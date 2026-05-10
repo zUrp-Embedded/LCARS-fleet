@@ -1,0 +1,9 @@
+{
+  "id": "6",
+  "subject": "Mettre à jour ipc-protocol.md",
+  "description": "Ajouter les 2 nouveaux canaux dans la table handoffs, documenter les valeurs notify acceptées, et le protocole builder→starfleet.",
+  "activeForm": "Mise à jour ipc-protocol.md",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

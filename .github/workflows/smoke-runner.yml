@@ -1,0 +1,17 @@
+name: Smoke Runner Test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/smoke-runner.yml'
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo runner state
+        run: |
+          echo "runner alive"
+          uname -a
+          date -u

@@ -1,0 +1,27 @@
+# Claude Code session artifacts — not versionable
+.claude/projects/
+.claude/file-history/
+.claude/telemetry/
+.claude/debug/
+.claude/paste-cache/
+.claude/cache/
+.claude/tasks/
+.claude/memory/
+.claude/history.jsonl
+.claude/backups/
+.claude/shell-snapshots/
+.claude/.credentials.json
+.claude/mcp-needs-auth-cache.json
+
+# Generated fleet blueprint (system + profile merge)
+fleet/fleet.yaml
+
+# Work directory — ephemeral plans, side quests (per-instance, not versioned)
+work/
+# Python / pytest caches
+__pycache__/
+.pytest_cache/
+
+# Coverage output (bashcov/simplecov)
+coverage/
+fleet-audit-report/

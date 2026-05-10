@@ -1,0 +1,9 @@
+{
+  "id": "7",
+  "subject": "Sync source repo + commit + push Claude-directives",
+  "description": "Copier fleet/* modifiés vers /home/wsl-root/#0_Claude-directives/fleet/, commit et push.",
+  "activeForm": "Sync et push Claude-directives",
+  "status": "in_progress",
+  "blocks": [],
+  "blockedBy": []
+}

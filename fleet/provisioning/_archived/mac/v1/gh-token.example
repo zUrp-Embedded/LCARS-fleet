@@ -1,0 +1,12 @@
+# gh-token — Personal Access Token GitHub, non versionné
+#
+# Copier ce fichier dans ~/claude-shared/private/gh-token
+# et remplacer par un vrai PAT GitHub.
+#
+# Scopes requis : repo (pour créer des releases, push, etc.)
+# Créer sur : https://github.com/settings/tokens
+#
+# Sourcé par le script de setup de l'instance starfleet.
+# Ce fichier ne doit PAS être versionné — ajouté dans .gitignore.
+
+ghp_<REMPLACER_PAR_VOTRE_TOKEN>

@@ -1,0 +1,97 @@
+#!/bin/bash
+#
+#       ______________________________________________________
+#      /          LCARS FLEET - FEDERATION DATABASE           \
+#     |   ________   __________________________________________\
+#     |  |  2026  |  | SOURCE: post-commit
+#     |  |________|  | AUTHOR: LORDZURP
+#     |   ________   | SYSTEM: LCARS-FLEET v5.3
+#     |  |  v5.3  |  | STATUS: OPERATIONAL
+#     |  |________|  |__________________________________________
+#     |              \__________________________________________\
+#      \    "To boldly go where no code has gone before..."     /
+#       \______________________________________________________/
+#
+#     +-----------------------------------------------------------+
+#     | [ LCARS FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
+#     +-----------------------------------------------------------+
+#     | MODULE: POST-COMMIT       | SUBSYSTEM: GIT-HOOKS / QA     |
+#     | LICENSE: AGPL-3           | STARDATE: 2026.090             |
+#     +-------------------------+---------------------------------+
+#
+# post-commit — auto QA request on HIGH/MEDIUM danger commits
+#
+# Install: cp fleet/git-hooks/post-commit .git/hooks/post-commit && chmod +x .git/hooks/post-commit
+# Or run: bash fleet/git-hooks/install-hooks.sh
+#
+# Danger levels:
+#   HIGH   : new/modified .claude/hooks/*.sh, .claude/skills/*/SKILL.md
+#            → sends QA request to qualifier via fleet-send.sh
+#   MEDIUM : fleet/*.sh with >3 files changed
+#            → logs warning, does not trigger QA
+#   LOW    : docs_and_plans/, header/date changes, fleet/*.py
+#            → silent
+
+set -euo pipefail
+
+COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+TIMESTAMP=$(date "+%Y-%m-%d %H:%M")
+
+# Get files changed in this commit
+CHANGED=$(git diff-tree --no-commit-id -r --name-only HEAD 2>/dev/null)
+
+# ── Danger assessment ─────────────────────────────────────────────────────────
+HIGH_FILES=()
+MEDIUM_COUNT=0
+
+while IFS= read -r f; do
+    case "$f" in
+        .claude/hooks/*.sh)
+            HIGH_FILES+=("$f") ;;
+        .claude/skills/*/SKILL.md)
+            HIGH_FILES+=("$f") ;;
+        home_claude_CLAUDE*.md)
+            # ARCH level — architect validates directly, not QA (no drvfs access)
+            ;;
+        fleet/*.sh)
+            MEDIUM_COUNT=$((MEDIUM_COUNT + 1)) ;;
+    esac
+done <<< "$CHANGED"
+
+# MEDIUM: only if >3 fleet/*.sh changed
+[[ $MEDIUM_COUNT -le 3 ]] && MEDIUM_COUNT=0
+
+# ── No danger → silent ────────────────────────────────────────────────────────
+[[ ${#HIGH_FILES[@]} -eq 0 && $MEDIUM_COUNT -eq 0 ]] && exit 0
+
+# ── HIGH: send QA request to qualifier via spool + notify ─────────────────────────
+if [[ ${#HIGH_FILES[@]} -gt 0 ]]; then
+    FILES_LIST=$(printf '  - %s\n' "${HIGH_FILES[@]}")
+    REPO_ROOT=$(git rev-parse --show-toplevel)
+    QA_ENTRY="[ ] [auto-QA HIGH] $COMMIT_HASH — $(echo "${HIGH_FILES[*]}" | tr ' ' ',') — validate hooks/skills behavior, check scope boundaries, confirm no side effects. READ FILES FROM: $REPO_ROOT (source repo, not deployed copies)"
+
+    echo ""
+    echo "🔴 [post-commit] HIGH danger detected — requesting QA"
+    printf '  %s\n' "${HIGH_FILES[@]}"
+
+    # Send QA request via spool
+    SEND_BIN=""
+    command -v fleet-send.sh &>/dev/null && SEND_BIN="fleet-send.sh"
+    [[ -z "$SEND_BIN" && -x "$HOME/.local/bin/fleet-send.sh" ]] && SEND_BIN="$HOME/.local/bin/fleet-send.sh"
+    if [[ -n "$SEND_BIN" ]]; then
+        echo "$QA_ENTRY" | "$SEND_BIN" qualifier "qa-high-$COMMIT_HASH" 2>/dev/null || true
+        echo "   → qualifier notified via fleet-send.sh"
+    else
+        echo "   WARN: fleet-send.sh not found — QA not notified"
+    fi
+
+fi
+
+# ── MEDIUM: log warning only ──────────────────────────────────────────────────
+if [[ $MEDIUM_COUNT -gt 0 ]]; then
+    echo ""
+    echo "🟡 [post-commit] MEDIUM danger: $MEDIUM_COUNT fleet/*.sh files changed"
+    echo "   Consider manual /push-github review before pushing."
+fi
+
+exit 0

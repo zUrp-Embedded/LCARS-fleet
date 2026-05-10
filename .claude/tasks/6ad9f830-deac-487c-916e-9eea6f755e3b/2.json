@@ -1,0 +1,9 @@
+{
+  "id": "2",
+  "subject": "Modifier fleet-hub.py — ajouter les 2 nouveaux canaux dans HANDOFF_FILES",
+  "description": "Lire fleet-hub.py, ajouter build-arm-to-starfleet et build-x86-to-starfleet dans HANDOFF_FILES.",
+  "activeForm": "Modification fleet-hub.py",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

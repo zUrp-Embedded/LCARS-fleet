@@ -1,0 +1,55 @@
+#!/bin/bash
+#
+#       ______________________________________________________
+#      /          LCARS FLEET - FEDERATION DATABASE           \
+#     |   ________   __________________________________________\
+#     |  |  2026  |  | SOURCE: pre-push
+#     |  |________|  | AUTHOR: LORDZURP
+#     |   ________   | SYSTEM: LCARS-FLEET v5.4
+#     |  |  v5.4  |  | STATUS: OPERATIONAL
+#     |  |________|  |__________________________________________
+#     |              \__________________________________________\
+#      \    "To boldly go where no code has gone before..."     /
+#       \______________________________________________________/
+#
+#     +-----------------------------------------------------------+
+#     | [ LCARS FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
+#     +-----------------------------------------------------------+
+#     | MODULE: PRE-PUSH          | SUBSYSTEM: GIT-HOOKS / TPD    |
+#     | LICENSE: AGPL-3           | STARDATE: 2026.077             |
+#     +-------------------------+---------------------------------+
+#
+# pre-push — Temporal Prime Directive enforcement
+#   Force-push block on main: detects non-fast-forward push by comparing
+#   remote sha ancestry. --force-with-lease on feature branches = allowed.
+#
+# QA notification is handled by post-commit via fleet-send.sh (spool IPC).
+# No blocking gate here — QA runs asynchronously.
+#
+# Install: bash fleet/git-hooks/install-hooks.sh
+
+set -euo pipefail
+
+# Gate 1 — Force-push detection (Temporal Prime Directive)
+# stdin format: <local_ref> <local_sha> <remote_ref> <remote_sha>
+PROTECTED_BRANCH="main"
+while read local_ref local_sha remote_ref remote_sha; do
+    branch="${remote_ref#refs/heads/}"
+    [[ "$branch" != "$PROTECTED_BRANCH" ]] && continue
+    zero_sha="0000000000000000000000000000000000000000"
+    [[ "$remote_sha" == "$zero_sha" ]] && continue
+    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+        echo ""
+        echo "⛔  [pre-push] Force-push blocked on '$PROTECTED_BRANCH' — Temporal Prime Directive."
+        echo ""
+        echo "    The remote commit is not an ancestor of your local commit."
+        echo "    This would rewrite published history."
+        echo ""
+        echo "    If you need to recover: escalate to Architect."
+        echo "    --force-with-lease on a feature branch is allowed."
+        echo ""
+        exit 1
+    fi
+done
+
+exit 0

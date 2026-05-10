@@ -1,0 +1,33 @@
+#!/bin/bash
+# pre-commit — shellcheck sur les scripts .sh modifiés/ajoutés
+set -euo pipefail
+
+CHANGED=$(git diff --cached --name-only --diff-filter=ACM | grep '\.sh$' || true)
+[[ -z "$CHANGED" ]] && exit 0
+
+if ! command -v shellcheck &>/dev/null; then
+    echo "WARN: shellcheck absent — vérification ignorée" >&2
+    exit 0
+fi
+
+FAIL=0
+while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    shellcheck -S error "$f" || FAIL=1
+done <<< "$CHANGED"
+
+exit $FAIL
+
+# Vérification fichiers gitignorés en staging (bloque git add -f accidentel)
+IGNORED=""
+while IFS= read -r staged; do
+    if git check-ignore --no-index -q "$staged" 2>/dev/null; then
+        IGNORED="${IGNORED}  ${staged}\n"
+    fi
+done < <(git diff --cached --name-only)
+
+if [[ -n "$IGNORED" ]]; then
+    echo "ERROR: fichiers gitignorés en staging — retirer avec: git rm --cached <file>" >&2
+    printf "%b" "$IGNORED" >&2
+    exit 1
+fi

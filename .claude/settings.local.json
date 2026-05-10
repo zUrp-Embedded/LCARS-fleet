@@ -1,0 +1,51 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(git push:*)"
+    ],
+    "defaultMode": "bypassPermissions",
+    "additionalDirectories": [
+      "/home/commons"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/session-startup.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/pre-scope-check.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/check-secrets.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "model": "claude-sonnet-4-6",
+  "env": {
+    "AUTOCOMPACT_PCT_OVERRIDE": "75"
+  }
+}

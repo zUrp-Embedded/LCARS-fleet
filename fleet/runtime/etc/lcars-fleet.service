@@ -1,0 +1,53 @@
+# lcars-fleet.service — chantier 16
+#
+# SOURCE: /etc/systemd/system/lcars-fleet.service
+# AUTHOR: LORDZURP
+# STARDATE: 2026.130
+# STATUS: OPERATIONAL — daemon LCARS v2 umbrella OTP Ring 0
+#
+# Install :
+#   sudo cp etc/lcars-fleet.service /etc/systemd/system/
+#   sudo cp bin/lcars-readiness /usr/local/bin/ && sudo chmod +x /usr/local/bin/lcars-readiness
+#   sudo cp etc/lcars-fleet.env.template /etc/fleet/lcars-fleet.env  # éditer secrets
+#   sudo chown root:lcars /etc/fleet/lcars-fleet.env && sudo chmod 0640 /etc/fleet/lcars-fleet.env
+#   sudo systemctl daemon-reload && sudo systemctl enable --now lcars-fleet.service
+
+[Unit]
+Description=LCARS Fleet daemon (Elixir umbrella OTP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=lcars
+Group=lcars
+WorkingDirectory=/var/lib/lcars
+EnvironmentFile=/etc/fleet/lcars-fleet.env
+ExecStart=/var/lib/lcars/release/bin/fleet_umbrella start
+ExecStartPost=/usr/local/bin/lcars-readiness 60
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+NotifyAccess=main
+
+# Hardening systemd — refus par défaut canon LCARS v1 §0 #1
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/lcars /var/log/fleet-audit.jsonl /var/log/fleet-starfleet.jsonl /tmp
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=no
+CapabilityBoundingSet=
+# AmbientCapabilities= vide — port :8080 > 1024 ne requiert pas
+# CAP_NET_BIND_SERVICE. Rétablir CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# seul si reverse proxy direct :80/:443 future.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictNamespaces=user mount
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+
+[Install]
+WantedBy=multi-user.target

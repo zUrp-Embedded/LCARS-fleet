@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+
+#       ______________________________________________________
+#      /          LCARS FLEET - FEDERATION DATABASE           \
+#     |   ________   __________________________________________\
+#     |  |  2026  |  | SOURCE: claude-update
+#     |  |________|  | AUTHOR: STARFLEET
+#     |   ________   | SYSTEM: LCARS-FLEET v5.4
+#     |  |  v5.4  |  | STATUS: OPERATIONAL
+#     |  |________|  |__________________________________________
+#     |              \__________________________________________\
+#      \    "To boldly go where no code has gone before..."     /
+#       \______________________________________________________/
+#
+#     +-----------------------------------------------------------+
+#     | [ LCARS-FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
+#     +-----------------------------------------------------------+
+#     | MODULE: CLAUDE-UPDATE   | SUBSYSTEM: TOOLBOX / MAINT      |
+#     | LICENSE: AGPL-3         | STARDATE: 2026.087.6            |
+#     +-------------------------+---------------------------------+
+#     |                                                           |
+#     |  Updates Claude Code fleet binary via GCS direct download. |
+#     |  SHA256 verified. Writes install metadata (fixes /doctor). |
+#     |                                                           |
+#     +-----------------------------------------------------------+
+#
+#     [FR]
+#     claude-update — met à jour le binaire Claude Code fleet
+#
+#     Télécharge directement depuis le bucket GCS Anthropic.
+#     Vérifie SHA256 via manifest.json. Écrit les metadata install
+#     pour résoudre le warning /doctor "config install method: unknown".
+#
+#     Usage: sudo claude-update [--force] [stable|latest|<version>]
+#     Défaut: channel courant (fleet-state/claude-channel, fallback latest)
+#     Called by: claude-to-stable, claude-to-latest (wrappers)
+#
+#     [EN]
+#     claude-update — Updates Claude Code fleet binary via GCS direct download.
+#     SHA256 verified. Writes install metadata (fixes /doctor warning).
+
+set -euo pipefail
+
+# --- Constants ---
+GCS_BUCKET="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"
+FLEET_STATE_DIR="/home/fleet-state"
+SYSTEM_BIN="/usr/local/bin/claude"
+
+# --- Args ---
+FORCE=0
+CHANNEL=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --force) FORCE=1; shift ;;
+        stable|latest) CHANNEL="$1"; shift ;;
+        [0-9]*.[0-9]*.[0-9]*)
+            # Direct version number — resolve channel from it
+            CHANNEL="$1"; shift ;;
+        *)
+            echo "Usage: claude-update [--force] [stable|latest|<version>]" >&2
+            exit 1 ;;
+    esac
+done
+
+[[ $EUID -eq 0 ]] || { echo "ERROR: must run as root (sudo $0 $CHANNEL)" >&2; exit 1; }
+
+# Default channel: read from fleet-state, fallback latest
+if [[ -z "$CHANNEL" ]]; then
+    CHANNEL="$(cat "$FLEET_STATE_DIR/claude-channel" 2>/dev/null || echo latest)"
+fi
+
+# --- Platform detection (IDIC) ---
+ARCH="$(uname -m)"
+case "$ARCH" in
+    x86_64)  PLATFORM="linux-x64" ;;
+    aarch64) PLATFORM="linux-arm64" ;;
+    *) echo "ERROR: unsupported architecture $ARCH" >&2; exit 1 ;;
+esac
+
+# --- Resolve channel → version ---
+echo "=== claude-update ==="
+if [[ "$CHANNEL" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    TARGET_VERSION="$CHANNEL"
+    echo "Target: version $TARGET_VERSION (direct)"
+else
+    TARGET_VERSION="$(curl -fsSL "$GCS_BUCKET/$CHANNEL" 2>/dev/null)" || {
+        echo "ERROR: failed to resolve channel '$CHANNEL' from GCS" >&2
+        exit 1
+    }
+    TARGET_VERSION="$(echo "$TARGET_VERSION" | tr -d '[:space:]')"
+    echo "Channel: $CHANNEL → version $TARGET_VERSION"
+fi
+
+# --- Version check ---
+CURRENT_VERSION="$("$SYSTEM_BIN" --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo 'none')"
+echo "Installed: $CURRENT_VERSION"
+
+if [[ "$CURRENT_VERSION" == "$TARGET_VERSION" && "$FORCE" -eq 0 ]]; then
+    echo "Already up to date ($TARGET_VERSION). Use --force to reinstall."
+    exit 0
+fi
+
+# --- Download manifest ---
+MANIFEST_URL="$GCS_BUCKET/$TARGET_VERSION/manifest.json"
+MANIFEST="$(curl -fsSL "$MANIFEST_URL" 2>/dev/null)" || {
+    echo "ERROR: failed to download manifest for $TARGET_VERSION" >&2
+    exit 1
+}
+
+EXPECTED_SHA256="$(echo "$MANIFEST" | python3 -c "import sys,json; print(json.load(sys.stdin)['platforms']['$PLATFORM']['checksum'])" 2>/dev/null)" || {
+    echo "ERROR: platform $PLATFORM not found in manifest" >&2
+    exit 1
+}
+EXPECTED_SIZE="$(echo "$MANIFEST" | python3 -c "import sys,json; print(json.load(sys.stdin)['platforms']['$PLATFORM']['size'])" 2>/dev/null)"
+
+echo "Target: $TARGET_VERSION ($PLATFORM, ${EXPECTED_SIZE:-?} bytes)"
+
+# --- Download binary ---
+BINARY_URL="$GCS_BUCKET/$TARGET_VERSION/$PLATFORM/claude"
+TMP_BIN="$(mktemp /tmp/claude-update-XXXXXX)"
+cleanup() { rm -f "$TMP_BIN"; }
+trap cleanup EXIT
+
+echo "Downloading binary..."
+curl -fsSL "$BINARY_URL" -o "$TMP_BIN" || {
+    echo "ERROR: failed to download binary from $BINARY_URL" >&2
+    exit 1
+}
+
+# --- SHA256 verification ---
+ACTUAL_SHA256="$(sha256sum "$TMP_BIN" | awk '{print $1}')"
+if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+    echo "ERROR: SHA256 mismatch!" >&2
+    echo "  expected: $EXPECTED_SHA256" >&2
+    echo "  actual:   $ACTUAL_SHA256" >&2
+    exit 1
+fi
+echo "SHA256: verified"
+
+# --- Atomic replace ---
+chmod 755 "$TMP_BIN"
+mv "$TMP_BIN" "$SYSTEM_BIN"
+trap - EXIT
+
+# --- Write install metadata (fixes /doctor "config install method: unknown") ---
+"$SYSTEM_BIN" install --force 2>/dev/null || true
+
+# --- Update fleet state ---
+mkdir -p "$FLEET_STATE_DIR"
+# Resolve channel name for state file (version numbers stay as-is in claude-version)
+case "$CHANNEL" in
+    stable|latest) echo "$CHANNEL" > "$FLEET_STATE_DIR/claude-channel" ;;
+esac
+echo "$TARGET_VERSION" > "$FLEET_STATE_DIR/claude-version"
+
+FINAL_VERSION="$("$SYSTEM_BIN" --version 2>/dev/null | head -1 || echo 'unknown')"
+echo "OK: $SYSTEM_BIN ← $CHANNEL ($FINAL_VERSION)"

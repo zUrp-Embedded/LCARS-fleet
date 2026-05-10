@@ -1,0 +1,9 @@
+{
+  "id": "5",
+  "subject": "Modifier fleet-launch.sh — ajouter fenêtre sup-channels",
+  "description": "Ajouter la fenêtre 7 sup-channels avec les 2 watch colorize-handoff dans fleet-launch.sh.",
+  "activeForm": "Modification fleet-launch.sh",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

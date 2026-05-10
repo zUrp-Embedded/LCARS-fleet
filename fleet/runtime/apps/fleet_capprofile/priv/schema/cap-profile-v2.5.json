@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LCARS Capability Profile v2.5",
+  "description": "Structural schema for a composed Capability Profile. Semantic invariants (enums, value constraints) are checked by Fleet.CapProfile.validate/1 (G24).",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name", "containment"],
+      "properties": {
+        "name": { "type": "string" },
+        "containment": { "type": "string" }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "scope",
+        "knowledge",
+        "invocation",
+        "injects",
+        "budget",
+        "modop_set",
+        "lifetime_scope"
+      ],
+      "properties": {
+        "scope": {
+          "type": "object",
+          "properties": {
+            "disallowedTools": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "git_ops_denied": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "knowledge": { "type": "object" },
+        "invocation": { "type": "object" },
+        "injects": { "type": "object" },
+        "budget": {
+          "type": "object",
+          "required": ["maxUsd", "maxDurationSec"],
+          "properties": {
+            "maxUsd": { "type": "number" },
+            "maxDurationSec": { "type": "number" }
+          }
+        },
+        "modop_set": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "modop_incompatible": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "lifetime_scope": { "type": "string" }
+      }
+    }
+  }
+}

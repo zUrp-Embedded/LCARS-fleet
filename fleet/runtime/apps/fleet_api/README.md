@@ -1,0 +1,105 @@
+# fleet_api (chantier 15)
+
+**Date** : 2026-05-10
+**Dernière révision** : 2026-05-10
+**Statut** : impl att-1 — qualifier en attente
+**Référencé par** : `design-notes/promoted/fleet_api.md`, `STATUS-CHANTIERS.md`
+
+API publique LCARS v2 (Ring 4 — frontières externes) : REST + WS.
+
+**API agnostique du client** — le dashboard web v1.5 `:8090` est *un*
+consommateur parmi d'autres possibles, pas couplé à l'arch v2.
+
+## Sous-modules
+
+| Module | Rôle |
+|---|---|
+| `Fleet.Api.Rest` | Plug.Router HTTP `:8080` endpoints REST + auth HMAC token |
+| `Fleet.Api.Ws` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
+| `Fleet.Api.RelayHandler` | GenServer subscribe `permission_relay_request`, ETS pending refs, POST `/api/relay/:ref` → broadcast `permission_relay_response` (round-trip ch10) |
+| `Fleet.Api.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380) |
+
+## Routes REST
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| GET | `/api/health` | NO | readiness probe (consommé ch16) |
+| GET | `/api/pipelines` | HMAC | liste état pipelines |
+| GET | `/api/tickets` | HMAC | liste tickets |
+| GET | `/api/pods` | HMAC | liste pods |
+| POST | `/api/admin/spawn` | HMAC | broadcast `admin.spawn.request` (ch6) |
+| POST | `/api/config/update` | HMAC | atomic write + git commit |
+| POST | `/api/relay/:ref` | HMAC | round-trip permission relay (ch10) |
+
+Auth via header `X-Auth-Token` HMAC SHA256 contre secret
+`/etc/fleet/api-secret` (root:lcars 600). Constant-time compare.
+
+## WebSocket protocol
+
+```
+GET /ws (upgrade)
+
+C → S: {"action": "subscribe", "topics": ["pipeline.*", "audit.cat5.*"]}
+S → C: {"type": "connected"}
+S → C: {"type": "subscribed", "topics": [...]}
+S → C: {"type": "ping"}                                  ← heartbeat 30s
+S → C: {"type": "event", "event_type": "pipeline.completed", "payload": {...}}
+S → C: {"type": "error", "reason": "..."}
+```
+
+Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
+`pipeline.completed`). Liste vide = subscribe-all.
+
+## Public API
+
+```elixir
+# RelayHandler round-trip (invoqué via REST POST /api/relay/:ref)
+:ok = Fleet.Api.RelayHandler.respond("ref-abc", "allow")
+
+# GitCommitter atomic write + git commit
+{:ok, sha} = Fleet.Api.GitCommitter.commit_config_change(
+  "intensity.json", ~s|{"level":"low"}|, "user1"
+)
+```
+
+## Configuration
+
+| Knob | Default | Rôle |
+|---|---|---|
+| `:fleet_api, :http_port` | `8080` | port Cowboy listener |
+| `:fleet_api, :start_listener` | `true` | bool — `false` en tests (`config/test.exs`) |
+| `:fleet_api, :api_secret_path` | `/etc/fleet/api-secret` | path secret HMAC |
+| `:fleet_api, :git_repo_path` | `/var/lib/lcars/config` | racine repo config |
+
+## Tests
+
+```bash
+mix test apps/fleet_api
+# 34 tests, 0 failures
+```
+
+Tests utilisent `Plug.Test` pour Rest (pas de listener réel),
+callbacks Cowboy directs pour Ws (pas de socket réel), et
+RelayHandler via instance Application-managed.
+
+## Dépendances
+
+* `fleet_event_router` (ch11 PROMOTED) — Bus PubSub
+* `:plug`, `:plug_cowboy`, `:jason`
+
+## D1 décidé (split deferred)
+
+MVP : 1 app umbrella `fleet_api` unique (REST + WS dans même
+supervision OTP). Pas de duplication subscribe bus, simplicité tree.
+
+**Deferred — critère post-implem 90 jours** : split éventuel en
+`fleet_bus_socket` (irréductible côté event_router) +
+`fleet_rest_facade` (optionnel surcouche). Critère opérationnalisable :
+si 1er client observé consume bus NDJSON brut sans REST surcouche
+(ex CLI custom, autre dashboard expérimental, MCP server externe) →
+ADR + amendement design note. Référence : `architecture-cible.md`
+§L368 + §L791, design note `fleet_api.md` D1.
+
+## Frontière vendor
+
+N0 (vendor-agnostic, orchestration via PubSub bus).

@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+# SOURCE: /usr/local/bin/lcars-readiness
+# AUTHOR: LORDZURP
+# STARDATE: 2026.130
+# STATUS: OPERATIONAL — readiness probe lcars-fleet.service (chantier 16)
+#
+# Usage : lcars-readiness [timeout_seconds]
+# Default timeout: 60s. Polling interval: 2s.
+#
+# Invoqué par systemd `ExecStartPost=` après que le daemon Elixir umbrella
+# a notifié `sd_notify(READY=1)`. Vérifie HTTP 200 sur `/api/health`
+# (chantier 15 PROMOTED `Fleet.Api.Rest`).
+#
+# Exit codes :
+#   0 — ready (HTTP 200 reçu avant timeout)
+#   1 — timeout (`/api/health` n'a pas répondu 200 dans la fenêtre)
+#
+# Réutilisable hors systemd (CI, debug, monitoring externe).
+
+set -euo pipefail
+
+TIMEOUT="${1:-60}"
+URL="${LCARS_HEALTH_URL:-http://localhost:8080/api/health}"
+INTERVAL=2
+ELAPSED=0
+
+while [ "$ELAPSED" -lt "$TIMEOUT" ]; do
+    if curl -sf -o /dev/null --max-time 2 "$URL"; then
+        echo "lcars-readiness: ready after ${ELAPSED}s (${URL})"
+        exit 0
+    fi
+    sleep "$INTERVAL"
+    ELAPSED=$((ELAPSED + INTERVAL))
+done
+
+echo "lcars-readiness: timeout ${TIMEOUT}s — ${URL} did not respond 200" >&2
+exit 1

@@ -1,0 +1,24 @@
+mappings:
+  "halt.gatekeeper.refuse":
+    action: notify_dashboard
+    escalation_path:
+      - dashboard
+      - ticket_comment
+  "escalate.pod_drift":
+    action: escalate_human
+    escalation_path:
+      - dashboard
+      - starfleet_alert
+  "escalate.pipeline_failed":
+    action: notify_dashboard
+    escalation_path:
+      - dashboard
+      - ticket_comment
+  "escalate.oauth_refresh_failed":
+    action: escalate_human
+    escalation_path:
+      - sysadmin_alert
+  "escalate.audit_verdict":
+    action: notify_dashboard
+    escalation_path:
+      - dashboard

@@ -1,0 +1,50 @@
+fleet:
+  version: "6.0.0-beta"
+  release_phase: "beta"         # freeze | beta | rc | stable
+  release_target: "6.0.0"
+  requires:
+    directives: ">=6.0"
+    protocole: ">=6.0"
+    fleet: ">=6.0"
+  project: LCARS
+  repo: lordzurp/LCARS-fleet
+  branch: main
+  group: fleet
+  lang: fr
+  profile: projects              # fleet | projects | embedded — read by fleet-build-yaml.sh
+
+  paths:
+    commons: /home/commons
+    # handoffs: computed from FLEET_WORKDIR in fleet-env.sh ($FLEET_HANDOFFS)
+    fleet_state: /home/fleet-state
+    lcars_root: /local/LCARS
+    homes_root: /home
+    ready_room: /home/ready-room
+
+  runtime: {}
+
+  identity:
+    fleet_user: lordzurp
+    windows_user: lordzurp
+
+  github:
+    mode: personal          # personal | org
+    org: null               # org name if mode=org, null if personal
+    auth: pat-classic       # pat-classic (always — fine-grained can't scope to org before creation)
+
+spool:
+  root: /var/spool/fleet
+  inbox: /var/spool/fleet/inbox
+  outbox: /var/spool/fleet/outbox
+
+dependencies:
+  yq_version: "v4.52.4"
+  claude_install_url: "https://claude.ai/install.sh"
+
+plan:
+  provider: anthropic
+  plan_type: max5             # max5 | pro | team | max20 — set at onboarding, read by fleet scripts
+  reset_day: monday
+  reset_time: "22:00"
+
+tools: {}

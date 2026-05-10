@@ -1,0 +1,21 @@
+events:
+  pod.allocate:
+    - Fleet.Spawner.EventHandler
+  pod.transition:
+    - Fleet.Spawner.EventHandler
+  pod.release:
+    - Fleet.Spawner.EventHandler
+  pod.refuse_pattern_match:
+    - Fleet.Starfleet.DriftHandler
+  pod.drift:
+    - Fleet.Starfleet.EscalateHandler
+  permission_relay_request:
+    - Fleet.Api.RelayHandler
+  audit.verdict.gatekeeper:
+    - Fleet.Coord.GatekeeperHandler
+  gitea.opened:
+    - Fleet.Spawner.TicketHandler
+  gitea.closed:
+    - Fleet.Spawner.TicketHandler
+  tick:
+    - Fleet.Pipeline.TickHandler

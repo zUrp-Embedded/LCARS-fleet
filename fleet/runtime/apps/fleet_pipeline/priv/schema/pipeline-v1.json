@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["name", "version", "stages"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "version": {"type": ["string", "integer"]},
+    "stages": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-zA-Z0-9_-]+$": {
+          "type": "object",
+          "required": ["role", "profile"],
+          "properties": {
+            "role": {"type": "string", "minLength": 1},
+            "profile": {"type": "string", "minLength": 1},
+            "needs": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "condition": {"type": "string"},
+            "inputs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["from_stage", "key"],
+                "properties": {
+                  "from_stage": {"type": "string"},
+                  "key": {"type": "string"}
+                }
+              }
+            },
+            "outputs": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "gate": {
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "required": ["type"],
+                  "properties": {
+                    "type": {"enum": ["hard", "soft", "terminal"]},
+                    "rule": {},
+                    "rules": {"type": "array"},
+                    "max_rounds": {"type": "integer", "minimum": 1}
+                  }
+                }
+              ]
+            },
+            "coordHook": {"type": ["string", "null"]}
+          }
+        }
+      }
+    }
+  }
+}

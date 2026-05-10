@@ -1,0 +1,69 @@
+# hooks.yaml — declarative hook manifest
+#
+# Source of truth for all Claude Code hooks deployed to fleet instances.
+# Read by deploy.sh — registers each hook in settings.local.json via patch-json.py.
+# Adding a hook = adding a line here. No deploy.sh edit needed.
+# Deploy is CONVERGENT: reset all hooks then register from this file (no residue).
+#
+# Fields:
+#   event:   PreToolUse | PostToolUse | PreCompact | Stop | UserPromptSubmit
+#   matcher: tool glob pattern (e.g. "Edit|Write") or "" for all tools
+#   command: shell command to execute (supports $HOME expansion at runtime)
+#
+# --- Deploy classification (v7 #01 Phase 1) ---
+# seed-only (first provision, never overwritten):
+#   .credentials.json, instance-name
+# enforced (convergent at every deploy):
+#   settings.json, settings.local.json (this file), system-prompt.md,
+#   CLAUDE.md, .bashrc fleet blocks, fleet-claude wrapper, hooks scripts,
+#   skills, sp-sources symlink
+
+hooks:
+  # on-prompt.sh is wired on UserPromptSubmit only (line 33).
+  # PreToolUse removed — was causing double execution on every tool call.
+
+  - event: PreCompact
+    matcher: "auto"
+    command: "bash $HOME/.claude/hooks/pre-compact-harvest.sh"
+
+  # H2-FIX: PreToolUse (not PostToolUse) — deny must fire BEFORE the write
+  # Covers Edit, Write AND Bash (write commands targeting project paths)
+  - event: PreToolUse
+    matcher: "Edit|Write|Bash"
+    command: "bash $HOME/.claude/hooks/pre-scope-check.sh"
+
+  # v7 Phase 4b: work/ guard — blocks ALL direct access (Write, Edit, Bash)
+  # Agents MUST use fleet-plan.sh / fleet-scrub.sh / worktree hooks
+  - event: PreToolUse
+    matcher: "Edit|Write|Bash"
+    command: "bash $HOME/.claude/hooks/work-guard.sh"
+
+  # agent-guard: blocks Agent tool forks that bypass fleet-dispatch (allows Explore/Plan only)
+  - event: PreToolUse
+    matcher: "Agent"
+    command: "bash $HOME/.claude/hooks/agent-guard.sh"
+
+  # runtime-guard: blocks writes to /local/LCARS/, ~/.claude/, ~/.local/bin/
+  - event: PreToolUse
+    matcher: "Edit|Write|Bash"
+    command: "bash $HOME/.claude/hooks/runtime-guard.sh"
+
+  - event: Stop
+    matcher: ""
+    command: "bash $HOME/.claude/hooks/on-stop.sh"
+
+  - event: PostToolUse
+    matcher: "Edit|Write"
+    command: "bash $HOME/.claude/hooks/check-secrets.sh"
+
+  - event: UserPromptSubmit
+    matcher: ""
+    command: "bash $HOME/.claude/hooks/on-prompt.sh"
+
+  - event: UserPromptSubmit
+    matcher: ""
+    command: "bash $HOME/.claude/hooks/session-startup.sh"
+
+  - event: PostToolUse
+    matcher: "Edit|Write"
+    command: "bash $HOME/.claude/hooks/post-directional-handoff-reminder.sh"

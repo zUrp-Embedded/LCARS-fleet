@@ -1,0 +1,9 @@
+{
+  "id": "3",
+  "subject": "Créer wake-instance.sh",
+  "description": "Créer /home/lordzurp/fleet/wake-instance.sh avec la table tmux hardcodée, la logique de vérification pane/Claude Code, et l'injection du message.",
+  "activeForm": "Création wake-instance.sh",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}
