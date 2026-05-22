@@ -23,7 +23,6 @@ defmodule Fleet.CapProfileTest do
       name: test-role
       containment: bwrap
     spec:
-      lifetime_scope: one-shot
       scope:
         disallowedTools:
           - web_search
@@ -35,12 +34,14 @@ defmodule Fleet.CapProfileTest do
         git_ops_denied:
           - push
       knowledge: {}
-      invocation: {}
+      invocation:
+        lifetime_scope: one-shot
       injects: {}
       budget:
         maxUsd: 1.0
         maxDurationSec: 60
-      modop_set: []
+      modop_set:
+        default: []
     """
   end
 
@@ -60,7 +61,6 @@ defmodule Fleet.CapProfileTest do
       kind: "CapabilityProfile",
       metadata: %{"name" => "test", "containment" => "bwrap"},
       spec: %{
-        "lifetime_scope" => "one-shot",
         "scope" => %{
           "disallowedTools" => [
             "web_search",
@@ -73,10 +73,10 @@ defmodule Fleet.CapProfileTest do
           "git_ops_denied" => ["push"]
         },
         "knowledge" => %{},
-        "invocation" => %{},
+        "invocation" => %{"lifetime_scope" => "one-shot"},
         "injects" => %{},
         "budget" => %{"maxUsd" => 1.0, "maxDurationSec" => 60},
-        "modop_set" => []
+        "modop_set" => %{"default" => []}
       }
     }
   end
@@ -234,7 +234,7 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "G24-4 fails when lifetime_scope is unknown" do
-      profile = put_in(valid_struct().spec["lifetime_scope"], "infinite")
+      profile = put_in(valid_struct().spec["invocation"]["lifetime_scope"], "infinite")
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
       assert :g24_4 in codes
     end
@@ -364,7 +364,6 @@ defmodule Fleet.CapProfileTest do
           kind: "CapabilityProfile",
           metadata: %{"name" => name, "containment" => containment},
           spec: %{
-            "lifetime_scope" => lifetime,
             "scope" => %{
               "disallowedTools" => [
                 "web_search",
@@ -377,13 +376,13 @@ defmodule Fleet.CapProfileTest do
               "git_ops_denied" => ["push"]
             },
             "knowledge" => %{},
-            "invocation" => %{},
+            "invocation" => %{"lifetime_scope" => lifetime},
             "injects" => %{},
             "budget" => %{
               "maxUsd" => max_usd_int * 1.0,
               "maxDurationSec" => max_sec
             },
-            "modop_set" => []
+            "modop_set" => %{"default" => []}
           }
         }
       end

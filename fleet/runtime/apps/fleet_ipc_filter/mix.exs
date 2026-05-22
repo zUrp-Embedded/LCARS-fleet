@@ -33,7 +33,10 @@ defmodule Fleet.IpcFilter.MixProject do
     # `fleet_event_router`). Pas dep `:phoenix_pubsub` ici.
     [
       {:jason, "~> 1.4"},
-      {:ex_json_schema, "~> 0.11"}
+      {:ex_json_schema, "~> 0.11"},
+      # B4 #576 : EventBackend.PubSub diffuse via Fleet.EventRouter.Bus
+      # (chantier 11). Pas de cycle (event_router ⊀ ipc_filter, vérifié).
+      {:fleet_event_router, in_umbrella: true}
     ]
   end
 end

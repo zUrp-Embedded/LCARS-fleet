@@ -72,6 +72,42 @@ defmodule Fleet.ClaudeBridge.SPInjection do
     |> Kernel.++(["--max-budget-usd", budget_usd])
   end
 
+  @doc """
+  Build flags mode-aware (DN ring1/fleet_claude_bridge.md §amendement RCMode).
+  **Additif** : `build_flags/2` (cap-profile `claude -p` chantier-8) inchangé.
+
+  - `:print` — `--system-prompt-file` (+ `--append-system-prompt-file`)
+  - `:remote_control` — `remote-control --spawn=session --system-prompt-file`
+    (+ `--name`/`--resume`/`--append-system-prompt-file` conditionnels)
+
+  Clés `:name`/`:resume` (alignées DN test 7 conformance — normatif — et
+  `RCMode.build_rc_args/1` ; le pseudo-code DN L434-435 disait
+  `:session_name`/`:resume_session_id` = illustratif, le test fait foi).
+
+      iex> Fleet.ClaudeBridge.SPInjection.build_flags(:remote_control, "/sp.md",
+      ...>   name: "architect", resume: "abc123")
+      ["remote-control", "--spawn=session", "--system-prompt-file", "/sp.md",
+       "--name", "architect", "--resume", "abc123"]
+  """
+  @spec build_flags(:print | :remote_control, Path.t(), keyword()) :: [String.t()]
+  def build_flags(:print, sp_path, opts)
+      when is_binary(sp_path) and is_list(opts) do
+    ["--system-prompt-file", sp_path]
+    |> maybe_arg("--append-system-prompt-file", opts[:append_sp_path])
+  end
+
+  def build_flags(:remote_control, sp_path, opts)
+      when is_binary(sp_path) and is_list(opts) do
+    ["remote-control", "--spawn=session", "--system-prompt-file", sp_path]
+    |> maybe_arg("--name", opts[:name])
+    |> maybe_arg("--resume", opts[:resume])
+    |> maybe_arg("--append-system-prompt-file", opts[:append_sp_path])
+  end
+
+  defp maybe_arg(flags, _flag, nil), do: flags
+  defp maybe_arg(flags, _flag, ""), do: flags
+  defp maybe_arg(flags, flag, val) when is_binary(val), do: flags ++ [flag, val]
+
   defp maybe_append_brief(flags, nil), do: flags
 
   defp maybe_append_brief(flags, brief_path) when is_binary(brief_path) do

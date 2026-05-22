@@ -1,9 +1,9 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-05-10
+**Dernière révision** : 2026-05-22
 **Statut** : impl att-1 — qualifier en attente
-**Référencé par** : `design-notes/promoted/fleet_api.md`, `STATUS-CHANTIERS.md`
+**Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
 API publique LCARS v2 (Ring 4 — frontières externes) : REST + WS.
 

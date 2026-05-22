@@ -1,9 +1,9 @@
 # Fleet.Spawner
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-09
+**Dernière révision** : 2026-05-22
 **Statut** : implémenté run #3.1 chantier #6 — design note PROMOTED
-**Référencé par** : work/beyond_#3.1/design-notes/promoted/fleet_spawner.md
+**Référencé par** : 04_design-notes/fleet_spawner.md
 
 Pilote lifecycle pod LCARS v2 (Ring 1 pod primitive). Cycle 8 phases
 ALLOCATE → CLEAN → PROJECT → INJECT → LAUNCH → MONITOR → EXTRACT →

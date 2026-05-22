@@ -2,11 +2,17 @@ defmodule Fleet.Api.RelayHandler do
   @moduledoc """
   GenServer subscribe `Fleet.EventRouter.Bus` topic `fleet.events`,
   collecte décision user via `respond/2` puis broadcast réponse
-  matching `ref` (round-trip permission relay ch10).
+  matching `ref` (round-trip permission relay).
 
-  ## Workflow
+  **VESTIGIAL — ADR-D rev2 2026-05-19** : l'unique émetteur de
+  `permission_relay_request` était `Fleet.PermissionRouter` (RETIRÉ —
+  bwrap = guard de surface, plus de permission routing). Ce handler
+  ne reçoit plus l'event (chemin dormant, compile-safe, conservé
+  pour réintro hypothétique V3 cf. ADR-D §Révision 2).
 
-  1. ch10 `Fleet.PermissionRouter` broadcast `permission_relay_request`
+  ## Workflow (historique — plus déclenché)
+
+  1. (émetteur retiré) broadcast `permission_relay_request`
      avec `ref` (16 bytes hex)
   2. RelayHandler stocke payload dans ETS `:fleet_api_relay_pending`
      keyed par `ref`

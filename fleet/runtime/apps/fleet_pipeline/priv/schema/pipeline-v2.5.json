@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:lcars:pipeline-v2.5",
+  "title": "LCARS Pipeline v2.5 (enveloppe apiVersion/kind/metadata/spec)",
+  "description": "Structural schema DÉRIVÉ DU CANON RÉEL 06_modops/pipelines/{standard-qa,audit-only}.yaml (structure complète vérifiée, pas inférée). GO-7: date 2026-05-19, statut actif, Lot 6. ADDITIF : pipeline-v1.json (flat chantier-12) inchangé ; Loader détecte apiVersion -> ce schema. Structural-only : enveloppe + role/profile obligatoires + type gate enum ; champs sémantiques gate/stage optionnels validés en forme, interprétés runtime.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {"type": "string", "pattern": "^lcars/v2\\.5$"},
+    "kind": {"const": "Pipeline"},
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "applicable_intensity": {"type": "array", "items": {"enum": ["L0", "L1", "L2", "L3", "L4"]}},
+        "applicable_regime": {"type": "array", "items": {"enum": ["R1", "R2"]}}
+      }
+    },
+    "cycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "regime_default": {"enum": ["R1", "R2"]},
+        "score_target": {"type": "string"},
+        "profile_preuve": {"type": "string"}
+      }
+    },
+    "selection_priority": {"type": "array", "items": {"type": "string"}},
+    "spec": {
+      "type": "object",
+      "required": ["stages"],
+      "additionalProperties": false,
+      "properties": {
+        "on_escalation": {"type": "object"},
+        "on_failure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "notify_role": {"type": "string"},
+            "log_path": {"type": "string"},
+            "cleanup": {"type": "boolean"}
+          }
+        },
+        "stages": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-zA-Z0-9_-]+$": {
+              "type": "object",
+              "required": ["role", "profile"],
+              "additionalProperties": false,
+              "properties": {
+                "role": {"type": "string", "minLength": 1},
+                "profile": {"type": "string", "minLength": 1},
+                "needs": {"type": "array", "items": {"type": "string"}},
+                "condition": {"type": "string"},
+                "inputs": {"type": "array", "items": {"type": "string"}},
+                "outputs": {"type": "array", "items": {"type": "string"}},
+                "timeout_sec": {"type": "integer", "minimum": 1},
+                "coordHook": {"type": ["string", "null"]},
+                "decisions": {"type": "array", "items": {"type": "string"}},
+                "gate": {
+                  "oneOf": [
+                    {"type": "null"},
+                    {
+                      "type": "object",
+                      "required": ["type"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "type": {"enum": ["hard", "soft", "terminal"]},
+                        "rule": {},
+                        "rules": {"type": "array"},
+                        "max_rounds": {"type": "integer", "minimum": 1},
+                        "max_retries": {"type": "integer", "minimum": 0},
+                        "max_revisions": {"type": "integer", "minimum": 0},
+                        "max_iterations_per_task": {"type": "integer", "minimum": 1},
+                        "human_approval_required": {"type": "boolean"},
+                        "approval_prompt": {"type": "string"},
+                        "fallback_invoke_gatekeeper": {"type": "boolean"},
+                        "on_blocking_severity": {"type": "string"},
+                        "on_revision_severity": {"type": "string"}
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

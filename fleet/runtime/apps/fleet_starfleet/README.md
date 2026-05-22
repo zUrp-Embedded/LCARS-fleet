@@ -1,13 +1,13 @@
 # fleet_starfleet (chantier 13)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-05-10
+**Dernière révision** : 2026-05-22
 **Statut** : impl att-1 — qualifier en attente
-**Référencé par** : `design-notes/promoted/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
+**Référencé par** : `04_design-notes/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
 
 Module système-side consommateur des outputs des pods d'arbitrage
 (gatekeeper + autres rôles décisionnels) côté core LCARS Ring 2.
-Source : `design-notes/promoted/fleet_starfleet.md` (Régime 1, profil
+Source : `04_design-notes/fleet_starfleet.md` (Régime 1, profil
 **CONFORMANCE**, PoC-π3 PROVEN + PoC-10).
 
 **Pas de pod, pas d'inférence dans ce module** — validation, parsing,

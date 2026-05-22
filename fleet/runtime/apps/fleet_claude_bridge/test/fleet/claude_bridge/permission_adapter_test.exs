@@ -18,15 +18,15 @@ defmodule Fleet.ClaudeBridge.PermissionAdapterTest do
     :ok
   end
 
-  describe "default backend (Fleet.PermissionRouter chantier 10 pas câblé)" do
-    test "DefaultDeny renvoie %{behavior: deny} avec reason explicite" do
+  describe "default backend (vestigial ADR-D rev2 — permission routing retiré, bwrap = guard)" do
+    test "DefaultDeny renvoie %{behavior: deny} fail-safe (§0 #1 axiome préservé)" do
       Application.delete_env(:fleet_claude_bridge, :permission_router_backend)
 
       assert %{"behavior" => "deny", "reason" => reason} =
                PermissionAdapter.can_use_tool("Read", %{}, %{})
 
       assert reason =~ "default-deny"
-      assert reason =~ "chantier 10"
+      assert reason =~ "vestigial ADR-D rev2"
     end
   end
 

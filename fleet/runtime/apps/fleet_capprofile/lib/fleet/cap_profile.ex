@@ -336,7 +336,12 @@ defmodule Fleet.CapProfile do
   end
 
   defp check_lifetime_scope(%__MODULE__{spec: spec}) do
-    if Map.get(spec, "lifetime_scope") in @lifetime_scope_enum, do: :ok, else: :error
+    # Canon : lifetime_scope nesté dans spec.invocation (schema
+    # cap-profile-v2.5.json + 7 cap-profiles 05_data-canon). Le code
+    # lisait spec-level (forme pré-alignement schema) → aligné canon.
+    if get_in(spec, ["invocation", "lifetime_scope"]) in @lifetime_scope_enum,
+      do: :ok,
+      else: :error
   end
 
   defp check_git_ops_denied(%__MODULE__{spec: spec}) do

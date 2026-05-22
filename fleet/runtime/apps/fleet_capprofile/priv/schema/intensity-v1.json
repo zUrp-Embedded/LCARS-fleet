@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:lcars:intensity-v1",
+  "title": "LCARS Project Intensity v1",
+  "description": "Structural schema for a per-project intensity.json (template: 05_data-canon/config/intensity-template.json). DERIVED FROM: 05_data-canon/config/intensity-template.json. GO-7: date 2026-05-19, statut actif, derive Lot 0bis plan-implementation.md. Structural only: pipeline_default resolvability and level<->pipeline coherence are project-level concerns, not enforced here. Underscore-prefixed keys are informational (comment/schema marker/levels reference) and ignored by the runtime.",
+  "type": "object",
+  "required": [
+    "level",
+    "declared_at",
+    "declared_by",
+    "criteria",
+    "justification",
+    "pipeline_default"
+  ],
+  "additionalProperties": false,
+  "patternProperties": {
+    "^_": {}
+  },
+  "properties": {
+    "level": {
+      "type": "string",
+      "enum": ["L0", "L1", "L2", "L3", "L4"]
+    },
+    "declared_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "declared_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "criteria": {
+      "type": "object",
+      "required": [
+        "stakes_failure",
+        "lifetime",
+        "multi_authors",
+        "external_audit_likely",
+        "base_for_other_bricks"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "stakes_failure": { "type": "string", "minLength": 1 },
+        "lifetime": { "type": "string", "minLength": 1 },
+        "multi_authors": { "type": "boolean" },
+        "external_audit_likely": { "type": "boolean" },
+        "base_for_other_bricks": { "type": "boolean" }
+      }
+    },
+    "justification": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pipeline_default": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -19,3 +19,29 @@ events:
     - Fleet.Spawner.TicketHandler
   tick:
     - Fleet.Pipeline.TickHandler
+  # B10/#583 Sprint 1 — admin.spawn.request : émis par fleet_api/rest.ex
+  # POST /api/admin/spawn ; consumé par Fleet.Spawner.PublishConsumer
+  # qui dispatche Fleet.Spawner.spawn_pod.
+  admin.spawn.request:
+    - Fleet.Spawner.PublishConsumer
+  # B10/#583 Sprint 1 — events lifecycle Fleet.Starfleet.BootOrchestrator
+  # (Task post-start fleet_starfleet). Pas de handler dispatch (subscribers
+  # libres : dashboard, audit). Pré-enregistrés starfleet @starfleet_event_atoms.
+  fleet.boot_complete:
+    - Fleet.Starfleet.AuditConsumer
+  fleet.boot_partial:
+    - Fleet.Starfleet.AuditConsumer
+  fleet.boot_failed:
+    - Fleet.Starfleet.AuditConsumer
+  # B10/#593 D11 — events lifecycle Pod GenServer (post-init Port stream).
+  # pod.completed : claude one-shot result is_error=false
+  # pod.failed    : claude one-shot result is_error=true
+  # pod.terminated: Port exit_status reçu (final, stop normal Pod)
+  # Subscribers : AuditConsumer pour log forensique. LifecycleConsumer
+  # Sprint 2 #583 différé reprendra le dispatch pipeline aval.
+  pod.completed:
+    - Fleet.Starfleet.AuditConsumer
+  pod.failed:
+    - Fleet.Starfleet.AuditConsumer
+  pod.terminated:
+    - Fleet.Starfleet.AuditConsumer

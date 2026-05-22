@@ -148,4 +148,55 @@ defmodule Fleet.ClaudeBridge.SPInjectionTest do
              ]
     end
   end
+
+  describe "build_flags/3 — mode-aware (DN amendement RCMode, additif /2)" do
+    test ":print base = --system-prompt-file seul" do
+      assert SPInjection.build_flags(:print, "/sp.md", []) ==
+               ["--system-prompt-file", "/sp.md"]
+    end
+
+    test ":print + append_sp_path" do
+      assert SPInjection.build_flags(:print, "/sp.md", append_sp_path: "/b.md") ==
+               ["--system-prompt-file", "/sp.md", "--append-system-prompt-file", "/b.md"]
+    end
+
+    test ":remote_control complet (DN test 7 conformance)" do
+      assert SPInjection.build_flags(:remote_control, "/sp.md",
+               name: "architect",
+               resume: "abc123"
+             ) ==
+               [
+                 "remote-control",
+                 "--spawn=session",
+                 "--system-prompt-file",
+                 "/sp.md",
+                 "--name",
+                 "architect",
+                 "--resume",
+                 "abc123"
+               ]
+    end
+
+    test ":remote_control base (name/resume omis si nil/vide)" do
+      assert SPInjection.build_flags(:remote_control, "/sp.md", name: nil, resume: "") ==
+               ["remote-control", "--spawn=session", "--system-prompt-file", "/sp.md"]
+    end
+
+    test ":remote_control + append_sp_path" do
+      assert SPInjection.build_flags(:remote_control, "/sp.md", append_sp_path: "/b.md") ==
+               [
+                 "remote-control",
+                 "--spawn=session",
+                 "--system-prompt-file",
+                 "/sp.md",
+                 "--append-system-prompt-file",
+                 "/b.md"
+               ]
+    end
+
+    test "additif : build_flags/2 (cap-profile) toujours fonctionnel" do
+      flags = SPInjection.build_flags(profile(), sp_path: "/tmp/sp.md")
+      assert ["--output-format", "stream-json" | _] = flags
+    end
+  end
 end

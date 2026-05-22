@@ -69,18 +69,21 @@ defmodule Fleet.CredentialsTest do
     test "happy path returns RT + scopes env vars" do
       write_coffre("engineer", %{
         "oauth_refresh_token" => "rt-abc-123\n",
+        "oauth_access_token" => "at-xyz-456\n",
         "oauth_scopes" => "user:inference user:sessions:claude_code\n"
       })
 
       assert {:ok, env} = Fleet.Credentials.resolve_env("engineer", profile())
 
       assert env["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] == "rt-abc-123"
+      assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "at-xyz-456"
       assert env["CLAUDE_CODE_OAUTH_SCOPES"] == "user:inference user:sessions:claude_code"
     end
 
     test "never injects ANTHROPIC_API_KEY (G24 invariant)" do
       write_coffre("engineer", %{
         "oauth_refresh_token" => "rt",
+        "oauth_access_token" => "at",
         "oauth_scopes" => "user:inference"
       })
 
@@ -91,6 +94,7 @@ defmodule Fleet.CredentialsTest do
     test "useRoleCredentials=false falls back to starfleet coffre" do
       write_coffre("starfleet", %{
         "oauth_refresh_token" => "rt-starfleet",
+        "oauth_access_token" => "at-starfleet",
         "oauth_scopes" => "user:inference user:sessions:claude_code"
       })
 
@@ -102,6 +106,7 @@ defmodule Fleet.CredentialsTest do
     test "gitconfig=true adds GIT_AUTHOR + GIT_COMMITTER vars" do
       write_coffre("engineer", %{
         "oauth_refresh_token" => "rt",
+        "oauth_access_token" => "at",
         "oauth_scopes" => "user:inference"
       })
 
@@ -117,6 +122,7 @@ defmodule Fleet.CredentialsTest do
     test "gitconfig default false omits GIT_* vars" do
       write_coffre("engineer", %{
         "oauth_refresh_token" => "rt",
+        "oauth_access_token" => "at",
         "oauth_scopes" => "user:inference"
       })
 

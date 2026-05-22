@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:lcars:coord-policies-v1",
+  "title": "LCARS Coord Policies v1",
+  "description": "Structural schema for 05_data-canon/config/coord-policies.yaml (parsed YAML map). DERIVED FROM: 05_data-canon/config/coord-policies.yaml. GO-7: date 2026-05-19, statut actif, derive Lot 0bis plan-implementation.md. Validated by ex_json_schema at Fleet.Coord.Policies.init_policies!/0. Structural only: action handler resolvability and escalation_path target existence are checked at runtime by Fleet.Coord, not here.",
+  "type": "object",
+  "required": ["mappings", "handoff_role_mapping"],
+  "additionalProperties": false,
+  "properties": {
+    "mappings": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Map key -> {action, escalation_path}. Key format: '<verdict>.<reason>' | 'escalate.<source>' | 'phase_done.<phase>' | 'halt.<source>.<reason>'.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["action", "escalation_path"],
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "escalation_path": {
+            "type": "array",
+            "description": "Chaine d'escalade ordonnee. PEUT etre vide [] pour une politique TERMINALE (verdict 'proven' / phase_done / gatekeeper.promote : l'action complete, aucune escalade). Asymetrie VOULUE vs events-v1 handlers (minItems:1) : 0 handler = event absurde ; 0 escalation = terminal legitime. Contrat runtime (hors schema, structural-only) : Fleet.Coord NE DOIT PAS faire head/hd sur escalation_path sans gerer le cas [] = terminal.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "handoff_role_mapping": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Map phase -> next assignee role.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

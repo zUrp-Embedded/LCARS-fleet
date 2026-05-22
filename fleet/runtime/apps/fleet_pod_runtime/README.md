@@ -1,9 +1,9 @@
 # Fleet.PodRuntime
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-09
+**Dernière révision** : 2026-05-22
 **Statut** : implémenté run #3.1 chantier #7 — design note PROMOTED
-**Référencé par** : work/beyond_#3.1/design-notes/promoted/fleet_pod_runtime.md
+**Référencé par** : 04_design-notes/fleet_pod_runtime.md
 
 Runtime intra-pod LCARS v2 (Ring 1 pod primitive). Consolide 4
 patterns PROVEN PoC en module umbrella. Distinct de `Fleet.Spawner`

@@ -45,6 +45,7 @@ defmodule Fleet.Spawner.Pod do
   require Logger
 
   alias Fleet.Credentials
+  alias Fleet.EventRouter.Bus
   alias Fleet.SPBuilder
   alias Fleet.Spawner.Pod.InitValidator
 
@@ -84,7 +85,13 @@ defmodule Fleet.Spawner.Pod do
           state_fs_path: Path.t(),
           init_message: map() | nil,
           last_error: term() | nil,
-          opts: keyword()
+          opts: keyword(),
+          # #593 D11 — Port stream lifecycle (post-init events + exit).
+          port: port() | nil,
+          # Buffer accumulé entre chunks Port (binary, split sur "\n").
+          event_buffer: binary(),
+          # Dernier event "result" reçu (claude one-shot final, ou nil).
+          last_result: map() | nil
         }
 
   # ============================================================
@@ -145,10 +152,133 @@ defmodule Fleet.Spawner.Pod do
       pod_dir: state.pod_dir,
       state_fs_path: state.state_fs_path,
       last_error: state.last_error,
-      init_message: state.init_message
+      init_message: state.init_message,
+      last_result: state.last_result
     }
 
     {:reply, info, state}
+  end
+
+  # ============================================================
+  # #593 D11 — handle_info Port lifecycle
+  # ============================================================
+  #
+  # PortBackend.launch ouvre `Port.open` (sous le process Pod) et bloque
+  # jusqu'à la 1ʳᵉ frame `init` NDJSON. Après, le Pod reprend la main
+  # (handle_continue :monitor → :extract → :release → :succeeded). Le
+  # Port n'est PAS fermé : claude continue à streamer (assistant events,
+  # result event final, exit_status). Sans clause handle_info, ces
+  # messages tombent dans le default → log unexpected message, state
+  # machine ne note JAMAIS la complétion réelle.
+  #
+  # Format Port options actuelles (PortBackend ligne 47-53) : `:binary`
+  # + `:exit_status`, PAS `{:line, _}` ni `{:packet, :line}` → on reçoit
+  # `{port, {:data, binary_chunk}}` (multi-events ou partial), buffering
+  # + split sur "\n" requis.
+
+  @impl GenServer
+  def handle_info({port, {:data, chunk}}, %{port: port} = state)
+      when is_port(port) and is_binary(chunk) do
+    {events, buffer} = parse_chunks(state.event_buffer <> chunk)
+    new_state = Enum.reduce(events, %{state | event_buffer: buffer}, &handle_event/2)
+    {:noreply, new_state}
+  end
+
+  def handle_info({port, {:exit_status, exit_code}}, %{port: port} = state)
+      when is_port(port) do
+    # Broadcast pod.terminated (catalogue events.yaml). Stop normal :
+    # le DynamicSupervisor (restart: :transient) ne respawnera pas.
+    safe_broadcast("pod.terminated", %{
+      "pod_id" => state.pod_id,
+      "ticket_id" => state.ticket_id,
+      "exit_code" => exit_code,
+      "had_result" => not is_nil(state.last_result)
+    })
+
+    Logger.info(
+      "pod #{state.pod_id} terminated exit=#{exit_code} " <>
+        "had_result=#{not is_nil(state.last_result)}"
+    )
+
+    {:stop, :normal, state}
+  end
+
+  # Catch-all silencieux : autres messages (down, monitor, etc.) ignorés.
+  def handle_info(_other, state), do: {:noreply, state}
+
+  # ============================================================
+  # Event stream parser (NDJSON chunks → events)
+  # ============================================================
+
+  # Split binary sur "\n", retourne {lines_décodées, buffer_residual}.
+  # Lignes vides ou JSON invalide → ignorées silencieusement (stream
+  # claude peut contenir des fragments non-NDJSON, robustesse).
+  defp parse_chunks(buffer) do
+    parts = String.split(buffer, "\n")
+    {lines, [residual]} = Enum.split(parts, length(parts) - 1)
+
+    events =
+      lines
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.flat_map(fn line ->
+        case Jason.decode(line) do
+          {:ok, ev} when is_map(ev) -> [ev]
+          _ -> []
+        end
+      end)
+
+    {events, residual}
+  end
+
+  # Dispatch par type d'event NDJSON claude (stream-json).
+  defp handle_event(%{"type" => "system", "subtype" => "init"}, state) do
+    # Déjà consommé sync par PortBackend.launch → no-op idempotent
+    # (claude ne réémet pas, mais defensive).
+    state
+  end
+
+  defp handle_event(%{"type" => "result", "is_error" => false} = result, state) do
+    safe_broadcast("pod.completed", %{
+      "pod_id" => state.pod_id,
+      "ticket_id" => state.ticket_id,
+      "result" => result
+    })
+
+    %{state | last_result: result}
+  end
+
+  defp handle_event(%{"type" => "result", "is_error" => true} = result, state) do
+    safe_broadcast("pod.failed", %{
+      "pod_id" => state.pod_id,
+      "ticket_id" => state.ticket_id,
+      "result" => result
+    })
+
+    %{state | last_result: result}
+  end
+
+  defp handle_event(%{"type" => "assistant"}, state) do
+    # Assistant turns intermédiaires : tracking possible (latency, token
+    # count). D11 minimal : no-op, hook potentiel pour PipelineConsumer
+    # Sprint 2 #583.
+    state
+  end
+
+  defp handle_event(_other, state), do: state
+
+  # Broadcast Bus avec rescue : un crash event_router (bus down, atom
+  # invalide) ne doit JAMAIS faire crash le Pod GenServer.
+  defp safe_broadcast(event_type, payload) do
+    Bus.broadcast(event_type, payload)
+  rescue
+    e ->
+      Logger.warning(
+        "Pod safe_broadcast #{event_type} rescue (non-fatal) — " <>
+          Exception.message(e)
+      )
+
+      :ok
   end
 
   # ============================================================
@@ -241,13 +371,21 @@ defmodule Fleet.Spawner.Pod do
       session_id: state.session_id
     }
 
-    case launch_backend().launch(args, state.env_vars) do
+    env = Map.merge(state.env_vars, skills_plugins_env(state.cap_profile))
+
+    case launch_backend().launch(args, env) do
       {:ok, %{init_message: init_msg, ndjson_log: ndjson_log} = launched} ->
+        # #593 D11 — extract port (PortBackend l'inclut, StubBackend non).
+        # nil-able : tests stub n'ont pas de Port → handle_info clauses
+        # ne matchent jamais → comportement legacy préservé.
+        port = Map.get(launched, :port)
+
         new_state =
           state
           |> Map.put(:phase, :monitoring)
           |> Map.put(:init_message, init_msg)
           |> Map.put(:ndjson_log_path, ndjson_log)
+          |> Map.put(:port, port)
           |> Map.put(
             :session_id,
             init_msg["session_id"] || launched[:session_id] || state.session_id
@@ -370,7 +508,10 @@ defmodule Fleet.Spawner.Pod do
       state_fs_path: state_fs_path,
       init_message: nil,
       last_error: nil,
-      opts: args.opts
+      opts: args.opts,
+      port: nil,
+      event_buffer: "",
+      last_result: nil
     }
   end
 
@@ -448,6 +589,32 @@ defmodule Fleet.Spawner.Pod do
 
   defp maybe_filter_skills(cap_profile, root) do
     Fleet.SPBuilder.filter_skills(cap_profile, root)
+  end
+
+  @doc false
+  # DN ring1/pod-bootstrap-superpowers : LCARS_SKILLS_PLUGINS = noms
+  # plugins uniques extraits des skills QUALIFIÉS `plugin:skill` du
+  # cap-profile.spec.knowledge.skills. Consommé par bin/bwrap_launch.sh
+  # (mount-bind RO). Anti-M1 : un skill non-qualifié (sans `:`) n'est
+  # PAS un plugin → filtré. Vide → pas d'env var (rétro-compatible).
+  # Public @doc false : pure, testable directement (pas d'intégration
+  # mock-backend lourde pour de la logique triviale).
+  def skills_plugins_env(%Fleet.CapProfile{spec: spec}) do
+    plugins =
+      (spec || %{})
+      |> Map.get("knowledge", %{})
+      |> Kernel.||(%{})
+      |> Map.get("skills", [])
+      |> Kernel.||([])
+      |> Enum.filter(&(is_binary(&1) and String.contains?(&1, ":")))
+      |> Enum.map(&(&1 |> String.split(":", parts: 2) |> hd()))
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    case plugins do
+      [] -> %{}
+      list -> %{"LCARS_SKILLS_PLUGINS" => Enum.join(list, " ")}
+    end
   end
 
   defp default_brief(state) do

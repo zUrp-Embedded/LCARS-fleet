@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# DEPLOY: instance-util
+# lcars-fleet-stop : grace shutdown coordonné (systemd ExecStop)
+# Canon : 04_design-notes/ring0/lcars-fleet_service.md §"Helper lcars-fleet-stop"
+
+set -euo pipefail
+/var/lib/lcars/release/bin/fleet_umbrella rpc \
+  'Fleet.Shutdown.begin(grace_ms: 45_000)' || true
+/var/lib/lcars/release/bin/fleet_umbrella stop

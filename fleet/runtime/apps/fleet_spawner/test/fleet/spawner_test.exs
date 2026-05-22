@@ -14,6 +14,7 @@ defmodule Fleet.SpawnerTest do
     Application.put_env(:fleet_credentials, :creds_root, coffre)
     File.mkdir_p!(Path.join(coffre, "engineer"))
     File.write!(Path.join([coffre, "engineer", "oauth_refresh_token"]), "rt")
+    File.write!(Path.join([coffre, "engineer", "oauth_access_token"]), "at")
 
     File.write!(
       Path.join([coffre, "engineer", "oauth_scopes"]),
@@ -37,7 +38,9 @@ defmodule Fleet.SpawnerTest do
       StubBackend.clear()
       Application.delete_env(:fleet_spawner, :state_fs_root)
       Application.delete_env(:fleet_spawner, :pod_dir_root)
-      Application.delete_env(:fleet_spawner, :launch_backend)
+      # B5 #576 : NE PAS delete :launch_backend — laisse la baseline
+      # hermétique config/test.exs (StubBackend) en place, sinon le
+      # code-default PortBackend RÉEL est atteint sous race async.
       Application.delete_env(:fleet_credentials, :creds_root)
       Application.delete_env(:fleet_spbuilder, :sp_role_root)
     end)

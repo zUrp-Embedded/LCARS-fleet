@@ -49,6 +49,10 @@ defmodule Fleet.Credentials do
 
   @oauth_refresh_token_env "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"
   @oauth_scopes_env "CLAUDE_CODE_OAUTH_SCOPES"
+  # #587 D8 — claude binary requiert TOKEN (access) en plus de REFRESH+SCOPES
+  # dans sandbox bwrap (--tmpfs /home masque le fallback file). REFRESH seul
+  # → "Not logged in". Si access expired, claude refresh via REFRESH_TOKEN.
+  @oauth_access_token_env "CLAUDE_CODE_OAUTH_TOKEN"
 
   @doc """
   Résout les env vars OAuth pour un rôle donné.
@@ -68,9 +72,11 @@ defmodule Fleet.Credentials do
     effective_role = if use_role, do: role, else: "starfleet"
 
     with {:ok, refresh_token} <- read_coffre_file(effective_role, "oauth_refresh_token"),
+         {:ok, access_token} <- read_coffre_file(effective_role, "oauth_access_token"),
          {:ok, scopes} <- read_coffre_file(effective_role, "oauth_scopes") do
       base = %{
         @oauth_refresh_token_env => String.trim(refresh_token),
+        @oauth_access_token_env => String.trim(access_token),
         @oauth_scopes_env => String.trim(scopes)
       }
 

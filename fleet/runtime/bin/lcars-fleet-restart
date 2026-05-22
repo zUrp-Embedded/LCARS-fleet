@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# DEPLOY: instance-util
+# lcars-fleet-restart : restart contrôlé umbrella OTP avec drain in-flight
+# Canon : 04_design-notes/ring0/lcars-fleet_service.md §"Helper lcars-fleet-restart"
+#
+# Usage: sudo lcars-fleet-restart [--grace-sec=N] [--force]
+#
+# Comportement :
+#   1. systemctl reload (Fleet.Shutdown.drain_in_flight via ExecReload)
+#   2. Attend drain --grace-sec (défaut 30s)
+#   3. systemctl stop (déclenche ExecStop grace shutdown)
+#   4. sleep 2s (libère ports + cleanup ETS)
+#   5. systemctl start (boot fresh)
+#   6. Poll readiness (60s max)
+#
+# Exit codes: 0 OK | 2 stop timeout | 3 readiness timeout | 4 sudo requis | 64 usage
+
+set -euo pipefail
+
+GRACE_SEC=30
+FORCE=0
+for arg in "$@"; do
+  case "$arg" in
+    --grace-sec=*) GRACE_SEC="${arg#*=}" ;;
+    --force) FORCE=1 ;;
+    *) echo "Usage: lcars-fleet-restart [--grace-sec=N] [--force]" >&2; exit 64 ;;
+  esac
+done
+
+[ "${EUID:-$(id -u)}" -eq 0 ] || { echo "sudo requis" >&2; exit 4; }
+
+echo "[lcars-fleet-restart] Drain in-flight (grace=${GRACE_SEC}s)..."
+systemctl reload lcars-fleet.service
+sleep "$GRACE_SEC"
+
+echo "[lcars-fleet-restart] Stop service..."
+if ! timeout 65 systemctl stop lcars-fleet.service; then
+  echo "[lcars-fleet-restart] Stop timeout" >&2
+  [ "$FORCE" -eq 0 ] && exit 2
+  systemctl kill --signal=SIGKILL lcars-fleet.service
+fi
+
+echo "[lcars-fleet-restart] Sleep 2s (port + ETS cleanup)..."
+sleep 2
+
+echo "[lcars-fleet-restart] Start service..."
+systemctl start lcars-fleet.service
+
+echo "[lcars-fleet-restart] Poll readiness (60s max)..."
+TS_END=$(($(date +%s) + 60))
+while [ "$(date +%s)" -lt "$TS_END" ]; do
+  if curl -sf http://localhost:8080/api/health >/dev/null 2>&1; then
+    echo "[lcars-fleet-restart] OK"
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "[lcars-fleet-restart] Readiness timeout" >&2
+exit 3

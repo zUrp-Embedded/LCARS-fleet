@@ -1,9 +1,9 @@
 # Fleet.ClaudeBridge
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-09
+**Dernière révision** : 2026-05-22
 **Statut** : implémenté run #3.1 chantier #8 — design note PROMOTED
-**Référencé par** : work/beyond_#3.1/design-notes/promoted/fleet_claude_bridge.md
+**Référencé par** : 04_design-notes/fleet_claude_bridge.md
 
 Wrapper SDK Elixir `guess/claude_code` côté LCARS Ring 1. Surface
 restreinte (pas exposer pid `Session` aux pods workers) + intégration

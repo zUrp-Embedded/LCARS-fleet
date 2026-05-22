@@ -1,0 +1,64 @@
+apiVersion: lcars/v2.5
+kind: CapabilityProfile
+metadata:
+  name: monk
+  description: "Monk archiviste générique. Tranche de corpus paramétrée au spawn via env LCARS_MONK_SOURCES_GLOB."
+  containment: bwrap
+spec:
+  scope:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+    disallowedTools:
+      - Edit
+      - Write
+      - Bash
+      - WebFetch
+      - WebSearch
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_servers
+      - tool_search_tools
+    git_ops_denied:
+      - push
+      - commit
+      - clone
+      - fetch
+      - merge
+      - rebase
+  knowledge:
+    skills: []
+    libs: []
+    mcpServers: []
+  invocation:
+    systemPrompt: /local/LCARS-v1.5/sp/monk.md
+    appendSystemPrompt: ""
+    mode: archive-mode
+    archiveMode:
+      keepAliveSec: 1800
+      pingIntervalSec: 240
+      autoRespawnOnCrash: true
+    model: claude-haiku-4-5
+    preLoadedSourcesGlob: ""
+  injects:
+    credentials: true
+    gitconfig: false
+    githubAuth: false
+  budget:
+    maxUsd: 999.00
+    maxDurationSec: 7200
+    maxUsdPerQuery: 0.10
+    maxQueries: 200
+  modop_set: []
+  modop_incompatible: []
+  lifetime_scope: pipe
+  podConstraints:
+    - "Tu reçois ta tranche via env LCARS_MONK_SOURCES_GLOB"
+    - "Au premier message, tu lis tous tes paths via Read pour cache prompt warm"
+    - "Tu réponds en JSON strict (objet ou array), jamais en prose libre"
+    - "Citation exacte, jamais de paraphrase"
+    - "Si pas trouvé dans tes pages, retourne { found: false } proprement"

@@ -88,9 +88,13 @@ defmodule Fleet.SPBuilder do
   def compose(%Fleet.CapProfile{} = cap_profile, modop_bundles, opts \\ [])
       when is_list(modop_bundles) and is_list(opts) do
     with {:ok, sp_role_base} <- read_sp_role_base(cap_profile),
-         {:ok, modop_fragments} <- read_modop_fragments(modop_bundles) do
-      preloaded_paths = Keyword.get(opts, :preloaded_paths, [])
-      modop_concat = modop_fragments_concat(modop_fragments)
+         {:ok, modop_fragments} <- read_modop_fragments(modop_bundles),
+         {:ok, monk_inj} <- monk_injection_or_empty(cap_profile, opts) do
+      preloaded_paths =
+        Keyword.get(opts, :preloaded_paths, []) ++ monk_inj.corpus_paths
+
+      modop_concat =
+        modop_fragments_concat(modop_fragments) <> monk_persona_section(monk_inj)
 
       stable_concat =
         IO.iodata_to_binary([
@@ -192,6 +196,84 @@ defmodule Fleet.SPBuilder do
       {:error, :skills_root_missing}
     end
   end
+
+  @doc """
+  Lot 4/6 (DN ring2/fleet_memory.md L478) — résout l'injection monk :
+  si le cap-profile porte `spec.knowledge.{monk_registry, monk_instance}`,
+  lit le registry YAML (kind MemoryRegistry), trouve l'entrée
+  `monk_instance` → `{:ok, %{persona_hint, corpus_paths}}`. Sinon
+  `:not_a_monk` (le flux compose/3 reste byte-identique chantier-2 —
+  construction-additive, non-recouvrement).
+
+  ## opts
+    * `:monk_registry_root` — racine résolvant le path relatif du registry
+      (test-seam ; défaut config `:fleet_spbuilder, :monk_registry_root`
+      puis cwd).
+
+  Fonction **pure** (lecture FS only, aucun process — Iron Law).
+  """
+  @spec resolve_monk_injection(Fleet.CapProfile.t(), keyword()) ::
+          {:ok, %{persona_hint: String.t(), corpus_paths: [String.t()]}}
+          | :not_a_monk
+          | {:error, term()}
+  def resolve_monk_injection(%Fleet.CapProfile{spec: spec}, opts \\ []) do
+    knowledge = Map.get(spec, "knowledge", %{})
+    registry_rel = Map.get(knowledge, "monk_registry")
+    instance = Map.get(knowledge, "monk_instance")
+
+    cond do
+      is_nil(registry_rel) or is_nil(instance) ->
+        :not_a_monk
+
+      true ->
+        root =
+          Keyword.get(opts, :monk_registry_root) ||
+            Application.get_env(:fleet_spbuilder, :monk_registry_root) || "."
+
+        path = Path.join(root, registry_rel)
+
+        with {:ok, reg} <- read_registry(path),
+             {:ok, monk} <- find_monk(reg, instance) do
+          {:ok,
+           %{
+             persona_hint: Map.get(monk, "persona_hint", ""),
+             corpus_paths: Map.get(monk, "corpus_paths", [])
+           }}
+        end
+    end
+  end
+
+  defp read_registry(path) do
+    case YamlElixir.read_from_file(path) do
+      {:ok, %{"kind" => "MemoryRegistry"} = reg} -> {:ok, reg}
+      {:ok, _} -> {:error, {:not_a_memory_registry, path}}
+      {:error, reason} -> {:error, {:registry_unreadable, path, reason}}
+    end
+  end
+
+  defp find_monk(reg, instance) do
+    monks = get_in(reg, ["spec", "monks"]) || []
+
+    case Enum.find(monks, &(Map.get(&1, "name") == instance)) do
+      nil -> {:error, {:monk_instance_not_found, instance}}
+      monk -> {:ok, monk}
+    end
+  end
+
+  # Wrapper compose/3 : :not_a_monk → injection vide (flux byte-identique
+  # chantier-2) ; {:error,_} → propagé (fail-loud, GO-0/D2).
+  defp monk_injection_or_empty(cap_profile, opts) do
+    case resolve_monk_injection(cap_profile, opts) do
+      {:ok, inj} -> {:ok, inj}
+      :not_a_monk -> {:ok, %{persona_hint: "", corpus_paths: []}}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp monk_persona_section(%{persona_hint: ""}), do: ""
+
+  defp monk_persona_section(%{persona_hint: ph}) when is_binary(ph),
+    do: "\n\n## Monk persona\n\n" <> ph
 
   # ============================================================
   # SP role base + modop fragments I/O

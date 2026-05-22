@@ -1,20 +1,27 @@
-# The directory Mix will write compiled artifacts to.
+# LCARS V2 runtime — umbrella Elixir .gitignore
+# Beyond_#4 encodage DN. Empêche pollution build/deps dans le triangle
+# (artefacts régénérables : _build, deps, *.beam ; pas de secret versionné).
+# Statut : actif. Référencé par : commit Lot 1/2 (run beyond_#4-engineer).
+
+# Build artifacts
 /_build/
-
-# If you run "mix test --cover", coverage assets end up here.
 /cover/
+/doc/
+/.fetch
+erl_crash.dump
+*.ez
+*.beam
+/config/*.secret.exs
 
-# The directory Mix downloads your dependencies sources to.
+# Dependencies (régénérés par mix deps.get)
 /deps/
 
-# Where third-party dependencies like ExDoc output generated docs.
-/doc/
+# Outils agent (hors livrable runtime)
+/.claude/
 
-# If the VM crashes, it generates a dump, let's ignore it too.
-erl_crash.dump
+# OS / éditeur
+.DS_Store
+*~
 
-# Also ignore archive artifacts (built via "mix archive.build").
-*.ez
-
-# Temporary files, for example, from tests.
-/tmp/
+# ExUnit @tag :tmp_dir artefacts (jamais versionnés)
+apps/*/tmp/

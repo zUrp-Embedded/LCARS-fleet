@@ -31,6 +31,10 @@ defmodule Fleet.Starfleet.MixProject do
     # (default `NotWiredYet`) — handle_decision + handle_escalation deferred.
     [
       {:fleet_event_router, in_umbrella: true},
+      # B10/#583 Sprint 1 — Fleet.Starfleet.BootOrchestrator appelle
+      # Fleet.Spawner.PermanentBoot.boot_permanent_pods/0. Pas de
+      # cycle (spawner ⊀ starfleet vérifié).
+      {:fleet_spawner, in_umbrella: true},
       {:jason, "~> 1.4"},
       {:ex_json_schema, "~> 0.11"}
     ]

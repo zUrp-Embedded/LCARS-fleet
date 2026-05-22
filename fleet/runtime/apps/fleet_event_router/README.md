@@ -1,9 +1,9 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-09
+**Dernière révision** : 2026-05-22
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED
-**Référencé par** : work/beyond_#3.1/design-notes/promoted/fleet_event_router.md
+**Référencé par** : 04_design-notes/fleet_event_router.md
 
 Bus events + dispatch table déclarative LCARS v2 (Ring 2 — colonne
 vertébrale orchestration). Webhooks Gitea + signaux OS + events
@@ -77,7 +77,7 @@ permission_relay_request, audit.verdict.gatekeeper, tick).
 
 - `phoenix_pubsub` 2.x — bus distribution-ready
 - `plug` 1.15+ + `plug_cowboy` 2.7+ — HTTP webhooks
-- `jason` — JSON encode/decode
+- `jason` — JSON en07_code/decode
 - `ex_json_schema` — schema validation soft
 - `yaml_elixir` — dispatch table parse
 

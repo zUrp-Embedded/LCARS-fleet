@@ -1,9 +1,9 @@
 # Fleet.Credentials
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-09
+**Dernière révision** : 2026-05-22
 **Statut** : implémenté run #3.1 chantier #3 — design note PROMOTED
-**Référencé par** : work/beyond_#3.1/design-notes/promoted/fleet_credentials.md
+**Référencé par** : 04_design-notes/fleet_credentials.md
 
 Coffre creds + injection ENV vars OAuth au boot pod LCARS v2 (Ring 2).
 

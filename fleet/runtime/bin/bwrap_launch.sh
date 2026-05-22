@@ -97,6 +97,26 @@ if [[ ! -d "$POD_DIR" ]]; then
 fi
 
 # =============================================================
+# Exposition plugins Claude Code natifs
+# DN ring1/pod-bootstrap-superpowers — mount-bind RO host→pod.
+# LCARS_SKILLS_PLUGINS = plugins whitelistés (space-separated),
+# produit par fleet_spbuilder.filter_skills/2 côté caller. Défaut
+# vide = aucun plugin (rétro-compatible). Adaptation anti-M1 vs
+# pseudo-patch DN : pod HOME réel = $POD_DIR (--setenv HOME +
+# --tmpfs /home), PAS /home/$ROLE. Fail-fast si absent host-side.
+# =============================================================
+
+PLUGIN_BINDS=()
+for plugin in ${LCARS_SKILLS_PLUGINS:-}; do
+  HOST_PLUGIN_PATH="$HOME/.claude/plugins/$plugin"
+  if [[ ! -d "$HOST_PLUGIN_PATH" ]]; then
+    echo "ERR: plugin '$plugin' not installed host-side at $HOST_PLUGIN_PATH" >&2
+    exit 1
+  fi
+  PLUGIN_BINDS+=(--ro-bind "$HOST_PLUGIN_PATH" "$POD_DIR/.claude/plugins/$plugin")
+done
+
+# =============================================================
 # Bwrap durci PoC-3 T2 stack + exec
 # =============================================================
 
@@ -108,6 +128,7 @@ exec "$BWRAP_BIN" \
   --bind "$POD_DIR" "$POD_DIR" \
   --ro-bind "$CREDS_PATH" "$CREDS_PATH" \
   --ro-bind "$GIT_MIRROR" "$GIT_MIRROR" \
+  ${PLUGIN_BINDS[@]+"${PLUGIN_BINDS[@]}"} \
   --dev /dev --proc /proc \
   --chdir "$POD_DIR" \
   --setenv HOME "$POD_DIR" \
@@ -118,4 +139,7 @@ exec "$BWRAP_BIN" \
   --setenv CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC "1" \
   --setenv DISABLE_AUTOUPDATER "1" \
   --setenv CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "100" \
+  --setenv CLAUDE_CODE_OAUTH_REFRESH_TOKEN "${CLAUDE_CODE_OAUTH_REFRESH_TOKEN:-}" \
+  --setenv CLAUDE_CODE_OAUTH_TOKEN "${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+  --setenv CLAUDE_CODE_OAUTH_SCOPES "${CLAUDE_CODE_OAUTH_SCOPES:-}" \
   -- "${COMMAND[@]}"

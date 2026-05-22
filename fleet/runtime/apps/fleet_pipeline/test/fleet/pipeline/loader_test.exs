@@ -35,7 +35,7 @@ defmodule Fleet.Pipeline.LoaderTest do
       version: 1
       """)
 
-      assert_raise RuntimeError, ~r/schema invalide/, fn ->
+      assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
         Loader.load!("invalid")
       end
     end
@@ -52,7 +52,7 @@ defmodule Fleet.Pipeline.LoaderTest do
             type: hocus_pocus
       """)
 
-      assert_raise RuntimeError, ~r/schema invalide/, fn ->
+      assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
         Loader.load!("bad_gate")
       end
     end

@@ -1,12 +1,12 @@
 # fleet_pipeline (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-10
+**Dernière révision** : 2026-05-22
 **Statut** : impl att-1 — qualifier en attente
-**Référencé par** : `design-notes/promoted/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
+**Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
 Exécuteur générique de pipelines YAML déclaratifs (Ring 2 — orchestration).
-Source : `design-notes/promoted/fleet_pipeline.md` (Régime 1, PoC-π1
+Source : `04_design-notes/fleet_pipeline.md` (Régime 1, PoC-π1
 PROVEN 2026-05-09, profil **CONFORMANCE**).
 
 ## Sous-modules

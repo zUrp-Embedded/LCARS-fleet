@@ -28,7 +28,11 @@ defmodule Fleet.Starfleet.Application do
     :"audit.cat5.pod_drift",
     :"audit.cat5.pipeline_failed",
     :"audit.cat5.oauth_refresh_failed",
-    :"audit.verdict"
+    :"audit.verdict",
+    # B10/#583 Sprint 1 — events lifecycle BootOrchestrator
+    :"fleet.boot_complete",
+    :"fleet.boot_partial",
+    :"fleet.boot_failed"
   ]
 
   @impl Application
@@ -36,11 +40,36 @@ defmodule Fleet.Starfleet.Application do
     :ok = Fleet.Starfleet.Gatekeeper.init_schema!()
 
     children =
-      if Application.get_env(:fleet_starfleet, :start_drift_monitor, true) do
-        [Fleet.Starfleet.DriftMonitor]
-      else
-        []
-      end
+      [] ++
+        if(Application.get_env(:fleet_starfleet, :start_drift_monitor, true),
+          do: [Fleet.Starfleet.DriftMonitor],
+          else: []
+        ) ++
+        if Application.get_env(:fleet_starfleet, :start_shutdown, true) do
+          # Grace shutdown coordonné — doit être vivant pour le RPC
+          # ExecStop systemd (DN ring0/lcars-fleet_service).
+          [Fleet.Shutdown]
+        else
+          []
+        end ++
+        if(Application.get_env(:fleet_starfleet, :start_audit_consumer, true),
+          do: [Fleet.Starfleet.AuditConsumer],
+          else: []
+        ) ++
+        if Application.get_env(:fleet_starfleet, :start_boot_orchestrator, true) do
+          # B10/#583 Sprint 1 — Task :transient post-start sequence
+          # boot_permanent_pods + emit fleet.boot_complete|partial|failed.
+          [
+            %{
+              id: Fleet.Starfleet.BootOrchestrator,
+              start: {Fleet.Starfleet.BootOrchestrator, :start_link, [[]]},
+              restart: :transient,
+              type: :worker
+            }
+          ]
+        else
+          []
+        end
 
     opts = [strategy: :one_for_one, name: Fleet.Starfleet.Supervisor]
     Supervisor.start_link(children, opts)

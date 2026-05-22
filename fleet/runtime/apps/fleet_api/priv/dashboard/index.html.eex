@@ -1,0 +1,136 @@
+<%!--
+  Source     : apps/fleet_api/priv/dashboard/index.html.eex
+  Attribution: starfleet#1 (LCARS v1.5 structure HTML originale TVA),
+               starfleet#2 (refinements panels). Clean-room copy partielle.
+  Created    : 2026-05-20 (chantier #594 D2 dashboard V2 Elixir natif)
+  Adaptations V2 :
+    - Panels D3-D7 placeholders vides (MEMORY-X, BUILD STATUS, COORDINATION,
+      OAUTH QUOTA) à remplir dans sub-tickets D3-D7
+    - Workers/tickets/health panels conservés depuis v1.5 (data sources D4)
+    - Pas de JS (D2 = squelette HTML + CSS uniquement)
+  Per plan-dashboard.md ruling user 2026-05-20.
+--%><!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title><%= @title %></title>
+<link rel="stylesheet" href="/dashboard/static/lcars-tva.css">
+</head>
+<body>
+
+<div class="crt-overlay"></div>
+
+<div class="lcars-frame">
+
+  <!-- HEADER -->
+  <header class="lcars-header">
+    <div class="bezel bezel-left"></div>
+    <div class="head-strip">
+      <span class="head-title">LCARS // V2 MAINFRAME</span>
+      <span class="head-sub">FLEET v2 — RUNTIME OBSERVATION DECK</span>
+    </div>
+    <div class="head-status">
+      <span class="status-led" id="led-health"></span>
+      <span class="head-clock" id="clock">--:--:--</span>
+    </div>
+    <div class="bezel bezel-right"></div>
+  </header>
+
+  <!-- LEFT RAIL -->
+  <aside class="lcars-rail">
+    <div class="rail-cell rail-orange"  data-target="top">FLEET</div>
+    <div class="rail-cell rail-yellow"  data-target="panel-memory-query">MEMORY-X</div>
+    <div class="rail-cell rail-rust"    data-target="panel-build">BUILD</div>
+    <div class="rail-cell rail-cream"   data-target="panel-coord">COORD</div>
+    <div class="rail-cell rail-magenta" data-target="panel-oauth">OAUTH</div>
+    <div class="rail-cell rail-cyan"    data-target="panel-health">HEALTH</div>
+    <div class="rail-cell rail-end"></div>
+  </aside>
+
+  <!-- MAIN GRID -->
+  <main class="lcars-main">
+
+    <!-- D3 placeholder : MEMORY QUERY -->
+    <section class="panel panel-memory-query" id="panel-memory-query">
+      <div class="panel-head">
+        <span class="panel-num">D3</span>
+        <span class="panel-name"><span class="syslogo-l">MEMORY</span><span class="syslogo-r">QUERY</span></span>
+        <span class="panel-meta">— placeholder D3 —</span>
+      </div>
+      <div class="panel-body">
+        <p class="placeholder-text">Sub-ticket D3 : formulaire query Memory ⟨X⟩ + résultats pointers.</p>
+      </div>
+    </section>
+
+    <!-- D5 placeholder : RUNTIME V2 BUILD STATUS -->
+    <section class="panel panel-build" id="panel-build">
+      <div class="panel-head">
+        <span class="panel-num">D5</span>
+        <span class="panel-name"><span class="syslogo-l">RUNTIME V2</span><span class="syslogo-r">BUILD STATUS</span></span>
+        <span class="panel-meta">— placeholder D5 —</span>
+      </div>
+      <div class="panel-body">
+        <p class="placeholder-text">Sub-ticket D5 : table apps OTP canon vs release.applications vs started_applications.</p>
+      </div>
+    </section>
+
+    <!-- D6 placeholder : COORDINATION 3-WAY -->
+    <section class="panel panel-coord" id="panel-coord">
+      <div class="panel-head">
+        <span class="panel-num">D6</span>
+        <span class="panel-name"><span class="syslogo-l">COORDINATION</span><span class="syslogo-r">3-WAY</span></span>
+        <span class="panel-meta">— placeholder D6 —</span>
+      </div>
+      <div class="panel-body">
+        <p class="placeholder-text">Sub-ticket D6 : phases A/B/C #576 + last comments + blockers.</p>
+      </div>
+    </section>
+
+    <!-- D7 placeholder : OAUTH QUOTA + PIVOT -->
+    <section class="panel panel-oauth" id="panel-oauth">
+      <div class="panel-head">
+        <span class="panel-num">D7</span>
+        <span class="panel-name"><span class="syslogo-l">OAUTH</span><span class="syslogo-r">QUOTA + PIVOT 15/06</span></span>
+        <span class="panel-meta">— placeholder D7 —</span>
+      </div>
+      <div class="panel-body">
+        <p class="placeholder-text">Sub-ticket D7 : pool subscription Max 20x + SDK credit post-pivot + alertes.</p>
+      </div>
+    </section>
+
+    <!-- D4 placeholder : WORKERS -->
+    <section class="panel panel-workers" id="panel-workers">
+      <div class="panel-head">
+        <span class="panel-num">D4-A</span>
+        <span class="panel-name"><span class="syslogo-l">ACTIVE</span><span class="syslogo-r">WORKERS</span></span>
+        <span class="panel-meta">— placeholder D4 —</span>
+      </div>
+      <div class="panel-body">
+        <p class="placeholder-text">Sub-ticket D4 : pods runtime via Fleet.Spawner.Registry direct (intra-release, ADR-C 5-zéros).</p>
+      </div>
+    </section>
+
+    <!-- D4 placeholder : HEALTH -->
+    <section class="panel panel-health" id="panel-health">
+      <div class="panel-head">
+        <span class="panel-num">D4-B</span>
+        <span class="panel-name"><span class="syslogo-l">RUNTIME</span><span class="syslogo-r">HEALTH</span></span>
+        <span class="panel-meta">— placeholder D4 —</span>
+      </div>
+      <div class="panel-body">
+        <p class="placeholder-text">Sub-ticket D4 : 15 apps OTP started, /api/health 200, lcars-fleet.service active.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="lcars-footer">
+    <span class="footer-meta">D2 squelette • sub-tickets D3-D7 panels • #594</span>
+  </footer>
+
+</div>
+
+</body>
+</html>

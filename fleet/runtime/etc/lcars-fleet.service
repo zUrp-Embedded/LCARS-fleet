@@ -43,7 +43,14 @@ CapabilityBoundingSet=
 # CAP_NET_BIND_SERVICE. Rétablir CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 # seul si reverse proxy direct :80/:443 future.
 SystemCallFilter=@system-service
-SystemCallFilter=~@privileged @resources
+# D6 #586 (sf empirique) : le deny ~@privileged @resources bloquait
+# par seccomp les syscalls bwrap (unshare/mount/setns/pivot_root) →
+# tous les pods exec mouraient "Bad system call (core dumped)" capté
+# pod_dir/bwrap.stderr. Remplacé par allow explicite @mount @namespace
+# (bwrap a besoin de mount + user/mount/pid namespaces pour son
+# sandbox). Hardening conservé via le reste (PrivateTmp, ProtectHome,
+# CapabilityBoundingSet vide, RestrictNamespaces user mount, etc.).
+SystemCallFilter=@mount @namespace
 RestrictNamespaces=user mount
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 LockPersonality=yes

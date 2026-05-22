@@ -85,6 +85,11 @@ defmodule Fleet.Api.Rest do
     end
   end
 
+  # #594 D2 — dashboard V2 Elixir natif. Mount Fleet.Api.Dashboard sous
+  # /dashboard. Pas d'auth HTTP (ADR-C accès intra-release, GET-only UI,
+  # whitelisté dans require_auth/2 ligne ~97).
+  forward("/dashboard", to: Fleet.Api.Dashboard)
+
   match _ do
     send_resp(conn, 404, ~s|{"error":"not found"}|)
   end
@@ -95,6 +100,11 @@ defmodule Fleet.Api.Rest do
 
   @doc false
   def require_auth(%Plug.Conn{request_path: "/api/health"} = conn, _opts), do: conn
+
+  # #594 D2 — dashboard V2 UI : pas d'auth HTTP (intra-release, GET-only,
+  # ADR-C 5-zéros). Whitelist /dashboard et /dashboard/static/*.
+  def require_auth(%Plug.Conn{request_path: "/dashboard" <> _, method: "GET"} = conn, _opts),
+    do: conn
 
   def require_auth(conn, _opts) do
     sig = get_req_header(conn, "x-auth-token") |> List.first() || ""

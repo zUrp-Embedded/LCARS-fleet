@@ -1,0 +1,33 @@
+apiVersion: lcars/v2
+kind: MemoryInstance
+metadata:
+  name: beta
+  description: "Implémentation pratique — corpus beyond (DN, retex, PoCs, méthodes)"
+spec:
+  corpus_path: /home/projects.work/LCARS/work/beyond
+  archivist_cap_profile: archivist
+  monk_cap_profile: monk
+  # 10 monks individuels (pas de consolidation observée pour beta — v1.5 alpha consolide via runtime,
+  # beta reste granulaire). Si concurrence devient problème (>5 monks actifs simultanés),
+  # consolider en post-MVP par regroupements thématiques.
+  monks:
+    - label: chantier-sp-positif
+      glob: "/home/projects.work/LCARS/work/beyond/chantier-sp-positif/**/*.md"
+    - label: feedbacks-user
+      glob: "/home/projects.work/LCARS/work/beyond/feedbacks-user/**/*.md"
+    - label: findings
+      glob: "/home/projects.work/LCARS/work/beyond/findings/**/*.md"
+    - label: mandats-pipeline
+      glob: "/home/projects.work/LCARS/work/beyond/mandats-pipeline/**/*.md"
+    - label: poc-exploratoire
+      glob: "/home/projects.work/LCARS/work/beyond/poc-exploratoire/**/*.md"
+    - label: poc-v1_5
+      glob: "/home/projects.work/LCARS/work/beyond/poc-v1.5/**/*.md"
+    - label: skeleton-l2
+      glob: "/home/projects.work/LCARS/work/beyond/skeleton-l2/**/*.md"
+    - label: triage
+      glob: "/home/projects.work/LCARS/work/beyond/triage/**/*.md"
+    - label: v1_auto-start_review-config
+      glob: "/home/projects.work/LCARS/work/beyond/v1_auto-start_review-config/**/*.md"
+    - label: root
+      glob: "/home/projects.work/LCARS/work/beyond/*.md"

@@ -1,9 +1,9 @@
 # Fleet.SPBuilder
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-09
+**Dernière révision** : 2026-05-22
 **Statut** : implémenté run #3.1 chantier #2 — design note PROMOTED
-**Référencé par** : work/beyond_#3.1/design-notes/promoted/fleet_spbuilder.md
+**Référencé par** : 04_design-notes/fleet_spbuilder.md
 
 System Prompt builder/composer (LCARS schema v2.5).
 

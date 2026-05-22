@@ -16,6 +16,7 @@ defmodule Fleet.Spawner.PodTest do
     Application.put_env(:fleet_credentials, :creds_root, coffre)
     File.mkdir_p!(Path.join(coffre, "engineer"))
     File.write!(Path.join([coffre, "engineer", "oauth_refresh_token"]), "rt-stub")
+    File.write!(Path.join([coffre, "engineer", "oauth_access_token"]), "at-stub")
 
     File.write!(
       Path.join([coffre, "engineer", "oauth_scopes"]),
@@ -32,7 +33,8 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.clear()
       Application.delete_env(:fleet_spawner, :state_fs_root)
       Application.delete_env(:fleet_spawner, :pod_dir_root)
-      Application.delete_env(:fleet_spawner, :launch_backend)
+      # B5 #576 : baseline hermétique config/test.exs StubBackend
+      # conservée (cf. spawner_test.exs même raison).
       Application.delete_env(:fleet_credentials, :creds_root)
       Application.delete_env(:fleet_spbuilder, :sp_role_root)
     end)
@@ -201,6 +203,211 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
 
       assert_receive {:EXIT, ^pid, {:shutdown, {:credentials_resolve_failed, _}}}, 2_000
+    end
+  end
+
+  # ============================================================
+  # #593 D11 — handle_info Port lifecycle (post-init NDJSON events)
+  # ============================================================
+  #
+  # Avant D11 : Port messages post-init tombaient dans le catch-all default
+  # GenServer → log unexpected message, state machine ne notait jamais la
+  # complétion. Fix : handle_info clauses {:data, chunk} (parse NDJSON +
+  # broadcast pod.completed/failed) et {:exit_status, code} (broadcast
+  # pod.terminated + stop normal).
+  describe "#593 D11 — Port stream lifecycle" do
+    setup do
+      # Fake port réel (sleep, ne sort rien, port reste owned tant que
+      # process alive). Cleanup on_exit.
+      fake_port = Port.open({:spawn, "/bin/sleep 60"}, [:binary, :exit_status])
+
+      on_exit(fn ->
+        if is_port(fake_port) and Port.info(fake_port) != nil, do: Port.close(fake_port)
+      end)
+
+      {:ok, fake_port: fake_port}
+    end
+
+    test "port stored in state after launch (when backend returns port)", %{
+      fake_port: fake_port
+    } do
+      StubBackend.set_reply(
+        {:ok,
+         %{
+           init_message: StubBackend.valid_init_message(),
+           ndjson_log: "/tmp/x.ndjson",
+           port: fake_port
+         }}
+      )
+
+      pod_id = "pod-port-stored-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-port"))
+      assert_receive {:launch_called, _, _}, 2_000
+      Process.sleep(50)
+
+      info = GenServer.call(pid, :info)
+      assert info.phase == :succeeded
+      assert info.last_result == nil
+    end
+
+    test "result event is_error=false → state.last_result populated", %{fake_port: fake_port} do
+      StubBackend.set_reply(
+        {:ok,
+         %{
+           init_message: StubBackend.valid_init_message(),
+           ndjson_log: "/tmp/x.ndjson",
+           port: fake_port
+         }}
+      )
+
+      pod_id = "pod-result-ok-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-result"))
+      assert_receive {:launch_called, _, _}, 2_000
+      Process.sleep(50)
+
+      # Stream result event via fake port (D11 handle_info clause matches
+      # on %{port: fake_port}).
+      chunk =
+        "{\"type\":\"result\",\"is_error\":false,\"duration_ms\":1234,\"result\":\"done\"}\n"
+
+      send(pid, {fake_port, {:data, chunk}})
+      Process.sleep(20)
+
+      info = GenServer.call(pid, :info)
+
+      assert info.last_result == %{
+               "type" => "result",
+               "is_error" => false,
+               "duration_ms" => 1234,
+               "result" => "done"
+             }
+    end
+
+    test "result event is_error=true → state.last_result populated (failed)", %{
+      fake_port: fake_port
+    } do
+      StubBackend.set_reply(
+        {:ok,
+         %{
+           init_message: StubBackend.valid_init_message(),
+           ndjson_log: "/tmp/x.ndjson",
+           port: fake_port
+         }}
+      )
+
+      pod_id = "pod-result-fail-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-fail"))
+      assert_receive {:launch_called, _, _}, 2_000
+      Process.sleep(50)
+
+      chunk = "{\"type\":\"result\",\"is_error\":true,\"error\":\"budget_exceeded\"}\n"
+      send(pid, {fake_port, {:data, chunk}})
+      Process.sleep(20)
+
+      info = GenServer.call(pid, :info)
+      assert info.last_result["is_error"] == true
+    end
+
+    test "chunks fragmentés sur ligne (partial event) → buffer accumule", %{
+      fake_port: fake_port
+    } do
+      StubBackend.set_reply(
+        {:ok,
+         %{
+           init_message: StubBackend.valid_init_message(),
+           ndjson_log: "/tmp/x.ndjson",
+           port: fake_port
+         }}
+      )
+
+      pod_id = "pod-chunked-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-chunk"))
+      assert_receive {:launch_called, _, _}, 2_000
+      Process.sleep(50)
+
+      # Split arbitraire d'un result event en 3 chunks
+      send(pid, {fake_port, {:data, "{\"type\":\"result\",\"is_error"}})
+      send(pid, {fake_port, {:data, "\":false,\"duration_ms\":99"}})
+      send(pid, {fake_port, {:data, "}\n"}})
+      Process.sleep(30)
+
+      info = GenServer.call(pid, :info)
+      assert info.last_result["type"] == "result"
+      assert info.last_result["is_error"] == false
+      assert info.last_result["duration_ms"] == 99
+    end
+
+    test "exit_status → process stops normal", %{fake_port: fake_port} do
+      Process.flag(:trap_exit, true)
+
+      StubBackend.set_reply(
+        {:ok,
+         %{
+           init_message: StubBackend.valid_init_message(),
+           ndjson_log: "/tmp/x.ndjson",
+           port: fake_port
+         }}
+      )
+
+      pod_id = "pod-exit-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-exit"))
+      assert_receive {:launch_called, _, _}, 2_000
+      Process.sleep(50)
+
+      send(pid, {fake_port, {:exit_status, 0}})
+
+      # Pod GenServer transitionne {:stop, :normal, _} → notification :EXIT.
+      assert_receive {:EXIT, ^pid, :normal}, 1_000
+    end
+
+    test "garbage JSON in chunk → ignored silently (no crash)", %{fake_port: fake_port} do
+      StubBackend.set_reply(
+        {:ok,
+         %{
+           init_message: StubBackend.valid_init_message(),
+           ndjson_log: "/tmp/x.ndjson",
+           port: fake_port
+         }}
+      )
+
+      pod_id = "pod-garbage-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-garb"))
+      assert_receive {:launch_called, _, _}, 2_000
+      Process.sleep(50)
+
+      send(pid, {fake_port, {:data, "not-json-at-all\n{\"valid\":true}\n"}})
+      Process.sleep(20)
+
+      info = GenServer.call(pid, :info)
+      # Pas de crash, last_result reste nil (la ligne valide n'est pas un
+      # type:result donc handle_event/2 catch-all → no-op).
+      assert info.last_result == nil
+    end
+
+    test "messages avec port différent → ignorés (catch-all)", %{fake_port: fake_port} do
+      StubBackend.set_reply(
+        {:ok,
+         %{
+           init_message: StubBackend.valid_init_message(),
+           ndjson_log: "/tmp/x.ndjson",
+           port: fake_port
+         }}
+      )
+
+      pod_id = "pod-other-port-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-other"))
+      assert_receive {:launch_called, _, _}, 2_000
+      Process.sleep(50)
+
+      other_port = Port.open({:spawn, "/bin/sleep 60"}, [:binary, :exit_status])
+      send(pid, {other_port, {:data, "{\"type\":\"result\",\"is_error\":false}\n"}})
+      Process.sleep(20)
+
+      # Le matching %{port: fake_port} échoue → catch-all → no-op.
+      info = GenServer.call(pid, :info)
+      assert info.last_result == nil
+
+      Port.close(other_port)
     end
   end
 

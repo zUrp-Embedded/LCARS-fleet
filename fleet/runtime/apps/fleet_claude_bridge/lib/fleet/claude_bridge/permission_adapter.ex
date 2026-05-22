@@ -1,18 +1,26 @@
 defmodule Fleet.ClaudeBridge.PermissionAdapter do
   @moduledoc """
-  Adapter SDK `can_use_tool` — délègue à `Fleet.PermissionRouter`
-  (chantier 10) avec discipline canon LCARS §1 "refus par défaut".
+  **VESTIGIAL — ADR-D rev2 2026-05-19 (ruling user).** Cet adapter
+  n'existait que pour déléguer à `Fleet.PermissionRouter` (Ring 3),
+  désormais RETIRÉ (bwrap intégral définit la surface accessible :
+  dedans = 100 % accessible, dehors = inaccessible → pas de
+  permissions à router). bwrap est le seul guard de surface.
 
-  Implémente la signature attendue par le SDK
-  (`ClaudeCode.PermissionAdapter` behaviour) en retournant des maps
-  `%{"behavior" => "allow"|"deny", ...}`.
+  Conservé **fail-safe non-wiré** : le backend défaut `DefaultDeny`
+  refuse par défaut (canon §0 #1 « refus par défaut » — l'axiome
+  DEMEURE, sa matérialisation est désormais structurelle via bwrap).
+  Aucun appelant actif ; non flippé vers allow (D2 fail-loud).
 
-  ## Backend swappable
+  Implémente la signature SDK (`ClaudeCode.PermissionAdapter`
+  behaviour) en retournant `%{"behavior" => "allow"|"deny", ...}`.
 
-  La logique allow/deny/relay est déléguée à un backend configurable
-  via `:fleet_claude_bridge, :permission_router_backend`. Default :
-  `Fleet.ClaudeBridge.PermissionAdapter.DefaultDeny` (refus par défaut
-  jusqu'à ce que `Fleet.PermissionRouter` chantier 10 soit câblé).
+  ## Backend swappable (inerte)
+
+  Backend configurable via `:fleet_claude_bridge,
+  :permission_router_backend`. Default :
+  `Fleet.ClaudeBridge.PermissionAdapter.DefaultDeny`. La cible
+  historique (`Fleet.PermissionRouter`) n'existe plus — cf.
+  `01_architecture/adr-d-ring3-canon-vs-code.md` §Révision 2.
 
   ## Mapping verdicts
 
@@ -64,17 +72,18 @@ end
 
 defmodule Fleet.ClaudeBridge.PermissionAdapter.DefaultDeny do
   @moduledoc """
-  Backend default — refus par défaut tant que `Fleet.PermissionRouter`
-  (chantier 10) n'est pas câblé.
-
-  Cohérent canon LCARS §1 "refus par défaut" : aucun tool autorisé
-  jusqu'à ce que la logique allow soit explicite côté router.
+  Backend default — refus par défaut. Fail-safe terminal : la cible
+  historique `Fleet.PermissionRouter` est RETIRÉE (ADR-D rev2) et
+  bwrap assure désormais l'isolation de surface. Conservé tel quel
+  (canon §0 #1 « refus par défaut » — axiome préservé) ; non flippé
+  vers allow (D2 fail-loud).
   """
 
   @behaviour Fleet.ClaudeBridge.PermissionAdapter.Backend
 
   @impl Fleet.ClaudeBridge.PermissionAdapter.Backend
   def can_use_tool(_tool_name, _tool_input, _context) do
-    {:deny, "default-deny: Fleet.PermissionRouter (chantier 10) pas encore wiré"}
+    {:deny,
+     "default-deny (vestigial ADR-D rev2 : permission routing retiré, bwrap = guard de surface)"}
   end
 end

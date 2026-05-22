@@ -1,13 +1,13 @@
 # fleet_coord (chantier 14)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-05-10
+**Dernière révision** : 2026-05-22
 **Statut** : impl att-1 — qualifier en attente
-**Référencé par** : `design-notes/promoted/fleet_coord.md`, `STATUS-CHANTIERS.md`
+**Référencé par** : `04_design-notes/fleet_coord.md`, `STATUS-CHANTIERS.md`
 
 Module Elixir système-side : table de routage déclarative
 `{verdict, reason} → {action, escalation_path}` LCARS v2 Ring 2
-orchestration. Source : `design-notes/promoted/fleet_coord.md`
+orchestration. Source : `04_design-notes/fleet_coord.md`
 (Régime 1, profil **CONFORMANCE**, PoC-π3 PROVEN).
 
 **Aucune logique de raisonnement LLM dans Policies** (méta-axiome
