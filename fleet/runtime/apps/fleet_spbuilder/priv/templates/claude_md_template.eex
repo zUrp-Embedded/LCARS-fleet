@@ -16,7 +16,6 @@ son header (Date, Statut, Auteur, Référencé par).
 ## Contraintes pod
 
 - `disallowedTools` enforced runtime via `fleet_ipc_filter` + `fleet_permission_router`
-- Budget `maxUsd: <%= @max_usd %>`, `maxDurationSec: <%= @max_duration_sec %>`
 - `git_ops_denied` : <%= Enum.join(@git_ops_denied, ", ") %>
 
 <%= if @repo_claude_md_sections != "" do %>

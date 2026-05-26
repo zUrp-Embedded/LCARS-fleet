@@ -157,8 +157,6 @@ defmodule Fleet.SPBuilder do
         role: get_in(cap_profile.metadata, ["name"]) || "unknown",
         containment: get_in(cap_profile.metadata, ["containment"]) || "unknown",
         lifetime_scope: get_in(cap_profile.spec, ["lifetime_scope"]) || "unknown",
-        max_usd: get_in(cap_profile.spec, ["budget", "maxUsd"]) || 0,
-        max_duration_sec: get_in(cap_profile.spec, ["budget", "maxDurationSec"]) || 0,
         git_ops_denied: get_in(cap_profile.spec, ["scope", "git_ops_denied"]) || [],
         repo_claude_md_sections: repo_sections
       ]
@@ -208,7 +206,11 @@ defmodule Fleet.SPBuilder do
   ## opts
     * `:monk_registry_root` — racine résolvant le path relatif du registry
       (test-seam ; défaut config `:fleet_spbuilder, :monk_registry_root`
-      puis cwd).
+      puis `Application.app_dir(:fleet_capprofile, "priv/canon/cap-profiles/monks")`).
+
+  R0.8-brick1 : le champ `monk_registry` dans le cap-profile = basename
+  (ex `alpha.yaml`) — le code resolve via `:monk_registry_root`. Le path
+  doctrine `05_data-canon/...` est mort : R0.7 a réabsorbé in-repo.
 
   Fonction **pure** (lecture FS only, aucun process — Iron Law).
   """
@@ -228,7 +230,8 @@ defmodule Fleet.SPBuilder do
       true ->
         root =
           Keyword.get(opts, :monk_registry_root) ||
-            Application.get_env(:fleet_spbuilder, :monk_registry_root) || "."
+            Application.get_env(:fleet_spbuilder, :monk_registry_root) ||
+            Application.app_dir(:fleet_capprofile, "priv/canon/cap-profiles/monks")
 
         path = Path.join(root, registry_rel)
 
@@ -244,10 +247,18 @@ defmodule Fleet.SPBuilder do
   end
 
   defp read_registry(path) do
+    # R0.8-brick2 : `kind: MemoryRegistry` retiré (1 seul kind par dossier
+    # `monks/*.yaml`, le path déclare le rôle). Validation = présence de
+    # `spec.monks` au shape attendu, pas d'attribut `kind` embarqué.
     case YamlElixir.read_from_file(path) do
-      {:ok, %{"kind" => "MemoryRegistry"} = reg} -> {:ok, reg}
-      {:ok, _} -> {:error, {:not_a_memory_registry, path}}
-      {:error, reason} -> {:error, {:registry_unreadable, path, reason}}
+      {:ok, %{"spec" => %{"monks" => monks}} = reg} when is_list(monks) ->
+        {:ok, reg}
+
+      {:ok, _} ->
+        {:error, {:not_a_memory_registry, path}}
+
+      {:error, reason} ->
+        {:error, {:registry_unreadable, path, reason}}
     end
   end
 
