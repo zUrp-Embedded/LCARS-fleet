@@ -1,6 +1,6 @@
 defmodule Fleet.CapProfile.V25ConformanceTest do
   @moduledoc """
-  Lot 5 inc4 — conformité des 7 cap-profiles canon `05_data-canon/cap-profiles/`
+  Lot 5 inc4 — conformité des 7 cap-profiles canon `priv/canon/cap-profiles/` (réabsorbés R0.7)
   au schema `priv/schema/cap-profile-v2.5.json` (critère done Lot 5
   "cap-profiles migrés v2.5"). Pattern Lot 0bis (PROVEN) : YAML canon →
   ex_json_schema validate. `async: true`.
@@ -17,16 +17,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   use ExUnit.Case, async: true
 
   @schema_path Path.join([__DIR__, "..", "priv", "schema", "cap-profile-v2.5.json"])
-  @canon_dir Path.join([
-               __DIR__,
-               "..",
-               "..",
-               "..",
-               "..",
-               "..",
-               "05_data-canon",
-               "cap-profiles"
-             ])
+  @canon_dir Path.join([__DIR__, "..", "priv", "canon", "cap-profiles"])
 
   @profiles ~w(architect-interactive consultant engineer gatekeeper qualifier reviewer starfleet)
 

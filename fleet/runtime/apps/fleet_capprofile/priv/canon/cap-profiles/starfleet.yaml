@@ -1,0 +1,64 @@
+# Cap-profile : starfleet
+# Date : 2026-05-18
+# Référencé par : design-notes/ring2/cap-profiles.md (tableau récap §L114), 01_architecture/derogations.md D-01
+# Schema : ../../07_code/runtime-v2/apps/fleet_capprofile/priv/schema/cap-profile-v2.5.json
+#
+# D-01 : starfleet hors-bwrap (host-natif sysadmin avec sudo).
+# Justification : starfleet doit gérer infrastructure host (systemd, ACL, bwrap config, provisioning).
+# Mitigation : isolation via system_user 'starfleet' UID + sudoers strict allowlist.
+kind: CapabilityProfile
+metadata:
+  name: starfleet
+  containment: none
+spec:
+  scope:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      - Bash
+      - Write
+      - Edit
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+    # Pattern destructeur push --force déclaré au baseline universel
+    # (`_baseline-git-denied.yaml`, intangible) — pas dupliqué ici.
+    git_ops_denied: []
+    outputs: ["/home/commons/starfleet/", "/var/log/fleet-starfleet.jsonl"]
+  knowledge:
+    libs:
+      - methodologie-axiome-inference-vs-mecanisable
+      - methodologie-doctrine-yolo
+      - methodologie-regles-yolo
+    skills: []  # modops listés dans modop_set
+    mcpServers: []
+    plugins: []
+    monk_registry: null
+    monk_instance: null
+  invocation:
+    lifetime_scope: forever  # D-01 host-natif process permanent
+    boot_at_start: false     # D-01 : starfleet boot via lcars-starfleet-host.sh systemd unit séparée, JAMAIS via fleet_spawner bwrap
+    subagent_template: null
+    mcp_channels: ["fleet-control.*", "fleet-forge.*"]
+    host_native: true
+    max_alive_sec: null  # forever — D-01 starfleet host-natif jusqu'à shutdown fleet
+    heartbeat_keepalive: false
+    bridge_enabled: false
+    policy: hide
+    rubber_duck_enabled: false
+    long_session_protocol: false
+    output_format: text
+  injects:
+    gitconfig: true
+    forge_signing_allowed: true
+  modop_set:
+    default: [archive-mode]
+    optional: [fire-mode, rubber-duck]
+    incompatible: [[fire-mode, long-session-discipline]]
+  project: null

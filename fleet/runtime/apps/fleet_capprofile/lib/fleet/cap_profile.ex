@@ -21,16 +21,16 @@ defmodule Fleet.CapProfile do
 
   require Logger
 
-  defstruct [:api_version, :kind, :metadata, :spec]
+  # R0.8-brick3 : `api_version` field retiré (cf. feedback "pas d'apiVersion
+  # dans YAML LCARS" — versioning par le code v2 release, pas champ embarqué).
+  defstruct [:kind, :metadata, :spec]
 
   @type t :: %__MODULE__{
-          api_version: String.t(),
           kind: String.t(),
           metadata: map(),
           spec: map()
         }
 
-  @api_version_pinned "lcars/v2.5"
   @kind_pinned "CapabilityProfile"
 
   # G24-9 (F-CONT-RISK) — server tools natifs Anthropic must be denied.
@@ -43,8 +43,10 @@ defmodule Fleet.CapProfile do
 
   # Fast-path guard for top-level reserved keys. `metadata.containment`
   # and `metadata.name` are also reserved — enforced by the JSON schema
-  # `priv/schema/modop-profile.json` (`not/anyOf` clause).
-  @reserved_modop_keys ~w(apiVersion kind)
+  # `priv/schema/modop-profile.json` (`not/anyOf` clause). R0.8-brick3 :
+  # `apiVersion` retiré ; kind reste réservé (différenciation cap-profile
+  # vs modop côté merge).
+  @reserved_modop_keys ~w(kind)
 
   # ============================================================
   # Loader behaviour
@@ -111,15 +113,13 @@ defmodule Fleet.CapProfile do
   @impl Fleet.CapProfile.Loader
   @spec validate(t()) :: :ok | {:error, [atom()]}
   def validate(%__MODULE__{} = profile) do
+    # R0.8-brick3 : G24-2 (check_api_version) retiré — apiVersion n'existe plus.
     violations =
       [
         {:g24_1, &check_containment/1},
-        {:g24_2, &check_api_version/1},
         {:g24_3, &check_kind/1},
         {:g24_4, &check_lifetime_scope/1},
-        {:g24_5, &check_git_ops_denied/1},
         {:g24_6, &check_modop_incompatible/1},
-        {:g24_7, &check_budget/1},
         {:g24_8, &check_metadata_name/1},
         {:g24_9_strict, &check_disallowed_strict/1},
         {:g24_9_prefix, &check_disallowed_prefix/1}
@@ -136,6 +136,96 @@ defmodule Fleet.CapProfile do
   # ============================================================
   # Public helpers
   # ============================================================
+
+  @doc """
+  Traduit les entrées sémantiques `spec.scope.git_ops_denied` (ex. `"push --force"`,
+  `"reset --hard"`) en patterns `disallowedTools` claude CLI de la forme
+  `Bash(git <entrée>:*)`. Les entrées vides/non-binaires sont ignorées. Ordre d'entrée
+  préservé. Pure.
+
+  Mécanisme générique catalogue → claude CLI : ce qui était une ligne déclarative
+  validée G24 isolément devient une contrainte effectivement enforced par claude
+  CLI au lancement du pod (disallow l'emporte sur allow sur le même pattern).
+  """
+  @spec git_ops_denied_patterns(t()) :: [String.t()]
+  def git_ops_denied_patterns(%__MODULE__{spec: spec}) do
+    spec
+    |> get_in(["scope", "git_ops_denied"])
+    |> List.wrap()
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.map(&"Bash(git #{&1}:*)")
+  end
+
+  @doc """
+  Retourne un `%CapProfile{}` dont `spec.scope.disallowedTools` est augmenté :
+  - des patterns du **baseline universel** (`_baseline-git-denied.yaml`,
+    intangibles selon principe directeur)
+  - PUIS des patterns issus de `git_ops_denied_patterns/1` (cap-profile worker
+    spécifique).
+  Union dédupliquée, ordre préservé : existants, baseline, profile.
+  Idempotent.
+
+  Point d'application : `Fleet.Spawner.Pod.do_allocate/1` au moment d'écrire
+  `.cap-profile.json` dans le pod, pour que `claude_launch.sh` reçoive la
+  liste déjà résolue.
+  """
+  @spec with_resolved_disallowed_tools(t()) :: t()
+  def with_resolved_disallowed_tools(%__MODULE__{spec: spec} = profile) do
+    baseline_patterns = baseline_git_ops_denied_patterns()
+    profile_patterns = git_ops_denied_patterns(profile)
+    existing = get_in(spec, ["scope", "disallowedTools"]) || []
+    augmented = Enum.uniq(existing ++ baseline_patterns ++ profile_patterns)
+
+    new_scope =
+      spec
+      |> Map.get("scope", %{})
+      |> Map.put("disallowedTools", augmented)
+
+    %{profile | spec: Map.put(spec, "scope", new_scope)}
+  end
+
+  @doc """
+  Patterns `disallowedTools` issus du baseline universel
+  (`priv/canon/cap-profiles/_baseline-git-denied.yaml`). Patterns
+  intangibles refusés à TOUS les workers indépendamment du cap-profile —
+  retirer un pattern = décision archi explicite (édit du fichier baseline,
+  pas option de cap-profile).
+
+  **Raise** si le fichier baseline est absent, illisible, ou de format
+  invalide. audit elixir #3 : la baseline est doctrinalement "intangible"
+  — un fail-open silencieux (retour `[]`) désactiverait la denylist
+  universelle sans alerter, contradictoire avec l'intention. Fail-closed
+  cohérent avec la doctrine. Le caller (`pod.ex do_allocate`) catch via
+  `rescue` et transitionne `:failed` proprement (Vulcan #5 préservé).
+
+  Pure modulo I/O fichier ; pas de cache (lu une fois par résolution cap-
+  profile, fréquence faible).
+  """
+  @spec baseline_git_ops_denied_patterns() :: [String.t()]
+  def baseline_git_ops_denied_patterns do
+    load_baseline_git_ops_denied!()
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.map(&"Bash(git #{&1}:*)")
+  end
+
+  defp load_baseline_git_ops_denied! do
+    path =
+      :fleet_capprofile
+      |> :code.priv_dir()
+      |> to_string()
+      |> Path.join("canon/cap-profiles/_baseline-git-denied.yaml")
+
+    case YamlElixir.read_from_file(path) do
+      {:ok, %{"git_ops_denied" => entries}} when is_list(entries) ->
+        entries
+
+      {:ok, _other} ->
+        raise "fleet_capprofile baseline #{path} : clé `git_ops_denied` absente ou format invalide (baseline intangible — fail-closed)"
+
+      {:error, reason} ->
+        raise "fleet_capprofile baseline #{path} absent ou corrompu (#{inspect(reason)}) (baseline intangible — fail-closed)"
+    end
+  end
 
   @doc """
   Returns the canonical JSON sha256 (lowercase hex) of a composed map
@@ -303,7 +393,6 @@ defmodule Fleet.CapProfile do
 
   defp to_struct(raw) when is_map(raw) do
     %__MODULE__{
-      api_version: Map.get(raw, "apiVersion"),
       kind: Map.get(raw, "kind"),
       metadata: Map.get(raw, "metadata", %{}),
       spec: Map.get(raw, "spec", %{})
@@ -312,7 +401,6 @@ defmodule Fleet.CapProfile do
 
   defp struct_to_map(%__MODULE__{} = p) do
     %{
-      "apiVersion" => p.api_version,
       "kind" => p.kind,
       "metadata" => p.metadata,
       "spec" => p.spec
@@ -325,10 +413,6 @@ defmodule Fleet.CapProfile do
 
   defp check_containment(%__MODULE__{metadata: meta}) do
     if Map.get(meta, "containment") in @containment_enum, do: :ok, else: :error
-  end
-
-  defp check_api_version(%__MODULE__{api_version: v}) do
-    if v == @api_version_pinned, do: :ok, else: :error
   end
 
   defp check_kind(%__MODULE__{kind: k}) do
@@ -344,10 +428,14 @@ defmodule Fleet.CapProfile do
       else: :error
   end
 
-  defp check_git_ops_denied(%__MODULE__{spec: spec}) do
-    denied = get_in(spec, ["scope", "git_ops_denied"]) || []
-    if "push" in denied, do: :ok, else: :error
-  end
+  # G24-5 (check_git_ops_denied) retiré : Face 2 doctrine (commit 4e0b3b3c)
+  # a tranché que les workers PEUVENT push si le cap-profile l'autorise via
+  # `allowedTools` claude CLI. L'invariant qui exigeait `"push"` dans
+  # `git_ops_denied` est obsolète. Le mécanisme générique catalogue →
+  # disallowedTools claude CLI (via `with_resolved_disallowed_tools/1` +
+  # baseline `_baseline-git-denied.yaml`) est le successeur : interdit
+  # universellement les patterns destructeurs (`push --force`, `reset --hard`,
+  # `--no-verify`, etc.) sans interdire `push` en bloc.
 
   defp check_modop_incompatible(%__MODULE__{spec: spec}) do
     pairs = Map.get(spec, "modop_incompatible", [])
@@ -364,15 +452,12 @@ defmodule Fleet.CapProfile do
     if conflict?, do: :error, else: :ok
   end
 
-  defp check_budget(%__MODULE__{spec: spec}) do
-    budget = Map.get(spec, "budget", %{})
-    usd = Map.get(budget, "maxUsd", 0)
-    sec = Map.get(budget, "maxDurationSec", 0)
-
-    if is_number(usd) and is_number(sec) and usd > 0 and sec > 0,
-      do: :ok,
-      else: :error
-  end
+  # R0.8-brick4 : G24-7 (check_budget) retiré. Pas d'API = pas de budget
+  # (cf. feedback "Pas de budget dans cap-profiles"). Le timeout de réponse
+  # (auparavant mal nommé budget.maxDurationSec) est désormais un default
+  # codé par lifetime_scope dans Fleet.Spawner.Pod.monitor_timeout_ms/1 ;
+  # un override par cap-profile (e.g. `spec.timeouts.response_sec`) est
+  # accepté optionnel mais non-requis.
 
   defp check_metadata_name(%__MODULE__{metadata: meta}) do
     case Map.get(meta, "name") do

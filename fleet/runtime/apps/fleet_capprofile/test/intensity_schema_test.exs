@@ -1,22 +1,12 @@
 defmodule Fleet.CapProfile.IntensitySchemaTest do
   @moduledoc """
-  Lot 0bis — prouve que le canon template `05_data-canon/config/intensity-template.json`
+  Lot 0bis — prouve que le canon template `priv/canon/config/intensity-template.json` (réabsorbé R0.7)
   valide contre `priv/schema/intensity-v1.json`, et qu'une config invalide est rejetée.
   """
   use ExUnit.Case, async: true
 
   @schema_path Path.join([__DIR__, "..", "priv", "schema", "intensity-v1.json"])
-  @canon_path Path.join([
-                __DIR__,
-                "..",
-                "..",
-                "..",
-                "..",
-                "..",
-                "05_data-canon",
-                "config",
-                "intensity-template.json"
-              ])
+  @canon_path Path.join([__DIR__, "..", "priv", "canon", "config", "intensity-template.json"])
 
   setup_all do
     assert File.exists?(@schema_path), "schema absent: #{@schema_path}"

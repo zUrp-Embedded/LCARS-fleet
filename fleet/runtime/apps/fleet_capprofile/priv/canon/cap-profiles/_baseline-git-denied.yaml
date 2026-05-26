@@ -1,0 +1,27 @@
+# Baseline universel des opérations git refusées à TOUS les workers (face 1
+# décision archi git, baseline + override-par-discussion-archi, 2026-05-24).
+#
+# Lu par `Fleet.CapProfile.with_resolved_disallowed_tools/1` et unioné
+# (uniq) avec `spec.scope.git_ops_denied` du cap-profile worker. Pas
+# d'override silencieux : retirer un pattern de cette liste = décision
+# archi explicite (édit de ce fichier).
+#
+# Ce N'EST PAS un cap-profile (pas d'apiVersion/kind/metadata/spec) — c'est
+# un slice catalogue dédié, consommé par le mécanisme générique de
+# résolution `disallowedTools` claude CLI.
+#
+# Politique : patterns universellement destructeurs pour l'historique git
+# partagé (main/master) ou la perte de travail local sans recovery
+# possible. Hors baseline = opérations légitimes selon D-04 (worker peut
+# commit, push simple, rebase feature branch).
+
+git_ops_denied:
+  - push --force            # destructive remote (réécrit historique partagé)
+  - push -f                 # alias short de push --force
+  - push --force-with-lease # idem mais conditionnel (refusé par défaut, override = décision)
+  - reset --hard            # perte travail local sans recovery
+  - branch -D               # delete branch force (perte si non poussée)
+  - rebase main             # réécrit historique main partagé
+  - rebase master           # idem variante main
+  - checkout main           # quitte la branche worker → risque WIP perdu
+  - checkout master         # idem variante main

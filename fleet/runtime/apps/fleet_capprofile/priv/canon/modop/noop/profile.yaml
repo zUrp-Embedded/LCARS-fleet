@@ -1,0 +1,15 @@
+# Modop noop — identité (no-op overlay)
+#
+# Date: 2026-05-26
+# Statut: utilitaire — référence dans un pipeline qui n'a pas besoin
+#         d'overlay modop sur le rôle. CapProfile.compose(role, ["noop"])
+#         retourne le cap-profile du rôle inchangé.
+# Référencé par: pipelines/judge-ping.yaml + tests stub
+#
+# Pourquoi : Fleet.Pipeline schema v1 exige `stages.<name>.profile` non-
+# vide (chaîne minLength 1). Pour les stages qui n'ont PAS besoin
+# d'overlay modop, on référence ce modop vide — deep_merge_last_wins
+# avec map vide = no-op.
+
+# Volontairement vide : tous les champs sont absents → deep merge identity.
+{}

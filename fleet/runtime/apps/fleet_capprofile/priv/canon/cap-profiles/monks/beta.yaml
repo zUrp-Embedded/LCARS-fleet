@@ -1,0 +1,75 @@
+# Memory-X V1 — registry service beta (corpus beyond granulaire)
+# DERIVED FROM: 04_design-notes/ring2/fleet_memory.md §"Registry beta" L218-295
+# Date : 2026-05-19 | Statut : actif | Lot 4 (plan-implementation.md)
+metadata:
+  service: beta
+  description: "Corpus beyond granulaire (10 monks)"
+spec:
+  monks:
+    - name: root-doctrine
+      corpus_paths: ["00_doctrine/beyond-1/doctrine-*.md"]
+      token_budget: 200000
+      persona_hint: "Tu es le gardien des doctrines fondatrices beyond #1 (24 doctrines)."
+      version: v2.5
+
+    - name: root-methodo
+      corpus_paths: ["02_methodologies/"]
+      token_budget: 250000
+      persona_hint: "Tu es le gardien des méthodologies (14 methodologies + anti-patterns-agent)."
+      version: v2.5
+
+    - name: root-misc
+      corpus_paths:
+        - "02_methodologies/conventions/"
+        - "02_methodologies/infra/"
+        - "02_methodologies/foundational/"
+        - "02_methodologies/runtime/"
+        - "audit-doctrinal/from-1/axes-plans/"
+        - "audit-doctrinal/from-1/notes/"
+      token_budget: 200000
+      persona_hint: "Tu es le gardien beyond #1 misc (conventions, infra, foundational, notes, axes)."
+      version: v2.5
+
+    - name: chantier-sp-versions
+      corpus_paths: ["02_methodologies/foundational/chantier-sp-positif/"]
+      token_budget: 200000
+      persona_hint: "Tu es le gardien du chantier SP positif (versions et expérimentations)."
+      version: v2.5
+
+    - name: chantier-sp-banc
+      corpus_paths: ["02_methodologies/foundational/chantier-sp-positif/banc/"]
+      token_budget: 150000
+      persona_hint: "Tu es le gardien du banc d'essai SP positif."
+      version: v2.5
+
+    - name: poc-mandats-misc
+      corpus_paths: ["audit-doctrinal/from-1/mandats-pipeline/"]
+      token_budget: 200000
+      persona_hint: "Tu es le gardien des PoCs + mandats pipeline beyond #1."
+      version: v2.5
+
+    - name: findings-recent
+      corpus_paths: ["audit-doctrinal/from-1/findings/"]
+      token_budget: 200000
+      persona_hint: "Tu es le gardien des findings récents (post-2026-04-01)."
+      version: v2.5
+
+    - name: findings-old
+      corpus_paths: ["audit-doctrinal/from-1/findings/"]
+      token_budget: 200000
+      persona_hint: "Tu es le gardien des findings historiques."
+      version: v2.5
+
+    - name: pre-rev-1
+      corpus_paths:
+        - "audit-doctrinal/from-2/PoC_system_#1_forensics-2026-04-29/"
+      token_budget: 250000
+      persona_hint: "Tu es le gardien forensics PoC system #1 (run #1)."
+      version: v2.5
+
+    - name: pre-rev-2
+      corpus_paths:
+        - "audit-doctrinal/from-2/PoC_system_#2_forensics-2026-05-03/"
+      token_budget: 250000
+      persona_hint: "Tu es le gardien forensics PoC system #2 (run #2)."
+      version: v2.5

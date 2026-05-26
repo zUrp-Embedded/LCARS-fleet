@@ -16,17 +16,7 @@ defmodule Fleet.CapProfile.MonksV25ConformanceTest do
   use ExUnit.Case, async: true
 
   @schema_path Path.join([__DIR__, "..", "priv", "schema", "cap-profile-v2.5.json"])
-  @monks_dir Path.join([
-               __DIR__,
-               "..",
-               "..",
-               "..",
-               "..",
-               "..",
-               "05_data-canon",
-               "cap-profiles",
-               "monks"
-             ])
+  @monks_dir Path.join([__DIR__, "..", "priv", "canon", "cap-profiles", "monks"])
 
   setup_all do
     schema = @schema_path |> File.read!() |> Jason.decode!() |> ExJsonSchema.Schema.resolve()
@@ -68,10 +58,10 @@ defmodule Fleet.CapProfile.MonksV25ConformanceTest do
     end
   end
 
-  test "registries alpha.yaml/beta.yaml : kind MemoryRegistry + monks bien formés" do
+  test "registries alpha.yaml/beta.yaml : monks bien formés (kind retiré R0.8-brick2)" do
     for {file, svc, n} <- [{"alpha.yaml", "alpha", 5}, {"beta.yaml", "beta", 10}] do
       reg = YamlElixir.read_from_file!(Path.join(@monks_dir, file))
-      assert reg["kind"] == "MemoryRegistry"
+      # R0.8-brick2 : `kind: MemoryRegistry` retiré (1 seul kind par dossier).
       assert reg["metadata"]["service"] == svc
       monks = reg["spec"]["monks"]
       assert length(monks) == n, "#{file} : #{n} monks attendus, vu #{length(monks)}"

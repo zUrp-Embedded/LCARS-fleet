@@ -1,0 +1,38 @@
+{
+  "_comment": "Template intensity.json par projet — copier dans <project_root>/intensity.json et adapter. Référencé par design-notes/ring2/intensity-json.md. Schema : schema/intensity-v1.json. 5 niveaux L0-L4 mapping pipeline default.",
+  "_schema": "lcars/intensity-v1",
+  "level": "L3",
+  "declared_at": "2026-05-18",
+  "declared_by": "architect",
+  "criteria": {
+    "stakes_failure": "high",
+    "lifetime": "multi-year",
+    "multi_authors": true,
+    "external_audit_likely": true,
+    "base_for_other_bricks": true
+  },
+  "justification": "Composant base infra critique multi-year, audit externe potentiel post-IPO Anthropic 2026-2027",
+  "pipeline_default": "standard-qa",
+  "_levels_reference": {
+    "L0": {
+      "description": "Utilitaire trivial single-shot",
+      "pipeline_default": "audit-only"
+    },
+    "L1": {
+      "description": "Utilitaire petit lifecycle court",
+      "pipeline_default": "audit-only"
+    },
+    "L2": {
+      "description": "Composant moyen multi-authors potentiels",
+      "pipeline_default": "standard-qa", "_pipeline_variant": "no-gatekeeper (cap-profile modop strips gatekeeper hooks)"
+    },
+    "L3": {
+      "description": "Base infra critique multi-year",
+      "pipeline_default": "standard-qa"
+    },
+    "L4": {
+      "description": "Système critique compliance/audit externe",
+      "pipeline_default": "standard-qa", "_pipeline_variant": "mandatory-rubber-duck (cap-profile modop forces rubber-duck)"
+    }
+  }
+}

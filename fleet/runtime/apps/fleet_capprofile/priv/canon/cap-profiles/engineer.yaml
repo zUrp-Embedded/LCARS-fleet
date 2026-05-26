@@ -1,0 +1,97 @@
+# Cap-profile : engineer
+# Date : 2026-05-18
+# Référencé par : design-notes/ring2/cap-profiles.md (tableau récap §L110)
+# Schema : ../../07_code/runtime-v2/apps/fleet_capprofile/priv/schema/cap-profile-v2.5.json
+kind: CapabilityProfile
+metadata:
+  name: engineer
+  containment: bwrap
+spec:
+  scope:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      - Edit
+      - Write
+      - Bash(git add:*)
+      - Bash(git commit:*)
+      - Bash(git push:*)
+      - Bash(git diff:*)
+      - Bash(git log:*)
+      - Bash(git status:*)
+      - Bash(git checkout:*)
+      - Bash(mix:*)
+      - Bash(elixir:*)
+      - Bash(npm:*)
+      - Bash(node:*)
+      - Bash(cargo:*)
+      - Bash(rustc:*)
+      - Bash(cmake:*)
+      - Bash(make:*)
+      - Bash(pytest:*)
+      - Bash(python:*)
+      - TaskCreate
+      - TaskUpdate
+      - TaskList
+      - TaskGet
+      - TaskStop
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+    # Patterns destructeurs déclarés au baseline universel
+    # (`_baseline-git-denied.yaml`, intangibles) — pas dupliqués ici.
+    git_ops_denied: []
+    outputs: ["/home/commons/engineer/"]
+  knowledge:
+    libs:
+      - methodologie-axiome-inference-vs-mecanisable
+      - methodologie-protocole-design-note
+    skills: []  # modops listés dans modop_set
+    mcpServers: []
+    plugins: []
+    monk_registry: null
+    monk_instance: null
+  invocation:
+    # `pipe` : l'engineer vit avec le pipeline standard-qa (Phase III, étapes
+    # 11.0 → 11.3 + boucles renvoi-au-dev) pour conserver le contexte de SON
+    # implémentation à travers les cycles audit→correction. Spawn unique au
+    # début du mandat ; release par gatekeeper(starfleet) au promote ou
+    # abandon. Cf. doctrine `00_doctrine/moon-shot-ref/#02_methodology/
+    # pipeline-implementation.md` Phase III + `04_design-notes/ring1/
+    # permanent-pods-boot.md` §"Task-level éphémère".
+    #
+    # Les judges (qualifier, reviewer, consultant) restent one-shot — pas de
+    # mémoire d'audit précédent souhaitée pour chaque cycle 11.1/11.2.
+    lifetime_scope: pipe
+    boot_at_start: false
+    # subagent_template retiré (était `implementer`) — G24-11 contraint
+    # subagent_template ⟹ lifetime_scope: one-shot. Avec l'engineer en
+    # `pipe` (pod long-lived ticket-driven, cf. chantier engineer-long-
+    # lived-pipe), il n'y a plus de dispatch subagent one-shot : le pod
+    # vit, get_task/submit_result via tools MCP. Pour le pattern
+    # subagent fire-mode-quick (mandate ultra-court), créer un
+    # cap-profile `engineer-quick.yaml` séparé.
+    subagent_template: null
+    mcp_channels: ["fleet-control.engineer.*", "fleet-forge.engineer"]  # fleet-control: Memory-X + coord ; fleet-forge: routing tickets Gitea
+    host_native: false
+    max_alive_sec: 3600
+    heartbeat_keepalive: false
+    bridge_enabled: false
+    policy: hide
+    rubber_duck_enabled: false
+    long_session_protocol: false
+    output_format: text
+  injects:
+    gitconfig: true
+    forge_signing_allowed: true
+  modop_set:
+    default: [fire-mode]
+    optional: [tdd, subagent-driven, rubber-duck]
+    incompatible: [[fire-mode, long-session-discipline]]
+  project: null

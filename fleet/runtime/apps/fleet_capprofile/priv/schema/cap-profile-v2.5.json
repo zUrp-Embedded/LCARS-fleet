@@ -3,11 +3,8 @@
   "title": "LCARS Capability Profile v2.5",
   "description": "Structural schema for a composed Capability Profile. Semantic invariants (enums, value constraints) are checked by Fleet.CapProfile.validate/1 (G24).",
   "type": "object",
-  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "required": ["kind", "metadata", "spec"],
   "properties": {
-    "apiVersion": {
-      "type": "string"
-    },
     "kind": {
       "type": "string"
     },
@@ -26,7 +23,6 @@
         "knowledge",
         "invocation",
         "injects",
-        "budget",
         "modop_set"
       ],
       "properties": {
@@ -91,18 +87,8 @@
         "injects": {
           "type": "object",
           "properties": {
-            "credentials": { "type": "boolean" },
-            "useRoleCredentials": { "type": "boolean" },
             "gitconfig": { "type": "boolean" },
             "forge_signing_allowed": { "type": "boolean" }
-          }
-        },
-        "budget": {
-          "type": "object",
-          "required": ["maxUsd", "maxDurationSec"],
-          "properties": {
-            "maxUsd": { "type": "number" },
-            "maxDurationSec": { "type": "number" }
           }
         },
         "modop_set": {
@@ -128,7 +114,6 @@
             }
           }
         },
-        "system_user": { "type": ["string", "null"] },
         "project": {
           "type": ["object", "null"],
           "properties": {

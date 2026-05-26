@@ -37,9 +37,6 @@ defmodule Fleet.CapProfileTest do
       invocation:
         lifetime_scope: one-shot
       injects: {}
-      budget:
-        maxUsd: 1.0
-        maxDurationSec: 60
       modop_set:
         default: []
     """
@@ -57,7 +54,6 @@ defmodule Fleet.CapProfileTest do
 
   defp valid_struct do
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "test", "containment" => "bwrap"},
       spec: %{
@@ -75,7 +71,6 @@ defmodule Fleet.CapProfileTest do
         "knowledge" => %{},
         "invocation" => %{"lifetime_scope" => "one-shot"},
         "injects" => %{},
-        "budget" => %{"maxUsd" => 1.0, "maxDurationSec" => 60},
         "modop_set" => %{"default" => []}
       }
     }
@@ -91,7 +86,6 @@ defmodule Fleet.CapProfileTest do
 
       assert {:ok,
               %Fleet.CapProfile{
-                api_version: "lcars/v2.5",
                 kind: "CapabilityProfile"
               }} = Fleet.CapProfile.load("engineer")
     end
@@ -134,7 +128,7 @@ defmodule Fleet.CapProfileTest do
     test "with empty modop_set returns the base profile", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
 
-      assert {:ok, %Fleet.CapProfile{api_version: "lcars/v2.5"}} =
+      assert {:ok, %Fleet.CapProfile{kind: "CapabilityProfile"}} =
                Fleet.CapProfile.compose("engineer", [])
     end
 
@@ -153,12 +147,8 @@ defmodule Fleet.CapProfileTest do
       assert ["tool_search_extra"] = profile.spec["scope"]["disallowedTools"]
     end
 
-    test "rejects modop with reserved key apiVersion", %{tmp_dir: tmp_dir} do
-      write_role(tmp_dir, "engineer", valid_profile_yaml())
-      write_modop(tmp_dir, "evil", "apiVersion: lcars/v3\n")
-
-      assert {:error, :invalid_modop} = Fleet.CapProfile.compose("engineer", ["evil"])
-    end
+    # R0.8-brick3 : test "rejects modop with reserved key apiVersion" retiré
+    # — apiVersion n'est plus une reserved key (le champ n'existe plus).
 
     test "rejects modop overriding metadata.containment", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
@@ -221,12 +211,8 @@ defmodule Fleet.CapProfileTest do
       assert :g24_1 in codes
     end
 
-    test "G24-2 fails when apiVersion is wrong" do
-      profile = %{valid_struct() | api_version: "lcars/v3.0"}
-      assert {:error, codes} = Fleet.CapProfile.validate(profile)
-      assert :g24_2 in codes
-    end
-
+    # R0.8-brick3 : G24-2 (check_api_version) retiré — apiVersion n'existe
+    # plus dans le struct ni dans le schema (versioning par le code v2).
     test "G24-3 fails when kind is wrong" do
       profile = %{valid_struct() | kind: "Pod"}
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
@@ -239,11 +225,11 @@ defmodule Fleet.CapProfileTest do
       assert :g24_4 in codes
     end
 
-    test "G24-5 fails when git_ops_denied does not include push" do
-      profile = put_in(valid_struct().spec["scope"]["git_ops_denied"], ["pull"])
-      assert {:error, codes} = Fleet.CapProfile.validate(profile)
-      assert :g24_5 in codes
-    end
+    # G24-5 retiré : Face 2 doctrine — workers PEUVENT push si cap-profile
+    # autorise via allowedTools claude CLI. L'ancien invariant qui exigeait
+    # `"push"` dans git_ops_denied est obsolète. Le mécanisme baseline
+    # `_baseline-git-denied.yaml` + `with_resolved_disallowed_tools/1`
+    # remplace : interdit les patterns destructeurs sans bloquer push.
 
     test "G24-6 fails when both modops in incompatible pair are active" do
       profile =
@@ -255,17 +241,9 @@ defmodule Fleet.CapProfileTest do
       assert :g24_6 in codes
     end
 
-    test "G24-7 fails when budget.maxUsd is zero" do
-      profile = put_in(valid_struct().spec["budget"]["maxUsd"], 0)
-      assert {:error, codes} = Fleet.CapProfile.validate(profile)
-      assert :g24_7 in codes
-    end
-
-    test "G24-7 fails when budget.maxDurationSec is zero" do
-      profile = put_in(valid_struct().spec["budget"]["maxDurationSec"], 0)
-      assert {:error, codes} = Fleet.CapProfile.validate(profile)
-      assert :g24_7 in codes
-    end
+    # R0.8-brick4 : G24-7 (check_budget) retiré — pas d'API = pas de budget
+    # (cf. feedback "Pas de budget dans cap-profiles"). Timeout de réponse
+    # géré par Pod.monitor_timeout_ms/1 (default par lifetime_scope).
 
     test "G24-8 fails when metadata.name is empty" do
       profile = put_in(valid_struct().metadata["name"], "")
@@ -290,6 +268,155 @@ defmodule Fleet.CapProfileTest do
       profile = put_in(valid_struct().spec["scope"]["disallowedTools"], tools)
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
       assert :g24_9_prefix in codes
+    end
+  end
+
+  # ============================================================
+  # git_ops_denied_patterns/1 + with_resolved_disallowed_tools/1
+  # Mécanisme catalogue→claude CLI (face 1 décision archi git, 2026-05-24)
+  # ============================================================
+
+  describe "git_ops_denied_patterns/1" do
+    test "traduit chaque entrée sémantique en Bash(git X:*)" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "engineer"},
+        spec: %{"scope" => %{"git_ops_denied" => ["push --force", "reset --hard", "rebase main"]}}
+      }
+
+      assert Fleet.CapProfile.git_ops_denied_patterns(profile) == [
+               "Bash(git push --force:*)",
+               "Bash(git reset --hard:*)",
+               "Bash(git rebase main:*)"
+             ]
+    end
+
+    test "retourne [] si git_ops_denied absent" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "x"},
+        spec: %{"scope" => %{}}
+      }
+
+      assert Fleet.CapProfile.git_ops_denied_patterns(profile) == []
+    end
+
+    test "ignore entrées vides ou non-binaires" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "x"},
+        spec: %{"scope" => %{"git_ops_denied" => ["push", "", nil, 42, "reset"]}}
+      }
+
+      assert Fleet.CapProfile.git_ops_denied_patterns(profile) == [
+               "Bash(git push:*)",
+               "Bash(git reset:*)"
+             ]
+    end
+  end
+
+  describe "baseline_git_ops_denied_patterns/0" do
+    test "lit _baseline-git-denied.yaml + traduit en patterns Bash(git X:*)" do
+      patterns = Fleet.CapProfile.baseline_git_ops_denied_patterns()
+
+      assert is_list(patterns)
+      # Patterns intangibles attendus dans le baseline (peuvent évoluer ;
+      # tests assertent un sous-ensemble canonique pour détecter régression
+      # sans casser sur ajout futur).
+      assert "Bash(git push --force:*)" in patterns
+      assert "Bash(git reset --hard:*)" in patterns
+      assert "Bash(git rebase main:*)" in patterns
+    end
+  end
+
+  describe "with_resolved_disallowed_tools/1" do
+    test "fusionne patterns avec disallowedTools existants (ordre préservé, sans doublons)" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "engineer"},
+        spec: %{
+          "scope" => %{
+            "disallowedTools" => ["web_search", "code_execution"],
+            # Pattern worker NON présent dans le baseline universel — assert
+            # qu'il est bien ajouté sans casser le baseline.
+            "git_ops_denied" => ["push some-feature-branch"]
+          }
+        }
+      }
+
+      resolved = Fleet.CapProfile.with_resolved_disallowed_tools(profile)
+      disallowed = get_in(resolved.spec, ["scope", "disallowedTools"])
+
+      # Existants préservés en tête, ordre.
+      assert ["web_search", "code_execution" | _] = disallowed
+      # Baseline universel appliqué.
+      assert "Bash(git push --force:*)" in disallowed
+      assert "Bash(git reset --hard:*)" in disallowed
+      # Profile-spécifique appliqué.
+      assert "Bash(git push some-feature-branch:*)" in disallowed
+    end
+
+    test "baseline appliqué même si profile.scope.git_ops_denied est vide" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "minimal"},
+        spec: %{"scope" => %{"disallowedTools" => [], "git_ops_denied" => []}}
+      }
+
+      resolved = Fleet.CapProfile.with_resolved_disallowed_tools(profile)
+      disallowed = get_in(resolved.spec, ["scope", "disallowedTools"])
+
+      # Le baseline universel est toujours appliqué — protection intangible.
+      assert "Bash(git push --force:*)" in disallowed
+      assert "Bash(git reset --hard:*)" in disallowed
+    end
+
+    test "idempotent — appliquer deux fois donne le même résultat" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "engineer"},
+        spec: %{
+          "scope" => %{
+            "disallowedTools" => ["web_search"],
+            "git_ops_denied" => ["push --force"]
+          }
+        }
+      }
+
+      once = Fleet.CapProfile.with_resolved_disallowed_tools(profile)
+      twice = Fleet.CapProfile.with_resolved_disallowed_tools(once)
+
+      assert once == twice
+    end
+
+    test "git_ops_denied absent → disallowedTools = existants + baseline universel seul" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "x"},
+        spec: %{"scope" => %{"disallowedTools" => ["web_search"]}}
+      }
+
+      resolved = Fleet.CapProfile.with_resolved_disallowed_tools(profile)
+      disallowed = get_in(resolved.spec, ["scope", "disallowedTools"])
+
+      assert ["web_search" | _baseline] = disallowed
+      assert "Bash(git push --force:*)" in disallowed
+    end
+
+    test "git_ops_denied présent, disallowedTools absent → baseline + profile patterns" do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "x"},
+        # `push origin custom` n'est PAS dans le baseline (push --force /
+        # -f / --force-with-lease oui, mais push simple non).
+        spec: %{"scope" => %{"git_ops_denied" => ["push origin custom"]}}
+      }
+
+      resolved = Fleet.CapProfile.with_resolved_disallowed_tools(profile)
+      disallowed = get_in(resolved.spec, ["scope", "disallowedTools"])
+
+      assert "Bash(git push --force:*)" in disallowed
+      assert "Bash(git push origin custom:*)" in disallowed
     end
   end
 
@@ -354,13 +481,10 @@ defmodule Fleet.CapProfileTest do
       tuple({
         string(:alphanumeric, min_length: 1, max_length: 12),
         member_of(~w(bwrap none)),
-        member_of(~w(one-shot pipe run session-user forever)),
-        positive_integer(),
-        positive_integer()
+        member_of(~w(one-shot pipe run session-user forever))
       }),
-      fn {name, containment, lifetime, max_usd_int, max_sec} ->
+      fn {name, containment, lifetime} ->
         %Fleet.CapProfile{
-          api_version: "lcars/v2.5",
           kind: "CapabilityProfile",
           metadata: %{"name" => name, "containment" => containment},
           spec: %{
@@ -378,10 +502,6 @@ defmodule Fleet.CapProfileTest do
             "knowledge" => %{},
             "invocation" => %{"lifetime_scope" => lifetime},
             "injects" => %{},
-            "budget" => %{
-              "maxUsd" => max_usd_int * 1.0,
-              "maxDurationSec" => max_sec
-            },
             "modop_set" => %{"default" => []}
           }
         }
@@ -441,13 +561,9 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  property "G24-2 violation detected when api_version is mutated" do
-    check all(profile <- valid_profile_struct_gen(), max_runs: 30) do
-      mutated = %{profile | api_version: "lcars/v9.9"}
-      assert {:error, codes} = Fleet.CapProfile.validate(mutated)
-      assert :g24_2 in codes
-    end
-  end
+  # R0.8-brick3 : property G24-2 retirée — apiVersion n'est plus dans le
+  # struct, le check `check_api_version` est supprimé (le code v2 release
+  # fait office de versioning, pas un champ embarqué).
 
   property "G24-1 violation detected when containment is unknown" do
     check all(profile <- valid_profile_struct_gen(), max_runs: 30) do
