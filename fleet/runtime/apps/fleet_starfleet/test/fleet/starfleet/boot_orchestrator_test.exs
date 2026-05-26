@@ -41,6 +41,19 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
     assert is_list(failed) and length(failed) == 1
   end
 
+  test "élément malformé (ni :ok ni :error) → boot_partial, PAS boot_complete (finding Vulcan)" do
+    BootOrchestrator.run(boot_permanent_pods: fn -> [{:ok, :pod1}, :garbage] end)
+
+    assert_receive {:"fleet.boot_partial",
+                    %{
+                      "event_type" => "fleet.boot_partial",
+                      "payload" => %{"permanent_pods" => 1, "failed_pods" => failed}
+                    }},
+                   1_000
+
+    assert is_list(failed) and length(failed) == 1
+  end
+
   test "boot raise → broadcast fleet.boot_failed (daemon reste up)" do
     BootOrchestrator.run(boot_permanent_pods: fn -> raise "boom" end)
 

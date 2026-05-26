@@ -80,7 +80,9 @@ defmodule Fleet.Starfleet.BootOrchestrator do
           Enum.split_with(results, fn
             {:ok, _} -> true
             {:error, _} -> false
-            _ -> true
+            # finding Vulcan : un élément malformé (ni :ok ni :error) était compté OK
+            # (`_ -> true`) → faux fleet.boot_complete. Désormais classé en échec.
+            _ -> false
           end)
 
         case errs do

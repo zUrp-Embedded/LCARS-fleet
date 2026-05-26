@@ -50,7 +50,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
   describe "pod_drift event" do
     test "drift_count >= 3 → Cat5 escalade" do
-      :ok = Bus.broadcast("pod_drift", %{"pod_id" => "drifty", "drift_count" => 3}, [])
+      :ok = Bus.broadcast("pod.drift", %{"pod_id" => "drifty", "drift_count" => 3}, [])
 
       wait_drift_monitor_drain()
 
