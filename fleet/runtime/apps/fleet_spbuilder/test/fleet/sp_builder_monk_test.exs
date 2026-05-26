@@ -10,17 +10,17 @@ defmodule Fleet.SPBuilder.MonkTest do
 
   alias Fleet.SPBuilder
 
-  # beyond_#4 root depuis apps/fleet_spbuilder/test/fleet → 6 remontées
-  @b4_root Path.join([__DIR__, "..", "..", "..", "..", "..", ".."])
+  # R0.8-brick1 : root canon in-repo (R0.7 réabsorption), pas path doctrine
+  # 05_data-canon/... (inexistant en standard install).
+  @monks_dir Application.app_dir(:fleet_capprofile, "priv/canon/cap-profiles/monks")
 
   defp monk_cp(instance) do
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "monk-alpha-#{instance}"},
       spec: %{
         "knowledge" => %{
-          "monk_registry" => "05_data-canon/cap-profiles/monks/alpha.yaml",
+          "monk_registry" => "alpha.yaml",
           "monk_instance" => instance
         }
       }
@@ -29,7 +29,6 @@ defmodule Fleet.SPBuilder.MonkTest do
 
   defp plain_cp do
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "engineer"},
       spec: %{"knowledge" => %{"skills" => ["x"]}}
@@ -39,7 +38,7 @@ defmodule Fleet.SPBuilder.MonkTest do
   test "monk canon réel (vision-doctrine) → persona_hint + corpus_paths du registry" do
     assert {:ok, %{persona_hint: ph, corpus_paths: cps}} =
              SPBuilder.resolve_monk_injection(monk_cp("vision-doctrine"),
-               monk_registry_root: @b4_root
+               monk_registry_root: @monks_dir
              )
 
     assert ph =~ "gardien de la doctrine fondatrice"
@@ -50,7 +49,7 @@ defmodule Fleet.SPBuilder.MonkTest do
   test "monk canon réel (archive) → entrée distincte" do
     assert {:ok, %{persona_hint: ph, corpus_paths: [cp]}} =
              SPBuilder.resolve_monk_injection(monk_cp("archive"),
-               monk_registry_root: @b4_root
+               monk_registry_root: @monks_dir
              )
 
     assert ph =~ "archives moon-shot"
@@ -63,7 +62,7 @@ defmodule Fleet.SPBuilder.MonkTest do
 
   test "monk_instance absent du registry → {:error,{:monk_instance_not_found,_}}" do
     assert {:error, {:monk_instance_not_found, "ghost"}} =
-             SPBuilder.resolve_monk_injection(monk_cp("ghost"), monk_registry_root: @b4_root)
+             SPBuilder.resolve_monk_injection(monk_cp("ghost"), monk_registry_root: @monks_dir)
   end
 
   test "registry path illisible → {:error,{:registry_unreadable,_,_}}" do

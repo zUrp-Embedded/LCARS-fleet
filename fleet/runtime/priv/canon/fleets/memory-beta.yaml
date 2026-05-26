@@ -1,4 +1,3 @@
-apiVersion: lcars/v2
 kind: MemoryInstance
 metadata:
   name: beta

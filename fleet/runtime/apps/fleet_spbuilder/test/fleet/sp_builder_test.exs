@@ -50,7 +50,6 @@ defmodule Fleet.SPBuilderTest do
       )
 
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "engineer", "containment" => "bwrap"},
       spec: spec

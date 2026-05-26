@@ -1,4 +1,3 @@
-apiVersion: lcars/v2.5
 kind: CapabilityProfile
 metadata:
   name: archivist
@@ -42,14 +41,8 @@ spec:
       pingIntervalSec: 240
       autoRespawnOnCrash: true
   injects:
-    credentials: true
     gitconfig: false
     githubAuth: false
-  budget:
-    maxUsd: 999.00
-    maxDurationSec: 14400
-    maxUsdPerQuery: 0.20
-    maxQueries: 500
   modop_set: []
   modop_incompatible: []
   lifetime_scope: forever

@@ -12,7 +12,14 @@ defmodule LcarsFleetRuntime.MixProject do
   end
 
   defp deps do
-    []
+    # R0.6 — outillage statique (gap VÉRIFIÉ : deps umbrella vide, aucun lint/type/sécu ;
+    # rien dans le canon ne le justifie). Sert aussi à VÉRIFIER les rapports d'audit de façon
+    # indépendante (Sobelow ↔ holes injection, Dialyzer ↔ @spec, Credo ↔ cohérence).
+    [
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
+      {:sobelow, "~> 0.13", only: [:dev], runtime: false}
+    ]
   end
 
   # Mix release Elixir 1.9+ stdlib pour `lcars-fleet.service` (chantier 16).
@@ -46,7 +53,12 @@ defmodule LcarsFleetRuntime.MixProject do
           fleet_pipeline: :permanent,
           fleet_starfleet: :permanent,
           fleet_coord: :permanent,
-          fleet_api: :permanent
+          fleet_api: :permanent,
+          # M-033 chantier 1 brique 1 : webhook handler dispatch tickets
+          # Gitea (subscribe Bus `gitea.*` → Routing catalogue → lock label
+          # `lcars-dispatched` via ForgeClient → invoke pipeline). OFF par
+          # défaut (LCARS_PILOT_DISPATCHER=true pour activer).
+          fleet_pilot: :permanent
         ],
         steps: [:assemble, :tar]
       ]

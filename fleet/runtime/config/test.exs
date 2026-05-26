@@ -21,3 +21,8 @@ config :fleet_spawner, launch_backend: Fleet.Spawner.LaunchBackend.StubBackend
 config :fleet_starfleet, start_audit_consumer: false
 config :fleet_starfleet, start_boot_orchestrator: false
 config :fleet_spawner, start_publish_consumer: false
+
+# fleet_pilot hermétisme test : AutoDispatcher off par défaut. Subscribe
+# Bus parasite ; tests dédiés (auto_dispatcher_test.exs) démarrent
+# manuellement avec opts isolés (subscribe?: false, name unique).
+config :fleet_pilot, start_dispatcher: false

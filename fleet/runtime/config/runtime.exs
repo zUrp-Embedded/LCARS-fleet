@@ -74,6 +74,74 @@ if config_env() != :test do
     pod_dir_root: System.get_env("LCARS_PODS_ROOT", "/var/lib/lcars/pods")
 
   # ============================================================
+  # U4 — pivot pod RC long-lived (claude --remote-control via tmux)
+  # ============================================================
+  # LCARS_LAUNCH_BACKEND=tmux → bascule sur Fleet.Spawner.LaunchBackend.TmuxBackend
+  # (claude --remote-control dans tmux session lcars-<pod_id>, pool subscription
+  # OAuth préservé, visible Desktop sidebar). Defaults reste PortBackend pour
+  # compat tests/dev. Production : set env var dans /etc/fleet/lcars-fleet.env.
+  if System.get_env("LCARS_LAUNCH_BACKEND") == "tmux" do
+    config :fleet_spawner, :launch_backend, Fleet.Spawner.LaunchBackend.TmuxBackend
+  end
+
+  # LCARS_FLEET_MCP_CHANNEL_URL : endpoint HTTP custom où le bridge.py long-poll
+  # les notifications push channel (forward stdout → claude REPL). Sans cette var,
+  # pod.ex ne propage pas LCARS_FLEET_MCP_CHANNEL_URL au pod → bridge.py reste en
+  # mode tools-only legacy. Avec : push brief activé end-to-end.
+  if url = System.get_env("LCARS_FLEET_MCP_CHANNEL_URL") do
+    config :fleet_spawner, mcp_channel_url: url
+  end
+
+  # ============================================================
+  # fleet_mcp — port HTTP push channel (U2)
+  # ============================================================
+  # Démarre le listener ChannelHTTP (Plug.Cowboy) sur ce port quand set. Le
+  # pod (via bridge.py + LCARS_FLEET_MCP_CHANNEL_URL) long-poll
+  # http://host:<port>/channels/<pod_id>/poll. Côté fleet, fleet_pilot ou
+  # Fleet.Spawner.Pod broadcast via Bus → Fleet.MCP.PushDispatcher enqueue.
+  if port = System.get_env("LCARS_FLEET_MCP_CHANNEL_HTTP_PORT") do
+    config :fleet_mcp, channel_http_port: String.to_integer(port)
+  end
+
+  # ============================================================
+  # fleet_mcp — port HTTP pod-facing (PodTools transport :http +
+  # TaskQueue centrale, R-CORE.comm Ring 4)
+  # ============================================================
+  # Démarre `Fleet.MCP.PodTools` HTTP + `Fleet.MCP.TaskQueue` quand set.
+  # Les pods s'y connectent via le bridge.py stdio → http://127.0.0.1:
+  # <port>/mcp. Sans ce port, les pods n'ont AUCUN tool mcp__fleet__*
+  # (workflow worker impossible).
+  if port = System.get_env("LCARS_FLEET_MCP_POD_FACING_PORT") do
+    config :fleet_mcp, pod_facing_port: String.to_integer(port)
+  end
+
+  # ============================================================
+  # fleet_spawner — mcp_server_spec (config du `.mcp-fleet.json`
+  # écrit dans chaque pod par pod.ex maybe_provision_mcp_config)
+  # ============================================================
+  # Le pod claude REPL démarre le bridge.py via cette spec ; le bridge
+  # forward stdio → HTTP central (LCARS_FLEET_MCP_URL). `LCARS_POD_ID`
+  # est ajouté per-pod par TmuxBackend env (pas dans le spec global).
+  mcp_url = System.get_env("LCARS_FLEET_MCP_URL")
+  bridge_path = System.get_env("LCARS_FLEET_MCP_BRIDGE_PATH")
+
+  if mcp_url && bridge_path do
+    config :fleet_spawner, :mcp_server_spec, %{
+      "command" => "bash",
+      "args" => [
+        "-c",
+        # Log path doit être RW pour le service systemd
+        # (ProtectSystem=strict + ReadWritePaths du unit file).
+        # /var/lib/lcars est dans ReadWritePaths.
+        "exec python3 #{bridge_path} 2>>/var/lib/lcars/fleet_mcp_bridge.log"
+      ],
+      "env" => %{
+        "LCARS_FLEET_MCP_URL" => mcp_url
+      }
+    }
+  end
+
+  # ============================================================
   # fleet_pipeline (ch12) — racine catalogue pipelines YAML
   # ============================================================
   if path = System.get_env("LCARS_PIPELINES_ROOT") do
@@ -115,5 +183,47 @@ if config_env() != :test do
 
   if path = System.get_env("LCARS_CONFIG_REPO") do
     config :fleet_api, git_repo_path: path
+  end
+
+  # ============================================================
+  # fleet_pilot (M-033) — auto-dispatch tickets Gitea
+  # ============================================================
+  # AutoDispatcher subscribe Bus `gitea.*` au boot. Lock idempotent via
+  # label `lcars-dispatched` posé côté forge avant invoke pipeline.
+  # OFF par défaut pour permettre rollout progressif via env var ;
+  # passer à true via LCARS_PILOT_DISPATCHER=true quand catalogue
+  # forge-routing.yaml est peuplé.
+  config :fleet_pilot,
+    start_dispatcher: System.get_env("LCARS_PILOT_DISPATCHER") == "true"
+
+  if path = System.get_env("LCARS_PILOT_ROUTING_PATH") do
+    config :fleet_pilot, forge_routing_path: path
+  end
+
+  # Poller catch-up : repo à scanner (`"owner/name"`) + interval ms.
+  # Sans LCARS_PILOT_POLL_REPO, le Poller n'est pas démarré (seul
+  # l'AutoDispatcher webhook-driven tourne).
+  if repo = System.get_env("LCARS_PILOT_POLL_REPO") do
+    config :fleet_pilot, poll_repo: repo
+  end
+
+  if interval = System.get_env("LCARS_PILOT_POLL_INTERVAL_MS") do
+    config :fleet_pilot, poll_interval_ms: String.to_integer(interval)
+  end
+
+  # Forge config — résolue par Fleet.Pilot.ForgeClient.resolve_config/1
+  # à l'appel (merge avec opts d'appel). base_url obligatoire ;
+  # token soit inline (FORGE_TOKEN) soit via fichier (FORGE_TOKEN_FILE,
+  # défaut ~/.gitea_token convention v1.5).
+  forge_opts =
+    [
+      base_url: System.get_env("FORGE_BASE_URL"),
+      token: System.get_env("FORGE_TOKEN"),
+      token_file: System.get_env("FORGE_TOKEN_FILE")
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+  if forge_opts != [] do
+    config :fleet_pilot, :forge, forge_opts
   end
 end

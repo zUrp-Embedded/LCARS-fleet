@@ -114,7 +114,8 @@ defmodule Fleet.TaskMonitorTest do
     test "event inconnu → no-op (pas de fichier parasite)", %{tmp_dir: dir} do
       {:ok, pid} = start_monitor(dir, :noop)
       send(pid, {:totally_unknown, %{"payload" => %{}}})
-      Process.sleep(30)
+      # Mi14 : :sys.get_state = barrière (l'event inconnu est traité avant, FIFO).
+      _ = :sys.get_state(pid)
       files = Path.wildcard(Path.join([dir, "fleet-monitor-v1", "*.json"]))
       # Seul le heartbeat doit exister.
       assert files == [Path.join([dir, "fleet-monitor-v1", "#{@pfx}heartbeat.json"])]
