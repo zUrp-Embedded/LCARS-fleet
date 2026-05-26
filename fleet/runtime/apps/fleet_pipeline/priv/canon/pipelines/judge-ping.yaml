@@ -1,0 +1,31 @@
+# Pipeline V2 — judge-ping (smoke-test e2e ticket-driven)
+#
+# Date: 2026-05-26
+# Statut: POC — pipeline minimal pour valider la chaîne complète ticket
+#         Gitea → fleet_pilot dispatcher → Pipeline.Executor → StageRunner
+#         → spawn pod judge → claude REPL → MCP get_task / submit_result
+#         → pod.completed → pipeline.completed.
+# Référencé par: /var/lib/lcars/config/forge-routing.yaml (route
+#                assignee:Qualifier → judge-ping)
+# Consommé par: Fleet.Pipeline.Loader → Executor.
+#
+# Format : flat v1 (`name/version/stages` top-level). L'enveloppe v2.5
+# `kind/metadata/spec/...` du canon doctrine n'est PAS consommée par
+# Executor (cf. executor.ex L93 `pipeline["stages"]` direct, pas de
+# de-envelope). Trou doctrine↔code à reload séparément.
+
+name: judge-ping
+version: 1
+
+stages:
+  audit:
+    role: qualifier
+    # `noop` modop = identité (cf. apps/fleet_capprofile/priv/canon/
+    # modop/noop/profile.yaml). Le schema v1 exige `profile` non-vide
+    # min 1 ; on référence noop quand on n'a pas besoin d'overlay sur
+    # le rôle de base. SpawnerBackend.Default.spawn_stage_pod compose
+    # role="qualifier" + modops=["noop"] = qualifier.yaml inchangé.
+    profile: noop
+    # Pas de needs : stage racine unique.
+    # Pas de gate : Gates.dispatch retourne :pass par défaut.
+    timeout_sec: 600

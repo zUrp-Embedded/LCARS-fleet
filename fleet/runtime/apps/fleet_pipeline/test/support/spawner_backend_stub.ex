@@ -28,9 +28,9 @@ defmodule Fleet.Pipeline.SpawnerBackendStub do
         outputs = Application.get_env(:fleet_pipeline, :stub_outputs, %{})[stage] || %{}
 
         spawn(fn ->
-          # broadcast async pour simuler le pod EXTRACT phase post-spawn
-          Process.sleep(5)
-
+          # broadcast async post-spawn (simule l'EXTRACT du pod). Mi14 : pas de sleep — l'Executor
+          # (GenServer) sérialise : il finit do_run_stage avant de traiter ce stage.completed
+          # (FIFO mailbox). Ordering garanti sans délai arbitraire.
           Fleet.EventRouter.Bus.broadcast(
             "pipeline.stage.completed",
             %{

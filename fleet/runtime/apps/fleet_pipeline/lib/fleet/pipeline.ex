@@ -47,21 +47,28 @@ defmodule Fleet.Pipeline do
           {:ok, pipeline_id :: String.t()} | {:error, term()}
   def start_pipeline(pipeline_name, mandate_context, opts \\ [])
       when is_binary(pipeline_name) and is_map(mandate_context) do
-    pipeline_id = Keyword.get(opts, :pipeline_id, generate_pipeline_id())
+    # Mi3 : un pipeline DOIT porter un ticket_id (traçabilité) — plus de pipeline anonyme.
+    case mandate_context[:ticket_id] do
+      ticket_id when is_binary(ticket_id) and ticket_id != "" ->
+        pipeline_id = Keyword.get(opts, :pipeline_id, generate_pipeline_id())
 
-    spec =
-      {Executor,
-       [
-         pipeline_id: pipeline_id,
-         pipeline_name: pipeline_name,
-         mandate_context: mandate_context
-       ]}
+        spec =
+          {Executor,
+           [
+             pipeline_id: pipeline_id,
+             pipeline_name: pipeline_name,
+             mandate_context: mandate_context
+           ]}
 
-    case DynamicSupervisor.start_child(Fleet.Pipeline.ExecutorSupervisor, spec) do
-      {:ok, _pid} -> {:ok, pipeline_id}
-      {:ok, _pid, _info} -> {:ok, pipeline_id}
-      {:error, {:already_started, _pid}} -> {:error, :already_started}
-      {:error, reason} -> {:error, reason}
+        case DynamicSupervisor.start_child(Fleet.Pipeline.ExecutorSupervisor, spec) do
+          {:ok, _pid} -> {:ok, pipeline_id}
+          {:ok, _pid, _info} -> {:ok, pipeline_id}
+          {:error, {:already_started, _pid}} -> {:error, :already_started}
+          {:error, reason} -> {:error, reason}
+        end
+
+      _ ->
+        {:error, :ticket_id_required}
     end
   end
 

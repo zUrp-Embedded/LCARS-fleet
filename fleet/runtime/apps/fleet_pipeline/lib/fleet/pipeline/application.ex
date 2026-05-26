@@ -35,6 +35,11 @@ defmodule Fleet.Pipeline.Application do
   def start(_type, _args) do
     children = [
       {Registry, keys: :unique, name: Fleet.Pipeline.Registry},
+      # PodRegistry — book-keeping {pipeline_id, role} → pod_id pour les
+      # pods pipe-scoped (engineer long-lived). Démarré avant
+      # ExecutorSupervisor pour qu'un Executor naissant puisse l'interroger
+      # via StageRunner.
+      Fleet.Pipeline.PodRegistry,
       {DynamicSupervisor, strategy: :one_for_one, name: Fleet.Pipeline.ExecutorSupervisor}
     ]
 

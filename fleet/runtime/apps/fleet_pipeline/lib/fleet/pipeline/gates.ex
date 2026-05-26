@@ -21,6 +21,13 @@ defmodule Fleet.Pipeline.Gates do
       # => true
   """
 
+  @behaviour Fleet.Pipeline.Gate
+
+  # Mi4 : Gates EST l'implémentation MVP du behaviour Fleet.Pipeline.Gate (hard/soft/terminal).
+  # evaluate/3 = point d'entrée du contrat, délègue au dispatch pattern-matché ci-dessous.
+  @impl Fleet.Pipeline.Gate
+  def evaluate(stage, outputs, ctx), do: dispatch(stage, outputs, ctx)
+
   @spec dispatch(stage :: map(), outputs :: map(), ctx :: map()) ::
           :pass | {:fail, String.t()} | :retry
   def dispatch(%{"gate" => nil}, _outputs, _ctx), do: :pass

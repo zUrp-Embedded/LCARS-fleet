@@ -25,6 +25,7 @@ defmodule Fleet.Pipeline.Toposort do
   @spec sort(stages()) :: [stage_name()]
   def sort(stages) when is_map(stages) do
     nodes = Map.keys(stages)
+    validate_deps!(stages, nodes)
     edges = build_edges(stages)
     in_degree = compute_in_degree(nodes, edges)
 
@@ -35,6 +36,30 @@ defmodule Fleet.Pipeline.Toposort do
     end
 
     sorted
+  end
+
+  # finding Vulcan : un `needs` vers un stage INEXISTANT crée une arête depuis un nœud
+  # absent → son in_degree ne retombe jamais à 0 → diagnostiqué (à tort) comme un cycle.
+  # On le détecte AVANT et on raise un message DISTINCT (debug non trompeur).
+  defp validate_deps!(stages, nodes) do
+    node_set = MapSet.new(nodes)
+
+    missing =
+      Enum.flat_map(stages, fn {stage_name, spec} ->
+        (Map.get(spec, "needs") || [])
+        |> Enum.reject(&MapSet.member?(node_set, &1))
+        |> Enum.map(&{stage_name, &1})
+      end)
+
+    case missing do
+      [] ->
+        :ok
+
+      _ ->
+        details = Enum.map_join(missing, ", ", fn {s, dep} -> "#{s} needs #{dep}" end)
+
+        raise "Fleet.Pipeline.Toposort: dépendance(s) `needs` vers stage(s) inexistant(s): #{details}"
+    end
   end
 
   @doc """

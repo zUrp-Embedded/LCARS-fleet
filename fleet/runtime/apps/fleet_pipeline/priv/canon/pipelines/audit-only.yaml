@@ -1,0 +1,69 @@
+# Pipeline V2 — audit-only rev2 Loader-compatible
+#
+# Date: 2026-05-18 (rev1) — 2026-05-18 rev2 post-validation Lot 5 item 17
+# Statut: actif — pipeline canonique V2 compatible Fleet.Pipeline.Loader chantier 12 PROMOTED
+# Dérivé de: design-notes/ring2/pipelines.md (audit-only existant) + format Loader chantier 12
+# Référencé par: 06_modops/docs/cascade-mix-v2-rationale.md
+# Consommé par: Fleet.Pipeline.Loader (chantier 12 PROMOTED)
+
+kind: Pipeline
+metadata:
+  name: audit-only
+  description: "Audit indépendant — pas de code généré. Consultant fire-mode + escalade gatekeeper si non-mécanique."
+  applicable_intensity: [L0, L1, L2, L3, L4]
+  applicable_regime: [R1, R2]
+
+spec:
+  stages:
+
+    # --- Stage 1: audit (consultant fire-mode) ---
+    audit:
+      role: consultant
+      profile: consultant.yaml  # cap-profile.modop_set inclut fire-mode + rubber-duck
+      needs: []  # racine DAG
+      inputs:
+        - ticket.body
+        - audit_target  # files/repos à auditer (path explicit dans ticket.body)
+      outputs:
+        - audits/consultant-{date}.json
+      gate:
+        type: terminal
+        rules:
+          - "audit_doc_exists AND audit_doc_non_empty"
+        fallback_invoke_gatekeeper: true  # si severity_max == critical, gatekeeper décide
+        on_blocking_severity: critical
+      timeout_sec: 1800
+
+    # --- Stage 2 (conditionnel): gatekeeper (~10% inférence) ---
+    gatekeeper-decision:
+      role: gatekeeper
+      profile: gatekeeper.yaml  # cap-profile pipe-scoped chantier 17 PROMOTED
+      needs: [audit]
+      condition: "audit.verdict in [partial, fail] OR audit.severity_max in [critical, important]"
+      inputs:
+        - audits/consultant-{date}.json
+      outputs:
+        - audits/gatekeeper-{date}.json
+      gate:
+        type: soft  # LLM one-shot (cohérent ~10% inférence chantier 17 PROMOTED)
+        max_retries: 1
+      decisions: [proceed, revision, abort, escalate-user]
+      timeout_sec: 600
+
+  on_failure:
+    notify_role: starfleet
+    log_path: audits/pipeline-failure-{date}.json
+    cleanup: false
+
+# Metadata cycle
+cycle:
+  regime_default: R1  # audit = data déclarative
+  score_target: 4/4
+  profile_preuve: CONFORMANCE
+
+# Sélection pipeline
+selection_priority:
+  - flag_pipeline_explicit
+  - ticket_body_mandate
+  - intensity_json_pipeline_default
+  - default

@@ -80,6 +80,13 @@ defmodule Fleet.Pipeline.ExecutorTest do
     assert payload["outputs"]["stage_c"] == %{"c_out" => 3}
   end
 
+  test "Mi3 : start_pipeline sans ticket_id (ou vide) → {:error, :ticket_id_required}" do
+    assert {:error, :ticket_id_required} = Pipeline.start_pipeline("test_pipeline", %{})
+
+    assert {:error, :ticket_id_required} =
+             Pipeline.start_pipeline("test_pipeline", %{ticket_id: ""})
+  end
+
   test "spawn_stage_pod failure → pipeline.failed broadcast" do
     Application.put_env(:fleet_pipeline, :stub_failure, true)
 

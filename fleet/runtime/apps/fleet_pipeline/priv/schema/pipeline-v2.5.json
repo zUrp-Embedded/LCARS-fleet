@@ -1,13 +1,12 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:lcars:pipeline-v2.5",
-  "title": "LCARS Pipeline v2.5 (enveloppe apiVersion/kind/metadata/spec)",
-  "description": "Structural schema DÉRIVÉ DU CANON RÉEL 06_modops/pipelines/{standard-qa,audit-only}.yaml (structure complète vérifiée, pas inférée). GO-7: date 2026-05-19, statut actif, Lot 6. ADDITIF : pipeline-v1.json (flat chantier-12) inchangé ; Loader détecte apiVersion -> ce schema. Structural-only : enveloppe + role/profile obligatoires + type gate enum ; champs sémantiques gate/stage optionnels validés en forme, interprétés runtime.",
+  "title": "LCARS Pipeline v2.5 (enveloppe kind/metadata/spec)",
+  "description": "Structural schema DÉRIVÉ DU CANON RÉEL 06_modops/pipelines/{standard-qa,audit-only}.yaml. R0.8-brick3 : apiVersion retiré (versioning par le code v2 release). Loader détecte enveloppe v2.5 par présence `spec` top-level vs flat v1 `stages`.",
   "type": "object",
-  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "required": ["kind", "metadata", "spec"],
   "additionalProperties": false,
   "properties": {
-    "apiVersion": {"type": "string", "pattern": "^lcars/v2\\.5$"},
     "kind": {"const": "Pipeline"},
     "metadata": {
       "type": "object",
@@ -87,6 +86,23 @@
                       }
                     }
                   ]
+                },
+                "post_extract": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "git": {
+                      "type": "object",
+                      "required": ["repo_url", "branch"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "repo_url": {"type": "string", "minLength": 1},
+                        "branch": {"type": "string", "minLength": 1},
+                        "push": {"type": "boolean"},
+                        "add_paths": {"type": "array", "items": {"type": "string"}}
+                      }
+                    }
+                  }
                 }
               }
             }
