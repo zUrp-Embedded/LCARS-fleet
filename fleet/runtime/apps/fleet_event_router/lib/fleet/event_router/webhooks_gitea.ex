@@ -43,7 +43,10 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     case verify_hmac(conn) do
       :ok ->
         body = conn.body_params || %{}
-        event_type = "gitea." <> (body["action"] || "push")
+        # M20 : ne pas défaulter aveuglément sur "push". Préférer l'action (routing
+        # events.yaml gitea.opened/closed), sinon l'event authoritatif (header X-Gitea-Event),
+        # sinon "unknown" — un event actionless non-push n'est plus mislabelé "push".
+        event_type = "gitea." <> (body["action"] || gitea_event_header(conn) || "unknown")
         ticket_id = extract_ticket(body)
 
         Fleet.EventRouter.Bus.broadcast(event_type, body, ticket_id: ticket_id)
@@ -108,6 +111,12 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     :crypto.mac(:hmac, :sha256, secret, body) |> Base.encode16(case: :lower)
   end
 
+  defp gitea_event_header(conn) do
+    conn |> get_req_header("x-gitea-event") |> List.first()
+  end
+
+  # M21 : extraire le ticket des issues ET des pull requests (pas seulement issue.id).
   defp extract_ticket(%{"issue" => %{"id" => id}}), do: "fleet/lcars##{id}"
+  defp extract_ticket(%{"pull_request" => %{"id" => id}}), do: "fleet/lcars##{id}"
   defp extract_ticket(_), do: nil
 end

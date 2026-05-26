@@ -9,6 +9,10 @@ events:
     - Fleet.Starfleet.DriftHandler
   pod.drift:
     - Fleet.Starfleet.EscalateHandler
+  # finding Vulcan S7 — émis par fleet_credentials OAuthRefresher sur refresh-failed permanent.
+  # Consommé par Fleet.Starfleet.DriftMonitor (subscribe Bus) → Cat5Escalator.
+  oauth.refresh.failed:
+    - Fleet.Starfleet.DriftMonitor
   permission_relay_request:
     - Fleet.Api.RelayHandler
   audit.verdict.gatekeeper:
@@ -44,4 +48,9 @@ events:
   pod.failed:
     - Fleet.Starfleet.AuditConsumer
   pod.terminated:
+    - Fleet.Starfleet.AuditConsumer
+  # R-CORE.comm brick 2.1 — émis par fleet_mcp (central) sur submit_result : un pod a soumis son
+  # résultat via MCP. Porte {pod_id, payload}. pod.ex (Ring 1) y souscrit (via Bus Ring 0, pas
+  # d'appel direct Ring 1→Ring 4) pour déclencher sa complétion (trigger event, plus result.md).
+  pod.result_submitted:
     - Fleet.Starfleet.AuditConsumer

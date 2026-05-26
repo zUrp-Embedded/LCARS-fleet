@@ -44,6 +44,38 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert event["payload"]["action"] == "opened"
     end
 
+    test "M20 : sans action, event_type via header X-Gitea-Event (pas défaut 'push')", %{
+      secret: secret
+    } do
+      body = %{"ref" => "refs/heads/main"}
+
+      conn =
+        post_with_sig(body, secret)
+        |> put_req_header("x-gitea-event", "push")
+        |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 200
+      assert_receive {_atom, %{"event_type" => "gitea.push"}}, 500
+    end
+
+    test "M20 : sans action ni header → gitea.unknown (pas mislabel 'push')", %{secret: secret} do
+      body = %{"ref" => "refs/heads/main"}
+      conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 200
+      assert_receive {_atom, %{"event_type" => "gitea.unknown"}}, 500
+    end
+
+    test "M21 : ticket extrait d'une pull request (pas seulement issue)", %{secret: secret} do
+      body = %{"action" => "opened", "pull_request" => %{"id" => 99}}
+      conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 200
+
+      assert_receive {_atom, %{"event_type" => "gitea.opened", "ticket_id" => "fleet/lcars#99"}},
+                     500
+    end
+
     test "HMAC manquante → 401", %{secret: _secret} do
       body = Jason.encode!(%{"action" => "opened"})
 
