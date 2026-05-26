@@ -16,7 +16,6 @@ defmodule Fleet.ClaudeBridge.SPInjectionTest do
       )
 
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "engineer"},
       spec: %{"scope" => scope}
@@ -69,7 +68,6 @@ defmodule Fleet.ClaudeBridge.SPInjectionTest do
 
     test "scope.allowedTools manquant → CSV vide" do
       cp = %Fleet.CapProfile{
-        api_version: "lcars/v2.5",
         kind: "CapabilityProfile",
         metadata: %{"name" => "x"},
         spec: %{"scope" => %{"disallowedTools" => ["x"]}}
@@ -82,7 +80,6 @@ defmodule Fleet.ClaudeBridge.SPInjectionTest do
 
     test "spec.scope manquant → CSV vides côté allowed et disallowed" do
       cp = %Fleet.CapProfile{
-        api_version: "lcars/v2.5",
         kind: "CapabilityProfile",
         metadata: %{"name" => "x"},
         spec: %{}
@@ -94,41 +91,16 @@ defmodule Fleet.ClaudeBridge.SPInjectionTest do
     end
   end
 
-  describe "build_flags/2 — budget" do
-    test "default \"1.0\" si :budget_usd absent" do
-      flags = SPInjection.build_flags(profile(), sp_path: "/tmp/sp.md")
-      assert "--max-budget-usd" in flags
-      assert "1.0" in flags
-    end
-
-    test "accept number → cast string" do
-      flags = SPInjection.build_flags(profile(), sp_path: "/tmp/sp.md", budget_usd: 2.5)
-      assert "2.5" in flags
-    end
-
-    test "accept string tel quel" do
-      flags = SPInjection.build_flags(profile(), sp_path: "/tmp/sp.md", budget_usd: "0.25")
-      assert "0.25" in flags
-    end
-
-    test "raise ArgumentError sur type invalide (atom, list, etc.)" do
-      assert_raise ArgumentError, ~r/budget_usd doit être number\|binary/, fn ->
-        SPInjection.build_flags(profile(), sp_path: "/tmp/sp.md", budget_usd: :infinite)
-      end
-
-      assert_raise ArgumentError, ~r/budget_usd doit être number\|binary/, fn ->
-        SPInjection.build_flags(profile(), sp_path: "/tmp/sp.md", budget_usd: [1, 2])
-      end
-    end
-  end
+  # R0.8-brick4 : describe "build_flags/2 — budget" retiré entièrement.
+  # `:budget_usd` n'est plus une opt, `--max-budget-usd` n'est plus émis
+  # (pas d'API = pas de budget). Le timeout de réponse est côté Pod.
 
   describe "build_flags/2 — ordre des flags" do
-    test "sequence cohérente : output-format, verbose, sp, brief, allowed, disallowed, budget" do
+    test "sequence cohérente : output-format, verbose, sp, brief, allowed, disallowed" do
       flags =
         SPInjection.build_flags(profile(),
           sp_path: "/tmp/sp.md",
-          brief_path: "/tmp/brief.md",
-          budget_usd: 1.0
+          brief_path: "/tmp/brief.md"
         )
 
       assert flags == [
@@ -142,9 +114,7 @@ defmodule Fleet.ClaudeBridge.SPInjectionTest do
                "--allowedTools",
                "Read,Glob",
                "--disallowedTools",
-               "web_search",
-               "--max-budget-usd",
-               "1.0"
+               "web_search"
              ]
     end
   end

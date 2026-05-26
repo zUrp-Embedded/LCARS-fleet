@@ -21,16 +21,17 @@ defmodule Fleet.ClaudeBridge.SPInjection do
     * `opts` :
       * `:sp_path` (obligatoire) — path absolu `system-prompt.md` (N2)
       * `:brief_path` (optionnel) — path absolu `brief.md` (N2bis)
-      * `:budget_usd` (optionnel) — string ou number
 
   ## Returns
 
   Liste de flags string (ex `["--system-prompt-file", "/path/sp.md", ...]`).
 
+  R0.8-brick4 : `:budget_usd` retiré, `--max-budget-usd` n'est plus émis
+  (pas d'API = pas de budget USD).
+
   ## Examples
 
       iex> profile = %Fleet.CapProfile{
-      ...>   api_version: "lcars/v2.5",
       ...>   kind: "CapabilityProfile",
       ...>   metadata: %{"name" => "engineer"},
       ...>   spec: %{
@@ -41,7 +42,7 @@ defmodule Fleet.ClaudeBridge.SPInjection do
       ...>   }
       ...> }
       iex> flags = Fleet.ClaudeBridge.SPInjection.build_flags(profile,
-      ...>   sp_path: "/tmp/sp.md", brief_path: "/tmp/brief.md", budget_usd: 1.0)
+      ...>   sp_path: "/tmp/sp.md", brief_path: "/tmp/brief.md")
       iex> "--system-prompt-file" in flags
       true
       iex> "/tmp/sp.md" in flags
@@ -53,7 +54,6 @@ defmodule Fleet.ClaudeBridge.SPInjection do
   def build_flags(%Fleet.CapProfile{} = cap_profile, opts) when is_list(opts) do
     sp_path = Keyword.fetch!(opts, :sp_path)
     brief_path = Keyword.get(opts, :brief_path)
-    budget_usd = opts |> Keyword.get(:budget_usd, "1.0") |> validate_budget!()
 
     allowed = get_in(cap_profile.spec, ["scope", "allowedTools"]) || []
     disallowed = get_in(cap_profile.spec, ["scope", "disallowedTools"]) || []
@@ -69,7 +69,6 @@ defmodule Fleet.ClaudeBridge.SPInjection do
     base
     |> maybe_append_brief(brief_path)
     |> append_tools_lists(allowed, disallowed)
-    |> Kernel.++(["--max-budget-usd", budget_usd])
   end
 
   @doc """
@@ -119,9 +118,4 @@ defmodule Fleet.ClaudeBridge.SPInjection do
     |> Kernel.++(["--allowedTools", Enum.join(allowed, ",")])
     |> Kernel.++(["--disallowedTools", Enum.join(disallowed, ",")])
   end
-
-  defp validate_budget!(v) when is_number(v) or is_binary(v), do: to_string(v)
-
-  defp validate_budget!(v),
-    do: raise(ArgumentError, "budget_usd doit être number|binary, reçu: #{inspect(v)}")
 end
