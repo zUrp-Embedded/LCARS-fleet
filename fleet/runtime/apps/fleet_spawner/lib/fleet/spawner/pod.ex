@@ -44,7 +44,6 @@ defmodule Fleet.Spawner.Pod do
 
   require Logger
 
-  alias Fleet.Credentials
   alias Fleet.EventRouter.Bus
   alias Fleet.SPBuilder
 
@@ -474,21 +473,24 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp do_inject(state) do
-    role = Map.get(state.cap_profile.metadata, "name", "engineer")
+    # adr-f : plus de resolve_env OAuth (coffre/RT-env déprécié). Le pod
+    # s'authentifie via le claudeDir de l'humain, bindé RW par bwrap_launch.sh
+    # (env CLAUDE_DIR → ~/.claude, refresh natif Anthropic). La résolution
+    # per-humain vient de la registration (DN onboarding/catalogue déférée,
+    # adr-e) ; minimal ici = config `:fleet_spawner, :claude_dir`.
+    env_vars = %{"CLAUDE_DIR" => claude_dir()}
 
-    case Credentials.resolve_env(role, state.cap_profile) do
-      {:ok, env_vars} ->
-        new_state =
-          state
-          |> Map.put(:phase, :launching)
-          |> Map.put(:env_vars, env_vars)
-          |> add_condition(:context_injected)
+    new_state =
+      state
+      |> Map.put(:phase, :launching)
+      |> Map.put(:env_vars, env_vars)
+      |> add_condition(:context_injected)
 
-        {:noreply, new_state, {:continue, :launch}}
+    {:noreply, new_state, {:continue, :launch}}
+  end
 
-      {:error, reason} ->
-        transition_failed(state, {:credentials_resolve_failed, reason})
-    end
+  defp claude_dir do
+    Application.get_env(:fleet_spawner, :claude_dir, "/home/starfleet/.claude")
   end
 
   defp do_launch(state) do

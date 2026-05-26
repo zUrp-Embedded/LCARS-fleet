@@ -106,7 +106,9 @@ defmodule Fleet.Spawner.PodTest do
       assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
 
       assert_receive {:launch_called, _args, env}, 2_000
-      assert env["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] == "rt-stub"
+      # adr-f : plus d'OAuth env injecté ; le pod reçoit CLAUDE_DIR (claudeDir
+      # humain) que bwrap_launch.sh bind en ~/.claude.
+      assert env["CLAUDE_DIR"] =~ ".claude"
 
       # Barrière : pod en :monitoring ⇒ do_monitor a tourné ⇒ subscribed au Bus.
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
