@@ -122,40 +122,24 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
   defmodule BindCredentials do
     @moduledoc """
-    Phase 4 — BIND credentials role-scopés. Délègue à
-    `Fleet.Credentials.resolve_env/2` (chantier 3 PROMOTED). ADR-C "5 zéros" :
-    tokens jamais en clair dans pod_dir, montés bwrap RO (phase LAUNCH).
+    Phase 4 — creds via **claudeDir natif bind** (adr-f). Plus d'injection
+    d'env OAuth : le claudeDir du compte de l'humain est monté RW par
+    `bwrap_launch.sh` en `~/.claude` (CLAUDE_DIR), refresh délégué au lockfile
+    cross-process natif Anthropic. Le path CLAUDE_DIR est résolu par
+    `Fleet.Spawner` depuis la registration de l'humain (DN onboarding/catalogue
+    déférée, adr-e). Cette phase ne produit donc aucun env à injecter.
     """
-    import Fleet.ProjectBootstrap.CapAccess, only: [cap: 3]
 
     @doc """
-    `Fleet.Credentials.resolve_env/2` (canon chantier 3) =
-    `(role :: String.t(), %Fleet.CapProfile{}) -> {:ok, env_map} | {:error, _}`
-    où `env_map :: %{String.t() => String.t()}` (variables OAuth, **pas**
-    des paths : bwrap LAUNCH injecte ces env, ADR-C "5 zéros" — tokens
-    jamais en clair dans pod_dir). Le pattern `%Fleet.CapProfile{}` rend le
-    type concret (le checker 1.18 exigeait mieux que `dynamic()`) et fait
-    office de garde défensive (struct invalide → erreur typée, pas crash).
+    Retourne un env vide : aucune variable OAuth injectée (adr-f — le coffre
+    `Fleet.Credentials` et le chemin RT-env sont dépréciés). Les creds vivent
+    dans le claudeDir bindé par bwrap. Le pattern `%Fleet.CapProfile{}` garde
+    le contrat (struct invalide → erreur typée).
     """
     @spec bind_credentials(Path.t(), Fleet.CapProfile.t()) ::
             {:ok, %{String.t() => String.t()}} | {:error, term()}
-    def bind_credentials(_pod_dir, %Fleet.CapProfile{} = cap_profile) do
-      # `function_exported?/3` est false si le module n'est pas *chargé*
-      # (≠ indisponible) — `Code.ensure_loaded?/1` force le chargement.
-      if Code.ensure_loaded?(Fleet.Credentials) and
-           function_exported?(Fleet.Credentials, :resolve_env, 2) do
-        role =
-          cap(cap_profile, [:metadata], %{})["name"] ||
-            cap(cap_profile, [:metadata], %{})[:name] || "worker"
-
-        case Fleet.Credentials.resolve_env(role, cap_profile) do
-          {:ok, env} when is_map(env) -> {:ok, env}
-          {:error, r} -> {:error, {:credentials_resolve_failed, r}}
-          other -> {:error, {:credentials_resolve_failed, {:unexpected, other}}}
-        end
-      else
-        {:error, {:credentials_resolve_failed, :fleet_credentials_unavailable}}
-      end
+    def bind_credentials(_pod_dir, %Fleet.CapProfile{}) do
+      {:ok, %{}}
     end
 
     def bind_credentials(_pod_dir, _not_a_cap_profile) do

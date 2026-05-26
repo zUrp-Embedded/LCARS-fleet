@@ -24,7 +24,6 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
 
   defp cap(opts) do
     %Fleet.CapProfile{
-      api_version: "v2.5",
       kind: "CapProfile",
       metadata: %{"name" => Keyword.get(opts, :role, "engineer")},
       spec: Keyword.get(opts, :spec, %{})
@@ -50,16 +49,20 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
   # prepare/3 court-circuite → tous les tests phases 1-3-5 ont besoin du
   # coffre. Roles couverts : engineer + reviewer.
   setup %{tmp_dir: dir} do
+    # Vulcan #6 : single-file coffre.json via Store.write_atomic_coffre.
     coffre = Path.join(dir, "coffre")
+    Application.put_env(:fleet_credentials, :creds_root, coffre)
 
     for role <- ["engineer", "reviewer"] do
-      File.mkdir_p!(Path.join(coffre, role))
-      File.write!(Path.join([coffre, role, "oauth_refresh_token"]), "RT-#{role}\n")
-      File.write!(Path.join([coffre, role, "oauth_access_token"]), "AT-#{role}\n")
-      File.write!(Path.join([coffre, role, "oauth_scopes"]), "scope-a scope-b\n")
+      :ok =
+        Fleet.Credentials.Store.write_atomic_coffre(role, %{
+          "refreshToken" => "RT-#{role}",
+          "accessToken" => "AT-#{role}",
+          "scopes" => "scope-a scope-b",
+          "expiresAt" => 9_999_999_999_999
+        })
     end
 
-    Application.put_env(:fleet_credentials, :creds_root, coffre)
     on_exit(fn -> Application.delete_env(:fleet_credentials, :creds_root) end)
     :ok
   end
@@ -134,13 +137,14 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
   end
 
   @tag :tmp_dir
-  test "5. credentials role-scopés via resolve_env (env map — divergence DN tracée)", ctx do
+  test "5. creds via claudeDir bind (adr-f) : aucun env OAuth injecté", ctx do
     pod_id = "conf5-#{System.unique_integer([:positive])}"
-    spec = %{"project" => %{"name" => "d"}, "injects" => %{"useRoleCredentials" => true}}
+    spec = %{"project" => %{"name" => "d"}}
     res = prepare!(pod_id, cap(role: "engineer", spec: spec), [], ctx)
 
-    assert %{"CLAUDE_CODE_OAUTH_REFRESH_TOKEN" => "RT-engineer"} = res.credentials_env
-    assert res.credentials_env["CLAUDE_CODE_OAUTH_SCOPES"] == "scope-a scope-b"
+    # adr-f : plus d'injection RT-env (coffre déprécié). Les creds vivent dans
+    # le claudeDir bindé par bwrap (CLAUDE_DIR), pas dans un env map résolu ici.
+    assert res.credentials_env == %{}
   end
 
   @tag :tmp_dir
