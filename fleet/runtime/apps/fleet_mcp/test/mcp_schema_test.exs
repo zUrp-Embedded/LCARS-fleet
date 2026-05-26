@@ -1,7 +1,7 @@
 defmodule Fleet.MCP.SchemaTest do
   @moduledoc """
-  Lot 1 — prouve que les configs canon `05_data-canon/config/mcp-channels.yaml`
-  et `mcp-bridge.yaml` valident contre leurs schemas dérivés
+  Lot 1 — prouve que les configs canon `priv/config/mcp-channels.yaml`
+  et `mcp-bridge.yaml` (réabsorbés R0.8) valident contre leurs schemas dérivés
   (`priv/schema/mcp-channels-v1.json` / `mcp-bridge-v1.json`), et que
   `Fleet.MCP.Schema.validate/2` rejette les configs structurellement invalides
   (fail-fast boot). Pattern TDD identique Lot 0bis (PROVEN).
@@ -13,28 +13,8 @@ defmodule Fleet.MCP.SchemaTest do
   @channels_schema Path.join([__DIR__, "..", "priv", "schema", "mcp-channels-v1.json"])
   @bridge_schema Path.join([__DIR__, "..", "priv", "schema", "mcp-bridge-v1.json"])
 
-  @canon_channels Path.join([
-                    __DIR__,
-                    "..",
-                    "..",
-                    "..",
-                    "..",
-                    "..",
-                    "05_data-canon",
-                    "config",
-                    "mcp-channels.yaml"
-                  ])
-  @canon_bridge Path.join([
-                  __DIR__,
-                  "..",
-                  "..",
-                  "..",
-                  "..",
-                  "..",
-                  "05_data-canon",
-                  "config",
-                  "mcp-bridge.yaml"
-                ])
+  @canon_channels Path.join([__DIR__, "..", "priv", "config", "mcp-channels.yaml"])
+  @canon_bridge Path.join([__DIR__, "..", "priv", "config", "mcp-bridge.yaml"])
 
   test "fixtures présentes (schemas + canon)" do
     assert File.exists?(@channels_schema), "schema absent: #{@channels_schema}"

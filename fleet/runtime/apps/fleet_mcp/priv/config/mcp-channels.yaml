@@ -1,0 +1,51 @@
+# Catalogue MCP channels V2 — registration channels custom LCARS
+# Date : 2026-05-18
+# Référencé par : 04_design-notes/ring4/fleet_mcp.md §"Config bridge"
+# Schema : 07_code/runtime-v2/apps/fleet_mcp/priv/schema/mcp-channels-v1.json (à créer engineer Lot 1)
+# Consommé par : Fleet.MCP.Server.init/1 — registration channels au boot fleet_mcp app
+#
+# 2 channels custom canon V2 (post-pivot 15/06/2026) :
+#   - fleet-control.* : Memory-X V1 queries + control plane (coord broadcasts, audit verdicts)
+#   - fleet-forge.*   : routing tickets Gitea (auto-routing forge→worker via webhook)
+#
+# Pattern subscription : `fleet-control.<role>.<topic>` ou `fleet-forge.<role>`
+# Workers souscrivent à leur préfixe role (cf. cap-profiles.spec.invocation.mcp_channels)
+
+channels:
+
+  # === fleet-control : Memory-X + control plane ===
+  fleet-control:
+    description: "Memory-X V1 queries + control plane broadcasts (coord actions, audit verdicts)"
+    transport: ["stdio", "http_sse"]  # native_beam INTERDIT côté pod (ADR-C 5 zéros)
+    sub_topics:
+      - "fleet-control.memory.*"      # Memory ⟨X⟩ V1 queries (alpha, beta, gamma, ...)
+      - "fleet-control.coord.*"       # Coord broadcasts (action, escalate, notify)
+      - "fleet-control.audit.*"       # Audit verdicts (qualifier, reviewer, gatekeeper, consultant)
+      - "fleet-control.architect.*"   # Architect-interactive bridge (session-user)
+      - "fleet-control.starfleet.*"   # Starfleet host-natif bridge (D-01)
+      - "fleet-control.engineer.*"    # Engineer worker channel
+      - "fleet-control.qualifier.*"   # Qualifier worker channel
+      - "fleet-control.reviewer.*"    # Reviewer worker channel
+      - "fleet-control.consultant.*"  # Consultant worker channel
+      - "fleet-control.gatekeeper.*"  # Gatekeeper sub-tools + 3-strike
+
+  # === fleet-forge : routing tickets Gitea ===
+  fleet-forge:
+    description: "Auto-routing tickets Gitea vers workers via MCP push (webhook → fleet_mcp → worker)"
+    transport: ["stdio", "http_sse"]
+    sub_topics:
+      - "fleet-forge.engineer"     # Tickets assignés engineer
+      - "fleet-forge.qualifier"    # Tickets dispatch audit qualifier
+      - "fleet-forge.reviewer"     # Tickets dispatch review reviewer
+      - "fleet-forge.consultant"   # Tickets dispatch audit consultant
+      - "fleet-forge.gatekeeper"   # Tickets escalation gatekeeper
+      - "fleet-forge.architect"    # Tickets escalation architect (assignee post-arbitrage)
+      - "fleet-forge.starfleet"    # Tickets ops sysadmin (D-01 escalades)
+
+# Gate runtime (cohérent G24-13) :
+# Boot fleet_mcp.app DOIT précéder boot des pods avec mcp_channels non-vide.
+# Si fleet_mcp.app pas alive → Fleet.CapProfile.validate/1 retourne {:error, :g24_13} → pod NE SPAWN PAS.
+
+# Filtrage par cap-profile :
+# `cap-profile.spec.invocation.mcp_channels` = whitelist patterns subscription.
+# Fleet.MCP.Server.subscribe/2 valide pattern matching whitelist OU refuse {:error, :channel_not_whitelisted}.

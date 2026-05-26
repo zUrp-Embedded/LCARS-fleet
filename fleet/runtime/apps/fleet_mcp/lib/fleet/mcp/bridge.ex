@@ -78,8 +78,27 @@ defmodule Fleet.MCP.Bridge do
     {:reply, %{pubsub_to_mcp: state.pubsub_to_mcp, mcp_to_pubsub: state.mcp_to_pubsub}, state}
   end
 
+  # Bus.broadcast publie `{event_atom, %{...}}` (tuple) sur "fleet.events" —
+  # cf. Fleet.EventRouter.Bus.broadcast/3. Pattern aligné avec les autres
+  # consumers du Bus (Executor, DriftMonitor). Le test legacy publiait
+  # direct la map sur PubSub (sans Bus.broadcast) → masquait le mismatch
+  # de shape en prod (bug #1 audit externe 2026-05-24).
   @impl GenServer
+  def handle_info({_atom, event}, state) when is_map(event) do
+    route_event(event, state)
+    {:noreply, state}
+  end
+
+  # Compat tolérante : map direct (legacy chemin test, ou émetteur custom hors
+  # Bus.broadcast). Pas une régression — Bus reste l'émetteur canonique tuple.
   def handle_info(event, state) when is_map(event) do
+    route_event(event, state)
+    {:noreply, state}
+  end
+
+  def handle_info(_other, state), do: {:noreply, state}
+
+  defp route_event(event, state) do
     etype = event["event_type"] || event["type"] || ""
 
     Enum.each(state.pubsub_to_mcp, fn m ->
@@ -96,11 +115,7 @@ defmodule Fleet.MCP.Bridge do
         end
       end
     end)
-
-    {:noreply, state}
   end
-
-  def handle_info(_other, state), do: {:noreply, state}
 
   # --- privé ---
 

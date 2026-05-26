@@ -89,6 +89,29 @@ defmodule Fleet.MCP.BridgeSupervisorTest do
     GenServer.stop(pid)
   end
 
+  # Bug audit externe 2026-05-24 (#1) : Bus.broadcast publie `{event_atom, map}`
+  # (tuple), pas la map directe. Avant fix, le bridge ne match que `is_map(event)`
+  # → tuple fall through au catch-all → 0 event consommé en prod. Ce test prouve
+  # que le tuple-shape de Bus est désormais routé correctement (parité prod).
+  @tag :tmp_dir
+  test "forward Bus-shape : {event_atom, map} tuple → push channel résolu", %{tmp_dir: dir} do
+    p = tmp(dir, "fwd_tuple.yaml", @valid_yaml)
+    {:ok, pid} = Bridge.start_link(name: uniq(), bridge_config_path: p)
+    :ok = Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet-control.engineer.coord")
+
+    # Shape EXACTE produite par Fleet.EventRouter.Bus.broadcast/3.
+    event = %{
+      "event_type" => "coord.action.handoff",
+      "target_role" => "engineer",
+      "payload" => "x"
+    }
+
+    Phoenix.PubSub.broadcast(Fleet.PubSub, "fleet.events", {:"coord.action.handoff", event})
+
+    assert_receive %{"event_type" => "coord.action.handoff", "target_role" => "engineer"}, 100
+    GenServer.stop(pid)
+  end
+
   @tag :tmp_dir
   test "forward : template non résolu → skip graceful (pas de crash)", %{tmp_dir: dir} do
     p = tmp(dir, "fwd2.yaml", @valid_yaml)
@@ -98,7 +121,8 @@ defmodule Fleet.MCP.BridgeSupervisorTest do
       "event_type" => "coord.action.handoff"
     })
 
-    Process.sleep(30)
+    # Mi14 : :sys.get_state = barrière (le broadcast PubSub local est déjà en mailbox, FIFO).
+    _ = :sys.get_state(pid)
     assert Process.alive?(pid)
     GenServer.stop(pid)
   end
