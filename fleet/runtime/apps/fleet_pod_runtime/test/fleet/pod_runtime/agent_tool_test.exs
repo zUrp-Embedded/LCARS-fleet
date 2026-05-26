@@ -6,7 +6,6 @@ defmodule Fleet.PodRuntime.AgentToolTest do
 
   defp fire_mode_quick_profile do
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "fire-mode-quick"},
       spec: %{

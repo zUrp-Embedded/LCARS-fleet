@@ -84,8 +84,7 @@ defmodule Fleet.PodRuntime.TurnDispatcherTest do
       pid = start_dispatcher()
       {:ok, turn_id} = TurnDispatcher.dispatch(pid, %{"text" => "msg"})
       :ok = TurnDispatcher.result_received(pid, turn_id, %{"result" => "ok"})
-      Process.sleep(10)
-
+      # Mi14 : state/1 (GenServer.call) synchronise après le cast result_received (FIFO).
       state = TurnDispatcher.state(pid)
       assert state.status == :idle
       assert state.current_turn_id == nil
@@ -98,7 +97,8 @@ defmodule Fleet.PodRuntime.TurnDispatcherTest do
       assert_received {:port_write, _msg1_payload}
 
       :ok = TurnDispatcher.result_received(pid, t1, %{"result" => "ok"})
-      Process.sleep(10)
+      # Mi14 : barrière de synchro (call) → le cast est traité, le port_write est émis.
+      _ = TurnDispatcher.state(pid)
 
       assert_received {:port_write, msg2_payload}
       assert {:ok, decoded} = Jason.decode(msg2_payload)
@@ -114,8 +114,6 @@ defmodule Fleet.PodRuntime.TurnDispatcherTest do
       pid = start_dispatcher()
       {:ok, _t1} = TurnDispatcher.dispatch(pid, %{"text" => "msg"})
       :ok = TurnDispatcher.result_received(pid, "turn-bogus", %{"result" => "ok"})
-      Process.sleep(10)
-
       state = TurnDispatcher.state(pid)
       assert state.status == :awaiting_result
     end
@@ -140,9 +138,10 @@ defmodule Fleet.PodRuntime.TurnDispatcherTest do
 
       Enum.each(ids, fn id ->
         :ok = TurnDispatcher.result_received(pid, id, %{"result" => "ok"})
-        Process.sleep(5)
       end)
 
+      # Mi14 : une barrière (call) après la rafale de casts → tous traités, tous les writes émis.
+      _ = TurnDispatcher.state(pid)
       dequeue_writes = collect_port_writes()
       assert length(dequeue_writes) == 4
 
@@ -184,8 +183,6 @@ defmodule Fleet.PodRuntime.TurnDispatcherTest do
       assert_received {:port_write, _msg1}
 
       :ok = TurnDispatcher.result_received(pid, t1, %{"result" => "ok"})
-      Process.sleep(20)
-
       state = TurnDispatcher.state(pid)
       assert state.status == :idle
       assert state.current_turn_id == nil
