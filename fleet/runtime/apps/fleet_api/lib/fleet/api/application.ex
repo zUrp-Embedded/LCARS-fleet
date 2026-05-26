@@ -92,7 +92,11 @@ defmodule Fleet.Api.Application do
   def api_event_atoms, do: @api_event_atoms
 
   defp base_children do
-    [Fleet.Api.RelayHandler]
+    # Vulcan #2 : GitCommitter GenServer sérialise les commits du repo
+    # config (évite race conditions cross-caller sur snapshot/rename/
+    # git add/commit/rollback). Pas de cycle, pas de state mutable —
+    # juste un mutex de file FIFO.
+    [Fleet.Api.GitCommitter, Fleet.Api.RelayHandler]
   end
 
   defp listener_children do

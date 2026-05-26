@@ -61,5 +61,44 @@ defmodule Fleet.Api.GitCommitterTest do
       # tmp file cleaned up
       refute File.exists?(Path.join(tmp_dir, "stable.json.tmp"))
     end
+
+    test "confinement : path traversal `..` rejeté, aucun fichier écrit hors repo", %{
+      tmp_dir: tmp_dir
+    } do
+      escapee = Path.expand(Path.join(tmp_dir, "../pwned.json"))
+      File.rm(escapee)
+
+      assert {:error, msg} =
+               GitCommitter.commit_config_change("../pwned.json", ~s|{"x":1}|, "attacker")
+
+      assert msg =~ "invalid file_path"
+      refute File.exists?(escapee)
+    end
+
+    test "confinement : chemin absolu rejeté" do
+      assert {:error, msg} =
+               GitCommitter.commit_config_change("/etc/pwned.json", "x", "attacker")
+
+      assert msg =~ "invalid file_path"
+    end
+
+    test "atomicité : échec git post-rename → fichier restauré à l'état d'origine", %{
+      tmp_dir: tmp_dir
+    } do
+      {:ok, _} = GitCommitter.commit_config_change("r.json", ~s|{"v":"old"}|, "u")
+      assert File.read!(Path.join(tmp_dir, "r.json")) == ~s|{"v":"old"}|
+
+      # hook pre-commit qui échoue → force `git commit` à planter APRÈS le rename
+      hooks = Path.join([tmp_dir, ".git", "hooks"])
+      File.mkdir_p!(hooks)
+      File.write!(Path.join(hooks, "pre-commit"), "#!/bin/sh\nexit 1\n")
+      File.chmod!(Path.join(hooks, "pre-commit"), 0o755)
+
+      assert {:error, _} = GitCommitter.commit_config_change("r.json", ~s|{"v":"new"}|, "u")
+
+      # le fichier disque est restauré à l'origine, PAS laissé sur "new" (atomicité)
+      assert File.read!(Path.join(tmp_dir, "r.json")) == ~s|{"v":"old"}|
+      refute File.exists?(Path.join(tmp_dir, "r.json.tmp"))
+    end
   end
 end
