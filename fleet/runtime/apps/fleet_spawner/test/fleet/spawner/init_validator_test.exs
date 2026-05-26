@@ -19,7 +19,6 @@ defmodule Fleet.Spawner.Pod.InitValidatorTest do
 
   defp profile do
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "engineer"},
       spec: %{}

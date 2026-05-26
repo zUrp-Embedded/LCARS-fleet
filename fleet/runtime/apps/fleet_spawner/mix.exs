@@ -34,6 +34,12 @@ defmodule FleetSpawner.MixProject do
       # B10/#583 Sprint 1 — Fleet.Spawner.PublishConsumer subscribe Bus
       # (admin.spawn.request). Pas de cycle (event_router ⊀ spawner).
       {:fleet_event_router, in_umbrella: true},
+      # Vulcan #7 — `Fleet.Spawner.Pod.do_project` est destiné à câbler
+      # `Fleet.ProjectBootstrap.prepare/3` (#596, dette actuelle = bypass).
+      # Déclarer la dep explicitement rend le couplage Ring 1 visible côté
+      # build graph (anticipation du câblage). Pas de cycle (fleet_project_
+      # bootstrap ne dep pas fleet_spawner).
+      {:fleet_project_bootstrap, in_umbrella: true},
       {:jason, "~> 1.4"},
       {:uuid, "~> 1.1"}
     ]

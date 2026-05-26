@@ -23,11 +23,13 @@ defmodule Fleet.Spawner.LaunchBackend do
       * `:role` — string
       * `:pod_id` — string
       * `:pod_dir` — path absolu pod
-      * `:budget_sec` — integer
-      * `:budget_usd` — float ou string
       * `:bwrap_launch_path` — path absolu `bwrap_launch.sh`
       * `:claude_launch_path` — path absolu `claude_launch.sh`
     * `env` — map ENV vars à injecter (OAuth + custom)
+
+  R0.8-brick4 : `:budget_sec`/`:budget_usd` retirés. Le timeout de réponse
+  est géré côté Pod GenServer (Process.send_after :result_deadline,
+  default par lifetime_scope) ; pas d'API = pas de budget USD.
 
   ## Returns
 

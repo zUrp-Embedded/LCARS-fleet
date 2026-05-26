@@ -29,7 +29,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
     send(pid, {:"admin.spawn.request", %{"payload" => %{}, "ticket_id" => "T1"}})
 
-    Process.sleep(30)
+    # Mi14 : :sys.get_state = barrière FIFO (send traité avant) → pas de sleep arbitraire.
     assert Process.alive?(pid)
     assert %{count: 1} = :sys.get_state(pid)
     refute_received {:spawn_called, _, _}
@@ -44,7 +44,6 @@ defmodule Fleet.Spawner.PublishConsumerTest do
        %{"payload" => %{"cap_profile_name" => "ghost-role-xyz"}, "ticket_id" => "T2"}}
     )
 
-    Process.sleep(30)
     assert Process.alive?(pid)
     assert %{count: 1} = :sys.get_state(pid)
     refute_received {:spawn_called, _, _}
@@ -56,7 +55,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     send(pid, {:"pod.drift", %{"payload" => %{}}})
     send(pid, {:"some.other", %{"payload" => %{}}})
 
-    Process.sleep(30)
+    _ = :sys.get_state(pid)
     assert Process.alive?(pid)
     refute_received {:spawn_called, _, _}
   end
@@ -64,7 +63,23 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   test "msg non-event : pas de crash" do
     {pid, _} = start_consumer()
     send(pid, :random)
-    Process.sleep(20)
+    _ = :sys.get_state(pid)
     assert Process.alive?(pid)
+  end
+
+  describe "to_keyword/1 — anti atom-leak (finding Vulcan)" do
+    test "clé connue (atom existant) convertie, clé inconnue ignorée (pas de String.to_atom)" do
+      # :mandate existe (littéral compilé ci-dessous + option spawn_opts) → conservée
+      assert PublishConsumer.to_keyword(%{"mandate" => "x"}) == [mandate: "x"]
+
+      # clé jamais vue comme atome → to_existing_atom raise → filtrée (anti DoS table d'atomes)
+      garbage = "atom_inexistant_zzz_#{System.unique_integer([:positive])}"
+      assert PublishConsumer.to_keyword(%{garbage => 1}) == []
+    end
+
+    test "keyword list passe telle quelle ; autre → []" do
+      assert PublishConsumer.to_keyword(mandate: 1) == [mandate: 1]
+      assert PublishConsumer.to_keyword(nil) == []
+    end
   end
 end

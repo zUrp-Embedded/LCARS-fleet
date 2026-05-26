@@ -10,7 +10,6 @@ defmodule Fleet.Spawner.PodSkillsPluginsTest do
 
   defp cp(skills),
     do: %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "engineer"},
       spec: %{"knowledge" => %{"skills" => skills}}
@@ -39,7 +38,6 @@ defmodule Fleet.Spawner.PodSkillsPluginsTest do
   test "knowledge/skills absent ou nil → %{} (défensif)" do
     assert %{} ==
              Pod.skills_plugins_env(%Fleet.CapProfile{
-               api_version: "lcars/v2.5",
                kind: "CapabilityProfile",
                metadata: %{"name" => "x"},
                spec: %{}

@@ -94,9 +94,25 @@ defmodule Fleet.Spawner.PublishConsumer do
     end
   end
 
-  defp to_keyword(map) when is_map(map),
-    do: Enum.map(map, fn {k, v} -> {String.to_atom(to_string(k)), v} end)
+  @doc """
+  Convertit une map de payload (clés string) en keyword list pour `spawn_pod`.
 
-  defp to_keyword(list) when is_list(list), do: list
-  defp to_keyword(_), do: []
+  finding Vulcan (atom-leak DoS) : `String.to_atom` sur des clés POST arbitraires
+  permettait d'épuiser la table d'atomes du BEAM. On n'accepte QUE les clés déjà
+  connues comme atomes (`to_existing_atom`) ; toute clé inconnue est ignorée.
+  Public pour test direct (le chemin via le consumer exige `CapProfile.load` + env
+  global → non async-safe).
+  """
+  def to_keyword(map) when is_map(map) do
+    Enum.flat_map(map, fn {k, v} ->
+      try do
+        [{String.to_existing_atom(to_string(k)), v}]
+      rescue
+        ArgumentError -> []
+      end
+    end)
+  end
+
+  def to_keyword(list) when is_list(list), do: list
+  def to_keyword(_), do: []
 end

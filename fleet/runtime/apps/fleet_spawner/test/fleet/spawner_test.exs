@@ -10,16 +10,17 @@ defmodule Fleet.SpawnerTest do
     Application.put_env(:fleet_spawner, :pod_dir_root, Path.join(tmp_dir, "pods"))
     Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
 
+    # Vulcan #6 : single-file coffre.json via Store.write_atomic_coffre.
     coffre = Path.join(tmp_dir, "coffre")
     Application.put_env(:fleet_credentials, :creds_root, coffre)
-    File.mkdir_p!(Path.join(coffre, "engineer"))
-    File.write!(Path.join([coffre, "engineer", "oauth_refresh_token"]), "rt")
-    File.write!(Path.join([coffre, "engineer", "oauth_access_token"]), "at")
 
-    File.write!(
-      Path.join([coffre, "engineer", "oauth_scopes"]),
-      "user:inference user:sessions:claude_code"
-    )
+    :ok =
+      Fleet.Credentials.Store.write_atomic_coffre("engineer", %{
+        "refreshToken" => "rt",
+        "accessToken" => "at",
+        "scopes" => "user:inference user:sessions:claude_code",
+        "expiresAt" => 9_999_999_999_999
+      })
 
     sp_root = Path.join(tmp_dir, "cap-profiles")
     File.mkdir_p!(sp_root)
@@ -50,7 +51,6 @@ defmodule Fleet.SpawnerTest do
 
   defp valid_profile do
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "engineer", "containment" => "bwrap"},
       spec: %{
@@ -69,7 +69,8 @@ defmodule Fleet.SpawnerTest do
     pod_id = "pod-public-api-#{System.unique_integer([:positive])}"
     assert {:ok, pid} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-1", pod_id: pod_id)
     assert is_pid(pid)
-    Process.sleep(50)
+
+    # Mi14 : registration synchrone (name: {:via, Registry, ...}) → pod enregistré dès {:ok, pid}.
     assert {:ok, %{pod_id: ^pod_id}} = Fleet.Spawner.pod_info(pod_id)
   end
 
@@ -80,10 +81,11 @@ defmodule Fleet.SpawnerTest do
   test "kill_pod terminates the pod" do
     pod_id = "pod-kill-#{System.unique_integer([:positive])}"
     {:ok, _pid} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-2", pod_id: pod_id)
-    Process.sleep(50)
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
-    Process.sleep(50)
+    # Mi14 : terminate_child est sync sur la mort, MAIS le cleanup Registry (via monitor) est
+    # async → poll borné déterministe (≤200ms) au lieu d'un sleep fixe flaky.
+    assert :ok = wait_unregistered(pod_id)
     assert {:error, :not_found} = Fleet.Spawner.pod_info(pod_id)
   end
 
@@ -104,8 +106,40 @@ defmodule Fleet.SpawnerTest do
 
     pod_id = "pod-count-#{System.unique_integer([:positive])}"
     {:ok, _pid} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-count", pod_id: pod_id)
-    Process.sleep(20)
-
+    # Mi14 : count_children reflète l'enfant actif dès {:ok} de start_child.
     assert Fleet.Spawner.count_pods() >= initial + 1
+  end
+
+  describe "wake_pod/1" do
+    test "wake_pod :not_found for unknown pod_id" do
+      assert {:error, :not_found} = Fleet.Spawner.wake_pod("never-spawned-id")
+    end
+
+    test "wake_pod :not_a_tmux_pod si le pod existe mais pas via TmuxBackend (StubBackend → tmux_session nil)" do
+      pod_id = "pod-wake-stub-#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-wake", pod_id: pod_id)
+
+      # StubBackend ne pose pas tmux_session dans launched → pod_info renvoie
+      # tmux_session: nil → wake_pod refuse proprement (pas de send-keys).
+      assert {:error, :not_a_tmux_pod} = Fleet.Spawner.wake_pod(pod_id)
+
+      Fleet.Spawner.kill_pod(pod_id)
+    end
+  end
+
+  # Poll borné déterministe (Mi14) : attend le cleanup Registry async post-terminate_child
+  # (≤200ms). Remplace un sleep fixe : réussit dès que nettoyé, échoue après le bound.
+  defp wait_unregistered(pod_id, tries \\ 100) do
+    case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
+      [] ->
+        :ok
+
+      _ when tries > 0 ->
+        Process.sleep(2)
+        wait_unregistered(pod_id, tries - 1)
+
+      _ ->
+        :timeout
+    end
   end
 end

@@ -10,7 +10,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
 
   defp cp(invocation) do
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "x"},
       spec: %{"invocation" => invocation}
@@ -74,7 +73,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
   describe "robustesse entrées" do
     test "spec sans invocation → false" do
       assert PermanentBoot.boot_at_start?(%Fleet.CapProfile{
-               api_version: "v",
                kind: "k",
                metadata: %{},
                spec: %{}
@@ -125,7 +123,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
         "architect-interactive" ->
           {:ok,
            %Fleet.CapProfile{
-             api_version: "lcars/v2.5",
              kind: "CapabilityProfile",
              metadata: %{"name" => "architect-interactive"},
              spec: %{
@@ -140,7 +137,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
         "engineer" ->
           {:ok,
            %Fleet.CapProfile{
-             api_version: "lcars/v2.5",
              kind: "CapabilityProfile",
              metadata: %{"name" => "engineer"},
              spec: %{"invocation" => %{"boot_at_start" => false, "lifetime_scope" => "one-shot"}}
@@ -149,7 +145,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
         "starfleet" ->
           {:ok,
            %Fleet.CapProfile{
-             api_version: "lcars/v2.5",
              kind: "CapabilityProfile",
              metadata: %{"name" => "starfleet"},
              spec: %{
@@ -223,21 +218,12 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
   end
 
-  describe "conformance canon RÉEL — boot_at_start? sur 05_data-canon/cap-profiles" do
-    # __DIR__ = .../runtime-v2/apps/fleet_spawner/test/fleet/spawner
-    # → 7 remontées jusqu'à work/beyond_#4/ puis 05_data-canon/cap-profiles
-    @canon_dir Path.join([
-                 __DIR__,
-                 "..",
-                 "..",
-                 "..",
-                 "..",
-                 "..",
-                 "..",
-                 "..",
-                 "05_data-canon",
-                 "cap-profiles"
-               ])
+  describe "conformance canon RÉEL — boot_at_start? sur cap-profiles in-repo" do
+    # R0.8-brick5 : canon réabsorbé in-repo (R0.7) à `apps/fleet_capprofile/
+    # priv/canon/cap-profiles/`. Plus de path doctrine `05_data-canon/...`
+    # en dur (inexistant en standard install). Pattern identique brick1
+    # MonkTest (resolve via Application.app_dir).
+    @canon_dir Application.app_dir(:fleet_capprofile, "priv/canon/cap-profiles")
 
     defp canon_spec(name) do
       @canon_dir
@@ -264,7 +250,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
         ~w(architect-interactive consultant engineer gatekeeper qualifier reviewer starfleet)
         |> Enum.map(fn n ->
           %Fleet.CapProfile{
-            api_version: "lcars/v2.5",
             kind: "CapabilityProfile",
             metadata: %{"name" => n},
             spec: canon_spec(n)

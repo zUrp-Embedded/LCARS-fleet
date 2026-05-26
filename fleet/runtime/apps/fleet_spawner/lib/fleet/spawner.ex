@@ -106,13 +106,64 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
+  Réveille un pod long-lived (lifetime_scope != one-shot) pour un nouveau
+  cycle. Envoie le mot-clé `yop` via tmux send-keys au claude REPL du pod,
+  déclenchant le workflow agent-worker-base :
+
+      yop → mcp__fleet__get_task → traite → mcp__fleet__submit_result
+
+  Pré-requis : le caller a déjà push la task dans `Fleet.MCP.TaskQueue`
+  (avec `_lcars_pod_id` corrélation pour que ce pod la récupère via
+  `get_task`). `wake_pod/1` ne gère QUE le trigger send-keys — la task
+  doit être en file AVANT.
+
+  Use-cases :
+    - pipeline `standard-qa` : après findings reviewer/gatekeeper, push
+      task corrective + wake_pod(engineer_pod_id) → cycle 11.0 boucle.
+    - starfleet/fleet_pilot : nouveau ticket assigné au même pod long-
+      lived (mandat actif) → push + wake.
+
+  Renvoie :
+    - `:ok` — send-keys exécuté.
+    - `{:error, :not_found}` — pod_id inconnu (jamais spawn ou déjà kill).
+    - `{:error, :not_a_tmux_pod}` — pod existe mais pas via TmuxBackend
+      (PortBackend/Stub) → pas de tmux_session pour send-keys.
+    - `{:error, term}` — erreur send-keys tmux (session morte côté tmux,
+      etc.).
+  """
+  @spec wake_pod(String.t()) :: :ok | {:error, term()}
+  def wake_pod(pod_id) when is_binary(pod_id) do
+    case pod_info(pod_id) do
+      {:ok, %{tmux_session: session}} when is_binary(session) ->
+        Fleet.Spawner.LaunchBackend.TmuxBackend.send_prompt(session, "yop")
+
+      {:ok, _info} ->
+        {:error, :not_a_tmux_pod}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  require Logger
+
+  @doc """
   Mappe `lifetime_scope` cap-profile vers OTP restart strategy.
   """
   @spec restart_strategy_for(String.t()) :: :temporary | :transient | :permanent
   def restart_strategy_for("one-shot"), do: :temporary
   def restart_strategy_for(scope) when scope in ["pipe", "run", "session-user"], do: :transient
   def restart_strategy_for("forever"), do: :permanent
-  def restart_strategy_for(_), do: :temporary
+
+  # finding Vulcan : un lifetime_scope inconnu (typo) tombait SILENCIEUSEMENT sur :temporary
+  # (pas de restart). On garde le défaut sûr mais on le rend VISIBLE (typo non masquée).
+  def restart_strategy_for(other) do
+    Logger.warning(
+      "Fleet.Spawner.restart_strategy_for: lifetime_scope inconnu #{inspect(other)} → :temporary (défaut — typo cap-profile ?)"
+    )
+
+    :temporary
+  end
 
   defp pod_child_spec(args) do
     cap_profile = args.cap_profile
