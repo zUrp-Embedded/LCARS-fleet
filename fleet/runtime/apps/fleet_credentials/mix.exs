@@ -21,8 +21,7 @@ defmodule FleetCredentials.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
-      mod: {Fleet.Credentials.Application, []}
+      extra_applications: [:logger]
     ]
   end
 
@@ -35,6 +34,7 @@ defmodule FleetCredentials.MixProject do
     # est appliqué. Cohérent design note §"Surface SDK utilisée" L255.
     [
       {:fleet_capprofile, in_umbrella: true},
+      {:fleet_event_router, in_umbrella: true},
       {:jason, "~> 1.4"},
       {:stream_data, "~> 1.0", only: [:dev, :test]}
     ]

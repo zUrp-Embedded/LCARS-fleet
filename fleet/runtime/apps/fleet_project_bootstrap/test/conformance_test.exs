@@ -45,27 +45,8 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
     repo
   end
 
-  # Coffre fixtures partagés : sans creds résolus, Phase4 échoue et
-  # prepare/3 court-circuite → tous les tests phases 1-3-5 ont besoin du
-  # coffre. Roles couverts : engineer + reviewer.
-  setup %{tmp_dir: dir} do
-    # Vulcan #6 : single-file coffre.json via Store.write_atomic_coffre.
-    coffre = Path.join(dir, "coffre")
-    Application.put_env(:fleet_credentials, :creds_root, coffre)
-
-    for role <- ["engineer", "reviewer"] do
-      :ok =
-        Fleet.Credentials.Store.write_atomic_coffre(role, %{
-          "refreshToken" => "RT-#{role}",
-          "accessToken" => "AT-#{role}",
-          "scopes" => "scope-a scope-b",
-          "expiresAt" => 9_999_999_999_999
-        })
-    end
-
-    on_exit(fn -> Application.delete_env(:fleet_credentials, :creds_root) end)
-    :ok
-  end
+  # adr-f : plus de coffre. Phase 4 (BindCredentials) retourne {:ok, %{}}
+  # sans dépendance externe → pas de setup creds nécessaire.
 
   # Nettoyage par-pod : on_exit empile, appelé depuis le process test
   # (helper invoqué dans le corps de test). Pas d'ETS (Iron Law — pas de

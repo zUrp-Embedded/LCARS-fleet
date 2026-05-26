@@ -10,18 +10,8 @@ defmodule Fleet.Spawner.PodTest do
     Application.put_env(:fleet_spawner, :state_fs_root, Path.join(tmp_dir, "state"))
     Application.put_env(:fleet_spawner, :pod_dir_root, Path.join(tmp_dir, "pods"))
     Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
-
-    # Vulcan #6 : single-file coffre.json via Store.write_atomic_coffre.
-    coffre = Path.join(tmp_dir, "coffre")
-    Application.put_env(:fleet_credentials, :creds_root, coffre)
-
-    :ok =
-      Fleet.Credentials.Store.write_atomic_coffre("engineer", %{
-        "refreshToken" => "rt-stub",
-        "accessToken" => "at-stub",
-        "scopes" => "user:inference user:sessions:claude_code",
-        "expiresAt" => 9_999_999_999_999
-      })
+    # adr-f : plus de coffre. Les creds viennent du claudeDir bindé par bwrap
+    # (CLAUDE_DIR, défaut config) ; pas de setup coffre en test.
 
     sp_root = Path.join(tmp_dir, "cap-profiles")
     File.mkdir_p!(sp_root)
@@ -32,7 +22,6 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.clear()
       Application.delete_env(:fleet_spawner, :state_fs_root)
       Application.delete_env(:fleet_spawner, :pod_dir_root)
-      Application.delete_env(:fleet_credentials, :creds_root)
       Application.delete_env(:fleet_spbuilder, :sp_role_root)
     end)
 
