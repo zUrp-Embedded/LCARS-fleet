@@ -725,7 +725,7 @@ defmodule Fleet.Spawner.Pod do
 
   defp initial_state(args) do
     state_fs_path = state_fs_path_for(args.pod_id, args.cap_profile, args.opts)
-    pod_dir = pod_dir_for(args.pod_id, args.opts)
+    pod_dir = pod_dir_for(args.pod_id, args.cap_profile, args.opts)
 
     %{
       phase: :pending,
@@ -748,15 +748,30 @@ defmodule Fleet.Spawner.Pod do
     }
   end
 
-  defp pod_dir_for(pod_id, opts) do
+  defp pod_dir_for(pod_id, cap_profile, opts) do
     base =
       Keyword.get(
         opts,
         :pod_dir_root,
-        Application.get_env(:fleet_spawner, :pod_dir_root, "/tmp/lcars-pods")
+        Application.get_env(:fleet_spawner, :pod_dir_root, "/home/pods")
       )
 
-    Path.join(base, "pod-#{pod_id}")
+    # Nom = <human>_<role>_<pod_id>. Repère humain+role lisible en tête ; pod_id
+    # comme discriminateur : unique PAR CONSTRUCTION (collision irreprésentable),
+    # stateless (pas de compteur _XX à allouer = pas de registre = pas de smell
+    # I-CBC), et déjà la clé de recovery (state_fs keyé pod_id) → MÊME pod_id =
+    # MÊME dossier → stable pour --resume. Le nom est une fonction pure de
+    # (human, role, pod_id) : différenciation par data, aucun branchement.
+    role = Map.get(cap_profile.metadata, "name", "worker")
+
+    human =
+      Keyword.get(
+        opts,
+        :human,
+        Application.get_env(:fleet_spawner, :pod_human, "fleet")
+      )
+
+    Path.join(base, "#{human}_#{role}_#{pod_id}")
   end
 
   defp state_fs_path_for(pod_id, cap_profile, opts) do
