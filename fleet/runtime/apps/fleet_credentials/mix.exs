@@ -26,11 +26,10 @@ defmodule FleetCredentials.MixProject do
   end
 
   defp deps do
-    # NOTE : `:claude_code` SDK dep jamais introduite. Les backends
-    # `ClaudeCodeBackend` sont des placeholders `:not_wired_yet`. Le
-    # SDK-bridge (`fleet_claude_bridge`) qui devait porter le wrap a été
-    # SUPPRIMÉ (SDK/stream-json mort, ADR-G pivot tmux-REPL) → ces
-    # placeholders = tendril SDK à retriager.
+    # `:claude_code` SDK jamais introduite. La validation de plan via SDK
+    # (`PlanValidator.ClaudeCodeBackend`) SUPPRIMÉE (ADR-G : SDK mort, pivot
+    # tmux-REPL). NB : `scope_validator` garde le scope OAuth
+    # `user:sessions:claude_code` (scope credential du pod, pas le SDK lib).
     [
       {:fleet_cap_profile, in_umbrella: true},
       {:fleet_event_router, in_umbrella: true},

@@ -27,13 +27,8 @@ defmodule Fleet.PodRuntime.MixProject do
   end
 
   defp deps do
-    # NOTE chantier 7 : `:claude_code` SDK dep prescrit design note L171 NON introduit
-    # ici tant que pod qualifier est en Elixir 1.14 (transitif `peri 0.8.4` requiert
-    # `~> 1.17`, fail compile). Cohérent apprentissages A1+A5 + précédent chantier 8.
-    #
-    # Surface SDK consommée par `TurnDispatcher` (Port write/read) wrappée derrière
-    # `SDKPortBackend` behaviour swappable. Default `NotWiredYet` → câblage post-pod-1.18.
-    # `StreamParser` réimplémente NDJSON parsing maison (pas import `ClaudeCode.CLI.Parser`).
+    # Runtime SDK (`:claude_code` + TurnDispatcher/StreamParser/SDKPortBackend)
+    # SUPPRIMÉ (ADR-G pivot tmux-REPL). Reste ContextMonitor + AgentTool (non-SDK).
     [
       {:fleet_cap_profile, in_umbrella: true},
       {:fleet_spawner, in_umbrella: true},
