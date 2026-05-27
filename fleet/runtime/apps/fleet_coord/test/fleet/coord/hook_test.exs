@@ -7,7 +7,7 @@ defmodule Fleet.Coord.HookTest do
     Application.put_env(
       :fleet_coord,
       :spawner_backend,
-      Fleet.Coord.SpawnerBackendStub
+      Fleet.Coord.HookSpawnerStub
     )
 
     Application.put_env(:fleet_coord, :stub_invocations, [])

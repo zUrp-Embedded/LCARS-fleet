@@ -48,7 +48,7 @@ defmodule Fleet.Starfleet.Application do
         if Application.get_env(:fleet_starfleet, :start_shutdown, true) do
           # Grace shutdown coordonné — doit être vivant pour le RPC
           # ExecStop systemd (DN ring0/lcars-fleet_service).
-          [Fleet.Shutdown]
+          [Fleet.Starfleet.Shutdown]
         else
           []
         end ++

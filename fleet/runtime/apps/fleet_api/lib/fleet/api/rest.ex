@@ -1,4 +1,4 @@
-defmodule Fleet.Api.Rest do
+defmodule Fleet.API.Rest do
   @moduledoc """
   Plug.Router HTTP `:8080` endpoints REST + auth HMAC token header.
 
@@ -26,7 +26,7 @@ defmodule Fleet.Api.Rest do
 
   use Plug.Router
 
-  alias Fleet.Api.{GitCommitter, RelayHandler}
+  alias Fleet.API.{GitCommitter, RelayHandler}
   alias Fleet.EventRouter.Bus
 
   plug(:match)
@@ -85,10 +85,10 @@ defmodule Fleet.Api.Rest do
     end
   end
 
-  # #594 D2 — dashboard V2 Elixir natif. Mount Fleet.Api.Dashboard sous
+  # #594 D2 — dashboard V2 Elixir natif. Mount Fleet.API.Dashboard sous
   # /dashboard. Pas d'auth HTTP (ADR-C accès intra-release, GET-only UI,
   # whitelisté dans require_auth/2 ligne ~97).
-  forward("/dashboard", to: Fleet.Api.Dashboard)
+  forward("/dashboard", to: Fleet.API.Dashboard)
 
   match _ do
     send_resp(conn, 404, ~s|{"error":"not found"}|)

@@ -33,7 +33,7 @@ defmodule FleetCredentials.MixProject do
     # chantier 8 (`fleet_claude_bridge`) où le wrap doctrine SDK #2
     # est appliqué. Cohérent design note §"Surface SDK utilisée" L255.
     [
-      {:fleet_capprofile, in_umbrella: true},
+      {:fleet_cap_profile, in_umbrella: true},
       {:fleet_event_router, in_umbrella: true},
       {:jason, "~> 1.4"},
       {:stream_data, "~> 1.0", only: [:dev, :test]}

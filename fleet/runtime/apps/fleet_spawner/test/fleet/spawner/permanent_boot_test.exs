@@ -219,11 +219,11 @@ defmodule Fleet.Spawner.PermanentBootTest do
   end
 
   describe "conformance canon RÉEL — boot_at_start? sur cap-profiles in-repo" do
-    # R0.8-brick5 : canon réabsorbé in-repo (R0.7) à `apps/fleet_capprofile/
+    # R0.8-brick5 : canon réabsorbé in-repo (R0.7) à `apps/fleet_cap_profile/
     # priv/canon/cap-profiles/`. Plus de path doctrine `05_data-canon/...`
     # en dur (inexistant en standard install). Pattern identique brick1
     # MonkTest (resolve via Application.app_dir).
-    @canon_dir Application.app_dir(:fleet_capprofile, "priv/canon/cap-profiles")
+    @canon_dir Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles")
 
     defp canon_spec(name) do
       @canon_dir

@@ -23,7 +23,7 @@ defmodule Fleet.ClaudeBridge do
       `fleet_event_router` chantier 11)
     * `Fleet.ClaudeBridge.SPInjection` — flags `claude -p`
       `--system-prompt-file`/`--append-system-prompt-file` (cohérent
-      `fleet_spbuilder` N2/N2bis chantier 2)
+      `fleet_sp_builder` N2/N2bis chantier 2)
 
   ## 5 disciplines SDK obligatoires
 

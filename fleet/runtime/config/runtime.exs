@@ -26,12 +26,12 @@ if config_env() != :test do
   config :logger, level: log_level
 
   # ============================================================
-  # fleet_capprofile (ch1) — chemin catalogue cap-profiles
+  # fleet_cap_profile (ch1) — chemin catalogue cap-profiles
   # ============================================================
   if path = System.get_env("LCARS_CAPPROFILES_ROOT") do
     # Clé `:root_dir` (pas `:capprofiles_root`) — ce que
     # Fleet.CapProfile.root_dir/0 lit réellement (cap_profile.ex:206).
-    config :fleet_capprofile, root_dir: path
+    config :fleet_cap_profile, root_dir: path
     # #582 re-bounce sf : Fleet.Spawner.PermanentBoot.cap_profiles_dir/0
     # lit `:fleet_spawner, :cap_profiles_dir` (config séparée du loader
     # ch1). Même env source → même path partagé canon.

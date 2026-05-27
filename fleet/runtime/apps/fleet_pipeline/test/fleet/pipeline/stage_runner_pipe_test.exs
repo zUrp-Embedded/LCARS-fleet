@@ -25,7 +25,7 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
   alias Fleet.Pipeline.{PodRegistry, SpawnerStub, StageRunner}
 
   setup do
-    Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.SpawnerBackendStub)
+    Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.StageSpawnerStub)
     Application.put_env(:fleet_pipeline, :spawner, SpawnerStub)
 
     # Resolver lifetime_scope : "engineer" → pipe, autres → one-shot.

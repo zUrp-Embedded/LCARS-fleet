@@ -1,4 +1,4 @@
-defmodule Fleet.Api.RelayHandler do
+defmodule Fleet.API.RelayHandler do
   @moduledoc """
   GenServer subscribe `Fleet.EventRouter.Bus` topic `fleet.events`,
   collecte décision user via `respond/2` puis broadcast réponse
@@ -19,7 +19,7 @@ defmodule Fleet.Api.RelayHandler do
   3. WS dashboard push notification au client
   4. User décide via dashboard, POST `/api/relay/<ref>` avec
      `decision: "allow" | "deny"`
-  5. Rest endpoint appelle `Fleet.Api.RelayHandler.respond/2`
+  5. Rest endpoint appelle `Fleet.API.RelayHandler.respond/2`
   6. RelayHandler broadcast `permission_relay_response` sur sous-topic
      `fleet.events.relay.<ref>` puis delete ETS entry
 

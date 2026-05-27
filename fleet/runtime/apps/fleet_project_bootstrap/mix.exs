@@ -33,11 +33,11 @@ defmodule Fleet.ProjectBootstrap.MixProject do
   end
 
   defp deps do
-    # fleet_capprofile : struct %Fleet.CapProfile{} consommée (spec.project.*).
+    # fleet_cap_profile : struct %Fleet.CapProfile{} consommée (spec.project.*).
     # fleet_credentials : Phase4 BIND délègue Fleet.Credentials.resolve_env/2.
     # Pas de dep Hex externe → pas de blocant compile (cf. jose #551 Lot 1).
     [
-      {:fleet_capprofile, in_umbrella: true},
+      {:fleet_cap_profile, in_umbrella: true},
       {:fleet_credentials, in_umbrella: true}
     ]
   end

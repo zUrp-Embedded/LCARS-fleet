@@ -1,7 +1,7 @@
-# Fleet.IpcFilter
+# Fleet.IPCFilter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-05-27
 **Statut** : implémenté run #3.1 chantier #9 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_ipc_filter.md
 
@@ -12,11 +12,11 @@ refus par défaut canon LCARS v1 §0 #1.
 
 ## API
 
-- `Fleet.IpcFilter.init_patterns!/0` — boot init (lit catalogue JSON,
+- `Fleet.IPCFilter.init_patterns!/0` — boot init (lit catalogue JSON,
   valide schema, compile regex, peuple ETS)
-- `Fleet.IpcFilter.filter_tool_call/2` — `:allow | {:deny, reason}`
-- `Fleet.IpcFilter.drift_for/1` — lecture compteur drift par pod_id
-- `Fleet.IpcFilter.reset_drift/0` — reset (helper test)
+- `Fleet.IPCFilter.filter_tool_call/2` — `:allow | {:deny, reason}`
+- `Fleet.IPCFilter.drift_for/1` — lecture compteur drift par pod_id
+- `Fleet.IPCFilter.reset_drift/0` — reset (helper test)
 
 ## Architecture
 
@@ -40,7 +40,7 @@ history-rewrite-filter-repo.
 web-fetch-attempted, code-execution-attempted,
 bash-code-execution-attempted, text-editor-code-execution-attempted,
 tool-search-attempted. Server tools natifs Anthropic bypass
-`can_use_tool` callback — bloqués au boot par `fleet_capprofile.G24-9`,
+`can_use_tool` callback — bloqués au boot par `fleet_cap_profile.G24-9`,
 log si tentative observable (défense en profondeur).
 
 ## Configuration
@@ -63,7 +63,7 @@ Canon `ipc-reception-filter §3` : ajout = PR avec justification
 
 ## Cohérence cross-design-notes
 
-- `fleet_capprofile` (chantier 1, PROMOTED) G24-9 gate boot pod
+- `fleet_cap_profile` (chantier 1, PROMOTED) G24-9 gate boot pod
   bloque `disallowed_tools` minimum F-CONT-RISK — complémentaire.
 - `fleet_permission_router` (chantier 10) invoque step 1 du flow
   `can_use_tool` decisions.

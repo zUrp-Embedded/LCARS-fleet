@@ -32,10 +32,10 @@ defmodule Fleet.PodRuntime.MixProject do
     # `~> 1.17`, fail compile). Cohérent apprentissages A1+A5 + précédent chantier 8.
     #
     # Surface SDK consommée par `TurnDispatcher` (Port write/read) wrappée derrière
-    # `PortBackend` behaviour swappable. Default `NotWiredYet` → câblage post-pod-1.18.
+    # `SDKPortBackend` behaviour swappable. Default `NotWiredYet` → câblage post-pod-1.18.
     # `StreamParser` réimplémente NDJSON parsing maison (pas import `ClaudeCode.CLI.Parser`).
     [
-      {:fleet_capprofile, in_umbrella: true},
+      {:fleet_cap_profile, in_umbrella: true},
       {:fleet_spawner, in_umbrella: true},
       {:jason, "~> 1.4"}
     ]

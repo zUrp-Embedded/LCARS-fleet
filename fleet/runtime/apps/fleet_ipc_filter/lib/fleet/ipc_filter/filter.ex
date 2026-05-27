@@ -1,4 +1,4 @@
-defmodule Fleet.IpcFilter.Filter do
+defmodule Fleet.IPCFilter.Filter do
   @moduledoc """
   Behaviour pour le filtre REFUSE_PATTERNS pre-tool-call.
 

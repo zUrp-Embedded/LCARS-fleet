@@ -1,7 +1,7 @@
 defmodule Fleet.Spawner.LaunchBackend.TmuxBackend do
   @moduledoc """
   Backend unifié U3 — lance `claude --remote-control --name <role>` dans
-  une tmux session nommée `lcars:<pod_id>`. Remplace `PortBackend` (mode
+  une tmux session nommée `lcars:<pod_id>`. Remplace `LauncherPortBackend` (mode
   `claude --print` legacy) pour le pivot RC permanent + reset via /clear.
 
   ## Pourquoi tmux
@@ -40,7 +40,7 @@ defmodule Fleet.Spawner.LaunchBackend.TmuxBackend do
 
   ## Pas de Port Erlang
 
-  Contrairement à PortBackend, on ne tient PAS un `port()` Erlang sur
+  Contrairement à LauncherPortBackend, on ne tient PAS un `port()` Erlang sur
   le process claude — la tmux session est detached, donc `Port.open` du
   tmux client retournerait immédiatement. À la place, le pod_id est la
   clé : `tmux_session` name = `"lcars:" <> pod_id`, et toutes les ops
@@ -197,13 +197,13 @@ defmodule Fleet.Spawner.LaunchBackend.TmuxBackend do
   def build_tmux_spawn(%{role: role, pod_id: pod_id} = args)
       when is_binary(role) and is_binary(pod_id) do
     session = session_name(pod_id)
-    cmd = build_claude_cmd(role, args)
+    cmd = build_pod_cmd(role, args)
     {:ok, session, cmd}
   end
 
   def build_tmux_spawn(_), do: {:error, :invalid_args}
 
-  defp build_claude_cmd(role, args) do
+  defp build_pod_cmd(role, args) do
     pod_dir = Map.get(args, :pod_dir, "")
     settings_path = Path.join([pod_dir, ".claude", "settings.json"])
     # U4 canon : `.mcp-fleet.json` (PAS `.mcp.json`) — c'est le nom écrit par

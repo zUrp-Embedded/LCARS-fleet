@@ -1,4 +1,4 @@
-defmodule Fleet.Api.Dashboard do
+defmodule Fleet.API.Dashboard do
   @moduledoc """
   Plug.Router dashboard V2 Elixir natif (chantier #594 D2).
 
@@ -19,7 +19,7 @@ defmodule Fleet.Api.Dashboard do
   ## Auth
 
   Pas d'auth HTTP — dashboard intra-release accède aux GenServers/PubSub
-  directement (ADR-C). Le `require_auth` plug de `Fleet.Api.Rest`
+  directement (ADR-C). Le `require_auth` plug de `Fleet.API.Rest`
   whitelist `/dashboard*` (GET-only, no mutation).
 
   ## Sous-tickets

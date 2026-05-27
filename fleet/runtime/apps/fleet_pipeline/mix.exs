@@ -29,10 +29,10 @@ defmodule Fleet.Pipeline.MixProject do
   defp deps do
     # Fleet.Coord (ch14) wrappé derrière `CoordBackend` behaviour swappable
     # (default `NotWiredYet`) — soft gate + coordHook deferred.
-    # Fleet.Spawner (ch6 PROMOTED) via `SpawnerBackend` (default délègue à
+    # Fleet.Spawner (ch6 PROMOTED) via `StageSpawner` (default délègue à
     # `Fleet.Spawner.spawn_pod/3`).
     [
-      {:fleet_capprofile, in_umbrella: true},
+      {:fleet_cap_profile, in_umbrella: true},
       {:fleet_spawner, in_umbrella: true},
       {:fleet_event_router, in_umbrella: true},
       {:jason, "~> 1.4"},

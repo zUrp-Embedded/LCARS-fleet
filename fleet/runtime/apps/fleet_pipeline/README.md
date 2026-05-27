@@ -1,7 +1,7 @@
 # fleet_pipeline (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-05-27
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
@@ -18,8 +18,8 @@ PROVEN 2026-05-09, profil **CONFORMANCE**).
 | `Fleet.Pipeline.Executor` | GenServer per-pipeline-run, state machine + collect events PubSub, dispatch gates, broadcast `pipeline.{stage.completed,completed,failed}` |
 | `Fleet.Pipeline.Gates` | dispatch gate par type (`:hard \| :soft \| :terminal \| nil`) |
 | `Fleet.Pipeline.Gate` | behaviour `evaluate/3` extensible compile-time |
-| `Fleet.Pipeline.StageRunner` | résolution inputs depuis prior outputs + spawn pod via `SpawnerBackend` |
-| `Fleet.Pipeline.SpawnerBackend` | seam wrap `Fleet.Spawner.spawn_pod/3` (ch6 PROMOTED) |
+| `Fleet.Pipeline.StageRunner` | résolution inputs depuis prior outputs + spawn pod via `StageSpawner` |
+| `Fleet.Pipeline.StageSpawner` | seam wrap `Fleet.Spawner.spawn_pod/3` (ch6 PROMOTED) |
 | `Fleet.Pipeline.CoordBackend` | seam wrap `Fleet.Coord` (ch14 deferred — default `NotWiredYet`) |
 
 ## Public API
@@ -70,7 +70,7 @@ Champs stage : `role` (string, required), `profile` (string, required),
   retry N rounds, ch14 deferred).
 * **`terminal`** — règles déclaratives (`required: true|false`). Toutes
   match → `:pass`. Required mismatch → `{:fail, _}`. Non-required
-  mismatch → fallback gatekeeper cap-profile via `SpawnerBackend` +
+  mismatch → fallback gatekeeper cap-profile via `StageSpawner` +
   `:retry`.
 
 ## Atom registration
@@ -90,8 +90,8 @@ mix test apps/fleet_pipeline
 
 ## Dépendances
 
-* `fleet_capprofile` (ch1) — résolution cap-profile YAML
-* `fleet_spawner` (ch6) — spawn pod via `SpawnerBackend.Default`
+* `fleet_cap_profile` (ch1) — résolution cap-profile YAML
+* `fleet_spawner` (ch6) — spawn pod via `StageSpawner.Default`
 * `fleet_event_router` (ch11) — Bus PubSub events stages
 * `fleet_coord` (ch14) — deferred via `CoordBackend.NotWiredYet`
 * `:yaml_elixir`, `:jason`, `:ex_json_schema`

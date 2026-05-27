@@ -1,7 +1,7 @@
 # fleet_coord (chantier 14)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-05-27
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_coord.md`, `STATUS-CHANTIERS.md`
 
@@ -20,9 +20,9 @@ spawn pod jetable cap-profile dédié.
 |---|---|
 | `Fleet.Coord` | delegator API publique |
 | `Fleet.Coord.Policies` | pure functions table mapping `{verdict, reason} → {action, escalation_path}` lookup `:persistent_term` cache boot-loaded `priv/config/coord-policies.yaml` + broadcast events `coord.action.*` / `coord.notify.dashboard` / `coord.escalate.human` |
-| `Fleet.Coord.SoftGate` | pure functions `invoke_soft_gate/4` spawn pod LLM one-shot via `SpawnerBackend` retry max N rounds (PoC-π2 fire-mode) |
+| `Fleet.Coord.SoftGate` | pure functions `invoke_soft_gate/4` spawn pod LLM one-shot via `HookSpawner` retry max N rounds (PoC-π2 fire-mode) |
 | `Fleet.Coord.Hook` | pure functions `invoke_hook/2` spawn pod fire-mode coordHook (PoC-π2) — MVP `:before_next` |
-| `Fleet.Coord.SpawnerBackend` | seam wrap `Fleet.Spawner.spawn_pod/3` (default `:not_wired_yet`, ch7 EXTRACT JSON deferred) |
+| `Fleet.Coord.HookSpawner` | seam wrap `Fleet.Spawner.spawn_pod/3` (default `:not_wired_yet`, ch7 EXTRACT JSON deferred) |
 
 ## Public API
 
@@ -87,7 +87,7 @@ mix test apps/fleet_coord
 ## Dépendances
 
 * `fleet_event_router` (ch11 PROMOTED) — Bus PubSub broadcast actions
-* `fleet_spawner` (ch6 PROMOTED) — derrière `SpawnerBackend.Default`
+* `fleet_spawner` (ch6 PROMOTED) — derrière `HookSpawner.NotWiredYet`
   (note : default actuel `:not_wired_yet` — wiring ch7 EXTRACT JSON
   pour récupérer outputs structurés du pod jetable)
 * `:yaml_elixir`

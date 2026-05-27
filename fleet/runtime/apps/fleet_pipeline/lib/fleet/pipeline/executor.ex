@@ -40,7 +40,7 @@ defmodule Fleet.Pipeline.Executor do
   use GenServer, restart: :transient
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Git, as: FleetGit
+  alias Fleet.Pipeline.Git, as: FleetGit
   alias Fleet.Pipeline.{Gates, Loader, PodRegistry, StageRunner, Toposort, WorkspaceProvisioner}
 
   require Logger
@@ -220,7 +220,7 @@ defmodule Fleet.Pipeline.Executor do
 
     stage_spec = state.pipeline["stages"][stage]
 
-    case Gates.dispatch(stage_spec, outputs, state.mandate_context) do
+    case Gates.evaluate(stage_spec, outputs, state.mandate_context) do
       :pass ->
         state = maybe_post_extract_git(stage, stage_spec, outputs, state)
         next_stage_or_done(state)

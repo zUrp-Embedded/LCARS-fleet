@@ -158,7 +158,7 @@ defmodule Fleet.Spawner.Pod do
       init_message: state.init_message,
       last_result: state.last_result,
       # tmux_session : nom de la session tmux du pod si TmuxBackend (RC long-
-      # lived), nil sinon (PortBackend/Stub). Exposé pour Fleet.Spawner.wake_
+      # lived), nil sinon (LauncherPortBackend/Stub). Exposé pour Fleet.Spawner.wake_
       # pod/1 (send-keys `yop` au pod cible pour nouveau cycle).
       tmux_session: state.tmux_session
     }
@@ -170,7 +170,7 @@ defmodule Fleet.Spawner.Pod do
   # #593 D11 — handle_info Port lifecycle
   # ============================================================
   #
-  # PortBackend.launch ouvre `Port.open` (sous le process Pod) et bloque
+  # LauncherPortBackend.launch ouvre `Port.open` (sous le process Pod) et bloque
   # jusqu'à la 1ʳᵉ frame `init` NDJSON. Après, le Pod reprend la main
   # (handle_continue :monitor → :extract → :release → :succeeded). Le
   # Port n'est PAS fermé : claude continue à streamer (assistant events,
@@ -178,7 +178,7 @@ defmodule Fleet.Spawner.Pod do
   # messages tombent dans le default → log unexpected message, state
   # machine ne note JAMAIS la complétion réelle.
   #
-  # Format Port options actuelles (PortBackend ligne 47-53) : `:binary`
+  # Format Port options actuelles (LauncherPortBackend ligne 47-53) : `:binary`
   # + `:exit_status`, PAS `{:line, _}` ni `{:packet, :line}` → on reçoit
   # `{port, {:data, binary_chunk}}` (multi-events ou partial), buffering
   # + split sur "\n" requis.
@@ -434,7 +434,7 @@ defmodule Fleet.Spawner.Pod do
   # get_task → submit_result + convention de retour (ok|failed). Le SP
   # final par rôle = chantier séparé post-code.
   defp read_agent_worker_draft do
-    path = Application.app_dir(:fleet_spbuilder, "priv/sp_drafts/agent-worker-base.md")
+    path = Application.app_dir(:fleet_sp_builder, "priv/sp_drafts/agent-worker-base.md")
 
     case File.read(path) do
       {:ok, content} -> {:ok, content}
@@ -445,7 +445,7 @@ defmodule Fleet.Spawner.Pod do
   # protocole-user.md (mots-clés personnalisés `yop`/`SeeU`).
   #
   # Default = `priv/sp_drafts/protocole-user-worker.md` shippé avec
-  # fleet_spbuilder : version WORKER (yop = trigger workflow ticket-driven,
+  # fleet_sp_builder : version WORKER (yop = trigger workflow ticket-driven,
   # SeeU = no-op). Override par config `:fleet_spawner, :protocole_user_path`
   # si besoin (instance utilisateur custom).
   #
@@ -457,7 +457,7 @@ defmodule Fleet.Spawner.Pod do
   defp read_protocole_user do
     case Application.get_env(:fleet_spawner, :protocole_user_path) do
       nil ->
-        path = Application.app_dir(:fleet_spbuilder, "priv/sp_drafts/protocole-user-worker.md")
+        path = Application.app_dir(:fleet_sp_builder, "priv/sp_drafts/protocole-user-worker.md")
 
         case File.read(path) do
           {:ok, content} -> {:ok, content}
@@ -500,7 +500,7 @@ defmodule Fleet.Spawner.Pod do
     # de réponse est géré par `monitor_timeout_ms/1` côté Pod GenServer
     # (Process.send_after :result_deadline). Les backends qui n'ont pas
     # leur propre script de lancement (TmuxBackend, StubBackend) n'ont pas
-    # besoin de la valeur ; PortBackend (legacy bwrap+print) recevait
+    # besoin de la valeur ; LauncherPortBackend (legacy bwrap+print) recevait
     # `budget_sec`/`budget_usd` comme args du script — ces clés sont retirées
     # de l'API LaunchBackend (cf. behaviour `Fleet.Spawner.LaunchBackend`).
     args = %{
@@ -516,7 +516,7 @@ defmodule Fleet.Spawner.Pod do
       state.env_vars
       |> Map.merge(skills_plugins_env(state.cap_profile))
       |> Map.merge(mcp_channel_env(state.pod_id))
-      # U4 — HOME=pod_dir cohérent bwrap pattern (PortBackend sous bwrap fait
+      # U4 — HOME=pod_dir cohérent bwrap pattern (LauncherPortBackend sous bwrap fait
       # `--setenv HOME` de toute façon — ce HOME ici est ignoré). TmuxBackend
       # propage via `tmux -e HOME=...` → claude REPL lit pod_dir/.claude/* (creds
       # OAuth + trust dialog skip) isolé du host. POC scope (containment dégradé).
@@ -524,11 +524,11 @@ defmodule Fleet.Spawner.Pod do
 
     case launch_backend().launch(args, env) do
       {:ok, %{init_message: init_msg, ndjson_log: ndjson_log} = launched} ->
-        # #593 D11 — extract port (PortBackend l'inclut, StubBackend non).
+        # #593 D11 — extract port (LauncherPortBackend l'inclut, StubBackend non).
         # nil-able : tests stub n'ont pas de Port → handle_info clauses
         # ne matchent jamais → comportement legacy préservé.
         port = Map.get(launched, :port)
-        # U4 — tmux_session présent quand TmuxBackend, nil sinon (PortBackend/Stub).
+        # U4 — tmux_session présent quand TmuxBackend, nil sinon (LauncherPortBackend/Stub).
         tmux_session = Map.get(launched, :tmux_session)
 
         new_state =
@@ -556,7 +556,7 @@ defmodule Fleet.Spawner.Pod do
         #   Anthropic. send-keys (control plane) reste universel, le brief est
         #   injecté tel quel dans le REPL, claude l'exécute comme prompt.
         #
-        # Path PortBackend : pas applicable (brief.md sur disk lu par claude_launch).
+        # Path LauncherPortBackend : pas applicable (brief.md sur disk lu par claude_launch).
         # Path Stub (tests) : no-op (pas de tmux_session retourné).
         #
         # PushDispatcher + ChannelHTTP (U2) restent en place pour activation future
@@ -650,7 +650,7 @@ defmodule Fleet.Spawner.Pod do
     # R1.2 — tue le pod interactif (Port.close → claude/bwrap/script terminés) puis ARRÊT NORMAL
     # du GenServer (H-S1 : avant, le Pod restait vivant après :succeeded → memory leak du
     # DynamicSupervisor). restart: :transient → pas de respawn sur :normal.
-    # U4 — TmuxBackend (RC long-lived) : kill_session via tmux. PortBackend : Port.close.
+    # U4 — TmuxBackend (RC long-lived) : kill_session via tmux. LauncherPortBackend : Port.close.
     # Sélection mutuellement exclusive (un seul backend par lifecycle pod).
     cond do
       is_port(state.port) and Port.info(state.port) ->
@@ -960,7 +960,7 @@ defmodule Fleet.Spawner.Pod do
     Application.get_env(
       :fleet_spawner,
       :launch_backend,
-      Fleet.Spawner.LaunchBackend.PortBackend
+      Fleet.Spawner.LaunchBackend.LauncherPortBackend
     )
   end
 
@@ -975,7 +975,7 @@ defmodule Fleet.Spawner.Pod do
   # R-CORE.comm — serveur MCP fleet (canal de comm UNIQUE pod↔fleet ; jamais de scraping).
   # Config = chemin pod-accessible (hors /home,/tmp, comme bwrap/claude_launch). IRON LAW : un pod
   # RÉEL parle MCP, point — il n'y a PAS de mode fichier alternatif. `nil` n'est légitime QUE pour
-  # les tests à launch-stub (claude pas lancé) ; un backend réel (PortBackend) sans spec MCP est un
+  # les tests à launch-stub (claude pas lancé) ; un backend réel (LauncherPortBackend) sans spec MCP est un
   # bug de config (le brief instruit submit_result, impossible sans serveur).
   #
   # UN mécanisme paramétré (Iron Law) : la config fournit la spec serveur (`command`/`args`/`env`),
@@ -1008,7 +1008,7 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # U4 — Injection brief au claude REPL via tmux send-keys (load-buffer + paste-buffer).
-  # No-op si pas de tmux_session (PortBackend / StubBackend → brief reste sur disk
+  # No-op si pas de tmux_session (LauncherPortBackend / StubBackend → brief reste sur disk
   # brief.md, lu par claude_launch.sh).
   #
   # Délai `@brief_inject_delay_ms` avant inject : le claude REPL n'est pas

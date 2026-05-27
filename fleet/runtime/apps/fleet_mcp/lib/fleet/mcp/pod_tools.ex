@@ -30,8 +30,8 @@ defmodule Fleet.MCP.PodTools do
       name("Get Task")
 
       description(
-        "Recupere ta prochaine tache aupres du fleet LCARS. Retourne " <>
-          "{\"done\":true} quand il n'y a plus de tache (tu t'arretes alors), " <>
+        "Récupère ta prochaine tâche auprès du fleet LCARS. Retourne " <>
+          "{\"done\":true} quand il n'y a plus de tâche (tu t'arrêtes alors), " <>
           "sinon {\"done\":false,\"task\":{...}}."
       )
     end
@@ -42,7 +42,7 @@ defmodule Fleet.MCP.PodTools do
   deftool "submit_result" do
     meta do
       name("Submit Result")
-      description("Retourne le resultat structure d'une tache au fleet LCARS, dans `payload`.")
+      description("Retourne le résultat structuré d'une tâche au fleet LCARS, dans `payload`.")
     end
 
     input_schema(%{

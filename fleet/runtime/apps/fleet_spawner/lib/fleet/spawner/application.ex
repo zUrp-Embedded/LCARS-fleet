@@ -7,7 +7,7 @@ defmodule Fleet.Spawner.Application do
 
   Le DN `permanent-pods-boot.md` §"Contrat technique" montre un spawn
   post-readiness dans `Application.start`. MAIS l'intersection DN L344
-  attribue l'orchestration readiness (`fleet_mcp` + `fleet_capprofile`
+  attribue l'orchestration readiness (`fleet_mcp` + `fleet_cap_profile`
   ready, timeout 60s) au **startup probe `lcars-fleet_service`** (ring0,
   encodé plus loin dans ce mandat) — pas à fleet_spawner.
 

@@ -51,7 +51,7 @@ defmodule Fleet.Spawner.LaunchBackend.TmuxBackendTest do
         # SKIP — pas de tmux dans le PATH (CI sans tmux)
         :ok
       else
-        # On override la cmd via build_claude_cmd-like fake : ici on appelle
+        # On override la cmd via build_pod_cmd-like fake : ici on appelle
         # directement spawn_session via launch/2 mais avec un fake claude.
         # Pour test sans claude réel, on bypass et fait juste tmux new-session
         # via System.cmd directement.

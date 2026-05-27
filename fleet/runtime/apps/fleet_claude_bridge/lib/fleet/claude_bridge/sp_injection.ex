@@ -1,7 +1,7 @@
 defmodule Fleet.ClaudeBridge.SPInjection do
   @moduledoc """
   Build flags `claude -p` `--system-prompt-file` + `--append-system-prompt-file`
-  cohérents `fleet_spbuilder` chantier 2 (N2 / N2bis).
+  cohérents `fleet_sp_builder` chantier 2 (N2 / N2bis).
 
   Consommé indirectement par `bin/claude_launch.sh` (chantier 5
   PROMOTED) via env vars + paths résolus côté `Fleet.Spawner.Pod`

@@ -1,14 +1,14 @@
-defmodule Fleet.Api.Application do
+defmodule Fleet.API.Application do
   @moduledoc """
   Application supervisor `fleet_api`.
 
   Démarre :
 
-    1. `Fleet.Api.RelayHandler` GenServer (subscribe Bus +
+    1. `Fleet.API.RelayHandler` GenServer (subscribe Bus +
        ETS pending refs)
     2. Cowboy listener `:8080` avec dispatch :
-       - `/ws` → `Fleet.Api.Ws` (WebSocket handler)
-       - `/_*` → `Fleet.Api.Rest` (Plug.Router REST)
+       - `/ws` → `Fleet.API.WS` (WebSocket handler)
+       - `/_*` → `Fleet.API.Rest` (Plug.Router REST)
 
   ## Configuration
 
@@ -39,7 +39,7 @@ defmodule Fleet.Api.Application do
   def start(_type, _args) do
     children = base_children() ++ listener_children()
 
-    opts = [strategy: :one_for_one, name: Fleet.Api.Supervisor]
+    opts = [strategy: :one_for_one, name: Fleet.API.Supervisor]
 
     case Supervisor.start_link(children, opts) do
       {:ok, _} = ok ->
@@ -68,12 +68,12 @@ defmodule Fleet.Api.Application do
           :ok = :gen_udp.send(s, {:local, socket}, 0, "READY=1\n")
           :gen_udp.close(s)
           require Logger
-          Logger.info("Fleet.Api: sd_notify READY=1 sent to #{socket}")
+          Logger.info("Fleet.API: sd_notify READY=1 sent to #{socket}")
           :ok
         rescue
           e ->
             require Logger
-            Logger.warning("Fleet.Api: sd_notify failed (non-fatal): #{inspect(e)}")
+            Logger.warning("Fleet.API: sd_notify failed (non-fatal): #{inspect(e)}")
             :ok
         end
 
@@ -96,7 +96,7 @@ defmodule Fleet.Api.Application do
     # config (évite race conditions cross-caller sur snapshot/rename/
     # git add/commit/rollback). Pas de cycle, pas de state mutable —
     # juste un mutex de file FIFO.
-    [Fleet.Api.GitCommitter, Fleet.Api.RelayHandler]
+    [Fleet.API.GitCommitter, Fleet.API.RelayHandler]
   end
 
   defp listener_children do
@@ -113,14 +113,14 @@ defmodule Fleet.Api.Application do
       dispatch = [
         {:_,
          [
-           {"/ws", Fleet.Api.Ws, []},
-           {:_, Plug.Cowboy.Handler, {Fleet.Api.Rest, []}}
+           {"/ws", Fleet.API.WS, []},
+           {:_, Plug.Cowboy.Handler, {Fleet.API.Rest, []}}
          ]}
       ]
 
       [
         {Plug.Cowboy,
-         scheme: :http, plug: Fleet.Api.Rest, options: [port: port, dispatch: dispatch]}
+         scheme: :http, plug: Fleet.API.Rest, options: [port: port, dispatch: dispatch]}
       ]
     else
       []

@@ -1,0 +1,64 @@
+# Cap-profile : qualifier
+# Date : 2026-05-18
+# Référencé par : design-notes/ring2/cap-profiles.md (tableau récap §L111)
+# Schema : ../../07_code/runtime-v2/apps/fleet_cap_profile/priv/schema/cap-profile-v2.5.json
+kind: CapabilityProfile
+metadata:
+  name: qualifier
+  containment: bwrap
+spec:
+  scope:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      - Bash(git diff:*)
+      - Bash(git log:*)
+      - Bash(git show:*)
+      - Bash(mix test:*)
+      - Bash(pytest:*)
+      - Write
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+    # `push --force` et `reset --hard` déclarés au baseline universel
+    # (`_baseline-git-denied.yaml`) — pas dupliqués ici. Restent les
+    # restrictions spécifiques qualifier : pas de push (verdict-only)
+    # et pas de rebase (préserve l'historique testé).
+    git_ops_denied: ["push", "rebase"]
+    outputs: ["/home/commons/qualifier/"]
+  knowledge:
+    libs:
+      - methodologie-axiome-inference-vs-mecanisable
+      - methodologie-protocole-design-note
+    skills: []  # modops listés dans modop_set
+    mcpServers: []
+    plugins: []
+    monk_registry: null
+    monk_instance: null
+  invocation:
+    lifetime_scope: one-shot
+    boot_at_start: false
+    subagent_template: spec-reviewer
+    mcp_channels: ["fleet-control.qualifier.*", "fleet-forge.qualifier"]  # fleet-control: Memory-X + coord ; fleet-forge: routing tickets Gitea
+    host_native: false
+    max_alive_sec: 1800
+    heartbeat_keepalive: false
+    bridge_enabled: false
+    policy: hide
+    rubber_duck_enabled: false
+    long_session_protocol: false
+    output_format: json
+  injects:
+    gitconfig: false
+    forge_signing_allowed: false
+  modop_set:
+    default: [fire-mode]
+    optional: [dual-review]
+    incompatible: [[fire-mode, long-session-discipline]]
+  project: null

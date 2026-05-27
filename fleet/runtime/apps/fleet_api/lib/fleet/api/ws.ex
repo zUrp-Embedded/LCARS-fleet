@@ -1,4 +1,4 @@
-defmodule Fleet.Api.Ws do
+defmodule Fleet.API.WS do
   @moduledoc """
   Cowboy WebSocket handler `:8080/ws` subscribe `Fleet.EventRouter.Bus`
   topic `fleet.events` + filtre per-client topics + heartbeat ping/pong

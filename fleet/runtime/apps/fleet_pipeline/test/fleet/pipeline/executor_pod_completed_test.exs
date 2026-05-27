@@ -1,13 +1,13 @@
 defmodule Fleet.Pipeline.PodCompletedCaptureStub do
   @moduledoc """
-  Stub SpawnerBackend pour R1.3 (hole C1) : retourne `{:ok, pod_id}` SANS émettre
+  Stub StageSpawner pour R1.3 (hole C1) : retourne `{:ok, pod_id}` SANS émettre
   `pipeline.stage.completed` (contrairement à SpawnerBackendStub) — pour tester le
   VRAI chemin où c'est `pod.completed` qui pilote l'avancement. Capture les spawn_opts
   reçus (preuve que StageRunner injecte pipeline_id+stage) vers le process `:r13_probe`.
   """
-  @behaviour Fleet.Pipeline.SpawnerBackend
+  @behaviour Fleet.Pipeline.StageSpawner
 
-  @impl Fleet.Pipeline.SpawnerBackend
+  @impl Fleet.Pipeline.StageSpawner
   def spawn_stage_pod(_role, _profile, stage_ctx) do
     send(:r13_probe, {:spawned, stage_ctx.stage, Map.get(stage_ctx, :spawn_opts)})
     {:ok, "pod-#{stage_ctx.stage}"}

@@ -1,41 +1,41 @@
-defmodule Fleet.Api.WsTest do
+defmodule Fleet.API.WSTest do
   use ExUnit.Case, async: true
 
-  alias Fleet.Api.Ws
+  alias Fleet.API.WS
 
   describe "topic_matches?/2" do
     test "topics vide → match all" do
-      assert Ws.topic_matches?("anything", [])
-      assert Ws.topic_matches?("pipeline.completed", [])
+      assert WS.topic_matches?("anything", [])
+      assert WS.topic_matches?("pipeline.completed", [])
     end
 
     test "exact match" do
-      assert Ws.topic_matches?("pipeline.completed", ["pipeline.completed"])
-      refute Ws.topic_matches?("pod.started", ["pipeline.completed"])
+      assert WS.topic_matches?("pipeline.completed", ["pipeline.completed"])
+      refute WS.topic_matches?("pod.started", ["pipeline.completed"])
     end
 
     test "wildcard suffix .*" do
-      assert Ws.topic_matches?("pipeline.completed", ["pipeline.*"])
-      assert Ws.topic_matches?("pipeline.failed", ["pipeline.*"])
-      assert Ws.topic_matches?("pipeline.stage.completed", ["pipeline.*"])
-      refute Ws.topic_matches?("pod.started", ["pipeline.*"])
+      assert WS.topic_matches?("pipeline.completed", ["pipeline.*"])
+      assert WS.topic_matches?("pipeline.failed", ["pipeline.*"])
+      assert WS.topic_matches?("pipeline.stage.completed", ["pipeline.*"])
+      refute WS.topic_matches?("pod.started", ["pipeline.*"])
     end
 
     test "multi patterns OR" do
-      assert Ws.topic_matches?("pipeline.completed", ["pod.*", "pipeline.*"])
-      assert Ws.topic_matches?("pod.started", ["pod.*", "pipeline.*"])
-      refute Ws.topic_matches?("audit.log", ["pod.*", "pipeline.*"])
+      assert WS.topic_matches?("pipeline.completed", ["pod.*", "pipeline.*"])
+      assert WS.topic_matches?("pod.started", ["pod.*", "pipeline.*"])
+      refute WS.topic_matches?("audit.log", ["pod.*", "pipeline.*"])
     end
 
     test "exact + wildcard mix" do
-      assert Ws.topic_matches?("audit.log", ["audit.log", "pod.*"])
-      assert Ws.topic_matches?("pod.started", ["audit.log", "pod.*"])
+      assert WS.topic_matches?("audit.log", ["audit.log", "pod.*"])
+      assert WS.topic_matches?("pod.started", ["audit.log", "pod.*"])
     end
   end
 
   describe "websocket_init/1" do
     test "subscribe Bus + init heartbeat + frame connected" do
-      assert {[{:text, frame}], state} = Ws.websocket_init(%{topics: []})
+      assert {[{:text, frame}], state} = WS.websocket_init(%{topics: []})
       assert frame == ~s|{"type":"connected"}|
       assert state == %{topics: []}
 
@@ -47,7 +47,7 @@ defmodule Fleet.Api.WsTest do
     test "{action: subscribe, topics: [...]} → ack + state.topics updated" do
       msg = Jason.encode!(%{action: "subscribe", topics: ["pipeline.*", "pod.*"]})
 
-      assert {[{:text, frame}], new_state} = Ws.websocket_handle({:text, msg}, %{topics: []})
+      assert {[{:text, frame}], new_state} = WS.websocket_handle({:text, msg}, %{topics: []})
 
       assert {:ok, %{"type" => "subscribed", "topics" => ["pipeline.*", "pod.*"]}} =
                Jason.decode(frame)
@@ -56,14 +56,14 @@ defmodule Fleet.Api.WsTest do
     end
 
     test "JSON malformé → error frame, state inchangé" do
-      assert {[{:text, frame}], state} = Ws.websocket_handle({:text, "not json"}, %{topics: []})
+      assert {[{:text, frame}], state} = WS.websocket_handle({:text, "not json"}, %{topics: []})
       assert frame =~ "invalid_msg"
       assert state == %{topics: []}
     end
 
     test "action inconnue → error frame" do
       msg = Jason.encode!(%{action: "weird"})
-      assert {[{:text, frame}], _} = Ws.websocket_handle({:text, msg}, %{topics: []})
+      assert {[{:text, frame}], _} = WS.websocket_handle({:text, msg}, %{topics: []})
       assert frame =~ "unknown action"
     end
   end
@@ -73,7 +73,7 @@ defmodule Fleet.Api.WsTest do
       event = %{"event_type" => "pipeline.completed", "payload" => %{"id" => "p1"}}
 
       assert {[{:text, frame}], state} =
-               Ws.websocket_info({:any_atom, event}, %{topics: ["pipeline.*"]})
+               WS.websocket_info({:any_atom, event}, %{topics: ["pipeline.*"]})
 
       assert {:ok,
               %{
@@ -88,20 +88,20 @@ defmodule Fleet.Api.WsTest do
     test "event non matching → no frame, state inchangé" do
       event = %{"event_type" => "audit.log", "payload" => %{}}
 
-      assert {[], state} = Ws.websocket_info({:any_atom, event}, %{topics: ["pipeline.*"]})
+      assert {[], state} = WS.websocket_info({:any_atom, event}, %{topics: ["pipeline.*"]})
       assert state == %{topics: ["pipeline.*"]}
     end
 
     test "topics vide → match all" do
       event = %{"event_type" => "anything", "payload" => %{}}
 
-      assert {[{:text, frame}], _} = Ws.websocket_info({:any_atom, event}, %{topics: []})
+      assert {[{:text, frame}], _} = WS.websocket_info({:any_atom, event}, %{topics: []})
       assert frame =~ "anything"
     end
 
     test "heartbeat → ping frame + reschedule" do
       assert {[{:text, ~s|{"type":"ping"}|}], state} =
-               Ws.websocket_info(:heartbeat, %{topics: []})
+               WS.websocket_info(:heartbeat, %{topics: []})
 
       assert state == %{topics: []}
 
@@ -110,7 +110,7 @@ defmodule Fleet.Api.WsTest do
     end
 
     test "message inconnu → no frame" do
-      assert {[], state} = Ws.websocket_info(:other, %{topics: []})
+      assert {[], state} = WS.websocket_info(:other, %{topics: []})
       assert state == %{topics: []}
     end
   end

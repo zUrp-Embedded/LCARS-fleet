@@ -127,7 +127,7 @@ defmodule Fleet.Spawner do
     - `:ok` — send-keys exécuté.
     - `{:error, :not_found}` — pod_id inconnu (jamais spawn ou déjà kill).
     - `{:error, :not_a_tmux_pod}` — pod existe mais pas via TmuxBackend
-      (PortBackend/Stub) → pas de tmux_session pour send-keys.
+      (LauncherPortBackend/Stub) → pas de tmux_session pour send-keys.
     - `{:error, term}` — erreur send-keys tmux (session morte côté tmux,
       etc.).
   """

@@ -31,7 +31,7 @@ defmodule Fleet.PodRuntime.TurnDispatcher do
   ## Surface SDK isolée
 
   Les Port write opérations sont déléguées à un module backend
-  implémentant `Fleet.PodRuntime.PortBackend`. Le default
+  implémentant `Fleet.PodRuntime.SDKPortBackend`. Le default
   `NotWiredYet` retourne `:not_wired_yet` (cf moduledoc Application).
   """
 
@@ -55,7 +55,7 @@ defmodule Fleet.PodRuntime.TurnDispatcher do
     * `:port_ref` (obligatoire) — référence Port BEAM (term opaque)
     * `:port_backend` (optionnel) — module backend Port. Default :
       Application config `:fleet_pod_runtime, :port_backend` (sinon
-      `PortBackend.NotWiredYet`)
+      `SDKPortBackend.NotWiredYet`)
     * `:name` (optionnel) — nom OTP enregistré
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -180,7 +180,7 @@ defmodule Fleet.PodRuntime.TurnDispatcher do
     Application.get_env(
       :fleet_pod_runtime,
       :port_backend,
-      Fleet.PodRuntime.PortBackend.NotWiredYet
+      Fleet.PodRuntime.SDKPortBackend.NotWiredYet
     )
   end
 end

@@ -1,6 +1,6 @@
 defmodule Fleet.Pipeline.Gates do
   @moduledoc """
-  Dispatch gates par type — `:hard | :soft | :terminal | nil`.
+  Évalue les gates par type — `:hard | :soft | :terminal | nil`.
 
   Types :
 
@@ -9,7 +9,7 @@ defmodule Fleet.Pipeline.Gates do
       one-shot retry N rounds, chantier 14).
     * **terminal** — `Terminal.evaluate_rules/2` règles déclaratives
       d'abord ; `:nontranchable` → fallback gatekeeper cap-profile via
-      `SpawnerBackend.spawn_stage_pod/3` async, gate retourne `:retry`
+      `StageSpawner.spawn_stage_pod/3` async, gate retourne `:retry`
       pour ré-évaluation post-gatekeeper.
     * **nil / absent** — `:pass` direct.
 
@@ -24,16 +24,16 @@ defmodule Fleet.Pipeline.Gates do
   @behaviour Fleet.Pipeline.Gate
 
   # Mi4 : Gates EST l'implémentation MVP du behaviour Fleet.Pipeline.Gate (hard/soft/terminal).
-  # evaluate/3 = point d'entrée du contrat, délègue au dispatch pattern-matché ci-dessous.
+  # evaluate/3 = point d'entrée du contrat, délègue à eval_by_type pattern-matché ci-dessous.
   @impl Fleet.Pipeline.Gate
-  def evaluate(stage, outputs, ctx), do: dispatch(stage, outputs, ctx)
+  def evaluate(stage, outputs, ctx), do: eval_by_type(stage, outputs, ctx)
 
-  @spec dispatch(stage :: map(), outputs :: map(), ctx :: map()) ::
+  @spec eval_by_type(stage :: map(), outputs :: map(), ctx :: map()) ::
           :pass | {:fail, String.t()} | :retry
-  def dispatch(%{"gate" => nil}, _outputs, _ctx), do: :pass
-  def dispatch(stage, _outputs, _ctx) when not is_map_key(stage, "gate"), do: :pass
+  defp eval_by_type(%{"gate" => nil}, _outputs, _ctx), do: :pass
+  defp eval_by_type(stage, _outputs, _ctx) when not is_map_key(stage, "gate"), do: :pass
 
-  def dispatch(%{"gate" => %{"type" => "hard", "rule" => rule}}, outputs, _ctx) do
+  defp eval_by_type(%{"gate" => %{"type" => "hard", "rule" => rule}}, outputs, _ctx) do
     if __MODULE__.Hard.matches?(rule, outputs) do
       :pass
     else
@@ -41,12 +41,12 @@ defmodule Fleet.Pipeline.Gates do
     end
   end
 
-  def dispatch(%{"gate" => %{"type" => "soft"} = gate} = stage, outputs, ctx) do
+  defp eval_by_type(%{"gate" => %{"type" => "soft"} = gate} = stage, outputs, ctx) do
     max_rounds = Map.get(gate, "max_rounds", 3)
     coord_backend().invoke_soft_gate(stage, outputs, ctx, max_rounds: max_rounds)
   end
 
-  def dispatch(%{"gate" => %{"type" => "terminal", "rules" => rules}} = stage, outputs, ctx) do
+  defp eval_by_type(%{"gate" => %{"type" => "terminal", "rules" => rules}} = stage, outputs, ctx) do
     case __MODULE__.Terminal.evaluate_rules(rules, outputs) do
       :pass ->
         :pass
@@ -76,7 +76,7 @@ defmodule Fleet.Pipeline.Gates do
     Application.get_env(
       :fleet_pipeline,
       :spawner_backend,
-      Fleet.Pipeline.SpawnerBackend.Default
+      Fleet.Pipeline.StageSpawner.Default
     )
   end
 

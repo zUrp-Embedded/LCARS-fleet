@@ -15,10 +15,10 @@ defmodule Fleet.Pipeline.ModopsConsumptionTest do
 
   # R0.8-brick6 : canon réabsorbé in-repo. modop-bundles + subagent-templates +
   # pipelines vivent dans `apps/fleet_pipeline/priv/canon/` ; cap-profiles dans
-  # `apps/fleet_capprofile/priv/canon/cap-profiles/` (R0.7). Pattern identique
+  # `apps/fleet_cap_profile/priv/canon/cap-profiles/` (R0.7). Pattern identique
   # brick1 MonkTest + brick5 PermanentBootTest (Application.app_dir).
   @canon Application.app_dir(:fleet_pipeline, "priv/canon")
-  @cap_profiles Application.app_dir(:fleet_capprofile, "priv/canon/cap-profiles")
+  @cap_profiles Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles")
 
   @bundles ~w(archive-mode brainstorming dual-review fire-mode long-session-discipline
               persuasion-discipline rubber-duck subagent-driven tdd)

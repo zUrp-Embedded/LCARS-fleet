@@ -1,8 +1,8 @@
-defmodule Fleet.Api.GitCommitterTest do
+defmodule Fleet.API.GitCommitterTest do
   use ExUnit.Case, async: false
   @moduletag :tmp_dir
 
-  alias Fleet.Api.GitCommitter
+  alias Fleet.API.GitCommitter
 
   setup %{tmp_dir: tmp_dir} do
     System.cmd("git", ["init", "--quiet"], cd: tmp_dir, stderr_to_stdout: true)

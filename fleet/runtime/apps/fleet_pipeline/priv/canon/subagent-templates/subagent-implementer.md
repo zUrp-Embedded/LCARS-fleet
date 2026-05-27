@@ -1,7 +1,7 @@
 # Subagent template — implementer
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-26
+**Dernière révision** : 2026-05-27
 **Statut** : actif — fragment SP cap-profile dev (implementer one-shot subagent)
 **Dérivé de** : superpowers/prompts/subagent-implementer.md (ADAPT) + LCARS cap-profile workers fire-mode
 
@@ -11,7 +11,7 @@
 
 Fragment SP injecté dans cap-profile `engineer.yaml` (lifetime_scope: one-shot) quand dispatché via `modop:subagent-driven` par orchestrateur engineer.
 
-Composé par `fleet_spbuilder` :
+Composé par `fleet_sp_builder` :
 ```
 SP = [anthropic-lcars, core/v1, organisation/topologie, modop/tdd, modop/fire-mode, modop/subagent-driven, modop/rubber-duck, role/dev, subagent-template/implementer]
 ```

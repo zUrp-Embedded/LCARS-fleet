@@ -1,9 +1,9 @@
-defmodule Fleet.IpcFilterTest do
+defmodule Fleet.IPCFilterTest do
   use ExUnit.Case, async: false
   @moduletag :tmp_dir
 
-  alias Fleet.IpcFilter
-  alias Fleet.IpcFilter.EventCapture
+  alias Fleet.IPCFilter
+  alias Fleet.IPCFilter.EventCapture
 
   @sample_patterns [
     %{
@@ -40,8 +40,8 @@ defmodule Fleet.IpcFilterTest do
     Application.put_env(:fleet_ipc_filter, :event_capture_target, self())
     Application.put_env(:fleet_ipc_filter, :drift_threshold, 3)
 
-    :ok = IpcFilter.init_patterns!()
-    :ok = IpcFilter.reset_drift()
+    :ok = IPCFilter.init_patterns!()
+    :ok = IPCFilter.reset_drift()
 
     on_exit(fn ->
       [
@@ -69,7 +69,7 @@ defmodule Fleet.IpcFilterTest do
       File.write!(patterns_path, Jason.encode!(bad))
 
       assert_raise RuntimeError, ~r/schema invalide/, fn ->
-        IpcFilter.init_patterns!()
+        IPCFilter.init_patterns!()
       end
     end
 
@@ -87,7 +87,7 @@ defmodule Fleet.IpcFilterTest do
       File.write!(patterns_path, Jason.encode!(bad))
 
       assert_raise RuntimeError, ~r/regex invalide/, fn ->
-        IpcFilter.init_patterns!()
+        IPCFilter.init_patterns!()
       end
     end
 
@@ -95,7 +95,7 @@ defmodule Fleet.IpcFilterTest do
       Application.put_env(:fleet_ipc_filter, :refuse_patterns_path, "/nonexistent/path.json")
 
       assert_raise File.Error, fn ->
-        IpcFilter.init_patterns!()
+        IPCFilter.init_patterns!()
       end
     end
   end
@@ -105,12 +105,12 @@ defmodule Fleet.IpcFilterTest do
       tool_call = %{"name" => "Read", "input" => %{"path" => "/tmp/foo.txt"}}
       ctx = %{pod_id: "pod-1", ticket_id: "ticket-42"}
 
-      assert :allow = IpcFilter.filter_tool_call(tool_call, ctx)
+      assert :allow = IPCFilter.filter_tool_call(tool_call, ctx)
     end
 
     test "tool_call avec input vide retourne :allow" do
       assert :allow =
-               IpcFilter.filter_tool_call(%{"name" => "Glob", "input" => %{}}, %{pod_id: "p"})
+               IPCFilter.filter_tool_call(%{"name" => "Glob", "input" => %{}}, %{pod_id: "p"})
     end
   end
 
@@ -122,7 +122,7 @@ defmodule Fleet.IpcFilterTest do
       }
 
       assert {:deny, reason} =
-               IpcFilter.filter_tool_call(tool_call, %{pod_id: "p1", ticket_id: "t1"})
+               IPCFilter.filter_tool_call(tool_call, %{pod_id: "p1", ticket_id: "t1"})
 
       assert reason =~ "REFUSE_PATTERN matched: force-push"
     end
@@ -131,7 +131,7 @@ defmodule Fleet.IpcFilterTest do
       tool_call = %{"name" => "Bash", "input" => %{"command" => "rm -rf .git"}}
 
       assert {:deny, reason} =
-               IpcFilter.filter_tool_call(tool_call, %{pod_id: "p1", ticket_id: "t1"})
+               IPCFilter.filter_tool_call(tool_call, %{pod_id: "p1", ticket_id: "t1"})
 
       assert reason =~ "rm-git"
     end
@@ -140,7 +140,7 @@ defmodule Fleet.IpcFilterTest do
       tool_call = %{"name" => "web_search", "input" => %{"query" => "fleet"}}
 
       assert {:deny, reason} =
-               IpcFilter.filter_tool_call(tool_call, %{pod_id: "p1", ticket_id: "t1"})
+               IPCFilter.filter_tool_call(tool_call, %{pod_id: "p1", ticket_id: "t1"})
 
       assert reason =~ "web-search-attempted"
     end
@@ -149,7 +149,7 @@ defmodule Fleet.IpcFilterTest do
       tool_call = %{"name" => "Bash", "input" => %{"command" => "git push --force"}}
       ctx = %{pod_id: "pod-X", ticket_id: "T-99"}
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
 
       assert_received {:ipc_event, :refuse_pattern_match,
                        %{pod_id: "pod-X", ticket_id: "T-99", pattern: "force-push"}}
@@ -161,7 +161,7 @@ defmodule Fleet.IpcFilterTest do
       tool_call = %{"name" => "Bash", "input" => %{"command" => "git push --force"}}
       ctx = %{pod_id: "pod-A", ticket_id: "T-1"}
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
 
       assert File.exists?(audit_path)
       line = File.read!(audit_path) |> String.trim()
@@ -179,9 +179,9 @@ defmodule Fleet.IpcFilterTest do
       tool_call = %{"name" => "Bash", "input" => %{"command" => "git push --force"}}
       ctx = %{pod_id: "pod-A", ticket_id: "T-1"}
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
 
       lines = File.read!(audit_path) |> String.trim() |> String.split("\n")
       assert length(lines) == 3
@@ -190,50 +190,50 @@ defmodule Fleet.IpcFilterTest do
 
   describe "drift counter — escalade :pod_drift après 3 strikes" do
     test "drift_for/1 = 0 si jamais incrémenté" do
-      assert IpcFilter.drift_for("pod-fresh") == 0
+      assert IPCFilter.drift_for("pod-fresh") == 0
     end
 
     test "drift increment cumul cross-calls" do
       tool_call = %{"name" => "Bash", "input" => %{"command" => "git push --force"}}
       ctx = %{pod_id: "pod-drift-1", ticket_id: "T"}
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
-      assert IpcFilter.drift_for("pod-drift-1") == 1
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
+      assert IPCFilter.drift_for("pod-drift-1") == 1
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
-      assert IpcFilter.drift_for("pod-drift-1") == 2
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
+      assert IPCFilter.drift_for("pod-drift-1") == 2
     end
 
     test ":pod_drift broadcast au seuil 3" do
       tool_call = %{"name" => "Bash", "input" => %{"command" => "git push --force"}}
       ctx = %{pod_id: "pod-escalade", ticket_id: "T"}
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
       refute_received {:ipc_event, :pod_drift, _}
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, ctx)
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, ctx)
       assert_received {:ipc_event, :pod_drift, %{pod_id: "pod-escalade", drift_count: 3}}
     end
 
     test "drift counters par pod_id distincts" do
       tool_call = %{"name" => "Bash", "input" => %{"command" => "git push --force"}}
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, %{pod_id: "pod-A", ticket_id: "T"})
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, %{pod_id: "pod-B", ticket_id: "T"})
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, %{pod_id: "pod-A", ticket_id: "T"})
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, %{pod_id: "pod-B", ticket_id: "T"})
 
-      assert IpcFilter.drift_for("pod-A") == 1
-      assert IpcFilter.drift_for("pod-B") == 1
+      assert IPCFilter.drift_for("pod-A") == 1
+      assert IPCFilter.drift_for("pod-B") == 1
     end
 
     test "reset_drift/0 efface tous les compteurs" do
       tool_call = %{"name" => "Bash", "input" => %{"command" => "git push --force"}}
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, %{pod_id: "pod-Z", ticket_id: "T"})
-      assert IpcFilter.drift_for("pod-Z") == 1
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, %{pod_id: "pod-Z", ticket_id: "T"})
+      assert IPCFilter.drift_for("pod-Z") == 1
 
-      :ok = IpcFilter.reset_drift()
-      assert IpcFilter.drift_for("pod-Z") == 0
+      :ok = IPCFilter.reset_drift()
+      assert IPCFilter.drift_for("pod-Z") == 0
     end
   end
 
@@ -242,19 +242,19 @@ defmodule Fleet.IpcFilterTest do
       Application.put_env(
         :fleet_ipc_filter,
         :event_backend,
-        Fleet.IpcFilter.EventBackend.NotWiredYet
+        Fleet.IPCFilter.EventBackend.NotWiredYet
       )
 
       tool_call = %{"name" => "Bash", "input" => %{"command" => "git push --force"}}
 
-      {:deny, _} = IpcFilter.filter_tool_call(tool_call, %{pod_id: "pod-nw", ticket_id: "T"})
+      {:deny, _} = IPCFilter.filter_tool_call(tool_call, %{pod_id: "pod-nw", ticket_id: "T"})
       refute_received {:ipc_event, _, _}
     end
   end
 
   describe "behaviour conformance" do
-    test "Fleet.IpcFilter implémente Fleet.IpcFilter.Filter" do
-      callbacks = Fleet.IpcFilter.Filter.behaviour_info(:callbacks)
+    test "Fleet.IPCFilter implémente Fleet.IPCFilter.Filter" do
+      callbacks = Fleet.IPCFilter.Filter.behaviour_info(:callbacks)
       assert {:filter_tool_call, 2} in callbacks
     end
   end

@@ -1,4 +1,4 @@
-defmodule Fleet.IpcFilter.MixProject do
+defmodule Fleet.IPCFilter.MixProject do
   use Mix.Project
 
   def project do
@@ -22,13 +22,13 @@ defmodule Fleet.IpcFilter.MixProject do
   def application do
     [
       extra_applications: [:logger],
-      mod: {Fleet.IpcFilter.Application, []}
+      mod: {Fleet.IPCFilter.Application, []}
     ]
   end
 
   defp deps do
     # ETS cache + regex `:re` PCRE2 stdlib + jason + ex_json_schema (dep transitive
-    # ch1 fleet_capprofile). Phoenix.PubSub event broadcast wrappé derrière
+    # ch1 fleet_cap_profile). Phoenix.PubSub event broadcast wrappé derrière
     # `EventBackend` behaviour swappable (default `NotWiredYet` jusqu'à chantier 11
     # `fleet_event_router`). Pas dep `:phoenix_pubsub` ici.
     [

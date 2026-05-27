@@ -1,7 +1,7 @@
 defmodule Fleet.Pipeline.StageRunner do
   @moduledoc """
   Orchestre l'exécution d'1 stage : prep `inputs` (résolution depuis
-  outputs prior stages) → spawn ou wake pod via `SpawnerBackend` /
+  outputs prior stages) → spawn ou wake pod via `StageSpawner` /
   `PodRegistry` → outputs collectés async par Executor via PubSub
   `:pipeline_stage_completed`.
 
@@ -16,7 +16,7 @@ defmodule Fleet.Pipeline.StageRunner do
   `PodRegistry` mappe `{pipeline_id, role} → pod_id` :
 
     * 1er passage (spawn) → push task `TaskQueue` ciblée `_lcars_pod_id`,
-      spawn via `SpawnerBackend`, register dans `PodRegistry`.
+      spawn via `StageSpawner`, register dans `PodRegistry`.
     * Passages suivants (wake) → push task corrective + `wake_pod` →
       le claude REPL reprend get_task/submit_result sur le même pod
       (contexte préservé).
@@ -221,7 +221,7 @@ defmodule Fleet.Pipeline.StageRunner do
   end
 
   # Résolution lifetime_scope via Fleet.CapProfile (même chemin que
-  # SpawnerBackend.Default). Fallback "one-shot" sur erreur de résolution
+  # StageSpawner.Default). Fallback "one-shot" sur erreur de résolution
   # — c'est le comportement sûr (pas de pipe registry sur cap-profile
   # cassé).
   #
@@ -282,7 +282,7 @@ defmodule Fleet.Pipeline.StageRunner do
     Application.get_env(
       :fleet_pipeline,
       :spawner_backend,
-      Fleet.Pipeline.SpawnerBackend.Default
+      Fleet.Pipeline.StageSpawner.Default
     )
   end
 

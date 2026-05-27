@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.PipelineInvoker do
   @moduledoc """
   Behaviour wrap autour de `Fleet.Pipeline.start_pipeline/3`. Mêmes
-  raisons que `Fleet.Pipeline.SpawnerBackend` (test stub
+  raisons que `Fleet.Pipeline.StageSpawner` (test stub
   synchrone, fallback futur).
 
   Default `Fleet.Pilot.PipelineInvoker.Default` délègue à

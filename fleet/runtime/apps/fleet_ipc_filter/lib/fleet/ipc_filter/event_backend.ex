@@ -1,4 +1,4 @@
-defmodule Fleet.IpcFilter.EventBackend do
+defmodule Fleet.IPCFilter.EventBackend do
   @moduledoc """
   Behaviour wrap autour de la diffusion events `:refuse_pattern_match`
   + `:pod_drift` vers le bus PubSub fleet_event_router (chantier 11).
@@ -10,20 +10,20 @@ defmodule Fleet.IpcFilter.EventBackend do
   @callback broadcast(event :: atom(), payload :: map()) :: :ok | {:error, term()}
 end
 
-defmodule Fleet.IpcFilter.EventBackend.NotWiredYet do
+defmodule Fleet.IPCFilter.EventBackend.NotWiredYet do
   @moduledoc """
   Backend placeholder hermétique (défaut env `:test`). Retourne `:ok`
   sans effet de bord — `fleet_ipc_filter` reste fonctionnel sans bus
   câblé (decision allow/deny correcte, pas de broadcast cross-pod).
   """
 
-  @behaviour Fleet.IpcFilter.EventBackend
+  @behaviour Fleet.IPCFilter.EventBackend
 
-  @impl Fleet.IpcFilter.EventBackend
+  @impl Fleet.IPCFilter.EventBackend
   def broadcast(_event, _payload), do: :ok
 end
 
-defmodule Fleet.IpcFilter.EventBackend.PubSub do
+defmodule Fleet.IPCFilter.EventBackend.PubSub do
   @moduledoc """
   Backend RÉEL (B4 #576, chantier 11 wiré) — diffuse vers
   `Fleet.EventRouter.Bus` (Phoenix.PubSub `Fleet.PubSub`, topic
@@ -45,7 +45,7 @@ defmodule Fleet.IpcFilter.EventBackend.PubSub do
   pour l'enveloppe Bus.
   """
 
-  @behaviour Fleet.IpcFilter.EventBackend
+  @behaviour Fleet.IPCFilter.EventBackend
 
   # Mapping atome interne ipc_filter → event_type canon events.yaml.
   @event_type %{
@@ -53,7 +53,7 @@ defmodule Fleet.IpcFilter.EventBackend.PubSub do
     pod_drift: "pod.drift"
   }
 
-  @impl Fleet.IpcFilter.EventBackend
+  @impl Fleet.IPCFilter.EventBackend
   def broadcast(event, payload) when is_atom(event) and is_map(payload) do
     case Map.fetch(@event_type, event) do
       {:ok, event_type} ->

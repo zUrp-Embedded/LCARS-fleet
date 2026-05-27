@@ -1,4 +1,4 @@
-defmodule Fleet.IpcFilter do
+defmodule Fleet.IPCFilter do
   @moduledoc """
   Filtre REFUSE_PATTERNS pre-tool-call LCARS v2 (Ring 3 gates sécurité).
 
@@ -23,7 +23,7 @@ defmodule Fleet.IpcFilter do
       regex, peuple ETS). Raise si schema invalide.
     * `filter_tool_call/2` — `:allow | {:deny, reason}` selon match
       regex sur `tool_name + tool_input` combinés. Implémente le
-      behaviour `Fleet.IpcFilter.Filter`.
+      behaviour `Fleet.IPCFilter.Filter`.
 
   ## Configuration
 
@@ -42,7 +42,7 @@ defmodule Fleet.IpcFilter do
   écrite, retrait = ADR explicite + amendement design note.
   """
 
-  @behaviour Fleet.IpcFilter.Filter
+  @behaviour Fleet.IPCFilter.Filter
 
   @patterns_table :fleet_ipc_filter_patterns
   @drift_table :fleet_ipc_filter_drift
@@ -111,10 +111,10 @@ defmodule Fleet.IpcFilter do
       `:refuse_pattern_match`, increment drift counter (broadcast
       `:pod_drift` au seuil).
 
-  Implémente le behaviour `Fleet.IpcFilter.Filter`.
+  Implémente le behaviour `Fleet.IPCFilter.Filter`.
   """
   @spec filter_tool_call(map(), map()) :: :allow | {:deny, String.t()}
-  @impl Fleet.IpcFilter.Filter
+  @impl Fleet.IPCFilter.Filter
   def filter_tool_call(tool_call, context) when is_map(tool_call) and is_map(context) do
     combined = combine(tool_call)
 
@@ -239,7 +239,7 @@ defmodule Fleet.IpcFilter do
     Application.get_env(
       :fleet_ipc_filter,
       :event_backend,
-      Fleet.IpcFilter.EventBackend.NotWiredYet
+      Fleet.IPCFilter.EventBackend.NotWiredYet
     )
   end
 

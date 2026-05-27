@@ -1,4 +1,4 @@
-defmodule Fleet.IpcFilter.EventCapture do
+defmodule Fleet.IPCFilter.EventCapture do
   @moduledoc """
   Stub `EventBackend` capturant les broadcasts dans le mailbox du
   process listener configuré via `Application.put_env(:fleet_ipc_filter,
@@ -7,9 +7,9 @@ defmodule Fleet.IpcFilter.EventCapture do
   Format message : `{:ipc_event, event_name, payload}`.
   """
 
-  @behaviour Fleet.IpcFilter.EventBackend
+  @behaviour Fleet.IPCFilter.EventBackend
 
-  @impl Fleet.IpcFilter.EventBackend
+  @impl Fleet.IPCFilter.EventBackend
   def broadcast(event, payload) do
     case Application.get_env(:fleet_ipc_filter, :event_capture_target) do
       pid when is_pid(pid) -> send(pid, {:ipc_event, event, payload})

@@ -20,12 +20,12 @@ version: 1
 stages:
   audit:
     role: qualifier
-    # `noop` modop = identité (cf. apps/fleet_capprofile/priv/canon/
+    # `noop` modop = identité (cf. apps/fleet_cap_profile/priv/canon/
     # modop/noop/profile.yaml). Le schema v1 exige `profile` non-vide
     # min 1 ; on référence noop quand on n'a pas besoin d'overlay sur
-    # le rôle de base. SpawnerBackend.Default.spawn_stage_pod compose
+    # le rôle de base. StageSpawner.Default.spawn_stage_pod compose
     # role="qualifier" + modops=["noop"] = qualifier.yaml inchangé.
     profile: noop
     # Pas de needs : stage racine unique.
-    # Pas de gate : Gates.dispatch retourne :pass par défaut.
+    # Pas de gate : Gates.evaluate retourne :pass par défaut.
     timeout_sec: 600

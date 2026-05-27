@@ -5,7 +5,7 @@ defmodule Fleet.MCP.Schema do
 
   Fonctions **pures** (Iron Law — aucun process : pas d'état mutable, pas
   de concurrence, pas de fault-isolation propre ; un GenServer cache serait
-  un goulot injustifié). Pattern cohérent fleet_capprofile/Lot 0bis
+  un goulot injustifié). Pattern cohérent fleet_cap_profile/Lot 0bis
   (`ex_json_schema` + résolution draft-07).
 
   Usage :

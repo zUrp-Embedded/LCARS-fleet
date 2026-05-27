@@ -27,7 +27,7 @@ defmodule Fleet.Coord.MixProject do
   end
 
   defp deps do
-    # Fleet.Spawner (ch6 PROMOTED) wrappé derrière `SpawnerBackend`
+    # Fleet.Spawner (ch6 PROMOTED) wrappé derrière `HookSpawner`
     # behaviour swappable (default délègue) — testable sans bwrap réel.
     [
       {:fleet_event_router, in_umbrella: true},

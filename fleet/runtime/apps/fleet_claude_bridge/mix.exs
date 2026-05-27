@@ -40,7 +40,7 @@ defmodule FleetClaudeBridge.MixProject do
     # Wiring SDK réel = à introduire post-pod-1.18 + chantier 7 fleet_pod_runtime
     # (consommateur ClaudeCode.Adapter.Port.* + CLI.Parser direct).
     [
-      {:fleet_capprofile, in_umbrella: true},
+      {:fleet_cap_profile, in_umbrella: true},
       {:jason, "~> 1.4"}
     ]
   end

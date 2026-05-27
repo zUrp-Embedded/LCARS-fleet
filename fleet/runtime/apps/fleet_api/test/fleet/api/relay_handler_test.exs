@@ -1,4 +1,4 @@
-defmodule Fleet.Api.RelayHandlerTest do
+defmodule Fleet.API.RelayHandlerTest do
   @moduledoc """
   Tests RelayHandler GenServer round-trip ch10.
 
@@ -11,13 +11,13 @@ defmodule Fleet.Api.RelayHandlerTest do
 
   use ExUnit.Case, async: false
 
-  alias Fleet.Api.RelayHandler
+  alias Fleet.API.RelayHandler
   alias Fleet.EventRouter.Bus
 
   @ref "test-ref-123"
 
   setup do
-    # RelayHandler démarré par Fleet.Api.Application — réutilise instance.
+    # RelayHandler démarré par Fleet.API.Application — réutilise instance.
     # `@ref` partagé entre les tests pour subscribe sous-topic dans
     # setup (les tests utilisent le même ref par convention).
     Bus.subscribe()

@@ -1,7 +1,7 @@
 # Modop — persuasion-discipline (Cialdini patterns)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-26
+**Dernière révision** : 2026-05-27
 **Statut** : actif — modop bundle SP positif transverse
 **Dérivé de** : superpowers/skills/writing-skills/persuasion-principles.md (ADOPT innovation)
 **Référencé par** : tous modop bundles (couche transverse)
@@ -142,7 +142,7 @@ Tout modop bundle DOIT respecter :
 
 ## Cas d'usage : composer SP positif
 
-Quand `fleet_spbuilder.compose/3` assemble le SP par rôle :
+Quand `fleet_sp_builder.compose/3` assemble le SP par rôle :
 
 ```
 SP composé = [

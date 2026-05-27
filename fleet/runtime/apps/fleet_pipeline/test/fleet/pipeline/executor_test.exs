@@ -37,7 +37,7 @@ defmodule Fleet.Pipeline.ExecutorTest do
     """)
 
     Application.put_env(:fleet_pipeline, :pipelines_root, tmp_dir)
-    Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.SpawnerBackendStub)
+    Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.StageSpawnerStub)
 
     Application.put_env(:fleet_pipeline, :stub_outputs, %{
       "stage_a" => %{"a_out" => 1},

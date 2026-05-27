@@ -6,7 +6,7 @@ defmodule Fleet.Pipeline.WorkspaceProvisioner do
   Convention du path : `<:workspaces_root>/<pipeline_id>/<stage>/workspace`.
   Clone `repo_url` à cet emplacement, checkout `branch` (créée si absente du
   remote). Le pod ne touche pas au workspace ; il livre un payload structuré
-  (`result.files`) que l'Executor applique post-EXTRACT avant `Fleet.Git.publish/1`.
+  (`result.files`) que l'Executor applique post-EXTRACT avant `Fleet.Pipeline.Git.publish/1`.
 
   Mécanisme **temporaire** en attendant le câblage de
   `Fleet.ProjectBootstrap.prepare/3` (#596) qui formalisera le workspace

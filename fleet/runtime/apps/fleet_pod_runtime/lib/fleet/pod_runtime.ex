@@ -23,7 +23,7 @@ defmodule Fleet.PodRuntime do
   ## Surface SDK (consommateur central côté système-side LCARS)
 
   - `ClaudeCode.Adapter.Port.*` — KEEP 100% (Port lifecycle, write/read
-    NDJSON), wrappé derrière `PortBackend` behaviour swappable
+    NDJSON), wrappé derrière `SDKPortBackend` behaviour swappable
   - `ClaudeCode.CLI.Parser` — KEEP, mais `StreamParser` réimplémente
     NDJSON parsing maison (pas d'import direct)
   - `ClaudeCode.Session` — WRAP via `Fleet.ClaudeBridge.SessionWrapper`
@@ -35,7 +35,7 @@ defmodule Fleet.PodRuntime do
   introduit ici tant que pod qualifier est en Elixir 1.14 (transitif
   `peri 0.8.4` requiert `~> 1.17`, fail compile). Apprentissages A1+A5.
 
-  La surface Port est isolée derrière `Fleet.PodRuntime.PortBackend`
+  La surface Port est isolée derrière `Fleet.PodRuntime.SDKPortBackend`
   behaviour. Default `NotWiredYet` retourne `{:error, :not_wired_yet}`
   jusqu'au câblage post-pod-1.18.
   """

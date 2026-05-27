@@ -1,4 +1,4 @@
-defmodule Fleet.Api.GitCommitter do
+defmodule Fleet.API.GitCommitter do
   @moduledoc """
   GenServer wrapper atomic write + git auto commit.
 

@@ -80,7 +80,7 @@
     "name": "web-search-attempted",
     "regex": "^web_search\\b",
     "severity": "medium",
-    "justification": "F-CONT-RISK observable — server tool natif Anthropic bypass can_use_tool. Bloqué au boot par fleet_capprofile.G24-9, log si tentative observable.",
+    "justification": "F-CONT-RISK observable — server tool natif Anthropic bypass can_use_tool. Bloqué au boot par fleet_cap_profile.G24-9, log si tentative observable.",
     "added_date": "2026-05-09"
   },
   {

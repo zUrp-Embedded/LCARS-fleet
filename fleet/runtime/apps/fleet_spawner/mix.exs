@@ -28,8 +28,8 @@ defmodule FleetSpawner.MixProject do
 
   defp deps do
     [
-      {:fleet_capprofile, in_umbrella: true},
-      {:fleet_spbuilder, in_umbrella: true},
+      {:fleet_cap_profile, in_umbrella: true},
+      {:fleet_sp_builder, in_umbrella: true},
       {:fleet_credentials, in_umbrella: true},
       # B10/#583 Sprint 1 — Fleet.Spawner.PublishConsumer subscribe Bus
       # (admin.spawn.request). Pas de cycle (event_router ⊀ spawner).

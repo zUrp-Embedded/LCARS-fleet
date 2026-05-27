@@ -25,7 +25,7 @@ defmodule Fleet.TaskMonitor do
 
   `tasks_root` / `list_id` résolus opt > `Application` env > défaut
   canon (`/var/lib/lcars/architect-tasks`, `fleet-monitor-v1`).
-  Pattern établi codebase (`fleet_capprofile.schema_dir`,
+  Pattern établi codebase (`fleet_cap_profile.schema_dir`,
   `fleet_pipeline.pipelines_root`) — défaut = valeur canon, testable.
 
   ## Core write-only, agent observateur

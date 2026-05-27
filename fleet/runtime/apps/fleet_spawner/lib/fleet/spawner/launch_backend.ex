@@ -3,7 +3,7 @@ defmodule Fleet.Spawner.LaunchBackend do
   Behaviour pour exécuter `bin/bwrap_launch.sh` (chantier 4) → `bin/claude_launch.sh`
   (chantier 5) avec ENV vars OAuth résolues.
 
-  Le default `Fleet.Spawner.LaunchBackend.PortBackend` utilise
+  Le default `Fleet.Spawner.LaunchBackend.LauncherPortBackend` utilise
   `Port.open/2` (`:spawn_executable`) et lit la sortie. Tests
   swappent via `Fleet.Spawner.LaunchBackend.StubBackend` pour
   retourner des données canned (init message NDJSON, exit code).
@@ -11,7 +11,7 @@ defmodule Fleet.Spawner.LaunchBackend do
   Configurable via :
 
       config :fleet_spawner, :launch_backend,
-        Fleet.Spawner.LaunchBackend.PortBackend
+        Fleet.Spawner.LaunchBackend.LauncherPortBackend
   """
 
   @doc """

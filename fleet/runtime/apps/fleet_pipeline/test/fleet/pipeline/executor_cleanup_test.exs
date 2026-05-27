@@ -31,7 +31,7 @@ defmodule Fleet.Pipeline.ExecutorCleanupTest do
     """)
 
     Application.put_env(:fleet_pipeline, :pipelines_root, pipelines_root)
-    Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.SpawnerBackendStub)
+    Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.StageSpawnerStub)
     Application.put_env(:fleet_pipeline, :spawner, SpawnerStub)
     Application.put_env(:fleet_pipeline, :stub_outputs, %{"only" => %{"ok" => true}})
 

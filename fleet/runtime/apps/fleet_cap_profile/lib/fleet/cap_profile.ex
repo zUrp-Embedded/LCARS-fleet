@@ -1,0 +1,484 @@
+defmodule Fleet.CapProfile do
+  @moduledoc """
+  Capability Profile composer/loader/validator (LCARS schema v2.5).
+
+  Pure data transformer: YAML on disk → composed `%Fleet.CapProfile{}`
+  struct. No process, no state. Three public functions (`load/1`,
+  `compose/2`, `validate/1`) implementing the `Fleet.CapProfile.Loader`
+  behaviour.
+
+  Schema is pinned to `apiVersion: lcars/v2.5`. Every profile is matched
+  against `priv/schema/cap-profile-v2.5.json` at load time. Modops are
+  matched against `priv/schema/modop-profile.json` (strict — reserved
+  keys forbidden, mitigates the "containment override by modop" finding
+  from PoC-11).
+
+  Composition is deterministic: deep-merge last-wins in declared order,
+  canonical JSON encoding (recursive key sort), `:crypto` sha256.
+  """
+
+  @behaviour Fleet.CapProfile.Loader
+
+  require Logger
+
+  # R0.8-brick3 : `api_version` field retiré (cf. feedback "pas d'apiVersion
+  # dans YAML LCARS" — versioning par le code v2 release, pas champ embarqué).
+  defstruct [:kind, :metadata, :spec]
+
+  @type t :: %__MODULE__{
+          kind: String.t(),
+          metadata: map(),
+          spec: map()
+        }
+
+  @kind_pinned "CapabilityProfile"
+
+  # G24-9 (F-CONT-RISK) — server tools natifs Anthropic must be denied.
+  # Strict entries match by equality, prefix entries by `String.starts_with?/2`.
+  @disallowed_minimum_strict ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution)
+  @disallowed_minimum_prefix ~w(tool_search_)
+
+  @containment_enum ~w(bwrap none)
+  @lifetime_scope_enum ~w(one-shot pipe run session-user forever)
+
+  # Fast-path guard for top-level reserved keys. `metadata.containment`
+  # and `metadata.name` are also reserved — enforced by the JSON schema
+  # `priv/schema/modop-profile.json` (`not/anyOf` clause). R0.8-brick3 :
+  # `apiVersion` retiré ; kind reste réservé (différenciation cap-profile
+  # vs modop côté merge).
+  @reserved_modop_keys ~w(kind)
+
+  # ============================================================
+  # Loader behaviour
+  # ============================================================
+
+  @doc """
+  Charge un cap-profile YAML pour le rôle donné, valide contre le schema
+  `priv/schema/cap-profile-v2.5.json`.
+
+  Path resolution : `<root_dir>/<role>.yaml` puis fallback
+  `<root_dir>/archivistes/<role>.yaml` (cohérence v1.5).
+
+  ## Exit codes
+    * `{:ok, %Fleet.CapProfile{}}` — chargement et validation OK
+    * `{:error, :not_found}` — fichier YAML absent
+    * `{:error, :invalid_schema}` — YAML mal formé OU non-conforme au schema
+    * `{:error, :schema_unavailable}` — fichier schema priv absent ou corrompu
+  """
+  @impl Fleet.CapProfile.Loader
+  @spec load(String.t()) :: {:ok, t()} | {:error, atom() | String.t()}
+  def load(role) when is_binary(role) do
+    with {:ok, raw} <- read_role_yaml(role),
+         :ok <- validate_against_schema(raw, :cap_profile) do
+      {:ok, to_struct(raw)}
+    end
+  end
+
+  @doc """
+  Compose un cap-profile à partir d'un rôle de base et d'une liste ordonnée
+  de modops. Deep-merge last-wins, ordre déclaré = précédence (PoC-16).
+
+  Le résultat est revalidé contre le schema cap-profile post-merge.
+
+  ## Exit codes
+    * `{:ok, %Fleet.CapProfile{}}` — composition OK
+    * `{:error, :not_found}` — rôle de base absent
+    * `{:error, :modop_not_found}` — au moins un modop nommé est absent
+      (le nom du modop manquant est loggé via `Logger.warning/1`)
+    * `{:error, :invalid_schema}` — base ou résultat post-merge non-conforme
+    * `{:error, :invalid_modop}` — modop YAML invalide ou clés réservées
+    * `{:error, :schema_unavailable}` — fichier schema priv absent ou corrompu
+  """
+  @impl Fleet.CapProfile.Loader
+  @spec compose(String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
+  def compose(role, modop_set) when is_binary(role) and is_list(modop_set) do
+    with {:ok, base} <- read_role_yaml(role),
+         :ok <- validate_against_schema(base, :cap_profile),
+         {:ok, modops} <- read_modops(modop_set),
+         merged <- Enum.reduce(modops, base, &deep_merge_last_wins(&2, &1)),
+         :ok <- validate_against_schema(merged, :cap_profile) do
+      {:ok, to_struct(merged)}
+    end
+  end
+
+  @doc """
+  Valide un `%Fleet.CapProfile{}` contre les 9 invariants G24 (canon
+  cap-profile v2.5 + F-CONT-RISK gate).
+
+  ## Exit codes
+    * `:ok` — tous les invariants passent
+    * `{:error, [violation_codes]}` — liste des invariants violés, atomes
+      parmi `:g24_1`..`:g24_8`, `:g24_9_strict`, `:g24_9_prefix`
+  """
+  @impl Fleet.CapProfile.Loader
+  @spec validate(t()) :: :ok | {:error, [atom()]}
+  def validate(%__MODULE__{} = profile) do
+    # R0.8-brick3 : G24-2 (check_api_version) retiré — apiVersion n'existe plus.
+    violations =
+      [
+        {:g24_1, &check_containment/1},
+        {:g24_3, &check_kind/1},
+        {:g24_4, &check_lifetime_scope/1},
+        {:g24_6, &check_modop_incompatible/1},
+        {:g24_8, &check_metadata_name/1},
+        {:g24_9_strict, &check_disallowed_strict/1},
+        {:g24_9_prefix, &check_disallowed_prefix/1}
+      ]
+      |> Enum.reject(fn {_code, fun} -> fun.(profile) == :ok end)
+      |> Enum.map(fn {code, _fun} -> code end)
+
+    case violations do
+      [] -> :ok
+      list -> {:error, list}
+    end
+  end
+
+  # ============================================================
+  # Public helpers
+  # ============================================================
+
+  @doc """
+  Traduit les entrées sémantiques `spec.scope.git_ops_denied` (ex. `"push --force"`,
+  `"reset --hard"`) en patterns `disallowedTools` claude CLI de la forme
+  `Bash(git <entrée>:*)`. Les entrées vides/non-binaires sont ignorées. Ordre d'entrée
+  préservé. Pure.
+
+  Mécanisme générique catalogue → claude CLI : ce qui était une ligne déclarative
+  validée G24 isolément devient une contrainte effectivement enforced par claude
+  CLI au lancement du pod (disallow l'emporte sur allow sur le même pattern).
+  """
+  @spec git_ops_denied_patterns(t()) :: [String.t()]
+  def git_ops_denied_patterns(%__MODULE__{spec: spec}) do
+    spec
+    |> get_in(["scope", "git_ops_denied"])
+    |> List.wrap()
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.map(&"Bash(git #{&1}:*)")
+  end
+
+  @doc """
+  Retourne un `%CapProfile{}` dont `spec.scope.disallowedTools` est augmenté :
+  - des patterns du **baseline universel** (`_baseline-git-denied.yaml`,
+    intangibles selon principe directeur)
+  - PUIS des patterns issus de `git_ops_denied_patterns/1` (cap-profile worker
+    spécifique).
+  Union dédupliquée, ordre préservé : existants, baseline, profile.
+  Idempotent.
+
+  Point d'application : `Fleet.Spawner.Pod.do_allocate/1` au moment d'écrire
+  `.cap-profile.json` dans le pod, pour que `claude_launch.sh` reçoive la
+  liste déjà résolue.
+  """
+  @spec with_resolved_disallowed_tools(t()) :: t()
+  def with_resolved_disallowed_tools(%__MODULE__{spec: spec} = profile) do
+    baseline_patterns = baseline_git_ops_denied_patterns()
+    profile_patterns = git_ops_denied_patterns(profile)
+    existing = get_in(spec, ["scope", "disallowedTools"]) || []
+    augmented = Enum.uniq(existing ++ baseline_patterns ++ profile_patterns)
+
+    new_scope =
+      spec
+      |> Map.get("scope", %{})
+      |> Map.put("disallowedTools", augmented)
+
+    %{profile | spec: Map.put(spec, "scope", new_scope)}
+  end
+
+  @doc """
+  Patterns `disallowedTools` issus du baseline universel
+  (`priv/canon/cap-profiles/_baseline-git-denied.yaml`). Patterns
+  intangibles refusés à TOUS les workers indépendamment du cap-profile —
+  retirer un pattern = décision archi explicite (édit du fichier baseline,
+  pas option de cap-profile).
+
+  **Raise** si le fichier baseline est absent, illisible, ou de format
+  invalide. audit elixir #3 : la baseline est doctrinalement "intangible"
+  — un fail-open silencieux (retour `[]`) désactiverait la denylist
+  universelle sans alerter, contradictoire avec l'intention. Fail-closed
+  cohérent avec la doctrine. Le caller (`pod.ex do_allocate`) catch via
+  `rescue` et transitionne `:failed` proprement (Vulcan #5 préservé).
+
+  Pure modulo I/O fichier ; pas de cache (lu une fois par résolution cap-
+  profile, fréquence faible).
+  """
+  @spec baseline_git_ops_denied_patterns() :: [String.t()]
+  def baseline_git_ops_denied_patterns do
+    load_baseline_git_ops_denied!()
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.map(&"Bash(git #{&1}:*)")
+  end
+
+  defp load_baseline_git_ops_denied! do
+    path =
+      :fleet_cap_profile
+      |> :code.priv_dir()
+      |> to_string()
+      |> Path.join("canon/cap-profiles/_baseline-git-denied.yaml")
+
+    case YamlElixir.read_from_file(path) do
+      {:ok, %{"git_ops_denied" => entries}} when is_list(entries) ->
+        entries
+
+      {:ok, _other} ->
+        raise "fleet_cap_profile baseline #{path} : clé `git_ops_denied` absente ou format invalide (baseline intangible — fail-closed)"
+
+      {:error, reason} ->
+        raise "fleet_cap_profile baseline #{path} absent ou corrompu (#{inspect(reason)}) (baseline intangible — fail-closed)"
+    end
+  end
+
+  @doc """
+  Returns the canonical JSON sha256 (lowercase hex) of a composed map
+  or struct. Used by callers to assert deterministic composition
+  (PoC-16 pattern). Underlying map iteration order is irrelevant — the
+  canonical encoder sorts keys recursively before encoding.
+  """
+  @spec sha256(t() | map()) :: String.t()
+  def sha256(%__MODULE__{} = profile), do: profile |> struct_to_map() |> sha256()
+
+  def sha256(map) when is_map(map) do
+    map
+    |> canonical_json()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
+  # ============================================================
+  # I/O
+  # ============================================================
+
+  defp read_role_yaml(role) do
+    candidates = [
+      Path.join(root_dir(), "#{role}.yaml"),
+      Path.join([root_dir(), "archivistes", "#{role}.yaml"])
+    ]
+
+    case Enum.find(candidates, &File.exists?/1) do
+      nil -> {:error, :not_found}
+      path -> decode_yaml(path)
+    end
+  end
+
+  defp read_modops(modop_set) do
+    result =
+      Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
+        path = Path.join([root_dir(), "modop", name, "profile.yaml"])
+
+        if File.exists?(path) do
+          with {:ok, raw} <- decode_yaml(path),
+               :ok <- validate_modop_keys(raw),
+               :ok <- validate_against_schema(raw, :modop) do
+            {:cont, {:ok, [raw | acc]}}
+          else
+            {:error, reason} -> {:halt, {:error, reason}}
+          end
+        else
+          Logger.warning("modop not found: #{inspect(name)} at #{path}")
+          {:halt, {:error, :modop_not_found}}
+        end
+      end)
+
+    case result do
+      {:ok, modops} -> {:ok, Enum.reverse(modops)}
+      error -> error
+    end
+  end
+
+  defp decode_yaml(path) do
+    case YamlElixir.read_from_file(path) do
+      {:ok, map} when is_map(map) -> {:ok, map}
+      {:ok, _other} -> {:error, :invalid_schema}
+      {:error, _reason} -> {:error, :invalid_schema}
+    end
+  end
+
+  defp root_dir do
+    Application.get_env(:fleet_cap_profile, :root_dir, "cap-profiles")
+  end
+
+  # ============================================================
+  # Schema validation
+  # ============================================================
+
+  defp validate_against_schema(map, kind) do
+    case load_schema(kind) do
+      {:ok, schema} ->
+        case ExJsonSchema.Validator.validate(schema, map) do
+          :ok ->
+            :ok
+
+          {:error, _errors} ->
+            case kind do
+              :cap_profile -> {:error, :invalid_schema}
+              :modop -> {:error, :invalid_modop}
+            end
+        end
+
+      {:error, :schema_unavailable} = err ->
+        err
+    end
+  end
+
+  defp load_schema(:cap_profile), do: load_schema_file("cap-profile-v2.5.json")
+  defp load_schema(:modop), do: load_schema_file("modop-profile.json")
+
+  defp load_schema_file(name) do
+    path = Path.join(schema_dir(), name)
+
+    with {:ok, content} <- File.read(path),
+         {:ok, decoded} <- Jason.decode(content),
+         {:ok, schema} <- safe_resolve(decoded) do
+      {:ok, schema}
+    else
+      {:error, reason} ->
+        Logger.warning("schema unavailable: #{inspect(reason)} at #{path}")
+        {:error, :schema_unavailable}
+    end
+  end
+
+  defp safe_resolve(decoded) do
+    {:ok, ExJsonSchema.Schema.resolve(decoded)}
+  rescue
+    e -> {:error, {:schema_resolve_error, Exception.message(e)}}
+  end
+
+  defp schema_dir do
+    case Application.get_env(:fleet_cap_profile, :schema_dir) do
+      nil -> Path.join(to_string(:code.priv_dir(:fleet_cap_profile)), "schema")
+      dir -> dir
+    end
+  end
+
+  defp validate_modop_keys(map) do
+    case Enum.find(@reserved_modop_keys, &Map.has_key?(map, &1)) do
+      nil -> :ok
+      _key -> {:error, :invalid_modop}
+    end
+  end
+
+  # ============================================================
+  # Deep merge & canonical encoding
+  # ============================================================
+
+  defp deep_merge_last_wins(left, right) when is_map(left) and is_map(right) do
+    Map.merge(left, right, fn _key, lv, rv ->
+      if is_map(lv) and is_map(rv), do: deep_merge_last_wins(lv, rv), else: rv
+    end)
+  end
+
+  defp deep_merge_last_wins(_left, right), do: right
+
+  defp canonical_json(map) when is_map(map) and not is_struct(map) do
+    pairs =
+      map
+      |> Map.to_list()
+      |> Enum.map(fn {k, v} -> {to_string(k), canonical_json(v)} end)
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map(fn {k, v} -> Jason.encode!(k) <> ":" <> v end)
+      |> Enum.join(",")
+
+    "{" <> pairs <> "}"
+  end
+
+  defp canonical_json(list) when is_list(list) do
+    inner = list |> Enum.map(&canonical_json/1) |> Enum.join(",")
+    "[" <> inner <> "]"
+  end
+
+  defp canonical_json(other), do: Jason.encode!(other)
+
+  # ============================================================
+  # Struct conversion
+  # ============================================================
+
+  defp to_struct(raw) when is_map(raw) do
+    %__MODULE__{
+      kind: Map.get(raw, "kind"),
+      metadata: Map.get(raw, "metadata", %{}),
+      spec: Map.get(raw, "spec", %{})
+    }
+  end
+
+  defp struct_to_map(%__MODULE__{} = p) do
+    %{
+      "kind" => p.kind,
+      "metadata" => p.metadata,
+      "spec" => p.spec
+    }
+  end
+
+  # ============================================================
+  # G24 invariants (one function per check)
+  # ============================================================
+
+  defp check_containment(%__MODULE__{metadata: meta}) do
+    if Map.get(meta, "containment") in @containment_enum, do: :ok, else: :error
+  end
+
+  defp check_kind(%__MODULE__{kind: k}) do
+    if k == @kind_pinned, do: :ok, else: :error
+  end
+
+  defp check_lifetime_scope(%__MODULE__{spec: spec}) do
+    # Canon : lifetime_scope nesté dans spec.invocation (schema
+    # cap-profile-v2.5.json + 7 cap-profiles 05_data-canon). Le code
+    # lisait spec-level (forme pré-alignement schema) → aligné canon.
+    if get_in(spec, ["invocation", "lifetime_scope"]) in @lifetime_scope_enum,
+      do: :ok,
+      else: :error
+  end
+
+  # G24-5 (check_git_ops_denied) retiré : Face 2 doctrine (commit 4e0b3b3c)
+  # a tranché que les workers PEUVENT push si le cap-profile l'autorise via
+  # `allowedTools` claude CLI. L'invariant qui exigeait `"push"` dans
+  # `git_ops_denied` est obsolète. Le mécanisme générique catalogue →
+  # disallowedTools claude CLI (via `with_resolved_disallowed_tools/1` +
+  # baseline `_baseline-git-denied.yaml`) est le successeur : interdit
+  # universellement les patterns destructeurs (`push --force`, `reset --hard`,
+  # `--no-verify`, etc.) sans interdire `push` en bloc.
+
+  defp check_modop_incompatible(%__MODULE__{spec: spec}) do
+    pairs = Map.get(spec, "modop_incompatible", [])
+    active = spec |> Map.get("modop_set", []) |> MapSet.new()
+
+    conflict? =
+      Enum.any?(pairs, fn pair ->
+        case pair do
+          [a, b] -> MapSet.member?(active, a) and MapSet.member?(active, b)
+          _ -> false
+        end
+      end)
+
+    if conflict?, do: :error, else: :ok
+  end
+
+  # R0.8-brick4 : G24-7 (check_budget) retiré. Pas d'API = pas de budget
+  # (cf. feedback "Pas de budget dans cap-profiles"). Le timeout de réponse
+  # (auparavant mal nommé budget.maxDurationSec) est désormais un default
+  # codé par lifetime_scope dans Fleet.Spawner.Pod.monitor_timeout_ms/1 ;
+  # un override par cap-profile (e.g. `spec.timeouts.response_sec`) est
+  # accepté optionnel mais non-requis.
+
+  defp check_metadata_name(%__MODULE__{metadata: meta}) do
+    case Map.get(meta, "name") do
+      name when is_binary(name) and byte_size(name) > 0 -> :ok
+      _ -> :error
+    end
+  end
+
+  defp check_disallowed_strict(%__MODULE__{spec: spec}) do
+    disallowed = get_in(spec, ["scope", "disallowedTools"]) || []
+    if Enum.all?(@disallowed_minimum_strict, &(&1 in disallowed)), do: :ok, else: :error
+  end
+
+  defp check_disallowed_prefix(%__MODULE__{spec: spec}) do
+    disallowed = get_in(spec, ["scope", "disallowedTools"]) || []
+
+    prefix_ok =
+      Enum.all?(@disallowed_minimum_prefix, fn prefix ->
+        Enum.any?(disallowed, &String.starts_with?(&1, prefix))
+      end)
+
+    if prefix_ok, do: :ok, else: :error
+  end
+end

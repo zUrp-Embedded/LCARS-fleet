@@ -1,13 +1,13 @@
 defmodule Fleet.Pipeline.PostExtractCaptureStub do
   @moduledoc """
-  Stub SpawnerBackend dédié à ce module : `{:ok, pod_id}` sans émettre
+  Stub StageSpawner dédié à ce module : `{:ok, pod_id}` sans émettre
   `pipeline.stage.completed` (le test pilote l'avancement via `pod.completed`
   broadcast manuel). Identique au CaptureStub d'executor_pod_completed_test
   mais isolé pour permettre l'exécution standalone du fichier.
   """
-  @behaviour Fleet.Pipeline.SpawnerBackend
+  @behaviour Fleet.Pipeline.StageSpawner
 
-  @impl Fleet.Pipeline.SpawnerBackend
+  @impl Fleet.Pipeline.StageSpawner
   def spawn_stage_pod(_role, _profile, stage_ctx) do
     send(:post_extract_probe, {:spawned, stage_ctx.stage, Map.get(stage_ctx, :spawn_opts)})
     {:ok, "pod-#{stage_ctx.stage}"}
@@ -19,7 +19,7 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
   Face 2 briques 2.3 + 2.4 — chaîne pipeline:
     do_run_stage → WorkspaceProvisioner.provision_for_stage (clone repo_url)
                  → spawn (stub)
-                 → pod.completed → apply payload → Fleet.Git.publish
+                 → pod.completed → apply payload → Fleet.Pipeline.Git.publish
                  → broadcast git.published / git.publish_failed.
 
   Tests pilotés par bare repo local seedé (file://…). Pas de pod réel,

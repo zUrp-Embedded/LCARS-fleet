@@ -1,7 +1,7 @@
 # Fleet.PodRuntime
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-05-27
 **Statut** : implémenté run #3.1 chantier #7 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_pod_runtime.md
 
@@ -30,7 +30,7 @@ Consommateur central côté système-side LCARS (avec `fleet_claude_bridge`
 chantier 8 PROMOTED) :
 
 - `ClaudeCode.Adapter.Port.*` — KEEP 100% (Port lifecycle, write/read
-  NDJSON), wrappé derrière `PortBackend` behaviour swappable
+  NDJSON), wrappé derrière `SDKPortBackend` behaviour swappable
 - `ClaudeCode.CLI.Parser` — KEEP, mais `StreamParser` réimplémente
   NDJSON parsing maison (pas d'import direct)
 - `ClaudeCode.Session` — WRAP via `Fleet.ClaudeBridge.SessionWrapper`
@@ -41,7 +41,7 @@ upstream) — cohérent chantier 8 PROMOTED.
 ## Configuration
 
 - `:fleet_pod_runtime, :port_backend` — module backend
-  `PortBackend` (default `PortBackend.NotWiredYet`, câblage
+  `SDKPortBackend` (default `SDKPortBackend.NotWiredYet`, câblage
   post-pod-1.18 + chantier 8 mapping SDK fin)
 - `:fleet_pod_runtime, :agent_tool_backend` — module backend
   `AgentTool.SpawnerBackend` (default `SpawnerBackend.Default`
@@ -54,7 +54,7 @@ Dep `:claude_code` prescrite design note L171 NON introduite tant
 que pod qualifier est en Elixir 1.14 (transitif `peri 0.8.4` requiert
 `~> 1.17`, fail compile). Cohérent apprentissages A1+A5 + chantier 8
 PROMOTED. Surface Port consommée par `TurnDispatcher` est isolée
-derrière `PortBackend` behaviour. Wiring SDK réel = post-pod-1.18.
+derrière `SDKPortBackend` behaviour. Wiring SDK réel = post-pod-1.18.
 
 ## API principale
 

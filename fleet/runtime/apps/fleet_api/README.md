@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-05-27
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -14,10 +14,10 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 
 | Module | Rôle |
 |---|---|
-| `Fleet.Api.Rest` | Plug.Router HTTP `:8080` endpoints REST + auth HMAC token |
-| `Fleet.Api.Ws` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
-| `Fleet.Api.RelayHandler` | GenServer subscribe `permission_relay_request`, ETS pending refs, POST `/api/relay/:ref` → broadcast `permission_relay_response` (round-trip ch10) |
-| `Fleet.Api.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380) |
+| `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST + auth HMAC token |
+| `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
+| `Fleet.API.RelayHandler` | GenServer subscribe `permission_relay_request`, ETS pending refs, POST `/api/relay/:ref` → broadcast `permission_relay_response` (round-trip ch10) |
+| `Fleet.API.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380) |
 
 ## Routes REST
 
@@ -54,10 +54,10 @@ Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 
 ```elixir
 # RelayHandler round-trip (invoqué via REST POST /api/relay/:ref)
-:ok = Fleet.Api.RelayHandler.respond("ref-abc", "allow")
+:ok = Fleet.API.RelayHandler.respond("ref-abc", "allow")
 
 # GitCommitter atomic write + git commit
-{:ok, sha} = Fleet.Api.GitCommitter.commit_config_change(
+{:ok, sha} = Fleet.API.GitCommitter.commit_config_change(
   "intensity.json", ~s|{"level":"low"}|, "user1"
 )
 ```
@@ -79,7 +79,7 @@ mix test apps/fleet_api
 ```
 
 Tests utilisent `Plug.Test` pour Rest (pas de listener réel),
-callbacks Cowboy directs pour Ws (pas de socket réel), et
+callbacks Cowboy directs pour WS (pas de socket réel), et
 RelayHandler via instance Application-managed.
 
 ## Dépendances

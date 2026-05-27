@@ -1,7 +1,7 @@
 # Subagent template — spec-reviewer
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-26
+**Dernière révision** : 2026-05-27
 **Statut** : actif — fragment SP cap-profile qualifier (spec compliance review)
 **Dérivé de** : superpowers/prompts/spec-reviewer.md (ADAPT) + LCARS modop:dual-review stage 1
 
@@ -11,7 +11,7 @@
 
 Fragment SP injecté dans cap-profile `qualifier.yaml` (lifetime_scope: one-shot) au stage `spec-review` du pipeline `standard-qa`.
 
-Composé par `fleet_spbuilder` :
+Composé par `fleet_sp_builder` :
 ```
 SP = [anthropic-lcars, core/v1, organisation/topologie, modop/dual-review, modop/fire-mode, modop/rubber-duck, role/qualifier, subagent-template/spec-reviewer]
 ```

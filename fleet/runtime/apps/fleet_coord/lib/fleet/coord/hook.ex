@@ -67,7 +67,7 @@ defmodule Fleet.Coord.Hook do
     Application.get_env(
       :fleet_coord,
       :spawner_backend,
-      Fleet.Coord.SpawnerBackend.Default
+      Fleet.Coord.HookSpawner.NotWiredYet
     )
   end
 end

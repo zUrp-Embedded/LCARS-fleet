@@ -1,4 +1,4 @@
-defmodule Fleet.Api.MixProject do
+defmodule Fleet.API.MixProject do
   use Mix.Project
 
   def project do
@@ -22,7 +22,7 @@ defmodule Fleet.Api.MixProject do
   def application do
     [
       extra_applications: [:logger],
-      mod: {Fleet.Api.Application, []}
+      mod: {Fleet.API.Application, []}
     ]
   end
 

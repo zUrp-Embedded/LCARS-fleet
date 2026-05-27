@@ -16,13 +16,13 @@ defmodule Fleet.Spawner.PodTest do
     sp_root = Path.join(tmp_dir, "cap-profiles")
     File.mkdir_p!(sp_root)
     File.write!(Path.join(sp_root, "engineer-role.md"), "# Engineer SP base")
-    Application.put_env(:fleet_spbuilder, :sp_role_root, sp_root)
+    Application.put_env(:fleet_sp_builder, :sp_role_root, sp_root)
 
     on_exit(fn ->
       StubBackend.clear()
       Application.delete_env(:fleet_spawner, :state_fs_root)
       Application.delete_env(:fleet_spawner, :pod_dir_root)
-      Application.delete_env(:fleet_spbuilder, :sp_role_root)
+      Application.delete_env(:fleet_sp_builder, :sp_role_root)
     end)
 
     {:ok, tmp_dir: tmp_dir}

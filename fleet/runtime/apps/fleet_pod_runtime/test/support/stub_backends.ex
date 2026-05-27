@@ -2,7 +2,7 @@ defmodule Fleet.PodRuntime.StubBackends do
   @moduledoc """
   Stubs des Backend behaviours pour swap test runtime.
 
-    * `Fleet.PodRuntime.PortBackend` — capture writes, simule erreurs
+    * `Fleet.PodRuntime.SDKPortBackend` — capture writes, simule erreurs
     * `Fleet.PodRuntime.AgentTool.SpawnerBackend` — simule spawn_pod
       + await_result selon scenarios test
   """
@@ -18,9 +18,9 @@ defmodule Fleet.PodRuntime.StubBackends do
     :port_capture_target, self())` pour recevoir les writes.
     """
 
-    @behaviour Fleet.PodRuntime.PortBackend
+    @behaviour Fleet.PodRuntime.SDKPortBackend
 
-    @impl Fleet.PodRuntime.PortBackend
+    @impl Fleet.PodRuntime.SDKPortBackend
     def write(_port_ref, payload) do
       case Application.get_env(:fleet_pod_runtime, :port_capture_target) do
         pid when is_pid(pid) -> send(pid, {:port_write, IO.iodata_to_binary(payload)})
@@ -32,9 +32,9 @@ defmodule Fleet.PodRuntime.StubBackends do
   end
 
   defmodule PortFailing do
-    @behaviour Fleet.PodRuntime.PortBackend
+    @behaviour Fleet.PodRuntime.SDKPortBackend
 
-    @impl Fleet.PodRuntime.PortBackend
+    @impl Fleet.PodRuntime.SDKPortBackend
     def write(_port_ref, _payload), do: {:error, :stub_port_fail}
   end
 
@@ -45,9 +45,9 @@ defmodule Fleet.PodRuntime.StubBackends do
     :flaky_n, n)` ; compteur via `:flaky_count` (atomic via Agent).
     """
 
-    @behaviour Fleet.PodRuntime.PortBackend
+    @behaviour Fleet.PodRuntime.SDKPortBackend
 
-    @impl Fleet.PodRuntime.PortBackend
+    @impl Fleet.PodRuntime.SDKPortBackend
     def write(_port_ref, payload) do
       n = Application.get_env(:fleet_pod_runtime, :flaky_n, 1)
       counter_pid = Application.fetch_env!(:fleet_pod_runtime, :flaky_counter_pid)

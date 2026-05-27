@@ -14,7 +14,7 @@ events:
   oauth.refresh.failed:
     - Fleet.Starfleet.DriftMonitor
   permission_relay_request:
-    - Fleet.Api.RelayHandler
+    - Fleet.API.RelayHandler
   audit.verdict.gatekeeper:
     - Fleet.Coord.GatekeeperHandler
   gitea.opened:

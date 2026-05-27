@@ -4,7 +4,7 @@ defmodule Fleet.Coord.SoftGate do
 
   Pattern PoC-π2 PROMOTED beyond_#2 `agent-as-tool` fire-mode :
   spawn pod jetable cap-profile `soft-gate-evaluator` instance
-  catalogue (chantier 1 `fleet_capprofile`) + retry max N rounds.
+  catalogue (chantier 1 `fleet_cap_profile`) + retry max N rounds.
 
   Le pod jetable retourne `%{decision: "pass" | "fail" | "retry",
   reason?: "..."}`. SoftGate translate vers `:pass | {:fail, reason}`
@@ -83,7 +83,7 @@ defmodule Fleet.Coord.SoftGate do
     Application.get_env(
       :fleet_coord,
       :spawner_backend,
-      Fleet.Coord.SpawnerBackend.Default
+      Fleet.Coord.HookSpawner.NotWiredYet
     )
   end
 end

@@ -30,8 +30,8 @@ defmodule LcarsFleetRuntime.MixProject do
       fleet_umbrella: [
         include_executables_for: [:unix],
         applications: [
-          fleet_capprofile: :permanent,
-          fleet_spbuilder: :permanent,
+          fleet_cap_profile: :permanent,
+          fleet_sp_builder: :permanent,
           fleet_credentials: :permanent,
           # D1 #578 fix : fleet_mcp = OTP app (mod: Fleet.MCP.Application,
           # supervision tree). Canon ring4 actif (mcp-channels-substrate +

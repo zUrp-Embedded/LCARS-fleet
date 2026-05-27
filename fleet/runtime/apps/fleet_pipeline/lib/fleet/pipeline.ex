@@ -13,9 +13,9 @@ defmodule Fleet.Pipeline do
     * `Fleet.Pipeline.Toposort` — DAG sort (Kahn)
     * `Fleet.Pipeline.Executor` — GenServer per-run
     * `Fleet.Pipeline.Gates` — dispatch hard/soft/terminal
-    * `Fleet.Pipeline.StageRunner` — spawn pod via SpawnerBackend
+    * `Fleet.Pipeline.StageRunner` — spawn pod via StageSpawner
     * `Fleet.Pipeline.Gate` — behaviour 1 callback `evaluate/3`
-    * `Fleet.Pipeline.SpawnerBackend` / `CoordBackend` — seams ch6/ch14
+    * `Fleet.Pipeline.StageSpawner` / `CoordBackend` — seams ch6/ch14
 
   ## Public API
 

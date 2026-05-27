@@ -1,4 +1,4 @@
-defmodule Fleet.IpcFilter.Application do
+defmodule Fleet.IPCFilter.Application do
   @moduledoc false
 
   use Application
@@ -8,12 +8,12 @@ defmodule Fleet.IpcFilter.Application do
     children = []
 
     if Application.get_env(:fleet_ipc_filter, :auto_init, false) do
-      Fleet.IpcFilter.init_patterns!()
+      Fleet.IPCFilter.init_patterns!()
     end
 
     Supervisor.start_link(children,
       strategy: :one_for_one,
-      name: Fleet.IpcFilter.Supervisor
+      name: Fleet.IPCFilter.Supervisor
     )
   end
 end

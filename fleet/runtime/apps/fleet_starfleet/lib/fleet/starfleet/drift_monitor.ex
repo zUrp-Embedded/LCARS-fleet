@@ -43,7 +43,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   end
 
   @impl GenServer
-  # finding Vulcan : le canon (events.yaml) + l'émetteur (IpcFilter EventBackend) utilisent
+  # finding Vulcan : le canon (events.yaml) + l'émetteur (IPCFilter EventBackend) utilisent
   # "pod.drift" (point). Ce handler écoutait "pod_drift" (underscore) → escalade drift morte.
   def handle_info({_atom, %{"event_type" => "pod.drift", "payload" => payload}}, state) do
     if drift_count(payload) >= @drift_threshold do

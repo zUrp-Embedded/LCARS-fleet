@@ -1,4 +1,4 @@
-defmodule Fleet.IpcFilter.EventBackend.PubSubTest do
+defmodule Fleet.IPCFilter.EventBackend.PubSubTest do
   @moduledoc """
   B4 #576 — backend RÉEL `EventBackend.PubSub` → `Fleet.EventRouter.Bus`.
   Preuve end-to-end (anti-fake-wired #P5) : le mapping canon
@@ -8,7 +8,7 @@ defmodule Fleet.IpcFilter.EventBackend.PubSubTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.IpcFilter.EventBackend.PubSub
+  alias Fleet.IPCFilter.EventBackend.PubSub
   alias Fleet.EventRouter.Bus
 
   setup do

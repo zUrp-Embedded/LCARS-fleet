@@ -62,13 +62,13 @@ defmodule Fleet.Coord.PoliciesTest do
                      500
     end
 
-    test "oauth_refresh_failed → escalate_human sysadmin_alert" do
+    test "oauth_refresh_failed → escalate_human starfleet_alert" do
       assert :ok = Policies.handle_escalation(:oauth_refresh_failed, %{"account" => "u@x.com"})
 
       assert_receive {_atom,
                       %{
                         "event_type" => "coord.escalate.human",
-                        "payload" => %{"path" => ["sysadmin_alert"]}
+                        "payload" => %{"path" => ["starfleet_alert"]}
                       }},
                      500
     end

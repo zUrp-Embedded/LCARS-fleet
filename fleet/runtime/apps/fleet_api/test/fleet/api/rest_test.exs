@@ -1,4 +1,4 @@
-defmodule Fleet.Api.RestTest do
+defmodule Fleet.API.RestTest do
   # async: false — Application.put_env sur :api_secret_path mute l'état
   # global runtime ; séquentialiser évite la pollution cross-test.
   use ExUnit.Case, async: false
@@ -6,7 +6,7 @@ defmodule Fleet.Api.RestTest do
   import Plug.Conn
   @moduletag :tmp_dir
 
-  alias Fleet.Api.Rest
+  alias Fleet.API.Rest
   alias Fleet.EventRouter.Bus
 
   @opts Rest.init([])
@@ -122,7 +122,7 @@ defmodule Fleet.Api.RestTest do
 
   describe "POST /api/relay/:ref" do
     setup %{secret: secret} do
-      # RelayHandler démarré par Fleet.Api.Application supervisor.
+      # RelayHandler démarré par Fleet.API.Application supervisor.
       {:ok, token: valid_token(secret)}
     end
 
@@ -153,7 +153,7 @@ defmodule Fleet.Api.RestTest do
   end
 
   # ============================================================
-  # #594 D2 — dashboard V2 Elixir natif (Fleet.Api.Dashboard mount)
+  # #594 D2 — dashboard V2 Elixir natif (Fleet.API.Dashboard mount)
   # ============================================================
   describe "GET /dashboard" do
     test "render HTML 200 sans auth (whitelisté require_auth)" do

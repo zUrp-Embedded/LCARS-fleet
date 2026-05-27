@@ -1,4 +1,4 @@
-defmodule Fleet.Api do
+defmodule Fleet.API do
   @moduledoc """
   API publique LCARS v2 (Ring 4 — frontières externes) : REST + WS.
 
@@ -7,16 +7,16 @@ defmodule Fleet.Api do
 
   ## Sous-modules
 
-    * `Fleet.Api.Rest` — Plug.Router HTTP `:8080` endpoints REST
+    * `Fleet.API.Rest` — Plug.Router HTTP `:8080` endpoints REST
       (GET pipelines/tickets/pods/health + POST admin/spawn,
       config/update, relay/:ref) + auth HMAC token header
-    * `Fleet.Api.Ws` — Cowboy WebSocket handler `:8080/ws` subscribe
+    * `Fleet.API.WS` — Cowboy WebSocket handler `:8080/ws` subscribe
       Phoenix.PubSub bus + filtre per-client topics + heartbeat 30s
-    * `Fleet.Api.RelayHandler` — GenServer subscribe
+    * `Fleet.API.RelayHandler` — GenServer subscribe
       `permission_relay_request` event, ETS pending refs, POST
       `/api/relay/:ref` → broadcast `permission_relay_response`
       matching ref (round-trip ch10)
-    * `Fleet.Api.GitCommitter` — pure functions wrapper atomic write
+    * `Fleet.API.GitCommitter` — pure functions wrapper atomic write
       rename + `git add` + `git commit` (canon trace strate 1)
 
   ## D1 décidé (split deferred)
