@@ -41,6 +41,7 @@ defmodule Fleet.Pipeline.ExecutorPodCompletedTest do
 
     Application.put_env(:fleet_pipeline, :pipelines_root, tmp_dir)
     Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.PodCompletedCaptureStub)
+    start_supervised!(Fleet.MCP.TaskQueue)
     Bus.subscribe()
 
     on_exit(fn ->

@@ -139,6 +139,12 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
       # Cycle 1 spawn
       StageRunner.run("implement", stage_spec("engineer"), %{ticket_id: "t"}, %{}, pipeline_id)
 
+      # Drain la task du spawn cycle1 : en réel le pod la pop (get_task) avant
+      # d'être réveillé. Sans ça, la TaskQueue FIFO renverrait la task cycle1
+      # (inputs vides) au lieu de celle du wake. Le code porte bien les inputs
+      # sur wake (build_pod_task) — c'est le test qui ne simulait pas la conso.
+      assert {:ok, _} = TaskQueue.next_for("stub-pod-implement")
+
       # Cycle 2 wake avec findings audit en inputs
       stage_spec_with_inputs = %{
         "role" => "engineer",

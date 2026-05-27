@@ -45,6 +45,7 @@ defmodule Fleet.Pipeline.ExecutorTest do
       "stage_c" => %{"c_out" => 3}
     })
 
+    start_supervised!(Fleet.MCP.TaskQueue)
     Bus.subscribe()
 
     on_exit(fn ->
