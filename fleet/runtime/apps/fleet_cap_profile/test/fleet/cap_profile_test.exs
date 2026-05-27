@@ -7,7 +7,15 @@ defmodule Fleet.CapProfileTest do
   setup %{tmp_dir: tmp_dir} do
     prev = Application.get_env(:fleet_cap_profile, :root_dir)
     Application.put_env(:fleet_cap_profile, :root_dir, tmp_dir)
-    on_exit(fn -> Application.put_env(:fleet_cap_profile, :root_dir, prev) end)
+    # Restaure l'état exact : si :root_dir n'était pas set, le SUPPRIMER
+    # (pas put_env(nil) — ça fuite un nil dans l'env partagé umbrella et
+    # crashe les tests d'autres apps qui lisent root_dir).
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
+        else: Application.delete_env(:fleet_cap_profile, :root_dir)
+    end)
+
     :ok
   end
 

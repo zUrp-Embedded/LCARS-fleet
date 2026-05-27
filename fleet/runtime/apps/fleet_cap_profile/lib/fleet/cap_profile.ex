@@ -293,7 +293,9 @@ defmodule Fleet.CapProfile do
   end
 
   defp root_dir do
-    Application.get_env(:fleet_cap_profile, :root_dir, "cap-profiles")
+    # I-CBC : un :root_dir explicitement nil (ex. fuite d'env cross-test en
+    # umbrella) ne doit JAMAIS atteindre Path.join → coalesce vers le défaut.
+    Application.get_env(:fleet_cap_profile, :root_dir) || "cap-profiles"
   end
 
   # ============================================================
