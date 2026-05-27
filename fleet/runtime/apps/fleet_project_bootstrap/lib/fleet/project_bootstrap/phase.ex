@@ -158,10 +158,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
     @spec prepare_mount_binds(Path.t(), struct()) ::
             {:ok, [{Path.t(), Path.t(), :ro | :rw}]} | {:error, term()}
-    def prepare_mount_binds(_pod_dir, cap_profile) do
+    def prepare_mount_binds(pod_dir, cap_profile) do
       knowledge = cap(cap_profile, [:spec, :knowledge], %{})
       skills = Map.get(knowledge, :skills) || Map.get(knowledge, "skills") || []
-      pod_role = cap(cap_profile, [:metadata], %{})[:name] || "worker"
       home = System.user_home!()
 
       binds =
@@ -169,8 +168,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
           []
         else
           [
+            # Target = HOME du pod (= $POD_DIR, cf. bwrap_launch.sh --setenv HOME),
+            # PAS /home/<role> : le rôle n'est pas un user Linux (adr-e), le chemin
+            # in-pod est virtuel. Cohérent avec le bind plugins de bwrap_launch.sh.
             {Path.join(home, ".claude/plugins/superpowers"),
-             "/home/#{pod_role}/.claude/plugins/superpowers", :ro}
+             Path.join(pod_dir, ".claude/plugins/superpowers"), :ro}
           ]
         end
 
