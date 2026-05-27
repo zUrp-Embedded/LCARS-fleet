@@ -476,22 +476,19 @@ defmodule Fleet.Pipeline.Executor do
     end
   end
 
-  # Dette pré-existante R0.8 : format pipeline v1 flat vs v2.5 nested. Le
-  # Loader normalise pas — l'Executor lit les deux. Log si fallback `"unknown"`
-  # déclenché (signal de dérive catalogue, pas de stage role).
+  # `role` est REQUIS par stage au schéma `pipeline-v1.json` (`required: [role, profile]`),
+  # validé fail-fast au `Loader.load!/2` (barrière I-CBC au LOAD). Donc tout pipeline qui
+  # atteint l'Executor a `stages.<s>.role`. Plus de fallback silencieux "unknown" (qui
+  # dispatcherait un pod role="unknown" = pire échec en aval) : si la clé manque, c'est
+  # qu'un pipeline a contourné le Loader → crash loud (le bug remonte ICI, pas masqué).
   defp role_for_stage(pipeline, stage) do
-    case get_in(pipeline, ["stages", stage, "role"]) ||
-           get_in(pipeline, ["spec", "stages", stage, "role"]) do
+    case get_in(pipeline, ["stages", stage, "role"]) do
       role when is_binary(role) and role != "" ->
         role
 
-      _ ->
-        Logger.warning(
-          "fleet_pipeline role_for_stage fallback to \"unknown\" — stage=#{stage} " <>
-            "(pipeline catalogue manque .stages.#{stage}.role)"
-        )
-
-        "unknown"
+      other ->
+        raise "fleet_pipeline: stage #{inspect(stage)} sans role valide (#{inspect(other)}) — " <>
+                "viole pipeline-v1.json (role requis) ; pipeline non chargé via Loader.load!/2 ?"
     end
   end
 end
