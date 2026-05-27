@@ -26,8 +26,9 @@ defmodule Fleet.PodRuntime do
     NDJSON), wrappé derrière `SDKPortBackend` behaviour swappable
   - `ClaudeCode.CLI.Parser` — KEEP, mais `StreamParser` réimplémente
     NDJSON parsing maison (pas d'import direct)
-  - `ClaudeCode.Session` — WRAP via `Fleet.ClaudeBridge.SessionWrapper`
-    (chantier 8 PROMOTED)
+  - `ClaudeCode.Session` — wrap `fleet_claude_bridge` SUPPRIMÉ (SDK/
+    stream-json mort par ADR-G, pivot tmux-REPL). Surface SDK ci-dessus
+    = tendril SDK à retriager (le launch est tmux, pas le SDK Port).
 
   ## Note dep `:claude_code` SDK
 

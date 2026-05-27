@@ -8,11 +8,10 @@ defmodule Fleet.Credentials.PlanValidator do
 
   ## Bypass discipline SDK #2
 
-  La doctrine LCARS v2 impose le wrap systématique des appels SDK via
-  `Fleet.ClaudeBridge.*` (chantier 8). Exception délibérée ici :
-  `PlanValidator` est appelé **au boot pod** (`Fleet.Spawner` phase
-  ALLOCATE), avant que `fleet_claude_bridge` soit dans le cycle de
-  démarrage. Justification tracée design note §"Surface SDK utilisée".
+  Le SDK-bridge (`fleet_claude_bridge`) a été SUPPRIMÉ (SDK/stream-json
+  mort, ADR-G pivot tmux-REPL). `PlanValidator.ClaudeCodeBackend` reste
+  un placeholder `:not_wired_yet` = tendril SDK à retriager (le chemin
+  SDK `account_info` n'est plus le modèle de lancement).
 
   ## Backend swappable (testabilité)
 

@@ -15,7 +15,7 @@ son header (Date, Statut, Auteur, Référencé par).
 
 ## Contraintes pod
 
-- `disallowedTools` enforced runtime via `fleet_ipc_filter` + `fleet_permission_router`
+- `disallowedTools` : refusés par le cap-profile (claude refuse les outils interdits) ; le pod est une sandbox isolée (containment substrat — ADR-D : pas de filtre IPC runtime, isolation R+W intérieur)
 - `git_ops_denied` : <%= Enum.join(@git_ops_denied, ", ") %>
 
 <%= if @repo_claude_md_sections != "" do %>

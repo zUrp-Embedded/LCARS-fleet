@@ -26,12 +26,11 @@ defmodule FleetCredentials.MixProject do
   end
 
   defp deps do
-    # NOTE chantier 3 : `:claude_code` SDK dep prescrit design note L253
-    # n'est PAS introduit ici car les backends `ClaudeCodeBackend` sont
-    # des placeholders `:not_wired_yet` (cf. moduledoc PlanValidator +
-    # OAuthRefresher). Le binding réel + la dep sont introduits au
-    # chantier 8 (`fleet_claude_bridge`) où le wrap doctrine SDK #2
-    # est appliqué. Cohérent design note §"Surface SDK utilisée" L255.
+    # NOTE : `:claude_code` SDK dep jamais introduite. Les backends
+    # `ClaudeCodeBackend` sont des placeholders `:not_wired_yet`. Le
+    # SDK-bridge (`fleet_claude_bridge`) qui devait porter le wrap a été
+    # SUPPRIMÉ (SDK/stream-json mort, ADR-G pivot tmux-REPL) → ces
+    # placeholders = tendril SDK à retriager.
     [
       {:fleet_cap_profile, in_umbrella: true},
       {:fleet_event_router, in_umbrella: true},

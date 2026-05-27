@@ -17,11 +17,6 @@ import Config
 #       metadata: [:user_id]
 #
 
-# B4 #576 — backend event ipc_filter RÉEL (prod/dev). Le wiring
-# chantier 11 (Fleet.EventRouter.Bus) est désormais effectif.
-# `config/test.exs` override → NotWiredYet (hermétique, importé après).
-config :fleet_ipc_filter, event_backend: Fleet.IPCFilter.EventBackend.PubSub
-
 if File.exists?(Path.join(__DIR__, "#{Mix.env()}.exs")) do
   import_config "#{Mix.env()}.exs"
 end

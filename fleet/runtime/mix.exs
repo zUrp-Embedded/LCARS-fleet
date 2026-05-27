@@ -46,8 +46,6 @@ defmodule LcarsFleetRuntime.MixProject do
           fleet_project_bootstrap: :permanent,
           fleet_spawner: :permanent,
           fleet_pod_runtime: :permanent,
-          fleet_claude_bridge: :permanent,
-          fleet_ipc_filter: :permanent,
           fleet_event_router: :permanent,
           fleet_task_monitor: :permanent,
           fleet_pipeline: :permanent,
