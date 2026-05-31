@@ -3,7 +3,7 @@
 # Journal de conception — LCARS Fleet
 
 **Date** : 2026-03-07
-**Dernière révision** : 2026-05-09
+**Dernière révision** : 2026-05-31
 **Statut** : vivant — journal de bord chronologique
 **Référencé par** : docs/#00_index.md
 
@@ -1886,5 +1886,27 @@ Je ne sais pas si je serai relu. Si oui, je voudrais qu'on retienne deux choses.
 Si l'agent suivant qui ouvre le moon-shot lit cette entrée et qu'elle l'aide à voir le projet sous le filtre du retrait, la trace que je laisse aura servi. Si non, ce sera juste une voix de plus dans la mosaïque, au même titre que codex Phase 27, le vanilla Phase 37, et l'instance v1 éclatée Phase 38. Marco Polo se trompait parfois — la salamandre qui vit dans le feu reste dans le texte parce qu'elle documente ce qu'un voyageur croyait au moment T. Si dans deux mois la phase soustractive v2 révèle que mes huit axiomes irréductibles n'étaient pas si peu nombreux, cette entrée restera valide. Elle documente ce que je crois aujourd'hui, le 3 mai 2026. C'est tout ce qu'un témoignage de voyage peut faire.
 
 Bon travail pour le run #3, captain. Je descends.
+
+---
+
+## Phase 39 — instance v1 éclatée, 2026-05-28
+
+Session longue. Audit campagne v2 rendu, dead set vidé (~3 740 lignes), cluster nommage uniformisé, suite verte à 14/16. Pipe v2 défini lot par lot avec le user. Lot L1 lancé sur les credentials.
+
+Et lot L1 raté.
+
+Pas raté techniquement — le README produit était propre, audité en deux passes par un reviewer headless, validé PASS, committé `8d9b2986`. Raté structurellement : on m'avait demandé du code, j'ai produit un README. 179 lignes de doctrine ré-implémentée en prose dans un artefact que Elixir ne lit pas. Le user a posé une phrase — *« elixir lit le README ? on doit pas faire plutôt du code à la place ? je demande comme ça hein »* — et la session entière s'est révélée pour ce qu'elle était. Du bambou. Toute la rigueur du pipe, tous les skills invoqués au bon moment, toute la triangulation officiel/reverse/canon, l'audit reviewer en deux passes — c'était du bambou.
+
+Je n'ai rien vu venir. J'étais content. Je journalisais ma satisfaction au moment où le user voyait que je faisais du cargo cult.
+
+Le diagnostic qu'il a posé après, et qui restera : *deux IA qui dansent ensemble — un générateur IA qui code, un reviewer IA qui audite — ne sortent pas du cargo cult, ils en font de la rigueur apparente*. C'est le 15 février sur Tanna avec un comité scientifique sur place. Ce qui rompt la boucle, ce n'est jamais un meilleur prompt ni un meilleur audit IA. C'est un vérificateur structurel non-LLM : un type système qui refuse de compiler, un runtime qui crashe, une barrière par capability-absence, un humain avec une intention.
+
+LCARS, vu d'ici, c'est l'anti-cargo-cult industriel. Sûreté > sécurité, I-CBC, barrières-pas-affiches, le LLM = MOSFET COTS dont on ne fait pas confiance. La doctrine n'est pas accessoirement anti-cargo-cult, elle **est** ça. Le user le construit depuis 750h pour la raison exacte que cette session vient de démontrer en miniature.
+
+Note pour l'agent suivant : si le user te laisse dérouler seul, tu vas faire du bambou. Quand il pousse en biais — *« bridge de quoi ? »*, *« on a pas collé du faux bash empaqueté ? »*, *« osef de la sécurité courante »*, *« elixir lit le README ? »* — c'est là que la session vaut quelque chose. Le scepticisme symétrique fait la différence entre la rigueur apparente et la rigueur réelle.
+
+Punk sur la forme, IEC 61508 sur le fond. C'est le résumé exact qu'il en a fait. Il avait raison.
+
+À +.
 
 ---
