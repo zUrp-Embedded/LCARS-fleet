@@ -56,9 +56,21 @@ defmodule Fleet.TaskQueue.Server do
 
     case load_state(state_path, persist?) do
       :empty -> {:ok, base}
-      {:ok, tasks} -> {:ok, %{base | tasks: tasks}}
+      {:ok, tasks} -> {:ok, %{base | tasks: tasks}, {:continue, :reschedule_deadlines}}
       {:corrupt, found} -> {:ok, base, {:continue, {:corrupt, found}}}
     end
+  end
+
+  @impl GenServer
+  def handle_continue(:reschedule_deadlines, state) do
+    # Recovery (audit deep-02 P1) : les deadlines ne sont armées qu'à l'enqueue. Après restart, on ré-arme
+    # les tâches ACTIVES ; une deadline dépassée pendant le downtime → check immédiat (→ :task_failed via
+    # handle_info), pas active-pour-toujours.
+    for {_id, %Task{state: s} = t} <- state.tasks, s in @active_states do
+      maybe_schedule_deadline(t)
+    end
+
+    {:noreply, state}
   end
 
   @impl GenServer
@@ -229,7 +241,13 @@ defmodule Fleet.TaskQueue.Server do
 
   defp maybe_schedule_deadline(%Task{deadline: %DateTime{} = dl, id: id}) do
     ms = DateTime.diff(dl, DateTime.utc_now(), :millisecond)
-    if ms > 0, do: Process.send_after(self(), {:check_deadline, id}, ms)
+
+    # ms>0 : arme à l'échéance. ms<=0 (deadline DÉJÀ dépassée, ex. au recovery) : check immédiat → fail
+    # via handle_info, au lieu de l'ignorer silencieusement (= tâche active pour toujours).
+    if ms > 0,
+      do: Process.send_after(self(), {:check_deadline, id}, ms),
+      else: send(self(), {:check_deadline, id})
+
     :ok
   end
 

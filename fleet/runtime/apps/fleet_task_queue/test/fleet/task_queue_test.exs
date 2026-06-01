@@ -187,6 +187,41 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, :invalid} = Fleet.TaskQueue.Task.from_map(bad)
   end
 
+  test "6e. recovery ré-arme les deadlines actives — expirée pendant le downtime → fail (fix deep-02 P1)",
+       %{topic: topic, tmp_dir: tmp_dir} do
+    now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+    past_iso = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.to_iso8601()
+    path = Path.join(tmp_dir, "deadline_recovery.json")
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "v" => 1,
+        "tasks" => %{
+          "t1" => %{
+            "id" => "t1",
+            "pod_id" => "p1",
+            "enqueued_at" => now_iso,
+            "state" => "assigned",
+            "deadline" => past_iso
+          }
+        }
+      })
+    )
+
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qdl)
+
+    assert_receive %Fleet.Event{
+                     source: :task_queue,
+                     type: :task_failed,
+                     correlation_id: "t1",
+                     payload: %{reason: :deadline_expired}
+                   },
+                   1000
+
+    assert {:ok, :failed} = TaskQueue.pod_status(q, "p1")
+  end
+
   test "7. failed via deadline", %{q: q} do
     deadline = DateTime.add(DateTime.utc_now(), 200, :millisecond)
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x", deadline: deadline})
