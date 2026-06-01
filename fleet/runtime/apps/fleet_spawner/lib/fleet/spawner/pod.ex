@@ -48,7 +48,7 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.SPBuilder
 
   # R-CORE.comm 2.2 — completion EVENT-DRIVEN : le résultat arrive via l'event Bus
-  # `pod.result_submitted` (émis par le central sur submit_result), PAS via un fichier.
+  # `task_queue.task_completed (struct %Fleet.Event{})` (émis par le central sur submit_result), PAS via un fichier.
 
   @type phase ::
           :pending
@@ -89,7 +89,7 @@ defmodule Fleet.Spawner.Pod do
           opts: keyword(),
           # R1.2 — Port owned par le Pod (détection exit + kill en RELEASE).
           port: port() | nil,
-          # R-CORE.comm 2.2 — résultat reçu via l'event Bus pod.result_submitted (completion).
+          # R-CORE.comm 2.2 — résultat reçu via l'event Bus task_queue.task_completed (struct %Fleet.Event{}) (completion).
           submitted_result: map() | nil,
           last_result: map() | nil,
           # U4 — nom tmux session si TmuxBackend a lancé (sinon nil). do_release
@@ -208,7 +208,7 @@ defmodule Fleet.Spawner.Pod do
   def handle_info({port, {:exit_status, exit_code}}, %{port: port} = state)
       when is_port(port) do
     # R-CORE.comm 2.2 — completion event-driven : si le résultat a été extrait (event
-    # pod.result_submitted reçu → :output_extracted), l'exit est l'arrêt normal post-release.
+    # task_queue.task_completed (struct %Fleet.Event{}) reçu → :output_extracted), l'exit est l'arrêt normal post-release.
     # Sinon le process est mort SANS soumettre de résultat → échec (plus de salvage fichier).
     if MapSet.member?(state.conditions, :output_extracted) do
       {:stop, :normal, state}
@@ -590,7 +590,7 @@ defmodule Fleet.Spawner.Pod do
 
   defp do_monitor(state) do
     # R-CORE.comm 2.2 — completion EVENT-DRIVEN (Iron Law : un seul mécanisme). On souscrit au Bus
-    # (Ring 0) et on attend `pod.result_submitted{pod_id == mien}` émis par le central (fleet_mcp)
+    # (Ring 0) et on attend `task_queue.task_completed (struct %Fleet.Event{}){pod_id == mien}` émis par le central (fleet_mcp)
     # sur submit_result. PLUS de poll du fichier result.md (mode fichier retiré). Deadline = budget
     # durée → :failed si aucun résultat. pod.ex (Ring 1) ne lit JAMAIS fleet_mcp (Ring 4) en direct.
     Bus.subscribe()
@@ -1089,7 +1089,7 @@ defmodule Fleet.Spawner.Pod do
   # déféré derrière ToolSearch — isDeferredTool isMcp→defer — absent du prompt turn-1 ; clé serveur
   # 2.1.150 dé-défère + attend la connexion regular-required. PERMISSION = mcp__fleet__* dans le
   # cap-profile allowedTools. cf corpus #0_ref_mcp-tool-deferral-oneshot.md). Le pod soumet via
-  # submit_result → le central broadcaste pod.result_submitted (brick 2.1) → pod.ex extrait (event-driven).
+  # submit_result → le central broadcaste task_queue.task_completed (struct %Fleet.Event{}) (brick 2.1) → pod.ex extrait (event-driven).
   # #596 — câblage Fleet.ProjectBootstrap.Phase.Clone pour les pods qui
   # déclarent `spec.project.repo_path` (futur use-case : pod sur un projet
   # utilisateur cloné). Aujourd'hui aucun cap-profile prod n'a ce champ, donc

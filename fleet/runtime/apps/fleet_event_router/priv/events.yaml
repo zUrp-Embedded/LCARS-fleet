@@ -49,8 +49,12 @@ events:
     - Fleet.Starfleet.AuditConsumer
   pod.terminated:
     - Fleet.Starfleet.AuditConsumer
-  # R-CORE.comm brick 2.1 — émis par fleet_mcp (central) sur submit_result : un pod a soumis son
-  # résultat via MCP. Porte {pod_id, payload}. pod.ex (Ring 1) y souscrit (via Bus Ring 0, pas
-  # d'appel direct Ring 1→Ring 4) pour déclencher sa complétion (trigger event, plus result.md).
-  pod.result_submitted:
-    - Fleet.Starfleet.AuditConsumer
+  # RETIRÉ 2026-06-02 (audit deep-02 P2) : `pod.result_submitted` (tuple émis par fleet_mcp sur
+  # submit_result) n'est PLUS émis — remplacé par `task_queue.task_completed` en struct %Fleet.Event{}.
+  #
+  # NOTE dual-stack (audit deep-02 P0/P1) : les events de cycle de tâche du broker (`task_queue.*` :
+  # task_enqueued/assigned/completed/failed + state_corrupt) sont émis en **struct %Fleet.Event{}**
+  # (broadcast direct), consommés DIRECTEMENT (ex. Fleet.Spawner.Pod pattern-match), PAS via cette table
+  # Dispatch — qui ne route que les tuples `{atom, map}` legacy (cf. dispatch.ex handle_info/2). Ils ne
+  # sont donc volontairement PAS listés ici tant que Dispatch ne supporte pas les structs (= unification
+  # du canon d'event, rework). Y mettre des handler-entries serait trompeur (jamais fan-out).
