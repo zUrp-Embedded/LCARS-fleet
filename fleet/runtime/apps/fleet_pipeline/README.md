@@ -1,7 +1,7 @@
 # fleet_pipeline (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-27
+**Dernière révision** : 2026-06-02
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
@@ -92,6 +92,9 @@ mix test apps/fleet_pipeline
 
 * `fleet_cap_profile` (ch1) — résolution cap-profile YAML
 * `fleet_spawner` (ch6) — spawn pod via `StageSpawner.Default`
+* `fleet_task_queue` (run #5) — broker de mandats. `StageRunner` **enqueue** le mandat ciblé `pod_id`
+  (`push_task_for_pod`, fail-soft : enqueue `{:error}` → kill du pod one-shot, pas de crash Executor) ;
+  le pod le **pull** via MCP `get_task` ; complétion = `%Fleet.Event{task_completed}` (event-driven).
 * `fleet_event_router` (ch11) — Bus PubSub events stages
 * `fleet_coord` (ch14) — deferred via `CoordBackend.NotWiredYet`
 * `:yaml_elixir`, `:jason`, `:ex_json_schema`
