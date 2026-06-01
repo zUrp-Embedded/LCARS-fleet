@@ -547,7 +547,8 @@ defmodule Fleet.Spawner.Pod do
         # nil-able : tests stub n'ont pas de Port → handle_info clauses
         # ne matchent jamais → comportement legacy préservé.
         port = Map.get(launched, :port)
-        # U4 — tmux_session présent quand TmuxBackend, nil sinon (LauncherPortBackend/Stub).
+
+        # tmux_session posé par LauncherPortBackend (chaîne bwrap) ET TmuxBackend ; nil pour StubBackend.
         tmux_session = Map.get(launched, :tmux_session)
 
         new_state =
@@ -1054,9 +1055,9 @@ defmodule Fleet.Spawner.Pod do
     Application.get_env(:fleet_spawner, :mcp_channel_url)
   end
 
-  # U4 — Injection brief au claude REPL via tmux send-keys (load-buffer + paste-buffer).
-  # No-op si pas de tmux_session (LauncherPortBackend / StubBackend → brief reste sur disk
-  # brief.md, lu par claude_launch.sh).
+  # Kick « yop » au claude REPL via PodTmux.send_keys (sock PAR-POD). Déclenche le pull du mandat par
+  # MCP get_task — le mandat n'est PAS injecté (il vit dans tickets/ + TaskQueue). No-op seulement si
+  # pas de tmux_session (StubBackend ; LauncherPortBackend ET TmuxBackend en posent un).
   #
   # Délai `@brief_inject_delay_ms` avant inject : le claude REPL n'est pas
   # immédiatement prêt à recevoir input — il boote, affiche banner, initialise
