@@ -1,31 +1,36 @@
 #!/usr/bin/env bash
 # SOURCE: bin/claude_launch.sh
 # AUTHOR: engineer
-# STARDATE: 2026-05-09
-# STATUS: R1.1 — launcher vendor-spécifique claude INTERACTIF (Ring 1, frontière vendor N1, pool subscription)
+# STARDATE: 2026-06-01
+# STATUS: PROD-V2 — launcher vendor claude INTERACTIF marionnette-PTY (Ring 1, frontière N1, subscription)
 #
-# Launcher vendor-spécifique pour `claude -p` LCARS v2 (Ring 1 pod
-# primitive, frontière vendor niveau 1, préfixe `claude_*`).
+# Launcher vendor-spécifique pour `claude` REPL interactif LCARS v2 sous ADR-G
+# (Ring 1 pod primitive, frontière vendor niveau 1, préfixe `claude_*`).
+# Déroule la DN `beyond_#5/design-notes/spawn/launcher-claude.md` (PROMOTED 9/10,
+# validation user 2026-05-30, amendement M.F.5 2026-05-31 : RC-at-startup = flag
+# `--remote-control` PROVEN sous PTY). Supersède le modèle `script(1)`-PTY one-shot
+# (mandat = prompt CLI) — interdit par ADR-G IV.1/IV.2.
 #
-# Invoqué via `exec` final par `bin/bwrap_launch.sh` (chantier 4).
-# Containment pré-set par bwrap (mounts RO + tmpfs /home + bind claudeDir
-# RW en ~/.claude). Auth = claudeDir natif Anthropic (.credentials.json,
-# refresh cross-process via lockfile natif) — PAS d'env OAuth injecté (adr-f).
+# Invoqué via `exec` final par `bin/bwrap_launch.sh` (N0). Le PTY est celui de
+# tmux (fourni par bwrap_launch) — ce launcher NE tient PLUS le PTY (plus de
+# `script -q`/inner-script) et NE porte PLUS le mandat (il arrive par MCP get_task).
+# Containment + tmux + socket-par-pod = N0 (bwrap_launch). Auth = claudeDir natif
+# Anthropic bind RW (adr-f), zéro env OAuth.
 #
-# Frontière vendor N1 stricte : ce script connaît `claude -p` flags
-# uniquement, jamais `bwrap`. Si 2e vendor → `bin/openai_launch.sh`
-# co-localisé, mêmes args, flags vendor différents.
+# Frontière vendor N1 stricte (IX.3) : flags `claude` uniquement, jamais `bwrap`/
+# `tmux`/`unshare`. Si 2e vendor → `bin/openai_launch.sh` co-localisé.
 #
-# Usage : claude_launch.sh <role> <pod_id> <pod_dir>
-#
-# R0.8-brick4 : budget_sec/budget_usd retirés (pas d'API = pas de budget).
-# Le timeout de réponse au tool MCP submit_result est géré côté Pod GenServer
-# Elixir (Process.send_after :result_deadline). Le script bash n'a plus de
-# timeout shell `timeout BUDGET_SEC` — claude tourne tant que le Port est ouvert.
+# Usage : claude_launch.sh <role> <pod_id> <pod_dir> <sp>
+#   <sp> = SP composé, élément argv discret (onboarding-DN : Port.open(args:[…,sp])
+#          → execve → claude ; jamais fichier, jamais env, jamais $(cat)).
+# Env identité (fournie par le spawner, non sensible au masquage ⇒ env OK ≠ SP) :
+#   LCARS_POD_SESSION_ID          UUID de session PRÉ-ALLOUÉ (uuidgen, state.json au spawn) — requis
+#   LCARS_POD_RESUME              0 = 1ʳᵉ création (--session-id) ; 1 = recovery (--resume)
+#   LCARS_POD_SESSION_NAME_PREFIX préfixe nom RC lisible Desktop (<human>_<role>) — requis
 #
 # Exit codes :
 #   0   : succès (propagé via exec)
-#   1   : setup error (cap-profile/SP/brief missing, jq missing, claude binary missing)
+#   1   : setup error (cap-profile/jq/claude binary missing, args/SP vides, session env manquant)
 #   *   : claude crash propagé
 
 set -euo pipefail
@@ -34,37 +39,60 @@ set -euo pipefail
 # Config (overridable via env pour testabilité)
 # =============================================================
 
-CLAUDE_BIN="${LCARS_CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo /usr/local/bin/claude)}"
+# Binaire vendor : LCARS_CLAUDE_BIN posé par bwrap (--setenv = POD_VENDOR_BIN = le claude
+# per-user du HUMAIN propriétaire, relocalisé dans le pod ; auto-update natif Anthropic).
+# Fallback = PATH du pod ($POD_DIR/.local/bin en tête, bwrap) ⇒ JAMAIS le /usr/local apt
+# système (stale, casse l'auto-update). Fail-fast si introuvable — pas de fallback silencieux
+# (un pod sur un binaire stale = casse rattrapable non rattrapée).
+CLAUDE_BIN="${LCARS_CLAUDE_BIN:-$(command -v claude 2>/dev/null || true)}"
+: "${CLAUDE_BIN:?claude binary introuvable (LCARS_CLAUDE_BIN posé par bwrap, ou PATH per-user ~/.local)}"
 JQ_BIN="${LCARS_JQ_BIN:-/usr/bin/jq}"
 
 # =============================================================
-# Args validation
+# Args POSITIONNELS : <role> <pod_id> <pod_dir> <sp>
 # =============================================================
 
-if [[ $# -ne 3 ]]; then
-  echo "ERR: usage: $0 <role> <pod_id> <pod_dir>" >&2
+if [[ $# -ne 4 ]]; then
+  echo "ERR: usage: $0 <role> <pod_id> <pod_dir> <sp>" >&2
   exit 1
 fi
 
 ROLE="$1"
 POD_ID="$2"
 POD_DIR="$3"
+SP="$4"
 
 # =============================================================
-# Debug trace #585 — append POD_DIR/claude_launch.dbg (bind RW
-# bwrap → survit côté host post-mortem). Identifie exit point
-# silent (:init_timeout sans NDJSON output, sf diag #585).
-# Removable post-B10 PASS si overhead vraiment cher.
+# Session : UUID PRÉ-ALLOUÉ par le spawner (uuidgen, persisté state.json au spawn).
+# Identité fournie par l'orchestrateur (VII.1) ⇒ env OK (≠ SP qui voyage en argv).
+# =============================================================
+
+SESSION_ID="${LCARS_POD_SESSION_ID:?UUID de session requis (pré-alloué par le spawner)}"
+POD_RESUME="${LCARS_POD_RESUME:-0}"                          # 0 = 1ʳᵉ création ; 1 = recovery
+SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<human>_<role>)}"
+
+PERM_MODE="${LCARS_PERMISSION_MODE:-acceptEdits}"
+# --settings est ADDITIF ⇒ --setting-sources DOIT exclure 'user' (sinon le settings de
+# l'humain bleed dans le pod). Default project,local — 'user' INTERDIT (fleet_spawner v2 §G).
+SETTING_SOURCES="${LCARS_SETTING_SOURCES:-project,local}"
+
+# =============================================================
+# Debug trace #585 — append POD_DIR/claude_launch.dbg (bind RW bwrap → survit
+# côté host post-mortem). Identifie un exit point silencieux (diag sf #585).
 # =============================================================
 dbg() { echo "[$(date -u +%H:%M:%S.%3N)] $*" >> "${POD_DIR:-/tmp}/claude_launch.dbg" 2>/dev/null || true; }
-# Mi9 : repart d'un dbg vierge à chaque lancement (pas de croissance non bornée si POD_DIR réutilisé).
 : > "${POD_DIR:-/tmp}/claude_launch.dbg" 2>/dev/null || true
-dbg "start ROLE=$ROLE POD_ID=$POD_ID POD_DIR=$POD_DIR PWD=$(pwd) HOME=${HOME:-} USER=$(id -un 2>/dev/null||echo ?)"
+dbg "start ROLE=$ROLE POD_ID=$POD_ID POD_DIR=$POD_DIR session=$SESSION_ID resume=$POD_RESUME prefix=$SESSION_NAME_PREFIX PWD=$(pwd) HOME=${HOME:-} USER=$(id -un 2>/dev/null||echo ?)"
 dbg "auth claudeDir bind: $([ -f "$HOME/.claude/.credentials.json" ] && echo 'creds present' || echo 'MISSING')"
 
 if [[ -z "$ROLE" || -z "$POD_ID" || -z "$POD_DIR" ]]; then
-  dbg "EXIT: args vides"
-  echo "ERR: tous les args doivent être non-vides" >&2
+  dbg "EXIT: args role/pod_id/pod_dir vides"
+  echo "ERR: role, pod_id et pod_dir doivent être non-vides" >&2
+  exit 1
+fi
+if [[ -z "$SP" ]]; then
+  dbg "EXIT: SP inline (argv) vide"
+  echo "ERR: SP inline (argv 4) doit être non-vide (Fleet.SPBuilder.compose/3)" >&2
   exit 1
 fi
 dbg "step args-non-empty OK"
@@ -88,9 +116,6 @@ fi
 dbg "step JQ_BIN OK ($JQ_BIN)"
 
 CAP_PROFILE_JSON="$POD_DIR/.cap-profile.json"
-SP_PATH="$POD_DIR/.claude/system-prompt.md"
-BRIEF_PATH="$POD_DIR/context/brief.md"
-
 if [[ ! -f "$CAP_PROFILE_JSON" ]]; then
   dbg "EXIT: cap-profile absent : $CAP_PROFILE_JSON ls_pod=$(ls -la "$POD_DIR" 2>&1)"
   echo "ERR: cap-profile $CAP_PROFILE_JSON missing (Fleet.Spawner ALLOCATE chantier 6)" >&2
@@ -98,41 +123,10 @@ if [[ ! -f "$CAP_PROFILE_JSON" ]]; then
 fi
 dbg "step CAP_PROFILE OK"
 
-if [[ ! -f "$SP_PATH" ]]; then
-  dbg "EXIT: SP absent : $SP_PATH ls_claude=$(ls -la "$POD_DIR/.claude" 2>&1)"
-  echo "ERR: SP $SP_PATH missing (Fleet.SPBuilder.compose/3 chantier 2)" >&2
-  exit 1
-fi
-dbg "step SP OK"
-
-if [[ ! -f "$BRIEF_PATH" ]]; then
-  dbg "EXIT: brief absent : $BRIEF_PATH ls_context=$(ls -la "$POD_DIR/context" 2>&1)"
-  echo "ERR: brief $BRIEF_PATH missing (caller responsibility N2bis)" >&2
-  exit 1
-fi
-dbg "step BRIEF OK"
-
-# =============================================================
-# Extract listes tools depuis cap-profile JSON resolved
-# (string-keyed cohérent fleet_capprofile L100)
-# =============================================================
-
-ALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.allowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq allowedTools fail rc=$? out=$ALLOWED_TOOLS"; exit 1; }
-DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq disallowedTools fail rc=$? out=$DISALLOWED_TOOLS"; exit 1; }
-dbg "step jq tools OK allowed='$ALLOWED_TOOLS' disallowed='$DISALLOWED_TOOLS'"
-
-# =============================================================
-# Sortie pod : dossier livrable ($POD_DIR/output/). En interactif, le livrable est un
-# FICHIER écrit par l'agent (lu par l'EXTRACT Elixir R1.2), pas un flux NDJSON stdout.
-# =============================================================
-
-OUTPUT_DIR="$POD_DIR/output"
-mkdir -p "$OUTPUT_DIR"
-dbg "step output_dir mkdir OK ($OUTPUT_DIR)"
-
 # =============================================================
 # Onboarding/trust skip (interactif) : sinon claude bloque sur le dialogue 1er lancement.
-# .claude.json minimal à la racine du HOME pod ($POD_DIR). Clé projects = cwd pod (= $POD_DIR).
+# .claude.json minimal à la racine du HOME pod ($POD_DIR, hors .claude/ ⇒ non masqué
+# par le bind creds). Clé projects = cwd pod (= $POD_DIR).
 # =============================================================
 
 VER="$("$CLAUDE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
@@ -143,20 +137,40 @@ JSONEOF
 dbg "step claude.json provisionné (VER=${VER:-?})"
 
 # =============================================================
-# R-CORE.comm — canal MCP fleet↔pod (programmatique, STRUCTURÉ ; le drive propre, jamais de
-# scraping terminal). Si le spawner/médiateur a provisionné une config MCP conventionnelle dans
-# le pod ($POD_DIR/.mcp-fleet.json — NOMMÉE ainsi, PAS `.mcp.json`, pour éviter l'auto-discovery
-# et son dialog de trust), on l'injecte avec --strict-mcp-config (n'utilise QUE cette config,
-# ignore toute autre).
-#
-# DEUX gates de démarrage distincts (NE PAS confondre — vérifié reverse CC 2.1.88 + binaire 2.1.150) :
-#   1. PERMISSION : mcp__* déclarés dans le cap-profile allowedTools → auto-approuvés (pas de prompt).
-#   2. VISIBILITÉ : SANS `"alwaysLoad":true` au niveau serveur dans .mcp-fleet.json, tout tool MCP est
-#      DÉFÉRÉ derrière ToolSearch (isDeferredTool : isMcp → defer) → absent du prompt turn-1. Pour un pod
-#      one-shot, le médiateur (pod.ex / driver de gate) DOIT poser alwaysLoad côté config serveur.
-# Ce launcher reste content-agnostique : il transmet la config telle quelle, c'est l'émetteur du
-# .mcp-fleet.json qui porte alwaysLoad. Keystone prouvé : claude (pod) → tool MCP fleet → résultat structuré.
+# Tools depuis cap-profile JSON resolved (string-keyed, cohérent fleet_capprofile L100).
 # =============================================================
+
+ALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.allowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq allowedTools fail rc=$? out=$ALLOWED_TOOLS"; exit 1; }
+DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq disallowedTools fail rc=$? out=$DISALLOWED_TOOLS"; exit 1; }
+dbg "step jq tools OK allowed='$ALLOWED_TOOLS' disallowed='$DISALLOWED_TOOLS'"
+
+# =============================================================
+# Settings pod-spécifiques (hooks/permissions). $POD_DIR/.lcars/settings.json (HORS .claude/,
+# le bind creds masque tout fichier sous .claude/ — amendement 2026-05-31 §C-2(a)).
+# --settings ADDITIF ⇒ --setting-sources exclut 'user'. Optionnel : si absent, pas de flag.
+# =============================================================
+
+POD_SETTINGS_FILE="$POD_DIR/.lcars/settings.json"
+# --setting-sources INCONDITIONNEL : on exclut le tier 'user' (settings.json de l'humain)
+# TOUJOURS — casser la dép par flag, pas en comptant sur le masquage bwrap. `--settings`
+# (additif) ajouté seulement si le fichier pod existe. (À confirmer empiriquement au bring-up :
+# que `--setting-sources` seul, sans `--settings`, est accepté par le binaire.)
+SETTINGS_FLAGS=(--setting-sources "$SETTING_SOURCES")
+if [[ -f "$POD_SETTINGS_FILE" ]]; then
+  SETTINGS_FLAGS+=(--settings "$POD_SETTINGS_FILE")
+  dbg "step settings pod détecté ($POD_SETTINGS_FILE) + --setting-sources $SETTING_SOURCES"
+else
+  dbg "step pas de settings pod ($POD_SETTINGS_FILE absent) ; --setting-sources $SETTING_SOURCES seul"
+fi
+
+# =============================================================
+# R-CORE.comm — canal MCP fleet↔pod (le drive propre, structuré ; jamais de scraping terminal).
+# .mcp-fleet.json (NOMMÉE ainsi, PAS `.mcp.json`, pour éviter l'auto-discovery + trust dialog),
+# `alwaysLoad:true` au niveau serveur porté par l'émetteur (pod.ex/spawner) — sinon les tools MCP
+# sont DÉFÉRÉS derrière ToolSearch (absents du prompt turn-1). Le launcher reste content-agnostique :
+# il transmet la config telle quelle via --strict-mcp-config (n'utilise QUE cette config).
+# =============================================================
+
 MCP_CONFIG="$POD_DIR/.mcp-fleet.json"
 MCP_FLAGS=()
 if [[ -f "$MCP_CONFIG" ]]; then
@@ -164,48 +178,41 @@ if [[ -f "$MCP_CONFIG" ]]; then
   dbg "step MCP config détectée ($MCP_CONFIG) → --strict-mcp-config"
 else
   # IRON LAW : MCP est le canal de comm UNIQUE. Un pod réel SANS .mcp-fleet.json = bug de config
-  # amont (l'émetteur, pod.ex, doit toujours le provisionner) — pas un "mode sans MCP". Le launcher
-  # reste content-agnostique (ne fail-fast pas ; il ne connaît pas l'intention), mais c'est anormal.
+  # amont (l'émetteur doit toujours le provisionner). Le launcher reste content-agnostique (ne
+  # fail-fast pas), mais c'est anormal.
   dbg "WARN: pas de MCP config ($MCP_CONFIG absent) — ANORMAL pour un pod réel (provisioning amont manquant)"
 fi
 
 # =============================================================
-# R1.1 — invocation INTERACTIVE (pool subscription, PAS -p/SDK billing post-15/06).
-# Mécanisme prouvé briques 1a/1b/2 : mandat (brief) = prompt initial, sous PTY (claude interactif
-# exige un TTY → script(1)), l'agent écrit son livrable en fichier dans output/. Frontière vendor N1 :
-# flags claude uniquement, jamais bwrap. claude résolu via PATH (provisionné par bwrap_launch R0.1).
-# --max-budget-usd retiré (print-only) ; timeout = budget temps. exit code non-fiable (REPL tué au
-# timeout) → l'EXTRACT Elixir s'appuie sur le livrable fichier + tue le pod après extraction, pas sur le code.
+# Session : UUID pré-alloué (--session-id exige un UUID — vérif binaire ; JAMAIS un nom lisible).
+#   1ʳᵉ création : --session-id <UUID>   (PROVEN : crée la session avec cet UUID).
+#   recovery     : --resume <UUID>       (PROVEN : reprend, contexte préservé serveur Anthropic).
+#   Nom lisible visible Desktop = axe SÉPARÉ : --remote-control-session-name-prefix (suffixe auto).
 # =============================================================
 
-MANDAT="$(cat "$BRIEF_PATH")"
-PERM_MODE="${LCARS_PERMISSION_MODE:-acceptEdits}"
-LAUNCH_INNER="$POD_DIR/.claude-launch-inner.sh"
-# Shebang bash OBLIGATOIRE : `printf %q` produit du quoting ANSI-C bash ($'...\n...') pour le mandat
-# multi-ligne. dash (#!/bin/sh) ne comprend pas $'...' → syntax error. bash %q ↔ interpréteur bash.
-{ printf '#!/usr/bin/env bash\nexec'; printf ' %q' "$CLAUDE_BIN" "$MANDAT" \
+if [[ "$POD_RESUME" == "1" ]]; then
+  SESSION_FLAGS=(--resume "$SESSION_ID")
+else
+  SESSION_FLAGS=(--session-id "$SESSION_ID")
+fi
+dbg "step session flags : ${SESSION_FLAGS[*]}"
+
+# =============================================================
+# exec claude INTERACTIF marionnette-PTY (ADR-G). PAS -p, PAS stream-json, PAS budget, PAS de
+# prompt positionnel (mandat = MCP get_task, IV.4). PAS de script(1)/inner-script : le PTY est
+# tmux (bwrap_launch, N0) ⇒ exec direct = argv propre de bout en bout (lève F-1b-04). RC-at-startup
+# = flag --remote-control (PROVEN sous PTY 2026-05-31 ; accepté silencieusement hors --help ; sans
+# TTY le binaire bascule en --print-like — le PTY tmux assure le mode interactif RC). SP inline argv.
+# =============================================================
+
+dbg "step pre-exec claude --remote-control (perm=$PERM_MODE bin=$CLAUDE_BIN)"
+exec "$CLAUDE_BIN" \
+    --remote-control \
+    "${SESSION_FLAGS[@]}" \
+    --remote-control-session-name-prefix "$SESSION_NAME_PREFIX" \
+    --system-prompt "$SP" \
     --permission-mode "$PERM_MODE" \
-    --system-prompt-file "$SP_PATH" \
     --allowedTools "$ALLOWED_TOOLS" \
     --disallowedTools "$DISALLOWED_TOOLS" \
-    ${MCP_FLAGS[@]+"${MCP_FLAGS[@]}"}; printf '\n'; } > "$LAUNCH_INNER"
-chmod +x "$LAUNCH_INNER"
-
-# Typescript du PTY (post-mortem : voir le tour claude, diag silent-exit #585). Dans le pod
-# (bind RW → survit côté host). Override LCARS_TYPESCRIPT pour rediriger.
-TYPESCRIPT="${LCARS_TYPESCRIPT:-$POD_DIR/.claude-typescript.log}"
-
-# stdin FORCÉ /dev/null (défensif). claude interactif (sous PTY script), une fois le tour-prompt-initial
-# exécuté, sort proprement sur EOF stdin. Backgrounded-bash donne /dev/null implicitement (gate-r1.1),
-# mais Port.open (Erlang) donne un pipe ouvert SANS EOF → claude traînerait jusqu'au timeout au lieu de
-# sortir net après écriture. On force /dev/null → launcher INDÉPENDANT du stdin de l'appelant.
-dbg "step pre-exec claude interactif (perm=$PERM_MODE bin=$CLAUDE_BIN ts=$TYPESCRIPT)"
-set +e
-# R0.8-brick4 : timeout shell retiré (pas de budget durée). claude tourne tant
-# que le Port stdin reste ouvert ; le timeout de RÉPONSE est côté Pod GenServer
-# (:result_deadline) qui ferme le Port via transition_failed.
-script -q -c "$LAUNCH_INNER" "$TYPESCRIPT" < /dev/null
-RC=$?
-set -e
-dbg "post-script rc=$RC output_ls=$(ls -la "$OUTPUT_DIR" 2>&1)"
-exit "$RC"
+    ${SETTINGS_FLAGS[@]+"${SETTINGS_FLAGS[@]}"} \
+    ${MCP_FLAGS[@]+"${MCP_FLAGS[@]}"}
