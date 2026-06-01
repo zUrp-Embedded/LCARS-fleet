@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-05-26
+**Dernière révision** : 2026-06-02
 **Statut** : guide runtime v2 (salvage cow-boy).
 **Référencé par** : —
 
@@ -36,14 +36,14 @@ Deploy procedure (systemd unit, env file, readiness probe paths) is in `etc/READ
 
 Apps are grouped into **rings** (substrate layering, declared in each README under "Frontière vendor"):
 - **Ring 0** — OS substrate: `lcars-fleet.service` (chantier 16, lives in `etc/` + `bin/`, not an app)
-- **Ring 1** — pod primitives + vendor frontier: `fleet_spawner`, `fleet_pod_runtime`, `fleet_claude_bridge`, `fleet_credentials`, `fleet_capprofile`, `fleet_spbuilder`, `fleet_project_bootstrap`, plus `bin/bwrap_launch.sh` + `bin/claude_launch.sh`
-- **Ring 2** — orchestration backbone: `fleet_event_router` (Phoenix.PubSub bus `Fleet.PubSub` on topic `fleet.events`), `fleet_ipc_filter`, `fleet_task_monitor`
+- **Ring 1** — pod primitives + vendor frontier: `fleet_spawner`, `fleet_pod_runtime`, `fleet_credentials`, `fleet_cap_profile`, `fleet_sp_builder`, `fleet_project_bootstrap`, plus `bin/bwrap_launch.sh` + `bin/claude_launch.sh`. (La frontière vendor N1 = ces scripts `bin/` ; il n'y a **pas** d'app `fleet_claude_bridge` — retirée au pivot ADR-G. Noms corrigés 2026-06-02 : `fleet_cap_profile`/`fleet_sp_builder`, pas `fleet_capprofile`/`fleet_spbuilder`.)
+- **Ring 2** — orchestration backbone: `fleet_event_router` (Phoenix.PubSub bus `Fleet.PubSub` on topic `fleet.events`), `fleet_task_queue` (broker de mandats — `get_task`/`submit_result`, run #5), `fleet_task_monitor`, `fleet_pilot` (dispatcher webhook→pipeline, off par défaut). (`fleet_ipc_filter` retiré : jamais implémenté, `event_backend: NotWiredYet`.)
 - **Ring 3** — coordination + policy: `fleet_coord`, `fleet_pipeline`, `fleet_starfleet` (Cat-5 audit), `fleet_mcp`
 - **Ring 4** — external surface: `fleet_api` (REST `:8080` + WS `/ws`, HMAC `X-Auth-Token` against `/etc/fleet/api-secret`)
 
 ### Vendor frontier (N0 / N1)
 
-Anything that talks to a specific vendor (Claude SDK, future OpenAI) is **N1** and isolated behind a shell launcher in `bin/` plus `fleet_claude_bridge`. Everything else is **N0** (vendor-agnostic). New vendor → new `bin/<vendor>_launch.sh` co-located with `claude_launch.sh`, same arg shape, **never** edit `bwrap_launch.sh`. Mixing vendor flags into N0 code breaks the contract.
+Anything that talks to a specific vendor (Claude SDK, future OpenAI) is **N1** and isolated behind a shell launcher in `bin/` (`claude_launch.sh` — there is **no** `fleet_claude_bridge` app; the N1 frontier IS the `bin/` script, ADR-G). Everything else is **N0** (vendor-agnostic). New vendor → new `bin/<vendor>_launch.sh` co-located with `claude_launch.sh`, same arg shape, **never** edit `bwrap_launch.sh`. Mixing vendor flags into N0 code breaks the contract.
 
 ### Pod sandboxing
 
@@ -63,8 +63,9 @@ Three config files, evaluated in this order:
 
 **Critical invariant** in `config/runtime.exs`: the entire file is wrapped in `if config_env() != :test do ... end`. Without that guard, `mix test` reads runtime.exs (Mix evaluates it in every env), flips `start_listener: true`, and Cowboy tries to bind `:8080` → umbrella boot crash. If you add runtime config, keep it inside the guard unless you genuinely want test eval.
 
-Env vars consumed at boot (full list in `config/runtime.exs`):
+Env vars consumed at boot (full template: `etc/lcars-fleet.env.template`):
 `LCARS_LOG_LEVEL`, `LCARS_CAPPROFILES_ROOT`, `LCARS_CREDENTIALS_ROOT`, `LCARS_PODS_ROOT`, `LCARS_PIPELINES_ROOT`, `LCARS_COORD_POLICIES_PATH`, `LCARS_STARFLEET_AUDIT_LOG`, `LCARS_BOOT_PERMANENT_AT_START`, `LCARS_CONFIG_REPO`, `FLEET_WEBHOOK_SECRET_PATH`, `FLEET_API_PORT`, `FLEET_API_SECRET_PATH`.
+Run #5 (ADR-G / MCP / pilot — added 2026-06-02): `LCARS_LAUNCH_BACKEND` (+ `LCARS_UNSAFE_ALLOW_HOST_TMUX`), `LCARS_FLEET_MCP_URL` / `_POD_FACING_PORT` / `_BRIDGE_PATH` / `_CHANNEL_URL` / `_CHANNEL_HTTP_PORT`, `LCARS_PILOT_DISPATCHER` / `_POLL_REPO` / `_POLL_INTERVAL_MS` / `_ROUTING_PATH`, `FORGE_BASE_URL` / `FORGE_TOKEN` / `FORGE_TOKEN_FILE`.
 
 ## Test hermeticity
 
