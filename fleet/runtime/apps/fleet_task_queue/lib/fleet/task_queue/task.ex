@@ -77,27 +77,29 @@ defmodule Fleet.TaskQueue.Task do
          %{"id" => id, "pod_id" => pod_id, "enqueued_at" => enq, "state" => state} = m
        )
        when is_binary(id) and is_binary(pod_id) and is_binary(enq) and is_binary(state) do
-    case parse_state(state) do
-      {:ok, st} ->
-        {:ok,
-         %__MODULE__{
-           id: id,
-           pod_id: pod_id,
-           ticket_id: m["ticket_id"],
-           role: m["role"],
-           brief: m["brief"],
-           deadline: parse(m["deadline"]),
-           retry_count: m["retry_count"] || 0,
-           enqueued_at: parse(enq),
-           assigned_at: parse(m["assigned_at"]),
-           completed_at: parse(m["completed_at"]),
-           state: st,
-           result: m["result"],
-           metadata: m["metadata"] || %{}
-         }}
-
-      :error ->
-        {:error, :invalid}
+    # `enqueued_at` est REQUIS (@enforce_keys + clé de tri DateTime de find_active) : un ISO invalide
+    # doit FAIL-LOUD ici, PAS devenir nil silencieusement (sinon boot OK puis crash au tri — audit
+    # Codex after-9b3aea3d). Les autres DateTime (deadline/assigned/completed) sont optionnels → nil OK.
+    with {:ok, st} <- parse_state(state),
+         {:ok, eat} <- parse_required_dt(enq) do
+      {:ok,
+       %__MODULE__{
+         id: id,
+         pod_id: pod_id,
+         ticket_id: m["ticket_id"],
+         role: m["role"],
+         brief: m["brief"],
+         deadline: parse(m["deadline"]),
+         retry_count: m["retry_count"] || 0,
+         enqueued_at: eat,
+         assigned_at: parse(m["assigned_at"]),
+         completed_at: parse(m["completed_at"]),
+         state: st,
+         result: m["result"],
+         metadata: m["metadata"] || %{}
+       }}
+    else
+      _ -> {:error, :invalid}
     end
   end
 
@@ -111,6 +113,14 @@ defmodule Fleet.TaskQueue.Task do
   defp parse_state("failed"), do: {:ok, :failed}
   defp parse_state("cleared"), do: {:ok, :cleared}
   defp parse_state(_), do: :error
+
+  # `enqueued_at` requis → `{:ok, dt} | :error` (vs `parse/1` qui tolère nil pour les champs optionnels).
+  defp parse_required_dt(s) when is_binary(s) do
+    case DateTime.from_iso8601(s) do
+      {:ok, dt, _} -> {:ok, dt}
+      _ -> :error
+    end
+  end
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

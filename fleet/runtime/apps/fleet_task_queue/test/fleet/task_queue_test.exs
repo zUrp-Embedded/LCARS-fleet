@@ -182,6 +182,11 @@ defmodule Fleet.TaskQueueTest do
     assert [] = TaskQueue.list_pending(q)
   end
 
+  test "6d. enqueued_at ISO invalide → {:error,:invalid} (champ requis, pas de nil silencieux — fix after-9b3aea3d)" do
+    bad = %{"id" => "t1", "pod_id" => "p1", "enqueued_at" => "pas-une-date", "state" => "pending"}
+    assert {:error, :invalid} = Fleet.TaskQueue.Task.from_map(bad)
+  end
+
   test "7. failed via deadline", %{q: q} do
     deadline = DateTime.add(DateTime.utc_now(), 200, :millisecond)
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x", deadline: deadline})
