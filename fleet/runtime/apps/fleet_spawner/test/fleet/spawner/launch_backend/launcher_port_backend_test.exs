@@ -14,7 +14,8 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
       pod_id: "pod-42",
       pod_dir: dir,
       bwrap_launch_path: bwrap,
-      claude_launch_path: "/opt/claude_launch.sh"
+      claude_launch_path: "/opt/claude_launch.sh",
+      sp: "# SP de test"
     }
     |> Map.merge(Map.new(opts))
   end
@@ -27,8 +28,9 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
   end
 
   describe "build_spawn/1 (pur, anti-M1 vecteur)" do
-    test "vecteur exact bwrap <role pod dir> claude <role pod dir>" do
-      # R0.8-brick4 : budget_sec/budget_usd retirés du vecteur (pas d'API).
+    test "vecteur exact bwrap <role pod dir> claude <role pod dir sp> (SP en argv4 inline)" do
+      # R0.8-brick4 : budget retiré. Le SP composé est l'argv4 de claude_launch (inline, pas fichier
+      # masqué par le bind bwrap). Identité/session voyagent par l'ENV (launch/2), pas le vecteur.
       assert {:ok, "/b/bwrap.sh",
               [
                 "engineer",
@@ -37,14 +39,16 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
                 "/opt/claude_launch.sh",
                 "engineer",
                 "pod-42",
-                "/p"
+                "/p",
+                "# SP composé du pod"
               ]} =
                LauncherPortBackend.build_spawn(%{
                  role: "engineer",
                  pod_id: "pod-42",
                  pod_dir: "/p",
                  bwrap_launch_path: "/b/bwrap.sh",
-                 claude_launch_path: "/opt/claude_launch.sh"
+                 claude_launch_path: "/opt/claude_launch.sh",
+                 sp: "# SP composé du pod"
                })
     end
 

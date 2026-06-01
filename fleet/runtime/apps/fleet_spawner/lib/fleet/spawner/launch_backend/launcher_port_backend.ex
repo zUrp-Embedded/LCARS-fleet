@@ -44,8 +44,11 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   (ordre/contenu du vecteur) → testé isolément.
 
   `bwrap_launch <role> <pod_id> <pod_dir>` puis `<command...>` =
-  `claude_launch <role> <pod_id> <pod_dir>`. R0.8-brick4 : budget_sec/
-  budget_usd retirés (pas d'API = pas de budget ; timeout côté Pod).
+  `claude_launch <role> <pod_id> <pod_dir> <sp>`. Le **SP composé est l'argv4** de
+  claude_launch (inline, PAS un fichier : `.claude/system-prompt.md` est masqué par le
+  bind CLAUDE_DIR→.claude de bwrap_launch). R0.8-brick4 : budget retiré (pas d'API).
+  Identité/session (`LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX`) voyagent par
+  l'ENV du Port (`launch/2` `env`), que bwrap_launch `--setenv` dans le pod.
   """
   @spec build_spawn(map()) :: {:ok, String.t(), [String.t()]} | {:error, term()}
   def build_spawn(%{
@@ -53,11 +56,12 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
         pod_id: pod_id,
         pod_dir: pod_dir,
         bwrap_launch_path: bwrap,
-        claude_launch_path: claude
+        claude_launch_path: claude,
+        sp: sp
       })
       when is_binary(role) and is_binary(pod_id) and is_binary(pod_dir) and
-             is_binary(bwrap) and is_binary(claude) do
-    argv = [role, pod_id, pod_dir, claude, role, pod_id, pod_dir]
+             is_binary(bwrap) and is_binary(claude) and is_binary(sp) do
+    argv = [role, pod_id, pod_dir, claude, role, pod_id, pod_dir, sp]
     {:ok, bwrap, argv}
   end
 

@@ -207,11 +207,14 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "state.json écrit après launch (point de recovery, session_id capturé)" do
-      StubBackend.set_reply(interactive_reply(session_id: "sess-xyz"))
+    test "state.json écrit après launch (point de recovery, session_id PRÉ-ALLOUÉ)" do
+      # session_id pré-alloué au spawn (DN §A) : passé via opts (le caller l'alloue, comme pod_id).
+      # Le backend ne le capture PLUS (modèle -p mort) — l'état fait foi, persisté tel quel.
+      StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-state-#{System.unique_integer([:positive])}"
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      args = build_args(pod_id, "ticket-1") |> Map.put(:opts, session_id: "sess-xyz")
+      {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
       # Barrière de sync : :launch_called est émis PENDANT launch_backend.launch, avant que
       # do_launch ne fasse write_state_fs. GenServer.call est traité après la chaîne handle_continue.

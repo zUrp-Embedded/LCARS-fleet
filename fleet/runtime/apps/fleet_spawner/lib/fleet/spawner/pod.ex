@@ -356,6 +356,9 @@ defmodule Fleet.Spawner.Pod do
       new_state =
         state
         |> Map.put(:phase, :injecting)
+        # SP composé stocké pour l'argv4 inline (do_launch) — même contenu que le fichier .claude/
+        # system-prompt.md (masqué par le bind bwrap), donc c'est cette copie en state qui sert au pod.
+        |> Map.put(:sp, sp_compose.sp_md <> "\n\n---\n\n" <> agent_draft)
         |> add_condition(:home_projected)
 
       {:noreply, new_state, {:continue, :inject}}
@@ -502,13 +505,19 @@ defmodule Fleet.Spawner.Pod do
     # besoin de la valeur ; LauncherPortBackend (legacy bwrap+print) recevait
     # `budget_sec`/`budget_usd` comme args du script — ces clés sont retirées
     # de l'API LaunchBackend (cf. behaviour `Fleet.Spawner.LaunchBackend`).
+    human =
+      Keyword.get(state.opts, :human, Application.get_env(:fleet_spawner, :pod_human, "fleet"))
+
     args = %{
       role: role,
       pod_id: state.pod_id,
       pod_dir: state.pod_dir,
       bwrap_launch_path: bwrap_launch_path(),
       claude_launch_path: claude_launch_path(),
-      session_id: state.session_id
+      session_id: state.session_id,
+      # SP composé inline (argv4 claude_launch) — le fichier .claude/system-prompt.md est masqué
+      # par le bind bwrap, donc le SP voyage en argv (cohérent contrat claude_launch.sh).
+      sp: state.sp
     }
 
     env =
@@ -520,6 +529,11 @@ defmodule Fleet.Spawner.Pod do
       # propage via `tmux -e HOME=...` → claude REPL lit pod_dir/.claude/* (creds
       # OAuth + trust dialog skip) isolé du host. POC scope (containment dégradé).
       |> Map.put("HOME", state.pod_dir)
+      # Chaîne de session (DN spawner-orchestrator §D) : bwrap_launch les `--setenv` dans le pod,
+      # claude_launch les lit `:?` strict (no-boot sinon). PRÉFIXE nom RC = <human>_<role>.
+      |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
+      |> Map.put("LCARS_POD_RESUME", if(state.resume, do: "1", else: "0"))
+      |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", "#{human}_#{role}")
 
     case launch_backend().launch(args, env) do
       {:ok, %{init_message: init_msg, ndjson_log: ndjson_log} = launched} ->
@@ -537,11 +551,9 @@ defmodule Fleet.Spawner.Pod do
           |> Map.put(:ndjson_log_path, ndjson_log)
           |> Map.put(:port, port)
           |> Map.put(:tmux_session, tmux_session)
-          |> Map.put(
-            :session_id,
-            (is_map(init_msg) && init_msg["session_id"]) || launched[:session_id] ||
-              state.session_id
-          )
+          # session_id PRÉ-ALLOUÉ (state) — plus de capture `init_msg["session_id"]` (modèle -p mort ;
+          # init_msg est nil en RC interactif). L'UUID a été alloué à l'init / restauré en recovery.
+          |> Map.put(:session_id, state.session_id)
           |> add_condition(:process_launched)
           |> add_condition(:stream_alive)
 
@@ -684,6 +696,8 @@ defmodule Fleet.Spawner.Pod do
           {:ok, %{"session_id" => session_id, "phase" => phase}} when is_binary(session_id) ->
             base
             |> Map.put(:session_id, session_id)
+            # recovery : on REPREND la session existante → --resume <uuid> (pas --session-id).
+            |> Map.put(:resume, true)
             |> Map.put(:phase, phase_from_string(phase) || :launching)
 
           _ ->
@@ -731,7 +745,14 @@ defmodule Fleet.Spawner.Pod do
       conditions: MapSet.new(),
       pod_id: args.pod_id,
       ticket_id: args.ticket_id,
-      session_id: nil,
+      # Session UUID PRÉ-ALLOUÉ au spawn (DN spawner-orchestrator §A) : `--session-id <uuid>` à la
+      # 1ʳᵉ création ; `recover_or_init` le RESTAURE depuis state.json → `--resume <uuid>`. Remplace
+      # le modèle -p (capture `init_msg["session_id"]`, mort). `resume`=false ; recovery le passe à true.
+      session_id: Keyword.get(args.opts, :session_id) || UUID.uuid4(),
+      resume: false,
+      # SP composé (do_project) stocké en state pour l'argv4 inline de claude_launch — le fichier
+      # `.claude/system-prompt.md` est MASQUÉ par le bind CLAUDE_DIR→.claude de bwrap_launch.
+      sp: nil,
       cap_profile: args.cap_profile,
       env_vars: %{},
       ndjson_log_path: nil,
