@@ -131,16 +131,18 @@ defmodule Fleet.Spawner.PodTest do
       assert info.phase == :monitoring
       assert File.dir?(info.pod_dir)
       assert File.exists?(Path.join(info.pod_dir, ".cap-profile.json"))
-      assert File.exists?(Path.join(info.pod_dir, ".claude/system-prompt.md"))
-      assert File.exists?(Path.join(info.pod_dir, ".claude/CLAUDE.md"))
-      assert File.exists?(Path.join(info.pod_dir, ".claude/protocole-user.md"))
+
+      # Provisioning HORS .claude/ (masqué par le bind bwrap) : .lcars/ + racine pod pour CLAUDE.md.
+      assert File.exists?(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
+      assert File.exists?(Path.join(info.pod_dir, "CLAUDE.md"))
+      assert File.exists?(Path.join(info.pod_dir, ".lcars/protocole-user.md"))
       # Ticket-driven (pivot doctrine) : le brief vit dans tickets/<ticket_id>.md
       # (pas context/brief.md). Claude le lit comme contenu projet.
       assert File.exists?(Path.join(info.pod_dir, "tickets/ticket-1.md"))
 
       # SP enrichi par agent-worker-base draft : doit contenir le workflow
       # yop → get_task → submit_result.
-      sp = File.read!(Path.join(info.pod_dir, ".claude/system-prompt.md"))
+      sp = File.read!(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
       assert sp =~ "agent worker LCARS"
       assert sp =~ "submit_result"
       assert sp =~ "yop"

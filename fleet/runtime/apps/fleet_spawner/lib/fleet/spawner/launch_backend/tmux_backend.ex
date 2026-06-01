@@ -205,7 +205,7 @@ defmodule Fleet.Spawner.LaunchBackend.TmuxBackend do
 
   defp build_pod_cmd(role, args) do
     pod_dir = Map.get(args, :pod_dir, "")
-    settings_path = Path.join([pod_dir, ".claude", "settings.json"])
+    settings_path = Path.join([pod_dir, ".lcars", "settings.json"])
     # U4 canon : `.mcp-fleet.json` (PAS `.mcp.json`) — c'est le nom écrit par
     # `Fleet.Spawner.Pod.maybe_provision_mcp_config/1`. Évite l'auto-discovery
     # de `.mcp.json` + son dialog de trust (cohérent claude_launch.sh R1.1).
@@ -219,7 +219,7 @@ defmodule Fleet.Spawner.LaunchBackend.TmuxBackend do
     # API, canal le plus fort, blob unique). Avec --append on traînerait le
     # default claude (skills auto-discovery + CLAUDE.md auto + onboarding)
     # = dilution + bruit contexte. Le pod a son SP, point.
-    sp_path = Path.join([pod_dir, ".claude", "system-prompt.md"])
+    sp_path = Path.join([pod_dir, ".lcars", "system-prompt.md"])
 
     # Binaire claude system-wide. Voie officielle Anthropic sur Linux =
     # dépôt apt/dnf/apk signé (cf. https://code.claude.com/docs/en/setup

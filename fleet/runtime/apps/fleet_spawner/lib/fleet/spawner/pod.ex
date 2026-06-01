@@ -320,7 +320,11 @@ defmodule Fleet.Spawner.Pod do
     # Le `.claude/protocole-user.md` est injecté pour le mot-clé `yop`.
     skills_root = Application.get_env(:fleet_spawner, :skills_root, nil)
     repo_md = Path.join(state.pod_dir, "CLAUDE.md.repo-source")
-    sp_dir = Path.join(state.pod_dir, ".claude")
+
+    # Provisioning HORS .claude/ : le bind CLAUDE_DIR→.claude de bwrap_launch MASQUE tout fichier pod
+    # sous .claude/. settings/SP/protocole → .lcars/ (où claude_launch lit settings + merge le
+    # skip-dialog) ; CLAUDE.md custom → racine pod (projet, cwd, non masquée).
+    lcars_dir = Path.join(state.pod_dir, ".lcars")
     tickets_dir = Path.join(state.pod_dir, "tickets")
 
     with {:ok, sp_compose} <-
@@ -329,21 +333,19 @@ defmodule Fleet.Spawner.Pod do
          {:ok, _skills_paths} <- maybe_filter_skills(state.cap_profile, skills_root),
          {:ok, agent_draft} <- read_agent_worker_draft(),
          {:ok, protocole_user} <- read_protocole_user(),
-         :ok <- safe_mkdir_p(sp_dir),
+         :ok <- safe_mkdir_p(lcars_dir),
          :ok <-
            safe_write(
-             Path.join(sp_dir, "system-prompt.md"),
+             Path.join(lcars_dir, "system-prompt.md"),
              sp_compose.sp_md <> "\n\n---\n\n" <> agent_draft
            ),
-         :ok <- safe_write(Path.join(sp_dir, "CLAUDE.md"), claude_md),
-         :ok <- safe_write(Path.join(sp_dir, "protocole-user.md"), protocole_user),
-         :ok <- safe_write(Path.join(sp_dir, "settings.json"), pod_settings_json()),
-         # creds : plus de copie (adr-f). Le claudeDir de l'humain est monté RW
-         # par bwrap_launch.sh en ~/.claude (CLAUDE_DIR) ; refresh OAuth délégué
-         # au lockfile cross-process natif Anthropic. RUNTIME-TODO (secondaire) :
-         # les fichiers pod-spécifiques ci-dessus (sp/CLAUDE.md/settings) sous
-         # .claude/ sont masqués/clobbés par le bind → à relocaliser hors ~/.claude
-         # au build (cf. worklog EXEC-consolidation §interaction share-claudeDir).
+         # CLAUDE.md custom à la RACINE du pod (projet/cwd, non masquée) ; le reste en .lcars/.
+         :ok <- safe_write(Path.join(state.pod_dir, "CLAUDE.md"), claude_md),
+         :ok <- safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
+         :ok <- safe_write(Path.join(lcars_dir, "settings.json"), pod_settings_json()),
+         # creds : plus de copie (adr-f). Le claudeDir de l'humain est monté RW par bwrap_launch.sh
+         # en ~/.claude (CLAUDE_DIR), refresh OAuth délégué au lockfile natif. Les fichiers pod
+         # ci-dessus sont en .lcars/ + racine pod (HORS .claude/) → plus masqués par le bind (résolu).
          :ok <- write_pod_claude_json(state),
          :ok <- safe_mkdir_p(tickets_dir),
          :ok <-
@@ -356,8 +358,8 @@ defmodule Fleet.Spawner.Pod do
       new_state =
         state
         |> Map.put(:phase, :injecting)
-        # SP composé stocké pour l'argv4 inline (do_launch) — même contenu que le fichier .claude/
-        # system-prompt.md (masqué par le bind bwrap), donc c'est cette copie en state qui sert au pod.
+        # SP composé stocké pour l'argv4 inline (do_launch) — la chaîne bwrap le passe en
+        # `--system-prompt` (inline), pas en fichier ; .lcars/system-prompt.md reste dispo en miroir.
         |> Map.put(:sp, sp_compose.sp_md <> "\n\n---\n\n" <> agent_draft)
         |> add_condition(:home_projected)
 
