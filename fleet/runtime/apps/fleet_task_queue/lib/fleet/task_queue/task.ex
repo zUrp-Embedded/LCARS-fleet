@@ -61,55 +61,56 @@ defmodule Fleet.TaskQueue.Task do
     }
   end
 
-  @doc "Désérialise depuis la map persistée. `{:error, :invalid}` si champ requis absent."
-  @spec from_map(map()) :: {:ok, t()} | {:error, :invalid}
-  def from_map(%{"id" => id, "pod_id" => pod_id, "enqueued_at" => enq, "state" => state})
-      when is_binary(id) and is_binary(pod_id) and is_binary(enq) and is_binary(state) do
-    {:ok,
-     %__MODULE__{
-       id: id,
-       pod_id: pod_id,
-       ticket_id: nil,
-       role: nil,
-       brief: nil,
-       deadline: nil,
-       retry_count: 0,
-       enqueued_at: parse(enq),
-       assigned_at: nil,
-       completed_at: nil,
-       state: String.to_existing_atom(state),
-       result: nil,
-       metadata: %{}
-     }}
-  end
+  @doc """
+  Désérialise depuis la map persistée. `{:error, :invalid}` si champ requis absent OU `state` inconnu.
 
+  Parser UNIQUE (fix audit deep-02) : l'ancienne clause « minimale » (mêmes clés requises) MASQUAIT
+  `rich_from_map` → la recovery perdait `brief`/`role`/`ticket_id`/`deadline`/`result`/`metadata`. Et
+  `String.to_existing_atom` RAISE sur un `state.json` corrompu → bypassait le fallback `:corrupt`.
+  """
+  @spec from_map(map()) :: {:ok, t()} | {:error, :invalid}
   def from_map(map) when is_map(map), do: rich_from_map(map)
   def from_map(_), do: {:error, :invalid}
 
-  # Reconstruit tous les champs optionnels en plus des requis.
+  # Reconstruit TOUS les champs (requis + optionnels). State en liste FERMÉE (pas to_existing_atom).
   defp rich_from_map(
          %{"id" => id, "pod_id" => pod_id, "enqueued_at" => enq, "state" => state} = m
        )
        when is_binary(id) and is_binary(pod_id) and is_binary(enq) and is_binary(state) do
-    {:ok,
-     %__MODULE__{
-       id: id,
-       pod_id: pod_id,
-       ticket_id: m["ticket_id"],
-       role: m["role"],
-       brief: m["brief"],
-       deadline: parse(m["deadline"]),
-       retry_count: m["retry_count"] || 0,
-       enqueued_at: parse(enq),
-       assigned_at: parse(m["assigned_at"]),
-       completed_at: parse(m["completed_at"]),
-       state: String.to_existing_atom(state),
-       result: m["result"],
-       metadata: m["metadata"] || %{}
-     }}
+    case parse_state(state) do
+      {:ok, st} ->
+        {:ok,
+         %__MODULE__{
+           id: id,
+           pod_id: pod_id,
+           ticket_id: m["ticket_id"],
+           role: m["role"],
+           brief: m["brief"],
+           deadline: parse(m["deadline"]),
+           retry_count: m["retry_count"] || 0,
+           enqueued_at: parse(enq),
+           assigned_at: parse(m["assigned_at"]),
+           completed_at: parse(m["completed_at"]),
+           state: st,
+           result: m["result"],
+           metadata: m["metadata"] || %{}
+         }}
+
+      :error ->
+        {:error, :invalid}
+    end
   end
 
   defp rich_from_map(_), do: {:error, :invalid}
+
+  # Liste FERMÉE des états (atomes littéraux ⇒ garantis exister, pas d'atom-leak ni de raise).
+  defp parse_state("pending"), do: {:ok, :pending}
+  defp parse_state("assigned"), do: {:ok, :assigned}
+  defp parse_state("in_progress"), do: {:ok, :in_progress}
+  defp parse_state("completed"), do: {:ok, :completed}
+  defp parse_state("failed"), do: {:ok, :failed}
+  defp parse_state("cleared"), do: {:ok, :cleared}
+  defp parse_state(_), do: :error
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

@@ -185,6 +185,19 @@ teardown() { rm -rf "$TMP_BASE"; }
   [[ "$status" -eq 0 ]]; [[ "$output" == *"/usr/bin/env FOO=bar"* ]]
 }
 
+# ==================== Sécu plugins (audit S5) =================
+
+@test "sécu: nom de plugin path-traversal (../) rejeté avant tout bind (allowlist S5)" {
+  export LCARS_SKILLS_PLUGINS="../evil"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 1 ]]; [[ "$output" == *"path-traversal"* ]]
+}
+@test "sécu: nom de plugin avec slash rejeté (allowlist S5)" {
+  export LCARS_SKILLS_PLUGINS="a/b"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 1 ]]; [[ "$output" == *"path-traversal"* ]]
+}
+
 @test "header LCARS: SOURCE/AUTHOR/STARDATE/STATUS présents" {
   grep -q "^# SOURCE:" "$SCRIPT"; grep -q "^# AUTHOR:" "$SCRIPT"
   grep -q "^# STARDATE:" "$SCRIPT"; grep -q "^# STATUS:" "$SCRIPT"

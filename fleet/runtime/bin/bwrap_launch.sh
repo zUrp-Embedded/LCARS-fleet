@@ -121,6 +121,13 @@ install -d -m 0755 "$POD_DIR/.local/bin"
 PLUGIN_BINDS=()
 set -f
 for plugin in ${LCARS_SKILLS_PLUGINS:-}; do
+  # Allowlist stricte du NOM (audit deep-04 S5) : le nom est interpolé dans des paths de bind. Sans
+  # garde, un nom forgé (`..`, `/`, leading-dot) = path-traversal hors ~/.claude/plugins. Rejet avant
+  # toute construction de path. (La source cap-profile doit rester opérateur-de-confiance ; ceinture.)
+  case "$plugin" in
+    *..* | */* | .*) echo "ERR: nom de plugin invalide '$plugin' (path-traversal)" >&2; exit 1 ;;
+  esac
+  [[ "$plugin" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "ERR: nom de plugin invalide '$plugin' (allowlist [A-Za-z0-9._-])" >&2; exit 1; }
   HOST_PLUGIN_PATH="$HOME/.claude/plugins/$plugin"
   [[ -d "$HOST_PLUGIN_PATH" ]] || { echo "ERR: plugin '$plugin' not installed host-side at $HOST_PLUGIN_PATH" >&2; exit 1; }
   PLUGIN_BINDS+=(--ro-bind "$HOST_PLUGIN_PATH" "$POD_DIR/.claude/plugins/$plugin")

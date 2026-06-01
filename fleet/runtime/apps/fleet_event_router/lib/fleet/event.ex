@@ -1,7 +1,11 @@
 defmodule Fleet.Event do
   @moduledoc """
-  Schema canon des events publiés sur Phoenix.PubSub topic `fleet.events`.
-  Tout module LCARS qui publie un event DOIT utiliser cette struct.
+  Schema canon CIBLE des events publiés sur Phoenix.PubSub topic `fleet.events`.
+
+  ⚠️ Dual-stack en cours (audit deep-02) : les NOUVEAUX producteurs (ex. `Fleet.TaskQueue`) émettent
+  cette struct, mais le `Fleet.EventRouter.Bus` legacy émet encore des tuples `{atom, map}`. « Subscribe
+  à `fleet.events` » ne garantit donc PAS une forme unique tant que l'unification (un seul envelope OU un
+  adapter explicite) n'est pas faite. Cible : tout producteur utilise cette struct.
 
   Cf. DN méta `architecture-canonical-references.md` §1.7 (schema canon
   `%Fleet.Event{}` + enum closed list `source`).

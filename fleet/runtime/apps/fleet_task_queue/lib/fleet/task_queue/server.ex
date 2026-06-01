@@ -253,8 +253,13 @@ defmodule Fleet.TaskQueue.Server do
   defp broadcast(state, %Fleet.Event{} = ev) do
     Phoenix.PubSub.broadcast(state.pubsub, state.topic, ev)
   rescue
-    # PubSub pas démarré (boot très précoce / contexte hors umbrella) → non-bloquant.
-    _ -> :ok
+    # PubSub pas démarré (boot précoce / hors umbrella) → non-bloquant. MAIS pour un event lifecycle-
+    # critique (task_completed), un échec silencieux = le pod ne reçoit jamais sa complétion → timeout
+    # (audit deep-02). On LOG au minimum ; rendre fatal/retry pour ces events = décision design différée.
+    e ->
+      require Logger
+      Logger.warning("TaskQueue broadcast #{ev.type} échec (pod=#{ev.pod_id}) : #{inspect(e)}")
+      :ok
   end
 
   defp now, do: DateTime.utc_now()
@@ -299,10 +304,7 @@ defmodule Fleet.TaskQueue.Server do
   defp decode_state(content) do
     case Jason.decode(content) do
       {:ok, %{"v" => 1, "tasks" => tasks_map}} when is_map(tasks_map) ->
-        tasks =
-          for {id, tm} <- tasks_map, {:ok, t} <- [Task.from_map(tm)], into: %{}, do: {id, t}
-
-        {:ok, tasks}
+        decode_tasks(tasks_map)
 
       {:ok, %{"v" => v}} ->
         {:corrupt, v}
@@ -310,6 +312,18 @@ defmodule Fleet.TaskQueue.Server do
       _ ->
         {:corrupt, :unparseable}
     end
+  end
+
+  # fail-loud (fix audit deep-02) : une tâche non-désérialisable (state corrompu / champ requis absent)
+  # → `{:corrupt, ...}`, PAS un drop silencieux. L'ancien `for {:ok,t} <- [from_map]` FILTRAIT la tâche
+  # corrompue (état tronqué en silence) ; + `from_map` RAISAIT avant le fix `task.ex` (bypass du fallback).
+  defp decode_tasks(tasks_map) do
+    Enum.reduce_while(tasks_map, {:ok, %{}}, fn {id, tm}, {:ok, acc} ->
+      case Task.from_map(tm) do
+        {:ok, t} -> {:cont, {:ok, Map.put(acc, id, t)}}
+        {:error, reason} -> {:halt, {:corrupt, {:task, id, reason}}}
+      end
+    end)
   end
 
   # ============================================================

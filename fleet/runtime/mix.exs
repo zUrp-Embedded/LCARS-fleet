@@ -47,6 +47,10 @@ defmodule LcarsFleetRuntime.MixProject do
           fleet_spawner: :permanent,
           fleet_pod_runtime: :permanent,
           fleet_event_router: :permanent,
+          # broker central de mandats (Ring 2, run #5) — absent du :releases (audit deep-05 C3) ⇒
+          # contrat release faux + ambiguïté boot/supervision pour une app OTP centrale (get_task/
+          # submit_result). Ajouté explicite.
+          fleet_task_queue: :permanent,
           fleet_task_monitor: :permanent,
           fleet_pipeline: :permanent,
           fleet_starfleet: :permanent,

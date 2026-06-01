@@ -127,6 +127,61 @@ defmodule Fleet.TaskQueueTest do
     assert [] = TaskQueue.list_pending(q)
   end
 
+  test "6b. Task.from_map round-trip préserve les champs riches (fix deep-02 : recovery ne perd plus brief/role/metadata)" do
+    t = %Fleet.TaskQueue.Task{
+      id: "t1",
+      pod_id: "p1",
+      enqueued_at: ~U[2026-06-02 00:00:00Z],
+      state: :assigned,
+      ticket_id: "tk1",
+      role: "engineer",
+      brief: "fais X",
+      metadata: %{"stage" => "qa"},
+      result: %{"ok" => true}
+    }
+
+    assert {:ok, back} = Fleet.TaskQueue.Task.from_map(Fleet.TaskQueue.Task.to_map(t))
+
+    assert %{
+             brief: "fais X",
+             role: "engineer",
+             ticket_id: "tk1",
+             state: :assigned,
+             metadata: %{"stage" => "qa"},
+             result: %{"ok" => true}
+           } = back
+  end
+
+  test "6c. recovery d'une tâche au state INCONNU → :state_corrupt (fix deep-02 : fail-loud, pas de raise ni drop silencieux)",
+       %{topic: topic, tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "badstate.json")
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "v" => 1,
+        "tasks" => %{
+          "t1" => %{
+            "id" => "t1",
+            "pod_id" => "p1",
+            "enqueued_at" => "2026-06-02T00:00:00Z",
+            "state" => "bogus_xyz"
+          }
+        }
+      })
+    )
+
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qbs)
+
+    assert_receive %Fleet.Event{
+      source: :task_queue,
+      type: :state_corrupt,
+      payload: %{found: {:task, "t1", :invalid}}
+    }
+
+    assert [] = TaskQueue.list_pending(q)
+  end
+
   test "7. failed via deadline", %{q: q} do
     deadline = DateTime.add(DateTime.utc_now(), 200, :millisecond)
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x", deadline: deadline})
