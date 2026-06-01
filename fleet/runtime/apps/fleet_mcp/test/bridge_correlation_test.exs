@@ -1,20 +1,19 @@
 defmodule Fleet.MCP.BridgeCorrelationTest do
   @moduledoc """
-  Gate R-CORE.comm brick 1a+1b — corrélation pod↔résultat à travers le pont.
-
-  Le central sert N pods ; les tool-calls sont anonymes. Le pont propage `LCARS_POD_ID` (1a) dans
-  les arguments forwardés ; `submit_result` l'attache au résultat (`_pod_id`) et `TaskQueue.results_for/1`
-  filtre par pod (1b). Preuve : DEUX ponts (pod_id distincts) soumettent ; le central sépare
-  correctement les résultats par pod. PUR (pas de claude). Fondation du completion event-driven.
+  Corrélation pod↔résultat à travers le pont (ADR-G). Le central sert N pods ; les tool-calls
+  sont anonymes. Le pont propage `LCARS_POD_ID` dans les arguments forwardés ; le **broker**
+  `Fleet.TaskQueue` corrèle nativement par `pod_id`. Preuve : DEUX ponts (pod_id distincts)
+  soumettent ; le broker clôt chaque mandat sur son pod et broadcast un
+  `%Fleet.Event{task_completed}` distinct par pod (pod_id + result séparés). PUR (pas de claude).
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.MCP.{PodTools, TaskQueue}
+  alias Fleet.MCP.PodTools
+  alias Fleet.TaskQueue
 
   @bridge Path.expand("../../../bin/fleet_mcp_stdio_bridge.py", __DIR__)
 
   setup do
-    start_supervised!(TaskQueue)
     ref = :"fleet_mcp_1ab_#{System.unique_integer([:positive])}"
     {:ok, _http} = PodTools.start_link(transport: :http, port: 0, ranch_ref: ref)
     port = :ranch.get_port(ref)
@@ -22,20 +21,37 @@ defmodule Fleet.MCP.BridgeCorrelationTest do
     %{url: "http://localhost:#{port}/mcp"}
   end
 
-  test "2 ponts (pod_id distincts) → central corrèle les résultats par pod", %{url: url} do
-    submit_via_bridge(url, "pod-alpha", %{"answer" => "from-alpha"})
-    submit_via_bridge(url, "pod-beta", %{"answer" => "from-beta"})
+  test "2 ponts (pod_id distincts) → broker corrèle chaque résultat sur son pod", %{url: url} do
+    u = System.unique_integer([:positive])
+    pa = "pod-alpha-#{u}"
+    pb = "pod-beta-#{u}"
+    {:ok, _} = TaskQueue.enqueue(pa, %{brief: "a"})
+    {:ok, _} = TaskQueue.enqueue(pb, %{brief: "b"})
 
-    alpha = TaskQueue.results_for("pod-alpha")
-    beta = TaskQueue.results_for("pod-beta")
+    Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
 
-    assert [%{"answer" => "from-alpha", "_pod_id" => "pod-alpha"}] = alpha
-    assert [%{"answer" => "from-beta", "_pod_id" => "pod-beta"}] = beta
-    # Séparation stricte : aucun croisement.
-    refute Enum.any?(alpha, &(&1["answer"] == "from-beta"))
-    refute Enum.any?(beta, &(&1["answer"] == "from-alpha"))
-    # results/0 reste la liste complète (additif, non cassé).
-    assert length(TaskQueue.results()) == 2
+    submit_via_bridge(url, pa, %{"answer" => "from-alpha"})
+    submit_via_bridge(url, pb, %{"answer" => "from-beta"})
+
+    # Séparation stricte : chaque pod a son event de complétion, avec SON résultat.
+    assert_receive %Fleet.Event{
+                     source: :task_queue,
+                     type: :task_completed,
+                     pod_id: ^pa,
+                     payload: %{result: %{"answer" => "from-alpha"}}
+                   },
+                   5_000
+
+    assert_receive %Fleet.Event{
+                     source: :task_queue,
+                     type: :task_completed,
+                     pod_id: ^pb,
+                     payload: %{result: %{"answer" => "from-beta"}}
+                   },
+                   5_000
+
+    assert {:ok, :completed} = TaskQueue.pod_status(pa)
+    assert {:ok, :completed} = TaskQueue.pod_status(pb)
   end
 
   defp submit_via_bridge(url, pod_id, payload) do

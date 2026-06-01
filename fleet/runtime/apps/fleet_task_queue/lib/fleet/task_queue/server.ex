@@ -125,15 +125,22 @@ defmodule Fleet.TaskQueue.Server do
           else: {:reply, {:error, :no_active_task}, state}
 
       %Task{} = task ->
-        completed = %{task | state: :completed, completed_at: now(), result: result}
-        new_state = state |> put_task(completed) |> persist()
+        case result["task_id"] || result[:task_id] do
+          tid when tid != nil and tid != task.id ->
+            # §A.70 : correlation_id du livrable ≠ mandat actif du pod → rejet, aucune mutation.
+            {:reply, {:error, :task_id_mismatch}, state}
 
-        broadcast(
-          new_state,
-          event(:task_completed, completed, %{task_id: completed.id, result: result})
-        )
+          _ok ->
+            completed = %{task | state: :completed, completed_at: now(), result: result}
+            new_state = state |> put_task(completed) |> persist()
 
-        {:reply, {:ok, completed}, new_state}
+            broadcast(
+              new_state,
+              event(:task_completed, completed, %{task_id: completed.id, result: result})
+            )
+
+            {:reply, {:ok, completed}, new_state}
+        end
     end
   end
 

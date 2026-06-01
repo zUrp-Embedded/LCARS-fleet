@@ -183,21 +183,20 @@ defmodule Fleet.Spawner.Pod do
   # `{port, {:data, binary_chunk}}` (multi-events ou partial), buffering
   # + split sur "\n" requis.
 
-  # R-CORE.comm 2.2 — completion event-driven : le central (fleet_mcp) a broadcasté le résultat
-  # d'un pod. On ne réagit qu'au NÔTRE (corrélation pod_id, brick 1a/1b) et seulement en :monitoring.
+  # R-CORE.comm ADR-G — completion event-driven : le broker fleet_task_queue broadcast
+  # %Fleet.Event{task_completed} sur fleet.events. On ne réagit qu'au NÔTRE (pod_id) en :monitoring.
   @impl GenServer
-  def handle_info({:"pod.result_submitted", event}, %{phase: :monitoring} = state) do
-    if is_map(event) and event["pod_id"] == state.pod_id do
-      {:noreply, Map.put(state, :submitted_result, event["payload"] || %{}),
-       {:continue, :extract}}
-    else
-      # Résultat d'un autre pod → ignore (le Bus est partagé).
-      {:noreply, state}
-    end
+  def handle_info(
+        %Fleet.Event{source: :task_queue, type: :task_completed, pod_id: pid, payload: payload},
+        %{phase: :monitoring, pod_id: pid} = state
+      ) do
+    result = payload[:result] || payload["result"] || %{}
+    {:noreply, Map.put(state, :submitted_result, result), {:continue, :extract}}
   end
 
-  # Event reçu hors phase :monitoring (déjà extrait/released) ou d'un autre pod → ignore.
-  def handle_info({:"pod.result_submitted", _event}, state), do: {:noreply, state}
+  # %Fleet.Event{task_completed} d'un autre pod, ou hors phase :monitoring → ignore.
+  def handle_info(%Fleet.Event{source: :task_queue, type: :task_completed}, state),
+    do: {:noreply, state}
 
   # Deadline : aucun résultat soumis dans le budget durée → échec.
   def handle_info(:result_deadline, %{phase: :monitoring} = state) do

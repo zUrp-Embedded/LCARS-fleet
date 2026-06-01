@@ -15,11 +15,11 @@ defmodule Fleet.Pipeline.StageRunner do
   pipeline-implementation.md Phase III boucle renvoi-au-dev). Le
   `PodRegistry` mappe `{pipeline_id, role} → pod_id` :
 
-    * 1er passage (spawn) → push task `TaskQueue` ciblée `_lcars_pod_id`,
-      spawn via `StageSpawner`, register dans `PodRegistry`.
-    * Passages suivants (wake) → push task corrective + `wake_pod` →
+    * 1er passage (spawn) → enqueue mandat dans le broker `Fleet.TaskQueue`
+      ciblé `pod_id`, spawn via `StageSpawner`, register dans `PodRegistry`.
+    * Passages suivants (wake) → enqueue mandat correctif + `wake_pod` →
       le claude REPL reprend get_task/submit_result sur le même pod
-      (contexte préservé).
+      (contexte préservé ; le mandat le plus récent gagne via `find_active`).
 
   Pour les pods `one-shot` (cycle vie = cycle stage) le comportement
   reste inchangé : spawn classique sans registry.
@@ -86,6 +86,7 @@ defmodule Fleet.Pipeline.StageRunner do
     stage_ctx = %{
       mandate: mandate_ctx,
       stage: stage_name,
+      role: role,
       inputs: inputs,
       pipeline_id: pipeline_id,
       ticket_id: Map.get(mandate_ctx, :ticket_id, "pipeline-#{pipeline_id}"),
@@ -162,11 +163,10 @@ defmodule Fleet.Pipeline.StageRunner do
   defp run_one_shot_stage(stage_name, role, profile, stage_ctx, pipeline_id) do
     case spawner_backend().spawn_stage_pod(role, profile, stage_ctx) do
       {:ok, pod_id} ->
-        # Push la task dans TaskQueue avec `_lcars_pod_id` ciblé : sans,
-        # le claude REPL appelle get_task → empty → done:true et termine
-        # sans traiter le stage. Le ticket file + brief mandate ne sont
-        # pas suffisants — la voie canonique pod→fleet est MCP (PodTools
-        # get_task / submit_result), pas Read fichier.
+        # Enqueue le mandat dans le broker `Fleet.TaskQueue` ciblé pod_id :
+        # sans, le claude REPL appelle get_task → empty → done:true et
+        # termine sans traiter le stage. La voie canonique pod→fleet est
+        # MCP (PodTools get_task / submit_result → TaskQueue), pas Read fichier.
         :ok = push_task_for_pod(pod_id, stage_ctx)
 
         Logger.debug(
@@ -184,23 +184,27 @@ defmodule Fleet.Pipeline.StageRunner do
     end
   end
 
-  # Push la task dans TaskQueue ciblée pod_id (le claude REPL pop via
-  # mcp__fleet__get_task → TaskQueue.next_for filtré). Helper réutilisable
-  # par spawn et wake.
+  # Enqueue le mandat dans le broker central `Fleet.TaskQueue` ciblé pod_id
+  # (le claude REPL le pop via mcp__fleet__get_task → PodTools.get_task →
+  # TaskQueue.get_for_pod). Helper réutilisable par spawn et wake.
   defp push_task_for_pod(pod_id, stage_ctx) do
-    task_queue().push(build_pod_task(stage_ctx, pod_id))
+    {:ok, _task} = task_queue().enqueue(pod_id, build_pod_attrs(stage_ctx))
+    :ok
   end
 
-  # Construit la task à pousser dans la TaskQueue centrale (consommée par
-  # le pod via mcp__fleet__get_task). `_lcars_pod_id` cible le pod éveillé
-  # (filtré par PodTools.get_task → TaskQueue.next_for).
-  defp build_pod_task(stage_ctx, pod_id) do
+  # Construit les attrs du mandat enqueué dans le broker (consommé par le
+  # pod via mcp__fleet__get_task). Le `pod_id` cible est l'argument
+  # d'`enqueue/2`. Le mandat texte (incluant les inputs amont) va dans
+  # `brief` ; `stage`/`inputs` structurés vont dans `metadata`.
+  defp build_pod_attrs(stage_ctx) do
     %{
-      "ticket_id" => Map.get(stage_ctx, :ticket_id),
-      "stage" => Map.get(stage_ctx, :stage),
-      "description" => build_mandate(stage_ctx),
-      "inputs" => Map.get(stage_ctx, :inputs, %{}),
-      "_lcars_pod_id" => pod_id
+      ticket_id: Map.get(stage_ctx, :ticket_id),
+      role: Map.get(stage_ctx, :role),
+      brief: build_mandate(stage_ctx),
+      metadata: %{
+        "stage" => Map.get(stage_ctx, :stage),
+        "inputs" => Map.get(stage_ctx, :inputs, %{})
+      }
     }
   end
 
@@ -289,7 +293,7 @@ defmodule Fleet.Pipeline.StageRunner do
   # Seams config-driven pour les tests (stub TaskQueue / stub Spawner sans
   # spin-up infra réelle). Default = modules production.
   defp task_queue do
-    Application.get_env(:fleet_pipeline, :task_queue, Fleet.MCP.TaskQueue)
+    Application.get_env(:fleet_pipeline, :task_queue, Fleet.TaskQueue)
   end
 
   defp spawner do

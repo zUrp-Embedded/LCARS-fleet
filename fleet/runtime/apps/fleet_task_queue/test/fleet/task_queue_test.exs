@@ -180,4 +180,24 @@ defmodule Fleet.TaskQueueTest do
     assert ev.correlation_id == t.id
     assert Fleet.Event.valid_source?(ev.source)
   end
+
+  test "11. submit_result avec task_id ≠ mandat actif → :task_id_mismatch (§A.70, pas de mutation)",
+       %{q: q} do
+    {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
+    assert_receive %Fleet.Event{type: :task_enqueued}
+    assert_receive %Fleet.Event{type: :task_assigned}
+
+    # Le pod renvoie un task_id forgé/périmé ≠ son mandat actif → rejet.
+    assert {:error, :task_id_mismatch} =
+             TaskQueue.submit_result(q, "pod-A", %{"task_id" => "forged-uuid", "verdict" => "x"})
+
+    # Aucune mutation : le mandat reste actif, pas de :task_completed.
+    assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-A")
+    refute_receive %Fleet.Event{type: :task_completed}, 100
+
+    # Avec le bon task_id → OK.
+    assert {:ok, _} = TaskQueue.submit_result(q, "pod-A", %{"task_id" => t.id, "verdict" => "ok"})
+    assert_receive %Fleet.Event{type: :task_completed}
+  end
 end

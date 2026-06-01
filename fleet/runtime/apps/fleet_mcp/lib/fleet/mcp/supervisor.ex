@@ -84,8 +84,9 @@ defmodule Fleet.MCP.Supervisor do
       port ->
         ref = Keyword.get(opts, :pod_facing_ranch_ref, :fleet_mcp_pod_facing)
 
+        # Le broker (Fleet.TaskQueue.Server) est démarré par l'app fleet_task_queue,
+        # pas ici (ADR-G : fleet_mcp sert la queue, ne la possède pas).
         [
-          {Fleet.MCP.TaskQueue, []},
           Supervisor.child_spec(
             {Fleet.MCP.PodTools, [transport: :http, port: port, ranch_ref: ref]},
             id: Fleet.MCP.PodTools

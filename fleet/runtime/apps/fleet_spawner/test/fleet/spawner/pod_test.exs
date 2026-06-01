@@ -64,11 +64,18 @@ defmodule Fleet.Spawner.PodTest do
      }}
   end
 
-  # R-CORE.comm 2.2 — completion event-driven : simule le central (fleet_mcp) broadcastant le
-  # résultat du pod sur le Bus (= ce qui arrive quand l'agent appelle submit_result). Le pod doit
-  # être en :monitoring (subscribed) avant l'appel.
+  # R-CORE.comm ADR-G — completion event-driven : simule le broker fleet_task_queue broadcastant
+  # %Fleet.Event{task_completed} sur fleet.events (= ce qui arrive quand l'agent appelle
+  # submit_result via fleet_mcp). Le pod doit être en :monitoring (subscribed) avant l'appel.
   defp submit_result_event(pod_id, payload) do
-    Bus.broadcast("pod.result_submitted", payload, pod_id: pod_id)
+    Phoenix.PubSub.broadcast(Fleet.PubSub, "fleet.events", %Fleet.Event{
+      source: :task_queue,
+      type: :task_completed,
+      timestamp: DateTime.utc_now(),
+      pod_id: pod_id,
+      correlation_id: "test-corr-#{pod_id}",
+      payload: %{result: payload}
+    })
   end
 
   defp state_fs_path(pod_id) do

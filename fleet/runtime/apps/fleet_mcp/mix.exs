@@ -58,11 +58,13 @@ defmodule Fleet.MCP.MixProject do
       {:phoenix_pubsub, "~> 2.1"},
       {:ex_json_schema, "~> 0.11"},
       {:jason, "~> 1.4"},
-      # fleet_event_router : Bus (Ring 0) — PodTools broadcaste `pod.result_submitted` sur
-      #   submit_result (brick 2.1). Déjà en extra_applications (ordering OTP) ; ici en dep
-      #   compile-time pour la visibilité du module Bus (sinon warning undefined, casse
-      #   --warnings-as-errors CI). Ring 4→Ring 0 OK, pas de cycle.
+      # fleet_event_router : Bus + Fleet.Event + Fleet.PubSub (Ring 0). Déjà en
+      #   extra_applications (ordering OTP boot) ; ici en dep compile-time. Ring 4→0, pas de cycle.
       {:fleet_event_router, in_umbrella: true},
+      # fleet_task_queue : le broker d'orchestration que PodTools sert via get_task/submit_result
+      #   (drive métier ADR-G ; le broker broadcast lui-même %Fleet.Event{task_completed}).
+      #   Ring 4→Ring 2 (fleet_mcp sert la queue, n'orchestre pas — DN drive/mcp-server §E). Pas de cycle.
+      {:fleet_task_queue, in_umbrella: true},
       # yaml_elixir : parse configs canon (mcp-channels.yaml / mcp-bridge.yaml)
       #   pour validation Fleet.MCP.Schema (version 2.12 = alignée
       #   fleet_event_router/fleet_coord/fleet_pipeline, déjà dans mix.lock).

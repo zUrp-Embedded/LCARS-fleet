@@ -37,7 +37,7 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
     Application.put_env(:fleet_pipeline, :pipelines_root, tmp_dir)
     Application.put_env(:fleet_pipeline, :workspaces_root, Path.join(tmp_dir, "ws-root"))
     Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.PostExtractCaptureStub)
-    start_supervised!(Fleet.MCP.TaskQueue)
+    # Broker Fleet.TaskQueue app-global (ensure_all_started) — pas de start_supervised.
     Bus.subscribe()
 
     on_exit(fn ->

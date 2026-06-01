@@ -44,7 +44,7 @@ defmodule Fleet.Pipeline.ExecutorCleanupTest do
       end
     )
 
-    start_supervised!(Fleet.MCP.TaskQueue)
+    # Broker Fleet.TaskQueue app-global (ensure_all_started) — pas de start_supervised.
     start_supervised!(SpawnerStub)
 
     Bus.subscribe()

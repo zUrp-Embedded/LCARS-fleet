@@ -6,8 +6,8 @@ defmodule Fleet.TaskQueue do
   `fleet_task_queue` distribue/collecte (broker), `fleet_mcp` sert via tools
   `get_task`/`submit_result` (frontière vendor), `fleet_coord` oriente post-résultat.
 
-  Chaque fonction a une variante test-seam (`server` explicite) pour l'isolation
-  des tests (cf. convention existante `Fleet.MCP.TaskQueue`).
+  Chaque fonction a une variante test-seam (`server` explicite, ex. `enqueue/3`,
+  `get_for_pod/2`) pour l'isolation des tests via serveur anonyme (`name: nil`).
   """
 
   alias Fleet.TaskQueue.Server
@@ -32,13 +32,19 @@ defmodule Fleet.TaskQueue do
   def get_for_pod(server, pod_id) when is_binary(pod_id),
     do: GenServer.call(server, {:get_for_pod, pod_id})
 
-  @doc "Soumet le résultat (servi par fleet_mcp `submit_result`). Idempotent (2e appel = `:double_submit_ignored`)."
+  @doc """
+  Soumet le résultat (servi par fleet_mcp `submit_result`). Idempotent (2e appel =
+  `:double_submit_ignored`). Si `result` porte un `task_id` ≠ mandat actif du pod
+  → `:task_id_mismatch` (validation correlation §A.70), aucune mutation.
+  """
   @spec submit_result(String.t(), map()) ::
-          {:ok, Fleet.TaskQueue.Task.t()} | {:error, :no_active_task | :double_submit_ignored}
+          {:ok, Fleet.TaskQueue.Task.t()}
+          | {:error, :no_active_task | :double_submit_ignored | :task_id_mismatch}
   def submit_result(pod_id, result), do: submit_result(@server, pod_id, result)
 
   @spec submit_result(GenServer.server(), String.t(), map()) ::
-          {:ok, Fleet.TaskQueue.Task.t()} | {:error, :no_active_task | :double_submit_ignored}
+          {:ok, Fleet.TaskQueue.Task.t()}
+          | {:error, :no_active_task | :double_submit_ignored | :task_id_mismatch}
   def submit_result(server, pod_id, result) when is_binary(pod_id) and is_map(result),
     do: GenServer.call(server, {:submit_result, pod_id, result})
 

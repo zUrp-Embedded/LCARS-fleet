@@ -1,48 +1,49 @@
 defmodule Fleet.MCP.ResultEventTest do
   @moduledoc """
-  Gate R-CORE.comm brick 2.1 — le central émet `pod.result_submitted` sur le Bus sur submit_result.
+  Completion event-driven (ADR-G) — sur `submit_result`, le **broker** `fleet_task_queue`
+  broadcast `%Fleet.Event{source: :task_queue, type: :task_completed}` sur `fleet.events`.
 
-  Fondation du completion event-driven : pod.ex (Ring 1) souscrira à cet event (via Bus Ring 0) pour
-  déclencher sa complétion SANS lire fleet_mcp (Ring 4) en direct (dépendance interdite). Ici on prouve
-  l'émission : submit_result (avec _lcars_pod_id) → event Bus `pod.result_submitted{pod_id, payload}`.
-  PUR (pas de claude). Additif — ne touche pas encore pod.ex (qui monitore toujours result.md).
+  `pod.ex` (Ring 1) y souscrit pour déclencher sa complétion SANS lire fleet_mcp (Ring 4)
+  en direct. Ici on prouve l'émission via le tool `submit_result` (PUR, pas de claude).
+  `fleet_mcp` n'émet plus le string-topic `pod.result_submitted` — c'est le broker qui possède l'event.
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.EventRouter.Bus
-  alias Fleet.MCP.{PodTools, TaskQueue}
+  alias Fleet.MCP.PodTools
+  alias Fleet.TaskQueue
 
-  setup do
-    start_supervised!(TaskQueue)
-    :ok
-  end
+  test "submit_result → broker broadcast %Fleet.Event{task_completed} (pod_id + correlation_id)" do
+    pod = "pod-evt-#{System.unique_integer([:positive])}"
+    {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})
+    tid = task.id
+    Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
 
-  test "submit_result broadcaste pod.result_submitted (pod_id en top-level, payload sous payload)" do
-    Bus.subscribe()
     payload = %{"answer" => "42", "nonce" => "evt-#{System.unique_integer([:positive])}"}
 
     assert {:ok, %{content: [%{"type" => "text"}]}, %{}} =
              PodTools.handle_tool_call(
                "submit_result",
-               %{"payload" => payload, "_lcars_pod_id" => "pod-evt"},
+               %{"payload" => payload, "_lcars_pod_id" => pod},
                %{}
              )
 
-    assert_receive {:"pod.result_submitted", event}, 2_000
-    assert event["event_type"] == "pod.result_submitted"
-    assert event["pod_id"] == "pod-evt"
-    assert event["payload"] == payload
+    assert_receive %Fleet.Event{
+                     source: :task_queue,
+                     type: :task_completed,
+                     pod_id: ^pod,
+                     correlation_id: ^tid,
+                     payload: %{result: ^payload}
+                   },
+                   2_000
   end
 
-  test "submit_result sans pod_id broadcaste quand même (pod_id nil, additif/rétro-compat)" do
-    Bus.subscribe()
+  test "submit_result sans _lcars_pod_id → erreur (pas de broadcast)" do
+    Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
     payload = %{"answer" => "anon-#{System.unique_integer([:positive])}"}
 
-    assert {:ok, _, %{}} =
+    assert {:error, :pod_id_required, %{}} =
              PodTools.handle_tool_call("submit_result", %{"payload" => payload}, %{})
 
-    assert_receive {:"pod.result_submitted", event}, 2_000
-    assert event["pod_id"] == nil
-    assert event["payload"] == payload
+    refute_receive %Fleet.Event{source: :task_queue, type: :task_completed}, 200
   end
 end

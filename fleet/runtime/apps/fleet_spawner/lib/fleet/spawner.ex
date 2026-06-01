@@ -112,9 +112,10 @@ defmodule Fleet.Spawner do
 
       yop → mcp__fleet__get_task → traite → mcp__fleet__submit_result
 
-  Pré-requis : le caller a déjà push la task dans `Fleet.MCP.TaskQueue`
-  (avec `_lcars_pod_id` corrélation pour que ce pod la récupère via
-  `get_task`). `wake_pod/1` ne gère QUE le trigger send-keys — la task
+  Pré-requis : le caller a déjà enqueué le mandat dans le broker
+  `Fleet.TaskQueue` (ciblé `pod_id` ; le pod s'identifie par `_lcars_pod_id`
+  sur le fil pour le récupérer via `get_task`). `wake_pod/1` ne gère QUE le
+  trigger send-keys — la task
   doit être en file AVANT.
 
   Use-cases :

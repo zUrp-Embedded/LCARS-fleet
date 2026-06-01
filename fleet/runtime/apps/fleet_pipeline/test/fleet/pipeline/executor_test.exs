@@ -45,7 +45,8 @@ defmodule Fleet.Pipeline.ExecutorTest do
       "stage_c" => %{"c_out" => 3}
     })
 
-    start_supervised!(Fleet.MCP.TaskQueue)
+    # Le broker Fleet.TaskQueue est démarré app-global (ensure_all_started
+    # dans test_helper) — pas de start_supervised par test.
     Bus.subscribe()
 
     on_exit(fn ->

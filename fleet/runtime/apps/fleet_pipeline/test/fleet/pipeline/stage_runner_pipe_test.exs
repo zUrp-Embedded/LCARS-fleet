@@ -7,9 +7,10 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
 
   1. Cycle 1 : pas de pod en registry → spawn + register dans
      `PodRegistry`.
-  2. Cycle 2 : lookup trouve pod → wake (send `yop` via stub) + push
-     task ciblée `_lcars_pod_id` dans TaskQueue (cohérent
-     `PodTools.get_task` qui filtre par `_lcars_pod_id`).
+  2. Cycle 2 : lookup trouve pod → wake (send `yop` via stub) + enqueue
+     mandat ciblé `pod_id` dans le broker `Fleet.TaskQueue` (le pod le
+     récupère via `PodTools.get_task` → `get_for_pod`, en s'identifiant par
+     `_lcars_pod_id` sur le fil).
 
   ## Stubs utilisés
 
@@ -21,7 +22,7 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
 
   use ExUnit.Case, async: false
 
-  alias Fleet.MCP.TaskQueue
+  alias Fleet.TaskQueue
   alias Fleet.Pipeline.{PodRegistry, SpawnerStub, StageRunner}
 
   setup do
@@ -38,7 +39,7 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
       end
     )
 
-    start_supervised!(TaskQueue)
+    # Broker Fleet.TaskQueue app-global (ensure_all_started) — pas de start_supervised.
     start_supervised!(SpawnerStub)
 
     on_exit(fn ->
@@ -97,11 +98,11 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
       # wake_pod a été appelé une fois avec le pod existant.
       assert SpawnerStub.wake_calls() == [pod_id_1]
 
-      # Une task est dans la TaskQueue, ciblée _lcars_pod_id == pod_id_1.
-      assert {:ok, task} = TaskQueue.next_for(pod_id_1)
-      assert task["_lcars_pod_id"] == pod_id_1
-      assert task["stage"] == "implement"
-      assert task["ticket_id"] == "ticket-1"
+      # Un mandat est dans le broker pour ce pod (get_for_pod l'assigne).
+      assert {:ok, task} = TaskQueue.get_for_pod(pod_id_1)
+      assert task.pod_id == pod_id_1
+      assert task.metadata["stage"] == "implement"
+      assert task.ticket_id == "ticket-1"
 
       # Registry inchangé (pas de re-register sur wake).
       assert {:ok, ^pod_id_1} = PodRegistry.lookup(pipeline_id, "engineer")
@@ -139,11 +140,10 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
       # Cycle 1 spawn
       StageRunner.run("implement", stage_spec("engineer"), %{ticket_id: "t"}, %{}, pipeline_id)
 
-      # Drain la task du spawn cycle1 : en réel le pod la pop (get_task) avant
-      # d'être réveillé. Sans ça, la TaskQueue FIFO renverrait la task cycle1
-      # (inputs vides) au lieu de celle du wake. Le code porte bien les inputs
-      # sur wake (build_pod_task) — c'est le test qui ne simulait pas la conso.
-      assert {:ok, _} = TaskQueue.next_for("stub-pod-implement")
+      # Draine le mandat du spawn cycle1 (le pod le pop via get_task) → il passe
+      # :assigned. Le mandat de wake (cycle2), plus récent et :pending, gagne
+      # ensuite via `find_active` (tri enqueued_at DESC, états actifs seulement).
+      assert {:ok, _} = TaskQueue.get_for_pod("stub-pod-implement")
 
       # Cycle 2 wake avec findings audit en inputs
       stage_spec_with_inputs = %{
@@ -160,9 +160,9 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
         pipeline_id
       )
 
-      assert {:ok, task} = TaskQueue.next_for("stub-pod-implement")
-      assert task["inputs"] == %{"spec-review" => ["fix this"]}
-      assert task["description"] =~ "Inputs (stages amont)"
+      assert {:ok, task} = TaskQueue.get_for_pod("stub-pod-implement")
+      assert task.metadata["inputs"] == %{"spec-review" => ["fix this"]}
+      assert task.brief =~ "Inputs (stages amont)"
 
       PodRegistry.cleanup_pipeline(pipeline_id)
     end

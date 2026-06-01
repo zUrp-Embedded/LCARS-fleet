@@ -45,8 +45,8 @@ defmodule Fleet.Pipeline.StageSpawner.Default do
          opts <- Map.get(stage_ctx, :spawn_opts, []) do
       # `Fleet.Spawner.spawn_pod/3` retourne `{:ok, pid}` (Erlang OTP),
       # PAS le pod_id string. Pour exposer le pod_id au StageRunner
-      # (TaskQueue routing `_lcars_pod_id`, PodRegistry mapping), on
-      # le génère en amont et le passe via `opts[:pod_id]`.
+      # (cible de l'`enqueue` broker, wire `_lcars_pod_id`, PodRegistry
+      # mapping), on le génère en amont et le passe via `opts[:pod_id]`.
       pod_id = Keyword.get_lazy(opts, :pod_id, fn -> UUID.uuid4() end)
 
       opts =

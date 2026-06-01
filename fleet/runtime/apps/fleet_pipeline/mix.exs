@@ -35,10 +35,10 @@ defmodule Fleet.Pipeline.MixProject do
       {:fleet_cap_profile, in_umbrella: true},
       {:fleet_spawner, in_umbrella: true},
       {:fleet_event_router, in_umbrella: true},
-      # StageRunner pousse les tasks dans Fleet.MCP.TaskQueue (seam
-      # `:task_queue`, défaut Fleet.MCP.TaskQueue) → dépendance runtime réelle.
-      # Pas de cycle (fleet_mcp ne dépend pas de fleet_pipeline).
-      {:fleet_mcp, in_umbrella: true},
+      # StageRunner enqueue les mandats dans le broker Fleet.TaskQueue (seam
+      # `:task_queue`, défaut Fleet.TaskQueue) → dépendance runtime réelle.
+      # Pas de cycle (fleet_task_queue → fleet_event_router seulement).
+      {:fleet_task_queue, in_umbrella: true},
       {:jason, "~> 1.4"},
       {:ex_json_schema, "~> 0.11"},
       {:yaml_elixir, "~> 2.12"}

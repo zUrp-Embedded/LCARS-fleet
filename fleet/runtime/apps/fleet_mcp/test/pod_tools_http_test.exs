@@ -1,19 +1,16 @@
 defmodule Fleet.MCP.PodToolsHttpTest do
   @moduledoc """
-  Gate R-CORE.comm inc3b.2 — transport HTTP-SSE réel.
-
-  `Fleet.MCP.PodTools` démarré en transport `:http` (Cowboy, port OS-assigné) ; un
-  client MCP (`ExMCP.Client`, transport `:http`) round-trip `get_task`/`submit_result`
-  sur le fil HTTP. PUR Elixir (client+serveur BEAM sur vrai HTTP), pas de claude —
-  prouve le wire que le pod réel empruntera en inc3b.3 (bwrap `--share-net` →
-  `http://localhost:PORT/mcp`).
+  Transport HTTP-SSE réel (ADR-G). `Fleet.MCP.PodTools` démarré en transport `:sse`
+  (Cowboy, port OS-assigné) ; un client MCP (`ExMCP.Client`, transport `:http`)
+  round-trip `get_task`/`submit_result` sur le fil HTTP contre le **vrai broker**
+  `Fleet.TaskQueue`. PUR Elixir (client+serveur BEAM), pas de claude.
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.MCP.{PodTools, TaskQueue}
+  alias Fleet.MCP.PodTools
+  alias Fleet.TaskQueue
 
   setup do
-    start_supervised!(TaskQueue)
     ref = :"fleet_mcp_inc3b2_#{System.unique_integer([:positive])}"
     {:ok, _http} = PodTools.start_link(transport: :sse, port: 0, ranch_ref: ref)
     port = :ranch.get_port(ref)
@@ -22,30 +19,32 @@ defmodule Fleet.MCP.PodToolsHttpTest do
   end
 
   test "transport HTTP-SSE : client MCP round-trip get_task/submit_result", %{port: port} do
+    pod = "pod-http-#{System.unique_integer([:positive])}"
     nonce = "inc3b2-#{System.system_time(:second)}-#{:rand.uniform(1_000_000)}"
-    :ok = TaskQueue.push(%{"id" => 7, "ask" => "Reponds : #{nonce}"})
+    {:ok, _} = TaskQueue.enqueue(pod, %{brief: nonce})
 
     {:ok, client} =
       ExMCP.Client.start_link(transport: :http, url: "http://localhost:#{port}/mcp")
 
-    # Canal IN sur le fil HTTP.
-    {:ok, r1} = ExMCP.Client.call_tool(client, "get_task", %{})
+    # Canal IN sur le fil HTTP — le pod s'identifie via `_lcars_pod_id` (= ce que le pont injecte).
+    {:ok, r1} = ExMCP.Client.call_tool(client, "get_task", %{"_lcars_pod_id" => pod})
 
-    assert {:ok, %{"done" => false, "task" => %{"id" => 7, "ask" => ask}}} =
+    assert {:ok, %{"done" => false, "task" => %{"brief" => ^nonce, "task_id" => tid}}} =
              Jason.decode(extract_text(r1))
 
-    assert ask =~ nonce
+    assert is_binary(tid)
 
     # Canal OUT sur le fil HTTP.
     {:ok, _r2} =
       ExMCP.Client.call_tool(client, "submit_result", %{
-        "payload" => %{"id" => 7, "answer" => nonce}
+        "payload" => %{"answer" => nonce},
+        "_lcars_pod_id" => pod
       })
 
-    assert [%{"id" => 7, "answer" => ^nonce}] = TaskQueue.results()
+    assert {:ok, :completed} = TaskQueue.pod_status(pod)
 
-    # File vidée → done.
-    {:ok, r3} = ExMCP.Client.call_tool(client, "get_task", %{})
+    # Plus de mandat actif → done.
+    {:ok, r3} = ExMCP.Client.call_tool(client, "get_task", %{"_lcars_pod_id" => pod})
     assert {:ok, %{"done" => true}} = Jason.decode(extract_text(r3))
   end
 
