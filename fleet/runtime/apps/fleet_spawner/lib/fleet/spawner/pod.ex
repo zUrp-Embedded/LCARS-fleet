@@ -671,7 +671,7 @@ defmodule Fleet.Spawner.Pod do
     # Sélection mutuellement exclusive (un seul backend par lifecycle pod).
     cond do
       is_port(state.port) and Port.info(state.port) ->
-        Port.close(state.port)
+        terminate_pod_port(state.port)
 
       is_binary(state.tmux_session) ->
         Fleet.Spawner.LaunchBackend.TmuxBackend.kill_session(state.tmux_session)
@@ -687,6 +687,27 @@ defmodule Fleet.Spawner.Pod do
 
     write_state_fs(new_state)
     {:stop, :normal, new_state}
+  end
+
+  @doc """
+  Tue le pod de la chaîne bwrap. Le holder (`exec sleep infinity` dans bwrap) IGNORE l'EOF stdin →
+  `Port.close` seul l'ORPHELINE (pod survit — PROVEN e2e Elixir 2026-06-01). On SIGTERM le process
+  bwrap par son os_pid : bwrap propage au holder → PID1 exit → namespace + serveur tmux + claude
+  tombent ensemble. Port.close ensuite (libère le port BEAM). `--die-with-parent` = filet si le BEAM
+  meurt avant d'arriver ici. Public pour test direct du fix.
+  """
+  @spec terminate_pod_port(port()) :: :ok
+  def terminate_pod_port(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, os_pid} ->
+        System.cmd("kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
+
+      _ ->
+        :ok
+    end
+
+    if Port.info(port), do: Port.close(port)
+    :ok
   end
 
   # ============================================================

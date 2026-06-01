@@ -83,6 +83,10 @@ defmodule Fleet.Spawner.PodTest do
     Path.join([root, "pods", pod_id, "state.json"])
   end
 
+  defp os_alive?(os_pid) do
+    match?({_, 0}, System.cmd("kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true))
+  end
+
   setup do
     case Registry.start_link(keys: :unique, name: Fleet.Spawner.Registry) do
       {:ok, _} -> :ok
@@ -429,6 +433,21 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:EXIT, ^pid, :normal}, 3_000
       content = File.read!(state_path) |> Jason.decode!()
       assert content["phase"] == "succeeded"
+    end
+  end
+
+  describe "terminate_pod_port/1 (teardown chaîne bwrap)" do
+    test "SIGTERM le process du port — le holder n'est PAS tué par Port.close seul" do
+      # Reproduit le holder : un process qui IGNORE l'EOF stdin (sleep) → Port.close l'orpheline ;
+      # terminate_pod_port le SIGTERM par os_pid. (Le vrai bwrap+holder est prouvé en e2e ; ici on
+      # verrouille la mécanique exacte du fix en unitaire.)
+      port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
+      {:os_pid, os_pid} = Port.info(port, :os_pid)
+      assert os_alive?(os_pid)
+
+      assert :ok = Fleet.Spawner.Pod.terminate_pod_port(port)
+      Process.sleep(400)
+      refute os_alive?(os_pid)
     end
   end
 end
