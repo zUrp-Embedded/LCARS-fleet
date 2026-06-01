@@ -120,17 +120,17 @@ defmodule Fleet.Pipeline.StageRunner do
   end
 
   defp wake_existing_pod(pod_id, stage_name, stage_ctx, pipeline_id) do
-    :ok = push_task_for_pod(pod_id, stage_ctx)
+    with :ok <- push_task_for_pod(pod_id, stage_ctx),
+         :ok <- spawner().wake_pod(pod_id) do
+      Logger.debug(
+        "fleet_pipeline stage wake ok: pipeline=#{inspect(pipeline_id)} stage=#{stage_name} pod=#{inspect(pod_id)} (réutilisation pipe)"
+      )
 
-    case spawner().wake_pod(pod_id) do
-      :ok ->
-        Logger.debug(
-          "fleet_pipeline stage wake ok: pipeline=#{inspect(pipeline_id)} stage=#{stage_name} pod=#{inspect(pod_id)} (réutilisation pipe)"
-        )
-
-        {:ok, pod_id}
-
+      {:ok, pod_id}
+    else
       {:error, reason} = err ->
+        # Pod pipe EXISTANT (réutilisable) : enqueue OU wake échoué → on NE tue PAS (l'échec peut être
+        # transitoire, le pod garde son état). On propage l'échec de stage proprement (pas de crash).
         Logger.error(
           "fleet_pipeline stage wake fail: pipeline=#{inspect(pipeline_id)} stage=#{stage_name} pod=#{inspect(pod_id)} reason=#{inspect(reason)}"
         )
@@ -143,13 +143,26 @@ defmodule Fleet.Pipeline.StageRunner do
     case spawner_backend().spawn_stage_pod(role, profile, stage_ctx) do
       {:ok, pod_id} ->
         :ok = PodRegistry.register(pipeline_id, role, pod_id)
-        :ok = push_task_for_pod(pod_id, stage_ctx)
 
-        Logger.debug(
-          "fleet_pipeline stage spawn ok (pipe, registered + task pushed): pipeline=#{inspect(pipeline_id)} stage=#{stage_name} role=#{role} pod=#{inspect(pod_id)}"
-        )
+        case push_task_for_pod(pod_id, stage_ctx) do
+          :ok ->
+            Logger.debug(
+              "fleet_pipeline stage spawn ok (pipe, registered + task pushed): pipeline=#{inspect(pipeline_id)} stage=#{stage_name} role=#{role} pod=#{inspect(pod_id)}"
+            )
 
-        {:ok, pod_id}
+            {:ok, pod_id}
+
+          {:error, reason} = err ->
+            # enqueue échoué APRÈS spawn+register : pod pipe sans mandat → unregister + kill (sinon le
+            # registry pointe un pod orphelin sans travail). Audit deep-01 P1.
+            Logger.error(
+              "fleet_pipeline stage spawn enqueue fail (pipe) → unregister+kill pod=#{inspect(pod_id)} reason=#{inspect(reason)}"
+            )
+
+            _ = PodRegistry.unregister(pod_id)
+            _ = spawner().kill_pod(pod_id)
+            err
+        end
 
       {:error, reason} = err ->
         Logger.error(
@@ -167,13 +180,24 @@ defmodule Fleet.Pipeline.StageRunner do
         # sans, le claude REPL appelle get_task → empty → done:true et
         # termine sans traiter le stage. La voie canonique pod→fleet est
         # MCP (PodTools get_task / submit_result → TaskQueue), pas Read fichier.
-        :ok = push_task_for_pod(pod_id, stage_ctx)
+        case push_task_for_pod(pod_id, stage_ctx) do
+          :ok ->
+            Logger.debug(
+              "fleet_pipeline stage spawn ok: pipeline=#{inspect(pipeline_id)} stage=#{stage_name} role=#{role} pod=#{inspect(pod_id)}"
+            )
 
-        Logger.debug(
-          "fleet_pipeline stage spawn ok: pipeline=#{inspect(pipeline_id)} stage=#{stage_name} role=#{role} pod=#{inspect(pod_id)}"
-        )
+            {:ok, pod_id}
 
-        {:ok, pod_id}
+          {:error, reason} = err ->
+            # enqueue échoué APRÈS spawn : pod one-shot (NON registered) orphelin sans mandat → kill
+            # pour ne pas le laisser fuir (audit deep-01 P1 : one-shot pas dans PodRegistry).
+            Logger.error(
+              "fleet_pipeline stage spawn enqueue fail (one-shot) → kill pod=#{inspect(pod_id)} reason=#{inspect(reason)}"
+            )
+
+            _ = spawner().kill_pod(pod_id)
+            err
+        end
 
       {:error, reason} = err ->
         Logger.error(
@@ -188,8 +212,12 @@ defmodule Fleet.Pipeline.StageRunner do
   # (le claude REPL le pop via mcp__fleet__get_task → PodTools.get_task →
   # TaskQueue.get_for_pod). Helper réutilisable par spawn et wake.
   defp push_task_for_pod(pod_id, stage_ctx) do
-    {:ok, _task} = task_queue().enqueue(pod_id, build_pod_attrs(stage_ctx))
-    :ok
+    # `{:error}` propagé (PAS hard-match) : un hoquet broker ne doit pas crasher l'Executor par MatchError
+    # (audit deep-01 P1). Les callers décident du cleanup (kill/unregister selon one-shot vs pipe).
+    case task_queue().enqueue(pod_id, build_pod_attrs(stage_ctx)) do
+      {:ok, _task} -> :ok
+      {:error, reason} -> {:error, {:enqueue_failed, reason}}
+    end
   end
 
   # Construit les attrs du mandat enqueué dans le broker (consommé par le

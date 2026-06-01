@@ -1,3 +1,8 @@
+defmodule Fleet.Pipeline.TaskQueueFailStub do
+  @moduledoc "Stub broker qui échoue tout enqueue (test fail-soft deep-01 P1)."
+  def enqueue(_pod_id, _attrs), do: {:error, :broker_down}
+end
+
 defmodule Fleet.Pipeline.StageRunnerPipeTest do
   @moduledoc """
   Tests du chantier engineer long-lived : `Fleet.Pipeline.StageRunner`
@@ -163,6 +168,24 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
       assert {:ok, task} = TaskQueue.get_for_pod("stub-pod-implement")
       assert task.metadata["inputs"] == %{"spec-review" => ["fix this"]}
       assert task.brief =~ "Inputs (stages amont)"
+
+      PodRegistry.cleanup_pipeline(pipeline_id)
+    end
+  end
+
+  describe "enqueue broker échoue — fail-soft, pas de crash ni leak (deep-01 P1)" do
+    test "one-shot : enqueue {:error} → pod tué + {:error} propagé (pas de MatchError)" do
+      Application.put_env(:fleet_pipeline, :task_queue, Fleet.Pipeline.TaskQueueFailStub)
+      on_exit(fn -> Application.delete_env(:fleet_pipeline, :task_queue) end)
+      SpawnerStub.reset()
+      pipeline_id = "test-enqfail-#{System.unique_integer([:positive])}"
+
+      # rôle non-engineer → one-shot (resolver du setup). Spawn OK puis enqueue échoue.
+      assert {:error, {:enqueue_failed, :broker_down}} =
+               StageRunner.run("qa", stage_spec("qa"), %{ticket_id: "t-fail"}, %{}, pipeline_id)
+
+      # le pod one-shot spawné NE FUIT PAS : il a été tué (audit deep-01 P1).
+      assert SpawnerStub.kill_calls() != []
 
       PodRegistry.cleanup_pipeline(pipeline_id)
     end
