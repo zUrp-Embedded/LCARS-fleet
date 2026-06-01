@@ -165,9 +165,17 @@ teardown() {
   [[ "$output" != *"--system-prompt-file"* ]]
 }
 
-@test "flags: --permission-mode acceptEdits (défaut)" {
+@test "flags: --dangerously-skip-permissions par défaut (sanctuaire = liberté, les murs portent la sécu)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
-  [[ "$output" == *"--permission-mode acceptEdits"* ]]
+  [[ "$output" == *"--dangerously-skip-permissions"* ]]
+  [[ "$output" != *"--permission-mode"* ]]
+}
+
+@test "flags: LCARS_PERMISSION_MODE override → --permission-mode <mode> (rôle bridé, pas skip)" {
+  export LCARS_PERMISSION_MODE=plan
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--permission-mode plan"* ]]
+  [[ "$output" != *"--dangerously-skip-permissions"* ]]
 }
 
 @test "flags: --allowedTools extrait du cap-profile JSON" {
@@ -197,6 +205,35 @@ teardown() {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
   [[ "$output" == *"--mcp-config $POD_DIR/.mcp-fleet.json"* ]]
   [[ "$output" == *"--strict-mcp-config"* ]]
+}
+
+# =============================================================
+# Bypass dialog : levée du gate interactif (skipDangerousModePermissionPrompt en settings/flagSettings).
+# PROVEN e2e sanctuaire 2026-06-01 : sans ça, claude RC hang sur « 1. No / 2. Yes I accept ».
+# =============================================================
+
+@test "bypass: mode skip provisionne skipDangerousModePermissionPrompt + le passe via --settings" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$status" -eq 0 ]]
+  [[ -f "$POD_DIR/.lcars/settings.json" ]]
+  grep -q "skipDangerousModePermissionPrompt" "$POD_DIR/.lcars/settings.json"
+  [[ "$output" == *"--settings $POD_DIR/.lcars/settings.json"* ]]
+}
+
+@test "bypass: merge non-destructif (settings pod préexistant conservé + flag ajouté)" {
+  mkdir -p "$POD_DIR/.lcars"
+  echo '{"hooks":{"PreToolUse":[]}}' > "$POD_DIR/.lcars/settings.json"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$status" -eq 0 ]]
+  grep -q "skipDangerousModePermissionPrompt" "$POD_DIR/.lcars/settings.json"
+  grep -q "PreToolUse" "$POD_DIR/.lcars/settings.json"   # l'existant n'est PAS clobberé
+}
+
+@test "bypass: rôle bridé (LCARS_PERMISSION_MODE) NE provisionne PAS le skip-dialog" {
+  export LCARS_PERMISSION_MODE=plan
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$status" -eq 0 ]]
+  [[ ! -f "$POD_DIR/.lcars/settings.json" ]] || ! grep -q "skipDangerousModePermissionPrompt" "$POD_DIR/.lcars/settings.json"
 }
 
 # =============================================================

@@ -71,7 +71,22 @@ SESSION_ID="${LCARS_POD_SESSION_ID:?UUID de session requis (pré-alloué par le 
 POD_RESUME="${LCARS_POD_RESUME:-0}"                          # 0 = 1ʳᵉ création ; 1 = recovery
 SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<human>_<role>)}"
 
-PERM_MODE="${LCARS_PERMISSION_MODE:-acceptEdits}"
+# Permission : SANCTUAIRE = liberté totale. Les murs bwrap portent la sécu, PAS le harness — l'agent
+# ne se brise pas les dents sur la paranoïa permission de Claude Code (un prompt « autoriser ? » hang
+# un pod headless : personne pour répondre). Défaut = --dangerously-skip-permissions (le user le fait
+# déjà sur sa session RC ; pod sous UID humain ≠ root → accepté). Le « no-internet recommended » du
+# flag est OK ici : threat-model = sandbox jetable root-de-confiance, le containment bwrap est le mur.
+# Overridable par cap-profile (LCARS_PERMISSION_MODE) pour un rôle bridé (ex. plan).
+PERM_MODE="${LCARS_PERMISSION_MODE:-}"
+if [[ -n "$PERM_MODE" ]]; then
+  PERM_FLAGS=(--permission-mode "$PERM_MODE")
+else
+  # --dangerously-skip-permissions POSE le mode bypass. Le BLOCAGE n'est pas le mode mais le DIALOGUE
+  # interactif d'acceptation (« 1. No / 2. Yes I accept ») qui hang un pod headless → levé séparément
+  # par skipDangerousModePermissionPrompt en settings (bloc « bypass dialog » ci-dessous). PAS besoin de
+  # --allow-dangerously-skip-permissions (redondant : il ne fait qu'enclencher le même mode).
+  PERM_FLAGS=(--dangerously-skip-permissions)
+fi
 # --settings est ADDITIF ⇒ --setting-sources DOIT exclure 'user' (sinon le settings de
 # l'humain bleed dans le pod). Default project,local — 'user' INTERDIT (fleet_spawner v2 §G).
 SETTING_SOURCES="${LCARS_SETTING_SOURCES:-project,local}"
@@ -127,6 +142,8 @@ dbg "step CAP_PROFILE OK"
 # Onboarding/trust skip (interactif) : sinon claude bloque sur le dialogue 1er lancement.
 # .claude.json minimal à la racine du HOME pod ($POD_DIR, hors .claude/ ⇒ non masqué
 # par le bind creds). Clé projects = cwd pod (= $POD_DIR).
+# (NB : l'acceptation bypass N'est PLUS ici — `bypassPermissionsModeAccepted` du global config a
+#  MIGRÉ vers settings.json/`skipDangerousModePermissionPrompt` — cf. bloc « bypass dialog » infra.)
 # =============================================================
 
 VER="$("$CLAUDE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
@@ -151,6 +168,28 @@ dbg "step jq tools OK allowed='$ALLOWED_TOOLS' disallowed='$DISALLOWED_TOOLS'"
 # =============================================================
 
 POD_SETTINGS_FILE="$POD_DIR/.lcars/settings.json"
+
+# Bypass dialog : en mode skip-permissions, pré-accepter le DIALOGUE interactif (« 1. No / 2. Yes I
+# accept ») qui hang un pod headless. Mécanisme (src leak v2.1.88, vérifié e2e 2026-06-01) :
+# interactiveHelpers.tsx montre le dialogue ssi `!hasSkipDangerousModePermissionPrompt()`, qui lit
+# `skipDangerousModePermissionPrompt` depuis userSettings|localSettings|flagSettings|policySettings.
+# `--settings <file>` = source **flagSettings** ⇒ dans la liste, INDÉPENDANT de --setting-sources.
+# On provisionne donc le flag dans le settings pod (merge si présent), claude_launch reste le
+# propriétaire bout-en-bout du mode bypass (le flag + la levée du dialogue). Non-skip (rôle bridé
+# par cap-profile) : on n'y touche pas. (Ex `bypassPermissionsModeAccepted` du global config :
+# DÉPRÉCIÉ/migré — ne plus l'écrire.)
+if [[ -z "$PERM_MODE" ]]; then
+  mkdir -p "$POD_DIR/.lcars"
+  if [[ -f "$POD_SETTINGS_FILE" ]]; then
+    _merged="$("$JQ_BIN" '. + {skipDangerousModePermissionPrompt: true}' "$POD_SETTINGS_FILE")" \
+      && printf '%s\n' "$_merged" > "$POD_SETTINGS_FILE" \
+      || { dbg "EXIT: merge skipDangerousModePermissionPrompt fail"; echo "ERR: merge settings échoué" >&2; exit 1; }
+  else
+    printf '{ "skipDangerousModePermissionPrompt": true }\n' > "$POD_SETTINGS_FILE"
+  fi
+  dbg "step bypass dialog pré-accepté (skipDangerousModePermissionPrompt → $POD_SETTINGS_FILE)"
+fi
+
 # --setting-sources INCONDITIONNEL : on exclut le tier 'user' (settings.json de l'humain)
 # TOUJOURS — casser la dép par flag, pas en comptant sur le masquage bwrap. `--settings`
 # (additif) ajouté seulement si le fichier pod existe. (À confirmer empiriquement au bring-up :
@@ -205,13 +244,13 @@ dbg "step session flags : ${SESSION_FLAGS[*]}"
 # TTY le binaire bascule en --print-like — le PTY tmux assure le mode interactif RC). SP inline argv.
 # =============================================================
 
-dbg "step pre-exec claude --remote-control (perm=$PERM_MODE bin=$CLAUDE_BIN)"
+dbg "step pre-exec claude --remote-control (perm=${PERM_FLAGS[*]} bin=$CLAUDE_BIN)"
 exec "$CLAUDE_BIN" \
     --remote-control \
     "${SESSION_FLAGS[@]}" \
     --remote-control-session-name-prefix "$SESSION_NAME_PREFIX" \
     --system-prompt "$SP" \
-    --permission-mode "$PERM_MODE" \
+    "${PERM_FLAGS[@]}" \
     --allowedTools "$ALLOWED_TOOLS" \
     --disallowedTools "$DISALLOWED_TOOLS" \
     ${SETTINGS_FLAGS[@]+"${SETTINGS_FLAGS[@]}"} \
