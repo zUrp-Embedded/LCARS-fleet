@@ -229,16 +229,17 @@ defmodule Fleet.Spawner.Pod do
   # Phase indépendante du cycle ALLOCATE→RELEASE : le pod est probably en :monitoring
   # quand ce message arrive. Une erreur send-keys n'interrompt pas le pod (warning
   # + le monitor pourra time-out si claude n'a rien reçu).
-  def handle_info({:inject_brief, brief}, %{tmux_session: session} = state)
-      when is_binary(session) and is_binary(brief) do
-    case Fleet.Spawner.LaunchBackend.TmuxBackend.send_prompt(session, brief) do
+  def handle_info({:inject_brief, keys}, %{tmux_session: session} = state)
+      when is_binary(session) and is_binary(keys) do
+    # KICK keyé par pod_id sur le sock PAR-POD (PodTmux) : la chaîne bwrap tourne tmux DANS bwrap.
+    # tmux_session présent (posé par le backend) = pod joignable. Le contenu est le kick (« yop ») —
+    # le mandat lui-même est pull par le pod via MCP get_task, pas injecté ici.
+    case Fleet.Spawner.PodTmux.send_keys(state.pod_id, keys) do
       :ok ->
         :ok
 
       {:error, reason} ->
-        Logger.warning(
-          "pod #{state.pod_id} brief injection failed (tmux=#{session}) : #{inspect(reason)}"
-        )
+        Logger.warning("pod #{state.pod_id} kick (#{keys}) failed : #{inspect(reason)}")
     end
 
     {:noreply, state}
@@ -536,6 +537,9 @@ defmodule Fleet.Spawner.Pod do
       |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
       |> Map.put("LCARS_POD_RESUME", if(state.resume, do: "1", else: "0"))
       |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", "#{human}_#{role}")
+      # Base sock tmux : bwrap_launch crée la socket sous <base>/<pod_id>/, PodTmux (host) y tape.
+      # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. (Défaut /run/lcars/tmux-sock partagé.)
+      |> Map.put("LCARS_TMUX_SOCK_BASE", Fleet.Spawner.PodTmux.sock_base())
 
     case launch_backend().launch(args, env) do
       {:ok, %{init_message: init_msg, ndjson_log: ndjson_log} = launched} ->

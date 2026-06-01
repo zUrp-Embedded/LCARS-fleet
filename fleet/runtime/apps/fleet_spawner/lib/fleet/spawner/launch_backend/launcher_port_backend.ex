@@ -35,7 +35,15 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
           {:cd, to_charlist(args.pod_dir)}
         ])
 
-      {:ok, %{port: port, init_message: nil, ndjson_log: nil}}
+      {:ok,
+       %{
+         port: port,
+         init_message: nil,
+         ndjson_log: nil,
+         # tmux_session présent ⇒ pod KICKABLE (PodTmux send-keys sur le sock par-pod). Le sock est
+         # dérivé du pod_id (convention bwrap_launch.sh), pas besoin de le porter dans l'état.
+         tmux_session: Fleet.Spawner.PodTmux.session_name(args.pod_id)
+       }}
     end
   end
 

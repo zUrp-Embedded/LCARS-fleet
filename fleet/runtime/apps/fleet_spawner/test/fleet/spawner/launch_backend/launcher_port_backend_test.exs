@@ -64,7 +64,8 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
     } do
       bwrap = fake_exe(dir, "fake_bwrap.sh", "sleep 2")
 
-      assert {:ok, %{init_message: nil, ndjson_log: nil, port: port}} =
+      assert {:ok,
+              %{init_message: nil, ndjson_log: nil, port: port, tmux_session: "lcars-pod-pod-42"}} =
                LauncherPortBackend.launch(args(dir, bwrap), %{"K" => "V"})
 
       assert is_port(port)

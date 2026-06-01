@@ -136,7 +136,7 @@ defmodule Fleet.Spawner do
   def wake_pod(pod_id) when is_binary(pod_id) do
     case pod_info(pod_id) do
       {:ok, %{tmux_session: session}} when is_binary(session) ->
-        Fleet.Spawner.LaunchBackend.TmuxBackend.send_prompt(session, "yop")
+        Fleet.Spawner.PodTmux.send_keys(pod_id, "yop")
 
       {:ok, _info} ->
         {:error, :not_a_tmux_pod}
