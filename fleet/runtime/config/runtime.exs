@@ -76,11 +76,18 @@ if config_env() != :test do
   # ============================================================
   # U4 — pivot pod RC long-lived (claude --remote-control via tmux)
   # ============================================================
-  # LCARS_LAUNCH_BACKEND=tmux → bascule sur Fleet.Spawner.LaunchBackend.TmuxBackend
-  # (claude --remote-control dans tmux session lcars-<pod_id>, pool subscription
-  # OAuth préservé, visible Desktop sidebar). Defaults reste PortBackend pour
-  # compat tests/dev. Production : set env var dans /etc/fleet/lcars-fleet.env.
-  if System.get_env("LCARS_LAUNCH_BACKEND") == "tmux" do
+  # TmuxBackend = claude --remote-control HORS bwrap (containment: none). Défaut = LauncherPortBackend
+  # (chaîne bwrap).
+  #
+  # ⚠️ QUARANTAINE 2026-06-02 (audit Codex P0-2/P1-2) : depuis la convergence ④ (le kick/wake passe par
+  # `PodTmux` = socket PAR-POD bwrap), le control-path de TmuxBackend est CASSÉ — il lance sur le tmux
+  # par défaut, que PodTmux ne cible pas → le pod boote mais ne reçoit JAMAIS de travail (split-brain).
+  # + containment: none. La voie documentée `LCARS_LAUNCH_BACKEND=tmux` ne suffit donc PLUS : il faut
+  # un opt-in EXPLICITE `LCARS_UNSAFE_ALLOW_HOST_TMUX=1` (POC dev sans bwrap uniquement, JAMAIS prod ;
+  # le pod reste non-kickable tant que TmuxBackend n'est pas re-câblé sur le sock par-pod OU supprimé —
+  # cf. CHANTIER-3-JOURNAL § reste). Le vrai fix (dispatch par backend, ou retrait complet) est différé.
+  if System.get_env("LCARS_LAUNCH_BACKEND") == "tmux" and
+       System.get_env("LCARS_UNSAFE_ALLOW_HOST_TMUX") == "1" do
     config :fleet_spawner, :launch_backend, Fleet.Spawner.LaunchBackend.TmuxBackend
   end
 
