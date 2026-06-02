@@ -498,6 +498,33 @@ defmodule Fleet.Spawner.Pod do
     Application.get_env(:fleet_spawner, :claude_dir, "/home/starfleet/.claude")
   end
 
+  # Creds du pod = ceux de l'HUMAIN (/home/<human>/.claude), même règle que pod_dir. Override config
+  # `:claude_dir` respecté (déploiement non-standard) ; sinon dérivé de l'humain (PAS /home/starfleet).
+  defp claude_dir_for(human) do
+    Application.get_env(:fleet_spawner, :claude_dir) || "/home/#{human}/.claude"
+  end
+
+  # Binaire vendor = celui de l'HUMAIN (~/.local/bin/claude résolu), posé en LCARS_VENDOR_BIN.
+  # Honore le contrat bwrap_launch.sh:55 « autorité = LCARS_VENDOR_BIN (spawner) » : sans ça, bwrap
+  # retombe sur `command -v claude` = PATH du daemon → binaire système périmé (terrain : /usr/local/bin
+  # 2.1.114 au lieu du 2.1.159 user, outil Monitor absent). readlink -f ⇒ bwrap_launch dérive
+  # VENDOR_SHARE = dirname(dirname(bin)) juste. Absent ⇒ on ne pose rien (fallback bwrap conservé).
+  defp maybe_put_vendor_bin(env, human) do
+    link = "/home/#{human}/.local/bin/claude"
+
+    if File.exists?(link) do
+      bin =
+        case System.cmd("readlink", ["-f", link], stderr_to_stdout: true) do
+          {out, 0} -> String.trim(out)
+          _ -> link
+        end
+
+      Map.put(env, "LCARS_VENDOR_BIN", bin)
+    else
+      env
+    end
+  end
+
   defp do_launch(state) do
     role = Map.get(state.cap_profile.metadata, "name", "engineer")
 
@@ -540,6 +567,12 @@ defmodule Fleet.Spawner.Pod do
       # Base sock tmux : bwrap_launch crée la socket sous <base>/<pod_id>/, PodTmux (host) y tape.
       # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. (Défaut /run/lcars/tmux-sock partagé.)
       |> Map.put("LCARS_TMUX_SOCK_BASE", Fleet.Spawner.PodTmux.sock_base())
+      # Le pod est celui de l'HUMAIN : creds ET binaire vendor suivent /home/<human> (même règle que
+      # pod_dir). Quel binaire = robuste ici (depuis ~/.local/bin, pas le pari `command -v`). Tourner
+      # SOUS l'UID de l'humain (ownership/perms/multi-user gratis OS, drop systemd-run --uid) = chantier
+      # substrat (cf. journal § reste) — orthogonal et complémentaire à ce qui suit.
+      |> Map.put("CLAUDE_DIR", claude_dir_for(human))
+      |> maybe_put_vendor_bin(human)
 
     case launch_backend().launch(args, env) do
       {:ok, %{init_message: init_msg, ndjson_log: ndjson_log} = launched} ->
