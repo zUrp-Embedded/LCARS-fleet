@@ -796,30 +796,23 @@ defmodule Fleet.Spawner.Pod do
     }
   end
 
-  defp pod_dir_for(pod_id, cap_profile, opts) do
+  defp pod_dir_for(pod_id, _cap_profile, opts) do
+    # DÉCISION session 2026-06-01 (monde-invoqué / ADR-E) : le pod vit SOUS LE HOME DU HUMAIN
+    # (`/home/<human>/pods/pod_<id>`), 0700, isolé OS gratis — PAS un `/home/pods` PARTAGÉ à
+    # perms-manuelles (l'anti-pattern qu'on a explicitement rejeté). L'humain est dans le PATH, pas
+    # dans le nom ; `pod_<id>` = nom stable (pod_id = clé de recovery, unique par construction → même
+    # pod_id = même dossier = stable pour --resume). `:pod_dir_root` reste un override (tests /
+    # déploiement non-standard) ; non-set ⇒ défaut per-humain.
+    # NB : l'OWNERSHIP effective UID-humain (le pod tourne EN tant que l'humain, owns 0700) via
+    # `systemd-run --uid`/setuid = substrat à brancher (cf. journal § reste) — ici on pose le PATH décidé.
+    human = Keyword.get(opts, :human, Application.get_env(:fleet_spawner, :pod_human, "fleet"))
+
     base =
-      Keyword.get(
-        opts,
-        :pod_dir_root,
-        Application.get_env(:fleet_spawner, :pod_dir_root, "/home/pods")
-      )
+      Keyword.get(opts, :pod_dir_root) ||
+        Application.get_env(:fleet_spawner, :pod_dir_root) ||
+        "/home/#{human}/pods"
 
-    # Nom = <human>_<role>_<pod_id>. Repère humain+role lisible en tête ; pod_id
-    # comme discriminateur : unique PAR CONSTRUCTION (collision irreprésentable),
-    # stateless (pas de compteur _XX à allouer = pas de registre = pas de smell
-    # I-CBC), et déjà la clé de recovery (state_fs keyé pod_id) → MÊME pod_id =
-    # MÊME dossier → stable pour --resume. Le nom est une fonction pure de
-    # (human, role, pod_id) : différenciation par data, aucun branchement.
-    role = Map.get(cap_profile.metadata, "name", "worker")
-
-    human =
-      Keyword.get(
-        opts,
-        :human,
-        Application.get_env(:fleet_spawner, :pod_human, "fleet")
-      )
-
-    Path.join(base, "#{human}_#{role}_#{pod_id}")
+    Path.join(base, "pod_#{pod_id}")
   end
 
   defp state_fs_path_for(pod_id, cap_profile, opts) do

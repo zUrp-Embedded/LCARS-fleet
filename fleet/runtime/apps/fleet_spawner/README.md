@@ -53,7 +53,7 @@ State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` (champs : `
 ## Configuration
 
 - `:fleet_spawner, :state_fs_root` — racine FS state recovery (default `/var/lib/lcars`)
-- `:fleet_spawner, :pod_dir_root` — racine pod_dir (default `/home/pods` ; nom `<human>_<role>_<pod_id>`)
+- `:fleet_spawner, :pod_dir_root` — **override** base-plate du pod_dir (tests / déploiement non-standard). Non-set ⇒ défaut **per-humain `/home/<human>/pods/pod_<pod_id>`** (ADR-E/monde-invoqué : pod sous le home humain, `0700`, PAS un répertoire partagé). Ownership UID-humain effective = substrat-pending.
 - `:fleet_spawner, :pod_human` — segment humain du nom de pod (default `fleet`)
 - `:fleet_spawner, :launch_backend` — module `LaunchBackend` (**default `LauncherPortBackend`** = chaîne bwrap)
 - `:fleet_spawner, :tmux_sock_base` — base sockets par-pod (default `/run/lcars/tmux-sock`, = `LCARS_TMUX_SOCK_BASE` côté bwrap)

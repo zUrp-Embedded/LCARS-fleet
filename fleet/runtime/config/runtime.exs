@@ -63,15 +63,17 @@ if config_env() != :test do
     boot_permanent_at_start: System.get_env("LCARS_BOOT_PERMANENT_AT_START") == "true"
 
   # ============================================================
-  # fleet_spawner pod_dir_root — #585 root cause final (5-layer)
-  # systemd PrivateTmp=yes + bwrap --tmpfs /tmp + --bind sous-/tmp =
-  # writes orphaned (sandbox éphémère meurt → tout perdu, init_timeout).
-  # Sortir POD_DIR hors /tmp via /var/lib/lcars/pods (sf provisionne
-  # lcars:lcars 755 + LCARS_PODS_ROOT dans /etc/fleet/lcars-fleet.env).
-  # Default code (pod.ex:384) = "/tmp/lcars-pods" laissé pour dev/test.
+  # fleet_spawner pod_dir_root — OVERRIDE optionnel seulement.
+  # DÉCISION 2026-06-01 (monde-invoqué/ADR-E) : le défaut est PER-HUMAIN `/home/<human>/pods/pod_<id>`
+  # (pod.ex `pod_dir_for` — pod sous le home humain, 0700, isolé OS gratis ; PAS un /home|/var PARTAGÉ).
+  # On ne fixe donc PLUS de défaut plat ici (l'ancien `/var/lib/lcars/pods` ÉCRASAIT le per-humain).
+  # `LCARS_PODS_ROOT` = base plate pour un déploiement non-standard ; non-set ⇒ défaut per-humain.
+  # (Risque #585 — writes orphaned sous /tmp via PrivateTmp+bwrap — ne s'applique pas : /home/<human>
+  #  n'est pas /tmp, et bwrap re-bind le POD_DIR par-dessus son `--tmpfs /home`.)
   # ============================================================
-  config :fleet_spawner,
-    pod_dir_root: System.get_env("LCARS_PODS_ROOT", "/var/lib/lcars/pods")
+  if pods_root = System.get_env("LCARS_PODS_ROOT") do
+    config :fleet_spawner, pod_dir_root: pods_root
+  end
 
   # ============================================================
   # U4 — pivot pod RC long-lived (claude --remote-control via tmux)

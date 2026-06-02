@@ -47,7 +47,7 @@ Anything that talks to a specific vendor (Claude SDK, future OpenAI) is **N1** a
 
 ### Pod sandboxing
 
-Pods (per-role agent processes) are launched via `bwrap_launch.sh` (bwrap sandbox, RO mounts + tmpfs /home + bind credentials) which `exec`s into a vendor launcher (`claude_launch.sh`). The systemd unit allows `@mount @namespace` syscalls explicitly so bwrap can `unshare`/`mount`/`setns`/`pivot_root` (canon comment in `etc/lcars-fleet.service`). Pod working dirs live under `LCARS_PODS_ROOT` (default `/var/lib/lcars/pods`) — **not** under `/tmp`, because `PrivateTmp=yes` + bwrap tmpfs would orphan writes.
+Pods (per-role agent processes) are launched via `bwrap_launch.sh` (bwrap sandbox, RO mounts + tmpfs /home + bind credentials) which `exec`s into a vendor launcher (`claude_launch.sh`). The systemd unit allows `@mount @namespace` syscalls explicitly so bwrap can `unshare`/`mount`/`setns`/`pivot_root` (canon comment in `etc/lcars-fleet.service`). Pod working dirs default to **`/home/<human>/pods/pod_<id>`** (per-human, `0700`, ADR-E — the pod lives under the owning human's home, isolated by OS ownership; **not** a shared `/home/pods`/`/var/lib/lcars/pods`). `LCARS_PODS_ROOT` is an optional flat-base override. Not under `/tmp` (`PrivateTmp=yes` + bwrap tmpfs would orphan writes). NB: effective UID-ownership (pod runs *as* the human via `systemd-run --uid`) is substrate-pending.
 
 ### Event bus
 
