@@ -4,6 +4,10 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
   Bus PubSub partagé entre tests : on filtre par marqueurs spécifiques
   (`:coord_invocations` reset en setup, `:audit_log_path` per-test).
+
+  BL-021 chantier 3 : les events sont émis au schema canon `%Fleet.Event{}` via
+  `Bus.broadcast/2` (le legacy tuple format `Bus.broadcast/3` n'est plus consommé
+  par DriftMonitor — handlers tuple retirés).
   """
 
   use ExUnit.Case, async: false
@@ -48,17 +52,29 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     Application.get_env(:fleet_starfleet, :coord_invocations, [])
   end
 
-  describe "pod_drift event" do
+  defp emit_canon(type, payload, cid \\ nil, pod_id \\ nil) do
+    Bus.broadcast("fleet.events", %Fleet.Event{
+      source: :event_router,
+      type: type,
+      timestamp: DateTime.utc_now(),
+      pod_id: pod_id,
+      correlation_id: cid,
+      payload: payload
+    })
+  end
+
+  describe "pod.drift event" do
     test "drift_count >= 3 → Cat5 escalade" do
-      :ok = Bus.broadcast("pod.drift", %{"pod_id" => "drifty", "drift_count" => 3}, [])
+      :ok =
+        emit_canon(:"pod.drift", %{"pod_id" => "drifty", "drift_count" => 3}, "cid-1", "drifty")
 
       wait_drift_monitor_drain()
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "audit.cat5.pod_drift",
-                        "payload" => %{"pod_id" => "drifty"}
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :starfleet,
+                       type: :"starfleet.audit_cat5_pod_drift",
+                       payload: %{"pod_id" => "drifty"}
+                     },
                      500
 
       assert Enum.any?(coord_invocations(), fn
@@ -68,7 +84,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     end
 
     test "drift_count < 3 → no escalade" do
-      :ok = Bus.broadcast("pod_drift", %{"pod_id" => "early", "drift_count" => 2}, [])
+      :ok = emit_canon(:"pod.drift", %{"pod_id" => "early", "drift_count" => 2})
 
       wait_drift_monitor_drain()
 
@@ -81,20 +97,15 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
   describe "pipeline.failed event" do
     test "broadcast → Cat5 escalade pipeline_failed" do
-      :ok =
-        Bus.broadcast(
-          "pipeline.failed",
-          %{"pipeline_id" => "pl1", "reason" => "gate fail"},
-          []
-        )
+      :ok = emit_canon(:"pipeline.failed", %{"pipeline_id" => "pl1", "reason" => "gate fail"})
 
       wait_drift_monitor_drain()
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "audit.cat5.pipeline_failed",
-                        "payload" => %{"pipeline_id" => "pl1"}
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :starfleet,
+                       type: :"starfleet.audit_cat5_pipeline_failed",
+                       payload: %{"pipeline_id" => "pl1"}
+                     },
                      500
 
       assert Enum.any?(coord_invocations(), fn
@@ -107,19 +118,18 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   describe "oauth.refresh.failed event" do
     test "broadcast → Cat5 escalade oauth_refresh_failed" do
       :ok =
-        Bus.broadcast(
-          "oauth.refresh.failed",
-          %{"account" => "u@x.com", "lead_time_min" => 30},
-          []
-        )
+        emit_canon(:"oauth.refresh.failed", %{
+          "account" => "u@x.com",
+          "lead_time_min" => 30
+        })
 
       wait_drift_monitor_drain()
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "audit.cat5.oauth_refresh_failed",
-                        "payload" => %{"account" => "u@x.com"}
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :starfleet,
+                       type: :"starfleet.audit_cat5_oauth_refresh_failed",
+                       payload: %{"account" => "u@x.com"}
+                     },
                      500
 
       assert Enum.any?(coord_invocations(), fn
@@ -133,7 +143,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     test "decision_json valide → CoordBackend.handle_decision invoqué" do
       json = ~s|{"decision":"halt","reason":"gatekeeper-said","details":{}}|
 
-      :ok = Bus.broadcast("audit.verdict", %{"decision_json" => json}, [])
+      :ok = emit_canon(:"audit.verdict", %{"decision_json" => json})
 
       wait_drift_monitor_drain()
 
@@ -145,7 +155,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
     test "decision_json invalide → AuditLog write + pas de handle_decision",
          %{tmp_dir: tmp_dir} do
-      :ok = Bus.broadcast("audit.verdict", %{"decision_json" => ~s|{not json}|}, [])
+      :ok = emit_canon(:"audit.verdict", %{"decision_json" => ~s|{not json}|})
 
       wait_drift_monitor_drain()
 
@@ -161,7 +171,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
   describe "events non-pertinents" do
     test "event inconnu → ignoré (no crash)" do
-      :ok = Bus.broadcast("pod.allocate", %{"pod_id" => "p1"}, [])
+      :ok = emit_canon(:"pod.allocate", %{"pod_id" => "p1"})
       wait_drift_monitor_drain()
 
       # DriftMonitor toujours vivant

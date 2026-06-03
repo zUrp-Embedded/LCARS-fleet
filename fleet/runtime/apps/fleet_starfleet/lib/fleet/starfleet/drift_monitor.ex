@@ -44,10 +44,8 @@ defmodule Fleet.Starfleet.DriftMonitor do
 
   @impl GenServer
   # DN 13 C2.3-starfleet — pattern match schema canon %Fleet.Event{} strict
-  # (DN 11 C3.1+C3.2). Dual stack avec format legacy {atom, %{event_type, payload}}
-  # pendant migration BL-021 chantier 2c — retiré chantier 3.
-
-  # === Schema canon strict (%Fleet.Event{}) ===
+  # (DN 11 C3.1+C3.2). Legacy tuple format retiré chantier 3 BL-021 (les
+  # producteurs sont passés au schema canon).
 
   def handle_info(
         %Fleet.Event{type: :"pod.drift", payload: payload, correlation_id: cid},
@@ -84,45 +82,8 @@ defmodule Fleet.Starfleet.DriftMonitor do
     {:noreply, state}
   end
 
-  # Ignore les autres types de %Fleet.Event{} non handlés.
+  # Ignore les autres types de %Fleet.Event{} non handlés + tout autre message.
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
-
-  # === Legacy compat shim (tuple format) — retiré chantier 3 BL-021 ===
-  # finding Vulcan : le canon (events.yaml) + l'émetteur (IPCFilter EventBackend) utilisent
-  # "pod.drift" (point). Ce handler écoutait "pod_drift" (underscore) → escalade drift morte.
-  def handle_info({_atom, %{"event_type" => "pod.drift", "payload" => payload}}, state) do
-    if drift_count(payload) >= @drift_threshold do
-      Cat5Escalator.escalate(:pod_drift, payload)
-    end
-
-    {:noreply, state}
-  end
-
-  def handle_info(
-        {_atom, %{"event_type" => "pipeline.failed", "payload" => payload}},
-        state
-      ) do
-    Cat5Escalator.escalate(:pipeline_failed, payload)
-    {:noreply, state}
-  end
-
-  def handle_info(
-        {_atom, %{"event_type" => "oauth.refresh.failed", "payload" => payload}},
-        state
-      ) do
-    Cat5Escalator.escalate(:oauth_refresh_failed, payload)
-    {:noreply, state}
-  end
-
-  def handle_info(
-        {_atom, %{"event_type" => "audit.verdict", "payload" => payload}},
-        state
-      ) do
-    dispatch_audit_verdict(payload, nil)
-    {:noreply, state}
-  end
-
-  def handle_info({_atom, %{"event_type" => _other}}, state), do: {:noreply, state}
   def handle_info(_msg, state), do: {:noreply, state}
 
   defp dispatch_audit_verdict(payload, correlation_id) do

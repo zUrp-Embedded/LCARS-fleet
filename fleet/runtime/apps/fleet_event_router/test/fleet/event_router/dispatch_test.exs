@@ -31,6 +31,10 @@ defmodule Fleet.EventRouter.DispatchTest do
     on_exit(fn ->
       Application.delete_env(:fleet_event_router, :events_yaml_path)
       Application.delete_env(:fleet_event_router, :test_handler_target)
+      # Reset persistent_term registry pour ne pas leaker la MapSet restrictive
+      # (tmp yaml = 2 entrées) vers les tests d'autres apps qui broadcast en
+      # schema canon strict (BL-021 chantier 3 : assert_authorized! activé).
+      Fleet.EventRouter.Bus.set_authorized_event_types(MapSet.new())
     end)
 
     :ok

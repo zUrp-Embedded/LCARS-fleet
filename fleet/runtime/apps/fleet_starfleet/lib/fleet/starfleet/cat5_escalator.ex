@@ -29,15 +29,6 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   alias Fleet.Starfleet.AuditLog
 
   @doc """
-  Compat shim legacy — délègue à `escalate/3` avec `correlation_id = nil`.
-
-  ⚠️ Retiré chantier 3 BL-021 (post-migration callers DriftMonitor migrés
-  à `escalate/3` strict).
-  """
-  @spec escalate(source :: atom(), payload :: map()) :: :ok
-  def escalate(source, payload), do: escalate(source, payload, nil)
-
-  @doc """
   Déclenche l'escalade Cat 5 pour un `source` donné — DN 13 C2.3-starfleet
   amendement chirurgical.
 
@@ -76,14 +67,6 @@ defmodule Fleet.Starfleet.Cat5Escalator do
 
     # Broadcast schema canon strict %Fleet.Event{source: :starfleet, ...}
     _ = broadcast_canon(source, enriched, correlation_id)
-
-    # Compat shim legacy — retiré chantier 3 BL-021
-    _ =
-      Bus.broadcast(
-        "audit.cat5.#{source}",
-        enriched,
-        ticket_id: payload["ticket_id"]
-      )
 
     _ = coord_backend().handle_escalation(source, enriched, correlation_id)
     :ok
