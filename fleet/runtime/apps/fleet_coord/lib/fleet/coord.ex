@@ -38,8 +38,14 @@ defmodule Fleet.Coord do
   LLM via spawn pod jetable cap-profile dédié).
   """
 
+  # Compat shims legacy (BL-021 chantier 2a retire au chantier 3)
   defdelegate handle_decision(decision), to: Fleet.Coord.Policies
   defdelegate handle_escalation(source, payload), to: Fleet.Coord.Policies
+
+  # DN 9 C2.3 amendement — arités étendues correlation_id explicite
+  defdelegate handle_decision(decision, correlation_id), to: Fleet.Coord.Policies
+  defdelegate handle_escalation(source, payload, correlation_id), to: Fleet.Coord.Policies
+
   defdelegate invoke_soft_gate(stage, outputs, ctx, opts), to: Fleet.Coord.SoftGate
   defdelegate invoke_hook(hook_type, ctx), to: Fleet.Coord.Hook
 end
