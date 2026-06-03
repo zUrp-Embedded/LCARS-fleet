@@ -456,4 +456,77 @@ defmodule Fleet.Spawner.PodTest do
       refute os_alive?(os_pid)
     end
   end
+
+  describe "BL-021 chantier 6 — auth_mode switch" do
+    test "défaut :bind — env contient LCARS_AUTH_MODE=bind, pas de LCARS_ANTHROPIC_AUTH_TOKEN" do
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-auth-bind-#{System.unique_integer([:positive])}"
+
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+
+      assert_receive {:launch_called, _args, env}, 2_000
+      assert env["LCARS_AUTH_MODE"] == "bind"
+      refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
+    end
+
+    test ":token_arg — extrait access_token depuis creds.json + injecte LCARS_ANTHROPIC_AUTH_TOKEN",
+         %{tmp_dir: tmp_dir} do
+      # Setup : faux claudeDir + creds.json avec slot canonique `claudeAiOauth.accessToken`.
+      fake_claude_dir = Path.join(tmp_dir, "fake-claude")
+      File.mkdir_p!(fake_claude_dir)
+
+      File.write!(
+        Path.join(fake_claude_dir, ".credentials.json"),
+        Jason.encode!(%{
+          "claudeAiOauth" => %{
+            "accessToken" => "sk-ant-fake-test-token-XYZ",
+            "expiresAt" => 99_999_999_999_999,
+            "refreshToken" => "rt-fake",
+            "scopes" => ["user:inference", "user:sessions:claude_code"]
+          }
+        })
+      )
+
+      Application.put_env(:fleet_spawner, :claude_dir, fake_claude_dir)
+      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
+
+      on_exit(fn ->
+        Application.delete_env(:fleet_spawner, :claude_dir)
+        Application.delete_env(:fleet_spawner, :auth_mode)
+      end)
+
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-auth-token-#{System.unique_integer([:positive])}"
+
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+
+      assert_receive {:launch_called, _args, env}, 2_000
+      assert env["LCARS_AUTH_MODE"] == "token_arg"
+      assert env["LCARS_ANTHROPIC_AUTH_TOKEN"] == "sk-ant-fake-test-token-XYZ"
+    end
+
+    test ":token_arg + creds.json absent — pod part SANS LCARS_ANTHROPIC_AUTH_TOKEN (log warn)",
+         %{tmp_dir: tmp_dir} do
+      # Pas de creds.json créé → read_oauth_access_token retourne nil → env sans token.
+      missing_dir = Path.join(tmp_dir, "no-creds-here")
+      File.mkdir_p!(missing_dir)
+
+      Application.put_env(:fleet_spawner, :claude_dir, missing_dir)
+      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
+
+      on_exit(fn ->
+        Application.delete_env(:fleet_spawner, :claude_dir)
+        Application.delete_env(:fleet_spawner, :auth_mode)
+      end)
+
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-auth-token-missing-#{System.unique_integer([:positive])}"
+
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+
+      assert_receive {:launch_called, _args, env}, 2_000
+      assert env["LCARS_AUTH_MODE"] == "token_arg"
+      refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
+    end
+  end
 end

@@ -507,11 +507,70 @@ defmodule Fleet.Spawner.Pod do
     Application.get_env(:fleet_spawner, :claude_dir) || "/home/#{human}/.claude"
   end
 
+  # BL-021 chantier 6 — auth mode switch :
+  #   :bind     (défaut)  — bind RW de `<claude_dir>/.credentials.json` via bwrap_launch.sh
+  #                         (mécanique native Anthropic : lockfile POSIX + mtime cross-process sync
+  #                         + refresh atomique). Voie ADR-F historique.
+  #   :token_arg          — extrait l'access_token côté hôte depuis creds.json + injecte via
+  #                         ANTHROPIC_AUTH_TOKEN env var ; aucun bind du claudeDir humain (pod isolé).
+  #                         ATTENTION : désactive le refresh OAuth interne au binaire claude
+  #                         (`isAnthropicAuthEnabled` retourne false avec ANTHROPIC_AUTH_TOKEN posé) —
+  #                         la viabilité dépend de la durée de vie du token (~8h vérifié) vs la durée
+  #                         des pods (one-shot < forever).
+  # Toggle via `config :fleet_spawner, :auth_mode, :bind | :token_arg`. Mode posé aussi dans l'env
+  # comme `LCARS_AUTH_MODE` pour que bwrap_launch.sh sache quoi faire (bind xor setenv token).
+  defp auth_mode do
+    Application.get_env(:fleet_spawner, :auth_mode, :bind)
+  end
+
+  # Lit l'access_token OAuth depuis `<claude_dir>/.credentials.json` (slot canonique `claudeAiOauth`,
+  # cf. inbox/src #0_ref_oauth-token-lifecycle.md §2.2). Retourne `nil` (+ log warn) sur toute erreur
+  # (fichier absent, JSON corrompu, slot absent) pour ne pas crasher le spawn — le pod partira avec
+  # un env sans token, le binaire claude basculera sur le fallback (rang 6 subscription `/login`
+  # interactive si bind aussi présent, sinon 401 et `transition_failed`).
+  defp read_oauth_access_token(claude_dir) do
+    creds_path = Path.join(claude_dir, ".credentials.json")
+
+    with {:ok, raw} <- File.read(creds_path),
+         {:ok, %{"claudeAiOauth" => %{"accessToken" => token}}} when is_binary(token) <-
+           Jason.decode(raw) do
+      token
+    else
+      err ->
+        Logger.warning(
+          "pod auth_mode=:token_arg : read_oauth_access_token failed (#{inspect(err)}) — " <>
+            "path=#{creds_path}, pod will launch without ANTHROPIC_AUTH_TOKEN"
+        )
+
+        nil
+    end
+  end
+
   # Binaire vendor = celui de l'HUMAIN (~/.local/bin/claude résolu), posé en LCARS_VENDOR_BIN.
   # Honore le contrat bwrap_launch.sh:55 « autorité = LCARS_VENDOR_BIN (spawner) » : sans ça, bwrap
   # retombe sur `command -v claude` = PATH du daemon → binaire système périmé (terrain : /usr/local/bin
   # 2.1.114 au lieu du 2.1.159 user, outil Monitor absent). readlink -f ⇒ bwrap_launch dérive
   # VENDOR_SHARE = dirname(dirname(bin)) juste. Absent ⇒ on ne pose rien (fallback bwrap conservé).
+  # BL-021 chantier 6 — branche bwrap_launch.sh sur le mode auth choisi (cf. `auth_mode/0`).
+  # `LCARS_AUTH_MODE` est toujours posé (bwrap_launch lit `${LCARS_AUTH_MODE:-bind}` strict) ;
+  # `LCARS_ANTHROPIC_AUTH_TOKEN` n'est posé qu'en mode `:token_arg` ET si l'extraction du token
+  # depuis creds.json a réussi (sinon le pod part sans token, voir `read_oauth_access_token/1`).
+  defp maybe_put_auth_token(env, human) do
+    mode = auth_mode()
+    env_with_mode = Map.put(env, "LCARS_AUTH_MODE", Atom.to_string(mode))
+
+    case mode do
+      :token_arg ->
+        case read_oauth_access_token(claude_dir_for(human)) do
+          nil -> env_with_mode
+          token -> Map.put(env_with_mode, "LCARS_ANTHROPIC_AUTH_TOKEN", token)
+        end
+
+      _ ->
+        env_with_mode
+    end
+  end
+
   defp maybe_put_vendor_bin(env, human) do
     link = "/home/#{human}/.local/bin/claude"
 
@@ -576,6 +635,7 @@ defmodule Fleet.Spawner.Pod do
       # substrat (cf. journal § reste) — orthogonal et complémentaire à ce qui suit.
       |> Map.put("CLAUDE_DIR", claude_dir_for(human))
       |> maybe_put_vendor_bin(human)
+      |> maybe_put_auth_token(human)
 
     case launch_backend().launch(args, env) do
       {:ok, %{init_message: init_msg, ndjson_log: ndjson_log} = launched} ->

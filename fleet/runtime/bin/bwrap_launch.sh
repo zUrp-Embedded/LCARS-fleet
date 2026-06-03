@@ -27,7 +27,16 @@
 #   LCARS_POD_SESSION_ID          UUID pré-alloué — requis (:? strict, consommé par claude_launch)
 #   LCARS_POD_RESUME              0|1 (1ʳᵉ création / recovery) — défaut 0
 #   LCARS_POD_SESSION_NAME_PREFIX <human>_<role> nom RC lisible — requis (:? strict)
-#   CLAUDE_DIR                    claudeDir du compte humain (bind RW, adr-f) — requis
+#   CLAUDE_DIR                    claudeDir du compte humain — requis (utilisé selon LCARS_AUTH_MODE)
+#   LCARS_AUTH_MODE               bind (défaut, adr-f) | token_arg (BL-021 chantier 6) :
+#                                   - bind     : --bind CLAUDE_DIR pod_dir/.claude (RW, refresh natif
+#                                                Anthropic via lockfile POSIX + mtime sync)
+#                                   - token_arg: pas de bind ; ANTHROPIC_AUTH_TOKEN injecté via env
+#                                                (LCARS_ANTHROPIC_AUTH_TOKEN extrait par le spawner
+#                                                depuis CLAUDE_DIR/.credentials.json). Désactive le
+#                                                refresh natif → viable si pod < ~8h (durée de vie
+#                                                access_token) ou recovery 401 côté Pod GenServer.
+#   LCARS_ANTHROPIC_AUTH_TOKEN    access_token OAuth — requis SSI LCARS_AUTH_MODE=token_arg
 #   LCARS_POD_CWD                 cwd du pod = racine de la branche/repo (monde-invoqué, align Claude
 #                                 Code natif /init) — défaut $POD_DIR (le bootstrap/spawner le pose
 #                                 sur $POD_DIR/<repo> pour un pod-projet).
@@ -80,6 +89,16 @@ SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<h
 
 # cwd = racine de branche (monde-invoqué). Défaut $POD_DIR ; le spawner/bootstrap pose le repo cloné.
 WORKDIR="${LCARS_POD_CWD:-$POD_DIR}"
+
+# BL-021 chantier 6 — switch mode auth (bind RW claudeDir vs token-as-arg ANTHROPIC_AUTH_TOKEN).
+AUTH_MODE="${LCARS_AUTH_MODE:-bind}"
+case "$AUTH_MODE" in
+  bind|token_arg) ;;
+  *) echo "ERR: LCARS_AUTH_MODE='$AUTH_MODE' invalide (attendu: bind | token_arg)" >&2; exit 1 ;;
+esac
+if [[ "$AUTH_MODE" == "token_arg" ]]; then
+  ANTHROPIC_AUTH_TOKEN_VALUE="${LCARS_ANTHROPIC_AUTH_TOKEN:?LCARS_ANTHROPIC_AUTH_TOKEN requis quand LCARS_AUTH_MODE=token_arg (extraction creds.json côté spawner)}"
+fi
 
 # Session tmux (nom INTERNE, distinct du préfixe nom RC claude — P3 panel #13).
 POD_SOCK_DIR="$SOCK_PARENT/$POD_ID"
@@ -144,6 +163,17 @@ set +f
 #   --clearenv : ENV CLOS — rien de l'ambient du spawner ne fuit ; tout est --setenv explicite.
 #   La discipline est dans les MURS (binds = ce qui existe) + l'ENV (ce qui est posé), pas dans le SP.
 # =============================================================
+# BL-021 chantier 6 — branchement bind vs token_arg sur LCARS_AUTH_MODE :
+#   bind     : --bind CLAUDE_DIR pod_dir/.claude (RW), pas d'ANTHROPIC_AUTH_TOKEN injecté.
+#   token_arg: pas de bind claudeDir (pod isolé), --setenv ANTHROPIC_AUTH_TOKEN <token>.
+AUTH_BIND_ARGS=()
+AUTH_ENV_ARGS=()
+if [[ "$AUTH_MODE" == "bind" ]]; then
+  AUTH_BIND_ARGS=(--bind "$CLAUDE_DIR" "$POD_DIR/.claude")
+else
+  AUTH_ENV_ARGS=(--setenv ANTHROPIC_AUTH_TOKEN "$ANTHROPIC_AUTH_TOKEN_VALUE")
+fi
+
 exec "$BWRAP_BIN" \
   --unshare-all --share-net \
   --die-with-parent \
@@ -153,7 +183,7 @@ exec "$BWRAP_BIN" \
   --tmpfs /tmp \
   --dev /dev --proc /proc \
   --bind "$POD_DIR" "$POD_DIR" \
-  --bind "$CLAUDE_DIR" "$POD_DIR/.claude" \
+  ${AUTH_BIND_ARGS[@]+"${AUTH_BIND_ARGS[@]}"} \
   --ro-bind "$GIT_MIRROR" "$GIT_MIRROR" \
   --ro-bind "$VENDOR_BIN" "$POD_VENDOR_BIN" \
   --ro-bind "$VENDOR_SHARE" "$POD_DIR/.local/share/$VENDOR_NAME" \
@@ -166,6 +196,7 @@ exec "$BWRAP_BIN" \
   --setenv LANG "${LANG:-C.UTF-8}" \
   --setenv LCARS_POD_ID "$POD_ID" \
   --setenv LCARS_ROLE "$ROLE" \
+  --setenv LCARS_AUTH_MODE "$AUTH_MODE" \
   --setenv LCARS_POD_SESSION_ID "$SESSION_ID" \
   --setenv LCARS_POD_RESUME "$POD_RESUME" \
   --setenv LCARS_POD_SESSION_NAME_PREFIX "$SESSION_NAME_PREFIX" \
@@ -175,6 +206,7 @@ exec "$BWRAP_BIN" \
   --setenv CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC "1" \
   --setenv CLAUDE_CODE_DISABLE_AUTO_MEMORY "1" \
   --setenv CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "100" \
+  ${AUTH_ENV_ARGS[@]+"${AUTH_ENV_ARGS[@]}"} \
   -- /bin/sh -c '
        tmux_bin=$1; sock=$2; name=$3; shift 3
        "$tmux_bin" -S "$sock" new-session -d -s "$name" "$@"
