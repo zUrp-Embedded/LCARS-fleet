@@ -672,9 +672,6 @@ defmodule Fleet.Spawner.Pod do
         #
         # Path LauncherPortBackend : pas applicable (brief.md sur disk lu par claude_launch).
         # Path Stub (tests) : no-op (pas de tmux_session retourné).
-        #
-        # PushDispatcher + ChannelHTTP (U2) restent en place pour activation future
-        # quand tengu_harbor sera dispo (zéro code à toucher côté pod.ex à ce moment).
         inject_brief_to_tmux_pod(new_state)
 
         {:noreply, new_state, {:continue, :monitor}}
@@ -1135,28 +1132,16 @@ defmodule Fleet.Spawner.Pod do
   # TESTS : fixture file-backed. Même mécanisme, spec différente.
   defp mcp_server_spec, do: Application.get_env(:fleet_spawner, :mcp_server_spec)
 
-  # U4 — env vars push channel à propager au pod (bridge.py démarré par claude REPL).
-  # Le bridge.py active sa thread `channel_poll_loop` SSI les deux vars sont présentes ;
-  # absentes → mode legacy tools-only (pas de push channel). `mcp_channel_url/0` retourne
-  # nil si non configuré côté daemon → no-op silencieux.
+  # Env vars MCP à propager au pod (consommés par bridge.py côté pod). `LCARS_POD_ID`
+  # est TOUJOURS posé : nécessaire pour que bridge.py injecte `_lcars_pod_id` dans
+  # chaque tool call MCP (corrélation côté central PodTools, filtrage TaskQueue.next_for).
+  # Sans ça le pod est anonyme — get_task ne retournerait QUE les untargeted (rate les
+  # tasks ciblées via wake_pod).
+  #
+  # BL-021 chantier 7 — purge ADR-G C5.1 : `LCARS_FLEET_MCP_CHANNEL_URL` retiré
+  # (push channel ChannelHTTP supprimé, drive via tools pull `get_task`).
   defp mcp_channel_env(pod_id) when is_binary(pod_id) do
-    # LCARS_POD_ID est TOUJOURS propagé au pod : nécessaire pour le
-    # bridge.py qui injecte `_lcars_pod_id` dans chaque tool call MCP
-    # (corrélation côté central PodTools, filtrage TaskQueue.next_for).
-    # Sans, le pod est anonyme — get_task ne retournerait QUE les
-    # untargeted (rate les tasks ciblées via wake_pod).
-    base = %{"LCARS_POD_ID" => pod_id}
-
-    # LCARS_FLEET_MCP_CHANNEL_URL : optionnel (push channel U2). Activé
-    # seulement si configuré côté daemon.
-    case mcp_channel_url() do
-      nil -> base
-      url when is_binary(url) -> Map.put(base, "LCARS_FLEET_MCP_CHANNEL_URL", url)
-    end
-  end
-
-  defp mcp_channel_url do
-    Application.get_env(:fleet_spawner, :mcp_channel_url)
+    %{"LCARS_POD_ID" => pod_id}
   end
 
   # Kick « yop » au claude REPL via PodTmux.send_keys (sock PAR-POD). Déclenche le pull du mandat par
@@ -1169,10 +1154,6 @@ defmodule Fleet.Spawner.Pod do
   # tôt sont perdus. 4s = empiriquement suffisant sur cette machine, à calibrer.
   # Le délai est non-bloquant (Process.send_after + handle_info), le Pod GenServer
   # passe à :monitor entretemps.
-  #
-  # PushDispatcher / ChannelHTTP / Bus event `pod.brief.push` restent disponibles
-  # (U2) pour activation future quand le flag `tengu_harbor` channels MCP sera
-  # supporté côté Anthropic. Côté pod.ex : changement = swap de cet appel.
   @brief_inject_delay_ms 4_000
 
   defp inject_brief_to_tmux_pod(%{tmux_session: nil}), do: :ok

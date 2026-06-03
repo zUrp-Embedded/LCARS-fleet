@@ -93,25 +93,6 @@ if config_env() != :test do
     config :fleet_spawner, :launch_backend, Fleet.Spawner.LaunchBackend.TmuxBackend
   end
 
-  # LCARS_FLEET_MCP_CHANNEL_URL : endpoint HTTP custom où le bridge.py long-poll
-  # les notifications push channel (forward stdout → claude REPL). Sans cette var,
-  # pod.ex ne propage pas LCARS_FLEET_MCP_CHANNEL_URL au pod → bridge.py reste en
-  # mode tools-only legacy. Avec : push brief activé end-to-end.
-  if url = System.get_env("LCARS_FLEET_MCP_CHANNEL_URL") do
-    config :fleet_spawner, mcp_channel_url: url
-  end
-
-  # ============================================================
-  # fleet_mcp — port HTTP push channel (U2)
-  # ============================================================
-  # Démarre le listener ChannelHTTP (Plug.Cowboy) sur ce port quand set. Le
-  # pod (via bridge.py + LCARS_FLEET_MCP_CHANNEL_URL) long-poll
-  # http://host:<port>/channels/<pod_id>/poll. Côté fleet, fleet_pilot ou
-  # Fleet.Spawner.Pod broadcast via Bus → Fleet.MCP.PushDispatcher enqueue.
-  if port = System.get_env("LCARS_FLEET_MCP_CHANNEL_HTTP_PORT") do
-    config :fleet_mcp, channel_http_port: String.to_integer(port)
-  end
-
   # ============================================================
   # fleet_mcp — port HTTP pod-facing (PodTools transport :http +
   # TaskQueue centrale, R-CORE.comm Ring 4)

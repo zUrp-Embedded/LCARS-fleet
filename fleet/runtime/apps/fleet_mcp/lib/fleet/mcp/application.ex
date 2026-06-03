@@ -5,13 +5,18 @@ defmodule Fleet.MCP.Application do
   DN : `ring4/fleet_mcp.md` + `ring4/mcp-channels-substrate.md`.
 
   Au boot (post-PoC ExMCP validé) — délégué à `Fleet.MCP.Supervisor` :
-    - `Fleet.MCP.Server` (GenServer : registry channels + lifecycle ;
-      registration/list bas-débit sérialisés — PAS un goulot ; broadcast =
-      Phoenix.PubSub fan-out, JAMAIS via le GenServer — anti-goulot DN)
-    - `Fleet.MCP.Bridge` (GenServer : subscribe Phoenix.PubSub bus interne ↔
-      re-broadcast MCP channels, config-driven `mcp-bridge.yaml`)
-    - `Fleet.MCP.Channel` / `FleetControl` / `FleetForge` / `Schema` = behaviour +
-      fonctions pures (zéro process — Iron Law)
+    - `Fleet.MCP.Server` (GenServer : registry + lifecycle bas-débit sérialisés
+      — PAS un goulot)
+    - `Fleet.MCP.Bridge` (GenServer : subscribe Phoenix.PubSub bus interne,
+      mapping YAML `mcp-bridge.yaml`)
+    - `Fleet.MCP.PodTools` (HTTP transport pour `get_task`/`submit_result`,
+      démarré SSI `:pod_facing_port` configuré)
+    - `Fleet.MCP.Schema` = fonctions pures (zéro process — Iron Law)
+
+  BL-021 chantier 7 — purge ADR-G C5.1 : retrait `Channel`, `ChannelHTTP`,
+  `Channels.FleetControl/FleetForge`, `PushDispatcher`. PoC Channel Anthropic
+  KO 4 itérations 2026-05-27 → drive ré-implémenté via tools MCP pull
+  (`get_task`/`submit_result`) + kick send-keys.
 
   Stratégie `:one_for_one`, `max_restarts: 3`, `max_seconds: 60` (DN fleet_mcp.md
   §Lifecycle) — portée par `Fleet.MCP.Supervisor`.
