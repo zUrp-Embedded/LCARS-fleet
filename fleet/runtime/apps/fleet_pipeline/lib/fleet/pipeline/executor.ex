@@ -230,11 +230,7 @@ defmodule Fleet.Pipeline.Executor do
           "fleet_pipeline gate fail: pipeline=#{inspect(state.pipeline_id)} stage=#{stage} reason=#{reason}"
         )
 
-        Bus.broadcast(
-          "pipeline.failed",
-          %{"pipeline_id" => state.pipeline_id, "stage" => stage, "reason" => reason},
-          ticket_id: state.mandate_context[:ticket_id]
-        )
+        broadcast_pipeline_failed(state, stage, reason)
 
         {:stop, :gate_fail, state}
 
@@ -257,11 +253,7 @@ defmodule Fleet.Pipeline.Executor do
         do_run_stage(next, state)
 
       [] ->
-        Bus.broadcast(
-          "pipeline.completed",
-          %{"pipeline_id" => state.pipeline_id, "outputs" => state.outputs},
-          ticket_id: state.mandate_context[:ticket_id]
-        )
+        broadcast_pipeline_completed(state)
 
         {:stop, :normal, state}
     end
@@ -280,14 +272,10 @@ defmodule Fleet.Pipeline.Executor do
         run_stage_backend(stage_name, stage_spec, state)
 
       {:error, reason} ->
-        Bus.broadcast(
-          "pipeline.failed",
-          %{
-            "pipeline_id" => state.pipeline_id,
-            "stage" => stage_name,
-            "reason" => "workspace provision fail: #{inspect(reason)}"
-          },
-          ticket_id: state.mandate_context[:ticket_id]
+        broadcast_pipeline_failed(
+          state,
+          stage_name,
+          "workspace provision fail: #{inspect(reason)}"
         )
 
         {:stop, :provision_fail, state}
@@ -312,19 +300,71 @@ defmodule Fleet.Pipeline.Executor do
         {:noreply, new_state}
 
       {:error, reason} ->
-        Bus.broadcast(
-          "pipeline.failed",
-          %{
-            "pipeline_id" => state.pipeline_id,
-            "stage" => stage_name,
-            "reason" => "spawn fail: #{inspect(reason)}"
-          },
-          ticket_id: state.mandate_context[:ticket_id]
-        )
+        broadcast_pipeline_failed(state, stage_name, "spawn fail: #{inspect(reason)}")
 
         {:stop, :spawn_fail, state}
     end
   end
+
+  # ============================================================
+  # Broadcasts pipeline lifecycle — DN 10 C2.3-pipeline amendement
+  # ============================================================
+  #
+  # Dual stack pendant migration BL-021 :
+  # - Schema canon strict %Fleet.Event{source: :pipeline, type, correlation_id, ...}
+  #   via Bus.broadcast/2 (DN 11 C3.1+C3.2)
+  # - Legacy {atom, %{event_type, payload, ...}} via Bus.broadcast/3 préservé
+  #   pour ne pas casser subscribers existants — retiré chantier 3 BL-021.
+
+  defp broadcast_pipeline_failed(state, stage, reason) do
+    pipeline_event(:"pipeline.failed", state, %{
+      "pipeline_id" => state.pipeline_id,
+      "stage" => stage,
+      "reason" => reason
+    })
+
+    Bus.broadcast(
+      "pipeline.failed",
+      %{"pipeline_id" => state.pipeline_id, "stage" => stage, "reason" => reason},
+      ticket_id: state.mandate_context[:ticket_id]
+    )
+  end
+
+  defp broadcast_pipeline_completed(state) do
+    pipeline_event(:"pipeline.completed", state, %{
+      "pipeline_id" => state.pipeline_id,
+      "outputs" => state.outputs
+    })
+
+    Bus.broadcast(
+      "pipeline.completed",
+      %{"pipeline_id" => state.pipeline_id, "outputs" => state.outputs},
+      ticket_id: state.mandate_context[:ticket_id]
+    )
+  end
+
+  defp pipeline_event(type, state, payload) do
+    event = %Fleet.Event{
+      source: :pipeline,
+      type: type,
+      timestamp: DateTime.utc_now(),
+      correlation_id: extract_correlation_id(state.mandate_context),
+      payload: payload
+    }
+
+    Bus.broadcast("fleet.events", event)
+  rescue
+    # Boot order ou test sans Dispatch — registry pas peuplé. Silencieux.
+    _e in Fleet.Event.UnregisteredError -> :ok
+    # Source :pipeline pas dans enum closed list — pour l'instant pas dans
+    # Fleet.Event canonical_sources(), donc on tolère un FunctionClauseError
+    # éventuel sur la struct creation. À ajouter dans Fleet.Event chantier 3.
+    _e in [ArgumentError, FunctionClauseError] -> :ok
+  end
+
+  defp extract_correlation_id(%{correlation_id: cid}) when is_binary(cid), do: cid
+  defp extract_correlation_id(%{"correlation_id" => cid}) when is_binary(cid), do: cid
+  defp extract_correlation_id(_), do: nil
 
   # ============================================================
   # post_extract.git (face 2 décision archi git, 2026-05-24)

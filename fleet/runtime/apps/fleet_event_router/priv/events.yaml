@@ -62,3 +62,14 @@ events:
     - Fleet.Starfleet.EscalateHandler
   coord.action_dispatched:
     - Fleet.API.WebSocketHandler
+
+  # === fleet_pipeline (BL-021 chantier 2b — DN 10 C2.3-pipeline) ===
+  # Émis par Fleet.Pipeline.Executor au schema canon %Fleet.Event{source: :pipeline}.
+  # Subscribers : Fleet.Starfleet.PipelineMonitor (PROVEN) + dashboard.
+  # pipeline.stage_completed : NOT listé — c'est un event PubSub interne consommé
+  # par Fleet.Pipeline.Executor.handle_info directement via Bus.subscribe, pas
+  # dispatch fan-out via Dispatch table.
+  pipeline.failed:
+    - Fleet.Starfleet.PipelineMonitor
+  pipeline.completed:
+    - Fleet.Starfleet.PipelineMonitor
