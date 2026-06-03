@@ -45,7 +45,8 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
       assert bcast_payload["chain"] == ["starfleet.cat5.pod_drift"]
       assert bcast_payload["pod_id"] == "p1"
 
-      [{:escalation, :pod_drift, ctx}] = Application.get_env(:fleet_starfleet, :coord_invocations)
+      [{:escalation, :pod_drift, ctx, _cid}] =
+        Application.get_env(:fleet_starfleet, :coord_invocations)
 
       assert ctx["chain"] == ["starfleet.cat5.pod_drift"]
 

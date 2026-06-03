@@ -73,3 +73,13 @@ events:
     - Fleet.Starfleet.PipelineMonitor
   pipeline.completed:
     - Fleet.Starfleet.PipelineMonitor
+
+  # === fleet_starfleet broadcasts Cat 5 (BL-021 chantier 2c — DN 13 C2.3-starfleet) ===
+  # Émis par Fleet.Starfleet.Cat5Escalator au schema canon %Fleet.Event{source: :starfleet}.
+  # Subscribers : Fleet.API.WebSocketHandler dashboard alert + Fleet.Starfleet.AuditConsumer.
+  starfleet.audit_cat5_pod_drift:
+    - Fleet.Starfleet.AuditConsumer
+  starfleet.audit_cat5_pipeline_failed:
+    - Fleet.Starfleet.AuditConsumer
+  starfleet.audit_cat5_oauth_refresh_failed:
+    - Fleet.Starfleet.AuditConsumer

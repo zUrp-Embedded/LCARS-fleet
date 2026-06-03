@@ -43,6 +43,51 @@ defmodule Fleet.Starfleet.DriftMonitor do
   end
 
   @impl GenServer
+  # DN 13 C2.3-starfleet — pattern match schema canon %Fleet.Event{} strict
+  # (DN 11 C3.1+C3.2). Dual stack avec format legacy {atom, %{event_type, payload}}
+  # pendant migration BL-021 chantier 2c — retiré chantier 3.
+
+  # === Schema canon strict (%Fleet.Event{}) ===
+
+  def handle_info(
+        %Fleet.Event{type: :"pod.drift", payload: payload, correlation_id: cid},
+        state
+      ) do
+    if drift_count(payload) >= @drift_threshold do
+      Cat5Escalator.escalate(:pod_drift, payload, cid)
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info(
+        %Fleet.Event{type: :"pipeline.failed", payload: payload, correlation_id: cid},
+        state
+      ) do
+    Cat5Escalator.escalate(:pipeline_failed, payload, cid)
+    {:noreply, state}
+  end
+
+  def handle_info(
+        %Fleet.Event{type: :"oauth.refresh.failed", payload: payload, correlation_id: cid},
+        state
+      ) do
+    Cat5Escalator.escalate(:oauth_refresh_failed, payload, cid)
+    {:noreply, state}
+  end
+
+  def handle_info(
+        %Fleet.Event{type: :"audit.verdict", payload: payload, correlation_id: cid},
+        state
+      ) do
+    dispatch_audit_verdict(payload, cid)
+    {:noreply, state}
+  end
+
+  # Ignore les autres types de %Fleet.Event{} non handlés.
+  def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
+
+  # === Legacy compat shim (tuple format) — retiré chantier 3 BL-021 ===
   # finding Vulcan : le canon (events.yaml) + l'émetteur (IPCFilter EventBackend) utilisent
   # "pod.drift" (point). Ce handler écoutait "pod_drift" (underscore) → escalade drift morte.
   def handle_info({_atom, %{"event_type" => "pod.drift", "payload" => payload}}, state) do
@@ -73,26 +118,30 @@ defmodule Fleet.Starfleet.DriftMonitor do
         {_atom, %{"event_type" => "audit.verdict", "payload" => payload}},
         state
       ) do
+    dispatch_audit_verdict(payload, nil)
+    {:noreply, state}
+  end
+
+  def handle_info({_atom, %{"event_type" => _other}}, state), do: {:noreply, state}
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  defp dispatch_audit_verdict(payload, correlation_id) do
     case Gatekeeper.validate(payload["decision_json"] || "") do
       {:ok, decision} ->
-        _ = coord_backend().handle_decision(decision)
+        _ = coord_backend().handle_decision(decision, correlation_id)
 
       {:error, reason} ->
         _ =
           AuditLog.write(%{
             "source" => "invalid_decision",
             "reason" => reason,
-            "raw" => payload
+            "raw" => payload,
+            "correlation_id" => correlation_id
           })
 
         Logger.warning("starfleet drift_monitor: invalid audit.verdict — #{reason}")
     end
-
-    {:noreply, state}
   end
-
-  def handle_info({_atom, %{"event_type" => _other}}, state), do: {:noreply, state}
-  def handle_info(_msg, state), do: {:noreply, state}
 
   defp drift_count(payload) do
     case Map.get(payload, "drift_count") do

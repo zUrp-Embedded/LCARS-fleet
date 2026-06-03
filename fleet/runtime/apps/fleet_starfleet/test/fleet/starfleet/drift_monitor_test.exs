@@ -62,7 +62,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
                      500
 
       assert Enum.any?(coord_invocations(), fn
-               {:escalation, :pod_drift, _} -> true
+               {:escalation, :pod_drift, _, _} -> true
                _ -> false
              end)
     end
@@ -73,7 +73,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
       wait_drift_monitor_drain()
 
       refute Enum.any?(coord_invocations(), fn
-               {:escalation, :pod_drift, _} -> true
+               {:escalation, :pod_drift, _, _} -> true
                _ -> false
              end)
     end
@@ -98,7 +98,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
                      500
 
       assert Enum.any?(coord_invocations(), fn
-               {:escalation, :pipeline_failed, _} -> true
+               {:escalation, :pipeline_failed, _, _} -> true
                _ -> false
              end)
     end
@@ -123,7 +123,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
                      500
 
       assert Enum.any?(coord_invocations(), fn
-               {:escalation, :oauth_refresh_failed, _} -> true
+               {:escalation, :oauth_refresh_failed, _, _} -> true
                _ -> false
              end)
     end
@@ -138,7 +138,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
       wait_drift_monitor_drain()
 
       assert Enum.any?(coord_invocations(), fn
-               {:decision, %{decision: "halt", reason: "gatekeeper-said"}} -> true
+               {:decision, %{decision: "halt", reason: "gatekeeper-said"}, _} -> true
                _ -> false
              end)
     end
@@ -153,7 +153,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
       assert log_content =~ "invalid_decision"
 
       refute Enum.any?(coord_invocations(), fn
-               {:decision, _} -> true
+               {:decision, _, _} -> true
                _ -> false
              end)
     end
