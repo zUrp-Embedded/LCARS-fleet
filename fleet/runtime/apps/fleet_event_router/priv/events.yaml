@@ -83,3 +83,21 @@ events:
     - Fleet.Starfleet.AuditConsumer
   starfleet.audit_cat5_oauth_refresh_failed:
     - Fleet.Starfleet.AuditConsumer
+
+  # === fleet_task_queue lifecycle (BL-021 chantier 2d — DN orchestration/task-queue §E) ===
+  # Émis par Fleet.TaskQueue.Server au schema canon %Fleet.Event{source: :task_queue,
+  # correlation_id = task.id}. Le serveur broadcast directement via Phoenix.PubSub sur
+  # state.topic (paramétrable pour isolation async tests : "fleet.events.test.<id>") —
+  # en production, state.topic = "fleet.events" et Dispatch route vers les handlers ci-dessous.
+  task_enqueued:
+    - Fleet.Starfleet.AuditConsumer
+  task_assigned:
+    - Fleet.Starfleet.AuditConsumer
+  task_completed:
+    - Fleet.Starfleet.AuditConsumer
+  task_cleared:
+    - Fleet.Starfleet.AuditConsumer
+  task_failed:
+    - Fleet.Starfleet.AuditConsumer
+  state_corrupt:
+    - Fleet.Starfleet.AuditConsumer
