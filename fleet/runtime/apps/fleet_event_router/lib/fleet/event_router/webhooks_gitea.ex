@@ -49,7 +49,31 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         event_type = "gitea." <> (body["action"] || gitea_event_header(conn) || "unknown")
         ticket_id = extract_ticket(body)
 
-        Fleet.EventRouter.Bus.broadcast(event_type, body, ticket_id: ticket_id)
+        # BL-021 chantier 9 (B) — schema canon strict %Fleet.Event{source: :event_router}.
+        try do
+          type_atom = String.to_existing_atom(event_type)
+
+          payload = Map.put(body, "ticket_id", ticket_id)
+
+          event = %Fleet.Event{
+            source: :event_router,
+            type: type_atom,
+            timestamp: DateTime.utc_now(),
+            pod_id: nil,
+            correlation_id: nil,
+            payload: payload
+          }
+
+          _ = Fleet.EventRouter.Bus.broadcast("fleet.events", event)
+        rescue
+          ArgumentError ->
+            Logger.warning(
+              "fleet_event_router webhook gitea unknown event type #{inspect(event_type)} — skip"
+            )
+
+          _e in Fleet.Event.UnregisteredError ->
+            :ok
+        end
 
         send_resp(conn, 200, "ok")
 

@@ -38,10 +38,12 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert conn.status == 200
       assert conn.resp_body == "ok"
 
-      assert_receive {:"gitea.opened", event}, 500
-      assert event["event_type"] == "gitea.opened"
-      assert event["ticket_id"] == "fleet/lcars#42"
-      assert event["payload"]["action"] == "opened"
+      assert_receive %Fleet.Event{
+                       source: :event_router,
+                       type: :"gitea.opened",
+                       payload: %{"action" => "opened", "ticket_id" => "fleet/lcars#42"}
+                     },
+                     500
     end
 
     test "M20 : sans action, event_type via header X-Gitea-Event (pas défaut 'push')", %{
@@ -55,7 +57,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
         |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 200
-      assert_receive {_atom, %{"event_type" => "gitea.push"}}, 500
+      assert_receive %Fleet.Event{source: :event_router, type: :"gitea.push"}, 500
     end
 
     test "M20 : sans action ni header → gitea.unknown (pas mislabel 'push')", %{secret: secret} do
@@ -63,7 +65,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 200
-      assert_receive {_atom, %{"event_type" => "gitea.unknown"}}, 500
+      assert_receive %Fleet.Event{source: :event_router, type: :"gitea.unknown"}, 500
     end
 
     test "M21 : ticket extrait d'une pull request (pas seulement issue)", %{secret: secret} do
@@ -72,7 +74,11 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
 
       assert conn.status == 200
 
-      assert_receive {_atom, %{"event_type" => "gitea.opened", "ticket_id" => "fleet/lcars#99"}},
+      assert_receive %Fleet.Event{
+                       source: :event_router,
+                       type: :"gitea.opened",
+                       payload: %{"ticket_id" => "fleet/lcars#99"}
+                     },
                      500
     end
 

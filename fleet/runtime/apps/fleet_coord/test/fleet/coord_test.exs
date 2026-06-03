@@ -25,16 +25,26 @@ defmodule Fleet.CoordTest do
   end
 
   describe "delegator API" do
-    test "handle_decision/1 délégué à Policies" do
+    test "handle_decision/2 délégué à Policies" do
       decision = %{decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []}
 
-      assert :ok = Coord.handle_decision(decision)
-      assert_receive {_atom, %{"event_type" => "coord.notify.dashboard"}}, 500
+      assert :ok = Coord.handle_decision(decision, nil)
+
+      assert_receive %Fleet.Event{
+                       source: :coord,
+                       type: :"coord.notification_routed"
+                     },
+                     500
     end
 
-    test "handle_escalation/2 délégué à Policies" do
-      assert :ok = Coord.handle_escalation(:pod_drift, %{"pod_id" => "p1"})
-      assert_receive {_atom, %{"event_type" => "coord.escalate.human"}}, 500
+    test "handle_escalation/3 délégué à Policies" do
+      assert :ok = Coord.handle_escalation(:pod_drift, %{"pod_id" => "p1"}, nil)
+
+      assert_receive %Fleet.Event{
+                       source: :coord,
+                       type: :"coord.escalation_triggered"
+                     },
+                     500
     end
 
     test "invoke_soft_gate/4 délégué à SoftGate" do

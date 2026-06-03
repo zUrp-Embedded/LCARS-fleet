@@ -38,17 +38,34 @@ defmodule Fleet.Spawner.PublishConsumer do
   end
 
   @impl true
-  def handle_info({:"admin.spawn.request", event}, state) when is_map(event) do
-    # Bulletproof D2 : consumer ne crash JAMAIS sur input (load
-    # peut raise selon contexte umbrella/standalone, schema invalide,
-    # etc.). Toute exception → log + count, GenServer reste alive.
+  # BL-021 chantier 9 (B) — schema canon strict.
+  def handle_info(
+        %Fleet.Event{source: :api, type: :"admin.spawn.request", payload: payload},
+        state
+      )
+      when is_map(payload) do
     try do
-      handle_spawn_request(event, state)
+      handle_spawn_request(payload, payload, state)
     rescue
       e ->
         Logger.warning(
-          "PublishConsumer: handle_spawn_request rescue (non-fatal) — " <>
-            "#{Exception.message(e)}"
+          "PublishConsumer: handle_spawn_request rescue (non-fatal) — #{Exception.message(e)}"
+        )
+    end
+
+    {:noreply, %{state | count: state.count + 1}}
+  end
+
+  # Legacy tuple format (retiré post BL-021 chantier 9 — tests + producteurs migrés).
+  def handle_info({:"admin.spawn.request", event}, state) when is_map(event) do
+    payload = Map.get(event, "payload", %{})
+
+    try do
+      handle_spawn_request(payload, event, state)
+    rescue
+      e ->
+        Logger.warning(
+          "PublishConsumer: handle_spawn_request rescue (non-fatal) — #{Exception.message(e)}"
         )
     end
 
@@ -56,13 +73,20 @@ defmodule Fleet.Spawner.PublishConsumer do
   end
 
   # autres events broadcasts sur fleet.events → ignore
+  def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info({_other, _event}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
-  defp handle_spawn_request(event, state) do
-    payload = Map.get(event, "payload", %{})
+  # `payload` = map applicative ; `envelope` = struct/map qui peut porter `ticket_id`
+  # à la racine (cas legacy tuple — la struct canon le porte dans le payload aussi).
+  defp handle_spawn_request(payload, envelope, state) do
     name = Map.get(payload, "cap_profile_name") || Map.get(payload, "role")
-    ticket_id = Map.get(event, "ticket_id") || Map.get(payload, "ticket_id") || ""
+
+    ticket_id =
+      Map.get(payload, "ticket_id") ||
+        (is_map(envelope) and Map.get(envelope, "ticket_id")) ||
+        ""
+
     opts = Map.get(payload, "opts", []) |> to_keyword()
 
     cond do

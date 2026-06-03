@@ -73,6 +73,11 @@ events:
     - Fleet.Starfleet.PipelineMonitor
   pipeline.completed:
     - Fleet.Starfleet.PipelineMonitor
+  # BL-021 chantier 9 (B) — post_extract.git events migrés au schema canon.
+  git.published:
+    - Fleet.Starfleet.AuditConsumer
+  git.publish_failed:
+    - Fleet.Starfleet.AuditConsumer
 
   # === fleet_starfleet broadcasts Cat 5 (BL-021 chantier 2c — DN 13 C2.3-starfleet) ===
   # Émis par Fleet.Starfleet.Cat5Escalator au schema canon %Fleet.Event{source: :starfleet}.

@@ -106,36 +106,47 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   defp emit_complete(apps, pods) do
     payload = %{
       "started_apps" => Enum.map(apps, &Atom.to_string/1),
-      "permanent_pods" => length(pods),
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+      "permanent_pods" => length(pods)
     }
 
     Logger.info("BootOrchestrator: fleet.boot_complete pods=#{length(pods)}")
-    Bus.broadcast("fleet.boot_complete", payload, [])
+    emit_canon(:"fleet.boot_complete", payload)
   end
 
   defp emit_partial(apps, pods, failed) do
     payload = %{
       "started_apps" => Enum.map(apps, &Atom.to_string/1),
       "permanent_pods" => length(pods),
-      "failed_pods" => Enum.map(failed, &inspect/1),
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+      "failed_pods" => Enum.map(failed, &inspect/1)
     }
 
     Logger.warning(
       "BootOrchestrator: fleet.boot_partial pods=#{length(pods)} failed=#{length(failed)}"
     )
 
-    Bus.broadcast("fleet.boot_partial", payload, [])
+    emit_canon(:"fleet.boot_partial", payload)
   end
 
   defp emit_failed(reason) do
-    payload = %{
-      "reason" => inspect(reason),
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+    payload = %{"reason" => inspect(reason)}
+    Logger.error("BootOrchestrator: fleet.boot_failed reason=#{inspect(reason)}")
+    emit_canon(:"fleet.boot_failed", payload)
+  end
+
+  # BL-021 chantier 9 (B) — broadcast schema canon %Fleet.Event{source: :starfleet}.
+  defp emit_canon(type, payload) do
+    event = %Fleet.Event{
+      source: :starfleet,
+      type: type,
+      timestamp: DateTime.utc_now(),
+      pod_id: nil,
+      correlation_id: nil,
+      payload: payload
     }
 
-    Logger.error("BootOrchestrator: fleet.boot_failed reason=#{inspect(reason)}")
-    Bus.broadcast("fleet.boot_failed", payload, [])
+    Bus.broadcast("fleet.events", event)
+  rescue
+    _e in Fleet.Event.UnregisteredError -> :ok
+    _e in [ArgumentError, FunctionClauseError] -> :ok
   end
 end

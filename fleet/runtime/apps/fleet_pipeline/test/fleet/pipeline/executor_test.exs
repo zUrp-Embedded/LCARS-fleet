@@ -70,11 +70,11 @@ defmodule Fleet.Pipeline.ExecutorTest do
 
     assert is_binary(pipeline_id)
 
-    assert_receive {_atom,
-                    %{
-                      "event_type" => "pipeline.completed",
-                      "payload" => %{"pipeline_id" => ^pipeline_id} = payload
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.completed",
+                     payload: %{"pipeline_id" => ^pipeline_id} = payload
+                   },
                    2_000
 
     assert payload["outputs"]["stage_a"] == %{"a_out" => 1}
@@ -94,11 +94,11 @@ defmodule Fleet.Pipeline.ExecutorTest do
 
     {:ok, pipeline_id} = Pipeline.start_pipeline("test_pipeline", %{ticket_id: "test#2"})
 
-    assert_receive {_atom,
-                    %{
-                      "event_type" => "pipeline.failed",
-                      "payload" => %{"pipeline_id" => ^pipeline_id} = payload
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.failed",
+                     payload: %{"pipeline_id" => ^pipeline_id} = payload
+                   },
                    2_000
 
     assert payload["reason"] =~ "spawn fail"

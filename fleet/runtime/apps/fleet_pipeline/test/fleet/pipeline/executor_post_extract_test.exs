@@ -131,16 +131,16 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
       }
     })
 
-    assert_receive {_atom,
-                    %{
-                      "event_type" => "git.published",
-                      "payload" => %{
-                        "pipeline_id" => ^pipeline_id,
-                        "stage" => "publish",
-                        "commit_sha" => <<_::binary-size(40)>>,
-                        "pushed?" => false
-                      }
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"git.published",
+                     payload: %{
+                       "pipeline_id" => ^pipeline_id,
+                       "stage" => "publish",
+                       "commit_sha" => <<_::binary-size(40)>>,
+                       "pushed?" => false
+                     }
+                   },
                    2_000
 
     # Le fichier livré est bien commit dans le workspace.
@@ -157,7 +157,7 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
     assert String.trim(msg) == "feat(publish): worker payload"
 
     # Le pipeline avance malgré tout (post_extract est best-effort).
-    assert_receive {_a, %{"event_type" => "pipeline.completed"}}, 2_000
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000
   end
 
   # ============================================================
@@ -175,15 +175,15 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
 
     {:ok, pipeline_id} = Pipeline.start_pipeline("p2", %{ticket_id: "p2#1"})
 
-    assert_receive {_atom,
-                    %{
-                      "event_type" => "pipeline.failed",
-                      "payload" => %{
-                        "pipeline_id" => ^pipeline_id,
-                        "stage" => "publish",
-                        "reason" => reason
-                      }
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.failed",
+                     payload: %{
+                       "pipeline_id" => ^pipeline_id,
+                       "stage" => "publish",
+                       "reason" => reason
+                     }
+                   },
                    3_000
 
     assert String.contains?(reason, "workspace provision fail")
@@ -218,16 +218,16 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
       "result" => %{"answer" => "ok"}
     })
 
-    assert_receive {_atom,
-                    %{
-                      "event_type" => "git.publish_failed",
-                      "payload" => %{"reason" => reason}
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"git.publish_failed",
+                     payload: %{"reason" => reason}
+                   },
                    2_000
 
     assert String.contains?(reason, ":no_files_in_payload")
 
-    assert_receive {_a, %{"event_type" => "pipeline.completed"}}, 2_000
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000
   end
 
   # ============================================================
@@ -263,18 +263,18 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
       }
     })
 
-    assert_receive {_atom,
-                    %{
-                      "event_type" => "git.publish_failed",
-                      "payload" => %{"reason" => reason}
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"git.publish_failed",
+                     payload: %{"reason" => reason}
+                   },
                    2_000
 
     assert String.contains?(reason, ":path_traversal")
     # Aucun fichier écrit hors workspace.
     refute File.exists?(Path.join([ws, "..", "..", "escaped.md"]))
 
-    assert_receive {_a, %{"event_type" => "pipeline.completed"}}, 2_000
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000
   end
 
   test "payload multi-fichiers AVEC un path traversal → AUCUN fichier écrit (pré-validation)",
@@ -307,14 +307,14 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
       }
     })
 
-    assert_receive {_atom, %{"event_type" => "git.publish_failed"}}, 2_000
+    assert_receive %Fleet.Event{source: :pipeline, type: :"git.publish_failed"}, 2_000
 
     # Atomicité (#4) : validation préalable refuse tout → aucun fichier écrit,
     # y compris A.md qui passerait isolément.
     refute File.exists?(Path.join(ws, "ok/A.md"))
     refute File.exists?(Path.join(ws, "ok/B.md"))
 
-    assert_receive {_a, %{"event_type" => "pipeline.completed"}}, 2_000
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000
   end
 
   # ============================================================
@@ -336,9 +336,9 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
       "result" => %{"answer" => "x"}
     })
 
-    assert_receive {_a, %{"event_type" => "pipeline.completed"}}, 2_000
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000
 
-    refute_receive {_, %{"event_type" => "git.published"}}, 200
-    refute_receive {_, %{"event_type" => "git.publish_failed"}}, 200
+    refute_receive %Fleet.Event{source: :pipeline, type: :"git.published"}, 200
+    refute_receive %Fleet.Event{source: :pipeline, type: :"git.publish_failed"}, 200
   end
 end

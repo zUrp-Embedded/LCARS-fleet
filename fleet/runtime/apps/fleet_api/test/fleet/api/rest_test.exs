@@ -111,11 +111,11 @@ defmodule Fleet.API.RestTest do
 
       assert conn.status == 202
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "admin.spawn.request",
-                        "payload" => %{"role" => "scout"}
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :api,
+                       type: :"admin.spawn.request",
+                       payload: %{"role" => "scout"}
+                     },
                      500
     end
   end

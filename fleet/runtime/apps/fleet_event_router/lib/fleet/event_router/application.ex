@@ -40,7 +40,14 @@ defmodule Fleet.EventRouter.Application do
     signal_events = ~w(os.signal.sigusr1 os.signal.sigterm os.signal.sighup)
     fallback_events = ~w(unknown_event)
 
-    Enum.each(yaml_events ++ signal_events ++ fallback_events, fn event_type ->
+    # BL-021 chantier 9 (B) — webhook gitea broadcasts gitea.<action> dynamique
+    # (action body ou X-Gitea-Event header). Pré-enregistre les types vus en pratique
+    # pour autoriser le schema canon `:gitea.<action>` via `to_existing_atom`.
+    gitea_events =
+      ~w(gitea.opened gitea.closed gitea.push gitea.unknown gitea.reopened
+         gitea.merged gitea.edited gitea.created gitea.synchronized gitea.deleted)
+
+    Enum.each(yaml_events ++ signal_events ++ fallback_events ++ gitea_events, fn event_type ->
       _ = String.to_atom(event_type)
     end)
   end

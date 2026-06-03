@@ -151,6 +151,13 @@ defmodule Fleet.EventRouter.Bus do
     cond do
       MapSet.size(types) == 0 ->
         # Registry pas encore chargé (boot order ou test sans Dispatch) — pass.
+        # BL-021 chantier 9 (B) — l'escape hatch est CONSERVÉ comme safety net
+        # de boot order. Le flip strict_canon (raise même si registry vide) a
+        # été tenté mais nécessite que Dispatch démarre dans TOUS les contextes
+        # de test (ou que chaque test setup peuple le registry manuellement) —
+        # coût test élevé pour bénéfice marginal (les producteurs sont déjà
+        # migrés au schema canon, et le rescue UnregisteredError des appelants
+        # protège déjà du raise si un type inconnu passait).
         :ok
 
       type in types ->

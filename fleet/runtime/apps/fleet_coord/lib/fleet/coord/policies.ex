@@ -49,24 +49,14 @@ defmodule Fleet.Coord.Policies do
   end
 
   @doc """
-  Dispatch d'une décision validée Gatekeeper.
-
-  Délègue à `handle_decision/2` avec `correlation_id = nil`. Compat shim
-  legacy — appelants devraient passer à `handle_decision/2` (DN 9 C2.3).
-  """
-  @spec handle_decision(Fleet.Starfleet.Decision.t() | map()) ::
-          :ok | {:error, String.t()}
-  def handle_decision(dec), do: handle_decision(dec, nil)
-
-  @doc """
   Dispatch d'une décision validée Gatekeeper — DN 9 C2.3 amendement.
 
   Arité étendue : `correlation_id` explicite (task.id UUID v4 du mandat
   ayant produit le verdict, peut être nil hors mandat).
 
   Lookup `{decision, reason}` → table policies → broadcast schema canon
-  `%Fleet.Event{source: :coord, type, correlation_id, …}` (DN 9 C2.1+C2.2)
-  + broadcast legacy compat shim (chantier 2a BL-021, retiré chantier 3).
+  `%Fleet.Event{source: :coord, type, correlation_id, …}` (DN 9 C2.1+C2.2).
+  Compat shim `handle_decision/1` retiré au chantier 9 (B) BL-021.
 
   Returns :
     * `:ok` — policy match + broadcast effectué
@@ -87,20 +77,11 @@ defmodule Fleet.Coord.Policies do
   end
 
   @doc """
-  Dispatch d'une escalade Cat 5 — compat shim legacy.
-
-  Délègue à `handle_escalation/3` avec `correlation_id = nil`. Appelants
-  devraient passer à `handle_escalation/3` (DN 9 C2.3).
-  """
-  @spec handle_escalation(source :: atom() | String.t(), payload :: map()) ::
-          :ok | {:error, String.t()}
-  def handle_escalation(source, payload), do: handle_escalation(source, payload, nil)
-
-  @doc """
   Dispatch d'une escalade Cat 5 — DN 9 C2.3 amendement.
 
   Arité étendue : `correlation_id` explicite (extrait de l'event upstream
-  ayant déclenché l'escalade, peut être nil hors mandat).
+  ayant déclenché l'escalade, peut être nil hors mandat). Compat shim
+  `handle_escalation/2` retiré au chantier 9 (B) BL-021.
   """
   @spec handle_escalation(
           source :: atom() | String.t(),
@@ -147,19 +128,16 @@ defmodule Fleet.Coord.Policies do
 
   defp dispatch_action("notify_dashboard", path, payload, correlation_id) do
     canon_event(:notification_routed, "dashboard", path, payload, correlation_id)
-    legacy_broadcast("coord.notify.dashboard", path, payload)
     :ok
   end
 
   defp dispatch_action("escalate_human", path, payload, correlation_id) do
     canon_event(:escalation_triggered, "operator", path, payload, correlation_id)
-    legacy_broadcast("coord.escalate.human", path, payload)
     :ok
   end
 
   defp dispatch_action(action, path, payload, correlation_id) when is_binary(action) do
     canon_action(action, path, payload, correlation_id)
-    legacy_broadcast("coord.action.#{action}", path, payload)
     :ok
   end
 
@@ -212,14 +190,6 @@ defmodule Fleet.Coord.Policies do
     Bus.broadcast("fleet.events", event)
   rescue
     _e in Fleet.Event.UnregisteredError -> :ok
-  end
-
-  defp legacy_broadcast(event_type, path, payload) do
-    Bus.broadcast(
-      event_type,
-      %{"path" => path, "payload" => normalize_payload(payload)},
-      []
-    )
   end
 
   defp extract_pod_id(%{pod_id: pid}) when is_binary(pid), do: pid

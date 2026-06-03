@@ -18,11 +18,11 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
   test "boot OK (liste de :ok) → broadcast fleet.boot_complete" do
     BootOrchestrator.run(boot_permanent_pods: fn -> [{:ok, :pod1}, {:ok, :pod2}] end)
 
-    assert_receive {:"fleet.boot_complete",
-                    %{
-                      "event_type" => "fleet.boot_complete",
-                      "payload" => %{"permanent_pods" => 2}
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :starfleet,
+                     type: :"fleet.boot_complete",
+                     payload: %{"permanent_pods" => 2}
+                   },
                    1_000
   end
 
@@ -31,11 +31,11 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
       boot_permanent_pods: fn -> [{:ok, :pod1}, {:error, :nope}, {:ok, :pod2}] end
     )
 
-    assert_receive {:"fleet.boot_partial",
-                    %{
-                      "event_type" => "fleet.boot_partial",
-                      "payload" => %{"permanent_pods" => 2, "failed_pods" => failed}
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :starfleet,
+                     type: :"fleet.boot_partial",
+                     payload: %{"permanent_pods" => 2, "failed_pods" => failed}
+                   },
                    1_000
 
     assert is_list(failed) and length(failed) == 1
@@ -44,11 +44,11 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
   test "élément malformé (ni :ok ni :error) → boot_partial, PAS boot_complete (finding Vulcan)" do
     BootOrchestrator.run(boot_permanent_pods: fn -> [{:ok, :pod1}, :garbage] end)
 
-    assert_receive {:"fleet.boot_partial",
-                    %{
-                      "event_type" => "fleet.boot_partial",
-                      "payload" => %{"permanent_pods" => 1, "failed_pods" => failed}
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :starfleet,
+                     type: :"fleet.boot_partial",
+                     payload: %{"permanent_pods" => 1, "failed_pods" => failed}
+                   },
                    1_000
 
     assert is_list(failed) and length(failed) == 1
@@ -57,8 +57,11 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
   test "boot raise → broadcast fleet.boot_failed (daemon reste up)" do
     BootOrchestrator.run(boot_permanent_pods: fn -> raise "boom" end)
 
-    assert_receive {:"fleet.boot_failed",
-                    %{"event_type" => "fleet.boot_failed", "payload" => %{"reason" => reason}}},
+    assert_receive %Fleet.Event{
+                     source: :starfleet,
+                     type: :"fleet.boot_failed",
+                     payload: %{"reason" => reason}
+                   },
                    1_000
 
     assert reason =~ "boom"
@@ -67,7 +70,11 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
   test "boot {:error, reason} → fleet.boot_failed" do
     BootOrchestrator.run(boot_permanent_pods: fn -> {:error, :enoent} end)
 
-    assert_receive {:"fleet.boot_failed", %{"payload" => %{"reason" => r}}},
+    assert_receive %Fleet.Event{
+                     source: :starfleet,
+                     type: :"fleet.boot_failed",
+                     payload: %{"reason" => r}
+                   },
                    1_000
 
     assert r =~ "enoent"

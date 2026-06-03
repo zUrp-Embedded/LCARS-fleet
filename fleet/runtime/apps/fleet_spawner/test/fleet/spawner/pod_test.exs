@@ -330,7 +330,13 @@ defmodule Fleet.Spawner.PodTest do
       submit_result_event(pod_id, %{"cycle" => 1, "answer" => "ok"})
 
       # pod.completed reçue côté Bus.
-      assert_receive {_atom, %{"event_type" => "pod.completed", "payload" => payload}}, 2_000
+      assert_receive %Fleet.Event{
+                       source: :spawner,
+                       type: :"pod.completed",
+                       payload: payload
+                     },
+                     2_000
+
       assert payload["pod_id"] == pod_id
       assert payload["result"]["cycle"] == 1
 
@@ -357,11 +363,11 @@ defmodule Fleet.Spawner.PodTest do
 
       submit_result_event(pod_id, %{"cycle" => 1})
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "pod.completed",
-                        "payload" => %{"result" => %{"cycle" => 1}}
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :spawner,
+                       type: :"pod.completed",
+                       payload: %{"result" => %{"cycle" => 1}}
+                     },
                      2_000
 
       Process.sleep(50)
@@ -369,11 +375,11 @@ defmodule Fleet.Spawner.PodTest do
 
       submit_result_event(pod_id, %{"cycle" => 2})
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "pod.completed",
-                        "payload" => %{"result" => %{"cycle" => 2}}
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :spawner,
+                       type: :"pod.completed",
+                       payload: %{"result" => %{"cycle" => 2}}
+                     },
                      2_000
 
       assert Process.alive?(pid)

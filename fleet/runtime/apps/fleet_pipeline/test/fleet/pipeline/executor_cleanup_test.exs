@@ -72,11 +72,11 @@ defmodule Fleet.Pipeline.ExecutorCleanupTest do
     {:ok, pipeline_id} = Pipeline.start_pipeline("tp", %{ticket_id: "tk#1"})
 
     # Le pipeline finit (stage `only` complete → pipeline.completed).
-    assert_receive {_atom,
-                    %{
-                      "event_type" => "pipeline.completed",
-                      "payload" => %{"pipeline_id" => ^pipeline_id}
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.completed",
+                     payload: %{"pipeline_id" => ^pipeline_id}
+                   },
                    2_000
 
     # On laisse `terminate/2` s'exécuter (le GenServer a stop :normal,

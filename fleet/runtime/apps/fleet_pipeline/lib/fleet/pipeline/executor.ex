@@ -310,11 +310,9 @@ defmodule Fleet.Pipeline.Executor do
   # Broadcasts pipeline lifecycle — DN 10 C2.3-pipeline amendement
   # ============================================================
   #
-  # Dual stack pendant migration BL-021 :
-  # - Schema canon strict %Fleet.Event{source: :pipeline, type, correlation_id, ...}
-  #   via Bus.broadcast/2 (DN 11 C3.1+C3.2)
-  # - Legacy {atom, %{event_type, payload, ...}} via Bus.broadcast/3 préservé
-  #   pour ne pas casser subscribers existants — retiré chantier 3 BL-021.
+  # BL-021 chantier 9 (B) — émetteur unique schema canon strict
+  # %Fleet.Event{source: :pipeline, type, correlation_id, ...} via Bus.broadcast/2
+  # (DN 11 C3.1+C3.2). Legacy tuple format retiré (subscribers migrés).
 
   defp broadcast_pipeline_failed(state, stage, reason) do
     pipeline_event(:"pipeline.failed", state, %{
@@ -322,12 +320,6 @@ defmodule Fleet.Pipeline.Executor do
       "stage" => stage,
       "reason" => reason
     })
-
-    Bus.broadcast(
-      "pipeline.failed",
-      %{"pipeline_id" => state.pipeline_id, "stage" => stage, "reason" => reason},
-      ticket_id: state.mandate_context[:ticket_id]
-    )
   end
 
   defp broadcast_pipeline_completed(state) do
@@ -335,12 +327,6 @@ defmodule Fleet.Pipeline.Executor do
       "pipeline_id" => state.pipeline_id,
       "outputs" => state.outputs
     })
-
-    Bus.broadcast(
-      "pipeline.completed",
-      %{"pipeline_id" => state.pipeline_id, "outputs" => state.outputs},
-      ticket_id: state.mandate_context[:ticket_id]
-    )
   end
 
   defp pipeline_event(type, state, payload) do
@@ -398,16 +384,12 @@ defmodule Fleet.Pipeline.Executor do
           "stage=#{stage} sha=#{sha} pushed?=#{pushed?}"
       )
 
-      Bus.broadcast(
-        "git.published",
-        %{
-          "pipeline_id" => state.pipeline_id,
-          "stage" => stage,
-          "commit_sha" => sha,
-          "pushed?" => pushed?
-        },
-        ticket_id: state.mandate_context[:ticket_id]
-      )
+      pipeline_event(:"git.published", state, %{
+        "pipeline_id" => state.pipeline_id,
+        "stage" => stage,
+        "commit_sha" => sha,
+        "pushed?" => pushed?
+      })
     else
       {:error, reason} ->
         Logger.warning(
@@ -415,15 +397,11 @@ defmodule Fleet.Pipeline.Executor do
             "stage=#{stage} reason=#{inspect(reason)}"
         )
 
-        Bus.broadcast(
-          "git.publish_failed",
-          %{
-            "pipeline_id" => state.pipeline_id,
-            "stage" => stage,
-            "reason" => inspect(reason)
-          },
-          ticket_id: state.mandate_context[:ticket_id]
-        )
+        pipeline_event(:"git.publish_failed", state, %{
+          "pipeline_id" => state.pipeline_id,
+          "stage" => stage,
+          "reason" => inspect(reason)
+        })
     end
   end
 

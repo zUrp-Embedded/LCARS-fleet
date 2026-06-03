@@ -52,10 +52,27 @@ defmodule Fleet.API.Rest do
   end
 
   post "/api/admin/spawn" do
-    case Bus.broadcast("admin.spawn.request", conn.body_params || %{}, []) do
+    # BL-021 chantier 9 (B) — migrated to schema canon %Fleet.Event{source: :api}.
+    event = %Fleet.Event{
+      source: :api,
+      type: :"admin.spawn.request",
+      timestamp: DateTime.utc_now(),
+      pod_id: nil,
+      correlation_id: nil,
+      payload: conn.body_params || %{}
+    }
+
+    case safe_broadcast(event) do
       :ok -> send_resp(conn, 202, ~s|{"status":"queued"}|)
       {:error, reason} -> send_resp(conn, 400, Jason.encode!(%{error: inspect(reason)}))
     end
+  end
+
+  defp safe_broadcast(%Fleet.Event{} = event) do
+    Bus.broadcast("fleet.events", event)
+  rescue
+    e in Fleet.Event.UnregisteredError -> {:error, e.message}
+    e in [ArgumentError, FunctionClauseError] -> {:error, inspect(e)}
   end
 
   post "/api/config/update" do

@@ -65,7 +65,7 @@ defmodule Fleet.Pipeline.ExecutorPodCompletedTest do
     assert spawn_opts[:stage] == "only_stage"
 
     # Le pod n'a PAS émis stage.completed (stub no-emit) → pipeline en attente.
-    refute_receive {_a, %{"event_type" => "pipeline.completed"}}, 200
+    refute_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 200
 
     # (b) Simule la complétion event-driven du pod : pod.completed self-décrit (cf. Pod.pod_completed_payload),
     # `result` = résultat structuré (R-CORE.comm 2.2, plus de livrable_path fichier).
@@ -77,11 +77,11 @@ defmodule Fleet.Pipeline.ExecutorPodCompletedTest do
       "stage" => "only_stage"
     })
 
-    assert_receive {_a,
-                    %{
-                      "event_type" => "pipeline.completed",
-                      "payload" => %{"pipeline_id" => ^pipeline_id} = payload
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.completed",
+                     payload: %{"pipeline_id" => ^pipeline_id} = payload
+                   },
                    2_000
 
     # outputs de la stage = le résultat structuré du pod (R-CORE.comm 2.2).
@@ -100,6 +100,6 @@ defmodule Fleet.Pipeline.ExecutorPodCompletedTest do
       "stage" => "only_stage"
     })
 
-    refute_receive {_a, %{"event_type" => "pipeline.completed"}}, 500
+    refute_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 500
   end
 end

@@ -259,13 +259,26 @@ defmodule Fleet.Spawner.Pod do
 
   # Broadcast Bus avec rescue : un crash event_router (bus down, atom
   # invalide) ne doit JAMAIS faire crash le Pod GenServer.
-  defp safe_broadcast(event_type, payload) do
-    Bus.broadcast(event_type, payload)
+  #
+  # BL-021 chantier 9 (B) — schema canon strict %Fleet.Event{source: :spawner}.
+  defp safe_broadcast(event_type, payload) when is_binary(event_type) do
+    type_atom = String.to_existing_atom(event_type)
+    pod_id = Map.get(payload, "pod_id")
+
+    event = %Fleet.Event{
+      source: :spawner,
+      type: type_atom,
+      timestamp: DateTime.utc_now(),
+      pod_id: pod_id,
+      correlation_id: nil,
+      payload: payload
+    }
+
+    Bus.broadcast("fleet.events", event)
   rescue
     e ->
       Logger.warning(
-        "Pod safe_broadcast #{event_type} rescue (non-fatal) — " <>
-          Exception.message(e)
+        "Pod safe_broadcast #{event_type} rescue (non-fatal) — #{Exception.message(e)}"
       )
 
       :ok

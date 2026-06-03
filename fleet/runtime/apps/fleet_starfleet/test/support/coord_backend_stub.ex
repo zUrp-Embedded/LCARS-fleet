@@ -6,23 +6,13 @@ defmodule Fleet.Starfleet.CoordBackendStub do
   :coord_invocations, [...])` pour assertion side-effect.
 
   Reset via `Application.put_env(:fleet_starfleet, :coord_invocations, [])`.
+
+  BL-021 chantier 9 (B) — compat shims `/1` et `/2` retirés. Seules les
+  arités canon sont conservées (DN 9 C2.3).
   """
 
   @behaviour Fleet.Starfleet.CoordBackend
 
-  @impl Fleet.Starfleet.CoordBackend
-  def handle_decision(decision) do
-    log({:decision, decision})
-    :ok
-  end
-
-  @impl Fleet.Starfleet.CoordBackend
-  def handle_escalation(source, payload) do
-    log({:escalation, source, payload})
-    :ok
-  end
-
-  # DN 9 C2.3 amendement — arités étendues correlation_id
   @impl Fleet.Starfleet.CoordBackend
   def handle_decision(decision, correlation_id) do
     log({:decision, decision, correlation_id})
