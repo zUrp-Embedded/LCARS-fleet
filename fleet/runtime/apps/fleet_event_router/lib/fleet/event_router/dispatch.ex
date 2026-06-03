@@ -37,7 +37,19 @@ defmodule Fleet.EventRouter.Dispatch do
 
   @impl GenServer
   def handle_info({event_atom, event}, table) when is_atom(event_atom) do
+    # Legacy format (broadcast/3 compat shim BL-021 chantier 1)
     handlers = Map.get(table["events"] || %{}, Atom.to_string(event_atom), [])
+
+    Enum.each(handlers, fn handler_name ->
+      dispatch_one(handler_name, event)
+    end)
+
+    {:noreply, table}
+  end
+
+  def handle_info(%Fleet.Event{type: type} = event, table) do
+    # Schema canon strict (broadcast/2 + DN 11 C3.1+C3.2)
+    handlers = Map.get(table["events"] || %{}, Atom.to_string(type), [])
 
     Enum.each(handlers, fn handler_name ->
       dispatch_one(handler_name, event)
@@ -92,6 +104,7 @@ defmodule Fleet.EventRouter.Dispatch do
     case File.exists?(path) && YamlElixir.read_from_file(path) do
       {:ok, table} when is_map(table) ->
         preregister_atoms(table)
+        register_authorized_types(table)
         table
 
       _ ->
@@ -105,6 +118,20 @@ defmodule Fleet.EventRouter.Dispatch do
   end
 
   defp preregister_atoms(_), do: :ok
+
+  defp register_authorized_types(%{"events" => events}) when is_map(events) do
+    # DN 11 C3.2 : registry events.yaml = source de vérité pour broadcast/2 strict.
+    # Set d'atomes inscrits dans events.yaml — broadcast/2 raise UnregisteredError si type hors set.
+    set =
+      events
+      |> Map.keys()
+      |> Enum.map(&String.to_atom/1)
+      |> MapSet.new()
+
+    Fleet.EventRouter.Bus.set_authorized_event_types(set)
+  end
+
+  defp register_authorized_types(_), do: :ok
 
   defp events_yaml_path do
     Application.get_env(

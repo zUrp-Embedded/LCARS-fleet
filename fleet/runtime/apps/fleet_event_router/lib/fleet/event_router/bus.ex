@@ -4,26 +4,35 @@ defmodule Fleet.EventRouter.Bus do
   `fleet.events` + sous-topics `fleet.events.<scope>.<id>` (ex relay
   ch10 `fleet.events.relay.<ref>`).
 
-  ## API
+  ## API — Dual stack pendant migration BL-021 chantier 1
 
-    * `child_spec/1` — pour Application supervisor (instancie
-      `Phoenix.PubSub` `Fleet.PubSub`)
-    * `broadcast/3` — diffuse event NDJSON validé schema (soft : log
-      + reject sans crash si invalide)
+  **Schema canon strict (CIBLE post-migration, DN 11 C3.1+C3.2)** :
+
+    * `broadcast/2 (topic, %Fleet.Event{} = event)` — fail-loud
+      `Fleet.Event.SchemaError` si pas struct, `Fleet.Event.UnregisteredError`
+      si event.type hors registry events.yaml. Émet la struct directement
+      (les subscribers reçoivent `%Fleet.Event{}`, pas un tuple).
+
+  **Compat shim legacy (à retirer chantier 3 BL-021)** :
+
+    * `broadcast/3 (event_type, payload, opts)` — soft validate JSON schema,
+      émet `{event_atom, map}` tuple. Conservé pour ne pas casser les
+      producteurs/consommateurs avant leur migration.
+
+  **Communs** :
+
+    * `child_spec/1` — pour Application supervisor (instancie `Phoenix.PubSub`)
     * `subscribe/1` / `unsubscribe/1` — gestion abonnements topic
+    * `broadcast_subtopic/2` — sous-topics `fleet.events.<scope>.<id>`
+    * `authorized_event_types/0` — MapSet atoms chargé au boot par Dispatch
+    * `set_authorized_event_types/1` — appelé par Dispatch boot
 
-  ## Format event diffusé
+  ## Registry obligatoire (C3.2)
 
-      {String.to_atom(event_type), %{
-        "ts" => ISO8601,
-        "event_type" => string,
-        "node_id" => string,
-        "trace_id" => 16-hex string,
-        "payload" => map,
-        "ticket_id" => optional string,
-        "pod_id" => optional string,
-        "attempt_id" => optional string
-      }}
+  Le set `authorized_event_types` est chargé par `Fleet.EventRouter.Dispatch`
+  au boot depuis `priv/events.yaml` via `:persistent_term`. Tant que le set
+  est vide (boot order), `broadcast/2` laisse passer sans check (initialisation).
+  Dès que peuplé, tout event hors set raise `UnregisteredError`.
   """
 
   require Logger
@@ -38,7 +47,41 @@ defmodule Fleet.EventRouter.Bus do
   def child_spec(_opts), do: Phoenix.PubSub.child_spec(name: @pubsub_name)
 
   @doc """
-  Diffuse un event sur le topic principal `fleet.events`.
+  Diffuse un event au schema canon strict `%Fleet.Event{}` sur le topic
+  donné (typiquement `"fleet.events"`).
+
+  Fail-loud strict (DN 11 C3.1+C3.2) :
+
+    * raise `Fleet.Event.SchemaError` si event n'est pas une struct `%Fleet.Event{}`
+    * raise `Fleet.Event.UnregisteredError` si `event.type` n'est pas dans
+      le registry `events.yaml` (set chargé par `Fleet.EventRouter.Dispatch`)
+
+  Émet la struct directement — les subscribers reçoivent `%Fleet.Event{}`,
+  pas un tuple. Pattern match côté consumer :
+  `handle_info(%Fleet.Event{type: :pod_drift, payload: payload, correlation_id: cid}, state)`.
+
+  ## Returns
+
+    * `:ok` — broadcast effectué
+  """
+  @spec broadcast(String.t(), Fleet.Event.t() | map()) :: :ok | {:error, term()}
+  def broadcast(topic, %Fleet.Event{} = event) when is_binary(topic) do
+    assert_authorized!(event)
+    Phoenix.PubSub.broadcast(@pubsub_name, topic, event)
+  end
+
+  def broadcast(event_type, payload) when is_binary(event_type) and is_map(payload) do
+    # Compat shim legacy 2-arity — équivalent à broadcast/3 avec opts = [].
+    # ⚠️ Retiré au chantier 3 BL-021 (post-migration tous producteurs vers
+    # broadcast/2 (topic, %Fleet.Event{})).
+    broadcast(event_type, payload, [])
+  end
+
+  @doc """
+  Compat shim legacy 3-arity — diffuse un event sur le topic principal `fleet.events`.
+
+  ⚠️ Retiré au chantier 3 BL-021 (post-migration tous producteurs vers
+  `broadcast/2 (topic, %Fleet.Event{})`).
 
   ## Inputs
 
@@ -56,7 +99,7 @@ defmodule Fleet.EventRouter.Bus do
     * `{:error, reason}` — schema invalide (logged, pas crash)
   """
   @spec broadcast(String.t(), map(), keyword()) :: :ok | {:error, term()}
-  def broadcast(event_type, payload, opts \\ [])
+  def broadcast(event_type, payload, opts)
       when is_binary(event_type) and is_map(payload) and is_list(opts) do
     event = build_event(event_type, payload, opts)
 
@@ -74,6 +117,50 @@ defmodule Fleet.EventRouter.Bus do
         )
 
         {:error, reason}
+    end
+  end
+
+  @doc """
+  Set de types d'events autorisés (MapSet d'atomes), chargé depuis
+  `events.yaml` au boot par `Fleet.EventRouter.Dispatch`.
+
+  Vide tant que le boot n'a pas peuplé le set. `broadcast/2` laisse passer
+  sans check tant que vide (initialisation), raise `UnregisteredError`
+  dès que peuplé pour tout event hors set.
+  """
+  @spec authorized_event_types() :: MapSet.t()
+  def authorized_event_types do
+    :persistent_term.get({__MODULE__, :authorized_event_types}, MapSet.new())
+  end
+
+  @doc """
+  Set authorized event types (MapSet d'atomes) — appelé par
+  `Fleet.EventRouter.Dispatch` au boot après lecture `events.yaml`.
+
+  Idempotent — peut être ré-appelé via `Fleet.EventRouter.Dispatch.reload/0`.
+  """
+  @spec set_authorized_event_types(MapSet.t()) :: :ok
+  def set_authorized_event_types(%MapSet{} = set) do
+    :persistent_term.put({__MODULE__, :authorized_event_types}, set)
+    :ok
+  end
+
+  defp assert_authorized!(%Fleet.Event{type: type} = event) do
+    types = authorized_event_types()
+
+    cond do
+      MapSet.size(types) == 0 ->
+        # Registry pas encore chargé (boot order ou test sans Dispatch) — pass.
+        :ok
+
+      type in types ->
+        :ok
+
+      true ->
+        raise Fleet.Event.UnregisteredError,
+              "event type #{inspect(type)} not in registry events.yaml " <>
+                "(source=#{inspect(event.source)}). Add entry to events.yaml or " <>
+                "use Fleet.EventRouter.Bus.set_authorized_event_types/1 in tests."
     end
   end
 
