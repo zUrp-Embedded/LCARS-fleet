@@ -65,9 +65,15 @@ defmodule Fleet.Spawner.PermanentBoot do
   validation au loader canonique `Fleet.CapProfile.load/1` (DRY — pas de
   re-parse YAML, le pseudo-code DN `File.ls!+load_cap_profile` est
   illustratif) → garde `select_permanent/1` (D-01 exclu) → `spawn_pod/3`
-  (signature réelle `(%CapProfile{}, ticket_id, opts)`) → `persist_state`
-  atomique. **Succès partiel acceptable** : un profil invalide / un
-  spawn KO n'empêche pas les autres (DN exit codes L296).
+  (signature réelle `(%CapProfile{}, ticket_id, opts)`). **Succès partiel
+  acceptable** : un profil invalide / un spawn KO n'empêche pas les autres
+  (DN exit codes L296).
+
+  ## Écrivain unique state.json (BL-021 chantier 4 / DN permanent-pods-boot §C-3)
+
+  PermanentBoot **spawne** mais **n'écrit pas** `state.json` — l'écriture est
+  déléguée au `Fleet.Spawner.Pod` GenServer via `write_state_fs/1`. Seam
+  `:state_writer` retiré (viol C-3 « un seul écrivain »).
 
   ## Seams (test-seam, élixir-thinking découpl. IO)
     * `:cap_profiles_dir` — répertoire scanné (défaut config
@@ -76,15 +82,12 @@ defmodule Fleet.Spawner.PermanentBoot do
       (défaut `&Fleet.CapProfile.load/1`)
     * `:spawner` — `(cp, ticket_id, opts) -> {:ok, pid} | {:error, term}`
       (défaut `&Fleet.Spawner.spawn_pod/3`)
-    * `:state_writer` — `(pod_id, map) -> :ok` (défaut écriture atomique
-      rename idiom `/var/lib/lcars/pods/<id>/state.json`)
   """
   @spec boot_permanent_pods(keyword()) :: {:ok, [String.t()]} | {:error, term()}
   def boot_permanent_pods(opts \\ []) when is_list(opts) do
     dir = Keyword.get(opts, :cap_profiles_dir) || cap_profiles_dir()
     loader = Keyword.get(opts, :loader, &Fleet.CapProfile.load/1)
     spawner = Keyword.get(opts, :spawner, &Fleet.Spawner.spawn_pod/3)
-    state_writer = Keyword.get(opts, :state_writer, &persist_state/2)
 
     case list_roles(dir) do
       {:ok, roles} ->
@@ -93,7 +96,7 @@ defmodule Fleet.Spawner.PermanentBoot do
           |> Enum.map(&load_one(&1, loader))
           |> Enum.reject(&is_nil/1)
           |> select_permanent()
-          |> Enum.map(&spawn_one(&1, spawner, state_writer))
+          |> Enum.map(&spawn_one(&1, spawner))
           |> Enum.reject(&is_nil/1)
 
         {:ok, pod_ids}
@@ -114,17 +117,9 @@ defmodule Fleet.Spawner.PermanentBoot do
     Application.get_env(:fleet_spawner, :boot_permanent_at_start, false) == true
   end
 
-  @doc "Écriture atomique state.json (rename idiom, pattern fleet_credentials)."
-  @spec persist_state(String.t(), map()) :: :ok
-  def persist_state(pod_id, state) do
-    pod_dir_root = Application.get_env(:fleet_spawner, :pod_dir_root, "/var/lib/lcars/pods")
-    path = Path.join([pod_dir_root, pod_id, "state.json"])
-    File.mkdir_p!(Path.dirname(path))
-    tmp = path <> ".tmp"
-    File.write!(tmp, Jason.encode!(state))
-    File.rename!(tmp, path)
-    :ok
-  end
+  # NB BL-021 chantier 4 — `persist_state/2` retirée (DN permanent-pods-boot §C-3
+  # amendement « écrivain unique » : seul `Fleet.Spawner.Pod.write_state_fs/1` écrit
+  # `state.json`. PermanentBoot spawne le Pod et délègue l'écriture au GenServer).
 
   # --- privé ---
 
@@ -163,18 +158,12 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
-  defp spawn_one(%Fleet.CapProfile{metadata: meta} = cp, spawner, state_writer) do
+  defp spawn_one(%Fleet.CapProfile{metadata: meta} = cp, spawner) do
     name = Map.get(meta, "name") || Map.get(meta, :name) || "unknown"
     ticket_id = "permanent-#{name}-#{System.os_time(:second)}"
 
     case spawner.(cp, ticket_id, pod_id: ticket_id) do
       {:ok, _pid} ->
-        :ok =
-          state_writer.(ticket_id, %{
-            cap_profile_name: name,
-            started_at: DateTime.utc_now() |> DateTime.to_iso8601()
-          })
-
         ticket_id
 
       {:error, reason} ->

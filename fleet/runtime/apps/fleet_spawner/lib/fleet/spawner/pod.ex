@@ -79,6 +79,9 @@ defmodule Fleet.Spawner.Pod do
           pod_id: String.t(),
           ticket_id: String.t(),
           session_id: String.t() | nil,
+          # DN spawner-orchestrator §C-3 : `started_at` ISO8601 figé à la création du
+          # Pod GenServer, persisté tel quel dans `state.json` (point de recovery).
+          started_at: DateTime.t(),
           cap_profile: Fleet.CapProfile.t(),
           env_vars: %{String.t() => String.t()},
           ndjson_log_path: Path.t() | nil,
@@ -810,6 +813,9 @@ defmodule Fleet.Spawner.Pod do
       # 1ʳᵉ création ; `recover_or_init` le RESTAURE depuis state.json → `--resume <uuid>`. Remplace
       # le modèle -p (capture `init_msg["session_id"]`, mort). `resume`=false ; recovery le passe à true.
       session_id: Keyword.get(args.opts, :session_id) || UUID.uuid4(),
+      # DN spawner-orchestrator §C-3 (BL-021 chantier 4) : timestamp ISO8601 figé
+      # à la création du GenServer, persisté tel quel dans state.json.
+      started_at: DateTime.utc_now(),
       resume: false,
       # SP composé (do_project) stocké en state pour l'argv4 inline de claude_launch — le fichier
       # `.claude/system-prompt.md` est MASQUÉ par le bind CLAUDE_DIR→.claude de bwrap_launch.
@@ -860,19 +866,31 @@ defmodule Fleet.Spawner.Pod do
     Path.join([root, scope, pod_id, "state.json"])
   end
 
+  defp cap_profile_name(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
+    Map.get(meta, "name") || Map.get(meta, :name) || "unknown"
+  end
+
+  defp cap_profile_name(_), do: "unknown"
+
   defp scope_for("pipe"), do: "pipes"
   defp scope_for("run"), do: "runs"
   defp scope_for("session-user"), do: "runs"
-  defp scope_for("forever"), do: "runs"
+  # DN spawner-orchestrator §C-3 + cap-profiles-schema §B (F-Q5) : `forever` partage
+  # le scope FS `pods/` avec `one_shot` (les deux = pods avec lifetime propre).
+  defp scope_for("forever"), do: "pods"
   defp scope_for(_), do: "pods"
 
   defp write_state_fs(state) do
+    # DN spawner-orchestrator §C-3 + BL-021 chantier 4 : schéma complet
+    # {v, session_id, cap_profile_name, started_at, phase, conditions, ticket_id}.
     payload = %{
       "v" => 1,
-      "pod_id" => state.pod_id,
-      "ticket_id" => state.ticket_id,
       "session_id" => state.session_id,
-      "phase" => Atom.to_string(state.phase)
+      "cap_profile_name" => cap_profile_name(state.cap_profile),
+      "started_at" => DateTime.to_iso8601(state.started_at),
+      "phase" => Atom.to_string(state.phase),
+      "conditions" => state.conditions |> MapSet.to_list() |> Enum.map(&Atom.to_string/1),
+      "ticket_id" => state.ticket_id
     }
 
     tmp = state.state_fs_path <> ".tmp"

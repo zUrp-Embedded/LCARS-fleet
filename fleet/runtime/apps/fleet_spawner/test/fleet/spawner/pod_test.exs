@@ -227,11 +227,17 @@ defmodule Fleet.Spawner.PodTest do
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
       # state.json écrit en LAUNCH (avant MONITOR) → présent même sans livrable.
+      # BL-021 chantier 4 : schéma C-3 complet (v, session_id, cap_profile_name,
+      # started_at, phase, conditions, ticket_id). `pod_id` n'est PLUS persisté
+      # (la clé de recovery = path /var/lib/lcars/<scope>/<pod_id>/state.json).
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
-      assert content["pod_id"] == pod_id
-      assert content["ticket_id"] == "ticket-1"
       assert content["v"] == 1
+      assert content["ticket_id"] == "ticket-1"
       assert content["session_id"] == "sess-xyz"
+      assert is_binary(content["cap_profile_name"])
+      assert is_binary(content["started_at"])
+      assert is_list(content["conditions"])
+      assert content["phase"] in ["launching", "monitoring"]
 
       Process.exit(pid, :kill)
     end

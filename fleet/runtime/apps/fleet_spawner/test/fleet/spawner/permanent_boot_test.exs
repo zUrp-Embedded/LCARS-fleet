@@ -167,22 +167,15 @@ defmodule Fleet.Spawner.PermanentBootTest do
         {:ok, spawn(fn -> :ok end)}
       end
 
-      writer = fn pod_id, st ->
-        send(parent, {:state, pod_id, st})
-        :ok
-      end
-
       assert {:ok, [pid_arch]} =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
-                 spawner: spawner,
-                 state_writer: writer
+                 spawner: spawner
                )
 
       assert pid_arch =~ ~r/^permanent-architect-interactive-/
       assert_received {:spawned, "architect-interactive", ^pid_arch}
-      assert_received {:state, ^pid_arch, %{cap_profile_name: "architect-interactive"}}
       refute_received {:spawned, "engineer", _}
       refute_received {:spawned, "starfleet", _}
     end
@@ -197,8 +190,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader,
-                 spawner: fn _cp, _t, _o -> {:ok, self()} end,
-                 state_writer: fn _i, _s -> :ok end
+                 spawner: fn _cp, _t, _o -> {:ok, self()} end
                )
     end
 
@@ -207,8 +199,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
-                 spawner: fn _cp, _t, _o -> {:error, :launch_failed} end,
-                 state_writer: fn _i, _s -> :ok end
+                 spawner: fn _cp, _t, _o -> {:error, :launch_failed} end
                )
     end
 
