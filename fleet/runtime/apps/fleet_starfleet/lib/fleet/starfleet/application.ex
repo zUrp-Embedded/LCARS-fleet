@@ -32,13 +32,20 @@ defmodule Fleet.Starfleet.Application do
     # B10/#583 Sprint 1 — events lifecycle BootOrchestrator
     :"fleet.boot_complete",
     :"fleet.boot_partial",
-    :"fleet.boot_failed"
+    :"fleet.boot_failed",
+    # BL-021 chantier 8 — Extensions V2 MCPWatcher + MCPMonitor
+    :sdk_upstream_alert,
+    :mcp_server_crashed
   ]
 
   @impl Application
   def start(_type, _args) do
     :ok = Fleet.Starfleet.Gatekeeper.init_schema!()
 
+    # BL-021 chantier 8 — Extensions V2 (DN 13).
+    # MCPWatcher : default OFF (HTTP I/O Hex.pm — opt-in en prod où l'outbound
+    # est autorisé). MCPMonitor : default ON (purement local Process.whereis,
+    # zéro I/O réseau, cohérent avec DriftMonitor/AuditConsumer).
     children =
       [] ++
         if(Application.get_env(:fleet_starfleet, :start_drift_monitor, true),
@@ -69,7 +76,15 @@ defmodule Fleet.Starfleet.Application do
           ]
         else
           []
-        end
+        end ++
+        if(Application.get_env(:fleet_starfleet, :start_mcp_watcher, false),
+          do: [Fleet.Starfleet.MCPWatcher],
+          else: []
+        ) ++
+        if(Application.get_env(:fleet_starfleet, :start_mcp_monitor, true),
+          do: [Fleet.Starfleet.MCPMonitor],
+          else: []
+        )
 
     opts = [strategy: :one_for_one, name: Fleet.Starfleet.Supervisor]
     Supervisor.start_link(children, opts)

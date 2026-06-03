@@ -48,6 +48,33 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
+  # BL-021 chantier 8 — Extensions V2 (MCPWatcher + MCPMonitor).
+  def handle_info(
+        %Fleet.Event{source: :starfleet, type: :sdk_upstream_alert, payload: p},
+        state
+      ) do
+    Logger.warning(
+      "AUDIT starfleet.sdk_upstream_alert package=#{inspect(Map.get(p, "package"))} " <>
+        "current=#{inspect(Map.get(p, "current"))} " <>
+        "upstream=#{inspect(Map.get(p, "upstream"))}"
+    )
+
+    {:noreply, %{state | events_count: state.events_count + 1}}
+  end
+
+  def handle_info(
+        %Fleet.Event{source: :starfleet, type: :mcp_server_crashed, payload: p},
+        state
+      ) do
+    Logger.error(
+      "AUDIT starfleet.mcp_server_crashed target=#{inspect(Map.get(p, "target"))} " <>
+        "previous=#{inspect(Map.get(p, "previous_status"))} " <>
+        "new=#{inspect(Map.get(p, "new_status"))}"
+    )
+
+    {:noreply, %{state | events_count: state.events_count + 1}}
+  end
+
   # Ignore les autres %Fleet.Event{} non handlés (cohabitation dual stack).
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
 

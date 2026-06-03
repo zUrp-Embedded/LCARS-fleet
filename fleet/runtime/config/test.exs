@@ -16,6 +16,11 @@ config :fleet_spawner, launch_backend: Fleet.Spawner.LaunchBackend.StubBackend
 # tests async ; les tests dédiés démarrent manuellement avec opts isolés.
 config :fleet_starfleet, start_audit_consumer: false
 config :fleet_starfleet, start_boot_orchestrator: false
+# BL-021 chantier 8 — Extensions V2 off par défaut en test (hermétisme :
+# MCPWatcher fetch HTTP Hex.pm parasiterait CI, MCPMonitor Process.whereis +
+# timer Bus broadcast pollue async tests). Tests dédiés instancient avec opts.
+config :fleet_starfleet, start_mcp_watcher: false
+config :fleet_starfleet, start_mcp_monitor: false
 config :fleet_spawner, start_publish_consumer: false
 
 # fleet_pilot hermétisme test : AutoDispatcher off par défaut. Subscribe

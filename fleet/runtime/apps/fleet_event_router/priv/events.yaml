@@ -101,3 +101,14 @@ events:
     - Fleet.Starfleet.AuditConsumer
   state_corrupt:
     - Fleet.Starfleet.AuditConsumer
+
+  # === fleet_starfleet Extensions V2 (BL-021 chantier 8 — DN 13 Extensions V2) ===
+  # MCPWatcher : cron hebdo SDK MCP Elixir (ex_mcp) upstream — broadcast si drift
+  # version installée vs version publiée Hex.pm.
+  sdk_upstream_alert:
+    - Fleet.Starfleet.AuditConsumer
+  # MCPMonitor : health check Process.whereis(Fleet.MCP.Server) — broadcast sur
+  # transition :ok → :crashed (post-C5.1 ADR-G : MCP server reste critique pour
+  # le drive métier get_task/submit_result).
+  mcp_server_crashed:
+    - Fleet.Starfleet.AuditConsumer
