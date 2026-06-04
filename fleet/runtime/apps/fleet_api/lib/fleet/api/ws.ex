@@ -61,8 +61,15 @@ defmodule Fleet.API.WS do
 
   def websocket_handle(_other, state), do: {[], state}
 
+  # R2 (D1 schema unique) — forward la struct canon `%Fleet.Event{}` strict. Le
+  # tuple legacy `{atom, %{"event_type" => ...}}` est RETIRÉ : les producteurs
+  # émettent la struct, les subscribers la reçoivent directement (DN 11 C3.1).
+  # `event_type` (string, forme dot) dérivé de `type` (atom) pour le filtre topics
+  # + le wire JSON client.
   @impl :cowboy_websocket
-  def websocket_info({_atom, %{"event_type" => event_type, "payload" => payload}}, state) do
+  def websocket_info(%Fleet.Event{type: type, payload: payload}, state) do
+    event_type = Atom.to_string(type)
+
     if topic_matches?(event_type, state.topics) do
       frame =
         Jason.encode!(%{

@@ -69,12 +69,19 @@ defmodule Fleet.Pipeline.ExecutorPodCompletedTest do
 
     # (b) Simule la complétion event-driven du pod : pod.completed self-décrit (cf. Pod.pod_completed_payload),
     # `result` = résultat structuré (R-CORE.comm 2.2, plus de livrable_path fichier).
-    Bus.broadcast("pod.completed", %{
-      "pod_id" => "pod-only_stage",
-      "ticket_id" => "r13#1",
-      "result" => %{"answer" => "r13-done"},
-      "pipeline_id" => pipeline_id,
-      "stage" => "only_stage"
+    # R2 (D1) : struct canon %Fleet.Event{} (comme Spawner.Pod.safe_broadcast/2).
+    Bus.broadcast("fleet.events", %Fleet.Event{
+      source: :spawner,
+      type: :"pod.completed",
+      timestamp: DateTime.utc_now(),
+      pod_id: "pod-only_stage",
+      payload: %{
+        "pod_id" => "pod-only_stage",
+        "ticket_id" => "r13#1",
+        "result" => %{"answer" => "r13-done"},
+        "pipeline_id" => pipeline_id,
+        "stage" => "only_stage"
+      }
     })
 
     assert_receive %Fleet.Event{
@@ -92,12 +99,18 @@ defmodule Fleet.Pipeline.ExecutorPodCompletedTest do
     {:ok, pipeline_id} = Pipeline.start_pipeline("r13", %{ticket_id: "r13#2"})
     assert_receive {:spawned, "only_stage", _}, 2_000
 
-    Bus.broadcast("pod.completed", %{
-      "pod_id" => "pod-foreign",
-      "ticket_id" => "other",
-      "result" => %{"answer" => "x"},
-      "pipeline_id" => "#{pipeline_id}-DIFFERENT",
-      "stage" => "only_stage"
+    Bus.broadcast("fleet.events", %Fleet.Event{
+      source: :spawner,
+      type: :"pod.completed",
+      timestamp: DateTime.utc_now(),
+      pod_id: "pod-foreign",
+      payload: %{
+        "pod_id" => "pod-foreign",
+        "ticket_id" => "other",
+        "result" => %{"answer" => "x"},
+        "pipeline_id" => "#{pipeline_id}-DIFFERENT",
+        "stage" => "only_stage"
+      }
     })
 
     refute_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 500

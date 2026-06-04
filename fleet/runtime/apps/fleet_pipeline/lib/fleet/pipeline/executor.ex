@@ -18,7 +18,8 @@ defmodule Fleet.Pipeline.Executor do
   1. `init/1` → load pipeline via `Loader`, subscribe `fleet.events`,
      `{:continue, :start_first_stage}`
   2. `handle_continue(:start_first_stage, _)` → toposort + run first stage
-  3. `handle_info` filtre `event_type == "pipeline.stage.completed"`
+  3. `handle_info` consomme les `%Fleet.Event{}` canon `:"pipeline.stage.completed"`
+     (source `:pipeline`) et `:"pod.completed"` (source `:spawner`, bridge C1)
      pour le `pipeline_id` courant → store outputs → dispatch gate :
      - `:pass` → stage suivant ou `pipeline.completed` broadcast + stop
      - `{:fail, reason}` → `pipeline.failed` broadcast + stop
@@ -113,15 +114,17 @@ defmodule Fleet.Pipeline.Executor do
     end
   end
 
+  # R2 (D1 schema unique) — consommation canon `%Fleet.Event{}` strict. Le tuple
+  # legacy `{atom, %{"event_type" => ...}}` est RETIRÉ : tous les producteurs
+  # émettent la struct (Spawner.Pod.safe_broadcast/2, StageSpawnerStub). La forme
+  # tuple n'est plus représentable côté consommateur (I-CBC).
   @impl GenServer
   def handle_info(
-        {_atom, %{"event_type" => "pipeline.stage.completed", "payload" => payload}},
+        %Fleet.Event{source: :pipeline, type: :"pipeline.stage.completed", payload: payload},
         state
       ) do
     if payload["pipeline_id"] == state.pipeline_id do
-      stage = payload["stage"]
-      outputs = payload["outputs"] || %{}
-      handle_stage_completed(stage, outputs, state)
+      handle_stage_completed(payload["stage"], payload["outputs"] || %{}, state)
     else
       {:noreply, state}
     end
@@ -134,18 +137,18 @@ defmodule Fleet.Pipeline.Executor do
   # `result` = payload submit_result ; plus de livrable fichier). Filtre pipeline_id : on ignore
   # les pods des autres pipelines (ou hors-pipeline, sans ces clés).
   def handle_info(
-        {_atom, %{"event_type" => "pod.completed", "payload" => payload}},
+        %Fleet.Event{source: :spawner, type: :"pod.completed", payload: payload},
         state
       ) do
     if payload["pipeline_id"] == state.pipeline_id and is_binary(payload["stage"]) do
-      outputs = %{"result" => payload["result"]}
-      handle_stage_completed(payload["stage"], outputs, state)
+      handle_stage_completed(payload["stage"], %{"result" => payload["result"]}, state)
     else
       {:noreply, state}
     end
   end
 
-  def handle_info({_atom, %{"event_type" => _other}}, state), do: {:noreply, state}
+  # Tout autre %Fleet.Event{} (autres sources/types) ou message non-event = ignoré.
+  def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ============================================================

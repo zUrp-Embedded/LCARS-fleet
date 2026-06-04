@@ -31,6 +31,18 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
   alias Fleet.EventRouter.Bus
   alias Fleet.Pipeline
 
+  # R2 (D1) : émet la complétion pod via la struct canon %Fleet.Event{} (comme
+  # Spawner.Pod.safe_broadcast/2) au lieu du tuple legacy broadcast/3.
+  defp pod_completed(payload) do
+    Bus.broadcast("fleet.events", %Fleet.Event{
+      source: :spawner,
+      type: :"pod.completed",
+      timestamp: DateTime.utc_now(),
+      pod_id: payload["pod_id"],
+      payload: payload
+    })
+  end
+
   setup %{tmp_dir: tmp_dir} do
     Process.register(self(), :post_extract_probe)
 
@@ -120,7 +132,7 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
     # Le WorkspaceProvisioner a déjà cloné bare → ws ; pas d'init manuel.
     assert File.dir?(Path.join(ws, ".git"))
 
-    Bus.broadcast("pod.completed", %{
+    pod_completed(%{
       "pod_id" => "pod-publish",
       "ticket_id" => "p1#1",
       "pipeline_id" => pipeline_id,
@@ -210,7 +222,7 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
     {:ok, pipeline_id} = Pipeline.start_pipeline("p3", %{ticket_id: "p3#1"})
     assert_receive {:spawned, "publish", _}, 2_000
 
-    Bus.broadcast("pod.completed", %{
+    pod_completed(%{
       "pod_id" => "pod-publish",
       "ticket_id" => "p3#1",
       "pipeline_id" => pipeline_id,
@@ -253,7 +265,7 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
     assert File.dir?(Path.join(ws, ".git"))
 
     # Le worker tente d'écraser un fichier hors workspace via `../`.
-    Bus.broadcast("pod.completed", %{
+    pod_completed(%{
       "pod_id" => "pod-publish",
       "ticket_id" => "p5#1",
       "pipeline_id" => pipeline_id,
@@ -293,7 +305,7 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
 
     ws = workspace_for(pipeline_id, "publish")
 
-    Bus.broadcast("pod.completed", %{
+    pod_completed(%{
       "pod_id" => "pod-publish",
       "ticket_id" => "p6#1",
       "pipeline_id" => pipeline_id,
@@ -328,7 +340,7 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
     {:ok, pipeline_id} = Pipeline.start_pipeline("p4", %{ticket_id: "p4#1"})
     assert_receive {:spawned, "publish", _}, 2_000
 
-    Bus.broadcast("pod.completed", %{
+    pod_completed(%{
       "pod_id" => "pod-publish",
       "ticket_id" => "p4#1",
       "pipeline_id" => pipeline_id,

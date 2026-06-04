@@ -108,11 +108,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ── Checks implémentés ───────────────────────────────────────────────
 
   # R03/R10 (→R2) : les consommateurs d'events doivent matcher %Fleet.Event{},
-  # pas le tuple legacy {atom, %{"event_type" => ...}}.
+  # pas le tuple legacy {atom, %{"event_type" => ...}}. Set R2 = Executor + WS
+  # (R2a, fait) + TaskMonitor + RelayHandler (R2b). Hors R2 (autres sous-lots) :
+  # AutoDispatcher (Pilot→R4), MCP Bridge (channels→R6), Dispatch/AuditConsumer
+  # (dual legacy retiré au verrou→R5/R7).
   defp check_event_consumers_canon(root) do
     targets = [
       "apps/fleet_pipeline/lib/fleet/pipeline/executor.ex",
-      "apps/fleet_api/lib/fleet/api/ws.ex"
+      "apps/fleet_api/lib/fleet/api/ws.ex",
+      "apps/fleet_task_monitor/lib/fleet/task_monitor.ex",
+      "apps/fleet_api/lib/fleet/api/relay_handler.ex"
     ]
 
     evidence =
