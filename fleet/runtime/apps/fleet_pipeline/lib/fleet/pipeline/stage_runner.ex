@@ -286,8 +286,15 @@ defmodule Fleet.Pipeline.StageRunner do
   end
 
   @doc """
-  Résolution des inputs : chaque spec `%{"from_stage" => s, "key" => k}`
-  pioche `prior_outputs[s][k]`. Renvoie une map keyed par `from_stage`.
+  Résolution des inputs vers une map. Deux formes d'item supportées :
+
+    * **v1 structuré** `%{"from_stage" => s, "key" => k}` → pioche
+      `prior_outputs[s][k]`, keyed par `from_stage` (passage de données
+      cross-stage).
+    * **v2.5 déclaratif** `"ticket.body"` / `"git_diff_main_to_head"` /
+      chemin → descriptif que le pod résout lui-même. Le moteur est mécanique
+      (pas de fetch) : on le passe en self-key (`%{descr => descr}`) pour
+      qu'il apparaisse dans le mandat sans valeur inventée.
 
   ## Examples
 
@@ -297,6 +304,9 @@ defmodule Fleet.Pipeline.StageRunner do
       ...> )
       %{"a" => 42}
 
+      iex> Fleet.Pipeline.StageRunner.resolve_inputs(["ticket.body"], %{})
+      %{"ticket.body" => "ticket.body"}
+
       iex> Fleet.Pipeline.StageRunner.resolve_inputs(nil, %{})
       %{}
   """
@@ -305,8 +315,9 @@ defmodule Fleet.Pipeline.StageRunner do
   def resolve_inputs([], _prior), do: %{}
 
   def resolve_inputs(specs, prior) when is_list(specs) do
-    Enum.reduce(specs, %{}, fn %{"from_stage" => s, "key" => k}, acc ->
-      Map.put(acc, s, get_in(prior, [s, k]))
+    Enum.reduce(specs, %{}, fn
+      %{"from_stage" => s, "key" => k}, acc -> Map.put(acc, s, get_in(prior, [s, k]))
+      input, acc when is_binary(input) -> Map.put(acc, input, input)
     end)
   end
 

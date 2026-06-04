@@ -24,7 +24,13 @@ defmodule Fleet.Pipeline.Loader do
   """
 
   @doc """
-  Charge un pipeline YAML par nom + valide le schema.
+  Charge un pipeline YAML par nom, valide le schema, puis **normalise** vers
+  la forme interne unique `%{"name" => ..., "stages" => ...}` (U1, R3/D2).
+
+  Le format source (flat v1 `name/stages` top-level OU enveloppe v2.5
+  `kind/metadata/spec.stages`) est déballé ici, au LOAD. En aval, l'Executor /
+  Toposort / StageRunner consomment toujours `pipeline["stages"]` sans connaître
+  le format d'origine — une seule forme représentable (I-CBC au load).
 
   Raises `YamlElixir.FileNotFoundError` si fichier introuvable,
   `RuntimeError` si schema invalide.
@@ -42,11 +48,25 @@ defmodule Fleet.Pipeline.Loader do
 
     case ExJsonSchema.Validator.validate(schema, yaml) do
       :ok ->
-        yaml
+        normalize(yaml)
 
       {:error, errors} ->
         raise "Fleet.Pipeline.Loader: schema #{schema_file} invalide pour #{pipeline_name}: #{inspect(errors)}"
     end
+  end
+
+  # U1 — Loader-normalizer (R3/D2). Le schema a déjà garanti la structure
+  # (v2.5 ⇒ `spec.stages` présent ; v1 ⇒ `stages` top-level). On déballe vers
+  # `%{"name", "stages"}`. Les champs d'enveloppe non consommés (`metadata`
+  # autre que `name`, `spec.on_escalation`/`on_failure`, `cycle`,
+  # `selection_priority`) sont volontairement écartés — étendre cette forme
+  # quand un consommateur réel apparaît (pas de portage spéculatif).
+  defp normalize(%{"spec" => %{"stages" => stages}} = yaml) when is_map(stages) do
+    %{"name" => get_in(yaml, ["metadata", "name"]), "stages" => stages}
+  end
+
+  defp normalize(%{"stages" => stages} = yaml) when is_map(stages) do
+    %{"name" => yaml["name"], "stages" => stages}
   end
 
   defp pipelines_root(opts) do

@@ -119,6 +119,70 @@ defmodule Fleet.Pipeline.GatesTest do
       Application.delete_env(:fleet_pipeline, :gatekeeper_invocations)
     end
   end
+
+  describe "evaluate/3 — v2.5 string rules (R3)" do
+    test "hard : tous les prédicats vrais → :pass" do
+      stage = %{
+        "gate" => %{"type" => "hard", "rules" => ["all_tests_pass", "tdd_iron_law_respected"]}
+      }
+
+      assert :pass =
+               Gates.evaluate(
+                 stage,
+                 %{"all_tests_pass" => true, "tdd_iron_law_respected" => true},
+                 %{}
+               )
+    end
+
+    test "hard : un prédicat faux → {:fail}" do
+      stage = %{"gate" => %{"type" => "hard", "rules" => ["all_tests_pass"]}}
+      assert {:fail, _} = Gates.evaluate(stage, %{"all_tests_pass" => false}, %{})
+    end
+
+    test "terminal : prédicats vrais sans aval humain → :pass" do
+      stage = %{"gate" => %{"type" => "terminal", "rules" => ["severity_max != critical"]}}
+      assert :pass = Gates.evaluate(stage, %{"severity_max" => "important"}, %{})
+    end
+
+    test "terminal : un prédicat faux → {:fail}" do
+      stage = %{"gate" => %{"type" => "terminal", "rules" => ["severity_max != critical"]}}
+      assert {:fail, _} = Gates.evaluate(stage, %{"severity_max" => "critical"}, %{})
+    end
+
+    test "terminal human_approval_required (prédicats OK) → {:fail} fail-closed (pas d'auto-pass)" do
+      stage = %{
+        "gate" => %{
+          "type" => "terminal",
+          "human_approval_required" => true,
+          "rules" => ["spec_doc_exists"]
+        }
+      }
+
+      assert {:fail, reason} = Gates.evaluate(stage, %{"spec_doc_exists" => true}, %{})
+      assert reason =~ "human_approval_required"
+    end
+
+    test "terminal SANS clé rules + human_approval (gate `finish` canon) → {:fail}, pas de crash" do
+      # standard-qa `finish` : terminal + human_approval, AUCUNE rules.
+      stage = %{"gate" => %{"type" => "terminal", "human_approval_required" => true}}
+      assert {:fail, reason} = Gates.evaluate(stage, %{}, %{})
+      assert reason =~ "human_approval_required"
+    end
+
+    test "terminal rules:[] + human_approval → {:fail} (JAMAIS :pass silencieux)" do
+      stage = %{
+        "gate" => %{"type" => "terminal", "rules" => [], "human_approval_required" => true}
+      }
+
+      assert {:fail, reason} = Gates.evaluate(stage, %{}, %{})
+      assert reason =~ "human_approval_required"
+    end
+
+    test "terminal SANS rules ni human_approval → :pass (dégénéré, rien à juger)" do
+      stage = %{"gate" => %{"type" => "terminal"}}
+      assert :pass = Gates.evaluate(stage, %{}, %{})
+    end
+  end
 end
 
 defmodule Fleet.Pipeline.GatesTest.CoordStub do

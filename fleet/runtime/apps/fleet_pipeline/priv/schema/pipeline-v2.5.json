@@ -73,7 +73,7 @@
                       "properties": {
                         "type": {"enum": ["hard", "soft", "terminal"]},
                         "rule": {},
-                        "rules": {"type": "array"},
+                        "rules": {"type": "array", "items": {"type": "string"}},
                         "max_rounds": {"type": "integer", "minimum": 1},
                         "max_retries": {"type": "integer", "minimum": 0},
                         "max_revisions": {"type": "integer", "minimum": 0},

@@ -4,6 +4,11 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   kind/metadata/spec) sans casser le flat chantier-12. Détection
   présence `spec` top-level → pipeline-v2.5.json ; sinon → pipeline-v1.json.
 
+  U1 (R3/D2) — `Loader.load!` NORMALISE désormais le résultat vers la forme
+  interne unique `%{"name", "stages"}` : l'enveloppe v2.5 est déballée au load
+  (les tests assertent la forme normalisée, plus le YAML brut). La détection de
+  format + validation schema restent inchangées (v2.5 vs v1).
+
   M7 — `async: true` : on passe `:pipelines_root` via opts à `Loader.load!/2`
   (pas de couplage Application env global).
   """
@@ -14,21 +19,23 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   # R0.8-brick6 : canon pipelines réabsorbés in-repo.
   @canon_pipelines Application.app_dir(:fleet_pipeline, "priv/canon/pipelines")
 
-  test "canon standard-qa.yaml (V2.5) valide pipeline-v2.5.json via Loader" do
-    yaml = Loader.load!("standard-qa", pipelines_root: @canon_pipelines)
-    assert yaml["kind"] == "Pipeline"
-    assert get_in(yaml, ["metadata", "name"]) == "standard-qa"
-    assert is_map(get_in(yaml, ["spec", "stages"]))
+  test "canon standard-qa.yaml (V2.5) normalisé → name + stages top-level" do
+    pipe = Loader.load!("standard-qa", pipelines_root: @canon_pipelines)
+    assert pipe["name"] == "standard-qa"
+    assert is_map(pipe["stages"])
+    assert is_map(pipe["stages"]["brainstorm"])
+    refute Map.has_key?(pipe, "spec")
   end
 
-  test "canon audit-only.yaml (V2.5) valide pipeline-v2.5.json via Loader" do
-    yaml = Loader.load!("audit-only", pipelines_root: @canon_pipelines)
-    assert get_in(yaml, ["metadata", "name"]) == "audit-only"
-    assert is_map(get_in(yaml, ["spec", "stages"]))
+  test "canon audit-only.yaml (V2.5) normalisé → name + stages top-level" do
+    pipe = Loader.load!("audit-only", pipelines_root: @canon_pipelines)
+    assert pipe["name"] == "audit-only"
+    assert is_map(pipe["stages"])
+    refute Map.has_key?(pipe, "spec")
   end
 
   @tag :tmp_dir
-  test "régression : flat chantier-12 (sans spec top-level) → pipeline-v1.json inchangé",
+  test "régression : flat chantier-12 (sans spec top-level) → forme normalisée identique",
        %{tmp_dir: dir} do
     flat = """
     name: legacy-flat
@@ -40,9 +47,10 @@ defmodule Fleet.Pipeline.LoaderV25Test do
     """
 
     File.write!(Path.join(dir, "legacy-flat.yaml"), flat)
-    yaml = Loader.load!("legacy-flat", pipelines_root: dir)
-    assert yaml["name"] == "legacy-flat"
-    refute Map.has_key?(yaml, "spec")
+    pipe = Loader.load!("legacy-flat", pipelines_root: dir)
+    assert pipe["name"] == "legacy-flat"
+    assert is_map(pipe["stages"]["only"])
+    refute Map.has_key?(pipe, "spec")
   end
 
   @tag :tmp_dir
@@ -67,7 +75,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
 
     File.write!(Path.join(dir, "face2-stage.yaml"), yaml)
     loaded = Loader.load!("face2-stage", pipelines_root: dir)
-    stage = get_in(loaded, ["spec", "stages", "publish"])
+    stage = get_in(loaded, ["stages", "publish"])
     assert get_in(stage, ["post_extract", "git", "repo_url"]) == "http://gitea/fleet/lcars"
     assert get_in(stage, ["post_extract", "git", "branch"]) == "feature/x"
     assert get_in(stage, ["post_extract", "git", "push"]) == true
