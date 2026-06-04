@@ -489,7 +489,7 @@ defmodule Fleet.CapProfileTest do
       tuple({
         string(:alphanumeric, min_length: 1, max_length: 12),
         member_of(~w(bwrap none)),
-        member_of(~w(one-shot pipe run session-user forever))
+        member_of(~w(one-shot pipe run forever))
       }),
       fn {name, containment, lifetime} ->
         %Fleet.CapProfile{

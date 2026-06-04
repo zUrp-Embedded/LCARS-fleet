@@ -66,7 +66,7 @@
           "properties": {
             "lifetime_scope": {
               "type": "string",
-              "enum": ["one-shot", "pipe", "run", "session-user", "forever"]
+              "enum": ["one-shot", "pipe", "run", "forever"]
             },
             "boot_at_start": { "type": "boolean" },
             "subagent_template": { "type": ["string", "null"] },

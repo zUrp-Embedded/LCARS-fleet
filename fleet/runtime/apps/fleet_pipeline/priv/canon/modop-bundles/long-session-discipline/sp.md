@@ -9,7 +9,7 @@
 
 ## Principe
 
-Discipline cognitive pour pods avec `lifetime_scope: session-user` ou `forever` (contexte 1M tokens utilisé) qui durent des heures voire jours en autonomie. Anti-dérive cognitive sur durée prolongée.
+Discipline cognitive pour pods avec `lifetime_scope: forever` (contexte 1M tokens utilisé) qui durent des heures voire jours en autonomie. Anti-dérive cognitive sur durée prolongée.
 
 **Différence avec `fire-mode`** : fire-mode = livraison autonome one-shot mandat clair. long-session-discipline = autonomie continue interactive user-driven. Les deux sont **incompatibles** dans le même modop_set.default car ils prescrivent des comportements opposés (fire-mode = exécution autonome ; long-session = vérification user systématique).
 
@@ -96,7 +96,7 @@ Pod avec ce modop dans default produit :
 
 ## Trigger d'application
 
-Cap-profiles avec `lifetime_scope: forever` ou `session-user` :
+Cap-profiles avec `lifetime_scope: forever` :
 - `architect-interactive.yaml` ✓ (default = [long-session-discipline])
 - `starfleet.yaml` (forever D-01) — pourrait l'ajouter en optional
 

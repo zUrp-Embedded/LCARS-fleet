@@ -13,10 +13,6 @@ defmodule Fleet.Spawner.RestartStrategyTest do
     assert :transient = Fleet.Spawner.restart_strategy_for("run")
   end
 
-  test "session-user maps to :transient" do
-    assert :transient = Fleet.Spawner.restart_strategy_for("session-user")
-  end
-
   test "forever maps to :permanent" do
     assert :permanent = Fleet.Spawner.restart_strategy_for("forever")
   end

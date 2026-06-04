@@ -39,7 +39,7 @@ defmodule Fleet.CapProfile do
   @disallowed_minimum_prefix ~w(tool_search_)
 
   @containment_enum ~w(bwrap none)
-  @lifetime_scope_enum ~w(one-shot pipe run session-user forever)
+  @lifetime_scope_enum ~w(one-shot pipe run forever)
 
   # Fast-path guard for top-level reserved keys. `metadata.containment`
   # and `metadata.name` are also reserved — enforced by the JSON schema

@@ -11,8 +11,9 @@ defmodule Fleet.Spawner.Pod do
 
   Chaque transition est dirigée par `handle_continue/2`. L'`init/1`
   démarre la chaîne avec `{:continue, :allocate}`. Si recovery state
-  FS détecte un `session_id` capturé, l'`init/1` reprend directement
-  en phase `:launching` (le respawn passera `--resume <session_id>`).
+  FS détecte un `session_id` (pré-alloué au spawn, persisté `state.json`),
+  l'`init/1` reprend directement en phase `:launching` (le respawn
+  passera `--resume <session_id>`).
 
   ## Conditions
 
@@ -22,22 +23,14 @@ defmodule Fleet.Spawner.Pod do
   `:home_released`. Permet à `pod_info/1` de distinguer "phase X
   atteinte" de "condition Y vérifiée".
 
-  ## F-INIT-VALIDATE (handoff consultant SDK)
-
-  Au passage `:monitoring`, le module valide les 9 champs critiques
-  de la première frame `init` NDJSON émise par claude -p :
-  `tools`, `model`, `permission_mode`, `api_key_source`, `cwd`,
-  `claude_code_version`, `mcp_servers`, `slash_commands`, `agents`.
-  Si la frame `init` reçue manque > 0 champs requis ou si
-  `api_key_source` ≠ `"oauth"`, le pod transitionne `:failed`.
-
   ## Recovery state FS
 
-  `<state_fs_root>/<scope>/<id>/state.json` écrit après `:launching`
-  (capture `session_id`). `<scope>` ∈ `pods` (one-shot) /
-  `pipes` (pipe) / `runs` (run/session-user/forever). Au prochain
-  `init/1`, lecture du fichier → reprise directe en phase
-  `:launching` avec le `session_id` (claude -p `--resume`).
+  `<state_fs_root>/<scope>/<id>/state.json` écrit dès post-ALLOCATE
+  (le `session_id` est pré-alloué au spawn — ADR-G IV.1/IV.2 : plus de
+  frame `init` NDJSON, modèle `-p` mort). `<scope>` ∈ `pods` (one-shot/forever) /
+  `pipes` (pipe) / `runs` (run). Au prochain `init/1`, lecture du fichier →
+  reprise directe en phase `:launching` avec le `session_id`
+  (`--resume <session_id>` au respawn).
   """
 
   use GenServer, restart: :transient
@@ -709,7 +702,7 @@ defmodule Fleet.Spawner.Pod do
     #
     # Branche lifetime_scope (chantier engineer long-lived) :
     #   - `one-shot` : extract → release → kill (cycle complet 1 task = 1 vie pod).
-    #   - autres (`pipe`/`run`/`session-user`/`forever`) : pod long-lived. Le
+    #   - autres (`pipe`/`run`/`forever`) : pod long-lived. Le
     #     broadcast pod.completed remonte le résultat au pipeline / starfleet
     #     (qui décide promote/renvoi), mais le pod RESTE vivant. Retour à
     #     :monitoring, reset submitted_result, re-arm result_deadline pour
@@ -944,7 +937,6 @@ defmodule Fleet.Spawner.Pod do
 
   defp scope_for("pipe"), do: "pipes"
   defp scope_for("run"), do: "runs"
-  defp scope_for("session-user"), do: "runs"
   # DN spawner-orchestrator §C-3 + cap-profiles-schema §B (F-Q5) : `forever` partage
   # le scope FS `pods/` avec `one_shot` (les deux = pods avec lifetime propre).
   defp scope_for("forever"), do: "pods"
@@ -1013,7 +1005,7 @@ defmodule Fleet.Spawner.Pod do
   # R0.8-brick4 : timeout de RÉPONSE (pas budget de durée de vie) au tool MCP
   # submit_result. Si pas de réponse dans le délai → :result_deadline →
   # transition_failed → kill+relaunch via OTP restart strategy par
-  # `lifetime_scope` (one-shot=:temporary, pipe/run/session-user=:transient,
+  # `lifetime_scope` (one-shot=:temporary, pipe/run=:transient,
   # forever=:permanent — cf. `Fleet.Spawner.restart_strategy_for/1`).
   #
   # Override par cap-profile optionnel : `spec.timeouts.response_sec`. Sinon

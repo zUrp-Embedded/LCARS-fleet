@@ -19,7 +19,7 @@ defmodule Fleet.Spawner do
   Mappée depuis `cap_profile.spec["invocation"]["lifetime_scope"]` :
 
     * `"one-shot"` → `:temporary` (pas de restart, mort propre post-EXTRACT)
-    * `"pipe"` / `"run"` / `"session-user"` → `:transient` (restart si crash, pas si exit normal)
+    * `"pipe"` / `"run"` → `:transient` (restart si crash, pas si exit normal)
     * `"forever"` → `:permanent` (daemon long-run, restart toujours)
 
   ## Recovery
@@ -153,7 +153,7 @@ defmodule Fleet.Spawner do
   """
   @spec restart_strategy_for(String.t()) :: :temporary | :transient | :permanent
   def restart_strategy_for("one-shot"), do: :temporary
-  def restart_strategy_for(scope) when scope in ["pipe", "run", "session-user"], do: :transient
+  def restart_strategy_for(scope) when scope in ["pipe", "run"], do: :transient
   def restart_strategy_for("forever"), do: :permanent
 
   # finding Vulcan : un lifetime_scope inconnu (typo) tombait SILENCIEUSEMENT sur :temporary

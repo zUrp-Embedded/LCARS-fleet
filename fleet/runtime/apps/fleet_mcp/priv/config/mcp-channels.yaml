@@ -21,7 +21,7 @@ channels:
       - "fleet-control.memory.*"      # Memory ⟨X⟩ V1 queries (alpha, beta, gamma, ...)
       - "fleet-control.coord.*"       # Coord broadcasts (action, escalate, notify)
       - "fleet-control.audit.*"       # Audit verdicts (qualifier, reviewer, gatekeeper, consultant)
-      - "fleet-control.architect.*"   # Architect-interactive bridge (session-user)
+      - "fleet-control.architect.*"   # Architect-interactive bridge (forever)
       - "fleet-control.starfleet.*"   # Starfleet host-natif bridge (D-01)
       - "fleet-control.engineer.*"    # Engineer worker channel
       - "fleet-control.qualifier.*"   # Qualifier worker channel
