@@ -71,17 +71,20 @@ defmodule Fleet.API.RelayHandler do
     {:ok, nil}
   end
 
+  # R2b (D1 schema unique) — consommation canon `%Fleet.Event{}` strict.
+  # Le tuple legacy `{atom, %{"event_type" => ...}}` est RETIRÉ. Match sur
+  # `type` (ignore `source` : event vestigial pré-canon, cf. moduledoc).
   @impl GenServer
   def handle_info(
-        {_atom,
-         %{"event_type" => "permission_relay_request", "payload" => %{"ref" => ref} = payload}},
+        %Fleet.Event{type: :permission_relay_request, payload: %{"ref" => ref} = payload},
         state
       ) do
     :ets.insert(@ets_table, {ref, payload})
     {:noreply, state}
   end
 
-  def handle_info({_atom, %{"event_type" => _other}}, state), do: {:noreply, state}
+  # Tout autre %Fleet.Event{} (autres types) ou message non-event = ignoré.
+  def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_msg, state), do: {:noreply, state}
 
   defp lookup_pending(ref) do

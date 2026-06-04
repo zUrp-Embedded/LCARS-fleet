@@ -1,6 +1,7 @@
 # Fleet.TaskMonitor
 
 **Date** : 2026-06-02 (créé — dette README, convention CLAUDE.md:82)
+**Dernière révision** : 2026-06-04 (R2b — migration consommation canon `%Fleet.Event{}`, `map_event/1`)
 **Statut** : implémenté, **config-gated** (`:start_monitor` défaut `false`)
 **Dérivé de** : DN `ring1/fleet-task-monitor`
 
@@ -20,14 +21,16 @@ qui voit ainsi l'état de la fleet dans son panneau Tasks natif. **Core write-on
 
 - `Fleet.TaskMonitor.start_link/1` — démarre le monitor (opts test-seam : `tasks_root`, `list_id`, `subscribe`, `name`).
 - `Fleet.TaskMonitor.prefix/0` / `statuses/0` — conventions de nommage / statuts exposés.
-- `Fleet.TaskMonitor.map_event/2` — pur : `(event_atom, event) → mutation TaskList` (testable isolément).
+- `Fleet.TaskMonitor.map_event/1` — pur : `%Fleet.Event{} → mutation TaskList` (testable isolément).
 
-## Contrat Bus (réel, pas le pseudo-code DN)
+## Contrat Bus (canon `%Fleet.Event{}`, D1 — R2b)
 
-Consomme les events **tuple legacy** `{event_type_atom, %{"event_type", "payload", "ticket_id"?, "pod_id"?}}`
-(format `Fleet.EventRouter.Bus` + `dispatch.ex`). ⚠️ Comme `Dispatch`, il ne voit donc PAS les events
-**struct `%Fleet.Event{}`** du broker `Fleet.TaskQueue` (cf. dual-stack, audit deep-02) — il ne reflète
-les tâches que via les events tuple tant que le canon n'est pas unifié (rework).
+Consomme la **struct canon** `%Fleet.Event{source:, type:, payload:, correlation_id:, pod_id:}` (schéma
+unique D1, BL-021). Dispatch sur `type` (consommateur dashboard multi-source) ; `correlation_id` porte le
+ticket, `pod_id` le pod. La forme tuple legacy `{atom, %{"event_type" => …}}` est **retirée** (I-CBC, plus
+représentable côté consommateur). Les events des producteurs migrés (`Fleet.TaskQueue`, `Fleet.Spawner.Pod`,
+etc.) sont donc tous vus sous la même forme. ⚠️ Consommateur **dormant** : ses events (`:dispatch_started`,
+`:gatekeeper_spawned`, `:ticket_*`, …) n'ont pas encore de producteur câblé (cf. DN §Intersections).
 
 ## OTP (Iron Law)
 

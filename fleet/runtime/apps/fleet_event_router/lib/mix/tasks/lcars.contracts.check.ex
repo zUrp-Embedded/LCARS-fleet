@@ -120,9 +120,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       "apps/fleet_api/lib/fleet/api/relay_handler.ex"
     ]
 
+    pattern = ~r/"event_type"\s*=>/
+
+    # Le check mesure le CODE réel : une mention `"event_type" =>` en
+    # commentaire (ex. « le tuple legacy {atom, %{"event_type" => ...}} est
+    # RETIRÉ ») ne doit PAS compter comme une violation (sinon le gate flague
+    # sa propre documentation — clôture sur proxy). On retire le commentaire
+    # de fin de ligne avant de re-tester (R2b).
     evidence =
       Enum.flat_map(targets, fn rel ->
-        grep_lines(Path.join(root, rel), ~r/"event_type"\s*=>/)
+        Path.join(root, rel)
+        |> grep_lines(pattern)
+        |> Enum.filter(fn {_ln, line} -> Regex.match?(pattern, strip_comment(line)) end)
         |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
       end)
 
@@ -209,6 +218,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     mod = String.to_atom("Elixir." <> name)
     Code.ensure_loaded?(mod)
   end
+
+  # Retire le commentaire `#...` de fin de ligne, hors chaîne double-quote
+  # (les `#` à l'intérieur d'un "..." sont du code, ex. interpolation `#{}`).
+  # Heuristique suffisante pour mesurer le code vs une mention en commentaire.
+  # Limite connue : le char literal `?#` est tronqué (non géré) — non exploitable
+  # sur les cibles fixes (aucun `?#`), une forme tuple `{?#, …}` étant absurde.
+  defp strip_comment(line) do
+    line
+    |> String.to_charlist()
+    |> do_strip_comment([], false)
+    |> Enum.reverse()
+    |> List.to_string()
+  end
+
+  defp do_strip_comment([], acc, _in_str), do: acc
+  defp do_strip_comment([?# | _rest], acc, false), do: acc
+
+  defp do_strip_comment([?" | rest], acc, in_str),
+    do: do_strip_comment(rest, [?" | acc], not in_str)
+
+  defp do_strip_comment([c | rest], acc, in_str), do: do_strip_comment(rest, [c | acc], in_str)
 
   defp grep_lines(path, regex) do
     case File.read(path) do
