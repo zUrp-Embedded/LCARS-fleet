@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-05-27
+**Dernière révision** : 2026-06-05 (P05 — readiness honnête `/api/readiness/deep` + `Fleet.API.Readiness` read-model anti-vert-creux)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -18,12 +18,14 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 | `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
 | `Fleet.API.RelayHandler` | GenServer subscribe `permission_relay_request`, ETS pending refs, POST `/api/relay/:ref` → broadcast `permission_relay_response` (round-trip ch10) |
 | `Fleet.API.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380) |
+| `Fleet.API.Readiness` | read-model P05 — état opérationnel LIVE (anti-vert-creux). Introspecte config/process/persistent_term ; `deep/0` rend `status: operational\|degraded` + sous-systèmes. Jumeau runtime de `mix lcars.contracts.check` (plan source-conformance build/CI) sur le plan opérationnel. Fonctions pures (pas de process — Iron Law) |
 
 ## Routes REST
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| GET | `/api/health` | NO | readiness probe (consommé ch16) |
+| GET | `/api/health` | NO | readiness probe shallow (200 dès Cowboy bind, consommé ch16 `lcars-readiness`) |
+| GET | `/api/readiness/deep` | HMAC | P05 — état opérationnel LIVE (`Fleet.API.Readiness.deep/0`). 200 même si `status: degraded` (dégradation = donnée, pas erreur HTTP). Vue interne → auth |
 | GET | `/api/pipelines` | HMAC | liste état pipelines |
 | GET | `/api/tickets` | HMAC | liste tickets |
 | GET | `/api/pods` | HMAC | liste pods |
@@ -75,7 +77,7 @@ Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 
 ```bash
 mix test apps/fleet_api
-# 34 tests, 0 failures
+# 58 tests, 0 failures
 ```
 
 Tests utilisent `Plug.Test` pour Rest (pas de listener réel),

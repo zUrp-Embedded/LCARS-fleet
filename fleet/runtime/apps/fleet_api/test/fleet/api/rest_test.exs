@@ -38,6 +38,26 @@ defmodule Fleet.API.RestTest do
     end
   end
 
+  describe "GET /api/readiness/deep (P05, auth)" do
+    test "no token → 401 (vue interne, pas un probe public)" do
+      conn = conn(:get, "/api/readiness/deep") |> Rest.call(@opts)
+      assert conn.status == 401
+    end
+
+    test "valid token → 200 + état opérationnel structuré", %{secret: secret} do
+      conn =
+        conn(:get, "/api/readiness/deep")
+        |> put_req_header("x-auth-token", valid_token(secret))
+        |> Rest.call(@opts)
+
+      assert conn.status == 200
+      {:ok, body} = Jason.decode(conn.resp_body)
+      assert body["status"] in ["operational", "degraded"]
+      assert is_list(body["subsystems"])
+      assert is_list(body["degraded"])
+    end
+  end
+
   describe "auth HMAC" do
     test "missing token → 401", %{secret: _secret} do
       conn = conn(:get, "/api/pipelines") |> Rest.call(@opts)

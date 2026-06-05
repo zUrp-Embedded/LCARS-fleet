@@ -4,7 +4,9 @@ defmodule Fleet.API.Rest do
 
   ## Routes MVP
 
-    * `GET /api/health` — readiness probe
+    * `GET /api/health` — readiness probe (public, no auth)
+    * `GET /api/readiness/deep` — état opérationnel LIVE (P05, auth) via
+      `Fleet.API.Readiness.deep/0` — anti-vert-creux
     * `GET /api/pipelines` / `tickets` / `pods` — lecture état (stubs MVP)
     * `POST /api/admin/spawn` — broadcast `admin.spawn.request` event
     * `POST /api/config/update` — atomic write + git commit auto via
@@ -37,6 +39,13 @@ defmodule Fleet.API.Rest do
   # Public health probe — no auth (skipped via require_auth special-case)
   get "/api/health" do
     send_json(conn, %{status: "ok", ts: DateTime.utc_now() |> DateTime.to_iso8601()})
+  end
+
+  # P05 — readiness deep : état opérationnel LIVE (anti-vert-creux). Auth-gated
+  # (vue de câblage interne, pas un probe public comme /api/health). 200 même
+  # si `status: degraded` — la dégradation est une donnée, pas une erreur HTTP.
+  get "/api/readiness/deep" do
+    send_json(conn, Fleet.API.Readiness.deep())
   end
 
   get "/api/pipelines" do
