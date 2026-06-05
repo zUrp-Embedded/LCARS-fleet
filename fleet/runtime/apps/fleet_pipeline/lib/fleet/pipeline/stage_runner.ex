@@ -280,7 +280,7 @@ defmodule Fleet.Pipeline.StageRunner do
       end
 
     case result do
-      {:ok, cap} -> get_in(cap.spec, ["invocation", "lifetime_scope"]) || "one-shot"
+      {:ok, cap} -> Fleet.CapProfile.lifetime_scope(cap)
       _ -> "one-shot"
     end
   end

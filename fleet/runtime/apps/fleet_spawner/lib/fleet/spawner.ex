@@ -220,7 +220,7 @@ defmodule Fleet.Spawner do
 
   defp pod_child_spec(args) do
     cap_profile = args.cap_profile
-    scope = get_in(cap_profile.spec, ["invocation", "lifetime_scope"]) || "one-shot"
+    scope = Fleet.CapProfile.lifetime_scope(cap_profile)
     max_alive_sec = get_in(cap_profile.spec, ["invocation", "max_alive_sec"]) || 600
 
     %{

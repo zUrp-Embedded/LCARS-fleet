@@ -754,9 +754,8 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  defp lifetime_scope(%Fleet.CapProfile{spec: spec}) do
-    get_in(spec, ["invocation", "lifetime_scope"]) || "one-shot"
-  end
+  # Rework #4 : délègue à la source unique `Fleet.CapProfile.lifetime_scope/1`.
+  defp lifetime_scope(%Fleet.CapProfile{} = cp), do: Fleet.CapProfile.lifetime_scope(cp)
 
   # R1.3 (hole C1) : pod.completed porte le contexte pipeline (pipeline_id+stage) si
   # le pod a été spawné par fleet_pipeline (via spawn_opts). L'Executor corrèle alors
@@ -939,7 +938,7 @@ defmodule Fleet.Spawner.Pod do
         Application.get_env(:fleet_spawner, :state_fs_root, "/var/lib/lcars")
       )
 
-    scope = scope_for(get_in(cap_profile.spec, ["invocation", "lifetime_scope"]))
+    scope = scope_for(Fleet.CapProfile.lifetime_scope(cap_profile, nil))
     Path.join([root, scope, pod_id, "state.json"])
   end
 

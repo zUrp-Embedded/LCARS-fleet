@@ -393,6 +393,18 @@ defmodule Fleet.CapProfile do
   # Struct conversion
   # ============================================================
 
+  @doc """
+  Accesseur canon du `lifetime_scope` d'un cap-profile (`spec.invocation.lifetime_scope`,
+  schéma v2.5). Rework #4 : source unique — l'extraction était ré-implémentée dans
+  spawner/stage_runner/sp_builder/pod avec des défauts incohérents. `default` par
+  défaut `"one-shot"` (le défaut canon) ; les lecteurs qui veulent distinguer
+  l'absence (ex. mandate_guard) passent `nil`.
+  """
+  @spec lifetime_scope(t(), term()) :: String.t() | term()
+  def lifetime_scope(%__MODULE__{spec: spec}, default \\ "one-shot") do
+    get_in(spec, ["invocation", "lifetime_scope"]) || default
+  end
+
   defp to_struct(raw) when is_map(raw) do
     %__MODULE__{
       kind: Map.get(raw, "kind"),
