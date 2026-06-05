@@ -54,9 +54,54 @@ defmodule Fleet.SpawnerTest do
     }
   end
 
+  defp forever_profile do
+    put_in(valid_profile().spec["invocation"], %{"lifetime_scope" => "forever"})
+  end
+
+  describe "R18 — refus spawn one-shot sans mandat" do
+    test "one-shot + pas de mandat → {:error, :mandate_required}" do
+      assert {:error, :mandate_required} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-no-mandate")
+    end
+
+    test "one-shot + mandat VIDE (ex. StageSpawner ctx vide) → {:error, :mandate_required}" do
+      assert {:error, :mandate_required} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-empty-mandate", mandate: "")
+    end
+
+    test "one-shot + mandat → {:ok, _}" do
+      assert {:ok, _pid} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-mandate",
+                 mandate: "répare le bug X",
+                 pod_id: "pod-r18-mandate-#{System.unique_integer([:positive])}"
+               )
+    end
+
+    test "one-shot + allow_no_mandate (admin/diagnostic) → {:ok, _}" do
+      assert {:ok, _pid} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-admin",
+                 allow_no_mandate: true,
+                 pod_id: "pod-r18-admin-#{System.unique_integer([:positive])}"
+               )
+    end
+
+    test "long-lived (forever) sans mandat → {:ok, _} (exempté, pull via MCP)" do
+      assert {:ok, _pid} =
+               Fleet.Spawner.spawn_pod(forever_profile(), "ticket-forever",
+                 pod_id: "pod-r18-forever-#{System.unique_integer([:positive])}"
+               )
+    end
+  end
+
   test "spawn_pod returns {:ok, pid} and registers the pod" do
     pod_id = "pod-public-api-#{System.unique_integer([:positive])}"
-    assert {:ok, pid} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-1", pod_id: pod_id)
+
+    assert {:ok, pid} =
+             Fleet.Spawner.spawn_pod(valid_profile(), "ticket-1",
+               pod_id: pod_id,
+               allow_no_mandate: true
+             )
+
     assert is_pid(pid)
 
     # Mi14 : registration synchrone (name: {:via, Registry, ...}) → pod enregistré dès {:ok, pid}.
@@ -69,7 +114,9 @@ defmodule Fleet.SpawnerTest do
 
   test "kill_pod terminates the pod" do
     pod_id = "pod-kill-#{System.unique_integer([:positive])}"
-    {:ok, _pid} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-2", pod_id: pod_id)
+
+    {:ok, _pid} =
+      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-2", pod_id: pod_id, allow_no_mandate: true)
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
     # Mi14 : terminate_child est sync sur la mort, MAIS le cleanup Registry (via monitor) est
@@ -83,8 +130,12 @@ defmodule Fleet.SpawnerTest do
   end
 
   test "spawn_pod uses UUID by default if no :pod_id opt given" do
-    {:ok, pid1} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-1")
-    {:ok, pid2} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-2")
+    {:ok, pid1} =
+      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-1", allow_no_mandate: true)
+
+    {:ok, pid2} =
+      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-2", allow_no_mandate: true)
+
     assert pid1 != pid2
   end
 
@@ -94,7 +145,13 @@ defmodule Fleet.SpawnerTest do
     assert initial >= 0
 
     pod_id = "pod-count-#{System.unique_integer([:positive])}"
-    {:ok, _pid} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-count", pod_id: pod_id)
+
+    {:ok, _pid} =
+      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-count",
+        pod_id: pod_id,
+        allow_no_mandate: true
+      )
+
     # Mi14 : count_children reflète l'enfant actif dès {:ok} de start_child.
     assert Fleet.Spawner.count_pods() >= initial + 1
   end
@@ -106,7 +163,12 @@ defmodule Fleet.SpawnerTest do
 
     test "wake_pod :not_a_tmux_pod si le pod existe mais pas via TmuxBackend (StubBackend → tmux_session nil)" do
       pod_id = "pod-wake-stub-#{System.unique_integer([:positive])}"
-      {:ok, _pid} = Fleet.Spawner.spawn_pod(valid_profile(), "ticket-wake", pod_id: pod_id)
+
+      {:ok, _pid} =
+        Fleet.Spawner.spawn_pod(valid_profile(), "ticket-wake",
+          pod_id: pod_id,
+          allow_no_mandate: true
+        )
 
       # StubBackend ne pose pas tmux_session dans launched → pod_info renvoie
       # tmux_session: nil → wake_pod refuse proprement (pas de send-keys).

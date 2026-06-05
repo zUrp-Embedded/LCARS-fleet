@@ -115,8 +115,11 @@ defmodule Fleet.PodRuntime.AgentTool do
   end
 
   defp run_fire_mode(%__MODULE__{} = state) do
+    # R18 : le brief EST le mandat du pod (le pod lit `opts[:mandate]`). L'ancien
+    # `brief:` n'était jamais consommé par le pod (bug latent) et serait refusé
+    # par le guard one-shot. `mandate:` livre le travail ET satisfait le guard.
     with {:ok, _pid} <-
-           state.backend.spawn_pod(state.cap_profile, state.pod_id, brief: state.brief),
+           state.backend.spawn_pod(state.cap_profile, state.pod_id, mandate: state.brief),
          {:ok, %{} = result} <- state.backend.await_result(state.pod_id, state.timeout_ms) do
       duration_ms = System.monotonic_time(:millisecond) - state.started_at
       {:ok, Map.put(result, :duration_ms, duration_ms)}

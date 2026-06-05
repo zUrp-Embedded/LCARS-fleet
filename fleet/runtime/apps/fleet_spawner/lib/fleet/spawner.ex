@@ -43,6 +43,8 @@ defmodule Fleet.Spawner do
 
   alias Fleet.Spawner.Pod
 
+  require Logger
+
   @doc """
   Spawn a new pod.
 
@@ -53,22 +55,74 @@ defmodule Fleet.Spawner do
     * `opts` :
       * `:pod_id` (default `UUID.uuid4()`)
       * `:state_fs_root` (override, default config `:fleet_spawner, :state_fs_root`)
+      * `:mandate` — le travail du pod (string). R18 : **obligatoire** pour un
+        pod `one-shot` (sinon `{:error, :mandate_required}`).
+      * `:allow_no_mandate` — échappatoire admin/diagnostic (bool, default false).
   """
   @spec spawn_pod(Fleet.CapProfile.t(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   def spawn_pod(%Fleet.CapProfile{} = cap_profile, ticket_id, opts \\ [])
       when is_binary(ticket_id) and is_list(opts) do
-    pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
+    case mandate_guard(cap_profile, opts) do
+      :ok ->
+        pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
 
-    args = %{
-      cap_profile: cap_profile,
-      ticket_id: ticket_id,
-      pod_id: pod_id,
-      opts: opts
-    }
+        args = %{
+          cap_profile: cap_profile,
+          ticket_id: ticket_id,
+          pod_id: pod_id,
+          opts: opts
+        }
 
-    spec = pod_child_spec(args)
-    DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec)
+        spec = pod_child_spec(args)
+        DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec)
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # R18 (verrou I-CBC) : un pod `one-shot` (1 tâche puis meurt) DOIT porter un
+  # mandat — sinon il part sans travail (brief générique → claude attend →
+  # timeout). Les pods long-lived (`forever`/`run`/`pipe`) pullent leurs tâches
+  # via MCP (`yop` → get_task) → exemptés (épargne les pods permanents/gatekeeper).
+  # Échappatoire admin/diagnostic explicite : `opts[:allow_no_mandate]`.
+  defp mandate_guard(%Fleet.CapProfile{spec: spec}, opts) do
+    mandate = Keyword.get(opts, :mandate)
+    # `nil` ET `""` (mandat vide — ex. `StageSpawner.build_mandate` sur un
+    # stage_ctx vide/malformé) comptent tous deux comme « pas de mandat ».
+    has_mandate? = is_binary(mandate) and mandate != ""
+    scope = get_in(spec, ["invocation", "lifetime_scope"])
+
+    cond do
+      has_mandate? ->
+        :ok
+
+      Keyword.get(opts, :allow_no_mandate, false) ->
+        :ok
+
+      scope == "one-shot" ->
+        # Diagnosable (pas un refus muet) : distingue clairement le cas.
+        Logger.warning(
+          "Fleet.Spawner.spawn_pod refusé (R18) : pod one-shot sans mandat — " <>
+            "fournir :mandate (le travail) ou :allow_no_mandate (admin/diagnostic)."
+        )
+
+        {:error, :mandate_required}
+
+      is_nil(scope) ->
+        # Profil sans lifetime_scope déclaré (non validé ?) : exemption par défaut
+        # (on ne refuse que le one-shot EXPLICITE), mais on rend le trou visible.
+        Logger.warning(
+          "Fleet.Spawner.spawn_pod (R18) : lifetime_scope absent du cap-profile — " <>
+            "spawn autorisé sans mandat (exemption par défaut, profil à vérifier)."
+        )
+
+        :ok
+
+      true ->
+        :ok
+    end
   end
 
   @doc """
@@ -145,8 +199,6 @@ defmodule Fleet.Spawner do
         err
     end
   end
-
-  require Logger
 
   @doc """
   Mappe `lifetime_scope` cap-profile vers OTP restart strategy.

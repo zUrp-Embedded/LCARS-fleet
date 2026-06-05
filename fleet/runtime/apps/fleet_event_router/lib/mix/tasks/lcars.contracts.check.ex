@@ -42,11 +42,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       id: "skills.declared_present",
       remediation: "R11",
       note: "skills whitelistés absents → fail"
-    },
-    %{
-      id: "spawn.has_mandate",
-      remediation: "R18",
-      note: "refus spawn sans mandat hors mode admin"
     }
   ]
 
@@ -97,7 +92,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_capprofile_modop_incompatible_path(root),
         check_launch_backend_containment(root),
         check_mcp_required_real_backend(root),
-        check_auth_token_arg_failloud(root)
+        check_auth_token_arg_failloud(root),
+        check_spawn_has_mandate(root)
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
@@ -361,6 +357,30 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(present?, do: :pass, else: :fail),
       evidence: if(present?, do: [], else: ["#{pod} : pas de fail-loud :oauth_token_unreadable"]),
       note: ":token_arg doit fail-loud (refus spawn) si le token est absent"
+    }
+  end
+
+  # R18 (→R4-pending) : `Fleet.Spawner.spawn_pod/3` doit refuser un pod `one-shot`
+  # sans mandat (sinon le pod part sans travail → timeout). Marqueur du guard :
+  # l'erreur `:mandate_required`. Rouge si absente (retour au brief générique muet).
+  defp check_spawn_has_mandate(root) do
+    sp = "apps/fleet_spawner/lib/fleet/spawner.ex"
+
+    present? =
+      Path.join(root, sp)
+      |> grep_lines(~r/:mandate_required/)
+      |> Enum.any?(fn {_ln, line} -> Regex.match?(~r/:mandate_required/, strip_comment(line)) end)
+
+    %{
+      id: "spawn.has_mandate",
+      remediation: "R18",
+      status: if(present?, do: :pass, else: :fail),
+      evidence:
+        if(present?,
+          do: [],
+          else: ["#{sp} : pas de guard :mandate_required au boundary spawn_pod"]
+        ),
+      note: "spawn_pod doit refuser un pod one-shot sans mandat (hors allow_no_mandate)"
     }
   end
 
