@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Gate Decision (gatekeeper, projet)",
+  "description": "Décision rendue par le gatekeeper sur une gate de pipeline projet. Distinct de decision-v1.json (starfleet/escalade OS : allow/halt/escalate/retry). Vocab canon gatekeeper-exception.md.",
+  "type": "object",
+  "required": ["decision", "reason"],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": ["continue", "abandon", "redirect", "escalate_user", "halt_wait_input"]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "details": {
+      "type": "object"
+    },
+    "chain": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

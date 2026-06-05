@@ -26,23 +26,13 @@ defmodule Fleet.Pipeline.R1SeamTest do
     @behaviour Fleet.Pipeline.StageSpawner
 
     @impl Fleet.Pipeline.StageSpawner
-    # R06 — le gatekeeper (juge unique) a un pod_id distinct du pod de stage
-    # (sinon collision de corrélation gate_evals ↔ stage).
-    def spawn_stage_pod("gatekeeper", _profile, stage_ctx) do
-      notify(stage_ctx.stage, "gatekeeper")
-      {:ok, "r1-gk-#{stage_ctx.stage}"}
-    end
-
     def spawn_stage_pod(role, _profile, stage_ctx) do
-      notify(stage_ctx.stage, role)
-      {:ok, "r1-pod-#{stage_ctx.stage}"}
-    end
-
-    defp notify(stage, role) do
       case Application.get_env(:fleet_pipeline, :r1_test_pid) do
-        pid when is_pid(pid) -> send(pid, {:spawned, stage, role})
+        pid when is_pid(pid) -> send(pid, {:spawned, stage_ctx.stage, role})
         _ -> :ok
       end
+
+      {:ok, "r1-pod-#{stage_ctx.stage}"}
     end
   end
 
@@ -116,11 +106,13 @@ defmodule Fleet.Pipeline.R1SeamTest do
     assert_receive {:spawned, "brainstorm", "architect-interactive"}, 2_000
   end
 
-  # T5 — soft gate : la complétion d'un stage à soft gate dispatche le
-  # **gatekeeper** (juge unique), jamais un silent pass ni l'ancien placeholder
-  # NotWiredYet (couture coord retirée → consolidée pipeline, R06).
+  # T5 — soft gate : la complétion d'un stage à soft gate route vers le
+  # **gatekeeper** (juge unique). Sans gatekeeper booté (work-session), la gate
+  # échoue **fail-loud** (jamais un silent pass). R4/B : le gatekeeper est un pod
+  # permanent adressé via mandat MCP, pas spawné par la gate.
   @tag :tmp_dir
-  test "T5 — soft gate → dispatch gatekeeper (jamais silent pass / NotWiredYet)", %{tmp_dir: tmp} do
+  test "T5 — soft gate route vers le gatekeeper (fail-loud si absent, jamais silent pass)",
+       %{tmp_dir: tmp} do
     pipelines_dir = Path.join(tmp, "pipelines")
     File.mkdir_p!(pipelines_dir)
 
@@ -133,7 +125,6 @@ defmodule Fleet.Pipeline.R1SeamTest do
         profile: noop
         gate:
           type: soft
-          max_rounds: 1
     """)
 
     Application.put_env(:fleet_pipeline, :pipelines_root, pipelines_dir)
@@ -147,9 +138,16 @@ defmodule Fleet.Pipeline.R1SeamTest do
 
     Bus.broadcast("fleet.events", canon_pod_completed(pid, "audit"))
 
-    # RED avant R06 : le soft gate tombait sur NotWiredYet (silent fail coord).
-    # Après : la complétion du stage évalue le soft gate → dispatch gatekeeper.
-    assert_receive {:spawned, "audit", "gatekeeper"}, 2_000
+    # Pas de gatekeeper booté (gatekeeper_pod_id nil par défaut) → la gate ne
+    # peut PAS être silent-pass : elle requiert le juge → pipeline.failed fail-loud.
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.failed",
+                     payload: %{"pipeline_id" => ^pid, "reason" => reason}
+                   },
+                   2_000
+
+    assert reason =~ "no gatekeeper"
   end
 
   # T6 (e2e) — spawn stage_a → pod.completed canon → gate → spawn stage_b.

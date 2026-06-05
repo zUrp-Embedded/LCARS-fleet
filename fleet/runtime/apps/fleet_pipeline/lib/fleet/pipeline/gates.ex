@@ -78,9 +78,8 @@ defmodule Fleet.Pipeline.Gates do
   # async + la corrélation `pod.completed` sont faits par l'Executor (qui possède
   # le nom de stage + le lifecycle). Plus de spawn coord (le « cap-profile dédié »
   # du PoC-π2 n'a jamais existé — consolidé sur gatekeeper).
-  defp eval_by_type(%{"gate" => %{"type" => "soft"} = gate}, _outputs, _ctx) do
-    max_rounds = Map.get(gate, "max_rounds", 3)
-    {:dispatch_gatekeeper, %{kind: :soft, round: 1, max_rounds: max_rounds}}
+  defp eval_by_type(%{"gate" => %{"type" => "soft"}}, _outputs, _ctx) do
+    {:dispatch_gatekeeper, %{kind: :soft}}
   end
 
   # Terminal : `rules` est OPTIONNEL (le gate `finish` du canon est terminal +

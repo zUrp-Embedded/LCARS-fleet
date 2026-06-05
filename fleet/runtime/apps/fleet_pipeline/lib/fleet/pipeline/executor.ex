@@ -23,11 +23,14 @@ defmodule Fleet.Pipeline.Executor do
      pour le `pipeline_id` courant → store outputs → dispatch gate :
      - `:pass` → stage suivant ou `pipeline.completed` broadcast + stop
      - `{:fail, reason}` → `pipeline.failed` broadcast + stop
-     - `{:dispatch_gatekeeper, info}` (R06) → spawn pod gatekeeper async,
-       état `:awaiting_gate` (corrélation `gate_evals[pod_id]`), attente du
-       `pod.completed` du gatekeeper → `handle_gate_decision/3` : decision
-       `:pass` → stage suivant ; `:retry` (soft, rounds restants) →
-       re-dispatch ; `:fail` / terminal / épuisement → `pipeline.failed`
+     - `{:dispatch_gatekeeper, info}` (R4/B) → **enqueue un mandat d'éval au
+       gatekeeper permanent** (work-session, adressé par `gatekeeper_pod_id`, MCP
+       via TaskQueue) ; état `:awaiting_gate` (corrélation `gate_evals[correlation_id]`).
+       La décision revient via `%Fleet.Event{source: :task_queue, type: :task_completed}`
+       → `handle_gate_decision/3` : vocab canon `gate-decision-v1.json`
+       (`continue` → stage suivant ; `abandon|redirect|escalate_user|halt_wait_input`
+       / inconnu → `pipeline.failed`, halt). L'Executor **ne spawn ni ne possède**
+       le gatekeeper.
 
   ## Process raison runtime
 
@@ -149,27 +152,41 @@ defmodule Fleet.Pipeline.Executor do
         %Fleet.Event{source: :spawner, type: :"pod.completed", payload: payload},
         state
       ) do
-    pod_id = payload["pod_id"]
+    if payload["pipeline_id"] == state.pipeline_id and is_binary(payload["stage"]) do
+      handle_stage_completed(payload["stage"], %{"result" => payload["result"]}, state)
+    else
+      {:noreply, state}
+    end
+  end
 
-    cond do
-      # R06 — le pod terminé est un gatekeeper d'évaluation de gate qu'on attend.
-      # Corrélation par pod_id (priorité sur le bridge de stage ci-dessous : un
-      # gatekeeper porte aussi un `stage`, mais sa complétion est une DÉCISION,
-      # pas l'avancement de la stage).
-      Map.has_key?(state.gate_evals, pod_id) ->
-        handle_gate_decision(pod_id, payload["result"], state)
-
-      payload["pipeline_id"] == state.pipeline_id and is_binary(payload["stage"]) ->
-        handle_stage_completed(payload["stage"], %{"result" => payload["result"]}, state)
-
-      true ->
-        {:noreply, state}
+  # R4/B — décision de gate du **gatekeeper** : elle revient via le mandat MCP
+  # (`task_queue.task_completed`, `correlation_id` = task.id de l'éval), PAS via
+  # un `pod.completed` (le gatekeeper est un pod permanent work-session, pas un
+  # pod spawné par cette gate). Corrélation par `correlation_id`.
+  def handle_info(
+        %Fleet.Event{source: :task_queue, type: :task_completed, correlation_id: corr} = ev,
+        state
+      )
+      when is_binary(corr) do
+    if Map.has_key?(state.gate_evals, corr) do
+      handle_gate_decision(corr, gate_result(ev.payload), state)
+    else
+      {:noreply, state}
     end
   end
 
   # Tout autre %Fleet.Event{} (autres sources/types) ou message non-event = ignoré.
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # Extrait le résultat (décision) du payload `task_completed`. Deux couches de
+  # clés : l'**enveloppe** TaskQueue.Server (`event/3`) pose `:result` en clé
+  # ATOM ; le **résultat** lui-même (la décision soumise par le gatekeeper) est du
+  # JSON parsé → clés STRING (`"decision"`, `"reason"`, lus par `gate_decision/1`).
+  defp gate_result(payload) when is_map(payload),
+    do: Map.get(payload, :result) || payload["result"]
+
+  defp gate_result(_), do: nil
 
   # ============================================================
   # Terminate — cleanup pipe-scoped pods
@@ -228,6 +245,19 @@ defmodule Fleet.Pipeline.Executor do
     Application.get_env(:fleet_pipeline, :spawner, Fleet.Spawner)
   end
 
+  # Seam broker de mandats (même que StageRunner). Default = broker réel.
+  defp task_queue do
+    Application.get_env(:fleet_pipeline, :task_queue, Fleet.TaskQueue)
+  end
+
+  # R4/B — pod_id du **gatekeeper permanent** (work-session) à adresser. Alimenté
+  # par le boot Type 3 (sous-lot C, registration). nil tant qu'aucun gatekeeper
+  # n'est booté → une gate qui requiert le juge échoue fail-loud (pas de pass
+  # silencieux). Override config/test via `:fleet_pipeline, :gatekeeper_pod_id`.
+  defp gatekeeper_pod_id do
+    Application.get_env(:fleet_pipeline, :gatekeeper_pod_id)
+  end
+
   # ============================================================
   # Internal
   # ============================================================
@@ -257,108 +287,116 @@ defmodule Fleet.Pipeline.Executor do
 
         {:stop, :gate_fail, state}
 
-      # R06 — gate déléguée au gatekeeper (async). L'Executor spawn le pod
-      # gatekeeper (il possède le nom de stage), enregistre la corrélation
-      # `pod_id → {stage, kind, round, max_rounds}` et N'AVANCE PAS : la stage
-      # reste :completed, le pipeline attend la décision (`pod.completed` du
-      # gatekeeper → handle_gate_decision/3).
+      # R4/B — gate déléguée au gatekeeper (juge unique, pod permanent
+      # work-session). L'Executor **n'avance pas** : il enqueue un mandat d'éval
+      # au gatekeeper (MCP) et attend sa décision (`task_queue.task_completed`).
       {:dispatch_gatekeeper, info} ->
         do_dispatch_gatekeeper(stage, outputs, info, state)
     end
   end
 
-  # R06 — spawn async du pod **gatekeeper** (juge unique). Le ctx porte le nom de
-  # stage + les outputs à juger. `{:ok, pod_id}` → corrélation stockée, on attend.
-  # `{:error, _}` → fail-loud (jamais un pass sur dispatch raté).
+  # R4/B — enqueue un mandat d'évaluation au **gatekeeper permanent** (work-session)
+  # via la TaskQueue (MCP). L'Executor NE spawn PAS le gatekeeper (il ne le possède
+  # pas — pod permanent partagé, booté Type 3) : il l'**adresse** par son pod_id.
+  # `{:ok, task}` → corrélation `gate_evals[task.id]` (= correlation_id), on attend
+  # `task_queue.task_completed`. Pas de gatekeeper adressable / enqueue raté →
+  # fail-loud (jamais un pass silencieux).
   #
-  # ⚠ Scope R06 = la state-machine. L'enqueue du mandat d'évaluation au pod (pour
-  # qu'il puise une tâche via MCP) = U2/R3b (sous-lot PLAN distinct).
+  # ⚠ Le boot/registration du gatekeeper permanent (Type 3) alimente `gatekeeper_pod_id`
+  # (sous-lot C). Le contenu du brief d'éval = sous-lot D (ici : stage + gate + outputs).
   defp do_dispatch_gatekeeper(stage, outputs, info, state) do
-    gk_ctx = Map.merge(state.mandate_context, %{stage: stage, outputs: outputs, gate_eval: true})
+    case gatekeeper_pod_id() do
+      pod_id when is_binary(pod_id) ->
+        attrs = %{
+          role: "gatekeeper",
+          brief: "gate eval — stage #{stage}",
+          metadata: %{
+            "gate_eval" => true,
+            "stage" => stage,
+            "pipeline_id" => state.pipeline_id,
+            "gate" => get_in(state.pipeline, ["stages", stage, "gate"]),
+            "outputs" => outputs
+          }
+        }
 
-    case gatekeeper_backend().spawn_stage_pod("gatekeeper", nil, gk_ctx) do
-      {:ok, pod_id} ->
-        Logger.info(
-          "fleet_pipeline gate pending: pipeline=#{inspect(state.pipeline_id)} " <>
-            "stage=#{stage} kind=#{info.kind} gatekeeper=#{inspect(pod_id)}"
-        )
+        case task_queue().enqueue(pod_id, attrs) do
+          {:ok, %{id: corr}} ->
+            Logger.info(
+              "fleet_pipeline gate pending: pipeline=#{inspect(state.pipeline_id)} " <>
+                "stage=#{stage} kind=#{info.kind} gatekeeper=#{inspect(pod_id)} corr=#{inspect(corr)}"
+            )
 
-        gate_evals = Map.put(state.gate_evals, pod_id, Map.put(info, :stage, stage))
-        {:noreply, %{state | gate_evals: gate_evals}}
+            gate_evals = Map.put(state.gate_evals, corr, Map.put(info, :stage, stage))
+            {:noreply, %{state | gate_evals: gate_evals}}
 
-      {:error, reason} ->
-        broadcast_pipeline_failed(state, stage, "gatekeeper dispatch failed: #{inspect(reason)}")
+          {:error, reason} ->
+            broadcast_pipeline_failed(
+              state,
+              stage,
+              "gatekeeper enqueue failed: #{inspect(reason)}"
+            )
+
+            {:stop, :gate_fail, state}
+        end
+
+      _ ->
+        broadcast_pipeline_failed(state, stage, "no gatekeeper available (not booted)")
         {:stop, :gate_fail, state}
     end
   end
 
-  # Seam spawn gatekeeper = même backend que les stages (`StageSpawner`).
-  defp gatekeeper_backend do
-    Application.get_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.StageSpawner.Default)
-  end
-
-  # R06 — décision du gatekeeper reçue (son `pod.completed`). On retire la
-  # corrélation, on mappe la décision (`result["decision"]`) et on poursuit :
-  # pass → avance ; fail/inconnu → halt (fail-closed) ; retry → re-dispatch si
-  # rounds restants (soft), sinon halt.
-  defp handle_gate_decision(pod_id, result, state) do
-    {info, gate_evals} = Map.pop(state.gate_evals, pod_id)
+  # R4/B — décision du gatekeeper reçue (mandat MCP complété, corrélé par
+  # `correlation_id`). Vocabulaire canon `gate-decision-v1.json` :
+  # `continue` → avance ; `abandon|redirect|escalate_user|halt_wait_input` → halt
+  # (le run s'arrête, la décision est portée dans le payload pour le handoff aval —
+  # coord `escalate_gatekeeper`, gate-build). nil/inconnu → halt fail-closed.
+  defp handle_gate_decision(corr, result, state) do
+    {info, gate_evals} = Map.pop(state.gate_evals, corr)
     state = %{state | gate_evals: gate_evals}
     stage = info.stage
     decision = gate_decision(result)
 
     Logger.info(
       "fleet_pipeline gate decision: pipeline=#{inspect(state.pipeline_id)} " <>
-        "stage=#{stage} kind=#{info.kind} decision=#{decision}"
+        "stage=#{stage} kind=#{info.kind} decision=#{inspect(decision)}"
     )
 
     case decision do
-      :pass ->
+      "continue" ->
         stage_spec = state.pipeline["stages"][stage]
         outputs = Map.get(state.outputs, stage, %{})
         state = maybe_post_extract_git(stage, stage_spec, outputs, state)
         next_stage_or_done(state)
 
-      :retry ->
-        handle_gate_retry(stage, info, state)
-
-      :fail ->
-        broadcast_pipeline_failed(state, stage, "gate decision: #{inspect(result)}")
-        {:stop, :gate_fail, state}
+      other ->
+        broadcast_pipeline_failed(state, stage, gate_halt_reason(other, result))
+        {:stop, :gate_halt, state}
     end
   end
 
-  # Mappe la décision auto-rapportée par le gatekeeper vers le verdict gate.
-  # Vocabulaire unifié soft (pass/fail/retry) + gatekeeper terminal
-  # (proceed/revision/abort/escalate-user). Fail-closed : nil/inconnu → :fail.
+  # Vocab canon gate-decision-v1.json. Fail-closed : nil/inconnu → "halt_invalid"
+  # (jamais "continue" sur décision absente/malformée).
+  @gate_decisions ~w(continue abandon redirect escalate_user halt_wait_input)
   defp gate_decision(result) when is_map(result) do
     case result["decision"] do
-      d when d in ["pass", "proceed"] -> :pass
-      d when d in ["retry", "revision"] -> :retry
-      _ -> :fail
+      d when d in @gate_decisions ->
+        d
+
+      other ->
+        Logger.warning("fleet_pipeline gate decision inconnue/absente: #{inspect(other)}")
+        "halt_invalid"
     end
   end
 
-  defp gate_decision(_), do: :fail
-
-  # Retry : re-dispatch un gatekeeper frais si rounds restants (soft gate), sinon
-  # halt. Terminal n'a pas de compteur de rounds → retry = halt (rework requis).
-  defp handle_gate_retry(stage, %{kind: :soft, round: round, max_rounds: max}, state)
-       when round < max do
-    outputs = Map.get(state.outputs, stage, %{})
-
-    do_dispatch_gatekeeper(
-      stage,
-      outputs,
-      %{kind: :soft, round: round + 1, max_rounds: max},
-      state
-    )
+  defp gate_decision(result) do
+    Logger.warning("fleet_pipeline gate result non-map (forme inattendue): #{inspect(result)}")
+    "halt_invalid"
   end
 
-  defp handle_gate_retry(stage, _info, state) do
-    broadcast_pipeline_failed(state, stage, "gate retry exhausted / non-retryable")
-    {:stop, :gate_fail, state}
-  end
+  defp gate_halt_reason(decision, result) when is_map(result),
+    do: "gate decision: #{decision} (#{inspect(Map.get(result, "reason"))})"
+
+  defp gate_halt_reason(decision, _), do: "gate decision: #{decision}"
 
   defp next_stage_or_done(state) do
     sorted = Toposort.sort(state.pipeline["stages"])

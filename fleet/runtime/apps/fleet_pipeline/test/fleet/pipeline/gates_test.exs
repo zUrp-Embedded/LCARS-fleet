@@ -37,19 +37,10 @@ defmodule Fleet.Pipeline.GatesTest do
     end
   end
 
-  describe "evaluate/3 — soft (R06 : décision pure → dispatch gatekeeper)" do
-    test "soft gate → {:dispatch_gatekeeper, kind: :soft} (Gates pur, pas de spawn)" do
-      stage = %{"gate" => %{"type" => "soft", "max_rounds" => 5}}
-
-      assert {:dispatch_gatekeeper, %{kind: :soft, round: 1, max_rounds: 5}} =
-               Gates.evaluate(stage, %{}, %{user: "test"})
-    end
-
-    test "soft gate max_rounds par défaut = 3" do
+  describe "evaluate/3 — soft (décision pure → dispatch gatekeeper)" do
+    test "soft gate → {:dispatch_gatekeeper, kind: :soft} (Gates pur, pas de spawn ni retry)" do
       stage = %{"gate" => %{"type" => "soft"}}
-
-      assert {:dispatch_gatekeeper, %{kind: :soft, max_rounds: 3}} =
-               Gates.evaluate(stage, %{}, %{})
+      assert {:dispatch_gatekeeper, %{kind: :soft}} = Gates.evaluate(stage, %{}, %{user: "test"})
     end
   end
 
