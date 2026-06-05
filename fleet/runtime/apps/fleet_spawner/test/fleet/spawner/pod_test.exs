@@ -511,9 +511,11 @@ defmodule Fleet.Spawner.PodTest do
       assert env["LCARS_ANTHROPIC_AUTH_TOKEN"] == "sk-ant-fake-test-token-XYZ"
     end
 
-    test ":token_arg + creds.json absent — pod part SANS LCARS_ANTHROPIC_AUTH_TOKEN (log warn)",
+    test ":token_arg + creds.json absent — spawn BLOQUÉ (R15 fail-loud, pas de launch)",
          %{tmp_dir: tmp_dir} do
-      # Pas de creds.json créé → read_oauth_access_token retourne nil → env sans token.
+      # R15 : pas de creds.json → en mode :token_arg, le spawn est refusé net
+      # (transition_failed {:auth_token_required, _}) AVANT le launch — plus de
+      # pod lancé sans token (l'ancien comportement silencieux).
       missing_dir = Path.join(tmp_dir, "no-creds-here")
       File.mkdir_p!(missing_dir)
 
@@ -528,11 +530,43 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-auth-token-missing-#{System.unique_integer([:positive])}"
 
-      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      Process.flag(:trap_exit, true)
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
 
-      assert_receive {:launch_called, _args, env}, 2_000
-      assert env["LCARS_AUTH_MODE"] == "token_arg"
-      refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
+      # Le backend n'est jamais lancé, le pod tombe avec la raison fail-loud.
+      assert_receive {:EXIT, ^pid, {:shutdown, {:auth_token_required, _}}}, 2_000
+      refute_received {:launch_called, _args, _env}
+    end
+  end
+
+  describe "R14 — mcp_server_spec obligatoire pour backend réel" do
+    test "backend réel + mcp_server_spec nil → spawn refusé (fail-loud, pas de pod cassé)" do
+      # Backend réel (non-Stub) sans spec MCP : le pod réel parle MCP → refus net
+      # à do_project (maybe_provision_mcp_config) AVANT tout launch. On NE lance
+      # pas réellement bwrap (l'échec est au provisioning).
+      Application.put_env(
+        :fleet_spawner,
+        :launch_backend,
+        Fleet.Spawner.LaunchBackend.LauncherPortBackend
+      )
+
+      Application.delete_env(:fleet_spawner, :mcp_server_spec)
+
+      on_exit(fn ->
+        Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
+        Application.delete_env(:fleet_spawner, :mcp_server_spec)
+      end)
+
+      Process.flag(:trap_exit, true)
+      pod_id = "pod-mcp-missing-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+
+      assert_receive {:EXIT, ^pid,
+                      {:shutdown, {:project_failed, {:mcp_server_spec_required, _backend}}}},
+                     2_000
+
+      # Le refus est à do_project (provisioning) AVANT do_launch → jamais de launch.
+      refute_received {:launch_called, _args, _env}
     end
   end
 end

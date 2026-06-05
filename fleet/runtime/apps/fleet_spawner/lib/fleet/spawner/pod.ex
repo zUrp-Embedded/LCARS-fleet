@@ -530,25 +530,26 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # Lit l'access_token OAuth depuis `<claude_dir>/.credentials.json` (slot canonique `claudeAiOauth`,
-  # cf. inbox/src #0_ref_oauth-token-lifecycle.md §2.2). Retourne `nil` (+ log warn) sur toute erreur
-  # (fichier absent, JSON corrompu, slot absent) pour ne pas crasher le spawn — le pod partira avec
-  # un env sans token, le binaire claude basculera sur le fallback (rang 6 subscription `/login`
-  # interactive si bind aussi présent, sinon 401 et `transition_failed`).
+  # cf. inbox/src #0_ref_oauth-token-lifecycle.md §2.2).
+  # R15 (verrou I-CBC) : en mode `:token_arg`, l'absence/illisibilité du token est FAIL-LOUD —
+  # `{:error, reason}` propagé → `transition_failed`. L'ancien retour `nil` silencieux lançait un
+  # pod SANS `LCARS_ANTHROPIC_AUTH_TOKEN` (en `:token_arg` il n'y a pas de bind → 401, pas de
+  # fallback `/login`) : un pod inutile au lieu d'un refus net.
   defp read_oauth_access_token(claude_dir) do
     creds_path = Path.join(claude_dir, ".credentials.json")
 
     with {:ok, raw} <- File.read(creds_path),
          {:ok, %{"claudeAiOauth" => %{"accessToken" => token}}} when is_binary(token) <-
            Jason.decode(raw) do
-      token
+      {:ok, token}
     else
       err ->
-        Logger.warning(
-          "pod auth_mode=:token_arg : read_oauth_access_token failed (#{inspect(err)}) — " <>
-            "path=#{creds_path}, pod will launch without ANTHROPIC_AUTH_TOKEN"
+        Logger.error(
+          "pod auth_mode=:token_arg : read_oauth_access_token ÉCHEC (#{inspect(err)}) — " <>
+            "path=#{creds_path} — spawn BLOQUÉ (R15 fail-loud)"
         )
 
-        nil
+        {:error, {:oauth_token_unreadable, creds_path}}
     end
   end
 
@@ -561,6 +562,10 @@ defmodule Fleet.Spawner.Pod do
   # `LCARS_AUTH_MODE` est toujours posé (bwrap_launch lit `${LCARS_AUTH_MODE:-bind}` strict) ;
   # `LCARS_ANTHROPIC_AUTH_TOKEN` n'est posé qu'en mode `:token_arg` ET si l'extraction du token
   # depuis creds.json a réussi (sinon le pod part sans token, voir `read_oauth_access_token/1`).
+  # R15 : rend `{:ok, env}` | `{:error, reason}`. En mode `:token_arg`, un token
+  # absent/illisible → `{:error, _}` (fail-loud, propagé par do_launch →
+  # transition_failed). Mode `:bind` (défaut) : toujours `{:ok, _}` (le token
+  # n'est pas requis, le claudeDir est bindé).
   defp maybe_put_auth_token(env, human) do
     mode = auth_mode()
     env_with_mode = Map.put(env, "LCARS_AUTH_MODE", Atom.to_string(mode))
@@ -568,12 +573,12 @@ defmodule Fleet.Spawner.Pod do
     case mode do
       :token_arg ->
         case read_oauth_access_token(claude_dir_for(human)) do
-          nil -> env_with_mode
-          token -> Map.put(env_with_mode, "LCARS_ANTHROPIC_AUTH_TOKEN", token)
+          {:ok, token} -> {:ok, Map.put(env_with_mode, "LCARS_ANTHROPIC_AUTH_TOKEN", token)}
+          {:error, _reason} = err -> err
         end
 
       _ ->
-        env_with_mode
+        {:ok, env_with_mode}
     end
   end
 
@@ -641,8 +646,17 @@ defmodule Fleet.Spawner.Pod do
       # substrat (cf. journal § reste) — orthogonal et complémentaire à ce qui suit.
       |> Map.put("CLAUDE_DIR", claude_dir_for(human))
       |> maybe_put_vendor_bin(human)
-      |> maybe_put_auth_token(human)
 
+    # R15 : l'étape auth sort du pipe — en mode :token_arg un token absent
+    # bloque le spawn (fail-loud) au lieu de lancer un pod sans token.
+    with {:ok, env} <- maybe_put_auth_token(env, human) do
+      do_launch_backend(state, args, env)
+    else
+      {:error, reason} -> transition_failed(state, {:auth_token_required, reason})
+    end
+  end
+
+  defp do_launch_backend(state, args, env) do
     case launch_backend().launch(args, env) do
       {:ok, %{init_message: init_msg, ndjson_log: ndjson_log} = launched} ->
         # #593 D11 — extract port (LauncherPortBackend l'inclut, StubBackend non).
@@ -1216,11 +1230,19 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp maybe_provision_mcp_config(state) do
-    case mcp_server_spec() do
-      nil ->
+    case {mcp_server_spec(), launch_backend()} do
+      # Seam test explicite : StubBackend ne lance pas claude → pas de MCP requis.
+      {nil, Fleet.Spawner.LaunchBackend.StubBackend} ->
         :ok
 
-      spec when is_map(spec) ->
+      # R14 (verrou I-CBC) : un backend RÉEL sans spec MCP est un bug de config —
+      # le pod réel parle MCP (le brief instruit submit_result, impossible sans
+      # serveur). Refus net (propagé au with do_project → transition_failed)
+      # plutôt qu'un pod lancé puis bloqué en timeout silencieux.
+      {nil, backend} ->
+        {:error, {:mcp_server_spec_required, backend}}
+
+      {spec, _backend} when is_map(spec) ->
         fleet_entry = Map.put(spec, "alwaysLoad", true)
         config = %{"mcpServers" => %{"fleet" => fleet_entry}}
 
