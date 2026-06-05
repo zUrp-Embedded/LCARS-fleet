@@ -9,6 +9,8 @@ defmodule Fleet.Pipeline.GateMandateTaskQueueStub do
     # dépendance à un compteur partagé inter-tests).
     corr = "corr-#{System.unique_integer([:positive])}"
     send(:gate_probe, {:enqueued, corr, pod_id, attrs.metadata["stage"]})
+    # Brief du mandat de GATE uniquement (le stage enqueue aussi via StageRunner).
+    if pod_id == "gk-permanent", do: send(:gate_probe, {:brief, attrs.brief})
     {:ok, %{id: corr}}
   end
 end
@@ -145,6 +147,10 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
 
   test "gate → mandat enqueué au gatekeeper, pipeline en attente (pas d'avancement)" do
     {pid, _corr} = start_to_gate("softgate")
+    # Le mandat porte le brief d'éval (sous-lot D — GateBrief câblé).
+    assert_receive {:brief, brief}, 2_000
+    assert brief =~ "gate-decision-v1.json"
+    assert brief =~ "Stage : audit"
     refute_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 200
     _ = pid
   end

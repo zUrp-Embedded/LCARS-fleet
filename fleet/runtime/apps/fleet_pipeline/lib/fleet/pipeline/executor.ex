@@ -305,14 +305,24 @@ defmodule Fleet.Pipeline.Executor do
   defp do_dispatch_gatekeeper(stage, outputs, info, state) do
     case gatekeeper_pod_id() do
       pod_id when is_binary(pod_id) ->
+        gate = get_in(state.pipeline, ["stages", stage, "gate"])
+
+        brief =
+          Fleet.Pipeline.GateBrief.build(%{
+            stage: stage,
+            pipeline_id: state.pipeline_id,
+            gate: gate,
+            outputs: outputs
+          })
+
         attrs = %{
           role: "gatekeeper",
-          brief: "gate eval — stage #{stage}",
+          brief: brief,
           metadata: %{
             "gate_eval" => true,
             "stage" => stage,
             "pipeline_id" => state.pipeline_id,
-            "gate" => get_in(state.pipeline, ["stages", stage, "gate"]),
+            "gate" => gate,
             "outputs" => outputs
           }
         }

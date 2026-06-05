@@ -19,6 +19,7 @@ PROVEN 2026-05-09, profil **CONFORMANCE**).
 | `Fleet.Pipeline.Gates` | dispatch gate par type (`:hard \| :soft \| :terminal \| nil`) ; rules v1 map OU v2.5 string ; PUR (`{:dispatch_gatekeeper, info}` pour l'inférentiel, aucun spawn) |
 | `Fleet.Pipeline.Gates.Predicate` | évaluateur pur des rule-strings v2.5 (`"all_tests_pass"`, `"severity_max != critical"`, conjonction `AND`) contre les outputs, fail-closed |
 | `Fleet.Pipeline.Gatekeeper` | boot + registration du **gatekeeper permanent** (Type 3, `forever`, work-session) à l'activation pipeline ; `pod_id/0` (registry `:persistent_term` / override config) lu par l'Executor |
+| `Fleet.Pipeline.GateBrief` | construit le **brief d'éval** (texte du mandat MCP) que le gatekeeper pull via `get_task` : contexte + livrable à juger + question + options canon + contrat `gate-decision-v1.json` (pur) |
 | `Fleet.Pipeline.Gate` | behaviour `evaluate/3` extensible compile-time |
 | `Fleet.Pipeline.StageRunner` | résolution inputs (v1 `{from_stage,key}` depuis prior outputs OU v2.5 descriptifs string) + spawn pod via `StageSpawner` |
 | `Fleet.Pipeline.StageSpawner` | seam wrap `Fleet.Spawner.spawn_pod/3` (ch6 PROMOTED) |
