@@ -49,16 +49,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       note: ":token_arg fail-loud si token absent"
     },
     %{
-      id: "capprofile.lifetime_scope_path",
-      remediation: "R12",
-      note: "compose_claude_md lit spec.invocation.lifetime_scope"
-    },
-    %{
-      id: "capprofile.modop_incompatible_path",
-      remediation: "R13",
-      note: "check_modop_incompatible lit spec.modop_set.incompatible"
-    },
-    %{
       id: "skills.declared_present",
       remediation: "R11",
       note: "skills whitelistés absents → fail"
@@ -117,7 +107,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_event_consumers_canon(root),
         check_pipeline_v25_normalized(root),
         check_events_handlers_exist(root),
-        check_coord_backend_wired(root)
+        check_coord_backend_wired(root),
+        check_capprofile_lifetime_scope_path(root),
+        check_capprofile_modop_incompatible_path(root)
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
@@ -247,6 +239,59 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       evidence: evidence,
       note:
         "gate LLM consolidée gatekeeper (Gates pur) ; pas de NotWiredYet ni délégation coord résiduelle"
+    }
+  end
+
+  # R12 (→R4-pending) : `compose_claude_md/3` doit lire `spec.invocation.lifetime_scope`
+  # (le schéma v2.5 + les cap-profiles canon), pas `spec.lifetime_scope` (forme
+  # pré-v2.5) — sinon le CLAUDE.md du pod affiche toujours "unknown". Le jumeau
+  # `check_lifetime_scope/1` (cap_profile.ex) lit déjà le bon chemin.
+  defp check_capprofile_lifetime_scope_path(root) do
+    sp = "apps/fleet_sp_builder/lib/fleet/sp_builder.ex"
+
+    # Couvre get_in (forme liste `spec, ["lifetime_scope"]`) ET Map.get (forme
+    # string `spec, "lifetime_scope"`) — futur-proof contre une régression qui
+    # réintroduirait le mauvais chemin sous une autre forme.
+    wrong = ~r/cap_profile\.spec,\s*(\["lifetime_scope"\]|"lifetime_scope")/
+
+    evidence =
+      Path.join(root, sp)
+      |> grep_lines(wrong)
+      |> Enum.filter(fn {_ln, line} -> Regex.match?(wrong, strip_comment(line)) end)
+      |> Enum.map(fn {ln, _} -> "#{sp}:#{ln}" end)
+
+    %{
+      id: "capprofile.lifetime_scope_path",
+      remediation: "R12",
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
+      note:
+        "compose_claude_md lit spec.lifetime_scope (pré-v2.5) au lieu de spec.invocation.lifetime_scope"
+    }
+  end
+
+  # R13 (→R4-pending) : `check_modop_incompatible/1` doit lire
+  # `spec.modop_set.incompatible` (schéma v2.5) + comparer aux modops actifs
+  # (`default` ++ `optional`), pas `spec.modop_incompatible` (clé inexistante)
+  # ni `spec.modop_set` traité comme une liste → l'invariant ne tire jamais.
+  defp check_capprofile_modop_incompatible_path(root) do
+    cp = "apps/fleet_cap_profile/lib/fleet/cap_profile.ex"
+
+    evidence =
+      Path.join(root, cp)
+      |> grep_lines(~r/Map\.get\(spec,\s*"modop_incompatible"/)
+      |> Enum.filter(fn {_ln, line} ->
+        Regex.match?(~r/modop_incompatible/, strip_comment(line))
+      end)
+      |> Enum.map(fn {ln, _} -> "#{cp}:#{ln}" end)
+
+    %{
+      id: "capprofile.modop_incompatible_path",
+      remediation: "R13",
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
+      note:
+        "check_modop_incompatible lit spec.modop_incompatible (inexistant) au lieu de spec.modop_set.incompatible"
     }
   end
 

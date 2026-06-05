@@ -34,17 +34,18 @@ defmodule Fleet.SPBuilderTest do
     spec =
       Map.merge(
         %{
-          "lifetime_scope" => "one-shot",
           "systemPrompt" => "engineer-role.md",
           "scope" => %{
             "disallowedTools" => ["web_search", "tool_search_internal"],
             "git_ops_denied" => ["push"]
           },
           "knowledge" => %{"skills" => ["memory-query", "loop"]},
-          "invocation" => %{},
+          # R12 : lifetime_scope nesté sous invocation (schéma v2.5).
+          "invocation" => %{"lifetime_scope" => "one-shot"},
           "injects" => %{},
           "budget" => %{"maxUsd" => 1.0, "maxDurationSec" => 600},
-          "modop_set" => []
+          # modop_set = MAP (schéma v2.5 : default/optional/incompatible).
+          "modop_set" => %{"default" => []}
         },
         extra_spec
       )
@@ -211,6 +212,17 @@ defmodule Fleet.SPBuilderTest do
       assert claude_md =~ "engineer"
       assert claude_md =~ "bwrap"
       refute claude_md =~ "Repo conventions"
+    end
+
+    # R12 : compose_claude_md lit lifetime_scope sous spec.invocation (v2.5).
+    # Avant le fix, il lisait spec.lifetime_scope → rendait toujours "unknown".
+    test "surfaces lifetime_scope depuis spec.invocation (pas 'unknown')" do
+      profile =
+        valid_cap_profile(%{"invocation" => %{"lifetime_scope" => "forever"}})
+
+      assert {:ok, claude_md} = Fleet.SPBuilder.compose_claude_md(profile, nil)
+      assert claude_md =~ "forever"
+      refute claude_md =~ "scope : unknown"
     end
 
     test "extracts named sections from repo CLAUDE.md when provided", %{tmp_dir: tmp_dir} do

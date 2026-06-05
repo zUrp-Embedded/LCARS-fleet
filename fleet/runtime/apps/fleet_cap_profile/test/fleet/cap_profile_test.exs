@@ -239,14 +239,32 @@ defmodule Fleet.CapProfileTest do
     # `_baseline-git-denied.yaml` + `with_resolved_disallowed_tools/1`
     # remplace : interdit les patterns destructeurs sans bloquer push.
 
+    # R13 : structure canon v2.5 — `modop_set` est une MAP
+    # (default/optional/incompatible) ; modops actifs = default ++ optional.
     test "G24-6 fails when both modops in incompatible pair are active" do
       profile =
-        valid_struct()
-        |> put_in([Access.key!(:spec), "modop_set"], ["a", "b"])
-        |> put_in([Access.key!(:spec), "modop_incompatible"], [["a", "b"]])
+        put_in(valid_struct(), [Access.key!(:spec), "modop_set"], %{
+          "default" => ["a", "b"],
+          "incompatible" => [["a", "b"]]
+        })
 
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
       assert :g24_6 in codes
+    end
+
+    test "G24-6 passes when incompatible pair declared but only one modop active" do
+      profile =
+        put_in(valid_struct(), [Access.key!(:spec), "modop_set"], %{
+          "default" => ["a"],
+          "optional" => ["c"],
+          "incompatible" => [["a", "b"]]
+        })
+
+      # "b" n'est ni dans default ni optional → pas de conflit → g24_6 absent.
+      case Fleet.CapProfile.validate(profile) do
+        :ok -> :ok
+        {:error, codes} -> refute :g24_6 in codes
+      end
     end
 
     # R0.8-brick4 : G24-7 (check_budget) retiré — pas d'API = pas de budget

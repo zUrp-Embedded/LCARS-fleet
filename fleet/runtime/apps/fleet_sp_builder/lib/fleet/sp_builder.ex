@@ -156,7 +156,10 @@ defmodule Fleet.SPBuilder do
       assigns = [
         role: get_in(cap_profile.metadata, ["name"]) || "unknown",
         containment: get_in(cap_profile.metadata, ["containment"]) || "unknown",
-        lifetime_scope: get_in(cap_profile.spec, ["lifetime_scope"]) || "unknown",
+        # R12 : lifetime_scope est nesté sous spec.invocation (schéma v2.5 +
+        # cap-profiles canon ; cohérent avec check_lifetime_scope/1). L'ancien
+        # chemin spec.lifetime_scope (pré-v2.5) rendait toujours "unknown".
+        lifetime_scope: get_in(cap_profile.spec, ["invocation", "lifetime_scope"]) || "unknown",
         git_ops_denied: get_in(cap_profile.spec, ["scope", "git_ops_denied"]) || [],
         repo_claude_md_sections: repo_sections
       ]

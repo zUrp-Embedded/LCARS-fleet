@@ -440,8 +440,17 @@ defmodule Fleet.CapProfile do
   # `--no-verify`, etc.) sans interdire `push` en bloc.
 
   defp check_modop_incompatible(%__MODULE__{spec: spec}) do
-    pairs = Map.get(spec, "modop_incompatible", [])
-    active = spec |> Map.get("modop_set", []) |> MapSet.new()
+    # R13 : `modop_set` est une MAP (schéma v2.5 : default/optional/incompatible),
+    # pas une liste. Les paires incompatibles sont sous `spec.modop_set.incompatible` ;
+    # les modops ACTIFS = `default` ++ `optional`. L'ancien code lisait
+    # `spec.modop_incompatible` (clé inexistante → toujours []) et traitait
+    # `spec.modop_set` comme une liste → l'invariant ne tirait jamais.
+    modop_set = Map.get(spec, "modop_set", %{})
+    pairs = Map.get(modop_set, "incompatible", [])
+
+    active =
+      (Map.get(modop_set, "default", []) ++ Map.get(modop_set, "optional", []))
+      |> MapSet.new()
 
     conflict? =
       Enum.any?(pairs, fn pair ->
