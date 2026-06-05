@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-06-05 (R5 — purge handlers fantômes + fail-loud boot Dispatch ; events.yaml = registry + dispatch)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -67,11 +67,28 @@ text |> Fleet.EventRouter.Sanitize.Secrets.run()
 - `:fleet_event_router, :captured_signals` — atoms signaux à capturer
   (default `[:sigusr1, :sigterm, :sighup]`)
 
-## Catalogue events.yaml
+## Catalogue events.yaml — double rôle
 
-Format `event_type → [handler_module]`. Extensible via PR. Catalogue
-initial dans `priv/events.yaml` (10 events : pod.*, gitea.*,
-permission_relay_request, audit.verdict.gatekeeper, tick).
+`priv/events.yaml` sert **deux** fonctions (cf. en-tête du fichier) :
+1. **Clés = registry** `authorized_event_types` : `Bus.broadcast/2` fail-loud
+   sur tout type hors registry. Tout event émis DOIT avoir sa clé.
+2. **Valeurs = table de dispatch** `event → [handler]`. `[]` = registré mais
+   **non dispatché** → consommé par des **subscribers directs** (`Bus.subscribe`
+   + `handle_info` : WS dashboard, `AuditConsumer`, `DriftMonitor`, `Executor`).
+
+**R5/R08** : les handlers fantômes (modules absents) ont été purgés ; `Dispatch.init`
++ `reload` sont **fail-loud** sur tout handler référencé-mais-absent (verrou
+anti-récurrence, T4).
+
+> ⚠️ **État connu (à trancher — fork architectural, hors R5)** : la table de
+> dispatch est aujourd'hui **inerte** — (a) aucun module n'implémente
+> `handle_event/1` (les handlers réels consomment via `Bus.subscribe`, pas via
+> Dispatch) ; (b) `start_dispatch: false` par défaut → en prod le registry n'est
+> pas chargé (validation broadcast inactive). Réactiver Dispatch en prod exige
+> un audit « tous les types émis sont registrés » (sinon crash au 1er broadcast
+> non-registré). Décision : raviver la table de dispatch (`handle_event/1` +
+> enable prod + audit) OU acter « subscribers directs = canon » et retirer la
+> table. Voir REPRISE/point.
 
 ## Dépendances
 

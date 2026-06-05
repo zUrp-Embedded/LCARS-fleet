@@ -31,8 +31,37 @@ defmodule Fleet.EventRouter.Dispatch do
   @impl GenServer
   def init(_opts) do
     table = load_table()
-    :ok = Fleet.EventRouter.Bus.subscribe()
-    {:ok, table}
+
+    # R5/R08 — fail-loud au BOOT : un handler référencé dans events.yaml qui
+    # n'existe pas = état invalide non-représentable (I-CBC). Refuser de booter
+    # plutôt que tolérer un dispatch silencieusement no-op (warning runtime).
+    # Verrou anti-récurrence de la classe « handler fantôme ».
+    case validate_handlers(table) do
+      :ok ->
+        :ok = Fleet.EventRouter.Bus.subscribe()
+        {:ok, table}
+
+      {:error, missing} ->
+        {:stop, {:phantom_handlers, missing}}
+    end
+  end
+
+  defp validate_handlers(%{"events" => events}) when is_map(events) do
+    missing =
+      events
+      |> Map.values()
+      |> List.flatten()
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+      |> Enum.reject(&handler_loadable?/1)
+
+    if missing == [], do: :ok, else: {:error, missing}
+  end
+
+  defp validate_handlers(_), do: :ok
+
+  defp handler_loadable?(name) do
+    match?({:ok, _}, safe_module(name))
   end
 
   @impl GenServer
@@ -94,8 +123,18 @@ defmodule Fleet.EventRouter.Dispatch do
   end
 
   @impl GenServer
-  def handle_cast(:reload, _state) do
-    {:noreply, load_table()}
+  def handle_cast(:reload, state) do
+    table = load_table()
+    # R5 — symétrie avec le boot : un reload introduisant un handler fantôme est
+    # rejeté (table précédente conservée), pas accepté silencieusement.
+    case validate_handlers(table) do
+      :ok ->
+        {:noreply, table}
+
+      {:error, missing} ->
+        Logger.error("dispatch reload refusé — handlers fantômes: #{inspect(missing)}")
+        {:noreply, state}
+    end
   end
 
   defp load_table do

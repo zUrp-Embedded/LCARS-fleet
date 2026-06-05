@@ -37,9 +37,12 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
-  test "config invalide rejetée — liste de handlers vide", %{schema: schema} do
-    bad = %{"events" => %{"pod.allocated" => []}}
-    assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
+  # R5/R08 — liste de handlers VIDE désormais VALIDE : un event peut être
+  # registré (clé = authorized_event_type) sans handler dispatch, consommé par des
+  # subscribers directs (WS, AuditConsumer, DriftMonitor). `minItems: 0`.
+  test "config valide — liste de handlers vide (registré sans dispatch)", %{schema: schema} do
+    ok = %{"events" => %{"pod.allocate" => []}}
+    assert :ok = ExJsonSchema.Validator.validate(schema, ok)
   end
 
   test "config invalide rejetée — event_type majuscule", %{schema: schema} do
