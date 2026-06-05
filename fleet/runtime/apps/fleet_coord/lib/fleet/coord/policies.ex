@@ -161,7 +161,10 @@ defmodule Fleet.Coord.Policies do
   defp canon_action(action, path, payload, correlation_id) do
     event = %Fleet.Event{
       source: :coord,
-      type: :action_dispatched,
+      # R09 : clé registry = `coord.action_dispatched` (préfixe coord, cohérent
+      # coord.notification_routed/escalation_triggered). L'ancien `:action_dispatched`
+      # nu était hors registry → broadcast rejeté (UnregisteredError) → drop silencieux.
+      type: :"coord.action_dispatched",
       timestamp: DateTime.utc_now(),
       pod_id: extract_pod_id(payload),
       correlation_id: correlation_id,

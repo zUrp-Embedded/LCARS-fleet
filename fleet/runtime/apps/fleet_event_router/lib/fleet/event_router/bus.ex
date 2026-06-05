@@ -58,7 +58,7 @@ defmodule Fleet.EventRouter.Bus do
 
   Émet la struct directement — les subscribers reçoivent `%Fleet.Event{}`,
   pas un tuple. Pattern match côté consumer :
-  `handle_info(%Fleet.Event{type: :pod_drift, payload: payload, correlation_id: cid}, state)`.
+  `handle_info(%Fleet.Event{type: :"pod.drift", payload: payload, correlation_id: cid}, state)`.
 
   ## Returns
 

@@ -38,7 +38,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   Étend le `chain` payload avec `"starfleet.cat5.<source>"` puis :
 
     1. log audit `/var/log/fleet-starfleet.jsonl` via `AuditLog.write/1`
-    2. broadcast `%Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_<src>",
+    2. broadcast `%Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_pod_drift",
        correlation_id, ...}` schema canon (DN 11 C3.1+C3.2) + legacy
        `audit.cat5.<source>` compat shim
     3. dispatch `CoordBackend.handle_escalation/3` (DN 9 amendement)
@@ -75,7 +75,10 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   defp broadcast_canon(source, enriched, correlation_id) do
     event = %Fleet.Event{
       source: :starfleet,
-      type: String.to_atom("starfleet.audit_cat5_#{source}"),
+      # R09 : to_existing_atom (pas to_atom) — anti atom-leak M1 ; les 3 atomes
+      # `starfleet.audit_cat5_<src>` sont registrés (events.yaml + préregistre
+      # Starfleet.Application). Une source inattendue → ArgumentError → rescue.
+      type: String.to_existing_atom("starfleet.audit_cat5_#{source}"),
       timestamp: DateTime.utc_now(),
       pod_id: extract_pod_id(enriched),
       correlation_id: correlation_id,

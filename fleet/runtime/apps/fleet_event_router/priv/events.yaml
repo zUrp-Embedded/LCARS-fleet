@@ -32,10 +32,22 @@ events:
   permission_relay_request: []
 
   # --- Audit gatekeeper / forge tickets / tick ---
-  audit.verdict.gatekeeper: []
+  # R09 : `audit.verdict` (2 segments) — aligné sur le consommateur réel
+  # (DriftMonitor `%Fleet.Event{type: :"audit.verdict"}`) + l'atome pré-enregistré
+  # (Starfleet.Application). L'ancienne clé `audit.verdict.gatekeeper` (3 segments,
+  # jamais émise) était désalignée du consommateur → consommateur mort.
+  audit.verdict: []
   gitea.opened: []
   gitea.closed: []
   tick: []
+
+  # --- Signaux OS (SignalsOS, source :event_router) ---
+  # R09 : émis par SignalsOS sur SIGUSR1/SIGTERM/SIGHUP — registrés ici pour
+  # éviter le drop silencieux (UnregisteredError rescue). Pas de consommateur
+  # routé pour l'instant (le drain passe par ExecStop/Shutdown, pas par signal).
+  os.signal.sigusr1: []
+  os.signal.sigterm: []
+  os.signal.sighup: []
 
   # --- Admin spawn ---
   admin.spawn.request: []

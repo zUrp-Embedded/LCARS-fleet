@@ -32,18 +32,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Chaque check : %{id, remediation, status: :pass|:fail|:pending, evidence: [..], note}
   # Les checks IMPLÉMENTÉS sont grounded sur le code réel (grep/introspection).
   # Les PENDING nomment la remédiation qui les rendra exécutables (R2→R7).
-  # R09/F-08 (events.registry.keys_aligned) reste pending : le rename des clés
-  # `<source>.<type>` (13/37 non-conformes + `pod` hors canonical_sources) touche
-  # émetteurs+consommateurs sur 8 apps → SESSION DÉDIÉE actée user (BL-027,
-  # « prod-crash si bulldozé »). Écrire le check rouge maintenant bloquerait les
-  # releases via le verrou R7 → on ne l'implémente PAS sans le rename.
-  @pending_checks [
-    %{
-      id: "events.registry.keys_aligned",
-      remediation: "R09/F-08",
-      note: "clés <source>.<type> + source canonique — rename 8 apps, session dédiée (BL-027)"
-    }
-  ]
+  # Tous les checks de remédiation sont implémentés (8/8). @pending_checks vide.
+  @pending_checks []
 
   @impl Mix.Task
   def run(args) do
@@ -94,7 +84,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_required_real_backend(root),
         check_auth_token_arg_failloud(root),
         check_spawn_has_mandate(root),
-        check_skills_declared_present(root)
+        check_skills_declared_present(root),
+        check_events_registry_keys_aligned(root)
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
@@ -405,6 +396,59 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         if(present?, do: [], else: ["#{sp} : filter_skills filtre les absents en silence"]),
       note: "filter_skills doit fail-loud {:skills_missing} sur un skill plain absent"
     }
+  end
+
+  # R09/F-08 (→R4-pending) : modèle réel post-B2 — la clé events.yaml EST le
+  # `type` de l'event (le `source` est un champ séparé, validé par
+  # `Fleet.Event.canonical_sources/0`). Le « rename <source>.<type> » de F-08 est
+  # superseded par B2 (Dispatch retiré, registry keye par type). L'invariant qui
+  # RESTE : tout type **consommé** (`handle_info(%Fleet.Event{type: :X})`, exemples
+  # moduledoc inclus) doit être une clé du registry — sinon consommateur mort
+  # (attend un type qui ne peut être broadcast sans UnregisteredError). Les
+  # émetteurs sont couverts par la validation fail-loud B2 au runtime.
+  defp check_events_registry_keys_aligned(root) do
+    registry = registry_event_keys(root)
+
+    consumed =
+      Path.wildcard(Path.join(root, "apps/*/lib/**/*.ex"))
+      |> Enum.flat_map(&consumed_event_types/1)
+      |> Enum.uniq()
+
+    unregistered = Enum.reject(consumed, &MapSet.member?(registry, &1))
+
+    %{
+      id: "events.registry.keys_aligned",
+      remediation: "R09/F-08",
+      status: if(unregistered == [], do: :pass, else: :fail),
+      evidence: Enum.map(unregistered, &"type consommé hors registry : #{&1}"),
+      note: "tout type consommé (handle_info %Fleet.Event{type:}) doit être une clé events.yaml"
+    }
+  end
+
+  defp registry_event_keys(root) do
+    yaml = Path.join(root, "apps/fleet_event_router/priv/events.yaml")
+
+    case YamlElixir.read_from_file(yaml) do
+      {:ok, %{"events" => events}} when is_map(events) -> MapSet.new(Map.keys(events))
+      _ -> MapSet.new()
+    end
+  end
+
+  # `[^}]*?` autorise des champs AVANT `type:` (ex. `%Fleet.Event{source: :X,
+  # type: :Y}`) et traverse les structs multi-lignes (négation de `}` matche les
+  # newlines) → capture les consommateurs type-first ET source-first.
+  # Limite connue : les consommateurs `%Fleet.Event{}` génériques + `case type do`
+  # (pas de type literal dans le struct) ne sont pas couverts.
+  defp consumed_event_types(file) do
+    case File.read(file) do
+      {:ok, content} ->
+        ~r/%Fleet\.Event\{[^}]*?type:\s*:"?([a-z_][a-z0-9_.]*)"?/
+        |> Regex.scan(content)
+        |> Enum.map(fn [_, type] -> type end)
+
+      _ ->
+        []
+    end
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────
