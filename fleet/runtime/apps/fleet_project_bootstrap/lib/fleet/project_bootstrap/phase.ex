@@ -1,28 +1,14 @@
-defmodule Fleet.ProjectBootstrap.CapAccess do
-  @moduledoc """
-  Accès tolérant à `%Fleet.CapProfile{spec: %{...}}` (struct OU map à clés
-  atom/string). Module sibling autonome (compilé avant `Phase.*`) — les
-  sous-phases l'importent sans dépendre de l'ordre de compilation du module
-  englobant (un `import` du module parent depuis un module nested du même
-  fichier échoue : parent pas encore compilé → `module_info/1 undefined`).
-  Fonction pure (Iron Law — aucun process).
-  """
-
-  @spec cap(term(), [atom()], term()) :: term()
-  def cap(cp, path, default \\ nil) do
-    Enum.reduce(path, cp, fn
-      key, %{} = acc -> Map.get(acc, key) || Map.get(acc, to_string(key))
-      _key, _acc -> nil
-    end) || default
-  end
-end
-
+# Rework #1 : `Fleet.ProjectBootstrap.CapAccess.cap/3` (accès tolérant
+# atom|string) RETIRÉ — `Fleet.CapProfile` garantit désormais des clés STRING
+# (normalisation à `to_struct`). Les phases accèdent `cap_profile.spec["..."]`
+# directement, sans double-lookup défensif.
 defmodule Fleet.ProjectBootstrap.Phase do
   @moduledoc """
   Les 5 sous-phases de `Fleet.ProjectBootstrap.prepare/3` (DN
   ring1/fleet_project_bootstrap.md §"Contrat technique"). Fonctions pures
   (Iron Law — aucun process). Erreurs typées (exit codes DN).
-  Helper d'accès cap-profile : `Fleet.ProjectBootstrap.CapAccess`.
+  Accès cap-profile : clés STRING directes (`cap_profile.spec["..."]`) —
+  `Fleet.CapProfile` garantit la forme à la production (rework #1).
   """
 
   defmodule Allocate do
@@ -46,15 +32,12 @@ defmodule Fleet.ProjectBootstrap.Phase do
     `git clone --reference` (ADR-B Q5) si `spec.project.repo_path`, sinon
     workspace = `mktemp -d` (branch nil).
     """
-    import Fleet.ProjectBootstrap.CapAccess, only: [cap: 2, cap: 3]
-
-    @spec clone_or_skip(Path.t(), struct(), keyword()) ::
+    @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
-    def clone_or_skip(pod_dir, cap_profile, opts) do
-      spec = cap(cap_profile, [:spec], %{})
-      project = cap(spec, [:project])
+    def clone_or_skip(pod_dir, %Fleet.CapProfile{spec: spec}, opts) do
+      project = spec["project"] || %{}
 
-      case project && (Map.get(project, :repo_path) || Map.get(project, "repo_path")) do
+      case project["repo_path"] do
         nil ->
           ws = Path.join(pod_dir, "workspace")
 
@@ -65,8 +48,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
         repo_url ->
           ws = Path.join(pod_dir, "workspace")
-          ref = Map.get(project, :reference_repo_path) || Map.get(project, "reference_repo_path")
-          base = Map.get(project, :base_branch) || Map.get(project, "base_branch") || "main"
+          ref = project["reference_repo_path"]
+          base = project["base_branch"] || "main"
           slug = Keyword.get(opts, :slug, "work")
           pod_id = Path.basename(pod_dir) |> String.replace_prefix("pod-", "")
           feature = "feature/#{pod_id}-#{slug}"
@@ -92,21 +75,17 @@ defmodule Fleet.ProjectBootstrap.Phase do
     (EEx) → `<workspace>/CLAUDE.md`. L'agent découvre un projet post-/init,
     ne réinvoque pas `/init`.
     """
-    import Fleet.ProjectBootstrap.CapAccess, only: [cap: 3]
-    @spec init_mimic(Path.t(), struct()) :: {:ok, Path.t()} | {:error, term()}
-    def init_mimic(workspace, cap_profile) do
+    @spec init_mimic(Path.t(), Fleet.CapProfile.t()) :: {:ok, Path.t()} | {:error, term()}
+    def init_mimic(workspace, %Fleet.CapProfile{spec: spec, metadata: metadata}) do
       tpl =
         Application.app_dir(:fleet_project_bootstrap, "priv/templates/claude-md-vanilla.md.eex")
 
-      spec = cap(cap_profile, [:spec], %{})
-      project = cap(spec, [:project], %{})
+      project = spec["project"] || %{}
 
       assigns = [
-        project_name: Map.get(project, :name) || Map.get(project, "name") || "project",
-        project_intent: Map.get(project, :intent) || Map.get(project, "intent") || "",
-        pod_role:
-          cap(cap_profile, [:metadata], %{})[:name] ||
-            cap(cap_profile, [:metadata], %{})["name"] || "worker"
+        project_name: project["name"] || "project",
+        project_intent: project["intent"] || "",
+        pod_role: metadata["name"] || "worker"
       ]
 
       with {:ok, tpl_src} <- File.read(tpl),
@@ -154,13 +133,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
     `spec.knowledge.skills/plugins`. `~/.claude/CLAUDE.md` NON montée (le
     CLAUDE.md vanilla phase 3 prend la place).
     """
-    import Fleet.ProjectBootstrap.CapAccess, only: [cap: 3]
-
-    @spec prepare_mount_binds(Path.t(), struct()) ::
+    @spec prepare_mount_binds(Path.t(), Fleet.CapProfile.t()) ::
             {:ok, [{Path.t(), Path.t(), :ro | :rw}]} | {:error, term()}
-    def prepare_mount_binds(pod_dir, cap_profile) do
-      knowledge = cap(cap_profile, [:spec, :knowledge], %{})
-      skills = Map.get(knowledge, :skills) || Map.get(knowledge, "skills") || []
+    def prepare_mount_binds(pod_dir, %Fleet.CapProfile{spec: spec}) do
+      knowledge = spec["knowledge"] || %{}
+      skills = knowledge["skills"] || []
       home = System.user_home!()
 
       binds =

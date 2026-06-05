@@ -396,10 +396,22 @@ defmodule Fleet.CapProfile do
   defp to_struct(raw) when is_map(raw) do
     %__MODULE__{
       kind: Map.get(raw, "kind"),
-      metadata: Map.get(raw, "metadata", %{}),
-      spec: Map.get(raw, "spec", %{})
+      metadata: stringify_keys(Map.get(raw, "metadata", %{})),
+      spec: stringify_keys(Map.get(raw, "spec", %{}))
     }
   end
+
+  # Rework #1 (axe « contrôle côté producteur ») : `metadata`/`spec` sont
+  # garantis à **clés STRING en profondeur**, ici à la production (boundary
+  # unique `to_struct`). Les lecteurs (ProjectBootstrap, sp_builder, spawner)
+  # accèdent en clés string SANS double-lookup atom|string défensif — la forme
+  # incohérente devient irreprésentable (I-CBC). Les structs (DateTime…) et
+  # scalaires passent tels quels ; seules les CLÉS de map sont stringifiées.
+  defp stringify_keys(map) when is_map(map) and not is_struct(map),
+    do: Map.new(map, fn {k, v} -> {to_string(k), stringify_keys(v)} end)
+
+  defp stringify_keys(list) when is_list(list), do: Enum.map(list, &stringify_keys/1)
+  defp stringify_keys(other), do: other
 
   defp struct_to_map(%__MODULE__{} = p) do
     %{
