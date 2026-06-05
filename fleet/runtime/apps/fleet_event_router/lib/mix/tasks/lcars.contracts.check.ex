@@ -32,16 +32,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Chaque check : %{id, remediation, status: :pass|:fail|:pending, evidence: [..], note}
   # Les checks IMPLÉMENTÉS sont grounded sur le code réel (grep/introspection).
   # Les PENDING nomment la remédiation qui les rendra exécutables (R2→R7).
+  # R09/F-08 (events.registry.keys_aligned) reste pending : le rename des clés
+  # `<source>.<type>` (13/37 non-conformes + `pod` hors canonical_sources) touche
+  # émetteurs+consommateurs sur 8 apps → SESSION DÉDIÉE actée user (BL-027,
+  # « prod-crash si bulldozé »). Écrire le check rouge maintenant bloquerait les
+  # releases via le verrou R7 → on ne l'implémente PAS sans le rename.
   @pending_checks [
     %{
       id: "events.registry.keys_aligned",
       remediation: "R09/F-08",
-      note: "clés <source>.<type> + Dispatch keye source.type"
-    },
-    %{
-      id: "skills.declared_present",
-      remediation: "R11",
-      note: "skills whitelistés absents → fail"
+      note: "clés <source>.<type> + source canonique — rename 8 apps, session dédiée (BL-027)"
     }
   ]
 
@@ -93,7 +93,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_launch_backend_containment(root),
         check_mcp_required_real_backend(root),
         check_auth_token_arg_failloud(root),
-        check_spawn_has_mandate(root)
+        check_spawn_has_mandate(root),
+        check_skills_declared_present(root)
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
@@ -381,6 +382,28 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           else: ["#{sp} : pas de guard :mandate_required au boundary spawn_pod"]
         ),
       note: "spawn_pod doit refuser un pod one-shot sans mandat (hors allow_no_mandate)"
+    }
+  end
+
+  # R11 (→R4-pending) : `Fleet.SPBuilder.filter_skills/2` doit échouer (fail-loud)
+  # si un skill PLAIN whitelisté est absent du disque (plus de filtrage silencieux
+  # qui laissait un pod réclamer un skill inexistant). Marqueur : `:skills_missing`.
+  # Rouge si absent.
+  defp check_skills_declared_present(root) do
+    sp = "apps/fleet_sp_builder/lib/fleet/sp_builder.ex"
+
+    present? =
+      Path.join(root, sp)
+      |> grep_lines(~r/:skills_missing/)
+      |> Enum.any?(fn {_ln, line} -> Regex.match?(~r/:skills_missing/, strip_comment(line)) end)
+
+    %{
+      id: "skills.declared_present",
+      remediation: "R11",
+      status: if(present?, do: :pass, else: :fail),
+      evidence:
+        if(present?, do: [], else: ["#{sp} : filter_skills filtre les absents en silence"]),
+      note: "filter_skills doit fail-loud {:skills_missing} sur un skill plain absent"
     }
   end
 

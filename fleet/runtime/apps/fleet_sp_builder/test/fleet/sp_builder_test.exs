@@ -278,12 +278,32 @@ defmodule Fleet.SPBuilderTest do
       refute Enum.any?(paths, &String.ends_with?(&1, "extra-not-listed"))
     end
 
-    test "silently skips whitelist entries absent from FS", %{tmp_dir: tmp_dir} do
+    # R11 : un skill plain whitelisté mais absent du FS = fail-loud (plus de
+    # filtrage silencieux). Ici "loop" manque (seul "memory-query" existe).
+    test "fail-loud {:skills_missing} quand un skill whitelisté est absent du FS",
+         %{tmp_dir: tmp_dir} do
       skills_root = Path.join(tmp_dir, "skills")
       File.mkdir_p!(Path.join(skills_root, "memory-query"))
 
-      assert {:ok, paths} = Fleet.SPBuilder.filter_skills(valid_cap_profile(), skills_root)
-      assert length(paths) == 1
+      assert {:error, {:skills_missing, ["loop"]}} =
+               Fleet.SPBuilder.filter_skills(valid_cap_profile(), skills_root)
+    end
+
+    # R11 : les skills QUALIFIÉS `plugin:skill` sont livrés via LCARS_SKILLS_PLUGINS,
+    # pas comme paths montés → JAMAIS flaggés absents (même si le path n'existe pas).
+    test "les skills plugin:skill ne sont pas flaggés absents", %{tmp_dir: tmp_dir} do
+      skills_root = Path.join(tmp_dir, "skills")
+      File.mkdir_p!(Path.join(skills_root, "memory-query"))
+      File.mkdir_p!(Path.join(skills_root, "loop"))
+
+      profile =
+        valid_cap_profile(%{
+          "knowledge" => %{"skills" => ["memory-query", "loop", "elixir:otp-thinking"]}
+        })
+
+      assert {:ok, paths} = Fleet.SPBuilder.filter_skills(profile, skills_root)
+      assert length(paths) == 2
+      refute Enum.any?(paths, &String.contains?(&1, "otp-thinking"))
     end
 
     test "returns :skills_root_missing when path absent" do

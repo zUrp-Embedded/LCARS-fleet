@@ -171,13 +171,16 @@ defmodule Fleet.SPBuilder do
   @doc """
   Filtre `skills_root` selon la whitelist `cap_profile.spec["knowledge"]["skills"]`.
 
-  Retourne la liste des paths absolus à mount-bind dans le pod. Les
-  entrées de la whitelist absentes du FS sont silencieusement ignorées
-  (pas d'erreur — un skill absent = skill non disponible, pas une faute).
+  Retourne la liste des paths absolus à mount-bind dans le pod. R11 : un skill
+  PLAIN whitelisté mais absent du FS est un **fail-loud** (plus de filtrage
+  silencieux — un pod ne doit pas réclamer un skill inexistant). Les skills
+  QUALIFIÉS `plugin:skill` sont livrés via `LCARS_SKILLS_PLUGINS` (pas comme
+  paths) → exclus de ce check de présence.
 
   ## Exit codes
 
-    * `{:ok, [path_absolu, ...]}` — paths valides existants (ordre conservé)
+    * `{:ok, [path_absolu, ...]}` — paths des skills plain présents (ordre conservé)
+    * `{:error, {:skills_missing, [name, ...]}}` — skill(s) plain whitelisté(s) absent(s)
     * `{:error, :skills_root_missing}` — `skills_root` n'existe pas
   """
   @impl Fleet.SPBuilder.Composer
@@ -187,12 +190,23 @@ defmodule Fleet.SPBuilder do
     if File.dir?(skills_root) do
       whitelist = get_in(cap_profile.spec, ["knowledge", "skills"]) || []
 
-      paths =
-        whitelist
-        |> Enum.map(&Path.join(skills_root, &1))
-        |> Enum.filter(&File.exists?/1)
+      # R11 : les skills QUALIFIÉS `plugin:skill` sont livrés via
+      # `LCARS_SKILLS_PLUGINS` (skills_plugins_env → bwrap charge le plugin),
+      # PAS comme paths montés → exclus du check de présence sur disque.
+      plain = Enum.reject(whitelist, &String.contains?(&1, ":"))
 
-      {:ok, paths}
+      {present, missing} =
+        plain
+        |> Enum.map(&{&1, Path.join(skills_root, &1)})
+        |> Enum.split_with(fn {_name, path} -> File.exists?(path) end)
+
+      # R11 (verrou I-CBC) : un skill whitelisté mais ABSENT du disque est un
+      # fail-loud (`{:error, {:skills_missing, names}}`) — plus de filtrage
+      # silencieux qui laissait un pod réclamer un skill inexistant.
+      case missing do
+        [] -> {:ok, Enum.map(present, fn {_name, path} -> path end)}
+        _ -> {:error, {:skills_missing, Enum.map(missing, fn {name, _path} -> name end)}}
+      end
     else
       {:error, :skills_root_missing}
     end
