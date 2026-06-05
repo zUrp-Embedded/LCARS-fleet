@@ -27,3 +27,9 @@ config :fleet_spawner, start_publish_consumer: false
 # Bus parasite ; tests dédiés (auto_dispatcher_test.exs) démarrent
 # manuellement avec opts isolés (subscribe?: false, name unique).
 config :fleet_pilot, start_dispatcher: false
+
+# R4 sous-lot C — hermétisme : pas d'autoboot du gatekeeper permanent en test
+# (start_pipeline ne spawnera pas de pod gatekeeper). Le test dédié
+# (gatekeeper_test.exs) active l'autoboot + injecte des seams stub ; les tests
+# de gate (executor_gate_pending) posent `:gatekeeper_pod_id` directement.
+config :fleet_pipeline, gatekeeper_autoboot: false

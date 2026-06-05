@@ -50,6 +50,10 @@ defmodule Fleet.Pipeline do
     # Mi3 : un pipeline DOIT porter un ticket_id (traçabilité) — plus de pipeline anonyme.
     case mandate_context[:ticket_id] do
       ticket_id when is_binary(ticket_id) and ticket_id != "" ->
+        # Type 3 — le gatekeeper permanent (juge) boote à l'activation pipeline
+        # (idempotent, work-session). No-op si déjà up / autoboot off (tests).
+        _ = Fleet.Pipeline.Gatekeeper.ensure_booted()
+
         pipeline_id = Keyword.get(opts, :pipeline_id, generate_pipeline_id())
 
         spec =

@@ -250,13 +250,11 @@ defmodule Fleet.Pipeline.Executor do
     Application.get_env(:fleet_pipeline, :task_queue, Fleet.TaskQueue)
   end
 
-  # R4/B — pod_id du **gatekeeper permanent** (work-session) à adresser. Alimenté
-  # par le boot Type 3 (sous-lot C, registration). nil tant qu'aucun gatekeeper
-  # n'est booté → une gate qui requiert le juge échoue fail-loud (pas de pass
-  # silencieux). Override config/test via `:fleet_pipeline, :gatekeeper_pod_id`.
-  defp gatekeeper_pod_id do
-    Application.get_env(:fleet_pipeline, :gatekeeper_pod_id)
-  end
+  # R4 — pod_id du **gatekeeper permanent** (work-session) à adresser. Registré
+  # par `Fleet.Pipeline.Gatekeeper` au boot Type 3 (sous-lot C). nil tant qu'aucun
+  # gatekeeper n'est booté → une gate qui requiert le juge échoue fail-loud (pas
+  # de pass silencieux). Override config/test via `:fleet_pipeline, :gatekeeper_pod_id`.
+  defp gatekeeper_pod_id, do: Fleet.Pipeline.Gatekeeper.pod_id()
 
   # ============================================================
   # Internal
