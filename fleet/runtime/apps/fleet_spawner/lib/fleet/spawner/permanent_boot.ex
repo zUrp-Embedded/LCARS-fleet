@@ -58,8 +58,9 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   @doc """
   Boot des pods permanents Type 1 (DN §"Contrat technique"
-  `boot_permanent_pods/0`). Invoqué post-readiness gate par
-  `Fleet.Spawner.Application` (inc suivant).
+  `boot_permanent_pods/0`). Invoqué post-readiness par l'**autorité unique**
+  `Fleet.Starfleet.BootOrchestrator` (F-14, R7 — le hook `Fleet.Spawner.Application`
+  qui l'invoquait aussi a été retiré pour éviter le double-boot).
 
   Énumère les rôles du répertoire cap-profiles → délègue le chargement+
   validation au loader canonique `Fleet.CapProfile.load/1` (DRY — pas de
@@ -107,10 +108,15 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   @doc """
-  L'auto-invoke `boot_permanent_pods/0` au démarrage de l'app est-il activé ?
-  Config `:fleet_spawner, :boot_permanent_at_start` (défaut **false** —
-  OFF en test/dev, umbrella stable ; ON en `config/runtime.exs`). Pur,
-  testable (gate découplé de l'IO spawn — pattern elixir-thinking).
+  Prédicat de config `:fleet_spawner, :boot_permanent_at_start` (défaut **false**).
+  Pur, testable (gate découplé de l'IO spawn — pattern elixir-thinking).
+
+  ⚠ **F-14 (R7)** : le hook auto-invoke de `Fleet.Spawner.Application` qui
+  consultait ce prédicat au démarrage de l'app a été **retiré** (double-boot avec
+  `BootOrchestrator`). Ce prédicat n'est donc plus sur le chemin de boot canon —
+  l'autorité unique est `Fleet.Starfleet.BootOrchestrator` (`:start_boot_orchestrator`).
+  Conservé pour usage explicite / introspection ; `:boot_permanent_at_start` est
+  inerte sur le chemin canon (décision surface-de-contrôle flaggée REPRISE/BACKLOG).
   """
   @spec auto_boot_enabled?() :: boolean()
   def auto_boot_enabled? do

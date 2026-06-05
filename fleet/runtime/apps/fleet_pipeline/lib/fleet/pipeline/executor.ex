@@ -503,12 +503,29 @@ defmodule Fleet.Pipeline.Executor do
 
     Bus.broadcast("fleet.events", event)
   rescue
-    # Boot order ou test sans Dispatch — registry pas peuplé. Silencieux.
-    _e in Fleet.Event.UnregisteredError -> :ok
-    # Source :pipeline pas dans enum closed list — pour l'instant pas dans
-    # Fleet.Event canonical_sources(), donc on tolère un FunctionClauseError
-    # éventuel sur la struct creation. À ajouter dans Fleet.Event chantier 3.
-    _e in [ArgumentError, FunctionClauseError] -> :ok
+    e ->
+      # R7 verrou I-CBC : ne plus AVALER en silence. L'ancien rescue rendait
+      # `:ok` muet sur UnregisteredError ET ArgumentError/FunctionClauseError —
+      # ce dernier « parce que :pipeline n'est pas dans l'enum » : STALE,
+      # `:pipeline` EST dans `Fleet.Event.canonical_sources/0`. Post-B2 le
+      # registry est chargé au boot et `pipeline.*` y est inscrit → un échec
+      # ici = un VRAI trou (type lifecycle absent du registry), plus un effet
+      # de boot order. On le rend visible.
+      Logger.error(
+        "Fleet.Pipeline.Executor: broadcast #{inspect(type)} échoué " <>
+          "(pipeline_id=#{state.pipeline_id}, source=:pipeline) : #{inspect(e)} — " <>
+          "événement lifecycle NON émis"
+      )
+
+      # Fail-loud (re-raise) hors prod → le dev voit le trou immédiatement ;
+      # en prod, log-only (ne pas perdre l'état du pipeline sur un échec de
+      # simple notification lifecycle). Gate `:reraise_broadcast_errors`
+      # (défaut true ; false en prod via runtime.exs).
+      if Application.get_env(:fleet_pipeline, :reraise_broadcast_errors, true) do
+        reraise(e, __STACKTRACE__)
+      else
+        :ok
+      end
   end
 
   defp extract_correlation_id(%{correlation_id: cid}) when is_binary(cid), do: cid

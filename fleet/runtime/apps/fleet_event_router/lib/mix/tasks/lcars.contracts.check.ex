@@ -80,17 +80,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     quiet? = "--quiet" in args
     Mix.Task.run("compile")
 
-    root = umbrella_root()
-
-    checks =
-      [
-        check_event_consumers_canon(root),
-        check_pipeline_v25_normalized(root),
-        check_events_handlers_exist(root),
-        check_coord_backend_wired(root)
-      ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
-
-    overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
+    {overall, checks} = run_checks()
 
     unless quiet?, do: IO.puts(render_yaml(overall, checks))
 
@@ -103,6 +93,36 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     )
 
     if overall == :fail, do: exit({:shutdown, 1})
+  end
+
+  @doc """
+  Exécute tous les checks et rend `{overall, checks}` SANS imprimer ni `exit`.
+
+  Forme réutilisable de la logique de check (R7 verrou I-CBC) : appelée par
+  `run/1` (CLI : print + exit) ET par le step de `mix release`
+  (`mix.exs` `verrou_contracts/1` : refuse de bâtir la release si rouge). Les
+  sources étant présentes au build (release bâtie depuis le projet), les checks
+  grep/introspection tournent ; un check rouge → release refusée = la
+  réalisation mécanique de « le boot refuse si un contrat est rouvert ».
+
+  Suppose le code déjà compilé (le caller compile : `run/1` via `Mix.Task.run`,
+  le step release après la phase compile).
+  """
+  @spec run_checks() :: {:pass | :fail, [map()]}
+  def run_checks do
+    root = umbrella_root()
+
+    checks =
+      [
+        check_event_consumers_canon(root),
+        check_pipeline_v25_normalized(root),
+        check_events_handlers_exist(root),
+        check_coord_backend_wired(root)
+      ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
+
+    overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
+
+    {overall, checks}
   end
 
   # ── Checks implémentés ───────────────────────────────────────────────

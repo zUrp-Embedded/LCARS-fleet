@@ -3,20 +3,21 @@ defmodule Fleet.Spawner.Application do
   Application supervisor `fleet_spawner` (chantier-6) + extension Lot 3
   boot pods permanents Type 1.
 
-  ## Auto-invoke boot_permanent_pods — config-gated défaut OFF
+  ## Boot des pods permanents : autorité UNIQUE = BootOrchestrator (F-14, R7)
 
-  Le DN `permanent-pods-boot.md` §"Contrat technique" montre un spawn
-  post-readiness dans `Application.start`. MAIS l'intersection DN L344
-  attribue l'orchestration readiness (`fleet_mcp` + `fleet_cap_profile`
-  ready, timeout 60s) au **startup probe `lcars-fleet_service`** (ring0,
-  encodé plus loin dans ce mandat) — pas à fleet_spawner.
+  Le boot des pods permanents (`Fleet.Spawner.PermanentBoot.boot_permanent_pods/0`)
+  est orchestré **uniquement** par `Fleet.Starfleet.BootOrchestrator` (post-readiness,
+  gardé `:fleet_starfleet, :start_boot_orchestrator`). Le hook auto-invoke
+  historique de cette app (gardé `:boot_permanent_at_start`) a été **retiré
+  (F-14)** : c'était un **second** chemin de boot qui, si `:boot_permanent_at_start`
+  était activé en prod (la voie documentée), bootait les pods permanents EN PLUS
+  de BootOrchestrator → **double-boot**. Une seule autorité de boot désormais.
 
-  Donc ici : hook auto-invoke **gardé par `:fleet_spawner,
-  :boot_permanent_at_start` (défaut `false`)**. OFF en test/dev (umbrella
-  stable — leçon nuit-1 : ne pas auto-démarrer de singletons lourds en
-  test). ON uniquement en `config/runtime.exs` runtime. `lcars-fleet_service`
-  invoquera `Fleet.Spawner.PermanentBoot.boot_permanent_pods/1`
-  explicitement post-readiness ; ce hook reste un fallback optionnel.
+  > Résidu flaggé (hors R7-core) : `:boot_permanent_at_start` /
+  > `LCARS_BOOT_PERMANENT_AT_START` n'est plus consulté par le chemin de boot
+  > canon (BootOrchestrator boote sur `:start_boot_orchestrator`). La surface de
+  > contrôle prod du boot permanent (env-var dédiée vs `:start_boot_orchestrator`)
+  > est une décision séparée — voir REPRISE/BACKLOG.
   """
 
   use Application
@@ -40,28 +41,12 @@ defmodule Fleet.Spawner.Application do
 
     children = base ++ publish
 
-    case Supervisor.start_link(children,
-           strategy: :one_for_one,
-           name: Fleet.Spawner.RootSupervisor
-         ) do
-      {:ok, pid} ->
-        maybe_boot_permanent_pods()
-        {:ok, pid}
-
-      err ->
-        err
-    end
-  end
-
-  # Async, non-bloquant pour le démarrage de l'app (DN pattern spawn/1).
-  # Gardé : ne fait RIEN sauf si explicitement activé en config runtime.
-  defp maybe_boot_permanent_pods do
-    if Fleet.Spawner.PermanentBoot.auto_boot_enabled?() do
-      spawn(fn ->
-        {:ok, _pod_ids} = Fleet.Spawner.PermanentBoot.boot_permanent_pods()
-      end)
-    end
-
-    :ok
+    # F-14 (R7) : plus de boot des pods permanents ici — autorité unique =
+    # Fleet.Starfleet.BootOrchestrator (post-readiness). Cette app ne fait que
+    # démarrer son Registry + Supervisor + PublishConsumer.
+    Supervisor.start_link(children,
+      strategy: :one_for_one,
+      name: Fleet.Spawner.RootSupervisor
+    )
   end
 end

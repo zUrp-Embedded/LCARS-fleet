@@ -252,7 +252,10 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
   end
 
-  describe "auto_boot_enabled?/0 — gate config (défaut OFF, umbrella stable)" do
+  # ⚠ F-14 (R7) : `auto_boot_enabled?/0` n'est PLUS sur le chemin de boot canon
+  # (hook Spawner.Application retiré ; autorité unique = BootOrchestrator). Ces
+  # tests valident le prédicat de config en soi, pas un comportement de boot actif.
+  describe "auto_boot_enabled?/0 — gate config (défaut OFF, hors chemin canon F-14)" do
     test "défaut false (non configuré : OFF en test/dev)" do
       refute PermanentBoot.auto_boot_enabled?()
     end

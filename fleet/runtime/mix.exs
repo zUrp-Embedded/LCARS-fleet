@@ -7,8 +7,55 @@ defmodule LcarsFleetRuntime.MixProject do
       version: "0.1.0",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      aliases: aliases(),
       releases: releases()
     ]
+  end
+
+  # R7 verrou I-CBC — gate CI/dev composable : compile strict + suite + le
+  # tableau de bord des contrats inter-module. `mix gate` exit≠0 si un contrat
+  # est rouge (le jumeau runtime du gate doctrine §11-PATH). À câbler en CI.
+  defp aliases do
+    [
+      gate: [
+        "compile --warnings-as-errors",
+        "test",
+        "lcars.contracts.check"
+      ]
+    ]
+  end
+
+  # R7 verrou I-CBC — step de `mix release` : refuse de bâtir la release si un
+  # contrat inter-module est rouge. Aucune release rouge ne se construit ⇒
+  # réalisation mécanique de « le boot refuse si un contrat est rouvert »
+  # (PLAN R7). Tourne après la phase compile, avant :assemble (sources
+  # présentes au build → checks grep/introspection valides).
+  defp verrou_contracts(release) do
+    # Fail-closed : un check qui CRASH (fichier absent, YAML invalide…) rend
+    # le statut des contrats inconnu → on refuse la release avec un message
+    # clair (pas une stacktrace brute opaque), comme pour un contrat rouge.
+    {overall, checks} =
+      try do
+        Mix.Tasks.Lcars.Contracts.Check.run_checks()
+      rescue
+        e ->
+          Mix.raise(
+            "Verrou contracts.check (R7 I-CBC) : release REFUSÉE — le checker a planté " <>
+              "(#{Exception.message(e)}). Statut des contrats inconnu → fail-closed."
+          )
+      end
+
+    if overall == :fail do
+      rouges = checks |> Enum.filter(&(&1.status == :fail)) |> Enum.map(& &1.id)
+
+      Mix.raise(
+        "Verrou contracts.check (R7 I-CBC) : release REFUSÉE — contrats rouges : " <>
+          "#{inspect(rouges)}. Corriger avant de bâtir (cf. mix lcars.contracts.check)."
+      )
+    end
+
+    Mix.shell().info("[verrou] contracts.check vert — release autorisée")
+    release
   end
 
   defp deps do
@@ -62,7 +109,7 @@ defmodule LcarsFleetRuntime.MixProject do
           # défaut (LCARS_PILOT_DISPATCHER=true pour activer).
           fleet_pilot: :permanent
         ],
-        steps: [:assemble, :tar]
+        steps: [&verrou_contracts/1, :assemble, :tar]
       ]
     ]
   end

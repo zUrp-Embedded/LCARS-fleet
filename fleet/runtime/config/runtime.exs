@@ -53,11 +53,15 @@ if config_env() != :test do
   end
 
   # ============================================================
-  # fleet_spawner (Lot 3) — auto-boot pods permanents au daemon start
-  # B10 C2 #582 : LCARS_BOOT_PERMANENT_AT_START="true" → maybe_boot_
-  # permanent_pods/0 invoqué au start fleet_spawner.Application
-  # (architect-interactive + memory-X). OFF par défaut hors prod
-  # systemd (test/dev).
+  # fleet_spawner (Lot 3) — pods permanents
+  # ⚠ F-14 (R7) : `:boot_permanent_at_start` n'est PLUS sur le chemin de boot
+  # canon. Le hook `Fleet.Spawner.Application.maybe_boot_permanent_pods/0` qui le
+  # consultait a été RETIRÉ (double-boot avec BootOrchestrator). L'autorité unique
+  # de boot des pods permanents est `Fleet.Starfleet.BootOrchestrator`
+  # (gardée `:start_boot_orchestrator`, défaut true). La clé ci-dessous reste
+  # positionnée (lue par `auto_boot_enabled?/0` pour introspection) mais est
+  # INERTE sur le chemin canon. Surface de contrôle prod = décision flaggée
+  # (REPRISE/BACKLOG : env-var dédiée vs `:start_boot_orchestrator`).
   # ============================================================
   config :fleet_spawner,
     boot_permanent_at_start: System.get_env("LCARS_BOOT_PERMANENT_AT_START") == "true"
@@ -137,6 +141,12 @@ if config_env() != :test do
   if path = System.get_env("LCARS_PIPELINES_ROOT") do
     config :fleet_pipeline, pipelines_root: path
   end
+
+  # R7 I-CBC — en prod, un échec de broadcast d'event lifecycle pipeline est
+  # loggé (Logger.error) mais NE crash PAS l'Executor (préserver l'état du
+  # pipeline). Hors prod, défaut `true` = fail-loud (re-raise) pour que le dev
+  # voie le trou. (Ce fichier n'est pas évalué en `:test` → test garde true.)
+  config :fleet_pipeline, reraise_broadcast_errors: false
 
   # ============================================================
   # fleet_starfleet (ch13) — log audit Cat 5
