@@ -13,11 +13,13 @@ defmodule Fleet.Spawner.Application do
   était activé en prod (la voie documentée), bootait les pods permanents EN PLUS
   de BootOrchestrator → **double-boot**. Une seule autorité de boot désormais.
 
-  > Résidu flaggé (hors R7-core) : `:boot_permanent_at_start` /
-  > `LCARS_BOOT_PERMANENT_AT_START` n'est plus consulté par le chemin de boot
-  > canon (BootOrchestrator boote sur `:start_boot_orchestrator`). La surface de
-  > contrôle prod du boot permanent (env-var dédiée vs `:start_boot_orchestrator`)
-  > est une décision séparée — voir REPRISE/BACKLOG.
+  **BL-028 (clos)** : la surface de contrôle prod est tranchée. `BootOrchestrator`
+  **gate** le boot des pods permanents sur `:boot_permanent_at_start` (via
+  `PermanentBoot.auto_boot_enabled?/0`, **défaut true** — DN lcars-fleet_service §391) ;
+  `LCARS_BOOT_PERMANENT_AT_START=false` désactive (boot_complete émis, 0 pod spawné).
+  Deux knobs distincts : `:start_boot_orchestrator` (l'orchestrateur tourne-t-il ?)
+  + `:boot_permanent_at_start` (boote-t-il les pods permanents ?). Cette app, elle,
+  ne boote plus jamais de pod permanent (hook retiré F-14).
   """
 
   use Application

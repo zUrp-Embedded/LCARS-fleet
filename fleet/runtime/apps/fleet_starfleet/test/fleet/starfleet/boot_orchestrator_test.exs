@@ -26,6 +26,27 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
                    1_000
   end
 
+  test "BL-028 : boot_permanent désactivé → boot_complete avec 0 pod, boot_fn PAS appelé" do
+    parent = self()
+
+    BootOrchestrator.run(
+      boot_permanent_enabled: false,
+      boot_permanent_pods: fn ->
+        send(parent, :boot_fn_called)
+        [{:ok, :pod1}]
+      end
+    )
+
+    assert_receive %Fleet.Event{
+                     source: :starfleet,
+                     type: :"fleet.boot_complete",
+                     payload: %{"permanent_pods" => 0}
+                   },
+                   1_000
+
+    refute_received :boot_fn_called
+  end
+
   test "boot partial (mix :ok + :error) → broadcast fleet.boot_partial" do
     BootOrchestrator.run(
       boot_permanent_pods: fn -> [{:ok, :pod1}, {:error, :nope}, {:ok, :pod2}] end

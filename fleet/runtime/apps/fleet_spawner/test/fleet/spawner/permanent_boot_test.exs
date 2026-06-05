@@ -2,9 +2,13 @@ defmodule Fleet.Spawner.PermanentBootTest do
   @moduledoc """
   Lot 3 inc1 — `Fleet.Spawner.PermanentBoot.boot_at_start?/1` garde D-01
   CRITIQUE (DN ring1/permanent-pods-boot.md). Pur, string-keyed
-  (anti-M1 : pseudo-code DN atom-keys = illustratif). `async: true`.
+  (anti-M1 : pseudo-code DN atom-keys = illustratif).
+
+  `async: false` : le describe `auto_boot_enabled?/0` mute la config Application
+  globale (`:boot_permanent_at_start`) via `put_env` — couplage config runtime
+  inhérent au prédicat, séquentialiser évite la race inter-module (BL-028).
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Fleet.Spawner.PermanentBoot
 
@@ -252,19 +256,23 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
   end
 
-  # ⚠ F-14 (R7) : `auto_boot_enabled?/0` n'est PLUS sur le chemin de boot canon
-  # (hook Spawner.Application retiré ; autorité unique = BootOrchestrator). Ces
-  # tests valident le prédicat de config en soi, pas un comportement de boot actif.
-  describe "auto_boot_enabled?/0 — gate config (défaut OFF, hors chemin canon F-14)" do
-    test "défaut false (non configuré : OFF en test/dev)" do
-      refute PermanentBoot.auto_boot_enabled?()
+  # BL-028 (R7→clos) : `auto_boot_enabled?/0` EST le gate canon du boot des pods
+  # permanents (consulté par BootOrchestrator, autorité unique depuis F-14).
+  # Défaut **true** (DN lcars-fleet_service §391) ; `false` désactive.
+  describe "auto_boot_enabled?/0 — gate canon boot pods permanents (défaut true)" do
+    test "défaut true (non configuré) — boote par défaut, canon DN" do
+      assert PermanentBoot.auto_boot_enabled?()
     end
 
-    test "true uniquement si :boot_permanent_at_start == true" do
-      Application.put_env(:fleet_spawner, :boot_permanent_at_start, true)
+    test "false seulement si :boot_permanent_at_start mis explicitement à false" do
+      Application.put_env(:fleet_spawner, :boot_permanent_at_start, false)
       on_exit(fn -> Application.delete_env(:fleet_spawner, :boot_permanent_at_start) end)
+      refute PermanentBoot.auto_boot_enabled?()
+
+      Application.put_env(:fleet_spawner, :boot_permanent_at_start, true)
       assert PermanentBoot.auto_boot_enabled?()
 
+      # Seul le booléen `true` active (pas une string "yes").
       Application.put_env(:fleet_spawner, :boot_permanent_at_start, "yes")
       refute PermanentBoot.auto_boot_enabled?()
     end

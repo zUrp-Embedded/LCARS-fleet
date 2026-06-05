@@ -54,17 +54,17 @@ if config_env() != :test do
 
   # ============================================================
   # fleet_spawner (Lot 3) — pods permanents
-  # ⚠ F-14 (R7) : `:boot_permanent_at_start` n'est PLUS sur le chemin de boot
-  # canon. Le hook `Fleet.Spawner.Application.maybe_boot_permanent_pods/0` qui le
-  # consultait a été RETIRÉ (double-boot avec BootOrchestrator). L'autorité unique
-  # de boot des pods permanents est `Fleet.Starfleet.BootOrchestrator`
-  # (gardée `:start_boot_orchestrator`, défaut true). La clé ci-dessous reste
-  # positionnée (lue par `auto_boot_enabled?/0` pour introspection) mais est
-  # INERTE sur le chemin canon. Surface de contrôle prod = décision flaggée
-  # (REPRISE/BACKLOG : env-var dédiée vs `:start_boot_orchestrator`).
+  # BL-028 (clos) : `:boot_permanent_at_start` EST le gate canon du boot des pods
+  # permanents (consulté par `Fleet.Starfleet.BootOrchestrator` via
+  # `PermanentBoot.auto_boot_enabled?/0`, l'autorité unique depuis F-14). Défaut
+  # **true** (canon DN lcars-fleet_service §391 : « default true en prod ») ;
+  # `LCARS_BOOT_PERMANENT_AT_START=false` désactive (BootOrchestrator wire les
+  # consumers + émet boot_complete mais ne spawn aucun pod permanent). Le second
+  # gate `:start_boot_orchestrator` (défaut true) contrôle si l'orchestrateur
+  # tourne du tout. Deux knobs distincts et significatifs.
   # ============================================================
   config :fleet_spawner,
-    boot_permanent_at_start: System.get_env("LCARS_BOOT_PERMANENT_AT_START") == "true"
+    boot_permanent_at_start: System.get_env("LCARS_BOOT_PERMANENT_AT_START") != "false"
 
   # ============================================================
   # fleet_spawner pod_dir_root — OVERRIDE optionnel seulement.

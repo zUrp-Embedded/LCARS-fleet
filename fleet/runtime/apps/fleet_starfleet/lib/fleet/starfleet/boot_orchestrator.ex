@@ -49,15 +49,25 @@ defmodule Fleet.Starfleet.BootOrchestrator do
         Fleet.Spawner.PermanentBoot.boot_permanent_pods()
       end)
 
+    # BL-028 : gate canon du boot des pods permanents (DN lcars-fleet_service §391,
+    # défaut true ; `LCARS_BOOT_PERMANENT_AT_START=false` désactive). Désactivé →
+    # on wire les consumers + émet boot_complete, mais 0 pod permanent spawné.
+    enabled? =
+      Keyword.get(opts, :boot_permanent_enabled, Fleet.Spawner.PermanentBoot.auto_boot_enabled?())
+
     started_apps =
       Application.started_applications()
       |> Enum.map(fn {a, _, _} -> a end)
       |> Enum.filter(&String.starts_with?(Atom.to_string(&1), "fleet_"))
       |> Enum.sort()
 
-    Logger.info("BootOrchestrator: démarrage sequence post-readiness")
+    Logger.info(
+      "BootOrchestrator: démarrage sequence post-readiness (boot_permanent=#{enabled?})"
+    )
 
-    case safe_boot(boot_fn) do
+    boot_result = if enabled?, do: safe_boot(boot_fn), else: {:ok, []}
+
+    case boot_result do
       {:ok, pods} ->
         emit_complete(started_apps, pods)
 

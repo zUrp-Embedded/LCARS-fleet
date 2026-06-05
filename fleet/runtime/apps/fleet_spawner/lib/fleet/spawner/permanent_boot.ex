@@ -108,19 +108,21 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   @doc """
-  Prédicat de config `:fleet_spawner, :boot_permanent_at_start` (défaut **false**).
-  Pur, testable (gate découplé de l'IO spawn — pattern elixir-thinking).
+  Le boot des pods permanents est-il activé ? Config `:fleet_spawner,
+  :boot_permanent_at_start` — **défaut `true`** (canon DN `lcars-fleet_service`
+  §391 : « default true en prod, false en test » ; `false` désactive). Pur,
+  testable (gate découplé de l'IO spawn — pattern elixir-thinking).
 
-  ⚠ **F-14 (R7)** : le hook auto-invoke de `Fleet.Spawner.Application` qui
-  consultait ce prédicat au démarrage de l'app a été **retiré** (double-boot avec
-  `BootOrchestrator`). Ce prédicat n'est donc plus sur le chemin de boot canon —
-  l'autorité unique est `Fleet.Starfleet.BootOrchestrator` (`:start_boot_orchestrator`).
-  Conservé pour usage explicite / introspection ; `:boot_permanent_at_start` est
-  inerte sur le chemin canon (décision surface-de-contrôle flaggée REPRISE/BACKLOG).
+  **BL-028 (R7→clos)** : ce prédicat est l'**unique gate canon** du boot des pods
+  permanents, consulté par `Fleet.Starfleet.BootOrchestrator` (l'autorité de boot
+  unique depuis F-14). `LCARS_BOOT_PERMANENT_AT_START=false` (runtime.exs) le met à
+  `false` → BootOrchestrator wire les consumers + émet `fleet.boot_complete` mais
+  ne spawn AUCUN pod permanent (mode dégradé/maintenance explicite). Le défaut
+  (env absent) = `true` = boote — comportement prod inchangé vs avant.
   """
   @spec auto_boot_enabled?() :: boolean()
   def auto_boot_enabled? do
-    Application.get_env(:fleet_spawner, :boot_permanent_at_start, false) == true
+    Application.get_env(:fleet_spawner, :boot_permanent_at_start, true) == true
   end
 
   # NB BL-021 chantier 4 — `persist_state/2` retirée (DN permanent-pods-boot §C-3
