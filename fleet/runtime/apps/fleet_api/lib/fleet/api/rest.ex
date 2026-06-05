@@ -61,6 +61,18 @@ defmodule Fleet.API.Rest do
   end
 
   post "/api/admin/spawn" do
+    # Chokepoint « nouveau pod opérateur » : refusé pendant un drain de
+    # shutdown (Fleet.Shutdown.Quiesce). 503 = indisponible temporairement.
+    # REST est l'UNIQUE producteur de l'event `admin.spawn.request` (vérifié) —
+    # gater ici couvre donc intégralement l'admission de pods top-level.
+    if Fleet.Shutdown.Quiesce.quiescing?() do
+      send_resp(conn, 503, ~s|{"error":"quiescing — shutdown drain in progress"}|)
+    else
+      do_admin_spawn(conn)
+    end
+  end
+
+  defp do_admin_spawn(conn) do
     # BL-021 chantier 9 (B) — migrated to schema canon %Fleet.Event{source: :api}.
     event = %Fleet.Event{
       source: :api,

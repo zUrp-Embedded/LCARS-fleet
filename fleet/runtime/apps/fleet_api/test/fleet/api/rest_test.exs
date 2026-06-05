@@ -58,6 +58,21 @@ defmodule Fleet.API.RestTest do
     end
   end
 
+  describe "POST /api/admin/spawn — quiescence (drain shutdown)" do
+    test "503 quand le daemon quiesce (refuse nouveau pod top-level)", %{secret: secret} do
+      Fleet.Shutdown.Quiesce.refuse!()
+      on_exit(&Fleet.Shutdown.Quiesce.resume!/0)
+
+      conn =
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{"role" => "x"}))
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-auth-token", valid_token(secret))
+        |> Rest.call(@opts)
+
+      assert conn.status == 503
+    end
+  end
+
   describe "auth HMAC" do
     test "missing token → 401", %{secret: _secret} do
       conn = conn(:get, "/api/pipelines") |> Rest.call(@opts)

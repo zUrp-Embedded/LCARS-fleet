@@ -42,11 +42,24 @@ defmodule Fleet.Pipeline do
 
     * `{:ok, pipeline_id}` — Executor démarré, monitorable via Registry
     * `{:error, reason}` — schema invalide / introuvable / déjà démarré
+    * `{:error, :quiescing}` — drain de shutdown en cours, nouveau travail
+      top-level refusé (`Fleet.Shutdown.Quiesce`)
   """
   @spec start_pipeline(String.t(), map(), keyword()) ::
           {:ok, pipeline_id :: String.t()} | {:error, term()}
   def start_pipeline(pipeline_name, mandate_context, opts \\ [])
       when is_binary(pipeline_name) and is_map(mandate_context) do
+    # Chokepoint « nouveau pipeline top-level » : pendant un drain de shutdown,
+    # on refuse d'admettre du travail neuf (le travail interne d'un pipeline en
+    # vol ne passe PAS par ici, il peut donc se terminer).
+    if Fleet.Shutdown.Quiesce.quiescing?() do
+      {:error, :quiescing}
+    else
+      do_start_pipeline(pipeline_name, mandate_context, opts)
+    end
+  end
+
+  defp do_start_pipeline(pipeline_name, mandate_context, opts) do
     # Mi3 : un pipeline DOIT porter un ticket_id (traçabilité) — plus de pipeline anonyme.
     case mandate_context[:ticket_id] do
       ticket_id when is_binary(ticket_id) and ticket_id != "" ->
@@ -75,6 +88,14 @@ defmodule Fleet.Pipeline do
         {:error, :ticket_id_required}
     end
   end
+
+  @doc """
+  Nombre de pipelines en cours d'exécution (Executors vivants enregistrés
+  dans `Fleet.Pipeline.Registry`). Consommé par l'agrégateur d'in-flight du
+  drain de shutdown (`Fleet.Starfleet.Shutdown`).
+  """
+  @spec count_running() :: non_neg_integer()
+  def count_running, do: Registry.count(Fleet.Pipeline.Registry)
 
   defp generate_pipeline_id do
     16

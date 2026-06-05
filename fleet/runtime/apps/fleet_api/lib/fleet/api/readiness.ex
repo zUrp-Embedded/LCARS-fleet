@@ -154,9 +154,9 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # Drain de shutdown : `NoOpDispatcher` (défaut, `Fleet.Dispatcher` absent)
-  # ⇒ drain immédiat 0 in-flight = honnête-dégradé (le drain ne draine pas).
-  # Visible jusqu'au câblage du vrai backend agrégateur.
+  # Drain de shutdown : `NoOpDispatcher` (défaut test/fallback) ⇒ drain immédiat
+  # 0 in-flight = honnête-dégradé (le drain ne draine pas). Operational quand le
+  # backend prod `AggregateDispatcher` est câblé (seam `:shutdown_dispatcher`).
   defp shutdown_dispatcher do
     backend =
       Application.get_env(
@@ -168,7 +168,7 @@ defmodule Fleet.API.Readiness do
     if backend == Fleet.Starfleet.Shutdown.NoOpDispatcher do
       probe("shutdown.dispatcher", :degraded, %{
         backend: "NoOpDispatcher",
-        note: "drain NoOp (Fleet.Dispatcher absent) — 0 in-flight, drain immédiat"
+        note: "drain NoOp (AggregateDispatcher non câblé) — 0 in-flight, drain immédiat"
       })
     else
       probe("shutdown.dispatcher", :operational, %{backend: inspect(backend)})

@@ -1,7 +1,7 @@
 # fleet_pipeline (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-05 (R4 — gate inférentielle = mandat MCP au gatekeeper permanent (Type 3), vocab canon, `Fleet.Pipeline.Gatekeeper` boot/registration ; R3 — Loader-normalizer v2.5/U1, prédicats Gates)
+**Dernière révision** : 2026-06-05 (R4 D5 — `count_running/0` + gate `:quiescing` sur `start_pipeline/3` (drain shutdown) ; R4 — gate inférentielle = mandat MCP au gatekeeper permanent (Type 3), vocab canon, `Fleet.Pipeline.Gatekeeper` boot/registration ; R3 — Loader-normalizer v2.5/U1, prédicats Gates)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
@@ -29,9 +29,15 @@ PROVEN 2026-05-09, profil **CONFORMANCE**).
 ```elixir
 {:ok, pipeline_id} =
   Fleet.Pipeline.start_pipeline("intensity-low", %{ticket_id: "fleet/lcars#42"})
+# {:error, :quiescing} si un drain de shutdown est en cours (chokepoint
+# top-level — Fleet.Shutdown.Quiesce ; le travail interne d'un pipeline en
+# vol n'est PAS gaté)
 
 # Lookup Executor pid via Registry
 [{pid, _}] = Registry.lookup(Fleet.Pipeline.Registry, pipeline_id)
+
+# Nombre de pipelines en cours (consommé par l'agrégateur d'in-flight du drain)
+n = Fleet.Pipeline.count_running()
 ```
 
 ## Format pipeline YAML

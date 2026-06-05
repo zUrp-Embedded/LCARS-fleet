@@ -2,7 +2,7 @@
 
 **Date** : 2026-05-09
 **Dernière révision** : 2026-06-05 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
-**Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED
+**Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
 Bus events (Phoenix.PubSub) + registry events.yaml LCARS v2 (Ring 2 —
@@ -29,6 +29,11 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
 - `Fleet.EventRouter.Sanitize.Secrets` — redact `<TOKEN_REDACTED>`
   (sk-..., ghp_...) PoC-7
 - `Fleet.EventRouter.Sanitize.PII` — redact `<EMAIL_REDACTED>` PoC-7
+- `Fleet.Shutdown.Quiesce` — primitive partagée du drain de shutdown (flag
+  `:persistent_term` `quiescing?/refuse!/resume!`). Vit ici car substrat
+  universel (comme `Fleet.Event`) : lisible par `fleet_pipeline`/`fleet_api`
+  (gate top-level) sans inversion de layering. Policy (quand quiescer) =
+  `fleet_starfleet` (`Shutdown.AggregateDispatcher`). Pas de process (Iron Law)
 
 ## API principale
 

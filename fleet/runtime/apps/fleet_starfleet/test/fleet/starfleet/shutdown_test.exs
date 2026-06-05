@@ -2,9 +2,9 @@ defmodule Fleet.Starfleet.ShutdownTest do
   @moduledoc """
   DN ring0/lcars-fleet_service §Fleet.Starfleet.Shutdown. `async: false` :
   le backend stub modélise un dispatcher singleton (Agent nommé,
-  lu cross-process par le GenServer). Couplage global assumé et
-  cohérent (le vrai Fleet.Dispatcher futur sera lui aussi singleton).
-  Seam #P5 : Fleet.Dispatcher absent → behaviour injecté.
+  lu cross-process par le GenServer). Couplage global assumé et cohérent.
+  Le backend est injecté via le seam `:shutdown_dispatcher` (behaviour
+  `Shutdown.Dispatcher`) — défaut `NoOpDispatcher`, prod `AggregateDispatcher`.
   """
   use ExUnit.Case, async: false
 

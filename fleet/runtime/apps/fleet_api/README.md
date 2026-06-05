@@ -29,7 +29,7 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 | GET | `/api/pipelines` | HMAC | liste état pipelines |
 | GET | `/api/tickets` | HMAC | liste tickets |
 | GET | `/api/pods` | HMAC | liste pods |
-| POST | `/api/admin/spawn` | HMAC | broadcast `admin.spawn.request` (ch6) |
+| POST | `/api/admin/spawn` | HMAC | broadcast `admin.spawn.request` (ch6) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
 | POST | `/api/config/update` | HMAC | atomic write + git commit |
 | POST | `/api/relay/:ref` | HMAC | round-trip permission relay (ch10) |
 
@@ -77,7 +77,7 @@ Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 
 ```bash
 mix test apps/fleet_api
-# 58 tests, 0 failures
+# 59 tests, 0 failures
 ```
 
 Tests utilisent `Plug.Test` pour Rest (pas de listener réel),

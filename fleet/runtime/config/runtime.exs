@@ -145,6 +145,14 @@ if config_env() != :test do
     config :fleet_starfleet, audit_log_path: path
   end
 
+  # Drain de shutdown : backend réel (agrège l'in-flight Spawner/Pipeline/
+  # TaskQueue + active la quiescence). Hors `:test` (ce fichier est guardé) →
+  # les tests gardent le défaut `NoOpDispatcher` (hermétisme). Décision user
+  # 2026-06-05 : pas de god-module Fleet.Dispatcher, le seam EST l'abstraction.
+  config :fleet_starfleet,
+         :shutdown_dispatcher,
+         Fleet.Starfleet.Shutdown.AggregateDispatcher
+
   # ============================================================
   # fleet_coord (ch14) — wired backend Fleet.Coord pour ch13
   # (ch12/pipeline : soft gate consolidé sur le gatekeeper côté pipeline, R06 —
