@@ -57,11 +57,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       id: "spawn.has_mandate",
       remediation: "R18",
       note: "refus spawn sans mandat hors mode admin"
-    },
-    %{
-      id: "launch.backend_containment_coherent",
-      remediation: "R20",
-      note: "TmuxBackend quarantaine/containment cohérent"
     }
   ]
 
@@ -109,7 +104,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_events_handlers_exist(root),
         check_coord_backend_wired(root),
         check_capprofile_lifetime_scope_path(root),
-        check_capprofile_modop_incompatible_path(root)
+        check_capprofile_modop_incompatible_path(root),
+        check_launch_backend_containment(root)
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
@@ -292,6 +288,41 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       evidence: evidence,
       note:
         "check_modop_incompatible lit spec.modop_incompatible (inexistant) au lieu de spec.modop_set.incompatible"
+    }
+  end
+
+  # R20 (→R4-pending) : `TmuxBackend` lance claude HORS bwrap (containment: none,
+  # control-path cassé). Il ne doit être activable que derrière le double-garde
+  # env (quarantaine : `LCARS_LAUNCH_BACKEND=tmux` ET `LCARS_UNSAFE_ALLOW_HOST_TMUX=1`)
+  # ET documenter honnêtement son containment dégradé. Rouge si le garde "unsafe"
+  # disparaît (quarantaine levée) ou si le moduledoc ne warn plus.
+  defp check_launch_backend_containment(root) do
+    rt = "config/runtime.exs"
+    tb = "apps/fleet_spawner/lib/fleet/spawner/launch_backend/tmux_backend.ex"
+    rt_src = File.read!(Path.join(root, rt))
+    tb_src = File.read!(Path.join(root, tb))
+
+    configures_tmux? =
+      Regex.match?(~r/:launch_backend,\s*Fleet\.Spawner\.LaunchBackend\.TmuxBackend/, rt_src)
+
+    quarantine_ok? = String.contains?(rt_src, "LCARS_UNSAFE_ALLOW_HOST_TMUX")
+    documented? = Regex.match?(~r/containment dégradé|containment:\s*none/i, tb_src)
+
+    evidence =
+      [
+        {configures_tmux? and not quarantine_ok?,
+         "#{rt} : TmuxBackend activable sans garde LCARS_UNSAFE_ALLOW_HOST_TMUX (quarantaine levée)"},
+        {not documented?, "#{tb} : moduledoc ne documente plus le containment dégradé"}
+      ]
+      |> Enum.filter(&elem(&1, 0))
+      |> Enum.map(&elem(&1, 1))
+
+    %{
+      id: "launch.backend_containment_coherent",
+      remediation: "R20",
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
+      note: "TmuxBackend en quarantaine (double-garde env) + containment dégradé documenté"
     }
   end
 
