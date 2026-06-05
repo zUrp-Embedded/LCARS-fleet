@@ -26,13 +26,23 @@ defmodule Fleet.Pipeline.R1SeamTest do
     @behaviour Fleet.Pipeline.StageSpawner
 
     @impl Fleet.Pipeline.StageSpawner
+    # R06 — le gatekeeper (juge unique) a un pod_id distinct du pod de stage
+    # (sinon collision de corrélation gate_evals ↔ stage).
+    def spawn_stage_pod("gatekeeper", _profile, stage_ctx) do
+      notify(stage_ctx.stage, "gatekeeper")
+      {:ok, "r1-gk-#{stage_ctx.stage}"}
+    end
+
     def spawn_stage_pod(role, _profile, stage_ctx) do
+      notify(stage_ctx.stage, role)
+      {:ok, "r1-pod-#{stage_ctx.stage}"}
+    end
+
+    defp notify(stage, role) do
       case Application.get_env(:fleet_pipeline, :r1_test_pid) do
-        pid when is_pid(pid) -> send(pid, {:spawned, stage_ctx.stage, role})
+        pid when is_pid(pid) -> send(pid, {:spawned, stage, role})
         _ -> :ok
       end
-
-      {:ok, "r1-pod-#{stage_ctx.stage}"}
     end
   end
 
@@ -104,6 +114,42 @@ defmodule Fleet.Pipeline.R1SeamTest do
     {:ok, _exec} = start_supervised({Executor, pipeline_id: pid, pipeline_name: "standard-qa"})
 
     assert_receive {:spawned, "brainstorm", "architect-interactive"}, 2_000
+  end
+
+  # T5 — soft gate : la complétion d'un stage à soft gate dispatche le
+  # **gatekeeper** (juge unique), jamais un silent pass ni l'ancien placeholder
+  # NotWiredYet (couture coord retirée → consolidée pipeline, R06).
+  @tag :tmp_dir
+  test "T5 — soft gate → dispatch gatekeeper (jamais silent pass / NotWiredYet)", %{tmp_dir: tmp} do
+    pipelines_dir = Path.join(tmp, "pipelines")
+    File.mkdir_p!(pipelines_dir)
+
+    File.write!(Path.join(pipelines_dir, "r1-soft.yaml"), """
+    name: r1-soft
+    version: 1
+    stages:
+      audit:
+        role: scout
+        profile: noop
+        gate:
+          type: soft
+          max_rounds: 1
+    """)
+
+    Application.put_env(:fleet_pipeline, :pipelines_root, pipelines_dir)
+    on_exit(fn -> Application.delete_env(:fleet_pipeline, :pipelines_root) end)
+
+    Bus.subscribe()
+    pid = "r1-t5-#{System.unique_integer([:positive])}"
+
+    {:ok, _exec} = start_supervised({Executor, pipeline_id: pid, pipeline_name: "r1-soft"})
+    assert_receive {:spawned, "audit", "scout"}, 2_000
+
+    Bus.broadcast("fleet.events", canon_pod_completed(pid, "audit"))
+
+    # RED avant R06 : le soft gate tombait sur NotWiredYet (silent fail coord).
+    # Après : la complétion du stage évalue le soft gate → dispatch gatekeeper.
+    assert_receive {:spawned, "audit", "gatekeeper"}, 2_000
   end
 
   # T6 (e2e) — spawn stage_a → pod.completed canon → gate → spawn stage_b.

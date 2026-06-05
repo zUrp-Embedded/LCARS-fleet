@@ -27,10 +27,9 @@ defmodule Fleet.Pipeline.MixProject do
   end
 
   defp deps do
-    # Fleet.Coord (ch14) wrappé derrière `CoordBackend` behaviour swappable
-    # (default `NotWiredYet`) — soft gate + coordHook deferred.
     # Fleet.Spawner (ch6 PROMOTED) via `StageSpawner` (default délègue à
-    # `Fleet.Spawner.spawn_pod/3`).
+    # `Fleet.Spawner.spawn_pod/3`) — spawn des stages ET du gatekeeper (R06 :
+    # soft/terminal gates → gatekeeper, juge unique, plus de backend coord).
     [
       {:fleet_cap_profile, in_umbrella: true},
       {:fleet_spawner, in_umbrella: true},

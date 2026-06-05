@@ -5,13 +5,18 @@ defmodule Fleet.Pipeline.Gates do
   Types :
 
     * **hard** — règle déclarative `Hard.match?/2`. Pas de bypass.
-    * **soft** — délégation `CoordBackend.invoke_soft_gate/4` (LLM
-      one-shot retry N rounds, chantier 14).
+    * **soft** — jugement LLM délégué au **gatekeeper** (R06). `Gates` est
+      PUR : il retourne `{:dispatch_gatekeeper, info}` (décision d'escalade) ;
+      l'Executor spawn le gatekeeper + collecte la décision sur son
+      `pod.completed`. (Plus de délégation coord — consolidé sur le gatekeeper.)
     * **terminal** — `Terminal.evaluate_rules/2` règles déclaratives
-      d'abord ; `:nontranchable` → fallback gatekeeper cap-profile via
-      `StageSpawner.spawn_stage_pod/3` async, gate retourne `:retry`
-      pour ré-évaluation post-gatekeeper.
+      d'abord ; `:nontranchable` → **même `{:dispatch_gatekeeper, info}`**
+      que le soft gate.
     * **nil / absent** — `:pass` direct.
+
+  Le gatekeeper est le **juge unique de la fleet** : soft gate et terminal
+  non-tranchable y passent tous deux. `Gates` ne fait AUCUN spawn (pur) — c'est
+  l'Executor qui possède le nom de stage + le lifecycle (`:awaiting_gate`).
 
   ## Deux formes de `rules` (v1 map vs v2.5 string)
 
@@ -43,7 +48,7 @@ defmodule Fleet.Pipeline.Gates do
   def evaluate(stage, outputs, ctx), do: eval_by_type(stage, outputs, ctx)
 
   @spec eval_by_type(stage :: map(), outputs :: map(), ctx :: map()) ::
-          :pass | {:fail, String.t()} | :retry
+          :pass | {:fail, String.t()} | {:dispatch_gatekeeper, map()}
   defp eval_by_type(%{"gate" => nil}, _outputs, _ctx), do: :pass
   defp eval_by_type(stage, _outputs, _ctx) when not is_map_key(stage, "gate"), do: :pass
 
@@ -67,27 +72,33 @@ defmodule Fleet.Pipeline.Gates do
     end
   end
 
-  defp eval_by_type(%{"gate" => %{"type" => "soft"} = gate} = stage, outputs, ctx) do
+  # R06 — soft gate = jugement LLM délégué au **gatekeeper** (juge unique de la
+  # fleet : il fait tourner la fleet, récupère les problèmes). `Gates` reste PUR :
+  # il décide qu'il faut le gatekeeper (`{:dispatch_gatekeeper, info}`) ; le spawn
+  # async + la corrélation `pod.completed` sont faits par l'Executor (qui possède
+  # le nom de stage + le lifecycle). Plus de spawn coord (le « cap-profile dédié »
+  # du PoC-π2 n'a jamais existé — consolidé sur gatekeeper).
+  defp eval_by_type(%{"gate" => %{"type" => "soft"} = gate}, _outputs, _ctx) do
     max_rounds = Map.get(gate, "max_rounds", 3)
-    coord_backend().invoke_soft_gate(stage, outputs, ctx, max_rounds: max_rounds)
+    {:dispatch_gatekeeper, %{kind: :soft, round: 1, max_rounds: max_rounds}}
   end
 
   # Terminal : `rules` est OPTIONNEL (le gate `finish` du canon est terminal +
   # human_approval SANS rules) → on défaute à `[]`. Items strings (ou liste
   # vide/absente) → chemin v2.5 (Predicate + human_approval cohérent, même sans
   # rules) ; items maps → chemin v1 (evaluate_rules + fallback gatekeeper).
-  defp eval_by_type(%{"gate" => %{"type" => "terminal"} = gate} = stage, outputs, ctx) do
+  defp eval_by_type(%{"gate" => %{"type" => "terminal"} = gate}, outputs, _ctx) do
     rules = Map.get(gate, "rules", [])
 
     if Enum.all?(rules, &is_binary/1) do
       eval_terminal_string(rules, gate, outputs)
     else
-      eval_terminal_map(rules, stage, outputs, ctx)
+      eval_terminal_map(rules, outputs)
     end
   end
 
   # v1 — terminal map rules + fallback gatekeeper async sur :nontranchable.
-  defp eval_terminal_map(rules, stage, outputs, ctx) do
+  defp eval_terminal_map(rules, outputs) do
     case __MODULE__.Terminal.evaluate_rules(rules, outputs) do
       :pass ->
         :pass
@@ -96,12 +107,9 @@ defmodule Fleet.Pipeline.Gates do
         {:fail, reason}
 
       :nontranchable ->
-        # Fallback gatekeeper cap-profile (async via pod spawn) — résultat
-        # collecté plus tard via PubSub `:pipeline_stage_completed`. Le
-        # GenServer Executor doit alors ré-évaluer.
-        gatekeeper_ctx = Map.merge(ctx, %{stage: stage, outputs: outputs})
-        _ = spawner_backend().spawn_stage_pod("gatekeeper", nil, gatekeeper_ctx)
-        :retry
+        # Règles non tranchantes → le gatekeeper décide (async, même mécanique
+        # que le soft gate). L'Executor spawn + ré-évalue (`:awaiting_gate`).
+        {:dispatch_gatekeeper, %{kind: :terminal}}
     end
   end
 
@@ -123,22 +131,6 @@ defmodule Fleet.Pipeline.Gates do
       true ->
         :pass
     end
-  end
-
-  defp coord_backend do
-    Application.get_env(
-      :fleet_pipeline,
-      :coord_backend,
-      Fleet.Pipeline.CoordBackend.NotWiredYet
-    )
-  end
-
-  defp spawner_backend do
-    Application.get_env(
-      :fleet_pipeline,
-      :spawner_backend,
-      Fleet.Pipeline.StageSpawner.Default
-    )
   end
 
   defmodule Hard do

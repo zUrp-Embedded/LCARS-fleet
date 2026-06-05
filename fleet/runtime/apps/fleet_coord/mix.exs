@@ -27,11 +27,11 @@ defmodule Fleet.Coord.MixProject do
   end
 
   defp deps do
-    # Fleet.Spawner (ch6 PROMOTED) wrappé derrière `HookSpawner`
-    # behaviour swappable (default délègue) — testable sans bwrap réel.
+    # R06 : `fleet_spawner` retiré — coord ne spawne plus (SoftGate/Hook
+    # supprimés, gate LLM consolidée sur le gatekeeper côté `fleet_pipeline`).
+    # coord = policies déclaratives pures + broadcast Bus.
     [
       {:fleet_event_router, in_umbrella: true},
-      {:fleet_spawner, in_umbrella: true},
       {:yaml_elixir, "~> 2.12"}
     ]
   end

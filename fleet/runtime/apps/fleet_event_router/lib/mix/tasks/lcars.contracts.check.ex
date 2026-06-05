@@ -196,19 +196,37 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # R06/R22 (→R4) : le backend de spawn coord par défaut doit être câblé,
   # pas le placeholder NotWiredYet (qui rend les soft gates silencieusement KO).
+  # R06/R22 — invariant post-consolidation : la gate LLM (soft + terminal
+  # non-tranchable) est jugée par le **gatekeeper** côté pipeline ; `coord` ne
+  # porte plus de spawn de gate (placeholder `NotWiredYet` retiré du chemin
+  # actif). On vérifie le code RÉEL : (a) aucun `HookSpawner.NotWiredYet`
+  # résiduel dans le gate-path coord, (b) `Gates` est pur — aucune délégation
+  # `coord_backend()`/`CoordBackend` (la couture morte ne doit pas réapparaître).
   defp check_coord_backend_wired(root) do
-    soft_gate = Path.join(root, "apps/fleet_coord/lib/fleet/coord/soft_gate.ex")
-
-    evidence =
-      grep_lines(soft_gate, ~r/HookSpawner\.NotWiredYet/)
+    notwired =
+      grep_lines(
+        Path.join(root, "apps/fleet_coord/lib/fleet/coord/soft_gate.ex"),
+        ~r/NotWiredYet/
+      )
       |> Enum.map(fn {ln, _} -> "apps/fleet_coord/lib/fleet/coord/soft_gate.ex:#{ln}" end)
+
+    gates_coord_dep =
+      Path.join(root, "apps/fleet_pipeline/lib/fleet/pipeline/gates.ex")
+      |> grep_lines(~r/coord_backend|CoordBackend/)
+      |> Enum.filter(fn {_ln, line} ->
+        Regex.match?(~r/coord_backend|CoordBackend/, strip_comment(line))
+      end)
+      |> Enum.map(fn {ln, _} -> "apps/fleet_pipeline/lib/fleet/pipeline/gates.ex:#{ln}" end)
+
+    evidence = notwired ++ gates_coord_dep
 
     %{
       id: "coord.backend.wired_or_pure",
       remediation: "R06/R22 (R4)",
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
-      note: "soft_gate spawner_backend défaut = NotWiredYet placeholder"
+      note:
+        "gate LLM consolidée gatekeeper (Gates pur) ; pas de NotWiredYet ni délégation coord résiduelle"
     }
   end
 

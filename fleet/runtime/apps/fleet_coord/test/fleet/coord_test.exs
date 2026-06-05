@@ -5,22 +5,7 @@ defmodule Fleet.CoordTest do
   alias Fleet.EventRouter.Bus
 
   setup do
-    Application.put_env(
-      :fleet_coord,
-      :spawner_backend,
-      Fleet.Coord.HookSpawnerStub
-    )
-
-    Application.put_env(:fleet_coord, :stub_invocations, [])
-
     Bus.subscribe()
-
-    on_exit(fn ->
-      Application.delete_env(:fleet_coord, :spawner_backend)
-      Application.delete_env(:fleet_coord, :stub_invocations)
-      Application.delete_env(:fleet_coord, :stub_response)
-    end)
-
     :ok
   end
 
@@ -45,16 +30,6 @@ defmodule Fleet.CoordTest do
                        type: :"coord.escalation_triggered"
                      },
                      500
-    end
-
-    test "invoke_soft_gate/4 délégué à SoftGate" do
-      Application.put_env(:fleet_coord, :stub_response, {:ok, %{decision: "pass"}})
-      assert :pass = Coord.invoke_soft_gate(%{}, %{}, %{}, max_rounds: 1)
-    end
-
-    test "invoke_hook/2 délégué à Hook" do
-      Application.put_env(:fleet_coord, :stub_response, {:ok, %{decision: "continue"}})
-      assert :continue = Coord.invoke_hook(:before_next, %{})
     end
   end
 end

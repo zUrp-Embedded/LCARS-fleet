@@ -10,38 +10,34 @@ defmodule Fleet.Coord do
 
   ## Public API (delegator)
 
-  Cette module délègue à `Fleet.Coord.Policies`,
-  `Fleet.Coord.SoftGate`, `Fleet.Coord.Hook`.
+  Cette module délègue à `Fleet.Coord.Policies`.
 
     * `handle_decision/2` — consume validated decision (ch13
       `Fleet.Starfleet.Gatekeeper`) → broadcast event canon
     * `handle_escalation/3` — consume Cat 5 escalade (ch13
       `Fleet.Starfleet.Cat5Escalator`) → broadcast event canon
-    * `invoke_soft_gate/4` — soft gate type pipeline (ch12
-      `Fleet.Pipeline.Gates`) → spawn pod LLM one-shot retry N rounds
-    * `invoke_hook/2` — coordHook before-next (ch12
-      `Fleet.Pipeline`) → spawn pod fire-mode
 
-  ## Implémentation backends ch12 + ch13
+  ## Soft gate / hook — supersédés (R06)
 
-  Cette module satisfait les behaviours `Fleet.Pipeline.CoordBackend`
-  (callbacks `invoke_soft_gate/4` + `invoke_hook/2`) et
-  `Fleet.Starfleet.CoordBackend` (callbacks `handle_decision/2` +
-  `handle_escalation/3`). Configuration runtime :
+  Les anciens `invoke_soft_gate/4` + `invoke_hook/2` (spawn pod LLM
+  délégué coord) sont **retirés** : le jugement LLM des gates est
+  consolidé sur le **gatekeeper** (juge unique), spawné côté pipeline
+  (`Fleet.Pipeline.Gates.dispatch_gatekeeper/4`, async). `Fleet.Coord`
+  ne porte plus de spawn — uniquement les policies déclaratives.
 
-      config :fleet_pipeline, :coord_backend, Fleet.Coord
+  ## Implémentation backend ch13
+
+  Cette module satisfait le behaviour `Fleet.Starfleet.CoordBackend`
+  (callbacks `handle_decision/2` + `handle_escalation/3`). Configuration :
+
       config :fleet_starfleet, :coord_backend, Fleet.Coord
 
   ## Frontière vendor
 
-  N0 (vendor-agnostic, pas d'inférence — soft gate + hook délèguent
-  LLM via spawn pod jetable cap-profile dédié).
+  N0 (vendor-agnostic, pas d'inférence — règle déclarative pure).
   """
 
   # DN 9 C2.3 — arités strict canon (chantier 9 (B) BL-021 retire les compat shims /1 et /2).
   defdelegate handle_decision(decision, correlation_id), to: Fleet.Coord.Policies
   defdelegate handle_escalation(source, payload, correlation_id), to: Fleet.Coord.Policies
-
-  defdelegate invoke_soft_gate(stage, outputs, ctx, opts), to: Fleet.Coord.SoftGate
-  defdelegate invoke_hook(hook_type, ctx), to: Fleet.Coord.Hook
 end

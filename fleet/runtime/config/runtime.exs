@@ -146,9 +146,10 @@ if config_env() != :test do
   end
 
   # ============================================================
-  # fleet_coord (ch14) — wired backend Fleet.Coord pour ch12 + ch13
+  # fleet_coord (ch14) — wired backend Fleet.Coord pour ch13
+  # (ch12/pipeline : soft gate consolidé sur le gatekeeper côté pipeline, R06 —
+  #  plus de :fleet_pipeline, :coord_backend)
   # ============================================================
-  config :fleet_pipeline, :coord_backend, Fleet.Coord
   config :fleet_starfleet, :coord_backend, Fleet.Coord
 
   if path = System.get_env("LCARS_COORD_POLICIES_PATH") do

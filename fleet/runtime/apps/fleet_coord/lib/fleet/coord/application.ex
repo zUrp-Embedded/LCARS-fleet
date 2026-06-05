@@ -8,8 +8,8 @@ defmodule Fleet.Coord.Application do
        persiste `:persistent_term` (fail-fast)
     2. Pré-enregistre atomes events `coord.*` (compile-time via
        attribut module, cohérent ch11 M1 atom-leak DoS mitigation)
-    3. Pas de GenServer démarré — Policies/SoftGate/Hook sont
-       pure functions, aucun process raison runtime
+    3. Pas de GenServer démarré — `Policies` = pure functions,
+       aucun process raison runtime
 
   ## Stratégie
 
