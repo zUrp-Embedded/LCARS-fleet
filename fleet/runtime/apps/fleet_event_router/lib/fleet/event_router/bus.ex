@@ -24,13 +24,13 @@ defmodule Fleet.EventRouter.Bus do
     * `child_spec/1` — pour Application supervisor (instancie `Phoenix.PubSub`)
     * `subscribe/1` / `unsubscribe/1` — gestion abonnements topic
     * `broadcast_subtopic/2` — sous-topics `fleet.events.<scope>.<id>`
-    * `authorized_event_types/0` — MapSet atoms chargé au boot par Dispatch
-    * `set_authorized_event_types/1` — appelé par Dispatch boot
+    * `authorized_event_types/0` — MapSet atoms chargé au boot par `Catalog.load!/0`
+    * `set_authorized_event_types/1` — appelé par `Catalog.load!/0` au boot
 
   ## Registry obligatoire (C3.2)
 
-  Le set `authorized_event_types` est chargé par `Fleet.EventRouter.Dispatch`
-  au boot depuis `priv/events.yaml` via `:persistent_term`. Tant que le set
+  Le set `authorized_event_types` est chargé par `Fleet.EventRouter.Catalog` au boot
+  depuis `priv/events.yaml` via `:persistent_term`. Tant que le set
   est vide (boot order), `broadcast/2` laisse passer sans check (initialisation).
   Dès que peuplé, tout event hors set raise `UnregisteredError`.
   """
@@ -54,7 +54,7 @@ defmodule Fleet.EventRouter.Bus do
 
     * raise `Fleet.Event.SchemaError` si event n'est pas une struct `%Fleet.Event{}`
     * raise `Fleet.Event.UnregisteredError` si `event.type` n'est pas dans
-      le registry `events.yaml` (set chargé par `Fleet.EventRouter.Dispatch`)
+      le registry `events.yaml` (set chargé par `Fleet.EventRouter.Catalog` au boot)
 
   Émet la struct directement — les subscribers reçoivent `%Fleet.Event{}`,
   pas un tuple. Pattern match côté consumer :
@@ -122,7 +122,7 @@ defmodule Fleet.EventRouter.Bus do
 
   @doc """
   Set de types d'events autorisés (MapSet d'atomes), chargé depuis
-  `events.yaml` au boot par `Fleet.EventRouter.Dispatch`.
+  `events.yaml` au boot par `Fleet.EventRouter.Catalog`.
 
   Vide tant que le boot n'a pas peuplé le set. `broadcast/2` laisse passer
   sans check tant que vide (initialisation), raise `UnregisteredError`
@@ -135,9 +135,9 @@ defmodule Fleet.EventRouter.Bus do
 
   @doc """
   Set authorized event types (MapSet d'atomes) — appelé par
-  `Fleet.EventRouter.Dispatch` au boot après lecture `events.yaml`.
+  `Fleet.EventRouter.Catalog.load!/0` au boot après lecture `events.yaml`.
 
-  Idempotent — peut être ré-appelé via `Fleet.EventRouter.Dispatch.reload/0`.
+  Idempotent — peut être ré-appelé via `Fleet.EventRouter.Catalog.load!/0`.
   """
   @spec set_authorized_event_types(MapSet.t()) :: :ok
   def set_authorized_event_types(%MapSet{} = set) do

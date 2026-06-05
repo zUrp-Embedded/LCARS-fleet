@@ -33,3 +33,8 @@ config :fleet_pilot, start_dispatcher: false
 # (gatekeeper_test.exs) active l'autoboot + injecte des seams stub ; les tests
 # de gate (executor_gate_pending) posent `:gatekeeper_pod_id` directement.
 config :fleet_pipeline, gatekeeper_autoboot: false
+
+# BL-027 — hermétisme : registry events.yaml non chargé en test (authorized_event_types
+# vide → escape-hatch assert_authorized! → Bus.broadcast/2 ne valide pas). Le test dédié
+# (catalog/broadcast validation) peuple le registry manuellement.
+config :fleet_event_router, load_event_registry: false

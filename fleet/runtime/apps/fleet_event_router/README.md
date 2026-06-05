@@ -1,12 +1,13 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-05 (R5 — purge handlers fantômes + fail-loud boot Dispatch ; events.yaml = registry + dispatch)
+**Dernière révision** : 2026-06-05 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
-Bus events + dispatch table déclarative LCARS v2 (Ring 2 — colonne
-vertébrale orchestration). Webhooks Gitea + signaux OS + events
+Bus events (Phoenix.PubSub) + registry events.yaml LCARS v2 (Ring 2 —
+colonne vertébrale orchestration). Consommation = subscribers directs
+PubSub (BL-027 ; table de dispatch retirée). Webhooks Gitea + signaux OS + events
 internes (`pod.*`, `pipeline.*`, `audit.verdict.*`,
 `refuse_pattern_match`, `pod_drift`, `permission_relay_request`)
 publiés sur Phoenix.PubSub topic `fleet.events`.
@@ -22,8 +23,9 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
   HMAC SHA256 verify (secret `/etc/fleet/webhook-secret`)
 - `Fleet.EventRouter.SignalsOS` — `:os.set_signal/2` SIGUSR1/SIGTERM/SIGHUP
   → broadcast `os.signal.<sig>`
-- `Fleet.EventRouter.Dispatch` — table YAML déclarative `priv/events.yaml`
-  → handlers `apply(module, :handle_event, [event])`
+- `Fleet.EventRouter.Catalog` — charge le **registry** `priv/events.yaml` au boot
+  (`load!/0` → `authorized_event_types`). Consommation = subscribers directs PubSub
+  (BL-027 ; ex-`Dispatch` retiré, cf. § Catalogue)
 - `Fleet.EventRouter.Sanitize.Secrets` — redact `<TOKEN_REDACTED>`
   (sk-..., ghp_...) PoC-7
 - `Fleet.EventRouter.Sanitize.PII` — redact `<EMAIL_REDACTED>` PoC-7
@@ -31,15 +33,19 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
 ## API principale
 
 ```elixir
-# Broadcast
-Fleet.EventRouter.Bus.broadcast("pod.allocate", %{"pod_id" => "p1"},
-  ticket_id: "fleet/lcars#42")
+# Broadcast canon (struct %Fleet.Event{}) — fail-loud si type hors registry
+Fleet.EventRouter.Bus.broadcast("fleet.events", %Fleet.Event{
+  source: :spawner, type: :"pod.allocate",
+  timestamp: DateTime.utc_now(), payload: %{"pod_id" => "p1"}})
 
-# Subscribe + receive
+# Subscribe + receive (subscriber direct = canon, BL-027)
 Fleet.EventRouter.Bus.subscribe()
 receive do
-  {:"pod.allocate", event} -> ...
+  %Fleet.Event{type: :"pod.allocate"} = event -> ...
 end
+
+# (Compat shim legacy 3-arity {atom, map} — à retirer ch3 BL-021)
+# Fleet.EventRouter.Bus.broadcast("pod.allocate", %{...}, ticket_id: "...")
 
 # Sous-topic (ch10 step 4 relay pattern)
 Fleet.EventRouter.Bus.subscribe("fleet.events.relay.<ref>")
@@ -55,8 +61,9 @@ text |> Fleet.EventRouter.Sanitize.Secrets.run()
 
 - `:fleet_event_router, :start_webhooks` — boot Plug.Cowboy webhooks
   (default `false` — dev/test ne touchent pas le port `:8081`)
-- `:fleet_event_router, :start_dispatch` — boot Dispatch GenServer
-  (default `false`)
+- `:fleet_event_router, :load_event_registry` — charge le registry events.yaml
+  au boot (`Catalog.load!`, default `true` ; `false` en `:test` pour l'hermétisme
+  — registry vide → validation broadcast off)
 - `:fleet_event_router, :start_signals` — boot SignalsOS GenServer
   (default `false` — éviter capture signaux dans les tests)
 - `:fleet_event_router, :webhook_port` — port HTTP webhooks (default 8081)
@@ -67,28 +74,26 @@ text |> Fleet.EventRouter.Sanitize.Secrets.run()
 - `:fleet_event_router, :captured_signals` — atoms signaux à capturer
   (default `[:sigusr1, :sigterm, :sighup]`)
 
-## Catalogue events.yaml — double rôle
+## Catalogue events.yaml — registry (BL-027)
 
-`priv/events.yaml` sert **deux** fonctions (cf. en-tête du fichier) :
-1. **Clés = registry** `authorized_event_types` : `Bus.broadcast/2` fail-loud
-   sur tout type hors registry. Tout event émis DOIT avoir sa clé.
-2. **Valeurs = table de dispatch** `event → [handler]`. `[]` = registré mais
-   **non dispatché** → consommé par des **subscribers directs** (`Bus.subscribe`
-   + `handle_info` : WS dashboard, `AuditConsumer`, `DriftMonitor`, `Executor`).
+`priv/events.yaml` est un **registry PUR** : ses **clés** = `authorized_event_types`,
+chargées au boot par `Fleet.EventRouter.Catalog.load!/0` → `Bus.broadcast/2`
+**fail-loud** sur tout type hors registry (verrou anti-récurrence, T4). Tout event
+émis DOIT avoir sa clé. Les **valeurs sont `[]`** (le runtime n'en consomme aucune).
 
-**R5/R08** : les handlers fantômes (modules absents) ont été purgés ; `Dispatch.init`
-+ `reload` sont **fail-loud** sur tout handler référencé-mais-absent (verrou
-anti-récurrence, T4).
+La **consommation** se fait par **subscribers directs** (Phoenix.PubSub :
+`Bus.subscribe` + `handle_info` — WS dashboard, `AuditConsumer`, `DriftMonitor`,
+`Spawner.PublishConsumer`, `Pipeline.Executor`, …). Qui consomme quoi est documenté
+dans le moduledoc de chaque consommateur.
 
-> ⚠️ **État connu (à trancher — fork architectural, hors R5)** : la table de
-> dispatch est aujourd'hui **inerte** — (a) aucun module n'implémente
-> `handle_event/1` (les handlers réels consomment via `Bus.subscribe`, pas via
-> Dispatch) ; (b) `start_dispatch: false` par défaut → en prod le registry n'est
-> pas chargé (validation broadcast inactive). Réactiver Dispatch en prod exige
-> un audit « tous les types émis sont registrés » (sinon crash au 1er broadcast
-> non-registré). Décision : raviver la table de dispatch (`handle_event/1` +
-> enable prod + audit) OU acter « subscribers directs = canon » et retirer la
-> table. Voir REPRISE/point.
+> **Décision BL-027 (user 2026-06-05)** : « subscribers directs = canon ». Le
+> GenServer `Dispatch` (table `event → handle_event/1`, jamais câblée — aucun
+> module n'implémentait `handle_event/1`) a été **retiré** ; PubSub `subscribe` EST
+> le dispatch. Le chargement du registry, auparavant couplé au `Dispatch` off-en-prod
+> (→ validation broadcast inactive en prod), est désormais fait par `Catalog.load!`
+> au boot (prod-on/test-off). Audit des ~15 émetteurs : les statiques émettent des
+> types registrés, les dynamiques externes (`webhooks_gitea`/`signals_os`/`policies`/
+> `Pod.safe_broadcast`) rescue `UnregisteredError` → activation sûre.
 
 ## Dépendances
 

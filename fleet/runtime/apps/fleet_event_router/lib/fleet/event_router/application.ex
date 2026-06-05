@@ -6,11 +6,14 @@ defmodule Fleet.EventRouter.Application do
   @impl Application
   def start(_type, _args) do
     preregister_event_atoms()
+    # BL-027 — registry events.yaml → authorized_event_types (validation broadcast
+    # fail-loud, prod-on/test-off). Remplace le chargement par le GenServer Dispatch
+    # (retiré : table de dispatch inerte, consommation = subscribers directs).
+    Fleet.EventRouter.Catalog.load!()
 
     children =
       base_children() ++
         webhook_children() ++
-        dispatch_children() ++
         signals_children()
 
     Supervisor.start_link(children,
@@ -63,14 +66,6 @@ defmodule Fleet.EventRouter.Application do
       [
         {Plug.Cowboy, scheme: :http, plug: Fleet.EventRouter.WebhooksGitea, options: [port: port]}
       ]
-    else
-      []
-    end
-  end
-
-  defp dispatch_children do
-    if Application.get_env(:fleet_event_router, :start_dispatch, false) do
-      [Fleet.EventRouter.Dispatch]
     else
       []
     end

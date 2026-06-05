@@ -1,111 +1,77 @@
-# Registry des events canon + table de dispatch.
+# Registry des events canon (BL-027 — fork « subscribers directs = canon »).
 #
-# DOUBLE rôle (DN 11 C3.2) :
-#   1. Les CLÉS = `authorized_event_types` (Bus.broadcast/2 fail-loud sur type hors registry).
-#      Tout event émis DOIT avoir sa clé ici, même s'il n'a pas de handler dispatch.
-#   2. Les VALEURS = table de dispatch `event → [handler]` (Dispatch appelle handler.handle_event/1).
-#      `[]` = registré mais NON dispatché → consommé par des **subscribers directs** (qui font
-#      Bus.subscribe + handle_info), pas par la table. Le WS dashboard, AuditConsumer, DriftMonitor,
-#      l'Executor sont des subscribers directs.
+# `events.yaml` est un **registry PUR** : ses CLÉS sont les `authorized_event_types`
+# (chargées au boot par `Fleet.EventRouter.Catalog.load!/0` → `Bus.broadcast/2`
+# fail-loud sur tout type hors registry). Tout event émis DOIT avoir sa clé ici.
 #
-# R5/R08 — handlers fantômes purgés : les modules `Fleet.Spawner.EventHandler`,
-# `Fleet.Starfleet.{DriftHandler,EscalateHandler,PipelineMonitor}`, `Fleet.Coord.GatekeeperHandler`,
-# `Fleet.Spawner.TicketHandler`, `Fleet.Pipeline.TickHandler`, `Fleet.API.WebSocketHandler`
-# n'existaient pas (dispatch silencieusement no-op). Leurs events sont consommés par subscribers
-# directs OU n'ont pas encore de consommateur (gap tracé, pas masqué) → handler vidé `[]`.
-# `Dispatch.init` est désormais **fail-loud au boot** sur tout handler référencé-mais-absent
-# (verrou anti-récurrence « handler fantôme »).
+# La **consommation** se fait par **subscribers directs** (Phoenix.PubSub :
+# `Bus.subscribe` + `handle_info`) — PAS par une table de dispatch. Le GenServer
+# `Dispatch` (table `event → handle_event/1`, jamais câblée) a été RETIRÉ. Qui
+# consomme quel event est documenté dans le moduledoc de chaque consommateur
+# (`AuditConsumer`, `DriftMonitor`, `RelayHandler`, `Spawner.PublishConsumer`,
+# `API.WS`, `Pipeline.Executor`, …).
+#
+# Valeurs = `[]` (registry pur). Le schéma (`events-v1.json`) tolère une liste de
+# handlers `Fleet.*` non vide pour un éventuel futur ré-câblage, mais le runtime
+# n'en consomme aucune.
 events:
   # --- Pod lifecycle (Spawner.Pod) ---
-  # allocate/transition/release : pas de consommateur dispatch (EventHandler jamais implémenté) ;
-  # registrés (émis par le Pod). À doter d'un handler réel si un besoin aval émerge (≠ R5).
   pod.allocate: []
   pod.transition: []
   pod.release: []
-  # completed/failed/terminated : log forensique AuditConsumer (réel).
-  pod.completed:
-    - Fleet.Starfleet.AuditConsumer
-  pod.failed:
-    - Fleet.Starfleet.AuditConsumer
-  pod.terminated:
-    - Fleet.Starfleet.AuditConsumer
-  # refuse_pattern_match / drift : consommés DIRECTEMENT par DriftMonitor (+ AuditConsumer) via
-  # Bus.subscribe → Cat5Escalator. Pas de handler dispatch.
+  pod.completed: []
+  pod.failed: []
+  pod.terminated: []
   pod.refuse_pattern_match: []
   pod.drift: []
 
-  # --- Credentials (finding Vulcan S7) ---
-  # oauth.refresh.failed : consommé par DriftMonitor (subscribe Bus) → Cat5Escalator.
-  oauth.refresh.failed:
-    - Fleet.Starfleet.DriftMonitor
+  # --- Credentials ---
+  oauth.refresh.failed: []
 
   # --- API relay (vestigial ADR-D) ---
-  permission_relay_request:
-    - Fleet.API.RelayHandler
+  permission_relay_request: []
 
-  # --- Audit gatekeeper / forge tickets / tick : pas de handler dispatch implémenté ---
+  # --- Audit gatekeeper / forge tickets / tick ---
   audit.verdict.gatekeeper: []
   gitea.opened: []
   gitea.closed: []
   tick: []
 
-  # --- Admin spawn (B10/#583) ---
-  # admin.spawn.request : POST /api/admin/spawn → PublishConsumer → spawn_pod (réel).
-  admin.spawn.request:
-    - Fleet.Spawner.PublishConsumer
+  # --- Admin spawn ---
+  admin.spawn.request: []
 
-  # --- Boot lifecycle (BootOrchestrator) → log audit ---
-  fleet.boot_complete:
-    - Fleet.Starfleet.AuditConsumer
-  fleet.boot_partial:
-    - Fleet.Starfleet.AuditConsumer
-  fleet.boot_failed:
-    - Fleet.Starfleet.AuditConsumer
+  # --- Boot lifecycle (BootOrchestrator) ---
+  fleet.boot_complete: []
+  fleet.boot_partial: []
+  fleet.boot_failed: []
 
-  # --- Coord (Policies, source :coord) : consommés par le WS dashboard (subscriber direct
-  # forward-all) + audit. WebSocketHandler dispatch jamais implémenté → []. ---
+  # --- Coord (Policies, source :coord) ---
   coord.notification_routed: []
   coord.escalation_triggered: []
   coord.action_dispatched: []
 
-  # --- Pipeline (Executor, source :pipeline) : consommés par le WS dashboard (subscriber direct).
-  # PipelineMonitor dispatch jamais implémenté → []. ---
+  # --- Pipeline (Executor, source :pipeline) ---
   pipeline.failed: []
   pipeline.completed: []
-  # pipeline.stage.completed : event interne consommé DIRECTEMENT par l'Executor
-  # (Bus.subscribe). Registré pour broadcast/2 strict ; pas de handler dispatch.
   pipeline.stage.completed: []
 
-  # --- post_extract.git (BL-021 ch9) → log audit ---
-  git.published:
-    - Fleet.Starfleet.AuditConsumer
-  git.publish_failed:
-    - Fleet.Starfleet.AuditConsumer
+  # --- post_extract.git ---
+  git.published: []
+  git.publish_failed: []
 
-  # --- Cat 5 broadcasts (Cat5Escalator, source :starfleet) → log audit (+ WS direct) ---
-  starfleet.audit_cat5_pod_drift:
-    - Fleet.Starfleet.AuditConsumer
-  starfleet.audit_cat5_pipeline_failed:
-    - Fleet.Starfleet.AuditConsumer
-  starfleet.audit_cat5_oauth_refresh_failed:
-    - Fleet.Starfleet.AuditConsumer
+  # --- Cat 5 broadcasts (Cat5Escalator, source :starfleet) ---
+  starfleet.audit_cat5_pod_drift: []
+  starfleet.audit_cat5_pipeline_failed: []
+  starfleet.audit_cat5_oauth_refresh_failed: []
 
-  # --- TaskQueue lifecycle (source :task_queue, correlation_id = task.id) → log audit ---
-  task_enqueued:
-    - Fleet.Starfleet.AuditConsumer
-  task_assigned:
-    - Fleet.Starfleet.AuditConsumer
-  task_completed:
-    - Fleet.Starfleet.AuditConsumer
-  task_cleared:
-    - Fleet.Starfleet.AuditConsumer
-  task_failed:
-    - Fleet.Starfleet.AuditConsumer
-  state_corrupt:
-    - Fleet.Starfleet.AuditConsumer
+  # --- TaskQueue lifecycle (source :task_queue) ---
+  task_enqueued: []
+  task_assigned: []
+  task_completed: []
+  task_cleared: []
+  task_failed: []
+  state_corrupt: []
 
-  # --- Extensions V2 (MCPWatcher / MCPMonitor) → log audit ---
-  sdk_upstream_alert:
-    - Fleet.Starfleet.AuditConsumer
-  mcp_server_crashed:
-    - Fleet.Starfleet.AuditConsumer
+  # --- Extensions V2 (MCPWatcher / MCPMonitor) ---
+  sdk_upstream_alert: []
+  mcp_server_crashed: []
