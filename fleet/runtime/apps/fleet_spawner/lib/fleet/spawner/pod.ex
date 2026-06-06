@@ -33,7 +33,11 @@ defmodule Fleet.Spawner.Pod do
   (`--resume <session_id>` au respawn).
   """
 
-  use GenServer, restart: :transient
+  # DN-recovery B : tous les pods `:temporary` (le supervisor ne ressuscite
+  # jamais ; recovery délibérée). NB : `pod_child_spec/1` (spawner.ex) construit
+  # le child_spec explicite et fixe lui aussi `restart: :temporary` — c'est lui
+  # qui fait foi au spawn ; cette valeur de module reste alignée par honnêteté.
+  use GenServer, restart: :temporary
 
   require Logger
 
@@ -209,6 +213,9 @@ defmodule Fleet.Spawner.Pod do
     if MapSet.member?(state.conditions, :output_extracted) do
       {:stop, :normal, state}
     else
+      # STATE-004 : process mort SANS résultat soumis → task active orpheline. Libère.
+      clear_pod_task(state.pod_id)
+
       safe_broadcast("pod.failed", %{
         "pod_id" => state.pod_id,
         "ticket_id" => state.ticket_id,
@@ -779,7 +786,9 @@ defmodule Fleet.Spawner.Pod do
   defp do_release(state) do
     # R1.2 — tue le pod interactif (Port.close → claude/bwrap/script terminés) puis ARRÊT NORMAL
     # du GenServer (H-S1 : avant, le Pod restait vivant après :succeeded → memory leak du
-    # DynamicSupervisor). restart: :transient → pas de respawn sur :normal.
+    # DynamicSupervisor). Sous `:temporary` (DN-recovery B) l'arrêt :normal n'est jamais ressuscité.
+    # NB : pas de clear_for_pod ici — do_release = succès post-EXTRACT, la task a déjà été
+    # soumise/complétée (pas de task active à libérer).
     # U4 — TmuxBackend (RC long-lived) : kill_session via tmux. LauncherPortBackend : Port.close.
     # Sélection mutuellement exclusive (un seul backend par lifecycle pod).
     cond do
@@ -1002,6 +1011,10 @@ defmodule Fleet.Spawner.Pod do
   defp transition_failed(state, reason) do
     Logger.warning("pod #{state.pod_id} failed: #{inspect(reason)}")
 
+    # STATE-004 (couplage DN-recovery B) : le pod meurt sans relaunch → libérer
+    # sa task active sinon elle reste orpheline (assigned/pending sans pod).
+    clear_pod_task(state.pod_id)
+
     new_state =
       state
       |> Map.put(:phase, :failed)
@@ -1015,11 +1028,29 @@ defmodule Fleet.Spawner.Pod do
     Map.update!(state, :conditions, &MapSet.put(&1, condition))
   end
 
+  # STATE-004 : libère la task active d'un pod qui meurt sans l'avoir complétée.
+  # Appel direct best-effort (non-fatal) : le Pod est sinon découplé de TaskQueue
+  # (complétion event-driven via le bus) — on ne fait pas crasher la mort d'un
+  # pod si TaskQueue est indisponible (ex. contexte de test sans broker).
+  defp clear_pod_task(pod_id) do
+    Fleet.TaskQueue.clear_for_pod(pod_id)
+    :ok
+  rescue
+    e ->
+      Logger.warning("pod #{pod_id} clear_for_pod échec (non-fatal) : #{inspect(e)}")
+      :ok
+  catch
+    :exit, reason ->
+      Logger.warning("pod #{pod_id} clear_for_pod indisponible (non-fatal) : #{inspect(reason)}")
+      :ok
+  end
+
   # R0.8-brick4 : timeout de RÉPONSE (pas budget de durée de vie) au tool MCP
   # submit_result. Si pas de réponse dans le délai → :result_deadline →
-  # transition_failed → kill+relaunch via OTP restart strategy par
-  # `lifetime_scope` (one-shot=:temporary, pipe/run=:transient,
-  # forever=:permanent — cf. `Fleet.Spawner.restart_strategy_for/1`).
+  # transition_failed → le pod MEURT (tous `:temporary`, DN-recovery B) : PAS de
+  # relaunch OTP. Conséquence (couplage) : la task active est à libérer
+  # (`TaskQueue.clear_for_pod`, STATE-004) sinon elle reste orpheline, et le
+  # re-dispatch est délibéré (recovery boot-orchestrator).
   #
   # Override par cap-profile optionnel : `spec.timeouts.response_sec`. Sinon
   # default codé par scope (one-shot=300s par défaut ; pour les pods

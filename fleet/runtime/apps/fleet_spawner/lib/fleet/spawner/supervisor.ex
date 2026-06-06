@@ -3,20 +3,15 @@ defmodule Fleet.Spawner.Supervisor do
   DynamicSupervisor top-level pour les pods. Stratégie `:one_for_one`,
   `max_restarts: 3, max_seconds: 60`.
 
-  ⚠️ Sémantique OTP réelle (corrigée 2026-06-06, audit RC-2 / 73ᵉ — l'ancien
-  moduledoc MENTAIT) : `max_restarts` est un seuil **GLOBAL au supervisor**, PAS
-  par-pod. 3 restarts de pods *quelconques* (même non corrélés) en 60s → le
-  supervisor ENTIER s'arrête, **tous les pods avec** (cascade fleet-wide). Le
-  restart par-pod vient de `restart:` dérivé du `lifetime_scope`
-  (`one-shot→:temporary`, `pipe/run→:transient`, `forever→:permanent`, cf.
-  `Fleet.Spawner.restart_strategy_for/1`) : lui décide SI un pod restarte, mais
-  l'intensité qui peut tuer la fleet reste globale.
+  Les pods sont **tous `:temporary`** (DN-recovery option B, 2026-06-06, cf.
+  `Fleet.Spawner.restart_strategy_for/1`) : le supervisor ne **ressuscite
+  jamais** un pod. Un pod mort (sortie normale OU crash) est retiré, point.
 
-  L'intention « abandonner un pod qui crash-loop sans tuer les autres » N'est
-  donc PAS tenue ici. Le correctif (isolation per-pod via sous-superviseur OU
-  pods `:temporary` + résurrection FS-driven délibérée) est une décision
-  **RC-2-design**, nouée avec la recovery (LIFE-002 / STATE-006). NE PAS
-  band-aider isolément — voir `WORKLIST-audit-codex-2026-06-06.md`.
+  Comme les enfants `:temporary` ne comptent **pas** dans l'intensité de restart,
+  `max_restarts` ne peut plus déclencher de **cascade fleet-wide** (ferme le 73ᵉ
+  d'audit) — il est de fait inerte tant que tous les enfants sont `:temporary`.
+  La résurrection est un acte **délibéré** du boot-orchestrator depuis le
+  desired-state (cap-profile), pas un restart OTP. Cf. `DN-recovery-2026-06-06`.
   """
 
   use DynamicSupervisor

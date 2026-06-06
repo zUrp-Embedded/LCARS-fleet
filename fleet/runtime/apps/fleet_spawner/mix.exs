@@ -40,6 +40,11 @@ defmodule FleetSpawner.MixProject do
       # build graph (anticipation du câblage). Pas de cycle (fleet_project_
       # bootstrap ne dep pas fleet_spawner).
       {:fleet_project_bootstrap, in_umbrella: true},
+      # STATE-004 (DN-recovery B) : un pod qui meurt sans complétion libère sa
+      # task active (`TaskQueue.clear_for_pod`, best-effort dans
+      # `Pod.transition_failed` + handler exit). Dep déclarée → couplage visible
+      # au build graph + ordre compile garanti. Pas de cycle (task_queue ⊀ spawner).
+      {:fleet_task_queue, in_umbrella: true},
       {:jason, "~> 1.4"},
       {:uuid, "~> 1.1"}
     ]

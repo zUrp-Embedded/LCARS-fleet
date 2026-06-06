@@ -58,6 +58,20 @@ defmodule Fleet.SpawnerTest do
     put_in(valid_profile().spec["invocation"], %{"lifetime_scope" => "forever"})
   end
 
+  defp wait_until(fun, tries \\ 80) do
+    cond do
+      fun.() ->
+        true
+
+      tries <= 0 ->
+        false
+
+      true ->
+        Process.sleep(10)
+        wait_until(fun, tries - 1)
+    end
+  end
+
   describe "R18 — refus spawn one-shot sans mandat" do
     test "one-shot + pas de mandat → {:error, :mandate_required}" do
       assert {:error, :mandate_required} =
@@ -106,6 +120,31 @@ defmodule Fleet.SpawnerTest do
 
     # Mi14 : registration synchrone (name: {:via, Registry, ...}) → pod enregistré dès {:ok, pid}.
     assert {:ok, %{pod_id: ^pod_id}} = Fleet.Spawner.pod_info(pod_id)
+  end
+
+  # STATE-004 (couplage DN-recovery B) : sous `:temporary`, un pod qui meurt sans
+  # complétion n'est pas relancé → sa task active doit être libérée (clear_for_pod)
+  # sinon elle reste orpheline. Backend en échec → transition_failed → clear.
+  test "un pod qui échoue libère sa task active (STATE-004)" do
+    pod_id = "pod-orphan-#{System.unique_integer([:positive])}"
+    {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
+
+    # task active présente avant l'échec
+    assert {:ok, status} = Fleet.TaskQueue.pod_status(pod_id)
+    refute is_nil(status)
+
+    # backend en échec → le pod meurt via transition_failed → clear_pod_task
+    StubBackend.set_reply({:error, :stub_launch_fail})
+
+    {:ok, _pid} =
+      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-orphan",
+        pod_id: pod_id,
+        allow_no_mandate: true
+      )
+
+    # la task active passe à `:cleared` (≠ `:pending`/`:assigned`) — best-effort, async → poll borné
+    assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
+           "la task du pod mort devrait être :cleared, statut actuel : #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
   end
 
   test "pod_info returns :not_found when pod doesn't exist" do

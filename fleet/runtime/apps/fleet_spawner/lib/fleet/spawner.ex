@@ -16,18 +16,19 @@ defmodule Fleet.Spawner do
 
   ## Restart strategy
 
-  Mappée depuis `cap_profile.spec["invocation"]["lifetime_scope"]` :
-
-    * `"one-shot"` → `:temporary` (pas de restart, mort propre post-EXTRACT)
-    * `"pipe"` / `"run"` → `:transient` (restart si crash, pas si exit normal)
-    * `"forever"` → `:permanent` (daemon long-run, restart toujours)
+  Tous les pods sont `:temporary` (DN-recovery option B, 2026-06-06, cf.
+  `restart_strategy_for/1`). Le `DynamicSupervisor` ne ressuscite JAMAIS un pod —
+  un pod mort (normal OU crash) est retiré, point. `lifetime_scope` pilote
+  désormais la RECOVERY (`release|recreate|resume`), pas le restart.
 
   ## Recovery
 
-  State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json`
-  écrit aux transitions critiques. Au respawn, `init/1` du Pod
-  GenServer lit ce fichier et reprend via `--resume <session_id>`
-  (PoC-19, conversation préservée serveur Anthropic).
+  State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` =
+  **snapshot d'observation** (où en était le pod), pas un état de reconstruction.
+  La résurrection est un acte **délibéré** du boot-orchestrator qui re-matérialise
+  depuis le desired-state (cap-profile), via `--resume <session_id>` si la session
+  est reprenable (PoC-19, contexte préservé serveur Anthropic). Cf.
+  `DN-recovery-2026-06-06`.
 
   ## Q4 ADR-B random pod_id
 
@@ -201,22 +202,18 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Mappe `lifetime_scope` cap-profile vers OTP restart strategy.
+  Restart strategy d'un pod : `:temporary` pour TOUS les scopes (DN-recovery,
+  option B 2026-06-06). Le `DynamicSupervisor` ne ressuscite JAMAIS un pod — un
+  pod mort (sortie normale OU crash) est retiré, point final. La résurrection
+  est un acte délibéré du boot-orchestrator (recovery `release|recreate|resume`).
+
+  Ferme le 73e : les enfants `:temporary` ne comptent pas dans l'intensité
+  globale `max_restarts` du supervisor → plus de cascade fleet-wide possible.
+  `lifetime_scope` pilote désormais la RECOVERY, pas le restart (la détection de
+  typo de scope vit donc avec `lifetime_scope`, plus ici).
   """
-  @spec restart_strategy_for(String.t()) :: :temporary | :transient | :permanent
-  def restart_strategy_for("one-shot"), do: :temporary
-  def restart_strategy_for(scope) when scope in ["pipe", "run"], do: :transient
-  def restart_strategy_for("forever"), do: :permanent
-
-  # finding Vulcan : un lifetime_scope inconnu (typo) tombait SILENCIEUSEMENT sur :temporary
-  # (pas de restart). On garde le défaut sûr mais on le rend VISIBLE (typo non masquée).
-  def restart_strategy_for(other) do
-    Logger.warning(
-      "Fleet.Spawner.restart_strategy_for: lifetime_scope inconnu #{inspect(other)} → :temporary (défaut — typo cap-profile ?)"
-    )
-
-    :temporary
-  end
+  @spec restart_strategy_for(String.t() | nil) :: :temporary
+  def restart_strategy_for(_scope), do: :temporary
 
   defp pod_child_spec(args) do
     cap_profile = args.cap_profile
