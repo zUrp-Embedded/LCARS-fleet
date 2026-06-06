@@ -64,8 +64,17 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
     Bus.subscribe()
 
     on_exit(fn ->
-      for {_, pid, _, _} <- DynamicSupervisor.which_children(Fleet.Pipeline.ExecutorSupervisor) do
-        DynamicSupervisor.terminate_child(Fleet.Pipeline.ExecutorSupervisor, pid)
+      # Plusieurs pipelines de ce module s'AUTO-stoppent (`:gate_halt`/`:gate_fail`)
+      # → l'enfant peut déjà être mort quand le cleanup tourne (race which_children
+      # ↔ terminate_child). Best-effort + catch :exit : un enfant/superviseur absent
+      # n'est PAS une erreur de cleanup (sinon fail intermittent du run, indépendant
+      # du test réel).
+      try do
+        for {_, pid, _, _} <- DynamicSupervisor.which_children(Fleet.Pipeline.ExecutorSupervisor) do
+          DynamicSupervisor.terminate_child(Fleet.Pipeline.ExecutorSupervisor, pid)
+        end
+      catch
+        :exit, _ -> :ok
       end
 
       for k <- [:pipelines_root, :spawner_backend, :gatekeeper_pod_id, :task_queue] do
@@ -165,6 +174,56 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
                      payload: %{"pipeline_id" => ^pid}
                    },
                    2_000
+  end
+
+  test "décision dans l'enveloppe worker %{status, result} → dépliée → continue (forme RÉELLE du pod)" do
+    {pid, corr} = start_to_gate("softgate")
+
+    # Forme RÉELLE qu'un pod gatekeeper soumet : `agent-worker-base.md` impose
+    # l'enveloppe `%{"status","result"}` à TOUT submit_result ; le GateBrief
+    # demande la décision DANS `result`. Le gatekeeper réconcilie en nichant.
+    # Exposé LIVE par C4a (2026-06-06) : sans dépliage, l'Executor lisait
+    # `result["decision"] = nil` → "halt_invalid" → le pipeline haltait alors
+    # que le gatekeeper avait dit `continue`. Régression #C4a.
+    complete_gate(corr, %{
+      "status" => "ok",
+      "result" => %{"decision" => "continue", "reason" => "soft_gate_pass_coherent_deliverable"}
+    })
+
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.completed",
+                     payload: %{"pipeline_id" => ^pid}
+                   },
+                   2_000
+  end
+
+  test "enveloppe worker status=failed (gatekeeper n'a pas pu juger) → halt fail-closed" do
+    {pid, corr} = start_to_gate("softgate")
+
+    # Mode fail explicite de `agent-worker-base.md` : pas de `result`, donc pas
+    # de décision → halt fail-closed (jamais continue sur un fail de jugement).
+    complete_gate(corr, %{
+      "status" => "failed",
+      "reason" => "ambiguous",
+      "details" => "gate unclear"
+    })
+
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.failed"}, 2_000
+    refute_receive %Fleet.Event{type: :"pipeline.completed"}, 100
+    _ = pid
+  end
+
+  test "enveloppe worker status=ok mais result=nil (sortie vide) → halt fail-closed" do
+    {pid, corr} = start_to_gate("softgate")
+
+    # `result` non-map (nil) → pas de dépliage (clause `when is_map(inner)` échoue),
+    # pas de `"decision"` → halt. Jamais un continue silencieux sur une sortie vide.
+    complete_gate(corr, %{"status" => "ok", "result" => nil})
+
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.failed"}, 2_000
+    refute_receive %Fleet.Event{type: :"pipeline.completed"}, 100
+    _ = pid
   end
 
   test "décision abandon → pipeline.failed (halt)" do

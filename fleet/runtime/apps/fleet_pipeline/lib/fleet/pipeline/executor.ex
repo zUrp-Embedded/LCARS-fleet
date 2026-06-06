@@ -152,6 +152,12 @@ defmodule Fleet.Pipeline.Executor do
         %Fleet.Event{source: :spawner, type: :"pod.completed", payload: payload},
         state
       ) do
+    # NB : c'est le chemin des pods de STAGE (workers normaux). Le **gatekeeper** ne
+    # passe JAMAIS ici — sa décision de gate revient via `task_queue.task_completed`
+    # (corrélée), pas via `pod.completed`. Donc le dépliage d'enveloppe worker
+    # (`unwrap_worker_envelope`) est sur le chemin gate uniquement ; ici les outputs
+    # de stage restent bruts (les hard/terminal gates écrivent leurs règles contre
+    # cette forme).
     if payload["pipeline_id"] == state.pipeline_id and is_binary(payload["stage"]) do
       handle_stage_completed(payload["stage"], %{"result" => payload["result"]}, state)
     else
@@ -179,14 +185,41 @@ defmodule Fleet.Pipeline.Executor do
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # Extrait le résultat (décision) du payload `task_completed`. Deux couches de
-  # clés : l'**enveloppe** TaskQueue.Server (`event/3`) pose `:result` en clé
-  # ATOM ; le **résultat** lui-même (la décision soumise par le gatekeeper) est du
-  # JSON parsé → clés STRING (`"decision"`, `"reason"`, lus par `gate_decision/1`).
-  defp gate_result(payload) when is_map(payload),
-    do: Map.get(payload, :result) || payload["result"]
+  # Extrait la décision de gate du payload `task_completed`. TROIS couches :
+  #
+  #   1. **enveloppe TaskQueue** (`event/3`) — pose `:result` en clé ATOM ;
+  #   2. **enveloppe worker** — `agent-worker-base.md` impose à TOUT `submit_result`
+  #      la forme `%{"status" => "ok"|"failed", "result" => <sortie>}` (clés STRING) ;
+  #   3. **décision** — le GateBrief demande la décision DANS `result` →
+  #      `%{"decision", "reason", ...}` (gate-decision-v1.json, lue par `gate_decision/1`).
+  #
+  # On déplie (1) puis (2) : sans le dépliage worker, l'Executor lisait
+  # `result["decision"] = nil` → "halt_invalid" → le pipeline haltait alors que le
+  # gatekeeper avait dit `continue`. Bug exposé LIVE par C4a (2026-06-06, vrai
+  # gatekeeper) — invisible aux tests qui injectaient la décision sans enveloppe.
+  defp gate_result(payload) when is_map(payload) do
+    (Map.get(payload, :result) || payload["result"])
+    |> unwrap_worker_envelope()
+  end
 
   defp gate_result(_), do: nil
+
+  # Déplie l'enveloppe worker `%{"status","result"}`.
+  #
+  # INVARIANT de discrimination : une décision `gate-decision-v1.json` porte
+  # TOUJOURS `"decision"` au top (les 5 décisions canon). La clause 1 s'appuie
+  # dessus — donc une décision directe (forme des tests, ou worker qui n'enveloppe
+  # pas) est rendue telle quelle, jamais confondue avec une enveloppe à déplier.
+  # Cet invariant doit rester vrai si gate-decision-v1.json évolue.
+  #
+  # Clause 2 : enveloppe succès `%{"status"=>"ok", "result"=>map}` → on rend `result`
+  # (la décision). Clause 3 : tout le reste rendu tel quel — dont le mode `failed`
+  # (`%{"status"=>"failed", "reason"=>...}`, pas de `result` map) et `result: nil` →
+  # pas de `"decision"` → `gate_decision/1` halt fail-closed (jamais continue sur un
+  # échec/absence de jugement).
+  defp unwrap_worker_envelope(%{"decision" => _} = direct), do: direct
+  defp unwrap_worker_envelope(%{"status" => _, "result" => inner}) when is_map(inner), do: inner
+  defp unwrap_worker_envelope(other), do: other
 
   # ============================================================
   # Terminate — cleanup pipe-scoped pods
