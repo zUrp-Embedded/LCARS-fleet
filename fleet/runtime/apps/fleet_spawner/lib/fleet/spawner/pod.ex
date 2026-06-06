@@ -912,9 +912,16 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # DN-recovery B : un pod (re)spawné avec un snapshot suit la décision explicite
-  # de `recover_or_init`/`recovery_action`. `:resume` RE-LANCE (backend mort) —
-  # JAMAIS reprendre directement en `:monitor` (LIFE-002).
-  defp first_continue_for(%{recovery: :resume}), do: :launch
+  # de `recover_or_init`/`recovery_action`. `:resume` RE-MATÉRIALISE (→ :project :
+  # le SP + les fichiers .lcars NE sont PAS dans le snapshot minimal, ils se
+  # re-composent depuis le cap-profile, déterministe) PUIS launch(resume) —
+  # `do_project` pose `state.sp` ; aller directement à :launch laissait sp=nil →
+  # `build_spawn` `:invalid_args` (bug exposé live par le gatekeeper-permanent qui
+  # recovere d'un `phase:monitoring`, 2026-06-06). JAMAIS reprendre en `:monitor`
+  # sur backend mort (LIFE-002). NB : `do_project` re-clone le workspace si
+  # `spec.project.repo_path` — idempotence du clone = STATE-003 (séparé) ; pour les
+  # pods sans projet (gatekeeper, judges) c'est un no-op.
+  defp first_continue_for(%{recovery: :resume}), do: :project
   defp first_continue_for(%{recovery: :recreate}), do: :allocate
   defp first_continue_for(%{recovery: :release}), do: :release
   defp first_continue_for(%{phase: :pending}), do: :allocate

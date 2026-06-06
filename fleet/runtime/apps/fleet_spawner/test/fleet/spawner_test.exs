@@ -181,13 +181,19 @@ defmodule Fleet.SpawnerTest do
     # re-spawn même pod_id → recovery_action(forever, :monitoring) = :resume
     {:ok, _} = Fleet.Spawner.spawn_pod(forever_profile(), "ticket-rec", pod_id: pod_id)
 
+    # :resume RE-MATÉRIALISE (:home_projected = do_project a re-composé le SP, pas
+    # dans le snapshot) PUIS re-lance (:process_launched). Sans le re-project, sp=nil
+    # → build_spawn :invalid_args en backend réel (bug gatekeeper-permanent live).
     assert wait_until(fn ->
              case Fleet.Spawner.pod_info(pod_id) do
-               {:ok, %{session_id: ^resumed_sid, conditions: conds}} -> :process_launched in conds
-               _ -> false
+               {:ok, %{session_id: ^resumed_sid, conditions: conds}} ->
+                 :home_projected in conds and :process_launched in conds
+
+               _ ->
+                 false
              end
            end),
-           "le pod repris devrait restaurer #{resumed_sid} ET re-lancer (:process_launched), info: #{inspect(Fleet.Spawner.pod_info(pod_id))}"
+           "le pod repris devrait restaurer #{resumed_sid}, RE-MATÉRIALISER (:home_projected) ET re-lancer (:process_launched), info: #{inspect(Fleet.Spawner.pod_info(pod_id))}"
 
     Fleet.Spawner.kill_pod(pod_id)
   end
