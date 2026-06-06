@@ -22,6 +22,8 @@ spec:
       - Edit
       - WebFetch       # PascalCase : tool Claude Code natif autorisé côté pod
       - WebSearch      # PascalCase : tool Claude Code natif autorisé côté pod
+      - ToolSearch     # PascalCase : charge les tools déférés (Monitor, mcp__fleet__*)
+      - Monitor        # PascalCase : réveil-par-flag (watch.sh) — wake sans send-keys de contenu (ADR-G pt3)
     disallowedTools:
       # snake_case : server tools API Anthropic bypassant can_use_tool — F-CONT-RISK gate
       - web_search

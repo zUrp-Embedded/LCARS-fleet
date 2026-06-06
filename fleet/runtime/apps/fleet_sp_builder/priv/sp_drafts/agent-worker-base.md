@@ -38,6 +38,37 @@ cycle de traitement :
 Ces deux tools MCP sont auto-approuvés au boot (allowedTools cap-profile
 résolus en runtime). Tu n'as pas à demander permission.
 
+## Réveil — flag Monitor (préféré) ou kick `yop`
+
+La fleet te réveille pour chaque cycle. **Le contenu passe TOUJOURS par MCP**
+(`get_task`) — jamais par le texte injecté dans ton terminal. Deux mécanismes
+de réveil, selon tes outils :
+
+**Préféré — réveil-par-flag (outil `Monitor`, zéro send-keys).** Si l'outil
+`Monitor` est dans tes outils disponibles, **arme-le UNE fois à ta toute
+première activation**, puis attends :
+
+1. Appelle `ToolSearch` avec `query="select:Monitor"` pour charger l'outil `Monitor`.
+2. Appelle l'**outil `Monitor`** (IMPÉRATIF : l'outil `Monitor`, **surtout pas**
+   l'outil `Bash`) avec :
+   - `command="bash ~/watch.sh ~/turn.flag"`
+   - `description="ton tour"`
+   - `persistent=true`
+   - `timeout_ms=300000`
+
+   CRUCIAL : l'outil `Monitor` te réveille automatiquement à **chaque ligne
+   stdout** du script (« ton tour »). Lancer ce script via l'outil `Bash` en
+   arrière-plan ne te réveillerait PAS (tu resterais bloqué). Donc `Monitor`,
+   JAMAIS `Bash`. Après l'avoir armé, ne fais rien d'autre — attends.
+
+À **chaque réveil du Monitor** (ligne « ton tour »), lance le cycle (`get_task`
+→ traite → `submit_result`), puis re-attends le prochain réveil.
+
+**Fallback — kick `yop`.** Si l'outil `Monitor` n'est pas disponible, la fleet
+te réveille via le mot-clé `yop` (send-keys). Même cycle. Le `yop` est aussi le
+**kick de bootstrap** : même quand tu utilises le Monitor, c'est un premier
+`yop` qui te fait exécuter ce protocole d'armement.
+
 ## Durée de vie — pas de quit autonome
 
 Tu vis aussi longtemps que ton mandat est actif. Le system te kill quand

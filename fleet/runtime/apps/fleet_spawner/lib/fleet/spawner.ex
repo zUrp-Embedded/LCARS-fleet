@@ -212,7 +212,13 @@ defmodule Fleet.Spawner do
   @spec wake_pod(String.t()) :: :ok | {:error, term()}
   def wake_pod(pod_id) when is_binary(pod_id) do
     case pod_info(pod_id) do
-      {:ok, %{tmux_session: session}} when is_binary(session) ->
+      {:ok, %{tmux_session: session} = info} when is_binary(session) ->
+        # Réveil-par-flag (outil Monitor in-pod) : touche `turn.flag` → si l'agent a armé
+        # son Monitor (cf. SP `agent-worker-base.md`), il se réveille SANS send-keys de
+        # CONTENU (ADR-G pt3). best-effort, additif. Le `yop` reste le kick sanctionné
+        # (bootstrap + fallback pods sans Monitor) ; pour un pod Monitor-armé, le yop
+        # redondant retombe sur un get_task vide (done:true) — inoffensif.
+        _ = touch_turn_flag(info)
         Fleet.Spawner.PodTmux.send_keys(pod_id, "yop")
 
       {:ok, _info} ->
@@ -222,6 +228,18 @@ defmodule Fleet.Spawner do
         err
     end
   end
+
+  # Touche le flag du monitor in-pod (`pod_dir/turn.flag`, bind-monté = `~/turn.flag` côté
+  # pod). Le `watch.sh` armé via l'outil Monitor émet « ton tour » → réveille l'agent.
+  defp touch_turn_flag(%{pod_dir: pod_dir}) when is_binary(pod_dir) do
+    flag = Path.join(pod_dir, "turn.flag")
+    _ = File.write(flag, Integer.to_string(System.system_time(:millisecond)) <> "\n")
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp touch_turn_flag(_info), do: :ok
 
   @doc """
   Restart strategy d'un pod : `:temporary` pour TOUS les scopes (DN-recovery,

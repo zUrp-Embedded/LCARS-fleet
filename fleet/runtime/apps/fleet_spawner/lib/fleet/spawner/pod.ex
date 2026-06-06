@@ -407,6 +407,7 @@ defmodule Fleet.Spawner.Pod do
              default_brief(state)
            ),
          :ok <- maybe_provision_mcp_config(state),
+         :ok <- provision_monitor_watch(state),
          :ok <- maybe_bootstrap_project_workspace(state) do
       new_state =
         state
@@ -1423,6 +1424,27 @@ defmodule Fleet.Spawner.Pod do
           Path.join(state.pod_dir, ".mcp-fleet.json"),
           Jason.encode!(config, pretty: true)
         )
+    end
+  end
+
+  # Provisionne le monitor in-pod (`watch.sh`) dans le pod_dir (= HOME bwrap). L'agent
+  # l'arme via l'outil natif `Monitor` (cf. SP `agent-worker-base.md`) → réveil-par-flag
+  # (`turn.flag` touché par la fleet), zéro send-keys de CONTENU (ADR-G pt3 : send-keys =
+  # kick `yop` + slash uniquement). L'asset vit en `priv/` (résolu app_dir, comme le SP
+  # draft). chmod best-effort : l'agent lance `bash ~/watch.sh`, le bit exec n'est pas requis.
+  defp provision_monitor_watch(state) do
+    src = Application.app_dir(:fleet_spawner, "priv/watch.sh")
+    dst = Path.join(state.pod_dir, "watch.sh")
+
+    case File.read(src) do
+      {:ok, content} ->
+        with :ok <- safe_write(dst, content) do
+          _ = File.chmod(dst, 0o755)
+          :ok
+        end
+
+      {:error, reason} ->
+        {:error, {:watch_asset_unreadable, reason}}
     end
   end
 

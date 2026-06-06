@@ -144,12 +144,22 @@ defmodule Fleet.Spawner.PodTest do
       # (pas context/brief.md). Claude le lit comme contenu projet.
       assert File.exists?(Path.join(info.pod_dir, "tickets/ticket-1.md"))
 
+      # Monitor in-pod (réveil-par-flag, ADR-G) : watch.sh provisionné au pod_dir,
+      # exécutable. L'agent l'arme via l'outil Monitor (cf. SP).
+      watch = Path.join(info.pod_dir, "watch.sh")
+      assert File.exists?(watch)
+      assert File.read!(watch) =~ "ton tour"
+      %File.Stat{mode: mode} = File.stat!(watch)
+      assert Bitwise.band(mode, 0o100) != 0, "watch.sh doit être exécutable (owner)"
+
       # SP enrichi par agent-worker-base draft : doit contenir le workflow
-      # yop → get_task → submit_result.
+      # yop → get_task → submit_result + le protocole Monitor (réveil-par-flag).
       sp = File.read!(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
       assert sp =~ "agent worker LCARS"
       assert sp =~ "submit_result"
       assert sp =~ "yop"
+      assert sp =~ "Monitor"
+      assert sp =~ "watch.sh"
 
       Process.exit(pid, :kill)
     end
