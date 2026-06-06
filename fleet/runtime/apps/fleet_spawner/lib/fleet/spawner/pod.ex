@@ -245,28 +245,47 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # U4 — Inject brief asynchrone (post-délai) au claude REPL TmuxBackend.
-  # Phase indépendante du cycle ALLOCATE→RELEASE : le pod est probably en :monitoring
-  # quand ce message arrive. Une erreur send-keys n'interrompt pas le pod (warning
-  # + le monitor pourra time-out si claude n'a rien reçu).
-  def handle_info({:inject_brief, keys}, %{tmux_session: session} = state)
-      when is_binary(session) and is_binary(keys) do
-    # KICK keyé par pod_id sur le sock PAR-POD (PodTmux) : la chaîne bwrap tourne tmux DANS bwrap.
-    # tmux_session présent (posé par le backend) = pod joignable. Le contenu est le kick (« yop ») —
-    # le mandat lui-même est pull par le pod via MCP get_task, pas injecté ici.
-    case Fleet.Spawner.PodTmux.send_keys(state.pod_id, keys) do
-      :ok ->
-        :ok
+  # R3b / F-C4b-2 — Kick AUTONOME readiness-gated. Tick borné (indépendant du cycle
+  # ALLOCATE→RELEASE, le pod est en :monitoring quand ces messages arrivent) :
+  #   - mandat déjà pull → stop (plus rien à faire) ;
+  #   - cap atteint → abandon loggé (REPL jamais joignable OU mandat jamais pull) ;
+  #   - tmux joignable → yop (le pull peut prendre un tour → on revérifie au prochain tick) ;
+  #   - tmux pas encore up → on retente sans consommer un yop perdu.
+  # Une erreur send-keys n'interrompt pas le pod (le monitor time-out couvre).
+  def handle_info({:kick_attempt, n}, %{tmux_session: session} = state)
+      when is_binary(session) do
+    cond do
+      mandate_pulled?(state.pod_id) ->
+        {:noreply, state}
 
-      {:error, reason} ->
-        Logger.warning("pod #{state.pod_id} kick (#{keys}) failed : #{inspect(reason)}")
+      n >= kick_max_attempts() ->
+        Logger.warning(
+          "pod #{state.pod_id} kick autonome abandonné après #{n} tentatives " <>
+            "(REPL jamais joignable OU mandat jamais pull)"
+        )
+
+        {:noreply, state}
+
+      Fleet.Spawner.PodTmux.alive?(state.pod_id) ->
+        case Fleet.Spawner.PodTmux.send_keys(state.pod_id, "yop") do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning("pod #{state.pod_id} kick (yop) failed : #{inspect(reason)}")
+        end
+
+        Process.send_after(self(), {:kick_attempt, n + 1}, kick_retry_ms())
+        {:noreply, state}
+
+      true ->
+        Process.send_after(self(), {:kick_attempt, n + 1}, kick_retry_ms())
+        {:noreply, state}
     end
-
-    {:noreply, state}
   end
 
-  # tmux_session disparue (kill_session race) ou pod stoppé → ignore.
-  def handle_info({:inject_brief, _}, state), do: {:noreply, state}
+  # Pas de tmux_session (StubBackend, ou session disparue/kill race) → pas de kick.
+  def handle_info({:kick_attempt, _n}, state), do: {:noreply, state}
 
   # Catch-all silencieux : autres messages (down, monitor, etc.) ignorés.
   def handle_info(_other, state), do: {:noreply, state}
@@ -1259,29 +1278,46 @@ defmodule Fleet.Spawner.Pod do
     %{"LCARS_POD_ID" => pod_id}
   end
 
-  # Kick « yop » au claude REPL via PodTmux.send_keys (sock PAR-POD). Déclenche le pull du mandat par
-  # MCP get_task — le mandat n'est PAS injecté (il vit dans tickets/ + TaskQueue). No-op seulement si
-  # pas de tmux_session (StubBackend ; LauncherPortBackend ET TmuxBackend en posent un).
+  # Kick AUTONOME « yop » readiness-gated (R3b / F-C4b-2). Déclenche le pull du mandat
+  # par MCP get_task — le mandat n'est PAS injecté (il vit dans tickets/ + TaskQueue).
+  # No-op si pas de tmux_session (StubBackend ; LauncherPortBackend ET TmuxBackend en posent un).
   #
-  # Délai `@brief_inject_delay_ms` avant inject : le claude REPL n'est pas
-  # immédiatement prêt à recevoir input — il boote, affiche banner, initialise
-  # MCP servers (spawn bridge.py via .mcp-fleet.json). Send-keys arrivés trop
-  # tôt sont perdus. 4s = empiriquement suffisant sur cette machine, à calibrer.
-  # Le délai est non-bloquant (Process.send_after + handle_info), le Pod GenServer
-  # passe à :monitor entretemps.
-  @brief_inject_delay_ms 4_000
+  # Pourquoi pas un délai FIXE : le claude REPL n'est pas prêt à un instant connu — il
+  # boote (tmux server up, banner, init MCP servers via .mcp-fleet.json), durée variable.
+  # Un yop à délai fixe arrive trop tôt et est perdu (observé C4b live : « no server
+  # running on .../pod.sock » à T+5s). On planifie donc une BOUCLE bornée : à chaque tick,
+  # si le serveur tmux est joignable (`PodTmux.alive?`) on envoie yop ; on s'arrête dès que
+  # le mandat est pull (task ≠ pending) ou au cap. Non-bloquant (send_after + handle_info),
+  # le pod passe à :monitor entretemps. Intervalles configurables (test : valeurs ~ms).
+  defp kick_first_delay_ms, do: Application.get_env(:fleet_spawner, :kick_first_delay_ms, 2_000)
+  defp kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
+  defp kick_max_attempts, do: Application.get_env(:fleet_spawner, :kick_max_attempts, 12)
 
   defp inject_brief_to_tmux_pod(%{tmux_session: nil}), do: :ok
 
   defp inject_brief_to_tmux_pod(%{tmux_session: session}) when is_binary(session) do
-    # Trigger pur : `yop` (mot-clé du protocole-user). Le SP draft
-    # `agent-worker-base.md` injecté dans system-prompt.md décrit le
-    # workflow : sur `yop` → `mcp__fleet__get_task` → traite → `mcp__fleet__
-    # submit_result`. Pas de mandate inline (= prompt injection guardrail
-    # refus). Pas de "lis ce fichier" non plus — le SP a déjà le workflow,
-    # `yop` = juste le démarrage du cycle.
-    Process.send_after(self(), {:inject_brief, "yop"}, @brief_inject_delay_ms)
+    # Démarre la boucle de kick readiness-gated. `yop` = trigger pur (mot-clé
+    # protocole-user) ; le SP `agent-worker-base.md` porte le workflow get_task→submit_result.
+    Process.send_after(self(), {:kick_attempt, 1}, kick_first_delay_ms())
     :ok
+  end
+
+  # Le mandat est-il déjà pull par le pod ? « Pull » = la task est dans un état qui
+  # PROUVE que claude a appelé get_task : `:assigned | :in_progress | :completed`.
+  # Volontairement PAS : `:pending`/`nil` (pas encore pull / pas encore enqueué — on
+  # continue de kicker, ce qui couvre aussi la race spawn↔enqueue), ni `:cleared`/`:failed`
+  # (kill délibéré / deadline broker — le pod n'a rien pull, ne PAS arrêter le kick sur
+  # un faux « pull » ; au pire on kicke jusqu'au cap, harmless, le result_deadline couvre).
+  # Best-effort : exception/exit broker → false (on retentera). Sert à ARRÊTER la boucle.
+  defp mandate_pulled?(pod_id) do
+    case Fleet.TaskQueue.pod_status(pod_id) do
+      {:ok, s} when s in [:assigned, :in_progress, :completed] -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
   end
 
   # Provisionne $POD_DIR/.mcp-fleet.json (serveur MCP UNIQUE du pod). claude_launch le détecte

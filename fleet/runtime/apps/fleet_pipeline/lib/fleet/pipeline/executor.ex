@@ -362,6 +362,22 @@ defmodule Fleet.Pipeline.Executor do
 
         case task_queue().enqueue(pod_id, attrs) do
           {:ok, %{id: corr}} ->
+            # R3b / F-C4b-2 — KICK le gatekeeper après l'enqueue. Le gatekeeper est un
+            # pod PERMANENT déjà booté+idle (:monitoring) : son kick-loop de boot est fini,
+            # ce mandat de gate arrive APRÈS → sans wake il ne pull jamais (gate qui stalle,
+            # observé C4b). Même mécanique que StageRunner.wake_existing_pod (push + wake).
+            # Best-effort : le mandat est enqueué quoi qu'il arrive ; un wake raté → warn
+            # (le gatekeeper, déjà ready, le reçoit normalement).
+            case spawner().wake_pod(pod_id) do
+              :ok ->
+                :ok
+
+              {:error, reason} ->
+                Logger.warning(
+                  "fleet_pipeline gate kick gatekeeper=#{inspect(pod_id)} failed: #{inspect(reason)}"
+                )
+            end
+
             Logger.info(
               "fleet_pipeline gate pending: pipeline=#{inspect(state.pipeline_id)} " <>
                 "stage=#{stage} kind=#{info.kind} gatekeeper=#{inspect(pod_id)} corr=#{inspect(corr)}"
