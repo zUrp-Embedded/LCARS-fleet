@@ -103,7 +103,11 @@ fi
 # Session tmux (nom INTERNE, distinct du préfixe nom RC claude — P3 panel #13).
 POD_SOCK_DIR="$SOCK_PARENT/$POD_ID"
 TMUX_SESSION_NAME="lcars-pod-$POD_ID"
-TMUX_SOCK="$POD_SOCK_DIR/${TMUX_SESSION_NAME}.sock"
+# Filename CONSTANT (pas ${TMUX_SESSION_NAME}.sock) : le dir $POD_ID/ donne déjà
+# l'unicité. Le double pod_id (dir + filename) dépassait sun_path 108o pour un
+# pod_id UUID (chemin pipeline) → "File name too long". MÊME chemin côté Elixir
+# (Fleet.Spawner.PodTmux.sock_path = <base>/<pod_id>/pod.sock).
+TMUX_SOCK="$POD_SOCK_DIR/pod.sock"
 POD_VENDOR_BIN="$POD_DIR/.local/bin/$VENDOR_NAME"
 
 # =============================================================

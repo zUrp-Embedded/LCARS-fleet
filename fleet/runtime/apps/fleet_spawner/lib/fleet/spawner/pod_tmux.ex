@@ -31,10 +31,18 @@ defmodule Fleet.Spawner.PodTmux do
   @spec sock_base() :: String.t()
   def sock_base, do: Application.get_env(:fleet_spawner, :tmux_sock_base, "/run/lcars/tmux-sock")
 
-  @doc "Chemin socket du pod — convention bwrap_launch.sh : `<base>/<pod_id>/lcars-pod-<pod_id>.sock`."
+  @doc """
+  Chemin socket du pod — convention bwrap_launch.sh : `<base>/<pod_id>/pod.sock`.
+
+  Filename CONSTANT (`pod.sock`), pas `lcars-pod-<pod_id>.sock` : le dir `<pod_id>/`
+  donne déjà l'unicité + l'isolation (bind-mount). Le double pod_id (dir + filename)
+  faisait dépasser la limite dure `sun_path` (108 octets) des sockets Unix dès que
+  `pod_id` est un UUID (chemin pipeline) → `error: File name too long` (jamais vu en
+  spawn direct à id court ; exposé par l'assemblage pipeline C3, 2026-06-06).
+  """
   @spec sock_path(String.t()) :: String.t()
   def sock_path(pod_id) when is_binary(pod_id),
-    do: Path.join([sock_base(), pod_id, "lcars-pod-#{pod_id}.sock"])
+    do: Path.join([sock_base(), pod_id, "pod.sock"])
 
   @doc "Nom de session tmux INTERNE du pod — convention bwrap_launch.sh (`lcars-pod-<pod_id>`)."
   @spec session_name(String.t()) :: String.t()
