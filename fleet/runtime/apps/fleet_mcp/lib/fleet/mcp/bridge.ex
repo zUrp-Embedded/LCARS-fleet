@@ -78,19 +78,25 @@ defmodule Fleet.MCP.Bridge do
     {:reply, %{pubsub_to_mcp: state.pubsub_to_mcp, mcp_to_pubsub: state.mcp_to_pubsub}, state}
   end
 
-  # Bus.broadcast publie `{event_atom, %{...}}` (tuple) sur "fleet.events" —
-  # cf. Fleet.EventRouter.Bus.broadcast/3. Pattern aligné avec les autres
-  # consumers du Bus (Executor, DriftMonitor). Le test legacy publiait
-  # direct la map sur PubSub (sans Bus.broadcast) → masquait le mismatch
-  # de shape en prod (bug #1 audit externe 2026-05-24).
+  # Trois formes circulent sur "fleet.events" (dual-stack event.ex, RC-1
+  # audit Codex 2026-06-06 / NOM-001 / SEAM-003) :
+  #   - %Fleet.Event{}    : canon — producteurs migrés R1-R2 (Bus.broadcast/2)
+  #   - {event_atom, map} : legacy Bus.broadcast/3 (#1 audit externe 2026-05-24)
+  #   - %{"type"=>…}      : map directe (test ou émetteur custom)
+  # `route_event/2` les normalise toutes vers une map à clés string AVANT tout
+  # `event["…"]` (SEAM-003 : on ne lit jamais une forme non normalisée). Sans ça
+  # une struct canon levait `Fleet.Event.fetch/2 undefined` → bridge crashé.
   @impl GenServer
+  def handle_info(%Fleet.Event{} = event, state) do
+    route_event(event, state)
+    {:noreply, state}
+  end
+
   def handle_info({_atom, event}, state) when is_map(event) do
     route_event(event, state)
     {:noreply, state}
   end
 
-  # Compat tolérante : map direct (legacy chemin test, ou émetteur custom hors
-  # Bus.broadcast). Pas une régression — Bus reste l'émetteur canonique tuple.
   def handle_info(event, state) when is_map(event) do
     route_event(event, state)
     {:noreply, state}
@@ -98,7 +104,8 @@ defmodule Fleet.MCP.Bridge do
 
   def handle_info(_other, state), do: {:noreply, state}
 
-  defp route_event(event, state) do
+  defp route_event(raw, state) do
+    event = normalize_event(raw)
     etype = event["event_type"] || event["type"] || ""
 
     Enum.each(state.pubsub_to_mcp, fn m ->
@@ -118,6 +125,33 @@ defmodule Fleet.MCP.Bridge do
   end
 
   # --- privé ---
+
+  # Normalise les formes du bus vers une map à clés string (shallow : suffit pour
+  # glob_match? sur event_type + resolve_template sur les champs top-level).
+  # NB collision : `Map.merge(payload, canon)` → les champs canon (event_type,
+  # source, pod_id, correlation_id) écrasent un homonyme éventuel du payload.
+  # Voulu : la struct fait autorité sur son payload.
+  defp normalize_event(%Fleet.Event{} = e) do
+    (e.payload || %{})
+    |> stringify_keys()
+    |> Map.merge(%{
+      "event_type" => Atom.to_string(e.type),
+      "type" => Atom.to_string(e.type),
+      "source" => to_string(e.source),
+      "pod_id" => e.pod_id,
+      "correlation_id" => e.correlation_id
+    })
+  end
+
+  defp normalize_event({_atom, inner}) when is_map(inner), do: normalize_event(inner)
+  # `stringify_keys` aussi ici (juge FAIL-1) : une map à clés atomiques sinon
+  # échappe à la normalisation → event["…"] = nil. Identité sur clés string.
+  defp normalize_event(%{} = map), do: stringify_keys(map)
+
+  defp stringify_keys(map) when is_map(map),
+    do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
+
+  defp stringify_keys(other), do: other
 
   defp config_path(opts) do
     Keyword.get(opts, :bridge_config_path) ||

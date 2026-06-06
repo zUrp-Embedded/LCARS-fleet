@@ -112,6 +112,51 @@ defmodule Fleet.MCP.BridgeSupervisorTest do
     GenServer.stop(pid)
   end
 
+  # RC-1 (audit Codex 2026-06-06, NOM-001/SEAM-003) : depuis la couture R1-R2,
+  # les producteurs canon (Executor, TaskQueue…) émettent `%Fleet.Event{}` via
+  # `Bus.broadcast/2`. Le bridge ne fermait PAS ce contrat : `event["event_type"]`
+  # sur une struct (clés atomiques, pas d'`Access`) lève/`nil` → routing perdu /
+  # bridge crashé. Ce test prouve que la struct canon est désormais routée.
+  @tag :tmp_dir
+  test "forward canon : %Fleet.Event{} struct → push channel résolu (RC-1)", %{tmp_dir: dir} do
+    p = tmp(dir, "fwd_canon.yaml", @valid_yaml)
+    {:ok, pid} = Bridge.start_link(name: uniq(), bridge_config_path: p)
+    :ok = Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet-control.engineer.coord")
+
+    event = %Fleet.Event{
+      source: :coord,
+      type: :"coord.action.handoff",
+      timestamp: DateTime.utc_now(),
+      pod_id: "pod-x",
+      payload: %{"target_role" => "engineer", "answer" => "x"}
+    }
+
+    Phoenix.PubSub.broadcast(Fleet.PubSub, "fleet.events", event)
+
+    assert_receive %{"event_type" => "coord.action.handoff", "target_role" => "engineer"}, 200
+    assert Process.alive?(pid)
+    GenServer.stop(pid)
+  end
+
+  # RC-1 (juge FAIL-1) : une map à clés ATOMIQUES doit aussi être normalisée —
+  # sinon `event["event_type"]` (clé string) = nil → routing silencieusement
+  # perdu. Tient la promesse SEAM-003 « on ne lit jamais une forme non normalisée ».
+  @tag :tmp_dir
+  test "forward map à clés atomiques → push channel résolu (RC-1 hermétique)", %{tmp_dir: dir} do
+    p = tmp(dir, "fwd_atom.yaml", @valid_yaml)
+    {:ok, pid} = Bridge.start_link(name: uniq(), bridge_config_path: p)
+    :ok = Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet-control.engineer.coord")
+
+    Phoenix.PubSub.broadcast(Fleet.PubSub, "fleet.events", %{
+      event_type: "coord.action.handoff",
+      target_role: "engineer",
+      payload: "x"
+    })
+
+    assert_receive %{"event_type" => "coord.action.handoff", "target_role" => "engineer"}, 200
+    GenServer.stop(pid)
+  end
+
   @tag :tmp_dir
   test "forward : template non résolu → skip graceful (pas de crash)", %{tmp_dir: dir} do
     p = tmp(dir, "fwd2.yaml", @valid_yaml)
