@@ -92,6 +92,30 @@ defmodule Fleet.Pilot.AutoDispatcherTest do
     end
   end
 
+  describe "process_event/2 — canon %Fleet.Event{} (dual-stack, B8 e2e)" do
+    # WebhooksGitea émet une STRUCT canon `%Fleet.Event{}` sur le Bus (pas le
+    # tuple/map legacy). process_event lisait `event["event_type"]`/`event["payload"]`
+    # → nil sur struct → `:missing_event_type` → skip silencieux : le déclencheur
+    # webhook→pipeline était MORT en prod. Faux-vert : l'autre test ne feed que le map.
+    test "struct canon (forme réelle WebhooksGitea) → dispatch, pas :missing_event_type" do
+      routes = [
+        %{"on" => ["gitea.opened"], "when" => %{"type" => "poc"}, "pipeline" => "poc-cycle"}
+      ]
+
+      event = %Fleet.Event{
+        source: :event_router,
+        type: :"gitea.opened",
+        timestamp: DateTime.utc_now(),
+        payload: issue_payload()
+      }
+
+      assert {:dispatched, "stub-pipeline-id-poc-cycle"} =
+               AutoDispatcher.process_event(event, state(routes: routes))
+
+      assert_received {:invoked, "poc-cycle", %{ticket_id: "fleet/lcars#42"}}
+    end
+  end
+
   describe "process_event/2 — skip paths" do
     test "event_type non-gitea.* → skip" do
       event = gitea_event("pod.completed", %{})

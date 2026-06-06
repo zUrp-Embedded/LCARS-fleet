@@ -170,6 +170,13 @@ defmodule Fleet.Pilot.AutoDispatcher do
           {:dispatched, String.t()}
           | {:skipped, atom()}
           | {:error, term()}
+  # WebhooksGitea (et tout producteur canon) émet une STRUCT `%Fleet.Event{}` sur
+  # le Bus. Un struct n'implémente pas Access → `event["event_type"]` rendrait nil
+  # → skip silencieux (déclencheur webhook→pipeline mort en prod, B8 e2e). On
+  # normalise vers la map à clés string canonique avant la logique map existante.
+  def process_event(%Fleet.Event{} = event, %__MODULE__{} = state),
+    do: process_event(Fleet.Event.to_string_map(event), state)
+
   def process_event(event, %__MODULE__{} = state) do
     with {:ok, event_type} <- fetch_event_type(event),
          :ok <- ensure_gitea_event(event_type),

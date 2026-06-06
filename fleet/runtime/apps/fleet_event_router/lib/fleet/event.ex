@@ -52,6 +52,28 @@ defmodule Fleet.Event do
   @spec valid_source?(atom()) :: boolean()
   def valid_source?(source), do: source in @canonical_sources
 
+  @doc """
+  Représentation canonique à clés string de l'enveloppe (payload **nested**, pas
+  hoisté). Pour les consommateurs dual-stack qui lisent encore `event["…"]` : un
+  struct n'implémente pas `Access`, donc `event["event_type"]` y rendrait `nil`
+  (cause du skip silencieux webhook→pipeline, B8 e2e). Le `payload` garde ses
+  propres clés (déjà string côté webhook JSON). 2ᵉ occurrence du besoin après
+  `Fleet.MCP.Bridge` (qui, lui, hoiste le payload — sémantique différente) →
+  helper canonique ici plutôt qu'une Nᵉ copie.
+  """
+  @spec to_string_map(t()) :: %{optional(String.t()) => any()}
+  def to_string_map(%__MODULE__{} = e) do
+    %{
+      "event_type" => Atom.to_string(e.type),
+      "type" => Atom.to_string(e.type),
+      "source" => to_string(e.source),
+      "pod_id" => e.pod_id,
+      "correlation_id" => e.correlation_id,
+      "timestamp" => e.timestamp,
+      "payload" => e.payload || %{}
+    }
+  end
+
   defmodule UnregisteredError do
     @moduledoc "Event publié hors registry `events.yaml` (fail-loud strict, DN méta §1.7)."
     defexception [:message]
