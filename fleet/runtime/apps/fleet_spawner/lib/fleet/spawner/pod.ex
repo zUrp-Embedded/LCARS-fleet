@@ -839,25 +839,63 @@ defmodule Fleet.Spawner.Pod do
   defp recover_or_init(args) do
     base = initial_state(args)
 
-    case File.read(base.state_fs_path) do
-      {:ok, json} ->
-        case Jason.decode(json) do
-          {:ok, %{"session_id" => session_id, "phase" => phase}} when is_binary(session_id) ->
-            base
-            |> Map.put(:session_id, session_id)
-            # recovery : on REPREND la session existante → --resume <uuid> (pas --session-id).
-            |> Map.put(:resume, true)
-            |> Map.put(:phase, phase_from_string(phase) || :launching)
-
-          _ ->
-            base
-        end
-
-      {:error, _} ->
-        base
+    with {:ok, json} <- File.read(base.state_fs_path),
+         {:ok, %{"session_id" => sid, "phase" => phase_str}} when is_binary(sid) <-
+           Jason.decode(json) do
+      phase = phase_from_string(phase_str) || :launching
+      apply_recovery(base, recovery_action(phase), sid, phase)
+    else
+      _ -> base
     end
   end
 
+  @doc """
+  Décision de recovery (DN-recovery B) d'un pod (re)spawné dont un `state.json`
+  snapshot existe. PURE, fonction de la **phase observée** (pas du scope : le
+  scope joue au niveau orchestrateur — faut-il re-spawner un pod absent — pas au
+  niveau action-sur-snapshot). Sous `:temporary` le supervisor ne ressuscite
+  jamais : c'est un (re)spawn délibéré qui appelle `init/1`, et la décision est
+  explicite (plus de reprise implicite `first_continue_for(:monitoring)` sur
+  backend mort — LIFE-002).
+
+    * `:release`  — phase terminale (`:succeeded`/`:released`) → rien à relancer.
+    * `:resume`   — en vol (`:launching`/`:monitoring`/`:extracting`/`:releasing`) →
+                    reprend la session (`--resume`) en RE-LANÇANT le backend (mort) ;
+                    jamais `:monitor` direct. Préserve le travail, tout scope.
+    * `:recreate` — `:failed` / `:pending` / phase ambiguë → from scratch, session neuve.
+  """
+  @spec recovery_action(atom()) :: :release | :resume | :recreate
+  def recovery_action(phase) do
+    cond do
+      phase in [:succeeded, :released] -> :release
+      phase in [:launching, :monitoring, :extracting, :releasing] -> :resume
+      true -> :recreate
+    end
+  end
+
+  # :resume → session reprise + RE-LAUNCH (le backend est mort sous `:temporary`).
+  defp apply_recovery(base, :resume, sid, phase) do
+    base
+    |> Map.put(:session_id, sid)
+    |> Map.put(:resume, true)
+    |> Map.put(:phase, phase)
+    |> Map.put(:recovery, :resume)
+  end
+
+  # :recreate → fresh, nouvelle session (base intacte : session_id neuf, resume=false).
+  defp apply_recovery(base, :recreate, _sid, _phase), do: Map.put(base, :recovery, :recreate)
+
+  # :release → terminal ; le pod stoppera proprement (do_release sur backend nil).
+  defp apply_recovery(base, :release, _sid, phase) do
+    base |> Map.put(:phase, phase) |> Map.put(:recovery, :release)
+  end
+
+  # DN-recovery B : un pod (re)spawné avec un snapshot suit la décision explicite
+  # de `recover_or_init`/`recovery_action`. `:resume` RE-LANCE (backend mort) —
+  # JAMAIS reprendre directement en `:monitor` (LIFE-002).
+  defp first_continue_for(%{recovery: :resume}), do: :launch
+  defp first_continue_for(%{recovery: :recreate}), do: :allocate
+  defp first_continue_for(%{recovery: :release}), do: :release
   defp first_continue_for(%{phase: :pending}), do: :allocate
   defp first_continue_for(%{phase: :launching}), do: :launch
   defp first_continue_for(%{phase: phase}), do: phase_to_continue(phase)

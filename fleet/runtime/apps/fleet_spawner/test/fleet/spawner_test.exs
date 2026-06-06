@@ -147,6 +147,51 @@ defmodule Fleet.SpawnerTest do
            "la task du pod mort devrait être :cleared, statut actuel : #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
   end
 
+  # LIFE-002 (DN-recovery B) : un pod long-lived (re)spawné avec un snapshot
+  # `state.json` en phase `:monitoring` doit RESTAURER la session (`--resume`) ET
+  # RE-LANCER le backend (`:process_launched`), PAS reprendre directement en
+  # `:monitor` sur un backend mort (le supervisor ne ressuscite jamais sous B).
+  test "recovery : pod long-lived repris à :monitoring restaure la session + re-launch (LIFE-002)" do
+    pod_id = "pod-recover-#{System.unique_integer([:positive])}"
+
+    # 1er spawn → récupère le state_fs_path réel, puis kill (kill_pod n'écrit pas
+    # de state sous B — pas de do_release), donc notre snapshot ci-dessous fait foi.
+    {:ok, _} = Fleet.Spawner.spawn_pod(forever_profile(), "ticket-rec", pod_id: pod_id)
+    assert {:ok, %{state_fs_path: path}} = Fleet.Spawner.pod_info(pod_id)
+    :ok = Fleet.Spawner.kill_pod(pod_id)
+    assert wait_until(fn -> match?({:error, :not_found}, Fleet.Spawner.pod_info(pod_id)) end)
+
+    # snapshot recovery : session connue + phase active
+    resumed_sid = "11111111-2222-4333-8444-555555555555"
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "v" => 1,
+        "session_id" => resumed_sid,
+        "phase" => "monitoring",
+        "cap_profile_name" => "engineer",
+        "started_at" => DateTime.to_iso8601(DateTime.utc_now()),
+        "conditions" => [],
+        "ticket_id" => "ticket-rec"
+      })
+    )
+
+    # re-spawn même pod_id → recovery_action(forever, :monitoring) = :resume
+    {:ok, _} = Fleet.Spawner.spawn_pod(forever_profile(), "ticket-rec", pod_id: pod_id)
+
+    assert wait_until(fn ->
+             case Fleet.Spawner.pod_info(pod_id) do
+               {:ok, %{session_id: ^resumed_sid, conditions: conds}} -> :process_launched in conds
+               _ -> false
+             end
+           end),
+           "le pod repris devrait restaurer #{resumed_sid} ET re-lancer (:process_launched), info: #{inspect(Fleet.Spawner.pod_info(pod_id))}"
+
+    Fleet.Spawner.kill_pod(pod_id)
+  end
+
   test "pod_info returns :not_found when pod doesn't exist" do
     assert {:error, :not_found} = Fleet.Spawner.pod_info("nonexistent-pod-id")
   end
