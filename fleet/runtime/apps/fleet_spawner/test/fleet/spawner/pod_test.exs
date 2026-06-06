@@ -78,9 +78,9 @@ defmodule Fleet.Spawner.PodTest do
     })
   end
 
-  defp state_fs_path(pod_id) do
+  defp state_fs_path(pod_id, scope_dir \\ "pods") do
     root = Application.get_env(:fleet_spawner, :state_fs_root)
-    Path.join([root, "pods", pod_id, "state.json"])
+    Path.join([root, scope_dir, pod_id, "state.json"])
   end
 
   defp os_alive?(os_pid) do
@@ -414,8 +414,41 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   describe "recovery depuis state FS" do
-    test "init/1 lit state.json + reprend en :launching ; résultat soumis → :succeeded" do
+    test "pipe scope : init/1 lit state.json en vol → :resume (--resume session-old) → :succeeded" do
       pod_id = "pod-recover-#{System.unique_integer([:positive])}"
+      Process.flag(:trap_exit, true)
+
+      # pipe pod → state FS sous `pipes/` (scope-dérivé), pas `pods/`.
+      state_path = state_fs_path(pod_id, "pipes")
+      File.mkdir_p!(Path.dirname(state_path))
+
+      File.write!(
+        state_path,
+        Jason.encode!(%{
+          "v" => 1,
+          "pod_id" => pod_id,
+          "ticket_id" => "ticket-old",
+          "session_id" => "session-old",
+          "phase" => "launching"
+        })
+      )
+
+      StubBackend.set_reply(interactive_reply(session_id: "session-old"))
+
+      # pipe = porte un contexte → recovery :resume → relance avec --resume session-old.
+      pipe_args = %{build_args(pod_id, "ticket-1") | cap_profile: pipe_profile()}
+      {:ok, pid} = spawn_via_supervisor(pipe_args)
+      assert_receive {:launch_called, args, _env}, 2_000
+      # LE point F-C4b-1 : le travail est repris (--resume session-old), pas reroll.
+      assert args.session_id == "session-old"
+
+      # pipe = long-lived : après reprise il atteint :monitoring et y RESTE (pas de
+      # release auto sur submit ; cf. cycle pipe). On vérifie la reprise, pas la complétion.
+      assert %{phase: :monitoring} = GenServer.call(pid, :info)
+    end
+
+    test "one-shot scope : recovery in-flight → :recreate (session NEUVE, pas --resume) — F-C4b-1" do
+      pod_id = "pod-recover-os-#{System.unique_integer([:positive])}"
       Process.flag(:trap_exit, true)
 
       state_path = state_fs_path(pod_id)
@@ -432,19 +465,14 @@ defmodule Fleet.Spawner.PodTest do
         })
       )
 
-      StubBackend.set_reply(interactive_reply(session_id: "session-old"))
+      StubBackend.set_reply(interactive_reply(session_id: "ignored"))
 
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
-      assert_receive {:launch_called, args, _env}, 2_000
-      assert args.session_id == "session-old"
-
-      # Après reprise launch → :monitoring (subscribed). Le central broadcaste le résultat → succeeded.
-      assert %{phase: :monitoring} = GenServer.call(pid, :info)
-      submit_result_event(pod_id, %{"answer" => "RECOVERED"})
-
-      assert_receive {:EXIT, ^pid, :normal}, 3_000
-      content = File.read!(state_path) |> Jason.decode!()
-      assert content["phase"] == "succeeded"
+      # valid_profile() = one-shot → /clear chaque cycle, pas de contexte → :recreate.
+      # Le pod relance avec une session NEUVE (UUID), PAS --resume session-old.
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      assert_receive {:launch_called, args, env}, 2_000
+      refute args.session_id == "session-old"
+      assert env["LCARS_POD_RESUME"] == "0"
     end
   end
 

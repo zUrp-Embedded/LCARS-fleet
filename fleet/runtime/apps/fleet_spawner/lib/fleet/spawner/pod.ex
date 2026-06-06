@@ -898,7 +898,8 @@ defmodule Fleet.Spawner.Pod do
          {:ok, %{"session_id" => sid, "phase" => phase_str}} when is_binary(sid) <-
            Jason.decode(json) do
       phase = phase_from_string(phase_str) || :launching
-      apply_recovery(base, recovery_action(phase), sid, phase)
+      scope = Fleet.CapProfile.lifetime_scope(base.cap_profile)
+      apply_recovery(base, recovery_action(phase, scope), sid, phase)
     else
       _ -> base
     end
@@ -919,14 +920,37 @@ defmodule Fleet.Spawner.Pod do
                     jamais `:monitor` direct. Préserve le travail, tout scope.
     * `:recreate` — `:failed` / `:pending` / phase ambiguë → from scratch, session neuve.
   """
-  @spec recovery_action(atom()) :: :release | :resume | :recreate
-  def recovery_action(phase) do
+  @spec recovery_action(atom(), String.t() | nil) :: :release | :resume | :recreate
+  def recovery_action(phase, scope \\ nil) do
     cond do
       phase in [:succeeded, :released, :killed] -> :release
-      phase in [:launching, :monitoring, :extracting, :releasing] -> :resume
+      phase in [:launching, :monitoring, :extracting, :releasing] -> resume_or_recreate(scope)
       true -> :recreate
     end
   end
+
+  # `:resume` (préserver le travail) seulement si (1) le GATE global est ON et (2) le pod
+  # porte un contexte reprenable. Sinon `:recreate` (reroll, sûr). F-C4b-1 — `--resume`
+  # jamais prouvé live (« pas poncé »), deux cas l'invalident :
+  #   * gate OFF (`:recovery_resume_enabled` false) → `:recreate` PARTOUT. Escape-hatch :
+  #     si `--resume` se révèle mauvais à l'usage (session morte → claude exit → boot raté
+  #     silencieux, observé C4b), on coupe et tout reroll proprement.
+  #   * `one-shot` → `:recreate` TOUJOURS (indépendant du gate) : la clear-policy fait
+  #     `/clear` chaque cycle (IV.6) → pas de contexte à reprendre, ET le sessionId LOCAL
+  #     régénéré par `/clear` diverge du `session_id` snapshot → `--resume` reprendrait la
+  #     mauvaise/ancienne session. Le reroll est correct ET sûr.
+  #   * `pipe`/`forever` (ou scope inconnu/nil) + gate ON → `:resume` : préserve le travail
+  #     mid-mandat (engineer en cours, gatekeeper avec contexte accumulé). Reste exposé au
+  #     cas « session morte » → c'est le gate qui sert d'interrupteur si ça se passe mal.
+  defp resume_or_recreate(scope) do
+    cond do
+      not resume_enabled?() -> :recreate
+      scope == "one-shot" -> :recreate
+      true -> :resume
+    end
+  end
+
+  defp resume_enabled?, do: Application.get_env(:fleet_spawner, :recovery_resume_enabled, true)
 
   # :resume → session reprise + RE-LAUNCH (le backend est mort sous `:temporary`).
   defp apply_recovery(base, :resume, sid, phase) do

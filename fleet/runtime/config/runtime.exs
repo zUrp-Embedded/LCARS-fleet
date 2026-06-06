@@ -66,6 +66,15 @@ if config_env() != :test do
   config :fleet_spawner,
     boot_permanent_at_start: System.get_env("LCARS_BOOT_PERMANENT_AT_START") != "false"
 
+  # F-C4b-1 — GATE du recovery `:resume` (`--resume <session>` au respawn d'un pod
+  # pipe/forever en vol). Défaut **true** (resume implémenté + actif) ; mais `--resume`
+  # n'a jamais été prouvé live (session morte/non-persistée → claude exit → boot raté
+  # silencieux, observé C4b). `LCARS_RECOVERY_RESUME_ENABLED=false` → recovery reroll
+  # (`:recreate`) PARTOUT = escape-hatch si `--resume` se révèle mauvais à l'usage.
+  # (Les one-shot rerollent de toute façon — clear-policy /clear, hors gate.)
+  config :fleet_spawner,
+    recovery_resume_enabled: System.get_env("LCARS_RECOVERY_RESUME_ENABLED") != "false"
+
   # ============================================================
   # fleet_spawner pod_dir_root — OVERRIDE optionnel seulement.
   # DÉCISION 2026-06-01 (monde-invoqué/ADR-E) : le défaut est PER-HUMAIN `/home/<human>/pods/pod_<id>`
