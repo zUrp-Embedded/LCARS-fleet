@@ -12,6 +12,13 @@ defmodule LcarsFleetRuntime.MixProject do
     ]
   end
 
+  # R7 — `mix gate` doit tourner en :test (sinon l'étape `test` de l'alias
+  # s'exécute dans l'env ambiant `:dev` et Mix refuse / la suite ne boote pas
+  # dans le bon env). `preferred_envs` force MIX_ENV=test pour la tâche `gate`.
+  def cli do
+    [preferred_envs: [gate: :test]]
+  end
+
   # R7 verrou I-CBC — gate CI/dev composable : compile strict + suite + le
   # tableau de bord des contrats inter-module. `mix gate` exit≠0 si un contrat
   # est rouge (le jumeau runtime du gate doctrine §11-PATH). À câbler en CI.
