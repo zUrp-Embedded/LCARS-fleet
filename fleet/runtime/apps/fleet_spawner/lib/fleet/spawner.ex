@@ -133,7 +133,18 @@ defmodule Fleet.Spawner do
   def kill_pod(pod_id) when is_binary(pod_id) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [{pid, _}] ->
-        DynamicSupervisor.terminate_child(Fleet.Spawner.Supervisor, pid)
+        # LIFE-003 (DN-recovery B §5) : release DÉLIBÉRÉE d'abord — handle_call(:kill)
+        # fait teardown backend + clear_for_pod + état terminal :killed, puis stop.
+        # Fallback brutal terminate_child SEULEMENT si le pod ne répond pas (timeout
+        # / déjà mort). Plus de bypass de la transition de release.
+        try do
+          :ok = GenServer.call(pid, :kill, 5_000)
+          :ok
+        catch
+          :exit, _reason ->
+            DynamicSupervisor.terminate_child(Fleet.Spawner.Supervisor, pid)
+            :ok
+        end
 
       [] ->
         {:error, :not_found}
@@ -146,8 +157,19 @@ defmodule Fleet.Spawner do
   @spec pod_info(String.t()) :: {:ok, map()} | {:error, :not_found}
   def pod_info(pod_id) when is_binary(pod_id) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
-      [{pid, _}] -> {:ok, GenServer.call(pid, :info)}
-      [] -> {:error, :not_found}
+      [{pid, _}] ->
+        # Le pid peut être mort mais encore brièvement dans le Registry (cleanup
+        # async via monitor) — un `GenServer.call` y lèverait `EXIT`. Un pod mort =
+        # absent → `{:error, :not_found}` (cohérent avec le pattern try/catch de
+        # `kill_pod/1` ; supprime une race exposée par le stop rapide de LIFE-003).
+        try do
+          {:ok, GenServer.call(pid, :info)}
+        catch
+          :exit, _reason -> {:error, :not_found}
+        end
+
+      [] ->
+        {:error, :not_found}
     end
   end
 

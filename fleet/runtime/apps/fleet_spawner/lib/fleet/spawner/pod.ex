@@ -166,6 +166,23 @@ defmodule Fleet.Spawner.Pod do
     {:reply, info, state}
   end
 
+  # LIFE-003 (DN-recovery B §5) : kill = transition de release DÉLIBÉRÉE, pas un
+  # kill brutal du supervisor. Teardown backend + libère la task (abort, pas
+  # succès → clear_for_pod) + état terminal `:killed`, puis arrêt :normal. Le
+  # fallback brutal (terminate_child) ne sert que si ce call timeout (cf. kill_pod/1).
+  def handle_call(:kill, _from, state) do
+    teardown_backend(state)
+    clear_pod_task(state.pod_id)
+
+    new_state =
+      state
+      |> Map.put(:phase, :killed)
+      |> add_condition(:home_released)
+
+    write_state_fs(new_state)
+    {:stop, :normal, :ok, new_state}
+  end
+
   # ============================================================
   # #593 D11 — handle_info Port lifecycle
   # ============================================================
@@ -789,8 +806,20 @@ defmodule Fleet.Spawner.Pod do
     # DynamicSupervisor). Sous `:temporary` (DN-recovery B) l'arrêt :normal n'est jamais ressuscité.
     # NB : pas de clear_for_pod ici — do_release = succès post-EXTRACT, la task a déjà été
     # soumise/complétée (pas de task active à libérer).
-    # U4 — TmuxBackend (RC long-lived) : kill_session via tmux. LauncherPortBackend : Port.close.
-    # Sélection mutuellement exclusive (un seul backend par lifecycle pod).
+    teardown_backend(state)
+
+    new_state =
+      state
+      |> Map.put(:phase, :succeeded)
+      |> add_condition(:home_released)
+
+    write_state_fs(new_state)
+    {:stop, :normal, new_state}
+  end
+
+  # Teardown du backend du pod (mutuellement exclusif — un seul par lifecycle).
+  # U4 — TmuxBackend (RC long-lived) : kill_session via tmux. LauncherPortBackend : Port.close.
+  defp teardown_backend(state) do
     cond do
       is_port(state.port) and Port.info(state.port) ->
         terminate_pod_port(state.port)
@@ -801,14 +830,6 @@ defmodule Fleet.Spawner.Pod do
       true ->
         :ok
     end
-
-    new_state =
-      state
-      |> Map.put(:phase, :succeeded)
-      |> add_condition(:home_released)
-
-    write_state_fs(new_state)
-    {:stop, :normal, new_state}
   end
 
   @doc """
@@ -867,7 +888,7 @@ defmodule Fleet.Spawner.Pod do
   @spec recovery_action(atom()) :: :release | :resume | :recreate
   def recovery_action(phase) do
     cond do
-      phase in [:succeeded, :released] -> :release
+      phase in [:succeeded, :released, :killed] -> :release
       phase in [:launching, :monitoring, :extracting, :releasing] -> :resume
       true -> :recreate
     end

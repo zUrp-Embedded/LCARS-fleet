@@ -11,6 +11,7 @@ defmodule Fleet.Spawner.RecoveryTest do
   test "phase terminale → :release (rien à relancer)" do
     assert :release = Pod.recovery_action(:succeeded)
     assert :release = Pod.recovery_action(:released)
+    assert :release = Pod.recovery_action(:killed)
   end
 
   test "phase en vol → :resume (reprend la session + re-launch, tout scope)" do

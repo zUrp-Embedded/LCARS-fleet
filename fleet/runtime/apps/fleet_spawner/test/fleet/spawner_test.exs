@@ -192,6 +192,25 @@ defmodule Fleet.SpawnerTest do
     Fleet.Spawner.kill_pod(pod_id)
   end
 
+  # LIFE-003 (DN-recovery B §5) : kill_pod = release DÉLIBÉRÉE (handle_call(:kill) →
+  # teardown + clear_for_pod + état :killed), pas un terminate_child brutal. Discriminant :
+  # la task active est libérée (`:cleared`) — un kill brutal ne clearait pas.
+  test "kill_pod fait une release propre : task libérée + pod parti (LIFE-003)" do
+    pod_id = "pod-killclean-#{System.unique_integer([:positive])}"
+    {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
+
+    {:ok, _pid} = Fleet.Spawner.spawn_pod(forever_profile(), "ticket-kill", pod_id: pod_id)
+    assert wait_until(fn -> match?({:ok, _}, Fleet.Spawner.pod_info(pod_id)) end)
+
+    assert :ok = Fleet.Spawner.kill_pod(pod_id)
+
+    # release propre : la task est libérée (vs kill brutal qui ne clear pas)
+    assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
+           "kill_pod devrait libérer la task (release propre), statut : #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
+
+    assert wait_until(fn -> match?({:error, :not_found}, Fleet.Spawner.pod_info(pod_id)) end)
+  end
+
   test "pod_info returns :not_found when pod doesn't exist" do
     assert {:error, :not_found} = Fleet.Spawner.pod_info("nonexistent-pod-id")
   end
