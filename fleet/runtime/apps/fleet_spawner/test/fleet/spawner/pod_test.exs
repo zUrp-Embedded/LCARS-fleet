@@ -461,6 +461,23 @@ defmodule Fleet.Spawner.PodTest do
       Process.sleep(400)
       refute os_alive?(os_pid)
     end
+
+    # F-C4b-3 : race TOCTOU — le port se ferme tout seul (claude finit après submit_result)
+    # entre le check et le Port.close → ArgumentError → le GenServer du pod crashait sur une
+    # complétion RÉUSSIE (observé C4b do_release). safe_port_close absorbe l'ArgumentError ;
+    # sans le rescue, ce test crashe (RED).
+    test "safe_port_close sur un port DÉJÀ fermé → :ok (pas de crash, race do_release)" do
+      port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
+      true = Port.close(port)
+      # port maintenant fermé : un Port.close brut lèverait ArgumentError.
+      assert :ok = Fleet.Spawner.Pod.safe_port_close(port)
+    end
+
+    test "terminate_pod_port sur un port déjà fermé → :ok (idempotent teardown)" do
+      port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
+      true = Port.close(port)
+      assert :ok = Fleet.Spawner.Pod.terminate_pod_port(port)
+    end
   end
 
   describe "BL-021 chantier 6 — auth_mode switch" do

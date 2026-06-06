@@ -868,8 +868,23 @@ defmodule Fleet.Spawner.Pod do
         :ok
     end
 
-    if Port.info(port), do: Port.close(port)
+    safe_port_close(port)
+  end
+
+  @doc """
+  Ferme le port BEAM en absorbant l'`ArgumentError` de RACE : le port peut se fermer
+  entre notre check et le close (claude finit tout seul après submit_result → son process
+  exit → le port disparaît). La garde `Port.info` seule est insuffisante (TOCTOU) — un port
+  déjà fermé EST l'état voulu, donc on rescue plutôt que crash (observé F-C4b-3 : do_release
+  → `:erlang.port_close` ArgumentError → GenServer du pod crashe sur une complétion RÉUSSIE).
+  Public pour test direct.
+  """
+  @spec safe_port_close(port()) :: :ok
+  def safe_port_close(port) do
+    Port.close(port)
     :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   # ============================================================
