@@ -554,7 +554,17 @@ defmodule Fleet.Spawner.Pod do
   # Creds du pod = ceux de l'HUMAIN (/home/<human>/.claude), même règle que pod_dir. Override config
   # `:claude_dir` respecté (déploiement non-standard) ; sinon dérivé de l'humain (PAS /home/starfleet).
   defp claude_dir_for(human) do
-    Application.get_env(:fleet_spawner, :claude_dir) || "/home/#{human}/.claude"
+    Application.get_env(:fleet_spawner, :claude_dir) || claude_dir_from_passwd(human)
+  end
+
+  # Creds du pod = `.claude` dans le home de l'humain, résolu via `getent passwd` (PAS
+  # `/home/<x>` hardcodé — même raison que le binaire vendor : lcars = /var/lib/lcars).
+  # Fallback `/home/<human>/.claude` conservé si passwd échoue (compat).
+  defp claude_dir_from_passwd(human) do
+    case passwd_home(human) do
+      {:ok, home} -> Path.join(home, ".claude")
+      :error -> "/home/#{human}/.claude"
+    end
   end
 
   # BL-021 chantier 6 — auth mode switch :
@@ -690,7 +700,7 @@ defmodule Fleet.Spawner.Pod do
     # `budget_sec`/`budget_usd` comme args du script — ces clés sont retirées
     # de l'API LaunchBackend (cf. behaviour `Fleet.Spawner.LaunchBackend`).
     human =
-      Keyword.get(state.opts, :human, Application.get_env(:fleet_spawner, :pod_human, "fleet"))
+      Keyword.get(state.opts, :human, Application.get_env(:fleet_spawner, :pod_human, "lcars"))
 
     args = %{
       role: role,
@@ -1091,7 +1101,7 @@ defmodule Fleet.Spawner.Pod do
     # déploiement non-standard) ; non-set ⇒ défaut per-humain.
     # NB : l'OWNERSHIP effective UID-humain (le pod tourne EN tant que l'humain, owns 0700) via
     # `systemd-run --uid`/setuid = substrat à brancher (cf. journal § reste) — ici on pose le PATH décidé.
-    human = Keyword.get(opts, :human, Application.get_env(:fleet_spawner, :pod_human, "fleet"))
+    human = Keyword.get(opts, :human, Application.get_env(:fleet_spawner, :pod_human, "lcars"))
 
     base =
       Keyword.get(opts, :pod_dir_root) ||
