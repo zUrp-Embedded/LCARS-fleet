@@ -54,6 +54,15 @@ defmodule Fleet.CapProfileTest do
     File.write!(Path.join(tmp_dir, "#{role}.yaml"), yaml)
   end
 
+  # Helpers G24-10..14 : mutent un sous-champ nesté du struct (clés string).
+  defp put_invocation(struct, key, value) do
+    put_in(struct, [Access.key!(:spec), "invocation", key], value)
+  end
+
+  defp put_knowledge(struct, key, value) do
+    put_in(struct, [Access.key!(:spec), "knowledge", key], value)
+  end
+
   defp write_modop(tmp_dir, name, yaml) do
     dir = Path.join([tmp_dir, "modop", name])
     File.mkdir_p!(dir)
@@ -294,6 +303,113 @@ defmodule Fleet.CapProfileTest do
       profile = put_in(valid_struct().spec["scope"]["disallowedTools"], tools)
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
       assert :g24_9_prefix in codes
+    end
+  end
+
+  # ============================================================
+  # validate/1 — extensions v2.5 G24-10..14 (BL-022)
+  # Réconciliés DN↔réel : clés string, G24-12 sans system_user,
+  # G24-13 (liveness) hors validate/1 pur, G24-14 structurel seul.
+  # ============================================================
+
+  describe "validate/1 — G24-10..14 (v2.5)" do
+    test "valid_struct (sans champs v2.5) passe — back-compat defaults" do
+      # Aucun boot_at_start/subagent_template/host_native/monk_* → tous :ok.
+      assert :ok = Fleet.CapProfile.validate(valid_struct())
+    end
+
+    # --- G24-10 : boot_at_start ⟹ forever ---
+    test "G24-10 fails when boot_at_start: true but lifetime_scope != forever" do
+      profile =
+        valid_struct()
+        |> put_invocation("boot_at_start", true)
+        |> put_invocation("lifetime_scope", "one-shot")
+
+      assert {:error, codes} = Fleet.CapProfile.validate(profile)
+      assert :g24_10 in codes
+    end
+
+    test "G24-10 passes when boot_at_start: true and lifetime_scope: forever" do
+      profile =
+        valid_struct()
+        |> put_invocation("boot_at_start", true)
+        |> put_invocation("lifetime_scope", "forever")
+
+      assert :ok = Fleet.CapProfile.validate(profile)
+    end
+
+    test "G24-10 passes when boot_at_start absent (nil ≠ true)" do
+      profile = put_invocation(valid_struct(), "lifetime_scope", "run")
+      assert :ok = Fleet.CapProfile.validate(profile)
+    end
+
+    # --- G24-11 : subagent_template ⟹ one-shot ---
+    test "G24-11 fails when subagent_template set but lifetime_scope != one-shot" do
+      profile =
+        valid_struct()
+        |> put_invocation("subagent_template", "implementer")
+        |> put_invocation("lifetime_scope", "forever")
+
+      assert {:error, codes} = Fleet.CapProfile.validate(profile)
+      assert :g24_11 in codes
+    end
+
+    test "G24-11 passes when subagent_template set and lifetime_scope: one-shot" do
+      profile = put_invocation(valid_struct(), "subagent_template", "implementer")
+      # valid_struct est déjà one-shot.
+      assert :ok = Fleet.CapProfile.validate(profile)
+    end
+
+    test "G24-11 passes when subagent_template empty string (pas de template)" do
+      profile =
+        valid_struct()
+        |> put_invocation("subagent_template", "")
+        |> put_invocation("lifetime_scope", "forever")
+
+      assert :ok = Fleet.CapProfile.validate(profile)
+    end
+
+    # --- G24-12 : host_native ⟹ containment none (sans system_user) ---
+    test "G24-12 fails when host_native: true but containment != none" do
+      # valid_struct.metadata.containment == "bwrap".
+      profile = put_invocation(valid_struct(), "host_native", true)
+      assert {:error, codes} = Fleet.CapProfile.validate(profile)
+      assert :g24_12 in codes
+    end
+
+    test "G24-12 passes when host_native: true and containment: none" do
+      profile =
+        valid_struct()
+        |> put_invocation("host_native", true)
+        |> put_in([Access.key!(:metadata), "containment"], "none")
+
+      assert :ok = Fleet.CapProfile.validate(profile)
+    end
+
+    # --- G24-14 : pairing monk_registry ⟺ monk_instance ---
+    test "G24-14 fails when monk_registry set without monk_instance" do
+      profile = put_knowledge(valid_struct(), "monk_registry", "/some/registry.yaml")
+      assert {:error, codes} = Fleet.CapProfile.validate(profile)
+      assert :g24_14 in codes
+    end
+
+    test "G24-14 fails when monk_instance set without monk_registry" do
+      profile = put_knowledge(valid_struct(), "monk_instance", "vision-doctrine")
+      assert {:error, codes} = Fleet.CapProfile.validate(profile)
+      assert :g24_14 in codes
+    end
+
+    test "G24-14 passes when both monk_registry and monk_instance set" do
+      profile =
+        valid_struct()
+        |> put_knowledge("monk_registry", "/some/registry.yaml")
+        |> put_knowledge("monk_instance", "vision-doctrine")
+
+      assert :ok = Fleet.CapProfile.validate(profile)
+    end
+
+    test "G24-14 passes when neither monk field set (both-or-neither)" do
+      assert :ok = Fleet.CapProfile.validate(valid_struct())
     end
   end
 

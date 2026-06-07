@@ -102,13 +102,40 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Valide un `%Fleet.CapProfile{}` contre les 9 invariants G24 (canon
-  cap-profile v2.5 + F-CONT-RISK gate).
+  Valide un `%Fleet.CapProfile{}` contre les invariants G24 **purs**
+  (canon cap-profile v2.5 + F-CONT-RISK gate). Fonction pure : aucune
+  lecture de process ni de FS (cf. moduledoc) — même struct ⇒ même verdict.
+
+  ## Invariants implémentés
+    * Structuraux PROMUS chantier 1 : `:g24_1` (containment), `:g24_3`
+      (kind), `:g24_4` (lifetime_scope enum), `:g24_6` (modop incompatible),
+      `:g24_8` (metadata.name), `:g24_9_strict`/`:g24_9_prefix` (F-CONT-RISK
+      disallowedTools minimum).
+    * Belt-and-suspenders v2.5 (BL-022, doublonnent le JSON-schema `allOf`
+      pour un atome verbeux côté Elixir) : `:g24_10` (boot_at_start ⟹
+      forever), `:g24_11` (subagent_template ⟹ one-shot), `:g24_12`
+      (host_native ⟹ containment none).
+    * Couverture NON portée par le schéma : `:g24_14` (pairing
+      monk_registry ⟺ monk_instance — both-or-neither).
+
+  ## Hors `validate/1` (réconciliation BL-022 ↔ BL-006, justifiée)
+    * **G24-13** (`mcp_channels` non-vide ⟹ `Fleet.MCP.Server` vivant) :
+      check de **liveness runtime**, donc impur (non-déterministe) — viole
+      le contrat « pure data transformer ». Concern de spawn-time, pas un
+      invariant statique du profil. NON implémenté ici (sp-monde-invoqué :
+      la liveness est bornée au boundary de spawn, pas dans le validateur).
+    * **G24-12 `system_user` privilégié** : le pseudo-code DN l'exigeait
+      mais `system_user` n'existe pas au schéma v2.5 (BL-006 F-6 ;
+      G24-12 réel = `containment: none` seul, aligné sur l'`allOf` JSON).
+    * **G24-14 existence FS du registry + lookup `monk_instance`** : I/O,
+      donc impur — c'est un check load-time (`compose/2`), pas `validate/1`.
 
   ## Exit codes
     * `:ok` — tous les invariants passent
     * `{:error, [violation_codes]}` — liste des invariants violés, atomes
-      parmi `:g24_1`..`:g24_8`, `:g24_9_strict`, `:g24_9_prefix`
+      parmi `:g24_1`, `:g24_3`, `:g24_4`, `:g24_6`, `:g24_8`,
+      `:g24_9_strict`, `:g24_9_prefix`, `:g24_10`, `:g24_11`, `:g24_12`,
+      `:g24_14`
   """
   @impl Fleet.CapProfile.Loader
   @spec validate(t()) :: :ok | {:error, [atom()]}
@@ -122,7 +149,11 @@ defmodule Fleet.CapProfile do
         {:g24_6, &check_modop_incompatible/1},
         {:g24_8, &check_metadata_name/1},
         {:g24_9_strict, &check_disallowed_strict/1},
-        {:g24_9_prefix, &check_disallowed_prefix/1}
+        {:g24_9_prefix, &check_disallowed_prefix/1},
+        {:g24_10, &check_boot_at_start_forever/1},
+        {:g24_11, &check_subagent_template_one_shot/1},
+        {:g24_12, &check_host_native_containment/1},
+        {:g24_14, &check_monk_registry_pairing/1}
       ]
       |> Enum.reject(fn {_code, fun} -> fun.(profile) == :ok end)
       |> Enum.map(fn {code, _fun} -> code end)
@@ -526,5 +557,69 @@ defmodule Fleet.CapProfile do
       end)
 
     if prefix_ok, do: :ok, else: :error
+  end
+
+  # ------------------------------------------------------------
+  # G24-10..14 — extensions v2.5 (BL-022)
+  #
+  # Clés/valeurs STRING : le struct est stringifié en profondeur
+  # (`to_struct` Rework #1). Le pseudo-code DN `fleet_cap_profile.md`
+  # (atomes `:invocation`/`:forever`/`:one_shot`) le précède — il est
+  # transposé string ici (`"forever"`, `"one-shot"` tiret, `"none"`).
+  # ------------------------------------------------------------
+
+  # G24-10 : boot_at_start: true ⟹ lifetime_scope: forever.
+  # Doublonne l'`allOf` JSON-schema (belt-and-suspenders, atome verbeux).
+  defp check_boot_at_start_forever(%__MODULE__{spec: spec}) do
+    if get_in(spec, ["invocation", "boot_at_start"]) == true and
+         get_in(spec, ["invocation", "lifetime_scope"]) != "forever" do
+      :error
+    else
+      :ok
+    end
+  end
+
+  # G24-11 : subagent_template non-vide ⟹ lifetime_scope: one-shot.
+  # `subagent_template` (invocation) implique un dispatch one-shot ; distinct
+  # de `knowledge.sp_template` (ADR #565, pod permanent monk/archivist) qui
+  # n'est PAS contraint ici. nil ou "" = pas de template → pas de contrainte
+  # (cohérent `minLength: 1` du schéma).
+  defp check_subagent_template_one_shot(%__MODULE__{spec: spec}) do
+    template = get_in(spec, ["invocation", "subagent_template"])
+    scope = get_in(spec, ["invocation", "lifetime_scope"])
+
+    if is_binary(template) and template != "" and scope != "one-shot" do
+      :error
+    else
+      :ok
+    end
+  end
+
+  # G24-12 : host_native: true ⟹ metadata.containment: none (D-01).
+  # `containment` vit dans `metadata` (pas `spec`). La clause `system_user`
+  # du pseudo-code DN est ABANDONNÉE : champ inexistant au schéma v2.5
+  # (BL-006 F-6). Aligné sur l'`allOf` JSON (containment seul).
+  defp check_host_native_containment(%__MODULE__{spec: spec, metadata: meta}) do
+    if get_in(spec, ["invocation", "host_native"]) == true and
+         Map.get(meta, "containment") != "none" do
+      :error
+    else
+      :ok
+    end
+  end
+
+  # G24-14 : pairing monk_registry ⟺ monk_instance (both-or-neither).
+  # Part PURE et structurelle (non portée par le JSON-schema, qui déclare
+  # les deux indépendamment nullable). L'existence FS du registry + le
+  # lookup de l'instance sont I/O ⟹ load-time (`compose/2`), pas ici.
+  defp check_monk_registry_pairing(%__MODULE__{spec: spec}) do
+    registry = get_in(spec, ["knowledge", "monk_registry"])
+    instance = get_in(spec, ["knowledge", "monk_instance"])
+
+    case {is_nil(registry), is_nil(instance)} do
+      {true, true} -> :ok
+      {false, false} -> :ok
+      _ -> :error
+    end
   end
 end
