@@ -107,32 +107,13 @@ defmodule Fleet.ProjectBootstrap.Phase do
       end
     end
 
-    @doc """
-    Identité git du pod (P4b / mundo invocado) — si `spec.injects.gitconfig`, pose dans le `workspace`
-    l'identité du RÔLE pour les commits : `LCARS-<role>` / `<role>@lcars.local` (email non-routable,
-    identifiant structuré, pas une boîte mail). `commit.gpgsign false` (pas d'infra GPG par défaut —
-    moon-shot `beyond-spawn-pod-v2`). Best-effort : un `git config` raté (workspace non-repo) ne bloque
-    pas le spawn — l'agent peut commiter sans identité (juste moins traçable). `injects.gitconfig` faux
-    ou absent → no-op. Clôt A7 (`gitconfig` déclaré mais jamais consommé).
-    """
-    @spec set_git_identity(Path.t(), Fleet.CapProfile.t()) :: :ok
-    def set_git_identity(workspace, %Fleet.CapProfile{spec: spec, metadata: metadata}) do
-      injects = spec["injects"] || %{}
-
-      if injects["gitconfig"] do
-        role = metadata["name"] || "worker"
-
-        cfg = fn k, v ->
-          System.cmd("git", ["-C", workspace, "config", k, v], stderr_to_stdout: true)
-        end
-
-        cfg.("user.name", "LCARS-#{role}")
-        cfg.("user.email", "#{role}@lcars.local")
-        cfg.("commit.gpgsign", "false")
-      end
-
-      :ok
-    end
+    # O5 (Brick 5) — `set_git_identity/2` RETIRÉ. Posait l'identité du rôle via `git config` dans le
+    # `.git/config` du workspace : MUTABLE, le pod l'écrasait (`git config user.email …`) → identité
+    # falsifiable (F-01 du juge consultant). Remplacé par une injection en env au lancement
+    # (bwrap_launch.sh : GIT_AUTHOR_*/GIT_COMMITTER_* = LCARS-<role> / <role>@lcars.local +
+    # GIT_CONFIG_GLOBAL=/dev/null), défaut coopératif déterministe. La garantie F-01 vit côté monde :
+    # `Fleet.Pipeline.DeliverableGate.check_identity/3` rejette au push tout commit hors identité
+    # autorisée (le pod ne PEUT PAS pousser un livrable usurpé). Cf. JOURNAL-deliverable-model.
   end
 
   defmodule InitMimic do

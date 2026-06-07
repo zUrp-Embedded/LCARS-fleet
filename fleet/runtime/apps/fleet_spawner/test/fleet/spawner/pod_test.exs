@@ -740,13 +740,12 @@ defmodule Fleet.Spawner.PodTest do
       # P2 : CLAUDE.md composé présent À LA RACINE DU CWD (workspace), pas seulement au pod_dir
       assert File.exists?(Path.join([pod_dir, "workspace", "CLAUDE.md"]))
 
-      # P4b : identité git du rôle posée dans le workspace (injects.gitconfig)
-      {name, 0} =
-        System.cmd("git", ["-C", Path.join(pod_dir, "workspace"), "config", "user.name"],
-          stderr_to_stdout: true
-        )
-
-      assert String.trim(name) == "LCARS-engineer"
+      # O5 (Brick 5) : l'identité git du rôle n'est PLUS posée par `git config` mutable dans le
+      # workspace (F-01 falsifiable) — elle est injectée en env au lancement (bwrap_launch.sh :
+      # GIT_AUTHOR_*/GIT_COMMITTER_* + GIT_CONFIG_GLOBAL=/dev/null), non observable depuis ce backend
+      # stub. L'enforcement F-01 (gate au push) est couvert par deliverable_gate_test.exs +
+      # executor_post_extract_test.exs (cas git_native usurpation). Donc plus d'assertion sur la
+      # config git locale ici.
     end
 
     test "projet injecté par le MANDAT (opts[:project]) — pas besoin du cap_profile statique",

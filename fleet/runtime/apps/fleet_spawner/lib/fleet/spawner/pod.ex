@@ -1517,8 +1517,11 @@ defmodule Fleet.Spawner.Pod do
           # avec cwd=workspace il doit être DANS le cwd (sinon l'agent code sans sa codebase-doc en cwd).
           _ = File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md"))
 
-          # Identité git du rôle (P4b) : `LCARS-<role>` pour les commits du pod sur sa feature-branch.
-          :ok = Fleet.ProjectBootstrap.Phase.Clone.set_git_identity(workspace, state.cap_profile)
+          # Identité git du rôle : O5 — plus de `git config` mutable dans le workspace (F-01
+          # falsifiable, le pod l'écrasait). L'identité est injectée en env IMMUABLE-par-défaut au
+          # lancement (bwrap_launch.sh : GIT_AUTHOR_*/GIT_COMMITTER_* = LCARS-<role> + GIT_CONFIG_GLOBAL
+          # /dev/null). La garantie F-01 vit côté monde : la gate DeliverableGate rejette au push tout
+          # commit hors identité autorisée. Voir JOURNAL-deliverable-model-2026-06-07 (Brick 5).
 
           Logger.info(
             "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})" <>
