@@ -16,6 +16,26 @@ defmodule Fleet.SpawnerTest do
     File.write!(Path.join(sp_root, "engineer-role.md"), "# SP")
     Application.put_env(:fleet_sp_builder, :sp_role_root, sp_root)
 
+    # mundo invocado #1 : auth_mode défaut :token_arg → tout spawn extrait l'access_token OAuth du
+    # claudeDir (fail-loud R15 sinon). Fixture creds par défaut (ces tests ne testent pas l'auth) —
+    # cf. pod_test.exs. Sans ça : {:auth_token_required, :oauth_token_unreadable} → pod meurt au boot.
+    setup_claude = Path.join(tmp_dir, ".claude")
+    File.mkdir_p!(setup_claude)
+
+    File.write!(
+      Path.join(setup_claude, ".credentials.json"),
+      Jason.encode!(%{
+        "claudeAiOauth" => %{
+          "accessToken" => "sk-ant-setup-tok",
+          "expiresAt" => 99_999_999_999_999,
+          "refreshToken" => "rt",
+          "scopes" => ["user:inference"]
+        }
+      })
+    )
+
+    Application.put_env(:fleet_spawner, :claude_dir, setup_claude)
+
     StubBackend.set_reply(
       {:ok,
        %{
@@ -33,6 +53,7 @@ defmodule Fleet.SpawnerTest do
       # code-default LauncherPortBackend RÉEL est atteint sous race async.
       Application.delete_env(:fleet_credentials, :creds_root)
       Application.delete_env(:fleet_sp_builder, :sp_role_root)
+      Application.delete_env(:fleet_spawner, :claude_dir)
     end)
 
     :ok
