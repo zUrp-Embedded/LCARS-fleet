@@ -162,10 +162,22 @@ defmodule Fleet.Pipeline.Executor do
     # (`unwrap_worker_envelope`) est sur le chemin gate uniquement ; ici les outputs
     # de stage restent bruts (les hard/terminal gates écrivent leurs règles contre
     # cette forme).
-    if payload["pipeline_id"] == state.pipeline_id and is_binary(payload["stage"]) do
-      handle_stage_completed(payload["stage"], %{"result" => payload["result"]}, state)
-    else
-      {:noreply, state}
+    # BL-034 (dogfood F5) : le `payload["stage"]` est STALE sur réutilisation pipe-pod — il est figé au
+    # spawn (`state.opts[:stage]` côté Pod) et `wake_existing_pod` réutilise le pod pour le stage suivant
+    # SANS le mettre à jour → un engineer pipe build→verify rapporte toujours `stage=build` → l'Executor
+    # re-traite build en boucle, n'avance jamais. Le stage AUTORITATIF est `state.current_stage` (le
+    # pipeline est séquentiel : un seul stage court à la fois, posé par `run_stage_backend`). On l'utilise
+    # pour l'attribution ; le `payload["stage"]` ne sert plus que de garde « c'est bien un pod de stage ».
+    cond do
+      payload["pipeline_id"] != state.pipeline_id or not is_binary(payload["stage"]) ->
+        {:noreply, state}
+
+      is_nil(state.current_stage) ->
+        # Aucun stage en cours (complétion tardive/dupliquée après avancement) → ignore.
+        {:noreply, state}
+
+      true ->
+        handle_stage_completed(state.current_stage, %{"result" => payload["result"]}, state)
     end
   end
 
