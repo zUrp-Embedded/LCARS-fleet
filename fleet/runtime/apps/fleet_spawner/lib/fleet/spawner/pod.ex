@@ -679,7 +679,7 @@ defmodule Fleet.Spawner.Pod do
   # côté (`<pod_dir>/work`). bwrap_launch lit `LCARS_POD_CWD` (défaut `$POD_DIR`). Pas de projet → cwd
   # = pod_dir (pods permanents/memory-X sans repo).
   defp maybe_put_pod_cwd(env, state) do
-    case get_in(state.cap_profile.spec, ["project", "repo_path"]) do
+    case effective_project(state)["repo_path"] do
       nil -> env
       _ -> Map.put(env, "LCARS_POD_CWD", Path.join(state.pod_dir, "workspace"))
     end
@@ -1480,16 +1480,29 @@ defmodule Fleet.Spawner.Pod do
   # ProjectBootstrap pour les stages git (workspace per-stage). pod.ex câble
   # ProjectBootstrap pour les pods one-shot avec projet (workspace per-pod).
   # 2 sites callers d'un même mécanisme, paramétré par cap-profile.
+  # Projet EFFECTIF = celui du MANDAT (`opts[:project]`, injecté par le dispatch ticket→repo via
+  # `spawn_opts`) sinon le cap_profile statique (pods permanents sur un repo fixe). Rend la feature
+  # pod-projet utilisable : un engineer dispatché sur un ticket reçoit LE repo du ticket, pas un projet
+  # figé au catalogue. `%{}` si ni l'un ni l'autre (pods sans projet : memory-X, architect).
+  defp effective_project(state) do
+    Keyword.get(state.opts || [], :project) || get_in(state.cap_profile.spec, ["project"]) || %{}
+  end
+
   defp maybe_bootstrap_project_workspace(state) do
-    case get_in(state.cap_profile.spec, ["project", "repo_path"]) do
+    project = effective_project(state)
+
+    case project["repo_path"] do
       nil ->
         :ok
 
       _repo_path ->
+        # cap_profile porteur du projet EFFECTIF (mandat > statique) pour les Clone.* (qui lisent spec.project).
+        eff_cap = %{state.cap_profile | spec: Map.put(state.cap_profile.spec, "project", project)}
+
         with {:ok, workspace, branch} <-
                Fleet.ProjectBootstrap.Phase.Clone.clone_or_skip(
                  state.pod_dir,
-                 state.cap_profile,
+                 eff_cap,
                  []
                ),
              # Doc-mount (mundo invocado) : la branche `work/ops` (plans/backlog/conventions) à côté
@@ -1497,7 +1510,7 @@ defmodule Fleet.Spawner.Pod do
              {:ok, doc} <-
                Fleet.ProjectBootstrap.Phase.Clone.clone_work_doc(
                  state.pod_dir,
-                 state.cap_profile
+                 eff_cap
                ) do
           # CLAUDE.md composé (pod-identité + conventions repo) à la racine du CWD (workspace) :
           # l'agent pop dans un projet déjà documenté. Le do_project l'écrit au pod_dir (parent) ;

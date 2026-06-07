@@ -748,5 +748,35 @@ defmodule Fleet.Spawner.PodTest do
 
       assert String.trim(name) == "LCARS-engineer"
     end
+
+    test "projet injecté par le MANDAT (opts[:project]) — pas besoin du cap_profile statique",
+         %{tmp_dir: tmp_dir} do
+      src = source_repo_with_doc(Path.join(tmp_dir, "mandate-src"))
+
+      # cap_profile SANS project (project absent) ; le mandat l'injecte via opts.
+      profile = valid_profile()
+
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-mandate-#{System.unique_integer([:positive])}"
+
+      args = %{
+        cap_profile: profile,
+        ticket_id: "t-1",
+        pod_id: pod_id,
+        opts: [
+          project: %{"repo_path" => src, "base_branch" => "main", "work_branch" => "work/ops"}
+        ]
+      }
+
+      {:ok, _pid} = spawn_via_supervisor(args)
+
+      assert_receive {:launch_called, _args, env}, 3_000
+      pod_dir = env["HOME"]
+
+      # le projet du mandat est cloné (code + doc) + cwd posé, sans aucun project au catalogue
+      assert env["LCARS_POD_CWD"] == Path.join(pod_dir, "workspace")
+      assert File.exists?(Path.join([pod_dir, "workspace", "src.txt"]))
+      assert File.exists?(Path.join([pod_dir, "work", "BACKLOG.md"]))
+    end
   end
 end
