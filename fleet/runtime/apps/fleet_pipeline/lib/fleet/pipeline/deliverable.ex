@@ -51,6 +51,10 @@ defmodule Fleet.Pipeline.Deliverable do
 
   @type result :: %{commit_sha: String.t(), pushed?: boolean(), mode: mode()}
 
+  # R5 (#596) — `core.hooksPath=/dev/null` sur toute invocation git côté monde sur le workspace pod
+  # (défense en profondeur ; head_sha/head_advanced sont des rev-parse sans hook, mais coût nul).
+  @hooks_off ["-c", "core.hooksPath=/dev/null"]
+
   @common_keys [:mode, :workspace, :base_sha, :allowed_emails]
   @payload_keys [:files, :identity, :message]
   @identity_keys [:author_name, :author_email, :committer_name, :committer_email]
@@ -156,7 +160,7 @@ defmodule Fleet.Pipeline.Deliverable do
   end
 
   defp head_advanced?(workspace, base_sha) do
-    case System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
+    case System.cmd("git", @hooks_off ++ ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
       {out, 0} -> String.trim(out) != base_sha
       _ -> false
     end
@@ -233,7 +237,7 @@ defmodule Fleet.Pipeline.Deliverable do
   defp local_ref(opts), do: Map.get(opts, :local_ref, "HEAD")
 
   defp head_sha(workspace) do
-    case System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
+    case System.cmd("git", @hooks_off ++ ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
       {sha, 0} -> {:ok, String.trim(sha)}
       {err, rc} -> {:error, {:rev_parse_failed, rc, String.trim(err)}}
     end

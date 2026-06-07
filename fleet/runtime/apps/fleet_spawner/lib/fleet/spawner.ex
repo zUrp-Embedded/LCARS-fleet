@@ -151,6 +151,26 @@ defmodule Fleet.Spawner do
     end
   end
 
+  # Convention #596 (R2) : le workspace livrable d'un pod = `<pod_dir>/workspace` (sous `$POD_DIR`,
+  # bound bwrap RW). Sous-dossier centralisé ICI — autorité unique de la convention de placement, au
+  # lieu d'être copié dans `Pod.maybe_put_pod_cwd`, `ProjectBootstrap.Clone`, l'Executor.
+  @pod_workspace_subdir "workspace"
+
+  @doc """
+  Résout le workspace livrable d'un pod (`<pod_dir>/workspace`) depuis le pod_dir ENREGISTRÉ (#596 R3).
+  Le monde lit où IL a placé le pod (record spawner via `pod_info`), pas une assertion du pod (Q2 :
+  anti-I-CBC — le pod ne nomme jamais le chemin de son propre audit). Sert à l'Executor pour gater le
+  workspace en mode `git_native`.
+  """
+  @spec pod_workspace_dir(String.t()) :: {:ok, Path.t()} | {:error, :not_found}
+  def pod_workspace_dir(pod_id) when is_binary(pod_id) do
+    case pod_info(pod_id) do
+      {:ok, %{pod_dir: dir}} when is_binary(dir) -> {:ok, Path.join(dir, @pod_workspace_subdir)}
+      {:ok, _} -> {:error, :not_found}
+      {:error, _} = err -> err
+    end
+  end
+
   @doc """
   Renvoie l'état courant d'un pod (`%{phase, conditions, ...}`).
   """

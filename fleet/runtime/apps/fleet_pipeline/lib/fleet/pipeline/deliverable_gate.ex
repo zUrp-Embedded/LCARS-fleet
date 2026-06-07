@@ -132,10 +132,15 @@ defmodule Fleet.Pipeline.DeliverableGate do
   end
 
   # `git -C <ws> <args>` borné (push/diff réseau ou gros packfile ne bloquent pas le GenServer).
+  # F-07 / R5 (défense en profondeur, re-audit #596) : `core.hooksPath=/dev/null` sur TOUTE invocation
+  # git côté monde sur un workspace co-écrit par le pod — même si log/diff/merge-base n'exécutent pas de
+  # hook aujourd'hui, ça ferme toute classe future de hook-surprise (coût nul, flag git natif).
+  @hooks_off ["-c", "core.hooksPath=/dev/null"]
+
   defp git(workspace, args) do
     task =
       Task.async(fn ->
-        System.cmd("git", ["-C", workspace] ++ args, stderr_to_stdout: true)
+        System.cmd("git", @hooks_off ++ ["-C", workspace] ++ args, stderr_to_stdout: true)
       end)
 
     case Task.yield(task, @git_timeout_ms) || Task.shutdown(task, :brutal_kill) do
