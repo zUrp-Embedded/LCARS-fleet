@@ -59,11 +59,38 @@ defmodule Fleet.ProjectBootstrap.Phase do
                  System.cmd("git", ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
                    stderr_to_stdout: true
                  ),
+               # #596 R1 (F-03) : si l'Executor a PINNÉ une base_sha (ls-remote hors-pod), on épingle
+               # HEAD dessus AVANT la feature-branch. Élimine la fenêtre « le pod clone une base que
+               # l'Executor n'a pas capturée » (course same-role) : `base..HEAD` ne contiendra QUE les
+               # commits du pod. F-03 = axiome au boundary clone, pas « observable post-hoc ».
+               {_, 0} <- pin_base_sha(ws, project["base_sha"]),
                {_, 0} <-
                  System.cmd("git", ["-C", ws, "checkout", "-b", feature], stderr_to_stdout: true) do
             {:ok, ws, feature}
           else
             {out, code} -> {:error, {:clone_failed, {code, String.slice(out, 0, 500)}}}
+          end
+      end
+    end
+
+    # Épingle HEAD du workspace sur `sha` (capturé hors-pod par l'Executor). Le clone `--branch base`
+    # contient déjà `sha` dans le cas nominal (sha = tip) et fast-forward (sha = ancêtre) → `reset
+    # --hard` local suffit. Cas pathologique (force-push remote a effacé `sha`) → fetch ciblé puis
+    # reset ; échec des deux = {out, code≠0} remonté au `with` → `{:clone_failed, ...}`. nil/"" = no-op.
+    defp pin_base_sha(_ws, sha) when sha in [nil, ""], do: {"", 0}
+
+    defp pin_base_sha(ws, sha) when is_binary(sha) do
+      case System.cmd("git", ["-C", ws, "reset", "--hard", sha], stderr_to_stdout: true) do
+        {_, 0} = ok ->
+          ok
+
+        _ ->
+          case System.cmd("git", ["-C", ws, "fetch", "origin", sha], stderr_to_stdout: true) do
+            {_, 0} ->
+              System.cmd("git", ["-C", ws, "reset", "--hard", sha], stderr_to_stdout: true)
+
+            other ->
+              other
           end
       end
     end

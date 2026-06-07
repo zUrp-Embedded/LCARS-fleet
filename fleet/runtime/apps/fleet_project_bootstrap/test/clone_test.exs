@@ -51,6 +51,36 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     refute File.exists?(Path.join(doc, "src.txt"))
   end
 
+  test "#596 R1 — base_sha pinne HEAD sur le commit capturé (pas le tip remote)", %{tmp_dir: tmp} do
+    src = Path.join(tmp, "src-pin")
+    File.mkdir_p!(src)
+    {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", src], stderr_to_stdout: true)
+    {_, 0} = git(["config", "user.email", "t@lcars.local"], src)
+    {_, 0} = git(["config", "user.name", "test"], src)
+    File.write!(Path.join(src, "a.txt"), "1")
+    {_, 0} = git(["add", "."], src)
+    {_, 0} = git(["commit", "-q", "-m", "c1"], src)
+    {c1, 0} = git(["rev-parse", "HEAD"], src)
+    c1 = String.trim(c1)
+    # C2 = tip courant ; un Executor qui a ls-remote AVANT C2 a capturé C1.
+    File.write!(Path.join(src, "b.txt"), "2")
+    {_, 0} = git(["add", "."], src)
+    {_, 0} = git(["commit", "-q", "-m", "c2"], src)
+
+    pod_dir = Path.join(tmp, "pod-pin-1")
+    File.mkdir_p!(pod_dir)
+    profile = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => c1})
+
+    assert {:ok, ws, feature} = Clone.clone_or_skip(pod_dir, profile, [])
+    {head, 0} = git(["rev-parse", "HEAD"], ws)
+
+    # HEAD du pod COMMENCE garanti à C1 (épinglé), pas au tip C2 → base..HEAD = uniquement ses commits.
+    assert String.trim(head) == c1
+    assert feature =~ "feature/"
+    assert File.exists?(Path.join(ws, "a.txt"))
+    refute File.exists?(Path.join(ws, "b.txt"))
+  end
+
   test "work_branch nil → skip (projet sans branche doc)", %{tmp_dir: tmp} do
     src = make_source_repo(Path.join(tmp, "src2"))
     pod_dir = Path.join(tmp, "pod-test-2")
