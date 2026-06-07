@@ -116,6 +116,38 @@ defmodule Fleet.Pipeline.DeliverableTest do
       assert {:error, :no_files_in_payload} = Deliverable.publish(opts)
     end
 
+    test "F-07 — hooks .git/hooks/ posés par le pod NE s'exécutent PAS côté monde (commit+push)",
+         %{tmp_dir: tmp} do
+      {ws, bare, base} = setup_ws(tmp, "payload-hooks")
+      sentinel = Path.join(tmp, "pwned")
+      hooks = Path.join([ws, ".git", "hooks"])
+      File.mkdir_p!(hooks)
+      # Le pod (adversaire) pose pre-commit ET pre-push qui exécuteraient du code côté monde.
+      for h <- ["pre-commit", "pre-push"] do
+        p = Path.join(hooks, h)
+        File.write!(p, "#!/bin/sh\ntouch #{sentinel}\n")
+        File.chmod!(p, 0o755)
+      end
+
+      opts = %{
+        mode: :payload,
+        workspace: ws,
+        base_sha: base,
+        allowed_emails: payload_allowed(),
+        remote: "origin",
+        target_branch: "deliverables/x",
+        files: [%{"path" => "a.txt", "content" => "a\n"}],
+        identity: payload_identity(),
+        message: "feat: a"
+      }
+
+      assert {:ok, %{pushed?: true}} = Deliverable.publish(opts)
+      # core.hooksPath=/dev/null sur les ops système-side → aucun hook exécuté.
+      refute File.exists?(sentinel)
+      # Le livrable est quand même bien poussé (le fix ne casse pas la publication).
+      {_pushed, 0} = g(bare, ["rev-parse", "deliverables/x"])
+    end
+
     test "path traversal dans le payload → BLOQUE avant écriture", %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-traversal")
 

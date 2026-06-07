@@ -48,6 +48,17 @@ defmodule Fleet.Pipeline.Git do
   # absents ici. L'identité (author/committer) + message + workspace suffisent.
   @commit_required_keys @required_keys -- [:branch]
 
+  # F-07 (re-audit O5, consultant fire-mode) — le workspace est CO-ÉCRIT par un pod adversaire ;
+  # `.git/hooks/` y est inscriptible par le pod. `git commit`/`git push` sont lancés ICI, côté MONDE
+  # (runtime Elixir, HORS bwrap) → un `pre-push`/`pre-commit` posé par le pod s'exécuterait avec les
+  # privilèges du runtime = RCE hors-pod. `core.hooksPath=/dev/null` neutralise TOUS les hooks du
+  # workspace pour les ops système-side (flag git natif, tournevis). I-CBC : le monde REFUSE d'exécuter
+  # le code du pod, plutôt que d'espérer que le pod n'en pose pas. N'affecte PAS la doctrine
+  # `--no-verify JAMAIS` (qui protège l'appelant du module ; ici on neutralise le hook adversaire, pas
+  # la vérif d'intégrité de l'appelant). Les ops read-only de la gate (log/diff/merge-base) n'exécutent
+  # pas de hook → pas concernées.
+  @hooks_off ["-c", "core.hooksPath=/dev/null"]
+
   # Refuse branches/refs avec caractères ambigus (espace, ..., leading `-`).
   # Pas une défense anti-injection (System.cmd n'utilise pas de shell), juste
   # un garde-fou contre des entrées catalogue manifestement cassées. Aligne
@@ -168,7 +179,7 @@ defmodule Fleet.Pipeline.Git do
         {:error, :nothing_to_commit}
 
       true ->
-        case System.cmd("git", ["commit", "-m", opts.message],
+        case System.cmd("git", @hooks_off ++ ["commit", "-m", opts.message],
                cd: opts.workspace,
                env: commit_env(opts),
                stderr_to_stdout: true
@@ -225,7 +236,10 @@ defmodule Fleet.Pipeline.Git do
     # pas de retour dans `timeout_ms` → on tue le Task (port → process git via SIGKILL).
     task =
       Task.async(fn ->
-        System.cmd("git", ["push", remote, refspec], cd: workspace, stderr_to_stdout: true)
+        System.cmd("git", @hooks_off ++ ["push", remote, refspec],
+          cd: workspace,
+          stderr_to_stdout: true
+        )
       end)
 
     case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
