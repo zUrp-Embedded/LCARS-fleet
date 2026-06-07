@@ -34,7 +34,7 @@
 #                                                Anthropic en place + mtime sync). PAS le .claude
 #                                                humain entier — sinon ses hooks fuient et jamment
 #                                                le boot (P1/C9, JOURNAL-P1-hooks.md). .claude/ pod-owned.
-#                                   - token_arg: pas de bind ; ANTHROPIC_AUTH_TOKEN injecté via env
+#                                   - token_arg (DÉFAUT): pas de bind ; CLAUDE_CODE_OAUTH_TOKEN injecté via env
 #                                                (LCARS_ANTHROPIC_AUTH_TOKEN extrait par le spawner
 #                                                depuis CLAUDE_DIR/.credentials.json). Désactive le
 #                                                refresh natif → viable si pod < ~8h (durée de vie
@@ -93,14 +93,18 @@ SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<h
 # cwd = racine de branche (monde-invoqué). Défaut $POD_DIR ; le spawner/bootstrap pose le repo cloné.
 WORKDIR="${LCARS_POD_CWD:-$POD_DIR}"
 
-# BL-021 chantier 6 — switch mode auth (bind RW claudeDir vs token-as-arg ANTHROPIC_AUTH_TOKEN).
-AUTH_MODE="${LCARS_AUTH_MODE:-bind}"
+# Mode auth — mundo invocado #1 (2026-06-07) : DÉFAUT = token_arg (inject, zéro mount du compte humain).
+#   token_arg : pas de bind ; access_token OAuth injecté en env CLAUDE_CODE_OAUTH_TOKEN (abonnement —
+#               inférence + MCP get_task/submit_result + Monitor PROUVÉS verts ; pas de bridge RC = confort).
+#               Source = creds.json du HUMAIN propriétaire du pod (per-human), extrait côté spawner.
+#   bind      : legacy ADR-F (bind RW de .credentials.json) — conservé comme échappatoire opt-in.
+AUTH_MODE="${LCARS_AUTH_MODE:-token_arg}"
 case "$AUTH_MODE" in
   bind|token_arg) ;;
   *) echo "ERR: LCARS_AUTH_MODE='$AUTH_MODE' invalide (attendu: bind | token_arg)" >&2; exit 1 ;;
 esac
 if [[ "$AUTH_MODE" == "token_arg" ]]; then
-  ANTHROPIC_AUTH_TOKEN_VALUE="${LCARS_ANTHROPIC_AUTH_TOKEN:?LCARS_ANTHROPIC_AUTH_TOKEN requis quand LCARS_AUTH_MODE=token_arg (extraction creds.json côté spawner)}"
+  OAUTH_TOKEN_VALUE="${LCARS_ANTHROPIC_AUTH_TOKEN:?LCARS_ANTHROPIC_AUTH_TOKEN requis quand LCARS_AUTH_MODE=token_arg (access_token OAuth extrait de creds.json côté spawner, per-human)}"
 fi
 
 # Session tmux (nom INTERNE, distinct du préfixe nom RC claude — P3 panel #13).
@@ -171,8 +175,8 @@ set +f
 #   La discipline est dans les MURS (binds = ce qui existe) + l'ENV (ce qui est posé), pas dans le SP.
 # =============================================================
 # BL-021 chantier 6 — branchement bind vs token_arg sur LCARS_AUTH_MODE :
-#   bind     : bind RW de CLAUDE_DIR/.credentials.json SEUL (pas d'ANTHROPIC_AUTH_TOKEN injecté).
-#   token_arg: pas de bind claudeDir (pod isolé), --setenv ANTHROPIC_AUTH_TOKEN <token>.
+#   bind     : bind RW de CLAUDE_DIR/.credentials.json SEUL (legacy ADR-F).
+#   token_arg (DÉFAUT): pas de bind claudeDir (pod isolé), --setenv CLAUDE_CODE_OAUTH_TOKEN <token>.
 #
 # P1/C9 (2026-06-07) — on NE bind PLUS le .claude humain entier. Raison : cwd=HOME=POD_DIR, donc les
 # tiers settings `project`/`local` (racine=cwd, activés par --setting-sources project,local)
@@ -192,7 +196,9 @@ if [[ "$AUTH_MODE" == "bind" ]]; then
   mkdir -p "$POD_DIR/.claude"
   AUTH_BIND_ARGS=(--bind "$HUMAN_CREDS" "$POD_DIR/.claude/.credentials.json")
 else
-  AUTH_ENV_ARGS=(--setenv ANTHROPIC_AUTH_TOKEN "$ANTHROPIC_AUTH_TOKEN_VALUE")
+  # CLAUDE_CODE_OAUTH_TOKEN = chemin abonnement (cf. reverse oauth-token-lifecycle §10.1).
+  # ≠ ANTHROPIC_AUTH_TOKEN (Bearer gateway) ≠ ANTHROPIC_API_KEY (X-Api-Key) — ces deux-là = métré, morts 15/06.
+  AUTH_ENV_ARGS=(--setenv CLAUDE_CODE_OAUTH_TOKEN "$OAUTH_TOKEN_VALUE")
 fi
 
 # Télémétrie ↔ feature-flags. Les flags Statsig/GrowthBook (dont `MONITOR_TOOL`, qui expose

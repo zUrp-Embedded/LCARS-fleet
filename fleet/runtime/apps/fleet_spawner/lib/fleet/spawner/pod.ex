@@ -592,20 +592,17 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # BL-021 chantier 6 — auth mode switch :
-  #   :bind     (défaut)  — bind RW de `<claude_dir>/.credentials.json` via bwrap_launch.sh
-  #                         (mécanique native Anthropic : lockfile POSIX + mtime cross-process sync
-  #                         + refresh atomique). Voie ADR-F historique.
-  #   :token_arg          — extrait l'access_token côté hôte depuis creds.json + injecte via
-  #                         ANTHROPIC_AUTH_TOKEN env var ; aucun bind du claudeDir humain (pod isolé).
-  #                         ATTENTION : désactive le refresh OAuth interne au binaire claude
-  #                         (`isAnthropicAuthEnabled` retourne false avec ANTHROPIC_AUTH_TOKEN posé) —
-  #                         la viabilité dépend de la durée de vie du token (~8h vérifié) vs la durée
-  #                         des pods (one-shot < forever).
-  # Toggle via `config :fleet_spawner, :auth_mode, :bind | :token_arg`. Mode posé aussi dans l'env
-  # comme `LCARS_AUTH_MODE` pour que bwrap_launch.sh sache quoi faire (bind xor setenv token).
+  # Auth mode — mundo invocado #1 (2026-06-07) : DÉFAUT = :token_arg (inject, zéro mount du compte humain).
+  #   :token_arg (défaut) — extrait l'access_token OAuth du creds.json du HUMAIN propriétaire (per-human,
+  #                         `claude_dir_for(human)`, fail-loud R15) + injecte en env CLAUDE_CODE_OAUTH_TOKEN
+  #                         (abonnement ; inférence + MCP get_task/submit_result + Monitor PROUVÉS verts
+  #                         2026-06-07). Aucun bind du claudeDir, aucune pollution du compte user. Pas de
+  #                         bridge RC (confort, ≠ critique). Refresh interne claude OFF → viabilité = token
+  #                         ~8h vs durée pod : one-shot OK ; forever via re-spawn-on-401 (`--resume`).
+  #   :bind               — legacy ADR-F (bind RW `.credentials.json`, refresh natif lockfile). Échappatoire.
+  # Toggle via `config :fleet_spawner, :auth_mode`. Posé aussi en env `LCARS_AUTH_MODE` pour bwrap_launch.sh.
   defp auth_mode do
-    Application.get_env(:fleet_spawner, :auth_mode, :bind)
+    Application.get_env(:fleet_spawner, :auth_mode, :token_arg)
   end
 
   # Lit l'access_token OAuth depuis `<claude_dir>/.credentials.json` (slot canonique `claudeAiOauth`,

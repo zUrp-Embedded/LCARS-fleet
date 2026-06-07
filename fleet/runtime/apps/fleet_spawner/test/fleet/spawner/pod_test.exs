@@ -529,7 +529,11 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   describe "BL-021 chantier 6 — auth_mode switch" do
-    test "défaut :bind — env contient LCARS_AUTH_MODE=bind, pas de LCARS_ANTHROPIC_AUTH_TOKEN" do
+    test "explicit :bind (legacy ADR-F) — env contient LCARS_AUTH_MODE=bind, pas de LCARS_ANTHROPIC_AUTH_TOKEN" do
+      # mundo invocado #1 : le défaut est désormais :token_arg ; :bind reste une échappatoire opt-in.
+      Application.put_env(:fleet_spawner, :auth_mode, :bind)
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :auth_mode) end)
+
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-auth-bind-#{System.unique_integer([:positive])}"
 
@@ -540,7 +544,7 @@ defmodule Fleet.Spawner.PodTest do
       refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
     end
 
-    test ":token_arg — extrait access_token depuis creds.json + injecte LCARS_ANTHROPIC_AUTH_TOKEN",
+    test "défaut :token_arg — extrait access_token depuis creds.json + injecte LCARS_ANTHROPIC_AUTH_TOKEN",
          %{tmp_dir: tmp_dir} do
       # Setup : faux claudeDir + creds.json avec slot canonique `claudeAiOauth.accessToken`.
       fake_claude_dir = Path.join(tmp_dir, "fake-claude")
@@ -558,12 +562,11 @@ defmodule Fleet.Spawner.PodTest do
         })
       )
 
+      # Pas de put_env(:auth_mode) — on prouve que le DÉFAUT est :token_arg (mundo invocado #1).
       Application.put_env(:fleet_spawner, :claude_dir, fake_claude_dir)
-      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
 
       on_exit(fn ->
         Application.delete_env(:fleet_spawner, :claude_dir)
-        Application.delete_env(:fleet_spawner, :auth_mode)
       end)
 
       StubBackend.set_reply(interactive_reply())
