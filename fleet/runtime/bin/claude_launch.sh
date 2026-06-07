@@ -140,16 +140,19 @@ dbg "step CAP_PROFILE OK"
 
 # =============================================================
 # Onboarding/trust skip (interactif) : sinon claude bloque sur le dialogue 1er lancement.
-# .claude.json minimal à la racine du HOME pod ($POD_DIR, hors .claude/). Clé projects = cwd pod
-# (= $POD_DIR). (.claude/ est pod-owned : bwrap n'y bind QUE .credentials.json — P1/C9.)
+# .claude.json minimal à la racine du HOME pod ($POD_DIR, hors .claude/). Clé projects = le CWD réel
+# de l'agent (`LCARS_POD_CWD`, = workspace quand un projet est cloné, sinon $POD_DIR) — sinon /init
+# tournerait dans un dir non-onboardé (P2 mundo invocado : l'agent pop dans un projet déjà onboardé).
+# (.claude/ est pod-owned : bwrap n'y bind QUE .credentials.json — P1/C9.)
 # (NB : l'acceptation bypass N'est PLUS ici — `bypassPermissionsModeAccepted` du global config a
 #  MIGRÉ vers settings.json/`skipDangerousModePermissionPrompt` — cf. bloc « bypass dialog » infra.)
 # =============================================================
 
 VER="$("$CLAUDE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+POD_CWD="${LCARS_POD_CWD:-$POD_DIR}"
 cat > "$POD_DIR/.claude.json" <<JSONEOF
 { "hasCompletedOnboarding": true, "lastOnboardingVersion": "${VER:-2.1.150}", "migrationVersion": 13,
-  "projects": { "$POD_DIR": { "allowedTools": [], "hasTrustDialogAccepted": true, "projectOnboardingSeenCount": 10 } } }
+  "projects": { "$POD_CWD": { "allowedTools": [], "hasTrustDialogAccepted": true, "projectOnboardingSeenCount": 10 } } }
 JSONEOF
 dbg "step claude.json provisionné (VER=${VER:-?})"
 

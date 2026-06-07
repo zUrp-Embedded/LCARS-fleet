@@ -1499,6 +1499,11 @@ defmodule Fleet.Spawner.Pod do
                  state.pod_dir,
                  state.cap_profile
                ) do
+          # CLAUDE.md composé (pod-identité + conventions repo) à la racine du CWD (workspace) :
+          # l'agent pop dans un projet déjà documenté. Le do_project l'écrit au pod_dir (parent) ;
+          # avec cwd=workspace il doit être DANS le cwd (sinon l'agent code sans sa codebase-doc en cwd).
+          _ = File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md"))
+
           Logger.info(
             "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})" <>
               if(doc, do: " doc=#{doc}", else: " (pas de branche doc)")

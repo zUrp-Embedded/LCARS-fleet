@@ -734,6 +734,9 @@ defmodule Fleet.Spawner.PodTest do
       # doc-mount : branche code + branche doc clonées côte à côte dans le pod
       assert File.exists?(Path.join([pod_dir, "workspace", "src.txt"]))
       assert File.exists?(Path.join([pod_dir, "work", "BACKLOG.md"]))
+
+      # P2 : CLAUDE.md composé présent À LA RACINE DU CWD (workspace), pas seulement au pod_dir
+      assert File.exists?(Path.join([pod_dir, "workspace", "CLAUDE.md"]))
     end
   end
 end

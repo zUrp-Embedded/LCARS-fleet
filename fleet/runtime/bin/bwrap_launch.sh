@@ -255,6 +255,7 @@ exec "$BWRAP_BIN" \
   --setenv LANG "${LANG:-C.UTF-8}" \
   --setenv LCARS_POD_ID "$POD_ID" \
   --setenv LCARS_ROLE "$ROLE" \
+  --setenv LCARS_POD_CWD "$WORKDIR" \
   --setenv LCARS_AUTH_MODE "$AUTH_MODE" \
   --setenv LCARS_POD_SESSION_ID "$SESSION_ID" \
   --setenv LCARS_POD_RESUME "$POD_RESUME" \
