@@ -15,10 +15,16 @@ defmodule Fleet.Spawner.PodKickTest do
   setup do
     Application.put_env(:fleet_spawner, :kick_retry_ms, 10)
     Application.put_env(:fleet_spawner, :kick_max_attempts, 3)
+    # Les fake_pods n'ont aucun mandat → chemin BOOTSTRAP (cap/retry dédiés). On les override
+    # aussi pour garder les tests rapides + bornés.
+    Application.put_env(:fleet_spawner, :kick_bootstrap_retry_ms, 10)
+    Application.put_env(:fleet_spawner, :kick_bootstrap_max, 3)
 
     on_exit(fn ->
       Application.delete_env(:fleet_spawner, :kick_retry_ms)
       Application.delete_env(:fleet_spawner, :kick_max_attempts)
+      Application.delete_env(:fleet_spawner, :kick_bootstrap_retry_ms)
+      Application.delete_env(:fleet_spawner, :kick_bootstrap_max)
     end)
 
     :ok
@@ -57,5 +63,33 @@ defmodule Fleet.Spawner.PodKickTest do
              Pod.handle_info({:kick_attempt, 1}, %{tmux_session: "sess", pod_id: pod})
 
     refute_receive {:kick_attempt, _}, 60
+  end
+
+  test "pod SANS mandat → mode bootstrap : stop au cap bootstrap, pas au cap worker" do
+    # cap bootstrap (2) < cap worker (9). fake_pod = aucune task → no_pending_mandate? = true.
+    Application.put_env(:fleet_spawner, :kick_bootstrap_max, 2)
+    Application.put_env(:fleet_spawner, :kick_max_attempts, 9)
+
+    state = %{tmux_session: "sess", pod_id: fake_pod()}
+
+    # n=2 ≥ cap bootstrap (2) → stop. Si le cap worker (9) s'appliquait, n=2 < 9 → reschedule.
+    assert {:noreply, _} = Pod.handle_info({:kick_attempt, 2}, state)
+    refute_receive {:kick_attempt, _}, 80
+  end
+
+  test "pod AVEC mandat pending → mode worker : continue au-delà du cap bootstrap" do
+    Application.put_env(:fleet_spawner, :kick_bootstrap_max, 2)
+    Application.put_env(:fleet_spawner, :kick_max_attempts, 9)
+
+    pod = fake_pod()
+
+    # enqueue SANS get_for_pod → task `:pending` (pas pull) → no_pending_mandate? = false (worker).
+    {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
+    on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
+
+    state = %{tmux_session: "sess", pod_id: pod}
+    # n=3 > cap bootstrap (2) MAIS < cap worker (9) → reschedule (chemin worker, tmux pas up).
+    assert {:noreply, _} = Pod.handle_info({:kick_attempt, 3}, state)
+    assert_receive {:kick_attempt, 4}, 300
   end
 end

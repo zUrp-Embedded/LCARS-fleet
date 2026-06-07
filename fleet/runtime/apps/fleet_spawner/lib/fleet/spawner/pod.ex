@@ -254,15 +254,32 @@ defmodule Fleet.Spawner.Pod do
   # Une erreur send-keys n'interrompt pas le pod (le monitor time-out couvre).
   def handle_info({:kick_attempt, n}, %{tmux_session: session} = state)
       when is_binary(session) do
+    # Un pod SANS mandat en attente (interactif/forever comme l'architecte, ou permanent booté
+    # à froid comme le gatekeeper) n'a RIEN à puller : ses mandats arrivent plus tard via
+    # `wake_pod`. R3b se contente alors d'un BOOTSTRAP — réveil du REPL + armement du Monitor
+    # (cf. SP) — borné et ESPACÉ (pas de rafale de 12 yops qui distrait l'agent). Un worker
+    # (mandat enqueué au spawn) garde le kick fréquent jusqu'au pull. Détection race-safe :
+    # l'enqueue StageRunner (ms après spawn) précède largement le 1er kick (+2s) → un worker a
+    # déjà son mandat `pending`, un pod permanent a `pod_status == {:ok, nil}`.
+    bootstrap? = no_pending_mandate?(state.pod_id)
+    cap = if bootstrap?, do: kick_bootstrap_max(), else: kick_max_attempts()
+    retry = if bootstrap?, do: kick_bootstrap_retry_ms(), else: kick_retry_ms()
+
     cond do
       mandate_pulled?(state.pod_id) ->
         {:noreply, state}
 
-      n >= kick_max_attempts() ->
-        Logger.warning(
-          "pod #{state.pod_id} kick autonome abandonné après #{n} tentatives " <>
-            "(REPL jamais joignable OU mandat jamais pull)"
-        )
+      n >= cap ->
+        if bootstrap? do
+          Logger.debug(
+            "pod #{state.pod_id} bootstrap kické (#{n}× sans mandat) → en attente de wake_pod"
+          )
+        else
+          Logger.warning(
+            "pod #{state.pod_id} kick autonome abandonné après #{n} tentatives " <>
+              "(REPL jamais joignable OU mandat jamais pull)"
+          )
+        end
 
         {:noreply, state}
 
@@ -275,11 +292,11 @@ defmodule Fleet.Spawner.Pod do
             Logger.warning("pod #{state.pod_id} kick (yop) failed : #{inspect(reason)}")
         end
 
-        Process.send_after(self(), {:kick_attempt, n + 1}, kick_retry_ms())
+        Process.send_after(self(), {:kick_attempt, n + 1}, retry)
         {:noreply, state}
 
       true ->
-        Process.send_after(self(), {:kick_attempt, n + 1}, kick_retry_ms())
+        Process.send_after(self(), {:kick_attempt, n + 1}, retry)
         {:noreply, state}
     end
   end
@@ -1380,6 +1397,13 @@ defmodule Fleet.Spawner.Pod do
   defp kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
   defp kick_max_attempts, do: Application.get_env(:fleet_spawner, :kick_max_attempts, 12)
 
+  # Bootstrap (pod sans mandat) : kicks BORNÉS + ESPACÉS — ~4 tentatives à 8s d'intervalle
+  # couvrent le boot claude (~15s) sans rafale. Le réveil-par-flag (Monitor) prend le relais ensuite.
+  defp kick_bootstrap_max, do: Application.get_env(:fleet_spawner, :kick_bootstrap_max, 4)
+
+  defp kick_bootstrap_retry_ms,
+    do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
+
   defp inject_brief_to_tmux_pod(%{tmux_session: nil}), do: :ok
 
   defp inject_brief_to_tmux_pod(%{tmux_session: session}) when is_binary(session) do
@@ -1399,6 +1423,21 @@ defmodule Fleet.Spawner.Pod do
   defp mandate_pulled?(pod_id) do
     case Fleet.TaskQueue.pod_status(pod_id) do
       {:ok, s} when s in [:assigned, :in_progress, :completed] -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
+  end
+
+  # AUCUN mandat (task) en attente pour ce pod : `pod_status == {:ok, nil}` (jamais enqueué).
+  # Distingue le pod permanent/interactif (rien à puller à froid → bootstrap) du worker (mandat
+  # `pending` enqueué au spawn). En cas d'erreur → `false` (défaut sûr : on traite comme un
+  # worker, kick fréquent — on ne suspend pas par erreur les kicks d'un vrai mandat).
+  defp no_pending_mandate?(pod_id) do
+    case Fleet.TaskQueue.pod_status(pod_id) do
+      {:ok, nil} -> true
       _ -> false
     end
   rescue
