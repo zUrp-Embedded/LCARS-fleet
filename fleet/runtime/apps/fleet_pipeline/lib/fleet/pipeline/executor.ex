@@ -612,7 +612,11 @@ defmodule Fleet.Pipeline.Executor do
   # I-CBC (identité/secrets/base) tourne côté monde sur `base_sha..HEAD` ; un livrable invalide
   # n'est PAS poussé. Reste best-effort observable : succès/échec broadcastés, le pipeline avance.
   defp do_post_extract_git(stage, git_spec, outputs, state) do
-    result = Map.get(outputs, "result", %{})
+    # Le vrai pod soumet une ENVELOPPE `%{"status"=>"ok", "result"=>%{files,message}}` (submit_result
+    # MCP). Le chemin gate la déplie (`unwrap_worker_envelope`) ; ici il FAUT le même dépliage sinon
+    # `result["files"]` est nil (files sous `result["result"]["files"]`) → `:no_files_in_payload`.
+    # Trouvé en dogfood live (PASSE-8) : les tests unitaires envoyaient le `result` déjà déplié.
+    result = outputs |> Map.get("result", %{}) |> unwrap_worker_envelope()
     workspace = WorkspaceProvisioner.workspace_dir_for(state.pipeline_id, stage)
     role = role_for_stage(state.pipeline, stage)
     profile = profile_for_stage(state.pipeline, stage)

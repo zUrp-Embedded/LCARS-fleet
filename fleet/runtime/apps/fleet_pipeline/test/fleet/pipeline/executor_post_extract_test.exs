@@ -145,9 +145,14 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
       "ticket_id" => "p1#1",
       "pipeline_id" => pipeline_id,
       "stage" => "publish",
+      # Forme RÉELLE du pod : enveloppe submit_result `%{status, result}` (dépliée côté Executor —
+      # dogfood PASSE-8 ; avant, les tests envoyaient le result déjà déplié → masquait le trou).
       "result" => %{
-        "files" => [%{"path" => "out/X.md", "content" => "from worker\n"}],
-        "message" => "feat(publish): worker payload"
+        "status" => "ok",
+        "result" => %{
+          "files" => [%{"path" => "out/X.md", "content" => "from worker\n"}],
+          "message" => "feat(publish): worker payload"
+        }
       }
     })
 
