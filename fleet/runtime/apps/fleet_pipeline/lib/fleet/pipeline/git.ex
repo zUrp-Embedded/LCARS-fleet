@@ -44,6 +44,10 @@ defmodule Fleet.Pipeline.Git do
     :branch
   ]
 
+  # `commit/1` (O5) ne pousse pas → `:branch`/`:remote` sont des concerns de push,
+  # absents ici. L'identité (author/committer) + message + workspace suffisent.
+  @commit_required_keys @required_keys -- [:branch]
+
   # Refuse branches/refs avec caractères ambigus (espace, ..., leading `-`).
   # Pas une défense anti-injection (System.cmd n'utilise pas de shell), juste
   # un garde-fou contre des entrées catalogue manifestement cassées. Aligne
@@ -66,6 +70,23 @@ defmodule Fleet.Pipeline.Git do
     end
   end
 
+  @doc """
+  Commit-only (O5) — `git add <paths> → git commit` dans `workspace`, **sans push**. Sépare le
+  CONTENU (le système commite le payload) de la PUBLICATION (`push/3` après la gate I-CBC). Utilisé
+  par `Fleet.Pipeline.Deliverable` en mode `payload` ; `publish/1` reste le chemin couplé legacy
+  (PASSE-7). Pas de `:branch`/`:remote` requis (concerns de push). Retourne le SHA du HEAD commité.
+  """
+  @spec commit(opts) :: {:ok, String.t()} | {:error, term()}
+  def commit(opts) when is_map(opts) do
+    with :ok <- check_required_keys(opts, @commit_required_keys),
+         :ok <- check_workspace_string(opts.workspace),
+         :ok <- ensure_git_workspace(opts.workspace),
+         :ok <- git_add(opts),
+         {:ok, sha} <- git_commit(opts) do
+      {:ok, sha}
+    end
+  end
+
   # ============================================================
   # Validation
   # ============================================================
@@ -79,8 +100,10 @@ defmodule Fleet.Pipeline.Git do
     end
   end
 
-  defp check_required_keys(opts) do
-    case Enum.reject(@required_keys, &Map.has_key?(opts, &1)) do
+  defp check_required_keys(opts), do: check_required_keys(opts, @required_keys)
+
+  defp check_required_keys(opts, keys) do
+    case Enum.reject(keys, &Map.has_key?(opts, &1)) do
       [] -> :ok
       missing -> {:error, {:missing_opts, missing}}
     end
