@@ -178,6 +178,21 @@ else
   AUTH_ENV_ARGS=(--setenv ANTHROPIC_AUTH_TOKEN "$ANTHROPIC_AUTH_TOKEN_VALUE")
 fi
 
+# Télémétrie ↔ feature-flags. Les flags Statsig/GrowthBook (dont `MONITOR_TOOL`, qui expose
+# l'outil Monitor = réveil-par-flag du pod, cf. investigation 2026-06-07 :
+# beyond_#5/.../investigation-monitor/JOURNAL.md) sont fetchés via le pipeline télémétrie.
+# `DISABLE_TELEMETRY=1` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` COUPENT ce fetch → `MONITOR_TOOL`
+# défaut OFF → l'agent retombe sur le kick `yop` (send-keys) au lieu du Monitor. Le contenu reste
+# 100% MCP (get_task/submit_result) dans les deux cas. Arbitrage acté (user) : on PRIVILÉGIE le
+# Monitor → télémétrie ACTIVE par défaut. Mode privacy opt-in : `LCARS_POD_DISABLE_TELEMETRY=1`
+# (pas de Monitor, fallback yop). Le couplage télémétrie→Monitor est côté relais Anthropic, pas
+# notre choix ; l'override `CLAUDE_INTERNAL_FC_OVERRIDES` est gardé `USER_TYPE=ant` (interne, inerte
+# sur le binaire public) → non utilisable.
+TELEMETRY_ENV=()
+if [[ "${LCARS_POD_DISABLE_TELEMETRY:-0}" == "1" ]]; then
+  TELEMETRY_ENV=(--setenv DISABLE_TELEMETRY "1" --setenv CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC "1")
+fi
+
 exec "$BWRAP_BIN" \
   --unshare-all --share-net \
   --die-with-parent \
@@ -205,11 +220,10 @@ exec "$BWRAP_BIN" \
   --setenv LCARS_POD_RESUME "$POD_RESUME" \
   --setenv LCARS_POD_SESSION_NAME_PREFIX "$SESSION_NAME_PREFIX" \
   --setenv LCARS_CLAUDE_BIN "$POD_VENDOR_BIN" \
-  --setenv DISABLE_TELEMETRY "1" \
   --setenv DISABLE_AUTOUPDATER "1" \
-  --setenv CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC "1" \
   --setenv CLAUDE_CODE_DISABLE_AUTO_MEMORY "1" \
   --setenv CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "100" \
+  ${TELEMETRY_ENV[@]+"${TELEMETRY_ENV[@]}"} \
   ${AUTH_ENV_ARGS[@]+"${AUTH_ENV_ARGS[@]}"} \
   -- /bin/sh -c '
        tmux_bin=$1; sock=$2; name=$3; shift 3
