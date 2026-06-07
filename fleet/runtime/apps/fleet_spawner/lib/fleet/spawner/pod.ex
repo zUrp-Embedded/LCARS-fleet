@@ -723,6 +723,12 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp do_launch(state) do
+    # BL-036 (dogfood F7) : un crash du Pod GenServer ne tue PAS le bwrap/tmux/claude (`--die-with-parent`
+    # = BEAM, pas GenServer) → pod ORPHELIN vivant (OAuth+RAM). Avant tout (re)launch, on REAP un éventuel
+    # orphelin du même pod_id : no-op pour un pod neuf ; sur recovery (:recreate, BL-035) ça nettoie le
+    # mort-vivant AVANT de relancer (sinon collision sock/process). Rend la recovery viable en prod
+    # (le probe F7 le faisait à la main). Reaper périodique (orphelins jamais re-spawnés) = reste BL-036b.
+    reap_orphan_pod(state.pod_id)
     role = Map.get(state.cap_profile.metadata, "name", "engineer")
 
     # R0.8-brick4 : plus de budget côté pod (OAuth pool, pas d'API). Le timeout
@@ -779,6 +785,24 @@ defmodule Fleet.Spawner.Pod do
     else
       {:error, reason} -> transition_failed(state, {:auth_token_required, reason})
     end
+  end
+
+  # BL-036 : reap un orphelin (bwrap/tmux/claude survivant à un crash GenServer) du même pod_id avant
+  # un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). tmux kill-server tue tmux+claude ;
+  # pkill -f <pod_id> tue le holder bwrap (que kill-server laisse vivant). pod_id = UUID unique → ciblé.
+  defp reap_orphan_pod(pod_id) do
+    if Fleet.Spawner.PodTmux.alive?(pod_id) do
+      Logger.warning("pod #{pod_id} : orphelin vivant détecté avant launch (BL-036) — reap")
+      sock = Fleet.Spawner.PodTmux.sock_path(pod_id)
+      _ = System.cmd("tmux", ["-S", sock, "kill-server"], stderr_to_stdout: true)
+      _ = System.cmd("pkill", ["-9", "-f", pod_id], stderr_to_stdout: true)
+    end
+
+    :ok
+  rescue
+    e ->
+      Logger.warning("pod #{pod_id} reap_orphan échec (non-bloquant): #{inspect(e)}")
+      :ok
   end
 
   defp do_launch_backend(state, args, env) do
