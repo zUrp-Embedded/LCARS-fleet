@@ -125,7 +125,8 @@
             "repo_path": { "type": "string" },
             "base_branch": { "type": "string" },
             "branch_isolation": { "type": "boolean" },
-            "reference_repo_path": { "type": ["string", "null"] }
+            "reference_repo_path": { "type": ["string", "null"] },
+            "work_branch": { "type": ["string", "null"] }
           }
         }
       },

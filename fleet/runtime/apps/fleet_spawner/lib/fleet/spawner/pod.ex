@@ -674,6 +674,17 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
+  # cwd du pod = la branche CODE (`<pod_dir>/workspace`) quand un projet est cloné — l'agent démarre
+  # DANS son code, pas dans le pod_dir nu (mundo invocado : « sa branche code »). La branche DOC est à
+  # côté (`<pod_dir>/work`). bwrap_launch lit `LCARS_POD_CWD` (défaut `$POD_DIR`). Pas de projet → cwd
+  # = pod_dir (pods permanents/memory-X sans repo).
+  defp maybe_put_pod_cwd(env, state) do
+    case get_in(state.cap_profile.spec, ["project", "repo_path"]) do
+      nil -> env
+      _ -> Map.put(env, "LCARS_POD_CWD", Path.join(state.pod_dir, "workspace"))
+    end
+  end
+
   # Cherche `~/.local/bin/claude` dans le home passwd de `user`. Retourne le path réel
   # (readlink -f) ou `nil`. Le home vient de `getent passwd` (NSS), pas d'un `/home/<x>` deviné.
   defp claude_bin_in_home(user) when is_binary(user) do
@@ -759,6 +770,7 @@ defmodule Fleet.Spawner.Pod do
       # substrat (cf. journal § reste) — orthogonal et complémentaire à ce qui suit.
       |> Map.put("CLAUDE_DIR", claude_dir_for(human))
       |> maybe_put_vendor_bin(human)
+      |> maybe_put_pod_cwd(state)
 
     # R15 : l'étape auth sort du pipe — en mode :token_arg un token absent
     # bloque le spawn (fail-loud) au lieu de lancer un pod sans token.
@@ -1474,20 +1486,27 @@ defmodule Fleet.Spawner.Pod do
         :ok
 
       _repo_path ->
-        case Fleet.ProjectBootstrap.Phase.Clone.clone_or_skip(
-               state.pod_dir,
-               state.cap_profile,
-               []
-             ) do
-          {:ok, workspace, branch} ->
-            Logger.info(
-              "pod #{state.pod_id} project workspace cloned: #{workspace} (branch=#{branch || "default"})"
-            )
+        with {:ok, workspace, branch} <-
+               Fleet.ProjectBootstrap.Phase.Clone.clone_or_skip(
+                 state.pod_dir,
+                 state.cap_profile,
+                 []
+               ),
+             # Doc-mount (mundo invocado) : la branche `work/ops` (plans/backlog/conventions) à côté
+             # du code. nil si le projet n'a pas de branche doc ; fail-loud si déclarée mais absente.
+             {:ok, doc} <-
+               Fleet.ProjectBootstrap.Phase.Clone.clone_work_doc(
+                 state.pod_dir,
+                 state.cap_profile
+               ) do
+          Logger.info(
+            "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})" <>
+              if(doc, do: " doc=#{doc}", else: " (pas de branche doc)")
+          )
 
-            :ok
-
-          {:error, reason} ->
-            {:error, {:project_workspace_clone_failed, reason}}
+          :ok
+        else
+          {:error, reason} -> {:error, {:project_workspace_clone_failed, reason}}
         end
     end
   end

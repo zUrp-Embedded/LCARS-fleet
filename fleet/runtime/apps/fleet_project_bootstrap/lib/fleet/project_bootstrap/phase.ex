@@ -67,6 +67,45 @@ defmodule Fleet.ProjectBootstrap.Phase do
           end
       end
     end
+
+    @doc """
+    Doc-mount (mundo invocado) — clone la branche DOC du projet (`spec.project.work_branch`,
+    orpheline `work/ops` par convention LCARS) dans `<pod_dir>/work` : la doc sur quoi l'agent
+    s'appuie pour coder (plans, backlog, conventions). À côté de la branche code (`workspace`).
+
+    - `work_branch` nil/absent OU pas de `repo_path` → `{:ok, nil}` (skip : projet sans branche doc).
+    - déclarée mais clone échoué → `{:error, ...}` FAIL-LOUD (I-CBC : un cap-profile qui déclare une
+      branche doc inexistante = bug de config, pas un pod silencieusement amputé de sa doc).
+    """
+    @spec clone_work_doc(Path.t(), Fleet.CapProfile.t()) ::
+            {:ok, Path.t() | nil} | {:error, term()}
+    def clone_work_doc(pod_dir, %Fleet.CapProfile{spec: spec}) do
+      project = spec["project"] || %{}
+      work_branch = project["work_branch"]
+      repo_url = project["repo_path"]
+
+      if is_nil(work_branch) or is_nil(repo_url) do
+        {:ok, nil}
+      else
+        doc = Path.join(pod_dir, "work")
+        ref = project["reference_repo_path"]
+        ref_args = if ref, do: ["--reference", ref], else: []
+
+        # --single-branch : la branche doc est orpheline ⇒ inutile de fetch le reste de l'historique.
+        case System.cmd(
+               "git",
+               ["clone"] ++
+                 ref_args ++ ["--branch", work_branch, "--single-branch", repo_url, doc],
+               stderr_to_stdout: true
+             ) do
+          {_, 0} ->
+            {:ok, doc}
+
+          {out, code} ->
+            {:error, {:work_doc_clone_failed, {work_branch, code, String.slice(out, 0, 500)}}}
+        end
+      end
+    end
   end
 
   defmodule InitMimic do
