@@ -22,6 +22,8 @@ config :fleet_starfleet, start_boot_orchestrator: false
 config :fleet_starfleet, start_mcp_watcher: false
 config :fleet_starfleet, start_mcp_monitor: false
 config :fleet_spawner, start_publish_consumer: false
+# BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
+config :fleet_spawner, start_orphan_reaper: false
 
 # fleet_pilot hermétisme test : AutoDispatcher off par défaut. Subscribe
 # Bus parasite ; tests dédiés (auto_dispatcher_test.exs) démarrent

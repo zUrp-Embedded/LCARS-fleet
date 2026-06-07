@@ -41,7 +41,16 @@ defmodule Fleet.Spawner.Application do
         []
       end
 
-    children = base ++ publish
+    # BL-036b : reaper périodique des pods orphelins (crash GenServer → bwrap/tmux survit). Gaté
+    # `:start_orphan_reaper` (défaut true prod, false test — pas de vrais pods à reaper en test).
+    reaper =
+      if Application.get_env(:fleet_spawner, :start_orphan_reaper, true) do
+        [Fleet.Spawner.OrphanReaper]
+      else
+        []
+      end
+
+    children = base ++ publish ++ reaper
 
     # F-14 (R7) : plus de boot des pods permanents ici — autorité unique =
     # Fleet.Starfleet.BootOrchestrator (post-readiness). Cette app ne fait que
