@@ -70,4 +70,37 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     assert {:error, {:work_doc_clone_failed, {"work/nope", _code, _out}}} =
              Clone.clone_work_doc(pod_dir, profile)
   end
+
+  test "set_git_identity : LCARS-<role> si injects.gitconfig ; no-op sinon", %{tmp_dir: tmp} do
+    src = make_source_repo(Path.join(tmp, "srcg"))
+    ws = Path.join(tmp, "ws-on")
+
+    {_, 0} =
+      System.cmd("git", ["clone", "-q", "--branch", "main", src, ws], stderr_to_stdout: true)
+
+    p_on = %Fleet.CapProfile{
+      metadata: %{"name" => "engineer"},
+      spec: %{"injects" => %{"gitconfig" => true}}
+    }
+
+    assert :ok = Clone.set_git_identity(ws, p_on)
+    {name, 0} = System.cmd("git", ["-C", ws, "config", "user.name"], stderr_to_stdout: true)
+    assert String.trim(name) == "LCARS-engineer"
+    {email, 0} = System.cmd("git", ["-C", ws, "config", "user.email"], stderr_to_stdout: true)
+    assert String.trim(email) == "engineer@lcars.local"
+
+    # injects.gitconfig absent → no-op (pas d'identité LCARS posée localement)
+    ws2 = Path.join(tmp, "ws-off")
+
+    {_, 0} =
+      System.cmd("git", ["clone", "-q", "--branch", "main", src, ws2], stderr_to_stdout: true)
+
+    p_off = %Fleet.CapProfile{metadata: %{"name" => "qualifier"}, spec: %{"injects" => %{}}}
+    assert :ok = Clone.set_git_identity(ws2, p_off)
+
+    {out, code} =
+      System.cmd("git", ["-C", ws2, "config", "--local", "user.name"], stderr_to_stdout: true)
+
+    assert code != 0 or String.trim(out) != "LCARS-qualifier"
+  end
 end

@@ -1504,6 +1504,9 @@ defmodule Fleet.Spawner.Pod do
           # avec cwd=workspace il doit être DANS le cwd (sinon l'agent code sans sa codebase-doc en cwd).
           _ = File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md"))
 
+          # Identité git du rôle (P4b) : `LCARS-<role>` pour les commits du pod sur sa feature-branch.
+          :ok = Fleet.ProjectBootstrap.Phase.Clone.set_git_identity(workspace, state.cap_profile)
+
           Logger.info(
             "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})" <>
               if(doc, do: " doc=#{doc}", else: " (pas de branche doc)")

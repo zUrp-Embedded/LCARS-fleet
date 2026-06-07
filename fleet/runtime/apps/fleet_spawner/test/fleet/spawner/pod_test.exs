@@ -708,11 +708,13 @@ defmodule Fleet.Spawner.PodTest do
       profile = %{
         base
         | spec:
-            Map.put(base.spec, "project", %{
+            base.spec
+            |> Map.put("project", %{
               "repo_path" => src,
               "base_branch" => "main",
               "work_branch" => "work/ops"
             })
+            |> Map.put("injects", %{"gitconfig" => true})
       }
 
       StubBackend.set_reply(interactive_reply())
@@ -737,6 +739,14 @@ defmodule Fleet.Spawner.PodTest do
 
       # P2 : CLAUDE.md composé présent À LA RACINE DU CWD (workspace), pas seulement au pod_dir
       assert File.exists?(Path.join([pod_dir, "workspace", "CLAUDE.md"]))
+
+      # P4b : identité git du rôle posée dans le workspace (injects.gitconfig)
+      {name, 0} =
+        System.cmd("git", ["-C", Path.join(pod_dir, "workspace"), "config", "user.name"],
+          stderr_to_stdout: true
+        )
+
+      assert String.trim(name) == "LCARS-engineer"
     end
   end
 end
