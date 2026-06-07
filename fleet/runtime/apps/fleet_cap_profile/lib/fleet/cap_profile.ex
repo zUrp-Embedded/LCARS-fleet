@@ -405,6 +405,17 @@ defmodule Fleet.CapProfile do
     get_in(spec, ["invocation", "lifetime_scope"]) || default
   end
 
+  @doc """
+  Accesseur canon du `deliverable_mode` (`spec.deliverable_mode`, schéma v2.5, modèle O5). Source
+  unique — la sélection du mode de publication (`Fleet.Pipeline.Deliverable.publish/1`) se lit ICI,
+  pas ré-implémentée chez les lecteurs. `default` `"payload"` (le défaut canon, back-compat PASSE-7 :
+  un profil sans champ = legacy le-système-écrit-le-payload). Les code-rôles déclarent `git_native`.
+  """
+  @spec deliverable_mode(t(), term()) :: String.t() | term()
+  def deliverable_mode(%__MODULE__{spec: spec}, default \\ "payload") do
+    get_in(spec, ["deliverable_mode"]) || default
+  end
+
   defp to_struct(raw) when is_map(raw) do
     %__MODULE__{
       kind: Map.get(raw, "kind"),

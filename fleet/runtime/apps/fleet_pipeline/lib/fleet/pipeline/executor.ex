@@ -48,7 +48,6 @@ defmodule Fleet.Pipeline.Executor do
   use GenServer, restart: :transient
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Pipeline.Git, as: FleetGit
   alias Fleet.Pipeline.{Gates, Loader, PodRegistry, StageRunner, Toposort, WorkspaceProvisioner}
 
   require Logger
@@ -62,7 +61,11 @@ defmodule Fleet.Pipeline.Executor do
             # R06 — gates async : pod_id du gatekeeper en attente → infos de la
             # gate (stage, kind, round, max_rounds). Le stage reste :completed
             # mais le pipeline n'avance pas tant que la décision n'est pas reçue.
-            gate_evals: %{}
+            gate_evals: %{},
+            # O5 (F-03) — `base_sha` capturée HORS-pod juste après provision (clone+checkout),
+            # AVANT spawn. Verrou de la gate `DeliverableGate.check_base_ancestor` : le pod ne peut
+            # pas la falsifier (il n'existe pas encore quand on la lit). Keyed par stage.
+            base_shas: %{}
 
   @type t :: %__MODULE__{
           pipeline_id: term(),
@@ -71,7 +74,8 @@ defmodule Fleet.Pipeline.Executor do
           current_stage: String.t() | nil,
           outputs: %{optional(String.t()) => map()},
           mandate_context: map(),
-          gate_evals: %{optional(term()) => map()}
+          gate_evals: %{optional(term()) => map()},
+          base_shas: %{optional(String.t()) => String.t()}
         }
 
   # ============================================================
@@ -480,7 +484,9 @@ defmodule Fleet.Pipeline.Executor do
     # post_extract.git absent. Échec = halt pipeline (clone/checkout = erreur
     # infrastructure, pas un livrable à juger).
     case WorkspaceProvisioner.provision_for_stage(state.pipeline_id, stage_name, git_spec) do
-      {:ok, _ws_or_nil} ->
+      {:ok, ws_or_nil} ->
+        # F-03 : verrouille base_sha = HEAD post-clone, AVANT spawn (le pod ne peut pas la bouger).
+        state = maybe_capture_base_sha(state, stage_name, ws_or_nil)
         run_stage_backend(stage_name, stage_spec, state)
 
       {:error, reason} ->
@@ -601,125 +607,162 @@ defmodule Fleet.Pipeline.Executor do
     state
   end
 
+  # O5 — route vers `Fleet.Pipeline.Deliverable.publish/1` (module unifié). Le mode (`payload` /
+  # `git_native`) est une propriété du cap-profile du rôle (différenciation par catalogue). La gate
+  # I-CBC (identité/secrets/base) tourne côté monde sur `base_sha..HEAD` ; un livrable invalide
+  # n'est PAS poussé. Reste best-effort observable : succès/échec broadcastés, le pipeline avance.
   defp do_post_extract_git(stage, git_spec, outputs, state) do
     result = Map.get(outputs, "result", %{})
     workspace = WorkspaceProvisioner.workspace_dir_for(state.pipeline_id, stage)
-    publish_opts = build_publish_opts(workspace, git_spec, result, state, stage)
+    role = role_for_stage(state.pipeline, stage)
+    profile = profile_for_stage(state.pipeline, stage)
+    mode = resolve_deliverable_mode(role, profile)
+    base_sha = Map.get(state.base_shas, stage)
 
-    with :ok <- apply_payload_files(workspace, result),
-         {:ok, %{commit_sha: sha, pushed?: pushed?}} <- FleetGit.publish(publish_opts) do
-      Logger.info(
-        "fleet_pipeline post_extract.git ok: pipeline=#{inspect(state.pipeline_id)} " <>
-          "stage=#{stage} sha=#{sha} pushed?=#{pushed?}"
-      )
+    case build_deliverable_opts(mode, workspace, git_spec, result, role, base_sha) do
+      {:ok, opts} -> publish_deliverable(stage, opts, state)
+      {:error, reason} -> broadcast_publish_failed(stage, reason, state)
+    end
+  end
 
-      pipeline_event(:"git.published", state, %{
-        "pipeline_id" => state.pipeline_id,
-        "stage" => stage,
-        "commit_sha" => sha,
-        "pushed?" => pushed?
-      })
-    else
-      {:error, reason} ->
-        Logger.warning(
-          "fleet_pipeline post_extract.git failed: pipeline=#{inspect(state.pipeline_id)} " <>
-            "stage=#{stage} reason=#{inspect(reason)}"
+  defp publish_deliverable(stage, opts, state) do
+    case Fleet.Pipeline.Deliverable.publish(opts) do
+      {:ok, %{commit_sha: sha, pushed?: pushed?, mode: mode}} ->
+        Logger.info(
+          "fleet_pipeline post_extract.git ok: pipeline=#{inspect(state.pipeline_id)} " <>
+            "stage=#{stage} mode=#{mode} sha=#{sha} pushed?=#{pushed?}"
         )
 
-        pipeline_event(:"git.publish_failed", state, %{
+        pipeline_event(:"git.published", state, %{
           "pipeline_id" => state.pipeline_id,
           "stage" => stage,
-          "reason" => inspect(reason)
+          "commit_sha" => sha,
+          "pushed?" => pushed?,
+          "mode" => to_string(mode)
         })
+
+      {:error, reason} ->
+        broadcast_publish_failed(stage, reason, state)
     end
   end
 
-  # Atomicité best-effort + sécu path traversal (audit externe 2026-05-24 #3+#4).
-  # 2 passes : (1) valide TOUS les paths avant toute écriture — refuse
-  # path traversal `../`, refuse shapes invalides. (2) écrit en séquence si
-  # validation OK. Si une écriture échoue après validation (disk error rare),
-  # `git.publish_failed` est broadcasté → pas de commit → workspace dirty
-  # mais pas pushé (atomicité au sens git préservée).
-  defp apply_payload_files(workspace, %{"files" => files}) when is_list(files) and files != [] do
-    with :ok <- validate_payload_files(workspace, files) do
-      write_validated_files(workspace, files)
-    end
+  defp broadcast_publish_failed(stage, reason, state) do
+    Logger.warning(
+      "fleet_pipeline post_extract.git failed: pipeline=#{inspect(state.pipeline_id)} " <>
+        "stage=#{stage} reason=#{inspect(reason)}"
+    )
+
+    pipeline_event(:"git.publish_failed", state, %{
+      "pipeline_id" => state.pipeline_id,
+      "stage" => stage,
+      "reason" => inspect(reason)
+    })
   end
 
-  defp apply_payload_files(_workspace, _other), do: {:error, :no_files_in_payload}
+  # Construit les opts `Deliverable` selon le mode. `base_sha` nil (provision n'a pas capturé) =
+  # fail-loud : sans base on ne peut PAS gater (F-03) → on refuse de publier. `remote` = `origin`
+  # (convention WorkspaceProvisioner). `target_branch` = la branche du git_spec (système-side, pas
+  # lue côté pod) ; `push?` du git_spec (défaut false, préserve PASSE-7).
+  defp build_deliverable_opts(_mode, _ws, _git_spec, _result, _role, nil),
+    do: {:error, :base_sha_unavailable}
 
-  # Refuse rel_path qui s'évadent du workspace (`..`, paths absolus, etc.).
-  # `Path.expand/2` normalise `.`/`..` sans suivre symlinks → on compare le
-  # préfixe canoniquement. Fail-closed strict : 1ère anomalie = halt.
-  defp validate_payload_files(workspace, files) do
-    expanded_ws = Path.expand(workspace)
-
-    Enum.reduce_while(files, :ok, fn
-      %{"path" => rel_path, "content" => content}, :ok
-      when is_binary(rel_path) and is_binary(content) ->
-        full = Path.expand(Path.join(workspace, rel_path))
-
-        if full == expanded_ws or String.starts_with?(full, expanded_ws <> "/") do
-          {:cont, :ok}
-        else
-          {:halt, {:error, {:path_traversal, rel_path}}}
-        end
-
-      bad, :ok ->
-        {:halt, {:error, {:invalid_payload_file, inspect(bad)}}}
-    end)
-  end
-
-  defp write_validated_files(workspace, files) do
-    Enum.reduce_while(files, :ok, fn
-      %{"path" => rel_path, "content" => content}, :ok ->
-        case write_payload_file(workspace, rel_path, content) do
-          :ok -> {:cont, :ok}
-          {:error, reason} -> {:halt, {:error, {:file_write_failed, rel_path, reason}}}
-        end
-    end)
-  end
-
-  # Non-bang : un disk error doit propager {:error, _} pour broadcast
-  # git.publish_failed — pas crasher l'Executor GenServer (perte d'état pipeline).
-  defp write_payload_file(workspace, rel_path, content) do
-    full_path = Path.join(workspace, rel_path)
-
-    with :ok <- File.mkdir_p(Path.dirname(full_path)),
-         :ok <- File.write(full_path, content) do
-      :ok
-    end
-  end
-
-  defp build_publish_opts(workspace, git_spec, result, state, stage) do
-    role = role_for_stage(state.pipeline, stage)
-
-    %{
+  defp build_deliverable_opts(mode, workspace, git_spec, result, role, base_sha) do
+    common = %{
+      mode: mode,
       workspace: workspace,
-      author_name: role,
-      author_email: "#{role}@lcars.local",
-      committer_name: "LCARS System",
-      committer_email: "system@lcars.local",
-      # audit elixir #5 : `||` traitait `""` comme truthy (Elixir : seul `nil`
-      # et `false` sont falsy). Un worker posant `message: ""` enverrait une
-      # string vide à git commit qui la rejetterait → `{:git_commit_failed,
-      # ...}` opaque. Pattern match strict : binary non-vide gardé tel quel,
-      # tout autre cas (nil, "", non-string) → default informatif.
-      message: commit_message(result, stage, role),
-      branch: Map.fetch!(git_spec, "branch"),
-      # `origin` est conventionné par WorkspaceProvisioner (git clone → remote
-      # `origin` pointe vers repo_url). Le catalogue n'expose pas le nom du
-      # remote — convention unique.
+      base_sha: base_sha,
+      allowed_emails: allowed_emails(mode, role),
       remote: "origin",
-      add_paths: Map.get(git_spec, "add_paths", ["."]),
+      target_branch: Map.get(git_spec, "branch"),
       push?: Map.get(git_spec, "push", false)
+    }
+
+    {:ok, Map.merge(common, mode_specific_opts(mode, result, role))}
+  end
+
+  # payload : le système écrit les fichiers + commite (author=rôle D-04, committer=système).
+  # git_native : le pod a commité ; rien à fournir (le contenu vient du `.git` du workspace).
+  defp mode_specific_opts(:payload, result, role) do
+    %{
+      files: Map.get(result, "files"),
+      message: payload_message(result, role),
+      identity: %{
+        author_name: "LCARS-#{role}",
+        author_email: "#{role}@lcars.local",
+        committer_name: "LCARS System",
+        committer_email: "system@lcars.local"
+      }
     }
   end
 
-  defp commit_message(result, stage, role) do
+  defp mode_specific_opts(:git_native, _result, _role), do: %{}
+
+  # Identités acceptées par la gate (F-01). payload : le commit est fait par le système →
+  # author=rôle + committer=système. git_native : le pod commite → author=committer=rôle (la
+  # forme committer=système serait un mensonge, le système n'a pas commité). Cf. nuance D-04
+  # mode-dépendante (JOURNAL-deliverable-model, Brick 6).
+  defp allowed_emails(:payload, role), do: ["#{role}@lcars.local", "system@lcars.local"]
+  defp allowed_emails(:git_native, role), do: ["#{role}@lcars.local"]
+
+  defp payload_message(result, role) do
     case Map.get(result, "message") do
       msg when is_binary(msg) and msg != "" -> msg
-      _ -> "feat(#{stage}): payload from #{role}"
+      _ -> "feat: payload from #{role}"
+    end
+  end
+
+  # Seam (mirroir `lifetime_scope_resolver` du StageRunner) : override test/config via
+  # `:fleet_pipeline, :deliverable_mode_resolver` (fun/2 role,profile → "payload"|"git_native").
+  # Défaut : charge le cap-profile et lit `spec.deliverable_mode` (source unique catalogue).
+  defp resolve_deliverable_mode(role, profile) do
+    case Application.get_env(:fleet_pipeline, :deliverable_mode_resolver) do
+      fun when is_function(fun, 2) -> normalize_mode(fun.(role, profile))
+      _ -> normalize_mode(default_deliverable_mode(role, profile))
+    end
+  end
+
+  defp default_deliverable_mode(role, nil), do: default_deliverable_mode(role, [])
+
+  defp default_deliverable_mode(role, profile) when is_binary(profile),
+    do: default_deliverable_mode(role, [profile])
+
+  defp default_deliverable_mode(role, profile) when is_list(profile) do
+    result =
+      case profile do
+        [] -> Fleet.CapProfile.load(role)
+        modops -> Fleet.CapProfile.compose(role, modops)
+      end
+
+    case result do
+      {:ok, cap} -> Fleet.CapProfile.deliverable_mode(cap)
+      _ -> "payload"
+    end
+  end
+
+  defp normalize_mode("git_native"), do: :git_native
+  defp normalize_mode(:git_native), do: :git_native
+  defp normalize_mode(_), do: :payload
+
+  defp profile_for_stage(pipeline, stage), do: get_in(pipeline, ["stages", stage, "profile"])
+
+  # F-03 — capture HEAD du workspace fraîchement provisionné (clone+checkout), AVANT spawn du pod.
+  # Stocké dans `state.base_shas[stage]`, servira de borne `base..HEAD` à la gate. ws nil (pas de
+  # post_extract.git) → no-op. Lecture ratée (workspace pas un repo ?) → pas de capture : à la
+  # publication, base_sha absent → `:base_sha_unavailable` fail-loud (pas de gate aveugle).
+  defp maybe_capture_base_sha(state, _stage, nil), do: state
+
+  defp maybe_capture_base_sha(state, stage, workspace) do
+    case System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
+      {sha, 0} ->
+        %{state | base_shas: Map.put(state.base_shas, stage, String.trim(sha))}
+
+      {out, rc} ->
+        Logger.warning(
+          "fleet_pipeline base_sha capture fail: pipeline=#{inspect(state.pipeline_id)} " <>
+            "stage=#{stage} rc=#{rc} out=#{String.trim(out)}"
+        )
+
+        state
     end
   end
 
