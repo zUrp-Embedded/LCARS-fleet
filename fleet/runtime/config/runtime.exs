@@ -72,8 +72,10 @@ if config_env() != :test do
   # silencieux, observé C4b). `LCARS_RECOVERY_RESUME_ENABLED=false` → recovery reroll
   # (`:recreate`) PARTOUT = escape-hatch si `--resume` se révèle mauvais à l'usage.
   # (Les one-shot rerollent de toute façon — clear-policy /clear, hors gate.)
+  # BL-035 (dogfood F7) : défaut OFF (opt-in via env "true"). `--resume` sur session morte = pod zombie
+  # PROUVÉ ; `:recreate` (session neuve) est le défaut sûr.
   config :fleet_spawner,
-    recovery_resume_enabled: System.get_env("LCARS_RECOVERY_RESUME_ENABLED") != "false"
+    recovery_resume_enabled: System.get_env("LCARS_RECOVERY_RESUME_ENABLED") == "true"
 
   # ============================================================
   # fleet_spawner pod_dir_root — OVERRIDE optionnel seulement.

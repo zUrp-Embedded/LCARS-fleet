@@ -21,14 +21,30 @@ defmodule Fleet.Spawner.RecoveryTest do
     assert :recreate = Pod.recovery_action(:allocating)
   end
 
-  test "phase en vol, scope nil/inconnu (rétro-compat arity-1) → :resume" do
+  # BL-035 (dogfood F7) : le DÉFAUT du gate est désormais OFF (`--resume` sur session morte = pod
+  # zombie, PROUVÉ live). Donc en vol → `:recreate` par défaut. La décision `:resume` n'est atteinte
+  # que si le gate est explicitement ON (opt-in).
+  test "DÉFAUT (gate OFF, BL-035) : phase en vol → :recreate (session morte irrécupérable)" do
+    assert :recreate = Pod.recovery_action(:launching)
+    assert :recreate = Pod.recovery_action(:monitoring, "pipe")
+    assert :recreate = Pod.recovery_action(:monitoring, "forever")
+    assert :recreate = Pod.recovery_action(:releasing, nil)
+  end
+
+  test "gate ON (opt-in) + phase en vol, scope nil/inconnu → :resume" do
+    Application.put_env(:fleet_spawner, :recovery_resume_enabled, true)
+    on_exit(fn -> Application.delete_env(:fleet_spawner, :recovery_resume_enabled) end)
+
     assert :resume = Pod.recovery_action(:launching)
     assert :resume = Pod.recovery_action(:monitoring)
     assert :resume = Pod.recovery_action(:extracting)
     assert :resume = Pod.recovery_action(:releasing)
   end
 
-  test "scope pipe/forever en vol → :resume (préserve le travail mid-mandat)" do
+  test "gate ON (opt-in) + scope pipe/forever en vol → :resume (préserve le travail mid-mandat)" do
+    Application.put_env(:fleet_spawner, :recovery_resume_enabled, true)
+    on_exit(fn -> Application.delete_env(:fleet_spawner, :recovery_resume_enabled) end)
+
     assert :resume = Pod.recovery_action(:monitoring, "pipe")
     assert :resume = Pod.recovery_action(:monitoring, "forever")
     assert :resume = Pod.recovery_action(:launching, "pipe")

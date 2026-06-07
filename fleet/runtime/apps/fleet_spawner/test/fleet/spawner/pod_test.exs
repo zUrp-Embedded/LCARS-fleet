@@ -475,6 +475,10 @@ defmodule Fleet.Spawner.PodTest do
 
   describe "recovery depuis state FS" do
     test "pipe scope : init/1 lit state.json en vol → :resume (--resume session-old) → :succeeded" do
+      # BL-035 : `:resume` est désormais opt-in (défaut OFF). Ce test exerce le chemin :resume → gate ON.
+      Application.put_env(:fleet_spawner, :recovery_resume_enabled, true)
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :recovery_resume_enabled) end)
+
       pod_id = "pod-recover-#{System.unique_integer([:positive])}"
       Process.flag(:trap_exit, true)
 

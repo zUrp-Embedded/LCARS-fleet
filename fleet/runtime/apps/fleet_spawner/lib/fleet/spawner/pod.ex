@@ -1032,7 +1032,13 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  defp resume_enabled?, do: Application.get_env(:fleet_spawner, :recovery_resume_enabled, true)
+  # BL-035 (dogfood F7, 2026-06-07) : défaut basculé à FALSE. F-C4b-1 n'est plus une crainte — c'est
+  # PROUVÉ live : recovery `:resume` relance claude `--resume <session-MORTE>` → claude exit → pod
+  # ZOMBIE (Elixir croit :monitoring, REPL mort, OAuth consommé). Un crash = la session claude n'existe
+  # plus serveur-side, `--resume` est voué à l'échec. `:recreate` (session neuve) relance un REPL VIVANT
+  # et la tâche (toujours en queue) re-drive le travail. Le gate reste un opt-in (`true`) si un jour
+  # `--resume` est prouvé ressusciter une session serveur-side (douteux).
+  defp resume_enabled?, do: Application.get_env(:fleet_spawner, :recovery_resume_enabled, false)
 
   # :resume → session reprise + RE-LAUNCH (le backend est mort sous `:temporary`).
   defp apply_recovery(base, :resume, sid, phase) do

@@ -173,6 +173,10 @@ defmodule Fleet.SpawnerTest do
   # RE-LANCER le backend (`:process_launched`), PAS reprendre directement en
   # `:monitor` sur un backend mort (le supervisor ne ressuscite jamais sous B).
   test "recovery : pod long-lived repris à :monitoring restaure la session + re-launch (LIFE-002)" do
+    # BL-035 : `:resume` opt-in (défaut OFF). Ce test exerce le chemin :resume → gate ON.
+    Application.put_env(:fleet_spawner, :recovery_resume_enabled, true)
+    on_exit(fn -> Application.delete_env(:fleet_spawner, :recovery_resume_enabled) end)
+
     pod_id = "pod-recover-#{System.unique_integer([:positive])}"
 
     # 1er spawn → récupère le state_fs_path réel, puis kill (kill_pod n'écrit pas
