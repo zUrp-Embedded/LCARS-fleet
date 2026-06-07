@@ -68,6 +68,7 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
       Application.delete_env(:fleet_pipeline, :workspaces_root)
       Application.delete_env(:fleet_pipeline, :spawner_backend)
       Application.delete_env(:fleet_pipeline, :deliverable_mode_resolver)
+      Application.delete_env(:fleet_pipeline, :git_native_workspace_resolver)
     end)
 
     {:ok, tmp_dir: tmp_dir}
@@ -370,24 +371,57 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
       )
   end
 
-  test "git_native : pod a commité (identité rôle) → git.published mode=git_native, gate OK",
-       %{tmp_dir: tmp_dir} do
+  # #596 : en git_native le pod provisionne SON workspace (`<pod_dir>/workspace`) et l'Executor le
+  # résout via PodRegistry→pod_workspace_dir. En test (pas de vrai pod claude), on injecte le workspace
+  # via le seam `:git_native_workspace_resolver` et on le peuple = clone du bare (base) + commit pod.
+  # base_sha vient de `ls-remote(bare, main)` (prepare_workspace :git_native) = le seed. Les modes
+  # d'échec fins (usurpation/vide) sont aussi unit-couverts au niveau module (deliverable_test.exs).
+  defp pod_ws_clone(tmp_dir, name, bare) do
+    ws = Path.join(tmp_dir, "#{name}-podws")
+
+    {_, 0} =
+      System.cmd("git", ["clone", "-q", "--branch", "main", bare, ws], stderr_to_stdout: true)
+
+    ws
+  end
+
+  defp git_native_setup(tmp_dir, name) do
+    bare = seed_remote(tmp_dir, "#{name}-source")
+    ws = pod_ws_clone(tmp_dir, name, bare)
+
     Application.put_env(:fleet_pipeline, :deliverable_mode_resolver, fn _r, _p -> "git_native" end)
 
-    bare = seed_remote(tmp_dir, "gn1-source")
+    Application.put_env(:fleet_pipeline, :git_native_workspace_resolver, fn _pid, _role ->
+      {:ok, ws}
+    end)
 
-    write_pipeline(tmp_dir, "gn1", """
+    write_pipeline(tmp_dir, name, """
         post_extract:
           git:
             repo_url: #{bare}
             branch: main
+            target_branch: deliverables/engineer/#{name}
+            push: true
     """)
 
-    {:ok, pipeline_id} = Pipeline.start_pipeline("gn1", %{ticket_id: "gn1#1"})
-    assert_receive {:spawned, "publish", _}, 2_000
+    {bare, ws}
+  end
 
-    ws = workspace_for(pipeline_id, "publish")
-    # Le pod commite lui-même (identité engineer, injectée immuable en prod — ici mimée).
+  defp gn_pod_completed(pipeline_id, name) do
+    pod_completed(%{
+      "pod_id" => "pod-publish",
+      "ticket_id" => "#{name}#1",
+      "pipeline_id" => pipeline_id,
+      "stage" => "publish",
+      # En git_native, le payload ne porte pas de files : le livrable est dans le .git du pod.
+      "result" => %{"answer" => "committed"}
+    })
+  end
+
+  test "git_native : pod a commité (identité rôle) → push sur target système-choisie, gate OK",
+       %{tmp_dir: tmp_dir} do
+    {bare, ws} = git_native_setup(tmp_dir, "gn1")
+
     pod_commits(
       ws,
       "feature.py",
@@ -397,106 +431,73 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
       "LCARS-engineer"
     )
 
-    pod_completed(%{
-      "pod_id" => "pod-publish",
-      "ticket_id" => "gn1#1",
-      "pipeline_id" => pipeline_id,
-      "stage" => "publish",
-      # En git_native, le payload ne porte pas de files : le livrable est dans le .git.
-      "result" => %{"answer" => "committed"}
-    })
+    {:ok, pipeline_id} = Pipeline.start_pipeline("gn1", %{ticket_id: "gn1#1"})
+    assert_receive {:spawned, "publish", _}, 2_000
+    gn_pod_completed(pipeline_id, "gn1")
 
     assert_receive %Fleet.Event{
                      source: :pipeline,
                      type: :"git.published",
-                     payload: %{
-                       "pipeline_id" => ^pipeline_id,
-                       "stage" => "publish",
-                       "commit_sha" => <<_::binary-size(40)>>,
-                       "pushed?" => false,
-                       "mode" => "git_native"
-                     }
+                     payload: %{"mode" => "git_native", "pushed?" => true, "commit_sha" => sha}
                    },
-                   2_000
+                   3_000
 
+    # F-04 : la ref poussée sur le bare est la cible système-choisie, avec le commit du pod.
+    {pushed, 0} =
+      System.cmd("git", ["-C", bare, "rev-parse", "deliverables/engineer/gn1"],
+        stderr_to_stdout: true
+      )
+
+    assert String.trim(pushed) == sha
     assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000
   end
 
-  test "git_native : pod usurpe une identité (architect) → git.publish_failed (bad_identity)",
+  test "git_native : pod usurpe une identité (architect) → git.publish_failed (bad_identity), aucun push",
        %{tmp_dir: tmp_dir} do
-    Application.put_env(:fleet_pipeline, :deliverable_mode_resolver, fn _r, _p -> "git_native" end)
-
-    bare = seed_remote(tmp_dir, "gn2-source")
-
-    write_pipeline(tmp_dir, "gn2", """
-        post_extract:
-          git:
-            repo_url: #{bare}
-            branch: main
-    """)
+    {bare, ws} = git_native_setup(tmp_dir, "gn2")
+    pod_commits(ws, "x.py", "x = 1\n", "fraud", "architect@lcars.local", "evil")
 
     {:ok, pipeline_id} = Pipeline.start_pipeline("gn2", %{ticket_id: "gn2#1"})
     assert_receive {:spawned, "publish", _}, 2_000
-
-    ws = workspace_for(pipeline_id, "publish")
-    # Le pod se fait passer pour l'architect → la gate (F-01) doit refuser.
-    pod_commits(ws, "x.py", "x = 1\n", "fraud", "architect@lcars.local", "evil")
-
-    pod_completed(%{
-      "pod_id" => "pod-publish",
-      "ticket_id" => "gn2#1",
-      "pipeline_id" => pipeline_id,
-      "stage" => "publish",
-      "result" => %{"answer" => "committed"}
-    })
+    gn_pod_completed(pipeline_id, "gn2")
 
     assert_receive %Fleet.Event{
                      source: :pipeline,
                      type: :"git.publish_failed",
                      payload: %{"reason" => reason}
                    },
-                   2_000
+                   3_000
 
     assert String.contains?(reason, "bad_identity")
     assert String.contains?(reason, "architect@lcars.local")
+
+    assert {_, 1} =
+             System.cmd(
+               "git",
+               ["-C", bare, "rev-parse", "--verify", "-q", "deliverables/engineer/gn2"],
+               stderr_to_stdout: true
+             )
 
     assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000
   end
 
   test "git_native : pod n'a produit aucun commit → git.publish_failed (no_deliverable_commit)",
        %{tmp_dir: tmp_dir} do
-    Application.put_env(:fleet_pipeline, :deliverable_mode_resolver, fn _r, _p -> "git_native" end)
-
-    bare = seed_remote(tmp_dir, "gn3-source")
-
-    write_pipeline(tmp_dir, "gn3", """
-        post_extract:
-          git:
-            repo_url: #{bare}
-            branch: main
-    """)
+    {_bare, _ws} = git_native_setup(tmp_dir, "gn3")
+    # Aucun pod_commits → le workspace pod reste à HEAD == base (seed).
 
     {:ok, pipeline_id} = Pipeline.start_pipeline("gn3", %{ticket_id: "gn3#1"})
     assert_receive {:spawned, "publish", _}, 2_000
-    # Le pod n'a RIEN commité : HEAD == base.
-
-    pod_completed(%{
-      "pod_id" => "pod-publish",
-      "ticket_id" => "gn3#1",
-      "pipeline_id" => pipeline_id,
-      "stage" => "publish",
-      "result" => %{"answer" => "nothing"}
-    })
+    gn_pod_completed(pipeline_id, "gn3")
 
     assert_receive %Fleet.Event{
                      source: :pipeline,
                      type: :"git.publish_failed",
                      payload: %{"reason" => reason}
                    },
-                   2_000
+                   3_000
 
     assert String.contains?(reason, "no_deliverable_commit")
-
     assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000
   end
 

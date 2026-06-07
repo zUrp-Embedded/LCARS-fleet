@@ -478,15 +478,14 @@ defmodule Fleet.Pipeline.Executor do
   defp do_run_stage(stage_name, state) do
     stage_spec = state.pipeline["stages"][stage_name]
     git_spec = get_in(stage_spec, ["post_extract", "git"])
+    mode = deliverable_mode_for_stage(stage_name, git_spec, state)
 
-    # Face 2 brique 2.4 : provisionne le workspace AVANT spawn si la stage
-    # déclare post_extract.git. Clone repo_url + checkout branch. No-op si
-    # post_extract.git absent. Échec = halt pipeline (clone/checkout = erreur
-    # infrastructure, pas un livrable à juger).
-    case WorkspaceProvisioner.provision_for_stage(state.pipeline_id, stage_name, git_spec) do
-      {:ok, ws_or_nil} ->
-        # F-03 : verrouille base_sha = HEAD post-clone, AVANT spawn (le pod ne peut pas la bouger).
-        state = maybe_capture_base_sha(state, stage_name, ws_or_nil)
+    # #596 : la PRÉPARATION du workspace diverge par mode (autorité unique par côté de la frontière).
+    #  · payload   → l'Executor provisionne `<workspaces_root>/...` (système-écrit) + capture base.
+    #  · git_native → le POD provisionne `<pod_dir>/workspace` (ProjectBootstrap) ; l'Executor PIN la
+    #    base hors-pod (ls-remote, F-03 R1) + l'injecte dans le spawn. Pas de WorkspaceProvisioner.
+    case prepare_workspace(mode, stage_name, git_spec, state) do
+      {:ok, state} ->
         run_stage_backend(stage_name, stage_spec, state)
 
       {:error, reason} ->
@@ -497,6 +496,77 @@ defmodule Fleet.Pipeline.Executor do
         )
 
         {:stop, :provision_fail, state}
+    end
+  end
+
+  # Mode seulement pertinent si la stage a un post_extract.git. Sinon `:payload` (no-op provisioner).
+  defp deliverable_mode_for_stage(_stage, nil, _state), do: :payload
+
+  defp deliverable_mode_for_stage(stage, _git_spec, state) do
+    resolve_deliverable_mode(
+      role_for_stage(state.pipeline, stage),
+      profile_for_stage(state.pipeline, stage)
+    )
+  end
+
+  defp prepare_workspace(:payload, stage, git_spec, state) do
+    case WorkspaceProvisioner.provision_for_stage(state.pipeline_id, stage, git_spec) do
+      # F-03 (payload) : base = HEAD post-clone, lu hors-pod AVANT spawn (le pod n'écrit pas ce ws).
+      {:ok, ws_or_nil} -> {:ok, maybe_capture_base_sha(state, stage, ws_or_nil)}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp prepare_workspace(:git_native, stage, git_spec, state) do
+    repo_url = git_spec["repo_url"]
+    base_branch = git_spec["branch"]
+
+    # F-03 R1 (verdict juge #636) : PIN la base via `ls-remote` HORS-pod, injectée au clone du pod
+    # (`project.base_sha` → ProjectBootstrap `reset --hard`). Le pod commence garanti à `pinned` →
+    # `base..HEAD` = uniquement ses commits. Élimine la course same-role (ls-remote seul = théâtre).
+    case ls_remote_sha(repo_url, base_branch) do
+      {:ok, pinned} ->
+        project = %{
+          "repo_path" => repo_url,
+          "base_branch" => base_branch,
+          "base_sha" => pinned,
+          "reference_repo_path" => Map.get(git_spec, "reference_repo_path")
+        }
+
+        mc = state.mandate_context
+        spawn_opts = mc |> Map.get(:spawn_opts, []) |> Keyword.put(:project, project)
+        mc = Map.put(mc, :spawn_opts, spawn_opts)
+
+        {:ok, %{state | mandate_context: mc, base_shas: Map.put(state.base_shas, stage, pinned)}}
+
+      {:error, reason} ->
+        {:error, {:ls_remote_failed, reason}}
+    end
+  end
+
+  # `git ls-remote <repo_url> <branch>` borné → SHA du tip (1ère colonne, 1ère ligne). Capture
+  # hors-pod de la base (sp-monde-invoque : le monde projette le SHA, le pod l'exécute mécaniquement).
+  defp ls_remote_sha(repo_url, branch) do
+    task =
+      Task.async(fn ->
+        System.cmd("git", ["ls-remote", repo_url, branch], stderr_to_stdout: true)
+      end)
+
+    case Task.yield(task, 15_000) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {out, 0}} ->
+        case out |> String.split("\n", trim: true) |> List.first() do
+          nil -> {:error, :no_ref}
+          line -> {:ok, line |> String.split() |> List.first()}
+        end
+
+      {:ok, {out, rc}} ->
+        {:error, {rc, String.trim(out)}}
+
+      nil ->
+        {:error, :timeout}
+
+      {:exit, reason} ->
+        {:error, {:exit, reason}}
     end
   end
 
@@ -617,15 +687,44 @@ defmodule Fleet.Pipeline.Executor do
     # `result["files"]` est nil (files sous `result["result"]["files"]`) → `:no_files_in_payload`.
     # Trouvé en dogfood live (PASSE-8) : les tests unitaires envoyaient le `result` déjà déplié.
     result = outputs |> Map.get("result", %{}) |> unwrap_worker_envelope()
-    workspace = WorkspaceProvisioner.workspace_dir_for(state.pipeline_id, stage)
     role = role_for_stage(state.pipeline, stage)
     profile = profile_for_stage(state.pipeline, stage)
     mode = resolve_deliverable_mode(role, profile)
     base_sha = Map.get(state.base_shas, stage)
 
-    case build_deliverable_opts(mode, workspace, git_spec, result, role, base_sha) do
-      {:ok, opts} -> publish_deliverable(stage, opts, state)
+    # #596 : le workspace À GATER diverge par mode. payload → dir système-provisionné ; git_native →
+    # workspace DU POD (`<pod_dir>/workspace`), résolu via PodRegistry+pod_workspace_dir (le monde lit
+    # où IL a placé le pod, pas une assertion du pod — Q2). Échec de résolution = fail-loud (pas de gate
+    # sur un chemin inventé).
+    with {:ok, workspace} <- resolve_gate_workspace(mode, stage, role, state),
+         {:ok, opts} <- build_deliverable_opts(mode, workspace, git_spec, result, role, base_sha) do
+      publish_deliverable(stage, opts, state)
+    else
       {:error, reason} -> broadcast_publish_failed(stage, reason, state)
+    end
+  end
+
+  defp resolve_gate_workspace(:payload, stage, _role, state),
+    do: {:ok, WorkspaceProvisioner.workspace_dir_for(state.pipeline_id, stage)}
+
+  defp resolve_gate_workspace(:git_native, _stage, role, state) do
+    # Seam test/config (mirroir `deliverable_mode_resolver`) : override la résolution du workspace pod
+    # (un vrai pod claude n'existe qu'en e2e/dogfood). Défaut = PodRegistry → pod_workspace_dir.
+    case Application.get_env(:fleet_pipeline, :git_native_workspace_resolver) do
+      fun when is_function(fun, 2) ->
+        fun.(state.pipeline_id, role)
+
+      _ ->
+        case Fleet.Pipeline.PodRegistry.lookup(state.pipeline_id, role) do
+          {:ok, pod_id} ->
+            case Fleet.Spawner.pod_workspace_dir(pod_id) do
+              {:ok, ws} -> {:ok, ws}
+              {:error, _} -> {:error, :pod_workspace_unresolved}
+            end
+
+          :not_found ->
+            {:error, :pod_not_registered}
+        end
     end
   end
 
@@ -663,10 +762,11 @@ defmodule Fleet.Pipeline.Executor do
     })
   end
 
-  # Construit les opts `Deliverable` selon le mode. `base_sha` nil (provision n'a pas capturé) =
-  # fail-loud : sans base on ne peut PAS gater (F-03) → on refuse de publier. `remote` = `origin`
-  # (convention WorkspaceProvisioner). `target_branch` = la branche du git_spec (système-side, pas
-  # lue côté pod) ; `push?` du git_spec (défaut false, préserve PASSE-7).
+  # Construit les opts `Deliverable` selon le mode. `base_sha` nil = fail-loud (sans base, pas de gate
+  # F-03 → refus de publier). `remote` = `origin` (convention clone). `target_branch` = branche cible
+  # système-choisie (F-04) : `git_spec["target_branch"]` si présent (git_native : le pod clone `branch`
+  # comme base, le système pousse sur une cible distincte), sinon `git_spec["branch"]` (payload : la
+  # branche provisionnée EST la cible). `push?` du git_spec (défaut false, préserve PASSE-7).
   defp build_deliverable_opts(_mode, _ws, _git_spec, _result, _role, nil),
     do: {:error, :base_sha_unavailable}
 
@@ -677,7 +777,7 @@ defmodule Fleet.Pipeline.Executor do
       base_sha: base_sha,
       allowed_emails: allowed_emails(mode, role),
       remote: "origin",
-      target_branch: Map.get(git_spec, "branch"),
+      target_branch: Map.get(git_spec, "target_branch") || Map.get(git_spec, "branch"),
       push?: Map.get(git_spec, "push", false)
     }
 
