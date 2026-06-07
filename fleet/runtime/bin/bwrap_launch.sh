@@ -210,11 +210,28 @@ if [[ "${LCARS_POD_DISABLE_TELEMETRY:-0}" == "1" ]]; then
   TELEMETRY_ENV=(--setenv DISABLE_TELEMETRY "1" --setenv CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC "1")
 fi
 
+# Monde minimal (#2 mundo invocado) : resolv.conf est souvent un symlink HORS /etc (WSL → /mnt/wsl ;
+# systemd-resolved → /run). Comme on bind /etc seul (pas `/ /`), il faut binder le fichier RÉEL à son
+# path d'origine pour que le symlink /etc/resolv.conf résolve dans le pod — sinon DNS mort → claude
+# hang sur l'API (POC 2026-06-07, gotcha WSL). On ne peut PAS override sous /etc RO ⇒ bind au vrai path.
+RESOLV_BIND=()
+RESOLV_REAL="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
+if [[ -n "$RESOLV_REAL" && "$RESOLV_REAL" != /etc/* && -e "$RESOLV_REAL" ]]; then
+  RESOLV_BIND=(--ro-bind "$RESOLV_REAL" "$RESOLV_REAL")
+fi
+
 exec "$BWRAP_BIN" \
   --unshare-all --share-net \
   --die-with-parent \
   --clearenv \
-  --ro-bind / / \
+  --ro-bind /usr /usr \
+  --symlink usr/bin /bin \
+  --symlink usr/sbin /sbin \
+  --symlink usr/lib /lib \
+  --symlink usr/lib64 /lib64 \
+  --ro-bind /etc /etc \
+  ${RESOLV_BIND[@]+"${RESOLV_BIND[@]}"} \
+  --ro-bind /sys /sys \
   --tmpfs /home \
   --tmpfs /tmp \
   --dev /dev --proc /proc \
