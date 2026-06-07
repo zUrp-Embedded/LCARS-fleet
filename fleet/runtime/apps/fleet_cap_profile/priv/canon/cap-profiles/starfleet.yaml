@@ -43,6 +43,8 @@ spec:
     monk_instance: null
   invocation:
     lifetime_scope: forever  # D-01 host-natif process permanent
+    model: opus        # catalogue → --model (alias/nom complet ; tunable)
+    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false     # D-01 : starfleet boot via lcars-starfleet-host.sh systemd unit séparée, JAMAIS via fleet_spawner bwrap
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]

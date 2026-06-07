@@ -53,6 +53,8 @@ spec:
     monk_instance: null
   invocation:
     lifetime_scope: forever  # G24-10 : boot_at_start: true requires forever (pod permanent Type 1)
+    model: opus        # catalogue → --model (alias/nom complet ; tunable)
+    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: true
     subagent_template: null
     mcp_channels: ["fleet-control.*", "fleet-forge.*"]

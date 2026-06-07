@@ -81,7 +81,12 @@
             "policy": { "type": "string" },
             "rubber_duck_enabled": { "type": "boolean" },
             "long_session_protocol": { "type": "boolean" },
-            "output_format": { "type": "string" }
+            "output_format": { "type": "string" },
+            "model": { "type": "string" },
+            "effort": {
+              "type": "string",
+              "enum": ["low", "medium", "high", "xhigh", "max"]
+            }
           }
         },
         "injects": {

@@ -161,6 +161,15 @@ ALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.allowedTools | join(",")' "$CAP_PROFIL
 DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq disallowedTools fail rc=$? out=$DISALLOWED_TOOLS"; exit 1; }
 dbg "step jq tools OK allowed='$ALLOWED_TOOLS' disallowed='$DISALLOWED_TOOLS'"
 
+# Model + effort depuis le catalogue (spec.invocation) → flags claude. Absent/null ⇒ flag omis
+# (claude garde son défaut binaire ; les 7 cap-profiles canon les posent ⇒ flag toujours émis en prod).
+# `--effort` enum {low,medium,high,xhigh,max}, `--model` alias ('opus'/'sonnet') ou nom complet (claude --help 2.1.114).
+MODEL=$("$JQ_BIN" -r '.spec.invocation.model // empty' "$CAP_PROFILE_JSON" 2>/dev/null)
+EFFORT=$("$JQ_BIN" -r '.spec.invocation.effort // empty' "$CAP_PROFILE_JSON" 2>/dev/null)
+MODEL_FLAGS=();  [[ -n "$MODEL"  ]] && MODEL_FLAGS=(--model "$MODEL")
+EFFORT_FLAGS=(); [[ -n "$EFFORT" ]] && EFFORT_FLAGS=(--effort "$EFFORT")
+dbg "step jq invocation model='$MODEL' effort='$EFFORT'"
+
 # =============================================================
 # Settings pod-spécifiques (permissions/bypass). $POD_DIR/.lcars/settings.json, passé en flagSettings
 # via --settings (ADDITIF, indépendant de --setting-sources). Les hooks humains, eux, ne fuitent plus
@@ -255,5 +264,7 @@ exec "$CLAUDE_BIN" \
     "${PERM_FLAGS[@]}" \
     --allowedTools "$ALLOWED_TOOLS" \
     --disallowedTools "$DISALLOWED_TOOLS" \
+    "${MODEL_FLAGS[@]+"${MODEL_FLAGS[@]}"}" \
+    "${EFFORT_FLAGS[@]+"${EFFORT_FLAGS[@]}"}" \
     ${SETTINGS_FLAGS[@]+"${SETTINGS_FLAGS[@]}"} \
     ${MCP_FLAGS[@]+"${MCP_FLAGS[@]}"}

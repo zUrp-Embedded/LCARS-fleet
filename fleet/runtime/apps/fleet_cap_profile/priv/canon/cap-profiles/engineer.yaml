@@ -69,6 +69,8 @@ spec:
     # Les judges (qualifier, reviewer, consultant) restent one-shot — pas de
     # mémoire d'audit précédent souhaitée pour chaque cycle 11.1/11.2.
     lifetime_scope: pipe
+    model: opus        # catalogue → --model (alias/nom complet ; tunable)
+    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
     # subagent_template retiré (était `implementer`) — G24-11 contraint
     # subagent_template ⟹ lifetime_scope: one-shot. Avec l'engineer en

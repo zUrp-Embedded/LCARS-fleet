@@ -44,6 +44,8 @@ spec:
     monk_instance: null
   invocation:
     lifetime_scope: one-shot
+    model: opus        # catalogue → --model (alias/nom complet ; tunable)
+    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
     subagent_template: null
     mcp_channels: ["fleet-control.consultant.*", "fleet-forge.consultant"]  # fleet-control: Memory-X + coord ; fleet-forge: routing tickets Gitea

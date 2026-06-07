@@ -42,6 +42,8 @@ spec:
     monk_instance: null
   invocation:
     lifetime_scope: one-shot
+    model: opus        # catalogue → --model (alias/nom complet ; tunable)
+    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
     subagent_template: code-quality-reviewer
     mcp_channels: ["fleet-control.reviewer.*", "fleet-forge.reviewer"]  # fleet-control: Memory-X + coord ; fleet-forge: routing tickets Gitea
