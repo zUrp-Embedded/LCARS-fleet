@@ -187,40 +187,34 @@ defmodule Fleet.Pipeline.Git do
     end
   end
 
-  defp maybe_push(%{push?: true} = opts) do
-    remote = Map.fetch!(opts, :remote)
+  @doc """
+  Push-only (O5) — pousse `refspec` du `workspace` vers `remote`, **borné** (timeout). PAS d'add/commit :
+  la branche est déjà commitée (par le pod en mode `git_native`, ou par `publish/1` en mode `payload`).
+  `refspec` peut être `local_ref:target_branch` pour que la ref poussée soit **choisie par le système**
+  (F-04). Partagé par `Fleet.Pipeline.Deliverable` (les 2 modes) et `maybe_push/1` (compat `publish/1`).
+  """
+  @spec push(Path.t(), String.t(), String.t()) :: {:ok, true} | {:error, term()}
+  def push(workspace, remote, refspec) do
     timeout_ms = push_timeout_ms()
 
-    # audit elixir #1 BLOQUANT — `System.cmd("git", ["push", ...])` n'a pas
-    # de timeout natif. Un push réseau hung (DNS, TLS handshake, packfile
-    # transfer interrompu) bloque l'Executor GenServer indéfiniment.
-    # Task.async + Task.yield + Task.shutdown :brutal_kill : si pas de retour
-    # dans `timeout_ms`, on tue le Task (donc le port, donc le process git
-    # via SIGKILL). Retour `{:error, :git_push_timeout}` propagé à
-    # `Fleet.Pipeline.Executor.do_post_extract_git/4` qui broadcast
-    # `git.publish_failed` (best-effort, n'interrompt pas le pipeline).
+    # audit elixir #1 BLOQUANT — `git push` n'a pas de timeout natif. Push réseau hung (DNS, TLS,
+    # packfile interrompu) bloquerait l'Executor GenServer. Task.async + yield + shutdown :brutal_kill :
+    # pas de retour dans `timeout_ms` → on tue le Task (port → process git via SIGKILL).
     task =
       Task.async(fn ->
-        System.cmd("git", ["push", remote, opts.branch],
-          cd: opts.workspace,
-          stderr_to_stdout: true
-        )
+        System.cmd("git", ["push", remote, refspec], cd: workspace, stderr_to_stdout: true)
       end)
 
     case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {_out, 0}} ->
-        {:ok, true}
-
-      {:ok, {out, rc}} ->
-        {:error, {:git_push_failed, rc, String.trim(out)}}
-
-      nil ->
-        {:error, {:git_push_timeout, timeout_ms}}
-
-      {:exit, reason} ->
-        {:error, {:git_push_exit, reason}}
+      {:ok, {_out, 0}} -> {:ok, true}
+      {:ok, {out, rc}} -> {:error, {:git_push_failed, rc, String.trim(out)}}
+      nil -> {:error, {:git_push_timeout, timeout_ms}}
+      {:exit, reason} -> {:error, {:git_push_exit, reason}}
     end
   end
+
+  defp maybe_push(%{push?: true} = opts),
+    do: push(opts.workspace, Map.fetch!(opts, :remote), opts.branch)
 
   defp maybe_push(_opts), do: {:ok, false}
 
