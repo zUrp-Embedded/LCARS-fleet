@@ -29,8 +29,11 @@
 #   LCARS_POD_SESSION_NAME_PREFIX <human>_<role> nom RC lisible — requis (:? strict)
 #   CLAUDE_DIR                    claudeDir du compte humain — requis (utilisé selon LCARS_AUTH_MODE)
 #   LCARS_AUTH_MODE               bind (défaut, adr-f) | token_arg (BL-021 chantier 6) :
-#                                   - bind     : --bind CLAUDE_DIR pod_dir/.claude (RW, refresh natif
-#                                                Anthropic via lockfile POSIX + mtime sync)
+#                                   - bind     : bind RW de CLAUDE_DIR/.credentials.json SEUL →
+#                                                pod_dir/.claude/.credentials.json (refresh natif
+#                                                Anthropic en place + mtime sync). PAS le .claude
+#                                                humain entier — sinon ses hooks fuient et jamment
+#                                                le boot (P1/C9, JOURNAL-P1-hooks.md). .claude/ pod-owned.
 #                                   - token_arg: pas de bind ; ANTHROPIC_AUTH_TOKEN injecté via env
 #                                                (LCARS_ANTHROPIC_AUTH_TOKEN extrait par le spawner
 #                                                depuis CLAUDE_DIR/.credentials.json). Désactive le
@@ -168,12 +171,26 @@ set +f
 #   La discipline est dans les MURS (binds = ce qui existe) + l'ENV (ce qui est posé), pas dans le SP.
 # =============================================================
 # BL-021 chantier 6 — branchement bind vs token_arg sur LCARS_AUTH_MODE :
-#   bind     : --bind CLAUDE_DIR pod_dir/.claude (RW), pas d'ANTHROPIC_AUTH_TOKEN injecté.
+#   bind     : bind RW de CLAUDE_DIR/.credentials.json SEUL (pas d'ANTHROPIC_AUTH_TOKEN injecté).
 #   token_arg: pas de bind claudeDir (pod isolé), --setenv ANTHROPIC_AUTH_TOKEN <token>.
+#
+# P1/C9 (2026-06-07) — on NE bind PLUS le .claude humain entier. Raison : cwd=HOME=POD_DIR, donc les
+# tiers settings `project`/`local` (racine=cwd, activés par --setting-sources project,local)
+# résolvaient dans le .claude humain bindé → le settings.json humain était chargé comme settings
+# *projet* → ses hooks (session-startup.sh…) s'exécutaient → plantent → retry 10× → JAM au boot.
+# Le flag ne pouvait rien (il autorise project/local). Fix : seul `.credentials.json` est bindé
+# (refresh OAuth natif = écriture EN PLACE, survit au bind single-file + réécrit le fichier humain) ;
+# `.claude/` reste pod-owned (créé par do_project) → 0 settings.json humain → 0 hook. Détail
+# mécanisme : validation-pod/JOURNAL-P1-hooks.md.
 AUTH_BIND_ARGS=()
 AUTH_ENV_ARGS=()
 if [[ "$AUTH_MODE" == "bind" ]]; then
-  AUTH_BIND_ARGS=(--bind "$CLAUDE_DIR" "$POD_DIR/.claude")
+  HUMAN_CREDS="$CLAUDE_DIR/.credentials.json"
+  [[ -f "$HUMAN_CREDS" ]] || { echo "ERR: creds $HUMAN_CREDS missing (registration humain — adr-f)" >&2; exit 1; }
+  # `.claude/` pod-owned doit exister host-side pour héberger le mountpoint creds (POD_DIR est lui-même
+  # bind-monté RW → ce mkdir est visible dans le sandbox). do_project le crée déjà ; défensif ici.
+  mkdir -p "$POD_DIR/.claude"
+  AUTH_BIND_ARGS=(--bind "$HUMAN_CREDS" "$POD_DIR/.claude/.credentials.json")
 else
   AUTH_ENV_ARGS=(--setenv ANTHROPIC_AUTH_TOKEN "$ANTHROPIC_AUTH_TOKEN_VALUE")
 fi

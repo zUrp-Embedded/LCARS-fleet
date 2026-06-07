@@ -391,9 +391,14 @@ defmodule Fleet.Spawner.Pod do
     skills_root = Application.get_env(:fleet_spawner, :skills_root, nil)
     repo_md = Path.join(state.pod_dir, "CLAUDE.md.repo-source")
 
-    # Provisioning HORS .claude/ : le bind CLAUDE_DIR→.claude de bwrap_launch MASQUE tout fichier pod
-    # sous .claude/. settings/SP/protocole → .lcars/ (où claude_launch lit settings + merge le
-    # skip-dialog) ; CLAUDE.md custom → racine pod (projet, cwd, non masquée).
+    # P1/C9 (2026-06-07) — `.claude/` est désormais POD-OWNED. bwrap ne bind QUE
+    # `.credentials.json` dedans (plus le .claude humain entier). Raison de la fuite : cwd=HOME=POD_DIR,
+    # donc les tiers settings `project`/`local` (racine = cwd) résolvaient dans `$POD_DIR/.claude/` =
+    # le `.claude` humain bindé → le settings.json humain (et ses hooks) lu comme settings *projet*.
+    # `--setting-sources project,local` n'y pouvait rien (il autorise project/local). Fix : `.claude/`
+    # pod-owned + aucun settings.json dedans → tiers project/local vides → 0 hook humain.
+    # cf JOURNAL-P1-hooks.md. Fichiers pod (settings/SP/protocole) en .lcars/ ; CLAUDE.md → racine pod.
+    pod_claude_dir = Path.join(state.pod_dir, ".claude")
     lcars_dir = Path.join(state.pod_dir, ".lcars")
     tickets_dir = Path.join(state.pod_dir, "tickets")
 
@@ -404,6 +409,9 @@ defmodule Fleet.Spawner.Pod do
          {:ok, agent_draft} <- read_agent_worker_draft(),
          {:ok, protocole_user} <- read_protocole_user(),
          :ok <- safe_mkdir_p(lcars_dir),
+         # `.claude/` pod-owned = cible du bind creds-only (bwrap_launch). On ne crée QUE le dir,
+         # aucun settings.json dedans → 0 hook humain (P1/C9). bwrap y monte `.credentials.json`.
+         :ok <- safe_mkdir_p(pod_claude_dir),
          :ok <-
            safe_write(
              Path.join(lcars_dir, "system-prompt.md"),
@@ -413,9 +421,9 @@ defmodule Fleet.Spawner.Pod do
          :ok <- safe_write(Path.join(state.pod_dir, "CLAUDE.md"), claude_md),
          :ok <- safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
          :ok <- safe_write(Path.join(lcars_dir, "settings.json"), pod_settings_json()),
-         # creds : plus de copie (adr-f). Le claudeDir de l'humain est monté RW par bwrap_launch.sh
-         # en ~/.claude (CLAUDE_DIR), refresh OAuth délégué au lockfile natif. Les fichiers pod
-         # ci-dessus sont en .lcars/ + racine pod (HORS .claude/) → plus masqués par le bind (résolu).
+         # creds : plus de copie (adr-f). Seul `.credentials.json` de l'humain est monté RW par
+         # bwrap_launch.sh dans `pod_dir/.claude/` (refresh OAuth natif, écriture en place). `.claude/`
+         # reste pod-owned → pas de hook humain. Les fichiers pod sont en .lcars/ + racine pod.
          :ok <- write_pod_claude_json(state),
          :ok <- safe_mkdir_p(tickets_dir),
          :ok <-
@@ -726,8 +734,8 @@ defmodule Fleet.Spawner.Pod do
       bwrap_launch_path: bwrap_launch_path(),
       claude_launch_path: claude_launch_path(),
       session_id: state.session_id,
-      # SP composé inline (argv4 claude_launch) — le fichier .claude/system-prompt.md est masqué
-      # par le bind bwrap, donc le SP voyage en argv (cohérent contrat claude_launch.sh).
+      # SP composé inline (argv4 claude_launch) : le SP voyage en argv (--system-prompt), pas en
+      # fichier — contrat claude_launch.sh. (.lcars/system-prompt.md = miroir lisible côté pod.)
       sp: state.sp
     }
 
@@ -1091,8 +1099,8 @@ defmodule Fleet.Spawner.Pod do
       # à la création du GenServer, persisté tel quel dans state.json.
       started_at: DateTime.utc_now(),
       resume: false,
-      # SP composé (do_project) stocké en state pour l'argv4 inline de claude_launch — le fichier
-      # `.claude/system-prompt.md` est MASQUÉ par le bind CLAUDE_DIR→.claude de bwrap_launch.
+      # SP composé (do_project) stocké en state pour l'argv4 inline de claude_launch
+      # (--system-prompt) ; pas de fichier SP côté pod (.lcars/system-prompt.md = miroir lisible).
       sp: nil,
       cap_profile: args.cap_profile,
       env_vars: %{},

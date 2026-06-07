@@ -136,7 +136,17 @@ defmodule Fleet.Spawner.PodTest do
       assert File.dir?(info.pod_dir)
       assert File.exists?(Path.join(info.pod_dir, ".cap-profile.json"))
 
-      # Provisioning HORS .claude/ (masqué par le bind bwrap) : .lcars/ + racine pod pour CLAUDE.md.
+      # P1/C9 — `.claude/` pod-owned : cible du bind creds-only (bwrap bind UNIQUEMENT
+      # .credentials.json dedans, plus le dir humain entier). Doit exister, créé par do_project.
+      assert File.dir?(Path.join(info.pod_dir, ".claude")),
+             "pod_dir/.claude doit exister (cible pod-owned du bind .credentials.json)"
+
+      # Aucun settings.json humain ne doit fuiter (userSettings = .claude/settings.json absent
+      # → 0 hook chargé ; getAllHooks ignore --setting-sources, cf JOURNAL-P1-hooks).
+      refute File.exists?(Path.join(info.pod_dir, ".claude/settings.json")),
+             ".claude/settings.json ne doit PAS exister (sinon des hooks chargeraient)"
+
+      # Provisioning du reste HORS .claude/ : .lcars/ + racine pod pour CLAUDE.md.
       assert File.exists?(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
       assert File.exists?(Path.join(info.pod_dir, "CLAUDE.md"))
       assert File.exists?(Path.join(info.pod_dir, ".lcars/protocole-user.md"))

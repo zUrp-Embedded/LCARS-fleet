@@ -140,8 +140,8 @@ dbg "step CAP_PROFILE OK"
 
 # =============================================================
 # Onboarding/trust skip (interactif) : sinon claude bloque sur le dialogue 1er lancement.
-# .claude.json minimal à la racine du HOME pod ($POD_DIR, hors .claude/ ⇒ non masqué
-# par le bind creds). Clé projects = cwd pod (= $POD_DIR).
+# .claude.json minimal à la racine du HOME pod ($POD_DIR, hors .claude/). Clé projects = cwd pod
+# (= $POD_DIR). (.claude/ est pod-owned : bwrap n'y bind QUE .credentials.json — P1/C9.)
 # (NB : l'acceptation bypass N'est PLUS ici — `bypassPermissionsModeAccepted` du global config a
 #  MIGRÉ vers settings.json/`skipDangerousModePermissionPrompt` — cf. bloc « bypass dialog » infra.)
 # =============================================================
@@ -162,9 +162,10 @@ DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_
 dbg "step jq tools OK allowed='$ALLOWED_TOOLS' disallowed='$DISALLOWED_TOOLS'"
 
 # =============================================================
-# Settings pod-spécifiques (hooks/permissions). $POD_DIR/.lcars/settings.json (HORS .claude/,
-# le bind creds masque tout fichier sous .claude/ — amendement 2026-05-31 §C-2(a)).
-# --settings ADDITIF ⇒ --setting-sources exclut 'user'. Optionnel : si absent, pas de flag.
+# Settings pod-spécifiques (permissions/bypass). $POD_DIR/.lcars/settings.json, passé en flagSettings
+# via --settings (ADDITIF, indépendant de --setting-sources). Les hooks humains, eux, ne fuitent plus
+# au niveau du BIND (bwrap ne bind que .credentials.json, .claude/ pod-owned → 0 settings.json humain
+# dans aucun tier user/project/local — P1/C9). Optionnel : si absent, pas de flag --settings.
 # =============================================================
 
 POD_SETTINGS_FILE="$POD_DIR/.lcars/settings.json"
@@ -190,10 +191,11 @@ if [[ -z "$PERM_MODE" ]]; then
   dbg "step bypass dialog pré-accepté (skipDangerousModePermissionPrompt → $POD_SETTINGS_FILE)"
 fi
 
-# --setting-sources INCONDITIONNEL : on exclut le tier 'user' (settings.json de l'humain)
-# TOUJOURS — casser la dép par flag, pas en comptant sur le masquage bwrap. `--settings`
-# (additif) ajouté seulement si le fichier pod existe. (À confirmer empiriquement au bring-up :
-# que `--setting-sources` seul, sans `--settings`, est accepté par le binaire.)
+# --setting-sources INCONDITIONNEL : exclut le tier 'user' (settings.json de l'humain en ~/.claude).
+# NB (P1/C9) : ce flag NE suffit PAS à fermer la fuite des hooks — celle-ci passait par les tiers
+# `project`/`local` (qu'il AUTORISE), dont la racine = cwd = POD_DIR = le .claude humain quand il
+# était bindé entier. La fuite est fermée au BIND (.claude pod-owned, bwrap ne bind que les creds),
+# pas par ce flag. `--settings` (additif/flagSettings) ajouté seulement si le fichier pod existe.
 SETTINGS_FLAGS=(--setting-sources "$SETTING_SOURCES")
 if [[ -f "$POD_SETTINGS_FILE" ]]; then
   SETTINGS_FLAGS+=(--settings "$POD_SETTINGS_FILE")
