@@ -626,20 +626,57 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
+  # Résolution du binaire vendor à poser en LCARS_VENDOR_BIN (honore bwrap_launch.sh:55) :
+  #   1. binaire de l'HUMAIN (`~/.local/bin/claude` résolu via son home passwd — PAS `/home/<x>`
+  #      hardcodé : gère lcars=/var/lib/lcars ≠ /home/lcars, et tout home non-standard) ;
+  #   2. fallback = binaire global du user système du daemon (`lcars` par défaut, overridable
+  #      `:vendor_fallback_user`) — provisionné côté deploy (`<lcars-home>/.local/bin/claude`).
+  # Aucun des deux → on ne pose rien → bwrap retombe sur `command -v claude` = binaire système
+  # périmé (/usr/local 2.1.114, outil Monitor absent — piège #4). Le fallback lcars évite ce piège.
   defp maybe_put_vendor_bin(env, human) do
-    link = "/home/#{human}/.local/bin/claude"
+    fallback_user = Application.get_env(:fleet_spawner, :vendor_fallback_user, "lcars")
 
-    if File.exists?(link) do
-      bin =
-        case System.cmd("readlink", ["-f", link], stderr_to_stdout: true) do
-          {out, 0} -> String.trim(out)
-          _ -> link
+    case claude_bin_in_home(human) || claude_bin_in_home(fallback_user) do
+      bin when is_binary(bin) -> Map.put(env, "LCARS_VENDOR_BIN", bin)
+      nil -> env
+    end
+  end
+
+  # Cherche `~/.local/bin/claude` dans le home passwd de `user`. Retourne le path réel
+  # (readlink -f) ou `nil`. Le home vient de `getent passwd` (NSS), pas d'un `/home/<x>` deviné.
+  defp claude_bin_in_home(user) when is_binary(user) do
+    with {:ok, home} <- passwd_home(user),
+         link = Path.join([home, ".local", "bin", "claude"]),
+         true <- File.exists?(link) do
+      case System.cmd("readlink", ["-f", link], stderr_to_stdout: true) do
+        {out, 0} -> String.trim(out)
+        _ -> link
+      end
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp claude_bin_in_home(_), do: nil
+
+  # Home de `user` via `getent passwd` (champ 6, 0-indexé 5). `{:ok, home}` | `:error`.
+  defp passwd_home(user) do
+    case System.cmd("getent", ["passwd", user], stderr_to_stdout: true) do
+      {line, 0} ->
+        case String.split(String.trim(line), ":") do
+          fields when length(fields) >= 6 -> {:ok, Enum.at(fields, 5)}
+          _ -> :error
         end
 
-      Map.put(env, "LCARS_VENDOR_BIN", bin)
-    else
-      env
+      _ ->
+        :error
     end
+  rescue
+    _ -> :error
+  catch
+    _, _ -> :error
   end
 
   defp do_launch(state) do
