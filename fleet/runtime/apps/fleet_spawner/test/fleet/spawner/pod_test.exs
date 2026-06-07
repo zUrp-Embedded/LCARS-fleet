@@ -18,11 +18,32 @@ defmodule Fleet.Spawner.PodTest do
     File.write!(Path.join(sp_root, "engineer-role.md"), "# Engineer SP base")
     Application.put_env(:fleet_sp_builder, :sp_role_root, sp_root)
 
+    # mundo invocado #1 : le défaut auth_mode est :token_arg → tout spawn extrait l'access_token
+    # OAuth (fail-loud R15 sinon). Fixture creds par défaut pour les tests qui ne testent pas l'auth ;
+    # les tests auth/fail-loud overrident :claude_dir per-test.
+    setup_claude = Path.join(tmp_dir, ".claude")
+    File.mkdir_p!(setup_claude)
+
+    File.write!(
+      Path.join(setup_claude, ".credentials.json"),
+      Jason.encode!(%{
+        "claudeAiOauth" => %{
+          "accessToken" => "sk-ant-setup-tok",
+          "expiresAt" => 99_999_999_999_999,
+          "refreshToken" => "rt",
+          "scopes" => ["user:inference"]
+        }
+      })
+    )
+
+    Application.put_env(:fleet_spawner, :claude_dir, setup_claude)
+
     on_exit(fn ->
       StubBackend.clear()
       Application.delete_env(:fleet_spawner, :state_fs_root)
       Application.delete_env(:fleet_spawner, :pod_dir_root)
       Application.delete_env(:fleet_sp_builder, :sp_role_root)
+      Application.delete_env(:fleet_spawner, :claude_dir)
     end)
 
     {:ok, tmp_dir: tmp_dir}
@@ -51,6 +72,25 @@ defmodule Fleet.Spawner.PodTest do
 
   defp build_args(pod_id, ticket_id) do
     %{cap_profile: valid_profile(), ticket_id: ticket_id, pod_id: pod_id, opts: []}
+  end
+
+  # Repo source pour les tests projet : `main` (src.txt) + branche orpheline `work/ops` (BACKLOG.md).
+  defp source_repo_with_doc(dir) do
+    File.mkdir_p!(dir)
+    g = fn args -> System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true) end
+    {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", dir], stderr_to_stdout: true)
+    {_, 0} = g.(["config", "user.email", "t@lcars.local"])
+    {_, 0} = g.(["config", "user.name", "test"])
+    File.write!(Path.join(dir, "src.txt"), "code")
+    {_, 0} = g.(["add", "."])
+    {_, 0} = g.(["commit", "-q", "-m", "code"])
+    {_, 0} = g.(["checkout", "-q", "--orphan", "work/ops"])
+    {_, _} = g.(["rm", "-rfq", "."])
+    File.write!(Path.join(dir, "BACKLOG.md"), "doc")
+    {_, 0} = g.(["add", "."])
+    {_, 0} = g.(["commit", "-q", "-m", "doc"])
+    {_, 0} = g.(["checkout", "-q", "main"])
+    dir
   end
 
   # R1.2 — modèle interactif : le backend retourne init_message: nil (pas de frame NDJSON).
@@ -635,6 +675,65 @@ defmodule Fleet.Spawner.PodTest do
 
       # Le refus est à do_project (provisioning) AVANT do_launch → jamais de launch.
       refute_received {:launch_called, _args, _env}
+    end
+  end
+
+  describe "mundo invocado — intégration e2e (#1 creds-inject + cwd + doc-mount dans un spawn)" do
+    test "pod-projet : token_arg défaut + token per-human + cwd=workspace + code & doc clonés",
+         %{tmp_dir: tmp_dir} do
+      # creds fixture per-human (token_arg lit ce claudeDir, défaut config)
+      fake_claude = Path.join(tmp_dir, "fake-claude")
+      File.mkdir_p!(fake_claude)
+
+      File.write!(
+        Path.join(fake_claude, ".credentials.json"),
+        Jason.encode!(%{
+          "claudeAiOauth" => %{
+            "accessToken" => "sk-ant-mundo-XYZ",
+            "expiresAt" => 99_999_999_999_999,
+            "refreshToken" => "rt",
+            "scopes" => ["user:inference"]
+          }
+        })
+      )
+
+      Application.put_env(:fleet_spawner, :claude_dir, fake_claude)
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :claude_dir) end)
+
+      # repo source avec branche code (main) + branche doc (work/ops)
+      src = source_repo_with_doc(Path.join(tmp_dir, "proj-src"))
+
+      base = valid_profile()
+
+      profile = %{
+        base
+        | spec:
+            Map.put(base.spec, "project", %{
+              "repo_path" => src,
+              "base_branch" => "main",
+              "work_branch" => "work/ops"
+            })
+      }
+
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-mundo-#{System.unique_integer([:positive])}"
+
+      {:ok, _pid} =
+        spawn_via_supervisor(%{cap_profile: profile, ticket_id: "t-1", pod_id: pod_id, opts: []})
+
+      assert_receive {:launch_called, _args, env}, 3_000
+
+      # #1 — creds-inject per-human, DÉFAUT token_arg (zéro mount du .claude)
+      assert env["LCARS_AUTH_MODE"] == "token_arg"
+      assert env["LCARS_ANTHROPIC_AUTH_TOKEN"] == "sk-ant-mundo-XYZ"
+
+      # cwd → la branche CODE (workspace)
+      pod_dir = env["HOME"]
+      assert env["LCARS_POD_CWD"] == Path.join(pod_dir, "workspace")
+
+      # doc-mount : branche code + branche doc clonées côte à côte dans le pod
+      assert File.exists?(Path.join([pod_dir, "workspace", "src.txt"]))
+      assert File.exists?(Path.join([pod_dir, "work", "BACKLOG.md"]))
     end
   end
 end
