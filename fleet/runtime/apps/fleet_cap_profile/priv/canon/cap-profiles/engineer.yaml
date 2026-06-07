@@ -97,3 +97,8 @@ spec:
     optional: [tdd, subagent-driven, rubber-duck]
     incompatible: [[fire-mode, long-session-discipline]]
   project: null
+  # O5 — l'engineer EST un dev : il commite son code dans son workspace (git-natif).
+  # Le système vérifie (gate I-CBC : identité/secrets/base) puis pousse sur la branche
+  # qu'IL choisit (forge-aveugle). Les juges restent en `payload` (défaut) : leur livrable
+  # est un verdict structuré, pas un patch git. Cf. JOURNAL-deliverable-model-2026-06-07.
+  deliverable_mode: git_native
