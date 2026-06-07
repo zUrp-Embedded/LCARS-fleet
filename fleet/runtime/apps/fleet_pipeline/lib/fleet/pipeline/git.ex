@@ -236,7 +236,7 @@ defmodule Fleet.Pipeline.Git do
     # pas de retour dans `timeout_ms` → on tue le Task (port → process git via SIGKILL).
     task =
       Task.async(fn ->
-        System.cmd("git", @hooks_off ++ ["push", remote, refspec],
+        System.cmd("git", @hooks_off ++ forge_auth_args() ++ ["push", remote, refspec],
           cd: workspace,
           stderr_to_stdout: true
         )
@@ -260,5 +260,23 @@ defmodule Fleet.Pipeline.Git do
   # :git_push_timeout_ms (config app ou Application.put_env).
   defp push_timeout_ms do
     Application.get_env(:fleet_pipeline, :git_push_timeout_ms, 30_000)
+  end
+
+  # BL-037 (dogfood F8) — auth forge AUTHENTIFIÉE côté SYSTÈME. Le push vers une forge réelle (NAS HTTP)
+  # exige un token ; il est injecté `-c http.<prefix>.extraheader=Authorization: token <T>` SUR LA
+  # COMMANDE (jamais dans la config du workspace → le pod ne le lit pas : forge-cécité préservée, O5).
+  # Token détenu par le RUNTIME via config `:fleet_pipeline, :forge_auth = %{url_prefix, token}` (posée
+  # depuis l'env/secret au boot). Absent (ex. bare local `file://`) → `[]`, comportement inchangé.
+  # Public : partagé avec `WorkspaceProvisioner` (clone système-side depuis une forge authentifiée).
+  @doc false
+  def forge_auth_args do
+    case Application.get_env(:fleet_pipeline, :forge_auth) do
+      %{url_prefix: prefix, token: token}
+      when is_binary(prefix) and is_binary(token) and prefix != "" and token != "" ->
+        ["-c", "http.#{prefix}.extraheader=Authorization: token #{token}"]
+
+      _ ->
+        []
+    end
   end
 end
