@@ -45,7 +45,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
   alias Fleet.EventRouter.Bus
 
-  defstruct [:repo, :remote, :forge_opts, :role_emails, :hop_completer, :forge_client]
+  defstruct [:repo, :remote, :forge_opts, :role_emails, :hop_completer, :forge_client, :loader]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -68,7 +68,9 @@ defmodule Fleet.Pilot.HopConsumer do
         hop_completer: Keyword.get(opts, :hop_completer, Fleet.Pilot.HopCompleter),
         # nil → HopCompleter applique son défaut (Fleet.Pilot.ForgeClient). Injectable
         # pour un backend forge alternatif (ou un sim en dogfood bare).
-        forge_client: Keyword.get(opts, :forge_client)
+        forge_client: Keyword.get(opts, :forge_client),
+        # Loader de carte (A2 multi-stage) : résout le stage suivant. Défaut = Loader réel.
+        loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader)
       }
 
       Logger.info("fleet_pilot HopConsumer start repo=#{repo} remote=#{remote}")
@@ -122,29 +124,65 @@ defmodule Fleet.Pilot.HopConsumer do
   defp run_hop(payload, n, state) do
     role = payload["role"]
 
-    hop = %{
-      repo: state.repo,
-      issue_number: n,
-      role: role,
-      deliverable_opts: %{
-        mode: :git_native,
-        workspace: payload["workspace"],
-        base_sha: payload["base_sha"],
-        allowed_emails: state.role_emails.(role),
-        remote: state.remote,
-        target_branch: "lcars/issue-#{n}-#{role}",
-        push?: true,
-        local_ref: "HEAD"
-      },
-      next_assignee: nil,
-      state_label: "state:delivered"
-    }
+    # A2 : si le payload porte le contexte carte (pipeline+stage), le stage suivant
+    # est calculé par CarteNav (reassign vers le rôle suivant, ou close si terminal).
+    # Sans contexte carte (A1 1-stage) → next_assignee nil → close. Une erreur de carte
+    # (DAG, stage inconnu) NE misroute PAS : elle remonte (le système n'avance pas à l'aveugle).
+    case resolve_next_assignee(payload, state) do
+      {:error, reason} ->
+        {:error, reason}
 
-    hc_opts =
-      [forge_opts: state.forge_opts]
-      |> maybe_put_forge_client(state.forge_client)
+      {:ok, next_assignee} ->
+        hop = %{
+          repo: state.repo,
+          issue_number: n,
+          role: role,
+          deliverable_opts: %{
+            mode: :git_native,
+            workspace: payload["workspace"],
+            base_sha: payload["base_sha"],
+            allowed_emails: state.role_emails.(role),
+            remote: state.remote,
+            target_branch: "lcars/issue-#{n}-#{role}",
+            push?: true,
+            local_ref: "HEAD"
+          },
+          next_assignee: next_assignee,
+          state_label: "state:delivered"
+        }
 
-    state.hop_completer.complete(hop, hc_opts)
+        hc_opts =
+          [forge_opts: state.forge_opts]
+          |> maybe_put_forge_client(state.forge_client)
+
+        state.hop_completer.complete(hop, hc_opts)
+    end
+  end
+
+  # Résout le prochain assignee depuis la carte (A2.4). Le contexte carte arrive dans le
+  # payload `pod.completed` : `pipeline` (nom de carte) + `stage` (nom du stage courant —
+  # le NOM, pas le rôle, cf. CarteNav wrinkle DN §8). Absent → 1-stage terminal (A1).
+  defp resolve_next_assignee(payload, state) do
+    case {payload["pipeline"], payload["stage"]} do
+      {pipeline, stage} when is_binary(pipeline) and is_binary(stage) ->
+        with {:ok, carte} <- load_carte(state, pipeline) do
+          case Fleet.Pilot.CarteNav.next_stage(carte, stage) do
+            {:ok, {_next_stage, next_role}} -> {:ok, next_role}
+            :terminal -> {:ok, nil}
+            {:error, reason} -> {:error, {:carte_nav, reason}}
+          end
+        end
+
+      _ ->
+        # pas de contexte carte → pod 1-stage (A1) → terminal close
+        {:ok, nil}
+    end
+  end
+
+  defp load_carte(state, pipeline) do
+    {:ok, state.loader.load!(pipeline)}
+  rescue
+    e -> {:error, {:carte_load, Exception.message(e)}}
   end
 
   defp maybe_put_forge_client(opts, nil), do: opts

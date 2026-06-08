@@ -11,6 +11,23 @@ defmodule Fleet.Pilot.HopConsumerTest do
     end
   end
 
+  # Seam Loader (A2.4) : carte poc-cycle linéaire ; "bad" raise (pipeline introuvable).
+  defmodule StubLoader do
+    def load!("poc-cycle") do
+      %{
+        "name" => "poc-cycle",
+        "stages" => %{
+          "triage" => %{"role" => "architect", "needs" => []},
+          "refine" => %{"role" => "consultant", "needs" => ["triage"]},
+          "build" => %{"role" => "engineer", "needs" => ["refine"]},
+          "review" => %{"role" => "reviewer", "needs" => ["build"]}
+        }
+      }
+    end
+
+    def load!(_), do: raise("pipeline introuvable")
+  end
+
   defp state(extra \\ %{}) do
     Map.merge(
       %HopConsumer{
@@ -85,6 +102,51 @@ defmodule Fleet.Pilot.HopConsumerTest do
 
       assert {:skip, {:bad_ticket_id, "owner/repo#42"}} =
                HopConsumer.maybe_complete(payload, state())
+    end
+  end
+
+  describe "A2.4 — chaînage carte (pipeline+stage → next_assignee)" do
+    test "stage milieu de chaîne → reassign vers le rôle suivant" do
+      payload = stage_payload(%{"pipeline" => "poc-cycle", "stage" => "build"})
+      assert {:ok, :completed} = HopConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
+
+      assert_received {:hop, hop, _opts}
+      # build → review (rôle reviewer)
+      assert hop.next_assignee == "reviewer"
+    end
+
+    test "dernier stage → terminal (next_assignee nil → close)" do
+      payload = stage_payload(%{"pipeline" => "poc-cycle", "stage" => "review"})
+      assert {:ok, :completed} = HopConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
+
+      assert_received {:hop, hop, _opts}
+      assert hop.next_assignee == nil
+    end
+
+    test "carte introuvable → {:error, {:carte_load, _}}, pas de hop" do
+      payload = stage_payload(%{"pipeline" => "bad", "stage" => "build"})
+
+      assert {:error, {:carte_load, _}} =
+               HopConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
+
+      refute_received {:hop, _, _}
+    end
+
+    test "stage inconnu dans la carte → {:error, {:carte_nav, :unknown_stage}}, pas de misroute" do
+      payload = stage_payload(%{"pipeline" => "poc-cycle", "stage" => "ghost"})
+
+      assert {:error, {:carte_nav, :unknown_stage}} =
+               HopConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
+
+      refute_received {:hop, _, _}
+    end
+
+    test "sans contexte carte (A1 1-stage) → terminal, pas d'appel loader" do
+      # loader nil : si run_hop appelait le loader sans contexte carte, ça crasherait.
+      payload = stage_payload()
+      assert {:ok, :completed} = HopConsumer.maybe_complete(payload, state())
+      assert_received {:hop, hop, _opts}
+      assert hop.next_assignee == nil
     end
   end
 
