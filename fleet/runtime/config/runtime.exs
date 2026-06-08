@@ -84,6 +84,14 @@ if config_env() != :test do
   # runtime, point. Override éventuel = `config :fleet_spawner, pod_dir_root: …` directement (tests).
   # ============================================================
 
+  # tmux sock-dir base — défaut `/run/lcars/tmux-sock` (provisionné par le service systemd via
+  # RuntimeDirectory). Override quand le runtime est lancé par un HUMAIN (pas le service) → un chemin
+  # SOUS son home, writable sans privilège. Pose à la fois le côté runtime (`:tmux_sock_base`) et,
+  # via do_launch, l'env `LCARS_TMUX_SOCK_BASE` que bwrap_launch lit (les deux côtés coïncident).
+  if sock_base = System.get_env("LCARS_TMUX_SOCK_BASE") do
+    config :fleet_spawner, tmux_sock_base: sock_base
+  end
+
   # ============================================================
   # U4 — pivot pod RC long-lived (claude --remote-control via tmux)
   # ============================================================
