@@ -115,7 +115,7 @@ defmodule Fleet.Pilot.StageDispatcher do
           pod_id = "issue-#{number}-#{role}-#{ts}"
 
           spawn_opts =
-            [mandate: issue["body"] || "", pod_id: pod_id]
+            [mandate: build_mandate(forge, repo, number, role, issue, forge_opts), pod_id: pod_id]
             |> maybe_put_project(project)
             |> maybe_put_route(route)
 
@@ -166,6 +166,27 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   defp maybe_put_route(spawn_opts, {pipeline, stage}),
     do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:stage, stage)
+
+  # A2.3b item 5 (option B, DN gatekeeper-forge-encoding-v2 §5) : un pod **gatekeeper**
+  # doit savoir QUOI juger. Plutôt que cloner la branche du prédécesseur (F-08, chirurgie
+  # bootstrap), on lui passe le `result_K` (gravé par HopCompleter dans le comment du hop
+  # précédent, N-04) DANS son mandat. Le pod reste forge-aveugle (c'est le runtime qui lit
+  # le comment). Rôle ordinaire → mandat = corps de l'issue (inchangé).
+  defp build_mandate(forge, repo, number, "gatekeeper", issue, forge_opts) do
+    base = issue["body"] || ""
+
+    case forge.get_predecessor_result(repo, number, forge_opts) do
+      {:ok, result} ->
+        base <>
+          "\n\n## Outputs du stage précédent à juger\n```json\n" <>
+          Jason.encode!(result) <> "\n```"
+
+      _ ->
+        base
+    end
+  end
+
+  defp build_mandate(_forge, _repo, _number, _role, issue, _forge_opts), do: issue["body"] || ""
 
   # Tag l'erreur d'une étape de résolution (préserve {:project_resolution, _} attendu).
   defp tag_err({:ok, _} = ok, _tag), do: ok

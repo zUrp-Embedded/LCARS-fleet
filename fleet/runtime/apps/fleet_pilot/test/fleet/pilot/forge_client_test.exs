@@ -375,4 +375,21 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert nil == ForgeClient.parse_route_marker(nil)
     end
   end
+
+  describe "parse_result_block/1 (A2.3b item 5 — pur)" do
+    test "extrait le map du bloc ```result (round-trip avec le format HopCompleter N-04)" do
+      body =
+        "Livrable de architect.\n\n```result\n" <>
+          ~s({"severity_max":"ok","findings":0}) <> "\n```\n\n[hop:architect:abc]"
+
+      assert {:ok, %{"severity_max" => "ok", "findings" => 0}} =
+               ForgeClient.parse_result_block(body)
+    end
+
+    test "pas de bloc result → nil ; JSON invalide → nil ; nil → nil" do
+      assert nil == ForgeClient.parse_result_block("juste un commentaire\n[hop:x:y]")
+      assert nil == ForgeClient.parse_result_block("```result\npas du json\n```")
+      assert nil == ForgeClient.parse_result_block(nil)
+    end
+  end
 end

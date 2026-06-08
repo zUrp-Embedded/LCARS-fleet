@@ -310,6 +310,44 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  @result_block_rx ~r/```result\n(.*?)\n```/s
+
+  @doc """
+  Extrait le dernier bloc ` ```result ` posté dans un comment de hop — le `result_K`
+  gravé par `HopCompleter` quand le stage avance vers un gatekeeper (A2.3b N-04). Sert
+  à `StageDispatcher` pour donner au pod gatekeeper **quoi juger** dans son mandat
+  (option B : pas de clone de branche). `:none` si aucun ; `{:error, _}` HTTP/config.
+  """
+  @spec get_predecessor_result(String.t(), integer(), Keyword.t()) ::
+          {:ok, map()} | :none | {:error, term()}
+  def get_predecessor_result(repo, issue_number, opts \\ []) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, comments} when is_list(comments) <-
+           http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+      comments
+      |> Enum.map(& &1["body"])
+      |> Enum.reverse()
+      |> Enum.find_value(:none, &parse_result_block/1)
+    end
+  end
+
+  @doc false
+  # Pur : extrait le map du dernier bloc ```result d'un body, sinon nil.
+  def parse_result_block(body) when is_binary(body) do
+    case Regex.run(@result_block_rx, body) do
+      [_, json] ->
+        case Jason.decode(json) do
+          {:ok, map} when is_map(map) -> {:ok, map}
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  def parse_result_block(_), do: nil
+
   # ============================================================
   # HTTP plumbing
   # ============================================================

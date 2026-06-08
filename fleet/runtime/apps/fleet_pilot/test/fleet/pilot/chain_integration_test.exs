@@ -67,6 +67,12 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       |> Enum.find_value(:none, &ForgeClient.parse_route_marker/1)
     end
 
+    def get_predecessor_result(pid, _r, _n, _o) do
+      (get(pid)["comments"] || [])
+      |> Enum.reverse()
+      |> Enum.find_value(:none, &ForgeClient.parse_result_block/1)
+    end
+
     def close_issue(pid, _r, _n, _o) do
       upd(pid, fn i -> Map.put(i, "state", "closed") end)
       {:ok, :closed}
@@ -84,6 +90,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def post_comment(r, n, b, o), do: Sim.post_comment(p(), r, n, b, o)
     def post_route(r, n, pi, st, o), do: Sim.post_route(p(), r, n, pi, st, o)
     def get_route(r, n, o), do: Sim.get_route(p(), r, n, o)
+    def get_predecessor_result(r, n, o), do: Sim.get_predecessor_result(p(), r, n, o)
     def close_issue(r, n, o), do: Sim.close_issue(p(), r, n, o)
   end
 
@@ -316,6 +323,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     assert_received {:spawned, "issue-1", o2}
     assert o2[:stage] == "review"
+    # item 5 : le mandat du gatekeeper embarque le result_K du prédécesseur (à juger).
+    assert o2[:mandate] =~ "severity_max"
 
     {pid, dispatch_opts, hc, o2}
   end
