@@ -63,7 +63,13 @@ defmodule Fleet.Pilot.Entry do
   end
 
   defp load_carte(pipeline, loader) do
-    {:ok, loader.load!(pipeline)}
+    carte = loader.load!(pipeline)
+    # A2.3b §9.7 (stage-mode-only) : rejeter une carte malformée (soft⟺gatekeeper) dès
+    # l'entrée — aucune carte invalide n'entre en stage-mode (I-CBC).
+    case Fleet.Pilot.CarteNav.validate_explicit_stage(carte) do
+      :ok -> {:ok, carte}
+      {:error, reason} -> {:error, {:carte_invalid, reason}}
+    end
   rescue
     e -> {:error, Exception.message(e)}
   end

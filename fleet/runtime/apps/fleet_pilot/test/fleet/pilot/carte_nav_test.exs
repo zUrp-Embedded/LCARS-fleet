@@ -99,4 +99,48 @@ defmodule Fleet.Pilot.CarteNavTest do
       assert :error = CarteNav.stage_spec(poc_cycle(), "nope")
     end
   end
+
+  describe "validate_explicit_stage/1 — invariant soft⟺gatekeeper (A2.3b)" do
+    test "carte sans gate soft (poc_cycle) → :ok" do
+      assert :ok = CarteNav.validate_explicit_stage(poc_cycle())
+    end
+
+    test "gatekeeper-stage avec gate soft → :ok" do
+      carte = %{
+        "stages" => %{
+          "audit" => %{"role" => "consultant", "needs" => []},
+          "decision" => %{
+            "role" => "gatekeeper",
+            "needs" => ["audit"],
+            "gate" => %{"type" => "soft"}
+          }
+        }
+      }
+
+      assert :ok = CarteNav.validate_explicit_stage(carte)
+    end
+
+    test "gate soft sur stage NON-gatekeeper → {:error, {:soft_gate_non_gatekeeper, name}}" do
+      carte = %{
+        "stages" => %{
+          "scout" => %{"role" => "engineer", "needs" => [], "gate" => %{"type" => "soft"}}
+        }
+      }
+
+      assert {:error, {:soft_gate_non_gatekeeper, "scout"}} =
+               CarteNav.validate_explicit_stage(carte)
+    end
+
+    test "gatekeeper-stage SANS gate soft (réciproque R-01) → {:error, {:gatekeeper_without_soft_gate, name}}" do
+      for bad_gate <- [%{"type" => "hard"}, %{"type" => "terminal"}, nil] do
+        spec = %{"role" => "gatekeeper", "needs" => []}
+        spec = if bad_gate, do: Map.put(spec, "gate", bad_gate), else: spec
+        carte = %{"stages" => %{"judge" => spec}}
+
+        assert {:error, {:gatekeeper_without_soft_gate, "judge"}} =
+                 CarteNav.validate_explicit_stage(carte),
+               "gate=#{inspect(bad_gate)} doit être rejeté"
+      end
+    end
+  end
 end

@@ -157,10 +157,15 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
              HopConsumer.maybe_complete(payload, hc(forge_opts: [_hops: 6]))
   end
 
-  test "soft gate → gate_pending (différé A2.3b), n'avance pas, ne déverrouille pas" do
+  test "carte avec gate soft sur stage NON-gatekeeper → rejetée au load (carte_invalid, R-01)" do
+    # En explicit-stage (A2.3b), une gate soft DOIT être portée par un gatekeeper-stage.
+    # La carte "soft" (triage=architect+soft) est désormais malformée → rejet à load_carte,
+    # AVANT tout routage. Fail-closed, aucune écriture.
     payload = triage_done("soft", %{})
 
-    assert {:error, {:gate_pending, %{kind: :soft}}} = HopConsumer.maybe_complete(payload, hc())
+    assert {:error, {:carte_invalid, {:soft_gate_non_gatekeeper, "triage"}}} =
+             HopConsumer.maybe_complete(payload, hc())
+
     refute_received {:assignee, _}
     refute_received :unlocked
   end

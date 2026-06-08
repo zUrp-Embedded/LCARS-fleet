@@ -94,6 +94,37 @@ defmodule Fleet.Pilot.CarteNav do
     end
   end
 
+  @doc """
+  Valide l'invariant **explicit-stage** A2.3b (DN `gatekeeper-forge-encoding-v2` §2/§9.7,
+  R-01) : `gate.type == "soft"` **⟺** `role == "gatekeeper"`. Une gate `soft` = « la
+  sortie du stage EST un verdict » → portée UNIQUEMENT par un gatekeeper-stage ; et un
+  gatekeeper-stage DOIT porter une gate soft (sinon `HopConsumer` ne court-circuite pas
+  → stuck/advance silencieux).
+
+  ⚠ **STAGE-MODE-ONLY** : à appeler depuis le code stage-mode (`HopConsumer`/`Entry`),
+  JAMAIS depuis le code partagé (Executor RAM, modèle implicite où `soft` vit sur un
+  stage quelconque). C'est pour ça que la règle est ici (CarteNav, stage-mode) et pas
+  dans `Fleet.Pipeline.Loader` (partagé).
+
+  `:ok` si toutes les stages respectent la bi-conditionnelle, sinon
+  `{:error, {:soft_gate_non_gatekeeper | :gatekeeper_without_soft_gate, stage_name}}`.
+  """
+  @spec validate_explicit_stage(carte()) :: :ok | {:error, {atom(), stage_name()}}
+  def validate_explicit_stage(carte) do
+    carte
+    |> stages()
+    |> Enum.find_value(:ok, fn {name, spec} ->
+      soft? = get_in(spec, ["gate", "type"]) == "soft"
+      gk? = Map.get(spec, "role") == "gatekeeper"
+
+      cond do
+        soft? and not gk? -> {:error, {:soft_gate_non_gatekeeper, name}}
+        gk? and not soft? -> {:error, {:gatekeeper_without_soft_gate, name}}
+        true -> false
+      end
+    end)
+  end
+
   # ── internals ──
   defp stages(carte), do: Map.get(carte, "stages", %{})
   defp needs(spec), do: Map.get(spec, "needs", [])

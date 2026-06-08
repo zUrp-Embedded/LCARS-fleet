@@ -294,7 +294,13 @@ defmodule Fleet.Pilot.HopConsumer do
   end
 
   defp load_carte(state, pipeline) do
-    {:ok, state.loader.load!(pipeline)}
+    carte = state.loader.load!(pipeline)
+    # A2.3b §9.7 (stage-mode-only) : rejeter une carte malformée (soft⟺gatekeeper)
+    # AVANT de router — sinon le gatekeeper-stage ne serait pas court-circuité.
+    case Fleet.Pilot.CarteNav.validate_explicit_stage(carte) do
+      :ok -> {:ok, carte}
+      {:error, reason} -> {:error, {:carte_invalid, reason}}
+    end
   rescue
     e -> {:error, {:carte_load, Exception.message(e)}}
   end
