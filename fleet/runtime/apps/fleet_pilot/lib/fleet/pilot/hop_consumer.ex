@@ -165,16 +165,7 @@ defmodule Fleet.Pilot.HopConsumer do
           repo: state.repo,
           issue_number: n,
           role: role,
-          deliverable_opts: %{
-            mode: :git_native,
-            workspace: payload["workspace"],
-            base_sha: payload["base_sha"],
-            allowed_emails: state.role_emails.(role),
-            remote: state.remote,
-            target_branch: "lcars/issue-#{n}-#{role}",
-            push?: true,
-            local_ref: "HEAD"
-          },
+          deliverable_opts: build_deliverable_opts(role, payload, n, state),
           next_assignee: next_assignee,
           # A2.1 : pipeline + stage suivant → HopCompleter grave la route avant le reassign.
           # nil/nil pour terminal ou 1-stage (pas de route, close).
@@ -193,6 +184,45 @@ defmodule Fleet.Pilot.HopConsumer do
           |> maybe_put(:deliverable, state.deliverable)
 
         state.hop_completer.complete(hop, hc_opts)
+    end
+  end
+
+  # A2.3b item 3 (DN gatekeeper-forge-encoding-v2 §4) : le livrable d'un hop.
+  #   * rôle ordinaire → `:git_native` : le pod a commité dans son workspace, le système
+  #     vérifie (gate F-01/F-03) + pousse.
+  #   * **gatekeeper** → `:payload` : le pod est forge+disk-aveugle (cap-profile durci) → il
+  #     ne commit RIEN. Le RUNTIME matérialise le verdict (`payload["result"]`, issu du
+  #     `submit_result`) comme fichier `verdict.json` ; Deliverable l'écrit + commit (identité
+  #     gatekeeper, ∈ allowed_emails pour la gate F-01) + push. Verdict durable en git.
+  defp build_deliverable_opts(role, payload, n, state) do
+    emails = state.role_emails.(role)
+
+    base = %{
+      workspace: payload["workspace"],
+      base_sha: payload["base_sha"],
+      allowed_emails: emails,
+      remote: state.remote,
+      target_branch: "lcars/issue-#{n}-#{role}",
+      push?: true,
+      local_ref: "HEAD"
+    }
+
+    if role == "gatekeeper" do
+      email = List.first(emails) || "#{role}@lcars.local"
+
+      Map.merge(base, %{
+        mode: :payload,
+        files: [%{"path" => "verdict.json", "content" => Jason.encode!(payload["result"] || %{})}],
+        identity: %{
+          author_name: role,
+          author_email: email,
+          committer_name: role,
+          committer_email: email
+        },
+        message: "Verdict gatekeeper (issue ##{n})"
+      })
+    else
+      Map.put(base, :mode, :git_native)
     end
   end
 

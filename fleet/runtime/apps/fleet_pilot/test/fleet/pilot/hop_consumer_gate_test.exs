@@ -27,7 +27,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   end
 
   defmodule DelivStub do
-    def publish(_o), do: {:ok, %{commit_sha: "sha-x", pushed?: true, mode: :git_native}}
+    def publish(o) do
+      send(self(), {:publish, o})
+      {:ok, %{commit_sha: "sha-x", pushed?: true, mode: Map.get(o, :mode, :git_native)}}
+    end
   end
 
   # Cartes 2 stages. `gated` : hard gate sur triage (exige result %{"ok"=>true}).
@@ -245,6 +248,24 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert_received {:label, "lcars-awaits-human"}
     refute_received {:assignee, _}
     refute_received :closed
+  end
+
+  test "hop gatekeeper continue → livrable PAYLOAD verdict.json (item 3, runtime écrit)" do
+    assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done("continue"), hc())
+    assert_received {:publish, d}
+    assert d.mode == :payload
+    assert [%{"path" => "verdict.json", "content" => content}] = d.files
+    assert content =~ ~s("decision":"continue")
+    # identité = gatekeeper (∈ allowed_emails pour la gate F-01)
+    assert d.identity.author_email == "gatekeeper@lcars.local"
+    assert "gatekeeper@lcars.local" in d.allowed_emails
+  end
+
+  test "hop ordinaire (non-gatekeeper) → livrable git_native (le pod a commité)" do
+    assert {:ok, :reassigned} = HopConsumer.maybe_complete(triage_done("plain", %{}), hc())
+    assert_received {:publish, d}
+    assert d.mode == :git_native
+    refute Map.has_key?(d, :files)
   end
 
   test "le gatekeeper-stage NE passe PAS par Gates (pas de {:gate_pending})" do
