@@ -12,13 +12,17 @@ spec:
       - Read
       - Grep
       - Glob
-      - Bash(git mv:*)
-      - Bash(git commit:*)
-      - Bash(git tag:*)
-      - Bash(git push:*)
-      - Bash(tea issues edit:*)
-      - Bash(tea issues close:*)
-      - Bash(tea comment:*)
+      # Git READ-ONLY uniquement — inspecter le livrable de K (cloné par le runtime
+      # dans le workspace, le pod ne fetch pas : barrière §4 niveau-1).
+      - Bash(git diff:*)
+      - Bash(git log:*)
+      - Bash(git status:*)
+      - Bash(git show:*)
+      # `git push/commit/mv/tag` + `tea issues edit/close/comment` RETIRÉS — barrière
+      # forge-aveugle (DN forge-state-machine §4 ; gatekeeper-forge-encoding-v2 §4/§9.9 ;
+      # analogue engineer A1.2a `c49b32eb`). Le gatekeeper rend son verdict par
+      # `submit_result` (canal fleet-control) ; le SYSTÈME écrit `verdict.json` + push +
+      # route. Le pod ne touche JAMAIS la forge. Voir git_ops_denied + mcp_channels.
     disallowedTools:
       - web_search
       - web_fetch
@@ -29,7 +33,9 @@ spec:
       - tool_search_bash
     # Patterns destructeurs déclarés au baseline universel
     # (`_baseline-git-denied.yaml`, intangibles) — pas dupliqués ici.
-    git_ops_denied: []
+    # `push` = barrière forge-aveugle MÉCANIQUE (DN §4) : `Bash(git push:*)` devient
+    # un no-op même si ré-ajouté à allowedTools (défense en profondeur, analogue engineer).
+    git_ops_denied: [push]
     outputs: ["/home/commons/gatekeeper/"]
   knowledge:
     libs:
@@ -47,7 +53,10 @@ spec:
     effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
     subagent_template: null
-    mcp_channels: ["fleet-control.gatekeeper.*", "fleet-forge.*"]
+    # `fleet-forge.*` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4 ;
+    # gatekeeper-forge-encoding-v2 §9.9). Le gatekeeper hand-off son verdict via
+    # `fleet-control.gatekeeper.*` (submit_result) ; le système écrit la forge.
+    mcp_channels: ["fleet-control.gatekeeper.*"]
     host_native: false
     max_alive_sec: 3600
     heartbeat_keepalive: false

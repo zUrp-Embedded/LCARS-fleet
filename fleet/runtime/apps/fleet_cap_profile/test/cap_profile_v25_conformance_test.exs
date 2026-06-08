@@ -53,6 +53,47 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     end
   end
 
+  # ── Barrière forge-aveugle §4 — invariant MÉCANIQUE (pas une affiche) ──────
+  # DN forge-state-machine §4 + gatekeeper-forge-encoding-v2 §9.9 : les pods
+  # producteurs de la chaîne (engineer livrable, gatekeeper verdict) NE touchent
+  # JAMAIS la forge — le SYSTÈME (lcars-system) écrit. Vérifié ici, pas seulement
+  # commenté dans le yaml (méta-finding audit v2 : « barrières = affiches »).
+  # NB hors-scope tracé : architect/consultant/qualifier/reviewer ont encore
+  # `fleet-forge.*` ; sous forge-state-machine §4 ils devraient aussi être
+  # forge-aveugles (finding complétude barrière, séparé). starfleet = système
+  # writer (forge OK, légitime).
+  @forge_blind ~w(engineer gatekeeper)
+  @forge_write_tools [
+    "Bash(git push:*)",
+    "Bash(tea issues edit:*)",
+    "Bash(tea issues close:*)",
+    "Bash(tea comment:*)"
+  ]
+
+  for profile <- @forge_blind do
+    test "cap-profile #{profile}.yaml est forge-aveugle (barrière §4 mécanique)" do
+      canon =
+        @canon_dir
+        |> Path.join("#{unquote(profile)}.yaml")
+        |> YamlElixir.read_from_file!()
+
+      tools = get_in(canon, ["spec", "scope", "allowedTools"]) || []
+      denied = get_in(canon, ["spec", "scope", "git_ops_denied"]) || []
+      channels = get_in(canon, ["spec", "invocation", "mcp_channels"]) || []
+
+      for forbidden <- @forge_write_tools do
+        refute forbidden in tools,
+               "#{unquote(profile)} ne doit pas autoriser #{forbidden} (barrière forge-aveugle §4)"
+      end
+
+      assert "push" in denied,
+             "#{unquote(profile)} doit dénier `push` (git_ops_denied) — barrière mécanique §4"
+
+      refute Enum.any?(channels, &String.starts_with?(&1, "fleet-forge")),
+             "#{unquote(profile)} ne doit pas avoir de canal fleet-forge (barrière §4) — vu: #{inspect(channels)}"
+    end
+  end
+
   test "négatif — apiVersion manquant rejeté", %{schema: schema} do
     bad = %{"kind" => "CapabilityProfile", "metadata" => %{}, "spec" => %{}}
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
