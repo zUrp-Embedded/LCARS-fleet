@@ -215,16 +215,44 @@ defmodule Fleet.Pilot.HopConsumer do
         :error -> %{}
       end
 
-    case Fleet.Pipeline.Gates.evaluate(spec, payload["result"] || %{}, %{}) do
-      :pass ->
-        advance(carte, stage)
+    # A2.3b (DN gatekeeper-forge-encoding-v2 §2/§9.1, N-01) : un gatekeeper-stage
+    # (role:gatekeeper + gate soft) a pour SORTIE un verdict `gate-decision-v1.json`.
+    # On NE passe PAS par `Gates.evaluate` (qui renverrait {:dispatch_gatekeeper} →
+    # stuck) ; on route par `result["decision"]`. Critère lu dans la carte chargée
+    # (zéro round-trip forge). ⚠ stage-mode-only : ce court-circuit vit ICI, JAMAIS
+    # dans `Gates`/`Loader` partagés (l'Executor RAM utilise soft sur stage quelconque).
+    if gatekeeper_verdict_stage?(spec) do
+      verdict_route(carte, stage, payload)
+    else
+      case Fleet.Pipeline.Gates.evaluate(spec, payload["result"] || %{}, %{}) do
+        :pass ->
+          advance(carte, stage)
 
-      {:fail, reason} ->
-        Logger.info("HopConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}")
-        rebound(carte, n, state)
+        {:fail, reason} ->
+          Logger.info("HopConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}")
+          rebound(carte, n, state)
 
-      {:dispatch_gatekeeper, info} ->
-        {:error, {:gate_pending, info}}
+        {:dispatch_gatekeeper, info} ->
+          {:error, {:gate_pending, info}}
+      end
+    end
+  end
+
+  defp gatekeeper_verdict_stage?(spec) do
+    get_in(spec, ["gate", "type"]) == "soft" and spec["role"] == "gatekeeper"
+  end
+
+  # Verdict-flow (DN gatekeeper-forge-encoding-v2 §3). MVP A2.3b : les 2 décisions
+  # qui routent dans la carte/forge déjà câblée. `continue` → advance ; `abandon` →
+  # close (terminal). Les sorties HUMAINES (`escalate_user`/`halt_wait_input`/`redirect`/
+  # absente/invalide) → différées explicitement `{:error, {:await_human, decision}}` :
+  # fail-closed (JAMAIS `continue` silencieux), n'avance pas, surface. Le mécanisme
+  # `lcars-awaits-human` (pose label + poller skip) = commit suivant (frontière A2.6).
+  defp verdict_route(carte, stage, payload) do
+    case get_in(payload, ["result", "decision"]) do
+      "continue" -> advance(carte, stage)
+      "abandon" -> {:ok, {nil, nil}}
+      other -> {:error, {:await_human, other}}
     end
   end
 

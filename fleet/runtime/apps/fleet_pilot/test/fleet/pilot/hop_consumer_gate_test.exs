@@ -65,6 +65,23 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
         }
       }
     end
+
+    # A2.3b : carte avec gatekeeper-stage explicite au milieu (review, role:gatekeeper,
+    # gate soft) — triage → review(verdict) → build.
+    def load!("gk") do
+      %{
+        "name" => "gk",
+        "stages" => %{
+          "triage" => %{"role" => "architect", "needs" => []},
+          "review" => %{
+            "role" => "gatekeeper",
+            "needs" => ["triage"],
+            "gate" => %{"type" => "soft", "max_rounds" => 1}
+          },
+          "build" => %{"role" => "engineer", "needs" => ["review"]}
+        }
+      }
+    end
   end
 
   defp hc(opts \\ []) do
@@ -146,5 +163,67 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert {:error, {:gate_pending, %{kind: :soft}}} = HopConsumer.maybe_complete(payload, hc())
     refute_received {:assignee, _}
     refute_received :unlocked
+  end
+
+  # ── A2.3b verdict-flow : gatekeeper-stage (role:gatekeeper + gate soft) ────────
+  # Sa sortie EST un verdict ; HopConsumer court-circuite Gates et route par decision.
+  # pod.completed du gatekeeper-stage `review` de la carte "gk".
+  defp gk_done(decision) do
+    base = %{
+      "ticket_id" => "issue-1",
+      "workspace" => "/ws",
+      "base_sha" => "cafe",
+      "role" => "gatekeeper",
+      "pipeline" => "gk",
+      "stage" => "review"
+    }
+
+    if decision, do: Map.put(base, "result", %{"decision" => decision}), else: base
+  end
+
+  test "verdict continue → advance vers le stage suivant (build/engineer)" do
+    assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done("continue"), hc())
+    assert_received {:route, "gk", "build"}
+    assert_received {:assignee, "engineer"}
+    assert_received :unlocked
+  end
+
+  test "verdict abandon → close (terminal)" do
+    assert {:ok, :completed} = HopConsumer.maybe_complete(gk_done("abandon"), hc())
+    assert_received :closed
+    refute_received {:assignee, _}
+  end
+
+  test "verdict escalate_user → await_human différé, AUCUNE écriture (fail-closed)" do
+    assert {:error, {:await_human, "escalate_user"}} =
+             HopConsumer.maybe_complete(gk_done("escalate_user"), hc())
+
+    refute_received {:assignee, _}
+    refute_received :closed
+    refute_received :unlocked
+  end
+
+  test "verdict halt_wait_input → await_human différé" do
+    assert {:error, {:await_human, "halt_wait_input"}} =
+             HopConsumer.maybe_complete(gk_done("halt_wait_input"), hc())
+  end
+
+  test "verdict redirect → await_human différé (pas de routage hors-DAG en A2.3b)" do
+    assert {:error, {:await_human, "redirect"}} =
+             HopConsumer.maybe_complete(gk_done("redirect"), hc())
+
+    refute_received {:assignee, _}
+  end
+
+  test "verdict absent/invalide → await_human (jamais continue silencieux)" do
+    assert {:error, {:await_human, nil}} = HopConsumer.maybe_complete(gk_done(nil), hc())
+    refute_received {:assignee, _}
+    refute_received :closed
+  end
+
+  test "le gatekeeper-stage NE passe PAS par Gates (pas de {:gate_pending})" do
+    # sans court-circuit, Gates.evaluate(soft) renverrait {:dispatch_gatekeeper} → gate_pending.
+    # Avec le court-circuit, continue route normalement.
+    assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done("continue"), hc())
   end
 end
