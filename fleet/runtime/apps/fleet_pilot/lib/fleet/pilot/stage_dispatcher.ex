@@ -115,7 +115,10 @@ defmodule Fleet.Pilot.StageDispatcher do
           pod_id = "issue-#{number}-#{role}-#{ts}"
 
           spawn_opts =
-            [mandate: build_mandate(forge, repo, number, role, issue, forge_opts), pod_id: pod_id]
+            [
+              mandate: build_mandate(forge, repo, number, role, issue, forge_opts, route),
+              pod_id: pod_id
+            ]
             |> maybe_put_project(project)
             |> maybe_put_route(route)
 
@@ -168,25 +171,41 @@ defmodule Fleet.Pilot.StageDispatcher do
     do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:stage, stage)
 
   # A2.3b item 5 (option B, DN gatekeeper-forge-encoding-v2 §5) : un pod **gatekeeper**
-  # doit savoir QUOI juger. Plutôt que cloner la branche du prédécesseur (F-08, chirurgie
-  # bootstrap), on lui passe le `result_K` (gravé par HopCompleter dans le comment du hop
-  # précédent, N-04) DANS son mandat. Le pod reste forge-aveugle (c'est le runtime qui lit
-  # le comment). Rôle ordinaire → mandat = corps de l'issue (inchangé).
-  defp build_mandate(forge, repo, number, "gatekeeper", issue, forge_opts) do
-    base = issue["body"] || ""
+  # doit savoir QUOI juger ET comment rendre son verdict. On réutilise le brief canonique
+  # `Fleet.Pipeline.GateBrief` (contexte + livrable + question + **contrat
+  # `gate-decision-v1.json` + options canon**) — le même que le modèle RAM. Le `result_K`
+  # à juger est lu du comment du hop précédent (gravé par HopCompleter, N-04) ; le pod reste
+  # forge-aveugle (c'est le runtime qui lit le comment, option B, pas de clone F-08).
+  # Rôle ordinaire → mandat = corps de l'issue (inchangé).
+  defp build_mandate(forge, repo, number, "gatekeeper", issue, forge_opts, route) do
+    outputs =
+      case forge.get_predecessor_result(repo, number, forge_opts) do
+        {:ok, result} -> result
+        _ -> %{}
+      end
 
-    case forge.get_predecessor_result(repo, number, forge_opts) do
-      {:ok, result} ->
-        base <>
-          "\n\n## Outputs du stage précédent à juger\n```json\n" <>
-          Jason.encode!(result) <> "\n```"
+    {pipeline, stage} =
+      case route do
+        {p, s} -> {p, s}
+        _ -> {nil, "gatekeeper"}
+      end
 
-      _ ->
-        base
+    brief =
+      Fleet.Pipeline.GateBrief.build(%{
+        stage: stage,
+        pipeline_id: pipeline,
+        gate: nil,
+        outputs: outputs
+      })
+
+    case issue["body"] do
+      b when is_binary(b) and b != "" -> b <> "\n\n" <> brief
+      _ -> brief
     end
   end
 
-  defp build_mandate(_forge, _repo, _number, _role, issue, _forge_opts), do: issue["body"] || ""
+  defp build_mandate(_forge, _repo, _number, _role, issue, _forge_opts, _route),
+    do: issue["body"] || ""
 
   # Tag l'erreur d'une étape de résolution (préserve {:project_resolution, _} attendu).
   defp tag_err({:ok, _} = ok, _tag), do: ok

@@ -323,8 +323,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     assert_received {:spawned, "issue-1", o2}
     assert o2[:stage] == "review"
-    # item 5 : le mandat du gatekeeper embarque le result_K du prédécesseur (à juger).
+    # item 5 : le mandat du gatekeeper = brief GateBrief = result_K à juger + contrat verdict.
     assert o2[:mandate] =~ "severity_max"
+    assert o2[:mandate] =~ "gate-decision-v1.json"
+    assert o2[:mandate] =~ "continue"
 
     {pid, dispatch_opts, hc, o2}
   end
