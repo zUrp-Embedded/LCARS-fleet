@@ -16,7 +16,9 @@ spec:
       - Write
       - Bash(git add:*)
       - Bash(git commit:*)
-      - Bash(git push:*)
+      # `git push` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4, P1.6) :
+      # l'engineer commite en LOCAL dans son workspace (git_native), le SYSTÈME pousse
+      # (DeliverableGate F-04). Le pod n'écrit jamais la forge. Voir git_ops_denied + mcp_channels.
       - Bash(git diff:*)
       - Bash(git log:*)
       - Bash(git status:*)
@@ -46,7 +48,9 @@ spec:
       - tool_search_bash
     # Patterns destructeurs déclarés au baseline universel
     # (`_baseline-git-denied.yaml`, intangibles) — pas dupliqués ici.
-    git_ops_denied: []
+    # `push` ajouté ici = barrière forge-aveugle MÉCANIQUE (DN §4) : `Bash(git push:*)` devient
+    # disallowed (disallow > allow), pas seulement absent de l'allowlist. Le pod NE PEUT PAS push.
+    git_ops_denied: [push]
     outputs: ["/home/commons/engineer/"]
   knowledge:
     libs:
@@ -80,7 +84,10 @@ spec:
     # subagent fire-mode-quick (mandate ultra-court), créer un
     # cap-profile `engineer-quick.yaml` séparé.
     subagent_template: null
-    mcp_channels: ["fleet-control.engineer.*", "fleet-forge.engineer"]  # fleet-control: Memory-X + coord ; fleet-forge: routing tickets Gitea
+    # `fleet-forge.engineer` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4) : l'engineer
+    # n'a aucun canal d'écriture forge. Il lit son mandat / rend son livrable via MCP get_task/
+    # submit_result (le runtime fait commit/comment/PATCH côté système). fleet-control = Memory-X/coord.
+    mcp_channels: ["fleet-control.engineer.*"]
     host_native: false
     max_alive_sec: 3600
     heartbeat_keepalive: false
