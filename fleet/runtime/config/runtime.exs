@@ -292,4 +292,17 @@ if config_env() != :test do
   if path = System.get_env("LCARS_STATE_PATH") do
     config :fleet_task_queue, state_path: path
   end
+
+  # Kick d'onboarding du pod (nudge `yop` → claude appelle get_task). La fenêtre par défaut
+  # (first 2s + 12×2.5s ≈ 32s) est trop courte face au cold-start claude en bwrap sur le service
+  # déployé (binaire 238MB, caches froids) → kick abandonné avant REPL prêt → pod sans mandat.
+  # Élargir en deploy. Entiers via env.
+  if v = System.get_env("LCARS_KICK_FIRST_DELAY_MS"),
+    do: config(:fleet_spawner, kick_first_delay_ms: String.to_integer(v))
+
+  if v = System.get_env("LCARS_KICK_RETRY_MS"),
+    do: config(:fleet_spawner, kick_retry_ms: String.to_integer(v))
+
+  if v = System.get_env("LCARS_KICK_MAX_ATTEMPTS"),
+    do: config(:fleet_spawner, kick_max_attempts: String.to_integer(v))
 end
