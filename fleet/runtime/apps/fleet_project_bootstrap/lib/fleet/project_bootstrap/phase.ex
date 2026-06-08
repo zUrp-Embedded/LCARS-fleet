@@ -56,7 +56,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           ref_args = if ref, do: ["--reference", ref], else: []
 
           with {_, 0} <-
-                 System.cmd("git", ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
+                 System.cmd(
+                   "git",
+                   forge_auth_args() ++ ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
                    stderr_to_stdout: true
                  ),
                # #596 R1 (F-03) : si l'Executor a PINNÉ une base_sha (ls-remote hors-pod), on épingle
@@ -85,7 +87,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           ok
 
         _ ->
-          case System.cmd("git", ["-C", ws, "fetch", "origin", sha], stderr_to_stdout: true) do
+          case System.cmd("git", ["-C", ws] ++ forge_auth_args() ++ ["fetch", "origin", sha],
+                 stderr_to_stdout: true
+               ) do
             {_, 0} ->
               System.cmd("git", ["-C", ws, "reset", "--hard", sha], stderr_to_stdout: true)
 
@@ -121,7 +125,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
         # --single-branch : la branche doc est orpheline ⇒ inutile de fetch le reste de l'historique.
         case System.cmd(
                "git",
-               ["clone"] ++
+               forge_auth_args() ++
+                 ["clone"] ++
                  ref_args ++ ["--branch", work_branch, "--single-branch", repo_url, doc],
                stderr_to_stdout: true
              ) do
@@ -131,6 +136,24 @@ defmodule Fleet.ProjectBootstrap.Phase do
           {out, code} ->
             {:error, {:work_doc_clone_failed, {work_branch, code, String.slice(out, 0, 500)}}}
         end
+      end
+    end
+
+    # Auth git système-side pour cloner/fetcher une forge PRIVÉE (repo_path remote). Source unique :
+    # config `:fleet_pipeline, :forge_auth = %{url_prefix, token}` (même clé que `Fleet.Pipeline.Git.
+    # forge_auth_args`, lue ici sans dépendance compile pour éviter le cycle pipeline⇄bootstrap).
+    # Injecté en `-c http.<prefix>.extraheader` (option CLI, **non persistée** dans `.git/config` du
+    # workspace) : le clone s'authentifie côté MONDE, mais le pod hérite d'un remote SANS credential —
+    # barrière forge-aveugle préservée (DN forge-state-machine §4 ; cf. BL-045 unifier les helpers).
+    # Absent → `[]` (repo local `file://` / mirror : pas d'auth).
+    defp forge_auth_args do
+      case Application.get_env(:fleet_pipeline, :forge_auth) do
+        %{url_prefix: prefix, token: token}
+        when is_binary(prefix) and is_binary(token) and prefix != "" and token != "" ->
+          ["-c", "http.#{prefix}.extraheader=Authorization: token #{token}"]
+
+        _ ->
+          []
       end
     end
 
