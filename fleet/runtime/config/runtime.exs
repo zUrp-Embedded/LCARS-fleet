@@ -246,4 +246,35 @@ if config_env() != :test do
   if forge_opts != [] do
     config :fleet_pilot, :forge, forge_opts
   end
+
+  # ============================================================
+  # A2/A3 — runtime STAGE-MODE (forge = machine à états) + BL-045b auth push
+  # ============================================================
+  # OFF par défaut. `LCARS_PILOT_STAGE=true` démarre Poller(stage) + HopConsumer
+  # (cf. Fleet.Pilot.Application.stage_children). Requiert aussi LCARS_PILOT_POLL_REPO.
+  if System.get_env("LCARS_PILOT_STAGE") == "true" do
+    config :fleet_pilot, stage_dispatch?: true
+  end
+
+  # Routing d'ENTRÉE stage-mode : map `type:X → carte`. JSON inline via env.
+  # Ex : LCARS_PILOT_STAGE_ROUTING='{"type:poc":"poc-cycle"}'.
+  if routing_json = System.get_env("LCARS_PILOT_STAGE_ROUTING") do
+    config :fleet_pilot, stage_routing: Jason.decode!(routing_json)
+  end
+
+  # Remote git où le système pousse les livrables (HopConsumer). Override ; sinon dérivé
+  # de :forge base_url + poll_repo (cf. Application.hop_remote). Token JAMAIS dans l'URL.
+  if remote = System.get_env("LCARS_HOP_REMOTE") do
+    config :fleet_pilot, hop_remote: remote
+  end
+
+  # BL-045b — auth push runtime (`Fleet.Pipeline.Git.forge_auth_args` → extraheader, token
+  # HORS .git/config). Token système (lcars-system, write:repository). FORGE_PUSH_TOKEN
+  # prioritaire sur FORGE_TOKEN (le push exige write:repository, ≠ token poller read).
+  forge_base = System.get_env("FORGE_BASE_URL")
+  forge_push_token = System.get_env("FORGE_PUSH_TOKEN") || System.get_env("FORGE_TOKEN")
+
+  if is_binary(forge_base) and is_binary(forge_push_token) do
+    config :fleet_pipeline, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
+  end
 end
