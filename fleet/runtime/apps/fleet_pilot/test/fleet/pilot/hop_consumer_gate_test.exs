@@ -21,6 +21,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     def set_assignee(_r, _n, login, _o), do: send(self(), {:assignee, login}) && {:ok, :set}
     def post_route(_r, _n, p, s, _o), do: send(self(), {:route, p, s}) && {:ok, :posted}
     def remove_label(_r, _n, _l, _o), do: send(self(), :unlocked) && {:ok, :removed}
+    def add_label(_r, _n, label, _o), do: send(self(), {:label, label}) && {:ok, :added}
     def close_issue(_r, _n, _o), do: send(self(), :closed) && {:ok, :closed}
     def count_signed_hops(_r, _n, opts), do: {:ok, Keyword.get(opts, :_hops, 0)}
   end
@@ -220,29 +221,28 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute_received {:assignee, _}
   end
 
-  test "verdict escalate_user → await_human différé, AUCUNE écriture (fail-closed)" do
-    assert {:error, {:await_human, "escalate_user"}} =
-             HopConsumer.maybe_complete(gk_done("escalate_user"), hc())
-
+  test "verdict escalate_user → await_human : lcars-awaits-human posé + unlock, pas close/reassign" do
+    assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(gk_done("escalate_user"), hc())
+    assert_received {:label, "lcars-awaits-human"}
+    assert_received :unlocked
     refute_received {:assignee, _}
     refute_received :closed
-    refute_received :unlocked
   end
 
-  test "verdict halt_wait_input → await_human différé" do
-    assert {:error, {:await_human, "halt_wait_input"}} =
-             HopConsumer.maybe_complete(gk_done("halt_wait_input"), hc())
+  test "verdict halt_wait_input → await_human (lcars-awaits-human)" do
+    assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(gk_done("halt_wait_input"), hc())
+    assert_received {:label, "lcars-awaits-human"}
   end
 
-  test "verdict redirect → await_human différé (pas de routage hors-DAG en A2.3b)" do
-    assert {:error, {:await_human, "redirect"}} =
-             HopConsumer.maybe_complete(gk_done("redirect"), hc())
-
+  test "verdict redirect → await_human (différé A2.x, pas de routage hors-DAG en A2.3b)" do
+    assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(gk_done("redirect"), hc())
+    assert_received {:label, "lcars-awaits-human"}
     refute_received {:assignee, _}
   end
 
   test "verdict absent/invalide → await_human (jamais continue silencieux)" do
-    assert {:error, {:await_human, nil}} = HopConsumer.maybe_complete(gk_done(nil), hc())
+    assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(gk_done(nil), hc())
+    assert_received {:label, "lcars-awaits-human"}
     refute_received {:assignee, _}
     refute_received :closed
   end

@@ -148,6 +148,18 @@ defmodule Fleet.Pilot.HopConsumer do
       {:error, reason} ->
         {:error, reason}
 
+      # A2.3b : verdict humain (escalate_user/halt_wait_input/redirect/invalide) → le
+      # système pose `lcars-awaits-human` + unlock (pas d'avance, pas de close). Le poller
+      # skip ensuite (StageDispatcher.decide). Pas de livrable git ici (le verdict est dans
+      # le comment ; verdict.json = item submit_result séparé).
+      {:await_human, decision} ->
+        hop = %{repo: state.repo, issue_number: n, role: role, decision: decision}
+
+        hc_opts =
+          [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
+
+        state.hop_completer.await_human(hop, hc_opts)
+
       {:ok, {next_assignee, next_stage}} ->
         hop = %{
           repo: state.repo,
@@ -242,17 +254,17 @@ defmodule Fleet.Pilot.HopConsumer do
     get_in(spec, ["gate", "type"]) == "soft" and spec["role"] == "gatekeeper"
   end
 
-  # Verdict-flow (DN gatekeeper-forge-encoding-v2 §3). MVP A2.3b : les 2 décisions
-  # qui routent dans la carte/forge déjà câblée. `continue` → advance ; `abandon` →
-  # close (terminal). Les sorties HUMAINES (`escalate_user`/`halt_wait_input`/`redirect`/
-  # absente/invalide) → différées explicitement `{:error, {:await_human, decision}}` :
-  # fail-closed (JAMAIS `continue` silencieux), n'avance pas, surface. Le mécanisme
-  # `lcars-awaits-human` (pose label + poller skip) = commit suivant (frontière A2.6).
+  # Verdict-flow (DN gatekeeper-forge-encoding-v2 §3). `continue` → advance ;
+  # `abandon` → close (terminal). Les sorties HUMAINES (`escalate_user`/`halt_wait_input`/
+  # `redirect`/absente/invalide) → `{:await_human, decision}` : fail-closed (JAMAIS
+  # `continue` silencieux), le système pose `lcars-awaits-human` + unlock (run_hop →
+  # HopCompleter.await_human) et le poller SKIP l'issue (StageDispatcher.decide). `redirect`
+  # est différé (A2.x) → traité comme await_human (DN §3/§6, R-02).
   defp verdict_route(carte, stage, payload) do
     case get_in(payload, ["result", "decision"]) do
       "continue" -> advance(carte, stage)
       "abandon" -> {:ok, {nil, nil}}
-      other -> {:error, {:await_human, other}}
+      other -> {:await_human, other}
     end
   end
 

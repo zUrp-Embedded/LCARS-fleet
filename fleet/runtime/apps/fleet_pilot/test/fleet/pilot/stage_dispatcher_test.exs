@@ -37,6 +37,18 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert {:skip, :in_flight} = StageDispatcher.decide(payload, &known?/1)
     end
 
+    test "verrou HUMAIN lcars-awaits-human → {:skip, :awaits_human} (A2.3b, pas de re-dispatch)" do
+      # assignee connu (gatekeeper) MAIS lcars-awaits-human posé → skip (sinon, après
+      # l'unlock d'un verdict escalate, le poller relancerait le gatekeeper en boucle).
+      payload =
+        issue(%{
+          "assignees" => [%{"login" => "gatekeeper"}],
+          "labels" => [%{"name" => "lcars-awaits-human"}]
+        })
+
+      assert {:skip, :awaits_human} = StageDispatcher.decide(payload, &known?/1)
+    end
+
     test "pas d'assignee → {:skip, :no_assignee}" do
       assert {:skip, :no_assignee} = StageDispatcher.decide(issue(%{}), &known?/1)
     end

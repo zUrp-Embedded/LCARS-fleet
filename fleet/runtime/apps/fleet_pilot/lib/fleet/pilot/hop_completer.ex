@@ -100,6 +100,52 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
+  @awaits_human_label "lcars-awaits-human"
+
+  @doc """
+  Fin-de-hop ALTERNATIVE (A2.3b, DN `gatekeeper-forge-encoding-v2` §3/§6) : un verdict
+  gatekeeper **humain** (`escalate_user`/`halt_wait_input`/`redirect`/absent/invalide).
+  Le SYSTÈME pose `lcars-awaits-human` + retire le verrou ; NE close PAS, NE reassign PAS.
+  L'issue attend une action humaine **via l'arch** (`convention-tickets-gitea-v2` §7/§8) ;
+  le poller la **SKIP** (`StageDispatcher.decide` → `:awaits_human`).
+
+  Pas de livrable git ici (le verdict vit dans le comment signé ; `verdict.json` =
+  item `submit_result` séparé). Ordre : comment → `lcars-awaits-human` → unlock (DERNIER,
+  même principe §5 : un crash laisse le verrou → poller skip → recovery rejoue,
+  idempotent via dédup comment + add/remove label idempotents).
+
+  `hop` : `:repo`, `:issue_number`, `:role`, `:decision`. Returns `{:ok, :awaiting_human}`
+  | `{:error, {:await_human, reason}}`.
+  """
+  @spec await_human(map(), keyword()) :: {:ok, :awaiting_human} | {:error, {:await_human, term()}}
+  def await_human(hop, opts \\ []) when is_map(hop) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+    repo = Map.fetch!(hop, :repo)
+    n = Map.fetch!(hop, :issue_number)
+    role = Map.fetch!(hop, :role)
+    decision = Map.get(hop, :decision)
+
+    signature = "[hop:#{role}:await:#{decision}]"
+
+    body =
+      "Verdict du juge **#{role}** : `#{inspect(decision)}` → escalade humaine. " <>
+        "L'issue attend une action via l'arch (`lcars-awaits-human`).\n\n" <> signature
+
+    with {:ok, _} <-
+           forge.post_comment(repo, n, body, Keyword.put(forge_opts, :dedup_signature, signature)),
+         {:ok, _} <- forge.add_label(repo, n, @awaits_human_label, forge_opts),
+         {:ok, _} <- forge.remove_label(repo, n, @in_flight_label, forge_opts) do
+      Logger.info(
+        "HopCompleter: #{repo}##{n} role=#{role} → awaiting_human (decision=#{inspect(decision)})"
+      )
+
+      {:ok, :awaiting_human}
+    else
+      {:error, reason} -> {:error, {:await_human, reason}}
+    end
+  end
+
   # ── Étape 1 : commit + push livrable (ou hop_sha fourni si pas de git) ──────
   defp step1_publish(hop, deliverable) do
     case Map.get(hop, :deliverable_opts) do

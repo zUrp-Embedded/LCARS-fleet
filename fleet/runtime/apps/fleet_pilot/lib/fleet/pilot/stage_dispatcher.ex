@@ -32,6 +32,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   require Logger
 
   @in_flight_label "lcars-in-flight"
+  @awaits_human_label "lcars-awaits-human"
 
   @type decision :: {:spawn, role :: String.t()} | {:skip, atom()}
 
@@ -48,6 +49,12 @@ defmodule Fleet.Pilot.StageDispatcher do
     cond do
       @in_flight_label in labels ->
         {:skip, :in_flight}
+
+      # A2.3b : verrou HUMAIN (verdict gatekeeper escalate/halt/redirect, ou anomalie A2.6).
+      # L'issue attend une action via l'arch ; le poller NE re-dispatche PAS (sinon, après
+      # l'unlock de `await_human`, l'assignee=gatekeeper relancerait un jugement en boucle).
+      @awaits_human_label in labels ->
+        {:skip, :awaits_human}
 
       assignees == [] ->
         {:skip, :no_assignee}
