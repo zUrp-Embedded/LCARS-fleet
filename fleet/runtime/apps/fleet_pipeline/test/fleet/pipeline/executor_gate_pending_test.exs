@@ -159,7 +159,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
     # Le mandat porte le brief d'éval (sous-lot D — GateBrief câblé).
     assert_receive {:brief, brief}, 2_000
     assert brief =~ "gate-decision-v1.json"
-    assert brief =~ "Stage : audit"
+    assert brief =~ "Stage jugé : audit"
     refute_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 200
     _ = pid
   end

@@ -588,7 +588,7 @@ defmodule Fleet.Spawner.PodTest do
       refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
     end
 
-    test "défaut :token_arg — extrait access_token depuis creds.json + injecte LCARS_ANTHROPIC_AUTH_TOKEN",
+    test "explicit :token_arg — extrait access_token depuis creds.json + injecte LCARS_ANTHROPIC_AUTH_TOKEN",
          %{tmp_dir: tmp_dir} do
       # Setup : faux claudeDir + creds.json avec slot canonique `claudeAiOauth.accessToken`.
       fake_claude_dir = Path.join(tmp_dir, "fake-claude")
@@ -606,10 +606,12 @@ defmodule Fleet.Spawner.PodTest do
         })
       )
 
-      # Pas de put_env(:auth_mode) — on prouve que le DÉFAUT est :token_arg (mundo invocado #1).
+      # :token_arg = échappatoire opt-in (le défaut est désormais :bind) → posé explicitement.
+      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
       Application.put_env(:fleet_spawner, :claude_dir, fake_claude_dir)
 
       on_exit(fn ->
+        Application.delete_env(:fleet_spawner, :auth_mode)
         Application.delete_env(:fleet_spawner, :claude_dir)
       end)
 
@@ -701,8 +703,14 @@ defmodule Fleet.Spawner.PodTest do
         })
       )
 
+      # :token_arg explicite (le défaut est désormais :bind) pour prouver l'extraction per-human.
+      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
       Application.put_env(:fleet_spawner, :claude_dir, fake_claude)
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :claude_dir) end)
+
+      on_exit(fn ->
+        Application.delete_env(:fleet_spawner, :auth_mode)
+        Application.delete_env(:fleet_spawner, :claude_dir)
+      end)
 
       # repo source avec branche code (main) + branche doc (work/ops)
       src = source_repo_with_doc(Path.join(tmp_dir, "proj-src"))

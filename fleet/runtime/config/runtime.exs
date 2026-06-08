@@ -78,17 +78,11 @@ if config_env() != :test do
     recovery_resume_enabled: System.get_env("LCARS_RECOVERY_RESUME_ENABLED") == "true"
 
   # ============================================================
-  # fleet_spawner pod_dir_root — OVERRIDE optionnel seulement.
-  # DÉCISION 2026-06-01 (monde-invoqué/ADR-E) : le défaut est PER-HUMAIN `/home/<human>/pods/pod_<id>`
-  # (pod.ex `pod_dir_for` — pod sous le home humain, 0700, isolé OS gratis ; PAS un /home|/var PARTAGÉ).
-  # On ne fixe donc PLUS de défaut plat ici (l'ancien `/var/lib/lcars/pods` ÉCRASAIT le per-humain).
-  # `LCARS_PODS_ROOT` = base plate pour un déploiement non-standard ; non-set ⇒ défaut per-humain.
-  # (Risque #585 — writes orphaned sous /tmp via PrivateTmp+bwrap — ne s'applique pas : /home/<human>
-  #  n'est pas /tmp, et bwrap re-bind le POD_DIR par-dessus son `--tmpfs /home`.)
+  # fleet_spawner pod_dir : PER-HUMAIN, dérivé du HOME du process runtime (pod.ex `pod_dir_for` →
+  # `~/pods/pod_<id>`). Décision 2026-06-09 : plus de knob env `LCARS_PODS_ROOT` (il écrasait le
+  # per-humain et a re-cassé le runtime le 2026-06-08 ; cf. journal). L'humain = l'user qui lance le
+  # runtime, point. Override éventuel = `config :fleet_spawner, pod_dir_root: …` directement (tests).
   # ============================================================
-  if pods_root = System.get_env("LCARS_PODS_ROOT") do
-    config :fleet_spawner, pod_dir_root: pods_root
-  end
 
   # ============================================================
   # U4 — pivot pod RC long-lived (claude --remote-control via tmux)
@@ -291,11 +285,8 @@ if config_env() != :test do
   # :root_dir, plus haut) et `LCARS_PIPELINES_ROOT` (→ :fleet_pipeline :pipelines_root). Pas de
   # knob dupliqué ici (I-CBC, une source par config).
 
-  # Pod runner : user linux qui exécute le pod (home `/home/<human>/pods` + creds claude).
-  # Défaut `lcars` (deploy). Dogfood worktree : pointer un user avec home+creds présents.
-  if human = System.get_env("LCARS_POD_HUMAN") do
-    config :fleet_spawner, pod_human: human
-  end
+  # (Plus de knob `LCARS_POD_HUMAN` : l'humain = l'user du process runtime, dérivé in-code, jamais
+  #  une config. Décision 2026-06-09 — cf. pod.ex `runtime_user`/`runtime_home`.)
 
   # State task-queue (défaut /var/lib/lcars/task-queue/state.json, root-owned en deploy).
   if path = System.get_env("LCARS_STATE_PATH") do

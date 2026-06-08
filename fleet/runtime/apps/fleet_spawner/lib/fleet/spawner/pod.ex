@@ -572,37 +572,50 @@ defmodule Fleet.Spawner.Pod do
     {:noreply, new_state, {:continue, :launch}}
   end
 
-  defp claude_dir do
-    Application.get_env(:fleet_spawner, :claude_dir, "/home/starfleet/.claude")
+  # L'humain qui fait tourner la fleet = l'user du process runtime lui-même. Décision 2026-06-09 :
+  # sur cette instance les SEULS users sont les users fleet → l'user courant EST l'humain. Pas de
+  # config, pas de défaut littéral (un défaut = masquage d'un trou de câblage, I-CBC). Le pod, enfant
+  # du runtime (Port/tmux), HÉRITE de cet UID → tourne dans le home de l'humain, bind ses creds. Si
+  # demain quelqu'un d'autre installe LCARS, c'est SON user qui lance, SON home — rien à hardcoder.
+  # Fail-loud si HOME/user irrésoluble (impossible en pratique, mais jamais rattrapé en silence).
+  defp runtime_home, do: System.user_home!()
+
+  defp runtime_user do
+    case System.cmd("id", ["-un"], stderr_to_stdout: true) do
+      {out, 0} -> String.trim(out)
+      other -> raise "runtime_user: user courant irrésoluble (#{inspect(other)})"
+    end
   end
 
-  # Creds du pod = ceux de l'HUMAIN (/home/<human>/.claude), même règle que pod_dir. Override config
-  # `:claude_dir` respecté (déploiement non-standard) ; sinon dérivé de l'humain (PAS /home/starfleet).
+  defp claude_dir do
+    Application.get_env(:fleet_spawner, :claude_dir) || Path.join(runtime_home(), ".claude")
+  end
+
+  # Creds du pod = `~/.claude` de l'HUMAIN (= l'user runtime). Override config `:claude_dir` respecté
+  # (tests / déploiement non-standard) ; sinon dérivé de son home passwd.
   defp claude_dir_for(human) do
     Application.get_env(:fleet_spawner, :claude_dir) || claude_dir_from_passwd(human)
   end
 
-  # Creds du pod = `.claude` dans le home de l'humain, résolu via `getent passwd` (PAS
-  # `/home/<x>` hardcodé — même raison que le binaire vendor : lcars = /var/lib/lcars).
-  # Fallback `/home/<human>/.claude` conservé si passwd échoue (compat).
+  # Creds du pod = `.claude` dans le home de l'humain, résolu via `getent passwd`. Échec passwd =
+  # erreur réelle (l'user de l'humain DOIT exister) → fail-loud, pas de `/home/<x>` deviné.
   defp claude_dir_from_passwd(human) do
     case passwd_home(human) do
       {:ok, home} -> Path.join(home, ".claude")
-      :error -> "/home/#{human}/.claude"
+      :error -> raise "claude_dir: home introuvable (getent passwd #{inspect(human)}) — fail-loud"
     end
   end
 
-  # Auth mode — mundo invocado #1 (2026-06-07) : DÉFAUT = :token_arg (inject, zéro mount du compte humain).
-  #   :token_arg (défaut) — extrait l'access_token OAuth du creds.json du HUMAIN propriétaire (per-human,
-  #                         `claude_dir_for(human)`, fail-loud R15) + injecte en env CLAUDE_CODE_OAUTH_TOKEN
-  #                         (abonnement ; inférence + MCP get_task/submit_result + Monitor PROUVÉS verts
-  #                         2026-06-07). Aucun bind du claudeDir, aucune pollution du compte user. Pas de
-  #                         bridge RC (confort, ≠ critique). Refresh interne claude OFF → viabilité = token
-  #                         ~8h vs durée pod : one-shot OK ; forever via re-spawn-on-401 (`--resume`).
-  #   :bind               — legacy ADR-F (bind RW `.credentials.json`, refresh natif lockfile). Échappatoire.
+  # Auth mode (cf. inbox/src #0_ref_oauth-token-lifecycle.md) : DÉFAUT = :bind.
+  #   :bind (défaut) — bwrap bind RW le `.credentials.json` de l'HUMAIN (avec son refreshToken) →
+  #                    refresh natif (proactif 5min + réactif 401 + lockfile). Full scope, PAS de
+  #                    falaise ~8h. Le pod = l'humain → bind son propre claudeDir, zéro copie.
+  #   :token_arg     — échappatoire opt-in : extrait l'access_token OAuth (~8h, expiresAt:null côté pod
+  #                    donc AUCUN refresh) et l'injecte en CLAUDE_CODE_OAUTH_TOKEN. Fail-loud R15 si
+  #                    creds.json illisible. À réserver aux pods one-shot < 8h.
   # Toggle via `config :fleet_spawner, :auth_mode`. Posé aussi en env `LCARS_AUTH_MODE` pour bwrap_launch.sh.
   defp auth_mode do
-    Application.get_env(:fleet_spawner, :auth_mode, :token_arg)
+    Application.get_env(:fleet_spawner, :auth_mode, :bind)
   end
 
   # Lit l'access_token OAuth depuis `<claude_dir>/.credentials.json` (slot canonique `claudeAiOauth`,
@@ -658,19 +671,17 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Résolution du binaire vendor à poser en LCARS_VENDOR_BIN (honore bwrap_launch.sh:55) :
-  #   1. binaire de l'HUMAIN (`~/.local/bin/claude` résolu via son home passwd — PAS `/home/<x>`
-  #      hardcodé : gère lcars=/var/lib/lcars ≠ /home/lcars, et tout home non-standard) ;
-  #   2. fallback = binaire global du user système du daemon (`lcars` par défaut, overridable
-  #      `:vendor_fallback_user`) — provisionné côté deploy (`<lcars-home>/.local/bin/claude`).
-  # Aucun des deux → on ne pose rien → bwrap retombe sur `command -v claude` = binaire système
-  # périmé (/usr/local 2.1.114, outil Monitor absent — piège #4). Le fallback lcars évite ce piège.
+  # Binaire vendor posé en LCARS_VENDOR_BIN (honore bwrap_launch.sh:55) = `~/.local/bin/claude` de
+  # l'HUMAIN (= l'user runtime), résolu via son home passwd. PLUS de fallback `lcars` : le pod EST
+  # l'humain, c'est SON binaire. Introuvable → fail-loud (sinon bwrap retombe sur `command -v claude`
+  # = binaire système périmé, outil Monitor absent — piège #4).
   defp maybe_put_vendor_bin(env, human) do
-    fallback_user = Application.get_env(:fleet_spawner, :vendor_fallback_user, "lcars")
+    case claude_bin_in_home(human) do
+      bin when is_binary(bin) ->
+        Map.put(env, "LCARS_VENDOR_BIN", bin)
 
-    case claude_bin_in_home(human) || claude_bin_in_home(fallback_user) do
-      bin when is_binary(bin) -> Map.put(env, "LCARS_VENDOR_BIN", bin)
-      nil -> env
+      nil ->
+        raise "vendor: binaire claude introuvable dans ~/.local/bin de #{inspect(human)} (fail-loud)"
     end
   end
 
@@ -738,8 +749,7 @@ defmodule Fleet.Spawner.Pod do
     # besoin de la valeur ; LauncherPortBackend (legacy bwrap+print) recevait
     # `budget_sec`/`budget_usd` comme args du script — ces clés sont retirées
     # de l'API LaunchBackend (cf. behaviour `Fleet.Spawner.LaunchBackend`).
-    human =
-      Keyword.get(state.opts, :human, Application.get_env(:fleet_spawner, :pod_human, "lcars"))
+    human = Keyword.get(state.opts, :human) || runtime_user()
 
     args = %{
       role: role,
@@ -1191,20 +1201,14 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp pod_dir_for(pod_id, _cap_profile, opts) do
-    # DÉCISION session 2026-06-01 (monde-invoqué / ADR-E) : le pod vit SOUS LE HOME DU HUMAIN
-    # (`/home/<human>/pods/pod_<id>`), 0700, isolé OS gratis — PAS un `/home/pods` PARTAGÉ à
-    # perms-manuelles (l'anti-pattern qu'on a explicitement rejeté). L'humain est dans le PATH, pas
-    # dans le nom ; `pod_<id>` = nom stable (pod_id = clé de recovery, unique par construction → même
-    # pod_id = même dossier = stable pour --resume). `:pod_dir_root` reste un override (tests /
-    # déploiement non-standard) ; non-set ⇒ défaut per-humain.
-    # NB : l'OWNERSHIP effective UID-humain (le pod tourne EN tant que l'humain, owns 0700) via
-    # `systemd-run --uid`/setuid = substrat à brancher (cf. journal § reste) — ici on pose le PATH décidé.
-    human = Keyword.get(opts, :human, Application.get_env(:fleet_spawner, :pod_human, "lcars"))
-
+    # Le pod vit SOUS LE HOME DE L'HUMAIN (= l'user runtime) : `~/pods/pod_<id>`, 0700, isolé OS
+    # gratis (le pod hérite de l'UID du runtime). Le home ENCODE déjà l'humain (pas de `/home/<human>`
+    # construit). `:pod_dir_root` (opts ou config) = override tests/déploiement non-standard ; non-set
+    # ⇒ home du runtime. `pod_<id>` = nom stable (pod_id = clé de recovery, stable pour --resume).
     base =
       Keyword.get(opts, :pod_dir_root) ||
         Application.get_env(:fleet_spawner, :pod_dir_root) ||
-        "/home/#{human}/pods"
+        Path.join(runtime_home(), "pods")
 
     Path.join(base, "pod_#{pod_id}")
   end
