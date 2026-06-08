@@ -45,7 +45,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
   alias Fleet.EventRouter.Bus
 
-  defstruct [:repo, :remote, :forge_opts, :role_emails, :hop_completer]
+  defstruct [:repo, :remote, :forge_opts, :role_emails, :hop_completer, :forge_client]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -65,7 +65,10 @@ defmodule Fleet.Pilot.HopConsumer do
         remote: remote,
         forge_opts: Keyword.get(opts, :forge_opts, []),
         role_emails: Keyword.get(opts, :role_emails, &default_role_emails/1),
-        hop_completer: Keyword.get(opts, :hop_completer, Fleet.Pilot.HopCompleter)
+        hop_completer: Keyword.get(opts, :hop_completer, Fleet.Pilot.HopCompleter),
+        # nil → HopCompleter applique son défaut (Fleet.Pilot.ForgeClient). Injectable
+        # pour un backend forge alternatif (ou un sim en dogfood bare).
+        forge_client: Keyword.get(opts, :forge_client)
       }
 
       Logger.info("fleet_pilot HopConsumer start repo=#{repo} remote=#{remote}")
@@ -137,8 +140,15 @@ defmodule Fleet.Pilot.HopConsumer do
       state_label: "state:delivered"
     }
 
-    state.hop_completer.complete(hop, forge_opts: state.forge_opts)
+    hc_opts =
+      [forge_opts: state.forge_opts]
+      |> maybe_put_forge_client(state.forge_client)
+
+    state.hop_completer.complete(hop, hc_opts)
   end
+
+  defp maybe_put_forge_client(opts, nil), do: opts
+  defp maybe_put_forge_client(opts, fc), do: Keyword.put(opts, :forge_client, fc)
 
   defp project_payload?(p) do
     is_binary(p["workspace"]) and is_binary(p["base_sha"]) and p["base_sha"] != "" and

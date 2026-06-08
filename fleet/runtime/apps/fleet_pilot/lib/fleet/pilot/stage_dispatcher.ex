@@ -104,8 +104,14 @@ defmodule Fleet.Pilot.StageDispatcher do
             {:error, {:project_resolution, reason}}
 
           {:ok, project} ->
+            # pod_id DÉTERMINISTE (string connue AVANT spawn) : `Spawner.spawn_pod/3` retourne le
+            # `pid` du GenServer, pas l'identifiant ; on impose donc le pod_id via `:pod_id` (sinon
+            # UUID interne). Utile au diagnostic (lock comment) + recovery (lookup issue/role). `ts`
+            # le rend unique par hop (respawn = nouveau ts).
+            pod_id = "issue-#{number}-#{role}-#{ts}"
+
             spawn_opts =
-              [mandate: issue["body"] || ""]
+              [mandate: issue["body"] || "", pod_id: pod_id]
               |> maybe_put_project(project)
 
             # Ordre canonique du SPAWN (DN §6) : label AVANT pod.
@@ -118,7 +124,7 @@ defmodule Fleet.Pilot.StageDispatcher do
                      Keyword.put(forge_opts, :dedup_signature, "[lock:#{role}:")
                    ),
                  {:ok, profile} <- loader.load(role),
-                 {:ok, pod_id} <- spawner.spawn_pod(profile, "issue-#{number}", spawn_opts) do
+                 {:ok, _pid} <- spawner.spawn_pod(profile, "issue-#{number}", spawn_opts) do
               Logger.info(
                 "StageDispatcher: spawned role=#{role} pod=#{pod_id} issue=#{repo}##{number} " <>
                   "project=#{if(project, do: project["base_sha"], else: "none")}"

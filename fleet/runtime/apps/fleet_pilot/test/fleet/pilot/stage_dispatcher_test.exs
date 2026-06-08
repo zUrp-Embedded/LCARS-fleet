@@ -61,9 +61,11 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   end
 
   defmodule StubSpawner do
+    # Fidèle au contrat réel `Spawner.spawn_pod/3` : retourne `{:ok, pid()}`, PAS une string
+    # (un retour string masquait le bug d'interpolation PID attrapé par le dogfood PASSE-9).
     def spawn_pod(_profile, ticket_id, opts) do
       send(self(), {:spawned, ticket_id, opts})
-      {:ok, "pod-test-123"}
+      {:ok, self()}
     end
   end
 
@@ -86,7 +88,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     test "spawn : ordre label → comment → pod, retourne {:ok, {:spawned, pod, role}}" do
       payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
 
-      assert {:ok, {:spawned, "pod-test-123", "engineer"}} =
+      assert {:ok, {:spawned, "issue-42-engineer-1700000000", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts())
 
       # le mandat = issue.body, ticket_id dérivé du numéro
@@ -122,7 +124,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       opts = dispatch_opts(project_resolver: fn _repo, _opts -> {:ok, project} end)
 
-      assert {:ok, {:spawned, "pod-test-123", "engineer"}} =
+      assert {:ok, {:spawned, "issue-42-engineer-1700000000", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
