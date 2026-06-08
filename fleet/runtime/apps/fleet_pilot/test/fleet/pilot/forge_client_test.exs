@@ -236,4 +236,121 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
     end
   end
+
+  # ============================================================
+  # Write-ops (primitives de fin-de-hop, DN forge-state-machine §5)
+  # ============================================================
+
+  describe "set_assignee/4" do
+    test "PATCH l'assignee quand différent" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42"} =>
+          {200, %{"assignees" => [%{"login" => "Engineer"}]}},
+        {"PATCH", "/api/v1/repos/fleet/lcars/issues/42"} => {201, %{}}
+      }
+
+      assert {:ok, :set} =
+               ForgeClient.set_assignee("fleet/lcars", 42, "Qualifier", opts(handlers))
+    end
+
+    test "no-op si déjà le seul assignee (idempotent)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42"} =>
+          {200, %{"assignees" => [%{"login" => "Qualifier"}]}}
+      }
+
+      assert {:ok, :already} =
+               ForgeClient.set_assignee("fleet/lcars", 42, "Qualifier", opts(handlers))
+    end
+  end
+
+  describe "set_state_label/4" do
+    test "retire l'ancien state:* et pose le nouveau, conserve les autres labels" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+          {200,
+           [
+             %{"id" => 3, "name" => "type:poc"},
+             %{"id" => 9, "name" => "lcars-in-flight"},
+             %{"id" => 4, "name" => "state:dispatched"}
+           ]},
+        {"GET", "/api/v1/repos/fleet/lcars/labels"} =>
+          {200,
+           [
+             %{"id" => 3, "name" => "type:poc"},
+             %{"id" => 9, "name" => "lcars-in-flight"},
+             %{"id" => 4, "name" => "state:dispatched"},
+             %{"id" => 5, "name" => "state:judged"}
+           ]},
+        {"PUT", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []}
+      }
+
+      assert {:ok, :set} =
+               ForgeClient.set_state_label("fleet/lcars", 42, "state:judged", opts(handlers))
+    end
+  end
+
+  describe "post_comment/4 — dédup signature" do
+    test "poste si la signature est absente" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {200, []},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {201, %{"id" => 1}}
+      }
+
+      assert {:ok, :posted} =
+               ForgeClient.post_comment(
+                 "fleet/lcars",
+                 42,
+                 "[hop:engineer:abc] livrable",
+                 Keyword.merge(opts(handlers), dedup_signature: "[hop:engineer:abc]")
+               )
+    end
+
+    test "no-op si la signature existe déjà (idempotent replay)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200, [%{"body" => "déjà là [hop:engineer:abc] livrable"}]}
+      }
+
+      assert {:ok, :already} =
+               ForgeClient.post_comment(
+                 "fleet/lcars",
+                 42,
+                 "[hop:engineer:abc] livrable",
+                 Keyword.merge(opts(handlers), dedup_signature: "[hop:engineer:abc]")
+               )
+    end
+  end
+
+  describe "remove_label/4 + close_issue/3" do
+    test "remove_label : no-op si absent" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []}
+      }
+
+      assert {:ok, :already_absent} =
+               ForgeClient.remove_label("fleet/lcars", 42, "lcars-in-flight", opts(handlers))
+    end
+
+    test "remove_label : DELETE quand présent" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+          {200, [%{"id" => 9, "name" => "lcars-in-flight"}]},
+        {"GET", "/api/v1/repos/fleet/lcars/labels"} =>
+          {200, [%{"id" => 9, "name" => "lcars-in-flight"}]},
+        {"DELETE", "/api/v1/repos/fleet/lcars/issues/42/labels/9"} => {204, %{}}
+      }
+
+      assert {:ok, :removed} =
+               ForgeClient.remove_label("fleet/lcars", 42, "lcars-in-flight", opts(handlers))
+    end
+
+    test "close_issue : PATCH state closed" do
+      handlers = %{
+        {"PATCH", "/api/v1/repos/fleet/lcars/issues/42"} => {201, %{"state" => "closed"}}
+      }
+
+      assert {:ok, :closed} = ForgeClient.close_issue("fleet/lcars", 42, opts(handlers))
+    end
+  end
 end

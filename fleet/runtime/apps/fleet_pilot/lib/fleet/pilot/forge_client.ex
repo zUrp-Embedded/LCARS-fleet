@@ -112,6 +112,126 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
+  # Write-ops — primitives mécaniques de fin-de-hop (DN forge-state-machine §5)
+  # Toutes idempotentes (skip si l'état cible est déjà atteint).
+  # ============================================================
+
+  @doc """
+  Réassigne l'issue à `login` (1-assignee strict, DN §10). PATCH `assignees: [login]`
+  remplace la liste. Idempotent : `{:ok, :already}` si `login` est déjà le seul assignee.
+  """
+  @spec set_assignee(String.t(), integer(), String.t(), Keyword.t()) ::
+          {:ok, :set | :already} | {:error, term()}
+  def set_assignee(repo, issue_number, login, opts \\ [])
+      when is_binary(repo) and is_integer(issue_number) and is_binary(login) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, issue} <- http_get(config, "/repos/#{repo}/issues/#{issue_number}") do
+      current = Enum.map(Map.get(issue, "assignees") || [], & &1["login"])
+
+      if current == [login] do
+        {:ok, :already}
+      else
+        case http_patch(config, "/repos/#{repo}/issues/#{issue_number}", %{assignees: [login]}) do
+          {:ok, _} -> {:ok, :set}
+          {:error, _} = err -> err
+        end
+      end
+    end
+  end
+
+  @doc """
+  Transition de `state:*` (DN §5 étape 3) : retire tout label `state:*` existant et pose
+  `new_state`. Les labels non-`state:*` (dont `lcars-in-flight`) sont conservés. Idempotent.
+  """
+  @spec set_state_label(String.t(), integer(), String.t(), Keyword.t()) ::
+          {:ok, :set} | {:error, term()}
+  def set_state_label(repo, issue_number, new_state, opts \\ [])
+      when is_binary(new_state) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, current} <- get_issue_labels(config, repo, issue_number),
+         {:ok, index} <- get_labels_index(config, repo),
+         {:ok, new_id} <- lookup_label(index, new_state) do
+      kept_ids =
+        current
+        |> Enum.reject(fn l -> String.starts_with?(l["name"] || "", "state:") end)
+        |> Enum.map(& &1["id"])
+
+      case put_issue_labels(config, repo, issue_number, Enum.uniq([new_id | kept_ids])) do
+        :ok -> {:ok, :set}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Poste un comment (DN §5 étape 2). Si `:dedup_signature` est fourni et qu'un comment existant
+  la contient déjà, no-op (`{:ok, :already}`) — la signature `[hop:<role>:<sha>]` rend le replay
+  idempotent.
+  """
+  @spec post_comment(String.t(), integer(), String.t(), Keyword.t()) ::
+          {:ok, :posted | :already} | {:error, term()}
+  def post_comment(repo, issue_number, body, opts \\ [])
+      when is_binary(body) do
+    sig = Keyword.get(opts, :dedup_signature)
+
+    with {:ok, config} <- resolve_config(opts) do
+      if sig && comment_signed?(config, repo, issue_number, sig) do
+        {:ok, :already}
+      else
+        case http_post(config, "/repos/#{repo}/issues/#{issue_number}/comments", %{body: body}) do
+          {:ok, _} -> {:ok, :posted}
+          {:error, _} = err -> err
+        end
+      end
+    end
+  end
+
+  @doc """
+  Retire le label `label_name` (DN §5 étape 5 : release du verrou `lcars-in-flight`).
+  Idempotent : `{:ok, :already_absent}` si le label n'est pas présent.
+  """
+  @spec remove_label(String.t(), integer(), String.t(), Keyword.t()) ::
+          {:ok, :removed | :already_absent} | {:error, term()}
+  def remove_label(repo, issue_number, label_name, opts \\ [])
+      when is_binary(label_name) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, current} <- get_issue_labels(config, repo, issue_number) do
+      if label_name not in Enum.map(current, & &1["name"]) do
+        {:ok, :already_absent}
+      else
+        with {:ok, index} <- get_labels_index(config, repo),
+             {:ok, id} <- lookup_label(index, label_name),
+             {:ok, _} <-
+               request(config, :delete, "/repos/#{repo}/issues/#{issue_number}/labels/#{id}", nil) do
+          {:ok, :removed}
+        end
+      end
+    end
+  end
+
+  @doc """
+  Ferme l'issue (DN §14 terminal de chaîne). PATCH `state: closed`. Idempotent côté Gitea.
+  """
+  @spec close_issue(String.t(), integer(), Keyword.t()) :: {:ok, :closed} | {:error, term()}
+  def close_issue(repo, issue_number, opts \\ []) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, _} <-
+           http_patch(config, "/repos/#{repo}/issues/#{issue_number}", %{state: "closed"}) do
+      {:ok, :closed}
+    end
+  end
+
+  defp comment_signed?(config, repo, issue_number, sig) do
+    case http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+      {:ok, comments} when is_list(comments) ->
+        Enum.any?(comments, fn c -> String.contains?(c["body"] || "", sig) end)
+
+      _ ->
+        false
+    end
+  end
+
+  # ============================================================
   # HTTP plumbing
   # ============================================================
 
@@ -153,6 +273,8 @@ defmodule Fleet.Pilot.ForgeClient do
 
   defp http_get(config, path), do: request(config, :get, path, nil)
   defp http_put(config, path, body), do: request(config, :put, path, body)
+  defp http_post(config, path, body), do: request(config, :post, path, body)
+  defp http_patch(config, path, body), do: request(config, :patch, path, body)
 
   defp request(config, method, path, body) do
     url = config.base_url <> "/api/v1" <> path
