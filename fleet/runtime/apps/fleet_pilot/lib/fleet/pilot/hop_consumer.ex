@@ -180,7 +180,11 @@ defmodule Fleet.Pilot.HopConsumer do
           # nil/nil pour terminal ou 1-stage (pas de route, close).
           next_stage: next_stage,
           pipeline: payload["pipeline"],
-          state_label: "state:delivered"
+          state_label: "state:delivered",
+          # A2.3b N-04 : si on avance vers un gatekeeper-stage, embarquer le result_K (les
+          # outputs de CE stage) dans le comment → le juge a quoi juger. Sinon nil (pas de
+          # bruit). Critère = le rôle suivant EST gatekeeper (CarteNav a résolu next_assignee).
+          outputs: if(next_assignee == "gatekeeper", do: payload["result"])
         }
 
         hc_opts =

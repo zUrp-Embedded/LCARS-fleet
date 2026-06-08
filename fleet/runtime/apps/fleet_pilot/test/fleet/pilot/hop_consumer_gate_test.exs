@@ -16,7 +16,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   # ── Sim forge : capture les writes via send(self()), sert un compteur de hops
   #    configurable par `forge_opts[:_hops]` (le bound lit count_signed_hops). ──
   defmodule StubForge do
-    def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
+    def post_comment(_r, _n, body, _o), do: send(self(), {:comment, body}) && {:ok, :posted}
     def set_state_label(_r, _n, _s, _o), do: {:ok, :set}
     def set_assignee(_r, _n, login, _o), do: send(self(), {:assignee, login}) && {:ok, :set}
     def post_route(_r, _n, p, s, _o), do: send(self(), {:route, p, s}) && {:ok, :posted}
@@ -251,6 +251,35 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     # sans court-circuit, Gates.evaluate(soft) renverrait {:dispatch_gatekeeper} → gate_pending.
     # Avec le court-circuit, continue route normalement.
     assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done("continue"), hc())
+  end
+
+  test "avance vers un gatekeeper-stage → le comment embarque result_K (N-04)" do
+    # triage(gk) → review(gatekeeper) : le comment de triage doit porter ses outputs.
+    payload = %{
+      "ticket_id" => "issue-1",
+      "workspace" => "/ws",
+      "base_sha" => "cafe",
+      "role" => "architect",
+      "pipeline" => "gk",
+      "stage" => "triage",
+      "result" => %{"severity_max" => "ok", "findings" => 0}
+    }
+
+    assert {:ok, :reassigned} = HopConsumer.maybe_complete(payload, hc())
+    assert_received {:assignee, "gatekeeper"}
+    assert_received {:comment, body}
+    assert body =~ "```result"
+    assert body =~ ~s("severity_max":"ok")
+  end
+
+  test "avance vers un stage ORDINAIRE → pas d'enrichissement result (pas de bruit)" do
+    # plain : triage(architect) → build(engineer) — build n'est pas gatekeeper.
+    assert {:ok, :reassigned} =
+             HopConsumer.maybe_complete(triage_done("plain", %{"x" => 1}), hc())
+
+    assert_received {:assignee, "engineer"}
+    assert_received {:comment, body}
+    refute body =~ "```result"
   end
 
   test "budget rework exclut les gatekeeper-stages (N-05) : budget=2*(2+1)=6, pas 9" do
