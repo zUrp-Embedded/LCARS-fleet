@@ -353,4 +353,26 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert {:ok, :closed} = ForgeClient.close_issue("fleet/lcars", 42, opts(handlers))
     end
   end
+
+  describe "parse_route_marker/1 (A2.1 — pur)" do
+    test "extrait {pipeline, stage} d'un marqueur" do
+      assert {:ok, {"poc-cycle", "build"}} =
+               ForgeClient.parse_route_marker("[lcars-route:poc-cycle:build]")
+    end
+
+    test "marqueur noyé dans du texte" do
+      assert {:ok, {"poc-cycle", "review"}} =
+               ForgeClient.parse_route_marker("blabla\n[lcars-route:poc-cycle:review]\nfin")
+    end
+
+    test "noms kebab-case OK" do
+      assert {:ok, {"standard-qa", "spec-review"}} =
+               ForgeClient.parse_route_marker("[lcars-route:standard-qa:spec-review]")
+    end
+
+    test "pas de marqueur → nil" do
+      assert nil == ForgeClient.parse_route_marker("juste un commentaire")
+      assert nil == ForgeClient.parse_route_marker(nil)
+    end
+  end
 end

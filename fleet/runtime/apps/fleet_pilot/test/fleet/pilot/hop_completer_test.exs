@@ -30,6 +30,11 @@ defmodule Fleet.Pilot.HopCompleterTest do
       send(self(), {:call, :unlock, label})
       {:ok, :removed}
     end
+
+    def post_route(_repo, _n, pipeline, stage, _opts) do
+      send(self(), {:call, :route, pipeline, stage})
+      {:ok, :posted}
+    end
   end
 
   defmodule StubDeliverable do
@@ -100,6 +105,23 @@ defmodule Fleet.Pilot.HopCompleterTest do
       assert_received {:call, :assignee, "qualifier"}
       assert_received {:call, :unlock, "lcars-in-flight"}
       refute_received {:call, :close}
+    end
+
+    test "reassign avec contexte carte → grave la ROUTE du stage suivant AVANT le reassign (A2.1)" do
+      hop =
+        base_hop(%{next_assignee: "qualifier", pipeline: "poc-cycle", next_stage: "spec-review"})
+
+      assert {:ok, :reassigned} = HopCompleter.complete(hop, seams())
+
+      # ordre §5 : route gravée AVANT l'assignee (le poller voit le next assignee déjà positionné)
+      assert_received {:call, :route, "poc-cycle", "spec-review"}
+      assert_received {:call, :assignee, "qualifier"}
+    end
+
+    test "reassign sans contexte carte → pas de post_route (defensif)" do
+      hop = base_hop(%{next_assignee: "qualifier"})
+      assert {:ok, :reassigned} = HopCompleter.complete(hop, seams())
+      refute_received {:call, :route, _, _}
     end
   end
 

@@ -188,6 +188,7 @@ defmodule Fleet.Pilot.PollerTest do
 
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+    def get_route(_repo, _n, _opts), do: :none
   end
 
   defmodule StageStubLoader do

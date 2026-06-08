@@ -86,12 +86,11 @@ defmodule Fleet.Pilot.HopCompleter do
     n = Map.fetch!(hop, :issue_number)
     role = Map.fetch!(hop, :role)
     state_label = Map.get(hop, :state_label, "state:delivered")
-    next_assignee = Map.get(hop, :next_assignee)
 
     with {:ok, sha} <- step1_publish(hop, deliverable),
          {:ok, _} <- step2_comment(forge, repo, n, role, sha, hop, forge_opts),
          {:ok, _} <- step3_state(forge, repo, n, state_label, forge_opts),
-         {:ok, routed} <- step4_route(forge, repo, n, next_assignee, forge_opts),
+         {:ok, routed} <- step4_route(forge, repo, n, hop, forge_opts),
          {:ok, _} <- step5_unlock(forge, repo, n, forge_opts) do
       Logger.info(
         "HopCompleter: #{repo}##{n} role=#{role} sha=#{sha} → #{routed} (state=#{state_label})"
@@ -138,17 +137,31 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # ── Étape 4 : assignee suivant (A2) OU close (1-stage terminal) ────────────
-  defp step4_route(forge, repo, n, nil, forge_opts) do
-    case forge.close_issue(repo, n, forge_opts) do
-      {:ok, _} -> {:ok, :completed}
-      {:error, reason} -> {:error, {:close, reason}}
+  # Reassign : grave la ROUTE du stage suivant AVANT le PATCH assignee (A2.1) — le poller
+  # ne doit voir le nouvel assignee qu'avec sa position carte déjà posée (sinon le spawn
+  # suivant ne saurait pas quel stage il est). post_route idempotent (dédup marqueur).
+  defp step4_route(forge, repo, n, hop, forge_opts) do
+    case Map.get(hop, :next_assignee) do
+      nil ->
+        case forge.close_issue(repo, n, forge_opts) do
+          {:ok, _} -> {:ok, :completed}
+          {:error, reason} -> {:error, {:close, reason}}
+        end
+
+      next when is_binary(next) ->
+        with {:ok, _} <- maybe_post_route(forge, repo, n, hop, forge_opts),
+             {:ok, _} <- forge.set_assignee(repo, n, next, forge_opts) do
+          {:ok, :reassigned}
+        else
+          {:error, reason} -> {:error, {:reassign, reason}}
+        end
     end
   end
 
-  defp step4_route(forge, repo, n, next_assignee, forge_opts) when is_binary(next_assignee) do
-    case forge.set_assignee(repo, n, next_assignee, forge_opts) do
-      {:ok, _} -> {:ok, :reassigned}
-      {:error, reason} -> {:error, {:reassign, reason}}
+  defp maybe_post_route(forge, repo, n, hop, forge_opts) do
+    case {Map.get(hop, :pipeline), Map.get(hop, :next_stage)} do
+      {p, s} when is_binary(p) and is_binary(s) -> forge.post_route(repo, n, p, s, forge_opts)
+      _ -> {:ok, :no_route}
     end
   end
 

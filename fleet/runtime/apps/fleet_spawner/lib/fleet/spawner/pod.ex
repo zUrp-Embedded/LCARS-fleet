@@ -929,11 +929,13 @@ defmodule Fleet.Spawner.Pod do
         # (memory-X, architect) → payload nu (base), filtré en aval.
         case effective_project(state) do
           %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
-            Map.merge(base, %{
+            base
+            |> Map.merge(%{
               "workspace" => Path.join(state.pod_dir, "workspace"),
               "base_sha" => proj["base_sha"],
               "role" => Map.get(state.cap_profile.metadata, "name", "engineer")
             })
+            |> maybe_put_carte_ctx(opts)
 
           _ ->
             base
@@ -941,6 +943,19 @@ defmodule Fleet.Spawner.Pod do
 
       {pipeline_id, stage} ->
         Map.merge(base, %{"pipeline_id" => pipeline_id, "stage" => stage})
+    end
+  end
+
+  # A2.1 : contexte carte (pipeline+stage) injecté au spawn par StageDispatcher via `:pipeline`/
+  # `:stage` (≠ `:pipeline_id` du chemin pipeline legacy). Permet au HopConsumer de naviguer la
+  # carte (CarteNav.next_stage). Absent (1-stage A1) → payload inchangé.
+  defp maybe_put_carte_ctx(payload, opts) do
+    case {Keyword.get(opts, :pipeline), Keyword.get(opts, :stage)} do
+      {p, s} when is_binary(p) and is_binary(s) ->
+        Map.merge(payload, %{"pipeline" => p, "stage" => s})
+
+      _ ->
+        payload
     end
   end
 

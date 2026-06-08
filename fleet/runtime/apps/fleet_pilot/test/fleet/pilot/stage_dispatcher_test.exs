@@ -51,6 +51,8 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   defmodule StubForge do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+    # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-carte / 1-stage).
+    def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
   end
 
   defmodule StubLoader do
@@ -150,6 +152,40 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:project] == project
       assert spawn_opts[:mandate] == "fais le hello"
+    end
+
+    test "route gravée sur la forge → pipeline+stage injectés dans spawn_opts (A2.1)" do
+      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+
+      opts =
+        dispatch_opts(forge_opts: [_test_route: {:ok, {"poc-cycle", "build"}}])
+
+      assert {:ok, {:spawned, _, "engineer"}} = StageDispatcher.dispatch_issue(payload, opts)
+
+      assert_received {:spawned, "issue-42", spawn_opts}
+      assert spawn_opts[:pipeline] == "poc-cycle"
+      assert spawn_opts[:stage] == "build"
+    end
+
+    test "pas de route (hors-carte / 1-stage) → spawn_opts SANS pipeline/stage (A1 préservé)" do
+      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+
+      assert {:ok, {:spawned, _, "engineer"}} =
+               StageDispatcher.dispatch_issue(payload, dispatch_opts())
+
+      assert_received {:spawned, "issue-42", spawn_opts}
+      refute Keyword.has_key?(spawn_opts, :pipeline)
+      refute Keyword.has_key?(spawn_opts, :stage)
+    end
+
+    test "échec lecture route → {:error, {:route_resolution, _}}, AUCUN verrou ni spawn" do
+      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      opts = dispatch_opts(forge_opts: [_test_route: {:error, :http_500}])
+
+      assert {:error, {:route_resolution, :http_500}} =
+               StageDispatcher.dispatch_issue(payload, opts)
+
+      refute_received {:spawned, _, _}
     end
 
     test "échec résolution projet → {:error}, AUCUN verrou posé ni spawn" do

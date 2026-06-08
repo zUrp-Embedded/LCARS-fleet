@@ -96,61 +96,83 @@ defmodule Fleet.Pilot.StageDispatcher do
         # PROJET résolu AVANT toute écriture forge (read-only ls-remote) : un échec
         # transitoire ne laisse pas de verrou orphelin. base_sha pinné HORS-pod (F-03 R1,
         # symétrique de l'Executor) → injecté au clone du pod (project.base_sha).
-        case resolver.(repo, opts) do
-          {:error, reason} ->
-            Logger.warning(
-              "StageDispatcher: project resolution role=#{role} issue=#{repo}##{number} → #{inspect(reason)} (skip, pas de verrou)"
+        # PROJET + ROUTE résolus AVANT toute écriture forge (read-only) : un échec transitoire
+        # ne laisse pas de verrou orphelin. project = base_sha pinné (F-03) ; route = (pipeline,
+        # stage) gravé sur la forge (A2.1) → identifie le stage (l'assignee=rôle ne suffit pas).
+        # `:none` (hors-carte / 1-stage) → route nil → comportement A1.
+        with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
+             {:ok, route} <-
+               tag_err(route_for(forge, repo, number, forge_opts), :route_resolution) do
+          # pod_id DÉTERMINISTE (string connue AVANT spawn) : `Spawner.spawn_pod/3` retourne le
+          # `pid` du GenServer ; on impose le pod_id via `:pod_id`. `ts` le rend unique par hop.
+          pod_id = "issue-#{number}-#{role}-#{ts}"
+
+          spawn_opts =
+            [mandate: issue["body"] || "", pod_id: pod_id]
+            |> maybe_put_project(project)
+            |> maybe_put_route(route)
+
+          # Ordre canonique du SPAWN (DN §6) : label AVANT pod.
+          with {:ok, _} <- forge.add_label(repo, number, @in_flight_label, forge_opts),
+               {:ok, _} <-
+                 forge.post_comment(
+                   repo,
+                   number,
+                   "[lock:#{role}:#{ts}]",
+                   Keyword.put(forge_opts, :dedup_signature, "[lock:#{role}:")
+                 ),
+               {:ok, profile} <- loader.load(role),
+               {:ok, _pid} <- spawner.spawn_pod(profile, "issue-#{number}", spawn_opts),
+               :ok <- enqueue_mandate(task_queue, pod_id, role, number, issue) do
+            # Kick best-effort : le pod auto-kicke les workers ; le wake accélère le 1er get_task.
+            _ = safe_wake(spawner, pod_id)
+
+            Logger.info(
+              "StageDispatcher: spawned role=#{role} pod=#{pod_id} issue=#{repo}##{number} " <>
+                "project=#{if(project, do: project["base_sha"], else: "none")} route=#{inspect(route)}"
             )
 
-            {:error, {:project_resolution, reason}}
-
-          {:ok, project} ->
-            # pod_id DÉTERMINISTE (string connue AVANT spawn) : `Spawner.spawn_pod/3` retourne le
-            # `pid` du GenServer, pas l'identifiant ; on impose donc le pod_id via `:pod_id` (sinon
-            # UUID interne). Utile au diagnostic (lock comment) + recovery (lookup issue/role). `ts`
-            # le rend unique par hop (respawn = nouveau ts).
-            pod_id = "issue-#{number}-#{role}-#{ts}"
-
-            spawn_opts =
-              [mandate: issue["body"] || "", pod_id: pod_id]
-              |> maybe_put_project(project)
-
-            # Ordre canonique du SPAWN (DN §6) : label AVANT pod.
-            with {:ok, _} <- forge.add_label(repo, number, @in_flight_label, forge_opts),
-                 {:ok, _} <-
-                   forge.post_comment(
-                     repo,
-                     number,
-                     "[lock:#{role}:#{ts}]",
-                     Keyword.put(forge_opts, :dedup_signature, "[lock:#{role}:")
-                   ),
-                 {:ok, profile} <- loader.load(role),
-                 {:ok, _pid} <- spawner.spawn_pod(profile, "issue-#{number}", spawn_opts),
-                 :ok <- enqueue_mandate(task_queue, pod_id, role, number, issue) do
-              # Kick best-effort : le pod auto-kicke les workers (mandat enqueué → mode worker),
-              # mais un wake explicite accélère le 1er `get_task`. Non-fatal (le pod pull de toute façon).
-              _ = safe_wake(spawner, pod_id)
-
-              Logger.info(
-                "StageDispatcher: spawned role=#{role} pod=#{pod_id} issue=#{repo}##{number} " <>
-                  "project=#{if(project, do: project["base_sha"], else: "none")}"
+            {:ok, {:spawned, pod_id, role}}
+          else
+            {:error, _} = err ->
+              Logger.warning(
+                "StageDispatcher: spawn role=#{role} issue=#{repo}##{number} → #{inspect(err)}"
               )
 
-              {:ok, {:spawned, pod_id, role}}
-            else
-              {:error, _} = err ->
-                Logger.warning(
-                  "StageDispatcher: spawn role=#{role} issue=#{repo}##{number} → #{inspect(err)}"
-                )
+              err
+          end
+        else
+          {:error, {phase, reason}} ->
+            Logger.warning(
+              "StageDispatcher: #{phase} role=#{role} issue=#{repo}##{number} → #{inspect(reason)} (skip, pas de verrou)"
+            )
 
-                err
-            end
+            {:error, {phase, reason}}
         end
     end
   end
 
   defp maybe_put_project(spawn_opts, nil), do: spawn_opts
   defp maybe_put_project(spawn_opts, project), do: Keyword.put(spawn_opts, :project, project)
+
+  defp maybe_put_route(spawn_opts, nil), do: spawn_opts
+
+  defp maybe_put_route(spawn_opts, {pipeline, stage}),
+    do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:stage, stage)
+
+  # Tag l'erreur d'une étape de résolution (préserve {:project_resolution, _} attendu).
+  defp tag_err({:ok, _} = ok, _tag), do: ok
+  defp tag_err({:error, reason}, tag), do: {:error, {tag, reason}}
+
+  # Lit la position carte (pipeline, stage) gravée sur la forge (A2.1). `:none` (hors-carte /
+  # 1-stage) → `{:ok, nil}` (comportement A1). Erreur HTTP → propagée (skip sans verrou).
+  defp route_for(forge, repo, number, forge_opts) do
+    case forge.get_route(repo, number, forge_opts) do
+      {:ok, {_p, _s} = route} -> {:ok, route}
+      :none -> {:ok, nil}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   # Enqueue le mandat dans le broker `Fleet.TaskQueue` ciblé pod_id — le claude REPL le pull via
   # `mcp__fleet__get_task` → `PodTools.get_task` → `TaskQueue.get_for_pod` (PAS un Read fichier).

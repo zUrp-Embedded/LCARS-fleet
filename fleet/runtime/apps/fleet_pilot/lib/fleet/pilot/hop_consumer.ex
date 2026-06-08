@@ -128,11 +128,11 @@ defmodule Fleet.Pilot.HopConsumer do
     # est calculé par CarteNav (reassign vers le rôle suivant, ou close si terminal).
     # Sans contexte carte (A1 1-stage) → next_assignee nil → close. Une erreur de carte
     # (DAG, stage inconnu) NE misroute PAS : elle remonte (le système n'avance pas à l'aveugle).
-    case resolve_next_assignee(payload, state) do
+    case resolve_next(payload, state) do
       {:error, reason} ->
         {:error, reason}
 
-      {:ok, next_assignee} ->
+      {:ok, {next_assignee, next_stage}} ->
         hop = %{
           repo: state.repo,
           issue_number: n,
@@ -148,6 +148,10 @@ defmodule Fleet.Pilot.HopConsumer do
             local_ref: "HEAD"
           },
           next_assignee: next_assignee,
+          # A2.1 : pipeline + stage suivant → HopCompleter grave la route avant le reassign.
+          # nil/nil pour terminal ou 1-stage (pas de route, close).
+          next_stage: next_stage,
+          pipeline: payload["pipeline"],
           state_label: "state:delivered"
         }
 
@@ -162,20 +166,20 @@ defmodule Fleet.Pilot.HopConsumer do
   # Résout le prochain assignee depuis la carte (A2.4). Le contexte carte arrive dans le
   # payload `pod.completed` : `pipeline` (nom de carte) + `stage` (nom du stage courant —
   # le NOM, pas le rôle, cf. CarteNav wrinkle DN §8). Absent → 1-stage terminal (A1).
-  defp resolve_next_assignee(payload, state) do
+  defp resolve_next(payload, state) do
     case {payload["pipeline"], payload["stage"]} do
       {pipeline, stage} when is_binary(pipeline) and is_binary(stage) ->
         with {:ok, carte} <- load_carte(state, pipeline) do
           case Fleet.Pilot.CarteNav.next_stage(carte, stage) do
-            {:ok, {_next_stage, next_role}} -> {:ok, next_role}
-            :terminal -> {:ok, nil}
+            {:ok, {next_stage, next_role}} -> {:ok, {next_role, next_stage}}
+            :terminal -> {:ok, {nil, nil}}
             {:error, reason} -> {:error, {:carte_nav, reason}}
           end
         end
 
       _ ->
         # pas de contexte carte → pod 1-stage (A1) → terminal close
-        {:ok, nil}
+        {:ok, {nil, nil}}
     end
   end
 

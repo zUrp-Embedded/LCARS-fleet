@@ -232,6 +232,55 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
+  # Marqueur ROUTE — position carte sur la forge (A2.1, DN forge-state-machine §8)
+  # `[lcars-route:<pipeline>:<stage>]` : grave (pipeline, stage) sur l'issue, car l'assignee
+  # (= rôle) seul n'identifie pas le stage (un rôle peut être sur N stages, cf. CarteNav).
+  # Écrit à l'assignation (entrée + reassign), lu par StageDispatcher au spawn.
+  # ============================================================
+
+  @route_prefix "[lcars-route:"
+
+  @doc """
+  Grave le marqueur route `[lcars-route:<pipeline>:<stage>]`. Idempotent (dédup sur le marqueur
+  exact → un replay ne duplique pas). Le dernier marqueur posé fait foi (cf. `get_route`).
+  """
+  @spec post_route(String.t(), integer(), String.t(), String.t(), Keyword.t()) ::
+          {:ok, :posted | :already} | {:error, term()}
+  def post_route(repo, issue_number, pipeline, stage, opts \\ [])
+      when is_binary(pipeline) and is_binary(stage) do
+    marker = "#{@route_prefix}#{pipeline}:#{stage}]"
+    post_comment(repo, issue_number, marker, Keyword.put(opts, :dedup_signature, marker))
+  end
+
+  @doc """
+  Lit la position carte courante = le **dernier** marqueur `[lcars-route:p:s]` de l'issue.
+  `:none` si aucun (ticket hors-carte / 1-stage). `{:error, _}` sur échec HTTP/config.
+  """
+  @spec get_route(String.t(), integer(), Keyword.t()) ::
+          {:ok, {String.t(), String.t()}} | :none | {:error, term()}
+  def get_route(repo, issue_number, opts \\ []) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, comments} when is_list(comments) <-
+           http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+      comments
+      |> Enum.map(& &1["body"])
+      |> Enum.reverse()
+      |> Enum.find_value(:none, fn body -> parse_route_marker(body) end)
+    end
+  end
+
+  @doc false
+  # Pur : extrait `{pipeline, stage}` d'un body contenant `[lcars-route:p:s]`, sinon nil.
+  def parse_route_marker(nil), do: nil
+
+  def parse_route_marker(body) when is_binary(body) do
+    case Regex.run(~r/\[lcars-route:([^:\]]+):([^:\]]+)\]/, body) do
+      [_, pipeline, stage] -> {:ok, {pipeline, stage}}
+      _ -> nil
+    end
+  end
+
+  # ============================================================
   # HTTP plumbing
   # ============================================================
 
