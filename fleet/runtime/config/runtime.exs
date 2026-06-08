@@ -277,4 +277,15 @@ if config_env() != :test do
   if is_binary(forge_base) and is_binary(forge_push_token) do
     config :fleet_pipeline, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
   end
+
+  # Emplacement des cap-profiles / cartes (A3 deploy). `Fleet.CapProfile` défaute à un
+  # chemin RELATIF (`cap-profiles`) → injecter le chemin absolu en prod/dogfood. Le Loader
+  # de cartes défaute à `app_dir` (OK), override possible.
+  if dir = System.get_env("LCARS_CAP_PROFILES_DIR") do
+    config :fleet_cap_profile, root_dir: dir
+  end
+
+  if dir = System.get_env("LCARS_PIPELINES_DIR") do
+    config :fleet_pipeline, pipelines_root: dir
+  end
 end

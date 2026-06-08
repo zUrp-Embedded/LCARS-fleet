@@ -1,0 +1,30 @@
+# Pipeline V2 — gk-smoke (dogfood live A2.3b : business → gatekeeper)
+#
+# Date: 2026-06-08
+# Statut: SMOKE — carte minimale 2 stages pour valider la chaîne forge-driven
+#         AVEC un gatekeeper-stage explicite (A2.3b) sur de vrais pods.
+#         build(engineer, livrable git) → review(gatekeeper, verdict gate-decision-v1).
+# Consommé par: Fleet.Pipeline.Loader (format flat v1) + stage-mode forge-driven
+#               (Entry/StageDispatcher/HopConsumer). Routé via LCARS_PILOT_STAGE_ROUTING.
+
+name: gk-smoke
+version: 1
+
+stages:
+  build:
+    role: engineer
+    # noop modop = rôle de base inchangé. L'engineer commite en LOCAL (barrière §4),
+    # le SYSTÈME pousse. Pas de gate → avance directe vers le gatekeeper.
+    profile: noop
+    timeout_sec: 900
+
+  review:
+    role: gatekeeper
+    profile: noop
+    needs: [build]
+    # gate soft = la sortie EST un verdict gate-decision-v1.json (A2.3b explicit-stage).
+    # Le runtime court-circuite Gates et route par result["decision"].
+    gate:
+      type: soft
+      max_rounds: 1
+    timeout_sec: 900
