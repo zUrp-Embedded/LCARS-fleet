@@ -53,7 +53,8 @@ defmodule Fleet.Pilot.HopConsumer do
     :hop_completer,
     :forge_client,
     :loader,
-    :deliverable
+    :deliverable,
+    :max_rework_rounds
   ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -81,7 +82,11 @@ defmodule Fleet.Pilot.HopConsumer do
         # Loader de carte (A2 multi-stage) : résout le stage suivant. Défaut = Loader réel.
         loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader),
         # nil → HopCompleter applique son défaut (Fleet.Pipeline.Deliverable). Injectable (sim/test).
-        deliverable: Keyword.get(opts, :deliverable)
+        deliverable: Keyword.get(opts, :deliverable),
+        # A2.3 : bound anti-runaway du rebond de gate. Budget de hops = nb_stages *
+        # (max_rework_rounds + 1) : la 1re passe + N rounds de rework. Au-delà → stuck
+        # surfacé (pas de boucle). Défaut 2 rounds.
+        max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2)
       }
 
       Logger.info("fleet_pilot HopConsumer start repo=#{repo} remote=#{remote}")
@@ -139,7 +144,7 @@ defmodule Fleet.Pilot.HopConsumer do
     # est calculé par CarteNav (reassign vers le rôle suivant, ou close si terminal).
     # Sans contexte carte (A1 1-stage) → next_assignee nil → close. Une erreur de carte
     # (DAG, stage inconnu) NE misroute PAS : elle remonte (le système n'avance pas à l'aveugle).
-    case resolve_next(payload, state) do
+    case resolve_next(payload, n, state) do
       {:error, reason} ->
         {:error, reason}
 
@@ -178,21 +183,86 @@ defmodule Fleet.Pilot.HopConsumer do
   # Résout le prochain assignee depuis la carte (A2.4). Le contexte carte arrive dans le
   # payload `pod.completed` : `pipeline` (nom de carte) + `stage` (nom du stage courant —
   # le NOM, pas le rôle, cf. CarteNav wrinkle DN §8). Absent → 1-stage terminal (A1).
-  defp resolve_next(payload, state) do
+  defp resolve_next(payload, n, state) do
     case {payload["pipeline"], payload["stage"]} do
       {pipeline, stage} when is_binary(pipeline) and is_binary(stage) ->
         with {:ok, carte} <- load_carte(state, pipeline) do
-          case Fleet.Pilot.CarteNav.next_stage(carte, stage) do
-            {:ok, {next_stage, next_role}} -> {:ok, {next_role, next_stage}}
-            :terminal -> {:ok, {nil, nil}}
-            {:error, reason} -> {:error, {:carte_nav, reason}}
-          end
+          gate_decide(carte, stage, payload, n, state)
         end
 
       _ ->
         # pas de contexte carte → pod 1-stage (A1) → terminal close
         {:ok, {nil, nil}}
     end
+  end
+
+  # A2.3 — la gate du stage FINI décide AVANT d'avancer (DN forge-state-machine §9).
+  # `Gates.evaluate/3` est PUR (gate nil/absente → :pass) ; on lui passe la spec du
+  # stage qui vient de finir + le `result` du pod (outputs → prédicats hard).
+  #
+  #   :pass                     → avance dans la carte (next_stage)
+  #   {:fail, _}                → REBOND vers le 1er stage (rework), BORNÉ (anti-runaway,
+  #                               I-CBC : une boucle de rework infinie ne doit pas être
+  #                               représentable).
+  #   {:dispatch_gatekeeper, i} → jugement async — A2.3b, pas encore câblé → différé
+  #                               explicite {:error, {:gate_pending, i}} (pas d'avance à l'aveugle).
+  defp gate_decide(carte, stage, payload, n, state) do
+    spec =
+      case Fleet.Pilot.CarteNav.stage_spec(carte, stage) do
+        {:ok, s} -> s
+        # stage inconnu : pas de gate → next_stage tranchera ({:error,:unknown_stage}),
+        # pas de misroute silencieux.
+        :error -> %{}
+      end
+
+    case Fleet.Pipeline.Gates.evaluate(spec, payload["result"] || %{}, %{}) do
+      :pass ->
+        advance(carte, stage)
+
+      {:fail, reason} ->
+        Logger.info("HopConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}")
+        rebound(carte, n, state)
+
+      {:dispatch_gatekeeper, info} ->
+        {:error, {:gate_pending, info}}
+    end
+  end
+
+  defp advance(carte, stage) do
+    case Fleet.Pilot.CarteNav.next_stage(carte, stage) do
+      {:ok, {next_stage, next_role}} -> {:ok, {next_role, next_stage}}
+      :terminal -> {:ok, {nil, nil}}
+      {:error, reason} -> {:error, {:carte_nav, reason}}
+    end
+  end
+
+  # Rebond borné. Budget = nb_stages * (max_rework_rounds + 1) hops signés. Le compteur
+  # forge-natif = les comments `[hop:role:sha]` déjà postés (monotone). Lu UNIQUEMENT ici
+  # (branche fail) → zéro I/O sur le happy path. Budget illisible → on NE rebondit PAS à
+  # l'aveugle (un rebond non vérifiable pourrait boucler) : on surface.
+  defp rebound(carte, n, state) do
+    budget = stage_count(carte) * (state.max_rework_rounds + 1)
+
+    case count_hops(state, n) do
+      {:ok, hops} when hops >= budget ->
+        {:error, {:rework_exhausted, %{hops: hops, budget: budget}}}
+
+      {:ok, _hops} ->
+        case Fleet.Pilot.CarteNav.first_stage(carte) do
+          {:ok, {first_stage, first_role}} -> {:ok, {first_role, first_stage}}
+          {:error, reason} -> {:error, {:carte_nav, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:rework_budget_unreadable, reason}}
+    end
+  end
+
+  defp stage_count(carte), do: carte |> Map.get("stages", %{}) |> map_size()
+
+  defp count_hops(state, n) do
+    forge = state.forge_client || Fleet.Pilot.ForgeClient
+    forge.count_signed_hops(state.repo, n, state.forge_opts)
   end
 
   defp load_carte(state, pipeline) do

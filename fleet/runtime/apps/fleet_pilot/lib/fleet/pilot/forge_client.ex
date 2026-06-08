@@ -280,6 +280,36 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  @hop_marker_rx ~r/\[hop:[^:\]]+:[^:\]]+\]/
+
+  @doc """
+  Compte les comments portant un marqueur de hop signé `[hop:<role>:<sha>]`
+  (posés par `HopCompleter` à chaque fin-de-hop). Sert de compteur **forge-natif**
+  au bound anti-runaway du rebond de gate (A2.3) : combien de hops ont déjà été
+  joués sur l'issue. Monotone (les comments ne sont pas retirés), idempotent à lire.
+
+  `{:error, _}` sur échec HTTP/config — le caller NE rebondit PAS à l'aveugle si le
+  budget n'est pas vérifiable (un rebond non vérifiable pourrait boucler).
+
+  NB : `?limit=50` — le budget de rework (`nb_stages * (max_rounds+1)`, ~quelques
+  unités) est très en-dessous, donc pas de pagination ici. Si un jour le budget
+  approche 50, paginer (même limite que `get_route`).
+  """
+  @spec count_signed_hops(String.t(), integer(), Keyword.t()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def count_signed_hops(repo, issue_number, opts \\ []) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, comments} when is_list(comments) <-
+           http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+      count =
+        comments
+        |> Enum.map(& &1["body"])
+        |> Enum.count(fn b -> is_binary(b) and Regex.match?(@hop_marker_rx, b) end)
+
+      {:ok, count}
+    end
+  end
+
   # ============================================================
   # HTTP plumbing
   # ============================================================
