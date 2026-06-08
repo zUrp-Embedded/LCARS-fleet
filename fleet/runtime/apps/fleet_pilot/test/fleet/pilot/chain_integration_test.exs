@@ -98,10 +98,27 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
         }
       }
     end
+
+    # A2.3b : chaîne avec gatekeeper-stage explicite : triage(architect) →
+    # review(gatekeeper, gate soft = verdict) → build(engineer).
+    def load!("gkchain") do
+      %{
+        "name" => "gkchain",
+        "stages" => %{
+          "triage" => %{"role" => "architect", "needs" => []},
+          "review" => %{
+            "role" => "gatekeeper",
+            "needs" => ["triage"],
+            "gate" => %{"type" => "soft", "max_rounds" => 1}
+          },
+          "build" => %{"role" => "engineer", "needs" => ["review"]}
+        }
+      }
+    end
   end
 
   defmodule CapLoader do
-    def load(role) when role in ["architect", "engineer"],
+    def load(role) when role in ["architect", "engineer", "gatekeeper"],
       do:
         {:ok,
          %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => role}, spec: %{}}}
@@ -139,8 +156,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
   # Reconstruit le payload pod.completed (ce que pod.ex produit) : pipeline+stage des opts de spawn,
   # role explicite (le test sait quel stage vient de finir).
-  defp completed(spawn_opts, role) do
-    %{
+  defp completed(spawn_opts, role, result \\ nil) do
+    base = %{
       "ticket_id" => "issue-1",
       "workspace" => "/ws",
       "base_sha" => "cafe",
@@ -148,6 +165,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       "pipeline" => spawn_opts[:pipeline],
       "stage" => spawn_opts[:stage]
     }
+
+    if result, do: Map.put(base, "result", result), else: base
   end
 
   test "chaîne 2 stages : entrée → triage(architect) → build(engineer) → terminal close" do
@@ -222,5 +241,126 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     comments = Sim.get(pid)["comments"]
     assert Enum.any?(comments, &String.contains?(&1, "[hop:architect:"))
     assert Enum.any?(comments, &String.contains?(&1, "[hop:engineer:"))
+  end
+
+  # ── A2.3b : chaîne avec gatekeeper-stage explicite (gkchain) ──────────────────
+  defp gk_opts do
+    {:ok, pid} =
+      Sim.start_link(%{
+        "number" => 1,
+        "state" => "open",
+        "labels" => [%{"name" => "type:poc"}],
+        "assignees" => [],
+        "comments" => []
+      })
+
+    SimForge.put(pid)
+
+    dispatch_opts = [
+      repo: "o/r",
+      forge_client: SimForge,
+      loader: CapLoader,
+      spawner: SpawnStub,
+      task_queue: TQStub,
+      clock: fn :second -> 100 end,
+      project_resolver: fn _r, _o ->
+        {:ok, %{"repo_path" => "x", "base_branch" => "main", "base_sha" => "cafe"}}
+      end
+    ]
+
+    entry_opts = [
+      repo: "o/r",
+      routing: %{"type:poc" => "gkchain"},
+      forge_client: SimForge,
+      loader: CarteLoader
+    ]
+
+    hc = %HopConsumer{
+      repo: "o/r",
+      remote: "origin",
+      forge_opts: [],
+      role_emails: fn r -> ["#{r}@lcars.local"] end,
+      hop_completer: Fleet.Pilot.HopCompleter,
+      forge_client: SimForge,
+      loader: CarteLoader,
+      deliverable: DelivStub,
+      max_rework_rounds: 2
+    }
+
+    {pid, dispatch_opts, entry_opts, hc}
+  end
+
+  # entrée → triage(architect) spawn → triage finit (outputs) → review(gatekeeper) spawn.
+  # Renvoie {pid, dispatch_opts, hc, review_spawn_opts}.
+  defp drive_to_review do
+    {pid, dispatch_opts, entry_opts, hc} = gk_opts()
+
+    assert {:ok, {:entered, "architect"}} = Entry.enter(wrap(pid), entry_opts)
+
+    assert {:ok, {:spawned, _, "architect"}} =
+             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
+
+    assert_received {:spawned, "issue-1", o1}
+
+    # triage finit avec des outputs → avance vers review(gatekeeper) ; le comment porte result_K
+    assert {:ok, :reassigned} =
+             HopConsumer.maybe_complete(completed(o1, "architect", %{"severity_max" => "ok"}), hc)
+
+    assert {:ok, {"gkchain", "review"}} = SimForge.get_route("o/r", 1, [])
+    assert [%{"login" => "gatekeeper"}] = Sim.get(pid)["assignees"]
+    assert Enum.any?(Sim.get(pid)["comments"], &String.contains?(&1, "```result"))
+
+    # dispatch review → spawn gatekeeper (rôle connu via CapLoader)
+    assert {:ok, {:spawned, _, "gatekeeper"}} =
+             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
+
+    assert_received {:spawned, "issue-1", o2}
+    assert o2[:stage] == "review"
+
+    {pid, dispatch_opts, hc, o2}
+  end
+
+  test "gatekeeper continue : triage → review(verdict continue) → build → close" do
+    {pid, dispatch_opts, hc, o2} = drive_to_review()
+
+    # verdict continue → avance vers build(engineer)
+    assert {:ok, :reassigned} =
+             HopConsumer.maybe_complete(
+               completed(o2, "gatekeeper", %{"decision" => "continue"}),
+               hc
+             )
+
+    assert {:ok, {"gkchain", "build"}} = SimForge.get_route("o/r", 1, [])
+    assert [%{"login" => "engineer"}] = Sim.get(pid)["assignees"]
+
+    # dispatch build → spawn engineer → finit → terminal close
+    assert {:ok, {:spawned, _, "engineer"}} =
+             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
+
+    assert_received {:spawned, "issue-1", o3}
+    assert {:ok, :completed} = HopConsumer.maybe_complete(completed(o3, "engineer"), hc)
+    assert Sim.get(pid)["state"] == "closed"
+
+    comments = Sim.get(pid)["comments"]
+    assert Enum.any?(comments, &String.contains?(&1, "[hop:gatekeeper:"))
+  end
+
+  test "gatekeeper escalate_user : lcars-awaits-human + unlock + poller SKIP (boucle fermée)" do
+    {pid, dispatch_opts, hc, o2} = drive_to_review()
+
+    # verdict escalate_user → await-human
+    assert {:ok, :awaiting_human} =
+             HopConsumer.maybe_complete(
+               completed(o2, "gatekeeper", %{"decision" => "escalate_user"}),
+               hc
+             )
+
+    labels = Enum.map(Sim.get(pid)["labels"], & &1["name"])
+    assert "lcars-awaits-human" in labels
+    refute "lcars-in-flight" in labels
+    assert Sim.get(pid)["state"] == "open"
+
+    # LE POINT CLÉ : le poller NE re-dispatche PAS (assignee=gatekeeper mais awaits-human).
+    assert {:skipped, :awaits_human} = StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
   end
 end
