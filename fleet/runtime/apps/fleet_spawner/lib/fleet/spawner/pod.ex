@@ -1613,7 +1613,20 @@ defmodule Fleet.Spawner.Pod do
         {:error, {:mcp_server_spec_required, backend}}
 
       {spec, _backend} when is_map(spec) ->
-        fleet_entry = Map.put(spec, "alwaysLoad", true)
+        # A2.3b live (PASSE-7) : injecter `LCARS_POD_ID` DANS l'env du serveur MCP `fleet`
+        # (ceinture). Le bridge stdio (`fleet_mcp_stdio_bridge.py` l.37) lit `LCARS_POD_ID`
+        # pour corréler `get_task` au bon pod. claude lance le serveur via `--mcp-config` avec
+        # l'`env` de CETTE config ; ne pas dépendre de l'héritage env claude→bridge (sinon
+        # get_task sans pod_id → "no task"). Le pod_id est connu ici (state.pod_id).
+        fleet_entry =
+          spec
+          |> Map.put("alwaysLoad", true)
+          |> Map.update(
+            "env",
+            %{"LCARS_POD_ID" => state.pod_id},
+            &Map.put(&1, "LCARS_POD_ID", state.pod_id)
+          )
+
         config = %{"mcpServers" => %{"fleet" => fleet_entry}}
 
         # Vulcan #5 : non-bang + retour {:ok|:error} propagé au with chain
