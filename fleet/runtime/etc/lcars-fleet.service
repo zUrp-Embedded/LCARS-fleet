@@ -35,6 +35,13 @@ NotifyAccess=main
 ProtectHome=yes
 ProtectSystem=strict
 ReadWritePaths=/var/lib/lcars /var/log/fleet-audit.jsonl /var/log/fleet-starfleet.jsonl /tmp
+# /run/lcars/tmux-sock : base des sockets tmux par-pod (bwrap_launch.sh `install -d`).
+# Sous ProtectSystem=strict, /run/lcars n'est PAS writable hors ReadWritePaths/RuntimeDirectory →
+# le spawn de pod echoue ("install: cannot change permissions ... No such file"). RuntimeDirectory
+# cree /run/lcars/tmux-sock owned par le service user (lcars) + RW a chaque start (tmpfs-safe).
+RuntimeDirectory=lcars/tmux-sock
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=no
