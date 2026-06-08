@@ -920,8 +920,27 @@ defmodule Fleet.Spawner.Pod do
     opts = state.opts || []
 
     case {Keyword.get(opts, :pipeline_id), Keyword.get(opts, :stage)} do
-      {nil, _} -> base
-      {pipeline_id, stage} -> Map.merge(base, %{"pipeline_id" => pipeline_id, "stage" => stage})
+      {nil, _} ->
+        # Pod stage-dispatch (assignee-driven, DN forge-state-machine) hors pipeline.
+        # S'il porte un PROJET (repo cloné), le payload embarque le contexte de
+        # fin-de-hop : le consumer `Fleet.Pilot.HopConsumer` est stateless (l'event
+        # porte l'état, pas de query `pod_info` racy). workspace+base_sha+role
+        # suffisent au `Deliverable.publish` côté système. Pod sans projet
+        # (memory-X, architect) → payload nu (base), filtré en aval.
+        case effective_project(state) do
+          %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
+            Map.merge(base, %{
+              "workspace" => Path.join(state.pod_dir, "workspace"),
+              "base_sha" => proj["base_sha"],
+              "role" => Map.get(state.cap_profile.metadata, "name", "engineer")
+            })
+
+          _ ->
+            base
+        end
+
+      {pipeline_id, stage} ->
+        Map.merge(base, %{"pipeline_id" => pipeline_id, "stage" => stage})
     end
   end
 

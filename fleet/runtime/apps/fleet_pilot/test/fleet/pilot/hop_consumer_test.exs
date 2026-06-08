@@ -1,0 +1,159 @@
+defmodule Fleet.Pilot.HopConsumerTest do
+  use ExUnit.Case, async: true
+
+  alias Fleet.Pilot.HopConsumer
+
+  # Seam HopCompleter : capture le hop reçu + retourne un outcome configurable.
+  defmodule CaptureCompleter do
+    def complete(hop, opts) do
+      send(self(), {:hop, hop, opts})
+      {:ok, :completed}
+    end
+  end
+
+  defp state(extra \\ %{}) do
+    Map.merge(
+      %HopConsumer{
+        repo: "lordzurp/lcars-test",
+        remote: "origin",
+        forge_opts: [base_url: "http://10.42.0.118"],
+        role_emails: fn role -> ["#{role}@lcars.local"] end,
+        hop_completer: CaptureCompleter
+      },
+      extra
+    )
+  end
+
+  defp stage_payload(extra \\ %{}) do
+    Map.merge(
+      %{
+        "pod_id" => "pod-abc",
+        "ticket_id" => "issue-42",
+        "result" => %{"ok" => true},
+        "workspace" => "/pods/pod-abc/workspace",
+        "base_sha" => "cafe1234",
+        "role" => "engineer"
+      },
+      extra
+    )
+  end
+
+  describe "maybe_complete/2 — traduction event → hop" do
+    test "pod stage-dispatch porteur de projet → hop git_native, terminal (close)" do
+      assert {:ok, :completed} = HopConsumer.maybe_complete(stage_payload(), state())
+
+      assert_received {:hop, hop, opts}
+      assert hop.repo == "lordzurp/lcars-test"
+      assert hop.issue_number == 42
+      assert hop.role == "engineer"
+      assert hop.next_assignee == nil
+      assert hop.state_label == "state:delivered"
+
+      d = hop.deliverable_opts
+      assert d.mode == :git_native
+      assert d.workspace == "/pods/pod-abc/workspace"
+      assert d.base_sha == "cafe1234"
+      assert d.allowed_emails == ["engineer@lcars.local"]
+      assert d.remote == "origin"
+      assert d.target_branch == "lcars/issue-42-engineer"
+      assert d.push? == true
+
+      assert opts[:forge_opts] == [base_url: "http://10.42.0.118"]
+    end
+  end
+
+  describe "maybe_complete/2 — filtres (skip)" do
+    test "pipeline pod (pipeline_id présent) → skip, pas d'appel completer" do
+      payload = stage_payload(%{"pipeline_id" => "pl-1", "stage" => "build"})
+      assert {:skip, :pipeline_pod} = HopConsumer.maybe_complete(payload, state())
+      refute_received {:hop, _, _}
+    end
+
+    test "pod sans projet (pas de base_sha) → skip" do
+      payload = stage_payload(%{"base_sha" => nil, "workspace" => nil})
+      assert {:skip, :no_project} = HopConsumer.maybe_complete(payload, state())
+      refute_received {:hop, _, _}
+    end
+
+    test "base_sha vide → skip (pas de livrable git)" do
+      payload = stage_payload(%{"base_sha" => ""})
+      assert {:skip, :no_project} = HopConsumer.maybe_complete(payload, state())
+    end
+
+    test "ticket_id non parseable → skip" do
+      payload = stage_payload(%{"ticket_id" => "owner/repo#42"})
+
+      assert {:skip, {:bad_ticket_id, "owner/repo#42"}} =
+               HopConsumer.maybe_complete(payload, state())
+    end
+  end
+
+  describe "parse_issue_number/1" do
+    test "issue-N → {:ok, N}" do
+      assert {:ok, 7} = HopConsumer.parse_issue_number("issue-7")
+    end
+
+    test "format legacy / inconnu → :error" do
+      assert :error = HopConsumer.parse_issue_number("owner/repo#7")
+      assert :error = HopConsumer.parse_issue_number("issue-7x")
+      assert :error = HopConsumer.parse_issue_number("issue-")
+    end
+  end
+
+  describe "GenServer lifecycle" do
+    test "crash si :repo ou :remote manquant" do
+      Process.flag(:trap_exit, true)
+
+      assert {:error, {:missing_required_opt, :repo}} =
+               HopConsumer.start_link(
+                 name: :"HC_norepo_#{System.unique_integer([:positive])}",
+                 remote: "origin",
+                 subscribe: false
+               )
+
+      assert {:error, {:missing_required_opt, :remote}} =
+               HopConsumer.start_link(
+                 name: :"HC_noremote_#{System.unique_integer([:positive])}",
+                 repo: "o/r",
+                 subscribe: false
+               )
+    end
+
+    test "handle_info pod.completed → délègue (via Event réel, subscribe: false)" do
+      name = :"HC_live_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        HopConsumer.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          remote: "origin",
+          hop_completer: CaptureCompleter,
+          subscribe: false
+        )
+
+      # Le completer fait send(self()) DANS le GenServer → on vérifie juste que
+      # l'event est routé sans crash (le hop est unit-testé via maybe_complete).
+      event = %Fleet.Event{
+        source: :spawner,
+        type: :"pod.completed",
+        timestamp: DateTime.utc_now(),
+        pod_id: "pod-abc",
+        payload: stage_payload()
+      }
+
+      send(pid, event)
+      assert Process.alive?(pid)
+      # un event non-spawner est ignoré sans crash
+      send(pid, %Fleet.Event{
+        source: :task_queue,
+        type: :task_completed,
+        timestamp: DateTime.utc_now(),
+        payload: %{}
+      })
+
+      assert Process.alive?(pid)
+
+      GenServer.stop(pid)
+    end
+  end
+end
