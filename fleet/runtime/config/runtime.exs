@@ -288,4 +288,15 @@ if config_env() != :test do
   if dir = System.get_env("LCARS_PIPELINES_DIR") do
     config :fleet_pipeline, pipelines_root: dir
   end
+
+  # Pod runner : user linux qui exécute le pod (home `/home/<human>/pods` + creds claude).
+  # Défaut `lcars` (deploy). Dogfood worktree : pointer un user avec home+creds présents.
+  if human = System.get_env("LCARS_POD_HUMAN") do
+    config :fleet_spawner, pod_human: human
+  end
+
+  # State task-queue (défaut /var/lib/lcars/task-queue/state.json, root-owned en deploy).
+  if path = System.get_env("LCARS_STATE_PATH") do
+    config :fleet_task_queue, state_path: path
+  end
 end
