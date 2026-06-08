@@ -177,7 +177,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # à juger est lu du comment du hop précédent (gravé par HopCompleter, N-04) ; le pod reste
   # forge-aveugle (c'est le runtime qui lit le comment, option B, pas de clone F-08).
   # Rôle ordinaire → mandat = corps de l'issue (inchangé).
-  defp build_mandate(forge, repo, number, "gatekeeper", issue, forge_opts, route) do
+  defp build_mandate(forge, repo, number, "gatekeeper", _issue, forge_opts, route) do
     outputs =
       case forge.get_predecessor_result(repo, number, forge_opts) do
         {:ok, result} -> result
@@ -190,18 +190,21 @@ defmodule Fleet.Pilot.StageDispatcher do
         _ -> {nil, "gatekeeper"}
       end
 
-    brief =
-      Fleet.Pipeline.GateBrief.build(%{
-        stage: stage,
-        pipeline_id: pipeline,
-        gate: nil,
-        outputs: outputs
-      })
-
-    case issue["body"] do
-      b when is_binary(b) and b != "" -> b <> "\n\n" <> brief
-      _ -> brief
-    end
+    # I-CBC (bug PASSE-9, prouvé live #11 ET #12) : le mandat du juge ne contient
+    # AUCUNE instruction exécutable. Le body de l'issue (= mandat du BUILD :
+    # « crée X, commit ») n'est PAS injecté — même quoté en contexte « NE PAS
+    # exécuter », un pod base-worker (profile noop) l'exécute (il est amorcé pour
+    # FAIRE) : sur #11 et #12 le gatekeeper a recommité SMOKE.md + soumis un
+    # "status ok" sans `decision`. Le seul contexte fourni = les `outputs` du
+    # prédécesseur (descriptifs : commit + summary, non-exécutables). Si un jour le
+    # gatekeeper a une vraie persona de juge, GateBrief sait rendre `request` en
+    # contexte désamorcé — mais pas pour un base-worker.
+    Fleet.Pipeline.GateBrief.build(%{
+      stage: stage,
+      pipeline_id: pipeline,
+      gate: nil,
+      outputs: outputs
+    })
   end
 
   defp build_mandate(_forge, _repo, _number, _role, issue, _forge_opts, _route),
