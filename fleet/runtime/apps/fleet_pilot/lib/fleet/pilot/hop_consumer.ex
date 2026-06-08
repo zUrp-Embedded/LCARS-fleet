@@ -45,7 +45,16 @@ defmodule Fleet.Pilot.HopConsumer do
 
   alias Fleet.EventRouter.Bus
 
-  defstruct [:repo, :remote, :forge_opts, :role_emails, :hop_completer, :forge_client, :loader]
+  defstruct [
+    :repo,
+    :remote,
+    :forge_opts,
+    :role_emails,
+    :hop_completer,
+    :forge_client,
+    :loader,
+    :deliverable
+  ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -70,7 +79,9 @@ defmodule Fleet.Pilot.HopConsumer do
         # pour un backend forge alternatif (ou un sim en dogfood bare).
         forge_client: Keyword.get(opts, :forge_client),
         # Loader de carte (A2 multi-stage) : résout le stage suivant. Défaut = Loader réel.
-        loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader)
+        loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader),
+        # nil → HopCompleter applique son défaut (Fleet.Pipeline.Deliverable). Injectable (sim/test).
+        deliverable: Keyword.get(opts, :deliverable)
       }
 
       Logger.info("fleet_pilot HopConsumer start repo=#{repo} remote=#{remote}")
@@ -157,7 +168,8 @@ defmodule Fleet.Pilot.HopConsumer do
 
         hc_opts =
           [forge_opts: state.forge_opts]
-          |> maybe_put_forge_client(state.forge_client)
+          |> maybe_put(:forge_client, state.forge_client)
+          |> maybe_put(:deliverable, state.deliverable)
 
         state.hop_completer.complete(hop, hc_opts)
     end
@@ -189,8 +201,8 @@ defmodule Fleet.Pilot.HopConsumer do
     e -> {:error, {:carte_load, Exception.message(e)}}
   end
 
-  defp maybe_put_forge_client(opts, nil), do: opts
-  defp maybe_put_forge_client(opts, fc), do: Keyword.put(opts, :forge_client, fc)
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp project_payload?(p) do
     is_binary(p["workspace"]) and is_binary(p["base_sha"]) and p["base_sha"] != "" and
