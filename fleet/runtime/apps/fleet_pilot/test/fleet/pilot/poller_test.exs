@@ -189,6 +189,8 @@ defmodule Fleet.Pilot.PollerTest do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def get_route(_repo, _n, _opts), do: :none
+    def post_route(_repo, _n, p, s, _opts), do: send(self(), {:route, p, s}) && {:ok, :posted}
+    def set_assignee(_repo, _n, login, _opts), do: send(self(), {:assignee, login}) && {:ok, :set}
   end
 
   defmodule StageStubLoader do
@@ -196,6 +198,13 @@ defmodule Fleet.Pilot.PollerTest do
       do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
 
     def load(_), do: {:error, :not_found}
+  end
+
+  # Loader de CARTE (load!/1) — distinct du loader CapProfile ci-dessus (load/1).
+  defmodule StageStubCarteLoader do
+    def load!("poc-cycle") do
+      %{"name" => "poc-cycle", "stages" => %{"triage" => %{"role" => "architect", "needs" => []}}}
+    end
   end
 
   defmodule StageStubSpawner do
@@ -287,6 +296,41 @@ defmodule Fleet.Pilot.PollerTest do
 
       assert %{dispatched: 0, skipped: 0, errors: 1} = Poller.force_poll(name)
       assert %{err_streak: 1, error_count: 1} = Poller.stats(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "ticket type: SANS assignee → ENTRÉE carte (route + 1er assignee) [A2.1]" do
+      issues = [
+        %{
+          "number" => 10,
+          "body" => "neuf",
+          "labels" => [%{"name" => "type:poc"}],
+          "assignees" => []
+        }
+      ]
+
+      name = :"P_entry_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          start_tick?: false,
+          stage_dispatch?: true,
+          forge_client: StageStubForge,
+          forge_opts: [_test_issues: {:ok, issues}],
+          loader: StageStubLoader,
+          carte_loader: StageStubCarteLoader,
+          routing: %{"type:poc" => "poc-cycle"},
+          spawner: StageStubSpawner,
+          clock: fn :second -> 1_700_000_000 end
+        )
+
+      # pas d'assignee → pas de spawn, mais ENTRÉE réussie (route+assignee posés DANS le GenServer →
+      # messages dans SA mailbox, pas celle du test ; le détail est unit-testé dans entry_test).
+      # Au niveau Poller, le contrat = le tally : entrée comptée dispatched.
+      assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)
     end

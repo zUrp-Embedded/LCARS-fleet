@@ -67,7 +67,7 @@ defmodule Fleet.Pilot.Poller do
   use GenServer
   require Logger
 
-  alias Fleet.Pilot.{Routing, Dispatcher, AutoDispatcher, StageDispatcher}
+  alias Fleet.Pilot.{Routing, Dispatcher, AutoDispatcher, StageDispatcher, Entry}
 
   @default_interval_ms 30_000
   @max_backoff_ms 300_000
@@ -81,7 +81,9 @@ defmodule Fleet.Pilot.Poller do
     :forge_client_override,
     stage_dispatch?: false,
     forge_opts: [],
+    routing: %{},
     loader: nil,
+    carte_loader: nil,
     spawner: nil,
     clock: nil,
     poll_count: 0,
@@ -144,7 +146,9 @@ defmodule Fleet.Pilot.Poller do
           forge_client_override: Keyword.get(opts, :forge_client),
           stage_dispatch?: Keyword.get(opts, :stage_dispatch?, false),
           forge_opts: Keyword.get(opts, :forge_opts, []),
+          routing: Keyword.get(opts, :routing, %{}),
           loader: Keyword.get(opts, :loader),
+          carte_loader: Keyword.get(opts, :carte_loader),
           spawner: Keyword.get(opts, :spawner),
           clock: Keyword.get(opts, :clock)
         }
@@ -402,16 +406,44 @@ defmodule Fleet.Pilot.Poller do
 
   defp stage_process_issues(issues, state) do
     opts = stage_dispatch_opts(state)
+    entry_opts = stage_entry_opts(state)
 
     Enum.reduce(issues, %{dispatched: 0, skipped: 0, errors: 0}, fn issue, acc ->
       payload = wrap_issue_as_payload(issue, state.repo)
 
       case StageDispatcher.dispatch_issue(payload, opts) do
-        {:ok, {:spawned, _pod_id, _role}} -> %{acc | dispatched: acc.dispatched + 1}
-        {:skipped, _reason} -> %{acc | skipped: acc.skipped + 1}
-        {:error, _reason} -> %{acc | errors: acc.errors + 1}
+        {:ok, {:spawned, _pod_id, _role}} ->
+          %{acc | dispatched: acc.dispatched + 1}
+
+        # Pas d'assignee : peut-être un ticket NEUF à ENTRER dans une carte (type:→carte, A2.1).
+        # Entry est idempotent (déjà routé → skip). L'entrée pose route+assignee ; le spawn suit
+        # au prochain tick (le payload courant est stale).
+        {:skipped, :no_assignee} ->
+          case Entry.enter(payload, entry_opts) do
+            {:ok, {:entered, _role}} -> %{acc | dispatched: acc.dispatched + 1}
+            {:skip, _} -> %{acc | skipped: acc.skipped + 1}
+            {:error, _} -> %{acc | errors: acc.errors + 1}
+          end
+
+        {:skipped, _reason} ->
+          %{acc | skipped: acc.skipped + 1}
+
+        {:error, _reason} ->
+          %{acc | errors: acc.errors + 1}
       end
     end)
+  end
+
+  defp stage_entry_opts(state) do
+    [
+      repo: state.repo,
+      routing: state.routing,
+      forge_client: stage_forge_client(state),
+      forge_opts: state.forge_opts
+    ]
+    # `:carte_loader` (Loader de pipeline, load!/1) ≠ `:loader` de StageDispatcher (CapProfile,
+    # load/1). Entry navigue la carte → il lui faut le loader de carte, pas celui des cap-profiles.
+    |> maybe_put_seam(:loader, state.carte_loader)
   end
 
   # Construit les opts de StageDispatcher.dispatch_issue. Les seams
