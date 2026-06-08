@@ -26,15 +26,38 @@ defmodule Fleet.Pilot.Poller do
     * **Telemetry** `[:fleet_pilot, :poller, :poll]` (duration_ms,
       issues_count, dispatched_count, skipped_count, error_count).
 
+  ## Deux modes de poll
+
+    * **Legacy (route-table)** — défaut. `Routing.match_issue` (table
+      `type:X → pipeline`) → `Dispatcher.dispatch` → Executor. Path
+      historique dogfoodé, conservé tant que l'Executor n'est pas
+      PROMOTE-retiré.
+    * **Stage-dispatch (assignee-driven)** — `:stage_dispatch?` true.
+      C'est le réacteur de la DN `orchestration/forge-state-machine.md` :
+      pour chaque issue ouverte SANS `lcars-in-flight`, on appelle
+      `StageDispatcher.dispatch_issue` (assignee = stage courant → spawn
+      le rôle). **Découplé du legacy AutoDispatcher** : le mode stage ne
+      lit PAS `ad_state` (l'Executor est SUPPRIMÉ dans ce modèle) ; il
+      prend sa config forge via `:forge_opts` direct. Le même GenServer
+      (jitter, backoff, telemetry, safety-net) sert les deux modes — on
+      ne réinvente pas la tungsten-proofing.
+
   ## Configuration init
 
     * `:repo` — `"owner/name"`, obligatoire
     * `:interval_ms` — défaut `30_000` (30s, cohérent v1.5)
+    * `:stage_dispatch?` — bool défaut `false`. `true` = mode
+      assignee-driven (cf. ci-dessus).
+    * `:forge_opts` — keyword passé au ForgeClient (base_url, token,
+      req_options). Utilisé par le mode stage (le legacy le tire de
+      `ad_state`).
     * `:auto_dispatcher` — name du process AutoDispatcher (défaut
-      `Fleet.Pilot.AutoDispatcher`), utilisé pour récupérer la config
-      runtime (routes, forge_opts, modules injectés)
-    * `:forge_client` — override module ForgeClient (défaut résolu
-      via AutoDispatcher)
+      `Fleet.Pilot.AutoDispatcher`), utilisé par le mode LEGACY pour
+      récupérer la config runtime (routes, forge_opts, modules injectés)
+    * `:forge_client` — override module ForgeClient (légacy : défaut
+      résolu via AutoDispatcher ; stage : défaut `ForgeClient`)
+    * `:loader` / `:spawner` / `:clock` — seams du mode stage (défauts
+      réels via `StageDispatcher`). Injectés seulement si non-nil.
     * `:subscribe?` — pas applicable (poller ne subscribe pas)
     * `:start_tick?` — bool défaut `true`. `false` = ne planifie pas
       le premier tick (utilisé par tests pour driver via
@@ -44,17 +67,23 @@ defmodule Fleet.Pilot.Poller do
   use GenServer
   require Logger
 
-  alias Fleet.Pilot.{Routing, Dispatcher, AutoDispatcher}
+  alias Fleet.Pilot.{Routing, Dispatcher, AutoDispatcher, StageDispatcher}
 
   @default_interval_ms 30_000
   @max_backoff_ms 300_000
   @jitter_ratio 0.1
+  @in_flight_label "lcars-in-flight"
 
   defstruct [
     :repo,
     :interval_ms,
     :auto_dispatcher,
     :forge_client_override,
+    stage_dispatch?: false,
+    forge_opts: [],
+    loader: nil,
+    spawner: nil,
+    clock: nil,
     poll_count: 0,
     error_count: 0,
     err_streak: 0,
@@ -66,6 +95,11 @@ defmodule Fleet.Pilot.Poller do
           interval_ms: pos_integer(),
           auto_dispatcher: GenServer.server(),
           forge_client_override: module() | nil,
+          stage_dispatch?: boolean(),
+          forge_opts: keyword(),
+          loader: module() | nil,
+          spawner: module() | nil,
+          clock: (atom() -> integer()) | nil,
           poll_count: non_neg_integer(),
           error_count: non_neg_integer(),
           err_streak: non_neg_integer(),
@@ -107,7 +141,12 @@ defmodule Fleet.Pilot.Poller do
           repo: repo,
           interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
           auto_dispatcher: Keyword.get(opts, :auto_dispatcher, Fleet.Pilot.AutoDispatcher),
-          forge_client_override: Keyword.get(opts, :forge_client)
+          forge_client_override: Keyword.get(opts, :forge_client),
+          stage_dispatch?: Keyword.get(opts, :stage_dispatch?, false),
+          forge_opts: Keyword.get(opts, :forge_opts, []),
+          loader: Keyword.get(opts, :loader),
+          spawner: Keyword.get(opts, :spawner),
+          clock: Keyword.get(opts, :clock)
         }
 
         if Keyword.get(opts, :start_tick?, true) do
@@ -115,7 +154,8 @@ defmodule Fleet.Pilot.Poller do
         end
 
         Logger.info(
-          "fleet_pilot Poller start repo=#{repo} interval=#{state.interval_ms}ms jitter=±10%"
+          "fleet_pilot Poller start repo=#{repo} mode=#{if(state.stage_dispatch?, do: :stage, else: :legacy)} " <>
+            "interval=#{state.interval_ms}ms jitter=±10%"
         )
 
         {:ok, state}
@@ -231,6 +271,8 @@ defmodule Fleet.Pilot.Poller do
   # Internals — GenServer poll orchestration
   # ============================================================
 
+  defp do_poll(%__MODULE__{stage_dispatch?: true} = state), do: stage_do_poll(state)
+
   defp do_poll(state) do
     started = System.monotonic_time()
 
@@ -324,6 +366,74 @@ defmodule Fleet.Pilot.Poller do
       "repository" => %{"full_name" => repo}
     }
   end
+
+  # ============================================================
+  # Mode STAGE — réacteur assignee-driven (DN forge-state-machine §3/§6)
+  # Découplé du legacy AutoDispatcher : pas de routes, pas d'Executor.
+  # ============================================================
+
+  defp stage_do_poll(state) do
+    started = System.monotonic_time()
+    forge = stage_forge_client(state)
+
+    case forge.list_open_issues_without_label(state.repo, @in_flight_label, state.forge_opts) do
+      {:ok, issues} ->
+        tally = stage_process_issues(issues, state)
+        duration_ms = elapsed_ms(started)
+
+        :telemetry.execute(
+          [:fleet_pilot, :poller, :poll],
+          %{duration_ms: duration_ms},
+          Map.merge(tally, %{status: :ok, mode: :stage, repo: state.repo})
+        )
+
+        Logger.info(
+          "fleet_pilot Poller tick mode=stage repo=#{state.repo} " <>
+            "dispatched=#{tally.dispatched} skipped=#{tally.skipped} errors=#{tally.errors} " <>
+            "duration_ms=#{duration_ms}"
+        )
+
+        {tally, %{state | poll_count: state.poll_count + 1, err_streak: 0, last_error: nil}}
+
+      {:error, reason} = err ->
+        handle_poll_error(state, reason, started, err)
+    end
+  end
+
+  defp stage_process_issues(issues, state) do
+    opts = stage_dispatch_opts(state)
+
+    Enum.reduce(issues, %{dispatched: 0, skipped: 0, errors: 0}, fn issue, acc ->
+      payload = wrap_issue_as_payload(issue, state.repo)
+
+      case StageDispatcher.dispatch_issue(payload, opts) do
+        {:ok, {:spawned, _pod_id, _role}} -> %{acc | dispatched: acc.dispatched + 1}
+        {:skipped, _reason} -> %{acc | skipped: acc.skipped + 1}
+        {:error, _reason} -> %{acc | errors: acc.errors + 1}
+      end
+    end)
+  end
+
+  # Construit les opts de StageDispatcher.dispatch_issue. Les seams
+  # (loader/spawner/clock) ne sont injectés QUE s'ils sont set sur le
+  # state — sinon StageDispatcher applique ses défauts réels (passer nil
+  # écraserait le défaut).
+  defp stage_dispatch_opts(state) do
+    [
+      repo: state.repo,
+      forge_client: stage_forge_client(state),
+      forge_opts: state.forge_opts
+    ]
+    |> maybe_put_seam(:loader, state.loader)
+    |> maybe_put_seam(:spawner, state.spawner)
+    |> maybe_put_seam(:clock, state.clock)
+  end
+
+  defp maybe_put_seam(opts, _key, nil), do: opts
+  defp maybe_put_seam(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp stage_forge_client(%__MODULE__{forge_client_override: nil}), do: Fleet.Pilot.ForgeClient
+  defp stage_forge_client(%__MODULE__{forge_client_override: fc}), do: fc
 
   defp fetch_auto_dispatcher_state(state) do
     case GenServer.call(state.auto_dispatcher, :get_state, 5_000) do

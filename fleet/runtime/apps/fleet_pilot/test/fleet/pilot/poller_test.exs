@@ -173,4 +173,121 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
   end
+
+  # ============================================================
+  # Mode STAGE — assignee-driven (DN forge-state-machine)
+  # ============================================================
+
+  # Forge stub pour le mode stage : list (filtre déjà appliqué côté API
+  # réelle, ici on renvoie tel quel) + les write-ops touchées par
+  # StageDispatcher.dispatch_issue (add_label / post_comment).
+  defmodule StageStubForge do
+    def list_open_issues_without_label(_repo, _exclude_label, opts) do
+      Keyword.fetch!(opts, :_test_issues)
+    end
+
+    def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
+    def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+  end
+
+  defmodule StageStubLoader do
+    def load("engineer"),
+      do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
+
+    def load(_), do: {:error, :not_found}
+  end
+
+  defmodule StageStubSpawner do
+    def spawn_pod(_profile, ticket_id, opts) do
+      send(self(), {:spawned, ticket_id, opts})
+      {:ok, "pod-#{ticket_id}"}
+    end
+  end
+
+  defp start_stage_poller(issues_response) do
+    name = :"P_stage_#{System.unique_integer([:positive])}"
+
+    {:ok, pid} =
+      Poller.start_link(
+        name: name,
+        repo: "lordzurp/lcars-test",
+        start_tick?: false,
+        stage_dispatch?: true,
+        forge_client: StageStubForge,
+        forge_opts: [_test_issues: issues_response],
+        loader: StageStubLoader,
+        spawner: StageStubSpawner,
+        clock: fn :second -> 1_700_000_000 end
+      )
+
+    {name, pid}
+  end
+
+  describe "mode stage — force_poll" do
+    test "issue assignée à un rôle connu → spawn (tally dispatched)" do
+      issues = [
+        %{
+          "number" => 7,
+          "body" => "fais le hello",
+          "labels" => [],
+          "assignees" => [%{"login" => "Engineer"}]
+        }
+      ]
+
+      {name, pid} = start_stage_poller({:ok, issues})
+
+      # Le spawn tourne DANS le GenServer (force_poll → handle_call) : le
+      # message du StageStubSpawner part dans SA mailbox, pas celle du test.
+      # Au niveau Poller, le contrat = le tally. Le détail (ticket_id,
+      # mandate) est unit-testé dans stage_dispatcher_test.
+      assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "verrou lcars-in-flight → skip, pas de spawn" do
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "Engineer"}]
+        }
+      ]
+
+      {name, pid} = start_stage_poller({:ok, issues})
+
+      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
+      refute_received {:spawned, _, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "assignee humain (rôle inconnu) → skip" do
+      issues = [
+        %{
+          "number" => 9,
+          "body" => "x",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      {name, pid} = start_stage_poller({:ok, issues})
+
+      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
+      refute_received {:spawned, _, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "forge list en erreur → tally error + backoff (err_streak incrémenté)" do
+      {name, pid} = start_stage_poller({:error, {:http, 500, "boom"}})
+
+      assert %{dispatched: 0, skipped: 0, errors: 1} = Poller.force_poll(name)
+      assert %{err_streak: 1, error_count: 1} = Poller.stats(name)
+
+      GenServer.stop(pid)
+    end
+  end
 end
