@@ -1613,28 +1613,80 @@ defmodule Fleet.Spawner.Pod do
         {:error, {:mcp_server_spec_required, backend}}
 
       {spec, _backend} when is_map(spec) ->
-        # A2.3b live (PASSE-7) : injecter `LCARS_POD_ID` DANS l'env du serveur MCP `fleet`
-        # (ceinture). Le bridge stdio (`fleet_mcp_stdio_bridge.py` l.37) lit `LCARS_POD_ID`
-        # pour corréler `get_task` au bon pod. claude lance le serveur via `--mcp-config` avec
-        # l'`env` de CETTE config ; ne pas dépendre de l'héritage env claude→bridge (sinon
-        # get_task sans pod_id → "no task"). Le pod_id est connu ici (state.pod_id).
-        fleet_entry =
-          spec
-          |> Map.put("alwaysLoad", true)
-          |> Map.update(
-            "env",
-            %{"LCARS_POD_ID" => state.pod_id},
-            &Map.put(&1, "LCARS_POD_ID", state.pod_id)
-          )
-
-        config = %{"mcpServers" => %{"fleet" => fleet_entry}}
-
         # Vulcan #5 : non-bang + retour {:ok|:error} propagé au with chain
         # do_project (où l'erreur déclenche transition_failed proprement).
-        safe_write(
-          Path.join(state.pod_dir, ".mcp-fleet.json"),
-          Jason.encode!(config, pretty: true)
+        with {:ok, fleet_entry} <- build_fleet_mcp_entry(spec, state) do
+          config = %{"mcpServers" => %{"fleet" => fleet_entry}}
+
+          safe_write(
+            Path.join(state.pod_dir, ".mcp-fleet.json"),
+            Jason.encode!(config, pretty: true)
+          )
+        end
+    end
+  end
+
+  # Construit l'entrée serveur MCP `fleet` du `.mcp-fleet.json`, en provisionnant
+  # le bridge stdio DANS le pod_dir.
+  #
+  # PASSE-9 root-cause (2026-06-08) : le bwrap est un SANCTUAIRE — il ne monte que
+  # `/usr`, `/etc`, `/sys`, `$POD_DIR`, `$GIT_MIRROR`, le vendor et le sock-dir.
+  # `/var/lib/lcars` n'y est PAS monté. Or l'ancienne spec lançait le bridge via
+  # son chemin HÔTE (`/var/lib/lcars/bin/...py`) avec un log sous `/var/lib/lcars/`
+  # → DANS le sandbox ce chemin n'existe pas → `bash -c` échoue → le serveur MCP
+  # `fleet` ne démarre jamais → le tool `mcp__fleet__get_task` n'est jamais chargé
+  # → l'agent improvise du curl et timeout. Le bridge marchait en test direct car
+  # il tournait sur l'HÔTE, pas dans le sandbox.
+  #
+  # Fix (couche N1, le provisioning) : `bwrap_launch.sh` reste MCP-agnostique (N0).
+  # On copie le bridge sous `pod_dir/.lcars/` (pod_dir est bind RW AU MÊME chemin
+  # absolu hôte+sandbox via `--bind "$POD_DIR" "$POD_DIR"`) et on résout les
+  # placeholders `{{BRIDGE}}`/`{{BRIDGE_LOG}}` de la spec sur ces chemins pod-locaux.
+  # Le monde MCP (config + bridge + log) est ainsi entièrement projeté dans le pod.
+  #
+  # Injecte aussi `LCARS_POD_ID` dans l'env du serveur (ceinture A2.3b PASSE-7 : le
+  # bridge l.37 le lit pour corréler `get_task` au bon pod ; ne pas dépendre de
+  # l'héritage env claude→bridge) et force `alwaysLoad:true` (sinon les tools MCP
+  # sont déférés derrière ToolSearch, absents du prompt turn-1).
+  defp build_fleet_mcp_entry(spec, state) do
+    pod_bridge = Path.join([state.pod_dir, ".lcars", "fleet_mcp_bridge.py"])
+    pod_log = Path.join([state.pod_dir, ".lcars", "fleet_mcp_bridge.log"])
+
+    with :ok <- copy_bridge_into_pod(spec["bridge_source"], pod_bridge) do
+      args =
+        (spec["args"] || [])
+        |> Enum.map(fn arg ->
+          arg
+          |> String.replace("{{BRIDGE}}", pod_bridge)
+          |> String.replace("{{BRIDGE_LOG}}", pod_log)
+        end)
+
+      entry =
+        spec
+        |> Map.drop(["bridge_source"])
+        |> Map.put("args", args)
+        |> Map.put("alwaysLoad", true)
+        |> Map.update(
+          "env",
+          %{"LCARS_POD_ID" => state.pod_id},
+          &Map.put(&1, "LCARS_POD_ID", state.pod_id)
         )
+
+      {:ok, entry}
+    end
+  end
+
+  # nil = spec sans bridge à projeter (stub/legacy : la spec porte alors un
+  # `command`/`args` déjà autonome, pas de placeholder à résoudre).
+  defp copy_bridge_into_pod(nil, _dest), do: :ok
+
+  defp copy_bridge_into_pod(source, dest) when is_binary(source) do
+    with :ok <- File.mkdir_p(Path.dirname(dest)),
+         {:ok, _bytes} <- File.copy(source, dest),
+         :ok <- File.chmod(dest, 0o755) do
+      :ok
+    else
+      {:error, reason} -> {:error, {:mcp_bridge_provision_failed, source, reason}}
     end
   end
 

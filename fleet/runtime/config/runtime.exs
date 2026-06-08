@@ -126,19 +126,28 @@ if config_env() != :test do
   # ============================================================
   # Le pod claude REPL démarre le bridge.py via cette spec ; le bridge
   # forward stdio → HTTP central (LCARS_FLEET_MCP_URL). `LCARS_POD_ID`
-  # est ajouté per-pod par TmuxBackend env (pas dans le spec global).
+  # est ajouté per-pod par pod.ex (build_fleet_mcp_entry).
+  #
+  # PASSE-9 (2026-06-08) : le bridge NE peut PAS être lancé via son chemin hôte
+  # (`/var/lib/lcars/bin/...`) — le sandbox bwrap ne monte PAS `/var/lib/lcars`.
+  # On fournit donc `bridge_source` (chemin HÔTE à COPIER) ; pod.ex le projette
+  # sous `pod_dir/.lcars/` et résout les placeholders `{{BRIDGE}}`/`{{BRIDGE_LOG}}`
+  # sur ce chemin pod-local (pod_dir est le SEUL espace RW monté dans le sandbox,
+  # au même chemin absolu hôte+sandbox). Cf. pod.ex build_fleet_mcp_entry.
   mcp_url = System.get_env("LCARS_FLEET_MCP_URL")
   bridge_path = System.get_env("LCARS_FLEET_MCP_BRIDGE_PATH")
 
   if mcp_url && bridge_path do
     config :fleet_spawner, :mcp_server_spec, %{
+      # Chemin HÔTE du bridge, copié per-pod par pod.ex (pas lancé en place).
+      "bridge_source" => bridge_path,
       "command" => "bash",
       "args" => [
         "-c",
-        # Log path doit être RW pour le service systemd
-        # (ProtectSystem=strict + ReadWritePaths du unit file).
-        # /var/lib/lcars est dans ReadWritePaths.
-        "exec python3 #{bridge_path} 2>>/var/lib/lcars/fleet_mcp_bridge.log"
+        # {{BRIDGE}}/{{BRIDGE_LOG}} = chemins POD-LOCAUX résolus par pod.ex (sous
+        # pod_dir/.lcars/, RW dans le sandbox). PAS de chemin hôte ici : invisible
+        # dans le sandbox bwrap.
+        "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"
       ],
       "env" => %{
         "LCARS_FLEET_MCP_URL" => mcp_url
