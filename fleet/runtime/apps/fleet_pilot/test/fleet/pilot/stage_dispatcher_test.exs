@@ -67,6 +67,18 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       send(self(), {:spawned, ticket_id, opts})
       {:ok, self()}
     end
+
+    def wake_pod(pod_id) do
+      send(self(), {:woke, pod_id})
+      :ok
+    end
+  end
+
+  defmodule StubTaskQueue do
+    def enqueue(pod_id, attrs) do
+      send(self(), {:enqueued, pod_id, attrs})
+      {:ok, %{id: "task-1"}}
+    end
   end
 
   defp dispatch_opts(extra \\ []) do
@@ -76,6 +88,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         forge_client: StubForge,
         loader: StubLoader,
         spawner: StubSpawner,
+        task_queue: StubTaskQueue,
         clock: fn :second -> 1_700_000_000 end,
         # résolveur stub par défaut : pas de projet (les tests d'ordre ne clonent rien).
         project_resolver: fn _repo, _opts -> {:ok, nil} end
@@ -94,6 +107,13 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # le mandat = issue.body, ticket_id dérivé du numéro
       assert_received {:spawned, "issue-42", opts}
       assert opts[:mandate] == "fais le hello"
+
+      # le mandat est ENQUEUÉ en TaskQueue (sinon le pod se croit bootstrap → idle ; bug PASSE-9)
+      assert_received {:enqueued, "issue-42-engineer-1700000000", attrs}
+      assert attrs.brief == "fais le hello"
+      assert attrs.role == "engineer"
+      # kick best-effort émis
+      assert_received {:woke, "issue-42-engineer-1700000000"}
     end
 
     test "skip in_flight : pas de spawn" do

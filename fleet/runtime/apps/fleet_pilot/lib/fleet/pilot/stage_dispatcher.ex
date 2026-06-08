@@ -78,6 +78,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     loader = Keyword.get(opts, :loader, Fleet.CapProfile)
     spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
+    task_queue = Keyword.get(opts, :task_queue, Fleet.TaskQueue)
     clock = Keyword.get(opts, :clock, &System.os_time/1)
     resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
 
@@ -124,7 +125,12 @@ defmodule Fleet.Pilot.StageDispatcher do
                      Keyword.put(forge_opts, :dedup_signature, "[lock:#{role}:")
                    ),
                  {:ok, profile} <- loader.load(role),
-                 {:ok, _pid} <- spawner.spawn_pod(profile, "issue-#{number}", spawn_opts) do
+                 {:ok, _pid} <- spawner.spawn_pod(profile, "issue-#{number}", spawn_opts),
+                 :ok <- enqueue_mandate(task_queue, pod_id, role, number, issue) do
+              # Kick best-effort : le pod auto-kicke les workers (mandat enqueué → mode worker),
+              # mais un wake explicite accélère le 1er `get_task`. Non-fatal (le pod pull de toute façon).
+              _ = safe_wake(spawner, pod_id)
+
               Logger.info(
                 "StageDispatcher: spawned role=#{role} pod=#{pod_id} issue=#{repo}##{number} " <>
                   "project=#{if(project, do: project["base_sha"], else: "none")}"
@@ -145,6 +151,31 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   defp maybe_put_project(spawn_opts, nil), do: spawn_opts
   defp maybe_put_project(spawn_opts, project), do: Keyword.put(spawn_opts, :project, project)
+
+  # Enqueue le mandat dans le broker `Fleet.TaskQueue` ciblé pod_id — le claude REPL le pull via
+  # `mcp__fleet__get_task` → `PodTools.get_task` → `TaskQueue.get_for_pod` (PAS un Read fichier).
+  # MÊME mécanisme que `StageRunner.push_task_for_pod` (DN §8 « réutilise StageRunner ») : sans cet
+  # enqueue, `TaskQueue.pod_status(pod_id) == nil` → le pod se croit bootstrap (rien à puller) → idle.
+  # Le `brief` = le corps de l'issue (le mandat de l'eng). `metadata.issue` corrèle au ticket.
+  defp enqueue_mandate(task_queue, pod_id, role, number, issue) do
+    attrs = %{
+      ticket_id: "issue-#{number}",
+      role: role,
+      brief: issue["body"] || "",
+      metadata: %{"issue" => number}
+    }
+
+    case task_queue.enqueue(pod_id, attrs) do
+      {:ok, _task} -> :ok
+      {:error, reason} -> {:error, {:enqueue_failed, reason}}
+    end
+  end
+
+  defp safe_wake(spawner, pod_id) do
+    if function_exported?(spawner, :wake_pod, 1), do: spawner.wake_pod(pod_id), else: :ok
+  rescue
+    _ -> :ok
+  end
 
   # ============================================================
   # Internals
