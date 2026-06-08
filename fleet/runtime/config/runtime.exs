@@ -278,16 +278,9 @@ if config_env() != :test do
     config :fleet_pipeline, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
   end
 
-  # Emplacement des cap-profiles / cartes (A3 deploy). `Fleet.CapProfile` défaute à un
-  # chemin RELATIF (`cap-profiles`) → injecter le chemin absolu en prod/dogfood. Le Loader
-  # de cartes défaute à `app_dir` (OK), override possible.
-  if dir = System.get_env("LCARS_CAP_PROFILES_DIR") do
-    config :fleet_cap_profile, root_dir: dir
-  end
-
-  if dir = System.get_env("LCARS_PIPELINES_DIR") do
-    config :fleet_pipeline, pipelines_root: dir
-  end
+  # NB cap-profiles / cartes : déjà couverts par `LCARS_CAPPROFILES_ROOT` (→ :fleet_cap_profile
+  # :root_dir, plus haut) et `LCARS_PIPELINES_ROOT` (→ :fleet_pipeline :pipelines_root). Pas de
+  # knob dupliqué ici (I-CBC, une source par config).
 
   # Pod runner : user linux qui exécute le pod (home `/home/<human>/pods` + creds claude).
   # Défaut `lcars` (deploy). Dogfood worktree : pointer un user avec home+creds présents.
