@@ -286,7 +286,14 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
-  defp stage_count(carte), do: carte |> Map.get("stages", %{}) |> map_size()
+  # A2.3b N-05 : le budget rework couvre les stages MÉTIER. Les gatekeeper-stages
+  # (rounds de jugement) sont bornés séparément (respawn-on-timeout, DN §6), pas par
+  # ce budget — sinon `max_rework_rounds` serait silencieusement réduit pour l'user.
+  defp stage_count(carte) do
+    carte
+    |> Map.get("stages", %{})
+    |> Enum.count(fn {_name, spec} -> Map.get(spec, "role") != "gatekeeper" end)
+  end
 
   defp count_hops(state, n) do
     forge = state.forge_client || Fleet.Pilot.ForgeClient

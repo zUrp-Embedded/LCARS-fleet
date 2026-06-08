@@ -82,6 +82,27 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
         }
       }
     end
+
+    # A2.3b N-05 : 2 stages MÉTIER (triage hard-gated, build) + 1 gatekeeper-stage.
+    # Budget rework = 2*(rounds+1), PAS 3*(rounds+1) (gatekeeper exclu).
+    def load!("gkb") do
+      %{
+        "name" => "gkb",
+        "stages" => %{
+          "triage" => %{
+            "role" => "architect",
+            "needs" => [],
+            "gate" => %{"type" => "hard", "rule" => %{"ok" => true}}
+          },
+          "review" => %{
+            "role" => "gatekeeper",
+            "needs" => ["triage"],
+            "gate" => %{"type" => "soft"}
+          },
+          "build" => %{"role" => "engineer", "needs" => ["review"]}
+        }
+      }
+    end
   end
 
   defp hc(opts \\ []) do
@@ -230,5 +251,22 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     # sans court-circuit, Gates.evaluate(soft) renverrait {:dispatch_gatekeeper} → gate_pending.
     # Avec le court-circuit, continue route normalement.
     assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done("continue"), hc())
+  end
+
+  test "budget rework exclut les gatekeeper-stages (N-05) : budget=2*(2+1)=6, pas 9" do
+    # carte gkb = triage(hard) + review(gatekeeper) + build → 2 stages métier.
+    fail = %{
+      "ticket_id" => "issue-1",
+      "workspace" => "/ws",
+      "base_sha" => "cafe",
+      "role" => "architect",
+      "pipeline" => "gkb",
+      "stage" => "triage",
+      "result" => %{}
+    }
+
+    # budget 6 (gatekeeper exclu) : hops=6 épuise. Si le gatekeeper était compté → 9 → rebondirait.
+    assert {:error, {:rework_exhausted, %{budget: 6}}} =
+             HopConsumer.maybe_complete(fail, hc(forge_opts: [_hops: 6]))
   end
 end
