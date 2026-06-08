@@ -67,14 +67,19 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
   end
 
-  defp dispatch_opts do
-    [
-      repo: "lordzurp/lcars-test",
-      forge_client: StubForge,
-      loader: StubLoader,
-      spawner: StubSpawner,
-      clock: fn :second -> 1_700_000_000 end
-    ]
+  defp dispatch_opts(extra \\ []) do
+    Keyword.merge(
+      [
+        repo: "lordzurp/lcars-test",
+        forge_client: StubForge,
+        loader: StubLoader,
+        spawner: StubSpawner,
+        clock: fn :second -> 1_700_000_000 end,
+        # résolveur stub par défaut : pas de projet (les tests d'ordre ne clonent rien).
+        project_resolver: fn _repo, _opts -> {:ok, nil} end
+      ],
+      extra
+    )
   end
 
   describe "dispatch_issue/2 (effets, seams stubés)" do
@@ -103,6 +108,38 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     test "skip no_role (assignee humain) : pas de spawn" do
       payload = issue(%{"assignees" => [%{"login" => "lordzurp"}]})
       assert {:skipped, :no_role} = StageDispatcher.dispatch_issue(payload, dispatch_opts())
+      refute_received {:spawned, _, _}
+    end
+
+    test "projet résolu → injecté dans spawn_opts (:project, F-03 base_sha pinné)" do
+      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+
+      project = %{
+        "repo_path" => "http://10.42.0.118/lordzurp/lcars-test.git",
+        "base_branch" => "main",
+        "base_sha" => "cafe1234"
+      }
+
+      opts = dispatch_opts(project_resolver: fn _repo, _opts -> {:ok, project} end)
+
+      assert {:ok, {:spawned, "pod-test-123", "engineer"}} =
+               StageDispatcher.dispatch_issue(payload, opts)
+
+      assert_received {:spawned, "issue-42", spawn_opts}
+      assert spawn_opts[:project] == project
+      assert spawn_opts[:mandate] == "fais le hello"
+    end
+
+    test "échec résolution projet → {:error}, AUCUN verrou posé ni spawn" do
+      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+
+      opts =
+        dispatch_opts(project_resolver: fn _repo, _opts -> {:error, :ls_remote_timeout} end)
+
+      assert {:error, {:project_resolution, :ls_remote_timeout}} =
+               StageDispatcher.dispatch_issue(payload, opts)
+
+      # résolution AVANT toute écriture forge : pas de spawn, pas de verrou orphelin
       refute_received {:spawned, _, _}
     end
   end
