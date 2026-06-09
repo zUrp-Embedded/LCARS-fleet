@@ -17,6 +17,24 @@ import Config
 
 if config_env() != :test do
   # ============================================================
+  # R-no-root-runtime (FORGE-D1, Z4) — boot guard anti-root
+  # ============================================================
+  # Le daemon fleet ne tourne JAMAIS en root (User=lcars côté systemd ; ce
+  # self-check attrape les lancements dev/manuel en root, où ~/.gitea_token
+  # résoudrait /root/.gitea_token = token admin — cf. FORGE-D1). starfleet/
+  # sysadmin est HORS-fleet (invoqué hors daemon) → pas d'exception ici. Hygiène,
+  # pas défense anti-adversaire (threat-model coopératif). Garde `== :prod` : ne
+  # gêne ni le dev ni `mix lcars.contracts.check` (qui tourne en :dev).
+  if config_env() == :prod do
+    {uid, 0} = System.cmd("id", ["-u"])
+
+    if String.trim(uid) == "0" do
+      raise "R-no-root-runtime : le daemon fleet refuse de tourner en root " <>
+              "(lancer sous l'user `lcars` ; cf. lcars-fleet.service User=lcars)"
+    end
+  end
+
+  # ============================================================
   # Logger
   # ============================================================
   log_level =

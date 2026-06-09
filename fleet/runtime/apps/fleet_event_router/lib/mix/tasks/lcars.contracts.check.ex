@@ -85,7 +85,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_auth_token_arg_failloud(root),
         check_spawn_has_mandate(root),
         check_skills_declared_present(root),
-        check_events_registry_keys_aligned(root)
+        check_events_registry_keys_aligned(root),
+        # ── Rails de remédiation 2026-06-09 (STEP 0) ──
+        check_grace_shutdown_wired(root),
+        check_result_deadline_cancelled(root),
+        check_capprofile_validate_wired(root),
+        check_gatekeeper_not_a_stage(root),
+        check_verdict_envelope_unwrapped(root),
+        check_no_root_runtime_guard(root)
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
@@ -449,6 +456,210 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       _ ->
         []
     end
+  end
+
+  # ── Rails de remédiation (STEP 0, 2026-06-09) ────────────────────────
+  # Drop-ins de `RAILS-R-xx-pret-a-graver-2026-06-09.md` (audit re-analyse).
+  # Promotion clôture-documentaire → clôture-contrainte des invariants que la
+  # branche cowboy a traversés faute de check : un agent qui re-dérive →
+  # `mix release` REFUSE (verrou_contracts), build rouge, fix immédiat.
+
+  # R-grace-shutdown-wired (conformance #2/#3/#4, Z0) : la chaîne grace-shutdown
+  # coordonnée doit être câblée. Rouge si (a) le unit n'a pas d'ExecStop= (drain
+  # jamais invoqué par systemd → kill brutal), OU (b) un helper bin/lcars-fleet-*
+  # RPC vers le namespace MORT Fleet.Shutdown.{begin,drain_in_flight} (réel =
+  # Fleet.Starfleet.Shutdown → UndefinedFunctionError ; stop l'avale en kill
+  # brutal, reload plante sous pipefail). Vérifié en arbre 2ba76c84, pas 1-vote.
+  defp check_grace_shutdown_wired(root) do
+    unit = "etc/lcars-fleet.service"
+
+    has_execstop? =
+      Path.join(root, unit)
+      |> grep_lines(~r/^\s*ExecStop\s*=/)
+      |> Enum.any?(fn {_l, line} -> Regex.match?(~r/ExecStop\s*=/, strip_comment(line)) end)
+
+    # le \. avant (begin|drain) évite tout faux-positif sur Fleet.Shutdown.Quiesce
+    # (légitime) ou Fleet.Starfleet.Shutdown (la cible correcte). strip_comment
+    # écarte la ligne de doc-commentaire `# Invoque Fleet.Shutdown.drain_…`.
+    dead_calls =
+      Path.join([root, "bin", "lcars-fleet-*"])
+      |> Path.wildcard()
+      |> Enum.flat_map(fn path ->
+        rel = Path.relative_to(path, root)
+
+        path
+        |> grep_lines(~r/Fleet\.Shutdown\.(begin|drain_in_flight)\b/)
+        |> Enum.filter(fn {_l, line} ->
+          Regex.match?(~r/Fleet\.Shutdown\.(begin|drain_in_flight)\b/, strip_comment(line))
+        end)
+        |> Enum.map(fn {ln, _} ->
+          "#{rel}:#{ln} (RPC vers Fleet.Shutdown.* mort → renommer Fleet.Starfleet.Shutdown)"
+        end)
+      end)
+
+    evidence =
+      if(has_execstop?,
+        do: [],
+        else: [
+          "#{unit} : pas d'ExecStop= → drain jamais invoqué par systemd (kill brutal, « inacceptable production » DN)"
+        ]
+      ) ++ dead_calls
+
+    %{
+      id: "infra.grace_shutdown_wired",
+      remediation: "R-grace-shutdown-wired",
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
+      note:
+        "rename Fleet.Shutdown.{begin,drain_in_flight} → Fleet.Starfleet.Shutdown dans bin/lcars-fleet-{stop,reload} + ExecStop=/ExecStopPost= au unit"
+    }
+  end
+
+  # R-result-deadline (SPAWN-CR1, Z1) : timer :result_deadline ANNULÉ à l'arrivée
+  # du résultat (sinon tue les pods forever/pipe/run au cycle 2). Rouge si
+  # (a) aucun Process.cancel_timer dans pod.ex, OU (b) le band-aid
+  # `"forever" -> 60_000` (HACK) encore présent au lieu du vrai fix.
+  defp check_result_deadline_cancelled(root) do
+    pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
+    src = File.read!(Path.join(root, pod))
+
+    has_cancel? =
+      Path.join(root, pod)
+      |> grep_lines(~r/Process\.cancel_timer/)
+      |> Enum.any?(fn {_l, line} -> Regex.match?(~r/cancel_timer/, strip_comment(line)) end)
+
+    has_hack? = Regex.match?(~r/"forever"\s*->\s*60_?000\b/, src)
+
+    evidence =
+      [
+        {not has_cancel?,
+         "#{pod} : aucun Process.cancel_timer — timer :result_deadline jamais annulé (SPAWN-CR1, tue les pods permanents)"},
+        {has_hack?,
+         "#{pod} : band-aid `forever -> 60_000` encore présent — revert vers 60s + vrai fix (n'armer que si task active)"}
+      ]
+      |> Enum.filter(&elem(&1, 0))
+      |> Enum.map(&elem(&1, 1))
+
+    %{
+      id: "spawner.result_deadline_cancelled",
+      remediation: "R-result-deadline",
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
+      note:
+        "annuler le timer à l'arrivée du résultat + n'armer que si task active ; revert le band-aid 60ks"
+    }
+  end
+
+  # R-cap-validate (CAP-D1) : la porte G24 `Fleet.CapProfile.validate/1` (dont
+  # F-CONT-RISK g24_9 : deny server-tools natifs) DOIT être appelée sur le chemin
+  # de spawn (boundary do_allocate), pas seulement par les tests. Rouge si pod.ex
+  # ne l'appelle pas → porte de containment creuse (CAP-D1). NB Z2 : ce rail sera
+  # ÉTENDU en R-spawn-gates (3 callsites : validate + ScopeValidator + PlanValidator)
+  # au câblage du cluster de gates — cf. SYNTHESE §Z2.
+  defp check_capprofile_validate_wired(root) do
+    pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
+
+    present? =
+      Path.join(root, pod)
+      |> grep_lines(~r/CapProfile\.validate\(/)
+      |> Enum.any?(fn {_ln, line} ->
+        Regex.match?(~r/CapProfile\.validate\(/, strip_comment(line))
+      end)
+
+    %{
+      id: "capprofile.validate_wired_at_spawn",
+      remediation: "R-cap-validate",
+      status: if(present?, do: :pass, else: :fail),
+      evidence:
+        if(present?,
+          do: [],
+          else: [
+            "#{pod} : Fleet.CapProfile.validate/1 jamais appelée hors test (porte G24/F-CONT-RISK creuse — CAP-D1)"
+          ]
+        ),
+      note:
+        "validate/1 (G24 + F-CONT-RISK) doit être câblée au boundary spawn (do_allocate, après with_resolved_disallowed_tools), pas test-only"
+    }
+  end
+
+  # R-gatekeeper-exception (GATE-D1) : le gatekeeper est un juge d'EXCEPTION-
+  # inférence (dispatché par une gate :soft/:nontranchable), JAMAIS un stage
+  # d'ordonnancement. Rouge si une carte déclare un stage `role: gatekeeper`
+  # (méta-axiome §L441 : raisonneur dans la mécanique = design défaillant).
+  # NB transcription : parenthèses externes autour de `(… || [])` — sans elles
+  # `|>` (précédence > `||`) appliquerait flat_map à `[]`, pas à la liste de
+  # cartes (testé : `(true && l) || [] |> map` ⇒ `l`, map sauté). Drop-in corrigé.
+  defp check_gatekeeper_not_a_stage(root) do
+    dir = "apps/fleet_pipeline/priv/canon/pipelines"
+    abs = Path.join(root, dir)
+
+    evidence =
+      ((File.dir?(abs) && Path.wildcard(Path.join(abs, "*.yaml"))) || [])
+      |> Enum.flat_map(fn path ->
+        rel = Path.relative_to(path, root)
+
+        path
+        |> grep_lines(~r/role:\s*gatekeeper\b/)
+        |> Enum.filter(fn {_ln, line} ->
+          Regex.match?(~r/role:\s*gatekeeper\b/, strip_comment(line))
+        end)
+        |> Enum.map(fn {ln, _} -> "#{rel}:#{ln} (stage role: gatekeeper)" end)
+      end)
+
+    %{
+      id: "gatekeeper.not_an_ordering_stage",
+      remediation: "R-gatekeeper-exception",
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
+      note:
+        "gatekeeper = juge d'exception (dispatch sur gate non-tranchable), jamais un stage role:gatekeeper (§L441 ; GATE-D1)"
+    }
+  end
+
+  # R-worker-envelope-unwrap (#11, Z3) : verdict_route (HopConsumer) doit déplier
+  # l'enveloppe worker avant de lire result["decision"] (sinon tout verdict valide
+  # continue/abandon → fausse escalade humaine → pipeline forge bloqué).
+  defp check_verdict_envelope_unwrapped(root) do
+    hop = "apps/fleet_pilot/lib/fleet/pilot/hop_consumer.ex"
+    abs = Path.join(root, hop)
+
+    ok? =
+      not File.exists?(abs) or
+        abs
+        |> grep_lines(~r/unwrap_worker_envelope|unwrap_envelope/)
+        |> Enum.any?(fn {_l, line} -> Regex.match?(~r/unwrap/, strip_comment(line)) end)
+
+    %{
+      id: "verdict.worker_envelope_unwrapped",
+      remediation: "R-worker-envelope-unwrap",
+      status: if(ok?, do: :pass, else: :fail),
+      evidence:
+        if(ok?, do: [], else: ["#{hop} : verdict_route ne déplie pas l'enveloppe worker (#11)"]),
+      note:
+        "déplier %{status,result} avant de lire decision (HopConsumer #11) ; idem avant Gates.evaluate côté Executor (#2, vérifié par test)"
+    }
+  end
+
+  # R-no-root-runtime (présence du guard) : vérifie que le self-check anti-root
+  # existe dans le boot path (config/runtime.exs). Rouge s'il disparaît. Le boot
+  # guard runtime vit dans runtime.exs (bloc :prod) ; ce check garde sa présence.
+  defp check_no_root_runtime_guard(root) do
+    rt = "config/runtime.exs"
+
+    present? =
+      Path.join(root, rt)
+      |> grep_lines(~r/R-no-root-runtime|refuse de tourner en root/)
+      |> Enum.any?(fn {_ln, line} -> Regex.match?(~r/root/, strip_comment(line)) end)
+
+    %{
+      id: "runtime.no_root_boot_guard",
+      remediation: "R-no-root-runtime",
+      status: if(present?, do: :pass, else: :fail),
+      evidence:
+        if(present?, do: [], else: ["#{rt} : pas de self-check anti-root au boot (FORGE-D1)"]),
+      note:
+        "le daemon doit refuser getuid()==0 au boot (boot guard) ; User=lcars systemd seul ne couvre pas un run dev/manuel en root"
+    }
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────
