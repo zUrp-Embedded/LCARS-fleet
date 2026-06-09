@@ -32,7 +32,7 @@ Deploy procedure (systemd unit, env file, readiness probe paths) is in `etc/READ
 
 ### Umbrella layout
 
-15 apps under `apps/fleet_*/`, each a normal OTP app with `lib/fleet/<name>/application.ex` as its supervisor entry. Shared `config/` lives at the umbrella root.
+14 apps under `apps/fleet_*/`, each a normal OTP app with `lib/fleet/<name>/application.ex` as its supervisor entry. Shared `config/` lives at the umbrella root.
 
 Apps are grouped into **rings** (substrate layering, declared in each README under "Frontière vendor"):
 - **Ring 0** — OS substrate: `lcars-fleet.service` (chantier 16, lives in `etc/` + `bin/`, not an app)
