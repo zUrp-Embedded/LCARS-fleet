@@ -99,7 +99,6 @@ defmodule LcarsFleetRuntime.MixProject do
           # non initialisé). Critère opérationnel #3.
           fleet_project_bootstrap: :permanent,
           fleet_spawner: :permanent,
-          fleet_pod_runtime: :permanent,
           fleet_event_router: :permanent,
           # broker central de mandats (Ring 2, run #5) — absent du :releases (audit deep-05 C3) ⇒
           # contrat release faux + ambiguïté boot/supervision pour une app OTP centrale (get_task/

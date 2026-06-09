@@ -6,7 +6,7 @@ defmodule Fleet.Pipeline.StageRunner do
   `:pipeline_stage_completed`.
 
   Pas de state local — pure fonction. Le pod broadcast l'event de
-  complétion en EXTRACT phase (chantier 7 `fleet_pod_runtime` PROMOTED).
+  complétion en EXTRACT phase.
 
   ## Réutilisation pod pipe-scoped (chantier engineer long-lived)
 
