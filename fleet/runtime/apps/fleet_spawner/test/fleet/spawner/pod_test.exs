@@ -303,30 +303,83 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "deadline résultat (aucun submit_result)" do
-    test "timeout réponse court + aucun résultat → :failed (result_timeout)" do
+  describe "deadline résultat — Z1 (timeout de RÉPONSE, pas budget de vie)" do
+    # `spec.timeouts.response_sec` (champ optionnel) → forçage déterministe court
+    # (le default par scope est 300s, trop long pour un test unit). 1s mini car
+    # Process.send_after exige un integer ; assert_receive/sleep tolèrent le délai.
+    defp short_timeout(profile), do: put_in(profile.spec["timeouts"], %{"response_sec" => 1})
+
+    test "timeout AVEC task active → :failed (result_timeout)" do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
 
-      # R0.8-brick4 : override `spec.timeouts.response_sec` (champ optionnel)
-      # → forçage déterministe court (default code par scope ne fit pas un test
-      # unit court). 0s = :result_deadline... non, 0 invalide (cond `> 0` faux)
-      # → fallback default 300s. On set 0.001s ? Non, integer requis. Approche
-      # alternative : on garde le default scope, mais l'assertion timeout=5_000
-      # ne marche pas. → set explicitement 1s suffit.
-      # En fait, le code accepte tout `is_number and > 0`. On peut set
-      # un nombre minuscule (eg `0.001`) car le check est `> 0`, pas integer.
-      # MAIS Process.send_after exige integer. Donc 1s mini puis assert_receive
-      # tolère le délai.
-      profile = valid_profile()
-      profile = put_in(profile.spec["timeouts"], %{"response_sec" => 1})
-      pod_id = "pod-timeout-#{System.unique_integer([:positive])}"
+      pod_id = "pod-timeout-active-#{System.unique_integer([:positive])}"
+      # Une task ACTIVE (pending) pour ce pod → au FIRE du deadline,
+      # pod_has_active_task? = true → vrai timeout de réponse → transition_failed.
+      {:ok, _t} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "fais X", role: "engineer"})
+      on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
-      args = %{cap_profile: profile, ticket_id: "ticket-1", pod_id: pod_id, opts: []}
+      args = %{
+        cap_profile: short_timeout(valid_profile()),
+        ticket_id: "t1",
+        pod_id: pod_id,
+        opts: []
+      }
+
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _, _}, 2_000
 
       assert_receive {:EXIT, ^pid, {:shutdown, {:result_timeout, _}}}, 5_000
+    end
+
+    test "timeout SANS task active (idle) → pod survit (Z1 : pas d'idle-kill)" do
+      StubBackend.set_reply(interactive_reply())
+
+      pod_id = "pod-timeout-idle-#{System.unique_integer([:positive])}"
+      # AUCUNE task → au FIRE, pod_has_active_task? = false → le pod attendait juste
+      # sa prochaine task → PAS de kill. C'est le bug d'origine que le band-aid 60ks
+      # masquait ; ici prouvé corrigé à la racine (vérif au fire, pas à l'armement).
+      args = %{
+        cap_profile: short_timeout(valid_profile()),
+        ticket_id: "t1",
+        pod_id: pod_id,
+        opts: []
+      }
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _, _}, 2_000
+
+      # Au-delà du response_sec (1s) : le deadline a firé, mais idle → pas de kill.
+      Process.sleep(1_300)
+      assert Process.alive?(pid), "pod idle tué par :result_deadline (régression Z1)"
+      assert GenServer.call(pid, :info).phase == :monitoring
+
+      Process.exit(pid, :kill)
+    end
+
+    test "pod forever — deadline JAMAIS armé (survit même avec task active + timeout court)" do
+      StubBackend.set_reply(interactive_reply())
+
+      pod_id = "pod-forever-noarm-#{System.unique_integer([:positive])}"
+      # forever = permanent : arm_result_deadline n'arme PAS (pas de timeout de réponse ;
+      # gouverné par kill_pod externe). Même AVEC une task active + response_sec=1s, pas
+      # de kill — preuve directe du point auditeur (un permanent ne meurt pas sur timeout).
+      {:ok, _t} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "veille", role: "gatekeeper"})
+      on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
+
+      profile = valid_profile()
+
+      profile =
+        put_in(profile.spec["invocation"], %{"lifetime_scope" => "forever", "max_alive_sec" => 60})
+
+      args = %{cap_profile: short_timeout(profile), ticket_id: "t1", pod_id: pod_id, opts: []}
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _, _}, 2_000
+
+      Process.sleep(1_300)
+      assert Process.alive?(pid), "pod forever tué par :result_deadline (ne doit JAMAIS armer)"
+
+      Process.exit(pid, :kill)
     end
   end
 

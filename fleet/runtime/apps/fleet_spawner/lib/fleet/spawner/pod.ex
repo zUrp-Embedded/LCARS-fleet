@@ -208,6 +208,9 @@ defmodule Fleet.Spawner.Pod do
         %{phase: :monitoring, pod_id: pid} = state
       ) do
     result = payload[:result] || payload["result"] || %{}
+    # Z1 #3 : le résultat est arrivé → annuler le deadline AVANT d'extraire (sinon le
+    # timer du cycle courant fire plus tard en :monitoring et tue le pod sain).
+    state = cancel_result_deadline(state)
     {:noreply, Map.put(state, :submitted_result, result), {:continue, :extract}}
   end
 
@@ -215,9 +218,18 @@ defmodule Fleet.Spawner.Pod do
   def handle_info(%Fleet.Event{source: :task_queue, type: :task_completed}, state),
     do: {:noreply, state}
 
-  # Deadline : aucun résultat soumis dans le budget durée → échec.
+  # Deadline : timeout de RÉPONSE. Au FIRE, on distingue (Z1) :
+  #   - task active (pending/assigned/in_progress) → le pod n'a PAS répondu à temps → échec.
+  #   - aucune task active → le pod attendait juste sa prochaine task (idle) ; ce n'est
+  #     PAS un timeout de réponse → on laisse lapser, PAS de kill (sinon on re-crée
+  #     l'idle-kill que le band-aid 60ks masquait). La vérif est à l'instant du fire
+  #     (≠ à l'armement) → couvre la race d'enqueue worker ET l'inter-stage pipe d'un coup.
   def handle_info(:result_deadline, %{phase: :monitoring} = state) do
-    transition_failed(state, {:result_timeout, state.pod_id})
+    if pod_has_active_task?(state.pod_id) do
+      transition_failed(state, {:result_timeout, state.pod_id})
+    else
+      {:noreply, Map.put(state, :result_deadline_ref, nil)}
+    end
   end
 
   def handle_info(:result_deadline, state), do: {:noreply, state}
@@ -866,8 +878,8 @@ defmodule Fleet.Spawner.Pod do
     # sur submit_result. PLUS de poll du fichier result.md (mode fichier retiré). Deadline = budget
     # durée → :failed si aucun résultat. pod.ex (Ring 1) ne lit JAMAIS fleet_mcp (Ring 4) en direct.
     Bus.subscribe()
-    Process.send_after(self(), :result_deadline, monitor_timeout_ms(state))
-    {:noreply, %{state | phase: :monitoring}}
+    new_state = arm_result_deadline(%{state | phase: :monitoring})
+    {:noreply, new_state}
   end
 
   defp do_extract(state) do
@@ -900,15 +912,18 @@ defmodule Fleet.Spawner.Pod do
         {:noreply, new_state, {:continue, :release}}
 
       _other ->
+        # Z1 #15 : reset :output_extracted au re-monitoring (sinon un crash REPL au
+        # cycle 2 est masqué en {:stop,:normal} via la garde l.230 → pod.failed/clear
+        # jamais émis). Z1 #16 : arm_result_deadline annule le timer du cycle précédent
+        # avant de ré-armer (pas d'accumulation). Bus.subscribe pas re-appelé : déjà
+        # subscribed depuis do_monitor au 1er cycle.
         new_state =
           new_state
           |> Map.put(:phase, :monitoring)
           |> Map.put(:submitted_result, nil)
+          |> remove_condition(:output_extracted)
+          |> arm_result_deadline()
 
-        # Re-arm le deadline (do_monitor n'est pas re-emprunté → on duplique
-        # le send_after ici). Bus.subscribe pas re-appelé : déjà subscribed
-        # depuis do_monitor au 1er cycle.
-        Process.send_after(self(), :result_deadline, monitor_timeout_ms(new_state))
         {:noreply, new_state}
     end
   end
@@ -1196,7 +1211,11 @@ defmodule Fleet.Spawner.Pod do
       port: nil,
       submitted_result: nil,
       last_result: nil,
-      tmux_session: nil
+      tmux_session: nil,
+      # Z1 — ref du timer :result_deadline (timeout de RÉPONSE). nil = non armé.
+      # Armé seulement pour les scopes bornés (pas `forever`), annulé à l'arrivée du
+      # résultat / avant ré-arme. Cf. arm_result_deadline/1.
+      result_deadline_ref: nil
     }
   end
 
@@ -1302,6 +1321,13 @@ defmodule Fleet.Spawner.Pod do
     Map.update!(state, :conditions, &MapSet.put(&1, condition))
   end
 
+  # Z1 #15 : retire une condition. `:output_extracted` DOIT être reset au re-monitoring
+  # d'un pod long-lived (do_extract _other) — sinon un crash REPL au cycle 2 reste masqué
+  # en {:stop, :normal} (la garde l.230 reste vraie) → pod.failed/clear jamais émis.
+  defp remove_condition(state, condition) do
+    Map.update!(state, :conditions, &MapSet.delete(&1, condition))
+  end
+
   # STATE-004 : libère la task active d'un pod qui meurt sans l'avoir complétée.
   # Appel direct best-effort (non-fatal) : le Pod est sinon découplé de TaskQueue
   # (complétion event-driven via le bus) — on ne fait pas crasher la mort d'un
@@ -1317,6 +1343,32 @@ defmodule Fleet.Spawner.Pod do
     :exit, reason ->
       Logger.warning("pod #{pod_id} clear_for_pod indisponible (non-fatal) : #{inspect(reason)}")
       :ok
+  end
+
+  # Z1 — gestion du timer :result_deadline (timeout de RÉPONSE).
+  #
+  # arm : annule TOUJOURS le timer précédent (pas d'accumulation #16, pas de stale-kill
+  # #3) puis arme un nouveau — SAUF pour un pod `forever` (permanent : gatekeeper/
+  # architect/monk) qui ne porte PAS de timeout de réponse (idle = normal, slow-task =
+  # légitime ; gouverné par kill_pod externe). Stocke la ref dans l'état.
+  defp arm_result_deadline(state) do
+    state = cancel_result_deadline(state)
+
+    if lifetime_scope(state.cap_profile) == "forever" do
+      state
+    else
+      ref = Process.send_after(self(), :result_deadline, monitor_timeout_ms(state))
+      Map.put(state, :result_deadline_ref, ref)
+    end
+  end
+
+  defp cancel_result_deadline(state) do
+    case Map.get(state, :result_deadline_ref) do
+      ref when is_reference(ref) -> Process.cancel_timer(ref)
+      _ -> :ok
+    end
+
+    Map.put(state, :result_deadline_ref, nil)
   end
 
   # R0.8-brick4 : timeout de RÉPONSE (pas budget de durée de vie) au tool MCP
@@ -1345,6 +1397,11 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp default_response_timeout_sec(%Fleet.CapProfile{spec: spec}) do
+    # Z1 (2026-06-09) — band-aid `forever -> 60_000` (≈16.6h) REVERTÉ. Le vrai fix est
+    # appliqué : arm_result_deadline n'arme PAS pour `forever` (un permanent n'a pas de
+    # timeout de réponse), et le fire ne tue que si une task est réellement active. La
+    # valeur `forever` ci-dessous est donc inerte (forever n'arme jamais) ; conservée
+    # par cohérence si un override `spec.timeouts.response_sec` la réactivait un jour.
     case get_in(spec, ["invocation", "lifetime_scope"]) do
       "forever" -> 60
       _other -> 300
@@ -1505,6 +1562,22 @@ defmodule Fleet.Spawner.Pod do
   # (kill délibéré / deadline broker — le pod n'a rien pull, ne PAS arrêter le kick sur
   # un faux « pull » ; au pire on kicke jusqu'au cap, harmless, le result_deadline couvre).
   # Best-effort : exception/exit broker → false (on retentera). Sert à ARRÊTER la boucle.
+  # Z1 — le pod a-t-il une task ACTIVE (pending/assigned/in_progress) là, maintenant ?
+  # Utilisé au FIRE de :result_deadline : oui = vrai timeout de réponse (kill) ; non =
+  # le pod attendait juste sa prochaine task (idle), on laisse lapser. Même source que
+  # mandate_pulled?/no_pending_mandate? (TaskQueue.pod_status), même garde rescue/catch
+  # (TaskQueue indisponible ⇒ pas de task active connue ⇒ pas de kill, fail-safe).
+  defp pod_has_active_task?(pod_id) do
+    case Fleet.TaskQueue.pod_status(pod_id) do
+      {:ok, s} when s in [:pending, :assigned, :in_progress] -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
+  end
+
   defp mandate_pulled?(pod_id) do
     case Fleet.TaskQueue.pod_status(pod_id) do
       {:ok, s} when s in [:assigned, :in_progress, :completed] -> true
