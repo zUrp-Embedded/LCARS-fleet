@@ -3,6 +3,10 @@ defmodule Fleet.SpawnerTest do
 
   alias Fleet.Spawner.LaunchBackend.StubBackend
 
+  # G24-9 (F-CONT-RISK) — disallowedTools minimum exigé par validate/1 câblée au spawn
+  # (Z2 ; cf. cap_profile.ex @disallowed_minimum_strict/_prefix).
+  @min_disallowed ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution tool_search_web)
+
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp_dir} do
@@ -65,7 +69,7 @@ defmodule Fleet.SpawnerTest do
       metadata: %{"name" => "engineer", "containment" => "bwrap"},
       spec: %{
         "systemPrompt" => "engineer-role.md",
-        "scope" => %{"disallowedTools" => [], "git_ops_denied" => []},
+        "scope" => %{"disallowedTools" => @min_disallowed, "git_ops_denied" => []},
         "knowledge" => %{"skills" => []},
         "invocation" => %{"lifetime_scope" => "one-shot", "max_alive_sec" => 60},
         "injects" => %{},

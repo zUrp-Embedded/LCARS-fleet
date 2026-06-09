@@ -512,11 +512,18 @@ defmodule Fleet.CapProfile do
     # `spec.modop_incompatible` (clé inexistante → toujours []) et traitait
     # `spec.modop_set` comme une liste → l'invariant ne tirait jamais.
     modop_set = Map.get(spec, "modop_set", %{})
-    pairs = Map.get(modop_set, "incompatible", [])
 
-    active =
-      (Map.get(modop_set, "default", []) ++ Map.get(modop_set, "optional", []))
-      |> MapSet.new()
+    # modop_set canon = MAP (default/optional/incompatible). Un profil legacy/vide peut
+    # le porter en LISTE (`[]`) → `Map.get` crasherait (BadMapError — jamais vu car
+    # validate/1 n'était appelée qu'en test, CAP-D1). I-CBC : forme non-map = aucune
+    # paire incompatible déclarée → pas de conflit, pas de crash au boundary spawn.
+    {pairs, active} =
+      if is_map(modop_set) do
+        {Map.get(modop_set, "incompatible", []),
+         MapSet.new(Map.get(modop_set, "default", []) ++ Map.get(modop_set, "optional", []))}
+      else
+        {[], MapSet.new()}
+      end
 
     conflict? =
       Enum.any?(pairs, fn pair ->

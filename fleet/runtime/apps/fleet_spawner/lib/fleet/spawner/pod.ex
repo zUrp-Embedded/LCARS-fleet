@@ -361,6 +361,7 @@ defmodule Fleet.Spawner.Pod do
     cap_profile_path = Path.join(state.pod_dir, ".cap-profile.json")
 
     with {:ok, resolved} <- safe_resolve_disallowed(state.cap_profile),
+         :ok <- gate_cap_profile(resolved),
          :ok <- safe_mkdir_p(state.pod_dir),
          :ok <-
            safe_write(
@@ -378,6 +379,19 @@ defmodule Fleet.Spawner.Pod do
     {:ok, Fleet.CapProfile.with_resolved_disallowed_tools(cap_profile)}
   rescue
     e -> {:error, {:baseline_corrupt, Exception.message(e)}}
+  end
+
+  # Z2 / CAP-D1 — porte de containment G24 (dont F-CONT-RISK g24_9 : deny des
+  # server-tools natifs Anthropic) câblée au boundary spawn. `validate/1` (toute la
+  # sémantique G24) n'était appelée QUE par les tests → porte creuse : un profil neuf
+  # ou un modop qui remplace `disallowedTools` bypassait silencieusement. Fail-loud :
+  # profil G24-invalide → :failed, le pod n'est JAMAIS lancé. Le JSON-schema (load/
+  # compose) ne couvre PAS g24_1/3/6/8/9/14 — d'où le besoin de validate/1 ici.
+  defp gate_cap_profile(resolved) do
+    case Fleet.CapProfile.validate(resolved) do
+      :ok -> :ok
+      {:error, violations} -> {:error, {:cap_profile_invalid, violations}}
+    end
   end
 
   defp do_clean(state) do

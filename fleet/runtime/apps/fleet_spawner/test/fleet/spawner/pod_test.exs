@@ -4,6 +4,11 @@ defmodule Fleet.Spawner.PodTest do
   alias Fleet.EventRouter.Bus
   alias Fleet.Spawner.LaunchBackend.StubBackend
 
+  # G24-9 (F-CONT-RISK) — disallowedTools minimum exigé par Fleet.CapProfile.validate/1
+  # (câblée au spawn, Z2 ; cf. cap_profile.ex @disallowed_minimum_strict/_prefix). Tout
+  # profil spawné DOIT les porter, sinon la gate le rejette (:cap_profile_invalid).
+  @min_disallowed ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution tool_search_web)
+
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp_dir} do
@@ -56,7 +61,7 @@ defmodule Fleet.Spawner.PodTest do
       spec: %{
         "lifetime_scope" => "one-shot",
         "systemPrompt" => "engineer-role.md",
-        "scope" => %{"disallowedTools" => [], "git_ops_denied" => []},
+        "scope" => %{"disallowedTools" => @min_disallowed, "git_ops_denied" => []},
         "knowledge" => %{"skills" => []},
         "invocation" => %{"lifetime_scope" => "one-shot", "max_alive_sec" => 60},
         "injects" => %{},
@@ -252,7 +257,7 @@ defmodule Fleet.Spawner.PodTest do
 
       profile =
         put_in(profile.spec["scope"], %{
-          "disallowedTools" => ["web_search"],
+          "disallowedTools" => @min_disallowed,
           "git_ops_denied" => ["push --force", "reset --hard"]
         })
 
@@ -380,6 +385,31 @@ defmodule Fleet.Spawner.PodTest do
       assert Process.alive?(pid), "pod forever tué par :result_deadline (ne doit JAMAIS armer)"
 
       Process.exit(pid, :kill)
+    end
+  end
+
+  describe "Z2 — porte cap-profile G24 au spawn (CAP-D1 / F-CONT-RISK)" do
+    test "profil G24-invalide (server-tools non deny) → :failed, JAMAIS lancé" do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply())
+
+      # disallowedTools VIDE → viole g24_9 (F-CONT-RISK : web_search/web_fetch/code_execution/…
+      # non deny). La gate validate/1 (do_allocate) doit refuser AVANT tout launch.
+      profile =
+        put_in(valid_profile().spec["scope"], %{"disallowedTools" => [], "git_ops_denied" => []})
+
+      pod_id = "pod-g24-invalid-#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        spawn_via_supervisor(%{cap_profile: profile, ticket_id: "t1", pod_id: pod_id, opts: []})
+
+      assert_receive {:EXIT, ^pid,
+                      {:shutdown, {:allocate_failed, {:cap_profile_invalid, violations}}}},
+                     2_000
+
+      assert :g24_9_strict in violations, "la gate doit lever g24_9 (F-CONT-RISK)"
+      # Le refus est au boundary ALLOCATE → le pod n'est JAMAIS lancé (gate effective).
+      refute_received {:launch_called, _, _}
     end
   end
 
