@@ -25,7 +25,17 @@ WorkingDirectory=/var/lib/lcars
 EnvironmentFile=/etc/fleet/lcars-fleet.env
 ExecStart=/var/lib/lcars/release/bin/fleet_umbrella start
 ExecStartPost=/usr/local/bin/lcars-readiness 60
-ExecReload=/bin/kill -HUP $MAINPID
+# Z0 #4 (conformance) : grace-shutdown coordonné câblé (DN §31/§67-69). ExecReload
+# draine in-flight sans restart ; ExecStop = drain + arrêt propre (begin(45s) puis
+# stop) ; ExecStopPost = cleanup locks/queues. Sans ces 3, `systemctl stop` tuait
+# brutalement (Fleet.Starfleet.Shutdown.begin jamais invoqué) — « inacceptable
+# production » DN §67-69.
+# DEPLOY : les 3 helpers vivent dans bin/, copiés en /usr/local/bin (root:root 0755)
+# par la procédure etc/README.md §"Procédure deploy" étape 3 (sans quoi systemd skip
+# ExecStop = retour au stop brutal). Table des livrables etc/README.md à jour.
+ExecReload=/usr/local/bin/lcars-fleet-reload
+ExecStop=/usr/local/bin/lcars-fleet-stop
+ExecStopPost=/usr/local/bin/lcars-fleet-stop-post
 Restart=on-failure
 RestartSec=10
 TimeoutStartSec=120

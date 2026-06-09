@@ -6,7 +6,7 @@
 # Usage: sudo lcars-fleet-restart [--grace-sec=N] [--force]
 #
 # Comportement :
-#   1. systemctl reload (Fleet.Shutdown.drain_in_flight via ExecReload)
+#   1. systemctl reload (Fleet.Starfleet.Shutdown.drain_in_flight via ExecReload)
 #   2. Attend drain --grace-sec (défaut 30s)
 #   3. systemctl stop (déclenche ExecStop grace shutdown)
 #   4. sleep 2s (libère ports + cleanup ETS)

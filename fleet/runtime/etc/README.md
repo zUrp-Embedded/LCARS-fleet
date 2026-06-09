@@ -1,7 +1,7 @@
 # lcars-fleet.service (chantier 16)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-05-10
+**Dernière révision** : 2026-06-09
 **Statut** : att-1 livré
 **Référencé par** : `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -14,6 +14,9 @@ Mix release config pour daemon LCARS v2 umbrella OTP.
 |---|---|---|---|
 | `etc/lcars-fleet.service` | `/etc/systemd/system/lcars-fleet.service` | root:root 0644 | systemd unit `Type=notify` + hardening strict |
 | `bin/lcars-readiness` | `/usr/local/bin/lcars-readiness` | root:root 0755 | bash readiness probe `/api/health` polling |
+| `bin/lcars-fleet-reload` | `/usr/local/bin/lcars-fleet-reload` | root:root 0755 | helper systemd `ExecReload` — drain in-flight sans restart |
+| `bin/lcars-fleet-stop` | `/usr/local/bin/lcars-fleet-stop` | root:root 0755 | helper systemd `ExecStop` — grace shutdown coordonné (begin 45s + stop) |
+| `bin/lcars-fleet-stop-post` | `/usr/local/bin/lcars-fleet-stop-post` | root:root 0755 | helper systemd `ExecStopPost` — cleanup locks/queues |
 | `etc/lcars-fleet.env.template` | `/etc/fleet/lcars-fleet.env` | root:lcars 0640 | EnvironmentFile (secrets cookie + tokens, hors git) |
 | `rel/runtime.exs` | inclus dans Mix release `_build/prod/rel/...` | — | runtime config Elixir 1.9+ stdlib (env vars → Application config) |
 
@@ -58,6 +61,9 @@ sudo chown -R lcars:lcars /var/lib/lcars/
 sudo cp etc/lcars-fleet.service /etc/systemd/system/
 sudo cp bin/lcars-readiness /usr/local/bin/
 sudo chmod +x /usr/local/bin/lcars-readiness
+# Helpers grace-shutdown (ExecReload/ExecStop/ExecStopPost du unit — Z0)
+sudo cp bin/lcars-fleet-reload bin/lcars-fleet-stop bin/lcars-fleet-stop-post /usr/local/bin/
+sudo chmod +x /usr/local/bin/lcars-fleet-reload /usr/local/bin/lcars-fleet-stop /usr/local/bin/lcars-fleet-stop-post
 
 sudo cp etc/lcars-fleet.env.template /etc/fleet/lcars-fleet.env
 # Éditer secrets : RELEASE_COOKIE (32 bytes base64), GITEA_TOKEN, etc.

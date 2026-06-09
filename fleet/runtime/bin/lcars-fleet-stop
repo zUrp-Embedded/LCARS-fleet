@@ -5,5 +5,5 @@
 
 set -euo pipefail
 /var/lib/lcars/release/bin/fleet_umbrella rpc \
-  'Fleet.Shutdown.begin(grace_ms: 45_000)' || true
+  'Fleet.Starfleet.Shutdown.begin(grace_ms: 45_000)' || true
 /var/lib/lcars/release/bin/fleet_umbrella stop
