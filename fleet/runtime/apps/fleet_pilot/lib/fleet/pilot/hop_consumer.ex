@@ -267,10 +267,15 @@ defmodule Fleet.Pilot.HopConsumer do
     # stuck) ; on route par `result["decision"]`. Critère lu dans la carte chargée
     # (zéro round-trip forge). ⚠ stage-mode-only : ce court-circuit vit ICI, JAMAIS
     # dans `Gates`/`Loader` partagés (l'Executor RAM utilise soft sur stage quelconque).
+    # Z3 #11/#2 : déplie l'enveloppe worker `%{"status","result"}` AVANT de lire la
+    # décision (verdict_route) OU d'évaluer la gate — sinon decision=nil → fausse
+    # escalade humaine (#11), ou la gate voit l'enveloppe au lieu des outputs (#2).
+    result = unwrap_worker_envelope(payload["result"] || %{})
+
     if gatekeeper_verdict_stage?(spec) do
-      verdict_route(carte, stage, payload)
+      verdict_route(carte, stage, result)
     else
-      case Fleet.Pipeline.Gates.evaluate(spec, payload["result"] || %{}, %{}) do
+      case Fleet.Pipeline.Gates.evaluate(spec, result, %{}) do
         :pass ->
           advance(carte, stage)
 
@@ -294,13 +299,22 @@ defmodule Fleet.Pilot.HopConsumer do
   # `continue` silencieux), le système pose `lcars-awaits-human` + unlock (run_hop →
   # HopCompleter.await_human) et le poller SKIP l'issue (StageDispatcher.decide). `redirect`
   # est différé (A2.x) → traité comme await_human (DN §3/§6, R-02).
-  defp verdict_route(carte, stage, payload) do
-    case get_in(payload, ["result", "decision"]) do
+  defp verdict_route(carte, stage, result) do
+    case Map.get(result, "decision") do
       "continue" -> advance(carte, stage)
       "abandon" -> {:ok, {nil, nil}}
       other -> {:await_human, other}
     end
   end
+
+  # Déplie l'enveloppe worker `%{"status","result"}` (jumeau de
+  # `Fleet.Pipeline.Executor.unwrap_worker_envelope`). Le worker rend soit directement
+  # `%{"decision"=>...}`, soit l'enveloppe `%{"status"=>"ok","result"=>%{"decision"=>...}}`.
+  # Sans dépliage : decision=nil → fausse escalade humaine → pipeline forge bloqué (#11) ;
+  # côté gate, outputs enfouis → hard-gate à tort (#2). Stage-mode (HopConsumer).
+  defp unwrap_worker_envelope(%{"decision" => _} = direct), do: direct
+  defp unwrap_worker_envelope(%{"status" => _, "result" => inner}) when is_map(inner), do: inner
+  defp unwrap_worker_envelope(other), do: other
 
   defp advance(carte, stage) do
     case Fleet.Pilot.CarteNav.next_stage(carte, stage) do

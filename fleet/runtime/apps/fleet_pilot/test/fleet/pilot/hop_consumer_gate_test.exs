@@ -211,6 +211,15 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     if decision, do: Map.put(base, "result", %{"decision" => decision}), else: base
   end
 
+  # Z3 #11 : le worker peut ENVELOPPER son verdict `%{"status"=>"ok","result"=>%{...}}`
+  # au lieu de le rendre direct. Sans dépliage, `result["decision"]`=nil → fausse escalade.
+  defp gk_done_enveloped(decision) do
+    Map.put(gk_done(decision), "result", %{
+      "status" => "ok",
+      "result" => %{"decision" => decision}
+    })
+  end
+
   test "verdict continue → advance vers le stage suivant (build/engineer)" do
     assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done("continue"), hc())
     assert_received {:route, "gk", "build"}
@@ -248,6 +257,14 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert_received {:label, "lcars-awaits-human"}
     refute_received {:assignee, _}
     refute_received :closed
+  end
+
+  test "verdict ENVELOPPÉ %{status,result} continue → advance (pas de fausse escalade, #11)" do
+    # Sans le dépliage d'enveloppe (Z3 #11), result[decision]=nil → await_human à tort.
+    assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done_enveloped("continue"), hc())
+    assert_received {:route, "gk", "build"}
+    assert_received {:assignee, "engineer"}
+    refute_received {:label, "lcars-awaits-human"}
   end
 
   test "hop gatekeeper continue → livrable PAYLOAD verdict.json (item 3, runtime écrit)" do
