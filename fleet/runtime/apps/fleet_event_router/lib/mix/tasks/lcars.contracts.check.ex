@@ -606,10 +606,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       |> Enum.flat_map(fn path ->
         rel = Path.relative_to(path, root)
 
+        # `\brole:` (ancre gauche) — ne vise QUE les stages `role: gatekeeper`,
+        # PAS `target_role: gatekeeper` (escalade légitime §L441, ex. standard-qa
+        # `on_escalation.target_role` : le gatekeeper EST la cible d'exception, pas un
+        # stage). Sans l'ancre, `target_role:` contient `role:` → faux-positif.
         path
-        |> grep_lines(~r/role:\s*gatekeeper\b/)
+        |> grep_lines(~r/\brole:\s*gatekeeper\b/)
         |> Enum.filter(fn {_ln, line} ->
-          Regex.match?(~r/role:\s*gatekeeper\b/, strip_comment(line))
+          Regex.match?(~r/\brole:\s*gatekeeper\b/, strip_comment(line))
         end)
         |> Enum.map(fn {ln, _} -> "#{rel}:#{ln} (stage role: gatekeeper)" end)
       end)

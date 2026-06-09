@@ -1,15 +1,25 @@
-# Pipeline V2 — audit-only rev2 Loader-compatible
+# Pipeline V2 — audit-only rev3 (B / §L441)
 #
-# Date: 2026-05-18 (rev1) — 2026-05-18 rev2 post-validation Lot 5 item 17
+# Date: 2026-05-18 (rev1) — 2026-05-18 rev2 — 2026-06-10 rev3 (gatekeeper pattern B)
 # Statut: actif — pipeline canonique V2 compatible Fleet.Pipeline.Loader chantier 12 PROMOTED
 # Dérivé de: design-notes/ring2/pipelines.md (audit-only existant) + format Loader chantier 12
 # Référencé par: 06_modops/docs/cascade-mix-v2-rationale.md
-# Consommé par: Fleet.Pipeline.Loader (chantier 12 PROMOTED)
+# Consommé par: Fleet.Pipeline.Loader (chantier 12 PROMOTED) → Executor.
+#
+# rev3 (B / §L441) : le stage `gatekeeper-decision` (role: gatekeeper) est RETIRÉ.
+#   Le gatekeeper est un juge d'EXCEPTION dispatché par une gate non-tranchable, JAMAIS
+#   un stage d'ordonnancement (§L441 ; GATE-D1). ⚠ SIGNAL (auditeur) : l'escalade
+#   "si non-mécanique" n'est PLUS exprimée — en v2.5 les `rules` de gate sont
+#   string-only (schema `additionalProperties:false`, `items:string`) et le chemin
+#   terminal-string (`Gates.eval_terminal_string`) n'a PAS de branche `:nontranchable`.
+#   Le SEUL véhicule d'escalade v2.5 est une gate `soft` (toujours dispatch). Re-encoder
+#   l'escalade conditionnelle de l'audit en B = décision DIFFÉRÉE (soft trop large, ou
+#   étendre schema+predicate string pour une bande-milieu). cf. JOURNAL re-analyse-2026-06-09.
 
 kind: Pipeline
 metadata:
   name: audit-only
-  description: "Audit indépendant — pas de code généré. Consultant fire-mode + escalade gatekeeper si non-mécanique."
+  description: "Audit indépendant — pas de code généré. Consultant fire-mode (1 stage). Escalade gatekeeper = à re-encoder en B (cf. en-tête)."
   applicable_intensity: [L0, L1, L2, L3, L4]
   applicable_regime: [R1, R2]
 
@@ -30,25 +40,13 @@ spec:
         type: terminal
         rules:
           - "audit_doc_exists AND audit_doc_non_empty"
-        fallback_invoke_gatekeeper: true  # si severity_max == critical, gatekeeper décide
+        # NB (B/§L441, rev3) : `fallback_invoke_gatekeeper`/`on_blocking_severity` sont
+        # INERTES — le chemin terminal-string (`Gates.eval_terminal_string`) ne les
+        # évalue pas (pas de branche :nontranchable en v2.5). Conservés comme marqueur
+        # de l'escalade à re-encoder en B (cf. en-tête). Pas un stage gatekeeper.
+        fallback_invoke_gatekeeper: true
         on_blocking_severity: critical
       timeout_sec: 1800
-
-    # --- Stage 2 (conditionnel): gatekeeper (~10% inférence) ---
-    gatekeeper-decision:
-      role: gatekeeper
-      profile: gatekeeper.yaml  # cap-profile pipe-scoped chantier 17 PROMOTED
-      needs: [audit]
-      condition: "audit.verdict in [partial, fail] OR audit.severity_max in [critical, important]"
-      inputs:
-        - audits/consultant-{date}.json
-      outputs:
-        - audits/gatekeeper-{date}.json
-      gate:
-        type: soft  # LLM one-shot (cohérent ~10% inférence chantier 17 PROMOTED)
-        max_retries: 1
-      decisions: [proceed, revision, abort, escalate-user]
-      timeout_sec: 600
 
   on_failure:
     notify_role: starfleet
