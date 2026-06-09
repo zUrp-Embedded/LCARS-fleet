@@ -106,15 +106,17 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       }
     end
 
-    # A2.3b : chaîne avec gatekeeper-stage explicite : triage(architect) →
-    # review(gatekeeper, gate soft = verdict) → build(engineer).
+    # B (§L441) : chaîne avec ESCALADE gatekeeper (pas de stage role:gatekeeper) :
+    # triage(architect) → review(reviewer, gate soft → escalade) → build(engineer).
+    # La gate soft du stage MÉTIER `review` dispatche le gatekeeper permanent ; le verdict
+    # revient async (resume_gate) — il n'y a pas de stage gatekeeper spawné.
     def load!("gkchain") do
       %{
         "name" => "gkchain",
         "stages" => %{
           "triage" => %{"role" => "architect", "needs" => []},
           "review" => %{
-            "role" => "gatekeeper",
+            "role" => "reviewer",
             "needs" => ["triage"],
             "gate" => %{"type" => "soft", "max_rounds" => 1}
           },
@@ -125,7 +127,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   end
 
   defmodule CapLoader do
-    def load(role) when role in ["architect", "engineer", "gatekeeper"],
+    def load(role) when role in ["architect", "engineer", "reviewer", "gatekeeper"],
       do:
         {:ok,
          %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => role}, spec: %{}}}
@@ -291,14 +293,20 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       forge_client: SimForge,
       loader: CarteLoader,
       deliverable: DelivStub,
-      max_rework_rounds: 2
+      max_rework_rounds: 2,
+      # B (§L441) — seams d'escalade gatekeeper.
+      task_queue: TQStub,
+      spawner: SpawnStub,
+      gatekeeper_pod_id_fun: fn -> "gk-perm" end,
+      gate_evals: %{}
     }
 
     {pid, dispatch_opts, entry_opts, hc}
   end
 
-  # entrée → triage(architect) spawn → triage finit (outputs) → review(gatekeeper) spawn.
-  # Renvoie {pid, dispatch_opts, hc, review_spawn_opts}.
+  # B (§L441) — entrée → triage(architect) spawn → triage finit → review(reviewer) spawn →
+  # review finit AVEC gate soft → ESCALADE (mandat au gatekeeper permanent). Renvoie
+  # `{pid, dispatch_opts, hc, eval_ctx}` (eval_ctx = contexte de reprise sur le verdict).
   defp drive_to_review do
     {pid, dispatch_opts, entry_opts, hc} = gk_opts()
 
@@ -309,40 +317,46 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     assert_received {:spawned, "issue-1", o1}
 
-    # triage finit avec des outputs → avance vers review(gatekeeper) ; le comment porte result_K
+    # triage (pas de gate) finit → avance vers review(reviewer), stage métier ordinaire.
     assert {:ok, :reassigned} =
              HopConsumer.maybe_complete(completed(o1, "architect", %{"severity_max" => "ok"}), hc)
 
     assert {:ok, {"gkchain", "review"}} = SimForge.get_route("o/r", 1, [])
-    assert [%{"login" => "gatekeeper"}] = Sim.get(pid)["assignees"]
-    assert Enum.any?(Sim.get(pid)["comments"], &String.contains?(&1, "```result"))
+    assert [%{"login" => "reviewer"}] = Sim.get(pid)["assignees"]
 
-    # dispatch review → spawn gatekeeper (rôle connu via CapLoader)
-    assert {:ok, {:spawned, _, "gatekeeper"}} =
+    # dispatch review → spawn reviewer (stage métier, pas un gatekeeper-stage)
+    assert {:ok, {:spawned, _, "reviewer"}} =
              StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
 
     assert_received {:spawned, "issue-1", o2}
     assert o2[:stage] == "review"
-    # item 5 : le mandat du gatekeeper = brief GateBrief = result_K à juger + contrat verdict.
-    assert o2[:mandate] =~ "severity_max"
-    assert o2[:mandate] =~ "gate-decision-v1.json"
-    assert o2[:mandate] =~ "continue"
 
-    {pid, dispatch_opts, hc, o2}
+    # review finit AVEC gate soft → escalade gatekeeper (mandat enqueué, PAS d'avance).
+    # L'issue reste verrouillée (in-flight) en attendant le verdict.
+    assert {:escalate, "t", eval_ctx} =
+             HopConsumer.maybe_complete(completed(o2, "reviewer", %{"severity_max" => "ok"}), hc)
+
+    assert eval_ctx.stage == "review"
+    assert eval_ctx.role == "reviewer"
+    # pas de reassign/close avant le verdict
+    assert [%{"login" => "reviewer"}] = Sim.get(pid)["assignees"]
+    assert Sim.get(pid)["state"] == "open"
+
+    {pid, dispatch_opts, hc, eval_ctx}
   end
 
-  test "gatekeeper continue : triage → review(verdict continue) → build → close" do
-    {pid, dispatch_opts, hc, o2} = drive_to_review()
+  test "B escalade continue : triage → review(soft→escalade) → verdict continue → build → close" do
+    {pid, dispatch_opts, hc, eval_ctx} = drive_to_review()
 
-    # verdict continue → avance vers build(engineer)
+    # verdict du gatekeeper = continue → avance vers build(engineer), push du livrable reviewer.
     assert {:ok, :reassigned} =
-             HopConsumer.maybe_complete(
-               completed(o2, "gatekeeper", %{"decision" => "continue"}),
-               hc
-             )
+             HopConsumer.resume_gate(eval_ctx, %{"result" => %{"decision" => "continue"}}, hc)
 
     assert {:ok, {"gkchain", "build"}} = SimForge.get_route("o/r", 1, [])
     assert [%{"login" => "engineer"}] = Sim.get(pid)["assignees"]
+
+    # la trace du verdict est durable (comment du hop)
+    assert Enum.any?(Sim.get(pid)["comments"], &String.contains?(&1, "gatekeeper"))
 
     # dispatch build → spawn engineer → finit → terminal close
     assert {:ok, {:spawned, _, "engineer"}} =
@@ -353,16 +367,17 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert Sim.get(pid)["state"] == "closed"
 
     comments = Sim.get(pid)["comments"]
-    assert Enum.any?(comments, &String.contains?(&1, "[hop:gatekeeper:"))
+    assert Enum.any?(comments, &String.contains?(&1, "[hop:reviewer:"))
   end
 
-  test "gatekeeper escalate_user : lcars-awaits-human + unlock + poller SKIP (boucle fermée)" do
-    {pid, dispatch_opts, hc, o2} = drive_to_review()
+  test "B escalade escalate_user : lcars-awaits-human + unlock + poller SKIP (boucle fermée)" do
+    {pid, dispatch_opts, hc, eval_ctx} = drive_to_review()
 
-    # verdict escalate_user → await-human
+    # verdict escalate_user → await-human (fail-closed)
     assert {:ok, :awaiting_human} =
-             HopConsumer.maybe_complete(
-               completed(o2, "gatekeeper", %{"decision" => "escalate_user"}),
+             HopConsumer.resume_gate(
+               eval_ctx,
+               %{"result" => %{"decision" => "escalate_user"}},
                hc
              )
 
@@ -371,7 +386,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     refute "lcars-in-flight" in labels
     assert Sim.get(pid)["state"] == "open"
 
-    # LE POINT CLÉ : le poller NE re-dispatche PAS (assignee=gatekeeper mais awaits-human).
+    # LE POINT CLÉ : le poller NE re-dispatche PAS (assignee=reviewer mais awaits-human).
     assert {:skipped, :awaits_human} = StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
   end
 end

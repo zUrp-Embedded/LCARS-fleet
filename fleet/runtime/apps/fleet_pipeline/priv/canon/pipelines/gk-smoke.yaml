@@ -1,11 +1,17 @@
-# Pipeline V2 — gk-smoke (dogfood live A2.3b : business → gatekeeper)
+# Pipeline V2 — gk-smoke (dogfood live B : business → escalade gatekeeper)
 #
-# Date: 2026-06-08
-# Statut: SMOKE — carte minimale 2 stages pour valider la chaîne forge-driven
-#         AVEC un gatekeeper-stage explicite (A2.3b) sur de vrais pods.
-#         build(engineer, livrable git) → review(gatekeeper, verdict gate-decision-v1).
+# Date: 2026-06-08 — 2026-06-10 rev2 (gatekeeper pattern B / §L441)
+# Statut: SMOKE — carte minimale 2 stages pour valider la chaîne forge-driven AVEC
+#         une ESCALADE gatekeeper (pattern B) sur de vrais pods.
+#         build(engineer, livrable git) → review(reviewer, gate soft → escalade).
 # Consommé par: Fleet.Pipeline.Loader (format flat v1) + stage-mode forge-driven
 #               (Entry/StageDispatcher/HopConsumer). Routé via LCARS_PILOT_STAGE_ROUTING.
+#
+# rev2 (B / §L441) : `review` n'est PLUS un stage `role: gatekeeper` (A2.3b explicit-stage,
+#   retiré — §L441 : le gatekeeper n'est jamais un stage d'ordonnancement). C'est un stage
+#   métier `reviewer` avec une gate `soft` : Gates.evaluate → {:dispatch_gatekeeper} →
+#   HopConsumer enqueue un mandat d'éval au gatekeeper PERMANENT (juge d'exception) et
+#   reprend sur son verdict. Smoke-test du chemin d'escalade B de bout en bout.
 
 name: gk-smoke
 version: 1
@@ -14,16 +20,17 @@ stages:
   build:
     role: engineer
     # noop modop = rôle de base inchangé. L'engineer commite en LOCAL (barrière §4),
-    # le SYSTÈME pousse. Pas de gate → avance directe vers le gatekeeper.
+    # le SYSTÈME pousse. Pas de gate → avance directe vers review.
     profile: noop
     timeout_sec: 900
 
   review:
-    role: gatekeeper
+    role: reviewer
     profile: noop
     needs: [build]
-    # gate soft = la sortie EST un verdict gate-decision-v1.json (A2.3b explicit-stage).
-    # Le runtime court-circuite Gates et route par result["decision"].
+    # gate soft (B) = condition runtime non-tranchable → escalade au gatekeeper permanent
+    # (PAS un verdict-de-stage A2.3b). HopConsumer dispatch le mandat + reprend sur le
+    # task_completed corrélé (continue → avance ; abandon → close ; humain → await_human).
     gate:
       type: soft
       max_rounds: 1

@@ -1,13 +1,15 @@
 defmodule Fleet.Pilot.HopConsumerGateTest do
   @moduledoc """
-  A2.3 — la gate du stage FINI décide la fin-de-hop (DN forge-state-machine §9).
-  On pilote `HopConsumer.maybe_complete` (avec le VRAI `HopCompleter`) contre un sim
-  forge + des cartes gatées, et on prouve les trois issues :
+  A2.3 / B (§L441) — la gate du stage FINI décide la fin-de-hop (DN forge-state-machine §9).
+  On pilote `HopConsumer.maybe_complete` (avec le VRAI `HopCompleter`) contre un sim forge +
+  des cartes gatées, et on prouve :
 
     * gate `:pass`              → avance (next_stage)
     * gate `{:fail}`            → rebond vers le 1er stage, BORNÉ (budget hops)
     * budget épuisé             → `{:error, {:rework_exhausted, _}}` (aucune écriture forge)
-    * gate `{:dispatch_gatekeeper}` (soft) → `{:error, {:gate_pending, _}}` (différé A2.3b)
+    * gate `soft`/non-tranchable (B) → ESCALADE : `{:escalate, corr, ctx}` + mandat enqueué
+      au gatekeeper permanent (PAS un stage `role: gatekeeper`). La décision revient async ;
+      `resume_gate/3` route : continue→avance, abandon→close, humain→await_human.
   """
   use ExUnit.Case, async: true
 
@@ -33,8 +35,20 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     end
   end
 
+  # B — broker de mandats stub : capture l'enqueue, rend un correlation_id stable.
+  defmodule StubQueue do
+    def enqueue(pod_id, attrs) do
+      send(self(), {:enqueue, pod_id, attrs})
+      {:ok, %{id: "corr-1"}}
+    end
+  end
+
+  defmodule StubSpawner do
+    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+  end
+
   # Cartes 2 stages. `gated` : hard gate sur triage (exige result %{"ok"=>true}).
-  # `soft` : soft gate sur triage. `plain` : aucune gate (advance pur).
+  # `soft` : soft gate sur triage (B → escalade gatekeeper). `plain` : aucune gate.
   defmodule Carte do
     def load!("gated") do
       %{
@@ -69,44 +83,6 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
         }
       }
     end
-
-    # A2.3b : carte avec gatekeeper-stage explicite au milieu (review, role:gatekeeper,
-    # gate soft) — triage → review(verdict) → build.
-    def load!("gk") do
-      %{
-        "name" => "gk",
-        "stages" => %{
-          "triage" => %{"role" => "architect", "needs" => []},
-          "review" => %{
-            "role" => "gatekeeper",
-            "needs" => ["triage"],
-            "gate" => %{"type" => "soft", "max_rounds" => 1}
-          },
-          "build" => %{"role" => "engineer", "needs" => ["review"]}
-        }
-      }
-    end
-
-    # A2.3b N-05 : 2 stages MÉTIER (triage hard-gated, build) + 1 gatekeeper-stage.
-    # Budget rework = 2*(rounds+1), PAS 3*(rounds+1) (gatekeeper exclu).
-    def load!("gkb") do
-      %{
-        "name" => "gkb",
-        "stages" => %{
-          "triage" => %{
-            "role" => "architect",
-            "needs" => [],
-            "gate" => %{"type" => "hard", "rule" => %{"ok" => true}}
-          },
-          "review" => %{
-            "role" => "gatekeeper",
-            "needs" => ["triage"],
-            "gate" => %{"type" => "soft"}
-          },
-          "build" => %{"role" => "engineer", "needs" => ["review"]}
-        }
-      }
-    end
   end
 
   defp hc(opts \\ []) do
@@ -119,7 +95,12 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
       forge_client: StubForge,
       loader: Carte,
       deliverable: DelivStub,
-      max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2)
+      max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2),
+      task_queue: StubQueue,
+      spawner: StubSpawner,
+      gatekeeper_pod_id_fun:
+        Keyword.get(opts, :gatekeeper_pod_id_fun, fn -> "gatekeeper-permanent" end),
+      gate_evals: %{}
     }
   end
 
@@ -135,6 +116,19 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
       "result" => result
     }
   end
+
+  # contexte de reprise tel que le construit gate_decide à l'escalade (carte "soft").
+  defp soft_ctx do
+    %{
+      n: 1,
+      role: "architect",
+      payload: triage_done("soft", %{"x" => 1}),
+      carte: Carte.load!("soft"),
+      stage: "triage"
+    }
+  end
+
+  # ── Happy path : pass / fail / budget (inchangé vs A2.3) ──────────────────────
 
   test "gate :pass → avance vers build (engineer)" do
     assert {:ok, :reassigned} =
@@ -175,107 +169,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "budget : juste sous la limite rebondit, pile à la limite s'arrête" do
     payload = triage_done("gated", %{})
-    # budget 6 : hops=5 rebondit, hops=6 stuck
     assert {:ok, :reassigned} = HopConsumer.maybe_complete(payload, hc(forge_opts: [_hops: 5]))
 
     assert {:error, {:rework_exhausted, _}} =
              HopConsumer.maybe_complete(payload, hc(forge_opts: [_hops: 6]))
-  end
-
-  test "carte avec gate soft sur stage NON-gatekeeper → rejetée au load (carte_invalid, R-01)" do
-    # En explicit-stage (A2.3b), une gate soft DOIT être portée par un gatekeeper-stage.
-    # La carte "soft" (triage=architect+soft) est désormais malformée → rejet à load_carte,
-    # AVANT tout routage. Fail-closed, aucune écriture.
-    payload = triage_done("soft", %{})
-
-    assert {:error, {:carte_invalid, {:soft_gate_non_gatekeeper, "triage"}}} =
-             HopConsumer.maybe_complete(payload, hc())
-
-    refute_received {:assignee, _}
-    refute_received :unlocked
-  end
-
-  # ── A2.3b verdict-flow : gatekeeper-stage (role:gatekeeper + gate soft) ────────
-  # Sa sortie EST un verdict ; HopConsumer court-circuite Gates et route par decision.
-  # pod.completed du gatekeeper-stage `review` de la carte "gk".
-  defp gk_done(decision) do
-    base = %{
-      "ticket_id" => "issue-1",
-      "workspace" => "/ws",
-      "base_sha" => "cafe",
-      "role" => "gatekeeper",
-      "pipeline" => "gk",
-      "stage" => "review"
-    }
-
-    if decision, do: Map.put(base, "result", %{"decision" => decision}), else: base
-  end
-
-  # Z3 #11 : le worker peut ENVELOPPER son verdict `%{"status"=>"ok","result"=>%{...}}`
-  # au lieu de le rendre direct. Sans dépliage, `result["decision"]`=nil → fausse escalade.
-  defp gk_done_enveloped(decision) do
-    Map.put(gk_done(decision), "result", %{
-      "status" => "ok",
-      "result" => %{"decision" => decision}
-    })
-  end
-
-  test "verdict continue → advance vers le stage suivant (build/engineer)" do
-    assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done("continue"), hc())
-    assert_received {:route, "gk", "build"}
-    assert_received {:assignee, "engineer"}
-    assert_received :unlocked
-  end
-
-  test "verdict abandon → close (terminal)" do
-    assert {:ok, :completed} = HopConsumer.maybe_complete(gk_done("abandon"), hc())
-    assert_received :closed
-    refute_received {:assignee, _}
-  end
-
-  test "verdict escalate_user → await_human : lcars-awaits-human posé + unlock, pas close/reassign" do
-    assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(gk_done("escalate_user"), hc())
-    assert_received {:label, "lcars-awaits-human"}
-    assert_received :unlocked
-    refute_received {:assignee, _}
-    refute_received :closed
-  end
-
-  test "verdict halt_wait_input → await_human (lcars-awaits-human)" do
-    assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(gk_done("halt_wait_input"), hc())
-    assert_received {:label, "lcars-awaits-human"}
-  end
-
-  test "verdict redirect → await_human (différé A2.x, pas de routage hors-DAG en A2.3b)" do
-    assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(gk_done("redirect"), hc())
-    assert_received {:label, "lcars-awaits-human"}
-    refute_received {:assignee, _}
-  end
-
-  test "verdict absent/invalide → await_human (jamais continue silencieux)" do
-    assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(gk_done(nil), hc())
-    assert_received {:label, "lcars-awaits-human"}
-    refute_received {:assignee, _}
-    refute_received :closed
-  end
-
-  test "verdict ENVELOPPÉ %{status,result} continue → advance (pas de fausse escalade, #11)" do
-    # Sans le dépliage d'enveloppe (Z3 #11), result[decision]=nil → await_human à tort.
-    assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done_enveloped("continue"), hc())
-    assert_received {:route, "gk", "build"}
-    assert_received {:assignee, "engineer"}
-    refute_received {:label, "lcars-awaits-human"}
-  end
-
-  test "hop gatekeeper continue → livrable PAYLOAD verdict.json (item 3, runtime écrit)" do
-    assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done("continue"), hc())
-    assert_received {:publish, d}
-    assert d.mode == :payload
-    assert [%{"path" => "verdict.json", "content" => content}] = d.files
-    assert content =~ ~s("decision":"continue")
-    # identité = gatekeeper (∈ allowed_emails pour la gate F-01)
-    assert d.identity.author_email == "gatekeeper@lcars.local"
-    assert "gatekeeper@lcars.local" in d.allowed_emails
   end
 
   test "hop ordinaire (non-gatekeeper) → livrable git_native (le pod a commité)" do
@@ -285,55 +182,185 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute Map.has_key?(d, :files)
   end
 
-  test "le gatekeeper-stage NE passe PAS par Gates (pas de {:gate_pending})" do
-    # sans court-circuit, Gates.evaluate(soft) renverrait {:dispatch_gatekeeper} → gate_pending.
-    # Avec le court-circuit, continue route normalement.
-    assert {:ok, :reassigned} = HopConsumer.maybe_complete(gk_done("continue"), hc())
+  # ── B (§L441) : escalade gatekeeper (gate soft sur un stage MÉTIER) ───────────
+
+  test "gate soft sur stage métier → ESCALADE : mandat enqueué, AUCUNE avance/écriture forge" do
+    # En B, une gate soft sur un stage métier (architect) n'est PAS une carte malformée :
+    # elle dispatche le gatekeeper permanent (juge d'exception). Pas de stage role:gatekeeper.
+    assert {:escalate, "corr-1", ctx} =
+             HopConsumer.maybe_complete(triage_done("soft", %{"sev" => "high"}), hc())
+
+    assert ctx.stage == "triage"
+    assert ctx.role == "architect"
+
+    assert_received {:enqueue, "gatekeeper-permanent", attrs}
+    assert attrs.role == "gatekeeper"
+    assert attrs.metadata["gate_eval"] == true
+    assert attrs.metadata["stage"] == "triage"
+    assert is_binary(attrs.brief)
+    # outputs DÉPLIÉS portés au juge (le worker peut envelopper) :
+    assert attrs.metadata["outputs"] == %{"sev" => "high"}
+    # kick best-effort du gatekeeper permanent.
+    assert_received {:wake, "gatekeeper-permanent"}
+
+    # rien d'avancé avant le verdict (l'issue reste verrouillée) :
+    refute_received {:assignee, _}
+    refute_received :unlocked
+    refute_received :closed
   end
 
-  test "avance vers un gatekeeper-stage → le comment embarque result_K (N-04)" do
-    # triage(gk) → review(gatekeeper) : le comment de triage doit porter ses outputs.
-    payload = %{
-      "ticket_id" => "issue-1",
-      "workspace" => "/ws",
-      "base_sha" => "cafe",
-      "role" => "architect",
-      "pipeline" => "gk",
-      "stage" => "triage",
-      "result" => %{"severity_max" => "ok", "findings" => 0}
-    }
+  test "escalade : outputs ENVELOPPÉS %{status,result} → dépliés avant le brief (#2)" do
+    enveloped = %{"status" => "ok", "result" => %{"sev" => "low"}}
 
-    assert {:ok, :reassigned} = HopConsumer.maybe_complete(payload, hc())
-    assert_received {:assignee, "gatekeeper"}
-    assert_received {:comment, body}
-    assert body =~ "```result"
-    assert body =~ ~s("severity_max":"ok")
+    assert {:escalate, "corr-1", _ctx} =
+             HopConsumer.maybe_complete(triage_done("soft", enveloped), hc())
+
+    assert_received {:enqueue, _pod, attrs}
+    assert attrs.metadata["outputs"] == %{"sev" => "low"}
   end
 
-  test "avance vers un stage ORDINAIRE → pas d'enrichissement result (pas de bruit)" do
-    # plain : triage(architect) → build(engineer) — build n'est pas gatekeeper.
+  test "escalade : pas de gatekeeper booté → fail-loud (jamais un pass silencieux)" do
+    state = hc(gatekeeper_pod_id_fun: fn -> nil end)
+
+    assert {:error, {:gatekeeper_dispatch, :no_gatekeeper}} =
+             HopConsumer.maybe_complete(triage_done("soft", %{}), state)
+
+    refute_received {:assignee, _}
+    refute_received :unlocked
+  end
+
+  # ── B : reprise sur le verdict du gatekeeper (resume_gate/3) ──────────────────
+
+  test "verdict continue → avance (push business git_native + reassign) + trace" do
     assert {:ok, :reassigned} =
-             HopConsumer.maybe_complete(triage_done("plain", %{"x" => 1}), hc())
+             HopConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "continue", "reason" => "RAS"}},
+               hc()
+             )
 
+    assert_received {:route, "soft", "build"}
     assert_received {:assignee, "engineer"}
+    assert_received {:publish, d}
+    assert d.mode == :git_native
     assert_received {:comment, body}
-    refute body =~ "```result"
+    assert body =~ "gatekeeper"
+    assert body =~ "continue"
+    assert_received :unlocked
   end
 
-  test "budget rework exclut les gatekeeper-stages (N-05) : budget=2*(2+1)=6, pas 9" do
-    # carte gkb = triage(hard) + review(gatekeeper) + build → 2 stages métier.
-    fail = %{
-      "ticket_id" => "issue-1",
-      "workspace" => "/ws",
-      "base_sha" => "cafe",
-      "role" => "architect",
-      "pipeline" => "gkb",
-      "stage" => "triage",
-      "result" => %{}
-    }
+  test "verdict continue ENVELOPPÉ %{status,result} → déplié (gate_result), avance" do
+    raw = %{result: %{"status" => "ok", "result" => %{"decision" => "continue"}}}
+    assert {:ok, :reassigned} = HopConsumer.resume_gate(soft_ctx(), raw, hc())
+    assert_received {:assignee, "engineer"}
+  end
 
-    # budget 6 (gatekeeper exclu) : hops=6 épuise. Si le gatekeeper était compté → 9 → rebondirait.
-    assert {:error, {:rework_exhausted, %{budget: 6}}} =
-             HopConsumer.maybe_complete(fail, hc(forge_opts: [_hops: 6]))
+  test "verdict abandon → close (terminal), PAS de push business (travail rejeté)" do
+    assert {:ok, :completed} =
+             HopConsumer.resume_gate(soft_ctx(), %{"result" => %{"decision" => "abandon"}}, hc())
+
+    assert_received :closed
+    refute_received {:publish, _}
+    refute_received {:assignee, _}
+  end
+
+  test "verdict escalate_user → await_human (lcars-awaits-human + unlock, pas close/reassign)" do
+    assert {:ok, :awaiting_human} =
+             HopConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "escalate_user"}},
+               hc()
+             )
+
+    assert_received {:label, "lcars-awaits-human"}
+    assert_received :unlocked
+    refute_received {:assignee, _}
+    refute_received :closed
+  end
+
+  test "verdict halt_wait_input → await_human" do
+    assert {:ok, :awaiting_human} =
+             HopConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "halt_wait_input"}},
+               hc()
+             )
+
+    assert_received {:label, "lcars-awaits-human"}
+  end
+
+  test "verdict redirect → await_human (différé A2.x, pas de routage hors-DAG)" do
+    assert {:ok, :awaiting_human} =
+             HopConsumer.resume_gate(soft_ctx(), %{"result" => %{"decision" => "redirect"}}, hc())
+
+    assert_received {:label, "lcars-awaits-human"}
+    refute_received {:assignee, _}
+  end
+
+  test "verdict absent/invalide → await_human (fail-closed, jamais continue silencieux)" do
+    assert {:ok, :awaiting_human} =
+             HopConsumer.resume_gate(soft_ctx(), %{"result" => %{}}, hc())
+
+    assert_received {:label, "lcars-awaits-human"}
+    refute_received {:assignee, _}
+    refute_received :closed
+  end
+
+  # ── B : câblage async (GenServer) — store gate_evals à l'escalade, pop à la reprise ──
+
+  test "GenServer : pod.completed soft → gate_evals stocké ; task_completed corrélé → pop" do
+    {:ok, pid} =
+      HopConsumer.start_link(
+        repo: "o/r",
+        remote: "origin",
+        subscribe: false,
+        forge_client: StubForge,
+        loader: Carte,
+        deliverable: DelivStub,
+        task_queue: StubQueue,
+        spawner: StubSpawner,
+        gatekeeper_pod_id_fun: fn -> "gk-perm" end,
+        role_emails: fn r -> ["#{r}@lcars.local"] end
+      )
+
+    # 1. business soft → escalade → gate_evals["corr-1"] présent
+    send(pid, %Fleet.Event{
+      source: :spawner,
+      type: :"pod.completed",
+      timestamp: DateTime.utc_now(),
+      payload: triage_done("soft", %{})
+    })
+
+    state = :sys.get_state(pid)
+    assert Map.has_key?(state.gate_evals, "corr-1")
+    assert %{stage: "triage"} = state.gate_evals["corr-1"]
+
+    # 2. verdict du gatekeeper (corrélé) → resume + pop
+    send(pid, %Fleet.Event{
+      source: :task_queue,
+      type: :task_completed,
+      correlation_id: "corr-1",
+      timestamp: DateTime.utc_now(),
+      payload: %{result: %{"decision" => "continue"}}
+    })
+
+    assert %{gate_evals: evals} = :sys.get_state(pid)
+    refute Map.has_key?(evals, "corr-1")
+  end
+
+  test "GenServer : task_completed d'un corr inconnu → ignoré (pas de crash)" do
+    {:ok, pid} =
+      HopConsumer.start_link(repo: "o/r", remote: "origin", subscribe: false, loader: Carte)
+
+    send(pid, %Fleet.Event{
+      source: :task_queue,
+      type: :task_completed,
+      correlation_id: "inconnu",
+      timestamp: DateTime.utc_now(),
+      payload: %{result: %{"decision" => "continue"}}
+    })
+
+    assert %{gate_evals: evals} = :sys.get_state(pid)
+    assert evals == %{}
   end
 end

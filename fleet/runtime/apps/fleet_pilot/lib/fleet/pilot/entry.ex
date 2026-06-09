@@ -63,13 +63,10 @@ defmodule Fleet.Pilot.Entry do
   end
 
   defp load_carte(pipeline, loader) do
-    carte = loader.load!(pipeline)
-    # A2.3b §9.7 (stage-mode-only) : rejeter une carte malformée (soft⟺gatekeeper) dès
-    # l'entrée — aucune carte invalide n'entre en stage-mode (I-CBC).
-    case Fleet.Pilot.CarteNav.validate_explicit_stage(carte) do
-      :ok -> {:ok, carte}
-      {:error, reason} -> {:error, {:carte_invalid, reason}}
-    end
+    # B (§L441) : plus de `validate_explicit_stage` (biconditionnelle soft⟺gatekeeper,
+    # A2.3b) — une gate soft sur un stage métier est légitime (escalade gatekeeper). Le
+    # Loader valide le schema ; pas de garde-fou explicit-stage.
+    {:ok, loader.load!(pipeline)}
   rescue
     e -> {:error, Exception.message(e)}
   end

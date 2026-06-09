@@ -628,9 +628,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R-worker-envelope-unwrap (#11, Z3) : verdict_route (HopConsumer) doit déplier
-  # l'enveloppe worker avant de lire result["decision"] (sinon tout verdict valide
-  # continue/abandon → fausse escalade humaine → pipeline forge bloqué).
+  # R-worker-envelope-unwrap (#11/#2, Z3) : HopConsumer doit déplier l'enveloppe worker
+  # `%{status,result}` avant de lire la décision (resume_gate/gate_result, B) OU d'évaluer
+  # la gate (gate_decide) — sinon decision/outputs enfouis → fausse escalade / hard-gate à tort.
   defp check_verdict_envelope_unwrapped(root) do
     hop = "apps/fleet_pilot/lib/fleet/pilot/hop_consumer.ex"
     abs = Path.join(root, hop)
