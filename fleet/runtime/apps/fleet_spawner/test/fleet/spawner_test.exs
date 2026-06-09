@@ -33,7 +33,8 @@ defmodule Fleet.SpawnerTest do
           "accessToken" => "sk-ant-setup-tok",
           "expiresAt" => 99_999_999_999_999,
           "refreshToken" => "rt",
-          "scopes" => ["user:inference"]
+          "scopes" => ["user:inference", "user:sessions:claude_code"],
+          "subscriptionType" => "max"
         }
       })
     )

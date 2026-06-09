@@ -89,7 +89,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # ── Rails de remédiation 2026-06-09 (STEP 0) ──
         check_grace_shutdown_wired(root),
         check_result_deadline_cancelled(root),
-        check_capprofile_validate_wired(root),
+        check_spawn_gates_wired(root),
         check_gatekeeper_not_a_stage(root),
         check_verdict_envelope_unwrapped(root),
         check_no_root_runtime_guard(root)
@@ -556,29 +556,37 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ne l'appelle pas → porte de containment creuse (CAP-D1). NB Z2 : ce rail sera
   # ÉTENDU en R-spawn-gates (3 callsites : validate + ScopeValidator + PlanValidator)
   # au câblage du cluster de gates — cf. SYNTHESE §Z2.
-  defp check_capprofile_validate_wired(root) do
+  # R-spawn-gates (Z2, ex-R-cap-validate étendu) : les 3 portes du spawn-boundary
+  # doivent être câblées dans pod.ex, pas test-only — (1) CapProfile.validate (G24 /
+  # F-CONT-RISK deny server-tools, do_allocate), (2) ScopeValidator.validate (couverture
+  # de scopes OAuth par-rôle), (3) PlanValidator.validate (abonnement payant). Rouge si
+  # l'une manque → porte de containment/credentials creuse (CAP-D1 / CRED-D1).
+  defp check_spawn_gates_wired(root) do
     pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
+    abs = Path.join(root, pod)
 
-    present? =
-      Path.join(root, pod)
-      |> grep_lines(~r/CapProfile\.validate\(/)
-      |> Enum.any?(fn {_ln, line} ->
-        Regex.match?(~r/CapProfile\.validate\(/, strip_comment(line))
+    gates = [
+      {~r/CapProfile\.validate\(/, "CapProfile.validate (G24/F-CONT-RISK)"},
+      {~r/ScopeValidator\.validate\(/, "ScopeValidator.validate (scope-coverage)"},
+      {~r/PlanValidator\.validate\(/, "PlanValidator.validate (plan payant)"}
+    ]
+
+    evidence =
+      gates
+      |> Enum.reject(fn {re, _label} ->
+        abs
+        |> grep_lines(re)
+        |> Enum.any?(fn {_ln, line} -> Regex.match?(re, strip_comment(line)) end)
       end)
+      |> Enum.map(fn {_re, label} -> "#{pod} : #{label} non câblée au spawn (porte creuse)" end)
 
     %{
-      id: "capprofile.validate_wired_at_spawn",
-      remediation: "R-cap-validate",
-      status: if(present?, do: :pass, else: :fail),
-      evidence:
-        if(present?,
-          do: [],
-          else: [
-            "#{pod} : Fleet.CapProfile.validate/1 jamais appelée hors test (porte G24/F-CONT-RISK creuse — CAP-D1)"
-          ]
-        ),
+      id: "spawn.gates_wired",
+      remediation: "R-spawn-gates",
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
       note:
-        "validate/1 (G24 + F-CONT-RISK) doit être câblée au boundary spawn (do_allocate, après with_resolved_disallowed_tools), pas test-only"
+        "les 3 portes spawn (cap.validate G24 + scope + plan) câblées dans pod.ex (do_allocate + do_launch), pas test-only"
     }
   end
 

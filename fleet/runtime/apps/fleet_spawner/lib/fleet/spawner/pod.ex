@@ -668,6 +668,72 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
+  # Z2 gates 2&3 — porte credentials au spawn-boundary (CRED-D1 / F-AC-VALIDATE).
+  # Defense-in-depth : tourne dans les 2 auth_mode, APRÈS maybe_put_auth_token (préserve
+  # le fail-loud R15 en :token_arg — un token absent échoue d'abord là). Lit le claudeDir
+  # de l'humain UNE fois → valide scope-coverage (ScopeValidator, par-rôle via flags) +
+  # plan payant (PlanValidator). Le binaire claude impose déjà scope+plan (401) ; ces
+  # gates font échouer TÔT au lieu du 1ᵉʳ appel API du pod. Erreurs taguées
+  # `{:credentials_invalid, _}` pour les distinguer de l'auth-token au call-site.
+  defp gate_credentials(human, cap_profile) do
+    with {:ok, oauth} <- read_oauth_creds(claude_dir_for(human)),
+         :ok <- gate_scopes(oauth, cap_profile),
+         :ok <- gate_plan(oauth) do
+      :ok
+    end
+  end
+
+  defp read_oauth_creds(claude_dir) do
+    creds_path = Path.join(claude_dir, ".credentials.json")
+
+    with {:ok, raw} <- File.read(creds_path),
+         {:ok, %{"claudeAiOauth" => oauth}} when is_map(oauth) <- Jason.decode(raw) do
+      {:ok, oauth}
+    else
+      err -> {:error, {:credentials_invalid, {:credentials_unreadable, creds_path, err}}}
+    end
+  end
+
+  # ScopeValidator par-rôle : les scopes requis dépendent des flags du cap-profile
+  # (bridge_enabled→user:profile, mcp_oauth→user:mcp_servers ; défaut = inference+sessions).
+  defp gate_scopes(oauth, cap_profile) do
+    scopes =
+      case Map.get(oauth, "scopes") do
+        l when is_list(l) -> l
+        # certains formats portent les scopes en string whitespace-séparée (cf. ScopeValidator)
+        s when is_binary(s) -> String.split(s)
+        _ -> []
+      end
+
+    case Fleet.Credentials.ScopeValidator.validate(scopes, role_profile_flags(cap_profile)) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:credentials_invalid, reason}}
+    end
+  end
+
+  defp gate_plan(oauth) do
+    case Map.get(oauth, "subscriptionType") do
+      type when is_binary(type) ->
+        case Fleet.Credentials.PlanValidator.validate(type) do
+          :ok -> :ok
+          {:error, reason} -> {:error, {:credentials_invalid, reason}}
+        end
+
+      _ ->
+        {:error, {:credentials_invalid, :subscription_type_missing}}
+    end
+  end
+
+  defp role_profile_flags(%Fleet.CapProfile{spec: spec}) do
+    inv = Map.get(spec, "invocation", %{})
+    inv = if is_map(inv), do: inv, else: %{}
+
+    %{
+      "bridge_enabled" => Map.get(inv, "bridge_enabled", false) == true,
+      "mcp_oauth" => Map.get(inv, "mcp_oauth", false) == true
+    }
+  end
+
   # Binaire vendor = celui de l'HUMAIN (~/.local/bin/claude résolu), posé en LCARS_VENDOR_BIN.
   # Honore le contrat bwrap_launch.sh:55 « autorité = LCARS_VENDOR_BIN (spawner) » : sans ça, bwrap
   # retombe sur `command -v claude` = PATH du daemon → binaire système périmé (terrain : /usr/local/bin
@@ -814,11 +880,14 @@ defmodule Fleet.Spawner.Pod do
       |> maybe_put_vendor_bin(human)
       |> maybe_put_pod_cwd(state)
 
-    # R15 : l'étape auth sort du pipe — en mode :token_arg un token absent
-    # bloque le spawn (fail-loud) au lieu de lancer un pod sans token.
-    with {:ok, env} <- maybe_put_auth_token(env, human) do
+    # R15 : l'étape auth sort du pipe — en mode :token_arg un token absent bloque le
+    # spawn (fail-loud) au lieu de lancer un pod sans token. Z2 : la porte credentials
+    # (scope/plan) suit, taguée {:credentials_invalid, _} pour un refus distinct de l'auth.
+    with {:ok, env} <- maybe_put_auth_token(env, human),
+         :ok <- gate_credentials(human, state.cap_profile) do
       do_launch_backend(state, args, env)
     else
+      {:error, {:credentials_invalid, _} = reason} -> transition_failed(state, reason)
       {:error, reason} -> transition_failed(state, {:auth_token_required, reason})
     end
   end

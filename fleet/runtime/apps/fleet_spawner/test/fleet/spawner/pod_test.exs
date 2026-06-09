@@ -36,7 +36,8 @@ defmodule Fleet.Spawner.PodTest do
           "accessToken" => "sk-ant-setup-tok",
           "expiresAt" => 99_999_999_999_999,
           "refreshToken" => "rt",
-          "scopes" => ["user:inference"]
+          "scopes" => ["user:inference", "user:sessions:claude_code"],
+          "subscriptionType" => "max"
         }
       })
     )
@@ -413,6 +414,60 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
+  describe "Z2 — porte credentials au spawn (CRED-D1 : scope + plan)" do
+    defp write_creds(dir, oauth) do
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, ".credentials.json"), Jason.encode!(%{"claudeAiOauth" => oauth}))
+      Application.put_env(:fleet_spawner, :claude_dir, dir)
+    end
+
+    test "scopes insuffisants (manque user:sessions:claude_code) → :failed, jamais lancé",
+         %{tmp_dir: tmp_dir} do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply())
+
+      write_creds(Path.join(tmp_dir, "creds-noscope"), %{
+        "accessToken" => "sk-ant-x",
+        "expiresAt" => 99_999_999_999_999,
+        "refreshToken" => "rt",
+        "scopes" => ["user:inference"],
+        "subscriptionType" => "max"
+      })
+
+      pod_id = "pod-noscope-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t1"))
+
+      assert_receive {:EXIT, ^pid,
+                      {:shutdown,
+                       {:credentials_invalid,
+                        {:insufficient_scopes, ["user:sessions:claude_code"]}}}},
+                     2_000
+
+      refute_received {:launch_called, _, _}
+    end
+
+    test "plan non-payant (subscriptionType free) → :failed", %{tmp_dir: tmp_dir} do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply())
+
+      write_creds(Path.join(tmp_dir, "creds-free"), %{
+        "accessToken" => "sk-ant-x",
+        "expiresAt" => 99_999_999_999_999,
+        "refreshToken" => "rt",
+        "scopes" => ["user:inference", "user:sessions:claude_code"],
+        "subscriptionType" => "free"
+      })
+
+      pod_id = "pod-free-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t1"))
+
+      assert_receive {:EXIT, ^pid, {:shutdown, {:credentials_invalid, {:invalid_plan, "free"}}}},
+                     2_000
+
+      refute_received {:launch_called, _, _}
+    end
+  end
+
   describe "launch backend errors" do
     test "backend :error → phase :failed avec raison" do
       Process.flag(:trap_exit, true)
@@ -684,7 +739,8 @@ defmodule Fleet.Spawner.PodTest do
             "accessToken" => "sk-ant-fake-test-token-XYZ",
             "expiresAt" => 99_999_999_999_999,
             "refreshToken" => "rt-fake",
-            "scopes" => ["user:inference", "user:sessions:claude_code"]
+            "scopes" => ["user:inference", "user:sessions:claude_code"],
+            "subscriptionType" => "max"
           }
         })
       )
@@ -781,7 +837,8 @@ defmodule Fleet.Spawner.PodTest do
             "accessToken" => "sk-ant-mundo-XYZ",
             "expiresAt" => 99_999_999_999_999,
             "refreshToken" => "rt",
-            "scopes" => ["user:inference"]
+            "scopes" => ["user:inference", "user:sessions:claude_code"],
+            "subscriptionType" => "max"
           }
         })
       )
