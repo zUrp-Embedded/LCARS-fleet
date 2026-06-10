@@ -14,15 +14,19 @@ defmodule Fleet.SPBuilder do
 
     * N0  — poids modèle (rien runtime)
     * N1  — server prompt Anthropic (config console)
-    * N2  — `system-prompt.md` composé via `compose/3` (`--system-prompt-file`)
+    * N2  — `system-prompt.md` composé via `compose/3`
     * N2bis — `~/context/brief.md` mandate-spécifique (référencé, pas composé)
     * N3  — `~/.claude/CLAUDE.md` composé via `compose_claude_md/3`
     * N3bis — `~/.claude/skills/` filtrés via `filter_skills/2`
 
-  Frontière vendor : ce module reste vendor-agnostic. Les flags
-  `claude -p` (`--system-prompt-file`, etc.) sont appliqués par
-  `Fleet.Claude.SPInjection` co-localisé `fleet_claude_bridge`
-  (chantier 8), pas ici.
+  Frontière vendor : ce module reste vendor-agnostic. L'INJECTION du SP dans le
+  pod est faite par la **frontière N1** (`bin/claude_launch.sh` → `--system-prompt "$SP"`
+  en argv, REPL interactif, ADR-G), PAS ici.
+
+  SPB-E1 (2026-06-10) — réfs MORTES purgées du moduledoc : `claude -p` / `--system-prompt-file`
+  (= mode metered mort ADR-G, le réel est `--system-prompt` interactif), `Fleet.Claude.SPInjection`
+  + `fleet_claude_bridge` (module + app INEXISTANTS, retirés ADR-G — il n'y a pas d'app claude-bridge,
+  la frontière N1 EST le script `bin/`).
 
   Déterminisme sha256 : 2 exécutions sur même input produisent un
   `stable_sha256` identique (stable parts uniquement, exclut
