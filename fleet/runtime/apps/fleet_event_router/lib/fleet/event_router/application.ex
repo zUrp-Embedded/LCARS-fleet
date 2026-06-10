@@ -3,6 +3,17 @@ defmodule Fleet.EventRouter.Application do
 
   use Application
 
+  # Z5 #9 — actions gitea que `WebhooksGitea` peut émettre (`gitea.<action>`). Source UNIQUE :
+  # pré-enregistrement des atomes (preregister_event_atoms) ET garde de cohérence registry
+  # (test `gitea_event_types/0 ⊆ events.yaml`). Ajouter une action ici SANS la clé events.yaml
+  # = drop muet en prod → le test casse (regression #9 verrouillée).
+  @gitea_event_types ~w(gitea.opened gitea.closed gitea.push gitea.unknown gitea.reopened
+                        gitea.merged gitea.edited gitea.created gitea.synchronized gitea.deleted)
+
+  @doc "Types d'events gitea pré-enregistrés (= ce que WebhooksGitea peut broadcaster)."
+  @spec gitea_event_types() :: [String.t()]
+  def gitea_event_types, do: @gitea_event_types
+
   @impl Application
   def start(_type, _args) do
     preregister_event_atoms()
@@ -46,13 +57,15 @@ defmodule Fleet.EventRouter.Application do
     # BL-021 chantier 9 (B) — webhook gitea broadcasts gitea.<action> dynamique
     # (action body ou X-Gitea-Event header). Pré-enregistre les types vus en pratique
     # pour autoriser le schema canon `:gitea.<action>` via `to_existing_atom`.
-    gitea_events =
-      ~w(gitea.opened gitea.closed gitea.push gitea.unknown gitea.reopened
-         gitea.merged gitea.edited gitea.created gitea.synchronized gitea.deleted)
-
-    Enum.each(yaml_events ++ signal_events ++ fallback_events ++ gitea_events, fn event_type ->
-      _ = String.to_atom(event_type)
-    end)
+    # Z5 #9 : ces types DOIVENT aussi être clés d'events.yaml, sinon `Bus.broadcast`
+    # fail-loud `UnregisteredError` → drop muet du webhook. Garde : test
+    # `gitea_event_types/0 ⊆ registry` (event_registry_gitea_test).
+    Enum.each(
+      yaml_events ++ signal_events ++ fallback_events ++ gitea_event_types(),
+      fn event_type ->
+        _ = String.to_atom(event_type)
+      end
+    )
   end
 
   defp base_children do
