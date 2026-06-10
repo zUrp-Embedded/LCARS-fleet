@@ -42,6 +42,8 @@ defmodule Fleet.Pipeline.Deliverable do
           optional(:target_branch) => String.t(),
           optional(:push?) => boolean(),
           optional(:local_ref) => String.t(),
+          # Z4 (A.2) — rôle attendu pour le trailer `Co-authored-by` (F-01) ; nil/absent → skip.
+          optional(:coauthor_role) => String.t() | nil,
           # mode :payload uniquement
           optional(:files) => [map()],
           optional(:identity) => map(),

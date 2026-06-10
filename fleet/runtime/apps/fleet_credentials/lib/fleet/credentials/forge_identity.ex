@@ -22,7 +22,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
           name:  "Prénom Nom"
           email: "addr@exemple.tld"
 
-  Chemin : `opts[:catalog_path]` > `config :fleet_pipeline, :users_catalog_path`
+  Chemin : `opts[:catalog_path]` > `config :fleet_credentials, :users_catalog_path`
   (env `LCARS_USERS_CATALOG`) > placeholder `runtime/settings_users.yaml`. Le path est
   un **knob** : le remplir/déplacer à l'install n'exige pas de recompiler. Humain absent
   du catalogue OU fichier illisible → **fail-loud** (pas d'identité devinée).
