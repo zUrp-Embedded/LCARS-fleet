@@ -4,6 +4,10 @@ import Config
 # Tests instantiate Plug.Cowboy/handlers directly via start_supervised.
 config :fleet_api, start_listener: false
 
+# fleet_observation : idem — pas de listener Cowboy :8091 en test (sinon bind
+# du port → crash boot umbrella, même invariant hermétique que fleet_api).
+config :fleet_observation, start_listener: false
+
 # B5 #576 — baseline hermétique launch_backend en :test. PortBackend
 # est désormais RÉEL (spawn bwrap) ; sans baseline, le code-default
 # atteint sous race async global :launch_backend produirait un spawn

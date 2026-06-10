@@ -113,7 +113,10 @@ defmodule LcarsFleetRuntime.MixProject do
           # Gitea (subscribe Bus `gitea.*` → Routing catalogue → lock label
           # `lcars-dispatched` via ForgeClient → invoke pipeline). OFF par
           # défaut (LCARS_PILOT_DISPATCHER=true pour activer).
-          fleet_pilot: :permanent
+          fleet_pilot: :permanent,
+          # observation deck read-only :8091 (Ring 4, BL-026 read-frontier).
+          # Lecture seule, no-auth intra-release ; ne touche pas au core.
+          fleet_observation: :permanent
         ],
         steps: [&verrou_contracts/1, :assemble, :tar]
       ]

@@ -194,6 +194,27 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
+  Énumère les `:info` des pods vivants — **read seam observabilité** (BL-026).
+
+  Liste les clés du `Fleet.Spawner.Registry` et collecte le `:info` de chacun
+  via `pod_info/1` ; les pods morts mais encore brièvement registrés (race
+  cleanup async monitor, cf. `pod_info/1`) sont écartés. Lecture seule — n'altère
+  aucun état. C'est l'unique seam d'énumération exposé : les lecteurs (deck
+  d'observabilité Ring 4) passent par ici, **jamais** par le Registry en direct.
+  """
+  @spec list_pods() :: [map()]
+  def list_pods do
+    Fleet.Spawner.Registry
+    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Enum.flat_map(fn pod_id ->
+      case pod_info(pod_id) do
+        {:ok, info} -> [info]
+        {:error, :not_found} -> []
+      end
+    end)
+  end
+
+  @doc """
   Nombre de pods actifs.
   """
   @spec count_pods() :: non_neg_integer()

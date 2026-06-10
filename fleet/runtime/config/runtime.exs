@@ -269,6 +269,20 @@ if config_env() != :test do
   end
 
   # ============================================================
+  # fleet_observation — observation deck read-only :8091 (BL-026)
+  # ============================================================
+  # Listener démarré en prod/dev (le `start_listener: false` hermétique de
+  # test.exs n'est pas atteint ici : runtime.exs est gardé hors :test).
+  obs_port =
+    case System.get_env("LCARS_OBSERVATION_PORT") do
+      nil -> 8091
+      str -> parse_int.("LCARS_OBSERVATION_PORT", str)
+    end
+
+  config :fleet_observation, http_port: obs_port
+  config :fleet_observation, start_listener: true
+
+  # ============================================================
   # fleet_pilot (M-033) — auto-dispatch tickets Gitea
   # ============================================================
   # AutoDispatcher subscribe Bus `gitea.*` au boot. Lock idempotent via
