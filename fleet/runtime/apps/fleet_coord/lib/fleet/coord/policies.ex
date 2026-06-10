@@ -187,8 +187,7 @@ defmodule Fleet.Coord.Policies do
     do: :"coord.escalation_triggered"
 
   # Broadcast canon strict — silencieux si UnregisteredError (registry pas
-  # peuplé) pour ne pas casser le boot. SchemaError en revanche raise (bug
-  # d'implémentation, fail-loud).
+  # peuplé) pour ne pas casser le boot. (Z5 ER-D2 : `SchemaError` retiré, jamais levé.)
   defp safe_canon_broadcast(%Fleet.Event{} = event) do
     Bus.broadcast("fleet.events", event)
   rescue

@@ -79,8 +79,7 @@ defmodule Fleet.Event do
     defexception [:message]
   end
 
-  defmodule SchemaError do
-    @moduledoc "Event ne respectant pas le schema canon `%Fleet.Event{}` (fail-loud strict, DN méta §1.7)."
-    defexception [:message]
-  end
+  # Z5 (ER-D2) — `SchemaError` retiré : défini mais JAMAIS levé (le chemin canon
+  # `Bus.broadcast/2` ne valide pas un schema JSON, il pattern-matche `%Fleet.Event{}`
+  # et vérifie le registry → UnregisteredError). Husk vestigial du legacy broadcast/3.
 end
