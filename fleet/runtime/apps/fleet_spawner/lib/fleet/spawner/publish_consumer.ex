@@ -56,25 +56,13 @@ defmodule Fleet.Spawner.PublishConsumer do
     {:noreply, %{state | count: state.count + 1}}
   end
 
-  # Legacy tuple format (retiré post BL-021 chantier 9 — tests + producteurs migrés).
-  def handle_info({:"admin.spawn.request", event}, state) when is_map(event) do
-    payload = Map.get(event, "payload", %{})
-
-    try do
-      handle_spawn_request(payload, event, state)
-    rescue
-      e ->
-        Logger.warning(
-          "PublishConsumer: handle_spawn_request rescue (non-fatal) — #{Exception.message(e)}"
-        )
-    end
-
-    {:noreply, %{state | count: state.count + 1}}
-  end
+  # Z5 (#50/#51) — clause tuple legacy `{:"admin.spawn.request", event}` + catch-all tuple
+  # RETIRÉES : post-ER-D2 plus AUCUN producteur n'émet le tuple `{atom, map}` (tous en
+  # `%Fleet.Event{}`). Le chemin canon (clause struct ci-dessus) reçoit l'event ; les clauses
+  # tuple étaient mortes. Le catch-all `_other` couvre tout message non-event.
 
   # autres events broadcasts sur fleet.events → ignore
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
-  def handle_info({_other, _event}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
   # `payload` = map applicative ; `envelope` = struct/map qui peut porter `ticket_id`

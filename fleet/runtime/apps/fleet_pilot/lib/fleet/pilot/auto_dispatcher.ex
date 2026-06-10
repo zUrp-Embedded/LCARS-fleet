@@ -142,11 +142,9 @@ defmodule Fleet.Pilot.AutoDispatcher do
   def handle_call(:get_state, _from, state), do: {:reply, state, state}
 
   @impl GenServer
-  def handle_info({_event_atom, event}, state) when is_map(event) do
-    safe_process(event, state)
-    {:noreply, state}
-  end
-
+  # Z5 (#50/#51) — clause tuple legacy `{_event_atom, event}` RETIRÉE (post-ER-D2, plus de
+  # tuple `{atom, map}` émis ; tout en `%Fleet.Event{}`). Le `%Fleet.Event{}` est un map →
+  # capté par la clause `is_map` ci-dessous → `process_event` (qui a sa clause struct).
   def handle_info(event, state) when is_map(event) do
     safe_process(event, state)
     {:noreply, state}
