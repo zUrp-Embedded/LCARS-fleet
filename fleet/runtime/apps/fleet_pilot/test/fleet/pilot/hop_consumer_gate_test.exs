@@ -276,6 +276,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert_received :unlocked
     refute_received {:assignee, _}
     refute_received :closed
+    # TRACE : le comment await_human attribue le verdict au gatekeeper (pas au rôle métier).
+    assert_received {:comment, body}
+    assert body =~ "gatekeeper"
+    assert body =~ "escalate_user"
   end
 
   test "verdict halt_wait_input → await_human" do
@@ -304,6 +308,9 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert_received {:label, "lcars-awaits-human"}
     refute_received {:assignee, _}
     refute_received :closed
+    # TRACE : halt_invalid distingué d'un vrai verdict (fail-closed, pas "décision gatekeeper").
+    assert_received {:comment, body}
+    assert body =~ "illisible ou absent"
   end
 
   # ── B : câblage async (GenServer) — store gate_evals à l'escalade, pop à la reprise ──

@@ -128,9 +128,14 @@ defmodule Fleet.Pilot.HopCompleter do
 
     signature = "[hop:#{role}:await:#{decision}]"
 
+    # `:comment_body` (optionnel) = trace fournie par l'appelant (ex. HopConsumer B porte le
+    # verdict gatekeeper attribué + halt_invalid distingué). Absent → corps par défaut.
+    lead =
+      Map.get(hop, :comment_body) ||
+        "Verdict du juge **#{role}** : `#{inspect(decision)}` → escalade humaine."
+
     body =
-      "Verdict du juge **#{role}** : `#{inspect(decision)}` → escalade humaine. " <>
-        "L'issue attend une action via l'arch (`lcars-awaits-human`).\n\n" <> signature
+      lead <> " L'issue attend une action via l'arch (`lcars-awaits-human`).\n\n" <> signature
 
     with {:ok, _} <-
            forge.post_comment(repo, n, body, Keyword.put(forge_opts, :dedup_signature, signature)),
@@ -177,11 +182,13 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # A2.3b N-04 : quand le hop avance vers un gatekeeper-stage, le comment embarque le
-  # `result_K` (les outputs du stage qui finit) → le juge (et la recovery) le lit sans
-  # query séparée. JSON fencé si ≤ 8KB ; sinon note pointant vers le livrable de la
-  # branche (jamais de JSON tronqué = invalide). `nil`/vide → rien (pas de bruit sur
-  # les hops ordinaires).
+  # Enrichissement optionnel : si le hop porte des `:outputs`, le comment forge les
+  # embarque (le `result_K` du stage qui finit) → lisible sans query séparée (recovery,
+  # contexte). JSON fencé si ≤ 8KB ; sinon note pointant vers le livrable de la branche
+  # (jamais de JSON tronqué = invalide). `nil`/vide → rien (pas de bruit). NB : en B
+  # (§L441), HopConsumer ne pose plus `:outputs` sur le hop (l'ex-cas A2.3b "avance vers
+  # un gatekeeper-stage" n'existe plus) → ce bloc reste un seam générique, inactif côté
+  # HopConsumer mais conservé (autres appelants / extensibilité).
   defp outputs_block(outputs) when is_map(outputs) and map_size(outputs) > 0 do
     json = Jason.encode!(outputs)
 

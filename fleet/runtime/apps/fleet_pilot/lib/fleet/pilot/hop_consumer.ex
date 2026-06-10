@@ -448,16 +448,27 @@ defmodule Fleet.Pilot.HopConsumer do
         close_with_trace(n, role, trace, state)
 
       other ->
-        hop = %{repo: state.repo, issue_number: n, role: role, decision: other}
+        # `comment_body: trace` → la trace verdict (attribuée au gatekeeper, halt_invalid
+        # distingué) est portée sur le comment await_human, parité continue/abandon.
+        hop = %{
+          repo: state.repo,
+          issue_number: n,
+          role: role,
+          decision: other,
+          comment_body: trace
+        }
+
         hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
         state.hop_completer.await_human(hop, hc_opts)
     end
   end
 
-  # Verdict `abandon` : close terminal, SANS push (le travail métier est rejeté ; parité
-  # Executor qui n'extrait pas le livrable sur halt). `deliverable_opts: nil` + `hop_sha`
-  # → HopCompleter saute l'étape publish, garde la séquence idempotente (comment trace →
-  # state → close → unlock).
+  # Verdict `abandon` : close terminal forge, SANS push (le travail métier est rejeté).
+  # NB : l'Executor (RAM, pipeline-centric) n'a PAS de notion "close issue" — il fait
+  # `broadcast_pipeline_failed` + stop ; ici (forge-driven) l'équivalent est close_issue.
+  # Point commun : aucun des deux n'extrait/pousse le livrable sur un verdict non-continue.
+  # `deliverable_opts: nil` + `hop_sha` → HopCompleter saute l'étape publish, garde la
+  # séquence idempotente (comment trace → state → close → unlock).
   defp close_with_trace(n, role, trace, state) do
     hop = %{
       repo: state.repo,
@@ -475,6 +486,13 @@ defmodule Fleet.Pilot.HopConsumer do
   end
 
   # Trace lisible du verdict (portée dans le comment du hop → durable en forge).
+  # `halt_invalid` n'est PAS une décision du gatekeeper : c'est le fallback fail-closed
+  # interne (verdict absent/malformé) → message distinct pour ne pas faire croire à un
+  # verdict gatekeeper "halt_invalid".
+  defp verdict_comment("halt_invalid", _result) do
+    "Verdict du **gatekeeper** illisible ou absent (fail-closed) → escalade humaine."
+  end
+
   defp verdict_comment(decision, result) do
     reason = if is_map(result), do: Map.get(result, "reason")
 
