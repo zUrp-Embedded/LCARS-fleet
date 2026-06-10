@@ -37,8 +37,21 @@ events:
   # (Starfleet.Application). L'ancienne clé `audit.verdict.gatekeeper` (3 segments,
   # jamais émise) était désalignée du consommateur → consommateur mort.
   audit.verdict: []
+  # Z5 #9 : le producteur (`WebhooksGitea`, `gitea.<action>` dynamique) + les atomes
+  # pré-enregistrés (`event_router/application.ex` `to_existing_atom`) émettent CES 10
+  # actions. N'avoir que opened/closed → les 8 autres broadcastaient en `UnregisteredError`
+  # SILENCIEUX (rescue `:ok`) → webhook 200 OK mais event jamais routé (drop muet). Registry
+  # aligné sur le producteur (sinon AutoDispatcher ne voit jamais reopened/merged/edited/…).
   gitea.opened: []
   gitea.closed: []
+  gitea.reopened: []
+  gitea.merged: []
+  gitea.edited: []
+  gitea.created: []
+  gitea.synchronized: []
+  gitea.deleted: []
+  gitea.push: []
+  gitea.unknown: []
   tick: []
 
   # --- Signaux OS (SignalsOS, source :event_router) ---

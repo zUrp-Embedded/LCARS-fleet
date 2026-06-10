@@ -71,8 +71,15 @@ defmodule Fleet.EventRouter.WebhooksGitea do
               "fleet_event_router webhook gitea unknown event type #{inspect(event_type)} — skip"
             )
 
+          # Z5 #9 : NE PLUS avaler en silence. Un type `gitea.*` dont l'atome existe mais
+          # qui n'est pas dans `events.yaml` = drift registry/producteur → drop muet (webhook
+          # 200 mais event jamais routé). On le rend VISIBLE (le registry doit lister toute
+          # action émise par WebhooksGitea ; cf. events.yaml section gitea).
           _e in Fleet.Event.UnregisteredError ->
-            :ok
+            Logger.warning(
+              "fleet_event_router webhook gitea type #{inspect(event_type)} hors registry " <>
+                "events.yaml — DROP (ajouter la clé si l'action doit être routée)"
+            )
         end
 
         send_resp(conn, 200, "ok")
