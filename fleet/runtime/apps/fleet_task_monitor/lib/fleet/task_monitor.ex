@@ -191,8 +191,20 @@ defmodule Fleet.TaskMonitor do
 
     case File.read(path) do
       {:ok, body} ->
-        merged = body |> Jason.decode!() |> Map.merge(patch)
-        write_raw(path, merged)
+        # #56 : `Jason.decode!` crashait le monitor sur un JSON corrompu (write partiel,
+        # édition manuelle, corruption disque). Garde non-bang → corrompu = même traitement
+        # defensif que le fichier absent (re-matérialise depuis le patch), pas un crash.
+        case Jason.decode(body) do
+          {:ok, existing} when is_map(existing) ->
+            write_raw(path, Map.merge(existing, patch))
+
+          _ ->
+            Logger.warning(
+              "fleet_task_monitor: #{id}.json illisible/corrompu — re-matérialisé depuis le patch (#56)"
+            )
+
+            write_json(state.dir, id, Map.merge(%{"id" => id}, patch))
+        end
 
       {:error, _} ->
         # Update sans create préalable : matérialise depuis le patch
