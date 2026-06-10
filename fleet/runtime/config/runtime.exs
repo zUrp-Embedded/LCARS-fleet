@@ -34,12 +34,39 @@ if config_env() != :test do
     end
   end
 
+  # Z6 (CFG-CR) — parse entier d'un env var SANS crash-boot opaque. Malformé → raise CLAIR
+  # (un port/intervalle invalide DOIT refuser le boot, mais avec un message lisible, pas une
+  # `** (ArgumentError) String.to_integer`). Le daemon ne doit jamais crash-booter sur une
+  # stacktrace énigmatique d'un typo d'env.
+  parse_int = fn name, val ->
+    case Integer.parse(val) do
+      {n, ""} ->
+        n
+
+      _ ->
+        raise "LCARS config: #{name}=#{inspect(val)} n'est pas un entier valide — boot refusé (corriger l'env)"
+    end
+  end
+
   # ============================================================
   # Logger
   # ============================================================
+  # Z6 (CFG-CR) — `String.to_existing_atom` crashait le boot sur un niveau inconnu
+  # (ex. LCARS_LOG_LEVEL=verbose). Validé contre l'enum Logger ; inconnu → fallback :info
+  # + warning stderr (un mauvais niveau de log NE doit PAS empêcher le boot — non-critique).
   log_level =
-    System.get_env("LCARS_LOG_LEVEL", "info")
-    |> String.to_existing_atom()
+    case System.get_env("LCARS_LOG_LEVEL", "info") do
+      lvl when lvl in ~w(emergency alert critical error warning notice info debug) ->
+        String.to_existing_atom(lvl)
+
+      other ->
+        IO.puts(
+          :stderr,
+          "LCARS config: LCARS_LOG_LEVEL=#{inspect(other)} invalide — fallback :info"
+        )
+
+        :info
+    end
 
   config :logger, level: log_level
 
@@ -144,7 +171,7 @@ if config_env() != :test do
   # <port>/mcp. Sans ce port, les pods n'ont AUCUN tool mcp__fleet__*
   # (workflow worker impossible).
   if port = System.get_env("LCARS_FLEET_MCP_POD_FACING_PORT") do
-    config :fleet_mcp, pod_facing_port: String.to_integer(port)
+    config :fleet_mcp, pod_facing_port: parse_int.("LCARS_FLEET_MCP_POD_FACING_PORT", port)
   end
 
   # ============================================================
@@ -227,7 +254,7 @@ if config_env() != :test do
   http_port =
     case System.get_env("FLEET_API_PORT") do
       nil -> 8080
-      str -> String.to_integer(str)
+      str -> parse_int.("FLEET_API_PORT", str)
     end
 
   config :fleet_api, http_port: http_port
@@ -264,7 +291,7 @@ if config_env() != :test do
   end
 
   if interval = System.get_env("LCARS_PILOT_POLL_INTERVAL_MS") do
-    config :fleet_pilot, poll_interval_ms: String.to_integer(interval)
+    config :fleet_pilot, poll_interval_ms: parse_int.("LCARS_PILOT_POLL_INTERVAL_MS", interval)
   end
 
   # Forge config — résolue par Fleet.Pilot.ForgeClient.resolve_config/1
@@ -295,7 +322,14 @@ if config_env() != :test do
   # Routing d'ENTRÉE stage-mode : map `type:X → carte`. JSON inline via env.
   # Ex : LCARS_PILOT_STAGE_ROUTING='{"type:poc":"poc-cycle"}'.
   if routing_json = System.get_env("LCARS_PILOT_STAGE_ROUTING") do
-    config :fleet_pilot, stage_routing: Jason.decode!(routing_json)
+    # Z6 (CFG-CR) — `Jason.decode!` crashait le boot sur un JSON malformé. Garde claire.
+    case Jason.decode(routing_json) do
+      {:ok, map} when is_map(map) ->
+        config :fleet_pilot, stage_routing: map
+
+      _ ->
+        raise "LCARS config: LCARS_PILOT_STAGE_ROUTING n'est pas un objet JSON valide — boot refusé"
+    end
   end
 
   # Remote git où le système pousse les livrables (HopConsumer). Override ; sinon dérivé
@@ -331,11 +365,11 @@ if config_env() != :test do
   # déployé (binaire 238MB, caches froids) → kick abandonné avant REPL prêt → pod sans mandat.
   # Élargir en deploy. Entiers via env.
   if v = System.get_env("LCARS_KICK_FIRST_DELAY_MS"),
-    do: config(:fleet_spawner, kick_first_delay_ms: String.to_integer(v))
+    do: config(:fleet_spawner, kick_first_delay_ms: parse_int.("LCARS_KICK_FIRST_DELAY_MS", v))
 
   if v = System.get_env("LCARS_KICK_RETRY_MS"),
-    do: config(:fleet_spawner, kick_retry_ms: String.to_integer(v))
+    do: config(:fleet_spawner, kick_retry_ms: parse_int.("LCARS_KICK_RETRY_MS", v))
 
   if v = System.get_env("LCARS_KICK_MAX_ATTEMPTS"),
-    do: config(:fleet_spawner, kick_max_attempts: String.to_integer(v))
+    do: config(:fleet_spawner, kick_max_attempts: parse_int.("LCARS_KICK_MAX_ATTEMPTS", v))
 end
