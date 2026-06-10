@@ -74,7 +74,12 @@ defmodule Fleet.Pipeline.Deliverable do
     with :ok <- validate(opts),
          :ok <- materialize_content(opts),
          {:ok, :verified} <-
-           DeliverableGate.verify(opts.workspace, opts.base_sha, opts.allowed_emails),
+           DeliverableGate.verify(
+             opts.workspace,
+             opts.base_sha,
+             opts.allowed_emails,
+             Map.get(opts, :coauthor_role)
+           ),
          {:ok, sha} <- head_sha(opts.workspace),
          {:ok, pushed?} <- push_deliverable(opts) do
       {:ok, %{commit_sha: sha, pushed?: pushed?, mode: opts.mode}}
@@ -160,7 +165,9 @@ defmodule Fleet.Pipeline.Deliverable do
   end
 
   defp head_advanced?(workspace, base_sha) do
-    case System.cmd("git", @hooks_off ++ ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
+    case System.cmd("git", @hooks_off ++ ["-C", workspace, "rev-parse", "HEAD"],
+           stderr_to_stdout: true
+         ) do
       {out, 0} -> String.trim(out) != base_sha
       _ -> false
     end
@@ -237,7 +244,9 @@ defmodule Fleet.Pipeline.Deliverable do
   defp local_ref(opts), do: Map.get(opts, :local_ref, "HEAD")
 
   defp head_sha(workspace) do
-    case System.cmd("git", @hooks_off ++ ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
+    case System.cmd("git", @hooks_off ++ ["-C", workspace, "rev-parse", "HEAD"],
+           stderr_to_stdout: true
+         ) do
       {sha, 0} -> {:ok, String.trim(sha)}
       {err, rc} -> {:error, {:rev_parse_failed, rc, String.trim(err)}}
     end

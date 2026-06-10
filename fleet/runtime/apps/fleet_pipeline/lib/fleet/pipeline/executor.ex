@@ -811,7 +811,9 @@ defmodule Fleet.Pipeline.Executor do
     }
   end
 
-  defp mode_specific_opts(:git_native, _result, _role), do: %{}
+  # Z4 (A.2) — git_native : F-01 vérifie le trailer `Co-authored-by: LCARS-<role>` (le pod
+  # signe son rôle ; l'author git = l'humain). payload (système commite) → pas de coauthor_role.
+  defp mode_specific_opts(:git_native, _result, role), do: %{coauthor_role: role}
 
   # Identités acceptées par la gate (F-01). payload : le commit est fait par le système →
   # author=rôle + committer=système. git_native : le pod commite → author=committer=rôle (la

@@ -285,6 +285,8 @@ defmodule Fleet.Pilot.HopConsumer do
       workspace: payload["workspace"],
       base_sha: payload["base_sha"],
       allowed_emails: state.role_emails.(role),
+      # Z4 (A.2) — F-01 vérifie le trailer `Co-authored-by: LCARS-<role>` (signature rôle).
+      coauthor_role: role,
       remote: state.remote,
       target_branch: "lcars/issue-#{n}-#{role}",
       push?: true,

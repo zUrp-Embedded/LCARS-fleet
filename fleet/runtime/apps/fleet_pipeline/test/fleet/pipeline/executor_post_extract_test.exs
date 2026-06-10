@@ -423,12 +423,13 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
     {bare, ws} = git_native_setup(tmp_dir, "gn1")
 
     # Z4 : le pod commite EN TANT QUE l'humain (bwrap GIT_AUTHOR=humain) ; F-01 allows
-    # l'humain (override test `human@lcars.local`, cf. config/test.exs). Le rôle ≠ l'identité.
+    # l'humain (override test `human@lcars.local`, cf. config/test.exs). Le rôle ≠ l'identité :
+    # il se signe par le trailer `Co-authored-by: LCARS-engineer` (A.2), vérifié par F-01.
     pod_commits(
       ws,
       "feature.py",
       "x = 1\n",
-      "feat: agent work",
+      "feat: agent work\n\nCo-authored-by: LCARS-engineer <engineer@lcars.local>",
       "human@lcars.local",
       "Test Human"
     )
@@ -481,6 +482,41 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
              )
 
     assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000
+  end
+
+  test "git_native (Z4 A.2) : identité humaine OK mais SANS trailer rôle → git.publish_failed (missing_coauthor_trailer)",
+       %{tmp_dir: tmp_dir} do
+    {bare, ws} = git_native_setup(tmp_dir, "gn4")
+    # author=humain (passe F-01 identité) MAIS pas de `Co-authored-by: LCARS-engineer` →
+    # F-01 volet trailer (A.2) rejette → pas de push. Prouve l'ENFORCEMENT end-to-end.
+    pod_commits(
+      ws,
+      "x.py",
+      "x = 1\n",
+      "feat: sans signature rôle",
+      "human@lcars.local",
+      "Test Human"
+    )
+
+    {:ok, pipeline_id} = Pipeline.start_pipeline("gn4", %{ticket_id: "gn4#1"})
+    assert_receive {:spawned, "publish", _}, 2_000
+    gn_pod_completed(pipeline_id, "gn4")
+
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"git.publish_failed",
+                     payload: %{"reason" => reason}
+                   },
+                   3_000
+
+    assert String.contains?(reason, "missing_coauthor_trailer")
+
+    assert {_, 1} =
+             System.cmd(
+               "git",
+               ["-C", bare, "rev-parse", "--verify", "-q", "deliverables/engineer/gn4"],
+               stderr_to_stdout: true
+             )
   end
 
   test "git_native : pod n'a produit aucun commit → git.publish_failed (no_deliverable_commit)",

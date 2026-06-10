@@ -238,6 +238,7 @@ defmodule Fleet.Pipeline.StageRunner do
 
   defp build_mandate(stage_ctx) do
     stage = Map.get(stage_ctx, :stage)
+    role = Map.get(stage_ctx, :role)
     mandate = Map.get(stage_ctx, :mandate)
     inputs = Map.get(stage_ctx, :inputs, %{})
 
@@ -246,6 +247,15 @@ defmodule Fleet.Pipeline.StageRunner do
       if(not is_nil(mandate), do: "Mandat : #{inspect(mandate)}"),
       if(is_map(inputs) and map_size(inputs) > 0,
         do: "Inputs (stages amont) : #{inspect(inputs)}"
+      ),
+      # Z4 (A.2) — signature de rôle OBLIGATOIRE (I-CBC : le pod est INSTRUIT, le MONDE vérifie
+      # au push via F-01 `check_coauthor_trailer`). L'author git = l'humain (cf. GIT_AUTHOR) ; le
+      # rôle se signe par CE trailer, sur CHAQUE commit. Absent → livrable rejeté (pas de push).
+      if(is_binary(role),
+        do:
+          "Signature OBLIGATOIRE — ajoute à CHAQUE commit git le trailer exact :\n" <>
+            "`Co-authored-by: LCARS-#{role} <#{role}@lcars.local>`\n" <>
+            "(sans lui, le livrable est rejeté au push — gate F-01)."
       )
     ]
     |> Enum.reject(&is_nil/1)

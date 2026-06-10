@@ -44,14 +44,23 @@ defmodule Fleet.Pipeline.DeliverableGate do
   des emails d'identité acceptés (typiquement `["<role>@lcars.local"]`). `{:ok, :verified}` ou le
   PREMIER `{:error, reason}`. Ordre : base (F-03) → identité (F-01) → secrets (F-02).
   """
-  @spec verify(Path.t(), String.t(), [String.t()]) :: {:ok, :verified} | {:error, reason()}
-  def verify(workspace, base_sha, allowed_emails) do
+  @spec verify(Path.t(), String.t(), [String.t()], String.t() | nil) ::
+          {:ok, :verified} | {:error, reason()}
+  def verify(workspace, base_sha, allowed_emails, expected_role \\ nil) do
     with :ok <- check_base_ancestor(workspace, base_sha),
          :ok <- check_identity(workspace, base_sha, allowed_emails),
+         :ok <- maybe_check_trailer(workspace, base_sha, expected_role),
          :ok <- scan_secrets(workspace, base_sha) do
       {:ok, :verified}
     end
   end
+
+  # Z4 (A.2) — volet trailer rôle de F-01, opt-in par `expected_role`. nil → skip (mode
+  # payload système / back-compat). Posé `git_native` (le pod commite + signe son rôle).
+  defp maybe_check_trailer(_workspace, _base_sha, nil), do: :ok
+
+  defp maybe_check_trailer(workspace, base_sha, role) when is_binary(role),
+    do: check_coauthor_trailer(workspace, base_sha, role)
 
   @doc "F-03 — `base_sha` doit être un ancêtre de HEAD (pas de réécriture d'historique)."
   @spec check_base_ancestor(Path.t(), String.t()) :: :ok | {:error, reason()}
@@ -90,9 +99,9 @@ defmodule Fleet.Pipeline.DeliverableGate do
   l'appelant). Range vide → `:ok` (vacuité). Un commit sans le trailer → fail-loud
   `{:missing_coauthor_trailer, expected_role, [sha…]}` (le push n'a pas lieu).
 
-  ⚠ Z4 : NON câblé dans `verify/3` tant que les DEUX producteurs (payload système +
-  git_native pod, SPAWN-X1) n'émettent pas le trailer — sinon git_native casserait la
-  gate. Fonction autonome, vérifiée par test ; le câblage dans `verify` = increment 2.
+  Z4 (A.2) : câblé dans `verify/4` via `expected_role` (opt-in). git_native → le pod signe
+  son rôle (mandat instruit, `StageRunner.build_mandate`) ; payload système → `nil` (skip,
+  follow-up). L'author git = l'humain (A.1) ; le rôle = CE trailer, vérifié au boundary monde.
   """
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
   def check_coauthor_trailer(workspace, base_sha, expected_role) when is_binary(expected_role) do
