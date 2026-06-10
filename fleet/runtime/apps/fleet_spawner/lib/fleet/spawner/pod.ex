@@ -480,17 +480,7 @@ defmodule Fleet.Spawner.Pod do
   # le dialog remote-control au boot. Cohérent avec le gate U-RC e2e qui
   # pré-pose ce fichier.
   defp write_pod_claude_json(state) do
-    version =
-      case System.cmd("/usr/bin/claude", ["--version"], stderr_to_stdout: true) do
-        {output, 0} ->
-          case Regex.run(~r/\d+\.\d+\.\d+/, output) do
-            [v | _] -> v
-            _ -> "2.1.150"
-          end
-
-        _ ->
-          "2.1.150"
-      end
+    version = detect_claude_version()
 
     payload = %{
       "hasCompletedOnboarding" => true,
@@ -509,6 +499,23 @@ defmodule Fleet.Spawner.Pod do
     }
 
     safe_write(Path.join(state.pod_dir, ".claude.json"), Jason.encode!(payload, pretty: true))
+  end
+
+  # F116 : ne PAS hardcoder `/usr/bin/claude` (fuite vendor-bin N0 + `System.cmd` RAISE
+  # `:enoent` sur binaire absent — non rattrapé → crashe le Pod en do_project sans
+  # transition_failed). On résout via le PATH (claude per-user `~/.local/bin` honoré) et on
+  # rescue tout : un host sans claude tombe sur la version par défaut, jamais un crash. La
+  # version ne sert qu'à `lastOnboardingVersion` (anti-écran login) — la précision est cosmétique.
+  defp detect_claude_version do
+    with path when is_binary(path) <- System.find_executable("claude"),
+         {output, 0} <- System.cmd(path, ["--version"], stderr_to_stdout: true),
+         [v | _] <- Regex.run(~r/\d+\.\d+\.\d+/, output) do
+      v
+    else
+      _ -> "2.1.150"
+    end
+  rescue
+    _ -> "2.1.150"
   end
 
   # creds : write_claude_credentials/lead_credentials_path SUPPRIMÉS (adr-f).
@@ -863,8 +870,6 @@ defmodule Fleet.Spawner.Pod do
     # besoin de la valeur ; LauncherPortBackend (legacy bwrap+print) recevait
     # `budget_sec`/`budget_usd` comme args du script — ces clés sont retirées
     # de l'API LaunchBackend (cf. behaviour `Fleet.Spawner.LaunchBackend`).
-    human = Keyword.get(state.opts, :human) || runtime_user()
-
     args = %{
       role: role,
       pod_id: state.pod_id,
@@ -877,41 +882,62 @@ defmodule Fleet.Spawner.Pod do
       sp: state.sp
     }
 
-    env =
-      state.env_vars
-      |> Map.merge(skills_plugins_env(state.cap_profile))
-      |> Map.merge(mcp_channel_env(state.pod_id))
-      # U4 — HOME=pod_dir cohérent bwrap pattern (LauncherPortBackend sous bwrap fait
-      # `--setenv HOME` de toute façon — ce HOME ici est ignoré). TmuxBackend
-      # propage via `tmux -e HOME=...` → claude REPL lit pod_dir/.claude/* (creds
-      # OAuth + trust dialog skip) isolé du host. POC scope (containment dégradé).
-      |> Map.put("HOME", state.pod_dir)
-      # Chaîne de session (DN spawner-orchestrator §D) : bwrap_launch les `--setenv` dans le pod,
-      # claude_launch les lit `:?` strict (no-boot sinon). PRÉFIXE nom RC = <human>_<role>.
-      |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
-      |> Map.put("LCARS_POD_RESUME", if(state.resume, do: "1", else: "0"))
-      |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", "#{human}_#{role}")
-      # Base sock tmux : bwrap_launch crée la socket sous <base>/<pod_id>/, PodTmux (host) y tape.
-      # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. (Défaut /run/lcars/tmux-sock partagé.)
-      |> Map.put("LCARS_TMUX_SOCK_BASE", Fleet.Spawner.PodTmux.sock_base())
-      # Le pod est celui de l'HUMAIN : creds ET binaire vendor suivent /home/<human> (même règle que
-      # pod_dir). Quel binaire = robuste ici (depuis ~/.local/bin, pas le pari `command -v`). Tourner
-      # SOUS l'UID de l'humain (ownership/perms/multi-user gratis OS, drop systemd-run --uid) = chantier
-      # substrat (cf. journal § reste) — orthogonal et complémentaire à ce qui suit.
-      |> Map.put("CLAUDE_DIR", claude_dir_for(human))
-      |> maybe_put_vendor_bin(human)
-      |> maybe_put_pod_cwd(state)
+    # F120 : la résolution humain + le pipeline env peuvent RAISE (runtime_user /
+    # claude_dir_from_passwd / maybe_put_vendor_bin = fail-loud sur host sans claude
+    # per-user ou home irrésoluble). Un raise ICI crashait le Pod GenServer SANS
+    # transition_failed → task orphaned :pending + state.json à la phase périmée. On
+    # rabat tout raise de construction-env sur transition_failed (même cleanup que les
+    # autres échecs launch : clear_pod_task + phase=failed).
+    launch_env =
+      try do
+        human = Keyword.get(state.opts, :human) || runtime_user()
+
+        env =
+          state.env_vars
+          |> Map.merge(skills_plugins_env(state.cap_profile))
+          |> Map.merge(mcp_channel_env(state.pod_id))
+          # U4 — HOME=pod_dir cohérent bwrap pattern (LauncherPortBackend sous bwrap fait
+          # `--setenv HOME` de toute façon — ce HOME ici est ignoré). TmuxBackend
+          # propage via `tmux -e HOME=...` → claude REPL lit pod_dir/.claude/* (creds
+          # OAuth + trust dialog skip) isolé du host. POC scope (containment dégradé).
+          |> Map.put("HOME", state.pod_dir)
+          # Chaîne de session (DN spawner-orchestrator §D) : bwrap_launch les `--setenv` dans le pod,
+          # claude_launch les lit `:?` strict (no-boot sinon). PRÉFIXE nom RC = <human>_<role>.
+          |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
+          |> Map.put("LCARS_POD_RESUME", if(state.resume, do: "1", else: "0"))
+          |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", "#{human}_#{role}")
+          # Base sock tmux : bwrap_launch crée la socket sous <base>/<pod_id>/, PodTmux (host) y tape.
+          # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. (Défaut /run/lcars/tmux-sock partagé.)
+          |> Map.put("LCARS_TMUX_SOCK_BASE", Fleet.Spawner.PodTmux.sock_base())
+          # Le pod est celui de l'HUMAIN : creds ET binaire vendor suivent /home/<human> (même règle que
+          # pod_dir). Quel binaire = robuste ici (depuis ~/.local/bin, pas le pari `command -v`). Tourner
+          # SOUS l'UID de l'humain (ownership/perms/multi-user gratis OS, drop systemd-run --uid) = chantier
+          # substrat (cf. journal § reste) — orthogonal et complémentaire à ce qui suit.
+          |> Map.put("CLAUDE_DIR", claude_dir_for(human))
+          |> maybe_put_vendor_bin(human)
+          |> maybe_put_pod_cwd(state)
+
+        {:ok, human, env}
+      rescue
+        e -> {:error, {:launch_env_unresolved, Exception.message(e)}}
+      end
 
     # R15 : l'étape auth sort du pipe — en mode :token_arg un token absent bloque le
     # spawn (fail-loud) au lieu de lancer un pod sans token. Z2 : la porte credentials
     # (scope/plan) suit, taguée {:credentials_invalid, _} pour un refus distinct de l'auth.
-    with {:ok, env} <- maybe_put_auth_token(env, human),
-         {:ok, env} <- maybe_put_git_identity(env, human, role),
-         :ok <- gate_credentials(human, state.cap_profile) do
-      do_launch_backend(state, args, env)
-    else
-      {:error, {:credentials_invalid, _} = reason} -> transition_failed(state, reason)
-      {:error, reason} -> transition_failed(state, {:auth_token_required, reason})
+    case launch_env do
+      {:ok, human, env} ->
+        with {:ok, env} <- maybe_put_auth_token(env, human),
+             {:ok, env} <- maybe_put_git_identity(env, human, role),
+             :ok <- gate_credentials(human, state.cap_profile) do
+          do_launch_backend(state, args, env)
+        else
+          {:error, {:credentials_invalid, _} = reason} -> transition_failed(state, reason)
+          {:error, reason} -> transition_failed(state, {:auth_token_required, reason})
+        end
+
+      {:error, reason} ->
+        transition_failed(state, reason)
     end
   end
 

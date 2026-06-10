@@ -41,7 +41,12 @@ defmodule Fleet.Credentials.ForgeIdentity do
       `[human_email, "system@lcars.local"]`.
   """
 
-  @placeholder_catalog "runtime/settings_users.yaml"
+  # F029 : défaut ABSOLU (chemin canonique d'install, cf. etc/lcars-fleet.env.template).
+  # Un chemin RELATIF se résoudrait contre le cwd du daemon (WorkingDirectory=/var/lib/lcars)
+  # → fichier inexistant en release → CHAQUE spawn échoue à maybe_put_git_identity (outage
+  # fleet-wide au lieu d'un fail clair). Le placeholder reste rempli à l'install ; l'override
+  # `LCARS_USERS_CATALOG` (runtime.exs) le surcharge.
+  @placeholder_catalog "/etc/fleet/settings_users.yaml"
   @role_email_domain "lcars.local"
   @system_email "system@lcars.local"
 
