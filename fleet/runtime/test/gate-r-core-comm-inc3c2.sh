@@ -13,6 +13,15 @@
 # résolution du blocage inc3b.3 (HTTP direct mort) faite proprement : un seul mécanisme (MCP/stdio),
 # état CENTRAL via le pont. Iron Law respectée. Bin+pont+launchers hors /home,/tmp (bwrap tmpfs).
 set -uo pipefail
+
+# ── SUPERSEDED (Fable F168-F178) — archi coffre + file MCP-channel globale RETIRÉE ──
+# Cette gate e2e teste un modèle DISPARU : coffre credentials (pré-ADR-F : on bind le claudeDir
+# natif), file globale Fleet.MCP.TaskQueue.push/results (pré-per-pod Fleet.TaskQueue), listener
+# channel HTTP (purgé ADR-G C5.1). Réécriture contre l'archi courante (per-pod + bwrap/RC) = exige
+# un vrai claude+bwrap → chantier deploy-env, non faisable en sandbox. Round-trip MCP per-pod prouvé
+# par gate-r4-mcp-boot.sh (réécrit + validé). Corps historique conservé ci-dessous (archive).
+echo "SUPERSEDED — gate e2e archi coffre/MCP-channel (pré-ADR-F/ADR-G). Réécriture = deploy-env. cf. gate-r4-mcp-boot.sh"
+exit 2
 HERE="$(cd "$(dirname "$0")" && pwd)"; RT="$(cd "$HERE/.." && pwd)"; BIN="$RT/bin"
 WORK="$(mktemp -d)"; POD="$WORK/pod"
 BINV="$(mktemp -d -p /var/tmp lcars-gate-inc3c2.XXXXXX)"
