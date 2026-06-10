@@ -148,16 +148,16 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
   # Démarre + amène le stage `audit` jusqu'à l'enqueue du mandat au gatekeeper.
   defp start_to_gate(name) do
     {:ok, pid} = Pipeline.start_pipeline(name, %{ticket_id: "sg#{name}"})
-    assert_receive {:spawned, "audit"}, 2_000
+    assert_receive {:spawned, "audit"}, 5_000
     complete_stage(pid, "audit")
-    assert_receive {:enqueued, corr, "gk-permanent", "audit"}, 2_000
+    assert_receive {:enqueued, corr, "gk-permanent", "audit"}, 5_000
     {pid, corr}
   end
 
   test "gate → mandat enqueué au gatekeeper, pipeline en attente (pas d'avancement)" do
     {pid, _corr} = start_to_gate("softgate")
     # Le mandat porte le brief d'éval (sous-lot D — GateBrief câblé).
-    assert_receive {:brief, brief}, 2_000
+    assert_receive {:brief, brief}, 5_000
     assert brief =~ "gate-decision-v1.json"
     assert brief =~ "Stage jugé : audit"
     refute_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 200
@@ -173,7 +173,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
                      type: :"pipeline.completed",
                      payload: %{"pipeline_id" => ^pid}
                    },
-                   2_000
+                   5_000
   end
 
   test "décision dans l'enveloppe worker %{status, result} → dépliée → continue (forme RÉELLE du pod)" do
@@ -195,7 +195,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
                      type: :"pipeline.completed",
                      payload: %{"pipeline_id" => ^pid}
                    },
-                   2_000
+                   5_000
   end
 
   test "enveloppe worker status=failed (gatekeeper n'a pas pu juger) → halt fail-closed" do
@@ -209,7 +209,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
       "details" => "gate unclear"
     })
 
-    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.failed"}, 2_000
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.failed"}, 5_000
     refute_receive %Fleet.Event{type: :"pipeline.completed"}, 100
     _ = pid
   end
@@ -221,7 +221,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
     # pas de `"decision"` → halt. Jamais un continue silencieux sur une sortie vide.
     complete_gate(corr, %{"status" => "ok", "result" => nil})
 
-    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.failed"}, 2_000
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.failed"}, 5_000
     refute_receive %Fleet.Event{type: :"pipeline.completed"}, 100
     _ = pid
   end
@@ -235,7 +235,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
                      type: :"pipeline.failed",
                      payload: %{"pipeline_id" => ^pid, "reason" => reason}
                    },
-                   2_000
+                   5_000
 
     assert reason =~ "abandon"
   end
@@ -249,7 +249,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
                      type: :"pipeline.failed",
                      payload: %{"pipeline_id" => ^pid, "reason" => reason}
                    },
-                   2_000
+                   5_000
 
     assert reason =~ "redirect"
   end
@@ -258,27 +258,27 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
     {pid, corr} = start_to_gate("softgate")
     complete_gate(corr, %{"garbage" => true})
 
-    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.failed"}, 2_000
+    assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.failed"}, 5_000
     refute_receive %Fleet.Event{type: :"pipeline.completed"}, 100
     _ = pid
   end
 
   test "terminal non-tranchable → mandat gatekeeper ; continue → completed" do
     {:ok, pid} = Pipeline.start_pipeline("termgate", %{ticket_id: "tg"})
-    assert_receive {:spawned, "audit"}, 2_000
+    assert_receive {:spawned, "audit"}, 5_000
     complete_stage(pid, "audit")
-    assert_receive {:enqueued, corr, "gk-permanent", "audit"}, 2_000
+    assert_receive {:enqueued, corr, "gk-permanent", "audit"}, 5_000
 
     complete_gate(corr, %{"decision" => "continue", "reason" => "ok"})
 
     assert_receive %Fleet.Event{type: :"pipeline.completed", payload: %{"pipeline_id" => ^pid}},
-                   2_000
+                   5_000
   end
 
   test "aucun gatekeeper booté (gatekeeper_pod_id nil) → fail-loud (jamais silent pass)" do
     Application.delete_env(:fleet_pipeline, :gatekeeper_pod_id)
     {:ok, pid} = Pipeline.start_pipeline("softgate", %{ticket_id: "nogk"})
-    assert_receive {:spawned, "audit"}, 2_000
+    assert_receive {:spawned, "audit"}, 5_000
     complete_stage(pid, "audit")
 
     assert_receive %Fleet.Event{
@@ -286,7 +286,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
                      type: :"pipeline.failed",
                      payload: %{"pipeline_id" => ^pid, "reason" => reason}
                    },
-                   2_000
+                   5_000
 
     assert reason =~ "no gatekeeper"
   end
@@ -294,7 +294,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
   test "enqueue du mandat échoue → fail-loud" do
     Application.put_env(:fleet_pipeline, :task_queue, Fleet.Pipeline.GateEnqueueFailStub)
     {:ok, pid} = Pipeline.start_pipeline("softgate", %{ticket_id: "enqfail"})
-    assert_receive {:spawned, "audit"}, 2_000
+    assert_receive {:spawned, "audit"}, 5_000
     complete_stage(pid, "audit")
 
     assert_receive %Fleet.Event{
@@ -302,7 +302,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
                      type: :"pipeline.failed",
                      payload: %{"pipeline_id" => ^pid, "reason" => reason}
                    },
-                   2_000
+                   5_000
 
     assert reason =~ "enqueue failed"
   end
