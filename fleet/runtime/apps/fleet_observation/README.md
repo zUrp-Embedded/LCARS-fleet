@@ -2,7 +2,7 @@
 
 **Date** : 2026-06-10
 **Dernière révision** : 2026-06-10
-**Statut** : squelette (incrément B — BL-026 read-frontier, deck PODS live)
+**Statut** : incréments A+B+C — BL-026 read-frontier live (PODS + read-model stream)
 **Référencé par** : —
 **Design** : `DESIGN-observabilite.md` (catalogue de l'observable + organisation LCARS)
 
@@ -25,14 +25,15 @@ no-auth, intra-release (ADR-C « 5-zéros ») : il observe, il ne mute rien.
 |---|---|
 | `Fleet.Observation.Application` | supervisor + listener Cowboy `:8091` (guardé `:test`) |
 | `Fleet.Observation.Deck` | `Plug.Router` — HTML LCARS (7 decks) + endpoints read JSON |
-| `Fleet.Observation.ReadModel` | *(incrément C)* GenServer + ETS, projette le stream `%Fleet.Event{}` |
+| `Fleet.Observation.ReadModel` | GenServer + ETS, abonné unique, projette le stream `%Fleet.Event{}` |
 
 ## Public API (HTTP)
 
 | Route | Réponse |
 |---|---|
-| `GET /` | shell LCARS : header BRIDGE + 7 decks (PODS live, autres → read-model C) |
-| `GET /api/pods` | `{"pods": [...], "count": n}` — pods vivants (vue JSON-safe) |
+| `GET /` | shell LCARS : header BRIDGE + 7 decks (PODS live + read-model) |
+| `GET /api/pods` | `{"pods": [...], "count": n}` — pods vivants (vue JSON-safe, live) |
+| `GET /api/projection` | projection read-model (stream + counts + decks event-dérivés) |
 | `GET /health` | `{"status": "ok", ...}` |
 | `GET /static/lcars-tva.css` | feuille de style LCARS |
 | `GET /static/assets/*.svg` | icônes de rôles + favicons |
@@ -42,9 +43,10 @@ no-auth, intra-release (ADR-C « 5-zéros ») : il observe, il ne mute rien.
 `BRIDGE` (santé/readiness/quiescence) · `PODS` (cartes par rôle, **live**) ·
 `FLOW` (mandats + pipelines) · `GATEKEEPER` (escalades Z3-B + verdicts) ·
 `COORDINATION` (Pilot/coord/MCP) · `STREAM` (tail `%Fleet.Event{}`) ·
-`DIAGNOSTICS` (not_wired_yet/boot/quota). En incrément B seul `PODS` est
-alimenté ; les autres affichent un placeholder **honnête** (« en attente du
-read-model C ») — pas de vert creux.
+`DIAGNOSTICS` (boot/oauth/mcp/sdk/signal/git). `PODS` = snapshot live
+(`/api/pods`) ; les decks event-dérivés (FLOW/GATEKEEPER/COORDINATION/STREAM/
+DIAGNOSTICS + résumé BRIDGE) sont alimentés par la **projection read-model**
+(`/api/projection`), routés par préfixe de type d'event (cf. ReadModel).
 
 ## Configuration
 
@@ -52,11 +54,12 @@ read-model C ») — pas de vert creux.
 |---|---|---|
 | `:fleet_observation, :http_port` | `8091` | `runtime.exs` (`LCARS_OBSERVATION_PORT`) |
 | `:fleet_observation, :start_listener` | `true` | `false` en `:test` (invariant hermétique) |
+| `:fleet_observation, :start_readmodel` | `true` | `false` en `:test` (pas d'abonné Bus parasite) |
 
 ## Dépendances
 
-- `fleet_spawner` (Ring 1) — `Fleet.Spawner.list_pods/0` (lecture seule).
-- `fleet_event_router` (Ring 2) — bus `%Fleet.Event{}` (read-model, incrément C).
+- `fleet_spawner` (Ring 1) — `Fleet.Spawner.list_pods/0` (lecture seule, deck PODS).
+- `fleet_event_router` (Ring 2) — bus `%Fleet.Event{}` (`Bus.subscribe/1`, read-model).
 - `plug`, `plug_cowboy`, `jason`.
 
 ## Frontière starfleet
@@ -65,10 +68,14 @@ read-model C ») — pas de vert creux.
 `fleet_starfleet`. L'icône `starfleet.svg` existe dans les assets mais aucun
 panel ne l'instrumente.
 
-## Frontière BL-026 (cible — incrément C)
+## Frontière BL-026 (implémentée)
 
-Le squelette lit `Fleet.Spawner.list_pods/0` directement. L'incrément C
-interpose `Fleet.Observation.ReadModel` qui projette le stream `%Fleet.Event{}`
-+ un snapshot au boot ; le deck lit **la projection**, jamais l'état GenServer
-interne. Test architectural : le core n'est pas touché (diff hors
-`apps/fleet_observation/` + `config/` + `mix.exs` = 0).
+`Fleet.Observation.ReadModel` (abonné **unique** au bus) projette le stream
+`%Fleet.Event{}` dans une table ETS qu'il possède ; le deck lit **la projection**
+via `ReadModel.projection/0` (read ETS direct, bypass GenServer — Iron Law),
+**jamais** l'état GenServer interne d'un tiers. Les `PODS` restent un snapshot
+live (`Spawner.list_pods/0`) car `pod.*` n'émet que des terminaux.
+
+**Test architectural BL-020/BL-026** : le core n'a été touché qu'en **un** point
+— l'ajout du read-seam `Fleet.Spawner.list_pods/0` (énumération générique, owned
+par le spawner). Tout le reste se branche par-dessus sans modifier le core.

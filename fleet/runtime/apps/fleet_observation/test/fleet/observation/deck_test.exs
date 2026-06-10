@@ -5,7 +5,6 @@ defmodule Fleet.Observation.DeckTest do
   """
   use ExUnit.Case, async: true
   import Plug.Test
-  import Plug.Conn
 
   @opts Fleet.Observation.Deck.init([])
 
@@ -39,6 +38,12 @@ defmodule Fleet.Observation.DeckTest do
     assert %{"pods" => pods, "count" => count} = Jason.decode!(conn.resp_body)
     assert is_list(pods)
     assert count == length(pods)
+  end
+
+  test "GET /api/projection → 200 JSON (read-model éteint → projection vide, pas de crash)" do
+    conn = call(:get, "/api/projection")
+    assert %Plug.Conn{status: 200} = conn
+    assert %{"total" => 0, "stream" => [], "counts" => %{}} = Jason.decode!(conn.resp_body)
   end
 
   test "route inconnue → 404 JSON" do

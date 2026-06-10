@@ -7,6 +7,9 @@ config :fleet_api, start_listener: false
 # fleet_observation : idem — pas de listener Cowboy :8091 en test (sinon bind
 # du port → crash boot umbrella, même invariant hermétique que fleet_api).
 config :fleet_observation, start_listener: false
+# ReadModel OFF en test (abonné Bus global = consommateur parasite interdit en
+# async ; les tests le démarrent manuellement avec subscribe:false).
+config :fleet_observation, start_readmodel: false
 
 # B5 #576 — baseline hermétique launch_backend en :test. PortBackend
 # est désormais RÉEL (spawn bwrap) ; sans baseline, le code-default

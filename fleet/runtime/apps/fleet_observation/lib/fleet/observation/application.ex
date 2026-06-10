@@ -37,9 +37,20 @@ defmodule Fleet.Observation.Application do
 
   @impl Application
   def start(_type, _args) do
-    children = listener_children()
+    children = readmodel_children() ++ listener_children()
     opts = [strategy: :one_for_one, name: Fleet.Observation.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # ReadModel = abonné unique au bus (incrément C). Gardé `:test` : un abonné
+  # global en test = consommateur Bus parasite (interdit par l'invariant
+  # hermétique). Les tests démarrent le ReadModel manuellement avec subscribe:false.
+  defp readmodel_children do
+    if Application.get_env(:fleet_observation, :start_readmodel, true) do
+      [Fleet.Observation.ReadModel]
+    else
+      []
+    end
   end
 
   defp listener_children do

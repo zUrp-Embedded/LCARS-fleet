@@ -198,9 +198,11 @@ Ce sont des idées **fonctionnelles** du v1, pas du décor — je les porte.
 - **B — Scaffold** : app `fleet_observation`, `Application` (supervisor + Cowboy :8091 guardé test),
   `Deck` (Plug.Router : `/`, `/health`, `/api/*`, `/static/*`), intégration assets LCARS,
   squelette des 7 decks (lecture directe `list_pods` d'abord, comme :8089). README contrat.
-- **C — Read-model** : `Fleet.Observation.ReadModel` (GenServer + ETS, abonné `%Fleet.Event{}`,
-  snapshot boot). Le deck lit la projection. **Test architectural** : le core n'est pas touché
-  (diff = 0 ligne hors `apps/fleet_observation/` + `config/` + `mix.exs` dep).
+- **C — Read-model** ✅ : `Fleet.Observation.ReadModel` (GenServer + ETS, abonné unique
+  `%Fleet.Event{}`). Routage deck par préfixe de type (catalogue data). Le deck lit la projection
+  via `ReadModel.projection/0` (read ETS direct, bypass GenServer). Endpoint `/api/projection`,
+  6 decks event-dérivés câblés. **Résultat du test architectural** : le core n'a été touché qu'en
+  **un** point — l'ajout du read-seam `Fleet.Spawner.list_pods/0`. Couture quasi-propre.
 
 ---
 

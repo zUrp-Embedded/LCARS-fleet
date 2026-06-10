@@ -56,6 +56,16 @@ defmodule Fleet.Observation.Deck do
     |> send_resp(200, body)
   end
 
+  # Projection event-dérivée (read-model BL-026) : alimente FLOW/GATEKEEPER/
+  # STREAM/COORDINATION/DIAGNOSTICS/BRIDGE. Read ETS direct (bypass GenServer).
+  get "/api/projection" do
+    body = Jason.encode!(Fleet.Observation.ReadModel.projection())
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, body)
+  end
+
   match _ do
     send_resp(conn, 404, Jason.encode!(%{error: "deck route not found"}))
   end
@@ -103,6 +113,14 @@ defmodule Fleet.Observation.Deck do
       .deck-soon{color:#668;font-family:monospace;font-size:12px;padding:8px}
       .led-ok{background:#3f3 !important}
       .glyph{font-weight:bold}
+      .ev-list{font-family:monospace;font-size:12px;max-height:240px;overflow:auto}
+      .ev-row{display:flex;gap:8px;padding:2px 6px;border-bottom:1px solid #223;white-space:nowrap}
+      .ev-type{color:#f93;min-width:170px}
+      .ev-src{color:#6cf;min-width:90px}
+      .ev-pod{color:#9af;flex:1;overflow:hidden;text-overflow:ellipsis}
+      .ev-ts{color:#668}
+      .stat-row{display:flex;flex-wrap:wrap;gap:10px;font-family:monospace;font-size:12px;padding:6px}
+      .stat{color:#9af}.stat b{color:#f93}
     </style>
     </head>
     <body>
@@ -122,17 +140,17 @@ defmodule Fleet.Observation.Deck do
       </header>
 
       <main class="lcars-main">
-        #{deck("B1", "BRIDGE", soon("readiness deep · quiescence · débit events"))}
+        #{deck("B1", "BRIDGE", ~s|<div class="stat-row" id="bridge-body"><span class="deck-soon">…</span></div>|)}
         #{deck("P1", "PODS", ~s|<div class="obs-grid" id="pods-grid"><div class="deck-soon">chargement…</div></div><div class="panel-meta" id="pods-count">— … —</div>|)}
-        #{deck("F1", "FLOW", soon("mandats (pending/active/done/failed) · pipelines par état"))}
-        #{deck("G1", "GATEKEEPER", soon("escalades Z3-B · verdicts · gate_evals"))}
-        #{deck("C1", "COORDINATION", soon("routes Pilot · policies coord · MCP config"))}
-        #{deck("S1", "STREAM", soon("tail live %Fleet.Event{} · critiques surlignés"))}
-        #{deck("D1", "DIAGNOSTICS", soon("not_wired_yet · boot state · quota OAUTH"))}
+        #{deck("F1", "FLOW", ~s|<div class="stat-row" id="flow-tasks"></div><div class="ev-list" id="flow-body"></div>|)}
+        #{deck("G1", "GATEKEEPER", ~s|<div class="ev-list" id="gk-body"></div>|)}
+        #{deck("C1", "COORDINATION", ~s|<div class="ev-list" id="coord-body"></div>|)}
+        #{deck("S1", "STREAM", ~s|<div class="ev-list" id="stream-body"></div>|)}
+        #{deck("D1", "DIAGNOSTICS", ~s|<div class="ev-list" id="diag-body"></div>|)}
       </main>
 
       <footer class="lcars-footer">
-        <span class="footer-meta">fleet_observation • BL-026 read-frontier • incrément B (squelette) • PODS live, autres → read-model C</span>
+        <span class="footer-meta">fleet_observation • BL-026 read-frontier • PODS live + read-model (stream %Fleet.Event{})</span>
       </footer>
     </div>
 
@@ -149,16 +167,51 @@ defmodule Fleet.Observation.Deck do
         + '<div class="pc-row"><span class="pc-k">tmux</span>'+esc(p.tmux_session)+'</div>'
         + '</div>';
     }
-    async function refresh(){
+    function evRow(s){
+      return '<div class="ev-row"><span class="ev-type">'+esc(s.type)+'</span>'
+        + '<span class="ev-src">'+esc(s.source)+'</span>'
+        + '<span class="ev-pod">'+esc(s.pod_id||'')+'</span>'
+        + '<span class="ev-ts">'+esc((s.ts||'').slice(11,19))+'</span></div>';
+    }
+    function fillList(id, arr, empty){
+      var el=document.getElementById(id);
+      el.innerHTML = (arr && arr.length) ? arr.map(evRow).join('') : '<div class="deck-soon">'+empty+'</div>';
+    }
+    function n(counts,k){return (counts&&counts[k])||0;}
+    async function refreshPods(){
       var led=document.getElementById('led-health');
       try{
-        var r=await fetch('/api/pods');var j=await r.json();
+        var j=await (await fetch('/api/pods')).json();
         led.classList.add('led-ok');
         document.getElementById('pods-count').textContent='— '+j.count+' actifs —';
         var g=document.getElementById('pods-grid');
         g.innerHTML = j.pods.length ? j.pods.map(podCard).join('') : '<div class="deck-soon">aucun pod actif</div>';
       }catch(e){led.classList.remove('led-ok');}
     }
+    async function refreshProjection(){
+      try{
+        var p=await (await fetch('/api/projection')).json();
+        var c=p.counts||{};
+        document.getElementById('bridge-body').innerHTML =
+          '<span class="stat">events <b>'+(p.total||0)+'</b></span>'
+          +'<span class="stat">types <b>'+Object.keys(c).length+'</b></span>'
+          +'<span class="stat">pipelines <b>'+(p.pipelines||[]).length+'</b></span>'
+          +'<span class="stat">gatekeeper <b>'+(p.gatekeeper||[]).length+'</b></span>'
+          +'<span class="stat">diag <b>'+(p.diagnostics||[]).length+'</b></span>';
+        document.getElementById('flow-tasks').innerHTML =
+          '<span class="stat">enqueued <b>'+n(c,'task_enqueued')+'</b></span>'
+          +'<span class="stat">assigned <b>'+n(c,'task_assigned')+'</b></span>'
+          +'<span class="stat">completed <b>'+n(c,'task_completed')+'</b></span>'
+          +'<span class="stat">failed <b>'+n(c,'task_failed')+'</b></span>'
+          +'<span class="stat">cleared <b>'+n(c,'task_cleared')+'</b></span>';
+        fillList('flow-body', p.pipelines, 'aucun pipeline observé');
+        fillList('gk-body', p.gatekeeper, 'aucun verdict / escalade');
+        fillList('coord-body', p.coordination, 'aucune coordination / ticket');
+        fillList('stream-body', p.stream, 'flux vide');
+        fillList('diag-body', p.diagnostics, 'aucun signal diagnostic');
+      }catch(e){}
+    }
+    function refresh(){refreshPods();refreshProjection();}
     tick();setInterval(tick,1000);refresh();setInterval(refresh,3000);
     </script>
     </body>
@@ -170,7 +223,4 @@ defmodule Fleet.Observation.Deck do
   defp deck(num, name, body) do
     ~s|<section class="panel"><div class="panel-head"><span class="panel-num">#{num}</span><span class="panel-name">#{name}</span></div><div class="panel-body">#{body}</div></section>|
   end
-
-  defp soon(what),
-    do: ~s|<div class="deck-soon">— en attente du read-model (incrément C) : #{what} —</div>|
 end
