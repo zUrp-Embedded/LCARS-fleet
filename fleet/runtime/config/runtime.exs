@@ -63,6 +63,13 @@ if config_env() != :test do
     config :fleet_credentials, credentials_root: path
   end
 
+  # Z4 (forge-identité B') — catalogue humain→{name,email} (`Fleet.Pipeline.ForgeIdentity`),
+  # provisionné à l'install LCARS (onboarding live). Knob path : le remplir/déplacer
+  # à l'install n'exige PAS de recompiler. Défaut placeholder `runtime/settings_users.yaml`.
+  if path = System.get_env("LCARS_USERS_CATALOG") do
+    config :fleet_pipeline, users_catalog_path: path
+  end
+
   # ============================================================
   # fleet_event_router (ch11) — webhook Gitea + signaux OS
   # ============================================================

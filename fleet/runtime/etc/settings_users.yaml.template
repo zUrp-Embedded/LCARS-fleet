@@ -1,0 +1,19 @@
+# Catalogue des humains de la fleet LCARS — identité git per-humain (Z4 forge-identité B').
+#
+# Provisionné à l'INSTALL LCARS (onboarding live avec le premier agent — DN installeur
+# déférée). Lu par `Fleet.Pipeline.ForgeIdentity` pour résoudre `GIT_AUTHOR` = l'humain
+# du mandat (non-négo #1 : l'identité n'est jamais aplatie ; le rôle LCARS est un trailer
+# `Co-authored-by: LCARS-<role>` vérifié, pas l'author).
+#
+# Path : env `LCARS_USERS_CATALOG` (knob runtime.exs) → sinon placeholder
+# `runtime/settings_users.yaml`. Le remplir/déplacer à l'install n'exige PAS de recompiler.
+#
+# Clé `<login>` = l'user système qui lance le runtime (`id -un` ; sur cette instance,
+# l'user courant EST l'humain — cf. Fleet.Spawner.Pod). Humain absent → fail-loud
+# (pas d'identité devinée).
+
+users:
+  # exemple — remplacer par les humains réels à l'install :
+  lordzurp:
+    name: "Lord Zurp"
+    email: "lordzurp.dev@gmail.com"

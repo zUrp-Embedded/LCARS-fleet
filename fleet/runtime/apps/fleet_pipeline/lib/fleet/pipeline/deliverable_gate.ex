@@ -35,6 +35,7 @@ defmodule Fleet.Pipeline.DeliverableGate do
   @type reason ::
           {:base_not_ancestor, String.t()}
           | {:bad_identity, [String.t()]}
+          | {:missing_coauthor_trailer, String.t(), [String.t()]}
           | {:secret_detected, String.t(), String.t()}
           | {:git_error, term()}
 
@@ -75,6 +76,44 @@ defmodule Fleet.Pipeline.DeliverableGate do
         case Enum.reject(emails, &MapSet.member?(allowed_set, &1)) do
           [] -> :ok
           bad -> {:error, {:bad_identity, Enum.uniq(bad)}}
+        end
+
+      {out, _rc} ->
+        {:error, {:git_error, String.trim(out)}}
+    end
+  end
+
+  @doc """
+  F-01 (volet trailer, Z4 B') — chaque commit `base..HEAD` porte le trailer
+  `Co-authored-by: LCARS-<role>` ATTENDU (la signature machine du rôle est vérifiée au
+  boundary monde, pas crue depuis le pod ; rôle ↔ stage = `expected_role`, posé par
+  l'appelant). Range vide → `:ok` (vacuité). Un commit sans le trailer → fail-loud
+  `{:missing_coauthor_trailer, expected_role, [sha…]}` (le push n'a pas lieu).
+
+  ⚠ Z4 : NON câblé dans `verify/3` tant que les DEUX producteurs (payload système +
+  git_native pod, SPAWN-X1) n'émettent pas le trailer — sinon git_native casserait la
+  gate. Fonction autonome, vérifiée par test ; le câblage dans `verify` = increment 2.
+  """
+  @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
+  def check_coauthor_trailer(workspace, base_sha, expected_role) when is_binary(expected_role) do
+    needle = "Co-authored-by: LCARS-#{expected_role}"
+
+    # `%x00` (NUL) sépare les commits — un NUL ne peut pas apparaître dans un message git.
+    case git(workspace, ["log", "#{base_sha}..HEAD", "--format=%H%x1f%B%x00"]) do
+      {out, 0} ->
+        missing =
+          out
+          |> String.split(<<0>>, trim: true)
+          |> Enum.flat_map(fn chunk ->
+            case String.split(chunk, <<0x1F>>, parts: 2) do
+              [sha, body] -> if String.contains?(body, needle), do: [], else: [String.trim(sha)]
+              _ -> []
+            end
+          end)
+
+        case missing do
+          [] -> :ok
+          shas -> {:error, {:missing_coauthor_trailer, expected_role, shas}}
         end
 
       {out, _rc} ->
