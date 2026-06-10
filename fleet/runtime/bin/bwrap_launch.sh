@@ -167,7 +167,12 @@ for plugin in ${LCARS_SKILLS_PLUGINS:-}; do
     *..* | */* | .*) echo "ERR: nom de plugin invalide '$plugin' (path-traversal)" >&2; exit 1 ;;
   esac
   [[ "$plugin" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "ERR: nom de plugin invalide '$plugin' (allowlist [A-Za-z0-9._-])" >&2; exit 1; }
-  HOST_PLUGIN_PATH="$HOME/.claude/plugins/$plugin"
+  # F152 : résoudre depuis CLAUDE_DIR (le ~/.claude RÉEL de l'humain), PAS $HOME — le spawner
+  # ouvre le Port avec HOME=POD_DIR (env du pod), donc côté host `$HOME` = le pod_dir frais
+  # (sans plugins) → l'ancien `$HOME/.claude/plugins` échouait toujours → exit 1 → le trap EXIT
+  # `rm -rf "$POD_DIR"` détruisait le pod provisionné pour TOUT cap-profile à skill plugin-qualifié.
+  # CLAUDE_DIR (requis l.70) pointe le claudeDir humain ⇒ ses plugins sont sous CLAUDE_DIR/plugins.
+  HOST_PLUGIN_PATH="$CLAUDE_DIR/plugins/$plugin"
   [[ -d "$HOST_PLUGIN_PATH" ]] || { echo "ERR: plugin '$plugin' not installed host-side at $HOST_PLUGIN_PATH" >&2; exit 1; }
   PLUGIN_BINDS+=(--ro-bind "$HOST_PLUGIN_PATH" "$POD_DIR/.claude/plugins/$plugin")
 done
