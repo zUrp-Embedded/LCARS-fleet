@@ -33,6 +33,8 @@ defmodule Fleet.Pipeline.MixProject do
     [
       {:fleet_cap_profile, in_umbrella: true},
       {:fleet_spawner, in_umbrella: true},
+      # Z4 — `Fleet.Credentials.ForgeIdentity` (F-01 allowed_emails = l'humain du mandat).
+      {:fleet_credentials, in_umbrella: true},
       {:fleet_event_router, in_umbrella: true},
       # StageRunner enqueue les mandats dans le broker Fleet.TaskQueue (seam
       # `:task_queue`, défaut Fleet.TaskQueue) → dépendance runtime réelle.

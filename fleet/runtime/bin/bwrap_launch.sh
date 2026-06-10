@@ -44,12 +44,14 @@
 #                                 Code natif /init) — défaut $POD_DIR (le bootstrap/spawner le pose
 #                                 sur $POD_DIR/<repo> pour un pod-projet).
 #
-# Identité git (O5, dérivée de $ROLE — source unique) : GIT_AUTHOR_*/GIT_COMMITTER_* = LCARS-<role> /
-# <role>@lcars.local, + GIT_CONFIG_GLOBAL=/dev/null (l'env est la SEULE source d'identité — pas de
-# config globale ambiante, déterministe). C'est le DÉFAUT COOPÉRATIF (un pod git-natif bien élevé
-# commite avec la bonne identité sans règle SP, façon tournevis). Ce n'est PAS une garantie de
-# sécurité — un shell peut surcharger l'env (`git -c user.email=…`). La garantie F-01 vit côté MONDE :
-# la gate `Fleet.Pipeline.DeliverableGate` rejette au push tout commit hors identité autorisée.
+# Identité git (Z4 forge-identité B') : GIT_AUTHOR_*/GIT_COMMITTER_* = l'HUMAIN du mandat,
+# FORWARDÉS depuis l'env (posés par le spawner `pod.ex` via `Fleet.Credentials.ForgeIdentity` →
+# catalogue `settings_users.yaml`). PLUS dérivés de $ROLE : le rôle ne signe plus l'identité (il
+# passe en trailer `Co-authored-by: LCARS-<role>`, ajouté par le pod). + GIT_CONFIG_GLOBAL=/dev/null
+# (l'env = SEULE source d'identité, déterministe). C'est le DÉFAUT COOPÉRATIF (un pod git-natif bien
+# élevé commite avec la bonne identité sans règle SP, façon tournevis). Ce n'est PAS une garantie de
+# sécurité — un shell peut surcharger l'env. La garantie F-01 vit côté MONDE : la gate
+# `Fleet.Pipeline.DeliverableGate` rejette au push tout commit hors identité autorisée (= l'humain).
 #
 # Exit codes : 0 succès (le pod est lancé détaché) | 1 setup error | 2 bwrap/vendor missing
 #
@@ -263,10 +265,10 @@ exec "$BWRAP_BIN" \
   --setenv LCARS_POD_ID "$POD_ID" \
   --setenv LCARS_ROLE "$ROLE" \
   --setenv LCARS_POD_CWD "$WORKDIR" \
-  --setenv GIT_AUTHOR_NAME "LCARS-$ROLE" \
-  --setenv GIT_AUTHOR_EMAIL "$ROLE@lcars.local" \
-  --setenv GIT_COMMITTER_NAME "LCARS-$ROLE" \
-  --setenv GIT_COMMITTER_EMAIL "$ROLE@lcars.local" \
+  --setenv GIT_AUTHOR_NAME "${GIT_AUTHOR_NAME:?Z4: GIT_AUTHOR_NAME requis (humain, posé par pod.ex)}" \
+  --setenv GIT_AUTHOR_EMAIL "${GIT_AUTHOR_EMAIL:?Z4: GIT_AUTHOR_EMAIL requis (humain)}" \
+  --setenv GIT_COMMITTER_NAME "${GIT_COMMITTER_NAME:?Z4: GIT_COMMITTER_NAME requis (humain)}" \
+  --setenv GIT_COMMITTER_EMAIL "${GIT_COMMITTER_EMAIL:?Z4: GIT_COMMITTER_EMAIL requis (humain)}" \
   --setenv GIT_CONFIG_GLOBAL "/dev/null" \
   --setenv LCARS_AUTH_MODE "$AUTH_MODE" \
   --setenv LCARS_POD_SESSION_ID "$SESSION_ID" \

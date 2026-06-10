@@ -34,6 +34,8 @@ defmodule Fleet.Pilot.MixProject do
     [
       {:fleet_event_router, in_umbrella: true},
       {:fleet_pipeline, in_umbrella: true},
+      # Z4 — `Fleet.Credentials.ForgeIdentity` (allowed_emails F-01 = l'humain du mandat).
+      {:fleet_credentials, in_umbrella: true},
       {:yaml_elixir, "~> 2.12"},
       {:req, "~> 0.5"}
     ]

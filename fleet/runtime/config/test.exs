@@ -11,6 +11,12 @@ config :fleet_api, start_listener: false
 # les tests le re-settent en setup, ne le delete plus en on_exit.
 config :fleet_spawner, launch_backend: Fleet.Spawner.LaunchBackend.StubBackend
 
+# Z4 — identité forge fixe en test (`id -un` varie par runner, pas de catalogue en test).
+# `Fleet.Credentials.ForgeIdentity.for_role/2` court-circuite sur cet override (sauf les
+# tests qui injectent un `:catalog` explicite — forge_identity_test teste la vraie résolution).
+config :fleet_credentials,
+  forge_identity_override: %{name: "Test Human", email: "human@lcars.local"}
+
 # B10/#583 Sprint 1 — hermétisme test : consumers + BootOrchestrator
 # off par défaut. Subscribe global au Bus + emit fleet.boot_* parasiterait
 # tests async ; les tests dédiés démarrent manuellement avec opts isolés.

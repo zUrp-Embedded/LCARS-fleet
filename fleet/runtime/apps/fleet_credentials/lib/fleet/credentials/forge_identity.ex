@@ -64,8 +64,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   """
   @spec for_role(String.t(), keyword()) :: {:ok, identity()} | {:error, term()}
   def for_role(role, opts \\ []) when is_binary(role) and role != "" do
-    with {:ok, human} <- resolve_human(opts),
-         {:ok, %{name: name, email: email}} <- lookup(human, opts) do
+    with {:ok, %{name: name, email: email, human: human}} <- resolve_identity(opts) do
       {:ok,
        %{
          author_name: name,
@@ -111,6 +110,29 @@ defmodule Fleet.Credentials.ForgeIdentity do
         case System.cmd("id", ["-un"], stderr_to_stdout: true) do
           {out, 0} -> {:ok, String.trim(out)}
           other -> {:error, {:human_unresolved, other}}
+        end
+    end
+  end
+
+  # Résout {name, email, human}. Override config `:forge_identity_override` (map
+  # %{name, email, human?}) court-circuite TOUT (seam test : `id -un` varie par runner,
+  # le catalogue n'existe pas en test) → tous les callers (pod.ex/hop_consumer/executor)
+  # obtiennent une identité fixe. Sinon : humain (`id -un`) → lookup catalogue.
+  defp resolve_identity(opts) do
+    override = Application.get_env(:fleet_credentials, :forge_identity_override)
+    # un `:catalog`/`:catalog_path` explicite (forge_identity_test teste la VRAIE résolution)
+    # désactive l'override — sinon l'override gagne (seam test pour les callers réels).
+    explicit_catalog? = Keyword.has_key?(opts, :catalog) or Keyword.has_key?(opts, :catalog_path)
+
+    case override do
+      %{name: name, email: email} = ov
+      when is_binary(name) and is_binary(email) and not explicit_catalog? ->
+        {:ok, %{name: name, email: email, human: Map.get(ov, :human, "override")}}
+
+      _ ->
+        with {:ok, human} <- resolve_human(opts),
+             {:ok, %{name: name, email: email}} <- lookup(human, opts) do
+          {:ok, %{name: name, email: email, human: human}}
         end
     end
   end

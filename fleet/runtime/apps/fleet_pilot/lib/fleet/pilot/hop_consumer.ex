@@ -604,8 +604,24 @@ defmodule Fleet.Pilot.HopConsumer do
 
   def parse_issue_number(_), do: :error
 
-  defp default_role_emails(role), do: [default_email(role)]
-  defp default_email(role), do: "#{role}@lcars.local"
+  # Z4 (forge-identité B') — F-01 `allowed_emails` = l'HUMAIN du mandat (le pod git_native
+  # commite EN TANT QUE l'humain, cf. `bwrap_launch.sh`/`ForgeIdentity`), PLUS le rôle. Même
+  # catalogue que le spawn → cohérent (commit humain ⟺ F-01 allows humain). Irrésoluble →
+  # `[]` fail-closed (F-01 rejette tout). Le rôle est vérifié via le trailer (A.2), pas l'email.
+  defp default_role_emails(role) do
+    case Fleet.Credentials.ForgeIdentity.for_role(role) do
+      {:ok, id} ->
+        Fleet.Credentials.ForgeIdentity.allowed_emails(:git_native, id.author_email)
+
+      {:error, reason} ->
+        Logger.warning(
+          "HopConsumer: identité forge irrésoluble (role=#{role}): #{inspect(reason)} — " <>
+            "allowed_emails=[] (F-01 rejettera le push, fail-closed)"
+        )
+
+        []
+    end
+  end
 
   defp require_opt(opts, key) do
     case Keyword.get(opts, key) do

@@ -818,7 +818,17 @@ defmodule Fleet.Pipeline.Executor do
   # forme committer=système serait un mensonge, le système n'a pas commité). Cf. nuance D-04
   # mode-dépendante (JOURNAL-deliverable-model, Brick 6).
   defp allowed_emails(:payload, role), do: ["#{role}@lcars.local", "system@lcars.local"]
-  defp allowed_emails(:git_native, role), do: ["#{role}@lcars.local"]
+
+  # Z4 (A.1) — git_native : le pod commite EN TANT QUE l'humain (bwrap GIT_AUTHOR=humain) →
+  # F-01 allows l'humain (via ForgeIdentity, même catalogue que le spawn). Irrésoluble → `[]`
+  # fail-closed. (Le mode `payload` — système commite, author=LCARS-role — reste role-based en
+  # A.1 : chemin Executor RAM mourant ; bascule humain = follow-up A.x.)
+  defp allowed_emails(:git_native, role) do
+    case Fleet.Credentials.ForgeIdentity.for_role(role) do
+      {:ok, id} -> Fleet.Credentials.ForgeIdentity.allowed_emails(:git_native, id.author_email)
+      {:error, _} -> []
+    end
+  end
 
   defp payload_message(result, role) do
     case Map.get(result, "message") do

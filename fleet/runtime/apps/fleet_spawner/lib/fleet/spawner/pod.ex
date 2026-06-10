@@ -747,6 +747,28 @@ defmodule Fleet.Spawner.Pod do
   # absent/illisible → `{:error, _}` (fail-loud, propagé par do_launch →
   # transition_failed). Mode `:bind` (défaut) : toujours `{:ok, _}` (le token
   # n'est pas requis, le claudeDir est bindé).
+  # Z4 (forge-identité B') — l'identité git du pod = l'HUMAIN du mandat (author ET committer ;
+  # le pod commite EN TANT QUE l'humain qui le run), résolue via le catalogue
+  # (`Fleet.Credentials.ForgeIdentity`). Remplace l'ancien DÉFAUT COOPÉRATIF role-based de
+  # `bwrap_launch.sh` (GIT_AUTHOR=LCARS-$ROLE) : le rôle ne signe plus l'identité — il passe en
+  # trailer `Co-authored-by` (A.2). bwrap_launch.sh forward ces GIT_AUTHOR_*/GIT_COMMITTER_*.
+  # Catalogue absent → fail-loud {:forge_identity_unresolved,_} (pas de pod sans identité
+  # vérifiable au push — la garantie reste côté MONDE, gate F-01 `allowed_emails=[humain]`).
+  defp maybe_put_git_identity(env, human, role) do
+    case Fleet.Credentials.ForgeIdentity.for_role(role, human: human) do
+      {:ok, id} ->
+        {:ok,
+         env
+         |> Map.put("GIT_AUTHOR_NAME", id.author_name)
+         |> Map.put("GIT_AUTHOR_EMAIL", id.author_email)
+         |> Map.put("GIT_COMMITTER_NAME", id.committer_name)
+         |> Map.put("GIT_COMMITTER_EMAIL", id.committer_email)}
+
+      {:error, reason} ->
+        {:error, {:forge_identity_unresolved, reason}}
+    end
+  end
+
   defp maybe_put_auth_token(env, human) do
     mode = auth_mode()
     env_with_mode = Map.put(env, "LCARS_AUTH_MODE", Atom.to_string(mode))
@@ -884,6 +906,7 @@ defmodule Fleet.Spawner.Pod do
     # spawn (fail-loud) au lieu de lancer un pod sans token. Z2 : la porte credentials
     # (scope/plan) suit, taguée {:credentials_invalid, _} pour un refus distinct de l'auth.
     with {:ok, env} <- maybe_put_auth_token(env, human),
+         {:ok, env} <- maybe_put_git_identity(env, human, role),
          :ok <- gate_credentials(human, state.cap_profile) do
       do_launch_backend(state, args, env)
     else

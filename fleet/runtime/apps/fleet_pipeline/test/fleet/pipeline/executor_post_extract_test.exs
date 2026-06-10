@@ -418,17 +418,19 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
     })
   end
 
-  test "git_native : pod a commité (identité rôle) → push sur target système-choisie, gate OK",
+  test "git_native : pod a commité (identité HUMAINE, Z4) → push sur target système-choisie, gate OK",
        %{tmp_dir: tmp_dir} do
     {bare, ws} = git_native_setup(tmp_dir, "gn1")
 
+    # Z4 : le pod commite EN TANT QUE l'humain (bwrap GIT_AUTHOR=humain) ; F-01 allows
+    # l'humain (override test `human@lcars.local`, cf. config/test.exs). Le rôle ≠ l'identité.
     pod_commits(
       ws,
       "feature.py",
       "x = 1\n",
       "feat: agent work",
-      "engineer@lcars.local",
-      "LCARS-engineer"
+      "human@lcars.local",
+      "Test Human"
     )
 
     {:ok, pipeline_id} = Pipeline.start_pipeline("gn1", %{ticket_id: "gn1#1"})
