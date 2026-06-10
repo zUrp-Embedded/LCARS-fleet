@@ -173,14 +173,19 @@ defmodule Fleet.Pipeline.ExecutorPostExtractTest do
     {tracked, 0} = System.cmd("git", ["show", "--name-only", "--format=", "HEAD"], cd: ws)
     assert String.contains?(tracked, "out/X.md")
 
+    # Z4 (B') payload : author = l'HUMAIN du mandat (override test), committer = système.
     {author, 0} = System.cmd("git", ["log", "-1", "--format=%an <%ae>"], cd: ws)
-    assert String.trim(author) == "LCARS-engineer <engineer@lcars.local>"
+    assert String.trim(author) == "Test Human <human@lcars.local>"
 
     {committer, 0} = System.cmd("git", ["log", "-1", "--format=%cn <%ce>"], cd: ws)
     assert String.trim(committer) == "LCARS System <system@lcars.local>"
 
     {msg, 0} = System.cmd("git", ["log", "-1", "--format=%s"], cd: ws)
     assert String.trim(msg) == "feat(publish): worker payload"
+
+    # Z4 (A.2) : le rôle est signé par le trailer (ajouté au message par le système).
+    {body, 0} = System.cmd("git", ["log", "-1", "--format=%b"], cd: ws)
+    assert String.contains?(body, "Co-authored-by: LCARS-engineer <engineer@lcars.local>")
 
     # Le pipeline avance malgré tout (post_extract est best-effort).
     assert_receive %Fleet.Event{source: :pipeline, type: :"pipeline.completed"}, 2_000

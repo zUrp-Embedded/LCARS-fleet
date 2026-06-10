@@ -796,30 +796,51 @@ defmodule Fleet.Pipeline.Executor do
     {:ok, Map.merge(common, mode_specific_opts(mode, result, role))}
   end
 
-  # payload : le système écrit les fichiers + commite (author=rôle D-04, committer=système).
-  # git_native : le pod a commité ; rien à fournir (le contenu vient du `.git` du workspace).
+  # payload : le système écrit les fichiers + commite. Z4 (B') — author = l'HUMAIN du mandat
+  # (non-négo #1 : jamais aplati sur le rôle, même quand c'est le système qui commite),
+  # committer = système (le système matérialise, D-04). Le rôle = trailer `Co-authored-by`
+  # ajouté au message par le système → F-01 le vérifie (coauthor_role). Cohérent git_native.
   defp mode_specific_opts(:payload, result, role) do
+    {author_name, author_email} = payload_author(role)
+
     %{
       files: Map.get(result, "files"),
-      message: payload_message(result, role),
+      message: payload_message(result, role) <> "\n\n" <> coauthor_trailer(role),
       identity: %{
-        author_name: "LCARS-#{role}",
-        author_email: "#{role}@lcars.local",
+        author_name: author_name,
+        author_email: author_email,
         committer_name: "LCARS System",
         committer_email: "system@lcars.local"
-      }
+      },
+      coauthor_role: role
     }
   end
 
   # Z4 (A.2) — git_native : F-01 vérifie le trailer `Co-authored-by: LCARS-<role>` (le pod
-  # signe son rôle ; l'author git = l'humain). payload (système commite) → pas de coauthor_role.
+  # signe son rôle ; l'author git = l'humain). payload aussi (coauthor_role posé ci-dessus).
   defp mode_specific_opts(:git_native, _result, role), do: %{coauthor_role: role}
 
-  # Identités acceptées par la gate (F-01). payload : le commit est fait par le système →
-  # author=rôle + committer=système. git_native : le pod commite → author=committer=rôle (la
-  # forme committer=système serait un mensonge, le système n'a pas commité). Cf. nuance D-04
-  # mode-dépendante (JOURNAL-deliverable-model, Brick 6).
-  defp allowed_emails(:payload, role), do: ["#{role}@lcars.local", "system@lcars.local"]
+  # Author humain pour le commit système (payload). Irrésoluble → sentinelle hors-allowed →
+  # F-01 rejette (fail-closed, jamais un author deviné qui passerait la gate).
+  defp payload_author(role) do
+    case Fleet.Credentials.ForgeIdentity.for_role(role) do
+      {:ok, id} -> {id.author_name, id.author_email}
+      {:error, _} -> {"LCARS-unresolved", "unresolved@invalid.local"}
+    end
+  end
+
+  defp coauthor_trailer(role), do: Fleet.Credentials.ForgeIdentity.coauthor_trailer(role)
+
+  # Identités acceptées par la gate (F-01). Z4 (B') — payload : author=HUMAIN (le système
+  # commite au nom de l'humain du mandat) + committer=système → `[humain, système]`.
+  # git_native : author=committer=humain (le pod commite EN TANT QUE l'humain). Irrésoluble →
+  # fail-closed.
+  defp allowed_emails(:payload, role) do
+    case Fleet.Credentials.ForgeIdentity.for_role(role) do
+      {:ok, id} -> Fleet.Credentials.ForgeIdentity.allowed_emails(:payload, id.author_email)
+      {:error, _} -> ["system@lcars.local"]
+    end
+  end
 
   # Z4 (A.1) — git_native : le pod commite EN TANT QUE l'humain (bwrap GIT_AUTHOR=humain) →
   # F-01 allows l'humain (via ForgeIdentity, même catalogue que le spawn). Irrésoluble → `[]`
