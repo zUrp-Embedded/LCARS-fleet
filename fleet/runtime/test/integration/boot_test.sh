@@ -22,7 +22,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UNIT="${ROOT}/etc/lcars-fleet.service"
 ENV_TPL="${ROOT}/etc/lcars-fleet.env.template"
 READINESS="${ROOT}/bin/lcars-readiness"
-RUNTIME_EXS="${ROOT}/rel/runtime.exs"
+RUNTIME_EXS="${ROOT}/config/runtime.exs"
 
 PASS=0
 FAIL=0
@@ -133,11 +133,9 @@ else
     ko "runtime.exs missing 'import Config'"
 fi
 
-if grep -q "config :fleet_pipeline, :coord_backend, Fleet.Coord" "$RUNTIME_EXS"; then
-    ok "runtime.exs wire-up coord_backend ch12 → Fleet.Coord"
-else
-    ko "runtime.exs missing coord_backend ch12 wire-up"
-fi
+# F180 : le wire-up `:fleet_pipeline, :coord_backend` a été RETIRÉ en R06
+# (gates consolidées gatekeeper). Ce grep cherchait un canon mort → KO forever.
+# Le wire-up courant `:fleet_starfleet, :coord_backend` est vérifié juste après.
 
 if grep -q "config :fleet_starfleet, :coord_backend, Fleet.Coord" "$RUNTIME_EXS"; then
     ok "runtime.exs wire-up coord_backend ch13 → Fleet.Coord"

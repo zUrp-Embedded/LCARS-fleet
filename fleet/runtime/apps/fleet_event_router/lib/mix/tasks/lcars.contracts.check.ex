@@ -198,12 +198,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # résiduel dans le gate-path coord, (b) `Gates` est pur — aucune délégation
   # `coord_backend()`/`CoordBackend` (la couture morte ne doit pas réapparaître).
   defp check_coord_backend_wired(root) do
+    # F043 fix : `soft_gate.ex` a été retiré en R06 (gates consolidées gatekeeper).
+    # `grep_lines/2` rend `[]` sur un fichier absent → cette moitié `notwired`
+    # passait TOUJOURS vide = vert-creux (la classe d'échec que ce checker existe
+    # pour prévenir). On grep désormais TOUT le lib coord (glob de fichiers RÉELS,
+    # pas un fichier mort) pour le placeholder `NotWiredYet` qui ne doit pas
+    # réapparaître dans le gate-path coord.
     notwired =
-      grep_lines(
-        Path.join(root, "apps/fleet_coord/lib/fleet/coord/soft_gate.ex"),
-        ~r/NotWiredYet/
-      )
-      |> Enum.map(fn {ln, _} -> "apps/fleet_coord/lib/fleet/coord/soft_gate.ex:#{ln}" end)
+      Path.wildcard(Path.join(root, "apps/fleet_coord/lib/**/*.ex"))
+      |> Enum.flat_map(fn file ->
+        file
+        |> grep_lines(~r/NotWiredYet/)
+        |> Enum.map(fn {ln, _} -> "#{Path.relative_to(file, root)}:#{ln}" end)
+      end)
 
     gates_coord_dep =
       Path.join(root, "apps/fleet_pipeline/lib/fleet/pipeline/gates.ex")
@@ -702,6 +709,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   defp do_strip_comment([c | rest], acc, in_str), do: do_strip_comment(rest, [c | acc], in_str)
 
+  # ⚠ PIÈGE VERT-CREUX (cf. F043) : sur un fichier ABSENT, `grep_lines` rend `[]`
+  # — indistinguable de « présent mais 0 match ». Un check « pas de résidu X dans
+  # le fichier Y » qui statue `pass` sur `evidence == []` passe donc TOUJOURS si Y
+  # a été supprimé. Pour un check de RÉSIDU, grep un glob de fichiers réels
+  # (`Path.wildcard`), pas un chemin de fichier unique potentiellement mort.
   defp grep_lines(path, regex) do
     case File.read(path) do
       {:ok, content} ->

@@ -31,7 +31,9 @@ check_app() {  # $1=app $2=test_glob $3=fichier_canon_attendu
 }
 
 # --- sub-brick mcp (R0.8.mcp) ---
-check_app fleet_mcp "" "priv/config/mcp-channels.yaml"
+# F174 : mcp-channels.yaml + tout le substrat channels retirés en MCP-D1 ;
+# fleet_mcp n'a plus de priv/. Le check exigeait un canon volontairement
+# supprimé → FAIL forever. fleet_mcp reste auto-suffisant sans ce fichier.
 
 echo "---"
 [ "$FAIL" -eq 0 ] && echo "GATE R0.8 : exit 0 — apps réabsorbées auto-suffisantes" || echo "GATE R0.8 : exit 1"

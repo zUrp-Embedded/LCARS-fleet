@@ -12,7 +12,7 @@
 # PAS de pipefail (mix test exit non-zéro sur fail ≠ échec d'exécution ; on juge sur "0 failures").
 set -u
 RT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$RT/apps/fleet_capprofile"
+APP="$RT/apps/fleet_cap_profile"
 cd "$APP" || exit 1
 FAIL=0
 echo "== Gate R0.7 — cap-profiles canon in-repo (fleet_capprofile auto-suffisant) =="
