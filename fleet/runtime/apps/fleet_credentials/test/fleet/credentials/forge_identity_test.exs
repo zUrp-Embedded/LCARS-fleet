@@ -1,11 +1,11 @@
-defmodule Fleet.Pipeline.ForgeIdentityTest do
+defmodule Fleet.Credentials.ForgeIdentityTest do
   @moduledoc """
   Z4 (forge-identité B') — l'author = l'humain du mandat (catalogue), le rôle = trailer
   `Co-authored-by: LCARS-<role>` vérifié. Tests purs (humain + catalogue injectés, zéro IO).
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pipeline.ForgeIdentity
+  alias Fleet.Credentials.ForgeIdentity
 
   @catalog %{
     "users" => %{

@@ -67,7 +67,7 @@ if config_env() != :test do
   # provisionné à l'install LCARS (onboarding live). Knob path : le remplir/déplacer
   # à l'install n'exige PAS de recompiler. Défaut placeholder `runtime/settings_users.yaml`.
   if path = System.get_env("LCARS_USERS_CATALOG") do
-    config :fleet_pipeline, users_catalog_path: path
+    config :fleet_credentials, users_catalog_path: path
   end
 
   # ============================================================

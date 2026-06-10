@@ -34,6 +34,8 @@ defmodule FleetCredentials.MixProject do
       {:fleet_cap_profile, in_umbrella: true},
       {:fleet_event_router, in_umbrella: true},
       {:jason, "~> 1.4"},
+      # Z4 — `Fleet.Credentials.ForgeIdentity` lit le catalogue `settings_users.yaml`.
+      {:yaml_elixir, "~> 2.12"},
       {:stream_data, "~> 1.0", only: [:dev, :test]}
     ]
   end

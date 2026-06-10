@@ -1,4 +1,4 @@
-defmodule Fleet.Pipeline.ForgeIdentity do
+defmodule Fleet.Credentials.ForgeIdentity do
   @moduledoc """
   Z4 (forge-identité B') — résout l'identité git d'un livrable : **author = l'humain
   du mandat**, le rôle LCARS étant porté par un trailer **vérifié** `Co-authored-by:
@@ -153,7 +153,7 @@ defmodule Fleet.Pipeline.ForgeIdentity do
 
   defp catalog_path(opts) do
     Keyword.get(opts, :catalog_path) ||
-      Application.get_env(:fleet_pipeline, :users_catalog_path) ||
+      Application.get_env(:fleet_credentials, :users_catalog_path) ||
       @placeholder_catalog
   end
 end
