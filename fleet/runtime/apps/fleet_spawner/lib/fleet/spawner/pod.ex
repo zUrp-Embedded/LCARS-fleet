@@ -92,8 +92,8 @@ defmodule Fleet.Spawner.Pod do
           # R-CORE.comm 2.2 — résultat reçu via l'event Bus task_queue.task_completed (struct %Fleet.Event{}) (completion).
           submitted_result: map() | nil,
           last_result: map() | nil,
-          # U4 — nom tmux session si TmuxBackend a lancé (sinon nil). do_release
-          # kill via TmuxBackend.kill_session/1 quand présent.
+          # Nom de la session tmux du pod (`lcars-pod-<id>` sur le sock PAR-POD, posé par
+          # LauncherPortBackend). Sert au kick/wake (PodTmux) et au teardown sock-aware (F124).
           tmux_session: String.t() | nil
         }
 
@@ -1133,15 +1133,23 @@ defmodule Fleet.Spawner.Pod do
     {:stop, :normal, new_state}
   end
 
-  # Teardown du backend du pod (mutuellement exclusif — un seul par lifecycle).
-  # U4 — TmuxBackend (RC long-lived) : kill_session via tmux. LauncherPortBackend : Port.close.
+  # Teardown du backend du pod. Port vivant → Port.close (le SIGTERM du holder bwrap fait tomber
+  # namespace+tmux+claude). Port déjà mort mais session bwrap/tmux/claude survivante → kill
+  # SOCK-AWARE (F124).
   defp teardown_backend(state) do
     cond do
       is_port(state.port) and Port.info(state.port) ->
         terminate_pod_port(state.port)
 
       is_binary(state.tmux_session) ->
-        Fleet.Spawner.LaunchBackend.TmuxBackend.kill_session(state.tmux_session)
+        # F124 : la session du pod bwrap (`lcars-pod-<id>`) vit sur le sock PAR-POD (PodTmux), PAS
+        # le serveur tmux par défaut. L'ancien `TmuxBackend.kill_session` ciblait le défaut → no-op
+        # silencieux → le claude sandboxé continuait à consommer l'OAuth. On kill via le sock par-pod
+        # (même geste que reap_orphan_pod) : kill-server tue tmux+claude, pkill tue le holder bwrap.
+        sock = Fleet.Spawner.PodTmux.sock_path(state.pod_id)
+        _ = System.cmd("tmux", ["-S", sock, "kill-server"], stderr_to_stdout: true)
+        _ = System.cmd("pkill", ["-9", "-f", state.pod_id], stderr_to_stdout: true)
+        :ok
 
       true ->
         :ok

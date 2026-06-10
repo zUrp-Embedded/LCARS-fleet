@@ -145,22 +145,12 @@ if config_env() != :test do
   end
 
   # ============================================================
-  # U4 — pivot pod RC long-lived (claude --remote-control via tmux)
+  # Backend de lancement : LauncherPortBackend (chaîne bwrap) — défaut et unique.
   # ============================================================
-  # TmuxBackend = claude --remote-control HORS bwrap (containment: none). Défaut = LauncherPortBackend
-  # (chaîne bwrap).
-  #
-  # ⚠️ QUARANTAINE 2026-06-02 (audit Codex P0-2/P1-2) : depuis la convergence ④ (le kick/wake passe par
-  # `PodTmux` = socket PAR-POD bwrap), le control-path de TmuxBackend est CASSÉ — il lance sur le tmux
-  # par défaut, que PodTmux ne cible pas → le pod boote mais ne reçoit JAMAIS de travail (split-brain).
-  # + containment: none. La voie documentée `LCARS_LAUNCH_BACKEND=tmux` ne suffit donc PLUS : il faut
-  # un opt-in EXPLICITE `LCARS_UNSAFE_ALLOW_HOST_TMUX=1` (POC dev sans bwrap uniquement, JAMAIS prod ;
-  # le pod reste non-kickable tant que TmuxBackend n'est pas re-câblé sur le sock par-pod OU supprimé —
-  # cf. CHANTIER-3-JOURNAL § reste). Le vrai fix (dispatch par backend, ou retrait complet) est différé.
-  if System.get_env("LCARS_LAUNCH_BACKEND") == "tmux" and
-       System.get_env("LCARS_UNSAFE_ALLOW_HOST_TMUX") == "1" do
-    config :fleet_spawner, :launch_backend, Fleet.Spawner.LaunchBackend.TmuxBackend
-  end
+  # TmuxBackend (claude --remote-control HORS bwrap, containment: none, control-path cassé depuis la
+  # convergence PodTmux 2026-06-02) a été SUPPRIMÉ (Fable F103). Le bloc d'opt-in quarantaine
+  # `LCARS_LAUNCH_BACKEND=tmux` + `LCARS_UNSAFE_ALLOW_HOST_TMUX=1` est retiré avec lui : il n'y a plus
+  # de backend hors-bwrap à activer. La chaîne bwrap est la seule voie (sanctuaire).
 
   # ============================================================
   # fleet_mcp — port HTTP pod-facing (PodTools transport :http +
