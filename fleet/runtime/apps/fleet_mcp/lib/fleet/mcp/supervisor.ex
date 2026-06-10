@@ -6,10 +6,16 @@ defmodule Fleet.MCP.Supervisor do
   Stratégie `:one_for_one`, `max_restarts: 3`, `max_seconds: 60` (DN).
   Enfants :
     - `Fleet.MCP.Server` (registry/lifecycle opaque) ;
-    - `Fleet.MCP.Bridge` (pont Phoenix.PubSub interne, mapping YAML
-      `mcp-bridge.yaml`) ;
     - `Fleet.MCP.PodTools` (HTTP transport pour `get_task`/`submit_result`)
       démarré SSI `:pod_facing_port` configuré.
+
+  Z7.3 (MCP-D1, 2026-06-10) — `Fleet.MCP.Bridge` RETIRÉ : pont PubSub↔channels
+  mort (re-broadcast vers 0 subscriber, les channels push `fleet-control.*` ayant
+  été retirés au chantier 7 ; `mcp_to_pubsub` demi-implémenté ; config purgée). Le
+  drive pod-facing vit dans `PodTools` (pull `get_task`/`submit_result`), PAS dans
+  un push channel. ⚠ "bridge" est homonyme : le pont **stdio→HTTP**
+  (`bin/fleet_mcp_stdio_bridge.py`, tests `bridge_*`) est VIVANT (transport drive),
+  rien à voir avec ce `Fleet.MCP.Bridge` PubSub mort.
 
   BL-021 chantier 7 — purge ADR-G C5.1 : retrait `ChannelHTTP.QueueOwner`,
   `PushDispatcher`, et l'enfant `channel_http_children` (Plug.Cowboy long-poll
@@ -36,8 +42,7 @@ defmodule Fleet.MCP.Supervisor do
   def init(opts) do
     children =
       [
-        {Fleet.MCP.Server, opts},
-        {Fleet.MCP.Bridge, opts}
+        {Fleet.MCP.Server, opts}
       ] ++ pod_facing_children(opts)
 
     Supervisor.init(children,

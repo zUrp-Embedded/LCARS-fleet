@@ -1,36 +1,29 @@
 defmodule Fleet.MCP.SchemaTest do
   @moduledoc """
-  Lot 1 — prouve que les configs canon `priv/config/mcp-channels.yaml`
-  et `mcp-bridge.yaml` (réabsorbés R0.8) valident contre leurs schemas dérivés
-  (`priv/schema/mcp-channels-v1.json` / `mcp-bridge-v1.json`), et que
+  Lot 1 — prouve que le canon `priv/config/mcp-channels.yaml` valide contre son
+  schema dérivé (`priv/schema/mcp-channels-v1.json`), et que
   `Fleet.MCP.Schema.validate/2` rejette les configs structurellement invalides
   (fail-fast boot). Pattern TDD identique Lot 0bis (PROVEN).
+
+  Z7.3 (2026-06-10) — les cas `mcp-bridge.yaml` retirés avec `Fleet.MCP.Bridge`
+  (husk mort, MCP-D1). `Schema.validate/2` reste générique (prouvé sur channels).
   """
   use ExUnit.Case, async: true
 
   alias Fleet.MCP.Schema
 
   @channels_schema Path.join([__DIR__, "..", "priv", "schema", "mcp-channels-v1.json"])
-  @bridge_schema Path.join([__DIR__, "..", "priv", "schema", "mcp-bridge-v1.json"])
 
   @canon_channels Path.join([__DIR__, "..", "priv", "config", "mcp-channels.yaml"])
-  @canon_bridge Path.join([__DIR__, "..", "priv", "config", "mcp-bridge.yaml"])
 
-  test "fixtures présentes (schemas + canon)" do
+  test "fixtures présentes (schema + canon)" do
     assert File.exists?(@channels_schema), "schema absent: #{@channels_schema}"
-    assert File.exists?(@bridge_schema), "schema absent: #{@bridge_schema}"
     assert File.exists?(@canon_channels), "canon absent: #{@canon_channels}"
-    assert File.exists?(@canon_bridge), "canon absent: #{@canon_bridge}"
   end
 
   test "le canon mcp-channels.yaml valide contre mcp-channels-v1.json" do
     canon = YamlElixir.read_from_file!(@canon_channels)
     assert :ok = Schema.validate(canon, @channels_schema)
-  end
-
-  test "le canon mcp-bridge.yaml valide contre mcp-bridge-v1.json" do
-    canon = YamlElixir.read_from_file!(@canon_bridge)
-    assert :ok = Schema.validate(canon, @bridge_schema)
   end
 
   test "channels : transport hors enum rejeté (fail-fast)" do
@@ -66,28 +59,6 @@ defmodule Fleet.MCP.SchemaTest do
     }
 
     assert {:error, [_ | _]} = Schema.validate(bad, @channels_schema)
-  end
-
-  test "bridge : direction requise manquante rejetée" do
-    bad = %{"bridges" => %{"mcp_to_pubsub" => [%{}]}}
-    assert {:error, [_ | _]} = Schema.validate(bad, @bridge_schema)
-  end
-
-  test "bridge : item mcp_to_pubsub incomplet rejeté" do
-    bad = %{
-      "bridges" => %{
-        "mcp_to_pubsub" => [%{"mcp_channel" => "fleet-control.*"}],
-        "pubsub_to_mcp" => [
-          %{
-            "pubsub_topic" => "fleet.events",
-            "event_type" => "coord.action.*",
-            "mcp_channel_template" => "fleet-control.{target_role}.coord"
-          }
-        ]
-      }
-    }
-
-    assert {:error, [_ | _]} = Schema.validate(bad, @bridge_schema)
   end
 
   test "schema introuvable → erreur taggée, pas d'exception" do

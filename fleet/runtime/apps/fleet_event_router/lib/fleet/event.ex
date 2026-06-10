@@ -57,9 +57,9 @@ defmodule Fleet.Event do
   hoisté). Pour les consommateurs dual-stack qui lisent encore `event["…"]` : un
   struct n'implémente pas `Access`, donc `event["event_type"]` y rendrait `nil`
   (cause du skip silencieux webhook→pipeline, B8 e2e). Le `payload` garde ses
-  propres clés (déjà string côté webhook JSON). 2ᵉ occurrence du besoin après
-  `Fleet.MCP.Bridge` (qui, lui, hoiste le payload — sémantique différente) →
-  helper canonique ici plutôt qu'une Nᵉ copie.
+  propres clés (déjà string côté webhook JSON). Helper canonique ici plutôt
+  qu'une copie par consommateur. (Réf historique `Fleet.MCP.Bridge` retirée —
+  Z7.3 husk mort.)
   """
   @spec to_string_map(t()) :: %{optional(String.t()) => any()}
   def to_string_map(%__MODULE__{} = e) do

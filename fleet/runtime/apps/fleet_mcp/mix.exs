@@ -27,14 +27,14 @@ defmodule Fleet.MCP.MixProject do
 
   def application do
     [
-      # `:fleet_event_router` : DÉPENDANCE OTP forcée pour ordering au
-      # boot release. `Fleet.MCP.Bridge.init/1` appelle
-      # `Phoenix.PubSub.subscribe(Fleet.PubSub, …)` (bridge.ex:60, registry
-      # Fleet.PubSub hébergé par fleet_event_router). Sans cette
-      # dépendance, l'ordre `release.applications` ne suffit pas (4e
-      # défaut deploy-time capté par Starfleet #576 : ArgumentError
-      # "unknown registry: Fleet.PubSub" au boot systemd live ; cascade
-      # `ensure_all_started` masquait — l'ordre release strict expose).
+      # `:fleet_event_router` : ex-DÉPENDANCE OTP forcée pour ordering au boot
+      # release — justifiée par `Fleet.MCP.Bridge.init/1` qui appelait
+      # `Phoenix.PubSub.subscribe(Fleet.PubSub, …)` (registry hébergé par
+      # fleet_event_router ; #576 "unknown registry: Fleet.PubSub" au boot live).
+      # Z7.3 (2026-06-10) : Bridge RETIRÉ → plus AUCUN usage de Fleet.PubSub dans
+      # fleet_mcp/lib → cette dépendance est désormais VESTIGIALE. Conservée ce
+      # passage (sibling umbrella toujours présent, retrait = changement d'ordre de
+      # boot → risque #576) ; candidate au retrait avec preuve (SIGNAL auditeur).
       # Pas de cycle (fleet_event_router ne dépend pas de fleet_mcp).
       extra_applications: [:logger, :fleet_event_router],
       mod: {Fleet.MCP.Application, []}

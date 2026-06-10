@@ -9,9 +9,9 @@ defmodule Fleet.MCP.Schema do
   (`ex_json_schema` + résolution draft-07).
 
   Usage :
-  - boot config fail-fast : `Fleet.MCP.Server.init/1` valide
-    `mcp-channels.yaml` contre `priv/schema/mcp-channels-v1.json` ;
-    `Fleet.MCP.Bridge.init/1` valide `mcp-bridge.yaml`.
+  - boot config fail-fast : validation `mcp-channels.yaml` contre
+    `priv/schema/mcp-channels-v1.json`. (Z7.3 — `Fleet.MCP.Bridge`/`mcp-bridge.yaml`
+    retirés ; ce helper reste générique, validation pure réutilisable.)
   - broadcast : validation event contre le schema du channel avant push
     (fail-fast `{:error, :schema_invalid, errors}` côté `Channel.broadcast/2`).
 

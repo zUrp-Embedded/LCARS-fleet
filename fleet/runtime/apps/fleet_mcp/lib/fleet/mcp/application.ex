@@ -7,11 +7,14 @@ defmodule Fleet.MCP.Application do
   Au boot (post-PoC ExMCP validé) — délégué à `Fleet.MCP.Supervisor` :
     - `Fleet.MCP.Server` (GenServer : registry + lifecycle bas-débit sérialisés
       — PAS un goulot)
-    - `Fleet.MCP.Bridge` (GenServer : subscribe Phoenix.PubSub bus interne,
-      mapping YAML `mcp-bridge.yaml`)
     - `Fleet.MCP.PodTools` (HTTP transport pour `get_task`/`submit_result`,
       démarré SSI `:pod_facing_port` configuré)
     - `Fleet.MCP.Schema` = fonctions pures (zéro process — Iron Law)
+
+  Z7.3 (MCP-D1, 2026-06-10) — `Fleet.MCP.Bridge` (pont PubSub↔channels) RETIRÉ :
+  husk mort (channels push retirés chantier 7, re-broadcast vers 0 subscriber).
+  Le drive vit dans `PodTools` (pull). NB homonyme : le pont stdio→HTTP
+  `bin/fleet_mcp_stdio_bridge.py` (transport drive, VIVANT) ≠ ce module mort.
 
   BL-021 chantier 7 — purge ADR-G C5.1 : retrait `Channel`, `ChannelHTTP`,
   `Channels.FleetControl/FleetForge`, `PushDispatcher`. PoC Channel Anthropic
