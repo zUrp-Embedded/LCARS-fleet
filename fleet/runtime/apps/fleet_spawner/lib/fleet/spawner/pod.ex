@@ -1595,6 +1595,10 @@ defmodule Fleet.Spawner.Pod do
 
   defp default_brief(state) do
     mandate = Keyword.get(state.opts || [], :mandate)
+    # F128 : interpoler le RÔLE résolu, ne pas hardcoder "engineer". Un gatekeeper (juge) sans
+    # mandat explicite ne doit PAS être amorcé "worker engineer" (priming I-CBC PASSE-9). Cadre
+    # neutre "pod LCARS (rôle X)" — le mandat (GateBrief pour le juge) porte la persona réelle.
+    role = Map.get(state.cap_profile.metadata, "name", "engineer")
 
     body =
       if is_binary(mandate) and mandate != "" do
@@ -1604,7 +1608,7 @@ defmodule Fleet.Spawner.Pod do
       end
 
     """
-    Salut. Tu es un worker LCARS (engineer, role pod #{state.pod_id}) ; cette session
+    Salut. Tu es un pod LCARS (rôle #{role}, pod #{state.pod_id}) ; cette session
     a été lancée par le fleet pour traiter une demande référencée ticket #{state.ticket_id}.
 
     Le fleet attend que tu utilises le tool MCP `submit_result` quand ton travail est

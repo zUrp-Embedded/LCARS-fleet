@@ -114,9 +114,15 @@ defmodule Fleet.Pilot.StageDispatcher do
           # `pid` du GenServer ; on impose le pod_id via `:pod_id`. `ts` le rend unique par hop.
           pod_id = "issue-#{number}-#{role}-#{ts}"
 
+          # F078 : le mandat role-aware (GateBrief I-CBC pour gatekeeper, body d'issue pour worker)
+          # est calculé UNE fois et sert au spawn-file ET au brief TaskQueue (que le pod pull via
+          # get_task). Sans ça, enqueue_mandate ré-enqueuait `issue["body"]` brut → le gatekeeper
+          # pullait le mandat BUILD exécutable au lieu du GateBrief → PASSE-9 recréé.
+          mandate = build_mandate(forge, repo, number, role, issue, forge_opts, route)
+
           spawn_opts =
             [
-              mandate: build_mandate(forge, repo, number, role, issue, forge_opts, route),
+              mandate: mandate,
               pod_id: pod_id
             ]
             |> maybe_put_project(project)
@@ -133,7 +139,7 @@ defmodule Fleet.Pilot.StageDispatcher do
                  ),
                {:ok, profile} <- loader.load(role),
                {:ok, _pid} <- spawner.spawn_pod(profile, "issue-#{number}", spawn_opts),
-               :ok <- enqueue_mandate(task_queue, pod_id, role, number, issue) do
+               :ok <- enqueue_mandate(task_queue, pod_id, role, number, mandate) do
             # Kick best-effort : le pod auto-kicke les workers ; le wake accélère le 1er get_task.
             _ = safe_wake(spawner, pod_id)
 
@@ -228,12 +234,14 @@ defmodule Fleet.Pilot.StageDispatcher do
   # `mcp__fleet__get_task` → `PodTools.get_task` → `TaskQueue.get_for_pod` (PAS un Read fichier).
   # MÊME mécanisme que `StageRunner.push_task_for_pod` (DN §8 « réutilise StageRunner ») : sans cet
   # enqueue, `TaskQueue.pod_status(pod_id) == nil` → le pod se croit bootstrap (rien à puller) → idle.
-  # Le `brief` = le corps de l'issue (le mandat de l'eng). `metadata.issue` corrèle au ticket.
-  defp enqueue_mandate(task_queue, pod_id, role, number, issue) do
+  # Le `brief` = le MANDAT role-aware déjà construit (build_mandate) : GateBrief I-CBC pour le
+  # gatekeeper, corps de l'issue pour un worker. F078 : c'était `issue["body"]` brut → le juge
+  # pullait le mandat BUILD exécutable (PASSE-9). `metadata.issue` corrèle au ticket.
+  defp enqueue_mandate(task_queue, pod_id, role, number, mandate) do
     attrs = %{
       ticket_id: "issue-#{number}",
       role: role,
-      brief: issue["body"] || "",
+      brief: mandate,
       metadata: %{"issue" => number}
     }
 

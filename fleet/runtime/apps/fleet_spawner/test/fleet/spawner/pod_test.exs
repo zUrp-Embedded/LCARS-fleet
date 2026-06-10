@@ -240,7 +240,8 @@ defmodule Fleet.Spawner.PodTest do
       # Ticket-driven : le brief est dans tickets/<ticket_id>.md, pas en prompt
       # canal-user (safety guardrail REPL).
       ticket = File.read!(Path.join(info.pod_dir, "tickets/ticket-1.md"))
-      assert ticket =~ "worker LCARS"
+      # F128 : cadre neutre + rôle interpolé (plus de priming "worker engineer").
+      assert ticket =~ "pod LCARS (rôle engineer"
       assert ticket =~ mandate
       assert ticket =~ "submit_result"
 
