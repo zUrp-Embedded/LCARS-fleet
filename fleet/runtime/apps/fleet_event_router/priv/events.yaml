@@ -16,13 +16,16 @@
 # n'en consomme aucune.
 events:
   # --- Pod lifecycle (Spawner.Pod) ---
-  pod.allocate: []
-  pod.transition: []
-  pod.release: []
+  # Z5 (nettoyage hollow producers) : `Spawner.Pod` n'émet QUE `pod.completed` + `pod.failed`
+  # (call-sites vérifiés). `pod.allocate`/`transition`/`release`/`terminated`/
+  # `refuse_pattern_match` étaient enregistrés mais JAMAIS produits (0 producteur, 0 consumer
+  # type-spécifique) = mensonge de registry (I-CBC : le registry doit refléter la réalité).
+  # Retirés ; à ré-ajouter AVEC un producteur si la progression pod devient observable.
   pod.completed: []
   pod.failed: []
-  pod.terminated: []
-  pod.refuse_pattern_match: []
+  # pod.drift : conservé — consommé par DriftMonitor (SF-D1) ; son producteur manquant
+  # (fleet_ipc_filter inexistant) = hollow CONSUMER côté starfleet (hors-fleet, non-négo #2),
+  # pas un hollow producer ; non touché ici.
   pod.drift: []
 
   # --- Credentials ---
