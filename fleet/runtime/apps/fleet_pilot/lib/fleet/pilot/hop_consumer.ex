@@ -85,6 +85,10 @@ defmodule Fleet.Pilot.HopConsumer do
     :task_queue,
     :spawner,
     :gatekeeper_pod_id_fun,
+    # F066 — boot du gatekeeper permanent en stage-mode (ensure_booted idempotent, gardé
+    # :gatekeeper_autoboot). Sans ça, en stage-only rien ne boote/registre le gatekeeper →
+    # pod_id/0 nil → toute escalade soft/terminal échoue {:error,:no_gatekeeper}.
+    :gatekeeper_boot_fun,
     # B (§L441) — escalades en attente, keyées par correlation_id (= task.id du
     # mandat d'éval). Valeur = contexte de reprise `%{n, role, payload, carte, stage}`.
     gate_evals: %{}
@@ -125,14 +129,37 @@ defmodule Fleet.Pilot.HopConsumer do
         spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
         gatekeeper_pod_id_fun:
           Keyword.get(opts, :gatekeeper_pod_id_fun, &Fleet.Pipeline.Gatekeeper.pod_id/0),
+        gatekeeper_boot_fun:
+          Keyword.get(opts, :gatekeeper_boot_fun, &Fleet.Pipeline.Gatekeeper.ensure_booted/0),
         gate_evals: %{}
       }
 
       Logger.info("fleet_pilot HopConsumer start repo=#{repo} remote=#{remote}")
-      {:ok, state}
+      # F066 : en stage-mode, le HopConsumer EST le chemin actif → il assure le gatekeeper
+      # permanent (handle_continue : boot hors init, OTP). Idempotent + gardé autoboot (no-op
+      # en test où gatekeeper_autoboot=false ; no-op si le path RAM l'a déjà booté).
+      {:ok, state, {:continue, :ensure_gatekeeper}}
     else
       {:error, missing} -> {:stop, {:missing_required_opt, missing}}
     end
+  end
+
+  @impl GenServer
+  def handle_continue(:ensure_gatekeeper, state) do
+    case state.gatekeeper_boot_fun.() do
+      {:ok, :disabled} ->
+        :ok
+
+      {:ok, pod_id} ->
+        Logger.info("HopConsumer: gatekeeper permanent assuré (pod=#{pod_id})")
+
+      {:error, reason} ->
+        Logger.warning(
+          "HopConsumer: ensure gatekeeper échoué (#{inspect(reason)}) — escalades KO"
+        )
+    end
+
+    {:noreply, state}
   end
 
   @impl GenServer
