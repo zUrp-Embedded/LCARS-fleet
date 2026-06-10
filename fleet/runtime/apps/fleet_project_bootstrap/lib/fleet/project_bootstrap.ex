@@ -27,7 +27,7 @@ defmodule Fleet.ProjectBootstrap do
   @spec prepare(pod_id :: String.t(), cap_profile :: struct(), opts :: keyword()) ::
           {:ok, bootstrap_result()} | {:error, term()}
   def prepare(pod_id, cap_profile, opts \\ []) do
-    with {:ok, pod_dir} <- Phase.Allocate.allocate(pod_id, cap_profile),
+    with {:ok, pod_dir} <- Phase.Allocate.allocate(pod_id, cap_profile, opts),
          {:ok, workspace, branch} <- Phase.Clone.clone_or_skip(pod_dir, cap_profile, opts),
          {:ok, claude_md_path} <- Phase.InitMimic.init_mimic(workspace, cap_profile),
          {:ok, creds_env} <- Phase.BindCredentials.bind_credentials(pod_dir, cap_profile),

@@ -52,6 +52,11 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
   # (helper invoqué dans le corps de test). Pas d'ETS (Iron Law — pas de
   # table partagée à posséder/transmettre).
   defp prepare!(pod_id, capp, opts, _ctx) do
+    # PB-D2 : `:pod_dir_base` requis (plus de défaut /tmp silencieux dans Allocate) → le test
+    # l'injecte EXPLICITEMENT. On utilise `System.tmp_dir!()` (et PAS `ctx.tmp_dir`) : le nom du
+    # tmp_dir ExUnit contient les `(...)` du nom de test → casse le `find \( … \)` d'un test.
+    # pod-<id> est unique (entier) → pas de collision ; on_exit nettoie.
+    opts = Keyword.put_new(opts, :pod_dir_base, System.tmp_dir!())
     {:ok, res} = ProjectBootstrap.prepare(pod_id, capp, opts)
     on_exit(fn -> File.rm_rf(res.pod_dir) end)
     res

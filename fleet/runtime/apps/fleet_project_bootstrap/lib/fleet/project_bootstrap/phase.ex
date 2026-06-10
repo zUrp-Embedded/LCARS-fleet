@@ -12,10 +12,20 @@ defmodule Fleet.ProjectBootstrap.Phase do
   """
 
   defmodule Allocate do
-    @moduledoc "Phase 1 — ALLOCATE pod_dir `/tmp/pod-<pod_id>/` (owner = system_user)."
-    @spec allocate(String.t(), struct()) :: {:ok, Path.t()} | {:error, term()}
-    def allocate(pod_id, _cap_profile) when is_binary(pod_id) and pod_id != "" do
-      pod_dir = Path.join(System.tmp_dir!(), "pod-#{pod_id}")
+    @moduledoc """
+    Phase 1 — ALLOCATE pod_dir = `<pod_dir_base>/pod-<id>`.
+
+    PB-D2 (2026-06-10) : le défaut **`/tmp`** (`System.tmp_dir!`) est RETIRÉ — il contredisait
+    ADR-E (les pods vivent sous `/home/<human>/pods/pod_<id>`, JAMAIS `/tmp` ; `PrivateTmp=yes`
+    + tmpfs bwrap orphelineraient les writes). Le `:pod_dir_base` est désormais **REQUIS** dans
+    `opts` : prod (#596) injecte la racine ADR-E calculée côté `Fleet.Spawner.Pod` (qui connaît
+    l'humain) ; les tests injectent leur `tmp_dir`. Pas de défaut silencieux qui réintroduirait
+    le piège `/tmp` si #596 réveille `prepare/3` (aujourd'hui le spawner emprunte direct `Clone`).
+    """
+    @spec allocate(String.t(), struct(), keyword()) :: {:ok, Path.t()} | {:error, term()}
+    def allocate(pod_id, _cap_profile, opts) when is_binary(pod_id) and pod_id != "" do
+      base = Keyword.fetch!(opts, :pod_dir_base)
+      pod_dir = Path.join(base, "pod-#{pod_id}")
 
       case File.mkdir_p(pod_dir) do
         :ok -> {:ok, pod_dir}
@@ -23,7 +33,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
       end
     end
 
-    def allocate(_, _), do: {:error, {:allocate_failed, :invalid_pod_id}}
+    def allocate(_, _, _), do: {:error, {:allocate_failed, :invalid_pod_id}}
   end
 
   defmodule Clone do
