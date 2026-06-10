@@ -25,7 +25,10 @@ else
 fi
 
 # 2. canon complet vendoré
-W=$(ls priv/canon/cap-profiles/*.yaml 2>/dev/null | wc -l)
+# Les `_*.yaml` (ex. `_baseline-git-denied.yaml`) NE SONT PAS des cap-profiles
+# workers mais des slices catalogue (lus par with_resolved_disallowed_tools/1) →
+# exclus du compte des 7 workers (sinon la gate sur-compte 8/7, faux négatif).
+W=$(find priv/canon/cap-profiles -maxdepth 1 -name '*.yaml' ! -name '_*' 2>/dev/null | wc -l)
 M=$(ls priv/canon/cap-profiles/monks/*.yaml 2>/dev/null | wc -l)
 I=$([ -f priv/canon/config/intensity-template.json ] && echo 1 || echo 0)
 if [ "$W" -eq 7 ] && [ "$M" -eq 18 ] && [ "$I" -eq 1 ]; then
