@@ -279,9 +279,7 @@ defmodule Fleet.SpawnerTest do
   end
 
   test "count_pods returns the number of active pods" do
-    initial = Fleet.Spawner.count_pods()
-    assert is_integer(initial)
-    assert initial >= 0
+    assert is_integer(Fleet.Spawner.count_pods())
 
     pod_id = "pod-count-#{System.unique_integer([:positive])}"
 
@@ -291,8 +289,11 @@ defmodule Fleet.SpawnerTest do
         allow_no_mandate: true
       )
 
-    # Mi14 : count_children reflète l'enfant actif dès {:ok} de start_child.
-    assert Fleet.Spawner.count_pods() >= initial + 1
+    # Mi14 : count_children reflète l'enfant actif dès {:ok} de start_child. Le pod que JE
+    # viens de spawner est actif → count ≥ 1. PAS d'assertion sur un DELTA `initial+1` : le
+    # registre pods est GLOBAL (singleton DynamicSupervisor) partagé entre tests async → un
+    # spawn/terminate concurrent fausse le delta (flaky observé). `≥ 1` est déterministe.
+    assert Fleet.Spawner.count_pods() >= 1
   end
 
   describe "wake_pod/1" do
