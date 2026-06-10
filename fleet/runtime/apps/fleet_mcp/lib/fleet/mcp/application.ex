@@ -2,19 +2,20 @@ defmodule Fleet.MCP.Application do
   @moduledoc """
   Application supervisor `fleet_mcp` (Lot 1 — Ring 4 MCP substrat).
 
-  DN : `ring4/fleet_mcp.md` + `ring4/mcp-channels-substrate.md`.
+  DN : `ring4/fleet_mcp.md`.
 
   Au boot (post-PoC ExMCP validé) — délégué à `Fleet.MCP.Supervisor` :
     - `Fleet.MCP.Server` (GenServer : registry + lifecycle bas-débit sérialisés
       — PAS un goulot)
     - `Fleet.MCP.PodTools` (HTTP transport pour `get_task`/`submit_result`,
       démarré SSI `:pod_facing_port` configuré)
-    - `Fleet.MCP.Schema` = fonctions pures (zéro process — Iron Law)
 
-  Z7.3 (MCP-D1, 2026-06-10) — `Fleet.MCP.Bridge` (pont PubSub↔channels) RETIRÉ :
-  husk mort (channels push retirés chantier 7, re-broadcast vers 0 subscriber).
-  Le drive vit dans `PodTools` (pull). NB homonyme : le pont stdio→HTTP
-  `bin/fleet_mcp_stdio_bridge.py` (transport drive, VIVANT) ≠ ce module mort.
+  Z7.3 / Z5 (MCP-D1, 2026-06-10) — substrat channels MORT retiré : `Fleet.MCP.Bridge`
+  (pont PubSub↔channels, re-broadcast vers 0 subscriber, channels push retirés chantier 7)
+  + sa cascade `Fleet.MCP.Schema` / `mcp-channels.yaml` / `mcp-channels-v1.json` (validation
+  config jamais chargée au runtime, 0 caller après le retrait du Bridge). Le drive vit dans
+  `PodTools` (pull). NB homonyme : le pont stdio→HTTP `bin/fleet_mcp_stdio_bridge.py`
+  (transport drive, VIVANT) ≠ ces modules morts.
 
   BL-021 chantier 7 — purge ADR-G C5.1 : retrait `Channel`, `ChannelHTTP`,
   `Channels.FleetControl/FleetForge`, `PushDispatcher`. PoC Channel Anthropic
