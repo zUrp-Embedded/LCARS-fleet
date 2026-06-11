@@ -154,8 +154,18 @@ defmodule Fleet.Pilot.StageDispatcher do
             {:ok, {:spawned, pod_id, role}}
           else
             {:error, _} = err ->
+              # F181 : une étape POST-verrou a échoué (post_comment / spawn / enqueue). Le verrou
+              # `lcars-in-flight` est (peut-être) posé → sans compensation, le poller SKIP l'issue à
+              # jamais (stuck). On compense : kill best-effort du pod (pod_id déterministe ; no-op s'il
+              # n'a jamais spawné ou si enqueue a échoué pod-vivant → pas de pod orphelin), PUIS retrait
+              # du verrou (best-effort) → le prochain tick re-dispatche proprement (pas de double-spawn :
+              # plus de pod vivant). L'erreur est propagée (jamais d'avance silencieuse).
+              _ = safe_kill(spawner, pod_id)
+              _ = forge.remove_label(repo, number, @in_flight_label, forge_opts)
+
               Logger.warning(
-                "StageDispatcher: spawn role=#{role} issue=#{repo}##{number} → #{inspect(err)}"
+                "StageDispatcher: spawn role=#{role} issue=#{repo}##{number} → #{inspect(err)} " <>
+                  "(verrou retiré, pod tué — re-dispatch au prochain tick)"
               )
 
               err
@@ -261,6 +271,14 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   defp safe_wake(spawner, pod_id) do
     if function_exported?(spawner, :wake_pod, 1), do: spawner.wake_pod(pod_id), else: :ok
+  rescue
+    _ -> :ok
+  end
+
+  # F181 — compensation best-effort : tue le pod (s'il a spawné) avant de retirer le verrou.
+  # No-op silencieux si le spawner n'expose pas `kill_pod/1` ou si le pod n'existe pas.
+  defp safe_kill(spawner, pod_id) do
+    if function_exported?(spawner, :kill_pod, 1), do: spawner.kill_pod(pod_id), else: :ok
   rescue
     _ -> :ok
   end

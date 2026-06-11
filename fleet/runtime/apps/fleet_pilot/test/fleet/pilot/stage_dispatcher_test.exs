@@ -68,6 +68,12 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
     # F077 : le mandat juge lit le result du prédécesseur (option B). Stub : forge_opts[:_test_pred].
     def get_predecessor_result(_repo, _n, opts), do: Keyword.get(opts, :_test_pred, :none)
+
+    # F181 : compensation — retrait du verrou sur échec post-verrou.
+    def remove_label(_repo, _n, label, _opts) do
+      send(self(), {:removed_label, label})
+      {:ok, :removed}
+    end
   end
 
   defmodule StubLoader do
@@ -99,6 +105,12 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       send(self(), {:woke, pod_id})
       :ok
     end
+
+    # F181 : compensation — kill best-effort du pod avant retrait du verrou.
+    def kill_pod(pod_id) do
+      send(self(), {:killed, pod_id})
+      :ok
+    end
   end
 
   defmodule StubTaskQueue do
@@ -106,6 +118,11 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       send(self(), {:enqueued, pod_id, attrs})
       {:ok, %{id: "task-1"}}
     end
+  end
+
+  # F181 : broker qui échoue tout enqueue → simule un échec POST-verrou (pod déjà spawné).
+  defmodule FailTaskQueue do
+    def enqueue(_pod_id, _attrs), do: {:error, :broker_down}
   end
 
   defp dispatch_opts(extra \\ []) do
@@ -163,6 +180,20 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # Le MÊME mandat juge est enqueué (sinon le pod pullerait le body brut via get_task → PASSE-9).
       assert_received {:enqueued, "issue-42-gatekeeper-1700000000", attrs}
       assert attrs.brief == mandate
+    end
+
+    test "F181 : échec POST-verrou (enqueue KO) → verrou retiré + pod tué (pas de stuck)" do
+      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      opts = dispatch_opts(task_queue: FailTaskQueue)
+
+      assert {:error, {:enqueue_failed, :broker_down}} =
+               StageDispatcher.dispatch_issue(payload, opts)
+
+      # le pod avait spawné → tué (sinon orphelin) ; le verrou lcars-in-flight → retiré (sinon le
+      # poller skipperait l'issue à jamais).
+      assert_received {:spawned, "issue-42", _}
+      assert_received {:killed, "issue-42-engineer-1700000000"}
+      assert_received {:removed_label, "lcars-in-flight"}
     end
 
     test "skip in_flight : pas de spawn" do

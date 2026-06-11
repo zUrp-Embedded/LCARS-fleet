@@ -68,8 +68,13 @@ defmodule Fleet.Pilot.Application do
 
       _ ->
         case Keyword.get(Application.get_env(:fleet_pilot, :forge, []), :base_url) do
-          base when is_binary(base) and base != "" -> "#{base}/#{repo}.git"
-          _ -> nil
+          # F055 : trim du slash final (symétrie avec StageDispatcher.forge_base_url + ForgeClient.
+          # resolve_config) — sinon `http://forge//repo.git` (double slash → remote invalide).
+          base when is_binary(base) and base != "" ->
+            "#{String.trim_trailing(base, "/")}/#{repo}.git"
+
+          _ ->
+            nil
         end
     end
   end
