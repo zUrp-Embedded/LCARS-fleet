@@ -1,19 +1,17 @@
 defmodule Fleet.Credentials.ForgeIdentityTest do
   @moduledoc """
-  Z4 (forge-identité B') — l'author = l'humain du mandat (catalogue), le rôle = trailer
-  `Co-authored-by: LCARS-<role>` vérifié. Tests purs (humain + catalogue injectés, zéro IO).
+  Z4 (forge-identité B') — l'author = l'humain du mandat (identité dérivée de l'OS),
+  le rôle = trailer `Co-authored-by: LCARS-<role>` vérifié. Tests purs (humain +
+  identité injectés via `:identity` — zéro IO ; la dérivation OS réelle git config/GECOS
+  est validée en deploy-env, non hermétique en unit).
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Credentials.ForgeIdentity
 
-  @catalog %{
-    "users" => %{
-      "lordzurp" => %{"name" => "Lord Zurp", "email" => "lordzurp.dev@gmail.com"}
-    }
-  }
-
-  defp opts, do: [human: "lordzurp", catalog: @catalog]
+  # `:identity` court-circuite la dérivation OS (et l'override config) → assemblée testable.
+  defp opts,
+    do: [human: "lordzurp", identity: %{name: "Lord Zurp", email: "lordzurp.dev@gmail.com"}]
 
   test "for_role : author/committer = l'humain (pas le rôle)" do
     assert {:ok, id} = ForgeIdentity.for_role("engineer", opts())
@@ -43,23 +41,13 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
     assert ForgeIdentity.system_email() == "system@lcars.local"
   end
 
-  test "fail-loud : humain absent du catalogue → {:error, {:human_not_in_catalog, _}}" do
-    assert {:error, {:human_not_in_catalog, "inconnu"}} =
-             ForgeIdentity.for_role("engineer", human: "inconnu", catalog: @catalog)
-  end
-
-  test "fail-loud : entrée catalogue incomplète (email manquant) → {:error, _}" do
-    bad = %{"users" => %{"lordzurp" => %{"name" => "Lord Zurp"}}}
-
-    assert {:error, {:catalog_entry_invalid, "lordzurp"}} =
-             ForgeIdentity.for_role("engineer", human: "lordzurp", catalog: bad)
-  end
-
-  test "fail-loud : catalogue introuvable (path bidon, pas d'injection) → {:error, _}" do
-    assert {:error, {:catalog_unreadable, _path, _reason}} =
+  test "pas de catalogue : un humain quelconque résout TOUJOURS (on n'over-filtre pas)" do
+    # `:identity` injecté → l'assemblée réussit sans aucun catalogue ni fichier, pour
+    # n'importe quel login. Plus de fail-loud {:human_not_in_catalog}.
+    assert {:ok, %{human: "qui-que-ce-soit", author_email: "x@y.tld"}} =
              ForgeIdentity.for_role("engineer",
-               human: "lordzurp",
-               catalog_path: "/nonexistent/settings_users.yaml"
+               human: "qui-que-ce-soit",
+               identity: %{name: "X", email: "x@y.tld"}
              )
   end
 end

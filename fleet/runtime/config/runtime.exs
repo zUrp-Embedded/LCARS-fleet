@@ -90,12 +90,9 @@ if config_env() != :test do
     config :fleet_credentials, credentials_root: path
   end
 
-  # Z4 (forge-identité B') — catalogue humain→{name,email} (`Fleet.Pipeline.ForgeIdentity`),
-  # provisionné à l'install LCARS (onboarding live). Knob path : le remplir/déplacer
-  # à l'install n'exige PAS de recompiler. Défaut placeholder `runtime/settings_users.yaml`.
-  if path = System.get_env("LCARS_USERS_CATALOG") do
-    config :fleet_credentials, users_catalog_path: path
-  end
+  # Z4 (forge-identité B') — l'identité git de l'humain est DÉRIVÉE de l'OS (git config →
+  # GECOS → login), plus de catalogue `settings_users.yaml` (doctrine 2026-06-11 : si l'user
+  # existe sur le système, c'est un humain de la fleet, on n'over-filtre pas). Aucun knob.
 
   # ============================================================
   # fleet_event_router (ch11) — webhook Gitea + signaux OS

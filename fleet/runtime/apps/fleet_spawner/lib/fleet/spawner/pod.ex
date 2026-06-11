@@ -910,9 +910,11 @@ defmodule Fleet.Spawner.Pod do
           # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. (Défaut /run/lcars/tmux-sock partagé.)
           |> Map.put("LCARS_TMUX_SOCK_BASE", Fleet.Spawner.PodTmux.sock_base())
           # Le pod est celui de l'HUMAIN : creds ET binaire vendor suivent /home/<human> (même règle que
-          # pod_dir). Quel binaire = robuste ici (depuis ~/.local/bin, pas le pari `command -v`). Tourner
-          # SOUS l'UID de l'humain (ownership/perms/multi-user gratis OS, drop systemd-run --uid) = chantier
-          # substrat (cf. journal § reste) — orthogonal et complémentaire à ce qui suit.
+          # pod_dir). Quel binaire = robuste ici (depuis ~/.local/bin, pas le pari `command -v`). Le pod
+          # tourne SOUS l'UID de l'humain PAR CONSTRUCTION : le daemon tourne *as* l'humain (unit
+          # `User=<humain>`, doctrine 2026-06-11 — chaque humain = SA fleet sous son user), le pod = Port
+          # BEAM hérite cet UID → ownership/perms/isolation OS gratis, PAS de systemd-run --uid. (Seul
+          # starfleet a un user dédié, hors-fleet.)
           |> Map.put("CLAUDE_DIR", claude_dir_for(human))
           |> maybe_put_vendor_bin(human)
           |> maybe_put_pod_cwd(state)

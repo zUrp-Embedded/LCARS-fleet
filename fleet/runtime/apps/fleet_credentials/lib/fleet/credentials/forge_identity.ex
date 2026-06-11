@@ -7,30 +7,31 @@ defmodule Fleet.Credentials.ForgeIdentity do
 
   ## D'où vient l'humain
 
-  L'humain du mandat = **l'user du process runtime** (`id -un`). Décision 2026-06-09
-  (cf. `Fleet.Spawner.Pod` : « sur cette instance les SEULS users sont les users fleet
-  → l'user courant EST l'humain » ; le pod hérite de cet UID). Pas de défaut littéral
-  (un défaut masque un trou de câblage — I-CBC) : irrésoluble → fail-loud.
+  L'humain du mandat = **l'user du process runtime** (`id -un`). Doctrine 2026-06-11 :
+  la fleet ENTIÈRE tourne sous l'user OS de l'humain qui la lance (`User=<humain>`) —
+  chaque humain = sa fleet sous son user, isolation OS par construction ; le pod (Port
+  BEAM) hérite cet UID. Donc l'user courant EST l'humain. Pas de défaut littéral
+  (masquerait un trou de câblage — I-CBC) : `id -un` irrésoluble → fail-loud.
 
-  ## D'où vient son name/email git
+  ## D'où vient son name/email git — l'OS, pas un catalogue
 
-  D'un **catalogue** `settings_users.yaml` provisionné à l'install LCARS (onboarding
-  live — DN installeur déférée). Format :
+  Doctrine 2026-06-11 : **si l'user existe sur le système, c'est un humain de la fleet**
+  — on ne re-filtre pas par un catalogue (supprimé). L'identité git se DÉRIVE de l'OS,
+  dans l'ordre :
 
-      users:
-        <login>:
-          name:  "Prénom Nom"
-          email: "addr@exemple.tld"
+    * **name**  : `git config --global user.name` (le daemon tourne *as* l'humain → lit
+      son `~/.gitconfig`, l'identité avec laquelle il commite DÉJÀ) → sinon GECOS
+      (`getent passwd`) → sinon le login.
+    * **email** : `git config --global user.email` → sinon `<login>@<hostname>`
+      (convention git par défaut).
 
-  Chemin : `opts[:catalog_path]` > `config :fleet_credentials, :users_catalog_path`
-  (env `LCARS_USERS_CATALOG`) > placeholder `runtime/settings_users.yaml`. Le path est
-  un **knob** : le remplir/déplacer à l'install n'exige pas de recompiler. Humain absent
-  du catalogue OU fichier illisible → **fail-loud** (pas d'identité devinée).
+  Aucune lecture de fichier, aucun knob à provisionner, aucun fail-loud « humain absent
+  du catalogue » : un user OS ⇒ toujours une identité. (Seam test : `opts[:identity]`
+  ou `config :fleet_credentials, :forge_identity_override` — `git config` varie par runner.)
 
   ## Trailer rôle
 
-  `Co-authored-by: LCARS-<role> <<role>@lcars.local>` — l'email `<role>@lcars.local`
-  matche l'ancienne identité role-based (compat F-01) ; le trailer est ce que la gate
+  `Co-authored-by: LCARS-<role> <<role>@lcars.local>` — le trailer est ce que la gate
   F-01 vérifie (présence + rôle ↔ stage). Pure string, vérifiable mécaniquement.
 
   ## allowed_emails (gate F-01)
@@ -41,12 +42,6 @@ defmodule Fleet.Credentials.ForgeIdentity do
       `[human_email, "system@lcars.local"]`.
   """
 
-  # F029 : défaut ABSOLU (chemin canonique d'install, cf. etc/lcars-fleet.env.template).
-  # Un chemin RELATIF se résoudrait contre le cwd du daemon (WorkingDirectory=/var/lib/lcars)
-  # → fichier inexistant en release → CHAQUE spawn échoue à maybe_put_git_identity (outage
-  # fleet-wide au lieu d'un fail clair). Le placeholder reste rempli à l'install ; l'override
-  # `LCARS_USERS_CATALOG` (runtime.exs) le surcharge.
-  @placeholder_catalog "/etc/fleet/settings_users.yaml"
   @role_email_domain "lcars.local"
   @system_email "system@lcars.local"
 
@@ -62,10 +57,10 @@ defmodule Fleet.Credentials.ForgeIdentity do
 
   @doc """
   Identité git complète pour un `role` (author=humain + trailer rôle). `opts` :
-  `:human` (override, défaut `id -un`), `:catalog_path` (override), `:catalog`
-  (map injectée directement — tests, court-circuite la lecture fichier).
+  `:human` (override, défaut `id -un`), `:identity` (map `%{name, email}` injectée —
+  tests, court-circuite la dérivation OS).
 
-  `{:ok, identity}` | `{:error, reason}` (fail-loud : humain/catalogue irrésoluble).
+  `{:ok, identity}` | `{:error, reason}` (fail-loud uniquement si `id -un` irrésoluble).
   """
   @spec for_role(String.t(), keyword()) :: {:ok, identity()} | {:error, term()}
   def for_role(role, opts \\ []) when is_binary(role) and role != "" do
@@ -120,67 +115,79 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   # Résout {name, email, human}. Override config `:forge_identity_override` (map
-  # %{name, email, human?}) court-circuite TOUT (seam test : `id -un` varie par runner,
-  # le catalogue n'existe pas en test) → tous les callers (pod.ex/hop_consumer/executor)
-  # obtiennent une identité fixe. Sinon : humain (`id -un`) → lookup catalogue.
+  # %{name, email, human?}) court-circuite TOUT (seam test : `id -un`/`git config`
+  # varient par runner). Un `:identity` explicite (forge_identity_test) désactive
+  # l'override pour tester la VRAIE assemblée. Sinon : humain (`id -un`) → identité OS.
   defp resolve_identity(opts) do
     override = Application.get_env(:fleet_credentials, :forge_identity_override)
-    # un `:catalog`/`:catalog_path` explicite (forge_identity_test teste la VRAIE résolution)
-    # désactive l'override — sinon l'override gagne (seam test pour les callers réels).
-    explicit_catalog? = Keyword.has_key?(opts, :catalog) or Keyword.has_key?(opts, :catalog_path)
+    explicit_identity? = Keyword.has_key?(opts, :identity)
 
     case override do
       %{name: name, email: email} = ov
-      when is_binary(name) and is_binary(email) and not explicit_catalog? ->
+      when is_binary(name) and is_binary(email) and not explicit_identity? ->
         {:ok, %{name: name, email: email, human: Map.get(ov, :human, "override")}}
 
       _ ->
-        with {:ok, human} <- resolve_human(opts),
-             {:ok, %{name: name, email: email}} <- lookup(human, opts) do
-          {:ok, %{name: name, email: email, human: human}}
+        with {:ok, human} <- resolve_human(opts) do
+          {:ok, id} = os_identity(human, opts)
+          {:ok, Map.put(id, :human, human)}
         end
     end
   end
 
-  defp lookup(human, opts) do
-    with {:ok, catalog} <- load_catalog(opts),
-         %{} = users <- Map.get(catalog, "users", %{}),
-         %{} = entry <- Map.get(users, human) do
-      name = entry["name"]
-      email = entry["email"]
-
-      if is_binary(name) and name != "" and is_binary(email) and email != "" do
+  # Identité OS de l'humain. `opts[:identity]` (test) court-circuite. Sinon dérive :
+  # git config (l'identité de commit du humain) → GECOS → login ; email → <login>@<host>.
+  # Ne FAIL JAMAIS : un user OS ⇒ toujours une identité (« on n'over-filtre pas »).
+  defp os_identity(human, opts) do
+    case Keyword.get(opts, :identity) do
+      %{name: name, email: email} when is_binary(name) and is_binary(email) ->
         {:ok, %{name: name, email: email}}
-      else
-        {:error, {:catalog_entry_invalid, human}}
-      end
-    else
-      nil -> {:error, {:human_not_in_catalog, human}}
-      {:error, _} = err -> err
-      _ -> {:error, {:catalog_malformed, human}}
-    end
-  end
-
-  # `:catalog` injecté (tests) court-circuite le fichier. Sinon lecture YAML fail-loud.
-  defp load_catalog(opts) do
-    case Keyword.get(opts, :catalog) do
-      %{} = c ->
-        {:ok, c}
 
       _ ->
-        path = catalog_path(opts)
-
-        case YamlElixir.read_from_file(path) do
-          {:ok, %{} = data} -> {:ok, data}
-          {:ok, _} -> {:error, {:catalog_malformed, path}}
-          {:error, reason} -> {:error, {:catalog_unreadable, path, reason}}
-        end
+        name = git_config("user.name") || gecos_name(human) || human
+        email = git_config("user.email") || "#{human}@#{hostname()}"
+        {:ok, %{name: name, email: email}}
     end
   end
 
-  defp catalog_path(opts) do
-    Keyword.get(opts, :catalog_path) ||
-      Application.get_env(:fleet_credentials, :users_catalog_path) ||
-      @placeholder_catalog
+  # `git config --global --get <key>` du humain (daemon tourne *as* lui → ~/.gitconfig).
+  # git absent / clé non set → nil (→ fallback).
+  defp git_config(key) do
+    case System.cmd("git", ["config", "--global", "--get", key], stderr_to_stdout: true) do
+      {out, 0} -> blank_to_nil(String.trim(out))
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
+
+  # GECOS (champ 5 de `getent passwd`, avant la 1re virgule) = nom complet, ou nil.
+  defp gecos_name(human) do
+    case System.cmd("getent", ["passwd", human], stderr_to_stdout: true) do
+      {line, 0} ->
+        line
+        |> String.trim()
+        |> String.split(":")
+        |> Enum.at(4, "")
+        |> String.split(",")
+        |> List.first()
+        |> blank_to_nil()
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp hostname do
+    case :inet.gethostname() do
+      {:ok, h} -> List.to_string(h)
+      _ -> "localhost"
+    end
+  end
+
+  defp blank_to_nil(nil), do: nil
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(s) when is_binary(s), do: s
 end

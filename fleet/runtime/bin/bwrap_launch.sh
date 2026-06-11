@@ -45,9 +45,10 @@
 #                                 sur $POD_DIR/<repo> pour un pod-projet).
 #
 # Identité git (Z4 forge-identité B') : GIT_AUTHOR_*/GIT_COMMITTER_* = l'HUMAIN du mandat,
-# FORWARDÉS depuis l'env (posés par le spawner `pod.ex` via `Fleet.Credentials.ForgeIdentity` →
-# catalogue `settings_users.yaml`). PLUS dérivés de $ROLE : le rôle ne signe plus l'identité (il
-# passe en trailer `Co-authored-by: LCARS-<role>`, ajouté par le pod). + GIT_CONFIG_GLOBAL=/dev/null
+# FORWARDÉS depuis l'env (posés par le spawner `pod.ex` via `Fleet.Credentials.ForgeIdentity` qui
+# DÉRIVE de l'OS host : `git config` du humain → GECOS → login ; plus de catalogue). PLUS dérivés de
+# $ROLE : le rôle ne signe plus l'identité (il passe en trailer `Co-authored-by: LCARS-<role>`, ajouté
+# par le pod). + GIT_CONFIG_GLOBAL=/dev/null côté pod → git lit les GIT_AUTHOR_* forwardés, pas son global.
 # (l'env = SEULE source d'identité, déterministe). C'est le DÉFAUT COOPÉRATIF (un pod git-natif bien
 # élevé commite avec la bonne identité sans règle SP, façon tournevis). Ce n'est PAS une garantie de
 # sécurité — un shell peut surcharger l'env. La garantie F-01 vit côté MONDE : la gate
