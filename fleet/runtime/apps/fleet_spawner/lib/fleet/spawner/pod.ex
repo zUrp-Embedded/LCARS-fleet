@@ -861,7 +861,7 @@ defmodule Fleet.Spawner.Pod do
     # mort-vivant AVANT de relancer (sinon collision sock/process). Rend la recovery viable en prod
     # (le probe F7 le faisait à la main). Reaper périodique (orphelins jamais re-spawnés) = reste BL-036b.
     reap_orphan_pod(state.pod_id)
-    role = Map.get(state.cap_profile.metadata, "name", "engineer")
+    role = cap_profile_name(state.cap_profile)
 
     # R0.8-brick4 : plus de budget côté pod (OAuth pool, pas d'API). Le timeout
     # de réponse est géré par `monitor_timeout_ms/1` côté Pod GenServer
@@ -1092,7 +1092,7 @@ defmodule Fleet.Spawner.Pod do
             |> Map.merge(%{
               "workspace" => Path.join(state.pod_dir, "workspace"),
               "base_sha" => proj["base_sha"],
-              "role" => Map.get(state.cap_profile.metadata, "name", "engineer")
+              "role" => cap_profile_name(state.cap_profile)
             })
             |> maybe_put_carte_ctx(opts)
 
@@ -1386,6 +1386,10 @@ defmodule Fleet.Spawner.Pod do
     Path.join([root, scope, pod_id, "state.json"])
   end
 
+  # F122 : accesseur UNIQUE du rôle (= metadata.name). Avant, 3 sites inlinaient
+  # `Map.get(metadata, "name", "engineer")` (launch/payload/brief) tandis que la persistance
+  # state.json passait par ici (défaut "unknown") → un profil SANS metadata.name se lançait
+  # "engineer" mais persistait "unknown" (mésattribution silencieuse tout le hop). Tous unifiés ici.
   defp cap_profile_name(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
     Map.get(meta, "name") || Map.get(meta, :name) || "unknown"
   end
@@ -1612,7 +1616,7 @@ defmodule Fleet.Spawner.Pod do
     # F128 : interpoler le RÔLE résolu, ne pas hardcoder "engineer". Un gatekeeper (juge) sans
     # mandat explicite ne doit PAS être amorcé "worker engineer" (priming I-CBC PASSE-9). Cadre
     # neutre "pod LCARS (rôle X)" — le mandat (GateBrief pour le juge) porte la persona réelle.
-    role = Map.get(state.cap_profile.metadata, "name", "engineer")
+    role = cap_profile_name(state.cap_profile)
 
     body =
       if is_binary(mandate) and mandate != "" do
