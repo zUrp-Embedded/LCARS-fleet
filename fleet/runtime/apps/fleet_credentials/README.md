@@ -1,7 +1,7 @@
 # Fleet.Credentials
 
 **Date** : 2026-05-28
-**Dernière révision** : 2026-05-28 (rework post-audit L1)
+**Dernière révision** : 2026-06-11 (rework post-audit L1)
 **Statut** : actif — aligné ADR-F PROMOTED 2026-05-26
 **DERIVED FROM** : `01_architecture/adr-f-credentials-anthropic-natif.md` + `04_design-notes/ring0/fleet_credentials.md`
 
@@ -50,6 +50,7 @@ Deux slots cohabitent dans le même fichier :
   - `bridge_enabled` : profil bridge — scopes exacts dérivés au câblage
   - `mcp_oauth` : ajoute `user:mcp_servers` (pour les MCP-OAuth servers)
 - `Fleet.Credentials.PlanValidator` — gate **plan Pro/Max/Team/Enterprise** (F-AC-VALIDATE) : lit `claudeAiOauth.subscriptionType` directement depuis le fichier. Pas d'appel réseau, pas de SDK.
+- `Fleet.Credentials.ForgeAuth` — `git_env/0` : auth git **système-side** des ops forge privées (clone/fetch/ls-remote/push). **Source unique** (F095) consommée par `Fleet.Pipeline.Git`, `WorkspaceProvisioner`, `StageDispatcher`, `ProjectBootstrap.Phase.Clone`. Token injecté via env `GIT_CONFIG_*` (hors argv/`/proc/cmdline` — F087), jamais persisté dans `.git/config` (forge-cécité du pod). Config `:fleet_credentials, :forge_auth = %{url_prefix, token}` posée au boot. Absent → `[]`.
 
 ## Distribution — `share-claudeDir` per-humain (ADR-F décidé 2026-05-26)
 

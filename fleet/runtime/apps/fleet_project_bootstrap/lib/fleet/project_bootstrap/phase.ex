@@ -68,8 +68,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           with {_, 0} <-
                  System.cmd(
                    "git",
-                   forge_auth_args() ++ ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
-                   stderr_to_stdout: true
+                   ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
+                   stderr_to_stdout: true,
+                   env: Fleet.Credentials.ForgeAuth.git_env()
                  ),
                # #596 R1 (F-03) : si l'Executor a PINNÉ une base_sha (ls-remote hors-pod), on épingle
                # HEAD dessus AVANT la feature-branch. Élimine la fenêtre « le pod clone une base que
@@ -97,8 +98,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           ok
 
         _ ->
-          case System.cmd("git", ["-C", ws] ++ forge_auth_args() ++ ["fetch", "origin", sha],
-                 stderr_to_stdout: true
+          case System.cmd("git", ["-C", ws, "fetch", "origin", sha],
+                 stderr_to_stdout: true,
+                 env: Fleet.Credentials.ForgeAuth.git_env()
                ) do
             {_, 0} ->
               System.cmd("git", ["-C", ws, "reset", "--hard", sha], stderr_to_stdout: true)
@@ -135,10 +137,10 @@ defmodule Fleet.ProjectBootstrap.Phase do
         # --single-branch : la branche doc est orpheline ⇒ inutile de fetch le reste de l'historique.
         case System.cmd(
                "git",
-               forge_auth_args() ++
-                 ["clone"] ++
+               ["clone"] ++
                  ref_args ++ ["--branch", work_branch, "--single-branch", repo_url, doc],
-               stderr_to_stdout: true
+               stderr_to_stdout: true,
+               env: Fleet.Credentials.ForgeAuth.git_env()
              ) do
           {_, 0} ->
             {:ok, doc}
@@ -149,23 +151,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
       end
     end
 
-    # Auth git système-side pour cloner/fetcher une forge PRIVÉE (repo_path remote). Source unique :
-    # config `:fleet_pipeline, :forge_auth = %{url_prefix, token}` (même clé que `Fleet.Pipeline.Git.
-    # forge_auth_args`, lue ici sans dépendance compile pour éviter le cycle pipeline⇄bootstrap).
-    # Injecté en `-c http.<prefix>.extraheader` (option CLI, **non persistée** dans `.git/config` du
-    # workspace) : le clone s'authentifie côté MONDE, mais le pod hérite d'un remote SANS credential —
-    # barrière forge-aveugle préservée (DN forge-state-machine §4 ; cf. BL-045 unifier les helpers).
-    # Absent → `[]` (repo local `file://` / mirror : pas d'auth).
-    defp forge_auth_args do
-      case Application.get_env(:fleet_pipeline, :forge_auth) do
-        %{url_prefix: prefix, token: token}
-        when is_binary(prefix) and is_binary(token) and prefix != "" and token != "" ->
-          ["-c", "http.#{prefix}.extraheader=Authorization: token #{token}"]
-
-        _ ->
-          []
-      end
-    end
+    # F087/F095 — `forge_auth_args/0` (dup byte-à-byte de Fleet.Pipeline.Git, justifiée jadis par le
+    # cycle compile pipeline⇄bootstrap) RETIRÉE. Source unique `Fleet.Credentials.ForgeAuth.git_env/0`
+    # (fleet_credentials est en-dessous des deux apps → pas de cycle), token via env hors argv.
 
     # O5 (Brick 5) — `set_git_identity/2` RETIRÉ. Posait l'identité du rôle via `git config` dans le
     # `.git/config` du workspace : MUTABLE, le pod l'écrasait (`git config user.email …`) → identité

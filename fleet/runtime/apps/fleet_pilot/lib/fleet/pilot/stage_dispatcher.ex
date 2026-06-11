@@ -300,8 +300,8 @@ defmodule Fleet.Pilot.StageDispatcher do
   # Construit `%{repo_path, base_branch, base_sha}` pour le repo du ticket.
   # `base_url` ← `:forge_opts[:base_url]` ou config app ; `base_branch` ← `:base_branch`
   # (défaut "main"). Pas de forge configurée → `{:ok, nil}` (pod sans repo, ex. tests
-  # locaux). L'auth de clone/ls-remote est portée par le runtime (`forge_auth_args`),
-  # jamais par le pod (barrière §4).
+  # locaux). L'auth de clone/ls-remote est portée par le runtime (`Fleet.Credentials.ForgeAuth.
+  # git_env`, token via env), jamais par le pod (barrière §4).
   @spec default_project_resolver(String.t(), keyword()) ::
           {:ok, map() | nil} | {:error, term()}
   def default_project_resolver(repo, opts) do
@@ -333,9 +333,13 @@ defmodule Fleet.Pilot.StageDispatcher do
   # `git ls-remote <repo_url> <branch>` borné + auth runtime → SHA du tip (hors-pod).
   # Symétrique de `Fleet.Pipeline.Executor.ls_remote_sha` (même rôle F-03 R1).
   defp ls_remote_sha(repo_url, branch) do
-    args = Fleet.Pipeline.Git.forge_auth_args() ++ ["ls-remote", repo_url, branch]
+    # F087/F095 : token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth.
+    git_env = Fleet.Credentials.ForgeAuth.git_env()
 
-    task = Task.async(fn -> System.cmd("git", args, stderr_to_stdout: true) end)
+    task =
+      Task.async(fn ->
+        System.cmd("git", ["ls-remote", repo_url, branch], stderr_to_stdout: true, env: git_env)
+      end)
 
     case Task.yield(task, 15_000) || Task.shutdown(task, :brutal_kill) do
       {:ok, {out, 0}} ->

@@ -369,14 +369,14 @@ if config_env() != :test do
     config :fleet_pilot, hop_remote: remote
   end
 
-  # BL-045b — auth push runtime (`Fleet.Pipeline.Git.forge_auth_args` → extraheader, token
-  # HORS .git/config). Token système (lcars-system, write:repository). FORGE_PUSH_TOKEN
-  # prioritaire sur FORGE_TOKEN (le push exige write:repository, ≠ token poller read).
+  # BL-045b — auth push runtime (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token
+  # HORS argv ET HORS .git/config — F087/F095). Token système (lcars-system, write:repository).
+  # FORGE_PUSH_TOKEN prioritaire sur FORGE_TOKEN (le push exige write:repository, ≠ token poller read).
   forge_base = System.get_env("FORGE_BASE_URL")
   forge_push_token = System.get_env("FORGE_PUSH_TOKEN") || System.get_env("FORGE_TOKEN")
 
   if is_binary(forge_base) and is_binary(forge_push_token) do
-    config :fleet_pipeline, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
+    config :fleet_credentials, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
   end
 
   # NB cap-profiles / cartes : déjà couverts par `LCARS_CAPPROFILES_ROOT` (→ :fleet_cap_profile

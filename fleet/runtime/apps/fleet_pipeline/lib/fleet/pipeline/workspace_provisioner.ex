@@ -95,10 +95,11 @@ defmodule Fleet.Pipeline.WorkspaceProvisioner do
   end
 
   defp clone(workspace, repo_url) do
-    # BL-037 : clone système-side depuis une forge authentifiée → injecte le token forge `-c
-    # http.<prefix>.extraheader` (jamais persisté dans la config du clone). `[]` si non-configuré (bare).
-    case System.cmd("git", Fleet.Pipeline.Git.forge_auth_args() ++ ["clone", repo_url, workspace],
-           stderr_to_stdout: true
+    # BL-037 : clone système-side depuis une forge authentifiée. F087/F095 : token forge injecté via
+    # env (hors argv/cmdline), jamais persisté dans la config du clone. `[]` si non-configuré (bare).
+    case System.cmd("git", ["clone", repo_url, workspace],
+           stderr_to_stdout: true,
+           env: Fleet.Credentials.ForgeAuth.git_env()
          ) do
       {_out, 0} ->
         Logger.debug("fleet_pipeline workspace clone ok: #{workspace} <- #{repo_url}")
