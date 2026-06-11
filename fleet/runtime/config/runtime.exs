@@ -332,6 +332,15 @@ if config_env() != :test do
     config :fleet_pilot, :forge, forge_opts
   end
 
+  # F058/F059/F060 — login du compte SYSTÈME (propriétaire de FORGE_TOKEN). Les marqueurs
+  # forge (route / hop / result-block) ne font foi QUE s'ils sont écrits par ce login (un user
+  # forge qui en poste un faux est ignoré). Optionnel : si absent, ForgeClient le dérive une fois
+  # via `GET /user` (l'authentifié du token) et le cache. Le surcharger ici évite ce round-trip et
+  # lève toute ambiguïté en déploiement (token partagé, miroir, etc.).
+  if bot_login = System.get_env("FORGE_BOT_LOGIN") do
+    config :fleet_pilot, forge_bot_login: bot_login
+  end
+
   # ============================================================
   # A2/A3 — runtime STAGE-MODE (forge = machine à états) + BL-045b auth push
   # ============================================================

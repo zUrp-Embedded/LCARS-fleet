@@ -260,9 +260,13 @@ defmodule Fleet.Pilot.ForgeClient do
           {:ok, {String.t(), String.t()}} | :none | {:error, term()}
   def get_route(repo, issue_number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts),
+         {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+      # F058 : ne faire foi QUE des comments écrits par le compte SYSTÈME (bot). Un user forge
+      # (humain/attaquant) qui poste `[lcars-route:evil:stage]` pilotait sinon la navigation.
       comments
+      |> Enum.filter(&system_authored?(&1, bot))
       |> Enum.map(& &1["body"])
       |> Enum.reverse()
       |> Enum.find_value(:none, fn body -> parse_route_marker(body) end)
@@ -299,10 +303,15 @@ defmodule Fleet.Pilot.ForgeClient do
           {:ok, non_neg_integer()} | {:error, term()}
   def count_signed_hops(repo, issue_number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts),
+         {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+      # F059 : compter SEULEMENT les hops signés par le SYSTÈME — sinon un user forge forge des
+      # `[hop:role:sha]` pour gonfler le compteur et faire TRIPPER le budget anti-runaway (DoS rework).
+      # Bot irrésoluble → {:error} (via le with) : le caller NE rebondit PAS sur un budget non vérifiable.
       count =
         comments
+        |> Enum.filter(&system_authored?(&1, bot))
         |> Enum.map(& &1["body"])
         |> Enum.count(fn b -> is_binary(b) and Regex.match?(@hop_marker_rx, b) end)
 
@@ -322,9 +331,13 @@ defmodule Fleet.Pilot.ForgeClient do
           {:ok, map()} | :none | {:error, term()}
   def get_predecessor_result(repo, issue_number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts),
+         {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+      # F060 (le plus grave) : le bloc ```result nourrit le MANDAT DE JUGEMENT du gatekeeper. Ne
+      # l'extraire QUE de comments SYSTÈME — sinon un user forge injecte ce que le juge évalue.
       comments
+      |> Enum.filter(&system_authored?(&1, bot))
       |> Enum.map(& &1["body"])
       |> Enum.reverse()
       |> Enum.find_value(:none, &parse_result_block/1)
@@ -347,6 +360,48 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   def parse_result_block(_), do: nil
+
+  @doc false
+  # Pur (F058/F059/F060) : un comment est DE CONFIANCE ssi son auteur = le compte système (bot)
+  # de la fleet. Un user forge (humain/attaquant) a un autre login → ses marqueurs sont ignorés.
+  def system_authored?(comment, bot_login)
+      when is_map(comment) and is_binary(bot_login) and bot_login != "" do
+    get_in(comment, ["user", "login"]) == bot_login
+  end
+
+  def system_authored?(_comment, _bot), do: false
+
+  # Login du compte système (le propriétaire de FORGE_TOKEN). Config `:forge_bot_login` (déploiement)
+  # OU dérivé une fois via `GET /user` (l'authentifié du token), caché. Irrésoluble → `{:error}` :
+  # les callers refusent alors de faire foi de marqueurs non vérifiables (fail-closed).
+  defp forge_bot_login(config, opts) do
+    # opts (seam test) > config (déploiement) > dérivé /user (caché).
+    case Keyword.get(opts, :forge_bot_login) ||
+           Application.get_env(:fleet_pilot, :forge_bot_login) do
+      login when is_binary(login) and login != "" -> {:ok, login}
+      _ -> derive_bot_login(config)
+    end
+  end
+
+  defp derive_bot_login(config) do
+    case :persistent_term.get({__MODULE__, :bot_login}, :unset) do
+      login when is_binary(login) ->
+        {:ok, login}
+
+      :unset ->
+        case http_get(config, "/user") do
+          {:ok, %{"login" => login}} when is_binary(login) and login != "" ->
+            :persistent_term.put({__MODULE__, :bot_login}, login)
+            {:ok, login}
+
+          {:ok, _} ->
+            {:error, :bot_login_unresolved}
+
+          {:error, _} = err ->
+            err
+        end
+    end
+  end
 
   # ============================================================
   # HTTP plumbing
