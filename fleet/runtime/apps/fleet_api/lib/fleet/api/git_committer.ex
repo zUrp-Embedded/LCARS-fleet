@@ -147,9 +147,17 @@ defmodule Fleet.API.GitCommitter do
   end
 
   defp git_add_commit(cwd, file_path, user_id) do
-    with {_add_out, 0} <- System.cmd("git", ["add", file_path], cd: cwd, stderr_to_stdout: true),
+    # F008/F009 : séparateur `--` AVANT le path. Sans lui, un file_path commençant par `-`
+    # (`--renormalize`) que `safe_abs_path` laisse passer (Path.type relative) est interprété par
+    # git comme une OPTION (injection d'options). Et `git commit -- <pathspec>` borne le commit au
+    # SEUL fichier écrit (sans `--`, `commit` balaye tout l'index staged, y compris un changement
+    # pré-staged étranger sous un message qui ne le décrit pas).
+    with {_add_out, 0} <-
+           System.cmd("git", ["add", "--", file_path], cd: cwd, stderr_to_stdout: true),
          {commit_out, 0} <-
-           System.cmd("git", ["commit", "-m", "config: #{file_path} updated by #{user_id}"],
+           System.cmd(
+             "git",
+             ["commit", "-m", "config: #{file_path} updated by #{user_id}", "--", file_path],
              cd: cwd,
              stderr_to_stdout: true
            ),

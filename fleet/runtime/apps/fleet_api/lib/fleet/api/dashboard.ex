@@ -30,6 +30,15 @@ defmodule Fleet.API.Dashboard do
   """
 
   use Plug.Router
+  require EEx
+
+  # F007 : template compilé UNE FOIS au build (plus de `EEx.eval_file` par requête =
+  # re-lecture+recompilation à chaque hit, + plus de 500 runtime sur template absent côté route NON
+  # authentifiée). `function_from_file` génère `render_dashboard/1` au build ; un template manquant
+  # casse le BUILD (détecté tôt), pas une 500. `@external_resource` → recompile si le `.eex` change.
+  @dashboard_template Path.expand("../../../priv/dashboard/index.html.eex", __DIR__)
+  @external_resource @dashboard_template
+  EEx.function_from_file(:defp, :render_dashboard, @dashboard_template, [:assigns])
 
   # Static assets sous /dashboard/static (servis depuis priv/dashboard/static).
   # `at:` = URL prefix après le mount point parent. Le forward `/dashboard`
@@ -46,8 +55,7 @@ defmodule Fleet.API.Dashboard do
 
   # GET /dashboard (forward consomme le prefix, on voit "/" ici)
   get "/" do
-    template_path = template_path()
-    body = EEx.eval_file(template_path, assigns: %{title: "LCARS // V2 MAINFRAME"})
+    body = render_dashboard(%{title: "LCARS // V2 MAINFRAME"})
 
     conn
     |> put_resp_content_type("text/html; charset=utf-8")

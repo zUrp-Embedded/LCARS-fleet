@@ -171,9 +171,22 @@ defmodule Fleet.API.Rest do
   defp load_secret do
     path = Application.get_env(:fleet_api, :api_secret_path, "/etc/fleet/api-secret")
 
-    case File.read(path) do
-      {:ok, content} -> {:ok, String.trim(content)}
-      {:error, reason} -> {:error, reason}
+    # F017 : refuse un secret WORLD-readable (bit `other` de lecture). L'invariant documenté est
+    # root:lcars 600/640 (lisible par owner/groupe-daemon, JAMAIS par tout le monde). Sans ce
+    # check, un `/etc/fleet/api-secret` en 644 était accepté SILENCIEUSEMENT → tout user local lit
+    # le secret et forge le token. Fail-closed : un secret exposé ne sert pas (l'op doit corriger).
+    with {:ok, %File.Stat{mode: mode}} <- File.stat(path),
+         :ok <- check_secret_not_world_readable(path, mode),
+         {:ok, content} <- File.read(path) do
+      {:ok, String.trim(content)}
+    end
+  end
+
+  defp check_secret_not_world_readable(path, mode) do
+    if Bitwise.band(mode, 0o004) == 0 do
+      :ok
+    else
+      {:error, {:secret_world_readable, path, Bitwise.band(mode, 0o777)}}
     end
   end
 

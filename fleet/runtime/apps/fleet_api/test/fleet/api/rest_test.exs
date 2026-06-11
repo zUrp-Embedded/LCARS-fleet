@@ -14,6 +14,9 @@ defmodule Fleet.API.RestTest do
   setup %{tmp_dir: tmp_dir} do
     secret_path = Path.join(tmp_dir, "api-secret")
     File.write!(secret_path, "test-secret-1234")
+    # F017 : le secret doit respecter l'invariant non-world-readable (root:lcars 600/640) —
+    # `File.write!` laisse l'umask (souvent 644 = world-readable) que `load_secret` refuse désormais.
+    File.chmod!(secret_path, 0o600)
     Application.put_env(:fleet_api, :api_secret_path, secret_path)
 
     Bus.subscribe()
