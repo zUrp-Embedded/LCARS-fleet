@@ -613,12 +613,10 @@ defmodule Fleet.Spawner.Pod do
   # Fail-loud si HOME/user irrésoluble (impossible en pratique, mais jamais rattrapé en silence).
   defp runtime_home, do: System.user_home!()
 
-  defp runtime_user do
-    case System.cmd("id", ["-un"], stderr_to_stdout: true) do
-      {out, 0} -> String.trim(out)
-      other -> raise "runtime_user: user courant irrésoluble (#{inspect(other)})"
-    end
-  end
+  # F027 : source UNIQUE `Fleet.Credentials.Human` (plus de `id -un` shellé en double — sinon
+  # spawn-ownership et commit-identity peuvent diverger, casse F-01). Fail-loud (raise) conservé,
+  # rattrapé par le try/rescue de do_launch (F120).
+  defp runtime_user, do: Fleet.Credentials.Human.current!()
 
   defp claude_dir do
     Application.get_env(:fleet_spawner, :claude_dir) || Path.join(runtime_home(), ".claude")

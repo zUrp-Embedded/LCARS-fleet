@@ -118,11 +118,9 @@ defmodule Fleet.Credentials.ForgeIdentity do
       h when is_binary(h) and h != "" ->
         {:ok, h}
 
+      # F027 : source UNIQUE `Fleet.Credentials.Human` (plus de `id -un` shellé en double).
       _ ->
-        case System.cmd("id", ["-un"], stderr_to_stdout: true) do
-          {out, 0} -> {:ok, String.trim(out)}
-          other -> {:error, {:human_unresolved, other}}
-        end
+        Fleet.Credentials.Human.current()
     end
   end
 
