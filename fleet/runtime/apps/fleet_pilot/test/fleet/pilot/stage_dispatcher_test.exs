@@ -65,11 +65,24 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-carte / 1-stage).
     def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
+
+    # F077 : le mandat juge lit le result du prédécesseur (option B). Stub : forge_opts[:_test_pred].
+    def get_predecessor_result(_repo, _n, opts), do: Keyword.get(opts, :_test_pred, :none)
   end
 
   defmodule StubLoader do
     def load("engineer"),
       do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
+
+    # F077 : un rôle juge déclare `mandate_kind: judge` dans son cap-profile (pas un nom magique).
+    def load("gatekeeper"),
+      do:
+        {:ok,
+         %Fleet.CapProfile{
+           kind: "CapabilityProfile",
+           metadata: %{"name" => "gatekeeper"},
+           spec: %{"mandate_kind" => "judge"}
+         }}
 
     def load(_), do: {:error, :not_found}
   end
@@ -128,6 +141,28 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert attrs.role == "engineer"
       # kick best-effort émis
       assert_received {:woke, "issue-42-engineer-1700000000"}
+    end
+
+    test "F077/F078 : rôle juge (mandate_kind: judge) → mandat = GateBrief désamorcé, PAS le body" do
+      # gatekeeper assigné. Son cap-profile déclare `mandate_kind: judge` (StubLoader) → le mandat
+      # doit être un GateBrief I-CBC (« JUGER »), jamais le corps exécutable de l'issue (PASSE-9).
+      payload =
+        issue(%{"assignees" => [%{"login" => "gatekeeper"}], "body" => "crée X et commit"})
+
+      opts =
+        dispatch_opts(forge_opts: [_test_pred: {:ok, %{"commit" => "abc", "summary" => "done"}}])
+
+      assert {:ok, {:spawned, "issue-42-gatekeeper-1700000000", "gatekeeper"}} =
+               StageDispatcher.dispatch_issue(payload, opts)
+
+      assert_received {:spawned, "issue-42", spawn_opts}
+      mandate = spawn_opts[:mandate]
+      assert mandate =~ "JUGER"
+      refute mandate =~ "crée X et commit"
+
+      # Le MÊME mandat juge est enqueué (sinon le pod pullerait le body brut via get_task → PASSE-9).
+      assert_received {:enqueued, "issue-42-gatekeeper-1700000000", attrs}
+      assert attrs.brief == mandate
     end
 
     test "skip in_flight : pas de spawn" do

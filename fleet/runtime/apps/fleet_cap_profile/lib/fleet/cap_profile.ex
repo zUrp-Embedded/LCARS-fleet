@@ -453,6 +453,26 @@ defmodule Fleet.CapProfile do
     get_in(spec, ["deliverable_mode"]) || default
   end
 
+  @doc """
+  Accesseur canon du `mandate_kind` (`spec.mandate_kind`, schéma v2.5). Dual D'ENTRÉE de
+  `deliverable_mode` (sortie) : il déclare la **forme du mandat** que le rôle reçoit, par catalogue
+  et PAS par nom magique (F077, `differentiation-par-catalogue`).
+
+    * `"worker"` (défaut) — le mandat est une instruction exécutable (corps de l'issue) : le rôle
+      AGIT (engineer, architect…).
+    * `"judge"` — le rôle JUGE : il reçoit un `GateBrief` I-CBC **désamorcé** (contexte + livrable +
+      contrat de verdict, AUCUNE instruction exécutable — bug PASSE-9). Le gatekeeper le déclare.
+
+  `default` `"worker"` est **fail-safe** : un profil sans champ reçoit un mandat exécutable (le cas
+  ultra-majoritaire) ; jamais l'inverse (un worker désamorcé par erreur ne ferait rien). Un rôle
+  juge DOIT déclarer `judge` explicitement — la judge-ness est une propriété de sécurité (I-CBC),
+  pas une inférence.
+  """
+  @spec mandate_kind(t(), term()) :: String.t() | term()
+  def mandate_kind(%__MODULE__{spec: spec}, default \\ "worker") do
+    get_in(spec, ["mandate_kind"]) || default
+  end
+
   defp to_struct(raw) when is_map(raw) do
     %__MODULE__{
       kind: Map.get(raw, "kind"),

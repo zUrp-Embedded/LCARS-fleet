@@ -133,6 +133,11 @@
           "type": "string",
           "enum": ["payload", "git_native"],
           "description": "Modèle O5 — forme du livrable du rôle, condition d'entrée de Fleet.Pipeline.Deliverable.publish/1 (différenciation par catalogue, pas par branche de code). `payload` : le pod produit un payload de fichiers, le SYSTÈME écrit+commite (verdict-rôles, legacy PASSE-7). `git_native` : le pod commite lui-même dans son workspace, le système vérifie (gate I-CBC) + pousse (code-rôles). Absent → défaut `payload` appliqué côté code (back-compat ; ne concerne que les stages avec post_extract.git)."
+        },
+        "mandate_kind": {
+          "type": "string",
+          "enum": ["worker", "judge"],
+          "description": "Forme du MANDAT reçu par le rôle — dual d'entrée de deliverable_mode (différenciation par catalogue, pas par nom magique de code, F077). `worker` : mandat = instruction exécutable (corps de l'issue) ; le rôle AGIT. `judge` : le rôle JUGE et reçoit un GateBrief I-CBC désamorcé (contexte + livrable + contrat de verdict, AUCUNE instruction exécutable — bug PASSE-9 prouvé live #11/#12). Absent → défaut `worker` appliqué côté code (fail-safe : un juge doit déclarer `judge` explicitement, la judge-ness est une propriété de sécurité)."
         }
       },
       "allOf": [

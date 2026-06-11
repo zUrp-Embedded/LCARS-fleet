@@ -107,18 +107,22 @@ defmodule Fleet.Pilot.StageDispatcher do
         # ne laisse pas de verrou orphelin. project = base_sha pinné (F-03) ; route = (pipeline,
         # stage) gravé sur la forge (A2.1) → identifie le stage (l'assignee=rôle ne suffit pas).
         # `:none` (hors-carte / 1-stage) → route nil → comportement A1.
+        # Le cap-profile est chargé AVANT toute écriture forge (avec project + route) : un échec de
+        # load ne laisse pas de verrou orphelin, et `mandate_kind` (F077) en dépend. Réutilisé au spawn.
         with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
              {:ok, route} <-
-               tag_err(route_for(forge, repo, number, forge_opts), :route_resolution) do
+               tag_err(route_for(forge, repo, number, forge_opts), :route_resolution),
+             {:ok, profile} <- tag_err(loader.load(role), :profile_load) do
           # pod_id DÉTERMINISTE (string connue AVANT spawn) : `Spawner.spawn_pod/3` retourne le
           # `pid` du GenServer ; on impose le pod_id via `:pod_id`. `ts` le rend unique par hop.
           pod_id = "issue-#{number}-#{role}-#{ts}"
 
-          # F078 : le mandat role-aware (GateBrief I-CBC pour gatekeeper, body d'issue pour worker)
-          # est calculé UNE fois et sert au spawn-file ET au brief TaskQueue (que le pod pull via
-          # get_task). Sans ça, enqueue_mandate ré-enqueuait `issue["body"]` brut → le gatekeeper
-          # pullait le mandat BUILD exécutable au lieu du GateBrief → PASSE-9 recréé.
-          mandate = build_mandate(forge, repo, number, role, issue, forge_opts, route)
+          # F077/F078 : la FORME du mandat (worker exécutable | juge désamorcé) est lue du cap-profile
+          # (`mandate_kind`), PAS d'un nom magique "gatekeeper" en ring2 (differentiation-par-catalogue).
+          # Calculé UNE fois → sert au spawn-file ET au brief TaskQueue (que le pod pull via get_task).
+          # Sans ça, enqueue_mandate ré-enqueuait `issue["body"]` brut → un juge pullait le mandat BUILD
+          # exécutable au lieu du GateBrief → PASSE-9 recréé.
+          mandate = build_mandate(profile, role, forge, repo, number, issue, forge_opts, route)
 
           spawn_opts =
             [
@@ -137,7 +141,6 @@ defmodule Fleet.Pilot.StageDispatcher do
                    "[lock:#{role}:#{ts}]",
                    Keyword.put(forge_opts, :dedup_signature, "[lock:#{role}:")
                  ),
-               {:ok, profile} <- loader.load(role),
                {:ok, _pid} <- spawner.spawn_pod(profile, "issue-#{number}", spawn_opts),
                :ok <- enqueue_mandate(task_queue, pod_id, role, number, mandate) do
             # Kick best-effort : le pod auto-kicke les workers ; le wake accélère le 1er get_task.
@@ -176,14 +179,22 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp maybe_put_route(spawn_opts, {pipeline, stage}),
     do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:stage, stage)
 
-  # A2.3b item 5 (option B, DN gatekeeper-forge-encoding-v2 §5) : un pod **gatekeeper**
-  # doit savoir QUOI juger ET comment rendre son verdict. On réutilise le brief canonique
-  # `Fleet.Pipeline.GateBrief` (contexte + livrable + question + **contrat
-  # `gate-decision-v1.json` + options canon**) — le même que le modèle RAM. Le `result_K`
-  # à juger est lu du comment du hop précédent (gravé par HopCompleter, N-04) ; le pod reste
-  # forge-aveugle (c'est le runtime qui lit le comment, option B, pas de clone F-08).
-  # Rôle ordinaire → mandat = corps de l'issue (inchangé).
-  defp build_mandate(forge, repo, number, "gatekeeper", _issue, forge_opts, route) do
+  # F077 : la forme du mandat est une propriété du rôle (cap-profile `mandate_kind`), PAS un nom
+  # magique en ring2. `judge` → GateBrief désamorcé ; tout le reste (`worker`, défaut) → corps d'issue.
+  defp build_mandate(profile, role, forge, repo, number, issue, forge_opts, route) do
+    case Fleet.CapProfile.mandate_kind(profile) do
+      "judge" -> build_judge_mandate(role, forge, repo, number, forge_opts, route)
+      _worker -> issue["body"] || ""
+    end
+  end
+
+  # A2.3b item 5 (option B, DN gatekeeper-forge-encoding-v2 §5) : un pod **juge** doit savoir QUOI
+  # juger ET comment rendre son verdict. On réutilise le brief canonique `Fleet.Pipeline.GateBrief`
+  # (contexte + livrable + question + **contrat `gate-decision-v1.json` + options canon**) — le même
+  # que le modèle RAM. Le `result_K` à juger est lu du comment du hop précédent (gravé par
+  # HopCompleter, N-04) ; le pod reste forge-aveugle (le runtime lit le comment, option B, pas de
+  # clone F-08).
+  defp build_judge_mandate(role, forge, repo, number, forge_opts, route) do
     outputs =
       case forge.get_predecessor_result(repo, number, forge_opts) do
         {:ok, result} -> result
@@ -193,7 +204,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     {pipeline, stage} =
       case route do
         {p, s} -> {p, s}
-        _ -> {nil, "gatekeeper"}
+        _ -> {nil, role}
       end
 
     # I-CBC (bug PASSE-9, prouvé live #11 ET #12) : le mandat du juge ne contient
@@ -203,8 +214,8 @@ defmodule Fleet.Pilot.StageDispatcher do
     # FAIRE) : sur #11 et #12 le gatekeeper a recommité SMOKE.md + soumis un
     # "status ok" sans `decision`. Le seul contexte fourni = les `outputs` du
     # prédécesseur (descriptifs : commit + summary, non-exécutables). Si un jour le
-    # gatekeeper a une vraie persona de juge, GateBrief sait rendre `request` en
-    # contexte désamorcé — mais pas pour un base-worker.
+    # juge a une vraie persona, GateBrief sait rendre `request` en contexte
+    # désamorcé — mais pas pour un base-worker.
     Fleet.Pipeline.GateBrief.build(%{
       stage: stage,
       pipeline_id: pipeline,
@@ -212,9 +223,6 @@ defmodule Fleet.Pilot.StageDispatcher do
       outputs: outputs
     })
   end
-
-  defp build_mandate(_forge, _repo, _number, _role, issue, _forge_opts, _route),
-    do: issue["body"] || ""
 
   # Tag l'erreur d'une étape de résolution (préserve {:project_resolution, _} attendu).
   defp tag_err({:ok, _} = ok, _tag), do: ok
