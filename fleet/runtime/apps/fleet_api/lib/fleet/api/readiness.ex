@@ -179,7 +179,16 @@ defmodule Fleet.API.Readiness do
   # aucun spawn réel ⇒ `:degraded` ; backend réel (LauncherPort/Tmux) ⇒
   # operational ; absent ⇒ degraded.
   defp launch_backend do
-    backend = Application.get_env(:fleet_spawner, :launch_backend)
+    # F010 : MÊME défaut que la résolution réelle (`pod.ex` → `LauncherPortBackend`). Sans ce défaut,
+    # un prod standard (clé non-set : runtime.exs ne la pose plus) lisait `nil` → `:degraded` PERMANENT
+    # sur une fleet pourtant saine (les pods lancent via le défaut LauncherPortBackend) → la sonde
+    # anti-vert-creux criait au loup. Avec le défaut aligné, nil n'arrive plus.
+    backend =
+      Application.get_env(
+        :fleet_spawner,
+        :launch_backend,
+        Fleet.Spawner.LaunchBackend.LauncherPortBackend
+      )
 
     cond do
       is_nil(backend) ->

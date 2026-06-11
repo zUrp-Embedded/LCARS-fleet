@@ -1535,7 +1535,11 @@ defmodule Fleet.Spawner.Pod do
           default_response_timeout_sec(state.cap_profile)
       end
 
-    sec * 1000
+    # F126 : `Process.send_after` exige un entier non-négatif. `is_number(override)` accepte les
+    # FLOATS (un cap-profile `timeouts.response_sec: 1.5` passe la validation) → `sec * 1000` = float
+    # → ArgumentError dans arm_result_deadline qui CRASHE le Pod sans transition_failed. `round/1`
+    # coerce → entier (ms), quel que soit l'override.
+    round(sec * 1000)
   end
 
   defp default_response_timeout_sec(%Fleet.CapProfile{spec: spec}) do
