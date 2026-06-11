@@ -164,9 +164,11 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Poste un comment (DN §5 étape 2). Si `:dedup_signature` est fourni et qu'un comment existant
-  la contient déjà, no-op (`{:ok, :already}`) — la signature `[hop:<role>:<sha>]` rend le replay
-  idempotent.
+  Poste un comment (DN §5 étape 2). Si `:dedup_signature` est fourni et qu'un comment **système**
+  existant la contient déjà, no-op (`{:ok, :already}`) — la signature `[hop:<role>:<sha>]` rend le
+  replay idempotent. Le dédup ne fait foi QUE des comments du bot (F058 suivi-review) : sinon un
+  user forge postant la signature en avance supprimerait le comment système (→ `count_signed_hops`
+  sous-compterait). Bot irrésoluble → dédup non filtré (fail-open vers la sûreté du replay).
   """
   @spec post_comment(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
@@ -175,7 +177,7 @@ defmodule Fleet.Pilot.ForgeClient do
     sig = Keyword.get(opts, :dedup_signature)
 
     with {:ok, config} <- resolve_config(opts) do
-      if sig && comment_signed?(config, repo, issue_number, sig) do
+      if sig && comment_signed?(config, repo, issue_number, sig, opts) do
         {:ok, :already}
       else
         case http_post(config, "/repos/#{repo}/issues/#{issue_number}/comments", %{body: body}) do
@@ -221,10 +223,21 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  defp comment_signed?(config, repo, issue_number, sig) do
+  defp comment_signed?(config, repo, issue_number, sig, opts) do
     case http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
       {:ok, comments} when is_list(comments) ->
-        Enum.any?(comments, fn c -> String.contains?(c["body"] || "", sig) end)
+        # F058 (suivi review) : le dédup garde une ÉCRITURE système → ne fait foi que des comments
+        # du bot. Sinon un user forge poste la signature en avance → le comment système est skipé →
+        # `count_signed_hops` sous-compte (budget anti-runaway sur-permissif). Bot irrésoluble →
+        # fail-OPEN (dédup non filtré) : au pire un comment dupliqué au replay, jamais une suppression
+        # silencieuse d'un marqueur load-bearing.
+        trusted =
+          case forge_bot_login(config, opts) do
+            {:ok, bot} -> Enum.filter(comments, &system_authored?(&1, bot))
+            {:error, _} -> comments
+          end
+
+        Enum.any?(trusted, fn c -> String.contains?(c["body"] || "", sig) end)
 
       _ ->
         false

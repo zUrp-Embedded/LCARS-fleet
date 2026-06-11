@@ -291,6 +291,12 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   describe "post_comment/4 — dédup signature" do
+    # seam `forge_bot_login` injecté → déterministe (pas de GET /user ni de cache persistent_term).
+    defp dedup_opts(handlers, sig) do
+      opts(handlers)
+      |> Keyword.merge(dedup_signature: sig, forge_bot_login: "lcars-bot")
+    end
+
     test "poste si la signature est absente" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {200, []},
@@ -302,14 +308,20 @@ defmodule Fleet.Pilot.ForgeClientTest do
                  "fleet/lcars",
                  42,
                  "[hop:engineer:abc] livrable",
-                 Keyword.merge(opts(handlers), dedup_signature: "[hop:engineer:abc]")
+                 dedup_opts(handlers, "[hop:engineer:abc]")
                )
     end
 
-    test "no-op si la signature existe déjà (idempotent replay)" do
+    test "no-op si la signature existe déjà dans un comment SYSTÈME (idempotent replay)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
-          {200, [%{"body" => "déjà là [hop:engineer:abc] livrable"}]}
+          {200,
+           [
+             %{
+               "user" => %{"login" => "lcars-bot"},
+               "body" => "déjà là [hop:engineer:abc] livrable"
+             }
+           ]}
       }
 
       assert {:ok, :already} =
@@ -317,7 +329,25 @@ defmodule Fleet.Pilot.ForgeClientTest do
                  "fleet/lcars",
                  42,
                  "[hop:engineer:abc] livrable",
-                 Keyword.merge(opts(handlers), dedup_signature: "[hop:engineer:abc]")
+                 dedup_opts(handlers, "[hop:engineer:abc]")
+               )
+    end
+
+    test "F058 suivi-review : signature pré-postée par un ATTAQUANT → le système poste quand même" do
+      # un user forge poste la signature en avance ; le dédup ne doit PAS la prendre pour une
+      # écriture système (sinon le comment système est supprimé → count_signed_hops sous-compte).
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200, [%{"user" => %{"login" => "attacker"}, "body" => "[hop:engineer:abc] forgé"}]},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {201, %{"id" => 2}}
+      }
+
+      assert {:ok, :posted} =
+               ForgeClient.post_comment(
+                 "fleet/lcars",
+                 42,
+                 "[hop:engineer:abc] livrable",
+                 dedup_opts(handlers, "[hop:engineer:abc]")
                )
     end
   end
@@ -539,6 +569,12 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  # ⚠ persistent_term + async (suivi review F058 #1) : `derive_bot_login` cache le login dans
+  # `:persistent_term.{ForgeClient, :bot_login}` — clé GLOBALE partagée par toute la VM ExUnit. TOUT
+  # test qui n'injecte PAS `:forge_bot_login` dans ses opts atteint ce cache et peut polluer/être
+  # pollué par un test concurrent. Invariant du module : tous les AUTRES tests injectent le seam
+  # `forge_bot_login:` exprès (déterministe, pas de cache) ; SEUL le test ci-dessous touche le cache,
+  # et il l'efface en amont ET en `after`. Un futur test sans seam DOIT faire de même (ou async:false).
   describe "forge_bot_login — dérivation /user (seam absent)" do
     test "dérive le login via GET /user quand ni opts ni config" do
       handlers = %{
