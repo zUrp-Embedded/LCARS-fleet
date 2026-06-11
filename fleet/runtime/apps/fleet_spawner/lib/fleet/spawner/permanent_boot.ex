@@ -132,11 +132,11 @@ defmodule Fleet.Spawner.PermanentBoot do
   # --- privé ---
 
   defp cap_profiles_dir do
-    Application.get_env(
-      :fleet_spawner,
-      :cap_profiles_dir,
-      "05_data-canon/cap-profiles"
-    )
+    # F110/F111 (#582) : source UNIQUE alignée sur le LOADER (`Fleet.CapProfile.root_dir`) — sinon
+    # PermanentBoot ÉNUMÈRE un dir (`05_data-canon/cap-profiles`) pendant que `Fleet.CapProfile.load`
+    # CHARGE depuis un autre (`cap-profiles`) → un profil listé n'est pas chargeable (enum/load
+    # désaccordés). L'override `:fleet_spawner, :cap_profiles_dir` reste (tests/déploiement non-standard).
+    Application.get_env(:fleet_spawner, :cap_profiles_dir) || Fleet.CapProfile.root_dir()
   end
 
   defp list_roles(dir) do

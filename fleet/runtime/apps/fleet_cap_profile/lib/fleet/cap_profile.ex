@@ -323,7 +323,13 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  defp root_dir do
+  @doc """
+  Racine du catalogue cap-profiles (`<root_dir>/<role>.yaml`). **Source UNIQUE** : tout
+  énumérateur (ex. `Fleet.Spawner.PermanentBoot`) DOIT scanner ce dir, sinon enum et load
+  se désaccordent (#582, Fable F110/F111).
+  """
+  @spec root_dir() :: String.t()
+  def root_dir do
     # I-CBC : un :root_dir explicitement nil (ex. fuite d'env cross-test en
     # umbrella) ne doit JAMAIS atteindre Path.join → coalesce vers le défaut.
     Application.get_env(:fleet_cap_profile, :root_dir) || "cap-profiles"

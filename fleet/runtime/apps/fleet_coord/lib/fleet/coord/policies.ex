@@ -35,6 +35,8 @@ defmodule Fleet.Coord.Policies do
 
   @policies_key {__MODULE__, :policies}
 
+  require Logger
+
   @doc """
   Charge les policies YAML et persiste dans `:persistent_term`.
   Fail-fast au boot si fichier absent ou YAML malformé.
@@ -43,7 +45,31 @@ defmodule Fleet.Coord.Policies do
   def init_policies! do
     path = Application.get_env(:fleet_coord, :policies_path, default_policies_path())
 
-    policies = YamlElixir.read_from_file!(path)
+    # F025 : NE PAS planter le boot umbrella sur un fichier policies absent/malformé (typo de
+    # LCARS_COORD_POLICIES_PATH). L'ancien `read_from_file!` (bang) raisait dans Application.start →
+    # fleet_coord ne démarre pas → crash boot opaque de TOUTE l'umbrella. On dégrade : log clair +
+    # policies vides (coord boote, routage par défaut) au lieu de tuer le daemon.
+    policies =
+      case YamlElixir.read_from_file(path) do
+        {:ok, %{} = data} ->
+          data
+
+        {:ok, _} ->
+          Logger.error(
+            "fleet_coord: policies #{path} malformé (pas une map) — coord DÉGRADÉ (vides)"
+          )
+
+          %{}
+
+        {:error, reason} ->
+          Logger.error(
+            "fleet_coord: policies #{path} illisible (#{inspect(reason)}) — boot DÉGRADÉ " <>
+              "(policies vides) ; vérifier LCARS_COORD_POLICIES_PATH"
+          )
+
+          %{}
+      end
+
     :persistent_term.put(@policies_key, policies)
     :ok
   end
