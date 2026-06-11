@@ -575,9 +575,14 @@ defmodule Fleet.Pipeline.Executor do
   # `git ls-remote <repo_url> <branch>` borné → SHA du tip (1ère colonne, 1ère ligne). Capture
   # hors-pod de la base (sp-monde-invoque : le monde projette le SHA, le pod l'exécute mécaniquement).
   defp ls_remote_sha(repo_url, branch) do
+    # F083 : auth runtime côté SYSTÈME (forge privée) — symétrique de `StageDispatcher.ls_remote_sha`.
+    # Sans `forge_auth_args`, la résolution F-03 R1 du base_sha échouait l'auth sur un repo privé
+    # (le chemin RAM Executor ne s'authentifiait pas, contrairement au chemin stage-driven).
+    args = Fleet.Pipeline.Git.forge_auth_args() ++ ["ls-remote", repo_url, branch]
+
     task =
       Task.async(fn ->
-        System.cmd("git", ["ls-remote", repo_url, branch], stderr_to_stdout: true)
+        System.cmd("git", args, stderr_to_stdout: true)
       end)
 
     case Task.yield(task, 15_000) || Task.shutdown(task, :brutal_kill) do
