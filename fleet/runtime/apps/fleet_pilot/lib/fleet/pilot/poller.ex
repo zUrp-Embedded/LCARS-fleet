@@ -72,7 +72,8 @@ defmodule Fleet.Pilot.Poller do
   @default_interval_ms 30_000
   @max_backoff_ms 300_000
   @jitter_ratio 0.1
-  @in_flight_label "lcars-in-flight"
+  # F072 : vocabulaire protocole = source unique Fleet.Pilot.Labels.
+  @in_flight_label Fleet.Pilot.Labels.in_flight()
 
   defstruct [
     :repo,

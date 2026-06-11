@@ -42,7 +42,8 @@ defmodule Fleet.Pilot.AutoDispatcher do
   alias Fleet.Pilot.Routing
   alias Fleet.EventRouter.Bus
 
-  @default_dispatch_label "lcars-dispatched"
+  # F072 : vocabulaire protocole = source unique Fleet.Pilot.Labels.
+  @default_dispatch_label Fleet.Pilot.Labels.dispatched()
   @gitea_prefix "gitea."
 
   defstruct [

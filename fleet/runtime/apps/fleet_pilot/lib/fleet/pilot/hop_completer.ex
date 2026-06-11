@@ -41,8 +41,10 @@ defmodule Fleet.Pilot.HopCompleter do
   require Logger
 
   alias Fleet.Pilot.ForgeClient
+  alias Fleet.Pilot.Labels
 
-  @in_flight_label "lcars-in-flight"
+  # F072 : vocabulaire protocole = source unique Fleet.Pilot.Labels.
+  @in_flight_label Labels.in_flight()
 
   @typedoc """
   Décrit la fin-de-hop d'un rôle sur une issue.
@@ -87,7 +89,7 @@ defmodule Fleet.Pilot.HopCompleter do
     repo = Map.fetch!(hop, :repo)
     n = Map.fetch!(hop, :issue_number)
     role = Map.fetch!(hop, :role)
-    state_label = Map.get(hop, :state_label, "state:delivered")
+    state_label = Map.get(hop, :state_label, Labels.delivered())
 
     with {:ok, sha} <- step1_publish(hop, deliverable),
          {:ok, _} <- step2_comment(forge, repo, n, role, sha, hop, forge_opts),
@@ -102,7 +104,7 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  @awaits_human_label "lcars-awaits-human"
+  @awaits_human_label Labels.awaits_human()
 
   @doc """
   Fin-de-hop ALTERNATIVE (A2.3b, DN `gatekeeper-forge-encoding-v2` §3/§6) : un verdict

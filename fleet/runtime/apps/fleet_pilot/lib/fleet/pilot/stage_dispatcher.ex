@@ -31,8 +31,9 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   require Logger
 
-  @in_flight_label "lcars-in-flight"
-  @awaits_human_label "lcars-awaits-human"
+  # F072 : vocabulaire protocole = source unique Fleet.Pilot.Labels (constantes compile-time).
+  @in_flight_label Fleet.Pilot.Labels.in_flight()
+  @awaits_human_label Fleet.Pilot.Labels.awaits_human()
 
   @type decision :: {:spawn, role :: String.t()} | {:skip, atom()}
 

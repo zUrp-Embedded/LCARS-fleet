@@ -153,7 +153,9 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, new_id} <- lookup_label(index, new_state) do
       kept_ids =
         current
-        |> Enum.reject(fn l -> String.starts_with?(l["name"] || "", "state:") end)
+        |> Enum.reject(fn l ->
+          String.starts_with?(l["name"] || "", Fleet.Pilot.Labels.state_prefix())
+        end)
         |> Enum.map(& &1["id"])
 
       case put_issue_labels(config, repo, issue_number, Enum.uniq([new_id | kept_ids])) do

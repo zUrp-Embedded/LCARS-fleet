@@ -290,7 +290,7 @@ defmodule Fleet.Pilot.HopConsumer do
         # nil/nil pour terminal ou 1-stage (pas de route, close).
         next_stage: next_stage,
         pipeline: payload["pipeline"],
-        state_label: "state:delivered"
+        state_label: Fleet.Pilot.Labels.delivered()
       }
       |> put_unless_nil(:comment_body, comment_body)
 
@@ -506,7 +506,7 @@ defmodule Fleet.Pilot.HopConsumer do
       deliverable_opts: nil,
       hop_sha: "gate-abandon",
       next_assignee: nil,
-      state_label: "state:delivered",
+      state_label: Fleet.Pilot.Labels.delivered(),
       comment_body: trace
     }
 

@@ -108,7 +108,7 @@ defmodule Fleet.Pilot.Routing do
 
     %{
       type: extract_label_value(labels, "type:"),
-      state: extract_label_value(labels, "state:"),
+      state: extract_label_value(labels, Fleet.Pilot.Labels.state_prefix()),
       assignee: extract_first_assignee(issue)
     }
   end
