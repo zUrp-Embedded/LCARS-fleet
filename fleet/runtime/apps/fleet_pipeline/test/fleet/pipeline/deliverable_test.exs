@@ -165,6 +165,31 @@ defmodule Fleet.Pipeline.DeliverableTest do
 
       assert {:error, {:path_traversal, "../escape.txt"}} = Deliverable.publish(opts)
     end
+
+    test "F081 — symlink checké-in dans le workspace → BLOQUE (pas d'évasion via File.write)",
+         %{tmp_dir: tmp} do
+      {ws, _bare, base} = setup_ws(tmp, "payload-symlink")
+      # Vecteur : un repo cloné avec un symlink piège `out` -> hors workspace. Le check lexical
+      # (Path.expand) passe ; File.write SUIVRAIT le lien → évasion. Doit être bloqué.
+      escape = Path.join(tmp, "escape-target")
+      File.mkdir_p!(escape)
+      File.ln_s!(escape, Path.join(ws, "out"))
+
+      opts = %{
+        mode: :payload,
+        workspace: ws,
+        base_sha: base,
+        allowed_emails: payload_allowed(),
+        remote: "origin",
+        target_branch: "deliverables/x",
+        files: [%{"path" => "out/escape.txt", "content" => "x"}],
+        identity: payload_identity(),
+        message: "evil"
+      }
+
+      assert {:error, {:symlink_escape, "out/escape.txt"}} = Deliverable.publish(opts)
+      refute File.exists?(Path.join(escape, "escape.txt"))
+    end
   end
 
   describe "mode :git_native" do

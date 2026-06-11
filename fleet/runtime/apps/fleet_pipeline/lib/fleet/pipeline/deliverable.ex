@@ -194,15 +194,40 @@ defmodule Fleet.Pipeline.Deliverable do
       when is_binary(rel_path) and is_binary(content) ->
         full = Path.expand(Path.join(workspace, rel_path))
 
-        if full == expanded_ws or String.starts_with?(full, expanded_ws <> "/") do
-          {:cont, :ok}
-        else
-          {:halt, {:error, {:path_traversal, rel_path}}}
+        cond do
+          not (full == expanded_ws or String.starts_with?(full, expanded_ws <> "/")) ->
+            {:halt, {:error, {:path_traversal, rel_path}}}
+
+          # F081 : `Path.expand` est LEXICAL (résout `..`, PAS les symlinks). Un symlink checké-in
+          # dans le repo cloné (`out -> /home/<human>/.claude`) passe le check de préfixe ci-dessus,
+          # mais `File.write` SUIT le symlink → écriture HORS workspace. On rejette si un composant
+          # EXISTANT du chemin (dossiers parents OU fichier cible déjà présent) est un symlink.
+          symlink_in_chain?(workspace, rel_path) ->
+            {:halt, {:error, {:symlink_escape, rel_path}}}
+
+          true ->
+            {:cont, :ok}
         end
 
       bad, :ok ->
         {:halt, {:error, {:invalid_payload_file, inspect(bad)}}}
     end)
+  end
+
+  # Vrai si un composant EXISTANT du chemin (de workspace au fichier) est un symlink. `lstat` ne
+  # suit pas le lien (stat le lien lui-même) → on détecte le vecteur d'évasion avant tout write.
+  defp symlink_in_chain?(workspace, rel_path) do
+    rel_path
+    |> Path.split()
+    |> Enum.scan(workspace, fn part, acc -> Path.join(acc, part) end)
+    |> Enum.any?(&symlink?/1)
+  end
+
+  defp symlink?(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :symlink}} -> true
+      _ -> false
+    end
   end
 
   defp write_validated_files(workspace, files) do

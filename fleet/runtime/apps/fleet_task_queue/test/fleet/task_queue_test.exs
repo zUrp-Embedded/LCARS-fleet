@@ -30,7 +30,8 @@ defmodule Fleet.TaskQueueTest do
       type: :task_enqueued,
       pod_id: "pod-A",
       correlation_id: ^tid,
-      payload: %{task: ^task}
+      # F144 : payload = %{task_id} (cohérent + JSON-safe), plus le %Task{} brut.
+      payload: %{task_id: ^tid}
     }
 
     {:ok, assigned} = TaskQueue.get_for_pod(q, "pod-A")

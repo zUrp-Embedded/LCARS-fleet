@@ -107,7 +107,11 @@ defmodule Fleet.TaskQueue.Server do
     }
 
     new_state = state |> put_task(task) |> persist()
-    broadcast(new_state, event(:task_enqueued, task, %{task: task}))
+    # F144/F019 : payload = `%{task_id}` (cohérent avec tous les autres task_* events), PAS le
+    # `%Task{}` brut — Task n'a pas de @derive Jason.Encoder → l'ancien `%{task: task}` crashait
+    # `Jason.encode!` chez tout consommateur d'events JSON (Fleet.API.WS à chaque enqueue). Aucun
+    # consommateur n'a besoin du struct (deck = count, audit = pod_id/correlation_id).
+    broadcast(new_state, event(:task_enqueued, task, %{task_id: task.id}))
     maybe_schedule_deadline(task)
     {:reply, {:ok, task}, new_state}
   end
