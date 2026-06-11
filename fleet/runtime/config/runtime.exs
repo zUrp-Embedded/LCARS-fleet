@@ -84,11 +84,10 @@ if config_env() != :test do
   end
 
   # ============================================================
-  # fleet_credentials (ch3) — chemin secrets
+  # fleet_credentials (ch3) — ADR-F : plus de coffre. Le knob LCARS_CREDENTIALS_ROOT
+  # (→ :credentials_root) a été RETIRÉ (Fable F160) : aucun module ne lisait `credentials_root`
+  # (les creds = claudeDir humain bindé par bwrap, pas un coffre).
   # ============================================================
-  if path = System.get_env("LCARS_CREDENTIALS_ROOT") do
-    config :fleet_credentials, credentials_root: path
-  end
 
   # Z4 (forge-identité B') — l'identité git de l'humain est DÉRIVÉE de l'OS (git config →
   # GECOS → login), plus de catalogue `settings_users.yaml` (doctrine 2026-06-11 : si l'user
