@@ -393,6 +393,51 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "F064 — format↔parse co-localisés (round-trip)" do
+    test "hop_marker/2 produit un marqueur reconnu par le comptage" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200,
+           [
+             %{
+               "user" => %{"login" => "bot"},
+               "body" => ForgeClient.hop_marker("engineer", "deadbeef")
+             }
+           ]}
+      }
+
+      assert {:ok, 1} =
+               ForgeClient.count_signed_hops(
+                 "fleet/lcars",
+                 42,
+                 Keyword.put(opts(handlers), :forge_bot_login, "bot")
+               )
+    end
+
+    test "result_block/1 round-trip avec parse_result_block/1" do
+      outputs = %{"severity_max" => "ok", "findings" => 3}
+      body = "Livrable.\n" <> ForgeClient.result_block(outputs)
+
+      assert {:ok, ^outputs} = ForgeClient.parse_result_block(body)
+    end
+
+    test "result_block/1 : map vide → \"\" (pas de bloc, donc rien à parser)" do
+      assert "" == ForgeClient.result_block(%{})
+      assert "" == ForgeClient.result_block(nil)
+      assert nil == ForgeClient.parse_result_block("Livrable sans result.")
+    end
+
+    test "result_block/1 : payload > 8 KB → note, pas de JSON tronqué" do
+      big = %{"blob" => String.duplicate("x", 9000)}
+      block = ForgeClient.result_block(big)
+
+      refute block =~ "```result"
+      assert block =~ "trop volumineux"
+      # la note n'est pas un bloc result valide → parse renvoie nil (jamais de JSON tronqué).
+      assert nil == ForgeClient.parse_result_block(block)
+    end
+  end
+
   describe "system_authored?/2 (F058/F059/F060 — pur)" do
     test "true ssi le login de l'auteur == bot" do
       assert ForgeClient.system_authored?(%{"user" => %{"login" => "lcars-bot"}}, "lcars-bot")

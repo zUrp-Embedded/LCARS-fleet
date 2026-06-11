@@ -40,6 +40,8 @@ defmodule Fleet.Pilot.HopCompleter do
 
   require Logger
 
+  alias Fleet.Pilot.ForgeClient
+
   @in_flight_label "lcars-in-flight"
 
   @typedoc """
@@ -169,37 +171,26 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # ── Étape 2 : comment signé [hop:role:sha], dédup ──────────────────────────
+  # F064 : la signature ET le bloc result viennent de ForgeClient (co-localisés avec leurs
+  # parseurs `@hop_marker_rx` / `parse_result_block`). On NE passe PAS par le seam `forge`
+  # (un stub ne doit pas pouvoir désynchroniser le format du parseur réel).
+  #
+  # NB `:outputs` : embarque le `result_K` du stage qui finit → lisible sans query séparée
+  # (recovery, contexte). En B (§L441) HopConsumer ne pose plus `:outputs` (l'ex-cas A2.3b
+  # "avance vers un gatekeeper-stage" n'existe plus) → seam générique, inactif côté HopConsumer
+  # mais conservé (autres appelants / extensibilité).
   defp step2_comment(forge, repo, n, role, sha, hop, forge_opts) do
-    signature = "[hop:#{role}:#{sha}]"
+    signature = ForgeClient.hop_marker(role, sha)
 
     body =
       Map.get(hop, :comment_body, default_comment(role, sha)) <>
-        outputs_block(Map.get(hop, :outputs)) <> "\n\n" <> signature
+        ForgeClient.result_block(Map.get(hop, :outputs)) <> "\n\n" <> signature
 
     case forge.post_comment(repo, n, body, Keyword.put(forge_opts, :dedup_signature, signature)) do
       {:ok, _} = ok -> ok
       {:error, reason} -> {:error, {:comment, reason}}
     end
   end
-
-  # Enrichissement optionnel : si le hop porte des `:outputs`, le comment forge les
-  # embarque (le `result_K` du stage qui finit) → lisible sans query séparée (recovery,
-  # contexte). JSON fencé si ≤ 8KB ; sinon note pointant vers le livrable de la branche
-  # (jamais de JSON tronqué = invalide). `nil`/vide → rien (pas de bruit). NB : en B
-  # (§L441), HopConsumer ne pose plus `:outputs` sur le hop (l'ex-cas A2.3b "avance vers
-  # un gatekeeper-stage" n'existe plus) → ce bloc reste un seam générique, inactif côté
-  # HopConsumer mais conservé (autres appelants / extensibilité).
-  defp outputs_block(outputs) when is_map(outputs) and map_size(outputs) > 0 do
-    json = Jason.encode!(outputs)
-
-    if byte_size(json) <= 8192 do
-      "\n\n```result\n#{json}\n```"
-    else
-      "\n\n_(result #{byte_size(json)} o — trop volumineux pour le comment ; livrable complet sur la branche système)_"
-    end
-  end
-
-  defp outputs_block(_), do: ""
 
   # ── Étape 3 : PATCH state:* ────────────────────────────────────────────────
   defp step3_state(forge, repo, n, state_label, forge_opts) do

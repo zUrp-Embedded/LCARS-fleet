@@ -287,6 +287,17 @@ defmodule Fleet.Pilot.ForgeClient do
   @hop_marker_rx ~r/\[hop:[^:\]]+:[^:\]]+\]/
 
   @doc """
+  Format du marqueur de hop signé `[hop:<role>:<sha>]` (F064 : co-localisé avec son
+  parseur `@hop_marker_rx` / `count_signed_hops` — un changement de format se fait ICI,
+  le regex en face, jamais l'un sans l'autre). Posé par `HopCompleter` en fin-de-hop,
+  sert aussi de `:dedup_signature` (replay idempotent).
+  """
+  @spec hop_marker(String.t(), String.t()) :: String.t()
+  def hop_marker(role, sha) when is_binary(role) and is_binary(sha) do
+    "[hop:#{role}:#{sha}]"
+  end
+
+  @doc """
   Compte les comments portant un marqueur de hop signé `[hop:<role>:<sha>]`
   (posés par `HopCompleter` à chaque fin-de-hop). Sert de compteur **forge-natif**
   au bound anti-runaway du rebond de gate (A2.3) : combien de hops ont déjà été
@@ -320,6 +331,26 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @result_block_rx ~r/```result\n(.*?)\n```/s
+  @result_fence_limit 8192
+
+  @doc """
+  Format du bloc ` ```result ` (sérialise les `outputs` d'un stage dans le comment de hop).
+  F064 : co-localisé avec son parseur `parse_result_block/1` — round-trip garanti. `nil`/vide →
+  `""` (pas de bruit). JSON fencé si ≤ 8 KB ; au-delà, une note pointant vers le livrable de la
+  branche (jamais de JSON tronqué = invalide). Préfixe `\\n\\n` inclus (séparateur du corps).
+  """
+  @spec result_block(map() | nil) :: String.t()
+  def result_block(outputs) when is_map(outputs) and map_size(outputs) > 0 do
+    json = Jason.encode!(outputs)
+
+    if byte_size(json) <= @result_fence_limit do
+      "\n\n```result\n#{json}\n```"
+    else
+      "\n\n_(result #{byte_size(json)} o — trop volumineux pour le comment ; livrable complet sur la branche système)_"
+    end
+  end
+
+  def result_block(_), do: ""
 
   @doc """
   Extrait le dernier bloc ` ```result ` posté dans un comment de hop — le `result_K`
