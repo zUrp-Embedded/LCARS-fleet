@@ -21,8 +21,10 @@ defmodule Fleet.Pipeline.StageRunner do
       le claude REPL reprend get_task/submit_result sur le même pod
       (contexte préservé ; le mandat le plus récent gagne via `find_active`).
 
-  Pour les pods `one-shot` (cycle vie = cycle stage) le comportement
-  reste inchangé : spawn classique sans registry.
+  Pour les pods `one-shot` (cycle vie = cycle stage) : spawn classique, mais
+  RÉGISTRÉ aussi dans `PodRegistry` (F084) — le gate git_native résout le
+  workspace du pod par lookup ; sans register, un stage one-shot git_native ne
+  publie jamais. Nettoyé par `cleanup_pipeline` en fin de pipeline.
 
   ## Format inputs résolution
 
@@ -176,25 +178,31 @@ defmodule Fleet.Pipeline.StageRunner do
   defp run_one_shot_stage(stage_name, role, profile, stage_ctx, pipeline_id) do
     case spawner_backend().spawn_stage_pod(role, profile, stage_ctx) do
       {:ok, pod_id} ->
-        # Enqueue le mandat dans le broker `Fleet.TaskQueue` ciblé pod_id :
-        # sans, le claude REPL appelle get_task → empty → done:true et
-        # termine sans traiter le stage. La voie canonique pod→fleet est
-        # MCP (PodTools get_task / submit_result → TaskQueue), pas Read fichier.
+        # F084 : registre AUSSI les pods one-shot dans PodRegistry. Le gate git_native
+        # (`resolve_gate_workspace`) résout le workspace du pod via `PodRegistry.lookup` ; sans
+        # register, un stage one-shot git_native échouait `{:pod_not_registered}` → ne publiait JAMAIS
+        # malgré un commit valide. `register` overwrite (re-spawn même rôle = dernier pod gagne) ;
+        # nettoyé par `cleanup_pipeline` à la fin du pipeline (comme les pods pipe).
+        :ok = PodRegistry.register(pipeline_id, role, pod_id)
+
+        # Enqueue le mandat dans le broker `Fleet.TaskQueue` ciblé pod_id : sans, le claude REPL appelle
+        # get_task → empty → done:true et termine sans traiter le stage. Voie canonique = MCP.
         case push_task_for_pod(pod_id, stage_ctx) do
           :ok ->
             Logger.debug(
-              "fleet_pipeline stage spawn ok: pipeline=#{inspect(pipeline_id)} stage=#{stage_name} role=#{role} pod=#{inspect(pod_id)}"
+              "fleet_pipeline stage spawn ok (one-shot, registered): pipeline=#{inspect(pipeline_id)} stage=#{stage_name} role=#{role} pod=#{inspect(pod_id)}"
             )
 
             {:ok, pod_id}
 
           {:error, reason} = err ->
-            # enqueue échoué APRÈS spawn : pod one-shot (NON registered) orphelin sans mandat → kill
-            # pour ne pas le laisser fuir (audit deep-01 P1 : one-shot pas dans PodRegistry).
+            # enqueue échoué APRÈS spawn+register : pod orphelin sans mandat → unregister + kill
+            # (comme le chemin pipe).
             Logger.error(
-              "fleet_pipeline stage spawn enqueue fail (one-shot) → kill pod=#{inspect(pod_id)} reason=#{inspect(reason)}"
+              "fleet_pipeline stage spawn enqueue fail (one-shot) → unregister+kill pod=#{inspect(pod_id)} reason=#{inspect(reason)}"
             )
 
+            _ = PodRegistry.unregister(pod_id)
             _ = spawner().kill_pod(pod_id)
             err
         end

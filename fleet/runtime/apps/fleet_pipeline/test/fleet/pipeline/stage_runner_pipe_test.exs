@@ -116,12 +116,12 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
       PodRegistry.cleanup_pipeline(pipeline_id)
     end
 
-    test "cycle one-shot ne touche pas le PodRegistry" do
+    test "cycle one-shot : spawn neuf MAIS registré (F084 : le gate git_native le résout par lookup)" do
       pipeline_id = "test-os-#{System.unique_integer([:positive])}"
       mandate_ctx = %{ticket_id: "ticket-2"}
 
-      # qualifier = one-shot par resolver → path classique (spawn sans
-      # register).
+      # qualifier = one-shot par resolver → spawn neuf, MAIS registré (F084) pour que le gate
+      # git_native résolve son workspace (sinon {:pod_not_registered} → ne publie jamais).
       assert {:ok, pod_id} =
                StageRunner.run(
                  "spec-review",
@@ -133,9 +133,9 @@ defmodule Fleet.Pipeline.StageRunnerPipeTest do
 
       assert pod_id == "stub-pod-spec-review"
 
-      # Pas de registration.
-      assert :not_found = PodRegistry.lookup(pipeline_id, "qualifier")
-      # Pas de wake (c'était spawn neuf).
+      # F084 : le pod one-shot EST registré (résolvable par le gate). Nettoyé par cleanup_pipeline.
+      assert {:ok, "stub-pod-spec-review"} = PodRegistry.lookup(pipeline_id, "qualifier")
+      # Pas de wake (c'était spawn neuf, pas une réutilisation pipe).
       assert SpawnerStub.wake_calls() == []
     end
 
