@@ -260,7 +260,14 @@ defmodule Fleet.Spawner do
         # (bootstrap + fallback pods sans Monitor) ; pour un pod Monitor-armé, le yop
         # redondant retombe sur un get_task vide (done:true) — inoffensif.
         _ = touch_turn_flag(info)
-        Fleet.Spawner.PodTmux.send_keys(pod_id, "yop")
+        result = Fleet.Spawner.PodTmux.send_keys(pod_id, "yop")
+
+        # F112 : ré-arme la deadline de RÉPONSE pour la nouvelle tâche. wake_pod = « nouveau travail
+        # assigné » → la fenêtre de timeout doit repartir. Sans ça, un pod long-lived réveillé n'avait
+        # PAS de deadline armée jusqu'à son prochain cycle do_extract → tâche sans protection timeout.
+        # Cast best-effort au Pod GenServer (re-arme s'il est en :monitoring, no-op sinon).
+        _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :rearm_deadline)
+        result
 
       {:ok, _info} ->
         {:error, :not_a_tmux_pod}

@@ -319,6 +319,16 @@ defmodule Fleet.Spawner.Pod do
   # Catch-all silencieux : autres messages (down, monitor, etc.) ignorés.
   def handle_info(_other, state), do: {:noreply, state}
 
+  # F112 : ré-armement de la deadline de réponse — déclenché par `wake_pod` quand une nouvelle tâche
+  # est assignée à un pod long-lived. Seulement en :monitoring (hors-monitoring = pas de fenêtre de
+  # réponse active) ; sinon no-op. arm_result_deadline annule l'ancien timer + en arme un neuf.
+  @impl GenServer
+  def handle_cast(:rearm_deadline, %{phase: :monitoring} = state) do
+    {:noreply, arm_result_deadline(state)}
+  end
+
+  def handle_cast(:rearm_deadline, state), do: {:noreply, state}
+
   # (R1.2 — parser NDJSON `parse_chunks`/`handle_event` retiré : modèle -p mort.
   #  La complétion vient du livrable fichier, pas d'un event `result` NDJSON.)
 
