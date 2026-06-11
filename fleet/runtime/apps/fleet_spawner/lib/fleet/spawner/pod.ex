@@ -821,7 +821,8 @@ defmodule Fleet.Spawner.Pod do
   defp maybe_put_pod_cwd(env, state) do
     case effective_project(state)["repo_path"] do
       nil -> env
-      _ -> Map.put(env, "LCARS_POD_CWD", Path.join(state.pod_dir, "workspace"))
+      # F121 : dérive le workspace via l'autorité unique (Fleet.Spawner), pas un littéral recopié.
+      _ -> Map.put(env, "LCARS_POD_CWD", Fleet.Spawner.pod_workspace_path(state.pod_dir))
     end
   end
 
@@ -1098,7 +1099,8 @@ defmodule Fleet.Spawner.Pod do
           %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
             base
             |> Map.merge(%{
-              "workspace" => Path.join(state.pod_dir, "workspace"),
+              # F121 : autorité unique du sous-dossier workspace (Fleet.Spawner), pas un littéral recopié.
+              "workspace" => Fleet.Spawner.pod_workspace_path(state.pod_dir),
               "base_sha" => proj["base_sha"],
               "role" => cap_profile_name(state.cap_profile)
             })

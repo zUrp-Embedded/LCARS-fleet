@@ -152,9 +152,21 @@ defmodule Fleet.Spawner do
   end
 
   # Convention #596 (R2) : le workspace livrable d'un pod = `<pod_dir>/workspace` (sous `$POD_DIR`,
-  # bound bwrap RW). Sous-dossier centralisé ICI — autorité unique de la convention de placement, au
-  # lieu d'être copié dans `Pod.maybe_put_pod_cwd`, `ProjectBootstrap.Clone`, l'Executor.
+  # bound bwrap RW). Sous-dossier centralisé ICI — autorité unique de la convention de placement.
+  # F121 : `Pod` (maybe_put_pod_cwd + pod.completed) le dérive via `pod_workspace_path/1`, plus de
+  # littéral recopié. `ProjectBootstrap.Clone` garde sa copie (ring1 ne peut pas dépendre de spawner
+  # sans cycle spawner⇄bootstrap) MAIS il RETOURNE le workspace calculé → producteur autoritaire.
   @pod_workspace_subdir "workspace"
+
+  @doc """
+  Workspace livrable depuis un `pod_dir` DÉJÀ connu (`<pod_dir>/workspace`). Pur — pour les
+  appelants intra-app qui tiennent le pod_dir (ex. `Pod` sur son state) au lieu de ré-encoder le
+  littéral `"workspace"` (F121 : autorité unique #596 R2). `pod_workspace_dir/1` reste la voie
+  registry (le monde lit où IL a placé le pod, Q2 anti-I-CBC).
+  """
+  @spec pod_workspace_path(Path.t()) :: Path.t()
+  def pod_workspace_path(pod_dir) when is_binary(pod_dir),
+    do: Path.join(pod_dir, @pod_workspace_subdir)
 
   @doc """
   Résout le workspace livrable d'un pod (`<pod_dir>/workspace`) depuis le pod_dir ENREGISTRÉ (#596 R3).
@@ -165,7 +177,7 @@ defmodule Fleet.Spawner do
   @spec pod_workspace_dir(String.t()) :: {:ok, Path.t()} | {:error, :not_found}
   def pod_workspace_dir(pod_id) when is_binary(pod_id) do
     case pod_info(pod_id) do
-      {:ok, %{pod_dir: dir}} when is_binary(dir) -> {:ok, Path.join(dir, @pod_workspace_subdir)}
+      {:ok, %{pod_dir: dir}} when is_binary(dir) -> {:ok, pod_workspace_path(dir)}
       {:ok, _} -> {:error, :not_found}
       {:error, _} = err -> err
     end
