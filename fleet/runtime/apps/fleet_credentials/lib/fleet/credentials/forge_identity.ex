@@ -85,6 +85,18 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   @doc """
+  Instruction de signature à injecter dans le mandat du pod (F090/F091) — SOURCE UNIQUE du trailer.
+  Dérive de `coauthor_trailer/1` : tout mandat (StageRunner ET StageSpawner) doit l'utiliser, sinon
+  la chaîne (instruction côté pod / needle de la gate F-01) se désaccorde du canon.
+  """
+  @spec coauthor_instruction(String.t()) :: String.t()
+  def coauthor_instruction(role) when is_binary(role) do
+    "Signature OBLIGATOIRE — ajoute à CHAQUE commit git le trailer exact :\n" <>
+      "`#{coauthor_trailer(role)}`\n" <>
+      "(sans lui, le livrable est rejeté au push — gate F-01)."
+  end
+
+  @doc """
   Emails d'identité acceptés par la gate F-01 selon le mode. `git_native` → l'humain
   seul (il commite) ; `payload` → l'humain (author) + système (committer).
   """

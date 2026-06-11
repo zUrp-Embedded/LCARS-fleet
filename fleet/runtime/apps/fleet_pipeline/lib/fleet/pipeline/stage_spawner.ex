@@ -67,6 +67,7 @@ defmodule Fleet.Pipeline.StageSpawner.Default do
   # Mandat textuel livré au pod (brief) : la stage + le mandat + les inputs résolus des stages amont.
   defp build_mandate(stage_ctx) do
     stage = Map.get(stage_ctx, :stage)
+    role = Map.get(stage_ctx, :role)
     mandate = Map.get(stage_ctx, :mandate)
     inputs = Map.get(stage_ctx, :inputs, %{})
 
@@ -75,7 +76,11 @@ defmodule Fleet.Pipeline.StageSpawner.Default do
       if(not is_nil(mandate), do: "Mandat : #{inspect(mandate)}"),
       if(is_map(inputs) and map_size(inputs) > 0,
         do: "Inputs (stages amont) : #{inspect(inputs)}"
-      )
+      ),
+      # F090 : le mandat spawn-time portait PAS l'instruction de signature (copie de StageRunner
+      # qui l'avait, pas celle-ci) → un pod spawné par ce chemin commitait SANS trailer → rejet F-01
+      # au push. Même source unique que StageRunner (F091).
+      if(is_binary(role), do: Fleet.Credentials.ForgeIdentity.coauthor_instruction(role))
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")

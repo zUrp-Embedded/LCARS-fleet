@@ -851,8 +851,14 @@ defmodule Fleet.Pipeline.Executor do
   # fail-closed.
   defp allowed_emails(:payload, role) do
     case Fleet.Credentials.ForgeIdentity.for_role(role) do
-      {:ok, id} -> Fleet.Credentials.ForgeIdentity.allowed_emails(:payload, id.author_email)
-      {:error, _} -> ["system@lcars.local"]
+      {:ok, id} ->
+        Fleet.Credentials.ForgeIdentity.allowed_emails(:payload, id.author_email)
+
+      # F086 : identité irrésoluble → `[]` FAIL-CLOSED (cohérent avec git_native + HopConsumer).
+      # L'ancien `["system@lcars.local"]` laissait un commit système passer la gate F-01 SANS author
+      # humain résolu → divergence de fallback (payload non-vide vs git_native vide).
+      {:error, _} ->
+        []
     end
   end
 

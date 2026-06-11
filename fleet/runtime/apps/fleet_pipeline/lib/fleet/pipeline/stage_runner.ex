@@ -249,14 +249,10 @@ defmodule Fleet.Pipeline.StageRunner do
         do: "Inputs (stages amont) : #{inspect(inputs)}"
       ),
       # Z4 (A.2) — signature de rôle OBLIGATOIRE (I-CBC : le pod est INSTRUIT, le MONDE vérifie
-      # au push via F-01 `check_coauthor_trailer`). L'author git = l'humain (cf. GIT_AUTHOR) ; le
-      # rôle se signe par CE trailer, sur CHAQUE commit. Absent → livrable rejeté (pas de push).
-      if(is_binary(role),
-        do:
-          "Signature OBLIGATOIRE — ajoute à CHAQUE commit git le trailer exact :\n" <>
-            "`Co-authored-by: LCARS-#{role} <#{role}@lcars.local>`\n" <>
-            "(sans lui, le livrable est rejeté au push — gate F-01)."
-      )
+      # au push via F-01 `check_coauthor_trailer`). F091 : instruction = SOURCE UNIQUE
+      # `ForgeIdentity.coauthor_instruction/1` (dérive du trailer canon), plus de string inline qui
+      # pouvait se désaccorder du owner.
+      if(is_binary(role), do: Fleet.Credentials.ForgeIdentity.coauthor_instruction(role))
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")

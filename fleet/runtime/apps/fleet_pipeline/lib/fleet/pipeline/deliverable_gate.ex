@@ -105,7 +105,13 @@ defmodule Fleet.Pipeline.DeliverableGate do
   """
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
   def check_coauthor_trailer(workspace, base_sha, expected_role) when is_binary(expected_role) do
-    needle = "Co-authored-by: LCARS-#{expected_role}"
+    # F091 : needle DÉRIVÉ du trailer canon (ForgeIdentity.coauthor_trailer = SOURCE UNIQUE) — on
+    # prend le préfixe avant l'email (lenient sur l'adresse) mais on suit tout changement de format
+    # du owner, plus de string inline qui se désaccorde de l'instruction donnée au pod.
+    needle =
+      Fleet.Credentials.ForgeIdentity.coauthor_trailer(expected_role)
+      |> String.split(" <")
+      |> hd()
 
     # `%x00` (NUL) sépare les commits — un NUL ne peut pas apparaître dans un message git.
     case git(workspace, ["log", "#{base_sha}..HEAD", "--format=%H%x1f%B%x00"]) do
