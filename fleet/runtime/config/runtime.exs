@@ -100,6 +100,22 @@ if config_env() != :test do
     config :fleet_event_router, webhook_secret_path: path
   end
 
+  # F161/F036 : ON-SWITCH du listener webhook Gitea (:8081 HMAC). Sans lui, `:start_webhooks` restait
+  # à `false` partout → WebhooksGitea + le secret + les clés gitea.* du registre étaient une surface
+  # de config qui ne pouvait JAMAIS démarrer. Défaut OFF (intégration forge opt-in). Port surchargeable.
+  if System.get_env("LCARS_FLEET_WEBHOOKS") == "true" do
+    config :fleet_event_router, start_webhooks: true
+
+    if port = System.get_env("LCARS_FLEET_WEBHOOK_PORT") do
+      config :fleet_event_router, webhook_port: parse_int.("LCARS_FLEET_WEBHOOK_PORT", port)
+    end
+  end
+
+  # SignalsOS (:start_signals) : PAS d'on-switch — F037 : `handle_info({:signal,_})` est MORT
+  # (les signaux OS vont au gen_event `:erl_signal_server`, pas au GenServer ; SIGUSR1 halte même le
+  # VM). Câbler un knob activerait un module cassé ET dangereux. Reste gated-off jusqu'à F037 (vrai
+  # fix = gen_event handler). os.signal.* du registre = dormant en attendant.
+
   # ============================================================
   # fleet_spawner (Lot 3) — pods permanents
   # BL-028 (clos) : `:boot_permanent_at_start` EST le gate canon du boot des pods

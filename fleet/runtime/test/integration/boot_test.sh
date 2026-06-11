@@ -97,18 +97,16 @@ step "3. EnvironmentFile template"
 
 [ -f "$ENV_TPL" ] && ok "env template exists" || ko "env template missing: $ENV_TPL"
 
+# F164 : LCARS_CONFIG_PATH / LCARS_CREDENTIALS_ROOT / GITEA_URL / GITEA_TOKEN RETIRÉS (vars mortes,
+# aucun module ne les lit — creds=claudeDir ADR-F, forge=FORGE_*). On ne valide que les vars LUES.
 for var in \
     "RELEASE_NODE" \
     "RELEASE_COOKIE" \
-    "LCARS_CONFIG_PATH" \
     "LCARS_LOG_LEVEL" \
     "LCARS_CAPPROFILES_ROOT" \
-    "LCARS_CREDENTIALS_ROOT" \
     "LCARS_PIPELINES_ROOT" \
     "LCARS_STARFLEET_AUDIT_LOG" \
     "LCARS_COORD_POLICIES_PATH" \
-    "GITEA_URL" \
-    "GITEA_TOKEN" \
     "FLEET_WEBHOOK_SECRET_PATH" \
     "FLEET_API_PORT" \
     "FLEET_API_SECRET_PATH" \
