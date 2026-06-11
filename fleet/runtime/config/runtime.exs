@@ -203,6 +203,12 @@ if config_env() != :test do
     config :fleet_pipeline, pipelines_root: path
   end
 
+  # F092 : racine des workspaces de pipeline (scratch git). Défaut HORS /tmp (ADR-E :
+  # PrivateTmp + tmpfs bwrap orphelineraient les écritures) = `~/.lcars/workspaces`.
+  if path = System.get_env("LCARS_WORKSPACES_ROOT") do
+    config :fleet_pipeline, workspaces_root: path
+  end
+
   # R7 I-CBC — en prod, un échec de broadcast d'event lifecycle pipeline est
   # loggé (Logger.error) mais NE crash PAS l'Executor (préserver l'état du
   # pipeline). Hors prod, défaut `true` = fail-loud (re-raise) pour que le dev

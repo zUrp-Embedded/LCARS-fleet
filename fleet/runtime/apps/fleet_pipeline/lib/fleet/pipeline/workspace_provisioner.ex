@@ -49,7 +49,13 @@ defmodule Fleet.Pipeline.WorkspaceProvisioner do
   """
   @spec workspace_dir_for(term(), String.t()) :: Path.t()
   def workspace_dir_for(pipeline_id, stage) do
-    root = Application.get_env(:fleet_pipeline, :workspaces_root, System.tmp_dir!())
+    # F092 : défaut HORS /tmp. ADR-E : pas sous /tmp (PrivateTmp=yes + tmpfs bwrap orphelineraient
+    # les écritures). Sous le home de l'humain (`~/.lcars/workspaces`), surchargeable par le knob
+    # `LCARS_WORKSPACES_ROOT` (runtime.exs). `:workspaces_root` = override config (tests/déploiement).
+    root =
+      Application.get_env(:fleet_pipeline, :workspaces_root) ||
+        Path.join(System.user_home() || "/var/lib/lcars", ".lcars/workspaces")
+
     Path.join([root, to_string(pipeline_id), stage, "workspace"])
   end
 

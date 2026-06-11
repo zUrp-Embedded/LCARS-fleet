@@ -121,13 +121,27 @@ defmodule Fleet.Pipeline.Executor do
 
   @impl GenServer
   def handle_continue(:start_first_stage, state) do
-    case Toposort.sort(state.pipeline["stages"]) do
-      [] ->
-        {:stop, :empty_pipeline, state}
-
-      [first | _] ->
+    # F082 : `Toposort.sort` RAISE sur un graphe cyclique/dangling. Sous `restart: :transient`, un
+    # raise = exit ABNORMAL → restart → re-raise → RESTART STORM (tue les pipelines voisins via le
+    # superviseur). On rabat le graphe invalide (ET le pipeline vide) sur un `pipeline.failed`
+    # observable + `:stop, :normal` — que `:transient` NE restart PAS.
+    case safe_first_stage(state) do
+      {:ok, first} ->
         do_run_stage(first, state)
+
+      {:error, reason} ->
+        broadcast_pipeline_failed(state, nil, reason)
+        {:stop, :normal, state}
     end
+  end
+
+  defp safe_first_stage(state) do
+    case Toposort.sort(state.pipeline["stages"]) do
+      [] -> {:error, :empty_pipeline}
+      [first | _] -> {:ok, first}
+    end
+  rescue
+    e -> {:error, {:invalid_pipeline_graph, Exception.message(e)}}
   end
 
   # R2 (D1 schema unique) — consommation canon `%Fleet.Event{}` strict. Le tuple
