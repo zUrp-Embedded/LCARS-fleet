@@ -12,6 +12,15 @@ defmodule Fleet.Spawner.LaunchBackend do
 
       config :fleet_spawner, :launch_backend,
         Fleet.Spawner.LaunchBackend.LauncherPortBackend
+
+  ## Contrat N1 — `.claude.json` (F115/F157)
+
+  La projection N0 (`Fleet.Spawner.Pod`) n'écrit PLUS `<pod_dir>/.claude.json` : c'est de la
+  connaissance schéma-vendor. **Tout vendor launcher** (`claude_launch.sh` et tout futur
+  `<vendor>_launch.sh`) DOIT écrire `<pod_dir>/.claude.json` AVANT l'exec, avec au minimum
+  `hasCompletedOnboarding: true` + les 3 clés remote-control
+  (`remoteControlAtStartup`/`hasUsedRemoteControl`/`remoteDialogSeen`) — sinon le dialog RC bloque
+  le pod au boot. La clé `projects` doit être le CWD réel de l'agent (`LCARS_POD_CWD`).
   """
 
   @doc """

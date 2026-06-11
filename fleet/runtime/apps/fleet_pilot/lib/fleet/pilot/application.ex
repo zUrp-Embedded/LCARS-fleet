@@ -60,7 +60,7 @@ defmodule Fleet.Pilot.Application do
 
   # Remote git où le SYSTÈME pousse les livrables (HopConsumer). Dérivé du base_url forge
   # (`:fleet_pilot, :forge`) + repo, ou override explicite `:hop_remote`. Le token n'est PAS
-  # dans l'URL (auth via `:fleet_pipeline, :forge_auth` extraheader). `nil` → stage désactivé.
+  # dans l'URL (auth via `Fleet.Credentials.ForgeAuth.git_env`, env hors argv). `nil` → stage désactivé.
   defp hop_remote(repo) do
     case Application.get_env(:fleet_pilot, :hop_remote) do
       url when is_binary(url) and url != "" ->

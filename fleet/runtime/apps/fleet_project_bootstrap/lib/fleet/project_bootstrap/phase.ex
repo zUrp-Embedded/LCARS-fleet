@@ -57,6 +57,10 @@ defmodule Fleet.ProjectBootstrap.Phase do
           end
 
         repo_url ->
+          # F121 NB : `fleet_project_bootstrap` ne peut PAS dépendre de `fleet_spawner` (cycle compile),
+          # donc `"workspace"` est ré-encodé ici — il DOIT rester en sync avec
+          # `Fleet.Spawner.@pod_workspace_subdir` (autorité de la convention #596). Ce module est le
+          # PRODUCTEUR (il crée et retourne le workspace) ; Pod le RECOMPUTE via pod_workspace_path/1.
           ws = Path.join(pod_dir, "workspace")
           ref = project["reference_repo_path"]
           base = project["base_branch"] || "main"
