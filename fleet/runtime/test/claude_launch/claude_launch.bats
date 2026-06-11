@@ -140,6 +140,18 @@ teardown() {
   [[ "$output" == *"--remote-control"* ]]
 }
 
+@test "F115/F157: .claude.json provisionné porte les 3 clés remote-control (écrivain unique N1)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$status" -eq 0 ]]
+  # Le launcher est l'unique écrivain du .claude.json : sans ces clés, le dialog RC re-bloque
+  # au boot (pod.ex N0 ne les pose plus — sa version était clobberée par ce `cat >`).
+  [[ -f "$POD_DIR/.claude.json" ]]
+  run cat "$POD_DIR/.claude.json"
+  [[ "$output" == *'"remoteControlAtStartup": true'* ]]
+  [[ "$output" == *'"hasUsedRemoteControl": true'* ]]
+  [[ "$output" == *'"remoteDialogSeen": true'* ]]
+}
+
 @test "flags: 1ʳᵉ création → --session-id <UUID> (pas --resume)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
   [[ "$output" == *"--session-id test-session-uuid"* ]]

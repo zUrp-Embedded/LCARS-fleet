@@ -150,11 +150,16 @@ dbg "step CAP_PROFILE OK"
 
 VER="$("$CLAUDE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 POD_CWD="${LCARS_POD_CWD:-$POD_DIR}"
+# F115/F157 : ÉCRIVAIN UNIQUE du .claude.json (N1, frontière vendor). Les 3 clés remote-control
+# (remoteControlAtStartup/hasUsedRemoteControl/remoteDialogSeen) sont posées ICI — avant, pod.ex (N0)
+# les écrivait puis ce `cat >` les clobberait → le dialog RC re-bloquait au boot (ADR-G). La clé
+# `projects` = le CWD réel de l'agent ($POD_CWD), pas $POD_DIR.
 cat > "$POD_DIR/.claude.json" <<JSONEOF
 { "hasCompletedOnboarding": true, "lastOnboardingVersion": "${VER:-2.1.150}", "migrationVersion": 13,
+  "remoteControlAtStartup": true, "hasUsedRemoteControl": true, "remoteDialogSeen": true,
   "projects": { "$POD_CWD": { "allowedTools": [], "hasTrustDialogAccepted": true, "projectOnboardingSeenCount": 10 } } }
 JSONEOF
-dbg "step claude.json provisionné (VER=${VER:-?})"
+dbg "step claude.json provisionné (VER=${VER:-?}, RC keys posées)"
 
 # =============================================================
 # Tools depuis cap-profile JSON resolved (string-keyed, cohérent fleet_capprofile L100).

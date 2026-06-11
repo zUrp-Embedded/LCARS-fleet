@@ -460,7 +460,9 @@ defmodule Fleet.Spawner.Pod do
          # creds : plus de copie (adr-f). Seul `.credentials.json` de l'humain est monté RW par
          # bwrap_launch.sh dans `pod_dir/.claude/` (refresh OAuth natif, écriture en place). `.claude/`
          # reste pod-owned → pas de hook humain. Les fichiers pod sont en .lcars/ + racine pod.
-         :ok <- write_pod_claude_json(state),
+         # F115/F157 : le `.claude.json` (onboarding + remote-control) est écrit par claude_launch.sh
+         # (frontière vendor N1) — PAS ici. La version N0 était clobberée à l'exec (claude_launch le
+         # ré-écrit sans condition) ET vivait dans N0 (connaissance vendor) : retirée (ADR-G / N1).
          :ok <- safe_mkdir_p(tickets_dir),
          :ok <-
            safe_write(
@@ -484,49 +486,13 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Pré-écrit `pod_dir/.claude.json` (state file global claude REPL) avec
-  # les flags onboarding + remote-control pré-acceptés. Sans, claude REPL
-  # affiche le login screen interactif (même creds valides) ou bloque sur
-  # le dialog remote-control au boot. Cohérent avec le gate U-RC e2e qui
-  # pré-pose ce fichier.
-  defp write_pod_claude_json(state) do
-    version = detect_claude_version()
-
-    payload = %{
-      "hasCompletedOnboarding" => true,
-      "lastOnboardingVersion" => version,
-      "migrationVersion" => 13,
-      "remoteControlAtStartup" => true,
-      "hasUsedRemoteControl" => true,
-      "remoteDialogSeen" => true,
-      "projects" => %{
-        state.pod_dir => %{
-          "allowedTools" => [],
-          "hasTrustDialogAccepted" => true,
-          "projectOnboardingSeenCount" => 10
-        }
-      }
-    }
-
-    safe_write(Path.join(state.pod_dir, ".claude.json"), Jason.encode!(payload, pretty: true))
-  end
-
-  # F116 : ne PAS hardcoder `/usr/bin/claude` (fuite vendor-bin N0 + `System.cmd` RAISE
-  # `:enoent` sur binaire absent — non rattrapé → crashe le Pod en do_project sans
-  # transition_failed). On résout via le PATH (claude per-user `~/.local/bin` honoré) et on
-  # rescue tout : un host sans claude tombe sur la version par défaut, jamais un crash. La
-  # version ne sert qu'à `lastOnboardingVersion` (anti-écran login) — la précision est cosmétique.
-  defp detect_claude_version do
-    with path when is_binary(path) <- System.find_executable("claude"),
-         {output, 0} <- System.cmd(path, ["--version"], stderr_to_stdout: true),
-         [v | _] <- Regex.run(~r/\d+\.\d+\.\d+/, output) do
-      v
-    else
-      _ -> "2.1.150"
-    end
-  rescue
-    _ -> "2.1.150"
-  end
+  # F115/F157 — `write_pod_claude_json` + `detect_claude_version` RETIRÉS. Le `.claude.json`
+  # (onboarding + remote-control pré-acceptés) est désormais l'unique responsabilité de
+  # `claude_launch.sh` (frontière vendor N1) : la version N0 était (1) systématiquement clobberée
+  # par le `cat >` du launcher juste avant l'exec — donc morte — et perdait au passage les 3 clés RC
+  # (`remoteControlAtStartup`/`hasUsedRemoteControl`/`remoteDialogSeen`), ré-introduisant le blocage
+  # dialog RC qu'elle prétendait éviter ; (2) plaçait de la connaissance schéma-vendor dans N0. Les
+  # clés RC ont migré dans le launcher (clé `projects` correcte = `LCARS_POD_CWD`, pas `pod_dir`).
 
   # creds : write_claude_credentials/lead_credentials_path SUPPRIMÉS (adr-f).
   # Plus de copie du `.credentials.json` du lead vers le pod : le claudeDir de
