@@ -121,17 +121,19 @@ defmodule Fleet.Pipeline.Executor do
 
   @impl GenServer
   def handle_continue(:start_first_stage, state) do
-    # F082 : `Toposort.sort` RAISE sur un graphe cyclique/dangling. Sous `restart: :transient`, un
-    # raise = exit ABNORMAL → restart → re-raise → RESTART STORM (tue les pipelines voisins via le
-    # superviseur). On rabat le graphe invalide (ET le pipeline vide) sur un `pipeline.failed`
-    # observable + `:stop, :normal` — que `:transient` NE restart PAS.
+    # F082 (+ review Finding 3) : `Toposort.sort` RAISE sur un graphe cyclique/dangling. Sous
+    # `restart: :transient`, un exit ABNORMAL → restart → re-échec → RESTART STORM (tue les
+    # pipelines voisins, borné par max_restarts mais épuise le budget). CONVENTION : tout échec
+    # TERMINAL de pipeline (graphe invalide, gate_fail, gate_halt, provision_fail, spawn_fail)
+    # broadcast `pipeline.failed` PUIS `{:stop, {:shutdown, reason}}` — `:transient` ne restart PAS
+    # un `:shutdown` (vs un atom nu = abnormal) ET la reason reste visible dans les logs OTP.
     case safe_first_stage(state) do
       {:ok, first} ->
         do_run_stage(first, state)
 
       {:error, reason} ->
         broadcast_pipeline_failed(state, nil, reason)
-        {:stop, :normal, state}
+        {:stop, {:shutdown, reason}, state}
     end
   end
 
@@ -346,7 +348,7 @@ defmodule Fleet.Pipeline.Executor do
 
         broadcast_pipeline_failed(state, stage, reason)
 
-        {:stop, :gate_fail, state}
+        {:stop, {:shutdown, :gate_fail}, state}
 
       # R4/B — gate déléguée au gatekeeper (juge unique, pod permanent
       # work-session). L'Executor **n'avance pas** : il enqueue un mandat d'éval
@@ -423,12 +425,12 @@ defmodule Fleet.Pipeline.Executor do
               "gatekeeper enqueue failed: #{inspect(reason)}"
             )
 
-            {:stop, :gate_fail, state}
+            {:stop, {:shutdown, :gate_fail}, state}
         end
 
       _ ->
         broadcast_pipeline_failed(state, stage, "no gatekeeper available (not booted)")
-        {:stop, :gate_fail, state}
+        {:stop, {:shutdown, :gate_fail}, state}
     end
   end
 
@@ -457,7 +459,7 @@ defmodule Fleet.Pipeline.Executor do
 
       other ->
         broadcast_pipeline_failed(state, stage, gate_halt_reason(other, result))
-        {:stop, :gate_halt, state}
+        {:stop, {:shutdown, :gate_halt}, state}
     end
   end
 
@@ -521,7 +523,7 @@ defmodule Fleet.Pipeline.Executor do
           "workspace provision fail: #{inspect(reason)}"
         )
 
-        {:stop, :provision_fail, state}
+        {:stop, {:shutdown, :provision_fail}, state}
     end
   end
 
@@ -616,7 +618,7 @@ defmodule Fleet.Pipeline.Executor do
       {:error, reason} ->
         broadcast_pipeline_failed(state, stage_name, "spawn fail: #{inspect(reason)}")
 
-        {:stop, :spawn_fail, state}
+        {:stop, {:shutdown, :spawn_fail}, state}
     end
   end
 

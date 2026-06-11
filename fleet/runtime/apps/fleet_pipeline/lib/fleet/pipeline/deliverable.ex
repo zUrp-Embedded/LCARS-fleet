@@ -190,8 +190,10 @@ defmodule Fleet.Pipeline.Deliverable do
     expanded_ws = Path.expand(workspace)
 
     Enum.reduce_while(files, :ok, fn
+      # F081 (review) : `rel_path` non-vide — un path "" passait les checks (Path.expand → workspace,
+      # symlink_in_chain? sur [] → false) puis File.write sur le dir = :eisdir opaque. Rejet propre.
       %{"path" => rel_path, "content" => content}, :ok
-      when is_binary(rel_path) and is_binary(content) ->
+      when is_binary(rel_path) and rel_path != "" and is_binary(content) ->
         full = Path.expand(Path.join(workspace, rel_path))
 
         cond do

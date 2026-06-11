@@ -29,6 +29,12 @@ defmodule Fleet.Credentials.ForgeIdentity do
   du catalogue » : un user OS ⇒ toujours une identité. (Seam test : `opts[:identity]`
   ou `config :fleet_credentials, :forge_identity_override` — `git config` varie par runner.)
 
+  **Pré-requis déploiement nominal** : l'humain a `git config --global user.email` configuré.
+  Sinon le fallback `<login>@<hostname>` n'est PAS stable (review Fable) — l'email est résolu
+  deux fois indépendamment (au spawn → `GIT_AUTHOR_EMAIL` du pod ; au check → `allowed_emails`
+  de la gate F-01) ; si le gitconfig est complété ou le hostname change entre les deux, les
+  emails divergent et F-01 rejette un commit légitime. Avec `git config user.email` posé, stable.
+
   ## Trailer rôle
 
   `Co-authored-by: LCARS-<role> <<role>@lcars.local>` — le trailer est ce que la gate
