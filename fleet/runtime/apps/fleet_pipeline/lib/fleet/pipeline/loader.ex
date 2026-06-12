@@ -44,7 +44,7 @@ defmodule Fleet.Pipeline.Loader do
     schema_file =
       if Map.has_key?(yaml, "spec"), do: "pipeline-v2.5.json", else: "pipeline-v1.json"
 
-    schema = ExJsonSchema.Schema.resolve(load_schema!(schema_file, opts))
+    schema = resolved_schema(schema_file, opts)
 
     case ExJsonSchema.Validator.validate(schema, yaml) do
       :ok ->
@@ -75,19 +75,26 @@ defmodule Fleet.Pipeline.Loader do
       Application.app_dir(:fleet_pipeline, "priv/canon/pipelines")
   end
 
-  defp load_schema!(schema_file, opts) do
-    explicit_path =
-      Keyword.get(opts, :schema_path) || Application.get_env(:fleet_pipeline, :schema_path)
+  # F088 — schema résolu (read+decode+resolve) caché en `:persistent_term`, keyé par
+  # le path RÉSOLU (les overrides `:schema_path` des tests ont leur propre entrée →
+  # pas de pollution prod↔test). Lazy-init, mirroring `Starfleet.Gatekeeper`.
+  defp resolved_schema(schema_file, opts) do
+    path = schema_path(schema_file, opts)
+    key = {__MODULE__, :schema, path}
 
-    case explicit_path do
-      nil ->
-        :code.priv_dir(:fleet_pipeline)
-        |> Path.join("schema/#{schema_file}")
-        |> File.read!()
-        |> Jason.decode!()
+    case :persistent_term.get(key, :miss) do
+      :miss ->
+        schema = path |> File.read!() |> Jason.decode!() |> ExJsonSchema.Schema.resolve()
+        :persistent_term.put(key, schema)
+        schema
 
-      path ->
-        path |> File.read!() |> Jason.decode!()
+      schema ->
+        schema
     end
+  end
+
+  defp schema_path(schema_file, opts) do
+    Keyword.get(opts, :schema_path) || Application.get_env(:fleet_pipeline, :schema_path) ||
+      :code.priv_dir(:fleet_pipeline) |> to_string() |> Path.join("schema/#{schema_file}")
   end
 end
