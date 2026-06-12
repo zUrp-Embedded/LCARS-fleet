@@ -14,7 +14,7 @@ defmodule Fleet.TaskQueue.Server do
 
   ## Options
   `:name` (`nil` → anonyme, isolation tests), `:state_path`, `:persist`,
-  `:pubsub` (défaut `Fleet.PubSub`), `:topic` (défaut `"fleet.events"`).
+  `:topic` (défaut `"fleet.events"`).
   """
 
   use GenServer
@@ -22,7 +22,6 @@ defmodule Fleet.TaskQueue.Server do
 
   alias Fleet.TaskQueue.Task
 
-  @default_pubsub Fleet.PubSub
   @default_topic "fleet.events"
   @default_path "/var/lib/lcars/task-queue/state.json"
   @active_states [:pending, :assigned, :in_progress]
@@ -50,7 +49,6 @@ defmodule Fleet.TaskQueue.Server do
       tasks: %{},
       state_path: state_path,
       persist: persist?,
-      pubsub: Keyword.get(opts, :pubsub, @default_pubsub),
       topic: Keyword.get(opts, :topic, @default_topic)
     }
 
@@ -273,7 +271,9 @@ defmodule Fleet.TaskQueue.Server do
   end
 
   defp broadcast(state, %Fleet.Event{} = ev) do
-    Phoenix.PubSub.broadcast(state.pubsub, state.topic, ev)
+    # F147 — passe par Bus.broadcast (validation registry `assert_authorized!`) au lieu
+    # de Phoenix.PubSub direct : les events task ont la même garde que les autres.
+    Fleet.EventRouter.Bus.broadcast(state.topic, ev)
   rescue
     # PubSub pas démarré (boot précoce / hors umbrella) → non-bloquant. MAIS pour un event lifecycle-
     # critique (task_completed), un échec silencieux = le pod ne reçoit jamais sa complétion → timeout
