@@ -3,7 +3,7 @@ defmodule Fleet.MCP.ServerBehaviour do
   Contrat opaque du serveur MCP (DN ring4/fleet_mcp.md §"Contrat technique").
 
   4 fonctions publiques — internals SDK cachés (discipline #2 wrap
-  systématique, exemplar chantier 8 `fleet_claude_bridge`). Behaviour exposé
+  systématique). Behaviour exposé
   pour tests/mocks + bascule SDK ultérieure (ExMCP → Hermes) sans casser les
   apps consommatrices : interface inchangée, impl SDK changée.
   """

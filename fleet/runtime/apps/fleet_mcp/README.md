@@ -1,20 +1,35 @@
-# fleet_mcp — à écrire
+# fleet_mcp
 
 **Date** : 2026-05-18
-**Statut** : placeholder — app à implémenter post-session
-**Dérivé de** : 04_design-notes/ + session 2026-05-17/18 (rings finalisés)
+**Dernière révision** : 2026-06-12
+**Statut** : implémenté — serveur MCP pod-facing (`get_task` / `submit_result`)
+**Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
-Cette app fait partie du **core V2 cible** (rings finalisés cette session) mais n'est pas encore implémentée.
+Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
+`ex_mcp` derrière un contrat opaque et expose aux pods les outils MCP du runtime.
 
-## Scope V2
+## Modules
 
-MCP server LCARS, wrapper SDK MCP Elixir. Candidats SDK :
-- Hermes (cloudwalk, v0.14, mainstream)
-- Anubis (zoedsoupe, v1.5, fork)
-- ExMCP (azmaveth, supporte ACP bonus)
+- `Fleet.MCP.PodTools` — outils MCP **pod-facing** : `get_task` (le pod tire son
+  mandat depuis la TaskQueue) et `submit_result` (le pod rend son livrable).
+  `handle_tool_call/3` = fonctions pures, réutilisables hors transport.
+- `Fleet.MCP.Server` — wrap opaque du SDK `ex_mcp` (registre de channels opaque
+  `register_channel/2` + `list_channels/0`, gardé pour extensibilité future).
+- `Fleet.MCP.ServerBehaviour` — contrat (4 fonctions) pour tests/mocks + bascule
+  SDK ultérieure (ExMCP → Hermes) sans casser les apps consommatrices.
+- `Fleet.MCP.Supervisor` / `Fleet.MCP.Application` — supervision de l'app.
 
-Étude + choix à faire avant écriture. Frontière vendor `mcp_*` (ADR-C).
+## Outils MCP (pod-facing)
 
-Channels custom v2 :
-- `fleet-control` (Memory-X V1)
-- `fleet-forge` (auto-routing tickets — substitue le pattern Monitor + BOOT sentinel)
+- `get_task` — le pod récupère son mandat (corrélé `pod_id`).
+- `submit_result` — le pod soumet son livrable (`payload`).
+
+## Configuration
+
+- `:fleet_mcp, :pod_facing_port` — port d'écoute MCP côté pods.
+- `:fleet_mcp, :boot_environment` — environnement injecté au boot du serveur.
+
+## Frontière vendor
+
+`mcp_*` = N1 (ADR-C) : le SDK `ex_mcp` est wrappé derrière `Fleet.MCP.Server` ;
+bascule vers un autre SDK (Hermes) possible sans toucher les consommateurs.

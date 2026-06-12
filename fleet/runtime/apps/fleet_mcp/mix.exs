@@ -45,7 +45,7 @@ defmodule Fleet.MCP.MixProject do
     # ex_mcp : SDK MCP/ACP Elixir, multi-transport (stdio/HTTP-SSE/BEAM) — wrap opaque
     #          via Fleet.MCP.Server (discipline SDK #2, bascule Hermes possible).
     # phoenix_pubsub : bus interne (fan-out broadcast — PAS via GenServer, anti-goulot OTP).
-    # ex_json_schema + jason : validation events au broadcast (cohérent Lot 0bis).
+    # jason : encode/decode JSON des payloads d'outils MCP (get_task/submit_result).
     # jose : pin override 1.11.10 — ex_mcp tire jose transitivement à 1.11.12 qui
     #        exige OTP27 (`dynamic()` undefined), or env = OTP25. 1.11.10 =
     #        dernière révision OTP25-compatible. Sanctionné starfleet #551
@@ -56,7 +56,6 @@ defmodule Fleet.MCP.MixProject do
       {:ex_mcp, "~> 0.9.1"},
       {:jose, "1.11.10", override: true},
       {:phoenix_pubsub, "~> 2.1"},
-      {:ex_json_schema, "~> 0.11"},
       {:jason, "~> 1.4"},
       # fleet_event_router : Bus + Fleet.Event + Fleet.PubSub (Ring 0). Déjà en
       #   extra_applications (ordering OTP boot) ; ici en dep compile-time. Ring 4→0, pas de cycle.
