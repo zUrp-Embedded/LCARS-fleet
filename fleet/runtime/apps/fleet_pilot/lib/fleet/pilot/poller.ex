@@ -172,7 +172,7 @@ defmodule Fleet.Pilot.Poller do
 
   @impl GenServer
   def handle_info(:poll, state) do
-    new_state = safe_poll(state)
+    {_result, new_state} = safe_poll(state)
     schedule(next_delay(new_state))
     {:noreply, new_state}
   end
@@ -181,7 +181,7 @@ defmodule Fleet.Pilot.Poller do
 
   @impl GenServer
   def handle_call(:force_poll, _from, state) do
-    {result, new_state} = do_poll(state)
+    {result, new_state} = safe_poll(state)
     {:reply, result, new_state}
   end
 
@@ -217,21 +217,23 @@ defmodule Fleet.Pilot.Poller do
     max(ms + offset, 1_000)
   end
 
+  # Retourne `{result, new_state}` — rescue-wrappé. Partagé par le tick (qui jette le
+  # result) ET force_poll (qui le renvoie) : F184, force_poll ne bypasse plus le rescue.
   defp safe_poll(state) do
-    {_result, new_state} = do_poll(state)
-    new_state
+    do_poll(state)
   rescue
     exception ->
       Logger.error(
         "fleet_pilot Poller unexpected crash in do_poll: #{inspect(exception)} — state preserved"
       )
 
-      %{
-        state
-        | error_count: state.error_count + 1,
-          err_streak: state.err_streak + 1,
-          last_error: inspect(exception)
-      }
+      {%{dispatched: 0, skipped: 0, errors: 1},
+       %{
+         state
+         | error_count: state.error_count + 1,
+           err_streak: state.err_streak + 1,
+           last_error: inspect(exception)
+       }}
   end
 
   # ============================================================
