@@ -330,8 +330,13 @@ defmodule Fleet.Pipeline.StageRunner do
 
   def resolve_inputs(specs, prior) when is_list(specs) do
     Enum.reduce(specs, %{}, fn
-      %{"from_stage" => s, "key" => k}, acc -> Map.put(acc, s, get_in(prior, [s, k]))
-      input, acc when is_binary(input) -> Map.put(acc, input, input)
+      # F183 — `key` optionnel (aligné sur missing_dependencies) : absente → nil,
+      # pas de FunctionClauseError sur un spec `%{from_stage}` sans clé.
+      %{"from_stage" => s} = spec, acc ->
+        Map.put(acc, s, get_in(prior, [s, Map.get(spec, "key")]))
+
+      input, acc when is_binary(input) ->
+        Map.put(acc, input, input)
     end)
   end
 
