@@ -38,12 +38,7 @@ defmodule Fleet.EventRouter.Application do
   # côté `Fleet.EventRouter.Bus.broadcast/3` (mitigation atom leak DoS — M1
   # reviewer ch11).
   defp preregister_event_atoms do
-    yaml_path =
-      Application.get_env(
-        :fleet_event_router,
-        :events_yaml_path,
-        Path.join(:code.priv_dir(:fleet_event_router) |> to_string(), "events.yaml")
-      )
+    yaml_path = Fleet.EventRouter.Catalog.events_yaml_path()
 
     yaml_events =
       case File.exists?(yaml_path) && YamlElixir.read_from_file(yaml_path) do

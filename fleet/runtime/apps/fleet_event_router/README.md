@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-11 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-06-12 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -17,8 +17,6 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
 - `Fleet.EventRouter.Bus` — Phoenix.PubSub instance `Fleet.PubSub`
   + sous-topics `fleet.events.<scope>.<id>` (broadcast / subscribe /
   validation schema NDJSON soft)
-- `Fleet.EventRouter.Schema` — JSON schema NDJSON (5 required + 3
-  optional) validé `ex_json_schema`
 - `Fleet.EventRouter.WebhooksGitea` — Plug.Router HTTP `:8081` +
   HMAC SHA256 verify (secret `/etc/fleet/webhook-secret`)
 - `Fleet.EventRouter.SignalsOS` — `:os.set_signal/2` SIGUSR1/SIGTERM/SIGHUP
@@ -26,9 +24,6 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
 - `Fleet.EventRouter.Catalog` — charge le **registry** `priv/events.yaml` au boot
   (`load!/0` → `authorized_event_types`). Consommation = subscribers directs PubSub
   (BL-027 ; ex-`Dispatch` retiré, cf. § Catalogue)
-- `Fleet.EventRouter.Sanitize.Secrets` — redact `<TOKEN_REDACTED>`
-  (sk-..., ghp_...) PoC-7
-- `Fleet.EventRouter.Sanitize.PII` — redact `<EMAIL_REDACTED>` PoC-7
 - `Fleet.Shutdown.Quiesce` — primitive partagée du drain de shutdown (flag
   `:persistent_term` `quiescing?/refuse!/resume!`). Vit ici car substrat
   universel (comme `Fleet.Event`) : lisible par `fleet_pipeline`/`fleet_api`
@@ -56,10 +51,6 @@ end
 Fleet.EventRouter.Bus.subscribe("fleet.events.relay.<ref>")
 Fleet.EventRouter.Bus.broadcast_subtopic("relay.<ref>",
   {:permission_relay_response, %{ref: "...", decision: :allow}})
-
-# Sanitize chain composable
-text |> Fleet.EventRouter.Sanitize.Secrets.run()
-     |> Fleet.EventRouter.Sanitize.PII.run()
 ```
 
 ## Configuration

@@ -60,7 +60,8 @@ defmodule Fleet.EventRouter.Catalog do
     end
   end
 
-  defp events_yaml_path do
+  @doc "Résout le path du registry events.yaml (env override ou priv/). Public : réutilisé par `Application.preregister_event_atoms/0` (dedup F035)."
+  def events_yaml_path do
     Application.get_env(
       :fleet_event_router,
       :events_yaml_path,
