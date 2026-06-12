@@ -239,7 +239,23 @@ defmodule Fleet.CapProfile do
     |> Enum.map(&"Bash(git #{&1}:*)")
   end
 
+  # F021 — baseline priv IMMUABLE : read+parse une fois, caché en `:persistent_term`
+  # (lazy-init ; une erreur n'est pas cachée — le bang re-raise au prochain appel).
   defp load_baseline_git_ops_denied! do
+    key = {__MODULE__, :baseline_git_ops_denied}
+
+    case :persistent_term.get(key, :miss) do
+      :miss ->
+        entries = read_baseline_git_ops_denied!()
+        :persistent_term.put(key, entries)
+        entries
+
+      entries ->
+        entries
+    end
+  end
+
+  defp read_baseline_git_ops_denied! do
     path =
       :fleet_cap_profile
       |> :code.priv_dir()
@@ -361,9 +377,30 @@ defmodule Fleet.CapProfile do
   defp load_schema(:cap_profile), do: load_schema_file("cap-profile-v2.5.json")
   defp load_schema(:modop), do: load_schema_file("modop-profile.json")
 
+  # F022 — schema priv IMMUABLE : read+decode+resolve une fois, caché en `:persistent_term`
+  # keyé par le path RÉSOLU (les overrides test de `schema_dir/0` ont leur entrée). Lazy-init,
+  # erreurs non-cachées.
   defp load_schema_file(name) do
     path = Path.join(schema_dir(), name)
+    key = {__MODULE__, :schema, path}
 
+    case :persistent_term.get(key, :miss) do
+      :miss ->
+        case read_schema_file(path) do
+          {:ok, _schema} = ok ->
+            :persistent_term.put(key, ok)
+            ok
+
+          err ->
+            err
+        end
+
+      cached ->
+        cached
+    end
+  end
+
+  defp read_schema_file(path) do
     with {:ok, content} <- File.read(path),
          {:ok, decoded} <- Jason.decode(content),
          {:ok, schema} <- safe_resolve(decoded) do
