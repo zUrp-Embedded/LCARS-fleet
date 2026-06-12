@@ -10,10 +10,9 @@ defmodule Fleet.Pipeline.PodRegistry do
   ## State
 
       %{
-        # primary : lookup rapide {pipeline_id, role} → pod_id
-        bindings: %{{pipeline_id, role} => pod_id},
-        # reverse : pour unregister(pod_id), retrouver le binding
-        reverse: %{pod_id => {pipeline_id, role}}
+        # bindings : lookup rapide {pipeline_id, role} → pod_id ; unregister(pod_id)
+        # fait un Enum.find inverse (poignée de pods, O(n) trivial — F089).
+        bindings: %{{pipeline_id, role} => pod_id}
       }
 
   ## Pourquoi GenServer + Map (pas Registry built-in)
@@ -100,21 +99,14 @@ defmodule Fleet.Pipeline.PodRegistry do
   # ============================================================
 
   @impl GenServer
-  def init(_opts), do: {:ok, %{bindings: %{}, reverse: %{}}}
+  def init(_opts), do: {:ok, %{bindings: %{}}}
 
   @impl GenServer
   def handle_call({:register, pipeline_id, role, pod_id}, _from, state) do
-    # Si un autre pod était déjà sur cette clé, on l'évacue du reverse map
-    # pour préserver la cohérence reverse↔bindings.
-    reverse =
-      case Map.get(state.bindings, {pipeline_id, role}) do
-        nil -> state.reverse
-        old_pod -> Map.delete(state.reverse, old_pod)
-      end
-
+    # Idempotent : re-register sur la même clé écrase l'ancien pod_id (qui sort
+    # alors des bindings — pas de reverse map à garder en cohérence, F089).
     bindings = Map.put(state.bindings, {pipeline_id, role}, pod_id)
-    reverse = Map.put(reverse, pod_id, {pipeline_id, role})
-    {:reply, :ok, %{state | bindings: bindings, reverse: reverse}}
+    {:reply, :ok, %{state | bindings: bindings}}
   end
 
   def handle_call({:lookup, pipeline_id, role}, _from, state) do
@@ -132,13 +124,13 @@ defmodule Fleet.Pipeline.PodRegistry do
   end
 
   def handle_call({:unregister, pod_id}, _from, state) do
-    case Map.pop(state.reverse, pod_id) do
-      {nil, _} ->
+    # Lookup inverse par Enum.find sur les bindings (poignée de pods, F089).
+    case Enum.find(state.bindings, fn {_key, pid} -> pid == pod_id end) do
+      nil ->
         {:reply, :not_found, state}
 
-      {key, reverse} ->
-        bindings = Map.delete(state.bindings, key)
-        {:reply, :ok, %{state | bindings: bindings, reverse: reverse}}
+      {key, _pod_id} ->
+        {:reply, :ok, %{state | bindings: Map.delete(state.bindings, key)}}
     end
   end
 
@@ -150,7 +142,6 @@ defmodule Fleet.Pipeline.PodRegistry do
       end)
 
     removed_pods = Enum.map(to_remove, fn {_key, pod_id} -> pod_id end)
-    reverse = Enum.reduce(removed_pods, state.reverse, &Map.delete(&2, &1))
-    {:reply, {:ok, removed_pods}, %{state | bindings: Map.new(kept), reverse: reverse}}
+    {:reply, {:ok, removed_pods}, %{state | bindings: Map.new(kept)}}
   end
 end

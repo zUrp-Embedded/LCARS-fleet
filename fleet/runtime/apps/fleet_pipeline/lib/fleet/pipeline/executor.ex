@@ -831,7 +831,7 @@ defmodule Fleet.Pipeline.Executor do
         author_name: author_name,
         author_email: author_email,
         committer_name: "LCARS System",
-        committer_email: "system@lcars.local"
+        committer_email: Fleet.Credentials.ForgeIdentity.system_email()
       },
       coauthor_role: role
     }
