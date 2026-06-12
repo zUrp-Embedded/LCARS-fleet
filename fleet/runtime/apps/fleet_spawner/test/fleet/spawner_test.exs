@@ -56,7 +56,6 @@ defmodule Fleet.SpawnerTest do
       # B5 #576 : NE PAS delete :launch_backend — laisse la baseline
       # hermétique config/test.exs (StubBackend) en place, sinon le
       # code-default LauncherPortBackend RÉEL est atteint sous race async.
-      Application.delete_env(:fleet_credentials, :creds_root)
       Application.delete_env(:fleet_sp_builder, :sp_role_root)
       Application.delete_env(:fleet_spawner, :claude_dir)
     end)

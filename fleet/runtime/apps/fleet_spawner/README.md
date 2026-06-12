@@ -1,7 +1,7 @@
 # Fleet.Spawner
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-10 (resync ADR-G : chaîne de lancement bwrap, modèle session pré-alloc, PodTmux, recovery réelle nommée — cf. audit Codex deep-03)
+**Dernière révision** : 2026-06-13 (resync ADR-G : chaîne de lancement bwrap, modèle session pré-alloc, PodTmux, recovery réelle nommée — cf. audit Codex deep-03)
 **Statut** : implémenté run #3.1 chantier #6, convergé ADR-G run #5 2026-06-01
 
 Pilote le lifecycle pod LCARS v2 (Ring 1 pod primitive). Cycle 8 phases
@@ -55,7 +55,6 @@ State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` (champs : `
 
 - `:fleet_spawner, :state_fs_root` — racine FS state recovery (default `/var/lib/lcars`)
 - `:fleet_spawner, :pod_dir_root` — **override** base-plate du pod_dir (tests / déploiement non-standard). Non-set ⇒ défaut **per-humain `/home/<human>/pods/pod_<pod_id>`** (ADR-E/monde-invoqué : pod sous le home humain, `0700`, PAS un répertoire partagé). Ownership UID-humain effective = substrat-pending.
-- `:fleet_spawner, :pod_human` — segment humain du nom de pod (default `fleet`)
 - `:fleet_spawner, :launch_backend` — module `LaunchBackend` (**default `LauncherPortBackend`** = chaîne bwrap)
 - `:fleet_spawner, :tmux_sock_base` — base sockets par-pod (default `/run/lcars/tmux-sock`, = `LCARS_TMUX_SOCK_BASE` côté bwrap)
 - `:fleet_spawner, :bwrap_launch_path` / `:claude_launch_path` — paths absolus des launchers (default `/usr/local/bin/*` — **hors `/home`,`/tmp`** sinon masqués par `--tmpfs`)
