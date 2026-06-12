@@ -1,7 +1,7 @@
 # lcars-fleet.service (chantier 16)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-09
+**Dernière révision** : 2026-06-12
 **Statut** : att-1 livré
 **Référencé par** : `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -18,14 +18,14 @@ Mix release config pour daemon LCARS v2 umbrella OTP.
 | `bin/lcars-fleet-stop` | `/usr/local/bin/lcars-fleet-stop` | root:root 0755 | helper systemd `ExecStop` — grace shutdown coordonné (begin 45s + stop) |
 | `bin/lcars-fleet-stop-post` | `/usr/local/bin/lcars-fleet-stop-post` | root:root 0755 | helper systemd `ExecStopPost` — cleanup locks/queues |
 | `etc/lcars-fleet.env.template` | `/etc/fleet/lcars-fleet.env` | root:lcars 0640 | EnvironmentFile (secrets cookie + tokens, hors git) |
-| `rel/runtime.exs` | inclus dans Mix release `_build/prod/rel/...` | — | runtime config Elixir 1.9+ stdlib (env vars → Application config) |
+| `config/runtime.exs` | lu au boot (pas de `rel/` — démarrage par humain, pas Mix release) | — | runtime config Elixir 1.9+ stdlib (env vars → Application config) |
 
 ## Hardening systemd (refus par défaut canon §0 #1)
 
 ```
 ProtectHome=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/lcars /var/log/fleet-audit.jsonl /var/log/fleet-starfleet.jsonl /tmp
+ReadWritePaths=/var/lib/lcars /var/log/fleet-starfleet.jsonl /tmp
 NoNewPrivileges=yes
 PrivateTmp=yes
 CapabilityBoundingSet=             # vide (port :8080 > 1024 sans privilège)
@@ -118,4 +118,4 @@ systemd actif requis. Procédure manuelle ci-dessus.
 ## Frontière vendor
 
 N0 (substrat OS pur, daemon démarré consume SDK indirectement via
-ch8 `fleet_claude_bridge` frontière vendor N1 isolée).
+la frontière vendor N1 isolée `bin/claude_launch.sh`, post-ADR-G — `fleet_claude_bridge` retiré).

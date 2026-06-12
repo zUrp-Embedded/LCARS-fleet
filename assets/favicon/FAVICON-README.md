@@ -1,7 +1,7 @@
 # LCARS favicon — integration
 
 **Date** : 2026-04-21
-**Dernière révision** : 2026-06-12
+**Dernière révision** : 2026-04-21
 **Statut** : actif — sources SVG/PNG/ICO pour branding Gitea LCARS
 **Référencé par** : `fleet/tooling/gitea-fleet-config.sh --doc` (procédure install)
 

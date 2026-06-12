@@ -44,7 +44,7 @@ NotifyAccess=main
 # Hardening systemd — refus par défaut canon LCARS v1 §0 #1
 ProtectHome=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/lcars /var/log/fleet-audit.jsonl /var/log/fleet-starfleet.jsonl /tmp
+ReadWritePaths=/var/lib/lcars /var/log/fleet-starfleet.jsonl /tmp
 # /run/lcars/tmux-sock : base des sockets tmux par-pod (bwrap_launch.sh `install -d`).
 # Sous ProtectSystem=strict, /run/lcars n'est PAS writable hors ReadWritePaths/RuntimeDirectory →
 # le spawn de pod echoue ("install: cannot change permissions ... No such file"). RuntimeDirectory
