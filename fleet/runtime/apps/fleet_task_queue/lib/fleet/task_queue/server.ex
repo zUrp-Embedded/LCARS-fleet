@@ -95,7 +95,7 @@ defmodule Fleet.TaskQueue.Server do
   @impl GenServer
   def handle_call({:enqueue, pod_id, attrs}, _from, state) do
     task = %Task{
-      id: uuid4(),
+      id: UUID.uuid4(),
       pod_id: pod_id,
       ticket_id: attrs[:ticket_id] || attrs["ticket_id"],
       role: attrs[:role] || attrs["role"],
@@ -348,15 +348,6 @@ defmodule Fleet.TaskQueue.Server do
     end)
   end
 
-  # ============================================================
-  # UUID v4 (substrat :crypto, pas de dép externe — DN §A `correlation_id = task.id`)
-  # ============================================================
-
-  defp uuid4 do
-    <<u0::48, _::4, u1::12, _::2, u2::62>> = :crypto.strong_rand_bytes(16)
-    <<a::32, b::16, c::16, d::16, e::48>> = <<u0::48, 4::4, u1::12, 2::2, u2::62>>
-
-    :io_lib.format("~8.16.0b-~4.16.0b-~4.16.0b-~4.16.0b-~12.16.0b", [a, b, c, d, e])
-    |> IO.iodata_to_binary()
-  end
+  # UUID v4 (`correlation_id = task.id`, DN §A) via la dép `:uuid` (déjà shippée
+  # dans l'umbrella) — F149 : ex-uuid4/0 hand-rolled :crypto retiré (dedup).
 end

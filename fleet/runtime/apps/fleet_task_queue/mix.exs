@@ -31,6 +31,7 @@ defmodule Fleet.TaskQueue.MixProject do
       {:fleet_event_router, in_umbrella: true},
       {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
+      {:uuid, "~> 1.1"},
       {:stream_data, "~> 1.1", only: :test}
     ]
   end
