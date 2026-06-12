@@ -223,16 +223,14 @@ defmodule Fleet.TaskQueue.Server do
     tasks
     |> Map.values()
     |> Enum.filter(&(&1.pod_id == pod_id and &1.state in @active_states))
-    |> Enum.sort_by(& &1.enqueued_at, {:desc, DateTime})
-    |> List.first()
+    |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
   end
 
   defp latest_for_pod(tasks, pod_id) do
     tasks
     |> Map.values()
     |> Enum.filter(&(&1.pod_id == pod_id))
-    |> Enum.sort_by(& &1.enqueued_at, {:desc, DateTime})
-    |> List.first()
+    |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
   end
 
   defp has_completed?(tasks, pod_id) do
