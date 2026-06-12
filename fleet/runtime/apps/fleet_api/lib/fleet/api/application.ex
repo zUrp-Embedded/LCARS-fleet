@@ -29,11 +29,9 @@ defmodule Fleet.API.Application do
 
   use Application
 
-  @api_event_atoms [
-    :"admin.spawn.request",
-    :permission_relay_request,
-    :permission_relay_response
-  ]
+  # NB atomes `api` (admin.spawn.request, permission_relay_*) : créés au compile-time
+  # par leurs vrais sites (rest.ex / relay_handler.ex / events.yaml registry) — pas
+  # besoin d'un attribut de pré-enregistrement dédié (F005, ex-@api_event_atoms retiré).
 
   @impl Application
   def start(_type, _args) do
@@ -83,13 +81,6 @@ defmodule Fleet.API.Application do
         :ok
     end
   end
-
-  @doc """
-  Liste des atomes events `api`-related pré-enregistrés. Cohérent ch11
-  M1 atom-leak DoS mitigation (Bus `String.to_existing_atom/1`).
-  """
-  @spec api_event_atoms() :: [atom()]
-  def api_event_atoms, do: @api_event_atoms
 
   defp base_children do
     # Vulcan #2 : GitCommitter GenServer sérialise les commits du repo
