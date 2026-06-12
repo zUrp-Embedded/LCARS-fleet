@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" shape-rendering="geometricPrecision">
+  <!-- Background LCARS panel -->
+  <rect width="256" height="256" rx="32" fill="#0a0a0a"/>
+  <!-- LCARS corner accent (top-left elbow) -->
+  <path d="M 32 16 L 96 16 L 96 40 L 56 40 L 56 72 L 32 72 Z" fill="#CC99CC"/>
+  <!-- LCARS right pill -->
+  <rect x="208" y="16" width="32" height="24" rx="12" fill="#CC99CC"/>
+  <!-- Role color fill area -->
+  <rect x="32" y="88" width="192" height="140" rx="16" fill="#CC99CC"/>
+  <!-- Glyph: stratified pyramid (architectural hierarchy) -->
+  <g fill="#0a0a0a">
+    <polygon points="128,104 160,136 96,136"/>
+    <rect x="88" y="144" width="80" height="20"/>
+    <rect x="72" y="172" width="112" height="20"/>
+    <rect x="56" y="200" width="144" height="20"/>
+  </g>
+</svg>
