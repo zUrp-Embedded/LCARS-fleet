@@ -5,7 +5,7 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
   l'agent dans le pod ne voit AUCUNE trace de la mécanique LCARS hors
   workspace vanilla + plugins mount-bindés.
 
-  `async: false` : `Fleet.Credentials.creds_root` = `Application` env global.
+  `async: false` : ressource globale partagée `System.tmp_dir!/0` (`/tmp/pod-*`, cf. ci-dessous).
   Hermétique : coffre fixtures + repo git sous `tmp_dir` ; pods `/tmp/pod-*`
   nettoyés `on_exit` (Allocate écrit dans `System.tmp_dir!/0`, n'honore pas
   de base custom — comportement DN, le test nettoie).

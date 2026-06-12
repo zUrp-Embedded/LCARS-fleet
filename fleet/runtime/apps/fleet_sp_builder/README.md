@@ -1,7 +1,7 @@
 # Fleet.SPBuilder
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-06-13
 **Statut** : implémenté run #3.1 chantier #2 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_sp_builder.md
 
@@ -45,7 +45,7 @@ paths skills filtrés.
 
 ## Frontière vendor
 
-Module vendor-agnostic. Les flags `claude -p`
-(`--system-prompt-file`, `--append-system-prompt-file`) sont appliqués
-par `Fleet.Claude.SPInjection` co-localisé `fleet_claude_bridge`
-(chantier 8).
+Module vendor-agnostic : il **compose** le SP, il ne l'injecte pas. Le SP
+composé est passé **inline en argv** à `bin/claude_launch.sh` par le spawner
+(post-ADR-G : RC interactif, plus de `claude -p` ni d'app `fleet_claude_bridge`
+— retirée au pivot).

@@ -5,14 +5,10 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   "cap-profiles migrés v2.5"). Pattern Lot 0bis (PROVEN) : YAML canon →
   ex_json_schema validate. `async: true`.
 
-  ## Gap cross-DN tracé — invocation.mode (escaladé architect)
-  `fleet_claude_bridge.md` L386 route `selon cap_profile.spec.invocation.mode
-  (à ajouter cap-profiles amendement)` MAIS `cap-profiles.md` + le schema
-  v2.5 ne définissent PAS `invocation.mode`. Amendement canon jamais ajouté.
-  GO-0/#P5 : NON inventé ici (= erreur inférence M1). Routing fonctionnel
-  via `Fleet.ClaudeBridge.session_start` `:auto`→RC (défaut DN). Escaladé
-  type:request architect (non-bloquant). Ce test valide la conformité
-  RÉELLE du schema canon, pas un champ inventé.
+  Ce test valide la conformité RÉELLE des cap-profiles au schema canon v2.5,
+  pas un champ inventé (GO-0/#P5). NB historique : `invocation.mode` (jamais
+  ajouté au schema) devait router via `fleet_claude_bridge` — app **retirée au
+  pivot ADR-G** (RC interactif) ; le routing par `invocation.mode` est obsolète.
   """
   use ExUnit.Case, async: true
 

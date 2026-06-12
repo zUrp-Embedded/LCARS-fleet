@@ -34,7 +34,7 @@ defmodule Fleet.ProjectBootstrap.MixProject do
 
   defp deps do
     # fleet_cap_profile : struct %Fleet.CapProfile{} consommée (spec.project.*).
-    # fleet_credentials : Phase4 BIND délègue Fleet.Credentials.resolve_env/2.
+    # fleet_credentials : Phase.Clone délègue l'auth git système à Fleet.Credentials.ForgeAuth.git_env/0 (source unique F095).
     # Pas de dep Hex externe → pas de blocant compile (cf. jose #551 Lot 1).
     [
       {:fleet_cap_profile, in_umbrella: true},
