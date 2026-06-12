@@ -2,15 +2,18 @@ defmodule Fleet.Spawner.PermanentBootTest do
   @moduledoc """
   Lot 3 inc1 — `Fleet.Spawner.PermanentBoot.boot_at_start?/1` garde D-01
   CRITIQUE (DN ring1/permanent-pods-boot.md). Pur, string-keyed
-  (anti-M1 : pseudo-code DN atom-keys = illustratif). `async: true`.
+  (anti-M1 : pseudo-code DN atom-keys = illustratif).
+
+  `async: false` : le describe `auto_boot_enabled?/0` mute la config Application
+  globale (`:boot_permanent_at_start`) via `put_env` — couplage config runtime
+  inhérent au prédicat, séquentialiser évite la race inter-module (BL-028).
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Fleet.Spawner.PermanentBoot
 
   defp cp(invocation) do
     %Fleet.CapProfile{
-      api_version: "lcars/v2.5",
       kind: "CapabilityProfile",
       metadata: %{"name" => "x"},
       spec: %{"invocation" => invocation}
@@ -74,7 +77,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
   describe "robustesse entrées" do
     test "spec sans invocation → false" do
       assert PermanentBoot.boot_at_start?(%Fleet.CapProfile{
-               api_version: "v",
                kind: "k",
                metadata: %{},
                spec: %{}
@@ -125,7 +127,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
         "architect-interactive" ->
           {:ok,
            %Fleet.CapProfile{
-             api_version: "lcars/v2.5",
              kind: "CapabilityProfile",
              metadata: %{"name" => "architect-interactive"},
              spec: %{
@@ -140,7 +141,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
         "engineer" ->
           {:ok,
            %Fleet.CapProfile{
-             api_version: "lcars/v2.5",
              kind: "CapabilityProfile",
              metadata: %{"name" => "engineer"},
              spec: %{"invocation" => %{"boot_at_start" => false, "lifetime_scope" => "one-shot"}}
@@ -149,7 +149,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
         "starfleet" ->
           {:ok,
            %Fleet.CapProfile{
-             api_version: "lcars/v2.5",
              kind: "CapabilityProfile",
              metadata: %{"name" => "starfleet"},
              spec: %{
@@ -172,22 +171,15 @@ defmodule Fleet.Spawner.PermanentBootTest do
         {:ok, spawn(fn -> :ok end)}
       end
 
-      writer = fn pod_id, st ->
-        send(parent, {:state, pod_id, st})
-        :ok
-      end
-
       assert {:ok, [pid_arch]} =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
-                 spawner: spawner,
-                 state_writer: writer
+                 spawner: spawner
                )
 
       assert pid_arch =~ ~r/^permanent-architect-interactive-/
       assert_received {:spawned, "architect-interactive", ^pid_arch}
-      assert_received {:state, ^pid_arch, %{cap_profile_name: "architect-interactive"}}
       refute_received {:spawned, "engineer", _}
       refute_received {:spawned, "starfleet", _}
     end
@@ -202,8 +194,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader,
-                 spawner: fn _cp, _t, _o -> {:ok, self()} end,
-                 state_writer: fn _i, _s -> :ok end
+                 spawner: fn _cp, _t, _o -> {:ok, self()} end
                )
     end
 
@@ -212,8 +203,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
-                 spawner: fn _cp, _t, _o -> {:error, :launch_failed} end,
-                 state_writer: fn _i, _s -> :ok end
+                 spawner: fn _cp, _t, _o -> {:error, :launch_failed} end
                )
     end
 
@@ -223,21 +213,12 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
   end
 
-  describe "conformance canon RÉEL — boot_at_start? sur 05_data-canon/cap-profiles" do
-    # __DIR__ = .../runtime-v2/apps/fleet_spawner/test/fleet/spawner
-    # → 7 remontées jusqu'à work/beyond_#4/ puis 05_data-canon/cap-profiles
-    @canon_dir Path.join([
-                 __DIR__,
-                 "..",
-                 "..",
-                 "..",
-                 "..",
-                 "..",
-                 "..",
-                 "..",
-                 "05_data-canon",
-                 "cap-profiles"
-               ])
+  describe "conformance canon RÉEL — boot_at_start? sur cap-profiles in-repo" do
+    # R0.8-brick5 : canon réabsorbé in-repo (R0.7) à `apps/fleet_cap_profile/
+    # priv/canon/cap-profiles/`. Plus de path doctrine `05_data-canon/...`
+    # en dur (inexistant en standard install). Pattern identique brick1
+    # MonkTest (resolve via Application.app_dir).
+    @canon_dir Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles")
 
     defp canon_spec(name) do
       @canon_dir
@@ -264,7 +245,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
         ~w(architect-interactive consultant engineer gatekeeper qualifier reviewer starfleet)
         |> Enum.map(fn n ->
           %Fleet.CapProfile{
-            api_version: "lcars/v2.5",
             kind: "CapabilityProfile",
             metadata: %{"name" => n},
             spec: canon_spec(n)
@@ -276,16 +256,23 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
   end
 
-  describe "auto_boot_enabled?/0 — gate config (défaut OFF, umbrella stable)" do
-    test "défaut false (non configuré : OFF en test/dev)" do
-      refute PermanentBoot.auto_boot_enabled?()
+  # BL-028 (R7→clos) : `auto_boot_enabled?/0` EST le gate canon du boot des pods
+  # permanents (consulté par BootOrchestrator, autorité unique depuis F-14).
+  # Défaut **true** (DN lcars-fleet_service §391) ; `false` désactive.
+  describe "auto_boot_enabled?/0 — gate canon boot pods permanents (défaut true)" do
+    test "défaut true (non configuré) — boote par défaut, canon DN" do
+      assert PermanentBoot.auto_boot_enabled?()
     end
 
-    test "true uniquement si :boot_permanent_at_start == true" do
-      Application.put_env(:fleet_spawner, :boot_permanent_at_start, true)
+    test "false seulement si :boot_permanent_at_start mis explicitement à false" do
+      Application.put_env(:fleet_spawner, :boot_permanent_at_start, false)
       on_exit(fn -> Application.delete_env(:fleet_spawner, :boot_permanent_at_start) end)
+      refute PermanentBoot.auto_boot_enabled?()
+
+      Application.put_env(:fleet_spawner, :boot_permanent_at_start, true)
       assert PermanentBoot.auto_boot_enabled?()
 
+      # Seul le booléen `true` active (pas une string "yes").
       Application.put_env(:fleet_spawner, :boot_permanent_at_start, "yes")
       refute PermanentBoot.auto_boot_enabled?()
     end

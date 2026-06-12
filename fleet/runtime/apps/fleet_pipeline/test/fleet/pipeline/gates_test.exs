@@ -3,25 +3,25 @@ defmodule Fleet.Pipeline.GatesTest do
 
   alias Fleet.Pipeline.Gates
 
-  describe "dispatch/3 — nil / absent gate" do
+  describe "evaluate/3 — nil / absent gate" do
     test "gate nil → :pass" do
-      assert Gates.dispatch(%{"gate" => nil}, %{}, %{}) == :pass
+      assert Gates.evaluate(%{"gate" => nil}, %{}, %{}) == :pass
     end
 
     test "gate absent → :pass" do
-      assert Gates.dispatch(%{"role" => "x"}, %{}, %{}) == :pass
+      assert Gates.evaluate(%{"role" => "x"}, %{}, %{}) == :pass
     end
   end
 
-  describe "dispatch/3 — hard" do
+  describe "evaluate/3 — hard" do
     test "rule match outputs → :pass" do
       stage = %{"gate" => %{"type" => "hard", "rule" => %{"status" => "ok"}}}
-      assert Gates.dispatch(stage, %{"status" => "ok", "extra" => 1}, %{}) == :pass
+      assert Gates.evaluate(stage, %{"status" => "ok", "extra" => 1}, %{}) == :pass
     end
 
     test "rule mismatch → {:fail, _}" do
       stage = %{"gate" => %{"type" => "hard", "rule" => %{"status" => "ok"}}}
-      assert {:fail, "hard gate rule mismatch"} = Gates.dispatch(stage, %{"status" => "ko"}, %{})
+      assert {:fail, "hard gate rule mismatch"} = Gates.evaluate(stage, %{"status" => "ko"}, %{})
     end
 
     test "nested rule match" do
@@ -32,38 +32,19 @@ defmodule Fleet.Pipeline.GatesTest do
         }
       }
 
-      assert Gates.dispatch(stage, %{"data" => %{"count" => 3, "extra" => true}}, %{}) ==
+      assert Gates.evaluate(stage, %{"data" => %{"count" => 3, "extra" => true}}, %{}) ==
                :pass
     end
   end
 
-  describe "dispatch/3 — soft" do
-    setup do
-      Application.put_env(
-        :fleet_pipeline,
-        :coord_backend,
-        Fleet.Pipeline.GatesTest.CoordStub
-      )
-
-      on_exit(fn -> Application.delete_env(:fleet_pipeline, :coord_backend) end)
-      :ok
-    end
-
-    test "délégué CoordBackend" do
-      stage = %{"gate" => %{"type" => "soft", "max_rounds" => 5}}
-      assert Gates.dispatch(stage, %{}, %{user: "test"}) == :pass
+  describe "evaluate/3 — soft (décision pure → dispatch gatekeeper)" do
+    test "soft gate → {:dispatch_gatekeeper, kind: :soft} (Gates pur, pas de spawn ni retry)" do
+      stage = %{"gate" => %{"type" => "soft"}}
+      assert {:dispatch_gatekeeper, %{kind: :soft}} = Gates.evaluate(stage, %{}, %{user: "test"})
     end
   end
 
-  describe "dispatch/3 — soft (NotWiredYet par défaut)" do
-    test "default backend retourne {:fail, _}" do
-      stage = %{"gate" => %{"type" => "soft", "max_rounds" => 3}}
-      assert {:fail, msg} = Gates.dispatch(stage, %{}, %{})
-      assert msg =~ "fleet_coord"
-    end
-  end
-
-  describe "dispatch/3 — terminal" do
+  describe "evaluate/3 — terminal" do
     test "toutes règles match → :pass" do
       stage = %{
         "gate" => %{
@@ -75,7 +56,7 @@ defmodule Fleet.Pipeline.GatesTest do
         }
       }
 
-      assert Gates.dispatch(stage, %{"a" => 1, "b" => 2}, %{}) == :pass
+      assert Gates.evaluate(stage, %{"a" => 1, "b" => 2}, %{}) == :pass
     end
 
     test "règle required mismatch → {:fail, _}" do
@@ -88,19 +69,11 @@ defmodule Fleet.Pipeline.GatesTest do
         }
       }
 
-      assert {:fail, msg} = Gates.dispatch(stage, %{"status" => "ko"}, %{})
+      assert {:fail, msg} = Gates.evaluate(stage, %{"status" => "ko"}, %{})
       assert msg =~ "must_have_status"
     end
 
-    test "règle non-required mismatch → :retry (gatekeeper fallback)" do
-      Application.put_env(
-        :fleet_pipeline,
-        :spawner_backend,
-        Fleet.Pipeline.GatesTest.SpawnerStub
-      )
-
-      Application.put_env(:fleet_pipeline, :gatekeeper_invocations, [])
-
+    test "règle non-required mismatch → {:dispatch_gatekeeper, kind: :terminal}" do
       stage = %{
         "gate" => %{
           "type" => "terminal",
@@ -110,34 +83,72 @@ defmodule Fleet.Pipeline.GatesTest do
         }
       }
 
-      assert :retry = Gates.dispatch(stage, %{"clean" => false}, %{ticket_id: "t#1"})
-
-      invocations = Application.get_env(:fleet_pipeline, :gatekeeper_invocations, [])
-      assert Enum.any?(invocations, fn {role, _ctx} -> role == "gatekeeper" end)
-    after
-      Application.delete_env(:fleet_pipeline, :spawner_backend)
-      Application.delete_env(:fleet_pipeline, :gatekeeper_invocations)
+      assert {:dispatch_gatekeeper, %{kind: :terminal}} =
+               Gates.evaluate(stage, %{"clean" => false}, %{ticket_id: "t#1"})
     end
   end
-end
 
-defmodule Fleet.Pipeline.GatesTest.CoordStub do
-  @behaviour Fleet.Pipeline.CoordBackend
+  describe "evaluate/3 — v2.5 string rules (R3)" do
+    test "hard : tous les prédicats vrais → :pass" do
+      stage = %{
+        "gate" => %{"type" => "hard", "rules" => ["all_tests_pass", "tdd_iron_law_respected"]}
+      }
 
-  @impl true
-  def invoke_soft_gate(_stage, _outputs, _ctx, _opts), do: :pass
+      assert :pass =
+               Gates.evaluate(
+                 stage,
+                 %{"all_tests_pass" => true, "tdd_iron_law_respected" => true},
+                 %{}
+               )
+    end
 
-  @impl true
-  def invoke_hook(_name, _ctx), do: :ok
-end
+    test "hard : un prédicat faux → {:fail}" do
+      stage = %{"gate" => %{"type" => "hard", "rules" => ["all_tests_pass"]}}
+      assert {:fail, _} = Gates.evaluate(stage, %{"all_tests_pass" => false}, %{})
+    end
 
-defmodule Fleet.Pipeline.GatesTest.SpawnerStub do
-  @behaviour Fleet.Pipeline.SpawnerBackend
+    test "terminal : prédicats vrais sans aval humain → :pass" do
+      stage = %{"gate" => %{"type" => "terminal", "rules" => ["severity_max != critical"]}}
+      assert :pass = Gates.evaluate(stage, %{"severity_max" => "important"}, %{})
+    end
 
-  @impl true
-  def spawn_stage_pod(role, _profile, ctx) do
-    log = Application.get_env(:fleet_pipeline, :gatekeeper_invocations, [])
-    Application.put_env(:fleet_pipeline, :gatekeeper_invocations, [{role, ctx} | log])
-    {:ok, "stub-#{role}"}
+    test "terminal : un prédicat faux → {:fail}" do
+      stage = %{"gate" => %{"type" => "terminal", "rules" => ["severity_max != critical"]}}
+      assert {:fail, _} = Gates.evaluate(stage, %{"severity_max" => "critical"}, %{})
+    end
+
+    test "terminal human_approval_required (prédicats OK) → {:fail} fail-closed (pas d'auto-pass)" do
+      stage = %{
+        "gate" => %{
+          "type" => "terminal",
+          "human_approval_required" => true,
+          "rules" => ["spec_doc_exists"]
+        }
+      }
+
+      assert {:fail, reason} = Gates.evaluate(stage, %{"spec_doc_exists" => true}, %{})
+      assert reason =~ "human_approval_required"
+    end
+
+    test "terminal SANS clé rules + human_approval (gate `finish` canon) → {:fail}, pas de crash" do
+      # standard-qa `finish` : terminal + human_approval, AUCUNE rules.
+      stage = %{"gate" => %{"type" => "terminal", "human_approval_required" => true}}
+      assert {:fail, reason} = Gates.evaluate(stage, %{}, %{})
+      assert reason =~ "human_approval_required"
+    end
+
+    test "terminal rules:[] + human_approval → {:fail} (JAMAIS :pass silencieux)" do
+      stage = %{
+        "gate" => %{"type" => "terminal", "rules" => [], "human_approval_required" => true}
+      }
+
+      assert {:fail, reason} = Gates.evaluate(stage, %{}, %{})
+      assert reason =~ "human_approval_required"
+    end
+
+    test "terminal SANS rules ni human_approval → :pass (dégénéré, rien à juger)" do
+      stage = %{"gate" => %{"type" => "terminal"}}
+      assert :pass = Gates.evaluate(stage, %{}, %{})
+    end
   end
 end

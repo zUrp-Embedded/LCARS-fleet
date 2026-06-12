@@ -1,4 +1,4 @@
-defmodule Fleet.Api.RestTest do
+defmodule Fleet.API.RestTest do
   # async: false — Application.put_env sur :api_secret_path mute l'état
   # global runtime ; séquentialiser évite la pollution cross-test.
   use ExUnit.Case, async: false
@@ -6,7 +6,7 @@ defmodule Fleet.Api.RestTest do
   import Plug.Conn
   @moduletag :tmp_dir
 
-  alias Fleet.Api.Rest
+  alias Fleet.API.Rest
   alias Fleet.EventRouter.Bus
 
   @opts Rest.init([])
@@ -14,6 +14,9 @@ defmodule Fleet.Api.RestTest do
   setup %{tmp_dir: tmp_dir} do
     secret_path = Path.join(tmp_dir, "api-secret")
     File.write!(secret_path, "test-secret-1234")
+    # F017 : le secret doit respecter l'invariant non-world-readable (root:lcars 600/640) —
+    # `File.write!` laisse l'umask (souvent 644 = world-readable) que `load_secret` refuse désormais.
+    File.chmod!(secret_path, 0o600)
     Application.put_env(:fleet_api, :api_secret_path, secret_path)
 
     Bus.subscribe()
@@ -35,6 +38,41 @@ defmodule Fleet.Api.RestTest do
       assert conn.status == 200
       {:ok, body} = Jason.decode(conn.resp_body)
       assert body["status"] == "ok"
+    end
+  end
+
+  describe "GET /api/readiness/deep (P05, auth)" do
+    test "no token → 401 (vue interne, pas un probe public)" do
+      conn = conn(:get, "/api/readiness/deep") |> Rest.call(@opts)
+      assert conn.status == 401
+    end
+
+    test "valid token → 200 + état opérationnel structuré", %{secret: secret} do
+      conn =
+        conn(:get, "/api/readiness/deep")
+        |> put_req_header("x-auth-token", valid_token(secret))
+        |> Rest.call(@opts)
+
+      assert conn.status == 200
+      {:ok, body} = Jason.decode(conn.resp_body)
+      assert body["status"] in ["operational", "degraded"]
+      assert is_list(body["subsystems"])
+      assert is_list(body["degraded"])
+    end
+  end
+
+  describe "POST /api/admin/spawn — quiescence (drain shutdown)" do
+    test "503 quand le daemon quiesce (refuse nouveau pod top-level)", %{secret: secret} do
+      Fleet.Shutdown.Quiesce.refuse!()
+      on_exit(&Fleet.Shutdown.Quiesce.resume!/0)
+
+      conn =
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{"role" => "x"}))
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-auth-token", valid_token(secret))
+        |> Rest.call(@opts)
+
+      assert conn.status == 503
     end
   end
 
@@ -111,18 +149,18 @@ defmodule Fleet.Api.RestTest do
 
       assert conn.status == 202
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "admin.spawn.request",
-                        "payload" => %{"role" => "scout"}
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :api,
+                       type: :"admin.spawn.request",
+                       payload: %{"role" => "scout"}
+                     },
                      500
     end
   end
 
   describe "POST /api/relay/:ref" do
     setup %{secret: secret} do
-      # RelayHandler démarré par Fleet.Api.Application supervisor.
+      # RelayHandler démarré par Fleet.API.Application supervisor.
       {:ok, token: valid_token(secret)}
     end
 
@@ -153,7 +191,7 @@ defmodule Fleet.Api.RestTest do
   end
 
   # ============================================================
-  # #594 D2 — dashboard V2 Elixir natif (Fleet.Api.Dashboard mount)
+  # #594 D2 — dashboard V2 Elixir natif (Fleet.API.Dashboard mount)
   # ============================================================
   describe "GET /dashboard" do
     test "render HTML 200 sans auth (whitelisté require_auth)" do

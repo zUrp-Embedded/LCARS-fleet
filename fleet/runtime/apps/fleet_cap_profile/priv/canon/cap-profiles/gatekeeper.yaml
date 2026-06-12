@@ -1,0 +1,79 @@
+# Cap-profile : gatekeeper
+# Date : 2026-05-18
+# Référencé par : design-notes/ring2/cap-profiles.md (tableau récap §L113 + exemplar §L116)
+# Schema : ../../07_code/runtime-v2/apps/fleet_cap_profile/priv/schema/cap-profile-v2.5.json
+kind: CapabilityProfile
+metadata:
+  name: gatekeeper
+  containment: bwrap
+spec:
+  scope:
+    allowedTools:
+      - Read
+      - Grep
+      - Glob
+      # Git READ-ONLY uniquement — inspecter le livrable de K (cloné par le runtime
+      # dans le workspace, le pod ne fetch pas : barrière §4 niveau-1).
+      - Bash(git diff:*)
+      - Bash(git log:*)
+      - Bash(git status:*)
+      - Bash(git show:*)
+      # `git push/commit/mv/tag` + `tea issues edit/close/comment` RETIRÉS — barrière
+      # forge-aveugle (DN forge-state-machine §4 ; gatekeeper-forge-encoding-v2 §4/§9.9 ;
+      # analogue engineer A1.2a `c49b32eb`). Le gatekeeper rend son verdict par
+      # `submit_result` (canal fleet-control) ; le SYSTÈME écrit `verdict.json` + push +
+      # route. Le pod ne touche JAMAIS la forge. Voir git_ops_denied + mcp_channels.
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+    # Patterns destructeurs déclarés au baseline universel
+    # (`_baseline-git-denied.yaml`, intangibles) — pas dupliqués ici.
+    # `push` = barrière forge-aveugle MÉCANIQUE (DN §4) : `Bash(git push:*)` devient
+    # un no-op même si ré-ajouté à allowedTools (défense en profondeur, analogue engineer).
+    git_ops_denied: [push]
+    outputs: ["/home/commons/gatekeeper/"]
+  knowledge:
+    libs:
+      - methodologie-protocole-design-note
+      - methodologie-axiome-inference-vs-mecanisable
+      - regles-meres-consolidees
+    skills: []
+    mcpServers: []
+    plugins: []
+    monk_registry: null
+    monk_instance: null
+  invocation:
+    lifetime_scope: pipe
+    model: opus        # catalogue → --model (alias/nom complet ; tunable)
+    effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
+    boot_at_start: false
+    subagent_template: null
+    # `fleet-forge.*` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4 ;
+    # gatekeeper-forge-encoding-v2 §9.9). Le gatekeeper hand-off son verdict via
+    # `fleet-control.gatekeeper.*` (submit_result) ; le système écrit la forge.
+    mcp_channels: ["fleet-control.gatekeeper.*"]
+    host_native: false
+    max_alive_sec: 3600
+    heartbeat_keepalive: false
+    bridge_enabled: false
+    policy: hide
+    rubber_duck_enabled: true
+    long_session_protocol: false
+    output_format: json
+  injects:
+    gitconfig: true
+    forge_signing_allowed: false
+  modop_set:
+    default: [rubber-duck]
+    optional: [fire-mode]
+    incompatible: [[fire-mode, long-session-discipline]]
+  project: null
+  # F077 — le gatekeeper est un JUGE : il reçoit un GateBrief I-CBC DÉSAMORCÉ (contexte +
+  # livrable + contrat de verdict, AUCUNE instruction exécutable — bug PASSE-9 #11/#12). Déclaré
+  # par catalogue (pas un nom magique "gatekeeper" en ring2). Dual d'entrée de deliverable_mode.
+  mandate_kind: judge

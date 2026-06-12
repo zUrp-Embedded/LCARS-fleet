@@ -3,14 +3,28 @@ defmodule Fleet.EventRouter.Application do
 
   use Application
 
+  # Z5 #9 — actions gitea que `WebhooksGitea` peut émettre (`gitea.<action>`). Source UNIQUE :
+  # pré-enregistrement des atomes (preregister_event_atoms) ET garde de cohérence registry
+  # (test `gitea_event_types/0 ⊆ events.yaml`). Ajouter une action ici SANS la clé events.yaml
+  # = drop muet en prod → le test casse (regression #9 verrouillée).
+  @gitea_event_types ~w(gitea.opened gitea.closed gitea.push gitea.unknown gitea.reopened
+                        gitea.merged gitea.edited gitea.created gitea.synchronized gitea.deleted)
+
+  @doc "Types d'events gitea pré-enregistrés (= ce que WebhooksGitea peut broadcaster)."
+  @spec gitea_event_types() :: [String.t()]
+  def gitea_event_types, do: @gitea_event_types
+
   @impl Application
   def start(_type, _args) do
     preregister_event_atoms()
+    # BL-027 — registry events.yaml → authorized_event_types (validation broadcast
+    # fail-loud, prod-on/test-off). Remplace le chargement par le GenServer Dispatch
+    # (retiré : table de dispatch inerte, consommation = subscribers directs).
+    Fleet.EventRouter.Catalog.load!()
 
     children =
       base_children() ++
         webhook_children() ++
-        dispatch_children() ++
         signals_children()
 
     Supervisor.start_link(children,
@@ -40,9 +54,18 @@ defmodule Fleet.EventRouter.Application do
     signal_events = ~w(os.signal.sigusr1 os.signal.sigterm os.signal.sighup)
     fallback_events = ~w(unknown_event)
 
-    Enum.each(yaml_events ++ signal_events ++ fallback_events, fn event_type ->
-      _ = String.to_atom(event_type)
-    end)
+    # BL-021 chantier 9 (B) — webhook gitea broadcasts gitea.<action> dynamique
+    # (action body ou X-Gitea-Event header). Pré-enregistre les types vus en pratique
+    # pour autoriser le schema canon `:gitea.<action>` via `to_existing_atom`.
+    # Z5 #9 : ces types DOIVENT aussi être clés d'events.yaml, sinon `Bus.broadcast`
+    # fail-loud `UnregisteredError` → drop muet du webhook. Garde : test
+    # `gitea_event_types/0 ⊆ registry` (event_registry_gitea_test).
+    Enum.each(
+      yaml_events ++ signal_events ++ fallback_events ++ gitea_event_types(),
+      fn event_type ->
+        _ = String.to_atom(event_type)
+      end
+    )
   end
 
   defp base_children do
@@ -56,14 +79,6 @@ defmodule Fleet.EventRouter.Application do
       [
         {Plug.Cowboy, scheme: :http, plug: Fleet.EventRouter.WebhooksGitea, options: [port: port]}
       ]
-    else
-      []
-    end
-  end
-
-  defp dispatch_children do
-    if Application.get_env(:fleet_event_router, :start_dispatch, false) do
-      [Fleet.EventRouter.Dispatch]
     else
       []
     end

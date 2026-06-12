@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-06-05 (P05 — readiness honnête `/api/readiness/deep` + `Fleet.API.Readiness` read-model anti-vert-creux)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -14,20 +14,22 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 
 | Module | Rôle |
 |---|---|
-| `Fleet.Api.Rest` | Plug.Router HTTP `:8080` endpoints REST + auth HMAC token |
-| `Fleet.Api.Ws` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
-| `Fleet.Api.RelayHandler` | GenServer subscribe `permission_relay_request`, ETS pending refs, POST `/api/relay/:ref` → broadcast `permission_relay_response` (round-trip ch10) |
-| `Fleet.Api.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380) |
+| `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST + auth HMAC token |
+| `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
+| `Fleet.API.RelayHandler` | GenServer subscribe `permission_relay_request`, ETS pending refs, POST `/api/relay/:ref` → broadcast `permission_relay_response` (round-trip ch10) |
+| `Fleet.API.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380) |
+| `Fleet.API.Readiness` | read-model P05 — état opérationnel LIVE (anti-vert-creux). Introspecte config/process/persistent_term ; `deep/0` rend `status: operational\|degraded` + sous-systèmes. Jumeau runtime de `mix lcars.contracts.check` (plan source-conformance build/CI) sur le plan opérationnel. Fonctions pures (pas de process — Iron Law) |
 
 ## Routes REST
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| GET | `/api/health` | NO | readiness probe (consommé ch16) |
+| GET | `/api/health` | NO | readiness probe shallow (200 dès Cowboy bind, consommé ch16 `lcars-readiness`) |
+| GET | `/api/readiness/deep` | HMAC | P05 — état opérationnel LIVE (`Fleet.API.Readiness.deep/0`). 200 même si `status: degraded` (dégradation = donnée, pas erreur HTTP). Vue interne → auth |
 | GET | `/api/pipelines` | HMAC | liste état pipelines |
 | GET | `/api/tickets` | HMAC | liste tickets |
 | GET | `/api/pods` | HMAC | liste pods |
-| POST | `/api/admin/spawn` | HMAC | broadcast `admin.spawn.request` (ch6) |
+| POST | `/api/admin/spawn` | HMAC | broadcast `admin.spawn.request` (ch6) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
 | POST | `/api/config/update` | HMAC | atomic write + git commit |
 | POST | `/api/relay/:ref` | HMAC | round-trip permission relay (ch10) |
 
@@ -54,10 +56,10 @@ Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 
 ```elixir
 # RelayHandler round-trip (invoqué via REST POST /api/relay/:ref)
-:ok = Fleet.Api.RelayHandler.respond("ref-abc", "allow")
+:ok = Fleet.API.RelayHandler.respond("ref-abc", "allow")
 
 # GitCommitter atomic write + git commit
-{:ok, sha} = Fleet.Api.GitCommitter.commit_config_change(
+{:ok, sha} = Fleet.API.GitCommitter.commit_config_change(
   "intensity.json", ~s|{"level":"low"}|, "user1"
 )
 ```
@@ -75,11 +77,11 @@ Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 
 ```bash
 mix test apps/fleet_api
-# 34 tests, 0 failures
+# 59 tests, 0 failures
 ```
 
 Tests utilisent `Plug.Test` pour Rest (pas de listener réel),
-callbacks Cowboy directs pour Ws (pas de socket réel), et
+callbacks Cowboy directs pour WS (pas de socket réel), et
 RelayHandler via instance Application-managed.
 
 ## Dépendances

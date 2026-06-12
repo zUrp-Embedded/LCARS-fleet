@@ -6,7 +6,7 @@
 # Usage: sudo lcars-fleet-restart [--grace-sec=N] [--force]
 #
 # Comportement :
-#   1. systemctl reload (Fleet.Shutdown.drain_in_flight via ExecReload)
+#   1. systemctl reload (Fleet.Starfleet.Shutdown.drain_in_flight via ExecReload)
 #   2. Attend drain --grace-sec (défaut 30s)
 #   3. systemctl stop (déclenche ExecStop grace shutdown)
 #   4. sleep 2s (libère ports + cleanup ETS)
@@ -49,7 +49,10 @@ systemctl start lcars-fleet.service
 echo "[lcars-fleet-restart] Poll readiness (60s max)..."
 TS_END=$(($(date +%s) + 60))
 while [ "$(date +%s)" -lt "$TS_END" ]; do
-  if curl -sf http://localhost:8080/api/health >/dev/null 2>&1; then
+  # #19 : `--max-time`/`--connect-timeout` bornent CHAQUE poll. Sans eux, un curl qui
+  # PEND (port ouvert mais app wedgée mid-boot, pas refusée) bloque indéfiniment → la
+  # borne 60s (vérifiée en HAUT de boucle) n'est jamais atteinte → le script pend à vie.
+  if curl -sf --connect-timeout 3 --max-time 5 http://localhost:8080/api/health >/dev/null 2>&1; then
     echo "[lcars-fleet-restart] OK"
     exit 0
   fi

@@ -3,7 +3,7 @@ defmodule Fleet.Spawner.LaunchBackend do
   Behaviour pour exécuter `bin/bwrap_launch.sh` (chantier 4) → `bin/claude_launch.sh`
   (chantier 5) avec ENV vars OAuth résolues.
 
-  Le default `Fleet.Spawner.LaunchBackend.PortBackend` utilise
+  Le default `Fleet.Spawner.LaunchBackend.LauncherPortBackend` utilise
   `Port.open/2` (`:spawn_executable`) et lit la sortie. Tests
   swappent via `Fleet.Spawner.LaunchBackend.StubBackend` pour
   retourner des données canned (init message NDJSON, exit code).
@@ -11,7 +11,16 @@ defmodule Fleet.Spawner.LaunchBackend do
   Configurable via :
 
       config :fleet_spawner, :launch_backend,
-        Fleet.Spawner.LaunchBackend.PortBackend
+        Fleet.Spawner.LaunchBackend.LauncherPortBackend
+
+  ## Contrat N1 — `.claude.json` (F115/F157)
+
+  La projection N0 (`Fleet.Spawner.Pod`) n'écrit PLUS `<pod_dir>/.claude.json` : c'est de la
+  connaissance schéma-vendor. **Tout vendor launcher** (`claude_launch.sh` et tout futur
+  `<vendor>_launch.sh`) DOIT écrire `<pod_dir>/.claude.json` AVANT l'exec, avec au minimum
+  `hasCompletedOnboarding: true` + les 3 clés remote-control
+  (`remoteControlAtStartup`/`hasUsedRemoteControl`/`remoteDialogSeen`) — sinon le dialog RC bloque
+  le pod au boot. La clé `projects` doit être le CWD réel de l'agent (`LCARS_POD_CWD`).
   """
 
   @doc """
@@ -23,11 +32,13 @@ defmodule Fleet.Spawner.LaunchBackend do
       * `:role` — string
       * `:pod_id` — string
       * `:pod_dir` — path absolu pod
-      * `:budget_sec` — integer
-      * `:budget_usd` — float ou string
       * `:bwrap_launch_path` — path absolu `bwrap_launch.sh`
       * `:claude_launch_path` — path absolu `claude_launch.sh`
     * `env` — map ENV vars à injecter (OAuth + custom)
+
+  R0.8-brick4 : `:budget_sec`/`:budget_usd` retirés. Le timeout de réponse
+  est géré côté Pod GenServer (Process.send_after :result_deadline,
+  default par lifetime_scope) ; pas d'API = pas de budget USD.
 
   ## Returns
 

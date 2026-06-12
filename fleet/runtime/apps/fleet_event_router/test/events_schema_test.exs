@@ -1,23 +1,18 @@
 defmodule Fleet.EventRouter.EventsSchemaTest do
   @moduledoc """
-  Lot 0bis — prouve que le canon `05_data-canon/config/events.yaml` valide
-  contre le schéma dérivé `priv/schema/events-v1.json`, et qu'une config
-  structurellement invalide est rejetée (ni trop strict, ni trop laxe).
+  Lot 0bis — prouve que le canon in-repo `priv/events.yaml` (chargé par le runtime,
+  embarqué dans la release) valide contre le schéma dérivé `priv/schema/events-v1.json`,
+  et qu'une config structurellement invalide est rejetée (ni trop strict, ni trop laxe).
+
+  R0.3 fix : @canon_path pointait `05_data-canon/config/events.yaml` (chemin DOCTRINE,
+  absent du repo de code post-bascule) → setup_all échouait → 7 tests invalid. Repointé
+  sur le canon in-repo `priv/events.yaml` (single-source). Drift priv↔doctrine (47 vs 144 l)
+  = réconciliation [DATA] Ring 2 (cf. v2-reabsorption-inventory.md / portfolio Ring 2).
   """
   use ExUnit.Case, async: true
 
   @schema_path Path.join([__DIR__, "..", "priv", "schema", "events-v1.json"])
-  @canon_path Path.join([
-                __DIR__,
-                "..",
-                "..",
-                "..",
-                "..",
-                "..",
-                "05_data-canon",
-                "config",
-                "events.yaml"
-              ])
+  @canon_path Path.join([__DIR__, "..", "priv", "events.yaml"])
 
   setup_all do
     assert File.exists?(@schema_path), "schema absent: #{@schema_path}"
@@ -42,9 +37,12 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
-  test "config invalide rejetée — liste de handlers vide", %{schema: schema} do
-    bad = %{"events" => %{"pod.allocated" => []}}
-    assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
+  # R5/R08 — liste de handlers VIDE désormais VALIDE : un event peut être
+  # registré (clé = authorized_event_type) sans handler dispatch, consommé par des
+  # subscribers directs (WS, AuditConsumer, DriftMonitor). `minItems: 0`.
+  test "config valide — liste de handlers vide (registré sans dispatch)", %{schema: schema} do
+    ok = %{"events" => %{"pod.allocate" => []}}
+    assert :ok = ExJsonSchema.Validator.validate(schema, ok)
   end
 
   test "config invalide rejetée — event_type majuscule", %{schema: schema} do

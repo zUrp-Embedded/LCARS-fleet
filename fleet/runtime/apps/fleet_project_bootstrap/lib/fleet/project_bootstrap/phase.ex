@@ -1,35 +1,31 @@
-defmodule Fleet.ProjectBootstrap.CapAccess do
-  @moduledoc """
-  Accès tolérant à `%Fleet.CapProfile{spec: %{...}}` (struct OU map à clés
-  atom/string). Module sibling autonome (compilé avant `Phase.*`) — les
-  sous-phases l'importent sans dépendre de l'ordre de compilation du module
-  englobant (un `import` du module parent depuis un module nested du même
-  fichier échoue : parent pas encore compilé → `module_info/1 undefined`).
-  Fonction pure (Iron Law — aucun process).
-  """
-
-  @spec cap(term(), [atom()], term()) :: term()
-  def cap(cp, path, default \\ nil) do
-    Enum.reduce(path, cp, fn
-      key, %{} = acc -> Map.get(acc, key) || Map.get(acc, to_string(key))
-      _key, _acc -> nil
-    end) || default
-  end
-end
-
+# Rework #1 : `Fleet.ProjectBootstrap.CapAccess.cap/3` (accès tolérant
+# atom|string) RETIRÉ — `Fleet.CapProfile` garantit désormais des clés STRING
+# (normalisation à `to_struct`). Les phases accèdent `cap_profile.spec["..."]`
+# directement, sans double-lookup défensif.
 defmodule Fleet.ProjectBootstrap.Phase do
   @moduledoc """
   Les 5 sous-phases de `Fleet.ProjectBootstrap.prepare/3` (DN
   ring1/fleet_project_bootstrap.md §"Contrat technique"). Fonctions pures
   (Iron Law — aucun process). Erreurs typées (exit codes DN).
-  Helper d'accès cap-profile : `Fleet.ProjectBootstrap.CapAccess`.
+  Accès cap-profile : clés STRING directes (`cap_profile.spec["..."]`) —
+  `Fleet.CapProfile` garantit la forme à la production (rework #1).
   """
 
   defmodule Allocate do
-    @moduledoc "Phase 1 — ALLOCATE pod_dir `/tmp/pod-<pod_id>/` (owner = system_user)."
-    @spec allocate(String.t(), struct()) :: {:ok, Path.t()} | {:error, term()}
-    def allocate(pod_id, _cap_profile) when is_binary(pod_id) and pod_id != "" do
-      pod_dir = Path.join(System.tmp_dir!(), "pod-#{pod_id}")
+    @moduledoc """
+    Phase 1 — ALLOCATE pod_dir = `<pod_dir_base>/pod-<id>`.
+
+    PB-D2 (2026-06-10) : le défaut **`/tmp`** (`System.tmp_dir!`) est RETIRÉ — il contredisait
+    ADR-E (les pods vivent sous `/home/<human>/pods/pod_<id>`, JAMAIS `/tmp` ; `PrivateTmp=yes`
+    + tmpfs bwrap orphelineraient les writes). Le `:pod_dir_base` est désormais **REQUIS** dans
+    `opts` : prod (#596) injecte la racine ADR-E calculée côté `Fleet.Spawner.Pod` (qui connaît
+    l'humain) ; les tests injectent leur `tmp_dir`. Pas de défaut silencieux qui réintroduirait
+    le piège `/tmp` si #596 réveille `prepare/3` (aujourd'hui le spawner emprunte direct `Clone`).
+    """
+    @spec allocate(String.t(), struct(), keyword()) :: {:ok, Path.t()} | {:error, term()}
+    def allocate(pod_id, _cap_profile, opts) when is_binary(pod_id) and pod_id != "" do
+      base = Keyword.fetch!(opts, :pod_dir_base)
+      pod_dir = Path.join(base, "pod-#{pod_id}")
 
       case File.mkdir_p(pod_dir) do
         :ok -> {:ok, pod_dir}
@@ -37,7 +33,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
       end
     end
 
-    def allocate(_, _), do: {:error, {:allocate_failed, :invalid_pod_id}}
+    def allocate(_, _, _), do: {:error, {:allocate_failed, :invalid_pod_id}}
   end
 
   defmodule Clone do
@@ -46,15 +42,12 @@ defmodule Fleet.ProjectBootstrap.Phase do
     `git clone --reference` (ADR-B Q5) si `spec.project.repo_path`, sinon
     workspace = `mktemp -d` (branch nil).
     """
-    import Fleet.ProjectBootstrap.CapAccess, only: [cap: 2, cap: 3]
-
-    @spec clone_or_skip(Path.t(), struct(), keyword()) ::
+    @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
-    def clone_or_skip(pod_dir, cap_profile, opts) do
-      spec = cap(cap_profile, [:spec], %{})
-      project = cap(spec, [:project])
+    def clone_or_skip(pod_dir, %Fleet.CapProfile{spec: spec}, opts) do
+      project = spec["project"] || %{}
 
-      case project && (Map.get(project, :repo_path) || Map.get(project, "repo_path")) do
+      case project["repo_path"] do
         nil ->
           ws = Path.join(pod_dir, "workspace")
 
@@ -64,18 +57,30 @@ defmodule Fleet.ProjectBootstrap.Phase do
           end
 
         repo_url ->
+          # F121 NB : `fleet_project_bootstrap` ne peut PAS dépendre de `fleet_spawner` (cycle compile),
+          # donc `"workspace"` est ré-encodé ici — il DOIT rester en sync avec
+          # `Fleet.Spawner.@pod_workspace_subdir` (autorité de la convention #596). Ce module est le
+          # PRODUCTEUR (il crée et retourne le workspace) ; Pod le RECOMPUTE via pod_workspace_path/1.
           ws = Path.join(pod_dir, "workspace")
-          ref = Map.get(project, :reference_repo_path) || Map.get(project, "reference_repo_path")
-          base = Map.get(project, :base_branch) || Map.get(project, "base_branch") || "main"
+          ref = project["reference_repo_path"]
+          base = project["base_branch"] || "main"
           slug = Keyword.get(opts, :slug, "work")
           pod_id = Path.basename(pod_dir) |> String.replace_prefix("pod-", "")
           feature = "feature/#{pod_id}-#{slug}"
           ref_args = if ref, do: ["--reference", ref], else: []
 
           with {_, 0} <-
-                 System.cmd("git", ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
-                   stderr_to_stdout: true
+                 System.cmd(
+                   "git",
+                   ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
+                   stderr_to_stdout: true,
+                   env: Fleet.Credentials.ForgeAuth.git_env()
                  ),
+               # #596 R1 (F-03) : si l'Executor a PINNÉ une base_sha (ls-remote hors-pod), on épingle
+               # HEAD dessus AVANT la feature-branch. Élimine la fenêtre « le pod clone une base que
+               # l'Executor n'a pas capturée » (course same-role) : `base..HEAD` ne contiendra QUE les
+               # commits du pod. F-03 = axiome au boundary clone, pas « observable post-hoc ».
+               {_, 0} <- pin_base_sha(ws, project["base_sha"]),
                {_, 0} <-
                  System.cmd("git", ["-C", ws, "checkout", "-b", feature], stderr_to_stdout: true) do
             {:ok, ws, feature}
@@ -84,6 +89,83 @@ defmodule Fleet.ProjectBootstrap.Phase do
           end
       end
     end
+
+    # Épingle HEAD du workspace sur `sha` (capturé hors-pod par l'Executor). Le clone `--branch base`
+    # contient déjà `sha` dans le cas nominal (sha = tip) et fast-forward (sha = ancêtre) → `reset
+    # --hard` local suffit. Cas pathologique (force-push remote a effacé `sha`) → fetch ciblé puis
+    # reset ; échec des deux = {out, code≠0} remonté au `with` → `{:clone_failed, ...}`. nil/"" = no-op.
+    defp pin_base_sha(_ws, sha) when sha in [nil, ""], do: {"", 0}
+
+    defp pin_base_sha(ws, sha) when is_binary(sha) do
+      case System.cmd("git", ["-C", ws, "reset", "--hard", sha], stderr_to_stdout: true) do
+        {_, 0} = ok ->
+          ok
+
+        _ ->
+          case System.cmd("git", ["-C", ws, "fetch", "origin", sha],
+                 stderr_to_stdout: true,
+                 env: Fleet.Credentials.ForgeAuth.git_env()
+               ) do
+            {_, 0} ->
+              System.cmd("git", ["-C", ws, "reset", "--hard", sha], stderr_to_stdout: true)
+
+            other ->
+              other
+          end
+      end
+    end
+
+    @doc """
+    Doc-mount (mundo invocado) — clone la branche DOC du projet (`spec.project.work_branch`,
+    orpheline `work/ops` par convention LCARS) dans `<pod_dir>/work` : la doc sur quoi l'agent
+    s'appuie pour coder (plans, backlog, conventions). À côté de la branche code (`workspace`).
+
+    - `work_branch` nil/absent OU pas de `repo_path` → `{:ok, nil}` (skip : projet sans branche doc).
+    - déclarée mais clone échoué → `{:error, ...}` FAIL-LOUD (I-CBC : un cap-profile qui déclare une
+      branche doc inexistante = bug de config, pas un pod silencieusement amputé de sa doc).
+    """
+    @spec clone_work_doc(Path.t(), Fleet.CapProfile.t()) ::
+            {:ok, Path.t() | nil} | {:error, term()}
+    def clone_work_doc(pod_dir, %Fleet.CapProfile{spec: spec}) do
+      project = spec["project"] || %{}
+      work_branch = project["work_branch"]
+      repo_url = project["repo_path"]
+
+      if is_nil(work_branch) or is_nil(repo_url) do
+        {:ok, nil}
+      else
+        doc = Path.join(pod_dir, "work")
+        ref = project["reference_repo_path"]
+        ref_args = if ref, do: ["--reference", ref], else: []
+
+        # --single-branch : la branche doc est orpheline ⇒ inutile de fetch le reste de l'historique.
+        case System.cmd(
+               "git",
+               ["clone"] ++
+                 ref_args ++ ["--branch", work_branch, "--single-branch", repo_url, doc],
+               stderr_to_stdout: true,
+               env: Fleet.Credentials.ForgeAuth.git_env()
+             ) do
+          {_, 0} ->
+            {:ok, doc}
+
+          {out, code} ->
+            {:error, {:work_doc_clone_failed, {work_branch, code, String.slice(out, 0, 500)}}}
+        end
+      end
+    end
+
+    # F087/F095 — `forge_auth_args/0` (dup byte-à-byte de Fleet.Pipeline.Git, justifiée jadis par le
+    # cycle compile pipeline⇄bootstrap) RETIRÉE. Source unique `Fleet.Credentials.ForgeAuth.git_env/0`
+    # (fleet_credentials est en-dessous des deux apps → pas de cycle), token via env hors argv.
+
+    # O5 (Brick 5) — `set_git_identity/2` RETIRÉ. Posait l'identité du rôle via `git config` dans le
+    # `.git/config` du workspace : MUTABLE, le pod l'écrasait (`git config user.email …`) → identité
+    # falsifiable (F-01 du juge consultant). Remplacé par une injection en env au lancement
+    # (bwrap_launch.sh : GIT_AUTHOR_*/GIT_COMMITTER_* = LCARS-<role> / <role>@lcars.local +
+    # GIT_CONFIG_GLOBAL=/dev/null), défaut coopératif déterministe. La garantie F-01 vit côté monde :
+    # `Fleet.Pipeline.DeliverableGate.check_identity/3` rejette au push tout commit hors identité
+    # autorisée (le pod ne PEUT PAS pousser un livrable usurpé). Cf. JOURNAL-deliverable-model.
   end
 
   defmodule InitMimic do
@@ -92,21 +174,17 @@ defmodule Fleet.ProjectBootstrap.Phase do
     (EEx) → `<workspace>/CLAUDE.md`. L'agent découvre un projet post-/init,
     ne réinvoque pas `/init`.
     """
-    import Fleet.ProjectBootstrap.CapAccess, only: [cap: 3]
-    @spec init_mimic(Path.t(), struct()) :: {:ok, Path.t()} | {:error, term()}
-    def init_mimic(workspace, cap_profile) do
+    @spec init_mimic(Path.t(), Fleet.CapProfile.t()) :: {:ok, Path.t()} | {:error, term()}
+    def init_mimic(workspace, %Fleet.CapProfile{spec: spec, metadata: metadata}) do
       tpl =
         Application.app_dir(:fleet_project_bootstrap, "priv/templates/claude-md-vanilla.md.eex")
 
-      spec = cap(cap_profile, [:spec], %{})
-      project = cap(spec, [:project], %{})
+      project = spec["project"] || %{}
 
       assigns = [
-        project_name: Map.get(project, :name) || Map.get(project, "name") || "project",
-        project_intent: Map.get(project, :intent) || Map.get(project, "intent") || "",
-        pod_role:
-          cap(cap_profile, [:metadata], %{})[:name] ||
-            cap(cap_profile, [:metadata], %{})["name"] || "worker"
+        project_name: project["name"] || "project",
+        project_intent: project["intent"] || "",
+        pod_role: metadata["name"] || "worker"
       ]
 
       with {:ok, tpl_src} <- File.read(tpl),
@@ -122,40 +200,24 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
   defmodule BindCredentials do
     @moduledoc """
-    Phase 4 — BIND credentials role-scopés. Délègue à
-    `Fleet.Credentials.resolve_env/2` (chantier 3 PROMOTED). ADR-C "5 zéros" :
-    tokens jamais en clair dans pod_dir, montés bwrap RO (phase LAUNCH).
+    Phase 4 — creds via **claudeDir natif bind** (adr-f). Plus d'injection
+    d'env OAuth : le claudeDir du compte de l'humain est monté RW par
+    `bwrap_launch.sh` en `~/.claude` (CLAUDE_DIR), refresh délégué au lockfile
+    cross-process natif Anthropic. Le path CLAUDE_DIR est résolu par
+    `Fleet.Spawner` depuis la registration de l'humain (DN onboarding/catalogue
+    déférée, adr-e). Cette phase ne produit donc aucun env à injecter.
     """
-    import Fleet.ProjectBootstrap.CapAccess, only: [cap: 3]
 
     @doc """
-    `Fleet.Credentials.resolve_env/2` (canon chantier 3) =
-    `(role :: String.t(), %Fleet.CapProfile{}) -> {:ok, env_map} | {:error, _}`
-    où `env_map :: %{String.t() => String.t()}` (variables OAuth, **pas**
-    des paths : bwrap LAUNCH injecte ces env, ADR-C "5 zéros" — tokens
-    jamais en clair dans pod_dir). Le pattern `%Fleet.CapProfile{}` rend le
-    type concret (le checker 1.18 exigeait mieux que `dynamic()`) et fait
-    office de garde défensive (struct invalide → erreur typée, pas crash).
+    Retourne un env vide : aucune variable OAuth injectée (adr-f — le coffre
+    `Fleet.Credentials` et le chemin RT-env sont dépréciés). Les creds vivent
+    dans le claudeDir bindé par bwrap. Le pattern `%Fleet.CapProfile{}` garde
+    le contrat (struct invalide → erreur typée).
     """
     @spec bind_credentials(Path.t(), Fleet.CapProfile.t()) ::
             {:ok, %{String.t() => String.t()}} | {:error, term()}
-    def bind_credentials(_pod_dir, %Fleet.CapProfile{} = cap_profile) do
-      # `function_exported?/3` est false si le module n'est pas *chargé*
-      # (≠ indisponible) — `Code.ensure_loaded?/1` force le chargement.
-      if Code.ensure_loaded?(Fleet.Credentials) and
-           function_exported?(Fleet.Credentials, :resolve_env, 2) do
-        role =
-          cap(cap_profile, [:metadata], %{})["name"] ||
-            cap(cap_profile, [:metadata], %{})[:name] || "worker"
-
-        case Fleet.Credentials.resolve_env(role, cap_profile) do
-          {:ok, env} when is_map(env) -> {:ok, env}
-          {:error, r} -> {:error, {:credentials_resolve_failed, r}}
-          other -> {:error, {:credentials_resolve_failed, {:unexpected, other}}}
-        end
-      else
-        {:error, {:credentials_resolve_failed, :fleet_credentials_unavailable}}
-      end
+    def bind_credentials(_pod_dir, %Fleet.CapProfile{}) do
+      {:ok, %{}}
     end
 
     def bind_credentials(_pod_dir, _not_a_cap_profile) do
@@ -170,14 +232,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
     `spec.knowledge.skills/plugins`. `~/.claude/CLAUDE.md` NON montée (le
     CLAUDE.md vanilla phase 3 prend la place).
     """
-    import Fleet.ProjectBootstrap.CapAccess, only: [cap: 3]
-
-    @spec prepare_mount_binds(Path.t(), struct()) ::
+    @spec prepare_mount_binds(Path.t(), Fleet.CapProfile.t()) ::
             {:ok, [{Path.t(), Path.t(), :ro | :rw}]} | {:error, term()}
-    def prepare_mount_binds(_pod_dir, cap_profile) do
-      knowledge = cap(cap_profile, [:spec, :knowledge], %{})
-      skills = Map.get(knowledge, :skills) || Map.get(knowledge, "skills") || []
-      pod_role = cap(cap_profile, [:metadata], %{})[:name] || "worker"
+    def prepare_mount_binds(pod_dir, %Fleet.CapProfile{spec: spec}) do
+      knowledge = spec["knowledge"] || %{}
+      skills = knowledge["skills"] || []
       home = System.user_home!()
 
       binds =
@@ -185,8 +244,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
           []
         else
           [
+            # Target = HOME du pod (= $POD_DIR, cf. bwrap_launch.sh --setenv HOME),
+            # PAS /home/<role> : le rôle n'est pas un user Linux (adr-e), le chemin
+            # in-pod est virtuel. Cohérent avec le bind plugins de bwrap_launch.sh.
             {Path.join(home, ".claude/plugins/superpowers"),
-             "/home/#{pod_role}/.claude/plugins/superpowers", :ro}
+             Path.join(pod_dir, ".claude/plugins/superpowers"), :ro}
           ]
         end
 

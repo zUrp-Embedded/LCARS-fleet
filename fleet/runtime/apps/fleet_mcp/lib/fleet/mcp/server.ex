@@ -3,12 +3,15 @@ defmodule Fleet.MCP.Server do
   Serveur MCP LCARS — wrapper opaque SDK ExMCP (DN ring4/fleet_mcp.md
   §"Contrat technique" + §"Test récursif D7-bis").
 
-  **GenServer justifié** (Iron Law) : état mutable persistant = registre des
-  channels + lifecycle ; supervisé par `Fleet.MCP.Supervisor`. Ce process
-  porte UNIQUEMENT registration/lifecycle (bas débit). Le **broadcast
-  fan-out NE passe PAS par ce GenServer** — il est délégué à Phoenix.PubSub
-  via les `Fleet.MCP.Channel` (anti-goulot explicite : DN §"Coût" multi-
-  subscriber + otp-thinking Iron Law "GenServer is a bottleneck by design").
+  **GenServer justifié** (Iron Law) : état mutable persistant = registre
+  bas-débit (names → opts) + lifecycle ; supervisé par `Fleet.MCP.Supervisor`.
+  Ce process porte UNIQUEMENT registration/lifecycle (bas débit), pas de
+  hot path broadcast.
+
+  BL-021 chantier 7 — purge ADR-G C5.1 : `Fleet.MCP.Channel` behaviour et ses
+  façades (`FleetControl`/`FleetForge`) retirées. L'API `register_channel/2` +
+  `list_channels/0` reste comme registre opaque (noms + opts arbitraires,
+  pas de behaviour côté Server) — utilisée par tests + extensibilité future.
 
   **Conformance ADR-C OBLIGATOIRE CI** (DN D7-bis ligne 338) : ce serveur
   ne doit JAMAIS démarrer côté pod (substrat système-side hors-bwrap). La

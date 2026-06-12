@@ -17,7 +17,7 @@ mappings:
   "escalate.oauth_refresh_failed":
     action: escalate_human
     escalation_path:
-      - sysadmin_alert
+      - starfleet_alert
   "escalate.audit_verdict":
     action: notify_dashboard
     escalation_path:

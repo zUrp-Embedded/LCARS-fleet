@@ -37,7 +37,7 @@ defmodule Fleet.Pipeline.ExecutorTest do
     """)
 
     Application.put_env(:fleet_pipeline, :pipelines_root, tmp_dir)
-    Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.SpawnerBackendStub)
+    Application.put_env(:fleet_pipeline, :spawner_backend, Fleet.Pipeline.StageSpawnerStub)
 
     Application.put_env(:fleet_pipeline, :stub_outputs, %{
       "stage_a" => %{"a_out" => 1},
@@ -45,6 +45,8 @@ defmodule Fleet.Pipeline.ExecutorTest do
       "stage_c" => %{"c_out" => 3}
     })
 
+    # Le broker Fleet.TaskQueue est démarré app-global (ensure_all_started
+    # dans test_helper) — pas de start_supervised par test.
     Bus.subscribe()
 
     on_exit(fn ->
@@ -68,11 +70,11 @@ defmodule Fleet.Pipeline.ExecutorTest do
 
     assert is_binary(pipeline_id)
 
-    assert_receive {_atom,
-                    %{
-                      "event_type" => "pipeline.completed",
-                      "payload" => %{"pipeline_id" => ^pipeline_id} = payload
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.completed",
+                     payload: %{"pipeline_id" => ^pipeline_id} = payload
+                   },
                    2_000
 
     assert payload["outputs"]["stage_a"] == %{"a_out" => 1}
@@ -80,16 +82,23 @@ defmodule Fleet.Pipeline.ExecutorTest do
     assert payload["outputs"]["stage_c"] == %{"c_out" => 3}
   end
 
+  test "Mi3 : start_pipeline sans ticket_id (ou vide) → {:error, :ticket_id_required}" do
+    assert {:error, :ticket_id_required} = Pipeline.start_pipeline("test_pipeline", %{})
+
+    assert {:error, :ticket_id_required} =
+             Pipeline.start_pipeline("test_pipeline", %{ticket_id: ""})
+  end
+
   test "spawn_stage_pod failure → pipeline.failed broadcast" do
     Application.put_env(:fleet_pipeline, :stub_failure, true)
 
     {:ok, pipeline_id} = Pipeline.start_pipeline("test_pipeline", %{ticket_id: "test#2"})
 
-    assert_receive {_atom,
-                    %{
-                      "event_type" => "pipeline.failed",
-                      "payload" => %{"pipeline_id" => ^pipeline_id} = payload
-                    }},
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.failed",
+                     payload: %{"pipeline_id" => ^pipeline_id} = payload
+                   },
                    2_000
 
     assert payload["reason"] =~ "spawn fail"

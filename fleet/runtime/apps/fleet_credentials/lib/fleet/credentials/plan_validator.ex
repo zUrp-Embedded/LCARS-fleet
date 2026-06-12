@@ -1,98 +1,36 @@
 defmodule Fleet.Credentials.PlanValidator do
   @moduledoc """
-  Validation plan Pro/Max au boot pod (F-AC-VALIDATE).
+  Gate plan/abonnement (F-AC-VALIDATE) : le claudeDir de l'humain doit porter un
+  abonnement payant pour faire tourner des pods claude_code. Lit
+  `claudeAiOauth.subscriptionType` du `.credentials.json` natif — PAS de SDK, pas
+  d'appel réseau (transformateur pur, même contrat que `Fleet.Credentials.ScopeValidator`).
 
-  Consomme `ClaudeCode.Session.account_info/1` du SDK `guess/claude_code`
-  pour vérifier que le compte authentifié dispose d'un plan Claude.ai
-  Pro ou Max — refuse fail-fast sinon (raisons économiques LCARS v2).
+  ## Valeurs canon
 
-  ## Bypass discipline SDK #2
+  Source CC désobfusquée (`inbox/src` #0_ref_oauth-token-lifecycle) :
+  `subscriptionType: "max" | "pro" | "team" | "enterprise" | null`. `null`/absent =
+  pas d'abonnement → refus. Toute valeur payante connue → `:ok` (insensible à la casse).
 
-  La doctrine LCARS v2 impose le wrap systématique des appels SDK via
-  `Fleet.ClaudeBridge.*` (chantier 8). Exception délibérée ici :
-  `PlanValidator` est appelé **au boot pod** (`Fleet.Spawner` phase
-  ALLOCATE), avant que `fleet_claude_bridge` soit dans le cycle de
-  démarrage. Justification tracée design note §"Surface SDK utilisée".
+  ## Défense en profondeur
 
-  ## Backend swappable (testabilité)
-
-  Le module utilise un backend `Fleet.Credentials.PlanValidator.Backend`
-  configurable via `:fleet_credentials, :plan_validator_backend`.
-  Default : `Fleet.Credentials.PlanValidator.ClaudeCodeBackend` (wrap
-  réel SDK). Tests : `Fleet.Credentials.PlanValidator.StubBackend`
-  (canned data, pas d'appel réseau).
+  Le binaire claude impose DÉJÀ le plan (401/login). Ce gate fait échouer le spawn
+  TÔT (fail-fast au boundary) plutôt qu'au 1ᵉʳ appel API du pod — porte annoncée par la
+  DN `security/fleet_credentials.md` (F-AC-VALIDATE) qui n'existait pas (CRED-D1).
 
   ## Exit codes
 
-    * `:ok` — plan dans `["pro", "max"]`
-    * `{:error, {:invalid_plan, current}}` — plan ≠ Pro/Max
-    * `{:error, {:account_info_failed, reason}}` — appel SDK échoue
+    * `:ok` — abonnement payant reconnu
+    * `{:error, {:invalid_plan, type}}` — plan non-payant/inconnu (type conservé pour rapport)
   """
 
-  defmodule Backend do
-    @moduledoc """
-    Behaviour SDK : `account_info/1` renvoie les infos de compte du
-    SDK Claude Code (`subscription_type` entre autres).
-    """
+  # Plans payants reconnus (source CC). L'absence/`null` est gérée par le caller
+  # (le slot peut manquer) — ici on ne valide qu'une valeur binaire présente.
+  @paid_plans ~w(max pro team enterprise)
 
-    @callback account_info(access_token :: String.t()) ::
-                {:ok, map()} | {:error, term()}
-  end
-
-  @valid_plans ["pro", "max"]
-
-  @doc """
-  Valide le plan associé à un access token.
-
-  Délègue au backend configuré. Au runtime → SDK ClaudeCode ; en
-  test → stub.
-  """
-  @spec validate_plan(String.t()) ::
-          :ok
-          | {:error, {:invalid_plan, String.t()}}
-          | {:error, {:account_info_failed, term()}}
-  def validate_plan(access_token) when is_binary(access_token) do
-    case backend().account_info(access_token) do
-      {:ok, %{"subscription_type" => plan}} when plan in @valid_plans ->
-        :ok
-
-      {:ok, %{"subscription_type" => other}} ->
-        {:error, {:invalid_plan, to_string(other)}}
-
-      {:error, reason} ->
-        {:error, {:account_info_failed, reason}}
-    end
-  end
-
-  defp backend do
-    Application.get_env(
-      :fleet_credentials,
-      :plan_validator_backend,
-      Fleet.Credentials.PlanValidator.ClaudeCodeBackend
-    )
-  end
-end
-
-defmodule Fleet.Credentials.PlanValidator.ClaudeCodeBackend do
-  @moduledoc """
-  Backend SDK production placeholder.
-
-  Le SDK `guess/claude_code` expose `ClaudeCode.Session.account_info/1`
-  mais prend un `session()` pid (pas un access_token string brut).
-  Le binding réel se fait au chantier 6 (`fleet_spawner`) où la
-  Session est démarrée avec les creds résolus, OU chantier 8
-  (`fleet_claude_bridge`) si l'on opte pour un wrap SDK uniformisé.
-
-  Default ici : `{:error, :not_wired_yet}` — compile-time safe,
-  runtime fail-fast jusqu'à ce que le caller configure
-  `:fleet_credentials, :plan_validator_backend` avec un backend
-  réel.
-  """
-
-  @behaviour Fleet.Credentials.PlanValidator.Backend
-
-  @impl Fleet.Credentials.PlanValidator.Backend
-  def account_info(_access_token) do
-    {:error, :not_wired_yet}
+  @spec validate(String.t()) :: :ok | {:error, {:invalid_plan, String.t()}}
+  def validate(subscription_type) when is_binary(subscription_type) do
+    if String.downcase(subscription_type) in @paid_plans,
+      do: :ok,
+      else: {:error, {:invalid_plan, subscription_type}}
   end
 end

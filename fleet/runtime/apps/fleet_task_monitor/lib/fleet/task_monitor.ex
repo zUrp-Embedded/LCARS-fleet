@@ -13,19 +13,21 @@ defmodule Fleet.TaskMonitor do
   concurrency" : « Concurrent writes core impossibles par construction
   (1 GenServer sérialise) »). Pas un wrapper stateless.
 
-  ## Contrat Bus réel (vérifié, pas le pseudo-code DN)
+  ## Contrat Bus canon (D1 — schema unique `%Fleet.Event{}`, R2b)
 
-  Message reçu = `{event_type_atom, %{"event_type" => str,
-  "payload" => map, "ticket_id" => opt, "pod_id" => opt, ...}}`
-  (cf. `Fleet.EventRouter.Bus` §"Format event diffusé" +
-  consommateur réel `dispatch.ex`). Le `{:fleet_event, ...}` du DN
-  était illustratif.
+  Message reçu = `%Fleet.Event{source: _, type: atom, payload: map,
+  correlation_id: ticket | nil, pod_id: pod | nil}` (BL-021 chantier 9 +
+  R2b). Dispatch sur `type` (consommateur dashboard multi-source) ;
+  `correlation_id` porte le ticket, `pod_id` le pod. La forme tuple
+  legacy `{atom, map}` n'est plus représentable côté consommateur
+  (I-CBC). Le `{:fleet_event, ...}` du pseudo-code DN (2026-05-18) était
+  pré-canon — stale.
 
   ## Test-seam
 
   `tasks_root` / `list_id` résolus opt > `Application` env > défaut
   canon (`/var/lib/lcars/architect-tasks`, `fleet-monitor-v1`).
-  Pattern établi codebase (`fleet_capprofile.schema_dir`,
+  Pattern établi codebase (`fleet_cap_profile.schema_dir`,
   `fleet_pipeline.pipelines_root`) — défaut = valeur canon, testable.
 
   ## Core write-only, agent observateur
@@ -88,10 +90,9 @@ defmodule Fleet.TaskMonitor do
   end
 
   @impl true
-  def handle_info({event_atom, event}, state)
-      when is_atom(event_atom) and is_map(event) do
+  def handle_info(%Fleet.Event{} = event, state) do
     new_state =
-      case map_event(event_atom, event) do
+      case map_event(event) do
         {:create, id, payload} -> apply_task(state, id, payload)
         {:update, id, patch} -> patch_task(state, id, patch)
         :ignore -> state
@@ -107,17 +108,18 @@ defmodule Fleet.TaskMonitor do
   # ----------------------------------------------------------------
 
   @doc """
-  Mappe `{event_atom, event_map}` → mutation task. Pur (testable
-  sans process). `event_map` = enveloppe Bus (`"payload"`,
-  `"ticket_id"`, `"pod_id"`). Défensif : clé absente → `:ignore`
-  ou défaut sain (pas de crash — defensive programming).
+  Mappe un `%Fleet.Event{}` canon → mutation task. Pur (testable sans
+  process). Dispatch sur `type` ; `payload` (clés string),
+  `correlation_id` (ticket) et `pod_id` portés par la struct. Défensif :
+  clé absente → `:ignore` ou défaut sain (pas de crash — defensive
+  programming).
   """
-  @spec map_event(atom(), map()) ::
+  @spec map_event(Fleet.Event.t()) ::
           {:create, String.t(), map()} | {:update, String.t(), map()} | :ignore
-  def map_event(event_atom, event) do
-    p = Map.get(event, "payload", %{})
+  def map_event(%Fleet.Event{type: type, payload: payload} = event) do
+    p = payload || %{}
 
-    case event_atom do
+    case type do
       :dispatch_started ->
         n = ticket(event, p)
 
@@ -126,7 +128,7 @@ defmodule Fleet.TaskMonitor do
            id("dispatch-#{n}"),
            "⚙️ #{get(p, "role", "?")} ##{n}: #{get(p, "brief", "")}",
            "in_progress",
-           %{"ticket" => n, "pod_id" => Map.get(event, "pod_id")}
+           %{"ticket" => n, "pod_id" => event.pod_id}
          )}
 
       :dispatch_completed ->
@@ -189,8 +191,20 @@ defmodule Fleet.TaskMonitor do
 
     case File.read(path) do
       {:ok, body} ->
-        merged = body |> Jason.decode!() |> Map.merge(patch)
-        write_raw(path, merged)
+        # #56 : `Jason.decode!` crashait le monitor sur un JSON corrompu (write partiel,
+        # édition manuelle, corruption disque). Garde non-bang → corrompu = même traitement
+        # defensif que le fichier absent (re-matérialise depuis le patch), pas un crash.
+        case Jason.decode(body) do
+          {:ok, existing} when is_map(existing) ->
+            write_raw(path, Map.merge(existing, patch))
+
+          _ ->
+            Logger.warning(
+              "fleet_task_monitor: #{id}.json illisible/corrompu — re-matérialisé depuis le patch (#56)"
+            )
+
+            write_json(state.dir, id, Map.merge(%{"id" => id}, patch))
+        end
 
       {:error, _} ->
         # Update sans create préalable : matérialise depuis le patch
@@ -234,9 +248,9 @@ defmodule Fleet.TaskMonitor do
     }
   end
 
-  # ticket_id de l'enveloppe Bus prioritaire, sinon payload, sinon "?"
-  defp ticket(event, payload),
-    do: Map.get(event, "ticket_id") || get(payload, "ticket", "?")
+  # correlation_id canon (ticket) prioritaire, sinon payload "ticket", sinon "?"
+  defp ticket(%Fleet.Event{correlation_id: corr}, payload),
+    do: corr || get(payload, "ticket", "?")
 
   defp get(map, key, default) when is_map(map), do: Map.get(map, key, default)
   defp get(_, _, default), do: default

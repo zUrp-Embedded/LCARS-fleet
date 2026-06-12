@@ -29,19 +29,26 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   alias Fleet.Starfleet.AuditLog
 
   @doc """
-  Déclenche l'escalade Cat 5 pour un `source` donné.
+  Déclenche l'escalade Cat 5 pour un `source` donné — DN 13 C2.3-starfleet
+  amendement chirurgical.
+
+  Arité étendue : `correlation_id` explicite extrait de l'event upstream
+  ayant déclenché l'escalade (peut être nil hors mandat).
 
   Étend le `chain` payload avec `"starfleet.cat5.<source>"` puis :
 
     1. log audit `/var/log/fleet-starfleet.jsonl` via `AuditLog.write/1`
-    2. broadcast `audit.cat5.<source>` sur `Fleet.EventRouter.Bus`
-    3. dispatch `CoordBackend.handle_escalation/2` (ch14 deferred via seam)
+    2. broadcast `%Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_pod_drift",
+       correlation_id, ...}` schema canon (DN 11 C3.1+C3.2) + legacy
+       `audit.cat5.<source>` compat shim
+    3. dispatch `CoordBackend.handle_escalation/3` (DN 9 amendement)
 
   Toujours `:ok` (audit-only fail-safe : un échec d'écriture log
   n'interrompt pas le pipeline).
   """
-  @spec escalate(source :: atom(), payload :: map()) :: :ok
-  def escalate(source, payload) when is_atom(source) and is_map(payload) do
+  @spec escalate(source :: atom(), payload :: map(), correlation_id :: String.t() | nil) :: :ok
+  def escalate(source, payload, correlation_id)
+      when is_atom(source) and is_map(payload) do
     chain = (Map.get(payload, "chain") || []) ++ ["starfleet.cat5.#{source}"]
 
     enriched =
@@ -54,19 +61,40 @@ defmodule Fleet.Starfleet.Cat5Escalator do
         "source" => Atom.to_string(source),
         "chain" => chain,
         "payload" => payload,
-        "action" => "cat5_escalate"
+        "action" => "cat5_escalate",
+        "correlation_id" => correlation_id
       })
 
-    _ =
-      Bus.broadcast(
-        "audit.cat5.#{source}",
-        enriched,
-        ticket_id: payload["ticket_id"]
-      )
+    # Broadcast schema canon strict %Fleet.Event{source: :starfleet, ...}
+    _ = broadcast_canon(source, enriched, correlation_id)
 
-    _ = coord_backend().handle_escalation(source, enriched)
+    _ = coord_backend().handle_escalation(source, enriched, correlation_id)
     :ok
   end
+
+  defp broadcast_canon(source, enriched, correlation_id) do
+    event = %Fleet.Event{
+      source: :starfleet,
+      # R09 : to_existing_atom (pas to_atom) — anti atom-leak M1 ; les 3 atomes
+      # `starfleet.audit_cat5_<src>` sont registrés (events.yaml + préregistre
+      # Starfleet.Application). Une source inattendue → ArgumentError → rescue.
+      type: String.to_existing_atom("starfleet.audit_cat5_#{source}"),
+      timestamp: DateTime.utc_now(),
+      pod_id: extract_pod_id(enriched),
+      correlation_id: correlation_id,
+      payload: enriched
+    }
+
+    Bus.broadcast("fleet.events", event)
+  rescue
+    # Boot order ou type pas inscrit registry — silent (DN 11 C3.2 fail-loud
+    # est appliqué chantier 3 flip strict_canon).
+    _e in Fleet.Event.UnregisteredError -> :ok
+    _e in [ArgumentError, FunctionClauseError] -> :ok
+  end
+
+  defp extract_pod_id(%{"pod_id" => pid}) when is_binary(pid), do: pid
+  defp extract_pod_id(_), do: nil
 
   defp coord_backend do
     Application.get_env(

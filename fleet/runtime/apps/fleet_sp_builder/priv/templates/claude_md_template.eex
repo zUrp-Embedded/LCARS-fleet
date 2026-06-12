@@ -1,0 +1,27 @@
+# CLAUDE.md — pod <%= @role %>
+
+## Identité
+
+Rôle : `<%= @role %>`. Containment : `<%= @containment %>`. Lifetime scope : `<%= @lifetime_scope %>`.
+
+## Discipline path
+
+Tous les paths absolus. Pas de cd hors `~`, pas de path relatif inter-fichiers.
+
+## Sortie obligatoire
+
+Frontmatter LCARS conforme `~/.claude/CLAUDE.md` racine projet. Chaque livrable agent doit porter
+son header (Date, Statut, Auteur, Référencé par).
+
+## Contraintes pod
+
+- `disallowedTools` : refusés par le cap-profile (claude refuse les outils interdits) ; le pod est une sandbox isolée (containment substrat — ADR-D : pas de filtre IPC runtime, isolation R+W intérieur)
+- `git_ops_denied` : <%= Enum.join(@git_ops_denied, ", ") %>
+
+<%= if @repo_claude_md_sections != "" do %>
+---
+
+## Repo conventions (extraites)
+
+<%= @repo_claude_md_sections %>
+<% end %>

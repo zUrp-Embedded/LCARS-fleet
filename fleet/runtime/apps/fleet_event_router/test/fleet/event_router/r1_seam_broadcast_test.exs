@@ -1,0 +1,61 @@
+defmodule Fleet.EventRouter.R1SeamBroadcastTest do
+  @moduledoc """
+  R1 / BL-027 — couture **registry + validation broadcast** (fork « subscribers
+  directs = canon » : la table de dispatch est retirée, `events.yaml` = registry).
+
+  Le verrou anti-récurrence n'est plus « Dispatch refuse de booter sur handler
+  fantôme » (T4 historique) mais « un event émis hors registry est rejeté
+  fail-loud au broadcast » : `Fleet.EventRouter.Catalog.load!/0` peuple
+  `authorized_event_types` depuis events.yaml → `Bus.broadcast/2` raise
+  `UnregisteredError` sur tout type non-registré. Couture testée SANS stub : vrai
+  Catalog.load! + vrai Bus.broadcast/2.
+
+  Tag `:r1_seam` — `mix test --only r1_seam`.
+  """
+  use ExUnit.Case, async: false
+
+  @moduletag :r1_seam
+
+  alias Fleet.EventRouter.{Bus, Catalog}
+
+  @tag :tmp_dir
+  test "T4 — registry chargé (Catalog) → Bus.broadcast/2 fail-loud sur type non-registré",
+       %{tmp_dir: tmp} do
+    path = Path.join(tmp, "events.yaml")
+    File.write!(path, "events:\n  pod.completed: []\n")
+
+    Application.put_env(:fleet_event_router, :events_yaml_path, path)
+    Application.put_env(:fleet_event_router, :load_event_registry, true)
+
+    on_exit(fn ->
+      Application.delete_env(:fleet_event_router, :events_yaml_path)
+      Application.put_env(:fleet_event_router, :load_event_registry, false)
+      # Reset le registry global pour ne pas polluer les autres tests.
+      Bus.set_authorized_event_types(MapSet.new())
+    end)
+
+    :ok = Catalog.load!()
+
+    registered = %Fleet.Event{
+      source: :spawner,
+      type: :"pod.completed",
+      timestamp: DateTime.utc_now(),
+      payload: %{}
+    }
+
+    unregistered = %Fleet.Event{
+      source: :spawner,
+      type: :"phantom.unregistered.type",
+      timestamp: DateTime.utc_now(),
+      payload: %{}
+    }
+
+    # Type registré → passe.
+    assert :ok = Bus.broadcast("fleet.events", registered)
+
+    # Type hors registry → fail-loud (verrou anti-récurrence).
+    assert_raise Fleet.Event.UnregisteredError, fn ->
+      Bus.broadcast("fleet.events", unregistered)
+    end
+  end
+end

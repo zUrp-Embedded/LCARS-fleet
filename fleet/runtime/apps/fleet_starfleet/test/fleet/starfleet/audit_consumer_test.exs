@@ -16,7 +16,8 @@ defmodule Fleet.Starfleet.AuditConsumerTest do
   test "boot_complete : handle_info → count++ (pas de crash)" do
     {pid, _} = start_consumer()
     send(pid, {:"fleet.boot_complete", %{"payload" => %{"x" => 1}}})
-    Process.sleep(20)
+
+    # Mi14 : :sys.get_state/1 synchronise (FIFO — le send est traité avant) → pas de sleep arbitraire.
     assert %{events_count: 1} = :sys.get_state(pid)
   end
 
@@ -29,14 +30,12 @@ defmodule Fleet.Starfleet.AuditConsumerTest do
        %{"pod_id" => "p1", "ticket_id" => "T", "payload" => %{"pattern" => "force-push"}}}
     )
 
-    Process.sleep(20)
     assert %{events_count: 1} = :sys.get_state(pid)
   end
 
   test "event inconnu : ignore (no crash, no count)" do
     {pid, _} = start_consumer()
     send(pid, {:"some.unknown", %{}})
-    Process.sleep(20)
     # handle_info match wildcard ignore — count incrementé quand même
     # car premier clause match (atom + map). C'est OK (log_event fallthrough no-op).
     assert %{events_count: 1} = :sys.get_state(pid)
@@ -45,7 +44,7 @@ defmodule Fleet.Starfleet.AuditConsumerTest do
   test "msg non-event : pas de crash" do
     {pid, _} = start_consumer()
     send(pid, :random_message)
-    Process.sleep(20)
+    _ = :sys.get_state(pid)
     assert Process.alive?(pid)
   end
 end

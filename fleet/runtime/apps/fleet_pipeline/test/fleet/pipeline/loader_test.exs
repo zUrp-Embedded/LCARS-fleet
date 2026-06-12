@@ -25,7 +25,9 @@ defmodule Fleet.Pipeline.LoaderTest do
           profile: empty
       """)
 
-      assert %{"name" => "minimal", "version" => 1, "stages" => %{"only" => _}} =
+      # U1 (R3) : forme normalisée `%{"name", "stages"}` — `version` (marqueur
+      # de format source) est écarté, aucun consommateur runtime ne le lit.
+      assert %{"name" => "minimal", "stages" => %{"only" => _}} =
                Loader.load!("minimal")
     end
 

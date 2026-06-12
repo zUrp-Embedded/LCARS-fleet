@@ -27,14 +27,14 @@ defmodule Fleet.MCP.MixProject do
 
   def application do
     [
-      # `:fleet_event_router` : DÉPENDANCE OTP forcée pour ordering au
-      # boot release. `Fleet.MCP.Bridge.init/1` appelle
-      # `Phoenix.PubSub.subscribe(Fleet.PubSub, …)` (bridge.ex:60, registry
-      # Fleet.PubSub hébergé par fleet_event_router). Sans cette
-      # dépendance, l'ordre `release.applications` ne suffit pas (4e
-      # défaut deploy-time capté par Starfleet #576 : ArgumentError
-      # "unknown registry: Fleet.PubSub" au boot systemd live ; cascade
-      # `ensure_all_started` masquait — l'ordre release strict expose).
+      # `:fleet_event_router` : ex-DÉPENDANCE OTP forcée pour ordering au boot
+      # release — justifiée par `Fleet.MCP.Bridge.init/1` qui appelait
+      # `Phoenix.PubSub.subscribe(Fleet.PubSub, …)` (registry hébergé par
+      # fleet_event_router ; #576 "unknown registry: Fleet.PubSub" au boot live).
+      # Z7.3 (2026-06-10) : Bridge RETIRÉ → plus AUCUN usage de Fleet.PubSub dans
+      # fleet_mcp/lib → cette dépendance est désormais VESTIGIALE. Conservée ce
+      # passage (sibling umbrella toujours présent, retrait = changement d'ordre de
+      # boot → risque #576) ; candidate au retrait avec preuve (SIGNAL auditeur).
       # Pas de cycle (fleet_event_router ne dépend pas de fleet_mcp).
       extra_applications: [:logger, :fleet_event_router],
       mod: {Fleet.MCP.Application, []}
@@ -58,10 +58,16 @@ defmodule Fleet.MCP.MixProject do
       {:phoenix_pubsub, "~> 2.1"},
       {:ex_json_schema, "~> 0.11"},
       {:jason, "~> 1.4"},
-      # yaml_elixir : parse configs canon (mcp-channels.yaml / mcp-bridge.yaml)
-      #   pour validation Fleet.MCP.Schema (version 2.12 = alignée
-      #   fleet_event_router/fleet_coord/fleet_pipeline, déjà dans mix.lock).
-      {:yaml_elixir, "~> 2.12"}
+      # fleet_event_router : Bus + Fleet.Event + Fleet.PubSub (Ring 0). Déjà en
+      #   extra_applications (ordering OTP boot) ; ici en dep compile-time. Ring 4→0, pas de cycle.
+      {:fleet_event_router, in_umbrella: true},
+      # fleet_task_queue : le broker d'orchestration que PodTools sert via get_task/submit_result
+      #   (drive métier ADR-G ; le broker broadcast lui-même %Fleet.Event{task_completed}).
+      #   Ring 4→Ring 2 (fleet_mcp sert la queue, n'orchestre pas — DN drive/mcp-server §E). Pas de cycle.
+      {:fleet_task_queue, in_umbrella: true}
+      # Z5 (MCP-D1) — `yaml_elixir` retiré : ne servait qu'à parser mcp-channels.yaml /
+      #   mcp-bridge.yaml pour `Fleet.MCP.Schema`, tous retirés (substrat channels mort).
+      #   Plus aucun usage YamlElixir dans fleet_mcp (lib + test).
     ]
   end
 end

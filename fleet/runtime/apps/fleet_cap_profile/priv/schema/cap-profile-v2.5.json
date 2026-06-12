@@ -1,0 +1,213 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LCARS Capability Profile v2.5",
+  "description": "Structural schema for a composed Capability Profile. Semantic invariants (enums, value constraints) are checked by Fleet.CapProfile.validate/1 (G24).",
+  "type": "object",
+  "required": ["kind", "metadata", "spec"],
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name", "containment"],
+      "properties": {
+        "name": { "type": "string" },
+        "containment": { "type": "string" }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "scope",
+        "knowledge",
+        "invocation",
+        "injects",
+        "modop_set"
+      ],
+      "properties": {
+        "scope": {
+          "type": "object",
+          "properties": {
+            "allowedTools": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "disallowedTools": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "git_ops_denied": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "outputs": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "knowledge": {
+          "type": "object",
+          "properties": {
+            "libs": { "type": "array", "items": { "type": "string" } },
+            "skills": { "type": "array", "items": { "type": "string" } },
+            "mcpServers": { "type": "array", "items": { "type": "string" } },
+            "plugins": { "type": "array", "items": { "type": "string" } },
+            "monk_registry": { "type": ["string", "null"] },
+            "monk_instance": { "type": ["string", "null"] },
+            "sp_template": { "type": ["string", "null"], "description": "ADR #565 verdict B : template SP pour matérialiser un pod permanent (monk, archivist). Distinct de invocation.subagent_template (qui implique dispatch one-shot, G24-11 inchangé)." },
+            "skills_plugin_versions": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+" }, "description": "DN ring1/pod-bootstrap-superpowers : pin version par plugin (map plugin_name → semver). Validation regex semver au load." }
+          }
+        },
+        "invocation": {
+          "type": "object",
+          "required": ["lifetime_scope"],
+          "properties": {
+            "lifetime_scope": {
+              "type": "string",
+              "enum": ["one-shot", "pipe", "run", "forever"]
+            },
+            "boot_at_start": { "type": "boolean" },
+            "subagent_template": { "type": ["string", "null"] },
+            "mcp_channels": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "host_native": { "type": "boolean" },
+            "max_alive_sec": { "type": ["number", "null"] },
+            "heartbeat_keepalive": { "type": "boolean" },
+            "bridge_enabled": { "type": "boolean" },
+            "policy": { "type": "string" },
+            "rubber_duck_enabled": { "type": "boolean" },
+            "long_session_protocol": { "type": "boolean" },
+            "output_format": { "type": "string" },
+            "model": { "type": "string" },
+            "effort": {
+              "type": "string",
+              "enum": ["low", "medium", "high", "xhigh", "max"]
+            }
+          }
+        },
+        "injects": {
+          "type": "object",
+          "properties": {
+            "gitconfig": { "type": "boolean" },
+            "forge_signing_allowed": { "type": "boolean" }
+          }
+        },
+        "modop_set": {
+          "type": "object",
+          "required": ["default"],
+          "properties": {
+            "default": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "optional": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "incompatible": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": { "type": "string" },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        },
+        "project": {
+          "type": ["object", "null"],
+          "properties": {
+            "repo_path": { "type": "string" },
+            "base_branch": { "type": "string" },
+            "branch_isolation": { "type": "boolean" },
+            "reference_repo_path": { "type": ["string", "null"] },
+            "work_branch": { "type": ["string", "null"] }
+          }
+        },
+        "deliverable_mode": {
+          "type": "string",
+          "enum": ["payload", "git_native"],
+          "description": "Modèle O5 — forme du livrable du rôle, condition d'entrée de Fleet.Pipeline.Deliverable.publish/1 (différenciation par catalogue, pas par branche de code). `payload` : le pod produit un payload de fichiers, le SYSTÈME écrit+commite (verdict-rôles, legacy PASSE-7). `git_native` : le pod commite lui-même dans son workspace, le système vérifie (gate I-CBC) + pousse (code-rôles). Absent → défaut `payload` appliqué côté code (back-compat ; ne concerne que les stages avec post_extract.git)."
+        },
+        "mandate_kind": {
+          "type": "string",
+          "enum": ["worker", "judge"],
+          "description": "Forme du MANDAT reçu par le rôle — dual d'entrée de deliverable_mode (différenciation par catalogue, pas par nom magique de code, F077). `worker` : mandat = instruction exécutable (corps de l'issue) ; le rôle AGIT. `judge` : le rôle JUGE et reçoit un GateBrief I-CBC désamorcé (contexte + livrable + contrat de verdict, AUCUNE instruction exécutable — bug PASSE-9 prouvé live #11/#12). Absent → défaut `worker` appliqué côté code (fail-safe : un juge doit déclarer `judge` explicitement, la judge-ness est une propriété de sécurité)."
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "G24-10 : boot_at_start: true requires lifetime_scope: forever",
+          "if": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "boot_at_start": { "const": true }
+                },
+                "required": ["boot_at_start"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "lifetime_scope": { "const": "forever" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "G24-11 : subagent_template != null requires lifetime_scope: one-shot",
+          "if": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "subagent_template": { "type": "string", "minLength": 1 }
+                },
+                "required": ["subagent_template"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "lifetime_scope": { "const": "one-shot" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "G24-12 : host_native: true requires containment: none",
+          "if": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "host_native": { "const": true }
+                },
+                "required": ["host_native"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "metadata": {
+                "properties": {
+                  "containment": { "const": "none" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

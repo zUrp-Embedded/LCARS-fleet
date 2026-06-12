@@ -1,47 +1,105 @@
+# Registry des events canon (BL-027 — fork « subscribers directs = canon »).
+#
+# `events.yaml` est un **registry PUR** : ses CLÉS sont les `authorized_event_types`
+# (chargées au boot par `Fleet.EventRouter.Catalog.load!/0` → `Bus.broadcast/2`
+# fail-loud sur tout type hors registry). Tout event émis DOIT avoir sa clé ici.
+#
+# La **consommation** se fait par **subscribers directs** (Phoenix.PubSub :
+# `Bus.subscribe` + `handle_info`) — PAS par une table de dispatch. Le GenServer
+# `Dispatch` (table `event → handle_event/1`, jamais câblée) a été RETIRÉ. Qui
+# consomme quel event est documenté dans le moduledoc de chaque consommateur
+# (`AuditConsumer`, `DriftMonitor`, `RelayHandler`, `Spawner.PublishConsumer`,
+# `API.WS`, `Pipeline.Executor`, …).
+#
+# Valeurs = `[]` (registry pur). Le schéma (`events-v1.json`) tolère une liste de
+# handlers `Fleet.*` non vide pour un éventuel futur ré-câblage, mais le runtime
+# n'en consomme aucune.
 events:
-  pod.allocate:
-    - Fleet.Spawner.EventHandler
-  pod.transition:
-    - Fleet.Spawner.EventHandler
-  pod.release:
-    - Fleet.Spawner.EventHandler
-  pod.refuse_pattern_match:
-    - Fleet.Starfleet.DriftHandler
-  pod.drift:
-    - Fleet.Starfleet.EscalateHandler
-  permission_relay_request:
-    - Fleet.Api.RelayHandler
-  audit.verdict.gatekeeper:
-    - Fleet.Coord.GatekeeperHandler
-  gitea.opened:
-    - Fleet.Spawner.TicketHandler
-  gitea.closed:
-    - Fleet.Spawner.TicketHandler
-  tick:
-    - Fleet.Pipeline.TickHandler
-  # B10/#583 Sprint 1 — admin.spawn.request : émis par fleet_api/rest.ex
-  # POST /api/admin/spawn ; consumé par Fleet.Spawner.PublishConsumer
-  # qui dispatche Fleet.Spawner.spawn_pod.
-  admin.spawn.request:
-    - Fleet.Spawner.PublishConsumer
-  # B10/#583 Sprint 1 — events lifecycle Fleet.Starfleet.BootOrchestrator
-  # (Task post-start fleet_starfleet). Pas de handler dispatch (subscribers
-  # libres : dashboard, audit). Pré-enregistrés starfleet @starfleet_event_atoms.
-  fleet.boot_complete:
-    - Fleet.Starfleet.AuditConsumer
-  fleet.boot_partial:
-    - Fleet.Starfleet.AuditConsumer
-  fleet.boot_failed:
-    - Fleet.Starfleet.AuditConsumer
-  # B10/#593 D11 — events lifecycle Pod GenServer (post-init Port stream).
-  # pod.completed : claude one-shot result is_error=false
-  # pod.failed    : claude one-shot result is_error=true
-  # pod.terminated: Port exit_status reçu (final, stop normal Pod)
-  # Subscribers : AuditConsumer pour log forensique. LifecycleConsumer
-  # Sprint 2 #583 différé reprendra le dispatch pipeline aval.
-  pod.completed:
-    - Fleet.Starfleet.AuditConsumer
-  pod.failed:
-    - Fleet.Starfleet.AuditConsumer
-  pod.terminated:
-    - Fleet.Starfleet.AuditConsumer
+  # --- Pod lifecycle (Spawner.Pod) ---
+  # Z5 (nettoyage hollow producers) : `Spawner.Pod` n'émet QUE `pod.completed` + `pod.failed`
+  # (call-sites vérifiés). `pod.allocate`/`transition`/`release`/`terminated`/
+  # `refuse_pattern_match` étaient enregistrés mais JAMAIS produits (0 producteur, 0 consumer
+  # type-spécifique) = mensonge de registry (I-CBC : le registry doit refléter la réalité).
+  # Retirés ; à ré-ajouter AVEC un producteur si la progression pod devient observable.
+  pod.completed: []
+  pod.failed: []
+  # pod.drift : conservé — consommé par DriftMonitor (SF-D1) ; son producteur manquant
+  # (fleet_ipc_filter inexistant) = hollow CONSUMER côté starfleet (hors-fleet, non-négo #2),
+  # pas un hollow producer ; non touché ici.
+  pod.drift: []
+
+  # --- Credentials ---
+  oauth.refresh.failed: []
+
+  # --- API relay (vestigial ADR-D) ---
+  permission_relay_request: []
+
+  # --- Audit gatekeeper / forge tickets / tick ---
+  # R09 : `audit.verdict` (2 segments) — aligné sur le consommateur réel
+  # (DriftMonitor `%Fleet.Event{type: :"audit.verdict"}`) + l'atome pré-enregistré
+  # (Starfleet.Application). L'ancienne clé `audit.verdict.gatekeeper` (3 segments,
+  # jamais émise) était désalignée du consommateur → consommateur mort.
+  audit.verdict: []
+  # Z5 #9 : le producteur (`WebhooksGitea`, `gitea.<action>` dynamique) + les atomes
+  # pré-enregistrés (`event_router/application.ex` `to_existing_atom`) émettent CES 10
+  # actions. N'avoir que opened/closed → les 8 autres broadcastaient en `UnregisteredError`
+  # SILENCIEUX (rescue `:ok`) → webhook 200 OK mais event jamais routé (drop muet). Registry
+  # aligné sur le producteur (sinon AutoDispatcher ne voit jamais reopened/merged/edited/…).
+  gitea.opened: []
+  gitea.closed: []
+  gitea.reopened: []
+  gitea.merged: []
+  gitea.edited: []
+  gitea.created: []
+  gitea.synchronized: []
+  gitea.deleted: []
+  gitea.push: []
+  gitea.unknown: []
+  tick: []
+
+  # --- Signaux OS (SignalsOS, source :event_router) ---
+  # R09 : émis par SignalsOS sur SIGUSR1/SIGTERM/SIGHUP — registrés ici pour
+  # éviter le drop silencieux (UnregisteredError rescue). Pas de consommateur
+  # routé pour l'instant (le drain passe par ExecStop/Shutdown, pas par signal).
+  os.signal.sigusr1: []
+  os.signal.sigterm: []
+  os.signal.sighup: []
+
+  # --- Admin spawn ---
+  admin.spawn.request: []
+
+  # --- Boot lifecycle (BootOrchestrator) ---
+  fleet.boot_complete: []
+  fleet.boot_partial: []
+  fleet.boot_failed: []
+
+  # --- Coord (Policies, source :coord) ---
+  coord.notification_routed: []
+  coord.escalation_triggered: []
+  coord.action_dispatched: []
+
+  # --- Pipeline (Executor, source :pipeline) ---
+  pipeline.failed: []
+  pipeline.completed: []
+  pipeline.stage.completed: []
+
+  # --- post_extract.git ---
+  git.published: []
+  git.publish_failed: []
+
+  # --- Cat 5 broadcasts (Cat5Escalator, source :starfleet) ---
+  starfleet.audit_cat5_pod_drift: []
+  starfleet.audit_cat5_pipeline_failed: []
+  starfleet.audit_cat5_oauth_refresh_failed: []
+
+  # --- TaskQueue lifecycle (source :task_queue) ---
+  task_enqueued: []
+  task_assigned: []
+  task_completed: []
+  task_cleared: []
+  task_failed: []
+  state_corrupt: []
+
+  # --- Extensions V2 (MCPWatcher / MCPMonitor) ---
+  sdk_upstream_alert: []
+  mcp_server_crashed: []

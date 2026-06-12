@@ -1,4 +1,3 @@
-apiVersion: lcars/v2.5
 kind: CapabilityProfile
 metadata:
   name: monk
@@ -45,14 +44,8 @@ spec:
     model: claude-haiku-4-5
     preLoadedSourcesGlob: ""
   injects:
-    credentials: true
     gitconfig: false
     githubAuth: false
-  budget:
-    maxUsd: 999.00
-    maxDurationSec: 7200
-    maxUsdPerQuery: 0.10
-    maxQueries: 200
   modop_set: []
   modop_incompatible: []
   lifetime_scope: pipe

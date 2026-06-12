@@ -1,0 +1,40 @@
+name: Gate runtime (I-CBC)
+
+# R7 verrou — `mix gate` mécanique sur push : compile --warnings-as-errors +
+# suite umbrella + lcars.contracts.check. Rouge = le commit/la branche est
+# marqué KO sur la forge. Les dents de la méthodo cadrage, hardware-backed.
+# Runner : host local (label `elixir`), réutilise Elixir 1.18 de la machine.
+
+on:
+  push:
+    paths:
+      - 'fleet/runtime/**'
+      - '.gitea/workflows/gate.yml'
+  pull_request:
+    paths:
+      - 'fleet/runtime/**'
+
+jobs:
+  gate:
+    runs-on: elixir
+    defaults:
+      run:
+        working-directory: fleet/runtime
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain (versions)
+        run: |
+          elixir --version
+          mix --version
+
+      - name: Hex/Rebar présents
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Deps
+        run: mix deps.get
+
+      - name: Gate (compile strict + suite + contracts.check)
+        run: mix gate

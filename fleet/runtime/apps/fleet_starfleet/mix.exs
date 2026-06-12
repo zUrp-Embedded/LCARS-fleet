@@ -36,7 +36,9 @@ defmodule Fleet.Starfleet.MixProject do
       # cycle (spawner ⊀ starfleet vérifié).
       {:fleet_spawner, in_umbrella: true},
       {:jason, "~> 1.4"},
-      {:ex_json_schema, "~> 0.11"}
+      {:ex_json_schema, "~> 0.11"},
+      # BL-021 chantier 8 — MCPWatcher fetch Hex.pm pour version SDK MCP upstream.
+      {:req, "~> 0.5"}
     ]
   end
 end

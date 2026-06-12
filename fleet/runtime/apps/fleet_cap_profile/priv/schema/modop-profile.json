@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LCARS Modop Profile (strict, v2.5)",
+  "description": "Modop fragment validated at load time. Reserved keys (kind, metadata.containment, metadata.name) are forbidden — mitigates 'containment override par modop' (PoC-11). R0.8-brick3 : apiVersion retiré (versioning par le code, pas champ embarqué).",
+  "type": "object",
+  "not": {
+    "anyOf": [
+      { "required": ["kind"] }
+    ]
+  },
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "not": {
+        "anyOf": [
+          { "required": ["containment"] },
+          { "required": ["name"] }
+        ]
+      }
+    }
+  }
+}

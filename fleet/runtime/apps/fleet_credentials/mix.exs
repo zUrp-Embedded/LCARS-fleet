@@ -21,20 +21,18 @@ defmodule FleetCredentials.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
-      mod: {Fleet.Credentials.Application, []}
+      extra_applications: [:logger]
     ]
   end
 
   defp deps do
-    # NOTE chantier 3 : `:claude_code` SDK dep prescrit design note L253
-    # n'est PAS introduit ici car les backends `ClaudeCodeBackend` sont
-    # des placeholders `:not_wired_yet` (cf. moduledoc PlanValidator +
-    # OAuthRefresher). Le binding réel + la dep sont introduits au
-    # chantier 8 (`fleet_claude_bridge`) où le wrap doctrine SDK #2
-    # est appliqué. Cohérent design note §"Surface SDK utilisée" L255.
+    # `:claude_code` SDK jamais introduite. La validation de plan via SDK
+    # (`PlanValidator.ClaudeCodeBackend`) SUPPRIMÉE (ADR-G : SDK mort, pivot
+    # tmux-REPL). NB : `scope_validator` garde le scope OAuth
+    # `user:sessions:claude_code` (scope credential du pod, pas le SDK lib).
     [
-      {:fleet_capprofile, in_umbrella: true},
+      {:fleet_cap_profile, in_umbrella: true},
+      {:fleet_event_router, in_umbrella: true},
       {:jason, "~> 1.4"},
       {:stream_data, "~> 1.0", only: [:dev, :test]}
     ]

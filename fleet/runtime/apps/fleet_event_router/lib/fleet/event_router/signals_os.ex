@@ -44,7 +44,31 @@ defmodule Fleet.EventRouter.SignalsOS do
 
   @impl GenServer
   def handle_info({:signal, sig}, state) when is_atom(sig) do
-    Fleet.EventRouter.Bus.broadcast("os.signal.#{sig}", %{"signal" => Atom.to_string(sig)})
+    # BL-021 chantier 9 (B) — schema canon strict %Fleet.Event{source: :event_router}.
+    type_str = "os.signal.#{sig}"
+
+    try do
+      type_atom = String.to_existing_atom(type_str)
+
+      event = %Fleet.Event{
+        source: :event_router,
+        type: type_atom,
+        timestamp: DateTime.utc_now(),
+        pod_id: nil,
+        correlation_id: nil,
+        payload: %{"signal" => Atom.to_string(sig)}
+      }
+
+      _ = Fleet.EventRouter.Bus.broadcast("fleet.events", event)
+    rescue
+      ArgumentError ->
+        require Logger
+        Logger.warning("SignalsOS unknown signal atom #{inspect(type_str)} — skip broadcast")
+
+      _e in Fleet.Event.UnregisteredError ->
+        :ok
+    end
+
     {:noreply, state}
   end
 

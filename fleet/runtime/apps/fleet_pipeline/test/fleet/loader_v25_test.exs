@@ -1,62 +1,41 @@
 defmodule Fleet.Pipeline.LoaderV25Test do
   @moduledoc """
   Lot 6 inc1 — extension additive Loader format V2.5 (enveloppe
-  apiVersion/kind/metadata/spec) sans casser le flat chantier-12.
-  Détection `apiVersion` → pipeline-v2.5.json ; sinon → pipeline-v1.json.
-  `async: false` (Application env :pipelines_root global).
+  kind/metadata/spec) sans casser le flat chantier-12. Détection
+  présence `spec` top-level → pipeline-v2.5.json ; sinon → pipeline-v1.json.
+
+  U1 (R3/D2) — `Loader.load!` NORMALISE désormais le résultat vers la forme
+  interne unique `%{"name", "stages"}` : l'enveloppe v2.5 est déballée au load
+  (les tests assertent la forme normalisée, plus le YAML brut). La détection de
+  format + validation schema restent inchangées (v2.5 vs v1).
+
+  M7 — `async: true` : on passe `:pipelines_root` via opts à `Loader.load!/2`
+  (pas de couplage Application env global).
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Fleet.Pipeline.Loader
 
-  # __DIR__ = .../runtime-v2/apps/fleet_pipeline/test/fleet → 6 remontées → beyond_#4
-  @canon_pipelines Path.join([
-                     __DIR__,
-                     "..",
-                     "..",
-                     "..",
-                     "..",
-                     "..",
-                     "..",
-                     "06_modops",
-                     "pipelines"
-                   ])
+  # R0.8-brick6 : canon pipelines réabsorbés in-repo.
+  @canon_pipelines Application.app_dir(:fleet_pipeline, "priv/canon/pipelines")
 
-  setup do
-    prev = Application.get_env(:fleet_pipeline, :pipelines_root)
-    prev_schema = Application.get_env(:fleet_pipeline, :schema_path)
-    # IMPORTANT : ne PAS fixer :schema_path (sinon override la détection format).
-    Application.delete_env(:fleet_pipeline, :schema_path)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_pipeline, :pipelines_root, prev),
-        else: Application.delete_env(:fleet_pipeline, :pipelines_root)
-
-      if prev_schema, do: Application.put_env(:fleet_pipeline, :schema_path, prev_schema)
-    end)
-
-    :ok
+  test "canon standard-qa.yaml (V2.5) normalisé → name + stages top-level" do
+    pipe = Loader.load!("standard-qa", pipelines_root: @canon_pipelines)
+    assert pipe["name"] == "standard-qa"
+    assert is_map(pipe["stages"])
+    assert is_map(pipe["stages"]["brainstorm"])
+    refute Map.has_key?(pipe, "spec")
   end
 
-  test "canon standard-qa.yaml (V2.5) valide pipeline-v2.5.json via Loader" do
-    Application.put_env(:fleet_pipeline, :pipelines_root, @canon_pipelines)
-    yaml = Loader.load!("standard-qa")
-    assert yaml["apiVersion"] == "lcars/v2.5"
-    assert yaml["kind"] == "Pipeline"
-    assert get_in(yaml, ["metadata", "name"]) == "standard-qa"
-    assert is_map(get_in(yaml, ["spec", "stages"]))
-  end
-
-  test "canon audit-only.yaml (V2.5) valide pipeline-v2.5.json via Loader" do
-    Application.put_env(:fleet_pipeline, :pipelines_root, @canon_pipelines)
-    yaml = Loader.load!("audit-only")
-    assert yaml["apiVersion"] == "lcars/v2.5"
-    assert get_in(yaml, ["metadata", "name"]) == "audit-only"
+  test "canon audit-only.yaml (V2.5) normalisé → name + stages top-level" do
+    pipe = Loader.load!("audit-only", pipelines_root: @canon_pipelines)
+    assert pipe["name"] == "audit-only"
+    assert is_map(pipe["stages"])
+    refute Map.has_key?(pipe, "spec")
   end
 
   @tag :tmp_dir
-  test "régression : flat chantier-12 (sans apiVersion) → pipeline-v1.json inchangé",
+  test "régression : flat chantier-12 (sans spec top-level) → forme normalisée identique",
        %{tmp_dir: dir} do
     flat = """
     name: legacy-flat
@@ -68,16 +47,67 @@ defmodule Fleet.Pipeline.LoaderV25Test do
     """
 
     File.write!(Path.join(dir, "legacy-flat.yaml"), flat)
-    Application.put_env(:fleet_pipeline, :pipelines_root, dir)
-    yaml = Loader.load!("legacy-flat")
-    assert yaml["name"] == "legacy-flat"
-    refute Map.has_key?(yaml, "apiVersion")
+    pipe = Loader.load!("legacy-flat", pipelines_root: dir)
+    assert pipe["name"] == "legacy-flat"
+    assert is_map(pipe["stages"]["only"])
+    refute Map.has_key?(pipe, "spec")
+  end
+
+  @tag :tmp_dir
+  test "V2.5 stage avec post_extract.git valide schema (face 2 décision archi git)",
+       %{tmp_dir: dir} do
+    yaml = """
+    kind: Pipeline
+    metadata:
+      name: face2-stage
+    spec:
+      stages:
+        publish:
+          role: engineer
+          profile: engineer
+          post_extract:
+            git:
+              repo_url: http://gitea/fleet/lcars
+              branch: feature/x
+              push: true
+              add_paths: ["docs/", "src/"]
+    """
+
+    File.write!(Path.join(dir, "face2-stage.yaml"), yaml)
+    loaded = Loader.load!("face2-stage", pipelines_root: dir)
+    stage = get_in(loaded, ["stages", "publish"])
+    assert get_in(stage, ["post_extract", "git", "repo_url"]) == "http://gitea/fleet/lcars"
+    assert get_in(stage, ["post_extract", "git", "branch"]) == "feature/x"
+    assert get_in(stage, ["post_extract", "git", "push"]) == true
+    assert get_in(stage, ["post_extract", "git", "add_paths"]) == ["docs/", "src/"]
+  end
+
+  @tag :tmp_dir
+  test "V2.5 post_extract.git sans repo_url ni branch → invalide", %{tmp_dir: dir} do
+    yaml = """
+    kind: Pipeline
+    metadata:
+      name: face2-missing-required
+    spec:
+      stages:
+        publish:
+          role: engineer
+          profile: engineer
+          post_extract:
+            git:
+              push: true
+    """
+
+    File.write!(Path.join(dir, "face2-missing-required.yaml"), yaml)
+
+    assert_raise RuntimeError, ~r/pipeline-v2\.5\.json invalide/, fn ->
+      Loader.load!("face2-missing-required", pipelines_root: dir)
+    end
   end
 
   @tag :tmp_dir
   test "V2.5 structurellement invalide → raise schema pipeline-v2.5", %{tmp_dir: dir} do
     bad = """
-    apiVersion: lcars/v2.5
     kind: Pipeline
     metadata:
       name: bad
@@ -86,10 +116,26 @@ defmodule Fleet.Pipeline.LoaderV25Test do
     """
 
     File.write!(Path.join(dir, "bad.yaml"), bad)
-    Application.put_env(:fleet_pipeline, :pipelines_root, dir)
 
     assert_raise RuntimeError, ~r/pipeline-v2\.5\.json invalide/, fn ->
-      Loader.load!("bad")
+      Loader.load!("bad", pipelines_root: dir)
     end
+  end
+
+  @tag :tmp_dir
+  test "M7 — load!/2 opt :schema_path override Application env", %{tmp_dir: dir} do
+    yaml = """
+    name: legacy-flat
+    version: 1
+    stages:
+      only:
+        role: engineer
+        profile: engineer.yaml
+    """
+
+    File.write!(Path.join(dir, "legacy-flat.yaml"), yaml)
+    # No global put_env — async: true safe.
+    loaded = Loader.load!("legacy-flat", pipelines_root: dir)
+    assert loaded["name"] == "legacy-flat"
   end
 end

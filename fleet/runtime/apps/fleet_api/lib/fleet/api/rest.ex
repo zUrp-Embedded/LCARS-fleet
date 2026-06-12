@@ -1,10 +1,12 @@
-defmodule Fleet.Api.Rest do
+defmodule Fleet.API.Rest do
   @moduledoc """
   Plug.Router HTTP `:8080` endpoints REST + auth HMAC token header.
 
   ## Routes MVP
 
-    * `GET /api/health` — readiness probe
+    * `GET /api/health` — readiness probe (public, no auth)
+    * `GET /api/readiness/deep` — état opérationnel LIVE (P05, auth) via
+      `Fleet.API.Readiness.deep/0` — anti-vert-creux
     * `GET /api/pipelines` / `tickets` / `pods` — lecture état (stubs MVP)
     * `POST /api/admin/spawn` — broadcast `admin.spawn.request` event
     * `POST /api/config/update` — atomic write + git commit auto via
@@ -26,7 +28,7 @@ defmodule Fleet.Api.Rest do
 
   use Plug.Router
 
-  alias Fleet.Api.{GitCommitter, RelayHandler}
+  alias Fleet.API.{GitCommitter, RelayHandler}
   alias Fleet.EventRouter.Bus
 
   plug(:match)
@@ -37,6 +39,13 @@ defmodule Fleet.Api.Rest do
   # Public health probe — no auth (skipped via require_auth special-case)
   get "/api/health" do
     send_json(conn, %{status: "ok", ts: DateTime.utc_now() |> DateTime.to_iso8601()})
+  end
+
+  # P05 — readiness deep : état opérationnel LIVE (anti-vert-creux). Auth-gated
+  # (vue de câblage interne, pas un probe public comme /api/health). 200 même
+  # si `status: degraded` — la dégradation est une donnée, pas une erreur HTTP.
+  get "/api/readiness/deep" do
+    send_json(conn, Fleet.API.Readiness.deep())
   end
 
   get "/api/pipelines" do
@@ -52,10 +61,39 @@ defmodule Fleet.Api.Rest do
   end
 
   post "/api/admin/spawn" do
-    case Bus.broadcast("admin.spawn.request", conn.body_params || %{}, []) do
+    # Chokepoint « nouveau pod opérateur » : refusé pendant un drain de
+    # shutdown (Fleet.Shutdown.Quiesce). 503 = indisponible temporairement.
+    # REST est l'UNIQUE producteur de l'event `admin.spawn.request` (vérifié) —
+    # gater ici couvre donc intégralement l'admission de pods top-level.
+    if Fleet.Shutdown.Quiesce.quiescing?() do
+      send_resp(conn, 503, ~s|{"error":"quiescing — shutdown drain in progress"}|)
+    else
+      do_admin_spawn(conn)
+    end
+  end
+
+  defp do_admin_spawn(conn) do
+    # BL-021 chantier 9 (B) — migrated to schema canon %Fleet.Event{source: :api}.
+    event = %Fleet.Event{
+      source: :api,
+      type: :"admin.spawn.request",
+      timestamp: DateTime.utc_now(),
+      pod_id: nil,
+      correlation_id: nil,
+      payload: conn.body_params || %{}
+    }
+
+    case safe_broadcast(event) do
       :ok -> send_resp(conn, 202, ~s|{"status":"queued"}|)
       {:error, reason} -> send_resp(conn, 400, Jason.encode!(%{error: inspect(reason)}))
     end
+  end
+
+  defp safe_broadcast(%Fleet.Event{} = event) do
+    Bus.broadcast("fleet.events", event)
+  rescue
+    e in Fleet.Event.UnregisteredError -> {:error, e.message}
+    e in [ArgumentError, FunctionClauseError] -> {:error, inspect(e)}
   end
 
   post "/api/config/update" do
@@ -85,10 +123,10 @@ defmodule Fleet.Api.Rest do
     end
   end
 
-  # #594 D2 — dashboard V2 Elixir natif. Mount Fleet.Api.Dashboard sous
+  # #594 D2 — dashboard V2 Elixir natif. Mount Fleet.API.Dashboard sous
   # /dashboard. Pas d'auth HTTP (ADR-C accès intra-release, GET-only UI,
   # whitelisté dans require_auth/2 ligne ~97).
-  forward("/dashboard", to: Fleet.Api.Dashboard)
+  forward("/dashboard", to: Fleet.API.Dashboard)
 
   match _ do
     send_resp(conn, 404, ~s|{"error":"not found"}|)
@@ -133,9 +171,22 @@ defmodule Fleet.Api.Rest do
   defp load_secret do
     path = Application.get_env(:fleet_api, :api_secret_path, "/etc/fleet/api-secret")
 
-    case File.read(path) do
-      {:ok, content} -> {:ok, String.trim(content)}
-      {:error, reason} -> {:error, reason}
+    # F017 : refuse un secret WORLD-readable (bit `other` de lecture). L'invariant documenté est
+    # root:lcars 600/640 (lisible par owner/groupe-daemon, JAMAIS par tout le monde). Sans ce
+    # check, un `/etc/fleet/api-secret` en 644 était accepté SILENCIEUSEMENT → tout user local lit
+    # le secret et forge le token. Fail-closed : un secret exposé ne sert pas (l'op doit corriger).
+    with {:ok, %File.Stat{mode: mode}} <- File.stat(path),
+         :ok <- check_secret_not_world_readable(path, mode),
+         {:ok, content} <- File.read(path) do
+      {:ok, String.trim(content)}
+    end
+  end
+
+  defp check_secret_not_world_readable(path, mode) do
+    if Bitwise.band(mode, 0o004) == 0 do
+      :ok
+    else
+      {:error, {:secret_world_readable, path, Bitwise.band(mode, 0o777)}}
     end
   end
 

@@ -50,6 +50,14 @@ defmodule Fleet.Pipeline.ToposortTest do
       end
     end
 
+    test "needs vers stage inexistant → raise DISTINCT (pas un cycle, finding Vulcan)" do
+      stages = %{"a" => %{"role" => "x", "needs" => ["ghost"]}}
+
+      assert_raise RuntimeError, ~r/inexistant/, fn ->
+        Toposort.sort(stages)
+      end
+    end
+
     test "self-loop détecté → raise" do
       stages = %{"a" => %{"role" => "x", "needs" => ["a"]}}
 

@@ -24,7 +24,6 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
 
   defp cap(opts) do
     %Fleet.CapProfile{
-      api_version: "v2.5",
       kind: "CapProfile",
       metadata: %{"name" => Keyword.get(opts, :role, "engineer")},
       spec: Keyword.get(opts, :spec, %{})
@@ -46,28 +45,18 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
     repo
   end
 
-  # Coffre fixtures partagés : sans creds résolus, Phase4 échoue et
-  # prepare/3 court-circuite → tous les tests phases 1-3-5 ont besoin du
-  # coffre. Roles couverts : engineer + reviewer.
-  setup %{tmp_dir: dir} do
-    coffre = Path.join(dir, "coffre")
-
-    for role <- ["engineer", "reviewer"] do
-      File.mkdir_p!(Path.join(coffre, role))
-      File.write!(Path.join([coffre, role, "oauth_refresh_token"]), "RT-#{role}\n")
-      File.write!(Path.join([coffre, role, "oauth_access_token"]), "AT-#{role}\n")
-      File.write!(Path.join([coffre, role, "oauth_scopes"]), "scope-a scope-b\n")
-    end
-
-    Application.put_env(:fleet_credentials, :creds_root, coffre)
-    on_exit(fn -> Application.delete_env(:fleet_credentials, :creds_root) end)
-    :ok
-  end
+  # adr-f : plus de coffre. Phase 4 (BindCredentials) retourne {:ok, %{}}
+  # sans dépendance externe → pas de setup creds nécessaire.
 
   # Nettoyage par-pod : on_exit empile, appelé depuis le process test
   # (helper invoqué dans le corps de test). Pas d'ETS (Iron Law — pas de
   # table partagée à posséder/transmettre).
   defp prepare!(pod_id, capp, opts, _ctx) do
+    # PB-D2 : `:pod_dir_base` requis (plus de défaut /tmp silencieux dans Allocate) → le test
+    # l'injecte EXPLICITEMENT. On utilise `System.tmp_dir!()` (et PAS `ctx.tmp_dir`) : le nom du
+    # tmp_dir ExUnit contient les `(...)` du nom de test → casse le `find \( … \)` d'un test.
+    # pod-<id> est unique (entier) → pas de collision ; on_exit nettoie.
+    opts = Keyword.put_new(opts, :pod_dir_base, System.tmp_dir!())
     {:ok, res} = ProjectBootstrap.prepare(pod_id, capp, opts)
     on_exit(fn -> File.rm_rf(res.pod_dir) end)
     res
@@ -134,13 +123,14 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
   end
 
   @tag :tmp_dir
-  test "5. credentials role-scopés via resolve_env (env map — divergence DN tracée)", ctx do
+  test "5. creds via claudeDir bind (adr-f) : aucun env OAuth injecté", ctx do
     pod_id = "conf5-#{System.unique_integer([:positive])}"
-    spec = %{"project" => %{"name" => "d"}, "injects" => %{"useRoleCredentials" => true}}
+    spec = %{"project" => %{"name" => "d"}}
     res = prepare!(pod_id, cap(role: "engineer", spec: spec), [], ctx)
 
-    assert %{"CLAUDE_CODE_OAUTH_REFRESH_TOKEN" => "RT-engineer"} = res.credentials_env
-    assert res.credentials_env["CLAUDE_CODE_OAUTH_SCOPES"] == "scope-a scope-b"
+    # adr-f : plus d'injection RT-env (coffre déprécié). Les creds vivent dans
+    # le claudeDir bindé par bwrap (CLAUDE_DIR), pas dans un env map résolu ici.
+    assert res.credentials_env == %{}
   end
 
   @tag :tmp_dir

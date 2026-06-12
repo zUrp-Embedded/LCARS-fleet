@@ -7,17 +7,27 @@ defmodule Fleet.Starfleet.CoordBackend do
   pas de side effect runtime). Cohérent canon §0 #1 refus par défaut +
   fail-safe (audit log écrit même si coord pas câblé).
 
+  BL-021 chantier 9 (B) — compat shims `/1` et `/2` retirés. Seules les
+  arités canon avec correlation_id explicite (DN 9 C2.3) sont conservées.
+
   ## Callbacks
 
-    * `handle_decision/1` — consume validated decision (gatekeeper output)
-    * `handle_escalation/2` — consume Cat 5 escalade (source + payload)
+    * `handle_decision/2` — consume validated decision (gatekeeper output) +
+      correlation_id explicite
+    * `handle_escalation/3` — consume Cat 5 escalade (source + payload) +
+      correlation_id explicite
   """
 
-  @callback handle_decision(decision :: Fleet.Starfleet.Decision.t()) ::
-              :ok | {:error, term()}
+  @callback handle_decision(
+              decision :: Fleet.Starfleet.Decision.t(),
+              correlation_id :: String.t() | nil
+            ) :: :ok | {:error, term()}
 
-  @callback handle_escalation(source :: atom(), payload :: map()) ::
-              :ok | {:error, term()}
+  @callback handle_escalation(
+              source :: atom(),
+              payload :: map(),
+              correlation_id :: String.t() | nil
+            ) :: :ok | {:error, term()}
 end
 
 defmodule Fleet.Starfleet.CoordBackend.NotWiredYet do
@@ -28,15 +38,15 @@ defmodule Fleet.Starfleet.CoordBackend.NotWiredYet do
   require Logger
 
   @impl Fleet.Starfleet.CoordBackend
-  def handle_decision(_decision) do
-    Logger.debug("starfleet coord_backend: handle_decision deferred ch14 (not wired)")
+  def handle_decision(_decision, _correlation_id) do
+    Logger.debug("starfleet coord_backend: handle_decision/2 deferred ch14 (not wired)")
     :ok
   end
 
   @impl Fleet.Starfleet.CoordBackend
-  def handle_escalation(source, _payload) do
+  def handle_escalation(source, _payload, _correlation_id) do
     Logger.debug(
-      "starfleet coord_backend: handle_escalation #{inspect(source)} deferred ch14 (not wired)"
+      "starfleet coord_backend: handle_escalation/3 #{inspect(source)} deferred ch14 (not wired)"
     )
 
     :ok

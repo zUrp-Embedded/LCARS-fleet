@@ -1,20 +1,21 @@
 #!/usr/bin/env bats
 # SOURCE: test/claude_launch/claude_launch.bats
 # AUTHOR: engineer
-# STARDATE: 2026-05-09
-# STATUS: chantier #5 run #3.1 — tests bats bin/claude_launch.sh
+# STARDATE: 2026-06-01
+# STATUS: beyond_#5 chantier 3 — tests bats bin/claude_launch.sh v2 (ADR-G, RC interactif)
 #
-# Tests intégration bin/claude_launch.sh (Ring 1 frontière vendor N1).
-# Couvre args validation, setup checks, extraction cap-profile JSON,
-# stream-json output, timeout enforcement, frontière vendor N1.
+# Tests intégration bin/claude_launch.sh (Ring 1, frontière vendor N1) au contrat ADR-G :
+# 4 args positionnels <role> <pod_id> <pod_dir> <sp>, session UUID pré-allouée (env), exec
+# `claude --remote-control` interactif (PAS -p/stream-json/budget). Le launcher exec direct →
+# le stub claude echo ses args, on asserte sur la ligne STUB_ARGS.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/claude_launch.sh"
   TMP_BASE="$(mktemp -d)"
   POD_DIR="$TMP_BASE/pod-engineer-test"
-  mkdir -p "$POD_DIR/.claude" "$POD_DIR/context" "$POD_DIR/output"
+  mkdir -p "$POD_DIR/.claude"
 
-  # Cap-profile JSON resolved (forme attendue chantier 6 fleet_spawner)
+  # Cap-profile JSON resolved (forme fleet_spawner chantier 6)
   cat > "$POD_DIR/.cap-profile.json" <<'EOF'
 {
   "api_version": "lcars/v2.5",
@@ -29,25 +30,24 @@ setup() {
 }
 EOF
 
-  echo "# Engineer SP" > "$POD_DIR/.claude/system-prompt.md"
-  echo "# Brief" > "$POD_DIR/context/brief.md"
-
-  # Stub claude binary qui imite le comportement minimal (lit args, écrit
-  # stream-json sur stdout, exit 0).
+  # Stub vendor claude : répond à --version (provisioning .claude.json) puis echo ses args.
   CLAUDE_STUB="$TMP_BASE/claude-stub"
   cat > "$CLAUDE_STUB" <<'EOF'
 #!/usr/bin/env bash
-# Stub vendor claude -p pour tests
-echo '{"type":"init","session_id":"stub-1"}'
-echo '{"type":"result","subtype":"success"}'
-# Echo args reçus pour assertions test
+if [[ "${1:-}" == "--version" ]]; then echo "2.1.159 (Claude Code)"; exit 0; fi
 printf 'STUB_ARGS:'
 for a in "$@"; do printf ' %s' "$a"; done
 printf '\n'
 exit 0
 EOF
   chmod +x "$CLAUDE_STUB"
+
   export LCARS_CLAUDE_BIN="$CLAUDE_STUB"
+  # Session : UUID pré-alloué + préfixe nom RC (posés par le spawner via bwrap --setenv en prod).
+  export LCARS_POD_SESSION_ID="test-session-uuid"
+  export LCARS_POD_SESSION_NAME_PREFIX="lordzurp_engineer"
+  # SP inline (argv 4)
+  SP="# Engineer SP de test"
 }
 
 teardown() {
@@ -64,28 +64,40 @@ teardown() {
   [[ "$output" == *"usage:"* ]]
 }
 
-@test "args: exit 1 quand 4 args (budget_usd manquant)" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60
+@test "args: exit 1 quand 3 args (SP manquant)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"usage:"* ]]
 }
 
 @test "args: exit 1 quand role est string vide" {
-  run "$SCRIPT" "" pod-1 "$POD_DIR" 60 1.0
+  run "$SCRIPT" "" pod-1 "$POD_DIR" "$SP"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"non-vides"* ]]
 }
 
-@test "args: exit 1 quand budget_sec n'est pas un entier" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" "not-a-number" 1.0
+@test "args: exit 1 quand SP (argv 4) est vide" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" ""
   [[ "$status" -eq 1 ]]
-  [[ "$output" == *"strictement positif"* ]]
+  [[ "$output" == *"SP inline"* ]]
 }
 
-@test "args: exit 1 quand budget_sec = 0 (non strictement positif)" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 0 1.0
-  [[ "$status" -eq 1 ]]
-  [[ "$output" == *"strictement positif"* ]]
+# =============================================================
+# Session env (:? strict — posés par le spawner)
+# =============================================================
+
+@test "session: exit non-zéro + message quand LCARS_POD_SESSION_ID absent" {
+  unset LCARS_POD_SESSION_ID
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"UUID de session requis"* ]]
+}
+
+@test "session: exit non-zéro + message quand LCARS_POD_SESSION_NAME_PREFIX absent" {
+  unset LCARS_POD_SESSION_NAME_PREFIX
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"préfixe nom RC requis"* ]]
 }
 
 # =============================================================
@@ -94,153 +106,176 @@ teardown() {
 
 @test "setup: exit 1 quand claude binary missing" {
   export LCARS_CLAUDE_BIN="/nonexistent/claude"
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"claude binary missing"* ]]
 }
 
 @test "setup: exit 1 quand jq binary missing" {
   export LCARS_JQ_BIN="/nonexistent/jq"
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"jq binary missing"* ]]
 }
 
 @test "setup: exit 1 quand cap-profile JSON missing" {
   rm -f "$POD_DIR/.cap-profile.json"
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"cap-profile"* ]]
   [[ "$output" == *"missing"* ]]
 }
 
-@test "setup: exit 1 quand SP missing" {
-  rm -f "$POD_DIR/.claude/system-prompt.md"
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  [[ "$status" -eq 1 ]]
-  [[ "$output" == *"SP"* ]]
-  [[ "$output" == *"missing"* ]]
-}
-
-@test "setup: exit 1 quand brief missing" {
-  rm -f "$POD_DIR/context/brief.md"
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  [[ "$status" -eq 1 ]]
-  [[ "$output" == *"brief"* ]]
-  [[ "$output" == *"missing"* ]]
-}
-
 # =============================================================
-# Happy path : exec claude stub + stream-json output
+# Happy path + assemblage flags ADR-G (le stub echo ses args)
 # =============================================================
 
-@test "happy path: claude stub exit 0 → status 0" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
+@test "happy path: exit 0" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
   [[ "$status" -eq 0 ]]
 }
 
-@test "happy path: NDJSON output créé sous \$POD_DIR/output/" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
+@test "flags: --remote-control présent (RC-at-startup)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--remote-control"* ]]
+}
+
+@test "F115/F157: .claude.json provisionné porte les 3 clés remote-control (écrivain unique N1)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
   [[ "$status" -eq 0 ]]
-  [[ -f "$POD_DIR/output/.claude-stream.ndjson" ]]
+  # Le launcher est l'unique écrivain du .claude.json : sans ces clés, le dialog RC re-bloque
+  # au boot (pod.ex N0 ne les pose plus — sa version était clobberée par ce `cat >`).
+  [[ -f "$POD_DIR/.claude.json" ]]
+  run cat "$POD_DIR/.claude.json"
+  [[ "$output" == *'"remoteControlAtStartup": true'* ]]
+  [[ "$output" == *'"hasUsedRemoteControl": true'* ]]
+  [[ "$output" == *'"remoteDialogSeen": true'* ]]
 }
 
-@test "happy path: NDJSON contient stream-json events init+result" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  ndjson="$(cat "$POD_DIR/output/.claude-stream.ndjson")"
-  [[ "$ndjson" == *'"type":"init"'* ]]
-  [[ "$ndjson" == *'"type":"result"'* ]]
+@test "flags: 1ʳᵉ création → --session-id <UUID> (pas --resume)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--session-id test-session-uuid"* ]]
+  [[ "$output" != *"--resume"* ]]
 }
 
-@test "happy path: LCARS_NDJSON_LOG override redirige output" {
-  CUSTOM_LOG="$TMP_BASE/custom.ndjson"
-  export LCARS_NDJSON_LOG="$CUSTOM_LOG"
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  [[ "$status" -eq 0 ]]
-  [[ -f "$CUSTOM_LOG" ]]
-  [[ ! -f "$POD_DIR/output/.claude-stream.ndjson" ]]
+@test "flags: recovery (LCARS_POD_RESUME=1) → --resume <UUID> (pas --session-id)" {
+  export LCARS_POD_RESUME=1
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--resume test-session-uuid"* ]]
+  [[ "$output" != *"--session-id"* ]]
 }
 
-# =============================================================
-# Flags claude -p : extraction cap-profile + injection
-# =============================================================
-
-@test "flags: --output-format stream-json passé au claude binary" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  ndjson="$(cat "$POD_DIR/output/.claude-stream.ndjson")"
-  [[ "$ndjson" == *"--output-format stream-json"* ]]
+@test "flags: --remote-control-session-name-prefix = préfixe humain_role" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--remote-control-session-name-prefix lordzurp_engineer"* ]]
 }
 
-@test "flags: --verbose présent" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  ndjson="$(cat "$POD_DIR/output/.claude-stream.ndjson")"
-  [[ "$ndjson" == *"--verbose"* ]]
+@test "flags: --system-prompt inline porte le SP (pas de --system-prompt-file)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--system-prompt"* ]]
+  [[ "$output" == *"Engineer SP de test"* ]]
+  [[ "$output" != *"--system-prompt-file"* ]]
 }
 
-@test "flags: --system-prompt-file pointe vers SP path" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  ndjson="$(cat "$POD_DIR/output/.claude-stream.ndjson")"
-  [[ "$ndjson" == *"--system-prompt-file"* ]]
-  [[ "$ndjson" == *"$POD_DIR/.claude/system-prompt.md"* ]]
+@test "flags: --dangerously-skip-permissions par défaut (sanctuaire = liberté, les murs portent la sécu)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--dangerously-skip-permissions"* ]]
+  [[ "$output" != *"--permission-mode"* ]]
 }
 
-@test "flags: --append-system-prompt-file pointe vers brief path" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  ndjson="$(cat "$POD_DIR/output/.claude-stream.ndjson")"
-  [[ "$ndjson" == *"--append-system-prompt-file"* ]]
-  [[ "$ndjson" == *"$POD_DIR/context/brief.md"* ]]
+@test "flags: LCARS_PERMISSION_MODE override → --permission-mode <mode> (rôle bridé, pas skip)" {
+  export LCARS_PERMISSION_MODE=plan
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--permission-mode plan"* ]]
+  [[ "$output" != *"--dangerously-skip-permissions"* ]]
 }
 
 @test "flags: --allowedTools extrait du cap-profile JSON" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  ndjson="$(cat "$POD_DIR/output/.claude-stream.ndjson")"
-  [[ "$ndjson" == *"--allowedTools Read,Glob,Grep"* ]]
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--allowedTools Read,Glob,Grep"* ]]
 }
 
 @test "flags: --disallowedTools extrait du cap-profile JSON" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 1.0
-  ndjson="$(cat "$POD_DIR/output/.claude-stream.ndjson")"
-  [[ "$ndjson" == *"--disallowedTools web_search,tool_search_internal"* ]]
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--disallowedTools web_search,tool_search_internal"* ]]
 }
 
-@test "flags: --max-budget-usd injecté depuis args" {
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 60 2.5
-  ndjson="$(cat "$POD_DIR/output/.claude-stream.ndjson")"
-  [[ "$ndjson" == *"--max-budget-usd 2.5"* ]]
+@test "flags: --setting-sources project,local INCONDITIONNEL (exclut 'user')" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--setting-sources project,local"* ]]
 }
 
-# =============================================================
-# Budget enforcement timeout bash (double étage)
-# =============================================================
+@test "flags: --settings ajouté seulement si .lcars/settings.json présent" {
+  mkdir -p "$POD_DIR/.lcars"
+  echo '{}' > "$POD_DIR/.lcars/settings.json"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--settings $POD_DIR/.lcars/settings.json"* ]]
+}
 
-@test "timeout: claude stub qui sleep > budget → exit 124" {
-  # Stub qui sleep 5s ; budget 1s → timeout doit firer
-  cat > "$LCARS_CLAUDE_BIN" <<'EOF'
-#!/usr/bin/env bash
-sleep 5
-EOF
-  chmod +x "$LCARS_CLAUDE_BIN"
-  run "$SCRIPT" engineer pod-1 "$POD_DIR" 1 1.0
-  [[ "$status" -eq 124 ]]
+@test "flags: --mcp-config --strict-mcp-config si .mcp-fleet.json présent" {
+  echo '{"mcpServers":{}}' > "$POD_DIR/.mcp-fleet.json"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" == *"--mcp-config $POD_DIR/.mcp-fleet.json"* ]]
+  [[ "$output" == *"--strict-mcp-config"* ]]
 }
 
 # =============================================================
-# Frontière vendor N1 — préfixe claude_*, jamais bwrap
+# Bypass dialog : levée du gate interactif (skipDangerousModePermissionPrompt en settings/flagSettings).
+# PROVEN e2e sanctuaire 2026-06-01 : sans ça, claude RC hang sur « 1. No / 2. Yes I accept ».
 # =============================================================
 
-@test "frontière vendor: aucune référence fonctionnelle bwrap (hors commentaires)" {
-  # Le script peut mentionner "bwrap" en doc (header expliquant qu'il
-  # est invoqué par bwrap_launch.sh) mais pas dans du code exécutable.
-  # On filtre les lignes de commentaires (^# et trailing # comments).
-  ! grep -vE "^\s*#" "$SCRIPT" | grep -E "bwrap|--ro-bind|--unshare"
+@test "bypass: mode skip provisionne skipDangerousModePermissionPrompt + le passe via --settings" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$status" -eq 0 ]]
+  [[ -f "$POD_DIR/.lcars/settings.json" ]]
+  grep -q "skipDangerousModePermissionPrompt" "$POD_DIR/.lcars/settings.json"
+  [[ "$output" == *"--settings $POD_DIR/.lcars/settings.json"* ]]
 }
 
-@test "frontière vendor: aucune référence fonctionnelle openai/anthropic-sdk (hors commentaires)" {
+@test "bypass: merge non-destructif (settings pod préexistant conservé + flag ajouté)" {
+  mkdir -p "$POD_DIR/.lcars"
+  echo '{"hooks":{"PreToolUse":[]}}' > "$POD_DIR/.lcars/settings.json"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$status" -eq 0 ]]
+  grep -q "skipDangerousModePermissionPrompt" "$POD_DIR/.lcars/settings.json"
+  grep -q "PreToolUse" "$POD_DIR/.lcars/settings.json"   # l'existant n'est PAS clobberé
+}
+
+@test "bypass: rôle bridé (LCARS_PERMISSION_MODE) NE provisionne PAS le skip-dialog" {
+  export LCARS_PERMISSION_MODE=plan
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$status" -eq 0 ]]
+  [[ ! -f "$POD_DIR/.lcars/settings.json" ]] || ! grep -q "skipDangerousModePermissionPrompt" "$POD_DIR/.lcars/settings.json"
+}
+
+# =============================================================
+# Interdits ADR-G (IV.1/IV.2 : pas de -p/stream-json/budget)
+# =============================================================
+
+@test "ADR-G: aucun -p/--print/--output-format/stream-json/--max-budget-usd" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" "$SP"
+  [[ "$output" != *"--print"* ]]
+  [[ "$output" != *"--output-format"* ]]
+  [[ "$output" != *"stream-json"* ]]
+  [[ "$output" != *"--max-budget-usd"* ]]
+}
+
+# =============================================================
+# Frontière vendor N1 — préfixe claude_*, jamais bwrap/tmux
+# =============================================================
+
+@test "frontière vendor: aucun containment fonctionnel (flags bwrap / bwrap|tmux exécutés)" {
+  # Les MENTIONS en doc/string (« LCARS_CLAUDE_BIN posé par bwrap », « le PTY est tmux ») sont
+  # légitimes (frontière N0/N1 documentée). On interdit le FONCTIONNEL : flags bwrap
+  # (--ro-bind/--unshare/--clearenv/--tmpfs) ou bwrap/tmux exécutés (début de ligne ou après exec).
+  ! grep -vE "^\s*#" "$SCRIPT" | grep -E "(^|exec +)(bwrap|tmux)\b|--ro-bind|--unshare|--clearenv|--tmpfs"
+}
+
+@test "frontière vendor: pas de --bare ni anthropic_api_key fonctionnels (hors commentaires)" {
   ! grep -vE "^\s*#" "$SCRIPT" | grep -iE "openai|anthropic_api_key|--bare"
 }
 
 @test "frontière vendor: script connaît juste claude (vendor N1)" {
-  # Le script doit référencer "claude" (binary, flags) mais pas d'autres vendors.
   grep -q "claude" "$SCRIPT"
 }
 

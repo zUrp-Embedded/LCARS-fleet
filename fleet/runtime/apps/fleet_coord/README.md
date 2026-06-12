@@ -1,7 +1,7 @@
 # fleet_coord (chantier 14)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-06-05 (R06 — retrait SoftGate/Hook/HookSpawner : gates LLM consolidées sur le gatekeeper côté pipeline ; coord = policies déclaratives pures)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_coord.md`, `STATUS-CHANTIERS.md`
 
@@ -10,46 +10,43 @@ Module Elixir système-side : table de routage déclarative
 orchestration. Source : `04_design-notes/fleet_coord.md`
 (Régime 1, profil **CONFORMANCE**, PoC-π3 PROVEN).
 
-**Aucune logique de raisonnement LLM dans Policies** (méta-axiome
-architecture-cible §L441). Soft gate + Hook délèguent LLM via
-spawn pod jetable cap-profile dédié.
+**Aucune logique de raisonnement LLM** : `coord` = policies déclaratives
+pures (méta-axiome architecture-cible §L441). Le jugement LLM des gates
+pipeline est **consolidé sur le gatekeeper** (juge unique), spawné côté
+`fleet_pipeline` (R06) — `coord` ne porte plus de soft gate / hook.
 
 ## Sous-modules
 
 | Module | Rôle |
 |---|---|
-| `Fleet.Coord` | delegator API publique |
+| `Fleet.Coord` | delegator API publique (`handle_decision` / `handle_escalation`) |
 | `Fleet.Coord.Policies` | pure functions table mapping `{verdict, reason} → {action, escalation_path}` lookup `:persistent_term` cache boot-loaded `priv/config/coord-policies.yaml` + broadcast events `coord.action.*` / `coord.notify.dashboard` / `coord.escalate.human` |
-| `Fleet.Coord.SoftGate` | pure functions `invoke_soft_gate/4` spawn pod LLM one-shot via `SpawnerBackend` retry max N rounds (PoC-π2 fire-mode) |
-| `Fleet.Coord.Hook` | pure functions `invoke_hook/2` spawn pod fire-mode coordHook (PoC-π2) — MVP `:before_next` |
-| `Fleet.Coord.SpawnerBackend` | seam wrap `Fleet.Spawner.spawn_pod/3` (default `:not_wired_yet`, ch7 EXTRACT JSON deferred) |
+
+> **Retiré (R06)** : `Fleet.Coord.SoftGate` / `Fleet.Coord.Hook` /
+> `Fleet.Coord.HookSpawner` (+ `NotWiredYet`). Le soft gate et le terminal
+> non-tranchable sont jugés par le **gatekeeper** (`Fleet.Pipeline.Gates`
+> retourne `{:dispatch_gatekeeper, info}`, l'Executor spawn + ré-évalue).
 
 ## Public API
 
 ```elixir
-# ch13 callers (handle_decision + handle_escalation)
-:ok = Fleet.Coord.handle_decision(%Fleet.Starfleet.Decision{
-  decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []
-})
+# Backend fleet_starfleet (handle_decision + handle_escalation)
+:ok = Fleet.Coord.handle_decision(decision, correlation_id)
 
-:ok = Fleet.Coord.handle_escalation(:pod_drift, %{"pod_id" => "p1", "drift_count" => 3})
-
-# ch12 callers (invoke_soft_gate + invoke_hook)
-:pass | {:fail, reason} = Fleet.Coord.invoke_soft_gate(stage, outputs, ctx, max_rounds: 3)
-
-:continue | {:halt, reason} = Fleet.Coord.invoke_hook(:before_next, ctx)
+:ok = Fleet.Coord.handle_escalation(:pod_drift, %{"pod_id" => "p1"}, correlation_id)
 ```
 
-## Wiring backends ch12 + ch13
+## Wiring backend ch13
 
-`Fleet.Coord` satisfait les behaviours `Fleet.Pipeline.CoordBackend`
-(`invoke_soft_gate/4` + `invoke_hook/2`) et `Fleet.Starfleet.CoordBackend`
-(`handle_decision/1` + `handle_escalation/2`). Configuration runtime :
+`Fleet.Coord` satisfait le behaviour `Fleet.Starfleet.CoordBackend`
+(`handle_decision/2` + `handle_escalation/3`). Configuration runtime :
 
 ```elixir
-config :fleet_pipeline, :coord_backend, Fleet.Coord
 config :fleet_starfleet, :coord_backend, Fleet.Coord
 ```
+
+(Plus de `:fleet_pipeline, :coord_backend` — supprimé en R06 : le pipeline
+ne délègue plus la gate LLM à coord.)
 
 ## Format `priv/config/coord-policies.yaml`
 
@@ -87,13 +84,10 @@ mix test apps/fleet_coord
 ## Dépendances
 
 * `fleet_event_router` (ch11 PROMOTED) — Bus PubSub broadcast actions
-* `fleet_spawner` (ch6 PROMOTED) — derrière `SpawnerBackend.Default`
-  (note : default actuel `:not_wired_yet` — wiring ch7 EXTRACT JSON
-  pour récupérer outputs structurés du pod jetable)
 * `:yaml_elixir`
 
 ## Frontière vendor
 
-N0 (vendor-agnostic, pas d'inférence dans ce module — soft gate +
-hook délèguent LLM via spawn pod cap-profile dédié, frontière N1
-isolée chantier 5 `claude_launch.sh`).
+N0 (vendor-agnostic, pas d'inférence dans ce module — policies
+déclaratives pures ; le jugement LLM des gates est côté `fleet_pipeline`
+→ gatekeeper, R06).

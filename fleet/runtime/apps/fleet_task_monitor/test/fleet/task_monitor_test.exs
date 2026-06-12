@@ -1,23 +1,40 @@
 defmodule Fleet.TaskMonitorTest do
   @moduledoc """
-  DN ring1/fleet-task-monitor. `map_event/2` pur (async) + intégration
+  DN ring1/fleet-task-monitor. `map_event/1` pur (async) + intégration
   GenServer FS (tmp_dir async-safe, name unique, `subscribe: false`).
-  Contrat Bus réel `{event_atom, %{"payload"=>,"ticket_id"=>}}`
-  (vérifié vs pseudo-code DN).
+  Contrat Bus canon `%Fleet.Event{type:, payload:, correlation_id:, pod_id:}`
+  (R2b — D1 schema unique, ex-tuple legacy retiré).
   """
   use ExUnit.Case, async: true
 
+  alias Fleet.Event
   alias Fleet.TaskMonitor
 
   @pfx "lcars-fleet-"
 
-  describe "map_event/2 — mapping pur (DN §Mapping)" do
+  # Helper : construit la struct canon `%Fleet.Event{}`. La source est
+  # ignorée par le consommateur (dashboard multi-source) — on garde une
+  # source plausible par event (cf. intersections cross-docs DN).
+  defp ev(type, opts \\ []) do
+    %Event{
+      source: Keyword.get(opts, :source, :spawner),
+      type: type,
+      timestamp: DateTime.utc_now(),
+      correlation_id: Keyword.get(opts, :ticket),
+      pod_id: Keyword.get(opts, :pod_id),
+      payload: Keyword.get(opts, :payload, %{})
+    }
+  end
+
+  describe "map_event/1 — mapping pur (DN §Mapping)" do
     test "dispatch_started → create in_progress, id+title canon" do
       assert {:create, id, %{"title" => t, "status" => "in_progress"} = task} =
-               TaskMonitor.map_event(:dispatch_started, %{
-                 "ticket_id" => "491",
-                 "payload" => %{"role" => "engineer", "brief" => "fleet_gk"}
-               })
+               TaskMonitor.map_event(
+                 ev(:dispatch_started,
+                   ticket: "491",
+                   payload: %{"role" => "engineer", "brief" => "fleet_gk"}
+                 )
+               )
 
       assert id == @pfx <> "dispatch-491"
       assert t == "⚙️ engineer #491: fleet_gk"
@@ -26,50 +43,52 @@ defmodule Fleet.TaskMonitorTest do
 
     test "dispatch_completed/failed → update status" do
       assert {:update, "lcars-fleet-dispatch-7", %{"status" => "completed"}} =
-               TaskMonitor.map_event(:dispatch_completed, %{"ticket_id" => "7"})
+               TaskMonitor.map_event(ev(:dispatch_completed, ticket: "7"))
 
       assert {:update, "lcars-fleet-dispatch-7", %{"status" => "failed"}} =
-               TaskMonitor.map_event(:dispatch_failed, %{"ticket_id" => "7"})
+               TaskMonitor.map_event(ev(:dispatch_failed, ticket: "7"))
     end
 
     test "gatekeeper spawned/terminated" do
       assert {:create, "lcars-fleet-gk-projX", %{"status" => "in_progress"}} =
-               TaskMonitor.map_event(:gatekeeper_spawned, %{
-                 "payload" => %{"slug" => "projX"}
-               })
+               TaskMonitor.map_event(
+                 ev(:gatekeeper_spawned, source: :starfleet, payload: %{"slug" => "projX"})
+               )
 
       assert {:update, "lcars-fleet-gk-projX", %{"status" => "completed"}} =
-               TaskMonitor.map_event(:gatekeeper_terminated, %{
-                 "payload" => %{"slug" => "projX"}
-               })
+               TaskMonitor.map_event(
+                 ev(:gatekeeper_terminated, source: :starfleet, payload: %{"slug" => "projX"})
+               )
     end
 
     test "pipeline_stage_transition → update title" do
       assert {:update, "lcars-fleet-dispatch-9", %{"title" => title}} =
-               TaskMonitor.map_event(:pipeline_stage_transition, %{
-                 "ticket_id" => "9",
-                 "payload" => %{"stage" => "code-review"}
-               })
+               TaskMonitor.map_event(
+                 ev(:pipeline_stage_transition,
+                   source: :pipeline,
+                   ticket: "9",
+                   payload: %{"stage" => "code-review"}
+                 )
+               )
 
       assert title =~ "code-review"
     end
 
     test "ticket_new_route_architect → create pending" do
       assert {:create, "lcars-fleet-ticket-42", %{"status" => "pending"} = task} =
-               TaskMonitor.map_event(:ticket_new_route_architect, %{
-                 "ticket_id" => "42",
-                 "payload" => %{"title" => "bug X"}
-               })
+               TaskMonitor.map_event(
+                 ev(:ticket_new_route_architect, ticket: "42", payload: %{"title" => "bug X"})
+               )
 
       assert task["title"] =~ "Ticket #42: bug X"
     end
 
     test "event inconnu → :ignore (défensif)" do
-      assert :ignore = TaskMonitor.map_event(:something_else, %{})
+      assert :ignore = TaskMonitor.map_event(ev(:something_else))
 
       # défensif : payload absent ne crash pas, défauts sains
       assert {:create, "lcars-fleet-dispatch-?", %{"status" => "in_progress"}} =
-               TaskMonitor.map_event(:dispatch_started, %{})
+               TaskMonitor.map_event(ev(:dispatch_started))
     end
   end
 
@@ -92,15 +111,14 @@ defmodule Fleet.TaskMonitorTest do
 
       send(
         pid,
-        {:dispatch_started,
-         %{"ticket_id" => "491", "payload" => %{"role" => "eng", "brief" => "b"}}}
+        ev(:dispatch_started, ticket: "491", payload: %{"role" => "eng", "brief" => "b"})
       )
 
       assert wait_file(f)
       assert %{"status" => "in_progress"} = f |> File.read!() |> Jason.decode!()
       refute File.exists?(f <> ".tmp"), "écriture non-atomique (tmp résiduel)"
 
-      send(pid, {:dispatch_completed, %{"ticket_id" => "491"}})
+      send(pid, ev(:dispatch_completed, ticket: "491"))
 
       assert wait_until(fn ->
                match?(
@@ -113,8 +131,9 @@ defmodule Fleet.TaskMonitorTest do
     @tag :tmp_dir
     test "event inconnu → no-op (pas de fichier parasite)", %{tmp_dir: dir} do
       {:ok, pid} = start_monitor(dir, :noop)
-      send(pid, {:totally_unknown, %{"payload" => %{}}})
-      Process.sleep(30)
+      send(pid, ev(:totally_unknown))
+      # Mi14 : :sys.get_state = barrière (l'event inconnu est traité avant, FIFO).
+      _ = :sys.get_state(pid)
       files = Path.wildcard(Path.join([dir, "fleet-monitor-v1", "*.json"]))
       # Seul le heartbeat doit exister.
       assert files == [Path.join([dir, "fleet-monitor-v1", "#{@pfx}heartbeat.json"])]

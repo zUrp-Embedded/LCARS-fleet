@@ -49,15 +49,25 @@ defmodule Fleet.Starfleet.BootOrchestrator do
         Fleet.Spawner.PermanentBoot.boot_permanent_pods()
       end)
 
+    # BL-028 : gate canon du boot des pods permanents (DN lcars-fleet_service §391,
+    # défaut true ; `LCARS_BOOT_PERMANENT_AT_START=false` désactive). Désactivé →
+    # on wire les consumers + émet boot_complete, mais 0 pod permanent spawné.
+    enabled? =
+      Keyword.get(opts, :boot_permanent_enabled, Fleet.Spawner.PermanentBoot.auto_boot_enabled?())
+
     started_apps =
       Application.started_applications()
       |> Enum.map(fn {a, _, _} -> a end)
       |> Enum.filter(&String.starts_with?(Atom.to_string(&1), "fleet_"))
       |> Enum.sort()
 
-    Logger.info("BootOrchestrator: démarrage sequence post-readiness")
+    Logger.info(
+      "BootOrchestrator: démarrage sequence post-readiness (boot_permanent=#{enabled?})"
+    )
 
-    case safe_boot(boot_fn) do
+    boot_result = if enabled?, do: safe_boot(boot_fn), else: {:ok, []}
+
+    case boot_result do
       {:ok, pods} ->
         emit_complete(started_apps, pods)
 
@@ -80,7 +90,9 @@ defmodule Fleet.Starfleet.BootOrchestrator do
           Enum.split_with(results, fn
             {:ok, _} -> true
             {:error, _} -> false
-            _ -> true
+            # finding Vulcan : un élément malformé (ni :ok ni :error) était compté OK
+            # (`_ -> true`) → faux fleet.boot_complete. Désormais classé en échec.
+            _ -> false
           end)
 
         case errs do
@@ -104,36 +116,47 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   defp emit_complete(apps, pods) do
     payload = %{
       "started_apps" => Enum.map(apps, &Atom.to_string/1),
-      "permanent_pods" => length(pods),
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+      "permanent_pods" => length(pods)
     }
 
     Logger.info("BootOrchestrator: fleet.boot_complete pods=#{length(pods)}")
-    Bus.broadcast("fleet.boot_complete", payload, [])
+    emit_canon(:"fleet.boot_complete", payload)
   end
 
   defp emit_partial(apps, pods, failed) do
     payload = %{
       "started_apps" => Enum.map(apps, &Atom.to_string/1),
       "permanent_pods" => length(pods),
-      "failed_pods" => Enum.map(failed, &inspect/1),
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+      "failed_pods" => Enum.map(failed, &inspect/1)
     }
 
     Logger.warning(
       "BootOrchestrator: fleet.boot_partial pods=#{length(pods)} failed=#{length(failed)}"
     )
 
-    Bus.broadcast("fleet.boot_partial", payload, [])
+    emit_canon(:"fleet.boot_partial", payload)
   end
 
   defp emit_failed(reason) do
-    payload = %{
-      "reason" => inspect(reason),
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+    payload = %{"reason" => inspect(reason)}
+    Logger.error("BootOrchestrator: fleet.boot_failed reason=#{inspect(reason)}")
+    emit_canon(:"fleet.boot_failed", payload)
+  end
+
+  # BL-021 chantier 9 (B) — broadcast schema canon %Fleet.Event{source: :starfleet}.
+  defp emit_canon(type, payload) do
+    event = %Fleet.Event{
+      source: :starfleet,
+      type: type,
+      timestamp: DateTime.utc_now(),
+      pod_id: nil,
+      correlation_id: nil,
+      payload: payload
     }
 
-    Logger.error("BootOrchestrator: fleet.boot_failed reason=#{inspect(reason)}")
-    Bus.broadcast("fleet.boot_failed", payload, [])
+    Bus.broadcast("fleet.events", event)
+  rescue
+    _e in Fleet.Event.UnregisteredError -> :ok
+    _e in [ArgumentError, FunctionClauseError] -> :ok
   end
 end

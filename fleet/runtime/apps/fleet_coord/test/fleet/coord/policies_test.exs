@@ -9,79 +9,85 @@ defmodule Fleet.Coord.PoliciesTest do
     :ok
   end
 
-  describe "handle_decision/1" do
-    test "halt + gatekeeper.refuse → notify_dashboard broadcast" do
+  describe "handle_decision/2" do
+    test "halt + gatekeeper.refuse → notify_dashboard canon broadcast" do
       decision = %{decision: "halt", reason: "gatekeeper.refuse", details: %{}, chain: []}
 
-      assert :ok = Policies.handle_decision(decision)
+      assert :ok = Policies.handle_decision(decision, nil)
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "coord.notify.dashboard",
-                        "payload" => %{
-                          "path" => ["dashboard", "ticket_comment"],
-                          "payload" => payload
-                        }
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :coord,
+                       type: :"coord.notification_routed",
+                       payload: %{
+                         "target" => "dashboard",
+                         "path" => ["dashboard", "ticket_comment"],
+                         "message" => message
+                       }
+                     },
                      500
 
-      assert payload[:decision] == "halt" or payload["decision"] == "halt"
+      assert message[:decision] == "halt" or message["decision"] == "halt"
     end
 
     test "decision sans match dans table → {:error, _}" do
       decision = %{decision: "allow", reason: "unknown", details: %{}, chain: []}
 
-      assert {:error, msg} = Policies.handle_decision(decision)
+      assert {:error, msg} = Policies.handle_decision(decision, nil)
       assert msg =~ "no policy match"
     end
   end
 
-  describe "handle_escalation/2" do
-    test "pod_drift → escalate_human broadcast" do
-      assert :ok = Policies.handle_escalation(:pod_drift, %{"pod_id" => "p1"})
+  describe "handle_escalation/3" do
+    test "pod_drift → escalate_human canon broadcast" do
+      assert :ok = Policies.handle_escalation(:pod_drift, %{"pod_id" => "p1"}, nil)
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "coord.escalate.human",
-                        "payload" => %{
-                          "path" => ["dashboard", "starfleet_alert"],
-                          "payload" => %{"pod_id" => "p1"}
-                        }
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :coord,
+                       type: :"coord.escalation_triggered",
+                       payload: %{
+                         "target" => "operator",
+                         "path" => ["dashboard", "starfleet_alert"],
+                         "message" => %{"pod_id" => "p1"}
+                       }
+                     },
                      500
     end
 
-    test "pipeline_failed → notify_dashboard broadcast" do
-      assert :ok = Policies.handle_escalation(:pipeline_failed, %{"pipeline_id" => "pl1"})
+    test "pipeline_failed → notify_dashboard canon broadcast" do
+      assert :ok = Policies.handle_escalation(:pipeline_failed, %{"pipeline_id" => "pl1"}, nil)
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "coord.notify.dashboard",
-                        "payload" => %{"payload" => %{"pipeline_id" => "pl1"}}
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :coord,
+                       type: :"coord.notification_routed",
+                       payload: %{"message" => %{"pipeline_id" => "pl1"}}
+                     },
                      500
     end
 
-    test "oauth_refresh_failed → escalate_human sysadmin_alert" do
-      assert :ok = Policies.handle_escalation(:oauth_refresh_failed, %{"account" => "u@x.com"})
+    test "oauth_refresh_failed → escalate_human starfleet_alert" do
+      assert :ok =
+               Policies.handle_escalation(:oauth_refresh_failed, %{"account" => "u@x.com"}, nil)
 
-      assert_receive {_atom,
-                      %{
-                        "event_type" => "coord.escalate.human",
-                        "payload" => %{"path" => ["sysadmin_alert"]}
-                      }},
+      assert_receive %Fleet.Event{
+                       source: :coord,
+                       type: :"coord.escalation_triggered",
+                       payload: %{"path" => ["starfleet_alert"]}
+                     },
                      500
     end
 
     test "source binaire (string) accepté" do
-      assert :ok = Policies.handle_escalation("pod_drift", %{"pod_id" => "p2"})
+      assert :ok = Policies.handle_escalation("pod_drift", %{"pod_id" => "p2"}, nil)
 
-      assert_receive {_atom, %{"event_type" => "coord.escalate.human"}},
+      assert_receive %Fleet.Event{
+                       source: :coord,
+                       type: :"coord.escalation_triggered"
+                     },
                      500
     end
 
     test "source inconnu → {:error, _}" do
-      assert {:error, msg} = Policies.handle_escalation(:totally_unknown, %{})
+      assert {:error, msg} = Policies.handle_escalation(:totally_unknown, %{}, nil)
       assert msg =~ "no escalation policy"
     end
   end

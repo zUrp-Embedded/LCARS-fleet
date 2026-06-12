@@ -1,54 +1,23 @@
 defmodule Fleet.Credentials.PlanValidatorTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Fleet.Credentials.PlanValidator
-  alias Fleet.Credentials.PlanValidator.StubBackend
 
-  setup do
-    prev = Application.get_env(:fleet_credentials, :plan_validator_backend)
-    Application.put_env(:fleet_credentials, :plan_validator_backend, StubBackend)
-
-    on_exit(fn ->
-      case prev do
-        nil -> Application.delete_env(:fleet_credentials, :plan_validator_backend)
-        v -> Application.put_env(:fleet_credentials, :plan_validator_backend, v)
-      end
-    end)
-
-    :ok
+  test "plans payants reconnus (source CC : max/pro/team/enterprise) → :ok" do
+    for plan <- ~w(max pro team enterprise) do
+      assert PlanValidator.validate(plan) == :ok, "#{plan} devrait être accepté"
+    end
   end
 
-  test "pro plan returns :ok" do
-    StubBackend.set_reply("tok-pro", {:ok, %{"subscription_type" => "pro"}})
-    assert :ok = PlanValidator.validate_plan("tok-pro")
-    StubBackend.clear()
+  test "insensible à la casse" do
+    assert PlanValidator.validate("Max") == :ok
+    assert PlanValidator.validate("PRO") == :ok
+    assert PlanValidator.validate("Enterprise") == :ok
   end
 
-  test "max plan returns :ok" do
-    StubBackend.set_reply("tok-max", {:ok, %{"subscription_type" => "max"}})
-    assert :ok = PlanValidator.validate_plan("tok-max")
-    StubBackend.clear()
-  end
-
-  test "free plan returns invalid_plan" do
-    StubBackend.set_reply("tok-free", {:ok, %{"subscription_type" => "free"}})
-
-    assert {:error, {:invalid_plan, "free"}} = PlanValidator.validate_plan("tok-free")
-    StubBackend.clear()
-  end
-
-  test "atom plan returned by SDK is stringified" do
-    StubBackend.set_reply("tok-atom", {:ok, %{"subscription_type" => :enterprise}})
-    assert {:error, {:invalid_plan, "enterprise"}} = PlanValidator.validate_plan("tok-atom")
-    StubBackend.clear()
-  end
-
-  test "SDK error returns account_info_failed" do
-    StubBackend.set_reply("tok-broken", {:error, :network_timeout})
-
-    assert {:error, {:account_info_failed, :network_timeout}} =
-             PlanValidator.validate_plan("tok-broken")
-
-    StubBackend.clear()
+  test "plan non-payant / inconnu → {:error, {:invalid_plan, type}} (type conservé)" do
+    assert PlanValidator.validate("free") == {:error, {:invalid_plan, "free"}}
+    assert PlanValidator.validate("") == {:error, {:invalid_plan, ""}}
+    assert PlanValidator.validate("bogus") == {:error, {:invalid_plan, "bogus"}}
   end
 end

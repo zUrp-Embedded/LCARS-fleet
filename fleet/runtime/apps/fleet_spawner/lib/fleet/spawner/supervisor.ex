@@ -1,11 +1,17 @@
 defmodule Fleet.Spawner.Supervisor do
   @moduledoc """
-  DynamicSupervisor top-level pour les pods.
+  DynamicSupervisor top-level pour les pods. Stratégie `:one_for_one`,
+  `max_restarts: 3, max_seconds: 60`.
 
-  Stratégie `:one_for_one` avec `max_restarts: 3, max_seconds: 60` :
-  3 crashes en 60s sur un même pod → supervisor stop ce pod (pattern
-  `:degraded` cohérent topologie-ring L235). Évite restart loop infini
-  sur fail catastrophique.
+  Les pods sont **tous `:temporary`** (DN-recovery option B, 2026-06-06, cf.
+  `Fleet.Spawner.restart_strategy_for/1`) : le supervisor ne **ressuscite
+  jamais** un pod. Un pod mort (sortie normale OU crash) est retiré, point.
+
+  Comme les enfants `:temporary` ne comptent **pas** dans l'intensité de restart,
+  `max_restarts` ne peut plus déclencher de **cascade fleet-wide** (ferme le 73ᵉ
+  d'audit) — il est de fait inerte tant que tous les enfants sont `:temporary`.
+  La résurrection est un acte **délibéré** du boot-orchestrator depuis le
+  desired-state (cap-profile), pas un restart OTP. Cf. `DN-recovery-2026-06-06`.
   """
 
   use DynamicSupervisor

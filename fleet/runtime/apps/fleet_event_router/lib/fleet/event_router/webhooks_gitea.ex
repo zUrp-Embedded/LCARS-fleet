@@ -43,10 +43,44 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     case verify_hmac(conn) do
       :ok ->
         body = conn.body_params || %{}
-        event_type = "gitea." <> (body["action"] || "push")
+        # M20 : ne pas défaulter aveuglément sur "push". Préférer l'action (routing
+        # events.yaml gitea.opened/closed), sinon l'event authoritatif (header X-Gitea-Event),
+        # sinon "unknown" — un event actionless non-push n'est plus mislabelé "push".
+        event_type = "gitea." <> (body["action"] || gitea_event_header(conn) || "unknown")
         ticket_id = extract_ticket(body)
 
-        Fleet.EventRouter.Bus.broadcast(event_type, body, ticket_id: ticket_id)
+        # BL-021 chantier 9 (B) — schema canon strict %Fleet.Event{source: :event_router}.
+        try do
+          type_atom = String.to_existing_atom(event_type)
+
+          payload = Map.put(body, "ticket_id", ticket_id)
+
+          event = %Fleet.Event{
+            source: :event_router,
+            type: type_atom,
+            timestamp: DateTime.utc_now(),
+            pod_id: nil,
+            correlation_id: nil,
+            payload: payload
+          }
+
+          _ = Fleet.EventRouter.Bus.broadcast("fleet.events", event)
+        rescue
+          ArgumentError ->
+            Logger.warning(
+              "fleet_event_router webhook gitea unknown event type #{inspect(event_type)} — skip"
+            )
+
+          # Z5 #9 : NE PLUS avaler en silence. Un type `gitea.*` dont l'atome existe mais
+          # qui n'est pas dans `events.yaml` = drift registry/producteur → drop muet (webhook
+          # 200 mais event jamais routé). On le rend VISIBLE (le registry doit lister toute
+          # action émise par WebhooksGitea ; cf. events.yaml section gitea).
+          _e in Fleet.Event.UnregisteredError ->
+            Logger.warning(
+              "fleet_event_router webhook gitea type #{inspect(event_type)} hors registry " <>
+                "events.yaml — DROP (ajouter la clé si l'action doit être routée)"
+            )
+        end
 
         send_resp(conn, 200, "ok")
 
@@ -108,6 +142,12 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     :crypto.mac(:hmac, :sha256, secret, body) |> Base.encode16(case: :lower)
   end
 
+  defp gitea_event_header(conn) do
+    conn |> get_req_header("x-gitea-event") |> List.first()
+  end
+
+  # M21 : extraire le ticket des issues ET des pull requests (pas seulement issue.id).
   defp extract_ticket(%{"issue" => %{"id" => id}}), do: "fleet/lcars##{id}"
+  defp extract_ticket(%{"pull_request" => %{"id" => id}}), do: "fleet/lcars##{id}"
   defp extract_ticket(_), do: nil
 end

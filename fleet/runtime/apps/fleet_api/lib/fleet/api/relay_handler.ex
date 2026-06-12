@@ -1,4 +1,4 @@
-defmodule Fleet.Api.RelayHandler do
+defmodule Fleet.API.RelayHandler do
   @moduledoc """
   GenServer subscribe `Fleet.EventRouter.Bus` topic `fleet.events`,
   collecte décision user via `respond/2` puis broadcast réponse
@@ -19,7 +19,7 @@ defmodule Fleet.Api.RelayHandler do
   3. WS dashboard push notification au client
   4. User décide via dashboard, POST `/api/relay/<ref>` avec
      `decision: "allow" | "deny"`
-  5. Rest endpoint appelle `Fleet.Api.RelayHandler.respond/2`
+  5. Rest endpoint appelle `Fleet.API.RelayHandler.respond/2`
   6. RelayHandler broadcast `permission_relay_response` sur sous-topic
      `fleet.events.relay.<ref>` puis delete ETS entry
 
@@ -71,17 +71,20 @@ defmodule Fleet.Api.RelayHandler do
     {:ok, nil}
   end
 
+  # R2b (D1 schema unique) — consommation canon `%Fleet.Event{}` strict.
+  # Le tuple legacy `{atom, %{"event_type" => ...}}` est RETIRÉ. Match sur
+  # `type` (ignore `source` : event vestigial pré-canon, cf. moduledoc).
   @impl GenServer
   def handle_info(
-        {_atom,
-         %{"event_type" => "permission_relay_request", "payload" => %{"ref" => ref} = payload}},
+        %Fleet.Event{type: :permission_relay_request, payload: %{"ref" => ref} = payload},
         state
       ) do
     :ets.insert(@ets_table, {ref, payload})
     {:noreply, state}
   end
 
-  def handle_info({_atom, %{"event_type" => _other}}, state), do: {:noreply, state}
+  # Tout autre %Fleet.Event{} (autres types) ou message non-event = ignoré.
+  def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_msg, state), do: {:noreply, state}
 
   defp lookup_pending(ref) do

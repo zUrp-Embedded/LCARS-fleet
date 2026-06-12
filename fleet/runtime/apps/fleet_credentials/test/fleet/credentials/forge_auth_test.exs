@@ -1,0 +1,62 @@
+defmodule Fleet.Credentials.ForgeAuthTest do
+  # async: false — mute `:fleet_credentials, :forge_auth` (env applicatif global).
+  use ExUnit.Case, async: false
+
+  alias Fleet.Credentials.ForgeAuth
+
+  setup do
+    prev = Application.get_env(:fleet_credentials, :forge_auth)
+    on_exit(fn -> restore(:forge_auth, prev) end)
+    :ok
+  end
+
+  defp restore(key, nil), do: Application.delete_env(:fleet_credentials, key)
+  defp restore(key, val), do: Application.put_env(:fleet_credentials, key, val)
+
+  describe "git_env/0" do
+    test "non configuré → [] (comportement bare inchangé)" do
+      Application.delete_env(:fleet_credentials, :forge_auth)
+      assert [] = ForgeAuth.git_env()
+    end
+
+    test "config incomplète (token vide / prefix manquant) → []" do
+      Application.put_env(:fleet_credentials, :forge_auth, %{url_prefix: "https://f/", token: ""})
+      assert [] = ForgeAuth.git_env()
+
+      Application.put_env(:fleet_credentials, :forge_auth, %{token: "t"})
+      assert [] = ForgeAuth.git_env()
+    end
+
+    test "configuré → GIT_CONFIG_* (token DANS l'env, jamais sur l'argv — F087)" do
+      Application.put_env(:fleet_credentials, :forge_auth, %{
+        url_prefix: "https://forge.example/",
+        token: "SECRET123"
+      })
+
+      assert [
+               {"GIT_CONFIG_COUNT", "1"},
+               {"GIT_CONFIG_KEY_0", "http.https://forge.example/.extraheader"},
+               {"GIT_CONFIG_VALUE_0", "Authorization: token SECRET123"}
+             ] = ForgeAuth.git_env()
+    end
+  end
+
+  describe "preuve locale : git honore git_env (mécanisme F087, sans forge)" do
+    test "git config --get lit l'extraheader depuis l'env, pas l'argv" do
+      Application.put_env(:fleet_credentials, :forge_auth, %{
+        url_prefix: "https://forge.example/",
+        token: "SECRET123"
+      })
+
+      # `git config --get` ne reçoit AUCUN -c sur l'argv ; s'il rend le header, c'est qu'il l'a lu
+      # depuis GIT_CONFIG_* (env). C'est exactement le canal qu'utilisent clone/fetch/ls-remote/push.
+      {out, 0} =
+        System.cmd("git", ["config", "--get", "http.https://forge.example/.extraheader"],
+          env: ForgeAuth.git_env(),
+          stderr_to_stdout: true
+        )
+
+      assert String.trim(out) == "Authorization: token SECRET123"
+    end
+  end
+end

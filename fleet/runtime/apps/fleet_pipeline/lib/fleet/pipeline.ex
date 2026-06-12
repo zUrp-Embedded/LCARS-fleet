@@ -13,9 +13,9 @@ defmodule Fleet.Pipeline do
     * `Fleet.Pipeline.Toposort` — DAG sort (Kahn)
     * `Fleet.Pipeline.Executor` — GenServer per-run
     * `Fleet.Pipeline.Gates` — dispatch hard/soft/terminal
-    * `Fleet.Pipeline.StageRunner` — spawn pod via SpawnerBackend
+    * `Fleet.Pipeline.StageRunner` — spawn pod via StageSpawner
     * `Fleet.Pipeline.Gate` — behaviour 1 callback `evaluate/3`
-    * `Fleet.Pipeline.SpawnerBackend` / `CoordBackend` — seams ch6/ch14
+    * `Fleet.Pipeline.StageSpawner` — seam spawn ch6 (stages + gatekeeper)
 
   ## Public API
 
@@ -42,28 +42,60 @@ defmodule Fleet.Pipeline do
 
     * `{:ok, pipeline_id}` — Executor démarré, monitorable via Registry
     * `{:error, reason}` — schema invalide / introuvable / déjà démarré
+    * `{:error, :quiescing}` — drain de shutdown en cours, nouveau travail
+      top-level refusé (`Fleet.Shutdown.Quiesce`)
   """
   @spec start_pipeline(String.t(), map(), keyword()) ::
           {:ok, pipeline_id :: String.t()} | {:error, term()}
   def start_pipeline(pipeline_name, mandate_context, opts \\ [])
       when is_binary(pipeline_name) and is_map(mandate_context) do
-    pipeline_id = Keyword.get(opts, :pipeline_id, generate_pipeline_id())
-
-    spec =
-      {Executor,
-       [
-         pipeline_id: pipeline_id,
-         pipeline_name: pipeline_name,
-         mandate_context: mandate_context
-       ]}
-
-    case DynamicSupervisor.start_child(Fleet.Pipeline.ExecutorSupervisor, spec) do
-      {:ok, _pid} -> {:ok, pipeline_id}
-      {:ok, _pid, _info} -> {:ok, pipeline_id}
-      {:error, {:already_started, _pid}} -> {:error, :already_started}
-      {:error, reason} -> {:error, reason}
+    # Chokepoint « nouveau pipeline top-level » : pendant un drain de shutdown,
+    # on refuse d'admettre du travail neuf (le travail interne d'un pipeline en
+    # vol ne passe PAS par ici, il peut donc se terminer).
+    if Fleet.Shutdown.Quiesce.quiescing?() do
+      {:error, :quiescing}
+    else
+      do_start_pipeline(pipeline_name, mandate_context, opts)
     end
   end
+
+  defp do_start_pipeline(pipeline_name, mandate_context, opts) do
+    # Mi3 : un pipeline DOIT porter un ticket_id (traçabilité) — plus de pipeline anonyme.
+    case mandate_context[:ticket_id] do
+      ticket_id when is_binary(ticket_id) and ticket_id != "" ->
+        # Type 3 — le gatekeeper permanent (juge) boote à l'activation pipeline
+        # (idempotent, work-session). No-op si déjà up / autoboot off (tests).
+        _ = Fleet.Pipeline.Gatekeeper.ensure_booted()
+
+        pipeline_id = Keyword.get(opts, :pipeline_id, generate_pipeline_id())
+
+        spec =
+          {Executor,
+           [
+             pipeline_id: pipeline_id,
+             pipeline_name: pipeline_name,
+             mandate_context: mandate_context
+           ]}
+
+        case DynamicSupervisor.start_child(Fleet.Pipeline.ExecutorSupervisor, spec) do
+          {:ok, _pid} -> {:ok, pipeline_id}
+          {:ok, _pid, _info} -> {:ok, pipeline_id}
+          {:error, {:already_started, _pid}} -> {:error, :already_started}
+          {:error, reason} -> {:error, reason}
+        end
+
+      _ ->
+        {:error, :ticket_id_required}
+    end
+  end
+
+  @doc """
+  Nombre de pipelines en cours d'exécution (Executors vivants enregistrés
+  dans `Fleet.Pipeline.Registry`). Consommé par l'agrégateur d'in-flight du
+  drain de shutdown (`Fleet.Starfleet.Shutdown`).
+  """
+  @spec count_running() :: non_neg_integer()
+  def count_running, do: Registry.count(Fleet.Pipeline.Registry)
 
   defp generate_pipeline_id do
     16
