@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-12
+**Dernière révision** : 2026-06-13
 **Statut** : guide runtime v2 (salvage cow-boy).
 **Référencé par** : —
 
@@ -37,7 +37,7 @@ Deploy procedure (systemd unit, env file, readiness probe paths) is in `etc/READ
 Apps are grouped into **rings** (substrate layering, declared in each README under "Frontière vendor"):
 - **Ring 0** — OS substrate: `lcars-fleet.service` (chantier 16, lives in `etc/` + `bin/`, not an app)
 - **Ring 1** — pod primitives + vendor frontier: `fleet_spawner`, `fleet_credentials`, `fleet_cap_profile`, `fleet_sp_builder`, `fleet_project_bootstrap`, plus `bin/bwrap_launch.sh` + `bin/claude_launch.sh`. (`fleet_pod_runtime` retiré 2026-06-10 — app morte post-ADR-G, PODRT-D1.) (La frontière vendor N1 = ces scripts `bin/` ; il n'y a **pas** d'app `fleet_claude_bridge` — retirée au pivot ADR-G. Noms corrigés 2026-06-02 : `fleet_cap_profile`/`fleet_sp_builder`, pas `fleet_capprofile`/`fleet_spbuilder`.)
-- **Ring 2** — orchestration backbone: `fleet_event_router` (Phoenix.PubSub bus `Fleet.PubSub` on topic `fleet.events`), `fleet_task_queue` (broker de mandats — `get_task`/`submit_result`, run #5), `fleet_task_monitor`, `fleet_pilot` (dispatcher webhook→pipeline, off par défaut). (`fleet_ipc_filter` retiré : jamais implémenté.)
+- **Ring 2** — orchestration backbone: `fleet_event_router` (Phoenix.PubSub bus `Fleet.PubSub` on topic `fleet.events`), `fleet_task_queue` (broker de mandats — `get_task`/`submit_result`, run #5), `fleet_task_monitor`, `fleet_pilot` (dispatcher webhook→pipeline, off par défaut — **client du core**, dépend compile-time du Ring 3 `fleet_pipeline` ; pas backbone pur, cf. son README « client du core ring 1, pas core »). (`fleet_ipc_filter` retiré : jamais implémenté.)
 - **Ring 3** — coordination + policy: `fleet_coord`, `fleet_pipeline`, `fleet_starfleet` (Cat-5 audit), `fleet_mcp`
 - **Ring 4** — external surface: `fleet_api` (REST `:8080` + WS `/ws`, HMAC `X-Auth-Token` against `/etc/fleet/api-secret`)
 
