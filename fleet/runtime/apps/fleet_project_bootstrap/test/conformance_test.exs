@@ -5,18 +5,18 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
   l'agent dans le pod ne voit AUCUNE trace de la mécanique LCARS hors
   workspace vanilla + plugins mount-bindés.
 
-  `async: false` : ressource globale partagée `System.tmp_dir!/0` (`/tmp/pod-*`, cf. ci-dessous).
-  Hermétique : coffre fixtures + repo git sous `tmp_dir` ; pods `/tmp/pod-*`
-  nettoyés `on_exit` (Allocate écrit dans `System.tmp_dir!/0`, n'honore pas
-  de base custom — comportement DN, le test nettoie).
+  `async: false` : la **base pod** est la ressource globale partagée
+  `System.tmp_dir!/0` (`/tmp/pod-*`), pas un répertoire par-test isolé. Chaque test
+  reçoit quand même un `ctx.tmp_dir` ExUnit (`@tag :tmp_dir`) pour son repo
+  git/fixtures, mais la base pod est **injectée explicitement**
+  (`:pod_dir_base = System.tmp_dir!/0`) : PB-D2 a retiré le défaut `/tmp` silencieux
+  d'Allocate — la base est désormais requise ET honorée. On prend `System.tmp_dir!/0`
+  plutôt que `ctx.tmp_dir` parce que le nom du tmp_dir ExUnit contient des
+  parenthèses (issues du nom de test) qui cassent l'expression `find` du test 1.
 
-  ## Divergence tracée — DV-CREDS (escaladée architect type:request)
-  DN ring1 type `bootstrap_result.credentials_paths :: [Path.t()]` /
-  Phase4 `{:ok, [Path.t()]}` MAIS le contrat chantier-3 promu
-  `Fleet.Credentials.resolve_env/2` renvoie `{:ok, %{String=>String}}`
-  (env OAuth, pas paths). Inconsistance cross-DN. Implémentation = vérité
-  du contrat délégué (env map), champ `credentials_env`. Test 5 valide la
-  réalité d'implémentation. Arbitrage forme finale = architect.
+  Crédentiels (ADR-F) : plus de coffre. La Phase 4 (`BindCredentials`) bind le
+  `claudeDir` et renvoie `{:ok, %{}}` — aucun env OAuth injecté
+  (`credentials_env == %{}`, test 5).
   """
   use ExUnit.Case, async: false
 

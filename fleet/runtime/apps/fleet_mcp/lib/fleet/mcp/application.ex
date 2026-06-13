@@ -5,8 +5,8 @@ defmodule Fleet.MCP.Application do
   DN : `ring4/fleet_mcp.md`.
 
   Au boot (post-PoC ExMCP validé) — délégué à `Fleet.MCP.Supervisor` :
-    - `Fleet.MCP.Server` (GenServer : registry + lifecycle bas-débit sérialisés
-      — PAS un goulot)
+    - `Fleet.MCP.Server` (garde de boot ADR-C : refuse `start_link` côté pod ;
+      ex-registre de channels retiré F049, husk mort chantier 7)
     - `Fleet.MCP.PodTools` (HTTP transport pour `get_task`/`submit_result`,
       démarré SSI `:pod_facing_port` configuré)
 

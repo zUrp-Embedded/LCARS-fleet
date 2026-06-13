@@ -5,8 +5,9 @@ defmodule Fleet.MCP.PoCExMCPNativeTest do
 
   Critère décisif DN : round-trip MCP fonctionnel + latence < 100 ms via
   transport native BEAM. Valide le choix ExMCP (azmaveth) AVANT impl complète
-  `apps/fleet_mcp/`. Si KO → bascule Hermes (interface `Fleet.MCP.Server`
-  opaque inchangée).
+  `apps/fleet_mcp/`. Si KO → bascule Hermes (le wrap SDK vit dans
+  `Fleet.MCP.PodTools` `use ExMCP.Server`, tools `get_task`/`submit_result`
+  inchangés ; F049 — `Fleet.MCP.Server` n'est plus qu'une garde de boot).
 
   Pattern canonique natif (deps/ex_mcp/lib/ex_mcp/service.ex §Usage) :
   `use ExMCP.Service, name: <atom>` — auto-register `ExMCP.Native` en init/1,

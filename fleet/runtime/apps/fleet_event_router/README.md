@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-12 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-06-13 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -22,8 +22,10 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
 - `Fleet.EventRouter.SignalsOS` — `:os.set_signal/2` SIGUSR1/SIGTERM/SIGHUP
   → broadcast `os.signal.<sig>`
 - `Fleet.EventRouter.Catalog` — charge le **registry** `priv/events.yaml` au boot
-  (`load!/0` → `authorized_event_types`). Consommation = subscribers directs PubSub
-  (BL-027 ; ex-`Dispatch` retiré, cf. § Catalogue)
+  (`load!/0` → `authorized_event_types`). Source unique du parse exposée :
+  `event_type_strings/0` (clés-types, réutilisée par `Application.preregister_event_atoms/0`,
+  dedup F035) + `events_yaml_path/0` (résolution du path). Consommation = subscribers
+  directs PubSub (BL-027 ; ex-`Dispatch` retiré, cf. § Catalogue)
 - `Fleet.Shutdown.Quiesce` — primitive partagée du drain de shutdown (flag
   `:persistent_term` `quiescing?/refuse!/resume!`). Vit ici car substrat
   universel (comme `Fleet.Event`) : lisible par `fleet_pipeline`/`fleet_api`

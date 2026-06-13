@@ -38,13 +38,9 @@ defmodule Fleet.EventRouter.Application do
   # côté `Fleet.EventRouter.Bus.broadcast/3` (mitigation atom leak DoS — M1
   # reviewer ch11).
   defp preregister_event_atoms do
-    yaml_path = Fleet.EventRouter.Catalog.events_yaml_path()
-
-    yaml_events =
-      case File.exists?(yaml_path) && YamlElixir.read_from_file(yaml_path) do
-        {:ok, %{"events" => events}} when is_map(events) -> Map.keys(events)
-        _ -> []
-      end
+    # F035 : parse events.yaml via la source unique `Catalog.event_type_strings/0`
+    # (plus de localisation + parse inline dupliqués avec `Catalog.do_load/0`).
+    yaml_events = Fleet.EventRouter.Catalog.event_type_strings()
 
     signal_events = ~w(os.signal.sigusr1 os.signal.sigterm os.signal.sighup)
     fallback_events = ~w(unknown_event)

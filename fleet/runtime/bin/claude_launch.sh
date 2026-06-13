@@ -162,7 +162,7 @@ JSONEOF
 dbg "step claude.json provisionné (VER=${VER:-?}, RC keys posées)"
 
 # =============================================================
-# Tools depuis cap-profile JSON resolved (string-keyed, cohérent fleet_capprofile L100).
+# Tools depuis cap-profile JSON resolved (string-keyed, cohérent fleet_cap_profile L100).
 # =============================================================
 
 ALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.allowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq allowedTools fail rc=$? out=$ALLOWED_TOOLS"; exit 1; }

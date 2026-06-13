@@ -1,7 +1,7 @@
 # fleet_mcp
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-12
+**Dernière révision** : 2026-06-13
 **Statut** : implémenté — serveur MCP pod-facing (`get_task` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
@@ -13,10 +13,10 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 - `Fleet.MCP.PodTools` — outils MCP **pod-facing** : `get_task` (le pod tire son
   mandat depuis la TaskQueue) et `submit_result` (le pod rend son livrable).
   `handle_tool_call/3` = fonctions pures, réutilisables hors transport.
-- `Fleet.MCP.Server` — wrap opaque du SDK `ex_mcp` (registre de channels opaque
-  `register_channel/2` + `list_channels/0`, gardé pour extensibilité future).
-- `Fleet.MCP.ServerBehaviour` — contrat (4 fonctions) pour tests/mocks + bascule
-  SDK ultérieure (ExMCP → Hermes) sans casser les apps consommatrices.
+- `Fleet.MCP.Server` — **garde de boot ADR-C** : `start_link/1` refuse
+  (`{:error, :forbidden_in_pod}`) si `boot_environment == :pod` → `fleet_mcp` ne boote
+  jamais côté pod (D7-bis). L'ancienne API husk `register_channel`/`list_channels`
+  (push channel) + le `ServerBehaviour` sont **retirés** (F049 — morts chantier 7, 0 appelant prod).
 - `Fleet.MCP.Supervisor` / `Fleet.MCP.Application` — supervision de l'app.
 
 ## Outils MCP (pod-facing)
@@ -31,5 +31,6 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 
 ## Frontière vendor
 
-`mcp_*` = N1 (ADR-C) : le SDK `ex_mcp` est wrappé derrière `Fleet.MCP.Server` ;
-bascule vers un autre SDK (Hermes) possible sans toucher les consommateurs.
+`mcp_*` = N1 (ADR-C) : le SDK `ex_mcp` est wrappé derrière `Fleet.MCP.PodTools`
+(`use ExMCP.Server`, tools `get_task`/`submit_result`) ; bascule vers un autre SDK
+(Hermes) possible sans toucher les consommateurs.

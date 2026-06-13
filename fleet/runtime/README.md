@@ -1,7 +1,7 @@
 # LCARS Fleet Runtime
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-12
+**Dernière révision** : 2026-06-13
 **Statut** : runtime v2 consolidé sur `main` (cf. tag `remise-au-propre-2026-06-12`)
 **Référencé par** : 04_design-notes/
 
@@ -10,7 +10,7 @@ PROMOTED du run #3.1.
 
 ## Layout
 
-- `apps/fleet_*/` : applications par bloc (cf. STATUS.md du run #3.1)
+- `apps/fleet_*/` : 15 applications OTP (une par bloc) — inventaire + rings dans `CLAUDE.md` §Architecture
 - `config/` : configuration mix umbrella
 - Branche : `main` (code) ; doctrine sur `work/ops`
 

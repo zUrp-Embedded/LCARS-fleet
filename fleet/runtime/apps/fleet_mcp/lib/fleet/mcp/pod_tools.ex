@@ -50,19 +50,22 @@ defmodule Fleet.MCP.PodTools do
 
   @impl true
   def handle_tool_call("get_task", arguments, state) do
-    result =
-      case pod_id(arguments) do
-        nil ->
-          %{"done" => true}
+    case pod_id(arguments) do
+      nil ->
+        # F045 : pod_id absent = erreur de config (LCARS_POD_ID perdu), PAS une fin de mandat.
+        # Symétrique avec submit_result. Ne jamais masquer en {"done": true} — sinon le pod
+        # s'arrête en croyant avoir tout fini alors qu'il n'a jamais pu s'identifier.
+        {:error, :pod_id_required, state}
 
-        pid ->
+      pid ->
+        result =
           case TaskQueue.get_for_pod(pid) do
             {:ok, task} -> %{"done" => false, "task" => envelope(task)}
             {:error, :no_task} -> %{"done" => true}
           end
-      end
 
-    {:ok, %{content: [json(result)]}, state}
+        {:ok, %{content: [json(result)]}, state}
+    end
   end
 
   def handle_tool_call("submit_result", %{"payload" => payload} = args, state)

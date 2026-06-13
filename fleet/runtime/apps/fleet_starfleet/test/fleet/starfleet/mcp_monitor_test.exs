@@ -1,14 +1,16 @@
 defmodule Fleet.Starfleet.MCPMonitorTest do
   @moduledoc """
-  Tests MCPMonitor (health check Process.whereis(Fleet.MCP.Server)).
+  Tests MCPMonitor (health check liveness ; défaut = drive supervisé
+  `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodTools}`, cf. F049).
 
   BL-021 chantier 8 — DN 13 Extensions V2. Le timer Process.send_after
   n'est pas observé directement (interval >> durée test). On exerce
   `handle_call(:check_now, ...)` qui rejoue le code path complet du timer.
 
   Cible : module name configurable (`:target` opt) — les tests utilisent
-  des cibles factices (un GenServer mock qu'on tue à la demande) pour
-  éviter de dépendre de Fleet.MCP.Server qui n'est pas démarré en test.
+  des cibles factices (cible atome `Process.whereis` OU cible `{:supervised, sup,
+  child_id}` avec un superviseur de test) pour éviter de dépendre du drive réel
+  `Fleet.MCP.PodTools` qui n'est pas démarré en test.
   """
 
   use ExUnit.Case, async: false
@@ -137,6 +139,72 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
       assert %DateTime{} = state.last_check
       assert DateTime.compare(state.last_check, before) in [:eq, :gt]
       GenServer.stop(monitor_pid)
+    end
+  end
+
+  describe "cible supervisée {:supervised, sup, child_id} (F049)" do
+    test "enfant vivant → :ok ; terminé (reste mort) → :ok → :crashed broadcast" do
+      child_id = :fake_drive
+      child = %{id: child_id, start: {Agent, :start_link, [fn -> :ok end]}, restart: :temporary}
+      {:ok, sup} = Supervisor.start_link([child], strategy: :one_for_one)
+
+      {:ok, mon} =
+        MCPMonitor.start_link(
+          name: :mcp_monitor_sup_ok,
+          target: {:supervised, sup, child_id},
+          interval_ms: 60_000
+        )
+
+      # enfant vivant → :ok (transition unknown → :ok, pas de broadcast)
+      assert {:ok, :ok} = GenServer.call(mon, :check_now)
+      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+
+      # termine l'enfant `:temporary` → il DISPARAÎT de which_children (`[]`, vérifié ;
+      # un enfant :permanent/:transient terminé resterait en `:undefined`). Les deux cas
+      # tombent dans la branche `_ -> :crashed` (keyfind → nil OU pid non-vivant).
+      :ok = Supervisor.terminate_child(sup, child_id)
+      assert {:ok, :crashed} = GenServer.call(mon, :check_now)
+
+      assert_receive %Fleet.Event{
+                       source: :starfleet,
+                       type: :mcp_server_crashed,
+                       payload: %{"new_status" => "crashed", "previous_status" => "ok"}
+                     },
+                     500
+
+      GenServer.stop(mon)
+      Supervisor.stop(sup)
+    end
+
+    test "superviseur sans cet enfant → :crashed sans broadcast (unknown → crashed)" do
+      {:ok, sup} = Supervisor.start_link([], strategy: :one_for_one)
+
+      {:ok, mon} =
+        MCPMonitor.start_link(
+          name: :mcp_monitor_sup_absent,
+          target: {:supervised, sup, :inexistant},
+          interval_ms: 60_000
+        )
+
+      assert {:ok, :crashed} = GenServer.call(mon, :check_now)
+      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+
+      GenServer.stop(mon)
+      Supervisor.stop(sup)
+    end
+
+    test "superviseur non démarré → :crashed (rescue, pas de crash du moniteur)" do
+      {:ok, mon} =
+        MCPMonitor.start_link(
+          name: :mcp_monitor_sup_nosup,
+          target: {:supervised, :superviseur_inexistant, :child},
+          interval_ms: 60_000
+        )
+
+      assert {:ok, :crashed} = GenServer.call(mon, :check_now)
+      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+
+      GenServer.stop(mon)
     end
   end
 end

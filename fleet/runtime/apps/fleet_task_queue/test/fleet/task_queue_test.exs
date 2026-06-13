@@ -296,4 +296,41 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, _} = TaskQueue.submit_result(q, "pod-A", %{"task_id" => t.id, "verdict" => "ok"})
     assert_receive %Fleet.Event{type: :task_completed}
   end
+
+  test "12. F148 — rétention borne les tâches terminales (actives intactes + double-submit du plus récent)",
+       %{topic: topic, tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "retention.json")
+
+    {:ok, q} =
+      start_supervised(
+        {Server, name: nil, topic: topic, state_path: path, retention_terminal_max: 3},
+        id: :qret
+      )
+
+    # 5 pods menés à complétion (terminal :completed) ; cap = 3.
+    for i <- 1..5 do
+      pod = "pod-#{i}"
+      {:ok, _} = TaskQueue.enqueue(q, pod, %{brief: "b#{i}"})
+      {:ok, _} = TaskQueue.get_for_pod(q, pod)
+      {:ok, _} = TaskQueue.submit_result(q, pod, %{"verdict" => "ok"})
+    end
+
+    # + un mandat ACTIF : ne doit JAMAIS être élagué.
+    {:ok, _} = TaskQueue.enqueue(q, "pod-active", %{brief: "en cours"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-active")
+
+    tasks = :sys.get_state(q).tasks |> Map.values()
+    terminal = Enum.filter(tasks, &(&1.state == :completed))
+    active = Enum.filter(tasks, &(&1.state in [:pending, :assigned, :in_progress]))
+
+    # Borne dure : 5 complétées → au plus 3 conservées (2 élaguées).
+    assert length(terminal) == 3
+    # L'active survit toujours (jamais comptée ni coupée).
+    assert [%{pod_id: "pod-active", state: :assigned}] = active
+
+    # Le plus récent complété (pod-5) survit → double-submit TOUJOURS détecté, pas dégradé
+    # en :no_active_task par une rétention qui couperait la mauvaise tâche (récence, pas FIFO).
+    assert {:error, :double_submit_ignored} =
+             TaskQueue.submit_result(q, "pod-5", %{"verdict" => "retry"})
+  end
 end

@@ -1,72 +1,35 @@
 defmodule Fleet.MCP.Server do
   @moduledoc """
-  Serveur MCP LCARS — wrapper opaque SDK ExMCP (DN ring4/fleet_mcp.md
-  §"Contrat technique" + §"Test récursif D7-bis").
+  Garde de boot ADR-C de `fleet_mcp` (DN ring4/fleet_mcp.md §"Test récursif D7-bis").
 
-  **GenServer justifié** (Iron Law) : état mutable persistant = registre
-  bas-débit (names → opts) + lifecycle ; supervisé par `Fleet.MCP.Supervisor`.
-  Ce process porte UNIQUEMENT registration/lifecycle (bas débit), pas de
-  hot path broadcast.
+  **Conformance ADR-C OBLIGATOIRE CI** (DN D7-bis ligne 338) : `fleet_mcp` ne doit
+  JAMAIS démarrer côté pod (substrat système-side hors-bwrap). Ce process, supervisé
+  par `Fleet.MCP.Supervisor`, porte la garde : `start_link/1` lit `:boot_environment`
+  (priorité opts > app env > défaut `:host`) et refuse (`{:error, :forbidden_in_pod}`)
+  si `:pod` → l'enfant échoue → le superviseur échoue → l'app ne boote pas dans un pod.
 
-  BL-021 chantier 7 — purge ADR-G C5.1 : `Fleet.MCP.Channel` behaviour et ses
-  façades (`FleetControl`/`FleetForge`) retirées. L'API `register_channel/2` +
-  `list_channels/0` reste comme registre opaque (noms + opts arbitraires,
-  pas de behaviour côté Server) — utilisée par tests + extensibilité future.
+  ## Pourquoi ce process existe (et n'est PAS supprimé) — F049
 
-  **Conformance ADR-C OBLIGATOIRE CI** (DN D7-bis ligne 338) : ce serveur
-  ne doit JAMAIS démarrer côté pod (substrat système-side hors-bwrap). La
-  garde lit `:boot_environment` — priorité opts > app env > défaut `:host`
-  (défaut sûr ; signal pod exact non spécifié au canon → config-driven non-
-  inférentiel, tracé run-journal #MCP1). `:pod` → refus `start_link`.
+  L'audit l'avait classé « husk » sur son ancienne API `register_channel`/`list_channels`
+  (registre de channels push). Cette API est **retirée** ici (0 appelant prod ; le push
+  channel est mort — PoC Channel KO chantier 7, ADR-G C5.1). MAIS la garde de containment
+  ci-dessus est **load-bearing** (testée par la conformance ADR-C) : on retire le husk, on
+  GARDE la garde. Le drive pod-facing (`get_task`/`submit_result`) vit dans
+  `Fleet.MCP.PodTools`, pas ici.
+
+  **GenServer** (Iron Law) : aucun état métier ; le process existe pour être l'enfant
+  supervisé dont le `start_link` exécute la garde au boot (idle ensuite).
   """
 
-  @behaviour Fleet.MCP.ServerBehaviour
   use GenServer
 
   @name __MODULE__
 
-  # --- API publique opaque (4 fonctions, ServerBehaviour) ---
-
-  @impl Fleet.MCP.ServerBehaviour
   @spec start_link(keyword()) :: GenServer.on_start() | {:error, :forbidden_in_pod}
   def start_link(opts \\ []) do
     case boot_environment(opts) do
       :pod -> {:error, :forbidden_in_pod}
       _host -> GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, @name))
-    end
-  end
-
-  @impl Fleet.MCP.ServerBehaviour
-  @spec register_channel(String.t(), keyword()) :: :ok | {:error, term()}
-  def register_channel(name, opts \\ []) when is_binary(name) do
-    register_channel(@name, name, opts)
-  end
-
-  @doc "Variante test-seam : cible un serveur explicite (nom/pid)."
-  @spec register_channel(GenServer.server(), String.t(), keyword()) :: :ok | {:error, term()}
-  def register_channel(server, name, opts) when is_binary(name) do
-    GenServer.call(server, {:register_channel, name, opts})
-  end
-
-  @impl Fleet.MCP.ServerBehaviour
-  @spec list_channels() :: [String.t()]
-  def list_channels, do: list_channels(@name)
-
-  @doc "Variante test-seam : cible un serveur explicite (nom/pid)."
-  @spec list_channels(GenServer.server()) :: [String.t()]
-  def list_channels(server), do: GenServer.call(server, :list_channels)
-
-  @impl Fleet.MCP.ServerBehaviour
-  @spec stop() :: :ok
-  def stop, do: stop(@name)
-
-  @doc "Variante test-seam : arrête un serveur explicite (nom/pid)."
-  @spec stop(GenServer.server()) :: :ok
-  def stop(server) do
-    cond do
-      is_pid(server) and Process.alive?(server) -> GenServer.stop(server, :normal)
-      is_atom(server) and Process.whereis(server) -> GenServer.stop(server, :normal)
-      true -> :ok
     end
   end
 
@@ -81,20 +44,6 @@ defmodule Fleet.MCP.Server do
       Application.get_env(:fleet_mcp, :boot_environment, :host)
   end
 
-  # --- GenServer (registration/lifecycle uniquement) ---
-
   @impl GenServer
-  def init(opts) do
-    {:ok, %{channels: %{}, opts: opts}}
-  end
-
-  @impl GenServer
-  def handle_call({:register_channel, name, copts}, _from, %{channels: ch} = state) do
-    {:reply, :ok, %{state | channels: Map.put(ch, name, copts)}}
-  end
-
-  @impl GenServer
-  def handle_call(:list_channels, _from, %{channels: ch} = state) do
-    {:reply, Map.keys(ch) |> Enum.sort(), state}
-  end
+  def init(opts), do: {:ok, %{opts: opts}}
 end

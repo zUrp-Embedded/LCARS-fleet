@@ -5,7 +5,8 @@ defmodule Fleet.MCP.Supervisor do
 
   Stratégie `:one_for_one`, `max_restarts: 3`, `max_seconds: 60` (DN).
   Enfants :
-    - `Fleet.MCP.Server` (registry/lifecycle opaque) ;
+    - `Fleet.MCP.Server` (garde de boot ADR-C : refuse côté pod ; ex-husk channels
+      retiré F049) ;
     - `Fleet.MCP.PodTools` (HTTP transport pour `get_task`/`submit_result`)
       démarré SSI `:pod_facing_port` configuré.
 

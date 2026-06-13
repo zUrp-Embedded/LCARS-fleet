@@ -1,39 +1,46 @@
 defmodule Fleet.Starfleet.MCPMonitor do
   @moduledoc """
-  Health check passif du serveur MCP local (`Fleet.MCP.Server`).
+  Health check passif du **drive MCP pod-facing** (`Fleet.MCP.PodTools`).
 
   DN 13 `orchestration/fleet_starfleet.md` §Extensions V2 (BL-021 chantier 8).
 
   ## Mécanique
 
   GenServer + `Process.send_after/3` récursif. À chaque tick (default 60s),
-  consulte `Process.whereis(Fleet.MCP.Server)` :
+  vérifie la liveness de la cible :
 
-    * pid non-nil → status `:ok`
-    * nil → status `:crashed`
+    * cible vivante → status `:ok`
+    * absente / morte → status `:crashed`
 
   Détecte la transition `:ok → :crashed` (PAS `:unknown → :crashed` au boot,
   PAS `:crashed → :crashed` pour ne pas spammer) et broadcast un event canon.
   Le retour `:crashed → :ok` log juste (recovery silencieuse, pas d'event
   dédié dans la DN MVP).
 
-  ## Configuration
+  ## Cible (F049 — résolu)
 
-    * `:fleet_starfleet, :mcp_monitor_check_interval_ms` — default `60_000` (1 min)
-    * `:fleet_starfleet, :mcp_monitor_target` — module cible (default
-      `Fleet.MCP.Server`). Permet aux tests d'injecter une cible factice.
+  Le drive porteur (`get_task`/`submit_result`) est `Fleet.MCP.PodTools`, démarré
+  en `transport: :http` → c'est un listener Cowboy/Ranch, **pas** un process nommé
+  (`Process.whereis(Fleet.MCP.PodTools)` rend `nil` — un pointage direct rendrait le
+  moniteur aveugle, l'erreur attrapée par le panel). On vérifie donc sa liveness par
+  l'**arbre de supervision** : cible `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodTools}`
+  → `Supervisor.which_children/1` cherche l'enfant et teste que son pid est vivant.
+  Robuste (OTP pur, zéro dépendance aux internes ExMCP/Ranch) et sémantiquement juste :
+  PodTools absent (pod-facing non configuré) → `:crashed` silencieux (aucun broadcast
+  depuis `:unknown`, rien à monitorer). Une cible **atome** reste supportée
+  (`Process.whereis`, pour les tests + tout process nommé).
 
   ## Event broadcast
 
   Schema canon `%Fleet.Event{source: :starfleet, type: :mcp_server_crashed,
   payload: %{previous_status, new_status, target}, correlation_id: nil}`.
 
-  ## Post-C5.1 ADR-G
+  ## Configuration
 
-  Les channels push (FleetControl/FleetForge) ont été retirés au chantier 7
-  BL-021 (PoC Channel KO 4 itérations), mais le serveur MCP reste critique
-  (drive métier `get_task`/`submit_result` via tools pull). Monitorer son
-  process est nécessaire pour détecter un crash silencieux post-purge.
+    * `:fleet_starfleet, :mcp_monitor_check_interval_ms` — default `60_000` (1 min)
+    * `:fleet_starfleet, :mcp_monitor_target` — cible (default
+      `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodTools}`). Accepte un atome
+      (process nommé) OU `{:supervised, sup, child_id}`. Les tests injectent une cible factice.
   """
 
   use GenServer
@@ -42,7 +49,10 @@ defmodule Fleet.Starfleet.MCPMonitor do
   alias Fleet.EventRouter.Bus
 
   @default_interval_ms 60_000
-  @default_target Fleet.MCP.Server
+  # F049 — on monitore le DRIVE pod-facing (PodTools) via l'arbre de supervision
+  # (`which_children`), PAS `Process.whereis` : PodTools en `:http` est un listener
+  # Ranch, pas un process nommé. Cf. moduledoc §Cible + `check_target/1`.
+  @default_target {:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodTools}
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -101,6 +111,22 @@ defmodule Fleet.Starfleet.MCPMonitor do
     end
 
     new_state
+  end
+
+  # F049 — cible supervisée : on lit l'arbre de supervision (OTP pur). L'enfant
+  # `child_id` vivant (pid) → :ok ; absent / :restarting / :undefined → :crashed.
+  defp check_target({:supervised, sup, child_id}) do
+    case List.keyfind(Supervisor.which_children(sup), child_id, 0) do
+      {^child_id, pid, _type, _modules} when is_pid(pid) -> :ok
+      _ -> :crashed
+    end
+  rescue
+    _ -> :crashed
+  catch
+    # `which_children` sur un superviseur non démarré (fleet_mcp absent du nœud)
+    # fait un `exit :noproc` (pas une exception) → :crashed silencieux (depuis
+    # :unknown = aucun broadcast, rien à monitorer).
+    :exit, _ -> :crashed
   end
 
   defp check_target(target) when is_atom(target) do

@@ -14,7 +14,9 @@ defmodule Fleet.TaskQueue.Server do
 
   ## Options
   `:name` (`nil` → anonyme, isolation tests), `:state_path`, `:persist`,
-  `:topic` (défaut `"fleet.events"`).
+  `:topic` (défaut `"fleet.events"`), `:retention_terminal_max` (F148 — nombre max
+  de tâches TERMINALES conservées, défaut 500 ; borne `tasks` en mémoire ET la taille
+  de `state.json` réécrit à chaque mutation. Les tâches ACTIVES ne comptent pas).
   """
 
   use GenServer
@@ -25,6 +27,10 @@ defmodule Fleet.TaskQueue.Server do
   @default_topic "fleet.events"
   @default_path "/var/lib/lcars/task-queue/state.json"
   @active_states [:pending, :assigned, :in_progress]
+  # F148 — borne de rétention des tâches terminales (:completed/:failed/:cleared). Sans elle,
+  # `tasks` croît sans borne et `persist/1` réécrit un `state.json` toujours plus gros à CHAQUE
+  # mutation. On garde les N plus récentes ; les actives ne comptent pas (cf. prune_terminal/2).
+  @default_retention_terminal 500
 
   # ============================================================
   # Lifecycle
@@ -49,7 +55,14 @@ defmodule Fleet.TaskQueue.Server do
       tasks: %{},
       state_path: state_path,
       persist: persist?,
-      topic: Keyword.get(opts, :topic, @default_topic)
+      topic: Keyword.get(opts, :topic, @default_topic),
+      retention_terminal_max:
+        Keyword.get(opts, :retention_terminal_max) ||
+          Application.get_env(
+            :fleet_task_queue,
+            :retention_terminal_max,
+            @default_retention_terminal
+          )
     }
 
     case load_state(state_path, persist?) do
@@ -237,7 +250,34 @@ defmodule Fleet.TaskQueue.Server do
     Enum.any?(Map.values(tasks), &(&1.pod_id == pod_id and &1.state == :completed))
   end
 
-  defp put_task(state, %Task{} = task), do: %{state | tasks: Map.put(state.tasks, task.id, task)}
+  defp put_task(state, %Task{} = task) do
+    tasks = Map.put(state.tasks, task.id, task)
+    %{state | tasks: prune_terminal(tasks, state.retention_terminal_max)}
+  end
+
+  # F148 — garde au plus `max` tâches TERMINALES (les plus récentes), élague les plus vieilles.
+  # No-op tant qu'on est sous le cap. Les tâches ACTIVES ne comptent pas et ne sont JAMAIS coupées
+  # (mandats en cours). L'ordre par récence (≠ ordre d'enqueue) protège la détection double-submit :
+  # une tâche juste complétée est la plus récente → jamais élaguée en premier (has_completed?/1).
+  defp prune_terminal(tasks, max) do
+    terminal = for {_id, t} <- tasks, t.state not in @active_states, do: t
+
+    if length(terminal) <= max do
+      tasks
+    else
+      drop_ids =
+        terminal
+        |> Enum.sort_by(&recency/1, {:desc, DateTime})
+        |> Enum.drop(max)
+        |> MapSet.new(& &1.id)
+
+      Map.reject(tasks, fn {id, _t} -> MapSet.member?(drop_ids, id) end)
+    end
+  end
+
+  # Récence pour l'ordre de rétention : completed_at si complétée, sinon assigned_at, sinon
+  # enqueued_at (toujours présent — @enforce_keys). Toujours un %DateTime{}, jamais nil.
+  defp recency(%Task{} = t), do: t.completed_at || t.assigned_at || t.enqueued_at
 
   defp maybe_schedule_deadline(%Task{deadline: %DateTime{} = dl, id: id}) do
     ms = DateTime.diff(dl, DateTime.utc_now(), :millisecond)

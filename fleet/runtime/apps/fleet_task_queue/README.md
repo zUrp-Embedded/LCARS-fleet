@@ -15,7 +15,7 @@ Flux : `fleet_spawner`/`fleet_pipeline` **enqueue** (source) → `fleet_task_que
 ## Sous-modules
 
 - `Fleet.TaskQueue` — façade API publique. Chaque fonction a une variante test-seam (`server` explicite, ex. `enqueue/3`) pour l'isolation via serveur anonyme (`name: nil`).
-- `Fleet.TaskQueue.Server` — le broker GenServer (un seul écrivain ; persistance `state.json` atomique v:1 ; recovery cross-restart fail-loud `:state_corrupt` ; deadline par tâche).
+- `Fleet.TaskQueue.Server` — le broker GenServer (un seul écrivain ; persistance `state.json` atomique v:1 ; recovery cross-restart fail-loud `:state_corrupt` ; deadline par tâche ; **rétention bornée** des tâches terminales, knob `:retention_terminal_max` défaut 500, F148).
 - `Fleet.TaskQueue.Task` — struct tâche + `to_map/1` / `from_map/1` (sérialisation state.json).
 - `Fleet.TaskQueue.Application` — superviseur (démarre le `Server` nommé).
 
@@ -34,6 +34,7 @@ Flux : `fleet_spawner`/`fleet_pipeline` **enqueue** (source) → `fleet_task_que
 
 - **Un mandat actif par pod** (`find_active`, tri `enqueued_at` DESC). Le wake d'un pod long-lived reçoit le mandat le plus récent après complétion du précédent.
 - **Complétion event-driven** : émet `%Fleet.Event{source: :task_queue}` sur le bus `fleet.events` (topic `Fleet.PubSub`), `correlation_id = task.id`. Les 6 events couvrent enqueue/assign/complete/etc. (cf. DN §C). Plus de string-topic, plus de poll de fichier.
+- **Rétention bornée** (F148) : les tâches terminales (`:completed`/`:failed`/`:cleared`) sont élaguées au-delà de `:retention_terminal_max` (défaut 500, les plus récentes conservées) → `tasks` en mémoire et `state.json` sont bornés. Les tâches **actives** ne sont jamais élaguées ; une tâche juste complétée (la plus récente) survit → la détection de double-submit (`has_completed?`) reste correcte.
 
 ## Dépendances
 

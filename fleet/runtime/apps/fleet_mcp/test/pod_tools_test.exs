@@ -45,11 +45,11 @@ defmodule Fleet.MCP.PodToolsTest do
     assert {:ok, %{"done" => true}} = Jason.decode(t2)
   end
 
-  test "get_task sans _lcars_pod_id (anomalie pont) → done:true" do
-    assert {:ok, %{content: [%{"text" => t}]}, %{}} =
+  test "get_task sans _lcars_pod_id (anomalie pont) → erreur typée (F045, symétrie submit_result)" do
+    # F045 : un pod_id absent = erreur de config (LCARS_POD_ID perdu), pas une fin de
+    # mandat. Ne JAMAIS masquer en done:true — sinon le pod s'arrête en croyant avoir fini.
+    assert {:error, :pod_id_required, %{}} =
              PodTools.handle_tool_call("get_task", %{}, %{})
-
-    assert {:ok, %{"done" => true}} = Jason.decode(t)
   end
 
   test "submit_result sans _lcars_pod_id → erreur (le pod doit être identifié)" do

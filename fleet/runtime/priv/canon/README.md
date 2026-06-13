@@ -18,7 +18,7 @@ Référencé par : DN `04_design-notes/ring1/fleet-as-instance.md` (DRAFT), DN `
 
 ## Discovery
 
-Au boot du runtime, `Fleet.Instance.Loader` (à implémenter post-bascule, cf. DN fleet-as-instance §2.4) glob `priv/canon/fleets/*.yaml` pour charger les instances de fleet. Les cap-profiles sont chargés par `fleet_capprofile` depuis `LCARS_CAPPROFILES_ROOT` env var (cf. `config/runtime.exs`).
+Au boot du runtime, `Fleet.Instance.Loader` (à implémenter post-bascule, cf. DN fleet-as-instance §2.4) glob `priv/canon/fleets/*.yaml` pour charger les instances de fleet. Les cap-profiles sont chargés par `fleet_cap_profile` depuis `LCARS_CAPPROFILES_ROOT` env var (cf. `config/runtime.exs`).
 
 ## Dette de migration
 

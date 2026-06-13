@@ -45,18 +45,46 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   defp do_load do
-    path = events_yaml_path()
-
-    case File.exists?(path) && YamlElixir.read_from_file(path) do
-      {:ok, %{"events" => events}} when is_map(events) ->
+    case parse_events() do
+      {:ok, events} ->
         set = events |> Map.keys() |> Enum.map(&String.to_atom/1) |> MapSet.new()
         Fleet.EventRouter.Bus.set_authorized_event_types(set)
         Logger.info("fleet_event_router: registry events.yaml chargé (#{MapSet.size(set)} types)")
         :ok
 
-      _ ->
-        Logger.warning("fleet_event_router: events.yaml absent ou invalide à #{path}")
+      :error ->
+        Logger.warning(
+          "fleet_event_router: events.yaml absent ou invalide à #{events_yaml_path()}"
+        )
+
         :ok
+    end
+  end
+
+  @doc """
+  Clés-types du registry events.yaml (strings). **Source unique du parse** — réutilisée
+  par `do_load/0` ET `Application.preregister_event_atoms/0` (dedup F035 : le fichier
+  n'est plus localisé/parsé 2× au boot, plus de risque de drift de shape). Rend `[]` si
+  events.yaml est absent/invalide.
+  """
+  @spec event_type_strings() :: [String.t()]
+  def event_type_strings do
+    case parse_events() do
+      {:ok, events} -> Map.keys(events)
+      :error -> []
+    end
+  end
+
+  # Le parse events.yaml en UN seul endroit (F035) : localise + lit + valide la shape.
+  # `{:ok, events_map}` si présent et `events:` est une map (map vide incluse — `do_load`
+  # doit set un MapSet vide, pas warner) ; `:error` si absent/invalide. Le caller tranche
+  # le log : do_load → warning sur :error ; event_type_strings → [].
+  defp parse_events do
+    path = events_yaml_path()
+
+    case File.exists?(path) && YamlElixir.read_from_file(path) do
+      {:ok, %{"events" => events}} when is_map(events) -> {:ok, events}
+      _ -> :error
     end
   end
 
