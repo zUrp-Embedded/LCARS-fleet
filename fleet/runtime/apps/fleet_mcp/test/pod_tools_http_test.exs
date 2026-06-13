@@ -48,6 +48,28 @@ defmodule Fleet.MCP.PodToolsHttpTest do
     assert {:ok, %{"done" => true}} = Jason.decode(extract_text(r3))
   end
 
+  test "transport HTTP : submit_result sans mandat actif → isError sur le fil (F046)", %{
+    port: port
+  } do
+    # F046 wire-level : le broker rend :no_active_task (pod sans mandat → livrable droppé). Le fix
+    # `{:error, :no_active_task, state}` DOIT ressortir `isError: true` côté pod (pas un faux {:ok "ok"}).
+    # Vérifie la conversion end-to-end ExMCP (handle_tool_call → isError sur le frame MCP), pas juste l'unité.
+    pod = "pod-notask-#{System.unique_integer([:positive])}"
+
+    {:ok, client} =
+      ExMCP.Client.start_link(transport: :http, url: "http://localhost:#{port}/mcp")
+
+    result =
+      ExMCP.Client.call_tool(client, "submit_result", %{
+        "payload" => %{"x" => 1},
+        "_lcars_pod_id" => pod
+      })
+
+    # ExMCP.Client rend la réponse tool en struct (`is_error:` atom, pas `"isError"` string) — forme
+    # constatée empiriquement (R8), pas supposée.
+    assert {:ok, %{is_error: true}} = result
+  end
+
   # Résultat tool MCP sur le fil = %{"content" => [%{"type"=>"text","text"=>...}], ...}.
   defp extract_text(result) do
     content = result["content"] || result[:content] || []

@@ -57,6 +57,43 @@ defmodule Fleet.MCP.PodToolsTest do
              PodTools.handle_tool_call("submit_result", %{"payload" => %{"x" => 1}}, %{})
   end
 
+  test "submit_result sans mandat actif → erreur :no_active_task (F046 : le drop n'est pas masqué)" do
+    # F046 : un pod qui submit sans mandat actif (jamais assigné, ou clos/réassigné depuis) → son
+    # livrable n'a NULLE PART où aller = DROP. Doit ressortir isError, PAS {:ok "ok"} — sinon le pod
+    # croit son livrable accepté. Symétrie avec :task_id_mismatch / :pod_id_required (classe F045).
+    pod = uniq("pod-no-task")
+
+    assert {:error, :no_active_task, %{}} =
+             PodTools.handle_tool_call(
+               "submit_result",
+               %{"payload" => %{"x" => 1}, "_lcars_pod_id" => pod},
+               %{}
+             )
+  end
+
+  test "submit_result en double (mandat déjà clos) → {:ok ignoré}, PAS une erreur (idempotent ≠ F046)" do
+    # Verrouille l'asymétrie voulue : un re-submit après une tâche close n'est PAS un livrable perdu
+    # (le 1er submit EST encaissé) → :ok "déjà reçu", idempotent. À NE PAS confondre avec :no_active_task.
+    pod = uniq("pod-dbl")
+    {:ok, _} = TaskQueue.enqueue(pod, %{brief: "once"})
+    assert {:ok, _, _} = PodTools.handle_tool_call("get_task", %{"_lcars_pod_id" => pod}, %{})
+
+    assert {:ok, %{content: [%{"type" => "text"}]}, %{}} =
+             PodTools.handle_tool_call(
+               "submit_result",
+               %{"payload" => %{"a" => 1}, "_lcars_pod_id" => pod},
+               %{}
+             )
+
+    # 2e submit → idempotent ignoré, toujours :ok (livrable déjà encaissé, rien perdu).
+    assert {:ok, %{content: [%{"type" => "text"}]}, %{}} =
+             PodTools.handle_tool_call(
+               "submit_result",
+               %{"payload" => %{"a" => 2}, "_lcars_pod_id" => pod},
+               %{}
+             )
+  end
+
   test "tool inconnu / mauvais args → erreurs propres" do
     assert {:error, :unknown_tool, %{}} = PodTools.handle_tool_call("nope", %{}, %{})
 

@@ -40,6 +40,8 @@ defmodule Fleet.Spawner do
     * `{:ok, pid}` — pod démarré
     * `{:error, :cap_profile_invalid, reason}` — struct invalide
     * `{:error, {:already_started, pid}}` — pod_id collision
+    * `{:error, :invalid_pod_id}` — pod_id non path-safe (hors `[A-Za-z0-9._-]` ou contient `..`) — F076
+    * `{:error, :mandate_required}` — pod one-shot sans mandat (R18)
   """
 
   alias Fleet.Spawner.Pod
@@ -54,7 +56,9 @@ defmodule Fleet.Spawner do
     * `cap_profile` — struct `%Fleet.CapProfile{}` issue de `Fleet.CapProfile.compose/2`
     * `ticket_id` — événement source (ticket Gitea, signal OS, etc.)
     * `opts` :
-      * `:pod_id` (default `UUID.uuid4()`)
+      * `:pod_id` (default `UUID.uuid4()`) — doit être **path-safe** (`[A-Za-z0-9._-]`, pas de `..`),
+        car interpolé dans des paths FS (`~/pods/pod_<id>`, sock, state recovery) ;
+        sinon `{:error, :invalid_pod_id}` (F076).
       * `:state_fs_root` (override, default config `:fleet_spawner, :state_fs_root`)
       * `:mandate` — le travail du pod (string). R18 : **obligatoire** pour un
         pod `one-shot` (sinon `{:error, :mandate_required}`).
@@ -68,15 +72,24 @@ defmodule Fleet.Spawner do
       :ok ->
         pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
 
-        args = %{
-          cap_profile: cap_profile,
-          ticket_id: ticket_id,
-          pod_id: pod_id,
-          opts: opts
-        }
+        # F076 : pod_id file dans des paths FS (pod_dir `~/pods/pod_<id>`, sock_path, state recovery)
+        # par interpolation. Défaut UUID = sûr, mais l'override `:pod_id` (stage `issue-N-role-ts`, role
+        # résolu forge ; permanent `permanent-<name>-ts` ; admin) n'était PAS validé → un `/` ou `..`
+        # traverserait hors de `~/pods`. Guard charset path-safe + rejet `..` → refus CLAIR, jamais un
+        # path traversé (tous les pod_id légitimes — UUID / catalogue / stage — passent).
+        if valid_pod_id?(pod_id) do
+          args = %{
+            cap_profile: cap_profile,
+            ticket_id: ticket_id,
+            pod_id: pod_id,
+            opts: opts
+          }
 
-        spec = pod_child_spec(args)
-        DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec)
+          spec = pod_child_spec(args)
+          DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec)
+        else
+          {:error, :invalid_pod_id}
+        end
 
       {:error, _} = err ->
         err
@@ -330,4 +343,12 @@ defmodule Fleet.Spawner do
   end
 
   defp generate_pod_id, do: UUID.uuid4()
+
+  # F076 : pod_id path-safe (interpolé dans pod_dir / sock_path / state recovery — cf. Pod.pod_dir_for).
+  # Charset blanc [A-Za-z0-9._-] (couvre UUID, `permanent-<name>-<ts>`, `issue-<n>-<role>-<ts>`) + rejet
+  # explicite de `..` (seul construct traversal qui passerait le charset ; `/` est déjà hors charset).
+  defp valid_pod_id?(id) when is_binary(id),
+    do: Regex.match?(~r/^[A-Za-z0-9._-]+$/, id) and not String.contains?(id, "..")
+
+  defp valid_pod_id?(_), do: false
 end

@@ -108,6 +108,23 @@ defmodule Fleet.SpawnerTest do
                Fleet.Spawner.spawn_pod(valid_profile(), "ticket-empty-mandate", mandate: "")
     end
 
+    test "F076 — pod_id non path-safe (.. ou / ou vide) → {:error, :invalid_pod_id}, aucun spawn" do
+      # pod_id file dans pod_dir/sock_path/state recovery (Path.join + interpolation) → un pod_id non
+      # path-safe traverserait hors de ~/pods. Refus CLAIR AVANT tout spawn. Les ids légitimes
+      # UUID / `permanent-<name>-ts` / `issue-<n>-<role>-ts` (charset [A-Za-z0-9._-]) passent — couverts
+      # par les tests qui spawnent avec des ids UUID (hyphénés = même charset).
+      for bad <- ["../etc/passwd", "a/b", "..", "pod_..", "x y", ""] do
+        assert match?(
+                 {:error, :invalid_pod_id},
+                 Fleet.Spawner.spawn_pod(valid_profile(), "ticket-1",
+                   pod_id: bad,
+                   mandate: "do x"
+                 )
+               ),
+               "pod_id #{inspect(bad)} aurait dû être rejeté (path-traversal)"
+      end
+    end
+
     test "one-shot + mandat → {:ok, _}" do
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(valid_profile(), "ticket-mandate",

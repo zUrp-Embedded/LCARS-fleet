@@ -81,7 +81,11 @@ defmodule Fleet.MCP.PodTools do
             {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
 
           {:error, :no_active_task} ->
-            {:ok, %{content: [text("Aucun mandat actif pour ce pod.")]}, state}
+            # F046 : pas de mandat actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
+            # réassigné depuis) → DROP. Le signaler isError (comme :task_id_mismatch / :pod_id_required F045)
+            # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (classe F045).
+            # (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST déjà enregistré.)
+            {:error, :no_active_task, state}
 
           {:error, :double_submit_ignored} ->
             {:ok, %{content: [text("Resultat deja recu (ignore).")]}, state}
