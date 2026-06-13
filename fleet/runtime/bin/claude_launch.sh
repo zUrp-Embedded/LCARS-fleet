@@ -76,7 +76,10 @@ SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<h
 # un pod headless : personne pour répondre). Défaut = --dangerously-skip-permissions (le user le fait
 # déjà sur sa session RC ; pod sous UID humain ≠ root → accepté). Le « no-internet recommended » du
 # flag est OK ici : threat-model = sandbox jetable root-de-confiance, le containment bwrap est le mur.
-# Overridable par cap-profile (LCARS_PERMISSION_MODE) pour un rôle bridé (ex. plan).
+# Hook LCARS_PERMISSION_MODE pour un rôle bridé (ex. plan) — NON câblé aujourd'hui (F156) : bwrap_launch.sh
+# fait --clearenv SANS --setenv LCARS_PERMISSION_MODE, et aucun cap-profile/pod.ex ne le pose → PERM_MODE
+# reste vide, le défaut sanctuaire s'applique partout. Le hook ci-dessous est prêt ; câbler = cap-profile.spec
+# → LCARS_PERMISSION_MODE (pod.ex) + l'ajouter à la liste --setenv de bwrap_launch (frontière N0).
 PERM_MODE="${LCARS_PERMISSION_MODE:-}"
 if [[ -n "$PERM_MODE" ]]; then
   PERM_FLAGS=(--permission-mode "$PERM_MODE")

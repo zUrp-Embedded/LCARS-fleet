@@ -156,6 +156,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert_received {:enqueued, "issue-42-engineer-1700000000", attrs}
       assert attrs.brief == "fais le hello"
       assert attrs.role == "engineer"
+
+      # F071 : verrouille le 2ᵉ site `TicketId.compose` (enqueue_mandate) — sinon un retour au littéral
+      # "issue-#{number}" pour `ticket_id` ne serait pas attrapé (le pod_id ≠ ticket_id).
+      assert attrs.ticket_id == "issue-42"
       # kick best-effort émis
       assert_received {:woke, "issue-42-engineer-1700000000"}
     end

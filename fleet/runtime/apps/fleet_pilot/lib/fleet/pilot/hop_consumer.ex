@@ -623,15 +623,11 @@ defmodule Fleet.Pilot.HopConsumer do
       is_binary(p["role"])
   end
 
+  # F071 : le format ticket_id "issue-<n>" a une SOURCE UNIQUE (Fleet.Pilot.TicketId) — writer
+  # (StageDispatcher) et parser ne peuvent plus dériver. `parse_issue_number` reste l'API publique
+  # (appelée l.243 + testée hop_consumer_test) mais délègue.
   @doc false
-  def parse_issue_number("issue-" <> rest) do
-    case Integer.parse(rest) do
-      {n, ""} -> {:ok, n}
-      _ -> :error
-    end
-  end
-
-  def parse_issue_number(_), do: :error
+  defdelegate parse_issue_number(ticket_id), to: Fleet.Pilot.TicketId, as: :parse
 
   # Z4 (forge-identité B') — F-01 `allowed_emails` = l'HUMAIN du mandat (le pod git_native
   # commite EN TANT QUE l'humain, cf. `bwrap_launch.sh`/`ForgeIdentity`), PLUS le rôle. Même

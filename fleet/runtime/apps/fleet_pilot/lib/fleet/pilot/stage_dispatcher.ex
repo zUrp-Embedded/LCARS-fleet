@@ -116,6 +116,9 @@ defmodule Fleet.Pilot.StageDispatcher do
              {:ok, profile} <- tag_err(loader.load(role), :profile_load) do
           # pod_id DÉTERMINISTE (string connue AVANT spawn) : `Spawner.spawn_pod/3` retourne le
           # `pid` du GenServer ; on impose le pod_id via `:pod_id`. `ts` le rend unique par hop.
+          # F071 : le préfixe "issue-" ci-dessous (et la branch hop_consumer.ex:318 "lcars/issue-...") est
+          # aligné PAR CONVENTION sur `Fleet.Pilot.TicketId.@prefix` — formats DISTINCTS du ticket_id (jamais
+          # parsés), mais si ce préfixe change un jour, mettre à jour ces 2 littéraux aussi (couplage implicite).
           pod_id = "issue-#{number}-#{role}-#{ts}"
 
           # F077/F078 : la FORME du mandat (worker exécutable | juge désamorcé) est lue du cap-profile
@@ -142,7 +145,8 @@ defmodule Fleet.Pilot.StageDispatcher do
                    "[lock:#{role}:#{ts}]",
                    Keyword.put(forge_opts, :dedup_signature, "[lock:#{role}:")
                  ),
-               {:ok, _pid} <- spawner.spawn_pod(profile, "issue-#{number}", spawn_opts),
+               {:ok, _pid} <-
+                 spawner.spawn_pod(profile, Fleet.Pilot.TicketId.compose(number), spawn_opts),
                :ok <- enqueue_mandate(task_queue, pod_id, role, number, mandate) do
             # Kick best-effort : le pod auto-kicke les workers ; le wake accélère le 1er get_task.
             _ = safe_wake(spawner, pod_id)
@@ -258,7 +262,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # pullait le mandat BUILD exécutable (PASSE-9). `metadata.issue` corrèle au ticket.
   defp enqueue_mandate(task_queue, pod_id, role, number, mandate) do
     attrs = %{
-      ticket_id: "issue-#{number}",
+      ticket_id: Fleet.Pilot.TicketId.compose(number),
       role: role,
       brief: mandate,
       metadata: %{"issue" => number}
