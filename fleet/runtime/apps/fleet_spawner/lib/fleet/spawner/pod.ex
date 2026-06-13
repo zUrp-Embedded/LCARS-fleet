@@ -625,27 +625,40 @@ defmodule Fleet.Spawner.Pod do
     Application.get_env(:fleet_spawner, :auth_mode, :bind)
   end
 
-  # Lit l'access_token OAuth depuis `<claude_dir>/.credentials.json` (slot canonique `claudeAiOauth`,
-  # cf. inbox/src #0_ref_oauth-token-lifecycle.md §2.2).
+  # Token-extractor au-dessus de la SOURCE UNIQUE `read_oauth_creds/1` (F117/F118/F119 — plus de 2e parser
+  # de `.credentials.json` : un seul File.read + Jason.decode + extraction du bloc `claudeAiOauth`). Slot
+  # canonique `claudeAiOauth.accessToken` (cf. inbox/src #0_ref_oauth-token-lifecycle.md §2.2).
   # R15 (verrou I-CBC) : en mode `:token_arg`, l'absence/illisibilité du token est FAIL-LOUD —
-  # `{:error, reason}` propagé → `transition_failed`. L'ancien retour `nil` silencieux lançait un
-  # pod SANS `LCARS_ANTHROPIC_AUTH_TOKEN` (en `:token_arg` il n'y a pas de bind → 401, pas de
-  # fallback `/login`) : un pod inutile au lieu d'un refus net.
+  # `{:error, {:oauth_token_unreadable, _}}` propagé → `transition_failed`. L'ancien retour `nil` silencieux
+  # lançait un pod SANS `LCARS_ANTHROPIC_AUTH_TOKEN` (en `:token_arg` pas de bind → 401, pas de fallback
+  # `/login`) : un pod inutile au lieu d'un refus net. La garde `is_binary` distingue « creds lisible mais
+  # sans token » (gate scope/plan peut passer) de « token présent » — divergence légitime, MÊME parse.
   defp read_oauth_access_token(claude_dir) do
-    creds_path = Path.join(claude_dir, ".credentials.json")
+    case read_oauth_creds(claude_dir) do
+      {:ok, %{"accessToken" => token}} when is_binary(token) ->
+        {:ok, token}
 
-    with {:ok, raw} <- File.read(creds_path),
-         {:ok, %{"claudeAiOauth" => %{"accessToken" => token}}} when is_binary(token) <-
-           Jason.decode(raw) do
-      {:ok, token}
-    else
-      err ->
+      other ->
+        # Hygiène creds (F117/F118/F119) : on ne logge JAMAIS le contenu OAuth (refreshToken/accessToken) —
+        # la cause de `read_oauth_creds/1` est déjà catégorisée, on ne réinspecte que la catégorie.
+        detail =
+          case other do
+            {:ok, _oauth} ->
+              "creds lisible mais accessToken absent ou non-binaire"
+
+            {:error, {:credentials_invalid, {:credentials_unreadable, _p, cause}}} ->
+              "creds illisible (#{inspect(cause)})"
+
+            _ ->
+              "creds illisible"
+          end
+
         Logger.error(
-          "pod auth_mode=:token_arg : read_oauth_access_token ÉCHEC (#{inspect(err)}) — " <>
-            "path=#{creds_path} — spawn BLOQUÉ (R15 fail-loud)"
+          "pod auth_mode=:token_arg : read_oauth_access_token ÉCHEC (#{detail}) — " <>
+            "claude_dir=#{claude_dir} — spawn BLOQUÉ (R15 fail-loud)"
         )
 
-        {:error, {:oauth_token_unreadable, creds_path}}
+        {:error, {:oauth_token_unreadable, Path.join(claude_dir, ".credentials.json")}}
     end
   end
 
@@ -664,6 +677,9 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
+  # SOURCE UNIQUE de lecture du creds natif `<claude_dir>/.credentials.json` (F117/F118/F119) : un seul
+  # File.read + Jason.decode + extraction du bloc `claudeAiOauth`. `read_oauth_access_token/1` (token) ET
+  # `gate_credentials/2` (scope+plan) consomment CE parse — plus de 2 parsers driftables du même fichier.
   defp read_oauth_creds(claude_dir) do
     creds_path = Path.join(claude_dir, ".credentials.json")
 
@@ -671,7 +687,17 @@ defmodule Fleet.Spawner.Pod do
          {:ok, %{"claudeAiOauth" => oauth}} when is_map(oauth) <- Jason.decode(raw) do
       {:ok, oauth}
     else
-      err -> {:error, {:credentials_invalid, {:credentials_unreadable, creds_path, err}}}
+      # Hygiène creds (F117/F118/F119) : la cause est CATÉGORISÉE, jamais le JSON décodé (qui porte
+      # refreshToken/accessToken). `:malformed_json` (Jason) / `:no_oauth_block` (décodé sans bloc oauth
+      # valide) / posix (File.read) — tous sûrs à propager et logger.
+      {:error, %Jason.DecodeError{}} ->
+        {:error, {:credentials_invalid, {:credentials_unreadable, creds_path, :malformed_json}}}
+
+      {:ok, _decoded} ->
+        {:error, {:credentials_invalid, {:credentials_unreadable, creds_path, :no_oauth_block}}}
+
+      {:error, posix} ->
+        {:error, {:credentials_invalid, {:credentials_unreadable, creds_path, posix}}}
     end
   end
 

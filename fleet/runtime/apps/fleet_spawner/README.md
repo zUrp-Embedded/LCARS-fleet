@@ -1,7 +1,7 @@
 # Fleet.Spawner
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-13 (resync ADR-G : chaîne de lancement bwrap, modèle session pré-alloc, PodTmux, recovery réelle nommée — cf. audit Codex deep-03)
+**Dernière révision** : 2026-06-14 (resync ADR-G : chaîne de lancement bwrap, modèle session pré-alloc, PodTmux, recovery réelle nommée — cf. audit Codex deep-03)
 **Statut** : implémenté run #3.1 chantier #6, convergé ADR-G run #5 2026-06-01
 
 Pilote le lifecycle pod LCARS v2 (Ring 1 pod primitive). Cycle 8 phases
@@ -59,6 +59,7 @@ State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` (champs : `
 - `:fleet_spawner, :tmux_sock_base` — base sockets par-pod (default `/run/lcars/tmux-sock`, = `LCARS_TMUX_SOCK_BASE` côté bwrap)
 - `:fleet_spawner, :bwrap_launch_path` / `:claude_launch_path` — paths absolus des launchers (default `/usr/local/bin/*` — **hors `/home`,`/tmp`** sinon masqués par `--tmpfs`)
 - `:fleet_spawner, :claude_dir` — claudeDir humain bindé RW (default `/home/starfleet/.claude`)
+- `:fleet_spawner, :auth_mode` — switch auth **sécu-critique** : **`:bind` (défaut)** bwrap bind RW le `.credentials.json` humain (refresh OAuth natif, full scope, pas de falaise ~8h) ; **`:token_arg`** (opt-in pods one-shot <8h) extrait l'access_token et l'injecte en `LCARS_ANTHROPIC_AUTH_TOKEN` (pas de refresh). Posé en `LCARS_AUTH_MODE` pour bwrap_launch.sh. Lecture du creds natif = **source unique** `read_oauth_creds/1` (F117/F118/F119 : token-extractor + gate scope/plan partagent UN parse).
 - `:fleet_spawner, :mcp_server_spec` — config `.mcp-fleet.json` (cf. audit P1 : `nil` toléré, devrait fail-fast pour un vrai backend)
 - `:fleet_spawner, :skills_root` — racine skills à filtrer (default `nil`)
 
