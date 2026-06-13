@@ -17,7 +17,6 @@ defmodule Fleet.EventRouter.Bus do
     * `broadcast_subtopic/2` — sous-topics `fleet.events.<scope>.<id>`
     * `authorized_event_types/0` — MapSet atoms chargé au boot par `Catalog.load!/0`
     * `set_authorized_event_types/1` — appelé par `Catalog.load!/0` au boot
-    * `generate_trace_id/0` — id de trace 16-hex
 
   ## Z5 (ER-D2) — shim legacy retiré
 
@@ -137,13 +136,5 @@ defmodule Fleet.EventRouter.Bus do
   @spec broadcast_subtopic(String.t(), term()) :: :ok | {:error, term()}
   def broadcast_subtopic(subtopic, message) when is_binary(subtopic) do
     Phoenix.PubSub.broadcast(@pubsub_name, "#{@main_topic}.#{subtopic}", message)
-  end
-
-  @doc """
-  Génère un `trace_id` 16-hex (8 bytes crypto strong).
-  """
-  @spec generate_trace_id() :: String.t()
-  def generate_trace_id do
-    :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
   end
 end

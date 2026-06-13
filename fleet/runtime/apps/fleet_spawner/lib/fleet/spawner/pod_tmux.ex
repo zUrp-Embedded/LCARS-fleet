@@ -73,10 +73,6 @@ defmodule Fleet.Spawner.PodTmux do
     end
   end
 
-  @doc "Reset le contexte REPL claude (`/clear`). Régénère le sessionId local, le handle bridge survit."
-  @spec send_clear(String.t()) :: :ok | {:error, term()}
-  def send_clear(pod_id) when is_binary(pod_id), do: send_keys(pod_id, "/clear")
-
   defp tmux(pod_id, args) do
     System.cmd(@tmux_bin, ["-S", sock_path(pod_id) | args], stderr_to_stdout: true)
   end

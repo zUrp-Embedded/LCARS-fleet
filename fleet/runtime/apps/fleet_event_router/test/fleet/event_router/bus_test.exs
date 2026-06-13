@@ -42,17 +42,4 @@ defmodule Fleet.EventRouter.BusTest do
       Bus.unsubscribe("fleet.events.relay.abc123")
     end
   end
-
-  describe "generate_trace_id/0" do
-    test "16-hex chars" do
-      trace = Bus.generate_trace_id()
-      assert byte_size(trace) == 16
-      assert String.match?(trace, ~r/^[0-9a-f]{16}$/)
-    end
-
-    test "unique" do
-      traces = for _ <- 1..100, do: Bus.generate_trace_id()
-      assert length(Enum.uniq(traces)) == 100
-    end
-  end
 end
