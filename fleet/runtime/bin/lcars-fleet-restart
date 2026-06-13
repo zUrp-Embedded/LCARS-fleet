@@ -47,17 +47,15 @@ echo "[lcars-fleet-restart] Start service..."
 systemctl start lcars-fleet.service
 
 echo "[lcars-fleet-restart] Poll readiness (60s max)..."
-TS_END=$(($(date +%s) + 60))
-while [ "$(date +%s)" -lt "$TS_END" ]; do
-  # #19 : `--max-time`/`--connect-timeout` bornent CHAQUE poll. Sans eux, un curl qui
-  # PEND (port ouvert mais app wedgée mid-boot, pas refusée) bloque indéfiniment → la
-  # borne 60s (vérifiée en HAUT de boucle) n'est jamais atteinte → le script pend à vie.
-  if curl -sf --connect-timeout 3 --max-time 5 http://localhost:8080/api/health >/dev/null 2>&1; then
-    echo "[lcars-fleet-restart] OK"
-    exit 0
-  fi
-  sleep 2
-done
-
-echo "[lcars-fleet-restart] Readiness timeout" >&2
-exit 3
+# F159 : réutilise `lcars-readiness` (SOURCE UNIQUE du poll readiness, header §"réutilisable") au lieu de
+# ré-implémenter la boucle inline — qui hardcodait `localhost:8080` (ignorait `LCARS_HEALTH_URL` → cassait
+# un deploy à URL/port custom). `lcars-readiness` honore `LCARS_HEALTH_URL` et borne chaque poll (--max-time 2,
+# couvre le hang #19). Sibling résolu par dirname (deploy /usr/local/bin + repo bin/).
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+if "$SCRIPT_DIR/lcars-readiness" 60; then
+  echo "[lcars-fleet-restart] OK"
+  exit 0
+else
+  echo "[lcars-fleet-restart] Readiness timeout" >&2
+  exit 3
+fi
