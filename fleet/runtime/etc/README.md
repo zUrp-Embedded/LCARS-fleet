@@ -109,6 +109,11 @@ bash test/integration/boot_test.sh
 bash test/integration/host_launch_test.sh
 # LAUNCH-Q : host_launch.sh vs tmux RÉEL (command factice, pas de claude) — sock+session+holder, contrat
 # argv de bout en bout, teardown SIGTERM→kill-server. 15 checks, exit 0. Nécessite tmux.
+
+bash test/integration/sandbox_notrace_test.sh
+# F094 : invariant no-trace de bwrap_launch.sh vs bwrap RÉEL (command factice qui inspecte sa vue) —
+# arbo runtime LCARS host invisible, /home tmpfs, HOME=pod_dir. 12 checks, exit 0. Nécessite bwrap+userns+tmux.
+# ⚠ Surface un FINDING : /etc/fleet (secrets) visible dans le pod (--ro-bind /etc) — décision sanctuaire.
 ```
 
 Vérifie hardening directives + readiness exit codes + env vars + Mix
