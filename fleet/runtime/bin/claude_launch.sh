@@ -21,9 +21,12 @@
 # Frontière vendor N1 stricte (IX.3) : flags `claude` uniquement, jamais `bwrap`/
 # `tmux`/`unshare`. Si 2e vendor → `bin/openai_launch.sh` co-localisé.
 #
-# Usage : claude_launch.sh <role> <pod_id> <pod_dir> <sp>
-#   <sp> = SP composé, élément argv discret (onboarding-DN : Port.open(args:[…,sp])
-#          → execve → claude ; jamais fichier, jamais env, jamais $(cat)).
+# Usage : claude_launch.sh <role> <pod_id> <pod_dir>
+#   SP HORS argv (2026-06-14) : lu depuis $POD_DIR/.lcars/system-prompt.md (écrit par le spawner en
+#   do_project) via --system-prompt-file. Motif : le SP en argv fuitait /proc/<pid>/cmdline + frôlait
+#   ARG_MAX. Empirique 2.1.177 : --system-prompt-file = replace + TRUSTED (≠ inline, qui passe au filtre
+#   anti-injection). `.lcars/` lisible in-sandbox (bind pod_dir). (L'onboarding-DN « jamais fichier »
+#   visait `.claude/system-prompt.md` masqué par le bind creds — ne s'applique PAS à `.lcars/`.)
 # Env identité (fournie par le spawner, non sensible au masquage ⇒ env OK ≠ SP) :
 #   LCARS_POD_SESSION_ID          UUID de session PRÉ-ALLOUÉ (uuidgen, state.json au spawn) — requis
 #   LCARS_POD_RESUME              0 = 1ʳᵉ création (--session-id) ; 1 = recovery (--resume)
@@ -50,18 +53,21 @@ CLAUDE_BIN="${LCARS_CLAUDE_BIN:-$(command -v claude 2>/dev/null || true)}"
 JQ_BIN="${LCARS_JQ_BIN:-/usr/bin/jq}"
 
 # =============================================================
-# Args POSITIONNELS : <role> <pod_id> <pod_dir> <sp>
+# Args POSITIONNELS : <role> <pod_id> <pod_dir>
 # =============================================================
 
-if [[ $# -ne 4 ]]; then
-  echo "ERR: usage: $0 <role> <pod_id> <pod_dir> <sp>" >&2
+if [[ $# -ne 3 ]]; then
+  echo "ERR: usage: $0 <role> <pod_id> <pod_dir>" >&2
   exit 1
 fi
 
 ROLE="$1"
 POD_ID="$2"
 POD_DIR="$3"
-SP="$4"
+# SP HORS ARGV (fuite /proc/cmdline + frôle ARG_MAX) : source = fichier écrit par le spawner en
+# do_project (pod.ex). `.lcars/` est lisible in-sandbox (cf. --settings, bind pod_dir). claude le lit
+# via --system-prompt-file (vérifié 2026-06-14, claude 2.1.177 : -file = replace + trusted).
+SP_FILE="$POD_DIR/.lcars/system-prompt.md"
 
 # =============================================================
 # Session : UUID PRÉ-ALLOUÉ par le spawner (uuidgen, persisté state.json au spawn).
@@ -109,11 +115,12 @@ if [[ -z "$ROLE" || -z "$POD_ID" || -z "$POD_DIR" ]]; then
   echo "ERR: role, pod_id et pod_dir doivent être non-vides" >&2
   exit 1
 fi
-if [[ -z "$SP" ]]; then
-  dbg "EXIT: SP inline (argv) vide"
-  echo "ERR: SP inline (argv 4) doit être non-vide (Fleet.SPBuilder.compose/3)" >&2
+if [[ ! -s "$SP_FILE" ]]; then
+  dbg "EXIT: SP file absent/vide : $SP_FILE"
+  echo "ERR: SP file $SP_FILE absent ou vide (écrit par Fleet.Spawner do_project)" >&2
   exit 1
 fi
+dbg "step SP_FILE OK ($SP_FILE, $(wc -c < "$SP_FILE" 2>/dev/null) o)"
 dbg "step args-non-empty OK"
 
 # =============================================================
@@ -264,15 +271,16 @@ dbg "step session flags : ${SESSION_FLAGS[*]}"
 # prompt positionnel (mandat = MCP get_task, IV.4). PAS de script(1)/inner-script : le PTY est
 # tmux (bwrap_launch, N0) ⇒ exec direct = argv propre de bout en bout (lève F-1b-04). RC-at-startup
 # = flag --remote-control (PROVEN sous PTY 2026-05-31 ; accepté silencieusement hors --help ; sans
-# TTY le binaire bascule en --print-like — le PTY tmux assure le mode interactif RC). SP inline argv.
+# TTY le binaire bascule en --print-like — le PTY tmux assure le mode interactif RC).
+# SP via --system-prompt-file (HORS argv) : lu depuis $SP_FILE (.lcars/system-prompt.md), trusted+replace.
 # =============================================================
 
-dbg "step pre-exec claude --remote-control (perm=${PERM_FLAGS[*]} bin=$CLAUDE_BIN)"
+dbg "step pre-exec claude --remote-control (perm=${PERM_FLAGS[*]} bin=$CLAUDE_BIN sp_file=$SP_FILE)"
 exec "$CLAUDE_BIN" \
     --remote-control \
     "${SESSION_FLAGS[@]}" \
     --remote-control-session-name-prefix "$SESSION_NAME_PREFIX" \
-    --system-prompt "$SP" \
+    --system-prompt-file "$SP_FILE" \
     "${PERM_FLAGS[@]}" \
     --allowedTools "$ALLOWED_TOOLS" \
     --disallowedTools "$DISALLOWED_TOOLS" \

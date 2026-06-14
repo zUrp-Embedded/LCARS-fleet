@@ -14,8 +14,7 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
       pod_id: "pod-42",
       pod_dir: dir,
       launcher_path: launcher,
-      claude_launch_path: "/opt/claude_launch.sh",
-      sp: "# SP de test"
+      claude_launch_path: "/opt/claude_launch.sh"
     }
     |> Map.merge(Map.new(opts))
   end
@@ -28,9 +27,9 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
   end
 
   describe "build_spawn/1 (pur, anti-M1 vecteur)" do
-    test "vecteur exact launcher <role pod dir> claude <role pod dir sp> (SP en argv4 inline)" do
-      # R0.8-brick4 : budget retiré. Le SP composé est l'argv4 de claude_launch (inline, pas fichier
-      # masqué par le bind bwrap). Identité/session voyagent par l'ENV (launch/2), pas le vecteur.
+    test "vecteur exact launcher <role pod dir> claude <role pod dir> (SP HORS argv → --system-prompt-file)" do
+      # SP plus dans l'argv (fuite /proc/cmdline + ARG_MAX) : claude_launch le lit depuis
+      # .lcars/system-prompt.md via --system-prompt-file. Identité/session voyagent par l'ENV (launch/2).
       assert {:ok, "/b/bwrap.sh",
               [
                 "engineer",
@@ -39,16 +38,14 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
                 "/opt/claude_launch.sh",
                 "engineer",
                 "pod-42",
-                "/p",
-                "# SP composé du pod"
+                "/p"
               ]} =
                LauncherPortBackend.build_spawn(%{
                  role: "engineer",
                  pod_id: "pod-42",
                  pod_dir: "/p",
                  launcher_path: "/b/bwrap.sh",
-                 claude_launch_path: "/opt/claude_launch.sh",
-                 sp: "# SP composé du pod"
+                 claude_launch_path: "/opt/claude_launch.sh"
                })
     end
 
@@ -62,8 +59,7 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
                  pod_id: "pod-7",
                  pod_dir: "/p",
                  launcher_path: "/h/host_launch.sh",
-                 claude_launch_path: "/opt/claude_launch.sh",
-                 sp: "# SP arch"
+                 claude_launch_path: "/opt/claude_launch.sh"
                })
     end
 

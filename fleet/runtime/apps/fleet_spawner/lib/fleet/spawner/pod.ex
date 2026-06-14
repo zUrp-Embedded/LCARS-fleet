@@ -475,9 +475,8 @@ defmodule Fleet.Spawner.Pod do
       new_state =
         state
         |> Map.put(:phase, :injecting)
-        # SP composé stocké pour l'argv4 inline (do_launch) — la chaîne bwrap le passe en
-        # `--system-prompt` (inline), pas en fichier ; .lcars/system-prompt.md reste dispo en miroir.
-        |> Map.put(:sp, sp_compose.sp_md <> "\n\n---\n\n" <> agent_draft)
+        # SP plus stocké en state (plus en argv) : la SOURCE = .lcars/system-prompt.md (écrit ci-dessus),
+        # lu par claude_launch via --system-prompt-file. Supprime la fragilité sp=nil au recovery.
         |> add_condition(:home_projected)
 
       {:noreply, new_state, {:continue, :inject}}
@@ -895,10 +894,9 @@ defmodule Fleet.Spawner.Pod do
       # <command...>). Le command opaque (claude_launch.sh …) est claude_launch_path ci-dessous.
       launcher_path: launcher_path,
       claude_launch_path: claude_launch_path(),
-      session_id: state.session_id,
-      # SP composé inline (argv4 claude_launch) : le SP voyage en argv (--system-prompt), pas en
-      # fichier — contrat claude_launch.sh. (.lcars/system-prompt.md = miroir lisible côté pod.)
-      sp: state.sp
+      # SP plus dans l'argv (fuite /proc/cmdline + frôle ARG_MAX) : claude_launch lit
+      # pod_dir/.lcars/system-prompt.md via --system-prompt-file (écrit en do_project). C'est la SOURCE.
+      session_id: state.session_id
     }
 
     # F120 : la résolution humain + le pipeline env peuvent RAISE (runtime_user /

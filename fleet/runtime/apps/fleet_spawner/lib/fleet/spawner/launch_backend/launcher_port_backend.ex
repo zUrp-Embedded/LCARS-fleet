@@ -55,12 +55,13 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   (ordre/contenu du vecteur) → testé isolément.
 
   `<launcher_path> <role> <pod_id> <pod_dir>` puis `<command...>` =
-  `claude_launch <role> <pod_id> <pod_dir> <sp>`. `launcher_path` = bwrap_launch (défaut)
-  ou host_launch (containment: none) — **même argv** (LAUNCH-Q). Le **SP composé est
-  l'argv4** de claude_launch (inline, PAS un fichier). R0.8-brick4 : budget retiré (pas
-  d'API). Identité/session (`LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX`) voyagent
-  par l'ENV du Port (`launch/2` `env`), que bwrap_launch `--setenv` dans le pod (host_launch
-  l'hérite directement, sans namespace).
+  `claude_launch <role> <pod_id> <pod_dir>`. `launcher_path` = bwrap_launch (défaut)
+  ou host_launch (containment: none) — **même argv** (LAUNCH-Q). Le **SP n'est PLUS dans
+  l'argv** (fuite /proc/cmdline + ARG_MAX) : claude_launch le lit depuis
+  `pod_dir/.lcars/system-prompt.md` via `--system-prompt-file` (écrit par `Fleet.Spawner` do_project).
+  R0.8-brick4 : budget retiré (pas d'API). Identité/session
+  (`LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX`) voyagent par l'ENV du Port (`launch/2`
+  `env`), que bwrap_launch `--setenv` dans le pod (host_launch l'hérite directement, sans namespace).
   """
   @spec build_spawn(map()) :: {:ok, String.t(), [String.t()]} | {:error, term()}
   def build_spawn(%{
@@ -68,12 +69,14 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
         pod_id: pod_id,
         pod_dir: pod_dir,
         launcher_path: launcher,
-        claude_launch_path: claude,
-        sp: sp
+        claude_launch_path: claude
       })
       when is_binary(role) and is_binary(pod_id) and is_binary(pod_dir) and
-             is_binary(launcher) and is_binary(claude) and is_binary(sp) do
-    argv = [role, pod_id, pod_dir, claude, role, pod_id, pod_dir, sp]
+             is_binary(launcher) and is_binary(claude) do
+    # SP plus en argv (fuite /proc/cmdline + frôle ARG_MAX) : claude_launch le lit depuis
+    # pod_dir/.lcars/system-prompt.md via --system-prompt-file (vérifié empirique 2026-06-14, claude 2.1.177 :
+    # -file = replace + TRUSTED). Supprime aussi la fragilité sp=nil → :invalid_args au recovery.
+    argv = [role, pod_id, pod_dir, claude, role, pod_id, pod_dir]
     {:ok, launcher, argv}
   end
 
