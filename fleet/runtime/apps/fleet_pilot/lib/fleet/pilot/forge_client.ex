@@ -225,6 +225,76 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  # ============================================================
+  # Onboarding projet (Rail 1 e2e 2026-06-14) — création repo + issue.
+  # Greffe sur le plumbing http_post existant ; le token système (lcars-system)
+  # doit porter write:organization (repo) + write:issue.
+  # ============================================================
+
+  @doc """
+  Crée un repo sur la forge. `opts[:org]` → `POST /orgs/<org>/repos` (repo d'org) ; sinon
+  `POST /user/repos` (compte du token). `auto_init: true` par défaut (commit initial + README
+  → clonable tout de suite). Idempotent best-effort : repo déjà présent (HTTP 409) → `{:ok, :already_exists}`.
+
+  ## Returns
+    * `{:ok, full_name}` — repo créé (ex `"fleet/poc-helloworld"`)
+    * `{:ok, :already_exists}` — déjà présent (409)
+    * `{:error, term()}` — HTTP/transport/config
+  """
+  @spec create_repo(String.t(), Keyword.t()) ::
+          {:ok, String.t() | :already_exists} | {:error, term()}
+  def create_repo(name, opts \\ []) when is_binary(name) do
+    with {:ok, config} <- resolve_config(opts) do
+      body = %{
+        name: name,
+        description: Keyword.get(opts, :description, ""),
+        private: Keyword.get(opts, :private, false),
+        auto_init: Keyword.get(opts, :auto_init, true),
+        default_branch: Keyword.get(opts, :default_branch, "main")
+      }
+
+      path =
+        case Keyword.get(opts, :org) do
+          org when is_binary(org) and org != "" -> "/orgs/#{org}/repos"
+          _ -> "/user/repos"
+        end
+
+      case http_post(config, path, body) do
+        {:ok, %{"full_name" => full_name}} -> {:ok, full_name}
+        {:error, {:http, 409, _}} -> {:ok, :already_exists}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Crée une issue (ticket) sur `repo`. `opts[:assignees]` = logins, `opts[:labels]` = IDs entiers
+  (le label `type:*` de routage se pose plutôt via `add_label/4` après, résolution name→id).
+  Retourne le numéro d'issue.
+
+  ## Returns
+    * `{:ok, issue_number}` — issue créée
+    * `{:error, term()}` — HTTP/transport/config
+  """
+  @spec create_issue(String.t(), String.t(), String.t(), Keyword.t()) ::
+          {:ok, integer()} | {:error, term()}
+  def create_issue(repo, title, body, opts \\ [])
+      when is_binary(repo) and is_binary(title) and is_binary(body) do
+    with {:ok, config} <- resolve_config(opts) do
+      attrs = %{
+        title: title,
+        body: body,
+        assignees: Keyword.get(opts, :assignees, []),
+        labels: Keyword.get(opts, :labels, [])
+      }
+
+      case http_post(config, "/repos/#{repo}/issues", attrs) do
+        {:ok, %{"number" => number}} -> {:ok, number}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     case http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
       {:ok, comments} when is_list(comments) ->

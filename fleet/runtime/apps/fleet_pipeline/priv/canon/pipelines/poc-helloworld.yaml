@@ -1,0 +1,26 @@
+# Pipeline PoC — délégation hello-world (run live e2e 2026-06-14)
+#
+# But : prouver la chaîne de délégation minimale — l'engineer reçoit un mandat
+# (l'ask passe via le contexte start_pipeline → build_mandate), implémente, et
+# rend son livrable via submit_result. PAS de gate human-approval (caillou C1) ;
+# 1 seul stage pour isoler la mécanique avant d'enrichir (qualifier/reviewer/gate).
+#
+# Statut : draft défrichage — sera enrichi (gates qualité, clone forge, finish) une
+# fois la mécanique de base prouvée. Ne pas considérer comme canon.
+
+kind: Pipeline
+metadata:
+  name: poc-helloworld
+  description: "PoC délégation : engineer implémente hello_world (1 stage, no human-gate)"
+
+spec:
+  stages:
+    implement:
+      role: engineer
+      profile: fire-mode   # NB: `profile` = MODOP overlay (pas le fichier cap-profile) ; `role` charge engineer.yaml. (dette C8: canon pipelines mal-authorés profile=<role>.yaml)
+      needs: []
+      inputs:
+        - ticket.body
+      outputs:
+        - deliverable
+      timeout_sec: 1800

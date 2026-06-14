@@ -442,7 +442,7 @@ defmodule Fleet.Spawner.Pod do
            SPBuilder.compose(state.cap_profile, [], pod_id: state.pod_id, job_id: state.ticket_id),
          {:ok, claude_md} <- SPBuilder.compose_claude_md(state.cap_profile, maybe_path(repo_md)),
          {:ok, _skills_paths} <- maybe_filter_skills(state.cap_profile, skills_root),
-         {:ok, agent_draft} <- read_agent_worker_draft(),
+         {:ok, agent_draft} <- read_agent_draft(state.cap_profile),
          {:ok, protocole_user} <- read_protocole_user(),
          :ok <- safe_mkdir_p(lcars_dir),
          # `.claude/` pod-owned = cible du bind creds-only (bwrap_launch). On ne crée QUE le dir,
@@ -525,12 +525,21 @@ defmodule Fleet.Spawner.Pod do
   # SP draft minimal POC — déclare le rôle agent worker + workflow yop →
   # get_task → submit_result + convention de retour (ok|failed). Le SP
   # final par rôle = chantier séparé post-code.
-  defp read_agent_worker_draft do
-    path = Application.app_dir(:fleet_sp_builder, "priv/sp_drafts/agent-worker-base.md")
+  # Draft SP role-aware (Rail 2 e2e 2026-06-14) : l'architecte reçoit un draft DÉLÉGATEUR
+  # (les 2 leviers qualité+économie + create_ticket), les workers le draft get_task/submit_result.
+  # Sélection par metadata.name (string-keyed). Défaut = worker.
+  defp read_agent_draft(%Fleet.CapProfile{metadata: meta}) do
+    file =
+      case Map.get(meta || %{}, "name", "") do
+        "architect-interactive" -> "priv/sp_drafts/agent-architect-base.md"
+        _ -> "priv/sp_drafts/agent-worker-base.md"
+      end
+
+    path = Application.app_dir(:fleet_sp_builder, file)
 
     case File.read(path) do
       {:ok, content} -> {:ok, content}
-      {:error, reason} -> {:error, {:agent_worker_draft_missing, path, reason}}
+      {:error, reason} -> {:error, {:agent_draft_missing, path, reason}}
     end
   end
 

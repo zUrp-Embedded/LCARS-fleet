@@ -48,6 +48,29 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "create_ticket" do
+    meta do
+      name("Create Ticket")
+
+      description(
+        "Délègue une tâche d'implémentation à la fleet LCARS : crée un ticket (issue forge) ET " <>
+          "lance le pipeline de réalisation (engineer → gates → livré). Utilise-le pour DÉLÉGUER " <>
+          "plutôt que de coder toi-même (la fleet livre mieux et préserve ton contexte). " <>
+          "`brief` = le mandat clair pour l'engineer. Retourne {\"status\":\"delegated\",...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "title" => %{"type" => "string"},
+        "brief" => %{"type" => "string"},
+        "pipeline" => %{"type" => "string"}
+      },
+      "required" => ["title", "brief"]
+    })
+  end
+
   @impl true
   def handle_tool_call("get_task", arguments, state) do
     case pod_id(arguments) do
@@ -97,6 +120,46 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("submit_result", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  # create_ticket (Rail 2 e2e 2026-06-14) — canal DÉLÉGATION : l'architecte délègue une
+  # implémentation à la fleet. Crée l'issue forge (traçabilité) + lance le pipeline. Dispatch
+  # runtime via modules-en-variable (pas de dep compile-time fleet_pilot/fleet_pipeline).
+  def handle_tool_call("create_ticket", %{"title" => title, "brief" => brief} = args, state)
+      when is_binary(title) and is_binary(brief) do
+    repo = Application.get_env(:fleet_mcp, :delegation_repo, "fleet/fleet-test")
+
+    pipeline =
+      Map.get(args, "pipeline") ||
+        Application.get_env(:fleet_mcp, :delegation_pipeline, "poc-helloworld")
+
+    forge = Fleet.Pilot.ForgeClient
+    pipe = Fleet.Pipeline
+
+    ticket_id =
+      case apply(forge, :create_issue, [repo, title, brief, []]) do
+        {:ok, number} -> "#{repo}##{number}"
+        _ -> "deleg-#{System.unique_integer([:positive])}"
+      end
+
+    case apply(pipe, :start_pipeline, [pipeline, %{ticket_id: ticket_id, ask: brief}]) do
+      {:ok, pipeline_id} ->
+        result = %{
+          "status" => "delegated",
+          "ticket" => ticket_id,
+          "pipeline" => pipeline,
+          "pipeline_id" => pipeline_id
+        }
+
+        {:ok, %{content: [json(result)]}, state}
+
+      {:error, reason} ->
+        {:error, {:delegation_failed, inspect(reason)}, state}
+    end
+  end
+
+  def handle_tool_call("create_ticket", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
