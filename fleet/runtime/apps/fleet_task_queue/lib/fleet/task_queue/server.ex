@@ -163,7 +163,14 @@ defmodule Fleet.TaskQueue.Server do
 
             broadcast(
               new_state,
-              event(:task_completed, completed, %{task_id: completed.id, result: result})
+              # role/ticket_id additifs (traça 2026-06-14 : le DeliveryPublisher stampe l'identité de
+              # l'agent d'origine sur le commit forge). Les consumers existants ignorent les clés extra.
+              event(:task_completed, completed, %{
+                task_id: completed.id,
+                role: completed.role,
+                ticket_id: completed.ticket_id,
+                result: result
+              })
             )
 
             {:reply, {:ok, completed}, new_state}

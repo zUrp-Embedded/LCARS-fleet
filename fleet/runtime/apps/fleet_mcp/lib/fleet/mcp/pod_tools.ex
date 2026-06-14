@@ -137,8 +137,13 @@ defmodule Fleet.MCP.PodTools do
     forge = Fleet.Pilot.ForgeClient
     pipe = Fleet.Pipeline
 
+    # Traça : stampe l'ORIGINE (l'arch) sur l'issue. Le système crée l'issue (token système) MAIS
+    # trace QUI a délégué (l'arch appelant ; son pod_id injecté par le bridge MCP).
+    origin = Map.get(args, "_lcars_pod_id", "architect")
+    issue_body = "_Délégué par l'architecte (pod `#{origin}`) via la fleet LCARS._\n\n" <> brief
+
     ticket_id =
-      case apply(forge, :create_issue, [repo, title, brief, []]) do
+      case apply(forge, :create_issue, [repo, title, issue_body, []]) do
         {:ok, number} -> "#{repo}##{number}"
         _ -> "deleg-#{System.unique_integer([:positive])}"
       end

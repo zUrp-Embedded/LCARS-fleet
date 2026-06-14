@@ -42,28 +42,39 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
   def handle_info(_other, state), do: {:noreply, state}
 
   defp publish(payload) when is_map(payload) do
-    task_id = payload[:task_id] || payload["task_id"] || "unknown"
+    role = payload[:role] || payload["role"]
+
+    ticket =
+      payload[:ticket_id] || payload["ticket_id"] || to_string(payload[:task_id] || "unknown")
+
     result = payload[:result] || payload["result"] || %{}
     deliverables = extract_deliverables(result)
     publishable = Enum.filter(deliverables, fn d -> is_map(d) and is_binary(d["content"]) end)
 
     if publishable != [] do
       repo = Application.get_env(:fleet_mcp, :delegation_repo, "fleet/fleet-test")
-      ns = "deliverables/" <> sanitize(to_string(task_id))
+      ns = "deliverables/" <> sanitize(ticket)
       forge = Fleet.Pilot.ForgeClient
+
+      # Traça : le commit forge porte l'identité de l'agent d'ORIGINE (le rôle), pas le compte système.
+      author = author_for(role)
+
+      trailer =
+        if is_binary(role),
+          do: "\n\nCo-authored-by: LCARS-#{role} <#{role}@lcars.local>",
+          else: ""
 
       published =
         Enum.reduce(publishable, 0, fn d, acc ->
           path = ns <> "/" <> sanitize_path(d["path"] || "file")
+          opts = [message: "feat(fleet): livrable #{path} (delegation)" <> trailer] ++ author
 
-          case apply(forge, :put_file, [
-                 repo,
-                 path,
-                 d["content"],
-                 [message: "feat(fleet): livrable #{path} (delegation)"]
-               ]) do
+          case apply(forge, :put_file, [repo, path, d["content"], opts]) do
             {:ok, _} ->
-              Logger.info("DeliveryPublisher: publié #{repo}/#{path}")
+              Logger.info(
+                "DeliveryPublisher: publié #{repo}/#{path} (author=#{author_label(role)})"
+              )
+
               acc + 1
 
             {:error, reason} ->
@@ -73,7 +84,8 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
         end)
 
       Logger.info(
-        "DeliveryPublisher: #{published}/#{length(publishable)} livrable(s) gravé(s) sur #{repo} (task #{task_id})"
+        "DeliveryPublisher: #{published}/#{length(publishable)} livrable(s) gravé(s) sur #{repo} " <>
+          "(ticket #{ticket}, author #{author_label(role)})"
       )
     end
   rescue
@@ -81,6 +93,16 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
   end
 
   defp publish(_), do: :ok
+
+  # author Keyword pour put_file : identité du RÔLE d'origine (forge-aveugle = le système écrit, mais
+  # AU NOM de l'agent). [] si rôle inconnu → put_file commit avec le compte système (fallback).
+  defp author_for(role) when is_binary(role) and role != "",
+    do: [author: %{name: "LCARS-#{role}", email: "#{role}@lcars.local"}]
+
+  defp author_for(_), do: []
+
+  defp author_label(role) when is_binary(role) and role != "", do: "LCARS-#{role}"
+  defp author_label(_), do: "système"
 
   # deliverables au top-level OU enveloppés sous "result" (l'engineer enveloppe parfois).
   defp extract_deliverables(%{"deliverables" => d}) when is_list(d), do: d

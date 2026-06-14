@@ -318,6 +318,9 @@ defmodule Fleet.Pilot.ForgeClient do
           branch: Keyword.get(opts, :branch, "main")
         }
         |> maybe_put_new_branch(Keyword.get(opts, :new_branch))
+        # Traça (2026-06-14) : `author: %{name, email}` → le SYSTÈME fait l'I/O (token système) MAIS
+        # le commit porte l'identité de l'agent d'origine (forge-aveugle ≠ écrire en son propre nom).
+        |> maybe_put_author(Keyword.get(opts, :author))
 
       case http_put(config, "/repos/#{repo}/contents/#{path}", body) do
         {:ok, %{"commit" => %{"sha" => sha}}} -> {:ok, sha}
@@ -329,6 +332,12 @@ defmodule Fleet.Pilot.ForgeClient do
 
   defp maybe_put_new_branch(body, nil), do: body
   defp maybe_put_new_branch(body, nb) when is_binary(nb), do: Map.put(body, :new_branch, nb)
+
+  defp maybe_put_author(body, %{name: name, email: email})
+       when is_binary(name) and is_binary(email),
+       do: Map.put(body, :author, %{name: name, email: email})
+
+  defp maybe_put_author(body, _), do: body
 
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     case http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
