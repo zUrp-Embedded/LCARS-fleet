@@ -56,11 +56,14 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
       ns = "deliverables/" <> sanitize(ticket)
       forge = Fleet.Pilot.ForgeClient
 
-      # Traça 2 NIVEAUX (git-natif) : `author` = le WORKER (qui a écrit), `committer` = l'HUMAIN
-      # commanditaire (qui a fait bosser la fleet — git config du runtime). Le système fait l'I/O,
-      # le commit attribue les deux niveaux. forge-aveugle préservé (le pod ne pousse jamais).
+      # Traça 3 NIVEAUX : `author` = le WORKER, `committer` = l'HUMAIN commanditaire (linké au compte
+      # forge par email), `pusher` (feed « a soumis ») = le token qui authentifie le put_file → le token
+      # OPÉRATEUR (Starfleet, git config runtime ou config :delivery_push_token). PAS de fallback : si le
+      # token opérateur n'a pas `write:repository`, le put_file échoue (loggué) — on attend le token carré,
+      # on ne masque pas. forge-aveugle préservé (le pod ne pousse jamais).
       author = author_for(role)
       committer = committer_human()
+      push = push_token_opt()
 
       published =
         Enum.reduce(publishable, 0, fn d, acc ->
@@ -68,7 +71,7 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
 
           opts =
             [message: "feat(fleet): livrable #{path} (delegation #{ticket})"] ++
-              author ++ committer
+              author ++ committer ++ push
 
           case apply(forge, :put_file, [repo, path, d["content"], opts]) do
             {:ok, _} ->
@@ -122,6 +125,34 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
 
   defp committer_label(committer: %{name: name}), do: name
   defp committer_label(_), do: "système"
+
+  # token OPÉRATEUR pour le push du livrable : config `:delivery_push_token` si posée, sinon lu du
+  # git extraheader du repo runtime (le MÊME token que le push de code — pas de doublon). [] si introuvable.
+  defp push_token_opt do
+    case Application.get_env(:fleet_pipeline, :delivery_push_token) || read_git_push_token() do
+      t when is_binary(t) and t != "" -> [token: t]
+      _ -> []
+    end
+  end
+
+  defp read_git_push_token do
+    root = Application.get_env(:fleet_pipeline, :delivery_push_repo_root, "/home/projects/LCARS")
+
+    case System.cmd("git", ["-C", root, "config", "--get-regexp", ~S/http\..*\.extraheader/],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} ->
+        case Regex.run(~r/[Tt]oken\s+(\S+)/, out) do
+          [_, tok] -> tok
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
 
   # deliverables au top-level OU enveloppés sous "result" (l'engineer enveloppe parfois).
   defp extract_deliverables(%{"deliverables" => d}) when is_list(d), do: d
