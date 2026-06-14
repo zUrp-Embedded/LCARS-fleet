@@ -22,7 +22,11 @@ defmodule Fleet.Pipeline.Executor do
      (source `:pipeline`) et `:"pod.completed"` (source `:spawner`, bridge C1)
      pour le `pipeline_id` courant → store outputs → dispatch gate :
      - `:pass` → stage suivant ou `pipeline.completed` broadcast + stop
-     - `{:fail, reason}` → `pipeline.failed` broadcast + stop
+     - `{:fail, reason}` (F150) → **retry borné système-side** (`reject_stage`) :
+       compteur per-stage `retry_counts` (l'Executor = le système, JAMAIS le pod) ;
+       `n < stage_max_retries` (défaut 3) → re-dispatch du stage (`reason` injectée
+       au `mandate_context`) ; au seuil → **interception** = mandat de DIAGNOSTIC au
+       gatekeeper (`dispatch_gatekeeper_diagnosis`, routing via `handle_gate_decision`).
      - `{:dispatch_gatekeeper, info}` (R4/B) → **enqueue un mandat d'éval au
        gatekeeper permanent** (work-session, adressé par `gatekeeper_pod_id`, MCP
        via TaskQueue) ; état `:awaiting_gate` (corrélation `gate_evals[correlation_id]`).
@@ -65,7 +69,12 @@ defmodule Fleet.Pipeline.Executor do
             # O5 (F-03) — `base_sha` capturée HORS-pod juste après provision (clone+checkout),
             # AVANT spawn. Verrou de la gate `DeliverableGate.check_base_ancestor` : le pod ne peut
             # pas la falsifier (il n'existe pas encore quand on la lit). Keyed par stage.
-            base_shas: %{}
+            base_shas: %{},
+            # F150 — compteur de FAIL par stage, maintenu par le SYSTÈME (l'Executor), JAMAIS par le pod
+            # (on ne fait pas confiance à l'agent : il loopera jusqu'à la mort). À chaque rejet hard-gate
+            # `{:fail}` : +1 ; tant que < `stage_max_retries` (défaut 3) → re-dispatch du stage ; au seuil
+            # → interception (mandat de DIAGNOSTIC au gatekeeper). Keyed par stage.
+            retry_counts: %{}
 
   @type t :: %__MODULE__{
           pipeline_id: term(),
@@ -75,7 +84,8 @@ defmodule Fleet.Pipeline.Executor do
           outputs: %{optional(String.t()) => map()},
           mandate_context: map(),
           gate_evals: %{optional(term()) => map()},
-          base_shas: %{optional(String.t()) => String.t()}
+          base_shas: %{optional(String.t()) => String.t()},
+          retry_counts: %{optional(String.t()) => non_neg_integer()}
         }
 
   # ============================================================
@@ -341,14 +351,12 @@ defmodule Fleet.Pipeline.Executor do
         state = maybe_post_extract_git(stage, stage_spec, outputs, state)
         next_stage_or_done(state)
 
+      # F150 — un FAIL hard-gate ne tue PLUS le pipeline au 1er coup : le système compte et RETRY (borné),
+      # puis intercepte au seuil (diagnostic gatekeeper). Hard-gate = livrable déterministe rejeté (ex.
+      # tests) → un retry a un sens (l'eng REFAIT avec le feedback). [Choix : axe hard-gate ; la sémantique
+      # soft-gate/gatekeeper-redirect reste inchangée — cf. PLAN-CHANTIER §F150 fork 1.]
       {:fail, reason} ->
-        Logger.warning(
-          "fleet_pipeline gate fail: pipeline=#{inspect(state.pipeline_id)} stage=#{stage} reason=#{reason}"
-        )
-
-        broadcast_pipeline_failed(state, stage, reason)
-
-        {:stop, {:shutdown, :gate_fail}, state}
+        reject_stage(stage, reason, state)
 
       # R4/B — gate déléguée au gatekeeper (juge unique, pod permanent
       # work-session). L'Executor **n'avance pas** : il enqueue un mandat d'éval
@@ -368,38 +376,114 @@ defmodule Fleet.Pipeline.Executor do
   # ⚠ Le boot/registration du gatekeeper permanent (Type 3) alimente `gatekeeper_pod_id`
   # (sous-lot C). Le contenu du brief d'éval = sous-lot D (ici : stage + gate + outputs).
   defp do_dispatch_gatekeeper(stage, outputs, info, state) do
+    gate = get_in(state.pipeline, ["stages", stage, "gate"])
+
+    brief =
+      Fleet.Pipeline.GateBrief.build(%{
+        stage: stage,
+        pipeline_id: state.pipeline_id,
+        gate: gate,
+        outputs: outputs
+      })
+
+    metadata = %{
+      "gate_eval" => true,
+      "stage" => stage,
+      "pipeline_id" => state.pipeline_id,
+      "gate" => gate,
+      "outputs" => outputs
+    }
+
+    enqueue_gatekeeper_mandate(brief, metadata, info, stage, state)
+  end
+
+  # F150 — un stage a été REJETÉ par sa hard-gate (`{:fail}`). Le SYSTÈME (l'Executor, autorité per-run)
+  # compte et décide ; le pod ne participe PAS au compteur (un agent s'acharnerait à l'infini). Sous le
+  # seuil → retry borné (re-dispatch) ; au seuil → interception (diagnostic gatekeeper). Remplace l'ancien
+  # « 1er FAIL = pipeline mort ». Le retry borné lève la crainte de `gates.ex` (« :retry re-spawnerait en
+  # boucle ») : la borne EST le garde-fou.
+  defp reject_stage(stage, reason, state) do
+    max = stage_max_retries()
+    n = Map.get(state.retry_counts, stage, 0) + 1
+    state = %{state | retry_counts: Map.put(state.retry_counts, stage, n)}
+
+    if n < max do
+      Logger.warning(
+        "fleet_pipeline stage rejeté (#{n}/#{max}) → retry: pipeline=#{inspect(state.pipeline_id)} " <>
+          "stage=#{stage} reason=#{reason}"
+      )
+
+      # Feedback (fork 3) : la raison du FAIL voyage dans le `mandate_context` du re-dispatch → l'eng REFAIT
+      # en sachant quoi corriger (sinon il re-FAIL à l'identique). Re-dispatch = `do_run_stage` (re-spawn
+      # d'un pod frais : le pod précédent a livré + release ; cohérent avec le dispatch initial). [fork 2]
+      state = %{
+        state
+        | mandate_context:
+            Map.put(state.mandate_context, "previous_failure", %{
+              "stage" => stage,
+              "attempt" => n,
+              "reason" => reason
+            }),
+          stages_status: Map.put(state.stages_status, stage, :pending)
+      }
+
+      do_run_stage(stage, state)
+    else
+      Logger.warning(
+        "fleet_pipeline stage #{max} FAILs → INTERCEPTION (diagnostic gatekeeper): " <>
+          "pipeline=#{inspect(state.pipeline_id)} stage=#{stage} reason=#{reason}"
+      )
+
+      dispatch_gatekeeper_diagnosis(stage, reason, n, state)
+    end
+  end
+
+  # F150 — au seuil de retry le système n'abandonne ni ne loope : il INTERCEPTE et confie au gatekeeper
+  # (juge unique) un mandat de DIAGNOSTIC (distinct d'une éval de gate) — « le mandat est-il mal construit
+  # (→ `redirect` arch) ou un autre problème (→ `escalate_user`/`abandon`) ? ». La décision revient par le
+  # MÊME chemin que les gates (`handle_gate_decision`). Générique (role-agnostic) même si seul l'eng la
+  # déclenche aujourd'hui. Le vocab `gate-decision-v1` couvre déjà le routing (`redirect`=renvoi arch).
+  defp dispatch_gatekeeper_diagnosis(stage, reason, attempts, state) do
+    request =
+      "DIAGNOSTIC retry_exhausted — le livrable du stage `#{stage}` a été REJETÉ #{attempts} fois " <>
+        "(dernier motif : #{reason}). Le retry borné système est épuisé. Tranche la CAUSE : si le MANDAT " <>
+        "est mal construit (trop gros, ambigu, contradictoire) → `redirect` (renvoi architecte pour " <>
+        "re-cadrage) ; sinon → `escalate_user` ou `abandon`. PAS de `continue` (le livrable n'a pas passé la gate)."
+
+    brief =
+      Fleet.Pipeline.GateBrief.build(%{
+        stage: stage,
+        pipeline_id: state.pipeline_id,
+        gate: get_in(state.pipeline, ["stages", stage, "gate"]),
+        outputs: Map.get(state.outputs, stage, %{}),
+        request: request
+      })
+
+    metadata = %{
+      "gate_eval" => true,
+      "diagnosis" => "retry_exhausted",
+      "stage" => stage,
+      "pipeline_id" => state.pipeline_id,
+      "attempts" => attempts
+    }
+
+    enqueue_gatekeeper_mandate(brief, metadata, %{kind: :retry_exhausted}, stage, state)
+  end
+
+  # R4/B — enqueue + kick + corrélation d'un mandat au gatekeeper permanent (work-session). Partagé par
+  # l'éval de gate (soft/terminal) ET le diagnostic F150 : même transport MCP, même corrélation
+  # `gate_evals[corr]`, même fail-loud (jamais un pass silencieux). `info` porte `:kind` (gate vs
+  # `:retry_exhausted`) → tracé dans le log + le handoff.
+  defp enqueue_gatekeeper_mandate(brief, metadata, info, stage, state) do
     case gatekeeper_pod_id() do
       pod_id when is_binary(pod_id) ->
-        gate = get_in(state.pipeline, ["stages", stage, "gate"])
-
-        brief =
-          Fleet.Pipeline.GateBrief.build(%{
-            stage: stage,
-            pipeline_id: state.pipeline_id,
-            gate: gate,
-            outputs: outputs
-          })
-
-        attrs = %{
-          role: "gatekeeper",
-          brief: brief,
-          metadata: %{
-            "gate_eval" => true,
-            "stage" => stage,
-            "pipeline_id" => state.pipeline_id,
-            "gate" => gate,
-            "outputs" => outputs
-          }
-        }
+        attrs = %{role: "gatekeeper", brief: brief, metadata: metadata}
 
         case task_queue().enqueue(pod_id, attrs) do
           {:ok, %{id: corr}} ->
-            # R3b / F-C4b-2 — KICK le gatekeeper après l'enqueue. Le gatekeeper est un
-            # pod PERMANENT déjà booté+idle (:monitoring) : son kick-loop de boot est fini,
-            # ce mandat de gate arrive APRÈS → sans wake il ne pull jamais (gate qui stalle,
-            # observé C4b). Même mécanique que StageRunner.wake_existing_pod (push + wake).
-            # Best-effort : le mandat est enqueué quoi qu'il arrive ; un wake raté → warn
-            # (le gatekeeper, déjà ready, le reçoit normalement).
+            # R3b / F-C4b-2 — KICK le gatekeeper après l'enqueue : pod PERMANENT déjà booté+idle, son
+            # kick-loop de boot est fini → sans wake il ne pull jamais (gate qui stalle, observé C4b).
+            # Best-effort : le mandat est enqueué quoi qu'il arrive ; un wake raté → warn.
             case spawner().wake_pod(pod_id) do
               :ok ->
                 :ok
@@ -434,6 +518,11 @@ defmodule Fleet.Pipeline.Executor do
     end
   end
 
+  # F150 — borne du retry système (défaut 3 : au 3e FAIL on intercepte). Config-overridable.
+  defp stage_max_retries do
+    Application.get_env(:fleet_pipeline, :stage_max_retries, 3)
+  end
+
   # R4/B — décision du gatekeeper reçue (mandat MCP complété, corrélé par
   # `correlation_id`). Vocabulaire canon `gate-decision-v1.json` :
   # `continue` → avance ; `abandon|redirect|escalate_user|halt_wait_input` → halt
@@ -450,14 +539,27 @@ defmodule Fleet.Pipeline.Executor do
         "stage=#{stage} kind=#{info.kind} decision=#{inspect(decision)}"
     )
 
-    case decision do
-      "continue" ->
+    case {info.kind, decision} do
+      # F150 — un mandat de DIAGNOSTIC `:retry_exhausted` ne peut JAMAIS rendre `continue` : le livrable a
+      # déjà échoué la hard-gate `stage_max_retries` fois (le compteur n'est PAS remis à zéro, le stage
+      # reste `:completed` mais INVALIDE). Un `continue` du gatekeeper sur ce mandat = enforcement code-side
+      # → halt fail-closed (le `request` du brief le dit, mais on ne fait pas confiance au seul texte).
+      {:retry_exhausted, "continue"} ->
+        broadcast_pipeline_failed(
+          state,
+          stage,
+          "diagnostic retry_exhausted: décision `continue` INVALIDE (livrable jamais validé par la gate) — halt fail-closed"
+        )
+
+        {:stop, {:shutdown, :gate_halt}, state}
+
+      {_kind, "continue"} ->
         stage_spec = state.pipeline["stages"][stage]
         outputs = Map.get(state.outputs, stage, %{})
         state = maybe_post_extract_git(stage, stage_spec, outputs, state)
         next_stage_or_done(state)
 
-      other ->
+      {_kind, other} ->
         broadcast_pipeline_failed(state, stage, gate_halt_reason(other, result))
         {:stop, {:shutdown, :gate_halt}, state}
     end

@@ -31,6 +31,9 @@ defmodule Fleet.Pipeline.GatePendingStageStub do
   @impl Fleet.Pipeline.StageSpawner
   def spawn_stage_pod(_role, _profile, ctx) do
     send(:gate_probe, {:spawned, ctx.stage})
+
+    # F150 — expose le mandate_context du spawn (le test vérifie que `previous_failure` y arrive au retry).
+    send(:gate_probe, {:stage_ctx, ctx.stage, ctx.mandate})
     {:ok, "pod-#{ctx.stage}"}
   end
 end
@@ -54,6 +57,7 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
 
     write_pipeline(tmp_dir, "softgate", soft_gate_yaml())
     write_pipeline(tmp_dir, "termgate", terminal_gate_yaml())
+    write_pipeline(tmp_dir, "failgate", fail_gate_yaml())
 
     Application.put_env(:fleet_pipeline, :pipelines_root, tmp_dir)
     # Stage pods : spawn no-emit (la complétion de stage est pilotée à la main).
@@ -115,6 +119,22 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
               required: false
               match:
                 clean: true
+    """
+  end
+
+  # F150 — hard gate dont la `rule` ne matche JAMAIS l'output `%{"ok" => true}` ⇒ `{:fail}` déterministe.
+  defp fail_gate_yaml do
+    """
+    name: failgate
+    version: 1
+    stages:
+      build:
+        role: engineer
+        profile: empty
+        gate:
+          type: hard
+          rule:
+            passed: true
     """
   end
 
@@ -305,5 +325,85 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
                    5_000
 
     assert reason =~ "enqueue failed"
+  end
+
+  # ── F150 — retry borné système-side + interception au seuil ───────────────────
+  test "F150 — hard-gate FAIL : retry borné par le SYSTÈME, puis interception gatekeeper au seuil" do
+    {:ok, pid} = Pipeline.start_pipeline("failgate", %{ticket_id: "f150"})
+    assert_receive {:spawned, "build"}, 5_000
+
+    # 1er FAIL → le système RETRY (re-spawn le stage) ; il ne tue PAS le pipeline (≠ ancien
+    # comportement « 1er FAIL = pipeline mort »). Le compteur vit dans l'Executor, pas le pod.
+    complete_stage(pid, "build")
+    assert_receive {:spawned, "build"}, 5_000
+
+    # Feedback (fork 3) : le re-dispatch porte `previous_failure` (raison + tentative) → l'eng REÇOIT
+    # quoi corriger (pas juste un re-spawn aveugle). Pattern sélectif : le spawn INITIAL n'a pas la clé.
+    assert_receive {:stage_ctx, "build",
+                    %{"previous_failure" => %{"attempt" => 1, "reason" => _}}},
+                   5_000
+
+    # 2e FAIL → retry encore (toujours sous le seuil 3).
+    complete_stage(pid, "build")
+    assert_receive {:spawned, "build"}, 5_000
+
+    # 3e FAIL → INTERCEPTION : mandat de DIAGNOSTIC au gatekeeper (PAS un 4e retry infini).
+    complete_stage(pid, "build")
+    assert_receive {:enqueued, corr, "gk-permanent", "build"}, 5_000
+    assert_receive {:brief, brief}, 5_000
+    assert brief =~ "retry_exhausted"
+    # Le brief cadre le diagnostic : mandat mal construit → `redirect` (renvoi arch).
+    assert brief =~ "redirect"
+
+    # La décision du diagnostic revient par le MÊME chemin que les gates (handle_gate_decision) :
+    # `redirect` (mandat mal construit → renvoi arch) → halt, décision portée pour le handoff aval.
+    complete_gate(corr, %{"decision" => "redirect", "reason" => "mandat trop gros"})
+
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.failed",
+                     payload: %{"pipeline_id" => ^pid}
+                   },
+                   5_000
+  end
+
+  test "F150 — borne configurable : stage_max_retries=1 → interception au 1er FAIL (zéro retry)" do
+    Application.put_env(:fleet_pipeline, :stage_max_retries, 1)
+    on_exit(fn -> Application.delete_env(:fleet_pipeline, :stage_max_retries) end)
+
+    {:ok, pid} = Pipeline.start_pipeline("failgate", %{ticket_id: "f150max1"})
+    assert_receive {:spawned, "build"}, 5_000
+
+    # max=1 → n=1 n'est PAS < 1 → interception immédiate, AUCUN re-spawn de "build".
+    complete_stage(pid, "build")
+    assert_receive {:enqueued, _corr, "gk-permanent", "build"}, 5_000
+    refute_received {:spawned, "build"}
+  end
+
+  test "F150 — diagnostic qui revient `continue` → halt fail-closed (JAMAIS avancer un livrable non validé)" do
+    # Un livrable qui a échoué la gate au seuil NE doit pas avancer même si le gatekeeper rend `continue`
+    # (le brief l'interdit, mais on ne fait pas confiance au seul texte : enforcement code-side).
+    Application.put_env(:fleet_pipeline, :stage_max_retries, 1)
+    on_exit(fn -> Application.delete_env(:fleet_pipeline, :stage_max_retries) end)
+
+    {:ok, pid} = Pipeline.start_pipeline("failgate", %{ticket_id: "f150cont"})
+    assert_receive {:spawned, "build"}, 5_000
+    complete_stage(pid, "build")
+    assert_receive {:enqueued, corr, "gk-permanent", "build"}, 5_000
+
+    complete_gate(corr, %{
+      "decision" => "continue",
+      "reason" => "(le gatekeeper tente d'avancer à tort)"
+    })
+
+    assert_receive %Fleet.Event{
+                     source: :pipeline,
+                     type: :"pipeline.failed",
+                     payload: %{"pipeline_id" => ^pid, "reason" => reason}
+                   },
+                   5_000
+
+    assert reason =~ "continue` INVALIDE"
+    refute_received %Fleet.Event{type: :"pipeline.completed"}
   end
 end

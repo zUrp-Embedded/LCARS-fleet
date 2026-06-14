@@ -1,7 +1,7 @@
 # fleet_pipeline (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-05 (R4 D5 — `count_running/0` + gate `:quiescing` sur `start_pipeline/3` (drain shutdown) ; R4 — gate inférentielle = mandat MCP au gatekeeper permanent (Type 3), vocab canon, `Fleet.Pipeline.Gatekeeper` boot/registration ; R3 — Loader-normalizer v2.5/U1, prédicats Gates)
+**Dernière révision** : 2026-06-14 (R4 D5 — `count_running/0` + gate `:quiescing` sur `start_pipeline/3` (drain shutdown) ; R4 — gate inférentielle = mandat MCP au gatekeeper permanent (Type 3), vocab canon, `Fleet.Pipeline.Gatekeeper` boot/registration ; R3 — Loader-normalizer v2.5/U1, prédicats Gates)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
@@ -89,6 +89,26 @@ v1, `inputs` = array `{from_stage, key}` et `gate.rule(s)` = maps.
   **même dispatch gatekeeper** que `soft`). v2.5 `rules` strings → tous vrais →
   `:pass`. `rules` OPTIONNEL (gate `finish`). **`human_approval_required: true`
   → HALT fail-closed `{:fail}`** (le moteur mécanique n'auto-approuve jamais).
+
+### F150 — retry borné système-side sur FAIL hard-gate
+
+Un `{:fail}` hard-gate (livrable déterministe rejeté, ex. tests rouges) ne tue
+**plus** le pipeline au 1er coup. Le **système** (l'Executor — JAMAIS le pod : un
+agent s'acharnerait à l'infini) tient un compteur per-stage (`retry_counts` dans
+son state) et **RETRY le stage** (re-dispatch d'un pod frais via `do_run_stage`,
+la `reason` du FAIL injectée dans le `mandate_context` → l'eng refait en sachant
+quoi corriger) tant que `n < stage_max_retries` (config `:fleet_pipeline,
+:stage_max_retries`, défaut **3**).
+
+Au seuil, le système **n'abandonne ni ne loope** : il **INTERCEPTE** et confie au
+gatekeeper un mandat de **DIAGNOSTIC** (`dispatch_gatekeeper_diagnosis`, distinct
+d'une éval de gate) — *« le mandat est-il mal construit (→ `redirect` renvoi arch)
+ou un autre problème (→ `escalate_user`/`abandon`) ? »*. La décision revient par le
+**même chemin** que les gates (`handle_gate_decision`, vocab `gate-decision-v1`).
+La borne EST le garde-fou contre le re-spawn-en-boucle que `Gates` craignait. Le
+mécanisme est **générique** (role-agnostic) même si seul l'eng le déclenche
+aujourd'hui. *(La sémantique soft-gate/gatekeeper-redirect reste inchangée — fork
+ouvert, cf. PLAN-CHANTIER §F150.)*
 
 ### Décision du gatekeeper (vocab canon)
 

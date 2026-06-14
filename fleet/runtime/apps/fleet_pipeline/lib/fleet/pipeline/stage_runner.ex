@@ -253,6 +253,9 @@ defmodule Fleet.Pipeline.StageRunner do
     [
       if(is_binary(stage), do: "Stage : #{stage}"),
       if(not is_nil(mandate), do: "Mandat : #{inspect(mandate)}"),
+      # F150 — feedback de retry LISIBLE (pas enfoui dans l'inspect du mandate_context) : si ce stage est
+      # un RE-dispatch après un FAIL gate, l'eng voit explicitement quoi corriger avant de re-livrer.
+      prev_failure_line(mandate),
       if(is_map(inputs) and map_size(inputs) > 0,
         do: "Inputs (stages amont) : #{inspect(inputs)}"
       ),
@@ -265,6 +268,21 @@ defmodule Fleet.Pipeline.StageRunner do
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
   end
+
+  # F150 — ligne de feedback explicite quand le stage est re-dispatché après un FAIL gate (le système a
+  # injecté `previous_failure` dans le mandate_context). Absent au 1er passage → nil (rejeté du brief).
+  defp prev_failure_line(mandate) when is_map(mandate) do
+    case Map.get(mandate, "previous_failure") do
+      %{"attempt" => n, "reason" => reason} ->
+        "⚠ Tentative #{n} de ce stage REJETÉE par la gate — raison : #{reason}. CORRIGE ce point avant " <>
+          "de re-livrer (le retry système est borné ; au seuil il escalade au gatekeeper)."
+
+      _ ->
+        nil
+    end
+  end
+
+  defp prev_failure_line(_), do: nil
 
   # Résolution lifetime_scope via Fleet.CapProfile (même chemin que
   # StageSpawner.Default). Fallback "one-shot" sur erreur de résolution

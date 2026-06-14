@@ -33,9 +33,12 @@ defmodule Fleet.Pipeline.Gates do
       les items binaires → chemin v2.5 ; sinon → chemin v1.
 
   Terminal v2.5 `human_approval_required: true` → **HALT fail-closed** (aucun
-  human-in-loop câblé : le moteur mécanique n'auto-approuve jamais, et ne
-  :retry pas — ça re-spawnerait en boucle). L'orchestration severity
-  (`fallback_invoke_gatekeeper`, `on_*_severity`) reste hors-scope R3.
+  human-in-loop câblé : le moteur mécanique n'auto-approuve jamais). `Gates`
+  ne retourne JAMAIS `:retry` (le retry n'est pas une décision de gate). NB
+  (F150) : un retry BORNÉ existe désormais — mais c'est l'**Executor** qui le
+  pilote (`reject_stage`, compteur `retry_counts`, borne `stage_max_retries`),
+  pas la gate ; la borne lève la crainte du re-spawn-en-boucle. L'orchestration
+  severity (`fallback_invoke_gatekeeper`, `on_*_severity`) reste hors-scope R3.
   """
 
   @behaviour Fleet.Pipeline.Gate
@@ -115,7 +118,8 @@ defmodule Fleet.Pipeline.Gates do
   # v2.5 (R3) — terminal string rules. Ordre : (1) une rule non satisfaite →
   # {:fail} ; (2) `human_approval_required` → HALT fail-closed (le moteur
   # mécanique ne peut PAS accorder l'aval humain ; aucun human-in-loop câblé →
-  # jamais d'auto-approbation, et pas de :retry qui re-spawnerait en boucle) ;
+  # jamais d'auto-approbation. Gates ne rend pas `:retry` ; le retry borné est
+  # côté Executor, F150 — pas ici) ;
   # (3) sinon → :pass. L'orchestration severity (fallback_invoke_gatekeeper,
   # on_*_severity) n'est pas portée ici — couche séparée, hors R3.
   defp eval_terminal_string(rules, gate, outputs) do
