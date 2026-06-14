@@ -10,7 +10,7 @@ defmodule Fleet.Pilot.CarteNav do
 
   La DN §8 dit « le runtime trouve le stage dont `role` = assignee ». **Insuffisant** :
   une carte peut avoir le même rôle sur plusieurs stages (ex. `standard-qa` :
-  `architect-interactive` est sur `brainstorm` ET `plan`). L'assignee (= rôle) seul
+  `architect` est sur `brainstorm` ET `plan`). L'assignee (= rôle) seul
   **n'identifie pas** le stage. La position canonique est donc le **nom du stage**, que
   le runtime grave sur la forge (lock comment enrichi `[lock:role:stage:ts]`, cf.
   A2.4/A2.1) et relit pour naviguer. `CarteNav` est keyé par nom de stage ; d'où vient

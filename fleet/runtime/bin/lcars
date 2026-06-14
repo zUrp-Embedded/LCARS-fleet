@@ -41,7 +41,7 @@ $PROG — CLI opérateur fleet LCARS v2
 USAGE
   $PROG spawn <role> [--ticket <id>] [--mandate <texte>]
       Demande au daemon de lancer un pod du rôle <role> (= nom de cap-profile,
-      ex: architect-interactive, engineer, consultant). Dispatch ASYNC → vérifier
+      ex: architect, engineer, consultant). Dispatch ASYNC → vérifier
       avec « $PROG list ». NB : les rôles boot_at_start (arch) démarrent seuls au
       boot de la fleet — spawn sert surtout aux rôles à la demande / au test.
 
@@ -65,7 +65,7 @@ EOF
 
 cmd_spawn() {
   local role="" ticket="" mandate="" have_mandate=0
-  [[ $# -ge 1 && "$1" != --* ]] || die "spawn: rôle requis (ex: $PROG spawn architect-interactive)"
+  [[ $# -ge 1 && "$1" != --* ]] || die "spawn: rôle requis (ex: $PROG spawn architect)"
   role="$1"; shift
   # Rôle = slug cap-profile (anti-injection JSON quand jq absent).
   [[ "$role" =~ ^[a-z][a-z0-9-]*$ ]] || die "spawn: rôle '$role' invalide (slug [a-z0-9-] attendu)"

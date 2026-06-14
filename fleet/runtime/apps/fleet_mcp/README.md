@@ -1,7 +1,7 @@
 # fleet_mcp
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-13
+**Dernière révision** : 2026-06-14
 **Statut** : implémenté — serveur MCP pod-facing (`get_task` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
@@ -11,7 +11,8 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 ## Modules
 
 - `Fleet.MCP.PodTools` — outils MCP **pod-facing** : `get_task` (le pod tire son
-  mandat depuis la TaskQueue) et `submit_result` (le pod rend son livrable).
+  mandat depuis la TaskQueue), `submit_result` (le pod rend son livrable), `create_ticket`
+  (l'arch délègue une implémentation) et `create_project` (l'arch onboard un projet neuf).
   `handle_tool_call/3` = fonctions pures, réutilisables hors transport.
 - `Fleet.MCP.Server` — **garde de boot ADR-C** : `start_link/1` refuse
   (`{:error, :forbidden_in_pod}`) si `boot_environment == :pod` → `fleet_mcp` ne boote
@@ -23,6 +24,15 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 
 - `get_task` — le pod récupère son mandat (corrélé `pod_id`).
 - `submit_result` — le pod soumet son livrable (`payload`).
+- `create_ticket` (Rail 2 — délégation) — l'architecte délègue une implémentation : crée l'issue forge
+  (stampée origine arch) + lance le pipeline (`Fleet.Pilot.ForgeClient.create_issue` + `Fleet.Pipeline.start_pipeline`,
+  dispatch runtime).
+- `create_project` (Rail 1 — onboarding) — l'architecte démarre un projet neuf : `Fleet.Pilot.ProjectOnboard.onboard/2`
+  (repo forge + dual-worktree `main`/`work/ops` + scaffold + push). Le projet créé devient la cible de
+  délégation (`:delegation_repo`) → enchaîner `create_ticket`. Dispatch runtime (pas de dep compile-time `fleet_pilot`).
+
+NB **bridge stdio** (`bin/fleet_mcp_stdio_bridge.py`) : la liste `TOOLS` est hardcodée — tout nouveau tool
+doit y être ajouté en miroir (dette connue : proxifier `tools/list` vers le central).
 
 ## Configuration
 

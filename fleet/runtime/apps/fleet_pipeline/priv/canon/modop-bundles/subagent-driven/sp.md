@@ -1,7 +1,7 @@
 # Modop — subagent-driven (dispatch fresh per task)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-26
+**Dernière révision** : 2026-06-14
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : superpowers/skills/subagent-driven-development (ADAPT) + LCARS fire-mode + cap-profile lifetime_scope one-shot
 
@@ -15,7 +15,7 @@ Le subagent ne lit jamais le fichier plan. L'orchestrateur lui passe le **texte 
 
 ## Dispatch pattern
 
-### Orchestrateur (cap-profile engineer ou architect-interactive)
+### Orchestrateur (cap-profile engineer ou architect)
 
 Pour chaque task du plan :
 

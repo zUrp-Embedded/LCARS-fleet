@@ -81,16 +81,16 @@ defmodule Fleet.Pilot.CarteNavTest do
     end
 
     test "rôle d'un même rôle sur 2 stages — le NOM désambiguïse (le wrinkle DN §8)" do
-      # standard-qa : architect-interactive sur brainstorm ET plan
+      # standard-qa : architect sur brainstorm ET plan
       carte = %{
         "stages" => %{
-          "brainstorm" => %{"role" => "architect-interactive", "needs" => []},
-          "plan" => %{"role" => "architect-interactive", "needs" => ["brainstorm"]}
+          "brainstorm" => %{"role" => "architect", "needs" => []},
+          "plan" => %{"role" => "architect", "needs" => ["brainstorm"]}
         }
       }
 
       # par nom : sans ambiguïté
-      assert {:ok, {"plan", "architect-interactive"}} = CarteNav.next_stage(carte, "brainstorm")
+      assert {:ok, {"plan", "architect"}} = CarteNav.next_stage(carte, "brainstorm")
       assert :terminal = CarteNav.next_stage(carte, "plan")
     end
 

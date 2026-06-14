@@ -294,16 +294,68 @@ defmodule Fleet.CapProfile do
   # I/O
   # ============================================================
 
+  # Résout un cap-profile par sa PROP `metadata.name` (pas par nom de fichier — celui-ci est
+  # cosmétique). Source de vérité = la donnée, jamais le filesystem (cf. `list/1`).
   defp read_role_yaml(role) do
-    candidates = [
-      Path.join(root_dir(), "#{role}.yaml"),
-      Path.join([root_dir(), "archivistes", "#{role}.yaml"])
-    ]
-
-    case Enum.find(candidates, &File.exists?/1) do
-      nil -> {:error, :not_found}
-      path -> decode_yaml(path)
+    with {:ok, index} <- name_index(root_dir()) do
+      case Map.fetch(index, role) do
+        {:ok, raw} -> {:ok, raw}
+        :error -> {:error, :not_found}
+      end
     end
+  end
+
+  @doc """
+  Liste les NOMS (`metadata.name`) des cap-profiles du catalogue (`dir`, défaut `root_dir/0`).
+
+  **Source UNIQUE** (#582, F110/F111) : tout énumérateur (`Fleet.Spawner.PermanentBoot`) ET `load/1`
+  résolvent par CETTE clé — la prop `name`, **jamais** le nom de fichier (cosmétique). Trié.
+  Collision de `name` entre deux fichiers → `{:error, :name_collision}` (fail-loud : pas de résolution
+  silencieuse au petit bonheur du filesystem).
+  """
+  @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def list(dir \\ root_dir()) do
+    # Dir absent/illisible = erreur (config cassée) — distinct d'un catalogue vide ({:ok, []}).
+    # `Path.wildcard` confond les deux ; `File.dir?` tranche. (`load/1` passe par `name_index`
+    # directement → un dir absent y donne `:not_found`, pas `:enoent` — le rôle est juste introuvable.)
+    if File.dir?(dir) do
+      with {:ok, index} <- name_index(dir) do
+        {:ok, index |> Map.keys() |> Enum.sort()}
+      end
+    else
+      {:error, :enoent}
+    end
+  end
+
+  # Index `metadata.name => raw` en scannant `<dir>/*.yaml` + `<dir>/archivistes/*.yaml` (le `modop/`
+  # est exclu : les overlays n'ont pas d'identité de rôle). Fragment sans `metadata.name` → ignoré
+  # (baseline/overlay). YAML illisible → ignoré (un `load` ciblé échouera via sa propre validation).
+  # Collision de `name` → fail-loud.
+  defp name_index(dir) do
+    files =
+      Path.wildcard(Path.join(dir, "*.yaml")) ++
+        Path.wildcard(Path.join([dir, "archivistes", "*.yaml"]))
+
+    Enum.reduce_while(files, {:ok, %{}}, fn path, {:ok, acc} ->
+      case decode_yaml(path) do
+        {:ok, raw} ->
+          case get_in(raw, ["metadata", "name"]) do
+            name when is_binary(name) and name != "" ->
+              if Map.has_key?(acc, name) do
+                Logger.error("CapProfile: collision metadata.name #{inspect(name)} (#{path})")
+                {:halt, {:error, :name_collision}}
+              else
+                {:cont, {:ok, Map.put(acc, name, raw)}}
+              end
+
+            _ ->
+              {:cont, {:ok, acc}}
+          end
+
+        {:error, _} ->
+          {:cont, {:ok, acc}}
+      end
+    end)
   end
 
   defp read_modops(modop_set) do

@@ -1,7 +1,7 @@
 # Modop — brainstorming (Socratic design pre-code) rev2 enrichi
 
 **Date** : 2026-05-18 (rev1) — 2026-05-18 rev2 enrichi M5 item 16
-**Dernière révision** : 2026-05-26
+**Dernière révision** : 2026-06-14
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : superpowers/skills/brainstorming (ADAPT enrichi) — design Socratique avant code + reverse outbox/#3_ponce-reverse/superpowers/superpowers-reverse/blocS1-workflow-core.md
 
@@ -118,7 +118,7 @@ After writing spec document, **STOP for 30s**. Re-lis comme si c'était un autre
 ## Cap-profile usage
 
 Stage `brainstorm` du pipeline `standard-qa` :
-- Role : `architect-interactive` (Tier 0, front user)
+- Role : `architect` (Tier 0, front user)
 - Modop_set : `[brainstorming, rubber-duck, persuasion-discipline]`
 - Output : `docs/specs/<date>-<slug>.md`
 - Gate : user-approval explicite

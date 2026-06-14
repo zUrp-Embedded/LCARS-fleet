@@ -530,7 +530,7 @@ defmodule Fleet.Spawner.Pod do
   defp read_agent_draft(%Fleet.CapProfile{metadata: meta}) do
     file =
       case Map.get(meta || %{}, "name", "") do
-        "architect-interactive" -> "priv/sp_drafts/agent-architect-base.md"
+        "architect" -> "priv/sp_drafts/agent-architect-base.md"
         _ -> "priv/sp_drafts/agent-worker-base.md"
       end
 
@@ -874,7 +874,7 @@ defmodule Fleet.Spawner.Pod do
     containment = cap_profile_containment(state.cap_profile)
 
     # LAUNCH-Q : le launcher N0 dépend du containment, lu ICI (avant ce fix : bwrap aveugle pour tous).
-    # "none" (host_native : architect-interactive, starfleet) → host_launch.sh (host, sans sandbox) ;
+    # "none" (host_native : architect, starfleet) → host_launch.sh (host, sans sandbox) ;
     # sinon la chaîne bwrap. `PermanentBoot` reste générique — la branche vit sur le chemin de lancement.
     launcher_path = if containment == "none", do: host_launch_path(), else: bwrap_launch_path()
 
@@ -1421,7 +1421,7 @@ defmodule Fleet.Spawner.Pod do
   defp cap_profile_name(_), do: "unknown"
 
   # LAUNCH-Q : `metadata.containment` ∈ {"bwrap","none"} (cap_profile G24-1, défaut conservateur "bwrap").
-  # "none" = host_native (architect-interactive, starfleet) → host_launch.sh (PAS de sandbox) ; sinon la
+  # "none" = host_native (architect, starfleet) → host_launch.sh (PAS de sandbox) ; sinon la
   # chaîne bwrap. Lu ICI, sur le chemin de lancement — avant ce fix `do_launch` bwrappait tout aveuglément.
   defp cap_profile_containment(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
     Map.get(meta, "containment") || Map.get(meta, :containment) || "bwrap"

@@ -5,7 +5,7 @@
 # STATUS: PROTO-V2 — launcher N0 host (containment: none) : tmux PTY persistant + socket-dir par-pod + holder, SANS bwrap
 #
 # Frère host (N0, Ring 1 pod primitive, vendor-agnostic) de `bin/bwrap_launch.sh`. Sélectionné par le
-# spawner pour les rôles `containment: none` (architect-interactive, starfleet) : ces pods tournent SUR
+# spawner pour les rôles `containment: none` (architect, starfleet) : ces pods tournent SUR
 # L'HÔTE, comme l'humain, SANS sandbox bwrap (l'arch interactif paire avec l'humain et voit l'env réel ;
 # c'est le SENS de containment:none host_native). LAUNCH-Q : avant ce launcher, le spawner bwrappait TOUT
 # (containment jamais lu) → l'arch booté au démarrage était isolé à tort.

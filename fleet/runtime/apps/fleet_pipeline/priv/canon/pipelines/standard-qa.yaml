@@ -20,8 +20,8 @@ spec:
 
     # --- Stage 1: brainstorm (design Socratique) ---
     brainstorm:
-      role: architect-interactive
-      profile: architect-interactive.yaml
+      role: architect
+      profile: architect.yaml
       needs: []  # racine DAG
       inputs:
         - ticket.body
@@ -39,8 +39,8 @@ spec:
 
     # --- Stage 2: plan (TodoWrite + tasks 2-5min) ---
     plan:
-      role: architect-interactive
-      profile: architect-interactive.yaml
+      role: architect
+      profile: architect.yaml
       needs: [brainstorm]
       inputs:
         - docs/specs/{date}-{slug}.md

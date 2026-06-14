@@ -4,7 +4,7 @@
 
 ## Contenu
 
-- `cap-profiles/` — capability profiles (archivist, monk, à compléter : architect-interactive, engineer, consultant, qualifier, reviewer, gatekeeper, starfleet)
+- `cap-profiles/` — capability profiles (archivist, monk, à compléter : architect, engineer, consultant, qualifier, reviewer, gatekeeper, starfleet)
 - `fleets/` — configurations d'instances de fleet (memory-alpha, memory-beta, à compléter selon DN ring1/fleet-as-instance.md)
 - `sp/` — system prompts cap-profile (archivist, monk)
 

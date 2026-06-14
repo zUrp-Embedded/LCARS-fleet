@@ -71,6 +71,30 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "create_project" do
+    meta do
+      name("Create Project")
+
+      description(
+        "Démarre un NOUVEAU projet : crée le repo sur la forge + les 2 dossiers dual-dir " <>
+          "(`/home/projects/<name>` sur `main`, `/home/projects.work/<name>` sur `work/ops`) + " <>
+          "le scaffold de base, et le pousse. Utilise-le quand l'humain veut LANCER un projet neuf. " <>
+          "`name` = slug kebab-case. Le projet créé devient la cible de délégation : enchaîne ensuite " <>
+          "`create_ticket` pour l'implémentation. Retourne {\"status\":\"onboarded\",\"repo\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "name" => %{"type" => "string"},
+        "pitch" => %{"type" => "string"},
+        "description" => %{"type" => "string"}
+      },
+      "required" => ["name"]
+    })
+  end
+
   @impl true
   def handle_tool_call("get_task", arguments, state) do
     case pod_id(arguments) do
@@ -137,13 +161,11 @@ defmodule Fleet.MCP.PodTools do
     forge = Fleet.Pilot.ForgeClient
     pipe = Fleet.Pipeline
 
-    # Traça : stampe l'ORIGINE (l'arch) sur l'issue. Le système crée l'issue (token système) MAIS
-    # trace QUI a délégué (l'arch appelant ; son pod_id injecté par le bridge MCP).
-    origin = Map.get(args, "_lcars_pod_id", "architect")
-    issue_body = "_Délégué par l'architecte (pod `#{origin}`) via la fleet LCARS._\n\n" <> brief
-
+    # L'arch poste l'issue EN SON NOM : token du compte forge `Architect` (→ avatar, traça honnête).
+    # Plus d'en-tête « Délégué par l'architecte » — l'arch EST l'auteur de l'issue ; le stamp textuel
+    # était un proxy faute de token de rôle (raccourci PoC). Le `brief` est le corps tel quel.
     ticket_id =
-      case apply(forge, :create_issue, [repo, title, issue_body, []]) do
+      case apply(forge, :create_issue, [repo, title, brief, role_token_opts("architect")]) do
         {:ok, number} -> "#{repo}##{number}"
         _ -> "deleg-#{System.unique_integer([:positive])}"
       end
@@ -168,6 +190,41 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
+  # create_project (Rail 1 e2e 2026-06-14) — canal ONBOARDING : l'architecte démarre un projet neuf.
+  # Le SYSTÈME exécute la séquence mécanique (repo forge + dual-worktree main/work-ops + scaffold + push)
+  # via Fleet.Pilot.ProjectOnboard, dispatch runtime (pas de dep compile-time fleet_pilot). Le projet créé
+  # devient la cible de délégation courante (`:delegation_repo`) → le `create_ticket` suivant livre dedans
+  # (mono-projet actif, KISS v1 ; le routage multi-projet = follow-up).
+  def handle_tool_call("create_project", %{"name" => name} = args, state) when is_binary(name) do
+    onboard = Fleet.Pilot.ProjectOnboard
+    org = Application.get_env(:fleet_mcp, :delegation_org, "fleet")
+    pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
+
+    opts = [org: org, description: Map.get(args, "description", pitch), pitch: pitch]
+
+    case apply(onboard, :onboard, [name, opts]) do
+      {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
+        Application.put_env(:fleet_mcp, :delegation_repo, repo)
+
+        result = %{
+          "status" => "onboarded",
+          "repo" => repo,
+          "project_dir" => pdir,
+          "work_dir" => wdir,
+          "delegation_target" => repo
+        }
+
+        {:ok, %{content: [json(result)]}, state}
+
+      {:error, reason} ->
+        {:error, {:onboard_failed, inspect(reason)}, state}
+    end
+  end
+
+  def handle_tool_call("create_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
   def handle_tool_call(_unknown, _arguments, state) do
     {:error, :unknown_tool, state}
   end
@@ -177,6 +234,26 @@ defmodule Fleet.MCP.PodTools do
     case Map.get(args || %{}, "_lcars_pod_id") do
       id when is_binary(id) and id != "" -> id
       _ -> nil
+    end
+  end
+
+  # Token forge du compte de RÔLE (le rôle poste/commente EN SON NOM → avatar honnête). Lu de
+  # `<role_tokens_dir>/<role>.token` (défaut `~/.lcars/role-tokens/`). `[]` si absent → `create_issue`
+  # retombe sur le token système (dette à provisionner — pas un masquage, le rôle existe comme compte).
+  defp role_token_opts(role) do
+    dir =
+      Application.get_env(:fleet_mcp, :role_tokens_dir) ||
+        Path.join(System.user_home() || "/home/starfleet", ".lcars/role-tokens")
+
+    case File.read(Path.join(dir, "#{role}.token")) do
+      {:ok, content} ->
+        case String.trim(content) do
+          "" -> []
+          token -> [token: token]
+        end
+
+      _ ->
+        []
     end
   end
 

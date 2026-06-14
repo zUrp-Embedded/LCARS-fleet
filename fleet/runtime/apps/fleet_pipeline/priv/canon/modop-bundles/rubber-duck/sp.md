@@ -1,7 +1,7 @@
 # Modop — rubber-duck (verbalisation pré-action)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-26
+**Dernière révision** : 2026-06-14
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : doctrine YOLO D-Y-1 4 marqueurs verbalisation + §2.6 verbalisation pre-edit inconditionnelle (beyond_#1 doctrine-anti-yolo + LCARS canon)
 
@@ -51,7 +51,7 @@ Si une des cases est faible ou vide → **STOP**. Re-check avant action.
 
 Cap-profile dont `modop_set: [rubber-duck, ...]` :
 - engineer (workers code) — toute écriture code
-- architect-interactive — toute proposition irréversible (plan, dispatch)
+- architect — toute proposition irréversible (plan, dispatch)
 - starfleet — toute opération système (sudo, deploy, merge)
 
 Cap-profile **dispensé** :

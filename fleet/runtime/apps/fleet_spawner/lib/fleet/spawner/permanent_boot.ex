@@ -139,20 +139,11 @@ defmodule Fleet.Spawner.PermanentBoot do
     Application.get_env(:fleet_spawner, :cap_profiles_dir) || Fleet.CapProfile.root_dir()
   end
 
+  # #582 (F110/F111) : énumère via la SOURCE UNIQUE `Fleet.CapProfile.list/1` — par prop
+  # `metadata.name`, jamais par nom de fichier. Enum et `load` partagent ainsi la MÊME clé
+  # (le name) → plus de désaccord enum↔load (un profil listé est toujours chargeable).
   defp list_roles(dir) do
-    case File.ls(dir) do
-      {:ok, files} ->
-        roles =
-          files
-          |> Enum.filter(&String.ends_with?(&1, ".yaml"))
-          |> Enum.map(&Path.basename(&1, ".yaml"))
-          |> Enum.sort()
-
-        {:ok, roles}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    Fleet.CapProfile.list(dir)
   end
 
   defp load_one(role, loader) do

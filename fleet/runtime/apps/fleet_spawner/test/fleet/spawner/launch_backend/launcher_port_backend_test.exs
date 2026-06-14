@@ -53,9 +53,9 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
       # Le backend est agnostique du containment : il exécute le launcher que le spawner a choisi.
       # Même vecteur d'args ⇒ même argv ; seul l'exe (argv0 du Port) change (host vs bwrap).
       assert {:ok, "/h/host_launch.sh",
-              ["architect-interactive", "pod-7", "/p", "/opt/claude_launch.sh" | _]} =
+              ["architect", "pod-7", "/p", "/opt/claude_launch.sh" | _]} =
                LauncherPortBackend.build_spawn(%{
-                 role: "architect-interactive",
+                 role: "architect",
                  pod_id: "pod-7",
                  pod_dir: "/p",
                  launcher_path: "/h/host_launch.sh",

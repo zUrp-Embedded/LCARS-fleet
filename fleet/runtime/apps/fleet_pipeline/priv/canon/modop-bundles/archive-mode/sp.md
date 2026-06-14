@@ -1,7 +1,7 @@
 # Modop — archive-mode (broadcast events, persistent monks)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-26
+**Dernière révision** : 2026-06-14
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : LCARS-v1.5 pattern archive-mode (monks Memory Alpha) + doctrine memory-alpha primitive cognitive (beyond_#2/doctrines/001)
 
@@ -77,7 +77,7 @@ Payload structuré :
 - **V1 cible** : monks archive-mode via cap-profile + channel MCP custom `fleet-control` (push events)
   - Pas de module Elixir dédié — la diff est config métier
   - Cap-profile `monk-doctrine.yaml`, `monk-architecture.yaml`, etc.
-  - Channel `fleet-control` route les queries depuis architect-interactive → monks → archivist → response
+  - Channel `fleet-control` route les queries depuis architect → monks → archivist → response
 
 ## Anti-pattern
 

@@ -32,7 +32,7 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
 → **holder** (`sleep infinity`) → `tmux new-session -d` (PTY persistant, socket par-pod) →
 `claude_launch.sh` → `exec claude --remote-control` (abonnement, jamais headless). Le launcher N0 :
 - `bin/bwrap_launch.sh` (**défaut**, `containment: bwrap`) — sandbox userns/mountns + tmpfs /home + binds.
-- `bin/host_launch.sh` (`containment: none` — architect-interactive, starfleet) — **même mécanisme
+- `bin/host_launch.sh` (`containment: none` — architect, starfleet) — **même mécanisme
   tmux-holder, SANS bwrap** : le pod tourne sur l'hôte comme l'humain (`HOME` = home réel → `~/.claude`
   natif). Teardown self-contained (trap → `tmux kill-server`, pas de cascade namespace).
 
@@ -69,7 +69,7 @@ State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` (champs : `
 
 ### `containment: none` — host_launch.sh (LAUNCH-Q, remplace l'ex-TmuxBackend)
 
-Les rôles `containment: none` (architect-interactive, starfleet) tournent **sur l'hôte, sans bwrap**.
+Les rôles `containment: none` (architect, starfleet) tournent **sur l'hôte, sans bwrap**.
 Avant LAUNCH-Q, `do_launch` bwrappait **tout** (containment jamais lu) → l'arch interactif (booté au
 démarrage) était isolé à tort. Le fix : `do_launch` lit `metadata.containment` et sélectionne le launcher
 N0 (`launcher_path` passé au backend).

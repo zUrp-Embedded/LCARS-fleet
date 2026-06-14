@@ -15,7 +15,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   @schema_path Path.join([__DIR__, "..", "priv", "schema", "cap-profile-v2.5.json"])
   @canon_dir Path.join([__DIR__, "..", "priv", "canon", "cap-profiles"])
 
-  @profiles ~w(architect-interactive consultant engineer gatekeeper qualifier reviewer starfleet)
+  @profiles ~w(architect consultant engineer gatekeeper qualifier reviewer starfleet)
 
   setup_all do
     schema =

@@ -97,6 +97,25 @@ TOOLS = [
             "required": ["title", "brief"],
         },
     },
+    # create_project (Rail 1 e2e 2026-06-14) — canal ONBOARDING (architecte). Le central exécute la
+    # sequence mecanique (repo forge + dual-worktree main/work-ops + scaffold + push) via ProjectOnboard.
+    {
+        "name": "create_project",
+        "description": "Demarre un NOUVEAU projet : cree le repo forge + les 2 dossiers dual-dir "
+                       "(/home/projects/<name> sur main, /home/projects.work/<name> sur work/ops) + le "
+                       "scaffold de base, et le pousse. Utilise-le quand l'humain veut LANCER un projet "
+                       "neuf. `name` = slug kebab-case. Le projet cree devient la cible de delegation : "
+                       "enchaine ensuite create_ticket pour l'implementation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "pitch": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["name"],
+        },
+    },
 ]
 
 

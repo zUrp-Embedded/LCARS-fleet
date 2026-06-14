@@ -1,7 +1,7 @@
 # Modop — fire-mode (one-shot, JSON strict output)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-26
+**Dernière révision** : 2026-06-14
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : LCARS-v1.5 pattern fire-mode + extract_v1/system-prompt residu-doctrinal (résidu doctrinal worker minimal)
 
@@ -64,7 +64,7 @@ spec:
 
 Cap-profiles workers (engineer, qualifier, reviewer, consultant) ont **fire-mode** par défaut en mode dispatch one-shot.
 
-Cap-profile **architect-interactive** est l'opposé : long-running, conversation, pas fire-mode.
+Cap-profile **architect** est l'opposé : long-running, conversation, pas fire-mode.
 
 ## Anti-pattern
 

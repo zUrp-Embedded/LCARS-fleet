@@ -50,8 +50,12 @@ defmodule Fleet.CapProfileTest do
     """
   end
 
+  # Le loader résout par `metadata.name` (pas par nom de fichier). On aligne donc `name` sur `role`
+  # pour que `load(role)` trouve le profil — les fixtures portent `name: test-role` par défaut, qui
+  # était masqué par l'ancien load-par-fichier. (Si le yaml n'a pas de `name:`, écrit tel quel.)
   defp write_role(tmp_dir, role, yaml) do
-    File.write!(Path.join(tmp_dir, "#{role}.yaml"), yaml)
+    aligned = String.replace(yaml, ~r/^(\s*name:).*$/m, "\\1 #{role}", global: false)
+    File.write!(Path.join(tmp_dir, "#{role}.yaml"), aligned)
   end
 
   # Helpers G24-10..14 : mutent un sous-champ nesté du struct (clés string).
@@ -112,13 +116,23 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "returns :invalid_schema when YAML is missing required fields", %{tmp_dir: tmp_dir} do
-      write_role(tmp_dir, "incomplete", "apiVersion: lcars/v2.5\nkind: CapabilityProfile\n")
+      # a un metadata.name (donc indexable/résolvable) mais manque containment + spec → invalid_schema
+      write_role(
+        tmp_dir,
+        "incomplete",
+        "apiVersion: lcars/v2.5\nkind: CapabilityProfile\nmetadata:\n  name: incomplete\n"
+      )
+
       assert {:error, :invalid_schema} = Fleet.CapProfile.load("incomplete")
     end
 
-    test "falls back to archivistes/<role>.yaml", %{tmp_dir: tmp_dir} do
+    test "résout un profil de archivistes/ par son metadata.name", %{tmp_dir: tmp_dir} do
       File.mkdir_p!(Path.join(tmp_dir, "archivistes"))
-      File.write!(Path.join([tmp_dir, "archivistes", "specialist.yaml"]), valid_profile_yaml())
+
+      aligned =
+        String.replace(valid_profile_yaml(), ~r/^(\s*name:).*$/m, "\\1 specialist", global: false)
+
+      File.write!(Path.join([tmp_dir, "archivistes", "specialist.yaml"]), aligned)
 
       assert {:ok, %Fleet.CapProfile{}} = Fleet.CapProfile.load("specialist")
     end

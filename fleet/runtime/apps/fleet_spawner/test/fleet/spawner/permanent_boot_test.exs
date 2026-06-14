@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
   end
 
   describe "boot_at_start?/1 — Type 1 fleet-level" do
-    test "true : boot_at_start true + forever + host_native false (architect-interactive)" do
+    test "true : boot_at_start true + forever + host_native false (architect)" do
       assert PermanentBoot.boot_at_start?(
                cp(%{
                  "boot_at_start" => true,
@@ -115,20 +115,25 @@ defmodule Fleet.Spawner.PermanentBootTest do
   describe "boot_permanent_pods/1 (seams injectés — déterministe)" do
     @describetag :tmp_dir
     setup %{tmp_dir: dir} do
-      for f <- ~w(architect-interactive.yaml engineer.yaml starfleet.yaml notes.txt) do
-        File.write!(Path.join(dir, f), "x")
+      # L'énumérateur (`CapProfile.list`) résout par `metadata.name` → fixtures yaml portant le name
+      # (l'identité indexable). Le contenu COMPLET vient du loader injecté (`loader_for`). `notes.txt`
+      # = non-.yaml, ignoré par le scan.
+      for name <- ~w(architect engineer starfleet) do
+        File.write!(Path.join(dir, "#{name}.yaml"), "metadata:\n  name: #{name}\n")
       end
+
+      File.write!(Path.join(dir, "notes.txt"), "x")
 
       {:ok, dir: dir}
     end
 
     defp loader_for do
       fn
-        "architect-interactive" ->
+        "architect" ->
           {:ok,
            %Fleet.CapProfile{
              kind: "CapabilityProfile",
-             metadata: %{"name" => "architect-interactive"},
+             metadata: %{"name" => "architect"},
              spec: %{
                "invocation" => %{
                  "boot_at_start" => true,
@@ -162,7 +167,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
       end
     end
 
-    test "spawn UNIQUEMENT architect-interactive (engineer worker + starfleet D-01 exclus)",
+    test "spawn UNIQUEMENT architect (engineer worker + starfleet D-01 exclus)",
          %{dir: dir} do
       parent = self()
 
@@ -178,15 +183,15 @@ defmodule Fleet.Spawner.PermanentBootTest do
                  spawner: spawner
                )
 
-      assert pid_arch =~ ~r/^permanent-architect-interactive-/
-      assert_received {:spawned, "architect-interactive", ^pid_arch}
+      assert pid_arch =~ ~r/^permanent-architect-/
+      assert_received {:spawned, "architect", ^pid_arch}
       refute_received {:spawned, "engineer", _}
       refute_received {:spawned, "starfleet", _}
     end
 
     test "succès partiel : loader {:error} sur un rôle → skip, autres OK", %{dir: dir} do
       loader = fn
-        "architect-interactive" -> loader_for().("architect-interactive")
+        "architect" -> loader_for().("architect")
         _ -> {:error, :invalid_schema}
       end
 
@@ -227,8 +232,8 @@ defmodule Fleet.Spawner.PermanentBootTest do
       |> Map.get("spec")
     end
 
-    test "architect-interactive.yaml (canon réel) → boot_at_start? TRUE (Type 1)" do
-      assert PermanentBoot.boot_at_start?(canon_spec("architect-interactive"))
+    test "architect.yaml (canon réel) → boot_at_start? TRUE (Type 1)" do
+      assert PermanentBoot.boot_at_start?(canon_spec("architect"))
     end
 
     test "starfleet.yaml (canon réel) → boot_at_start? FALSE (D-01 host_native préservé)" do
@@ -240,9 +245,9 @@ defmodule Fleet.Spawner.PermanentBootTest do
       refute PermanentBoot.boot_at_start?(canon_spec("engineer"))
     end
 
-    test "select_permanent sur les 7 cap-profiles canon → architect-interactive seul" do
+    test "select_permanent sur les 7 cap-profiles canon → architect seul" do
       profiles =
-        ~w(architect-interactive consultant engineer gatekeeper qualifier reviewer starfleet)
+        ~w(architect consultant engineer gatekeeper qualifier reviewer starfleet)
         |> Enum.map(fn n ->
           %Fleet.CapProfile{
             kind: "CapabilityProfile",
@@ -252,7 +257,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
         end)
 
       selected = PermanentBoot.select_permanent(profiles)
-      assert [%Fleet.CapProfile{metadata: %{"name" => "architect-interactive"}}] = selected
+      assert [%Fleet.CapProfile{metadata: %{"name" => "architect"}}] = selected
     end
   end
 

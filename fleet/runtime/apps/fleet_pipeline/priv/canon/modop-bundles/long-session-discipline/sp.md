@@ -2,7 +2,7 @@
 
 **Date** : 2026-05-18
 **Statut** : actif — modop bundle canon V2 (cycle 4)
-**Référencé par** : `architect-interactive.yaml` `modop_set.default`, les 7 cap-profiles `incompatible:[[fire-mode,long-session-discipline]]`
+**Référencé par** : `architect.yaml` `modop_set.default`, les 7 cap-profiles `incompatible:[[fire-mode,long-session-discipline]]`
 **Doctrine source** : `00_doctrine/doctrine-yolo.md` §F1-F5 filets sécurité + R6-bis-adversarial format triadique
 
 ---
@@ -97,7 +97,7 @@ Pod avec ce modop dans default produit :
 ## Trigger d'application
 
 Cap-profiles avec `lifetime_scope: forever` :
-- `architect-interactive.yaml` ✓ (default = [long-session-discipline])
+- `architect.yaml` ✓ (default = [long-session-discipline])
 - `starfleet.yaml` (forever D-01) — pourrait l'ajouter en optional
 
 Cap-profiles `lifetime_scope: one-shot` : incompatible — utilise `fire-mode` à la place.

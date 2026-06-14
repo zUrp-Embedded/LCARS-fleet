@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-14 (mode stage A2/A3 + offload HopConsumer F067)
+**Dernière révision** : 2026-06-14 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -36,6 +36,25 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
 
 Knobs : `:start_dispatcher` (legacy), `:stage_dispatch?` + `:poll_repo` + `:poll_interval_ms` (stage),
 `:hop_runner` (offload complétion, F067).
+
+## Onboarding projet (Rail 1 — « idée → le projet existe »)
+
+`Fleet.Pilot.ProjectOnboard` — `onboard/2` : crée mécaniquement un projet en répliquant l'archi
+dual-dir de LCARS (un repo, **deux worktrees**) :
+
+- `/home/projects/<name>` → worktree `main` (livrable, push origin) ;
+- `/home/projects.work/<name>` → worktree **orphan** `work/ops` (plans/backlog/ops).
+
+Séquence : `ForgeClient.create_repo` (org `fleet`, `auto_init`) → `git clone main` → scaffold (README,
+.gitignore, .editorconfig, docs/spec.md) → commit+push `main` → `git worktree add --orphan -b work/ops`
+→ scaffold (backlog.md, scratchpad.md, plans/) → commit+push `work/ops`. Identité **M2** (l'onboarding est
+un acte d'infra système, pas du travail créatif) : `author=lcars-system` (le système GÉNÈRE le scaffold ;
+l'arch n'écrit rien, il relaie `name`+`pitch`), `committer`=git config runtime (**l'humain qui a initié →
+tracé**), `pusher`=`lcars-system` (`ForgeAuth.git_env`, owner fleet-wide) — tout avataré. Rail mécanique
+(l'arch *déclenche* via le tool MCP `create_project`, le système *exécute* ; cf. `fleet_mcp`). Pas de GenServer.
+
+`Fleet.Pilot.ForgeClient` porte aussi les write-ops forge réutilisées ici (`create_repo`, `create_issue`,
+`put_file`, `post_comment`, `close_issue`).
 
 ## Découplage core
 

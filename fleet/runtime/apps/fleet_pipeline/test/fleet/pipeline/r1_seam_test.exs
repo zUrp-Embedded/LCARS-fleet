@@ -103,7 +103,7 @@ defmodule Fleet.Pipeline.R1SeamTest do
     # normalizer) + R3 (inputs/gate v2.5), le 1er stage doit être spawné.
     {:ok, _exec} = start_supervised({Executor, pipeline_id: pid, pipeline_name: "standard-qa"})
 
-    assert_receive {:spawned, "brainstorm", "architect-interactive"}, 2_000
+    assert_receive {:spawned, "brainstorm", "architect"}, 2_000
   end
 
   # T5 — soft gate : la complétion d'un stage à soft gate route vers le

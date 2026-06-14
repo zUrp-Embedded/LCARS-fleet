@@ -1,10 +1,10 @@
-# Cap-profile : architect-interactive
+# Cap-profile : architect
 # Date : 2026-05-18
 # Référencé par : design-notes/ring2/cap-profiles.md (tableau récap §L108)
 # Schema : ../../07_code/runtime-v2/apps/fleet_cap_profile/priv/schema/cap-profile-v2.5.json
 kind: CapabilityProfile
 metadata:
-  name: architect-interactive
+  name: architect
   containment: none
 spec:
   scope:
