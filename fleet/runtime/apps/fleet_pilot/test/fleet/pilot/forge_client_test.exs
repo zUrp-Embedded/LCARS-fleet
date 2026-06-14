@@ -591,4 +591,76 @@ defmodule Fleet.Pilot.ForgeClientTest do
       :persistent_term.erase({ForgeClient, :bot_login})
     end
   end
+
+  describe "open_pr/5 + get_pr_for_branch/4 (BL-044 primitives PR)" do
+    test "ouvre une PR head→base → {:ok, number}" do
+      handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls"} => {201, %{"number" => 7}}}
+
+      assert {:ok, 7} =
+               ForgeClient.open_pr("fleet/proj", "feature/x", "main", "titre", opts(handlers))
+    end
+
+    test "idempotent : 409 (PR déjà ouverte) → retrouve la PR existante head→base" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls"} => {409, %{"message" => "already exists"}},
+        {"GET", "/api/v1/repos/fleet/proj/pulls"} =>
+          {200,
+           [
+             %{"number" => 3, "head" => %{"ref" => "other"}, "base" => %{"ref" => "main"}},
+             %{"number" => 9, "head" => %{"ref" => "feature/x"}, "base" => %{"ref" => "main"}}
+           ]}
+      }
+
+      assert {:ok, 9} =
+               ForgeClient.open_pr("fleet/proj", "feature/x", "main", "titre", opts(handlers))
+    end
+
+    test "get_pr_for_branch : aucune PR head→base ouverte → :pr_not_found" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/proj/pulls"} =>
+          {200, [%{"number" => 3, "head" => %{"ref" => "autre"}, "base" => %{"ref" => "main"}}]}
+      }
+
+      assert {:error, :pr_not_found} =
+               ForgeClient.get_pr_for_branch("fleet/proj", "feature/x", "main", opts(handlers))
+    end
+  end
+
+  describe "request_review/4 + post_review/5 (déclenchement + domicile verdict)" do
+    test "request_review → POST requested_reviewers, :ok" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/requested_reviewers"} => {201, [%{"id" => 1}]}
+      }
+
+      assert :ok = ForgeClient.request_review("fleet/proj", 9, ["Qualifier"], opts(handlers))
+    end
+
+    test "post_review :approve poste le verdict, :ok" do
+      handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/reviews"} => {200, %{"id" => 5}}}
+
+      assert :ok = ForgeClient.post_review("fleet/proj", 9, :approve, "gate PASS", opts(handlers))
+    end
+
+    test "post_review event inconnu → fail-loud sans round-trip HTTP" do
+      assert {:error, {:invalid_review_event, :bogus}} =
+               ForgeClient.post_review("fleet/proj", 9, :bogus, "x", opts(%{}))
+    end
+  end
+
+  describe "merge_pr/3 (PROMOTE fast-forward-only)" do
+    test "merge FF → :ok" do
+      handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}}
+
+      assert :ok = ForgeClient.merge_pr("fleet/proj", 9, opts(handlers))
+    end
+
+    test "FF impossible (409) = invariant serial violé → fail-loud {:http, 409, _}" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
+          {409, %{"message" => "Merge conflict"}}
+      }
+
+      assert {:error, {:http, 409, _}} = ForgeClient.merge_pr("fleet/proj", 9, opts(handlers))
+    end
+  end
 end

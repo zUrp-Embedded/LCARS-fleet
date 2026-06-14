@@ -295,6 +295,143 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  # ============================================================
+  # Pull requests (BL-044 / Corr.3 git-native) — la PR est la surface de la phase
+  # REVIEW+PROMOTE : domicile durable des verdicts de gate (review native Gitea) et
+  # entonnoir unique vers `main`. Barrière §4 : le SYSTÈME ouvre/review/merge, le pod
+  # n'a jamais le token. Primitives IDEMPOTENTES (rejouables sans casser).
+  # ============================================================
+
+  @doc """
+  Ouvre une pull request `head` → `base` sur `repo` (Gitea `POST /repos/{repo}/pulls`).
+  IDEMPOTENT : si une PR ouverte existe déjà pour cette `head`, retourne son numéro (le
+  409 Gitea n'est pas une erreur). `opts[:body]` = corps — y mettre `Closes #N` pour
+  l'auto-close de l'issue au merge (la forge maintient le lien ticket↔PR).
+
+  ## Returns
+    * `{:ok, number}` — PR ouverte (ou déjà existante)
+    * `{:error, term()}` — HTTP/transport/config
+  """
+  @spec open_pr(String.t(), String.t(), String.t(), String.t(), Keyword.t()) ::
+          {:ok, integer()} | {:error, term()}
+  def open_pr(repo, head, base, title, opts \\ [])
+      when is_binary(repo) and is_binary(head) and is_binary(base) and is_binary(title) do
+    with {:ok, config} <- resolve_config(opts) do
+      attrs = %{head: head, base: base, title: title, body: Keyword.get(opts, :body, "")}
+
+      case http_post(config, "/repos/#{repo}/pulls", attrs) do
+        {:ok, %{"number" => number}} -> {:ok, number}
+        # PR déjà ouverte pour cette head (Gitea 409) → idempotence : on la retrouve.
+        {:error, {:http, 409, _}} -> get_pr_for_branch(repo, head, base, opts)
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Retrouve la PR OUVERTE `head` → `base` sur `repo` (Gitea `GET /repos/{repo}/pulls`, filtré
+  côté client par `head.ref`/`base.ref`). Brique d'idempotence d'`open_pr/5`.
+
+  ## Returns
+    * `{:ok, number}` — PR trouvée
+    * `{:error, :pr_not_found}` — aucune PR ouverte head→base
+    * `{:error, term()}` — HTTP/transport/config
+  """
+  @spec get_pr_for_branch(String.t(), String.t(), String.t(), Keyword.t()) ::
+          {:ok, integer()} | {:error, term()}
+  def get_pr_for_branch(repo, head, base, opts \\ [])
+      when is_binary(repo) and is_binary(head) and is_binary(base) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_get(config, "/repos/#{repo}/pulls?state=open&limit=50") do
+        {:ok, pulls} when is_list(pulls) ->
+          case Enum.find(pulls, &pr_matches_head?(&1, head, base)) do
+            %{"number" => number} -> {:ok, number}
+            _ -> {:error, :pr_not_found}
+          end
+
+        {:ok, _} ->
+          {:error, :pr_not_found}
+
+        {:error, _} = err ->
+          err
+      end
+    end
+  end
+
+  defp pr_matches_head?(pr, head, base) do
+    get_in(pr, ["head", "ref"]) == head and get_in(pr, ["base", "ref"]) == base
+  end
+
+  @doc """
+  Demande la review des `reviewers` (logins) sur la PR `index` (Gitea
+  `POST /repos/{repo}/pulls/{index}/requested_reviewers`). C'est la mécanique de
+  DÉCLENCHEMENT de la phase judge — remplace `set_assignee` côté PR (le poller spawn le
+  juge sur la review-request).
+  """
+  @spec request_review(String.t(), integer(), [String.t()], Keyword.t()) ::
+          :ok | {:error, term()}
+  def request_review(repo, index, reviewers, opts \\ [])
+      when is_binary(repo) and is_integer(index) and is_list(reviewers) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_post(config, "/repos/#{repo}/pulls/#{index}/requested_reviewers", %{
+             reviewers: reviewers
+           }) do
+        {:ok, _} -> :ok
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Poste une review native sur la PR `index` (Gitea `POST /repos/{repo}/pulls/{index}/reviews`).
+  `event` ∈ `:approve | :request_changes | :comment` → c'est le DOMICILE durable du verdict de
+  gate (review native traçable, vs l'ancien comment-JSON maison). `body` = le verdict lisible.
+  """
+  @spec post_review(
+          String.t(),
+          integer(),
+          :approve | :request_changes | :comment,
+          String.t(),
+          Keyword.t()
+        ) :: :ok | {:error, term()}
+  def post_review(repo, index, event, body, opts \\ [])
+      when is_binary(repo) and is_integer(index) and is_binary(body) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, gitea_event} <- review_event(event) do
+      case http_post(config, "/repos/#{repo}/pulls/#{index}/reviews", %{
+             event: gitea_event,
+             body: body
+           }) do
+        {:ok, _} -> :ok
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  defp review_event(:approve), do: {:ok, "APPROVED"}
+  defp review_event(:request_changes), do: {:ok, "REQUEST_CHANGES"}
+  defp review_event(:comment), do: {:ok, "COMMENT"}
+  defp review_event(other), do: {:error, {:invalid_review_event, other}}
+
+  @doc """
+  Merge (PROMOTE) la PR `index` en FAST-FORWARD-ONLY (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
+  `Do: fast-forward-only` par défaut). Sous bail serial + funnel append-only, la feature est
+  descendante linéaire de `main` → FF garanti, zéro merge commit. Un échec FF = invariant serial
+  violé (deux branches sur le même code) → fail-loud, PAS un conflit à résoudre. `opts[:method]`
+  override le style (`squash`/`merge`/`rebase`) si un jour nécessaire.
+  """
+  @spec merge_pr(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
+  def merge_pr(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
+    with {:ok, config} <- resolve_config(opts) do
+      body = %{"Do" => Keyword.get(opts, :method, "fast-forward-only")}
+
+      case http_post(config, "/repos/#{repo}/pulls/#{index}/merge", body) do
+        {:ok, _} -> :ok
+        {:error, _} = err -> err
+      end
+    end
+  end
+
   @doc """
   Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea
   `PUT /repos/{repo}/contents/{path}`. **Le SYSTÈME publie** (forge-aveugle : le pod ne
