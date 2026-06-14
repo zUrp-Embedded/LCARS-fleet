@@ -19,6 +19,8 @@ defmodule Fleet.MCP.PodTools do
 
   use ExMCP.Server
 
+  require Logger
+
   alias Fleet.TaskQueue
 
   deftool "get_task" do
@@ -161,11 +163,27 @@ defmodule Fleet.MCP.PodTools do
     forge = Fleet.Pilot.ForgeClient
     pipe = Fleet.Pipeline
 
-    # L'arch poste l'issue EN SON NOM : token du compte forge `Architect` (→ avatar, traça honnête).
-    # Plus d'en-tête « Délégué par l'architecte » — l'arch EST l'auteur de l'issue ; le stamp textuel
-    # était un proxy faute de token de rôle (raccourci PoC). Le `brief` est le corps tel quel.
+    # L'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT — résolu depuis
+    # `_lcars_role` (injecté par le pont MCP, = le `metadata.name` du cap-profile appelant). Agnostique :
+    # JAMAIS un rôle hardcodé. nil/introuvable → fallback token système (loggué — dégradé, pas masquage).
+    # Pas d'en-tête « Délégué par l'architecte » : l'arch EST l'auteur de l'issue (→ avatar, traça vraie).
+    role = Map.get(args, "_lcars_role")
+
+    issue_opts =
+      case Fleet.Credentials.RoleToken.token(role) do
+        t when is_binary(t) ->
+          [token: t]
+
+        _ ->
+          Logger.warning(
+            "create_ticket: token de rôle introuvable pour #{inspect(role)} — issue postée par le compte système"
+          )
+
+          []
+      end
+
     ticket_id =
-      case apply(forge, :create_issue, [repo, title, brief, role_token_opts("architect")]) do
+      case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
         {:ok, number} -> "#{repo}##{number}"
         _ -> "deleg-#{System.unique_integer([:positive])}"
       end
@@ -234,26 +252,6 @@ defmodule Fleet.MCP.PodTools do
     case Map.get(args || %{}, "_lcars_pod_id") do
       id when is_binary(id) and id != "" -> id
       _ -> nil
-    end
-  end
-
-  # Token forge du compte de RÔLE (le rôle poste/commente EN SON NOM → avatar honnête). Lu de
-  # `<role_tokens_dir>/<role>.token` (défaut `~/.lcars/role-tokens/`). `[]` si absent → `create_issue`
-  # retombe sur le token système (dette à provisionner — pas un masquage, le rôle existe comme compte).
-  defp role_token_opts(role) do
-    dir =
-      Application.get_env(:fleet_mcp, :role_tokens_dir) ||
-        Path.join(System.user_home() || "/home/starfleet", ".lcars/role-tokens")
-
-    case File.read(Path.join(dir, "#{role}.token")) do
-      {:ok, content} ->
-        case String.trim(content) do
-          "" -> []
-          token -> [token: token]
-        end
-
-      _ ->
-        []
     end
   end
 

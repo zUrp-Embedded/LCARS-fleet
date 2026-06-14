@@ -30,6 +30,7 @@ import urllib.request
 
 CENTRAL_URL = os.environ.get("LCARS_FLEET_MCP_URL", "")
 POD_ID = os.environ.get("LCARS_POD_ID", "")
+ROLE = os.environ.get("LCARS_ROLE", "")
 PROTO = "2024-11-05"
 _req_id = [1000]
 
@@ -145,10 +146,14 @@ def main():
         elif method == "tools/call":
             p = msg.get("params", {})
             try:
-                # Injecte l'identité du pod dans les arguments forwardés (corrélation côté central).
-                if POD_ID:
+                # Injecte l'identité du pod (pod_id + rôle) dans les arguments forwardés : corrélation
+                # côté central + résolution du compte de rôle (ex create_ticket → token du rôle appelant).
+                if POD_ID or ROLE:
                     args = dict(p.get("arguments") or {})
-                    args["_lcars_pod_id"] = POD_ID
+                    if POD_ID:
+                        args["_lcars_pod_id"] = POD_ID
+                    if ROLE:
+                        args["_lcars_role"] = ROLE
                     p = {**p, "arguments": args}
                 # Forward au central (même method/params enrichis) → réponse central renvoyée telle quelle.
                 result = central_call("tools/call", p)

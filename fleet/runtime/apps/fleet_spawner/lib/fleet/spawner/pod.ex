@@ -912,7 +912,7 @@ defmodule Fleet.Spawner.Pod do
         env =
           state.env_vars
           |> Map.merge(skills_plugins_env(state.cap_profile))
-          |> Map.merge(mcp_channel_env(state.pod_id))
+          |> Map.merge(mcp_channel_env(state.pod_id, cap_profile_name(state.cap_profile)))
           # HOME — LAUNCH-Q : dépend du containment.
           #   bwrap (défaut) : HOME=pod_dir (U4 — cohérent ; bwrap fait `--setenv HOME` de toute façon,
           #     cette valeur est ignorée sous le sandbox).
@@ -1719,10 +1719,15 @@ defmodule Fleet.Spawner.Pod do
   # Sans ça le pod est anonyme — get_task ne retournerait QUE les untargeted (rate les
   # tasks ciblées via wake_pod).
   #
+  # `LCARS_ROLE` (= `metadata.name` du cap-profile = rôle métier) : bridge.py l'injecte en
+  # `_lcars_role` → le central résout le compte/token de rôle (create_ticket poste l'issue EN SON NOM).
+  # Posé ICI (env du process pod) → couvre host_launch ET bwrap (qui le re-`--setenv` dans son sandbox).
+  #
   # BL-021 chantier 7 — purge ADR-G C5.1 : `LCARS_FLEET_MCP_CHANNEL_URL` retiré
   # (push channel ChannelHTTP supprimé, drive via tools pull `get_task`).
-  defp mcp_channel_env(pod_id) when is_binary(pod_id) do
-    %{"LCARS_POD_ID" => pod_id}
+  defp mcp_channel_env(pod_id, role) when is_binary(pod_id) do
+    base = %{"LCARS_POD_ID" => pod_id}
+    if is_binary(role) and role != "", do: Map.put(base, "LCARS_ROLE", role), else: base
   end
 
   # Kick AUTONOME « yop » readiness-gated (R3b / F-C4b-2). Déclenche le pull du mandat

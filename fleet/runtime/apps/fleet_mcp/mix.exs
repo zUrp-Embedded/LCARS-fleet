@@ -63,7 +63,10 @@ defmodule Fleet.MCP.MixProject do
       # fleet_task_queue : le broker d'orchestration que PodTools sert via get_task/submit_result
       #   (drive métier ADR-G ; le broker broadcast lui-même %Fleet.Event{task_completed}).
       #   Ring 4→Ring 2 (fleet_mcp sert la queue, n'orchestre pas — DN drive/mcp-server §E). Pas de cycle.
-      {:fleet_task_queue, in_umbrella: true}
+      {:fleet_task_queue, in_umbrella: true},
+      # fleet_credentials : Fleet.Credentials.RoleToken — token forge du compte de rôle, pour que
+      #   l'arch poste l'issue EN SON NOM (create_ticket). Ring 4→Ring 1, descendant, pas de cycle.
+      {:fleet_credentials, in_umbrella: true}
       # Z5 (MCP-D1) — `yaml_elixir` retiré : ne servait qu'à parser mcp-channels.yaml /
       #   mcp-bridge.yaml pour `Fleet.MCP.Schema`, tous retirés (substrat channels mort).
       #   Plus aucun usage YamlElixir dans fleet_mcp (lib + test).
