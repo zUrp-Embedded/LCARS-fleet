@@ -14,8 +14,6 @@ defmodule Fleet.API.Application do
     * `:fleet_api, :http_port` — port HTTP (default `8080`)
     * `:fleet_api, :start_listener` — booléen (default `true`).
       Tests peuvent set à `false` pour démarrer Cowboy manuellement.
-    * `:fleet_api, :api_secret_path` — path secret HMAC (default
-      `/etc/fleet/api-secret`)
     * `:fleet_api, :git_repo_path` — racine repo config
       (default `/var/lib/lcars/config`)
 

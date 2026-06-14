@@ -1,38 +1,21 @@
 defmodule Fleet.API.RestTest do
-  # async: false — Application.put_env sur :api_secret_path mute l'état
-  # global runtime ; séquentialiser évite la pollution cross-test.
+  # async: false — pas d'auth (frontière = isolation réseau/container, cf. rest.ex § Auth), mais le bus
+  # PubSub est global (le test admin.spawn broadcast + assert_receive) → séquentialiser évite le cross-talk.
   use ExUnit.Case, async: false
   import Plug.Test
   import Plug.Conn
-  @moduletag :tmp_dir
 
   alias Fleet.API.Rest
   alias Fleet.EventRouter.Bus
 
   @opts Rest.init([])
 
-  setup %{tmp_dir: tmp_dir} do
-    secret_path = Path.join(tmp_dir, "api-secret")
-    File.write!(secret_path, "test-secret-1234")
-    # F017 : le secret doit respecter l'invariant non-world-readable (root:lcars 600/640) —
-    # `File.write!` laisse l'umask (souvent 644 = world-readable) que `load_secret` refuse désormais.
-    File.chmod!(secret_path, 0o600)
-    Application.put_env(:fleet_api, :api_secret_path, secret_path)
-
+  setup do
     Bus.subscribe()
-
-    on_exit(fn ->
-      Application.delete_env(:fleet_api, :api_secret_path)
-    end)
-
-    {:ok, secret: "test-secret-1234"}
+    :ok
   end
 
-  defp valid_token(secret) do
-    :crypto.mac(:hmac, :sha256, secret, "fleet-api-v1") |> Base.encode16(case: :lower)
-  end
-
-  describe "GET /api/health (no auth)" do
+  describe "GET /api/health" do
     test "returns 200 + status ok" do
       conn = conn(:get, "/api/health") |> Rest.call(@opts)
       assert conn.status == 200
@@ -41,17 +24,9 @@ defmodule Fleet.API.RestTest do
     end
   end
 
-  describe "GET /api/readiness/deep (P05, auth)" do
-    test "no token → 401 (vue interne, pas un probe public)" do
+  describe "GET /api/readiness/deep (P05)" do
+    test "→ 200 + état opérationnel structuré" do
       conn = conn(:get, "/api/readiness/deep") |> Rest.call(@opts)
-      assert conn.status == 401
-    end
-
-    test "valid token → 200 + état opérationnel structuré", %{secret: secret} do
-      conn =
-        conn(:get, "/api/readiness/deep")
-        |> put_req_header("x-auth-token", valid_token(secret))
-        |> Rest.call(@opts)
 
       assert conn.status == 200
       {:ok, body} = Jason.decode(conn.resp_body)
@@ -62,89 +37,42 @@ defmodule Fleet.API.RestTest do
   end
 
   describe "POST /api/admin/spawn — quiescence (drain shutdown)" do
-    test "503 quand le daemon quiesce (refuse nouveau pod top-level)", %{secret: secret} do
+    test "503 quand le daemon quiesce (refuse nouveau pod top-level)" do
       Fleet.Shutdown.Quiesce.refuse!()
       on_exit(&Fleet.Shutdown.Quiesce.resume!/0)
 
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{"role" => "x"}))
         |> put_req_header("content-type", "application/json")
-        |> put_req_header("x-auth-token", valid_token(secret))
         |> Rest.call(@opts)
 
       assert conn.status == 503
     end
   end
 
-  describe "auth HMAC" do
-    test "missing token → 401", %{secret: _secret} do
-      conn = conn(:get, "/api/pipelines") |> Rest.call(@opts)
-      assert conn.status == 401
-    end
-
-    test "wrong token → 401" do
-      conn =
-        conn(:get, "/api/pipelines")
-        |> put_req_header("x-auth-token", "wrong")
-        |> Rest.call(@opts)
-
-      assert conn.status == 401
-    end
-
-    test "valid token → 200", %{secret: secret} do
-      conn =
-        conn(:get, "/api/pipelines")
-        |> put_req_header("x-auth-token", valid_token(secret))
-        |> Rest.call(@opts)
-
-      assert conn.status == 200
-    end
-  end
-
   describe "GET endpoints (lecture état)" do
-    setup %{secret: secret} do
-      {:ok, token: valid_token(secret)}
-    end
-
-    test "GET /api/pipelines → 200 JSON", %{token: token} do
-      conn =
-        conn(:get, "/api/pipelines")
-        |> put_req_header("x-auth-token", token)
-        |> Rest.call(@opts)
-
+    test "GET /api/pipelines → 200 JSON" do
+      conn = conn(:get, "/api/pipelines") |> Rest.call(@opts)
       assert conn.status == 200
       assert {:ok, %{"pipelines" => _}} = Jason.decode(conn.resp_body)
     end
 
-    test "GET /api/tickets → 200 JSON", %{token: token} do
-      conn =
-        conn(:get, "/api/tickets")
-        |> put_req_header("x-auth-token", token)
-        |> Rest.call(@opts)
-
+    test "GET /api/tickets → 200 JSON" do
+      conn = conn(:get, "/api/tickets") |> Rest.call(@opts)
       assert conn.status == 200
     end
 
-    test "GET /api/pods → 200 JSON", %{token: token} do
-      conn =
-        conn(:get, "/api/pods")
-        |> put_req_header("x-auth-token", token)
-        |> Rest.call(@opts)
-
+    test "GET /api/pods → 200 JSON" do
+      conn = conn(:get, "/api/pods") |> Rest.call(@opts)
       assert conn.status == 200
     end
   end
 
   describe "POST /api/admin/spawn" do
-    setup %{secret: secret} do
-      {:ok, token: valid_token(secret)}
-    end
-
-    test "broadcast admin.spawn.request + 202", %{token: token} do
+    test "broadcast admin.spawn.request + 202" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "scout"}))
         |> put_req_header("content-type", "application/json")
-        |> put_req_header("x-auth-token", token)
         |> Rest.call(@opts)
 
       assert conn.status == 202
@@ -159,16 +87,8 @@ defmodule Fleet.API.RestTest do
   end
 
   describe "match _ (404)" do
-    setup %{secret: secret} do
-      {:ok, token: valid_token(secret)}
-    end
-
-    test "route inexistante → 404", %{token: token} do
-      conn =
-        conn(:get, "/api/nonexistent")
-        |> put_req_header("x-auth-token", token)
-        |> Rest.call(@opts)
-
+    test "route inexistante → 404" do
+      conn = conn(:get, "/api/nonexistent") |> Rest.call(@opts)
       assert conn.status == 404
     end
   end
@@ -177,7 +97,7 @@ defmodule Fleet.API.RestTest do
   # #594 D2 — dashboard V2 Elixir natif (Fleet.API.Dashboard mount)
   # ============================================================
   describe "GET /dashboard" do
-    test "render HTML 200 sans auth (whitelisté require_auth)" do
+    test "render HTML 200" do
       conn = conn(:get, "/dashboard") |> Rest.call(@opts)
 
       assert conn.status == 200
@@ -204,22 +124,13 @@ defmodule Fleet.API.RestTest do
       assert ct =~ "utf-8"
     end
 
-    test "GET /dashboard/static/lcars-tva.css sert le CSS sans auth" do
+    test "GET /dashboard/static/lcars-tva.css sert le CSS" do
       conn = conn(:get, "/dashboard/static/lcars-tva.css") |> Rest.call(@opts)
 
       assert conn.status == 200
       assert conn.resp_body =~ "LCARS"
       assert conn.resp_body =~ "starfleet#1"
       assert conn.resp_body =~ "clean-room"
-    end
-
-    test "POST /dashboard → require_auth applied (méthode non-GET → 401)" do
-      conn =
-        conn(:post, "/dashboard", "{}")
-        |> put_req_header("content-type", "application/json")
-        |> Rest.call(@opts)
-
-      assert conn.status == 401
     end
   end
 end

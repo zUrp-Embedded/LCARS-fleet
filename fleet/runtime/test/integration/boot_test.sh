@@ -109,7 +109,6 @@ for var in \
     "LCARS_COORD_POLICIES_PATH" \
     "FLEET_WEBHOOK_SECRET_PATH" \
     "FLEET_API_PORT" \
-    "FLEET_API_SECRET_PATH" \
     "LCARS_CONFIG_REPO"; do
     if grep -qE "^${var}=" "$ENV_TPL"; then
         ok "env var template: $var"

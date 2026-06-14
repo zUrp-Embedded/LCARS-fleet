@@ -1,28 +1,25 @@
 defmodule Fleet.API.Rest do
   @moduledoc """
-  Plug.Router HTTP `:8080` endpoints REST + auth HMAC token header.
+  Plug.Router HTTP `:8080` endpoints REST.
 
   ## Routes MVP
 
-    * `GET /api/health` — readiness probe (public, no auth)
-    * `GET /api/readiness/deep` — état opérationnel LIVE (P05, auth) via
+    * `GET /api/health` — readiness probe (200 dès Cowboy bind, ch16 `lcars-readiness`)
+    * `GET /api/readiness/deep` — état opérationnel LIVE (P05) via
       `Fleet.API.Readiness.deep/0` — anti-vert-creux
     * `GET /api/pipelines` / `tickets` / `pods` — lecture état (stubs MVP)
     * `POST /api/admin/spawn` — broadcast `admin.spawn.request` event
     * `POST /api/config/update` — atomic write + git commit auto via
       `GitCommitter` (canon trace strate 1)
 
-  ## Auth
+  ## Auth — AUCUNE (par design ; frontière = réseau/container)
 
-  Header `X-Auth-Token` validé HMAC SHA256 contre secret
-  `:fleet_api, :api_secret_path` (default `/etc/fleet/api-secret`
-  root:lcars 600). Constant-time compare via `Plug.Crypto.secure_compare`.
-
-  ## Health endpoint
-
-  `GET /api/health` retourne 200 + `%{status: "ok", ts: ...}` sans
-  auth (consommé par chantier 16 lcars-readiness script,
-  architecture-cible §L737).
+  Pas d'auth applicative. Le HMAC `X-Auth-Token` (bearer statique sur la constante
+  `"fleet-api-v1"` — pas une signature de requête) a été RETIRÉ (F006/F016/F018/SEC-3) :
+  intra-container non-exposé = zéro surface, et une auth bricolée donne un faux sentiment
+  de sécurité (pire que rien). **La frontière est l'isolation réseau** : ne PAS publier
+  `:8080` hors du container (bind loopback / `docker exec`) ; tunnel (WireGuard/Tailscale)
+  pour un accès distant. Threat-model §0 = LAN / humains de confiance.
   """
 
   use Plug.Router
@@ -32,17 +29,16 @@ defmodule Fleet.API.Rest do
 
   plug(:match)
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
-  plug(:require_auth)
   plug(:dispatch)
 
-  # Public health probe — no auth (skipped via require_auth special-case)
+  # Public health probe (200 dès Cowboy bind, consommé ch16 `lcars-readiness`)
   get "/api/health" do
     send_json(conn, %{status: "ok", ts: DateTime.utc_now() |> DateTime.to_iso8601()})
   end
 
-  # P05 — readiness deep : état opérationnel LIVE (anti-vert-creux). Auth-gated
-  # (vue de câblage interne, pas un probe public comme /api/health). 200 même
-  # si `status: degraded` — la dégradation est une donnée, pas une erreur HTTP.
+  # P05 — readiness deep : état opérationnel LIVE (anti-vert-creux). Vue de câblage
+  # interne (pas un probe public comme /api/health). 200 même si `status: degraded`
+  # — la dégradation est une donnée, pas une erreur HTTP.
   get "/api/readiness/deep" do
     send_json(conn, Fleet.API.Readiness.deep())
   end
@@ -114,70 +110,11 @@ defmodule Fleet.API.Rest do
   end
 
   # #594 D2 — dashboard V2 Elixir natif. Mount Fleet.API.Dashboard sous
-  # /dashboard. Pas d'auth HTTP (ADR-C accès intra-release, GET-only UI,
-  # whitelisté dans require_auth/2 ligne ~97).
+  # /dashboard (UI GET-only). Pas d'auth — comme toute l'API (cf. moduledoc § Auth).
   forward("/dashboard", to: Fleet.API.Dashboard)
 
   match _ do
     send_resp(conn, 404, ~s|{"error":"not found"}|)
-  end
-
-  # ============================================================
-  # Auth plug
-  # ============================================================
-
-  @doc false
-  def require_auth(%Plug.Conn{request_path: "/api/health"} = conn, _opts), do: conn
-
-  # #594 D2 — dashboard V2 UI : pas d'auth HTTP (intra-release, GET-only,
-  # ADR-C 5-zéros). Whitelist /dashboard et /dashboard/static/*.
-  def require_auth(%Plug.Conn{request_path: "/dashboard" <> _, method: "GET"} = conn, _opts),
-    do: conn
-
-  def require_auth(conn, _opts) do
-    sig = get_req_header(conn, "x-auth-token") |> List.first() || ""
-
-    case load_secret() do
-      {:ok, secret} ->
-        expected =
-          :crypto.mac(:hmac, :sha256, secret, "fleet-api-v1")
-          |> Base.encode16(case: :lower)
-
-        if Plug.Crypto.secure_compare(sig, expected) do
-          assign(conn, :user_id, "api-user")
-        else
-          conn
-          |> send_resp(401, ~s|{"error":"unauthorized"}|)
-          |> halt()
-        end
-
-      {:error, _reason} ->
-        conn
-        |> send_resp(401, ~s|{"error":"auth secret unavailable"}|)
-        |> halt()
-    end
-  end
-
-  defp load_secret do
-    path = Application.get_env(:fleet_api, :api_secret_path, "/etc/fleet/api-secret")
-
-    # F017 : refuse un secret WORLD-readable (bit `other` de lecture). L'invariant documenté est
-    # root:lcars 600/640 (lisible par owner/groupe-daemon, JAMAIS par tout le monde). Sans ce
-    # check, un `/etc/fleet/api-secret` en 644 était accepté SILENCIEUSEMENT → tout user local lit
-    # le secret et forge le token. Fail-closed : un secret exposé ne sert pas (l'op doit corriger).
-    with {:ok, %File.Stat{mode: mode}} <- File.stat(path),
-         :ok <- check_secret_not_world_readable(path, mode),
-         {:ok, content} <- File.read(path) do
-      {:ok, String.trim(content)}
-    end
-  end
-
-  defp check_secret_not_world_readable(path, mode) do
-    if Bitwise.band(mode, 0o004) == 0 do
-      :ok
-    else
-      {:error, {:secret_world_readable, path, Bitwise.band(mode, 0o777)}}
-    end
   end
 
   defp send_json(conn, payload) do

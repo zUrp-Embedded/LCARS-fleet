@@ -257,7 +257,7 @@ if config_env() != :test do
   end
 
   # ============================================================
-  # fleet_api (ch15) — port HTTP + secret HMAC + git config repo
+  # fleet_api (ch15) — port HTTP + git config repo (pas d'auth app, cf. rest.ex § Auth)
   # ============================================================
   http_port =
     case System.get_env("FLEET_API_PORT") do
@@ -267,10 +267,6 @@ if config_env() != :test do
 
   config :fleet_api, http_port: http_port
   config :fleet_api, start_listener: true
-
-  if path = System.get_env("FLEET_API_SECRET_PATH") do
-    config :fleet_api, api_secret_path: path
-  end
 
   if path = System.get_env("LCARS_CONFIG_REPO") do
     config :fleet_api, git_repo_path: path

@@ -19,8 +19,8 @@ defmodule Fleet.API.Dashboard do
   ## Auth
 
   Pas d'auth HTTP — dashboard intra-release accède aux GenServers/PubSub
-  directement (ADR-C). Le `require_auth` plug de `Fleet.API.Rest`
-  whitelist `/dashboard*` (GET-only, no mutation).
+  directement (ADR-C). Toute l'API `:8080` est no-auth par design (frontière =
+  isolation réseau du container, cf. `Fleet.API.Rest` § Auth).
 
   ## Sous-tickets
 

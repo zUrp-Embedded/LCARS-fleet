@@ -1,7 +1,7 @@
 # lcars-fleet.service (chantier 16)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-12
+**Dernière révision** : 2026-06-14
 **Statut** : att-1 livré
 **Référencé par** : `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -71,10 +71,9 @@ sudo $EDITOR /etc/fleet/lcars-fleet.env
 sudo chown root:lcars /etc/fleet/lcars-fleet.env
 sudo chmod 0640 /etc/fleet/lcars-fleet.env
 
-# 4. Provisionner secrets root:lcars 0600
-sudo install -o root -g lcars -m 0600 /dev/null /etc/fleet/api-secret
+# 4. Provisionner le secret webhook root:lcars 0600 (HMAC Gitea ; pas d'api-secret — API no-auth)
 sudo install -o root -g lcars -m 0600 /dev/null /etc/fleet/webhook-secret
-# Remplir les 2 secrets
+# Remplir le secret
 
 # 5. Activer + démarrer
 sudo systemctl daemon-reload

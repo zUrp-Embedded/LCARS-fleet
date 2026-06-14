@@ -14,7 +14,7 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 
 | Module | Rôle |
 |---|---|
-| `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST + auth HMAC token |
+| `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST |
 | `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
 | `Fleet.API.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380) |
 | `Fleet.API.Readiness` | read-model P05 — état opérationnel LIVE (anti-vert-creux). Introspecte config/process/persistent_term ; `deep/0` rend `status: operational\|degraded` + sous-systèmes. Jumeau runtime de `mix lcars.contracts.check` (plan source-conformance build/CI) sur le plan opérationnel. Fonctions pures (pas de process — Iron Law) |
@@ -23,16 +23,16 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| GET | `/api/health` | NO | readiness probe shallow (200 dès Cowboy bind, consommé ch16 `lcars-readiness`) |
-| GET | `/api/readiness/deep` | HMAC | P05 — état opérationnel LIVE (`Fleet.API.Readiness.deep/0`). 200 même si `status: degraded` (dégradation = donnée, pas erreur HTTP). Vue interne → auth |
-| GET | `/api/pipelines` | HMAC | liste état pipelines |
-| GET | `/api/tickets` | HMAC | liste tickets |
-| GET | `/api/pods` | HMAC | liste pods |
-| POST | `/api/admin/spawn` | HMAC | broadcast `admin.spawn.request` (ch6) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
-| POST | `/api/config/update` | HMAC | atomic write + git commit |
+| GET | `/api/health` | — | readiness probe shallow (200 dès Cowboy bind, consommé ch16 `lcars-readiness`) |
+| GET | `/api/readiness/deep` | — | P05 — état opérationnel LIVE (`Fleet.API.Readiness.deep/0`). 200 même si `status: degraded` (dégradation = donnée, pas erreur HTTP). Vue de câblage interne (pas une probe externe) |
+| GET | `/api/pipelines` | — | liste état pipelines |
+| GET | `/api/tickets` | — | liste tickets |
+| GET | `/api/pods` | — | liste pods |
+| POST | `/api/admin/spawn` | — | broadcast `admin.spawn.request` (ch6) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
+| POST | `/api/config/update` | — | atomic write + git commit |
 
-Auth via header `X-Auth-Token` HMAC SHA256 contre secret
-`/etc/fleet/api-secret` (root:lcars 600). Constant-time compare.
+**Pas d'auth applicative** (HMAC retiré — bearer statique sans surface intra-container).
+Frontière = isolation réseau du container (ne pas publier `:8080` ; tunnel pour le remote).
 
 ## WebSocket protocol
 
@@ -65,7 +65,6 @@ Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 |---|---|---|
 | `:fleet_api, :http_port` | `8080` | port Cowboy listener |
 | `:fleet_api, :start_listener` | `true` | bool — `false` en tests (`config/test.exs`) |
-| `:fleet_api, :api_secret_path` | `/etc/fleet/api-secret` | path secret HMAC |
 | `:fleet_api, :git_repo_path` | `/var/lib/lcars/config` | racine repo config |
 
 ## Tests

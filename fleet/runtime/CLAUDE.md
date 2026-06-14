@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-13
+**Dernière révision** : 2026-06-14
 **Statut** : guide runtime v2 (salvage cow-boy).
 **Référencé par** : —
 
@@ -39,7 +39,7 @@ Apps are grouped into **rings** (substrate layering, declared in each README und
 - **Ring 1** — pod primitives + vendor frontier: `fleet_spawner`, `fleet_credentials`, `fleet_cap_profile`, `fleet_sp_builder`, `fleet_project_bootstrap`, plus `bin/bwrap_launch.sh` + `bin/claude_launch.sh`. (`fleet_pod_runtime` retiré 2026-06-10 — app morte post-ADR-G, PODRT-D1.) (La frontière vendor N1 = ces scripts `bin/` ; il n'y a **pas** d'app `fleet_claude_bridge` — retirée au pivot ADR-G. Noms corrigés 2026-06-02 : `fleet_cap_profile`/`fleet_sp_builder`, pas `fleet_capprofile`/`fleet_spbuilder`.)
 - **Ring 2** — orchestration backbone: `fleet_event_router` (Phoenix.PubSub bus `Fleet.PubSub` on topic `fleet.events`), `fleet_task_queue` (broker de mandats — `get_task`/`submit_result`, run #5), `fleet_task_monitor`, `fleet_pilot` (dispatcher webhook→pipeline, off par défaut — **client du core**, dépend compile-time du Ring 3 `fleet_pipeline` ; pas backbone pur, cf. son README « client du core ring 1, pas core »). (`fleet_ipc_filter` retiré : jamais implémenté.)
 - **Ring 3** — coordination + policy: `fleet_coord`, `fleet_pipeline`, `fleet_starfleet` (Cat-5 audit), `fleet_mcp`
-- **Ring 4** — external surface: `fleet_api` (REST `:8080` + WS `/ws`, HMAC `X-Auth-Token` against `/etc/fleet/api-secret`) ; `fleet_observation` (read-only observation deck `:8091`, BL-026 — dépend vers le bas Ring 1/2/3, aucune app du core ne dépend de lui)
+- **Ring 4** — external surface: `fleet_api` (REST `:8080` + WS `/ws`, **no-auth** par design — frontière = isolation réseau/container, cf. `Fleet.API.Rest` § Auth) ; `fleet_observation` (read-only observation deck `:8091`, BL-026 — dépend vers le bas Ring 1/2/3, aucune app du core ne dépend de lui)
 
 ### Vendor frontier (N0 / N1)
 
@@ -64,7 +64,7 @@ Three config files, evaluated in this order:
 **Critical invariant** in `config/runtime.exs`: the entire file is wrapped in `if config_env() != :test do ... end`. Without that guard, `mix test` reads runtime.exs (Mix evaluates it in every env), flips `start_listener: true`, and Cowboy tries to bind `:8080` → umbrella boot crash. If you add runtime config, keep it inside the guard unless you genuinely want test eval.
 
 Env vars consumed at boot (full template: `etc/lcars-fleet.env.template`):
-`LCARS_LOG_LEVEL`, `LCARS_CAPPROFILES_ROOT`, `LCARS_PIPELINES_ROOT`, `LCARS_COORD_POLICIES_PATH`, `LCARS_STARFLEET_AUDIT_LOG`, `LCARS_BOOT_PERMANENT_AT_START`, `LCARS_CONFIG_REPO`, `FLEET_WEBHOOK_SECRET_PATH`, `FLEET_API_PORT`, `FLEET_API_SECRET_PATH`.
+`LCARS_LOG_LEVEL`, `LCARS_CAPPROFILES_ROOT`, `LCARS_PIPELINES_ROOT`, `LCARS_COORD_POLICIES_PATH`, `LCARS_STARFLEET_AUDIT_LOG`, `LCARS_BOOT_PERMANENT_AT_START`, `LCARS_CONFIG_REPO`, `FLEET_WEBHOOK_SECRET_PATH`, `FLEET_API_PORT`.
 Run #5 (ADR-G / MCP / pilot — added 2026-06-02): `LCARS_LAUNCH_BACKEND` (+ `LCARS_UNSAFE_ALLOW_HOST_TMUX`), `LCARS_FLEET_MCP_URL` / `_POD_FACING_PORT` / `_BRIDGE_PATH`, `LCARS_PILOT_DISPATCHER` / `_POLL_REPO` / `_POLL_INTERVAL_MS` / `_ROUTING_PATH`, `FORGE_BASE_URL` / `FORGE_TOKEN` / `FORGE_TOKEN_FILE`.
 
 ## Test hermeticity
