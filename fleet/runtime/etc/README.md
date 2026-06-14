@@ -69,6 +69,9 @@ sudo chmod +x /usr/local/bin/lcars-fleet-reload /usr/local/bin/lcars-fleet-stop 
 # claude_launch = launcher vendor. Absents → 1er spawn KO :executable_missing.
 sudo cp bin/bwrap_launch.sh bin/host_launch.sh bin/claude_launch.sh /usr/local/bin/
 sudo chmod +x /usr/local/bin/bwrap_launch.sh /usr/local/bin/host_launch.sh /usr/local/bin/claude_launch.sh
+# CLI opérateur (LAUNCH-1/2/2b — spawn/list/attach un pod). `attach` exige le même UID que le daemon.
+sudo cp bin/lcars /usr/local/bin/
+sudo chmod +x /usr/local/bin/lcars
 
 sudo cp etc/lcars-fleet.env.template /etc/fleet/lcars-fleet.env
 # Éditer secrets : RELEASE_COOKIE (32 bytes base64), GITEA_TOKEN, etc.
