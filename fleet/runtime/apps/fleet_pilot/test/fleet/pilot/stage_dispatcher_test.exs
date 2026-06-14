@@ -3,8 +3,11 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
   alias Fleet.Pilot.StageDispatcher
 
-  # rôles connus pour les tests (évite de toucher CapProfile.load réel)
-  defp known?(role), do: role in ["engineer", "qualifier", "reviewer"]
+  # F075 : decide reçoit un LOADER ({:ok, profile} | {:error, _}). Stub : rôles connus → profil minimal.
+  defp load_role(role) when role in ["engineer", "qualifier", "reviewer"],
+    do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
+
+  defp load_role(_role), do: {:error, :not_found}
 
   defp issue(fields) do
     %{
@@ -19,12 +22,12 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   describe "decide/2 (pure)" do
     test "assignee = rôle connu, pas de verrou → {:spawn, role}" do
       payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
-      assert {:spawn, "engineer"} = StageDispatcher.decide(payload, &known?/1)
+      assert {:spawn, "engineer", _} = StageDispatcher.decide(payload, &load_role/1)
     end
 
     test "login forge downcasé → role" do
       payload = issue(%{"assignees" => [%{"login" => "Qualifier"}]})
-      assert {:spawn, "qualifier"} = StageDispatcher.decide(payload, &known?/1)
+      assert {:spawn, "qualifier", _} = StageDispatcher.decide(payload, &load_role/1)
     end
 
     test "verrou lcars-in-flight présent → {:skip, :in_flight}" do
@@ -34,7 +37,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           "labels" => [%{"name" => "lcars-in-flight"}]
         })
 
-      assert {:skip, :in_flight} = StageDispatcher.decide(payload, &known?/1)
+      assert {:skip, :in_flight} = StageDispatcher.decide(payload, &load_role/1)
     end
 
     test "verrou HUMAIN lcars-awaits-human → {:skip, :awaits_human} (A2.3b, pas de re-dispatch)" do
@@ -46,16 +49,16 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           "labels" => [%{"name" => "lcars-awaits-human"}]
         })
 
-      assert {:skip, :awaits_human} = StageDispatcher.decide(payload, &known?/1)
+      assert {:skip, :awaits_human} = StageDispatcher.decide(payload, &load_role/1)
     end
 
     test "pas d'assignee → {:skip, :no_assignee}" do
-      assert {:skip, :no_assignee} = StageDispatcher.decide(issue(%{}), &known?/1)
+      assert {:skip, :no_assignee} = StageDispatcher.decide(issue(%{}), &load_role/1)
     end
 
     test "assignee humain / rôle inconnu → {:skip, :no_role}" do
       payload = issue(%{"assignees" => [%{"login" => "lordzurp"}]})
-      assert {:skip, :no_role} = StageDispatcher.decide(payload, &known?/1)
+      assert {:skip, :no_role} = StageDispatcher.decide(payload, &load_role/1)
     end
   end
 
@@ -125,6 +128,14 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     def enqueue(_pod_id, _attrs), do: {:error, :broker_down}
   end
 
+  # F075 : loader qui SIGNALE chaque load(role) → permet d'asserter UN SEUL load par dispatch.
+  defmodule CountingLoader do
+    def load(role) do
+      send(self(), {:f075_loaded, role})
+      {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
+    end
+  end
+
   defp dispatch_opts(extra \\ []) do
     Keyword.merge(
       [
@@ -142,6 +153,17 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   end
 
   describe "dispatch_issue/2 (effets, seams stubés)" do
+    test "F075 : un seul load(role) par dispatch (fin du double-load sonde+spawn)" do
+      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+
+      assert {:ok, {:spawned, _, "engineer"}} =
+               StageDispatcher.dispatch_issue(payload, dispatch_opts(loader: CountingLoader))
+
+      # decide charge le profil et le threade ; dispatch le réutilise → load appelé EXACTEMENT une fois.
+      assert_received {:f075_loaded, "engineer"}
+      refute_received {:f075_loaded, _}
+    end
+
     test "spawn : ordre label → comment → pod, retourne {:ok, {:spawned, pod, role}}" do
       payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
 

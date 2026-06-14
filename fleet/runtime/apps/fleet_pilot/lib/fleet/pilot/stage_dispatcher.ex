@@ -5,25 +5,26 @@ defmodule Fleet.Pilot.StageDispatcher do
   legacy (route → pipeline nommé) : ici le poller voit un ticket **assigné à un rôle**
   et **spawn ce rôle** (= stage courant), sans table de routes.
 
-  ## Décision (pure, `decide/1`)
+  ## Décision (`decide/2`)
 
   À partir du payload d'une issue Gitea, décide :
-    * `{:spawn, role}` — assignee = un rôle connu (login forge → cap-profile), pas de
-      verrou `lcars-in-flight` → spawner le rôle.
-    * `{:skip, reason}` — `:no_role` (assignee humain / inconnu), `:in_flight` (verrou
-      posé, pod déjà en vol), `:no_assignee`.
+    * `{:spawn, role, profile}` — assignee = un rôle connu (login forge → cap-profile
+      chargé), pas de verrou `lcars-in-flight` → spawner le rôle.
+    * `{:skip, reason}` — `:no_role` (assignee humain / inconnu / cap-profile illisible),
+      `:in_flight` (verrou posé, pod déjà en vol), `:awaits_human`, `:no_assignee`.
 
-  `decide/1` ne fait **aucune** I/O — elle lit le payload (labels + assignees) déjà
-  fourni par le poller. Testable sans réseau ni forge.
+  L'I/O (lecture du cap-profile) est **injectée** via `load_role` (défaut `CapProfile.load/1`)
+  → testable sans forge. F075 : le profil chargé pour décider est THREADÉ dans `{:spawn, …}`
+  et réutilisé au spawn (pas de second load).
 
   ## Effets (`dispatch_issue/2`)
 
-  Sur `{:spawn, role}`, applique l'**ordre canonique du spawn** (DN §6, label AVANT pod,
-  sinon double-spawn) :
+  Sur `{:spawn, role, profile}`, applique l'**ordre canonique du spawn** (DN §6, label AVANT
+  pod, sinon double-spawn) :
     1. PUT label `lcars-in-flight` (verrou)
     2. POST comment `[lock:<role>:<ts>]` (TTL / diagnostic recovery)
-    3. spawn le pod (`CapProfile.load(role)` → `Spawner.spawn_pod(profile, ticket_id,
-       mandate: issue.body)`)
+    3. spawn le pod avec le `profile` déjà chargé par `decide` (`Spawner.spawn_pod(profile,
+       ticket_id, mandate: …)`)
 
   Les modules `:forge_client`, `:loader`, `:spawner` sont des **seams** (défauts =
   modules réels) pour tester sans toucher forge ni spawner.
@@ -35,14 +36,18 @@ defmodule Fleet.Pilot.StageDispatcher do
   @in_flight_label Fleet.Pilot.Labels.in_flight()
   @awaits_human_label Fleet.Pilot.Labels.awaits_human()
 
-  @type decision :: {:spawn, role :: String.t()} | {:skip, atom()}
+  @type decision ::
+          {:spawn, role :: String.t(), profile :: Fleet.CapProfile.t()} | {:skip, atom()}
 
   @doc """
-  Décision pure : payload issue Gitea → `{:spawn, role}` | `{:skip, reason}`.
-  `known_role?` (fun arité 1) injectable pour les tests ; défaut = `CapProfile.load/1` réussit.
+  Décision pure : payload issue Gitea → `{:spawn, role, profile}` | `{:skip, reason}`.
+  `load_role` (fun arité 1 → `{:ok, profile} | {:error, _}`) injectable pour les tests ; défaut =
+  `CapProfile.load/1`. F075 : le profil chargé pour décider est THREADÉ dans `{:spawn, …}` et réutilisé
+  au spawn par `dispatch_issue` (fin du double-load sonde+reload).
   """
-  @spec decide(map(), (String.t() -> boolean())) :: decision()
-  def decide(payload, known_role? \\ &default_known_role?/1) when is_map(payload) do
+  @spec decide(map(), (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()})) ::
+          decision()
+  def decide(payload, load_role \\ &default_load_role/1) when is_map(payload) do
     issue = Map.get(payload, "issue", payload)
     labels = Enum.map(Map.get(issue, "labels", []), & &1["name"])
     assignees = Map.get(issue, "assignees") || []
@@ -65,14 +70,19 @@ defmodule Fleet.Pilot.StageDispatcher do
         login = assignees |> hd() |> Map.get("login", "")
         role = String.downcase(login)
 
-        if role != "" and known_role?.(role),
-          do: {:spawn, role},
-          else: {:skip, :no_role}
+        # F075 : on charge le cap-profile UNE fois ici (la décision EN dépend) et on le threade —
+        # `dispatch_issue` le réutilise au spawn au lieu de recharger. role=="" ou load-error → :no_role.
+        with true <- role != "",
+             {:ok, profile} <- load_role.(role) do
+          {:spawn, role, profile}
+        else
+          _ -> {:skip, :no_role}
+        end
     end
   end
 
   @doc """
-  Dispatch effectif d'une issue : `decide/1` puis, sur `{:spawn, role}`, l'ordre
+  Dispatch effectif d'une issue : `decide/2` puis, sur `{:spawn, role, profile}`, l'ordre
   canonique du spawn (verrou → comment → pod). Idempotent via les write-ops ForgeClient.
 
   `opts` : `:repo` (obligatoire), `:forge_opts` (passé au ForgeClient), + seams
@@ -90,11 +100,11 @@ defmodule Fleet.Pilot.StageDispatcher do
     clock = Keyword.get(opts, :clock, &System.os_time/1)
     resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
 
-    case decide(payload, &role_loadable?(loader, &1)) do
+    case decide(payload, &loader.load/1) do
       {:skip, reason} ->
         {:skipped, reason}
 
-      {:spawn, role} ->
+      {:spawn, role, profile} ->
         issue = Map.get(payload, "issue", payload)
         number = issue["number"]
         repo = Keyword.fetch!(opts, :repo)
@@ -108,12 +118,12 @@ defmodule Fleet.Pilot.StageDispatcher do
         # ne laisse pas de verrou orphelin. project = base_sha pinné (F-03) ; route = (pipeline,
         # stage) gravé sur la forge (A2.1) → identifie le stage (l'assignee=rôle ne suffit pas).
         # `:none` (hors-carte / 1-stage) → route nil → comportement A1.
-        # Le cap-profile est chargé AVANT toute écriture forge (avec project + route) : un échec de
-        # load ne laisse pas de verrou orphelin, et `mandate_kind` (F077) en dépend. Réutilisé au spawn.
+        # F075 : le cap-profile est chargé par `decide` (threadé dans `{:spawn, role, profile}`) AVANT
+        # toute écriture forge — un échec de load = `{:skip, :no_role}` (zéro verrou orphelin). `mandate_kind`
+        # (F077) en dépend ; plus de reload ici (fin du double-load sonde+spawn).
         with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
              {:ok, route} <-
-               tag_err(route_for(forge, repo, number, forge_opts), :route_resolution),
-             {:ok, profile} <- tag_err(loader.load(role), :profile_load) do
+               tag_err(route_for(forge, repo, number, forge_opts), :route_resolution) do
           # pod_id DÉTERMINISTE (string connue AVANT spawn) : `Spawner.spawn_pod/3` retourne le
           # `pid` du GenServer ; on impose le pod_id via `:pod_id`. `ts` le rend unique par hop.
           # F071 : le préfixe "issue-" ci-dessous (et la branch hop_consumer.ex:318 "lcars/issue-...") est
@@ -292,11 +302,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # Internals
   # ============================================================
 
-  defp role_loadable?(loader, role) do
-    match?({:ok, _}, loader.load(role))
-  end
-
-  defp default_known_role?(role), do: role_loadable?(Fleet.CapProfile, role)
+  defp default_load_role(role), do: Fleet.CapProfile.load(role)
 
   # ============================================================
   # Résolution projet (base_sha pinné hors-pod, F-03 R1)
