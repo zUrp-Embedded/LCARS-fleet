@@ -143,21 +143,44 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # R01 (→R3) : le Loader doit normaliser v1/v2.5 vers une forme interne unique
   # (déballer spec.stages). Sans ça l'Executor lit pipeline["stages"]=nil sur v2.5.
   defp check_pipeline_v25_normalized(root) do
-    loader = Path.join(root, "apps/fleet_pipeline/lib/fleet/pipeline/loader.ex")
-    src = File.read!(loader)
+    rel = "apps/fleet_pipeline/lib/fleet/pipeline/loader.ex"
+    loader = Path.join(root, rel)
 
-    # Normalisation présente = le loader déballe spec.stages (ex `get_in(yaml, ["spec", "stages"])`
-    # ou un Map.put("stages", ...)). Heuristique : absence de toute extraction de spec.stages.
-    normalized? = Regex.match?(~r/"spec".*"stages"|normalize|deenvelope|déball/i, src)
+    # Anti-vert-creux DURCI (F-couche3, 2026-06-14) : l'ancien rail matchait `~r/normalize|déball/i` sur
+    # TOUT le source → un simple COMMENTAIRE contenant « normalize » le rendait vert même sans le code. On
+    # matche désormais la CLAUSE DE CODE réelle qui déballe `spec.stages` (la normalisation v2.5) ET son
+    # appel, en STRIPPANT le commentaire de chaque ligne (un `# defp normalize(...)` commenté ne compte pas).
+    unwrap_clause? =
+      loader
+      |> grep_lines(~r/defp normalize\(%\{"spec"/)
+      |> Enum.any?(fn {_l, line} -> Regex.match?(~r/defp normalize/, strip_comment(line)) end)
+
+    called? =
+      loader
+      |> grep_lines(~r/normalize\(yaml\)/)
+      |> Enum.any?(fn {_l, line} -> Regex.match?(~r/normalize\(yaml\)/, strip_comment(line)) end)
+
+    ok? = unwrap_clause? and called?
 
     %{
       id: "pipeline.v25.normalized",
       remediation: "R01/U1 (R3)",
-      status: if(normalized?, do: :pass, else: :fail),
+      status: if(ok?, do: :pass, else: :fail),
       evidence:
-        grep_lines(loader, ~r/has_key\?\(yaml, "spec"\)/)
-        |> Enum.map(fn {ln, _} -> "apps/fleet_pipeline/lib/fleet/pipeline/loader.ex:#{ln}" end),
-      note: "Loader détecte v2.5 mais ne déballe pas spec → Executor lit stages=nil"
+        cond do
+          not unwrap_clause? ->
+            [
+              "#{rel} : clause `defp normalize(%{\"spec\" => %{\"stages\" => ...}})` (déballage v2.5) absente → Executor lit stages=nil"
+            ]
+
+          not called? ->
+            ["#{rel} : `normalize(yaml)` jamais appelé au load → enveloppe v2.5 non déballée"]
+
+          true ->
+            []
+        end,
+      note:
+        "Loader DÉBALLE spec.stages via la CLAUSE DE CODE v2.5 (`defp normalize(%{\"spec\"…})`) ET l'appelle au load — matche le code, pas un commentaire (anti-vert-creux durci)"
     }
   end
 
@@ -639,8 +662,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     hop = "apps/fleet_pilot/lib/fleet/pilot/hop_consumer.ex"
     abs = Path.join(root, hop)
 
-    ok? =
-      not File.exists?(abs) or
+    # Anti-vert-creux DURCI (F-couche3, 2026-06-14) : l'ancien `not File.exists?(abs) or …` rendait le rail
+    # VERT si `hop_consumer.ex` était SUPPRIMÉ (l'invariant verdict-route disparu mais pass quand même). Le
+    # verdict-route EST le hop_consumer : son absence est elle-même un défaut → on EXIGE le fichier ET le
+    # déballage (strip_comment : un `# unwrap_worker_envelope` commenté ne compte pas). Déplacer l'unwrap
+    # ailleurs = changement de design qui DOIT mettre à jour ce rail (ce que ce fail-on-absence force).
+    unwrap_present? =
+      File.exists?(abs) and
         abs
         |> grep_lines(~r/unwrap_worker_envelope|unwrap_envelope/)
         |> Enum.any?(fn {_l, line} -> Regex.match?(~r/unwrap/, strip_comment(line)) end)
@@ -648,11 +676,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     %{
       id: "verdict.worker_envelope_unwrapped",
       remediation: "R-worker-envelope-unwrap",
-      status: if(ok?, do: :pass, else: :fail),
+      status: if(unwrap_present?, do: :pass, else: :fail),
       evidence:
-        if(ok?, do: [], else: ["#{hop} : verdict_route ne déplie pas l'enveloppe worker (#11)"]),
+        cond do
+          not File.exists?(abs) ->
+            [
+              "#{hop} : ABSENT — le verdict-route (déballage enveloppe worker) a disparu (#11) ; si déplacé, MAJ ce rail"
+            ]
+
+          not unwrap_present? ->
+            ["#{hop} : verdict_route ne déplie pas l'enveloppe worker (#11)"]
+
+          true ->
+            []
+        end,
       note:
-        "déplier %{status,result} avant de lire decision (HopConsumer #11) ; idem avant Gates.evaluate côté Executor (#2, vérifié par test)"
+        "déplier %{status,result} avant de lire decision (HopConsumer #11) ; idem avant Gates.evaluate côté Executor (#2, vérifié par test). Rail EXIGE le fichier (pas de pass-si-absent — anti-vert-creux durci)"
     }
   end
 
