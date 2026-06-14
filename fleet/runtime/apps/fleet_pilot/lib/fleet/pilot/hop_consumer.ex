@@ -64,6 +64,10 @@ defmodule Fleet.Pilot.HopConsumer do
     * `:spawner` — wake du gatekeeper après enqueue (défaut `Fleet.Spawner`)
     * `:gatekeeper_pod_id_fun` — `fn -> pod_id | nil end` (défaut `&Fleet.Pipeline.Gatekeeper.pod_id/0`)
     * `:subscribe` — bool défaut `true` (tests : `false` + envoi manuel)
+    * `:hop_runner` — F067 : seam d'offload de la complétion. Défaut `nil` → **SYNC** (l'outcome remonte,
+      seams/tests inchangés). Prod (`application.ex`) injecte `&offload_async/1` → la complétion (git push
+      ≤30s + writes forge) tourne dans une `Task.Supervisor` : le **singleton HopConsumer ne bloque pas**
+      (et un `.complete` qui crash est isolé par la task supervisée).
   """
 
   use GenServer
@@ -91,7 +95,10 @@ defmodule Fleet.Pilot.HopConsumer do
     :gatekeeper_boot_fun,
     # B (§L441) — escalades en attente, keyées par correlation_id (= task.id du
     # mandat d'éval). Valeur = contexte de reprise `%{n, role, payload, carte, stage}`.
-    gate_evals: %{}
+    gate_evals: %{},
+    # F067 : seam d'offload de la complétion. Défaut nil → `run_completion` retombe sur SYNC (l'outcome
+    # remonte, seams `maybe_complete`/`resume_gate` + tous les tests inchangés). Prod = async Task.Supervisor.
+    hop_runner: nil
   ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -99,6 +106,28 @@ defmodule Fleet.Pilot.HopConsumer do
     {gs_opts, init_opts} = Keyword.split(opts, [:name])
     name = Keyword.get(gs_opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, init_opts, name: name)
+  end
+
+  # F067 : superviseur de tasks pour l'offload de la complétion (prod). Nom partagé entre
+  # `application.ex stage_children` (qui le démarre AVANT le HopConsumer) et `offload_async/1`.
+  @hop_task_supervisor Fleet.Pilot.HopTaskSupervisor
+
+  @doc false
+  def task_supervisor, do: @hop_task_supervisor
+
+  # F067 : runner ASYNC (prod, injecté en `:hop_runner`) — offload la complétion dans la
+  # `Task.Supervisor` : le git push ≤30s + writes forge ne bloquent PAS le singleton. Rend
+  # `{:ok, :offloaded}` (le vrai outcome est loggé dans la task). Échec de spawn → fail-loud loggé.
+  @doc false
+  def offload_async(fun) do
+    case Task.Supervisor.start_child(@hop_task_supervisor, fun) do
+      {:ok, _pid} ->
+        {:ok, :offloaded}
+
+      {:error, reason} ->
+        Logger.error("HopConsumer: offload Task échoué (#{inspect(reason)}) — complétion perdue")
+        {:error, {:offload_failed, reason}}
+    end
   end
 
   @impl GenServer
@@ -131,7 +160,10 @@ defmodule Fleet.Pilot.HopConsumer do
           Keyword.get(opts, :gatekeeper_pod_id_fun, &Fleet.Pipeline.Gatekeeper.pod_id/0),
         gatekeeper_boot_fun:
           Keyword.get(opts, :gatekeeper_boot_fun, &Fleet.Pipeline.Gatekeeper.ensure_booted/0),
-        gate_evals: %{}
+        gate_evals: %{},
+        # F067 (critique panel) : prod (stage_children) injecte `&offload_async/1` ici ; sans cette
+        # lecture, `run_completion` retombait sur sync → le git push bloquait le singleton (offload mort).
+        hop_runner: Keyword.get(opts, :hop_runner)
       }
 
       Logger.info("fleet_pilot HopConsumer start repo=#{repo} remote=#{remote}")
@@ -165,8 +197,8 @@ defmodule Fleet.Pilot.HopConsumer do
   @impl GenServer
   def handle_info(%Fleet.Event{source: :spawner, type: :"pod.completed", payload: p}, state) do
     case maybe_complete(p, state) do
-      {:ok, outcome} ->
-        Logger.info("HopConsumer: #{p["ticket_id"]} → #{inspect(outcome)}")
+      # F067 : l'outcome est loggé par `run_completion` (dans la task en async), pas ici.
+      {:ok, _outcome} ->
         {:noreply, state}
 
       # B (§L441) — gate non-tranchable : le mandat d'éval est enqueué au gatekeeper
@@ -207,8 +239,9 @@ defmodule Fleet.Pilot.HopConsumer do
         state = %{state | gate_evals: gate_evals}
 
         case resume_gate(eval_ctx, ev.payload, state) do
-          {:ok, outcome} ->
-            Logger.info("HopConsumer gate resume: corr=#{inspect(corr)} → #{inspect(outcome)}")
+          # F067 : outcome loggé par `run_completion` ; ici on ne logge que l'erreur de DÉCISION (pré-complétion).
+          {:ok, _outcome} ->
+            :ok
 
           {:error, reason} ->
             Logger.warning(
@@ -267,6 +300,32 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
+  # F067 : exécute la complétion d'un hop via le seam `hop_runner`. SYNC (défaut) → exécute, logge
+  # l'outcome, et le REND (seams `maybe_complete`/`resume_gate` + tous les tests le reçoivent). ASYNC
+  # (prod, Task.Supervisor) → offload : le git push ≤30s + writes forge ne bloquent PAS le singleton,
+  # l'outcome est loggé DANS la task, le runner rend `{:ok, :offloaded}`. Ordering préservé (lock
+  # lcars-in-flight + writes idempotentes, per finding F067). Un `.complete` qui crash en async est
+  # isolé par la task supervisée (ne tue plus le HopConsumer).
+  defp run_completion(state, label, fun) do
+    exec = fn ->
+      outcome = fun.()
+
+      case outcome do
+        {:error, reason} ->
+          Logger.warning("HopConsumer fin-de-hop FAIL #{label}: #{inspect(reason)}")
+
+        _ ->
+          Logger.info("HopConsumer fin-de-hop #{label} → #{inspect(outcome)}")
+      end
+
+      outcome
+    end
+
+    (state.hop_runner || (&run_sync/1)).(exec)
+  end
+
+  defp run_sync(fun), do: fun.()
+
   # Construit + applique le hop métier (livrable `:git_native` : le pod a commité dans
   # son workspace, le système vérifie gate F-01/F-03 + pousse). `comment_body` nil →
   # HopCompleter applique son comment par défaut ; non-nil → trace (ex. verdict gatekeeper).
@@ -299,7 +358,9 @@ defmodule Fleet.Pilot.HopConsumer do
       |> maybe_put(:forge_client, state.forge_client)
       |> maybe_put(:deliverable, state.deliverable)
 
-    state.hop_completer.complete(hop, hc_opts)
+    run_completion(state, "##{n}", fn ->
+      state.hop_completer.complete(hop, hc_opts)
+    end)
   end
 
   # Livrable d'un hop métier : `:git_native`. Le pod a commité dans son workspace
@@ -488,7 +549,10 @@ defmodule Fleet.Pilot.HopConsumer do
         }
 
         hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
-        state.hop_completer.await_human(hop, hc_opts)
+
+        run_completion(state, "##{n}", fn ->
+          state.hop_completer.await_human(hop, hc_opts)
+        end)
     end
   end
 
@@ -511,7 +575,10 @@ defmodule Fleet.Pilot.HopConsumer do
     }
 
     hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
-    state.hop_completer.complete(hop, hc_opts)
+
+    run_completion(state, "##{n}", fn ->
+      state.hop_completer.complete(hop, hc_opts)
+    end)
   end
 
   # Trace lisible du verdict (portée dans le comment du hop → durable en forge).

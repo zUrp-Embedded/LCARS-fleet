@@ -79,6 +79,28 @@ defmodule Fleet.Pilot.HopConsumerTest do
     end
   end
 
+  describe "F067 — offload de la complétion (hop_runner)" do
+    test "hop_runner async → complétion offloadée (le singleton ne bloque pas sur .complete)" do
+      test_pid = self()
+
+      # Runner « recording » : capture l'exec sans le lancer (simule l'offload Task.Supervisor) →
+      # prouve que .complete passe par le runner, pas en direct (bloquant) dans le GenServer.
+      recording = fn exec ->
+        send(test_pid, {:offloaded, exec})
+        {:ok, :offloaded}
+      end
+
+      assert {:ok, :offloaded} =
+               HopConsumer.maybe_complete(stage_payload(), state(%{hop_runner: recording}))
+
+      assert_received {:offloaded, exec}
+
+      # l'exec capturé, lancé, fait la VRAIE complétion (CaptureCompleter → {:hop,...} + {:ok,:completed}).
+      assert {:ok, :completed} = exec.()
+      assert_received {:hop, _hop, _opts}
+    end
+  end
+
   describe "maybe_complete/2 — filtres (skip)" do
     test "pipeline pod (pipeline_id présent) → skip, pas d'appel completer" do
       payload = stage_payload(%{"pipeline_id" => "pl-1", "stage" => "build"})
@@ -179,6 +201,44 @@ defmodule Fleet.Pilot.HopConsumerTest do
                  repo: "o/r",
                  subscribe: false
                )
+    end
+
+    test "F067 : start_link câble :hop_runner → la complétion passe par le runner (chemin init/prod)" do
+      # RED-first : ce test passe par start_link → init (le chemin PROD, que stage_children utilise),
+      # PAS par un state construit en direct. Si init oublie de lire :hop_runner des opts, le runner
+      # injecté est ignoré → la complétion s'exécute en sync (bloquante) → {:offloaded_gs} n'arrive
+      # JAMAIS → ce test échoue. C'est le filet du critique F067-init.
+      test_pid = self()
+
+      recording = fn exec ->
+        send(test_pid, {:offloaded_gs, exec})
+        {:ok, :offloaded}
+      end
+
+      name = :"HC_runner_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        HopConsumer.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          remote: "origin",
+          forge_opts: [base_url: "http://10.42.0.118"],
+          role_emails: fn role -> ["#{role}@lcars.local"] end,
+          hop_completer: CaptureCompleter,
+          hop_runner: recording,
+          subscribe: false
+        )
+
+      send(pid, %Fleet.Event{
+        source: :spawner,
+        type: :"pod.completed",
+        timestamp: DateTime.utc_now(),
+        pod_id: "pod-abc",
+        payload: stage_payload()
+      })
+
+      # init a câblé hop_runner → la complétion est routée vers le runner (msg au process test).
+      assert_receive {:offloaded_gs, _exec}, 1_000
     end
 
     test "handle_info pod.completed → délègue (via Event réel, subscribe: false)" do

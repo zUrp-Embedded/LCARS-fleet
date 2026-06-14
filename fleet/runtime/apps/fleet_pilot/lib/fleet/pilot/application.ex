@@ -84,9 +84,16 @@ defmodule Fleet.Pilot.Application do
       routing = Application.get_env(:fleet_pilot, :stage_routing, %{})
 
       [
+        # F067 : superviseur de tasks pour l'offload de la complétion de hop (le git push ≤30s du
+        # HopConsumer ne bloque pas le singleton). Démarré AVANT le HopConsumer (qui s'y réfère).
+        {Task.Supervisor, name: Fleet.Pilot.HopConsumer.task_supervisor()},
         {Fleet.Pilot.Poller,
          repo: repo, interval_ms: interval, stage_dispatch?: true, routing: routing},
-        {Fleet.Pilot.HopConsumer, repo: repo, remote: remote, forge_opts: []}
+        {Fleet.Pilot.HopConsumer,
+         repo: repo,
+         remote: remote,
+         forge_opts: [],
+         hop_runner: &Fleet.Pilot.HopConsumer.offload_async/1}
       ]
     else
       _ -> []
