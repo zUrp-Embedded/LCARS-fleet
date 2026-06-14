@@ -87,6 +87,10 @@ sandbox. Auth = `HOME` = home réel de l'humain (≈ `:bind` réalisé nativemen
 > `LCARS_AUTH_MODE=bind` posé dans l'env n'est PAS consommé (host_launch ne bind rien — l'auth est
 > native via `HOME`+UID). Réservé aux rôles de confiance (`containment: none` = architect, starfleet).
 
+**Preuve mécanisme** : `test/integration/host_launch_test.sh` exécute host_launch.sh contre un tmux RÉEL
+(command factice, sans claude) — valide sock+session+holder, le **contrat argv de bout en bout**, et le
+teardown SIGTERM→`kill-server`. La couche vendor (claude_launch + OAuth) reste à valider au 1er spawn live.
+
 ## Restart strategy mapping
 
 | `lifetime_scope` | OTP `restart` |

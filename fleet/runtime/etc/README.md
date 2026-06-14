@@ -104,7 +104,11 @@ sudo systemd-analyze security lcars-fleet.service
 
 ```bash
 bash test/integration/boot_test.sh
-# 31 checks, exit 0
+# hardening + readiness + env vars + runtime.exs wire-up (1 KO env = systemd-analyze @namespace, WSL2)
+
+bash test/integration/host_launch_test.sh
+# LAUNCH-Q : host_launch.sh vs tmux RÉEL (command factice, pas de claude) — sock+session+holder, contrat
+# argv de bout en bout, teardown SIGTERM→kill-server. 15 checks, exit 0. Nécessite tmux.
 ```
 
 Vérifie hardening directives + readiness exit codes + env vars + Mix
