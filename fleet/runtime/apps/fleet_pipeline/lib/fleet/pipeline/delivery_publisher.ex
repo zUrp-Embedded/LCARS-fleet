@@ -126,29 +126,24 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
   defp committer_label(committer: %{name: name}), do: name
   defp committer_label(_), do: "système"
 
-  # token OPÉRATEUR pour le push du livrable : config `:delivery_push_token` si posée, sinon lu du
-  # git extraheader du repo runtime (le MÊME token que le push de code — pas de doublon). [] si introuvable.
+  # token OPÉRATEUR pour le push du livrable : config `:delivery_push_token` si posée, sinon lu du HOME
+  # de l'opérateur (`~/.gitea_token`, comme un compte humain standard — symétrique avec lordzurp). Le
+  # daemon tourne *as* l'humain → son home porte son token. [] si introuvable (→ pas de push opérateur).
   defp push_token_opt do
-    case Application.get_env(:fleet_pipeline, :delivery_push_token) || read_git_push_token() do
+    case Application.get_env(:fleet_pipeline, :delivery_push_token) || read_operator_token() do
       t when is_binary(t) and t != "" -> [token: t]
       _ -> []
     end
   end
 
-  defp read_git_push_token do
-    root = Application.get_env(:fleet_pipeline, :delivery_push_repo_root, "/home/projects/LCARS")
+  defp read_operator_token do
+    path =
+      Application.get_env(:fleet_pipeline, :delivery_push_token_file) ||
+        Path.join(System.user_home() || "/home/starfleet", ".gitea_token")
 
-    case System.cmd("git", ["-C", root, "config", "--get-regexp", ~S/http\..*\.extraheader/],
-           stderr_to_stdout: true
-         ) do
-      {out, 0} ->
-        case Regex.run(~r/[Tt]oken\s+(\S+)/, out) do
-          [_, tok] -> tok
-          _ -> nil
-        end
-
-      _ ->
-        nil
+    case File.read(path) do
+      {:ok, content} -> String.trim(content)
+      _ -> nil
     end
   rescue
     _ -> nil
