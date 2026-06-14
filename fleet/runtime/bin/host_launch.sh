@@ -122,5 +122,12 @@ cd "$WORKDIR"
 
 # Holder : ce process EST le pod vivant (Port spawner). SIGTERM → trap → cleanup → namespace-libre, le
 # serveur tmux par-pod est tué explicitement. Validation ASYNC côté spawner via `tmux -S sock list-sessions`.
-sleep infinity &
+#
+# argv0 identifiable `lcars-hold:<role>:<pod_id>` (hygiène ressources) : host_launch n'a NI namespace NI
+# `--die-with-parent` (vs bwrap) → sur crash dur BEAM, le trap est bypassé, le holder meurt et le sleep
+# ORPHELINE. Sans pod_id dans l'argv, le filet `pkill -f <pod_id>` ne le matche pas → accumulation
+# invisible. Avec argv0 porteur du pod_id : orphelin VISIBLE (`ps | grep lcars-hold:`) et REAPABLE.
+# Subshell `( exec -a … )` et pas `exec` direct : le shell holder reste vivant + trappable (sinon le
+# teardown `kill-server` du trap raterait — cf. l.118).
+( exec -a "lcars-hold:${ROLE}:${POD_ID}" sleep infinity ) &
 wait $!
