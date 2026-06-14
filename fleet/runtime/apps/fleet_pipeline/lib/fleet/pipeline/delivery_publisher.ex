@@ -56,23 +56,24 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
       ns = "deliverables/" <> sanitize(ticket)
       forge = Fleet.Pilot.ForgeClient
 
-      # Traça : le commit forge porte l'identité de l'agent d'ORIGINE (le rôle), pas le compte système.
+      # Traça 2 NIVEAUX (git-natif) : `author` = le WORKER (qui a écrit), `committer` = l'HUMAIN
+      # commanditaire (qui a fait bosser la fleet — git config du runtime). Le système fait l'I/O,
+      # le commit attribue les deux niveaux. forge-aveugle préservé (le pod ne pousse jamais).
       author = author_for(role)
-
-      trailer =
-        if is_binary(role),
-          do: "\n\nCo-authored-by: LCARS-#{role} <#{role}@lcars.local>",
-          else: ""
+      committer = committer_human()
 
       published =
         Enum.reduce(publishable, 0, fn d, acc ->
           path = ns <> "/" <> sanitize_path(d["path"] || "file")
-          opts = [message: "feat(fleet): livrable #{path} (delegation)" <> trailer] ++ author
+
+          opts =
+            [message: "feat(fleet): livrable #{path} (delegation #{ticket})"] ++
+              author ++ committer
 
           case apply(forge, :put_file, [repo, path, d["content"], opts]) do
             {:ok, _} ->
               Logger.info(
-                "DeliveryPublisher: publié #{repo}/#{path} (author=#{author_label(role)})"
+                "DeliveryPublisher: publié #{repo}/#{path} (author=#{author_label(role)}, committer=#{committer_label(committer)})"
               )
 
               acc + 1
@@ -85,7 +86,7 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
 
       Logger.info(
         "DeliveryPublisher: #{published}/#{length(publishable)} livrable(s) gravé(s) sur #{repo} " <>
-          "(ticket #{ticket}, author #{author_label(role)})"
+          "(ticket #{ticket}, author #{author_label(role)}, committer #{committer_label(committer)})"
       )
     end
   rescue
@@ -103,6 +104,24 @@ defmodule Fleet.Pipeline.DeliveryPublisher do
 
   defp author_label(role) when is_binary(role) and role != "", do: "LCARS-#{role}"
   defp author_label(_), do: "système"
+
+  # committer Keyword : l'HUMAIN commanditaire (git config du runtime via ForgeIdentity ; role-indépendant).
+  # [] si irrésoluble → put_file commit avec le compte du token (système, fallback fail-soft).
+  defp committer_human do
+    case Fleet.Credentials.ForgeIdentity.for_role("engineer") do
+      {:ok, %{committer_name: name, committer_email: email}}
+      when is_binary(name) and is_binary(email) ->
+        [committer: %{name: name, email: email}]
+
+      _ ->
+        []
+    end
+  rescue
+    _ -> []
+  end
+
+  defp committer_label(committer: %{name: name}), do: name
+  defp committer_label(_), do: "système"
 
   # deliverables au top-level OU enveloppés sous "result" (l'engineer enveloppe parfois).
   defp extract_deliverables(%{"deliverables" => d}) when is_list(d), do: d

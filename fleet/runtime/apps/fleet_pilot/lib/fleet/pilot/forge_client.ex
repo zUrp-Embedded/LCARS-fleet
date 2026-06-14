@@ -318,9 +318,11 @@ defmodule Fleet.Pilot.ForgeClient do
           branch: Keyword.get(opts, :branch, "main")
         }
         |> maybe_put_new_branch(Keyword.get(opts, :new_branch))
-        # Traça (2026-06-14) : `author: %{name, email}` → le SYSTÈME fait l'I/O (token système) MAIS
-        # le commit porte l'identité de l'agent d'origine (forge-aveugle ≠ écrire en son propre nom).
-        |> maybe_put_author(Keyword.get(opts, :author))
+        # Traça à 2 niveaux (git-natif, 2026-06-14) : `author` = le WORKER (qui a écrit),
+        # `committer` = l'HUMAIN commanditaire (qui a fait bosser la fleet ; le système fait l'I/O,
+        # mais le commit attribue les deux niveaux). forge-aveugle préservé (le pod ne pousse jamais).
+        |> maybe_put_identity(:author, Keyword.get(opts, :author))
+        |> maybe_put_identity(:committer, Keyword.get(opts, :committer))
 
       case http_put(config, "/repos/#{repo}/contents/#{path}", body) do
         {:ok, %{"commit" => %{"sha" => sha}}} -> {:ok, sha}
@@ -333,11 +335,11 @@ defmodule Fleet.Pilot.ForgeClient do
   defp maybe_put_new_branch(body, nil), do: body
   defp maybe_put_new_branch(body, nb) when is_binary(nb), do: Map.put(body, :new_branch, nb)
 
-  defp maybe_put_author(body, %{name: name, email: email})
+  defp maybe_put_identity(body, key, %{name: name, email: email})
        when is_binary(name) and is_binary(email),
-       do: Map.put(body, :author, %{name: name, email: email})
+       do: Map.put(body, key, %{name: name, email: email})
 
-  defp maybe_put_author(body, _), do: body
+  defp maybe_put_identity(body, _key, _), do: body
 
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     case http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
