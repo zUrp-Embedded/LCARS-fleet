@@ -4,8 +4,7 @@ defmodule Fleet.API.Application do
 
   Démarre :
 
-    1. `Fleet.API.RelayHandler` GenServer (subscribe Bus +
-       ETS pending refs)
+    1. `Fleet.API.GitCommitter` (mutex FIFO commits config)
     2. Cowboy listener `:8080` avec dispatch :
        - `/ws` → `Fleet.API.WS` (WebSocket handler)
        - `/_*` → `Fleet.API.Rest` (Plug.Router REST)
@@ -22,16 +21,15 @@ defmodule Fleet.API.Application do
 
   ## Stratégie
 
-  `:one_for_one` — RelayHandler restart `:permanent`, Cowboy listener
-  restart `:permanent`. Pré-enregistrement atomes events (cohérent
-  ch11 M1 atom-leak DoS).
+  `:one_for_one` — GitCommitter + Cowboy listener restart `:permanent`.
+  Pré-enregistrement atomes events (cohérent ch11 M1 atom-leak DoS).
   """
 
   use Application
 
-  # NB atomes `api` (admin.spawn.request, permission_relay_*) : créés au compile-time
-  # par leurs vrais sites (rest.ex / relay_handler.ex / events.yaml registry) — pas
-  # besoin d'un attribut de pré-enregistrement dédié (F005, ex-@api_event_atoms retiré).
+  # NB atome `api` (admin.spawn.request) : créé au compile-time par son vrai site
+  # (rest.ex) — pas besoin d'un attribut de pré-enregistrement dédié (F005,
+  # ex-@api_event_atoms retiré).
 
   @impl Application
   def start(_type, _args) do
@@ -87,7 +85,7 @@ defmodule Fleet.API.Application do
     # config (évite race conditions cross-caller sur snapshot/rename/
     # git add/commit/rollback). Pas de cycle, pas de state mutable —
     # juste un mutex de file FIFO.
-    [Fleet.API.GitCommitter, Fleet.API.RelayHandler]
+    [Fleet.API.GitCommitter]
   end
 
   defp listener_children do

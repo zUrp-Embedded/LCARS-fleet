@@ -1,8 +1,6 @@
 defmodule Fleet.EventRouter.Bus do
   @moduledoc """
-  Bus events Phoenix.PubSub instance `Fleet.PubSub` topic
-  `fleet.events` + sous-topics `fleet.events.<scope>.<id>` (ex relay
-  ch10 `fleet.events.relay.<ref>`).
+  Bus events Phoenix.PubSub instance `Fleet.PubSub` topic `fleet.events`.
 
   ## API — schema canon strict (DN 11 C3.1+C3.2)
 
@@ -14,7 +12,6 @@ defmodule Fleet.EventRouter.Bus do
 
     * `child_spec/1` — pour Application supervisor (instancie `Phoenix.PubSub`)
     * `subscribe/1` / `unsubscribe/1` — gestion abonnements topic
-    * `broadcast_subtopic/2` — sous-topics `fleet.events.<scope>.<id>`
     * `authorized_event_types/0` — MapSet atoms chargé au boot par `Catalog.load!/0`
     * `set_authorized_event_types/1` — appelé par `Catalog.load!/0` au boot
 
@@ -127,14 +124,5 @@ defmodule Fleet.EventRouter.Bus do
   @spec unsubscribe(String.t()) :: :ok
   def unsubscribe(topic \\ @main_topic) when is_binary(topic) do
     Phoenix.PubSub.unsubscribe(@pubsub_name, topic)
-  end
-
-  @doc """
-  Diffuse un event vers un sous-topic `fleet.events.<scope>.<id>`
-  (ex `fleet.events.relay.<ref>` pour ch10 step 4 relay matching ref).
-  """
-  @spec broadcast_subtopic(String.t(), term()) :: :ok | {:error, term()}
-  def broadcast_subtopic(subtopic, message) when is_binary(subtopic) do
-    Phoenix.PubSub.broadcast(@pubsub_name, "#{@main_topic}.#{subtopic}", message)
   end
 end

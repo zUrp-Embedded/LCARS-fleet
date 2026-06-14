@@ -8,7 +8,7 @@
 # `Bus.subscribe` + `handle_info`) — PAS par une table de dispatch. Le GenServer
 # `Dispatch` (table `event → handle_event/1`, jamais câblée) a été RETIRÉ. Qui
 # consomme quel event est documenté dans le moduledoc de chaque consommateur
-# (`AuditConsumer`, `DriftMonitor`, `RelayHandler`, `Spawner.PublishConsumer`,
+# (`AuditConsumer`, `DriftMonitor`, `Spawner.PublishConsumer`,
 # `API.WS`, `Pipeline.Executor`, …).
 #
 # Valeurs = `[]` (registry pur). Le schéma (`events-v1.json`) tolère une liste de
@@ -30,9 +30,6 @@ events:
 
   # --- Credentials ---
   oauth.refresh.failed: []
-
-  # --- API relay (vestigial ADR-D) ---
-  permission_relay_request: []
 
   # --- Audit gatekeeper / forge tickets / tick ---
   # R09 : `audit.verdict` (2 segments) — aligné sur le consommateur réel

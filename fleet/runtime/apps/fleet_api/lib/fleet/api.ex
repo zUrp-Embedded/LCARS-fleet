@@ -9,13 +9,9 @@ defmodule Fleet.API do
 
     * `Fleet.API.Rest` — Plug.Router HTTP `:8080` endpoints REST
       (GET pipelines/tickets/pods/health + POST admin/spawn,
-      config/update, relay/:ref) + auth HMAC token header
+      config/update) + auth HMAC token header
     * `Fleet.API.WS` — Cowboy WebSocket handler `:8080/ws` subscribe
       Phoenix.PubSub bus + filtre per-client topics + heartbeat 30s
-    * `Fleet.API.RelayHandler` — GenServer subscribe
-      `permission_relay_request` event, ETS pending refs, POST
-      `/api/relay/:ref` → broadcast `permission_relay_response`
-      matching ref (round-trip ch10)
     * `Fleet.API.GitCommitter` — pure functions wrapper atomic write
       rename + `git add` + `git commit` (canon trace strate 1)
 

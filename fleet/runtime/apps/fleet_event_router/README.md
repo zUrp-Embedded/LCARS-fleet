@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-13 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-06-14 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -9,14 +9,13 @@ Bus events (Phoenix.PubSub) + registry events.yaml LCARS v2 (Ring 2 —
 colonne vertébrale orchestration). Consommation = subscribers directs
 PubSub (BL-027 ; table de dispatch retirée). Webhooks Gitea + signaux OS + events
 internes (`pod.*`, `pipeline.*`, `audit.verdict.*`,
-`refuse_pattern_match`, `pod_drift`, `permission_relay_request`)
+`pod_drift`)
 publiés sur Phoenix.PubSub topic `fleet.events`.
 
 ## Sous-modules
 
 - `Fleet.EventRouter.Bus` — Phoenix.PubSub instance `Fleet.PubSub`
-  + sous-topics `fleet.events.<scope>.<id>` (broadcast / subscribe /
-  validation schema NDJSON soft)
+  (broadcast / subscribe / validation schema NDJSON soft)
 - `Fleet.EventRouter.WebhooksGitea` — Plug.Router HTTP `:8081` +
   HMAC SHA256 verify (secret `/etc/fleet/webhook-secret`)
 - `Fleet.EventRouter.SignalsOS` — `:os.set_signal/2` SIGUSR1/SIGTERM/SIGHUP
@@ -48,11 +47,6 @@ end
 
 # (Compat shim legacy 3-arity {atom, map} — à retirer ch3 BL-021)
 # Fleet.EventRouter.Bus.broadcast("pod.allocate", %{...}, ticket_id: "...")
-
-# Sous-topic (ch10 step 4 relay pattern)
-Fleet.EventRouter.Bus.subscribe("fleet.events.relay.<ref>")
-Fleet.EventRouter.Bus.broadcast_subtopic("relay.<ref>",
-  {:permission_relay_response, %{ref: "...", decision: :allow}})
 ```
 
 ## Configuration

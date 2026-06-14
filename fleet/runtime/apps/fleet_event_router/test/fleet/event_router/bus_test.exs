@@ -28,18 +28,4 @@ defmodule Fleet.EventRouter.BusTest do
       :ok = Bus.subscribe()
     end
   end
-
-  describe "broadcast_subtopic/2 — sous-topic ch10 relay pattern" do
-    test "diffuse vers fleet.events.relay.<ref>" do
-      Bus.subscribe("fleet.events.relay.abc123")
-
-      Bus.broadcast_subtopic(
-        "relay.abc123",
-        {:permission_relay_response, %{ref: "abc123", decision: :allow}}
-      )
-
-      assert_receive {:permission_relay_response, %{ref: "abc123", decision: :allow}}
-      Bus.unsubscribe("fleet.events.relay.abc123")
-    end
-  end
 end

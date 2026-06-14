@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-05 (P05 — readiness honnête `/api/readiness/deep` + `Fleet.API.Readiness` read-model anti-vert-creux)
+**Dernière révision** : 2026-06-14 (P05 — readiness honnête `/api/readiness/deep` + `Fleet.API.Readiness` read-model anti-vert-creux)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -16,7 +16,6 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 |---|---|
 | `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST + auth HMAC token |
 | `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
-| `Fleet.API.RelayHandler` | GenServer subscribe `permission_relay_request`, ETS pending refs, POST `/api/relay/:ref` → broadcast `permission_relay_response` (round-trip ch10) |
 | `Fleet.API.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380) |
 | `Fleet.API.Readiness` | read-model P05 — état opérationnel LIVE (anti-vert-creux). Introspecte config/process/persistent_term ; `deep/0` rend `status: operational\|degraded` + sous-systèmes. Jumeau runtime de `mix lcars.contracts.check` (plan source-conformance build/CI) sur le plan opérationnel. Fonctions pures (pas de process — Iron Law) |
 
@@ -31,7 +30,6 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 | GET | `/api/pods` | HMAC | liste pods |
 | POST | `/api/admin/spawn` | HMAC | broadcast `admin.spawn.request` (ch6) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
 | POST | `/api/config/update` | HMAC | atomic write + git commit |
-| POST | `/api/relay/:ref` | HMAC | round-trip permission relay (ch10) |
 
 Auth via header `X-Auth-Token` HMAC SHA256 contre secret
 `/etc/fleet/api-secret` (root:lcars 600). Constant-time compare.
@@ -55,9 +53,6 @@ Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 ## Public API
 
 ```elixir
-# RelayHandler round-trip (invoqué via REST POST /api/relay/:ref)
-:ok = Fleet.API.RelayHandler.respond("ref-abc", "allow")
-
 # GitCommitter atomic write + git commit
 {:ok, sha} = Fleet.API.GitCommitter.commit_config_change(
   "intensity.json", ~s|{"level":"low"}|, "user1"
@@ -77,12 +72,10 @@ Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 
 ```bash
 mix test apps/fleet_api
-# 59 tests, 0 failures
 ```
 
-Tests utilisent `Plug.Test` pour Rest (pas de listener réel),
-callbacks Cowboy directs pour WS (pas de socket réel), et
-RelayHandler via instance Application-managed.
+Tests utilisent `Plug.Test` pour Rest (pas de listener réel) et
+callbacks Cowboy directs pour WS (pas de socket réel).
 
 ## Dépendances
 

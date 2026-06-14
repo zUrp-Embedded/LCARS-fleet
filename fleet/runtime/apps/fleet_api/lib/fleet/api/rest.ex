@@ -11,7 +11,6 @@ defmodule Fleet.API.Rest do
     * `POST /api/admin/spawn` — broadcast `admin.spawn.request` event
     * `POST /api/config/update` — atomic write + git commit auto via
       `GitCommitter` (canon trace strate 1)
-    * `POST /api/relay/:ref` — `RelayHandler.respond` round-trip ch10
 
   ## Auth
 
@@ -28,7 +27,7 @@ defmodule Fleet.API.Rest do
 
   use Plug.Router
 
-  alias Fleet.API.{GitCommitter, RelayHandler}
+  alias Fleet.API.GitCommitter
   alias Fleet.EventRouter.Bus
 
   plug(:match)
@@ -111,15 +110,6 @@ defmodule Fleet.API.Rest do
 
       _ ->
         send_resp(conn, 400, ~s|{"error":"missing file_path or content"}|)
-    end
-  end
-
-  post "/api/relay/:ref" do
-    decision = conn.body_params["decision"] || ""
-
-    case RelayHandler.respond(ref, decision) do
-      :ok -> send_resp(conn, 200, ~s|{"status":"ok"}|)
-      {:error, reason} -> send_resp(conn, 404, Jason.encode!(%{error: reason}))
     end
   end
 

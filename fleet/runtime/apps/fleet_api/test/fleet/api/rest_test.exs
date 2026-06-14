@@ -158,23 +158,6 @@ defmodule Fleet.API.RestTest do
     end
   end
 
-  describe "POST /api/relay/:ref" do
-    setup %{secret: secret} do
-      # RelayHandler démarré par Fleet.API.Application supervisor.
-      {:ok, token: valid_token(secret)}
-    end
-
-    test "ref inconnu → 404", %{token: token} do
-      conn =
-        conn(:post, "/api/relay/unknown-ref", Jason.encode!(%{decision: "allow"}))
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("x-auth-token", token)
-        |> Rest.call(@opts)
-
-      assert conn.status == 404
-    end
-  end
-
   describe "match _ (404)" do
     setup %{secret: secret} do
       {:ok, token: valid_token(secret)}
