@@ -23,9 +23,9 @@ defmodule Fleet.Spawner.PodTest do
     File.write!(Path.join(sp_root, "engineer-role.md"), "# Engineer SP base")
     Application.put_env(:fleet_sp_builder, :sp_role_root, sp_root)
 
-    # mundo invocado #1 : le défaut auth_mode est :token_arg → tout spawn extrait l'access_token
-    # OAuth (fail-loud R15 sinon). Fixture creds par défaut pour les tests qui ne testent pas l'auth ;
-    # les tests auth/fail-loud overrident :claude_dir per-test.
+    # mundo invocado #1 : auth = mode bind unique (token_arg retiré 2026-06-14). Le gate credentials
+    # (scope/plan) lit toujours le creds natif → fixture creds par défaut pour les tests qui ne testent
+    # pas la porte credentials ; les tests credentials/fail-loud overrident :claude_dir per-test.
     setup_claude = Path.join(tmp_dir, ".claude")
     File.mkdir_p!(setup_claude)
 
@@ -774,12 +774,10 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
-  describe "BL-021 chantier 6 — auth_mode switch" do
-    test "explicit :bind (legacy ADR-F) — env contient LCARS_AUTH_MODE=bind, pas de LCARS_ANTHROPIC_AUTH_TOKEN" do
-      # mundo invocado #1 : le défaut est désormais :token_arg ; :bind reste une échappatoire opt-in.
-      Application.put_env(:fleet_spawner, :auth_mode, :bind)
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :auth_mode) end)
-
+  describe "auth — mode bind unique (token_arg retiré 2026-06-14)" do
+    test "tout spawn pose LCARS_AUTH_MODE=bind, jamais de token en clair (LCARS_ANTHROPIC_AUTH_TOKEN)" do
+      # Plus de switch : bind est le seul mode (bwrap monte le .credentials.json RW → refresh OAuth natif,
+      # pas de falaise 8h, pas de fuite en argv). Aucune config :auth_mode à poser.
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-auth-bind-#{System.unique_integer([:positive])}"
 
@@ -788,137 +786,6 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, env}, 2_000
       assert env["LCARS_AUTH_MODE"] == "bind"
       refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
-    end
-
-    test "explicit :token_arg — extrait access_token depuis creds.json + injecte LCARS_ANTHROPIC_AUTH_TOKEN",
-         %{tmp_dir: tmp_dir} do
-      # Setup : faux claudeDir + creds.json avec slot canonique `claudeAiOauth.accessToken`.
-      fake_claude_dir = Path.join(tmp_dir, "fake-claude")
-      File.mkdir_p!(fake_claude_dir)
-
-      File.write!(
-        Path.join(fake_claude_dir, ".credentials.json"),
-        Jason.encode!(%{
-          "claudeAiOauth" => %{
-            "accessToken" => "sk-ant-fake-test-token-XYZ",
-            "expiresAt" => 99_999_999_999_999,
-            "refreshToken" => "rt-fake",
-            "scopes" => ["user:inference", "user:sessions:claude_code"],
-            "subscriptionType" => "max"
-          }
-        })
-      )
-
-      # :token_arg = échappatoire opt-in (le défaut est désormais :bind) → posé explicitement.
-      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
-      Application.put_env(:fleet_spawner, :claude_dir, fake_claude_dir)
-
-      on_exit(fn ->
-        Application.delete_env(:fleet_spawner, :auth_mode)
-        Application.delete_env(:fleet_spawner, :claude_dir)
-      end)
-
-      StubBackend.set_reply(interactive_reply())
-      pod_id = "pod-auth-token-#{System.unique_integer([:positive])}"
-
-      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
-
-      assert_receive {:launch_called, _args, env}, 2_000
-      assert env["LCARS_AUTH_MODE"] == "token_arg"
-      assert env["LCARS_ANTHROPIC_AUTH_TOKEN"] == "sk-ant-fake-test-token-XYZ"
-    end
-
-    test ":token_arg + creds.json absent — spawn BLOQUÉ (R15 fail-loud, pas de launch)",
-         %{tmp_dir: tmp_dir} do
-      # R15 : pas de creds.json → en mode :token_arg, le spawn est refusé net
-      # (transition_failed {:auth_token_required, _}) AVANT le launch — plus de
-      # pod lancé sans token (l'ancien comportement silencieux).
-      missing_dir = Path.join(tmp_dir, "no-creds-here")
-      File.mkdir_p!(missing_dir)
-
-      Application.put_env(:fleet_spawner, :claude_dir, missing_dir)
-      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
-
-      on_exit(fn ->
-        Application.delete_env(:fleet_spawner, :claude_dir)
-        Application.delete_env(:fleet_spawner, :auth_mode)
-      end)
-
-      StubBackend.set_reply(interactive_reply())
-      pod_id = "pod-auth-token-missing-#{System.unique_integer([:positive])}"
-
-      Process.flag(:trap_exit, true)
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
-
-      # Le backend n'est jamais lancé, le pod tombe avec la raison fail-loud.
-      assert_receive {:EXIT, ^pid, {:shutdown, {:auth_token_required, _}}}, 2_000
-      refute_received {:launch_called, _args, _env}
-    end
-
-    test ":token_arg + creds.json présent mais sans accessToken → fail-loud (source unique, garde is_binary)",
-         %{tmp_dir: tmp_dir} do
-      # F117/F118/F119 : token-extractor et gate partagent UN SEUL parse de .credentials.json
-      # (`read_oauth_creds/1`). Ce cas verrouille la garde `is_binary(accessToken)` au-dessus de la source
-      # unique : creds LISIBLE (scopes/plan valides) MAIS pas de token binaire → le chemin token échoue
-      # d'abord (R15 : maybe_put_auth_token avant gate_credentials), pas de launch.
-      tokenless_dir = Path.join(tmp_dir, "creds-no-token")
-      File.mkdir_p!(tokenless_dir)
-
-      File.write!(
-        Path.join(tokenless_dir, ".credentials.json"),
-        Jason.encode!(%{
-          "claudeAiOauth" => %{
-            "expiresAt" => 99_999_999_999_999,
-            "refreshToken" => "rt-fake",
-            "scopes" => ["user:inference", "user:sessions:claude_code"],
-            "subscriptionType" => "max"
-          }
-        })
-      )
-
-      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
-      Application.put_env(:fleet_spawner, :claude_dir, tokenless_dir)
-
-      on_exit(fn ->
-        Application.delete_env(:fleet_spawner, :auth_mode)
-        Application.delete_env(:fleet_spawner, :claude_dir)
-      end)
-
-      StubBackend.set_reply(interactive_reply())
-      pod_id = "pod-auth-token-empty-#{System.unique_integer([:positive])}"
-
-      Process.flag(:trap_exit, true)
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
-
-      assert_receive {:EXIT, ^pid, {:shutdown, {:auth_token_required, _}}}, 2_000
-      refute_received {:launch_called, _args, _env}
-    end
-
-    test ":token_arg + .credentials.json JSON malformé → fail-loud (source unique, décode partagé)",
-         %{tmp_dir: tmp_dir} do
-      # F117/F118/F119 : la SOURCE UNIQUE `read_oauth_creds/1` est le seul Jason.decode du fichier. Ce cas
-      # verrouille le chemin décode-échec partagé : JSON invalide → `:malformed_json` catégorisé (zéro
-      # contenu creds propagé/loggé) → token-extractor fail-loud, pas de launch.
-      malformed_dir = Path.join(tmp_dir, "creds-malformed")
-      File.mkdir_p!(malformed_dir)
-      File.write!(Path.join(malformed_dir, ".credentials.json"), "{ pas du JSON valide")
-
-      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
-      Application.put_env(:fleet_spawner, :claude_dir, malformed_dir)
-
-      on_exit(fn ->
-        Application.delete_env(:fleet_spawner, :auth_mode)
-        Application.delete_env(:fleet_spawner, :claude_dir)
-      end)
-
-      StubBackend.set_reply(interactive_reply())
-      pod_id = "pod-auth-token-malformed-#{System.unique_integer([:positive])}"
-
-      Process.flag(:trap_exit, true)
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
-
-      assert_receive {:EXIT, ^pid, {:shutdown, {:auth_token_required, _}}}, 2_000
-      refute_received {:launch_called, _args, _env}
     end
   end
 
@@ -954,9 +821,9 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   describe "mundo invocado — intégration e2e (#1 creds-inject + cwd + doc-mount dans un spawn)" do
-    test "pod-projet : token_arg défaut + token per-human + cwd=workspace + code & doc clonés",
+    test "pod-projet : auth bind + cwd=workspace + code & doc clonés",
          %{tmp_dir: tmp_dir} do
-      # creds fixture per-human (token_arg lit ce claudeDir, défaut config)
+      # creds fixture per-human (gate_credentials lit ce claudeDir)
       fake_claude = Path.join(tmp_dir, "fake-claude")
       File.mkdir_p!(fake_claude)
 
@@ -973,14 +840,9 @@ defmodule Fleet.Spawner.PodTest do
         })
       )
 
-      # :token_arg explicite (le défaut est désormais :bind) pour prouver l'extraction per-human.
-      Application.put_env(:fleet_spawner, :auth_mode, :token_arg)
+      # claude_dir override → gate_credentials lit ce claudeDir (validation scope/plan). Mode = bind.
       Application.put_env(:fleet_spawner, :claude_dir, fake_claude)
-
-      on_exit(fn ->
-        Application.delete_env(:fleet_spawner, :auth_mode)
-        Application.delete_env(:fleet_spawner, :claude_dir)
-      end)
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :claude_dir) end)
 
       # repo source avec branche code (main) + branche doc (work/ops)
       src = source_repo_with_doc(Path.join(tmp_dir, "proj-src"))
@@ -1007,9 +869,9 @@ defmodule Fleet.Spawner.PodTest do
 
       assert_receive {:launch_called, _args, env}, 3_000
 
-      # #1 — creds-inject per-human, DÉFAUT token_arg (zéro mount du .claude)
-      assert env["LCARS_AUTH_MODE"] == "token_arg"
-      assert env["LCARS_ANTHROPIC_AUTH_TOKEN"] == "sk-ant-mundo-XYZ"
+      # #1 — mode bind (token_arg retiré) : LCARS_AUTH_MODE=bind, aucun token en clair dans l'env
+      assert env["LCARS_AUTH_MODE"] == "bind"
+      refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
 
       # cwd → la branche CODE (workspace)
       pod_dir = env["HOME"]

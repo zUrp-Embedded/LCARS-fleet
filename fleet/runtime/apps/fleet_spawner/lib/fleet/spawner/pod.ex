@@ -631,58 +631,8 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Auth mode (cf. inbox/src #0_ref_oauth-token-lifecycle.md) : DÉFAUT = :bind.
-  #   :bind (défaut) — bwrap bind RW le `.credentials.json` de l'HUMAIN (avec son refreshToken) →
-  #                    refresh natif (proactif 5min + réactif 401 + lockfile). Full scope, PAS de
-  #                    falaise ~8h. Le pod = l'humain → bind son propre claudeDir, zéro copie.
-  #   :token_arg     — échappatoire opt-in : extrait l'access_token OAuth (~8h, expiresAt:null côté pod
-  #                    donc AUCUN refresh) et l'injecte en CLAUDE_CODE_OAUTH_TOKEN. Fail-loud R15 si
-  #                    creds.json illisible. À réserver aux pods one-shot < 8h.
-  # Toggle via `config :fleet_spawner, :auth_mode`. Posé aussi en env `LCARS_AUTH_MODE` pour bwrap_launch.sh.
-  defp auth_mode do
-    Application.get_env(:fleet_spawner, :auth_mode, :bind)
-  end
-
-  # Token-extractor au-dessus de la SOURCE UNIQUE `read_oauth_creds/1` (F117/F118/F119 — plus de 2e parser
-  # de `.credentials.json` : un seul File.read + Jason.decode + extraction du bloc `claudeAiOauth`). Slot
-  # canonique `claudeAiOauth.accessToken` (cf. inbox/src #0_ref_oauth-token-lifecycle.md §2.2).
-  # R15 (verrou I-CBC) : en mode `:token_arg`, l'absence/illisibilité du token est FAIL-LOUD —
-  # `{:error, {:oauth_token_unreadable, _}}` propagé → `transition_failed`. L'ancien retour `nil` silencieux
-  # lançait un pod SANS `LCARS_ANTHROPIC_AUTH_TOKEN` (en `:token_arg` pas de bind → 401, pas de fallback
-  # `/login`) : un pod inutile au lieu d'un refus net. La garde `is_binary` distingue « creds lisible mais
-  # sans token » (gate scope/plan peut passer) de « token présent » — divergence légitime, MÊME parse.
-  defp read_oauth_access_token(claude_dir) do
-    case read_oauth_creds(claude_dir) do
-      {:ok, %{"accessToken" => token}} when is_binary(token) ->
-        {:ok, token}
-
-      other ->
-        # Hygiène creds (F117/F118/F119) : on ne logge JAMAIS le contenu OAuth (refreshToken/accessToken) —
-        # la cause de `read_oauth_creds/1` est déjà catégorisée, on ne réinspecte que la catégorie.
-        detail =
-          case other do
-            {:ok, _oauth} ->
-              "creds lisible mais accessToken absent ou non-binaire"
-
-            {:error, {:credentials_invalid, {:credentials_unreadable, _p, cause}}} ->
-              "creds illisible (#{inspect(cause)})"
-
-            _ ->
-              "creds illisible"
-          end
-
-        Logger.error(
-          "pod auth_mode=:token_arg : read_oauth_access_token ÉCHEC (#{detail}) — " <>
-            "claude_dir=#{claude_dir} — spawn BLOQUÉ (R15 fail-loud)"
-        )
-
-        {:error, {:oauth_token_unreadable, Path.join(claude_dir, ".credentials.json")}}
-    end
-  end
-
   # Z2 gates 2&3 — porte credentials au spawn-boundary (CRED-D1 / F-AC-VALIDATE).
-  # Defense-in-depth : tourne dans les 2 auth_mode, APRÈS maybe_put_auth_token (préserve
-  # le fail-loud R15 en :token_arg — un token absent échoue d'abord là). Lit le claudeDir
+  # Defense-in-depth : APRÈS maybe_put_auth_token (mode bind). Lit le claudeDir
   # de l'humain UNE fois → valide scope-coverage (ScopeValidator, par-rôle via flags) +
   # plan payant (PlanValidator). Le binaire claude impose déjà scope+plan (401) ; ces
   # gates font échouer TÔT au lieu du 1ᵉʳ appel API du pod. Erreurs taguées
@@ -696,8 +646,8 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # SOURCE UNIQUE de lecture du creds natif `<claude_dir>/.credentials.json` (F117/F118/F119) : un seul
-  # File.read + Jason.decode + extraction du bloc `claudeAiOauth`. `read_oauth_access_token/1` (token) ET
-  # `gate_credentials/2` (scope+plan) consomment CE parse — plus de 2 parsers driftables du même fichier.
+  # File.read + Jason.decode + extraction du bloc `claudeAiOauth`. `gate_credentials/2` (scope+plan)
+  # consomme CE parse — source unique, plus de parsers driftables du même fichier.
   defp read_oauth_creds(claude_dir) do
     creds_path = Path.join(claude_dir, ".credentials.json")
 
@@ -764,14 +714,6 @@ defmodule Fleet.Spawner.Pod do
   # retombe sur `command -v claude` = PATH du daemon → binaire système périmé (terrain : /usr/local/bin
   # 2.1.114 au lieu du 2.1.159 user, outil Monitor absent). readlink -f ⇒ bwrap_launch dérive
   # VENDOR_SHARE = dirname(dirname(bin)) juste. Absent ⇒ on ne pose rien (fallback bwrap conservé).
-  # BL-021 chantier 6 — branche bwrap_launch.sh sur le mode auth choisi (cf. `auth_mode/0`).
-  # `LCARS_AUTH_MODE` est toujours posé (bwrap_launch lit `${LCARS_AUTH_MODE:-bind}` strict) ;
-  # `LCARS_ANTHROPIC_AUTH_TOKEN` n'est posé qu'en mode `:token_arg` ET si l'extraction du token
-  # depuis creds.json a réussi (sinon le pod part sans token, voir `read_oauth_access_token/1`).
-  # R15 : rend `{:ok, env}` | `{:error, reason}`. En mode `:token_arg`, un token
-  # absent/illisible → `{:error, _}` (fail-loud, propagé par do_launch →
-  # transition_failed). Mode `:bind` (défaut) : toujours `{:ok, _}` (le token
-  # n'est pas requis, le claudeDir est bindé).
   # Z4 (forge-identité B') — l'identité git du pod = l'HUMAIN du mandat (author ET committer ;
   # le pod commite EN TANT QUE l'humain qui le run), résolue via le catalogue
   # (`Fleet.Credentials.ForgeIdentity`). Remplace l'ancien DÉFAUT COOPÉRATIF role-based de
@@ -794,20 +736,12 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  defp maybe_put_auth_token(env, human) do
-    mode = auth_mode()
-    env_with_mode = Map.put(env, "LCARS_AUTH_MODE", Atom.to_string(mode))
-
-    case mode do
-      :token_arg ->
-        case read_oauth_access_token(claude_dir_for(human)) do
-          {:ok, token} -> {:ok, Map.put(env_with_mode, "LCARS_ANTHROPIC_AUTH_TOKEN", token)}
-          {:error, _reason} = err -> err
-        end
-
-      _ ->
-        {:ok, env_with_mode}
-    end
+  # Auth = mode `bind` UNIQUEMENT (token_arg retiré 2026-06-14). bwrap monte le `.credentials.json` de
+  # l'humain en RW → refresh OAuth natif (proactif 5min + réactif 401 + lockfile), full scope, PAS de
+  # falaise ~8h. token_arg fuyait le token en argv (`--setenv CLAUDE_CODE_OAUTH_TOKEN`) ET ne refreshait
+  # pas (expiresAt:null) → un eng long (>8h) perdait l'auth en plein travail. Plus de toggle.
+  defp maybe_put_auth_token(env, _human) do
+    {:ok, Map.put(env, "LCARS_AUTH_MODE", "bind")}
   end
 
   # Binaire vendor posé en LCARS_VENDOR_BIN (honore bwrap_launch.sh:55) = `~/.local/bin/claude` de
@@ -953,9 +887,8 @@ defmodule Fleet.Spawner.Pod do
         e -> {:error, {:launch_env_unresolved, Exception.message(e)}}
       end
 
-    # R15 : l'étape auth sort du pipe — en mode :token_arg un token absent bloque le
-    # spawn (fail-loud) au lieu de lancer un pod sans token. Z2 : la porte credentials
-    # (scope/plan) suit, taguée {:credentials_invalid, _} pour un refus distinct de l'auth.
+    # R15 : l'étape auth sort du pipe (pose LCARS_AUTH_MODE=bind, fail-loud sur erreur). Z2 : la porte
+    # credentials (scope/plan) suit, taguée {:credentials_invalid, _} pour un refus distinct de l'auth.
     case launch_env do
       {:ok, human, env} ->
         with {:ok, env} <- maybe_put_auth_token(env, human),

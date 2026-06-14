@@ -20,9 +20,9 @@ defmodule Fleet.SpawnerTest do
     File.write!(Path.join(sp_root, "engineer-role.md"), "# SP")
     Application.put_env(:fleet_sp_builder, :sp_role_root, sp_root)
 
-    # mundo invocado #1 : auth_mode défaut :token_arg → tout spawn extrait l'access_token OAuth du
-    # claudeDir (fail-loud R15 sinon). Fixture creds par défaut (ces tests ne testent pas l'auth) —
-    # cf. pod_test.exs. Sans ça : {:auth_token_required, :oauth_token_unreadable} → pod meurt au boot.
+    # auth = mode bind unique (token_arg retiré 2026-06-14) ; le gate credentials lit quand même le creds
+    # natif (scope/plan). Fixture creds par défaut (ces tests ne testent pas la porte credentials) —
+    # cf. pod_test.exs. Sans ça : {:credentials_invalid, _} → pod meurt au boot.
     setup_claude = Path.join(tmp_dir, ".claude")
     File.mkdir_p!(setup_claude)
 
