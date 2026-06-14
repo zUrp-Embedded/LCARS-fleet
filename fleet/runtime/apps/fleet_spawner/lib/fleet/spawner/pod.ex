@@ -524,14 +524,24 @@ defmodule Fleet.Spawner.Pod do
   # SP draft minimal POC — déclare le rôle agent worker + workflow yop →
   # get_task → submit_result + convention de retour (ok|failed). Le SP
   # final par rôle = chantier séparé post-code.
-  # Draft SP role-aware (Rail 2 e2e 2026-06-14) : l'architecte reçoit un draft DÉLÉGATEUR
-  # (les 2 leviers qualité+économie + create_ticket), les workers le draft get_task/submit_result.
-  # Sélection par metadata.name (string-keyed). Défaut = worker.
+  # Draft SP role-aware (Rail 2 e2e 2026-06-14) : le draft d'un rôle est `agent-<role>-base.md` s'il
+  # EXISTE, sinon le draft worker générique. Convention catalogue (le draft suit le `metadata.name`),
+  # plus de rôle gravé en `case` : l'architecte tombe sur son draft délégateur (qualité+économie +
+  # create_ticket), tout rôle sans draft dédié sur le draft worker (get_task/submit_result). `role`
+  # validé path-safe (interpolé dans un path).
   defp read_agent_draft(%Fleet.CapProfile{metadata: meta}) do
+    role = Map.get(meta || %{}, "name", "")
+    default = "priv/sp_drafts/agent-worker-base.md"
+
     file =
-      case Map.get(meta || %{}, "name", "") do
-        "architect" -> "priv/sp_drafts/agent-architect-base.md"
-        _ -> "priv/sp_drafts/agent-worker-base.md"
+      if Regex.match?(~r/^[a-z0-9][a-z0-9_-]*$/, role) do
+        candidate = "priv/sp_drafts/agent-#{role}-base.md"
+
+        if File.exists?(Application.app_dir(:fleet_sp_builder, candidate)),
+          do: candidate,
+          else: default
+      else
+        default
       end
 
     path = Application.app_dir(:fleet_sp_builder, file)
