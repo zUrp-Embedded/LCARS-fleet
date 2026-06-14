@@ -107,8 +107,17 @@ ou un autre problème (→ `escalate_user`/`abandon`) ? »*. La décision revien
 **même chemin** que les gates (`handle_gate_decision`, vocab `gate-decision-v1`).
 La borne EST le garde-fou contre le re-spawn-en-boucle que `Gates` craignait. Le
 mécanisme est **générique** (role-agnostic) même si seul l'eng le déclenche
-aujourd'hui. *(La sémantique soft-gate/gatekeeper-redirect reste inchangée — fork
-ouvert, cf. PLAN-CHANTIER §F150.)*
+aujourd'hui.
+
+**Séparation fonction→owner (invariant doctrinal — généalogie GATE-D1 / overload-gatekeeper).**
+F150 *exemplifie* la redistribution : la **boucle** (compte/retry/route) vit dans la
+**machine** (Executor = orchestration) ; le **gatekeeper** n'entre qu'au seuil, en
+exception, pour **juger** (verdict du vocab fermé) ; **arch** reçoit le re-cadrage
+(`redirect`). Un rejet **soft-gate** (jugement gatekeeper) NE pilote PAS la boucle
+(il garde sa sémantique halt) — sinon on redonne au gatekeeper du contrôle
+d'orchestration = la 6ᵉ responsabilité qui a déclenché les ~12 itérations de girouette.
+**Ce n'est pas un fork ouvert : c'est verrouillé par doctrine.** (cf. commentaire
+load-bearing dans `executor.ex` ; BACKLOG §10 « gatekeeper redistribué ».)
 
 ### Décision du gatekeeper (vocab canon)
 

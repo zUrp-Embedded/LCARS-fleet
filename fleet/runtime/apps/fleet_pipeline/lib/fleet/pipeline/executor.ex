@@ -353,8 +353,15 @@ defmodule Fleet.Pipeline.Executor do
 
       # F150 — un FAIL hard-gate ne tue PLUS le pipeline au 1er coup : le système compte et RETRY (borné),
       # puis intercepte au seuil (diagnostic gatekeeper). Hard-gate = livrable déterministe rejeté (ex.
-      # tests) → un retry a un sens (l'eng REFAIT avec le feedback). [Choix : axe hard-gate ; la sémantique
-      # soft-gate/gatekeeper-redirect reste inchangée — cf. PLAN-CHANTIER §F150 fork 1.]
+      # tests) → un retry a un sens (l'eng REFAIT avec le feedback).
+      #
+      # ⚠ INVARIANT DOCTRINAL (séparation fonction→owner ; généalogie GATE-D1 / overload-gatekeeper) : seul
+      # le HARD-gate (datum qui EXÉCUTE — celui qui attrape le faux-plat) pilote la boucle de retry, et cette
+      # boucle vit dans la MACHINE (Executor = orchestration). Un rejet SOFT-gate (jugement gatekeeper :
+      # redirect/abandon/escalate) NE compte PAS dans le retry et NE devient PAS un re-dispatch — sinon on
+      # redonne au gatekeeper du contrôle d'ORCHESTRATION = la 6ᵉ responsabilité qui a déclenché les ~12
+      # itérations de girouette (cf. BACKLOG §10 « gatekeeper redistribué »). Le gatekeeper JUGE, point ;
+      # il n'entre ici qu'au SEUIL, en exception (dispatch_gatekeeper_diagnosis). NE PAS recâbler.
       {:fail, reason} ->
         reject_stage(stage, reason, state)
 
@@ -443,6 +450,11 @@ defmodule Fleet.Pipeline.Executor do
   # (→ `redirect` arch) ou un autre problème (→ `escalate_user`/`abandon`) ? ». La décision revient par le
   # MÊME chemin que les gates (`handle_gate_decision`). Générique (role-agnostic) même si seul l'eng la
   # déclenche aujourd'hui. Le vocab `gate-decision-v1` couvre déjà le routing (`redirect`=renvoi arch).
+  #
+  # Séparation fonction→owner respectée : le gatekeeper TRANCHE (rend 1 décision du vocab fermé), il ne
+  # PLANIFIE pas — un mandat mal construit → `redirect` confie le RE-CADRAGE à l'ARCH (planif=arch), pas au
+  # gatekeeper. La sortie est un verdict, jamais un plan ni une boucle. C'est l'unique point d'inférence
+  # (~10%) sur le chemin FAIL ; tout le reste (compte, retry, route) est mécanique (machine).
   defp dispatch_gatekeeper_diagnosis(stage, reason, attempts, state) do
     request =
       "DIAGNOSTIC retry_exhausted — le livrable du stage `#{stage}` a été REJETÉ #{attempts} fois " <>
