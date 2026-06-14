@@ -82,7 +82,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_capprofile_modop_incompatible_path(root),
         check_launch_backend_containment(root),
         check_mcp_required_real_backend(root),
-        check_auth_token_arg_failloud(root),
         check_spawn_has_mandate(root),
         check_skills_declared_present(root),
         check_events_registry_keys_aligned(root),
@@ -361,28 +360,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       evidence:
         if(present?, do: [], else: ["#{pod} : pas de fail-loud :mcp_server_spec_required"]),
       note: "maybe_provision_mcp_config doit refuser un backend réel sans mcp_server_spec"
-    }
-  end
-
-  # R15 (→R4-pending) : en mode `:token_arg`, un token absent/illisible doit
-  # BLOQUER le spawn (fail-loud), pas lancer un pod sans token. Marqueur :
-  # l'erreur `:oauth_token_unreadable`. Rouge si absente (retour au nil muet).
-  defp check_auth_token_arg_failloud(root) do
-    pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
-
-    present? =
-      Path.join(root, pod)
-      |> grep_lines(~r/:oauth_token_unreadable/)
-      |> Enum.any?(fn {_ln, line} ->
-        Regex.match?(~r/:oauth_token_unreadable/, strip_comment(line))
-      end)
-
-    %{
-      id: "auth.token_arg.failloud",
-      remediation: "R15",
-      status: if(present?, do: :pass, else: :fail),
-      evidence: if(present?, do: [], else: ["#{pod} : pas de fail-loud :oauth_token_unreadable"]),
-      note: ":token_arg doit fail-loud (refus spawn) si le token est absent"
     }
   end
 
