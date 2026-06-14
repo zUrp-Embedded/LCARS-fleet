@@ -362,9 +362,14 @@ defmodule Fleet.Pipeline.ExecutorGatePendingTest do
     assert_receive %Fleet.Event{
                      source: :pipeline,
                      type: :"pipeline.failed",
-                     payload: %{"pipeline_id" => ^pid}
+                     payload: %{"pipeline_id" => ^pid, "reason" => reason}
                    },
                    5_000
+
+    # Le payload d'escalade (→ Cat5 starfleet + dashboard) porte le CONTEXTE retry_exhausted (N tentatives)
+    # + la décision diagnostiquée → l'arch re-cadre de façon ACTIONNABLE.
+    assert reason =~ "retry_exhausted"
+    assert reason =~ "redirect"
   end
 
   test "F150 — borne configurable : stage_max_retries=1 → interception au 1er FAIL (zéro retry)" do

@@ -467,7 +467,13 @@ defmodule Fleet.Pipeline.Executor do
       "attempts" => attempts
     }
 
-    enqueue_gatekeeper_mandate(brief, metadata, %{kind: :retry_exhausted}, stage, state)
+    enqueue_gatekeeper_mandate(
+      brief,
+      metadata,
+      %{kind: :retry_exhausted, attempts: attempts},
+      stage,
+      state
+    )
   end
 
   # R4/B — enqueue + kick + corrélation d'un mandat au gatekeeper permanent (work-session). Partagé par
@@ -558,6 +564,18 @@ defmodule Fleet.Pipeline.Executor do
         outputs = Map.get(state.outputs, stage, %{})
         state = maybe_post_extract_git(stage, stage_spec, outputs, state)
         next_stage_or_done(state)
+
+      # F150 — un diagnostic retry_exhausted porte son CONTEXTE dans la raison du halt (→ payload
+      # `pipeline.failed` → escalade Cat5 starfleet + dashboard). L'arch/humain sait que c'est une
+      # exhaustion-de-retry (N tentatives) + la cause diagnostiquée (`redirect`=mandat mal construit /
+      # `escalate_user`/`abandon`) → il peut re-cadrer le mandat de façon ACTIONNABLE (≠ un fail générique).
+      {:retry_exhausted, other} ->
+        reason =
+          "retry_exhausted (#{info.attempts} tentatives) → diagnostic gatekeeper: " <>
+            gate_halt_reason(other, result)
+
+        broadcast_pipeline_failed(state, stage, reason)
+        {:stop, {:shutdown, :gate_halt}, state}
 
       {_kind, other} ->
         broadcast_pipeline_failed(state, stage, gate_halt_reason(other, result))
