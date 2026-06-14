@@ -295,6 +295,41 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  @doc """
+  Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea
+  `PUT /repos/{repo}/contents/{path}`. **Le SYSTÈME publie** (forge-aveugle : le pod ne
+  pousse jamais ; c'est ce chemin qui grave durablement le livrable d'un engineer). Création
+  (pas d'update sha) : viser un `path` neuf (ticket-namespacé). Branche existante requise
+  (défaut `main`) — `opts[:new_branch]` pour brancher depuis `branch`.
+
+  ## Returns
+    * `{:ok, commit_sha}` — fichier écrit
+    * `{:error, term()}` — HTTP/transport/config (422 = path déjà présent sur la branche)
+  """
+  @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def put_file(repo, path, content, opts \\ [])
+      when is_binary(repo) and is_binary(path) and is_binary(content) do
+    with {:ok, config} <- resolve_config(opts) do
+      body =
+        %{
+          content: Base.encode64(content),
+          message: Keyword.get(opts, :message, "feat(fleet): #{path}"),
+          branch: Keyword.get(opts, :branch, "main")
+        }
+        |> maybe_put_new_branch(Keyword.get(opts, :new_branch))
+
+      case http_put(config, "/repos/#{repo}/contents/#{path}", body) do
+        {:ok, %{"commit" => %{"sha" => sha}}} -> {:ok, sha}
+        {:ok, _other} -> {:ok, :written}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  defp maybe_put_new_branch(body, nil), do: body
+  defp maybe_put_new_branch(body, nb) when is_binary(nb), do: Map.put(body, :new_branch, nb)
+
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     case http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
       {:ok, comments} when is_list(comments) ->

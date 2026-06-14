@@ -33,18 +33,30 @@ defmodule Fleet.Pipeline.Application do
 
   @impl Application
   def start(_type, _args) do
-    children = [
-      {Registry, keys: :unique, name: Fleet.Pipeline.Registry},
-      # PodRegistry — book-keeping {pipeline_id, role} → pod_id pour les
-      # pods pipe-scoped (engineer long-lived). Démarré avant
-      # ExecutorSupervisor pour qu'un Executor naissant puisse l'interroger
-      # via StageRunner.
-      Fleet.Pipeline.PodRegistry,
-      {DynamicSupervisor, strategy: :one_for_one, name: Fleet.Pipeline.ExecutorSupervisor}
-    ]
+    children =
+      [
+        {Registry, keys: :unique, name: Fleet.Pipeline.Registry},
+        # PodRegistry — book-keeping {pipeline_id, role} → pod_id pour les
+        # pods pipe-scoped (engineer long-lived). Démarré avant
+        # ExecutorSupervisor pour qu'un Executor naissant puisse l'interroger
+        # via StageRunner.
+        Fleet.Pipeline.PodRegistry,
+        {DynamicSupervisor, strategy: :one_for_one, name: Fleet.Pipeline.ExecutorSupervisor}
+      ] ++ delivery_publisher_children()
 
     opts = [strategy: :rest_for_one, name: Fleet.Pipeline.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # DeliveryPublisher (Rail « au bout », e2e 2026-06-14) : grave durablement les livrables sur la
+  # forge (forge-aveugle, le système publie). OFF en :test (hermeticité — pas de consumer parasite
+  # sur le Bus ni de put_file réel). Démarré en dev/prod par défaut.
+  defp delivery_publisher_children do
+    if Application.get_env(:fleet_pipeline, :start_delivery_publisher, true) do
+      [Fleet.Pipeline.DeliveryPublisher]
+    else
+      []
+    end
   end
 
   @doc """

@@ -94,6 +94,20 @@ pour la fleet, pas un échec à cacher.
 }
 ```
 
+**Livrables de code — inclus le CONTENU.** Si ton travail produit des fichiers (code, test, doc),
+mets-les dans `result.deliverables` (liste), CHAQUE entrée portant **`path`** (chemin relatif) ET
+**`content`** (le contenu COMPLET du fichier, texte intégral) — en plus de `role`/`detail` éventuels.
+C'est le SYSTÈME qui grave durablement ces fichiers sur la forge (toi tu ne pousses jamais —
+forge-aveugle) : **sans `content`, ton livrable n'est pas publié.** Exemple :
+
+```json
+{ "status": "ok",
+  "result": { "deliverables": [
+    { "path": "hello_world.py", "role": "script", "content": "print(\"hello_world\")\n" },
+    { "path": "test_hello_world.py", "role": "test", "content": "...contenu complet du test..." }
+  ] } }
+```
+
 ### Refus / blocker / incapacité (sémantique fail explicite)
 
 ```json
