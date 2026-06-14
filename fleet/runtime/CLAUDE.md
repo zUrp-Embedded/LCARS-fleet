@@ -49,16 +49,6 @@ Anything that talks to a specific vendor (Claude SDK, future OpenAI) is **N1** a
 
 Pods (per-role agent processes) are launched via one of two N0 launchers, chosen by `metadata.containment` in `do_launch` (LAUNCH-Q): `bwrap_launch.sh` (default, `containment: bwrap` — bwrap sandbox, RO mounts + tmpfs /home + bind credentials) or `host_launch.sh` (`containment: none` — architect-interactive, starfleet — same tmux-holder mechanism **without** the sandbox: the pod runs on the host as the human, `HOME` = real home → native `~/.claude`). Both `exec`/run the vendor launcher (`claude_launch.sh`). **Never edit `bwrap_launch.sh`** (sanctuaire); a new containment need = a new co-located N0 launcher, same arg shape. The systemd unit allows `@mount @namespace` syscalls explicitly so bwrap can `unshare`/`mount`/`setns`/`pivot_root` (canon comment in `etc/lcars-fleet.service`). Pod working dirs default to **`/home/<human>/pods/pod_<id>`** (per-human, `0700`, ADR-E — the pod lives under the owning human's home, isolated by OS ownership; **not** a shared `/home/pods`/`/var/lib/lcars/pods`). Not under `/tmp` (`PrivateTmp=yes` + bwrap tmpfs would orphan writes). NB: effective UID-ownership (pod runs *as* the human via `systemd-run --uid`) is substrate-pending.
 
-### User & ownership model (decided 2026-06-14)
-
-Two **distinct namespaces** — conflating them is the trap (corrects the earlier "system user `fleet`" framing):
-
-- **System/runtime → OS account `lcars`** (uid 997, `nologin`, home `/var/lib/lcars`). The whole BEAM (`lcars-fleet.service`, `User=lcars`) and everything it spawns run as `lcars`. Linux daemon convention (caddy/caddy, polkitd/polkitd): the service account is named for the program. **There is no `fleet` OS user** (`id fleet` → no such user) and none must be created.
-- **`fleet` is a GROUP + a forge identity, never an OS user**: group `gid 1001` (shared disk ACL — `lcars` is a member, so it reaches `fleet`-group resources *via the group*, without *being* fleet) + the Gitea **org** that owns repos + git author/committer identity. The forge system account that signs system commits/repos is **`lcars-system`** (a Gitea account, distinct from the OS user `lcars`).
-- **Pods → owned by the HUMAN** (`starfleet`…), per the Pod sandboxing section above (ADR-E, `/home/<human>/pods/`). The pod runs *as* the human; that identity frontier is by design.
-
-**The daemon MUST boot via systemd** (`systemctl start lcars-fleet` → `User=lcars`), **never** `iex -S mix` from a human session — an `iex` launch inherits the human (`starfleet`), so processes, created repos, and on-disk ownership all become the human's (the bug observed 2026-06-14). Repos the runtime creates land as **`lcars:fleet`** only when it runs via systemd. The release node currently has no name (`RELEASE_DISTRIBUTION=none`) → `lcars-fleet-stop`'s `--rpc-eval` fails at `systemctl stop`, leaving the unit `failed`; fix pending = `RELEASE_DISTRIBUTION=sname` + `RELEASE_NODE=lcars`.
-
 ### Event bus
 
 `Fleet.EventRouter.Bus` (Phoenix.PubSub) is the single broadcast/subscribe substrate. Apps publish to `fleet.events` and consume via `subscribe/1`. In `:test` env hermeticity comes from consumers being off plus `fleet_event_router, load_event_registry: false` (Bus broadcasts skip validation), not a backend swap (see "Test hermeticity" below).
