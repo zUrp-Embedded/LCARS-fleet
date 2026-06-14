@@ -1,9 +1,14 @@
 defmodule Fleet.ProjectBootstrap.ConformanceTest do
   @moduledoc """
-  Lot 2 — **tests conformance CI gate OBLIGATOIRE** (DN
-  ring1/fleet_project_bootstrap.md §"Tests conformance"). Invariant cardinal :
-  l'agent dans le pod ne voit AUCUNE trace de la mécanique LCARS hors
-  workspace vanilla + plugins mount-bindés.
+  Lot 2 — tests UNITAIRES de l'orchestrateur `prepare/3` (les 5 sous-phases), DN
+  ring1/fleet_project_bootstrap.md §"Tests conformance".
+
+  ⚠ **F094/F096 — CE N'EST PAS le gate de l'invariant cardinal PROD (false-green démoté).** Ces tests
+  vérifient le pod_dir produit par `prepare/3` — or le spawner PROD câble `Phase.Clone` DIRECTEMENT
+  (`pod.ex maybe_bootstrap_project_workspace`) ; `prepare/3` n'est appelé QUE par ces tests (chemin mort,
+  #596). L'invariant cardinal « l'agent ne voit AUCUNE trace LCARS » sur le chemin PROD dépend de la VUE
+  sandbox (bwrap masque `.lcars/`) → **NON testable en hermétique, NON testé** : besoin d'un test-intégration
+  (lancer bwrap, inspecter la vue agent). Ne pas lire ce vert comme « invariant cardinal gardé ».
 
   `async: false` : la **base pod** est la ressource globale partagée
   `System.tmp_dir!/0` (`/tmp/pod-*`), pas un répertoire par-test isolé. Chaque test

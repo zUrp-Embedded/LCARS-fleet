@@ -2,15 +2,19 @@ defmodule Fleet.ProjectBootstrap do
   @moduledoc """
   Lot 2 — core du pod : prépare le pod_dir vanilla AVANT spawn.
 
-  DN : `ring1/fleet_project_bootstrap.md`. Invoqué par `Fleet.Spawner.Pod`
-  en phase PROJECT du cycle 8 phases (chantier 6 PROMOTED).
+  DN : `ring1/fleet_project_bootstrap.md`.
 
-  Invariant cardinal (SP positif appliqué au bootstrap) : l'agent dans le pod
-  **ne voit aucune trace de la mécanique LCARS** hors workspace projet vanilla
-  + plugins mount-bindés. Test conformance CI gate OBLIGATOIRE.
+  ⚠ **État #596 (2026-06-14)** : `prepare/3` orchestre 5 sous-phases (ALLOCATE → CLONE → INIT_MIMIC →
+  BIND_CREDENTIALS → PREPARE_MOUNT_BINDS), mais **seul `Phase.Clone` est câblé en PROD** :
+  `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace`) appelle `Phase.Clone` DIRECTEMENT. Les autres
+  concerns du bootstrap sont assurés en prod par des chemins **INDÉPENDANTS de `prepare/3`** : le CLAUDE.md
+  par `do_project` (pod.ex), les mounts/creds par bwrap (adr-f). `prepare/3` + les 4 phases non-Clone ne
+  sont appelés QUE par `conformance_test` (scaffold non-câblé) → revive-vs-remove = décision archi #596.
 
-  5 sous-phases pures (Iron Law — File/Path/git/:eex, aucun process) :
-  ALLOCATE → CLONE → INIT_MIMIC → BIND_CREDENTIALS → PREPARE_MOUNT_BINDS.
+  Invariant cardinal (SP positif) : l'agent dans le pod **ne voit aucune trace de la mécanique LCARS** hors
+  workspace vanilla + plugins. ⚠ **NON testé en hermétique sur le chemin PROD** (il dépend de la vue sandbox
+  bwrap ; le `conformance_test` couvre `prepare/3` = chemin mort, false-green démoté F094/F096) → besoin d'un
+  test-intégration sandbox.
   """
 
   alias Fleet.ProjectBootstrap.Phase
