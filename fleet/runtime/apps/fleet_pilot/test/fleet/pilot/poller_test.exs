@@ -27,7 +27,9 @@ defmodule Fleet.Pilot.PollerTest do
     end
   end
 
-  defp dispatcher_config(opts \\ []) do
+  # Baseline micro-finding : le default `\\ []` n'était JAMAIS utilisé (les 6 call sites passent tous un
+  # opts) → warning compilé en env test. Retiré (tous les appelants fournissent l'arg). « runtime propre ».
+  defp dispatcher_config(opts) do
     %{
       dispatch_label: "lcars-dispatched",
       forge_opts: opts,
