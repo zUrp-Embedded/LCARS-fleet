@@ -11,11 +11,12 @@
 # `--remote-control` PROVEN sous PTY). Supersède le modèle `script(1)`-PTY one-shot
 # (mandat = prompt CLI) — interdit par ADR-G IV.1/IV.2.
 #
-# Invoqué via `exec` final par `bin/bwrap_launch.sh` (N0). Le PTY est celui de
-# tmux (fourni par bwrap_launch) — ce launcher NE tient PLUS le PTY (plus de
+# Invoqué comme COMMAND par un launcher N0 — `bin/bwrap_launch.sh` (containment: bwrap)
+# OU `bin/host_launch.sh` (containment: none, host sans sandbox — LAUNCH-Q). Le PTY est
+# celui de tmux (fourni par le launcher N0) — ce launcher NE tient PLUS le PTY (plus de
 # `script -q`/inner-script) et NE porte PLUS le mandat (il arrive par MCP get_task).
-# Containment + tmux + socket-par-pod = N0 (bwrap_launch). Auth = claudeDir natif
-# Anthropic bind RW (adr-f), zéro env OAuth.
+# Containment + tmux + socket-par-pod = N0. Auth = claudeDir natif Anthropic (bind RW sous
+# bwrap ; HOME = home humain réel sous host), zéro env OAuth en mode :bind.
 #
 # Frontière vendor N1 stricte (IX.3) : flags `claude` uniquement, jamais `bwrap`/
 # `tmux`/`unshare`. Si 2e vendor → `bin/openai_launch.sh` co-localisé.

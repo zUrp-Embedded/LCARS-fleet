@@ -64,6 +64,11 @@ sudo chmod +x /usr/local/bin/lcars-readiness
 # Helpers grace-shutdown (ExecReload/ExecStop/ExecStopPost du unit — Z0)
 sudo cp bin/lcars-fleet-reload bin/lcars-fleet-stop bin/lcars-fleet-stop-post /usr/local/bin/
 sudo chmod +x /usr/local/bin/lcars-fleet-reload /usr/local/bin/lcars-fleet-stop /usr/local/bin/lcars-fleet-stop-post
+# Launchers N0/N1 pod (paths absolus lus par fleet_spawner : /usr/local/bin/*_launch.sh ; hors /home,/tmp
+# sinon masqués par --tmpfs). bwrap_launch = containment bwrap ; host_launch = containment none (LAUNCH-Q) ;
+# claude_launch = launcher vendor. Absents → 1er spawn KO :executable_missing.
+sudo cp bin/bwrap_launch.sh bin/host_launch.sh bin/claude_launch.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/bwrap_launch.sh /usr/local/bin/host_launch.sh /usr/local/bin/claude_launch.sh
 
 sudo cp etc/lcars-fleet.env.template /etc/fleet/lcars-fleet.env
 # Éditer secrets : RELEASE_COOKIE (32 bytes base64), GITEA_TOKEN, etc.

@@ -8,12 +8,12 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
 
   alias Fleet.Spawner.LaunchBackend.LauncherPortBackend
 
-  defp args(dir, bwrap, opts \\ []) do
+  defp args(dir, launcher, opts \\ []) do
     %{
       role: "engineer",
       pod_id: "pod-42",
       pod_dir: dir,
-      bwrap_launch_path: bwrap,
+      launcher_path: launcher,
       claude_launch_path: "/opt/claude_launch.sh",
       sp: "# SP de test"
     }
@@ -28,7 +28,7 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
   end
 
   describe "build_spawn/1 (pur, anti-M1 vecteur)" do
-    test "vecteur exact bwrap <role pod dir> claude <role pod dir sp> (SP en argv4 inline)" do
+    test "vecteur exact launcher <role pod dir> claude <role pod dir sp> (SP en argv4 inline)" do
       # R0.8-brick4 : budget retiré. Le SP composé est l'argv4 de claude_launch (inline, pas fichier
       # masqué par le bind bwrap). Identité/session voyagent par l'ENV (launch/2), pas le vecteur.
       assert {:ok, "/b/bwrap.sh",
@@ -46,9 +46,24 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
                  role: "engineer",
                  pod_id: "pod-42",
                  pod_dir: "/p",
-                 bwrap_launch_path: "/b/bwrap.sh",
+                 launcher_path: "/b/bwrap.sh",
                  claude_launch_path: "/opt/claude_launch.sh",
                  sp: "# SP composé du pod"
+               })
+    end
+
+    test "LAUNCH-Q : l'exe du Port = launcher_path (host_launch quand containment: none), argv inchangé" do
+      # Le backend est agnostique du containment : il exécute le launcher que le spawner a choisi.
+      # Même vecteur d'args ⇒ même argv ; seul l'exe (argv0 du Port) change (host vs bwrap).
+      assert {:ok, "/h/host_launch.sh",
+              ["architect-interactive", "pod-7", "/p", "/opt/claude_launch.sh" | _]} =
+               LauncherPortBackend.build_spawn(%{
+                 role: "architect-interactive",
+                 pod_id: "pod-7",
+                 pod_dir: "/p",
+                 launcher_path: "/h/host_launch.sh",
+                 claude_launch_path: "/opt/claude_launch.sh",
+                 sp: "# SP arch"
                })
     end
 

@@ -1,8 +1,11 @@
 defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   @moduledoc """
-  Backend RÉEL — lance la chaîne `bin/bwrap_launch.sh` → `bin/claude_launch.sh`
-  via `Port.open/2` `:spawn_executable`, **non-privilégié** (bwrap fait lui-même
-  l'isolation userns/mountns).
+  Backend RÉEL — lance la chaîne `<launcher N0> → bin/claude_launch.sh` via
+  `Port.open/2` `:spawn_executable`, **non-privilégié**. Le launcher N0 est choisi
+  par le spawner selon `containment` (LAUNCH-Q) : `bin/bwrap_launch.sh` (défaut, bwrap
+  fait l'isolation userns/mountns) ou `bin/host_launch.sh` (containment: none, host
+  sans sandbox). L'`exe` du Port = `args.launcher_path` ; l'argv est identique des
+  deux côtés (même contrat `<role> <pod_id> <pod_dir> <command...>`).
 
   ## R1.2 — modèle INTERACTIF (post -p/stream-json)
 
@@ -51,26 +54,27 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   Pur : construit `{:ok, executable, argv}` pour `Port.open`. Risque anti-M1
   (ordre/contenu du vecteur) → testé isolément.
 
-  `bwrap_launch <role> <pod_id> <pod_dir>` puis `<command...>` =
-  `claude_launch <role> <pod_id> <pod_dir> <sp>`. Le **SP composé est l'argv4** de
-  claude_launch (inline, PAS un fichier : `.claude/system-prompt.md` est masqué par le
-  bind CLAUDE_DIR→.claude de bwrap_launch). R0.8-brick4 : budget retiré (pas d'API).
-  Identité/session (`LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX`) voyagent par
-  l'ENV du Port (`launch/2` `env`), que bwrap_launch `--setenv` dans le pod.
+  `<launcher_path> <role> <pod_id> <pod_dir>` puis `<command...>` =
+  `claude_launch <role> <pod_id> <pod_dir> <sp>`. `launcher_path` = bwrap_launch (défaut)
+  ou host_launch (containment: none) — **même argv** (LAUNCH-Q). Le **SP composé est
+  l'argv4** de claude_launch (inline, PAS un fichier). R0.8-brick4 : budget retiré (pas
+  d'API). Identité/session (`LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX`) voyagent
+  par l'ENV du Port (`launch/2` `env`), que bwrap_launch `--setenv` dans le pod (host_launch
+  l'hérite directement, sans namespace).
   """
   @spec build_spawn(map()) :: {:ok, String.t(), [String.t()]} | {:error, term()}
   def build_spawn(%{
         role: role,
         pod_id: pod_id,
         pod_dir: pod_dir,
-        bwrap_launch_path: bwrap,
+        launcher_path: launcher,
         claude_launch_path: claude,
         sp: sp
       })
       when is_binary(role) and is_binary(pod_id) and is_binary(pod_dir) and
-             is_binary(bwrap) and is_binary(claude) and is_binary(sp) do
+             is_binary(launcher) and is_binary(claude) and is_binary(sp) do
     argv = [role, pod_id, pod_dir, claude, role, pod_id, pod_dir, sp]
-    {:ok, bwrap, argv}
+    {:ok, launcher, argv}
   end
 
   def build_spawn(_), do: {:error, :invalid_args}

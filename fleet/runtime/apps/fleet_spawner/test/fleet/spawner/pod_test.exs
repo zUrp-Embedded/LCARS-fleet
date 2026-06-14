@@ -310,6 +310,69 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
+  describe "LAUNCH-Q — branche containment (host_launch vs bwrap) sur le chemin de lancement" do
+    # Le gap : avant le fix, `do_launch` bwrappait TOUT (containment jamais lu). Ici on prouve que le
+    # launcher N0 passé au backend (`args.launcher_path`) ET le HOME suivent `metadata.containment`.
+    defp host_profile, do: put_in(valid_profile().metadata["containment"], "none")
+
+    test "containment: none → launcher host_launch.sh + HOME = home réel de l'humain (auth native)",
+         %{
+           tmp_dir: tmp_dir
+         } do
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-host-#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        spawn_via_supervisor(%{
+          cap_profile: host_profile(),
+          ticket_id: "t1",
+          pod_id: pod_id,
+          opts: []
+        })
+
+      assert_receive {:launch_called, args, env}, 2_000
+      assert String.ends_with?(args.launcher_path, "host_launch.sh")
+
+      # HOME = parent du claudeDir humain (= override config :claude_dir = <tmp_dir>/.claude) → tmp_dir.
+      # claude lit ainsi le ~/.claude humain natif (refresh OAuth, pas de falaise 8h — arch forever).
+      assert env["HOME"] == tmp_dir
+      Process.exit(pid, :kill)
+    end
+
+    test "containment: bwrap (défaut) → launcher bwrap_launch.sh + HOME = pod_dir (inchangé)" do
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-bwrap-#{System.unique_integer([:positive])}"
+
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t1"))
+
+      assert_receive {:launch_called, args, env}, 2_000
+      assert String.ends_with?(args.launcher_path, "bwrap_launch.sh")
+      assert env["HOME"] == args.pod_dir
+      Process.exit(pid, :kill)
+    end
+
+    test "clé containment ABSENTE → rejeté à la porte G24-1 (allocate), JAMAIS lancé sur host" do
+      # Invariant de sécurité LAUNCH-Q : un cap-profile mal formé (sans `containment`) ne peut PAS
+      # atteindre host_launch — la porte G24-1 (`check_containment`, enum {bwrap,none}) le rejette à
+      # l'allocate, AVANT do_launch. (Le défaut "bwrap" de `cap_profile_containment/1` est un filet
+      # defense-in-depth, inatteignable dans le chemin gardé : la porte tranche d'abord.)
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply())
+      profile = update_in(valid_profile().metadata, &Map.delete(&1, "containment"))
+      pod_id = "pod-nocont-#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        spawn_via_supervisor(%{cap_profile: profile, ticket_id: "t1", pod_id: pod_id, opts: []})
+
+      assert_receive {:EXIT, ^pid,
+                      {:shutdown, {:allocate_failed, {:cap_profile_invalid, violations}}}},
+                     2_000
+
+      assert :g24_1 in violations
+      refute_received {:launch_called, _, _}
+    end
+  end
+
   describe "deadline résultat — Z1 (timeout de RÉPONSE, pas budget de vie)" do
     # `spec.timeouts.response_sec` (champ optionnel) → forçage déterministe court
     # (le default par scope est 300s, trop long pour un test unit). 1s mini car

@@ -284,10 +284,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R20/F103 : `TmuxBackend` (claude --remote-control HORS bwrap, containment: none, control-path
-  # cassé depuis la convergence PodTmux) a été SUPPRIMÉ — la chaîne bwrap (LauncherPortBackend) est
-  # l'unique voie de lancement (sanctuaire). Le check garde la SUPPRESSION : rouge si le module
-  # réapparaît OU si runtime.exs re-référence TmuxBackend (réintroduction d'un backend hors-bwrap).
+  # R20/F103 : `TmuxBackend` (claude --remote-control HORS bwrap, control-path CASSÉ depuis la
+  # convergence PodTmux) a été SUPPRIMÉ. Le check garde la SUPPRESSION du module CASSÉ : rouge s'il
+  # réapparaît OU si runtime.exs re-référence TmuxBackend. NB (LAUNCH-Q) : il ne s'agit PAS d'interdire
+  # tout host-launch — `containment: none` est désormais servi par `bin/host_launch.sh` (mécanisme
+  # tmux-holder PROUVÉ de bwrap_launch, sélectionné par `do_launch` via `launcher_path`), pas par le
+  # remote-control nu de l'ex-TmuxBackend. Le rail interdit la résurrection du MÉCANISME cassé, pas la voie host.
   defp check_launch_backend_containment(root) do
     rt = "config/runtime.exs"
     tb = "apps/fleet_spawner/lib/fleet/spawner/launch_backend/tmux_backend.ex"
@@ -309,7 +311,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "TmuxBackend supprimé (containment:none hors bwrap) — chaîne bwrap unique ; ne doit pas réapparaître"
+        "TmuxBackend (remote-control nu, control-path cassé) supprimé ; ne doit pas réapparaître. La voie host containment:none = host_launch.sh (tmux-holder prouvé), pas TmuxBackend (LAUNCH-Q)"
     }
   end
 

@@ -32,7 +32,8 @@ defmodule Fleet.Spawner.LaunchBackend do
       * `:role` — string
       * `:pod_id` — string
       * `:pod_dir` — path absolu pod
-      * `:bwrap_launch_path` — path absolu `bwrap_launch.sh`
+      * `:launcher_path` — path absolu du launcher N0 choisi par containment
+        (`bwrap_launch.sh` défaut | `host_launch.sh` si containment: none) — LAUNCH-Q
       * `:claude_launch_path` — path absolu `claude_launch.sh`
     * `env` — map ENV vars à injecter (OAuth + custom)
 

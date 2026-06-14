@@ -157,9 +157,9 @@ defmodule Fleet.Spawner.Pod do
       last_error: state.last_error,
       init_message: state.init_message,
       last_result: state.last_result,
-      # tmux_session : nom de la session tmux du pod si TmuxBackend (RC long-
-      # lived), nil sinon (LauncherPortBackend/Stub). Exposé pour Fleet.Spawner.wake_
-      # pod/1 (send-keys `yop` au pod cible pour nouveau cycle).
+      # tmux_session : nom de la session tmux du pod, posé par LauncherPortBackend (les deux
+      # launchers N0 bwrap/host créent un tmux par-pod), nil pour StubBackend. Exposé pour
+      # Fleet.Spawner.wake_pod/1 (send-keys `yop` au pod cible pour nouveau cycle).
       tmux_session: state.tmux_session
     }
 
@@ -863,11 +863,17 @@ defmodule Fleet.Spawner.Pod do
     # (le probe F7 le faisait à la main). Reaper périodique (orphelins jamais re-spawnés) = reste BL-036b.
     reap_orphan_pod(state.pod_id)
     role = cap_profile_name(state.cap_profile)
+    containment = cap_profile_containment(state.cap_profile)
+
+    # LAUNCH-Q : le launcher N0 dépend du containment, lu ICI (avant ce fix : bwrap aveugle pour tous).
+    # "none" (host_native : architect-interactive, starfleet) → host_launch.sh (host, sans sandbox) ;
+    # sinon la chaîne bwrap. `PermanentBoot` reste générique — la branche vit sur le chemin de lancement.
+    launcher_path = if containment == "none", do: host_launch_path(), else: bwrap_launch_path()
 
     # R0.8-brick4 : plus de budget côté pod (OAuth pool, pas d'API). Le timeout
     # de réponse est géré par `monitor_timeout_ms/1` côté Pod GenServer
     # (Process.send_after :result_deadline). Les backends qui n'ont pas
-    # leur propre script de lancement (TmuxBackend, StubBackend) n'ont pas
+    # leur propre script de lancement (StubBackend) n'ont pas
     # besoin de la valeur ; LauncherPortBackend (legacy bwrap+print) recevait
     # `budget_sec`/`budget_usd` comme args du script — ces clés sont retirées
     # de l'API LaunchBackend (cf. behaviour `Fleet.Spawner.LaunchBackend`).
@@ -875,7 +881,10 @@ defmodule Fleet.Spawner.Pod do
       role: role,
       pod_id: state.pod_id,
       pod_dir: state.pod_dir,
-      bwrap_launch_path: bwrap_launch_path(),
+      # LAUNCH-Q : launcher N0 sélectionné par containment (host_launch.sh | bwrap_launch.sh). L'exe du
+      # Port (build_spawn) ; l'argv reste identique des deux côtés (même contrat <role> <pod_id> <pod_dir>
+      # <command...>). Le command opaque (claude_launch.sh …) est claude_launch_path ci-dessous.
+      launcher_path: launcher_path,
       claude_launch_path: claude_launch_path(),
       session_id: state.session_id,
       # SP composé inline (argv4 claude_launch) : le SP voyage en argv (--system-prompt), pas en
@@ -897,11 +906,13 @@ defmodule Fleet.Spawner.Pod do
           state.env_vars
           |> Map.merge(skills_plugins_env(state.cap_profile))
           |> Map.merge(mcp_channel_env(state.pod_id))
-          # U4 — HOME=pod_dir cohérent bwrap pattern (LauncherPortBackend sous bwrap fait
-          # `--setenv HOME` de toute façon — ce HOME ici est ignoré). TmuxBackend
-          # propage via `tmux -e HOME=...` → claude REPL lit pod_dir/.claude/* (creds
-          # OAuth + trust dialog skip) isolé du host. POC scope (containment dégradé).
-          |> Map.put("HOME", state.pod_dir)
+          # HOME — LAUNCH-Q : dépend du containment.
+          #   bwrap (défaut) : HOME=pod_dir (U4 — cohérent ; bwrap fait `--setenv HOME` de toute façon,
+          #     cette valeur est ignorée sous le sandbox).
+          #   none (host)    : HOME = home RÉEL de l'humain → claude lit son `~/.claude` natif. C'est l'auth
+          #     `:bind` réalisée NATIVEMENT sur l'hôte (refresh OAuth, full scope, pas de falaise 8h — l'arch
+          #     est un pod forever). host_launch.sh ne re-setenv PAS (pas de namespace) : ce HOME EST l'env réel.
+          |> Map.put("HOME", launch_home(containment, human, state.pod_dir))
           # Chaîne de session (DN spawner-orchestrator §D) : bwrap_launch les `--setenv` dans le pod,
           # claude_launch les lit `:?` strict (no-boot sinon). PRÉFIXE nom RC = <human>_<role>.
           |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
@@ -946,7 +957,8 @@ defmodule Fleet.Spawner.Pod do
 
   # BL-036 : reap un orphelin (bwrap/tmux/claude survivant à un crash GenServer) du même pod_id avant
   # un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). tmux kill-server tue tmux+claude ;
-  # pkill -f <pod_id> tue le holder bwrap (que kill-server laisse vivant). pod_id = UUID unique → ciblé.
+  # pkill -f <pod_id> tue le holder (bwrap OU host_launch — l'invocation porte le pod_id en argv ; que
+  # kill-server laisse vivant). pod_id = UUID unique → ciblé.
   defp reap_orphan_pod(pod_id) do
     if Fleet.Spawner.PodTmux.alive?(pod_id) do
       Logger.warning("pod #{pod_id} : orphelin vivant détecté avant launch (BL-036) — reap")
@@ -970,7 +982,7 @@ defmodule Fleet.Spawner.Pod do
         # ne matchent jamais → comportement legacy préservé.
         port = Map.get(launched, :port)
 
-        # tmux_session posé par LauncherPortBackend (chaîne bwrap) ET TmuxBackend ; nil pour StubBackend.
+        # tmux_session posé par LauncherPortBackend (les deux launchers N0 bwrap/host) ; nil pour StubBackend.
         tmux_session = Map.get(launched, :tmux_session)
 
         new_state =
@@ -990,7 +1002,7 @@ defmodule Fleet.Spawner.Pod do
 
         # U4 — Brief delivery au pod long-lived RC.
         #
-        # Path actuel : TmuxBackend → send_prompt (tmux load-buffer + paste-buffer).
+        # Path actuel : PodTmux send-keys sur le sock par-pod (universel, bwrap ET host).
         #   Pourquoi pas MCP channel push : reverse #5b §2.3 → gate 2
         #   `isChannelsEnabled = tengu_harbor` GrowthBook flag default false côté
         #   Anthropic. send-keys (control plane) reste universel, le brief est
@@ -1149,7 +1161,7 @@ defmodule Fleet.Spawner.Pod do
         # F124 : la session du pod bwrap (`lcars-pod-<id>`) vit sur le sock PAR-POD (PodTmux), PAS
         # le serveur tmux par défaut. L'ancien `TmuxBackend.kill_session` ciblait le défaut → no-op
         # silencieux → le claude sandboxé continuait à consommer l'OAuth. On kill via le sock par-pod
-        # (même geste que reap_orphan_pod) : kill-server tue tmux+claude, pkill tue le holder bwrap.
+        # (même geste que reap_orphan_pod) : kill-server tue tmux+claude, pkill tue le holder (bwrap ou host).
         sock = Fleet.Spawner.PodTmux.sock_path(state.pod_id)
         _ = System.cmd("tmux", ["-S", sock, "kill-server"], stderr_to_stdout: true)
         _ = System.cmd("pkill", ["-9", "-f", state.pod_id], stderr_to_stdout: true)
@@ -1161,11 +1173,14 @@ defmodule Fleet.Spawner.Pod do
   end
 
   @doc """
-  Tue le pod de la chaîne bwrap. Le holder (`exec sleep infinity` dans bwrap) IGNORE l'EOF stdin →
-  `Port.close` seul l'ORPHELINE (pod survit — PROVEN e2e Elixir 2026-06-01). On SIGTERM le process
-  bwrap par son os_pid : bwrap propage au holder → PID1 exit → namespace + serveur tmux + claude
-  tombent ensemble. Port.close ensuite (libère le port BEAM). `--die-with-parent` = filet si le BEAM
-  meurt avant d'arriver ici. Public pour test direct du fix.
+  Tue le pod (chaîne bwrap OU host — geste générique). Le holder (`sleep infinity`) IGNORE l'EOF stdin →
+  `Port.close` seul l'ORPHELINE (pod survit — PROVEN e2e Elixir 2026-06-01). On SIGTERM le process holder
+  par son os_pid :
+  - **bwrap** : bwrap propage au holder → PID1 exit → namespace + serveur tmux + claude tombent ensemble
+    (`--die-with-parent` = filet si le BEAM meurt avant d'arriver ici).
+  - **host** (LAUNCH-Q) : pas de namespace → le holder `host_launch.sh` trap le SIGTERM → `tmux
+    kill-server` explicite sur le sock par-pod (teardown self-contained ; cf. `bin/host_launch.sh`).
+  Port.close ensuite (libère le port BEAM). Public pour test direct du fix.
   """
   @spec terminate_pod_port(port()) :: :ok
   def terminate_pod_port(port) do
@@ -1397,6 +1412,24 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp cap_profile_name(_), do: "unknown"
+
+  # LAUNCH-Q : `metadata.containment` ∈ {"bwrap","none"} (cap_profile G24-1, défaut conservateur "bwrap").
+  # "none" = host_native (architect-interactive, starfleet) → host_launch.sh (PAS de sandbox) ; sinon la
+  # chaîne bwrap. Lu ICI, sur le chemin de lancement — avant ce fix `do_launch` bwrappait tout aveuglément.
+  defp cap_profile_containment(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
+    Map.get(meta, "containment") || Map.get(meta, :containment) || "bwrap"
+  end
+
+  defp cap_profile_containment(_), do: "bwrap"
+
+  # LAUNCH-Q : HOME du pod selon containment. host (none) = home réel de l'humain (claude → `~/.claude`
+  # natif, refresh OAuth) ; bwrap = pod_dir (ignoré sous le sandbox de toute façon). `claude_dir_for/1`
+  # honore l'override config `:claude_dir` (tests) et fail-loud si le passwd de l'humain est introuvable.
+  # NB mono-humain : si `:claude_dir` est overridé (path GLOBAL, non lié à `human`), `Path.dirname` rend
+  # son parent pour TOUT pod host. OK en prod mono-humain (1 daemon = 1 humain, unit `User=<humain>`) ;
+  # TODO multi-humain : dériver le home par-humain via `passwd_home/1` quand l'override n'est pas posé.
+  defp launch_home("none", human, _pod_dir), do: Path.dirname(claude_dir_for(human))
+  defp launch_home(_containment, _human, pod_dir), do: pod_dir
 
   defp scope_for("pipe"), do: "pipes"
   defp scope_for("run"), do: "runs"
@@ -1653,6 +1686,11 @@ defmodule Fleet.Spawner.Pod do
     Application.get_env(:fleet_spawner, :bwrap_launch_path, "/usr/local/bin/bwrap_launch.sh")
   end
 
+  # LAUNCH-Q : launcher N0 host (containment: none) — frère sans-sandbox de bwrap_launch, même argv-shape.
+  defp host_launch_path do
+    Application.get_env(:fleet_spawner, :host_launch_path, "/usr/local/bin/host_launch.sh")
+  end
+
   defp claude_launch_path do
     Application.get_env(:fleet_spawner, :claude_launch_path, "/usr/local/bin/claude_launch.sh")
   end
@@ -1682,7 +1720,7 @@ defmodule Fleet.Spawner.Pod do
 
   # Kick AUTONOME « yop » readiness-gated (R3b / F-C4b-2). Déclenche le pull du mandat
   # par MCP get_task — le mandat n'est PAS injecté (il vit dans tickets/ + TaskQueue).
-  # No-op si pas de tmux_session (StubBackend ; LauncherPortBackend ET TmuxBackend en posent un).
+  # No-op si pas de tmux_session (StubBackend ; LauncherPortBackend en pose un, bwrap ou host).
   #
   # Pourquoi pas un délai FIXE : le claude REPL n'est pas prêt à un instant connu — il
   # boote (tmux server up, banner, init MCP servers via .mcp-fleet.json), durée variable.
