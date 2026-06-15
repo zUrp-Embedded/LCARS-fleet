@@ -387,6 +387,13 @@ if config_env() != :test do
     config :fleet_task_queue, state_path: path
   end
 
+  # State FS des pods (session_id/phase, recovery). Défaut `~/.lcars/state` (fleet sous l'humain,
+  # doctrine 2026-06-11 — cf. pod.ex `default_state_fs_root`). Override explicite si déploiement
+  # non-standard ; sinon le state suit le home de l'humain qui lance la fleet.
+  if path = System.get_env("LCARS_STATE_FS_ROOT") do
+    config :fleet_spawner, state_fs_root: path
+  end
+
   # Kick d'onboarding du pod (nudge `yop` → claude appelle get_task). La fenêtre par défaut
   # (first 2s + 12×2.5s ≈ 32s) est trop courte face au cold-start claude en bwrap sur le service
   # déployé (binaire 238MB, caches froids) → kick abandonné avant REPL prêt → pod sans mandat.

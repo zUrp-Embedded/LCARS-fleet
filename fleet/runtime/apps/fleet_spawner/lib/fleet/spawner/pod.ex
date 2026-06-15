@@ -1346,12 +1346,19 @@ defmodule Fleet.Spawner.Pod do
       Keyword.get(
         opts,
         :state_fs_root,
-        Application.get_env(:fleet_spawner, :state_fs_root, "/var/lib/lcars")
+        Application.get_env(:fleet_spawner, :state_fs_root, default_state_fs_root())
       )
 
     scope = scope_for(Fleet.CapProfile.lifetime_scope(cap_profile, nil))
     Path.join([root, scope, pod_id, "state.json"])
   end
+
+  # Doctrine 2026-06-11 (fleet sous l'humain) : le state FS des pods suit le HOME de l'humain
+  # (= l'user runtime), comme `~/pods` (pod_dir) et `~/.lcars/workspaces`, PAS `/var/lib/lcars`.
+  # Override via env `LCARS_STATE_FS_ROOT` (→ `config :fleet_spawner, :state_fs_root`). Fallback
+  # `/var/lib/lcars` si home irrésoluble (jamais en pratique). Cf. PLAN-multiuser-spawn §A.3.
+  defp default_state_fs_root,
+    do: Path.join(System.user_home() || "/var/lib/lcars", ".lcars/state")
 
   # F122 : accesseur UNIQUE du rôle (= metadata.name). Avant, 3 sites inlinaient
   # `Map.get(metadata, "name", "engineer")` (launch/payload/brief) tandis que la persistance
