@@ -48,16 +48,28 @@ defmodule Fleet.Pilot.HopCompleterTest do
     def publish(_opts), do: {:error, :base_not_ancestor}
   end
 
-  # Forge stub PR-natif (Corr.3) : enregistre l'ouverture de PR.
+  # Forge stub PR-natif (Corr.3) : enregistre les appels PR (send au test).
   defmodule PrForge do
     def open_pr(_repo, head, base, _title, opts) do
       send(self(), {:open_pr, head, base, opts[:body]})
       {:ok, 7}
     end
+
+    def post_review(_repo, pr, event, body, _opts) do
+      send(self(), {:review, pr, event, body})
+      {:ok, :reviewed}
+    end
+
+    def merge_pr(_repo, pr, _opts) do
+      send(self(), {:merge, pr})
+      {:ok, :merged}
+    end
   end
 
   defmodule PrFailForge do
     def open_pr(_r, _h, _b, _t, _o), do: {:error, {:http, 422, "no commits between"}}
+    def post_review(_r, _pr, _e, _b, _o), do: {:error, {:http, 500, "boom"}}
+    def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
   defp base_hop(extra \\ %{}) do
@@ -225,6 +237,54 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
       assert {:error, {:open_pr, {:http, 422, _}}} =
                HopCompleter.open_deliverable_pr(pr_hop(), opts)
+    end
+  end
+
+  describe "record_review/2 + promote/2 (Corr.3 PR-natif)" do
+    test "verdict :approve → review native APPROVED (corps généré du rôle)" do
+      hop = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
+
+      assert {:ok, :reviewed} =
+               HopCompleter.record_review(hop, forge_client: PrForge, forge_opts: [])
+
+      assert_received {:review, 7, :approve, body}
+      assert body =~ "qualifier"
+      assert body =~ "PASS"
+    end
+
+    test "verdict :request_changes avec corps explicite" do
+      hop = %{
+        repo: "fleet/proj",
+        pr_number: 7,
+        role: "reviewer",
+        review_event: :request_changes,
+        review_body: "il manque un test de la branche d'erreur"
+      }
+
+      assert {:ok, :reviewed} =
+               HopCompleter.record_review(hop, forge_client: PrForge, forge_opts: [])
+
+      assert_received {:review, 7, :request_changes, "il manque un test de la branche d'erreur"}
+    end
+
+    test "record_review propage l'erreur forge" do
+      hop = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
+
+      assert {:error, {:review, {:http, 500, _}}} =
+               HopCompleter.record_review(hop, forge_client: PrFailForge, forge_opts: [])
+    end
+
+    test "promote → merge FF, {:ok, :promoted}" do
+      hop = %{repo: "fleet/proj", pr_number: 7}
+      assert {:ok, :promoted} = HopCompleter.promote(hop, forge_client: PrForge, forge_opts: [])
+      assert_received {:merge, 7}
+    end
+
+    test "promote : FF impossible (409) = invariant serial violé → {:merge, _} fail-loud" do
+      hop = %{repo: "fleet/proj", pr_number: 7}
+
+      assert {:error, {:merge, {:http, 409, _}}} =
+               HopCompleter.promote(hop, forge_client: PrFailForge, forge_opts: [])
     end
   end
 end

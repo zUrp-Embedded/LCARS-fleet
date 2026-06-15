@@ -199,6 +199,62 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
+  @doc """
+  **PR-natif (Corr.3)** — verdict de juge → **review native** sur la PR. Remplace le comment
+  `[hop:role:sha]` maison : le verdict de gate vit comme review Gitea (APPROVED / REQUEST_CHANGES),
+  traçable, lisible sans query custom. C'est le DOMICILE durable du verdict.
+
+  `hop` : `:repo`, `:pr_number`, `:role`, `:review_event` (`:approve` | `:request_changes` |
+  `:comment`), `:review_body` (optionnel, défaut généré du rôle + verdict).
+  Returns `{:ok, :reviewed}` | `{:error, {:review, reason}}`.
+  """
+  @spec record_review(map(), keyword()) :: {:ok, :reviewed} | {:error, {:review, term()}}
+  def record_review(hop, opts \\ []) when is_map(hop) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+    repo = Map.fetch!(hop, :repo)
+    pr = Map.fetch!(hop, :pr_number)
+    event = Map.fetch!(hop, :review_event)
+    body = Map.get(hop, :review_body, default_review_body(hop, event))
+
+    case forge.post_review(repo, pr, event, body, forge_opts) do
+      {:ok, _} -> {:ok, :reviewed}
+      {:error, reason} -> {:error, {:review, reason}}
+    end
+  end
+
+  defp default_review_body(hop, event) do
+    verdict =
+      case event do
+        :approve -> "PASS"
+        :request_changes -> "REQUEST_CHANGES"
+        _ -> "comment"
+      end
+
+    "Verdict **#{Map.get(hop, :role, "juge")}** : #{verdict}."
+  end
+
+  @doc """
+  **PR-natif (Corr.3)** — PROMOTE : merge la PR en **fast-forward-only**. C'est le terminal `:pass`
+  du dernier stage — auto-close de l'issue via `Closes #N`. Sous bail serial + funnel append-only,
+  la feature est descendante linéaire de `main` → FF garanti. Échec FF = invariant serial violé
+  (deux branches sur le même code) → fail-loud `{:merge, _}`, PAS un conflit à résoudre.
+
+  `hop` : `:repo`, `:pr_number`. Returns `{:ok, :promoted}` | `{:error, {:merge, reason}}`.
+  """
+  @spec promote(map(), keyword()) :: {:ok, :promoted} | {:error, {:merge, term()}}
+  def promote(hop, opts \\ []) when is_map(hop) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+    repo = Map.fetch!(hop, :repo)
+    pr = Map.fetch!(hop, :pr_number)
+
+    case forge.merge_pr(repo, pr, forge_opts) do
+      {:ok, _} -> {:ok, :promoted}
+      {:error, reason} -> {:error, {:merge, reason}}
+    end
+  end
+
   # ── Étape 1 : commit + push livrable (ou hop_sha fourni si pas de git) ──────
   defp step1_publish(hop, deliverable) do
     case Map.get(hop, :deliverable_opts) do
