@@ -190,9 +190,13 @@ defmodule Fleet.Pilot.PollerTest do
       Keyword.fetch!(opts, :_test_issues)
     end
 
+    # Corr.3 4-C : le mode stage liste AUSSI les PR ouvertes (chemin juge). Default {:ok, []}.
+    def list_open_pulls(_repo, opts), do: Keyword.get(opts, :_test_pulls, {:ok, []})
+
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def get_route(_repo, _n, _opts), do: :none
+    def get_predecessor_result(_repo, _n, _opts), do: :none
     def post_route(_repo, _n, p, s, _opts), do: send(self(), {:route, p, s}) && {:ok, :posted}
     def set_assignee(_repo, _n, login, _opts), do: send(self(), {:assignee, login}) && {:ok, :set}
   end
@@ -200,6 +204,16 @@ defmodule Fleet.Pilot.PollerTest do
   defmodule StageStubLoader do
     def load("engineer"),
       do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
+
+    # Corr.3 : juge de PR (qualifier/reviewer) -> mandate_kind: judge (mandat GateBrief desamorce).
+    def load(role) when role in ["qualifier", "reviewer"],
+      do:
+        {:ok,
+         %Fleet.CapProfile{
+           kind: "CapabilityProfile",
+           metadata: %{"name" => role},
+           spec: %{"mandate_kind" => "judge"}
+         }}
 
     def load(_), do: {:error, :not_found}
   end
@@ -218,7 +232,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
   end
 
-  defp start_stage_poller(issues_response) do
+  defp start_stage_poller(issues_response, pulls_response \\ {:ok, []}) do
     name = :"P_stage_#{System.unique_integer([:positive])}"
 
     {:ok, pid} =
@@ -228,7 +242,7 @@ defmodule Fleet.Pilot.PollerTest do
         start_tick?: false,
         stage_dispatch?: true,
         forge_client: StageStubForge,
-        forge_opts: [_test_issues: issues_response],
+        forge_opts: [_test_issues: issues_response, _test_pulls: pulls_response],
         loader: StageStubLoader,
         spawner: StageStubSpawner,
         clock: fn :second -> 1_700_000_000 end
@@ -426,6 +440,74 @@ defmodule Fleet.Pilot.PollerTest do
       {name, pid} = start_entry_poller({:ok, issues})
 
       assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
+
+      GenServer.stop(pid)
+    end
+  end
+
+  # ============================================================
+  # Chemin PR-driven (Corr.3 4-C) : les juges sont dispatches via les requested_reviewers.
+  # ============================================================
+  describe "mode stage — dispatch juge PR-driven" do
+    test "PR avec review demandee -> juge dispatche (chemin pulls)" do
+      pulls = [
+        %{
+          "number" => 6,
+          "head" => %{"ref" => "lcars/issue-42-engineer"},
+          "requested_reviewers" => [%{"login" => "Qualifier"}],
+          "labels" => []
+        }
+      ]
+
+      {name, pid} = start_stage_poller({:ok, []}, {:ok, pulls})
+
+      assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "issue avec PR fleet ouverte -> producteur SKIP cote issue (pas de re-spawn)" do
+      # #99 assigne engineer MAIS sa PR est ouverte -> phase juge : le chemin issue SKIP (sinon
+      # re-spawn du producteur deja fini) ; le juge est dispatche par le chemin pulls.
+      issues = [
+        %{
+          "number" => 99,
+          "body" => "x",
+          "labels" => [],
+          "assignees" => [%{"login" => "Engineer"}]
+        }
+      ]
+
+      pulls = [
+        %{
+          "number" => 7,
+          "head" => %{"ref" => "lcars/issue-99-engineer"},
+          "requested_reviewers" => [%{"login" => "Reviewer"}],
+          "labels" => []
+        }
+      ]
+
+      {name, pid} = start_stage_poller({:ok, issues}, {:ok, pulls})
+
+      # issue #99 skip (PR ouverte) + juge reviewer dispatche (pull) = {dispatched:1, skipped:1}
+      assert %{dispatched: 1, skipped: 1, errors: 0} = Poller.force_poll(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "PR sans review demandee -> skip (rien a dispatcher)" do
+      pulls = [
+        %{
+          "number" => 8,
+          "head" => %{"ref" => "lcars/issue-42-engineer"},
+          "requested_reviewers" => [],
+          "labels" => []
+        }
+      ]
+
+      {name, pid} = start_stage_poller({:ok, []}, {:ok, pulls})
+
+      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)
     end

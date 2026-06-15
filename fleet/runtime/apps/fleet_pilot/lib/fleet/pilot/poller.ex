@@ -382,32 +382,77 @@ defmodule Fleet.Pilot.Poller do
     forge = stage_forge_client(state)
 
     # Bail repo-serialise : on liste TOUS les ouverts (in-flight inclus) pour compter les
-    # pipelines actifs. decide skip les in-flight (lcars-in-flight) ; le bail bloque les entrees.
-    case forge.list_open_issues(state.repo, state.forge_opts) do
-      {:ok, issues} ->
-        tally = stage_process_issues(issues, state)
-        duration_ms = elapsed_ms(started)
+    # pipelines actifs. Corr.3 4-C : on liste AUSSI les PR ouvertes -> les JUGES sont dispatches
+    # via les requested_reviewers de la PR (plus l'assignee issue). decide skip les in-flight.
+    with {:ok, issues} <- forge.list_open_issues(state.repo, state.forge_opts),
+         {:ok, pulls} <- forge.list_open_pulls(state.repo, state.forge_opts) do
+      pr_issue_ids = pulls_issue_ids(pulls)
 
-        :telemetry.execute(
-          [:fleet_pilot, :poller, :poll],
-          %{duration_ms: duration_ms},
-          Map.merge(tally, %{status: :ok, mode: :stage, repo: state.repo})
+      tally =
+        merge_tally(
+          stage_process_issues(issues, pr_issue_ids, state),
+          stage_process_pulls(pulls, state)
         )
 
-        Logger.info(
-          "fleet_pilot Poller tick mode=stage repo=#{state.repo} " <>
-            "dispatched=#{tally.dispatched} skipped=#{tally.skipped} errors=#{tally.errors} " <>
-            "duration_ms=#{duration_ms}"
-        )
+      duration_ms = elapsed_ms(started)
 
-        {tally, %{state | poll_count: state.poll_count + 1, err_streak: 0, last_error: nil}}
+      :telemetry.execute(
+        [:fleet_pilot, :poller, :poll],
+        %{duration_ms: duration_ms},
+        Map.merge(tally, %{status: :ok, mode: :stage, repo: state.repo})
+      )
 
+      Logger.info(
+        "fleet_pilot Poller tick mode=stage repo=#{state.repo} " <>
+          "dispatched=#{tally.dispatched} skipped=#{tally.skipped} errors=#{tally.errors} " <>
+          "duration_ms=#{duration_ms}"
+      )
+
+      {tally, %{state | poll_count: state.poll_count + 1, err_streak: 0, last_error: nil}}
+    else
       {:error, reason} = err ->
         handle_poll_error(state, reason, started, err)
     end
   end
 
-  defp stage_process_issues(issues, state) do
+  # Issues portant une PR fleet ouverte (`lcars/issue-N-role`) = pipelines en phase JUGE :
+  # le producteur a fini, la suite est dispatchee via les pulls -> le chemin issue les SKIP
+  # (sinon le poller re-spawnerait le producteur, encore assigne).
+  defp pulls_issue_ids(pulls) do
+    pulls
+    |> Enum.flat_map(fn pr ->
+      case Fleet.Pilot.ForgeClient.parse_feature_branch(get_in(pr, ["head", "ref"]) || "") do
+        {:ok, {n, _role}} -> [n]
+        :error -> []
+      end
+    end)
+    |> MapSet.new()
+  end
+
+  defp merge_tally(a, b) do
+    %{
+      dispatched: a.dispatched + b.dispatched,
+      skipped: a.skipped + b.skipped,
+      errors: a.errors + b.errors
+    }
+  end
+
+  # Chemin PR-driven (Corr.3 4-C) : chaque PR ouverte avec une review demandee -> dispatch le juge.
+  # Non garde par le bail (les juges d'un pipeline DEJA actif doivent avancer ; le bail ne borne
+  # que l'ENTREE de nouveaux pipelines, cote issues).
+  defp stage_process_pulls(pulls, state) do
+    opts = stage_dispatch_opts(state)
+
+    Enum.reduce(pulls, %{dispatched: 0, skipped: 0, errors: 0}, fn pr, acc ->
+      case StageDispatcher.dispatch_review(pr, opts) do
+        {:ok, {:spawned, _pod_id, _role}} -> %{acc | dispatched: acc.dispatched + 1}
+        {:skipped, _reason} -> %{acc | skipped: acc.skipped + 1}
+        {:error, _reason} -> %{acc | errors: acc.errors + 1}
+      end
+    end)
+  end
+
+  defp stage_process_issues(issues, pr_issue_ids, state) do
     opts = stage_dispatch_opts(state)
     entry_opts = stage_entry_opts(state)
 
@@ -424,25 +469,38 @@ defmodule Fleet.Pilot.Poller do
                                                                                      {acc, lease} ->
         payload = wrap_issue_as_payload(issue, state.repo)
 
-        case StageDispatcher.dispatch_issue(payload, opts) do
-          {:ok, {:spawned, _pod_id, _role}} ->
-            {%{acc | dispatched: acc.dispatched + 1}, lease}
-
-          # Pas d'assignee : peut-être un ticket NEUF à ENTRER dans une carte (type:→carte, A2.1).
-          # Entry est idempotent (déjà routé → skip). L'entrée n'est permise QUE si le bail repo
-          # est libre (sinon le neuf attend le prochain tick, apres la fin du pipeline en cours).
-          {:skipped, :no_assignee} ->
-            stage_try_enter(payload, entry_opts, acc, lease)
-
-          {:skipped, _reason} ->
+        cond do
+          # Corr.3 4-C : l'issue porte une PR fleet ouverte -> phase JUGE (le producteur a fini,
+          # dispatchee via les pulls). SKIP cote issue, sinon le poller re-spawnerait le producteur
+          # (encore assigne). L'issue garde son assignee => le bail repo reste tenu (via les pulls).
+          MapSet.member?(pr_issue_ids, Map.get(issue, "number")) ->
             {%{acc | skipped: acc.skipped + 1}, lease}
 
-          {:error, _reason} ->
-            {%{acc | errors: acc.errors + 1}, lease}
+          true ->
+            stage_dispatch_one(payload, opts, entry_opts, acc, lease)
         end
       end)
 
     tally
+  end
+
+  defp stage_dispatch_one(payload, opts, entry_opts, acc, lease) do
+    case StageDispatcher.dispatch_issue(payload, opts) do
+      {:ok, {:spawned, _pod_id, _role}} ->
+        {%{acc | dispatched: acc.dispatched + 1}, lease}
+
+      # Pas d'assignee : peut-etre un ticket NEUF a ENTRER dans une carte (type:->carte, A2.1).
+      # Entry est idempotent (deja route -> skip). L'entree n'est permise QUE si le bail repo est
+      # libre (sinon le neuf attend le prochain tick, apres la fin du pipeline en cours).
+      {:skipped, :no_assignee} ->
+        stage_try_enter(payload, entry_opts, acc, lease)
+
+      {:skipped, _reason} ->
+        {%{acc | skipped: acc.skipped + 1}, lease}
+
+      {:error, _reason} ->
+        {%{acc | errors: acc.errors + 1}, lease}
+    end
   end
 
   # Entree d'un ticket neuf, gardee par le bail repo. Bail tenu -> skip (:repo_leased, le neuf
