@@ -295,8 +295,8 @@ defmodule Fleet.Pilot.HopConsumer do
       {:escalate, corr, eval_ctx} ->
         {:escalate, corr, eval_ctx}
 
-      {:ok, {next_assignee, next_stage}} ->
-        complete_business_hop(payload, n, role, next_assignee, next_stage, state)
+      {:ok, intent, {next_assignee, next_stage}} ->
+        complete_business_hop(payload, n, role, intent, next_assignee, next_stage, state)
     end
   end
 
@@ -333,6 +333,7 @@ defmodule Fleet.Pilot.HopConsumer do
          payload,
          n,
          role,
+         _intent,
          next_assignee,
          next_stage,
          state,
@@ -393,8 +394,8 @@ defmodule Fleet.Pilot.HopConsumer do
         end
 
       _ ->
-        # pas de contexte carte → pod 1-stage (A1) → terminal close
-        {:ok, {nil, nil}}
+        # pas de contexte carte → pod 1-stage (A1) → terminal (promote/close)
+        {:ok, :promote, {nil, nil}}
     end
   end
 
@@ -425,11 +426,12 @@ defmodule Fleet.Pilot.HopConsumer do
 
     case Fleet.Pipeline.Gates.evaluate(spec, result, %{}) do
       :pass ->
-        advance(carte, stage)
+        # Corr.3 — tag l'intent PR : `:advance` (stage suivant) | `:promote` (terminal).
+        tag_advance(advance(carte, stage))
 
       {:fail, reason} ->
         Logger.info("HopConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}")
-        rebound(carte, n, state)
+        tag(:rework, rebound(carte, n, state))
 
       {:dispatch_gatekeeper, _info} ->
         case dispatch_gatekeeper(carte, stage, result, state) do
@@ -442,6 +444,15 @@ defmodule Fleet.Pilot.HopConsumer do
         end
     end
   end
+
+  # Corr.3 — tag l'intent PR sur le routage de la carte. `:pass` → `:advance` si un stage suit,
+  # `:promote` si terminal (next_assignee nil). Préserve `{:error,_}` tel quel.
+  defp tag_advance({:ok, {nil, nil}}), do: {:ok, :promote, {nil, nil}}
+  defp tag_advance({:ok, routing}), do: {:ok, :advance, routing}
+  defp tag_advance(other), do: other
+
+  defp tag(intent, {:ok, routing}), do: {:ok, intent, routing}
+  defp tag(_intent, other), do: other
 
   # B (§L441) — jumeau forge-driven de `Fleet.Pipeline.Executor.do_dispatch_gatekeeper`.
   # Enqueue un mandat d'éval au gatekeeper PERMANENT (work-session, adressé par pod_id —
@@ -528,7 +539,18 @@ defmodule Fleet.Pilot.HopConsumer do
       "continue" ->
         case advance(carte, stage) do
           {:ok, {next_assignee, next_stage}} ->
-            complete_business_hop(payload, n, role, next_assignee, next_stage, state, trace)
+            intent = if is_nil(next_assignee), do: :promote, else: :advance
+
+            complete_business_hop(
+              payload,
+              n,
+              role,
+              intent,
+              next_assignee,
+              next_stage,
+              state,
+              trace
+            )
 
           {:error, reason} ->
             {:error, reason}
