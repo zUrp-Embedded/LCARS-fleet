@@ -183,6 +183,32 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "list_open_issues/2" do
+    test "renvoie tous les ouverts SANS filtre (bail repo : in-flight inclus)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues"} =>
+          {200,
+           [
+             %{"number" => 1, "labels" => []},
+             %{"number" => 2, "labels" => [%{"name" => "lcars-in-flight"}]}
+           ]}
+      }
+
+      assert {:ok, [%{"number" => 1}, %{"number" => 2}]} =
+               ForgeClient.list_open_issues("fleet/lcars", opts(handlers))
+    end
+
+    test "propage erreurs HTTP" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues"} =>
+          {503, %{"message" => "Service Unavailable"}}
+      }
+
+      assert {:error, {:http, 503, _}} =
+               ForgeClient.list_open_issues("fleet/lcars", opts(handlers))
+    end
+  end
+
   describe "add_label/4 — config" do
     test "manque base_url → {:error, {:config, {:missing, :base_url}}}" do
       assert {:error, {:config, {:missing, :base_url}}} =

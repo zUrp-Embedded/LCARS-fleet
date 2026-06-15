@@ -72,8 +72,6 @@ defmodule Fleet.Pilot.Poller do
   @default_interval_ms 30_000
   @max_backoff_ms 300_000
   @jitter_ratio 0.1
-  # F072 : vocabulaire protocole = source unique Fleet.Pilot.Labels.
-  @in_flight_label Fleet.Pilot.Labels.in_flight()
 
   defstruct [
     :repo,
@@ -383,7 +381,9 @@ defmodule Fleet.Pilot.Poller do
     started = System.monotonic_time()
     forge = stage_forge_client(state)
 
-    case forge.list_open_issues_without_label(state.repo, @in_flight_label, state.forge_opts) do
+    # Bail repo-serialise : on liste TOUS les ouverts (in-flight inclus) pour compter les
+    # pipelines actifs. decide skip les in-flight (lcars-in-flight) ; le bail bloque les entrees.
+    case forge.list_open_issues(state.repo, state.forge_opts) do
       {:ok, issues} ->
         tally = stage_process_issues(issues, state)
         duration_ms = elapsed_ms(started)
@@ -411,30 +411,58 @@ defmodule Fleet.Pilot.Poller do
     opts = stage_dispatch_opts(state)
     entry_opts = stage_entry_opts(state)
 
-    Enum.reduce(issues, %{dispatched: 0, skipped: 0, errors: 0}, fn issue, acc ->
-      payload = wrap_issue_as_payload(issue, state.repo)
+    # Bail repo-serialise (incrément 3) : au plus 1 pipeline actif par repo. Un ticket deja
+    # engage (assigne a un role, in-flight ou entre deux hops) tient le bail -> aucun ticket
+    # NEUF n'entre tant qu'il n'est pas fini (merge -> close). Les feature-branches sont donc
+    # creees sequentiellement (chacune descend du main a jour) -> merge FF garanti. Le dispatch
+    # des hops du ticket en cours n'est PAS bloque (seule l'entree d'un neuf l'est). Parallele-
+    # disjoint (1 pipeline/repo distinct) = optimisation differee.
+    lease_held0 = Enum.any?(issues, &repo_lease_held?/1)
 
-      case StageDispatcher.dispatch_issue(payload, opts) do
-        {:ok, {:spawned, _pod_id, _role}} ->
-          %{acc | dispatched: acc.dispatched + 1}
+    {tally, _lease} =
+      Enum.reduce(issues, {%{dispatched: 0, skipped: 0, errors: 0}, lease_held0}, fn issue,
+                                                                                     {acc, lease} ->
+        payload = wrap_issue_as_payload(issue, state.repo)
 
-        # Pas d'assignee : peut-être un ticket NEUF à ENTRER dans une carte (type:→carte, A2.1).
-        # Entry est idempotent (déjà routé → skip). L'entrée pose route+assignee ; le spawn suit
-        # au prochain tick (le payload courant est stale).
-        {:skipped, :no_assignee} ->
-          case Entry.enter(payload, entry_opts) do
-            {:ok, {:entered, _role}} -> %{acc | dispatched: acc.dispatched + 1}
-            {:skip, _} -> %{acc | skipped: acc.skipped + 1}
-            {:error, _} -> %{acc | errors: acc.errors + 1}
-          end
+        case StageDispatcher.dispatch_issue(payload, opts) do
+          {:ok, {:spawned, _pod_id, _role}} ->
+            {%{acc | dispatched: acc.dispatched + 1}, lease}
 
-        {:skipped, _reason} ->
-          %{acc | skipped: acc.skipped + 1}
+          # Pas d'assignee : peut-être un ticket NEUF à ENTRER dans une carte (type:→carte, A2.1).
+          # Entry est idempotent (déjà routé → skip). L'entrée n'est permise QUE si le bail repo
+          # est libre (sinon le neuf attend le prochain tick, apres la fin du pipeline en cours).
+          {:skipped, :no_assignee} ->
+            stage_try_enter(payload, entry_opts, acc, lease)
 
-        {:error, _reason} ->
-          %{acc | errors: acc.errors + 1}
-      end
-    end)
+          {:skipped, _reason} ->
+            {%{acc | skipped: acc.skipped + 1}, lease}
+
+          {:error, _reason} ->
+            {%{acc | errors: acc.errors + 1}, lease}
+        end
+      end)
+
+    tally
+  end
+
+  # Entree d'un ticket neuf, gardee par le bail repo. Bail tenu -> skip (:repo_leased, le neuf
+  # attend). Bail libre -> Entry ; une entree reussie PREND le bail (les neufs suivants du meme
+  # tick attendent).
+  defp stage_try_enter(_payload, _entry_opts, acc, true),
+    do: {%{acc | skipped: acc.skipped + 1}, true}
+
+  defp stage_try_enter(payload, entry_opts, acc, false) do
+    case Entry.enter(payload, entry_opts) do
+      {:ok, {:entered, _role}} -> {%{acc | dispatched: acc.dispatched + 1}, true}
+      {:skip, _} -> {%{acc | skipped: acc.skipped + 1}, false}
+      {:error, _} -> {%{acc | errors: acc.errors + 1}, false}
+    end
+  end
+
+  # Un ticket "tient le bail repo" s'il est deja engage dans un pipeline = assigne a un role
+  # (in-flight ou entre deux hops : les deux portent un assignee ; un ticket neuf type:X non).
+  defp repo_lease_held?(issue) do
+    (Map.get(issue, "assignees") || []) != []
   end
 
   defp stage_entry_opts(state) do

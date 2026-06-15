@@ -184,7 +184,9 @@ defmodule Fleet.Pilot.PollerTest do
   # réelle, ici on renvoie tel quel) + les write-ops touchées par
   # StageDispatcher.dispatch_issue (add_label / post_comment).
   defmodule StageStubForge do
-    def list_open_issues_without_label(_repo, _exclude_label, opts) do
+    # Bail repo : le mode stage liste TOUS les ouverts (list_open_issues), le filtre in-flight
+    # est applique par decide. Le stub renvoie le `:_test_issues` configure tel quel.
+    def list_open_issues(_repo, opts) do
       Keyword.fetch!(opts, :_test_issues)
     end
 
@@ -332,6 +334,97 @@ defmodule Fleet.Pilot.PollerTest do
       # pas d'assignee → pas de spawn, mais ENTRÉE réussie (route+assignee posés DANS le GenServer →
       # messages dans SA mailbox, pas celle du test ; le détail est unit-testé dans entry_test).
       # Au niveau Poller, le contrat = le tally : entrée comptée dispatched.
+      assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
+
+      GenServer.stop(pid)
+    end
+  end
+
+  # ============================================================
+  # Bail repo-serialise (incrément 3) : au plus 1 pipeline actif par repo.
+  # ============================================================
+  describe "mode stage — bail repo-serialise" do
+    defp start_entry_poller(issues_response) do
+      name = :"P_lease_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          start_tick?: false,
+          stage_dispatch?: true,
+          forge_client: StageStubForge,
+          forge_opts: [_test_issues: issues_response],
+          loader: StageStubLoader,
+          carte_loader: StageStubCarteLoader,
+          routing: %{"type:poc" => "poc-cycle"},
+          spawner: StageStubSpawner,
+          clock: fn :second -> 1_700_000_000 end
+        )
+
+      {name, pid}
+    end
+
+    test "un pipeline en cours (ticket assigne) bloque l'entree d'un ticket neuf" do
+      issues = [
+        # #11 deja engage (assigne engineer) -> tient le bail -> sera spawne (hop suivant).
+        %{
+          "number" => 11,
+          "body" => "en cours",
+          "labels" => [],
+          "assignees" => [%{"login" => "Engineer"}]
+        },
+        # #12 neuf (type:poc, pas d'assignee) -> entree BLOQUEE par le bail.
+        %{
+          "number" => 12,
+          "body" => "neuf",
+          "labels" => [%{"name" => "type:poc"}],
+          "assignees" => []
+        }
+      ]
+
+      {name, pid} = start_entry_poller({:ok, issues})
+
+      assert %{dispatched: 1, skipped: 1, errors: 0} = Poller.force_poll(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "deux tickets neufs -> un seul entre, l'autre attend (bail pris dans le tick)" do
+      issues = [
+        %{
+          "number" => 13,
+          "body" => "neuf1",
+          "labels" => [%{"name" => "type:poc"}],
+          "assignees" => []
+        },
+        %{
+          "number" => 14,
+          "body" => "neuf2",
+          "labels" => [%{"name" => "type:poc"}],
+          "assignees" => []
+        }
+      ]
+
+      {name, pid} = start_entry_poller({:ok, issues})
+
+      assert %{dispatched: 1, skipped: 1, errors: 0} = Poller.force_poll(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "bail libre (aucun ticket engage) -> le ticket neuf entre" do
+      issues = [
+        %{
+          "number" => 15,
+          "body" => "neuf",
+          "labels" => [%{"name" => "type:poc"}],
+          "assignees" => []
+        }
+      ]
+
+      {name, pid} = start_entry_poller({:ok, issues})
+
       assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)

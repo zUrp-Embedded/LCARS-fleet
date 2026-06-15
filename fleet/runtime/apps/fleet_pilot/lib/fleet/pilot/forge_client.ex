@@ -98,9 +98,7 @@ defmodule Fleet.Pilot.ForgeClient do
           {:ok, [map()]} | {:error, term()}
   def list_open_issues_without_label(repo, exclude_label, opts \\ [])
       when is_binary(repo) and is_binary(exclude_label) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, issues} <-
-           http_get(config, "/repos/#{repo}/issues?state=open&type=issues&limit=50") do
+    with {:ok, issues} <- list_open_issues(repo, opts) do
       filtered =
         Enum.reject(issues, fn issue ->
           labels = Map.get(issue, "labels", [])
@@ -108,6 +106,19 @@ defmodule Fleet.Pilot.ForgeClient do
         end)
 
       {:ok, filtered}
+    end
+  end
+
+  @doc """
+  Liste TOUTES les issues ouvertes du `repo` (Gitea `GET /repos/{repo}/issues?state=open`), sans
+  filtre. Brique du bail dispatch repo-serialise : le Poller compte les pipelines actifs = tickets
+  deja assignes a un role (in-flight INCLUS, contrairement a `list_open_issues_without_label/3`) ->
+  un seul pipeline a la fois par repo (merge FF garanti). Limite 50/page, 1 page (cf. catch-up).
+  """
+  @spec list_open_issues(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
+  def list_open_issues(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts) do
+      http_get(config, "/repos/#{repo}/issues?state=open&type=issues&limit=50")
     end
   end
 
