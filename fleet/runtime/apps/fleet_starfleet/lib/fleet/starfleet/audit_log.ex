@@ -1,7 +1,8 @@
 defmodule Fleet.Starfleet.AuditLog do
   @moduledoc """
   Wrapper `File.write/3` non-bang fail-safe sur le log audit Cat 5
-  `/var/log/fleet-starfleet.jsonl` (root:adm 640).
+  (défaut `~/.lcars/log/fleet-starfleet.jsonl` — fleet sous l'humain, 2026-06-11 ;
+  fallback `/var/log/fleet-starfleet.jsonl`).
 
   Format NDJSON append-only : 1 ligne JSON par entrée. Chaque entrée
   est merge avec `ts` ISO8601 UTC.
@@ -14,15 +15,14 @@ defmodule Fleet.Starfleet.AuditLog do
   ## Configuration
 
     * `:fleet_starfleet, :audit_log_path` — path log NDJSON
-      (default `/var/log/fleet-starfleet.jsonl`)
+      (default `~/.lcars/log/fleet-starfleet.jsonl`, home-relatif — fleet sous l'humain)
 
-  Distinct de `/var/log/fleet-audit.jsonl` (ch9+ch10) car forensics
-  Cat 5 spécifiques + permissions root:adm vs root:lcars.
+  Distinct du log audit `fleet-audit.jsonl` (ch9+ch10) : forensics Cat 5 spécifiques.
+  (Avant 2026-06-11 : `/var/log/…` root:adm — tamper-resistance vestigiale ; le vrai
+  audit = forge multi-author, ADR-E.)
   """
 
   require Logger
-
-  @default_path "/var/log/fleet-starfleet.jsonl"
 
   @doc """
   Écrit une entrée NDJSON sur le log audit. Merge `ts` ISO8601 UTC.
@@ -51,6 +51,13 @@ defmodule Fleet.Starfleet.AuditLog do
   end
 
   defp audit_log_path do
-    Application.get_env(:fleet_starfleet, :audit_log_path, @default_path)
+    Application.get_env(:fleet_starfleet, :audit_log_path, default_audit_path())
+  end
+
+  # Doctrine 2026-06-11 (fleet sous l'humain) : défaut home-relatif `~/.lcars/log`. L'audit LOCAL =
+  # convenance forensics ; le vrai audit = forge (commits multi-author, tamper-evident, ADR-E). Avant :
+  # `/var/log/fleet-starfleet.jsonl` (root:adm, non-writable hors root). Fallback `/var/log`.
+  defp default_audit_path do
+    Path.join(System.user_home() || "/var/log", ".lcars/log/fleet-starfleet.jsonl")
   end
 end

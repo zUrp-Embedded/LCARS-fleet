@@ -25,7 +25,6 @@ defmodule Fleet.TaskQueue.Server do
   alias Fleet.TaskQueue.Task
 
   @default_topic "fleet.events"
-  @default_path "/var/lib/lcars/task-queue/state.json"
   @active_states [:pending, :assigned, :in_progress]
   # F148 — borne de rétention des tâches terminales (:completed/:failed/:cleared). Sans elle,
   # `tasks` croît sans borne et `persist/1` réécrit un `state.json` toujours plus gros à CHAQUE
@@ -336,7 +335,14 @@ defmodule Fleet.TaskQueue.Server do
   # ============================================================
 
   defp default_path do
-    Application.get_env(:fleet_task_queue, :state_path, @default_path)
+    Application.get_env(:fleet_task_queue, :state_path, default_state_path())
+  end
+
+  # Doctrine 2026-06-11 (fleet sous l'humain) : défaut home-relatif `~/.lcars/task-queue`, comme le
+  # pod state_fs_root (cf. `Fleet.Spawner.Pod.default_state_fs_root`). Avant : `/var/lib/lcars` en dur,
+  # non-ownable hors du compte `lcars`. Fallback `/var/lib/lcars` si home irrésoluble (jamais en pratique).
+  defp default_state_path do
+    Path.join(System.user_home() || "/var/lib/lcars", ".lcars/task-queue/state.json")
   end
 
   defp persist(%{persist: false} = state), do: state

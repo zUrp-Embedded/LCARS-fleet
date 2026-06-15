@@ -24,12 +24,18 @@ defmodule Fleet.Spawner.PodTmux do
   @tmux_bin "tmux"
 
   @doc """
-  Base des sockets pod. Config `:fleet_spawner, :tmux_sock_base` (défaut `/run/lcars/tmux-sock`) — MÊME
+  Base des sockets pod. Config `:fleet_spawner, :tmux_sock_base` (défaut `~/.lcars/run/tmux-sock`) — MÊME
   défaut que `bwrap_launch.sh` (`LCARS_TMUX_SOCK_BASE`). do_launch pose cet env pour que les deux côtés
   (Elixir host / bwrap pod) calculent le MÊME chemin.
   """
   @spec sock_base() :: String.t()
-  def sock_base, do: Application.get_env(:fleet_spawner, :tmux_sock_base, "/run/lcars/tmux-sock")
+  def sock_base, do: Application.get_env(:fleet_spawner, :tmux_sock_base, default_sock_base())
+
+  # Doctrine 2026-06-11 (fleet sous l'humain) : défaut home-relatif `~/.lcars/run/tmux-sock`. Avant :
+  # `/run/lcars/tmux-sock` (RuntimeDirectory systemd, owned `lcars`, non-writable hors du daemon-lcars).
+  # Fallback `/run/lcars/tmux-sock` si home irrésoluble (jamais en pratique).
+  defp default_sock_base,
+    do: Path.join(System.user_home() || "/run/lcars", ".lcars/run/tmux-sock")
 
   @doc """
   Chemin socket du pod — convention bwrap_launch.sh : `<base>/<pod_id>/pod.sock`.
