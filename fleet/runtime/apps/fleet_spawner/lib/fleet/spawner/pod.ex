@@ -1759,12 +1759,12 @@ defmodule Fleet.Spawner.Pod do
   # 2.1.150 dé-défère + attend la connexion regular-required. PERMISSION = mcp__fleet__* dans le
   # cap-profile allowedTools. cf corpus #0_ref_mcp-tool-deferral-oneshot.md). Le pod soumet via
   # submit_result → le central broadcaste task_queue.task_completed (struct %Fleet.Event{}) (brick 2.1) → pod.ex extrait (event-driven).
-  # #596 — câblage Fleet.ProjectBootstrap.Phase.Clone pour les pods qui
-  # déclarent `spec.project.repo_path` (futur use-case : pod sur un projet
-  # utilisateur cloné). Aujourd'hui aucun cap-profile prod n'a ce champ, donc
-  # no-op. Si présent : clone le repo dans `<pod_dir>/workspace/` + checkout
-  # feature branch. Le workspace n'est pas utilisé en aval (claude REPL cwd
-  # reste pod_dir) — chantier futur pour wire cwd → workspace.
+  # #596 — cablage Fleet.ProjectBootstrap.Phase.Clone pour les pods porteurs d'un projet
+  # (`repo_path`). Corr.3 : le projet EFFECTIF vient du MANDAT (effective_project : opts[:project]
+  # injecte par le dispatch ticket->repo) ou du cap_profile statique (pods permanents). Present :
+  # clone le repo dans `<pod_dir>/workspace/` + checkout feature branch ; le cwd du REPL pointe sur
+  # ce workspace (maybe_put_pod_cwd -> LCARS_POD_CWD), l'agent code DANS sa branche (plus de no-op,
+  # plus de "cwd reste pod_dir" : ces deux affirmations etaient doc-stale pre-Corr.3).
   #
   # Découplage architectural : Pipeline.WorkspaceProvisioner (Face 2) câble
   # ProjectBootstrap pour les stages git (workspace per-stage). pod.ex câble
