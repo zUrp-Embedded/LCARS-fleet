@@ -277,11 +277,13 @@ defmodule Fleet.Pilot.HopCompleter do
       un juge (lookup de la PR). Producteur : sa propre `deliverable_opts.target_branch` sert de head.
     * `:next_assignee` — role suivant (`:advance`) ou role de rebond (`:rework`) ; `nil` en terminal.
 
-  ## Pont transitionnel (increment 4 le retire)
+  ## Routage (4-C, switch review-request)
 
-  Tant que le **poller** dispatche sur l'`assignee` de l'issue (pas encore sur la review-request),
-  on grave `set_assignee` (`:advance`/`:rework`) **en parallele** de la review-request native, et on
-  leve le verrou `lcars-in-flight` en dernier. Le switch poller→review-request = increment 4.
+  Le trigger du stage suivant = la review-request native (`request_review`), plus `set_assignee` :
+  le producteur reste assigne (Entry), les juges sont dispatches via la PR (`dispatch_review`). La
+  position carte (`post_route`) reste gravee sur l'issue. Le verrou `lcars-in-flight` est leve en
+  DERNIER sur le bon numero : producteur -> l'ISSUE (verrou pose par `dispatch_issue`) ; juge -> la
+  PR (verrou pose par `dispatch_review`).
 
   Returns `{:ok, :promoted | :review_requested | :rework_requested}` | `{:error, {step, reason}}`.
   """
@@ -340,17 +342,22 @@ defmodule Fleet.Pilot.HopCompleter do
   defp review_event_for_intent(:rework), do: :request_changes
   defp review_event_for_intent(_), do: :approve
 
-  # Routage commun selon l'intent (`pr` = nil seulement sur un rework producteur — pas de PR).
-  #   :promote → merge FF (la PR `Closes #N` ferme l'issue), unlock ;
-  #   :advance → request_review(next) [+ pont set_assignee], unlock ;
-  #   :rework  → re-dispatch (pont set_assignee vers le rebond), unlock.
-  # `lcars-in-flight` leve en DERNIER (pont poller, meme garantie crash que §5).
+  # Routage commun selon l'intent (Corr.3 4-C). Le trigger du stage suivant = la review-request
+  # native (`request_review`), plus `set_assignee` : le producteur reste assigne (Entry), les juges
+  # sont dispatches via la PR (`dispatch_review`). `post_route` (position carte) RESTE sur l'issue.
+  # `lcars-in-flight` leve en DERNIER sur le bon numero : producteur -> l'ISSUE (verrou pose par
+  # dispatch_issue) ; juge -> la PR (verrou pose par dispatch_review). `pr` = nil seulement sur un
+  # rework producteur (pas de PR).
+  #   :promote -> merge FF (la PR `Closes #N` ferme l'issue), unlock ;
+  #   :advance -> request_review(next) + post_route, unlock ;
+  #   :rework  -> post_route(rebond), unlock. Re-dispatch : producteur via l'assignee Entry conserve
+  #               (pas de PR encore) ; juge -> re-spawn producteur sur changes-requested (4-C-iv).
   defp route(%{intent: :promote} = hop, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
     with {:ok, :promoted} <- promote(%{repo: hop.repo, pr_number: pr}, opts),
-         {:ok, _} <- unlock(forge, hop.repo, hop.issue_number, forge_opts) do
+         {:ok, _} <- unlock(forge, hop.repo, lock_number(hop, pr), forge_opts) do
       {:ok, :promoted}
     end
   end
@@ -359,34 +366,35 @@ defmodule Fleet.Pilot.HopCompleter do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = hop.repo
-    n = hop.issue_number
     next = Map.fetch!(hop, :next_assignee)
 
     with :ok <- request_review_step(forge, repo, pr, next, forge_opts),
-         {:ok, _} <- bridge_route(forge, repo, n, hop, forge_opts),
-         {:ok, _} <- bridge_assignee(forge, repo, n, next, forge_opts),
-         {:ok, _} <- unlock(forge, repo, n, forge_opts) do
+         {:ok, _} <- bridge_route(forge, repo, hop.issue_number, hop, forge_opts),
+         {:ok, _} <- unlock(forge, repo, lock_number(hop, pr), forge_opts) do
       {:ok, :review_requested}
     end
   end
 
-  defp route(%{intent: :rework} = hop, _pr, opts) do
+  defp route(%{intent: :rework} = hop, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = hop.repo
-    n = hop.issue_number
-    rebound = Map.fetch!(hop, :next_assignee)
 
-    with {:ok, _} <- bridge_route(forge, repo, n, hop, forge_opts),
-         {:ok, _} <- bridge_assignee(forge, repo, n, rebound, forge_opts),
-         {:ok, _} <- unlock(forge, repo, n, forge_opts) do
+    with {:ok, _} <- bridge_route(forge, repo, hop.issue_number, hop, forge_opts),
+         {:ok, _} <- unlock(forge, repo, lock_number(hop, pr), forge_opts) do
       {:ok, :rework_requested}
     end
   end
 
-  # Pont transitionnel : le StageDispatcher lit la route gravee [lcars-route:p:s] pour spawner le
-  # stage suivant (l'assignee seul ne l'identifie pas). Grave si pipeline+next_stage presents
-  # (sinon 1-stage/terminal, pas de route). Retire a l'increment 4 (switch sur la review-request).
+  # Verrou a lever : producteur -> l'issue (verrou pose par dispatch_issue) ; juge -> la PR (verrou
+  # pose par dispatch_review). Un rework producteur (pr nil) tombe sur l'issue.
+  defp lock_number(%{pr_role: :judge}, pr) when is_integer(pr), do: pr
+  defp lock_number(%{issue_number: n}, _pr), do: n
+
+  # Grave la POSITION carte [lcars-route:p:s] sur l'issue (lue par StageDispatcher/dispatch_review
+  # pour identifier le stage du juge : l'assignee/le reviewer seul ne l'identifie pas, un role peut
+  # etre sur N stages). Reste (autorite de navigation) ; seul le TRIGGER (set_assignee) est remplace
+  # par la review-request. Grave si pipeline+next_stage presents (sinon 1-stage/terminal, pas de route).
   defp bridge_route(forge, repo, n, hop, forge_opts) do
     case {Map.get(hop, :pipeline), Map.get(hop, :next_stage)} do
       {p, s} when is_binary(p) and is_binary(s) ->
@@ -404,14 +412,6 @@ defmodule Fleet.Pilot.HopCompleter do
     case forge.request_review(repo, pr, [reviewer], forge_opts) do
       :ok -> :ok
       {:error, reason} -> {:error, {:request_review, reason}}
-    end
-  end
-
-  # Pont transitionnel (increment 4 le retire) : le poller dispatche encore sur l'assignee de l'issue.
-  defp bridge_assignee(forge, repo, n, login, forge_opts) do
-    case forge.set_assignee(repo, n, login, forge_opts) do
-      {:ok, _} = ok -> ok
-      {:error, reason} -> {:error, {:reassign, reason}}
     end
   end
 

@@ -141,13 +141,16 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   # ── Happy path : pass / fail / budget ────────────────────────────────────────
 
-  test "gate :pass -> producteur :advance : ouvre la PR, request_review(reviewer), pont assignee" do
+  test "gate :pass -> producteur :advance : ouvre la PR, request_review(reviewer), grave la route" do
     assert {:ok, :review_requested} =
              HopConsumer.maybe_complete(build_done("gated", %{"ok" => true}), hc())
 
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
-    assert_received {:assignee, "reviewer"}
+
+    # plus de set_assignee (PR-driven) : la position carte est gravee (route), le trigger = la review
+    refute_received {:assignee, _}
+    assert_received {:route, "gated", "review"}
     assert_received :unlocked
   end
 
@@ -155,7 +158,8 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert {:ok, :review_requested} = HopConsumer.maybe_complete(build_done("plain", %{}), hc())
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
-    assert_received {:assignee, "reviewer"}
+    refute_received {:assignee, _}
+    assert_received {:route, "plain", "review"}
   end
 
   test "gate {:fail} sous budget -> rebond producteur (engineer), PAS de PR" do
@@ -164,7 +168,9 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert {:ok, :rework_requested} =
              HopConsumer.maybe_complete(payload, hc(forge_opts: [_hops: 0]))
 
-    assert_received {:assignee, "engineer"}
+    # producteur rework : pas de set_assignee (l'engineer reste assigne par Entry) ; route rebondie
+    refute_received {:assignee, _}
+    assert_received {:route, "gated", "build"}
     assert_received :unlocked
     refute_received {:open_pr, _, _, _}
   end
@@ -245,7 +251,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   # NB Corr.3 : continue passe par complete_pr (PR-natif). La trace verdict n'est PAS encore
   # materialisee sur la PR (gap transitionnel) ; abandon/await gardent la sequence §5 (trace ok).
 
-  test "verdict continue -> producteur :advance (ouvre PR + request_review + pont)" do
+  test "verdict continue -> producteur :advance (ouvre PR + request_review + route)" do
     assert {:ok, :review_requested} =
              HopConsumer.resume_gate(
                soft_ctx(),
@@ -255,7 +261,8 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
-    assert_received {:assignee, "reviewer"}
+    refute_received {:assignee, _}
+    assert_received {:route, "soft", "review"}
     assert_received {:publish, d}
     assert d.mode == :git_native
     assert_received :unlocked
@@ -264,7 +271,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   test "verdict continue ENVELOPPE %{status,result} -> deplie (gate_result), avance" do
     raw = %{result: %{"status" => "ok", "result" => %{"decision" => "continue"}}}
     assert {:ok, :review_requested} = HopConsumer.resume_gate(soft_ctx(), raw, hc())
-    assert_received {:assignee, "reviewer"}
+    assert_received {:route, "soft", "review"}
   end
 
   test "verdict abandon -> close (terminal §5), PAS de push business (travail rejete)" do

@@ -381,7 +381,7 @@ defmodule Fleet.Pilot.HopCompleterTest do
       )
     end
 
-    test "producteur :advance → ouvre la PR, request_review(next), pont set_assignee, unlock" do
+    test "producteur :advance → ouvre la PR, request_review(next), unlock l'ISSUE (pas de set_assignee)" do
       hop = producer_hop(:advance, %{next_assignee: "qualifier"})
 
       assert {:ok, :review_requested} = HopCompleter.complete_pr(hop, orch_opts())
@@ -389,7 +389,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
       assert body =~ "Closes #42"
       assert_received {:request_review, 7, ["qualifier"]}
-      assert_received {:assignee, 42, "qualifier"}
+      # producteur : le verrou est sur l'ISSUE (dispatch_issue) ; plus de set_assignee (PR-driven)
+      refute_received {:assignee, _, _}
       assert_received {:unlock, 42, "lcars-in-flight"}
     end
 
@@ -402,17 +403,19 @@ defmodule Fleet.Pilot.HopCompleterTest do
       refute_received {:assignee, _, _}
     end
 
-    test "producteur :rework (son propre gate fail) → PAS de PR, re-dispatch rebond + unlock" do
+    test "producteur :rework (son propre gate fail) → PAS de PR, unlock l'ISSUE (re-spawn via assignee)" do
       hop = producer_hop(:rework, %{next_assignee: "engineer"})
 
       assert {:ok, :rework_requested} = HopCompleter.complete_pr(hop, orch_opts())
 
       refute_received {:open_pr, _, _, _}
-      assert_received {:assignee, 42, "engineer"}
+
+      # pas de PR encore -> l'engineer reste assigne (Entry) et re-spawn au prochain tick ; unlock l'issue
+      refute_received {:assignee, _, _}
       assert_received {:unlock, 42, _}
     end
 
-    test "juge :advance → retrouve la PR, review APPROVED, request_review(next), pont, unlock" do
+    test "juge :advance → retrouve la PR, review APPROVED, request_review(next), unlock la PR" do
       hop = judge_hop(:advance, %{role: "qualifier", next_assignee: "reviewer"})
 
       assert {:ok, :review_requested} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
@@ -420,11 +423,12 @@ defmodule Fleet.Pilot.HopCompleterTest do
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :approve, _}
       assert_received {:request_review, 7, ["reviewer"]}
-      assert_received {:assignee, 42, "reviewer"}
-      assert_received {:unlock, 42, _}
+      refute_received {:assignee, _, _}
+      # juge : le verrou est sur la PR (dispatch_review), pas l'issue
+      assert_received {:unlock, 7, "lcars-in-flight"}
     end
 
-    test "juge :promote (terminal) → review APPROVED puis merge FF" do
+    test "juge :promote (terminal) → review APPROVED puis merge FF, unlock la PR" do
       hop = judge_hop(:promote, %{role: "reviewer"})
 
       assert {:ok, :promoted} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
@@ -432,17 +436,18 @@ defmodule Fleet.Pilot.HopCompleterTest do
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :approve, _}
       assert_received {:merge, 7}
-      assert_received {:unlock, 42, _}
+      assert_received {:unlock, 7, _}
     end
 
-    test "juge :rework (gate fail) → review REQUEST_CHANGES, re-dispatch rebond, PAS de merge" do
+    test "juge :rework (gate fail) → review REQUEST_CHANGES, unlock la PR, PAS de merge" do
       hop = judge_hop(:rework, %{role: "reviewer", next_assignee: "engineer"})
 
       assert {:ok, :rework_requested} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
 
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :request_changes, _}
-      assert_received {:assignee, 42, "engineer"}
+      refute_received {:assignee, _, _}
+      assert_received {:unlock, 7, _}
       refute_received {:merge, _}
     end
 
