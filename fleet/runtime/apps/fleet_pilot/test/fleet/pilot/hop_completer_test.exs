@@ -48,7 +48,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
     def publish(_opts), do: {:error, :base_not_ancestor}
   end
 
-  # Forge stub PR-natif (Corr.3) : enregistre les appels PR (send au test).
+  # Forge stub PR-natif (Corr.3) : enregistre les appels PR (send au test). Rend le contrat REEL
+  # de `ForgeClient` : `post_review`/`merge_pr`/`request_review` → `:ok` (pas `{:ok, _}`).
   defmodule PrForge do
     def open_pr(_repo, head, base, _title, opts) do
       send(self(), {:open_pr, head, base, opts[:body]})
@@ -57,18 +58,66 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
     def post_review(_repo, pr, event, body, _opts) do
       send(self(), {:review, pr, event, body})
-      {:ok, :reviewed}
+      :ok
     end
 
     def merge_pr(_repo, pr, _opts) do
       send(self(), {:merge, pr})
-      {:ok, :merged}
+      :ok
     end
   end
 
   defmodule PrFailForge do
     def open_pr(_r, _h, _b, _t, _o), do: {:error, {:http, 422, "no commits between"}}
     def post_review(_r, _pr, _e, _b, _o), do: {:error, {:http, 500, "boom"}}
+    def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
+  end
+
+  # Forge stub COMPLET pour l'orchestrateur `complete_pr/2` (toutes les primitives PR + pont issue).
+  defmodule OrchForge do
+    def open_pr(_repo, head, base, _title, opts) do
+      send(self(), {:open_pr, head, base, opts[:body]})
+      {:ok, 7}
+    end
+
+    def get_pr_for_branch(_repo, head, base, _opts) do
+      send(self(), {:get_pr, head, base})
+      {:ok, 7}
+    end
+
+    def post_review(_repo, pr, event, body, _opts) do
+      send(self(), {:review, pr, event, body})
+      :ok
+    end
+
+    def request_review(_repo, pr, reviewers, _opts) do
+      send(self(), {:request_review, pr, reviewers})
+      :ok
+    end
+
+    def merge_pr(_repo, pr, _opts) do
+      send(self(), {:merge, pr})
+      :ok
+    end
+
+    def set_assignee(_repo, n, login, _opts) do
+      send(self(), {:assignee, n, login})
+      {:ok, :set}
+    end
+
+    def remove_label(_repo, n, label, _opts) do
+      send(self(), {:unlock, n, label})
+      {:ok, :removed}
+    end
+  end
+
+  # PR introuvable (le juge tombe avant tout review) ; merge FF impossible (open ok, merge 409).
+  defmodule NoPrForge do
+    def get_pr_for_branch(_r, _h, _b, _o), do: {:error, :pr_not_found}
+  end
+
+  defmodule MergeFailForge do
+    def open_pr(_r, _h, _b, _t, _o), do: {:ok, 7}
     def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
@@ -285,6 +334,148 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
       assert {:error, {:merge, {:http, 409, _}}} =
                HopCompleter.promote(hop, forge_client: PrFailForge, forge_opts: [])
+    end
+  end
+
+  describe "complete_pr/2 — orchestrateur PR-natif (Corr.3)" do
+    defp producer_hop(intent, extra \\ %{}) do
+      Map.merge(
+        %{
+          repo: "fleet/proj",
+          issue_number: 42,
+          role: "engineer",
+          pr_role: :producer,
+          intent: intent,
+          next_assignee: nil,
+          producer_branch: "lcars/issue-42-engineer",
+          deliverable_opts: %{
+            mode: :git_native,
+            workspace: "/tmp/ws",
+            base_sha: "cafe",
+            target_branch: "lcars/issue-42-engineer"
+          }
+        },
+        extra
+      )
+    end
+
+    defp judge_hop(intent, extra \\ %{}) do
+      Map.merge(
+        %{
+          repo: "fleet/proj",
+          issue_number: 42,
+          role: "reviewer",
+          pr_role: :judge,
+          intent: intent,
+          next_assignee: nil,
+          producer_branch: "lcars/issue-42-engineer"
+        },
+        extra
+      )
+    end
+
+    defp orch_opts(extra \\ []) do
+      Keyword.merge(
+        [deliverable: StubDeliverable, forge_client: OrchForge, forge_opts: []],
+        extra
+      )
+    end
+
+    test "producteur :advance → ouvre la PR, request_review(next), pont set_assignee, unlock" do
+      hop = producer_hop(:advance, %{next_assignee: "qualifier"})
+
+      assert {:ok, :review_requested} = HopCompleter.complete_pr(hop, orch_opts())
+
+      assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
+      assert body =~ "Closes #42"
+      assert_received {:request_review, 7, ["qualifier"]}
+      assert_received {:assignee, 42, "qualifier"}
+      assert_received {:unlock, 42, "lcars-in-flight"}
+    end
+
+    test "producteur :promote (terminal 1-stage) → ouvre la PR, merge FF, unlock, pas de reassign" do
+      assert {:ok, :promoted} = HopCompleter.complete_pr(producer_hop(:promote), orch_opts())
+
+      assert_received {:open_pr, "lcars/issue-42-engineer", "main", _}
+      assert_received {:merge, 7}
+      assert_received {:unlock, 42, _}
+      refute_received {:assignee, _, _}
+    end
+
+    test "producteur :rework (son propre gate fail) → PAS de PR, re-dispatch rebond + unlock" do
+      hop = producer_hop(:rework, %{next_assignee: "engineer"})
+
+      assert {:ok, :rework_requested} = HopCompleter.complete_pr(hop, orch_opts())
+
+      refute_received {:open_pr, _, _, _}
+      assert_received {:assignee, 42, "engineer"}
+      assert_received {:unlock, 42, _}
+    end
+
+    test "juge :advance → retrouve la PR, review APPROVED, request_review(next), pont, unlock" do
+      hop = judge_hop(:advance, %{role: "qualifier", next_assignee: "reviewer"})
+
+      assert {:ok, :review_requested} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+
+      assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
+      assert_received {:review, 7, :approve, _}
+      assert_received {:request_review, 7, ["reviewer"]}
+      assert_received {:assignee, 42, "reviewer"}
+      assert_received {:unlock, 42, _}
+    end
+
+    test "juge :promote (terminal) → review APPROVED puis merge FF" do
+      hop = judge_hop(:promote, %{role: "reviewer"})
+
+      assert {:ok, :promoted} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+
+      assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
+      assert_received {:review, 7, :approve, _}
+      assert_received {:merge, 7}
+      assert_received {:unlock, 42, _}
+    end
+
+    test "juge :rework (gate fail) → review REQUEST_CHANGES, re-dispatch rebond, PAS de merge" do
+      hop = judge_hop(:rework, %{role: "reviewer", next_assignee: "engineer"})
+
+      assert {:ok, :rework_requested} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+
+      assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
+      assert_received {:review, 7, :request_changes, _}
+      assert_received {:assignee, 42, "engineer"}
+      refute_received {:merge, _}
+    end
+
+    test "producteur : open_pr echoue → {:open_pr, _}, pas de route" do
+      assert {:error, {:open_pr, {:http, 422, _}}} =
+               HopCompleter.complete_pr(
+                 producer_hop(:promote),
+                 deliverable: StubDeliverable,
+                 forge_client: PrFailForge
+               )
+
+      refute_received {:merge, _}
+    end
+
+    test "juge : PR introuvable → {:pr_lookup, :pr_not_found} fail-loud" do
+      assert {:error, {:pr_lookup, :pr_not_found}} =
+               HopCompleter.complete_pr(judge_hop(:promote), forge_client: NoPrForge)
+    end
+
+    test "juge : producer_branch absent → {:pr_lookup, :no_producer_branch}" do
+      hop = judge_hop(:promote, %{producer_branch: nil})
+
+      assert {:error, {:pr_lookup, :no_producer_branch}} =
+               HopCompleter.complete_pr(hop, forge_client: OrchForge)
+    end
+
+    test "producteur :promote : merge FF impossible (409) → {:merge, _} fail-loud" do
+      assert {:error, {:merge, {:http, 409, _}}} =
+               HopCompleter.complete_pr(
+                 producer_hop(:promote),
+                 deliverable: StubDeliverable,
+                 forge_client: MergeFailForge
+               )
     end
   end
 end

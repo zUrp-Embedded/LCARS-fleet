@@ -217,7 +217,10 @@ defmodule Fleet.Pilot.HopCompleter do
     event = Map.fetch!(hop, :review_event)
     body = Map.get(hop, :review_body, default_review_body(hop, event))
 
+    # NB `ForgeClient.post_review/5` rend `:ok` (pas `{:ok, _}`) sur succes — matcher les deux
+    # (un seam test peut rendre l'un ou l'autre ; le contrat reel = `:ok`).
     case forge.post_review(repo, pr, event, body, forge_opts) do
+      :ok -> {:ok, :reviewed}
       {:ok, _} -> {:ok, :reviewed}
       {:error, reason} -> {:error, {:review, reason}}
     end
@@ -249,9 +252,155 @@ defmodule Fleet.Pilot.HopCompleter do
     repo = Map.fetch!(hop, :repo)
     pr = Map.fetch!(hop, :pr_number)
 
+    # NB `ForgeClient.merge_pr/3` rend `:ok` (pas `{:ok, _}`) sur succes — matcher les deux.
     case forge.merge_pr(repo, pr, forge_opts) do
+      :ok -> {:ok, :promoted}
       {:ok, _} -> {:ok, :promoted}
       {:error, reason} -> {:error, {:merge, reason}}
+    end
+  end
+
+  @doc """
+  **PR-natif (Corr.3) — orchestrateur de fin-de-hop.** Compose les primitives PR
+  (`open_deliverable_pr`/`record_review`/`promote`) + le routage selon l'`intent` de gate.
+  Remplace la sequence §5 `complete/2` (push `lcars/issue-N-role` + comment `[hop:role:sha]` +
+  state + assignee/close + unlock) sur le happy-path : la PR devient le domicile review+promote,
+  la forge auto-close l'issue au merge (`Closes #N`).
+
+  Le hop est **deja resolu** par l'appelant (`HopConsumer` connait la carte + le `deliverable_mode`) :
+
+    * `:pr_role` — `:producer` (role git_native → pousse le code, ouvre la PR) | `:judge`
+      (role payload → review la PR du producteur).
+    * `:intent` — decision de gate : `:advance` (stage suivant) | `:promote` (terminal) |
+      `:rework` (rebond).
+    * `:producer_branch` — head de la PR a reviewer (`lcars/issue-N-<producteur>`) ; requis pour
+      un juge (lookup de la PR). Producteur : sa propre `deliverable_opts.target_branch` sert de head.
+    * `:next_assignee` — role suivant (`:advance`) ou role de rebond (`:rework`) ; `nil` en terminal.
+
+  ## Pont transitionnel (increment 4 le retire)
+
+  Tant que le **poller** dispatche sur l'`assignee` de l'issue (pas encore sur la review-request),
+  on grave `set_assignee` (`:advance`/`:rework`) **en parallele** de la review-request native, et on
+  leve le verrou `lcars-in-flight` en dernier. Le switch poller→review-request = increment 4.
+
+  Returns `{:ok, :promoted | :review_requested | :rework_requested}` | `{:error, {step, reason}}`.
+  """
+  @spec complete_pr(map(), keyword()) ::
+          {:ok, :promoted | :review_requested | :rework_requested} | {:error, {atom(), term()}}
+  def complete_pr(hop, opts \\ []) when is_map(hop) do
+    case Map.fetch!(hop, :pr_role) do
+      :producer -> complete_producer(hop, opts)
+      :judge -> complete_judge(hop, opts)
+    end
+  end
+
+  # Producteur (engineer, git_native) : pousse le livrable + ouvre la PR, PUIS route. Sur un rework
+  # de son PROPRE gate (code rejete), pas de PR — re-dispatch direct (le producteur recommence).
+  defp complete_producer(%{intent: :rework} = hop, opts), do: route(hop, nil, opts)
+
+  defp complete_producer(hop, opts) do
+    with {:ok, %{pr_number: pr}} <- open_deliverable_pr(hop, opts) do
+      route(hop, pr, opts)
+    end
+  end
+
+  # Juge (payload) : retrouve la PR du producteur, enregistre la review native (verdict→event),
+  # PUIS route. La review native EST le domicile durable du verdict (vs le comment maison §5).
+  defp complete_judge(hop, opts) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+    repo = Map.fetch!(hop, :repo)
+    base = Map.get(hop, :base_branch, "main")
+    head = Map.get(hop, :producer_branch)
+
+    with {:ok, pr} <- resolve_pr(forge, repo, head, base, forge_opts),
+         {:ok, :reviewed} <- record_review(review_hop(hop, pr), opts) do
+      route(hop, pr, opts)
+    end
+  end
+
+  defp resolve_pr(_forge, _repo, head, _base, _opts) when not is_binary(head),
+    do: {:error, {:pr_lookup, :no_producer_branch}}
+
+  defp resolve_pr(forge, repo, head, base, forge_opts) do
+    case forge.get_pr_for_branch(repo, head, base, forge_opts) do
+      {:ok, pr} -> {:ok, pr}
+      {:error, reason} -> {:error, {:pr_lookup, reason}}
+    end
+  end
+
+  defp review_hop(hop, pr) do
+    hop
+    |> Map.put(:pr_number, pr)
+    |> Map.put(:review_event, review_event_for_intent(Map.fetch!(hop, :intent)))
+  end
+
+  # Verdict de gate → event de review native. `:rework` (gate fail) = REQUEST_CHANGES ; `:advance`/
+  # `:promote` (gate pass) = APPROVED. Le `:review_body` (optionnel) prime sur le corps genere.
+  defp review_event_for_intent(:rework), do: :request_changes
+  defp review_event_for_intent(_), do: :approve
+
+  # Routage commun selon l'intent (`pr` = nil seulement sur un rework producteur — pas de PR).
+  #   :promote → merge FF (la PR `Closes #N` ferme l'issue), unlock ;
+  #   :advance → request_review(next) [+ pont set_assignee], unlock ;
+  #   :rework  → re-dispatch (pont set_assignee vers le rebond), unlock.
+  # `lcars-in-flight` leve en DERNIER (pont poller, meme garantie crash que §5).
+  defp route(%{intent: :promote} = hop, pr, opts) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+
+    with {:ok, :promoted} <- promote(%{repo: hop.repo, pr_number: pr}, opts),
+         {:ok, _} <- unlock(forge, hop.repo, hop.issue_number, forge_opts) do
+      {:ok, :promoted}
+    end
+  end
+
+  defp route(%{intent: :advance} = hop, pr, opts) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+    repo = hop.repo
+    n = hop.issue_number
+    next = Map.fetch!(hop, :next_assignee)
+
+    with :ok <- request_review_step(forge, repo, pr, next, forge_opts),
+         {:ok, _} <- bridge_assignee(forge, repo, n, next, forge_opts),
+         {:ok, _} <- unlock(forge, repo, n, forge_opts) do
+      {:ok, :review_requested}
+    end
+  end
+
+  defp route(%{intent: :rework} = hop, _pr, opts) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+    repo = hop.repo
+    n = hop.issue_number
+    rebound = Map.fetch!(hop, :next_assignee)
+
+    with {:ok, _} <- bridge_assignee(forge, repo, n, rebound, forge_opts),
+         {:ok, _} <- unlock(forge, repo, n, forge_opts) do
+      {:ok, :rework_requested}
+    end
+  end
+
+  defp request_review_step(forge, repo, pr, reviewer, forge_opts) do
+    case forge.request_review(repo, pr, [reviewer], forge_opts) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:request_review, reason}}
+    end
+  end
+
+  # Pont transitionnel (increment 4 le retire) : le poller dispatche encore sur l'assignee de l'issue.
+  defp bridge_assignee(forge, repo, n, login, forge_opts) do
+    case forge.set_assignee(repo, n, login, forge_opts) do
+      {:ok, _} = ok -> ok
+      {:error, reason} -> {:error, {:reassign, reason}}
+    end
+  end
+
+  defp unlock(forge, repo, n, forge_opts) do
+    case forge.remove_label(repo, n, @in_flight_label, forge_opts) do
+      {:ok, _} = ok -> ok
+      {:error, reason} -> {:error, {:unlock, reason}}
     end
   end
 
