@@ -72,6 +72,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     # F077 : le mandat juge lit le result du prédécesseur (option B). Stub : forge_opts[:_test_pred].
     def get_predecessor_result(_repo, _n, opts), do: Keyword.get(opts, :_test_pred, :none)
 
+    # 4-C-iv : etat de review courant (rework). Stub : forge_opts[:_test_review_state] (defaut :none).
+    def pr_review_state(_repo, _index, opts),
+      do: {:ok, Keyword.get(opts, :_test_review_state, :none)}
+
     # F181 : compensation — retrait du verrou sur échec post-verrou.
     def remove_label(_repo, _n, label, _opts) do
       send(self(), {:removed_label, label})
@@ -354,11 +358,32 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "PR sans review demandee -> skip" do
+    test "PR sans reviewer + pas de REQUEST_CHANGES -> skip :no_work" do
+      pr = pr(%{"requested_reviewers" => []})
+      # _test_review_state defaut :none
+      assert {:skipped, :no_work} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+      refute_received {:spawned, _, _}
+    end
+
+    test "4-C-iv : PR sans reviewer mais REQUEST_CHANGES courant -> re-spawn le PRODUCTEUR" do
       pr = pr(%{"requested_reviewers" => []})
 
-      assert {:skipped, :no_review_requested} =
-               StageDispatcher.dispatch_review(pr, dispatch_opts())
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_review_state: :changes_requested,
+            _test_route: {:ok, {"poc", "build"}}
+          ]
+        )
+
+      # producteur = role git_native de head (lcars/issue-42-engineer) = engineer ; verrou sur la PR.
+      assert {:ok, {:spawned, "pr-6-engineer-1700000000", "engineer"}} =
+               StageDispatcher.dispatch_review(pr, opts)
+
+      assert_received {:spawned, "issue-42", spawn_opts}
+      assert spawn_opts[:mandate] =~ "REWORK"
+      assert_received {:enqueued, "pr-6-engineer-1700000000", attrs}
+      assert attrs.role == "engineer"
     end
 
     test "PR sur branche non-fleet -> skip (jamais misroutee)" do

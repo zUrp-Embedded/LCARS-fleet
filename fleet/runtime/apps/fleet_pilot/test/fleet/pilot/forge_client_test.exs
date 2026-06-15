@@ -239,6 +239,44 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert :error = ForgeClient.parse_feature_branch("feature/manual")
       assert :error = ForgeClient.parse_feature_branch(nil)
     end
+
+    test "pr_review_state : derniere review decisive = REQUEST_CHANGES -> :changes_requested" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             %{"state" => "REQUEST_REVIEW", "dismissed" => false},
+             %{"state" => "COMMENT", "dismissed" => false},
+             %{"state" => "APPROVED", "dismissed" => false},
+             %{"state" => "REQUEST_CHANGES", "dismissed" => false}
+           ]}
+      }
+
+      assert {:ok, :changes_requested} =
+               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+    end
+
+    test "pr_review_state : derniere decisive = APPROVED (REQUEST_CHANGES dismissed ignore)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             %{"state" => "REQUEST_CHANGES", "dismissed" => true},
+             %{"state" => "APPROVED", "dismissed" => false}
+           ]}
+      }
+
+      assert {:ok, :approved} = ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+    end
+
+    test "pr_review_state : aucune review decisive -> :none" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200, [%{"state" => "REQUEST_REVIEW", "dismissed" => false}, %{"state" => "COMMENT"}]}
+      }
+
+      assert {:ok, :none} = ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+    end
   end
 
   describe "add_label/4 — config" do

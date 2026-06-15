@@ -213,14 +213,17 @@ defmodule Fleet.Pilot.StageDispatcher do
   @spec dispatch_review(map(), keyword()) ::
           {:ok, {:spawned, String.t(), String.t()}} | {:skipped, atom()} | {:error, term()}
   def dispatch_review(pr, opts) when is_map(pr) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
-    loader = Keyword.get(opts, :loader, Fleet.CapProfile)
-    spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
-    task_queue = Keyword.get(opts, :task_queue, Fleet.TaskQueue)
-    clock = Keyword.get(opts, :clock, &System.os_time/1)
-    resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
-    repo = Keyword.fetch!(opts, :repo)
-    forge_opts = Keyword.get(opts, :forge_opts, [])
+    ctx = %{
+      forge: Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient),
+      loader: Keyword.get(opts, :loader, Fleet.CapProfile),
+      spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
+      task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
+      clock: Keyword.get(opts, :clock, &System.os_time/1),
+      resolver: Keyword.get(opts, :project_resolver, &default_project_resolver/2),
+      repo: Keyword.fetch!(opts, :repo),
+      forge_opts: Keyword.get(opts, :forge_opts, []),
+      opts: opts
+    }
 
     pr_number = pr["number"]
     head = get_in(pr, ["head", "ref"]) || ""
@@ -231,25 +234,44 @@ defmodule Fleet.Pilot.StageDispatcher do
       @in_flight_label in labels ->
         {:skipped, :in_flight}
 
-      reviewers == [] ->
-        {:skipped, :no_review_requested}
+      reviewers != [] ->
+        # un juge est en attente -> on le spawn pour reviewer la PR.
+        role = reviewers |> hd() |> Map.get("login", "") |> String.downcase()
+        dispatch_pr_role(:judge, pr_number, head, role, ctx)
 
       true ->
-        role = reviewers |> hd() |> Map.get("login", "") |> String.downcase()
+        # pas de reviewer en attente : rework ? une review REQUEST_CHANGES courante => le PRODUCTEUR
+        # (engineer) reprend pour corriger (4-C-iv). Sinon rien (PR approuvee en attente du merge).
+        dispatch_rework(pr_number, head, ctx)
+    end
+  end
 
-        with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head),
-             {:ok, profile} <- load_role_or_skip(loader, role) do
-          do_dispatch_review(pr_number, issue_n, role, profile, %{
-            repo: repo,
-            forge: forge,
-            spawner: spawner,
-            task_queue: task_queue,
-            clock: clock,
-            resolver: resolver,
-            forge_opts: forge_opts,
-            opts: opts
-          })
+  # Rework juge : la PR porte un verdict REQUEST_CHANGES courant (review postee, plus de reviewer en
+  # attente) -> le PRODUCTEUR (role git_native de head.ref) reprend pour corriger. Idempotent (verrou
+  # PR). NB transitionnel : le mandat ne porte pas encore le feedback detaille de la review (4-C-iv+).
+  defp dispatch_rework(pr_number, head, ctx) do
+    case ctx.forge.pr_review_state(ctx.repo, pr_number, ctx.forge_opts) do
+      {:ok, :changes_requested} ->
+        case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+          {:ok, {_n, producer_role}} ->
+            dispatch_pr_role(:rework, pr_number, head, producer_role, ctx)
+
+          :error ->
+            {:skipped, :not_fleet_branch}
         end
+
+      {:ok, _} ->
+        {:skipped, :no_work}
+
+      {:error, reason} ->
+        {:error, {:review_state, reason}}
+    end
+  end
+
+  defp dispatch_pr_role(kind, pr_number, head, role, ctx) do
+    with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head),
+         {:ok, profile} <- load_role_or_skip(ctx.loader, role) do
+      do_dispatch_review(pr_number, issue_n, role, profile, kind, ctx)
     end
   end
 
@@ -269,7 +291,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     end
   end
 
-  defp do_dispatch_review(pr_number, issue_n, role, profile, ctx) do
+  defp do_dispatch_review(pr_number, issue_n, role, profile, kind, ctx) do
     %{
       repo: repo,
       forge: forge,
@@ -289,8 +311,9 @@ defmodule Fleet.Pilot.StageDispatcher do
          {:ok, route} <- tag_err(route_for(forge, repo, issue_n, forge_opts), :route_resolution) do
       pod_id = "pr-#{pr_number}-#{role}-#{ts}"
 
-      # Mandat juge (GateBrief desamorce, I-CBC) source du contexte de l'issue (route + predecessor).
-      mandate = build_mandate(profile, role, forge, repo, issue_n, %{}, forge_opts, route)
+      # :judge -> GateBrief desamorce (I-CBC) ; :rework -> brief de rework au PRODUCTEUR (corrige + push).
+      mandate =
+        review_mandate(kind, profile, role, forge, repo, issue_n, forge_opts, route, pr_number)
 
       spawn_opts =
         [mandate: mandate, pod_id: pod_id]
@@ -346,6 +369,29 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   defp maybe_put_route(spawn_opts, {pipeline, stage}),
     do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:stage, stage)
+
+  # Mandat d'un dispatch PR (Corr.3 4-C) : :judge -> GateBrief desamorce (via build_mandate, le pod
+  # juge l'issue) ; :rework -> brief de rework au PRODUCTEUR (corrige selon la review, re-pousse).
+  defp review_mandate(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
+    do: build_mandate(profile, role, forge, repo, issue_n, %{}, forge_opts, route)
+
+  defp review_mandate(:rework, _profile, _role, _forge, _repo, _issue_n, _forge_opts, route, pr),
+    do: rework_mandate(pr, route)
+
+  # Brief de rework (4-C-iv) : le PRODUCTEUR (engineer) reprend sur une PR REQUEST_CHANGES.
+  # Transitionnel : le feedback detaille de la review n'est pas encore injecte (le pod a la PR clonee
+  # + voit son code ; enrichir le mandat avec le body de la review = raffinement ulterieur).
+  defp rework_mandate(pr, route) do
+    {pipeline, stage} =
+      case route do
+        {p, s} -> {p, s}
+        _ -> {nil, nil}
+      end
+
+    "REWORK — une review REQUEST_CHANGES a ete deposee sur la PR ##{pr}. Corrige ton code selon le " <>
+      "feedback de la review et re-pousse sur ta branche (meme PR). " <>
+      "stage=#{stage || "?"} pipeline=#{pipeline || "?"}."
+  end
 
   # F077 : la forme du mandat est une propriété du rôle (cap-profile `mandate_kind`), PAS un nom
   # magique en ring2. `judge` → GateBrief désamorcé ; tout le reste (`worker`, défaut) → corps d'issue.

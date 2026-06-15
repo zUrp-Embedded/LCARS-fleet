@@ -475,6 +475,44 @@ defmodule Fleet.Pilot.ForgeClient do
   def parse_feature_branch(_), do: :error
 
   @doc """
+  Etat de review COURANT d'une PR (Gitea `GET /repos/{repo}/pulls/{index}/reviews`) : la DERNIERE
+  review decisive non-dismissed. Sert au dispatch du rework juge (Corr.3 4-C-iv) : une PR sans
+  reviewer en attente mais avec un `REQUEST_CHANGES` courant -> le producteur doit reprendre.
+
+  Les reviews `REQUEST_REVIEW`/`COMMENT`/`PENDING` ne sont pas decisives (ignorees). Gitea liste
+  par ordre de creation -> la derniere decisive = le verdict en vigueur.
+
+  ## Returns
+    * `{:ok, :approved}` — derniere decisive = APPROVED
+    * `{:ok, :changes_requested}` — derniere decisive = REQUEST_CHANGES
+    * `{:ok, :none}` — aucune review decisive
+    * `{:error, term()}` — HTTP/transport/config
+  """
+  @spec pr_review_state(String.t(), integer(), Keyword.t()) ::
+          {:ok, :approved | :changes_requested | :none} | {:error, term()}
+  def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, reviews} when is_list(reviews) <-
+           http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
+      state =
+        reviews
+        |> Enum.reject(&Map.get(&1, "dismissed", false))
+        |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
+        |> List.last()
+        |> decisive_state()
+
+      {:ok, state}
+    else
+      {:ok, _non_list} -> {:ok, :none}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp decisive_state(%{"state" => "APPROVED"}), do: :approved
+  defp decisive_state(%{"state" => "REQUEST_CHANGES"}), do: :changes_requested
+  defp decisive_state(_), do: :none
+
+  @doc """
   Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea
   `PUT /repos/{repo}/contents/{path}`. **Le SYSTÈME publie** (forge-aveugle : le pod ne
   pousse jamais ; c'est ce chemin qui grave durablement le livrable d'un engineer). Création
