@@ -21,13 +21,13 @@
 #
 # Config (env) :
 #   LCARS_API_URL         base REST du daemon (défaut http://localhost:8080)
-#   LCARS_TMUX_SOCK_BASE  base des socks par-pod (défaut /run/lcars/tmux-sock ; = défaut Elixir/bwrap)
+#   LCARS_TMUX_SOCK_BASE  base des socks par-pod (défaut ~/.lcars/run/tmux-sock ; = défaut Elixir, c368f89d)
 #   LCARS_TMUX_BIN        binaire tmux (défaut tmux dans le PATH)
 
 set -euo pipefail
 
 API_URL="${LCARS_API_URL:-http://localhost:8080}"
-SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-/run/lcars/tmux-sock}"
+SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 
 PROG="$(basename "$0")"

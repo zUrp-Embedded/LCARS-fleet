@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# SOURCE: bin/fleet_v2
+# AUTHOR: starfleet
+# STARDATE: 2026-06-15
+# STATUS: PROTO-V2 — launcher humain. `fleet_v2 start` démarre la fleet SOUS l'humain, boote l'arch
+#         (pod permanent), et attache l'humain à son REPL claude.
+#
+# Modèle (ADR-E / doctrine 2026-06-11) : la BEAM tourne *as* l'humain qui lance → le Port spawn les pods,
+# qui HÉRITENT son UID (pas de systemd, pas de drop d'UID, pas de /var/lib/lcars). Les chemins d'état
+# défautent déjà sous le home côté Elixir (state_fs_root / sock tmux / task-queue / audit → ~/.lcars/*,
+# commit c368f89d). Ce launcher ne pose donc QUE le non-defaultable :
+#   - les PORTS per-humain (offset déterministe sur l'UID → N fleets coexistent dans UN conteneur) ;
+#   - la spec MCP (3 env requis sinon le pod ne lance pas : :mcp_server_spec_required) ;
+#   - les on-switches (arch permanent + machine stage-mode forge-driven).
+#
+# Config humaine : ~/.lcars/fleet_v2.env (cf. etc/fleet_v2.env.template) — forge + repo surveillé.
+# Gestes : fleet_v2 {start|stop|status}.
+
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+BIN_DIR="$(dirname "$SELF")"
+RUNTIME_DIR="$(dirname "$BIN_DIR")"          # bin/.. = l'umbrella
+TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
+SESSION="${LCARS_FLEET_V2_SESSION:-fleet_v2}"
+DAEMON_SOCK="${LCARS_FLEET_V2_SOCK:-$HOME/.lcars/run/fleet_v2.sock}"
+MIX_ENV_DEFAULT="${LCARS_FLEET_V2_MIX_ENV:-prod}"
+
+die() { echo "fleet_v2: $*" >&2; exit 1; }
+dtmux() { "$TMUX_BIN" -S "$DAEMON_SOCK" "$@"; }
+
+# Bloc de ports per-humain (D2). Déterministe sur l'UID : bloc de 10 ports à partir de 21000.
+# (uid % 500) → jusqu'à 500 humains avant collision de bloc ; au-delà, override explicite des ports.
+compute_ports() {
+  local uid base
+  uid="$(id -u)"
+  base=$(( 21000 + (uid % 500) * 10 ))
+  API_PORT="${FLEET_API_PORT:-$base}"
+  OBS_PORT="${LCARS_OBSERVATION_PORT:-$(( base + 1 ))}"
+  MCP_PORT="${LCARS_FLEET_MCP_POD_FACING_PORT:-$(( base + 2 ))}"
+  WEBHOOK_PORT="${LCARS_FLEET_WEBHOOK_PORT:-$(( base + 3 ))}"
+}
+
+setup_env() {
+  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
+  # env humain fourni au runtime (pas un chemin constant) :
+  # shellcheck source=/dev/null
+  if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
+
+  : "${LCARS_PILOT_POLL_REPO:?config manquante : LCARS_PILOT_POLL_REPO=owner/repo (dans $env_file)}"
+
+  compute_ports
+
+  # Ports per-humain (lus par runtime.exs : fleet_api / fleet_observation / fleet_mcp / event_router).
+  export FLEET_API_PORT="$API_PORT"
+  export LCARS_OBSERVATION_PORT="$OBS_PORT"
+  export LCARS_FLEET_MCP_POD_FACING_PORT="$MCP_PORT"
+  export LCARS_FLEET_WEBHOOK_PORT="$WEBHOOK_PORT"
+
+  # Spec MCP (URL pointe le port MCP per-humain ; bridge depuis l'install).
+  export LCARS_FLEET_MCP_URL="${LCARS_FLEET_MCP_URL:-http://127.0.0.1:$MCP_PORT/mcp}"
+  export LCARS_FLEET_MCP_BRIDGE_PATH="${LCARS_FLEET_MCP_BRIDGE_PATH:-$RUNTIME_DIR/bin/fleet_mcp_stdio_bridge.py}"
+
+  # Canon cap-profiles (install RO).
+  export LCARS_CAPPROFILES_ROOT="${LCARS_CAPPROFILES_ROOT:-$RUNTIME_DIR/apps/fleet_cap_profile/priv/canon/cap-profiles}"
+
+  # Sock tmux per-pod : défaut Elixir = ~/.lcars/run/tmux-sock (home, c368f89d). Exporté explicitement
+  # pour que le wait + l'attach + le CLI `lcars` calculent le MÊME chemin.
+  export LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
+
+  # CLI `lcars` → API per-humain.
+  export LCARS_API_URL="${LCARS_API_URL:-http://localhost:$API_PORT}"
+
+  # On-switches : l'arch boote (permanent), la machine stage-mode tourne (forge-driven).
+  export LCARS_BOOT_PERMANENT_AT_START=true
+  export LCARS_PILOT_STAGE="${LCARS_PILOT_STAGE:-true}"
+
+  mkdir -p "$LCARS_TMUX_SOCK_BASE" "$(dirname "$DAEMON_SOCK")"
+
+  # Persiste l'env runtime calculé pour que l'humain pilote `lcars` ensuite (`source` ce fichier).
+  cat > "$HOME/.lcars/run/fleet_v2.runtime.env" <<RT
+# Genere par fleet_v2 start — \`source\` pour utiliser lcars (spawn/list/attach) hors de cette session.
+export LCARS_API_URL="$LCARS_API_URL"
+export LCARS_TMUX_SOCK_BASE="$LCARS_TMUX_SOCK_BASE"
+RT
+}
+
+cmd_start() {
+  command -v "$TMUX_BIN" >/dev/null 2>&1 || die "tmux introuvable ($TMUX_BIN)"
+  if dtmux has-session -t "$SESSION" 2>/dev/null; then
+    die "fleet_v2 déjà démarrée (« fleet_v2 status » / « fleet_v2 stop »)."
+  fi
+  setup_env
+
+  local mix_env="${MIX_ENV:-$MIX_ENV_DEFAULT}"
+  echo "fleet_v2: démarrage du BEAM sous $(id -un) (uid $(id -u), MIX_ENV=$mix_env)" >&2
+  echo "fleet_v2: ports — API $API_PORT · obs $OBS_PORT · MCP $MCP_PORT · webhook $WEBHOOK_PORT" >&2
+  echo "fleet_v2: repo surveillé — $LCARS_PILOT_POLL_REPO" >&2
+
+  # Socket tmux DÉDIÉ (serveur frais) → il capture l'env exporté ci-dessus. Le BEAM y tourne détaché et
+  # survit à ce terminal. `mix run --no-halt` (pas iex) : on s'attache à l'ARCH, pas à un shell Elixir.
+  MIX_ENV="$mix_env" dtmux new-session -d -s "$SESSION" \
+    "cd '$RUNTIME_DIR' && exec mix run --no-halt"
+
+  echo "fleet_v2: attente du boot de l'arch…" >&2
+  local arch_sock=""
+  for _ in $(seq 1 120); do
+    arch_sock="$(ls -1d "$LCARS_TMUX_SOCK_BASE"/permanent-architect-*/ 2>/dev/null | head -1 || true)"
+    [[ -n "$arch_sock" && -S "${arch_sock}pod.sock" ]] && break
+    dtmux has-session -t "$SESSION" 2>/dev/null \
+      || die "le BEAM s'est arrêté (logs : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION »)"
+    sleep 1; arch_sock=""
+  done
+  [[ -n "$arch_sock" ]] || die "l'arch n'a pas booté en 120s (logs : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION »)"
+
+  local arch_pod
+  arch_pod="$(basename "${arch_sock%/}")"
+  echo "fleet_v2: arch up ($arch_pod) — attache (Ctrl-b d = détacher sans tuer la fleet)" >&2
+  exec "$BIN_DIR/lcars" attach "$arch_pod"
+}
+
+cmd_stop() {
+  if dtmux has-session -t "$SESSION" 2>/dev/null; then
+    dtmux kill-server 2>/dev/null || true
+    echo "fleet_v2: BEAM arrêté. (Pods éventuels reapés au prochain start par l'OrphanReaper.)" >&2
+  else
+    echo "fleet_v2: pas de fleet active." >&2
+  fi
+}
+
+cmd_status() {
+  if dtmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "fleet_v2: BEAM vivant. Logs : $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION"
+    LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}" \
+      "$BIN_DIR/lcars" list 2>/dev/null || true
+  else
+    echo "fleet_v2: arrêtée."
+  fi
+}
+
+case "${1:-help}" in
+  start)  shift; cmd_start "$@" ;;
+  stop)   shift; cmd_stop "$@" ;;
+  status) shift; cmd_status "$@" ;;
+  *) echo "usage: fleet_v2 {start|stop|status}" >&2; exit 1 ;;
+esac
