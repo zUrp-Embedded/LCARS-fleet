@@ -48,6 +48,18 @@ defmodule Fleet.Pilot.HopCompleterTest do
     def publish(_opts), do: {:error, :base_not_ancestor}
   end
 
+  # Forge stub PR-natif (Corr.3) : enregistre l'ouverture de PR.
+  defmodule PrForge do
+    def open_pr(_repo, head, base, _title, opts) do
+      send(self(), {:open_pr, head, base, opts[:body]})
+      {:ok, 7}
+    end
+  end
+
+  defmodule PrFailForge do
+    def open_pr(_r, _h, _b, _t, _o), do: {:error, {:http, 422, "no commits between"}}
+  end
+
   defp base_hop(extra \\ %{}) do
     Map.merge(
       %{
@@ -62,6 +74,22 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
   defp seams do
     [deliverable: StubDeliverable, forge_client: OrderForge, forge_opts: []]
+  end
+
+  defp pr_hop(extra \\ %{}) do
+    base_hop(
+      Map.merge(
+        %{
+          deliverable_opts: %{
+            mode: :git_native,
+            workspace: "/tmp/ws",
+            base_sha: "cafe",
+            target_branch: "feature/issue-42"
+          }
+        },
+        extra
+      )
+    )
   end
 
   describe "complete/2 — 1-stage terminal (next_assignee nil)" do
@@ -162,6 +190,41 @@ defmodule Fleet.Pilot.HopCompleterTest do
       opts = Keyword.put(seams(), :forge_client, CommentFailForge)
 
       assert {:error, {:comment, {:http, 500, "boom"}}} = HopCompleter.complete(base_hop(), opts)
+    end
+  end
+
+  describe "open_deliverable_pr/2 — engineer → PR (Corr.3 PR-natif)" do
+    test "push la feature-branch + ouvre la PR feature→base avec Closes #N" do
+      opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: []]
+
+      assert {:ok, %{commit_sha: "deadbeef", pr_number: 7}} =
+               HopCompleter.open_deliverable_pr(pr_hop(), opts)
+
+      assert_received {:published, %{target_branch: "feature/issue-42"}}
+      assert_received {:open_pr, "feature/issue-42", "main", body}
+      assert body =~ "Closes #42"
+    end
+
+    test "base_branch override" do
+      opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: []]
+      assert {:ok, _} = HopCompleter.open_deliverable_pr(pr_hop(%{base_branch: "develop"}), opts)
+      assert_received {:open_pr, "feature/issue-42", "develop", _}
+    end
+
+    test "publish échoue → {:error, {:publish, _}}, PAS de PR ouverte" do
+      opts = [deliverable: FailDeliverable, forge_client: PrForge, forge_opts: []]
+
+      assert {:error, {:publish, :base_not_ancestor}} =
+               HopCompleter.open_deliverable_pr(pr_hop(), opts)
+
+      refute_received {:open_pr, _, _, _}
+    end
+
+    test "open_pr échoue → {:error, {:open_pr, _}}" do
+      opts = [deliverable: StubDeliverable, forge_client: PrFailForge, forge_opts: []]
+
+      assert {:error, {:open_pr, {:http, 422, _}}} =
+               HopCompleter.open_deliverable_pr(pr_hop(), opts)
     end
   end
 end

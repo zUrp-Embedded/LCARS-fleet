@@ -155,6 +155,50 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
+  @doc """
+  **PR-natif (Corr.3, BL-044)** — livraison engineer → PR. Le SYSTÈME (barrière §4) pousse les
+  commits du pod (mode `git_native`, gate I-CBC déléguée à `Deliverable.publish`) sur la
+  feature-branch, PUIS **ouvre la PR** `feature → base`. La PR devient la surface review+promote :
+  domicile des verdicts (reviews natives) + entonnoir unique vers `main`. `body` porte `Closes #N`
+  → la forge auto-close l'issue au merge (lien ticket↔PR maintenu nativement).
+
+  Remplace le push `lcars/issue-N-role` + comment `[hop:role:sha]` de la séquence §5 maison.
+  **Idempotent** : `open_pr` retrouve une PR déjà ouverte pour la même head (replay-safe).
+
+  `hop` : `:repo`, `:issue_number`, `:role`, `:deliverable_opts` (dont `:target_branch` = la head),
+  `:base_branch` (défaut `"main"`), `:title`/`:pr_body` (optionnels). `opts` : seams `:deliverable`
+  / `:forge_client` / `:forge_opts`.
+
+  Returns `{:ok, %{commit_sha, pr_number}}` | `{:error, {step, reason}}`.
+  """
+  @spec open_deliverable_pr(map(), keyword()) ::
+          {:ok, %{commit_sha: String.t(), pr_number: integer()}} | {:error, {atom(), term()}}
+  def open_deliverable_pr(hop, opts \\ []) when is_map(hop) do
+    deliverable = Keyword.get(opts, :deliverable, Fleet.Pipeline.Deliverable)
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+
+    repo = Map.fetch!(hop, :repo)
+    n = Map.fetch!(hop, :issue_number)
+    base = Map.get(hop, :base_branch, "main")
+    head = Map.fetch!(Map.fetch!(hop, :deliverable_opts), :target_branch)
+    title = Map.get(hop, :title, "Livrable ##{n} (#{Map.get(hop, :role, "engineer")})")
+    body = Map.get(hop, :pr_body, "Closes ##{n}")
+
+    with {:ok, sha} <- step1_publish(hop, deliverable),
+         {:ok, pr} <- open_pr_step(forge, repo, head, base, title, body, forge_opts) do
+      Logger.info("HopCompleter: ##{n} engineer → PR ##{pr} (head=#{head}, sha=#{sha})")
+      {:ok, %{commit_sha: sha, pr_number: pr}}
+    end
+  end
+
+  defp open_pr_step(forge, repo, head, base, title, body, forge_opts) do
+    case forge.open_pr(repo, head, base, title, Keyword.put(forge_opts, :body, body)) do
+      {:ok, pr} -> {:ok, pr}
+      {:error, reason} -> {:error, {:open_pr, reason}}
+    end
+  end
+
   # ── Étape 1 : commit + push livrable (ou hop_sha fourni si pas de git) ──────
   defp step1_publish(hop, deliverable) do
     case Map.get(hop, :deliverable_opts) do
