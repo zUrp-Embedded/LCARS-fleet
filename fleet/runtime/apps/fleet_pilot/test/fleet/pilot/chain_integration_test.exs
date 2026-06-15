@@ -1,23 +1,22 @@
 defmodule Fleet.Pilot.ChainIntegrationTest do
   @moduledoc """
-  Intégration A2 : la chaîne multi-stage de bout en bout, modules RÉELS (Entry, StageDispatcher,
-  HopConsumer, HopCompleter, CarteNav) contre un **sim forge stateful**, en synchrone (pas de Bus ni
-  pods réels — on simule `pod.completed` en construisant le payload depuis les opts de spawn
-  capturées, ce que `pod.ex` ferait). Prouve le CÂBLAGE de la boucle : entrée → spawn → fin-de-hop
-  (route gravée) → reassign → spawn suivant → terminal close. Les unités sont testées ailleurs ;
-  ici on teste qu'elles s'enchaînent.
+  Integration A2 / Corr.3 : la chaine multi-stage de bout en bout, modules REELS (Entry,
+  StageDispatcher, HopConsumer, HopCompleter, CarteNav) contre un sim forge stateful PR-aware, en
+  synchrone (pas de Bus ni pods reels — on simule pod.completed depuis les opts de spawn capturees).
+  Prouve le CABLAGE de la boucle PR-natif engineer-first : entree -> spawn -> producteur ouvre la PR
+  -> route+assignee du juge -> spawn juge -> merge terminal -> issue close (Closes #N).
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.{Entry, StageDispatcher, HopConsumer, ForgeClient}
 
-  # ── Sim forge stateful (1 issue, clé fixe 1) ──────────────────────────────
+  # ── Sim forge stateful (1 issue + PRs) ────────────────────────────────────
   defmodule Sim do
     use Agent
 
-    def start_link(issue), do: Agent.start_link(fn -> issue end)
-    def get(pid), do: Agent.get(pid, & &1)
-    defp upd(pid, f), do: Agent.update(pid, f)
+    def start_link(issue), do: Agent.start_link(fn -> %{issue: issue, prs: [], seq: 0} end)
+    def get(pid), do: Agent.get(pid, & &1.issue)
+    defp upd(pid, f), do: Agent.update(pid, fn s -> %{s | issue: f.(s.issue)} end)
 
     def add_label(pid, _r, _n, l, _o) do
       upd(pid, fn i ->
@@ -67,19 +66,51 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       |> Enum.find_value(:none, &ForgeClient.parse_route_marker/1)
     end
 
-    def get_predecessor_result(pid, _r, _n, _o) do
-      (get(pid)["comments"] || [])
-      |> Enum.reverse()
-      |> Enum.find_value(:none, &ForgeClient.parse_result_block/1)
-    end
-
     def close_issue(pid, _r, _n, _o) do
       upd(pid, fn i -> Map.put(i, "state", "closed") end)
       {:ok, :closed}
     end
+
+    # ── PR (Corr.3) ──
+    def open_pr(pid, _r, head, base, _title, _o) do
+      Agent.get_and_update(pid, fn s ->
+        case Enum.find(s.prs, &(&1.head == head and &1.base == base and &1.state == :open)) do
+          %{number: num} ->
+            {{:ok, num}, s}
+
+          nil ->
+            num = s.seq + 1
+            pr = %{number: num, head: head, base: base, state: :open}
+            {{:ok, num}, %{s | seq: num, prs: s.prs ++ [pr]}}
+        end
+      end)
+    end
+
+    def get_pr_for_branch(pid, _r, head, base, _o) do
+      case Enum.find(
+             Agent.get(pid, & &1.prs),
+             &(&1.head == head and &1.base == base and &1.state == :open)
+           ) do
+        %{number: num} -> {:ok, num}
+        nil -> {:error, :pr_not_found}
+      end
+    end
+
+    def request_review(_pid, _r, _pr, _revs, _o), do: :ok
+    def post_review(_pid, _r, _pr, _ev, _body, _o), do: :ok
+
+    # merge FF : marque la PR merged + ferme l'issue (Closes #N).
+    def merge_pr(pid, _r, pr, _o) do
+      Agent.update(pid, fn s ->
+        prs = Enum.map(s.prs, fn p -> if p.number == pr, do: %{p | state: :merged}, else: p end)
+        %{s | prs: prs, issue: Map.put(s.issue, "state", "closed")}
+      end)
+
+      :ok
+    end
   end
 
-  # Wrapper module (les modules de la chaîne appellent ForgeClient.f/arity ; le pid sim vit en pdict).
+  # Wrapper (les modules de la chaine appellent ForgeClient.f/arity ; le pid sim vit en pdict).
   defmodule SimForge do
     def put(pid), do: Process.put(:sim, pid)
     defp p, do: Process.get(:sim)
@@ -90,37 +121,38 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def post_comment(r, n, b, o), do: Sim.post_comment(p(), r, n, b, o)
     def post_route(r, n, pi, st, o), do: Sim.post_route(p(), r, n, pi, st, o)
     def get_route(r, n, o), do: Sim.get_route(p(), r, n, o)
-    def get_predecessor_result(r, n, o), do: Sim.get_predecessor_result(p(), r, n, o)
     def close_issue(r, n, o), do: Sim.close_issue(p(), r, n, o)
+    def open_pr(r, head, base, t, o), do: Sim.open_pr(p(), r, head, base, t, o)
+    def get_pr_for_branch(r, head, base, o), do: Sim.get_pr_for_branch(p(), r, head, base, o)
+    def request_review(r, pr, revs, o), do: Sim.request_review(p(), r, pr, revs, o)
+    def post_review(r, pr, ev, body, o), do: Sim.post_review(p(), r, pr, ev, body, o)
+    def merge_pr(r, pr, o), do: Sim.merge_pr(p(), r, pr, o)
   end
 
   defmodule CarteLoader do
-    # 2 stages linéaires : triage(architect) → build(engineer)
+    # engineer-first 2 stages : build(engineer, producteur) -> review(reviewer, juge).
     def load!("poc-mini") do
       %{
         "name" => "poc-mini",
         "stages" => %{
-          "triage" => %{"role" => "architect", "needs" => []},
-          "build" => %{"role" => "engineer", "needs" => ["triage"]}
+          "build" => %{"role" => "engineer", "needs" => []},
+          "review" => %{"role" => "reviewer", "needs" => ["build"]}
         }
       }
     end
 
-    # B (§L441) : chaîne avec ESCALADE gatekeeper (pas de stage role:gatekeeper) :
-    # triage(architect) → review(reviewer, gate soft → escalade) → build(engineer).
-    # La gate soft du stage MÉTIER `review` dispatche le gatekeeper permanent ; le verdict
-    # revient async (resume_gate) — il n'y a pas de stage gatekeeper spawné.
+    # B (L441) : escalade gatekeeper sur le stage juge `review` (gate soft). Le producteur
+    # (engineer) ouvre la PR en tete ; le verdict revient async (resume_gate).
     def load!("gkchain") do
       %{
         "name" => "gkchain",
         "stages" => %{
-          "triage" => %{"role" => "architect", "needs" => []},
+          "build" => %{"role" => "engineer", "needs" => []},
           "review" => %{
             "role" => "reviewer",
-            "needs" => ["triage"],
+            "needs" => ["build"],
             "gate" => %{"type" => "soft", "max_rounds" => 1}
-          },
-          "build" => %{"role" => "engineer", "needs" => ["review"]}
+          }
         }
       }
     end
@@ -159,12 +191,17 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     end
   end
 
+  defp dmode,
+    do: fn
+      "engineer" -> "git_native"
+      _ -> "payload"
+    end
+
   @routing %{"type:poc" => "poc-mini"}
 
   defp wrap(pid), do: %{"issue" => Sim.get(pid)}
 
-  # Reconstruit le payload pod.completed (ce que pod.ex produit) : pipeline+stage des opts de spawn,
-  # role explicite (le test sait quel stage vient de finir).
+  # Reconstruit le payload pod.completed (ce que pod.ex produit) : pipeline+stage des opts de spawn.
   defp completed(spawn_opts, role, result \\ nil) do
     base = %{
       "ticket_id" => "issue-1",
@@ -178,19 +215,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     if result, do: Map.put(base, "result", result), else: base
   end
 
-  test "chaîne 2 stages : entrée → triage(architect) → build(engineer) → terminal close" do
-    {:ok, pid} =
-      Sim.start_link(%{
-        "number" => 1,
-        "state" => "open",
-        "labels" => [%{"name" => "type:poc"}],
-        "assignees" => [],
-        "comments" => []
-      })
-
-    SimForge.put(pid)
-
-    dispatch_opts = [
+  defp dispatch_opts do
+    [
       repo: "o/r",
       forge_client: SimForge,
       loader: CapLoader,
@@ -201,90 +227,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
         {:ok, %{"repo_path" => "x", "base_branch" => "main", "base_sha" => "cafe"}}
       end
     ]
-
-    entry_opts = [repo: "o/r", routing: @routing, forge_client: SimForge, loader: CarteLoader]
-
-    hc = %HopConsumer{
-      repo: "o/r",
-      remote: "origin",
-      forge_opts: [],
-      role_emails: fn r -> ["#{r}@lcars.local"] end,
-      hop_completer: Fleet.Pilot.HopCompleter,
-      forge_client: SimForge,
-      loader: CarteLoader,
-      deliverable: DelivStub
-    }
-
-    # 1. ENTRÉE : type:poc → route triage + assignee architect
-    assert {:ok, {:entered, "architect"}} = Entry.enter(wrap(pid), entry_opts)
-    assert {:ok, {"poc-mini", "triage"}} = SimForge.get_route("o/r", 1, [])
-    assert [%{"login" => "architect"}] = Sim.get(pid)["assignees"]
-
-    # 2. DISPATCH triage → spawn architect (opts portent pipeline+stage)
-    assert {:ok, {:spawned, _, "architect"}} =
-             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
-
-    assert_received {:spawned, "issue-1", o1}
-    assert o1[:pipeline] == "poc-mini" and o1[:stage] == "triage"
-
-    # 3. pod.completed(triage) → HopConsumer → HopCompleter : reassign engineer + route build
-    assert {:ok, :reassigned} = HopConsumer.maybe_complete(completed(o1, "architect"), hc)
-    assert {:ok, {"poc-mini", "build"}} = SimForge.get_route("o/r", 1, [])
-    assert [%{"login" => "engineer"}] = Sim.get(pid)["assignees"]
-    assert Sim.get(pid)["state"] == "open"
-    # verrou retiré entre les hops
-    refute Enum.any?(Sim.get(pid)["labels"], &(&1["name"] == "lcars-in-flight"))
-
-    # 4. DISPATCH build → spawn engineer
-    assert {:ok, {:spawned, _, "engineer"}} =
-             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
-
-    assert_received {:spawned, "issue-1", o2}
-    assert o2[:stage] == "build"
-
-    # 5. pod.completed(build) → terminal → close
-    assert {:ok, :completed} = HopConsumer.maybe_complete(completed(o2, "engineer"), hc)
-    assert Sim.get(pid)["state"] == "closed"
-
-    # trace : un comment signé par rôle
-    comments = Sim.get(pid)["comments"]
-    assert Enum.any?(comments, &String.contains?(&1, "[hop:architect:"))
-    assert Enum.any?(comments, &String.contains?(&1, "[hop:engineer:"))
   end
 
-  # ── A2.3b : chaîne avec gatekeeper-stage explicite (gkchain) ──────────────────
-  defp gk_opts do
-    {:ok, pid} =
-      Sim.start_link(%{
-        "number" => 1,
-        "state" => "open",
-        "labels" => [%{"name" => "type:poc"}],
-        "assignees" => [],
-        "comments" => []
-      })
-
-    SimForge.put(pid)
-
-    dispatch_opts = [
-      repo: "o/r",
-      forge_client: SimForge,
-      loader: CapLoader,
-      spawner: SpawnStub,
-      task_queue: TQStub,
-      clock: fn :second -> 100 end,
-      project_resolver: fn _r, _o ->
-        {:ok, %{"repo_path" => "x", "base_branch" => "main", "base_sha" => "cafe"}}
-      end
-    ]
-
-    entry_opts = [
-      repo: "o/r",
-      routing: %{"type:poc" => "gkchain"},
-      forge_client: SimForge,
-      loader: CarteLoader
-    ]
-
-    hc = %HopConsumer{
+  defp hc do
+    %HopConsumer{
       repo: "o/r",
       remote: "origin",
       forge_opts: [],
@@ -293,92 +239,129 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       forge_client: SimForge,
       loader: CarteLoader,
       deliverable: DelivStub,
+      deliverable_mode_fun: dmode(),
       max_rework_rounds: 2,
-      # B (§L441) — seams d'escalade gatekeeper.
       task_queue: TQStub,
       spawner: SpawnStub,
       gatekeeper_pod_id_fun: fn -> "gk-perm" end,
       gate_evals: %{}
     }
-
-    {pid, dispatch_opts, entry_opts, hc}
   end
 
-  # B (§L441) — entrée → triage(architect) spawn → triage finit → review(reviewer) spawn →
-  # review finit AVEC gate soft → ESCALADE (mandat au gatekeeper permanent). Renvoie
-  # `{pid, dispatch_opts, hc, eval_ctx}` (eval_ctx = contexte de reprise sur le verdict).
-  defp drive_to_review do
-    {pid, dispatch_opts, entry_opts, hc} = gk_opts()
+  defp new_issue do
+    {:ok, pid} =
+      Sim.start_link(%{
+        "number" => 1,
+        "state" => "open",
+        "labels" => [%{"name" => "type:poc"}],
+        "assignees" => [],
+        "comments" => []
+      })
 
-    assert {:ok, {:entered, "architect"}} = Entry.enter(wrap(pid), entry_opts)
+    SimForge.put(pid)
+    pid
+  end
 
-    assert {:ok, {:spawned, _, "architect"}} =
-             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
+  test "chaine engineer-first : entree -> build(engineer) ouvre PR -> review(reviewer) -> merge close" do
+    pid = new_issue()
+    entry_opts = [repo: "o/r", routing: @routing, forge_client: SimForge, loader: CarteLoader]
+
+    # 1. ENTREE : type:poc -> route build + assignee engineer (1er stage = producteur)
+    assert {:ok, {:entered, "engineer"}} = Entry.enter(wrap(pid), entry_opts)
+    assert {:ok, {"poc-mini", "build"}} = SimForge.get_route("o/r", 1, [])
+    assert [%{"login" => "engineer"}] = Sim.get(pid)["assignees"]
+
+    # 2. DISPATCH build -> spawn engineer (opts portent pipeline+stage)
+    assert {:ok, {:spawned, _, "engineer"}} =
+             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
 
     assert_received {:spawned, "issue-1", o1}
+    assert o1[:pipeline] == "poc-mini" and o1[:stage] == "build"
 
-    # triage (pas de gate) finit → avance vers review(reviewer), stage métier ordinaire.
-    assert {:ok, :reassigned} =
-             HopConsumer.maybe_complete(completed(o1, "architect", %{"severity_max" => "ok"}), hc)
-
-    assert {:ok, {"gkchain", "review"}} = SimForge.get_route("o/r", 1, [])
+    # 3. pod.completed(build) -> producteur :advance : ouvre la PR, route+assignee reviewer, unlock
+    assert {:ok, :review_requested} = HopConsumer.maybe_complete(completed(o1, "engineer"), hc())
+    assert {:ok, {"poc-mini", "review"}} = SimForge.get_route("o/r", 1, [])
     assert [%{"login" => "reviewer"}] = Sim.get(pid)["assignees"]
+    assert {:ok, _pr} = SimForge.get_pr_for_branch("o/r", "lcars/issue-1-engineer", "main", [])
+    assert Sim.get(pid)["state"] == "open"
+    refute Enum.any?(Sim.get(pid)["labels"], &(&1["name"] == "lcars-in-flight"))
 
-    # dispatch review → spawn reviewer (stage métier, pas un gatekeeper-stage)
+    # 4. DISPATCH review -> spawn reviewer
     assert {:ok, {:spawned, _, "reviewer"}} =
-             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
+             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
 
     assert_received {:spawned, "issue-1", o2}
     assert o2[:stage] == "review"
 
-    # review finit AVEC gate soft → escalade gatekeeper (mandat enqueué, PAS d'avance).
-    # L'issue reste verrouillée (in-flight) en attendant le verdict.
+    # 5. pod.completed(review) -> juge :promote : review approve + merge -> issue close (Closes #N)
+    assert {:ok, :promoted} = HopConsumer.maybe_complete(completed(o2, "reviewer"), hc())
+    assert Sim.get(pid)["state"] == "closed"
+  end
+
+  # ── B (L441) : escalade gatekeeper (gate soft sur le stage juge review) ───────
+  # entree -> build(engineer) ouvre PR -> review(reviewer) finit soft -> ESCALADE.
+  defp drive_to_review do
+    pid = new_issue()
+
+    entry_opts = [
+      repo: "o/r",
+      routing: %{"type:poc" => "gkchain"},
+      forge_client: SimForge,
+      loader: CarteLoader
+    ]
+
+    assert {:ok, {:entered, "engineer"}} = Entry.enter(wrap(pid), entry_opts)
+
+    assert {:ok, {:spawned, _, "engineer"}} =
+             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
+
+    assert_received {:spawned, "issue-1", o1}
+
+    # build (pas de gate) finit -> avance review(reviewer), PR ouverte par le producteur.
+    assert {:ok, :review_requested} = HopConsumer.maybe_complete(completed(o1, "engineer"), hc())
+    assert {:ok, {"gkchain", "review"}} = SimForge.get_route("o/r", 1, [])
+    assert [%{"login" => "reviewer"}] = Sim.get(pid)["assignees"]
+
+    # dispatch review -> spawn reviewer
+    assert {:ok, {:spawned, _, "reviewer"}} =
+             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
+
+    assert_received {:spawned, "issue-1", o2}
+    assert o2[:stage] == "review"
+
+    # review finit AVEC gate soft -> escalade gatekeeper (mandat enqueue, PAS d'avance).
     assert {:escalate, "t", eval_ctx} =
-             HopConsumer.maybe_complete(completed(o2, "reviewer", %{"severity_max" => "ok"}), hc)
+             HopConsumer.maybe_complete(
+               completed(o2, "reviewer", %{"severity_max" => "ok"}),
+               hc()
+             )
 
     assert eval_ctx.stage == "review"
     assert eval_ctx.role == "reviewer"
-    # pas de reassign/close avant le verdict
     assert [%{"login" => "reviewer"}] = Sim.get(pid)["assignees"]
     assert Sim.get(pid)["state"] == "open"
 
-    {pid, dispatch_opts, hc, eval_ctx}
+    {pid, eval_ctx}
   end
 
-  test "B escalade continue : triage → review(soft→escalade) → verdict continue → build → close" do
-    {pid, dispatch_opts, hc, eval_ctx} = drive_to_review()
+  test "B escalade continue : review(soft->escalade) -> verdict continue -> merge terminal close" do
+    {pid, eval_ctx} = drive_to_review()
 
-    # verdict du gatekeeper = continue → avance vers build(engineer), push du livrable reviewer.
-    assert {:ok, :reassigned} =
-             HopConsumer.resume_gate(eval_ctx, %{"result" => %{"decision" => "continue"}}, hc)
+    # verdict continue : review est le dernier stage -> :promote -> juge merge la PR du producteur.
+    assert {:ok, :promoted} =
+             HopConsumer.resume_gate(eval_ctx, %{"result" => %{"decision" => "continue"}}, hc())
 
-    assert {:ok, {"gkchain", "build"}} = SimForge.get_route("o/r", 1, [])
-    assert [%{"login" => "engineer"}] = Sim.get(pid)["assignees"]
-
-    # la trace du verdict est durable (comment du hop)
-    assert Enum.any?(Sim.get(pid)["comments"], &String.contains?(&1, "gatekeeper"))
-
-    # dispatch build → spawn engineer → finit → terminal close
-    assert {:ok, {:spawned, _, "engineer"}} =
-             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
-
-    assert_received {:spawned, "issue-1", o3}
-    assert {:ok, :completed} = HopConsumer.maybe_complete(completed(o3, "engineer"), hc)
     assert Sim.get(pid)["state"] == "closed"
-
-    comments = Sim.get(pid)["comments"]
-    assert Enum.any?(comments, &String.contains?(&1, "[hop:reviewer:"))
   end
 
-  test "B escalade escalate_user : lcars-awaits-human + unlock + poller SKIP (boucle fermée)" do
-    {pid, dispatch_opts, hc, eval_ctx} = drive_to_review()
+  test "B escalade escalate_user : lcars-awaits-human + unlock + poller SKIP (boucle fermee)" do
+    {pid, eval_ctx} = drive_to_review()
 
-    # verdict escalate_user → await-human (fail-closed)
     assert {:ok, :awaiting_human} =
              HopConsumer.resume_gate(
                eval_ctx,
                %{"result" => %{"decision" => "escalate_user"}},
-               hc
+               hc()
              )
 
     labels = Enum.map(Sim.get(pid)["labels"], & &1["name"])
@@ -386,7 +369,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     refute "lcars-in-flight" in labels
     assert Sim.get(pid)["state"] == "open"
 
-    # LE POINT CLÉ : le poller NE re-dispatche PAS (assignee=reviewer mais awaits-human).
-    assert {:skipped, :awaits_human} = StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts)
+    # le poller NE re-dispatche PAS (assignee=reviewer mais awaits-human).
+    assert {:skipped, :awaits_human} = StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
   end
 end

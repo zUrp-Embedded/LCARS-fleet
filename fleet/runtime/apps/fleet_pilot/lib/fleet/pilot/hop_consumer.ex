@@ -84,6 +84,9 @@ defmodule Fleet.Pilot.HopConsumer do
     :forge_client,
     :loader,
     :deliverable,
+    # Corr.3 — resout le deliverable_mode d'un role (`"git_native"` producteur / `"payload"` juge)
+    # pour classer le hop PR-natif. Defaut = catalogue cap-profile. Seam test (zero chargement).
+    :deliverable_mode_fun,
     :max_rework_rounds,
     # B (§L441) — seams d'escalade gatekeeper.
     :task_queue,
@@ -149,6 +152,9 @@ defmodule Fleet.Pilot.HopConsumer do
         loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader),
         # nil → HopCompleter applique son défaut (Fleet.Pipeline.Deliverable). Injectable (sim/test).
         deliverable: Keyword.get(opts, :deliverable),
+        # Corr.3 — classification producteur/juge du hop PR-natif. Defaut = catalogue cap-profile.
+        deliverable_mode_fun:
+          Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
         # A2.3 : bound anti-runaway du rebond de gate. Budget de hops = nb_stages *
         # (max_rework_rounds + 1) : la 1re passe + N rounds de rework. Au-delà → stuck
         # surfacé (pas de boucle). Défaut 2 rounds.
@@ -326,33 +332,41 @@ defmodule Fleet.Pilot.HopConsumer do
 
   defp run_sync(fun), do: fun.()
 
-  # Construit + applique le hop métier (livrable `:git_native` : le pod a commité dans
-  # son workspace, le système vérifie gate F-01/F-03 + pousse). `comment_body` nil →
-  # HopCompleter applique son comment par défaut ; non-nil → trace (ex. verdict gatekeeper).
+  # Corr.3 — construit + applique le hop PR-natif. Classe le role qui FINIT (producteur git_native
+  # → ouvre la PR ; juge payload → review la PR du producteur) puis delegue le routage selon
+  # l'`intent` de gate a `HopCompleter.complete_pr`. `next_stage` ne sert plus (la route §5 disparait
+  # avec le pari Gitea). `comment_body` (trace verdict gatekeeper sur continue) est porte mais pas
+  # encore materialise sur la PR — gap transitionnel note (la trace vit dans le resultat de tache du
+  # gatekeeper ; PR-trace = increment ulterieur).
   defp complete_business_hop(
          payload,
          n,
          role,
-         _intent,
+         intent,
          next_assignee,
          next_stage,
          state,
          comment_body \\ nil
        ) do
+    {pr_role, producer_branch} = classify_pr_role(payload, n, role, state)
+
     hop =
       %{
         repo: state.repo,
         issue_number: n,
         role: role,
-        deliverable_opts: build_deliverable_opts(role, payload, n, state),
+        pr_role: pr_role,
+        intent: intent,
         next_assignee: next_assignee,
-        # A2.1 : pipeline + stage suivant → HopCompleter grave la route avant le reassign.
-        # nil/nil pour terminal ou 1-stage (pas de route, close).
+        # Pont transitionnel : pipeline+next_stage gravent la route que le StageDispatcher lit
+        # pour spawner le stage suivant (retire a l'increment 4, switch sur la review-request).
         next_stage: next_stage,
         pipeline: payload["pipeline"],
-        state_label: Fleet.Pilot.Labels.delivered()
+        producer_branch: producer_branch,
+        base_branch: "main"
       }
       |> put_unless_nil(:comment_body, comment_body)
+      |> maybe_put_deliverable(pr_role, role, payload, n, state)
 
     hc_opts =
       [forge_opts: state.forge_opts]
@@ -360,8 +374,74 @@ defmodule Fleet.Pilot.HopConsumer do
       |> maybe_put(:deliverable, state.deliverable)
 
     run_completion(state, "##{n}", fn ->
-      state.hop_completer.complete(hop, hc_opts)
+      state.hop_completer.complete_pr(hop, hc_opts)
     end)
+  end
+
+  # Le producteur (engineer) porte sa `deliverable_opts` (publish vers sa feature-branch) ; le juge
+  # review (il ne pousse pas — son verdict est une review native), pas de livrable git.
+  defp maybe_put_deliverable(hop, :producer, role, payload, n, state),
+    do: Map.put(hop, :deliverable_opts, build_deliverable_opts(role, payload, n, state))
+
+  defp maybe_put_deliverable(hop, :judge, _role, _payload, _n, _state), do: hop
+
+  # Corr.3 (engineer-first) — classe le role qui finit. Producteur = role git_native (engineer) →
+  # pousse le code, ouvre la PR (head = sa propre branche). Juge = role payload (qualifier/reviewer
+  # en AVAL) → review la PR du producteur (head = la branche du stage git_native de la carte). Un
+  # juge sans producteur resoluble → `producer_branch` nil → `complete_pr` fail-loud
+  # `:no_producer_branch` (jamais un mauvais merge). Les stages design AMONT du producteur (architect)
+  # sont hors-scope Corr.3 (decision engineer-first, mapping PR).
+  defp classify_pr_role(payload, n, role, state) do
+    if producer?(role, state) do
+      {:producer, branch_for(n, role)}
+    else
+      {:judge, judge_producer_branch(payload, n, state)}
+    end
+  end
+
+  defp branch_for(n, role), do: "lcars/issue-#{n}-#{role}"
+
+  defp producer?(role, state) when is_binary(role),
+    do: state.deliverable_mode_fun.(role) == "git_native"
+
+  defp producer?(_role, _state), do: false
+
+  defp judge_producer_branch(payload, n, state) do
+    with pipeline when is_binary(pipeline) <- payload["pipeline"],
+         {:ok, carte} <- load_carte(state, pipeline),
+         {:ok, prole} <- producer_role(carte, state) do
+      branch_for(n, prole)
+    else
+      _ -> nil
+    end
+  end
+
+  # Producteur de la carte = l'unique role git_native. 0 (carte tout-juges, anormal) ou ≥2 (ambigu)
+  # → nil en aval (fail-loud `complete_pr`), jamais une devinette.
+  defp producer_role(carte, state) do
+    producers =
+      carte
+      |> Map.get("stages", %{})
+      |> Map.values()
+      |> Enum.map(&Map.get(&1, "role"))
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+      |> Enum.filter(&producer?(&1, state))
+
+    case producers do
+      [prole] -> {:ok, prole}
+      _ -> {:error, :no_unique_producer}
+    end
+  end
+
+  # Defaut du seam : resout le deliverable_mode du role via le catalogue cap-profile (source unique,
+  # meme mecanique que l'Executor). Irresoluble → `"payload"` (fail-safe : un role non chargeable
+  # n'est pas traite comme producteur).
+  defp default_deliverable_mode(role) do
+    case Fleet.CapProfile.load(role) do
+      {:ok, cap} -> Fleet.CapProfile.deliverable_mode(cap)
+      _ -> "payload"
+    end
   end
 
   # Livrable d'un hop métier : `:git_native`. Le pod a commité dans son workspace

@@ -363,6 +363,7 @@ defmodule Fleet.Pilot.HopCompleter do
     next = Map.fetch!(hop, :next_assignee)
 
     with :ok <- request_review_step(forge, repo, pr, next, forge_opts),
+         {:ok, _} <- bridge_route(forge, repo, n, hop, forge_opts),
          {:ok, _} <- bridge_assignee(forge, repo, n, next, forge_opts),
          {:ok, _} <- unlock(forge, repo, n, forge_opts) do
       {:ok, :review_requested}
@@ -376,9 +377,26 @@ defmodule Fleet.Pilot.HopCompleter do
     n = hop.issue_number
     rebound = Map.fetch!(hop, :next_assignee)
 
-    with {:ok, _} <- bridge_assignee(forge, repo, n, rebound, forge_opts),
+    with {:ok, _} <- bridge_route(forge, repo, n, hop, forge_opts),
+         {:ok, _} <- bridge_assignee(forge, repo, n, rebound, forge_opts),
          {:ok, _} <- unlock(forge, repo, n, forge_opts) do
       {:ok, :rework_requested}
+    end
+  end
+
+  # Pont transitionnel : le StageDispatcher lit la route gravee [lcars-route:p:s] pour spawner le
+  # stage suivant (l'assignee seul ne l'identifie pas). Grave si pipeline+next_stage presents
+  # (sinon 1-stage/terminal, pas de route). Retire a l'increment 4 (switch sur la review-request).
+  defp bridge_route(forge, repo, n, hop, forge_opts) do
+    case {Map.get(hop, :pipeline), Map.get(hop, :next_stage)} do
+      {p, s} when is_binary(p) and is_binary(s) ->
+        case forge.post_route(repo, n, p, s, forge_opts) do
+          {:ok, _} = ok -> ok
+          {:error, reason} -> {:error, {:route, reason}}
+        end
+
+      _ ->
+        {:ok, :no_route}
     end
   end
 
