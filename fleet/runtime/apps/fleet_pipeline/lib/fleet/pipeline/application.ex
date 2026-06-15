@@ -42,22 +42,15 @@ defmodule Fleet.Pipeline.Application do
         # via StageRunner.
         Fleet.Pipeline.PodRegistry,
         {DynamicSupervisor, strategy: :one_for_one, name: Fleet.Pipeline.ExecutorSupervisor}
-      ] ++ delivery_publisher_children()
+      ]
 
     opts = [strategy: :rest_for_one, name: Fleet.Pipeline.Supervisor]
     Supervisor.start_link(children, opts)
   end
 
-  # DeliveryPublisher (Rail « au bout », e2e 2026-06-14) : grave durablement les livrables sur la
-  # forge (forge-aveugle, le système publie). OFF en :test (hermeticité — pas de consumer parasite
-  # sur le Bus ni de put_file réel). Démarré en dev/prod par défaut.
-  defp delivery_publisher_children do
-    if Application.get_env(:fleet_pipeline, :start_delivery_publisher, true) do
-      [Fleet.Pipeline.DeliveryPublisher]
-    else
-      []
-    end
-  end
+  # Corr.3 incrément 5 : DeliveryPublisher RETIRE (le PoC payload put_file `deliverables/<task>/`,
+  # R5/R11) — la livraison passe par le stage-mode PR-natif (HopConsumer -> Deliverable.publish
+  # git_native -> PR -> merge). Plus de double-modèle.
 
   @doc """
   Liste des atomes events `pipeline.*` pré-enregistrés. Cohérent ch11
