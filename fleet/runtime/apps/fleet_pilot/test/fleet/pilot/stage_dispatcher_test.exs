@@ -93,6 +93,16 @@ defmodule Fleet.Pilot.StageDispatcherTest do
            spec: %{"mandate_kind" => "judge"}
          }}
 
+    # Corr.3 : un juge de PR (qualifier/reviewer) declare aussi mandate_kind: judge.
+    def load(role) when role in ["qualifier", "reviewer"],
+      do:
+        {:ok,
+         %Fleet.CapProfile{
+           kind: "CapabilityProfile",
+           metadata: %{"name" => role},
+           spec: %{"mandate_kind" => "judge"}
+         }}
+
     def load(_), do: {:error, :not_found}
   end
 
@@ -303,6 +313,73 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       # résolution AVANT toute écriture forge : pas de spawn, pas de verrou orphelin
       refute_received {:spawned, _, _}
+    end
+  end
+
+  describe "dispatch_review/2 (juge PR-driven, Corr.3 4-C)" do
+    defp pr(fields \\ %{}) do
+      Map.merge(
+        %{
+          "number" => 6,
+          "head" => %{"ref" => "lcars/issue-42-engineer"},
+          "requested_reviewers" => [%{"login" => "Qualifier"}],
+          "labels" => []
+        },
+        fields
+      )
+    end
+
+    test "PR avec review demandee -> spawn le juge (ticket=ISSUE, verrou sur la PR)" do
+      opts = dispatch_opts(forge_opts: [_test_route: {:ok, {"poc", "spec-review"}}])
+
+      assert {:ok, {:spawned, "pr-6-qualifier-1700000000", "qualifier"}} =
+               StageDispatcher.dispatch_review(pr(), opts)
+
+      # ticket_id = l'ISSUE (remontee de head.ref lcars/issue-42-engineer), PAS la PR
+      assert_received {:spawned, "issue-42", spawn_opts}
+      assert spawn_opts[:pipeline] == "poc" and spawn_opts[:stage] == "spec-review"
+      # mandat juge desamorce (mandate_kind: judge) — pas un corps executable
+      assert spawn_opts[:mandate] =~ "JUGER"
+
+      # enqueue cible le pod_id pr-... ; ticket_id = l'issue
+      assert_received {:enqueued, "pr-6-qualifier-1700000000", attrs}
+      assert attrs.ticket_id == "issue-42"
+      assert attrs.role == "qualifier"
+      assert_received {:woke, "pr-6-qualifier-1700000000"}
+    end
+
+    test "PR verrouillee (lcars-in-flight) -> skip, pas de spawn" do
+      pr = pr(%{"labels" => [%{"name" => "lcars-in-flight"}]})
+      assert {:skipped, :in_flight} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+      refute_received {:spawned, _, _}
+    end
+
+    test "PR sans review demandee -> skip" do
+      pr = pr(%{"requested_reviewers" => []})
+
+      assert {:skipped, :no_review_requested} =
+               StageDispatcher.dispatch_review(pr, dispatch_opts())
+    end
+
+    test "PR sur branche non-fleet -> skip (jamais misroutee)" do
+      pr = pr(%{"head" => %{"ref" => "refs/pull/6/head"}})
+      assert {:skipped, :not_fleet_branch} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+      refute_received {:spawned, _, _}
+    end
+
+    test "reviewer = role inconnu -> skip :no_role" do
+      pr = pr(%{"requested_reviewers" => [%{"login" => "lordzurp"}]})
+      assert {:skipped, :no_role} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+    end
+
+    test "F181 : echec POST-verrou (enqueue KO) -> verrou PR retire + pod tue" do
+      opts = dispatch_opts(task_queue: FailTaskQueue, forge_opts: [_test_route: :none])
+
+      assert {:error, {:enqueue_failed, :broker_down}} =
+               StageDispatcher.dispatch_review(pr(), opts)
+
+      assert_received {:killed, "pr-6-qualifier-1700000000"}
+      assert_received {:removed_label, "lcars-in-flight"}
     end
   end
 end

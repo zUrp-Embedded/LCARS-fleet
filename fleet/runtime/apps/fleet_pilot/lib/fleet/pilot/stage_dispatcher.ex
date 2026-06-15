@@ -196,6 +196,149 @@ defmodule Fleet.Pilot.StageDispatcher do
     end
   end
 
+  @doc """
+  Dispatch PR-driven d'un JUGE (Corr.3 4-C, switch review-request). Une PR ouverte avec une review
+  demandee (`requested_reviewers`) -> spawn le role juge pour la reviewer. Remplace le trigger
+  assignee-issue pour les JUGES (le producteur reste issue-assignee-driven, via `dispatch_issue`).
+
+  Le pipeline-state (route = position carte) reste sur l'ISSUE : `dispatch_review` remonte de
+  `head.ref` (`lcars/issue-N-role`) au ticket et lit la route gravee. Le verrou `lcars-in-flight`
+  est pose sur la PR (pas l'issue) : il empeche le re-spawn du juge entre le spawn et la review
+  postee (apres quoi Gitea retire le reviewer de `requested_reviewers`). Idempotent (verrou PR +
+  dedup du lock comment).
+
+  `pr` : map Gitea (`number`, `head.ref`, `requested_reviewers`, `labels`). `opts` comme
+  `dispatch_issue/2`. Returns `{:ok, {:spawned, pod_id, role}}` | `{:skipped, reason}` | `{:error, _}`.
+  """
+  @spec dispatch_review(map(), keyword()) ::
+          {:ok, {:spawned, String.t(), String.t()}} | {:skipped, atom()} | {:error, term()}
+  def dispatch_review(pr, opts) when is_map(pr) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    loader = Keyword.get(opts, :loader, Fleet.CapProfile)
+    spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
+    task_queue = Keyword.get(opts, :task_queue, Fleet.TaskQueue)
+    clock = Keyword.get(opts, :clock, &System.os_time/1)
+    resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
+    repo = Keyword.fetch!(opts, :repo)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+
+    pr_number = pr["number"]
+    head = get_in(pr, ["head", "ref"]) || ""
+    labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
+    reviewers = Map.get(pr, "requested_reviewers") || []
+
+    cond do
+      @in_flight_label in labels ->
+        {:skipped, :in_flight}
+
+      reviewers == [] ->
+        {:skipped, :no_review_requested}
+
+      true ->
+        role = reviewers |> hd() |> Map.get("login", "") |> String.downcase()
+
+        with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head),
+             {:ok, profile} <- load_role_or_skip(loader, role) do
+          do_dispatch_review(pr_number, issue_n, role, profile, %{
+            repo: repo,
+            forge: forge,
+            spawner: spawner,
+            task_queue: task_queue,
+            clock: clock,
+            resolver: resolver,
+            forge_opts: forge_opts,
+            opts: opts
+          })
+        end
+    end
+  end
+
+  defp parse_feature_branch_or_skip(head) do
+    case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+      {:ok, _} = ok -> ok
+      :error -> {:skipped, :not_fleet_branch}
+    end
+  end
+
+  defp load_role_or_skip(_loader, ""), do: {:skipped, :no_role}
+
+  defp load_role_or_skip(loader, role) do
+    case loader.load(role) do
+      {:ok, _} = ok -> ok
+      {:error, _} -> {:skipped, :no_role}
+    end
+  end
+
+  defp do_dispatch_review(pr_number, issue_n, role, profile, ctx) do
+    %{
+      repo: repo,
+      forge: forge,
+      spawner: spawner,
+      task_queue: task_queue,
+      clock: clock,
+      resolver: resolver,
+      forge_opts: forge_opts,
+      opts: opts
+    } = ctx
+
+    ts = clock.(:second)
+
+    # PROJET + ROUTE resolus AVANT toute ecriture forge (read-only) : un echec ne laisse pas de
+    # verrou orphelin. La route (pipeline, stage) est lue sur l'ISSUE (le pipeline-state y reste).
+    with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
+         {:ok, route} <- tag_err(route_for(forge, repo, issue_n, forge_opts), :route_resolution) do
+      pod_id = "pr-#{pr_number}-#{role}-#{ts}"
+
+      # Mandat juge (GateBrief desamorce, I-CBC) source du contexte de l'issue (route + predecessor).
+      mandate = build_mandate(profile, role, forge, repo, issue_n, %{}, forge_opts, route)
+
+      spawn_opts =
+        [mandate: mandate, pod_id: pod_id]
+        |> maybe_put_project(project)
+        |> maybe_put_route(route)
+
+      # Ordre canonique du spawn (label AVANT pod). Verrou sur la PR (pr_number), pas l'issue.
+      with {:ok, _} <- forge.add_label(repo, pr_number, @in_flight_label, forge_opts),
+           {:ok, _} <-
+             forge.post_comment(
+               repo,
+               pr_number,
+               "[lock:#{role}:#{ts}]",
+               Keyword.put(forge_opts, :dedup_signature, "[lock:#{role}:")
+             ),
+           {:ok, _pid} <-
+             spawner.spawn_pod(profile, Fleet.Pilot.TicketId.compose(issue_n), spawn_opts),
+           :ok <- enqueue_mandate(task_queue, pod_id, role, issue_n, mandate) do
+        _ = safe_wake(spawner, pod_id)
+
+        Logger.info(
+          "StageDispatcher: review-dispatch role=#{role} pod=#{pod_id} pr=#{repo}##{pr_number} issue=##{issue_n}"
+        )
+
+        {:ok, {:spawned, pod_id, role}}
+      else
+        {:error, _} = err ->
+          # F181 (jumeau dispatch_issue) : une etape post-verrou a echoue -> compense (kill pod +
+          # retrait verrou PR) pour ne pas stuck la PR a jamais.
+          _ = safe_kill(spawner, pod_id)
+          _ = forge.remove_label(repo, pr_number, @in_flight_label, forge_opts)
+
+          Logger.warning(
+            "StageDispatcher: review-dispatch role=#{role} pr=#{repo}##{pr_number} → #{inspect(err)} (verrou retire, pod tue)"
+          )
+
+          err
+      end
+    else
+      {:error, {phase, reason}} ->
+        Logger.warning(
+          "StageDispatcher: #{phase} review role=#{role} pr=#{repo}##{pr_number} → #{inspect(reason)} (skip, pas de verrou)"
+        )
+
+        {:error, {phase, reason}}
+    end
+  end
+
   defp maybe_put_project(spawn_opts, nil), do: spawn_opts
   defp maybe_put_project(spawn_opts, project), do: Keyword.put(spawn_opts, :project, project)
 
