@@ -209,6 +209,38 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "list_open_pulls/2 + parse_feature_branch/1 (dispatch juge PR-driven)" do
+    test "liste les PR ouvertes (head.ref + requested_reviewers + labels)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls"} =>
+          {200,
+           [
+             %{
+               "number" => 6,
+               "head" => %{"ref" => "lcars/issue-999-engineer"},
+               "requested_reviewers" => [%{"login" => "Qualifier"}],
+               "labels" => []
+             }
+           ]}
+      }
+
+      assert {:ok, [%{"number" => 6, "head" => %{"ref" => "lcars/issue-999-engineer"}}]} =
+               ForgeClient.list_open_pulls("fleet/lcars", opts(handlers))
+    end
+
+    test "parse_feature_branch extrait {issue, role} d'une branche systeme" do
+      assert {:ok, {42, "engineer"}} = ForgeClient.parse_feature_branch("lcars/issue-42-engineer")
+      assert {:ok, {7, "reviewer"}} = ForgeClient.parse_feature_branch("lcars/issue-7-reviewer")
+    end
+
+    test "parse_feature_branch :error sur une branche non-fleet" do
+      assert :error = ForgeClient.parse_feature_branch("refs/pull/55/head")
+      assert :error = ForgeClient.parse_feature_branch("main")
+      assert :error = ForgeClient.parse_feature_branch("feature/manual")
+      assert :error = ForgeClient.parse_feature_branch(nil)
+    end
+  end
+
   describe "add_label/4 — config" do
     test "manque base_url → {:error, {:config, {:missing, :base_url}}}" do
       assert {:error, {:config, {:missing, :base_url}}} =

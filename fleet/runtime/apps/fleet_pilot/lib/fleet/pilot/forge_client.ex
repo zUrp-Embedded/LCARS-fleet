@@ -444,6 +444,37 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
+  Liste les PR OUVERTES du `repo` (Gitea `GET /repos/{repo}/pulls?state=open`). Brique du dispatch
+  juge PR-driven (Corr.3 4-C) : le Poller lit les `requested_reviewers` en attente d'une PR pour
+  spawner le role juge (remplace l'assignee de l'issue). Chaque PR porte `number`, `head.ref` (la
+  feature-branch `lcars/issue-N-role`), `requested_reviewers`, `labels`. Limite 50/page.
+  """
+  @spec list_open_pulls(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
+  def list_open_pulls(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts) do
+      http_get(config, "/repos/#{repo}/pulls?state=open&limit=50")
+    end
+  end
+
+  @feature_branch_rx ~r{^lcars/issue-(\d+)-(.+)$}
+
+  @doc """
+  Extrait `{issue_number, role}` d'une feature-branch systeme `lcars/issue-<n>-<role>` (format pose
+  par `HopConsumer.build_deliverable_opts` / `StageDispatcher`, convention F071). Sert au dispatch
+  juge PR-driven a remonter de la PR (head.ref) au ticket. `:error` si le ref n'est pas une
+  feature-branch fleet (PR externe / branche manuelle -> ignoree par le dispatch, jamais misroutee).
+  """
+  @spec parse_feature_branch(String.t()) :: {:ok, {integer(), String.t()}} | :error
+  def parse_feature_branch(head) when is_binary(head) do
+    case Regex.run(@feature_branch_rx, head) do
+      [_, n, role] -> {:ok, {String.to_integer(n), role}}
+      _ -> :error
+    end
+  end
+
+  def parse_feature_branch(_), do: :error
+
+  @doc """
   Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea
   `PUT /repos/{repo}/contents/{path}`. **Le SYSTÈME publie** (forge-aveugle : le pod ne
   pousse jamais ; c'est ce chemin qui grave durablement le livrable d'un engineer). Création
