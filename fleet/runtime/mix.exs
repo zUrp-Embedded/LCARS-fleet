@@ -76,7 +76,7 @@ defmodule LcarsFleetRuntime.MixProject do
     ]
   end
 
-  # Mix release Elixir 1.9+ stdlib pour `lcars-fleet.service` (chantier 16).
+  # Mix release Elixir 1.9+ stdlib (chantier 16 — lancement per-humain via bin/fleet_v2).
   # Génère `_build/prod/rel/fleet_umbrella/bin/fleet_umbrella` self-contained
   # (ERTS + toutes apps umbrella).
   defp releases do

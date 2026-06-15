@@ -1,10 +1,10 @@
-# LCARS Fleet runtime config — chantier 16 lcars-fleet.service
+# LCARS Fleet runtime config — chantier 16 (lancement per-humain via bin/fleet_v2)
 #
 # Évalué à chaque démarrage du release (post-Mix release build, runtime)
 # ET par `mix test` (Mix charge config/runtime.exs dans TOUS les envs).
 #
 # Garde `config_env() != :test` OBLIGATOIRE : ce fichier est de la
-# config daemon-boot (lit des env vars systemd `/etc/fleet/lcars-fleet.env`
+# config de boot (lit des env vars du run humain `~/.lcars/fleet_v2.env`
 # inexistantes en test) et il est évalué APRÈS `config/test.exs`. Sans la
 # garde, `config :fleet_api, start_listener: true` (l.~) override le
 # `start_listener: false` hermétique de test.exs → fleet_api démarre le
@@ -19,7 +19,7 @@ if config_env() != :test do
   # ============================================================
   # R-no-root-runtime (FORGE-D1, Z4) — boot guard anti-root
   # ============================================================
-  # Le daemon fleet ne tourne JAMAIS en root (User=lcars côté systemd ; ce
+  # Le daemon fleet ne tourne JAMAIS en root (la BEAM tourne sous l'UID de l'humain ; ce
   # self-check attrape les lancements dev/manuel en root, où ~/.gitea_token
   # résoudrait /root/.gitea_token = token admin — cf. FORGE-D1). starfleet/
   # sysadmin est HORS-fleet (invoqué hors daemon) → pas d'exception ici. Hygiène,
@@ -30,7 +30,7 @@ if config_env() != :test do
 
     if String.trim(uid) == "0" do
       raise "R-no-root-runtime : le daemon fleet refuse de tourner en root " <>
-              "(lancer sous l'user `lcars` ; cf. lcars-fleet.service User=lcars)"
+              "(lancer sous ton UID humain via bin/fleet_v2, jamais en root)"
     end
   end
 

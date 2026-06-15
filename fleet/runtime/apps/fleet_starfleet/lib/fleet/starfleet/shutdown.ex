@@ -120,9 +120,9 @@ end
 
 defmodule Fleet.Starfleet.Shutdown do
   @moduledoc """
-  Grace shutdown coordonné — invoqué par `ExecStop` systemd ou
-  `lcars-fleet-restart` via RPC release. Canon DN
-  ring0/lcars-fleet_service §"Module Fleet.Starfleet.Shutdown".
+  Grace shutdown coordonné. Le déclencheur historique (`ExecStop` systemd /
+  `lcars-fleet-restart`) est retiré (systemd parti 2026-06-16) — à recâbler sur
+  `fleet_v2 stop` (backlog graceful-shutdown). La logique de drain reste valide.
 
   Trois phases :
   1. `begin/1` — refuse nouveaux jobs (gate dispatcher), drain queue

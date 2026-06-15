@@ -86,7 +86,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_skills_declared_present(root),
         check_events_registry_keys_aligned(root),
         # ── Rails de remédiation 2026-06-09 (STEP 0) ──
-        check_grace_shutdown_wired(root),
         check_result_deadline_cancelled(root),
         check_spawn_gates_wired(root),
         check_gatekeeper_not_a_stage(root),
@@ -467,57 +466,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Promotion clôture-documentaire → clôture-contrainte des invariants que la
   # branche cowboy a traversés faute de check : un agent qui re-dérive →
   # `mix release` REFUSE (verrou_contracts), build rouge, fix immédiat.
-
-  # R-grace-shutdown-wired (conformance #2/#3/#4, Z0) : la chaîne grace-shutdown
-  # coordonnée doit être câblée. Rouge si (a) le unit n'a pas d'ExecStop= (drain
-  # jamais invoqué par systemd → kill brutal), OU (b) un helper bin/lcars-fleet-*
-  # RPC vers le namespace MORT Fleet.Shutdown.{begin,drain_in_flight} (réel =
-  # Fleet.Starfleet.Shutdown → UndefinedFunctionError ; stop l'avale en kill
-  # brutal, reload plante sous pipefail). Vérifié en arbre 2ba76c84, pas 1-vote.
-  defp check_grace_shutdown_wired(root) do
-    unit = "etc/lcars-fleet.service"
-
-    has_execstop? =
-      Path.join(root, unit)
-      |> grep_lines(~r/^\s*ExecStop\s*=/)
-      |> Enum.any?(fn {_l, line} -> Regex.match?(~r/ExecStop\s*=/, strip_comment(line)) end)
-
-    # le \. avant (begin|drain) évite tout faux-positif sur Fleet.Shutdown.Quiesce
-    # (légitime) ou Fleet.Starfleet.Shutdown (la cible correcte). strip_comment
-    # écarte la ligne de doc-commentaire `# Invoque Fleet.Shutdown.drain_…`.
-    dead_calls =
-      Path.join([root, "bin", "lcars-fleet-*"])
-      |> Path.wildcard()
-      |> Enum.flat_map(fn path ->
-        rel = Path.relative_to(path, root)
-
-        path
-        |> grep_lines(~r/Fleet\.Shutdown\.(begin|drain_in_flight)\b/)
-        |> Enum.filter(fn {_l, line} ->
-          Regex.match?(~r/Fleet\.Shutdown\.(begin|drain_in_flight)\b/, strip_comment(line))
-        end)
-        |> Enum.map(fn {ln, _} ->
-          "#{rel}:#{ln} (RPC vers Fleet.Shutdown.* mort → renommer Fleet.Starfleet.Shutdown)"
-        end)
-      end)
-
-    evidence =
-      if(has_execstop?,
-        do: [],
-        else: [
-          "#{unit} : pas d'ExecStop= → drain jamais invoqué par systemd (kill brutal, « inacceptable production » DN)"
-        ]
-      ) ++ dead_calls
-
-    %{
-      id: "infra.grace_shutdown_wired",
-      remediation: "R-grace-shutdown-wired",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
-      note:
-        "rename Fleet.Shutdown.{begin,drain_in_flight} → Fleet.Starfleet.Shutdown dans bin/lcars-fleet-{stop,reload} + ExecStop=/ExecStopPost= au unit"
-    }
-  end
 
   # R-result-deadline (SPAWN-CR1, Z1) : timer :result_deadline ANNULÉ à l'arrivée
   # du résultat (sinon tue les pods forever/pipe/run au cycle 2). Rouge si

@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-# DEPLOY: instance-util
-# lcars-fleet-stop-post : cleanup post-stop systemd (ExecStopPost)
-# Canon : 04_design-notes/ring0/lcars-fleet_service.md §"Helper lcars-fleet-stop-post"
-
-set -euo pipefail
-find /var/lib/lcars/locks/ -type f -mmin +60 -delete 2>/dev/null || true
-find /var/lib/lcars/queues/ -name '*.partial' -delete 2>/dev/null || true

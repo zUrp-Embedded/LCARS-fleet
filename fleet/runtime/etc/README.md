@@ -1,137 +1,75 @@
-# lcars-fleet.service (chantier 16)
+# etc/ — run & déploiement de la fleet (chantier 16)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-14
-**Statut** : att-1 livré
+**Dernière révision** : 2026-06-16
+**Statut** : modèle humain-lance (systemd retiré 2026-06-16)
 **Référencé par** : `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
-Substrat OS Ring 0 — systemd unit + readiness probe + EnvironmentFile +
-Mix release config pour daemon LCARS v2 umbrella OTP.
+Substrat de lancement Ring 0. **systemd est retiré** : la fleet ne tourne plus comme un service
+système `User=lcars`. Modèle (ADR-E, doctrine 2026-06-11) : **chaque humain lance SA fleet sous son
+propre UID** → la BEAM tourne *as* l'humain → les pods héritent son UID (ownership/creds/isolation OS
+gratis, pas de drop, pas de `/var/lib/lcars`). L'état va sous `~/.lcars/*` de chaque humain.
 
-## Livrables
-
-| Fichier | Path cible | Permissions | Description |
-|---|---|---|---|
-| `etc/lcars-fleet.service` | `/etc/systemd/system/lcars-fleet.service` | root:root 0644 | systemd unit `Type=notify` + hardening strict |
-| `bin/lcars-readiness` | `/usr/local/bin/lcars-readiness` | root:root 0755 | bash readiness probe `/api/health` polling |
-| `bin/lcars-fleet-reload` | `/usr/local/bin/lcars-fleet-reload` | root:root 0755 | helper systemd `ExecReload` — drain in-flight sans restart |
-| `bin/lcars-fleet-stop` | `/usr/local/bin/lcars-fleet-stop` | root:root 0755 | helper systemd `ExecStop` — grace shutdown coordonné (begin 45s + stop) |
-| `bin/lcars-fleet-stop-post` | `/usr/local/bin/lcars-fleet-stop-post` | root:root 0755 | helper systemd `ExecStopPost` — cleanup locks/queues |
-| `etc/lcars-fleet.env.template` | `/etc/fleet/lcars-fleet.env` | root:lcars 0640 | EnvironmentFile (secrets cookie + tokens, hors git) |
-| `config/runtime.exs` | lu au boot (pas de `rel/` — démarrage par humain, pas Mix release) | — | runtime config Elixir 1.9+ stdlib (env vars → Application config) |
-
-## Hardening systemd (refus par défaut canon §0 #1)
-
-```
-ProtectHome=yes
-ProtectSystem=strict
-ReadWritePaths=/var/lib/lcars /var/log/fleet-starfleet.jsonl /tmp
-NoNewPrivileges=yes
-PrivateTmp=yes
-CapabilityBoundingSet=             # vide (port :8080 > 1024 sans privilège)
-SystemCallFilter=@system-service
-SystemCallFilter=~@privileged @resources
-RestrictNamespaces=user mount      # bwrap requirement (ch4 PROMOTED)
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-LockPersonality=yes
-```
-
-## Readiness probe
-
-`/usr/local/bin/lcars-readiness [timeout_s]` (default 60s) :
-- polling `curl -sf http://localhost:8080/api/health` toutes les 2s
-- exit 0 si HTTP 200 reçu
-- exit 1 si timeout
-- override URL via `LCARS_HEALTH_URL` env var (CI/debug/monitoring externe)
-
-## Procédure deploy host-natif
+## Lancer la fleet — `bin/fleet_v2`
 
 ```bash
-# 1. Build Mix release prod
-cd fleet/runtime
-MIX_ENV=prod mix deps.get
-MIX_ENV=prod mix release
+cp etc/fleet_v2.env.template ~/.lcars/fleet_v2.env   # éditer : FORGE + repo surveillé
+bin/fleet_v2 start          # démarre le BEAM sous toi, boote l'arch, attache son REPL claude
+bin/fleet_v2 status         # BEAM vivant ? pods vivants ?
+bin/fleet_v2 stop           # arrête la fleet
+```
 
-# 2. Copier release vers host cible
-sudo mkdir -p /var/lib/lcars/release
-sudo tar -xzf _build/prod/fleet_umbrella-0.1.0.tar.gz -C /var/lib/lcars/release/
-sudo chown -R lcars:lcars /var/lib/lcars/
+`fleet_v2` calcule seul les **ports per-UID** (offset déterministe → N fleets coexistent dans un même
+conteneur), pose la spec MCP + les on-switches ; le reste (state / sock tmux / task-queue / audit)
+défaute sous `~/.lcars/*`. Accès à l'arch : le REPL tmux (TUI) **ou** `/remote-control` (claude-desktop,
+mobile). Détail config : `etc/fleet_v2.env.template`.
 
-# 3. Installer unit + readiness + env
-sudo cp etc/lcars-fleet.service /etc/systemd/system/
-sudo cp bin/lcars-readiness /usr/local/bin/
-sudo chmod +x /usr/local/bin/lcars-readiness
-# Helpers grace-shutdown (ExecReload/ExecStop/ExecStopPost du unit — Z0)
-sudo cp bin/lcars-fleet-reload bin/lcars-fleet-stop bin/lcars-fleet-stop-post /usr/local/bin/
-sudo chmod +x /usr/local/bin/lcars-fleet-reload /usr/local/bin/lcars-fleet-stop /usr/local/bin/lcars-fleet-stop-post
-# Launchers N0/N1 pod (paths absolus lus par fleet_spawner : /usr/local/bin/*_launch.sh ; hors /home,/tmp
-# sinon masqués par --tmpfs). bwrap_launch = containment bwrap ; host_launch = containment none (LAUNCH-Q) ;
-# claude_launch = launcher vendor. Absents → 1er spawn KO :executable_missing.
+### Comment on « fire » la fleet selon le substrat
+- **Dev (WSL/laptop)** : `fleet_v2 start` dans un terminal.
+- **Cible (conteneur Docker sur le NAS)** : l'humain **SSH** dans le conteneur *en tant que lui*
+  (`sshd` = le login-manager : auth + drop vers son UID, zéro privilège custom) → `fleet_v2 start`.
+  Un dashboard web « start fleet » (futur) est une surface alternative, pas une dépendance.
+  Pas de systemd-in-docker (pas de boîte dans la boîte). La forge tourne dans son conteneur à côté.
+
+## Binaires partagés à installer (RO, owner système)
+
+Le spawner lit les launchers à des **paths absolus** `/usr/local/bin/*_launch.sh` (hors `/home`,`/tmp`
+sinon masqués par le `--tmpfs` du sandbox). Absents → 1er spawn KO `:executable_missing`.
+
+```bash
+# Launchers N0/N1 pod : bwrap_launch (containment bwrap) · host_launch (containment none, LAUNCH-Q) ·
+# claude_launch (launcher vendor N1, ADR-G).
 sudo cp bin/bwrap_launch.sh bin/host_launch.sh bin/claude_launch.sh /usr/local/bin/
-sudo chmod +x /usr/local/bin/bwrap_launch.sh /usr/local/bin/host_launch.sh /usr/local/bin/claude_launch.sh
-# CLI opérateur (LAUNCH-1/2/2b — spawn/list/attach un pod). `attach` exige le même UID que le daemon.
-sudo cp bin/lcars /usr/local/bin/
-sudo chmod +x /usr/local/bin/lcars
-
-sudo cp etc/lcars-fleet.env.template /etc/fleet/lcars-fleet.env
-# Éditer secrets : RELEASE_COOKIE (32 bytes base64), GITEA_TOKEN, etc.
-sudo $EDITOR /etc/fleet/lcars-fleet.env
-sudo chown root:lcars /etc/fleet/lcars-fleet.env
-sudo chmod 0640 /etc/fleet/lcars-fleet.env
-
-# 4. Provisionner le secret webhook root:lcars 0600 (HMAC Gitea ; pas d'api-secret — API no-auth)
-sudo install -o root -g lcars -m 0600 /dev/null /etc/fleet/webhook-secret
-# Remplir le secret
-
-# 5. Activer + démarrer
-sudo systemctl daemon-reload
-sudo systemctl enable --now lcars-fleet.service
-
-# 6. Vérifier
-sudo systemctl status lcars-fleet.service
-journalctl -u lcars-fleet.service -f
-curl -sf http://localhost:8080/api/health  # → {"status":"ok",...}
-```
-
-## Hardening verify (post-deploy)
-
-```bash
-sudo systemd-analyze security lcars-fleet.service
-# Score cible : ≤ 3.5 (low exposure)
+sudo chmod +x /usr/local/bin/{bwrap_launch.sh,host_launch.sh,claude_launch.sh}
+# CLI opérateur (spawn/list/attach un pod). `attach` exige le même UID que la fleet (= l'humain).
+sudo cp bin/lcars /usr/local/bin/ && sudo chmod +x /usr/local/bin/lcars
 ```
 
 ## Tests intégration
 
 ```bash
-bash test/integration/boot_test.sh
-# hardening + readiness + env vars + runtime.exs wire-up (1 KO env = systemd-analyze @namespace, WSL2)
-
 bash test/integration/host_launch_test.sh
 # LAUNCH-Q : host_launch.sh vs tmux RÉEL (command factice, pas de claude) — sock+session+holder, contrat
 # argv de bout en bout, teardown SIGTERM→kill-server. 15 checks, exit 0. Nécessite tmux.
 
 bash test/integration/sandbox_notrace_test.sh
-# F094 : invariant no-trace de bwrap_launch.sh vs bwrap RÉEL (command factice qui inspecte sa vue) —
-# arbo runtime LCARS host invisible, /home tmpfs, HOME=pod_dir. 12 checks, exit 0. Nécessite bwrap+userns+tmux.
-# ⚠ Surface un FINDING : /etc/fleet (secrets) visible dans le pod (--ro-bind /etc) — décision sanctuaire.
+# F094 : invariant no-trace de bwrap_launch.sh vs bwrap RÉEL — arbo runtime LCARS host invisible,
+# /home tmpfs, HOME=pod_dir. 12 checks, exit 0. Nécessite bwrap+userns+tmux.
+# ⚠ FINDING : /etc/fleet (secrets) visible dans le pod (--ro-bind /etc) — BL-046.
 ```
 
-Vérifie hardening directives + readiness exit codes + env vars + Mix
-release config + runtime.exs wire-up coord_backend ch12+ch13 → Fleet.Coord.
+*(`test/integration/boot_test.sh` testait le hardening/readiness systemd — obsolète avec le retrait,
+à re-cibler ou retirer.)*
 
-Tests *deployment* réels (`systemctl start`) hors scope CI — host avec
-systemd actif requis. Procédure manuelle ci-dessus.
-
-## Decisions deferred
-
-- **Watchdog systemd liveness 30s** : critère 1ère freeze daemon
-  observable → `WatchdogSec=30` + `sd_notify(WATCHDOG=1)` Elixir
-- **SystemCallFilter audit mode** : critère 1er service kill par
-  syscall non-prévu → `audit` mode log-only puis durcir
-- **Hot-code-loading upgrade** : critère production stable +
-  downtime restart >5s problématique → `release_handler` OTP
+## À reprendre (notes)
+- **Graceful shutdown façon fleet_v2** : avec systemd parti, le drain coordonné (`Fleet.Starfleet.Shutdown`)
+  n'est plus déclenché par `ExecStop=`. `fleet_v2 stop` fait un `tmux kill-server` (brutal). À câbler :
+  `stop` déclenche le drain (begin → wait in-flight → kill). Voir backlog.
+- **Caps bwrap en conteneur** : bwrap exige `unshare`/`mount`/`setns`/`pivot_root` (user+mount NS).
+  Le systemd unit les autorisait via `SystemCallFilter`/`RestrictNamespaces` ; en Docker, c'est au
+  **conteneur** de les accorder (cap-add / seccomp). À documenter au packaging cible.
 
 ## Frontière vendor
 
-N0 (substrat OS pur, daemon démarré consume SDK indirectement via
-la frontière vendor N1 isolée `bin/claude_launch.sh`, post-ADR-G — `fleet_claude_bridge` retiré).
+N0 (substrat pur). La frontière vendor N1 isolée = `bin/claude_launch.sh` (post-ADR-G ;
+`fleet_claude_bridge` retiré).
