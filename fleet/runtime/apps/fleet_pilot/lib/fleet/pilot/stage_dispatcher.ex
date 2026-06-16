@@ -499,16 +499,10 @@ defmodule Fleet.Pilot.StageDispatcher do
   # l'aveugle (l'eng morse a refusé de deviner → `blocked_dep` → wedge). On lit le feedback sur la forge
   # (le runtime, pas le pod : barrière §4 préservée) et on l'injecte. Si la lecture échoue / aucun body,
   # on retombe sur l'instruction générique (le pod a quand même la PR clonée + son code).
-  defp rework_mandate(role, forge, repo, pr, forge_opts, route) do
-    {pipeline, stage} =
-      case route do
-        {p, s} -> {p, s}
-        _ -> {nil, nil}
-      end
-
+  defp rework_mandate(role, forge, repo, pr, forge_opts, _route) do
     [
       "REWORK — une review REQUEST_CHANGES a été déposée sur la PR ##{pr}. Corrige ton code selon le " <>
-        "feedback de la review ci-dessous. (stage=#{stage || "?"} pipeline=#{pipeline || "?"})",
+        "feedback de la review ci-dessous.",
       render_rework_feedback(forge, repo, pr, forge_opts),
       "**Livraison (git-native)** : applique tes corrections dans ton workspace, puis `git add` + `git commit`. " <>
         "Le SYSTÈME pousse ton commit (forge-aveugle, toi tu ne push pas). `submit_result` clôt la tâche : le " <>
