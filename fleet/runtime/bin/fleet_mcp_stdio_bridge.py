@@ -79,13 +79,13 @@ TOOLS = [
             "required": ["payload"],
         },
     },
-    # create_ticket (Rail 2 e2e 2026-06-14) — canal DELEGATION (architecte). tools/call forwarde au
-    # central (qui porte la logique : create_issue + start_pipeline). NB dette : le bridge devrait
-    # proxy tools/list vers le central pour auto-exposer les futurs tools au lieu de hardcoder.
+    # create_ticket — canal DELEGATION (architecte). tools/call forwarde au central (qui porte la
+    # logique : create_issue assignee=humain + stage-marker, puis STOP — le poller livre, BL-050).
+    # NB dette : le bridge devrait proxy tools/list vers le central pour auto-exposer les futurs tools.
     {
         "name": "create_ticket",
-        "description": "Delegue une tache d'implementation a la fleet LCARS : cree un ticket (issue forge) "
-                       "ET lance le pipeline de realisation (engineer -> gates -> livre). Utilise-le pour "
+        "description": "Delegue une brique d'implementation a la fleet LCARS : cree un ticket (issue forge) "
+                       "pret pour la livraison forge-native (engineer -> PR -> review -> merge). Utilise-le pour "
                        "DELEGUER plutot que de coder toi-meme (la fleet livre mieux et preserve ton contexte). "
                        "`brief` = le mandat clair pour l'engineer.",
         "inputSchema": {
@@ -93,7 +93,6 @@ TOOLS = [
             "properties": {
                 "title": {"type": "string"},
                 "brief": {"type": "string"},
-                "pipeline": {"type": "string"},
             },
             "required": ["title", "brief"],
         },

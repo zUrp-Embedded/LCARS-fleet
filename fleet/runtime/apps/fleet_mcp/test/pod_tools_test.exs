@@ -119,4 +119,63 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{"done" => false, "task" => %{"brief" => "for-A"}}} = Jason.decode(ta)
     end
   end
+
+  # Stub forge (seam `:forge_client`) : enregistre l'appel create_issue, retourne le n° d'issue.
+  defmodule StubForge do
+    def create_issue(repo, title, body, opts) do
+      send(self(), {:create_issue, repo, title, body, opts})
+      {:ok, 77}
+    end
+  end
+
+  describe "create_ticket (délégation arch → ticket forge prêt pour le poller, ②.1b)" do
+    setup do
+      prev_forge = Application.get_env(:fleet_mcp, :forge_client)
+      prev_repo = Application.get_env(:fleet_mcp, :delegation_repo)
+      Application.put_env(:fleet_mcp, :forge_client, StubForge)
+      Application.put_env(:fleet_mcp, :delegation_repo, "fleet/demo")
+
+      on_exit(fn ->
+        restore(:forge_client, prev_forge)
+        restore(:delegation_repo, prev_repo)
+      end)
+
+      :ok
+    end
+
+    test "pose assignee=humain + stage-marker lcars-stage:engineer ; STOP (plus de start_pipeline)" do
+      assert {:ok, %{content: [%{"text" => txt}]}, %{}} =
+               PodTools.handle_tool_call(
+                 "create_ticket",
+                 %{"title" => "T", "brief" => "fais X"},
+                 %{}
+               )
+
+      # issue posée avec le contrat forge-state-machine : assignee = l'humain, rôle = stage-marker.
+      assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
+      human = Fleet.Credentials.Human.current!()
+      assert opts[:assignees] == [human]
+      assert opts[:labels] == ["lcars-stage:engineer"]
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["status"] == "ticket_created"
+      assert result["ticket"] == "fleet/demo#77"
+      assert result["assignee"] == human
+      assert result["stage"] == "engineer"
+    end
+
+    test "le stage-marker est overridable par config (:delegation_stage_role, data)" do
+      Application.put_env(:fleet_mcp, :delegation_stage_role, "consultant")
+      on_exit(fn -> Application.delete_env(:fleet_mcp, :delegation_stage_role) end)
+
+      assert {:ok, _, %{}} =
+               PodTools.handle_tool_call("create_ticket", %{"title" => "T", "brief" => "b"}, %{})
+
+      assert_received {:create_issue, _, _, _, opts}
+      assert opts[:labels] == ["lcars-stage:consultant"]
+    end
+  end
+
+  defp restore(key, nil), do: Application.delete_env(:fleet_mcp, key)
+  defp restore(key, val), do: Application.put_env(:fleet_mcp, key, val)
 end

@@ -23,6 +23,12 @@ defmodule Fleet.MCP.PodTools do
 
   alias Fleet.TaskQueue
 
+  # Stage-marker wire-protocol (`lcars-stage:<role>`) que `create_ticket` grave sur l'issue.
+  # MIRROIR délibéré de `Fleet.Pilot.Labels` (source unique côté poller, qui le PARSE) : fleet_mcp ne
+  # dépend PAS compile-time de fleet_pilot (frontière d'app, ADR-G) → le préfixe est dupliqué ici à
+  # dessein. L'accord producteur (ici) / consommateur (`Labels.parse_stage`) est vérifié e2e (②.2).
+  @stage_label_prefix "lcars-stage:"
+
   deftool "get_task" do
     meta do
       name("Get Task")
@@ -55,10 +61,10 @@ defmodule Fleet.MCP.PodTools do
       name("Create Ticket")
 
       description(
-        "Délègue une tâche d'implémentation à la fleet LCARS : crée un ticket (issue forge) ET " <>
-          "lance le pipeline de réalisation (engineer → gates → livré). Utilise-le pour DÉLÉGUER " <>
+        "Délègue une brique d'implémentation à la fleet LCARS : crée un ticket (issue forge) prêt " <>
+          "pour la livraison forge-native (engineer → PR → review → merge). Utilise-le pour DÉLÉGUER " <>
           "plutôt que de coder toi-même (la fleet livre mieux et préserve ton contexte). " <>
-          "`brief` = le mandat clair pour l'engineer. Retourne {\"status\":\"delegated\",...}."
+          "`brief` = le mandat clair pour l'engineer. Retourne {\"status\":\"ticket_created\",...}."
       )
     end
 
@@ -66,8 +72,7 @@ defmodule Fleet.MCP.PodTools do
       "type" => "object",
       "properties" => %{
         "title" => %{"type" => "string"},
-        "brief" => %{"type" => "string"},
-        "pipeline" => %{"type" => "string"}
+        "brief" => %{"type" => "string"}
       },
       "required" => ["title", "brief"]
     })
@@ -149,19 +154,19 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # create_ticket (Rail 2 e2e 2026-06-14) — canal DÉLÉGATION : l'architecte délègue une
-  # implémentation à la fleet. Crée l'issue forge (traçabilité) + lance le pipeline. Dispatch
-  # runtime via modules-en-variable (pas de dep compile-time fleet_pilot/fleet_pipeline).
+  # create_ticket — canal DÉLÉGATION : l'architecte délègue une brique d'implémentation à la fleet.
+  # Modèle forge-state-machine (BL-050, ②.1b) : pose une issue PRÊTE pour le poller (assignee=humain
+  # owner + stage-marker `lcars-stage:<role>`) et S'ARRÊTE. Plus de `start_pipeline` (rail RAM retiré) —
+  # le POLLER prend le relais (voit le stage-marker → spawn le rôle, StageDispatcher.decide).
+  # Dispatch runtime via modules-en-variable (pas de dep compile-time fleet_pilot/fleet_pipeline).
   def handle_tool_call("create_ticket", %{"title" => title, "brief" => brief} = args, state)
       when is_binary(title) and is_binary(brief) do
     repo = Application.get_env(:fleet_mcp, :delegation_repo, "fleet/fleet-test")
+    forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 
-    pipeline =
-      Map.get(args, "pipeline") ||
-        Application.get_env(:fleet_mcp, :delegation_pipeline, "poc-helloworld")
-
-    forge = Fleet.Pilot.ForgeClient
-    pipe = Fleet.Pipeline
+    # Le stage-marker porte le RÔLE catalogue qui implémente la brique (= data, jamais hardcodé).
+    # DN §1 : la seule cible des tickets code = l'eng → défaut "engineer", overridable par déploiement.
+    stage_role = Application.get_env(:fleet_mcp, :delegation_stage_role, "engineer")
 
     # L'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT — résolu depuis
     # `_lcars_role` (injecté par le pont MCP, = le `metadata.name` du cap-profile appelant). Agnostique :
@@ -169,7 +174,7 @@ defmodule Fleet.MCP.PodTools do
     # Pas d'en-tête « Délégué par l'architecte » : l'arch EST l'auteur de l'issue (→ avatar, traça vraie).
     role = Map.get(args, "_lcars_role")
 
-    issue_opts =
+    author_opts =
       case Fleet.Credentials.RoleToken.token(role) do
         t when is_binary(t) ->
           [token: t]
@@ -182,25 +187,34 @@ defmodule Fleet.MCP.PodTools do
           []
       end
 
-    ticket_id =
-      case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
-        {:ok, number} -> "#{repo}##{number}"
-        _ -> "deleg-#{System.unique_integer([:positive])}"
-      end
+    # assignee = l'HUMAIN owner (point fixe DN §1 : routing + ownership, jamais le rôle). Login forge
+    # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue).
+    case Fleet.Credentials.Human.current() do
+      {:ok, human} ->
+        issue_opts =
+          author_opts
+          |> Keyword.put(:assignees, [human])
+          |> Keyword.put(:labels, [@stage_label_prefix <> stage_role])
 
-    case apply(pipe, :start_pipeline, [pipeline, %{ticket_id: ticket_id, ask: brief}]) do
-      {:ok, pipeline_id} ->
-        result = %{
-          "status" => "delegated",
-          "ticket" => ticket_id,
-          "pipeline" => pipeline,
-          "pipeline_id" => pipeline_id
-        }
+        case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
+          {:ok, number} ->
+            # STOP — le poller prend le relais (assignee humain + stage-marker → spawn le rôle).
+            result = %{
+              "status" => "ticket_created",
+              "ticket" => "#{repo}##{number}",
+              "repo" => repo,
+              "assignee" => human,
+              "stage" => stage_role
+            }
 
-        {:ok, %{content: [json(result)]}, state}
+            {:ok, %{content: [json(result)]}, state}
+
+          {:error, reason} ->
+            {:error, {:ticket_creation_failed, inspect(reason)}, state}
+        end
 
       {:error, reason} ->
-        {:error, {:delegation_failed, inspect(reason)}, state}
+        {:error, {:human_unresolved, inspect(reason)}, state}
     end
   end
 
