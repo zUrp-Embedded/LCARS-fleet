@@ -118,6 +118,18 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  @doc """
+  Lit une issue par numéro (Gitea `GET /repos/{repo}/issues/{n}`). Lecture seule : `state`
+  (open/closed), labels, assignees… Utilisé par le tool MCP `get_ticket_status` (l'arch SUIT un
+  ticket délégué — ex. valider la livraison avant d'enchaîner). `{:error, {:http, 404, _}}` si absent.
+  """
+  @spec get_issue(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
+  def get_issue(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
+    with {:ok, config} <- resolve_config(opts) do
+      http_get(config, "/repos/#{repo}/issues/#{number}")
+    end
+  end
+
   # ============================================================
   # Write-ops — primitives mécaniques de fin-de-hop (DN forge-state-machine §5)
   # Toutes idempotentes (skip si l'état cible est déjà atteint).

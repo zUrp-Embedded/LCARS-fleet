@@ -59,6 +59,13 @@ defmodule Fleet.Pilot.PollerTest do
     def pr_review_verdicts(_repo, _index, _opts), do: {:ok, %{}}
     def post_route(_repo, _n, p, s, _opts), do: send(self(), {:route, p, s}) && {:ok, :posted}
     def set_assignee(_repo, _n, login, _opts), do: send(self(), {:assignee, login}) && {:ok, :set}
+
+    # Réconciliation (B) : la réclamation tourne DANS le GenServer Poller → on route le signal vers
+    # le pid de test (`:_test_pid` des forge_opts), pas vers `self()` (la mailbox du Poller).
+    def remove_label(_repo, n, label, opts) do
+      send(Keyword.get(opts, :_test_pid, self()), {:remove_label, n, label})
+      {:ok, :removed}
+    end
   end
 
   defmodule StageStubLoader do
@@ -90,6 +97,10 @@ defmodule Fleet.Pilot.PollerTest do
       send(self(), {:spawned, ticket_id, opts})
       {:ok, "pod-#{ticket_id}"}
     end
+
+    # Réconciliation (B) : aucun pod vivant par défaut → tout verrou `lcars-in-flight` est candidat
+    # orphelin (réclamé après la grace 2-tick). Un stub avec list_pods absent ferait fail-safe (skip).
+    def list_pods, do: []
   end
 
   defp start_stage_poller(issues_response, pulls_response \\ {:ok, []}) do
@@ -102,7 +113,11 @@ defmodule Fleet.Pilot.PollerTest do
         start_tick?: false,
         stage_dispatch?: true,
         forge_client: StageStubForge,
-        forge_opts: [_test_issues: issues_response, _test_pulls: pulls_response],
+        forge_opts: [
+          _test_issues: issues_response,
+          _test_pulls: pulls_response,
+          _test_pid: self()
+        ],
         loader: StageStubLoader,
         spawner: StageStubSpawner,
         clock: fn :second -> 1_700_000_000 end
@@ -147,6 +162,30 @@ defmodule Fleet.Pilot.PollerTest do
 
       assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
       refute_received {:spawned, _, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "réconciliation (B) : verrou orphelin réclamé au 2e tick (grace), pas au 1er" do
+      # #8 verrouillé mais AUCUN pod vivant (StageStubSpawner.list_pods → []) = orphelin confirmé.
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "Engineer"}]
+        }
+      ]
+
+      {name, pid} = start_stage_poller({:ok, issues})
+
+      # 1er tick : #8 devient SUSPECT (grace 2-tick) — PAS encore réclamé.
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+
+      # 2e tick consécutif : orphelin CONFIRMÉ → verrou réclamé (le prochain tick re-dispatchera).
+      Poller.force_poll(name)
+      assert_received {:remove_label, 8, "lcars-in-flight"}
 
       GenServer.stop(pid)
     end

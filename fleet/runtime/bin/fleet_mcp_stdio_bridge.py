@@ -61,9 +61,14 @@ def central_call(method, params):
     return payload.get("result", {})
 
 
-# Tools exposés au pod = mirroir des tools fleet (get_task IN / submit_result OUT). alwaysLoad est
-# porté par .mcp-fleet.json (config serveur), pas ici.
-TOOLS = [
+# Surface de tools du pod = DÉRIVÉE de son rôle (LCARS_ROLE). Principe : la PRÉSENCE EST
+# l'AUTORISATION — un pod ne voit (donc ne peut lister, chercher via ToolSearch, ni appeler) QUE
+# les tools que son rôle EST. Deny-par-défaut par construction : absent de la surface du rôle =
+# inexistant pour lui (rien à interdire, rien à ré-autoriser). Pas de champ allowlist : le rôle EST
+# la surface. (alwaysLoad — visibilité hors-déferral — est porté par .mcp-fleet.json.)
+
+# Base — tout pod EST un task-worker : pull get_task IN / push submit_result OUT.
+BASE_TOOLS = [
     {
         "name": "get_task",
         "description": "Recupere ta prochaine tache aupres du fleet LCARS. Retourne {\"done\":true} "
@@ -79,9 +84,12 @@ TOOLS = [
             "required": ["payload"],
         },
     },
-    # create_ticket — canal DELEGATION (architecte). tools/call forwarde au central (qui porte la
-    # logique : create_issue assignee=humain, puis STOP — le poller livre, BL-050).
-    # NB dette : le bridge devrait proxy tools/list vers le central pour auto-exposer les futurs tools.
+]
+
+# Délégateur — l'ARCHITECTE EST celui qui ONBOARDE (create_project), DÉLÈGUE (create_ticket) et SUIT
+# l'avancement (get_ticket_status). Ces tools n'existent QUE dans son monde ; un worker/juge ne les
+# voit pas du tout. tools/call forwarde au central (qui porte la logique : assignee=humain, etc.).
+ARCHITECT_TOOLS = [
     {
         "name": "create_ticket",
         "description": "Delegue une brique d'implementation a la fleet LCARS : cree un ticket (issue forge) "
@@ -97,8 +105,6 @@ TOOLS = [
             "required": ["title", "brief"],
         },
     },
-    # create_project (Rail 1 e2e 2026-06-14) — canal ONBOARDING (architecte). Le central exécute la
-    # sequence mecanique (repo forge + dual-worktree main/work-ops + scaffold + push) via ProjectOnboard.
     {
         "name": "create_project",
         "description": "Demarre un NOUVEAU projet : cree le repo forge + les 2 dossiers dual-dir "
@@ -116,7 +122,23 @@ TOOLS = [
             "required": ["name"],
         },
     },
+    {
+        "name": "get_ticket_status",
+        "description": "Consulte l'etat d'un ticket delegue (issue + PR liee) du projet courant : "
+                       "issue ouverte/fermee, PR mergee ou non, verdicts de review par juge. Utilise-le "
+                       "pour SUIVRE un ticket avant d'enchainer — ex: valider la livraison (PR mergee) du "
+                       "ticket N AVANT de poster le ticket N+1. `number` = le numero d'issue (ex: 1).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"number": {"type": "integer"}},
+            "required": ["number"],
+        },
+    },
 ]
+
+# La surface = dérivée du rôle, point. Un nouveau tool puissant n'est servi à personne tant qu'il
+# n'est pas rattaché à un rôle ; un nouveau rôle n'a que sa base tant qu'on ne lui en grant pas plus.
+TOOLS = BASE_TOOLS + (ARCHITECT_TOOLS if ROLE == "architect" else [])
 
 
 def main():

@@ -45,6 +45,9 @@ defmodule Fleet.Pilot.Poller do
 
   alias Fleet.Pilot.{StageDispatcher, Entry}
 
+  # Verrou pipeline (source unique `Fleet.Pilot.Labels`) — lu par la réconciliation d'orphelins.
+  @in_flight Fleet.Pilot.Labels.in_flight()
+
   @default_interval_ms 30_000
   @max_backoff_ms 300_000
   @jitter_ratio 0.1
@@ -63,7 +66,11 @@ defmodule Fleet.Pilot.Poller do
     poll_count: 0,
     error_count: 0,
     err_streak: 0,
-    last_error: nil
+    last_error: nil,
+    # Réconciliation verrou (B) : refs `{:issue|:pr, n}` vues ORPHELINES (verrou `lcars-in-flight`
+    # sans pod vivant) au tick précédent. Grace 2-tick (cf. OrphanReaper) → on ne réclame qu'au 2ᵉ
+    # tick consécutif (évite de déverrouiller un pod fraîchement dispatché ou en cours de mort).
+    orphan_lock_suspects: MapSet.new()
   ]
 
   @type t :: %__MODULE__{
@@ -265,6 +272,12 @@ defmodule Fleet.Pilot.Poller do
          {:ok, pulls} <- forge.list_open_pulls(state.repo, state.forge_opts) do
       pr_issue_ids = pulls_issue_ids(pulls)
 
+      # Réconciliation verrou (B) AVANT dispatch : un `lcars-in-flight` orphelin (pod mort sans avoir
+      # complété → reapé, mais le label survit côté forge) bloquerait la brique pour TOUJOURS
+      # (`dispatch_*` skip `:in_flight`). On le réclame (grace 2-tick) → le prochain tick re-dispatche.
+      # Sans ça, un seul stall de pod wedge le pipe définitivement (live #8).
+      new_suspects = reconcile_orphan_locks(issues, pulls, pr_issue_ids, state, forge)
+
       tally =
         merge_tally(
           stage_process_issues(issues, pr_issue_ids, state),
@@ -285,11 +298,94 @@ defmodule Fleet.Pilot.Poller do
           "duration_ms=#{duration_ms}"
       )
 
-      {tally, %{state | poll_count: state.poll_count + 1, err_streak: 0, last_error: nil}}
+      {tally,
+       %{
+         state
+         | poll_count: state.poll_count + 1,
+           err_streak: 0,
+           last_error: nil,
+           orphan_lock_suspects: new_suspects
+       }}
     else
       {:error, reason} = err ->
         handle_poll_error(state, reason, started, err)
     end
+  end
+
+  # ── Réconciliation verrou orphelin (B, brique 2 du README) ────────────────────────────────────
+  # Un verrou `lcars-in-flight` est ORPHELIN si la brique le porte mais qu'aucun pod vivant ne la
+  # travaille. Cause : un pod mort (deadline `:result_timeout`, crash, restart BEAM) reapé par
+  # l'OrphanReaper — qui retire le PROCESS mais PAS le label forge. Symétrie cassée → le poller le
+  # répare. Grace 2-tick (intersection avec les suspects du tick précédent) : on ne réclame qu'un
+  # orphelin CONFIRMÉ, jamais un pod fraîchement dispatché (pas encore registré) ou en cours de mort.
+  defp reconcile_orphan_locks(issues, pulls, pr_issue_ids, state, forge) do
+    case live_owned_refs(state) do
+      # Énumération des pods indisponible → fail-safe : on ne réclame RIEN (ne jamais déverrouiller
+      # à l'aveugle), on garde les suspects en l'état.
+      :error ->
+        state.orphan_lock_suspects
+
+      owned ->
+        issue_orphans =
+          for i <- issues,
+              n = i["number"],
+              locked?(i),
+              # une issue avec PR ouverte est en phase JUGE (verrou côté PR) → pas un orphelin issue
+              not MapSet.member?(pr_issue_ids, n),
+              not MapSet.member?(owned, {:issue, n}),
+              into: MapSet.new(),
+              do: {:issue, n}
+
+        pr_orphans =
+          for p <- pulls,
+              n = p["number"],
+              locked?(p),
+              not MapSet.member?(owned, {:pr, n}),
+              into: MapSet.new(),
+              do: {:pr, n}
+
+        orphaned_now = MapSet.union(issue_orphans, pr_orphans)
+        to_reclaim = MapSet.intersection(orphaned_now, state.orphan_lock_suspects)
+        Enum.each(to_reclaim, fn {_type, n} -> reclaim_lock(forge, state, n) end)
+        MapSet.difference(orphaned_now, to_reclaim)
+    end
+  end
+
+  # Refs `{:issue|:pr, n}` que des pods VIVANTS travaillent, dérivées des pod_ids déterministes
+  # (`issue-<n>-<role>-<ts>` / `pr-<n>-<role>-<ts>`). `:error` si l'énumération échoue (fail-safe).
+  defp live_owned_refs(state) do
+    spawner = state.spawner || Fleet.Spawner
+
+    spawner.list_pods()
+    |> Enum.flat_map(&parse_pod_ref(&1[:pod_id]))
+    |> MapSet.new()
+  rescue
+    _ -> :error
+  catch
+    _, _ -> :error
+  end
+
+  defp parse_pod_ref(pod_id) when is_binary(pod_id) do
+    case Regex.run(~r/^(issue|pr)-(\d+)-/, pod_id) do
+      [_, "issue", n] -> [{:issue, String.to_integer(n)}]
+      [_, "pr", n] -> [{:pr, String.to_integer(n)}]
+      _ -> []
+    end
+  end
+
+  defp parse_pod_ref(_), do: []
+
+  defp locked?(item) do
+    @in_flight in Enum.map(Map.get(item, "labels") || [], & &1["name"])
+  end
+
+  defp reclaim_lock(forge, state, number) do
+    Logger.warning(
+      "fleet_pilot Poller réconciliation : verrou #{@in_flight} ORPHELIN sur " <>
+        "#{state.repo}##{number} (pod mort sans complétion) → réclamé (re-dispatch au prochain tick)"
+    )
+
+    forge.remove_label(state.repo, number, @in_flight, state.forge_opts)
   end
 
   # Issues portant une PR fleet ouverte (`lcars/issue-N-role`) = pipelines en phase JUGE :

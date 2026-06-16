@@ -96,6 +96,26 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "get_ticket_status" do
+    meta do
+      name("Get Ticket Status")
+
+      description(
+        "Consulte l'état d'un ticket délégué (issue + PR liée) du projet de délégation courant : " <>
+          "issue ouverte/fermée, PR mergée ou non, verdicts de review. Utilise-le pour SUIVRE un " <>
+          "ticket avant d'enchaîner — ex. valider la livraison (issue fermée par le merge) du ticket N " <>
+          "AVANT de poster le ticket N+1. `number` = le numéro d'issue. " <>
+          "Retourne {\"delivered\":bool,\"issue_state\":...,\"pr\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{"number" => %{"type" => "integer"}},
+      "required" => ["number"]
+    })
+  end
+
   @impl true
   def handle_tool_call("get_task", arguments, state) do
     case pod_id(arguments) do
@@ -246,8 +266,68 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
+  # get_ticket_status — canal SUIVI (architecte). Lit l'état d'un ticket délégué pour séquencer le
+  # multi-ticket. « Livré » = issue fermée par le merge (`Closes #N`). Lecture seule (ForgeClient).
+  def handle_tool_call("get_ticket_status", %{"number" => number}, state)
+      when is_integer(number) do
+    repo = Application.get_env(:fleet_mcp, :delegation_repo, "fleet/fleet-test")
+    forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
+
+    issue_state =
+      case forge.get_issue(repo, number, []) do
+        {:ok, issue} -> Map.get(issue, "state", "unknown")
+        _ -> "unknown"
+      end
+
+    result = %{
+      "repo" => repo,
+      "issue" => number,
+      "issue_state" => issue_state,
+      # « livré » = la PR a fermé l'issue (merge FF `Closes #N`). Signal de séquencement multi-ticket :
+      # l'arch n'enchaîne le ticket N+1 que sur `delivered: true`.
+      "delivered" => issue_state == "closed",
+      "pr" => ticket_pr_status(forge, repo, number)
+    }
+
+    {:ok, %{content: [json(result)]}, state}
+  end
+
+  def handle_tool_call("get_ticket_status", _bad, state) do
+    {:error, :invalid_arguments, state}
+  end
+
   def handle_tool_call(_unknown, _arguments, state) do
     {:error, :unknown_tool, state}
+  end
+
+  # La PR EN COURS du ticket #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
+  # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.
+  defp ticket_pr_status(forge, repo, number) do
+    # Feature-branch du ticket = `lcars/issue-<n>-<role>` ; le `-` final distingue #1 de #12. Match
+    # inline (pas de call cross-app vers fleet_pilot : fleet_mcp dispatch le forge en runtime).
+    prefix = "lcars/issue-#{number}-"
+
+    case forge.list_open_pulls(repo, []) do
+      {:ok, pulls} ->
+        Enum.find_value(pulls, fn pr ->
+          head = get_in(pr, ["head", "ref"]) || ""
+
+          if String.starts_with?(head, prefix) do
+            verdicts =
+              case forge.pr_review_verdicts(repo, pr["number"],
+                     head_sha: get_in(pr, ["head", "sha"])
+                   ) do
+                {:ok, v} -> v
+                _ -> %{}
+              end
+
+            %{"number" => pr["number"], "merged" => pr["merged"], "verdicts" => verdicts}
+          end
+        end)
+
+      _ ->
+        nil
+    end
   end
 
   # Le pont stdio (`fleet-mcp-stdio-bridge`) injecte `_lcars_pod_id` dans tous les tool calls.

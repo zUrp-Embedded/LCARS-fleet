@@ -396,13 +396,55 @@ defmodule Fleet.Pilot.HopConsumer do
   # non-trivial = backlog DN §1.5 ; ici fail-closed strict.)
   defp maybe_put_review_event(hop, :judge, :reviewed, payload) do
     result = unwrap_worker_envelope(payload["result"] || %{})
-    Map.put(hop, :review_event, review_event_for_decision(gate_decision(result)))
+    event = review_event_for_decision(gate_decision(result))
+    hop = Map.put(hop, :review_event, event)
+
+    # Le juge PRODUIT un `reason`/`details`/`chain` dans sa gate-decision → on le REND sur la review
+    # (visu humaine + rework actionnable). Sinon `HopCompleter.record_review` retombe sur le corps
+    # générique (« la brique ne satisfait pas son critère »), inactionnable — pour l'humain comme pour
+    # le producteur en rework (live #8). On ne pose `:review_body` QUE s'il y a de la substance (sans
+    # quoi `Map.get(hop, :review_body, default)` renverrait `nil` au lieu du défaut).
+    case judge_review_body(event, result) do
+      body when is_binary(body) and body != "" -> Map.put(hop, :review_body, body)
+      _ -> hop
+    end
   end
 
   defp maybe_put_review_event(hop, _pr_role, _intent, _payload), do: hop
 
   defp review_event_for_decision("continue"), do: :approve
   defp review_event_for_decision(_other), do: :request_changes
+
+  # Compose le corps de review depuis la gate-decision du juge. `nil` si aucune substance (→ le
+  # défaut générique de `record_review`, qui porte au moins l'instruction de rework).
+  defp judge_review_body(event, result) when is_map(result) do
+    reason = result |> Map.get("reason") |> to_string() |> String.trim()
+    details = format_review_details(Map.get(result, "details"))
+    chain = format_review_chain(Map.get(result, "chain"))
+    substance = Enum.reject([reason, details, chain], &(&1 in [nil, ""]))
+
+    if substance == [] do
+      nil
+    else
+      verdict = if event == :approve, do: "APPROUVÉ", else: "CHANGEMENTS DEMANDÉS"
+
+      ["**#{verdict}** — verdict du juge.", reason, details, chain]
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.join("\n\n")
+    end
+  end
+
+  defp judge_review_body(_event, _), do: nil
+
+  defp format_review_details(d) when is_map(d) and map_size(d) > 0,
+    do: "**Détails**\n" <> Enum.map_join(d, "\n", fn {k, v} -> "- **#{k}** : #{v}" end)
+
+  defp format_review_details(_), do: nil
+
+  defp format_review_chain(c) when is_list(c) and c != [],
+    do: "**Raisonnement**\n" <> Enum.map_join(c, "\n", &"- #{&1}")
+
+  defp format_review_chain(_), do: nil
 
   # Corr.3 (engineer-first) — classe le role qui finit. Producteur = role git_native (engineer) →
   # pousse le code, ouvre la PR (head = sa propre branche). Juge = role payload (qualifier/reviewer
