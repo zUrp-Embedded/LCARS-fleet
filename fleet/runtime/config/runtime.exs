@@ -375,9 +375,31 @@ if config_env() != :test do
   # HORS argv ET HORS .git/config — F087/F095). Token système (lcars-system, write:repository).
   # FORGE_PUSH_TOKEN prioritaire sur FORGE_TOKEN (le push exige write:repository, ≠ token poller read).
   forge_base = System.get_env("FORGE_BASE_URL")
-  forge_push_token = System.get_env("FORGE_PUSH_TOKEN") || System.get_env("FORGE_TOKEN")
 
-  if is_binary(forge_base) and is_binary(forge_push_token) do
+  # Le token push doit venir de la MÊME source que le token poller : var (FORGE_PUSH_TOKEN / FORGE_TOKEN)
+  # PUIS le FICHIER (FORGE_TOKEN_FILE, défaut ~/.gitea_token). Sans ce fallback-fichier, un déploiement
+  # qui ne pose QUE le fichier (cas nominal) avait un push SANS auth → « could not read Username »
+  # (régression latente prouvée live : le poller lisait le fichier, le push ne lisait que la var).
+  default_token_file =
+    case System.user_home() do
+      home when is_binary(home) -> Path.join(home, ".gitea_token")
+      _ -> nil
+    end
+
+  forge_push_token =
+    System.get_env("FORGE_PUSH_TOKEN") || System.get_env("FORGE_TOKEN") ||
+      case System.get_env("FORGE_TOKEN_FILE") || default_token_file do
+        path when is_binary(path) ->
+          case File.read(path) do
+            {:ok, t} -> String.trim(t)
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+  if is_binary(forge_base) and is_binary(forge_push_token) and forge_push_token != "" do
     config :fleet_credentials, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
   end
 
