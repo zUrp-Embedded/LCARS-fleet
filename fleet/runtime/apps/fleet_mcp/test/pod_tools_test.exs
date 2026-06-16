@@ -128,7 +128,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  describe "create_ticket (délégation arch → ticket forge prêt pour le poller, ②.1b)" do
+  describe "create_ticket (délégation arch → ticket forge prêt pour le poller)" do
     setup do
       prev_forge = Application.get_env(:fleet_mcp, :forge_client)
       prev_repo = Application.get_env(:fleet_mcp, :delegation_repo)
@@ -143,7 +143,7 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "pose assignee=humain + stage-marker lcars-stage:engineer ; STOP (plus de start_pipeline)" do
+    test "pose une issue assignée à l'humain owner ; STOP (plus de start_pipeline ni label)" do
       assert {:ok, %{content: [%{"text" => txt}]}, %{}} =
                PodTools.handle_tool_call(
                  "create_ticket",
@@ -151,28 +151,20 @@ defmodule Fleet.MCP.PodToolsTest do
                  %{}
                )
 
-      # issue posée avec le contrat forge-state-machine : assignee = l'humain, rôle = stage-marker.
+      # contrat forge-state-machine : assignee = l'humain owner ; PAS de label stage-marker (le rôle
+      # producteur est un invariant côté poller, pas un sticker par-ticket). Gitea matche l'assignee
+      # insensible à la casse → le login OS suffit.
       assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
       human = Fleet.Credentials.Human.current!()
       assert opts[:assignees] == [human]
-      assert opts[:labels] == ["lcars-stage:engineer"]
+
+      # PAS de labels passés à create_issue (Gitea rejette les noms ; et c'est du panini de toute façon).
+      refute Keyword.has_key?(opts, :labels)
 
       assert {:ok, result} = Jason.decode(txt)
       assert result["status"] == "ticket_created"
       assert result["ticket"] == "fleet/demo#77"
       assert result["assignee"] == human
-      assert result["stage"] == "engineer"
-    end
-
-    test "le stage-marker est overridable par config (:delegation_stage_role, data)" do
-      Application.put_env(:fleet_mcp, :delegation_stage_role, "consultant")
-      on_exit(fn -> Application.delete_env(:fleet_mcp, :delegation_stage_role) end)
-
-      assert {:ok, _, %{}} =
-               PodTools.handle_tool_call("create_ticket", %{"title" => "T", "brief" => "b"}, %{})
-
-      assert_received {:create_issue, _, _, _, opts}
-      assert opts[:labels] == ["lcars-stage:consultant"]
     end
   end
 

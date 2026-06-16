@@ -1,21 +1,22 @@
 defmodule Fleet.Pilot.StageDispatcher do
   @moduledoc """
-  Dispatch `stage-marker → spawn` du modèle forge-state-machine (DN
-  `orchestration/forge-state-machine.md` §1/§4). Distinct du `Fleet.Pilot.Dispatcher`
-  legacy (route → pipeline nommé) : ici le poller voit un ticket portant un **stage-marker**
-  `lcars-stage:<role>` et **spawn ce rôle** (= la brique), sans table de routes.
+  Dispatch `ticket assigné → spawn producteur` du modèle forge-state-machine (DN
+  `orchestration/forge-state-machine.md` §1). Distinct du `Fleet.Pilot.Dispatcher`
+  legacy (route → pipeline nommé) : ici le poller voit un ticket **assigné** (à l'humain owner),
+  non verrouillé, et **spawn le rôle PRODUCTEUR** du catalogue (= la brique), sans table de routes.
 
   ## Décision (`decide/2`)
 
   À partir du payload d'une issue Gitea, décide :
-    * `{:spawn, role, profile}` — stage-marker `lcars-stage:<role>` présent (→ cap-profile
-      chargé), un assignee (= l'humain owner), pas de verrou `lcars-in-flight` → spawner le rôle.
-    * `{:skip, reason}` — `:no_stage` (pas de stage-marker → pas un ticket-producteur),
-      `:no_role` (stage-marker présent mais cap-profile illisible/inconnu), `:no_assignee`
-      (aucun humain owner), `:in_flight` (verrou posé, pod déjà en vol), `:awaits_human`.
+    * `{:spawn, role, profile}` — un assignee (= l'humain owner), pas de verrou `lcars-in-flight` →
+      spawner le **rôle producteur** (`:producer_role`, défaut `"engineer"`).
+    * `{:skip, reason}` — `:no_assignee` (aucun owner), `:no_role` (cap-profile producteur
+      illisible), `:in_flight` (verrou posé, pod déjà en vol), `:awaits_human`.
 
-  **Invariant DN §1** : le rôle vient du **stage-marker** (label = data, catalogue-driven),
-  jamais de l'assignee. L'assignee est l'**humain** (point fixe : ownership + routing).
+  **Invariant DN §1** : le rôle producteur est **invariant** (« la seule cible des tickets code =
+  l'eng ») → il vient de la **config** (`:producer_role`), PAS d'un marqueur par-ticket — un label
+  `lcars-stage:<role>` ré-encoderait une constante (bruit). L'assignee est l'**humain** (point fixe).
+  Les juges, eux, sont dispatchés PR-driven via `dispatch_review` (requested_reviewers), pas ici.
 
   L'I/O (lecture du cap-profile) est **injectée** via `load_role` (défaut `CapProfile.load/1`)
   → testable sans forge. F075 : le profil chargé pour décider est THREADÉ dans `{:spawn, …}`
@@ -70,24 +71,25 @@ defmodule Fleet.Pilot.StageDispatcher do
         {:skip, :no_assignee}
 
       true ->
-        # Forge-state-machine (DN §1) : le RÔLE vient du stage-marker `lcars-stage:<role>`
-        # (label = data, catalogue-driven), PAS de l'assignee (= l'humain owner, point fixe).
-        # Pas de stage-marker → pas un ticket-producteur → :no_stage.
-        case Fleet.Pilot.Labels.parse_stage(labels) do
-          {:ok, role} ->
-            # F075 : on charge le cap-profile UNE fois ici (la décision EN dépend) et on le threade —
-            # `dispatch_issue` le réutilise au spawn au lieu de recharger. load-error → :no_role.
-            with {:ok, profile} <- load_role.(role) do
-              {:spawn, role, profile}
-            else
-              _ -> {:skip, :no_role}
-            end
+        # Forge-state-machine (DN §1) : un ticket assigné (à l'humain owner), non verrouillé → on
+        # spawn le rôle PRODUCTEUR du catalogue. Il est INVARIANT (« seule cible des tickets code =
+        # l'eng ») → `:producer_role` (config, défaut "engineer"), jamais un marqueur par-ticket.
+        role = producer_role()
 
-          :error ->
-            {:skip, :no_stage}
+        # F075 : on charge le cap-profile UNE fois ici (la décision EN dépend) et on le threade —
+        # `dispatch_issue` le réutilise au spawn au lieu de recharger. load-error → :no_role.
+        with {:ok, profile} <- load_role.(role) do
+          {:spawn, role, profile}
+        else
+          _ -> {:skip, :no_role}
         end
     end
   end
+
+  # Rôle producteur (DN §1, invariant) : `:producer_role` (config, data catalogue), défaut "engineer".
+  @default_producer_role "engineer"
+  defp producer_role,
+    do: Application.get_env(:fleet_pilot, :producer_role, @default_producer_role)
 
   @doc """
   Dispatch effectif d'une issue : `decide/2` puis, sur `{:spawn, role, profile}`, l'ordre

@@ -254,12 +254,12 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   describe "mode stage — force_poll" do
-    test "issue portant un stage-marker → spawn (tally dispatched)" do
+    test "issue assignée (humain) → spawn producteur (tally dispatched)" do
       issues = [
         %{
           "number" => 7,
           "body" => "fais le hello",
-          "labels" => [%{"name" => "lcars-stage:engineer"}],
+          "labels" => [],
           "assignees" => [%{"login" => "lordzurp"}]
         }
       ]
@@ -293,13 +293,13 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "assignee humain (rôle inconnu) → skip" do
+    test "issue sans assignee (pas d'owner) → skip" do
       issues = [
         %{
           "number" => 9,
           "body" => "x",
           "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
+          "assignees" => []
         }
       ]
 
@@ -383,11 +383,11 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "un pipeline en cours (ticket assigne) bloque l'entree d'un ticket neuf" do
       issues = [
-        # #11 deja engage (stage-marker engineer, assigne humain) -> tient le bail -> sera spawne.
+        # #11 deja engage (assigne humain) -> tient le bail -> sera spawne (producteur).
         %{
           "number" => 11,
           "body" => "en cours",
-          "labels" => [%{"name" => "lcars-stage:engineer"}],
+          "labels" => [],
           "assignees" => [%{"login" => "lordzurp"}]
         },
         # #12 neuf (type:poc, pas d'assignee) -> entree BLOQUEE par le bail.

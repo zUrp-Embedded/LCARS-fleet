@@ -26,9 +26,9 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 - `submit_result` — le pod soumet son livrable (`payload`).
 - `create_ticket` (délégation) — l'architecte délègue une brique : crée l'issue forge **prête pour le
   poller** (`Fleet.Pilot.ForgeClient.create_issue`, dispatch runtime) — auteur=arch (token de rôle de
-  l'appelant), **assignee=humain** owner (login OS, `Fleet.Credentials.Human`), **stage-marker**
-  `lcars-stage:<role>` (rôle = `:delegation_stage_role`, défaut `engineer`) — puis **STOP**. Le poller
-  prend le relais (forge-state-machine, BL-050 : plus de `start_pipeline`/rail RAM). Seam test : `:forge_client`.
+  l'appelant), **assignee=humain** owner (login OS, `Fleet.Credentials.Human`) — puis **STOP**. Pas de
+  label : le rôle producteur est un invariant côté poller, pas un marqueur par-ticket. Le poller prend
+  le relais (forge-state-machine, BL-050 : plus de `start_pipeline`/rail RAM). Seam test : `:forge_client`.
 - `create_project` (Rail 1 — onboarding) — l'architecte démarre un projet neuf : `Fleet.Pilot.ProjectOnboard.onboard/2`
   (repo forge + dual-worktree `main`/`work/ops` + scaffold + push). Le projet créé devient la cible de
   délégation (`:delegation_repo`) → enchaîner `create_ticket`. Dispatch runtime (pas de dep compile-time `fleet_pilot`).

@@ -23,12 +23,6 @@ defmodule Fleet.MCP.PodTools do
 
   alias Fleet.TaskQueue
 
-  # Stage-marker wire-protocol (`lcars-stage:<role>`) que `create_ticket` grave sur l'issue.
-  # MIRROIR délibéré de `Fleet.Pilot.Labels` (source unique côté poller, qui le PARSE) : fleet_mcp ne
-  # dépend PAS compile-time de fleet_pilot (frontière d'app, ADR-G) → le préfixe est dupliqué ici à
-  # dessein. L'accord producteur (ici) / consommateur (`Labels.parse_stage`) est vérifié e2e (②.2).
-  @stage_label_prefix "lcars-stage:"
-
   deftool "get_task" do
     meta do
       name("Get Task")
@@ -155,18 +149,15 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # create_ticket — canal DÉLÉGATION : l'architecte délègue une brique d'implémentation à la fleet.
-  # Modèle forge-state-machine (BL-050, ②.1b) : pose une issue PRÊTE pour le poller (assignee=humain
-  # owner + stage-marker `lcars-stage:<role>`) et S'ARRÊTE. Plus de `start_pipeline` (rail RAM retiré) —
-  # le POLLER prend le relais (voit le stage-marker → spawn le rôle, StageDispatcher.decide).
-  # Dispatch runtime via modules-en-variable (pas de dep compile-time fleet_pilot/fleet_pipeline).
+  # Modèle forge-state-machine (BL-050) : pose une issue PRÊTE pour le poller — auteur=arch (traça),
+  # **assignee=humain owner** (point fixe DN §1) — et S'ARRÊTE. Plus de `start_pipeline` (rail RAM
+  # retiré). Le POLLER prend le relais : issue assignée non verrouillée → spawn le rôle PRODUCTEUR
+  # (`:producer_role`, invariant DN §1 — pas de marqueur par-ticket : un label `lcars-stage:` ré-
+  # encoderait une constante). Dispatch runtime via modules-en-variable (pas de dep compile-time pilot).
   def handle_tool_call("create_ticket", %{"title" => title, "brief" => brief} = args, state)
       when is_binary(title) and is_binary(brief) do
     repo = Application.get_env(:fleet_mcp, :delegation_repo, "fleet/fleet-test")
     forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
-
-    # Le stage-marker porte le RÔLE catalogue qui implémente la brique (= data, jamais hardcodé).
-    # DN §1 : la seule cible des tickets code = l'eng → défaut "engineer", overridable par déploiement.
-    stage_role = Application.get_env(:fleet_mcp, :delegation_stage_role, "engineer")
 
     # L'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT — résolu depuis
     # `_lcars_role` (injecté par le pont MCP, = le `metadata.name` du cap-profile appelant). Agnostique :
@@ -188,23 +179,21 @@ defmodule Fleet.MCP.PodTools do
       end
 
     # assignee = l'HUMAIN owner (point fixe DN §1 : routing + ownership, jamais le rôle). Login forge
-    # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue).
+    # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue ;
+    # Gitea matche l'assignee insensible à la casse → `starfleet` résout `Starfleet`). Pas de label :
+    # le rôle producteur est un invariant côté poller, pas un sticker par-ticket.
     case Fleet.Credentials.Human.current() do
       {:ok, human} ->
-        issue_opts =
-          author_opts
-          |> Keyword.put(:assignees, [human])
-          |> Keyword.put(:labels, [@stage_label_prefix <> stage_role])
+        issue_opts = Keyword.put(author_opts, :assignees, [human])
 
         case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
           {:ok, number} ->
-            # STOP — le poller prend le relais (assignee humain + stage-marker → spawn le rôle).
+            # STOP — le poller prend le relais (issue assignée à l'humain → spawn le producteur).
             result = %{
               "status" => "ticket_created",
               "ticket" => "#{repo}##{number}",
               "repo" => repo,
-              "assignee" => human,
-              "stage" => stage_role
+              "assignee" => human
             }
 
             {:ok, %{content: [json(result)]}, state}

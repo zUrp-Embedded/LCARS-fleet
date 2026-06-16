@@ -19,72 +19,42 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     }
   end
 
-  # Stage-marker map d'un label Gitea (`%{"name" => "lcars-stage:<role>"}`).
-  defp stage(role), do: %{"name" => Fleet.Pilot.Labels.stage(role)}
-
-  # Ticket-producteur du modèle forge-state-machine (DN §1) : assignee = l'HUMAIN owner,
-  # rôle porté par le stage-marker `lcars-stage:engineer`. `fields` override (labels, body…).
+  # Ticket-producteur du modèle forge-state-machine (DN §1) : assignee = l'HUMAIN owner. Le rôle
+  # producteur est un INVARIANT côté poller (`:producer_role`, défaut engineer), pas un marqueur
+  # par-ticket. `fields` override (labels, body…).
   defp eng_issue(fields \\ %{}) do
-    issue(
-      Map.merge(
-        %{"assignees" => [%{"login" => "lordzurp"}], "labels" => [stage("engineer")]},
-        fields
-      )
-    )
+    issue(Map.merge(%{"assignees" => [%{"login" => "lordzurp"}]}, fields))
   end
 
   describe "decide/2 (pure)" do
-    test "stage-marker lcars-stage:engineer + assignee humain → {:spawn, engineer}" do
-      payload = eng_issue()
+    test "issue assignée (humain) → {:spawn, producteur} (engineer par défaut)" do
+      assert {:spawn, "engineer", _} = StageDispatcher.decide(eng_issue(), &load_role/1)
+    end
+
+    test "le rôle spawné est le PRODUCTEUR (invariant), pas l'assignee (= l'humain)" do
+      # l'assignee n'est PAS le rôle ; quel que soit l'owner, on spawn le producteur (engineer).
+      payload = issue(%{"assignees" => [%{"login" => "anyone"}]})
       assert {:spawn, "engineer", _} = StageDispatcher.decide(payload, &load_role/1)
     end
 
-    test "le rôle vient du stage-marker (label), pas de l'assignee humain" do
-      # assignee = l'HUMAIN (point fixe), rôle porté par lcars-stage:qualifier → spawn qualifier.
-      payload =
-        issue(%{
-          "assignees" => [%{"login" => "lordzurp"}],
-          "labels" => [%{"name" => "lcars-stage:qualifier"}]
-        })
-
-      assert {:spawn, "qualifier", _} = StageDispatcher.decide(payload, &load_role/1)
-    end
-
     test "verrou lcars-in-flight présent → {:skip, :in_flight}" do
-      payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}, stage("engineer")]})
+      payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}]})
       assert {:skip, :in_flight} = StageDispatcher.decide(payload, &load_role/1)
     end
 
     test "verrou HUMAIN lcars-awaits-human → {:skip, :awaits_human} (A2.3b, pas de re-dispatch)" do
-      # stage-marker présent MAIS lcars-awaits-human posé → skip (sinon, après l'unlock
-      # d'un verdict escalate, le poller relancerait le jugement en boucle).
-      payload =
-        issue(%{
-          "assignees" => [%{"login" => "lordzurp"}],
-          "labels" => [%{"name" => "lcars-awaits-human"}, stage("gatekeeper")]
-        })
-
+      payload = eng_issue(%{"labels" => [%{"name" => "lcars-awaits-human"}]})
       assert {:skip, :awaits_human} = StageDispatcher.decide(payload, &load_role/1)
     end
 
-    test "stage-marker présent mais pas d'assignee (pas d'humain owner) → {:skip, :no_assignee}" do
-      payload = issue(%{"labels" => [stage("engineer")]})
-      assert {:skip, :no_assignee} = StageDispatcher.decide(payload, &load_role/1)
+    test "pas d'assignee (pas d'humain owner) → {:skip, :no_assignee}" do
+      assert {:skip, :no_assignee} = StageDispatcher.decide(issue(%{}), &load_role/1)
     end
 
-    test "pas de stage-marker (assignee humain seul) → {:skip, :no_stage}" do
-      payload = issue(%{"assignees" => [%{"login" => "lordzurp"}]})
-      assert {:skip, :no_stage} = StageDispatcher.decide(payload, &load_role/1)
-    end
-
-    test "stage-marker d'un rôle inconnu (cap-profile illisible) → {:skip, :no_role}" do
-      payload =
-        issue(%{
-          "assignees" => [%{"login" => "lordzurp"}],
-          "labels" => [stage("plombier")]
-        })
-
-      assert {:skip, :no_role} = StageDispatcher.decide(payload, &load_role/1)
+    test "cap-profile producteur illisible → {:skip, :no_role}" do
+      # loader qui échoue pour le rôle producteur → :no_role (pas de spawn à l'aveugle).
+      failing_load = fn _role -> {:error, :not_found} end
+      assert {:skip, :no_role} = StageDispatcher.decide(eng_issue(), failing_load)
     end
   end
 
@@ -226,32 +196,6 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert_received {:woke, "issue-42-engineer-1700000000"}
     end
 
-    test "F077/F078 : rôle juge (mandate_kind: judge) → mandat = GateBrief désamorcé, PAS le body" do
-      # stage-marker gatekeeper. Son cap-profile déclare `mandate_kind: judge` (StubLoader) → le mandat
-      # doit être un GateBrief I-CBC (« JUGER »), jamais le corps exécutable de l'issue (PASSE-9).
-      payload =
-        issue(%{
-          "assignees" => [%{"login" => "lordzurp"}],
-          "labels" => [stage("gatekeeper")],
-          "body" => "crée X et commit"
-        })
-
-      opts =
-        dispatch_opts(forge_opts: [_test_pred: {:ok, %{"commit" => "abc", "summary" => "done"}}])
-
-      assert {:ok, {:spawned, "issue-42-gatekeeper-1700000000", "gatekeeper"}} =
-               StageDispatcher.dispatch_issue(payload, opts)
-
-      assert_received {:spawned, "issue-42", spawn_opts}
-      mandate = spawn_opts[:mandate]
-      assert mandate =~ "JUGER"
-      refute mandate =~ "crée X et commit"
-
-      # Le MÊME mandat juge est enqueué (sinon le pod pullerait le body brut via get_task → PASSE-9).
-      assert_received {:enqueued, "issue-42-gatekeeper-1700000000", attrs}
-      assert attrs.brief == mandate
-    end
-
     test "F181 : échec POST-verrou (enqueue KO) → verrou retiré + pod tué (pas de stuck)" do
       payload = eng_issue()
       opts = dispatch_opts(task_queue: FailTaskQueue)
@@ -267,15 +211,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "skip in_flight : pas de spawn" do
-      payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}, stage("engineer")]})
+      payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}]})
 
       assert {:skipped, :in_flight} = StageDispatcher.dispatch_issue(payload, dispatch_opts())
-      refute_received {:spawned, _, _}
-    end
-
-    test "skip no_stage (assignee humain, pas de stage-marker) : pas de spawn" do
-      payload = issue(%{"assignees" => [%{"login" => "lordzurp"}]})
-      assert {:skipped, :no_stage} = StageDispatcher.dispatch_issue(payload, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 

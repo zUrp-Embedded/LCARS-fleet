@@ -310,10 +310,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       Sim.start_link(%{
         "number" => 1,
         "state" => "open",
-        # `type:poc` = trigger d'entrée carte (legacy Entry, FALL ②.3). `lcars-stage:engineer` =
-        # stage-marker du modèle forge-state-machine : c'est LUI qui porte le rôle pour `decide`
-        # (l'assignee=engineer posé par Entry est désormais inerte côté dispatch — retiré avec la carte).
-        "labels" => [%{"name" => "type:poc"}, %{"name" => "lcars-stage:engineer"}],
+        # `type:poc` = trigger d'entrée carte (legacy Entry, FALL ②.3). En no-label, `decide` spawn
+        # le producteur (engineer) pour toute issue assignée — pas besoin de stage-marker.
+        "labels" => [%{"name" => "type:poc"}],
         "assignees" => [],
         "comments" => []
       })

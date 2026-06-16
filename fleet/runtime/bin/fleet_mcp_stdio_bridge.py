@@ -80,7 +80,7 @@ TOOLS = [
         },
     },
     # create_ticket — canal DELEGATION (architecte). tools/call forwarde au central (qui porte la
-    # logique : create_issue assignee=humain + stage-marker, puis STOP — le poller livre, BL-050).
+    # logique : create_issue assignee=humain, puis STOP — le poller livre, BL-050).
     # NB dette : le bridge devrait proxy tools/list vers le central pour auto-exposer les futurs tools.
     {
         "name": "create_ticket",
