@@ -9,6 +9,12 @@ defmodule Fleet.Pilot.HopConsumerTest do
       send(self(), {:hop, hop, opts})
       {:ok, :captured}
     end
+
+    # BLOCKED_DEP : escalade producteur bloqué → await_human (capturé pour assertion).
+    def await_human(hop, opts) do
+      send(self(), {:await_human, hop, opts})
+      {:ok, :awaiting_human}
+    end
   end
 
   # Seam Loader (A2.4) : carte engineer-first lineaire (Corr.3) ; "bad" raise (introuvable).
@@ -118,6 +124,34 @@ defmodule Fleet.Pilot.HopConsumerTest do
       assert {:ok, :captured} = HopConsumer.maybe_complete(stage_payload(), state())
       assert_received {:hop, hop2, _}
       refute Map.has_key?(hop2, :eng_summary)
+    end
+
+    test "producteur BLOQUÉ (result.blocked) -> await_human (motif=summary), PAS complete_pr (anti-wedge)" do
+      payload =
+        stage_payload(%{
+          "result" => %{"blocked" => true, "summary" => "Manque la spec du protocole X"}
+        })
+
+      assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(payload, state())
+
+      # escalade humaine, pas une publish vide (qui wedgerait :no_deliverable_commit)
+      assert_received {:await_human, hop, _opts}
+      refute_received {:hop, _, _}
+      assert hop.issue_number == 42
+      assert hop.role == "engineer"
+      assert hop.decision == :blocked_dep
+      assert hop.comment_body =~ "BLOQUÉ"
+      assert hop.comment_body =~ "Manque la spec du protocole X"
+    end
+
+    test "blocked seulement pour un PRODUCTEUR (un juge avec blocked passe par le chemin normal)" do
+      # reviewer = juge (deliverable_mode payload) → blocked ignoré, chemin normal (hop capturé).
+      payload =
+        stage_payload(%{"role" => "reviewer", "result" => %{"blocked" => true}})
+
+      assert {:ok, :captured} = HopConsumer.maybe_complete(payload, state())
+      assert_received {:hop, _hop, _}
+      refute_received {:await_human, _, _}
     end
   end
 

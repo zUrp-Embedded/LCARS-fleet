@@ -289,21 +289,60 @@ defmodule Fleet.Pilot.HopConsumer do
   defp run_hop(payload, n, state) do
     role = payload["role"]
 
-    # A2 : si le payload porte le contexte carte (pipeline+stage), le stage suivant
-    # est calculé par CarteNav (reassign vers le rôle suivant, ou close si terminal).
-    # Sans contexte carte (A1 1-stage) → next_assignee nil → close. Une erreur de carte
-    # (DAG, stage inconnu) NE misroute PAS : elle remonte (le système n'avance pas à l'aveugle).
-    case resolve_next(payload, n, state) do
-      {:error, reason} ->
-        {:error, reason}
+    cond do
+      # BLOCKED_DEP : un PRODUCTEUR qui ne peut pas livrer (dépendance/info manquante) marque
+      # `blocked: true` dans son result → ESCALADE humaine via `await_human` (motif posté = sa voix
+      # `summary` + `lcars-awaits-human` + unlock → poller SKIP, l'humain tranche via l'arch). SINON la
+      # publish sans commit fail-loud `:no_deliverable_commit` = WEDGE silencieux (prouvé live morse :
+      # l'eng honnête refusait de deviner → blocage non escaladé). Réutilise tout le filet await_human.
+      producer?(role, state) and blocked_flag?(unwrap_worker_envelope(payload["result"] || %{})) ->
+        escalate_blocked_producer(payload, n, role, state)
 
-      # B (§L441) — escalade gatekeeper : remonte au handle_info qui stocke `gate_evals`.
-      {:escalate, corr, eval_ctx} ->
-        {:escalate, corr, eval_ctx}
+      true ->
+        # A2 : si le payload porte le contexte carte (pipeline+stage), le stage suivant
+        # est calculé par CarteNav (reassign vers le rôle suivant, ou close si terminal).
+        # Sans contexte carte (A1 1-stage) → next_assignee nil → close. Une erreur de carte
+        # (DAG, stage inconnu) NE misroute PAS : elle remonte (le système n'avance pas à l'aveugle).
+        case resolve_next(payload, n, state) do
+          {:error, reason} ->
+            {:error, reason}
 
-      {:ok, intent, {next_assignee, next_stage}} ->
-        complete_business_hop(payload, n, role, intent, next_assignee, next_stage, state)
+          # B (§L441) — escalade gatekeeper : remonte au handle_info qui stocke `gate_evals`.
+          {:escalate, corr, eval_ctx} ->
+            {:escalate, corr, eval_ctx}
+
+          {:ok, intent, {next_assignee, next_stage}} ->
+            complete_business_hop(payload, n, role, intent, next_assignee, next_stage, state)
+        end
     end
+  end
+
+  # BLOCKED_DEP — escalade un producteur bloqué vers l'humain (await_human), motif = sa voix `summary`.
+  # Réutilise le filet existant (comment dédupé + lcars-awaits-human + unlock) au lieu d'un wedge.
+  defp blocked_flag?(m) when is_map(m), do: m["blocked"] == true
+  defp blocked_flag?(_), do: false
+
+  defp escalate_blocked_producer(payload, n, role, state) do
+    reason = eng_summary(payload)
+
+    lead =
+      if reason == "",
+        do: "🚧 **#{role} BLOQUÉ** (dépendance/info manquante) — motif non fourni.",
+        else: "🚧 **#{role} BLOQUÉ** (dépendance/info manquante) :\n\n#{reason}"
+
+    hop = %{
+      repo: state.repo,
+      issue_number: n,
+      role: role,
+      decision: :blocked_dep,
+      comment_body: lead
+    }
+
+    hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
+
+    run_completion(state, "##{n} (blocked)", fn ->
+      state.hop_completer.await_human(hop, hc_opts)
+    end)
   end
 
   # F067 : exécute la complétion d'un hop via le seam `hop_runner`. SYNC (défaut) → exécute, logge

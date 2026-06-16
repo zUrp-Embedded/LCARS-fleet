@@ -209,6 +209,8 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # Voix de l'eng (info sortante) : le mandat demande un `summary` posté sur la PR par le système.
       assert opts[:mandate] =~ "summary"
       assert opts[:mandate] =~ "Ta voix"
+      # Blocked_dep : le mandat dit à l'eng de marquer `blocked: true` plutôt que deviner/wedge.
+      assert opts[:mandate] =~ "blocked"
 
       # le mandat est ENQUEUÉ en TaskQueue (sinon le pod se croit bootstrap → idle ; bug PASSE-9)
       assert_received {:enqueued, "issue-42-engineer-1700000000", attrs}

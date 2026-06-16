@@ -53,6 +53,10 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   **Voix de l'eng (info SORTANTE)** : si le producteur rend un `summary` dans `submit_result` (extrait par
   `HopConsumer`, coercé `safe_str`), le système le poste en **commentaire PR `as_role` engineer** (livraison
   ET rework) — l'eng n'est plus muet sur la forge (jumeau sortant de l'anti-famine ; le mandat l'élicite).
+  **Blocked_dep** : si le producteur rend `blocked: true` (dépendance/info manquante), `HopConsumer` route vers
+  `await_human` (motif = son `summary` + `lcars-awaits-human` + unlock → poller SKIP, l'humain tranche via l'arch)
+  AU LIEU d'une publish vide (`:no_deliverable_commit` = wedge silencieux). Le mandat dit à l'eng de marquer
+  `blocked` plutôt que deviner à l'aveugle.
   Identité ②.1e via `Fleet.Credentials.RoleToken` (poste EN SON NOM ; token absent → fallback système loggué).
   (Legacy carte multi-stage : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
 
