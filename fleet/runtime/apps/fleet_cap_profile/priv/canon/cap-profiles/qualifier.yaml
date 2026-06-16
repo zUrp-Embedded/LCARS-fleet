@@ -7,6 +7,11 @@ metadata:
   name: qualifier
   containment: bwrap
 spec:
+  # ②.1d — juge de PR (DN §1.4 : « les tests sont honnêtes », une REVIEW). Reçoit un GateBrief
+  # DÉSAMORCÉ (contexte + livrable + contrat de verdict, AUCUNE instruction exécutable — I-CBC) au lieu
+  # du corps de l'issue : sans ça (défaut `worker`), le qualifier exécuterait le build au lieu de juger.
+  # Dual d'entrée de deliverable_mode (sortie = `payload` par défaut : verdict, pas un patch git).
+  mandate_kind: judge
   scope:
     allowedTools:
       - Read
