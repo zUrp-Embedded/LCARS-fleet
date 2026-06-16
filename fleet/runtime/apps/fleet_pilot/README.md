@@ -32,8 +32,9 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   sont dispatchés PR-driven via `dispatch_review/2` (②.1d, **PR = machine à états**, DN §1.4-1.5,
   sans branch-protection — LCARS agrège, interim) : reviewers en attente → spawn le prochain juge (un à
   un, sérialisé par le verrou PR ; clone la **feature-branch** pour voir le diff) ; round terminé +
-  verdict agrégé `:changes_requested` → rework du producteur ; `:approved` → **merge FF scellé
-  `:gatekeeper_role`** (comment de fin honnête + close via `Closes #N`). **Passage de substance
+  verdict agrégé `:changes_requested` → rework du producteur ; `:approved` → **merge `rebase` scellé
+  `:gatekeeper_role`** (LINÉAIRE + gère un `main` avancé sous une PR parallèle — multi-ticket, cf.
+  `ForgeClient.merge_pr` ; comment de fin honnête + close via `Closes #N`). **Passage de substance
   (anti-famine-d'info, fix #1)** : le mandat **juge** (git-native) le POINTE sur son workspace
   (`git diff`) + porte le **critère** (body de l'issue, désamorcé I-CBC via `GateBrief :request`) ; le
   mandat **rework** injecte le **body des reviews REQUEST_CHANGES** (`ForgeClient.change_request_feedback/3`)

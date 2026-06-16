@@ -399,7 +399,8 @@ defmodule Fleet.Pilot.StageDispatcher do
   # approuvé → le système SCELLE. Modèle identité ②.1e : comment de fin + merge signés GATEKEEPER
   # (gardien des PRs — « c'est dans son nom » ; token de rôle, `as_role`). Comment HONNÊTE (principe
   # traça user : on ne ment pas, on montre) : livré par l'eng, validé par les juges (APPROVED), mergé
-  # par le système (branch-protection OFF en dev → LCARS agrège, pas Gitea — explicité). Le merge FF
+  # par le système (branch-protection OFF en dev → LCARS agrège, pas Gitea — explicité). Le merge
+  # `rebase` (LINÉAIRE, gère un `main` avancé sous une PR parallèle — multi-ticket, cf. merge_pr)
   # auto-close l'issue via `Closes #N` du body PR → close APRÈS merge, jamais avant. Pas de verrou
   # (poller mono-process) ; PR déjà mergée → 409 → la PR disparaît au tick suivant (idempotent).
   defp promote_pr(pr_number, head, ctx) do
@@ -421,7 +422,7 @@ defmodule Fleet.Pilot.StageDispatcher do
            :ok <- merge_step(ctx.forge, ctx.repo, pr_number, gk_opts) do
         Logger.info(
           "StageDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
-            "(juges OK → merge FF, scellé gatekeeper, close via Closes ##{issue_n})"
+            "(juges OK → merge rebase, scellé gatekeeper, close via Closes ##{issue_n})"
         )
 
         {:ok, {:merged, pr_number}}

@@ -869,8 +869,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
-  describe "merge_pr/3 (PROMOTE — cascade FF → rebase)" do
-    # Réponses ORDONNÉES sur le chemin merge (appelé 1× FF, puis 1× rebase) via Agent compteur.
+  describe "merge_pr/3 (PROMOTE — rebase single-call + retry transient)" do
+    # Réponses ORDONNÉES sur le chemin merge (rappelé en cas de retry) via Agent compteur.
     defp seq_handler(responses) do
       {:ok, agent} = Agent.start_link(fn -> responses end)
 
@@ -882,44 +882,69 @@ defmodule Fleet.Pilot.ForgeClientTest do
       end
     end
 
-    test "FF réussit du premier coup → :ok (pas de fallback)" do
+    # délai 0 dans les tests → pas de Process.sleep réel.
+    defp merge_opts(handlers), do: [{:merge_retry_delay_ms, 0} | opts(handlers)]
+
+    test "rebase réussit du premier coup → :ok" do
       handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}}
 
-      assert :ok = ForgeClient.merge_pr("fleet/proj", 9, opts(handlers))
+      assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
 
-    test "FF refusée (main avancé sous une PR parallèle) → fallback rebase → :ok (multi-ticket, live morse)" do
-      # 1er POST (fast-forward-only) → 409 ; 2e POST (rebase) → 200. Livrables disjoints → rebase passe.
+    test "transitoire « try again later » (405) PUIS 200 → retry → :ok (mergeabilité en cours, live morse)" do
+      # 1er POST → 405 checking ; 2e POST (retry) → 200 (la mergeabilité s'est stabilisée).
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
-          seq_handler([{409, %{"message" => "not fast-forward"}}, {200, %{}}])
+          seq_handler([{405, %{"message" => "Please try again later"}}, {200, %{}}])
       }
 
-      assert :ok = ForgeClient.merge_pr("fleet/proj", 9, opts(handlers))
+      assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
 
-    test "FF ET rebase échouent (vrai conflit de contenu) → fail-loud sur l'erreur rebase" do
+    test "« try again later » persistant (3×405) → fail-loud {:http, 405, _} (retry borné)" do
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
           seq_handler([
-            {409, %{"message" => "not fast-forward"}},
-            {409, %{"message" => "rebase conflict"}}
+            {405, %{"message" => "Please try again later"}},
+            {405, %{"message" => "Please try again later"}},
+            {405, %{"message" => "Please try again later"}}
           ])
       }
 
-      assert {:error, {:http, 409, _}} = ForgeClient.merge_pr("fleet/proj", 9, opts(handlers))
+      assert {:error, {:http, 405, _}} =
+               ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
 
-    test "method: forcé court-circuite le cascade (un seul style, FF 409 → fail-loud)" do
+    test "erreur NON-transitoire (409 conflit) → fail-loud IMMÉDIAT, aucun retry" do
+      # Un seul élément en séquence : un retry tenté donnerait 500 (épuisé) → l'assert sur 409 le prouve.
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
-          {409, %{"message" => "Merge conflict"}}
+          seq_handler([{409, %{"message" => "Merge conflict"}}])
       }
 
       assert {:error, {:http, 409, _}} =
-               ForgeClient.merge_pr("fleet/proj", 9, [
-                 {:method, "fast-forward-only"} | opts(handlers)
-               ])
+               ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
+    end
+
+    test "405 NON-checking (ex. not enough approvals) → fail-loud, pas de retry" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
+          seq_handler([{405, %{"message" => "Does not have enough approvals"}}])
+      }
+
+      assert {:error, {:http, 405, _}} =
+               ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
+    end
+
+    test "opts[:method] force le style (ex. fast-forward-only)" do
+      handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}}
+
+      assert :ok =
+               ForgeClient.merge_pr(
+                 "fleet/proj",
+                 9,
+                 [{:method, "fast-forward-only"} | merge_opts(handlers)]
+               )
     end
   end
 end

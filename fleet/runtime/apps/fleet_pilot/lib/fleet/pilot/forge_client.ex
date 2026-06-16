@@ -473,53 +473,62 @@ defmodule Fleet.Pilot.ForgeClient do
   defp review_event(other), do: {:error, {:invalid_review_event, other}}
 
   @doc """
-  Merge (PROMOTE) la PR `index`. STRATÉGIE EN CASCADE : `fast-forward-only` d'abord (Gitea
-  `POST /repos/{repo}/pulls/{index}/merge`, zéro commit rewriting, SHAs préservés) ; si la FF
-  échoue, FALLBACK `rebase` (rejoue les commits sur le `main` courant → reste LINÉAIRE, pas de
-  merge commit, doctrine append-only préservée).
+  Merge (PROMOTE) la PR `index` en **`rebase`** (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
+  `Do: rebase` par défaut) : rejoue les commits de la PR sur le `main` courant puis fast-forward →
+  reste **LINÉAIRE** (pas de merge commit, doctrine append-only préservée) ET gère un `main` qui a
+  avancé sous la PR (MULTI-TICKET PARALLÈLE : 2 tickets disjoints → 2 PR du même `main` → la 1ʳᵉ
+  merge avance `main`, la 2ᵉ n'est plus FF-able mais reste mergeable → `rebase` la passe ; `fast-forward-only`
+  la wedgeait à l'infini — fait live DUR, PoC morse).
 
-  Le fallback couvre le **MULTI-TICKET PARALLÈLE** (fait live DUR, PoC morse) : 2 tickets disjoints
-  → 2 PR branchées du MÊME `main` → la 1ʳᵉ FF-merge avance `main`, la 2ᵉ n'est PLUS descendante
-  linéaire → FF impossible alors que la PR est parfaitement mergeable (livrables disjoints, wedgée à
-  l'infini sinon). L'ancien invariant « FF-fail = violation serial → fail-loud » était calibré
-  **single-ticket** ; le multi-ticket parallèle le viole LÉGITIMEMENT. Si le `rebase` échoue AUSSI =
-  vrai conflit de contenu (livrables qui se recouvrent) → l'erreur remonte (fail-loud, rework légitime,
-  jamais un merge-commit silencieux qui casserait la linéarité). `opts[:method]` force un style unique
-  (court-circuite le cascade — utilisé par les tests / un besoin futur).
+  **PAS de cascade FF→rebase** : une 1ʳᵉ tentative qui échoue rejette la PR en état « checking »
+  (Gitea recalcule la mergeabilité de façon ASYNCHRONE), et la 2ᵉ tentative dos-à-dos tape dans cette
+  fenêtre → `405 « Please try again later »` (prouvé live : double-appel = double-405 ; `rebase` seul
+  sur une PR stable = 200). Donc UN SEUL appel, et le `405 try-again-later` est traité comme un
+  **TRANSITOIRE** (retry borné `@merge_checking_retries` × `merge_retry_delay_ms`, défaut 800ms — la
+  mergeabilité se stabilise en ~1 calcul). Tout autre échec (vrai conflit, pas d'approbations sous
+  branch-protection) remonte tel quel (fail-loud). `opts[:method]` force un style (ex. tests).
   """
+  @merge_checking_retries 3
   @spec merge_pr(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def merge_pr(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
     with {:ok, config} <- resolve_config(opts) do
-      case Keyword.get(opts, :method) do
-        nil -> merge_with_ff_then_rebase(config, repo, index)
-        method -> do_merge(config, repo, index, method)
-      end
+      method = Keyword.get(opts, :method, "rebase")
+      delay = Keyword.get(opts, :merge_retry_delay_ms, 800)
+      do_merge(config, repo, index, method, delay, @merge_checking_retries)
     end
   end
 
-  # FF d'abord (SHAs préservés) ; sur échec, `rebase` (linéaire, gère un `main` avancé sous une PR
-  # parallèle). `rebase` est ⊇ FF (réussit dès qu'aucun conflit de contenu) ; s'il échoue → vrai
-  # conflit → on remonte SON erreur (fail-loud).
-  defp merge_with_ff_then_rebase(config, repo, index) do
-    case do_merge(config, repo, index, "fast-forward-only") do
-      :ok ->
+  # UN appel `Do: method` ; retry borné UNIQUEMENT sur le transitoire « try again later » (mergeabilité
+  # en cours de calcul côté Gitea). Toute autre erreur = définitive → remonte (fail-loud).
+  defp do_merge(config, repo, index, method, delay, attempts_left) do
+    case http_post(config, "/repos/#{repo}/pulls/#{index}/merge", %{"Do" => method}) do
+      {:ok, _} ->
         :ok
 
-      {:error, _ff_reason} ->
-        Logger.info(
-          "ForgeClient.merge_pr ##{index}: FF refusée (main avancé ?) → fallback rebase"
-        )
+      {:error, {:http, 405, body}} = err ->
+        if attempts_left > 1 and merge_checking?(body) do
+          Logger.info(
+            "ForgeClient.merge_pr ##{index}: mergeabilité en cours (« try again later ») → " <>
+              "retry dans #{delay}ms (#{attempts_left - 1} restants)"
+          )
 
-        do_merge(config, repo, index, "rebase")
+          Process.sleep(delay)
+          do_merge(config, repo, index, method, delay, attempts_left - 1)
+        else
+          err
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
 
-  defp do_merge(config, repo, index, method) do
-    case http_post(config, "/repos/#{repo}/pulls/#{index}/merge", %{"Do" => method}) do
-      {:ok, _} -> :ok
-      {:error, _} = err -> err
-    end
-  end
+  # Transitoire Gitea : la mergeabilité d'une PR est recalculée en async (après création / push / un
+  # `main` avancé) → toute tentative de merge pendant ce calcul renvoie 405 « Please try again later ».
+  defp merge_checking?(body) when is_map(body),
+    do: body |> Map.get("message", "") |> String.downcase() |> String.contains?("try again later")
+
+  defp merge_checking?(_), do: false
 
   @doc """
   Liste les PR OUVERTES du `repo` (Gitea `GET /repos/{repo}/pulls?state=open`). Brique du dispatch
