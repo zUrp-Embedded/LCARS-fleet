@@ -440,15 +440,28 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # ②.1d — juge SANS carte : la review native a déjà été postée par `complete_judge` (`record_review`,
-  # signée par le token du juge). Il ne reste qu'à lever le verrou de la PR — le merge/rework est décidé
-  # par le poller (`dispatch_review`) sur l'état-PR AGRÉGÉ, pas par l'intent d'un pod juge isolé (sinon
-  # le 1er juge mergerait avant le second).
+  # signée par le token du juge). On (1) RETIRE le juge de `requested_reviewers` (Gitea ne le vide pas
+  # de façon fiable → sinon le poller le re-dispatche en boucle, vérifié live #6) puis (2) lève le
+  # verrou de la PR. Le merge/rework est décidé par le poller (`dispatch_review`) sur l'état-PR AGRÉGÉ
+  # quand TOUS les juges ont été retirés, pas par l'intent d'un pod juge isolé.
   defp route(%{intent: :reviewed} = hop, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
-    with {:ok, _} <- unlock(forge, hop.repo, lock_number(hop, pr), forge_opts) do
+    with {:ok, _} <-
+           unrequest_review_step(forge, hop.repo, pr, Map.fetch!(hop, :role), forge_opts),
+         {:ok, _} <- unlock(forge, hop.repo, lock_number(hop, pr), forge_opts) do
       {:ok, :reviewed}
+    end
+  end
+
+  # Retire le juge de `requested_reviewers` (fail-loud : un échec laisse la PR verrouillée → le poller
+  # SKIP, pas de boucle, surfacé — vs un best-effort qui re-bouclerait). La review postée reste comptée.
+  defp unrequest_review_step(forge, repo, pr, role, forge_opts) do
+    case forge.unrequest_review(repo, pr, [role], forge_opts) do
+      :ok -> {:ok, :unrequested}
+      {:ok, _} -> {:ok, :unrequested}
+      {:error, reason} -> {:error, {:unrequest_review, reason}}
     end
   end
 

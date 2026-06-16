@@ -392,6 +392,32 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
+  RETIRE une review-request des `reviewers` sur la PR `index` (Gitea
+  `DELETE /repos/{repo}/pulls/{index}/requested_reviewers`, body `{reviewers}`).
+
+  **②.1d — pourquoi le SYSTÈME retire explicitement** : Gitea 1.26 ne vide PAS de façon fiable
+  `requested_reviewers` quand un reviewer poste sa review (vérifié live #6 : un juge ayant APPROUVÉ
+  restait dans la liste → le poller le re-dispatchait à l'infini). Le runtime reprend donc la main :
+  après que le système a enregistré la review d'un juge (`record_review`), il retire ce juge de la
+  liste → `requested_reviewers` redevient le signal fiable « juges restant à juger » pour le poller.
+  La review POSTÉE n'est pas affectée (elle reste dans la liste des reviews → comptée à l'agrégat).
+  Idempotent (retirer un reviewer déjà absent = no-op forge).
+  """
+  @spec unrequest_review(String.t(), integer(), [String.t()], Keyword.t()) ::
+          :ok | {:error, term()}
+  def unrequest_review(repo, index, reviewers, opts \\ [])
+      when is_binary(repo) and is_integer(index) and is_list(reviewers) do
+    with {:ok, config} <- resolve_config(opts) do
+      case request(config, :delete, "/repos/#{repo}/pulls/#{index}/requested_reviewers", %{
+             reviewers: reviewers
+           }) do
+        {:ok, _} -> :ok
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
   Poste une review native sur la PR `index` (Gitea `POST /repos/{repo}/pulls/{index}/reviews`).
   `event` ∈ `:approve | :request_changes | :comment` → c'est le DOMICILE durable du verdict de
   gate (review native traçable, vs l'ancien comment-JSON maison). `body` = le verdict lisible.

@@ -212,11 +212,13 @@ defmodule Fleet.Pilot.HopConsumerTest do
 
     test "sans carte, un JUGE (role payload) -> :reviewed + review_event mappe du gate-decision (②.1d)" do
       # role "qualifier" => dmode = "payload" => juge. Le verdict du pod (gate-decision) est mappe en
-      # event de review : continue->approve, abandon->request_changes, autre->comment (fail-closed).
+      # event de review : continue->approve ; TOUT le reste->request_changes (fail-closed DÉCISIF :
+      # un COMMENT non-décisif ferait boucler le juge, vérifié live #6).
       for {decision, event} <- [
             {"continue", :approve},
             {"abandon", :request_changes},
-            {"halt_wait_input", :comment}
+            {"halt_wait_input", :request_changes},
+            {"garbage_unparseable", :request_changes}
           ] do
         payload = stage_payload(%{"role" => "qualifier", "result" => %{"decision" => decision}})
 

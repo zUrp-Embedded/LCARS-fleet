@@ -762,6 +762,14 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert :ok = ForgeClient.request_review("fleet/proj", 9, ["Qualifier"], opts(handlers))
     end
 
+    test "unrequest_review → DELETE requested_reviewers, :ok (②.1d : le système vide la requête)" do
+      handlers = %{
+        {"DELETE", "/api/v1/repos/fleet/proj/pulls/9/requested_reviewers"} => {204, ""}
+      }
+
+      assert :ok = ForgeClient.unrequest_review("fleet/proj", 9, ["qualifier"], opts(handlers))
+    end
+
     test "post_review :approve poste le verdict, :ok" do
       handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/reviews"} => {200, %{"id" => 5}}}
 

@@ -95,6 +95,11 @@ defmodule Fleet.Pilot.HopCompleterTest do
       :ok
     end
 
+    def unrequest_review(_repo, pr, reviewers, _opts) do
+      send(self(), {:unrequest_review, pr, reviewers})
+      :ok
+    end
+
     def merge_pr(_repo, pr, _opts) do
       send(self(), {:merge, pr})
       :ok
@@ -478,6 +483,9 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :approve, _}
+
+      # le juge est RETIRÉ de requested_reviewers (Gitea ne le vide pas → sinon re-dispatch en boucle)
+      assert_received {:unrequest_review, 7, ["qualifier"]}
       # juge : verrou sur la PR (dispatch_review)
       assert_received {:unlock, 7, "lcars-in-flight"}
 
@@ -486,12 +494,13 @@ defmodule Fleet.Pilot.HopCompleterTest do
       refute_received {:request_review, _, _}
     end
 
-    test "②.1d juge :reviewed REQUEST_CHANGES → review request_changes, unlock la PR, pas de merge" do
+    test "②.1d juge :reviewed REQUEST_CHANGES → review request_changes, unrequest, unlock la PR, pas de merge" do
       hop = judge_hop(:reviewed, %{role: "qualifier", review_event: :request_changes})
 
       assert {:ok, :reviewed} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
 
       assert_received {:review, 7, :request_changes, _}
+      assert_received {:unrequest_review, 7, ["qualifier"]}
       assert_received {:unlock, 7, _}
       refute_received {:merge, _}
     end

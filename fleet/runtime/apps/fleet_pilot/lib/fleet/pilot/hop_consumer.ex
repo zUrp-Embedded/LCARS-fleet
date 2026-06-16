@@ -389,8 +389,11 @@ defmodule Fleet.Pilot.HopConsumer do
   # ②.1d — pour un JUGE no-carte (intent `:reviewed`), le verdict de review (APPROVE/REQUEST_CHANGES)
   # est lu du gate-decision rendu par le pod (GateBrief : `continue`/`abandon`). On le mappe ici et on
   # le porte dans le hop (`:review_event`) → `HopCompleter.record_review` poste la review correspondante.
-  # `continue`→approve, `abandon`→request_changes, autre (redirect/escalate/halt/illisible)→`:comment`
-  # (fail-closed : PR en attente, ni mergée ni reworkée — escalade-gatekeeper-PR = backlog DN §1.5).
+  # `continue`→approve ; tout le reste (`abandon`/redirect/escalate/halt/illisible)→**request_changes**
+  # (fail-closed DÉCISIF). PAS `:comment` : une review COMMENT n'est pas décisive → le juge resterait
+  # « non tranché » et serait re-jugé en boucle (vérifié live #6). Un verdict non-`continue` = pas vert
+  # → on bloque le merge (rework), jamais un merge sur verdict douteux. (escalade-gatekeeper d'un verdict
+  # non-trivial = backlog DN §1.5 ; ici fail-closed strict.)
   defp maybe_put_review_event(hop, :judge, :reviewed, payload) do
     result = unwrap_worker_envelope(payload["result"] || %{})
     Map.put(hop, :review_event, review_event_for_decision(gate_decision(result)))
@@ -399,8 +402,7 @@ defmodule Fleet.Pilot.HopConsumer do
   defp maybe_put_review_event(hop, _pr_role, _intent, _payload), do: hop
 
   defp review_event_for_decision("continue"), do: :approve
-  defp review_event_for_decision("abandon"), do: :request_changes
-  defp review_event_for_decision(_other), do: :comment
+  defp review_event_for_decision(_other), do: :request_changes
 
   # Corr.3 (engineer-first) — classe le role qui finit. Producteur = role git_native (engineer) →
   # pousse le code, ouvre la PR (head = sa propre branche). Juge = role payload (qualifier/reviewer
