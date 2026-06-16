@@ -582,9 +582,10 @@ defmodule Fleet.Pilot.StageDispatcher do
       predecessor ||
         %{
           "livrable" =>
-            "git-native — le code à juger est dans TON workspace (la feature-branche est clonée). " <>
-              "Lance `git diff $(git merge-base HEAD main 2>/dev/null || echo main)..HEAD` (et `git show`) " <>
-              "pour voir les changements, puis juge-les contre le critère ci-dessous."
+            "git-native — le code à juger est checkout dans TON workspace. Le clone est mono-branche : " <>
+              "la base est `origin/main` (le ref local `main` N'EXISTE PAS). Le diff de la PR = " <>
+              "`git diff origin/main...HEAD` (trois points — point de divergence auto). `git log origin/main..HEAD` " <>
+              "pour les commits, `git show <sha>` pour le détail. Juge ces changements contre le critère ci-dessous."
         }
 
     # CRITÈRE de réussite = le body de l'issue (le mandat). Passé via `:request` → GateBrief le rend

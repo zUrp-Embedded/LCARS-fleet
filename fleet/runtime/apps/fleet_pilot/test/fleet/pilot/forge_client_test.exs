@@ -18,6 +18,15 @@ defmodule Fleet.Pilot.ForgeClientTest do
       key = {conn.method, conn.request_path}
 
       case Map.fetch(handlers, key) do
+        # Handler fonction (0-arité) : réponse calculée à l'appel → permet des réponses ORDONNÉES sur
+        # un même chemin appelé plusieurs fois (ex. cascade merge FF→rebase, via un Agent compteur).
+        {:ok, fun} when is_function(fun, 0) ->
+          {status, body} = fun.()
+
+          conn
+          |> Plug.Conn.put_resp_header("content-type", "application/json")
+          |> Plug.Conn.send_resp(status, JSON.encode!(body))
+
         {:ok, {status, body}} ->
           conn
           |> Plug.Conn.put_resp_header("content-type", "application/json")
@@ -860,20 +869,57 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
-  describe "merge_pr/3 (PROMOTE fast-forward-only)" do
-    test "merge FF → :ok" do
+  describe "merge_pr/3 (PROMOTE — cascade FF → rebase)" do
+    # Réponses ORDONNÉES sur le chemin merge (appelé 1× FF, puis 1× rebase) via Agent compteur.
+    defp seq_handler(responses) do
+      {:ok, agent} = Agent.start_link(fn -> responses end)
+
+      fn ->
+        Agent.get_and_update(agent, fn
+          [h | t] -> {h, t}
+          [] -> {{500, %{"message" => "séquence épuisée"}}, []}
+        end)
+      end
+    end
+
+    test "FF réussit du premier coup → :ok (pas de fallback)" do
       handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}}
 
       assert :ok = ForgeClient.merge_pr("fleet/proj", 9, opts(handlers))
     end
 
-    test "FF impossible (409) = invariant serial violé → fail-loud {:http, 409, _}" do
+    test "FF refusée (main avancé sous une PR parallèle) → fallback rebase → :ok (multi-ticket, live morse)" do
+      # 1er POST (fast-forward-only) → 409 ; 2e POST (rebase) → 200. Livrables disjoints → rebase passe.
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
+          seq_handler([{409, %{"message" => "not fast-forward"}}, {200, %{}}])
+      }
+
+      assert :ok = ForgeClient.merge_pr("fleet/proj", 9, opts(handlers))
+    end
+
+    test "FF ET rebase échouent (vrai conflit de contenu) → fail-loud sur l'erreur rebase" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
+          seq_handler([
+            {409, %{"message" => "not fast-forward"}},
+            {409, %{"message" => "rebase conflict"}}
+          ])
+      }
+
+      assert {:error, {:http, 409, _}} = ForgeClient.merge_pr("fleet/proj", 9, opts(handlers))
+    end
+
+    test "method: forcé court-circuite le cascade (un seul style, FF 409 → fail-loud)" do
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
           {409, %{"message" => "Merge conflict"}}
       }
 
-      assert {:error, {:http, 409, _}} = ForgeClient.merge_pr("fleet/proj", 9, opts(handlers))
+      assert {:error, {:http, 409, _}} =
+               ForgeClient.merge_pr("fleet/proj", 9, [
+                 {:method, "fast-forward-only"} | opts(handlers)
+               ])
     end
   end
 end

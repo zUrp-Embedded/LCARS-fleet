@@ -338,8 +338,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:mandate] =~ "JUGER"
 
       # Fix famine-d'info (juge) : predecessor vide (git-native) → le juge est POINTÉ sur son
-      # workspace (git diff) ET reçoit le CRITÈRE (body de l'issue, désamorcé en contexte).
-      assert spawn_opts[:mandate] =~ "git diff"
+      # workspace ET reçoit le CRITÈRE (body de l'issue, désamorcé en contexte).
+      # La base du diff est `origin/main` (clone mono-branche : le ref local `main` n'existe pas —
+      # bug live morse : `git diff main..HEAD` → fatal unknown revision → halt_wait_input intermittent).
+      assert spawn_opts[:mandate] =~ "git diff origin/main...HEAD"
       assert spawn_opts[:mandate] =~ "implémente le décodeur morse"
 
       # enqueue cible le pod_id pr-... ; ticket_id = l'issue

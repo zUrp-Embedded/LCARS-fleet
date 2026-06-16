@@ -473,21 +473,51 @@ defmodule Fleet.Pilot.ForgeClient do
   defp review_event(other), do: {:error, {:invalid_review_event, other}}
 
   @doc """
-  Merge (PROMOTE) la PR `index` en FAST-FORWARD-ONLY (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
-  `Do: fast-forward-only` par défaut). Sous bail serial + funnel append-only, la feature est
-  descendante linéaire de `main` → FF garanti, zéro merge commit. Un échec FF = invariant serial
-  violé (deux branches sur le même code) → fail-loud, PAS un conflit à résoudre. `opts[:method]`
-  override le style (`squash`/`merge`/`rebase`) si un jour nécessaire.
+  Merge (PROMOTE) la PR `index`. STRATÉGIE EN CASCADE : `fast-forward-only` d'abord (Gitea
+  `POST /repos/{repo}/pulls/{index}/merge`, zéro commit rewriting, SHAs préservés) ; si la FF
+  échoue, FALLBACK `rebase` (rejoue les commits sur le `main` courant → reste LINÉAIRE, pas de
+  merge commit, doctrine append-only préservée).
+
+  Le fallback couvre le **MULTI-TICKET PARALLÈLE** (fait live DUR, PoC morse) : 2 tickets disjoints
+  → 2 PR branchées du MÊME `main` → la 1ʳᵉ FF-merge avance `main`, la 2ᵉ n'est PLUS descendante
+  linéaire → FF impossible alors que la PR est parfaitement mergeable (livrables disjoints, wedgée à
+  l'infini sinon). L'ancien invariant « FF-fail = violation serial → fail-loud » était calibré
+  **single-ticket** ; le multi-ticket parallèle le viole LÉGITIMEMENT. Si le `rebase` échoue AUSSI =
+  vrai conflit de contenu (livrables qui se recouvrent) → l'erreur remonte (fail-loud, rework légitime,
+  jamais un merge-commit silencieux qui casserait la linéarité). `opts[:method]` force un style unique
+  (court-circuite le cascade — utilisé par les tests / un besoin futur).
   """
   @spec merge_pr(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def merge_pr(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
     with {:ok, config} <- resolve_config(opts) do
-      body = %{"Do" => Keyword.get(opts, :method, "fast-forward-only")}
-
-      case http_post(config, "/repos/#{repo}/pulls/#{index}/merge", body) do
-        {:ok, _} -> :ok
-        {:error, _} = err -> err
+      case Keyword.get(opts, :method) do
+        nil -> merge_with_ff_then_rebase(config, repo, index)
+        method -> do_merge(config, repo, index, method)
       end
+    end
+  end
+
+  # FF d'abord (SHAs préservés) ; sur échec, `rebase` (linéaire, gère un `main` avancé sous une PR
+  # parallèle). `rebase` est ⊇ FF (réussit dès qu'aucun conflit de contenu) ; s'il échoue → vrai
+  # conflit → on remonte SON erreur (fail-loud).
+  defp merge_with_ff_then_rebase(config, repo, index) do
+    case do_merge(config, repo, index, "fast-forward-only") do
+      :ok ->
+        :ok
+
+      {:error, _ff_reason} ->
+        Logger.info(
+          "ForgeClient.merge_pr ##{index}: FF refusée (main avancé ?) → fallback rebase"
+        )
+
+        do_merge(config, repo, index, "rebase")
+    end
+  end
+
+  defp do_merge(config, repo, index, method) do
+    case http_post(config, "/repos/#{repo}/pulls/#{index}/merge", %{"Do" => method}) do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
     end
   end
 
