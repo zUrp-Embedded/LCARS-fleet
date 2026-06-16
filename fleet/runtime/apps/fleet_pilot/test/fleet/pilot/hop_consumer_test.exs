@@ -28,6 +28,14 @@ defmodule Fleet.Pilot.HopConsumerTest do
     def load!(_), do: raise("pipeline introuvable")
   end
 
+  # Seam ForgeClient (②.1c) : le juge résout la branche producteur via la PR ouverte de l'issue
+  # (sans carte). Stub = une PR ouverte pour l'issue 42, head = la branche du producteur.
+  defmodule StubForge do
+    def list_open_pulls(_repo, _opts) do
+      {:ok, [%{"number" => 7, "head" => %{"ref" => "lcars/issue-42-engineer"}}]}
+    end
+  end
+
   # Seam deliverable_mode : engineer = git_native (producteur), tout le reste = payload (juge).
   defp dmode,
     do: fn
@@ -155,13 +163,18 @@ defmodule Fleet.Pilot.HopConsumerTest do
       payload =
         stage_payload(%{"role" => "reviewer", "pipeline" => "poc-cycle", "stage" => "review"})
 
-      assert {:ok, :captured} = HopConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
+      assert {:ok, :captured} =
+               HopConsumer.maybe_complete(
+                 payload,
+                 state(%{loader: StubLoader, forge_client: StubForge})
+               )
 
       assert_received {:hop, hop, _opts}
       assert hop.pr_role == :judge
       assert hop.intent == :promote
       assert hop.next_assignee == nil
-      # le juge review la PR du producteur (le stage git_native de la carte = engineer)
+
+      # le juge review la PR du producteur, résolue sans carte via la PR ouverte (head=producteur)
       assert hop.producer_branch == "lcars/issue-42-engineer"
       # un juge ne porte pas de deliverable_opts (il ne pousse pas)
       refute Map.has_key?(hop, :deliverable_opts)

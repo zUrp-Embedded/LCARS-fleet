@@ -387,10 +387,10 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # Corr.3 (engineer-first) — classe le role qui finit. Producteur = role git_native (engineer) →
   # pousse le code, ouvre la PR (head = sa propre branche). Juge = role payload (qualifier/reviewer
-  # en AVAL) → review la PR du producteur (head = la branche du stage git_native de la carte). Un
-  # juge sans producteur resoluble → `producer_branch` nil → `complete_pr` fail-loud
-  # `:no_producer_branch` (jamais un mauvais merge). Les stages design AMONT du producteur (architect)
-  # sont hors-scope Corr.3 (decision engineer-first, mapping PR).
+  # en AVAL) → review la PR du producteur (head = le head.ref de la PR ouverte de l'issue, résolu
+  # sans carte via `parse_feature_branch`, ②.1c). Un juge sans producteur resoluble → `producer_branch`
+  # nil → `complete_pr` fail-loud `:no_producer_branch` (jamais un mauvais merge). Les stages design
+  # AMONT du producteur (architect) sont hors-scope Corr.3 (decision engineer-first, mapping PR).
   defp classify_pr_role(payload, n, role, state) do
     if producer?(role, state) do
       {:producer, branch_for(n, role)}
@@ -406,32 +406,34 @@ defmodule Fleet.Pilot.HopConsumer do
 
   defp producer?(_role, _state), do: false
 
-  defp judge_producer_branch(payload, n, state) do
-    with pipeline when is_binary(pipeline) <- payload["pipeline"],
-         {:ok, carte} <- load_carte(state, pipeline),
-         {:ok, prole} <- producer_role(carte, state) do
-      branch_for(n, prole)
+  # Sans carte (forge-state-machine ②.1c) : le producteur = celui qui a OUVERT la PR de l'issue N.
+  # Sa branche = le `head.ref` de cette PR (`lcars/issue-N-<producteur>`), retrouvée en listant les PR
+  # ouvertes + `parse_feature_branch` (même pattern que le Poller). Le modèle 1-brique=1-producteur
+  # a retiré la carte (plus de `payload["pipeline"]` → l'ancienne résolution carte rendait nil → merge
+  # cassé). Aucune PR résoluble → nil → `complete_pr` fail-loud `:no_producer_branch` (jamais un
+  # mauvais merge).
+  defp judge_producer_branch(_payload, n, state) do
+    forge = state.forge_client || Fleet.Pilot.ForgeClient
+
+    with {:ok, pulls} <- forge.list_open_pulls(state.repo, state.forge_opts),
+         head when is_binary(head) <- producer_head_for_issue(pulls, n) do
+      head
     else
       _ -> nil
     end
   end
 
-  # Producteur de la carte = l'unique role git_native. 0 (carte tout-juges, anormal) ou ≥2 (ambigu)
-  # → nil en aval (fail-loud `complete_pr`), jamais une devinette.
-  defp producer_role(carte, state) do
-    producers =
-      carte
-      |> Map.get("stages", %{})
-      |> Map.values()
-      |> Enum.map(&Map.get(&1, "role"))
-      |> Enum.filter(&is_binary/1)
-      |> Enum.uniq()
-      |> Enum.filter(&producer?(&1, state))
+  # La branche producteur de l'issue N = le `head.ref` de la (1ʳᵉ) PR ouverte dont le head parse
+  # vers l'issue N. Ambiguïté (≥2 PR pour N — anormal) → la première ; aucune → nil (fail-loud aval).
+  defp producer_head_for_issue(pulls, n) do
+    Enum.find_value(pulls, fn pr ->
+      head = get_in(pr, ["head", "ref"]) || ""
 
-    case producers do
-      [prole] -> {:ok, prole}
-      _ -> {:error, :no_unique_producer}
-    end
+      case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+        {:ok, {^n, _role}} -> head
+        _ -> false
+      end
+    end)
   end
 
   # Defaut du seam : resout le deliverable_mode du role via le catalogue cap-profile (source unique,
