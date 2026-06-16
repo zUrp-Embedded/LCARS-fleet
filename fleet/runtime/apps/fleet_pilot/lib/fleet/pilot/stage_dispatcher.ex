@@ -26,9 +26,9 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   Sur `{:spawn, role, profile}`, applique l'**ordre canonique du spawn** (DN §6, label AVANT
   pod, sinon double-spawn) :
-    1. PUT label `lcars-in-flight` (verrou)
-    2. POST comment `[lock:<role>:<ts>]` (TTL / diagnostic recovery)
-    3. spawn le pod avec le `profile` déjà chargé par `decide` (`Spawner.spawn_pod(profile,
+    1. PUT label `lcars-in-flight` (le verrou = machine-state ; PAS de comment-lock dans le
+       ticket — le ticket garde du contenu humain, la recovery se fait sur la liveness du pod)
+    2. spawn le pod avec le `profile` déjà chargé par `decide` (`Spawner.spawn_pod(profile,
        ticket_id, mandate: …)`)
 
   Les modules `:forge_client`, `:loader`, `:spawner` sont des **seams** (défauts =
@@ -156,15 +156,10 @@ defmodule Fleet.Pilot.StageDispatcher do
             |> maybe_put_project(project)
             |> maybe_put_route(route)
 
-          # Ordre canonique du SPAWN (DN §6) : label AVANT pod.
+          # Ordre canonique du SPAWN (DN §6) : label-verrou AVANT pod. Le verrou = le LABEL
+          # `lcars-in-flight` (mutex machine-state) ; PAS de comment-lock dans le ticket (écriture
+          # morte, jamais lue — retirée : le ticket garde du contenu humain ; recovery = liveness pod).
           with {:ok, _} <- forge.add_label(repo, number, @in_flight_label, forge_opts),
-               {:ok, _} <-
-                 forge.post_comment(
-                   repo,
-                   number,
-                   "[lock:#{role}:#{ts}]",
-                   Keyword.put(forge_opts, :dedup_signature, "[lock:#{role}:")
-                 ),
                {:ok, _pid} <-
                  spawner.spawn_pod(profile, Fleet.Pilot.TicketId.compose(number), spawn_opts),
                :ok <- enqueue_mandate(task_queue, pod_id, role, number, mandate) do
@@ -330,15 +325,9 @@ defmodule Fleet.Pilot.StageDispatcher do
         |> maybe_put_project(project)
         |> maybe_put_route(route)
 
-      # Ordre canonique du spawn (label AVANT pod). Verrou sur la PR (pr_number), pas l'issue.
+      # Ordre canonique du spawn (label-verrou AVANT pod). Verrou = LABEL `lcars-in-flight` sur la PR
+      # (pr_number, pas l'issue) ; pas de comment-lock (écriture morte, retirée — cf. dispatch_issue).
       with {:ok, _} <- forge.add_label(repo, pr_number, @in_flight_label, forge_opts),
-           {:ok, _} <-
-             forge.post_comment(
-               repo,
-               pr_number,
-               "[lock:#{role}:#{ts}]",
-               Keyword.put(forge_opts, :dedup_signature, "[lock:#{role}:")
-             ),
            {:ok, _pid} <-
              spawner.spawn_pod(profile, Fleet.Pilot.TicketId.compose(issue_n), spawn_opts),
            :ok <- enqueue_mandate(task_queue, pod_id, role, issue_n, mandate) do

@@ -174,7 +174,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       refute_received {:f075_loaded, _}
     end
 
-    test "spawn : ordre label → comment → pod, retourne {:ok, {:spawned, pod, role}}" do
+    test "spawn : ordre label-verrou → pod (plus de comment-lock), retourne {:ok, {:spawned, pod, role}}" do
       payload = eng_issue()
 
       assert {:ok, {:spawned, "issue-42-engineer-1700000000", "engineer"}} =
