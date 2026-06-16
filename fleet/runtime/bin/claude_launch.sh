@@ -189,6 +189,16 @@ MODEL_FLAGS=();  [[ -n "$MODEL"  ]] && MODEL_FLAGS=(--model "$MODEL")
 EFFORT_FLAGS=(); [[ -n "$EFFORT" ]] && EFFORT_FLAGS=(--effort "$EFFORT")
 dbg "step jq invocation model='$MODEL' effort='$EFFORT'"
 
+# Visibilité Claude Desktop : `invocation.remote_control: false` (juges qualifier/reviewer) → on OMET
+# `--remote-control` (+ son nom de session) → le pod tourne INTERACTIF sous le PTY tmux (MCP/wake
+# intacts) mais reste INVISIBLE dans Desktop (RC = couche d'attache Desktop seule). Absent/true = visible.
+# Debug à la demande : un `/remote-control <slot>` envoyé en send-key rallume la visibilité d'un juge.
+REMOTE_CONTROL=$("$JQ_BIN" -r '.spec.invocation.remote_control // true' "$CAP_PROFILE_JSON" 2>/dev/null)
+RC_FLAGS=()
+[[ "$REMOTE_CONTROL" != "false" ]] &&
+  RC_FLAGS=(--remote-control --remote-control-session-name-prefix "$SESSION_NAME_PREFIX")
+dbg "step jq remote_control='$REMOTE_CONTROL' (RC=${#RC_FLAGS[@]} flags)"
+
 # =============================================================
 # Settings pod-spécifiques (permissions/bypass). $POD_DIR/.lcars/settings.json, passé en flagSettings
 # via --settings (ADDITIF, indépendant de --setting-sources). Les hooks humains, eux, ne fuitent plus
@@ -275,11 +285,10 @@ dbg "step session flags : ${SESSION_FLAGS[*]}"
 # SP via --system-prompt-file (HORS argv) : lu depuis $SP_FILE (.lcars/system-prompt.md), trusted+replace.
 # =============================================================
 
-dbg "step pre-exec claude --remote-control (perm=${PERM_FLAGS[*]} bin=$CLAUDE_BIN sp_file=$SP_FILE)"
+dbg "step pre-exec claude (RC=${#RC_FLAGS[@]} flags perm=${PERM_FLAGS[*]} bin=$CLAUDE_BIN sp_file=$SP_FILE)"
 exec "$CLAUDE_BIN" \
-    --remote-control \
+    "${RC_FLAGS[@]}" \
     "${SESSION_FLAGS[@]}" \
-    --remote-control-session-name-prefix "$SESSION_NAME_PREFIX" \
     --system-prompt-file "$SP_FILE" \
     "${PERM_FLAGS[@]}" \
     --allowedTools "$ALLOWED_TOOLS" \

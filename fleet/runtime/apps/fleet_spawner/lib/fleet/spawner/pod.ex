@@ -865,10 +865,15 @@ defmodule Fleet.Spawner.Pod do
           #     est un pod forever). host_launch.sh ne re-setenv PAS (pas de namespace) : ce HOME EST l'env réel.
           |> Map.put("HOME", launch_home(containment, human, state.pod_dir))
           # Chaîne de session (DN spawner-orchestrator §D) : bwrap_launch les `--setenv` dans le pod,
-          # claude_launch les lit `:?` strict (no-boot sinon). PRÉFIXE nom RC = <human>_<role>.
+          # claude_launch les lit `:?` strict (no-boot sinon).
           |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
           |> Map.put("LCARS_POD_RESUME", if(state.resume, do: "1", else: "0"))
-          |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", "#{human}_#{role}")
+          # Nom RC = le RÔLE seul (label Desktop). Le `human_` est inutile : les sessions RC sont
+          # per-user (l'humain ne voit QUE les siennes) → zéro collision, et le nom n'est qu'un label.
+          # (La visibilité Desktop — `--remote-control` ou non — est gatée côté `claude_launch.sh`,
+          # qui lit `invocation.remote_control` du cap-profile JSON ; pas d'env var ici, le sandbox
+          # bwrap `--clearenv` ne ferait pas passer un var neuf de toute façon.)
+          |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", role)
           # Base sock tmux : bwrap_launch crée la socket sous <base>/<pod_id>/, PodTmux (host) y tape.
           # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. (Défaut /run/lcars/tmux-sock partagé.)
           |> Map.put("LCARS_TMUX_SOCK_BASE", Fleet.Spawner.PodTmux.sock_base())

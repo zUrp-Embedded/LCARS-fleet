@@ -78,6 +78,7 @@
             "max_alive_sec": { "type": ["number", "null"] },
             "heartbeat_keepalive": { "type": "boolean" },
             "bridge_enabled": { "type": "boolean" },
+            "remote_control": { "type": "boolean", "description": "Visibilité Claude Desktop : false → le launcher omet --remote-control (pod fonctionnel mais invisible). Défaut (absent) = true. Posé false sur les juges éphémères (qualifier/reviewer)." },
             "policy": { "type": "string" },
             "rubber_duck_enabled": { "type": "boolean" },
             "long_session_protocol": { "type": "boolean" },
