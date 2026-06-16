@@ -519,8 +519,14 @@ defmodule Fleet.Pilot.ForgeClient do
   ne peut PAS s'appuyer dessus pour savoir « qui reste à juger ». La SOURCE DE VÉRITÉ = la liste des
   reviews : un juge a un **verdict décisif** ssi sa dernière review non-dismissed est APPROVED ou
   REQUEST_CHANGES. Le poller dispatch un juge demandé qui n'a PAS encore de verdict, et tranche
-  (merge/rework) quand tous les demandés en ont un. Une re-review (après rework) ÉCRASE l'ancienne du
-  même reviewer (Gitea garde la dernière active, dismisse les précédentes) → pas de verdict périmé.
+  (merge/rework) quand tous les demandés en ont un.
+
+  **Commit-scoping (`:head_sha`, live #7)** : un verdict ne vaut que pour le COMMIT qu'il a jugé. Passer
+  `head_sha: pr.head.sha` (chemin prod) → seules les reviews `commit_id == head_sha` comptent ; une review
+  sur un commit antérieur est PÉRIMÉE (le code n'existe plus). Crucial pour le REQUEST_CHANGES : Gitea ne
+  le dismisse JAMAIS au push (≠ approbations stale, dismissées par branch-protection) — sans scoping, un
+  REQUEST_CHANGES périmé reste « actif », son juge n'est jamais re-dispatché (il a déjà un verdict) et la
+  PR boucle en rework infini. Le scoping le rend `pending` → re-jugé sur le code courant.
   Les reviews COMMENT/PENDING/REQUEST_REVIEW ne sont PAS décisives (ignorées).
 
   ## Returns
@@ -531,10 +537,12 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec pr_review_verdicts(String.t(), integer(), Keyword.t()) ::
           {:ok, %{optional(String.t()) => :approved | :changes_requested}} | {:error, term()}
   def pr_review_verdicts(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
+    head_sha = Keyword.get(opts, :head_sha)
+
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} when is_list(reviews) <-
            http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
-      {:ok, verdicts_by_reviewer(reviews)}
+      {:ok, verdicts_by_reviewer(reviews, head_sha)}
     else
       {:ok, _non_list} -> {:ok, %{}}
       {:error, _} = err -> err
@@ -542,14 +550,26 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # Dernière review décisive PAR reviewer (login downcasé → verdict atom). Gitea liste par ordre de
-  # création → `List.last` d'un groupe = la review EN VIGUEUR de ce reviewer.
-  defp verdicts_by_reviewer(reviews) do
+  # création → `List.last` d'un groupe = la review EN VIGUEUR de ce reviewer. Quand `head_sha` est fourni
+  # (chemin prod, posé par `dispatch_review` depuis `pr.head.sha`), un verdict est **COMMIT-SCOPÉ** : seul
+  # celui posé sur le commit COURANT (`commit_id == head_sha`) compte ; une review sur un commit antérieur
+  # est PÉRIMÉE — le code jugé n'existe plus, le juge doit re-juger. Indispensable car Gitea ne dismisse
+  # PAS un REQUEST_CHANGES au push (seules les approbations stale via branch-protection le sont) : sans ce
+  # filtre, un REQUEST_CHANGES périmé qui n'est jamais re-dispatché bloque la PR pour TOUJOURS (live #7).
+  defp verdicts_by_reviewer(reviews, head_sha) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))
     |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
+    |> reject_stale_reviews(head_sha)
     |> Enum.group_by(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
     |> Map.new(fn {login, revs} -> {login, decisive_verdict(List.last(revs)["state"])} end)
   end
+
+  # `head_sha == nil` (appelants bas-niveau / legacy) → pas de scoping. Sinon : strict `commit_id == head`.
+  defp reject_stale_reviews(reviews, nil), do: reviews
+
+  defp reject_stale_reviews(reviews, head_sha),
+    do: Enum.filter(reviews, &(&1["commit_id"] == head_sha))
 
   defp decisive_verdict("APPROVED"), do: :approved
   defp decisive_verdict("REQUEST_CHANGES"), do: :changes_requested

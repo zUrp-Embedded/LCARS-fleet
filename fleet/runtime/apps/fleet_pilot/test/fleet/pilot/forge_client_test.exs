@@ -312,6 +312,67 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert {:ok, %{"qualifier" => :approved, "reviewer" => :approved}} =
                ForgeClient.pr_review_verdicts("fleet/lcars", 6, opts(handlers))
     end
+
+    test "pr_review_verdicts : head_sha → REQUEST_CHANGES sur un commit ANCIEN est périmé (live #7)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             # reviewer a rejeté l'ANCIEN commit (jamais dismissé par Gitea au push) → périmé sur head
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "Reviewer"},
+               "commit_id" => "old00000",
+               "dismissed" => false
+             },
+             # qualifier a approuvé le commit COURANT → seul verdict valide
+             %{
+               "state" => "APPROVED",
+               "user" => %{"login" => "Qualifier"},
+               "commit_id" => "head1111",
+               "dismissed" => false
+             }
+           ]}
+      }
+
+      # Reviewer DISPARAÎT de la map (verdict périmé) → il sera `pending` → re-jugé. Qualifier reste.
+      assert {:ok, %{"qualifier" => :approved}} =
+               ForgeClient.pr_review_verdicts(
+                 "fleet/lcars",
+                 6,
+                 opts(handlers) ++ [head_sha: "head1111"]
+               )
+    end
+
+    test "pr_review_verdicts : head_sha → re-review sur head ÉCRASE le verdict périmé du même juge" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             # round 1 : reviewer rejette l'ancien commit
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "Reviewer"},
+               "commit_id" => "old00000",
+               "dismissed" => false
+             },
+             # round 2 : reviewer re-juge le commit courant → approuve (sa DERNIÈRE sur head prime)
+             %{
+               "state" => "APPROVED",
+               "user" => %{"login" => "Reviewer"},
+               "commit_id" => "head1111",
+               "dismissed" => false
+             }
+           ]}
+      }
+
+      assert {:ok, %{"reviewer" => :approved}} =
+               ForgeClient.pr_review_verdicts(
+                 "fleet/lcars",
+                 6,
+                 opts(handlers) ++ [head_sha: "head1111"]
+               )
+    end
   end
 
   describe "add_label/4 — config" do

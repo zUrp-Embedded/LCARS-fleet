@@ -232,6 +232,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
     pr_number = pr["number"]
     head = get_in(pr, ["head", "ref"]) || ""
+    head_sha = get_in(pr, ["head", "sha"])
     labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
 
     # Le SET des juges = `requested_reviewers` (posé par `request_review` ; carte ET no-carte), logins
@@ -242,7 +243,12 @@ defmodule Fleet.Pilot.StageDispatcher do
     if @in_flight_label in labels do
       {:skipped, :in_flight}
     else
-      case ctx.forge.pr_review_verdicts(ctx.repo, pr_number, ctx.forge_opts) do
+      # head_sha → verdicts COMMIT-SCOPÉS : une review sur un commit antérieur (REQUEST_CHANGES jamais
+      # dismissé par Gitea au push) est PÉRIMÉE → son juge redevient `pending` → re-dispatché sur le code
+      # courant (sinon rework infini, live #7).
+      verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
+
+      case ctx.forge.pr_review_verdicts(ctx.repo, pr_number, verdict_opts) do
         {:ok, verdicts} ->
           dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
 
@@ -478,22 +484,31 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp review_mandate(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
     do: build_mandate(profile, role, forge, repo, issue_n, %{}, forge_opts, route)
 
-  defp review_mandate(:rework, _profile, _role, _forge, _repo, _issue_n, _forge_opts, route, pr),
-    do: rework_mandate(pr, route)
+  defp review_mandate(:rework, _profile, role, _forge, _repo, _issue_n, _forge_opts, route, pr),
+    do: rework_mandate(role, pr, route)
 
   # Brief de rework (4-C-iv) : le PRODUCTEUR (engineer) reprend sur une PR REQUEST_CHANGES.
-  # Transitionnel : le feedback detaille de la review n'est pas encore injecte (le pod a la PR clonee
-  # + voit son code ; enrichir le mandat avec le body de la review = raffinement ulterieur).
-  defp rework_mandate(pr, route) do
+  # PORTE LA MÊME instruction git-native que `build_worker_mandate` (sinon `:no_deliverable_commit` : le
+  # rework « re-pousse » mais le pod est FORGE-AVEUGLE et sans l'ordre de COMMITTER il ne livre rien —
+  # bug prouvé live e2e #1, F090 jumeau). Le pod corrige + commite EN LOCAL ; le SYSTÈME pousse (barrière
+  # §4). Trailer obligatoire (gate F-01). Transitionnel : le feedback détaillé de la review n'est pas
+  # encore injecté (le pod a la PR clonée + voit son code).
+  defp rework_mandate(role, pr, route) do
     {pipeline, stage} =
       case route do
         {p, s} -> {p, s}
         _ -> {nil, nil}
       end
 
-    "REWORK — une review REQUEST_CHANGES a ete deposee sur la PR ##{pr}. Corrige ton code selon le " <>
-      "feedback de la review et re-pousse sur ta branche (meme PR). " <>
-      "stage=#{stage || "?"} pipeline=#{pipeline || "?"}."
+    [
+      "REWORK — une review REQUEST_CHANGES a été déposée sur la PR ##{pr}. Corrige ton code selon le " <>
+        "feedback de la review. (stage=#{stage || "?"} pipeline=#{pipeline || "?"})",
+      "**Livraison (git-native)** : applique tes corrections dans ton workspace, puis `git add` + `git commit`. " <>
+        "Le SYSTÈME pousse ton commit (forge-aveugle, toi tu ne push pas). `submit_result` ne fait que " <>
+        "SIGNALER la fin : le livrable = ton COMMIT, jamais un payload de contenus.",
+      Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
+    ]
+    |> Enum.join("\n\n")
   end
 
   # F077 : la forme du mandat est une propriété du rôle (cap-profile `mandate_kind`), PAS un nom
