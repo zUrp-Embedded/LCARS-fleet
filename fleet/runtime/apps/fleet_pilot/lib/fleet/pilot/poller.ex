@@ -62,6 +62,7 @@ defmodule Fleet.Pilot.Poller do
     loader: nil,
     carte_loader: nil,
     spawner: nil,
+    task_queue: nil,
     clock: nil,
     poll_count: 0,
     error_count: 0,
@@ -129,6 +130,7 @@ defmodule Fleet.Pilot.Poller do
           loader: Keyword.get(opts, :loader),
           carte_loader: Keyword.get(opts, :carte_loader),
           spawner: Keyword.get(opts, :spawner),
+          task_queue: Keyword.get(opts, :task_queue),
           clock: Keyword.get(opts, :clock)
         }
 
@@ -351,12 +353,18 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # Refs `{:issue|:pr, n}` que des pods VIVANTS travaillent, dérivées des pod_ids déterministes
-  # (`issue-<n>-<role>-<ts>` / `pr-<n>-<role>-<ts>`). `:error` si l'énumération échoue (fail-safe).
+  # Refs `{:issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes
+  # (`issue-<n>-<role>-<ts>` / `pr-<n>-<role>-<ts>`). Filtre par **tâche active** (TaskQueue) : un
+  # verrou n'est légitimement tenu QUE pendant qu'un pod a une tâche active dessus. Un pod VIVANT mais
+  # IDLE (long-lived entre deux reworks, ex. l'engineer) ne « possède » PAS le verrou — sinon il
+  # masquerait un juge MORT et la réconciliation ne réclamerait jamais (wedge live #8). `:error` si
+  # l'énumération échoue (fail-safe : on ne réclame rien à l'aveugle).
   defp live_owned_refs(state) do
     spawner = state.spawner || Fleet.Spawner
+    tq = state.task_queue || Fleet.TaskQueue
 
     spawner.list_pods()
+    |> Enum.filter(&pod_has_active_task?(tq, &1[:pod_id]))
     |> Enum.flat_map(&parse_pod_ref(&1[:pod_id]))
     |> MapSet.new()
   rescue
@@ -364,6 +372,22 @@ defmodule Fleet.Pilot.Poller do
   catch
     _, _ -> :error
   end
+
+  # Un pod a-t-il une tâche ACTIVE (assignée, non close) ? `{:ok, nil}` = idle. Tolérant (toute
+  # anomalie → `false` : un pod dont on ne peut établir l'activité ne masque pas un orphelin).
+  defp pod_has_active_task?(tq, pod_id) when is_binary(pod_id) do
+    case tq.pod_status(pod_id) do
+      {:ok, nil} -> false
+      {:ok, _status} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  defp pod_has_active_task?(_tq, _), do: false
 
   defp parse_pod_ref(pod_id) when is_binary(pod_id) do
     case Regex.run(~r/^(issue|pr)-(\d+)-/, pod_id) do

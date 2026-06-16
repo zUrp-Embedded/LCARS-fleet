@@ -234,6 +234,30 @@ defmodule Fleet.Pilot.HopConsumerTest do
         refute Map.has_key?(hop, :deliverable_opts)
       end
     end
+
+    test "review-body robuste aux sorties LLM mal typées (régression live #8 : chain non-string crashait)" do
+      # Un juge peut rendre reason/chain/details en objets/listes imbriqués. L'ancien `#{...}` crashait
+      # le HopConsumer (SINGLETON) → fin-de-hop perdue → verrou jamais levé → pipe wedgé. `safe_str` doit
+      # absorber sans crasher et produire un corps de review en string.
+      payload =
+        stage_payload(%{
+          "role" => "qualifier",
+          "result" => %{
+            "decision" => "abandon",
+            "reason" => %{"resume" => "objet, pas string"},
+            "chain" => [%{"step" => "lecture"}, ["liste", "imbriquée"], 42],
+            "details" => %{"critere" => %{"nested" => true}}
+          }
+        })
+
+      assert {:ok, :captured} =
+               HopConsumer.maybe_complete(payload, state(%{forge_client: StubForge}))
+
+      assert_received {:hop, hop, _opts}
+      assert hop.review_event == :request_changes
+      assert is_binary(hop.review_body)
+      assert hop.review_body =~ "CHANGEMENTS DEMANDÉS"
+    end
   end
 
   describe "parse_issue_number/1" do

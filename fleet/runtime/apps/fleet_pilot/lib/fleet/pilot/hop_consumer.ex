@@ -418,7 +418,7 @@ defmodule Fleet.Pilot.HopConsumer do
   # Compose le corps de review depuis la gate-decision du juge. `nil` si aucune substance (→ le
   # défaut générique de `record_review`, qui porte au moins l'instruction de rework).
   defp judge_review_body(event, result) when is_map(result) do
-    reason = result |> Map.get("reason") |> to_string() |> String.trim()
+    reason = result |> Map.get("reason") |> safe_str() |> String.trim()
     details = format_review_details(Map.get(result, "details"))
     chain = format_review_chain(Map.get(result, "chain"))
     substance = Enum.reject([reason, details, chain], &(&1 in [nil, ""]))
@@ -436,13 +436,23 @@ defmodule Fleet.Pilot.HopConsumer do
 
   defp judge_review_body(_event, _), do: nil
 
+  # Coercion sûre des sorties LLM : un juge peut rendre `reason`/`details`/`chain` en objets ou listes
+  # imbriqués → interpoler/`to_string` brut crashe (String.Chars non implémenté pour Map/List). Tout
+  # non-binaire est `inspect`é. CRITIQUE : la construction du corps NE DOIT PAS crasher le HopConsumer
+  # (SINGLETON) — sinon la fin-de-hop est perdue, le verrou jamais levé, le pipe wedgé (régression live #8).
+  defp safe_str(nil), do: ""
+  defp safe_str(s) when is_binary(s), do: s
+  defp safe_str(other), do: inspect(other)
+
   defp format_review_details(d) when is_map(d) and map_size(d) > 0,
-    do: "**Détails**\n" <> Enum.map_join(d, "\n", fn {k, v} -> "- **#{k}** : #{v}" end)
+    do:
+      "**Détails**\n" <>
+        Enum.map_join(d, "\n", fn {k, v} -> "- **#{safe_str(k)}** : #{safe_str(v)}" end)
 
   defp format_review_details(_), do: nil
 
   defp format_review_chain(c) when is_list(c) and c != [],
-    do: "**Raisonnement**\n" <> Enum.map_join(c, "\n", &"- #{&1}")
+    do: "**Raisonnement**\n" <> Enum.map_join(c, "\n", fn item -> "- #{safe_str(item)}" end)
 
   defp format_review_chain(_), do: nil
 
