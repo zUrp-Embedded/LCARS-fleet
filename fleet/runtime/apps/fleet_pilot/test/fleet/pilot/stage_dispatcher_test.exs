@@ -68,9 +68,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     # F077 : le mandat juge lit le result du prédécesseur (option B). Stub : forge_opts[:_test_pred].
     def get_predecessor_result(_repo, _n, opts), do: Keyword.get(opts, :_test_pred, :none)
 
-    # 4-C-iv : etat de review courant (rework). Stub : forge_opts[:_test_review_state] (defaut :none).
-    def pr_review_state(_repo, _index, opts),
-      do: {:ok, Keyword.get(opts, :_test_review_state, :none)}
+    # ②.1d : verdicts par juge (reviews-driven). Stub : forge_opts[:_test_verdicts] (map login↓→verdict,
+    # defaut %{} = aucun juge n'a encore de verdict décisif).
+    def pr_review_verdicts(_repo, _index, opts),
+      do: {:ok, Keyword.get(opts, :_test_verdicts, %{})}
 
     # F181 : compensation — retrait du verrou sur échec post-verrou.
     def remove_label(_repo, _n, label, _opts) do
@@ -338,9 +339,18 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "②.1d : PR sans reviewer + tous APPROVED -> PROMOTE (comment de fin + merge FF, gatekeeper)" do
-      pr = pr(%{"requested_reviewers" => [], "number" => 6})
-      opts = dispatch_opts(forge_opts: [_test_review_state: :approved])
+    test "②.1d : tous les juges demandés ont APPROUVÉ -> PROMOTE (comment de fin + merge FF, gatekeeper)" do
+      # les 2 juges demandés ont chacun un verdict décisif APPROVED → pending vide → tous verts → merge.
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved}]
+        )
 
       assert {:ok, {:merged, 6}} = StageDispatcher.dispatch_review(pr, opts)
       # le merge FF a bien ete declenche sur la PR (auto-close de l'issue via Closes #N)
@@ -348,13 +358,15 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "4-C-iv : PR sans reviewer mais REQUEST_CHANGES courant -> re-spawn le PRODUCTEUR" do
-      pr = pr(%{"requested_reviewers" => []})
+    test "②.1d : un juge a demandé des changements (les autres approuvent) -> re-spawn le PRODUCTEUR" do
+      # tous les juges demandés ont un verdict (pending vide), mais un :changes_requested → rework.
+      pr =
+        pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}]})
 
       opts =
         dispatch_opts(
           forge_opts: [
-            _test_review_state: :changes_requested,
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :changes_requested},
             _test_route: {:ok, {"poc", "build"}}
           ]
         )

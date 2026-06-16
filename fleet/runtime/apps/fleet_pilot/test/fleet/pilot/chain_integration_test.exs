@@ -151,13 +151,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     defp review_state_of(:request_changes), do: :changes_requested
     defp review_state_of(_), do: :none
 
-    # ②.1d : etat de review courant d'une PR (defaut :none tant qu'aucune review decisive).
-    def pr_review_state(pid, _r, pr, _o) do
-      case get_pr(pid, pr) do
-        %{"review_state" => st} -> {:ok, st}
-        _ -> {:ok, :none}
-      end
-    end
+    # ②.1d : verdicts par juge (reviews-driven). Le chemin CARTE merge via complete_judge :promote,
+    # pas via dispatch_review → dispatch_review n'est appelé qu'AVANT toute review ici → {} suffit.
+    def pr_review_verdicts(_pid, _r, _pr, _o), do: {:ok, %{}}
 
     # merge FF : PR merged + issue close (Closes #N).
     def merge_pr(pid, _r, pr, _o) do
@@ -192,7 +188,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def request_review(r, pr, revs, o), do: Sim.request_review(p(), r, pr, revs, o)
     def post_review(r, pr, ev, body, o), do: Sim.post_review(p(), r, pr, ev, body, o)
     def merge_pr(r, pr, o), do: Sim.merge_pr(p(), r, pr, o)
-    def pr_review_state(r, pr, o), do: Sim.pr_review_state(p(), r, pr, o)
+    def pr_review_verdicts(r, pr, o), do: Sim.pr_review_verdicts(p(), r, pr, o)
   end
 
   defmodule CarteLoader do

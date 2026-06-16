@@ -233,18 +233,18 @@ defmodule Fleet.Pilot.StageDispatcher do
     pr_number = pr["number"]
     head = get_in(pr, ["head", "ref"]) || ""
     labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
-    reviewers = Map.get(pr, "requested_reviewers") || []
+
+    # Le SET des juges = `requested_reviewers` (posé par `request_review` ; carte ET no-carte), logins
+    # downcasés. Gitea NE LES RETIRE PAS de façon fiable après review (vérifié live #6) → on n'en déduit
+    # PAS « qui reste à juger ». C'est la LISTE DES REVIEWS (verdict décisif par juge) qui le dit.
+    requested = pr |> Map.get("requested_reviewers") |> List.wrap() |> Enum.map(&login_of/1)
 
     if @in_flight_label in labels do
       {:skipped, :in_flight}
     else
-      # ②.1d — décision PR-state-driven (single-brique, sans branch-protection : LCARS agrège les
-      # verdicts, décision user). On lit l'état de review COURANT (dernière review décisive) puis on
-      # branche (`dispatch_by_review_state`). Pas de verrou sur le merge : le poller est mono-process
-      # (ticks sérialisés) → pas de course ; une PR mergée disparaît de `list_open_pulls` (idempotent).
-      case ctx.forge.pr_review_state(ctx.repo, pr_number, ctx.forge_opts) do
-        {:ok, review_state} ->
-          dispatch_by_review_state(review_state, pr_number, head, reviewers, ctx)
+      case ctx.forge.pr_review_verdicts(ctx.repo, pr_number, ctx.forge_opts) do
+        {:ok, verdicts} ->
+          dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
 
         {:error, reason} ->
           {:error, {:review_state, reason}}
@@ -252,31 +252,33 @@ defmodule Fleet.Pilot.StageDispatcher do
     end
   end
 
-  # ②.1d — aiguillage PR-state-driven (sans branch-protection : LCARS agrège). ORDRE (clauses) :
-  #   1. des reviewers EN ATTENTE → round de review actif → spawn le PROCHAIN juge (un à un, sérialisé
-  #      par le verrou PR). PRIORITAIRE : tant que des juges doivent (re)juger, on NE tranche PAS sur un
-  #      verdict (qui peut être périmé d'un round précédent — sinon, après un rework qui re-demande les
-  #      reviews, le vieux REQUEST_CHANGES re-déclencherait un rework en boucle).
-  #   2. round terminé (aucun reviewer en attente) + verdict agrégé `:changes_requested` (un juge a
-  #      rejeté) → rework du producteur ;
-  #   3. round terminé + `:approved` (tous OK) → MERGE (scellé gatekeeper) ;
-  #   4. sinon (rien en attente, aucune review décisive) → no_verdict (PR en attente, surfacé).
-  defp dispatch_by_review_state(_state, pr_number, head, reviewers, ctx) when reviewers != [],
-    do: dispatch_pr_role(:judge, pr_number, head, hd_role(reviewers), ctx)
+  defp login_of(r), do: r |> Map.get("login", "") |> to_string() |> String.downcase()
 
-  defp dispatch_by_review_state(:changes_requested, pr_number, head, _reviewers, ctx),
-    do: dispatch_rework(pr_number, head, ctx)
+  # ②.1d — aiguillage REVIEWS-DRIVEN (la source de vérité = les reviews postées, PAS `requested_reviewers`
+  # que Gitea ne vide pas, live #6). Sans branch-protection : LCARS agrège (décision user). ORDRE :
+  #   1. un juge demandé SANS verdict décisif → round actif → on le spawn (sérialisé par le verrou PR).
+  #      Un juge déjà décisif (même encore listé dans requested_reviewers) n'est PAS re-spawné → fin de
+  #      la boucle live #6.
+  #   2. tous les demandés ont un verdict + au moins un `:changes_requested` → rework du producteur.
+  #   3. tous les demandés ont APPROUVÉ → MERGE (scellé gatekeeper).
+  #   4. aucun juge demandé → no_verdict (PR sans review-request, surfacé).
+  defp dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx) do
+    pending = requested -- Map.keys(verdicts)
 
-  defp dispatch_by_review_state(:approved, pr_number, head, _reviewers, ctx),
-    do: promote_pr(pr_number, head, ctx)
+    cond do
+      pending != [] ->
+        dispatch_pr_role(:judge, pr_number, head, hd(pending), ctx)
 
-  defp dispatch_by_review_state(_state, _pr_number, _head, _reviewers, _ctx),
-    do: {:skipped, :no_verdict}
+      requested == [] ->
+        {:skipped, :no_verdict}
 
-  # Login du prochain juge en attente (1er des requested_reviewers). Gitea le retire de la liste une
-  # fois sa review postée → le tick suivant spawn le suivant (sérialisation par le verrou PR).
-  defp hd_role(reviewers),
-    do: reviewers |> hd() |> Map.get("login", "") |> String.downcase()
+      Enum.any?(Map.values(Map.take(verdicts, requested)), &(&1 == :changes_requested)) ->
+        dispatch_rework(pr_number, head, ctx)
+
+      true ->
+        promote_pr(pr_number, head, ctx)
+    end
+  end
 
   # Rework juge : la PR porte un verdict REQUEST_CHANGES courant (l'état a déjà été lu par
   # `dispatch_review` → pas de re-lecture ici) -> le PRODUCTEUR (role git_native de head.ref) reprend

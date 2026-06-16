@@ -53,8 +53,10 @@ defmodule Fleet.Pilot.PollerTest do
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def get_route(_repo, _n, _opts), do: :none
     def get_predecessor_result(_repo, _n, _opts), do: :none
-    # 4-C-iv : par defaut aucun verdict courant (les tests poller ne couvrent pas le rework).
-    def pr_review_state(_repo, _index, _opts), do: {:ok, :none}
+
+    # ②.1d : par defaut aucun verdict de juge (les tests poller ne couvrent pas merge/rework) → tout
+    # juge demandé est « pending » → dispatché.
+    def pr_review_verdicts(_repo, _index, _opts), do: {:ok, %{}}
     def post_route(_repo, _n, p, s, _opts), do: send(self(), {:route, p, s}) && {:ok, :posted}
     def set_assignee(_repo, _n, login, _opts), do: send(self(), {:assignee, login}) && {:ok, :set}
   end

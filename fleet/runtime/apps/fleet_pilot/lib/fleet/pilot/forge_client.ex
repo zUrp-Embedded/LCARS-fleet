@@ -392,32 +392,6 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  RETIRE une review-request des `reviewers` sur la PR `index` (Gitea
-  `DELETE /repos/{repo}/pulls/{index}/requested_reviewers`, body `{reviewers}`).
-
-  **②.1d — pourquoi le SYSTÈME retire explicitement** : Gitea 1.26 ne vide PAS de façon fiable
-  `requested_reviewers` quand un reviewer poste sa review (vérifié live #6 : un juge ayant APPROUVÉ
-  restait dans la liste → le poller le re-dispatchait à l'infini). Le runtime reprend donc la main :
-  après que le système a enregistré la review d'un juge (`record_review`), il retire ce juge de la
-  liste → `requested_reviewers` redevient le signal fiable « juges restant à juger » pour le poller.
-  La review POSTÉE n'est pas affectée (elle reste dans la liste des reviews → comptée à l'agrégat).
-  Idempotent (retirer un reviewer déjà absent = no-op forge).
-  """
-  @spec unrequest_review(String.t(), integer(), [String.t()], Keyword.t()) ::
-          :ok | {:error, term()}
-  def unrequest_review(repo, index, reviewers, opts \\ [])
-      when is_binary(repo) and is_integer(index) and is_list(reviewers) do
-    with {:ok, config} <- resolve_config(opts) do
-      case request(config, :delete, "/repos/#{repo}/pulls/#{index}/requested_reviewers", %{
-             reviewers: reviewers
-           }) do
-        {:ok, _} -> :ok
-        {:error, _} = err -> err
-      end
-    end
-  end
-
-  @doc """
   Poste une review native sur la PR `index` (Gitea `POST /repos/{repo}/pulls/{index}/reviews`).
   `event` ∈ `:approve | :request_changes | :comment` → c'est le DOMICILE durable du verdict de
   gate (review native traçable, vs l'ancien comment-JSON maison). `body` = le verdict lisible.
@@ -499,55 +473,48 @@ defmodule Fleet.Pilot.ForgeClient do
   def parse_feature_branch(_), do: :error
 
   @doc """
-  Etat de review COURANT d'une PR (Gitea `GET /repos/{repo}/pulls/{index}/reviews`) : la DERNIERE
-  review decisive non-dismissed. Sert au dispatch du rework juge (Corr.3 4-C-iv) : une PR sans
-  reviewer en attente mais avec un `REQUEST_CHANGES` courant -> le producteur doit reprendre.
+  Verdict de review **PAR juge** d'une PR (Gitea `GET /repos/{repo}/pulls/{index}/reviews`) : la
+  DERNIÈRE review décisive non-dismissed de CHAQUE reviewer, clé = login **downcasé**.
 
-  Les reviews `REQUEST_REVIEW`/`COMMENT`/`PENDING` ne sont pas decisives (ignorees). Gitea liste
-  par ordre de creation -> la derniere decisive = le verdict en vigueur.
-
-  Verdict **AGRÉGÉ par reviewer** (②.1d, interim sans branch-protection — LCARS agrège à la place de
-  Gitea, cible DN §1.4 = branch-protection native) : on prend la DERNIÈRE review décisive de CHAQUE
-  reviewer (par login). Une seule `REQUEST_CHANGES` (parmi ces dernières) → `:changes_requested` (tout
-  rejet bloque le merge — sinon un qualifier rejetant puis un reviewer approuvant mergerait à tort) ;
-  sinon au moins une `APPROVED` → `:approved` ; aucune décisive → `:none`. Une re-review (après rework)
-  ÉCRASE l'ancienne du même reviewer → pas de verdict périmé qui boucle.
+  **②.1d — pourquoi par-juge et pas `requested_reviewers`** : Gitea 1.26 ne vide PAS `requested_reviewers`
+  quand un juge a reviewé, et la DELETE est un no-op sur un reviewer déjà actif (vérifié live #6) → on
+  ne peut PAS s'appuyer dessus pour savoir « qui reste à juger ». La SOURCE DE VÉRITÉ = la liste des
+  reviews : un juge a un **verdict décisif** ssi sa dernière review non-dismissed est APPROVED ou
+  REQUEST_CHANGES. Le poller dispatch un juge demandé qui n'a PAS encore de verdict, et tranche
+  (merge/rework) quand tous les demandés en ont un. Une re-review (après rework) ÉCRASE l'ancienne du
+  même reviewer (Gitea garde la dernière active, dismisse les précédentes) → pas de verdict périmé.
+  Les reviews COMMENT/PENDING/REQUEST_REVIEW ne sont PAS décisives (ignorées).
 
   ## Returns
-    * `{:ok, :approved}` — toutes les dernières-par-reviewer = APPROVED (≥1), aucune REQUEST_CHANGES
-    * `{:ok, :changes_requested}` — au moins une derniere-par-reviewer = REQUEST_CHANGES
-    * `{:ok, :none}` — aucune review decisive
+    * `{:ok, %{"qualifier" => :approved, "reviewer" => :changes_requested, ...}}` — login(↓) → verdict
+    * `{:ok, %{}}` — aucune review décisive
     * `{:error, term()}` — HTTP/transport/config
   """
-  @spec pr_review_state(String.t(), integer(), Keyword.t()) ::
-          {:ok, :approved | :changes_requested | :none} | {:error, term()}
-  def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
+  @spec pr_review_verdicts(String.t(), integer(), Keyword.t()) ::
+          {:ok, %{optional(String.t()) => :approved | :changes_requested}} | {:error, term()}
+  def pr_review_verdicts(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} when is_list(reviews) <-
            http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
-      {:ok, aggregate_review_state(reviews)}
+      {:ok, verdicts_by_reviewer(reviews)}
     else
-      {:ok, _non_list} -> {:ok, :none}
+      {:ok, _non_list} -> {:ok, %{}}
       {:error, _} = err -> err
     end
   end
 
-  # Agrège la DERNIÈRE review décisive PAR reviewer (login). Gitea liste par ordre de création →
-  # `List.last` d'un groupe = la review en vigueur de ce reviewer. Rejet prioritaire (fail-closed).
-  defp aggregate_review_state(reviews) do
-    latest_per_reviewer =
-      reviews
-      |> Enum.reject(&Map.get(&1, "dismissed", false))
-      |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
-      |> Enum.group_by(&get_in(&1, ["user", "login"]))
-      |> Enum.map(fn {_login, revs} -> List.last(revs)["state"] end)
-
-    cond do
-      "REQUEST_CHANGES" in latest_per_reviewer -> :changes_requested
-      "APPROVED" in latest_per_reviewer -> :approved
-      true -> :none
-    end
+  # Dernière review décisive PAR reviewer (login downcasé → verdict atom). Gitea liste par ordre de
+  # création → `List.last` d'un groupe = la review EN VIGUEUR de ce reviewer.
+  defp verdicts_by_reviewer(reviews) do
+    reviews
+    |> Enum.reject(&Map.get(&1, "dismissed", false))
+    |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
+    |> Enum.group_by(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
+    |> Map.new(fn {login, revs} -> {login, decisive_verdict(List.last(revs)["state"])} end)
   end
+
+  defp decisive_verdict("APPROVED"), do: :approved
+  defp decisive_verdict("REQUEST_CHANGES"), do: :changes_requested
 
   @doc """
   Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea

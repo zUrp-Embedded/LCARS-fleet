@@ -239,82 +239,78 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert :error = ForgeClient.parse_feature_branch(nil)
     end
 
-    test "pr_review_state : derniere review decisive = REQUEST_CHANGES -> :changes_requested" do
+    test "pr_review_verdicts : dernière review décisive par reviewer (login↓ → verdict)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200,
            [
-             %{"state" => "REQUEST_REVIEW", "dismissed" => false},
-             %{"state" => "COMMENT", "dismissed" => false},
-             %{"state" => "APPROVED", "dismissed" => false},
-             %{"state" => "REQUEST_CHANGES", "dismissed" => false}
+             %{
+               "state" => "REQUEST_REVIEW",
+               "user" => %{"login" => "Qualifier"},
+               "dismissed" => false
+             },
+             %{"state" => "COMMENT", "user" => %{"login" => "Reviewer"}, "dismissed" => false},
+             %{"state" => "APPROVED", "user" => %{"login" => "Qualifier"}, "dismissed" => false},
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "Reviewer"},
+               "dismissed" => false
+             }
            ]}
       }
 
-      assert {:ok, :changes_requested} =
-               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+      # Qualifier=APPROVED, Reviewer=REQUEST_CHANGES (COMMENT/REQUEST_REVIEW non décisifs, ignorés).
+      assert {:ok, %{"qualifier" => :approved, "reviewer" => :changes_requested}} =
+               ForgeClient.pr_review_verdicts("fleet/lcars", 6, opts(handlers))
     end
 
-    test "pr_review_state : derniere decisive = APPROVED (REQUEST_CHANGES dismissed ignore)" do
+    test "pr_review_verdicts : reviews dismissed ignorées" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200,
            [
-             %{"state" => "REQUEST_CHANGES", "dismissed" => true},
-             %{"state" => "APPROVED", "dismissed" => false}
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "Qualifier"},
+               "dismissed" => true
+             },
+             %{"state" => "APPROVED", "user" => %{"login" => "Qualifier"}, "dismissed" => false}
            ]}
       }
 
-      assert {:ok, :approved} = ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+      # la REQUEST_CHANGES dismissed est ignorée → Qualifier = APPROVED (sa dernière active).
+      assert {:ok, %{"qualifier" => :approved}} =
+               ForgeClient.pr_review_verdicts("fleet/lcars", 6, opts(handlers))
     end
 
-    test "pr_review_state : aucune review decisive -> :none" do
+    test "pr_review_verdicts : aucune review décisive -> %{}" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200, [%{"state" => "REQUEST_REVIEW", "dismissed" => false}, %{"state" => "COMMENT"}]}
       }
 
-      assert {:ok, :none} = ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+      assert {:ok, %{}} = ForgeClient.pr_review_verdicts("fleet/lcars", 6, opts(handlers))
     end
 
-    test "pr_review_state : agrege PAR reviewer — un rejet l'emporte sur l'approbation d'un autre (②.1d)" do
+    test "pr_review_verdicts : re-review ECRASE l'ancienne du meme reviewer (②.1d, dernière active)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200,
            [
+             # 1er round : qualifier rejette (puis dismissed quand il re-review), reviewer approuve
              %{
                "state" => "REQUEST_CHANGES",
-               "user" => %{"login" => "qualifier"},
-               "dismissed" => false
+               "user" => %{"login" => "Qualifier"},
+               "dismissed" => true
              },
-             %{"state" => "APPROVED", "user" => %{"login" => "reviewer"}, "dismissed" => false}
+             %{"state" => "APPROVED", "user" => %{"login" => "Reviewer"}, "dismissed" => false},
+             # apres rework : qualifier re-approuve -> sa DERNIERE active prime
+             %{"state" => "APPROVED", "user" => %{"login" => "Qualifier"}, "dismissed" => false}
            ]}
       }
 
-      # qualifier rejette, reviewer approuve -> le rejet l'emporte (fail-closed, pas de merge a tort)
-      assert {:ok, :changes_requested} =
-               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
-    end
-
-    test "pr_review_state : re-review ECRASE l'ancienne du meme reviewer (②.1d, anti-boucle rework)" do
-      handlers = %{
-        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
-          {200,
-           [
-             # 1er round : qualifier rejette, reviewer approuve
-             %{
-               "state" => "REQUEST_CHANGES",
-               "user" => %{"login" => "qualifier"},
-               "dismissed" => false
-             },
-             %{"state" => "APPROVED", "user" => %{"login" => "reviewer"}, "dismissed" => false},
-             # apres rework : qualifier re-approuve -> sa DERNIERE prime
-             %{"state" => "APPROVED", "user" => %{"login" => "qualifier"}, "dismissed" => false}
-           ]}
-      }
-
-      # les 2 reviewers ont leur DERNIERE = APPROVED -> :approved (le vieux REQUEST_CHANGES ne boucle pas)
-      assert {:ok, :approved} = ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+      assert {:ok, %{"qualifier" => :approved, "reviewer" => :approved}} =
+               ForgeClient.pr_review_verdicts("fleet/lcars", 6, opts(handlers))
     end
   end
 
@@ -760,14 +756,6 @@ defmodule Fleet.Pilot.ForgeClientTest do
       }
 
       assert :ok = ForgeClient.request_review("fleet/proj", 9, ["Qualifier"], opts(handlers))
-    end
-
-    test "unrequest_review → DELETE requested_reviewers, :ok (②.1d : le système vide la requête)" do
-      handlers = %{
-        {"DELETE", "/api/v1/repos/fleet/proj/pulls/9/requested_reviewers"} => {204, ""}
-      }
-
-      assert :ok = ForgeClient.unrequest_review("fleet/proj", 9, ["qualifier"], opts(handlers))
     end
 
     test "post_review :approve poste le verdict, :ok" do
