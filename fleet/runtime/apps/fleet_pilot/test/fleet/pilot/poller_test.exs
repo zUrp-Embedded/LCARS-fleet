@@ -53,6 +53,8 @@ defmodule Fleet.Pilot.PollerTest do
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def get_route(_repo, _n, _opts), do: :none
     def get_predecessor_result(_repo, _n, _opts), do: :none
+    # Fix famine-d'info : build_judge_mandate lit le critère (body de l'issue) via get_issue.
+    def get_issue(_repo, n, _opts), do: {:ok, %{"number" => n, "body" => "critère stub ##{n}"}}
 
     # ②.1d : par defaut aucun verdict de juge (les tests poller ne couvrent pas merge/rework) → tout
     # juge demandé est « pending » → dispatché.

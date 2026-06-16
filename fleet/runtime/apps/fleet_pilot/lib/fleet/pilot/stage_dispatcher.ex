@@ -484,16 +484,21 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp review_mandate(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
     do: build_mandate(profile, role, forge, repo, issue_n, %{}, forge_opts, route)
 
-  defp review_mandate(:rework, _profile, role, _forge, _repo, _issue_n, _forge_opts, route, pr),
-    do: rework_mandate(role, pr, route)
+  defp review_mandate(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
+    do: rework_mandate(role, forge, repo, pr, forge_opts, route)
 
   # Brief de rework (4-C-iv) : le PRODUCTEUR (engineer) reprend sur une PR REQUEST_CHANGES.
   # PORTE LA MÊME instruction git-native que `build_worker_mandate` (sinon `:no_deliverable_commit` : le
   # rework « re-pousse » mais le pod est FORGE-AVEUGLE et sans l'ordre de COMMITTER il ne livre rien —
   # bug prouvé live e2e #1, F090 jumeau). Le pod corrige + commite EN LOCAL ; le SYSTÈME pousse (barrière
-  # §4). Trailer obligatoire (gate F-01). Transitionnel : le feedback détaillé de la review n'est pas
-  # encore injecté (le pod a la PR clonée + voit son code).
-  defp rework_mandate(role, pr, route) do
+  # §4). Trailer obligatoire (gate F-01).
+  #
+  # FAMINE D'INFO, moitié rework (fix #1, prouvé live morse) : sans le BODY des reviews REQUEST_CHANGES,
+  # « corrige selon la review » est creux — le pod forge-aveugle ne voit PAS la review → il devine à
+  # l'aveugle (l'eng morse a refusé de deviner → `blocked_dep` → wedge). On lit le feedback sur la forge
+  # (le runtime, pas le pod : barrière §4 préservée) et on l'injecte. Si la lecture échoue / aucun body,
+  # on retombe sur l'instruction générique (le pod a quand même la PR clonée + son code).
+  defp rework_mandate(role, forge, repo, pr, forge_opts, route) do
     {pipeline, stage} =
       case route do
         {p, s} -> {p, s}
@@ -502,13 +507,32 @@ defmodule Fleet.Pilot.StageDispatcher do
 
     [
       "REWORK — une review REQUEST_CHANGES a été déposée sur la PR ##{pr}. Corrige ton code selon le " <>
-        "feedback de la review. (stage=#{stage || "?"} pipeline=#{pipeline || "?"})",
+        "feedback de la review ci-dessous. (stage=#{stage || "?"} pipeline=#{pipeline || "?"})",
+      render_rework_feedback(forge, repo, pr, forge_opts),
       "**Livraison (git-native)** : applique tes corrections dans ton workspace, puis `git add` + `git commit`. " <>
         "Le SYSTÈME pousse ton commit (forge-aveugle, toi tu ne push pas). `submit_result` ne fait que " <>
         "SIGNALER la fin : le livrable = ton COMMIT, jamais un payload de contenus.",
       Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
     ]
+    |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
+  end
+
+  # Rend le feedback des reviews REQUEST_CHANGES (body du verdict de chaque juge) en bloc actionnable.
+  # `""` si rien (lecture KO ou aucun body) → le brief retombe sur l'instruction générique (Enum.reject).
+  defp render_rework_feedback(forge, repo, pr, forge_opts) do
+    case forge.change_request_feedback(repo, pr, forge_opts) do
+      {:ok, [_ | _] = feedbacks} ->
+        sections =
+          Enum.map_join(feedbacks, "\n\n", fn fb ->
+            "### Review de `#{fb["login"]}`\n#{fb["body"]}"
+          end)
+
+        "## Feedback de review à traiter (REQUEST_CHANGES)\n\n#{sections}"
+
+      _ ->
+        ""
+    end
   end
 
   # F077 : la forme du mandat est une propriété du rôle (cap-profile `mandate_kind`), PAS un nom
@@ -544,10 +568,31 @@ defmodule Fleet.Pilot.StageDispatcher do
   # HopCompleter, N-04) ; le pod reste forge-aveugle (le runtime lit le comment, option B, pas de
   # clone F-08).
   defp build_judge_mandate(role, forge, repo, number, forge_opts, route) do
-    outputs =
+    predecessor =
       case forge.get_predecessor_result(repo, number, forge_opts) do
-        {:ok, result} -> result
-        _ -> %{}
+        {:ok, result} when is_map(result) and map_size(result) > 0 -> result
+        _ -> nil
+      end
+
+    # GIT-NATIVE (predecessor vide, live #8) : le livrable N'EST PAS un payload — c'est le CODE de la
+    # branche. Le juge clone la feature-branch + a `Bash(git diff/log/show)` → on le POINTE sur son
+    # workspace au lieu de lui donner `{}` (sur quoi il fail-closait `halt_wait_input`). Sinon il juge
+    # du vide → rework infini (le Reviewer ne peut JAMAIS dire `continue` sur `{}`).
+    outputs =
+      predecessor ||
+        %{
+          "livrable" =>
+            "git-native — le code à juger est dans TON workspace (la feature-branche est clonée). " <>
+              "Lance `git diff $(git merge-base HEAD main 2>/dev/null || echo main)..HEAD` (et `git show`) " <>
+              "pour voir les changements, puis juge-les contre le critère ci-dessous."
+        }
+
+    # CRITÈRE de réussite = le body de l'issue (le mandat). Passé via `:request` → GateBrief le rend
+    # DÉSAMORCÉ (contexte, pas instruction exécutable, I-CBC) → le juge sait CONTRE QUOI juger.
+    request =
+      case forge.get_issue(repo, number, forge_opts) do
+        {:ok, issue} -> Map.get(issue, "body")
+        _ -> nil
       end
 
     {pipeline, stage} =
@@ -556,20 +601,23 @@ defmodule Fleet.Pilot.StageDispatcher do
         _ -> {nil, role}
       end
 
-    # I-CBC (bug PASSE-9, prouvé live #11 ET #12) : le mandat du juge ne contient
-    # AUCUNE instruction exécutable. Le body de l'issue (= mandat du BUILD :
-    # « crée X, commit ») n'est PAS injecté — même quoté en contexte « NE PAS
-    # exécuter », un pod base-worker (profile noop) l'exécute (il est amorcé pour
-    # FAIRE) : sur #11 et #12 le gatekeeper a recommité SMOKE.md + soumis un
-    # "status ok" sans `decision`. Le seul contexte fourni = les `outputs` du
-    # prédécesseur (descriptifs : commit + summary, non-exécutables). Si un jour le
-    # juge a une vraie persona, GateBrief sait rendre `request` en contexte
-    # désamorcé — mais pas pour un base-worker.
+    # I-CBC (bug PASSE-9, prouvé live #11 ET #12) : le mandat du juge ne contient AUCUNE instruction
+    # exécutable. Le `request` (body de l'issue = critère) est rendu par GateBrief DÉSAMORCÉ (blockquote
+    # « CONTEXTE — déjà traité, NE PAS exécuter » + bannière « JUGER, PAS PRODUIRE »). Le warning #11/#12
+    # visait un juge **base-worker** (profile noop, gatekeeper) qui RE-exécute le build même quoté : ce
+    # juge-là reçoit son brief par `dispatch_gatekeeper` (hop_consumer) qui NE passe PAS `request` — il
+    # n'est pas affecté ici. `build_judge_mandate` ne sert que les juges À PERSONA (qualifier/reviewer,
+    # `subagent_template` spec-reviewer/code-quality-reviewer) — le cas que le warning déclarait SÛR
+    # (« si un jour le juge a une vraie persona, GateBrief sait rendre `request` désamorcé »). Preuve
+    # live morse : ces juges fail-closent `halt_wait_input` sur livrable vide, ils ne RE-buildent pas.
+    # Sans le critère (`request`) ET le livrable (diff via `outputs`), le juge jugeait du `{}` → rework
+    # infini (le Reviewer ne peut JAMAIS `continue` sur du vide) — c'est la famine d'info, fix #1.
     Fleet.Pipeline.GateBrief.build(%{
       stage: stage,
       pipeline_id: pipeline,
       gate: nil,
-      outputs: outputs
+      outputs: outputs,
+      request: request
     })
   end
 

@@ -89,6 +89,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     def get_predecessor_result(_pid, _r, _n, _o), do: :none
 
+    # Fix famine-d'info : build_judge_mandate lit le critère (body de l'issue) via get_issue.
+    def get_issue(pid, _r, _n, _o), do: {:ok, get(pid)}
+
     # ── PR ──
     def open_pr(pid, _r, head, base, _title, _o) do
       Agent.get_and_update(pid, fn s ->
@@ -182,6 +185,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def get_route(r, n, o), do: Sim.get_route(p(), r, n, o)
     def close_issue(r, n, o), do: Sim.close_issue(p(), r, n, o)
     def get_predecessor_result(r, n, o), do: Sim.get_predecessor_result(p(), r, n, o)
+    def get_issue(r, n, o), do: Sim.get_issue(p(), r, n, o)
     def open_pr(r, head, base, t, o), do: Sim.open_pr(p(), r, head, base, t, o)
     def get_pr_for_branch(r, head, base, o), do: Sim.get_pr_for_branch(p(), r, head, base, o)
     def list_open_pulls(r, o), do: Sim.list_open_pulls(p(), r, o)

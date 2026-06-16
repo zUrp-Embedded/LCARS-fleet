@@ -68,10 +68,22 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     # F077 : le mandat juge lit le result du prédécesseur (option B). Stub : forge_opts[:_test_pred].
     def get_predecessor_result(_repo, _n, opts), do: Keyword.get(opts, :_test_pred, :none)
 
+    # Fix famine-d'info : build_judge_mandate lit le critère (body de l'issue) via get_issue.
+    # Stub : forge_opts[:_test_issue_body] (défaut un body non-vide).
+    def get_issue(_repo, n, opts),
+      do: {:ok, %{"number" => n, "body" => Keyword.get(opts, :_test_issue_body, "critère stub")}}
+
     # ②.1d : verdicts par juge (reviews-driven). Stub : forge_opts[:_test_verdicts] (map login↓→verdict,
     # defaut %{} = aucun juge n'a encore de verdict décisif).
     def pr_review_verdicts(_repo, _index, opts),
       do: {:ok, Keyword.get(opts, :_test_verdicts, %{})}
+
+    # Fix famine-d'info (rework) : feedback REQUEST_CHANGES injecté au brief de rework. Stub :
+    # forge_opts[:_test_feedback] (liste %{"login","body"}, défaut un body non-vide).
+    def change_request_feedback(_repo, _index, opts),
+      do:
+        {:ok,
+         Keyword.get(opts, :_test_feedback, [%{"login" => "reviewer", "body" => "feedback stub"}])}
 
     # F181 : compensation — retrait du verrou sur échec post-verrou.
     def remove_label(_repo, _n, label, _opts) do
@@ -308,7 +320,13 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "PR avec review demandee -> spawn le juge (ticket=ISSUE, verrou sur la PR)" do
-      opts = dispatch_opts(forge_opts: [_test_route: {:ok, {"poc", "spec-review"}}])
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_route: {:ok, {"poc", "spec-review"}},
+            _test_issue_body: "implémente le décodeur morse"
+          ]
+        )
 
       assert {:ok, {:spawned, "pr-6-qualifier-1700000000", "qualifier"}} =
                StageDispatcher.dispatch_review(pr(), opts)
@@ -318,6 +336,11 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:pipeline] == "poc" and spawn_opts[:stage] == "spec-review"
       # mandat juge desamorce (mandate_kind: judge) — pas un corps executable
       assert spawn_opts[:mandate] =~ "JUGER"
+
+      # Fix famine-d'info (juge) : predecessor vide (git-native) → le juge est POINTÉ sur son
+      # workspace (git diff) ET reçoit le CRITÈRE (body de l'issue, désamorcé en contexte).
+      assert spawn_opts[:mandate] =~ "git diff"
+      assert spawn_opts[:mandate] =~ "implémente le décodeur morse"
 
       # enqueue cible le pod_id pr-... ; ticket_id = l'issue
       assert_received {:enqueued, "pr-6-qualifier-1700000000", attrs}
@@ -367,7 +390,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         dispatch_opts(
           forge_opts: [
             _test_verdicts: %{"qualifier" => :approved, "reviewer" => :changes_requested},
-            _test_route: {:ok, {"poc", "build"}}
+            _test_route: {:ok, {"poc", "build"}},
+            _test_feedback: [
+              %{"login" => "reviewer", "body" => "le timing des points/traits est faux"}
+            ]
           ]
         )
 
@@ -377,6 +403,11 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:mandate] =~ "REWORK"
+
+      # Fix famine-d'info (rework) : le BODY de la review REQUEST_CHANGES est injecté (sinon « corrige
+      # selon la review » est creux → l'eng devine à l'aveugle → blocked_dep/wedge, prouvé live morse).
+      assert spawn_opts[:mandate] =~ "le timing des points/traits est faux"
+      assert spawn_opts[:mandate] =~ "reviewer"
       assert_received {:enqueued, "pr-6-engineer-1700000000", attrs}
       assert attrs.role == "engineer"
     end

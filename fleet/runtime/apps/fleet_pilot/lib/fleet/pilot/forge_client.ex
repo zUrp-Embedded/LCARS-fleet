@@ -587,6 +587,49 @@ defmodule Fleet.Pilot.ForgeClient do
   defp decisive_verdict("REQUEST_CHANGES"), do: :changes_requested
 
   @doc """
+  Feedback des reviews REQUEST_CHANGES en vigueur d'une PR (Gitea `GET .../pulls/{index}/reviews`),
+  pour nourrir le **rework** du producteur. Renvoie la DERNIÈRE review REQUEST_CHANGES par reviewer
+  avec son `body` — le verdict structuré gravé par le juge (`reason`/`details`/`chain`, via
+  `HopConsumer.judge_review_body`). Sans ce body, le `rework_mandate` dit « corrige selon la review »
+  SANS le contenu de la review → l'engineer devine à l'aveugle (famine d'info, fix #1, DOUBLE :
+  jumeau de l'`outputs: {}` du juge ; prouvé live morse — l'eng a rendu `blocked_dep` plutôt que
+  deviner). Pas de commit-scoping ici : on veut le DERNIER feedback par reviewer (`List.last`), pas
+  un verdict décisif courant (le rework s'exécute AVANT le prochain push, le REQUEST_CHANGES porte
+  sur le head courant). Les reviews sans body (verdict générique) sont écartées (rien d'actionnable).
+
+  ## Returns
+    * `{:ok, [%{"login" => l, "body" => b}]}` — une entrée par reviewer ayant un REQUEST_CHANGES avec substance
+    * `{:ok, []}` — aucun REQUEST_CHANGES avec body actionnable
+    * `{:error, term()}` — HTTP/transport/config
+  """
+  @spec change_request_feedback(String.t(), integer(), Keyword.t()) ::
+          {:ok, [%{optional(String.t()) => String.t()}]} | {:error, term()}
+  def change_request_feedback(repo, index, opts \\ [])
+      when is_binary(repo) and is_integer(index) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, reviews} when is_list(reviews) <-
+           http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
+      {:ok, change_requests_by_reviewer(reviews)}
+    else
+      {:ok, _non_list} -> {:ok, []}
+      {:error, _} = err -> err
+    end
+  end
+
+  # Dernier REQUEST_CHANGES PAR reviewer (login → body). Même tri que `verdicts_by_reviewer` (ordre de
+  # création Gitea → `List.last` = la review en vigueur), filtré aux REQUEST_CHANGES avec un body non-vide.
+  defp change_requests_by_reviewer(reviews) do
+    reviews
+    |> Enum.reject(&Map.get(&1, "dismissed", false))
+    |> Enum.filter(&(&1["state"] == "REQUEST_CHANGES"))
+    |> Enum.group_by(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
+    |> Enum.map(fn {login, revs} ->
+      %{"login" => login, "body" => (List.last(revs)["body"] || "") |> to_string()}
+    end)
+    |> Enum.reject(&(String.trim(&1["body"]) == ""))
+  end
+
+  @doc """
   Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea
   `PUT /repos/{repo}/contents/{path}`. **Le SYSTÈME publie** (forge-aveugle : le pod ne
   pousse jamais ; c'est ce chemin qui grave durablement le livrable d'un engineer). Création

@@ -33,7 +33,11 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   sans branch-protection — LCARS agrège, interim) : reviewers en attente → spawn le prochain juge (un à
   un, sérialisé par le verrou PR ; clone la **feature-branch** pour voir le diff) ; round terminé +
   verdict agrégé `:changes_requested` → rework du producteur ; `:approved` → **merge FF scellé
-  `:gatekeeper_role`** (comment de fin honnête + close via `Closes #N`).
+  `:gatekeeper_role`** (comment de fin honnête + close via `Closes #N`). **Passage de substance
+  (anti-famine-d'info, fix #1)** : le mandat **juge** (git-native) le POINTE sur son workspace
+  (`git diff`) + porte le **critère** (body de l'issue, désamorcé I-CBC via `GateBrief :request`) ; le
+  mandat **rework** injecte le **body des reviews REQUEST_CHANGES** (`ForgeClient.change_request_feedback/3`)
+  — sans quoi le juge jugeait du `{}` et l'eng corrigeait à l'aveugle (wedge prouvé live morse).
 - `Fleet.Pilot.Poller` — scanne le repo, dispatche les issues assignées → spawn producteur (+ Entry legacy sur `type:`, FALL).
 - `Fleet.Pilot.Labels` — vocabulaire wire-protocol (source unique) : **uniquement** ce qui n'est pas
   dérivable de l'état forge — verrous `lcars-in-flight`/`lcars-awaits-human`, états `state:*` (legacy carte).
