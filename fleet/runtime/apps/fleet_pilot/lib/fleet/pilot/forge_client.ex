@@ -63,11 +63,7 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, current} <- get_issue_labels(config, repo, issue_number),
          current_names = Enum.map(current, & &1["name"]),
          false <- label_name in current_names && :already_present,
-         {:ok, labels_index} <- get_labels_index(config, repo),
-         {:ok, label_id} <- lookup_label(labels_index, label_name),
-         current_ids = Enum.map(current, & &1["id"]),
-         new_ids = Enum.uniq([label_id | current_ids]),
-         :ok <- put_issue_labels(config, repo, issue_number, new_ids) do
+         :ok <- add_issue_label(config, repo, issue_number, label_name) do
       {:ok, :added}
     else
       :already_present -> {:ok, :already_present}
@@ -159,17 +155,17 @@ defmodule Fleet.Pilot.ForgeClient do
   def set_state_label(repo, issue_number, new_state, opts \\ [])
       when is_binary(new_state) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, current} <- get_issue_labels(config, repo, issue_number),
-         {:ok, index} <- get_labels_index(config, repo),
-         {:ok, new_id} <- lookup_label(index, new_state) do
-      kept_ids =
+         {:ok, current} <- get_issue_labels(config, repo, issue_number) do
+      # Par NOM (Gitea résout repo+ORG côté serveur) : on garde les labels non-`state:*` et on pose
+      # `new_state`. PUT remplace l'ensemble — on lui passe les NOMS (verrous + état), pas des repo-ids.
+      kept_names =
         current
         |> Enum.reject(fn l ->
           String.starts_with?(l["name"] || "", Fleet.Pilot.Labels.state_prefix())
         end)
-        |> Enum.map(& &1["id"])
+        |> Enum.map(& &1["name"])
 
-      case put_issue_labels(config, repo, issue_number, Enum.uniq([new_id | kept_ids])) do
+      case put_issue_labels(config, repo, issue_number, Enum.uniq([new_state | kept_names])) do
         :ok -> {:ok, :set}
         {:error, _} = err -> err
       end
@@ -211,15 +207,17 @@ defmodule Fleet.Pilot.ForgeClient do
       when is_binary(label_name) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, current} <- get_issue_labels(config, repo, issue_number) do
-      if label_name not in Enum.map(current, & &1["name"]) do
-        {:ok, :already_absent}
-      else
-        with {:ok, index} <- get_labels_index(config, repo),
-             {:ok, id} <- lookup_label(index, label_name),
-             {:ok, _} <-
-               request(config, :delete, "/repos/#{repo}/issues/#{issue_number}/labels/#{id}", nil) do
-          {:ok, :removed}
-        end
+      # L'`id` vient des labels ATTACHÉS à l'issue (`current`), pas d'un index repo (qui rate les
+      # org-labels) : un org-label attaché y figure avec son id → DELETE marche pour repo ET org.
+      case Enum.find(current, &(&1["name"] == label_name)) do
+        nil ->
+          {:ok, :already_absent}
+
+        %{"id" => id} ->
+          case request(config, :delete, "/repos/#{repo}/issues/#{issue_number}/labels/#{id}", nil) do
+            {:ok, _} -> {:ok, :removed}
+            {:error, _} = err -> err
+          end
       end
     end
   end
@@ -793,32 +791,26 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  defp get_labels_index(config, repo) do
-    case http_get(config, "/repos/#{repo}/labels?limit=100") do
-      {:ok, labels} when is_list(labels) ->
-        index = Map.new(labels, fn %{"name" => n, "id" => id} -> {n, id} end)
-        {:ok, index}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  defp put_issue_labels(config, repo, issue_number, label_ids) do
-    case http_put(
-           config,
-           "/repos/#{repo}/issues/#{issue_number}/labels",
-           %{labels: label_ids}
-         ) do
+  # ADD un label par NOM (POST = ajoute sans remplacer l'existant). Gitea résout le nom contre les
+  # labels REPO **et ORG** côté serveur (`IssueLabelsOption.labels` = « strings representing label
+  # names », doc swagger) → plus de résolution repo-id côté client (qui ratait les org-labels). Les
+  # labels-verrous du wire-protocol vivent au niveau ORG `fleet` (config fleet, une fois, pas par-repo).
+  defp add_issue_label(config, repo, issue_number, label_name) do
+    case http_post(config, "/repos/#{repo}/issues/#{issue_number}/labels", %{labels: [label_name]}) do
       {:ok, _body} -> :ok
       {:error, _} = err -> err
     end
   end
 
-  defp lookup_label(index, name) do
-    case Map.fetch(index, name) do
-      {:ok, id} -> {:ok, id}
-      :error -> {:error, {:label_unknown, name}}
+  # PUT (remplace l'ensemble) par NOMS — Gitea résout repo+ORG côté serveur (cf. `add_issue_label`).
+  defp put_issue_labels(config, repo, issue_number, label_names) do
+    case http_put(
+           config,
+           "/repos/#{repo}/issues/#{issue_number}/labels",
+           %{labels: label_names}
+         ) do
+      {:ok, _body} -> :ok
+      {:error, _} = err -> err
     end
   end
 

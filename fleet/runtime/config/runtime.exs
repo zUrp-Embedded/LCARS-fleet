@@ -308,6 +308,12 @@ if config_env() != :test do
     config :fleet_pilot, poll_repo: repo
   end
 
+  # Repo cible de la délégation arch (`create_ticket`). Défaut `fleet/fleet-test` (config app
+  # fleet_mcp). À aligner sur LCARS_PILOT_POLL_REPO pour que le poller voie les tickets posés.
+  if repo = System.get_env("LCARS_DELEGATION_REPO") do
+    config :fleet_mcp, delegation_repo: repo
+  end
+
   if interval = System.get_env("LCARS_PILOT_POLL_INTERVAL_MS") do
     config :fleet_pilot, poll_interval_ms: parse_int.("LCARS_PILOT_POLL_INTERVAL_MS", interval)
   end

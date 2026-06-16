@@ -43,12 +43,10 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   describe "add_label/4 — happy paths" do
-    test "ajoute le label quand il n'est pas présent" do
+    test "ajoute le label par NOM (POST ; Gitea résout repo+org côté serveur)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []},
-        {"GET", "/api/v1/repos/fleet/lcars/labels"} =>
-          {200, [%{"id" => 7, "name" => "lcars-dispatched"}]},
-        {"PUT", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
           {200, [%{"id" => 7, "name" => "lcars-dispatched"}]}
       }
 
@@ -56,18 +54,17 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts(handlers))
     end
 
-    test "préserve les labels existants en PUT (pattern v1.5 GET+PUT)" do
+    test "POST ajoute sans toucher l'existant (préservation côté serveur, plus de GET-index/PUT-ids)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
           {200, [%{"id" => 3, "name" => "type:poc"}, %{"id" => 4, "name" => "state:open"}]},
-        {"GET", "/api/v1/repos/fleet/lcars/labels"} =>
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
           {200,
            [
              %{"id" => 3, "name" => "type:poc"},
              %{"id" => 4, "name" => "state:open"},
              %{"id" => 7, "name" => "lcars-dispatched"}
-           ]},
-        {"PUT", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []}
+           ]}
       }
 
       assert {:ok, :added} =
@@ -88,13 +85,15 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   describe "add_label/4 — error paths" do
-    test "label inconnu dans le repo" do
+    test "label inconnu (ni repo ni org) → erreur HTTP du POST propagée" do
+      # Plus de lookup repo-id côté client : un nom introuvable est tranché par Gitea (POST en erreur).
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []},
-        {"GET", "/api/v1/repos/fleet/lcars/labels"} => {200, []}
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+          {422, %{"message" => "label does not exist"}}
       }
 
-      assert {:error, {:label_unknown, "lcars-dispatched"}} =
+      assert {:error, {:http, 422, _}} =
                ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts(handlers))
     end
 
@@ -370,14 +369,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
              %{"id" => 9, "name" => "lcars-in-flight"},
              %{"id" => 4, "name" => "state:dispatched"}
            ]},
-        {"GET", "/api/v1/repos/fleet/lcars/labels"} =>
-          {200,
-           [
-             %{"id" => 3, "name" => "type:poc"},
-             %{"id" => 9, "name" => "lcars-in-flight"},
-             %{"id" => 4, "name" => "state:dispatched"},
-             %{"id" => 5, "name" => "state:judged"}
-           ]},
+        # plus de GET-index : PUT par NOMS (Gitea résout repo+org). Le stub matche par chemin.
         {"PUT", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []}
       }
 
@@ -460,9 +452,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
     test "remove_label : DELETE quand présent" do
       handlers = %{
+        # l'id (9) vient des labels ATTACHÉS (GET issue labels), pas d'un index repo → marche org aussi.
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
-          {200, [%{"id" => 9, "name" => "lcars-in-flight"}]},
-        {"GET", "/api/v1/repos/fleet/lcars/labels"} =>
           {200, [%{"id" => 9, "name" => "lcars-in-flight"}]},
         {"DELETE", "/api/v1/repos/fleet/lcars/issues/42/labels/9"} => {204, %{}}
       }
