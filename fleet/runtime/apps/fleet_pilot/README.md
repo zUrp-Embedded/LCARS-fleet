@@ -29,7 +29,11 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
 - `Fleet.Pilot.StageDispatcher` — `decide/2` (issue assignée non verrouillée → `{:spawn, role, profile}`
   où `role` = **rôle producteur invariant** `:producer_role`, défaut `engineer` — pas un marqueur
   par-ticket, DN §1) + `dispatch_issue/2` (ordre canonique label-verrou → comment → pod). Les **juges**
-  sont dispatchés PR-driven via `dispatch_review` (requested_reviewers), pas ici.
+  sont dispatchés PR-driven via `dispatch_review/2` (②.1d, **PR = machine à états**, DN §1.4-1.5,
+  sans branch-protection — LCARS agrège, interim) : reviewers en attente → spawn le prochain juge (un à
+  un, sérialisé par le verrou PR ; clone la **feature-branch** pour voir le diff) ; round terminé +
+  verdict agrégé `:changes_requested` → rework du producteur ; `:approved` → **merge FF scellé
+  `:gatekeeper_role`** (comment de fin honnête + close via `Closes #N`).
 - `Fleet.Pilot.Poller` — scanne le repo, dispatche les issues assignées → spawn producteur (+ Entry legacy sur `type:`, FALL).
 - `Fleet.Pilot.Labels` — vocabulaire wire-protocol (source unique) : **uniquement** ce qui n'est pas
   dérivable de l'état forge — verrous `lcars-in-flight`/`lcars-awaits-human`, états `state:*` (legacy carte).
@@ -37,10 +41,16 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   gatekeeper §L441 (escalade soft/terminal → `resume_gate`). **Singleton** : la complétion lourde
   (git push ≤30s) est offloadée en `Task.Supervisor` (`:hop_runner` / `HopTaskSupervisor`, F067) → ne
   bloque pas la tête de ligne.
-- `Fleet.Pilot.HopCompleter` — séquence §5 (publish livrable `git_native` + grave la route + reassign/close).
+- `Fleet.Pilot.HopCompleter` — orchestrateur de fin-de-hop PR-natif (`complete_pr/2`). **②.1d single-brique
+  (sans carte)** : producteur → `:review` (ouvre la PR **au nom de l'eng** via token de rôle + `request_review`
+  des juges `:reviewer_roles` + **assigne l'humain** + unlock issue/PR) ; juge → `:reviewed` (poste la review
+  native **signée par le juge** + unlock PR — le merge/rework est décidé par le poller sur l'état-PR agrégé).
+  Identité ②.1e via `Fleet.Credentials.RoleToken` (poste EN SON NOM ; token absent → fallback système loggué).
+  (Legacy carte multi-stage : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
 
-Knobs : `:start_dispatcher` (legacy), `:stage_dispatch?` + `:poll_repo` + `:poll_interval_ms` (stage),
-`:hop_runner` (offload complétion, F067).
+Knobs : `:stage_dispatch?` + `:poll_repo` + `:poll_interval_ms` (stage), `:producer_role` (défaut `engineer`),
+`:reviewer_roles` (juges PR, défaut `["qualifier", "reviewer"]`), `:gatekeeper_role` (scelle les fusions,
+défaut `gatekeeper`), `:hop_runner` (offload complétion, F067).
 
 ## Onboarding projet (Rail 1 — « idée → le projet existe »)
 

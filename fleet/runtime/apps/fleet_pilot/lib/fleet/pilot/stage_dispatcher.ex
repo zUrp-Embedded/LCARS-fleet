@@ -235,48 +235,67 @@ defmodule Fleet.Pilot.StageDispatcher do
     labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
     reviewers = Map.get(pr, "requested_reviewers") || []
 
-    cond do
-      @in_flight_label in labels ->
-        {:skipped, :in_flight}
+    if @in_flight_label in labels do
+      {:skipped, :in_flight}
+    else
+      # ②.1d — décision PR-state-driven (single-brique, sans branch-protection : LCARS agrège les
+      # verdicts, décision user). On lit l'état de review COURANT (dernière review décisive) puis on
+      # branche (`dispatch_by_review_state`). Pas de verrou sur le merge : le poller est mono-process
+      # (ticks sérialisés) → pas de course ; une PR mergée disparaît de `list_open_pulls` (idempotent).
+      case ctx.forge.pr_review_state(ctx.repo, pr_number, ctx.forge_opts) do
+        {:ok, review_state} ->
+          dispatch_by_review_state(review_state, pr_number, head, reviewers, ctx)
 
-      reviewers != [] ->
-        # un juge est en attente -> on le spawn pour reviewer la PR.
-        role = reviewers |> hd() |> Map.get("login", "") |> String.downcase()
-        dispatch_pr_role(:judge, pr_number, head, role, ctx)
-
-      true ->
-        # pas de reviewer en attente : rework ? une review REQUEST_CHANGES courante => le PRODUCTEUR
-        # (engineer) reprend pour corriger (4-C-iv). Sinon rien (PR approuvee en attente du merge).
-        dispatch_rework(pr_number, head, ctx)
+        {:error, reason} ->
+          {:error, {:review_state, reason}}
+      end
     end
   end
 
-  # Rework juge : la PR porte un verdict REQUEST_CHANGES courant (review postee, plus de reviewer en
-  # attente) -> le PRODUCTEUR (role git_native de head.ref) reprend pour corriger. Idempotent (verrou
-  # PR). NB transitionnel : le mandat ne porte pas encore le feedback detaille de la review (4-C-iv+).
+  # ②.1d — aiguillage PR-state-driven (sans branch-protection : LCARS agrège). ORDRE (clauses) :
+  #   1. des reviewers EN ATTENTE → round de review actif → spawn le PROCHAIN juge (un à un, sérialisé
+  #      par le verrou PR). PRIORITAIRE : tant que des juges doivent (re)juger, on NE tranche PAS sur un
+  #      verdict (qui peut être périmé d'un round précédent — sinon, après un rework qui re-demande les
+  #      reviews, le vieux REQUEST_CHANGES re-déclencherait un rework en boucle).
+  #   2. round terminé (aucun reviewer en attente) + verdict agrégé `:changes_requested` (un juge a
+  #      rejeté) → rework du producteur ;
+  #   3. round terminé + `:approved` (tous OK) → MERGE (scellé gatekeeper) ;
+  #   4. sinon (rien en attente, aucune review décisive) → no_verdict (PR en attente, surfacé).
+  defp dispatch_by_review_state(_state, pr_number, head, reviewers, ctx) when reviewers != [],
+    do: dispatch_pr_role(:judge, pr_number, head, hd_role(reviewers), ctx)
+
+  defp dispatch_by_review_state(:changes_requested, pr_number, head, _reviewers, ctx),
+    do: dispatch_rework(pr_number, head, ctx)
+
+  defp dispatch_by_review_state(:approved, pr_number, head, _reviewers, ctx),
+    do: promote_pr(pr_number, head, ctx)
+
+  defp dispatch_by_review_state(_state, _pr_number, _head, _reviewers, _ctx),
+    do: {:skipped, :no_verdict}
+
+  # Login du prochain juge en attente (1er des requested_reviewers). Gitea le retire de la liste une
+  # fois sa review postée → le tick suivant spawn le suivant (sérialisation par le verrou PR).
+  defp hd_role(reviewers),
+    do: reviewers |> hd() |> Map.get("login", "") |> String.downcase()
+
+  # Rework juge : la PR porte un verdict REQUEST_CHANGES courant (l'état a déjà été lu par
+  # `dispatch_review` → pas de re-lecture ici) -> le PRODUCTEUR (role git_native de head.ref) reprend
+  # pour corriger sur la même PR. Idempotent (verrou PR). NB transitionnel : le mandat ne porte pas
+  # encore le feedback détaillé de la review (4-C-iv+).
   defp dispatch_rework(pr_number, head, ctx) do
-    case ctx.forge.pr_review_state(ctx.repo, pr_number, ctx.forge_opts) do
-      {:ok, :changes_requested} ->
-        case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
-          {:ok, {_n, producer_role}} ->
-            dispatch_pr_role(:rework, pr_number, head, producer_role, ctx)
+    case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+      {:ok, {_n, producer_role}} ->
+        dispatch_pr_role(:rework, pr_number, head, producer_role, ctx)
 
-          :error ->
-            {:skipped, :not_fleet_branch}
-        end
-
-      {:ok, _} ->
-        {:skipped, :no_work}
-
-      {:error, reason} ->
-        {:error, {:review_state, reason}}
+      :error ->
+        {:skipped, :not_fleet_branch}
     end
   end
 
   defp dispatch_pr_role(kind, pr_number, head, role, ctx) do
     with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head),
          {:ok, profile} <- load_role_or_skip(ctx.loader, role) do
-      do_dispatch_review(pr_number, issue_n, role, profile, kind, ctx)
+      do_dispatch_review(pr_number, issue_n, head, role, profile, kind, ctx)
     end
   end
 
@@ -296,7 +315,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     end
   end
 
-  defp do_dispatch_review(pr_number, issue_n, role, profile, kind, ctx) do
+  defp do_dispatch_review(pr_number, issue_n, head, role, profile, kind, ctx) do
     %{
       repo: repo,
       forge: forge,
@@ -310,9 +329,16 @@ defmodule Fleet.Pilot.StageDispatcher do
 
     ts = clock.(:second)
 
+    # ②.1d — le pod review (juge) OU rework (producteur) clone la FEATURE-BRANCH (`head.ref`), PAS
+    # `main` : le juge doit voir le DIFF du producteur (sinon il juge `main`, c.-à-d. rien de réel) ;
+    # le rework reprend SON propre travail. Read-only sur le code via le workspace provisionné par le
+    # système (barrière §4 préservée : zéro token forge au pod). `base_branch: head` → base_sha = tip
+    # de la feature-branch.
+    review_opts = Keyword.put(opts, :base_branch, head)
+
     # PROJET + ROUTE resolus AVANT toute ecriture forge (read-only) : un echec ne laisse pas de
     # verrou orphelin. La route (pipeline, stage) est lue sur l'ISSUE (le pipeline-state y reste).
-    with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
+    with {:ok, project} <- tag_err(resolver.(repo, review_opts), :project_resolution),
          {:ok, route} <- tag_err(route_for(forge, repo, issue_n, forge_opts), :route_resolution) do
       pod_id = "pr-#{pr_number}-#{role}-#{ts}"
 
@@ -360,6 +386,82 @@ defmodule Fleet.Pilot.StageDispatcher do
         {:error, {phase, reason}}
     end
   end
+
+  # ②.1d/②.1e — PROMOTE PR-state-driven (interim, sans branch-protection) : tous les juges ont
+  # approuvé → le système SCELLE. Modèle identité ②.1e : comment de fin + merge signés GATEKEEPER
+  # (gardien des PRs — « c'est dans son nom » ; token de rôle, `as_role`). Comment HONNÊTE (principe
+  # traça user : on ne ment pas, on montre) : livré par l'eng, validé par les juges (APPROVED), mergé
+  # par le système (branch-protection OFF en dev → LCARS agrège, pas Gitea — explicité). Le merge FF
+  # auto-close l'issue via `Closes #N` du body PR → close APRÈS merge, jamais avant. Pas de verrou
+  # (poller mono-process) ; PR déjà mergée → 409 → la PR disparaît au tick suivant (idempotent).
+  defp promote_pr(pr_number, head, ctx) do
+    with {:ok, {issue_n, producer}} <- parse_feature_branch_or_skip(head) do
+      gk_opts = as_role(ctx.forge_opts, gatekeeper_role())
+      signature = "[merge:pr-#{pr_number}]"
+      body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
+
+      # 1. comment de fin signé gatekeeper sur l'ISSUE (trace durable, dédup). 2. merge FF (gatekeeper)
+      # → auto-close de l'issue. L'ordre (comment puis merge) garantit que la trace existe même si le
+      # close suit immédiatement le merge.
+      with {:ok, _} <-
+             ctx.forge.post_comment(
+               ctx.repo,
+               issue_n,
+               body,
+               Keyword.put(gk_opts, :dedup_signature, signature)
+             ),
+           :ok <- merge_step(ctx.forge, ctx.repo, pr_number, gk_opts) do
+        Logger.info(
+          "StageDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
+            "(juges OK → merge FF, scellé gatekeeper, close via Closes ##{issue_n})"
+        )
+
+        {:ok, {:merged, pr_number}}
+      end
+    end
+  end
+
+  defp merge_step(forge, repo, pr_number, opts) do
+    case forge.merge_pr(repo, pr_number, opts) do
+      :ok -> :ok
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, {:merge, reason}}
+    end
+  end
+
+  # Comment de fin DESCRIPTIF + HONNÊTE (②.1e, principe traça user). Dit exactement ce qui s'est passé :
+  # qui a livré, qui a validé, qui a scellé, et que la branch-protection est OFF (interim dev) → LCARS
+  # agrège (rien maquillé en review humaine ou en merge-gardé-par-Gitea).
+  defp promote_comment(issue_n, pr_number, producer) do
+    """
+    ## ✅ Brique ##{issue_n} livrée et fusionnée
+
+    - **Livrée par** : `#{producer}` (engineer) — PR ##{pr_number} (l'eng a codé, le système a poussé).
+    - **Validée par** : les juges (qualifier + reviewer) ont **APPROUVÉ** la PR (reviews natives).
+    - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge fast-forward → auto-close via `Closes ##{issue_n}`.
+
+    > ⚠ **Interim (dev)** : la branch-protection native est **OFF** pour ne pas bloquer le push pendant le dev — c'est **LCARS qui agrège les verdicts** des juges et scelle le merge (pas Gitea). Cible : branch-protection native (require qualifier+reviewer approuvés + CI vert). Traça honnête : rien n'est maquillé.
+    """
+  end
+
+  # Rôle gardien des PRs (signe les fusions, ②.1e) : config `:gatekeeper_role` (data, défaut
+  # "gatekeeper"), symétrique de `:producer_role`/`:reviewer_roles`.
+  @default_gatekeeper_role "gatekeeper"
+  defp gatekeeper_role,
+    do: Application.get_env(:fleet_pilot, :gatekeeper_role, @default_gatekeeper_role)
+
+  # ②.1e — injecte le token du compte de RÔLE dans les forge_opts → le SYSTÈME poste/merge EN SON NOM
+  # (avatar/traça honnête, même mécanique que `create_ticket`/arch et `HopCompleter`). `nil` (token
+  # absent) → forge_opts inchangé → fallback token système (RoleToken logge le dégradé). Barrière §4 :
+  # le système poste avec le token de rôle, jamais le pod (forge-aveugle).
+  defp as_role(forge_opts, role) when is_binary(role) and role != "" do
+    case Fleet.Credentials.RoleToken.token(role) do
+      t when is_binary(t) -> Keyword.put(forge_opts, :token, t)
+      _ -> forge_opts
+    end
+  end
+
+  defp as_role(forge_opts, _role), do: forge_opts
 
   defp maybe_put_project(spawn_opts, nil), do: spawn_opts
   defp maybe_put_project(spawn_opts, project), do: Keyword.put(spawn_opts, :project, project)

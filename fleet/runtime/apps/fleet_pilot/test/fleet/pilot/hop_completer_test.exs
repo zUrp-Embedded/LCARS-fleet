@@ -298,7 +298,7 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
       assert_received {:review, 7, :approve, body}
       assert body =~ "qualifier"
-      assert body =~ "PASS"
+      assert body =~ "APPROUVÉ"
     end
 
     test "verdict :request_changes avec corps explicite" do
@@ -447,6 +447,51 @@ defmodule Fleet.Pilot.HopCompleterTest do
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :request_changes, _}
       refute_received {:assignee, _, _}
+      assert_received {:unlock, 7, _}
+      refute_received {:merge, _}
+    end
+
+    test "②.1d producteur :review (no-carte) → ouvre PR, request_review(qualifier+reviewer), assigne l'humain, unlock issue+PR, PAS de merge" do
+      hop = producer_hop(:review)
+
+      assert {:ok, :review_requested} =
+               HopCompleter.complete_pr(hop, orch_opts(reviewer_roles: ["qualifier", "reviewer"]))
+
+      assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
+      assert body =~ "Closes #42"
+      # DN §1.4 : qualifier + reviewer demandés d'un coup
+      assert_received {:request_review, 7, ["qualifier", "reviewer"]}
+      # ②.1e : l'humain commanditaire (id -un) est assigné à la PR (#7)
+      assert_received {:assignee, 7, _human}
+      # unlock DES DEUX : issue (1re livraison, verrou dispatch_issue) ET PR (re-livraison rework,
+      # verrou dispatch_review) — idempotent, ne stuck ni l'un ni l'autre.
+      assert_received {:unlock, 42, "lcars-in-flight"}
+      assert_received {:unlock, 7, "lcars-in-flight"}
+      # pas de merge ici : le merge est piloté par l'état-PR (dispatch_review)
+      refute_received {:merge, _}
+    end
+
+    test "②.1d juge :reviewed (no-carte) → review native (event explicite :approve), unlock la PR, PAS de merge ni request_review" do
+      hop = judge_hop(:reviewed, %{role: "qualifier", review_event: :approve})
+
+      assert {:ok, :reviewed} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+
+      assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
+      assert_received {:review, 7, :approve, _}
+      # juge : verrou sur la PR (dispatch_review)
+      assert_received {:unlock, 7, "lcars-in-flight"}
+
+      # le juge ne merge pas et ne re-demande pas de review : c'est le poller qui décide (état-PR)
+      refute_received {:merge, _}
+      refute_received {:request_review, _, _}
+    end
+
+    test "②.1d juge :reviewed REQUEST_CHANGES → review request_changes, unlock la PR, pas de merge" do
+      hop = judge_hop(:reviewed, %{role: "qualifier", review_event: :request_changes})
+
+      assert {:ok, :reviewed} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+
+      assert_received {:review, 7, :request_changes, _}
       assert_received {:unlock, 7, _}
       refute_received {:merge, _}
     end

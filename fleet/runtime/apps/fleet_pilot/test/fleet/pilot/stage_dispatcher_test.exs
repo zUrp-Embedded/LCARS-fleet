@@ -77,6 +77,12 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       send(self(), {:removed_label, label})
       {:ok, :removed}
     end
+
+    # ②.1d : merge FF (promote PR-state-driven, tous les juges OK). Signale pour assertion.
+    def merge_pr(_repo, index, _opts) do
+      send(self(), {:merged, index})
+      :ok
+    end
   end
 
   defmodule StubLoader do
@@ -325,10 +331,20 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "PR sans reviewer + pas de REQUEST_CHANGES -> skip :no_work" do
+    test "PR sans reviewer + aucune review decisive -> skip :no_verdict (②.1d, PR en attente)" do
       pr = pr(%{"requested_reviewers" => []})
       # _test_review_state defaut :none
-      assert {:skipped, :no_work} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+      assert {:skipped, :no_verdict} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+      refute_received {:spawned, _, _}
+    end
+
+    test "②.1d : PR sans reviewer + tous APPROVED -> PROMOTE (comment de fin + merge FF, gatekeeper)" do
+      pr = pr(%{"requested_reviewers" => [], "number" => 6})
+      opts = dispatch_opts(forge_opts: [_test_review_state: :approved])
+
+      assert {:ok, {:merged, 6}} = StageDispatcher.dispatch_review(pr, opts)
+      # le merge FF a bien ete declenche sur la PR (auto-close de l'issue via Closes #N)
+      assert_received {:merged, 6}
       refute_received {:spawned, _, _}
     end
 

@@ -322,7 +322,8 @@ defmodule Fleet.Pilot.Poller do
 
     Enum.reduce(pulls, %{dispatched: 0, skipped: 0, errors: 0}, fn pr, acc ->
       case StageDispatcher.dispatch_review(pr, opts) do
-        {:ok, {:spawned, _pod_id, _role}} -> %{acc | dispatched: acc.dispatched + 1}
+        # ②.1d : `:ok` couvre `{:spawned, _, _}` (juge/rework spawné) ET `{:merged, _}` (PR scellée).
+        {:ok, _} -> %{acc | dispatched: acc.dispatched + 1}
         {:skipped, _reason} -> %{acc | skipped: acc.skipped + 1}
         {:error, _reason} -> %{acc | errors: acc.errors + 1}
       end

@@ -180,16 +180,31 @@ defmodule Fleet.Pilot.HopCompleter do
 
     repo = Map.fetch!(hop, :repo)
     n = Map.fetch!(hop, :issue_number)
+    role = Map.get(hop, :role, "engineer")
     base = Map.get(hop, :base_branch, "main")
     head = Map.fetch!(Map.fetch!(hop, :deliverable_opts), :target_branch)
-    title = Map.get(hop, :title, "Livrable ##{n} (#{Map.get(hop, :role, "engineer")})")
-    body = Map.get(hop, :pr_body, "Closes ##{n}")
+    title = Map.get(hop, :title, "Livrable ##{n} — brique livrée par #{role} (engineer)")
+    body = Map.get(hop, :pr_body, default_pr_body(n, role))
 
+    # ②.1e — la PR est ouverte AU NOM DE L'ENG (token de rôle, `as_role`), pas du compte système :
+    # l'auteur de la PR sur la forge = Engineer (l'eng a fait le boulot). Token absent → fallback
+    # système loggué (RoleToken, honnête-dégradé). Barrière §4 : c'est le SYSTÈME qui poste avec le
+    # token de rôle, jamais le pod (forge-aveugle).
     with {:ok, sha} <- step1_publish(hop, deliverable),
-         {:ok, pr} <- open_pr_step(forge, repo, head, base, title, body, forge_opts) do
-      Logger.info("HopCompleter: ##{n} engineer → PR ##{pr} (head=#{head}, sha=#{sha})")
+         {:ok, pr} <-
+           open_pr_step(forge, repo, head, base, title, body, as_role(forge_opts, role)) do
+      Logger.info("HopCompleter: ##{n} #{role} → PR ##{pr} (head=#{head}, sha=#{sha})")
       {:ok, %{commit_sha: sha, pr_number: pr}}
     end
+  end
+
+  # Corps de PR par défaut — descriptif (traça honnête : QUI a fait QUOI) + `Closes #N` (auto-close
+  # natif au merge → close APRÈS merge, jamais avant). [[feedback_verbose_descriptive_traceable]]
+  defp default_pr_body(n, role) do
+    "Livrable de la brique ##{n}, produit par **#{role}** (engineer). Le système a poussé le commit " <>
+      "(l'eng code dans son workspace, le système publie — barrière forge-aveugle, le pod n'a pas de " <>
+      "token forge). Reviews demandées aux juges (qualifier + reviewer) ; merge à l'approbation.\n\n" <>
+      "Closes ##{n}"
   end
 
   defp open_pr_step(forge, repo, head, base, title, body, forge_opts) do
@@ -217,24 +232,35 @@ defmodule Fleet.Pilot.HopCompleter do
     event = Map.fetch!(hop, :review_event)
     body = Map.get(hop, :review_body, default_review_body(hop, event))
 
+    # ②.1e — la review native est postée AU NOM DU JUGE (token de rôle, `as_role`) : sur la forge,
+    # l'auteur de la review = qualifier/reviewer (avatar/traça honnête), pas le compte système. Token
+    # absent → fallback système loggué (RoleToken, honnête-dégradé). Barrière §4 préservée (le pod
+    # n'a pas de token ; c'est le SYSTÈME qui poste la review en son nom).
     # NB `ForgeClient.post_review/5` rend `:ok` (pas `{:ok, _}`) sur succes — matcher les deux
     # (un seam test peut rendre l'un ou l'autre ; le contrat reel = `:ok`).
-    case forge.post_review(repo, pr, event, body, forge_opts) do
+    case forge.post_review(repo, pr, event, body, as_role(forge_opts, Map.get(hop, :role))) do
       :ok -> {:ok, :reviewed}
       {:ok, _} -> {:ok, :reviewed}
       {:error, reason} -> {:error, {:review, reason}}
     end
   end
 
+  # Corps de review par défaut — descriptif (rôle juge + verdict + ce qui est jugé).
+  # [[feedback_verbose_descriptive_traceable]]
   defp default_review_body(hop, event) do
-    verdict =
-      case event do
-        :approve -> "PASS"
-        :request_changes -> "REQUEST_CHANGES"
-        _ -> "comment"
-      end
+    role = Map.get(hop, :role, "juge")
 
-    "Verdict **#{Map.get(hop, :role, "juge")}** : #{verdict}."
+    case event do
+      :approve ->
+        "Verdict du juge **#{role}** : **APPROUVÉ** — la brique satisfait son critère de revue."
+
+      :request_changes ->
+        "Verdict du juge **#{role}** : **CHANGEMENTS DEMANDÉS** — la brique ne satisfait pas " <>
+          "son critère ; le producteur (engineer) doit corriger et re-pousser sur la même PR."
+
+      _ ->
+        "Commentaire du juge **#{role}** : verdict non concluant (en attente)."
+    end
   end
 
   @doc """
@@ -288,7 +314,8 @@ defmodule Fleet.Pilot.HopCompleter do
   Returns `{:ok, :promoted | :review_requested | :rework_requested}` | `{:error, {step, reason}}`.
   """
   @spec complete_pr(map(), keyword()) ::
-          {:ok, :promoted | :review_requested | :rework_requested} | {:error, {atom(), term()}}
+          {:ok, :promoted | :review_requested | :rework_requested | :reviewed}
+          | {:error, {atom(), term()}}
   def complete_pr(hop, opts \\ []) when is_map(hop) do
     case Map.fetch!(hop, :pr_role) do
       :producer -> complete_producer(hop, opts)
@@ -332,9 +359,13 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   defp review_hop(hop, pr) do
+    # ②.1d : un juge no-carte porte `:review_event` (mappé du gate-decision continue/abandon par
+    # HopConsumer). À défaut (legacy carte), on dérive de l'intent. Le `:review_event` explicite prime.
+    event = Map.get(hop, :review_event) || review_event_for_intent(Map.fetch!(hop, :intent))
+
     hop
     |> Map.put(:pr_number, pr)
-    |> Map.put(:review_event, review_event_for_intent(Map.fetch!(hop, :intent)))
+    |> Map.put(:review_event, event)
   end
 
   # Verdict de gate → event de review native. `:rework` (gate fail) = REQUEST_CHANGES ; `:advance`/
@@ -385,6 +416,95 @@ defmodule Fleet.Pilot.HopCompleter do
       {:ok, :rework_requested}
     end
   end
+
+  # ②.1d — producteur SANS carte (single-brique) : la PR est ouverte (`complete_producer`) → on met
+  # les JUGES (`:reviewer_roles`, défaut qualifier+reviewer) en `requested_reviewers` (le poller
+  # `dispatch_review` les spawn un à un), on ASSIGNE l'HUMAIN à la PR (②.1e — voir quel humain a
+  # drivé), puis on lève le verrou de l'ISSUE (la PR ouverte fait skip l'issue côté poller via
+  # `pulls_issue_ids`). PAS de merge ici : le merge est piloté par l'état-PR (dispatch_review, quand
+  # tous les juges ont approuvé). Branch-protection OFF en dev (décision user) → LCARS agrège, interim.
+  defp route(%{intent: :review} = hop, pr, opts) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+    repo = hop.repo
+
+    # Unlock DES DEUX numéros (idempotent : remove_label no-op si absent). 1re livraison → le verrou est
+    # sur l'ISSUE (posé par `dispatch_issue`) ; RE-livraison de rework → le verrou est sur la PR (posé
+    # par `dispatch_review` :rework). On lève les deux pour ne stuck ni l'un ni l'autre.
+    with :ok <- request_reviews_step(forge, repo, pr, reviewer_roles(opts), forge_opts),
+         {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
+         {:ok, _} <- unlock(forge, repo, hop.issue_number, forge_opts),
+         {:ok, _} <- unlock(forge, repo, pr, forge_opts) do
+      {:ok, :review_requested}
+    end
+  end
+
+  # ②.1d — juge SANS carte : la review native a déjà été postée par `complete_judge` (`record_review`,
+  # signée par le token du juge). Il ne reste qu'à lever le verrou de la PR — le merge/rework est décidé
+  # par le poller (`dispatch_review`) sur l'état-PR AGRÉGÉ, pas par l'intent d'un pod juge isolé (sinon
+  # le 1er juge mergerait avant le second).
+  defp route(%{intent: :reviewed} = hop, pr, opts) do
+    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+
+    with {:ok, _} <- unlock(forge, hop.repo, lock_number(hop, pr), forge_opts) do
+      {:ok, :reviewed}
+    end
+  end
+
+  # Demande la review de TOUS les juges d'un coup (DN §1.4 : qualifier+reviewer en requested_reviewers).
+  # Liste vide = trou de config (jamais merger sans juge en interim) → fail-loud.
+  defp request_reviews_step(_forge, _repo, _pr, [], _forge_opts),
+    do: {:error, {:request_review, :no_reviewers}}
+
+  defp request_reviews_step(forge, repo, pr, reviewers, forge_opts) do
+    case forge.request_review(repo, pr, reviewers, forge_opts) do
+      :ok -> :ok
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, {:request_review, reason}}
+    end
+  end
+
+  # ②.1e — assigne l'HUMAIN commanditaire à la PR (comme le ticket : voir QUEL humain a drivé les
+  # agents). L'humain DRIVE, ne fait rien → il ne signe rien, mais il est l'assignee partout (traça du
+  # driver). Assignee = champ de routing (pas d'authorship) → token système OK. Humain irrésoluble →
+  # best-effort (le code EST livré) : log + on n'échoue pas le hop.
+  defp assign_human_step(forge, repo, pr, forge_opts) do
+    case Fleet.Credentials.Human.current() do
+      {:ok, login} ->
+        case forge.set_assignee(repo, pr, login, forge_opts) do
+          {:ok, _} = ok -> ok
+          {:error, reason} -> {:error, {:assign_human, reason}}
+        end
+
+      {:error, reason} ->
+        Logger.warning(
+          "HopCompleter: humain commanditaire irrésoluble (#{inspect(reason)}) — PR ##{pr} non assignée"
+        )
+
+        {:ok, :no_human}
+    end
+  end
+
+  # Juges du modèle single-brique (DN §1.4) : config `:reviewer_roles` (data catalogue, défaut
+  # qualifier+reviewer), surchargée par `opts` pour les tests. Symétrique de `:producer_role`.
+  defp reviewer_roles(opts) do
+    Keyword.get(opts, :reviewer_roles) ||
+      Application.get_env(:fleet_pilot, :reviewer_roles, ["qualifier", "reviewer"])
+  end
+
+  # ②.1e — injecte le token du compte de RÔLE dans les forge_opts → le SYSTÈME poste EN SON NOM
+  # (avatar/traça honnête, même mécanique que `create_ticket`/arch). `nil` (token absent/illisible) →
+  # forge_opts inchangé → fallback token système (RoleToken logge le dégradé). Barrière §4 préservée :
+  # c'est le système qui poste avec le token de rôle, jamais le pod (forge-aveugle).
+  defp as_role(forge_opts, role) when is_binary(role) and role != "" do
+    case Fleet.Credentials.RoleToken.token(role) do
+      t when is_binary(t) -> Keyword.put(forge_opts, :token, t)
+      _ -> forge_opts
+    end
+  end
+
+  defp as_role(forge_opts, _role), do: forge_opts
 
   # Verrou a lever : producteur -> l'issue (verrou pose par dispatch_issue) ; juge -> la PR (verrou
   # pose par dispatch_review). Un rework producteur (pr nil) tombe sur l'issue.

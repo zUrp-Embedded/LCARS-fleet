@@ -276,6 +276,46 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
       assert {:ok, :none} = ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
     end
+
+    test "pr_review_state : agrege PAR reviewer — un rejet l'emporte sur l'approbation d'un autre (②.1d)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "qualifier"},
+               "dismissed" => false
+             },
+             %{"state" => "APPROVED", "user" => %{"login" => "reviewer"}, "dismissed" => false}
+           ]}
+      }
+
+      # qualifier rejette, reviewer approuve -> le rejet l'emporte (fail-closed, pas de merge a tort)
+      assert {:ok, :changes_requested} =
+               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+    end
+
+    test "pr_review_state : re-review ECRASE l'ancienne du meme reviewer (②.1d, anti-boucle rework)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             # 1er round : qualifier rejette, reviewer approuve
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "qualifier"},
+               "dismissed" => false
+             },
+             %{"state" => "APPROVED", "user" => %{"login" => "reviewer"}, "dismissed" => false},
+             # apres rework : qualifier re-approuve -> sa DERNIERE prime
+             %{"state" => "APPROVED", "user" => %{"login" => "qualifier"}, "dismissed" => false}
+           ]}
+      }
+
+      # les 2 reviewers ont leur DERNIERE = APPROVED -> :approved (le vieux REQUEST_CHANGES ne boucle pas)
+      assert {:ok, :approved} = ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+    end
   end
 
   describe "add_label/4 — config" do

@@ -480,9 +480,16 @@ defmodule Fleet.Pilot.ForgeClient do
   Les reviews `REQUEST_REVIEW`/`COMMENT`/`PENDING` ne sont pas decisives (ignorees). Gitea liste
   par ordre de creation -> la derniere decisive = le verdict en vigueur.
 
+  Verdict **AGRÉGÉ par reviewer** (②.1d, interim sans branch-protection — LCARS agrège à la place de
+  Gitea, cible DN §1.4 = branch-protection native) : on prend la DERNIÈRE review décisive de CHAQUE
+  reviewer (par login). Une seule `REQUEST_CHANGES` (parmi ces dernières) → `:changes_requested` (tout
+  rejet bloque le merge — sinon un qualifier rejetant puis un reviewer approuvant mergerait à tort) ;
+  sinon au moins une `APPROVED` → `:approved` ; aucune décisive → `:none`. Une re-review (après rework)
+  ÉCRASE l'ancienne du même reviewer → pas de verdict périmé qui boucle.
+
   ## Returns
-    * `{:ok, :approved}` — derniere decisive = APPROVED
-    * `{:ok, :changes_requested}` — derniere decisive = REQUEST_CHANGES
+    * `{:ok, :approved}` — toutes les dernières-par-reviewer = APPROVED (≥1), aucune REQUEST_CHANGES
+    * `{:ok, :changes_requested}` — au moins une derniere-par-reviewer = REQUEST_CHANGES
     * `{:ok, :none}` — aucune review decisive
     * `{:error, term()}` — HTTP/transport/config
   """
@@ -492,23 +499,29 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} when is_list(reviews) <-
            http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
-      state =
-        reviews
-        |> Enum.reject(&Map.get(&1, "dismissed", false))
-        |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
-        |> List.last()
-        |> decisive_state()
-
-      {:ok, state}
+      {:ok, aggregate_review_state(reviews)}
     else
       {:ok, _non_list} -> {:ok, :none}
       {:error, _} = err -> err
     end
   end
 
-  defp decisive_state(%{"state" => "APPROVED"}), do: :approved
-  defp decisive_state(%{"state" => "REQUEST_CHANGES"}), do: :changes_requested
-  defp decisive_state(_), do: :none
+  # Agrège la DERNIÈRE review décisive PAR reviewer (login). Gitea liste par ordre de création →
+  # `List.last` d'un groupe = la review en vigueur de ce reviewer. Rejet prioritaire (fail-closed).
+  defp aggregate_review_state(reviews) do
+    latest_per_reviewer =
+      reviews
+      |> Enum.reject(&Map.get(&1, "dismissed", false))
+      |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
+      |> Enum.group_by(&get_in(&1, ["user", "login"]))
+      |> Enum.map(fn {_login, revs} -> List.last(revs)["state"] end)
+
+    cond do
+      "REQUEST_CHANGES" in latest_per_reviewer -> :changes_requested
+      "APPROVED" in latest_per_reviewer -> :approved
+      true -> :none
+    end
+  end
 
   @doc """
   Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea

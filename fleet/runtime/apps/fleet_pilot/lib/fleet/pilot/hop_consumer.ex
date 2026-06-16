@@ -367,6 +367,7 @@ defmodule Fleet.Pilot.HopConsumer do
       }
       |> put_unless_nil(:comment_body, comment_body)
       |> maybe_put_deliverable(pr_role, role, payload, n, state)
+      |> maybe_put_review_event(pr_role, intent, payload)
 
     hc_opts =
       [forge_opts: state.forge_opts]
@@ -384,6 +385,22 @@ defmodule Fleet.Pilot.HopConsumer do
     do: Map.put(hop, :deliverable_opts, build_deliverable_opts(role, payload, n, state))
 
   defp maybe_put_deliverable(hop, :judge, _role, _payload, _n, _state), do: hop
+
+  # ②.1d — pour un JUGE no-carte (intent `:reviewed`), le verdict de review (APPROVE/REQUEST_CHANGES)
+  # est lu du gate-decision rendu par le pod (GateBrief : `continue`/`abandon`). On le mappe ici et on
+  # le porte dans le hop (`:review_event`) → `HopCompleter.record_review` poste la review correspondante.
+  # `continue`→approve, `abandon`→request_changes, autre (redirect/escalate/halt/illisible)→`:comment`
+  # (fail-closed : PR en attente, ni mergée ni reworkée — escalade-gatekeeper-PR = backlog DN §1.5).
+  defp maybe_put_review_event(hop, :judge, :reviewed, payload) do
+    result = unwrap_worker_envelope(payload["result"] || %{})
+    Map.put(hop, :review_event, review_event_for_decision(gate_decision(result)))
+  end
+
+  defp maybe_put_review_event(hop, _pr_role, _intent, _payload), do: hop
+
+  defp review_event_for_decision("continue"), do: :approve
+  defp review_event_for_decision("abandon"), do: :request_changes
+  defp review_event_for_decision(_other), do: :comment
 
   # Corr.3 (engineer-first) — classe le role qui finit. Producteur = role git_native (engineer) →
   # pousse le code, ouvre la PR (head = sa propre branche). Juge = role payload (qualifier/reviewer
@@ -476,8 +493,23 @@ defmodule Fleet.Pilot.HopConsumer do
         end
 
       _ ->
-        # pas de contexte carte → pod 1-stage (A1) → terminal (promote/close)
-        {:ok, :promote, {nil, nil}}
+        # ②.1d — pas de carte (single-brique) : l'intent dépend du RÔLE qui finit, plus de
+        # `:promote` direct (l'ancien terminal mergeait SANS juge). Le merge est piloté par
+        # l'état-PR (dispatch_review), pas par l'intent d'un pod isolé.
+        no_carte_resolve(payload, state)
+    end
+  end
+
+  # ②.1d — résolution single-brique (sans carte) :
+  #   producteur (git_native) → `:review` : `complete_pr` ouvre la PR + met les juges en
+  #     `requested_reviewers` + assigne l'humain + unlock l'issue ;
+  #   juge (payload) → `:reviewed` : `complete_pr` poste la review native (verdict lu du gate-decision,
+  #     porté plus loin via `:review_event`) + unlock la PR. Le merge/rework = poller (dispatch_review).
+  defp no_carte_resolve(payload, state) do
+    if producer?(payload["role"], state) do
+      {:ok, :review, {nil, nil}}
+    else
+      {:ok, :reviewed, {nil, nil}}
     end
   end
 

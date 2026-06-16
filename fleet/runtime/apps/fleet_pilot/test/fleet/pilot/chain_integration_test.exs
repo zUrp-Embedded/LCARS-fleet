@@ -135,10 +135,28 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       :ok
     end
 
-    # review soumise -> Gitea retire le reviewer de requested (ici on vide : 1 reviewer a la fois).
-    def post_review(pid, _r, pr, _ev, _body, _o) do
-      upd_pr(pid, pr, &Map.put(&1, "requested_reviewers", []))
+    # review soumise -> Gitea retire le reviewer de requested (ici on vide : 1 reviewer a la fois) ET
+    # enregistre le verdict courant (②.1d : dispatch_review lit pr_review_state pour merge/rework).
+    def post_review(pid, _r, pr, ev, _body, _o) do
+      upd_pr(pid, pr, fn p ->
+        p
+        |> Map.put("requested_reviewers", [])
+        |> Map.put("review_state", review_state_of(ev))
+      end)
+
       :ok
+    end
+
+    defp review_state_of(:approve), do: :approved
+    defp review_state_of(:request_changes), do: :changes_requested
+    defp review_state_of(_), do: :none
+
+    # ②.1d : etat de review courant d'une PR (defaut :none tant qu'aucune review decisive).
+    def pr_review_state(pid, _r, pr, _o) do
+      case get_pr(pid, pr) do
+        %{"review_state" => st} -> {:ok, st}
+        _ -> {:ok, :none}
+      end
     end
 
     # merge FF : PR merged + issue close (Closes #N).
@@ -174,6 +192,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def request_review(r, pr, revs, o), do: Sim.request_review(p(), r, pr, revs, o)
     def post_review(r, pr, ev, body, o), do: Sim.post_review(p(), r, pr, ev, body, o)
     def merge_pr(r, pr, o), do: Sim.merge_pr(p(), r, pr, o)
+    def pr_review_state(r, pr, o), do: Sim.pr_review_state(p(), r, pr, o)
   end
 
   defmodule CarteLoader do

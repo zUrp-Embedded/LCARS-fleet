@@ -72,7 +72,9 @@ defmodule Fleet.Pilot.HopConsumerTest do
   end
 
   describe "maybe_complete/2 — traduction event -> hop PR-natif" do
-    test "pod engineer porteur de projet (A1) -> hop producteur, terminal (:promote)" do
+    test "pod engineer porteur de projet (A1 single-brique) -> hop producteur, intent :review (②.1d)" do
+      # ②.1d : sans carte, le producteur ne merge PLUS directement (:promote) — il ouvre la PR et
+      # DEMANDE les juges (:review). Le merge est ensuite piloté par l'état-PR (dispatch_review).
       assert {:ok, :captured} = HopConsumer.maybe_complete(stage_payload(), state())
 
       assert_received {:hop, hop, opts}
@@ -80,7 +82,7 @@ defmodule Fleet.Pilot.HopConsumerTest do
       assert hop.issue_number == 42
       assert hop.role == "engineer"
       assert hop.pr_role == :producer
-      assert hop.intent == :promote
+      assert hop.intent == :review
       assert hop.next_assignee == nil
       assert hop.producer_branch == "lcars/issue-42-engineer"
       assert hop.base_branch == "main"
@@ -198,13 +200,37 @@ defmodule Fleet.Pilot.HopConsumerTest do
       refute_received {:hop, _, _}
     end
 
-    test "sans contexte carte (A1 1-stage) -> terminal, pas d'appel loader" do
-      # loader nil : si run_hop appelait le loader sans contexte carte, ca crasherait.
+    test "sans contexte carte (A1 single-brique) -> producteur :review, pas d'appel loader (carte)" do
+      # loader (carte) nil : si run_hop appelait le loader de carte sans contexte carte, ca crasherait.
+      # Le no-carte appelle deliverable_mode_fun (dmode), pas le loader de carte.
       payload = stage_payload()
       assert {:ok, :captured} = HopConsumer.maybe_complete(payload, state())
       assert_received {:hop, hop, _opts}
-      assert hop.intent == :promote
+      assert hop.intent == :review
       assert hop.next_assignee == nil
+    end
+
+    test "sans carte, un JUGE (role payload) -> :reviewed + review_event mappe du gate-decision (②.1d)" do
+      # role "qualifier" => dmode = "payload" => juge. Le verdict du pod (gate-decision) est mappe en
+      # event de review : continue->approve, abandon->request_changes, autre->comment (fail-closed).
+      for {decision, event} <- [
+            {"continue", :approve},
+            {"abandon", :request_changes},
+            {"halt_wait_input", :comment}
+          ] do
+        payload = stage_payload(%{"role" => "qualifier", "result" => %{"decision" => decision}})
+
+        # forge_client: StubForge → le juge resout la branche producteur via la PR ouverte (pas de HTTP).
+        assert {:ok, :captured} =
+                 HopConsumer.maybe_complete(payload, state(%{forge_client: StubForge}))
+
+        assert_received {:hop, hop, _opts}
+        assert hop.pr_role == :judge
+        assert hop.intent == :reviewed
+        assert hop.review_event == event
+        assert hop.producer_branch == "lcars/issue-42-engineer"
+        refute Map.has_key?(hop, :deliverable_opts)
+      end
     end
   end
 
