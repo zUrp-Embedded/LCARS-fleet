@@ -397,8 +397,25 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp build_mandate(profile, role, forge, repo, number, issue, forge_opts, route) do
     case Fleet.CapProfile.mandate_kind(profile) do
       "judge" -> build_judge_mandate(role, forge, repo, number, forge_opts, route)
-      _worker -> issue["body"] || ""
+      _worker -> build_worker_mandate(role, issue)
     end
+  end
+
+  # Mandat producteur = le brief de l'issue + l'instruction de LIVRAISON git-native. Sans elle (le rail
+  # forge l'avait perdue vs le rail RAM — régression F090), le pod « submit les contenus » au lieu de
+  # COMMITTER → la publish git_native ne trouve aucun commit (`:no_deliverable_commit`, prouvé live #3).
+  # Le pod commite en LOCAL ; le SYSTÈME pousse + ouvre la PR (forge-aveugle, barrière §4). Le trailer
+  # est obligatoire (gate F-01 au push, source unique `ForgeIdentity.coauthor_instruction`).
+  defp build_worker_mandate(role, issue) do
+    [
+      issue["body"] || "",
+      "---",
+      "**Livraison (git-native)** : réalise le travail dans ton workspace, puis `git add` + `git commit`. " <>
+        "Le SYSTÈME pousse ton commit et ouvre la PR — toi tu ne push pas (forge-aveugle). " <>
+        "`submit_result` ne fait que SIGNALER la fin : le livrable = ton COMMIT, jamais un payload de contenus.",
+      Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
+    ]
+    |> Enum.join("\n\n")
   end
 
   # A2.3b item 5 (option B, DN gatekeeper-forge-encoding-v2 §5) : un pod **juge** doit savoir QUOI

@@ -180,13 +180,16 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert {:ok, {:spawned, "issue-42-engineer-1700000000", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts())
 
-      # le mandat = issue.body, ticket_id dérivé du numéro
+      # le mandat = issue.body + l'instruction de LIVRAISON git-native (commit local + trailer),
+      # sinon le pod « submit les contenus » au lieu de committer → :no_deliverable_commit.
       assert_received {:spawned, "issue-42", opts}
-      assert opts[:mandate] == "fais le hello"
+      assert opts[:mandate] =~ "fais le hello"
+      assert opts[:mandate] =~ "git commit"
+      assert opts[:mandate] =~ "Co-authored-by: LCARS-engineer"
 
       # le mandat est ENQUEUÉ en TaskQueue (sinon le pod se croit bootstrap → idle ; bug PASSE-9)
       assert_received {:enqueued, "issue-42-engineer-1700000000", attrs}
-      assert attrs.brief == "fais le hello"
+      assert attrs.brief =~ "fais le hello"
       assert attrs.role == "engineer"
 
       # F071 : verrouille le 2ᵉ site `TicketId.compose` (enqueue_mandate) — sinon un retour au littéral
@@ -233,7 +236,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:project] == project
-      assert spawn_opts[:mandate] == "fais le hello"
+      assert spawn_opts[:mandate] =~ "fais le hello"
     end
 
     test "route gravée sur la forge → pipeline+stage injectés dans spawn_opts (A2.1)" do
