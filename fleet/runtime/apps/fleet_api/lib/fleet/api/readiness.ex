@@ -63,7 +63,6 @@ defmodule Fleet.API.Readiness do
   defp default_probes do
     [
       {"event.registry", &event_registry/0},
-      {"pilot.dispatcher", &pilot_dispatcher/0},
       {"coord.backend", &coord_backend/0},
       {"shutdown.dispatcher", &shutdown_dispatcher/0},
       {"launch.backend", &launch_backend/0},
@@ -92,48 +91,9 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # Pilot auto-dispatch : OFF-par-défaut (env `LCARS_PILOT_DISPATCHER`) =
-  # `:inactive` explicite (R21, attendu, rollout progressif), PAS une faute.
-  # ON sans process vivant, ou ON avec 0 route chargée = `:degraded`.
-  defp pilot_dispatcher do
-    on? = Application.get_env(:fleet_pilot, :start_dispatcher, false)
-    pid = Process.whereis(Fleet.Pilot.AutoDispatcher)
-
-    cond do
-      not on? ->
-        probe("pilot.dispatcher", :inactive, %{
-          start_dispatcher: false,
-          note: "auto-dispatch OFF (LCARS_PILOT_DISPATCHER) — rollout progressif"
-        })
-
-      is_pid(pid) ->
-        # Compte de routes lu sur l'état EN MÉMOIRE du dispatcher vivant (pas
-        # le YAML disque, qui peut diverger de ce que le process a chargé au
-        # boot). 0 route = dispatcher ON mais inopérant → dégradé.
-        case live_routes_count(pid) do
-          n when is_integer(n) and n > 0 ->
-            probe("pilot.dispatcher", :operational, %{routes_loaded: n})
-
-          n when is_integer(n) ->
-            probe("pilot.dispatcher", :degraded, %{
-              routes_loaded: n,
-              note: "dispatcher ON mais 0 route chargée (catalogue forge-routing vide/absent)"
-            })
-
-          :error ->
-            probe("pilot.dispatcher", :degraded, %{
-              note: "AutoDispatcher vivant mais stats injoignable"
-            })
-        end
-
-      true ->
-        probe("pilot.dispatcher", :degraded, %{
-          start_dispatcher: true,
-          alive: false,
-          note: "start_dispatcher=true mais AutoDispatcher absent du registre"
-        })
-    end
-  end
+  # NB probe `pilot.dispatcher` RETIRÉE (②.3 / BL-050, 2026-06-16) : elle sondait l'`AutoDispatcher`
+  # du rail legacy (webhook→route→Executor RAM), supprimé. Le rail forge-state-machine (Poller stage +
+  # HopConsumer) n'a pas de health-check ici — sa liveness = les pods vivants + les ticks poller (logs).
 
   # Backend d'escalade Cat 5 coord : `NotWiredYet` (ou absent) ⇒ escalades
   # audit-only silencieuses ⇒ `:degraded` (R22). Vrai backend ⇒ operational.
@@ -231,26 +191,6 @@ defmodule Fleet.API.Readiness do
   # ── Helpers ──────────────────────────────────────────────────────────
 
   defp probe(id, state, detail), do: %{id: id, state: state, detail: detail}
-
-  # `fleet_pilot` est Ring 2 ; `fleet_api` Ring 4 ne le prend PAS en dépendance
-  # compile-time (pas d'inversion de layering). Le read-model interroge donc
-  # l'état EN MÉMOIRE du dispatcher vivant via dispatch dynamique guardé :
-  # `AutoDispatcher.stats/1` (GenServer.call → `%{routes_count}`). Dep-free,
-  # résilient (module absent / process mort / call exit → `:error`).
-  defp live_routes_count(pid) do
-    mod = Fleet.Pilot.AutoDispatcher
-
-    if Code.ensure_loaded?(mod) and function_exported?(mod, :stats, 1) do
-      %{routes_count: n} = apply(mod, :stats, [pid])
-      n
-    else
-      :error
-    end
-  rescue
-    _ -> :error
-  catch
-    :exit, _ -> :error
-  end
 
   # Un probe qui crash ne fait pas tomber l'endpoint : rabattu en :degraded,
   # en conservant l'id du sous-système (attribution correcte du dégradé).

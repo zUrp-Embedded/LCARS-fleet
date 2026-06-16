@@ -33,13 +33,16 @@ defmodule Fleet.API.ReadinessTest do
   defp sub(result, id), do: Enum.find(result.subsystems, &(&1.id == id))
 
   describe "deep/0 — forme" do
-    test "verdict global + liste dégradés + 6 sous-systèmes + ts" do
+    test "verdict global + liste dégradés + 5 sous-systèmes + ts" do
       assert %{status: status, degraded: degraded, subsystems: subsystems, ts: ts} =
                Readiness.deep()
 
       assert status in ["operational", "degraded"]
       assert is_list(degraded)
-      assert length(subsystems) == 6
+
+      # 5 sous-systèmes depuis le retrait de `pilot.dispatcher` (②.3 / BL-050) : event.registry,
+      # coord.backend, shutdown.dispatcher, launch.backend, mcp.pod_facing.
+      assert length(subsystems) == 5
       assert is_binary(ts)
 
       # chaque sous-système : id/state/detail, state dans le vocab
@@ -119,14 +122,7 @@ defmodule Fleet.API.ReadinessTest do
     end
   end
 
-  describe "pilot.dispatcher (R21 — inactif visible)" do
-    test "inactive quand auto-dispatch OFF (n'apparaît PAS dans degraded)" do
-      # ambient test : start_dispatcher false (config/test.exs)
-      result = Readiness.deep()
-      assert %{state: :inactive} = sub(result, "pilot.dispatcher")
-      refute "pilot.dispatcher" in result.degraded
-    end
-  end
+  # describe "pilot.dispatcher" RETIRÉ (②.3 / BL-050) : la probe sondait l'AutoDispatcher legacy, supprimé.
 
   describe "event.registry (B2 — escape-hatch visible)" do
     test "degraded quand registry vide (ambient test, load_event_registry false)" do

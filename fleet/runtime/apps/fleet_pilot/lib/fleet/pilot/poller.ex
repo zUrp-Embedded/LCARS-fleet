@@ -1,73 +1,49 @@
 defmodule Fleet.Pilot.Poller do
   @moduledoc """
-  Reconciliateur catch-up : scan périodique du `repo` configuré, pour
-  chaque issue ouverte SANS label `lcars-dispatched`, tente le dispatch
-  via `Fleet.Pilot.Dispatcher`.
+  Réacteur du rail forge-state-machine (**mode STAGE uniquement**) : scan périodique du `repo`
+  configuré, délégation des issues + PR ouvertes au spawn des rôles via `StageDispatcher`.
 
-  ## Pourquoi un poller en plus de l'AutoDispatcher
+  ## Rôle
 
-  L'AutoDispatcher consomme les webhook events Gitea live. Si le
-  service est down quand un event survient, l'event est perdu
-  (`Phoenix.PubSub` = pas de persistance, webhook = fire-and-forget).
-  Le poller catch-up garantit "**l'issue est dispatchée si et seulement
-  si elle porte le label `lcars-dispatched`**" — c'est la doctrine
-  "label = source de vérité" (architecture-cible §"Idempotence
-  inter-restart").
+  La forge EST la machine à états ; ce poller en est le réacteur. À chaque tick, pour le `repo`
+  surveillé, il liste les **issues** + **PR** ouvertes et délègue :
 
-  ## Tungsten-proof (port v1.5 `LcarsFleetPoller`)
+    * **issue assignée** (assignee=humain owner), non verrouillée, sans PR ouverte → spawn le rôle
+      **producteur** (`StageDispatcher.dispatch_issue` ; rôle = `:producer_role`, défaut engineer).
+    * **PR** avec reviewer demandé → spawn le **juge** ; PR `REQUEST_CHANGES` sans reviewer → re-spawn
+      le **producteur** pour le rework (`StageDispatcher.dispatch_review`).
+    * verrou `lcars-in-flight` → skip (un pod travaille déjà la brique). **Bail repo-sérialisé** :
+      au plus un pipeline actif par repo (feature-branches séquentielles → merge FF garanti).
 
-    * **Jitter ±10%** sur l'interval — évite thundering herd si N
-      daemons redémarrent ensemble (cron, systemd cascade).
-    * **Backoff exponentiel** sur erreurs API (capped à 5 min) — la
-      forge down n'inonde pas les logs avec des retries rapides.
-    * **Safety net `try/rescue`** sur `do_poll/1` — un bug imprévu
-      dans le path dispatch ne crash pas le poller (perte du tracker
-      backoff = re-flood au boot).
-    * **Telemetry** `[:fleet_pilot, :poller, :poll]` (duration_ms,
-      issues_count, dispatched_count, skipped_count, error_count).
+  ## Robustesse (port v1.5 `LcarsFleetPoller`, conservé)
 
-  ## Deux modes de poll
-
-    * **Legacy (route-table)** — défaut. `Routing.match_issue` (table
-      `type:X → pipeline`) → `Dispatcher.dispatch` → Executor. Path
-      historique dogfoodé, conservé tant que l'Executor n'est pas
-      PROMOTE-retiré.
-    * **Stage-dispatch (assignee-driven)** — `:stage_dispatch?` true.
-      C'est le réacteur de la DN `orchestration/forge-state-machine.md` :
-      pour chaque issue ouverte SANS `lcars-in-flight`, on appelle
-      `StageDispatcher.dispatch_issue` (assignee = stage courant → spawn
-      le rôle). **Découplé du legacy AutoDispatcher** : le mode stage ne
-      lit PAS `ad_state` (l'Executor est SUPPRIMÉ dans ce modèle) ; il
-      prend sa config forge via `:forge_opts` direct. Le même GenServer
-      (jitter, backoff, telemetry, safety-net) sert les deux modes — on
-      ne réinvente pas la tungsten-proofing.
+    * **Jitter ±10%** sur l'interval — anti thundering-herd (N daemons qui redémarrent ensemble).
+    * **Backoff exponentiel** sur erreurs API (capé à 5 min) — la forge down n'inonde pas les logs.
+    * **Safety-net `try/rescue`** sur `do_poll/1` — un bug du path dispatch ne crash pas le poller.
+    * **Telemetry** `[:fleet_pilot, :poller, :poll]` (duration_ms, dispatched, skipped, errors).
 
   ## Configuration init
 
-    * `:repo` — `"owner/name"`, obligatoire
-    * `:interval_ms` — défaut `30_000` (30s, cohérent v1.5)
-    * `:stage_dispatch?` — bool défaut `false`. `true` = mode
-      assignee-driven (cf. ci-dessus).
-    * `:forge_opts` — keyword passé au ForgeClient (base_url, token,
-      req_options). Utilisé par le mode stage (le legacy le tire de
-      `ad_state`).
-    * `:auto_dispatcher` — name du process AutoDispatcher (défaut
-      `Fleet.Pilot.AutoDispatcher`), utilisé par le mode LEGACY pour
-      récupérer la config runtime (routes, forge_opts, modules injectés)
-    * `:forge_client` — override module ForgeClient (légacy : défaut
-      résolu via AutoDispatcher ; stage : défaut `ForgeClient`)
-    * `:loader` / `:spawner` / `:clock` — seams du mode stage (défauts
-      réels via `StageDispatcher`). Injectés seulement si non-nil.
-    * `:subscribe?` — pas applicable (poller ne subscribe pas)
-    * `:start_tick?` — bool défaut `true`. `false` = ne planifie pas
-      le premier tick (utilisé par tests pour driver via
-      `force_poll/1`)
+    * `:repo` — `"owner/name"`, obligatoire.
+    * `:interval_ms` — défaut `30_000` (30s).
+    * `:forge_opts` — keyword ForgeClient (base_url, token, req_options).
+    * `:routing` — map `type:X → carte` pour l'`Entry` legacy (transitionnel, FALL).
+    * `:stage_dispatch?` — historiquement le switch de mode ; aujourd'hui toujours `true` (seul mode).
+    * seams test : `:forge_client`, `:loader`, `:carte_loader`, `:spawner`, `:clock` (injectés si non-nil).
+    * `:start_tick?` — défaut `true` ; `false` = pas de 1er tick auto (tests drivent via `force_poll/1`).
+
+  ## Historique — mode legacy RETIRÉ (②.3 / BL-050, 2026-06-16)
+
+  L'ancien mode `do_poll` legacy (route-table `Routing.match_issue` → `Dispatcher.dispatch` →
+  `Fleet.Pipeline.start_pipeline` = Executor RAM, via l'état de l'`AutoDispatcher`) a été **supprimé**
+  avec le rail legacy (`auto_dispatcher`/`dispatcher`/`pipeline_invoker`). Seul le mode stage subsiste ;
+  le moteur RAM tombe en aval.
   """
 
   use GenServer
   require Logger
 
-  alias Fleet.Pilot.{Routing, Dispatcher, AutoDispatcher, StageDispatcher, Entry}
+  alias Fleet.Pilot.{StageDispatcher, Entry}
 
   @default_interval_ms 30_000
   @max_backoff_ms 300_000
@@ -76,7 +52,6 @@ defmodule Fleet.Pilot.Poller do
   defstruct [
     :repo,
     :interval_ms,
-    :auto_dispatcher,
     :forge_client_override,
     stage_dispatch?: false,
     forge_opts: [],
@@ -94,7 +69,6 @@ defmodule Fleet.Pilot.Poller do
   @type t :: %__MODULE__{
           repo: String.t(),
           interval_ms: pos_integer(),
-          auto_dispatcher: GenServer.server(),
           forge_client_override: module() | nil,
           stage_dispatch?: boolean(),
           forge_opts: keyword(),
@@ -141,7 +115,6 @@ defmodule Fleet.Pilot.Poller do
         state = %__MODULE__{
           repo: repo,
           interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
-          auto_dispatcher: Keyword.get(opts, :auto_dispatcher, Fleet.Pilot.AutoDispatcher),
           forge_client_override: Keyword.get(opts, :forge_client),
           stage_dispatch?: Keyword.get(opts, :stage_dispatch?, false),
           forge_opts: Keyword.get(opts, :forge_opts, []),
@@ -157,7 +130,7 @@ defmodule Fleet.Pilot.Poller do
         end
 
         Logger.info(
-          "fleet_pilot Poller start repo=#{repo} mode=#{if(state.stage_dispatch?, do: :stage, else: :legacy)} " <>
+          "fleet_pilot Poller start repo=#{repo} mode=stage " <>
             "interval=#{state.interval_ms}ms jitter=±10%"
         )
 
@@ -235,79 +208,12 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # ============================================================
-  # Poll core — pure function exposée pour tests
-  # ============================================================
-
-  @type tally :: %{
-          dispatched: non_neg_integer(),
-          skipped: non_neg_integer(),
-          errors: non_neg_integer()
-        }
-
-  @doc """
-  Exécute un poll de bout en bout (list issues → match routes → dispatch).
-  Pure côté logique : tous les effets passent par les modules injectés
-  (`forge_client`, `dispatcher_config.forge_client`,
-  `dispatcher_config.invoker`).
-
-  Retourne `{:ok, tally}` ou `{:error, reason}`. Utilisé par le GenServer
-  (via `do_poll/1`) et par les tests qui veulent éviter la friction
-  GenServer + Process dictionary cross-process.
-  """
-  @spec poll_once(String.t(), Fleet.Pilot.Dispatcher.config(), [map()], module()) ::
-          {:ok, tally()} | {:error, term()}
-  def poll_once(repo, dispatcher_config, routes, forge_client)
-      when is_binary(repo) and is_map(dispatcher_config) and is_list(routes) and
-             is_atom(forge_client) do
-    case forge_client.list_open_issues_without_label(
-           repo,
-           dispatcher_config.dispatch_label,
-           dispatcher_config.forge_opts
-         ) do
-      {:ok, issues} ->
-        {:ok, process_issues(issues, routes, dispatcher_config, repo)}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  # ============================================================
   # Internals — GenServer poll orchestration
   # ============================================================
 
-  defp do_poll(%__MODULE__{stage_dispatch?: true} = state), do: stage_do_poll(state)
-
-  defp do_poll(state) do
-    started = System.monotonic_time()
-
-    with {:ok, ad_state} <- fetch_auto_dispatcher_state(state),
-         dispatcher_config = build_dispatcher_config(ad_state, state),
-         forge_client = forge_client(state, ad_state),
-         {:ok, tally} <- poll_once(state.repo, dispatcher_config, ad_state.routes, forge_client) do
-      duration_ms = elapsed_ms(started)
-
-      :telemetry.execute(
-        [:fleet_pilot, :poller, :poll],
-        %{duration_ms: duration_ms},
-        Map.merge(tally, %{
-          status: :ok,
-          repo: state.repo
-        })
-      )
-
-      Logger.info(
-        "fleet_pilot Poller tick repo=#{state.repo} " <>
-          "dispatched=#{tally.dispatched} skipped=#{tally.skipped} errors=#{tally.errors} " <>
-          "duration_ms=#{duration_ms}"
-      )
-
-      {tally, %{state | poll_count: state.poll_count + 1, err_streak: 0, last_error: nil}}
-    else
-      {:error, reason} = err ->
-        handle_poll_error(state, reason, started, err)
-    end
-  end
+  # Mode STAGE uniquement (le legacy `do_poll`/Executor RAM a été retiré, ②.3). Le scan est dans
+  # `stage_do_poll/1` ; ce wrapper conserve le point d'entrée unique (jitter/backoff/safety-net partagés).
+  defp do_poll(state), do: stage_do_poll(state)
 
   defp handle_poll_error(state, reason, started, _err) do
     new_streak = state.err_streak + 1
@@ -334,35 +240,6 @@ defmodule Fleet.Pilot.Poller do
          err_streak: new_streak,
          last_error: inspect(reason)
      }}
-  end
-
-  defp process_issues(issues, routes, dispatcher_config, repo) do
-    Enum.reduce(issues, %{dispatched: 0, skipped: 0, errors: 0}, fn issue, acc ->
-      # Routing.match_issue attend un payload Gitea avec clé "issue" wrappée.
-      # Le list API renvoie l'issue directement → on wrappe pour réutiliser
-      # le même extract_fields.
-      payload = wrap_issue_as_payload(issue, repo)
-
-      case Routing.match_issue(payload, routes) do
-        :no_match ->
-          %{acc | skipped: acc.skipped + 1}
-
-        {:match, pipeline_name} ->
-          issue_number = Map.get(issue, "number")
-
-          case Dispatcher.dispatch(
-                 dispatcher_config,
-                 pipeline_name,
-                 repo,
-                 issue_number,
-                 payload
-               ) do
-            {:dispatched, _} -> %{acc | dispatched: acc.dispatched + 1}
-            {:skipped, _} -> %{acc | skipped: acc.skipped + 1}
-            {:error, _} -> %{acc | errors: acc.errors + 1}
-          end
-      end
-    end)
   end
 
   defp wrap_issue_as_payload(issue, repo) do
@@ -555,26 +432,6 @@ defmodule Fleet.Pilot.Poller do
 
   defp stage_forge_client(%__MODULE__{forge_client_override: nil}), do: Fleet.Pilot.ForgeClient
   defp stage_forge_client(%__MODULE__{forge_client_override: fc}), do: fc
-
-  defp fetch_auto_dispatcher_state(state) do
-    case GenServer.call(state.auto_dispatcher, :get_state, 5_000) do
-      %AutoDispatcher{} = ad_state -> {:ok, ad_state}
-      other -> {:error, {:unexpected_ad_state, other}}
-    end
-  rescue
-    exception -> {:error, {:auto_dispatcher_unavailable, exception}}
-  catch
-    :exit, reason -> {:error, {:auto_dispatcher_exit, reason}}
-  end
-
-  defp build_dispatcher_config(ad_state, _state) do
-    AutoDispatcher.dispatcher_config(ad_state)
-  end
-
-  defp forge_client(%__MODULE__{forge_client_override: nil}, %AutoDispatcher{forge_client: fc}),
-    do: fc
-
-  defp forge_client(%__MODULE__{forge_client_override: fc}, _ad_state), do: fc
 
   defp elapsed_ms(started_native) do
     System.convert_time_unit(

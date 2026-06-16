@@ -287,15 +287,10 @@ if config_env() != :test do
   config :fleet_observation, start_listener: true
 
   # ============================================================
-  # fleet_pilot (M-033) — auto-dispatch tickets Gitea
+  # fleet_pilot — knob legacy `start_dispatcher` / `LCARS_PILOT_DISPATCHER` RETIRÉ (②.3 / BL-050) :
+  # le rail AutoDispatcher (webhook→route→Executor RAM) est supprimé. Seul le rail forge-state-machine
+  # subsiste (config `LCARS_PILOT_STAGE` / `LCARS_PILOT_POLL_REPO`, plus bas).
   # ============================================================
-  # AutoDispatcher subscribe Bus `gitea.*` au boot. Lock idempotent via
-  # label `lcars-dispatched` posé côté forge avant invoke pipeline.
-  # OFF par défaut pour permettre rollout progressif via env var ;
-  # passer à true via LCARS_PILOT_DISPATCHER=true quand catalogue
-  # forge-routing.yaml est peuplé.
-  config :fleet_pilot,
-    start_dispatcher: System.get_env("LCARS_PILOT_DISPATCHER") == "true"
 
   if path = System.get_env("LCARS_PILOT_ROUTING_PATH") do
     config :fleet_pilot, forge_routing_path: path

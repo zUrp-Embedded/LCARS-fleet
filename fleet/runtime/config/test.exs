@@ -38,10 +38,9 @@ config :fleet_spawner, start_publish_consumer: false
 # BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
 config :fleet_spawner, start_orphan_reaper: false
 
-# fleet_pilot hermétisme test : AutoDispatcher off par défaut. Subscribe
-# Bus parasite ; tests dédiés (auto_dispatcher_test.exs) démarrent
-# manuellement avec opts isolés (subscribe?: false, name unique).
-config :fleet_pilot, start_dispatcher: false
+# fleet_pilot hermétisme test : le mode stage est OFF par défaut (`:stage_dispatch?` absent →
+# `stage_children` = [] → app inerte, pas de Poller/HopConsumer parasite). Le knob legacy
+# `start_dispatcher` a été retiré (②.3 / BL-050, rail AutoDispatcher supprimé).
 
 # R4 sous-lot C — hermétisme : pas d'autoboot du gatekeeper permanent en test
 # (start_pipeline ne spawnera pas de pod gatekeeper). Le test dédié
