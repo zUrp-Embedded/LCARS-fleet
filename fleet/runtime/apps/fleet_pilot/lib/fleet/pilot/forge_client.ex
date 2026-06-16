@@ -277,6 +277,44 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
+  Ajoute/met à jour un **collaborateur** sur `repo` avec `permission` (`"read"|"write"|"admin"`) —
+  Gitea `PUT /repos/{repo}/collaborators/{username}`. Idempotent (re-PUT = même perm). Requiert
+  repo-admin (token système). ②.1d : l'onboarding donne le **write** aux comptes de rôle (engineer/
+  qualifier/reviewer/gatekeeper) pour que leurs reviews comptent au gate de branch-protection et que
+  le gatekeeper puisse merger.
+  """
+  @spec add_collaborator(String.t(), String.t(), String.t(), Keyword.t()) ::
+          :ok | {:error, term()}
+  def add_collaborator(repo, username, permission, opts \\ [])
+      when is_binary(repo) and is_binary(username) and is_binary(permission) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_put(config, "/repos/#{repo}/collaborators/#{username}", %{permission: permission}) do
+        {:ok, _} -> :ok
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Pose une règle de **branch-protection** sur `repo` — Gitea `POST /repos/{repo}/branch_protections`.
+  `rule` = map d'options Gitea (`rule_name`, `required_approvals`, `dismiss_stale_approvals`,
+  `block_on_rejected_reviews`, `enable_push`, …). C'est le **gate forge-enforcé** : sur le repo
+  sandbox, la forge refuse le merge tant que les gardes (N approvals, pas de REQUEST_CHANGES) ne sont
+  pas vertes → l'arbitre est la forge, pas le runtime (cible DN §1.4). Requiert repo-admin.
+  Idempotent : une règle déjà posée (409/422) → `:ok`.
+  """
+  @spec protect_branch(String.t(), map(), Keyword.t()) :: :ok | {:error, term()}
+  def protect_branch(repo, rule, opts \\ []) when is_binary(repo) and is_map(rule) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_post(config, "/repos/#{repo}/branch_protections", rule) do
+        {:ok, _} -> :ok
+        {:error, {:http, code, _}} when code in [409, 422] -> :ok
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
   Crée une issue (ticket) sur `repo`. `opts[:assignees]` = logins, `opts[:labels]` = IDs entiers
   (le label `type:*` de routage se pose plutôt via `add_label/4` après, résolution name→id).
   Retourne le numéro d'issue.

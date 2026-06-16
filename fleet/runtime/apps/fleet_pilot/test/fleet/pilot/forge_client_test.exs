@@ -749,6 +749,35 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "add_collaborator/4 + protect_branch/3 (onboarding : gate forge-enforcé)" do
+    test "add_collaborator → PUT collaborators/{user} {permission}, :ok" do
+      handlers = %{
+        {"PUT", "/api/v1/repos/fleet/proj/collaborators/engineer"} => {204, ""}
+      }
+
+      assert :ok = ForgeClient.add_collaborator("fleet/proj", "engineer", "write", opts(handlers))
+    end
+
+    test "protect_branch → POST branch_protections, :ok" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
+          {201, %{"branch_name" => "main"}}
+      }
+
+      rule = %{rule_name: "main", required_approvals: 2, dismiss_stale_approvals: true}
+      assert :ok = ForgeClient.protect_branch("fleet/proj", rule, opts(handlers))
+    end
+
+    test "protect_branch idempotent : règle déjà posée (422) → :ok" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/branch_protections"} =>
+          {422, %{"message" => "branch protection already exists"}}
+      }
+
+      assert :ok = ForgeClient.protect_branch("fleet/proj", %{rule_name: "main"}, opts(handlers))
+    end
+  end
+
   describe "request_review/4 + post_review/5 (déclenchement + domicile verdict)" do
     test "request_review → POST requested_reviewers, :ok" do
       handlers = %{

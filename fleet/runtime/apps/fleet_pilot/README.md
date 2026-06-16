@@ -62,14 +62,18 @@ dual-dir de LCARS (un repo, **deux worktrees**) :
 
 Séquence : `ForgeClient.create_repo` (org `fleet`, `auto_init`) → `git clone main` → scaffold (README,
 .gitignore, .editorconfig, docs/spec.md) → commit+push `main` → `git worktree add --orphan -b work/ops`
-→ scaffold (backlog.md, scratchpad.md, plans/) → commit+push `work/ops`. Identité **M2** (l'onboarding est
+→ scaffold (backlog.md, scratchpad.md, plans/) → commit+push `work/ops` → **`lock_main`** (②.1d) : donne
+le **write** aux comptes de rôle (engineer/qualifier/reviewer/gatekeeper — sinon leurs reviews ne comptent
+pas + le gatekeeper ne peut pas merger) **puis pose la branch-protection sur `main`** (N approvals = nb de
+juges, dismiss-stale, block-on-rejected, pas de push direct). Mécanique → tout projet onboardé a le **gate
+forge-enforcé** (l'arbitre = la forge, cible DN §1.4). `work/ops` + feature-branches non protégées. Identité **M2** (l'onboarding est
 un acte d'infra système, pas du travail créatif) : `author=lcars-system` (le système GÉNÈRE le scaffold ;
 l'arch n'écrit rien, il relaie `name`+`pitch`), `committer`=git config runtime (**l'humain qui a initié →
 tracé**), `pusher`=`lcars-system` (`ForgeAuth.git_env`, owner fleet-wide) — tout avataré. Rail mécanique
 (l'arch *déclenche* via le tool MCP `create_project`, le système *exécute* ; cf. `fleet_mcp`). Pas de GenServer.
 
 `Fleet.Pilot.ForgeClient` porte aussi les write-ops forge réutilisées ici (`create_repo`, `create_issue`,
-`put_file`, `post_comment`, `close_issue`).
+`put_file`, `post_comment`, `close_issue`, `add_collaborator`, `protect_branch`).
 
 ## Découplage core
 

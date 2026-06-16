@@ -70,11 +70,71 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- add_work_ops(proj_dir, work_dir),
          :ok <- scaffold_work(work_dir, name, opts),
          :ok <- commit(work_dir, "chore(onboard): init work/ops"),
-         :ok <- push(work_dir, "work/ops", true) do
+         :ok <- push(work_dir, "work/ops", true),
+         :ok <- lock_main(full_name, opts) do
       Logger.info("ProjectOnboard: #{full_name} prêt — main=#{proj_dir}, work/ops=#{work_dir}")
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
     end
   end
+
+  # ── Verrou de `main` : le repo neuf naît PRÊT pour le workflow d'agents avec GATE forge-enforcé ──
+  # 1. Les comptes de rôle (engineer/qualifier/reviewer/gatekeeper) reçoivent le **write** — sinon
+  #    leurs reviews ne comptent pas au gate ET le gatekeeper ne peut pas merger (la protection
+  #    deadlockerait). 2. `main` est protégée : N approvals (= nb de juges) + dismiss-stale (re-review
+  #    au rework) + block-on-rejected (un REQUEST_CHANGES bloque) + pas de push direct (merge via PR).
+  # Mécanique (ce step, pas une action humaine) → tout projet onboardé a l'arbitre côté FORGE (cible DN
+  # §1.4). `work/ops` + feature-branches NON protégées (zones de mouvement direct du système).
+  defp lock_main(full_name, opts) do
+    with :ok <- grant_fleet_roles(full_name, opts),
+         :ok <- protect_main(full_name, opts) do
+      :ok
+    end
+  end
+
+  defp grant_fleet_roles(repo, opts) do
+    Enum.reduce_while(fleet_roles(opts), :ok, fn role, :ok ->
+      case ForgeClient.add_collaborator(repo, role, "write", fc_opts(opts)) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, {:grant_role, role, reason}}}
+      end
+    end)
+  end
+
+  defp protect_main(repo, opts) do
+    rule = %{
+      rule_name: "main",
+      required_approvals: length(reviewer_roles(opts)),
+      dismiss_stale_approvals: true,
+      block_on_rejected_reviews: true,
+      enable_push: false
+    }
+
+    case ForgeClient.protect_branch(repo, rule, fc_opts(opts)) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:protect_main, reason}}
+    end
+  end
+
+  # Comptes de rôle qui agissent sur un repo = producteur + juges + gatekeeper (config, data catalogue).
+  defp fleet_roles(opts),
+    do: [producer_role(opts)] ++ reviewer_roles(opts) ++ [gatekeeper_role(opts)]
+
+  defp producer_role(opts),
+    do:
+      Keyword.get(opts, :producer_role) ||
+        Application.get_env(:fleet_pilot, :producer_role, "engineer")
+
+  defp reviewer_roles(opts),
+    do:
+      Keyword.get(opts, :reviewer_roles) ||
+        Application.get_env(:fleet_pilot, :reviewer_roles, ["qualifier", "reviewer"])
+
+  defp gatekeeper_role(opts),
+    do:
+      Keyword.get(opts, :gatekeeper_role) ||
+        Application.get_env(:fleet_pilot, :gatekeeper_role, "gatekeeper")
+
+  defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])
 
   # ── slug / pré-conditions ────────────────────────────────────────────────
 
