@@ -19,6 +19,7 @@ defmodule Fleet.Pilot.Labels do
   @awaits_human "lcars-awaits-human"
   @dispatched "lcars-dispatched"
   @state_prefix "state:"
+  @stage_prefix "lcars-stage:"
 
   @doc "Verrou « pod en vol » : posé AVANT le spawn (anti double-spawn), levé en fin-de-hop (§5)."
   @spec in_flight() :: String.t()
@@ -43,4 +44,29 @@ defmodule Fleet.Pilot.Labels do
   @doc "État `state:delivered` (défaut de fin-de-hop : livrable poussé)."
   @spec delivered() :: String.t()
   def delivered, do: @state_prefix <> "delivered"
+
+  @doc """
+  Préfixe du **stage-marker** `lcars-stage:<role>` — le marqueur de rôle de la
+  forge-state-machine (DN forge-state-machine §1/§4). C'est lui (pas l'assignee, = l'humain
+  owner) qui porte le rôle catalogue → cap-profile. Un ticket = une brique = un stage-marker.
+  """
+  @spec stage_prefix() :: String.t()
+  def stage_prefix, do: @stage_prefix
+
+  @doc "Construit le stage-marker `lcars-stage:<role>` (role = slug cap-profile, verbatim)."
+  @spec stage(String.t()) :: String.t()
+  def stage(role) when is_binary(role), do: @stage_prefix <> role
+
+  @doc """
+  Extrait le rôle du **premier** stage-marker `lcars-stage:<role>` d'une liste de noms de
+  labels. `{:ok, role}` | `:error` (aucun stage-marker). Un ticket bien formé n'en porte
+  qu'un (une brique = un stage) ; on prend le premier non vide.
+  """
+  @spec parse_stage([String.t()]) :: {:ok, String.t()} | :error
+  def parse_stage(label_names) when is_list(label_names) do
+    Enum.find_value(label_names, :error, fn
+      @stage_prefix <> role when role != "" -> {:ok, role}
+      _ -> false
+    end)
+  end
 end

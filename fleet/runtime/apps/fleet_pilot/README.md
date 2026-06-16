@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-14 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
+**Dernière révision** : 2026-06-16 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -20,14 +20,17 @@ forge avant invocation (lock atomique). Le poller reconciliateur
 
 ## Mode stage (forge-state-machine — A2/A3, actif)
 
-Le mode **stage** (la forge EST la machine à états : ticket assigné à un rôle → spawn ce rôle)
+Le mode **stage** (la forge EST la machine à états : ticket portant un **stage-marker**
+`lcars-stage:<role>` → spawn ce rôle ; l'**assignee = l'humain** owner, point fixe — DN §1)
 double puis remplace le dispatch legacy ci-dessus. Activé par `:stage_dispatch?` + `:poll_repo` ;
 le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Application`
 `guard_no_duplicate_poller!`, F054 ; legacy `AutoDispatcher` retiré à F-09). Submodules :
 
-- `Fleet.Pilot.StageDispatcher` — `decide/2` (assignee → `{:spawn, role, profile}`) + `dispatch_issue/2`
-  (ordre canonique label → comment → pod).
-- `Fleet.Pilot.Poller` — scanne le repo, dispatche assignee→spawn (+ Entry sur `type:`).
+- `Fleet.Pilot.StageDispatcher` — `decide/2` (stage-marker `lcars-stage:<role>` → `{:spawn, role, profile}` ;
+  le rôle vient du **label**, jamais de l'assignee) + `dispatch_issue/2` (ordre canonique label → comment → pod).
+- `Fleet.Pilot.Poller` — scanne le repo, dispatche stage-marker→spawn (+ Entry legacy sur `type:`, FALL).
+- `Fleet.Pilot.Labels` — vocabulaire wire-protocol (source unique) : verrous `lcars-in-flight`/
+  `lcars-awaits-human`, états `state:*`, et le **stage-marker** `lcars-stage:<role>` (`stage/1`, `parse_stage/1`).
 - `Fleet.Pilot.HopConsumer` — consumer Bus de la **fin-de-hop** (`pod.completed` → `HopCompleter`) ;
   gatekeeper §L441 (escalade soft/terminal → `resume_gate`). **Singleton** : la complétion lourde
   (git push ≤30s) est offloadée en `Task.Supervisor` (`:hop_runner` / `HopTaskSupervisor`, F067) → ne

@@ -1,17 +1,21 @@
 defmodule Fleet.Pilot.StageDispatcher do
   @moduledoc """
-  Dispatch `assignee → spawn` du modèle forge-state-machine (DN
-  `orchestration/forge-state-machine.md` §3/§6). Distinct du `Fleet.Pilot.Dispatcher`
-  legacy (route → pipeline nommé) : ici le poller voit un ticket **assigné à un rôle**
-  et **spawn ce rôle** (= stage courant), sans table de routes.
+  Dispatch `stage-marker → spawn` du modèle forge-state-machine (DN
+  `orchestration/forge-state-machine.md` §1/§4). Distinct du `Fleet.Pilot.Dispatcher`
+  legacy (route → pipeline nommé) : ici le poller voit un ticket portant un **stage-marker**
+  `lcars-stage:<role>` et **spawn ce rôle** (= la brique), sans table de routes.
 
   ## Décision (`decide/2`)
 
   À partir du payload d'une issue Gitea, décide :
-    * `{:spawn, role, profile}` — assignee = un rôle connu (login forge → cap-profile
-      chargé), pas de verrou `lcars-in-flight` → spawner le rôle.
-    * `{:skip, reason}` — `:no_role` (assignee humain / inconnu / cap-profile illisible),
-      `:in_flight` (verrou posé, pod déjà en vol), `:awaits_human`, `:no_assignee`.
+    * `{:spawn, role, profile}` — stage-marker `lcars-stage:<role>` présent (→ cap-profile
+      chargé), un assignee (= l'humain owner), pas de verrou `lcars-in-flight` → spawner le rôle.
+    * `{:skip, reason}` — `:no_stage` (pas de stage-marker → pas un ticket-producteur),
+      `:no_role` (stage-marker présent mais cap-profile illisible/inconnu), `:no_assignee`
+      (aucun humain owner), `:in_flight` (verrou posé, pod déjà en vol), `:awaits_human`.
+
+  **Invariant DN §1** : le rôle vient du **stage-marker** (label = data, catalogue-driven),
+  jamais de l'assignee. L'assignee est l'**humain** (point fixe : ownership + routing).
 
   L'I/O (lecture du cap-profile) est **injectée** via `load_role` (défaut `CapProfile.load/1`)
   → testable sans forge. F075 : le profil chargé pour décider est THREADÉ dans `{:spawn, …}`
@@ -66,17 +70,21 @@ defmodule Fleet.Pilot.StageDispatcher do
         {:skip, :no_assignee}
 
       true ->
-        # 1-assignee strict (DN §10) : on prend le 1er login, role = login downcasé.
-        login = assignees |> hd() |> Map.get("login", "")
-        role = String.downcase(login)
+        # Forge-state-machine (DN §1) : le RÔLE vient du stage-marker `lcars-stage:<role>`
+        # (label = data, catalogue-driven), PAS de l'assignee (= l'humain owner, point fixe).
+        # Pas de stage-marker → pas un ticket-producteur → :no_stage.
+        case Fleet.Pilot.Labels.parse_stage(labels) do
+          {:ok, role} ->
+            # F075 : on charge le cap-profile UNE fois ici (la décision EN dépend) et on le threade —
+            # `dispatch_issue` le réutilise au spawn au lieu de recharger. load-error → :no_role.
+            with {:ok, profile} <- load_role.(role) do
+              {:spawn, role, profile}
+            else
+              _ -> {:skip, :no_role}
+            end
 
-        # F075 : on charge le cap-profile UNE fois ici (la décision EN dépend) et on le threade —
-        # `dispatch_issue` le réutilise au spawn au lieu de recharger. role=="" ou load-error → :no_role.
-        with true <- role != "",
-             {:ok, profile} <- load_role.(role) do
-          {:spawn, role, profile}
-        else
-          _ -> {:skip, :no_role}
+          :error ->
+            {:skip, :no_stage}
         end
     end
   end

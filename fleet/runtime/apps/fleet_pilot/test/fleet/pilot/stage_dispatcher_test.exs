@@ -19,45 +19,71 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     }
   end
 
+  # Stage-marker map d'un label Gitea (`%{"name" => "lcars-stage:<role>"}`).
+  defp stage(role), do: %{"name" => Fleet.Pilot.Labels.stage(role)}
+
+  # Ticket-producteur du modèle forge-state-machine (DN §1) : assignee = l'HUMAIN owner,
+  # rôle porté par le stage-marker `lcars-stage:engineer`. `fields` override (labels, body…).
+  defp eng_issue(fields \\ %{}) do
+    issue(
+      Map.merge(
+        %{"assignees" => [%{"login" => "lordzurp"}], "labels" => [stage("engineer")]},
+        fields
+      )
+    )
+  end
+
   describe "decide/2 (pure)" do
-    test "assignee = rôle connu, pas de verrou → {:spawn, role}" do
-      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+    test "stage-marker lcars-stage:engineer + assignee humain → {:spawn, engineer}" do
+      payload = eng_issue()
       assert {:spawn, "engineer", _} = StageDispatcher.decide(payload, &load_role/1)
     end
 
-    test "login forge downcasé → role" do
-      payload = issue(%{"assignees" => [%{"login" => "Qualifier"}]})
+    test "le rôle vient du stage-marker (label), pas de l'assignee humain" do
+      # assignee = l'HUMAIN (point fixe), rôle porté par lcars-stage:qualifier → spawn qualifier.
+      payload =
+        issue(%{
+          "assignees" => [%{"login" => "lordzurp"}],
+          "labels" => [%{"name" => "lcars-stage:qualifier"}]
+        })
+
       assert {:spawn, "qualifier", _} = StageDispatcher.decide(payload, &load_role/1)
     end
 
     test "verrou lcars-in-flight présent → {:skip, :in_flight}" do
-      payload =
-        issue(%{
-          "assignees" => [%{"login" => "Engineer"}],
-          "labels" => [%{"name" => "lcars-in-flight"}]
-        })
-
+      payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}, stage("engineer")]})
       assert {:skip, :in_flight} = StageDispatcher.decide(payload, &load_role/1)
     end
 
     test "verrou HUMAIN lcars-awaits-human → {:skip, :awaits_human} (A2.3b, pas de re-dispatch)" do
-      # assignee connu (gatekeeper) MAIS lcars-awaits-human posé → skip (sinon, après
-      # l'unlock d'un verdict escalate, le poller relancerait le gatekeeper en boucle).
+      # stage-marker présent MAIS lcars-awaits-human posé → skip (sinon, après l'unlock
+      # d'un verdict escalate, le poller relancerait le jugement en boucle).
       payload =
         issue(%{
-          "assignees" => [%{"login" => "gatekeeper"}],
-          "labels" => [%{"name" => "lcars-awaits-human"}]
+          "assignees" => [%{"login" => "lordzurp"}],
+          "labels" => [%{"name" => "lcars-awaits-human"}, stage("gatekeeper")]
         })
 
       assert {:skip, :awaits_human} = StageDispatcher.decide(payload, &load_role/1)
     end
 
-    test "pas d'assignee → {:skip, :no_assignee}" do
-      assert {:skip, :no_assignee} = StageDispatcher.decide(issue(%{}), &load_role/1)
+    test "stage-marker présent mais pas d'assignee (pas d'humain owner) → {:skip, :no_assignee}" do
+      payload = issue(%{"labels" => [stage("engineer")]})
+      assert {:skip, :no_assignee} = StageDispatcher.decide(payload, &load_role/1)
     end
 
-    test "assignee humain / rôle inconnu → {:skip, :no_role}" do
+    test "pas de stage-marker (assignee humain seul) → {:skip, :no_stage}" do
       payload = issue(%{"assignees" => [%{"login" => "lordzurp"}]})
+      assert {:skip, :no_stage} = StageDispatcher.decide(payload, &load_role/1)
+    end
+
+    test "stage-marker d'un rôle inconnu (cap-profile illisible) → {:skip, :no_role}" do
+      payload =
+        issue(%{
+          "assignees" => [%{"login" => "lordzurp"}],
+          "labels" => [stage("plombier")]
+        })
+
       assert {:skip, :no_role} = StageDispatcher.decide(payload, &load_role/1)
     end
   end
@@ -168,7 +194,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
   describe "dispatch_issue/2 (effets, seams stubés)" do
     test "F075 : un seul load(role) par dispatch (fin du double-load sonde+spawn)" do
-      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      payload = eng_issue()
 
       assert {:ok, {:spawned, _, "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts(loader: CountingLoader))
@@ -179,7 +205,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "spawn : ordre label → comment → pod, retourne {:ok, {:spawned, pod, role}}" do
-      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      payload = eng_issue()
 
       assert {:ok, {:spawned, "issue-42-engineer-1700000000", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts())
@@ -201,10 +227,14 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "F077/F078 : rôle juge (mandate_kind: judge) → mandat = GateBrief désamorcé, PAS le body" do
-      # gatekeeper assigné. Son cap-profile déclare `mandate_kind: judge` (StubLoader) → le mandat
+      # stage-marker gatekeeper. Son cap-profile déclare `mandate_kind: judge` (StubLoader) → le mandat
       # doit être un GateBrief I-CBC (« JUGER »), jamais le corps exécutable de l'issue (PASSE-9).
       payload =
-        issue(%{"assignees" => [%{"login" => "gatekeeper"}], "body" => "crée X et commit"})
+        issue(%{
+          "assignees" => [%{"login" => "lordzurp"}],
+          "labels" => [stage("gatekeeper")],
+          "body" => "crée X et commit"
+        })
 
       opts =
         dispatch_opts(forge_opts: [_test_pred: {:ok, %{"commit" => "abc", "summary" => "done"}}])
@@ -223,7 +253,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "F181 : échec POST-verrou (enqueue KO) → verrou retiré + pod tué (pas de stuck)" do
-      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      payload = eng_issue()
       opts = dispatch_opts(task_queue: FailTaskQueue)
 
       assert {:error, {:enqueue_failed, :broker_down}} =
@@ -237,24 +267,20 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "skip in_flight : pas de spawn" do
-      payload =
-        issue(%{
-          "assignees" => [%{"login" => "Engineer"}],
-          "labels" => [%{"name" => "lcars-in-flight"}]
-        })
+      payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}, stage("engineer")]})
 
       assert {:skipped, :in_flight} = StageDispatcher.dispatch_issue(payload, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 
-    test "skip no_role (assignee humain) : pas de spawn" do
+    test "skip no_stage (assignee humain, pas de stage-marker) : pas de spawn" do
       payload = issue(%{"assignees" => [%{"login" => "lordzurp"}]})
-      assert {:skipped, :no_role} = StageDispatcher.dispatch_issue(payload, dispatch_opts())
+      assert {:skipped, :no_stage} = StageDispatcher.dispatch_issue(payload, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 
     test "projet résolu → injecté dans spawn_opts (:project, F-03 base_sha pinné)" do
-      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      payload = eng_issue()
 
       project = %{
         "repo_path" => "http://10.42.0.118/lordzurp/lcars-test.git",
@@ -273,7 +299,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "route gravée sur la forge → pipeline+stage injectés dans spawn_opts (A2.1)" do
-      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      payload = eng_issue()
 
       opts =
         dispatch_opts(forge_opts: [_test_route: {:ok, {"poc-cycle", "build"}}])
@@ -286,7 +312,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "pas de route (hors-carte / 1-stage) → spawn_opts SANS pipeline/stage (A1 préservé)" do
-      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      payload = eng_issue()
 
       assert {:ok, {:spawned, _, "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts())
@@ -297,7 +323,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "échec lecture route → {:error, {:route_resolution, _}}, AUCUN verrou ni spawn" do
-      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      payload = eng_issue()
       opts = dispatch_opts(forge_opts: [_test_route: {:error, :http_500}])
 
       assert {:error, {:route_resolution, :http_500}} =
@@ -307,7 +333,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "échec résolution projet → {:error}, AUCUN verrou posé ni spawn" do
-      payload = issue(%{"assignees" => [%{"login" => "Engineer"}]})
+      payload = eng_issue()
 
       opts =
         dispatch_opts(project_resolver: fn _repo, _opts -> {:error, :ls_remote_timeout} end)

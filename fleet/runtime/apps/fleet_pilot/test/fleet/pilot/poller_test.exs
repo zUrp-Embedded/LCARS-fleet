@@ -254,13 +254,13 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   describe "mode stage — force_poll" do
-    test "issue assignée à un rôle connu → spawn (tally dispatched)" do
+    test "issue portant un stage-marker → spawn (tally dispatched)" do
       issues = [
         %{
           "number" => 7,
           "body" => "fais le hello",
-          "labels" => [],
-          "assignees" => [%{"login" => "Engineer"}]
+          "labels" => [%{"name" => "lcars-stage:engineer"}],
+          "assignees" => [%{"login" => "lordzurp"}]
         }
       ]
 
@@ -383,12 +383,12 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "un pipeline en cours (ticket assigne) bloque l'entree d'un ticket neuf" do
       issues = [
-        # #11 deja engage (assigne engineer) -> tient le bail -> sera spawne (hop suivant).
+        # #11 deja engage (stage-marker engineer, assigne humain) -> tient le bail -> sera spawne.
         %{
           "number" => 11,
           "body" => "en cours",
-          "labels" => [],
-          "assignees" => [%{"login" => "Engineer"}]
+          "labels" => [%{"name" => "lcars-stage:engineer"}],
+          "assignees" => [%{"login" => "lordzurp"}]
         },
         # #12 neuf (type:poc, pas d'assignee) -> entree BLOQUEE par le bail.
         %{
