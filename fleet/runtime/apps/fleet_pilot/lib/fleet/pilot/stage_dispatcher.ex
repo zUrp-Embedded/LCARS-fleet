@@ -511,12 +511,30 @@ defmodule Fleet.Pilot.StageDispatcher do
         "feedback de la review ci-dessous. (stage=#{stage || "?"} pipeline=#{pipeline || "?"})",
       render_rework_feedback(forge, repo, pr, forge_opts),
       "**Livraison (git-native)** : applique tes corrections dans ton workspace, puis `git add` + `git commit`. " <>
-        "Le SYSTÈME pousse ton commit (forge-aveugle, toi tu ne push pas). `submit_result` ne fait que " <>
-        "SIGNALER la fin : le livrable = ton COMMIT, jamais un payload de contenus.",
+        "Le SYSTÈME pousse ton commit (forge-aveugle, toi tu ne push pas). `submit_result` SIGNALE la fin " <>
+        "(le livrable = ton COMMIT, jamais un payload de contenus).",
+      eng_voice_instruction(:rework),
       Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
+  end
+
+  # VOIX DE L'ENG (info SORTANTE, jumeau de la famine d'info entrante) : le `summary` rendu dans
+  # `submit_result` est POSTÉ sur la PR par le système (forge-aveugle, `as_role` engineer) → l'eng
+  # a enfin une voix pour l'humain. Sans ça il est muet sur la forge (le diagnostic morse en or n'a
+  # jamais été vu). [[feedback_verbose_descriptive_traceable]]
+  defp eng_voice_instruction(:build) do
+    "**Ta voix (`summary`)** : dans `submit_result`, ajoute un champ `summary` (markdown COURT) — ce que " <>
+      "tu as réalisé + décisions/hypothèses notables. Le SYSTÈME le poste sur la PR (visu humaine, c'est " <>
+      "ta voix). Si tu es BLOQUÉ (dépendance/info manquante), mets le motif PRÉCIS dans `summary` — le " <>
+      "système l'escalade, jamais un silence."
+  end
+
+  defp eng_voice_instruction(:rework) do
+    "**Ta voix (`summary`)** : dans `submit_result`, ajoute un champ `summary` (markdown) — COMMENT tu as " <>
+      "répondu à CHAQUE point de la review (ce que tu as corrigé). Le SYSTÈME le poste sur la PR : c'est " <>
+      "ta réponse traçable au reviewer."
   end
 
   # Rend le feedback des reviews REQUEST_CHANGES (body du verdict de chaque juge) en bloc actionnable.
@@ -556,7 +574,8 @@ defmodule Fleet.Pilot.StageDispatcher do
       "---",
       "**Livraison (git-native)** : réalise le travail dans ton workspace, puis `git add` + `git commit`. " <>
         "Le SYSTÈME pousse ton commit et ouvre la PR — toi tu ne push pas (forge-aveugle). " <>
-        "`submit_result` ne fait que SIGNALER la fin : le livrable = ton COMMIT, jamais un payload de contenus.",
+        "`submit_result` SIGNALE la fin (le livrable = ton COMMIT, jamais un payload de contenus).",
+      eng_voice_instruction(:build),
       Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
     ]
     |> Enum.join("\n\n")

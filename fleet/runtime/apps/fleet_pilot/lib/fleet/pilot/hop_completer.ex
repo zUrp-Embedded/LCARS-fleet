@@ -329,7 +329,29 @@ defmodule Fleet.Pilot.HopCompleter do
 
   defp complete_producer(hop, opts) do
     with {:ok, %{pr_number: pr}} <- open_deliverable_pr(hop, opts) do
+      _ = maybe_post_eng_summary(hop, pr, opts)
       route(hop, pr, opts)
+    end
+  end
+
+  # VOIX DE L'ENG sur la PR (info SORTANTE, [[feedback_verbose_descriptive_traceable]]) : poste le
+  # `summary` du producteur (ce qu'il a fait à la livraison / sa réponse à la review au rework) en
+  # commentaire PR, AU NOM DE L'ENG (`as_role` — traça honnête ②.1e ; le pod reste forge-aveugle, c'est
+  # le SYSTÈME qui poste). Best-effort : un échec de post ne casse PAS la complétion (le livrable = le
+  # commit, déjà poussé). Absent/vide → rien (pas de commentaire vide). Couvre livraison ET rework (les
+  # deux passent ici via open_deliverable_pr — PR neuve ou existante).
+  defp maybe_post_eng_summary(hop, pr, opts) do
+    case Map.get(hop, :eng_summary) do
+      summary when is_binary(summary) and summary != "" ->
+        forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+        forge_opts = Keyword.get(opts, :forge_opts, [])
+        repo = Map.fetch!(hop, :repo)
+        role = Map.get(hop, :role, "engineer")
+        body = "## 🔧 Note de l'#{role}\n\n#{summary}"
+        forge.post_comment(repo, pr, body, as_role(forge_opts, role))
+
+      _ ->
+        :noop
     end
   end
 

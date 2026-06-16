@@ -109,6 +109,12 @@ defmodule Fleet.Pilot.HopCompleterTest do
       send(self(), {:unlock, n, label})
       {:ok, :removed}
     end
+
+    # Voix de l'eng (info sortante) : le summary du producteur posté en commentaire PR.
+    def post_comment(_repo, pr, body, _opts) do
+      send(self(), {:comment, pr, body})
+      {:ok, :posted}
+    end
   end
 
   # PR introuvable (le juge tombe avant tout review) ; merge FF impossible (open ok, merge 409).
@@ -392,6 +398,30 @@ defmodule Fleet.Pilot.HopCompleterTest do
       # producteur : le verrou est sur l'ISSUE (dispatch_issue) ; plus de set_assignee (PR-driven)
       refute_received {:assignee, _, _}
       assert_received {:unlock, 42, "lcars-in-flight"}
+    end
+
+    test "producteur avec :eng_summary → poste la VOIX de l'eng en commentaire PR (fin du « eng muet »)" do
+      hop =
+        producer_hop(:advance, %{
+          next_assignee: "qualifier",
+          eng_summary: "j'ai implémenté le décodeur, choisi un buffer circulaire"
+        })
+
+      assert {:ok, :review_requested} = HopCompleter.complete_pr(hop, orch_opts())
+
+      assert_received {:comment, 7, body}
+      assert body =~ "j'ai implémenté le décodeur, choisi un buffer circulaire"
+      assert body =~ "Note de l'engineer"
+    end
+
+    test "producteur SANS :eng_summary → AUCUN commentaire (pas de voix vide)" do
+      assert {:ok, :review_requested} =
+               HopCompleter.complete_pr(
+                 producer_hop(:advance, %{next_assignee: "qualifier"}),
+                 orch_opts()
+               )
+
+      refute_received {:comment, _, _}
     end
 
     test "producteur :promote (terminal 1-stage) → ouvre la PR, merge FF, unlock, pas de reassign" do

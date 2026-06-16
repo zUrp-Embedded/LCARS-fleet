@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-16 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
+**Dernière révision** : 2026-06-17 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -50,6 +50,9 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   (sans carte)** : producteur → `:review` (ouvre la PR **au nom de l'eng** via token de rôle + `request_review`
   des juges `:reviewer_roles` + **assigne l'humain** + unlock issue/PR) ; juge → `:reviewed` (poste la review
   native **signée par le juge** + unlock PR — le merge/rework est décidé par le poller sur l'état-PR agrégé).
+  **Voix de l'eng (info SORTANTE)** : si le producteur rend un `summary` dans `submit_result` (extrait par
+  `HopConsumer`, coercé `safe_str`), le système le poste en **commentaire PR `as_role` engineer** (livraison
+  ET rework) — l'eng n'est plus muet sur la forge (jumeau sortant de l'anti-famine ; le mandat l'élicite).
   Identité ②.1e via `Fleet.Credentials.RoleToken` (poste EN SON NOM ; token absent → fallback système loggué).
   (Legacy carte multi-stage : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
 

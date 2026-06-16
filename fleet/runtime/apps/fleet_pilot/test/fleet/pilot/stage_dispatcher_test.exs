@@ -206,6 +206,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert opts[:mandate] =~ "git commit"
       assert opts[:mandate] =~ "Co-authored-by: LCARS-engineer"
 
+      # Voix de l'eng (info sortante) : le mandat demande un `summary` posté sur la PR par le système.
+      assert opts[:mandate] =~ "summary"
+      assert opts[:mandate] =~ "Ta voix"
+
       # le mandat est ENQUEUÉ en TaskQueue (sinon le pod se croit bootstrap → idle ; bug PASSE-9)
       assert_received {:enqueued, "issue-42-engineer-1700000000", attrs}
       assert attrs.brief =~ "fais le hello"
@@ -410,6 +414,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # selon la review » est creux → l'eng devine à l'aveugle → blocked_dep/wedge, prouvé live morse).
       assert spawn_opts[:mandate] =~ "le timing des points/traits est faux"
       assert spawn_opts[:mandate] =~ "reviewer"
+
+      # Voix de l'eng (rework) : le mandat demande un `summary` = réponse au reviewer, posté sur la PR.
+      assert spawn_opts[:mandate] =~ "summary"
       assert_received {:enqueued, "pr-6-engineer-1700000000", attrs}
       assert attrs.role == "engineer"
     end

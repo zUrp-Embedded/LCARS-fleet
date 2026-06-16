@@ -98,6 +98,27 @@ defmodule Fleet.Pilot.HopConsumerTest do
 
       assert opts[:forge_opts] == [base_url: "http://10.42.0.118"]
     end
+
+    test "producteur : result.summary -> hop.eng_summary (voix de l'eng, info SORTANTE)" do
+      payload =
+        stage_payload(%{"result" => %{"ok" => true, "summary" => "j'ai fait X, choisi Y"}})
+
+      assert {:ok, :captured} = HopConsumer.maybe_complete(payload, state())
+      assert_received {:hop, hop, _}
+      assert hop.eng_summary == "j'ai fait X, choisi Y"
+    end
+
+    test "producteur : summary non-string -> coercé safe_str (pas de crash singleton #8) ; absent -> aucune clé" do
+      # map -> inspect (coercion défensive : un LLM peut rendre un objet)
+      p = stage_payload(%{"result" => %{"summary" => %{"raw" => 1}}})
+      assert {:ok, :captured} = HopConsumer.maybe_complete(p, state())
+      assert_received {:hop, hop, _}
+      assert hop.eng_summary =~ "raw"
+      # sans summary -> pas de clé eng_summary (pas de voix vide)
+      assert {:ok, :captured} = HopConsumer.maybe_complete(stage_payload(), state())
+      assert_received {:hop, hop2, _}
+      refute Map.has_key?(hop2, :eng_summary)
+    end
   end
 
   describe "F067 — offload de la completion (hop_runner)" do

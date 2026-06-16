@@ -368,6 +368,7 @@ defmodule Fleet.Pilot.HopConsumer do
       |> put_unless_nil(:comment_body, comment_body)
       |> maybe_put_deliverable(pr_role, role, payload, n, state)
       |> maybe_put_review_event(pr_role, intent, payload)
+      |> maybe_put_eng_summary(pr_role, payload)
 
     hc_opts =
       [forge_opts: state.forge_opts]
@@ -411,6 +412,27 @@ defmodule Fleet.Pilot.HopConsumer do
   end
 
   defp maybe_put_review_event(hop, _pr_role, _intent, _payload), do: hop
+
+  # VOIX DE L'ENG (info SORTANTE) : le PRODUCTEUR peut rendre un `summary` markdown dans submit_result
+  # (ce qu'il a fait / réponse à la review / motif blocked). On l'extrait du résultat (déplié de
+  # l'enveloppe worker) → `HopCompleter` le poste en commentaire PR (`as_role` engineer). Coercé par
+  # `safe_str` (#8 : l'eng peut rendre un non-binaire → ne pas crasher le singleton). Absent/vide → rien
+  # posé. Jumeau SORTANT de la famine d'info ENTRANTE — complète la « panne bidirectionnelle de substance ».
+  defp maybe_put_eng_summary(hop, :producer, payload) do
+    case eng_summary(payload) do
+      "" -> hop
+      summary -> Map.put(hop, :eng_summary, summary)
+    end
+  end
+
+  defp maybe_put_eng_summary(hop, _pr_role, _payload), do: hop
+
+  defp eng_summary(payload) do
+    case unwrap_worker_envelope(payload["result"] || %{}) do
+      m when is_map(m) -> m |> Map.get("summary") |> safe_str() |> String.trim()
+      _ -> ""
+    end
+  end
 
   defp review_event_for_decision("continue"), do: :approve
   defp review_event_for_decision(_other), do: :request_changes
