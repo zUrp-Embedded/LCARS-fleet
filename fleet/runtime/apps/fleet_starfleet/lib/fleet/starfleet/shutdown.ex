@@ -78,7 +78,10 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
   @impl true
   def in_flight_count do
-    spawner_pods() + pipeline_running() + tasks_pending()
+    # `pipeline_running` RETIRÉ (②.3 / BL-050) : le moteur RAM (`Fleet.Pipeline.Executor`) est supprimé,
+    # il n'y a plus de pipelines en RAM à drainer. L'in-flight = les **pods vivants** (le travail réel
+    # du rail forge : un pod = un hop en cours) + les mandats **en file** non encore pullés.
+    spawner_pods() + tasks_pending()
   end
 
   defp spawner_pods do
@@ -87,13 +90,6 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
     _ -> 0
   catch
     :exit, _ -> 0
-  end
-
-  defp pipeline_running do
-    case dyn(Fleet.Pipeline, :count_running, []) do
-      n when is_integer(n) -> n
-      _ -> 0
-    end
   end
 
   defp tasks_pending do

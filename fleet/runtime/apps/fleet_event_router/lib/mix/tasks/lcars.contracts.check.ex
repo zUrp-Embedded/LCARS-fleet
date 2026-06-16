@@ -90,9 +90,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_spawn_gates_wired(root),
         check_gatekeeper_not_a_stage(root),
         check_verdict_envelope_unwrapped(root),
-        check_no_root_runtime_guard(root),
-        # ── Rail F150 (retry borné système-side, 2026-06-14) ──
-        check_bounded_retry_system_side(root)
+        check_no_root_runtime_guard(root)
+        # NB rail F150 `pipeline.bounded_retry_system_side` RETIRÉ (②.3 / BL-050) : il vérifiait le
+        # retry borné système-side de l'`Executor` RAM (supprimé). L'équivalent côté rail forge = le
+        # `max_rework_rounds` (HopConsumer) ; à re-contractualiser si besoin (backlog).
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
@@ -108,8 +109,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # AutoDispatcher (Pilot→R4), MCP Bridge (channels→R6), Dispatch/AuditConsumer
   # (dual legacy retiré au verrou→R5/R7).
   defp check_event_consumers_canon(root) do
+    # NB cible `executor.ex` retirée (②.3 / BL-050 : l'Executor RAM était un consommateur d'events, supprimé).
     targets = [
-      "apps/fleet_pipeline/lib/fleet/pipeline/executor.ex",
       "apps/fleet_api/lib/fleet/api/ws.ex",
       "apps/fleet_task_monitor/lib/fleet/task_monitor.ex"
     ]
@@ -639,42 +640,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         if(present?, do: [], else: ["#{rt} : pas de self-check anti-root au boot (FORGE-D1)"]),
       note:
         "le daemon doit refuser getuid()==0 au boot (boot guard) ; User=lcars systemd seul ne couvre pas un run dev/manuel en root"
-    }
-  end
-
-  # F150 : le retry de stage après un FAIL hard-gate doit être (a) BORNÉ (`stage_max_retries`, sinon
-  # re-spawn en boucle — la crainte explicite de `gates.ex`) et (b) maintenu par le SYSTÈME (l'Executor,
-  # via `retry_counts` dans son state), JAMAIS par le pod (un agent s'acharnerait à l'infini). Au seuil →
-  # interception (diagnostic gatekeeper), pas d'abandon muet ni de loop. Rouge si l'un des marqueurs manque.
-  defp check_bounded_retry_system_side(root) do
-    exec = "apps/fleet_pipeline/lib/fleet/pipeline/executor.ex"
-    src = File.read!(Path.join(root, exec))
-
-    evidence =
-      [
-        {not Regex.match?(~r/retry_counts:/, src),
-         "#{exec} : champ `retry_counts` (compteur système-side) absent du state Executor"},
-        {not Regex.match?(~r/defp stage_max_retries/, src),
-         "#{exec} : borne `stage_max_retries` absente — retry NON borné (re-spawn en boucle, cf. gates.ex)"},
-        {not Regex.match?(~r/defp reject_stage/, src),
-         "#{exec} : `reject_stage` absent — le hard-gate {:fail} ne passe plus par le retry borné système"},
-        {not Regex.match?(~r/\{:fail, reason\}\s*->\s+reject_stage/, src),
-         "#{exec} : la branche {:fail} ne route plus vers `reject_stage` (retry système contourné)"},
-        {not Regex.match?(~r/dispatch_gatekeeper_diagnosis/, src),
-         "#{exec} : pas d'interception au seuil (`dispatch_gatekeeper_diagnosis`) — abandon ou loop"},
-        {not Regex.match?(~r/if n < max do/, src),
-         "#{exec} : la comparaison de borne `if n < max` absente — borne potentiellement inopérante (retry non-borné)"}
-      ]
-      |> Enum.filter(&elem(&1, 0))
-      |> Enum.map(&elem(&1, 1))
-
-    %{
-      id: "pipeline.bounded_retry_system_side",
-      remediation: "F150",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
-      note:
-        "retry de stage BORNÉ (`stage_max_retries`) + maintenu par le SYSTÈME (`Executor.retry_counts`, jamais le pod) ; au seuil → diagnostic gatekeeper (mandat→arch / autre→escalade), pas de loop infini (F150)"
     }
   end
 

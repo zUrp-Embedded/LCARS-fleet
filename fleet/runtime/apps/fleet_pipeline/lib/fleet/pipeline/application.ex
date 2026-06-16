@@ -1,26 +1,16 @@
 defmodule Fleet.Pipeline.Application do
   @moduledoc """
-  Application supervisor `fleet_pipeline`.
+  Application `fleet_pipeline` — désormais une **lib carte/gate/delivery** (quasi-pure).
 
-  Démarre :
+  Le moteur RAM (`Fleet.Pipeline.Executor` + sa pile : Registry/PodRegistry/ExecutorSupervisor,
+  StageRunner, StageSpawner, Toposort, WorkspaceProvisioner) a été RETIRÉ (②.3 / BL-050, 2026-06-16) :
+  il ne reste plus AUCUN process à superviser ici. Le supervisor est donc **vide** — conservé
+  transitoirement ; `fleet_pipeline` est destiné à devenir `fleet_core` **lib-only** (Bloc C, sortie de
+  la clé `mod:` de `mix.exs`). Les survivants sont la lib consommée par le rail forge + 4 apps :
+  `Loader` / `Gates` / `Gate` / `GateBrief` / `Deliverable` / `DeliverableGate` / `Git` / `Gatekeeper`.
 
-    * `Fleet.Pipeline.Registry` — Registry `:unique` keyed par
-      `pipeline_id`. Lookup `Executor` GenServer per-run via
-      `{:via, Registry, ...}`.
-    * `Fleet.Pipeline.ExecutorSupervisor` — `DynamicSupervisor`
-      `:one_for_one` qui spawne les `Executor` à la demande via
-      `Fleet.Pipeline.start_pipeline/2`.
-
-  ## Stratégie
-
-  `:rest_for_one` : si Registry crash, ExecutorSupervisor doit
-  redémarrer aussi (les via-tuples deviennent invalides).
-
-  ## Atom registration
-
-  Pré-enregistre les atomes des events `pipeline.*` que Bus utilisera
-  via `String.to_existing_atom/1` (cohérent ch11 M1 mitigation atom
-  leak DoS).
+  Pré-enregistre encore les atomes events `pipeline.*` (legacy Executor ; plus émis, mais le Bus les
+  autorise via `String.to_existing_atom/1` — nettoyage en Bloc C).
   """
 
   use Application
@@ -33,28 +23,13 @@ defmodule Fleet.Pipeline.Application do
 
   @impl Application
   def start(_type, _args) do
-    children =
-      [
-        {Registry, keys: :unique, name: Fleet.Pipeline.Registry},
-        # PodRegistry — book-keeping {pipeline_id, role} → pod_id pour les
-        # pods pipe-scoped (engineer long-lived). Démarré avant
-        # ExecutorSupervisor pour qu'un Executor naissant puisse l'interroger
-        # via StageRunner.
-        Fleet.Pipeline.PodRegistry,
-        {DynamicSupervisor, strategy: :one_for_one, name: Fleet.Pipeline.ExecutorSupervisor}
-      ]
-
-    opts = [strategy: :rest_for_one, name: Fleet.Pipeline.Supervisor]
-    Supervisor.start_link(children, opts)
+    # Plus aucun process (moteur RAM retiré) → supervisor vide. Conservé transitoirement (Bloc C : lib-only).
+    Supervisor.start_link([], strategy: :one_for_one, name: Fleet.Pipeline.Supervisor)
   end
 
-  # Corr.3 incrément 5 : DeliveryPublisher RETIRE (le PoC payload put_file `deliverables/<task>/`,
-  # R5/R11) — la livraison passe par le stage-mode PR-natif (HopConsumer -> Deliverable.publish
-  # git_native -> PR -> merge). Plus de double-modèle.
-
   @doc """
-  Liste des atomes events `pipeline.*` pré-enregistrés. Cohérent ch11
-  M1 atom-leak DoS mitigation (Bus `String.to_existing_atom/1`).
+  Liste des atomes events `pipeline.*` pré-enregistrés (legacy Executor). Cohérent ch11 M1
+  atom-leak DoS mitigation (Bus `String.to_existing_atom/1`).
   """
   @spec pipeline_event_atoms() :: [atom()]
   def pipeline_event_atoms, do: @pipeline_event_atoms
