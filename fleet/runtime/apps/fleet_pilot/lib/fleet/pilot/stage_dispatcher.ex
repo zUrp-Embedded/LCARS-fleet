@@ -107,7 +107,6 @@ defmodule Fleet.Pilot.StageDispatcher do
     loader = Keyword.get(opts, :loader, Fleet.CapProfile)
     spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
     task_queue = Keyword.get(opts, :task_queue, Fleet.TaskQueue)
-    clock = Keyword.get(opts, :clock, &System.os_time/1)
     resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
 
     case decide(payload, &loader.load/1) do
@@ -119,7 +118,6 @@ defmodule Fleet.Pilot.StageDispatcher do
         number = issue["number"]
         repo = Keyword.fetch!(opts, :repo)
         forge_opts = Keyword.get(opts, :forge_opts, [])
-        ts = clock.(:second)
 
         # PROJET résolu AVANT toute écriture forge (read-only ls-remote) : un échec
         # transitoire ne laisse pas de verrou orphelin. base_sha pinné HORS-pod (F-03 R1,
@@ -134,12 +132,14 @@ defmodule Fleet.Pilot.StageDispatcher do
         with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
              {:ok, route} <-
                tag_err(route_for(forge, repo, number, forge_opts), :route_resolution) do
-          # pod_id DÉTERMINISTE (string connue AVANT spawn) : `Spawner.spawn_pod/3` retourne le
-          # `pid` du GenServer ; on impose le pod_id via `:pod_id`. `ts` le rend unique par hop.
+          # BL-055 : pod_id DÉTERMINISTE STABLE keyé sur (issue, rôle) — PLUS de `-<ts>`. Le timestamp
+          # rendait l'id unique par hop → re-spawn à chaque rework, l'eng pipe (long-lived) lingérait,
+          # contexte perdu. Stable → un re-dispatch retombe sur le MÊME pod : s'il est vivant (eng pipe),
+          # on le RE-MANDATE (garde son contexte), sinon on spawn. (Idempotence — cf. spawn_or_remandate.)
           # F071 : le préfixe "issue-" ci-dessous (et la branch hop_consumer.ex:318 "lcars/issue-...") est
           # aligné PAR CONVENTION sur `Fleet.Pilot.TicketId.@prefix` — formats DISTINCTS du ticket_id (jamais
           # parsés), mais si ce préfixe change un jour, mettre à jour ces 2 littéraux aussi (couplage implicite).
-          pod_id = "issue-#{number}-#{role}-#{ts}"
+          pod_id = "issue-#{number}-#{role}"
 
           # F077/F078 : la FORME du mandat (worker exécutable | juge désamorcé) est lue du cap-profile
           # (`mandate_kind`), PAS d'un nom magique "gatekeeper" en ring2 (differentiation-par-catalogue).
@@ -156,36 +156,43 @@ defmodule Fleet.Pilot.StageDispatcher do
             |> maybe_put_project(project)
             |> maybe_put_route(route)
 
+          # BL-055 : eng pipe déjà vivant (id stable) ? → RE-MANDATE (garde le contexte), sinon spawn.
+          alive_before? = pod_alive?(spawner, pod_id)
+
           # Ordre canonique du SPAWN (DN §6) : label-verrou AVANT pod. Le verrou = le LABEL
           # `lcars-in-flight` (mutex machine-state) ; PAS de comment-lock dans le ticket (écriture
           # morte, jamais lue — retirée : le ticket garde du contenu humain ; recovery = liveness pod).
           with {:ok, _} <- forge.add_label(repo, number, @in_flight_label, forge_opts),
-               {:ok, _pid} <-
-                 spawner.spawn_pod(profile, Fleet.Pilot.TicketId.compose(number), spawn_opts),
+               {:ok, _} <-
+                 maybe_spawn(
+                   spawner,
+                   alive_before?,
+                   profile,
+                   Fleet.Pilot.TicketId.compose(number),
+                   spawn_opts
+                 ),
                :ok <- enqueue_mandate(task_queue, pod_id, role, number, mandate) do
-            # Kick best-effort : le pod auto-kicke les workers ; le wake accélère le 1er get_task.
+            # Wake (flag Monitor + yop-fallback) : le pod (frais OU re-mandaté) pull le mandat via get_task.
             _ = safe_wake(spawner, pod_id)
 
             Logger.info(
-              "StageDispatcher: spawned role=#{role} pod=#{pod_id} issue=#{repo}##{number} " <>
+              "StageDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} issue=#{repo}##{number} " <>
                 "project=#{if(project, do: project["base_sha"], else: "none")} route=#{inspect(route)}"
             )
 
             {:ok, {:spawned, pod_id, role}}
           else
             {:error, _} = err ->
-              # F181 : une étape POST-verrou a échoué (post_comment / spawn / enqueue). Le verrou
-              # `lcars-in-flight` est (peut-être) posé → sans compensation, le poller SKIP l'issue à
-              # jamais (stuck). On compense : kill best-effort du pod (pod_id déterministe ; no-op s'il
-              # n'a jamais spawné ou si enqueue a échoué pod-vivant → pas de pod orphelin), PUIS retrait
-              # du verrou (best-effort) → le prochain tick re-dispatche proprement (pas de double-spawn :
-              # plus de pod vivant). L'erreur est propagée (jamais d'avance silencieuse).
-              _ = safe_kill(spawner, pod_id)
+              # F181 : une étape POST-verrou a échoué. Compensation : retrait du verrou (sinon le poller
+              # SKIP l'issue à jamais). Kill **seulement si on a FRAÎCHEMENT spawné** — un re-mandate ne
+              # doit JAMAIS tuer l'eng vivant + son contexte sur un échec d'enqueue (BL-055). Le prochain
+              # tick re-dispatche proprement.
+              if not alive_before?, do: safe_kill(spawner, pod_id)
               _ = forge.remove_label(repo, number, @in_flight_label, forge_opts)
 
               Logger.warning(
-                "StageDispatcher: spawn role=#{role} issue=#{repo}##{number} → #{inspect(err)} " <>
-                  "(verrou retiré, pod tué — re-dispatch au prochain tick)"
+                "StageDispatcher: dispatch role=#{role} issue=#{repo}##{number} → #{inspect(err)} " <>
+                  "(verrou retiré#{if(not alive_before?, do: ", pod tué", else: "")} — re-dispatch au prochain tick)"
               )
 
               err
@@ -329,13 +336,10 @@ defmodule Fleet.Pilot.StageDispatcher do
       forge: forge,
       spawner: spawner,
       task_queue: task_queue,
-      clock: clock,
       resolver: resolver,
       forge_opts: forge_opts,
       opts: opts
     } = ctx
-
-    ts = clock.(:second)
 
     # ②.1d — le pod review (juge) OU rework (producteur) clone la FEATURE-BRANCH (`head.ref`), PAS
     # `main` : le juge doit voir le DIFF du producteur (sinon il juge `main`, c.-à-d. rien de réel) ;
@@ -348,7 +352,14 @@ defmodule Fleet.Pilot.StageDispatcher do
     # verrou orphelin. La route (pipeline, stage) est lue sur l'ISSUE (le pipeline-state y reste).
     with {:ok, project} <- tag_err(resolver.(repo, review_opts), :project_resolution),
          {:ok, route} <- tag_err(route_for(forge, repo, issue_n, forge_opts), :route_resolution) do
-      pod_id = "pr-#{pr_number}-#{role}-#{ts}"
+      # BL-055 : id déterministe stable. Le REWORK (producteur) keye sur l'ISSUE → MÊME id que
+      # dispatch_issue → retombe sur l'eng pipe vivant pour le RE-MANDATER (garde son contexte de
+      # diagnostic across reworks). Le JUGE (one-shot) keye sur la PR → re-spawn frais à chaque review.
+      pod_id =
+        case kind do
+          :rework -> "issue-#{issue_n}-#{role}"
+          _ -> "pr-#{pr_number}-#{role}"
+        end
 
       # :judge -> GateBrief desamorce (I-CBC) ; :rework -> brief de rework au PRODUCTEUR (corrige + push).
       mandate =
@@ -359,28 +370,38 @@ defmodule Fleet.Pilot.StageDispatcher do
         |> maybe_put_project(project)
         |> maybe_put_route(route)
 
+      # BL-055 : eng pipe déjà vivant (rework, id stable) ? → re-mandate, sinon spawn.
+      alive_before? = pod_alive?(spawner, pod_id)
+
       # Ordre canonique du spawn (label-verrou AVANT pod). Verrou = LABEL `lcars-in-flight` sur la PR
       # (pr_number, pas l'issue) ; pas de comment-lock (écriture morte, retirée — cf. dispatch_issue).
       with {:ok, _} <- forge.add_label(repo, pr_number, @in_flight_label, forge_opts),
-           {:ok, _pid} <-
-             spawner.spawn_pod(profile, Fleet.Pilot.TicketId.compose(issue_n), spawn_opts),
+           {:ok, _} <-
+             maybe_spawn(
+               spawner,
+               alive_before?,
+               profile,
+               Fleet.Pilot.TicketId.compose(issue_n),
+               spawn_opts
+             ),
            :ok <- enqueue_mandate(task_queue, pod_id, role, issue_n, mandate) do
         _ = safe_wake(spawner, pod_id)
 
         Logger.info(
-          "StageDispatcher: review-dispatch role=#{role} pod=#{pod_id} pr=#{repo}##{pr_number} issue=##{issue_n}"
+          "StageDispatcher: review-#{disposition(alive_before?)} role=#{role} pod=#{pod_id} pr=#{repo}##{pr_number} issue=##{issue_n}"
         )
 
         {:ok, {:spawned, pod_id, role}}
       else
         {:error, _} = err ->
-          # F181 (jumeau dispatch_issue) : une etape post-verrou a echoue -> compense (kill pod +
-          # retrait verrou PR) pour ne pas stuck la PR a jamais.
-          _ = safe_kill(spawner, pod_id)
+          # F181 (jumeau dispatch_issue) : compense (retrait verrou PR) pour ne pas stuck la PR.
+          # Kill SEULEMENT si frais spawn — un re-mandate ne tue pas l'eng vivant + son contexte (BL-055).
+          if not alive_before?, do: safe_kill(spawner, pod_id)
           _ = forge.remove_label(repo, pr_number, @in_flight_label, forge_opts)
 
           Logger.warning(
-            "StageDispatcher: review-dispatch role=#{role} pr=#{repo}##{pr_number} → #{inspect(err)} (verrou retire, pod tue)"
+            "StageDispatcher: review-dispatch role=#{role} pr=#{repo}##{pr_number} → #{inspect(err)} " <>
+              "(verrou retiré#{if(not alive_before?, do: ", pod tué", else: "")})"
           )
 
           err
@@ -420,9 +441,14 @@ defmodule Fleet.Pilot.StageDispatcher do
                Keyword.put(gk_opts, :dedup_signature, signature)
              ),
            :ok <- merge_step(ctx.forge, ctx.repo, pr_number, gk_opts) do
+        # BL-055 die-on-promote : le lot est SCELLÉ (mergé) → l'eng pipe `issue-N-producer` (long-lived,
+        # qui gardait son contexte across reworks) a fini sa vie → kill best-effort (no-op s'il est déjà
+        # mort). Sans ça il lingère idle pour toujours = leak terminal du chantier eng-reuse.
+        _ = safe_kill(ctx.spawner, "issue-#{issue_n}-#{producer}")
+
         Logger.info(
           "StageDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
-            "(juges OK → merge rebase, scellé gatekeeper, close via Closes ##{issue_n})"
+            "(juges OK → merge rebase, scellé gatekeeper, close via Closes ##{issue_n} ; eng tué)"
         )
 
         {:ok, {:merged, pr_number}}
@@ -691,6 +717,29 @@ defmodule Fleet.Pilot.StageDispatcher do
   rescue
     _ -> :ok
   end
+
+  # BL-055 — dispatch idempotent. Un pod déjà VIVANT (id déterministe stable) = l'eng pipe long-lived
+  # → on le RE-MANDATE (enqueue + wake, garde son contexte), pas de re-spawn (plus de leak/orphelin).
+  # `pod_alive?` défaute à `false` si le spawner n'expose pas `pod_info/1` (stubs de test) → chemin
+  # spawn inchangé.
+  defp pod_alive?(spawner, pod_id) do
+    function_exported?(spawner, :pod_info, 1) and match?({:ok, _}, spawner.pod_info(pod_id))
+  rescue
+    _ -> false
+  end
+
+  defp maybe_spawn(_spawner, true = _alive?, _profile, _ticket_id, _spawn_opts),
+    do: {:ok, :remandated}
+
+  defp maybe_spawn(spawner, false = _alive?, profile, ticket_id, spawn_opts) do
+    case spawner.spawn_pod(profile, ticket_id, spawn_opts) do
+      {:ok, _pid} -> {:ok, :spawned}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp disposition(true = _alive_before?), do: "re-mandated (pod vivant, contexte gardé)"
+  defp disposition(false = _alive_before?), do: "spawned"
 
   # ============================================================
   # Internals

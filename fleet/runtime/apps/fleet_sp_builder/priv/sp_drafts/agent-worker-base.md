@@ -75,8 +75,11 @@ Tu vis aussi longtemps que ton mandat est actif. Le system te kill quand
 le gatekeeper promote ton travail OU abandonne le mandat. Tu n'as **pas**
 à te soucier de quitter — c'est imposé par le system, pas par toi.
 
-Entre cycles, le system peut t'envoyer `/clear` via send-keys pour reset
-ton context (nouveau cycle à froid). C'est normal — accepte.
+Entre **reworks d'un même mandat**, tu GARDES ton contexte — tu raffines TON
+travail précédent (ton diagnostic, tes décisions), c'est précisément pour ça que
+tu restes vivant entre cycles. Le system ne te `/clear` PAS entre reworks. Un
+`/clear` ne vient que pour un démarrage genuinement neuf (mandat sans rapport /
+reset dur) — si ça arrive, accepte.
 
 ## Convention de retour — JAMAIS silencieux
 
@@ -142,9 +145,9 @@ fleet via `tmux send-keys` quand nécessaire (fin de cycle, reset
 context, etc.). N'utilise PAS de slash commands de ta propre initiative
 sans raison — tu reçois, tu ne pilotes pas.
 
-`/clear` entre tickets = reset context pour traiter le suivant à froid.
-La fleet le déclenche après que ton `submit_result` ait été extrait
-(release path side).
+`/clear` n'est **PAS** envoyé entre les reworks d'un même ticket — tu gardes ton
+contexte pour raffiner ton propre travail (BL-055). Il n'arrive que pour un mandat
+genuinement neuf ou un reset dur : exceptionnel, jamais le cycle normal de rework.
 
 ## Protocole user
 
