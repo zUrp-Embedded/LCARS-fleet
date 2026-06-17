@@ -338,6 +338,17 @@ if config_env() != :test do
     config :fleet_pilot, forge_bot_login: bot_login
   end
 
+  # Multi-forge par config (une forge par boot, choisie par profil env). Les tokens de RÔLE
+  # (`Fleet.Credentials.RoleToken`) sont lus dans `<role_tokens_dir>/<role>.gitea_token` ;
+  # défaut `/home/private` (forge primaire). Pour cibler une 2e forge (ex. secours :3000), un
+  # profil env distinct pose FORGE_BASE_URL + FORGE_TOKEN_FILE + ce dossier → un jeu de tokens
+  # ISOLÉ par forge (pas de clobber). Le token système, lui, est déjà par-forge via
+  # FORGE_TOKEN_FILE. Absent = défaut (rétro-compat stricte). Pas de multi-forge SIMULTANÉ
+  # (registry/routing par-projet) : hors-scope, ce serait un autre modèle.
+  if role_tokens_dir = System.get_env("FORGE_ROLE_TOKENS_DIR") do
+    config :fleet_credentials, role_tokens_dir: role_tokens_dir
+  end
+
   # ============================================================
   # A2/A3 — runtime STAGE-MODE (forge = machine à états) + BL-045b auth push
   # ============================================================
