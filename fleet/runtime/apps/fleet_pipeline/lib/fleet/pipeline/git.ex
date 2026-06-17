@@ -133,8 +133,12 @@ defmodule Fleet.Pipeline.Git do
 
   defp check_push_remote(%{push?: true} = opts) do
     case Map.get(opts, :remote) do
-      r when is_binary(r) -> :ok
-      _ -> {:error, :push_requires_remote}
+      # F-046 : rejet leading-`-` au plus tôt (publish/maybe_push) — `push/3` re-valide aussi.
+      r when is_binary(r) and r != "" ->
+        if String.starts_with?(r, "-"), do: {:error, {:invalid_remote, r}}, else: :ok
+
+      _ ->
+        {:error, :push_requires_remote}
     end
   end
 
@@ -155,11 +159,30 @@ defmodule Fleet.Pipeline.Git do
   defp git_add(opts) do
     paths = Map.get(opts, :add_paths, ["."])
 
-    case System.cmd("git", ["add" | paths], cd: opts.workspace, stderr_to_stdout: true) do
-      {_out, 0} -> :ok
-      {out, rc} -> {:error, {:git_add_failed, rc, String.trim(out)}}
+    case validate_add_paths(paths) do
+      :ok ->
+        # F-014 : `--` termine les options → un pathspec commençant par `-` (ex. `add_paths = ["--all"]`
+        # depuis un input non fiable) est traité comme un CHEMIN littéral, pas une option git. `System.cmd`
+        # n'utilise pas de shell, mais GIT parse ses propres options : un arg leading-`-` est une option.
+        case System.cmd("git", ["add", "--" | paths], cd: opts.workspace, stderr_to_stdout: true) do
+          {_out, 0} -> :ok
+          {out, rc} -> {:error, {:git_add_failed, rc, String.trim(out)}}
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
+
+  # F-014 : `add_paths` doit être une liste non vide de chemins binaires non vides (belt-and-suspenders
+  # avec le séparateur `--`).
+  defp validate_add_paths(paths) when is_list(paths) and paths != [] do
+    if Enum.all?(paths, &(is_binary(&1) and &1 != "")),
+      do: :ok,
+      else: {:error, :invalid_add_paths}
+  end
+
+  defp validate_add_paths(_), do: {:error, :invalid_add_paths}
 
   defp git_commit(opts) do
     with :ok <- run_commit(opts),
@@ -229,6 +252,23 @@ defmodule Fleet.Pipeline.Git do
   """
   @spec push(Path.t(), String.t(), String.t()) :: {:ok, true} | {:error, term()}
   def push(workspace, remote, refspec) do
+    with :ok <- validate_cli_arg(remote, :invalid_remote),
+         :ok <- validate_cli_arg(refspec, :invalid_refspec) do
+      do_push(workspace, remote, refspec)
+    end
+  end
+
+  # F-046 : `remote`/`refspec` ne doivent PAS commencer par `-`. Sinon `git push` les lit comme des
+  # OPTIONS (`--receive-pack=<cmd>` → exécution côté remote, `-c <config>`, `--exec=`) → injection
+  # d'options via un input non fiable. `System.cmd` n'utilise pas de shell, mais git parse ses options :
+  # un positional attendu qui commence par `-` est avalé comme option. On rejette fail-closed.
+  defp validate_cli_arg(arg, err) when is_binary(arg) and arg != "" do
+    if String.starts_with?(arg, "-"), do: {:error, {err, arg}}, else: :ok
+  end
+
+  defp validate_cli_arg(_arg, err), do: {:error, err}
+
+  defp do_push(workspace, remote, refspec) do
     timeout_ms = push_timeout_ms()
 
     # audit elixir #1 BLOQUANT — `git push` n'a pas de timeout natif. Push réseau hung (DNS, TLS,

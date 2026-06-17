@@ -141,6 +141,65 @@ defmodule Fleet.GitTest do
   end
 
   # ============================================================
+  # Injection git (F-014 add / F-046 push) — Pattern C
+  # ============================================================
+
+  describe "injection git (Pattern C)" do
+    test "F-014 : add_paths leading-`-` est un CHEMIN (via `--`), pas une option — `--all` ne stage pas tout",
+         %{tmp_dir: tmp} do
+      ws = init_workspace(Path.join(tmp, "ws-f014"))
+      commit_initial(ws)
+      File.write!(Path.join(ws, "sneaky.txt"), "x\n")
+
+      opts = Map.put(valid_opts(ws), :add_paths, ["--all"])
+
+      # Sans `--`, `git add --all` staterait sneaky.txt → {:ok}. Avec `--`, "--all" est un pathspec
+      # littéral (absent) → échec : l'option-injection est neutralisée (rien n'est stagé-en-masse).
+      assert {:error, _} = Fleet.Pipeline.Git.publish(opts)
+    end
+
+    test "F-014 : add_paths invalide (vide / non-binaire / élément vide) → :invalid_add_paths",
+         %{tmp_dir: tmp} do
+      ws = init_workspace(Path.join(tmp, "ws-f014b"))
+      commit_initial(ws)
+      File.write!(Path.join(ws, "x.txt"), "x\n")
+
+      for bad <- [[], [123], ["", "ok"], "not-a-list"] do
+        opts = Map.put(valid_opts(ws), :add_paths, bad)
+
+        assert {:error, :invalid_add_paths} = Fleet.Pipeline.Git.publish(opts),
+               "add_paths #{inspect(bad)}"
+      end
+    end
+
+    test "F-046 : push remote leading-`-` rejeté fail-closed (`-c`, `--receive-pack=`, `--exec=`)",
+         %{tmp_dir: tmp} do
+      ws = init_workspace(Path.join(tmp, "ws-f046"))
+
+      for bad <- ["-c", "--receive-pack=touch /tmp/pwn", "--exec=x"] do
+        assert {:error, {:invalid_remote, ^bad}} = Fleet.Pipeline.Git.push(ws, bad, "HEAD:main"),
+               "remote #{inspect(bad)}"
+      end
+    end
+
+    test "F-046 : push refspec leading-`-` rejeté", %{tmp_dir: tmp} do
+      ws = init_workspace(Path.join(tmp, "ws-f046b"))
+
+      assert {:error, {:invalid_refspec, "--force"}} =
+               Fleet.Pipeline.Git.push(ws, "origin", "--force")
+    end
+
+    test "F-046 : publish avec remote leading-`-` rejeté tôt (check_push_remote)", %{tmp_dir: tmp} do
+      ws = init_workspace(Path.join(tmp, "ws-f046c"))
+      commit_initial(ws)
+      File.write!(Path.join(ws, "x.txt"), "x\n")
+
+      opts = valid_opts(ws) |> Map.merge(%{remote: "--receive-pack=evil", push?: true})
+      assert {:error, {:invalid_remote, "--receive-pack=evil"}} = Fleet.Pipeline.Git.publish(opts)
+    end
+  end
+
+  # ============================================================
   # publish/1 — push vers bare repo local
   # ============================================================
 
