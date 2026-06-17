@@ -62,27 +62,33 @@ spec:
     monk_registry: null
     monk_instance: null
   invocation:
-    # `pipe` : l'engineer vit avec le pipeline standard-qa (Phase III, étapes
-    # 11.0 → 11.3 + boucles renvoi-au-dev) pour conserver le contexte de SON
-    # implémentation à travers les cycles audit→correction. Spawn unique au
-    # début du mandat ; release par gatekeeper(starfleet) au promote ou
-    # abandon. Cf. doctrine `00_doctrine/moon-shot-ref/#02_methodology/
-    # pipeline-implementation.md` Phase III + `04_design-notes/ring1/
-    # permanent-pods-boot.md` §"Task-level éphémère".
+    # `one-shot` : 1 task = 1 vie de pod (extract → release → kill, cf.
+    # `Fleet.Spawner.Pod.do_extract`). L'engineer rend sa révision via MCP
+    # `submit_result` puis MEURT ; le SYSTÈME publie sur la forge (forge-aveugle).
+    # Un rework (renvoi-au-dev avec findings du gatekeeper) re-spawne un pod
+    # FRAIS sur l'id déterministe `issue-<n>-engineer` (`Fleet.Pilot.StageDispatcher`),
+    # qui relit son contexte depuis la forge (PR + findings) — l'état vit sur la
+    # forge, pas en RAM (forge-state-machine, BL-043). Les judges (qualifier,
+    # reviewer, consultant) sont déjà one-shot : modèle désormais UNIFORME pour
+    # tous les workers de dispatch.
     #
-    # Les judges (qualifier, reviewer, consultant) restent one-shot — pas de
-    # mémoire d'audit précédent souhaitée pour chaque cycle 11.1/11.2.
-    lifetime_scope: pipe
+    # Décision 2026-06-17 (ferme le fork pipe-vs-one-shot, item #1) : one-shot
+    # retenu — state-sur-forge, pas de pod résident à maintenir vivant/réveiller.
+    # RÉVERSIBLE sans rien défaire : l'archi eng-reuse (id déterministe + dispatch
+    # idempotent + branche `pod_alive?` → remandate de StageDispatcher) reste en
+    # place mais DORMANTE (un pod one-shot est toujours mort au rework → toujours
+    # spawn frais). Rebasculer = remettre `lifetime_scope: pipe` ICI, point. Cf.
+    # BL-055 + `04_design-notes/ring1/permanent-pods-boot.md` §"Task-level éphémère".
+    lifetime_scope: one-shot
     model: opus        # catalogue → --model (alias/nom complet ; tunable)
     effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
-    # subagent_template retiré (était `implementer`) — G24-11 contraint
-    # subagent_template ⟹ lifetime_scope: one-shot. Avec l'engineer en
-    # `pipe` (pod long-lived ticket-driven, cf. chantier engineer-long-
-    # lived-pipe), il n'y a plus de dispatch subagent one-shot : le pod
-    # vit, get_task/submit_result via tools MCP. Pour le pattern
-    # subagent fire-mode-quick (mandate ultra-court), créer un
-    # cap-profile `engineer-quick.yaml` séparé.
+    # subagent_template null : l'engineer exécute son mandat DIRECTEMENT
+    # (get_task → travail → submit_result via tools MCP), pas via un subagent
+    # dispatché. Note : maintenant que `lifetime_scope: one-shot`, la garde
+    # G24-11 (subagent_template ⟹ one-shot) serait SATISFAITE si on voulait
+    # réintroduire un subagent_template `implementer` ; on reste sur l'exécution
+    # directe (plus simple). Pattern subagent fire-mode-quick → cap-profile séparé.
     subagent_template: null
     # `fleet-forge.engineer` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4) : l'engineer
     # n'a aucun canal d'écriture forge. Il lit son mandat / rend son livrable via MCP get_task/

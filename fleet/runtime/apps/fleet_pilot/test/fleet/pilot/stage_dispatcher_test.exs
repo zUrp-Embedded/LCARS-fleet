@@ -438,7 +438,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert_received {:merged, 6}
       refute_received {:spawned, _, _}
 
-      # BL-055 die-on-promote : l'eng pipe (issue-42-engineer) est tué au merge (plus de leak terminal).
+      # BL-055 die-on-promote : le producteur (id déterministe issue-42-engineer) est tué au
+      # merge. En one-shot il est déjà mort (kill = no-op de sûreté) ; en pipe c'est le vrai
+      # release terminal. Inconditionnel côté dispatcher → couvre les deux profils.
       assert_received {:killed, "issue-42-engineer"}
     end
 
