@@ -69,10 +69,9 @@ defmodule Fleet.Spawner.OrphanReaper do
       "OrphanReaper: pod #{pod_id} = orphelin persistant (sock vivante, aucun GenServer) — reap (BL-036b)"
     )
 
-    sock = PodTmux.sock_path(pod_id)
-    _ = System.cmd("tmux", ["-S", sock, "kill-server"], stderr_to_stdout: true)
-    _ = System.cmd("pkill", ["-9", "-f", pod_id], stderr_to_stdout: true)
-    _ = File.rm_rf(Path.dirname(sock))
+    # Kill (tmux kill-server + pkill -f ancré) centralisé dans PodTmux.kill_holder/1 (F-034).
+    PodTmux.kill_holder(pod_id)
+    _ = File.rm_rf(Path.dirname(PodTmux.sock_path(pod_id)))
     :ok
   rescue
     e -> Logger.warning("OrphanReaper reap #{pod_id} échec (non-bloquant): #{inspect(e)}")

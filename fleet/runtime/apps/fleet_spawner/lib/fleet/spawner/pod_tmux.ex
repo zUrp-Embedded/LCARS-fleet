@@ -12,11 +12,13 @@ defmodule Fleet.Spawner.PodTmux do
   (`has-session`). Voir la chaîne reverse #5b : les channels MCP sont `skipSlashCommands:true` → seul
   le send-keys tmux atteint les slash-commands.
 
-  ## Le KILL n'est PAS ici
+  ## Le KILL PRIMAIRE n'est PAS ici (mais le fallback orphelin, si)
 
   Tuer = `Port.close` du holder bwrap (pod.ex), PAS `kill-session` : le holder (`sleep infinity`) tient
   le namespace ; tuer juste la session tmux laisserait le holder vivant → namespace orphelin. La socket
-  meurt avec le namespace quand le Port se ferme.
+  meurt avec le namespace quand le Port se ferme. **Exception RECOVERY** : quand il n'y a plus de Port
+  (orphelin post-crash GenServer, reap), `kill_holder/1` ci-dessous fait le geste de secours
+  (tmux kill-server + `pkill -f` ancré, F-034).
   """
 
   require Logger
@@ -53,6 +55,61 @@ defmodule Fleet.Spawner.PodTmux do
   @doc "Nom de session tmux INTERNE du pod — convention bwrap_launch.sh (`lcars-pod-<pod_id>`)."
   @spec session_name(String.t()) :: String.t()
   def session_name(pod_id) when is_binary(pod_id), do: "lcars-pod-#{pod_id}"
+
+  @doc """
+  Kill le **holder** d'un pod (le process bwrap/host_launch qui tient le namespace + serveur tmux),
+  geste de RECOVERY partagé (DRY) par `Pod.reap_orphan_pod`, `Pod.terminate` (fallback tmux_session)
+  et `OrphanReaper.reap`. Le kill PRIMAIRE reste `Port.close` (cf. § « Le KILL n'est PAS ici ») ; ceci
+  est le chemin ORPHELIN/fallback où il n'y a plus de Port vivant.
+
+  `tmux kill-server` (sur le sock par-pod) tue tmux+claude ; `pkill -9 -f <pattern>` tue le holder
+  (que kill-server laisse vivant — il porte le namespace).
+
+  **F-034** — le `pkill -9 -f <pod_id>` brut était un regex NON ÉCHAPPÉ et NON ANCRÉ :
+    1. un `pod_id` métacaractérisé sur-matchait ;
+    2. un `pod_id` préfixe d'un autre (`pr-8-engineer` vs `pr-8-engineer-v2`) tuait les deux ;
+    3. un `pod_id` vide/anormal → `pkill -f ""` aurait tué **TOUT le host, BEAM inclus** (self-kill).
+  Fix via `pkill_pattern/1` : garde de validité (refus fail-safe si le pod_id n'a pas la forme
+  attendue) + `Regex.escape` + ancrage en token argv. Le holder porte le pod_id comme arg standalone
+  (`bwrap_launch.sh <role> <pod_id> <pod_dir>`) → l'ancrage `(^| )id( |$)` le matche sans le manquer,
+  tout en excluant les sur-matchs substring.
+  """
+  @spec kill_holder(String.t()) :: :ok
+  def kill_holder(pod_id) when is_binary(pod_id) do
+    sock = sock_path(pod_id)
+    _ = System.cmd(@tmux_bin, ["-S", sock, "kill-server"], stderr_to_stdout: true)
+
+    case pkill_pattern(pod_id) do
+      {:ok, pattern} ->
+        _ = System.cmd("pkill", ["-9", "-f", pattern], stderr_to_stdout: true)
+        :ok
+
+      :unsafe ->
+        Logger.error(
+          "PodTmux: pod_id #{inspect(pod_id)} non conforme — `pkill -f` SKIP par sécurité " <>
+            "(anti self-kill F-034 : un pattern trop large tuerait le BEAM)"
+        )
+
+        :ok
+    end
+  end
+
+  @doc """
+  Pattern `pkill -f` pour un pod_id : ancré-en-token (`(^| )<escaped>( |$)`) et échappé, ou `:unsafe`
+  si le pod_id ne matche pas la forme attendue (alphanumérique de tête + `.-_`, ≥4 chars). Public pour
+  test (F-034) — fonction pure. `:unsafe` ⇒ on NE lance PAS pkill (un pod_id vide/anormal produirait
+  un pattern catastrophique).
+  """
+  @spec pkill_pattern(String.t()) :: {:ok, String.t()} | :unsafe
+  def pkill_pattern(pod_id) when is_binary(pod_id) do
+    if Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._\-]{3,}\z/, pod_id) do
+      {:ok, "(^| )#{Regex.escape(pod_id)}( |$)"}
+    else
+      :unsafe
+    end
+  end
+
+  def pkill_pattern(_), do: :unsafe
 
   @doc "Session vivante ? (`tmux -S <sock> has-session`). Health + recovery."
   @spec alive?(String.t()) :: boolean()

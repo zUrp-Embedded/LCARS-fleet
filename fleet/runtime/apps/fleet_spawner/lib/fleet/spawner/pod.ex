@@ -911,15 +911,12 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # BL-036 : reap un orphelin (bwrap/tmux/claude survivant à un crash GenServer) du même pod_id avant
-  # un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). tmux kill-server tue tmux+claude ;
-  # pkill -f <pod_id> tue le holder (bwrap OU host_launch — l'invocation porte le pod_id en argv ; que
-  # kill-server laisse vivant). pod_id = UUID unique → ciblé.
+  # un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). Le kill (tmux kill-server +
+  # pkill -f ancré) est centralisé dans `PodTmux.kill_holder/1` (F-034 : anti self-kill).
   defp reap_orphan_pod(pod_id) do
     if Fleet.Spawner.PodTmux.alive?(pod_id) do
       Logger.warning("pod #{pod_id} : orphelin vivant détecté avant launch (BL-036) — reap")
-      sock = Fleet.Spawner.PodTmux.sock_path(pod_id)
-      _ = System.cmd("tmux", ["-S", sock, "kill-server"], stderr_to_stdout: true)
-      _ = System.cmd("pkill", ["-9", "-f", pod_id], stderr_to_stdout: true)
+      Fleet.Spawner.PodTmux.kill_holder(pod_id)
     end
 
     :ok
@@ -1116,10 +1113,8 @@ defmodule Fleet.Spawner.Pod do
         # F124 : la session du pod bwrap (`lcars-pod-<id>`) vit sur le sock PAR-POD (PodTmux), PAS
         # le serveur tmux par défaut. L'ancien `TmuxBackend.kill_session` ciblait le défaut → no-op
         # silencieux → le claude sandboxé continuait à consommer l'OAuth. On kill via le sock par-pod
-        # (même geste que reap_orphan_pod) : kill-server tue tmux+claude, pkill tue le holder (bwrap ou host).
-        sock = Fleet.Spawner.PodTmux.sock_path(state.pod_id)
-        _ = System.cmd("tmux", ["-S", sock, "kill-server"], stderr_to_stdout: true)
-        _ = System.cmd("pkill", ["-9", "-f", state.pod_id], stderr_to_stdout: true)
+        # (même geste que reap_orphan_pod), centralisé dans `PodTmux.kill_holder/1` (F-034 : anti self-kill).
+        Fleet.Spawner.PodTmux.kill_holder(state.pod_id)
         :ok
 
       true ->
