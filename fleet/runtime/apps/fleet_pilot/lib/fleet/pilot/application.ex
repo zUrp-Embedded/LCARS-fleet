@@ -33,31 +33,78 @@ defmodule Fleet.Pilot.Application do
     Supervisor.start_link(children, opts)
   end
 
-  # Process du rail STAGE (la forge EST la machine à états). Démarré ssi `:stage_dispatch?` +
-  # `:poll_repo` configurés (runtime.exs depuis env). `[]` sinon (app inerte — hermétisme test).
-  defp stage_children do
-    with true <- Application.get_env(:fleet_pilot, :stage_dispatch?, false),
-         repo when is_binary(repo) and repo != "" <-
-           Application.get_env(:fleet_pilot, :poll_repo),
-         remote when is_binary(remote) <- hop_remote(repo) do
-      interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
-      routing = Application.get_env(:fleet_pilot, :stage_routing, %{})
+  @doc """
+  Statut de liveness du rail stage forge-state-machine, pour la readiness (F-010). fleet_pilot
+  possède la topologie du rail → c'est lui qui sait si les singletons sont vivants (fleet_api ne
+  fait que demander, pas de fuite des noms de process Ring 2 dans Ring 4).
 
-      [
-        # F067 : superviseur de tasks pour l'offload de la complétion de hop (le git push ≤30s du
-        # HopConsumer ne bloque pas le singleton). Démarré AVANT le HopConsumer (qui s'y réfère).
-        {Task.Supervisor, name: Fleet.Pilot.HopConsumer.task_supervisor()},
-        {Fleet.Pilot.Poller,
-         repo: repo, interval_ms: interval, stage_dispatch?: true, routing: routing},
-        {Fleet.Pilot.HopConsumer,
-         repo: repo,
-         remote: remote,
-         forge_opts: [],
-         hop_runner: &Fleet.Pilot.HopConsumer.offload_async/1}
-      ]
+    * `{:inactive, _}`    — `:stage_dispatch?` off (rail volontairement absent, attendu hors prod-stage).
+    * `{:operational, _}` — Poller + HopConsumer vivants.
+    * `{:degraded, _}`    — stage activé mais ≥1 singleton mort → **vert-creux attrapé** (le daemon
+      tourne mais le rail forge n'avance plus).
+  """
+  @spec stage_status() :: {:inactive | :operational | :degraded, map()}
+  def stage_status do
+    if Application.get_env(:fleet_pilot, :stage_dispatch?, false) do
+      poller? = is_pid(Process.whereis(Fleet.Pilot.Poller))
+      hop? = is_pid(Process.whereis(Fleet.Pilot.HopConsumer))
+
+      if poller? and hop? do
+        {:operational, %{poller: true, hop_consumer: true}}
+      else
+        {:degraded, %{poller: poller?, hop_consumer: hop?}}
+      end
     else
-      _ -> []
+      {:inactive, %{note: "stage_dispatch? off"}}
     end
+  end
+
+  # Process du rail STAGE (la forge EST la machine à états). Démarré ssi `:stage_dispatch?` est
+  # vrai. `[]` si `:stage_dispatch?` absent/false (app inerte volontaire — hermétisme test).
+  #
+  # F-027 (Pattern A crash-boot) : si `:stage_dispatch?` est VRAI mais que `:poll_repo` ou le remote
+  # ne résolvent pas, on ne renvoie plus `[]` en SILENCE (ex-`else _ -> []` qui démarrait l'app
+  # « verte » sans Poller/HopConsumer → rail forge mort, zéro crash, zéro log). L'opérateur a DEMANDÉ
+  # le mode stage → une config incomplète = deploy cassé → fail-loud au boot.
+  defp stage_children do
+    if Application.get_env(:fleet_pilot, :stage_dispatch?, false) do
+      stage_children!()
+    else
+      []
+    end
+  end
+
+  defp stage_children! do
+    repo = Application.get_env(:fleet_pilot, :poll_repo)
+
+    unless is_binary(repo) and repo != "" do
+      raise "fleet_pilot: :stage_dispatch? activé mais :poll_repo absent/vide — le rail forge-state-" <>
+              "machine ne démarrerait pas (Poller/HopConsumer). Deploy cassé, fail-loud (vérifier " <>
+              "LCARS_PILOT_POLL_REPO)."
+    end
+
+    remote = hop_remote(repo)
+
+    unless is_binary(remote) and remote != "" do
+      raise "fleet_pilot: :stage_dispatch? activé (repo=#{repo}) mais remote irrésolu — FORGE_BASE_URL " <>
+              "(ou :hop_remote) absent → le HopConsumer ne pourrait pas pousser. Deploy cassé, fail-loud."
+    end
+
+    interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
+    routing = Application.get_env(:fleet_pilot, :stage_routing, %{})
+
+    [
+      # F067 : superviseur de tasks pour l'offload de la complétion de hop (le git push ≤30s du
+      # HopConsumer ne bloque pas le singleton). Démarré AVANT le HopConsumer (qui s'y réfère).
+      {Task.Supervisor, name: Fleet.Pilot.HopConsumer.task_supervisor()},
+      {Fleet.Pilot.Poller,
+       repo: repo, interval_ms: interval, stage_dispatch?: true, routing: routing},
+      {Fleet.Pilot.HopConsumer,
+       repo: repo,
+       remote: remote,
+       forge_opts: [],
+       hop_runner: &Fleet.Pilot.HopConsumer.offload_async/1}
+    ]
   end
 
   # Remote git où le SYSTÈME pousse les livrables (HopConsumer). Dérivé du base_url forge

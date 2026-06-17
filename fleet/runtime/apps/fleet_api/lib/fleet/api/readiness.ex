@@ -66,7 +66,8 @@ defmodule Fleet.API.Readiness do
       {"coord.backend", &coord_backend/0},
       {"shutdown.dispatcher", &shutdown_dispatcher/0},
       {"launch.backend", &launch_backend/0},
-      {"mcp.pod_facing", &mcp_pod_facing/0}
+      {"mcp.pod_facing", &mcp_pod_facing/0},
+      {"pilot.stage", &pilot_stage/0}
     ]
   end
 
@@ -91,9 +92,15 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # NB probe `pilot.dispatcher` RETIRÉE (②.3 / BL-050, 2026-06-16) : elle sondait l'`AutoDispatcher`
-  # du rail legacy (webhook→route→Executor RAM), supprimé. Le rail forge-state-machine (Poller stage +
-  # HopConsumer) n'a pas de health-check ici — sa liveness = les pods vivants + les ticks poller (logs).
+  # F-010 : le rail forge-state-machine (Poller stage + HopConsumer) EST désormais sondé — sa mort
+  # runtime (singleton tombé) bascule en `:degraded` au lieu d'un vert-creux. Délégué à fleet_pilot,
+  # qui possède la topologie du rail (`Fleet.Pilot.Application.stage_status/0`) — pas de fuite des
+  # noms de process Ring 2 dans Ring 4. `:inactive` si stage off (n'altère pas le verdict global).
+  # (Ex-probe `pilot.dispatcher` legacy AutoDispatcher RAM = retirée ②.3/BL-050.)
+  defp pilot_stage do
+    {state, detail} = Fleet.Pilot.Application.stage_status()
+    probe("pilot.stage", state, detail)
+  end
 
   # Backend d'escalade Cat 5 coord : `NotWiredYet` (ou absent) ⇒ escalades
   # audit-only silencieuses ⇒ `:degraded` (R22). Vrai backend ⇒ operational.

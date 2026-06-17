@@ -33,16 +33,16 @@ defmodule Fleet.API.ReadinessTest do
   defp sub(result, id), do: Enum.find(result.subsystems, &(&1.id == id))
 
   describe "deep/0 — forme" do
-    test "verdict global + liste dégradés + 5 sous-systèmes + ts" do
+    test "verdict global + liste dégradés + 6 sous-systèmes + ts" do
       assert %{status: status, degraded: degraded, subsystems: subsystems, ts: ts} =
                Readiness.deep()
 
       assert status in ["operational", "degraded"]
       assert is_list(degraded)
 
-      # 5 sous-systèmes depuis le retrait de `pilot.dispatcher` (②.3 / BL-050) : event.registry,
-      # coord.backend, shutdown.dispatcher, launch.backend, mcp.pod_facing.
-      assert length(subsystems) == 5
+      # 6 sous-systèmes : event.registry, coord.backend, shutdown.dispatcher, launch.backend,
+      # mcp.pod_facing, + pilot.stage (F-010 : liveness du rail forge-state-machine, ex-vert-creux).
+      assert length(subsystems) == 6
       assert is_binary(ts)
 
       # chaque sous-système : id/state/detail, state dans le vocab
