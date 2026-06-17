@@ -1416,9 +1416,8 @@ defmodule Fleet.Spawner.Pod do
     tmp = state.state_fs_path <> ".tmp"
 
     # Vulcan #5 : write_state_fs est appelé depuis transition_failed et autres
-    # sites — un crash ici provoquerait une régression du fix. Non-bang +
-    # log warn ; échec d'écriture state.json = perte du point de recovery
-    # uniquement (le {:stop, ...} prévu se passe quand même).
+    # sites — un crash ici provoquerait une régression du fix. Non-bang (le
+    # {:stop, ...} prévu se passe quand même).
     result =
       with :ok <- File.mkdir_p(Path.dirname(state.state_fs_path)),
            :ok <- File.write(tmp, Jason.encode!(payload, pretty: true)),
@@ -1431,9 +1430,12 @@ defmodule Fleet.Spawner.Pod do
         :ok
 
       {:error, reason} ->
-        Logger.warning(
-          "pod #{state.pod_id} write_state_fs failed (non-fatal, recovery dégradé) : " <>
-            inspect(reason)
+        # F-038 : échec d'écriture state.json = perte du point de recovery durable. C'est une
+        # ERREUR (pas un warning) — `:ok` reste rendu (non-fatal, cf. Vulcan #5 : ne pas crasher
+        # ici) mais le breach est désormais LOUD (error-level → monitoring / checklist BL-053).
+        Logger.error(
+          "pod #{state.pod_id} write_state_fs ÉCHEC — point de recovery durable perdu " <>
+            "(non-fatal) : #{inspect(reason)}"
         )
 
         :ok

@@ -5,7 +5,11 @@ defmodule Fleet.TaskQueue.Server do
 
   Broadcast `%Fleet.Event{source: :task_queue, ...}` sur `Phoenix.PubSub`
   topic `fleet.events`, `correlation_id = task.id`. Recovery cross-restart via
-  `state.json` (fail-loud `:state_corrupt` sur schema mismatch, fallback non-bloquant).
+  `state.json` (fail-loud `:state_corrupt` sur schema mismatch au READ, fallback
+  non-bloquant). Côté WRITE : `persist/1` est best-effort — un échec d'écriture est
+  loggé **error** (durabilité du point de recovery rompue, F-007), **non-fatal** (on
+  ne crashe pas le broker sur un blip disque) ; la réconciliation passe par le rail
+  forge-driven (re-dispatch depuis l'état forge), pas par cette persistance locale.
 
   ## Bottleneck assumé (otp-thinking Iron Law)
   GenServer = sérialisation voulue des transitions d'état (idempotence + écriture
@@ -357,7 +361,17 @@ defmodule Fleet.TaskQueue.Server do
       File.write!(tmp, Jason.encode!(data))
       File.rename!(tmp, path)
     rescue
-      e -> Logger.warning("fleet_task_queue persist failed (path=#{path}): #{inspect(e)}")
+      e ->
+        # F-007 : un échec d'écriture rompt la durabilité du point de recovery cross-restart. C'est
+        # une ERREUR, pas un warning : la queue RAM avance mais state.json diverge → un restart
+        # relirait un état stale. On NE crashe PAS le broker (un blip disque transitoire ne doit pas
+        # tuer les mandats en vol) ; la réconciliation passe par le rail forge-driven (re-dispatch
+        # depuis l'état forge). Le breach devient LOUD (error-level → monitoring / checklist BL-053),
+        # plus de dégradé silencieux.
+        Logger.error(
+          "fleet_task_queue persist ÉCHEC — durabilité du point de recovery rompue (non-fatal, " <>
+            "réconciliation forge-driven ; path=#{path}): #{inspect(e)}"
+        )
     end
 
     state
