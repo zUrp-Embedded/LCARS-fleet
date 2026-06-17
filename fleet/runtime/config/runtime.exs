@@ -297,8 +297,8 @@ if config_env() != :test do
   end
 
   # Poller catch-up : repo à scanner (`"owner/name"`) + interval ms.
-  # Sans LCARS_PILOT_POLL_REPO, le Poller n'est pas démarré (seul
-  # l'AutoDispatcher webhook-driven tourne).
+  # Sans LCARS_PILOT_POLL_REPO, le Poller n'est pas démarré, donc le rail stage
+  # ne tourne pas (pas d'AutoDispatcher de repli — ce rail est retiré, cf. plus haut).
   if repo = System.get_env("LCARS_PILOT_POLL_REPO") do
     config :fleet_pilot, poll_repo: repo
   end
@@ -405,7 +405,7 @@ if config_env() != :test do
   # (Plus de knob `LCARS_POD_HUMAN` : l'humain = l'user du process runtime, dérivé in-code, jamais
   #  une config. Décision 2026-06-09 — cf. pod.ex `runtime_user`/`runtime_home`.)
 
-  # State task-queue (défaut /var/lib/lcars/task-queue/state.json, root-owned en deploy).
+  # State task-queue (défaut home-relatif `~/.lcars/task-queue/state.json` ; `/var/lib/lcars` = fallback si home irrésoluble).
   if path = System.get_env("LCARS_STATE_PATH") do
     config :fleet_task_queue, state_path: path
   end

@@ -1,7 +1,7 @@
 # Fleet.Spawner
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-14 (resync ADR-G : chaîne de lancement bwrap, modèle session pré-alloc, PodTmux, recovery réelle nommée — cf. audit Codex deep-03)
+**Dernière révision** : 2026-06-17 (doc-rot F-019 : state_fs_root `~/.lcars/state`, `:token_arg` retiré, restart tous `:temporary`, recovery câblée release/resume/recreate)
 **Statut** : implémenté run #3.1 chantier #6, convergé ADR-G run #5 2026-06-01
 
 Pilote le lifecycle pod LCARS v2 (Ring 1 pod primitive). Cycle 8 phases
@@ -16,7 +16,7 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
 - `Fleet.Spawner.list_pods/0` — énumère les `:info` des pods vivants (read seam observabilité BL-026)
 - `Fleet.Spawner.count_pods/0` — nombre de pods actifs
 - `Fleet.Spawner.wake_pod/1` — kick « yop » host→pod (déclenche `get_task`)
-- `Fleet.Spawner.restart_strategy_for/1` — mappe `lifetime_scope` → OTP
+- `Fleet.Spawner.restart_strategy_for/1` — retourne **`:temporary` pour TOUT scope** (le DynamicSupervisor ne ressuscite jamais un pod ; `lifetime_scope` pilote la RECOVERY, plus le restart)
 
 ## Architecture OTP
 
@@ -45,25 +45,35 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
 ## Recovery
 
 State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` (champs : `pod_id`,
-`ticket_id`, `session_id`, `phase`). Au respawn, `recover_or_init/1` restaure `session_id`
-(+ `resume=true`) et la phase persistée.
+`ticket_id`, `session_id`, `phase`). Au (re)spawn, `recover_or_init/1` lit le snapshot et applique
+`recovery_action(phase, scope)` — décision **pure** sur la phase observée (DN-recovery B). Sous
+`:temporary` le supervisor ne ressuscite jamais : c'est un (re)spawn délibéré qui appelle `init/1` et
+la décision est explicite (plus de reprise implicite sur backend mort — LIFE-002).
 
-> ⚠️ **GAP CONNU (audit Codex deep-03 P0-1)** : une phase active post-launch persiste typiquement
-> `:monitoring` → la recovery reprend en `:monitor` (subscribe + deadline), **sans relancer ni
-> réattacher** le backend (port/tmux_session sont in-memory, perdus au restart ; le SP n'est pas
-> recomposé hors `do_project`). La recovery « relance `--resume` » n'est donc **PAS encore
-> fonctionnelle** — le flag `resume=true` est câblé mais le flow n'emprunte pas `:launch`. À faire :
-> router toute phase active recovered vers `:launch` + recomposer le SP (ou persister l'attachement).
+Trois actions (`apply_recovery/4`) :
+- **`:release`** — phase terminale (`:succeeded` / `:released` / `:killed`) → rien à relancer.
+- **`:resume`** — en vol (`:launching` / `:monitoring` / `:extracting` / `:releasing`) → reprend la
+  session (`session_id` + `resume=true`) en **RE-LANÇANT** le backend (mort sous `:temporary`) via
+  `--resume`. Conditionné au gate `:recovery_resume_enabled` (cf. infra) ET au scope (jamais pour
+  `one-shot` : `/clear` chaque cycle → pas de contexte à reprendre).
+- **`:recreate`** — `:failed` / `:pending` / phase ambiguë (ou gate OFF, ou `one-shot`) → from scratch,
+  session neuve.
+
+> **Gate `:recovery_resume_enabled` (default `false`, BL-035)** : `:resume` n'est PRIS que si le gate
+> est ON ET le scope reprenable (`pipe`/`forever`). Défaut FALSE car prouvé live (dogfood F7) :
+> `--resume <session-MORTE>` après crash → claude exit → pod ZOMBIE (la session n'existe plus
+> serveur-side). Gate OFF ⇒ `:recreate` PARTOUT (session neuve, REPL vivant, la tâche en queue
+> re-drive le travail). Opt-in `true` si un jour `--resume` est prouvé ressusciter une session.
 
 ## Configuration
 
-- `:fleet_spawner, :state_fs_root` — racine FS state recovery (default `/var/lib/lcars`)
+- `:fleet_spawner, :state_fs_root` — racine FS state recovery (default **`~/.lcars/state`** = home de l'humain, doctrine fleet-sous-l'humain 2026-06-11 ; `/var/lib/lcars` n'est que le FALLBACK si le home est irrésoluble. Override env `LCARS_STATE_FS_ROOT`)
 - `:fleet_spawner, :pod_dir_root` — **override** base-plate du pod_dir (tests / déploiement non-standard). Non-set ⇒ défaut **per-humain `/home/<human>/pods/pod_<pod_id>`** (ADR-E/monde-invoqué : pod sous le home humain, `0700`, PAS un répertoire partagé). Ownership UID-humain effective = substrat-pending.
 - `:fleet_spawner, :launch_backend` — module `LaunchBackend` (**default `LauncherPortBackend`** = chaîne bwrap)
 - `:fleet_spawner, :tmux_sock_base` — base sockets par-pod (default `/run/lcars/tmux-sock`, = `LCARS_TMUX_SOCK_BASE` côté bwrap)
 - `:fleet_spawner, :bwrap_launch_path` / `:host_launch_path` / `:claude_launch_path` — paths absolus des launchers N0 (default `/usr/local/bin/*` — **hors `/home`,`/tmp`** sinon masqués par `--tmpfs`). `host_launch_path` = launcher `containment: none` (LAUNCH-Q)
 - `:fleet_spawner, :claude_dir` — claudeDir humain bindé RW (default `/home/starfleet/.claude`)
-- `:fleet_spawner, :auth_mode` — switch auth **sécu-critique** : **`:bind` (défaut)** bwrap bind RW le `.credentials.json` humain (refresh OAuth natif, full scope, pas de falaise ~8h) ; **`:token_arg`** (opt-in pods one-shot <8h) extrait l'access_token et l'injecte en `LCARS_ANTHROPIC_AUTH_TOKEN` (pas de refresh). Posé en `LCARS_AUTH_MODE` pour bwrap_launch.sh. Lecture du creds natif = **source unique** `read_oauth_creds/1` (F117/F118/F119 : token-extractor + gate scope/plan partagent UN parse).
+- `:fleet_spawner, :auth_mode` — **`:bind` UNIQUEMENT** (le mode `:token_arg` a été **retiré 2026-06-14**, plus de toggle) : bwrap bind RW le `.credentials.json` humain → refresh OAuth natif (proactif 5min + réactif 401 + lockfile), full scope, pas de falaise ~8h. Posé en `LCARS_AUTH_MODE=bind` (seule valeur acceptée par `bin/bwrap_launch.sh`). L'ex-`:token_arg` fuyait le token en argv ET ne refreshait pas (un eng >8h perdait l'auth en vol) → supprimé. Lecture du creds natif = **source unique** `read_oauth_creds/1` (F117/F118/F119 : gate scope/plan partagent UN parse).
 - `:fleet_spawner, :mcp_server_spec` — config `.mcp-fleet.json` (cf. audit P1 : `nil` toléré, devrait fail-fast pour un vrai backend)
 - `:fleet_spawner, :skills_root` — racine skills à filtrer (default `nil`)
 
@@ -93,8 +103,10 @@ teardown SIGTERM→`kill-server`. La couche vendor (claude_launch + OAuth) reste
 
 ## Restart strategy mapping
 
+`restart_strategy_for/1` retourne **`:temporary` pour TOUS les scopes** (DN-recovery B, option B 2026-06-06) : le `DynamicSupervisor` ne ressuscite **jamais** un pod — un pod mort (sortie normale OU crash) est retiré, point final. La résurrection est un acte délibéré du boot-orchestrator (recovery `release|recreate|resume`). `lifetime_scope` pilote désormais la **RECOVERY** (cf. § Recovery), plus le restart OTP.
+
 | `lifetime_scope` | OTP `restart` |
 |---|---|
 | `one-shot` | `:temporary` |
-| `pipe` / `run` / `session-user` | `:transient` |
-| `forever` | `:permanent` |
+| `pipe` / `run` / `session-user` | `:temporary` |
+| `forever` | `:temporary` |

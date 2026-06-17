@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-16
+**Dernière révision** : 2026-06-17
 **Statut** : guide runtime v2 (salvage cow-boy).
 **Référencé par** : —
 
@@ -65,7 +65,7 @@ Three config files, evaluated in this order:
 
 Env vars consumed at boot (template: `etc/fleet_v2.env.template`):
 `LCARS_LOG_LEVEL`, `LCARS_CAPPROFILES_ROOT`, `LCARS_PIPELINES_ROOT`, `LCARS_COORD_POLICIES_PATH`, `LCARS_STARFLEET_AUDIT_LOG`, `LCARS_BOOT_PERMANENT_AT_START`, `LCARS_CONFIG_REPO`, `FLEET_WEBHOOK_SECRET_PATH`, `FLEET_API_PORT`.
-Run #5 (ADR-G / MCP / pilot — added 2026-06-02): `LCARS_LAUNCH_BACKEND` (+ `LCARS_UNSAFE_ALLOW_HOST_TMUX`), `LCARS_FLEET_MCP_URL` / `_POD_FACING_PORT` / `_BRIDGE_PATH`, `LCARS_PILOT_DISPATCHER` / `_POLL_REPO` / `_POLL_INTERVAL_MS` / `_ROUTING_PATH`, `FORGE_BASE_URL` / `FORGE_TOKEN` / `FORGE_TOKEN_FILE`.
+Run #5 (ADR-G / MCP / pilot — added 2026-06-02): `LCARS_FLEET_MCP_URL` / `_POD_FACING_PORT` / `_BRIDGE_PATH`, `LCARS_PILOT_POLL_REPO` / `_POLL_INTERVAL_MS` / `_ROUTING_PATH`, `FORGE_BASE_URL` / `FORGE_TOKEN` / `FORGE_TOKEN_FILE`.
 
 ## Test hermeticity
 

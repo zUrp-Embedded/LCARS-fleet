@@ -1,44 +1,42 @@
 # fleet_pipeline (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-14 (R4 D5 — `count_running/0` + gate `:quiescing` sur `start_pipeline/3` (drain shutdown) ; R4 — gate inférentielle = mandat MCP au gatekeeper permanent (Type 3), vocab canon, `Fleet.Pipeline.Gatekeeper` boot/registration ; R3 — Loader-normalizer v2.5/U1, prédicats Gates)
-**Statut** : impl att-1 — qualifier en attente
+**Dernière révision** : 2026-06-17 (doc-rot F-017 — purge des modules retirés au ②.3/BL-050 : `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés ; README recentré sur la lib carte/gate/delivery survivante)
+**Statut** : lib-only (salvage post-moteur-RAM) — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
-Exécuteur générique de pipelines YAML déclaratifs (Ring 2 — orchestration).
-Source : `04_design-notes/fleet_pipeline.md` (Régime 1, PoC-π1
-PROVEN 2026-05-09, profil **CONFORMANCE**).
+Lib **carte / gate / delivery** (quasi-pure) consommée par le rail forge-state-machine
+et les apps du core — Ring 3 (coordination + policy).
+
+Source : `04_design-notes/fleet_pipeline.md`.
+
+## État de l'app (②.3 / BL-050, 2026-06-16)
+
+Le **moteur RAM** (`Fleet.Pipeline.Executor` et toute sa pile :
+`Registry`/`PodRegistry`/`ExecutorSupervisor`, `StageRunner`, `StageSpawner`,
+`Toposort`, `WorkspaceProvisioner`) a été **RETIRÉ**. Il ne reste **aucun process
+à superviser** : `Fleet.Pipeline.Application.start/2` démarre un `Supervisor`
+**vide** (conservé transitoirement — l'app est destinée à devenir une lib-only,
+sortie de la clé `mod:` de `mix.exs`, au Bloc C).
+
+`fleet_pipeline` n'expose donc **plus** de `start_pipeline/2-3`, de lookup
+`Registry` per-pipeline-run, ni de `count_running/0`. Ce qui reste est un jeu de
+**fonctions pures (et un seam de boot gatekeeper)** : parsing/normalisation de
+carte YAML, évaluation de gates, et publication de livrable.
 
 ## Sous-modules
 
-| Module | Rôle |
+| Module | Rôle (vérifié dans le code) |
 |---|---|
-| `Fleet.Pipeline.Loader` | parse YAML `pipelines/<name>.yaml`, valide schema strict (`pipeline-v1.json` flat OU `pipeline-v2.5.json` enveloppe, détecté par présence `spec`) puis **normalise** (U1) vers la forme interne unique `%{"name", "stages"}` — en aval tout est format-agnostique |
-| `Fleet.Pipeline.Toposort` | tri topologique DAG des stages selon `needs` (Kahn's algorithm + cycle detection) |
-| `Fleet.Pipeline.Executor` | GenServer per-pipeline-run, state machine + collect events PubSub, dispatch gates, broadcast `pipeline.{stage.completed,completed,failed}` ; gate inférentielle → mandat MCP au gatekeeper, `:awaiting_gate` (corrélation `correlation_id`) |
-| `Fleet.Pipeline.Gates` | dispatch gate par type (`:hard \| :soft \| :terminal \| nil`) ; rules v1 map OU v2.5 string ; PUR (`{:dispatch_gatekeeper, info}` pour l'inférentiel, aucun spawn) |
-| `Fleet.Pipeline.Gates.Predicate` | évaluateur pur des rule-strings v2.5 (`"all_tests_pass"`, `"severity_max != critical"`, conjonction `AND`) contre les outputs, fail-closed |
-| `Fleet.Pipeline.Gatekeeper` | boot + registration du **gatekeeper permanent** (Type 3, `forever`, work-session) à l'activation pipeline ; `pod_id/0` (registry `:persistent_term` / override config) lu par l'Executor |
-| `Fleet.Pipeline.GateBrief` | construit le **brief d'éval** (texte du mandat MCP) que le gatekeeper pull via `get_task` : contexte + livrable à juger + question + options canon + contrat `gate-decision-v1.json` (pur) |
-| `Fleet.Pipeline.Gate` | behaviour `evaluate/3` extensible compile-time |
-| `Fleet.Pipeline.StageRunner` | résolution inputs (v1 `{from_stage,key}` depuis prior outputs OU v2.5 descriptifs string) + spawn pod via `StageSpawner` |
-| `Fleet.Pipeline.StageSpawner` | seam wrap `Fleet.Spawner.spawn_pod/3` (ch6 PROMOTED) |
-
-## Public API
-
-```elixir
-{:ok, pipeline_id} =
-  Fleet.Pipeline.start_pipeline("intensity-low", %{ticket_id: "fleet/lcars#42"})
-# {:error, :quiescing} si un drain de shutdown est en cours (chokepoint
-# top-level — Fleet.Shutdown.Quiesce ; le travail interne d'un pipeline en
-# vol n'est PAS gaté)
-
-# Lookup Executor pid via Registry
-[{pid, _}] = Registry.lookup(Fleet.Pipeline.Registry, pipeline_id)
-
-# Nombre de pipelines en cours (consommé par l'agrégateur d'in-flight du drain)
-n = Fleet.Pipeline.count_running()
-```
+| `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`pipeline-v1.json` flat OU `pipeline-v2.5.json` enveloppe, détecté par présence de la clé `spec`), puis **normalise** (U1) vers la forme interne unique `%{"name", "stages"}`. Schema résolu caché en `:persistent_term` (F088). Fonctions pures ; `opts` (`:pipelines_root`, `:schema_path`) pour tests async |
+| `Fleet.Pipeline.Gate` | `@callback evaluate/3` — behaviour générique d'évaluation de gate, vendor-extensible compile-time |
+| `Fleet.Pipeline.Gates` | implémentation du behaviour `Gate`. `evaluate/3` dispatche par type (`:hard \| :soft \| :terminal \| nil`). **Pur** : pour soft / terminal-non-tranchable il retourne `{:dispatch_gatekeeper, info}` (décision d'escalade), il ne spawn rien. Modules imbriqués `Gates.Hard` (subset-match récursif des `rule` map v1) et `Gates.Terminal` (`required`/`:nontranchable` sur `rules` map v1) |
+| `Fleet.Pipeline.Gates.Predicate` | `eval?/2` — évaluateur **pur** des rule-strings v2.5 (`"all_tests_pass"`, `"severity_max != critical"`, conjonction `AND`) contre les `outputs` auto-rapportés. Grammaire bornée au corpus canon ; **fail-closed** (fait absent / type incompatible → faux) |
+| `Fleet.Pipeline.GateBrief` | `build/1` — fonction pure qui construit le **brief markdown** (texte du mandat) que le gatekeeper pull via MCP `get_task` : contexte + livrable à juger + question + options canon + contrat de sortie `gate-decision-v1.json` |
+| `Fleet.Pipeline.Gatekeeper` | seam de **boot + registration** du gatekeeper permanent (juge unique, pod Type 3, `lifetime_scope: forever`, cap-profile `gatekeeper.yaml`). `ensure_booted/1` (idempotent, config-gated par `:gatekeeper_autoboot`), `pod_id/0` (lecture `:persistent_term` ou override config `:gatekeeper_pod_id`). Seul module non-pur survivant : il appelle `Fleet.CapProfile.load/1` + `Fleet.Spawner.spawn_pod/3` (injectables en test) |
+| `Fleet.Pipeline.Deliverable` | publication unifiée du livrable d'un pod (modèle O5). **Un seul** module, deux modes choisis par `spec.deliverable_mode` au catalogue : `:payload` (le système écrit les fichiers + `Git.commit`) / `:git_native` (l'agent a déjà commité). Trois temps : CONTENU → gate I-CBC partagée (`DeliverableGate.verify`) → push borné (`Git.push`). Frontière pod↔système : le pod est forge-aveugle, le système choisit la branche cible et pousse |
+| `Fleet.Pipeline.DeliverableGate` | gate **I-CBC mécanique** du livrable (modèle O5), vérifiée côté monde (Elixir). `verify/4` enchaîne, dans l'ordre : `check_base_ancestor` (F-03, base SHA hors-pod ancêtre de HEAD), `check_identity` (F-01, author+committer ∈ identités autorisées), trailer co-author optionnel, `scan_secrets` (F-02, aucun secret dans le diff `base..HEAD`). Ne croit aucune assertion du pod (lit son `.git` read-only) ; premier check raté → `{:error, reason}`, pas de push |
+| `Fleet.Pipeline.Git` | mécanisme système-side de publication git pur (data → action) : `add → commit → [push]`. Identité native git (`GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`, D-04). Fail-closed : `--force` / `--no-verify` **jamais** composés ; `core.hooksPath=/dev/null` sur toute op (F-07, neutralise les hooks posés par un pod adversaire dans le workspace co-écrit) |
 
 ## Format pipeline YAML
 
@@ -67,89 +65,67 @@ stages:
 Champs stage : `role` (string, required), `profile` (string, required),
 `needs` (array string), `condition` (string), `inputs`, `outputs`
 (array string), `gate`, `coordHook` (string, deferred ch14). Deux
-formats acceptés (détectés au load, normalisés ensuite) : **flat v1**
-(`name/version/stages` top-level) et **enveloppe v2.5**
-(`kind/metadata/spec.stages`). En v2.5, `inputs` = array de descriptifs
-string (`ticket.body`) et `gate.rules` = array de prédicats string ; en
-v1, `inputs` = array `{from_stage, key}` et `gate.rule(s)` = maps.
+formats acceptés (détectés au load par `Loader`, normalisés ensuite vers
+`%{"name", "stages"}`) : **flat v1** (`name/version/stages` top-level) et
+**enveloppe v2.5** (`kind/metadata/spec.stages`). En v2.5, `inputs` = array de
+descriptifs string (`ticket.body`) et `gate.rules` = array de prédicats string ;
+en v1, `inputs` = array `{from_stage, key}` et `gate.rule(s)` = maps.
 
 ## Types de gates
 
+`Fleet.Pipeline.Gates.evaluate/3` retourne `:pass`, `{:fail, reason}`, ou
+`{:dispatch_gatekeeper, info}` (PUR — aucun spawn) :
+
 * **`hard`** — pas de bypass. v1 `rule` map (`Gates.Hard.matches?/2`,
-  subset match) OU v2.5 `rules` strings (tous les prédicats vrais via
-  `Gates.Predicate`). `:pass` / `{:fail, reason}`.
-* **`soft`** — jugement LLM délégué au **gatekeeper** (juge unique, pod
-  permanent work-session). `Gates` retourne `{:dispatch_gatekeeper, info}` ;
-  l'Executor **enqueue un mandat d'éval** au gatekeeper (MCP, via TaskQueue,
-  adressé par `gatekeeper_pod_id`) et attend `task_queue.task_completed`
-  (corrélation `correlation_id`). **Pas de retry/rounds** (retry n'est pas une
-  décision de gate). Pas de gatekeeper booté → fail-loud.
-* **`terminal`** — v1 `rules` maps (`required: true|false` ; toutes match
-  → `:pass` ; required mismatch → `{:fail}` ; non-required mismatch →
-  **même dispatch gatekeeper** que `soft`). v2.5 `rules` strings → tous vrais →
-  `:pass`. `rules` OPTIONNEL (gate `finish`). **`human_approval_required: true`
-  → HALT fail-closed `{:fail}`** (le moteur mécanique n'auto-approuve jamais).
+  subset match récursif) OU v2.5 `rules` strings (tous les prédicats vrais via
+  `Gates.Predicate.eval?/2`). `:pass` / `{:fail, reason}`.
+* **`soft`** — jugement LLM délégué au **gatekeeper** (juge unique de la fleet,
+  pod permanent work-session). `Gates` retourne `{:dispatch_gatekeeper, %{kind: :soft}}` ;
+  le consommateur (rail forge) adresse un mandat d'éval au gatekeeper (MCP, via
+  `Fleet.TaskQueue`, ciblé par `pod_id`) et collecte la décision. Pas de gatekeeper
+  booté → fail-loud.
+* **`terminal`** — v1 `rules` maps (`Gates.Terminal.evaluate_rules/2` : `required: true`
+  mismatch → `{:fail}` ; non-required mismatch → `:nontranchable` → **même
+  `{:dispatch_gatekeeper, %{kind: :terminal}}`** que `soft`). v2.5 `rules` strings →
+  tous vrais → `:pass`. `rules` OPTIONNEL (gate `finish`). **`human_approval_required: true`
+  → HALT fail-closed `{:fail}`** (aucun human-in-loop câblé ; le moteur mécanique
+  n'auto-approuve jamais).
 
-### F150 — retry borné système-side sur FAIL hard-gate
-
-Un `{:fail}` hard-gate (livrable déterministe rejeté, ex. tests rouges) ne tue
-**plus** le pipeline au 1er coup. Le **système** (l'Executor — JAMAIS le pod : un
-agent s'acharnerait à l'infini) tient un compteur per-stage (`retry_counts` dans
-son state) et **RETRY le stage** (re-dispatch d'un pod frais via `do_run_stage`,
-la `reason` du FAIL injectée dans le `mandate_context` → l'eng refait en sachant
-quoi corriger) tant que `n < stage_max_retries` (config `:fleet_pipeline,
-:stage_max_retries`, défaut **3**).
-
-Au seuil, le système **n'abandonne ni ne loope** : il **INTERCEPTE** et confie au
-gatekeeper un mandat de **DIAGNOSTIC** (`dispatch_gatekeeper_diagnosis`, distinct
-d'une éval de gate) — *« le mandat est-il mal construit (→ `redirect` renvoi arch)
-ou un autre problème (→ `escalate_user`/`abandon`) ? »*. La décision revient par le
-**même chemin** que les gates (`handle_gate_decision`, vocab `gate-decision-v1`).
-La borne EST le garde-fou contre le re-spawn-en-boucle que `Gates` craignait. Le
-mécanisme est **générique** (role-agnostic) même si seul l'eng le déclenche
-aujourd'hui.
-
-**Séparation fonction→owner (invariant doctrinal — généalogie GATE-D1 / overload-gatekeeper).**
-F150 *exemplifie* la redistribution : la **boucle** (compte/retry/route) vit dans la
-**machine** (Executor = orchestration) ; le **gatekeeper** n'entre qu'au seuil, en
-exception, pour **juger** (verdict du vocab fermé) ; **arch** reçoit le re-cadrage
-(`redirect`). Un rejet **soft-gate** (jugement gatekeeper) NE pilote PAS la boucle
-(il garde sa sémantique halt) — sinon on redonne au gatekeeper du contrôle
-d'orchestration = la 6ᵉ responsabilité qui a déclenché les ~12 itérations de girouette.
-**Ce n'est pas un fork ouvert : c'est verrouillé par doctrine.** (cf. commentaire
-load-bearing dans `executor.ex` ; BACKLOG §10 « gatekeeper redistribué ».)
+`Gates.evaluate/3` ne retourne **jamais** `:retry` : le retry n'est pas une
+décision de gate. (Le retry borné système-side sur FAIL hard-gate, doctrine F150,
+était piloté par le moteur RAM retiré ; son portage sur le rail forge-state-machine
+est hors de cette lib.)
 
 ### Décision du gatekeeper (vocab canon)
 
 Schéma `priv/schema/gate-decision-v1.json` : `decision ∈ {continue, abandon,
-redirect, escalate_user, halt_wait_input}`. L'Executor mappe `continue` → stage
-suivant ; le reste (+ inconnu/malformé) → `pipeline.failed` (halt, fail-closed).
-Distinct de `decision-v1.json` (`allow/halt/escalate/retry`, chemin
-**starfleet/escalade OS**, jamais projet). Le gatekeeper est un pod permanent
-booté à l'activation pipeline (`Fleet.Pipeline.Gatekeeper`, Type 3, `forever`).
+redirect, escalate_user, halt_wait_input}`. Le consommateur mappe `continue` →
+avancer ; le reste (+ inconnu/malformé) → halt fail-closed. Distinct de
+`decision-v1.json` (`allow/halt/escalate/retry`, chemin **starfleet/escalade OS**,
+jamais projet). Le brief de jugement est rendu par `Fleet.Pipeline.GateBrief.build/1`.
 
-## Atom registration
+## Atom registration (legacy)
 
-Les events `pipeline.stage.completed | pipeline.completed |
-pipeline.failed` sont pré-enregistrés au compile-time via
-l'attribut `@pipeline_event_atoms` de `Fleet.Pipeline.Application`.
-Cohérent ch11 M1 atom-leak DoS mitigation (`Bus` côté ch11 utilise
-`String.to_existing_atom/1`).
+`Fleet.Pipeline.Application` pré-enregistre encore au compile-time les atomes
+`pipeline.stage.completed | pipeline.completed | pipeline.failed` via l'attribut
+`@pipeline_event_atoms` (exposé par `pipeline_event_atoms/0`). Ces events étaient
+émis par l'`Executor` retiré et **ne sont plus émis** ; ils restent pré-enregistrés
+pour rester cohérents avec la mitigation atom-leak DoS de ch11 (`Bus` utilise
+`String.to_existing_atom/1`). Nettoyage prévu au Bloc C.
 
 ## Tests
 
 ```bash
-mix test apps/fleet_pipeline   # suite complète (cf. sortie ; r1_seam exclus par défaut)
-mix test apps/fleet_pipeline --only r1_seam   # filet anti-régression coutures
+mix test apps/fleet_pipeline   # suite complète
 ```
 
 ## Dépendances
 
-* `fleet_cap_profile` (ch1) — résolution cap-profile YAML
-* `fleet_spawner` (ch6) — spawn pod via `StageSpawner.Default`
-* `fleet_task_queue` (run #5) — broker de mandats. `StageRunner` **enqueue** le mandat ciblé `pod_id`
-  (`push_task_for_pod`, fail-soft : enqueue `{:error}` → kill du pod one-shot, pas de crash Executor) ;
-  le pod le **pull** via MCP `get_task` ; complétion = `%Fleet.Event{task_completed}` (event-driven).
-* `fleet_event_router` (ch11) — Bus PubSub events stages
-* `fleet_coord` (ch14) — deferred via `CoordBackend.NotWiredYet`
+(déclarées dans `mix.exs`)
+
+* `fleet_cap_profile` (ch1) — résolution cap-profile YAML (boot gatekeeper)
+* `fleet_spawner` (ch6) — `Fleet.Spawner.spawn_pod/3` (boot gatekeeper, seam injectable)
+* `fleet_credentials` — `Fleet.Credentials.ForgeIdentity` (F-01 : `allowed_emails` = l'humain du mandat)
+* `fleet_event_router` (ch11) — Bus PubSub (pré-enregistrement des atomes events)
+* `fleet_task_queue` (run #5) — broker de mandats (adressage du gatekeeper par `pod_id`)
 * `:yaml_elixir`, `:jason`, `:ex_json_schema`

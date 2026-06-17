@@ -11,12 +11,16 @@ core ring 1, pas core**).
 
 Reçoit les events `gitea.*` du Bus (`Fleet.EventRouter.Bus`), filtre via
 catalogue déclaratif `priv/config/forge-routing.yaml` (axes
-`type:` × `state:` × `assignee`), puis invoke `Fleet.Pipeline.start_pipeline/2`
-avec le ticket_id + le brief (issue.body) comme `ask`.
+`type:` × `state:` × `assignee`), puis spawn le rôle producteur via le rail
+forge-state-machine décrit ci-dessous (mode **stage**).
 
-Idempotence inter-restart : label Gitea `lcars-dispatched` ajouté côté
-forge avant invocation (lock atomique). Le poller reconciliateur
-(brique 2, future) respectera ce label pour catch-up post-crash.
+> **OBSOLÈTE — dispatch legacy RETIRÉ.** L'ancien chemin invoquait
+> `Fleet.Pipeline.start_pipeline/2` (moteur RAM `Fleet.Pipeline.Executor`) avec
+> le ticket_id + le brief (issue.body) comme `ask`, et posait un label
+> `lcars-dispatched` (lock atomique) pour l'idempotence inter-restart. Ce moteur
+> RAM a été **supprimé** (②.3 / BL-050 — cf. `fleet_pipeline` `Application`,
+> `start_pipeline`/`Executor` n'existent plus) et le `AutoDispatcher` retiré à
+> F-09. Le dispatch actuel passe **uniquement** par le mode stage (§ ci-dessous).
 
 ## Mode stage (forge-state-machine — A2/A3, actif)
 
