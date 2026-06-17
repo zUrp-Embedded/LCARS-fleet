@@ -183,11 +183,23 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   defp spawn_one(%Fleet.CapProfile{metadata: meta} = cp, spawner) do
     name = Map.get(meta, "name") || Map.get(meta, :name) || "unknown"
-    ticket_id = "permanent-#{name}-#{System.os_time(:second)}"
 
-    case spawner.(cp, ticket_id, pod_id: ticket_id) do
+    # BL-055 : pod_id DÉTERMINISTE (plus de `-<os_time>`). Le timestamp rendait chaque (re-)boot
+    # NON-idempotent → un nouvel id à chaque tentative → l'ancien pod orpheline (flakiness « arch
+    # re-spawné 1× », holder-leak, accumulation). Déterministe → un re-spawn retombe sur le MÊME id :
+    # soit reap-orphan + relance propre (pod mort — `reap_orphan_pod` tourne à chaque launch), soit
+    # `{:already_started}` (pod vivant = déjà booté → no-op idempotent). Sûr aujourd'hui : le gate
+    # `:recovery_resume_enabled` est OFF par défaut → un vieux state.json réutilisé → `:recreate`
+    # (session fraîche), pas de `--resume` foireux (le `--resume` propre = chantier home-persistance).
+    pod_id = "permanent-#{name}"
+
+    case spawner.(cp, pod_id, pod_id: pod_id) do
       {:ok, _pid} ->
-        ticket_id
+        pod_id
+
+      {:error, {:already_started, _pid}} ->
+        Logger.info("PermanentBoot: permanent #{name} déjà vivant (#{pod_id}) — no-op idempotent")
+        pod_id
 
       {:error, reason} ->
         Logger.error("PermanentBoot: spawn permanent #{name} échoué (#{inspect(reason)})")

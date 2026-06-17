@@ -183,10 +183,25 @@ defmodule Fleet.Spawner.PermanentBootTest do
                  spawner: spawner
                )
 
-      assert pid_arch =~ ~r/^permanent-architect-/
+      # BL-055 : pod_id permanent DÉTERMINISTE (plus de `-<os_time>`) → idempotent.
+      assert pid_arch == "permanent-architect"
       assert_received {:spawned, "architect", ^pid_arch}
       refute_received {:spawned, "engineer", _}
       refute_received {:spawned, "starfleet", _}
+    end
+
+    test "BL-055 : permanent déjà vivant ({:already_started}) → no-op idempotent (pod_id conservé)",
+         %{dir: dir} do
+      # id déterministe → un re-boot retombe sur `permanent-architect` ; si le pod tourne déjà,
+      # spawn_pod rend {:already_started} → ce n'est PAS une erreur, le pod_id est conservé.
+      spawner = fn _cp, _tid, _o -> {:error, {:already_started, self()}} end
+
+      assert {:ok, ["permanent-architect"]} =
+               PermanentBoot.boot_permanent_pods(
+                 cap_profiles_dir: dir,
+                 loader: loader_for(),
+                 spawner: spawner
+               )
     end
 
     test "F-052 : load {:error} sur un rôle → fail-loud (deploy cassé, plus de skip silencieux)",
