@@ -53,11 +53,16 @@ defmodule Fleet.EventRouter.Catalog do
         :ok
 
       :error ->
-        Logger.warning(
-          "fleet_event_router: events.yaml absent ou invalide à #{events_yaml_path()}"
-        )
-
-        :ok
+        # F-008 (Pattern A crash-boot, fork « deploy cassé => on boot pas ») : avant, un events.yaml
+        # absent/invalide WARNait puis rendait :ok → `authorized_event_types` restait vide →
+        # `assert_authorized!` escape-hatch (MapSet vide) → le Bus broadcastait TOUT type SANS
+        # validation, deploy « vert » mais registry mort. `do_load` n'est atteint qu'en prod/dev
+        # (`load_event_registry: true` ; test pose `false`) → ici on est forcément dans un boot réel
+        # voulant le registry. Fail-loud : raise dans `Application.start` → le BEAM ne monte pas, le
+        # launcher redéploie. On NE démarre PAS un Bus sans validation.
+        raise "fleet_event_router: events.yaml absent ou invalide à #{events_yaml_path()} — " <>
+                "registry d'events non chargeable (deploy cassé). Fail-loud au boot : un Bus sans " <>
+                "registry validerait n'importe quel type. Réparer/redéployer priv/events.yaml."
     end
   end
 

@@ -66,9 +66,19 @@ defmodule Fleet.Spawner.PermanentBoot do
   validation au loader canonique `Fleet.CapProfile.load/1` (DRY — pas de
   re-parse YAML, le pseudo-code DN `File.ls!+load_cap_profile` est
   illustratif) → garde `select_permanent/1` (D-01 exclu) → `spawn_pod/3`
-  (signature réelle `(%CapProfile{}, ticket_id, opts)`). **Succès partiel
-  acceptable** : un profil invalide / un spawn KO n'empêche pas les autres
-  (DN exit codes L296).
+  (signature réelle `(%CapProfile{}, ticket_id, opts)`).
+
+  ## Échec de LOAD vs échec de SPAWN (F-052, Pattern A — révision doctrine 2026-06-17)
+
+  **Un cap-profile qui ne CHARGE pas** (absent / YAML corrompu / schema invalide) = artefact de
+  deploy cassé → **fail-loud** : `boot_permanent_pods/1` rend `{:error, {:cap_profile_load_failed,
+  role, reason}}` (BootOrchestrator → `fleet.boot_failed`, pas `boot_complete` vert amputé). Avant,
+  ces échecs étaient `Logger.warning + nil` → droppés en silence (« succès partiel acceptable », DN
+  exit codes L296) — c'est le « truc blessé qu'on garde en vie » que la doctrine rejette.
+
+  **Un échec de SPAWN** (bwrap/launch KO) reste **best-effort** : runtime, pas artefact de deploy →
+  loggué (`Logger.error`) + `pod_id` omis, les autres pods bootent. (La détection « tous les pods
+  permanents ont bien spawné » relève de la checklist de démarrage hors-runtime, cf. BL-053.)
 
   ## Écrivain unique state.json (BL-021 chantier 4 / DN permanent-pods-boot §C-3)
 
@@ -90,17 +100,20 @@ defmodule Fleet.Spawner.PermanentBoot do
     loader = Keyword.get(opts, :loader, &Fleet.CapProfile.load/1)
     spawner = Keyword.get(opts, :spawner, &Fleet.Spawner.spawn_pod/3)
 
-    case list_roles(dir) do
-      {:ok, roles} ->
-        pod_ids =
-          roles
-          |> Enum.map(&load_one(&1, loader))
-          |> Enum.reject(&is_nil/1)
-          |> select_permanent()
-          |> Enum.map(&spawn_one(&1, spawner))
-          |> Enum.reject(&is_nil/1)
+    with {:ok, roles} <- list_roles(dir),
+         {:ok, cps} <- load_all(roles, loader) do
+      pod_ids =
+        cps
+        |> select_permanent()
+        |> Enum.map(&spawn_one(&1, spawner))
+        |> Enum.reject(&is_nil/1)
 
-        {:ok, pod_ids}
+      {:ok, pod_ids}
+    else
+      # F-052 : un load raté = deploy cassé → on propage tel quel (fail-loud). Distinct du dir
+      # illisible (`list_roles`), classé `:cap_profiles_dir_unreadable`.
+      {:error, {:cap_profile_load_failed, _role, _reason}} = err ->
+        err
 
       {:error, reason} ->
         {:error, {:cap_profiles_dir_unreadable, reason}}
@@ -146,14 +159,25 @@ defmodule Fleet.Spawner.PermanentBoot do
     Fleet.CapProfile.list(dir)
   end
 
-  defp load_one(role, loader) do
-    case loader.(role) do
-      {:ok, %Fleet.CapProfile{} = cp} ->
-        cp
+  # F-052 : charge TOUS les rôles, short-circuit au PREMIER échec de load (fail-loud, plus de skip
+  # silencieux). Valide ainsi tout le catalogue au boot — un profil corrompu est attrapé avant même
+  # d'être nécessaire. (Le filtrage permanent vient APRÈS, sur les cps chargés.)
+  defp load_all(roles, loader) do
+    case Enum.reduce_while(roles, {:ok, []}, fn role, {:ok, acc} ->
+           case loader.(role) do
+             {:ok, %Fleet.CapProfile{} = cp} ->
+               {:cont, {:ok, [cp | acc]}}
 
-      {:error, reason} ->
-        Logger.warning("PermanentBoot: cap-profile #{role} ignoré (#{inspect(reason)})")
-        nil
+             {:error, reason} ->
+               Logger.error(
+                 "PermanentBoot: cap-profile #{role} non chargeable (#{inspect(reason)}) — boot fail-loud"
+               )
+
+               {:halt, {:error, {:cap_profile_load_failed, role, reason}}}
+           end
+         end) do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      {:error, _} = err -> err
     end
   end
 

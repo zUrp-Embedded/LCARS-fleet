@@ -45,29 +45,26 @@ defmodule Fleet.Coord.Policies do
   def init_policies! do
     path = Application.get_env(:fleet_coord, :policies_path, default_policies_path())
 
-    # F025 : NE PAS planter le boot umbrella sur un fichier policies absent/malformé (typo de
-    # LCARS_COORD_POLICIES_PATH). L'ancien `read_from_file!` (bang) raisait dans Application.start →
-    # fleet_coord ne démarre pas → crash boot opaque de TOUTE l'umbrella. On dégrade : log clair +
-    # policies vides (coord boote, routage par défaut) au lieu de tuer le daemon.
+    # F025 → RÉVISION DOCTRINE 2026-06-17 (fork crash-boot « deploy cassé => on boot pas »).
+    # Le dégradé F025 (policies absentes/malformées → table vide → coord boote « vert » mais TOUTE
+    # décision/escalade tombe `:not_found`) avait été introduit pour éviter un crash umbrella opaque.
+    # Mais c'est précisément le « truc blessé qu'on garde en vie » que la doctrine rejette : un fichier
+    # policies absent/malformé = artefact de deploy cassé → fail-loud. On restaure le `raise` dans
+    # `Application.start` (le @doc « Fail-fast au boot » redevient vrai — il mentait pendant F025) :
+    # fleet_coord ne démarre pas → le BEAM sort non-zéro → le launcher redéploie/escalade (cf. BL-053
+    # dead-man's switch). On NE limpe PAS sur une table de routage vide. (Pattern A.)
     policies =
       case YamlElixir.read_from_file(path) do
         {:ok, %{} = data} ->
           data
 
-        {:ok, _} ->
-          Logger.error(
-            "fleet_coord: policies #{path} malformé (pas une map) — coord DÉGRADÉ (vides)"
-          )
-
-          %{}
+        {:ok, other} ->
+          raise "fleet_coord: policies #{path} malformé (pas une map : #{inspect(other)}) — " <>
+                  "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
 
         {:error, reason} ->
-          Logger.error(
-            "fleet_coord: policies #{path} illisible (#{inspect(reason)}) — boot DÉGRADÉ " <>
-              "(policies vides) ; vérifier LCARS_COORD_POLICIES_PATH"
-          )
-
-          %{}
+          raise "fleet_coord: policies #{path} absent/illisible (#{inspect(reason)}) — " <>
+                  "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
       end
 
     :persistent_term.put(@policies_key, policies)

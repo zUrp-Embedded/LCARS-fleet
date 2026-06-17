@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-14 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-06-17 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -55,7 +55,9 @@ end
   (default `false` — dev/test ne touchent pas le port `:8081`)
 - `:fleet_event_router, :load_event_registry` — charge le registry events.yaml
   au boot (`Catalog.load!`, default `true` ; `false` en `:test` pour l'hermétisme
-  — registry vide → validation broadcast off)
+  — registry vide → validation broadcast off). En prod (`true`), un events.yaml
+  absent/invalide **raise** (crash-boot, F-008/Pattern A : pas de Bus sans
+  validation — un deploy cassé ne démarre pas)
 - `:fleet_event_router, :start_signals` — boot SignalsOS GenServer
   (default `false` — éviter capture signaux dans les tests)
 - `:fleet_event_router, :webhook_port` — port HTTP webhooks (default 8081)

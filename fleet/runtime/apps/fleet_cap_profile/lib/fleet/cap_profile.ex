@@ -297,11 +297,18 @@ defmodule Fleet.CapProfile do
   # Résout un cap-profile par sa PROP `metadata.name` (pas par nom de fichier — celui-ci est
   # cosmétique). Source de vérité = la donnée, jamais le filesystem (cf. `list/1`).
   defp read_role_yaml(role) do
-    with {:ok, index} <- name_index(root_dir()) do
-      case Map.fetch(index, role) do
-        {:ok, raw} -> {:ok, raw}
-        :error -> {:error, :not_found}
-      end
+    case name_index(root_dir()) do
+      {:ok, index} ->
+        case Map.fetch(index, role) do
+          {:ok, raw} -> {:ok, raw}
+          :error -> {:error, :not_found}
+        end
+
+      # F-040 : catalogue corrompu (un YAML non-décodable) → on ne peut PAS résoudre par name.
+      # Le contrat load/compose (moduledoc) classe « YAML mal formé » en `:invalid_schema` — pas
+      # `:not_found` (qui ferait croire le rôle absent). On honore le contrat.
+      {:error, {:invalid_yaml, _path}} ->
+        {:error, :invalid_schema}
     end
   end
 
@@ -331,7 +338,15 @@ defmodule Fleet.CapProfile do
   # `<dir>/monks/*.yaml` (F-041 : les profils Memory-X canon vivent sous `monks/` ; Memory-X VA vivre,
   # donc PermanentBoot — qui énumère via `list/1` — doit les voir). Le `modop/` reste exclu : les
   # overlays n'ont pas d'identité de rôle. Fragment sans `metadata.name` → ignoré (baseline/overlay).
-  # YAML illisible → ignoré (un `load` ciblé échouera via sa propre validation). Collision `name` → fail-loud.
+  # Collision `name` → fail-loud (`:name_collision`).
+  #
+  # F-040 (Pattern A) : un YAML NON-DÉCODABLE dans le catalogue n'est PLUS skippé en silence.
+  # Avant, le skip rendait le rôle INVISIBLE de l'index → `load` le voyait `:not_found` (rôle
+  # absent) au lieu de `:invalid_schema` (rôle corrompu), et `list/1` (énuméré par PermanentBoot)
+  # l'amputait du boot sans bruit → deploy « vert » incomplet. Un fichier corrompu = artefact de
+  # deploy cassé → on propage `{:error, {:invalid_yaml, path}}` (fail-loud). Conséquence assumée :
+  # un seul fichier illisible empoisonne tout l'index (catalogue corrompu = on n'en charge AUCUN) —
+  # cohérent avec « on ne sauve pas un truc blessé ».
   defp name_index(dir) do
     files =
       Path.wildcard(Path.join(dir, "*.yaml")) ++
@@ -354,8 +369,12 @@ defmodule Fleet.CapProfile do
               {:cont, {:ok, acc}}
           end
 
-        {:error, _} ->
-          {:cont, {:ok, acc}}
+        {:error, reason} ->
+          Logger.error(
+            "CapProfile: YAML illisible #{path} (#{inspect(reason)}) — catalogue corrompu"
+          )
+
+          {:halt, {:error, {:invalid_yaml, path}}}
       end
     end)
   end

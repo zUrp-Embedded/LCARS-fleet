@@ -189,13 +189,17 @@ defmodule Fleet.Spawner.PermanentBootTest do
       refute_received {:spawned, "starfleet", _}
     end
 
-    test "succès partiel : loader {:error} sur un rôle → skip, autres OK", %{dir: dir} do
+    test "F-052 : load {:error} sur un rôle → fail-loud (deploy cassé, plus de skip silencieux)",
+         %{dir: dir} do
+      # Avant (doctrine « succès partiel ») : engineer/starfleet invalides étaient skippés, architect
+      # bootait → {:ok, [arch]}. Révision crash-boot : un profil non chargeable = artefact cassé →
+      # on propage. `list_roles` rend les rôles triés → engineer est le 1er à échouer (architect OK).
       loader = fn
         "architect" -> loader_for().("architect")
         _ -> {:error, :invalid_schema}
       end
 
-      assert {:ok, [_]} =
+      assert {:error, {:cap_profile_load_failed, "engineer", :invalid_schema}} =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader,

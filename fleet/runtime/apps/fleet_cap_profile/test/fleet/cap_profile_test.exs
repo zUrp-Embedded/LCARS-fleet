@@ -126,6 +126,18 @@ defmodule Fleet.CapProfileTest do
       assert {:error, :invalid_schema} = Fleet.CapProfile.load("incomplete")
     end
 
+    test "F-040 : YAML NON-décodable dans le catalogue → :invalid_schema (pas :not_found)",
+         %{tmp_dir: tmp_dir} do
+      # Avant F-040, `name_index` skippait en silence un .yaml corrompu → le rôle paraissait ABSENT
+      # (:not_found) au lieu de corrompu (:invalid_schema). Un fichier non-décodable = artefact de
+      # deploy cassé → fail-loud : tout le catalogue est empoisonné (load de n'importe quel rôle +
+      # `list/1` rendent l'erreur), cohérent avec « on ne sauve pas un truc blessé ».
+      File.write!(Path.join(tmp_dir, "broken.yaml"), "a: [b, c\n")
+
+      assert {:error, :invalid_schema} = Fleet.CapProfile.load("whatever-role")
+      assert {:error, {:invalid_yaml, _path}} = Fleet.CapProfile.list(tmp_dir)
+    end
+
     test "résout un profil de archivistes/ par son metadata.name", %{tmp_dir: tmp_dir} do
       File.mkdir_p!(Path.join(tmp_dir, "archivistes"))
 
