@@ -77,7 +77,7 @@ chargées au boot par `Fleet.EventRouter.Catalog.load!/0` → `Bus.broadcast/2`
 
 La **consommation** se fait par **subscribers directs** (Phoenix.PubSub :
 `Bus.subscribe` + `handle_info` — WS dashboard, `AuditConsumer`, `DriftMonitor`,
-`Spawner.PublishConsumer`, `Pipeline.Executor`, …). Qui consomme quoi est documenté
+`Spawner.PublishConsumer`, …). Qui consomme quoi est documenté
 dans le moduledoc de chaque consommateur.
 
 > **Décision BL-027 (user 2026-06-05)** : « subscribers directs = canon ». Le
@@ -93,7 +93,7 @@ dans le moduledoc de chaque consommateur.
 
 - `phoenix_pubsub` 2.x — bus distribution-ready
 - `plug` 1.15+ + `plug_cowboy` 2.7+ — HTTP webhooks
-- `jason` — JSON en07_code/decode
+- `jason` — JSON encode/decode
 - `ex_json_schema` — schema validation soft
 - `yaml_elixir` — parse du registry `events.yaml` (Catalog + preregister ; la dispatch table est retirée BL-027)
 
