@@ -82,6 +82,20 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
                      500
     end
 
+    test "F-009 : event type drift (atome `gitea.*` inconnu) → 422, plus d'ACK 200 silencieux", %{
+      secret: secret
+    } do
+      # action jamais déclarée → `String.to_existing_atom("gitea.<action>")` lève ArgumentError →
+      # avant F-009 le handler renvoyait 200 « ok » (la forge croyait l'event livré, drop muet).
+      body = %{"action" => "zzz_drift_action_inexistante_42", "issue" => %{"id" => 7}}
+      conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["error"] == "unknown event type"
+      # pas de broadcast d'un event drift
+      refute_receive %Fleet.Event{source: :event_router}, 200
+    end
+
     test "HMAC manquante → 401", %{secret: _secret} do
       body = Jason.encode!(%{"action" => "opened"})
 

@@ -109,12 +109,14 @@ defmodule Fleet.Pilot.ForgeClient do
   Liste TOUTES les issues ouvertes du `repo` (Gitea `GET /repos/{repo}/issues?state=open`), sans
   filtre. Brique du bail dispatch repo-serialise : le Poller compte les pipelines actifs = tickets
   deja assignes a un role (in-flight INCLUS, contrairement a `list_open_issues_without_label/3`) ->
-  un seul pipeline a la fois par repo (merge FF garanti). Limite 50/page, 1 page (cf. catch-up).
+  un seul pipeline a la fois par repo (merge FF garanti). PAGINÉ (F-030) : toutes les pages, jamais
+  tronqué — sous-compter les pipelines actifs casserait le bail (2 pipelines en parallèle sur un repo).
   """
   @spec list_open_issues(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_open_issues(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts) do
-      http_get(config, "/repos/#{repo}/issues?state=open&type=issues&limit=50")
+      # F-030 : source-de-vérité du bail dispatch (compte les pipelines actifs) → paginé, jamais tronqué.
+      paginate(config, "/repos/#{repo}/issues", "state=open&type=issues")
     end
   end
 
@@ -534,12 +536,13 @@ defmodule Fleet.Pilot.ForgeClient do
   Liste les PR OUVERTES du `repo` (Gitea `GET /repos/{repo}/pulls?state=open`). Brique du dispatch
   juge PR-driven (Corr.3 4-C) : le Poller lit les `requested_reviewers` en attente d'une PR pour
   spawner le role juge (remplace l'assignee de l'issue). Chaque PR porte `number`, `head.ref` (la
-  feature-branch `lcars/issue-N-role`), `requested_reviewers`, `labels`. Limite 50/page.
+  feature-branch `lcars/issue-N-role`), `requested_reviewers`, `labels`. PAGINÉ (F-030).
   """
   @spec list_open_pulls(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_open_pulls(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts) do
-      http_get(config, "/repos/#{repo}/pulls?state=open&limit=50")
+      # F-030 : source-de-vérité du dispatch juge PR-driven → paginé, jamais une PR ratée au-delà de 50.
+      paginate(config, "/repos/#{repo}/pulls", "state=open")
     end
   end
 
@@ -715,7 +718,9 @@ defmodule Fleet.Pilot.ForgeClient do
   defp maybe_put_identity(body, _key, _), do: body
 
   defp comment_signed?(config, repo, issue_number, sig, opts) do
-    case http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+    # F-030 : paginé — un comment système signé au-delà de 50 ne doit pas échapper au dédup (sinon
+    # double-post au replay) ; le `case` non-liste reste géré par paginate (renvoie {:ok, acc}).
+    case paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
         # F058 (suivi review) : le dédup garde une ÉCRITURE système → ne fait foi que des comments
         # du bot. Sinon un user forge poste la signature en avance → le comment système est skipé →
@@ -766,7 +771,7 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts),
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
-           http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+           paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
       # F058 : ne faire foi QUE des comments écrits par le compte SYSTÈME (bot). Un user forge
       # (humain/attaquant) qui poste `[lcars-route:evil:stage]` pilotait sinon la navigation.
       comments
@@ -810,9 +815,9 @@ defmodule Fleet.Pilot.ForgeClient do
   `{:error, _}` sur échec HTTP/config — le caller NE rebondit PAS à l'aveugle si le
   budget n'est pas vérifiable (un rebond non vérifiable pourrait boucler).
 
-  NB : `?limit=50` — le budget de rework (`nb_stages * (max_rounds+1)`, ~quelques
-  unités) est très en-dessous, donc pas de pagination ici. Si un jour le budget
-  approche 50, paginer (même limite que `get_route`).
+  PAGINÉ (F-030) : même si le budget de rework (`nb_stages * (max_rounds+1)`) reste en
+  général sous 50, le compteur est source-de-vérité du bound anti-runaway — un hop signé
+  perdu au-delà de 50 sous-compterait le budget (sur-permissif). On lit donc TOUTES les pages.
   """
   @spec count_signed_hops(String.t(), integer(), Keyword.t()) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -820,7 +825,7 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts),
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
-           http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+           paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
       # F059 : compter SEULEMENT les hops signés par le SYSTÈME — sinon un user forge forge des
       # `[hop:role:sha]` pour gonfler le compteur et faire TRIPPER le budget anti-runaway (DoS rework).
       # Bot irrésoluble → {:error} (via le with) : le caller NE rebondit PAS sur un budget non vérifiable.
@@ -868,7 +873,7 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts),
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
-           http_get(config, "/repos/#{repo}/issues/#{issue_number}/comments?limit=50") do
+           paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
       # F060 (le plus grave) : le bloc ```result nourrit le MANDAT DE JUGEMENT du gatekeeper. Ne
       # l'extraire QUE de comments SYSTÈME — sinon un user forge injecte ce que le juge évalue.
       comments
@@ -972,6 +977,44 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  @page_limit 50
+
+  # F-030 : lecture PAGINÉE d'une collection source-de-vérité (issues / pulls / comments). Gitea
+  # plafonne `limit` à 50/page — une seule page rate les items 51+ (tickets/PR ignorés, marqueurs de
+  # hop sous-comptés). On boucle `page=1,2,...` (`@page_limit` items/page) en accumulant jusqu'à la
+  # DERNIÈRE page : une page rendant < @page_limit items (ou vide) est la dernière (invariant Gitea :
+  # une page pleine implique « peut-être une suite »). Comportement identique à l'ancien ≤50 items :
+  # une collection ≤50 tient en page 1 (< 50 → stop), un seul round-trip. `query` = query-string SANS
+  # pagination (ex. `"state=open&type=issues"` ou `""`). Toute page en erreur HTTP/transport remonte
+  # (fail-loud : un caller source-de-vérité ne doit JAMAIS travailler sur une vue tronquée silencieuse).
+  defp paginate(config, path_base, query) do
+    do_paginate(config, path_base, query, 1, [])
+  end
+
+  defp do_paginate(config, path_base, query, page, acc) do
+    sep = if query == "", do: "?", else: "?#{query}&"
+    path = "#{path_base}#{sep}page=#{page}&limit=#{@page_limit}"
+
+    case http_get(config, path) do
+      {:ok, items} when is_list(items) ->
+        acc = acc ++ items
+
+        # Page pleine → il PEUT y avoir une suite ; page partielle/vide → dernière page, on s'arrête.
+        if length(items) < @page_limit do
+          {:ok, acc}
+        else
+          do_paginate(config, path_base, query, page + 1, acc)
+        end
+
+      # Réponse 2xx non-liste (forme inattendue) : on remonte ce qu'on a (l'appelant tranche).
+      {:ok, _non_list} ->
+        {:ok, acc}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   defp http_get(config, path), do: request(config, :get, path, nil)
   defp http_put(config, path, body), do: request(config, :put, path, body)
   defp http_post(config, path, body), do: request(config, :post, path, body)
@@ -1053,8 +1096,17 @@ defmodule Fleet.Pilot.ForgeClient do
 
           path ->
             case File.read(path) do
-              {:ok, content} -> {:ok, String.trim(content)}
-              {:error, reason} -> {:error, {:config, {:token_file, path, reason}}}
+              {:ok, content} ->
+                # F-031 : un fichier token VIDE (ou whitespace-only) trimait en "" → header
+                # `authorization: token ` envoyé tel quel → 401 TARDIF côté forge (échec opaque,
+                # diagnostiqué loin de la source). On tranche ICI, à la config, fail-loud explicite.
+                case String.trim(content) do
+                  "" -> {:error, {:config, {:token_file_empty, path}}}
+                  token -> {:ok, token}
+                end
+
+              {:error, reason} ->
+                {:error, {:config, {:token_file, path, reason}}}
             end
         end
     end

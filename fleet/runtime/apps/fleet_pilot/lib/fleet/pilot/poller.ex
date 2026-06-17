@@ -68,6 +68,10 @@ defmodule Fleet.Pilot.Poller do
     error_count: 0,
     err_streak: 0,
     last_error: nil,
+    # F-033 : nb d'erreurs de DISPATCH (par item) du dernier tick. La liste forge
+    # (`list_open_*`) peut réussir alors que des `dispatch_*` échouent — ces erreurs
+    # incrémentent `err_streak` (backoff partiel via `next_delay`) au lieu d'être noyées.
+    last_tally_errors: 0,
     # Réconciliation verrou (B) : refs `{:issue|:pr, n}` vues ORPHELINES (verrou `lcars-in-flight`
     # sans pod vivant) au tick précédent. Grace 2-tick (cf. OrphanReaper) → on ne réclame qu'au 2ᵉ
     # tick consécutif (évite de déverrouiller un pod fraîchement dispatché ou en cours de mort).
@@ -86,7 +90,8 @@ defmodule Fleet.Pilot.Poller do
           poll_count: non_neg_integer(),
           error_count: non_neg_integer(),
           err_streak: non_neg_integer(),
-          last_error: term() | nil
+          last_error: term() | nil,
+          last_tally_errors: non_neg_integer()
         }
 
   # ============================================================
@@ -108,7 +113,7 @@ defmodule Fleet.Pilot.Poller do
         }
   def force_poll(server \\ __MODULE__), do: GenServer.call(server, :force_poll, 30_000)
 
-  @doc "Stats runtime : poll_count, error_count, err_streak, last_error."
+  @doc "Stats runtime : poll_count, error_count, err_streak, last_error, last_tally_errors."
   @spec stats(GenServer.server()) :: map()
   def stats(server \\ __MODULE__), do: GenServer.call(server, :stats)
 
@@ -171,7 +176,8 @@ defmodule Fleet.Pilot.Poller do
        poll_count: state.poll_count,
        error_count: state.error_count,
        err_streak: state.err_streak,
-       last_error: state.last_error
+       last_error: state.last_error,
+       last_tally_errors: state.last_tally_errors
      }, state}
   end
 
@@ -300,12 +306,26 @@ defmodule Fleet.Pilot.Poller do
           "duration_ms=#{duration_ms}"
       )
 
+      # F-033 : la liste forge a réussi, mais des `dispatch_*` PAR ITEM ont pu échouer
+      # (`tally.errors > 0` — ex. enqueue broker KO, spawn KO). Avant ce fix, `err_streak`
+      # était remis à 0 inconditionnellement → ces erreurs ne ralentissaient JAMAIS le
+      # poller (il martelait la forge au plein régime malgré l'échec). On réutilise le
+      # mécanisme `err_streak`/`next_delay` (backoff partiel) : streak incrémenté tant que
+      # des items échouent, reset à 0 seulement quand le tick est propre.
+      {next_streak, next_last_error} =
+        if tally.errors > 0 do
+          {state.err_streak + 1, {:dispatch_errors, tally.errors}}
+        else
+          {0, nil}
+        end
+
       {tally,
        %{
          state
          | poll_count: state.poll_count + 1,
-           err_streak: 0,
-           last_error: nil,
+           err_streak: next_streak,
+           last_error: next_last_error,
+           last_tally_errors: tally.errors,
            orphan_lock_suspects: new_suspects
        }}
     else
@@ -534,9 +554,12 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # Construit les opts de StageDispatcher.dispatch_issue. Les seams
-  # (loader/spawner/clock) ne sont injectés QUE s'ils sont set sur le
+  # (loader/spawner/task_queue/clock) ne sont injectés QUE s'ils sont set sur le
   # state — sinon StageDispatcher applique ses défauts réels (passer nil
   # écraserait le défaut).
+  # F-028 : `:task_queue` était porté par le state (lu dans `live_owned_refs/1`)
+  # mais JAMAIS transmis ici → StageDispatcher retombait sur `Fleet.TaskQueue`
+  # global pour l'enqueue du mandat (seam de broker non honoré côté dispatch).
   defp stage_dispatch_opts(state) do
     [
       repo: state.repo,
@@ -545,6 +568,7 @@ defmodule Fleet.Pilot.Poller do
     ]
     |> maybe_put_seam(:loader, state.loader)
     |> maybe_put_seam(:spawner, state.spawner)
+    |> maybe_put_seam(:task_queue, state.task_queue)
     |> maybe_put_seam(:clock, state.clock)
   end
 

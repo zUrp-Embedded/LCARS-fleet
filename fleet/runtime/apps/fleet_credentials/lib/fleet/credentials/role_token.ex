@@ -35,11 +35,25 @@ defmodule Fleet.Credentials.RoleToken do
       case File.read(path) do
         {:ok, content} ->
           case String.trim(content) do
-            "" -> nil
-            token -> token
+            "" ->
+              Logger.warning(
+                "RoleToken: token de rôle #{inspect(role)} vide (#{path}) → fallback token " <>
+                  "système (review/commit posté sous le compte système)"
+              )
+
+              nil
+
+            token ->
+              token
           end
 
-        {:error, _reason} ->
+        {:error, reason} ->
+          Logger.warning(
+            "RoleToken: token de rôle #{inspect(role)} absent/illisible (#{path} : " <>
+              "#{inspect(reason)}) → fallback token système (review/commit posté sous le compte " <>
+              "système)"
+          )
+
           nil
       end
     else

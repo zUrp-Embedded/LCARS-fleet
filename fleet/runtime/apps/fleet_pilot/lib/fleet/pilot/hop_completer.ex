@@ -517,8 +517,9 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # ②.1e — injecte le token du compte de RÔLE dans les forge_opts → le SYSTÈME poste EN SON NOM
-  # (avatar/traça honnête, même mécanique que `create_ticket`/arch). `nil` (token absent/illisible) →
-  # forge_opts inchangé → fallback token système (RoleToken logge le dégradé). Barrière §4 préservée :
+  # (avatar/traça honnête, même mécanique que `create_ticket`/arch). `nil` (token absent/illisible/vide)
+  # → forge_opts inchangé → fallback token système ; `RoleToken.token/1` émet un `Logger.warning` sur
+  # ce dégradé (token absent/illisible/vide), il est donc OBSERVABLE ici. Barrière §4 préservée :
   # c'est le système qui poste avec le token de rôle, jamais le pod (forge-aveugle).
   defp as_role(forge_opts, role) when is_binary(role) and role != "" do
     case Fleet.Credentials.RoleToken.token(role) do

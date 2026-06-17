@@ -421,6 +421,26 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
     end
 
+    @tag :tmp_dir
+    test "F-031 : token_file VIDE → erreur config (pas de requête HTTP, pas de 401 tardif)",
+         %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "empty_token")
+
+      # fichier présent mais whitespace-only → trim donne "" → header `authorization: token ` (401 tardif).
+      File.write!(path, "  \n\t")
+
+      # AUCUN handler : si une requête HTTP partait quand même, FakeForge fallback 500 → l'assert
+      # sur l'erreur config (jamais {:http, _, _}) prouve qu'on tranche AVANT le round-trip réseau.
+      opts = [
+        base_url: "http://fake.test",
+        token_file: path,
+        req_options: [plug: {FakeForge, %{}}]
+      ]
+
+      assert {:error, {:config, {:token_file_empty, ^path}}} =
+               ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
+    end
+
     test "trim trailing slash sur base_url" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
@@ -945,6 +965,91 @@ defmodule Fleet.Pilot.ForgeClientTest do
                  9,
                  [{:method, "fast-forward-only"} | merge_opts(handlers)]
                )
+    end
+  end
+
+  # ============================================================
+  # F-030 — pagination des lectures source-de-vérité. FakeForge route par chemin SEUL (la query
+  # `?page=N` est ignorée dans la clé) → un handler-FONCTION stateful (Agent) rend les pages dans
+  # l'ordre : page 1 PLEINE (50 items) → le client boucle ; page 2 partielle (< 50) → dernière page,
+  # stop. Le résultat doit inclure les 51 (la page 2 a bien été lue).
+  # ============================================================
+  describe "pagination (F-030) — au-delà de 50 items, les pages suivantes sont lues" do
+    # Rend `pages` (liste de listes d'items) dans l'ordre d'appel ; une fois épuisé, page vide
+    # (200, []) → le client s'arrête proprement (vide < 50). Même mécanique d'Agent que `seq_handler`.
+    defp paged_handler(pages) do
+      {:ok, agent} = Agent.start_link(fn -> pages end)
+
+      fn ->
+        items =
+          Agent.get_and_update(agent, fn
+            [p | rest] -> {p, rest}
+            [] -> {[], []}
+          end)
+
+        {200, items}
+      end
+    end
+
+    test "list_open_issues : 50 items page 1 + 1 item page 2 → les 51 accumulés (page 2 lue)" do
+      page1 = for n <- 1..50, do: %{"number" => n, "labels" => []}
+      page2 = [%{"number" => 51, "labels" => []}]
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues"} => paged_handler([page1, page2])
+      }
+
+      assert {:ok, issues} = ForgeClient.list_open_issues("fleet/lcars", opts(handlers))
+      assert length(issues) == 51
+
+      # le 51ᵉ (présent UNIQUEMENT en page 2) prouve que la 2ᵉ page a été lue et accumulée.
+      assert Enum.any?(issues, &(&1["number"] == 51))
+    end
+
+    test "list_open_pulls : pagination idem (51ᵉ PR en page 2 incluse)" do
+      page1 =
+        for n <- 1..50, do: %{"number" => n, "head" => %{"ref" => "lcars/issue-#{n}-engineer"}}
+
+      page2 = [%{"number" => 51, "head" => %{"ref" => "lcars/issue-51-engineer"}}]
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls"} => paged_handler([page1, page2])
+      }
+
+      assert {:ok, pulls} = ForgeClient.list_open_pulls("fleet/lcars", opts(handlers))
+      assert length(pulls) == 51
+      assert Enum.any?(pulls, &(&1["number"] == 51))
+    end
+
+    test "count_signed_hops : un hop signé en page 2 est compté (source-de-vérité du budget anti-runaway)" do
+      # page 1 pleine (50 comments NON signés) + page 2 (1 comment portant un marqueur de hop signé).
+      page1 = for _ <- 1..50, do: %{"user" => %{"login" => "lcars-bot"}, "body" => "blabla"}
+      page2 = [%{"user" => %{"login" => "lcars-bot"}, "body" => "fin [hop:engineer:aaa]"}]
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => paged_handler([page1, page2])
+      }
+
+      # sans pagination, le hop de la page 2 serait perdu → 0 ; paginé → 1.
+      assert {:ok, 1} =
+               ForgeClient.count_signed_hops(
+                 "fleet/lcars",
+                 42,
+                 Keyword.put(opts(handlers), :forge_bot_login, "lcars-bot")
+               )
+    end
+
+    test "≤ 50 items : une seule page (page 1 partielle) → comportement identique, pas de page 2" do
+      # 3 items < 50 → le client s'arrête après la page 1 (aucun 2ᵉ appel). Si un 2ᵉ appel partait,
+      # paged_handler rendrait [] → length resterait 3, mais surtout on prouve le court-circuit ≤50.
+      page1 = for n <- 1..3, do: %{"number" => n, "labels" => []}
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues"} => paged_handler([page1])
+      }
+
+      assert {:ok, issues} = ForgeClient.list_open_issues("fleet/lcars", opts(handlers))
+      assert length(issues) == 3
     end
   end
 end

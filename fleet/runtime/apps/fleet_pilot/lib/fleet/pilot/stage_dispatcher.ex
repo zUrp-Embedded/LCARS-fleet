@@ -461,7 +461,8 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # ②.1e — injecte le token du compte de RÔLE dans les forge_opts → le SYSTÈME poste/merge EN SON NOM
   # (avatar/traça honnête, même mécanique que `create_ticket`/arch et `HopCompleter`). `nil` (token
-  # absent) → forge_opts inchangé → fallback token système (RoleToken logge le dégradé). Barrière §4 :
+  # absent/illisible/vide) → forge_opts inchangé → fallback token système ; `RoleToken.token/1` émet
+  # un `Logger.warning` sur ce dégradé, il est donc OBSERVABLE ici. Barrière §4 :
   # le système poste avec le token de rôle, jamais le pod (forge-aveugle).
   defp as_role(forge_opts, role) when is_binary(role) and role != "" do
     case Fleet.Credentials.RoleToken.token(role) do

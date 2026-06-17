@@ -9,7 +9,9 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   ## Routes
 
     * `POST /webhook/gitea` — body JSON Gitea, header
-      `X-Gitea-Signature` HMAC SHA256. 200 ok / 401 hmac mismatch /
+      `X-Gitea-Signature` HMAC SHA256. 200 ok (broadcast réussi) /
+      401 hmac mismatch / 422 event drift (type inconnu/forgé ou hors
+      registry `events.yaml` — la forge doit retry/alerter, F-009) /
       415 invalid body / 500 error.
     * `GET /health` — liveness `200 ok`.
     * fallback 404.
@@ -65,11 +67,21 @@ defmodule Fleet.EventRouter.WebhooksGitea do
           }
 
           _ = Fleet.EventRouter.Bus.broadcast("fleet.events", event)
+          send_resp(conn, 200, "ok")
         rescue
+          # F-009 : un event droppé ne doit PLUS être ACK 200. Les deux cas ci-dessous
+          # sont du DRIFT (pas un drop intentionnel — il n'existe aucune catégorie
+          # « connu mais volontairement non-routé » dans ce handler) : on renvoie 422
+          # pour que la forge Gitea journalise/retry/alerte au lieu de croire l'event livré.
           ArgumentError ->
+            # Atome inconnu du BEAM (String.to_existing_atom a échoué) = type `gitea.*`
+            # jamais déclaré → drift producteur/registry forgé.
             Logger.warning(
-              "fleet_event_router webhook gitea unknown event type #{inspect(event_type)} — skip"
+              "fleet_event_router webhook gitea unknown event type #{inspect(event_type)} " <>
+                "— DRIFT (atome inconnu), 422"
             )
+
+            send_resp(conn, 422, Jason.encode!(%{error: "unknown event type", type: event_type}))
 
           # Z5 #9 : NE PLUS avaler en silence. Un type `gitea.*` dont l'atome existe mais
           # qui n'est pas dans `events.yaml` = drift registry/producteur → drop muet (webhook
@@ -78,11 +90,15 @@ defmodule Fleet.EventRouter.WebhooksGitea do
           _e in Fleet.Event.UnregisteredError ->
             Logger.warning(
               "fleet_event_router webhook gitea type #{inspect(event_type)} hors registry " <>
-                "events.yaml — DROP (ajouter la clé si l'action doit être routée)"
+                "events.yaml — DROP/DRIFT, 422 (ajouter la clé si l'action doit être routée)"
+            )
+
+            send_resp(
+              conn,
+              422,
+              Jason.encode!(%{error: "event type not in registry", type: event_type})
             )
         end
-
-        send_resp(conn, 200, "ok")
 
       {:error, reason} ->
         Logger.warning("fleet_event_router webhook hmac mismatch: #{reason}")
