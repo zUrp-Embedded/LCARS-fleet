@@ -327,14 +327,16 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  # Index `metadata.name => raw` en scannant `<dir>/*.yaml` + `<dir>/archivistes/*.yaml` (le `modop/`
-  # est exclu : les overlays n'ont pas d'identité de rôle). Fragment sans `metadata.name` → ignoré
-  # (baseline/overlay). YAML illisible → ignoré (un `load` ciblé échouera via sa propre validation).
-  # Collision de `name` → fail-loud.
+  # Index `metadata.name => raw` en scannant `<dir>/*.yaml` + `<dir>/archivistes/*.yaml` +
+  # `<dir>/monks/*.yaml` (F-041 : les profils Memory-X canon vivent sous `monks/` ; Memory-X VA vivre,
+  # donc PermanentBoot — qui énumère via `list/1` — doit les voir). Le `modop/` reste exclu : les
+  # overlays n'ont pas d'identité de rôle. Fragment sans `metadata.name` → ignoré (baseline/overlay).
+  # YAML illisible → ignoré (un `load` ciblé échouera via sa propre validation). Collision `name` → fail-loud.
   defp name_index(dir) do
     files =
       Path.wildcard(Path.join(dir, "*.yaml")) ++
-        Path.wildcard(Path.join([dir, "archivistes", "*.yaml"]))
+        Path.wildcard(Path.join([dir, "archivistes", "*.yaml"])) ++
+        Path.wildcard(Path.join([dir, "monks", "*.yaml"]))
 
     Enum.reduce_while(files, {:ok, %{}}, fn path, {:ok, acc} ->
       case decode_yaml(path) do
