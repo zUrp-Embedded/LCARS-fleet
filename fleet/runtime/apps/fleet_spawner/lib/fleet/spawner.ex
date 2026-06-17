@@ -250,16 +250,17 @@ defmodule Fleet.Spawner do
 
   @doc """
   Réveille un pod long-lived (lifetime_scope != one-shot) pour un nouveau
-  cycle. Envoie le mot-clé `yop` via tmux send-keys au claude REPL du pod,
-  déclenchant le workflow agent-worker-base :
+  cycle. **Rail porteur = réveil-par-flag** (`turn.flag` + outil Monitor in-pod) ; le `yop`
+  send-keys n'est qu'un fallback (`:wake_send_keys`, défaut `true`). Déclenche le workflow
+  agent-worker-base :
 
-      yop → mcp__fleet__get_task → traite → mcp__fleet__submit_result
+      (flag touché → Monitor « ton tour ») → mcp__fleet__get_task → traite → mcp__fleet__submit_result
 
   Pré-requis : le caller a déjà enqueué le mandat dans le broker
   `Fleet.TaskQueue` (ciblé `pod_id` ; le pod s'identifie par `_lcars_pod_id`
-  sur le fil pour le récupérer via `get_task`). `wake_pod/1` ne gère QUE le
-  trigger send-keys — la task
-  doit être en file AVANT.
+  sur le fil pour le récupérer via `get_task`). `wake_pod/1` ne fait QUE le
+  trigger (flag + yop-fallback) — la task doit être en file AVANT. Le CONTENU
+  passe TOUJOURS par MCP, jamais par le texte injecté.
 
   Use-cases :
     - pipeline `standard-qa` : après findings reviewer/gatekeeper, push
@@ -280,18 +281,24 @@ defmodule Fleet.Spawner do
   def wake_pod(pod_id) when is_binary(pod_id) do
     case pod_info(pod_id) do
       {:ok, %{tmux_session: session} = info} when is_binary(session) ->
-        # Réveil-par-flag (outil Monitor in-pod) : touche `turn.flag` → si l'agent a armé
-        # son Monitor (cf. SP `agent-worker-base.md`), il se réveille SANS send-keys de
-        # CONTENU (ADR-G pt3). best-effort, additif. Le `yop` reste le kick sanctionné
-        # (bootstrap + fallback pods sans Monitor) ; pour un pod Monitor-armé, le yop
-        # redondant retombe sur un get_task vide (done:true) — inoffensif.
+        # Réveil-par-flag (outil Monitor in-pod) : touche `turn.flag` → l'agent Monitor-armé se
+        # réveille SANS send-keys (ADR-G pt3, SP `agent-worker-base.md`). C'est le rail PORTEUR.
+        # Le `yop` send-keys n'est qu'un FALLBACK (`:wake_send_keys`, défaut `true`) : bootstrap +
+        # pods sans Monitor. **Knob à `false` ⇒ wake FLAG-ONLY** → permet de VALIDER/rendre porteur
+        # le Monitor en isolation. (Avant : le `yop` toujours-tiré MASQUAIT si le réveil-par-flag
+        # marchait — un pod réveillé par le yop ne prouvait jamais le Monitor → e2e jamais bouclé,
+        # cf. PoC mcp-debate piège #4. Le flag est désormais toujours touché et porteur.)
         _ = touch_turn_flag(info)
-        result = Fleet.Spawner.PodTmux.send_keys(pod_id, "yop")
 
-        # F112 : ré-arme la deadline de RÉPONSE pour la nouvelle tâche. wake_pod = « nouveau travail
-        # assigné » → la fenêtre de timeout doit repartir. Sans ça, un pod long-lived réveillé n'avait
-        # PAS de deadline armée jusqu'à son prochain cycle do_extract → tâche sans protection timeout.
-        # Cast best-effort au Pod GenServer (re-arme s'il est en :monitoring, no-op sinon).
+        result =
+          if wake_send_keys_fallback?() do
+            Fleet.Spawner.PodTmux.send_keys(pod_id, "yop")
+          else
+            :ok
+          end
+
+        # F112 : ré-arme la deadline de RÉPONSE pour la nouvelle tâche (toujours, indépendant du
+        # mécanisme de wake). wake_pod = « nouveau travail assigné » → la fenêtre de timeout repart.
         _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :rearm_deadline)
         result
 
@@ -314,6 +321,12 @@ defmodule Fleet.Spawner do
   end
 
   defp touch_turn_flag(_info), do: :ok
+
+  # Tirer le `yop` send-keys en fallback du réveil-par-flag ? Défaut `true` (sûr : couvre les pods
+  # sans Monitor + bootstrap). `false` ⇒ wake FLAG-ONLY = le Monitor est le rail porteur (à activer
+  # une fois le réveil-par-flag validé live — B). Config `:fleet_spawner, :wake_send_keys`.
+  defp wake_send_keys_fallback?,
+    do: Application.get_env(:fleet_spawner, :wake_send_keys, true)
 
   @doc """
   Restart strategy d'un pod : `:temporary` pour TOUS les scopes (DN-recovery,
