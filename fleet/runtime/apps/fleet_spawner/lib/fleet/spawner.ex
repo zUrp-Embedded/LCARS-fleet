@@ -78,6 +78,13 @@ defmodule Fleet.Spawner do
         # traverserait hors de `~/pods`. Guard charset path-safe + rejet `..` → refus CLAIR, jamais un
         # path traversé (tous les pod_id légitimes — UUID / catalogue / stage — passent).
         if valid_pod_id?(pod_id) do
+          # BL-055 — id pod DÉTERMINISTE : un re-dispatch retombe sur le même `pod_id`. Si une
+          # TOMBSTONE terminale (`state.json` :succeeded/:released/:killed) d'un cycle précédent
+          # subsiste, `recover_or_init` la lirait → `:release` → stop MUET sans launch → boucle
+          # orphelin côté poller. On efface la tombstone (state + pod_dir) AVANT spawn → init FRESH.
+          # No-op si pas de snapshot / snapshot en vol (recovery :resume/:recreate intacte).
+          _ = Fleet.Spawner.Pod.clear_terminal_snapshot(pod_id, cap_profile, opts)
+
           args = %{
             cap_profile: cap_profile,
             ticket_id: ticket_id,

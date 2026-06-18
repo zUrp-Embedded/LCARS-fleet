@@ -922,4 +922,71 @@ defmodule Fleet.Spawner.PodTest do
       assert File.exists?(Path.join([pod_dir, "work", "BACKLOG.md"]))
     end
   end
+
+  # BL-055 — sous l'id pod DÉTERMINISTE, un re-dispatch retombe sur le même pod_id : une tombstone
+  # terminale (state.json :succeeded/:released/:killed) d'un cycle précédent ferait court-circuiter
+  # `recover_or_init` en `:release` (stop muet, aucun launch) → boucle orphelin côté poller. `spawn_pod`
+  # appelle `clear_terminal_snapshot/3` AVANT spawn pour repartir FRESH. Régression validée live 2026-06-18.
+  describe "clear_terminal_snapshot/3 (anti-tombstone)" do
+    test "efface la tombstone TERMINALE (:succeeded) + le pod_dir → re-spawn fresh", %{
+      tmp_dir: tmp
+    } do
+      pod_id = "issue-99-engineer"
+      snap = write_snapshot!(tmp, pod_id, "succeeded")
+      pod_dir = seed_pod_dir!(tmp, pod_id)
+
+      assert :ok = Fleet.Spawner.Pod.clear_terminal_snapshot(pod_id, valid_profile())
+
+      refute File.exists?(snap)
+      refute File.exists?(pod_dir)
+    end
+
+    test "efface aussi :released et :killed (toutes phases terminales)", %{tmp_dir: tmp} do
+      for phase <- ["released", "killed"] do
+        pod_id = "issue-#{phase}-engineer"
+        snap = write_snapshot!(tmp, pod_id, phase)
+        pod_dir = seed_pod_dir!(tmp, pod_id)
+
+        assert :ok = Fleet.Spawner.Pod.clear_terminal_snapshot(pod_id, valid_profile())
+        refute File.exists?(snap)
+        refute File.exists?(pod_dir)
+      end
+    end
+
+    test "PRÉSERVE un snapshot EN VOL (:monitoring) — la recovery reste intacte", %{tmp_dir: tmp} do
+      pod_id = "issue-77-engineer"
+      snap = write_snapshot!(tmp, pod_id, "monitoring")
+      pod_dir = seed_pod_dir!(tmp, pod_id)
+
+      assert :ok = Fleet.Spawner.Pod.clear_terminal_snapshot(pod_id, valid_profile())
+
+      assert File.exists?(snap)
+      assert File.exists?(pod_dir)
+    end
+
+    test "no-op idempotent si aucun snapshot", %{tmp_dir: _tmp} do
+      assert :ok =
+               Fleet.Spawner.Pod.clear_terminal_snapshot("issue-404-engineer", valid_profile())
+    end
+  end
+
+  # scope_for("one-shot") == "pods" → <state_fs_root>/pods/<pod_id>/state.json (config posée par setup).
+  defp write_snapshot!(tmp, pod_id, phase) do
+    path = Path.join([tmp, "state", "pods", pod_id, "state.json"])
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      Jason.encode!(%{"phase" => phase, "session_id" => "sid-#{pod_id}", "v" => 1})
+    )
+
+    path
+  end
+
+  defp seed_pod_dir!(tmp, pod_id) do
+    dir = Path.join([tmp, "pods", "pod_#{pod_id}"])
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "workspace_marker"), "stale")
+    dir
+  end
 end

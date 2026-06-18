@@ -1165,6 +1165,46 @@ defmodule Fleet.Spawner.Pod do
   # Recovery / state FS
   # ============================================================
 
+  @doc """
+  Efface la TOMBSTONE d'un `pod_id` AVANT un (re)spawn délibéré (appelé par
+  `Fleet.Spawner.spawn_pod/3`).
+
+  Sous l'id pod DÉTERMINISTE (BL-055), un re-dispatch retombe sur le MÊME `pod_id`
+  (`issue-N-role`). Si un `state.json` TERMINAL (`:succeeded`/`:released`/`:killed`)
+  subsiste d'un cycle précédent — même d'une AUTRE issue #N sur un autre repo, l'id
+  ne porte que le numéro —, `recover_or_init` le lit → `recovery_action` rend
+  `:release` → le pod s'arrête AUSSITÔT (`do_release` sur backend nil, `{:stop,
+  :normal}` MUET) sans rien lancer. Le poller voit alors le verrou in-flight sans
+  complétion → réclame l'orphelin → re-dispatch → MÊME tombstone → boucle infinie
+  (le pod ne lance jamais de claude).
+
+  Un (re)spawn est TOUJOURS délibéré (sous `:temporary` le superviseur ne ressuscite
+  jamais) → une tombstone terminale n'a rien à protéger ici : on l'efface + le pod_dir
+  → `init` repart FRESH (`:allocate`). **No-op** si pas de snapshot, snapshot illisible,
+  ou phase EN VOL (`:launching`/`:monitoring`/… → la recovery `:resume`/`:recreate`
+  reste intacte — on ne touche QUE les tombstones).
+  """
+  @spec clear_terminal_snapshot(String.t(), Fleet.CapProfile.t(), keyword()) :: :ok
+  def clear_terminal_snapshot(pod_id, %Fleet.CapProfile{} = cap_profile, opts \\ [])
+      when is_binary(pod_id) and is_list(opts) do
+    state_fs_path = state_fs_path_for(pod_id, cap_profile, opts)
+
+    with {:ok, json} <- File.read(state_fs_path),
+         {:ok, %{"phase" => phase_str}} <- Jason.decode(json),
+         phase when phase in [:succeeded, :released, :killed] <- phase_from_string(phase_str) do
+      _ = File.rm_rf(Path.dirname(state_fs_path))
+      _ = File.rm_rf(pod_dir_for(pod_id, cap_profile, opts))
+
+      Logger.info(
+        "Pod.clear_terminal_snapshot #{pod_id}: tombstone :#{phase} effacée (re-spawn FRESH, BL-055)"
+      )
+
+      :ok
+    else
+      _ -> :ok
+    end
+  end
+
   defp recover_or_init(args) do
     base = initial_state(args)
 
