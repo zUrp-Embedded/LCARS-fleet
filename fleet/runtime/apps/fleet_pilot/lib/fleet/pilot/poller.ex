@@ -47,6 +47,8 @@ defmodule Fleet.Pilot.Poller do
 
   # Verrou pipeline (source unique `Fleet.Pilot.Labels`) — lu par la réconciliation d'orphelins.
   @in_flight Fleet.Pilot.Labels.in_flight()
+  # #8.A : préfixe `state:*` — un ticket portant un state-label est ENGAGÉ dans un pipeline (entre hops).
+  @state_prefix Fleet.Pilot.Labels.state_prefix()
 
   @default_interval_ms 30_000
   @max_backoff_ms 300_000
@@ -503,15 +505,21 @@ defmodule Fleet.Pilot.Poller do
   end
 
   defp stage_dispatch_one(payload, opts, entry_opts, acc, lease) do
+    # #8.A : Entry AVANT dispatch (idempotent + lease-gated, bail = labels in-flight/state, plus l'assignee).
+    # Un ticket typé (type:->carte) + NON-routé entre dans sa carte (Entry grave la route ; l'assignee
+    # reste l'HUMAIN — plus de set_assignee) → entrée comptée, PAS de dispatch ce tick (le prochain tick
+    # dispatche le rôle du stage via carte_role, comme l'original). Sinon (pas de type:* / déjà routé /
+    # bail tenu) → dispatch (advance d'un routé, ou producteur A1 si untyped — flux prouvé inchangé).
+    case stage_try_enter(payload, entry_opts, acc, lease) do
+      {:entered, acc, lease} -> {acc, lease}
+      {:noop, acc, lease} -> stage_do_dispatch(payload, opts, acc, lease)
+    end
+  end
+
+  defp stage_do_dispatch(payload, opts, acc, lease) do
     case StageDispatcher.dispatch_issue(payload, opts) do
       {:ok, {:spawned, _pod_id, _role}} ->
         {%{acc | dispatched: acc.dispatched + 1}, lease}
-
-      # Pas d'assignee : peut-etre un ticket NEUF a ENTRER dans une carte (type:->carte, A2.1).
-      # Entry est idempotent (deja route -> skip). L'entree n'est permise QUE si le bail repo est
-      # libre (sinon le neuf attend le prochain tick, apres la fin du pipeline en cours).
-      {:skipped, :no_assignee} ->
-        stage_try_enter(payload, entry_opts, acc, lease)
 
       {:skipped, _reason} ->
         {%{acc | skipped: acc.skipped + 1}, lease}
@@ -521,24 +529,26 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # Entree d'un ticket neuf, gardee par le bail repo. Bail tenu -> skip (:repo_leased, le neuf
-  # attend). Bail libre -> Entry ; une entree reussie PREND le bail (les neufs suivants du meme
-  # tick attendent).
-  defp stage_try_enter(_payload, _entry_opts, acc, true),
-    do: {%{acc | skipped: acc.skipped + 1}, true}
+  # #8.A : entrée carte idempotente + lease-gated. Entrée réussie → comptée dispatched + PREND le bail
+  # (les neufs suivants du tick attendent), `{:entered, ...}` (pas de dispatch ce tick). Bail tenu / pas
+  # de type:* / déjà routé → `{:noop, ...}` (dispatch normal suit). error → errors++.
+  defp stage_try_enter(_payload, _entry_opts, acc, true), do: {:noop, acc, true}
 
   defp stage_try_enter(payload, entry_opts, acc, false) do
     case Entry.enter(payload, entry_opts) do
-      {:ok, {:entered, _role}} -> {%{acc | dispatched: acc.dispatched + 1}, true}
-      {:skip, _} -> {%{acc | skipped: acc.skipped + 1}, false}
-      {:error, _} -> {%{acc | errors: acc.errors + 1}, false}
+      {:ok, {:entered, _role}} -> {:entered, %{acc | dispatched: acc.dispatched + 1}, true}
+      {:skip, _} -> {:noop, acc, false}
+      {:error, _} -> {:noop, %{acc | errors: acc.errors + 1}, false}
     end
   end
 
-  # Un ticket "tient le bail repo" s'il est deja engage dans un pipeline = assigne a un role
-  # (in-flight ou entre deux hops : les deux portent un assignee ; un ticket neuf type:X non).
+  # #8.A : le bail repo (1 pipeline actif/repo) = ticket ENGAGÉ dans un pipeline, signalé par les LABELS
+  # (in-flight = pod en vol ; state:* = entre deux hops), PAS par l'assignee (= l'humain, toujours présent
+  # → bail toujours tenu → deadlock d'entrée). Un ticket NEUF (type:* sans in-flight ni state:*) ne tient
+  # pas le bail → il peut entrer. Cohérent « assignee = traça humaine, l'état vit dans les labels ».
   defp repo_lease_held?(issue) do
-    (Map.get(issue, "assignees") || []) != []
+    labels = Enum.map(Map.get(issue, "labels") || [], & &1["name"])
+    @in_flight in labels or Enum.any?(labels, &String.starts_with?(&1 || "", @state_prefix))
   end
 
   defp stage_entry_opts(state) do

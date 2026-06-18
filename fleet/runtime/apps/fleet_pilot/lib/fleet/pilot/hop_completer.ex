@@ -648,11 +648,20 @@ defmodule Fleet.Pilot.HopCompleter do
         end
 
       next when is_binary(next) ->
-        with {:ok, _} <- maybe_post_route(forge, repo, n, hop, forge_opts),
-             {:ok, _} <- forge.set_assignee(repo, n, next, forge_opts) do
-          {:ok, :reassigned}
-        else
-          {:error, reason} -> {:error, {:reassign, reason}}
+        # #8.A : AVANCE = grave la route du stage suivant. PLUS de `set_assignee(next)` — l'assignee
+        # reste l'HUMAIN (traça) ; le rôle du next stage (`next`) est dérivé de la route au dispatch
+        # (`StageDispatcher.carte_role`), pas de l'assignee. `next` (next_role présent) distingue
+        # AVANCE vs terminal (nil → close).
+        case maybe_post_route(forge, repo, n, hop, forge_opts) do
+          {:ok, _} ->
+            Logger.debug(
+              "HopCompleter advance #{repo}##{n} → next stage role=#{next} (route gravée, assignee=humain inchangé)"
+            )
+
+            {:ok, :reassigned}
+
+          {:error, reason} ->
+            {:error, {:reassign, reason}}
         end
     end
   end

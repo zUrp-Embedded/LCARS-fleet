@@ -68,13 +68,14 @@ defmodule Fleet.Pilot.EntryTest do
       )
     end
 
-    test "ticket neuf type:poc → grave route PUIS assigne le 1er rôle" do
+    test "ticket neuf type:poc → grave SEULEMENT la route (assignee humain inchangé, #8.A)" do
       assert {:ok, {:entered, "architect"}} =
                Entry.enter(issue(["type:poc"]), enter_opts())
 
-      # route AVANT assignee (mailbox FIFO)
+      # #8.A : Entry grave la route mais N'écrase PLUS l'assignee (= l'humain, posé à la création).
+      # Le rôle du 1er stage ("architect") est dérivé de la route au dispatch (carte_role).
       assert_received {:route, "poc-cycle", "triage"}
-      assert_received {:assignee, "architect"}
+      refute_received {:assignee, _}
     end
 
     test "déjà routé (marqueur présent) → {:skip, :already_routed}, idempotent" do

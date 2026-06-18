@@ -191,26 +191,29 @@ defmodule Fleet.Pilot.HopCompleterTest do
   end
 
   describe "complete/2 — multi-stage (next_assignee présent, branche A2)" do
-    test "publie, comment, state, REASSIGN (pas de close), unlock" do
+    test "publie, comment, state, AVANCE (pas de close ni set_assignee, #8.A), unlock" do
       hop = base_hop(%{next_assignee: "qualifier"})
       assert {:ok, :reassigned} = HopCompleter.complete(hop, seams())
 
       assert_received {:call, :comment, _, _}
       assert_received {:call, :state, _}
-      assert_received {:call, :assignee, "qualifier"}
+
+      # #8.A : l'avance N'écrase PLUS l'assignee (= humain) ; le next-rôle est dérivé de la route au
+      # dispatch. (Ici pas de contexte carte → pas de route non plus, cf. cas défensif ci-dessous.)
+      refute_received {:call, :assignee, _}
       assert_received {:call, :unlock, "lcars-in-flight"}
       refute_received {:call, :close}
     end
 
-    test "reassign avec contexte carte → grave la ROUTE du stage suivant AVANT le reassign (A2.1)" do
+    test "avance avec contexte carte → grave la ROUTE du stage suivant (sans set_assignee, #8.A)" do
       hop =
         base_hop(%{next_assignee: "qualifier", pipeline: "poc-cycle", next_stage: "spec-review"})
 
       assert {:ok, :reassigned} = HopCompleter.complete(hop, seams())
 
-      # ordre §5 : route gravée AVANT l'assignee (le poller voit le next assignee déjà positionné)
+      # #8.A : l'avance grave la ROUTE du stage suivant ; l'assignee (humain) N'est PLUS touché.
       assert_received {:call, :route, "poc-cycle", "spec-review"}
-      assert_received {:call, :assignee, "qualifier"}
+      refute_received {:call, :assignee, _}
     end
 
     test "reassign sans contexte carte → pas de post_route (defensif)" do

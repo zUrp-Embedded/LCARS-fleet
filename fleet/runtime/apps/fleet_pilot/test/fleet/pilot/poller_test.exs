@@ -280,13 +280,14 @@ defmodule Fleet.Pilot.PollerTest do
       {name, pid}
     end
 
-    test "un pipeline en cours (ticket assigne) bloque l'entree d'un ticket neuf" do
+    test "un pipeline en cours (ticket engagé via label) bloque l'entree d'un ticket neuf" do
       issues = [
-        # #11 deja engage (assigne humain) -> tient le bail -> sera spawne (producteur).
+        # #8.A : #11 déjà ENGAGÉ — signalé par le LABEL state:delivered (entre deux hops), PLUS par
+        # l'assignee (= l'humain). Tient le bail → sera dispatché (advance). Bloque l'entrée de #12.
         %{
           "number" => 11,
           "body" => "en cours",
-          "labels" => [],
+          "labels" => [%{"name" => "state:delivered"}],
           "assignees" => [%{"login" => "lordzurp"}]
         },
         # #12 neuf (type:poc, pas d'assignee) -> entree BLOQUEE par le bail.

@@ -107,16 +107,20 @@ defmodule Fleet.Pilot.Entry do
         {:skip, reason}
 
       {:ok, {pipeline, first_stage, first_role}} ->
-        # route AVANT assignee : le prochain tick voit l'assignee avec sa position déjà gravée.
-        with {:ok, _} <- forge.post_route(repo, number, pipeline, first_stage, forge_opts),
-             {:ok, _} <- forge.set_assignee(repo, number, first_role, forge_opts) do
-          Logger.info(
-            "Entry: #{repo}##{number} → carte=#{pipeline} stage=#{first_stage} assignee=#{first_role}"
-          )
+        # #8.A : Entry grave SEULEMENT la route (position carte). L'assignee N'EST PLUS écrasé par le
+        # rôle-worker (`set_assignee` retiré) — il reste l'HUMAIN (traça, posé à la création du ticket).
+        # Le rôle du stage courant est dérivé de la route au dispatch (`StageDispatcher.carte_role`),
+        # plus de l'assignee. L'état/position vit dans la route + les labels, pas dans l'assignee.
+        case forge.post_route(repo, number, pipeline, first_stage, forge_opts) do
+          {:ok, _} ->
+            Logger.info(
+              "Entry: #{repo}##{number} → carte=#{pipeline} stage=#{first_stage} (role=#{first_role}, assignee=humain inchangé)"
+            )
 
-          {:ok, {:entered, first_role}}
-        else
-          {:error, reason} -> {:error, {:enter, reason}}
+            {:ok, {:entered, first_role}}
+
+          {:error, reason} ->
+            {:error, {:enter, reason}}
         end
     end
   end
