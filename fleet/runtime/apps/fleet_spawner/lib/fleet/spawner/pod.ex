@@ -1115,11 +1115,23 @@ defmodule Fleet.Spawner.Pod do
         # silencieux → le claude sandboxé continuait à consommer l'OAuth. On kill via le sock par-pod
         # (même geste que reap_orphan_pod), centralisé dans `PodTmux.kill_holder/1` (F-034 : anti self-kill).
         Fleet.Spawner.PodTmux.kill_holder(state.pod_id)
-        :ok
 
       true ->
         :ok
     end
+
+    # #2 (2026-06-18) : retire le sock-dir APRÈS le kill. Le kill est PROUVÉ FIABLE live (terminate_pod_port
+    # ET kill_holder tuent claude+namespace, dissection 2 probes 2026-06-18) → la garde « ne pas retirer le
+    # sock-dir tant que le kill n'est pas sûr » du chantier précédent est levée. Sans ça, le sock-dir traînait
+    # après un teardown gracieux → l'OrphanReaper le ramassait ~60s plus tard en loguant un FAUX « orphelin
+    # persistant » (bruit qui masque les vrais). L'OrphanReaper reste le filet des VRAIS orphelins (GenServer
+    # crashé → teardown jamais exécuté → sock-dir + claude survivent → reap). Gardé `tmux_session` : pods réels
+    # (bwrap/host), pas StubBackend (sock_path nominal, rm_rf no-op de toute façon).
+    if is_binary(state.tmux_session) do
+      _ = File.rm_rf(Path.dirname(Fleet.Spawner.PodTmux.sock_path(state.pod_id)))
+    end
+
+    :ok
   end
 
   @doc """
