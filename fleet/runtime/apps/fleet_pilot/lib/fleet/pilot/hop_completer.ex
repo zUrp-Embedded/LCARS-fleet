@@ -346,9 +346,31 @@ defmodule Fleet.Pilot.HopCompleter do
         forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
         forge_opts = Keyword.get(opts, :forge_opts, [])
         repo = Map.fetch!(hop, :repo)
+        n = Map.fetch!(hop, :issue_number)
         role = Map.get(hop, :role, "engineer")
-        body = "## 🔧 Note de l'#{role}\n\n#{summary}"
-        forge.post_comment(repo, pr, body, as_role(forge_opts, role))
+        role_opts = as_role(forge_opts, role)
+
+        # #6 (2026-06-18) : la voix de l'eng sur DEUX canaux à 2 buts distincts — la PR (revue du
+        # diff, contexte code) ET le TICKET (réponse au mandat, « voici ce que j'ai fait », contexte
+        # issue). Avant, seul la PR était servie (trou). Best-effort, `as_role` (le pod reste forge-aveugle,
+        # le SYSTÈME poste en son nom — même geste que le commentaire gatekeeper sur le ticket).
+        _ =
+          forge.post_comment(
+            repo,
+            pr,
+            "## 🔧 Note de l'#{role} (livrable)\n\n#{summary}",
+            role_opts
+          )
+
+        _ =
+          forge.post_comment(
+            repo,
+            n,
+            "## 🔧 Note de l'#{role} sur le ticket\n\n#{summary}",
+            role_opts
+          )
+
+        :ok
 
       _ ->
         :noop
