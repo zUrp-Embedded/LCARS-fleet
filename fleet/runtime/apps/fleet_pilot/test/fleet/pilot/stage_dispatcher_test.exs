@@ -370,6 +370,44 @@ defmodule Fleet.Pilot.StageDispatcherTest do
                StageDispatcher.dispatch_issue(payload, opts)
     end
 
+    test "#8.B : mandate_kind:judge AU STAGE override un profil worker (engineer) → mandat JUGE" do
+      payload = eng_issue()
+
+      # Le stage déclare mandate_kind:judge ; le rôle engineer a un profil WORKER. L'override per-stage
+      # doit produire un mandat JUGE (désamorcé), PAS le mandat worker (issue body + "Livraison git-native").
+      carte = %{
+        "name" => "g",
+        "stages" => %{
+          "review" => %{"role" => "engineer", "needs" => [], "mandate_kind" => "judge"}
+        }
+      }
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: {:ok, {"g", "review"}}],
+          carte_loader: fn "g" -> carte end
+        )
+
+      assert {:ok, {:spawned, _, "engineer"}} = StageDispatcher.dispatch_issue(payload, opts)
+      assert_received {:spawned, "issue-42", spawn_opts}
+      refute spawn_opts[:mandate] =~ "Livraison (git-native)"
+    end
+
+    test "#8.B : sans mandate_kind au stage → défaut du profil (engineer=worker → mandat worker)" do
+      payload = eng_issue()
+      carte = %{"name" => "g", "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: {:ok, {"g", "build"}}],
+          carte_loader: fn "g" -> carte end
+        )
+
+      assert {:ok, {:spawned, _, "engineer"}} = StageDispatcher.dispatch_issue(payload, opts)
+      assert_received {:spawned, "issue-42", spawn_opts}
+      assert spawn_opts[:mandate] =~ "Livraison (git-native)"
+    end
+
     test "pas de route (hors-carte / 1-stage) → spawn_opts SANS pipeline/stage (A1 préservé)" do
       payload = eng_issue()
 

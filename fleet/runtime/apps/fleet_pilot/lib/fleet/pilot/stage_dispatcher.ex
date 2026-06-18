@@ -142,7 +142,7 @@ defmodule Fleet.Pilot.StageDispatcher do
              # carte n'est posée. route={pipeline,stage} → `CarteNav.stage_role`. Échec de résolution sur
              # une issue ROUTÉE = misconfig → fail-loud (jamais un fallback eng muet : un stage
              # `mandate-review` qui retomberait sur l'eng = la gate sautée en silence).
-             {:ok, {role, profile}} <-
+             {:ok, {role, profile, stage_mandate_kind}} <-
                tag_err(
                  carte_role(route, role0, profile0, &loader.load/1, carte_loader),
                  :role_resolution
@@ -161,7 +161,18 @@ defmodule Fleet.Pilot.StageDispatcher do
           # Calculé UNE fois → sert au spawn-file ET au brief TaskQueue (que le pod pull via get_task).
           # Sans ça, enqueue_mandate ré-enqueuait `issue["body"]` brut → un juge pullait le mandat BUILD
           # exécutable au lieu du GateBrief → PASSE-9 recréé.
-          mandate = build_mandate(profile, role, forge, repo, number, issue, forge_opts, route)
+          mandate =
+            build_mandate(
+              profile,
+              role,
+              forge,
+              repo,
+              number,
+              issue,
+              forge_opts,
+              route,
+              stage_mandate_kind
+            )
 
           spawn_opts =
             [
@@ -524,8 +535,10 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # Mandat d'un dispatch PR (Corr.3 4-C) : :judge -> GateBrief desamorce (via build_mandate, le pod
   # juge l'issue) ; :rework -> brief de rework au PRODUCTEUR (corrige selon la review, re-pousse).
+  # #8.B : chemin PR-juge — pas de stage carte ici (juges PR-driven) → `stage_mandate_kind = nil`,
+  # build_mandate retombe sur le `mandate_kind` du profil (judge pour qualifier/reviewer).
   defp review_mandate(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
-    do: build_mandate(profile, role, forge, repo, issue_n, %{}, forge_opts, route)
+    do: build_mandate(profile, role, forge, repo, issue_n, %{}, forge_opts, route, nil)
 
   defp review_mandate(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
     do: rework_mandate(role, forge, repo, pr, forge_opts, route)
@@ -597,8 +610,23 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # F077 : la forme du mandat est une propriété du rôle (cap-profile `mandate_kind`), PAS un nom
   # magique en ring2. `judge` → GateBrief désamorcé ; tout le reste (`worker`, défaut) → corps d'issue.
-  defp build_mandate(profile, role, forge, repo, number, issue, forge_opts, route) do
-    case Fleet.CapProfile.mandate_kind(profile) do
+  defp build_mandate(
+         profile,
+         role,
+         forge,
+         repo,
+         number,
+         issue,
+         forge_opts,
+         route,
+         stage_mandate_kind
+       ) do
+    # #8.B : le `mandate_kind` du STAGE (carte) PRIME sur celui du profil (override per-stage). Permet
+    # de réutiliser un profil worker (consultant) en JUGE sur un stage donné (mandate-review) sans
+    # profil-doublon. Absent (nil) → défaut du profil (`CapProfile.mandate_kind`, "worker" par défaut).
+    kind = stage_mandate_kind || Fleet.CapProfile.mandate_kind(profile)
+
+    case kind do
       "judge" -> build_judge_mandate(role, forge, repo, number, forge_opts, route)
       _worker -> build_worker_mandate(role, issue)
     end
@@ -699,13 +727,17 @@ defmodule Fleet.Pilot.StageDispatcher do
           (String.t() -> map())
         ) :: {:ok, {String.t(), Fleet.CapProfile.t()}} | {:error, term()}
   defp carte_role(nil, producer_role, producer_profile, _load_role, _carte_loader),
-    do: {:ok, {producer_role, producer_profile}}
+    do: {:ok, {producer_role, producer_profile, nil}}
 
   defp carte_role({pipeline, stage}, _producer_role, _producer_profile, load_role, carte_loader) do
     with {:ok, carte} <- load_carte(pipeline, carte_loader),
          {:ok, role} <- carte_stage_role(carte, pipeline, stage),
          {:ok, profile} <- load_role.(role) do
-      {:ok, {role, profile}}
+      # #8.B : mandate_kind PEUT être déclaré au STAGE (carte) → override le défaut du profil. Permet au
+      # consultant (profil worker, audit intact) de JUGER en mandate-review (stage `mandate_kind: judge`)
+      # sans profil-doublon. nil → build_mandate retombe sur `CapProfile.mandate_kind(profil)`.
+      stage_mandate_kind = get_in(carte, ["stages", stage, "mandate_kind"])
+      {:ok, {role, profile, stage_mandate_kind}}
     end
   end
 
