@@ -109,11 +109,14 @@ defmodule Fleet.Pilot.StageDispatcher do
     task_queue = Keyword.get(opts, :task_queue, Fleet.TaskQueue)
     resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
 
+    # #8 : chargeur de carte injectable (seam, comme les autres) — rend `carte_role` testable sans disque.
+    carte_loader = Keyword.get(opts, :carte_loader, &Fleet.Pipeline.Loader.load!/1)
+
     case decide(payload, &loader.load/1) do
       {:skip, reason} ->
         {:skipped, reason}
 
-      {:spawn, role, profile} ->
+      {:spawn, role0, profile0} ->
         issue = Map.get(payload, "issue", payload)
         number = issue["number"]
         repo = Keyword.fetch!(opts, :repo)
@@ -131,7 +134,19 @@ defmodule Fleet.Pilot.StageDispatcher do
         # (F077) en dépend ; plus de reload ici (fin du double-load sonde+spawn).
         with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
              {:ok, route} <-
-               tag_err(route_for(forge, repo, number, forge_opts), :route_resolution) do
+               tag_err(route_for(forge, repo, number, forge_opts), :route_resolution),
+             # #8 (carte-driven) : le rôle à spawner dérive de la POSITION carte (route gravée), PAS de
+             # `producer_role` en dur. Amende l'invariant DN §1 « issue→producteur toujours » → « issue→
+             # rôle du stage courant de la carte ». route=nil (hors-carte / A1) → producteur de `decide`
+             # (role0/profile0) : comportement BYTE-IDENTIQUE, le flux prouvé ne bouge pas tant qu'aucune
+             # carte n'est posée. route={pipeline,stage} → `CarteNav.stage_role`. Échec de résolution sur
+             # une issue ROUTÉE = misconfig → fail-loud (jamais un fallback eng muet : un stage
+             # `mandate-review` qui retomberait sur l'eng = la gate sautée en silence).
+             {:ok, {role, profile}} <-
+               tag_err(
+                 carte_role(route, role0, profile0, &loader.load/1, carte_loader),
+                 :role_resolution
+               ) do
           # BL-055 : pod_id DÉTERMINISTE STABLE keyé sur (issue, rôle) — PLUS de `-<ts>`. Le timestamp
           # rendait l'id unique par hop → re-spawn à chaque rework, l'eng pipe (long-lived) lingérait,
           # contexte perdu. Stable → un re-dispatch retombe sur le MÊME pod : s'il est vivant (eng pipe),
@@ -200,7 +215,7 @@ defmodule Fleet.Pilot.StageDispatcher do
         else
           {:error, {phase, reason}} ->
             Logger.warning(
-              "StageDispatcher: #{phase} role=#{role} issue=#{repo}##{number} → #{inspect(reason)} (skip, pas de verrou)"
+              "StageDispatcher: #{phase} role=#{role0} issue=#{repo}##{number} → #{inspect(reason)} (skip, pas de verrou)"
             )
 
             {:error, {phase, reason}}
@@ -672,6 +687,40 @@ defmodule Fleet.Pilot.StageDispatcher do
   # Tag l'erreur d'une étape de résolution (préserve {:project_resolution, _} attendu).
   defp tag_err({:ok, _} = ok, _tag), do: ok
   defp tag_err({:error, reason}, tag), do: {:error, {tag, reason}}
+
+  # #8 (carte-driven role) : dérive `{role, profile}` de la POSITION carte. route=nil → producteur de
+  # `decide` (rétro-compat A1, exact). route={pipeline,stage} → `CarteNav.stage_role` + load du profil.
+  # Issue routée dont la carte/stage/profil ne résout pas = misconfig → `{:error,...}` (fail-loud).
+  @spec carte_role(
+          {String.t(), String.t()} | nil,
+          String.t(),
+          Fleet.CapProfile.t(),
+          (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()}),
+          (String.t() -> map())
+        ) :: {:ok, {String.t(), Fleet.CapProfile.t()}} | {:error, term()}
+  defp carte_role(nil, producer_role, producer_profile, _load_role, _carte_loader),
+    do: {:ok, {producer_role, producer_profile}}
+
+  defp carte_role({pipeline, stage}, _producer_role, _producer_profile, load_role, carte_loader) do
+    with {:ok, carte} <- load_carte(pipeline, carte_loader),
+         {:ok, role} <- carte_stage_role(carte, pipeline, stage),
+         {:ok, profile} <- load_role.(role) do
+      {:ok, {role, profile}}
+    end
+  end
+
+  defp load_carte(pipeline, carte_loader) do
+    {:ok, carte_loader.(pipeline)}
+  rescue
+    e -> {:error, {:carte_load_failed, pipeline, Exception.message(e)}}
+  end
+
+  defp carte_stage_role(carte, pipeline, stage) do
+    case Fleet.Pilot.CarteNav.stage_role(carte, stage) do
+      {:ok, role} when is_binary(role) -> {:ok, role}
+      _ -> {:error, {:carte_stage_unknown, pipeline, stage}}
+    end
+  end
 
   # Lit la position carte (pipeline, stage) gravée sur la forge (A2.1). `:none` (hors-carte /
   # 1-stage) → `{:ok, nil}` (comportement A1). Erreur HTTP → propagée (skip sans verrou).

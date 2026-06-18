@@ -122,6 +122,16 @@ defmodule Fleet.Pilot.StageDispatcherTest do
            spec: %{"mandate_kind" => "judge"}
          }}
 
+    # #8 : le consultant relit le MANDAT (juge) → mandate_kind: judge.
+    def load("consultant"),
+      do:
+        {:ok,
+         %Fleet.CapProfile{
+           kind: "CapabilityProfile",
+           metadata: %{"name" => "consultant"},
+           spec: %{"mandate_kind" => "judge"}
+         }}
+
     def load(_), do: {:error, :not_found}
   end
 
@@ -314,17 +324,50 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:mandate] =~ "fais le hello"
     end
 
-    test "route gravée sur la forge → pipeline+stage injectés dans spawn_opts (A2.1)" do
+    test "route gravée → rôle dérivé de la carte (stage build=engineer) + pipeline/stage injectés (A2.1, #8)" do
       payload = eng_issue()
 
+      # #8 : le rôle vient DÉSORMAIS de la carte (CarteNav.stage_role), pas de producer_role en dur.
+      # Ici le stage courant "build" porte role=engineer → rôle engineer (et route injectée, A2.1).
+      carte = %{
+        "name" => "poc-cycle",
+        "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}
+      }
+
       opts =
-        dispatch_opts(forge_opts: [_test_route: {:ok, {"poc-cycle", "build"}}])
+        dispatch_opts(
+          forge_opts: [_test_route: {:ok, {"poc-cycle", "build"}}],
+          carte_loader: fn "poc-cycle" -> carte end
+        )
 
       assert {:ok, {:spawned, _, "engineer"}} = StageDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:pipeline] == "poc-cycle"
       assert spawn_opts[:stage] == "build"
+    end
+
+    test "#8 : route sur un stage AMONT (mandate-review/consultant) → spawn le CONSULTANT, pas l'eng" do
+      payload = eng_issue()
+
+      # La carte EST la machine à états : le 1er stage (racine `needs:[]`) est mandate-review/consultant.
+      # decide() rendait "engineer" (DN §1) ; carte_role override avec le rôle du stage courant → consultant.
+      carte = %{
+        "name" => "mandate-gate",
+        "stages" => %{
+          "mandate-review" => %{"role" => "consultant", "needs" => []},
+          "build" => %{"role" => "engineer", "needs" => ["mandate-review"]}
+        }
+      }
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: {:ok, {"mandate-gate", "mandate-review"}}],
+          carte_loader: fn "mandate-gate" -> carte end
+        )
+
+      assert {:ok, {:spawned, "issue-42-consultant", "consultant"}} =
+               StageDispatcher.dispatch_issue(payload, opts)
     end
 
     test "pas de route (hors-carte / 1-stage) → spawn_opts SANS pipeline/stage (A1 préservé)" do
