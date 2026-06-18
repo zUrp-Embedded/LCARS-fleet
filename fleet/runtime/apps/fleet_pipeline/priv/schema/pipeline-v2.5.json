@@ -56,6 +56,7 @@
               "properties": {
                 "role": {"type": "string", "minLength": 1},
                 "profile": {"type": "string", "minLength": 1},
+                "mandate_kind": {"enum": ["worker", "judge"]},
                 "needs": {"type": "array", "items": {"type": "string"}},
                 "condition": {"type": "string"},
                 "inputs": {"type": "array", "items": {"type": "string"}},
