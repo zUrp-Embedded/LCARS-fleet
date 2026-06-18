@@ -408,6 +408,42 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:mandate] =~ "Livraison (git-native)"
     end
 
+    test "#8.E : judge_target:mandate → brief en cadrage MANDAT (juge le ticket.body, pas un livrable)" do
+      payload = eng_issue()
+
+      carte = %{
+        "name" => "mg",
+        "stages" => %{
+          "mandate-review" => %{
+            "role" => "consultant",
+            "needs" => [],
+            "mandate_kind" => "judge",
+            "judge_target" => "mandate"
+          }
+        }
+      }
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_route: {:ok, {"mg", "mandate-review"}},
+            _test_issue_body: "MON MANDAT A JUGER"
+          ],
+          carte_loader: fn "mg" -> carte end
+        )
+
+      assert {:ok, {:spawned, "issue-42-consultant", "consultant"}} =
+               StageDispatcher.dispatch_issue(payload, opts)
+
+      assert_received {:spawned, "issue-42", spawn_opts}
+      mandate = spawn_opts[:mandate]
+      # cadrage MANDAT (subject:mandate) + le mandat à juger, PAS le cadrage livrable.
+      assert mandate =~ "Mandat à juger"
+      assert mandate =~ "MON MANDAT A JUGER"
+      refute mandate =~ "Livrable à juger (outputs du stage"
+      refute mandate =~ "Livraison (git-native)"
+    end
+
     test "pas de route (hors-carte / 1-stage) → spawn_opts SANS pipeline/stage (A1 préservé)" do
       payload = eng_issue()
 

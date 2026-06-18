@@ -26,6 +26,8 @@ spec:
       role: consultant
       profile: consultant.yaml      # profil worker (audit), passé en JUGE par mandate_kind ci-dessous
       mandate_kind: judge           # #8.B : override per-stage → GateBrief désamorcé (verdict, pas de prod)
+      judge_target: mandate         # #8.E : juge le MANDAT (ticket.body), PAS un livrable/PR → pré-PR,
+                                    #        avance issue-level, no-PR légitime (vs deliverable = fail-loud)
       needs: []                     # racine DAG
       inputs:
         - ticket.body               # le mandat rédigé par l'arch
