@@ -311,6 +311,11 @@ defmodule Fleet.Pilot.HopConsumer do
           {:escalate, corr, eval_ctx} ->
             {:escalate, corr, eval_ctx}
 
+          # #8.E — le stage qui finit est un JUGE (mandate_kind:judge) : son verdict EST la décision →
+          # `apply_verdict` (LA fonction de verdict, partagée avec le gatekeeper async). Pas de gate hard.
+          {:judge_verdict, decision, trace, ctx} ->
+            apply_verdict(decision, trace, ctx, state)
+
           {:ok, intent, {next_assignee, next_stage}} ->
             complete_business_hop(payload, n, role, intent, next_assignee, next_stage, state)
         end
@@ -385,7 +390,8 @@ defmodule Fleet.Pilot.HopConsumer do
          next_assignee,
          next_stage,
          state,
-         comment_body \\ nil
+         comment_body \\ nil,
+         judge_target \\ nil
        ) do
     {pr_role, producer_branch} = classify_pr_role(payload, n, role, state)
 
@@ -405,6 +411,9 @@ defmodule Fleet.Pilot.HopConsumer do
         base_branch: "main"
       }
       |> put_unless_nil(:comment_body, comment_body)
+      # #8.E : judge_target (mandate|nil) → complete_judge décide trace review-PR vs commentaire-issue ;
+      # absent (chemin normal/gatekeeper) → comportement PR inchangé (fail-loud si pas de PR).
+      |> put_unless_nil(:judge_target, judge_target)
       |> maybe_put_deliverable(pr_role, role, payload, n, state)
       |> maybe_put_review_event(pr_role, intent, payload)
       |> maybe_put_eng_summary(pr_role, payload)
@@ -653,24 +662,45 @@ defmodule Fleet.Pilot.HopConsumer do
     # sinon la gate voit l'enveloppe au lieu des outputs (hard-gate à tort).
     result = unwrap_worker_envelope(payload["result"] || %{})
 
-    case Fleet.Pipeline.Gates.evaluate(spec, result, %{}) do
-      :pass ->
-        # Corr.3 — tag l'intent PR : `:advance` (stage suivant) | `:promote` (terminal).
-        tag_advance(advance(carte, stage))
+    if Map.get(spec, "mandate_kind") == "judge" do
+      # #8.E — le stage qui finit EST un juge (mandate_kind:judge, ex. mandate-review/consultant). Son
+      # result PORTE le verdict gate-decision-v1 : le juge a DÉJÀ tranché → PAS de Gates.evaluate (qui
+      # jugerait les outputs du juge comme un hard-gate). Le verdict est appliqué par `apply_verdict` (LA
+      # fonction, partagée avec le gatekeeper async). gate_decide reste un décideur PUR : il rend
+      # l'intention `{:judge_verdict, …}`, c'est run_hop qui agit.
+      decision = gate_decision(result)
+      trace = verdict_comment(payload["role"], decision, result)
 
-      {:fail, reason} ->
-        Logger.info("HopConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}")
-        tag(:rework, rebound(carte, n, state))
+      ctx = %{
+        n: n,
+        role: payload["role"],
+        payload: payload,
+        carte: carte,
+        stage: stage,
+        judge_target: Map.get(spec, "judge_target")
+      }
 
-      {:dispatch_gatekeeper, _info} ->
-        case dispatch_gatekeeper(carte, stage, result, state) do
-          {:ok, corr} ->
-            {:escalate, corr,
-             %{n: n, role: payload["role"], payload: payload, carte: carte, stage: stage}}
+      {:judge_verdict, decision, trace, ctx}
+    else
+      case Fleet.Pipeline.Gates.evaluate(spec, result, %{}) do
+        :pass ->
+          # Corr.3 — tag l'intent PR : `:advance` (stage suivant) | `:promote` (terminal).
+          tag_advance(advance(carte, stage))
 
-          {:error, reason} ->
-            {:error, {:gatekeeper_dispatch, reason}}
-        end
+        {:fail, reason} ->
+          Logger.info("HopConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}")
+          tag(:rework, rebound(carte, n, state))
+
+        {:dispatch_gatekeeper, _info} ->
+          case dispatch_gatekeeper(carte, stage, result, state) do
+            {:ok, corr} ->
+              {:escalate, corr,
+               %{n: n, role: payload["role"], payload: payload, carte: carte, stage: stage}}
+
+            {:error, reason} ->
+              {:error, {:gatekeeper_dispatch, reason}}
+          end
+      end
     end
   end
 
@@ -756,14 +786,28 @@ defmodule Fleet.Pilot.HopConsumer do
   # La TRACE du verdict est durable : portée dans le comment signé du hop (continue/abandon)
   # ou du await_human — c'est ce dont l'absence a coulé la v1.
   def resume_gate(
-        %{n: n, role: role, payload: payload, carte: carte, stage: stage},
+        %{n: _n, role: _role, payload: _payload, carte: _carte, stage: _stage} = ctx,
         raw_payload,
         state
       ) do
     result = gate_result(raw_payload)
     decision = gate_decision(result)
-    trace = verdict_comment(decision, result)
+    trace = verdict_comment("gatekeeper (juge d'exception §L441)", decision, result)
+    apply_verdict(decision, trace, ctx, state)
+  end
 
+  # #8.E — APPLICATION d'un verdict de juge (gate-decision-v1). UNE fonction, partagée par TOUS les juges
+  # quelle que soit leur position : le gatekeeper (verdict async via `task_completed` → resume_gate) ET le
+  # consultant mandate-review (verdict via `pod.completed` → gate_decide → run_hop). continue → avance la
+  # carte ; abandon → close ; reste → await_human. La SEULE diff (PR vs pré-PR) vit dans `complete_judge`
+  # (trace = review native si PR, sinon commentaire issue), dérivée de l'état forge + `judge_target` du
+  # ctx — PAS d'un fork ici. `trace` est déjà attribué au bon juge (label) par l'appelant.
+  defp apply_verdict(
+         decision,
+         trace,
+         %{n: n, role: role, payload: payload, carte: carte, stage: stage} = ctx,
+         state
+       ) do
     case decision do
       "continue" ->
         case advance(carte, stage) do
@@ -778,7 +822,8 @@ defmodule Fleet.Pilot.HopConsumer do
               next_assignee,
               next_stage,
               state,
-              trace
+              trace,
+              Map.get(ctx, :judge_target)
             )
 
           {:error, reason} ->
@@ -789,7 +834,7 @@ defmodule Fleet.Pilot.HopConsumer do
         close_with_trace(n, role, trace, state)
 
       other ->
-        # `comment_body: trace` → la trace verdict (attribuée au gatekeeper, halt_invalid
+        # `comment_body: trace` → la trace verdict (attribuée au juge via son label, halt_invalid
         # distingué) est portée sur le comment await_human, parité continue/abandon.
         hop = %{
           repo: state.repo,
@@ -832,19 +877,18 @@ defmodule Fleet.Pilot.HopConsumer do
     end)
   end
 
-  # Trace lisible du verdict (portée dans le comment du hop → durable en forge).
-  # `halt_invalid` n'est PAS une décision du gatekeeper : c'est le fallback fail-closed
-  # interne (verdict absent/malformé) → message distinct pour ne pas faire croire à un
-  # verdict gatekeeper "halt_invalid".
-  defp verdict_comment("halt_invalid", _result) do
-    "Verdict du **gatekeeper** illisible ou absent (fail-closed) → escalade humaine."
+  # Trace lisible du verdict (portée dans le comment du hop → durable en forge). #8.E : `judge_label`
+  # paramètre l'ATTRIBUTION (gatekeeper, consultant, …) → traça forge honnête (le bon juge nommé).
+  # `halt_invalid` n'est PAS une décision rendue : c'est le fallback fail-closed interne (verdict
+  # absent/malformé) → message distinct pour ne pas faire croire à un verdict "halt_invalid".
+  defp verdict_comment(judge_label, "halt_invalid", _result) do
+    "Verdict du **#{judge_label}** illisible ou absent (fail-closed) → escalade humaine."
   end
 
-  defp verdict_comment(decision, result) do
+  defp verdict_comment(judge_label, decision, result) do
     reason = if is_map(result), do: Map.get(result, "reason")
 
-    base =
-      "Verdict du **gatekeeper** (juge d'exception §L441) — décision : `#{decision}`."
+    base = "Verdict du **#{judge_label}** — décision : `#{decision}`."
 
     if is_binary(reason) and reason != "", do: base <> "\nMotif : #{reason}", else: base
   end

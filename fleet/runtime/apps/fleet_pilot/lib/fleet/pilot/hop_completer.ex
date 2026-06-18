@@ -386,9 +386,27 @@ defmodule Fleet.Pilot.HopCompleter do
     base = Map.get(hop, :base_branch, "main")
     head = Map.get(hop, :producer_branch)
 
-    with {:ok, pr} <- resolve_pr(forge, repo, head, base, forge_opts),
-         {:ok, :reviewed} <- record_review(review_hop(hop, pr), opts) do
-      route(hop, pr, opts)
+    case resolve_pr(forge, repo, head, base, forge_opts) do
+      {:ok, pr} ->
+        # Juge de LIVRABLE (la PR existe) : verdict tracé en review native + route PR (request next / merge).
+        with {:ok, :reviewed} <- record_review(review_hop(hop, pr), opts) do
+          route(hop, pr, opts)
+        end
+
+      {:error, {:pr_lookup, :no_producer_branch}} = err ->
+        # #8.E — juge de MANDAT (judge_target:mandate) : PRÉ-PR, donc pas de PR ni de review native → le
+        # verdict se trace en COMMENTAIRE issue et l'avance est ISSUE-LEVEL (grave la route → le poller
+        # dispatche le stage suivant). Réutilise `complete` (la MÊME complétion issue-level que
+        # close_with_trace : publish sauté via deliverable_opts nil + hop_sha). Tout AUTRE juge sans PR =
+        # erreur (un livrable était attendu) → fail-loud INCHANGÉ (jamais un merge sur PR introuvable).
+        if Map.get(hop, :judge_target) == "mandate" do
+          hop |> Map.merge(%{deliverable_opts: nil, hop_sha: "mandate-verdict"}) |> complete(opts)
+        else
+          err
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
 

@@ -28,6 +28,8 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
       do: send(self(), {:open_pr, head, base, o[:body]}) && {:ok, 7}
 
     def get_pr_for_branch(_r, head, base, _o), do: send(self(), {:get_pr, head, base}) && {:ok, 7}
+    # #8.E : un juge de MANDAT (mandate-review) est PRÉ-PR → aucune PR producteur ouverte.
+    def list_open_pulls(_r, _o), do: {:ok, []}
     def request_review(_r, pr, revs, _o), do: send(self(), {:request_review, pr, revs}) && :ok
     def post_review(_r, pr, ev, body, _o), do: send(self(), {:review, pr, ev, body}) && :ok
     def merge_pr(_r, pr, _o), do: send(self(), {:merge, pr}) && :ok
@@ -84,6 +86,22 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
         "stages" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "review" => %{"role" => "reviewer", "needs" => ["build"]}
+        }
+      }
+    end
+
+    # #8.E : carte mandate-gate — stage racine mandate-review (consultant JUGE le MANDAT, pré-PR) -> build.
+    def load!("mandgate") do
+      %{
+        "name" => "mandgate",
+        "stages" => %{
+          "mandate-review" => %{
+            "role" => "consultant",
+            "needs" => [],
+            "mandate_kind" => "judge",
+            "judge_target" => "mandate"
+          },
+          "build" => %{"role" => "engineer", "needs" => ["mandate-review"]}
         }
       }
     end
@@ -328,6 +346,65 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute_received :closed
     assert_received {:comment, body}
     assert body =~ "illisible ou absent"
+  end
+
+  # ── #8.E : verdict d'un juge de MANDAT (mandate-review/consultant) via pod.completed ──────────
+  # MÊME apply_verdict que le gatekeeper (factorisé) ; le consultant est PRÉ-PR → avance ISSUE-LEVEL
+  # (grave route, pas de PR) et trace attribuée au CONSULTANT (pas "gatekeeper").
+
+  # pod.completed du stage mandate-review (consultant) qui vient de rendre son verdict.
+  defp mandate_done(result),
+    do: %{
+      "ticket_id" => "issue-1",
+      "workspace" => "/ws",
+      "base_sha" => "cafe",
+      "role" => "consultant",
+      "pipeline" => "mandgate",
+      "stage" => "mandate-review",
+      "result" => result
+    }
+
+  test "#8.E mandate-review continue -> AVANCE issue-level vers build (route+commentaire, PAS de PR, assignee intact)" do
+    assert {:ok, :reassigned} =
+             HopConsumer.maybe_complete(
+               mandate_done(%{"decision" => "continue", "reason" => "mandat clair"}),
+               hc()
+             )
+
+    # avance ISSUE-LEVEL : grave la route vers build ; AUCUNE PR ouverte (le consultant juge pré-PR).
+    assert_received {:route, "mandgate", "build"}
+    refute_received {:open_pr, _, _, _}
+    refute_received {:assignee, _}
+    assert_received :unlocked
+    # trace attribuée au CONSULTANT (honnête), pas au gatekeeper.
+    assert_received {:comment, body}
+    assert body =~ "consultant"
+    assert body =~ "continue"
+  end
+
+  test "#8.E mandate-review escalate_user -> await_human (arch) ; trace CONSULTANT, pas gatekeeper" do
+    assert {:ok, :awaiting_human} =
+             HopConsumer.maybe_complete(
+               mandate_done(%{"decision" => "escalate_user", "reason" => "mandat ambigu"}),
+               hc()
+             )
+
+    assert_received {:label, "lcars-awaits-human"}
+    assert_received :unlocked
+    refute_received {:assignee, _}
+    refute_received :closed
+    assert_received {:comment, body}
+    assert body =~ "consultant"
+    refute body =~ "gatekeeper"
+  end
+
+  test "#8.E mandate-review abandon -> close (mandat jeté), PAS de PR ni de push" do
+    assert {:ok, :completed} =
+             HopConsumer.maybe_complete(mandate_done(%{"decision" => "abandon"}), hc())
+
+    assert_received :closed
+    refute_received {:open_pr, _, _, _}
+    refute_received {:publish, _}
   end
 
   # ── B : cablage async (GenServer) — store gate_evals a l'escalade, pop a la reprise ──
