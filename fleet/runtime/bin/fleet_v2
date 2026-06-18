@@ -105,7 +105,9 @@ cmd_start() {
   echo "fleet_v2: attente du boot de l'arch…" >&2
   local arch_sock=""
   for _ in $(seq 1 120); do
-    arch_sock="$(ls -1d "$LCARS_TMUX_SOCK_BASE"/permanent-architect-*/ 2>/dev/null | head -1 || true)"
+    # Glob PRÉFIXE (pas `-*`) : depuis BL-055 l'id permanent est DÉTERMINISTE (`permanent-architect`,
+    # sans `-<os_time>`) → le `-*` historique ne matchait plus jamais (timeout 120s, arch non attaché).
+    arch_sock="$(ls -1d "$LCARS_TMUX_SOCK_BASE"/permanent-architect*/ 2>/dev/null | head -1 || true)"
     [[ -n "$arch_sock" && -S "${arch_sock}pod.sock" ]] && break
     dtmux has-session -t "$SESSION" 2>/dev/null \
       || die "le BEAM s'est arrêté (logs : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION »)"
