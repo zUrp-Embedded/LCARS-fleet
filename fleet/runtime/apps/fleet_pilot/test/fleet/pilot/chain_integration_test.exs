@@ -296,6 +296,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       repo: "o/r",
       forge_client: SimForge,
       loader: CapLoader,
+      # #8 (piece 1) : carte_role dérive le rôle de la POSITION carte → il faut le loader de CARTE
+      # (load!/1), distinct du loader de cap-profiles (`loader`, load/1). Sans lui, carte_role tombe
+      # sur le vrai Loader (priv) → "poc-mini"/"gkchain" introuvables → dispatch échoue.
+      carte_loader: &CarteLoader.load!/1,
       spawner: SpawnStub,
       task_queue: TQStub,
       clock: fn :second -> 100 end,
@@ -329,10 +333,11 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       Sim.start_link(%{
         "number" => 1,
         "state" => "open",
-        # `type:poc` = trigger d'entrée carte (legacy Entry, FALL ②.3). En no-label, `decide` spawn
-        # le producteur (engineer) pour toute issue assignée — pas besoin de stage-marker.
+        # `type:poc` = trigger d'entrée carte (legacy Entry, FALL ②.3). #8.A : l'assignee = l'HUMAIN
+        # (posé à la création par l'arch) ; il reste inchangé tout au long de la chaîne (Entry/advance ne
+        # l'écrasent plus). `decide` spawn tant qu'il y a un assignee — l'état/position vit dans la route.
         "labels" => [%{"name" => "type:poc"}],
-        "assignees" => [],
+        "assignees" => [%{"login" => "human"}],
         "comments" => []
       })
 
@@ -355,23 +360,24 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       loader: CarteLoader
     ]
 
-    # 1. ENTREE : type:poc -> route build + assignee engineer (producteur)
+    # 1. ENTREE : type:poc -> grave route build ; l'assignee reste l'HUMAIN (#8.A : Entry ne pose QUE
+    #    la route, plus de set_assignee — le rôle du stage est dérivé de la route au dispatch).
     assert {:ok, {:entered, "engineer"}} = Entry.enter(wrap(pid), entry_opts)
     assert {:ok, {"poc-mini", "build"}} = SimForge.get_route("o/r", 1, [])
-    assert [%{"login" => "engineer"}] = Sim.get(pid)["assignees"]
+    assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
 
-    # 2. DISPATCH build -> spawn engineer (issue-assignee-driven)
+    # 2. DISPATCH build -> spawn engineer (route-driven : carte_role lit la route, pas l'assignee)
     assert {:ok, {:spawned, _, "engineer"}} =
              StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
 
     assert_received {:spawned, "issue-1", o1}
 
     # 3. engineer finit -> :advance : ouvre la PR + request_review(reviewer) + route review.
-    #    L'assignee de l'issue reste ENGINEER (plus de set_assignee), la suite est PR-driven.
+    #    L'assignee de l'issue reste l'HUMAIN (#8.A : plus de set_assignee), la suite est PR-driven.
     assert {:ok, :review_requested} = HopConsumer.maybe_complete(completed(o1, "engineer"), hc())
     assert {:ok, _pr_n} = SimForge.get_pr_for_branch("o/r", "lcars/issue-1-engineer", "main", [])
     assert {:ok, {"poc-mini", "review"}} = SimForge.get_route("o/r", 1, [])
-    assert [%{"login" => "engineer"}] = Sim.get(pid)["assignees"]
+    assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
     {pr_payload, pr_n} = single_open_pr()
     assert [%{"login" => "reviewer"}] = pr_payload["requested_reviewers"]
 
@@ -411,7 +417,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     # build (pas de gate) finit -> avance review(reviewer) : ouvre la PR + request_review.
     assert {:ok, :review_requested} = HopConsumer.maybe_complete(completed(o1, "engineer"), hc())
     assert {:ok, {"gkchain", "review"}} = SimForge.get_route("o/r", 1, [])
-    assert [%{"login" => "engineer"}] = Sim.get(pid)["assignees"]
+    assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
     {pr_payload, _pr_n} = single_open_pr()
 
     # dispatch review via la PR -> spawn reviewer
