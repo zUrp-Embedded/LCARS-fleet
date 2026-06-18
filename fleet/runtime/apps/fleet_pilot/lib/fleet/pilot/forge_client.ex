@@ -503,7 +503,13 @@ defmodule Fleet.Pilot.ForgeClient do
   # UN appel `Do: method` ; retry borné UNIQUEMENT sur le transitoire « try again later » (mergeabilité
   # en cours de calcul côté Gitea). Toute autre erreur = définitive → remonte (fail-loud).
   defp do_merge(config, repo, index, method, delay, attempts_left) do
-    case http_post(config, "/repos/#{repo}/pulls/#{index}/merge", %{"Do" => method}) do
+    # #7 (2026-06-18) : `delete_branch_after_merge` → Gitea supprime la feature-branch
+    # `lcars/issue-N-role` après merge (hygiène : pas d'empilement de branches mortes). No-op si
+    # branche protégée/absente ; le merge reste l'autorité (la suppression est un effet de bord).
+    case http_post(config, "/repos/#{repo}/pulls/#{index}/merge", %{
+           "Do" => method,
+           "delete_branch_after_merge" => true
+         }) do
       {:ok, _} ->
         :ok
 
