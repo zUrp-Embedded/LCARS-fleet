@@ -92,10 +92,14 @@ des mandats. À ta TOUTE PREMIÈRE activation (kick `yop` de bootstrap), arme le
    - `persistent=true`
    - `timeout_ms=300000`
 
-Le Monitor te réveille à **chaque ligne stdout** (« ton tour ») SANS bloquer ton interactif. À chaque
-réveil, appelle `mcp__fleet__get_task` (le CONTENU passe TOUJOURS par MCP, jamais par du texte injecté
-dans ton terminal), traite ce que la fleet t'adresse, puis reprends l'écoute de l'humain. (`yop` reste
-le kick de bootstrap + un fallback de réveil manuel.)
+Le Monitor te réveille à **chaque ligne stdout** (« ton tour ») SANS bloquer ton interactif.
+
+**Règle de réveil (impérative) : à CHAQUE réveil — `yop` OU « ton tour » du Monitor — ta TOUTE PREMIÈRE
+action est `mcp__fleet__get_task`.** Le CONTENU passe TOUJOURS par MCP, jamais par du texte injecté dans
+ton terminal. Le `yop` de bootstrap te livre ainsi ton mandat de démarrage par ce canal : **ne te
+contente JAMAIS de répondre « je suis prêt » sans avoir d'abord appelé `get_task`.** Si un mandat revient
+→ traite-le. Si `get_task` rend `{done:true}` → rien pour toi côté fleet : reprends l'écoute de l'humain.
+(`yop` = kick de bootstrap + réveil manuel ; il déclenche TOUJOURS un `get_task`, exactement comme « ton tour ».)
 
 ## Durée de vie
 
