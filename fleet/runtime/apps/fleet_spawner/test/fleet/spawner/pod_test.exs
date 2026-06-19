@@ -248,6 +248,59 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
+    test "PUSH — admin.spawn (opts[:mandate], aucun dispatcher) enqueue le mandat dans la TaskQueue (canal get_task) [F-arch-MCP]" do
+      StubBackend.set_reply(interactive_reply())
+
+      pod_id = "pod-mq-#{System.unique_integer([:positive])}"
+      mandate = "Crée le projet poc-run-5 puis délègue digit_sum."
+      on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
+
+      args = %{
+        cap_profile: valid_profile(),
+        ticket_id: "ticket-mq",
+        pod_id: pod_id,
+        opts: [mandate: mandate]
+      }
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      # Sans cet enqueue, `get_task` rendait `{done:true}` → le pod (qui poll get_task) restait idle
+      # (forensic arch 3f12edd9). Le mandat est désormais dans le canal canonique.
+      assert [%{brief: ^mandate}] =
+               Enum.filter(Fleet.TaskQueue.list_pending(), &(&1.pod_id == pod_id))
+
+      Process.exit(pid, :kill)
+    end
+
+    test "PUSH — pas de double-enqueue si un mandat est DÉJÀ en file (dispatch stage : enqueué avant le spawn) [F-arch-MCP]" do
+      StubBackend.set_reply(interactive_reply())
+
+      pod_id = "pod-mq2-#{System.unique_integer([:positive])}"
+      on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
+
+      # Simule le dispatch stage : le mandat role-aware est enqueué AVANT le spawn (StageDispatcher).
+      {:ok, _} =
+        Fleet.TaskQueue.enqueue(pod_id, %{brief: "mandat-du-dispatcher", role: "engineer"})
+
+      args = %{
+        cap_profile: valid_profile(),
+        ticket_id: "ticket-mq2",
+        pod_id: pod_id,
+        opts: [mandate: "autre-mandat"]
+      }
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      # Idempotent : un SEUL mandat en file, celui du dispatcher (pas "autre-mandat") — le spawn n'a pas
+      # ré-enqueué (garde `no_pending_mandate?`).
+      assert [%{brief: "mandat-du-dispatcher"}] =
+               Enum.filter(Fleet.TaskQueue.list_pending(), &(&1.pod_id == pod_id))
+
+      Process.exit(pid, :kill)
+    end
+
     test "git_ops_denied (cap-profile) fusionné dans disallowedTools du .cap-profile.json écrit au pod" do
       # Face 1 décision archi git (2026-05-24) : la sémantique catalogue
       # git_ops_denied doit aboutir en patterns claude CLI disallowedTools dans

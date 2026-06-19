@@ -469,6 +469,11 @@ defmodule Fleet.Spawner.Pod do
              Path.join(tickets_dir, "#{ticket_id_to_filename(state.ticket_id)}.md"),
              default_brief(state)
            ),
+         # F-arch-MCP : le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du mandat est
+         # la TaskQueue (`get_task`). Un dispatch stage enqueue AVANT le spawn (StageDispatcher) ; mais
+         # `admin.spawn` (lcars spawn --mandate) n'a PAS de dispatcher → sans cet enqueue, `get_task` rend
+         # `{done:true}` et le pod reste idle (forensic arch 3f12edd9). Idempotent (skip si déjà en file).
+         :ok <- maybe_enqueue_mandate(state),
          :ok <- maybe_provision_mcp_config(state),
          :ok <- provision_monitor_watch(state),
          :ok <- maybe_bootstrap_project_workspace(state) do
@@ -1683,6 +1688,38 @@ defmodule Fleet.Spawner.Pod do
 
     #{body}
     """
+  end
+
+  # F-arch-MCP — enqueue le mandat dans la TaskQueue (le canal CANONIQUE `get_task`), idempotent :
+  #   - pas de mandat (pod permanent/interactif booté à froid) → rien à puller → bootstrap (skip) ;
+  #   - mandat DÉJÀ en file (`pod_status != {:ok, nil}` : dispatch stage, StageDispatcher a enqueué AVANT
+  #     le spawn) → pas de double-enqueue (skip) ;
+  #   - sinon (`admin.spawn` / `lcars spawn --mandate` : aucun dispatcher) → on enqueue ici, sinon
+  #     `get_task` rend `{done:true}` et le pod reste idle (cf. StageDispatcher.enqueue_mandate).
+  # Mirror des `attrs` de StageDispatcher (`ticket_id`/`role`/`brief`/`metadata`).
+  defp maybe_enqueue_mandate(state) do
+    mandate = Keyword.get(state.opts || [], :mandate)
+
+    cond do
+      not (is_binary(mandate) and mandate != "") ->
+        :ok
+
+      not no_pending_mandate?(state.pod_id) ->
+        :ok
+
+      true ->
+        attrs = %{
+          ticket_id: state.ticket_id,
+          role: cap_profile_name(state.cap_profile),
+          brief: mandate,
+          metadata: %{"source" => "admin.spawn"}
+        }
+
+        case Fleet.TaskQueue.enqueue(state.pod_id, attrs) do
+          {:ok, _task} -> :ok
+          {:error, reason} -> {:error, {:mandate_enqueue_failed, reason}}
+        end
+    end
   end
 
   defp launch_backend do
