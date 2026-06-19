@@ -42,6 +42,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert c_opts[:token] == "GK-TOKEN"
     assert c_opts[:dedup_signature] == "[merge:pr-7]"
 
+    # comment signé GATEKEEPER (pas le bot) → dédup author-agnostic, sinon double-post au retry.
+    assert c_opts[:dedup_any_author] == true
+
     assert_received {:merge, "fleet/p", 7, m_opts}
     assert m_opts[:token] == "GK-TOKEN"
   end

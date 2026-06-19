@@ -35,8 +35,12 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     signature = "[merge:pr-#{pr_number}]"
     body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
 
-    with {:ok, _} <-
-           comment(forge, repo, issue_n, body, Keyword.put(gk_opts, :dedup_signature, signature)),
+    # `dedup_any_author` : le comment est signé GATEKEEPER (compte de rôle, pas le bot système) → le dédup
+    # doit le voir quel que soit l'auteur, sinon double-post quand `promote` rejoue (retry merge / escalade).
+    comment_opts =
+      gk_opts |> Keyword.put(:dedup_signature, signature) |> Keyword.put(:dedup_any_author, true)
+
+    with {:ok, _} <- comment(forge, repo, issue_n, body, comment_opts),
          :ok <- do_merge(forge, repo, pr_number, gk_opts) do
       :ok
     end

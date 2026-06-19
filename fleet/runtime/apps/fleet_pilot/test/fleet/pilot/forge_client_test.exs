@@ -564,6 +564,26 @@ defmodule Fleet.Pilot.ForgeClientTest do
                  dedup_opts(handlers, "[hop:engineer:abc]")
                )
     end
+
+    test "dedup_any_author : un comment de RÔLE (non-bot, ex. Gatekeeper) signé → no-op (sceau merge)" do
+      # F-arch-MCP : le sceau `[merge:pr-N]` est posté par le compte de rôle GATEKEEPER (pas le bot) → le
+      # dédup bot-only le raterait → double-post au retry. `dedup_any_author` le rend author-agnostic
+      # (sûr : `[merge:pr-N]` n'est PAS un marqueur compté, contrairement à `[hop:role:sha]` que F058 protège).
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200,
+           [%{"user" => %{"login" => "Gatekeeper"}, "body" => "## ✅ Brique #42 [merge:pr-2]"}]}
+      }
+
+      # Sans `dedup_any_author`, le comment Gatekeeper (non-bot) serait ignoré → re-post (cf. test F058).
+      assert {:ok, :already} =
+               ForgeClient.post_comment(
+                 "fleet/lcars",
+                 42,
+                 "## ✅ Brique #42 [merge:pr-2]",
+                 dedup_opts(handlers, "[merge:pr-2]") |> Keyword.put(:dedup_any_author, true)
+               )
+    end
   end
 
   describe "remove_label/4 + close_issue/3" do

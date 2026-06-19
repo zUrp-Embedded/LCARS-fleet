@@ -734,9 +734,19 @@ defmodule Fleet.Pilot.ForgeClient do
         # fail-OPEN (dédup non filtré) : au pire un comment dupliqué au replay, jamais une suppression
         # silencieuse d'un marqueur load-bearing.
         trusted =
-          case forge_bot_login(config, opts) do
-            {:ok, bot} -> Enum.filter(comments, &system_authored?(&1, bot))
-            {:error, _} -> comments
+          cond do
+            # F-arch-MCP : marqueur NON load-bearing (ex. `[merge:pr-N]`, posté par le compte de RÔLE
+            # gatekeeper et non le bot système) → dédup AUTHOR-AGNOSTIC. Le filtre bot-only de F058 ne
+            # protège QUE les marqueurs comptés (`[hop:role:sha]` → count_signed_hops) : un comment de
+            # sceau gatekeeper échappait au dédup bot-only (double-post au replay/retry).
+            Keyword.get(opts, :dedup_any_author, false) ->
+              comments
+
+            true ->
+              case forge_bot_login(config, opts) do
+                {:ok, bot} -> Enum.filter(comments, &system_authored?(&1, bot))
+                {:error, _} -> comments
+              end
           end
 
         Enum.any?(trusted, fn c -> String.contains?(c["body"] || "", sig) end)
