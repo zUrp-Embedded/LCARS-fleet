@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-17 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
+**Dernière révision** : 2026-06-19 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -43,7 +43,7 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   (`git diff`) + porte le **critère** (body de l'issue, désamorcé I-CBC via `GateBrief :request`) ; le
   mandat **rework** injecte le **body des reviews REQUEST_CHANGES** (`ForgeClient.change_request_feedback/3`)
   — sans quoi le juge jugeait du `{}` et l'eng corrigeait à l'aveugle (wedge prouvé live morse).
-- `Fleet.Pilot.Poller` — scanne le repo, dispatche les issues assignées → spawn producteur (+ Entry legacy sur `type:`, FALL).
+- `Fleet.Pilot.Poller` — scanne le repo, lit la **route-comment** (`[lcars-route:carte:stage]`, gravée par `create_ticket` = la state-machine de routing) → dispatche le rôle du stage (`carte_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du 1er stage). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
 - `Fleet.Pilot.Labels` — vocabulaire wire-protocol (source unique) : **uniquement** ce qui n'est pas
   dérivable de l'état forge — verrous `lcars-in-flight`/`lcars-awaits-human`, états `state:*` (legacy carte).
 - `Fleet.Pilot.HopConsumer` — consumer Bus de la **fin-de-hop** (`pod.completed` → `HopCompleter`) ;
