@@ -15,6 +15,12 @@ defmodule Fleet.CapProfile.MonksV25ConformanceTest do
   """
   use ExUnit.Case, async: true
 
+  # GELÉ (BL — Memory-X frozen 2026-06-19) : conformité v2.5 des cap-profiles monk, désormais ARCHIVÉS
+  # (`priv/canon/_frozen-monks/`, hors boucle de boot). Ré-activer au re-home de Memory-X (per-project +
+  # system-wide sous lcars). cf. work/backlog.md.
+  @moduletag skip:
+               "Memory-X gelé (BL) — cap-profiles monks archivés ; ré-activer au re-home per-project"
+
   @schema_path Path.join([__DIR__, "..", "priv", "schema", "cap-profile-v2.5.json"])
   @monks_dir Path.join([__DIR__, "..", "priv", "canon", "cap-profiles", "monks"])
 

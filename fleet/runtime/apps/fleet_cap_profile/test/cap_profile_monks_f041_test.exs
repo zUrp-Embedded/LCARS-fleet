@@ -2,6 +2,12 @@ defmodule Fleet.CapProfile.MonksF041Test do
   # async: false — mute la config globale :root_dir.
   use ExUnit.Case, async: false
 
+  # GELÉ (BL — Memory-X frozen 2026-06-19) : teste que `list/load` scannent `cap-profiles/monks/`,
+  # désormais ARCHIVÉ (`priv/canon/_frozen-monks/`, hors boucle de boot). Ré-activer au re-home de
+  # Memory-X (per-project + system-wide sous lcars). cf. work/backlog.md.
+  @moduletag skip:
+               "Memory-X gelé (BL) — cap-profiles monks archivés ; ré-activer au re-home per-project"
+
   alias Fleet.CapProfile
 
   @canon_dir Path.join([__DIR__, "..", "priv", "canon", "cap-profiles"]) |> Path.expand()

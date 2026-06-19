@@ -8,6 +8,14 @@ defmodule Fleet.SPBuilder.MonkTest do
   """
   use ExUnit.Case, async: true
 
+  # GELÉ (BL — Memory-X frozen 2026-06-19) : les fixtures de ce test = les cap-profiles monk réels
+  # (`cap-profiles/monks/alpha.yaml`…), désormais ARCHIVÉS dans `priv/canon/_frozen-monks/` (Memory-X
+  # sorti de la boucle de boot : doit être per-project + system-wide sous lcars, pas per-fleet). Le code
+  # `resolve_monk_injection/2` reste en place ; ré-activer ces tests (et re-pointer les fixtures) au
+  # re-home de Memory-X. cf. work/backlog.md.
+  @moduletag skip:
+               "Memory-X gelé (BL) — cap-profiles monks archivés ; ré-activer au re-home per-project"
+
   alias Fleet.SPBuilder
 
   # R0.8-brick1 : root canon in-repo (R0.7 réabsorption), pas path doctrine

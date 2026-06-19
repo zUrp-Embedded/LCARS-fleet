@@ -75,6 +75,14 @@ setup_env() {
   export LCARS_BOOT_PERMANENT_AT_START=true
   export LCARS_PILOT_STAGE="${LCARS_PILOT_STAGE:-true}"
 
+  # Debug (pas-à-pas RPC) : BEAM en node Erlang NOMMÉ, pilotable depuis l'extérieur. Config-driven via
+  # l'env (`LCARS_FLEET_V2_ERL_NODE` dans fleet_v2.env) → AUCUN `export` manuel pour lancer la fleet.
+  # Vide en prod = BEAM anonyme normal. (NB : ne PAS mettre dans .bashrc — polluerait tout `elixir`/`mix`
+  # du shell, dont le contrôleur RPC « multiple -name ».)
+  if [[ -n "${LCARS_FLEET_V2_ERL_NODE:-}" ]]; then
+    export ELIXIR_ERL_OPTIONS="-name ${LCARS_FLEET_V2_ERL_NODE} -setcookie ${LCARS_FLEET_V2_ERL_COOKIE:-lcars} ${ELIXIR_ERL_OPTIONS:-}"
+  fi
+
   mkdir -p "$LCARS_TMUX_SOCK_BASE" "$(dirname "$DAEMON_SOCK")"
 
   # Persiste l'env runtime calculé pour que l'humain pilote `lcars` ensuite (`source` ce fichier).
