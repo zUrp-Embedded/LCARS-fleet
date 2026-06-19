@@ -358,18 +358,8 @@ if config_env() != :test do
     config :fleet_pilot, stage_dispatch?: true
   end
 
-  # Routing d'ENTRÉE stage-mode : map `type:X → carte`. JSON inline via env.
-  # Ex : LCARS_PILOT_STAGE_ROUTING='{"type:poc":"poc-cycle"}'.
-  if routing_json = System.get_env("LCARS_PILOT_STAGE_ROUTING") do
-    # Z6 (CFG-CR) — `Jason.decode!` crashait le boot sur un JSON malformé. Garde claire.
-    case Jason.decode(routing_json) do
-      {:ok, map} when is_map(map) ->
-        config :fleet_pilot, stage_routing: map
-
-      _ ->
-        raise "LCARS config: LCARS_PILOT_STAGE_ROUTING n'est pas un objet JSON valide — boot refusé"
-    end
-  end
+  # #8 cohérence : plus de routing par label (`LCARS_PILOT_STAGE_ROUTING` retiré). Le routing vit dans la
+  # route-comment, gravée par `create_ticket` (carte de délégation, défaut mandate-gate). type:* = visu.
 
   # Remote git où le système pousse les livrables (HopConsumer). Override ; sinon dérivé
   # de :forge base_url + poll_repo (cf. Application.hop_remote). Token JAMAIS dans l'URL.

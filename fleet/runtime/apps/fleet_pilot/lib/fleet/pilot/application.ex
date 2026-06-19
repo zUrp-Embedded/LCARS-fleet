@@ -91,14 +91,14 @@ defmodule Fleet.Pilot.Application do
     end
 
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
-    routing = Application.get_env(:fleet_pilot, :stage_routing, %{})
 
     [
       # F067 : superviseur de tasks pour l'offload de la complétion de hop (le git push ≤30s du
       # HopConsumer ne bloque pas le singleton). Démarré AVANT le HopConsumer (qui s'y réfère).
       {Task.Supervisor, name: Fleet.Pilot.HopConsumer.task_supervisor()},
-      {Fleet.Pilot.Poller,
-       repo: repo, interval_ms: interval, stage_dispatch?: true, routing: routing},
+      # #8 cohérence : plus de `routing` (type:label→carte). Le routing vit dans la route-comment
+      # (gravée par create_ticket) ; le Poller la lit (state-machine). type:* = visu seulement.
+      {Fleet.Pilot.Poller, repo: repo, interval_ms: interval, stage_dispatch?: true},
       {Fleet.Pilot.HopConsumer,
        repo: repo,
        remote: remote,

@@ -51,7 +51,16 @@ defmodule Fleet.Pilot.PollerTest do
 
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
-    def get_route(_repo, _n, _opts), do: :none
+
+    # #8 : la route vit dans le route-comment (state-machine). Stub configurable par `_test_routes`
+    # (map n → {carte, stage}). Défaut :none (ticket non routé → A1 producteur).
+    def get_route(_repo, n, opts) do
+      case Map.get(Keyword.get(opts, :_test_routes, %{}), n) do
+        {carte, stage} -> {:ok, {carte, stage}}
+        _ -> :none
+      end
+    end
+
     def get_predecessor_result(_repo, _n, _opts), do: :none
     # Fix famine-d'info : build_judge_mandate lit le critère (body de l'issue) via get_issue.
     def get_issue(_repo, n, _opts), do: {:ok, %{"number" => n, "body" => "critère stub ##{n}"}}
@@ -89,8 +98,20 @@ defmodule Fleet.Pilot.PollerTest do
 
   # Loader de CARTE (load!/1) — distinct du loader CapProfile ci-dessus (load/1).
   defmodule StageStubCarteLoader do
-    def load!("poc-cycle") do
-      %{"name" => "poc-cycle", "stages" => %{"triage" => %{"role" => "architect", "needs" => []}}}
+    # 1-stage (producteur engineer) : un ticket routé ici (stage=build=1er) est EN FILE (pas démarré).
+    def load!("qa-build") do
+      %{"name" => "qa-build", "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+    end
+
+    # 2-stage : routé au 2e stage (deploy ≠ 1er) = pipeline AVANCÉ (entre deux hops) = ENGAGÉ.
+    def load!("qa-2") do
+      %{
+        "name" => "qa-2",
+        "stages" => %{
+          "build" => %{"role" => "engineer", "needs" => []},
+          "deploy" => %{"role" => "engineer", "needs" => ["build"]}
+        }
+      }
     end
   end
 
@@ -219,17 +240,20 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "ticket type: SANS assignee → ENTRÉE carte (route + 1er assignee) [A2.1]" do
+    test "ticket ROUTÉ (route-comment) + assignee → démarre → dispatche le rôle du stage (carte_role)" do
+      # #8 cohérence : le routing vient de la ROUTE-COMMENT (gravée par create_ticket), plus du label.
+      # #10 routé qa-build:build (1er stage = en file), assigné humain, bail libre → DÉMARRE → le poller
+      # dispatche le rôle du stage courant (build → engineer via carte_role).
       issues = [
         %{
           "number" => 10,
           "body" => "neuf",
-          "labels" => [%{"name" => "type:poc"}],
-          "assignees" => []
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
         }
       ]
 
-      name = :"P_entry_#{System.unique_integer([:positive])}"
+      name = :"P_routed_#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
         Poller.start_link(
@@ -238,17 +262,18 @@ defmodule Fleet.Pilot.PollerTest do
           start_tick?: false,
           stage_dispatch?: true,
           forge_client: StageStubForge,
-          forge_opts: [_test_issues: {:ok, issues}],
+          forge_opts: [
+            _test_issues: {:ok, issues},
+            _test_routes: %{10 => {"qa-build", "build"}}
+          ],
           loader: StageStubLoader,
           carte_loader: StageStubCarteLoader,
-          routing: %{"type:poc" => "poc-cycle"},
           spawner: StageStubSpawner,
           clock: fn :second -> 1_700_000_000 end
         )
 
-      # pas d'assignee → pas de spawn, mais ENTRÉE réussie (route+assignee posés DANS le GenServer →
-      # messages dans SA mailbox, pas celle du test ; le détail est unit-testé dans entry_test).
-      # Au niveau Poller, le contrat = le tally : entrée comptée dispatched.
+      # tally = le contrat au niveau Poller (le spawn part dans la mailbox du GenServer, pas du test ;
+      # le rôle dispatché par carte_role est unit-testé dans stage_dispatcher_test).
       assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)
@@ -259,7 +284,7 @@ defmodule Fleet.Pilot.PollerTest do
   # Bail repo-serialise (incrément 3) : au plus 1 pipeline actif par repo.
   # ============================================================
   describe "mode stage — bail repo-serialise" do
-    defp start_entry_poller(issues_response) do
+    defp start_entry_poller(issues_response, routes) do
       name = :"P_lease_#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
@@ -269,10 +294,9 @@ defmodule Fleet.Pilot.PollerTest do
           start_tick?: false,
           stage_dispatch?: true,
           forge_client: StageStubForge,
-          forge_opts: [_test_issues: issues_response],
+          forge_opts: [_test_issues: issues_response, _test_routes: routes],
           loader: StageStubLoader,
           carte_loader: StageStubCarteLoader,
-          routing: %{"type:poc" => "poc-cycle"},
           spawner: StageStubSpawner,
           clock: fn :second -> 1_700_000_000 end
         )
@@ -280,66 +304,71 @@ defmodule Fleet.Pilot.PollerTest do
       {name, pid}
     end
 
-    test "un pipeline en cours (ticket engagé via label) bloque l'entree d'un ticket neuf" do
+    test "un pipeline ENGAGÉ (route avancée) tient le bail et bloque un ticket EN FILE" do
+      # #8 : le bail se lit sur la ROUTE (state-machine), PLUS sur state:*. #11 routé qa-2:deploy (2e
+      # stage ≠ 1er = pipeline AVANCÉ entre deux hops) → ENGAGÉ → tient le bail ET son stage courant est
+      # dispatché (continue le hop). #12 routé qa-build:build (1er stage = EN FILE) → bail tenu → attend.
       issues = [
-        # #8.A : #11 déjà ENGAGÉ — signalé par le LABEL state:delivered (entre deux hops), PLUS par
-        # l'assignee (= l'humain). Tient le bail → sera dispatché (advance). Bloque l'entrée de #12.
         %{
           "number" => 11,
           "body" => "en cours",
-          "labels" => [%{"name" => "state:delivered"}],
+          "labels" => [],
           "assignees" => [%{"login" => "lordzurp"}]
         },
-        # #12 neuf (type:poc, pas d'assignee) -> entree BLOQUEE par le bail.
         %{
           "number" => 12,
-          "body" => "neuf",
-          "labels" => [%{"name" => "type:poc"}],
-          "assignees" => []
+          "body" => "en file",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
         }
       ]
 
-      {name, pid} = start_entry_poller({:ok, issues})
+      {name, pid} =
+        start_entry_poller({:ok, issues}, %{11 => {"qa-2", "deploy"}, 12 => {"qa-build", "build"}})
 
       assert %{dispatched: 1, skipped: 1, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)
     end
 
-    test "deux tickets neufs -> un seul entre, l'autre attend (bail pris dans le tick)" do
+    test "deux tickets EN FILE -> un seul démarre, l'autre attend (bail pris dans le tick)" do
       issues = [
         %{
           "number" => 13,
-          "body" => "neuf1",
-          "labels" => [%{"name" => "type:poc"}],
-          "assignees" => []
+          "body" => "file1",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
         },
         %{
           "number" => 14,
-          "body" => "neuf2",
-          "labels" => [%{"name" => "type:poc"}],
-          "assignees" => []
+          "body" => "file2",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
         }
       ]
 
-      {name, pid} = start_entry_poller({:ok, issues})
+      {name, pid} =
+        start_entry_poller({:ok, issues}, %{
+          13 => {"qa-build", "build"},
+          14 => {"qa-build", "build"}
+        })
 
       assert %{dispatched: 1, skipped: 1, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)
     end
 
-    test "bail libre (aucun ticket engage) -> le ticket neuf entre" do
+    test "bail libre (aucun pipeline engagé) -> le ticket EN FILE démarre" do
       issues = [
         %{
           "number" => 15,
-          "body" => "neuf",
-          "labels" => [%{"name" => "type:poc"}],
-          "assignees" => []
+          "body" => "file",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
         }
       ]
 
-      {name, pid} = start_entry_poller({:ok, issues})
+      {name, pid} = start_entry_poller({:ok, issues}, %{15 => {"qa-build", "build"}})
 
       assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
 

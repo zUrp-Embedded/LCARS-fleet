@@ -27,7 +27,6 @@ defmodule Fleet.Pilot.Poller do
     * `:repo` — `"owner/name"`, obligatoire.
     * `:interval_ms` — défaut `30_000` (30s).
     * `:forge_opts` — keyword ForgeClient (base_url, token, req_options).
-    * `:routing` — map `type:X → carte` pour l'`Entry` legacy (transitionnel, FALL).
     * `:stage_dispatch?` — historiquement le switch de mode ; aujourd'hui toujours `true` (seul mode).
     * seams test : `:forge_client`, `:loader`, `:carte_loader`, `:spawner`, `:clock` (injectés si non-nil).
     * `:start_tick?` — défaut `true` ; `false` = pas de 1er tick auto (tests drivent via `force_poll/1`).
@@ -43,12 +42,10 @@ defmodule Fleet.Pilot.Poller do
   use GenServer
   require Logger
 
-  alias Fleet.Pilot.{StageDispatcher, Entry}
+  alias Fleet.Pilot.StageDispatcher
 
   # Verrou pipeline (source unique `Fleet.Pilot.Labels`) — lu par la réconciliation d'orphelins.
   @in_flight Fleet.Pilot.Labels.in_flight()
-  # #8.A : préfixe `state:*` — un ticket portant un state-label est ENGAGÉ dans un pipeline (entre hops).
-  @state_prefix Fleet.Pilot.Labels.state_prefix()
 
   @default_interval_ms 30_000
   @max_backoff_ms 300_000
@@ -60,7 +57,6 @@ defmodule Fleet.Pilot.Poller do
     :forge_client_override,
     stage_dispatch?: false,
     forge_opts: [],
-    routing: %{},
     loader: nil,
     carte_loader: nil,
     spawner: nil,
@@ -133,7 +129,6 @@ defmodule Fleet.Pilot.Poller do
           forge_client_override: Keyword.get(opts, :forge_client),
           stage_dispatch?: Keyword.get(opts, :stage_dispatch?, false),
           forge_opts: Keyword.get(opts, :forge_opts, []),
-          routing: Keyword.get(opts, :routing, %{}),
           loader: Keyword.get(opts, :loader),
           carte_loader: Keyword.get(opts, :carte_loader),
           spawner: Keyword.get(opts, :spawner),
@@ -474,46 +469,49 @@ defmodule Fleet.Pilot.Poller do
 
   defp stage_process_issues(issues, pr_issue_ids, state) do
     opts = stage_dispatch_opts(state)
-    entry_opts = stage_entry_opts(state)
 
-    # Bail repo-serialise (incrément 3) : au plus 1 pipeline actif par repo. Un ticket deja
-    # engage (assigne a un role, in-flight ou entre deux hops) tient le bail -> aucun ticket
-    # NEUF n'entre tant qu'il n'est pas fini (merge -> close). Les feature-branches sont donc
-    # creees sequentiellement (chacune descend du main a jour) -> merge FF garanti. Le dispatch
-    # des hops du ticket en cours n'est PAS bloque (seule l'entree d'un neuf l'est). Parallele-
-    # disjoint (1 pipeline/repo distinct) = optimisation differee.
-    lease_held0 = Enum.any?(issues, &repo_lease_held?/1)
+    # #8 cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, gravée par create_ticket) — plus
+    # de routing par label, plus d'Entry. Le poller lit la route → dispatch (carte_role). Le bail
+    # « 1 pipeline actif/repo » se lit AUSSI sur la route (robuste, append-only), PAS sur `state:*` (label
+    # mutable). On classe chaque issue UNE fois (engaged? lit la route si besoin) :
+    #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er stage = pipeline démarré) → tient le bail ;
+    #     on dispatche son stage courant (continue le hop, ou skip si in-flight).
+    #   - EN FILE (routé par create_ticket, route au 1er stage, pas encore dispatché) → démarre seulement
+    #     si le bail est libre ; sinon attend (sérialisation → feature-branches séquentielles → FF merge).
+    classified =
+      Enum.map(issues, fn issue ->
+        pr? = MapSet.member?(pr_issue_ids, Map.get(issue, "number"))
+        {issue, pr?, not pr? and engaged?(issue, state)}
+      end)
+
+    lease_held0 = Enum.any?(classified, fn {_issue, _pr?, engaged} -> engaged end)
 
     {tally, _lease} =
-      Enum.reduce(issues, {%{dispatched: 0, skipped: 0, errors: 0}, lease_held0}, fn issue,
-                                                                                     {acc, lease} ->
-        payload = wrap_issue_as_payload(issue, state.repo)
+      Enum.reduce(classified, {%{dispatched: 0, skipped: 0, errors: 0}, lease_held0}, fn
+        {issue, pr?, engaged}, {acc, lease} ->
+          payload = wrap_issue_as_payload(issue, state.repo)
 
-        cond do
-          # Corr.3 4-C : l'issue porte une PR fleet ouverte -> phase JUGE (le producteur a fini,
-          # dispatchee via les pulls). SKIP cote issue, sinon le poller re-spawnerait le producteur
-          # (encore assigne). L'issue garde son assignee => le bail repo reste tenu (via les pulls).
-          MapSet.member?(pr_issue_ids, Map.get(issue, "number")) ->
-            {%{acc | skipped: acc.skipped + 1}, lease}
+          cond do
+            # Corr.3 4-C : issue avec PR fleet ouverte → phase JUGE (dispatchée via les pulls). SKIP côté
+            # issue (sinon re-spawn du producteur). La PR tient le bail.
+            pr? ->
+              {%{acc | skipped: acc.skipped + 1}, lease}
 
-          true ->
-            stage_dispatch_one(payload, opts, entry_opts, acc, lease)
-        end
+            # Pipeline ENGAGÉ → dispatche son stage courant ; il DÉTIENT le bail → lease inchangé.
+            engaged ->
+              stage_do_dispatch(payload, opts, acc, lease)
+
+            # EN FILE, bail tenu par un autre pipeline → attend.
+            lease ->
+              {%{acc | skipped: acc.skipped + 1}, lease}
+
+            # EN FILE, bail libre → DÉMARRE (prend le bail si effectivement dispatché).
+            true ->
+              start_pipeline(payload, opts, acc)
+          end
       end)
 
     tally
-  end
-
-  defp stage_dispatch_one(payload, opts, entry_opts, acc, lease) do
-    # #8.A : Entry AVANT dispatch (idempotent + lease-gated, bail = labels in-flight/state, plus l'assignee).
-    # Un ticket typé (type:->carte) + NON-routé entre dans sa carte (Entry grave la route ; l'assignee
-    # reste l'HUMAIN — plus de set_assignee) → entrée comptée, PAS de dispatch ce tick (le prochain tick
-    # dispatche le rôle du stage via carte_role, comme l'original). Sinon (pas de type:* / déjà routé /
-    # bail tenu) → dispatch (advance d'un routé, ou producteur A1 si untyped — flux prouvé inchangé).
-    case stage_try_enter(payload, entry_opts, acc, lease) do
-      {:entered, acc, lease} -> {acc, lease}
-      {:noop, acc, lease} -> stage_do_dispatch(payload, opts, acc, lease)
-    end
   end
 
   defp stage_do_dispatch(payload, opts, acc, lease) do
@@ -529,38 +527,48 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # #8.A : entrée carte idempotente + lease-gated. Entrée réussie → comptée dispatched + PREND le bail
-  # (les neufs suivants du tick attendent), `{:entered, ...}` (pas de dispatch ce tick). Bail tenu / pas
-  # de type:* / déjà routé → `{:noop, ...}` (dispatch normal suit). error → errors++.
-  defp stage_try_enter(_payload, _entry_opts, acc, true), do: {:noop, acc, true}
+  # #8 — démarrage d'un pipeline EN FILE (bail libre) : dispatch ; si un pod est effectivement spawné, le
+  # bail devient TENU (les autres tickets en file du même tick attendent → sérialisation 1 pipeline/repo).
+  defp start_pipeline(payload, opts, acc) do
+    {acc2, _} = stage_do_dispatch(payload, opts, acc, false)
+    {acc2, acc2.dispatched > acc.dispatched}
+  end
 
-  defp stage_try_enter(payload, entry_opts, acc, false) do
-    case Entry.enter(payload, entry_opts) do
-      {:ok, {:entered, _role}} -> {:entered, %{acc | dispatched: acc.dispatched + 1}, true}
-      {:skip, _} -> {:noop, acc, false}
-      {:error, _} -> {:noop, %{acc | errors: acc.errors + 1}, false}
+  # #8 — un pipeline est ENGAGÉ (tient le bail repo) si un pod est en vol (`in-flight` ; lecture liste,
+  # 0 I/O) OU si sa ROUTE a avancé au-delà du 1er stage de la carte (= pipeline démarré, entre deux hops ;
+  # lecture route-comment = state-machine robuste append-only, PAS `state:*` mutable). Un ticket
+  # fraîchement routé par create_ticket (route = 1er stage, pas de pod) n'est PAS engagé → EN FILE. Pas de
+  # route → A1 (pas engagé). La route n'est lue QUE si pas in-flight (fast-path, économise l'I/O).
+  defp engaged?(issue, state) do
+    labels = Enum.map(Map.get(issue, "labels") || [], & &1["name"])
+    @in_flight in labels or pipeline_started?(issue, state)
+  end
+
+  defp pipeline_started?(issue, state) do
+    forge = stage_forge_client(state)
+    n = Map.get(issue, "number")
+
+    case forge.get_route(state.repo, n, state.forge_opts) do
+      {:ok, {carte, stage}} when is_binary(carte) and is_binary(stage) ->
+        not at_first_stage?(carte, stage, state)
+
+      _ ->
+        false
     end
   end
 
-  # #8.A : le bail repo (1 pipeline actif/repo) = ticket ENGAGÉ dans un pipeline, signalé par les LABELS
-  # (in-flight = pod en vol ; state:* = entre deux hops), PAS par l'assignee (= l'humain, toujours présent
-  # → bail toujours tenu → deadlock d'entrée). Un ticket NEUF (type:* sans in-flight ni state:*) ne tient
-  # pas le bail → il peut entrer. Cohérent « assignee = traça humaine, l'état vit dans les labels ».
-  defp repo_lease_held?(issue) do
-    labels = Enum.map(Map.get(issue, "labels") || [], & &1["name"])
-    @in_flight in labels or Enum.any?(labels, &String.starts_with?(&1 || "", @state_prefix))
-  end
+  # Le stage courant est-il le 1er de la carte (= routé mais pas encore avancé = EN FILE) ? Toute anomalie
+  # de carte → `true` (traité « non engagé » : le dispatch fail-loud surfacera, JAMAIS de wedge du bail
+  # par une carte illisible).
+  defp at_first_stage?(carte, stage, state) do
+    loader = state.carte_loader || Fleet.Pipeline.Loader
 
-  defp stage_entry_opts(state) do
-    [
-      repo: state.repo,
-      routing: state.routing,
-      forge_client: stage_forge_client(state),
-      forge_opts: state.forge_opts
-    ]
-    # `:carte_loader` (Loader de pipeline, load!/1) ≠ `:loader` de StageDispatcher (CapProfile,
-    # load/1). Entry navigue la carte → il lui faut le loader de carte, pas celui des cap-profiles.
-    |> maybe_put_seam(:loader, state.carte_loader)
+    case Fleet.Pilot.CarteNav.first_stage(loader.load!(carte)) do
+      {:ok, {first, _role}} -> stage == first
+      _ -> true
+    end
+  rescue
+    _ -> true
   end
 
   # Construit les opts de StageDispatcher.dispatch_issue. Les seams
@@ -577,10 +585,17 @@ defmodule Fleet.Pilot.Poller do
       forge_opts: state.forge_opts
     ]
     |> maybe_put_seam(:loader, state.loader)
+    # #8 : `carte_role` (dispatch) charge la carte de la route → il lui faut le loader de CARTE (comme
+    # fonction load!/1). Live : nil → défaut `Fleet.Pipeline.Loader.load!` (priv). Test : dérivé du module
+    # stub. (Distinct de `:loader` = cap-profiles.)
+    |> maybe_put_seam(:carte_loader, carte_loader_fun(state))
     |> maybe_put_seam(:spawner, state.spawner)
     |> maybe_put_seam(:task_queue, state.task_queue)
     |> maybe_put_seam(:clock, state.clock)
   end
+
+  defp carte_loader_fun(%__MODULE__{carte_loader: nil}), do: nil
+  defp carte_loader_fun(%__MODULE__{carte_loader: cl}), do: fn name -> cl.load!(name) end
 
   defp maybe_put_seam(opts, _key, nil), do: opts
   defp maybe_put_seam(opts, key, value), do: Keyword.put(opts, key, value)
