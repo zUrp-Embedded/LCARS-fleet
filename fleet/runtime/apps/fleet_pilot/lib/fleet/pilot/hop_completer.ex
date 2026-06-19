@@ -277,14 +277,30 @@ defmodule Fleet.Pilot.HopCompleter do
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = Map.fetch!(hop, :repo)
     pr = Map.fetch!(hop, :pr_number)
+    issue_n = Map.fetch!(hop, :issue_number)
+    producer = producer_of(Map.get(hop, :producer_branch))
 
-    # NB `ForgeClient.merge_pr/3` rend `:ok` (pas `{:ok, _}`) sur succes — matcher les deux.
-    case forge.merge_pr(repo, pr, forge_opts) do
+    # Sceau UNIQUE (F-arch-MCP) : commentaire gatekeeper + merge signé gatekeeper — EXACTEMENT le même
+    # chemin que `StageDispatcher.promote_pr`. Avant, ce terminal `:promote` (ex. après escalade §L441)
+    # mergeait avec `forge_opts` brut = token système, sans commentaire (merge attribué `lcars-system`).
+    gk_opts = as_role(forge_opts, Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
+
+    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, gk_opts) do
       :ok -> {:ok, :promoted}
-      {:ok, _} -> {:ok, :promoted}
-      {:error, reason} -> {:error, {:merge, reason}}
+      {:error, {:merge, _}} = err -> err
+      {:error, {:seal_comment, reason}} -> {:error, {:merge, {:seal_comment, reason}}}
     end
   end
+
+  # Producteur extrait du `producer_branch` (`lcars/issue-N-<producteur>`) pour le commentaire de sceau.
+  defp producer_of(branch) when is_binary(branch) do
+    case Regex.run(~r{issue-\d+-(.+)$}, branch) do
+      [_, producer] -> producer
+      _ -> "engineer"
+    end
+  end
+
+  defp producer_of(_), do: "engineer"
 
   @doc """
   **PR-natif (Corr.3) — orchestrateur de fin-de-hop.** Compose les primitives PR
@@ -449,7 +465,16 @@ defmodule Fleet.Pilot.HopCompleter do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
-    with {:ok, :promoted} <- promote(%{repo: hop.repo, pr_number: pr}, opts),
+    # F-arch-MCP : transmet issue_number + producer_branch à `promote` (le sceau gatekeeper en a besoin
+    # pour le commentaire de fin). Avant, le hop était réduit à {repo, pr_number} → merge sans trace.
+    promote_hop = %{
+      repo: hop.repo,
+      pr_number: pr,
+      issue_number: hop.issue_number,
+      producer_branch: Map.get(hop, :producer_branch)
+    }
+
+    with {:ok, :promoted} <- promote(promote_hop, opts),
          {:ok, _} <- unlock(forge, hop.repo, lock_number(hop, pr), forge_opts) do
       {:ok, :promoted}
     end

@@ -61,6 +61,12 @@ defmodule Fleet.Pilot.HopCompleterTest do
       :ok
     end
 
+    # Sceau gatekeeper (F-arch-MCP) : promote poste le commentaire de fin avant le merge.
+    def post_comment(_repo, n, body, opts) do
+      send(self(), {:comment, n, body, opts})
+      {:ok, 1}
+    end
+
     def merge_pr(_repo, pr, _opts) do
       send(self(), {:merge, pr})
       :ok
@@ -70,6 +76,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
   defmodule PrFailForge do
     def open_pr(_r, _h, _b, _t, _o), do: {:error, {:http, 422, "no commits between"}}
     def post_review(_r, _pr, _e, _b, _o), do: {:error, {:http, 500, "boom"}}
+    # Le sceau commente OK puis le merge échoue (409) → {:error, {:merge, _}} fail-loud.
+    def post_comment(_r, _n, _b, _o), do: {:ok, 1}
     def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
@@ -124,6 +132,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
   defmodule MergeFailForge do
     def open_pr(_r, _h, _b, _t, _o), do: {:ok, 7}
+    # Sceau : commente OK puis merge 409 → {:error, {:merge, _}} fail-loud.
+    def post_comment(_r, _n, _b, _o), do: {:ok, 1}
     def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
@@ -332,14 +342,27 @@ defmodule Fleet.Pilot.HopCompleterTest do
                HopCompleter.record_review(hop, forge_client: PrFailForge, forge_opts: [])
     end
 
-    test "promote → merge FF, {:ok, :promoted}" do
-      hop = %{repo: "fleet/proj", pr_number: 7}
+    test "promote → comment gatekeeper + merge FF, {:ok, :promoted}" do
+      hop = %{
+        repo: "fleet/proj",
+        pr_number: 7,
+        issue_number: 42,
+        producer_branch: "lcars/issue-42-engineer"
+      }
+
       assert {:ok, :promoted} = HopCompleter.promote(hop, forge_client: PrForge, forge_opts: [])
+      # Sceau (F-arch-MCP) : commentaire gatekeeper sur l'issue PUIS merge.
+      assert_received {:comment, 42, _body, _opts}
       assert_received {:merge, 7}
     end
 
     test "promote : FF impossible (409) = invariant serial violé → {:merge, _} fail-loud" do
-      hop = %{repo: "fleet/proj", pr_number: 7}
+      hop = %{
+        repo: "fleet/proj",
+        pr_number: 7,
+        issue_number: 42,
+        producer_branch: "lcars/issue-42-engineer"
+      }
 
       assert {:error, {:merge, {:http, 409, _}}} =
                HopCompleter.promote(hop, forge_client: PrFailForge, forge_opts: [])

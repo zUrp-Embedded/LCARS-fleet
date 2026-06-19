@@ -452,64 +452,39 @@ defmodule Fleet.Pilot.StageDispatcher do
   # (poller mono-process) ; PR déjà mergée → 409 → la PR disparaît au tick suivant (idempotent).
   defp promote_pr(pr_number, head, ctx) do
     with {:ok, {issue_n, producer}} <- parse_feature_branch_or_skip(head) do
-      gk_opts = as_role(ctx.forge_opts, gatekeeper_role())
-      signature = "[merge:pr-#{pr_number}]"
-      body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
+      # Sceau UNIQUE partagé avec `HopCompleter.promote` (F-arch-MCP) : commentaire gatekeeper + merge
+      # signé gatekeeper. Plus de chemin de merge qui forke en token système (l'escalade signait `system`).
+      gk_opts = as_role(ctx.forge_opts, Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
 
-      # 1. comment de fin signé gatekeeper sur l'ISSUE (trace durable, dédup). 2. merge FF (gatekeeper)
-      # → auto-close de l'issue. L'ordre (comment puis merge) garantit que la trace existe même si le
-      # close suit immédiatement le merge.
-      with {:ok, _} <-
-             ctx.forge.post_comment(
-               ctx.repo,
-               issue_n,
-               body,
-               Keyword.put(gk_opts, :dedup_signature, signature)
-             ),
-           :ok <- merge_step(ctx.forge, ctx.repo, pr_number, gk_opts) do
-        # BL-055 die-on-promote : le lot est SCELLÉ (mergé) → l'eng pipe `issue-N-producer` (long-lived,
-        # qui gardait son contexte across reworks) a fini sa vie → kill best-effort (no-op s'il est déjà
-        # mort). Sans ça il lingère idle pour toujours = leak terminal du chantier eng-reuse.
-        _ = safe_kill(ctx.spawner, "issue-#{issue_n}-#{producer}")
+      case Fleet.Pilot.GatekeeperSeal.seal_and_merge(
+             ctx.forge,
+             ctx.repo,
+             pr_number,
+             issue_n,
+             producer,
+             gk_opts
+           ) do
+        :ok ->
+          # BL-055 die-on-promote : le lot est SCELLÉ (mergé) → l'eng pipe `issue-N-producer` (long-lived,
+          # qui gardait son contexte across reworks) a fini sa vie → kill best-effort (no-op s'il est déjà
+          # mort). Sans ça il lingère idle pour toujours = leak terminal du chantier eng-reuse.
+          _ = safe_kill(ctx.spawner, "issue-#{issue_n}-#{producer}")
 
-        Logger.info(
-          "StageDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
-            "(juges OK → merge rebase, scellé gatekeeper, close via Closes ##{issue_n} ; eng tué)"
-        )
+          Logger.info(
+            "StageDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
+              "(juges OK → merge rebase, scellé gatekeeper, close via Closes ##{issue_n} ; eng tué)"
+          )
 
-        {:ok, {:merged, pr_number}}
+          {:ok, {:merged, pr_number}}
+
+        {:error, _} = err ->
+          err
       end
     end
   end
 
-  defp merge_step(forge, repo, pr_number, opts) do
-    case forge.merge_pr(repo, pr_number, opts) do
-      :ok -> :ok
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, {:merge, reason}}
-    end
-  end
-
-  # Comment de fin DESCRIPTIF + HONNÊTE (②.1e, principe traça user). Dit exactement ce qui s'est passé :
-  # qui a livré, qui a validé, qui a scellé, et que la branch-protection est OFF (interim dev) → LCARS
-  # agrège (rien maquillé en review humaine ou en merge-gardé-par-Gitea).
-  defp promote_comment(issue_n, pr_number, producer) do
-    """
-    ## ✅ Brique ##{issue_n} livrée et fusionnée
-
-    - **Livrée par** : `#{producer}` (engineer) — PR ##{pr_number} (l'eng a codé, le système a poussé).
-    - **Validée par** : les juges (qualifier + reviewer) ont **APPROUVÉ** la PR (reviews natives).
-    - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge fast-forward → auto-close via `Closes ##{issue_n}`.
-
-    > ⚠ **Interim (dev)** : la branch-protection native est **OFF** pour ne pas bloquer le push pendant le dev — c'est **LCARS qui agrège les verdicts** des juges et scelle le merge (pas Gitea). Cible : branch-protection native (require qualifier+reviewer approuvés + CI vert). Traça honnête : rien n'est maquillé.
-    """
-  end
-
-  # Rôle gardien des PRs (signe les fusions, ②.1e) : config `:gatekeeper_role` (data, défaut
-  # "gatekeeper"), symétrique de `:producer_role`/`:reviewer_roles`.
-  @default_gatekeeper_role "gatekeeper"
-  defp gatekeeper_role,
-    do: Application.get_env(:fleet_pilot, :gatekeeper_role, @default_gatekeeper_role)
+  # `promote_comment` + le rôle gatekeeper + le merge sont désormais dans `Fleet.Pilot.GatekeeperSeal`
+  # (sceau UNIQUE partagé avec `HopCompleter.promote`, F-arch-MCP — fin du fork de signature de merge).
 
   # ②.1e — injecte le token du compte de RÔLE dans les forge_opts → le SYSTÈME poste/merge EN SON NOM
   # (avatar/traça honnête, même mécanique que `create_ticket`/arch et `HopCompleter`). `nil` (token

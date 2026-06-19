@@ -37,8 +37,10 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   sans branch-protection — LCARS agrège, interim) : reviewers en attente → spawn le prochain juge (un à
   un, sérialisé par le verrou PR ; clone la **feature-branch** pour voir le diff) ; round terminé +
   verdict agrégé `:changes_requested` → rework du producteur ; `:approved` → **merge `rebase` scellé
-  `:gatekeeper_role`** (LINÉAIRE + gère un `main` avancé sous une PR parallèle — multi-ticket, cf.
-  `ForgeClient.merge_pr` ; comment de fin honnête + close via `Closes #N`). **Passage de substance
+  `:gatekeeper_role`** via `Fleet.Pilot.GatekeeperSeal` (**sceau UNIQUE** partagé avec `HopCompleter.promote`,
+  F-arch-MCP : comment gatekeeper + merge signé gatekeeper, plus de fork où l'escalade mergeait en token
+  système ; LINÉAIRE + gère un `main` avancé sous une PR parallèle — multi-ticket, cf. `ForgeClient.merge_pr`
+  ; comment de fin honnête + close via `Closes #N`). **Passage de substance
   (anti-famine-d'info, fix #1)** : le mandat **juge** (git-native) le POINTE sur son workspace
   (`git diff`) + porte le **critère** (body de l'issue, désamorcé I-CBC via `GateBrief :request`) ; le
   mandat **rework** injecte le **body des reviews REQUEST_CHANGES** (`ForgeClient.change_request_feedback/3`)
