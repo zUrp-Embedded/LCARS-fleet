@@ -208,15 +208,33 @@ defmodule Fleet.MCP.PodTools do
 
         case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
           {:ok, number} ->
-            # STOP — le poller prend le relais (issue assignée à l'humain → spawn le producteur).
-            result = %{
-              "status" => "ticket_created",
-              "ticket" => "#{repo}##{number}",
-              "repo" => repo,
-              "assignee" => human
-            }
+            # #8 cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, source unique), PAS
+            # dans un label. create_ticket grave la route de la carte de délégation (défaut mandate-gate :
+            # le consultant review le mandat AVANT l'eng) → le poller lit la route → dispatch. La route est
+            # postée par le SYSTÈME (get_route ne fait foi que des comments système — sinon ignorée).
+            carte = Map.get(args, "pipeline") || delegation_carte()
 
-            {:ok, %{content: [json(result)]}, state}
+            case grave_initial_route(forge, repo, number, carte) do
+              {:ok, stage} ->
+                # type:feature = ÉTIQUETTE de visu (humain), best-effort — JAMAIS du routing.
+                _ = apply(forge, :add_label, [repo, number, "type:feature", []])
+
+                result = %{
+                  "status" => "ticket_routed",
+                  "ticket" => "#{repo}##{number}",
+                  "repo" => repo,
+                  "assignee" => human,
+                  "carte" => carte,
+                  "stage" => stage
+                }
+
+                {:ok, %{content: [json(result)]}, state}
+
+              {:error, reason} ->
+                # Fail-loud : la gate (route) n'a PAS été appliquée → ne jamais prétendre le contraire.
+                # L'issue existe mais non-routée ; l'opérateur tranche (re-grave ou ferme).
+                {:error, {:route_grave_failed, "#{repo}##{number}", inspect(reason)}, state}
+            end
 
           {:error, reason} ->
             {:error, {:ticket_creation_failed, inspect(reason)}, state}
@@ -298,6 +316,31 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call(_unknown, _arguments, state) do
     {:error, :unknown_tool, state}
+  end
+
+  # #8 — carte de délégation par défaut (toute délégation d'arch entre dedans ; défaut mandate-gate :
+  # le consultant review le mandat AVANT l'eng). Data-catalogue, pas un nom magique en dur.
+  defp delegation_carte, do: Application.get_env(:fleet_mcp, :delegation_carte, "mandate-gate")
+
+  # #8 — grave la ROUTE initiale de la carte sur l'issue = la state-machine de routing (source unique,
+  # plus de routing par label). Postée par le SYSTÈME (forge_opts `[]` → token système ; `get_route` ne
+  # fait foi QUE des comments système, sinon un user pourrait injecter une route). Dispatch RUNTIME (apply)
+  # — fleet_mcp n'a pas de dep compile-time vers fleet_pilot/fleet_pipeline.
+  defp grave_initial_route(forge, repo, number, carte_name) do
+    carte = apply(Fleet.Pipeline.Loader, :load!, [carte_name])
+
+    case apply(Fleet.Pilot.CarteNav, :first_stage, [carte]) do
+      {:ok, {stage, _role}} ->
+        case apply(forge, :post_route, [repo, number, carte_name, stage, []]) do
+          {:ok, _} -> {:ok, stage}
+          {:error, reason} -> {:error, {:post_route, reason}}
+        end
+
+      other ->
+        {:error, {:carte_first_stage, other}}
+    end
+  rescue
+    e -> {:error, {:carte_load, Exception.message(e)}}
   end
 
   # La PR EN COURS du ticket #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`

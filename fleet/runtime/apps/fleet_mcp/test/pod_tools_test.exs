@@ -120,11 +120,21 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # Stub forge (seam `:forge_client`) : enregistre l'appel create_issue, retourne le n° d'issue.
+  # Stub forge (seam `:forge_client`) : enregistre create_issue + post_route + add_label, retourne le n°.
   defmodule StubForge do
     def create_issue(repo, title, body, opts) do
       send(self(), {:create_issue, repo, title, body, opts})
       {:ok, 77}
+    end
+
+    def post_route(repo, n, carte, stage, opts) do
+      send(self(), {:post_route, repo, n, carte, stage, opts})
+      {:ok, :posted}
+    end
+
+    def add_label(repo, n, label, opts) do
+      send(self(), {:add_label, repo, n, label, opts})
+      {:ok, :added}
     end
   end
 
@@ -143,7 +153,7 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "pose une issue assignée à l'humain owner ; STOP (plus de start_pipeline ni label)" do
+    test "pose l'issue (assignee humain) PUIS grave la route de la carte (state-machine) + label visu" do
       assert {:ok, %{content: [%{"text" => txt}]}, %{}} =
                PodTools.handle_tool_call(
                  "create_ticket",
@@ -151,20 +161,26 @@ defmodule Fleet.MCP.PodToolsTest do
                  %{}
                )
 
-      # contrat forge-state-machine : assignee = l'humain owner ; PAS de label stage-marker (le rôle
-      # producteur est un invariant côté poller, pas un sticker par-ticket). Gitea matche l'assignee
-      # insensible à la casse → le login OS suffit.
+      # assignee = l'humain owner (point fixe). Pas de labels DANS create_issue (Gitea veut des IDs).
       assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
       human = Fleet.Credentials.Human.current!()
       assert opts[:assignees] == [human]
-
-      # PAS de labels passés à create_issue (Gitea rejette les noms ; et c'est du panini de toute façon).
       refute Keyword.has_key?(opts, :labels)
 
+      # #8 cohérence : la ROUTE est gravée (state-machine de routing) — carte par défaut mandate-gate,
+      # 1er stage mandate-review (le consultant review le mandat AVANT l'eng). Postée SYSTÈME (opts sans token).
+      assert_received {:post_route, "fleet/demo", 77, "mandate-gate", "mandate-review",
+                       _route_opts}
+
+      # type:feature = étiquette de VISU (best-effort), JAMAIS du routing.
+      assert_received {:add_label, "fleet/demo", 77, "type:feature", _}
+
       assert {:ok, result} = Jason.decode(txt)
-      assert result["status"] == "ticket_created"
+      assert result["status"] == "ticket_routed"
       assert result["ticket"] == "fleet/demo#77"
       assert result["assignee"] == human
+      assert result["carte"] == "mandate-gate"
+      assert result["stage"] == "mandate-review"
     end
   end
 
