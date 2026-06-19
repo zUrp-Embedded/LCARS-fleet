@@ -684,8 +684,8 @@ defmodule Fleet.Pilot.HopConsumer do
     else
       case Fleet.Pipeline.Gates.evaluate(spec, result, %{}) do
         :pass ->
-          # Corr.3 — tag l'intent PR : `:advance` (stage suivant) | `:promote` (terminal).
-          tag_advance(advance(carte, stage))
+          # Corr.3 + #8-fix : l'intent terminal dépend du RÔLE qui finit (cf. tag_advance/2).
+          tag_advance(advance(carte, stage), producer?(payload["role"], state))
 
         {:fail, reason} ->
           Logger.info("HopConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}")
@@ -704,11 +704,17 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
-  # Corr.3 — tag l'intent PR sur le routage de la carte. `:pass` → `:advance` si un stage suit,
-  # `:promote` si terminal (next_assignee nil). Préserve `{:error,_}` tel quel.
-  defp tag_advance({:ok, {nil, nil}}), do: {:ok, :promote, {nil, nil}}
-  defp tag_advance({:ok, routing}), do: {:ok, :advance, routing}
-  defp tag_advance(other), do: other
+  # Corr.3 + #8-fix « un PRODUCTEUR ne merge JAMAIS seul » : `:pass` → `:advance` si un stage suit ;
+  # terminal (next_assignee nil) → selon le RÔLE qui finit :
+  #   - PRODUCTEUR (git_native) → `:review` : son livrable ouvre une PR + demande les juges (le chemin
+  #     PR-driven prouvé `dispatch_by_verdicts` scelle au gatekeeper). JAMAIS d'auto-merge d'un livrable.
+  #   - JUGE (payload) → `:promote` : il a validé le dernier gate → merge terminal.
+  # Sans ce split, une carte terminant sur un producteur (ex. mandate-gate `mandate-review→build`)
+  # mergeait le code SANS juges ni gatekeeper (régression live #8.F). Préserve `{:error,_}` tel quel.
+  defp tag_advance({:ok, {nil, nil}}, true), do: {:ok, :review, {nil, nil}}
+  defp tag_advance({:ok, {nil, nil}}, false), do: {:ok, :promote, {nil, nil}}
+  defp tag_advance({:ok, routing}, _producer?), do: {:ok, :advance, routing}
+  defp tag_advance(other, _producer?), do: other
 
   defp tag(intent, {:ok, routing}), do: {:ok, intent, routing}
   defp tag(_intent, other), do: other

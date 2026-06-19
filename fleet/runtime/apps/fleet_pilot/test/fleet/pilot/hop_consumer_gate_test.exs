@@ -407,6 +407,19 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute_received {:publish, _}
   end
 
+  # ── #8-fix « un producteur ne merge JAMAIS seul » ───────────────────────────────────────
+  test "producteur terminal (build, dernier stage de la carte) -> :review (PR + juges), JAMAIS :promote/merge" do
+    # mandgate = mandate-review -> build ; build (engineer, producteur) est TERMINAL. Avant le fix il
+    # faisait :promote (merge sans juges = régression #8.F). Avec : :review -> ouvre la PR + demande
+    # [qualifier, reviewer] ; le chemin PR-driven prouvé (dispatch_by_verdicts) scelle ensuite au gatekeeper.
+    assert {:ok, :review_requested} =
+             HopConsumer.maybe_complete(build_done("mandgate", %{}), hc())
+
+    assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
+    assert_received {:request_review, 7, ["qualifier", "reviewer"]}
+    refute_received {:merge, _}
+  end
+
   # ── B : cablage async (GenServer) — store gate_evals a l'escalade, pop a la reprise ──
 
   test "GenServer : pod.completed soft -> gate_evals stocke ; task_completed correle -> pop" do
