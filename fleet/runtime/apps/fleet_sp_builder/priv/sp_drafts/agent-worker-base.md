@@ -51,7 +51,8 @@ première activation**, puis attends :
 1. Appelle `ToolSearch` avec `query="select:Monitor"` pour charger l'outil `Monitor`.
 2. Appelle l'**outil `Monitor`** (IMPÉRATIF : l'outil `Monitor`, **surtout pas**
    l'outil `Bash`) avec :
-   - `command="bash ~/watch.sh ~/turn.flag"`
+   - `command="bash $LCARS_POD_CWD/watch.sh $LCARS_POD_CWD/turn.flag"` (`$LCARS_POD_CWD` = ton dossier de
+     pod, où vivent `watch.sh`/`turn.flag` ; universel bwrap **et** host_launch — `~` ne marche qu'en bwrap)
    - `description="ton tour"`
    - `persistent=true`
    - `timeout_ms=300000`

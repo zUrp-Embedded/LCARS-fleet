@@ -118,6 +118,10 @@ trap cleanup EXIT
 #   PAS d'`exec` : le shell reste vivant comme HOLDER (handle Port) ET trappable (sinon kill-server raté).
 # =============================================================
 cd "$WORKDIR"
+# Le pod doit connaître son dossier de pod (watch.sh/turn.flag du réveil-par-flag Monitor, etc.). En
+# bwrap c'est `--setenv LCARS_POD_CWD` ; ici (host_launch, pas de namespace) on EXPORTE pour que le
+# new-session — qui hérite de cet env — le transmette à COMMAND (le pod voyait sinon `$LCARS_POD_CWD` vide).
+export LCARS_POD_CWD="$WORKDIR"
 "$TMUX_BIN" -S "$TMUX_SOCK" new-session -d -s "$TMUX_SESSION_NAME" "${COMMAND[@]}"
 
 # Holder : ce process EST le pod vivant (Port spawner). SIGTERM → trap → cleanup → namespace-libre, le
