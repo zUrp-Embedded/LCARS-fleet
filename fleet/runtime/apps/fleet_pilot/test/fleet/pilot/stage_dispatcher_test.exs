@@ -402,7 +402,8 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     test "#8.E : judge_target:mandate → brief en cadrage MANDAT (juge le ticket.body, pas un livrable)" do
-      payload = eng_issue()
+      # F-S2-1 : le mandat = body de l'ISSUE en main (payload), PAS un get_issue redondant.
+      payload = eng_issue(%{"body" => "MON MANDAT A JUGER"})
 
       carte = %{
         "name" => "mg",
@@ -418,10 +419,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       opts =
         dispatch_opts(
-          forge_opts: [
-            _test_route: {:ok, {"mg", "mandate-review"}},
-            _test_issue_body: "MON MANDAT A JUGER"
-          ],
+          forge_opts: [_test_route: {:ok, {"mg", "mandate-review"}}],
           carte_loader: fn "mg" -> carte end
         )
 

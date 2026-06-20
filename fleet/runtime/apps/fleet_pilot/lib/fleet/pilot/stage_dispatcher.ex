@@ -532,7 +532,7 @@ defmodule Fleet.Pilot.StageDispatcher do
       # #8.E : juge de MANDAT (judge_target:mandate) → juge le ticket.body (exécutable ?), PAS un livrable
       # (pas de code en amont). judge_target absent/deliverable → juge un livrable (PR), brief inchangé.
       {"judge", "mandate"} ->
-        build_mandate_review_mandate(role, forge, repo, number, forge_opts, route)
+        build_mandate_review_mandate(role, issue, forge, repo, number, forge_opts, route)
 
       {"judge", _deliverable} ->
         build_judge_mandate(role, forge, repo, number, forge_opts, route)
@@ -628,12 +628,10 @@ defmodule Fleet.Pilot.StageDispatcher do
   # `subject: :mandate` recadre le « truc à juger ». Le MANDAT va dans `outputs` (le truc À JUGER ; ≠
   # build_judge_mandate où outputs = le livrable/code) ; pas de `request` (le critère d'exécutabilité est
   # porté par le cadrage :mandate). Le juge est PRÉ-PR (aucun clone, aucun livrable) → cohérent N0.
-  defp build_mandate_review_mandate(role, forge, repo, number, forge_opts, route) do
-    mandat =
-      case forge.get_issue(repo, number, forge_opts) do
-        {:ok, issue} -> Map.get(issue, "body") || ""
-        _ -> ""
-      end
+  defp build_mandate_review_mandate(role, issue, forge, repo, number, forge_opts, route) do
+    # F-S2-1 : le mandat = body de l'ISSUE, DÉJÀ en main (le poller a listé l'issue ; mandate-review est
+    # toujours issue-path). On l'utilise → pas de `get_issue` redondant. Fallback fetch si body absent (robustesse).
+    mandat = issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts)
 
     {pipeline, stage} =
       case route do
@@ -648,6 +646,21 @@ defmodule Fleet.Pilot.StageDispatcher do
       subject: :mandate,
       outputs: %{"mandat" => mandat}
     })
+  end
+
+  # F-S2-1 : body de l'issue DÉJÀ listée par le poller → utilisé direct ; fetch SEULEMENT en fallback
+  # (body absent/vide — défensif ; mandate-review est toujours issue-path, l'issue est en main).
+  defp issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts) do
+    case Map.get(issue, "body") do
+      body when is_binary(body) and body != "" ->
+        body
+
+      _ ->
+        case forge.get_issue(repo, number, forge_opts) do
+          {:ok, fetched} -> Map.get(fetched, "body") || ""
+          _ -> ""
+        end
+    end
   end
 
   # Tag l'erreur d'une étape de résolution (préserve {:project_resolution, _} attendu).
