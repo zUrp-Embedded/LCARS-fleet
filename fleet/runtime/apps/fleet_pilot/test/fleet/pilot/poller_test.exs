@@ -163,7 +163,7 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   describe "mode stage — force_poll" do
-    test "issue assignée (humain) → spawn producteur (tally dispatched)" do
+    test "issue assignée ROUTELESS → onboardée sur la carte par défaut (skip, pas de spawn)" do
       issues = [
         %{
           "number" => 7,
@@ -175,11 +175,11 @@ defmodule Fleet.Pilot.PollerTest do
 
       {name, pid} = start_stage_poller({:ok, issues})
 
-      # Le spawn tourne DANS le GenServer (force_poll → handle_call) : le
-      # message du StageStubSpawner part dans SA mailbox, pas celle du test.
-      # Au niveau Poller, le contrat = le tally. Le détail (ticket_id,
-      # mandate) est unit-testé dans stage_dispatcher_test.
-      assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
+      # #5.2 D2 — route nil → le poller ONBOARDE (grave la carte par défaut mandate-gate via Loader) puis
+      # DÉFÈRE → skip (le tick suivant la voit routée → dispatch). Le dispatch routé est testé dans le
+      # describe « route gravée » + stage_dispatcher_test. Au niveau Poller, le contrat = le tally.
+      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
+      refute_received {:spawned, _, _}
 
       GenServer.stop(pid)
     end

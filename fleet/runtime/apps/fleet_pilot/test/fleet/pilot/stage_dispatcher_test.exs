@@ -3,12 +3,6 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
   alias Fleet.Pilot.StageDispatcher
 
-  # F075 : decide reçoit un LOADER ({:ok, profile} | {:error, _}). Stub : rôles connus → profil minimal.
-  defp load_role(role) when role in ["engineer", "qualifier", "reviewer"],
-    do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
-
-  defp load_role(_role), do: {:error, :not_found}
-
   defp issue(fields) do
     %{
       "issue" =>
@@ -26,31 +20,21 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     issue(Map.merge(%{"assignees" => [%{"login" => "lordzurp"}]}, fields))
   end
 
-  # #5.2 D1 — le scoping multi-user est FORGE-SIDE (list_open_issues ne rend QUE mes items) → `decide` ne
-  # vérifie PLUS l'ownership (pas de `:foreign` ici). decide = pure décision de dispatch.
-  describe "decide/2 (pure)" do
-    test "issue → {:spawn, producteur} (engineer par défaut)" do
-      assert {:spawn, "engineer", _} = StageDispatcher.decide(eng_issue(), &load_role/1)
-    end
-
-    test "le rôle spawné est le PRODUCTEUR (invariant), pas l'assignee" do
-      assert {:spawn, "engineer", _} = StageDispatcher.decide(eng_issue(), &load_role/1)
+  # #5.2 D2 — decide = PORTE pure : verrou → skip, sinon :spawn. Pas d'ownership (scoping forge-side amont),
+  # pas de rôle (vient de la route via carte_role), pas de load (carte_role charge).
+  describe "decide/1 (porte pure)" do
+    test "issue non verrouillée → :spawn (le rôle vient de la route, pas d'ici)" do
+      assert :spawn = StageDispatcher.decide(eng_issue())
     end
 
     test "verrou lcars-in-flight présent → {:skip, :in_flight}" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}]})
-      assert {:skip, :in_flight} = StageDispatcher.decide(payload, &load_role/1)
+      assert {:skip, :in_flight} = StageDispatcher.decide(payload)
     end
 
     test "verrou HUMAIN lcars-awaits-human → {:skip, :awaits_human} (A2.3b, pas de re-dispatch)" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-awaits-human"}]})
-      assert {:skip, :awaits_human} = StageDispatcher.decide(payload, &load_role/1)
-    end
-
-    test "cap-profile producteur illisible → {:skip, :no_role}" do
-      # loader qui échoue pour le rôle producteur → :no_role (pas de spawn à l'aveugle).
-      failing_load = fn _role -> {:error, :not_found} end
-      assert {:skip, :no_role} = StageDispatcher.decide(eng_issue(), failing_load)
+      assert {:skip, :awaits_human} = StageDispatcher.decide(payload)
     end
   end
 
@@ -60,6 +44,12 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-carte / 1-stage).
     def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
+
+    # #5.2 D2 — onboarding : grave la route initiale de la carte par défaut. Capture pour assertion.
+    def post_route(_repo, n, carte, stage, _opts) do
+      send(self(), {:routed, n, carte, stage})
+      {:ok, :posted}
+    end
 
     # F077 : le mandat juge lit le result du prédécesseur (option B). Stub : forge_opts[:_test_pred].
     def get_predecessor_result(_repo, _n, opts), do: Keyword.get(opts, :_test_pred, :none)
@@ -205,7 +195,14 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         task_queue: StubTaskQueue,
         clock: fn :second -> 1_700_000_000 end,
         # résolveur stub par défaut : pas de projet (les tests d'ordre ne clonent rien).
-        project_resolver: fn _repo, _opts -> {:ok, nil} end
+        project_resolver: fn _repo, _opts -> {:ok, nil} end,
+        # #5.2 D2 — route par défaut (stage build=engineer) : depuis le découplage, une issue ROUTELESS
+        # est ONBOARDÉE (skip) au lieu de spawner. Les tests d'effet veulent un spawn → ils partent d'une
+        # issue déjà routée. Les tests routés/onboard overrident `forge_opts`/`carte_loader`.
+        forge_opts: [_test_route: {:ok, {"g", "build"}}],
+        carte_loader: fn "g" ->
+          %{"stages" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+        end
       ],
       extra
     )
@@ -440,15 +437,23 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       refute mandate =~ "Livraison (git-native)"
     end
 
-    test "pas de route (hors-carte / 1-stage) → spawn_opts SANS pipeline/stage (A1 préservé)" do
+    test "#5.2 D2 — issue ROUTELESS → onboardée sur la carte par défaut (skip), PAS de spawn eng" do
       payload = eng_issue()
 
-      assert {:ok, {:spawned, _, "engineer"}} =
-               StageDispatcher.dispatch_issue(payload, dispatch_opts())
+      # route :none (override de la route par défaut) + carte par défaut mandate-gate (1er stage mandate-review).
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: :none],
+          carte_loader: fn "mandate-gate" ->
+            %{"stages" => %{"mandate-review" => %{"role" => "consultant", "needs" => []}}}
+          end
+        )
 
-      assert_received {:spawned, "issue-42", spawn_opts}
-      refute Keyword.has_key?(spawn_opts, :pipeline)
-      refute Keyword.has_key?(spawn_opts, :stage)
+      assert {:skipped, :onboarded} = StageDispatcher.dispatch_issue(payload, opts)
+
+      # la carte par défaut a été GRAVÉE (le tick suivant dispatchera le consultant) ; AUCUN spawn eng.
+      assert_received {:routed, 42, "mandate-gate", "mandate-review"}
+      refute_received {:spawned, _, _}
     end
 
     test "échec lecture route → {:error, {:route_resolution, _}}, AUCUN verrou ni spawn" do

@@ -1,38 +1,27 @@
 defmodule Fleet.Pilot.StageDispatcher do
   @moduledoc """
-  Dispatch `ticket assigné → spawn producteur` du modèle forge-state-machine (DN
-  `orchestration/forge-state-machine.md` §1). Distinct du `Fleet.Pilot.Dispatcher`
-  legacy (route → pipeline nommé) : ici le poller voit un ticket **assigné** (à l'humain owner),
-  non verrouillé, et **spawn le rôle PRODUCTEUR** du catalogue (= la brique), sans table de routes.
+  Dispatch `ticket assigné → spawn le rôle de la carte` du modèle forge-state-machine (DN
+  `orchestration/forge-state-machine.md` §1). Le poller voit un ticket **assigné-à-moi** (scoping
+  multi-user forge-side, #5.2 D1), non verrouillé, et le pousse à son stage courant.
 
-  ## Décision (`decide/2`)
+  ## Décision (`decide/1`) — PORTE pure (#5.2 D2)
 
-  À partir du payload d'une issue Gitea, décide :
-    * `{:spawn, role, profile}` — un assignee (= l'humain owner), pas de verrou `lcars-in-flight` →
-      spawner le **rôle producteur** (`:producer_role`, défaut `"engineer"`).
-    * `{:skip, reason}` — `:no_assignee` (aucun owner), `:no_role` (cap-profile producteur
-      illisible), `:in_flight` (verrou posé, pod déjà en vol), `:awaits_human`.
-
-  **Invariant DN §1** : le rôle producteur est **invariant** (« la seule cible des tickets code =
-  l'eng ») → il vient de la **config** (`:producer_role`), PAS d'un marqueur par-ticket — un label
-  `lcars-stage:<role>` ré-encoderait une constante (bruit). L'assignee est l'**humain** (point fixe).
-  Les juges, eux, sont dispatchés PR-driven via `dispatch_review` (requested_reviewers), pas ici.
-
-  L'I/O (lecture du cap-profile) est **injectée** via `load_role` (défaut `CapProfile.load/1`)
-  → testable sans forge. F075 : le profil chargé pour décider est THREADÉ dans `{:spawn, …}`
-  et réutilisé au spawn (pas de second load).
+  À partir du payload d'une issue Gitea : `:spawn` (engager) | `{:skip, reason}` (`:in_flight` verrou posé,
+  `:awaits_human` verrou humain). decide ne fait QUE la porte — pas d'ownership (scoping forge-side amont),
+  pas de rôle ni de load (le RÔLE vient de la POSITION carte, via `carte_role` ; voir Effets).
 
   ## Effets (`dispatch_issue/2`)
 
-  Sur `{:spawn, role, profile}`, applique l'**ordre canonique du spawn** (DN §6, label AVANT
-  pod, sinon double-spawn) :
-    1. PUT label `lcars-in-flight` (le verrou = machine-state ; PAS de comment-lock dans le
-       ticket — le ticket garde du contenu humain, la recovery se fait sur la liveness du pod)
-    2. spawn le pod avec le `profile` déjà chargé par `decide` (`Spawner.spawn_pod(profile,
-       ticket_id, mandate: …)`)
+  Sur `:spawn` : résout projet + route, puis (#5.2 D2) :
+    * **route absente** (issue routeless — create_ticket ne grave plus, ou ticket humain brut) →
+      `ensure_carte_or_onboard` grave la **carte par défaut** (mandate-gate) → `{:skipped, :onboarded}`
+      (on défère ; le tick suivant la voit routée). C'est l'ENTRÉE système : create_ticket crée, le poller route.
+    * **route présente** → `carte_role` dérive `{role, profile, stage_spec}` de la POSITION carte (PAS de
+      producteur en dur — la route décide ; route absente à ce point = anomalie → fail-loud, jamais l'eng en
+      silence), puis l'**ordre canonique du spawn** (DN §6, label `lcars-in-flight` AVANT pod, sinon double-spawn).
 
-  Les modules `:forge_client`, `:loader`, `:spawner` sont des **seams** (défauts =
-  modules réels) pour tester sans toucher forge ni spawner.
+  Les juges sont dispatchés PR-driven via `dispatch_review` (requested_reviewers). Les modules
+  `:forge_client` / `:loader` / `:carte_loader` / `:spawner` sont des **seams** (défauts = modules réels).
   """
 
   require Logger
@@ -41,20 +30,21 @@ defmodule Fleet.Pilot.StageDispatcher do
   @in_flight_label Fleet.Pilot.Labels.in_flight()
   @awaits_human_label Fleet.Pilot.Labels.awaits_human()
 
-  @type decision ::
-          {:spawn, role :: String.t(), profile :: Fleet.CapProfile.t()} | {:skip, atom()}
+  @type decision :: :spawn | {:skip, atom()}
 
   @doc """
-  Décision pure : payload issue Gitea → `{:spawn, role, profile}` | `{:skip, reason}`. Le **scoping
-  multi-user est FORGE-SIDE en amont** (`list_open_issues` ne rend QUE mes items, #5.2 D1) → decide ne
-  re-vérifie PAS l'ownership (pas son métier). `load_role` (fun arité 1) injectable pour les tests ; défaut =
-  `CapProfile.load/1`. F075 : le profil chargé pour décider est THREADÉ dans `{:spawn, …}` et réutilisé au spawn.
+  Décision PURE (porte) : payload issue → `:spawn` | `{:skip, reason}`. #5.2 D2 — decide ne fait QUE la
+  porte : verrou `lcars-in-flight` / `lcars-awaits-human` → skip ; sinon → engager (`:spawn`). Le SCOPING
+  (forge-side, en amont) et le ROUTAGE (route → rôle, via `carte_role`/onboard dans `dispatch_issue`) ne
+  sont PAS ici — decide ne charge rien et ne décide pas le rôle.
   """
-  @spec decide(map(), (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()})) ::
-          decision()
-  def decide(payload, load_role \\ &default_load_role/1) when is_map(payload) do
-    issue = Map.get(payload, "issue", payload)
-    labels = Enum.map(Map.get(issue, "labels", []), & &1["name"])
+  @spec decide(map()) :: decision()
+  def decide(payload) when is_map(payload) do
+    labels =
+      payload
+      |> Map.get("issue", payload)
+      |> Map.get("labels", [])
+      |> Enum.map(& &1["name"])
 
     cond do
       @in_flight_label in labels ->
@@ -66,23 +56,9 @@ defmodule Fleet.Pilot.StageDispatcher do
         {:skip, :awaits_human}
 
       true ->
-        # Forge-state-machine (DN §1) : issue (à moi, scopée par la liste), non verrouillée → spawn le rôle
-        # PRODUCTEUR du catalogue (`:producer_role`, défaut "engineer", invariant — pas un marqueur par-ticket).
-        role = producer_role()
-
-        # F075 : cap-profile chargé UNE fois (la décision en dépend) + threadé → réutilisé au spawn.
-        with {:ok, profile} <- load_role.(role) do
-          {:spawn, role, profile}
-        else
-          _ -> {:skip, :no_role}
-        end
+        :spawn
     end
   end
-
-  # Rôle producteur (DN §1, invariant) : `:producer_role` (config, data catalogue), défaut "engineer".
-  @default_producer_role "engineer"
-  defp producer_role,
-    do: Application.get_env(:fleet_pilot, :producer_role, @default_producer_role)
 
   @doc """
   Dispatch effectif d'une issue : `decide/2` puis, sur `{:spawn, role, profile}`, l'ordre
@@ -105,41 +81,29 @@ defmodule Fleet.Pilot.StageDispatcher do
     # #8 : chargeur de carte injectable (seam, comme les autres) — rend `carte_role` testable sans disque.
     carte_loader = Keyword.get(opts, :carte_loader, &Fleet.Pipeline.Loader.load!/1)
 
-    case decide(payload, &loader.load/1) do
+    case decide(payload) do
       {:skip, reason} ->
         {:skipped, reason}
 
-      {:spawn, role0, profile0} ->
+      :spawn ->
         issue = Map.get(payload, "issue", payload)
         number = issue["number"]
         repo = Keyword.fetch!(opts, :repo)
         forge_opts = Keyword.get(opts, :forge_opts, [])
 
-        # PROJET résolu AVANT toute écriture forge (read-only ls-remote) : un échec
-        # transitoire ne laisse pas de verrou orphelin. base_sha pinné HORS-pod (F-03 R1,
-        # symétrique de l'Executor) → injecté au clone du pod (project.base_sha).
-        # PROJET + ROUTE résolus AVANT toute écriture forge (read-only) : un échec transitoire
-        # ne laisse pas de verrou orphelin. project = base_sha pinné (F-03) ; route = (pipeline,
-        # stage) gravé sur la forge (A2.1) → identifie le stage (l'assignee=rôle ne suffit pas).
-        # `:none` (hors-carte / 1-stage) → route nil → comportement A1.
-        # F075 : le cap-profile est chargé par `decide` (threadé dans `{:spawn, role, profile}`) AVANT
-        # toute écriture forge — un échec de load = `{:skip, :no_role}` (zéro verrou orphelin). `mandate_kind`
-        # (F077) en dépend ; plus de reload ici (fin du double-load sonde+spawn).
+        # PROJET + ROUTE résolus AVANT toute écriture forge (read-only) : un échec transitoire ne laisse pas
+        # de verrou orphelin. project = base_sha pinné (F-03) ; route = (pipeline, stage) gravée (A2.1).
+        # #5.2 D2 — ROUTELESS = pas encore onboardée (create_ticket ne grave plus) → `ensure_carte_or_onboard`
+        # grave la carte par défaut + renvoie `{:onboarded, _}` → on DÉFÈRE (skip ; le tick suivant la voit
+        # routée). Routée → `carte_role` dérive le rôle de la POSITION carte (PAS de producteur en dur ;
+        # route absente à ce point = anomalie post-onboard → fail-loud, JAMAIS l'eng en silence).
         with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
              {:ok, route} <-
                tag_err(route_for(forge, repo, number, forge_opts), :route_resolution),
-             # #8 (carte-driven) : le rôle à spawner dérive de la POSITION carte (route gravée), PAS de
-             # `producer_role` en dur. Amende l'invariant DN §1 « issue→producteur toujours » → « issue→
-             # rôle du stage courant de la carte ». route=nil (hors-carte / A1) → producteur de `decide`
-             # (role0/profile0) : comportement BYTE-IDENTIQUE, le flux prouvé ne bouge pas tant qu'aucune
-             # carte n'est posée. route={pipeline,stage} → `CarteNav.stage_role`. Échec de résolution sur
-             # une issue ROUTÉE = misconfig → fail-loud (jamais un fallback eng muet : un stage
-             # `mandate-review` qui retomberait sur l'eng = la gate sautée en silence).
+             {:ok, route} <-
+               ensure_carte_or_onboard(forge, repo, number, route, carte_loader, forge_opts),
              {:ok, {role, profile, stage_spec}} <-
-               tag_err(
-                 carte_role(route, role0, profile0, &loader.load/1, carte_loader),
-                 :role_resolution
-               ) do
+               tag_err(carte_role(route, &loader.load/1, carte_loader), :role_resolution) do
           # BL-055 : pod_id DÉTERMINISTE STABLE keyé sur (issue, rôle) — PLUS de `-<ts>`. Le timestamp
           # rendait l'id unique par hop → re-spawn à chaque rework, l'eng pipe (long-lived) lingérait,
           # contexte perdu. Stable → un re-dispatch retombe sur le MÊME pod : s'il est vivant (eng pipe),
@@ -230,9 +194,14 @@ defmodule Fleet.Pilot.StageDispatcher do
               err
           end
         else
+          {:onboarded, _stage} ->
+            # #5.2 D2 — issue routeless onboardée sur la carte par défaut → on DÉFÈRE (skip ; le tick suivant
+            # la voit routée → dispatch). Entrée système : create_ticket crée, le poller route.
+            {:skipped, :onboarded}
+
           {:error, {phase, reason}} ->
             Logger.warning(
-              "StageDispatcher: #{phase} role=#{role0} issue=#{repo}##{number} → #{inspect(reason)} (skip, pas de verrou)"
+              "StageDispatcher: #{phase} issue=#{repo}##{number} → #{inspect(reason)} (skip, pas de verrou)"
             )
 
             {:error, {phase, reason}}
@@ -749,20 +718,20 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp tag_err({:ok, _} = ok, _tag), do: ok
   defp tag_err({:error, reason}, tag), do: {:error, {tag, reason}}
 
-  # #8 (carte-driven role) : dérive `{role, profile}` de la POSITION carte. route=nil → producteur de
-  # `decide` (rétro-compat A1, exact). route={pipeline,stage} → `CarteNav.stage_role` + load du profil.
-  # Issue routée dont la carte/stage/profil ne résout pas = misconfig → `{:error,...}` (fail-loud).
+  # #8 (carte-driven role) : dérive `{role, profile, stage_spec}` de la POSITION carte (route gravée) +
+  # load du profil. route nil = anomalie → fail-loud (#5.2 D2 — plus de fallback producteur). Carte/stage/
+  # profil non résolus = misconfig → `{:error, _}` (fail-loud).
   @spec carte_role(
           {String.t(), String.t()} | nil,
-          String.t(),
-          Fleet.CapProfile.t(),
           (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()}),
           (String.t() -> map())
         ) :: {:ok, {String.t(), Fleet.CapProfile.t(), map()}} | {:error, term()}
-  defp carte_role(nil, producer_role, producer_profile, _load_role, _carte_loader),
-    do: {:ok, {producer_role, producer_profile, %{}}}
+  # #5.2 D2 — route nil = ANOMALIE : le poller onboarde tout routeless AVANT dispatch (ensure_carte_or_onboard)
+  # → si on arrive ici sans route, fail-loud, JAMAIS un fallback eng silencieux. Le rôle vient TOUJOURS de la
+  # position carte (route gravée).
+  defp carte_role(nil, _load_role, _carte_loader), do: {:error, :unrouted}
 
-  defp carte_role({pipeline, stage}, _producer_role, _producer_profile, load_role, carte_loader) do
+  defp carte_role({pipeline, stage}, load_role, carte_loader) do
     with {:ok, carte} <- load_carte(pipeline, carte_loader),
          {:ok, role} <- carte_stage_role(carte, pipeline, stage),
          {:ok, profile} <- load_role.(role) do
@@ -773,6 +742,30 @@ defmodule Fleet.Pilot.StageDispatcher do
       {:ok, {role, profile, stage_spec}}
     end
   end
+
+  # #5.2 D2 — onboarding système. Route présente → passthrough `{:ok, route}`. Route nil (issue routeless :
+  # create_ticket ne grave plus la carte ; ou ticket humain brut) → grave la carte par défaut (mandate-gate)
+  # = elle ENTRE dans le gate → `{:onboarded, stage}` (dispatch_issue défère : skip ce tick, le suivant la
+  # voit routée). Route postée par le SYSTÈME (forge token système). Échec → `{:error, {:onboard, _}}`.
+  defp ensure_carte_or_onboard(_forge, _repo, _number, route, _carte_loader, _forge_opts)
+       when not is_nil(route),
+       do: {:ok, route}
+
+  defp ensure_carte_or_onboard(forge, repo, number, nil, carte_loader, forge_opts) do
+    carte_name = default_carte()
+
+    with {:ok, carte} <- load_carte(carte_name, carte_loader),
+         {:ok, {stage, _role}} <- Fleet.Pilot.CarteNav.first_stage(carte),
+         {:ok, _} <- forge.post_route(repo, number, carte_name, stage, forge_opts) do
+      {:onboarded, stage}
+    else
+      err -> {:error, {:onboard, err}}
+    end
+  end
+
+  # Carte par défaut de l'onboarding (toute issue assignée routeless y entre ; défaut mandate-gate : le
+  # consultant review le mandat AVANT l'eng). Data-catalogue, pas un nom magique en dur.
+  defp default_carte, do: Application.get_env(:fleet_pilot, :delegation_carte, "mandate-gate")
 
   defp load_carte(pipeline, carte_loader) do
     {:ok, carte_loader.(pipeline)}
@@ -858,8 +851,6 @@ defmodule Fleet.Pilot.StageDispatcher do
   # ============================================================
   # Internals
   # ============================================================
-
-  defp default_load_role(role), do: Fleet.CapProfile.load(role)
 
   # ============================================================
   # Résolution projet (base_sha pinné hors-pod, F-03 R1)

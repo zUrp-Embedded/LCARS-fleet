@@ -153,7 +153,7 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "pose l'issue (assignee humain) PUIS grave la route de la carte (state-machine) + label visu" do
+    test "#5.2 D2 — pose l'issue (assignee humain) + label visu, SANS graver de route (découplage)" do
       assert {:ok, %{content: [%{"text" => txt}]}, %{}} =
                PodTools.handle_tool_call(
                  "create_ticket",
@@ -167,20 +167,17 @@ defmodule Fleet.MCP.PodToolsTest do
       assert opts[:assignees] == [human]
       refute Keyword.has_key?(opts, :labels)
 
-      # #8 cohérence : la ROUTE est gravée (state-machine de routing) — carte par défaut mandate-gate,
-      # 1er stage mandate-review (le consultant review le mandat AVANT l'eng). Postée SYSTÈME (opts sans token).
-      assert_received {:post_route, "fleet/demo", 77, "mandate-gate", "mandate-review",
-                       _route_opts}
+      # #5.2 D2 — DÉCOUPLAGE : create_ticket ne grave PLUS la route. Le SYSTÈME (poller) onboarde l'issue
+      # routeless sur la carte par défaut. Donc AUCUN post_route ici.
+      refute_received {:post_route, _, _, _, _, _}
 
       # type:feature = étiquette de VISU (best-effort), JAMAIS du routing.
       assert_received {:add_label, "fleet/demo", 77, "type:feature", _}
 
       assert {:ok, result} = Jason.decode(txt)
-      assert result["status"] == "ticket_routed"
+      assert result["status"] == "ticket_created"
       assert result["ticket"] == "fleet/demo#77"
       assert result["assignee"] == human
-      assert result["carte"] == "mandate-gate"
-      assert result["stage"] == "mandate-review"
     end
   end
 
