@@ -13,7 +13,19 @@
       "required": ["name", "containment"],
       "properties": {
         "name": { "type": "string" },
-        "containment": { "type": "string" }
+        "containment": { "type": "string" },
+        "mounts": {
+          "type": "array",
+          "description": "Mounts CATALOGUE projetés dans le sandbox bwrap (le monde fourni au pod : qu'est-ce qu'on fournit). bwrap_launch les bind au MÊME path, RO/RW, après la tmpfs /home. Inerte si containment: none (host = accès natif). Vide/absent ⇒ aucun mount extra (worker bare).",
+          "items": {
+            "type": "object",
+            "required": ["path", "mode"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^/" },
+              "mode": { "type": "string", "enum": ["ro", "rw"] }
+            }
+          }
+        }
       }
     },
     "spec": {

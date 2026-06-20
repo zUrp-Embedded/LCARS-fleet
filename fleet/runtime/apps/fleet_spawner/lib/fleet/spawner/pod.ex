@@ -891,6 +891,8 @@ defmodule Fleet.Spawner.Pod do
           |> Map.put("CLAUDE_DIR", claude_dir_for(human))
           |> maybe_put_vendor_bin(human)
           |> maybe_put_pod_cwd(state)
+          # Mounts CATALOGUE (cap-profile-driven) → bwrap_launch les bind. Vide / host_launch = inerte.
+          |> Map.put("LCARS_POD_MOUNTS", mounts_env(cap_profile_mounts(state.cap_profile)))
 
         {:ok, human, env}
       rescue
@@ -1435,6 +1437,29 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp cap_profile_containment(_), do: "bwrap"
+
+  # Mounts CATALOGUE (cap-profile-driven, réaligné #5.2) : le monde projeté dans le sandbox bwrap est
+  # DÉCLARÉ par le cap-profile (`metadata.mounts`), pas hardcodé dans le launcher. bwrap_launch les bind
+  # (RO/RW) au MÊME path, après la tmpfs /home. Vide ⇒ aucun mount extra (worker bare). Inerte pour
+  # containment: none (host = accès natif).
+  defp cap_profile_mounts(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
+    Map.get(meta, "mounts") || Map.get(meta, :mounts) || []
+  end
+
+  defp cap_profile_mounts(_), do: []
+
+  # Sérialise les mounts pour bwrap_launch (`LCARS_POD_MOUNTS`) : une ligne "mode:path" par mount.
+  defp mounts_env(mounts) when is_list(mounts) do
+    mounts
+    |> Enum.map(fn m ->
+      mode = Map.get(m, "mode") || Map.get(m, :mode)
+      path = Map.get(m, "path") || Map.get(m, :path)
+      "#{mode}:#{path}"
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp mounts_env(_), do: ""
 
   # LAUNCH-Q : HOME du pod selon containment. host (none) = home réel de l'humain (claude → `~/.claude`
   # natif, refresh OAuth) ; bwrap = pod_dir (ignoré sous le sandbox de toute façon). `claude_dir_for/1`

@@ -224,6 +224,33 @@ if [[ -n "$RESOLV_REAL" && "$RESOLV_REAL" != /etc/* && -e "$RESOLV_REAL" ]]; the
   RESOLV_BIND=(--ro-bind "$RESOLV_REAL" "$RESOLV_REAL")
 fi
 
+# =============================================================
+# Mounts CATALOGUE (cap-profile-driven, LCARS_POD_MOUNTS = lignes "mode:path"). Le monde projeté est
+# DÉCLARÉ par le cap-profile (philosophie sanctuaire : « qu'est-ce qu'on fournit »), plus hardcodé ici.
+# Bindés APRÈS la `--tmpfs /home` ci-dessous ⇒ restaurent les chemins masqués (ex /home/projects). Ceinture :
+# path absolu + existant ; RW interdit sur les roots système (déjà montés RO par le sandbox de base). La
+# source cap-profile est opérateur-de-confiance — la ceinture = anti-tir-dans-le-pied, pas anti-malveillant.
+# =============================================================
+CATALOG_BINDS=()
+if [[ -n "${LCARS_POD_MOUNTS:-}" ]]; then
+  while IFS= read -r _mount; do
+    [[ -z "$_mount" ]] && continue
+    _mode="${_mount%%:*}"; _path="${_mount#*:}"
+    [[ "$_path" == /* ]] || { echo "ERR: mount catalogue path non-absolu: '$_path'" >&2; exit 1; }
+    [[ -e "$_path"   ]] || { echo "ERR: mount catalogue path absent host-side: '$_path'" >&2; exit 1; }
+    case "$_mode" in
+      ro) CATALOG_BINDS+=(--ro-bind "$_path" "$_path") ;;
+      rw)
+        case "$_path" in
+          / | /etc | /etc/* | /usr | /usr/* | /bin | /bin/* | /sbin | /sbin/* | /lib | /lib/* | /lib64 | /lib64/* | /boot | /boot/* | /proc | /proc/* | /sys | /sys/* | /dev | /dev/* | /root | /root/*)
+            echo "ERR: mount catalogue RW interdit sur root système: '$_path'" >&2; exit 1 ;;
+          *) CATALOG_BINDS+=(--bind "$_path" "$_path") ;;
+        esac ;;
+      *) echo "ERR: mount catalogue mode invalide '$_mode' (attendu ro|rw) pour '$_path'" >&2; exit 1 ;;
+    esac
+  done <<< "$LCARS_POD_MOUNTS"
+fi
+
 exec "$BWRAP_BIN" \
   --unshare-all --share-net \
   --die-with-parent \
@@ -246,6 +273,7 @@ exec "$BWRAP_BIN" \
   --ro-bind "$VENDOR_SHARE" "$POD_DIR/.local/share/$VENDOR_NAME" \
   --bind "$POD_SOCK_DIR" "$POD_SOCK_DIR" \
   ${PLUGIN_BINDS[@]+"${PLUGIN_BINDS[@]}"} \
+  ${CATALOG_BINDS[@]+"${CATALOG_BINDS[@]}"} \
   --chdir "$WORKDIR" \
   --setenv HOME "$POD_DIR" \
   --setenv PATH "$POD_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin" \

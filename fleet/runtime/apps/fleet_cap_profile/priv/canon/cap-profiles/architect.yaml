@@ -5,7 +5,16 @@
 kind: CapabilityProfile
 metadata:
   name: architect
-  containment: none
+  # bwrap (réaligné #5.2 2026-06-20) : l'arch est persistant ET sandboxé. Son besoin réel = voir tous les
+  # projets (via mounts catalogue ci-dessous), PAS "être le home de l'humain" (effet de bord host_launch,
+  # nocif : contamination doctrine BUG-3 + zéro sandbox). En bwrap, HOME=pod_dir → claude lit pod_dir/.claude,
+  # plus le ~/.claude humain → BUG-3 disparaît à la racine. Interactif via `lcars attach` (marche sur bwrap).
+  containment: bwrap
+  mounts:
+    - path: /home/projects        # RO : lire le code pour cadrer les briefs (tous les projets d'un coup)
+      mode: ro
+    - path: /home/projects.work   # RW : écrire la DOC (moon-shot/beyond), en amont des tickets
+      mode: rw
 spec:
   scope:
     # Convention nommage tools (cohérent fleet_cap_profile G24-9 F-CONT-RISK gate) :
