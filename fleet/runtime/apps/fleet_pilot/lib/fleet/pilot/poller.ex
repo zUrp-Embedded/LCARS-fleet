@@ -33,10 +33,10 @@ defmodule Fleet.Pilot.Poller do
 
   ## Historique — mode legacy RETIRÉ (②.3 / BL-050, 2026-06-16)
 
-  L'ancien mode `do_poll` legacy (route-table `Routing.match_issue` → `Dispatcher.dispatch` →
-  `Fleet.Pipeline.start_pipeline` = Executor RAM, via l'état de l'`AutoDispatcher`) a été **supprimé**
-  avec le rail legacy (`auto_dispatcher`/`dispatcher`/`pipeline_invoker`). Seul le mode stage subsiste ;
-  le moteur RAM tombe en aval.
+  L'ancien mode `do_poll` legacy (route-table → `Dispatcher.dispatch` → `Fleet.Pipeline.start_pipeline`
+  = Executor RAM, via l'état de l'`AutoDispatcher`) a été **supprimé** avec le rail legacy
+  (`auto_dispatcher`/`dispatcher`/`pipeline_invoker`). Le module `Routing` lui-même a été retiré en
+  #5.2 D4 (code mort). Seul le mode stage subsiste ; le moteur RAM tombe en aval.
   """
 
   use GenServer
@@ -211,18 +211,27 @@ defmodule Fleet.Pilot.Poller do
   defp safe_poll(state) do
     do_poll(state)
   rescue
-    exception ->
-      Logger.error(
-        "fleet_pilot Poller unexpected crash in do_poll: #{inspect(exception)} — state preserved"
-      )
+    exception -> poll_crash(state, exception, "crash")
+  catch
+    kind, reason -> poll_crash(state, {kind, reason}, "exit/throw")
+  end
 
-      {%{dispatched: 0, skipped: 0, errors: 1},
-       %{
-         state
-         | error_count: state.error_count + 1,
-           err_streak: state.err_streak + 1,
-           last_error: inspect(exception)
-       }}
+  # F-S1-8 : rescue ET catch :exit/:throw — un `GenServer.call` vers une dép morte (enqueue→TaskQueue,
+  # spawn→Spawner) lève `:exit`, PAS `{:error}` ; sans le catch, la boucle crashait (≠ « state preserved »
+  # annoncé). On dégrade gracieusement (err_streak + backoff, state conservé), comme `live_owned_refs` et le
+  # skill elixir « catch :exit on GenServer.call ».
+  defp poll_crash(state, detail, kind_label) do
+    Logger.error(
+      "fleet_pilot Poller unexpected #{kind_label} in do_poll: #{inspect(detail)} — state preserved"
+    )
+
+    {%{zero_tally() | errors: 1},
+     %{
+       state
+       | error_count: state.error_count + 1,
+         err_streak: state.err_streak + 1,
+         last_error: inspect(detail)
+     }}
   end
 
   # ============================================================
@@ -251,7 +260,7 @@ defmodule Fleet.Pilot.Poller do
       }
     )
 
-    {%{dispatched: 0, skipped: 0, errors: 1},
+    {%{zero_tally() | errors: 1},
      %{
        state
        | error_count: state.error_count + 1,
@@ -294,10 +303,13 @@ defmodule Fleet.Pilot.Poller do
       # Sans ça, un seul stall de pod wedge le pipe définitivement (live #8).
       new_suspects = reconcile_orphan_locks(issues, pulls, pr_issue_ids, state, forge)
 
+      # F-S1-6 : opts de dispatch calculées UNE fois/tick (partagées issues + pulls), pas 2×.
+      opts = stage_dispatch_opts(state)
+
       tally =
         merge_tally(
-          stage_process_issues(issues, pr_issue_ids, state),
-          stage_process_pulls(pulls, state)
+          stage_process_issues(issues, pr_issue_ids, state, opts),
+          stage_process_pulls(pulls, opts)
         )
 
       duration_ms = elapsed_ms(started)
@@ -462,13 +474,14 @@ defmodule Fleet.Pilot.Poller do
     }
   end
 
+  # Tally vierge (source unique — F-S1-5). Les chemins d'erreur utilisent `%{zero_tally() | errors: 1}`.
+  defp zero_tally, do: %{dispatched: 0, skipped: 0, errors: 0}
+
   # Chemin PR-driven (Corr.3 4-C) : chaque PR ouverte avec une review demandee -> dispatch le juge.
   # Non garde par le bail (les juges d'un pipeline DEJA actif doivent avancer ; le bail ne borne
   # que l'ENTREE de nouveaux pipelines, cote issues).
-  defp stage_process_pulls(pulls, state) do
-    opts = stage_dispatch_opts(state)
-
-    Enum.reduce(pulls, %{dispatched: 0, skipped: 0, errors: 0}, fn pr, acc ->
+  defp stage_process_pulls(pulls, opts) do
+    Enum.reduce(pulls, zero_tally(), fn pr, acc ->
       case StageDispatcher.dispatch_review(pr, opts) do
         # ②.1d : `:ok` couvre `{:spawned, _, _}` (juge/rework spawné) ET `{:merged, _}` (PR scellée).
         {:ok, _} -> %{acc | dispatched: acc.dispatched + 1}
@@ -478,16 +491,13 @@ defmodule Fleet.Pilot.Poller do
     end)
   end
 
-  defp stage_process_issues(issues, pr_issue_ids, state) do
-    opts = stage_dispatch_opts(state)
-
-    # #8 cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, gravée par create_ticket) — plus
-    # de routing par label, plus d'Entry. Le poller lit la route → dispatch (carte_role). Le bail
-    # « 1 pipeline actif/repo » se lit AUSSI sur la route (robuste, append-only), PAS sur `state:*` (label
-    # mutable). On classe chaque issue UNE fois (engaged? lit la route si besoin) :
+  defp stage_process_issues(issues, pr_issue_ids, state, opts) do
+    # #8 cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, gravée à l'onboard) — plus de
+    # routing par label. Le poller lit la route → dispatch (carte_role). Le bail « 1 pipeline actif/repo »
+    # se lit AUSSI sur la route (robuste, append-only). On classe chaque issue UNE fois :
     #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er stage = pipeline démarré) → tient le bail ;
     #     on dispatche son stage courant (continue le hop, ou skip si in-flight).
-    #   - EN FILE (routé par create_ticket, route au 1er stage, pas encore dispatché) → démarre seulement
+    #   - EN FILE (routée au 1er stage, ou routeless à onboarder, pas encore dispatchée) → démarre seulement
     #     si le bail est libre ; sinon attend (sérialisation → feature-branches séquentielles → FF merge).
     classified =
       Enum.map(issues, fn issue ->
@@ -498,7 +508,7 @@ defmodule Fleet.Pilot.Poller do
     lease_held0 = Enum.any?(classified, fn {_issue, _pr?, engaged} -> engaged end)
 
     {tally, _lease} =
-      Enum.reduce(classified, {%{dispatched: 0, skipped: 0, errors: 0}, lease_held0}, fn
+      Enum.reduce(classified, {zero_tally(), lease_held0}, fn
         {issue, pr?, engaged}, {acc, lease} ->
           payload = wrap_issue_as_payload(issue, state.repo)
 

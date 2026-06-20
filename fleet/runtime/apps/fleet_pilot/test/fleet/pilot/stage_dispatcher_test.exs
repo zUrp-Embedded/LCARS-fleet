@@ -20,11 +20,11 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     issue(Map.merge(%{"assignees" => [%{"login" => "lordzurp"}]}, fields))
   end
 
-  # #5.2 D2 — decide = PORTE pure : verrou → skip, sinon :spawn. Pas d'ownership (scoping forge-side amont),
+  # #5.2 D2 — decide = PORTE pure : verrou → skip, sinon :engage. Pas d'ownership (scoping forge-side amont),
   # pas de rôle (vient de la route via carte_role), pas de load (carte_role charge).
   describe "decide/1 (porte pure)" do
-    test "issue non verrouillée → :spawn (le rôle vient de la route, pas d'ici)" do
-      assert :spawn = StageDispatcher.decide(eng_issue())
+    test "issue non verrouillée → :engage (rôle ET action spawn/onboard décidés en aval)" do
+      assert :engage = StageDispatcher.decide(eng_issue())
     end
 
     test "verrou lcars-in-flight présent → {:skip, :in_flight}" do

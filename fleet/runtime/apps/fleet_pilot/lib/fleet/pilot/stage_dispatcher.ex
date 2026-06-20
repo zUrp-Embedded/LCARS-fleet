@@ -6,13 +6,13 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   ## Décision (`decide/1`) — PORTE pure (#5.2 D2)
 
-  À partir du payload d'une issue Gitea : `:spawn` (engager) | `{:skip, reason}` (`:in_flight` verrou posé,
+  À partir du payload d'une issue Gitea : `:engage` (procéder) | `{:skip, reason}` (`:in_flight` verrou posé,
   `:awaits_human` verrou humain). decide ne fait QUE la porte — pas d'ownership (scoping forge-side amont),
   pas de rôle ni de load (le RÔLE vient de la POSITION carte, via `carte_role` ; voir Effets).
 
   ## Effets (`dispatch_issue/2`)
 
-  Sur `:spawn` : résout projet + route, puis (#5.2 D2) :
+  Sur `:engage` : résout projet + route, puis (#5.2 D2) :
     * **route absente** (issue routeless — create_ticket ne grave plus, ou ticket humain brut) →
       `ensure_carte_or_onboard` grave la **carte par défaut** (mandate-gate) → `{:skipped, :onboarded}`
       (on défère ; le tick suivant la voit routée). C'est l'ENTRÉE système : create_ticket crée, le poller route.
@@ -30,11 +30,12 @@ defmodule Fleet.Pilot.StageDispatcher do
   @in_flight_label Fleet.Pilot.Labels.in_flight()
   @awaits_human_label Fleet.Pilot.Labels.awaits_human()
 
-  @type decision :: :spawn | {:skip, atom()}
+  @type decision :: :engage | {:skip, atom()}
 
   @doc """
-  Décision PURE (porte) : payload issue → `:spawn` | `{:skip, reason}`. #5.2 D2 — decide ne fait QUE la
-  porte : verrou `lcars-in-flight` / `lcars-awaits-human` → skip ; sinon → engager (`:spawn`). Le SCOPING
+  Décision PURE (porte) : payload issue → `:engage` | `{:skip, reason}`. #5.2 D2 — decide ne fait QUE la
+  porte : verrou `lcars-in-flight` / `lcars-awaits-human` → skip ; sinon → `:engage` (proceder). Le rôle ET
+  l'action (spawn vs onboard) sont décidés EN AVAL (`dispatch_issue`) — d'où `:engage` et pas `:spawn`. Le SCOPING
   (forge-side, en amont) et le ROUTAGE (route → rôle, via `carte_role`/onboard dans `dispatch_issue`) ne
   sont PAS ici — decide ne charge rien et ne décide pas le rôle.
   """
@@ -56,16 +57,17 @@ defmodule Fleet.Pilot.StageDispatcher do
         {:skip, :awaits_human}
 
       true ->
-        :spawn
+        :engage
     end
   end
 
   @doc """
-  Dispatch effectif d'une issue : `decide/2` puis, sur `{:spawn, role, profile}`, l'ordre
-  canonique du spawn (verrou → comment → pod). Idempotent via les write-ops ForgeClient.
+  Dispatch effectif d'une issue : `decide/1` puis, sur `:engage`, résout projet+route et soit ONBOARDE
+  (routeless → grave la carte par défaut → skip, D2), soit dérive le rôle de la carte (`carte_role`) et
+  applique l'ordre canonique du spawn (verrou → pod → enqueue → wake, `spawn_stage`). Idempotent.
 
   `opts` : `:repo` (obligatoire), `:forge_opts` (passé au ForgeClient), + seams
-  `:forge_client` / `:loader` / `:spawner` / `:clock` (défauts = modules réels).
+  `:forge_client` / `:loader` / `:carte_loader` / `:spawner` / `:task_queue` / `:clock` (défauts = modules réels).
   """
   @spec dispatch_issue(map(), keyword()) ::
           {:ok, {:spawned, pod_id :: String.t(), role :: String.t()}}
@@ -85,7 +87,7 @@ defmodule Fleet.Pilot.StageDispatcher do
       {:skip, reason} ->
         {:skipped, reason}
 
-      :spawn ->
+      :engage ->
         issue = Map.get(payload, "issue", payload)
         number = issue["number"]
         repo = Keyword.fetch!(opts, :repo)
