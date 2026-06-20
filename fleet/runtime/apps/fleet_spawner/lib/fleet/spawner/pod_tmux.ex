@@ -121,19 +121,35 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc """
-  Envoie `keys` + `Enter` au REPL du pod (le KICK, ex. « yop »). send-keys est le control-plane
+  Envoie `keys` puis `Enter` au REPL du pod (le KICK, ex. « yop »/« wake »). send-keys est le control-plane
   universel (atteint aussi les slash-commands, contrairement aux channels MCP).
+
+  Robustesse : le texte et l'`Enter` partent en DEUX send-keys distincts (cf. `send_keys_args/2`). Combinés
+  en un seul (`keys "Enter"`), le TUI de claude rate l'`Enter` par intermittence (vu live 2026-06-20 :
+  « yop » non soumis, fallait l'envoyer en 2 fois). send-keys est le SEUL canal out-of-band quand le Monitor
+  est mort → il doit être robuste par construction, pas seulement par le retry de la boucle de kick.
   """
   @spec send_keys(String.t(), String.t()) :: :ok | {:error, term()}
   def send_keys(pod_id, keys) when is_binary(pod_id) and is_binary(keys) do
-    case tmux(pod_id, ["send-keys", "-t", session_name(pod_id), keys, "Enter"]) do
-      {_, 0} ->
-        :ok
+    [text_args, enter_args] = send_keys_args(pod_id, keys)
 
+    with {_, 0} <- tmux(pod_id, text_args),
+         {_, 0} <- tmux(pod_id, enter_args) do
+      :ok
+    else
       {out, code} ->
         Logger.warning("PodTmux send-keys pod=#{pod_id} échec (#{code}) : #{String.trim(out)}")
         {:error, {:tmux_send_failed, code, String.trim(out)}}
     end
+  end
+
+  @doc false
+  # Séquence d'args tmux pour send_keys : DEUX sends — (1) le texte LITTÉRAL (`-l` : jamais interprété comme
+  # key-name), (2) l'`Enter` (key). Séparés = 2 events d'input distincts → le TUI ingère le texte avant le
+  # newline. Pure + testable (verrouille le contrat « texte littéral PUIS Enter », anti-régression).
+  def send_keys_args(pod_id, keys) when is_binary(pod_id) and is_binary(keys) do
+    s = session_name(pod_id)
+    [["send-keys", "-t", s, "-l", keys], ["send-keys", "-t", s, "Enter"]]
   end
 
   @doc """

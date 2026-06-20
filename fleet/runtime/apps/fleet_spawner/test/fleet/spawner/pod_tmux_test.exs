@@ -28,6 +28,24 @@ defmodule Fleet.Spawner.PodTmuxTest do
     end
   end
 
+  # ENTER manqué vu LIVE (2026-06-20) : texte+Enter batchés en un seul send = le TUI claude rate la
+  # soumission. Le contrat « 2 sends, texte littéral PUIS Enter » est verrouillé ici (anti-régression d'une
+  # "simplification" qui recombinerait les deux et réintroduirait la flakiness).
+  describe "send_keys_args/2 (robustesse ENTER — 2 sends distincts)" do
+    test "texte LITTÉRAL (-l) d'abord, puis Enter en send séparé" do
+      assert [
+               ["send-keys", "-t", "lcars-pod-pod-42", "-l", "wake"],
+               ["send-keys", "-t", "lcars-pod-pod-42", "Enter"]
+             ] = PodTmux.send_keys_args("pod-42", "wake")
+    end
+
+    test "le texte n'est JAMAIS combiné avec Enter dans le même send (la régression d'hier)" do
+      [text_args, enter_args] = PodTmux.send_keys_args("pod-1", "yop")
+      refute "Enter" in text_args
+      assert List.last(enter_args) == "Enter"
+    end
+  end
+
   # F-034 : `pkill -f` ancré + échappé + garde anti mass-kill.
   describe "pkill_pattern/1 (F-034 anti self-kill)" do
     test "pod_id valide → pattern ancré en token (matche le holder, exclut les sur-matchs)" do
