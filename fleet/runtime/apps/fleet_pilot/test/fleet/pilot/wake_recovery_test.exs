@@ -3,57 +3,82 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
   alias Fleet.Pilot.WakeRecovery
 
-  test "wake :ok → clear le compteur, renvoie :ok, ni note ni respawn" do
+  test "wake :ok → :ok, ni re-roll ni note ni escalade" do
     pid = self()
 
     opts = [
       wake_fun: fn p -> send(pid, {:wake, p}) && :ok end,
-      clear_fail_fun: fn p -> send(pid, {:clear, p}) && :ok end,
-      note_fail_fun: fn _ -> flunk("note interdit sur :ok") end
+      seen_before_fun: fn _ -> flunk("seen_before interdit sur :ok") end,
+      note_fun: fn _, _ -> flunk("note interdit sur :ok") end
     ]
 
     assert :ok = WakeRecovery.wake("pod-1", fn -> flunk("respawn interdit sur :ok") end, opts)
     assert_received {:wake, "pod-1"}
-    assert_received {:clear, "pod-1"}
   end
 
-  test "1er fail (n=1 ≤ reroll_max) → re-roll : respawn PUIS re-wake" do
+  test "fail + jamais vu + re-roll RÉCUPÈRE → grave l'incident (bonne signature) + :ok" do
     pid = self()
+    ctr = :counters.new(1, [])
 
     opts = [
-      wake_fun: fn p -> send(pid, {:wake, p}) && {:error, :boom} end,
-      note_fail_fun: fn _ -> 1 end,
-      reroll_max: 1
+      # 1er wake → {:error} ; re-wake (après re-roll) → :ok
+      wake_fun: fn p ->
+        send(pid, {:wake, p})
+        n = :counters.get(ctr, 1)
+        :counters.add(ctr, 1, 1)
+        if n == 0, do: {:error, :dead}, else: :ok
+      end,
+      seen_before_fun: fn _ -> false end,
+      note_fun: fn sig, reason -> send(pid, {:note, sig, reason}) && :ok end
     ]
 
-    WakeRecovery.wake("pod-2", fn -> send(pid, :respawn) end, opts)
+    assert :ok = WakeRecovery.wake("issue-7-engineer", fn -> send(pid, :respawn) end, opts)
 
-    assert_received {:wake, "pod-2"}
+    assert_received {:wake, "issue-7-engineer"}
     assert_received :respawn
-    assert_received {:wake, "pod-2"}
+    assert_received {:wake, "issue-7-engineer"}
+    # signature : chiffres normalisés → N
+    assert_received {:note, "wake:issue-N-engineer:dead", :dead}
   end
 
-  test "2e fail (n=2 > reroll_max) → escalade ticket système + {:error,{:escalated,_}}, pas de respawn" do
+  test "fail + jamais vu + re-roll ÉCHOUE → escalade :reroll_failed + {:error,{:escalated,_}}" do
     pid = self()
 
     opts = [
       wake_fun: fn _ -> {:error, :dead} end,
-      note_fail_fun: fn _ -> 2 end,
-      reroll_max: 1,
+      seen_before_fun: fn _ -> false end,
+      note_fun: fn _, _ -> flunk("pas de note si le re-roll échoue") end,
       create_issue_fun: fn repo, title, _body, iopts ->
-        send(pid, {:issue, repo, title, iopts})
-        {:ok, 42}
+        send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
       end
     ]
 
     assert {:error, {:escalated, :dead}} =
-             WakeRecovery.wake("pod-3", fn -> flunk("pas de respawn au 2e fail") end, opts)
+             WakeRecovery.wake("pod-x", fn -> send(pid, :respawn) end, opts)
 
+    assert_received :respawn
     assert_received {:issue, "fleet/lcars", title, iopts}
-    assert title =~ "error_system"
-    assert title =~ "pod-3"
+    assert title =~ "re-roll échoué"
     assert iopts[:labels] == ["error_system"]
     assert iopts[:assignees] == ["starfleet"]
+  end
+
+  test "fail + DÉJÀ VU → escalade :recurrence DIRECTE (pas de re-roll)" do
+    pid = self()
+
+    opts = [
+      wake_fun: fn _ -> {:error, :dead} end,
+      seen_before_fun: fn _ -> true end,
+      create_issue_fun: fn repo, title, _b, iopts ->
+        send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
+      end
+    ]
+
+    assert {:error, {:escalated, :dead}} =
+             WakeRecovery.wake("pod-y", fn -> flunk("pas de re-roll si déjà vu") end, opts)
+
+    assert_received {:issue, "fleet/lcars", title, _iopts}
+    assert title =~ "récurrence"
   end
 
   test "escalade : create_issue échoue avec assignee → fallback label-only" do
@@ -61,20 +86,17 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
     opts = [
       wake_fun: fn _ -> {:error, :dead} end,
-      note_fail_fun: fn _ -> 2 end,
-      reroll_max: 1,
+      seen_before_fun: fn _ -> true end,
       create_issue_fun: fn repo, _t, _b, iopts ->
         if iopts[:assignees] do
-          send(pid, :with_assignee)
-          {:error, :bad_assignee}
+          send(pid, :with_assignee) && {:error, :bad_assignee}
         else
-          send(pid, {:fallback, repo, iopts})
-          {:ok, 7}
+          send(pid, {:fallback, repo, iopts}) && {:ok, 7}
         end
       end
     ]
 
-    WakeRecovery.wake("pod-4", fn -> :ok end, opts)
+    WakeRecovery.wake("pod-z", fn -> :ok end, opts)
 
     assert_received :with_assignee
     assert_received {:fallback, "fleet/lcars", fb_opts}
