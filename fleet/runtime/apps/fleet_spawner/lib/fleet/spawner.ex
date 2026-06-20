@@ -321,10 +321,24 @@ defmodule Fleet.Spawner do
   # pod). Le `watch.sh` armé via l'outil Monitor émet « ton tour » → réveille l'agent.
   defp touch_turn_flag(%{pod_dir: pod_dir}) when is_binary(pod_dir) do
     flag = Path.join(pod_dir, "turn.flag")
-    _ = File.write(flag, Integer.to_string(System.system_time(:millisecond)) <> "\n")
+
+    # Token UNIQUE (ms + compteur monotone). watch.sh compare le CONTENU (`cur != last`) : un ms BARE peut
+    # se répéter (2 wakes dans la même ms) → token identique → wake MANQUÉ. Le suffixe unique garantit que
+    # chaque écriture change le contenu → toujours détectée. (Le ms reste pour la lisibilité humaine.)
+    token =
+      "#{System.system_time(:millisecond)}-#{System.unique_integer([:positive, :monotonic])}"
+
+    _ = File.write(flag, token <> "\n")
     :ok
   rescue
-    _ -> :ok
+    e ->
+      # Rail PORTEUR : un échec d'écriture du flag = wake-par-flag muet → log-LOUD (best-effort : le
+      # fallback send-keys + le result_deadline rattrapent, mais on ne l'avale PAS en silence).
+      Logger.warning(
+        "touch_turn_flag #{pod_dir}: écriture flag échouée (porteur best-effort): #{inspect(e)}"
+      )
+
+      :ok
   end
 
   defp touch_turn_flag(_info), do: :ok
