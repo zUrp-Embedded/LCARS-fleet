@@ -281,13 +281,14 @@ defmodule Fleet.Spawner.Pod do
       mandate_pulled?(state.pod_id) ->
         {:noreply, state}
 
-      # #5.2 double-yop : un pod bootstrap (permanent sans mandat) ne kicke QUE pour armer son Monitor.
-      # Dès qu'il est armé (process `watch.sh` vivant), le porteur (flag) prend le relais → on STOPPE le
-      # kick. Sinon kick_bootstrap_max (4) yops redondants atterrissent après l'armement et distraient
-      # l'agent (chacun = get_task pour rien). Détection host-side, cf. monitor_armed?/1.
-      bootstrap? and monitor_armed?(state) ->
+      # #5.2 : un pod bootstrap (permanent sans mandat) ne kicke QUE pour DÉMARRER l'agent. Dès qu'il a
+      # POLLÉ (appelé get_task = ACK in-band RÉEL : il est up + a lu son SP) → on STOPPE le kick (le
+      # porteur/flag prend le relais ; un Monitor non-armé serait rattrapé par le fallback de la boucle au
+      # prochain wake). On NE se fie PLUS au pgrep (proxy « process watch.sh existe ») mais à l'ACTE de
+      # l'agent — cf. `polled?/1` (last_poll TaskQueue, #5.2 [1]).
+      bootstrap? and polled?(state) ->
         Logger.debug(
-          "pod #{state.pod_id} bootstrap : Monitor armé → kick stoppé (porteur prend le relais)"
+          "pod #{state.pod_id} bootstrap : agent a POLLÉ (ack) → kick stoppé (porteur prend le relais)"
         )
 
         {:noreply, state}
@@ -1840,26 +1841,20 @@ defmodule Fleet.Spawner.Pod do
   defp kick_bootstrap_retry_ms,
     do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
 
-  # Le Monitor (rail porteur) est-il armé ? = le process `watch.sh` du pod tourne (il bloque sur turn.flag).
-  # Les process bwrap sont visibles host-side (descendants du holder) → `pgrep -f <pod_dir>/watch.sh`.
-  # Sert à stopper le kick bootstrap dès armement (#5.2 double-yop). Override test : `:monitor_armed_fun`.
-  defp monitor_armed?(%{pod_dir: pod_dir} = state) when is_binary(pod_dir) do
-    case Map.get(state, :monitor_armed_fun) ||
-           Application.get_env(:fleet_spawner, :monitor_armed_fun) do
-      fun when is_function(fun, 1) ->
-        fun.(state)
-
-      _ ->
-        case System.cmd("pgrep", ["-f", "#{pod_dir}/watch.sh"], stderr_to_stdout: true) do
-          {out, 0} -> String.trim(out) != ""
-          _ -> false
-        end
+  # L'agent a-t-il POLLÉ (appelé get_task) ? = ACK in-band RÉEL (#5.2) : l'agent a tendu la main via l'API
+  # officielle (last_poll, tracké par le TaskQueue en [1]), pas un proxy host-side comme l'ancien
+  # `pgrep watch.sh` (« le process existe » ≠ « l'agent agit »). Sert à stopper le kick bootstrap dès que
+  # l'agent est up. Override test : `:polled_fun`.
+  defp polled?(%{pod_id: pod_id} = state) when is_binary(pod_id) do
+    case Map.get(state, :polled_fun) || Application.get_env(:fleet_spawner, :polled_fun) do
+      fun when is_function(fun, 1) -> fun.(state)
+      _ -> Fleet.TaskQueue.last_poll(pod_id) != nil
     end
   rescue
     _ -> false
   end
 
-  defp monitor_armed?(_), do: false
+  defp polled?(_), do: false
 
   defp inject_brief_to_tmux_pod(%{tmux_session: nil}), do: :ok
 
