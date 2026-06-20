@@ -913,7 +913,7 @@ defmodule Fleet.Pilot.HopConsumer do
   # `broadcast_pipeline_failed` + stop ; ici (forge-driven) l'équivalent est close_issue.
   # Point commun : aucun des deux n'extrait/pousse le livrable sur un verdict non-continue.
   # `deliverable_opts: nil` + `hop_sha` → HopCompleter saute l'étape publish, garde la
-  # séquence idempotente (comment trace → state → close → unlock).
+  # séquence idempotente (comment trace → close → unlock).
   defp close_with_trace(n, role, trace, state) do
     hop = %{
       repo: state.repo,
@@ -922,7 +922,6 @@ defmodule Fleet.Pilot.HopConsumer do
       deliverable_opts: nil,
       hop_sha: "gate-abandon",
       next_assignee: nil,
-      state_label: Fleet.Pilot.Labels.delivered(),
       comment_body: trace
     }
 

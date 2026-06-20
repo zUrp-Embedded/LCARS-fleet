@@ -7,17 +7,11 @@ defmodule Fleet.Pilot.LabelsTest do
   # DÉLIBÉRÉ et visible (ce test rouge le force) — poller/dispatcher/completer/consumer s'accordent
   # dessus au byte près. Source unique F072.
   describe "vocabulaire protocole (valeurs canon)" do
-    test "labels de verrou + dispatch" do
+    # #5.2 D4 — `dispatched` (lock poller legacy) + la chaîne `state:*` (état-dans-label) retirés ;
+    # ne restent que les VERROUS.
+    test "labels de verrou" do
       assert Labels.in_flight() == "lcars-in-flight"
       assert Labels.awaits_human() == "lcars-awaits-human"
-      assert Labels.dispatched() == "lcars-dispatched"
-    end
-
-    test "labels d'état" do
-      assert Labels.state_prefix() == "state:"
-      assert Labels.state("delivered") == "state:delivered"
-      assert Labels.delivered() == "state:delivered"
-      assert Labels.state("judged") == "state:judged"
     end
   end
 end

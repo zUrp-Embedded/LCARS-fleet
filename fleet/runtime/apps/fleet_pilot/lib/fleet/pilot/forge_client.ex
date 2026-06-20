@@ -175,31 +175,9 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  @doc """
-  Transition de `state:*` (DN §5 étape 3) : retire tout label `state:*` existant et pose
-  `new_state`. Les labels non-`state:*` (dont `lcars-in-flight`) sont conservés. Idempotent.
-  """
-  @spec set_state_label(String.t(), integer(), String.t(), Keyword.t()) ::
-          {:ok, :set} | {:error, term()}
-  def set_state_label(repo, issue_number, new_state, opts \\ [])
-      when is_binary(new_state) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, current} <- get_issue_labels(config, repo, issue_number) do
-      # Par NOM (Gitea résout repo+ORG côté serveur) : on garde les labels non-`state:*` et on pose
-      # `new_state`. PUT remplace l'ensemble — on lui passe les NOMS (verrous + état), pas des repo-ids.
-      kept_names =
-        current
-        |> Enum.reject(fn l ->
-          String.starts_with?(l["name"] || "", Fleet.Pilot.Labels.state_prefix())
-        end)
-        |> Enum.map(& &1["name"])
-
-      case put_issue_labels(config, repo, issue_number, Enum.uniq([new_state | kept_names])) do
-        :ok -> {:ok, :set}
-        {:error, _} = err -> err
-      end
-    end
-  end
+  # #5.2 D4 — `set_state_label` (transition `state:*`, DN §5 étape 3) RETIRÉ : l'état vit dans la
+  # route-comment (source unique), pas dans un label `state:*` (qui n'était plus lu que par le
+  # `routing.ex` legacy supprimé). Les verrous (`lcars-in-flight`) passent par `add_label`/`remove_label`.
 
   @doc """
   Poste un comment (DN §5 étape 2). Si `:dedup_signature` est fourni et qu'un comment **système**
@@ -1053,18 +1031,6 @@ defmodule Fleet.Pilot.ForgeClient do
   # labels-verrous du wire-protocol vivent au niveau ORG `fleet` (config fleet, une fois, pas par-repo).
   defp add_issue_label(config, repo, issue_number, label_name) do
     case http_post(config, "/repos/#{repo}/issues/#{issue_number}/labels", %{labels: [label_name]}) do
-      {:ok, _body} -> :ok
-      {:error, _} = err -> err
-    end
-  end
-
-  # PUT (remplace l'ensemble) par NOMS — Gitea résout repo+ORG côté serveur (cf. `add_issue_label`).
-  defp put_issue_labels(config, repo, issue_number, label_names) do
-    case http_put(
-           config,
-           "/repos/#{repo}/issues/#{issue_number}/labels",
-           %{labels: label_names}
-         ) do
       {:ok, _body} -> :ok
       {:error, _} = err -> err
     end

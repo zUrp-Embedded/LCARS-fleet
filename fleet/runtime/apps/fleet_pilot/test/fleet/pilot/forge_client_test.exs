@@ -496,24 +496,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
-  describe "set_state_label/4" do
-    test "retire l'ancien state:* et pose le nouveau, conserve les autres labels" do
-      handlers = %{
-        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
-          {200,
-           [
-             %{"id" => 3, "name" => "type:poc"},
-             %{"id" => 9, "name" => "lcars-in-flight"},
-             %{"id" => 4, "name" => "state:dispatched"}
-           ]},
-        # plus de GET-index : PUT par NOMS (Gitea résout repo+org). Le stub matche par chemin.
-        {"PUT", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []}
-      }
-
-      assert {:ok, :set} =
-               ForgeClient.set_state_label("fleet/lcars", 42, "state:judged", opts(handlers))
-    end
-  end
+  # #5.2 D4 — `describe "set_state_label/4"` retiré : la fonction a disparu (état = route-comment, plus
+  # de label `state:*`).
 
   describe "post_comment/4 — dédup signature" do
     # seam `forge_bot_login` injecté → déterministe (pas de GET /user ni de cache persistent_term).

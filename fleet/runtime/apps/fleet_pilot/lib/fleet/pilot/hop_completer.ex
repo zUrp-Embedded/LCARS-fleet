@@ -16,7 +16,8 @@ defmodule Fleet.Pilot.HopCompleter do
        I-CBC F-03/F-01/F-02 + push borné). Indissociables : le commit local seul
        n'est pas vu par la forge. Retourne le `commit_sha` qui signe le hop.
     2. **Comment signé** `[hop:<role>:<sha>]` — dédup par signature (replay-safe).
-    3. **PATCH `state:*`** — `set_state_label` (DELETE ancien + PUT nouveau).
+       *(Ancienne étape 3 « PATCH `state:*` » RETIRÉE — #5.2 D4 : l'état vit dans la route-comment,
+       pas dans un label `state:*`. Les n° de step suivants gardent leur mapping DN §5.)*
     4. **Routage du stage suivant** :
          * `next_assignee` présent (multi-stage) → `set_assignee(next)` ; le
            poller ne verra le suivant que quand 1-3 sont OK. **(branche A2 — le
@@ -56,7 +57,6 @@ defmodule Fleet.Pilot.HopCompleter do
       livrable git ; alors `:hop_sha` requis.
     * `:hop_sha` — override de la signature de hop (défaut = commit_sha publié)
     * `:next_assignee` — login du rôle suivant (carte) ; `nil` = terminal → close
-    * `:state_label` — label `state:*` à poser (défaut `"state:delivered"`)
     * `:comment_body` — corps lisible du comment (la signature machine est
       toujours ajoutée) ; défaut généré
   """
@@ -67,7 +67,6 @@ defmodule Fleet.Pilot.HopCompleter do
           optional(:deliverable_opts) => map() | nil,
           optional(:hop_sha) => String.t(),
           optional(:next_assignee) => String.t() | nil,
-          optional(:state_label) => String.t(),
           optional(:comment_body) => String.t()
         }
 
@@ -89,16 +88,12 @@ defmodule Fleet.Pilot.HopCompleter do
     repo = Map.fetch!(hop, :repo)
     n = Map.fetch!(hop, :issue_number)
     role = Map.fetch!(hop, :role)
-    state_label = Map.get(hop, :state_label, Labels.delivered())
 
     with {:ok, sha} <- step1_publish(hop, deliverable),
          {:ok, _} <- step2_comment(forge, repo, n, role, sha, hop, forge_opts),
-         {:ok, _} <- step3_state(forge, repo, n, state_label, forge_opts),
          {:ok, routed} <- step4_route(forge, repo, n, hop, forge_opts),
          {:ok, _} <- step5_unlock(forge, repo, n, forge_opts) do
-      Logger.info(
-        "HopCompleter: #{repo}##{n} role=#{role} sha=#{sha} → #{routed} (state=#{state_label})"
-      )
+      Logger.info("HopCompleter: #{repo}##{n} role=#{role} sha=#{sha} → #{routed}")
 
       {:ok, routed}
     end
@@ -670,15 +665,8 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # ── Étape 3 : PATCH state:* ────────────────────────────────────────────────
-  defp step3_state(forge, repo, n, state_label, forge_opts) do
-    case forge.set_state_label(repo, n, state_label, forge_opts) do
-      {:ok, _} = ok -> ok
-      {:error, reason} -> {:error, {:state, reason}}
-    end
-  end
-
   # ── Étape 4 : assignee suivant (A2) OU close (1-stage terminal) ────────────
+  # (Étape 3 « PATCH state:* » retirée — #5.2 D4. N° de step conservés = mapping DN §5.)
   # Reassign : grave la ROUTE du stage suivant AVANT le PATCH assignee (A2.1) — le poller
   # ne doit voir le nouvel assignee qu'avec sa position carte déjà posée (sinon le spawn
   # suivant ne saurait pas quel stage il est). post_route idempotent (dédup marqueur).

@@ -11,11 +11,6 @@ defmodule Fleet.Pilot.HopCompleterTest do
       {:ok, :posted}
     end
 
-    def set_state_label(_repo, _n, label, _opts) do
-      send(self(), {:call, :state, label})
-      {:ok, :set}
-    end
-
     def set_assignee(_repo, _n, login, _opts) do
       send(self(), {:call, :assignee, login})
       {:ok, :set}
@@ -170,18 +165,17 @@ defmodule Fleet.Pilot.HopCompleterTest do
   end
 
   describe "complete/2 — 1-stage terminal (next_assignee nil)" do
-    test "publie, comment signé, state, CLOSE, unlock — dans l'ordre §5" do
+    test "publie, comment signé, CLOSE, unlock — dans l'ordre §5" do
       assert {:ok, :completed} = HopCompleter.complete(base_hop(), seams())
 
       # Étape 1 : publish appelé avec les opts du livrable
       assert_received {:published, %{mode: :git_native, base_sha: "cafe"}}
 
-      # Étapes 2→5 dans l'ordre canonique (mailbox FIFO)
+      # Étapes 2→4 dans l'ordre canonique (mailbox FIFO ; étape 3 state:* retirée — #5.2 D4)
       assert_received {:call, :comment, body, sig}
       assert sig == "[hop:engineer:deadbeef]"
       assert body =~ "[hop:engineer:deadbeef]"
 
-      assert_received {:call, :state, "state:delivered"}
       assert_received {:call, :close}
       assert_received {:call, :unlock, "lcars-in-flight"}
 
@@ -193,20 +187,14 @@ defmodule Fleet.Pilot.HopCompleterTest do
       HopCompleter.complete(base_hop(), seams())
       assert_received {:call, :comment, _body, "[hop:engineer:deadbeef]"}
     end
-
-    test "state_label override respecté" do
-      HopCompleter.complete(base_hop(%{state_label: "state:done"}), seams())
-      assert_received {:call, :state, "state:done"}
-    end
   end
 
   describe "complete/2 — multi-stage (next_assignee présent, branche A2)" do
-    test "publie, comment, state, AVANCE (pas de close ni set_assignee, #8.A), unlock" do
+    test "publie, comment, AVANCE (pas de close ni set_assignee, #8.A), unlock" do
       hop = base_hop(%{next_assignee: "qualifier"})
       assert {:ok, :reassigned} = HopCompleter.complete(hop, seams())
 
       assert_received {:call, :comment, _, _}
-      assert_received {:call, :state, _}
 
       # #8.A : l'avance N'écrase PLUS l'assignee (= humain) ; le next-rôle est dérivé de la route au
       # dispatch. (Ici pas de contexte carte → pas de route non plus, cf. cas défensif ci-dessous.)
@@ -258,7 +246,6 @@ defmodule Fleet.Pilot.HopCompleterTest do
       assert {:error, {:publish, :base_not_ancestor}} = HopCompleter.complete(base_hop(), opts)
 
       refute_received {:call, :comment, _, _}
-      refute_received {:call, :state, _}
       refute_received {:call, :unlock, _}
     end
 
