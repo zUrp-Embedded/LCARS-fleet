@@ -214,15 +214,16 @@ if [[ "${LCARS_POD_DISABLE_TELEMETRY:-0}" == "1" ]]; then
   TELEMETRY_ENV=(--setenv DISABLE_TELEMETRY "1" --setenv CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC "1")
 fi
 
-# Monde minimal (#2 mundo invocado) : resolv.conf est souvent un symlink HORS /etc (WSL → /mnt/wsl ;
-# systemd-resolved → /run). Comme on bind /etc seul (pas `/ /`), il faut binder le fichier RÉEL à son
-# path d'origine pour que le symlink /etc/resolv.conf résolve dans le pod — sinon DNS mort → claude
-# hang sur l'API (POC 2026-06-07, gotcha WSL). On ne peut PAS override sous /etc RO ⇒ bind au vrai path.
-RESOLV_BIND=()
+# /etc SÉLECTIF (sanctuaire : on ne projette QUE ce dont le pod a besoin — audit arch bwrap #5.2).
+# Un pod n'a RIEN à faire dans /etc en bloc : `--ro-bind /etc /etc` exposait 166 entrées inutiles ET
+# dangereuses (SECRETS /etc/fleet — api-secret/webhook-secret/FORGE_PUSH_TOKEN —, /etc/shadow, /etc/sudoers…),
+# ce qui défaisait la délégation forge (un pod pouvait lire le token et parler à Gitea en direct). Le pod a
+# besoin SEULEMENT de : DNS (resolv/nsswitch/hosts/host.conf/gai), TLS (ssl/ca-certificates), résolution
+# uid (passwd/group), tz/net. Tout le reste est HORS du monde projeté (cf. binds ciselés ci-dessous).
+# resolv.conf est souvent un symlink hors /etc (WSL → /mnt/wsl) → on bind le fichier RÉEL directement à
+# /etc/resolv.conf (plus de symlink à résoudre, plus de /mnt/wsl exposé). DNS mort = claude hang sur l'API.
 RESOLV_REAL="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
-if [[ -n "$RESOLV_REAL" && "$RESOLV_REAL" != /etc/* && -e "$RESOLV_REAL" ]]; then
-  RESOLV_BIND=(--ro-bind "$RESOLV_REAL" "$RESOLV_REAL")
-fi
+[[ -n "$RESOLV_REAL" && -e "$RESOLV_REAL" ]] || RESOLV_REAL=/etc/resolv.conf
 
 # =============================================================
 # Mounts CATALOGUE (cap-profile-driven, LCARS_POD_MOUNTS = lignes "mode:path"). Le monde projeté est
@@ -260,8 +261,18 @@ exec "$BWRAP_BIN" \
   --symlink usr/sbin /sbin \
   --symlink usr/lib /lib \
   --symlink usr/lib64 /lib64 \
-  --ro-bind /etc /etc \
-  ${RESOLV_BIND[@]+"${RESOLV_BIND[@]}"} \
+  --ro-bind "$RESOLV_REAL" /etc/resolv.conf \
+  --ro-bind-try /etc/nsswitch.conf /etc/nsswitch.conf \
+  --ro-bind-try /etc/host.conf /etc/host.conf \
+  --ro-bind-try /etc/hosts /etc/hosts \
+  --ro-bind-try /etc/gai.conf /etc/gai.conf \
+  --ro-bind-try /etc/ssl /etc/ssl \
+  --ro-bind-try /etc/ca-certificates /etc/ca-certificates \
+  --ro-bind-try /etc/passwd /etc/passwd \
+  --ro-bind-try /etc/group /etc/group \
+  --ro-bind-try /etc/protocols /etc/protocols \
+  --ro-bind-try /etc/services /etc/services \
+  --ro-bind-try /etc/localtime /etc/localtime \
   --ro-bind /sys /sys \
   --tmpfs /home \
   --tmpfs /tmp \
