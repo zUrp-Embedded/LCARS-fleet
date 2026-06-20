@@ -96,6 +96,10 @@ defmodule Fleet.Pilot.Application do
       # F067 : superviseur de tasks pour l'offload de la complétion de hop (le git push ≤30s du
       # HopConsumer ne bloque pas le singleton). Démarré AVANT le HopConsumer (qui s'y réfère).
       {Task.Supervisor, name: Fleet.Pilot.HopConsumer.task_supervisor()},
+      # #5.2 : mémoire persistante des incidents système (owner résilient). Utilisée par WakeRecovery
+      # (kick_gatekeeper / safe_wake) ; démarrée avec le rail, son seul consommateur. Boot best-effort
+      # (forge injoignable au boot → WAL local seul, pas de crash).
+      Fleet.Pilot.IncidentRegistry,
       # #8 cohérence : plus de `routing` (type:label→carte). Le routing vit dans la route-comment
       # (gravée par create_ticket) ; le Poller la lit (state-machine). type:* = visu seulement.
       {Fleet.Pilot.Poller, repo: repo, interval_ms: interval, stage_dispatch?: true},
