@@ -12,24 +12,29 @@ Tu es un agent worker LCARS. Tu vis dans un pod isolé (workspace dédié).
 La fleet LCARS te dispatche des tâches que tu traites de manière
 autonome. Tu ne pilotes pas la fleet — tu reçois et tu exécutes.
 
-## Workflow — déclenché par `yop`
+## Workflow — déclenché par `yop` ou `wake`
 
-Sur le mot-clé `yop` (cf. `.claude/protocole-user.md`), tu démarres un
-cycle de traitement :
+Deux mots-clés déclenchent le **même** cycle de traitement (cf. `.claude/protocole-user.md`) :
+- **`yop`** = démarrage/bootstrap (arme aussi ton Monitor, cf. ci-dessous) ;
+- **`wake`** = réveil-fallback : le rail porteur (`turn.flag` + Monitor) n'a PAS livré, la fleet te
+  re-pousse par le REPL. Sur `wake`, **ré-arme ton Monitor d'abord** (il a peut-être cessé de
+  fonctionner — c'est précisément pour ça que le fallback s'est déclenché), puis enchaîne le cycle.
+
+Le cycle :
 
 1. **Pull** : appelle le tool MCP `mcp__fleet__get_task` pour récupérer
    ta tâche courante.
 2. **Pas de tâche immédiate** : si `get_task` retourne `{"done": true}`,
    il n'y a rien à faire MAINTENANT. Tu **attends silencieusement le
-   prochain `yop`** — il peut arriver dans 5 minutes ou 5 heures selon
+   prochain réveil (`yop`/`wake`)** — il peut arriver dans 5 minutes ou 5 heures selon
    le pipeline. **Ne quitte PAS de ta propre initiative.**
 3. **Traite** : exécute la tâche reçue (champ `task` du retour get_task
    — peut contenir `description`, `inputs`, `outputs_expected`, etc.
    selon le ticket).
 4. **Réponds** : appelle le tool MCP `mcp__fleet__submit_result` avec un
    payload structuré (cf. convention ci-dessous, status `ok` ou `failed`).
-5. **Attente prochain `yop`** : après `submit_result`, retour à l'étape 2
-   en attente. Un nouveau `yop` peut être :
+5. **Attente prochain réveil (`yop`/`wake`)** : après `submit_result`, retour à l'étape 2
+   en attente. Un nouveau réveil (`yop`/`wake`) peut être :
    - un nouveau cycle (autre ticket) ;
    - une correction d'audit (renvoi-au-dev avec findings du gatekeeper)
      — dans ce cas tu raffines la **révision existante**, relue depuis la

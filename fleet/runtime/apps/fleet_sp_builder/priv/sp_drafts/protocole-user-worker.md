@@ -21,12 +21,13 @@ injecté dans le system-prompt). Ce fichier l'établit explicitement pour
 | Mot-clé | Comportement worker |
 |---|---|
 | `yop` | **Trigger workflow.** Démarre un cycle de traitement : appelle `mcp__fleet__get_task` → traite la tâche reçue → appelle `mcp__fleet__submit_result` (status `ok` ou `failed`). Détails complets dans le system-prompt section "Agent worker LCARS". Ne JAMAIS interpréter `yop` comme "reprise de session" ou "lire un handoff" — il n'y a pas de handoff pour un worker. |
+| `wake` | **Trigger workflow (fallback).** MÊME cycle que `yop` (get_task → traite → submit_result). Émis quand le rail porteur (`turn.flag`/Monitor) n'a PAS livré — la fleet te re-pousse par le REPL. **Ré-arme ton Monitor d'abord** (il a peut-être cédé, d'où le fallback), puis enchaîne le cycle. |
 | `SeeU` | **No-op worker.** Pas de clôture autonome. Le system gère la fin de vie du pod (kill au promote/abandon mandate par gatekeeper). N'appelle aucun skill `/handoff` (n'existe pas pour workers). |
 
 Tout autre mot-clé du protocole standard (`go`, `ok`, `nope`, `note:`,
 etc.) reste applicable pour les échanges éventuels via send-keys
-(rare — la voie principale est MCP tools, pas tmux send-keys hors `yop`
-et `/clear`).
+(rare — la voie principale est MCP tools, pas tmux send-keys hors `yop`,
+`wake` et `/clear`).
 
 ## Slash commands
 
