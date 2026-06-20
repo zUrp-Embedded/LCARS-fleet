@@ -49,7 +49,7 @@ defmodule Fleet.Pilot.WakeRecovery do
         "WakeRecovery #{pod_id} : #{inspect(reason)} DÉJÀ VU (#{sig}) → escalade directe (récurrence)"
       )
 
-      _ = escalate(:recurrence, pod_id, reason, sig, opts)
+      _ = IncidentRegistry.escalate(:recurrence, pod_id, reason, sig, opts)
       {:error, {:escalated, reason}}
     else
       Logger.warning("WakeRecovery #{pod_id} : #{inspect(reason)} (1er — #{sig}) → re-roll")
@@ -70,50 +70,8 @@ defmodule Fleet.Pilot.WakeRecovery do
           "WakeRecovery #{pod_id} : re-roll n'a pas réparé (#{inspect(err)}) → escalade immédiate"
         )
 
-        _ = escalate(:reroll_failed, pod_id, reason, sig, opts)
+        _ = IncidentRegistry.escalate(:reroll_failed, pod_id, reason, sig, opts)
         {:error, {:escalated, reason}}
     end
   end
-
-  # Ticket système → starfleet. 2 portes : :recurrence (pattern, root-cause) / :reroll_failed (actif).
-  # Label `error_system` = signal DURABLE (toujours posé) ; assignee best-effort (fallback label-only si
-  # le compte starfleet n'existe pas). cf. BL « ping starfleet à la création d'un ticket système ».
-  defp escalate(kind, pod_id, reason, sig, opts) do
-    create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Pilot.ForgeClient.create_issue/4)
-    repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_ticket_repo, "fleet/lcars")
-
-    label =
-      opts[:label] || Application.get_env(:fleet_pilot, :system_ticket_label, "error_system")
-
-    assignee =
-      opts[:assignee] || Application.get_env(:fleet_pilot, :system_ticket_assignee, "starfleet")
-
-    {kind_label, kind_note} = kind_describe(kind)
-    title = "[#{label}] #{kind_label} : #{pod_id}"
-
-    body = """
-    Incident `#{sig}` sur le pod `#{pod_id}`.
-    Raison : `#{inspect(reason)}`.
-
-    #{kind_note}
-
-    Domaine SYSADMIN (substrat : tmux / bwrap / launch) — PAS un problème de projet.
-    (Ticket auto — durcissement wake_pod #5.2.)
-    """
-
-    case create_fun.(repo, title, body, labels: [label], assignees: [assignee]) do
-      {:ok, _} = ok -> ok
-      {:error, _} -> create_fun.(repo, title, body, labels: [label])
-    end
-  end
-
-  defp kind_describe(:recurrence),
-    do:
-      {"récurrence",
-       "Déjà vu en session(s) précédente(s) (registre `work/ops`) — pattern, pas random → ROOT-CAUSE requis."}
-
-  defp kind_describe(:reroll_failed),
-    do:
-      {"re-roll échoué",
-       "Le re-roll (re-spawn + re-wake) n'a PAS réparé → problème actif, ici et maintenant."}
 end

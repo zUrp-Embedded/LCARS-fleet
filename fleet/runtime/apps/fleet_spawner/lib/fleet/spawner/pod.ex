@@ -1547,6 +1547,17 @@ defmodule Fleet.Spawner.Pod do
       |> Map.put(:last_error, reason)
 
     write_state_fs(new_state)
+
+    # #5.2 : signale l'échec sur le Bus → un consumer fleet_pilot l'enregistre au registre d'incidents
+    # (parité avec wake-`{:error}` : un échec de pod récurrent devient un pattern → root-cause). `reason` =
+    # terme brut (le consumer le catégorise). Ring-propre : Ring 1 PUBLIE, Ring 2 consomme (pas d'appel
+    # montant). Jumeau du broadcast `pod.failed` du handler exit_status (l.248).
+    safe_broadcast("pod.failed", %{
+      "pod_id" => state.pod_id,
+      "ticket_id" => state.ticket_id,
+      "reason" => reason
+    })
+
     {:stop, {:shutdown, reason}, new_state}
   end
 

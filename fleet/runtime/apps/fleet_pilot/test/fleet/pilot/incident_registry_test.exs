@@ -110,5 +110,52 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       # et l'owner a adopté la vérité cross-machine
       assert Reg.seen_before?("wake:other:z", server: name)
     end
+
+    test "record_or_escalate : jamais vu → noté (:recorded)", %{tmp_dir: tmp} do
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+        )
+
+      assert :recorded =
+               Reg.record_or_escalate("pod", "issue-9-engineer", :launch_failed,
+                 server: name,
+                 now: "2026-06-20T10:00:00Z"
+               )
+
+      assert Reg.seen_before?(Reg.signature("pod", "issue-9-engineer", :launch_failed),
+               server: name
+             )
+
+      assert_receive {:put, _}, 1000
+    end
+
+    test "record_or_escalate : déjà vu → escalade (:escalated)", %{tmp_dir: tmp} do
+      pid = self()
+      sig = Reg.signature("pod", "issue-7-engineer", :result_timeout)
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o ->
+            {:ok, %{content: JSON.encode!(%{sig => %{"count" => 1}}), sha: "s"}}
+          end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      assert {:escalated, :result_timeout} =
+               Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
+                 server: name,
+                 create_issue_fun: fn repo, title, _b, iopts ->
+                   send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
+                 end
+               )
+
+      assert_received {:issue, "fleet/lcars", title, iopts}
+      assert title =~ "récurrence"
+      assert iopts[:labels] == ["error_system"]
+    end
   end
 end

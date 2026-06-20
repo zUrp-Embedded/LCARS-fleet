@@ -58,6 +58,76 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {:error, :registry_unavailable}
   end
 
+  @doc """
+  Enregistre un échec, OU escalade s'il est récurrent (déjà vu). Pour les chemins SANS re-roll (ex.
+  `pod.failed` / `result_timeout`) : 1er = `note` (toléré, possiblement random) ; récurrence = escalade
+  (pattern → root-cause). Renvoie `:recorded` | `{:escalated, reason}`.
+  """
+  @spec record_or_escalate(String.t(), String.t(), term(), keyword()) ::
+          :recorded | {:escalated, term()}
+  def record_or_escalate(op, subject, reason, opts \\ [])
+      when is_binary(op) and is_binary(subject) do
+    sig = signature(op, subject, reason)
+
+    if seen_before?(sig, opts) do
+      _ = escalate(:recurrence, subject, reason, sig, opts)
+      {:escalated, reason}
+    else
+      _ = note(sig, reason, opts)
+      :recorded
+    end
+  end
+
+  @doc """
+  Ouvre un ticket système (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin) pour un
+  incident. `kind` : `:recurrence` | `:reroll_failed` | `:pod_failed`. Label = signal DURABLE (toujours) ;
+  assignee best-effort (fallback label-only si le compte n'existe pas). **Partagé** par WakeRecovery et les
+  consumers d'échec (DRY). Returns `{:ok, number}` | `{:error, term}`.
+  """
+  @spec escalate(atom(), String.t(), term(), String.t(), keyword()) ::
+          {:ok, integer()} | {:error, term()}
+  def escalate(kind, subject, reason, sig, opts \\ []) do
+    create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Pilot.ForgeClient.create_issue/4)
+    repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_ticket_repo, "fleet/lcars")
+
+    label =
+      opts[:label] || Application.get_env(:fleet_pilot, :system_ticket_label, "error_system")
+
+    assignee =
+      opts[:assignee] || Application.get_env(:fleet_pilot, :system_ticket_assignee, "starfleet")
+
+    {kind_label, kind_note} = kind_describe(kind)
+    title = "[#{label}] #{kind_label} : #{subject}"
+
+    body = """
+    Incident `#{sig}` sur `#{subject}`.
+    Raison : `#{inspect(reason)}`.
+
+    #{kind_note}
+
+    Domaine SYSADMIN (substrat : tmux / bwrap / launch / REPL) — PAS un problème de projet.
+    (Ticket auto — durcissement #5.2.)
+    """
+
+    case create_fun.(repo, title, body, labels: [label], assignees: [assignee]) do
+      {:ok, _} = ok -> ok
+      {:error, _} -> create_fun.(repo, title, body, labels: [label])
+    end
+  end
+
+  defp kind_describe(:recurrence),
+    do: {"récurrence", "Déjà vu (registre `work/ops`) — pattern, pas random → ROOT-CAUSE requis."}
+
+  defp kind_describe(:reroll_failed),
+    do:
+      {"re-roll échoué",
+       "Le re-roll (re-spawn + re-wake) n'a PAS réparé → problème actif, ici et maintenant."}
+
+  defp kind_describe(:pod_failed),
+    do:
+      {"pod en échec récurrent",
+       "Pod déjà tombé sur la même cause (registre `work/ops`) → pattern → ROOT-CAUSE requis."}
+
   # ============================================================
   # GenServer
   # ============================================================
@@ -269,6 +339,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   defp reason_category(reason) when is_tuple(reason) and tuple_size(reason) > 0,
     do: reason_category(elem(reason, 0))
+
+  defp reason_category(reason) when is_binary(reason), do: reason
 
   defp reason_category(reason), do: inspect(reason)
 end

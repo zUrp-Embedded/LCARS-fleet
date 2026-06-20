@@ -259,6 +259,32 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
+  # #5.2 : un pod en échec (`transition_failed` : result_timeout/dead-REPL, allocate/launch/auth/project) →
+  # registre d'incidents (PARITÉ avec wake-`{:error}`). 1er = noté (toléré) ; récurrent = escaladé (pattern
+  # → root-cause). Offload (Task) : ne pas bloquer le singleton sur le forge d'un escalade. Le littéral
+  # `:"pod.failed"` crée aussi l'atome dont `safe_broadcast` (côté Pod) a besoin.
+  def handle_info(
+        %Fleet.Event{source: :spawner, type: :"pod.failed", payload: %{"pod_id" => pod_id} = p},
+        state
+      )
+      when is_binary(pod_id) do
+    reason = p["reason"]
+
+    Task.Supervisor.start_child(task_supervisor(), fn ->
+      case Fleet.Pilot.IncidentRegistry.record_or_escalate("pod", pod_id, reason) do
+        :recorded ->
+          Logger.info("HopConsumer pod.failed #{pod_id} → incident gravé (#{inspect(reason)})")
+
+        {:escalated, _} ->
+          Logger.warning(
+            "HopConsumer pod.failed #{pod_id} RÉCURRENT → escaladé (#{inspect(reason)})"
+          )
+      end
+    end)
+
+    {:noreply, state}
+  end
+
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
