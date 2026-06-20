@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     * gate {:fail}             -> rebond producteur (re-dispatch, PAS de PR), BORNE (budget hops)
     * budget epuise            -> {:error, {:rework_exhausted, _}} (aucune ecriture forge)
     * gate soft/non-tranchable -> ESCALADE gatekeeper (inchange) ; le verdict revient async :
-      resume_gate continue->avance(PR), abandon->close(5), humain->await_human(5).
+      resume_gate continue->avance(PR), abandon->close(5), humain->await_arch(5).
   """
   use ExUnit.Case, async: true
 
@@ -301,15 +301,15 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute_received {:assignee, _}
   end
 
-  test "verdict escalate_user -> await_human (lcars-awaits-human + unlock, pas close/reassign)" do
-    assert {:ok, :awaiting_human} =
+  test "verdict escalate_user -> await_arch (lcars-awaits-arch + unlock, pas close/reassign)" do
+    assert {:ok, :awaiting_arch} =
              HopConsumer.resume_gate(
                soft_ctx(),
                %{"result" => %{"decision" => "escalate_user"}},
                hc()
              )
 
-    assert_received {:label, "lcars-awaits-human"}
+    assert_received {:label, "lcars-awaits-arch"}
     assert_received :unlocked
     refute_received {:assignee, _}
     refute_received :closed
@@ -318,30 +318,30 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert body =~ "escalate_user"
   end
 
-  test "verdict halt_wait_input -> await_human" do
-    assert {:ok, :awaiting_human} =
+  test "verdict halt_wait_input -> await_arch" do
+    assert {:ok, :awaiting_arch} =
              HopConsumer.resume_gate(
                soft_ctx(),
                %{"result" => %{"decision" => "halt_wait_input"}},
                hc()
              )
 
-    assert_received {:label, "lcars-awaits-human"}
+    assert_received {:label, "lcars-awaits-arch"}
   end
 
-  test "verdict redirect -> await_human (differe A2.x, pas de routage hors-DAG)" do
-    assert {:ok, :awaiting_human} =
+  test "verdict redirect -> await_arch (differe A2.x, pas de routage hors-DAG)" do
+    assert {:ok, :awaiting_arch} =
              HopConsumer.resume_gate(soft_ctx(), %{"result" => %{"decision" => "redirect"}}, hc())
 
-    assert_received {:label, "lcars-awaits-human"}
+    assert_received {:label, "lcars-awaits-arch"}
     refute_received {:assignee, _}
   end
 
-  test "verdict absent/invalide -> await_human (fail-closed, jamais continue silencieux)" do
-    assert {:ok, :awaiting_human} =
+  test "verdict absent/invalide -> await_arch (fail-closed, jamais continue silencieux)" do
+    assert {:ok, :awaiting_arch} =
              HopConsumer.resume_gate(soft_ctx(), %{"result" => %{}}, hc())
 
-    assert_received {:label, "lcars-awaits-human"}
+    assert_received {:label, "lcars-awaits-arch"}
     refute_received {:assignee, _}
     refute_received :closed
     assert_received {:comment, body}
@@ -382,14 +382,14 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert body =~ "continue"
   end
 
-  test "#8.E mandate-review escalate_user -> await_human (arch) ; trace CONSULTANT, pas gatekeeper" do
-    assert {:ok, :awaiting_human} =
+  test "#8.E mandate-review escalate_user -> await_arch (arch) ; trace CONSULTANT, pas gatekeeper" do
+    assert {:ok, :awaiting_arch} =
              HopConsumer.maybe_complete(
                mandate_done(%{"decision" => "escalate_user", "reason" => "mandat ambigu"}),
                hc()
              )
 
-    assert_received {:label, "lcars-awaits-human"}
+    assert_received {:label, "lcars-awaits-arch"}
     assert_received :unlocked
     refute_received {:assignee, _}
     refute_received :closed

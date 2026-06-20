@@ -346,10 +346,10 @@ defmodule Fleet.Pilot.HopConsumer do
 
     cond do
       # BLOCKED_DEP : un PRODUCTEUR qui ne peut pas livrer (dépendance/info manquante) marque
-      # `blocked: true` dans son result → ESCALADE humaine via `await_human` (motif posté = sa voix
-      # `summary` + `lcars-awaits-human` + unlock → poller SKIP, l'humain tranche via l'arch). SINON la
+      # `blocked: true` dans son result → ESCALADE humaine via `await_arch` (motif posté = sa voix
+      # `summary` + `lcars-awaits-arch` + unlock → poller SKIP, l'humain tranche via l'arch). SINON la
       # publish sans commit fail-loud `:no_deliverable_commit` = WEDGE silencieux (prouvé live morse :
-      # l'eng honnête refusait de deviner → blocage non escaladé). Réutilise tout le filet await_human.
+      # l'eng honnête refusait de deviner → blocage non escaladé). Réutilise tout le filet await_arch.
       producer?(role, state) and blocked_flag?(unwrap_worker_envelope(payload["result"] || %{})) ->
         escalate_blocked_producer(payload, n, role, state)
 
@@ -377,8 +377,8 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
-  # BLOCKED_DEP — escalade un producteur bloqué vers l'humain (await_human), motif = sa voix `summary`.
-  # Réutilise le filet existant (comment dédupé + lcars-awaits-human + unlock) au lieu d'un wedge.
+  # BLOCKED_DEP — escalade un producteur bloqué vers l'humain (await_arch), motif = sa voix `summary`.
+  # Réutilise le filet existant (comment dédupé + lcars-awaits-arch + unlock) au lieu d'un wedge.
   defp blocked_flag?(m) when is_map(m), do: m["blocked"] == true
   defp blocked_flag?(_), do: false
 
@@ -401,7 +401,7 @@ defmodule Fleet.Pilot.HopConsumer do
     hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
 
     run_completion(state, "##{n} (blocked)", fn ->
-      state.hop_completer.await_human(hop, hc_opts)
+      state.hop_completer.await_arch(hop, hc_opts)
     end)
   end
 
@@ -838,9 +838,9 @@ defmodule Fleet.Pilot.HopConsumer do
   # worker). Vocab canon `gate-decision-v1.json` :
   #   continue → avance (push livrable métier + reassign) ;
   #   abandon  → close (trace verdict, PAS de push : travail rejeté) ;
-  #   redirect|escalate_user|halt_wait_input|invalide → await_human (fail-closed).
+  #   redirect|escalate_user|halt_wait_input|invalide → await_arch (fail-closed).
   # La TRACE du verdict est durable : portée dans le comment signé du hop (continue/abandon)
-  # ou du await_human — c'est ce dont l'absence a coulé la v1.
+  # ou du await_arch — c'est ce dont l'absence a coulé la v1.
   def resume_gate(
         %{n: _n, role: _role, payload: _payload, carte: _carte, stage: _stage} = ctx,
         raw_payload,
@@ -855,7 +855,7 @@ defmodule Fleet.Pilot.HopConsumer do
   # #8.E — APPLICATION d'un verdict de juge (gate-decision-v1). UNE fonction, partagée par TOUS les juges
   # quelle que soit leur position : le gatekeeper (verdict async via `task_completed` → resume_gate) ET le
   # consultant mandate-review (verdict via `pod.completed` → gate_decide → run_hop). continue → avance la
-  # carte ; abandon → close ; reste → await_human. La SEULE diff (PR vs pré-PR) vit dans `complete_judge`
+  # carte ; abandon → close ; reste → await_arch. La SEULE diff (PR vs pré-PR) vit dans `complete_judge`
   # (trace = review native si PR, sinon commentaire issue), dérivée de l'état forge + `judge_target` du
   # ctx — PAS d'un fork ici. `trace` est déjà attribué au bon juge (label) par l'appelant.
   defp apply_verdict(
@@ -891,7 +891,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
       other ->
         # `comment_body: trace` → la trace verdict (attribuée au juge via son label, halt_invalid
-        # distingué) est portée sur le comment await_human, parité continue/abandon.
+        # distingué) est portée sur le comment await_arch, parité continue/abandon.
         hop = %{
           repo: state.repo,
           issue_number: n,
@@ -903,7 +903,7 @@ defmodule Fleet.Pilot.HopConsumer do
         hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
 
         run_completion(state, "##{n}", fn ->
-          state.hop_completer.await_human(hop, hc_opts)
+          state.hop_completer.await_arch(hop, hc_opts)
         end)
     end
   end
@@ -959,7 +959,7 @@ defmodule Fleet.Pilot.HopConsumer do
   defp gate_result(_), do: nil
 
   # Vocab canon gate-decision-v1.json. Fail-closed : nil/inconnu → "halt_invalid" (jamais
-  # "continue" sur décision absente/malformée → route en await_human). Jumeau Executor.
+  # "continue" sur décision absente/malformée → route en await_arch). Jumeau Executor.
   @gate_decisions ~w(continue abandon redirect escalate_user halt_wait_input)
   defp gate_decision(result) when is_map(result) do
     case result["decision"] do

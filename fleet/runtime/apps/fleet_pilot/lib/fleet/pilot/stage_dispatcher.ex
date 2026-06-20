@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   ## Décision (`decide/1`) — PORTE pure (#5.2 D2)
 
   À partir du payload d'une issue Gitea : `:engage` (procéder) | `{:skip, reason}` (`:in_flight` verrou posé,
-  `:awaits_human` verrou humain). decide ne fait QUE la porte — pas d'ownership (scoping forge-side amont),
+  `:awaits_arch` verrou humain). decide ne fait QUE la porte — pas d'ownership (scoping forge-side amont),
   pas de rôle ni de load (le RÔLE vient de la POSITION carte, via `carte_role` ; voir Effets).
 
   ## Effets (`dispatch_issue/2`)
@@ -28,13 +28,13 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # F072 : vocabulaire protocole = source unique Fleet.Pilot.Labels (constantes compile-time).
   @in_flight_label Fleet.Pilot.Labels.in_flight()
-  @awaits_human_label Fleet.Pilot.Labels.awaits_human()
+  @awaits_arch_label Fleet.Pilot.Labels.awaits_arch()
 
   @type decision :: :engage | {:skip, atom()}
 
   @doc """
   Décision PURE (porte) : payload issue → `:engage` | `{:skip, reason}`. #5.2 D2 — decide ne fait QUE la
-  porte : verrou `lcars-in-flight` / `lcars-awaits-human` → skip ; sinon → `:engage` (proceder). Le rôle ET
+  porte : verrou `lcars-in-flight` / `lcars-awaits-arch` → skip ; sinon → `:engage` (proceder). Le rôle ET
   l'action (spawn vs onboard) sont décidés EN AVAL (`dispatch_issue`) — d'où `:engage` et pas `:spawn`. Le SCOPING
   (forge-side, en amont) et le ROUTAGE (route → rôle, via `carte_role`/onboard dans `dispatch_issue`) ne
   sont PAS ici — decide ne charge rien et ne décide pas le rôle.
@@ -53,8 +53,8 @@ defmodule Fleet.Pilot.StageDispatcher do
 
       # A2.3b : verrou HUMAIN (verdict gatekeeper escalate/halt/redirect, ou anomalie A2.6). L'issue attend
       # une action via l'arch ; le poller NE re-dispatche PAS (sinon boucle de jugement après l'unlock).
-      @awaits_human_label in labels ->
-        {:skip, :awaits_human}
+      @awaits_arch_label in labels ->
+        {:skip, :awaits_arch}
 
       true ->
         :engage

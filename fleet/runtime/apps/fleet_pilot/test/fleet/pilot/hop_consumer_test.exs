@@ -10,10 +10,10 @@ defmodule Fleet.Pilot.HopConsumerTest do
       {:ok, :captured}
     end
 
-    # BLOCKED_DEP : escalade producteur bloqué → await_human (capturé pour assertion).
-    def await_human(hop, opts) do
-      send(self(), {:await_human, hop, opts})
-      {:ok, :awaiting_human}
+    # BLOCKED_DEP : escalade producteur bloqué → await_arch (capturé pour assertion).
+    def await_arch(hop, opts) do
+      send(self(), {:await_arch, hop, opts})
+      {:ok, :awaiting_arch}
     end
   end
 
@@ -126,16 +126,16 @@ defmodule Fleet.Pilot.HopConsumerTest do
       refute Map.has_key?(hop2, :eng_summary)
     end
 
-    test "producteur BLOQUÉ (result.blocked) -> await_human (motif=summary), PAS complete_pr (anti-wedge)" do
+    test "producteur BLOQUÉ (result.blocked) -> await_arch (motif=summary), PAS complete_pr (anti-wedge)" do
       payload =
         stage_payload(%{
           "result" => %{"blocked" => true, "summary" => "Manque la spec du protocole X"}
         })
 
-      assert {:ok, :awaiting_human} = HopConsumer.maybe_complete(payload, state())
+      assert {:ok, :awaiting_arch} = HopConsumer.maybe_complete(payload, state())
 
       # escalade humaine, pas une publish vide (qui wedgerait :no_deliverable_commit)
-      assert_received {:await_human, hop, _opts}
+      assert_received {:await_arch, hop, _opts}
       refute_received {:hop, _, _}
       assert hop.issue_number == 42
       assert hop.role == "engineer"
@@ -151,7 +151,7 @@ defmodule Fleet.Pilot.HopConsumerTest do
 
       assert {:ok, :captured} = HopConsumer.maybe_complete(payload, state())
       assert_received {:hop, _hop, _}
-      refute_received {:await_human, _, _}
+      refute_received {:await_arch, _, _}
     end
   end
 

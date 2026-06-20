@@ -32,9 +32,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert {:skip, :in_flight} = StageDispatcher.decide(payload)
     end
 
-    test "verrou HUMAIN lcars-awaits-human → {:skip, :awaits_human} (A2.3b, pas de re-dispatch)" do
-      payload = eng_issue(%{"labels" => [%{"name" => "lcars-awaits-human"}]})
-      assert {:skip, :awaits_human} = StageDispatcher.decide(payload)
+    test "verrou HUMAIN lcars-awaits-arch → {:skip, :awaits_arch} (A2.3b, pas de re-dispatch)" do
+      payload = eng_issue(%{"labels" => [%{"name" => "lcars-awaits-arch"}]})
+      assert {:skip, :awaits_arch} = StageDispatcher.decide(payload)
     end
   end
 

@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.LabelsTest do
     # ne restent que les VERROUS.
     test "labels de verrou" do
       assert Labels.in_flight() == "lcars-in-flight"
-      assert Labels.awaits_human() == "lcars-awaits-human"
+      assert Labels.awaits_arch() == "lcars-awaits-arch"
     end
   end
 end

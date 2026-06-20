@@ -444,10 +444,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert Sim.get(pid)["state"] == "closed"
   end
 
-  test "B escalade escalate_user : lcars-awaits-human + unlock + reste ouvert (boucle fermee)" do
+  test "B escalade escalate_user : lcars-awaits-arch + unlock + reste ouvert (boucle fermee)" do
     {pid, eval_ctx} = drive_to_review()
 
-    assert {:ok, :awaiting_human} =
+    assert {:ok, :awaiting_arch} =
              HopConsumer.resume_gate(
                eval_ctx,
                %{"result" => %{"decision" => "escalate_user"}},
@@ -455,7 +455,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
              )
 
     labels = Enum.map(Sim.get(pid)["labels"], & &1["name"])
-    assert "lcars-awaits-human" in labels
+    assert "lcars-awaits-arch" in labels
     refute "lcars-in-flight" in labels
     assert Sim.get(pid)["state"] == "open"
   end

@@ -30,7 +30,7 @@ stages:
     needs: [build]
     # gate soft (B) = condition runtime non-tranchable → escalade au gatekeeper permanent
     # (PAS un verdict-de-stage A2.3b). HopConsumer dispatch le mandat + reprend sur le
-    # task_completed corrélé (continue → avance ; abandon → close ; humain → await_human).
+    # task_completed corrélé (continue → avance ; abandon → close ; humain → await_arch).
     gate:
       type: soft
       max_rounds: 1

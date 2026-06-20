@@ -99,25 +99,25 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  @awaits_human_label Labels.awaits_human()
+  @awaits_arch_label Labels.awaits_arch()
 
   @doc """
   Fin-de-hop ALTERNATIVE (A2.3b, DN `gatekeeper-forge-encoding-v2` §3/§6) : un verdict
   gatekeeper **humain** (`escalate_user`/`halt_wait_input`/`redirect`/absent/invalide).
-  Le SYSTÈME pose `lcars-awaits-human` + retire le verrou ; NE close PAS, NE reassign PAS.
+  Le SYSTÈME pose `lcars-awaits-arch` + retire le verrou ; NE close PAS, NE reassign PAS.
   L'issue attend une action humaine **via l'arch** (`convention-tickets-gitea-v2` §7/§8) ;
-  le poller la **SKIP** (`StageDispatcher.decide` → `:awaits_human`).
+  le poller la **SKIP** (`StageDispatcher.decide` → `:awaits_arch`).
 
   Pas de livrable git ici (le verdict vit dans le comment signé ; `verdict.json` =
-  item `submit_result` séparé). Ordre : comment → `lcars-awaits-human` → unlock (DERNIER,
+  item `submit_result` séparé). Ordre : comment → `lcars-awaits-arch` → unlock (DERNIER,
   même principe §5 : un crash laisse le verrou → poller skip → recovery rejoue,
   idempotent via dédup comment + add/remove label idempotents).
 
-  `hop` : `:repo`, `:issue_number`, `:role`, `:decision`. Returns `{:ok, :awaiting_human}`
-  | `{:error, {:await_human, reason}}`.
+  `hop` : `:repo`, `:issue_number`, `:role`, `:decision`. Returns `{:ok, :awaiting_arch}`
+  | `{:error, {:await_arch, reason}}`.
   """
-  @spec await_human(map(), keyword()) :: {:ok, :awaiting_human} | {:error, {:await_human, term()}}
-  def await_human(hop, opts \\ []) when is_map(hop) do
+  @spec await_arch(map(), keyword()) :: {:ok, :awaiting_arch} | {:error, {:await_arch, term()}}
+  def await_arch(hop, opts \\ []) when is_map(hop) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = Map.fetch!(hop, :repo)
@@ -134,19 +134,19 @@ defmodule Fleet.Pilot.HopCompleter do
         "Verdict du juge **#{role}** : `#{inspect(decision)}` → escalade humaine."
 
     body =
-      lead <> " L'issue attend une action via l'arch (`lcars-awaits-human`).\n\n" <> signature
+      lead <> " L'issue attend une action via l'arch (`lcars-awaits-arch`).\n\n" <> signature
 
     with {:ok, _} <-
            forge.post_comment(repo, n, body, Keyword.put(forge_opts, :dedup_signature, signature)),
-         {:ok, _} <- forge.add_label(repo, n, @awaits_human_label, forge_opts),
+         {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
          {:ok, _} <- forge.remove_label(repo, n, @in_flight_label, forge_opts) do
       Logger.info(
-        "HopCompleter: #{repo}##{n} role=#{role} → awaiting_human (decision=#{inspect(decision)})"
+        "HopCompleter: #{repo}##{n} role=#{role} → awaiting_arch (decision=#{inspect(decision)})"
       )
 
-      {:ok, :awaiting_human}
+      {:ok, :awaiting_arch}
     else
-      {:error, reason} -> {:error, {:await_human, reason}}
+      {:error, reason} -> {:error, {:await_arch, reason}}
     end
   end
 

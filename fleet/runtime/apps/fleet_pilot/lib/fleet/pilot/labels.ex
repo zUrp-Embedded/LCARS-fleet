@@ -12,21 +12,21 @@ defmodule Fleet.Pilot.Labels do
 
       @in_flight_label Fleet.Pilot.Labels.in_flight()
 
-  ou runtime direct (`Fleet.Pilot.Labels.awaits_human()`).
+  ou runtime direct (`Fleet.Pilot.Labels.awaits_arch()`).
 
   #5.2 D4 — `lcars-dispatched` (lock du poller legacy, mort) ET la chaîne `state:*` (état-dans-label,
   contredit « état = route-comment » ; lue seulement par le `routing.ex` legacy supprimé) ont été retirés.
-  Les VERROUS restent : `lcars-in-flight`, `lcars-awaits-human`.
+  Les VERROUS restent : `lcars-in-flight`, `lcars-awaits-arch`.
   """
 
   @in_flight "lcars-in-flight"
-  @awaits_human "lcars-awaits-human"
+  @awaits_arch "lcars-awaits-arch"
 
   @doc "Verrou « pod en vol » : posé AVANT le spawn (anti double-spawn), levé en fin-de-hop (§5)."
   @spec in_flight() :: String.t()
   def in_flight, do: @in_flight
 
   @doc "Verrou HUMAIN : l'issue attend une action via l'arch (verdict escalate/halt/redirect, A2.3b)."
-  @spec awaits_human() :: String.t()
-  def awaits_human, do: @awaits_human
+  @spec awaits_arch() :: String.t()
+  def awaits_arch, do: @awaits_arch
 end
