@@ -99,4 +99,23 @@ defmodule Fleet.Pipeline.GatekeeperTest do
       assert Gatekeeper.pod_id() == nil
     end
   end
+
+  describe "reboot/1" do
+    test "FORCE le re-spawn même déjà registré (≠ ensure_booted idempotent) : reap + dé-registre + re-boote" do
+      {:ok, "gatekeeper-permanent"} =
+        Gatekeeper.ensure_booted(loader: &ok_loader/1, spawner: recording_spawner())
+
+      assert_received {:spawned, _, _}
+
+      # ensure_booted seul serait no-op (déjà registré, cf. test idempotent) ; reboot dé-registre → re-spawn.
+      assert {:ok, "gatekeeper-permanent"} =
+               Gatekeeper.reboot(
+                 loader: &ok_loader/1,
+                 spawner: recording_spawner(),
+                 killer: fn _pod_id -> :ok end
+               )
+
+      assert_received {:spawned, _, _}
+    end
+  end
 end

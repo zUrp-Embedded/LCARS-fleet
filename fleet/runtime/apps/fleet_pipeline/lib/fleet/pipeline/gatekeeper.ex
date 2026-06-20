@@ -78,7 +78,8 @@ defmodule Fleet.Pipeline.Gatekeeper do
   """
   @spec reboot(keyword()) :: {:ok, String.t() | :disabled} | {:error, term()}
   def reboot(opts \\ []) when is_list(opts) do
-    _ = Fleet.Spawner.PodTmux.kill_holder(@pod_id)
+    killer = Keyword.get(opts, :killer, &Fleet.Spawner.PodTmux.kill_holder/1)
+    _ = killer.(@pod_id)
     _ = :persistent_term.erase(@pt_key)
     ensure_booted(opts)
   end
