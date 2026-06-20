@@ -99,13 +99,24 @@ defmodule Fleet.Pilot.StageDispatcher do
         # grave la carte par défaut + renvoie `{:onboarded, _}` → on DÉFÈRE (skip ; le tick suivant la voit
         # routée). Routée → `carte_role` dérive le rôle de la POSITION carte (PAS de producteur en dur ;
         # route absente à ce point = anomalie post-onboard → fail-loud, JAMAIS l'eng en silence).
+        # F-S1-1 : route + carte pré-lues par le poller (classification du bail) → réutilisées via opts
+        # (`resolve_route` / `:prefetched_carte`) au lieu d'un 2ᵉ get_route + 2ᵉ load carte. Absentes (tests,
+        # autres callers) → lecture/chargement normaux (fallback).
         with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
              {:ok, route} <-
-               tag_err(route_for(forge, repo, number, forge_opts), :route_resolution),
+               tag_err(resolve_route(opts, forge, repo, number, forge_opts), :route_resolution),
              {:ok, route} <-
                ensure_carte_or_onboard(forge, repo, number, route, carte_loader, forge_opts),
              {:ok, {role, profile, stage_spec}} <-
-               tag_err(carte_role(route, &loader.load/1, carte_loader), :role_resolution) do
+               tag_err(
+                 carte_role(
+                   route,
+                   &loader.load/1,
+                   carte_loader,
+                   Keyword.get(opts, :prefetched_carte)
+                 ),
+                 :role_resolution
+               ) do
           # BL-055 : pod_id DÉTERMINISTE STABLE keyé sur (issue, rôle) — PLUS de `-<ts>`. Le timestamp
           # rendait l'id unique par hop → re-spawn à chaque rework, l'eng pipe (long-lived) lingérait,
           # contexte perdu. Stable → un re-dispatch retombe sur le MÊME pod : s'il est vivant (eng pipe),
@@ -646,18 +657,21 @@ defmodule Fleet.Pilot.StageDispatcher do
   # #8 (carte-driven role) : dérive `{role, profile, stage_spec}` de la POSITION carte (route gravée) +
   # load du profil. route nil = anomalie → fail-loud (#5.2 D2 — plus de fallback producteur). Carte/stage/
   # profil non résolus = misconfig → `{:error, _}` (fail-loud).
+  # `prefetched_carte` (F-S1-1) : carte déjà chargée par le poller (classification du bail) → on évite un
+  # 2ᵉ load ; `nil` (tests, autres callers) → chargement via `carte_loader` (fallback).
   @spec carte_role(
           {String.t(), String.t()} | nil,
           (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()}),
-          (String.t() -> map())
+          (String.t() -> map()),
+          map() | nil
         ) :: {:ok, {String.t(), Fleet.CapProfile.t(), map()}} | {:error, term()}
   # #5.2 D2 — route nil = ANOMALIE : le poller onboarde tout routeless AVANT dispatch (ensure_carte_or_onboard)
   # → si on arrive ici sans route, fail-loud, JAMAIS un fallback eng silencieux. Le rôle vient TOUJOURS de la
   # position carte (route gravée).
-  defp carte_role(nil, _load_role, _carte_loader), do: {:error, :unrouted}
+  defp carte_role(nil, _load_role, _carte_loader, _prefetched_carte), do: {:error, :unrouted}
 
-  defp carte_role({pipeline, stage}, load_role, carte_loader) do
-    with {:ok, carte} <- load_carte(pipeline, carte_loader),
+  defp carte_role({pipeline, stage}, load_role, carte_loader, prefetched_carte) do
+    with {:ok, carte} <- carte_or_load(prefetched_carte, pipeline, carte_loader),
          {:ok, role} <- carte_stage_role(carte, pipeline, stage),
          {:ok, profile} <- load_role.(role) do
       # #8.B/#8.E : on remonte le STAGE_SPEC entier (extensible) plutôt qu'un champ isolé. build_mandate y
@@ -665,6 +679,18 @@ defmodule Fleet.Pilot.StageDispatcher do
       # `judge_target` (#8.E — juge le MANDAT vs un livrable). route=nil (producteur A1) → stage_spec vide.
       stage_spec = get_in(carte, ["stages", stage]) || %{}
       {:ok, {role, profile, stage_spec}}
+    end
+  end
+
+  # F-S1-1 : carte pré-chargée (poller) → réutilisée ; sinon chargée via le seam.
+  defp carte_or_load(nil, pipeline, carte_loader), do: load_carte(pipeline, carte_loader)
+  defp carte_or_load(carte, _pipeline, _carte_loader), do: {:ok, carte}
+
+  # F-S1-1 : route pré-lue par le poller (classification) → réutilisée ici ; absente → lecture forge.
+  defp resolve_route(opts, forge, repo, number, forge_opts) do
+    case Keyword.fetch(opts, :prefetched_route) do
+      {:ok, route} -> {:ok, route}
+      :error -> route_for(forge, repo, number, forge_opts)
     end
   end
 

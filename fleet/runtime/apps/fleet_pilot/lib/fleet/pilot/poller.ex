@@ -393,8 +393,9 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # Refs `{:issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes
-  # (`issue-<n>-<role>-<ts>` / `pr-<n>-<role>-<ts>`). Filtre par **tâche active** (TaskQueue) : un
+  # Refs `{:issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes STABLES
+  # (`issue-<n>-<role>` / `pr-<n>-<role>` ; plus de suffixe `-<ts>` depuis BL-055). Filtre par **tâche
+  # active** (TaskQueue) : un
   # verrou n'est légitimement tenu QUE pendant qu'un pod a une tâche active dessus. Un pod VIVANT mais
   # IDLE (long-lived entre deux reworks, ex. l'engineer) ne « possède » PAS le verrou — sinon il
   # masquerait un juge MORT et la réconciliation ne réclamerait jamais (wedge live #8). `:error` si
@@ -499,18 +500,23 @@ defmodule Fleet.Pilot.Poller do
     #     on dispatche son stage courant (continue le hop, ou skip si in-flight).
     #   - EN FILE (routée au 1er stage, ou routeless à onboarder, pas encore dispatchée) → démarre seulement
     #     si le bail est libre ; sinon attend (sérialisation → feature-branches séquentielles → FF merge).
+    # F-S1-1 : `classify_issue` lit la route (+ charge la carte) UNE fois et la THREAD au dispatch via
+    # `prefetch` (mergé aux opts) → fin du double get_route / double load carte (la classif du bail et le
+    # dispatch lisaient la MÊME donnée 2×).
     classified =
       Enum.map(issues, fn issue ->
         pr? = MapSet.member?(pr_issue_ids, Map.get(issue, "number"))
-        {issue, pr?, not pr? and engaged?(issue, state)}
+        {engaged, prefetch} = classify_issue(issue, pr?, state)
+        {issue, pr?, engaged, prefetch}
       end)
 
-    lease_held0 = Enum.any?(classified, fn {_issue, _pr?, engaged} -> engaged end)
+    lease_held0 = Enum.any?(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end)
 
     {tally, _lease} =
       Enum.reduce(classified, {zero_tally(), lease_held0}, fn
-        {issue, pr?, engaged}, {acc, lease} ->
+        {issue, pr?, engaged, prefetch}, {acc, lease} ->
           payload = wrap_issue_as_payload(issue, state.repo)
+          item_opts = Keyword.merge(opts, prefetch)
 
           cond do
             # Corr.3 4-C : issue avec PR fleet ouverte → phase JUGE (dispatchée via les pulls). SKIP côté
@@ -520,7 +526,7 @@ defmodule Fleet.Pilot.Poller do
 
             # Pipeline ENGAGÉ → dispatche son stage courant ; il DÉTIENT le bail → lease inchangé.
             engaged ->
-              stage_do_dispatch(payload, opts, acc, lease)
+              stage_do_dispatch(payload, item_opts, acc, lease)
 
             # EN FILE, bail tenu par un autre pipeline → attend.
             lease ->
@@ -528,7 +534,7 @@ defmodule Fleet.Pilot.Poller do
 
             # EN FILE, bail libre → DÉMARRE (prend le bail si effectivement dispatché).
             true ->
-              start_pipeline(payload, opts, acc)
+              start_pipeline(payload, item_opts, acc)
           end
       end)
 
@@ -555,41 +561,54 @@ defmodule Fleet.Pilot.Poller do
     {acc2, acc2.dispatched > acc.dispatched}
   end
 
-  # #8 — un pipeline est ENGAGÉ (tient le bail repo) si un pod est en vol (`in-flight` ; lecture liste,
-  # 0 I/O) OU si sa ROUTE a avancé au-delà du 1er stage de la carte (= pipeline démarré, entre deux hops ;
-  # lecture route-comment = state-machine robuste append-only, PAS `state:*` mutable). Un ticket
-  # fraîchement routé par create_ticket (route = 1er stage, pas de pod) n'est PAS engagé → EN FILE. Pas de
-  # route → A1 (pas engagé). La route n'est lue QUE si pas in-flight (fast-path, économise l'I/O).
-  defp engaged?(issue, state) do
+  # F-S1-1 — classifie une issue (bail) ET pré-résout ce que `dispatch_issue` relirait sinon. Renvoie
+  # `{engaged?, prefetch_kw}` ; `prefetch_kw` (mergé aux opts de dispatch) porte `:prefetched_route` +
+  # `:prefetched_carte` → lecture forge/disque UNE seule fois. ENGAGÉ = pod en vol (`in-flight`) OU route
+  # avancée au-delà du 1er stage (pipeline démarré, entre deux hops). Fast-path : in-flight → pas de lecture
+  # route (`decide` le skip de toute façon). Routeless (`:none`) → EN FILE, route nil threadée (onboard en
+  # aval). Erreur HTTP get_route → EN FILE, RIEN threadé (le dispatch re-lit → fail-loud `:route_resolution`,
+  # jamais de wedge du bail par une carte/route illisible).
+  defp classify_issue(_issue, true = _pr?, _state), do: {false, []}
+
+  defp classify_issue(issue, false = _pr?, state) do
     labels = Enum.map(Map.get(issue, "labels") || [], & &1["name"])
-    @in_flight in labels or pipeline_started?(issue, state)
-  end
 
-  defp pipeline_started?(issue, state) do
-    forge = stage_forge_client(state)
-    n = Map.get(issue, "number")
+    if @in_flight in labels do
+      {true, []}
+    else
+      forge = stage_forge_client(state)
+      n = Map.get(issue, "number")
 
-    case forge.get_route(state.repo, n, state.forge_opts) do
-      {:ok, {carte, stage}} when is_binary(carte) and is_binary(stage) ->
-        not at_first_stage?(carte, stage, state)
+      case forge.get_route(state.repo, n, state.forge_opts) do
+        {:ok, {carte, stage} = route} when is_binary(carte) and is_binary(stage) ->
+          carte_map = load_carte_or_nil(carte, state)
+          engaged = not is_nil(carte_map) and not first_stage?(carte_map, stage)
+          {engaged, [prefetched_route: route, prefetched_carte: carte_map]}
 
-      _ ->
-        false
+        :none ->
+          {false, [prefetched_route: nil]}
+
+        _ ->
+          {false, []}
+      end
     end
   end
 
-  # Le stage courant est-il le 1er de la carte (= routé mais pas encore avancé = EN FILE) ? Toute anomalie
-  # de carte → `true` (traité « non engagé » : le dispatch fail-loud surfacera, JAMAIS de wedge du bail
-  # par une carte illisible).
-  defp at_first_stage?(carte, stage, state) do
+  # Charge la carte (seam `carte_loader` ou Loader réel) ; `nil` sur échec (le dispatch re-tentera → fail-loud).
+  defp load_carte_or_nil(carte, state) do
     loader = state.carte_loader || Fleet.Pipeline.Loader
+    loader.load!(carte)
+  rescue
+    _ -> nil
+  end
 
-    case Fleet.Pilot.CarteNav.first_stage(loader.load!(carte)) do
+  # Le stage est-il le 1er de la carte (= routé mais pas avancé = EN FILE) ? Anomalie carte → `true`
+  # (traité « non engagé » : le dispatch fail-loud surfacera, jamais de wedge du bail par une carte illisible).
+  defp first_stage?(carte_map, stage) do
+    case Fleet.Pilot.CarteNav.first_stage(carte_map) do
       {:ok, {first, _role}} -> stage == first
       _ -> true
     end
-  rescue
-    _ -> true
   end
 
   # Construit les opts de StageDispatcher.dispatch_issue. Les seams
