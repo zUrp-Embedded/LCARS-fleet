@@ -705,6 +705,8 @@ defmodule Fleet.Pilot.ForgeClient do
         # mais le commit attribue les deux niveaux). forge-aveugle préservé (le pod ne pousse jamais).
         |> maybe_put_identity(:author, Keyword.get(opts, :author))
         |> maybe_put_identity(:committer, Keyword.get(opts, :committer))
+        # BL #12 : `sha` présent ⇒ UPDATE du fichier existant (Gitea l'exige) ; absent ⇒ CREATE.
+        |> maybe_put_sha(Keyword.get(opts, :sha))
 
       case http_put(config, "/repos/#{repo}/contents/#{path}", body) do
         {:ok, %{"commit" => %{"sha" => sha}}} -> {:ok, sha}
@@ -714,8 +716,42 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  @doc """
+  Lit un fichier du repo (Gitea `GET /contents/{path}?ref=`). Le `sha` renvoyé sert à `put_file(.., sha:)`
+  pour un UPDATE (read-modify-write). `opts[:ref]` = branche/ref (défaut `main`).
+
+  ## Returns
+    * `{:ok, %{content: String.t(), sha: String.t()}}` — fichier lu (content décodé)
+    * `{:error, :not_found}` — 404 (fichier/branche absent)
+    * `{:error, term()}` — HTTP/transport/config/decode
+  """
+  @spec get_file(String.t(), String.t(), Keyword.t()) ::
+          {:ok, %{content: String.t(), sha: String.t()}} | {:error, term()}
+  def get_file(repo, path, opts \\ []) when is_binary(repo) and is_binary(path) do
+    with {:ok, config} <- resolve_config(opts) do
+      ref = Keyword.get(opts, :ref, "main")
+
+      case http_get(config, "/repos/#{repo}/contents/#{path}?ref=#{ref}") do
+        {:ok, %{"content" => b64, "sha" => sha}} ->
+          case Base.decode64(b64, ignore: :whitespace) do
+            {:ok, content} -> {:ok, %{content: content, sha: sha}}
+            :error -> {:error, :decode_failed}
+          end
+
+        {:error, {:http, 404, _}} ->
+          {:error, :not_found}
+
+        {:error, _} = err ->
+          err
+      end
+    end
+  end
+
   defp maybe_put_new_branch(body, nil), do: body
   defp maybe_put_new_branch(body, nb) when is_binary(nb), do: Map.put(body, :new_branch, nb)
+
+  defp maybe_put_sha(body, nil), do: body
+  defp maybe_put_sha(body, sha) when is_binary(sha), do: Map.put(body, :sha, sha)
 
   defp maybe_put_identity(body, key, %{name: name, email: email})
        when is_binary(name) and is_binary(email),
