@@ -285,6 +285,34 @@ defmodule Fleet.Pilot.HopConsumer do
     {:noreply, state}
   end
 
+  # #5.2 [6] : la boucle ack-driven a épuisé le cap (l'agent n'a JAMAIS acké : ni flag, ni send-keys) →
+  # registre, op="wake". Récurrence = **SP suspect** (pas l'agent : inférence → 1×=random, récurrent=SP
+  # mauvais/dérivé) → escalade `:sp_suspect`. Offload (Task). Le littéral `:"wake.failed"` crée l'atome
+  # dont `safe_broadcast` (côté Pod, #5.2 [3c]) a besoin.
+  def handle_info(
+        %Fleet.Event{source: :spawner, type: :"wake.failed", payload: %{"pod_id" => pod_id} = p},
+        state
+      )
+      when is_binary(pod_id) do
+    reason = p["reason"]
+
+    Task.Supervisor.start_child(task_supervisor(), fn ->
+      case Fleet.Pilot.IncidentRegistry.record_or_escalate("wake", pod_id, reason,
+             escalate_kind: :sp_suspect
+           ) do
+        :recorded ->
+          Logger.info("HopConsumer wake.failed #{pod_id} → incident gravé (#{inspect(reason)})")
+
+        {:escalated, _} ->
+          Logger.warning(
+            "HopConsumer wake.failed #{pod_id} RÉCURRENT → SP suspect, escaladé (#{inspect(reason)})"
+          )
+      end
+    end)
+
+    {:noreply, state}
+  end
+
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 

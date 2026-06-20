@@ -70,7 +70,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
     sig = signature(op, subject, reason)
 
     if seen_before?(sig, opts) do
-      _ = escalate(:recurrence, subject, reason, sig, opts)
+      # `escalate_kind` (défaut `:recurrence`) : le wake passe `:sp_suspect` (récurrence = SP, pas l'agent).
+      _ = escalate(Keyword.get(opts, :escalate_kind, :recurrence), subject, reason, sig, opts)
       {:escalated, reason}
     else
       _ = note(sig, reason, opts)

@@ -298,17 +298,16 @@ defmodule Fleet.Spawner.Pod do
         {:noreply, state}
 
       n >= cap ->
-        if bootstrap? do
-          Logger.debug(
-            "pod #{state.pod_id} bootstrap kické (#{n}× sans mandat) → en attente de wake_pod"
-          )
-        else
-          Logger.warning(
-            "pod #{state.pod_id} kick autonome abandonné après #{n} tentatives " <>
-              "(REPL jamais joignable OU mandat jamais pull)"
-          )
-        end
+        # #5.2 [3c] : cap épuisé = l'agent n'a JAMAIS acké (ni flag, ni send-keys). bootstrap = jamais
+        # pollé (démarrage KO) ; wake/worker = jamais pull (mandat non-acké). Ring-propre : on BROADCAST
+        # (Ring 1) → un consumer fleet_pilot (Ring 2) `record_or_escalate` → récurrent = `:sp_suspect` [6].
+        phase = if bootstrap?, do: :bootstrap, else: :wake
 
+        Logger.warning(
+          "pod #{state.pod_id} kick (#{phase}) abandonné après #{n} tentatives — agent jamais acké → escalade #5.2"
+        )
+
+        safe_broadcast("wake.failed", %{"pod_id" => state.pod_id, "reason" => {:no_ack, phase}})
         {:noreply, state}
 
       Fleet.Spawner.PodTmux.alive?(state.pod_id) ->

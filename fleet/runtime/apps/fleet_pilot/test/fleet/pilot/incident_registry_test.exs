@@ -157,5 +157,33 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert title =~ "récurrence"
       assert iopts[:labels] == ["error_system"]
     end
+
+    test "record_or_escalate escalate_kind :sp_suspect → ticket pointe le SP (wake récurrent)", %{
+      tmp_dir: tmp
+    } do
+      pid = self()
+      sig = Reg.signature("wake", "issue-7-engineer", {:no_ack, :wake})
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o ->
+            {:ok, %{content: JSON.encode!(%{sig => %{"count" => 1}}), sha: "s"}}
+          end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      assert {:escalated, _} =
+               Reg.record_or_escalate("wake", "issue-7-engineer", {:no_ack, :wake},
+                 server: name,
+                 escalate_kind: :sp_suspect,
+                 create_issue_fun: fn _r, title, body, _o ->
+                   send(pid, {:issue, title, body}) && {:ok, 1}
+                 end
+               )
+
+      assert_received {:issue, title, body}
+      assert title =~ "SP suspect"
+      assert body =~ "PROMPT"
+    end
   end
 end
