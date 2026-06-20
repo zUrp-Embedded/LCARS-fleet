@@ -45,6 +45,21 @@ defmodule Fleet.TaskQueueTest do
     }
   end
 
+  test "last_poll : get_for_pod enregistre le poll MÊME sans mandat (ACK bootstrap in-band)", %{
+    q: q
+  } do
+    assert TaskQueue.last_poll(q, "pod-boot") == nil
+    # pas de mandat → :no_task, mais l'agent a TENDU LA MAIN → le poll est gravé
+    assert {:error, :no_task} = TaskQueue.get_for_pod(q, "pod-boot")
+    assert %DateTime{} = TaskQueue.last_poll(q, "pod-boot")
+  end
+
+  test "last_poll : tracké aussi sur un pull (avec mandat)", %{q: q} do
+    {:ok, _} = TaskQueue.enqueue(q, "pod-W", %{brief: "x", role: "engineer"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-W")
+    assert %DateTime{} = TaskQueue.last_poll(q, "pod-W")
+  end
+
   test "2. get_for_pod idempotent (résiste au /clear one_shot, pas de double dispatch)", %{q: q} do
     {:ok, t1} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     assert_receive %Fleet.Event{type: :task_enqueued}

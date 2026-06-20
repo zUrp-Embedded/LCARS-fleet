@@ -70,4 +70,15 @@ defmodule Fleet.TaskQueue do
   @spec pod_status(GenServer.server(), String.t()) :: {:ok, atom() | nil}
   def pod_status(server, pod_id) when is_binary(pod_id),
     do: GenServer.call(server, {:pod_status, pod_id})
+
+  @doc """
+  Dernier poll du pod (`DateTime | nil`) = **ACK in-band** : l'agent a appelé `get_for_pod` (même sans
+  mandat → signal bootstrap « up + armé »). #5.2 — consommé par la boucle wake ack-driven. Query Port.
+  """
+  @spec last_poll(String.t()) :: DateTime.t() | nil
+  def last_poll(pod_id), do: last_poll(@server, pod_id)
+
+  @spec last_poll(GenServer.server(), String.t()) :: DateTime.t() | nil
+  def last_poll(server, pod_id) when is_binary(pod_id),
+    do: GenServer.call(server, {:last_poll, pod_id})
 end

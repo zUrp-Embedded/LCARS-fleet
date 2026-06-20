@@ -56,6 +56,10 @@ defmodule Fleet.TaskQueue.Server do
 
     base = %{
       tasks: %{},
+      # #5.2 : last-poll par pod (l'agent a appelé get_for_pod = ACK in-band, MÊME sans mandat → signal
+      # bootstrap « l'agent est up + a tendu la main »). In-mem/éphémère : la récence vit en runtime, pas
+      # persisté (un restart re-établit via les polls suivants).
+      polls: %{},
       state_path: state_path,
       persist: persist?,
       topic: Keyword.get(opts, :topic, @default_topic),
@@ -131,6 +135,10 @@ defmodule Fleet.TaskQueue.Server do
   end
 
   def handle_call({:get_for_pod, pod_id}, _from, state) do
+    # last-poll AVANT le case : l'agent a tendu la main = ACK in-band, qu'il reçoive un mandat ou non
+    # (le cas `:no_task` est le signal bootstrap « l'agent est up + armé »).
+    state = record_poll(state, pod_id)
+
     case find_active(state.tasks, pod_id) do
       nil ->
         {:reply, {:error, :no_task}, state}
@@ -213,6 +221,12 @@ defmodule Fleet.TaskQueue.Server do
     {:reply, {:ok, status}, state}
   end
 
+  # #5.2 : last-poll du pod (`DateTime | nil`) = l'ACK in-band du bootstrap (« l'agent a tendu la main »,
+  # même sans mandat). Le consommateur (boucle wake ack-driven) compare avec son instant de trigger.
+  def handle_call({:last_poll, pod_id}, _from, state) do
+    {:reply, Map.get(state.polls, pod_id), state}
+  end
+
   # ============================================================
   # Deadline (transition :failed)
   # ============================================================
@@ -259,6 +273,9 @@ defmodule Fleet.TaskQueue.Server do
   defp has_completed?(tasks, pod_id) do
     Enum.any?(Map.values(tasks), &(&1.pod_id == pod_id and &1.state == :completed))
   end
+
+  defp record_poll(state, pod_id) when is_binary(pod_id),
+    do: %{state | polls: Map.put(state.polls, pod_id, now())}
 
   defp put_task(state, %Task{} = task) do
     tasks = Map.put(state.tasks, task.id, task)
