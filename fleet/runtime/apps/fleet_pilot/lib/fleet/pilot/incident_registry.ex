@@ -128,6 +128,13 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {"pod en échec récurrent",
        "Pod déjà tombé sur la même cause (registre `work/ops`) → pattern → ROOT-CAUSE requis."}
 
+  defp kind_describe(:sp_suspect),
+    do:
+      {"SP suspect (wake récurrent)",
+       "Le wake-fallback de ce rôle a déjà raté (registre `work/ops`). Avec de l'inférence, 1× = random ; " <>
+         "récurrent = ce n'est PAS « l'agent est con » → le **SP est mauvais / a dérivé / le modèle réagit " <>
+         "autrement**. ROOT-CAUSE = le PROMPT du rôle, pas l'agent."}
+
   # ============================================================
   # GenServer
   # ============================================================
