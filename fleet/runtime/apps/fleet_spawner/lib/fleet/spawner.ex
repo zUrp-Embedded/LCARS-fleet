@@ -319,29 +319,41 @@ defmodule Fleet.Spawner do
 
   # Touche le flag du monitor in-pod (`pod_dir/turn.flag`, bind-monté = `~/turn.flag` côté
   # pod). Le `watch.sh` armé via l'outil Monitor émet « ton tour » → réveille l'agent.
-  defp touch_turn_flag(%{pod_dir: pod_dir}) when is_binary(pod_dir) do
+  defp touch_turn_flag(%{pod_dir: pod_dir}) when is_binary(pod_dir), do: write_turn_flag(pod_dir)
+  defp touch_turn_flag(_info), do: :ok
+
+  @doc false
+  # Écrit un token UNIQUE dans `pod_dir/turn.flag`. watch.sh compare le CONTENU (`cur != last`) : un ms BARE
+  # peut se répéter (2 wakes même ms) → token identique → wake MANQUÉ ; le suffixe unique garantit que chaque
+  # écriture change le contenu → toujours détectée. `File.write` RENVOIE `{:error,_}` (ne lève PAS) sur dir
+  # disparu/perm/disque → on traite le RETOUR (le `_ =` l'avalait). Rail PORTEUR : flag muet = log-LOUD
+  # (best-effort : fallback send-keys + result_deadline rattrapent, jamais avalé). Public (`@doc false`) pour
+  # le test : le chemin "proceed" (tmux_session) n'est jamais atteint par StubBackend.
+  def write_turn_flag(pod_dir) when is_binary(pod_dir) do
     flag = Path.join(pod_dir, "turn.flag")
 
-    # Token UNIQUE (ms + compteur monotone). watch.sh compare le CONTENU (`cur != last`) : un ms BARE peut
-    # se répéter (2 wakes dans la même ms) → token identique → wake MANQUÉ. Le suffixe unique garantit que
-    # chaque écriture change le contenu → toujours détectée. (Le ms reste pour la lisibilité humaine.)
     token =
       "#{System.system_time(:millisecond)}-#{System.unique_integer([:positive, :monotonic])}"
 
-    _ = File.write(flag, token <> "\n")
-    :ok
+    case File.write(flag, token <> "\n") do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "write_turn_flag #{pod_dir}: écriture flag échouée (#{inspect(reason)}) — rail porteur muet (best-effort)"
+        )
+
+        :ok
+    end
   rescue
     e ->
-      # Rail PORTEUR : un échec d'écriture du flag = wake-par-flag muet → log-LOUD (best-effort : le
-      # fallback send-keys + le result_deadline rattrapent, mais on ne l'avale PAS en silence).
       Logger.warning(
-        "touch_turn_flag #{pod_dir}: écriture flag échouée (porteur best-effort): #{inspect(e)}"
+        "write_turn_flag #{pod_dir}: exception écriture flag (#{inspect(e)}) — rail porteur muet (best-effort)"
       )
 
       :ok
   end
-
-  defp touch_turn_flag(_info), do: :ok
 
   # Tirer le `yop` send-keys en fallback du réveil-par-flag ? Défaut `true` (sûr : couvre les pods
   # sans Monitor + bootstrap). `false` ⇒ wake FLAG-ONLY = le Monitor est le rail porteur (à activer

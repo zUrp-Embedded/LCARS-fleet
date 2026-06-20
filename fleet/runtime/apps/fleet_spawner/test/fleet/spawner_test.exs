@@ -332,6 +332,26 @@ defmodule Fleet.SpawnerTest do
 
       Fleet.Spawner.kill_pod(pod_id)
     end
+
+    @tag :tmp_dir
+    test "write_turn_flag : token UNIQUE à chaque appel (anti-collision watch.sh content-based)",
+         %{
+           tmp_dir: tmp
+         } do
+      assert :ok = Fleet.Spawner.write_turn_flag(tmp)
+      t1 = File.read!(Path.join(tmp, "turn.flag"))
+      assert :ok = Fleet.Spawner.write_turn_flag(tmp)
+      t2 = File.read!(Path.join(tmp, "turn.flag"))
+      # watch.sh fire sur `cur != last` → chaque écriture DOIT changer le contenu.
+      assert t1 != t2
+    end
+
+    @tag :tmp_dir
+    test "write_turn_flag : dir absent → :ok best-effort (log-loud, pas de crash)", %{
+      tmp_dir: tmp
+    } do
+      assert :ok = Fleet.Spawner.write_turn_flag(Path.join(tmp, "nope/missing"))
+    end
   end
 
   # Poll borné déterministe (Mi14) : attend le cleanup Registry async post-terminate_child
