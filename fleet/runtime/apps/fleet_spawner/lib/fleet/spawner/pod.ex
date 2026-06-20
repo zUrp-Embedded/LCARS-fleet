@@ -1601,25 +1601,35 @@ defmodule Fleet.Spawner.Pod do
   # #3) puis arme un nouveau — SAUF pour un pod `forever` (permanent : gatekeeper/
   # architect/monk) qui ne porte PAS de timeout de réponse (idle = normal, slow-task =
   # légitime ; gouverné par kill_pod externe). Stocke la ref dans l'état.
-  defp arm_result_deadline(state) do
-    state = cancel_result_deadline(state)
-
-    if lifetime_scope(state.cap_profile) == "forever" do
-      state
-    else
-      ref = Process.send_after(self(), :result_deadline, monitor_timeout_ms(state))
-      Map.put(state, :result_deadline_ref, ref)
-    end
+  # #5.2 — mécanique « timer géré » FACTORISÉE (la LOI : 2 occurrences identiques [deadline F112 + kick F2]
+  # = 1 moteur paramétré). Un ref de timer vit sous `key` dans le state ; (re)armer = cancel l'ancien +
+  # send_after + stocker ; annuler = cancel + nil. 1 seul timer vivant par clé. Les appelants gardent leur
+  # POLITIQUE (forever-skip, quel message, quel délai) — cf. arm_result_deadline / schedule_kick.
+  defp arm_managed_timer(state, key, msg, delay) do
+    state = cancel_managed_timer(state, key)
+    Map.put(state, key, Process.send_after(self(), msg, delay))
   end
 
-  defp cancel_result_deadline(state) do
-    case Map.get(state, :result_deadline_ref) do
+  defp cancel_managed_timer(state, key) do
+    case Map.get(state, key) do
       ref when is_reference(ref) -> Process.cancel_timer(ref)
       _ -> :ok
     end
 
-    Map.put(state, :result_deadline_ref, nil)
+    Map.put(state, key, nil)
   end
+
+  # Deadline de RÉPONSE (F112). Politique : pas d'armement pour un pod `forever` (un permanent n'a pas de
+  # fenêtre de réponse bornée) → on garantit juste l'absence de timer.
+  defp arm_result_deadline(state) do
+    if lifetime_scope(state.cap_profile) == "forever" do
+      cancel_managed_timer(state, :result_deadline_ref)
+    else
+      arm_managed_timer(state, :result_deadline_ref, :result_deadline, monitor_timeout_ms(state))
+    end
+  end
+
+  defp cancel_result_deadline(state), do: cancel_managed_timer(state, :result_deadline_ref)
 
   # R0.8-brick4 : timeout de RÉPONSE (pas budget de durée de vie) au tool MCP
   # submit_result. Si pas de réponse dans le délai → :result_deadline →
@@ -1846,26 +1856,16 @@ defmodule Fleet.Spawner.Pod do
   defp kick_bootstrap_retry_ms,
     do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
 
-  # #5.2 F2 — arme/ré-arme la boucle de kick : 1 SEUL timer vivant (cancel l'ancien + rearm), MÊME pattern
-  # que arm_result_deadline/1. Appelé au bootstrap (inject_brief) ET à chaque wake (cast :arm_kick) → un
-  # wake_pod pendant le bootstrap ne crée pas une 2e boucle. 1er tick après kick_first_delay_ms : on laisse
-  # le flag porteur livrer d'abord.
+  # #5.2 F2 — boucle de kick (timer géré `:kick_ref`, 1 seul vivant). Politique : 1er tick après
+  # kick_first_delay_ms (on laisse le flag porteur livrer d'abord) ; armé au bootstrap (inject_brief) ET à
+  # chaque wake (cast :arm_kick) → un wake_pod pendant le bootstrap ne crée pas une 2e boucle. Mécanique
+  # FACTORISÉE dans arm_managed_timer/cancel_managed_timer (cf. deadline F112).
   defp arm_kick(state), do: schedule_kick(state, 0, kick_first_delay_ms())
 
-  defp schedule_kick(state, n, delay) do
-    state = cancel_kick(state)
-    ref = Process.send_after(self(), {:kick_attempt, n}, delay)
-    Map.put(state, :kick_ref, ref)
-  end
+  defp schedule_kick(state, n, delay),
+    do: arm_managed_timer(state, :kick_ref, {:kick_attempt, n}, delay)
 
-  defp cancel_kick(state) do
-    case Map.get(state, :kick_ref) do
-      ref when is_reference(ref) -> Process.cancel_timer(ref)
-      _ -> :ok
-    end
-
-    Map.put(state, :kick_ref, nil)
-  end
+  defp cancel_kick(state), do: cancel_managed_timer(state, :kick_ref)
 
   @doc false
   # #5.2 F3 — ACK (décision PURE, testable) = l'agent a tendu la main. C'est LE contrôle de la boucle :
