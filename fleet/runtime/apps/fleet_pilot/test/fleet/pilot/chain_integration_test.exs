@@ -104,6 +104,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
             pr = %{
               "number" => num,
+              # #5.2 D1 — fidèle au réel : le fleet assigne TOUJOURS l'humain à la PR (assign_human_step,
+              # hop_completer:560). Sinon dispatch_review skip :foreign (scoping PR client-side).
+              "assignees" => [%{"login" => "human"}],
               "head" => %{"ref" => head},
               "base" => %{"ref" => base},
               "state" => "open",

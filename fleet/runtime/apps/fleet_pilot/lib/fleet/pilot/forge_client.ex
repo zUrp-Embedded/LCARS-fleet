@@ -116,7 +116,21 @@ defmodule Fleet.Pilot.ForgeClient do
   def list_open_issues(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts) do
       # F-030 : source-de-vérité du bail dispatch (compte les pipelines actifs) → paginé, jamais tronqué.
-      paginate(config, "/repos/#{repo}/issues", "state=open&type=issues")
+      # #5.2 D1b — scoping multi-user FORGE-SIDE : `assigned_by=<login>` filtre les issues assignées à
+      # l'humain de cette fleet (vérifié live Gitea 1.26.1 : =Engineer→#2, =inconnu→∅). La forge bosse,
+      # le poller ne voit que les siennes. Le bail devient par-humain (cohérent : N fleets par-humain).
+      paginate(config, "/repos/#{repo}/issues", "state=open&type=issues" <> assigned_by_qs(opts))
+    end
+  end
+
+  # #5.2 D1b — suffixe query `&assigned_by=<login>` si `opts[:assigned_by]` posé, sinon "". Pur/testable.
+  # NB : ne marche QUE sur l'endpoint `/issues` ; `/pulls` IGNORE ce param (vérifié live) → le scoping PR
+  # est client-side (cf. StageDispatcher.dispatch_review).
+  @doc false
+  def assigned_by_qs(opts) do
+    case Keyword.get(opts, :assigned_by) do
+      login when is_binary(login) and login != "" -> "&assigned_by=" <> URI.encode_www_form(login)
+      _ -> ""
     end
   end
 
@@ -548,6 +562,9 @@ defmodule Fleet.Pilot.ForgeClient do
   def list_open_pulls(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts) do
       # F-030 : source-de-vérité du dispatch juge PR-driven → paginé, jamais une PR ratée au-delà de 50.
+      # #5.2 D1b — PAS de `assigned_by` ici : l'endpoint `/pulls` Gitea IGNORE ce param (vérifié live 1.26.1 :
+      # `assigned_by=inconnu` rend quand même la PR). Le scoping multi-user des PR est donc CLIENT-SIDE
+      # (StageDispatcher.dispatch_review → `:foreign` si pas à moi), pas forge-side comme les issues.
       paginate(config, "/repos/#{repo}/pulls", "state=open")
     end
   end

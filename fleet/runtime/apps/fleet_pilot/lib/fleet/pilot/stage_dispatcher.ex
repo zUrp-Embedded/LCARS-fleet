@@ -294,21 +294,28 @@ defmodule Fleet.Pilot.StageDispatcher do
     # PAS « qui reste à juger ». C'est la LISTE DES REVIEWS (verdict décisif par juge) qui le dit.
     requested = pr |> Map.get("requested_reviewers") |> List.wrap() |> Enum.map(&login_of/1)
 
-    if @in_flight_label in labels do
-      {:skipped, :in_flight}
-    else
-      # head_sha → verdicts COMMIT-SCOPÉS : une review sur un commit antérieur (REQUEST_CHANGES jamais
-      # dismissé par Gitea au push) est PÉRIMÉE → son juge redevient `pending` → re-dispatché sur le code
-      # courant (sinon rework infini, live #7).
-      verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
+    cond do
+      # #5.2 D1 — scoping multi-user PR, CLIENT-SIDE (Gitea `/pulls` ne filtre pas `assigned_by`). Pas
+      # assignée à MON humain → pas la mienne, je n'y touche pas (le poller d'Alice ne juge pas les PR de Bob).
+      not assigned_to_me?(Map.get(pr, "assignees") || [], Keyword.fetch!(opts, :human)) ->
+        {:skipped, :foreign}
 
-      case ctx.forge.pr_review_verdicts(ctx.repo, pr_number, verdict_opts) do
-        {:ok, verdicts} ->
-          dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
+      @in_flight_label in labels ->
+        {:skipped, :in_flight}
 
-        {:error, reason} ->
-          {:error, {:review_state, reason}}
-      end
+      true ->
+        # head_sha → verdicts COMMIT-SCOPÉS : une review sur un commit antérieur (REQUEST_CHANGES jamais
+        # dismissé par Gitea au push) est PÉRIMÉE → son juge redevient `pending` → re-dispatché sur le code
+        # courant (sinon rework infini, live #7).
+        verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
+
+        case ctx.forge.pr_review_verdicts(ctx.repo, pr_number, verdict_opts) do
+          {:ok, verdicts} ->
+            dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
+
+          {:error, reason} ->
+            {:error, {:review_state, reason}}
+        end
     end
   end
 

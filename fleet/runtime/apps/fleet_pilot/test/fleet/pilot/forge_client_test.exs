@@ -1072,4 +1072,18 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert length(issues) == 3
     end
   end
+
+  describe "assigned_by_qs/1 (#5.2 D1b — scoping forge-side, vérifié live Gitea 1.26.1)" do
+    test "opt absent → suffixe vide (pas de filtre)" do
+      assert ForgeClient.assigned_by_qs([]) == ""
+    end
+
+    test "assigned_by présent → &assigned_by=<login>" do
+      assert ForgeClient.assigned_by_qs(assigned_by: "lordzurp") == "&assigned_by=lordzurp"
+    end
+
+    test "login vide → suffixe vide (un &assigned_by= dégénéré rendrait TOUT — anti-régression scoping)" do
+      assert ForgeClient.assigned_by_qs(assigned_by: "") == ""
+    end
+  end
 end

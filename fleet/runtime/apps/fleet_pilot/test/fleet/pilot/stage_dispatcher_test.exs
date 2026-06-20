@@ -497,12 +497,20 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       Map.merge(
         %{
           "number" => 6,
+          # #5.2 D1 — la PR porte l'assignee humain (= @me), sinon dispatch_review skip :foreign.
+          "assignees" => [%{"login" => @me}],
           "head" => %{"ref" => "lcars/issue-42-engineer"},
           "requested_reviewers" => [%{"login" => "Qualifier"}],
           "labels" => []
         },
         fields
       )
+    end
+
+    test "D1 — PR assignée à un AUTRE humain → {:skipped, :foreign} (pas de juge cross-fleet)" do
+      # /pulls ne filtre pas côté forge → le scoping PR est client-side dans dispatch_review.
+      foreign_pr = pr(%{"assignees" => [%{"login" => "bob"}]})
+      assert {:skipped, :foreign} = StageDispatcher.dispatch_review(foreign_pr, dispatch_opts())
     end
 
     test "PR avec review demandee -> spawn le juge (ticket=ISSUE, verrou sur la PR)" do

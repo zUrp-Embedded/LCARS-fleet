@@ -387,6 +387,7 @@ defmodule Fleet.Pilot.PollerTest do
       pulls = [
         %{
           "number" => 6,
+          "assignees" => [%{"login" => "lordzurp"}],
           "head" => %{"ref" => "lcars/issue-42-engineer"},
           "requested_reviewers" => [%{"login" => "Qualifier"}],
           "labels" => []
@@ -415,6 +416,7 @@ defmodule Fleet.Pilot.PollerTest do
       pulls = [
         %{
           "number" => 7,
+          "assignees" => [%{"login" => "lordzurp"}],
           "head" => %{"ref" => "lcars/issue-99-engineer"},
           "requested_reviewers" => [%{"login" => "Reviewer"}],
           "labels" => []

@@ -279,7 +279,11 @@ defmodule Fleet.Pilot.Poller do
     # Bail repo-serialise : on liste TOUS les ouverts (in-flight inclus) pour compter les
     # pipelines actifs. Corr.3 4-C : on liste AUSSI les PR ouvertes -> les JUGES sont dispatches
     # via les requested_reviewers de la PR (plus l'assignee issue). decide skip les in-flight.
-    with {:ok, issues} <- forge.list_open_issues(state.repo, state.forge_opts),
+    # #5.2 D1b — scoping forge-side : `assigned_by` ne filtre QUE l'endpoint /issues (Gitea ignore le param
+    # sur /pulls). Les PR sont scopées client-side dans dispatch_review. Le bail devient ainsi par-humain.
+    issue_opts = Keyword.put(state.forge_opts, :assigned_by, state.my_human)
+
+    with {:ok, issues} <- forge.list_open_issues(state.repo, issue_opts),
          {:ok, pulls} <- forge.list_open_pulls(state.repo, state.forge_opts) do
       pr_issue_ids = pulls_issue_ids(pulls)
 
