@@ -96,17 +96,15 @@ defmodule Fleet.Pilot.IncidentRegistry do
   defp repo(opts),
     do: opts[:repo] || Application.get_env(:fleet_pilot, :incident_registry_repo, "fleet/lcars")
 
+  # `work/ops` est une BRANCHE de fleet/lcars (le worktree ops vit dessus) ; les artefacts ops sont à
+  # `work/*` (backlog.md, etat-fleet.md) → le registre les rejoint.
   defp branch(opts),
-    do: opts[:branch] || Application.get_env(:fleet_pilot, :incident_registry_branch, "main")
+    do: opts[:branch] || Application.get_env(:fleet_pilot, :incident_registry_branch, "work/ops")
 
   defp path(opts),
     do:
       opts[:path] ||
-        Application.get_env(
-          :fleet_pilot,
-          :incident_registry_path,
-          "work/ops/system-incidents.json"
-        )
+        Application.get_env(:fleet_pilot, :incident_registry_path, "work/system-incidents.json")
 
   defp normalize(subject), do: Regex.replace(~r/\d+/, subject, "N")
 
