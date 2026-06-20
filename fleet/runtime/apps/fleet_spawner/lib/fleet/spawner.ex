@@ -288,26 +288,16 @@ defmodule Fleet.Spawner do
   def wake_pod(pod_id) when is_binary(pod_id) do
     case pod_info(pod_id) do
       {:ok, %{tmux_session: session} = info} when is_binary(session) ->
-        # Réveil-par-flag (outil Monitor in-pod) : touche `turn.flag` → l'agent Monitor-armé se
-        # réveille SANS send-keys (ADR-G pt3, SP `agent-worker-base.md`). C'est le rail PORTEUR.
-        # Le `yop` send-keys n'est qu'un FALLBACK (`:wake_send_keys`, défaut `true`) : bootstrap +
-        # pods sans Monitor. **Knob à `false` ⇒ wake FLAG-ONLY** → permet de VALIDER/rendre porteur
-        # le Monitor en isolation. (Avant : le `yop` toujours-tiré MASQUAIT si le réveil-par-flag
-        # marchait — un pod réveillé par le yop ne prouvait jamais le Monitor → e2e jamais bouclé,
-        # cf. PoC mcp-debate piège #4. Le flag est désormais toujours touché et porteur.)
+        # Réveil-par-flag (rail PORTEUR) : touche `turn.flag` → l'agent Monitor-armé se réveille SANS
+        # send-keys (ADR-G pt3). #5.2 [3b] : plus de send-keys IMMÉDIAT ici → on ARME la boucle ack-driven
+        # du Pod (`:arm_kick`), qui est le FALLBACK : elle send-keys `"wake"` UNIQUEMENT si le pull n'arrive
+        # pas (le flag n'a pas livré), puis escalade au cap. + ré-arme la deadline de RÉPONSE (F112). Le
+        # `wake_pod` n'est plus qu'un trigger porteur + l'armement du filet ; le contrôle (ACK = pull) vit
+        # dans la boucle (`kick_attempt`). Le knob `:wake_send_keys` (flag-only) est désormais lu par la boucle.
         _ = touch_turn_flag(info)
-
-        result =
-          if wake_send_keys_fallback?() do
-            Fleet.Spawner.PodTmux.send_keys(pod_id, "yop")
-          else
-            :ok
-          end
-
-        # F112 : ré-arme la deadline de RÉPONSE pour la nouvelle tâche (toujours, indépendant du
-        # mécanisme de wake). wake_pod = « nouveau travail assigné » → la fenêtre de timeout repart.
         _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :rearm_deadline)
-        result
+        _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :arm_kick)
+        :ok
 
       {:ok, _info} ->
         {:error, :not_a_tmux_pod}
@@ -354,12 +344,6 @@ defmodule Fleet.Spawner do
 
       :ok
   end
-
-  # Tirer le `yop` send-keys en fallback du réveil-par-flag ? Défaut `true` (sûr : couvre les pods
-  # sans Monitor + bootstrap). `false` ⇒ wake FLAG-ONLY = le Monitor est le rail porteur (à activer
-  # une fois le réveil-par-flag validé live — B). Config `:fleet_spawner, :wake_send_keys`.
-  defp wake_send_keys_fallback?,
-    do: Application.get_env(:fleet_spawner, :wake_send_keys, true)
 
   @doc """
   Restart strategy d'un pod : `:temporary` pour TOUS les scopes (DN-recovery,

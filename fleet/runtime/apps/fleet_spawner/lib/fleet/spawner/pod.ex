@@ -274,6 +274,10 @@ defmodule Fleet.Spawner.Pod do
     # l'enqueue StageRunner (ms après spawn) précède largement le 1er kick (+2s) → un worker a
     # déjà son mandat `pending`, un pod permanent a `pod_status == {:ok, nil}`.
     bootstrap? = no_pending_mandate?(state.pod_id)
+
+    # polled? = l'agent a déjà appelé get_task (ACK in-band). Calculé 1× : sert au bootstrap-stop ET au
+    # choix du mot-clé (pas encore pollé = bootstrap-arm "yop" ; déjà pollé = pod running → fallback "wake").
+    polled = polled?(state)
     cap = if bootstrap?, do: kick_bootstrap_max(), else: kick_max_attempts()
     retry = if bootstrap?, do: kick_bootstrap_retry_ms(), else: kick_retry_ms()
 
@@ -286,7 +290,7 @@ defmodule Fleet.Spawner.Pod do
       # porteur/flag prend le relais ; un Monitor non-armé serait rattrapé par le fallback de la boucle au
       # prochain wake). On NE se fie PLUS au pgrep (proxy « process watch.sh existe ») mais à l'ACTE de
       # l'agent — cf. `polled?/1` (last_poll TaskQueue, #5.2 [1]).
-      bootstrap? and polled?(state) ->
+      bootstrap? and polled ->
         Logger.debug(
           "pod #{state.pod_id} bootstrap : agent a POLLÉ (ack) → kick stoppé (porteur prend le relais)"
         )
@@ -308,14 +312,7 @@ defmodule Fleet.Spawner.Pod do
         {:noreply, state}
 
       Fleet.Spawner.PodTmux.alive?(state.pod_id) ->
-        case Fleet.Spawner.PodTmux.send_keys(state.pod_id, "yop") do
-          :ok ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning("pod #{state.pod_id} kick (yop) failed : #{inspect(reason)}")
-        end
-
+        _ = kick_send(state, polled)
         Process.send_after(self(), {:kick_attempt, n + 1}, retry)
         {:noreply, state}
 
@@ -340,6 +337,14 @@ defmodule Fleet.Spawner.Pod do
   end
 
   def handle_cast(:rearm_deadline, state), do: {:noreply, state}
+
+  # #5.2 : `wake_pod` arme la boucle ack-driven. Le porteur (flag) vient d'être touché ; la boucle est le
+  # FALLBACK — elle ne send-keys `"wake"` QUE si le pull n'arrive pas (mandate_pulled? faux), puis escalade
+  # au cap. 1er tick après `kick_first_delay_ms` : on laisse le flag livrer d'abord (pas de double-trigger).
+  def handle_cast(:arm_kick, state) do
+    Process.send_after(self(), {:kick_attempt, 0}, kick_first_delay_ms())
+    {:noreply, state}
+  end
 
   # (R1.2 — parser NDJSON `parse_chunks`/`handle_event` retiré : modèle -p mort.
   #  La complétion vient du livrable fichier, pas d'un event `result` NDJSON.)
@@ -1855,6 +1860,40 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp polled?(_), do: false
+
+  # Mot-clé du kick selon `polled` (= l'agent a déjà appelé get_task) :
+  #   - pas encore pollé → `"yop"` : bootstrap-arm, IRRÉDUCTIBLE (seul moyen de démarrer/armer l'agent) ;
+  #   - déjà pollé (pod running) → `"wake"` : FALLBACK (le porteur/flag aurait dû livrer), GATÉ par
+  #     `:wake_send_keys` (off ⇒ flag-only : on valide le Monitor en isolation, pas de fallback).
+  # Le `"yop"` bootstrap n'est JAMAIS gaté (sinon un pod neuf ne démarrerait pas). Mots-clés discriminés
+  # ⇒ on sait, en lisant le REPL/les logs, si c'est un kick (démarrage) ou un fallback (Monitor raté).
+  defp kick_send(state, polled) do
+    case kick_keyword(polled, Application.get_env(:fleet_spawner, :wake_send_keys, true)) do
+      nil -> :ok
+      key -> do_send_keys(state, key)
+    end
+  end
+
+  @doc false
+  # Décision PURE du mot-clé (testable). `polled` = l'agent a déjà appelé get_task ; `fallback_on?` = knob
+  # `:wake_send_keys`. `nil` ⇒ pas de send-keys (flag-only). Le `"yop"` (bootstrap) n'est JAMAIS gaté.
+  def kick_keyword(polled, fallback_on?) do
+    cond do
+      not polled -> "yop"
+      fallback_on? -> "wake"
+      true -> nil
+    end
+  end
+
+  defp do_send_keys(state, key) do
+    case Fleet.Spawner.PodTmux.send_keys(state.pod_id, key) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("pod #{state.pod_id} kick (#{key}) failed : #{inspect(reason)}")
+    end
+  end
 
   defp inject_brief_to_tmux_pod(%{tmux_session: nil}), do: :ok
 

@@ -55,6 +55,21 @@ defmodule Fleet.Spawner.PodTest do
     {:ok, tmp_dir: tmp_dir}
   end
 
+  describe "kick_keyword/2 (#5.2 — mot-clé du kick selon l'ACK)" do
+    test "pas encore pollé → 'yop' (bootstrap-arm, JAMAIS gaté)" do
+      assert Fleet.Spawner.Pod.kick_keyword(false, true) == "yop"
+      assert Fleet.Spawner.Pod.kick_keyword(false, false) == "yop"
+    end
+
+    test "déjà pollé + knob on → 'wake' (fallback)" do
+      assert Fleet.Spawner.Pod.kick_keyword(true, true) == "wake"
+    end
+
+    test "déjà pollé + knob off → nil (flag-only, pas de send-keys)" do
+      assert Fleet.Spawner.Pod.kick_keyword(true, false) == nil
+    end
+  end
+
   defp valid_profile do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
