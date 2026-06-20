@@ -79,9 +79,19 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   # sha présent ⇒ UPDATE ; sha nil ⇒ CREATE (put_file/maybe_put_sha gère le nil).
+  # Chaque inscription = UN commit sur la forge (put_file écrit côté serveur = de facto poussé), attribué
+  # au sysadmin : le registre est un artefact SYSTÈME. L'historique git du fichier = la timeline des incidents.
   defp save(reg, sha, sig, opts) do
     putter = Keyword.get(opts, :put_file_fun, &Fleet.Pilot.ForgeClient.put_file/4)
-    put_opts = [branch: branch(opts), message: "ops(incident): #{sig}", sha: sha]
+    ident = author(opts)
+
+    put_opts = [
+      branch: branch(opts),
+      message: "ops(incident): #{sig}",
+      sha: sha,
+      author: ident,
+      committer: ident
+    ]
 
     case putter.(repo(opts), path(opts), JSON.encode!(reg), put_opts) do
       {:ok, _} ->
@@ -95,6 +105,14 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   defp repo(opts),
     do: opts[:repo] || Application.get_env(:fleet_pilot, :incident_registry_repo, "fleet/lcars")
+
+  defp author(opts),
+    do:
+      opts[:author] ||
+        Application.get_env(:fleet_pilot, :incident_registry_author, %{
+          name: "LCARS-starfleet",
+          email: "starfleet@lcars.local"
+        })
 
   # `work/ops` est une BRANCHE de fleet/lcars (le worktree ops vit dessus) ; les artefacts ops sont à
   # `work/*` (backlog.md, etat-fleet.md) → le registre les rejoint.
