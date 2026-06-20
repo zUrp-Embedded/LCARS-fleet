@@ -70,6 +70,25 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
+  describe "acked?/3 (#5.2 F3 — le contrôle de la boucle = l'ACK, pas un proxy)" do
+    test "wake : pull du mandat = ACK (peu importe polled)" do
+      assert Fleet.Spawner.Pod.acked?(true, false, false)
+      assert Fleet.Spawner.Pod.acked?(true, false, true)
+    end
+
+    test "bootstrap : poll = ACK (pas de mandat à puller, last_poll suffit)" do
+      assert Fleet.Spawner.Pod.acked?(false, true, true)
+    end
+
+    test "bootstrap pas encore pollé → PAS d'ACK (on continue à kicker 'yop')" do
+      refute Fleet.Spawner.Pod.acked?(false, true, false)
+    end
+
+    test "worker pas encore pull → PAS d'ACK même si pollé (polled ne compte QUE pour bootstrap)" do
+      refute Fleet.Spawner.Pod.acked?(false, false, true)
+    end
+  end
+
   defp valid_profile do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",

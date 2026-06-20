@@ -257,12 +257,12 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # R3b / F-C4b-2 — Kick AUTONOME readiness-gated. Tick borné (indépendant du cycle
-  # ALLOCATE→RELEASE, le pod est en :monitoring quand ces messages arrivent) :
-  #   - mandat déjà pull → stop (plus rien à faire) ;
-  #   - cap atteint → abandon loggé (REPL jamais joignable OU mandat jamais pull) ;
-  #   - tmux joignable → yop (le pull peut prendre un tour → on revérifie au prochain tick) ;
-  #   - tmux pas encore up → on retente sans consommer un yop perdu.
+  # #5.2 — Boucle KICK ack-driven UNIFIÉE (bootstrap + wake-fallback, paramétrée : cap/retry/mot-clé/ACK).
+  # Tick borné (le pod est en :monitoring). Le contrôle = l'ACK de l'agent (`acked?/3`), JAMAIS un proxy :
+  #   - ACK (pull pour un wake / poll pour un bootstrap) → stop + cancel timer ;
+  #   - cap sans ACK → broadcast `wake.failed` (escalade ring-propre, #5.2 [3c/6]) + cancel ;
+  #   - tmux joignable → kick_send (mot-clé `yop` bootstrap / `wake` fallback) + reschedule ;
+  #   - tmux pas encore up → reschedule sans consommer de send-keys.
   # Une erreur send-keys n'interrompt pas le pod (le monitor time-out couvre).
   def handle_info({:kick_attempt, n}, %{tmux_session: session} = state)
       when is_binary(session) do
@@ -282,20 +282,15 @@ defmodule Fleet.Spawner.Pod do
     retry = if bootstrap?, do: kick_bootstrap_retry_ms(), else: kick_retry_ms()
 
     cond do
-      mandate_pulled?(state.pod_id) ->
-        {:noreply, state}
-
-      # #5.2 : un pod bootstrap (permanent sans mandat) ne kicke QUE pour DÉMARRER l'agent. Dès qu'il a
-      # POLLÉ (appelé get_task = ACK in-band RÉEL : il est up + a lu son SP) → on STOPPE le kick (le
-      # porteur/flag prend le relais ; un Monitor non-armé serait rattrapé par le fallback de la boucle au
-      # prochain wake). On NE se fie PLUS au pgrep (proxy « process watch.sh existe ») mais à l'ACTE de
-      # l'agent — cf. `polled?/1` (last_poll TaskQueue, #5.2 [1]).
-      bootstrap? and polled ->
+      # #5.2 F3 : ACK (pull pour un wake / poll pour un bootstrap, cf. acked?/3) = l'agent a tendu la main →
+      # on STOPPE la boucle (cancel timer ; le porteur/flag prend le relais). On NE se fie PLUS au pgrep
+      # (proxy « process watch.sh existe ») mais à l'ACTE de l'agent (last_poll/pod_status TaskQueue, [1]).
+      acked?(mandate_pulled?(state.pod_id), bootstrap?, polled) ->
         Logger.debug(
-          "pod #{state.pod_id} bootstrap : agent a POLLÉ (ack) → kick stoppé (porteur prend le relais)"
+          "pod #{state.pod_id} acké (pull/poll) → kick stoppé (porteur prend le relais)"
         )
 
-        {:noreply, state}
+        {:noreply, cancel_kick(state)}
 
       n >= cap ->
         # #5.2 [3c] : cap épuisé = l'agent n'a JAMAIS acké (ni flag, ni send-keys). bootstrap = jamais
@@ -314,16 +309,14 @@ defmodule Fleet.Spawner.Pod do
           "pane" => Fleet.Spawner.PodTmux.capture_pane(state.pod_id)
         })
 
-        {:noreply, state}
+        {:noreply, cancel_kick(state)}
 
       Fleet.Spawner.PodTmux.alive?(state.pod_id) ->
         _ = kick_send(state, polled)
-        Process.send_after(self(), {:kick_attempt, n + 1}, retry)
-        {:noreply, state}
+        {:noreply, schedule_kick(state, n + 1, retry)}
 
       true ->
-        Process.send_after(self(), {:kick_attempt, n + 1}, retry)
-        {:noreply, state}
+        {:noreply, schedule_kick(state, n + 1, retry)}
     end
   end
 
@@ -347,8 +340,7 @@ defmodule Fleet.Spawner.Pod do
   # FALLBACK — elle ne send-keys `"wake"` QUE si le pull n'arrive pas (mandate_pulled? faux), puis escalade
   # au cap. 1er tick après `kick_first_delay_ms` : on laisse le flag livrer d'abord (pas de double-trigger).
   def handle_cast(:arm_kick, state) do
-    Process.send_after(self(), {:kick_attempt, 0}, kick_first_delay_ms())
-    {:noreply, state}
+    {:noreply, arm_kick(state)}
   end
 
   # (R1.2 — parser NDJSON `parse_chunks`/`handle_event` retiré : modèle -p mort.
@@ -991,7 +983,7 @@ defmodule Fleet.Spawner.Pod do
         #
         # Path LauncherPortBackend : pas applicable (brief.md sur disk lu par claude_launch).
         # Path Stub (tests) : no-op (pas de tmux_session retourné).
-        inject_brief_to_tmux_pod(new_state)
+        new_state = inject_brief_to_tmux_pod(new_state)
 
         {:noreply, new_state, {:continue, :monitor}}
 
@@ -1405,7 +1397,10 @@ defmodule Fleet.Spawner.Pod do
       # Z1 — ref du timer :result_deadline (timeout de RÉPONSE). nil = non armé.
       # Armé seulement pour les scopes bornés (pas `forever`), annulé à l'arrivée du
       # résultat / avant ré-arme. Cf. arm_result_deadline/1.
-      result_deadline_ref: nil
+      result_deadline_ref: nil,
+      # #5.2 F2 — ref du timer {:kick_attempt}. 1 SEUL vivant (cancel+rearm, cf. arm_kick/1) : un wake_pod
+      # pendant le bootstrap ne crée pas une 2e boucle. nil = boucle non armée / stoppée.
+      kick_ref: nil
     }
   end
 
@@ -1851,6 +1846,33 @@ defmodule Fleet.Spawner.Pod do
   defp kick_bootstrap_retry_ms,
     do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
 
+  # #5.2 F2 — arme/ré-arme la boucle de kick : 1 SEUL timer vivant (cancel l'ancien + rearm), MÊME pattern
+  # que arm_result_deadline/1. Appelé au bootstrap (inject_brief) ET à chaque wake (cast :arm_kick) → un
+  # wake_pod pendant le bootstrap ne crée pas une 2e boucle. 1er tick après kick_first_delay_ms : on laisse
+  # le flag porteur livrer d'abord.
+  defp arm_kick(state), do: schedule_kick(state, 0, kick_first_delay_ms())
+
+  defp schedule_kick(state, n, delay) do
+    state = cancel_kick(state)
+    ref = Process.send_after(self(), {:kick_attempt, n}, delay)
+    Map.put(state, :kick_ref, ref)
+  end
+
+  defp cancel_kick(state) do
+    case Map.get(state, :kick_ref) do
+      ref when is_reference(ref) -> Process.cancel_timer(ref)
+      _ -> :ok
+    end
+
+    Map.put(state, :kick_ref, nil)
+  end
+
+  @doc false
+  # #5.2 F3 — ACK (décision PURE, testable) = l'agent a tendu la main. C'est LE contrôle de la boucle :
+  # pas d'ACK → on (re)trigger ; ACK → stop ; cap sans ACK → escalade. Wake → `pulled?` (mandate_pulled? :
+  # le pull PROUVE get_task) ; bootstrap (permanent sans mandat) → `polled` (last_poll = up + SP lu).
+  def acked?(pulled?, bootstrap?, polled), do: pulled? or (bootstrap? and polled)
+
   # L'agent a-t-il POLLÉ (appelé get_task) ? = ACK in-band RÉEL (#5.2) : l'agent a tendu la main via l'API
   # officielle (last_poll, tracké par le TaskQueue en [1]), pas un proxy host-side comme l'ancien
   # `pgrep watch.sh` (« le process existe » ≠ « l'agent agit »). Sert à stopper le kick bootstrap dès que
@@ -1862,6 +1884,10 @@ defmodule Fleet.Spawner.Pod do
     end
   rescue
     _ -> false
+  catch
+    # F1 : `last_poll` est un GenServer.call → TaskQueue down/restarting EXIT (ne raise pas), `rescue` ne
+    # l'attrape pas. MÊME garde que mandate_pulled?/no_pending_mandate? : un hoquet broker ne crashe PAS le pod.
+    :exit, _ -> false
   end
 
   defp polled?(_), do: false
@@ -1900,13 +1926,12 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  defp inject_brief_to_tmux_pod(%{tmux_session: nil}), do: :ok
+  defp inject_brief_to_tmux_pod(%{tmux_session: nil} = state), do: state
 
-  defp inject_brief_to_tmux_pod(%{tmux_session: session}) when is_binary(session) do
-    # Démarre la boucle de kick readiness-gated. `yop` = trigger pur (mot-clé
-    # protocole-user) ; le SP `agent-worker-base.md` porte le workflow get_task→submit_result.
-    Process.send_after(self(), {:kick_attempt, 1}, kick_first_delay_ms())
-    :ok
+  defp inject_brief_to_tmux_pod(%{tmux_session: session} = state) when is_binary(session) do
+    # #5.2 — arme (cancel+rearm, 1 seul timer) la boucle de kick ack-driven. Le 1er send-keys sera `yop`
+    # (bootstrap : pas encore pollé) ; le SP `agent-worker-base.md` porte le workflow get_task→submit_result.
+    arm_kick(state)
   end
 
   # Le mandat est-il déjà pull par le pod ? « Pull » = la task est dans un état qui
