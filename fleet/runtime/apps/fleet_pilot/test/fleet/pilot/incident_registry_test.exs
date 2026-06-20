@@ -176,6 +176,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
                Reg.record_or_escalate("wake", "issue-7-engineer", {:no_ack, :wake},
                  server: name,
                  escalate_kind: :sp_suspect,
+                 pane: "ECRAN-TEST-42 : derniere ligne REPL",
                  create_issue_fun: fn _r, title, body, _o ->
                    send(pid, {:issue, title, body}) && {:ok, 1}
                  end
@@ -184,6 +185,9 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received {:issue, title, body}
       assert title =~ "SP suspect"
       assert body =~ "PROMPT"
+      # [5] : l'écran capturé (fallback-ack déporté) est attaché au ticket
+      assert body =~ "ECRAN-TEST-42"
+      assert body =~ "Écran capturé"
     end
   end
 end

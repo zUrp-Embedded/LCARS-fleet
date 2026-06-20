@@ -307,7 +307,13 @@ defmodule Fleet.Spawner.Pod do
           "pod #{state.pod_id} kick (#{phase}) abandonné après #{n} tentatives — agent jamais acké → escalade #5.2"
         )
 
-        safe_broadcast("wake.failed", %{"pod_id" => state.pod_id, "reason" => {:no_ack, phase}})
+        # #5.2 [5] : capture l'écran (fallback-ACK déporté, best-effort) → le consumer l'attache au ticket.
+        safe_broadcast("wake.failed", %{
+          "pod_id" => state.pod_id,
+          "reason" => {:no_ack, phase},
+          "pane" => Fleet.Spawner.PodTmux.capture_pane(state.pod_id)
+        })
+
         {:noreply, state}
 
       Fleet.Spawner.PodTmux.alive?(state.pod_id) ->

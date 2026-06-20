@@ -298,7 +298,8 @@ defmodule Fleet.Pilot.HopConsumer do
 
     Task.Supervisor.start_child(task_supervisor(), fn ->
       case Fleet.Pilot.IncidentRegistry.record_or_escalate("wake", pod_id, reason,
-             escalate_kind: :sp_suspect
+             escalate_kind: :sp_suspect,
+             pane: p["pane"]
            ) do
         :recorded ->
           Logger.info("HopConsumer wake.failed #{pod_id} → incident gravé (#{inspect(reason)})")

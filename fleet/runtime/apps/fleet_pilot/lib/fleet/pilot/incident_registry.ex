@@ -108,6 +108,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
     Domaine SYSADMIN (substrat : tmux / bwrap / launch / REPL) — PAS un problème de projet.
     (Ticket auto — durcissement #5.2.)
+    #{pane_block(opts[:pane])}
     """
 
     case create_fun.(repo, title, body, labels: [label], assignees: [assignee]) do
@@ -115,6 +116,13 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {:error, _} -> create_fun.(repo, title, body, labels: [label])
     end
   end
+
+  # Bloc « écran capturé » (fallback-ACK déporté #5.2 [5]) attaché au ticket — vide si pas de pane.
+  defp pane_block(pane) when is_binary(pane) and pane != "" do
+    "\n## Écran capturé (ce que l'agent affichait au moment de l'échec)\n```\n#{pane}\n```\n"
+  end
+
+  defp pane_block(_), do: ""
 
   defp kind_describe(:recurrence),
     do: {"récurrence", "Déjà vu (registre `work/ops`) — pattern, pas random → ROOT-CAUSE requis."}
