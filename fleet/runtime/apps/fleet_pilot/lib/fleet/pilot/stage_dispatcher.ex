@@ -295,8 +295,10 @@ defmodule Fleet.Pilot.StageDispatcher do
     requested = pr |> Map.get("requested_reviewers") |> List.wrap() |> Enum.map(&login_of/1)
 
     cond do
-      # #5.2 D1 — scoping multi-user PR, CLIENT-SIDE (Gitea `/pulls` ne filtre pas `assigned_by`). Pas
-      # assignée à MON humain → pas la mienne, je n'y touche pas (le poller d'Alice ne juge pas les PR de Bob).
+      # #5.2 D1 — scoping multi-user PR, CLIENT-SIDE. Forge-side serait un ARBITRAGE perdant, pas une
+      # impossibilité : seul `/issues?type=pulls&assigned_by` filtre l'assignee PR, mais sans la shape PR
+      # (head/requested_reviewers) → coûterait N+1 (cf. forge_client.list_open_pulls). Pas assignée à MON
+      # humain → pas la mienne, je n'y touche pas (le poller d'Alice ne juge pas les PR de Bob).
       not assigned_to_me?(Map.get(pr, "assignees") || [], Keyword.fetch!(opts, :human)) ->
         {:skipped, :foreign}
 

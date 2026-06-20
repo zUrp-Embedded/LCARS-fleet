@@ -562,9 +562,13 @@ defmodule Fleet.Pilot.ForgeClient do
   def list_open_pulls(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts) do
       # F-030 : source-de-vérité du dispatch juge PR-driven → paginé, jamais une PR ratée au-delà de 50.
-      # #5.2 D1b — PAS de `assigned_by` ici : l'endpoint `/pulls` Gitea IGNORE ce param (vérifié live 1.26.1 :
-      # `assigned_by=inconnu` rend quand même la PR). Le scoping multi-user des PR est donc CLIENT-SIDE
-      # (StageDispatcher.dispatch_review → `:foreign` si pas à moi), pas forge-side comme les issues.
+      # #5.2 D1b — pas de filtre assignee forge-side ici, mais c'est un ARBITRAGE, pas une impossibilité
+      # (vérifié live Gitea 1.26.1) : `/pulls` n'a pas `assigned_by` ; `/issues?type=pulls&assigned_by` LE
+      # filtre bien (=Starfleet→#2, =inconnu→∅) MAIS rend une shape ISSUE sans `head`/`requested_reviewers`
+      # (que dispatch_review EXIGE) → un filtre forge-side coûterait N+1 (numéros filtrés via /issues, puis
+      # 1 GET /pulls/{n} par PR pour la vraie shape). Le scoping PR est donc CLIENT-SIDE (dispatch_review →
+      # `:foreign`) : 1 call + filtre mémoire, plus simple. (Pour les ISSUES, /issues filtre ET rend la
+      # bonne shape → forge-side, cf. list_open_issues.)
       paginate(config, "/repos/#{repo}/pulls", "state=open")
     end
   end
