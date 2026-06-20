@@ -40,14 +40,26 @@ defmodule Fleet.Pilot.PollerTest do
   # réelle, ici on renvoie tel quel) + les write-ops touchées par
   # StageDispatcher.dispatch_issue (add_label / post_comment).
   defmodule StageStubForge do
-    # Bail repo : le mode stage liste TOUS les ouverts (list_open_issues), le filtre in-flight
-    # est applique par decide. Le stub renvoie le `:_test_issues` configure tel quel.
+    # #5.2 D1 — le scoping multi-user est FORGE-SIDE : le poller passe `assigned_by=<my_human>`. Le stub
+    # CAPTURE ce scoping (→ `:_test_pid`) pour le vérifier, puis renvoie `:_test_issues` tel quel.
     def list_open_issues(_repo, opts) do
+      send(
+        Keyword.get(opts, :_test_pid, self()),
+        {:scoped, :issues, Keyword.get(opts, :assigned_by)}
+      )
+
       Keyword.fetch!(opts, :_test_issues)
     end
 
-    # Corr.3 4-C : le mode stage liste AUSSI les PR ouvertes (chemin juge). Default {:ok, []}.
-    def list_open_pulls(_repo, opts), do: Keyword.get(opts, :_test_pulls, {:ok, []})
+    # Corr.3 4-C : le mode stage liste AUSSI les PR (chemin juge), scopées pareil (assigned_by). Default {:ok, []}.
+    def list_open_pulls(_repo, opts) do
+      send(
+        Keyword.get(opts, :_test_pid, self()),
+        {:scoped, :pulls, Keyword.get(opts, :assigned_by)}
+      )
+
+      Keyword.get(opts, :_test_pulls, {:ok, []})
+    end
 
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
@@ -214,20 +226,15 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "issue sans assignee (pas d'owner) → skip" do
-      issues = [
-        %{
-          "number" => 9,
-          "body" => "x",
-          "labels" => [],
-          "assignees" => []
-        }
-      ]
+    test "D1 — le poller SCOPE les listes par assigned_by=my_human (forge-side, issues ET PR)" do
+      # Le scoping multi-user vit dans la LISTE (forge-side) : le poller passe SON humain aux DEUX endpoints
+      # (/issues?type=issues ET ?type=pulls). decide/dispatch_review ne re-vérifient plus l'ownership.
+      {name, pid} = start_stage_poller({:ok, []}, {:ok, []})
 
-      {name, pid} = start_stage_poller({:ok, issues})
+      Poller.force_poll(name)
 
-      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
-      refute_received {:spawned, _, _}
+      assert_received {:scoped, :issues, "lordzurp"}
+      assert_received {:scoped, :pulls, "lordzurp"}
 
       GenServer.stop(pid)
     end

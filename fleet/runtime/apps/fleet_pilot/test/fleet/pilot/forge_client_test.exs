@@ -218,22 +218,33 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   describe "list_open_pulls/2 + parse_feature_branch/1 (dispatch juge PR-driven)" do
-    test "liste les PR ouvertes (head.ref + requested_reviewers + labels)" do
+    test "hybride : /issues?type=pulls (numéros filtrés) PUIS get_pull (shape PR complète)" do
       handlers = %{
-        {"GET", "/api/v1/repos/fleet/lcars/pulls"} =>
+        # #5.2 D1 — la liste passe par /issues (filtre assignee forge-side), rend une shape issue (numéros).
+        {"GET", "/api/v1/repos/fleet/lcars/issues"} => {200, [%{"number" => 6}]},
+        # puis get_pull récupère la vraie shape PR (head/requested_reviewers).
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6"} =>
           {200,
-           [
-             %{
-               "number" => 6,
-               "head" => %{"ref" => "lcars/issue-999-engineer"},
-               "requested_reviewers" => [%{"login" => "Qualifier"}],
-               "labels" => []
-             }
-           ]}
+           %{
+             "number" => 6,
+             "head" => %{"ref" => "lcars/issue-999-engineer"},
+             "requested_reviewers" => [%{"login" => "Qualifier"}],
+             "labels" => []
+           }}
       }
 
       assert {:ok, [%{"number" => 6, "head" => %{"ref" => "lcars/issue-999-engineer"}}]} =
                ForgeClient.list_open_pulls("fleet/lcars", opts(handlers))
+    end
+
+    test "get_pull/3 : GET une PR unique → shape complète" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6"} =>
+          {200, %{"number" => 6, "head" => %{"ref" => "lcars/issue-9-engineer", "sha" => "abc"}}}
+      }
+
+      assert {:ok, %{"number" => 6, "head" => %{"sha" => "abc"}}} =
+               ForgeClient.get_pull("fleet/lcars", 6, opts(handlers))
     end
 
     test "parse_feature_branch extrait {issue, role} d'une branche systeme" do
@@ -1026,20 +1037,9 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert Enum.any?(issues, &(&1["number"] == 51))
     end
 
-    test "list_open_pulls : pagination idem (51ᵉ PR en page 2 incluse)" do
-      page1 =
-        for n <- 1..50, do: %{"number" => n, "head" => %{"ref" => "lcars/issue-#{n}-engineer"}}
-
-      page2 = [%{"number" => 51, "head" => %{"ref" => "lcars/issue-51-engineer"}}]
-
-      handlers = %{
-        {"GET", "/api/v1/repos/fleet/lcars/pulls"} => paged_handler([page1, page2])
-      }
-
-      assert {:ok, pulls} = ForgeClient.list_open_pulls("fleet/lcars", opts(handlers))
-      assert length(pulls) == 51
-      assert Enum.any?(pulls, &(&1["number"] == 51))
-    end
+    # #5.2 D1 — pagination de list_open_pulls : la LISTE pagine via /issues (`list_scoped_issues`, MÊME code
+    # que list_open_issues → déjà couverte par le test issues ci-dessus). Le fan-out get_pull est testé dans
+    # le describe `list_open_pulls`. Pas de test dupliqué ici (un seul code de listing = un seul test pagination).
 
     test "count_signed_hops : un hop signé en page 2 est compté (source-de-vérité du budget anti-runaway)" do
       # page 1 pleine (50 comments NON signés) + page 2 (1 comment portant un marqueur de hop signé).

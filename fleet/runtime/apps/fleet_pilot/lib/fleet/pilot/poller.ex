@@ -279,12 +279,13 @@ defmodule Fleet.Pilot.Poller do
     # Bail repo-serialise : on liste TOUS les ouverts (in-flight inclus) pour compter les
     # pipelines actifs. Corr.3 4-C : on liste AUSSI les PR ouvertes -> les JUGES sont dispatches
     # via les requested_reviewers de la PR (plus l'assignee issue). decide skip les in-flight.
-    # #5.2 D1b — scoping forge-side : `assigned_by` ne filtre QUE l'endpoint /issues (Gitea ignore le param
-    # sur /pulls). Les PR sont scopées client-side dans dispatch_review. Le bail devient ainsi par-humain.
-    issue_opts = Keyword.put(state.forge_opts, :assigned_by, state.my_human)
+    # #5.2 D1 — scoping multi-user FORGE-SIDE : MÊME filtre `assigned_by` pour issues ET PR (les deux passent
+    # par /issues?type=… côté ForgeClient). Le poller ne voit QUE les items de SON humain → le scoping vit en
+    # UN endroit (la liste), decide/dispatch_review ne re-vérifient plus l'ownership. Bail par-humain.
+    scoped_opts = Keyword.put(state.forge_opts, :assigned_by, state.my_human)
 
-    with {:ok, issues} <- forge.list_open_issues(state.repo, issue_opts),
-         {:ok, pulls} <- forge.list_open_pulls(state.repo, state.forge_opts) do
+    with {:ok, issues} <- forge.list_open_issues(state.repo, scoped_opts),
+         {:ok, pulls} <- forge.list_open_pulls(state.repo, scoped_opts) do
       pr_issue_ids = pulls_issue_ids(pulls)
 
       # Réconciliation verrou (B) AVANT dispatch : un `lcars-in-flight` orphelin (pod mort sans avoir
@@ -591,7 +592,6 @@ defmodule Fleet.Pilot.Poller do
   defp stage_dispatch_opts(state) do
     [
       repo: state.repo,
-      human: state.my_human,
       forge_client: stage_forge_client(state),
       forge_opts: state.forge_opts
     ]

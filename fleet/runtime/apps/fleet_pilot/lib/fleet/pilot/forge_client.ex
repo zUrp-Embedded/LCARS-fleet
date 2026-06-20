@@ -106,26 +106,27 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Liste TOUTES les issues ouvertes du `repo` (Gitea `GET /repos/{repo}/issues?state=open`), sans
-  filtre. Brique du bail dispatch repo-serialise : le Poller compte les pipelines actifs = tickets
-  deja assignes a un role (in-flight INCLUS, contrairement a `list_open_issues_without_label/3`) ->
-  un seul pipeline a la fois par repo (merge FF garanti). PAGINÉ (F-030) : toutes les pages, jamais
-  tronqué — sous-compter les pipelines actifs casserait le bail (2 pipelines en parallèle sur un repo).
+  Liste les issues ouvertes du `repo` ASSIGNÉES À MOI (scoping multi-user forge-side, #5.2 D1). Brique du
+  bail dispatch repo-serialise (compte les pipelines actifs, in-flight inclus). PAGINÉ (F-030). Délègue à
+  `list_scoped_issues` — issues ET PR passent par le MÊME endpoint `/issues?type=…` (un seul code de scoping).
   """
   @spec list_open_issues(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_open_issues(repo, opts \\ []) when is_binary(repo) do
+    list_scoped_issues(repo, "issues", opts)
+  end
+
+  # #5.2 — UN SEUL lister sur `/issues`, paramétré par `type` (issues|pulls) + scopé assignee FORGE-SIDE.
+  # Source unique du listing/scoping (state/type/assigned_by), paginée (F-030). La forge filtre
+  # (`assigned_by` — vérifié live Gitea 1.26.1, marche sur /issues pour les 2 types) → le poller ne voit
+  # QUE les siennes (le bail devient par-humain, cohérent N-fleets-par-humain). Le scoping vit ICI, en un
+  # seul endroit — decide/dispatch_review n'ont plus à re-vérifier l'ownership.
+  defp list_scoped_issues(repo, type, opts) when type in ["issues", "pulls"] do
     with {:ok, config} <- resolve_config(opts) do
-      # F-030 : source-de-vérité du bail dispatch (compte les pipelines actifs) → paginé, jamais tronqué.
-      # #5.2 D1b — scoping multi-user FORGE-SIDE : `assigned_by=<login>` filtre les issues assignées à
-      # l'humain de cette fleet (vérifié live Gitea 1.26.1 : =Engineer→#2, =inconnu→∅). La forge bosse,
-      # le poller ne voit que les siennes. Le bail devient par-humain (cohérent : N fleets par-humain).
-      paginate(config, "/repos/#{repo}/issues", "state=open&type=issues" <> assigned_by_qs(opts))
+      paginate(config, "/repos/#{repo}/issues", "state=open&type=#{type}" <> assigned_by_qs(opts))
     end
   end
 
-  # #5.2 D1b — suffixe query `&assigned_by=<login>` si `opts[:assigned_by]` posé, sinon "". Pur/testable.
-  # NB : ne marche QUE sur l'endpoint `/issues` ; `/pulls` IGNORE ce param (vérifié live) → le scoping PR
-  # est client-side (cf. StageDispatcher.dispatch_review).
+  # #5.2 D1 — suffixe query `&assigned_by=<login>` si `opts[:assigned_by]` posé, sinon "". Pur/testable.
   @doc false
   def assigned_by_qs(opts) do
     case Keyword.get(opts, :assigned_by) do
@@ -553,24 +554,43 @@ defmodule Fleet.Pilot.ForgeClient do
   defp merge_checking?(_), do: false
 
   @doc """
-  Liste les PR OUVERTES du `repo` (Gitea `GET /repos/{repo}/pulls?state=open`). Brique du dispatch
-  juge PR-driven (Corr.3 4-C) : le Poller lit les `requested_reviewers` en attente d'une PR pour
-  spawner le role juge (remplace l'assignee de l'issue). Chaque PR porte `number`, `head.ref` (la
-  feature-branch `lcars/issue-N-role`), `requested_reviewers`, `labels`. PAGINÉ (F-030).
+  Liste les PR OUVERTES du `repo` ASSIGNÉES À MOI (scoping multi-user forge-side, #5.2 D1), shape PR
+  COMPLÈTE : `number`, `head.ref` (feature-branch `lcars/issue-N-role`), `head.sha`, `requested_reviewers`,
+  `labels`. PAGINÉ (F-030). Brique du dispatch juge PR-driven.
+
+  Hybride (Gitea vérifié live 1.26.1) : `/pulls` n'a PAS `assigned_by`, mais `/issues?type=pulls&assigned_by`
+  filtre l'assignee (en rendant une shape ISSUE, sans head/requested_reviewers). Donc on FILTRE via
+  `list_scoped_issues(type: pulls)` — MÊME code de scoping/pagination que les issues — puis on récupère la
+  shape PR complète via `get_pull/3`, 1 par numéro. Le scoping reste 100% forge-side, comme les issues.
   """
   @spec list_open_pulls(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_open_pulls(repo, opts \\ []) when is_binary(repo) do
-    with {:ok, config} <- resolve_config(opts) do
-      # F-030 : source-de-vérité du dispatch juge PR-driven → paginé, jamais une PR ratée au-delà de 50.
-      # #5.2 D1b — pas de filtre assignee forge-side ici, mais c'est un ARBITRAGE, pas une impossibilité
-      # (vérifié live Gitea 1.26.1) : `/pulls` n'a pas `assigned_by` ; `/issues?type=pulls&assigned_by` LE
-      # filtre bien (=Starfleet→#2, =inconnu→∅) MAIS rend une shape ISSUE sans `head`/`requested_reviewers`
-      # (que dispatch_review EXIGE) → un filtre forge-side coûterait N+1 (numéros filtrés via /issues, puis
-      # 1 GET /pulls/{n} par PR pour la vraie shape). Le scoping PR est donc CLIENT-SIDE (dispatch_review →
-      # `:foreign`) : 1 call + filtre mémoire, plus simple. (Pour les ISSUES, /issues filtre ET rend la
-      # bonne shape → forge-side, cf. list_open_issues.)
-      paginate(config, "/repos/#{repo}/pulls", "state=open")
+    with {:ok, pr_issues} <- list_scoped_issues(repo, "pulls", opts) do
+      pr_issues |> Enum.map(& &1["number"]) |> fetch_pulls(repo, opts)
     end
+  end
+
+  # Récupère la shape PR complète (head/head.sha/requested_reviewers) pour chaque numéro filtré. Fail-fast :
+  # une erreur sur une PR arrête tout (on ne dispatche pas sur une vue partielle, comme la pagination).
+  defp fetch_pulls(numbers, repo, opts) do
+    numbers
+    |> Enum.reduce_while({:ok, []}, fn n, {:ok, acc} ->
+      case get_pull(repo, n, opts) do
+        {:ok, pr} -> {:cont, {:ok, [pr | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, prs} -> {:ok, Enum.reverse(prs)}
+      err -> err
+    end
+  end
+
+  @doc "GET une PR unique → shape complète (head/head.sha/requested_reviewers). #5.2 — brique de list_open_pulls."
+  @spec get_pull(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
+  def get_pull(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
+    with {:ok, config} <- resolve_config(opts),
+         do: http_get(config, "/repos/#{repo}/pulls/#{number}")
   end
 
   @feature_branch_rx ~r{^lcars/issue-(\d+)-(.+)$}

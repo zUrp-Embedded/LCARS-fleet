@@ -45,26 +45,18 @@ defmodule Fleet.Pilot.StageDispatcher do
           {:spawn, role :: String.t(), profile :: Fleet.CapProfile.t()} | {:skip, atom()}
 
   @doc """
-  Décision pure : payload issue Gitea → `{:spawn, role, profile}` | `{:skip, reason}`.
-  `load_role` (fun arité 1 → `{:ok, profile} | {:error, _}`) injectable pour les tests ; défaut =
-  `CapProfile.load/1`. F075 : le profil chargé pour décider est THREADÉ dans `{:spawn, …}` et réutilisé
-  au spawn par `dispatch_issue` (fin du double-load sonde+reload).
+  Décision pure : payload issue Gitea → `{:spawn, role, profile}` | `{:skip, reason}`. Le **scoping
+  multi-user est FORGE-SIDE en amont** (`list_open_issues` ne rend QUE mes items, #5.2 D1) → decide ne
+  re-vérifie PAS l'ownership (pas son métier). `load_role` (fun arité 1) injectable pour les tests ; défaut =
+  `CapProfile.load/1`. F075 : le profil chargé pour décider est THREADÉ dans `{:spawn, …}` et réutilisé au spawn.
   """
-  @spec decide(map(), String.t(), (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()})) ::
+  @spec decide(map(), (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()})) ::
           decision()
-  def decide(payload, my_human, load_role \\ &default_load_role/1)
-      when is_map(payload) and is_binary(my_human) do
+  def decide(payload, load_role \\ &default_load_role/1) when is_map(payload) do
     issue = Map.get(payload, "issue", payload)
     labels = Enum.map(Map.get(issue, "labels", []), & &1["name"])
-    assignees = Map.get(issue, "assignees") || []
 
     cond do
-      # #5.2 D1 — scoping multi-user : on ne traite QUE les tickets assignés à MON humain (l'OS user qui a
-      # lancé cette fleet). Sinon le poller d'Alice spawnerait pour les tickets de Bob. « pas à moi » (autre
-      # OU aucun assignee) = on n'y touche pas. Garde de CORRECTION (vraie même si le filtre forge [1b] rate).
-      not assigned_to_me?(assignees, my_human) ->
-        {:skip, :foreign}
-
       @in_flight_label in labels ->
         {:skip, :in_flight}
 
@@ -74,8 +66,8 @@ defmodule Fleet.Pilot.StageDispatcher do
         {:skip, :awaits_human}
 
       true ->
-        # Forge-state-machine (DN §1) : ticket à MOI, non verrouillé → spawn le rôle PRODUCTEUR du
-        # catalogue (`:producer_role`, défaut "engineer", invariant — jamais un marqueur par-ticket).
+        # Forge-state-machine (DN §1) : issue (à moi, scopée par la liste), non verrouillée → spawn le rôle
+        # PRODUCTEUR du catalogue (`:producer_role`, défaut "engineer", invariant — pas un marqueur par-ticket).
         role = producer_role()
 
         # F075 : cap-profile chargé UNE fois (la décision en dépend) + threadé → réutilisé au spawn.
@@ -85,13 +77,6 @@ defmodule Fleet.Pilot.StageDispatcher do
           _ -> {:skip, :no_role}
         end
     end
-  end
-
-  # Gitea matche l'assignee insensible à la casse (`starfleet` résout `Starfleet`) → comparaison downcase.
-  # « à moi » = mon login OS est l'un des assignees ; aucun assignee ⇒ false (pas pour la fleet).
-  defp assigned_to_me?(assignees, my_human) do
-    mine = String.downcase(my_human)
-    Enum.any?(assignees, fn a -> String.downcase(a["login"] || "") == mine end)
   end
 
   # Rôle producteur (DN §1, invariant) : `:producer_role` (config, data catalogue), défaut "engineer".
@@ -120,7 +105,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     # #8 : chargeur de carte injectable (seam, comme les autres) — rend `carte_role` testable sans disque.
     carte_loader = Keyword.get(opts, :carte_loader, &Fleet.Pipeline.Loader.load!/1)
 
-    case decide(payload, Keyword.fetch!(opts, :human), &loader.load/1) do
+    case decide(payload, &loader.load/1) do
       {:skip, reason} ->
         {:skipped, reason}
 
@@ -294,30 +279,23 @@ defmodule Fleet.Pilot.StageDispatcher do
     # PAS « qui reste à juger ». C'est la LISTE DES REVIEWS (verdict décisif par juge) qui le dit.
     requested = pr |> Map.get("requested_reviewers") |> List.wrap() |> Enum.map(&login_of/1)
 
-    cond do
-      # #5.2 D1 — scoping multi-user PR, CLIENT-SIDE. Forge-side serait un ARBITRAGE perdant, pas une
-      # impossibilité : seul `/issues?type=pulls&assigned_by` filtre l'assignee PR, mais sans la shape PR
-      # (head/requested_reviewers) → coûterait N+1 (cf. forge_client.list_open_pulls). Pas assignée à MON
-      # humain → pas la mienne, je n'y touche pas (le poller d'Alice ne juge pas les PR de Bob).
-      not assigned_to_me?(Map.get(pr, "assignees") || [], Keyword.fetch!(opts, :human)) ->
-        {:skipped, :foreign}
+    # #5.2 D1 — pas de check d'ownership ici : le scoping PR est FORGE-SIDE en amont (list_open_pulls ne rend
+    # QUE mes PR via /issues?type=pulls&assigned_by). dispatch_review ne fait que du dispatch de jugement.
+    if @in_flight_label in labels do
+      {:skipped, :in_flight}
+    else
+      # head_sha → verdicts COMMIT-SCOPÉS : une review sur un commit antérieur (REQUEST_CHANGES jamais
+      # dismissé par Gitea au push) est PÉRIMÉE → son juge redevient `pending` → re-dispatché sur le code
+      # courant (sinon rework infini, live #7).
+      verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
 
-      @in_flight_label in labels ->
-        {:skipped, :in_flight}
+      case ctx.forge.pr_review_verdicts(ctx.repo, pr_number, verdict_opts) do
+        {:ok, verdicts} ->
+          dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
 
-      true ->
-        # head_sha → verdicts COMMIT-SCOPÉS : une review sur un commit antérieur (REQUEST_CHANGES jamais
-        # dismissé par Gitea au push) est PÉRIMÉE → son juge redevient `pending` → re-dispatché sur le code
-        # courant (sinon rework infini, live #7).
-        verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
-
-        case ctx.forge.pr_review_verdicts(ctx.repo, pr_number, verdict_opts) do
-          {:ok, verdicts} ->
-            dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
-
-          {:error, reason} ->
-            {:error, {:review_state, reason}}
-        end
+        {:error, reason} ->
+          {:error, {:review_state, reason}}
+      end
     end
   end
 
