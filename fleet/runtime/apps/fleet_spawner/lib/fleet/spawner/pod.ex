@@ -281,6 +281,17 @@ defmodule Fleet.Spawner.Pod do
       mandate_pulled?(state.pod_id) ->
         {:noreply, state}
 
+      # #5.2 double-yop : un pod bootstrap (permanent sans mandat) ne kicke QUE pour armer son Monitor.
+      # Dès qu'il est armé (process `watch.sh` vivant), le porteur (flag) prend le relais → on STOPPE le
+      # kick. Sinon kick_bootstrap_max (4) yops redondants atterrissent après l'armement et distraient
+      # l'agent (chacun = get_task pour rien). Détection host-side, cf. monitor_armed?/1.
+      bootstrap? and monitor_armed?(state) ->
+        Logger.debug(
+          "pod #{state.pod_id} bootstrap : Monitor armé → kick stoppé (porteur prend le relais)"
+        )
+
+        {:noreply, state}
+
       n >= cap ->
         if bootstrap? do
           Logger.debug(
@@ -1817,6 +1828,27 @@ defmodule Fleet.Spawner.Pod do
 
   defp kick_bootstrap_retry_ms,
     do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
+
+  # Le Monitor (rail porteur) est-il armé ? = le process `watch.sh` du pod tourne (il bloque sur turn.flag).
+  # Les process bwrap sont visibles host-side (descendants du holder) → `pgrep -f <pod_dir>/watch.sh`.
+  # Sert à stopper le kick bootstrap dès armement (#5.2 double-yop). Override test : `:monitor_armed_fun`.
+  defp monitor_armed?(%{pod_dir: pod_dir} = state) when is_binary(pod_dir) do
+    case Map.get(state, :monitor_armed_fun) ||
+           Application.get_env(:fleet_spawner, :monitor_armed_fun) do
+      fun when is_function(fun, 1) ->
+        fun.(state)
+
+      _ ->
+        case System.cmd("pgrep", ["-f", "#{pod_dir}/watch.sh"], stderr_to_stdout: true) do
+          {out, 0} -> String.trim(out) != ""
+          _ -> false
+        end
+    end
+  rescue
+    _ -> false
+  end
+
+  defp monitor_armed?(_), do: false
 
   defp inject_brief_to_tmux_pod(%{tmux_session: nil}), do: :ok
 
