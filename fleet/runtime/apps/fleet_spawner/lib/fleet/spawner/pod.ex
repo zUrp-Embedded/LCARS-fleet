@@ -159,7 +159,7 @@ defmodule Fleet.Spawner.Pod do
       last_result: state.last_result,
       # tmux_session : nom de la session tmux du pod, posé par LauncherPortBackend (les deux
       # launchers N0 bwrap/host créent un tmux par-pod), nil pour StubBackend. Exposé pour
-      # Fleet.Spawner.wake_pod/1 (send-keys `yop` au pod cible pour nouveau cycle).
+      # Fleet.Spawner.wake_pod/1 (décide trigger+armement vs `:not_a_tmux_pod` ; la boucle send-keys ensuite).
       tmux_session: state.tmux_session
     }
 

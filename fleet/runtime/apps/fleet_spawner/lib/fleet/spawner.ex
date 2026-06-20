@@ -256,35 +256,37 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Réveille un pod long-lived (lifetime_scope != one-shot) pour un nouveau
-  cycle. **Rail porteur = réveil-par-flag** (`turn.flag` + outil Monitor in-pod) ; le `yop`
-  send-keys n'est qu'un fallback (`:wake_send_keys`, défaut `true`). Déclenche le workflow
+  Réveille un pod long-lived (lifetime_scope != one-shot) pour un nouveau cycle.
+
+  **Rail porteur = réveil-par-flag** (`turn.flag` + outil Monitor in-pod), touché ICI. Déclenche le workflow
   agent-worker-base :
 
       (flag touché → Monitor « ton tour ») → mcp__fleet__get_task → traite → mcp__fleet__submit_result
 
-  Pré-requis : le caller a déjà enqueué le mandat dans le broker
-  `Fleet.TaskQueue` (ciblé `pod_id` ; le pod s'identifie par `_lcars_pod_id`
-  sur le fil pour le récupérer via `get_task`). `wake_pod/1` ne fait QUE le
-  trigger (flag + yop-fallback) — la task doit être en file AVANT. Le CONTENU
-  passe TOUJOURS par MCP, jamais par le texte injecté.
+  #5.2 — `wake_pod` n'est QUE *trigger + armement du filet* : il touche le flag (porteur), puis ARME (cast)
+  la boucle ack-driven du Pod (`:arm_kick` — le FALLBACK : send-keys `"wake"` UNIQUEMENT si le pull n'arrive
+  pas) + ré-arme la deadline de RÉPONSE (`:rearm_deadline`, F112). Il ne fait **plus** de send-keys lui-même.
+
+  Pré-requis : le caller a déjà enqueué le mandat dans `Fleet.TaskQueue` (ciblé `pod_id` ; le pod s'identifie
+  par `_lcars_pod_id` sur le fil) AVANT l'appel. Le CONTENU passe TOUJOURS par MCP (`get_task`), jamais par
+  le texte injecté.
 
   Use-cases :
-    - pipeline `standard-qa` : après findings reviewer/gatekeeper, push
-      task corrective + wake_pod(engineer_pod_id) → cycle 11.0 boucle.
-    - starfleet/fleet_pilot : nouveau ticket assigné au même pod long-
-      lived (mandat actif) → push + wake.
+    - pipeline `standard-qa` : après findings reviewer/gatekeeper, push task corrective + wake_pod(eng) ;
+    - starfleet/fleet_pilot : nouveau ticket assigné au même pod long-lived → push + wake.
 
-  Renvoie :
-    - `:ok` — send-keys exécuté.
-    - `{:error, :not_found}` — pod_id inconnu (jamais spawn ou déjà kill).
-    - `{:error, :not_a_tmux_pod}` — pod existe mais sans session tmux (StubBackend)
-      → pas de tmux_session pour send-keys. (L'atom est historique : LauncherPortBackend
-      pose toujours un tmux_session, bwrap comme host.)
-    - `{:error, term}` — erreur send-keys tmux (session morte côté tmux,
-      etc.).
+  Renvoie — signale UNIQUEMENT si le trigger a pu PARTIR ; le wake RÉEL est ASYNC :
+    - `:ok` — flag touché + boucle & deadline armées. **N'affirme PAS que l'agent s'est réveillé** : le
+      succès réel = l'ACK (pull) observé par la boucle ; un wake qui ne prend jamais → la boucle escalade au
+      cap (`wake.failed` → `:sp_suspect`).
+    - `{:error, :not_found}` — pod_id inconnu/mort (jamais spawn, déjà kill, ou pid mourant).
+    - `{:error, :not_a_tmux_pod}` — pod sans session tmux (StubBackend des tests ; en prod le backend pose
+      toujours un tmux_session, bwrap comme host).
+
+  Les deux `{:error, _}` = échec STRUCTUREL (on n'a même pas pu trigger) → le caller (cf. `WakeRecovery`)
+  re-roll/escalade. 2e voie, complémentaire de l'escalade async de la boucle (no-ACK).
   """
-  @spec wake_pod(String.t()) :: :ok | {:error, term()}
+  @spec wake_pod(String.t()) :: :ok | {:error, :not_found | :not_a_tmux_pod}
   def wake_pod(pod_id) when is_binary(pod_id) do
     case pod_info(pod_id) do
       {:ok, %{tmux_session: session} = info} when is_binary(session) ->
