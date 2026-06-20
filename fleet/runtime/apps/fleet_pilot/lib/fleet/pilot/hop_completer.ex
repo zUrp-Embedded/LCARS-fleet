@@ -131,10 +131,17 @@ defmodule Fleet.Pilot.HopCompleter do
     # verdict gatekeeper attribué + halt_invalid distingué). Absent → corps par défaut.
     lead =
       Map.get(hop, :comment_body) ||
-        "Verdict du juge **#{role}** : `#{inspect(decision)}` → escalade humaine."
+        "Verdict du juge **#{role}** : `#{inspect(decision)}`."
 
+    # #5.2 — ADRESSÉ à l'arch (le sas unique vers l'humain ; l'humain n'a pas d'autre canal vers la fleet).
+    # L'arch reprend le mandat (corrige + re-soumet) ou tranche avec son humain. PAS de re-assign (assignee
+    # = humain owner, DN §1) : l'arch query son inbox `lcars-awaits-arch` ; l'issue reste hors-dispatch.
     body =
-      lead <> " L'issue attend une action via l'arch (`lcars-awaits-arch`).\n\n" <> signature
+      "**Architecte** (auteur du mandat) — " <>
+        lead <>
+        "\n\nReprends ce mandat : corrige-le puis re-soumets (relance le cycle), ou tranche avec ton humain " <>
+        "(il n'a pas d'autre canal vers la fleet que toi). L'issue reste hors-dispatch tant que " <>
+        "`lcars-awaits-arch` est posé.\n\n" <> signature
 
     with {:ok, _} <-
            forge.post_comment(repo, n, body, Keyword.put(forge_opts, :dedup_signature, signature)),

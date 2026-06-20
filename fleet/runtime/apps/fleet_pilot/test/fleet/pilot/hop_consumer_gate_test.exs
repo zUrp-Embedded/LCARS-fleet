@@ -299,9 +299,14 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert_received :closed
     refute_received {:publish, _}
     refute_received {:assignee, _}
+
+    # #5.2 — abandon NOTIFIE l'arch (sas user) : kick + commentaire adressé-arch (pas d'enterrement muet).
+    assert_received {:wake, "permanent-architect"}
+    assert_received {:comment, abody}
+    assert abody =~ "Architecte"
   end
 
-  test "verdict escalate_user -> await_arch (lcars-awaits-arch + unlock, pas close/reassign)" do
+  test "verdict escalate_user -> await_arch (lcars-awaits-arch + unlock, pas close/reassign) + KICK arch" do
     assert {:ok, :awaiting_arch} =
              HopConsumer.resume_gate(
                soft_ctx(),
@@ -316,6 +321,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert_received {:comment, body}
     assert body =~ "gatekeeper"
     assert body =~ "escalate_user"
+
+    # #5.2 — commentaire ADRESSÉ à l'arch (sas unique) + KICK actif (l'arch arme son monitor au spawn).
+    assert body =~ "Architecte"
+    assert_received {:wake, "permanent-architect"}
   end
 
   test "verdict halt_wait_input -> await_arch" do

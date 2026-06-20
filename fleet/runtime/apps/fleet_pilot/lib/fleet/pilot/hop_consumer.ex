@@ -400,9 +400,14 @@ defmodule Fleet.Pilot.HopConsumer do
 
     hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
 
-    run_completion(state, "##{n} (blocked)", fn ->
-      state.hop_completer.await_arch(hop, hc_opts)
-    end)
+    result =
+      run_completion(state, "##{n} (blocked)", fn ->
+        state.hop_completer.await_arch(hop, hc_opts)
+      end)
+
+    # #5.2 — KICK l'arch : un producteur bloqué = l'arch (auteur du mandat) doit débloquer (clarifier/corriger).
+    _ = kick_architect(state)
+    result
   end
 
   # F067 : exécute la complétion d'un hop via le seam `hop_runner`. SYNC (défaut) → exécute, logge
@@ -831,6 +836,37 @@ defmodule Fleet.Pilot.HopConsumer do
     )
   end
 
+  # #5.2 — NOTIFIE l'arch (sas UNIQUE vers l'humain) qu'un verdict (escalate/abandon) ou un blocage requiert
+  # son attention. KICK best-effort via le wake UNIVERSEL (`wake_pod` : flag PORTEUR/MCP → fallback send-keys
+  # → log ; tout pod arme son Monitor au spawn). **PAS de reboot** : l'arch est la SESSION de l'humain, jamais
+  # kill/relancée par la fleet (un arch injoignable = l'humain relance SA session, pas nous) — d'où PAS de
+  # `WakeRecovery.wake` (qui porte un respawn). Échec wake → log-loud, non-bloquant (le label `lcars-awaits-arch`
+  # + le commentaire adressé-arch restent ; l'arch query son inbox au prochain tour).
+  defp kick_architect(state) do
+    pod_id = architect_pod_id()
+
+    case state.spawner.wake_pod(pod_id) do
+      :ok ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "HopConsumer: kick arch #{pod_id} → #{inspect(other)} (arch injoignable ? l'humain relance sa " <>
+            "session — la fleet ne reboot PAS l'arch ; label+commentaire restent)"
+        )
+
+        :ok
+    end
+  rescue
+    e ->
+      Logger.warning("HopConsumer: kick arch a levé #{inspect(e)} (non-bloquant)")
+      :ok
+  end
+
+  # Pod id de l'arch permanent (sas user) — config, défaut "permanent-architect" (id déterministe).
+  defp architect_pod_id,
+    do: Application.get_env(:fleet_pilot, :architect_pod_id, "permanent-architect")
+
   @doc false
   # B (§L441) — reprise après le verdict du gatekeeper. Exposé pour test (le GenServer
   # appelle via handle_info(:task_completed)). `raw_payload` = payload brut du
@@ -887,11 +923,19 @@ defmodule Fleet.Pilot.HopConsumer do
         end
 
       "abandon" ->
-        close_with_trace(n, role, trace, state)
+        # #5.2 — NE PAS enterrer en silence : le commentaire de close est ADRESSÉ à l'arch (auteur du mandat)
+        # + on KICKE l'arch (sas unique vers l'humain) → l'auteur APPREND que son mandat a été jeté.
+        arch_trace =
+          "**Architecte** (auteur du mandat) — mandat ABANDONNÉ par le juge. " <>
+            trace <> " (Non récupérable ; re-crée un mandat corrigé si besoin.)"
+
+        result = close_with_trace(n, role, arch_trace, state)
+        _ = kick_architect(state)
+        result
 
       other ->
         # `comment_body: trace` → la trace verdict (attribuée au juge via son label, halt_invalid
-        # distingué) est portée sur le comment await_arch, parité continue/abandon.
+        # distingué) est portée sur le comment await_arch (qui l'adresse à l'arch), parité continue/abandon.
         hop = %{
           repo: state.repo,
           issue_number: n,
@@ -902,9 +946,14 @@ defmodule Fleet.Pilot.HopConsumer do
 
         hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
 
-        run_completion(state, "##{n}", fn ->
-          state.hop_completer.await_arch(hop, hc_opts)
-        end)
+        result =
+          run_completion(state, "##{n}", fn ->
+            state.hop_completer.await_arch(hop, hc_opts)
+          end)
+
+        # #5.2 — KICK l'arch (notification active : il arme son monitor au spawn comme tout pod). Best-effort.
+        _ = kick_architect(state)
+        result
     end
   end
 
