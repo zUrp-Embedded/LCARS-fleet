@@ -765,20 +765,15 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
-  # KICK le gatekeeper après l'enqueue. Pod PERMANENT déjà booté+idle (:monitoring) : son
-  # kick-loop de boot est fini, ce mandat arrive APRÈS → sans wake il ne pull jamais (gate
-  # qui stalle). Best-effort (jumeau Executor) : le mandat est enqueué quoi qu'il arrive ;
-  # wake raté → warn (le gatekeeper, déjà ready, le reçoit normalement).
+  # KICK le gatekeeper après l'enqueue. Pod PERMANENT déjà booté+idle (:monitoring) : son kick-loop de
+  # boot est fini, ce mandat arrive APRÈS → sans wake il ne pull jamais (gate qui stalle). #5.2 : un wake
+  # raté = panne FLEET (pod injoignable), PAS un pb projet → re-roll (reboot du gatekeeper) au 1er fail,
+  # escalade système → starfleet au 2e. Plus de warn-et-oublie ici (le gatekeeper est un juge, pas un
+  # sysadmin : il ne peut rien faire d'une erreur système).
   defp kick_gatekeeper(state, pod_id) do
-    case state.spawner.wake_pod(pod_id) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning(
-          "HopConsumer gate kick gatekeeper=#{inspect(pod_id)} failed: #{inspect(reason)}"
-        )
-    end
+    Fleet.Pilot.WakeRecovery.wake(pod_id, fn -> Fleet.Pipeline.Gatekeeper.reboot() end,
+      wake_fun: fn p -> state.spawner.wake_pod(p) end
+    )
   end
 
   @doc false

@@ -198,8 +198,21 @@ defmodule Fleet.Pilot.StageDispatcher do
                    spawn_opts
                  ),
                :ok <- enqueue_mandate(task_queue, pod_id, role, number, mandate) do
-            # Wake (flag Monitor + yop-fallback) : le pod (frais OU re-mandaté) pull le mandat via get_task.
-            _ = safe_wake(spawner, pod_id)
+            # Wake + recovery (#5.2) : re-roll (re-spawn worker) au 1er fail, escalade système au 2e.
+            _ =
+              Fleet.Pilot.WakeRecovery.wake(
+                pod_id,
+                fn ->
+                  maybe_spawn(
+                    spawner,
+                    false,
+                    profile,
+                    Fleet.Pilot.TicketId.compose(number),
+                    spawn_opts
+                  )
+                end,
+                wake_fun: fn p -> safe_wake(spawner, p) end
+              )
 
             Logger.info(
               "StageDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} issue=#{repo}##{number} " <>
@@ -411,7 +424,21 @@ defmodule Fleet.Pilot.StageDispatcher do
                spawn_opts
              ),
            :ok <- enqueue_mandate(task_queue, pod_id, role, issue_n, mandate) do
-        _ = safe_wake(spawner, pod_id)
+        # Wake + recovery (#5.2) : re-roll (re-spawn worker) au 1er fail, escalade système au 2e.
+        _ =
+          Fleet.Pilot.WakeRecovery.wake(
+            pod_id,
+            fn ->
+              maybe_spawn(
+                spawner,
+                false,
+                profile,
+                Fleet.Pilot.TicketId.compose(issue_n),
+                spawn_opts
+              )
+            end,
+            wake_fun: fn p -> safe_wake(spawner, p) end
+          )
 
         Logger.info(
           "StageDispatcher: review-#{disposition(alive_before?)} role=#{role} pod=#{pod_id} pr=#{repo}##{pr_number} issue=##{issue_n}"

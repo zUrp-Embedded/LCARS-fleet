@@ -70,6 +70,19 @@ defmodule Fleet.Pipeline.Gatekeeper do
     end
   end
 
+  @doc """
+  Reboot du gatekeeper permanent : reap le holder survivant (cas ghost), dé-registre, re-boote frais.
+  Sert de `respawn_fun` au re-roll de `Fleet.Pilot.WakeRecovery` quand le gatekeeper est injoignable
+  (#5.2 — `ensure_booted` seul ne suffit pas : présence-based, il no-op sur un pod registré-mais-cassé).
+  Mêmes returns que `ensure_booted/1`.
+  """
+  @spec reboot(keyword()) :: {:ok, String.t() | :disabled} | {:error, term()}
+  def reboot(opts \\ []) when is_list(opts) do
+    _ = Fleet.Spawner.PodTmux.kill_holder(@pod_id)
+    _ = :persistent_term.erase(@pt_key)
+    ensure_booted(opts)
+  end
+
   defp boot(opts) do
     loader = Keyword.get(opts, :loader, &Fleet.CapProfile.load/1)
     spawner = Keyword.get(opts, :spawner, &Fleet.Spawner.spawn_pod/3)
