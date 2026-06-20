@@ -54,6 +54,9 @@ defmodule Fleet.Pilot.Poller do
   defstruct [
     :repo,
     :interval_ms,
+    # #5.2 D1 — l'humain de CETTE fleet (OS user, `Human.current!()`). Scoping multi-user : on ne dispatche
+    # QUE ses tickets (sinon le poller d'Alice spawne pour Bob). Seam test : opt `:human`.
+    :my_human,
     :forge_client_override,
     stage_dispatch?: false,
     forge_opts: [],
@@ -125,6 +128,9 @@ defmodule Fleet.Pilot.Poller do
       {:ok, repo} when is_binary(repo) and repo != "" ->
         state = %__MODULE__{
           repo: repo,
+          # #5.2 D1 — scoping multi-user. Seam test : `:human` ; prod : `Human.current!()` (fail-loud — un
+          # poller qui ne sait pas QUI il est ne peut pas scoper sûrement).
+          my_human: Keyword.get(opts, :human) || Fleet.Credentials.Human.current!(),
           interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
           forge_client_override: Keyword.get(opts, :forge_client),
           stage_dispatch?: Keyword.get(opts, :stage_dispatch?, false),
@@ -581,6 +587,7 @@ defmodule Fleet.Pilot.Poller do
   defp stage_dispatch_opts(state) do
     [
       repo: state.repo,
+      human: state.my_human,
       forge_client: stage_forge_client(state),
       forge_opts: state.forge_opts
     ]

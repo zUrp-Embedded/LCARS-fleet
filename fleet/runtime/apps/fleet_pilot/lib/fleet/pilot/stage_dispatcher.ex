@@ -50,40 +50,48 @@ defmodule Fleet.Pilot.StageDispatcher do
   `CapProfile.load/1`. F075 : le profil chargé pour décider est THREADÉ dans `{:spawn, …}` et réutilisé
   au spawn par `dispatch_issue` (fin du double-load sonde+reload).
   """
-  @spec decide(map(), (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()})) ::
+  @spec decide(map(), String.t(), (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()})) ::
           decision()
-  def decide(payload, load_role \\ &default_load_role/1) when is_map(payload) do
+  def decide(payload, my_human, load_role \\ &default_load_role/1)
+      when is_map(payload) and is_binary(my_human) do
     issue = Map.get(payload, "issue", payload)
     labels = Enum.map(Map.get(issue, "labels", []), & &1["name"])
     assignees = Map.get(issue, "assignees") || []
 
     cond do
+      # #5.2 D1 — scoping multi-user : on ne traite QUE les tickets assignés à MON humain (l'OS user qui a
+      # lancé cette fleet). Sinon le poller d'Alice spawnerait pour les tickets de Bob. « pas à moi » (autre
+      # OU aucun assignee) = on n'y touche pas. Garde de CORRECTION (vraie même si le filtre forge [1b] rate).
+      not assigned_to_me?(assignees, my_human) ->
+        {:skip, :foreign}
+
       @in_flight_label in labels ->
         {:skip, :in_flight}
 
-      # A2.3b : verrou HUMAIN (verdict gatekeeper escalate/halt/redirect, ou anomalie A2.6).
-      # L'issue attend une action via l'arch ; le poller NE re-dispatche PAS (sinon, après
-      # l'unlock de `await_human`, l'assignee=gatekeeper relancerait un jugement en boucle).
+      # A2.3b : verrou HUMAIN (verdict gatekeeper escalate/halt/redirect, ou anomalie A2.6). L'issue attend
+      # une action via l'arch ; le poller NE re-dispatche PAS (sinon boucle de jugement après l'unlock).
       @awaits_human_label in labels ->
         {:skip, :awaits_human}
 
-      assignees == [] ->
-        {:skip, :no_assignee}
-
       true ->
-        # Forge-state-machine (DN §1) : un ticket assigné (à l'humain owner), non verrouillé → on
-        # spawn le rôle PRODUCTEUR du catalogue. Il est INVARIANT (« seule cible des tickets code =
-        # l'eng ») → `:producer_role` (config, défaut "engineer"), jamais un marqueur par-ticket.
+        # Forge-state-machine (DN §1) : ticket à MOI, non verrouillé → spawn le rôle PRODUCTEUR du
+        # catalogue (`:producer_role`, défaut "engineer", invariant — jamais un marqueur par-ticket).
         role = producer_role()
 
-        # F075 : on charge le cap-profile UNE fois ici (la décision EN dépend) et on le threade —
-        # `dispatch_issue` le réutilise au spawn au lieu de recharger. load-error → :no_role.
+        # F075 : cap-profile chargé UNE fois (la décision en dépend) + threadé → réutilisé au spawn.
         with {:ok, profile} <- load_role.(role) do
           {:spawn, role, profile}
         else
           _ -> {:skip, :no_role}
         end
     end
+  end
+
+  # Gitea matche l'assignee insensible à la casse (`starfleet` résout `Starfleet`) → comparaison downcase.
+  # « à moi » = mon login OS est l'un des assignees ; aucun assignee ⇒ false (pas pour la fleet).
+  defp assigned_to_me?(assignees, my_human) do
+    mine = String.downcase(my_human)
+    Enum.any?(assignees, fn a -> String.downcase(a["login"] || "") == mine end)
   end
 
   # Rôle producteur (DN §1, invariant) : `:producer_role` (config, data catalogue), défaut "engineer".
@@ -112,7 +120,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     # #8 : chargeur de carte injectable (seam, comme les autres) — rend `carte_role` testable sans disque.
     carte_loader = Keyword.get(opts, :carte_loader, &Fleet.Pipeline.Loader.load!/1)
 
-    case decide(payload, &loader.load/1) do
+    case decide(payload, Keyword.fetch!(opts, :human), &loader.load/1) do
       {:skip, reason} ->
         {:skipped, reason}
 

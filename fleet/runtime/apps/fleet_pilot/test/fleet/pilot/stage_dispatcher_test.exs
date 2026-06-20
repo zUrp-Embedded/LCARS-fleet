@@ -3,6 +3,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
   alias Fleet.Pilot.StageDispatcher
 
+  # #5.2 D1 — l'humain de cette fleet (= l'assignee de `eng_issue`). Le scoping ne dispatche QUE ses tickets.
+  @me "lordzurp"
+
   # F075 : decide reçoit un LOADER ({:ok, profile} | {:error, _}). Stub : rôles connus → profil minimal.
   defp load_role(role) when role in ["engineer", "qualifier", "reviewer"],
     do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
@@ -26,35 +29,44 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     issue(Map.merge(%{"assignees" => [%{"login" => "lordzurp"}]}, fields))
   end
 
-  describe "decide/2 (pure)" do
-    test "issue assignée (humain) → {:spawn, producteur} (engineer par défaut)" do
-      assert {:spawn, "engineer", _} = StageDispatcher.decide(eng_issue(), &load_role/1)
+  describe "decide/3 (pure, scoping multi-user)" do
+    test "issue assignée à MOI → {:spawn, producteur} (engineer par défaut)" do
+      assert {:spawn, "engineer", _} = StageDispatcher.decide(eng_issue(), @me, &load_role/1)
     end
 
     test "le rôle spawné est le PRODUCTEUR (invariant), pas l'assignee (= l'humain)" do
-      # l'assignee n'est PAS le rôle ; quel que soit l'owner, on spawn le producteur (engineer).
-      payload = issue(%{"assignees" => [%{"login" => "anyone"}]})
-      assert {:spawn, "engineer", _} = StageDispatcher.decide(payload, &load_role/1)
+      # l'assignee (mon humain) n'est PAS le rôle ; on spawn le producteur (engineer), pas "lordzurp".
+      assert {:spawn, "engineer", _} = StageDispatcher.decide(eng_issue(), @me, &load_role/1)
+    end
+
+    test "D1 — assignée à un AUTRE humain → {:skip, :foreign} (pas de vol cross-fleet)" do
+      payload = issue(%{"assignees" => [%{"login" => "bob"}]})
+      assert {:skip, :foreign} = StageDispatcher.decide(payload, @me, &load_role/1)
+    end
+
+    test "D1 — aucun assignee → {:skip, :foreign} (pas pour la fleet)" do
+      assert {:skip, :foreign} = StageDispatcher.decide(issue(%{}), @me, &load_role/1)
+    end
+
+    test "D1 — match assignee INSENSIBLE à la casse (Gitea)" do
+      payload = issue(%{"assignees" => [%{"login" => "LordZurp"}]})
+      assert {:spawn, "engineer", _} = StageDispatcher.decide(payload, @me, &load_role/1)
     end
 
     test "verrou lcars-in-flight présent → {:skip, :in_flight}" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}]})
-      assert {:skip, :in_flight} = StageDispatcher.decide(payload, &load_role/1)
+      assert {:skip, :in_flight} = StageDispatcher.decide(payload, @me, &load_role/1)
     end
 
     test "verrou HUMAIN lcars-awaits-human → {:skip, :awaits_human} (A2.3b, pas de re-dispatch)" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-awaits-human"}]})
-      assert {:skip, :awaits_human} = StageDispatcher.decide(payload, &load_role/1)
-    end
-
-    test "pas d'assignee (pas d'humain owner) → {:skip, :no_assignee}" do
-      assert {:skip, :no_assignee} = StageDispatcher.decide(issue(%{}), &load_role/1)
+      assert {:skip, :awaits_human} = StageDispatcher.decide(payload, @me, &load_role/1)
     end
 
     test "cap-profile producteur illisible → {:skip, :no_role}" do
       # loader qui échoue pour le rôle producteur → :no_role (pas de spawn à l'aveugle).
       failing_load = fn _role -> {:error, :not_found} end
-      assert {:skip, :no_role} = StageDispatcher.decide(eng_issue(), failing_load)
+      assert {:skip, :no_role} = StageDispatcher.decide(eng_issue(), @me, failing_load)
     end
   end
 
@@ -203,6 +215,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     Keyword.merge(
       [
         repo: "lordzurp/lcars-test",
+        human: @me,
         forge_client: StubForge,
         loader: StubLoader,
         spawner: StubSpawner,

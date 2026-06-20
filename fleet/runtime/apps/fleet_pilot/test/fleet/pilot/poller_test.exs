@@ -133,6 +133,7 @@ defmodule Fleet.Pilot.PollerTest do
       Poller.start_link(
         name: name,
         repo: "lordzurp/lcars-test",
+        human: "lordzurp",
         start_tick?: false,
         stage_dispatch?: true,
         forge_client: StageStubForge,
@@ -177,7 +178,7 @@ defmodule Fleet.Pilot.PollerTest do
           "number" => 8,
           "body" => "x",
           "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "Engineer"}]
+          "assignees" => [%{"login" => "lordzurp"}]
         }
       ]
 
@@ -196,7 +197,7 @@ defmodule Fleet.Pilot.PollerTest do
           "number" => 8,
           "body" => "x",
           "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "Engineer"}]
+          "assignees" => [%{"login" => "lordzurp"}]
         }
       ]
 
@@ -259,6 +260,7 @@ defmodule Fleet.Pilot.PollerTest do
         Poller.start_link(
           name: name,
           repo: "lordzurp/lcars-test",
+          human: "lordzurp",
           start_tick?: false,
           stage_dispatch?: true,
           forge_client: StageStubForge,
@@ -291,6 +293,7 @@ defmodule Fleet.Pilot.PollerTest do
         Poller.start_link(
           name: name,
           repo: "lordzurp/lcars-test",
+          human: "lordzurp",
           start_tick?: false,
           stage_dispatch?: true,
           forge_client: StageStubForge,
@@ -405,7 +408,7 @@ defmodule Fleet.Pilot.PollerTest do
           "number" => 99,
           "body" => "x",
           "labels" => [],
-          "assignees" => [%{"login" => "Engineer"}]
+          "assignees" => [%{"login" => "lordzurp"}]
         }
       ]
 

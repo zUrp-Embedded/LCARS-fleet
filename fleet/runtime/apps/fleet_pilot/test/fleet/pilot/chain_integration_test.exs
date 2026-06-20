@@ -294,6 +294,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   defp dispatch_opts do
     [
       repo: "o/r",
+      # #5.2 D1 — scoping multi-user : l'humain de cette fleet = l'assignee des fixtures ("human").
+      human: "human",
       forge_client: SimForge,
       loader: CapLoader,
       # #8 (piece 1) : carte_role dérive le rôle de la POSITION carte → il faut le loader de CARTE
