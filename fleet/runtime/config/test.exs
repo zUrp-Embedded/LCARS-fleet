@@ -36,7 +36,7 @@ config :fleet_starfleet, start_mcp_watcher: false
 config :fleet_starfleet, start_mcp_monitor: false
 config :fleet_spawner, start_publish_consumer: false
 # BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
-config :fleet_spawner, start_orphan_reaper: false
+config :fleet_spawner, start_pod_warden: false
 
 # fleet_pilot hermétisme test : le mode stage est OFF par défaut (`:stage_dispatch?` absent →
 # `stage_children` = [] → app inerte, pas de Poller/HopConsumer parasite). Le knob legacy

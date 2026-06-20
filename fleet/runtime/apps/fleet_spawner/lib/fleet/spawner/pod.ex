@@ -1141,8 +1141,8 @@ defmodule Fleet.Spawner.Pod do
     # #2 (2026-06-18) : retire le sock-dir APRÈS le kill. Le kill est PROUVÉ FIABLE live (terminate_pod_port
     # ET kill_holder tuent claude+namespace, dissection 2 probes 2026-06-18) → la garde « ne pas retirer le
     # sock-dir tant que le kill n'est pas sûr » du chantier précédent est levée. Sans ça, le sock-dir traînait
-    # après un teardown gracieux → l'OrphanReaper le ramassait ~60s plus tard en loguant un FAUX « orphelin
-    # persistant » (bruit qui masque les vrais). L'OrphanReaper reste le filet des VRAIS orphelins (GenServer
+    # après un teardown gracieux → le PodWarden le ramassait ~60s plus tard en loguant un FAUX « orphelin
+    # persistant » (bruit qui masque les vrais). L'PodWarden reste le filet des VRAIS orphelins (GenServer
     # crashé → teardown jamais exécuté → sock-dir + claude survivent → reap). Gardé `tmux_session` : pods réels
     # (bwrap/host), pas StubBackend (sock_path nominal, rm_rf no-op de toute façon).
     if is_binary(state.tmux_session) do

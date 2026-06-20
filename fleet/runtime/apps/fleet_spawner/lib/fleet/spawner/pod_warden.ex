@@ -1,4 +1,4 @@
-defmodule Fleet.Spawner.OrphanReaper do
+defmodule Fleet.Spawner.PodWarden do
   @moduledoc """
   Reaper PÉRIODIQUE des pods orphelins (BL-036b, dogfood F7). Complète le reap-on-(re)launch
   (`Fleet.Spawner.Pod.reap_orphan_pod/1`, BL-036) qui ne couvre QUE le re-spawn : ici on attrape les
@@ -15,7 +15,13 @@ defmodule Fleet.Spawner.OrphanReaper do
   cours de boot). Le reap réutilise le mécanisme prouvé live (tmux kill-server + pkill `pod_id` +
   nettoyage du sock-dir).
 
-  Gaté `:start_orphan_reaper` (défaut true prod, false test).
+  Gaté `:start_pod_warden` (défaut true prod, false test).
+
+  ## Rôle 2 — compteur d'échecs de wake (#5.2)
+
+  Owne aussi la table ETS du **compteur d'échecs de wake** par pod (santé-pod, support du re-roll/escalade
+  de `wake_pod`). Owner naturel : longue-durée, **survit aux pods** (on compte même un pod `:not_found`),
+  même domaine (anomalie de cycle de vie). API : `note_wake_fail/1` · `clear_wake_fail/1` · `wake_fail_count/1`.
   """
 
   use GenServer
@@ -24,11 +30,15 @@ defmodule Fleet.Spawner.OrphanReaper do
   alias Fleet.Spawner.PodTmux
 
   @default_interval_ms 60_000
+  @table :fleet_wake_failures
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @impl true
-  def init(_opts), do: {:ok, %{suspects: MapSet.new()}, {:continue, :schedule}}
+  def init(_opts) do
+    _ = ensure_table()
+    {:ok, %{suspects: MapSet.new()}, {:continue, :schedule}}
+  end
 
   @impl true
   def handle_continue(:schedule, state) do
@@ -61,12 +71,54 @@ defmodule Fleet.Spawner.OrphanReaper do
   end
 
   # ============================================================
+  # Compteur d'échecs de wake (rôle 2 — santé-pod, #5.2). Table ETS PUBLIQUE nommée, créée+owned par ce
+  # GenServer (donc survit aux pods → on compte même un pod `:not_found`). Accès direct atomique depuis le
+  # process appelant (le wrapper recovery, fleet_pilot) — State (ETS) ⊥ Behavior (fonctions). Dégrade si la
+  # table n'existe pas (PodWarden gaté off en test/opt-out) → traité comme 1er fail, sans persistance.
+  # ============================================================
+
+  @doc "Incrémente le compteur d'échecs de wake du pod, renvoie le nouveau total. Reset par clear_wake_fail/1."
+  @spec note_wake_fail(String.t()) :: pos_integer()
+  def note_wake_fail(pod_id) when is_binary(pod_id) do
+    if table?(), do: :ets.update_counter(@table, pod_id, {2, 1}, {pod_id, 0}), else: 1
+  end
+
+  @doc "Remet à zéro le compteur d'échecs de wake du pod (sur wake réussi)."
+  @spec clear_wake_fail(String.t()) :: :ok
+  def clear_wake_fail(pod_id) when is_binary(pod_id) do
+    if table?(), do: :ets.delete(@table, pod_id)
+    :ok
+  end
+
+  @doc "Compteur courant d'échecs de wake du pod (0 si aucun / table absente)."
+  @spec wake_fail_count(String.t()) :: non_neg_integer()
+  def wake_fail_count(pod_id) when is_binary(pod_id) do
+    with true <- table?(), [{^pod_id, n}] <- :ets.lookup(@table, pod_id) do
+      n
+    else
+      _ -> 0
+    end
+  end
+
+  defp ensure_table do
+    case :ets.whereis(@table) do
+      :undefined ->
+        :ets.new(@table, [:public, :named_table, read_concurrency: true, write_concurrency: true])
+
+      _ ->
+        @table
+    end
+  end
+
+  defp table?, do: :ets.whereis(@table) != :undefined
+
+  # ============================================================
   # I/O (le reap est le même mécanisme que Pod.reap_orphan_pod/1, prouvé live F7)
   # ============================================================
 
   defp reap(pod_id) do
     Logger.warning(
-      "OrphanReaper: pod #{pod_id} = orphelin persistant (sock vivante, aucun GenServer) — reap (BL-036b)"
+      "PodWarden: pod #{pod_id} = orphelin persistant (sock vivante, aucun GenServer) — reap (BL-036b)"
     )
 
     # Kill (tmux kill-server + pkill -f ancré) centralisé dans PodTmux.kill_holder/1 (F-034).
@@ -74,7 +126,7 @@ defmodule Fleet.Spawner.OrphanReaper do
     _ = File.rm_rf(Path.dirname(PodTmux.sock_path(pod_id)))
     :ok
   rescue
-    e -> Logger.warning("OrphanReaper reap #{pod_id} échec (non-bloquant): #{inspect(e)}")
+    e -> Logger.warning("PodWarden reap #{pod_id} échec (non-bloquant): #{inspect(e)}")
   end
 
   defp live_pod_ids do
@@ -102,5 +154,5 @@ defmodule Fleet.Spawner.OrphanReaper do
   end
 
   defp interval_ms,
-    do: Application.get_env(:fleet_spawner, :orphan_reaper_interval_ms, @default_interval_ms)
+    do: Application.get_env(:fleet_spawner, :pod_warden_interval_ms, @default_interval_ms)
 end

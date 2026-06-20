@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.Poller do
     # incrémentent `err_streak` (backoff partiel via `next_delay`) au lieu d'être noyées.
     last_tally_errors: 0,
     # Réconciliation verrou (B) : refs `{:issue|:pr, n}` vues ORPHELINES (verrou `lcars-in-flight`
-    # sans pod vivant) au tick précédent. Grace 2-tick (cf. OrphanReaper) → on ne réclame qu'au 2ᵉ
+    # sans pod vivant) au tick précédent. Grace 2-tick (cf. PodWarden) → on ne réclame qu'au 2ᵉ
     # tick consécutif (évite de déverrouiller un pod fraîchement dispatché ou en cours de mort).
     orphan_lock_suspects: MapSet.new()
   ]
@@ -334,7 +334,7 @@ defmodule Fleet.Pilot.Poller do
   # ── Réconciliation verrou orphelin (B, brique 2 du README) ────────────────────────────────────
   # Un verrou `lcars-in-flight` est ORPHELIN si la brique le porte mais qu'aucun pod vivant ne la
   # travaille. Cause : un pod mort (deadline `:result_timeout`, crash, restart BEAM) reapé par
-  # l'OrphanReaper — qui retire le PROCESS mais PAS le label forge. Symétrie cassée → le poller le
+  # le PodWarden — qui retire le PROCESS mais PAS le label forge. Symétrie cassée → le poller le
   # répare. Grace 2-tick (intersection avec les suspects du tick précédent) : on ne réclame qu'un
   # orphelin CONFIRMÉ, jamais un pod fraîchement dispatché (pas encore registré) ou en cours de mort.
   defp reconcile_orphan_locks(issues, pulls, pr_issue_ids, state, forge) do

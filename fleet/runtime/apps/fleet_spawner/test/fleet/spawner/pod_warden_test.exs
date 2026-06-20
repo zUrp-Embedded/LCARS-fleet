@@ -1,7 +1,7 @@
-defmodule Fleet.Spawner.OrphanReaperTest do
+defmodule Fleet.Spawner.PodWardenTest do
   use ExUnit.Case, async: true
 
-  alias Fleet.Spawner.OrphanReaper, as: R
+  alias Fleet.Spawner.PodWarden, as: R
 
   defp s(list), do: MapSet.new(list)
 

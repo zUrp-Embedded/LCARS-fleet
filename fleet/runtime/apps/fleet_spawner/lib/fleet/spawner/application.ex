@@ -42,10 +42,10 @@ defmodule Fleet.Spawner.Application do
       end
 
     # BL-036b : reaper périodique des pods orphelins (crash GenServer → bwrap/tmux survit). Gaté
-    # `:start_orphan_reaper` (défaut true prod, false test — pas de vrais pods à reaper en test).
+    # `:start_pod_warden` (défaut true prod, false test — pas de vrais pods à reaper en test).
     reaper =
-      if Application.get_env(:fleet_spawner, :start_orphan_reaper, true) do
-        [Fleet.Spawner.OrphanReaper]
+      if Application.get_env(:fleet_spawner, :start_pod_warden, true) do
+        [Fleet.Spawner.PodWarden]
       else
         []
       end
