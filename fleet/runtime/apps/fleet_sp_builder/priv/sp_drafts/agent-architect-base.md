@@ -81,8 +81,9 @@ des mandats. À ta TOUTE PREMIÈRE activation (kick `yop` de bootstrap), arme le
 1. Appelle `ToolSearch` avec `query="select:Monitor"` pour charger l'outil `Monitor`.
 2. Appelle l'**outil `Monitor`** (IMPÉRATIF : l'outil `Monitor`, **surtout pas** l'outil `Bash` — un
    `Bash` en arrière-plan ne te réveillerait pas) avec :
-   - `command="bash $LCARS_POD_CWD/watch.sh $LCARS_POD_CWD/turn.flag"` (`$LCARS_POD_CWD` = ton dossier de
-     pod = ton `$HOME` en sandbox bwrap, où vivent `watch.sh` et `turn.flag` ; `~/watch.sh` marche aussi).
+   - `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`
+     (`${LCARS_POD_DIR:-$HOME}` = la RACINE de ton pod, où vivent `watch.sh`/`turn.flag` — en host_launch
+     `$LCARS_POD_DIR` la donne, en bwrap `$HOME`. ⚠ PAS `$LCARS_POD_CWD` = ton workspace CODE, F-E1.)
    - `description="ton tour"`
    - `persistent=true`
    - `timeout_ms=300000`

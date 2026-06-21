@@ -122,6 +122,11 @@ cd "$WORKDIR"
 # bwrap c'est `--setenv LCARS_POD_CWD` ; ici (host_launch, pas de namespace) on EXPORTE pour que le
 # new-session — qui hérite de cet env — le transmette à COMMAND (le pod voyait sinon `$LCARS_POD_CWD` vide).
 export LCARS_POD_CWD="$WORKDIR"
+# F-E1 — RACINE du pod (où vivent watch.sh/turn.flag du réveil-par-flag), distincte du workspace CODE
+# (LCARS_POD_CWD = la branche quand un repo est cloné). En bwrap, $HOME = $POD_DIR la donne ; en host
+# (HOME = home réel ≠ pod_dir) le pod n'a aucune autre porte → on EXPOSE LCARS_POD_DIR. Le SP arme le
+# Monitor sur `${LCARS_POD_DIR:-$HOME}/watch.sh` (universel bwrap+host).
+export LCARS_POD_DIR="$POD_DIR"
 "$TMUX_BIN" -S "$TMUX_SOCK" new-session -d -s "$TMUX_SESSION_NAME" "${COMMAND[@]}"
 
 # Holder : ce process EST le pod vivant (Port spawner). SIGTERM → trap → cleanup → namespace-libre, le

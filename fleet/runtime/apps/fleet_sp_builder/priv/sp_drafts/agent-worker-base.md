@@ -56,8 +56,10 @@ première activation**, puis attends :
 1. Appelle `ToolSearch` avec `query="select:Monitor"` pour charger l'outil `Monitor`.
 2. Appelle l'**outil `Monitor`** (IMPÉRATIF : l'outil `Monitor`, **surtout pas**
    l'outil `Bash`) avec :
-   - `command="bash $LCARS_POD_CWD/watch.sh $LCARS_POD_CWD/turn.flag"` (`$LCARS_POD_CWD` = ton dossier de
-     pod, où vivent `watch.sh`/`turn.flag` ; universel bwrap **et** host_launch — `~` ne marche qu'en bwrap)
+   - `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`
+     (`${LCARS_POD_DIR:-$HOME}` = la RACINE de ton pod, où vivent `watch.sh`/`turn.flag`. Universel : en
+     bwrap `$HOME` EST ta racine pod ; en host_launch `$LCARS_POD_DIR` la donne. ⚠ surtout PAS
+     `$LCARS_POD_CWD` — c'est ton workspace CODE quand un repo est cloné, `watch.sh` n'y est PAS, F-E1.)
    - `description="ton tour"`
    - `persistent=true`
    - `timeout_ms=300000`
