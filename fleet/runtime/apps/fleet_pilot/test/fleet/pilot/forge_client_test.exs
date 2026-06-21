@@ -51,6 +51,67 @@ defmodule Fleet.Pilot.ForgeClientTest do
     ]
   end
 
+  describe "collaborator?/3" do
+    test "204 → true, 404 → false" do
+      h = %{
+        {"GET", "/api/v1/repos/fleet/a/collaborators/bob"} => {204, ""},
+        {"GET", "/api/v1/repos/fleet/b/collaborators/bob"} => {404, %{}}
+      }
+
+      assert ForgeClient.collaborator?("fleet/a", "bob", opts(h))
+      refute ForgeClient.collaborator?("fleet/b", "bob", opts(h))
+    end
+  end
+
+  describe "last_worked_repo/2 — défaut create_ticket (dernier travaillé, scopé collaborateur)" do
+    test "tri client-side par updated_at desc + filtre collaborateur (le plus récent non-collab est écarté)" do
+      # Input volontairement DANS LE DÉSORDRE + le plus récent (poc-old, 23:00) est NON-collaborateur.
+      # Attendu : tri desc → [poc-old, alpha, beta] ; poc-old écarté (404) → alpha (22:38, le 1er collab).
+      # (Isole le tri : alpha est APRÈS beta dans l'input mais plus récent → sans tri on rendrait beta.)
+      issues = [
+        %{"updated_at" => "2026-06-21T22:05:44Z", "repository" => %{"full_name" => "fleet/beta"}},
+        %{
+          "updated_at" => "2026-06-21T22:38:04Z",
+          "repository" => %{"full_name" => "fleet/alpha"}
+        },
+        %{
+          "updated_at" => "2026-06-21T23:00:00Z",
+          "repository" => %{"full_name" => "fleet/poc-old"}
+        }
+      ]
+
+      h = %{
+        {"GET", "/api/v1/repos/issues/search"} => {200, issues},
+        {"GET", "/api/v1/repos/fleet/poc-old/collaborators/bob"} => {404, %{}},
+        {"GET", "/api/v1/repos/fleet/alpha/collaborators/bob"} => {204, ""},
+        {"GET", "/api/v1/repos/fleet/beta/collaborators/bob"} => {204, ""}
+      }
+
+      assert {:ok, "fleet/alpha"} = ForgeClient.last_worked_repo("bob", opts(h))
+    end
+
+    test "aucun repo collaborateur → :none (l'appelant retombe sur le fallback config)" do
+      issues = [
+        %{
+          "updated_at" => "2026-06-21T23:00:00Z",
+          "repository" => %{"full_name" => "fleet/poc-old"}
+        }
+      ]
+
+      h = %{
+        {"GET", "/api/v1/repos/issues/search"} => {200, issues},
+        {"GET", "/api/v1/repos/fleet/poc-old/collaborators/bob"} => {404, %{}}
+      }
+
+      assert :none = ForgeClient.last_worked_repo("bob", opts(h))
+    end
+
+    test "issue-search vide → :none" do
+      h = %{{"GET", "/api/v1/repos/issues/search"} => {200, []}}
+      assert :none = ForgeClient.last_worked_repo("bob", opts(h))
+    end
+  end
+
   describe "add_label/4 — happy paths" do
     test "ajoute le label par NOM (POST ; Gitea résout repo+org côté serveur)" do
       handlers = %{

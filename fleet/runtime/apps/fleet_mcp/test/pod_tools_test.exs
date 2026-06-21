@@ -136,6 +136,12 @@ defmodule Fleet.MCP.PodToolsTest do
       send(self(), {:add_label, repo, n, label, opts})
       {:ok, :added}
     end
+
+    # F-037 — défaut create_ticket (dernier projet travaillé). Configurable par test via `:test_last_worked`
+    # (défaut `:none` → resolve_target_repo retombe sur `:delegation_repo`).
+    def last_worked_repo(_human, _opts) do
+      Application.get_env(:fleet_mcp, :test_last_worked, :none)
+    end
   end
 
   describe "create_ticket (délégation arch → ticket forge prêt pour le poller)" do
@@ -178,6 +184,48 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["status"] == "ticket_created"
       assert result["ticket"] == "fleet/demo#77"
       assert result["assignee"] == human
+    end
+
+    test "F-037 — `project` EXPLICITE → l'issue est posée DANS ce repo (ignore last_worked + delegation)" do
+      # last_worked rendrait autre chose ; l'explicite prime.
+      Application.put_env(:fleet_mcp, :test_last_worked, {:ok, "fleet/worked"})
+      on_exit(fn -> Application.delete_env(:fleet_mcp, :test_last_worked) end)
+
+      assert {:ok, _, %{}} =
+               PodTools.handle_tool_call(
+                 "create_ticket",
+                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/explicit"},
+                 %{}
+               )
+
+      assert_received {:create_issue, "fleet/explicit", "T", "fais X", _opts}
+    end
+
+    test "F-037 — défaut (pas de `project`) = `last_worked_repo`, PAS `:delegation_repo`" do
+      Application.put_env(:fleet_mcp, :test_last_worked, {:ok, "fleet/worked"})
+      on_exit(fn -> Application.delete_env(:fleet_mcp, :test_last_worked) end)
+
+      assert {:ok, _, %{}} =
+               PodTools.handle_tool_call(
+                 "create_ticket",
+                 %{"title" => "T", "brief" => "fais X"},
+                 %{}
+               )
+
+      # delegation_repo = "fleet/demo" (setup) mais last_worked = "fleet/worked" → c'est worked qui gagne.
+      assert_received {:create_issue, "fleet/worked", "T", "fais X", _opts}
+    end
+
+    test "F-037 — last_worked `:none` → ultime fallback `:delegation_repo`" do
+      # test_last_worked non posé → StubForge rend :none → fallback delegation_repo "fleet/demo".
+      assert {:ok, _, %{}} =
+               PodTools.handle_tool_call(
+                 "create_ticket",
+                 %{"title" => "T", "brief" => "fais X"},
+                 %{}
+               )
+
+      assert_received {:create_issue, "fleet/demo", "T", "fais X", _opts}
     end
   end
 

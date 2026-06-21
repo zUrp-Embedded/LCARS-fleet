@@ -331,6 +331,54 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
+  `username` est-il collaborateur de `repo` ? Gitea `GET /repos/{repo}/collaborators/{username}` (204 = oui,
+  404 = non). `false` sur toute erreur (config/transport/404) — fail-safe (on ne défaut PAS sur un repo
+  inaccessible). Sert au scoping « projet par défaut = repos où l'humain est collaborateur » (create_ticket).
+  """
+  @spec collaborator?(String.t(), String.t(), Keyword.t()) :: boolean()
+  def collaborator?(repo, username, opts \\ []) when is_binary(repo) and is_binary(username) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, _} <- http_get(config, "/repos/#{repo}/collaborators/#{username}") do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  @doc """
+  Repo du **dernier ticket travaillé** par `human`, SCOPÉ aux repos où il est **collaborateur**. Sert de
+  projet par défaut quand l'arch appelle `create_ticket` sans `project` explicite (≠ « dernier créé », jugé
+  mauvais). Mécanique (vérifiée live Gitea :3000) : issue-search global `assigned_by=<human>` → tri
+  CLIENT-SIDE par `updated_at` desc (le `sort=` Gitea s'est révélé peu fiable) → 1ʳᵉ issue dont le repo passe
+  `collaborator?/3` (l'`assigned_by` seul inclut des repos non-collaborateur, ex. vieux tickets de test). `:none`
+  si rien (fleet neuve / forge down) → l'appelant retombe sur le fallback config `:delegation_repo`.
+  """
+  @spec last_worked_repo(String.t(), Keyword.t()) :: {:ok, String.t()} | :none
+  def last_worked_repo(human, opts \\ []) when is_binary(human) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, issues} <-
+           http_get(
+             config,
+             "/repos/issues/search?type=issues&state=all&limit=30&assigned_by=" <>
+               URI.encode_www_form(human)
+           ) do
+      issues
+      |> List.wrap()
+      |> Enum.sort_by(&(&1["updated_at"] || ""), :desc)
+      |> Enum.map(&get_in(&1, ["repository", "full_name"]))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.find(&collaborator?(&1, human, opts))
+      |> case do
+        repo when is_binary(repo) -> {:ok, repo}
+        nil -> :none
+      end
+    else
+      _ -> :none
+    end
+  end
+
+  @doc """
   Pose une règle de **branch-protection** sur `repo` — Gitea `POST /repos/{repo}/branch_protections`.
   `rule` = map d'options Gitea (`rule_name`, `required_approvals`, `dismiss_stale_approvals`,
   `block_on_rejected_reviews`, `enable_push`, …). C'est le **gate forge-enforcé** : sur le repo
