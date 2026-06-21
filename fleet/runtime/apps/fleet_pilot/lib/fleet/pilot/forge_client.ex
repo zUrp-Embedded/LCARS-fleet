@@ -303,6 +303,34 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
+  Recherche les repos dont un TOPIC matche `topic` — Gitea `GET /repos/search?q=&topic=true`. #5.2
+  multi-projet : le poller découvre SES projets via le topic per-humain `lcars-fleet-<human>` (posé par
+  l'onboarding). Retourne les `full_name` (`"owner/name"`). Forme inattendue / aucun résultat → `{:ok, []}`.
+  (limit=50 : un humain a < 50 projets actifs ; pagination = backlog si besoin.)
+  """
+  @spec search_repos_by_topic(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def search_repos_by_topic(topic, opts \\ []) when is_binary(topic) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, body} <-
+           http_get(config, "/repos/search?topic=true&limit=50&q=" <> URI.encode_www_form(topic)) do
+      repos = if is_map(body), do: Map.get(body, "data", []), else: []
+      {:ok, repos |> List.wrap() |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
+    end
+  end
+
+  @doc """
+  Ajoute le `topic` au `repo` — Gitea `PUT /repos/{repo}/topics/{topic}`. Idempotent (re-PUT = no-op).
+  #5.2 multi-projet : l'onboarding tague le repo neuf `lcars-fleet-<human>` → découvrable par le poller.
+  """
+  @spec add_topic(String.t(), String.t(), Keyword.t()) :: :ok | {:error, term()}
+  def add_topic(repo, topic, opts \\ []) when is_binary(repo) and is_binary(topic) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, _} <- http_put(config, "/repos/#{repo}/topics/#{topic}", nil) do
+      :ok
+    end
+  end
+
+  @doc """
   Pose une règle de **branch-protection** sur `repo` — Gitea `POST /repos/{repo}/branch_protections`.
   `rule` = map d'options Gitea (`rule_name`, `required_approvals`, `dismiss_stale_approvals`,
   `block_on_rejected_reviews`, `enable_push`, …). C'est le **gate forge-enforcé** : sur le repo

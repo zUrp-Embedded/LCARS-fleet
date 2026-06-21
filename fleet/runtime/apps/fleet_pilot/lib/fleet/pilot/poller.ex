@@ -124,38 +124,34 @@ defmodule Fleet.Pilot.Poller do
 
   @impl GenServer
   def init(opts) do
-    case Keyword.fetch(opts, :repo) do
-      {:ok, repo} when is_binary(repo) and repo != "" ->
-        state = %__MODULE__{
-          repo: repo,
-          # #5.2 D1 — scoping multi-user. Seam test : `:human` ; prod : `Human.current!()` (fail-loud — un
-          # poller qui ne sait pas QUI il est ne peut pas scoper sûrement).
-          my_human: Keyword.get(opts, :human) || Fleet.Credentials.Human.current!(),
-          interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
-          forge_client_override: Keyword.get(opts, :forge_client),
-          stage_dispatch?: Keyword.get(opts, :stage_dispatch?, false),
-          forge_opts: Keyword.get(opts, :forge_opts, []),
-          loader: Keyword.get(opts, :loader),
-          carte_loader: Keyword.get(opts, :carte_loader),
-          spawner: Keyword.get(opts, :spawner),
-          task_queue: Keyword.get(opts, :task_queue),
-          clock: Keyword.get(opts, :clock)
-        }
+    # #5.2 MULTI-PROJET : plus de `:repo` obligatoire — le poller DÉCOUVRE ses projets par topic
+    # (`fleet_topic(my_human)`, repos `lcars-fleet-<human>`). `:repo` reste accepté (tests/legacy/seam)
+    # mais n'est plus la source (do_poll l'écrase par itération). `my_human` = la VRAIE source requise
+    # (#5.2 D1 ; `Human.current!()` fail-loud — un poller qui ne sait pas QUI il est ne peut pas scoper).
+    state = %__MODULE__{
+      repo: Keyword.get(opts, :repo),
+      my_human: Keyword.get(opts, :human) || Fleet.Credentials.Human.current!(),
+      interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
+      forge_client_override: Keyword.get(opts, :forge_client),
+      stage_dispatch?: Keyword.get(opts, :stage_dispatch?, false),
+      forge_opts: Keyword.get(opts, :forge_opts, []),
+      loader: Keyword.get(opts, :loader),
+      carte_loader: Keyword.get(opts, :carte_loader),
+      spawner: Keyword.get(opts, :spawner),
+      task_queue: Keyword.get(opts, :task_queue),
+      clock: Keyword.get(opts, :clock)
+    }
 
-        if Keyword.get(opts, :start_tick?, true) do
-          schedule(jitter(state.interval_ms))
-        end
-
-        Logger.info(
-          "fleet_pilot Poller start repo=#{repo} mode=stage " <>
-            "interval=#{state.interval_ms}ms jitter=±10%"
-        )
-
-        {:ok, state}
-
-      _ ->
-        {:stop, {:missing_required_opt, :repo}}
+    if Keyword.get(opts, :start_tick?, true) do
+      schedule(jitter(state.interval_ms))
     end
+
+    Logger.info(
+      "fleet_pilot Poller start mode=stage MULTI-PROJET topic=#{fleet_topic(state.my_human)} " <>
+        "interval=#{state.interval_ms}ms jitter=±10%"
+    )
+
+    {:ok, state}
   end
 
   @impl GenServer
@@ -240,7 +236,43 @@ defmodule Fleet.Pilot.Poller do
 
   # Mode STAGE uniquement (le legacy `do_poll`/Executor RAM a été retiré, ②.3). Le scan est dans
   # `stage_do_poll/1` ; ce wrapper conserve le point d'entrée unique (jitter/backoff/safety-net partagés).
-  defp do_poll(state), do: stage_do_poll(state)
+  # #5.2 MULTI-PROJET : découverte forge-driven. Le poller scanne TOUS les projets de SON humain (repos
+  # taggés `lcars-fleet-<human>` par l'onboarding), pas un `:repo` hard-codé. Per-repo : la logique stage
+  # INCHANGÉE (state.repo posé par itération). Découverte OK → forge up → err_streak reset ; le scoping
+  # ticket `assigned_by=my_human` (déjà, #5.2 D1) reste le garde anti-vol même si un repo d'Alice fuyait.
+  # Découverte KO → backoff (handle_poll_error). Le bail repo-sérialisé reste per-repo (concurrent across,
+  # séquentiel within). Per-repo state ignoré (les erreurs per-item vivent dans la tally, pas le streak).
+  defp do_poll(state) do
+    forge = stage_forge_client(state)
+
+    case forge.search_repos_by_topic(fleet_topic(state.my_human), state.forge_opts) do
+      {:ok, repos} ->
+        base = %{state | err_streak: 0}
+
+        tally =
+          Enum.reduce(repos, zero_tally(), fn repo, acc ->
+            {t, _st} = stage_do_poll(%{base | repo: repo})
+            merge_tally(acc, t)
+          end)
+
+        {tally, base}
+
+      {:error, reason} ->
+        handle_poll_error(state, {:discover_repos, reason}, System.monotonic_time(), nil)
+    end
+  end
+
+  @doc """
+  Topic forge per-humain des projets de la fleet : `lcars-fleet-<human-sanitisé>`. **Source UNIQUE**
+  partagée par l'onboarding (qui TAGUE le repo neuf) et le poller (qui DÉCOUVRE). Sanitize Gitea-topic
+  (lowercase, `[a-z0-9-]`). C'est l'axe d'isolation REPO (Alice ne découvre pas les projets de Bob) ;
+  l'axe TICKET (`assigned_by`) est la ceinture.
+  """
+  @spec fleet_topic(String.t()) :: String.t()
+  def fleet_topic(human) when is_binary(human) do
+    h = human |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
+    "lcars-fleet-#{h}"
+  end
 
   defp handle_poll_error(state, reason, started, _err) do
     new_streak = state.err_streak + 1
