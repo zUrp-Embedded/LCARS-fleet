@@ -91,6 +91,9 @@ defmodule Fleet.Pilot.HopCompleter do
 
     with {:ok, sha} <- step1_publish(hop, deliverable),
          {:ok, _} <- step2_comment(forge, repo, n, role, sha, hop, forge_opts),
+         # F-E7 — gap AVANT la route : le comment de verdict prend un `created_at` strictement antérieur à
+         # la route (sinon même seconde → ordre dashboard arbitraire, « logiquement avant, affiché après »).
+         :ok <- space_writes(opts),
          {:ok, routed} <- step4_route(forge, repo, n, hop, forge_opts),
          {:ok, _} <- step5_unlock(forge, repo, n, forge_opts) do
       Logger.info("HopCompleter: #{repo}##{n} role=#{role} sha=#{sha} → #{routed}")
@@ -153,6 +156,8 @@ defmodule Fleet.Pilot.HopCompleter do
              body,
              forge_opts |> as_role(role) |> Keyword.put(:dedup_signature, signature)
            ),
+         # F-E7 — gap AVANT les labels : le comment de verdict prend un `created_at` antérieur (lecture cohérente).
+         :ok <- space_writes(opts),
          {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
          {:ok, _} <- forge.remove_label(repo, n, @in_flight_label, forge_opts) do
       Logger.info(
@@ -604,6 +609,23 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   defp as_role(forge_opts, _role), do: forge_opts
+
+  # F-E7 — espace deux écritures forge d'un même hop d'au moins UNE SECONDE. Gitea horodate les events à
+  # la seconde : deux écritures dans la même seconde tiennent une égalité de `created_at` que le feed
+  # dashboard rend dans un ordre arbitraire (« logiquement avant, affiché après », constaté sur plusieurs
+  # runs). On insère ce gap entre le commentaire HUMAIN (verdict) et l'écriture protocole suivante
+  # (route/label) → le commentaire prend un `created_at` strictement antérieur → ordre de lecture cohérent.
+  # Knob `:fleet_pilot, :hop_write_spacing_ms` (défaut 2000 ; 0 en test → pas de sleep). Seam `:sleeper`
+  # (test). NB : bloque brièvement le consumer (run_completion sync) — assumé : un hop est rare et bloque
+  # déjà sur le push + les écritures HTTP ; 2s achète une traça honnête (décision user).
+  defp space_writes(opts) do
+    case Application.get_env(:fleet_pilot, :hop_write_spacing_ms, 2000) do
+      ms when is_integer(ms) and ms > 0 -> (opts[:sleeper] || (&Process.sleep/1)).(ms)
+      _ -> :ok
+    end
+
+    :ok
+  end
 
   # Verrou a lever : producteur -> l'issue (verrou pose par dispatch_issue) ; juge -> la PR (verrou
   # pose par dispatch_review). Un rework producteur (pr nil) tombe sur l'issue.
