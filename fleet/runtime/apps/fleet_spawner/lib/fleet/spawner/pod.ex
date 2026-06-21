@@ -786,22 +786,14 @@ defmodule Fleet.Spawner.Pod do
   # côté (`<pod_dir>/work`). bwrap_launch lit `LCARS_POD_CWD` (défaut `$POD_DIR`). Pas de projet → cwd
   # = pod_dir (pods permanents/memory-X sans repo).
   defp maybe_put_pod_cwd(env, state) do
-    case rc_project(state) do
-      # Pas de projet nommé (permanent/admin) → comportement actuel : cwd = workspace réel si projet
-      # cloné, sinon défaut bwrap (pod_dir). Pas de remap.
-      nil ->
-        case effective_project(state)["repo_path"] do
-          nil -> env
-          _ -> Map.put(env, "LCARS_POD_CWD", pod_cwd_real(state))
-        end
+    env = Map.put(env, "LCARS_POD_CWD", pod_cwd(state))
 
-      # #monde-propre : l'agent voit `/home/<project>` (LCARS_POD_CWD) ; bwrap bind le workspace RÉEL
-      # (LCARS_POD_CWD_SRC) dessus. Le pod_dir réel reste intact.
-      _project ->
-        env
-        |> Map.put("LCARS_POD_CWD", pod_cwd(state))
-        |> Map.put("LCARS_POD_CWD_SRC", pod_cwd_real(state))
-    end
+    # Worker projet : le cwd `/home/<project>` est un REMAP du workspace réel → bwrap doit le binder
+    # (LCARS_POD_CWD_SRC, P3). Orchestrateur (mount rw déjà bindé) / permanent (cwd = pod_dir) → pas de
+    # bind à créer, juste le --chdir.
+    if rc_project(state),
+      do: Map.put(env, "LCARS_POD_CWD_SRC", pod_cwd_real(state)),
+      else: env
   end
 
   # cwd VU PAR L'AGENT dans le pod (= LCARS_POD_CWD + base du slug recall). #monde-propre : pour un
@@ -810,9 +802,19 @@ defmodule Fleet.Spawner.Pod do
   # PAS (reste `/home/<human>/pods/...`) — seul le CWD intra-pod est remappé.
   defp pod_cwd(state) do
     case rc_project(state) do
-      nil -> pod_cwd_real(state)
+      # Pas de projet → ORCHESTRATEUR : son mount RW déclaré (arch → /home/projects.work). Data-driven
+      # (le cap-profile dicte), pas de cas spécial par rôle. À défaut (permanent sans rw) → le réel (pod_dir).
+      nil -> first_rw_mount(state) || pod_cwd_real(state)
       project -> "/home/#{project}"
     end
+  end
+
+  # #monde-propre Stage A : cwd d'un orchestrateur = son 1er mount RW (DÉJÀ bindé via LCARS_POD_MOUNTS,
+  # donc pas de bind à créer). nil si aucun rw. Réutilise l'accesseur unique cap_profile_mounts (anti-fork).
+  defp first_rw_mount(state) do
+    state.cap_profile
+    |> cap_profile_mounts()
+    |> Enum.find_value(fn m -> if (m["mode"] || m[:mode]) == "rw", do: m["path"] || m[:path] end)
   end
 
   # Workspace RÉEL (hôte) sous le pod_dir : `pod_dir/workspace` si projet cloné, sinon `pod_dir`.
