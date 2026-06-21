@@ -28,13 +28,24 @@ defmodule Fleet.Spawner.SeedStoreTest do
     path
   end
 
-  test "checkpoint : cp le JSONl actif → seed-store + carte {uuid,slug}", %{tmp: tmp, root: root} do
+  test "checkpoint : garde le PREMIER ROUND seul (jusqu'au 1er assistant) + carte", %{
+    tmp: tmp,
+    root: root
+  } do
     pod_dir = Path.join(tmp, "pod")
-    make_jsonl(pod_dir, "-home-x-poc8-engineer", "uuid-abc", "{\"x\":1}\n")
+
+    content =
+      ~s({"type":"user","message":"r1"}\n{"type":"assistant","message":"ok"}\n{"type":"user","message":"r2"}\n)
+
+    make_jsonl(pod_dir, "-home-x-poc8-engineer", "uuid-abc", content)
 
     assert :ok = SeedStore.checkpoint(pod_dir, "poc-8", "engineer")
 
-    assert File.read!(Path.join([root, "poc-8", "pods", "engineer.jsonl"])) == "{\"x\":1}\n"
+    seed = File.read!(Path.join([root, "poc-8", "pods", "engineer.jsonl"]))
+    # round 1 (user + assistant) gardé ; round 2 jeté.
+    assert seed =~ "r1"
+    assert seed =~ "assistant"
+    refute seed =~ "r2"
 
     map = Path.join([root, "poc-8", "pods", "engineer.json"]) |> File.read!() |> Jason.decode!()
 

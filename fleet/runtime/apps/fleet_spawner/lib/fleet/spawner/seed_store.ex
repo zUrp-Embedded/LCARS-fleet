@@ -29,7 +29,11 @@ defmodule Fleet.Spawner.SeedStore do
         slug = Path.basename(Path.dirname(jsonl))
         dest_dir = Path.join([root(), projet, "pods"])
         File.mkdir_p!(dest_dir)
-        File.cp!(jsonl, Path.join(dest_dir, "#{role}.jsonl"))
+
+        # On ne garde QUE le PREMIER ROUND (seed minimal résumable = le setup/mandat initial du pod),
+        # PAS la session entière — le travail se re-dérive de la forge (axiome source-unique). PROVEN :
+        # ce sous-ensemble `--resume` correctement avec le seul contexte du round 1.
+        File.write!(Path.join(dest_dir, "#{role}.jsonl"), first_round(jsonl))
 
         File.write!(
           Path.join(dest_dir, "#{role}.json"),
@@ -43,6 +47,23 @@ defmodule Fleet.Spawner.SeedStore do
     e ->
       Logger.warning("SeedStore: checkpoint #{projet}/#{role} ÉCHEC (non-fatal) : #{inspect(e)}")
       {:error, e}
+  end
+
+  # Premier round = les lignes jusqu'au 1er event `assistant` INCLUS (mandat/setup + 1ʳᵉ réponse).
+  # C'est le seed minimal résumable ; le reste de la session est jeté (re-dérivable forge).
+  defp first_round(jsonl_path) do
+    jsonl_path
+    |> File.stream!()
+    |> Enum.reduce_while([], fn line, acc ->
+      acc = [line | acc]
+
+      case Jason.decode(line) do
+        {:ok, %{"type" => "assistant"}} -> {:halt, acc}
+        _ -> {:cont, acc}
+      end
+    end)
+    |> Enum.reverse()
+    |> Enum.join()
   end
 
   # JSONl actif = le plus récent sous .claude/projects/*/*.jsonl. Robuste aux fichiers volatils.
