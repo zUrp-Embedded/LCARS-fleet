@@ -184,16 +184,18 @@ defmodule Fleet.Spawner.PermanentBoot do
   defp spawn_one(%Fleet.CapProfile{metadata: meta} = cp, spawner) do
     name = Map.get(meta, "name") || Map.get(meta, :name) || "unknown"
 
-    # BL-055 : pod_id DÉTERMINISTE (plus de `-<os_time>`). Le timestamp rendait chaque (re-)boot
-    # NON-idempotent → un nouvel id à chaque tentative → l'ancien pod orpheline (flakiness « arch
-    # re-spawné 1× », holder-leak, accumulation). Déterministe → un re-spawn retombe sur le MÊME id :
-    # soit reap-orphan + relance propre (pod mort — `reap_orphan_pod` tourne à chaque launch), soit
-    # `{:already_started}` (pod vivant = déjà booté → no-op idempotent). Sûr aujourd'hui : le gate
-    # `:recovery_resume_enabled` est OFF par défaut → un vieux state.json réutilisé → `:recreate`
-    # (session fraîche), pas de `--resume` foireux (le `--resume` propre = chantier home-persistance).
+    # BL-055 : pod_id DÉTERMINISTE (plus de `-<os_time>`) → re-spawn idempotent (même id : reap-orphan +
+    # relance si mort, `{:already_started}` no-op si vivant ; plus de holder-leak/accumulation).
     pod_id = "permanent-#{name}"
 
-    case spawner.(cp, pod_id, pod_id: pod_id) do
+    # #chantier home-persistance : si une base existe pour ce rôle → boot-from-base (UUID FIXE porté par
+    # la base + restore + `--resume`) → entrée Claude Desktop UNIQUE réutilisée à chaque boot + contexte
+    # FRAIS (la base capturée hors-fleet, pas la session accumulée du run précédent). Sinon → recreate
+    # (session neuve, comportement actuel). Distinct de `:recovery_resume_enabled` (OFF) = recovery de
+    # CRASH ; ici c'est le boot DÉLIBÉRÉ propre.
+    opts = boot_opts(name, pod_id)
+
+    case spawner.(cp, pod_id, opts) do
       {:ok, _pid} ->
         pod_id
 
@@ -205,5 +207,41 @@ defmodule Fleet.Spawner.PermanentBoot do
         Logger.error("PermanentBoot: spawn permanent #{name} échoué (#{inspect(reason)})")
         nil
     end
+  end
+
+  # #chantier home-persistance — opts de spawn d'un permanent.
+  # Base présente (`priv/base_seeds/<role>.jsonl`) → boot-from-base : UUID FIXE = le `sessionId` PORTÉ par
+  # la base (la base EST la source de l'UUID, pas de config séparée) → `--resume` ce même UUID à chaque
+  # boot = UNE entrée Desktop, et `recall_seed_jsonl` restaure la base AVANT le launch = contexte frais.
+  # Pas de base → `[pod_id:]` seul = recreate (session neuve), comportement historique.
+  defp boot_opts(name, pod_id) do
+    path = base_seed_path(name)
+
+    case File.exists?(path) && base_seed_uuid(path) do
+      uuid when is_binary(uuid) ->
+        [pod_id: pod_id, session_id: uuid, resume: true, recall_seed_jsonl: path]
+
+      _ ->
+        [pod_id: pod_id]
+    end
+  end
+
+  # Base seed d'un permanent : ancre résumable propre, capturée hors-fleet (claude pur), versionnée en priv.
+  defp base_seed_path(name) do
+    Path.join([:code.priv_dir(:fleet_spawner), "base_seeds", "#{name}.jsonl"])
+  end
+
+  # UUID fixe = 1er `sessionId` trouvé dans la base. nil si absent (→ boot_opts retombe sur recreate).
+  defp base_seed_uuid(path) do
+    path
+    |> File.stream!()
+    |> Enum.find_value(fn line ->
+      case Jason.decode(line) do
+        {:ok, %{"sessionId" => uuid}} when is_binary(uuid) -> uuid
+        _ -> nil
+      end
+    end)
+  rescue
+    _ -> nil
   end
 end
