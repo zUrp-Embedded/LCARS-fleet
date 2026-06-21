@@ -103,6 +103,35 @@ defmodule Fleet.Spawner do
     end
   end
 
+  @doc """
+  #pod-seed v4 — RECALL délibéré : ramène vivant l'agent `(projet, role)` depuis son seed checkpointé
+  (`projects.work/<projet>/pods/`). Lit la carte (uuid+jsonl), spawn un pod en mode resume :
+  `session_id` = l'uuid du seed, `resume: true`, le seed est restauré dans le pod AVANT le launch
+  (do_project → maybe_recall_restore) → claude `--resume <uuid>` reprend le contexte. Nom Desktop
+  `<projet>_<role>`. `allow_no_mandate` (le pod resume son contexte, pas idle ; pas de mandat neuf).
+
+  `{:ok, pid}` | `{:error, :no_seed}` (aucun seed) | `{:error, term}`.
+  """
+  @spec recall(String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
+  def recall(projet, role) when is_binary(projet) and is_binary(role) do
+    case Fleet.Spawner.SeedStore.read_map(projet, role) do
+      :none ->
+        {:error, :no_seed}
+
+      {:ok, %{uuid: uuid, jsonl: jsonl}} ->
+        with {:ok, cap_profile} <- Fleet.CapProfile.load(role) do
+          spawn_pod(cap_profile, "recall-#{projet}-#{role}",
+            pod_id: "recall-#{projet}-#{role}",
+            session_id: uuid,
+            resume: true,
+            recall_seed_jsonl: jsonl,
+            rc_name: "#{projet}_#{role}",
+            allow_no_mandate: true
+          )
+        end
+    end
+  end
+
   # R18 (verrou I-CBC) : un pod `one-shot` (1 tâche puis meurt) DOIT porter un
   # mandat — sinon il part sans travail (brief générique → claude attend →
   # timeout). Les pods long-lived (`forever`/`run`/`pipe`) pullent leurs tâches

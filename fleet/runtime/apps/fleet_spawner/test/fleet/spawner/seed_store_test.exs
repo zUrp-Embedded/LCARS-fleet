@@ -93,4 +93,8 @@ defmodule Fleet.Spawner.SeedStoreTest do
     assert dest == Path.join([pod_dir, ".claude", "projects", "-home-r-recallpod", "u9.jsonl"])
     assert File.read!(dest) == "mem\n"
   end
+
+  test "Spawner.recall : aucun seed pour (projet,role) → {:error, :no_seed}" do
+    assert {:error, :no_seed} = Fleet.Spawner.recall("projet-inexistant", "engineer")
+  end
 end

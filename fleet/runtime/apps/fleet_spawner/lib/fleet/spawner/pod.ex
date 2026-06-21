@@ -492,7 +492,9 @@ defmodule Fleet.Spawner.Pod do
          :ok <- maybe_enqueue_mandate(state),
          :ok <- maybe_provision_mcp_config(state),
          :ok <- provision_monitor_watch(state),
-         :ok <- maybe_bootstrap_project_workspace(state) do
+         :ok <- maybe_bootstrap_project_workspace(state),
+         # #pod-seed v4 : recall délibéré — restaure le seed AVANT le launch (après workspace = cwd réglé).
+         :ok <- maybe_recall_restore(state) do
       new_state =
         state
         |> Map.put(:phase, :injecting)
@@ -787,7 +789,43 @@ defmodule Fleet.Spawner.Pod do
     case effective_project(state)["repo_path"] do
       nil -> env
       # F121 : dérive le workspace via l'autorité unique (Fleet.Spawner), pas un littéral recopié.
-      _ -> Map.put(env, "LCARS_POD_CWD", Fleet.Spawner.pod_workspace_path(state.pod_dir))
+      _ -> Map.put(env, "LCARS_POD_CWD", pod_cwd(state))
+    end
+  end
+
+  # cwd EFFECTIF du pod (= LCARS_POD_CWD que claude_launch utilisera) — autorité unique partagée avec
+  # le recall-restore (#pod-seed v4) pour que le seed soit restauré au BON slug. Projet cloné →
+  # workspace ; sinon pod_dir (défaut bwrap_launch).
+  defp pod_cwd(state) do
+    case effective_project(state)["repo_path"] do
+      nil -> state.pod_dir
+      _ -> Fleet.Spawner.pod_workspace_path(state.pod_dir)
+    end
+  end
+
+  # #pod-seed v4 : recall délibéré. Si `opts[:recall_seed_jsonl]` est fourni (par `Fleet.Spawner.recall`),
+  # restaure le seed à `projects/<slugify(cwd)>/<session_id>.jsonl` AVANT le launch ; claude
+  # `--resume <session_id>` (resume:true via opts) le retrouve. Gaté : absent → no-op (spawn normal
+  # intact). Le seed est validé (read_map) côté `Spawner.recall` ; absent ICI = fail-loud (transition_failed).
+  defp maybe_recall_restore(state) do
+    case Keyword.get(state.opts, :recall_seed_jsonl) do
+      nil ->
+        :ok
+
+      jsonl when is_binary(jsonl) ->
+        if File.exists?(jsonl) do
+          {:ok, _} =
+            Fleet.Spawner.SeedStore.restore(
+              jsonl,
+              state.pod_dir,
+              pod_cwd(state),
+              state.session_id
+            )
+
+          :ok
+        else
+          {:error, {:recall_seed_missing, jsonl}}
+        end
     end
   end
 
@@ -1401,7 +1439,9 @@ defmodule Fleet.Spawner.Pod do
       # DN spawner-orchestrator §C-3 (BL-021 chantier 4) : timestamp ISO8601 figé
       # à la création du GenServer, persisté tel quel dans state.json.
       started_at: DateTime.utc_now(),
-      resume: false,
+      # défaut false ; la recovery (apply_recovery) ET le recall délibéré (#pod-seed v4, opts[:resume])
+      # le passent à true → claude `--resume <session_id>`.
+      resume: Keyword.get(args.opts, :resume, false),
       # SP composé (do_project) stocké en state pour l'argv4 inline de claude_launch
       # (--system-prompt) ; pas de fichier SP côté pod (.lcars/system-prompt.md = miroir lisible).
       sp: nil,
