@@ -673,7 +673,18 @@ defmodule Fleet.Pilot.HopConsumer do
     case {payload["pipeline"], payload["stage"]} do
       {pipeline, stage} when is_binary(pipeline) and is_binary(stage) ->
         with {:ok, carte} <- load_carte(state, pipeline) do
-          gate_decide(carte, stage, payload, n, state)
+          # F-E8 — un pod dont le RÔLE ≠ le rôle déclaré du stage qu'il porte n'EST pas ce stage : c'est un
+          # juge NO-CARTE (qualifier/reviewer dispatché par `dispatch_review`) ayant HÉRITÉ la route de
+          # l'issue (le stage du producteur). Le traiter via la carte le ferait avancer/merger à tort —
+          # bug live PoC-7 : le qualifier portant `build` tombait en terminal non-producteur → `:promote`
+          # → merge sur 1 juge, court-circuitant le quorum. → résolution no-carte (`:reviewed`) : il
+          # enregistre sa review native, et le merge revient au quorum `dispatch_by_verdicts` (qui attend
+          # TOUS les juges). Un vrai stage de carte (rôle = rôle du stage) passe normalement par la gate.
+          if inherited_route?(carte, stage, payload["role"]) do
+            no_carte_resolve(payload, state)
+          else
+            gate_decide(carte, stage, payload, n, state)
+          end
         end
 
       _ ->
@@ -681,6 +692,23 @@ defmodule Fleet.Pilot.HopConsumer do
         # `:promote` direct (l'ancien terminal mergeait SANS juge). Le merge est piloté par
         # l'état-PR (dispatch_review), pas par l'intent d'un pod isolé.
         no_carte_resolve(payload, state)
+    end
+  end
+
+  # ROUTE HÉRITÉE (F-E8) = le stage EXISTE dans la carte MAIS son rôle déclaré ≠ le rôle du pod : c'est un
+  # juge no-carte (dispatché sur la PR) qui a hérité la route du producteur → à résoudre en no-carte. Un
+  # stage INCONNU (route corrompue) n'est PAS « hérité » → `false` → laisse `gate_decide` fail-loud
+  # (`unknown_stage`, jamais un misroute silencieux). Un stage sans `role` → `false` (gate_decide tranche).
+  defp inherited_route?(carte, stage, role) do
+    case Fleet.Pilot.CarteNav.stage_spec(carte, stage) do
+      {:ok, spec} ->
+        case Map.get(spec, "role") do
+          r when is_binary(r) -> r != role
+          _ -> false
+        end
+
+      _ ->
+        false
     end
   end
 
@@ -766,11 +794,14 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # Corr.3 + #8-fix « un PRODUCTEUR ne merge JAMAIS seul » : `:pass` → `:advance` si un stage suit ;
   # terminal (next_assignee nil) → selon le RÔLE qui finit :
-  #   - PRODUCTEUR (git_native) → `:review` : son livrable ouvre une PR + demande les juges (le chemin
-  #     PR-driven prouvé `dispatch_by_verdicts` scelle au gatekeeper). JAMAIS d'auto-merge d'un livrable.
-  #   - JUGE (payload) → `:promote` : il a validé le dernier gate → merge terminal.
-  # Sans ce split, une carte terminant sur un producteur (ex. mandate-gate `mandate-review→build`)
-  # mergeait le code SANS juges ni gatekeeper (régression live #8.F). Préserve `{:error,_}` tel quel.
+  #   - PRODUCTEUR (git_native) → `:review` : son livrable ouvre une PR + demande les juges. JAMAIS
+  #     d'auto-merge d'un livrable.
+  #   - JUGE-CARTE terminal (son rôle EST celui du stage) → `:promote` : il a validé le dernier gate de
+  #     SA carte (1 stage = 1 rôle = 1 juge) → merge terminal.
+  # Ici on ne voit QUE de vrais stages de carte (un juge NO-CARTE à route héritée est dévié vers
+  # `no_carte_resolve` AVANT — cf. `resolve_next`/`stage_role_matches?`, F-E8 : sinon le qualifier portant
+  # `build` mergeait sur 1 juge). Sans le split producteur/juge, une carte terminant sur un producteur
+  # (mandate-gate `mandate-review→build`) mergeait le code SANS juges (régression #8.F). `{:error,_}` tel quel.
   defp tag_advance({:ok, {nil, nil}}, true), do: {:ok, :review, {nil, nil}}
   defp tag_advance({:ok, {nil, nil}}, false), do: {:ok, :promote, {nil, nil}}
   defp tag_advance({:ok, routing}, _producer?), do: {:ok, :advance, routing}

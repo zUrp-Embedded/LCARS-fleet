@@ -237,6 +237,26 @@ defmodule Fleet.Pilot.HopConsumerTest do
       refute Map.has_key?(hop, :deliverable_opts)
     end
 
+    test "F-E8 : juge NO-CARTE à route héritée (rôle != rôle du stage) -> :reviewed, JAMAIS :promote" do
+      # Bug live PoC-7 : le qualifier (juge no-carte dispatché sur la PR) HÉRITE la route de l'issue
+      # (stage `build`, rôle engineer). Sans le garde `stage_role_matches?`, gate_decide(build) le voyait
+      # en terminal NON-producteur -> :promote -> MERGE sur 1 juge (quorum court-circuité). Avec : rôle
+      # `qualifier` != rôle du stage `build` -> résolution no-carte -> :reviewed (enregistre la review ;
+      # le merge revient au quorum `dispatch_by_verdicts` qui attend TOUS les juges).
+      payload =
+        stage_payload(%{"role" => "qualifier", "pipeline" => "poc-cycle", "stage" => "build"})
+
+      assert {:ok, :captured} =
+               HopConsumer.maybe_complete(
+                 payload,
+                 state(%{loader: StubLoader, forge_client: StubForge})
+               )
+
+      assert_received {:hop, hop, _opts}
+      assert hop.pr_role == :judge
+      assert hop.intent == :reviewed
+    end
+
     test "carte introuvable -> {:error, {:carte_load, _}}, pas de hop" do
       payload = stage_payload(%{"pipeline" => "bad", "stage" => "build"})
 
