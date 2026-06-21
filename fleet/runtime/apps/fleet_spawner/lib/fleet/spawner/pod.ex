@@ -171,6 +171,8 @@ defmodule Fleet.Spawner.Pod do
   # succès → clear_for_pod) + état terminal `:killed`, puis arrêt :normal. Le
   # fallback brutal (terminate_child) ne sert que si ce call timeout (cf. kill_pod/1).
   def handle_call(:kill, _from, state) do
+    # #chantier pod-seed v2 : checkpoint le seed même sur kill délibéré (mémoire préservée).
+    maybe_checkpoint_seed(state)
     teardown_backend(state)
     clear_pod_task(state.pod_id)
 
@@ -1112,6 +1114,8 @@ defmodule Fleet.Spawner.Pod do
     # DynamicSupervisor). Sous `:temporary` (DN-recovery B) l'arrêt :normal n'est jamais ressuscité.
     # NB : pas de clear_for_pod ici — do_release = succès post-EXTRACT, la task a déjà été
     # soumise/complétée (pas de task active à libérer).
+    # #chantier pod-seed v2 : checkpoint le seed AVANT de tuer le backend (JSONl encore intact).
+    maybe_checkpoint_seed(state)
     teardown_backend(state)
 
     new_state =
@@ -1121,6 +1125,24 @@ defmodule Fleet.Spawner.Pod do
 
     write_state_fs(new_state)
     {:stop, :normal, new_state}
+  end
+
+  # #chantier pod-seed v2 : à la mort d'un pod-PROJET (rc_name = `<projet>_<role>` présent),
+  # checkpointe son JSONl de session ACTIF vers le seed-store (`projects.work/<projet>/pods/<role>`)
+  # pour rappel ultérieur (`--resume`). Permanents (sans rc_name) → pas de seed-store. Best-effort
+  # (SeedStore ne raise jamais ici ; un échec ne casse pas le teardown).
+  defp maybe_checkpoint_seed(state) do
+    role = cap_profile_name(state.cap_profile)
+
+    case Keyword.get(state.opts, :rc_name) do
+      nil ->
+        :ok
+
+      rc when is_binary(rc) ->
+        projet = String.replace_suffix(rc, "_" <> role, "")
+        _ = Fleet.Spawner.SeedStore.checkpoint(state.pod_dir, projet, role)
+        :ok
+    end
   end
 
   # Teardown du backend du pod. Port vivant → Port.close (le SIGTERM du holder bwrap fait tomber
