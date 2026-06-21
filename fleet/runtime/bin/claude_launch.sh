@@ -63,7 +63,10 @@ fi
 
 ROLE="$1"
 POD_ID="$2"
-POD_DIR="$3"
+# #monde-propre Stage B : en bwrap, le pod_dir RÉEL ($3) est relocalisé derrière LCARS_POD_HOME (/home/.pod) ;
+# claude_launch tourne DANS le sandbox → ses paths (.claude.json, .lcars, system-prompt) doivent pointer le
+# home INTRA-POD. Host pods (host_launch) : LCARS_POD_HOME absent → $3 réel. Gaté, zéro effet si non posé.
+POD_DIR="${LCARS_POD_HOME:-$3}"
 # SP HORS ARGV (fuite /proc/cmdline + frôle ARG_MAX) : source = fichier écrit par le spawner en
 # do_project (pod.ex). `.lcars/` est lisible in-sandbox (cf. --settings, bind pod_dir). claude le lit
 # via --system-prompt-file (vérifié 2026-06-14, claude 2.1.177 : -file = replace + trusted).

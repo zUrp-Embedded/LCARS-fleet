@@ -962,7 +962,10 @@ defmodule Fleet.Spawner.PodTest do
 
       # cwd → la branche CODE (workspace)
       pod_dir = env["HOME"]
-      assert env["LCARS_POD_CWD"] == Path.join(pod_dir, "workspace")
+
+      # #monde-propre Stage B : cwd INTRA-POD relocalisé (le pod_dir réel masqué derrière /home/.pod).
+      # Legacy projet-sans-rc_name → le workspace relocalisé. (Un worker rc_name verrait /home/<project>.)
+      assert env["LCARS_POD_CWD"] == "/home/.pod/workspace"
 
       # doc-mount : branche code + branche doc clonées côte à côte dans le pod
       assert File.exists?(Path.join([pod_dir, "workspace", "src.txt"]))
@@ -1004,7 +1007,9 @@ defmodule Fleet.Spawner.PodTest do
       pod_dir = env["HOME"]
 
       # le projet du mandat est cloné (code + doc) + cwd posé, sans aucun project au catalogue
-      assert env["LCARS_POD_CWD"] == Path.join(pod_dir, "workspace")
+      # #monde-propre Stage B : cwd INTRA-POD relocalisé (le pod_dir réel masqué derrière /home/.pod).
+      # Legacy projet-sans-rc_name → le workspace relocalisé. (Un worker rc_name verrait /home/<project>.)
+      assert env["LCARS_POD_CWD"] == "/home/.pod/workspace"
       assert File.exists?(Path.join([pod_dir, "workspace", "src.txt"]))
       assert File.exists?(Path.join([pod_dir, "work", "BACKLOG.md"]))
     end

@@ -789,8 +789,8 @@ defmodule Fleet.Spawner.Pod do
     env = Map.put(env, "LCARS_POD_CWD", pod_cwd(state))
 
     # Worker projet : le cwd `/home/<project>` est un REMAP du workspace réel → bwrap doit le binder
-    # (LCARS_POD_CWD_SRC, P3). Orchestrateur (mount rw déjà bindé) / permanent (cwd = pod_dir) → pas de
-    # bind à créer, juste le --chdir.
+    # (LCARS_POD_CWD_SRC, P3). Orchestrateur (mount catalogue) / permanent / legacy (relocalisés sous le
+    # bind HOME) → déjà bindés, pas de SRC à créer.
     if rc_project(state),
       do: Map.put(env, "LCARS_POD_CWD_SRC", pod_cwd_real(state)),
       else: env
@@ -801,11 +801,23 @@ defmodule Fleet.Spawner.Pod do
   # workspace RÉEL (`pod_cwd_real`). Sinon (pas de projet nommé) = le réel. Le pod_dir RÉEL ne bouge
   # PAS (reste `/home/<human>/pods/...`) — seul le CWD intra-pod est remappé.
   defp pod_cwd(state) do
-    case rc_project(state) do
-      # Pas de projet → ORCHESTRATEUR : son mount RW déclaré (arch → /home/projects.work). Data-driven
-      # (le cap-profile dicte), pas de cas spécial par rôle. À défaut (permanent sans rw) → le réel (pod_dir).
-      nil -> first_rw_mount(state) || pod_cwd_real(state)
-      project -> "/home/#{project}"
+    cond do
+      # Worker projet → /home/<project> (P3).
+      project = rc_project(state) -> "/home/#{project}"
+      # Orchestrateur → son mount RW déclaré (arch → /home/projects.work). Data-driven (cap-profile).
+      rw = first_rw_mount(state) -> rw
+      # Permanent / legacy (projet sans rc_name) → le chemin RÉEL relocalisé (pod_dir → sandbox_home).
+      # Stage B : sandbox_home=/home/.pod → workspace/home relocalisés ; gaté off → pod_dir = identité.
+      true -> String.replace_prefix(pod_cwd_real(state), state.pod_dir, sandbox_home(state))
+    end
+  end
+
+  # Home INTRA-POD (#monde-propre Stage B). bwrap → /home/.pod (le pod_dir réel masqué derrière) ; sinon
+  # (host) → le pod_dir réel (pas de relocalisation). Doit matcher LCARS_POD_HOME posé par maybe_put_sandbox_home.
+  defp sandbox_home(state) do
+    case cap_profile_containment(state.cap_profile) do
+      "bwrap" -> "/home/.pod"
+      _ -> state.pod_dir
     end
   end
 
@@ -815,6 +827,16 @@ defmodule Fleet.Spawner.Pod do
     state.cap_profile
     |> cap_profile_mounts()
     |> Enum.find_value(fn m -> if (m["mode"] || m[:mode]) == "rw", do: m["path"] || m[:path] end)
+  end
+
+  # #monde-propre Stage B : relocalise le home intra-pod (bwrap UNIQUEMENT). LCARS_POD_HOME=/home/.pod →
+  # bwrap_launch masque le pod_dir réel derrière (SANDBOX_HOME) : l'agent ne voit ni human ni pod_id, et
+  # `ls /home` ne montre que les mounts. Host pods (containment none) : pas relocalisés (home réel).
+  defp maybe_put_sandbox_home(env, state) do
+    case cap_profile_containment(state.cap_profile) do
+      "bwrap" -> Map.put(env, "LCARS_POD_HOME", sandbox_home(state))
+      _ -> env
+    end
   end
 
   # Workspace RÉEL (hôte) sous le pod_dir : `pod_dir/workspace` si projet cloné, sinon `pod_dir`.
@@ -981,6 +1003,8 @@ defmodule Fleet.Spawner.Pod do
           |> Map.put("CLAUDE_DIR", claude_dir_for(human))
           |> maybe_put_vendor_bin(human)
           |> maybe_put_pod_cwd(state)
+          # #monde-propre Stage B : relocalise le home intra-pod (bwrap only) → bwrap masque le pod_dir réel.
+          |> maybe_put_sandbox_home(state)
           # Mounts CATALOGUE (cap-profile-driven) → bwrap_launch les bind. Vide / host_launch = inerte.
           |> Map.put("LCARS_POD_MOUNTS", mounts_env(cap_profile_mounts(state.cap_profile)))
 

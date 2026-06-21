@@ -94,8 +94,16 @@ SESSION_ID="${LCARS_POD_SESSION_ID:?UUID de session requis (pré-alloué par le 
 POD_RESUME="${LCARS_POD_RESUME:-0}"
 SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<human>_<role>)}"
 
-# cwd = racine de branche (monde-invoqué). Défaut $POD_DIR ; le spawner/bootstrap pose le repo cloné.
-WORKDIR="${LCARS_POD_CWD:-$POD_DIR}"
+# #monde-propre Stage B : $HOME intra-pod relocalisé. SANDBOX_HOME = ce que l'agent voit comme home (et
+# racine de TOUS les binds pod : .claude, creds, vendor, plugins). GATÉ : LCARS_POD_HOME absent →
+# SANDBOX_HOME=$POD_DIR = IDENTITÉ = comportement actuel (tests, host pods). Posé (=/home/.pod) → le pod_dir
+# RÉEL ($POD_DIR, qui reste la SRC des binds) est masqué derrière /home/.pod : l'agent ne voit ni human ni
+# pod_id, et `ls /home` ne montre que les mounts (le .pod est caché).
+SANDBOX_HOME="${LCARS_POD_HOME:-$POD_DIR}"
+
+# cwd = racine de branche (monde-invoqué). Défaut = SANDBOX_HOME (le home) ; worker/orchestrateur posent
+# LCARS_POD_CWD (/home/<project> ou /home/projects.work).
+WORKDIR="${LCARS_POD_CWD:-$SANDBOX_HOME}"
 
 # #monde-propre : remap du CWD INTRA-POD seulement. Si le spawner a posé LCARS_POD_CWD_SRC (le workspace
 # RÉEL sous le pod_dir), on le bind sur WORKDIR (= LCARS_POD_CWD, ex. /home/<project>) → l'agent voit un
@@ -123,7 +131,7 @@ TMUX_SESSION_NAME="lcars-pod-$POD_ID"
 # pod_id UUID (chemin pipeline) → "File name too long". MÊME chemin côté Elixir
 # (Fleet.Spawner.PodTmux.sock_path = <base>/<pod_id>/pod.sock).
 TMUX_SOCK="$POD_SOCK_DIR/pod.sock"
-POD_VENDOR_BIN="$POD_DIR/.local/bin/$VENDOR_NAME"
+POD_VENDOR_BIN="$SANDBOX_HOME/.local/bin/$VENDOR_NAME"
 
 # =============================================================
 # Trap cleanup (P2 panel #7) — utile PRÉ-exec uniquement : `exec` remplace le shell, donc le EXIT trap
@@ -173,7 +181,7 @@ for plugin in ${LCARS_SKILLS_PLUGINS:-}; do
   # CLAUDE_DIR (requis l.70) pointe le claudeDir humain ⇒ ses plugins sont sous CLAUDE_DIR/plugins.
   HOST_PLUGIN_PATH="$CLAUDE_DIR/plugins/$plugin"
   [[ -d "$HOST_PLUGIN_PATH" ]] || { echo "ERR: plugin '$plugin' not installed host-side at $HOST_PLUGIN_PATH" >&2; exit 1; }
-  PLUGIN_BINDS+=(--ro-bind "$HOST_PLUGIN_PATH" "$POD_DIR/.claude/plugins/$plugin")
+  PLUGIN_BINDS+=(--ro-bind "$HOST_PLUGIN_PATH" "$SANDBOX_HOME/.claude/plugins/$plugin")
 done
 set +f
 
@@ -205,7 +213,7 @@ HUMAN_CREDS="$CLAUDE_DIR/.credentials.json"
 # `.claude/` pod-owned doit exister host-side pour héberger le mountpoint creds (POD_DIR est lui-même
 # bind-monté RW → ce mkdir est visible dans le sandbox). do_project le crée déjà ; défensif ici.
 mkdir -p "$POD_DIR/.claude"
-AUTH_BIND_ARGS=(--bind "$HUMAN_CREDS" "$POD_DIR/.claude/.credentials.json")
+AUTH_BIND_ARGS=(--bind "$HUMAN_CREDS" "$SANDBOX_HOME/.claude/.credentials.json")
 
 # Télémétrie ↔ feature-flags. Les flags Statsig/GrowthBook (dont `MONITOR_TOOL`, qui expose
 # l'outil Monitor = réveil-par-flag du pod, cf. investigation 2026-06-07 :
@@ -285,23 +293,24 @@ exec "$BWRAP_BIN" \
   --tmpfs /home \
   --tmpfs /tmp \
   --dev /dev --proc /proc \
-  --bind "$POD_DIR" "$POD_DIR" \
+  --bind "$POD_DIR" "$SANDBOX_HOME" \
   ${CWD_BIND_ARGS[@]+"${CWD_BIND_ARGS[@]}"} \
   ${AUTH_BIND_ARGS[@]+"${AUTH_BIND_ARGS[@]}"} \
   --ro-bind "$GIT_MIRROR" "$GIT_MIRROR" \
   --ro-bind "$VENDOR_BIN" "$POD_VENDOR_BIN" \
-  --ro-bind "$VENDOR_SHARE" "$POD_DIR/.local/share/$VENDOR_NAME" \
+  --ro-bind "$VENDOR_SHARE" "$SANDBOX_HOME/.local/share/$VENDOR_NAME" \
   --bind "$POD_SOCK_DIR" "$POD_SOCK_DIR" \
   ${PLUGIN_BINDS[@]+"${PLUGIN_BINDS[@]}"} \
   ${CATALOG_BINDS[@]+"${CATALOG_BINDS[@]}"} \
   --chdir "$WORKDIR" \
-  --setenv HOME "$POD_DIR" \
-  --setenv PATH "$POD_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin" \
+  --setenv HOME "$SANDBOX_HOME" \
+  --setenv PATH "$SANDBOX_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" \
   --setenv TERM "${TERM:-xterm-256color}" \
   --setenv LANG "${LANG:-C.UTF-8}" \
   --setenv LCARS_POD_ID "$POD_ID" \
   --setenv LCARS_ROLE "$ROLE" \
   --setenv LCARS_POD_CWD "$WORKDIR" \
+  --setenv LCARS_POD_HOME "$SANDBOX_HOME" \
   --setenv GIT_AUTHOR_NAME "${GIT_AUTHOR_NAME:?Z4: GIT_AUTHOR_NAME requis (humain, posé par pod.ex)}" \
   --setenv GIT_AUTHOR_EMAIL "${GIT_AUTHOR_EMAIL:?Z4: GIT_AUTHOR_EMAIL requis (humain)}" \
   --setenv GIT_COMMITTER_NAME "${GIT_COMMITTER_NAME:?Z4: GIT_COMMITTER_NAME requis (humain)}" \

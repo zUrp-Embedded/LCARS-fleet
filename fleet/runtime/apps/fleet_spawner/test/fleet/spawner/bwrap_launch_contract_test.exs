@@ -35,10 +35,11 @@ defmodule Fleet.Spawner.BwrapLaunchContractTest do
     assert src =~ ~r/HUMAN_CREDS="\$CLAUDE_DIR\/\.credentials\.json"/,
            "HUMAN_CREDS doit pointer $CLAUDE_DIR/.credentials.json"
 
-    # Le bind cible .credentials.json dans le .claude pod-owned, pas le répertoire.
+    # Le bind cible .credentials.json dans le .claude pod-owned, pas le répertoire. #monde-propre Stage B :
+    # la cible est sous SANDBOX_HOME (= $POD_DIR si non relocalisé, /home/.pod sinon) — toujours UN fichier.
     assert src =~
-             ~r/--bind\s+"\$HUMAN_CREDS"\s+"\$POD_DIR\/\.claude\/\.credentials\.json"/,
-           "AUTH_BIND_ARGS doit binder $HUMAN_CREDS → $POD_DIR/.claude/.credentials.json"
+             ~r/--bind\s+"\$HUMAN_CREDS"\s+"\$SANDBOX_HOME\/\.claude\/\.credentials\.json"/,
+           "AUTH_BIND_ARGS doit binder $HUMAN_CREDS → $SANDBOX_HOME/.claude/.credentials.json"
 
     # Le bind du DIR entier (ancienne fuite) ne doit plus exister.
     refute src =~ ~r/--bind\s+"\$CLAUDE_DIR"\s+"\$POD_DIR\/\.claude"/,
