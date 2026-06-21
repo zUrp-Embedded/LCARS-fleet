@@ -149,7 +149,10 @@ defmodule Fleet.Pilot.StageDispatcher do
             [
               mandate: mandate,
               pod_id: pod_id,
-              rc_name: rc_name(repo, role)
+              rc_name: rc_name(repo, role),
+              # #chantier monde-propre : nom de branche LOCALE parlant (titre du ticket sanitizé), pas
+              # le pod_id. Sert à phase.ex → `feature/<slug>`.
+              slug: feature_slug(issue)
             ]
             |> maybe_put_project(project)
             |> maybe_put_route(route)
@@ -440,7 +443,28 @@ defmodule Fleet.Pilot.StageDispatcher do
   # #chantier pod-seed : nom RC Desktop = `<projet>_<role>` (projet = segment final du repo, ex.
   # `fleet/poc-8` → `poc-8`). Label EXACT (claude_launch → `--remote-control "<nom>"`, zéro suffixe
   # auto). Distinct du pod_id (clé technique repo-scopée) ; ici c'est le label humain-lisible Desktop.
-  defp rc_name(repo, role), do: "#{repo |> String.split("/") |> List.last()}_#{role}"
+  defp rc_name(repo, role), do: "#{project_name(repo)}_#{role}"
+
+  # #chantier monde-propre : nom de projet path/name-safe (charset [A-Za-z0-9-], zéro espace/`/`/`_`).
+  # Segment final du repo, sanitizé. C'est LA source du `<project>` partout en aval (nom RC Desktop,
+  # SANDBOX_HOME `/home/<project>`, seed-store, branche) via `rc_name` → un seul point de vérité, propre.
+  # Pas de `_` (séparateur de rc_name `<project>_<role>` → garderait l'ambiguïté).
+  defp project_name(repo),
+    do: repo |> String.split("/") |> List.last() |> String.replace(~r/[^A-Za-z0-9-]/, "-")
+
+  # #chantier monde-propre : slug parlant du titre du ticket pour la branche LOCALE (`feature/<slug>`).
+  # Sanitizé + tronqué ; vide → `work`. Aucune fuite de pod_id/human.
+  defp feature_slug(issue) do
+    (issue["title"] || "")
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "-")
+    |> String.trim("-")
+    |> String.slice(0, 40)
+    |> case do
+      "" -> "work"
+      s -> s
+    end
+  end
 
   defp maybe_put_project(spawn_opts, nil), do: spawn_opts
   defp maybe_put_project(spawn_opts, project), do: Keyword.put(spawn_opts, :project, project)

@@ -94,9 +94,11 @@ defmodule Fleet.ProjectBootstrap.ConformanceTest do
     spec = %{"project" => %{"name" => "demo", "repo_path" => repo, "base_branch" => "main"}}
     res = prepare!(pod_id, cap(spec: spec), [slug: "wk"], ctx)
 
-    assert res.branch =~ ~r/^feature\/#{pod_id}-/
+    # #chantier monde-propre : branche = `feature/<slug>` (slug du dispatcher), SANS le pod_id.
+    assert res.branch == "feature/wk"
+    refute res.branch =~ pod_id
     {head, 0} = System.cmd("git", ["-C", res.workspace, "rev-parse", "--abbrev-ref", "HEAD"])
-    assert String.trim(head) =~ ~r/^feature\/#{pod_id}-/
+    assert String.trim(head) == "feature/wk"
   end
 
   @tag :tmp_dir

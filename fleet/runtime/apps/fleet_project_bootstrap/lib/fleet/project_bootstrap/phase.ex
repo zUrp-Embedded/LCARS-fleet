@@ -64,9 +64,13 @@ defmodule Fleet.ProjectBootstrap.Phase do
           ws = Path.join(pod_dir, "workspace")
           ref = project["reference_repo_path"]
           base = project["base_branch"] || "main"
+
+          # #chantier monde-propre : branche = `feature/<slug>` SANS le pod_id (l'agent ne doit pas
+          # relire son pod_id dans sa propre branche — containment). Le slug vient du dispatcher (titre
+          # du ticket sanitizé) ; défaut `work`. (Fixe au passage l'ancien bug : `replace_prefix("pod-")`
+          # ne strippait pas `pod_` → le `pod_` restait collé.)
           slug = Keyword.get(opts, :slug, "work")
-          pod_id = Path.basename(pod_dir) |> String.replace_prefix("pod-", "")
-          feature = "feature/#{pod_id}-#{slug}"
+          feature = "feature/#{slug}"
           ref_args = if ref, do: ["--reference", ref], else: []
 
           with {_, 0} <-
