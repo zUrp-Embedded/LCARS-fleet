@@ -2239,26 +2239,39 @@ defmodule Fleet.Spawner.Pod do
   # il tournait sur l'HÔTE, pas dans le sandbox.
   #
   # Fix (couche N1, le provisioning) : `bwrap_launch.sh` reste MCP-agnostique (N0).
-  # On copie le bridge sous `pod_dir/.lcars/` (pod_dir est bind RW AU MÊME chemin
-  # absolu hôte+sandbox via `--bind "$POD_DIR" "$POD_DIR"`) et on résout les
-  # placeholders `{{BRIDGE}}`/`{{BRIDGE_LOG}}` de la spec sur ces chemins pod-locaux.
-  # Le monde MCP (config + bridge + log) est ainsi entièrement projeté dans le pod.
+  # On copie le bridge sous `pod_dir/.lcars/` et on résout les placeholders
+  # `{{BRIDGE}}`/`{{BRIDGE_LOG}}` de la spec.
+  #
+  # ⚠ RÉGRESSION monde-propre (Stage B) corrigée ici : l'ancienne version assumait que le pod_dir était
+  # bind AU MÊME chemin absolu hôte+sandbox (`--bind "$POD_DIR" "$POD_DIR"`) → elle posait le path HÔTE
+  # (`state.pod_dir = /home/<human>/pods/pod_<id>`) dans le `.mcp-fleet.json`. Depuis le chantier
+  # monde-propre, bwrap RELOCALISE le pod_dir derrière `/home/.pod` (`sandbox_home`) → le path hôte
+  # N'EXISTE PLUS dans le namespace → `bash -c "exec python3 <hôte>.py 2>><hôte>.log"` avorte au redirect
+  # (dossier parent absent) AVANT d'exec python → serveur MCP `fleet` jamais up → 0 tool `mcp__fleet__*`
+  # (prouvé live 2026-06-22 : arch + gatekeeper + consultants, le pont n'a jamais démarré). DEUX chemins
+  # distincts désormais : le bridge est COPIÉ sur le path HÔTE (où le spawner écrit), mais le `.mcp-fleet.json`
+  # référence le path IN-NAMESPACE (`sandbox_home/.lcars/…`, ce que claude exécute dans le sandbox). Host pods
+  # (containment none) : `sandbox_home == state.pod_dir` → identité (rétro-compat stricte).
   #
   # Injecte aussi `LCARS_POD_ID` dans l'env du serveur (ceinture A2.3b PASSE-7 : le
   # bridge l.37 le lit pour corréler `get_task` au bon pod ; ne pas dépendre de
   # l'héritage env claude→bridge) et force `alwaysLoad:true` (sinon les tools MCP
   # sont déférés derrière ToolSearch, absents du prompt turn-1).
   defp build_fleet_mcp_entry(spec, state) do
-    pod_bridge = Path.join([state.pod_dir, ".lcars", "fleet_mcp_bridge.py"])
-    pod_log = Path.join([state.pod_dir, ".lcars", "fleet_mcp_bridge.log"])
+    # HÔTE : où le spawner ÉCRIT réellement le pont (le pod_dir réel sur le disque).
+    host_bridge = Path.join([state.pod_dir, ".lcars", "fleet_mcp_bridge.py"])
 
-    with :ok <- copy_bridge_into_pod(spec["bridge_source"], pod_bridge) do
+    # IN-NAMESPACE : ce que claude EXÉCUTE dans le sandbox (pod_dir remappé → /home/.pod en bwrap).
+    ns_bridge = Path.join([sandbox_home(state), ".lcars", "fleet_mcp_bridge.py"])
+    ns_log = Path.join([sandbox_home(state), ".lcars", "fleet_mcp_bridge.log"])
+
+    with :ok <- copy_bridge_into_pod(spec["bridge_source"], host_bridge) do
       args =
         (spec["args"] || [])
         |> Enum.map(fn arg ->
           arg
-          |> String.replace("{{BRIDGE}}", pod_bridge)
-          |> String.replace("{{BRIDGE_LOG}}", pod_log)
+          |> String.replace("{{BRIDGE}}", ns_bridge)
+          |> String.replace("{{BRIDGE_LOG}}", ns_log)
         end)
 
       entry =

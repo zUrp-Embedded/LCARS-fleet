@@ -905,6 +905,35 @@ defmodule Fleet.Spawner.PodTest do
       # Le refus est à do_project (provisioning) AVANT do_launch → jamais de launch.
       refute_received {:launch_called, _args, _env}
     end
+
+    test "monde-propre : .mcp-fleet.json porte le path IN-NAMESPACE (/home/.pod), pas le pod_dir hôte" do
+      # Régression live 2026-06-22 : la génération posait le path HÔTE (state.pod_dir) du pont dans le
+      # .mcp-fleet.json. bwrap remappant le pod_dir → /home/.pod, ce path n'existe PAS in-sandbox → le pont
+      # MCP n'a jamais démarré → 0 tool mcp__fleet__* → TOUS les pods aveugles (data-plane mort, prouvé
+      # arch+gatekeeper+consultants). Le config doit porter le path sandbox (`sandbox_home`), la COPIE du
+      # pont visant elle le pod_dir hôte. valid_profile = containment bwrap → sandbox_home = /home/.pod.
+      Application.put_env(:fleet_spawner, :mcp_server_spec, %{
+        "command" => "bash",
+        "args" => ["-c", "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"],
+        "env" => %{"LCARS_FLEET_MCP_URL" => "http://127.0.0.1:21022/mcp"}
+      })
+
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :mcp_server_spec) end)
+
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-mcp-ns-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      %{pod_dir: pod_dir} = GenServer.call(pid, :info)
+      config = Path.join(pod_dir, ".mcp-fleet.json") |> File.read!() |> Jason.decode!()
+      [_, cmd] = get_in(config, ["mcpServers", "fleet", "args"])
+
+      assert cmd =~ "/home/.pod/.lcars/fleet_mcp_bridge.py"
+      assert cmd =~ "/home/.pod/.lcars/fleet_mcp_bridge.log"
+      # JAMAIS le pod_dir hôte (invisible in-sandbox → c'était LE bug).
+      refute cmd =~ pod_dir
+    end
   end
 
   describe "mundo invocado — intégration e2e (#1 creds-inject + cwd + doc-mount dans un spawn)" do
