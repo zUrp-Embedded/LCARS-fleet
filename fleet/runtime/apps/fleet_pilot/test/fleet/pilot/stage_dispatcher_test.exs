@@ -233,7 +233,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     test "spawn : ordre label-verrou → pod (plus de comment-lock), retourne {:ok, {:spawned, pod, role}}" do
       payload = eng_issue()
 
-      assert {:ok, {:spawned, "issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts())
 
       # le mandat = issue.body + l'instruction de LIVRAISON git-native (commit local + trailer),
@@ -250,7 +250,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert opts[:mandate] =~ "blocked"
 
       # le mandat est ENQUEUÉ en TaskQueue (sinon le pod se croit bootstrap → idle ; bug PASSE-9)
-      assert_received {:enqueued, "issue-42-engineer", attrs}
+      assert_received {:enqueued, "lordzurp-lcars-test-issue-42-engineer", attrs}
       assert attrs.brief =~ "fais le hello"
       assert attrs.role == "engineer"
 
@@ -258,21 +258,21 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # "issue-#{number}" pour `ticket_id` ne serait pas attrapé (le pod_id ≠ ticket_id).
       assert attrs.ticket_id == "issue-42"
       # kick best-effort émis
-      assert_received {:woke, "issue-42-engineer"}
+      assert_received {:woke, "lordzurp-lcars-test-issue-42-engineer"}
     end
 
     test "BL-055 : pod déjà vivant (id stable) → RE-MANDATE (enqueue+wake), PAS de re-spawn" do
       payload = eng_issue()
 
-      assert {:ok, {:spawned, "issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts(spawner: StubSpawnerAlive))
 
       # idempotent : le dispatcher a CONSULTÉ pod_info, l'a vu vivant → AUCUN spawn_pod.
-      assert_received {:pod_info, "issue-42-engineer"}
+      assert_received {:pod_info, "lordzurp-lcars-test-issue-42-engineer"}
       refute_received {:spawned, _, _}
       # le mandat de rework est quand même enqueué + le pod réveillé (re-mandate).
-      assert_received {:enqueued, "issue-42-engineer", _attrs}
-      assert_received {:woke, "issue-42-engineer"}
+      assert_received {:enqueued, "lordzurp-lcars-test-issue-42-engineer", _attrs}
+      assert_received {:woke, "lordzurp-lcars-test-issue-42-engineer"}
     end
 
     test "BL-055 : pod vivant + enqueue KO → verrou retiré mais pod PAS tué (contexte préservé)" do
@@ -297,7 +297,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # le pod avait spawné → tué (sinon orphelin) ; le verrou lcars-in-flight → retiré (sinon le
       # poller skipperait l'issue à jamais).
       assert_received {:spawned, "issue-42", _}
-      assert_received {:killed, "issue-42-engineer"}
+      assert_received {:killed, "lordzurp-lcars-test-issue-42-engineer"}
       assert_received {:removed_label, "lcars-in-flight"}
     end
 
@@ -319,7 +319,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       opts = dispatch_opts(project_resolver: fn _repo, _opts -> {:ok, project} end)
 
-      assert {:ok, {:spawned, "issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
@@ -369,7 +369,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           carte_loader: fn "mandate-gate" -> carte end
         )
 
-      assert {:ok, {:spawned, "issue-42-consultant", "consultant"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-consultant", "consultant"}} =
                StageDispatcher.dispatch_issue(payload, opts)
     end
 
@@ -433,7 +433,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           carte_loader: fn "mg" -> carte end
         )
 
-      assert {:ok, {:spawned, "issue-42-consultant", "consultant"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-consultant", "consultant"}} =
                StageDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
@@ -510,7 +510,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           ]
         )
 
-      assert {:ok, {:spawned, "pr-6-qualifier", "qualifier"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-pr-6-qualifier", "qualifier"}} =
                StageDispatcher.dispatch_review(pr(), opts)
 
       # ticket_id = l'ISSUE (remontee de head.ref lcars/issue-42-engineer), PAS la PR
@@ -527,10 +527,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:mandate] =~ "implémente le décodeur morse"
 
       # enqueue cible le pod_id pr-... ; ticket_id = l'issue
-      assert_received {:enqueued, "pr-6-qualifier", attrs}
+      assert_received {:enqueued, "lordzurp-lcars-test-pr-6-qualifier", attrs}
       assert attrs.ticket_id == "issue-42"
       assert attrs.role == "qualifier"
-      assert_received {:woke, "pr-6-qualifier"}
+      assert_received {:woke, "lordzurp-lcars-test-pr-6-qualifier"}
     end
 
     test "PR verrouillee (lcars-in-flight) -> skip, pas de spawn" do
@@ -567,7 +567,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # BL-055 die-on-promote : le producteur (id déterministe issue-42-engineer) est tué au
       # merge. En one-shot il est déjà mort (kill = no-op de sûreté) ; en pipe c'est le vrai
       # release terminal. Inconditionnel côté dispatcher → couvre les deux profils.
-      assert_received {:killed, "issue-42-engineer"}
+      assert_received {:killed, "lordzurp-lcars-test-issue-42-engineer"}
     end
 
     test "②.1d : un juge a demandé des changements (les autres approuvent) -> re-spawn le PRODUCTEUR" do
@@ -587,7 +587,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       # producteur = role git_native de head (lcars/issue-42-engineer) = engineer ; verrou sur la PR.
-      assert {:ok, {:spawned, "issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
                StageDispatcher.dispatch_review(pr, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
@@ -600,7 +600,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       # Voix de l'eng (rework) : le mandat demande un `summary` = réponse au reviewer, posté sur la PR.
       assert spawn_opts[:mandate] =~ "summary"
-      assert_received {:enqueued, "issue-42-engineer", attrs}
+      assert_received {:enqueued, "lordzurp-lcars-test-issue-42-engineer", attrs}
       assert attrs.role == "engineer"
     end
 
@@ -622,7 +622,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           ]
         )
 
-      assert {:ok, {:spawned, "pr-6-reviewer", "reviewer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-pr-6-reviewer", "reviewer"}} =
                StageDispatcher.dispatch_review(pr, opts)
 
       refute_received {:merged, _}
@@ -645,7 +645,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert {:error, {:enqueue_failed, :broker_down}} =
                StageDispatcher.dispatch_review(pr(), opts)
 
-      assert_received {:killed, "pr-6-qualifier"}
+      assert_received {:killed, "lordzurp-lcars-test-pr-6-qualifier"}
       assert_received {:removed_label, "lcars-in-flight"}
     end
   end

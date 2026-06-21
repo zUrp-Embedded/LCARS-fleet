@@ -121,10 +121,11 @@ defmodule Fleet.Pilot.StageDispatcher do
           # rendait l'id unique par hop → re-spawn à chaque rework, l'eng pipe (long-lived) lingérait,
           # contexte perdu. Stable → un re-dispatch retombe sur le MÊME pod : s'il est vivant (eng pipe),
           # on le RE-MANDATE (garde son contexte), sinon on spawn. (Idempotence — cf. spawn_or_remandate.)
-          # F071 : le préfixe "issue-" ci-dessous (et la branch hop_consumer.ex:318 "lcars/issue-...") est
-          # aligné PAR CONVENTION sur `Fleet.Pilot.TicketId.@prefix` — formats DISTINCTS du ticket_id (jamais
-          # parsés), mais si ce préfixe change un jour, mettre à jour ces 2 littéraux aussi (couplage implicite).
-          pod_id = "issue-#{number}-#{role}"
+          # #25 : pod_id REPO-SCOPÉ via `Fleet.Pilot.PodId` (clé GLOBALE → désambiguïse cross-repo/run).
+          # La branche reste repo-LOCALE (`lcars/issue-N-role`, branch_for/2) — pas de collision dans un
+          # repo → NON scopée ; pod_id et branche construits indépendamment depuis (n, role). pod_id opaque
+          # (jamais re-parsé) → seule exigence : tous les sites passent par le helper (format unique).
+          pod_id = Fleet.Pilot.PodId.for_issue(repo, number, role)
 
           # F077/F078 : la FORME du mandat (worker exécutable | juge désamorcé) est lue du cap-profile
           # (`mandate_kind`), PAS d'un nom magique "gatekeeper" en ring2 (differentiation-par-catalogue).
@@ -346,8 +347,10 @@ defmodule Fleet.Pilot.StageDispatcher do
       # diagnostic across reworks). Le JUGE (one-shot) keye sur la PR → re-spawn frais à chaque review.
       pod_id =
         case kind do
-          :rework -> "issue-#{issue_n}-#{role}"
-          _ -> "pr-#{pr_number}-#{role}"
+          # #25 : repo-scopé. Rework keye sur l'ISSUE → MÊME id que dispatch_issue (reuse BL-055) ;
+          # juge keye sur la PR. Helper unique (cf. Fleet.Pilot.PodId).
+          :rework -> Fleet.Pilot.PodId.for_issue(repo, issue_n, role)
+          _ -> Fleet.Pilot.PodId.for_pr(repo, pr_number, role)
         end
 
       # :judge -> GateBrief desamorce (I-CBC) ; :rework -> brief de rework au PRODUCTEUR (corrige + push).
@@ -400,7 +403,8 @@ defmodule Fleet.Pilot.StageDispatcher do
           # BL-055 die-on-promote : le lot est SCELLÉ (mergé) → l'eng pipe `issue-N-producer` (long-lived,
           # qui gardait son contexte across reworks) a fini sa vie → kill best-effort (no-op s'il est déjà
           # mort). Sans ça il lingère idle pour toujours = leak terminal du chantier eng-reuse.
-          _ = safe_kill(ctx.spawner, "issue-#{issue_n}-#{producer}")
+          # #25 : MÊME helper repo-scopé que le spawn/rework → le kill cible bien le pod existant.
+          _ = safe_kill(ctx.spawner, Fleet.Pilot.PodId.for_issue(ctx.repo, issue_n, producer))
 
           Logger.info(
             "StageDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
