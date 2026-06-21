@@ -225,10 +225,11 @@ defmodule Fleet.Pilot.StageDispatcher do
     head_sha = get_in(pr, ["head", "sha"])
     labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
 
-    # Le SET des juges = `requested_reviewers` (posé par `request_review` ; carte ET no-carte), logins
-    # downcasés. Gitea NE LES RETIRE PAS de façon fiable après review (vérifié live #6) → on n'en déduit
-    # PAS « qui reste à juger ». C'est la LISTE DES REVIEWS (verdict décisif par juge) qui le dit.
-    requested = pr |> Map.get("requested_reviewers") |> List.wrap() |> Enum.map(&login_of/1)
+    # F-E8 — le SET des juges NE se lit PAS du seul `requested_reviewers` : Gitea altère ce champ de façon
+    # NON FIABLE (un juge a pu en DISPARAÎTRE sans avoir voté → merge sur demi-jury, live PoC-7). Source
+    # STABLE = les review-records (`pr_review_state.reviewers`, REQUEST_REVIEW inclus). On garde
+    # `requested_reviewers` en UNION (défensif : un fraîchement-demandé pas encore dans les records). Logins↓.
+    requested_field = pr |> Map.get("requested_reviewers") |> List.wrap() |> Enum.map(&login_of/1)
 
     # #5.2 D1 — pas de check d'ownership ici : le scoping PR est FORGE-SIDE en amont (list_open_pulls ne rend
     # QUE mes PR via /issues?type=pulls&assigned_by). dispatch_review ne fait que du dispatch de jugement.
@@ -240,8 +241,12 @@ defmodule Fleet.Pilot.StageDispatcher do
       # courant (sinon rework infini, live #7).
       verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
 
-      case ctx.forge.pr_review_verdicts(ctx.repo, pr_number, verdict_opts) do
-        {:ok, verdicts} ->
+      case ctx.forge.pr_review_state(ctx.repo, pr_number, verdict_opts) do
+        {:ok, %{verdicts: verdicts, reviewers: jury}} ->
+          # F-E8 : SET des juges = union(requested_reviewers VOLATIL, review-records STABLES). Un juge
+          # tombé de `requested_reviewers` sans voter reste dans le jury → `pending` → spawné, jamais un
+          # merge sur demi-jury (cf. ForgeClient.pr_review_state).
+          requested = Enum.uniq(requested_field ++ jury)
           dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
 
         {:error, reason} ->

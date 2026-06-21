@@ -80,6 +80,10 @@ defmodule Fleet.Pilot.PollerTest do
     # ②.1d : par defaut aucun verdict de juge (les tests poller ne couvrent pas merge/rework) → tout
     # juge demandé est « pending » → dispatché.
     def pr_review_verdicts(_repo, _index, _opts), do: {:ok, %{}}
+
+    # F-E8 : état de jury combiné — aucun verdict + jury vide (les tests poller ne couvrent pas merge) →
+    # `requested` = `requested_reviewers` du PR → tout juge demandé reste pending → dispatché.
+    def pr_review_state(_repo, _index, _opts), do: {:ok, %{verdicts: %{}, reviewers: []}}
     def post_route(_repo, _n, p, s, _opts), do: send(self(), {:route, p, s}) && {:ok, :posted}
     def set_assignee(_repo, _n, login, _opts), do: send(self(), {:assignee, login}) && {:ok, :set}
 

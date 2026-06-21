@@ -64,6 +64,16 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     def pr_review_verdicts(_repo, _index, opts),
       do: {:ok, Keyword.get(opts, :_test_verdicts, %{})}
 
+    # F-E8 : état de jury combiné (verdicts + SET du jury depuis les review-records). `:_test_reviewers`
+    # (défaut [] → `requested` = le seul `requested_reviewers` du PR, comportement legacy des tests).
+    def pr_review_state(_repo, _index, opts),
+      do:
+        {:ok,
+         %{
+           verdicts: Keyword.get(opts, :_test_verdicts, %{}),
+           reviewers: Keyword.get(opts, :_test_reviewers, [])
+         }}
+
     # Fix famine-d'info (rework) : feedback REQUEST_CHANGES injecté au brief de rework. Stub :
     # forge_opts[:_test_feedback] (liste %{"login","body"}, défaut un body non-vide).
     def change_request_feedback(_repo, _index, opts),
@@ -592,6 +602,30 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:mandate] =~ "summary"
       assert_received {:enqueued, "issue-42-engineer", attrs}
       assert attrs.role == "engineer"
+    end
+
+    test "F-E8 : juge tombé de requested_reviewers (mais dans les review-records) reste au jury -> spawn, PAS merge" do
+      # BUG live PoC-7 : Gitea a fait DISPARAÎTRE le reviewer de `requested_reviewers` SANS qu'il vote
+      # (review-record encore REQUEST_REVIEW). Le champ volatil ne montre que le qualifier (qui a approuvé).
+      # SANS le fix : requested=[qualifier], pending=[] → MERGE prématuré sur 1 juge (demi-jury). AVEC : le
+      # jury vient des review-records (`pr_review_state.reviewers` = [qualifier, reviewer]) → union →
+      # pending=[reviewer] → on spawn le reviewer, JAMAIS de merge.
+      pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}], "number" => 6})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved},
+            _test_reviewers: ["qualifier", "reviewer"],
+            _test_route: {:ok, {"poc", "review"}},
+            _test_issue_body: "implémente le décodeur morse"
+          ]
+        )
+
+      assert {:ok, {:spawned, "pr-6-reviewer", "reviewer"}} =
+               StageDispatcher.dispatch_review(pr, opts)
+
+      refute_received {:merged, _}
     end
 
     test "PR sur branche non-fleet -> skip (jamais misroutee)" do

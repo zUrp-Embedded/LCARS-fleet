@@ -161,6 +161,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     # pas via dispatch_review → dispatch_review n'est appelé qu'AVANT toute review ici → {} suffit.
     def pr_review_verdicts(_pid, _r, _pr, _o), do: {:ok, %{}}
 
+    # F-E8 : état de jury combiné. Le chemin CARTE merge via complete_judge :promote (pas dispatch_review)
+    # → dispatch_review n'est appelé qu'AVANT review → verdicts {} + jury [] (requested = requested_reviewers).
+    def pr_review_state(_pid, _r, _pr, _o), do: {:ok, %{verdicts: %{}, reviewers: []}}
+
     # merge FF : PR merged + issue close (Closes #N).
     def merge_pr(pid, _r, pr, _o) do
       Agent.update(pid, fn s ->
@@ -196,6 +200,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def post_review(r, pr, ev, body, o), do: Sim.post_review(p(), r, pr, ev, body, o)
     def merge_pr(r, pr, o), do: Sim.merge_pr(p(), r, pr, o)
     def pr_review_verdicts(r, pr, o), do: Sim.pr_review_verdicts(p(), r, pr, o)
+    def pr_review_state(r, pr, o), do: Sim.pr_review_state(p(), r, pr, o)
   end
 
   defmodule CarteLoader do

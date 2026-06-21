@@ -616,16 +616,57 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec pr_review_verdicts(String.t(), integer(), Keyword.t()) ::
           {:ok, %{optional(String.t()) => :approved | :changes_requested}} | {:error, term()}
   def pr_review_verdicts(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
+    # Projection « verdicts seuls » de `pr_review_state` (factorisé : un seul fetch, une seule logique de
+    # scoping/dernière-review). Conservé pour les callers qui n'ont pas besoin du SET du jury (pod_tools).
+    with {:ok, %{verdicts: verdicts}} <- pr_review_state(repo, index, opts), do: {:ok, verdicts}
+  end
+
+  @doc """
+  État de jury d'une PR en UN fetch (`GET .../pulls/{index}/reviews`) : `verdicts` (décisifs par juge,
+  commit-scopés via `:head_sha` — cf. `pr_review_verdicts`) ET `reviewers` (le SET du jury).
+
+  **F-E8 — le SET du jury ne se lit PAS de `pr.requested_reviewers`** : ce champ est VOLATIL (Gitea
+  l'altère de façon non fiable — un juge a pu en DISPARAÎTRE sans avoir voté, ce qui faisait merger sur
+  demi-jury, live PoC-7). Source STABLE = les review-records, qui persistent : un `REQUEST_REVIEW` =
+  « ce juge a été demandé » ; un `APPROVED`/`REQUEST_CHANGES` = « il a voté ». Le caller (`dispatch_review`)
+  unionne avec `requested_reviewers` (défensif) et calcule `pending = jury -- verdicts` → un juge
+  jamais-voté reste `pending` (spawné), JAMAIS sauté.
+
+  ## Returns
+    * `{:ok, %{verdicts: %{login↓ => :approved | :changes_requested}, reviewers: [login↓]}}`
+    * `{:error, term()}` — HTTP/transport/config
+  """
+  @spec pr_review_state(String.t(), integer(), Keyword.t()) ::
+          {:ok,
+           %{
+             verdicts: %{optional(String.t()) => :approved | :changes_requested},
+             reviewers: [String.t()]
+           }}
+          | {:error, term()}
+  def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
     head_sha = Keyword.get(opts, :head_sha)
 
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} when is_list(reviews) <-
            http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
-      {:ok, verdicts_by_reviewer(reviews, head_sha)}
+      {:ok,
+       %{verdicts: verdicts_by_reviewer(reviews, head_sha), reviewers: jury_reviewers(reviews)}}
     else
-      {:ok, _non_list} -> {:ok, %{}}
+      {:ok, _non_list} -> {:ok, %{verdicts: %{}, reviewers: []}}
       {:error, _} = err -> err
     end
+  end
+
+  # F-E8 — le SET du jury = tout login ayant un review-record « de jury » : demandé (`REQUEST_REVIEW`) OU
+  # ayant voté (`APPROVED`/`REQUEST_CHANGES`). Exclut `COMMENT`/`PENDING` (bruit non-juge). Source STABLE
+  # (les records persistent) vs `requested_reviewers` volatil → un juge tombé du champ sans voter reste
+  # dans le jury → `pending` → spawné, plus de merge sur demi-jury.
+  defp jury_reviewers(reviews) do
+    reviews
+    |> Enum.filter(&(&1["state"] in ["REQUEST_REVIEW", "APPROVED", "REQUEST_CHANGES"]))
+    |> Enum.map(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
   end
 
   # Dernière review décisive PAR reviewer (login downcasé → verdict atom). Gitea liste par ordre de
