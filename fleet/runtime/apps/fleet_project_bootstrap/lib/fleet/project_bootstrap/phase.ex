@@ -62,6 +62,16 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # `Fleet.Spawner.@pod_workspace_subdir` (autorité de la convention #596). Ce module est le
           # PRODUCTEUR (il crée et retourne le workspace) ; Pod le RECOMPUTE via pod_workspace_path/1.
           ws = Path.join(pod_dir, "workspace")
+
+          # Idempotence du re-dispatch déterministe : un pod prédécesseur MORT (timeout/crash) laisse son
+          # workspace sur disque ; comme le pod_id est déterministe (`<repo-slug>-issue-N-role`), le
+          # re-dispatch retombe sur le MÊME pod_dir → `git clone` refuserait (« destination already exists
+          # and is not an empty directory ») → wedge PERMANENT du ticket (prouvé live 2026-06-22 : un
+          # consultant timeout bouclait à l'infini sur clone_failed). Le pod POSSÈDE son pod_dir (garde
+          # spawn = 1 pod/pod_id) → un `ws` résiduel ne peut venir que d'un prédécesseur mort → clean slate
+          # (le `base_sha` est ré-épinglé juste après, un clone frais est toujours correct).
+          _ = File.rm_rf(ws)
+
           ref = project["reference_repo_path"]
           base = project["base_branch"] || "main"
 

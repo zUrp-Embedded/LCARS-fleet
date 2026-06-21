@@ -51,6 +51,28 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     refute File.exists?(Path.join(doc, "src.txt"))
   end
 
+  test "idempotence : workspace résiduel (pod prédécesseur mort) → nettoyé + re-cloné, pas de clone_failed",
+       %{tmp_dir: tmp} do
+    # Régression live 2026-06-22 : un pod timeout/crash laisse son workspace ; le pod_id étant
+    # DÉTERMINISTE, le re-dispatch retombe sur le même pod_dir → `git clone` refusait (dest non vide)
+    # → wedge permanent du ticket. Le fix nettoie le résidu avant de re-cloner.
+    src = make_source_repo(Path.join(tmp, "src-idem"))
+    pod_dir = Path.join(tmp, "pod-idem-1")
+    File.mkdir_p!(pod_dir)
+    profile = cap(%{"repo_path" => src, "base_branch" => "main"})
+
+    # 1er clone OK (pod prédécesseur) + un résidu non committé qu'il aurait laissé en mourant.
+    assert {:ok, ws, _} = Clone.clone_or_skip(pod_dir, profile, [])
+    File.write!(Path.join(ws, "leftover.txt"), "junk d'un pod mort")
+
+    # re-dispatch sur le MÊME pod_dir : sans rm_rf → {:error, {:clone_failed, _}} ; avec → re-clone propre.
+    assert {:ok, ws2, feature2} = Clone.clone_or_skip(pod_dir, profile, [])
+    assert ws2 == ws
+    assert feature2 =~ "feature/"
+    assert File.exists?(Path.join(ws2, "src.txt"))
+    refute File.exists?(Path.join(ws2, "leftover.txt"))
+  end
+
   test "#596 R1 — base_sha pinne HEAD sur le commit capturé (pas le tip remote)", %{tmp_dir: tmp} do
     src = Path.join(tmp, "src-pin")
     File.mkdir_p!(src)
