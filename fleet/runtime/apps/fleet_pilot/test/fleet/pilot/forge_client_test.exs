@@ -126,6 +126,46 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "add_label/4 — F-E5 self-heal (label absent de la forge)" do
+    test "POST muet (label inconnu, 200 SANS le label) -> crée le label org puis ré-ajoute -> :added" do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []},
+        # 1er POST : Gitea ignore le nom inconnu -> 200 SANS le label (muet). 2e POST (après create) : posé.
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/labels"} => fn ->
+          n = Agent.get_and_update(counter, &{&1, &1 + 1})
+          if n == 0, do: {200, []}, else: {200, [%{"id" => 9, "name" => "lcars-awaits-arch"}]}
+        end,
+        # création du label manquant au niveau de l'ORG (le self-heal)
+        {"POST", "/api/v1/orgs/fleet/labels"} => fn ->
+          send(self(), :org_label_created)
+          {201, %{"id" => 9, "name" => "lcars-awaits-arch"}}
+        end
+      }
+
+      assert {:ok, :added} =
+               ForgeClient.add_label("fleet/lcars", 42, "lcars-awaits-arch", opts(handlers))
+
+      # le label a été créé (org) PUIS le 2e POST issue/labels l'a posé (2 POST issue + 1 POST org).
+      assert_received :org_label_created
+      assert Agent.get(counter, & &1) == 2
+    end
+
+    test "label toujours absent même après création -> fail-loud {:label_not_added} (jamais un :ok menteur)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []},
+        # POST muet à CHAQUE fois (le label ne tient jamais) -> pas de boucle silencieuse, on remonte.
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []},
+        {"POST", "/api/v1/orgs/fleet/labels"} =>
+          {201, %{"id" => 9, "name" => "lcars-awaits-arch"}}
+      }
+
+      assert {:error, {:label_not_added, "lcars-awaits-arch"}} =
+               ForgeClient.add_label("fleet/lcars", 42, "lcars-awaits-arch", opts(handlers))
+    end
+  end
+
   describe "list_open_issues_without_label/3" do
     test "filtre client-side les issues avec le label exclu" do
       handlers = %{

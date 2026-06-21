@@ -1070,10 +1070,58 @@ defmodule Fleet.Pilot.ForgeClient do
   # labels REPO **et ORG** côté serveur (`IssueLabelsOption.labels` = « strings representing label
   # names », doc swagger) → plus de résolution repo-id côté client (qui ratait les org-labels). Les
   # labels-verrous du wire-protocol vivent au niveau ORG `fleet` (config fleet, une fois, pas par-repo).
+  #
+  # F-E5 — SELF-HEAL : Gitea ignore EN SILENCE un nom de label qui n'existe NI au repo NI à l'org (POST
+  # 200, mais le label n'est PAS posé) → le verrou protocole serait fantôme → boucle de re-dispatch
+  # (live PoC-7 : `lcars-awaits-arch` absent de l'org). On ne se fie donc PAS au seul 200 : on VÉRIFIE
+  # que le label est dans la réponse ; absent → on le CRÉE (org du repo) puis on ré-essaie ; toujours
+  # absent → fail-loud `{:label_not_added}` (jamais un :ok menteur). Plus de dépendance à des labels
+  # créés à la main.
   defp add_issue_label(config, repo, issue_number, label_name) do
+    case post_issue_label(config, repo, issue_number, label_name) do
+      {:ok, true} ->
+        :ok
+
+      {:ok, false} ->
+        with :ok <- ensure_org_label(config, repo, label_name),
+             {:ok, true} <- post_issue_label(config, repo, issue_number, label_name) do
+          :ok
+        else
+          _ -> {:error, {:label_not_added, label_name}}
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # POST le label ET vérifie qu'il est réellement posé : la réponse Gitea = les labels de l'issue après
+  # ajout. Un nom inconnu est ignoré en silence (200 sans le label) → `{:ok, false}` (à compenser).
+  defp post_issue_label(config, repo, issue_number, label_name) do
     case http_post(config, "/repos/#{repo}/issues/#{issue_number}/labels", %{labels: [label_name]}) do
-      {:ok, _body} -> :ok
+      {:ok, body} when is_list(body) -> {:ok, Enum.any?(body, &(&1["name"] == label_name))}
+      {:ok, _non_list} -> {:ok, false}
       {:error, _} = err -> err
+    end
+  end
+
+  # F-E5 — crée le label protocole manquant au niveau de l'ORG du repo (convention LCARS : les labels
+  # `lcars-*` sont des labels d'ORG, partagés par tous les repos de la fleet — vérifié live). Couleur/
+  # description par défaut (le NOM porte le protocole ; la couleur est cosmétique). Tolérant : un échec
+  # (créé en concurrence, ou repo non-org) → `:ok` — c'est le re-POST + sa vérif qui tranchent (sinon
+  # le fail-loud d'`add_issue_label` remonte).
+  defp ensure_org_label(config, repo, label_name) do
+    org = repo |> String.split("/") |> List.first()
+
+    body = %{
+      name: label_name,
+      color: "#ededed",
+      description: "label protocole lcars (auto-cree, F-E5)"
+    }
+
+    case http_post(config, "/orgs/#{org}/labels", body) do
+      {:ok, _} -> :ok
+      {:error, _} -> :ok
     end
   end
 
