@@ -1005,6 +1005,11 @@ defmodule Fleet.Spawner.Pod do
           |> maybe_put_pod_cwd(state)
           # #monde-propre Stage B : relocalise le home intra-pod (bwrap only) → bwrap masque le pod_dir réel.
           |> maybe_put_sandbox_home(state)
+          # LCARS_POD_DIR = racine pod VUE PAR L'AGENT (= sandbox_home : /home/.pod en bwrap, pod_dir en host).
+          # Le SP + watch.sh la lisent (`${LCARS_POD_DIR:-$HOME}`) pour trouver watch.sh/turn.flag. Avant : unset
+          # → fallback `$HOME` ; OK en bwrap ($HOME=/home/.pod) mais FAUX en host ($HOME=home réel ≠ pod_dir où
+          # vivent watch.sh/turn.flag). On la pose explicitement (les pods la reportaient unset, 2026-06-22).
+          |> Map.put("LCARS_POD_DIR", sandbox_home(state))
           # Mounts CATALOGUE (cap-profile-driven) → bwrap_launch les bind. Vide / host_launch = inerte.
           |> Map.put("LCARS_POD_MOUNTS", mounts_env(cap_profile_mounts(state.cap_profile)))
 

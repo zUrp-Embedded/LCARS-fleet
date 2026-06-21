@@ -873,6 +873,10 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, env}, 2_000
       assert env["LCARS_AUTH_MODE"] == "bind"
       refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
+
+      # LCARS_POD_DIR posé explicitement (= sandbox_home : /home/.pod en bwrap) — le SP/watch.sh le lisent
+      # pour trouver watch.sh/turn.flag ; avant il était unset (fallback $HOME fragile, faux en host).
+      assert env["LCARS_POD_DIR"] == "/home/.pod"
     end
   end
 
