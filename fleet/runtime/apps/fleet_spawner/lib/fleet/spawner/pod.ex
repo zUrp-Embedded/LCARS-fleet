@@ -786,20 +786,53 @@ defmodule Fleet.Spawner.Pod do
   # côté (`<pod_dir>/work`). bwrap_launch lit `LCARS_POD_CWD` (défaut `$POD_DIR`). Pas de projet → cwd
   # = pod_dir (pods permanents/memory-X sans repo).
   defp maybe_put_pod_cwd(env, state) do
-    case effective_project(state)["repo_path"] do
-      nil -> env
-      # F121 : dérive le workspace via l'autorité unique (Fleet.Spawner), pas un littéral recopié.
-      _ -> Map.put(env, "LCARS_POD_CWD", pod_cwd(state))
+    case rc_project(state) do
+      # Pas de projet nommé (permanent/admin) → comportement actuel : cwd = workspace réel si projet
+      # cloné, sinon défaut bwrap (pod_dir). Pas de remap.
+      nil ->
+        case effective_project(state)["repo_path"] do
+          nil -> env
+          _ -> Map.put(env, "LCARS_POD_CWD", pod_cwd_real(state))
+        end
+
+      # #monde-propre : l'agent voit `/home/<project>` (LCARS_POD_CWD) ; bwrap bind le workspace RÉEL
+      # (LCARS_POD_CWD_SRC) dessus. Le pod_dir réel reste intact.
+      _project ->
+        env
+        |> Map.put("LCARS_POD_CWD", pod_cwd(state))
+        |> Map.put("LCARS_POD_CWD_SRC", pod_cwd_real(state))
     end
   end
 
-  # cwd EFFECTIF du pod (= LCARS_POD_CWD que claude_launch utilisera) — autorité unique partagée avec
-  # le recall-restore (#pod-seed v4) pour que le seed soit restauré au BON slug. Projet cloné →
-  # workspace ; sinon pod_dir (défaut bwrap_launch).
+  # cwd VU PAR L'AGENT dans le pod (= LCARS_POD_CWD + base du slug recall). #monde-propre : pour un
+  # pod-PROJET, l'agent voit `/home/<project>` (containment : ni human ni pod_id) ; bwrap y bind le
+  # workspace RÉEL (`pod_cwd_real`). Sinon (pas de projet nommé) = le réel. Le pod_dir RÉEL ne bouge
+  # PAS (reste `/home/<human>/pods/...`) — seul le CWD intra-pod est remappé.
   defp pod_cwd(state) do
+    case rc_project(state) do
+      nil -> pod_cwd_real(state)
+      project -> "/home/#{project}"
+    end
+  end
+
+  # Workspace RÉEL (hôte) sous le pod_dir : `pod_dir/workspace` si projet cloné, sinon `pod_dir`.
+  # C'est la SOURCE du bind cwd (bwrap mappe ce réel sur le `/home/<project>` vu par l'agent).
+  defp pod_cwd_real(state) do
     case effective_project(state)["repo_path"] do
       nil -> state.pod_dir
       _ -> Fleet.Spawner.pod_workspace_path(state.pod_dir)
+    end
+  end
+
+  # Nom de projet PROPRE depuis `rc_name` (`<project>_<role>`, source canonique sanitizée — dispatcher
+  # P1). `nil` si pas de rc_name (pods permanents / admin → pas de remap cwd). Partagé avec le checkpoint.
+  defp rc_project(state) do
+    with rc when is_binary(rc) <- Keyword.get(state.opts, :rc_name),
+         role <- cap_profile_name(state.cap_profile),
+         stripped when stripped != rc <- String.replace_suffix(rc, "_" <> role, "") do
+      stripped
+    else
+      _ -> nil
     end
   end
 
@@ -1170,15 +1203,18 @@ defmodule Fleet.Spawner.Pod do
   # pour rappel ultérieur (`--resume`). Permanents (sans rc_name) → pas de seed-store. Best-effort
   # (SeedStore ne raise jamais ici ; un échec ne casse pas le teardown).
   defp maybe_checkpoint_seed(state) do
-    role = cap_profile_name(state.cap_profile)
-
-    case Keyword.get(state.opts, :rc_name) do
+    case rc_project(state) do
       nil ->
         :ok
 
-      rc when is_binary(rc) ->
-        projet = String.replace_suffix(rc, "_" <> role, "")
-        _ = Fleet.Spawner.SeedStore.checkpoint(state.pod_dir, projet, role)
+      projet ->
+        _ =
+          Fleet.Spawner.SeedStore.checkpoint(
+            state.pod_dir,
+            projet,
+            cap_profile_name(state.cap_profile)
+          )
+
         :ok
     end
   end

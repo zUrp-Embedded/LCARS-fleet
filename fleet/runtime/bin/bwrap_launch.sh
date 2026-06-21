@@ -97,6 +97,14 @@ SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<h
 # cwd = racine de branche (monde-invoqué). Défaut $POD_DIR ; le spawner/bootstrap pose le repo cloné.
 WORKDIR="${LCARS_POD_CWD:-$POD_DIR}"
 
+# #monde-propre : remap du CWD INTRA-POD seulement. Si le spawner a posé LCARS_POD_CWD_SRC (le workspace
+# RÉEL sous le pod_dir), on le bind sur WORKDIR (= LCARS_POD_CWD, ex. /home/<project>) → l'agent voit un
+# chemin propre (ni human ni pod_id) alors que le pod_dir RÉEL reste /home/<human>/pods/... (bindé en
+# identité plus bas, INTACT). Absent → no-op (le CWD est couvert par le bind POD_DIR identité).
+CWD_BIND_ARGS=()
+[[ -n "${LCARS_POD_CWD_SRC:-}" && "$LCARS_POD_CWD_SRC" != "$WORKDIR" ]] &&
+  CWD_BIND_ARGS=(--bind "$LCARS_POD_CWD_SRC" "$WORKDIR")
+
 # Mode auth — bind UNIQUEMENT (token_arg retiré 2026-06-14). token_arg injectait l'access_token OAuth en
 #   `--setenv CLAUDE_CODE_OAUTH_TOKEN <token>` → FUITE dans l'argv (ps), ET pas de refresh (expiresAt:null)
 #   → un pod long (eng >8h) perdait l'auth en plein travail. bind (ADR-F) : bind RW de .credentials.json,
@@ -278,6 +286,7 @@ exec "$BWRAP_BIN" \
   --tmpfs /tmp \
   --dev /dev --proc /proc \
   --bind "$POD_DIR" "$POD_DIR" \
+  ${CWD_BIND_ARGS[@]+"${CWD_BIND_ARGS[@]}"} \
   ${AUTH_BIND_ARGS[@]+"${AUTH_BIND_ARGS[@]}"} \
   --ro-bind "$GIT_MIRROR" "$GIT_MIRROR" \
   --ro-bind "$VENDOR_BIN" "$POD_VENDOR_BIN" \
