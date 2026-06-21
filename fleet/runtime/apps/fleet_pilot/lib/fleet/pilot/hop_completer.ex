@@ -143,8 +143,16 @@ defmodule Fleet.Pilot.HopCompleter do
         "(il n'a pas d'autre canal vers la fleet que toi). L'issue reste hors-dispatch tant que " <>
         "`lcars-awaits-arch` est posé.\n\n" <> signature
 
+    # F-E6 — le commentaire de VERDICT est AU NOM DU JUGE (`as_role` : le texte dit « Verdict du juge X »,
+    # l'auteur forge doit être X, pas le compte système — sinon traça menteuse, masque le worker). Les
+    # labels (add/remove) restent SYSTÈME : l'état protocole appartient au système, pas au juge.
     with {:ok, _} <-
-           forge.post_comment(repo, n, body, Keyword.put(forge_opts, :dedup_signature, signature)),
+           forge.post_comment(
+             repo,
+             n,
+             body,
+             forge_opts |> as_role(role) |> Keyword.put(:dedup_signature, signature)
+           ),
          {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
          {:ok, _} <- forge.remove_label(repo, n, @in_flight_label, forge_opts) do
       Logger.info(
@@ -666,7 +674,14 @@ defmodule Fleet.Pilot.HopCompleter do
       Map.get(hop, :comment_body, default_comment(role, sha)) <>
         ForgeClient.result_block(Map.get(hop, :outputs)) <> "\n\n" <> signature
 
-    case forge.post_comment(repo, n, body, Keyword.put(forge_opts, :dedup_signature, signature)) do
+    # F-E6 — le comment signé du hop est AU NOM DU RÔLE qui finit (`as_role` : verdict du consultant /
+    # livrable de l'eng → auteur forge = le rôle, pas le compte système ; même geste que la PR/review/sceau).
+    case forge.post_comment(
+           repo,
+           n,
+           body,
+           forge_opts |> as_role(role) |> Keyword.put(:dedup_signature, signature)
+         ) do
       {:ok, _} = ok -> ok
       {:error, reason} -> {:error, {:comment, reason}}
     end
