@@ -1,7 +1,15 @@
 defmodule Fleet.TaskQueue.Server do
   @moduledoc """
-  GenServer source unique de vérité de la queue. Cf. DN `orchestration/task-queue` §C-3
-  (un seul écrivain), §D (persistence atomique `state.json` versionné `v: 1`), §E (events).
+  GenServer porteur de la queue EN RAM (un seul écrivain, §C-3). Cf. DN `orchestration/task-queue`
+  §D (persistence atomique `state.json` versionné `v: 1`, **opt-in**), §E (events).
+
+  AXIOME source-unique (2026-06-21) : la **forge** est la vérité du travail (issues/routes/PR) ; le
+  broker n'en est que le FRONT en RAM. Aucun champ du `Task` n'est broker-only-durable (tout est
+  re-dérivable au re-dispatch forge) → **en prod le broker tourne ÉPHÉMÈRE** (`persist: false`, cf.
+  `Application`) : pas de `state.json`, donc pas de tâches stale persistées qui survivent aux reboots
+  (cause des 1124 "en cours" accumulées). Au restart, la queue se re-dérive des polls forge (rail de
+  réconciliation canonique). La persistance ci-dessous reste un mécanisme **opt-in** (testé) pour un
+  futur état broker-only-durable — il n'en existe AUCUN à ce jour.
 
   Broadcast `%Fleet.Event{source: :task_queue, ...}` sur `Phoenix.PubSub`
   topic `fleet.events`, `correlation_id = task.id`. Recovery cross-restart via
@@ -123,6 +131,16 @@ defmodule Fleet.TaskQueue.Server do
       state: :pending,
       metadata: attrs[:metadata] || attrs["metadata"] || %{}
     }
+
+    # AXIOME cleanup (2026-06-21) : un mandat FRAIS supersède le `:pending` existant du pod (jamais pullé).
+    # Un seul pending/pod ; le forge-frais gagne sur le stale. Empêche l'empilement intra-session ET garantit
+    # que `get_task` sert le mandat COURANT, pas un résidu (le symptôme "en cours" servi à la place du rework).
+    # Les `:assigned/:in_progress` NE sont PAS touchés (le pod travaille dessus). DN task-queue : 1 mandat
+    # actif/pod ; ≥2 pending = duplication de re-dispatch, à superséder.
+    {state, superseded} = supersede_pending(state, pod_id)
+
+    if superseded > 0,
+      do: Logger.debug("TaskQueue: enqueue pod=#{pod_id} supersède #{superseded} :pending stale")
 
     new_state = state |> put_task(task) |> persist()
     # F144/F019 : payload = `%{task_id}` (cohérent avec tous les autres task_* events), PAS le
@@ -268,6 +286,19 @@ defmodule Fleet.TaskQueue.Server do
     |> Map.values()
     |> Enum.filter(&(&1.pod_id == pod_id))
     |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
+  end
+
+  # AXIOME cleanup : retire les `:pending` du pod (superséded par un mandat frais à l'enqueue). Garde tout
+  # le reste — autres pods, ET les `:assigned/:in_progress` du pod (il travaille dessus). Borne la queue à
+  # 1 mandat actif/pod (DN task-queue) → un re-dispatch ne peut plus EMPILER des pending stale. Retourne
+  # `{state, n_dropped}`.
+  defp supersede_pending(state, pod_id) do
+    {drop, keep} =
+      Enum.split_with(state.tasks, fn {_id, t} ->
+        t.pod_id == pod_id and t.state == :pending
+      end)
+
+    {%{state | tasks: Map.new(keep)}, length(drop)}
   end
 
   defp has_completed?(tasks, pod_id) do

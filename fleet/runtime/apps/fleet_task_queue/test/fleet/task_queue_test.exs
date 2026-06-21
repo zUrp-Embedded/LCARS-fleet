@@ -45,6 +45,21 @@ defmodule Fleet.TaskQueueTest do
     }
   end
 
+  test "AXIOME cleanup : enqueue supersède le :pending existant du pod (1 mandat actif/pod, le frais gagne)",
+       %{q: q} do
+    {:ok, _stale} = TaskQueue.enqueue(q, "pod-X", %{brief: "stale", role: "engineer"})
+    {:ok, fresh} = TaskQueue.enqueue(q, "pod-X", %{brief: "frais", role: "engineer"})
+
+    # un SEUL :pending pour pod-X = le frais ; le stale est superséded → pas d'empilement intra-session
+    # (la cause des 1124 "en cours"). [[axiome source-unique : nettoyé quand ce n'est plus vrai]]
+    assert [%{brief: "frais", state: :pending} = only] =
+             TaskQueue.list_pending(q) |> Enum.filter(&(&1.pod_id == "pod-X"))
+
+    assert only.id == fresh.id
+    # get_for_pod sert le frais, pas le résidu
+    assert {:ok, %{brief: "frais"}} = TaskQueue.get_for_pod(q, "pod-X")
+  end
+
   test "last_poll : get_for_pod enregistre le poll MÊME sans mandat (ACK bootstrap in-band)", %{
     q: q
   } do
