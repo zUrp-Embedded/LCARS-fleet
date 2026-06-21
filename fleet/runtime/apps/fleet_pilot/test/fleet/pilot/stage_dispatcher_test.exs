@@ -240,6 +240,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # sinon le pod « submit les contenus » au lieu de committer → :no_deliverable_commit.
       assert_received {:spawned, "issue-42", opts}
       assert opts[:mandate] =~ "fais le hello"
+
+      # #chantier pod-seed : nom RC Desktop = <projet>_<role> (projet = segment final du repo
+      # "lordzurp/lcars-test" → "lcars-test"). Label exact, distinct du pod_id technique.
+      assert opts[:rc_name] == "lcars-test_engineer"
       assert opts[:mandate] =~ "git commit"
       assert opts[:mandate] =~ "Co-authored-by: LCARS-engineer"
 

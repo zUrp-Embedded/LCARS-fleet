@@ -195,8 +195,11 @@ dbg "step jq invocation model='$MODEL' effort='$EFFORT'"
 # Debug à la demande : un `/remote-control <slot>` envoyé en send-key rallume la visibilité d'un juge.
 REMOTE_CONTROL=$("$JQ_BIN" -r '.spec.invocation.remote_control // true' "$CAP_PROFILE_JSON" 2>/dev/null)
 RC_FLAGS=()
+# #chantier pod-seed : nom RC EXACT via `--remote-control "<nom>"` (le nom optionnel positionnel),
+# PAS `--remote-control-session-name-prefix` (qui colle un suffixe auto = « noms random qui s'empilent »).
+# SESSION_NAME_PREFIX porte désormais le nom complet `<projet>_<role>` (posé par le spawner, pod.ex).
 [[ "$REMOTE_CONTROL" != "false" ]] &&
-  RC_FLAGS=(--remote-control --remote-control-session-name-prefix "$SESSION_NAME_PREFIX")
+  RC_FLAGS=(--remote-control "$SESSION_NAME_PREFIX")
 dbg "step jq remote_control='$REMOTE_CONTROL' (RC=${#RC_FLAGS[@]} flags)"
 
 # =============================================================

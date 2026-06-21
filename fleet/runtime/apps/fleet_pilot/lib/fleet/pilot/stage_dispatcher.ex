@@ -148,7 +148,8 @@ defmodule Fleet.Pilot.StageDispatcher do
           spawn_opts =
             [
               mandate: mandate,
-              pod_id: pod_id
+              pod_id: pod_id,
+              rc_name: rc_name(repo, role)
             ]
             |> maybe_put_project(project)
             |> maybe_put_route(route)
@@ -358,7 +359,7 @@ defmodule Fleet.Pilot.StageDispatcher do
         review_mandate(kind, profile, role, forge, repo, issue_n, forge_opts, route, pr_number)
 
       spawn_opts =
-        [mandate: mandate, pod_id: pod_id]
+        [mandate: mandate, pod_id: pod_id, rc_name: rc_name(repo, role)]
         |> maybe_put_project(project)
         |> maybe_put_route(route)
 
@@ -435,6 +436,11 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   defp as_role(forge_opts, _role), do: forge_opts
+
+  # #chantier pod-seed : nom RC Desktop = `<projet>_<role>` (projet = segment final du repo, ex.
+  # `fleet/poc-8` → `poc-8`). Label EXACT (claude_launch → `--remote-control "<nom>"`, zéro suffixe
+  # auto). Distinct du pod_id (clé technique repo-scopée) ; ici c'est le label humain-lisible Desktop.
+  defp rc_name(repo, role), do: "#{repo |> String.split("/") |> List.last()}_#{role}"
 
   defp maybe_put_project(spawn_opts, nil), do: spawn_opts
   defp maybe_put_project(spawn_opts, project), do: Keyword.put(spawn_opts, :project, project)
