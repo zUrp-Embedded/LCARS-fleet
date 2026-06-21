@@ -62,5 +62,45 @@ defmodule Fleet.Spawner.SeedStore do
     end
   end
 
+  @doc """
+  Lit la carte d'un seed checkpointé. `{:ok, %{uuid, slug, jsonl}}` (jsonl = chemin du seed dans le
+  store) si la carte ET le JSONl existent ; sinon `:none`.
+  """
+  @spec read_map(String.t(), String.t()) :: {:ok, map()} | :none
+  def read_map(projet, role) when is_binary(projet) and is_binary(role) do
+    dir = Path.join([root(), projet, "pods"])
+    jsonl = Path.join(dir, "#{role}.jsonl")
+
+    with {:ok, raw} <- File.read(Path.join(dir, "#{role}.json")),
+         {:ok, %{"uuid" => uuid} = m} <- Jason.decode(raw),
+         true <- File.exists?(jsonl) do
+      {:ok, %{uuid: uuid, slug: m["slug"], jsonl: jsonl}}
+    else
+      _ -> :none
+    end
+  end
+
+  @doc """
+  Restaure un seed dans le HOME d'un pod de rappel : `cp` le JSONl à
+  `<pod_dir>/.claude/projects/<slugify(cwd)>/<uuid>.jsonl`. Le `cwd` est celui du pod de rappel
+  (slug recalculé) → `--resume <uuid>` (cwd = `cwd`) retrouve la session. Renvoie `{:ok, dest}`.
+  """
+  @spec restore(Path.t(), Path.t(), Path.t(), String.t()) :: {:ok, Path.t()}
+  def restore(seed_jsonl, pod_dir, cwd, uuid)
+      when is_binary(seed_jsonl) and is_binary(pod_dir) and is_binary(cwd) and is_binary(uuid) do
+    dir = Path.join([pod_dir, ".claude", "projects", slugify(cwd)])
+    File.mkdir_p!(dir)
+    dest = Path.join(dir, "#{uuid}.jsonl")
+    File.cp!(seed_jsonl, dest)
+    {:ok, dest}
+  end
+
+  @doc """
+  Slug claude d'un `cwd` : chaque caractère hors `[A-Za-z0-9-]` → `-` (PAS de collapse des `-`).
+  PROVEN claude 2.1.183 (`/home/x/pod_a-b` → `-home-x-pod-a-b`).
+  """
+  @spec slugify(String.t()) :: String.t()
+  def slugify(path), do: String.replace(path, ~r/[^A-Za-z0-9-]/, "-")
+
   defp root, do: Application.get_env(:fleet_spawner, :seed_store_root, "/home/projects.work")
 end

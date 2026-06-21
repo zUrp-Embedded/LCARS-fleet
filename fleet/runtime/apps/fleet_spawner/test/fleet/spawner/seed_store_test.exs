@@ -66,4 +66,31 @@ defmodule Fleet.Spawner.SeedStoreTest do
     assert :none = SeedStore.checkpoint(pod_dir, "p", "engineer")
     refute File.exists?(Path.join(root, "p"))
   end
+
+  test "slugify : reproduit le slug claude réel (proven 2.1.183)" do
+    assert SeedStore.slugify("/home/starfleet/pods/pod_fleet-poc-8-issue-6-consultant/workspace") ==
+             "-home-starfleet-pods-pod-fleet-poc-8-issue-6-consultant-workspace"
+
+    assert SeedStore.slugify("/home/x/resume-test__9c62d00f") == "-home-x-resume-test--9c62d00f"
+  end
+
+  test "read_map : carte + jsonl présents → {:ok, uuid}, sinon :none", %{tmp: tmp} do
+    pod_dir = Path.join(tmp, "pod")
+    make_jsonl(pod_dir, "slug", "u1", "x\n")
+    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer")
+
+    assert {:ok, %{uuid: "u1"}} = SeedStore.read_map("p", "engineer")
+    assert :none = SeedStore.read_map("p", "inexistant")
+  end
+
+  test "restore : cp le seed au slug du cwd de rappel, retrouvable par --resume", %{tmp: tmp} do
+    seed = Path.join(tmp, "seed.jsonl")
+    File.write!(seed, "mem\n")
+    pod_dir = Path.join(tmp, "recallpod")
+
+    {:ok, dest} = SeedStore.restore(seed, pod_dir, "/home/r/recallpod", "u9")
+
+    assert dest == Path.join([pod_dir, ".claude", "projects", "-home-r-recallpod", "u9.jsonl"])
+    assert File.read!(dest) == "mem\n"
+  end
 end
