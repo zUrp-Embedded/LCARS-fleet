@@ -71,9 +71,30 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- scaffold_work(work_dir, name, opts),
          :ok <- commit(work_dir, "chore(onboard): init work/ops"),
          :ok <- push(work_dir, "work/ops", true),
+         :ok <- register_for_fleet(full_name, opts),
          :ok <- lock_main(full_name, opts) do
       Logger.info("ProjectOnboard: #{full_name} prêt — main=#{proj_dir}, work/ops=#{work_dir}")
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
+    end
+  end
+
+  # ── F-037 MULTI-PROJET — rend le repo neuf DÉCOUVRABLE + ACCESSIBLE par la fleet de l'humain ──
+  # 1. TOPIC `lcars-fleet-<human>` (source UNIQUE `Fleet.Pilot.Poller.fleet_topic/1`, partagée avec le
+  #    poller qui DÉCOUVRE par `search_repos_by_topic`) → un humain ne voit QUE ses projets (isolation REPO ;
+  #    l'axe TICKET `assigned_by` est la ceinture). 2. COLLABORATEUR write = l'humain initiateur (les
+  #    comptes-rôles, eux, sont ajoutés par `grant_fleet_roles` dans `lock_main`). `my_human` = l'user OS du
+  #    runtime — l'onboarding tourne dans SA BEAM (MCP `create_project`), donc `Human.current!()` EST l'humain
+  #    qui a initié → cohérent avec le scoping du poller (même source). Fail-loud si l'user est irrésoluble
+  #    (un repo taggé pour le mauvais humain ne serait jamais découvert — I-CBC).
+  defp register_for_fleet(repo, opts) do
+    my_human = Fleet.Credentials.Human.current!()
+    topic = Fleet.Pilot.Poller.fleet_topic(my_human)
+
+    with :ok <- ForgeClient.add_topic(repo, topic, fc_opts(opts)),
+         :ok <- ForgeClient.add_collaborator(repo, my_human, "write", fc_opts(opts)) do
+      :ok
+    else
+      {:error, reason} -> {:error, {:register_for_fleet, reason}}
     end
   end
 

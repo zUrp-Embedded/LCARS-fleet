@@ -347,23 +347,54 @@ defmodule Fleet.Pilot.HopConsumerTest do
     end
   end
 
+  describe "F-037 — repo + remote per-hop (dérivés de l'event)" do
+    test "payload porteur de repo → hop.repo + deliverable.remote viennent de l'EVENT, pas de la config" do
+      # MULTI-PROJET : le singleton HopConsumer traite N projets. Le repo (forge API) et le remote (push)
+      # de CE hop viennent du `pod.completed` (Spawner les embarque), PAS du fallback de config.
+      payload =
+        stage_payload(%{
+          "repository" => %{"full_name" => "alice/proj-a"},
+          "remote" => "http://forge/alice/proj-a.git"
+        })
+
+      # state de config délibérément DIFFÉRENT (repo "lordzurp/lcars-test", remote "origin") → si le hop
+      # lisait la config au lieu de l'event, l'assertion casserait.
+      assert {:ok, :captured} = HopConsumer.maybe_complete(payload, state())
+
+      assert_received {:hop, hop, _opts}
+      assert hop.repo == "alice/proj-a"
+      assert hop.deliverable_opts.remote == "http://forge/alice/proj-a.git"
+      # la branche système reste dérivée de l'issue (repo-locale, non scopée)
+      assert hop.producer_branch == "lcars/issue-42-engineer"
+    end
+
+    test "payload SANS repo → fallback config (single-repo legacy / test à payload nu)" do
+      # Rétro-compat : un `pod.completed` qui ne porte pas son repo → le HopConsumer retombe sur son
+      # repo/remote de config (le chemin de TOUS les tests pré-F-037).
+      assert {:ok, :captured} = HopConsumer.maybe_complete(stage_payload(), state())
+      assert_received {:hop, hop, _opts}
+      assert hop.repo == "lordzurp/lcars-test"
+      assert hop.deliverable_opts.remote == "origin"
+    end
+  end
+
   describe "GenServer lifecycle" do
-    test "crash si :repo ou :remote manquant" do
-      Process.flag(:trap_exit, true)
+    test "F-037 : init SANS :repo/:remote réussit (per-hop, plus de require au boot)" do
+      # Les opts :repo/:remote ne sont plus obligatoires (le repo+remote viennent de l'event). Un boot
+      # multi-projet (sans repo fixe) est légitime ; la garde fail-loud du rail vit côté application.ex.
+      name = :"HC_norepo_#{System.unique_integer([:positive])}"
 
-      assert {:error, {:missing_required_opt, :repo}} =
-               HopConsumer.start_link(
-                 name: :"HC_norepo_#{System.unique_integer([:positive])}",
-                 remote: "origin",
-                 subscribe: false
-               )
+      {:ok, pid} =
+        HopConsumer.start_link(
+          name: name,
+          subscribe: false,
+          gatekeeper_boot_fun: fn -> {:ok, :disabled} end
+        )
 
-      assert {:error, {:missing_required_opt, :remote}} =
-               HopConsumer.start_link(
-                 name: :"HC_noremote_#{System.unique_integer([:positive])}",
-                 repo: "o/r",
-                 subscribe: false
-               )
+      assert Process.alive?(pid)
+      assert %HopConsumer{repo: nil, remote: nil} = :sys.get_state(pid)
+
+      GenServer.stop(pid)
     end
 
     test "F067 : start_link cable :hop_runner -> la completion passe par le runner (chemin init/prod)" do

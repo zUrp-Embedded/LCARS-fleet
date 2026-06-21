@@ -933,7 +933,16 @@ defmodule Fleet.Pilot.StageDispatcher do
 
         case ls_remote_sha(repo_url, base_branch) do
           {:ok, sha} ->
-            {:ok, %{"repo_path" => repo_url, "base_branch" => base_branch, "base_sha" => sha}}
+            # F-037 : `"repo"` (full_name "owner/name") embarqué dans le projet → il voyage jusqu'au pod
+            # puis ressort dans `pod.completed` (`pod_completed_payload`) → le HopConsumer sait sur QUEL
+            # repo agir (multi-projet), sans le re-dériver. `repo_path` = l'URL de push (remote per-hop).
+            {:ok,
+             %{
+               "repo" => repo,
+               "repo_path" => repo_url,
+               "base_branch" => base_branch,
+               "base_sha" => sha
+             }}
 
           {:error, _} = err ->
             err

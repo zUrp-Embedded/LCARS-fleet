@@ -296,9 +296,11 @@ if config_env() != :test do
     config :fleet_pilot, forge_routing_path: path
   end
 
-  # Poller catch-up : repo à scanner (`"owner/name"`) + interval ms.
-  # Sans LCARS_PILOT_POLL_REPO, le Poller n'est pas démarré, donc le rail stage
-  # ne tourne pas (pas d'AutoDispatcher de repli — ce rail est retiré, cf. plus haut).
+  # F-037 MULTI-PROJET : le Poller ne scanne PLUS un repo fixe — il DÉCOUVRE ses projets par topic
+  # (`lcars-fleet-<human>`, posé à l'onboarding). `LCARS_PILOT_POLL_REPO` n'est donc PLUS requis pour que
+  # le rail tourne (la garde fail-loud boot est sur FORGE_BASE_URL, cf. Fleet.Pilot.Application). On garde
+  # la reconnaissance de l'env var (contrat ops + seam : les tests injectent repo/remote par opts directs,
+  # pas par cette config). En prod multi-projet, repo+remote voyagent dans l'event `pod.completed`.
   if repo = System.get_env("LCARS_PILOT_POLL_REPO") do
     config :fleet_pilot, poll_repo: repo
   end
@@ -353,7 +355,8 @@ if config_env() != :test do
   # A2/A3 — runtime STAGE-MODE (forge = machine à états) + BL-045b auth push
   # ============================================================
   # OFF par défaut. `LCARS_PILOT_STAGE=true` démarre Poller(stage) + HopConsumer
-  # (cf. Fleet.Pilot.Application.stage_children). Requiert aussi LCARS_PILOT_POLL_REPO.
+  # (cf. Fleet.Pilot.Application.stage_children). F-037 : requiert FORGE_BASE_URL (découverte + push),
+  # plus LCARS_PILOT_POLL_REPO (découverte par topic).
   if System.get_env("LCARS_PILOT_STAGE") == "true" do
     config :fleet_pilot, stage_dispatch?: true
   end
@@ -361,11 +364,10 @@ if config_env() != :test do
   # #8 cohérence : plus de routing par label (`LCARS_PILOT_STAGE_ROUTING` retiré). Le routing vit dans la
   # route-comment, gravée par `create_ticket` (carte de délégation, défaut mandate-gate). type:* = visu.
 
-  # Remote git où le système pousse les livrables (HopConsumer). Override ; sinon dérivé
-  # de :forge base_url + poll_repo (cf. Application.hop_remote). Token JAMAIS dans l'URL.
-  if remote = System.get_env("LCARS_HOP_REMOTE") do
-    config :fleet_pilot, hop_remote: remote
-  end
+  # F-037 : `LCARS_HOP_REMOTE` retiré — le remote de push n'est plus un URL fixe (incompatible multi-projet) ;
+  # il est PER-HOP, dérivé du `repo_path` du projet et embarqué dans l'event `pod.completed` (cf.
+  # `Fleet.Spawner.Pod.pod_completed_payload` + `Fleet.Pilot.HopConsumer.hop_state/2`). Auth push inchangée
+  # (`Fleet.Credentials.ForgeAuth.git_env` → token via env, jamais dans l'URL).
 
   # BL-045b — auth push runtime (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token
   # HORS argv ET HORS .git/config — F087/F095). Token système (lcars-system, write:repository).

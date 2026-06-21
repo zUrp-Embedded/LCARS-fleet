@@ -241,21 +241,29 @@ defmodule Fleet.Pilot.Poller do
   # INCHANGÉE (state.repo posé par itération). Découverte OK → forge up → err_streak reset ; le scoping
   # ticket `assigned_by=my_human` (déjà, #5.2 D1) reste le garde anti-vol même si un repo d'Alice fuyait.
   # Découverte KO → backoff (handle_poll_error). Le bail repo-sérialisé reste per-repo (concurrent across,
-  # séquentiel within). Per-repo state ignoré (les erreurs per-item vivent dans la tally, pas le streak).
+  # séquentiel within).
+  #
+  # Per-repo state : les erreurs de DISPATCH per-item vivent dans la TALLY (pas le streak — un repo qui
+  # liste mal ne backoff PAS toute la fleet, la forge est up puisque la découverte a réussi). MAIS l'état
+  # de RÉCONCILIATION (`orphan_lock_suspects`, grace 2-tick) DOIT persister cross-tick : sans le re-thread,
+  # la grace ne s'accumule jamais → un verrou orphelin n'est JAMAIS réclamé (le pipe wedge). On l'agrège
+  # (union sur tous les repos) dans le state rendu. `poll_count` +1/tick (observabilité). (Multi-repo : les
+  # refs `{:issue|:pr, n}` ne sont pas encore repo-qualifiées — pod_id repo-scopé = #25, downstream ; une
+  # collision de numéro d'issue entre 2 repos ne fait qu'avancer la grace d'un tick, sans danger.)
   defp do_poll(state) do
     forge = stage_forge_client(state)
 
     case forge.search_repos_by_topic(fleet_topic(state.my_human), state.forge_opts) do
       {:ok, repos} ->
-        base = %{state | err_streak: 0}
+        base = %{state | err_streak: 0, poll_count: state.poll_count + 1, last_error: nil}
 
-        tally =
-          Enum.reduce(repos, zero_tally(), fn repo, acc ->
-            {t, _st} = stage_do_poll(%{base | repo: repo})
-            merge_tally(acc, t)
+        {tally, suspects} =
+          Enum.reduce(repos, {zero_tally(), MapSet.new()}, fn repo, {acc_tally, acc_suspects} ->
+            {t, st} = stage_do_poll(%{base | repo: repo})
+            {merge_tally(acc_tally, t), MapSet.union(acc_suspects, st.orphan_lock_suspects)}
           end)
 
-        {tally, base}
+        {tally, %{base | orphan_lock_suspects: suspects, last_tally_errors: tally.errors}}
 
       {:error, reason} ->
         handle_poll_error(state, {:discover_repos, reason}, System.monotonic_time(), nil)
@@ -462,8 +470,16 @@ defmodule Fleet.Pilot.Poller do
 
   defp pod_has_active_task?(_tq, _), do: false
 
+  # F-037 / #25 : les pod_id sont **repo-scopés** (`<repo-slug>-issue-<n>-<role>`, cf. `Fleet.Pilot.PodId`)
+  # → le segment `issue|pr-<n>` n'est PLUS en tête (préfixé par le slug du repo). L'ancrage `^` ratait donc
+  # TOUS les pods vivants → `live_owned_refs` vide → chaque verrou paraissait orphelin → mis-réclamation du
+  # verrou d'un pod VIVANT (latent : masqué tant que les suspects n'étaient pas persistés cross-tick ; la
+  # persistance F-037 le réveille). On dé-ancre (`(?:^|-)`) : on reconnaît le marqueur de phase + le n° après
+  # le slug (et l'ancien format nu, rétro-compat). Un slug pathologique contenant lui-même `-issue-<chiffres>-`
+  # est un edge documenté ; le fix robuste = ne PAS re-parser l'id opaque mais lire le ref via `list_pods`
+  # (axe #25/backlog — `PodId` est explicitement « jamais re-parsé »).
   defp parse_pod_ref(pod_id) when is_binary(pod_id) do
-    case Regex.run(~r/^(issue|pr)-(\d+)-/, pod_id) do
+    case Regex.run(~r/(?:^|-)(issue|pr)-(\d+)-/, pod_id) do
       [_, "issue", n] -> [{:issue, String.to_integer(n)}]
       [_, "pr", n] -> [{:pr, String.to_integer(n)}]
       _ -> []

@@ -1181,6 +1181,7 @@ defmodule Fleet.Spawner.Pod do
               "base_sha" => proj["base_sha"],
               "role" => cap_profile_name(state.cap_profile)
             })
+            |> maybe_put_repo(proj)
             |> maybe_put_carte_ctx(opts)
 
           _ ->
@@ -1204,6 +1205,24 @@ defmodule Fleet.Spawner.Pod do
         payload
     end
   end
+
+  # F-037 MULTI-PROJET : embarque le REPO du projet dans `pod.completed` → le HopConsumer (singleton
+  # multi-projet) sait sur quel repo agir + où pousser, sans le re-dériver de la config (« l'event porte
+  # tout l'état »). `"repository" => %{"full_name"}` = identifiant forge (API) ; `"remote"` = l'URL de push
+  # (= `repo_path`, l'URL clonée). Projet sans `"repo"` (cap_profile statique legacy : pas de full_name) →
+  # payload inchangé → le HopConsumer retombe sur son repo/remote de config (fallback single-repo).
+  defp maybe_put_repo(payload, %{"repo" => repo} = proj) when is_binary(repo) and repo != "" do
+    payload
+    |> Map.put("repository", %{"full_name" => repo})
+    |> maybe_put_remote(proj["repo_path"])
+  end
+
+  defp maybe_put_repo(payload, _proj), do: payload
+
+  defp maybe_put_remote(payload, remote) when is_binary(remote) and remote != "",
+    do: Map.put(payload, "remote", remote)
+
+  defp maybe_put_remote(payload, _), do: payload
 
   defp do_release(state) do
     # R1.2 — tue le pod interactif (Port.close → claude/bwrap/script terminés) puis ARRÊT NORMAL

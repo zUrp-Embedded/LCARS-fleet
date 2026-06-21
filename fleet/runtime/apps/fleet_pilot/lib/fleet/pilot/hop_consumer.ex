@@ -44,7 +44,12 @@ defmodule Fleet.Pilot.HopConsumer do
   ## Traduction event → hop
 
     * `issue_number` ← `ticket_id` (`"issue-N"` → `N`)
-    * `repo` ← config `:repo`
+    * `repo` ← **l'event** (`payload["repository"]["full_name"]`), per-hop. #5.2 MULTI-PROJET (F-037) :
+      le HopConsumer est un singleton qui traite les hops de TOUS les projets de l'humain → le repo
+      (et le `remote` où pousser) ne peut PAS être figé en config ; il VOYAGE dans l'event (« l'event
+      porte tout l'état »). `:repo`/`:remote` de config restent un **fallback** (single-repo legacy / test
+      avec payload nu). Le state effectif d'un hop est dérivé par `hop_state/2` à l'entrée.
+    * `remote` ← **l'event** (`payload["remote"]`, = le `repo_path` cloné = l'URL de push), per-hop.
     * `deliverable_opts` ← `{mode: :git_native, workspace, base_sha,
       allowed_emails(role), remote, target_branch}` ; le SYSTÈME pousse
       (barrière §4, F-04) sur une branche système `lcars/issue-N-role`
@@ -54,8 +59,8 @@ defmodule Fleet.Pilot.HopConsumer do
 
   ## Config / seams
 
-    * `:repo` — `"owner/name"` (obligatoire)
-    * `:remote` — URL/nom du remote où le système pousse (obligatoire)
+    * `:repo` — `"owner/name"` — **fallback** (le repo per-hop vient de l'event ; F-037)
+    * `:remote` — URL/nom du remote où le système pousse — **fallback** (per-hop vient de l'event)
     * `:forge_opts` — passé au ForgeClient via HopCompleter
     * `:role_emails` — `fn role -> [email] end` (défaut `"<role>@lcars.local"`),
       doit matcher l'identité git injectée au pod (gate F-01)
@@ -135,51 +140,54 @@ defmodule Fleet.Pilot.HopConsumer do
 
   @impl GenServer
   def init(opts) do
-    with {:ok, repo} <- require_opt(opts, :repo),
-         {:ok, remote} <- require_opt(opts, :remote) do
-      if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
+    if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
 
-      state = %__MODULE__{
-        repo: repo,
-        remote: remote,
-        forge_opts: Keyword.get(opts, :forge_opts, []),
-        role_emails: Keyword.get(opts, :role_emails, &default_role_emails/1),
-        hop_completer: Keyword.get(opts, :hop_completer, Fleet.Pilot.HopCompleter),
-        # nil → HopCompleter applique son défaut (Fleet.Pilot.ForgeClient). Injectable
-        # pour un backend forge alternatif (ou un sim en dogfood bare).
-        forge_client: Keyword.get(opts, :forge_client),
-        # Loader de carte (A2 multi-stage) : résout le stage suivant. Défaut = Loader réel.
-        loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader),
-        # nil → HopCompleter applique son défaut (Fleet.Pipeline.Deliverable). Injectable (sim/test).
-        deliverable: Keyword.get(opts, :deliverable),
-        # Corr.3 — classification producteur/juge du hop PR-natif. Defaut = catalogue cap-profile.
-        deliverable_mode_fun:
-          Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
-        # A2.3 : bound anti-runaway du rebond de gate. Budget de hops = nb_stages *
-        # (max_rework_rounds + 1) : la 1re passe + N rounds de rework. Au-delà → stuck
-        # surfacé (pas de boucle). Défaut 2 rounds.
-        max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2),
-        # B (§L441) — seams d'escalade gatekeeper (défauts = broker/spawner/registry réels).
-        task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
-        spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
-        gatekeeper_pod_id_fun:
-          Keyword.get(opts, :gatekeeper_pod_id_fun, &Fleet.Pipeline.Gatekeeper.pod_id/0),
-        gatekeeper_boot_fun:
-          Keyword.get(opts, :gatekeeper_boot_fun, &Fleet.Pipeline.Gatekeeper.ensure_booted/0),
-        gate_evals: %{},
-        # F067 (critique panel) : prod (stage_children) injecte `&offload_async/1` ici ; sans cette
-        # lecture, `run_completion` retombait sur sync → le git push bloquait le singleton (offload mort).
-        hop_runner: Keyword.get(opts, :hop_runner)
-      }
+    # #5.2 MULTI-PROJET (F-037) : `:repo`/`:remote` ne sont PLUS obligatoires — le singleton dérive le
+    # repo (+ remote de push) per-hop depuis l'event (`hop_state/2`). Ils restent acceptés comme FALLBACK
+    # (single-repo legacy / test avec payload nu). Plus de `{:stop, :missing_required_opt}` : un boot sans
+    # repo est légitime (multi-projet) ; la garde fail-loud du rail vit désormais côté `application.ex`
+    # (forge base_url requis pour la découverte + le push).
+    state = %__MODULE__{
+      repo: Keyword.get(opts, :repo),
+      remote: Keyword.get(opts, :remote),
+      forge_opts: Keyword.get(opts, :forge_opts, []),
+      role_emails: Keyword.get(opts, :role_emails, &default_role_emails/1),
+      hop_completer: Keyword.get(opts, :hop_completer, Fleet.Pilot.HopCompleter),
+      # nil → HopCompleter applique son défaut (Fleet.Pilot.ForgeClient). Injectable
+      # pour un backend forge alternatif (ou un sim en dogfood bare).
+      forge_client: Keyword.get(opts, :forge_client),
+      # Loader de carte (A2 multi-stage) : résout le stage suivant. Défaut = Loader réel.
+      loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader),
+      # nil → HopCompleter applique son défaut (Fleet.Pipeline.Deliverable). Injectable (sim/test).
+      deliverable: Keyword.get(opts, :deliverable),
+      # Corr.3 — classification producteur/juge du hop PR-natif. Defaut = catalogue cap-profile.
+      deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
+      # A2.3 : bound anti-runaway du rebond de gate. Budget de hops = nb_stages *
+      # (max_rework_rounds + 1) : la 1re passe + N rounds de rework. Au-delà → stuck
+      # surfacé (pas de boucle). Défaut 2 rounds.
+      max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2),
+      # B (§L441) — seams d'escalade gatekeeper (défauts = broker/spawner/registry réels).
+      task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
+      spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
+      gatekeeper_pod_id_fun:
+        Keyword.get(opts, :gatekeeper_pod_id_fun, &Fleet.Pipeline.Gatekeeper.pod_id/0),
+      gatekeeper_boot_fun:
+        Keyword.get(opts, :gatekeeper_boot_fun, &Fleet.Pipeline.Gatekeeper.ensure_booted/0),
+      gate_evals: %{},
+      # F067 (critique panel) : prod (stage_children) injecte `&offload_async/1` ici ; sans cette
+      # lecture, `run_completion` retombait sur sync → le git push bloquait le singleton (offload mort).
+      hop_runner: Keyword.get(opts, :hop_runner)
+    }
 
-      Logger.info("fleet_pilot HopConsumer start repo=#{repo} remote=#{remote}")
-      # F066 : en stage-mode, le HopConsumer EST le chemin actif → il assure le gatekeeper
-      # permanent (handle_continue : boot hors init, OTP). Idempotent + gardé autoboot (no-op
-      # en test où gatekeeper_autoboot=false ; no-op si le path RAM l'a déjà booté).
-      {:ok, state, {:continue, :ensure_gatekeeper}}
-    else
-      {:error, missing} -> {:stop, {:missing_required_opt, missing}}
-    end
+    Logger.info(
+      "fleet_pilot HopConsumer start (MULTI-PROJET F-037 : repo/remote per-hop) " <>
+        "fallback_repo=#{inspect(state.repo)} fallback_remote=#{inspect(state.remote)}"
+    )
+
+    # F066 : en stage-mode, le HopConsumer EST le chemin actif → il assure le gatekeeper
+    # permanent (handle_continue : boot hors init, OTP). Idempotent + gardé autoboot (no-op
+    # en test où gatekeeper_autoboot=false ; no-op si le path RAM l'a déjà booté).
+    {:ok, state, {:continue, :ensure_gatekeeper}}
   end
 
   @impl GenServer
@@ -244,7 +252,10 @@ defmodule Fleet.Pilot.HopConsumer do
       {eval_ctx, gate_evals} ->
         state = %{state | gate_evals: gate_evals}
 
-        case resume_gate(eval_ctx, ev.payload, state) do
+        # F-037 : la reprise pousse/écrit sur le repo du HOP escaladé (porté par le `pod.completed`
+        # d'origine, conservé dans `eval_ctx.payload`), pas sur la config. Le verdict du gatekeeper arrive
+        # via un `task_completed` (autre event, sans repo) → on re-dérive depuis le payload d'origine.
+        case resume_gate(eval_ctx, ev.payload, hop_state(eval_ctx.payload, state)) do
           # F067 : outcome loggé par `run_completion` ; ici on ne logge que l'erreur de DÉCISION (pré-complétion).
           {:ok, _outcome} ->
             :ok
@@ -335,11 +346,32 @@ defmodule Fleet.Pilot.HopConsumer do
 
       true ->
         case parse_issue_number(payload["ticket_id"]) do
-          {:ok, n} -> run_hop(payload, n, state)
+          # F-037 : repo + remote de CE hop dérivés de l'event (per-hop), pas de la config.
+          {:ok, n} -> run_hop(payload, n, hop_state(payload, state))
           :error -> {:skip, {:bad_ticket_id, payload["ticket_id"]}}
         end
     end
   end
+
+  # F-037 MULTI-PROJET — dérive le state EFFECTIF d'un hop : le `repo` (forge API : list_open_pulls,
+  # count_signed_hops, comments…) et le `remote` (URL de push du livrable) viennent de l'EVENT, pas de la
+  # config. Le singleton HopConsumer traite les hops de TOUS les projets de l'humain → figer repo/remote en
+  # config serait faux dès le 2e projet. Le Spawner enrichit `pod.completed` à la source
+  # (`Fleet.Spawner.Pod.pod_completed_payload` : `"repository" => %{"full_name"}` + `"remote"`). Payload nu
+  # (sans repo : test/single-repo legacy) → on garde le state de config (fallback). `remote` absent mais
+  # repo présent → fallback remote (rare ; un projet bien onboardé porte les deux).
+  defp hop_state(payload, state) do
+    case payload_repo(payload) do
+      repo when is_binary(repo) and repo != "" ->
+        %{state | repo: repo, remote: payload["remote"] || state.remote}
+
+      _ ->
+        state
+    end
+  end
+
+  defp payload_repo(payload),
+    do: get_in(payload, ["repository", "full_name"]) || payload["repo"]
 
   defp run_hop(payload, n, state) do
     role = payload["role"]
@@ -1142,13 +1174,6 @@ defmodule Fleet.Pilot.HopConsumer do
         )
 
         []
-    end
-  end
-
-  defp require_opt(opts, key) do
-    case Keyword.get(opts, key) do
-      v when is_binary(v) and v != "" -> {:ok, v}
-      _ -> {:error, key}
     end
   end
 end

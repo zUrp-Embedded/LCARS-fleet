@@ -2,12 +2,12 @@ defmodule Fleet.Pilot.Application do
   @moduledoc """
   Supervisor de l'app `fleet_pilot` — **mode STAGE uniquement** (la forge EST la machine à états).
 
-  Démarre, si `:stage_dispatch?` + `:poll_repo` sont configurés (`config/runtime.exs` depuis l'env),
-  les trois process du rail forge-state-machine :
+  Démarre, si `:stage_dispatch?` est configuré (`config/runtime.exs` depuis l'env) et que la forge
+  `base_url` résout, les trois process du rail forge-state-machine :
 
-    * `Fleet.Pilot.Poller` (mode stage) — scanne le repo cible, dispatche les **issues assignées**
-      (assignee=humain) vers le spawn du rôle **producteur** (`StageDispatcher`). (+ `Entry` legacy
-      sur `type:`, conservé transitoirement, FALL.)
+    * `Fleet.Pilot.Poller` (mode stage) — **F-037 MULTI-PROJET** : DÉCOUVRE les repos de l'humain par
+      topic (`lcars-fleet-<human>`, plus de `:poll_repo` hard-codé), dispatche les **issues assignées**
+      (assignee=humain) vers le spawn du rôle **producteur** (`StageDispatcher`).
     * `Fleet.Pilot.HopConsumer` — consumer Bus : sur `pod.completed`, exécute la **fin-de-hop**
       (publish du livrable git-native → push système → ouverture PR → merge). Sans lui, la chaîne
       n'avance pas au-delà du spawn producteur.
@@ -62,10 +62,10 @@ defmodule Fleet.Pilot.Application do
   # Process du rail STAGE (la forge EST la machine à états). Démarré ssi `:stage_dispatch?` est
   # vrai. `[]` si `:stage_dispatch?` absent/false (app inerte volontaire — hermétisme test).
   #
-  # F-027 (Pattern A crash-boot) : si `:stage_dispatch?` est VRAI mais que `:poll_repo` ou le remote
-  # ne résolvent pas, on ne renvoie plus `[]` en SILENCE (ex-`else _ -> []` qui démarrait l'app
-  # « verte » sans Poller/HopConsumer → rail forge mort, zéro crash, zéro log). L'opérateur a DEMANDÉ
-  # le mode stage → une config incomplète = deploy cassé → fail-loud au boot.
+  # F-027 (Pattern A crash-boot) : si `:stage_dispatch?` est VRAI mais que la config essentielle ne
+  # résout pas, on ne renvoie plus `[]` en SILENCE (ex-`else _ -> []` qui démarrait l'app « verte » sans
+  # Poller/HopConsumer → rail forge mort, zéro crash, zéro log). L'opérateur a DEMANDÉ le mode stage →
+  # config incomplète = deploy cassé → fail-loud au boot.
   defp stage_children do
     if Application.get_env(:fleet_pilot, :stage_dispatch?, false) do
       stage_children!()
@@ -74,20 +74,20 @@ defmodule Fleet.Pilot.Application do
     end
   end
 
+  @doc false
+  # Test seam (F-037) : expose les child-specs du rail SANS démarrer le superviseur (qui enregistrerait les
+  # singletons sous leurs noms globaux → conflits / boot parasites). Sert à vérifier la garde fail-loud.
+  def stage_children_for_test, do: stage_children()
+
+  # F-037 MULTI-PROJET : plus de `:poll_repo` obligatoire ni de remote figé au boot — le Poller DÉCOUVRE
+  # ses repos par topic (`lcars-fleet-<human>`) et le HopConsumer dérive le repo+remote PER-HOP de l'event.
+  # La config essentielle qui reste = la forge `base_url` : sans elle, ni découverte (`search_repos_by_topic`)
+  # ni push (remote per-hop) ne marchent → rail mort. C'est la garde fail-loud F-027 re-pointée sur le réel.
   defp stage_children! do
-    repo = Application.get_env(:fleet_pilot, :poll_repo)
-
-    unless is_binary(repo) and repo != "" do
-      raise "fleet_pilot: :stage_dispatch? activé mais :poll_repo absent/vide — le rail forge-state-" <>
-              "machine ne démarrerait pas (Poller/HopConsumer). Deploy cassé, fail-loud (vérifier " <>
-              "LCARS_PILOT_POLL_REPO)."
-    end
-
-    remote = hop_remote(repo)
-
-    unless is_binary(remote) and remote != "" do
-      raise "fleet_pilot: :stage_dispatch? activé (repo=#{repo}) mais remote irrésolu — FORGE_BASE_URL " <>
-              "(ou :hop_remote) absent → le HopConsumer ne pourrait pas pousser. Deploy cassé, fail-loud."
+    unless forge_base_url() do
+      raise "fleet_pilot: :stage_dispatch? activé mais la forge base_url est absente (config :fleet_pilot, " <>
+              ":forge[:base_url] / FORGE_BASE_URL) — le Poller ne peut pas DÉCOUVRIR ses projets " <>
+              "(search_repos_by_topic) ni le HopConsumer dériver le remote de push. Deploy cassé, fail-loud."
     end
 
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
@@ -100,35 +100,20 @@ defmodule Fleet.Pilot.Application do
       # (kick_gatekeeper / safe_wake) ; démarrée avec le rail, son seul consommateur. Boot best-effort
       # (forge injoignable au boot → WAL local seul, pas de crash).
       Fleet.Pilot.IncidentRegistry,
-      # #8 cohérence : plus de `routing` (type:label→carte). Le routing vit dans la route-comment
-      # (gravée par create_ticket) ; le Poller la lit (state-machine). type:* = visu seulement.
-      {Fleet.Pilot.Poller, repo: repo, interval_ms: interval, stage_dispatch?: true},
+      # F-037 : ni `:repo` au Poller (découverte par topic), ni `:repo`/`:remote` au HopConsumer (per-hop).
+      # Le routing vit dans la route-comment (gravée par create_ticket) ; le Poller la lit (state-machine).
+      {Fleet.Pilot.Poller, interval_ms: interval, stage_dispatch?: true},
       {Fleet.Pilot.HopConsumer,
-       repo: repo,
-       remote: remote,
-       forge_opts: [],
-       hop_runner: &Fleet.Pilot.HopConsumer.offload_async/1}
+       forge_opts: [], hop_runner: &Fleet.Pilot.HopConsumer.offload_async/1}
     ]
   end
 
-  # Remote git où le SYSTÈME pousse les livrables (HopConsumer). Dérivé du base_url forge
-  # (`:fleet_pilot, :forge`) + repo, ou override explicite `:hop_remote`. Le token n'est PAS
-  # dans l'URL (auth via `Fleet.Credentials.ForgeAuth.git_env`, env hors argv). `nil` → stage désactivé.
-  defp hop_remote(repo) do
-    case Application.get_env(:fleet_pilot, :hop_remote) do
-      url when is_binary(url) and url != "" ->
-        url
-
-      _ ->
-        case Keyword.get(Application.get_env(:fleet_pilot, :forge, []), :base_url) do
-          # F055 : trim du slash final (symétrie avec StageDispatcher.forge_base_url + ForgeClient.
-          # resolve_config) — sinon `http://forge//repo.git` (double slash → remote invalide).
-          base when is_binary(base) and base != "" ->
-            "#{String.trim_trailing(base, "/")}/#{repo}.git"
-
-          _ ->
-            nil
-        end
+  # Forge base_url résolue (config app `:forge`). `nil` si absente/vide. Source de la garde fail-loud
+  # ci-dessus (le rail stage multi-projet en a besoin pour découvrir ET pour dériver les remotes per-hop).
+  defp forge_base_url do
+    case Keyword.get(Application.get_env(:fleet_pilot, :forge, []), :base_url) do
+      base when is_binary(base) and base != "" -> base
+      _ -> nil
     end
   end
 end

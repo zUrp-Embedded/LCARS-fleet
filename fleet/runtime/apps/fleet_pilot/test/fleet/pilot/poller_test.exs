@@ -8,11 +8,17 @@ defmodule Fleet.Pilot.PollerTest do
   # subsiste ci-dessous (+ le lifecycle GenServer, partagé).
 
   describe "GenServer init / lifecycle" do
-    test "crash si :repo manquant" do
-      Process.flag(:trap_exit, true)
+    test "F-037 : init SANS :repo réussit (découverte par topic, plus de repo fixe requis)" do
+      # Le poller ne scanne plus un repo hard-codé — il DÉCOUVRE ses projets par topic. `:repo` n'est
+      # donc plus requis ; le scoping `my_human` l'est (via :human ici, sinon `Human.current!()`).
+      name = :"P_no_repo_#{System.unique_integer([:positive])}"
 
-      assert {:error, {:missing_required_opt, :repo}} =
-               Poller.start_link(name: :"P_no_repo_#{System.unique_integer([:positive])}")
+      {:ok, pid} = Poller.start_link(name: name, human: "lordzurp", start_tick?: false)
+
+      assert Process.alive?(pid)
+      assert %{poll_count: 0, error_count: 0, err_streak: 0} = Poller.stats(name)
+
+      GenServer.stop(pid)
     end
 
     test "start réussit avec start_tick?: false (pas de tick planifié)" do
@@ -40,6 +46,17 @@ defmodule Fleet.Pilot.PollerTest do
   # réelle, ici on renvoie tel quel) + les write-ops touchées par
   # StageDispatcher.dispatch_issue (add_label / post_comment).
   defmodule StageStubForge do
+    # F-037 — le poller DÉCOUVRE ses repos par topic AVANT de scanner. Défaut = LE repo de test (les tests
+    # single-repo restent identiques : 1 repo découvert → 1 `stage_do_poll`). `_test_repos` pour le multi-repo,
+    # `_test_discover` pour simuler une découverte en erreur (forge down → backoff).
+    def search_repos_by_topic(_topic, opts) do
+      Keyword.get(
+        opts,
+        :_test_discover,
+        {:ok, Keyword.get(opts, :_test_repos, ["lordzurp/lcars-test"])}
+      )
+    end
+
     # #5.2 D1 — le scoping multi-user est FORGE-SIDE : le poller passe `assigned_by=<my_human>`. Le stub
     # CAPTURE ce scoping (→ `:_test_pid`) pour le vérifier, puis renvoie `:_test_issues` tel quel.
     def list_open_issues(_repo, opts) do
@@ -142,6 +159,17 @@ defmodule Fleet.Pilot.PollerTest do
     def list_pods, do: []
   end
 
+  # F-037 / #25 : un pod VIVANT à pod_id REPO-SCOPÉ (`<repo-slug>-issue-<n>-<role>`, format PodId réel).
+  defmodule LivePodSpawner do
+    def spawn_pod(_profile, ticket_id, _opts), do: {:ok, "pod-#{ticket_id}"}
+    def list_pods, do: [%{pod_id: "lordzurp-lcars-test-issue-8-engineer"}]
+  end
+
+  # TaskQueue stub : le pod a une tâche ACTIVE → il POSSÈDE légitimement son verrou.
+  defmodule ActiveTaskQueue do
+    def pod_status(_pod_id), do: {:ok, :running}
+  end
+
   defp start_stage_poller(issues_response, pulls_response \\ {:ok, []}) do
     name = :"P_stage_#{System.unique_integer([:positive])}"
 
@@ -230,6 +258,44 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
+    test "F-037 : un pod VIVANT à pod_id REPO-SCOPÉ tient son verrou (PAS de mis-réclamation)" do
+      # Régression du fix `parse_pod_ref` : pod_id = `<repo-slug>-issue-N-role` (repo-scopé, PodId/#25).
+      # L'ancien parse ancré `^issue-` ne le reconnaissait PAS → `live_owned_refs` vide → le verrou d'un pod
+      # VIVANT paraissait orphelin → mis-réclamé après la grace. Ici le pod (tâche active sur l'issue 8) est
+      # reconnu propriétaire → son verrou n'est JAMAIS réclamé, même après 2 ticks.
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_live_lock_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          stage_dispatch?: true,
+          forge_client: StageStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StageStubLoader,
+          spawner: LivePodSpawner,
+          task_queue: ActiveTaskQueue,
+          clock: fn :second -> 1_700_000_000 end
+        )
+
+      Poller.force_poll(name)
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+
+      GenServer.stop(pid)
+    end
+
     test "D1 — le poller SCOPE les listes par assigned_by=my_human (forge-side, issues ET PR)" do
       # Le scoping multi-user vit dans la LISTE (forge-side) : le poller passe SON humain aux DEUX endpoints
       # (/issues?type=issues ET ?type=pulls). decide/dispatch_review ne re-vérifient plus l'ownership.
@@ -243,11 +309,69 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "forge list en erreur → tally error + backoff (err_streak incrémenté)" do
+    test "F-037 : erreur de LISTE per-repo → tally error MAIS pas de backoff (err_streak 0, forge up)" do
+      # Un repo qui liste mal (500) ne backoff PAS toute la fleet : la DÉCOUVERTE a réussi (forge up), donc
+      # err_streak/error_count restent à 0 (réservés à l'échec de découverte). L'erreur per-item vit dans la
+      # TALLY (errors:1) + `last_tally_errors`.
       {name, pid} = start_stage_poller({:error, {:http, 500, "boom"}})
 
       assert %{dispatched: 0, skipped: 0, errors: 1} = Poller.force_poll(name)
+      assert %{err_streak: 0, error_count: 0, last_tally_errors: 1} = Poller.stats(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "F-037 : échec de DÉCOUVERTE (search_repos_by_topic) → backoff (err_streak + error_count +1)" do
+      # La forge est DOWN — la découverte elle-même échoue. C'est le SEUL cas qui backoff (handle_poll_error).
+      name = :"P_discover_err_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          human: "lordzurp",
+          start_tick?: false,
+          stage_dispatch?: true,
+          forge_client: StageStubForge,
+          forge_opts: [_test_discover: {:error, {:http, 503, "down"}}],
+          spawner: StageStubSpawner,
+          clock: fn :second -> 1_700_000_000 end
+        )
+
+      assert %{dispatched: 0, skipped: 0, errors: 1} = Poller.force_poll(name)
       assert %{err_streak: 1, error_count: 1} = Poller.stats(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "F-037 : découverte multi-repo → scan de CHAQUE repo, tally agrégée sur tous" do
+      # Cœur du chantier : 2 repos découverts → le poller scanne les DEUX, tally additionnée. Issue assignée
+      # routeless dans chaque repo → onboardée puis déférée (skip) ⇒ skipped:2 (1 par repo).
+      issue = %{
+        "number" => 1,
+        "body" => "x",
+        "labels" => [],
+        "assignees" => [%{"login" => "lordzurp"}]
+      }
+
+      name = :"P_multi_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          human: "lordzurp",
+          start_tick?: false,
+          stage_dispatch?: true,
+          forge_client: StageStubForge,
+          forge_opts: [
+            _test_repos: ["lordzurp/proj-a", "lordzurp/proj-b"],
+            _test_issues: {:ok, [issue]}
+          ],
+          loader: StageStubLoader,
+          spawner: StageStubSpawner,
+          clock: fn :second -> 1_700_000_000 end
+        )
+
+      assert %{dispatched: 0, skipped: 2, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)
     end
