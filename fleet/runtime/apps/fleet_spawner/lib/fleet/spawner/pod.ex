@@ -1003,6 +1003,13 @@ defmodule Fleet.Spawner.Pod do
           # claude_launch les lit `:?` strict (no-boot sinon).
           |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
           |> Map.put("LCARS_POD_RESUME", if(state.resume, do: "1", else: "0"))
+          # Mode permission (#kill-yolo) : défaut `default` → claude_launch passe `--permission-mode default`
+          # (allow/deny lists ENFORCED) au lieu de `--dangerously-skip-permissions` (héritage « agents dans la
+          # nature » qui bypasse TOUT). Monde shapé (bwrap RO/RW + cap-profile) → le bypass est inutile, il ne
+          # faisait que neutraliser nos listes. Override par cap-profile `spec.invocation.permission_mode`
+          # (ex. "bypassPermissions" pour ré-ouvrir le yolo explicitement). NB : l'enforcement de l'écriture =
+          # le MOUNT (RO/RW), pas la tool-list → les juges gardent Write/Edit (rapports), bornés par le mount.
+          |> Map.put("LCARS_PERMISSION_MODE", permission_mode(state.cap_profile))
           # Nom RC Desktop : `<projet>_<role>` fourni par le dispatch (`opts[:rc_name]`) ; défaut = role
           # seul (pods permanents / sans projet). #chantier pod-seed. claude_launch le passe en
           # `--remote-control "<nom>"` EXACT (zéro suffixe auto → fini les « noms random qui s'empilent »).
@@ -1549,6 +1556,14 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp deterministic_session_id(_, _), do: UUID.uuid4()
+
+  # Mode permission du pod (#kill-yolo) : `spec.invocation.permission_mode` du cap-profile, défaut
+  # `"default"` (→ `--permission-mode default`, listes allow/deny ENFORCED). Non-vide → claude_launch
+  # passe `--permission-mode <mode>` ; pour ré-ouvrir le bypass, un cap-profile pose `"bypassPermissions"`.
+  defp permission_mode(%Fleet.CapProfile{spec: spec}),
+    do: get_in(spec || %{}, ["invocation", "permission_mode"]) || "default"
+
+  defp permission_mode(_), do: "default"
 
   defp initial_state(args) do
     state_fs_path = state_fs_path_for(args.pod_id, args.cap_profile, args.opts)

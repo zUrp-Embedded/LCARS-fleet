@@ -16,7 +16,12 @@ spec:
       - Bash(git diff:*)
       - Bash(git show:*)
       - Bash(git blame:*)
+      # Rapport : Write/Edit bornés par le MOUNT RW (pas la tool-list).
       - Write
+      - Edit
+      # #kill-yolo : rail wake (Monitor via ToolSearch) — requis en --permission-mode default.
+      - Monitor
+      - ToolSearch
     disallowedTools:
       - web_search
       - web_fetch

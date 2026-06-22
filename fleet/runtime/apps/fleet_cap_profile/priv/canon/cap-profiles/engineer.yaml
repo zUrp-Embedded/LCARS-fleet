@@ -14,6 +14,9 @@ spec:
       - Grep
       - Edit
       - Write
+      # #kill-yolo : rail wake (Monitor via ToolSearch) — requis en --permission-mode default.
+      - Monitor
+      - ToolSearch
       - Bash(git add:*)
       - Bash(git commit:*)
       # `git push` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4, P1.6) :

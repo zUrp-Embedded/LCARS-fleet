@@ -488,6 +488,32 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
+  describe "#kill-yolo — LCARS_PERMISSION_MODE (--permission-mode vs --dangerously-skip)" do
+    setup do
+      StubBackend.set_reply(interactive_reply())
+      :ok
+    end
+
+    test "défaut = 'default' (claude_launch → --permission-mode default, listes enforced)" do
+      pod_id = "pod-perm-#{System.unique_integer([:positive])}"
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      assert_receive {:launch_called, _args, env}, 2_000
+      assert env["LCARS_PERMISSION_MODE"] == "default"
+    end
+
+    test "cap-profile spec.invocation.permission_mode override le défaut" do
+      pod_id = "pod-perm-ovr-#{System.unique_integer([:positive])}"
+      cp = valid_profile()
+      inv = Map.put(cp.spec["invocation"] || %{}, "permission_mode", "bypassPermissions")
+      cp = %{cp | spec: Map.put(cp.spec, "invocation", inv)}
+      args = %{cap_profile: cp, ticket_id: "ticket-1", pod_id: pod_id, opts: []}
+
+      {:ok, _pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _args, env}, 2_000
+      assert env["LCARS_PERMISSION_MODE"] == "bypassPermissions"
+    end
+  end
+
   describe "LAUNCH-Q — branche containment (host_launch vs bwrap) sur le chemin de lancement" do
     # Le gap : avant le fix, `do_launch` bwrappait TOUT (containment jamais lu). Ici on prouve que le
     # launcher N0 passé au backend (`args.launcher_path`) ET le HOME suivent `metadata.containment`.

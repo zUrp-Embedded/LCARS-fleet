@@ -18,6 +18,14 @@ spec:
       - Bash(git log:*)
       - Bash(git status:*)
       - Bash(git show:*)
+      # #kill-yolo : rail wake (Monitor armé via ToolSearch au boot) — requis dès qu'on quitte
+      # --dangerously-skip pour --permission-mode default (sinon ask→hang au démarrage).
+      - Monitor
+      - ToolSearch
+      # Rapport de jugement : Write/Edit BORNÉS par le MOUNT RW (zones RO/RW shapées par le pod), pas
+      # par la tool-list ; la forge reste hors de portée (push denied + forge-aveugle ci-dessous).
+      - Write
+      - Edit
       # `git push/commit/mv/tag` + `tea issues edit/close/comment` RETIRÉS — barrière
       # forge-aveugle (DN forge-state-machine §4 ; gatekeeper-forge-encoding-v2 §4/§9.9 ;
       # analogue engineer A1.2a `c49b32eb`). Le gatekeeper rend son verdict par
