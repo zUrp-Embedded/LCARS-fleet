@@ -12,14 +12,11 @@ spec:
       - Read
       - Grep
       - Glob
-      # Git READ-ONLY uniquement — inspecter le livrable de K (cloné par le runtime
-      # dans le workspace, le pod ne fetch pas : barrière §4 niveau-1).
-      - Bash(git diff:*)
-      - Bash(git log:*)
-      - Bash(git status:*)
-      - Bash(git show:*)
-      # #kill-yolo : rail wake (Monitor armé via ToolSearch au boot) — requis dès qu'on quitte
-      # --dangerously-skip pour --permission-mode default (sinon ask→hang au démarrage).
+      # #kill-yolo : Bash GÉNÉRIQUE (inspecter le livrable : git diff/log/show + shell). Le scopé est
+      # incompatible --permission-mode default (commande hors-pattern → prompt→hang). Enforcement = MOUNT
+      # (RO/RW) + git_ops_denied (push → `Bash(git push:*)` hard-denied = forge-aveugle).
+      - Bash
+      # rail wake (Monitor armé via ToolSearch au boot) — requis en --permission-mode default.
       - Monitor
       - ToolSearch
       # Rapport de jugement : Write/Edit BORNÉS par le MOUNT RW (zones RO/RW shapées par le pod), pas

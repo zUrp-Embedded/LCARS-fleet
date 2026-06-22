@@ -17,25 +17,11 @@ spec:
       # #kill-yolo : rail wake (Monitor via ToolSearch) — requis en --permission-mode default.
       - Monitor
       - ToolSearch
-      - Bash(git add:*)
-      - Bash(git commit:*)
-      # `git push` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4, P1.6) :
-      # l'engineer commite en LOCAL dans son workspace (git_native), le SYSTÈME pousse
-      # (DeliverableGate F-04). Le pod n'écrit jamais la forge. Voir git_ops_denied + mcp_channels.
-      - Bash(git diff:*)
-      - Bash(git log:*)
-      - Bash(git status:*)
-      - Bash(git checkout:*)
-      - Bash(mix:*)
-      - Bash(elixir:*)
-      - Bash(npm:*)
-      - Bash(node:*)
-      - Bash(cargo:*)
-      - Bash(rustc:*)
-      - Bash(cmake:*)
-      - Bash(make:*)
-      - Bash(pytest:*)
-      - Bash(python:*)
+      # #kill-yolo : Bash GÉNÉRIQUE (shell + git local + build : mix/npm/cargo/make/pytest…). Le Bash SCOPÉ
+      # (allow-as-restriction) est incompatible --permission-mode default : toute commande hors-pattern
+      # (printf/cat/pwd…) PROMPTE→hang. L'enforcement réel = le MOUNT (RO/RW, zones shapées) + `git_ops_denied`
+      # (`push` → `Bash(git push:*)` hard-denied = forge-aveugle ; DeliverableGate F-04 : le SYSTÈME pousse).
+      - Bash
       - TaskCreate
       - TaskUpdate
       - TaskList

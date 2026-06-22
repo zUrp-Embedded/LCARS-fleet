@@ -17,10 +17,9 @@ spec:
       - Read
       - Glob
       - Grep
-      - Bash(git diff:*)
-      - Bash(git log:*)
-      - Bash(git show:*)
-      - Bash(git blame:*)
+      # #kill-yolo : Bash GÉNÉRIQUE (scopé = hang en default mode). Enforcement = MOUNT (RO/RW)
+      # + git_ops_denied (push/rebase/commit hard-denied → forge-aveugle ET commit).
+      - Bash
       # Rapport : Write/Edit bornés par le MOUNT RW (pas la tool-list).
       - Write
       - Edit
