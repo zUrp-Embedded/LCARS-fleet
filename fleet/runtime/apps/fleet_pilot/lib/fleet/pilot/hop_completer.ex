@@ -303,7 +303,6 @@ defmodule Fleet.Pilot.HopCompleter do
     case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, gk_opts) do
       :ok -> {:ok, :promoted}
       {:error, {:merge, _}} = err -> err
-      {:error, {:seal_comment, reason}} -> {:error, {:merge, {:seal_comment, reason}}}
     end
   end
 

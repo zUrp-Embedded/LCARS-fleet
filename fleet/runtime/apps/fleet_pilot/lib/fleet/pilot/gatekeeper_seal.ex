@@ -22,15 +22,16 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     do: Application.get_env(:fleet_pilot, :gatekeeper_role, @default_gatekeeper_role)
 
   @doc """
-  Scelle la PR : poste le commentaire de fin gatekeeper sur l'issue (dédupliqué) PUIS merge avec
-  `gk_opts` (token gatekeeper). L'ordre (comment → merge) garantit la trace même si le close suit
-  immédiatement le merge. Comment KO → on ne merge PAS (cohérent avec l'ancien `promote_pr`).
+  Scelle la PR : **merge D'ABORD** (`gk_opts` = token gatekeeper), PUIS poste le commentaire de fin
+  « ✅ livrée et fusionnée » — SEULEMENT si le merge a réussi (best-effort, le merge fait foi ; Gitea
+  accepte un commentaire sur l'issue auto-close). On ne prétend JAMAIS « fusionnée » avant de l'avoir
+  vérifié (F-MERGE-CLAIM-BEFORE-REALITY). Merge KO → aucun commentaire de réussite, l'erreur remonte.
 
   `gk_opts` = `forge_opts` déjà passé par `as_role(_, gatekeeper_role())` côté appelant.
-  Returns `:ok | {:error, {:merge, reason}} | {:error, {:seal_comment, reason}}`.
+  Returns `:ok | {:error, {:merge, reason}}`.
   """
   @spec seal_and_merge(module(), String.t(), integer(), integer(), String.t(), keyword()) ::
-          :ok | {:error, {:merge | :seal_comment, term()}}
+          :ok | {:error, {:merge, term()}}
   def seal_and_merge(forge, repo, pr_number, issue_n, producer, gk_opts) do
     signature = "[merge:pr-#{pr_number}]"
     body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
@@ -40,9 +41,20 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     comment_opts =
       gk_opts |> Keyword.put(:dedup_signature, signature) |> Keyword.put(:dedup_any_author, true)
 
-    with {:ok, _} <- comment(forge, repo, issue_n, body, comment_opts),
-         :ok <- do_merge(forge, repo, pr_number, gk_opts) do
-      :ok
+    # F-MERGE-CLAIM-BEFORE-REALITY (2026-06-22) : MERGER D'ABORD, ne commenter « ✅ livrée et fusionnée » QUE
+    # si le merge a RÉELLEMENT réussi. L'ancien ordre (comment → merge) postait la réussite AVANT de la
+    # vérifier → sur un conflit, un commentaire MENSONGER « fusionnée » restait figé : fail silencieux sur LE
+    # point crucial du workflow (on contrôlait l'INTENTION, pas la RÉALITÉ du merge). Le sceau devient
+    # best-effort POST-merge (le merge fait foi ; Gitea accepte un commentaire sur l'issue auto-close par
+    # `Closes #N`). Merge KO → AUCUN « fusionnée », l'erreur remonte (la résolution du conflit = backlog
+    # F-PARALLEL-PR-CONFLICT).
+    case do_merge(forge, repo, pr_number, gk_opts) do
+      :ok ->
+        _ = comment(forge, repo, issue_n, body, comment_opts)
+        :ok
+
+      {:error, _} = err ->
+        err
     end
   end
 
