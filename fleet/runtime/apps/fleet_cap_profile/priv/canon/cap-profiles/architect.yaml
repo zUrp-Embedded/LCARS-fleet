@@ -33,6 +33,11 @@ spec:
       - WebSearch      # PascalCase : tool Claude Code natif autorisé côté pod
       - ToolSearch     # PascalCase : charge les tools déférés (Monitor, mcp__fleet__*)
       - Monitor        # PascalCase : réveil-par-flag (watch.sh) — wake sans send-keys de contenu (ADR-G pt3)
+      # MCP fleet role-specific de l'arch (délégation) — requis en --permission-mode default (sinon prompt).
+      # get_task/submit_result (universels) viennent du launcher #kill-yolo.
+      - mcp__fleet__create_project
+      - mcp__fleet__create_ticket
+      - mcp__fleet__get_ticket_status
     disallowedTools:
       # snake_case : server tools API Anthropic bypassant can_use_tool — F-CONT-RISK gate
       - web_search

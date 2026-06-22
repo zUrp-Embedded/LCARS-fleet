@@ -81,25 +81,13 @@ SESSION_ID="${LCARS_POD_SESSION_ID:?UUID de session requis (pré-alloué par le 
 POD_RESUME="${LCARS_POD_RESUME:-0}"                          # 0 = 1ʳᵉ création ; 1 = recovery
 SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?préfixe nom RC requis (<human>_<role>)}"
 
-# Permission : SANCTUAIRE = liberté totale. Les murs bwrap portent la sécu, PAS le harness — l'agent
-# ne se brise pas les dents sur la paranoïa permission de Claude Code (un prompt « autoriser ? » hang
-# un pod headless : personne pour répondre). Défaut = --dangerously-skip-permissions (le user le fait
-# déjà sur sa session RC ; pod sous UID humain ≠ root → accepté). Le « no-internet recommended » du
-# flag est OK ici : threat-model = sandbox jetable root-de-confiance, le containment bwrap est le mur.
-# Hook LCARS_PERMISSION_MODE pour un rôle bridé (ex. plan) — NON câblé aujourd'hui (F156) : bwrap_launch.sh
-# fait --clearenv SANS --setenv LCARS_PERMISSION_MODE, et aucun cap-profile/pod.ex ne le pose → PERM_MODE
-# reste vide, le défaut sanctuaire s'applique partout. Le hook ci-dessous est prêt ; câbler = cap-profile.spec
-# → LCARS_PERMISSION_MODE (pod.ex) + l'ajouter à la liste --setenv de bwrap_launch (frontière N0).
-PERM_MODE="${LCARS_PERMISSION_MODE:-}"
-if [[ -n "$PERM_MODE" ]]; then
-  PERM_FLAGS=(--permission-mode "$PERM_MODE")
-else
-  # --dangerously-skip-permissions POSE le mode bypass. Le BLOCAGE n'est pas le mode mais le DIALOGUE
-  # interactif d'acceptation (« 1. No / 2. Yes I accept ») qui hang un pod headless → levé séparément
-  # par skipDangerousModePermissionPrompt en settings (bloc « bypass dialog » ci-dessous). PAS besoin de
-  # --allow-dangerously-skip-permissions (redondant : il ne fait qu'enclencher le même mode).
-  PERM_FLAGS=(--dangerously-skip-permissions)
-fi
+# Permission (#kill-yolo 2026-06-22) : le monde est shapé (bwrap RO/RW + cap-profile allow/deny) → on
+# N'utilise PLUS --dangerously-skip-permissions, qui NEUTRALISAIT nos listes (héritage « agents dans la
+# nature », d'avant le sanctuaire bwrap). Le mode vient du CAP-PROFILE (`.spec.invocation.permission_mode`,
+# défaut `default` → listes ENFORCED) — canal IN-SANDBOX (la JSON est dans POD_DIR, lisible), PAS l'env
+# (bwrap --clearenv stripperait LCARS_PERMISSION_MODE, et bwrap_launch est SANCTUAIRE). Override host =
+# LCARS_PERMISSION_MODE (host_launch propage l'env). Dérivation DÉFÉRÉE après CAP_PROFILE_JSON (infra).
+PERM_ENV_OVERRIDE="${LCARS_PERMISSION_MODE:-}"
 # --settings est ADDITIF ⇒ --setting-sources DOIT exclure 'user' (sinon le settings de
 # l'humain bleed dans le pod). Default project,local — 'user' INTERDIT (fleet_spawner v2 §G).
 SETTING_SOURCES="${LCARS_SETTING_SOURCES:-project,local}"
@@ -181,7 +169,18 @@ dbg "step claude.json provisionné (VER=${VER:-?}, RC keys posées)"
 
 ALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.allowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq allowedTools fail rc=$? out=$ALLOWED_TOOLS"; exit 1; }
 DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq disallowedTools fail rc=$? out=$DISALLOWED_TOOLS"; exit 1; }
+# #kill-yolo : protocole MCP fleet UNIVERSEL (tout pod fait get_task/submit_result) → append à l'allowlist.
+# En --permission-mode default, un tool MCP non listé PROMPTE (« Do you want to proceed? ») → hang headless.
+# (Les MCP role-specific — create_*/get_ticket_status de l'arch — restent au cap-profile.)
+ALLOWED_TOOLS="${ALLOWED_TOOLS:+$ALLOWED_TOOLS,}mcp__fleet__get_task,mcp__fleet__submit_result"
 dbg "step jq tools OK allowed='$ALLOWED_TOOLS' disallowed='$DISALLOWED_TOOLS'"
+
+# Mode permission (#kill-yolo) : override env (host) sinon `cap-profile.spec.invocation.permission_mode`,
+# défaut "default" (→ `--permission-mode default`, listes ENFORCED ; fini --dangerously-skip qui bypassait).
+PERM_MODE="${PERM_ENV_OVERRIDE:-$("$JQ_BIN" -r '.spec.invocation.permission_mode // "default"' "$CAP_PROFILE_JSON" 2>/dev/null)}"
+[[ -z "$PERM_MODE" ]] && PERM_MODE="default"
+PERM_FLAGS=(--permission-mode "$PERM_MODE")
+dbg "step perm mode=$PERM_MODE (env_override='${PERM_ENV_OVERRIDE}')"
 
 # Model + effort depuis le catalogue (spec.invocation) → flags claude. Absent/null ⇒ flag omis
 # (claude garde son défaut binaire ; les 7 cap-profiles canon les posent ⇒ flag toujours émis en prod).
