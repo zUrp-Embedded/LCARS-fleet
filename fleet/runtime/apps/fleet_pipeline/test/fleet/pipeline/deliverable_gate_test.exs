@@ -91,6 +91,49 @@ defmodule Fleet.Pipeline.DeliverableGateTest do
     assert {:error, {:base_not_ancestor, _}} = Gate.check_base_ancestor(dir, base)
   end
 
+  test "F-03 / F-PARALLEL — message base_not_ancestor embarque le base_sha (diagnostique, plus de tuple muet)",
+       %{tmp_dir: tmp} do
+    {dir, base} = setup_repo(Path.join(tmp, "diag"))
+    {_, 0} = g(dir, ["commit", "--amend", "-q", "-m", "rewritten", "--allow-empty"])
+
+    assert {:error, {:base_not_ancestor, msg}} = Gate.check_base_ancestor(dir, base)
+
+    # le live `{:base_not_ancestor, ""}` (sortie merge-base vide) a coûté une traque entière : le message
+    # DOIT maintenant nommer la base fautive (12 hex) → la cause saute aux yeux dans un seul log.
+    assert msg =~ String.slice(base, 0, 12)
+  end
+
+  test "F-PARALLEL — résolution par rebase : la gate ACCEPTE avec base=main, REJETTE avec base=feature_tip (déconflation clone/gate)",
+       %{tmp_dir: tmp} do
+    {dir, _c0} = setup_repo(Path.join(tmp, "rebase-resolve"))
+    # le PRODUCTEUR a livré sur sa feature-branch (depuis C0).
+    {_, 0} = g(dir, ["checkout", "-q", "-b", "feature"])
+    commit_file(dir, "feature.py", "def blink(): pass  # GPIO5", "feat: blink")
+    {ft, 0} = g(dir, ["rev-parse", "HEAD"])
+    feature_tip = String.trim(ft)
+
+    # un ticket PARALLÈLE a fusionné → `main` avance (C1). Fichier DIFFÉRENT : la gate ne vérifie QUE
+    # l'ascendance + l'identité + les secrets ; la RÉSOLUTION du conflit de contenu est le boulot du pod.
+    {_, 0} = g(dir, ["checkout", "-q", "main"])
+    commit_file(dir, "parallel.md", "# autre ticket", "feat: ticket parallèle")
+    {m1, 0} = g(dir, ["rev-parse", "HEAD"])
+    main_c1 = String.trim(m1)
+
+    # l'eng de RÉSOLUTION rebase sa feature sur `main` (C1) → HEAD = feat REJOUÉ sur C1 (SHA neuf).
+    {_, 0} = g(dir, ["checkout", "-q", "feature"])
+    {_, 0} = g(dir, ["rebase", "-q", "main"])
+
+    # LE BUG (clone-base) : `base_branch=head` pinnait base_sha sur l'ANCIEN tip de feature, que le rebase
+    # a réécrit → plus ancêtre de HEAD → `base_not_ancestor` (live PR#4, publish jamais atteint).
+    assert {:error, {:base_not_ancestor, msg}} = Gate.check_base_ancestor(dir, feature_tip)
+    assert msg =~ String.slice(feature_tip, 0, 12)
+
+    # LE FIX (gate_base_sha = main, cible du rebase) : HEAD descend de `main` → la gate ACCEPTE, et la
+    # vérif COMPLÈTE passe (le commit feat rejoué porte l'identité engineer, zéro secret → publish + push).
+    assert :ok = Gate.check_base_ancestor(dir, main_c1)
+    assert {:ok, :verified} = Gate.verify(dir, main_c1, @role_emails)
+  end
+
   test "range vide (aucun nouveau commit) → identité OK (vacuité), scan OK", %{tmp_dir: tmp} do
     {dir, base} = setup_repo(Path.join(tmp, "empty"))
     # base == HEAD, aucun commit depuis

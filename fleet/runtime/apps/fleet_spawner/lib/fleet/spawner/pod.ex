@@ -1233,6 +1233,12 @@ defmodule Fleet.Spawner.Pod do
               # F121 : autorité unique du sous-dossier workspace (Fleet.Spawner), pas un littéral recopié.
               "workspace" => Fleet.Spawner.pod_workspace_path(state.pod_dir),
               "base_sha" => proj["base_sha"],
+              # F-PARALLEL-PR-CONFLICT — base de la GATE F-03, DÉCONFLÉE de la clone-base (`base_sha`). Pour
+              # une résolution par rebase, le livrable doit DESCENDRE de `main` (cible du rebase), pas de
+              # l'ancien tip de feature (réécrit → `base_not_ancestor`, bug live PR#4). Le resolver l'égale à
+              # `base_sha` pour le forward (build/rework) → comportement inchangé. Fallback `base_sha` : projet
+              # d'un spawn antérieur au champ (re-mandate vivant dont le project est figé au build initial).
+              "gate_base_sha" => proj["gate_base_sha"] || proj["base_sha"],
               "role" => cap_profile_name(state.cap_profile)
             })
             |> maybe_put_repo(proj)

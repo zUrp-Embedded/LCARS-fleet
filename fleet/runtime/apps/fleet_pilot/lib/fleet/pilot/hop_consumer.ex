@@ -687,7 +687,11 @@ defmodule Fleet.Pilot.HopConsumer do
     %{
       mode: :git_native,
       workspace: payload["workspace"],
-      base_sha: payload["base_sha"],
+      # F-PARALLEL-PR-CONFLICT — la gate F-03 se base sur `gate_base_sha` (DÉCONFLÉ de la clone-base) :
+      # pour une résolution par rebase, HEAD descend de `main` (cible du rebase), pas de l'ancien tip de
+      # feature (réécrit → `base_not_ancestor`, bug live PR#4). Forward (build/rework) : le resolver pose
+      # `gate_base_sha == base_sha`. Fallback `base_sha` (payload nu de test / spawn antérieur au champ).
+      base_sha: payload["gate_base_sha"] || payload["base_sha"],
       allowed_emails: state.role_emails.(role),
       # Z4 (A.2) — F-01 vérifie le trailer `Co-authored-by: LCARS-<role>` (signature rôle).
       coauthor_role: role,

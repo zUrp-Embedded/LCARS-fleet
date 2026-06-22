@@ -710,4 +710,73 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert_received {:removed_label, "lcars-in-flight"}
     end
   end
+
+  # F-PARALLEL-PR-CONFLICT — DÉCONFLATION clone-base / gate-base. Pour une résolution par rebase, le pod
+  # part de la feature (clone-base) mais son livrable doit DESCENDRE de `main` (gate-base) → le resolver
+  # pinne les DEUX séparément quand `:gate_base_branch` est posé. Fixture : un bare repo local = la « forge ».
+  describe "default_project_resolver/2 — gate_base_sha déconflé" do
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: tmp} do
+      forge = Path.join(tmp, "forge")
+      src = Path.join(tmp, "src")
+      File.mkdir_p!(forge)
+      gg = fn args -> {_o, 0} = System.cmd("git", ["-C", src] ++ args, stderr_to_stdout: true) end
+
+      {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", src], stderr_to_stdout: true)
+      gg.(["config", "user.email", "engineer@lcars.local"])
+      gg.(["config", "user.name", "LCARS-engineer"])
+      File.write!(Path.join(src, "base.txt"), "c0")
+      gg.(["add", "."])
+      gg.(["commit", "-q", "-m", "c0"])
+
+      # feature-branch (le travail du producteur, depuis C0)
+      gg.(["checkout", "-q", "-b", "lcars/issue-3-engineer"])
+      File.write!(Path.join(src, "feat.txt"), "feat")
+      gg.(["add", "."])
+      gg.(["commit", "-q", "-m", "feat"])
+      {ft, 0} = System.cmd("git", ["-C", src, "rev-parse", "HEAD"], stderr_to_stdout: true)
+
+      # `main` avance (ticket parallèle fusionné) → C1
+      gg.(["checkout", "-q", "main"])
+      File.write!(Path.join(src, "para.txt"), "para")
+      gg.(["add", "."])
+      gg.(["commit", "-q", "-m", "c1"])
+      {m1, 0} = System.cmd("git", ["-C", src, "rev-parse", "HEAD"], stderr_to_stdout: true)
+
+      # publie les deux branches dans le bare = `<forge>/owner/proj.git` (base_url = `<forge>`)
+      bare = Path.join(forge, "owner/proj.git")
+      File.mkdir_p!(Path.dirname(bare))
+      {_, 0} = System.cmd("git", ["clone", "-q", "--bare", src, bare], stderr_to_stdout: true)
+
+      %{base_url: forge, feature_tip: String.trim(ft), main_c1: String.trim(m1)}
+    end
+
+    test "resolve (gate_base_branch=main) : base_sha=feature_tip (clone) MAIS gate_base_sha=main",
+         ctx do
+      assert {:ok, proj} =
+               StageDispatcher.default_project_resolver("owner/proj",
+                 base_branch: "lcars/issue-3-engineer",
+                 gate_base_branch: "main",
+                 forge_opts: [base_url: ctx.base_url]
+               )
+
+      # clone-base = tip de la feature (le pod part de SON travail) ; gate-base = main (cible du rebase).
+      assert proj["base_sha"] == ctx.feature_tip
+      assert proj["gate_base_sha"] == ctx.main_c1
+      refute proj["base_sha"] == proj["gate_base_sha"]
+    end
+
+    test "forward (sans gate_base_branch) : gate_base_sha == base_sha (clone-base, inchangé)",
+         ctx do
+      assert {:ok, proj} =
+               StageDispatcher.default_project_resolver("owner/proj",
+                 base_branch: "lcars/issue-3-engineer",
+                 forge_opts: [base_url: ctx.base_url]
+               )
+
+      assert proj["base_sha"] == ctx.feature_tip
+      assert proj["gate_base_sha"] == proj["base_sha"]
+    end
+  end
 end

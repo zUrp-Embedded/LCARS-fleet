@@ -66,8 +66,18 @@ defmodule Fleet.Pipeline.DeliverableGate do
   @spec check_base_ancestor(Path.t(), String.t()) :: :ok | {:error, reason()}
   def check_base_ancestor(workspace, base_sha) do
     case git(workspace, ["merge-base", "--is-ancestor", base_sha, "HEAD"]) do
-      {_out, 0} -> :ok
-      {out, _rc} -> {:error, {:base_not_ancestor, String.trim(out)}}
+      {_out, 0} ->
+        :ok
+
+      {out, _rc} ->
+        # #5.2 F-PARALLEL — message DIAGNOSTIQUE. `merge-base --is-ancestor` ne sort RIEN sur le cas
+        # nominal d'échec (base valide mais pas ancêtre de HEAD, ex. un rebase a réécrit par-dessus) →
+        # `String.trim(out)` = "" : le live `{:base_not_ancestor, ""}` a coûté une traque entière. On
+        # embarque le `base_sha` (court) : un seul log dit « telle base ⊄ HEAD » → la cause (mauvaise
+        # base de gate — clone-base au lieu de la cible du rebase) saute aux yeux.
+        {:error,
+         {:base_not_ancestor,
+          "#{String.slice(to_string(base_sha), 0, 12)} ⊄ HEAD #{String.trim(out)}"}}
     end
   end
 

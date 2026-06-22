@@ -412,9 +412,19 @@ defmodule Fleet.Pilot.StageDispatcher do
     # ②.1d — le pod review (juge) OU rework (producteur) clone la FEATURE-BRANCH (`head.ref`), PAS
     # `main` : le juge doit voir le DIFF du producteur (sinon il juge `main`, c.-à-d. rien de réel) ;
     # le rework reprend SON propre travail. Read-only sur le code via le workspace provisionné par le
-    # système (barrière §4 préservée : zéro token forge au pod). `base_branch: head` → base_sha = tip
-    # de la feature-branch.
-    review_opts = Keyword.put(opts, :base_branch, head)
+    # système (barrière §4 préservée : zéro token forge au pod). `base_branch: head` → le pod CLONE et
+    # part du tip de la feature-branch.
+    #
+    # F-PARALLEL-PR-CONFLICT — la RÉSOLUTION (rebase) part AUSSI de la feature (son travail à rebaser),
+    # mais son livrable doit DESCENDRE de `main` (la cible du rebase), pas de l'ancien tip de feature
+    # (réécrit par le rebase → la gate F-03 le rejetterait : `base_not_ancestor`, bug live PR#4). On
+    # DÉCONFLE les deux rôles jadis portés par `base_sha` : `base_branch` = clone-base (feature, le pod
+    # part de là, INCHANGÉ) ; `gate_base_branch` = "main" → le resolver pinne la base de GATE sur `main`.
+    # judge/rework (forward, pas de réécriture) : pas de `gate_base_branch` → gate = clone-base, inchangé.
+    review_opts =
+      opts
+      |> Keyword.put(:base_branch, head)
+      |> maybe_gate_base_main(kind)
 
     # PROJET + ROUTE resolus AVANT toute ecriture forge (read-only) : un echec ne laisse pas de
     # verrou orphelin. La route (pipeline, stage) est lue sur l'ISSUE (le pipeline-state y reste).
@@ -458,6 +468,15 @@ defmodule Fleet.Pilot.StageDispatcher do
         {:error, {phase, reason}}
     end
   end
+
+  # F-PARALLEL-PR-CONFLICT — DÉCONFLATION clone-base / gate-base. Une RÉSOLUTION (rebase) part de la
+  # feature (clone-base, son travail) mais son livrable doit DESCENDRE de `main` (cible du rebase) → la
+  # gate F-03 se base sur `main`, pas sur l'ancien tip de feature (réécrit par le rebase, donc pas
+  # ancêtre). judge/rework (forward, pas de réécriture) : aucune divergence → gate = clone-base.
+  defp maybe_gate_base_main(opts, :resolve_conflict),
+    do: Keyword.put(opts, :gate_base_branch, "main")
+
+  defp maybe_gate_base_main(opts, _kind), do: opts
 
   # ②.1d/②.1e — PROMOTE PR-state-driven (interim, sans branch-protection) : tous les juges ont
   # approuvé → le système SCELLE. Modèle identité ②.1e : comment de fin + merge signés GATEKEEPER
@@ -1056,6 +1075,14 @@ defmodule Fleet.Pilot.StageDispatcher do
     forge_opts = Keyword.get(opts, :forge_opts, [])
     base_branch = Keyword.get(opts, :base_branch, "main")
 
+    # F-PARALLEL-PR-CONFLICT — DÉCONFLATION clone-base / gate-base. `base_sha` portait JADIS deux
+    # concerns confondus : (1) le POINT DE DÉPART du clone (`pin_base_sha` reset HEAD dessus) et (2) la
+    # base de la GATE F-03 (HEAD doit en DESCENDRE). Forward (build/rework) : ils coïncident. RÉSOLUTION
+    # par rebase : ils DIVERGENT — le pod part de la feature (son travail) mais doit descendre de `main`.
+    # `:gate_base_branch` (posé par le dispatch resolve) pinne la base de gate séparément ; absent → la
+    # gate retombe sur la clone-base (`base_sha`), comportement forward INCHANGÉ.
+    gate_base_branch = Keyword.get(opts, :gate_base_branch)
+
     case forge_base_url(forge_opts) do
       nil ->
         {:ok, nil}
@@ -1063,24 +1090,32 @@ defmodule Fleet.Pilot.StageDispatcher do
       base_url ->
         repo_url = "#{String.trim_trailing(base_url, "/")}/#{repo}.git"
 
-        case ls_remote_sha(repo_url, base_branch) do
-          {:ok, sha} ->
-            # F-037 : `"repo"` (full_name "owner/name") embarqué dans le projet → il voyage jusqu'au pod
-            # puis ressort dans `pod.completed` (`pod_completed_payload`) → le HopConsumer sait sur QUEL
-            # repo agir (multi-projet), sans le re-dériver. `repo_path` = l'URL de push (remote per-hop).
-            {:ok,
-             %{
-               "repo" => repo,
-               "repo_path" => repo_url,
-               "base_branch" => base_branch,
-               "base_sha" => sha
-             }}
-
-          {:error, _} = err ->
-            err
+        with {:ok, sha} <- ls_remote_sha(repo_url, base_branch),
+             {:ok, gate_sha} <- resolve_gate_base_sha(repo_url, gate_base_branch, sha) do
+          # F-037 : `"repo"` (full_name "owner/name") embarqué dans le projet → il voyage jusqu'au pod
+          # puis ressort dans `pod.completed` (`pod_completed_payload`) → le HopConsumer sait sur QUEL
+          # repo agir (multi-projet), sans le re-dériver. `repo_path` = l'URL de push (remote per-hop).
+          {:ok,
+           %{
+             "repo" => repo,
+             "repo_path" => repo_url,
+             "base_branch" => base_branch,
+             "base_sha" => sha,
+             # gate_base_sha = base de la GATE F-03 (≠ clone-base pour une résolution rebase, cf. supra).
+             "gate_base_sha" => gate_sha
+           }}
         end
     end
   end
+
+  # Base de la GATE F-03. Défaut (forward) : = clone-base (`base_sha`) → la garde exige que HEAD descende
+  # de là où le pod a cloné. Un dispatch resolve passe `:gate_base_branch` ("main") → on pinne le tip de
+  # CETTE branche (la cible du rebase) : la garde exige alors que HEAD descende de `main`, pas de l'ancien
+  # tip de feature (réécrit par le rebase → il ne serait plus ancêtre, d'où le `base_not_ancestor` live).
+  defp resolve_gate_base_sha(_repo_url, nil, clone_base_sha), do: {:ok, clone_base_sha}
+
+  defp resolve_gate_base_sha(repo_url, branch, _clone_base_sha) when is_binary(branch),
+    do: ls_remote_sha(repo_url, branch)
 
   defp forge_base_url(forge_opts) do
     Keyword.get(forge_opts, :base_url) ||
