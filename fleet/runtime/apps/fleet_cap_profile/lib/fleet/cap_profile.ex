@@ -421,7 +421,11 @@ defmodule Fleet.CapProfile do
   def root_dir do
     # I-CBC : un :root_dir explicitement nil (ex. fuite d'env cross-test en
     # umbrella) ne doit JAMAIS atteindre Path.join → coalesce vers le défaut.
-    Application.get_env(:fleet_cap_profile, :root_dir) || "cap-profiles"
+    # Défaut = le priv BUNDLÉ (`:code.priv_dir`) → résout en RELEASE (lib/fleet_cap_profile-vsn/priv/…)
+    # comme en dev (_build/…/priv) SANS aucun env. L'ancien défaut `"cap-profiles"` (relatif au CWD) n'a
+    # jamais été correct hors d'un `LCARS_CAPPROFILES_ROOT` explicite → `:enoent` en release (étanchéité).
+    Application.get_env(:fleet_cap_profile, :root_dir) ||
+      Path.join(to_string(:code.priv_dir(:fleet_cap_profile)), "canon/cap-profiles")
   end
 
   # ============================================================

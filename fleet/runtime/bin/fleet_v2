@@ -118,6 +118,9 @@ cmd_start() {
   local mode launch_cmd
   if [[ -x "$rel_bin" ]]; then
     mode="release"
+    # Install RO (owner système) → le BEAM écrit son tmp dans le home de l'humain, pas dans l'install.
+    export RELEASE_TMP="${RELEASE_TMP:-$HOME/.lcars/tmp}"
+    mkdir -p "$RELEASE_TMP"
     launch_cmd="exec '$rel_bin' start"
   else
     mode="dev (mix run, MIX_ENV=$mix_env)"
