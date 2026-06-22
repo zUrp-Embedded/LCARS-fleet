@@ -448,15 +448,15 @@ defmodule Fleet.Spawner.PodTest do
                ~r/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
     end
 
-    test "project-bound (engineer) AVEC repo_id → hexspeak déterministe (repo encodé, pré-M5)" do
+    test "project-bound (engineer) AVEC repo_id → hexspeak déterministe (repo DÉCIMAL encodé)" do
       pod_id = "pod-eng-repo-#{System.unique_integer([:positive])}"
-      args = build_args(pod_id, "ticket-1") |> Map.put(:opts, repo_id: 0x00AB)
+      args = build_args(pod_id, "ticket-1") |> Map.put(:opts, repo_id: 161)
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
       GenServer.call(pid, :info)
 
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
-      assert content["session_id"] == "1badcafe-feed-4dad-babe-00abdec0de03"
+      assert content["session_id"] == "1badcafe-feed-4dad-babe-0161dec0de03"
     end
 
     test "GC d'UUID : un <uuid>.jsonl stale (pod_dir survivant d'un crash) est retiré avant --session-id",

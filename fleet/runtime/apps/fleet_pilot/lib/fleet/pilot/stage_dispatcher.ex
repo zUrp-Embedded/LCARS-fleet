@@ -477,16 +477,17 @@ defmodule Fleet.Pilot.StageDispatcher do
     do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:stage, stage)
 
   # BL-055 (M5) : `repo_id` = id forge du projet → session_id déterministe des rôles project-bound
-  # (eng, juges) via `Fleet.Spawner.SessionId` (segment `<REPO4>`). Best-effort : forge sans `repo_id`
-  # (stub) / forge down / id absent → `nil` → pas de `repo_id` posé → le spawner retombe sur un UUID
-  # random (zéro collision). Masqué 16 bits (`<REPO4>` = 4 hex ; >65535 repos = wrap, improbable).
+  # (eng, juges) via `Fleet.Spawner.SessionId` (segment `<REPO4>` DÉCIMAL). Best-effort : forge sans
+  # `repo_id` (stub) / forge down / id absent → `nil` → pas de `repo_id` posé → le spawner retombe sur un
+  # UUID random (zéro collision). `rem(id, 10000)` : `<REPO4>` = 4 chiffres décimaux → DETTE assumée, le
+  # repo 10000 collisionne le repo 0 (on ne rouvrira pas le vieux ; cf. SessionId moduledoc).
   defp maybe_put_repo_id(spawn_opts, nil), do: spawn_opts
   defp maybe_put_repo_id(spawn_opts, repo_id), do: Keyword.put(spawn_opts, :repo_id, repo_id)
 
   defp resolve_repo_id(forge, repo, forge_opts) do
     if function_exported?(forge, :repo_id, 2) do
       case forge.repo_id(repo, forge_opts) do
-        {:ok, id} when is_integer(id) and id >= 0 -> rem(id, 0x10000)
+        {:ok, id} when is_integer(id) and id >= 0 -> rem(id, 10000)
         _ -> nil
       end
     else

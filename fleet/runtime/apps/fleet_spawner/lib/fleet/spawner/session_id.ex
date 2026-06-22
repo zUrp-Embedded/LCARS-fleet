@@ -10,9 +10,14 @@ defmodule Fleet.Spawner.SessionId do
                       ÉPARGNE l'arch (terminal user) ; `pkill -f badcafe` = tout.
     - `feed-4dad-babe` filler hexspeak fixe (`4` de `4dad` = nibble version UUID ; `b` de `babe` =
                       nibble variant RFC4122 valide → la string EST un UUID légal, accepté `--session-id`).
-    - `<REPO4>`       id forge du repo (4 hex) ; `0000` = fleet-level (permanents).
+    - `<REPO4>`       id forge du repo, en **DÉCIMAL** 4 chiffres (la forge crée l'id en décimal → `grep
+                      <id>dec0de` direct, zéro conversion). `0000` = fleet-level (permanents). Les chiffres
+                      `0-9` ⊂ hex → l'UUID reste légal. **DETTE ASSUMÉE** : cap 9999 ; `rem(id, 10000)` →
+                      le repo 10000 collisionne le repo 0, 10001↔1, etc. Accepté (on ne rouvrira pas un
+                      vieux projet au moment d'en créer 10000) — la seule dette qu'on s'accorde ici.
     - `dec0de`        filler.
-    - `<P><R>`        pool (nibble haut, `0` = séquentiel pour l'instant) + rôle (nibble bas, catalogue).
+    - `<P><R>`        pool (nibble haut, `0` = séquentiel) + rôle (nibble bas, catalogue) — **HEX** (R=0-F,
+                      notre compteur natif ; grep-hex assumé).
 
   Catalogue rôle → R (16 slots ; l'ordre est interne — personne n'inspecte les UUID à l'œil) :
 
@@ -57,18 +62,20 @@ defmodule Fleet.Spawner.SessionId do
   il ne reçoit JAMAIS un session_id fleet (axe OS, vu comme un humain par le runtime). Son slot `R=0`
   est réservé pour qu'aucun autre rôle ne le prenne, mais il n'est pas mintable.
   """
-  @spec build(String.t(), 0..0xFFFF, 0..0xF) :: {:ok, String.t()} | {:error, atom()}
+  @spec build(String.t(), 0..9999, 0..0xF) :: {:ok, String.t()} | {:error, atom()}
   def build(role, repo \\ 0x0000, pool \\ 0)
 
   def build("starfleet", _repo, _pool), do: {:error, :starfleet_hors_fleet}
 
   def build(role, repo, pool)
-      when is_binary(role) and repo in 0..0xFFFF and pool in 0..0xF do
+      when is_binary(role) and repo in 0..9999 and pool in 0..0xF do
     case @role_index do
       %{^role => r} ->
         t = if MapSet.member?(@protected, role), do: 0, else: 1
         xx = bsl(pool, 4) ||| r
-        {:ok, "#{hex(t, 1)}badcafe-feed-4dad-babe-#{hex(repo, 4)}dec0de#{hex(xx, 2)}"}
+
+        # repo = DÉCIMAL (la forge le crée en décimal → grep direct) ; tier + XX = HEX (compteur natif).
+        {:ok, "#{hex(t, 1)}badcafe-feed-4dad-babe-#{dec(repo, 4)}dec0de#{hex(xx, 2)}"}
 
       _ ->
         {:error, :unknown_role}
@@ -78,7 +85,7 @@ defmodule Fleet.Spawner.SessionId do
   @doc """
   Variante qui raise sur rôle inconnu/refusé — pour les call-sites qui SAVENT le rôle valide.
   """
-  @spec build!(String.t(), 0..0xFFFF, 0..0xF) :: String.t()
+  @spec build!(String.t(), 0..9999, 0..0xF) :: String.t()
   def build!(role, repo \\ 0x0000, pool \\ 0) do
     case build(role, repo, pool) do
       {:ok, id} ->
@@ -106,4 +113,7 @@ defmodule Fleet.Spawner.SessionId do
 
   defp hex(n, width),
     do: n |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(width, "0")
+
+  # DÉCIMAL zéro-paddé (id forge tel que la forge le crée → grep direct). Chiffres `0-9` ⊂ hex.
+  defp dec(n, width), do: n |> Integer.to_string() |> String.pad_leading(width, "0")
 end

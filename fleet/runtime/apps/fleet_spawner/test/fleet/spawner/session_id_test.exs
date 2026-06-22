@@ -20,9 +20,9 @@ defmodule Fleet.Spawner.SessionIdTest do
       assert {:ok, "1badcafe-feed-4dad-babe-0000dec0de03"} = SessionId.build("engineer")
     end
 
-    test "repo project-bound encodé en 4 hex (lowercase, padded)" do
-      assert {:ok, "1badcafe-feed-4dad-babe-00abdec0de03"} = SessionId.build("engineer", 0x00AB)
-      assert {:ok, "1badcafe-feed-4dad-babe-ffffdec0de03"} = SessionId.build("engineer", 0xFFFF)
+    test "repo project-bound encodé en 4 chiffres DÉCIMAUX (la forge crée l'id en décimal → grep direct)" do
+      assert {:ok, "1badcafe-feed-4dad-babe-0161dec0de03"} = SessionId.build("engineer", 161)
+      assert {:ok, "1badcafe-feed-4dad-babe-9999dec0de03"} = SessionId.build("engineer", 9999)
     end
 
     test "pool dans le nibble haut de XX (P=1, R=3 → 13)" do
