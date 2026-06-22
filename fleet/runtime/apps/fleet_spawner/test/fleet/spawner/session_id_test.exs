@@ -70,4 +70,16 @@ defmodule Fleet.Spawner.SessionIdTest do
       end
     end
   end
+
+  describe "verrou anti-drift seed↔builder" do
+    test "le base seed arch porte EXACTEMENT le session_id du builder (= ce que permanent_boot extrait)" do
+      seed = Path.join([:code.priv_dir(:fleet_spawner), "base_seeds", "architect.jsonl"])
+
+      # même extraction que Fleet.Spawner.PermanentBoot.base_seed_uuid/1 (1er sessionId).
+      [_, first_session_id] = Regex.run(~r/"sessionId":"([^"]+)"/, File.read!(seed))
+
+      assert first_session_id == SessionId.build!("architect")
+      assert first_session_id == "0badcafe-feed-4dad-babe-0000dec0de01"
+    end
+  end
 end
