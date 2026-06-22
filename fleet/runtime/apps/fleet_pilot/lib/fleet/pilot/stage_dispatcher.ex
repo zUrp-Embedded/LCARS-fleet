@@ -285,7 +285,13 @@ defmodule Fleet.Pilot.StageDispatcher do
         dispatch_rework(pr_number, head, ctx)
 
       true ->
-        promote_pr(pr_number, head, ctx)
+        # F-PARALLEL-PR-CONFLICT : tous approuvé → MERGE. Si le merge échoue sur un CONFLIT (PR approuvée mais
+        # `main` a avancé + même fichier édité), on ne remonte plus l'erreur sèche (= retry-à-l'infini avec un
+        # sceau mensonger). On RÉSOUT (rebase producteur), borné par l'IncidentRegistry (récurrence → escalade arch).
+        case promote_pr(pr_number, head, ctx) do
+          {:error, {:merge, reason}} -> dispatch_conflict_resolution(pr_number, head, reason, ctx)
+          other -> other
+        end
     end
   end
 
@@ -300,6 +306,69 @@ defmodule Fleet.Pilot.StageDispatcher do
 
       :error ->
         {:skipped, :not_fleet_branch}
+    end
+  end
+
+  # F-PARALLEL-PR-CONFLICT — merge KO sur conflit (PR approuvée, `main` avancé sous une PR parallèle touchant le
+  # même fichier). Borné par l'IncidentRegistry (cross-session, work/ops) :
+  #   1ʳᵉ occurrence → `:recorded` → dispatch le PRODUCTEUR en `:resolve_conflict` (rebase + résous ; le push
+  #     rebasé invalide les vieilles reviews via head_sha → les juges re-valident le fusionné, gatekeeper scelle
+  #     au tick suivant) ;
+  #   récurrence → `{:escalated, _}` (résolution déjà tentée, conflit persiste) → ESCALADE ARCH. PAS de boucle.
+  defp dispatch_conflict_resolution(pr_number, head, reason, ctx) do
+    subject = "#{ctx.repo}#pr-#{pr_number}"
+
+    # Reason STABLE pour le compteur : la dedup inclut la reason → un message http qui varie casserait le seuil.
+    # Le détail réel (`reason`) va dans le commentaire d'escalade, pas dans la clé. Seam test : router vers un
+    # IncidentRegistry nommé (async-safe) via `:incident_registry_server` ; absent (prod) → registry par défaut.
+    reg_opts =
+      case Keyword.get(Map.get(ctx, :opts, []), :incident_registry_server) do
+        nil -> []
+        server -> [server: server]
+      end
+
+    case Fleet.Pilot.IncidentRegistry.record_or_escalate(
+           "merge-conflict",
+           subject,
+           "PR inmergeable (conflit de base)",
+           reg_opts
+         ) do
+      :recorded ->
+        case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+          {:ok, {_n, producer_role}} ->
+            dispatch_pr_role(:resolve_conflict, pr_number, head, producer_role, ctx)
+
+          :error ->
+            {:skipped, :not_fleet_branch}
+        end
+
+      {:escalated, _} ->
+        escalate_conflict_to_arch(pr_number, head, reason, ctx)
+    end
+  end
+
+  # Conflit non auto-résolu (1 tentative déjà faite) → l'arch tranche. Commentaire signé gatekeeper (dédupliqué)
+  # + verrou `lcars-awaits-arch` sur l'ISSUE → le poller la SKIP (hors-dispatch, plus de retry). Honnête : on ne
+  # masque pas, on remonte au seul canal humain (l'arch).
+  defp escalate_conflict_to_arch(pr_number, head, reason, ctx) do
+    with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head) do
+      signature = "[merge-conflict-escalation:pr-#{pr_number}]"
+
+      body =
+        "**Architecte** — ⚠ Conflit de merge non auto-résolu sur la PR ##{pr_number} (issue ##{issue_n}) " <>
+          "après une tentative de rebase+résolution (`#{inspect(reason)}`). Reprends : fais rebaser/résoudre la " <>
+          "PR sur `main`, ou re-cadre. L'issue reste hors-dispatch tant que `lcars-awaits-arch` est posé.\n\n" <>
+          signature
+
+      gk_opts =
+        ctx.forge_opts
+        |> as_role(Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
+        |> Keyword.put(:dedup_signature, signature)
+        |> Keyword.put(:dedup_any_author, true)
+
+      _ = ctx.forge.post_comment(ctx.repo, issue_n, body, gk_opts)
+      _ = ctx.forge.add_label(ctx.repo, issue_n, @awaits_arch_label, ctx.forge_opts)
+      {:escalated, :merge_conflict}
     end
   end
 
@@ -352,10 +421,13 @@ defmodule Fleet.Pilot.StageDispatcher do
       # diagnostic across reworks). Le JUGE (one-shot) keye sur la PR → re-spawn frais à chaque review.
       pod_id =
         case kind do
-          # #25 : repo-scopé. Rework keye sur l'ISSUE → MÊME id que dispatch_issue (reuse BL-055) ;
-          # juge keye sur la PR. Helper unique (cf. Fleet.Pilot.PodId).
-          :rework -> Fleet.Pilot.PodId.for_issue(repo, issue_n, role)
-          _ -> Fleet.Pilot.PodId.for_pr(repo, pr_number, role)
+          # #25 : repo-scopé. Rework + résolution-de-conflit keyent sur l'ISSUE → MÊME id que dispatch_issue
+          # (reuse BL-055, l'eng pipe garde son contexte) ; juge keye sur la PR. Helper unique (Fleet.Pilot.PodId).
+          k when k in [:rework, :resolve_conflict] ->
+            Fleet.Pilot.PodId.for_issue(repo, issue_n, role)
+
+          _ ->
+            Fleet.Pilot.PodId.for_pr(repo, pr_number, role)
         end
 
       # :judge -> GateBrief desamorce (I-CBC) ; :rework -> brief de rework au PRODUCTEUR (corrige + push).
@@ -506,6 +578,19 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp review_mandate(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
     do: rework_mandate(role, forge, repo, pr, forge_opts, route)
 
+  defp review_mandate(
+         :resolve_conflict,
+         _profile,
+         role,
+         forge,
+         repo,
+         _issue_n,
+         forge_opts,
+         route,
+         pr
+       ),
+       do: resolve_conflict_mandate(role, forge, repo, pr, forge_opts, route)
+
   # Brief de rework (4-C-iv) : le PRODUCTEUR (engineer) reprend sur une PR REQUEST_CHANGES.
   # PORTE LA MÊME instruction git-native que `build_worker_mandate` (sinon `:no_deliverable_commit` : le
   # rework « re-pousse » mais le pod est FORGE-AVEUGLE et sans l'ordre de COMMITTER il ne livre rien —
@@ -525,6 +610,28 @@ defmodule Fleet.Pilot.StageDispatcher do
       "**Livraison (git-native)** : applique tes corrections dans ton workspace, puis `git add` + `git commit`. " <>
         "Le SYSTÈME pousse ton commit (forge-aveugle, toi tu ne push pas). `submit_result` clôt la tâche : le " <>
         "LIVRABLE = ton COMMIT (ne RE-mets PAS les fichiers dans le payload). Le payload porte ta voix ↓.",
+      eng_voice_instruction(:rework),
+      Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
+    ]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n\n")
+  end
+
+  # Brief de RÉSOLUTION DE CONFLIT (F-PARALLEL-PR-CONFLICT) : la PR est APPROUVÉE mais `main` a avancé (un
+  # autre ticket parallèle a fusionné) → conflit. Le PRODUCTEUR (git_native, il a écrit le contenu) RÉCONCILIE :
+  # rebase sur `main` + résolution en gardant TOUT (le sien + main). Pas un re-code. Le système pousse (§4) ;
+  # le push rebasé invalide les vieilles reviews (head_sha) → les juges re-valident le fusionné, gatekeeper scelle.
+  defp resolve_conflict_mandate(role, _forge, _repo, pr, _forge_opts, _route) do
+    [
+      "RÉSOLUTION DE CONFLIT — ta PR ##{pr} a été APPROUVÉE, mais `main` a avancé depuis (un autre ticket " <>
+        "parallèle a été fusionné) et ta branche **conflicte** avec `main`. On ne te demande PAS de re-coder : " <>
+        "juste de RÉCONCILIER les deux versions.",
+      "**Procédure (git-native)** : dans ton workspace, `git fetch origin` puis `git rebase origin/main`. Pour " <>
+        "CHAQUE fichier en conflit, résous en **gardant TOUT le contenu utile** — le tien ET celui arrivé sur " <>
+        "`main` (ex. un README partagé : garde les DEUX sections, ne supprime rien). `git add` les fichiers " <>
+        "résolus puis `git rebase --continue` (et `git commit` si besoin). Le SYSTÈME pousse (forge-aveugle, tu " <>
+        "ne push pas). `submit_result` clôt : le LIVRABLE = tes COMMIT(s) rebasés (ne RE-mets PAS les fichiers " <>
+        "dans le payload). Le payload porte ta voix ↓.",
       eng_voice_instruction(:rework),
       Fleet.Credentials.ForgeIdentity.coauthor_instruction(role)
     ]

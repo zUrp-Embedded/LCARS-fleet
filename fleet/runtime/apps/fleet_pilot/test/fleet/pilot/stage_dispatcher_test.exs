@@ -88,9 +88,17 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     # ②.1d : merge FF (promote PR-state-driven, tous les juges OK). Signale pour assertion.
-    def merge_pr(_repo, index, _opts) do
-      send(self(), {:merged, index})
-      :ok
+    # `_test_merge_result` (seam) force un échec (ex. conflit `{:error, {:http, 409, _}}`) → teste la
+    # résolution F-PARALLEL-PR-CONFLICT ; absent → succès `:ok`.
+    def merge_pr(_repo, index, opts) do
+      case Keyword.get(opts, :_test_merge_result) do
+        nil ->
+          send(self(), {:merged, index})
+          :ok
+
+        result ->
+          result
+      end
     end
   end
 
@@ -572,6 +580,53 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # merge. En one-shot il est déjà mort (kill = no-op de sûreté) ; en pipe c'est le vrai
       # release terminal. Inconditionnel côté dispatcher → couvre les deux profils.
       assert_received {:killed, "lordzurp-lcars-test-issue-42-engineer"}
+    end
+
+    test "F-PARALLEL-PR-CONFLICT : merge en conflit → 1ʳᵉ fois résolution (re-spawn producteur), 2ᵉ fois escalade arch" do
+      tmp = Path.join(System.tmp_dir!(), "mc-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf(tmp) end)
+
+      # IncidentRegistry nommé (async-safe) + stubs forge (hermétique) = le compteur du garde-fou.
+      reg = :"reg_mc_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Fleet.Pilot.IncidentRegistry,
+         name: reg,
+         wal_path: Path.join(tmp, "incidents.json"),
+         sync_debounce_ms: 5,
+         retry_ms: 50,
+         get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+         put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end}
+      )
+
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          incident_registry_server: reg,
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 409, "not fast-forward"}}
+          ]
+        )
+
+      # 1ʳᵉ fois : tous approuvé MAIS merge en CONFLIT → on RÉSOUT (re-spawn le producteur en mode résolution),
+      # PAS de merge, PAS d'escalade. Le mandat porte l'instruction rebase+résous.
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+               StageDispatcher.dispatch_review(pr, opts)
+
+      assert_received {:spawned, _ticket, spawn_opts}
+      assert spawn_opts[:mandate] =~ "RÉSOLUTION DE CONFLIT"
+      refute_received {:merged, _}
+
+      # 2ᵉ fois (même conflit, même WAL = récurrence) : la résolution a déjà été tentée → ESCALADE ARCH.
+      # Garde-fou : PAS de boucle infinie.
+      assert {:escalated, :merge_conflict} = StageDispatcher.dispatch_review(pr, opts)
     end
 
     test "②.1d : un juge a demandé des changements (les autres approuvent) -> re-spawn le PRODUCTEUR" do
