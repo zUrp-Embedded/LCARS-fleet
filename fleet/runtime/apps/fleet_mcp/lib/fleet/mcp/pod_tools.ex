@@ -58,11 +58,10 @@ defmodule Fleet.MCP.PodTools do
         "Délègue une brique d'implémentation à la fleet LCARS : crée un ticket (issue forge) prêt " <>
           "pour la livraison forge-native (engineer → PR → review → merge). Utilise-le pour DÉLÉGUER " <>
           "plutôt que de coder toi-même (la fleet livre mieux et préserve ton contexte). " <>
-          "`brief` = le mandat clair pour l'engineer. `project` = le repo `owner/name` OÙ LIVRER : passe-le " <>
-          "dès que tu connais le projet cible — TOUJOURS le repo retourné par `create_project`, ou le projet " <>
-          "désigné par l'humain. Omis SEULEMENT si tu restes sur le projet courant : la fleet route alors vers " <>
-          "le dernier projet où l'humain a un ticket (un projet fraîchement créé n'en a pas encore → `project` " <>
-          "explicite OBLIGATOIRE pour livrer dedans). Retourne {\"status\":\"ticket_created\",\"repo\":...}."
+          "`brief` = le mandat clair pour l'engineer. `project` = le repo `owner/name` OÙ LIVRER, **REQUIS** : " <>
+          "le repo retourné par `create_project`, ou le projet désigné par l'humain. La fleet ne route PLUS par " <>
+          "défaut — sans `project`, le ticket est REFUSÉ (jamais de misroute silencieux vers un autre projet). " <>
+          "Retourne {\"status\":\"ticket_created\",\"repo\":...}."
       )
     end
 
@@ -73,7 +72,7 @@ defmodule Fleet.MCP.PodTools do
         "brief" => %{"type" => "string"},
         "project" => %{"type" => "string"}
       },
-      "required" => ["title", "brief"]
+      "required" => ["title", "brief", "project"]
     })
   end
 
@@ -179,10 +178,13 @@ defmodule Fleet.MCP.PodTools do
   # retiré). Le POLLER prend le relais : issue assignée non verrouillée → spawn le rôle PRODUCTEUR
   # (`:producer_role`, invariant DN §1 — pas de marqueur par-ticket : un label `lcars-stage:` ré-
   # encoderait une constante). Dispatch runtime via modules-en-variable (pas de dep compile-time pilot).
-  def handle_tool_call("create_ticket", %{"title" => title, "brief" => brief} = args, state)
-      when is_binary(title) and is_binary(brief) do
+  def handle_tool_call(
+        "create_ticket",
+        %{"title" => title, "brief" => brief, "project" => repo} = args,
+        state
+      )
+      when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
     forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
-    repo = resolve_target_repo(args, forge)
 
     # L'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT — résolu depuis
     # `_lcars_role` (injecté par le pont MCP, = le `metadata.name` du cap-profile appelant). Agnostique :
@@ -236,6 +238,18 @@ defmodule Fleet.MCP.PodTools do
       {:error, reason} ->
         {:error, {:human_unresolved, inspect(reason)}, state}
     end
+  end
+
+  # create_ticket SANS `project` valide → REFUS STRUCTUREL. La bonne volonté ne s'impose pas : pas de routage
+  # par défaut (F-TICKET-ROUTE-FOOTGUN — l'arch omettait `project` → misroute silencieux vers le dernier projet
+  # travaillé). `project` est REQUIS ; sans lui, AUCUN ticket n'est créé.
+  def handle_tool_call("create_ticket", %{"title" => title, "brief" => brief}, state)
+      when is_binary(title) and is_binary(brief) do
+    {:error,
+     {:project_required,
+      "create_ticket REFUSÉ — `project` est REQUIS (le repo `owner/name` où livrer). Aucun routage par " <>
+        "défaut. Passe `project` = le repo retourné par create_project, ou le projet désigné par l'humain."},
+     state}
   end
 
   def handle_tool_call("create_ticket", _bad_args, state) do
@@ -318,30 +332,6 @@ defmodule Fleet.MCP.PodTools do
 
   # La PR EN COURS du ticket #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
   # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.
-  # F-037 producteur — repo cible de `create_ticket`, par priorité :
-  #   1. `args["project"]` EXPLICITE (l'arch désigne le repo — ex. celui que `create_project` vient de
-  #      retourner, ou « fais X sur projet A »). Cas user-facing : l'arch voit tous les projets.
-  #   2. sinon le DERNIER projet TRAVAILLÉ par l'humain, scopé aux repos où il est COLLABORATEUR
-  #      (`forge.last_worked_repo`) — et NON « le dernier créé » (un global qui traîne = mauvais défaut).
-  #   3. ultime fallback `:delegation_repo` (projet courant posé par create_project ; sinon config) — fleet
-  #      neuve / forge down / humain irrésoluble.
-  defp resolve_target_repo(args, forge) do
-    fallback = fn -> Application.get_env(:fleet_mcp, :delegation_repo, "fleet/fleet-test") end
-
-    case args["project"] do
-      p when is_binary(p) and p != "" ->
-        p
-
-      _ ->
-        with {:ok, human} <- Fleet.Credentials.Human.current(),
-             {:ok, repo} <- forge.last_worked_repo(human, []) do
-          repo
-        else
-          _ -> fallback.()
-        end
-    end
-  end
-
   defp ticket_pr_status(forge, repo, number) do
     # Feature-branch du ticket = `lcars/issue-<n>-<role>` ; le `-` final distingue #1 de #12. Match
     # inline (pas de call cross-app vers fleet_pilot : fleet_mcp dispatch le forge en runtime).

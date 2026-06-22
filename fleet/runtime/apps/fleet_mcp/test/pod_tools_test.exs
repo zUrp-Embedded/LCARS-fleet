@@ -163,7 +163,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{content: [%{"text" => txt}]}, %{}} =
                PodTools.handle_tool_call(
                  "create_ticket",
-                 %{"title" => "T", "brief" => "fais X"},
+                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
                  %{}
                )
 
@@ -201,31 +201,29 @@ defmodule Fleet.MCP.PodToolsTest do
       assert_received {:create_issue, "fleet/explicit", "T", "fais X", _opts}
     end
 
-    test "F-037 — défaut (pas de `project`) = `last_worked_repo`, PAS `:delegation_repo`" do
-      Application.put_env(:fleet_mcp, :test_last_worked, {:ok, "fleet/worked"})
-      on_exit(fn -> Application.delete_env(:fleet_mcp, :test_last_worked) end)
-
-      assert {:ok, _, %{}} =
+    test "REFUSE si `project` omis — pas de routage par défaut (F-TICKET-ROUTE-FOOTGUN)" do
+      # La bonne volonté ne s'impose pas : sans `project`, on REFUSE (plus de fallback last_worked/delegation
+      # qui misroutait silencieusement un ticket fraîchement délégué vers le mauvais projet).
+      assert {:error, {:project_required, msg}, %{}} =
                PodTools.handle_tool_call(
                  "create_ticket",
                  %{"title" => "T", "brief" => "fais X"},
                  %{}
                )
 
-      # delegation_repo = "fleet/demo" (setup) mais last_worked = "fleet/worked" → c'est worked qui gagne.
-      assert_received {:create_issue, "fleet/worked", "T", "fais X", _opts}
+      assert msg =~ "project"
+      refute_received {:create_issue, _, _, _, _}
     end
 
-    test "F-037 — last_worked `:none` → ultime fallback `:delegation_repo`" do
-      # test_last_worked non posé → StubForge rend :none → fallback delegation_repo "fleet/demo".
-      assert {:ok, _, %{}} =
+    test "REFUSE si `project` vide" do
+      assert {:error, {:project_required, _}, %{}} =
                PodTools.handle_tool_call(
                  "create_ticket",
-                 %{"title" => "T", "brief" => "fais X"},
+                 %{"title" => "T", "brief" => "fais X", "project" => ""},
                  %{}
                )
 
-      assert_received {:create_issue, "fleet/demo", "T", "fais X", _opts}
+      refute_received {:create_issue, _, _, _, _}
     end
   end
 
