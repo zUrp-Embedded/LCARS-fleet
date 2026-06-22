@@ -624,9 +624,11 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:mandate] =~ "RÉSOLUTION DE CONFLIT"
       refute_received {:merged, _}
 
-      # 2ᵉ fois (même conflit, même WAL = récurrence) : la résolution a déjà été tentée → ESCALADE ARCH.
-      # Garde-fou : PAS de boucle infinie.
-      assert {:escalated, :merge_conflict} = StageDispatcher.dispatch_review(pr, opts)
+      # 2ᵉ fois (même conflit, même registry = récurrence) : la résolution a déjà été tentée → ESCALADE ARCH.
+      # Garde-fou : PAS de boucle infinie. Retour `{:skipped, _}` = forme gérée par le poller (PAS `{:escalated, _}`
+      # qui crashait do_poll en CaseClauseError, vu live arduino-morse PR#4).
+      assert {:skipped, {:merge_conflict_escalated, 6}} =
+               StageDispatcher.dispatch_review(pr, opts)
     end
 
     test "②.1d : un juge a demandé des changements (les autres approuvent) -> re-spawn le PRODUCTEUR" do

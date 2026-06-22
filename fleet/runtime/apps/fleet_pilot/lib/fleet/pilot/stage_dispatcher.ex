@@ -368,7 +368,11 @@ defmodule Fleet.Pilot.StageDispatcher do
 
       _ = ctx.forge.post_comment(ctx.repo, issue_n, body, gk_opts)
       _ = ctx.forge.add_label(ctx.repo, issue_n, @awaits_arch_label, ctx.forge_opts)
-      {:escalated, :merge_conflict}
+
+      # `{:skipped, _}` = forme GÉRÉE par le poller (stage_process_pulls) → compté skipped, pas de crash.
+      # L'ancien `{:escalated, _}` n'était dans AUCUNE clause du `case do_poll` → CaseClauseError à chaque tick
+      # (vu live, PR#4 arduino-morse) : un retour de dispatch DOIT être {:ok|:skipped|:error}, jamais une 4ᵉ forme.
+      {:skipped, {:merge_conflict_escalated, pr_number}}
     end
   end
 

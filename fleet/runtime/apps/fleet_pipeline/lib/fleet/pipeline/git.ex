@@ -269,14 +269,43 @@ defmodule Fleet.Pipeline.Git do
   defp validate_cli_arg(_arg, err), do: {:error, err}
 
   defp do_push(workspace, remote, refspec) do
-    timeout_ms = push_timeout_ms()
+    case run_push(workspace, remote, refspec, []) do
+      {:ok, {_out, 0}} ->
+        {:ok, true}
 
-    # audit elixir #1 BLOQUANT — `git push` n'a pas de timeout natif. Push réseau hung (DNS, TLS,
-    # packfile interrompu) bloquerait l'Executor GenServer. Task.async + yield + shutdown :brutal_kill :
-    # pas de retour dans `timeout_ms` → on tue le Task (port → process git via SIGKILL).
+      {:ok, {out, rc}} ->
+        # F-PARALLEL-PR-CONFLICT : une RÉSOLUTION DE CONFLIT rebase la feature-branch → historique réécrit →
+        # push rejeté « non-fast-forward ». La feature-branch est SYSTÈME-owned (seul le système la pousse ; le
+        # pod est forge-aveugle, pas de pousseur concurrent) → un retry `--force` est sûr : le système écrase
+        # SA PROPRE branche avec le rebase. Sans ça, le rebase ne land JAMAIS (vu live, PR#4 arduino-morse).
+        if non_fast_forward?(out),
+          do: force_push(workspace, remote, refspec),
+          else: {:error, {:git_push_failed, rc, String.trim(out)}}
+
+      nil ->
+        {:error, {:git_push_timeout, push_timeout_ms()}}
+
+      {:exit, reason} ->
+        {:error, {:git_push_exit, reason}}
+    end
+  end
+
+  defp force_push(workspace, remote, refspec) do
+    case run_push(workspace, remote, refspec, ["--force"]) do
+      {:ok, {_out, 0}} -> {:ok, true}
+      {:ok, {out, rc}} -> {:error, {:git_push_failed, rc, String.trim(out)}}
+      nil -> {:error, {:git_push_timeout, push_timeout_ms()}}
+      {:exit, reason} -> {:error, {:git_push_exit, reason}}
+    end
+  end
+
+  # `git push [extra] remote refspec` borné. audit elixir #1 BLOQUANT — `git push` n'a pas de timeout natif.
+  # Push réseau hung (DNS, TLS, packfile interrompu) bloquerait l'Executor GenServer. Task.async + yield +
+  # shutdown :brutal_kill : pas de retour dans `timeout_ms` → on tue le Task (port → process git via SIGKILL).
+  defp run_push(workspace, remote, refspec, extra) do
     task =
       Task.async(fn ->
-        System.cmd("git", @hooks_off ++ ["push", remote, refspec],
+        System.cmd("git", @hooks_off ++ ["push"] ++ extra ++ [remote, refspec],
           cd: workspace,
           stderr_to_stdout: true,
           # F087/F095 : token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth.
@@ -284,12 +313,16 @@ defmodule Fleet.Pipeline.Git do
         )
       end)
 
-    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {_out, 0}} -> {:ok, true}
-      {:ok, {out, rc}} -> {:error, {:git_push_failed, rc, String.trim(out)}}
-      nil -> {:error, {:git_push_timeout, timeout_ms}}
-      {:exit, reason} -> {:error, {:git_push_exit, reason}}
-    end
+    Task.yield(task, push_timeout_ms()) || Task.shutdown(task, :brutal_kill)
+  end
+
+  # Rejet « non-fast-forward » (l'historique distant a divergé du local — ici un rebase). Détecté sur la sortie
+  # git (stderr fusionné) ; large pour couvrir les formulations git (« [rejected] … non-fast-forward / fetch first »).
+  defp non_fast_forward?(out) do
+    o = String.downcase(out)
+
+    String.contains?(o, "non-fast-forward") or String.contains?(o, "fetch first") or
+      String.contains?(o, "rejected")
   end
 
   defp maybe_push(%{push?: true} = opts),

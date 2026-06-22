@@ -238,4 +238,28 @@ defmodule Fleet.GitTest do
       assert bare_head_before == bare_head_after
     end
   end
+
+  describe "push/3 — F-PARALLEL-PR-CONFLICT (force sur historique réécrit)" do
+    test "push normal rejeté (non-fast-forward) → retry --force land la branche rebasée", %{
+      tmp_dir: tmp
+    } do
+      bare = init_bare_repo(Path.join(tmp, "remote.git"))
+      ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
+      commit_initial(ws, "C1")
+
+      # push initial → la remote a C1.
+      assert {:ok, true} = Fleet.Pipeline.Git.push(ws, "origin", "HEAD:main")
+
+      # réécrit l'historique (amend = nouvelle sha qui diverge de la remote — comme un rebase de résolution).
+      {_o, 0} = System.cmd("git", ["commit", "--amend", "-m", "C1-rebase"], cd: ws)
+      {rewritten, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: ws)
+
+      # un push normal serait « non-fast-forward » → do_push retry `--force` → land (sans ça, le rebase de
+      # résolution ne land JAMAIS et la PR reste en conflit, le bug live PR#4).
+      assert {:ok, true} = Fleet.Pipeline.Git.push(ws, "origin", "HEAD:main")
+
+      {remote_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
+      assert String.trim(remote_head) == String.trim(rewritten)
+    end
+  end
 end
