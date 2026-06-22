@@ -236,6 +236,26 @@ defmodule Fleet.Spawner.Pod do
 
   def handle_info(:result_deadline, state), do: {:noreply, state}
 
+  # F-RESULT-DEADLINE-LOOP — watchdog de LIVENESS (pas de durée). Tick récurrent (workers seulement, armé
+  # par arm_result_deadline) : si le pod a BOUGÉ depuis le tick précédent (taille jsonl ↑ OU jiffies CPU ↑)
+  # → ré-arme le deadline (repousse le kill) ; sinon → laisse le deadline courir. Résultat : un engineer qui
+  # bosse ne timeout JAMAIS ; le `:result_deadline` ne fire que sur silence total. Hors :monitoring → no-op
+  # (tick résiduel après transition).
+  def handle_info(:liveness_tick, %{phase: :monitoring} = state) do
+    sample = liveness_sample(state)
+    moved? = liveness_moved?(Map.get(state, :liveness_sample), sample)
+    state = Map.put(state, :liveness_sample, sample)
+
+    state =
+      if moved?,
+        do: arm_result_deadline(state),
+        else: schedule_liveness_tick(state)
+
+    {:noreply, state}
+  end
+
+  def handle_info(:liveness_tick, state), do: {:noreply, state}
+
   def handle_info({port, {:exit_status, exit_code}}, %{port: port} = state)
       when is_port(port) do
     # R-CORE.comm 2.2 — completion event-driven : si le résultat a été extrait (event
@@ -1846,13 +1866,111 @@ defmodule Fleet.Spawner.Pod do
   # fenêtre de réponse bornée) → on garantit juste l'absence de timer.
   defp arm_result_deadline(state) do
     if lifetime_scope(state.cap_profile) == "forever" do
-      cancel_managed_timer(state, :result_deadline_ref)
+      # Un permanent (arch) n'a pas de fenêtre de réponse bornée → ni deadline ni watchdog liveness.
+      state
+      |> cancel_managed_timer(:result_deadline_ref)
+      |> cancel_managed_timer(:liveness_tick_ref)
     else
-      arm_managed_timer(state, :result_deadline_ref, :result_deadline, monitor_timeout_ms(state))
+      # F-RESULT-DEADLINE-LOOP (2026-06-22) : le deadline N'EST PAS un budget « temps pour finir » (un vrai
+      # livrable a une durée inconnaissable a priori) — c'est un watchdog de SILENCE. Le `:liveness_tick`
+      # ré-arme ce deadline tant que le pod BOUGE (taille jsonl ↑ OU jiffies CPU /proc ↑) → un agent qui
+      # bosse ne timeout JAMAIS ; le deadline ne tombe que sur silence total = stuck/mort. Rend enfin VRAIE
+      # la promesse du commentaire kick (« le deadline se ré-arme sur activité »).
+      state
+      |> arm_managed_timer(:result_deadline_ref, :result_deadline, monitor_timeout_ms(state))
+      |> schedule_liveness_tick()
     end
   end
 
-  defp cancel_result_deadline(state), do: cancel_managed_timer(state, :result_deadline_ref)
+  defp cancel_result_deadline(state) do
+    state
+    |> cancel_managed_timer(:result_deadline_ref)
+    |> cancel_managed_timer(:liveness_tick_ref)
+  end
+
+  defp schedule_liveness_tick(state),
+    do: arm_managed_timer(state, :liveness_tick_ref, :liveness_tick, liveness_tick_ms(state))
+
+  defp liveness_tick_ms(state) do
+    keyword_opt(state, :liveness_tick_ms) ||
+      Application.get_env(:fleet_spawner, :liveness_tick_ms, 30_000)
+  end
+
+  # Lit une option per-pod depuis `state.opts` (keyword passé au spawn) → `nil` si absente/illisible. Permet
+  # d'injecter en test SANS config globale (async-safe) : `:liveness_probe_fun`, `:liveness_tick_ms`.
+  defp keyword_opt(state, key) do
+    case Map.get(state, :opts) do
+      opts when is_list(opts) -> Keyword.get(opts, key)
+      _ -> nil
+    end
+  end
+
+  # Sonde de liveness : `{taille_jsonl, jiffies_cpu}` — deux signaux complémentaires (le jsonl couvre « a
+  # produit une sortie », le CPU couvre « moud sans sortie encore »). Injectable (test) via l'opt per-pod
+  # `:liveness_probe_fun` (fun/1) ou la config. `nil` sur un signal = indisponible (pas de fichier / pas de
+  # port) → ne compte pas comme mouvement (biais anti-kill : on ne tue pas sur un nil).
+  defp liveness_sample(state) do
+    case keyword_opt(state, :liveness_probe_fun) ||
+           Application.get_env(:fleet_spawner, :liveness_probe_fun) do
+      fun when is_function(fun, 1) -> fun.(state)
+      _ -> {jsonl_size(state), proc_cpu_jiffies(state)}
+    end
+  end
+
+  # Mouvement = au moins UN des deux signaux a crû. Pas de baseline (1er tick) → vivant (bénéfice du doute).
+  defp liveness_moved?(nil, _now), do: true
+  defp liveness_moved?({pj, pc}, {nj, nc}), do: grew?(pj, nj) or grew?(pc, nc)
+
+  defp grew?(prev, now) when is_integer(prev) and is_integer(now), do: now > prev
+  defp grew?(_, _), do: false
+
+  # Taille cumulée des `<session_id>.jsonl` du pod (append-only → croît à chaque message/tool-result).
+  # `nil` si aucun jsonl (session pas encore écrite).
+  defp jsonl_size(state) do
+    [state.pod_dir, ".claude", "projects", "*", "#{state.session_id}.jsonl"]
+    |> Path.join()
+    |> Path.wildcard()
+    |> Enum.map(fn f ->
+      case File.stat(f) do
+        {:ok, %{size: s}} -> s
+        _ -> 0
+      end
+    end)
+    |> case do
+      [] -> nil
+      sizes -> Enum.sum(sizes)
+    end
+  end
+
+  # utime+stime (jiffies) du process claude via `/proc/<os_pid>/stat`. Robuste au `comm` (champ 2, entre
+  # parenthèses, peut contenir espaces/`)`) : on découpe après le DERNIER `)` (champ 3 = index 0 du reste →
+  # utime = index 11, stime = index 12). `nil` si pas de port / process parti / proc illisible. NB : mesure
+  # le process PARENT (un tool enfant CPU-lourd n'y figure pas — couvert par le OU-jsonl + la fenêtre de
+  # silence ; tail case documenté backlog F-RESULT-DEADLINE-LOOP).
+  defp proc_cpu_jiffies(state) do
+    with port when is_port(port) <- Map.get(state, :port),
+         {:os_pid, pid} <- Port.info(port, :os_pid),
+         {:ok, raw} <- File.read("/proc/#{pid}/stat") do
+      fields =
+        raw |> String.split(")") |> List.last() |> String.trim() |> String.split(~r/\s+/)
+
+      case {to_int(Enum.at(fields, 11)), to_int(Enum.at(fields, 12))} do
+        {u, s} when is_integer(u) and is_integer(s) -> u + s
+        _ -> nil
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  defp to_int(nil), do: nil
+
+  defp to_int(str) when is_binary(str) do
+    case Integer.parse(str) do
+      {n, _} -> n
+      :error -> nil
+    end
+  end
 
   # R0.8-brick4 : timeout de RÉPONSE (pas budget de durée de vie) au tool MCP
   # submit_result. Si pas de réponse dans le délai → :result_deadline →

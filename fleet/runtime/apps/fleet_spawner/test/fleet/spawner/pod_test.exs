@@ -655,6 +655,69 @@ defmodule Fleet.Spawner.PodTest do
 
       Process.exit(pid, :kill)
     end
+
+    test "liveness BOUGE → deadline ré-armé → pod survit malgré task active + timeout court (F-RESULT-DEADLINE-LOOP)" do
+      StubBackend.set_reply(interactive_reply())
+
+      pod_id = "pod-liveness-alive-#{System.unique_integer([:positive])}"
+
+      # Task active : sans le watchdog liveness, le deadline (1s) firerait → result_timeout (cf. test
+      # « timeout AVEC task active »). Ici la sonde renvoie une valeur TOUJOURS croissante (monotonic) → à
+      # chaque tick (100ms) le pod « a bougé » → arm_result_deadline ré-arme → le deadline ne tombe jamais.
+      {:ok, _t} =
+        Fleet.TaskQueue.enqueue(pod_id, %{brief: "vrai livrable long", role: "engineer"})
+
+      on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
+
+      probe = fn _state -> {System.monotonic_time(:microsecond), nil} end
+
+      args = %{
+        cap_profile: short_timeout(valid_profile()),
+        ticket_id: "t1",
+        pod_id: pod_id,
+        opts: [liveness_tick_ms: 100, liveness_probe_fun: probe]
+      }
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _, _}, 2_000
+
+      # Bien au-delà du response_sec (1s) : un engineer qui BOUGE ne doit JAMAIS timeout.
+      Process.sleep(1_500)
+
+      assert Process.alive?(pid),
+             "engineer qui BOUGE tué par le deadline (F-RESULT-DEADLINE-LOOP non corrigé)"
+
+      assert GenServer.call(pid, :info).phase == :monitoring
+
+      Process.exit(pid, :kill)
+    end
+
+    test "liveness PLAT (silence) AVEC task active → deadline fire → result_timeout (vrai stuck)" do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply())
+
+      pod_id = "pod-liveness-stuck-#{System.unique_integer([:positive])}"
+
+      # Sonde CONSTANTE → aucun mouvement → le watchdog ne ré-arme jamais → le deadline (1s) tombe sur
+      # silence total = vrai stuck → transition_failed. (1er tick sans baseline = 1 ré-arme « bénéfice du
+      # doute » → fire ~1 tick plus tard, couvert par assert_receive 5s.)
+      {:ok, _t} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "fais X", role: "engineer"})
+      on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
+
+      probe = fn _state -> {42, 42} end
+
+      args = %{
+        cap_profile: short_timeout(valid_profile()),
+        ticket_id: "t1",
+        pod_id: pod_id,
+        opts: [liveness_tick_ms: 100, liveness_probe_fun: probe]
+      }
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _, _}, 2_000
+
+      assert_receive {:EXIT, ^pid, {:shutdown, {:result_timeout, _}}}, 5_000
+    end
   end
 
   describe "Z2 — porte cap-profile G24 au spawn (CAP-D1 / F-CONT-RISK)" do
