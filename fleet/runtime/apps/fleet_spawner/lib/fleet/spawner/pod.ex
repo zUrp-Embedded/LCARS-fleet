@@ -421,10 +421,29 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp do_clean(state) do
-    # POD_DIR vient d'être créé en :allocate ; rien à clean ici tant que
-    # le respawn (recovery) ne réutilise pas le même path.
+    # GC d'UUID (BL-055) : avec des session_id DÉTERMINISTES + pod_dir survivant (kill -9 / crash →
+    # teardown raté → `safe_mkdir_p` PRÉSERVE le dir en :allocate), un re-spawn en `--session-id`
+    # (resume=false) heurterait `Session ID already in use` si un `<uuid>.jsonl` traîne. On le supprime
+    # → `--session-id` crée toujours frais. (resume=true → `SeedStore.restore` écrase le jsonl : pas de GC.)
+    unless state.resume, do: gc_stale_session_jsonl(state)
+
     new_state = %{state | phase: :projecting}
     {:noreply, new_state, {:continue, :project}}
+  end
+
+  # Supprime tout `<session_id>.jsonl` résiduel sous le pod_dir (tous cwd-slugs) → libère l'UUID pour
+  # `--session-id`. Best-effort : un échec ne casse pas le spawn.
+  defp gc_stale_session_jsonl(state) do
+    [state.pod_dir, ".claude", "projects", "*", "#{state.session_id}.jsonl"]
+    |> Path.join()
+    |> Path.wildcard()
+    |> Enum.each(fn f ->
+      _ = File.rm(f)
+
+      Logger.info(
+        "Pod.gc #{state.pod_id}: jsonl stale #{Path.basename(f)} retiré (GC UUID → session frais)"
+      )
+    end)
   end
 
   defp do_project(state) do

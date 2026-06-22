@@ -458,6 +458,34 @@ defmodule Fleet.Spawner.PodTest do
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
       assert content["session_id"] == "1badcafe-feed-4dad-babe-00abdec0de03"
     end
+
+    test "GC d'UUID : un <uuid>.jsonl stale (pod_dir survivant d'un crash) est retiré avant --session-id",
+         %{tmp_dir: tmp_dir} do
+      pod_id = "pod-gc-#{System.unique_integer([:positive])}"
+      uuid = "1badcafe-feed-4dad-babe-0000dec0de02"
+
+      # simule un pod_dir survivant (teardown raté) : le jsonl de l'UUID déterministe traîne déjà.
+      stale =
+        Path.join([
+          tmp_dir,
+          "pods",
+          "pod_#{pod_id}",
+          ".claude",
+          "projects",
+          "-home-x",
+          "#{uuid}.jsonl"
+        ])
+
+      File.mkdir_p!(Path.dirname(stale))
+      File.write!(stale, "{}\n")
+      assert File.exists?(stale)
+
+      {:ok, pid} = spawn_via_supervisor(gatekeeper_args(pod_id))
+      assert_receive {:launch_called, _args, _env}, 2_000
+      GenServer.call(pid, :info)
+
+      refute File.exists?(stale), "le jsonl stale aurait dû être GC'd avant le --session-id"
+    end
   end
 
   describe "LAUNCH-Q — branche containment (host_launch vs bwrap) sur le chemin de lancement" do
