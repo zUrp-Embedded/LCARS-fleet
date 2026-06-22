@@ -144,6 +144,10 @@ cmd_attach() {
   [[ -S "$sock" ]] || die "attach: pas de sock pour '$pod_id' ($sock) — pod vivant ? (cf. « $PROG list »)"
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "attach: tmux introuvable ($TMUX_BIN)"
   echo "attach $pod_id (Ctrl-b d pour détacher sans tuer le pod)…" >&2
+  # UI : molette = scroll du scrollback tmux (pas l'historique shell). `set -g mouse on` sur le serveur du pod,
+  # juste avant l'attache → couvre TOUS les pods sans toucher au sanctuaire bwrap_launch.sh. (NB : mouse ON change
+  # la sélection — maintenir Shift pour copier vers le presse-papier de l'OS.)
+  "$TMUX_BIN" -S "$sock" set -g mouse on 2>/dev/null || true
   exec "$TMUX_BIN" -S "$sock" attach -t "lcars-pod-$pod_id"
 }
 

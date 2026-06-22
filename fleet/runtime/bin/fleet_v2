@@ -146,6 +146,8 @@ cmd_start() {
   # Socket tmux DÉDIÉ (serveur frais) → capture l'env exporté ci-dessus. Le BEAM y tourne détaché, survit
   # à ce terminal. `start` (release) / `mix run --no-halt` (dev) : foreground tenu par le tmux.
   MIX_ENV="$mix_env" dtmux new-session -d -s "$SESSION" "$launch_cmd"
+  # UI : molette = scroll du scrollback des logs BEAM (pas l'historique shell). cf. même geste dans `lcars attach`.
+  dtmux set -g mouse on 2>/dev/null || true
 
   echo "fleet_v2: attente du boot de l'arch…" >&2
   local arch_sock="" arch_pod=""
