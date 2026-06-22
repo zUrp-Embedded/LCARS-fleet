@@ -232,7 +232,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp git(args, opts) do
     env =
       if(Keyword.get(opts, :auth, false), do: ForgeAuth.git_env(), else: []) ++
-        author_env(Keyword.get(opts, :author))
+        identity_env(Keyword.get(opts, :author))
 
     case System.cmd("git", args, env: env, stderr_to_stdout: true) do
       {_, 0} -> :ok
@@ -240,10 +240,21 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  defp author_env(%{name: name, email: email}),
-    do: [{"GIT_AUTHOR_NAME", name}, {"GIT_AUTHOR_EMAIL", email}]
+  # Commit (author posé) : GIT_AUTHOR = le système (scaffold généré, `@onboard_author`) + GIT_COMMITTER =
+  # l'humain qui a initié (traça), résolu ROBUSTE via `ForgeIdentity.human_identity` (git config → GECOS →
+  # login) ⇒ ne dépend PAS du `~/.gitconfig` humain. F-GIT-IDENTITY (2026-06-22) : sans GIT_COMMITTER, un
+  # humain non-configuré → committer « empty ident name » → commit du scaffold refusé → create_project bloqué.
+  defp identity_env(%{name: name, email: email}) do
+    committer =
+      case Fleet.Credentials.ForgeIdentity.human_identity() do
+        {:ok, %{name: cn, email: ce}} -> [{"GIT_COMMITTER_NAME", cn}, {"GIT_COMMITTER_EMAIL", ce}]
+        _ -> []
+      end
 
-  defp author_env(_), do: []
+    [{"GIT_AUTHOR_NAME", name}, {"GIT_AUTHOR_EMAIL", email}] ++ committer
+  end
+
+  defp identity_env(_), do: []
 
   # ── scaffold (standard, état de l'art — ajustable) ───────────────────────
 

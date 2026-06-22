@@ -163,6 +163,17 @@ cat > "$POD_DIR/.claude.json" <<JSONEOF
 JSONEOF
 dbg "step claude.json provisionné (VER=${VER:-?}, RC keys posées)"
 
+# F-RC-ORG (2026-06-22) : merge l'oauthAccount (org/compte de l'humain, posé par pod.ex depuis son
+# ~/.claude.json) → claude peut « determine your organization » pour l'éligibilité Remote Control (Desktop).
+# Absent/échec → skip (best-effort, non bloquant : la fleet tourne sans Desktop).
+OAUTH_FILE="$POD_DIR/.lcars/oauth_account.json"
+if [[ -f "$OAUTH_FILE" ]]; then
+  _cj="$("$JQ_BIN" -s '.[0] * .[1]' "$POD_DIR/.claude.json" "$OAUTH_FILE" 2>/dev/null)" \
+    && printf '%s\n' "$_cj" > "$POD_DIR/.claude.json" \
+    && dbg "step oauthAccount mergé (.claude.json → RC org éligible)" \
+    || dbg "WARN: merge oauthAccount échoué — RC org indispo (non bloquant)"
+fi
+
 # =============================================================
 # Tools depuis cap-profile JSON resolved (string-keyed, cohérent fleet_cap_profile L100).
 # =============================================================
@@ -222,17 +233,21 @@ POD_SETTINGS_FILE="$POD_DIR/.lcars/settings.json"
 # propriétaire bout-en-bout du mode bypass (le flag + la levée du dialogue). Non-skip (rôle bridé
 # par cap-profile) : on n'y touche pas. (Ex `bypassPermissionsModeAccepted` du global config :
 # DÉPRÉCIÉ/migré — ne plus l'écrire.)
-if [[ -z "$PERM_MODE" ]]; then
-  mkdir -p "$POD_DIR/.lcars"
-  if [[ -f "$POD_SETTINGS_FILE" ]]; then
-    _merged="$("$JQ_BIN" '. + {skipDangerousModePermissionPrompt: true}' "$POD_SETTINGS_FILE")" \
-      && printf '%s\n' "$_merged" > "$POD_SETTINGS_FILE" \
-      || { dbg "EXIT: merge skipDangerousModePermissionPrompt fail"; echo "ERR: merge settings échoué" >&2; exit 1; }
-  else
-    printf '{ "skipDangerousModePermissionPrompt": true }\n' > "$POD_SETTINGS_FILE"
-  fi
-  dbg "step bypass dialog pré-accepté (skipDangerousModePermissionPrompt → $POD_SETTINGS_FILE)"
+# F-POD-AUTOMEM (2026-06-22) : settings pod INCONDITIONNEL (avant : skip-mode seul → or tous les pods sont
+# en --permission-mode default depuis kill-yolo → jamais écrit). `autoMemoryEnabled:false` coupe l'auto-memory
+# claude du pod (mémoire siloée, inutile à la fleet, pollution doctrine BUG-3) — TOUS PERM_MODE. En skip-mode
+# (PERM_MODE vide) on AJOUTE `skipDangerousModePermissionPrompt:true` (pré-accepte le dialogue qui hang headless).
+mkdir -p "$POD_DIR/.lcars"
+POD_SETTINGS_JSON='{"autoMemoryEnabled":false}'
+[[ -z "$PERM_MODE" ]] && POD_SETTINGS_JSON="$("$JQ_BIN" -nc --argjson b "$POD_SETTINGS_JSON" '$b + {skipDangerousModePermissionPrompt:true}')"
+if [[ -f "$POD_SETTINGS_FILE" ]]; then
+  _merged="$("$JQ_BIN" --argjson add "$POD_SETTINGS_JSON" '. + $add' "$POD_SETTINGS_FILE")" \
+    && printf '%s\n' "$_merged" > "$POD_SETTINGS_FILE" \
+    || { dbg "EXIT: merge settings pod fail"; echo "ERR: merge settings pod échoué" >&2; exit 1; }
+else
+  printf '%s\n' "$POD_SETTINGS_JSON" > "$POD_SETTINGS_FILE"
 fi
+dbg "step settings pod écrit (autoMemoryEnabled=false → $POD_SETTINGS_FILE)"
 
 # --setting-sources INCONDITIONNEL : exclut le tier 'user' (settings.json de l'humain en ~/.claude).
 # NB (P1/C9) : ce flag NE suffit PAS à fermer la fuite des hooks — celle-ci passait par les tiers

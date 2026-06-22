@@ -84,6 +84,16 @@ defmodule Fleet.Credentials.ForgeIdentity do
     end
   end
 
+  @doc """
+  Identité git de l'HUMAIN qui run la fleet (name + email robustes : git config → GECOS → login ; ne FAIL
+  jamais sur un user OS). Sert de `committer` aux commits SYSTÈME (ex. onboard projet, author=`lcars-system`)
+  → trace qui a initié, SANS dépendre du `~/.gitconfig` humain (F-GIT-IDENTITY : sans ça, un humain non
+  configuré → committer « empty ident name » → commit refusé). `opts` identiques à `for_role/2`.
+  """
+  @spec human_identity(keyword()) ::
+          {:ok, %{name: String.t(), email: String.t(), human: String.t()}} | {:error, term()}
+  def human_identity(opts \\ []), do: resolve_identity(opts)
+
   @doc "Trailer machine vérifiable du rôle (Co-authored-by canon)."
   @spec coauthor_trailer(String.t()) :: String.t()
   def coauthor_trailer(role) when is_binary(role) do

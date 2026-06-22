@@ -492,6 +492,7 @@ defmodule Fleet.Spawner.Pod do
          :ok <- safe_write(Path.join(state.pod_dir, "CLAUDE.md"), claude_md),
          :ok <- safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
          :ok <- safe_write(Path.join(lcars_dir, "settings.json"), pod_settings_json()),
+         :ok <- maybe_provision_oauth_account(lcars_dir),
          # creds : plus de copie (adr-f). Seul `.credentials.json` de l'humain est monté RW par
          # bwrap_launch.sh dans `pod_dir/.claude/` (refresh OAuth natif, écriture en place). `.claude/`
          # reste pod-owned → pas de hook humain. Les fichiers pod sont en .lcars/ + racine pod.
@@ -524,6 +525,25 @@ defmodule Fleet.Spawner.Pod do
       {:noreply, new_state, {:continue, :inject}}
     else
       {:error, reason} -> transition_failed(state, {:project_failed, reason})
+    end
+  end
+
+  # F-RC-ORG (2026-06-22) : extrait l'`oauthAccount` (org/compte de l'humain) du `~/.claude.json` HUMAIN (le
+  # BEAM tourne *as* l'humain → lisible) → le pose en `pod_dir/.lcars/oauth_account.json`. claude_launch le
+  # merge dans le `.claude.json` du pod ; sinon claude ne peut « determine your organization » → Remote Control
+  # (Desktop) inéligible (vu live lordzurp). Best-effort, ne casse JAMAIS le provision : absent/illisible/sans
+  # oauthAccount → skip (la fleet tourne sans Desktop ; le pod a déjà les creds de l'humain, l'org n'est pas
+  # un secret de plus).
+  defp maybe_provision_oauth_account(lcars_dir) do
+    human_json = Path.join(System.user_home() || "/nonexistent", ".claude.json")
+
+    with {:ok, raw} <- File.read(human_json),
+         {:ok, %{"oauthAccount" => oa}} when is_map(oa) <- Jason.decode(raw),
+         {:ok, json} <- Jason.encode(%{"oauthAccount" => oa}) do
+      _ = safe_write(Path.join(lcars_dir, "oauth_account.json"), json)
+      :ok
+    else
+      _ -> :ok
     end
   end
 
@@ -2072,9 +2092,13 @@ defmodule Fleet.Spawner.Pod do
   defp kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
   defp kick_max_attempts, do: Application.get_env(:fleet_spawner, :kick_max_attempts, 12)
 
-  # Bootstrap (pod sans mandat) : kicks BORNÉS + ESPACÉS — ~4 tentatives à 8s d'intervalle
-  # couvrent le boot claude (~15s) sans rafale. Le réveil-par-flag (Monitor) prend le relais ensuite.
-  defp kick_bootstrap_max, do: Application.get_env(:fleet_spawner, :kick_bootstrap_max, 4)
+  # Bootstrap (pod sans mandat) : kicks BORNÉS + ESPACÉS jusqu'à ce que le REPL claude réponde (appel
+  # get_task = ack). F-KICK-COLDSTART (2026-06-22, vu live mon-moins-super-projet #2) : l'ancien défaut
+  # (4×8s ≈ 32s, calé sur un boot ~15s) était trop court pour le COLD-START réel de claude en bwrap
+  # (binaire ~238 MB, caches froids, contention multi-fleet) → tous les kicks tombaient avant REPL prêt →
+  # pod jamais onboardé. Élargi à 30×8s ≈ 4 min : couvre le cold-start, et le deadline résultat se RÉ-ARME
+  # sur activité (donc dès le mandat reçu, plus de timeout). Une fois acké, le réveil-par-flag prend le relais.
+  defp kick_bootstrap_max, do: Application.get_env(:fleet_spawner, :kick_bootstrap_max, 30)
 
   defp kick_bootstrap_retry_ms,
     do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
