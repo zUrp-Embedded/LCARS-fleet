@@ -163,17 +163,6 @@ cat > "$POD_DIR/.claude.json" <<JSONEOF
 JSONEOF
 dbg "step claude.json provisionné (VER=${VER:-?}, RC keys posées)"
 
-# F-RC-ORG (2026-06-22) : merge l'oauthAccount (org/compte de l'humain, posé par pod.ex depuis son
-# ~/.claude.json) → claude peut « determine your organization » pour l'éligibilité Remote Control (Desktop).
-# Absent/échec → skip (best-effort, non bloquant : la fleet tourne sans Desktop).
-OAUTH_FILE="$POD_DIR/.lcars/oauth_account.json"
-if [[ -f "$OAUTH_FILE" ]]; then
-  _cj="$("$JQ_BIN" -s '.[0] * .[1]' "$POD_DIR/.claude.json" "$OAUTH_FILE" 2>/dev/null)" \
-    && printf '%s\n' "$_cj" > "$POD_DIR/.claude.json" \
-    && dbg "step oauthAccount mergé (.claude.json → RC org éligible)" \
-    || dbg "WARN: merge oauthAccount échoué — RC org indispo (non bloquant)"
-fi
-
 # =============================================================
 # Tools depuis cap-profile JSON resolved (string-keyed, cohérent fleet_cap_profile L100).
 # =============================================================

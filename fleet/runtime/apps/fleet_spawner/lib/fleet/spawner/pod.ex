@@ -492,7 +492,6 @@ defmodule Fleet.Spawner.Pod do
          :ok <- safe_write(Path.join(state.pod_dir, "CLAUDE.md"), claude_md),
          :ok <- safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
          :ok <- safe_write(Path.join(lcars_dir, "settings.json"), pod_settings_json()),
-         :ok <- maybe_provision_oauth_account(lcars_dir),
          # creds : plus de copie (adr-f). Seul `.credentials.json` de l'humain est monté RW par
          # bwrap_launch.sh dans `pod_dir/.claude/` (refresh OAuth natif, écriture en place). `.claude/`
          # reste pod-owned → pas de hook humain. Les fichiers pod sont en .lcars/ + racine pod.
@@ -525,25 +524,6 @@ defmodule Fleet.Spawner.Pod do
       {:noreply, new_state, {:continue, :inject}}
     else
       {:error, reason} -> transition_failed(state, {:project_failed, reason})
-    end
-  end
-
-  # F-RC-ORG (2026-06-22) : extrait l'`oauthAccount` (org/compte de l'humain) du `~/.claude.json` HUMAIN (le
-  # BEAM tourne *as* l'humain → lisible) → le pose en `pod_dir/.lcars/oauth_account.json`. claude_launch le
-  # merge dans le `.claude.json` du pod ; sinon claude ne peut « determine your organization » → Remote Control
-  # (Desktop) inéligible (vu live lordzurp). Best-effort, ne casse JAMAIS le provision : absent/illisible/sans
-  # oauthAccount → skip (la fleet tourne sans Desktop ; le pod a déjà les creds de l'humain, l'org n'est pas
-  # un secret de plus).
-  defp maybe_provision_oauth_account(lcars_dir) do
-    human_json = Path.join(System.user_home() || "/nonexistent", ".claude.json")
-
-    with {:ok, raw} <- File.read(human_json),
-         {:ok, %{"oauthAccount" => oa}} when is_map(oa) <- Jason.decode(raw),
-         {:ok, json} <- Jason.encode(%{"oauthAccount" => oa}) do
-      _ = safe_write(Path.join(lcars_dir, "oauth_account.json"), json)
-      :ok
-    else
-      _ -> :ok
     end
   end
 
