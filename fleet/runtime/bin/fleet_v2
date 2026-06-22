@@ -47,7 +47,10 @@ setup_env() {
   # shellcheck source=/dev/null
   if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
 
-  : "${LCARS_PILOT_POLL_REPO:?config manquante : LCARS_PILOT_POLL_REPO=owner/repo (dans $env_file)}"
+  # F-037 multi-projet : le poller DÉCOUVRE ses repos par topic (lcars-fleet-<human>) → plus de
+  # LCARS_PILOT_POLL_REPO requis. La garde fail-loud porte désormais sur FORGE_BASE_URL (découverte +
+  # push per-hop), alignée sur la garde Elixir `Fleet.Pilot.Application.stage_children!`.
+  : "${FORGE_BASE_URL:?config manquante : FORGE_BASE_URL=http://forge (dans $env_file) — requis pour la découverte + le push}"
 
   compute_ports
 
@@ -103,7 +106,7 @@ cmd_start() {
   local mix_env="${MIX_ENV:-$MIX_ENV_DEFAULT}"
   echo "fleet_v2: démarrage du BEAM sous $(id -un) (uid $(id -u), MIX_ENV=$mix_env)" >&2
   echo "fleet_v2: ports — API $API_PORT · obs $OBS_PORT · MCP $MCP_PORT · webhook $WEBHOOK_PORT" >&2
-  echo "fleet_v2: repo surveillé — $LCARS_PILOT_POLL_REPO" >&2
+  echo "fleet_v2: découverte multi-projet par topic lcars-fleet-<humain> (F-037, plus de repo fixe)" >&2
 
   # Socket tmux DÉDIÉ (serveur frais) → il capture l'env exporté ci-dessus. Le BEAM y tourne détaché et
   # survit à ce terminal. `mix run --no-halt` (pas iex) : on s'attache à l'ARCH, pas à un shell Elixir.
