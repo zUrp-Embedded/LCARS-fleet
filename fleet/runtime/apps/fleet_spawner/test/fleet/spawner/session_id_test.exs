@@ -62,6 +62,13 @@ defmodule Fleet.Spawner.SessionIdTest do
       assert_raise ArgumentError, fn -> SessionId.build!("starfleet") end
     end
 
+    test "fleet_level? : arch + gatekeeper (repo 0000), project-bound & starfleet non" do
+      assert SessionId.fleet_level?("architect")
+      assert SessionId.fleet_level?("gatekeeper")
+      refute SessionId.fleet_level?("engineer")
+      refute SessionId.fleet_level?("starfleet")
+    end
+
     test "tier : arch protégé (0badcafe), workers (1badcafe) — pkill -f 1badcafe épargne l'arch" do
       assert {:ok, "0badcafe" <> _} = SessionId.build("architect")
 

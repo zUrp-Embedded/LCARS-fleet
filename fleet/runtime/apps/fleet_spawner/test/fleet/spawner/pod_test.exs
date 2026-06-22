@@ -397,6 +397,69 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
+  describe "BL-055 — session_id déterministe au spawn (Fleet.Spawner.SessionId)" do
+    setup do
+      StubBackend.set_reply(interactive_reply())
+      :ok
+    end
+
+    defp gatekeeper_args(pod_id, opts \\ []) do
+      gk = %{valid_profile() | metadata: %{"name" => "gatekeeper", "containment" => "bwrap"}}
+      %{cap_profile: gk, ticket_id: "ticket-1", pod_id: pod_id, opts: opts}
+    end
+
+    test "rôle fleet-level (gatekeeper) → session_id hexspeak déterministe 1badcafe-...02" do
+      pod_id = "pod-gk-det-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(gatekeeper_args(pod_id))
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      # barrière sync (state.json écrit en LAUNCH, après :launch_called) — cf. test state.json
+      GenServer.call(pid, :info)
+
+      content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
+      assert content["session_id"] == "1badcafe-feed-4dad-babe-0000dec0de02"
+    end
+
+    test "opts[:session_id] explicite PRIME (ex. arch boot-from-base sur 0badcafe)" do
+      pod_id = "pod-explicit-#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        spawn_via_supervisor(
+          gatekeeper_args(pod_id, session_id: "0badcafe-feed-4dad-babe-0000dec0de01")
+        )
+
+      assert_receive {:launch_called, _args, _env}, 2_000
+      GenServer.call(pid, :info)
+
+      content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
+      assert content["session_id"] == "0badcafe-feed-4dad-babe-0000dec0de01"
+    end
+
+    test "project-bound (engineer) SANS repo_id → random (pas de collision inter-projet)" do
+      pod_id = "pod-eng-rand-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      assert_receive {:launch_called, _args, _env}, 2_000
+      GenServer.call(pid, :info)
+
+      content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
+      refute content["session_id"] == "1badcafe-feed-4dad-babe-0000dec0de03"
+
+      assert content["session_id"] =~
+               ~r/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    end
+
+    test "project-bound (engineer) AVEC repo_id → hexspeak déterministe (repo encodé, pré-M5)" do
+      pod_id = "pod-eng-repo-#{System.unique_integer([:positive])}"
+      args = build_args(pod_id, "ticket-1") |> Map.put(:opts, repo_id: 0x00AB)
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _args, _env}, 2_000
+      GenServer.call(pid, :info)
+
+      content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
+      assert content["session_id"] == "1badcafe-feed-4dad-babe-00abdec0de03"
+    end
+  end
+
   describe "LAUNCH-Q — branche containment (host_launch vs bwrap) sur le chemin de lancement" do
     # Le gap : avant le fix, `do_launch` bwrappait TOUT (containment jamais lu). Ici on prouve que le
     # launcher N0 passé au backend (`args.launcher_path`) ET le HOME suivent `metadata.containment`.

@@ -1508,6 +1508,29 @@ defmodule Fleet.Spawner.Pod do
 
   defp phase_from_string(_), do: nil
 
+  # BL-055 : session_id DÉTERMINISTE hexspeak (`Fleet.Spawner.SessionId`) si le rôle est catalogué.
+  # - fleet-level (arch, gatekeeper) → repo `0000` (une instance/rôle, pas de collision).
+  # - project-bound (eng, juges) → SEULEMENT si `opts[:repo_id]` fourni ; sinon random (pas de
+  #   collision inter-projet/rework tant que le pipeline ne passe pas le repo — M5).
+  # - starfleet / rôle inconnu → `UUID.uuid4()`. `opts[:session_id]` (seed arch, recall) PRIME au call-site.
+  defp deterministic_session_id(%Fleet.CapProfile{metadata: meta}, opts) do
+    role = Map.get(meta || %{}, "name", "")
+    repo = Keyword.get(opts, :repo_id)
+
+    cond do
+      Fleet.Spawner.SessionId.fleet_level?(role) ->
+        Fleet.Spawner.SessionId.build!(role, 0x0000)
+
+      Fleet.Spawner.SessionId.deterministic?(role) and is_integer(repo) ->
+        Fleet.Spawner.SessionId.build!(role, repo)
+
+      true ->
+        UUID.uuid4()
+    end
+  end
+
+  defp deterministic_session_id(_, _), do: UUID.uuid4()
+
   defp initial_state(args) do
     state_fs_path = state_fs_path_for(args.pod_id, args.cap_profile, args.opts)
     pod_dir = pod_dir_for(args.pod_id, args.cap_profile, args.opts)
@@ -1520,7 +1543,9 @@ defmodule Fleet.Spawner.Pod do
       # Session UUID PRÉ-ALLOUÉ au spawn (DN spawner-orchestrator §A) : `--session-id <uuid>` à la
       # 1ʳᵉ création ; `recover_or_init` le RESTAURE depuis state.json → `--resume <uuid>`. Remplace
       # le modèle -p (capture `init_msg["session_id"]`, mort). `resume`=false ; recovery le passe à true.
-      session_id: Keyword.get(args.opts, :session_id) || UUID.uuid4(),
+      session_id:
+        Keyword.get(args.opts, :session_id) ||
+          deterministic_session_id(args.cap_profile, args.opts),
       # DN spawner-orchestrator §C-3 (BL-021 chantier 4) : timestamp ISO8601 figé
       # à la création du GenServer, persisté tel quel dans state.json.
       started_at: DateTime.utc_now(),

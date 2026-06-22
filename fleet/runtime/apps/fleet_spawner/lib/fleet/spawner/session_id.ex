@@ -45,6 +45,11 @@ defmodule Fleet.Spawner.SessionId do
   # Tier protégé `0badcafe` (épargné par `pkill -f 1badcafe`). Le reste = worker `1badcafe`.
   @protected MapSet.new(["starfleet", "architect"])
 
+  # Rôles FLEET-LEVEL : une seule instance, repo toujours `0000` (pas de dimension projet). Les rôles
+  # project-bound (eng, juges) portent le repo dans l'UUID → ne JAMAIS les minter sans repo (collision
+  # inter-projet/rework). Axe orthogonal au tier : le gatekeeper est worker (`1badcafe`) ET fleet-level.
+  @fleet_level MapSet.new(["architect", "gatekeeper"])
+
   @doc """
   `{:ok, session_id}` pour un rôle catalogué, sinon `{:error, reason}`.
 
@@ -91,6 +96,13 @@ defmodule Fleet.Spawner.SessionId do
   @spec deterministic?(String.t()) :: boolean()
   def deterministic?(role) when is_binary(role),
     do: role != "starfleet" and Map.has_key?(@role_index, role)
+
+  @doc """
+  Rôle FLEET-LEVEL (une instance, repo `0000`) ? Les project-bound (eng, juges) exigent le repo —
+  on ne les minte qu'avec un `repo_id` connu (sinon collision inter-projet).
+  """
+  @spec fleet_level?(String.t()) :: boolean()
+  def fleet_level?(role) when is_binary(role), do: MapSet.member?(@fleet_level, role)
 
   defp hex(n, width),
     do: n |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(width, "0")
