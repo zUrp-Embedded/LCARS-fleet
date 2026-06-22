@@ -874,9 +874,11 @@ defmodule Fleet.Spawner.PodTest do
       assert env["LCARS_AUTH_MODE"] == "bind"
       refute Map.has_key?(env, "LCARS_ANTHROPIC_AUTH_TOKEN")
 
-      # LCARS_POD_DIR posé explicitement (= sandbox_home : /home/.pod en bwrap) — le SP/watch.sh le lisent
-      # pour trouver watch.sh/turn.flag ; avant il était unset (fallback $HOME fragile, faux en host).
-      assert env["LCARS_POD_DIR"] == "/home/.pod"
+      # LCARS_POD_DIR n'est PAS posée par le spawner (dead code : bwrap_launch `--clearenv` la strippe,
+      # host_launch l'`export`e = $POD_DIR, F-E1). La racine pod passe par LCARS_POD_HOME (bwrap, forwardé
+      # par bwrap_launch) + le fallback `$HOME`. cf. pod.ex (Map.put 5001703f réverté).
+      refute Map.has_key?(env, "LCARS_POD_DIR")
+      assert env["LCARS_POD_HOME"] == "/home/.pod"
     end
   end
 
