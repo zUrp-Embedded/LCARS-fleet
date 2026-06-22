@@ -379,6 +379,24 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
+  L'**id forge numérique** du repo (`GET /repos/<repo>` → `.id`). C'est l'identité du projet pour le
+  `session_id` déterministe (`Fleet.Spawner.SessionId`, segment `<REPO4>` — BL-055) : la FORGE est la
+  source de vérité, on ne dérive PAS un id du néant. Id Gitea = entier séquentiel stable (vérifié live :
+  `fleet/lcars` = 145). `{:error, _}` si le repo n'existe pas / forge down → l'appelant retombe sur un
+  UUID random (best-effort, zéro collision).
+  """
+  @spec repo_id(String.t(), Keyword.t()) :: {:ok, integer()} | {:error, term()}
+  def repo_id(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, %{"id" => id}} when is_integer(id) <- http_get(config, "/repos/#{repo}") do
+      {:ok, id}
+    else
+      {:ok, _} -> {:error, :no_id}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   Pose une règle de **branch-protection** sur `repo` — Gitea `POST /repos/{repo}/branch_protections`.
   `rule` = map d'options Gitea (`rule_name`, `required_approvals`, `dismiss_stale_approvals`,
   `block_on_rejected_reviews`, `enable_push`, …). C'est le **gate forge-enforcé** : sur le repo

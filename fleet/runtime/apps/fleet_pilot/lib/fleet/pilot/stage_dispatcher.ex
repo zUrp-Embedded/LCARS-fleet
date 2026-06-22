@@ -156,6 +156,7 @@ defmodule Fleet.Pilot.StageDispatcher do
             ]
             |> maybe_put_project(project)
             |> maybe_put_route(route)
+            |> maybe_put_repo_id(resolve_repo_id(forge, repo, forge_opts))
 
           # #5.2 D3 — spawn LEAF partagé avec dispatch_by_verdicts (verrou → pod → enqueue → wake +
           # compensation). Producteur : verrou + ticket_id keyés sur l'ISSUE (number).
@@ -365,6 +366,7 @@ defmodule Fleet.Pilot.StageDispatcher do
         [mandate: mandate, pod_id: pod_id, rc_name: rc_name(repo, role)]
         |> maybe_put_project(project)
         |> maybe_put_route(route)
+        |> maybe_put_repo_id(resolve_repo_id(forge, repo, forge_opts))
 
       # #5.2 D3 — spawn LEAF partagé avec dispatch_issue (verrou → pod → enqueue → wake + compensation).
       # Verrou keyé sur la PR (pr_number) ; ticket_id + enqueue keyés sur l'ISSUE (issue_n — le
@@ -473,6 +475,24 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   defp maybe_put_route(spawn_opts, {pipeline, stage}),
     do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:stage, stage)
+
+  # BL-055 (M5) : `repo_id` = id forge du projet → session_id déterministe des rôles project-bound
+  # (eng, juges) via `Fleet.Spawner.SessionId` (segment `<REPO4>`). Best-effort : forge sans `repo_id`
+  # (stub) / forge down / id absent → `nil` → pas de `repo_id` posé → le spawner retombe sur un UUID
+  # random (zéro collision). Masqué 16 bits (`<REPO4>` = 4 hex ; >65535 repos = wrap, improbable).
+  defp maybe_put_repo_id(spawn_opts, nil), do: spawn_opts
+  defp maybe_put_repo_id(spawn_opts, repo_id), do: Keyword.put(spawn_opts, :repo_id, repo_id)
+
+  defp resolve_repo_id(forge, repo, forge_opts) do
+    if function_exported?(forge, :repo_id, 2) do
+      case forge.repo_id(repo, forge_opts) do
+        {:ok, id} when is_integer(id) and id >= 0 -> rem(id, 0x10000)
+        _ -> nil
+      end
+    else
+      nil
+    end
+  end
 
   # Mandat d'un dispatch PR (Corr.3 4-C) : :judge -> GateBrief desamorce (via build_mandate, le pod
   # juge l'issue) ; :rework -> brief de rework au PRODUCTEUR (corrige selon la review, re-pousse).

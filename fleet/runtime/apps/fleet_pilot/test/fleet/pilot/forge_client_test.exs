@@ -63,6 +63,27 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "repo_id/2 — id forge du repo (source de vérité pour <REPO4>, BL-055)" do
+    test "GET /repos/<repo> → {:ok, id} entier" do
+      h = %{
+        {"GET", "/api/v1/repos/fleet/lcars"} =>
+          {200, %{"id" => 145, "full_name" => "fleet/lcars"}}
+      }
+
+      assert {:ok, 145} = ForgeClient.repo_id("fleet/lcars", opts(h))
+    end
+
+    test "repo inexistant (404) → {:error, _} (l'appelant retombe sur un UUID random)" do
+      h = %{{"GET", "/api/v1/repos/fleet/ghost"} => {404, %{}}}
+      assert {:error, _} = ForgeClient.repo_id("fleet/ghost", opts(h))
+    end
+
+    test "réponse sans champ id → {:error, :no_id}" do
+      h = %{{"GET", "/api/v1/repos/fleet/weird"} => {200, %{"full_name" => "fleet/weird"}}}
+      assert {:error, :no_id} = ForgeClient.repo_id("fleet/weird", opts(h))
+    end
+  end
+
   describe "last_worked_repo/2 — défaut create_ticket (dernier travaillé, scopé collaborateur)" do
     test "tri client-side par updated_at desc + filtre collaborateur (le plus récent non-collab est écarté)" do
       # Input volontairement DANS LE DÉSORDRE + le plus récent (poc-old, 23:00) est NON-collaborateur.
