@@ -420,6 +420,27 @@ if config_env() != :test do
     config :fleet_spawner, state_fs_root: path
   end
 
+  # Launchers pod (N0/N1) : path absolu lu par le spawner (défaut `/usr/local/bin`, pod.ex). Le launcher
+  # `fleet_v2` les pose depuis `$INSTALL_DIR/bin` (BSD : tout sous l'install, rien d'éparpillé ; fini le
+  # `sudo cp` vers /usr/local/bin). Le dir parent est bindé RO dans le sandbox (pod.ex `system_mounts`,
+  # dérivé de `claude_launch_path`). Param d'install → le `v2 → lcars` futur ne touche aucun code.
+  if path = System.get_env("LCARS_BWRAP_LAUNCH_PATH"),
+    do: config(:fleet_spawner, bwrap_launch_path: path)
+
+  if path = System.get_env("LCARS_HOST_LAUNCH_PATH"),
+    do: config(:fleet_spawner, host_launch_path: path)
+
+  if path = System.get_env("LCARS_CLAUDE_LAUNCH_PATH"),
+    do: config(:fleet_spawner, claude_launch_path: path)
+
+  # Seed store (round-1 des pods — optimisation de reprise, JAMAIS requis ; vide = auto-peuplant, le pod
+  # spawne fresh). Défaut repointé sous le home (`~/.lcars/seeds`) : c'est de l'état per-humain, pas du
+  # source/install (seed_store.ex défautait `/home/projects.work`). Override `LCARS_SEED_STORE_ROOT`.
+  config :fleet_spawner,
+    seed_store_root:
+      System.get_env("LCARS_SEED_STORE_ROOT") ||
+        Path.join(System.user_home() || "/var/lib/lcars", ".lcars/seeds")
+
   # Kick d'onboarding du pod (nudge `yop` → claude appelle get_task). La fenêtre par défaut
   # (first 2s + 12×2.5s ≈ 32s) est trop courte face au cold-start claude en bwrap sur le service
   # déployé (binaire 238MB, caches froids) → kick abandonné avant REPL prêt → pod sans mandat.

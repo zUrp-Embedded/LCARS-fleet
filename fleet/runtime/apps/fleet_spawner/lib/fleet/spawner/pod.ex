@@ -1036,7 +1036,11 @@ defmodule Fleet.Spawner.Pod do
           # lui-même (= $POD_DIR, F-E1 `3152af3d`). Le SP/watch.sh lisent `${LCARS_POD_DIR:-$HOME}` :
           # host → la var ; bwrap → fallback `$HOME` (= /home/.pod = racine pod). (Map.put 5001703f réverté.)
           # Mounts CATALOGUE (cap-profile-driven) → bwrap_launch les bind. Vide / host_launch = inerte.
-          |> Map.put("LCARS_POD_MOUNTS", mounts_env(cap_profile_mounts(state.cap_profile)))
+          # `system_mounts` préfixe le dir des launchers (install) → claude_launch.sh visible dans le sandbox.
+          |> Map.put(
+            "LCARS_POD_MOUNTS",
+            mounts_env(system_mounts() ++ cap_profile_mounts(state.cap_profile))
+          )
 
         {:ok, human, env}
       rescue
@@ -1671,6 +1675,18 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp cap_profile_mounts(_), do: []
+
+  # Mount SYSTÈME universel : le dir des launchers (= `dirname(claude_launch_path)`) doit être VISIBLE
+  # dans le sandbox bwrap, car `claude_launch.sh` y tourne en PID1. `/usr/local/bin` l'était par accident
+  # (`--ro-bind /usr`) ; depuis l'install (`/local/LCARS_v2/bin`) ou le source dev (`/home/.../bin`) il faut
+  # le bind explicite. Dérivé du path launcher (= paramètre d'install) → suit le déploiement sans hardcode.
+  # Passe par le canal catalogue `LCARS_POD_MOUNTS` (appliqué APRÈS `--tmpfs /home` → re-expose même un
+  # chemin `/home/...`) ⇒ sanctuaire `bwrap_launch.sh` INTACT. Skip si déjà sous `/usr` (couvert par
+  # `--ro-bind /usr` → bind redondant inutile ; cas du défaut legacy `/usr/local/bin`, dont les tests).
+  defp system_mounts do
+    bin = Path.dirname(claude_launch_path())
+    if String.starts_with?(bin, "/usr/"), do: [], else: [%{"mode" => "ro", "path" => bin}]
+  end
 
   # Sérialise les mounts pour bwrap_launch (`LCARS_POD_MOUNTS`) : une ligne "mode:path" par mount.
   defp mounts_env(mounts) when is_list(mounts) do
