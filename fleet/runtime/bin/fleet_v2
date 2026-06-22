@@ -83,13 +83,11 @@ setup_env() {
   export LCARS_BOOT_PERMANENT_AT_START=true
   export LCARS_PILOT_STAGE="${LCARS_PILOT_STAGE:-true}"
 
-  # Debug (pas-à-pas RPC) : BEAM en node Erlang NOMMÉ, pilotable depuis l'extérieur. Config-driven via
-  # l'env (`LCARS_FLEET_V2_ERL_NODE` dans fleet_v2.env) → AUCUN `export` manuel pour lancer la fleet.
-  # Vide en prod = BEAM anonyme normal. (NB : ne PAS mettre dans .bashrc — polluerait tout `elixir`/`mix`
-  # du shell, dont le contrôleur RPC « multiple -name ».)
-  if [[ -n "${LCARS_FLEET_V2_ERL_NODE:-}" ]]; then
-    export ELIXIR_ERL_OPTIONS="-name ${LCARS_FLEET_V2_ERL_NODE} -setcookie ${LCARS_FLEET_V2_ERL_COOKIE:-lcars} ${ELIXIR_ERL_OPTIONS:-}"
-  fi
+  # Distribution Erlang (node nommé, RPC debug) : gérée par MODE dans cmd_start, avec un nom DÉRIVÉ
+  # PER-HUMAIN. ⚠ La release distribue `-sname fleet_umbrella` par DÉFAUT (nom FIXE partagé) → 2 humains =
+  # même node dans l'epmd partagé = 2e BEAM CRASH (vu live lordzurp 2026-06-22). cmd_start force donc soit
+  # un node per-humain (`fleet_<user>`, si LCARS_FLEET_V2_ERL_NODE set = debug), soit `RELEASE_DISTRIBUTION=
+  # none` (normal : pas d'epmd, pas de collision). Per-humain comme les ports.
 
   mkdir -p "$LCARS_TMUX_SOCK_BASE" "$(dirname "$DAEMON_SOCK")"
 
@@ -114,6 +112,12 @@ cmd_start() {
   #   - INSTALL (/local/LCARS_v2) : la RELEASE auto-contenue (`rel/.../bin/fleet_umbrella start`) tourne
   #     SANS le repo (priv bundlé, ERTS embarqué) → étanche.
   #   - SOURCE (dev) : `mix run --no-halt` depuis le repo (itération rapide) + cap-profiles LIVE du source.
+  # Distribution Erlang PER-HUMAIN (cf. setup_env) : node `fleet_<user>` (jamais le `fleet_umbrella` fixe
+  # partagé). ON seulement si LCARS_FLEET_V2_ERL_NODE est posé (debug RPC) ; sinon OFF (pas d'epmd).
+  local erl_node="fleet_$(id -un)@127.0.0.1"
+  local erl_cookie="${LCARS_FLEET_V2_ERL_COOKIE:-lcars}"
+  local dist_on=""; [[ -n "${LCARS_FLEET_V2_ERL_NODE:-}" ]] && dist_on=1
+
   local rel_bin="$RUNTIME_DIR/rel/fleet_umbrella/bin/fleet_umbrella"
   local mode launch_cmd
   if [[ -x "$rel_bin" ]]; then
@@ -121,10 +125,17 @@ cmd_start() {
     # Install RO (owner système) → le BEAM écrit son tmp dans le home de l'humain, pas dans l'install.
     export RELEASE_TMP="${RELEASE_TMP:-$HOME/.lcars/tmp}"
     mkdir -p "$RELEASE_TMP"
+    # Override le défaut `-sname fleet_umbrella` (partagé → collision multi-humain).
+    if [[ -n "$dist_on" ]]; then
+      export RELEASE_DISTRIBUTION=name RELEASE_NODE="$erl_node" RELEASE_COOKIE="$erl_cookie"
+    else
+      export RELEASE_DISTRIBUTION=none
+    fi
     launch_cmd="exec '$rel_bin' start"
   else
     mode="dev (mix run, MIX_ENV=$mix_env)"
     export LCARS_CAPPROFILES_ROOT="${LCARS_CAPPROFILES_ROOT:-$RUNTIME_DIR/apps/fleet_cap_profile/priv/canon/cap-profiles}"
+    [[ -n "$dist_on" ]] && export ELIXIR_ERL_OPTIONS="-name $erl_node -setcookie $erl_cookie ${ELIXIR_ERL_OPTIONS:-}"
     launch_cmd="cd '$RUNTIME_DIR' && exec mix run --no-halt"
   fi
 
