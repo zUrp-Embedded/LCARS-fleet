@@ -58,10 +58,11 @@ defmodule Fleet.MCP.PodTools do
         "Délègue une brique d'implémentation à la fleet LCARS : crée un ticket (issue forge) prêt " <>
           "pour la livraison forge-native (engineer → PR → review → merge). Utilise-le pour DÉLÉGUER " <>
           "plutôt que de coder toi-même (la fleet livre mieux et préserve ton contexte). " <>
-          "`brief` = le mandat clair pour l'engineer. `project` (optionnel) = le repo `owner/name` SUR " <>
-          "lequel délivrer — passe-le quand l'humain désigne un projet (ex. celui que `create_project` " <>
-          "vient de retourner). Omis → le dernier projet sur lequel l'humain a travaillé. " <>
-          "Retourne {\"status\":\"ticket_created\",...}."
+          "`brief` = le mandat clair pour l'engineer. `project` = le repo `owner/name` OÙ LIVRER : passe-le " <>
+          "dès que tu connais le projet cible — TOUJOURS le repo retourné par `create_project`, ou le projet " <>
+          "désigné par l'humain. Omis SEULEMENT si tu restes sur le projet courant : la fleet route alors vers " <>
+          "le dernier projet où l'humain a un ticket (un projet fraîchement créé n'en a pas encore → `project` " <>
+          "explicite OBLIGATOIRE pour livrer dedans). Retourne {\"status\":\"ticket_created\",\"repo\":...}."
       )
     end
 
