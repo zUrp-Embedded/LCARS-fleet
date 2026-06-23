@@ -316,13 +316,18 @@ defmodule Fleet.Pipeline.Git do
     Task.yield(task, push_timeout_ms()) || Task.shutdown(task, :brutal_kill)
   end
 
-  # Rejet « non-fast-forward » (l'historique distant a divergé du local — ici un rebase). Détecté sur la sortie
-  # git (stderr fusionné) ; large pour couvrir les formulations git (« [rejected] … non-fast-forward / fetch first »).
+  # MA-05 — Rejet « non-fast-forward » SEUL (l'historique distant a divergé du local — ici un rebase de
+  # résolution réécrit la feature-branch SYSTÈME-owned → `--force` sûr). Détecté sur la sortie git (stderr
+  # fusionné) en se limitant aux DIAGNOSTICS PROPRES du non-fast-forward : `non-fast-forward` / `fetch first`.
+  # Le substring `rejected` NU est RETIRÉ : git l'émet AUSSI pour un rejet de HOOK (`[remote rejected] …
+  # pre-receive hook declined`) ou de branche protégée — un retry `--force` y serait à tort une RÉÉCRITURE
+  # FORCÉE par-dessus une protection serveur (perte de données / contournement de garde). On ne force que
+  # quand la cause EST une divergence d'historique, jamais sur un refus de politique remote (fail-closed :
+  # un rejet non-explicitement-NFF remonte tel quel `{:git_push_failed, …}`, pas de force aveugle).
   defp non_fast_forward?(out) do
     o = String.downcase(out)
 
-    String.contains?(o, "non-fast-forward") or String.contains?(o, "fetch first") or
-      String.contains?(o, "rejected")
+    String.contains?(o, "non-fast-forward") or String.contains?(o, "fetch first")
   end
 
   defp maybe_push(%{push?: true} = opts),

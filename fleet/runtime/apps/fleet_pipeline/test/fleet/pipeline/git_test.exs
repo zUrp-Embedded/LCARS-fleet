@@ -261,5 +261,56 @@ defmodule Fleet.GitTest do
       {remote_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       assert String.trim(remote_head) == String.trim(rewritten)
     end
+
+    # NB nommage : le tmp_dir ExUnit est dérivé du nom du test ; git embarque ce chemin dans sa sortie
+    # d'erreur. Le nom NE DOIT PAS contenir les substrings classés par `non_fast_forward?` (sinon le chemin
+    # pollue `out` et fait un faux positif). D'où un libellé volontairement neutre.
+    test "MA-05 : push refuse par hook serveur ne declenche AUCUN retry brutal", %{tmp_dir: tmp} do
+      bare = init_bare_repo(Path.join(tmp, "remote.git"))
+      ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
+      commit_initial(ws, "C1")
+
+      # Hook pre-receive qui REFUSE tout push → git émet « [remote rejected] … pre-receive hook declined »
+      # (le substring `rejected` SANS `non-fast-forward`). Avant MA-05 : `non_fast_forward?` matchait
+      # `rejected` → retry `--force` à tort (réécriture forcée par-dessus une garde serveur).
+      #
+      # DISCRIMINANT : le hook COMPTE ses invocations (1 ligne `x`/appel dans un fichier témoin). Un push
+      # normal seul → 1 invocation. Si le fix régresse et tente `--force`, git relance le push (le force ne
+      # contourne PAS un pre-receive) → 2 invocations. Le COMPTE prouve l'absence de retry-force, là où
+      # observer la remote ne le pouvait pas (force-declined échoue comme push-declined).
+      # Le counter vit dans un chemin SANS caractères spéciaux : le tmp_dir ExUnit embarque le nom du test
+      # (parenthèses, `→`, `≠`) qui, interpolé non-quoté dans le `sh` du hook, casserait la redirection.
+      counter =
+        Path.join(System.tmp_dir!(), "ma05_hook_calls_#{System.unique_integer([:positive])}")
+
+      File.rm(counter)
+      hook = Path.join([bare, "hooks", "pre-receive"])
+
+      File.write!(
+        hook,
+        "#!/bin/sh\necho x >> '#{counter}'\necho 'policy: pushes are blocked' >&2\nexit 1\n"
+      )
+
+      File.chmod!(hook, 0o755)
+      on_exit(fn -> File.rm(counter) end)
+
+      assert {:error, {:git_push_failed, rc, out}} =
+               Fleet.Pipeline.Git.push(ws, "origin", "HEAD:main")
+
+      assert rc != 0
+      assert out =~ "declined" or out =~ "rejected"
+
+      # LE test : le hook n'a été invoqué QU'UNE fois → aucun retry `--force` (qui l'aurait re-déclenché).
+      invocations = counter |> File.read!() |> String.split("\n", trim: true) |> length()
+
+      assert invocations == 1,
+             "hook invoqué #{invocations}× — un retry --force a été tenté (régression MA-05)"
+
+      # Garde-fou complémentaire : la remote n'a jamais reçu le ref.
+      {_o, rev_rc} =
+        System.cmd("git", ["rev-parse", "--verify", "main"], cd: bare, stderr_to_stdout: true)
+
+      assert rev_rc != 0, "le hook declined ne doit RIEN avoir poussé sur la remote"
+    end
   end
 end
