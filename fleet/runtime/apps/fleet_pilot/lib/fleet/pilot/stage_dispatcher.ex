@@ -324,15 +324,52 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # Rework juge : la PR porte un verdict REQUEST_CHANGES courant (l'état a déjà été lu par
   # `dispatch_review` → pas de re-lecture ici) -> le PRODUCTEUR (role git_native de head.ref) reprend
-  # pour corriger sur la même PR. Idempotent (verrou PR). NB transitionnel : le mandat ne porte pas
-  # encore le feedback détaillé de la review (4-C-iv+).
+  # pour corriger sur la même PR. Idempotent (verrou PR).
+  #
+  # MA-06 — FREIN ANTI-CHURN. Avant : `dispatch_rework` re-spawnait le producteur SANS compteur — le frein
+  # `rebound` (budget carte, HopConsumer) n'est jamais appelé sur CE chemin (PR-review-driven) → rework
+  # INFINI si l'eng ne satisfait jamais le juge, sans escalade. On borne les rounds par un compteur
+  # FORGE-NATIF (`count_change_request_rounds` = nb de reviews REQUEST_CHANGES, monotone) aligné sur le frein
+  # carte (budget = `max_rework_rounds`, défaut 2, configurable via `:max_pr_rework_rounds`). Au-delà du
+  # budget → ESCALADE ARCH (label `awaits-arch` + commentaire), pas de re-spawn → fin du churn. Budget
+  # illisible (`{:error}`) → on NE re-spawn PAS à l'aveugle : escalade (symétrique de `rebound` qui surface).
   defp dispatch_rework(pr_number, head, ctx) do
     case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
       {:ok, {_n, producer_role}} ->
-        dispatch_pr_role(:rework, pr_number, head, producer_role, ctx)
+        budget = Keyword.get(Map.get(ctx, :opts, []), :max_pr_rework_rounds, 2)
+
+        case ctx.forge.count_change_request_rounds(ctx.repo, pr_number, ctx.forge_opts) do
+          {:ok, rounds} when rounds <= budget ->
+            dispatch_pr_role(:rework, pr_number, head, producer_role, ctx)
+
+          {:ok, rounds} ->
+            escalate_rework_to_arch(pr_number, head, %{rounds: rounds, budget: budget}, ctx)
+
+          {:error, reason} ->
+            # Budget non vérifiable → on n'entre pas dans une boucle aveugle : on remonte à l'arch.
+            escalate_rework_to_arch(pr_number, head, {:budget_unreadable, reason}, ctx)
+        end
 
       :error ->
         {:skipped, :not_fleet_branch}
+    end
+  end
+
+  # MA-06 — rework PR épuisé (rounds > budget, ou budget illisible) → l'arch tranche. Symétrique de
+  # `escalate_conflict_to_arch` : commentaire gatekeeper dédupliqué + verrou `lcars-awaits-arch` sur l'ISSUE
+  # (le poller la SKIP, plus de re-dispatch — cf. MA-01). Retour `{:skipped, _}` (forme gérée par le poller).
+  defp escalate_rework_to_arch(pr_number, head, detail, ctx) do
+    with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head) do
+      signature = "[rework-exhausted-escalation:pr-#{pr_number}]"
+
+      body =
+        "**Architecte** — ⚠ Rework non convergent sur la PR ##{pr_number} (issue ##{issue_n}) : le budget " <>
+          "de rounds de review est épuisé (`#{inspect(detail)}`). Le producteur ne satisfait pas les juges. " <>
+          "Reprends : re-cadre le mandat, tranche le désaccord, ou ferme la PR. L'issue reste hors-dispatch " <>
+          "tant que `lcars-awaits-arch` est posé.\n\n" <> signature
+
+      escalate_to_arch(issue_n, signature, body, ctx)
+      {:skipped, {:rework_exhausted_escalated, pr_number}}
     end
   end
 
@@ -408,20 +445,29 @@ defmodule Fleet.Pilot.StageDispatcher do
           "PR sur `main`, ou re-cadre. L'issue reste hors-dispatch tant que `lcars-awaits-arch` est posé.\n\n" <>
           signature
 
-      gk_opts =
-        ctx.forge_opts
-        |> as_role(Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
-        |> Keyword.put(:dedup_signature, signature)
-        |> Keyword.put(:dedup_any_author, true)
-
-      _ = ctx.forge.post_comment(ctx.repo, issue_n, body, gk_opts)
-      _ = ctx.forge.add_label(ctx.repo, issue_n, @awaits_arch_label, ctx.forge_opts)
+      escalate_to_arch(issue_n, signature, body, ctx)
 
       # `{:skipped, _}` = forme GÉRÉE par le poller (stage_process_pulls) → compté skipped, pas de crash.
       # L'ancien `{:escalated, _}` n'était dans AUCUNE clause du `case do_poll` → CaseClauseError à chaque tick
       # (vu live, PR#4 arduino-morse) : un retour de dispatch DOIT être {:ok|:skipped|:error}, jamais une 4ᵉ forme.
       {:skipped, {:merge_conflict_escalated, pr_number}}
     end
+  end
+
+  # CŒUR d'escalade arch (factorisé MA-06 — conflit ET rework épuisé) : commentaire gatekeeper DÉDUPLIQUÉ
+  # (signé via `as_role`) + verrou `lcars-awaits-arch` sur l'ISSUE → le poller la SKIP (hors-dispatch, cf.
+  # MA-01). Best-effort : on remonte au canal humain (l'arch), on ne masque pas. Un seul point d'écriture
+  # forge pour toutes les escalades arch PR (pas de fork de signature/label).
+  defp escalate_to_arch(issue_n, signature, body, ctx) do
+    gk_opts =
+      ctx.forge_opts
+      |> as_role(Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
+      |> Keyword.put(:dedup_signature, signature)
+      |> Keyword.put(:dedup_any_author, true)
+
+    _ = ctx.forge.post_comment(ctx.repo, issue_n, body, gk_opts)
+    _ = ctx.forge.add_label(ctx.repo, issue_n, @awaits_arch_label, ctx.forge_opts)
+    :ok
   end
 
   defp dispatch_pr_role(kind, pr_number, head, role, ctx) do

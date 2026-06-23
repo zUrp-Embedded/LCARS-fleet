@@ -101,6 +101,9 @@ defmodule Fleet.Pilot.PollerTest do
     # F-E8 : état de jury combiné — aucun verdict + jury vide (les tests poller ne couvrent pas merge) →
     # `requested` = `requested_reviewers` du PR → tout juge demandé reste pending → dispatché.
     def pr_review_state(_repo, _index, _opts), do: {:ok, %{verdicts: %{}, reviewers: []}}
+
+    # MA-06 : compteur forge-natif des rounds de rework (les tests poller ne couvrent pas le rework borné).
+    def count_change_request_rounds(_repo, _index, _opts), do: {:ok, 0}
     def post_route(_repo, _n, p, s, _opts), do: send(self(), {:route, p, s}) && {:ok, :posted}
     def set_assignee(_repo, _n, login, _opts), do: send(self(), {:assignee, login}) && {:ok, :set}
 
@@ -602,6 +605,7 @@ defmodule Fleet.Pilot.PollerTest do
       def list_open_pulls(_repo, _opts), do: {:ok, []}
       def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
       def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+      def count_change_request_rounds(_repo, _index, _opts), do: {:ok, 0}
       def get_route(_repo, _n, _opts), do: :none
       def get_predecessor_result(_repo, _n, _opts), do: :none
       def get_issue(_repo, n, _opts), do: {:ok, %{"number" => n, "body" => "x"}}

@@ -81,6 +81,11 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         {:ok,
          Keyword.get(opts, :_test_feedback, [%{"login" => "reviewer", "body" => "feedback stub"}])}
 
+    # MA-06 : compteur forge-natif des rounds de rework (nb REQUEST_CHANGES). Stub :
+    # forge_opts[:_test_rework_rounds] (défaut 0 = pas de round → re-spawn normal, tests legacy inchangés).
+    def count_change_request_rounds(_repo, _index, opts),
+      do: Keyword.get(opts, :_test_rework_rounds, {:ok, 0})
+
     # F181 : compensation — retrait du verrou sur échec post-verrou.
     def remove_label(_repo, _n, label, _opts) do
       send(self(), {:removed_label, label})
@@ -764,6 +769,63 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:mandate] =~ "summary"
       assert_received {:enqueued, "lordzurp-lcars-test-issue-42-engineer", attrs}
       assert attrs.role == "engineer"
+    end
+
+    test "MA-06 : rework SOUS le budget (rounds <= max) -> re-spawn producteur (pas d'escalade)" do
+      # Garde-fou de borne basse : tant que le budget n'est pas épuisé, le rework continue normalement.
+      pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :changes_requested},
+            _test_rework_rounds: {:ok, 2},
+            _test_route: {:ok, {"poc", "build"}}
+          ]
+        )
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+               StageDispatcher.dispatch_review(pr, opts)
+    end
+
+    test "MA-06 : N rounds de rework PR (rounds > budget) -> ESCALADE ARCH (borné, pas de churn infini)" do
+      # État illégal AVANT MA-06 : `dispatch_rework` re-spawnait le producteur SANS compteur → si l'eng ne
+      # satisfait jamais le juge, rework INFINI (le frein carte `rebound` n'est pas appelé sur ce chemin). Le
+      # fix borne par un compteur forge-natif (nb REQUEST_CHANGES) : > budget (2) → escalade arch (pas de
+      # re-spawn). On vérifie le retour {:skipped, {:rework_exhausted_escalated, _}} + le label awaits-arch posé.
+      pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :changes_requested},
+            _test_rework_rounds: {:ok, 3}
+          ]
+        )
+
+      assert {:skipped, {:rework_exhausted_escalated, 6}} =
+               StageDispatcher.dispatch_review(pr, opts)
+
+      # PAS de re-spawn du producteur (fin du churn) ; le verrou humain awaits-arch est posé sur l'ISSUE.
+      refute_received {:spawned, _, _}
+    end
+
+    test "MA-06 : budget illisible (forge {:error}) -> escalade (pas de re-spawn aveugle)" do
+      # Symétrique de `rebound` : un budget non vérifiable ne doit PAS faire boucler → on remonte à l'arch.
+      pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :changes_requested},
+            _test_rework_rounds: {:error, {:http, 500, "boom"}}
+          ]
+        )
+
+      assert {:skipped, {:rework_exhausted_escalated, 6}} =
+               StageDispatcher.dispatch_review(pr, opts)
+
+      refute_received {:spawned, _, _}
     end
 
     test "F-E8 : juge tombé de requested_reviewers (mais dans les review-records) reste au jury -> spawn, PAS merge" do

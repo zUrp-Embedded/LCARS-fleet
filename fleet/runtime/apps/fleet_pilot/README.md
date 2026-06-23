@@ -36,7 +36,9 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   sont dispatchés PR-driven via `dispatch_review/2` (②.1d, **PR = machine à états**, DN §1.4-1.5,
   sans branch-protection — LCARS agrège, interim) : reviewers en attente → spawn le prochain juge (un à
   un, sérialisé par le verrou PR ; clone la **feature-branch** pour voir le diff) ; round terminé +
-  verdict agrégé `:changes_requested` → rework du producteur ; `:approved` → **merge `rebase` scellé
+  verdict agrégé `:changes_requested` → rework du producteur (**borné MA-06** : compteur forge-natif
+  `ForgeClient.count_change_request_rounds/3` = nb REQUEST_CHANGES ; > budget `:max_pr_rework_rounds`
+  (défaut 2) → **escalade arch** au lieu de re-spawn → fin du churn infini) ; `:approved` → **merge `rebase` scellé
   `:gatekeeper_role`** via `Fleet.Pilot.GatekeeperSeal` (**sceau UNIQUE** partagé avec `HopCompleter.promote`,
   F-arch-MCP : comment gatekeeper + merge signé gatekeeper, plus de fork où l'escalade mergeait en token
   système ; LINÉAIRE + gère un `main` avancé sous une PR parallèle — multi-ticket, cf. `ForgeClient.merge_pr`

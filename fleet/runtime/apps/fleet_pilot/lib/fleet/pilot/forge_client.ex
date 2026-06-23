@@ -818,6 +818,37 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  @doc """
+  MA-06 — compte les rounds de REWORK déjà déclenchés sur une PR = nb de reviews `REQUEST_CHANGES`
+  non-dismissed (Gitea `GET .../pulls/{index}/reviews`). Chaque round (juge demande des changements →
+  l'eng re-pousse → re-review) ajoute une review REQUEST_CHANGES → le compteur est **forge-natif** et
+  MONOTONE (les reviews persistent), comme `count_signed_hops` pour le rebond de gate. Sert au frein
+  anti-churn du chemin PR-review (`StageDispatcher.dispatch_rework`) : au-delà du budget → escalade arch.
+
+  Pas de commit-scoping : on veut l'HISTORIQUE des rounds (tous commits), pas le verdict courant.
+
+  `{:error, _}` sur échec HTTP/config — le caller NE re-spawn PAS à l'aveugle si le budget n'est pas
+  vérifiable (un re-spawn non borné pourrait churner), symétrique de `count_signed_hops`.
+  """
+  @spec count_change_request_rounds(String.t(), integer(), Keyword.t()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def count_change_request_rounds(repo, index, opts \\ [])
+      when is_binary(repo) and is_integer(index) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, reviews} when is_list(reviews) <-
+           http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
+      count =
+        reviews
+        |> Enum.reject(&Map.get(&1, "dismissed", false))
+        |> Enum.count(&(&1["state"] == "REQUEST_CHANGES"))
+
+      {:ok, count}
+    else
+      {:ok, _non_list} -> {:ok, 0}
+      {:error, _} = err -> err
+    end
+  end
+
   # Dernier REQUEST_CHANGES PAR reviewer (login → body). Même tri que `verdicts_by_reviewer` (ordre de
   # création Gitea → `List.last` = la review en vigueur), filtré aux REQUEST_CHANGES avec un body non-vide.
   defp change_requests_by_reviewer(reviews) do
