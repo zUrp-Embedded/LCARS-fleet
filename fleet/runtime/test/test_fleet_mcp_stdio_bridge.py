@@ -5,8 +5,8 @@
 # STATUS: test regression — pont MCP stdio (bin/fleet_mcp_stdio_bridge.py), central STUBBE.
 #
 # Couvre (test du SHIM, central stubbe en HTTP) : handshake stdio MCP (initialize/tools/list),
-# tools/call forwarde au central + injection _lcars_pod_id, declaration capability claude/channel
-# si CHANNEL_URL set, erreur JSON-RPC -32601 sur methode inconnue.
+# tools/call forwarde au central + injection _lcars_pod_id, erreur JSON-RPC -32601 sur methode inconnue,
+# et (MA-19) le schema create_ticket en mode architecte (exige `project`, sync avec le central).
 # NE couvre PAS (= e2e gates supervises) : la poll-loop channel reelle, le vrai central fleet_mcp,
 # l'execution dans un vrai pod bwrap.
 # Run : python3 fleet/runtime/test/test_fleet_mcp_stdio_bridge.py  (exit 0 = pass).
@@ -85,15 +85,31 @@ check(received and received[-1].get("method") == "tools/call", "central a recu m
 inj = received[-1].get("params", {}).get("arguments", {}).get("_lcars_pod_id") if received else None
 check(inj == "test-pod-42", f"tools/call -> _lcars_pod_id injecte ({inj})")
 
-print("--- Test B : capability channel declaree si CHANNEL_URL set ---")
-ch = dict(base, LCARS_FLEET_MCP_CHANNEL_URL=f"http://127.0.0.1:{PORT}")
-by_id2 = run_bridge(ch, [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}])
-caps2 = by_id2.get(1, {}).get("result", {}).get("capabilities", {})
-check("claude/channel" in caps2.get("experimental", {}), f"initialize -> experimental.claude/channel ({caps2.get('experimental')})")
+# Test B (channel capability) RETIRE : le push channel (ChannelHTTP) a ete supprime au purge ADR-G C5.1
+# (drive 100% par pull get_task, F158) — le bridge ne declare plus de capability `claude/channel`. Le test
+# verifiait donc un comportement MORT (faux-rouge permanent). Cf. MOVE 6 (garde sans producteur).
 
 print("--- Test C : methode inconnue -> JSON-RPC error -32601 ---")
 by_id3 = run_bridge(base, [{"jsonrpc": "2.0", "id": 9, "method": "bogus/method", "params": {}}])
 check(by_id3.get(9, {}).get("error", {}).get("code") == -32601, "methode inconnue -> error -32601")
+
+print("--- Test D (MA-19) : create_ticket exige `project` en mode architecte ---")
+# Le central (apps/fleet_mcp/.../pod_tools.ex) REFUSE create_ticket sans `project` (F-TICKET-ROUTE-FOOTGUN).
+# Le bridge DOIT exposer le meme schema, sinon l'arch lit un schema stale, omet `project`, et le central
+# refuse. On verifie que `project` est present dans properties ET required du tool create_ticket (mode arch).
+arch = dict(base, LCARS_ROLE="architect")
+by_id4 = run_bridge(arch, [{"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": {}}])
+arch_tools = {t["name"]: t for t in by_id4.get(4, {}).get("result", {}).get("tools", [])}
+check("create_ticket" in arch_tools, f"mode architecte expose create_ticket ({sorted(arch_tools)})")
+ct_schema = arch_tools.get("create_ticket", {}).get("inputSchema", {})
+ct_required = ct_schema.get("required", [])
+ct_props = ct_schema.get("properties", {})
+check("project" in ct_props, f"create_ticket.properties contient `project` ({sorted(ct_props)})")
+check("project" in ct_required, f"create_ticket.required contient `project` ({ct_required})")
+# Anti-regression : un pod NON-architecte ne voit PAS create_ticket (deny-par-defaut par role).
+by_id5 = run_bridge(base, [{"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {}}])
+worker_tools = {t["name"] for t in by_id5.get(5, {}).get("result", {}).get("tools", [])}
+check("create_ticket" not in worker_tools, f"role non-arch ne voit PAS create_ticket ({sorted(worker_tools)})")
 
 print("\n=== VERDICT:", "ALL PASS" if ok else "FAILURES", "===")
 sys.exit(0 if ok else 1)

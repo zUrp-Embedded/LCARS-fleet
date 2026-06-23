@@ -92,17 +92,25 @@ BASE_TOOLS = [
 ARCHITECT_TOOLS = [
     {
         "name": "create_ticket",
+        # MA-19 : schéma SYNCHRONISÉ avec le central (apps/fleet_mcp/.../pod_tools.ex `create_ticket`).
+        # `project` est OBLIGATOIRE côté central (refus structurel sans lui — F-TICKET-ROUTE-FOOTGUN : pas de
+        # routage par défaut, jamais de misroute silencieux). Le bridge l'exposait SANS `project` → l'arch
+        # lisait un schéma stale, omettait `project`, et le central refusait. Toute évolution du schéma
+        # central se reflète ICI (sync cross-langage Python↔Elixir manuelle — outil LAN, pas de dérivation).
         "description": "Delegue une brique d'implementation a la fleet LCARS : cree un ticket (issue forge) "
                        "pret pour la livraison forge-native (engineer -> PR -> review -> merge). Utilise-le pour "
                        "DELEGUER plutot que de coder toi-meme (la fleet livre mieux et preserve ton contexte). "
-                       "`brief` = le mandat clair pour l'engineer.",
+                       "`brief` = le mandat clair pour l'engineer. `project` = le repo `owner/name` OU LIVRER, "
+                       "OBLIGATOIRE : le repo retourne par `create_project`, ou le projet designe par l'humain. "
+                       "Sans `project`, le ticket est REFUSE (jamais de misroute silencieux vers un autre projet).",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
                 "brief": {"type": "string"},
+                "project": {"type": "string"},
             },
-            "required": ["title", "brief"],
+            "required": ["title", "brief", "project"],
         },
     },
     {
