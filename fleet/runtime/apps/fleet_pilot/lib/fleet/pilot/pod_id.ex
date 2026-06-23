@@ -26,6 +26,15 @@ defmodule Fleet.Pilot.PodId do
   @spec for_pr(String.t(), integer() | String.t(), String.t()) :: String.t()
   def for_pr(repo, n, role), do: "#{slug(repo)}-pr-#{n}-#{role}"
 
+  @doc """
+  MA-02 — préfixe de scope REPO d'un pod_id : `<repo-slug>-`. C'est l'ANCRE qui qualifie une clé de
+  verrou par repo. Tout pod_id du repo commence par lui (`for_issue`/`for_pr` posent `<slug>-issue|pr-…`).
+  Source UNIQUE du slug (le même que `for_issue`/`for_pr`) → la réconciliation scope ses refs par repo
+  sans re-dériver le format. (`PodId` reste opaque : on ne re-parse pas l'id, on l'ANCRE par préfixe.)
+  """
+  @spec scope_prefix(String.t()) :: String.t()
+  def scope_prefix(repo) when is_binary(repo), do: "#{slug(repo)}-"
+
   # `owner/name` → `owner-name` ; tout char hors-charset path-safe (F076) → `-`.
   defp slug(repo) when is_binary(repo) do
     repo

@@ -247,9 +247,11 @@ defmodule Fleet.Pilot.Poller do
   # liste mal ne backoff PAS toute la fleet, la forge est up puisque la découverte a réussi). MAIS l'état
   # de RÉCONCILIATION (`orphan_lock_suspects`, grace 2-tick) DOIT persister cross-tick : sans le re-thread,
   # la grace ne s'accumule jamais → un verrou orphelin n'est JAMAIS réclamé (le pipe wedge). On l'agrège
-  # (union sur tous les repos) dans le state rendu. `poll_count` +1/tick (observabilité). (Multi-repo : les
-  # refs `{:issue|:pr, n}` ne sont pas encore repo-qualifiées — pod_id repo-scopé = #25, downstream ; une
-  # collision de numéro d'issue entre 2 repos ne fait qu'avancer la grace d'un tick, sans danger.)
+  # (union sur tous les repos) dans le state rendu. `poll_count` +1/tick (observabilité).
+  # MA-02 — les refs de verrou sont désormais REPO-QUALIFIÉES (`{repo, :issue|:pr, n}`, cf. `live_owned_refs`/
+  # `reconcile_orphan_locks`/`parse_pod_ref`) : l'union cross-repo des suspects ne collisionne plus sur le seul
+  # numéro → un pod vivant #N/repoB NE masque PLUS un orphelin #N/repoA, et la grace 2-tick ne se contamine
+  # plus entre repos (plus de double-spawn). La clé porte l'identité.
   defp do_poll(state) do
     forge = stage_forge_client(state)
 
@@ -408,45 +410,56 @@ defmodule Fleet.Pilot.Poller do
         state.orphan_lock_suspects
 
       owned ->
+        repo = state.repo
+
+        # MA-02 — orphelins REPO-QUALIFIÉS (`{repo, :issue|:pr, n}`) : la clé de verrou porte le repo, donc
+        # `owned` (refs repo-scopées des pods vivants de CE repo) et `orphan_lock_suspects` (cross-tick, tous
+        # repos) ne collisionnent plus sur le seul numéro. Un orphelin #N/repoA n'est plus masqué par un pod
+        # vivant #N/repoB, et la grace 2-tick ne se contamine plus entre repos.
         issue_orphans =
           for i <- issues,
               n = i["number"],
               locked?(i),
               # une issue avec PR ouverte est en phase JUGE (verrou côté PR) → pas un orphelin issue
               not MapSet.member?(pr_issue_ids, n),
-              not MapSet.member?(owned, {:issue, n}),
+              not MapSet.member?(owned, {repo, :issue, n}),
               into: MapSet.new(),
-              do: {:issue, n}
+              do: {repo, :issue, n}
 
         pr_orphans =
           for p <- pulls,
               n = p["number"],
               locked?(p),
-              not MapSet.member?(owned, {:pr, n}),
+              not MapSet.member?(owned, {repo, :pr, n}),
               into: MapSet.new(),
-              do: {:pr, n}
+              do: {repo, :pr, n}
 
         orphaned_now = MapSet.union(issue_orphans, pr_orphans)
         to_reclaim = MapSet.intersection(orphaned_now, state.orphan_lock_suspects)
-        Enum.each(to_reclaim, fn {_type, n} -> reclaim_lock(forge, state, n) end)
+        Enum.each(to_reclaim, fn {_repo, _type, n} -> reclaim_lock(forge, state, n) end)
         MapSet.difference(orphaned_now, to_reclaim)
     end
   end
 
-  # Refs `{:issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes STABLES
-  # (`issue-<n>-<role>` / `pr-<n>-<role>` ; plus de suffixe `-<ts>` depuis BL-055). Filtre par **tâche
-  # active** (TaskQueue) : un
-  # verrou n'est légitimement tenu QUE pendant qu'un pod a une tâche active dessus. Un pod VIVANT mais
-  # IDLE (long-lived entre deux reworks, ex. l'engineer) ne « possède » PAS le verrou — sinon il
-  # masquerait un juge MORT et la réconciliation ne réclamerait jamais (wedge live #8). `:error` si
-  # l'énumération échoue (fail-safe : on ne réclame rien à l'aveugle).
+  # Refs `{repo, :issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes STABLES
+  # (`<repo-slug>-issue-<n>-<role>` / `<repo-slug>-pr-<n>-<role>` ; plus de suffixe `-<ts>` depuis BL-055).
+  # Filtre par **tâche active** (TaskQueue) : un verrou n'est légitimement tenu QUE pendant qu'un pod a une
+  # tâche active dessus. Un pod VIVANT mais IDLE (long-lived entre deux reworks, ex. l'engineer) ne « possède »
+  # PAS le verrou — sinon il masquerait un juge MORT et la réconciliation ne réclamerait jamais (wedge live #8).
+  # `:error` si l'énumération échoue (fail-safe : on ne réclame rien à l'aveugle).
+  #
+  # MA-02 — SCOPE REPO : on ne garde QUE les pods de `state.repo` (préfixe `PodId.scope_prefix/1`), et la ref
+  # rendue PORTE le repo (`{repo, :issue|:pr, n}`). Sans ça, un pod vivant #N/repoB « possédait » la ref
+  # `{:issue, N}` globale → il MASQUAIT l'orphelin #N/repoA (verrou jamais réclamé = wedge) ET la grace 2-tick
+  # se contaminait cross-repo (double-spawn). La clé de verrou est désormais REPO-QUALIFIÉE = l'identité réelle.
   defp live_owned_refs(state) do
     spawner = state.spawner || Fleet.Spawner
     tq = state.task_queue || Fleet.TaskQueue
+    repo = state.repo
 
     spawner.list_pods()
     |> Enum.filter(&pod_has_active_task?(tq, &1[:pod_id]))
-    |> Enum.flat_map(&parse_pod_ref(&1[:pod_id]))
+    |> Enum.flat_map(&parse_pod_ref(&1[:pod_id], repo))
     |> MapSet.new()
   rescue
     _ -> :error
@@ -470,23 +483,27 @@ defmodule Fleet.Pilot.Poller do
 
   defp pod_has_active_task?(_tq, _), do: false
 
-  # F-037 / #25 : les pod_id sont **repo-scopés** (`<repo-slug>-issue-<n>-<role>`, cf. `Fleet.Pilot.PodId`)
-  # → le segment `issue|pr-<n>` n'est PLUS en tête (préfixé par le slug du repo). L'ancrage `^` ratait donc
-  # TOUS les pods vivants → `live_owned_refs` vide → chaque verrou paraissait orphelin → mis-réclamation du
-  # verrou d'un pod VIVANT (latent : masqué tant que les suspects n'étaient pas persistés cross-tick ; la
-  # persistance F-037 le réveille). On dé-ancre (`(?:^|-)`) : on reconnaît le marqueur de phase + le n° après
-  # le slug (et l'ancien format nu, rétro-compat). Un slug pathologique contenant lui-même `-issue-<chiffres>-`
-  # est un edge documenté ; le fix robuste = ne PAS re-parser l'id opaque mais lire le ref via `list_pods`
-  # (axe #25/backlog — `PodId` est explicitement « jamais re-parsé »).
-  defp parse_pod_ref(pod_id) when is_binary(pod_id) do
-    case Regex.run(~r/(?:^|-)(issue|pr)-(\d+)-/, pod_id) do
-      [_, "issue", n] -> [{:issue, String.to_integer(n)}]
-      [_, "pr", n] -> [{:pr, String.to_integer(n)}]
+  # MA-02 / F-037 / #25 : les pod_id sont **repo-scopés** (`<repo-slug>-issue-<n>-<role>`, cf.
+  # `Fleet.Pilot.PodId`). On ANCRE le parse sur le préfixe de scope du REPO COURANT (`PodId.scope_prefix/1`),
+  # suivi immédiatement du marqueur de phase `issue|pr-<n>-`. Double effet :
+  #   1. SCOPE — un pod d'un AUTRE repo ne matche pas (son slug diffère) → il ne « possède » pas une ref de
+  #      `state.repo` → fin du masquage cross-repo (#N/repoB masquant l'orphelin #N/repoA).
+  #   2. DÉSAMBIGUÏSATION — l'ancrage exige `<slug>-(issue|pr)-` : un slug `fleet-poc` n'avale pas le pod
+  #      `fleet-poc-2-issue-…` (après `fleet-poc-` vient `2`, pas `issue|pr`) → pas de faux positif de préfixe.
+  # La ref rendue PORTE le repo (`{repo, :issue|:pr, n}`) = la clé complète (l'identité réelle du verrou).
+  # (`PodId` reste « jamais re-parsé » sur sa SÉMANTIQUE — on ne reconstruit pas (n, role), on ANCRE pour
+  # corréler la phase+numéro à un repo connu.)
+  defp parse_pod_ref(pod_id, repo) when is_binary(pod_id) and is_binary(repo) do
+    prefix = Regex.escape(Fleet.Pilot.PodId.scope_prefix(repo))
+
+    case Regex.run(~r/^#{prefix}(issue|pr)-(\d+)-/, pod_id) do
+      [_, "issue", n] -> [{repo, :issue, String.to_integer(n)}]
+      [_, "pr", n] -> [{repo, :pr, String.to_integer(n)}]
       _ -> []
     end
   end
 
-  defp parse_pod_ref(_), do: []
+  defp parse_pod_ref(_, _), do: []
 
   defp locked?(item) do
     @in_flight in Enum.map(Map.get(item, "labels") || [], & &1["name"])

@@ -583,4 +583,92 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
   end
+
+  # ============================================================
+  # MA-02 — refs de verrou REPO-QUALIFIÉES (collision cross-repo)
+  # ============================================================
+
+  describe "MA-02 — réconciliation multi-repo (clé de verrou repo-qualifiée)" do
+    # Forge multi-repo : chaque repo a SA liste d'issues (`_test_issues_by_repo`). `remove_label` porte le
+    # REPO (pour distinguer repoA#8 de repoB#8 — MÊME numéro). Le reste = StageStubForge.
+    defmodule MultiRepoForge do
+      def search_repos_by_topic(_topic, opts),
+        do: {:ok, Keyword.get(opts, :_test_repos, [])}
+
+      def list_open_issues(repo, opts) do
+        Map.get(Keyword.get(opts, :_test_issues_by_repo, %{}), repo, {:ok, []})
+      end
+
+      def list_open_pulls(_repo, _opts), do: {:ok, []}
+      def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
+      def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+      def get_route(_repo, _n, _opts), do: :none
+      def get_predecessor_result(_repo, _n, _opts), do: :none
+      def get_issue(_repo, n, _opts), do: {:ok, %{"number" => n, "body" => "x"}}
+      def pr_review_state(_repo, _index, _opts), do: {:ok, %{verdicts: %{}, reviewers: []}}
+      def post_route(_repo, _n, _p, _s, _opts), do: {:ok, :posted}
+
+      def remove_label(repo, n, label, opts) do
+        send(Keyword.get(opts, :_test_pid, self()), {:remove_label, repo, n, label})
+        {:ok, :removed}
+      end
+    end
+
+    # Un seul pod vivant : `repoB#8` (pod_id repo-scopé pour repoB). repoA n'a AUCUN pod.
+    defmodule RepoBPodSpawner do
+      def spawn_pod(_profile, ticket_id, _opts), do: {:ok, "pod-#{ticket_id}"}
+      def list_pods, do: [%{pod_id: "owner-repoB-issue-8-engineer"}]
+    end
+
+    defmodule ActiveTaskQueue2 do
+      def pod_status(_pod_id), do: {:ok, :running}
+    end
+
+    test "un pod vivant #8/repoB NE masque PAS l'orphelin #8/repoA (réclamé) ET ne fait PAS réclamer #8/repoB" do
+      # État illégal AVANT MA-02 : la ref `{:issue, 8}` (non repo-qualifiée) du pod vivant repoB « possédait »
+      # le 8 GLOBAL → l'orphelin repoA#8 paraissait possédé → JAMAIS réclamé (wedge) ; et la grace 2-tick se
+      # contaminait cross-repo. Avec la clé `{repo, :issue, 8}` : repoA#8 est orphelin (aucun pod repoA),
+      # repoB#8 est possédé (pod vivant repoB) → seul repoA#8 est réclamé après la grace.
+      issue8 = fn ->
+        %{"number" => 8, "body" => "x", "labels" => [%{"name" => "lcars-in-flight"}]}
+      end
+
+      issues_by_repo = %{
+        "owner/repoA" => {:ok, [issue8.()]},
+        "owner/repoB" => {:ok, [issue8.()]}
+      }
+
+      name = :"P_ma02_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          human: "lordzurp",
+          start_tick?: false,
+          stage_dispatch?: true,
+          forge_client: MultiRepoForge,
+          forge_opts: [
+            _test_repos: ["owner/repoA", "owner/repoB"],
+            _test_issues_by_repo: issues_by_repo,
+            _test_pid: self()
+          ],
+          loader: StageStubLoader,
+          spawner: RepoBPodSpawner,
+          task_queue: ActiveTaskQueue2,
+          clock: fn :second -> 1_700_000_000 end
+        )
+
+      # 1er tick : repoA#8 ET repoB#8 deviennent suspects (grace) — repoB#8 sera filtré (pod vivant) mais
+      # n'est réclamé NI au 1er NI au 2e tick. Rien réclamé au 1er.
+      Poller.force_poll(name)
+      refute_received {:remove_label, _, 8, _}
+
+      # 2e tick consécutif : orphelin CONFIRMÉ → SEUL repoA#8 est réclamé. repoB#8 JAMAIS (pod vivant).
+      Poller.force_poll(name)
+      assert_received {:remove_label, "owner/repoA", 8, "lcars-in-flight"}
+      refute_received {:remove_label, "owner/repoB", 8, _}
+
+      GenServer.stop(pid)
+    end
+  end
 end
