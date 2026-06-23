@@ -227,6 +227,100 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
+  # ============================================================
+  # MA-15 — le rôle vient du SPAWN, jamais du `_lcars_role` du wire (anti-usurpation)
+  # ============================================================
+
+  describe "MA-15 — rôle lié au spawn (le `_lcars_role` du wire est ignoré pour le token)" do
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: tmp} do
+      prev_forge = Application.get_env(:fleet_mcp, :forge_client)
+      prev_resolver = Application.get_env(:fleet_mcp, :role_resolver)
+      prev_tokdir = Application.get_env(:fleet_credentials, :role_tokens_dir)
+
+      Application.put_env(:fleet_mcp, :forge_client, StubForge)
+
+      # Tokens de rôle sur disque : seul `engineer` (= le rôle du SPAWN) a un token. `architect` (= ce que le
+      # wire prétend) N'A PAS de fichier → si le fix marchait mal (lecture du wire), le token serait nil.
+      Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
+      File.write!(Path.join(tmp, "engineer.gitea_token"), "ENG_TOKEN\n")
+
+      on_exit(fn ->
+        restore(:forge_client, prev_forge)
+        restore(:role_resolver, prev_resolver)
+
+        if prev_tokdir,
+          do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev_tokdir),
+          else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
+      end)
+
+      :ok
+    end
+
+    test "wire prétend architect, le spawn dit engineer → token ENGINEER (du spawn), pas architect" do
+      # Binding serveur `pod_id → role` : le pod p1 a été SPAWNÉ comme engineer (Registry du Spawner). Le
+      # resolver stub MODÉLISE ce binding ET CAPTURE qu'on lui passe bien le pod_id (jamais le `_lcars_role`).
+      test_pid = self()
+
+      Application.put_env(:fleet_mcp, :role_resolver, fn pod_id ->
+        send(test_pid, {:resolved_from, pod_id})
+        if pod_id == "p1", do: "engineer", else: nil
+      end)
+
+      assert {:ok, _, %{}} =
+               PodTools.handle_tool_call(
+                 "create_ticket",
+                 %{
+                   "title" => "T",
+                   "brief" => "fais X",
+                   "project" => "fleet/demo",
+                   "_lcars_pod_id" => "p1",
+                   # Le pod MENT : il prétend être architect sur le fil non authentifié.
+                   "_lcars_role" => "architect"
+                 },
+                 %{}
+               )
+
+      # Le résolveur a été interrogé avec le POD_ID (le spawn), PAS le `_lcars_role` du wire.
+      assert_received {:resolved_from, "p1"}
+
+      # Le token posté = celui du rôle du SPAWN (engineer) → l'usurpation architect est neutralisée.
+      assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
+      assert opts[:token] == "ENG_TOKEN"
+    end
+
+    test "pod inconnu du Registry (resolver → nil) → fallback token système (pas le wire architect)" do
+      # Token architect PRÉSENT sur disque : si le code lisait le wire, il l'utiliserait. Le rôle résolu est
+      # nil (pod absent) → AUCUN token de rôle posé (fallback système), JAMAIS le token architect du wire.
+      File.write!(
+        Path.join(
+          Application.get_env(:fleet_credentials, :role_tokens_dir),
+          "architect.gitea_token"
+        ),
+        "ARCH_TOKEN\n"
+      )
+
+      Application.put_env(:fleet_mcp, :role_resolver, fn _pod_id -> nil end)
+
+      assert {:ok, _, %{}} =
+               PodTools.handle_tool_call(
+                 "create_ticket",
+                 %{
+                   "title" => "T",
+                   "brief" => "fais X",
+                   "project" => "fleet/demo",
+                   "_lcars_pod_id" => "ghost",
+                   "_lcars_role" => "architect"
+                 },
+                 %{}
+               )
+
+      assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
+      refute Keyword.has_key?(opts, :token)
+    end
+  end
+
   defp restore(key, nil), do: Application.delete_env(:fleet_mcp, key)
   defp restore(key, val), do: Application.put_env(:fleet_mcp, key, val)
 end

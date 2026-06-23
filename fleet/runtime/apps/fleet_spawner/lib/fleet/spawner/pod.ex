@@ -149,6 +149,11 @@ defmodule Fleet.Spawner.Pod do
     info = %{
       pod_id: state.pod_id,
       ticket_id: state.ticket_id,
+      # MA-15 — le RÔLE est gravé au SPAWN (= `metadata.name` du cap-profile, source `cap_profile_name/1`),
+      # exposé côté serveur via le Registry. C'est l'identité de rôle AUTHENTIFIÉE (le pod ne peut pas la
+      # forger via le wire) : `PodTools` la résout depuis le `pod_id` au lieu du `_lcars_role` du fil
+      # (non authentifié → usurpation `architect` par POST direct). Le wire propose, le SPAWN dispose.
+      role: cap_profile_name(state.cap_profile),
       phase: state.phase,
       conditions: MapSet.to_list(state.conditions),
       session_id: state.session_id,
@@ -2238,9 +2243,11 @@ defmodule Fleet.Spawner.Pod do
   # Sans ça le pod est anonyme — get_task ne retournerait QUE les untargeted (rate les
   # tasks ciblées via wake_pod).
   #
-  # `LCARS_ROLE` (= `metadata.name` du cap-profile = rôle métier) : bridge.py l'injecte en
-  # `_lcars_role` → le central résout le compte/token de rôle (create_ticket poste l'issue EN SON NOM).
-  # Posé ICI (env du process pod) → couvre host_launch ET bwrap (qui le re-`--setenv` dans son sandbox).
+  # `LCARS_ROLE` (= `metadata.name` du cap-profile = rôle métier) : bridge.py l'injecte en `_lcars_role`.
+  # MA-15 — ce champ du fil est désormais INDICATIF (surface de tools du pod, descriptif), PLUS la source de
+  # la décision de token de rôle : `PodTools.create_ticket` résout le rôle depuis le SPAWN (`pod_id → role`
+  # gravé côté serveur, `Fleet.Spawner.pod_info`), pas du wire (non authentifié → usurpation). Posé ICI
+  # (env du process pod) → couvre host_launch ET bwrap (qui le re-`--setenv` dans son sandbox).
   #
   # BL-021 chantier 7 — purge ADR-G C5.1 : `LCARS_FLEET_MCP_CHANNEL_URL` retiré
   # (push channel ChannelHTTP supprimé, drive via tools pull `get_task`).

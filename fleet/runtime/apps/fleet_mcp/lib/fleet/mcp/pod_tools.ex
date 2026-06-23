@@ -193,11 +193,13 @@ defmodule Fleet.MCP.PodTools do
       when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
     forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 
-    # L'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT — résolu depuis
-    # `_lcars_role` (injecté par le pont MCP, = le `metadata.name` du cap-profile appelant). Agnostique :
-    # JAMAIS un rôle hardcodé. nil/introuvable → fallback token système (loggué — dégradé, pas masquage).
-    # Pas d'en-tête « Délégué par l'architecte » : l'arch EST l'auteur de l'issue (→ avatar, traça vraie).
-    role = Map.get(args, "_lcars_role")
+    # MA-15 — l'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT. Le rôle est résolu
+    # depuis le SPAWN (binding `pod_id → role` gravé côté serveur, lu via `Fleet.Spawner.pod_info`), PAS du
+    # `_lcars_role` du fil. Le wire n'est pas authentifié : un pod (Bash + loopback joignable) pouvait POST
+    # direct `_lcars_role: architect` et usurper le token arch. Le `pod_id` du wire indexe le Registry serveur
+    # → le rôle rendu est celui réellement enregistré au spawn de CE pod. nil/introuvable → fallback token
+    # système (loggué — dégradé, pas masquage). Agnostique : JAMAIS un rôle hardcodé.
+    role = resolve_pod_role(args)
 
     author_opts =
       case Fleet.Credentials.RoleToken.token(role) do
@@ -373,6 +375,30 @@ defmodule Fleet.MCP.PodTools do
       id when is_binary(id) and id != "" -> id
       _ -> nil
     end
+  end
+
+  # MA-15 — résout le RÔLE de l'appelant depuis le SPAWN (binding `pod_id → role` gravé côté serveur), pas
+  # du `_lcars_role` du fil (non authentifié → usurpation). Le `pod_id` indexe le Registry du Spawner
+  # (`Fleet.Spawner.pod_info/1` → `info.role`, = `metadata.name` du cap-profile au spawn). Seam test
+  # `:role_resolver` (app-env) ; défaut = dispatch RUNTIME vers `Fleet.Spawner` (pas de dep compile-time
+  # fleet_spawner, comme `Fleet.Pilot.ProjectOnboard`). pod_id absent / pod inconnu / Spawner indisponible →
+  # `nil` → fallback token système (dégradé loggué, jamais l'usurpation silencieuse).
+  defp resolve_pod_role(args) do
+    resolver = Application.get_env(:fleet_mcp, :role_resolver, &default_role_resolver/1)
+    resolver.(pod_id(args))
+  end
+
+  defp default_role_resolver(nil), do: nil
+
+  defp default_role_resolver(pod_id) when is_binary(pod_id) do
+    case apply(Fleet.Spawner, :pod_info, [pod_id]) do
+      {:ok, %{role: role}} when is_binary(role) and role != "" -> role
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  catch
+    _, _ -> nil
   end
 
   # JSON envelope du mandat exposé au pod (DN drive/mcp-server §A) — task_id = correlation_id.
