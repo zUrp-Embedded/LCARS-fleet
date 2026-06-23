@@ -283,7 +283,7 @@ defmodule Fleet.Pilot.HopConsumer do
   # #5.2 : un pod en échec (`transition_failed` : result_timeout/dead-REPL, allocate/launch/auth/project) →
   # registre d'incidents (PARITÉ avec wake-`{:error}`). 1er = noté (toléré) ; récurrent = escaladé (pattern
   # → root-cause). Offload (Task) : ne pas bloquer le singleton sur le forge d'un escalade. Le littéral
-  # `:"pod.failed"` crée aussi l'atome dont `safe_broadcast` (côté Pod) a besoin.
+  # `:"pod.failed"` crée aussi l'atome dont `best_effort_broadcast` (côté Pod, MA-04) a besoin.
   def handle_info(
         %Fleet.Event{source: :spawner, type: :"pod.failed", payload: %{"pod_id" => pod_id} = p},
         state
@@ -309,7 +309,7 @@ defmodule Fleet.Pilot.HopConsumer do
   # #5.2 [6] : la boucle ack-driven a épuisé le cap (l'agent n'a JAMAIS acké : ni flag, ni send-keys) →
   # registre, op="wake". Récurrence = **SP suspect** (pas l'agent : inférence → 1×=random, récurrent=SP
   # mauvais/dérivé) → escalade `:sp_suspect`. Offload (Task). Le littéral `:"wake.failed"` crée l'atome
-  # dont `safe_broadcast` (côté Pod, #5.2 [3c]) a besoin.
+  # dont `best_effort_broadcast` (côté Pod, #5.2 [3c] / MA-04) a besoin.
   def handle_info(
         %Fleet.Event{source: :spawner, type: :"wake.failed", payload: %{"pod_id" => pod_id} = p},
         state

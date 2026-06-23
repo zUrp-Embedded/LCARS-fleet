@@ -164,6 +164,13 @@ defmodule Fleet.MCP.PodTools do
 
           {:error, :task_id_mismatch} ->
             {:error, :task_id_mismatch, state}
+
+          # MA-04 — le broadcast lifecycle `task_completed` a échoué : le hop ne finira PAS (le HopConsumer
+          # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès, classe F045) — le pod doit
+          # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
+          # son livrable accepté alors que le verrou forge reste posé à vie.
+          {:error, {:broadcast_failed, _reason}} ->
+            {:error, :broadcast_failed, state}
         end
     end
   end

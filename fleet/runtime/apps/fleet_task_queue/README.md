@@ -23,7 +23,7 @@ Flux : `fleet_spawner`/`fleet_pipeline` **enqueue** (source) → `fleet_task_que
 
 - `enqueue/2` `(pod_id, attrs)` — pousse un mandat (`%{brief, role, metadata}`). Source.
 - `get_for_pod/1` `(pod_id)` — rend le mandat actif du pod (**idempotent** : résiste à `/clear` / re-`get`).
-- `submit_result/2` `(pod_id, result)` — livre (**idempotent** : double soumission ignorée ; rejette un `task_id` ≠ mandat actif, §A.70).
+- `submit_result/2` `(pod_id, result)` — livre (**idempotent** : double soumission ignorée ; rejette un `task_id` ≠ mandat actif, §A.70). **MA-04** : le broadcast `task_completed` est lifecycle load-bearing → un échec de diffusion rend `{:error, {:broadcast_failed, _}}` (PAS un `:ok` muet ; le hop ne finirait pas).
 - `list_pending/0` — mandats en attente.
 - `clear_for_pod/1` `(pod_id)` — purge le mandat d'un pod.
 - `pod_status/1` `(pod_id)` — état courant côté broker.

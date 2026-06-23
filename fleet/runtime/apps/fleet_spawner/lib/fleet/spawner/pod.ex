@@ -267,7 +267,7 @@ defmodule Fleet.Spawner.Pod do
       # STATE-004 : process mort SANS résultat soumis → task active orpheline. Libère.
       clear_pod_task(state.pod_id)
 
-      safe_broadcast("pod.failed", %{
+      best_effort_broadcast("pod.failed", %{
         "pod_id" => state.pod_id,
         "ticket_id" => state.ticket_id,
         "reason" => "exited_before_result",
@@ -325,7 +325,7 @@ defmodule Fleet.Spawner.Pod do
         )
 
         # #5.2 [5] : capture l'écran (fallback-ACK déporté, best-effort) → le consumer l'attache au ticket.
-        safe_broadcast("wake.failed", %{
+        best_effort_broadcast("wake.failed", %{
           "pod_id" => state.pod_id,
           "reason" => {:no_ack, phase},
           "pane" => Fleet.Spawner.PodTmux.capture_pane(state.pod_id)
@@ -368,31 +368,75 @@ defmodule Fleet.Spawner.Pod do
   # (R1.2 — parser NDJSON `parse_chunks`/`handle_event` retiré : modèle -p mort.
   #  La complétion vient du livrable fichier, pas d'un event `result` NDJSON.)
 
-  # Broadcast Bus avec rescue : un crash event_router (bus down, atom
-  # invalide) ne doit JAMAIS faire crash le Pod GenServer.
-  #
+  # MA-04 — classification load-bearing vs best-effort (cf. task_queue/server.ex, même move).
+  # AVANT : un `safe_broadcast` unique avalait TOUTE exception en `:ok`, y compris pour `pod.completed`
+  # dont le HopConsumer DÉPEND pour finir le hop. Un `pod.completed` avalé = le pod « réussit » (release/
+  # kill pour un one-shot) MAIS la fin-de-hop ne se déclenche jamais → verrou forge conservé à vie (wedge
+  # silencieux, F-008+F-009 ×4 rapports). On SÉPARE :
+  #   - `best_effort_broadcast/2` : OBSERVABILITÉ/escalade (`pod.failed`, `wake.failed`). Un échec est
+  #     non-bloquant (rescue → log) — un consumer fleet_pilot les enregistre en best-effort, personne ne
+  #     FINIT un hop dessus.
+  #   - `required_broadcast/2` : LIFECYCLE load-bearing (`pod.completed`). L'échec n'est PAS avalé : il
+  #     remonte `{:error, {:broadcast_failed, _}}` → `do_extract` NE release/kill PAS le pod sur une
+  #     complétion orpheline ; il reste vivant (re-wake re-fire l'extract), fail-loud.
+  # (Durcissement ultérieur flaggé : constructeur `%Fleet.Event{}` prouvé-enregistré au build — hors-scope.)
+
+  # Broadcast Bus avec rescue : un crash event_router (bus down, atom invalide) ne doit JAMAIS faire crash
+  # le Pod GenServer. RÉSERVÉ aux events NON-lifecycle (observabilité/escalade).
   # BL-021 chantier 9 (B) — schema canon strict %Fleet.Event{source: :spawner}.
-  defp safe_broadcast(event_type, payload) when is_binary(event_type) do
-    type_atom = String.to_existing_atom(event_type)
-    pod_id = Map.get(payload, "pod_id")
-
-    event = %Fleet.Event{
-      source: :spawner,
-      type: type_atom,
-      timestamp: DateTime.utc_now(),
-      pod_id: pod_id,
-      correlation_id: nil,
-      payload: payload
-    }
-
-    Bus.broadcast("fleet.events", event)
+  defp best_effort_broadcast(event_type, payload) when is_binary(event_type) do
+    event_bus().broadcast("fleet.events", build_spawner_event(event_type, payload))
   rescue
     e ->
       Logger.warning(
-        "Pod safe_broadcast #{event_type} rescue (non-fatal) — #{Exception.message(e)}"
+        "Pod best_effort_broadcast #{event_type} rescue (non-fatal) — #{Exception.message(e)}"
       )
 
       :ok
+  end
+
+  # MA-04 — broadcast LIFECYCLE load-bearing (`pod.completed`) : l'échec n'est PAS avalé. Retourne `:ok` ou
+  # `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé ERROR : un
+  # `pod.completed` non diffusé = wedge potentiel (le hop ne finit pas, verrou conservé).
+  defp required_broadcast(event_type, payload) when is_binary(event_type) do
+    case event_bus().broadcast("fleet.events", build_spawner_event(event_type, payload)) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "Pod required_broadcast #{event_type} ÉCHEC (pod=#{Map.get(payload, "pod_id")}) : " <>
+            "#{inspect(reason)} — lifecycle NON diffusé (le hop ne finira pas ; pod pas release/kill, fail-loud)"
+        )
+
+        {:error, {:broadcast_failed, reason}}
+    end
+  rescue
+    e ->
+      Logger.error(
+        "Pod required_broadcast #{event_type} a LEVÉ (pod=#{Map.get(payload, "pod_id")}) : " <>
+          "#{Exception.message(e)} — lifecycle NON diffusé (pod pas release/kill, fail-loud)"
+      )
+
+      {:error, {:broadcast_failed, e}}
+  end
+
+  # MA-04 — seam du bus (défaut = le vrai `Fleet.EventRouter.Bus`). App-env override (même pattern que les
+  # autres seams pod : claude_dir, state_fs_root…) → un test injecte un bus stub qui rend `{:error,_}` / lève
+  # sur `pod.completed`, sans toucher le registry global.
+  defp event_bus, do: Application.get_env(:fleet_spawner, :event_bus, Bus)
+
+  # Construit l'enveloppe canon %Fleet.Event{source: :spawner} (factorisé — un seul site de construction
+  # pour best_effort/required, BL-021 schema canon strict).
+  defp build_spawner_event(event_type, payload) do
+    %Fleet.Event{
+      source: :spawner,
+      type: String.to_existing_atom(event_type),
+      timestamp: DateTime.utc_now(),
+      pod_id: Map.get(payload, "pod_id"),
+      correlation_id: nil,
+      payload: payload
+    }
   end
 
   # ============================================================
@@ -1173,8 +1217,32 @@ defmodule Fleet.Spawner.Pod do
     # Cf. doctrine `00_doctrine/moon-shot-ref/#02_methodology/pipeline-
     # implementation.md` Phase III étapes 11.0-11.3 + boucles renvoi-au-dev.
     result = state.submitted_result || %{}
-    safe_broadcast("pod.completed", pod_completed_payload(state, result))
 
+    # MA-04 — `pod.completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir le hop).
+    # Diffusion via `required_broadcast` : son échec n'est PLUS avalé. Si elle échoue, on NE progresse PAS
+    # vers release/kill (one-shot) ni vers le re-monitoring qui DROPPE `submitted_result` (long-lived) : le
+    # pod RESTE vivant avec son résultat RETENU + deadline ré-armée → un re-wake re-fire `do_extract` (la
+    # complétion sera ré-émise) au lieu d'une complétion ORPHELINE (pod tué, hop jamais fini, verrou à vie).
+    case required_broadcast("pod.completed", pod_completed_payload(state, result)) do
+      :ok ->
+        do_extract_proceed(state, result)
+
+      {:error, _reason} ->
+        # Fail-loud (déjà loggé ERROR par required_broadcast). Pod conservé en :monitoring, résultat
+        # RETENU (pas de drop), deadline ré-armée : le re-wake/poll re-déclenchera l'extract. PAS de
+        # release/kill sur une complétion non diffusée.
+        retry_state =
+          state
+          |> Map.put(:phase, :monitoring)
+          |> arm_result_deadline()
+
+        {:noreply, retry_state}
+    end
+  end
+
+  # MA-04 — progression normale APRÈS un `pod.completed` diffusé avec succès (extrait du chemin pour que
+  # l'échec de broadcast n'avance JAMAIS vers release/kill ni vers le drop de `submitted_result`).
+  defp do_extract_proceed(state, result) do
     new_state =
       state
       |> Map.put(:last_result, result)
@@ -1807,7 +1875,7 @@ defmodule Fleet.Spawner.Pod do
     # (parité avec wake-`{:error}` : un échec de pod récurrent devient un pattern → root-cause). `reason` =
     # terme brut (le consumer le catégorise). Ring-propre : Ring 1 PUBLIE, Ring 2 consomme (pas d'appel
     # montant). Jumeau du broadcast `pod.failed` du handler exit_status (l.248).
-    safe_broadcast("pod.failed", %{
+    best_effort_broadcast("pod.failed", %{
       "pod_id" => state.pod_id,
       "ticket_id" => state.ticket_id,
       "reason" => reason

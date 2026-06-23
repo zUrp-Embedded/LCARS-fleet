@@ -14,7 +14,8 @@ defmodule Fleet.EventRouter.Catalog do
   (`Bus.set_authorized_event_types/1`) → `Bus.broadcast/2` fail-loud sur tout type
   hors registry (verrou anti-récurrence : un event émis non-registré crashe son
   émetteur — les émetteurs dynamiques externes `webhooks_gitea`/`signals_os`/
-  `policies`/`Pod.safe_broadcast` rescue `UnregisteredError`, cf. audit BL-027).
+  `policies`/`Pod.best_effort_broadcast` rescue `UnregisteredError`, cf. audit BL-027 ; MA-04 : le
+  lifecycle `pod.completed` passe par `Pod.required_broadcast` qui PROPAGE l'échec au lieu de l'avaler).
 
   La **pré-registration des atomes** (`String.to_existing_atom` côté émetteurs
   dynamiques) est faite séparément par `Application.preregister_event_atoms/0`

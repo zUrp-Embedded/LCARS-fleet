@@ -12,6 +12,18 @@ defmodule Fleet.TaskQueueTest do
   alias Fleet.TaskQueue
   alias Fleet.TaskQueue.Server
 
+  # MA-04 — bus stub : `broadcast/2` RETOURNE `{:error, _}` (simule un PubSub qui refuse, ex.
+  # UnregisteredError downgradé). Le chemin lifecycle doit propager, pas avaler.
+  defmodule FailBus do
+    def broadcast(_topic, _ev), do: {:error, :forced_broadcast_fail}
+  end
+
+  # MA-04 — bus stub : `broadcast/2` LÈVE (simule UnregisteredError / PubSub pas démarré). Le
+  # `required_broadcast` doit rescue → `{:error, {:broadcast_failed, _}}`, jamais `:ok` muet.
+  defmodule RaiseBus do
+    def broadcast(_topic, _ev), do: raise(Fleet.Event.UnregisteredError, "forced raise")
+  end
+
   setup %{tmp_dir: tmp_dir} do
     topic = "fleet.events.test.#{System.unique_integer([:positive])}"
     Phoenix.PubSub.subscribe(Fleet.PubSub, topic)
@@ -106,6 +118,50 @@ defmodule Fleet.TaskQueueTest do
       correlation_id: ^tid,
       payload: %{result: %{"verdict" => "proven"}}
     }
+  end
+
+  # MA-04 — LE finding : `task_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir
+  # le hop). Si sa diffusion échoue, `submit_result` NE rend PLUS `{:ok}` muet (le pod croirait son livrable
+  # accepté alors que le hop ne finit jamais → verrou forge à vie) — il propage `{:error,{:broadcast_failed,_}}`.
+  test "3b. MA-04 : broadcast task_completed qui RETOURNE {:error} → submit_result {:error,{:broadcast_failed,_}}, pas {:ok}",
+       %{tmp_dir: tmp_dir} do
+    state_path = Path.join(tmp_dir, "state_failbus.json")
+
+    {:ok, q} =
+      start_supervised(
+        {Server, name: nil, topic: "t.failbus", state_path: state_path, bus: FailBus},
+        id: :q_failbus
+      )
+
+    {:ok, _t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
+
+    result = TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+
+    # PAS un succès muet. Le caller VOIT l'échec lifecycle.
+    refute match?({:ok, _}, result)
+    assert {:error, {:broadcast_failed, :forced_broadcast_fail}} = result
+  end
+
+  # MA-04 — variante : le broadcast LÈVE (UnregisteredError / PubSub down). Le `required_broadcast` rescue
+  # et propage `{:error,{:broadcast_failed,_}}`, jamais `:ok` muet (le rescue ne ré-avale plus le lifecycle).
+  test "3c. MA-04 : broadcast task_completed qui LÈVE → {:error,{:broadcast_failed,_}}, pas {:ok}",
+       %{tmp_dir: tmp_dir} do
+    state_path = Path.join(tmp_dir, "state_raisebus.json")
+
+    {:ok, q} =
+      start_supervised(
+        {Server, name: nil, topic: "t.raisebus", state_path: state_path, bus: RaiseBus},
+        id: :q_raisebus
+      )
+
+    {:ok, _t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
+
+    result = TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+
+    refute match?({:ok, _}, result)
+    assert {:error, {:broadcast_failed, _}} = result
   end
 
   test "4. submit_result idempotent (double submit ignoré, pas de double broadcast)", %{q: q} do

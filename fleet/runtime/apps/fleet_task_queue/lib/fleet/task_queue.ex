@@ -36,15 +36,27 @@ defmodule Fleet.TaskQueue do
   Soumet le résultat (servi par fleet_mcp `submit_result`). Idempotent (2e appel =
   `:double_submit_ignored`). Si `result` porte un `task_id` ≠ mandat actif du pod
   → `:task_id_mismatch` (validation correlation §A.70), aucune mutation.
+
+  MA-04 — le broadcast `task_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour
+  finir le hop). Si sa diffusion échoue, le retour est `{:error, {:broadcast_failed, _}}` (la tâche
+  reste `:completed`+persistée, mais le caller NE reçoit PAS un faux succès — plus de `:ok` qui ment).
   """
   @spec submit_result(String.t(), map()) ::
           {:ok, Fleet.TaskQueue.Task.t()}
-          | {:error, :no_active_task | :double_submit_ignored | :task_id_mismatch}
+          | {:error,
+             :no_active_task
+             | :double_submit_ignored
+             | :task_id_mismatch
+             | {:broadcast_failed, term()}}
   def submit_result(pod_id, result), do: submit_result(@server, pod_id, result)
 
   @spec submit_result(GenServer.server(), String.t(), map()) ::
           {:ok, Fleet.TaskQueue.Task.t()}
-          | {:error, :no_active_task | :double_submit_ignored | :task_id_mismatch}
+          | {:error,
+             :no_active_task
+             | :double_submit_ignored
+             | :task_id_mismatch
+             | {:broadcast_failed, term()}}
   def submit_result(server, pod_id, result) when is_binary(pod_id) and is_map(result),
     do: GenServer.call(server, {:submit_result, pod_id, result})
 

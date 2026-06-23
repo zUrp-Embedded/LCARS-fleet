@@ -11,6 +11,14 @@ defmodule Fleet.Spawner.PodTest do
 
   @moduletag :tmp_dir
 
+  # MA-04 — bus stub : `broadcast/2` LÈVE (simule UnregisteredError / PubSub down). Le Pod
+  # `required_broadcast` doit rescue → `{:error, {:broadcast_failed, _}}` → `do_extract` NE release/kill PAS
+  # le pod sur une complétion orpheline.
+  defmodule RaiseBus do
+    def broadcast(_topic, _ev),
+      do: raise(Fleet.Event.UnregisteredError, "forced pod.completed fail")
+  end
+
   setup %{tmp_dir: tmp_dir} do
     Application.put_env(:fleet_spawner, :state_fs_root, Path.join(tmp_dir, "state"))
     Application.put_env(:fleet_spawner, :pod_dir_root, Path.join(tmp_dir, "pods"))
@@ -201,6 +209,35 @@ defmodule Fleet.Spawner.PodTest do
       # state.json écrit en RELEASE avec phase :succeeded.
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
       assert content["phase"] == "succeeded"
+    end
+
+    # MA-04 — LE finding : `pod.completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir
+    # le hop). Si sa diffusion ÉCHOUE, le pod NE doit PAS release/kill sur une complétion orpheline (sinon
+    # le pod « réussit » mais le hop ne finit jamais → verrou forge à vie). Bus stub qui lève → le pod RESTE
+    # vivant en :monitoring (résultat retenu, deadline ré-armée), PAS d'EXIT :normal.
+    test "MA-04 : broadcast pod.completed qui échoue → pod PAS release/kill (reste vivant), fail-loud" do
+      Process.flag(:trap_exit, true)
+      Application.put_env(:fleet_spawner, :event_bus, RaiseBus)
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :event_bus) end)
+
+      StubBackend.set_reply(interactive_reply(session_id: "s-ma04"))
+      pod_id = "pod-ma04-#{System.unique_integer([:positive])}"
+
+      assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      assert_receive {:launch_called, _args, _env}, 2_000
+      assert %{phase: :monitoring} = GenServer.call(pid, :info)
+
+      # Le central broadcaste le résultat → extract → pod.completed (qui ÉCHOUE via RaiseBus).
+      submit_result_event(pod_id, %{"answer" => "OK"})
+
+      # LE finding : PAS d'EXIT :normal (le one-shot ne release PAS sur une complétion non diffusée).
+      refute_receive {:EXIT, ^pid, :normal}, 800
+
+      # Le pod RESTE vivant en :monitoring (fail-loud : le re-wake re-fire l'extract).
+      assert Process.alive?(pid)
+      assert %{phase: :monitoring} = GenServer.call(pid, :info)
+
+      GenServer.stop(pid)
     end
 
     test "POD_DIR + artefacts créés (pod en MONITORING tant que pas de livrable)" do

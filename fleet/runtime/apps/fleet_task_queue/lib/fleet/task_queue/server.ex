@@ -28,7 +28,15 @@ defmodule Fleet.TaskQueue.Server do
   `:name` (`nil` → anonyme, isolation tests), `:state_path`, `:persist`,
   `:topic` (défaut `"fleet.events"`), `:retention_terminal_max` (F148 — nombre max
   de tâches TERMINALES conservées, défaut 500 ; borne `tasks` en mémoire ET la taille
-  de `state.json` réécrit à chaque mutation. Les tâches ACTIVES ne comptent pas).
+  de `state.json` réécrit à chaque mutation. Les tâches ACTIVES ne comptent pas),
+  `:bus` (seam MA-04, défaut `Fleet.EventRouter.Bus` ; module `broadcast/2` — injecté en test pour
+  exercer le chemin lifecycle non-avalé `task_completed`).
+
+  ## Broadcast — load-bearing vs best-effort (MA-04)
+  `task_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir le hop) →
+  `required_broadcast` : un échec n'est PAS avalé, il propage `{:error, {:broadcast_failed, _}}` au caller
+  de `submit_result` (plus de `:ok` muet qui laisse le verrou forge à vie). Les autres events
+  (enqueued/assigned/cleared/failed-deadline/state_corrupt) = `best_effort_broadcast` (observabilité, rescue).
   """
 
   use GenServer
@@ -71,6 +79,10 @@ defmodule Fleet.TaskQueue.Server do
       state_path: state_path,
       persist: persist?,
       topic: Keyword.get(opts, :topic, @default_topic),
+      # MA-04 — seam du bus (défaut = le vrai `Fleet.EventRouter.Bus`). Module avec `broadcast/2`. Permet
+      # de tester le chemin lifecycle non-avalé (un bus stub qui rend `{:error,_}` / lève sur task_completed)
+      # sans toucher le registry global `:persistent_term`.
+      bus: Keyword.get(opts, :bus, Fleet.EventRouter.Bus),
       retention_terminal_max:
         Keyword.get(opts, :retention_terminal_max) ||
           Application.get_env(
@@ -102,7 +114,7 @@ defmodule Fleet.TaskQueue.Server do
   @impl GenServer
   def handle_continue({:corrupt, found}, state) do
     # Fallback non-bloquant (DN §D) : state vide + event de boot anomaly post-init.
-    broadcast(state, %Fleet.Event{
+    best_effort_broadcast(state, %Fleet.Event{
       source: :task_queue,
       type: :state_corrupt,
       timestamp: now(),
@@ -149,7 +161,7 @@ defmodule Fleet.TaskQueue.Server do
     # `%Task{}` brut — Task n'a pas de @derive Jason.Encoder → l'ancien `%{task: task}` crashait
     # `Jason.encode!` chez tout consommateur d'events JSON (Fleet.API.WS à chaque enqueue). Aucun
     # consommateur n'a besoin du struct (deck = count, audit = pod_id/correlation_id).
-    broadcast(new_state, event(:task_enqueued, task, %{task_id: task.id}))
+    best_effort_broadcast(new_state, event(:task_enqueued, task, %{task_id: task.id}))
     maybe_schedule_deadline(task)
     {:reply, {:ok, task}, new_state}
   end
@@ -166,7 +178,7 @@ defmodule Fleet.TaskQueue.Server do
       %Task{state: :pending} = task ->
         assigned = %{task | state: :assigned, assigned_at: now()}
         new_state = state |> put_task(assigned) |> persist()
-        broadcast(new_state, event(:task_assigned, assigned, %{task_id: assigned.id}))
+        best_effort_broadcast(new_state, event(:task_assigned, assigned, %{task_id: assigned.id}))
         {:reply, {:ok, assigned}, new_state}
 
       %Task{} = task ->
@@ -192,14 +204,19 @@ defmodule Fleet.TaskQueue.Server do
             completed = %{task | state: :completed, completed_at: now(), result: result}
             new_state = state |> put_task(completed) |> persist()
 
-            broadcast(
-              new_state,
-              # role/ticket_id additifs (traça 2026-06-14 : le DeliveryPublisher stampe l'identité de
-              # l'agent d'origine sur le commit forge). Les consumers existants ignorent les clés extra.
-              # MA-03 — `metadata` additif : le verdict task_completed porte le metadata de la TÂCHE (qui
-              # survit dans le broker au crash du HopConsumer seul). Pour une éval gatekeeper il porte le
-              # contexte de reprise (`gate_eval`/`payload`/`pipeline`/…) → le HopConsumer redémarré (gate_evals
-              # RAM vide) RECONSTRUIT l'eval_ctx du metadata au lieu d'un `{:noreply}` silencieux (wedge à vie).
+            # MA-04 — `task_completed` est LIFECYCLE load-bearing : le HopConsumer en DÉPEND pour finir le
+            # hop (lever le verrou forge). Le broadcast passe par `required_broadcast` : son échec n'est PLUS
+            # avalé en `:ok`. Si la diffusion échoue, on NE rend PAS `{:ok, completed}` (qui ferait croire au
+            # pod « tâche close » alors que le hop ne finira jamais → verrou conservé à vie) : on propage
+            # `{:error, {:broadcast_failed, _}}`. La tâche RESTE `:completed`+persistée (le livrable n'est
+            # pas perdu ; le rail forge-driven re-dérive au besoin), mais le pod voit un échec honnête.
+            # role/ticket_id additifs (traça 2026-06-14 : le DeliveryPublisher stampe l'identité de
+            # l'agent d'origine sur le commit forge). Les consumers existants ignorent les clés extra.
+            # MA-03 — `metadata` additif : le verdict task_completed porte le metadata de la TÂCHE (qui
+            # survit dans le broker au crash du HopConsumer seul). Pour une éval gatekeeper il porte le
+            # contexte de reprise (`gate_eval`/`payload`/`pipeline`/…) → le HopConsumer redémarré (gate_evals
+            # RAM vide) RECONSTRUIT l'eval_ctx du metadata au lieu d'un `{:noreply}` silencieux (wedge à vie).
+            ev =
               event(:task_completed, completed, %{
                 task_id: completed.id,
                 role: completed.role,
@@ -207,9 +224,14 @@ defmodule Fleet.TaskQueue.Server do
                 result: result,
                 metadata: completed.metadata
               })
-            )
 
-            {:reply, {:ok, completed}, new_state}
+            case required_broadcast(new_state, ev) do
+              :ok ->
+                {:reply, {:ok, completed}, new_state}
+
+              {:error, _} = err ->
+                {:reply, err, new_state}
+            end
         end
     end
   end
@@ -233,7 +255,7 @@ defmodule Fleet.TaskQueue.Server do
         new_state = Enum.reduce(cleared, state, &put_task(&2, &1)) |> persist()
 
         for t <- cleared,
-            do: broadcast(new_state, event(:task_cleared, t, %{task_id: t.id}))
+            do: best_effort_broadcast(new_state, event(:task_cleared, t, %{task_id: t.id}))
 
         {:reply, :ok, new_state}
     end
@@ -275,7 +297,9 @@ defmodule Fleet.TaskQueue.Server do
         failed = %{task | state: :failed}
         new_state = state |> put_task(failed) |> persist()
 
-        broadcast(
+        # MA-04 — `:task_failed` (deadline) = watchdog de l'IRRÉDUCTIBLE (Move 7), pas une complétion
+        # caller-facing : best-effort (un handle_info n'a personne à qui propager). La garde reste, honnête.
+        best_effort_broadcast(
           new_state,
           event(:task_failed, failed, %{task_id: failed.id, reason: :deadline_expired})
         )
@@ -396,18 +420,65 @@ defmodule Fleet.TaskQueue.Server do
     }
   end
 
-  defp broadcast(state, %Fleet.Event{} = ev) do
+  # MA-04 — classification load-bearing vs best-effort. AVANT : un `broadcast/2` unique avalait TOUTE
+  # exception en `:ok` — y compris pour `task_completed`, dont le HopConsumer DÉPEND pour finir le hop. Un
+  # broadcast `task_completed` avalé = submit OK rendu au pod, MAIS fin-de-hop jamais déclenchée → verrou
+  # forge conservé à vie (wedge silencieux, audit deep-02 / F-008+F-009 ×4 rapports). On SÉPARE :
+  #
+  #   - `best_effort_broadcast/2` : OBSERVABILITÉ pure (task_enqueued/assigned/cleared/failed-deadline,
+  #     state_corrupt). Un échec est non-bloquant (rescue → log) — personne ne FINIT un hop dessus.
+  #   - `required_broadcast/2` : LIFECYCLE load-bearing (task_completed). L'échec n'est PAS avalé : il
+  #     remonte `{:error, {:broadcast_failed, _}}` → le caller (`submit_result`) le propage au pod (qui ne
+  #     reçoit PAS un faux "tâche close" et peut re-soumettre) au lieu d'un `:ok` qui ment.
+  #
+  # In-process `Phoenix.PubSub.broadcast` ne lève quasi jamais (process local supervisé) ; le mode de panne
+  # réaliste est `UnregisteredError` (type lifecycle hors registry = bug build/config, attrapé en test) ou
+  # PubSub pas démarré (boot précoce). Les deux deviennent LOUD côté lifecycle. (Durcissement ultérieur
+  # flaggé : un constructeur `%Fleet.Event{}` prouvé-enregistré au build tuerait la classe UnregisteredError
+  # à la source — refactor cross-app event_router + producteurs, hors-scope de ce move.)
+  defp best_effort_broadcast(state, %Fleet.Event{} = ev) do
     # F147 — passe par Bus.broadcast (validation registry `assert_authorized!`) au lieu
     # de Phoenix.PubSub direct : les events task ont la même garde que les autres.
-    Fleet.EventRouter.Bus.broadcast(state.topic, ev)
+    state.bus.broadcast(state.topic, ev)
   rescue
-    # PubSub pas démarré (boot précoce / hors umbrella) → non-bloquant. MAIS pour un event lifecycle-
-    # critique (task_completed), un échec silencieux = le pod ne reçoit jamais sa complétion → timeout
-    # (audit deep-02). On LOG au minimum ; rendre fatal/retry pour ces events = décision design différée.
     e ->
       require Logger
-      Logger.warning("TaskQueue broadcast #{ev.type} échec (pod=#{ev.pod_id}) : #{inspect(e)}")
+
+      Logger.warning(
+        "TaskQueue best_effort_broadcast #{ev.type} échec (pod=#{ev.pod_id}) : #{inspect(e)}"
+      )
+
       :ok
+  end
+
+  # MA-04 — broadcast LIFECYCLE load-bearing : l'échec n'est PAS avalé. Retourne `:ok` ou
+  # `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé en ERROR (pas
+  # warning) : un `task_completed` non diffusé = wedge potentiel (hop jamais fini), c'est un incident.
+  defp required_broadcast(state, %Fleet.Event{} = ev) do
+    case state.bus.broadcast(state.topic, ev) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        require Logger
+
+        Logger.error(
+          "TaskQueue required_broadcast #{ev.type} ÉCHEC (pod=#{ev.pod_id}) : #{inspect(reason)} — " <>
+            "lifecycle NON diffusé (le hop ne finira pas ; propagé au caller, pas avalé)"
+        )
+
+        {:error, {:broadcast_failed, reason}}
+    end
+  rescue
+    e ->
+      require Logger
+
+      Logger.error(
+        "TaskQueue required_broadcast #{ev.type} a LEVÉ (pod=#{ev.pod_id}) : #{inspect(e)} — " <>
+          "lifecycle NON diffusé (propagé au caller, pas avalé)"
+      )
+
+      {:error, {:broadcast_failed, e}}
   end
 
   defp now, do: DateTime.utc_now()
