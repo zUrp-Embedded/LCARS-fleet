@@ -313,6 +313,52 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert_received {:removed_label, "lcars-in-flight"}
     end
 
+    # MA-17 — wake escalade (pod injoignable, re-wake KO → {:error,{:escalated,_}}). AVANT : le retour de
+    # WakeRecovery.wake était jeté (`_ = wake(...)`) → dispatch_issue rendait {:ok,{:spawned}} → le poller
+    # comptait `dispatched:1/errors:0` MENTEUR (pod jamais réveillé). Le seam `wake_recovery` simule
+    # l'escalade ; on assert que le dispatch N'est PAS un succès silencieux mais `{:error,{:wake_unreached,_}}`.
+    test "MA-17 : wake escaladé (pod injoignable) → dispatch {:error,{:wake_unreached}}, PAS {:ok,{:spawned}}" do
+      payload = eng_issue()
+
+      # Seam : le recovery de wake ESCALADE (équivalent re-wake KO → starfleet). Pas de hit
+      # IncidentRegistry/forge réels — on injecte directement le verdict d'injoignabilité.
+      escalating_wake = fn _pod_id, _respawn, _opts -> {:error, {:escalated, :dead}} end
+
+      result =
+        StageDispatcher.dispatch_issue(
+          payload,
+          dispatch_opts(wake_recovery: escalating_wake)
+        )
+
+      # LE finding : surtout PAS un succès dispatch silencieux (le poller le comptait dispatched:1).
+      refute match?({:ok, {:spawned, _, _}}, result)
+
+      assert {:error,
+              {:wake_unreached, "lordzurp-lcars-test-issue-42-engineer", "engineer",
+               {:escalated, :dead}}} =
+               result
+
+      # Le pod ET le mandat RESTENT en place (mandat enqueué, le re-wake/escalade couvre) : PAS de
+      # compensation (ce n'est pas un échec POST-verrou, c'est un wake injoignable). Le verrou tient.
+      assert_received {:spawned, "issue-42", _}
+      assert_received {:enqueued, "lordzurp-lcars-test-issue-42-engineer", _}
+      refute_received {:removed_label, _}
+      refute_received {:killed, _}
+    end
+
+    # MA-17 — contre-épreuve : un wake PROPRE (:ok) garde le dispatch en succès `{:ok,{:spawned}}` (le
+    # tally `dispatched` reste juste quand le pod EST réellement réveillé).
+    test "MA-17 : wake OK → dispatch reste {:ok,{:spawned}} (tally dispatched honnête)" do
+      payload = eng_issue()
+      clean_wake = fn _pod_id, _respawn, _opts -> :ok end
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+               StageDispatcher.dispatch_issue(payload, dispatch_opts(wake_recovery: clean_wake))
+
+      refute_received {:removed_label, _}
+      refute_received {:killed, _}
+    end
+
     test "skip in_flight : pas de spawn" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}]})
 

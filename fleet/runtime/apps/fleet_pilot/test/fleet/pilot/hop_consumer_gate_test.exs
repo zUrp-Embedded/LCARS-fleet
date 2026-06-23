@@ -129,6 +129,8 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
       spawner: StubSpawner,
       gatekeeper_pod_id_fun:
         Keyword.get(opts, :gatekeeper_pod_id_fun, fn -> "gatekeeper-permanent" end),
+      # MA-17 — seam du recovery de wake (défaut = la vraie fn ; un test l'injecte pour simuler l'escalade).
+      wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{}
     }
   end
@@ -243,6 +245,35 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute_received {:assignee, _}
     refute_received {:open_pr, _, _, _}
     refute_received :unlocked
+  end
+
+  # MA-17 — le retour du kick gatekeeper est LOAD-BEARING. AVANT : `_ = kick_gatekeeper(...)` jetait le
+  # retour de WakeRecovery.wake → un gatekeeper jamais réveillé restait INVISIBLE (le verdict ne reviendrait
+  # jamais, gate stallée en silence). Le mandat d'éval EST enqueué → l'escalade reste légitime
+  # ({:escalate, corr, _}), mais le kick injoignable est SURFACÉ (telemetry), pas confondu avec un kick OK.
+  test "MA-17 : kick gatekeeper INJOIGNABLE → escalade quand même MAIS surfacé en telemetry (pas avalé)" do
+    ref =
+      :telemetry_test.attach_event_handlers(self(), [
+        [:fleet_pilot, :hop_consumer, :gatekeeper_kick_unreached]
+      ])
+
+    on_exit(fn -> :telemetry.detach(ref) end)
+
+    # Seam : le recovery de wake ESCALADE (gatekeeper injoignable, re-wake KO → starfleet).
+    escalating = fn _pod, _respawn, _opts -> {:error, {:escalated, :dead}} end
+
+    # L'escalade reste légitime : le mandat est enqueué, corr retourné (le verdict reviendra au re-wake).
+    assert {:escalate, "corr-1", _ctx} =
+             HopConsumer.maybe_complete(
+               build_done("soft", %{"sev" => "high"}),
+               hc(wake_recovery: escalating)
+             )
+
+    assert_received {:enqueue, "gatekeeper-permanent", _attrs}
+
+    # LE finding : le kick injoignable est SURFACÉ (telemetry émise), pas avalé silencieusement.
+    assert_received {[:fleet_pilot, :hop_consumer, :gatekeeper_kick_unreached], ^ref, %{count: 1},
+                     %{pod_id: "gatekeeper-permanent", reason: {:escalated, :dead}}}
   end
 
   test "escalade : outputs ENVELOPPES %{status,result} -> deplies avant le brief (#2)" do

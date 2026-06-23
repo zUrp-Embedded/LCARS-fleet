@@ -103,6 +103,9 @@ defmodule Fleet.Pilot.HopConsumer do
     # :gatekeeper_autoboot). Sans ça, en stage-only rien ne boote/registre le gatekeeper →
     # pod_id/0 nil → toute escalade soft/terminal échoue {:error,:no_gatekeeper}.
     :gatekeeper_boot_fun,
+    # MA-17 — seam du recovery de wake du gatekeeper (défaut = la vraie fn). Permet de tester que le
+    # retour LOAD-BEARING du kick (`{:error,{:escalated,_}}`) est SURFACÉ (telemetry/warning), pas avalé.
+    :wake_recovery,
     # B (§L441) — escalades en attente, keyées par correlation_id (= task.id du mandat d'éval). Valeur =
     # contexte de reprise `%{n, role, payload, carte, stage}`. MA-03 : OPTIMISATION fast-path uniquement
     # (le verdict est auto-descriptif via le metadata de la tâche → reconstructible au restart).
@@ -176,6 +179,8 @@ defmodule Fleet.Pilot.HopConsumer do
         Keyword.get(opts, :gatekeeper_pod_id_fun, &Fleet.Pipeline.Gatekeeper.pod_id/0),
       gatekeeper_boot_fun:
         Keyword.get(opts, :gatekeeper_boot_fun, &Fleet.Pipeline.Gatekeeper.ensure_booted/0),
+      # MA-17 — seam du recovery de wake (défaut = la vraie fn).
+      wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{},
       # F067 (critique panel) : prod (stage_children) injecte `&offload_async/1` ici ; sans cette
       # lecture, `run_completion` retombait sur sync → le git push bloquait le singleton (offload mort).
@@ -945,8 +950,31 @@ defmodule Fleet.Pilot.HopConsumer do
 
         case state.task_queue.enqueue(pod_id, attrs) do
           {:ok, %{id: corr}} ->
-            kick_gatekeeper(state, pod_id)
-            {:ok, corr}
+            # MA-17 — le retour du kick est LOAD-BEARING : si le wake escalade (gatekeeper injoignable →
+            # starfleet) ou échoue, on ne l'AVALE PLUS (`_ = kick`). Le mandat d'éval EST enqueué (corr
+            # valide) → l'escalade gatekeeper reste légitime ({:escalate, corr, …}) ; mais un kick non
+            # joignable est SURFACÉ (telemetry + warning distinct), pas confondu avec un kick OK. Sans ça,
+            # un gatekeeper jamais réveillé restait invisible (le verdict ne reviendrait jamais, gate stallée
+            # en silence). `corr` retourné dans les deux cas (le mandat survit, le re-wake/escalade le couvre).
+            case kick_gatekeeper(state, pod_id) do
+              :ok ->
+                {:ok, corr}
+
+              {:error, reason} ->
+                :telemetry.execute(
+                  [:fleet_pilot, :hop_consumer, :gatekeeper_kick_unreached],
+                  %{count: 1},
+                  %{pod_id: pod_id, corr: corr, reason: reason}
+                )
+
+                Logger.warning(
+                  "HopConsumer: gatekeeper #{pod_id} kické MAIS INJOIGNABLE (#{inspect(reason)}) — " <>
+                    "mandat d'éval enqueué (corr=#{inspect(corr)}), escalade WakeRecovery active ; le verdict " <>
+                    "ne reviendra qu'au re-wake/réparation (pas un kick silencieux qui ment)"
+                )
+
+                {:ok, corr}
+            end
 
           {:error, reason} ->
             {:error, reason}
@@ -963,7 +991,9 @@ defmodule Fleet.Pilot.HopConsumer do
   # escalade système → starfleet au 2e. Plus de warn-et-oublie ici (le gatekeeper est un juge, pas un
   # sysadmin : il ne peut rien faire d'une erreur système).
   defp kick_gatekeeper(state, pod_id) do
-    Fleet.Pilot.WakeRecovery.wake(pod_id, fn -> Fleet.Pipeline.Gatekeeper.reboot() end,
+    wake_recovery = state.wake_recovery || (&Fleet.Pilot.WakeRecovery.wake/3)
+
+    wake_recovery.(pod_id, fn -> Fleet.Pipeline.Gatekeeper.reboot() end,
       wake_fun: fn p -> state.spawner.wake_pod(p) end
     )
   end

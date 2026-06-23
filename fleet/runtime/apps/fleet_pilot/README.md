@@ -71,7 +71,9 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
 
 Knobs : `:stage_dispatch?` + `:poll_repo` + `:poll_interval_ms` (stage), `:producer_role` (défaut `engineer`),
 `:reviewer_roles` (juges PR, défaut `["qualifier", "reviewer"]`), `:gatekeeper_role` (scelle les fusions,
-défaut `gatekeeper`), `:hop_runner` (offload complétion, F067).
+défaut `gatekeeper`), `:hop_runner` (offload complétion, F067), `:wake_recovery` (seam recovery de wake,
+défaut `&Fleet.Pilot.WakeRecovery.wake/3` ; MA-17 : le retour du wake est load-bearing → un kick injoignable
+remonte `{:error,{:wake_unreached,_}}` au dispatch (tally honnête) / une telemetry au gatekeeper, jamais avalé).
 
 ## Onboarding projet (Rail 1 — « idée → le projet existe »)
 

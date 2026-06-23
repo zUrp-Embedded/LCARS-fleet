@@ -170,7 +170,9 @@ defmodule Fleet.Pilot.StageDispatcher do
               spawner: spawner,
               task_queue: task_queue,
               repo: repo,
-              forge_opts: forge_opts
+              forge_opts: forge_opts,
+              # MA-17 — seam de recovery de wake (défaut = la vraie fn) threadé depuis opts.
+              wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3)
             },
             pod_id,
             role,
@@ -223,6 +225,8 @@ defmodule Fleet.Pilot.StageDispatcher do
       resolver: Keyword.get(opts, :project_resolver, &default_project_resolver/2),
       repo: Keyword.fetch!(opts, :repo),
       forge_opts: Keyword.get(opts, :forge_opts, []),
+      # MA-17 — seam de recovery de wake (défaut = la vraie fn) threadé depuis opts.
+      wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       opts: opts
     }
 
@@ -1022,24 +1026,48 @@ defmodule Fleet.Pilot.StageDispatcher do
     %{forge: forge, spawner: spawner, task_queue: task_queue, repo: repo, forge_opts: forge_opts} =
       ctx
 
+    # MA-17 — seam d'injection du recovery de wake (défaut = la vraie fn). Même pattern que les seams
+    # forge/spawner/task_queue : permet de tester le tally honnête sans hit IncidentRegistry/forge réels.
+    wake_recovery = Map.get(ctx, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3)
+
     ticket_id = Fleet.Pilot.TicketId.compose(ticket_number)
     alive_before? = pod_alive?(spawner, pod_id)
 
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, ticket_id, spawn_opts),
          :ok <- enqueue_mandate(task_queue, pod_id, role, ticket_number, mandate) do
-      _ =
-        Fleet.Pilot.WakeRecovery.wake(
-          pod_id,
-          fn -> maybe_spawn(spawner, false, profile, ticket_id, spawn_opts) end,
-          wake_fun: fn p -> safe_wake(spawner, p) end
-        )
+      # MA-17 — le retour de `WakeRecovery.wake` est LOAD-BEARING : `{:error, {:escalated, _}}`
+      # (pod injoignable, escaladé à starfleet) ou `{:error, _}` (re-wake KO) signifie que le pod n'est
+      # PAS réveillé. AVANT : `_ = wake(...)` jetait ce retour → `spawn_stage` rendait toujours
+      # `{:ok, {:spawned}}` → le poller comptait `dispatched +1 / errors 0` MENTEUR (pod jamais réveillé,
+      # mais tally clean). On le MATCHE maintenant : le verrou + le mandat + le pod RESTENT en place (le
+      # mandat est enqueué, l'escalade système existe → pas un cul-de-sac, re-wake au prochain tick), mais
+      # le dispatch n'est PAS un succès silencieux — il remonte `{:error, {:wake_unreached, …}}` → le poller
+      # le compte en `errors` (tally honnête + err_streak/telemetry reflètent l'injoignabilité réelle).
+      case wake_recovery.(
+             pod_id,
+             fn -> maybe_spawn(spawner, false, profile, ticket_id, spawn_opts) end,
+             wake_fun: fn p -> safe_wake(spawner, p) end
+           ) do
+        :ok ->
+          Logger.info(
+            "StageDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx}"
+          )
 
-      Logger.info(
-        "StageDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx}"
-      )
+          {:ok, {:spawned, pod_id, role}}
 
-      {:ok, {:spawned, pod_id, role}}
+        {:error, reason} ->
+          # PAS de compensation : verrou conservé (le pod est dispatché, l'objet EST in-flight),
+          # mandat conservé, pod conservé. Seul le réveil a échoué → tally honnête + re-wake au tick suivant
+          # (idempotent : alive_before? sera vrai, maybe_spawn no-op, re-wake retenté).
+          Logger.warning(
+            "StageDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
+              "MAIS wake INJOIGNABLE → #{inspect(reason)} (verrou+mandat conservés, re-wake au prochain tick ; " <>
+              "tally = error, pas dispatched silencieux)"
+          )
+
+          {:error, {:wake_unreached, pod_id, role, reason}}
+      end
     else
       {:error, _} = err ->
         # F181 : une étape POST-verrou a échoué → compensation (retrait du verrou, sinon stuck à jamais).
