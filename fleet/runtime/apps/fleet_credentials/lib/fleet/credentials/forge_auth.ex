@@ -26,9 +26,21 @@ defmodule Fleet.Credentials.ForgeAuth do
   `[]` → aucune variable posée, comportement inchangé.
   """
 
+  # MOVE-1/MA-22 — `GIT_TERMINAL_PROMPT=0` posé d'OFFICE dans la source unique de l'env git. Sans ça,
+  # un token absent/expiré (ou un repo qui exige une auth qu'on n'a pas) fait que git OUVRE UN PROMPT
+  # interactif (username/password) ; lancé par le BEAM SANS TTY, le prompt PEND indéfiniment → le
+  # process git ne rend jamais → le GenServer appelant (Pod, Poller) reste figé sur `System.cmd`. La
+  # borne `0` force git à ÉCHOUER tout de suite (rc≠0) au lieu de prompter — l'erreur typée remonte et
+  # le wrapper borné (`Fleet.Credentials.Shell.run/2`) peut la tuer dans son délai. Posé même quand
+  # `forge_auth` n'est PAS configuré (repo local `file://`) : c'est précisément le cas où l'absence de
+  # credential déclencherait le prompt. Couvre TOUS les call-sites passant par `git_env()`.
+  @git_no_prompt {"GIT_TERMINAL_PROMPT", "0"}
+
   @doc """
-  Variables d'environnement injectant l'extraheader d'auth forge — `[{name, value}]` à passer tel
-  quel à `System.cmd(env:)`. `[]` si `:fleet_credentials, :forge_auth` est absent ou incomplet.
+  Variables d'environnement de l'auth git système-side — `[{name, value}]` à passer tel quel à
+  `System.cmd(env:)`. **Porte TOUJOURS `GIT_TERMINAL_PROMPT=0`** (borne anti-hang, MOVE-1/MA-22) ;
+  ajoute l'extraheader d'auth forge SI `:fleet_credentials, :forge_auth` est présent et complet.
+  Jamais `[]` (l'invariant anti-prompt est inconditionnel).
   """
   @spec git_env() :: [{String.t(), String.t()}]
   def git_env do
@@ -36,13 +48,14 @@ defmodule Fleet.Credentials.ForgeAuth do
       %{url_prefix: prefix, token: token}
       when is_binary(prefix) and is_binary(token) and prefix != "" and token != "" ->
         [
+          @git_no_prompt,
           {"GIT_CONFIG_COUNT", "1"},
           {"GIT_CONFIG_KEY_0", "http.#{prefix}.extraheader"},
           {"GIT_CONFIG_VALUE_0", "Authorization: token #{token}"}
         ]
 
       _ ->
-        []
+        [@git_no_prompt]
     end
   end
 end

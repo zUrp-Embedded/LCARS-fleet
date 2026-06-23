@@ -1,7 +1,7 @@
 # Fleet.Credentials
 
 **Date** : 2026-05-28
-**Dernière révision** : 2026-06-13 (rework post-audit L1)
+**Dernière révision** : 2026-06-23 (rework post-audit L1)
 **Statut** : actif — aligné ADR-F PROMOTED 2026-05-26
 **DERIVED FROM** : `01_architecture/adr-f-credentials-anthropic-natif.md` + `04_design-notes/ring0/fleet_credentials.md`
 
@@ -50,7 +50,8 @@ Deux slots cohabitent dans le même fichier :
   - `bridge_enabled` : profil bridge — scopes exacts dérivés au câblage
   - `mcp_oauth` : ajoute `user:mcp_servers` (pour les MCP-OAuth servers)
 - `Fleet.Credentials.PlanValidator` — gate **plan Pro/Max/Team/Enterprise** (F-AC-VALIDATE) : lit `claudeAiOauth.subscriptionType` directement depuis le fichier. Pas d'appel réseau, pas de SDK.
-- `Fleet.Credentials.ForgeAuth` — `git_env/0` : auth git **système-side** des ops forge privées (clone/fetch/ls-remote/push). **Source unique** (F095) consommée par `Fleet.Pipeline.Git`, `WorkspaceProvisioner`, `StageDispatcher`, `ProjectBootstrap.Phase.Clone`. Token injecté via env `GIT_CONFIG_*` (hors argv/`/proc/cmdline` — F087), jamais persisté dans `.git/config` (forge-cécité du pod). Config `:fleet_credentials, :forge_auth = %{url_prefix, token}` posée au boot. Absent → `[]`.
+- `Fleet.Credentials.ForgeAuth` — `git_env/0` : auth git **système-side** des ops forge privées (clone/fetch/ls-remote/push). **Source unique** (F095) consommée par `Fleet.Pipeline.Git`, `WorkspaceProvisioner`, `StageDispatcher`, `ProjectBootstrap.Phase.Clone`. Token injecté via env `GIT_CONFIG_*` (hors argv/`/proc/cmdline` — F087), jamais persisté dans `.git/config` (forge-cécité du pod). Config `:fleet_credentials, :forge_auth = %{url_prefix, token}` posée au boot. **Porte TOUJOURS `GIT_TERMINAL_PROMPT=0`** (MOVE-1/MA-22 — borne anti-hang : un git sans credential échoue au lieu de prompter sans TTY) + l'extraheader d'auth si `forge_auth` est configuré.
+- `Fleet.Credentials.Shell` — `run/3` + `git/2` : **exécution bornée PAR CONSTRUCTION** d'une commande externe (MOVE-1/MA-22). Lance via `Port.open` (tient l'`os_pid`) ; à la deadline, **SIGKILL l'os_pid + ferme le port** → le process git/sleep ne survit pas (durcit le patron historique `Task.async`+`brutal_kill` de `Fleet.Pipeline.Git`, qui tuait le Task BEAM mais laissait le process OS fuir). `git/2` injecte `ForgeAuth.git_env/0` par défaut (anti-prompt + auth). Résultat typé non-ignorable : `{:ok, {out, code}}` | `{:error, {:timeout, ms}}` | `{:error, {:exit, reason}}`. Placé ici (sous bootstrap/pipeline/pilot) → aucun cycle compile. Rend `System.cmd("git", …)` non borné **inexprimable** sur le chemin PROJECT.
 - `Fleet.Credentials.Human` — source **UNIQUE** de « l'humain de la fleet » = l'user OS du process runtime (`id -un`). Consommée par `ForgeIdentity` + le spawner (pod = l'humain).
 - `Fleet.Credentials.ForgeIdentity` — identité git d'un livrable (Z4 forge-identité B') : **author = l'humain** (via `Human` + catalogue), **rôle = trailer `Co-authored-by: LCARS-<role>`** vérifié F-01 (I-CBC). Fail-loud si catalogue absent.
 

@@ -14,26 +14,31 @@ defmodule Fleet.Credentials.ForgeAuthTest do
   defp restore(key, val), do: Application.put_env(:fleet_credentials, key, val)
 
   describe "git_env/0" do
-    test "non configuré → [] (comportement bare inchangé)" do
+    # MOVE-1/MA-22 — `GIT_TERMINAL_PROMPT=0` est désormais posé d'OFFICE (inconditionnel) : le contrat
+    # de `git_env/0` n'est plus « [] si non configuré » mais « TOUJOURS la borne anti-prompt, + l'auth
+    # forge si configurée ». L'invariant ne dépend pas du forge_auth (le repo local sans token est
+    # justement le cas qui prompterait).
+    test "non configuré → seule la borne anti-prompt (GIT_TERMINAL_PROMPT=0)" do
       Application.delete_env(:fleet_credentials, :forge_auth)
-      assert [] = ForgeAuth.git_env()
+      assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
     end
 
-    test "config incomplète (token vide / prefix manquant) → []" do
+    test "config incomplète (token vide / prefix manquant) → borne anti-prompt seule" do
       Application.put_env(:fleet_credentials, :forge_auth, %{url_prefix: "https://f/", token: ""})
-      assert [] = ForgeAuth.git_env()
+      assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
 
       Application.put_env(:fleet_credentials, :forge_auth, %{token: "t"})
-      assert [] = ForgeAuth.git_env()
+      assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
     end
 
-    test "configuré → GIT_CONFIG_* (token DANS l'env, jamais sur l'argv — F087)" do
+    test "configuré → GIT_TERMINAL_PROMPT=0 + GIT_CONFIG_* (token DANS l'env, jamais sur l'argv — F087)" do
       Application.put_env(:fleet_credentials, :forge_auth, %{
         url_prefix: "https://forge.example/",
         token: "SECRET123"
       })
 
       assert [
+               {"GIT_TERMINAL_PROMPT", "0"},
                {"GIT_CONFIG_COUNT", "1"},
                {"GIT_CONFIG_KEY_0", "http.https://forge.example/.extraheader"},
                {"GIT_CONFIG_VALUE_0", "Authorization: token SECRET123"}
