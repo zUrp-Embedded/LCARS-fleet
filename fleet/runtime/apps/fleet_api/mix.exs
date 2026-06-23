@@ -32,6 +32,9 @@ defmodule Fleet.API.MixProject do
       # F-010 : readiness sonde la liveness du rail stage (Ring 2 fleet_pilot) via
       # `Fleet.Pilot.Application.stage_status/0` — dép vers le bas (Ring 4 → Ring 2), acyclique.
       {:fleet_pilot, in_umbrella: true},
+      # MA-18 : valide le cap-profile AVANT d'ACK un `/api/admin/spawn` (même loader que le
+      # PublishConsumer, source unique). Dép explicite (était transitive via fleet_pilot) — Ring 4 → Ring 1.
+      {:fleet_cap_profile, in_umbrella: true},
       {:plug, "~> 1.19"},
       {:plug_cowboy, "~> 2.8"},
       {:jason, "~> 1.4"}

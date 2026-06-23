@@ -105,6 +105,10 @@ cmd_spawn() {
   case "$http" in
     202) echo "spawn $role : mis en file (202). Le pod démarre en async — « $PROG list » pour le voir." ;;
     503) die "fleet en drain de shutdown (503) — réessayer après le redémarrage" ;;
+    # MA-18 : le cap-profile est validé AVANT l'ACK. 422 = rôle inconnu (cap-profile absent), 400 = requête
+    # mal formée. Plus de 202 menteur (jadis : 202 puis warning silencieux côté daemon, zéro pod).
+    422) die "spawn refusé : cap-profile '$role' inconnu (422) — vérifie le nom de rôle. $body" ;;
+    400) die "spawn refusé : requête invalide (400). $body" ;;
     *)   die "spawn refusé (HTTP $http) : $body" ;;
   esac
 }

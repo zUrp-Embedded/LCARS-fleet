@@ -8,7 +8,8 @@ defmodule Fleet.API.Rest do
     * `GET /api/readiness/deep` — état opérationnel LIVE (P05) via
       `Fleet.API.Readiness.deep/0` — anti-vert-creux
     * `GET /api/pipelines` / `tickets` / `pods` — lecture état (stubs MVP)
-    * `POST /api/admin/spawn` — broadcast `admin.spawn.request` event
+    * `POST /api/admin/spawn` — valide le cap-profile (MA-18 : 400 si absent, 422 si
+      inconnu) PUIS broadcast `admin.spawn.request` event + 202
     * `POST /api/config/update` — atomic write + git commit auto via
       `GitCommitter` (canon trace strate 1)
 
@@ -68,6 +69,53 @@ defmodule Fleet.API.Rest do
   end
 
   defp do_admin_spawn(conn) do
+    payload = conn.body_params || %{}
+
+    # MA-18 — VALIDER le cap-profile AVANT l'ACK. Avant : le 202 partait dès le broadcast ; un
+    # `cap_profile_name` inexistant n'était détecté QUE plus tard dans `PublishConsumer`, où
+    # `CapProfile.load` KO = un simple warning, ZÉRO pod spawné. L'appelant (`lcars spawn <rôle>`)
+    # voyait « mis en file (202) » pour un rôle qui ne produira jamais de pod → 202 menteur. Le
+    # contrat HTTP doit être honnête : le cap-profile fait partie de l'admission, pas d'un best-effort
+    # async. On le résout ICI (même loader que le consumer, source unique `Fleet.CapProfile.load/1`).
+    case validate_cap_profile(payload) do
+      :ok ->
+        do_broadcast_spawn(conn, payload)
+
+      {:error, :missing} ->
+        send_resp(
+          conn,
+          400,
+          ~s|{"error":"cap_profile_name (ou role) requis"}|
+        )
+
+      {:error, {:cap_profile, name, reason}} ->
+        # 422 Unprocessable — la requête est bien formée mais le cap-profile nommé n'est pas chargeable
+        # (absent / schema invalide) → AUCUN pod ne peut naître. Plus de 202 qui ment.
+        send_resp(
+          conn,
+          422,
+          Jason.encode!(%{error: "cap_profile inconnu : #{name}", reason: inspect(reason)})
+        )
+    end
+  end
+
+  # MA-18 — résout le cap-profile demandé (`cap_profile_name` ou `role`, mêmes clés que
+  # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing}` (400) ; load KO →
+  # `{:error, {:cap_profile, name, reason}}` (422) ; chargé → `:ok` (l'admission passe).
+  defp validate_cap_profile(payload) do
+    case Map.get(payload, "cap_profile_name") || Map.get(payload, "role") do
+      name when is_binary(name) and name != "" ->
+        case Fleet.CapProfile.load(name) do
+          {:ok, _cap} -> :ok
+          {:error, reason} -> {:error, {:cap_profile, name, reason}}
+        end
+
+      _ ->
+        {:error, :missing}
+    end
+  end
+
+  defp do_broadcast_spawn(conn, payload) do
     # BL-021 chantier 9 (B) — migrated to schema canon %Fleet.Event{source: :api}.
     event = %Fleet.Event{
       source: :api,
@@ -75,7 +123,7 @@ defmodule Fleet.API.Rest do
       timestamp: DateTime.utc_now(),
       pod_id: nil,
       correlation_id: nil,
-      payload: conn.body_params || %{}
+      payload: payload
     }
 
     case safe_broadcast(event) do

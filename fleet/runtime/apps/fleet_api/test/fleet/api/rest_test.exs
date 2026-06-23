@@ -69,9 +69,11 @@ defmodule Fleet.API.RestTest do
   end
 
   describe "POST /api/admin/spawn" do
-    test "broadcast admin.spawn.request + 202" do
+    # MA-18 : le cap-profile est validé AVANT l'ACK → un cap-profile RÉEL (canon `engineer`) doit
+    # passer (202 + broadcast). Avant, n'importe quel slug rendait 202 (même inexistant).
+    test "cap-profile réel → broadcast admin.spawn.request + 202" do
       conn =
-        conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "scout"}))
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "engineer"}))
         |> put_req_header("content-type", "application/json")
         |> Rest.call(@opts)
 
@@ -80,9 +82,35 @@ defmodule Fleet.API.RestTest do
       assert_receive %Fleet.Event{
                        source: :api,
                        type: :"admin.spawn.request",
-                       payload: %{"role" => "scout"}
+                       payload: %{"role" => "engineer"}
                      },
                      500
+    end
+
+    # MA-18 — LE finding : un slug bien formé mais SANS cap-profile (ex. `lcars spawn scout`) ne doit
+    # PLUS rendre 202 (qui mentait : le PublishConsumer logguait juste un warning, zéro pod). 422 +
+    # AUCUN broadcast (l'admission est refusée à la frontière, pas avalée en best-effort async).
+    test "MA-18 — cap-profile inexistant → 422, PAS 202, et AUCUN broadcast" do
+      conn =
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "scout-inexistant-xyz"}))
+        |> put_req_header("content-type", "application/json")
+        |> Rest.call(@opts)
+
+      assert conn.status == 422
+      refute conn.status == 202
+
+      refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
+    end
+
+    # MA-18 — ni `cap_profile_name` ni `role` → 400 (requête mal formée), pas un 202 ni un broadcast.
+    test "MA-18 — ni cap_profile_name ni role → 400" do
+      conn =
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{ticket_id: "issue-1"}))
+        |> put_req_header("content-type", "application/json")
+        |> Rest.call(@opts)
+
+      assert conn.status == 400
+      refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
   end
 
