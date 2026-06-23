@@ -133,6 +133,29 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert conn.status == 401
       assert Jason.decode!(conn.resp_body)["error"] == "secret missing"
     end
+
+    test "MA-13 : secret fichier VIDE/whitespace → 401 fail-closed (PAS d'HMAC à clé vide forgeable)",
+         %{tmp_dir: tmp_dir} do
+      # Fichier secret EXISTANT mais vide (whitespace) → AVANT MA-13 : compute_hmac("", body) → un attaquant
+      # forge une signature valide sans connaître AUCUN secret (fail-open). On vérifie que la signature
+      # CALCULÉE-SUR-CLÉ-VIDE (ce que ferait l'attaquant) est REFUSÉE.
+      empty_secret = Path.join(tmp_dir, "empty-secret")
+      File.write!(empty_secret, "   \n  \t\n")
+      Application.put_env(:fleet_event_router, :webhook_secret_path, empty_secret)
+
+      body = Jason.encode!(%{"action" => "opened"})
+      forged_sig = WebhooksGitea.compute_hmac("", body)
+
+      conn =
+        conn(:post, "/webhook/gitea", body)
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-gitea-signature", forged_sig)
+        |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 401
+      assert Jason.decode!(conn.resp_body)["error"] == "secret missing"
+      refute_receive %Fleet.Event{source: :event_router}, 200
+    end
   end
 
   describe "GET /health" do

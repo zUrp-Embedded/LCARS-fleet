@@ -136,13 +136,30 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
     case File.read(secret_path) do
       {:ok, secret} ->
-        sig = conn |> get_req_header("x-gitea-signature") |> List.first() || ""
-        body = conn.assigns[:raw_body] || ""
-        expected = compute_hmac(String.trim(secret), body)
+        # MA-13 — un fichier secret EXISTANT mais VIDE/whitespace passait par ce chemin `{:ok, secret}` →
+        # `compute_hmac("", body)` → HMAC à CLÉ VIDE → quiconque connaît l'algo forge une signature valide
+        # (fail-OPEN : la vérif HMAC est neutralisée sans le savoir). Un secret trimmé vide est REJETÉ
+        # fail-closed comme un secret absent (jamais d'HMAC à clé vide). (Gated par opt-in
+        # `LCARS_FLEET_WEBHOOKS`, mais on ferme le fail-open : un webhooks activé sur un secret vide est un
+        # trou, pas une config valide.)
+        case String.trim(secret) do
+          "" ->
+            Logger.error(
+              "fleet_event_router webhook : secret HMAC VIDE/whitespace (#{secret_path}) — " <>
+                "fail-closed (refus : un HMAC à clé vide est forgeable)"
+            )
 
-        if Plug.Crypto.secure_compare(sig, expected),
-          do: :ok,
-          else: {:error, "hmac mismatch"}
+            {:error, "secret missing"}
+
+          trimmed ->
+            sig = conn |> get_req_header("x-gitea-signature") |> List.first() || ""
+            body = conn.assigns[:raw_body] || ""
+            expected = compute_hmac(trimmed, body)
+
+            if Plug.Crypto.secure_compare(sig, expected),
+              do: :ok,
+              else: {:error, "hmac mismatch"}
+        end
 
       {:error, _} ->
         {:error, "secret missing"}
