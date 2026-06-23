@@ -755,6 +755,30 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert_received {:killed, "lordzurp-lcars-test-pr-6-qualifier"}
       assert_received {:removed_label, "lcars-in-flight"}
     end
+
+    test "MA-01 (bug B) : l'issue parente porte awaits-arch -> skip :awaits_arch, PAS de re-dispatch juge" do
+      # La PR head=lcars/issue-42-engineer (issue 42) a un reviewer demandé → SANS le fix, le juge serait
+      # re-spawné à chaque tick. Mais l'issue 42 est dans le SET `:awaits_arch_ids` (escalade en cours) →
+      # `dispatch_review` skippe (symétrique de `decide/1` côté issue) → fin du churn.
+      opts = dispatch_opts(awaits_arch_ids: MapSet.new([42]))
+
+      assert {:skipped, :awaits_arch} = StageDispatcher.dispatch_review(pr(), opts)
+      refute_received {:spawned, _, _}
+      refute_received {:enqueued, _, _}
+    end
+
+    test "MA-01 (bug B) : awaits_arch_ids ne contient PAS l'issue -> dispatch normal (back-compat)" do
+      # Garde-fou : le skip ne se déclenche QUE pour l'issue concernée. Issue 42 (PR head) absente du SET
+      # (ici {99}) → dispatch normal du juge. Et défaut MapSet vide (autres callers) → inchangé.
+      opts =
+        dispatch_opts(
+          awaits_arch_ids: MapSet.new([99]),
+          forge_opts: [_test_route: {:ok, {"poc", "spec-review"}}, _test_issue_body: "x"]
+        )
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-pr-6-qualifier", "qualifier"}} =
+               StageDispatcher.dispatch_review(pr(), opts)
+    end
   end
 
   # F-PARALLEL-PR-CONFLICT — DÉCONFLATION clone-base / gate-base. Pour une résolution par rebase, le pod

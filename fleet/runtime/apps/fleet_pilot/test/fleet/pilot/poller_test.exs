@@ -671,4 +671,42 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
   end
+
+  # ============================================================
+  # MA-01 (bug B) — dispatch_review skippe sur awaits-arch de l'ISSUE (poller-niveau)
+  # ============================================================
+
+  describe "MA-01 (bug B) — poller thread awaits_arch_ids aux pulls" do
+    test "issue 42 awaits-arch + PR head lcars/issue-42-engineer avec reviewer -> juge NON dispatché (skip)" do
+      # Sans le fix : l'escalade pose `lcars-awaits-arch` sur l'ISSUE 42, mais `dispatch_review` ne lit QUE
+      # les labels de la PR → le reviewer demandé fait re-spawner le juge à CHAQUE tick (churn). Avec le fix :
+      # le poller calcule le SET awaits-arch (issue 42, déjà listée → zéro I/O) et le thread aux pulls →
+      # dispatch_review skippe → le juge n'est PAS dispatché.
+      issues = [
+        %{
+          "number" => 42,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-awaits-arch"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      pulls = [
+        %{
+          "number" => 7,
+          "head" => %{"ref" => "lcars/issue-42-engineer", "sha" => "abc"},
+          "requested_reviewers" => [%{"login" => "qualifier"}],
+          "labels" => []
+        }
+      ]
+
+      {name, pid} = start_stage_poller({:ok, issues}, {:ok, pulls})
+
+      # issue 42 skip (awaits-arch, decide) + PR 7 skip (awaits_arch threadé) → dispatched:0.
+      assert %{dispatched: 0, errors: 0} = Poller.force_poll(name)
+      refute_received {:spawned, _, _}
+
+      GenServer.stop(pid)
+    end
+  end
 end

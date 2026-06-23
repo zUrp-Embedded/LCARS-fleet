@@ -243,25 +243,48 @@ defmodule Fleet.Pilot.StageDispatcher do
 
     # #5.2 D1 — pas de check d'ownership ici : le scoping PR est FORGE-SIDE en amont (list_open_pulls ne rend
     # QUE mes PR via /issues?type=pulls&assigned_by). dispatch_review ne fait que du dispatch de jugement.
-    if @in_flight_label in labels do
-      {:skipped, :in_flight}
-    else
-      # head_sha → verdicts COMMIT-SCOPÉS : une review sur un commit antérieur (REQUEST_CHANGES jamais
-      # dismissé par Gitea au push) est PÉRIMÉE → son juge redevient `pending` → re-dispatché sur le code
-      # courant (sinon rework infini, live #7).
-      verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
+    cond do
+      @in_flight_label in labels ->
+        {:skipped, :in_flight}
 
-      case ctx.forge.pr_review_state(ctx.repo, pr_number, verdict_opts) do
-        {:ok, %{verdicts: verdicts, reviewers: jury}} ->
-          # F-E8 : SET des juges = union(requested_reviewers VOLATIL, review-records STABLES). Un juge
-          # tombé de `requested_reviewers` sans voter reste dans le jury → `pending` → spawné, jamais un
-          # merge sur demi-jury (cf. ForgeClient.pr_review_state).
-          requested = Enum.uniq(requested_field ++ jury)
-          dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
+      # MA-01 (bug B) — l'ISSUE parente porte `lcars-awaits-arch` (escalade : verdict gatekeeper
+      # escalate/halt/redirect, ou conflit non auto-résolu) → on NE re-dispatch PAS le juge (sinon churn :
+      # re-spawn par tick, vu live). SYMÉTRIQUE de `decide/1` côté issue. Le SET vient du POLLER (issues déjà
+      # listées au tick → `:awaits_arch_ids`, ZÉRO I/O ajouté) ; absent (autres callers/tests) → `MapSet.new()`
+      # → comportement inchangé (back-compat). On lit le label sur l'ISSUE, pas sur la PR : c'est l'issue qui
+      # gèle (l'escalade pose le verrou humain dessus), la PR n'en sait rien — d'où l'aveuglement d'origine.
+      awaits_arch_issue?(head, opts) ->
+        {:skipped, :awaits_arch}
 
-        {:error, reason} ->
-          {:error, {:review_state, reason}}
-      end
+      true ->
+        # head_sha → verdicts COMMIT-SCOPÉS : une review sur un commit antérieur (REQUEST_CHANGES jamais
+        # dismissé par Gitea au push) est PÉRIMÉE → son juge redevient `pending` → re-dispatché sur le code
+        # courant (sinon rework infini, live #7).
+        verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
+
+        case ctx.forge.pr_review_state(ctx.repo, pr_number, verdict_opts) do
+          {:ok, %{verdicts: verdicts, reviewers: jury}} ->
+            # F-E8 : SET des juges = union(requested_reviewers VOLATIL, review-records STABLES). Un juge
+            # tombé de `requested_reviewers` sans voter reste dans le jury → `pending` → spawné, jamais un
+            # merge sur demi-jury (cf. ForgeClient.pr_review_state).
+            requested = Enum.uniq(requested_field ++ jury)
+            dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
+
+          {:error, reason} ->
+            {:error, {:review_state, reason}}
+        end
+    end
+  end
+
+  # MA-01 (bug B) — l'issue parente de la PR (déduite de `head.ref` = `lcars/issue-<n>-<role>`) attend-elle
+  # l'arch ? Le SET `:awaits_arch_ids` est calculé par le poller (issues du tick, zéro I/O) et threadé via
+  # opts ; défaut `MapSet.new()` (back-compat, autres callers). PR non-fleet (`:error`) → false (rien à skip).
+  defp awaits_arch_issue?(head, opts) do
+    ids = Keyword.get(opts, :awaits_arch_ids, MapSet.new())
+
+    case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+      {:ok, {n, _role}} -> MapSet.member?(ids, n)
+      :error -> false
     end
   end
 

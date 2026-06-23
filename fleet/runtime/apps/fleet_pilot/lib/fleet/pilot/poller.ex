@@ -47,6 +47,11 @@ defmodule Fleet.Pilot.Poller do
   # Verrou pipeline (source unique `Fleet.Pilot.Labels`) — lu par la réconciliation d'orphelins.
   @in_flight Fleet.Pilot.Labels.in_flight()
 
+  # MA-01 (bug B) — verrou HUMAIN posé sur l'ISSUE à l'escalade (verdict gatekeeper escalate/halt/redirect,
+  # ou conflit non résolu). Le poller calcule le SET des issues qui le portent (déjà listées au tick → zéro
+  # I/O) et le thread aux pulls → `dispatch_review` skippe le juge d'une PR dont l'issue parente attend l'arch.
+  @awaits_arch Fleet.Pilot.Labels.awaits_arch()
+
   @default_interval_ms 30_000
   @max_backoff_ms 300_000
   @jitter_ratio 0.1
@@ -348,10 +353,17 @@ defmodule Fleet.Pilot.Poller do
       # F-S1-6 : opts de dispatch calculées UNE fois/tick (partagées issues + pulls), pas 2×.
       opts = stage_dispatch_opts(state)
 
+      # MA-01 (bug B) — SET des issues `lcars-awaits-arch` (déjà listées au tick → ZÉRO I/O ajouté), threadé
+      # aux pulls via `:awaits_arch_ids` → `dispatch_review` skippe le juge d'une PR dont l'issue parente
+      # attend l'arch (symétrique de `decide/1` côté issue). Sans ça : l'escalade pose `awaits-arch` sur
+      # l'ISSUE mais `dispatch_review` ne lit QUE les labels de la PR → re-spawn du juge par tick (churn live).
+      awaits_arch_ids = awaits_arch_ids(issues)
+      pulls_opts = Keyword.put(opts, :awaits_arch_ids, awaits_arch_ids)
+
       tally =
         merge_tally(
           stage_process_issues(issues, pr_issue_ids, state, opts),
-          stage_process_pulls(pulls, opts)
+          stage_process_pulls(pulls, pulls_opts)
         )
 
       duration_ms = elapsed_ms(started)
@@ -507,6 +519,17 @@ defmodule Fleet.Pilot.Poller do
 
   defp locked?(item) do
     @in_flight in Enum.map(Map.get(item, "labels") || [], & &1["name"])
+  end
+
+  # MA-01 (bug B) — SET des numéros d'issue portant `lcars-awaits-arch`. Dérivé des `issues` DÉJÀ listées
+  # par le tick (aucun appel forge supplémentaire) → threadé aux pulls (`:awaits_arch_ids`) pour que
+  # `dispatch_review` skippe le juge d'une PR dont l'issue parente attend l'arch.
+  defp awaits_arch_ids(issues) do
+    for i <- issues, n = i["number"], awaits_arch?(i), into: MapSet.new(), do: n
+  end
+
+  defp awaits_arch?(item) do
+    @awaits_arch in Enum.map(Map.get(item, "labels") || [], & &1["name"])
   end
 
   defp reclaim_lock(forge, state, number) do
