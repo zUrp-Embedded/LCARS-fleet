@@ -363,4 +363,82 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, :double_submit_ignored} =
              TaskQueue.submit_result(q, "pod-5", %{"verdict" => "retry"})
   end
+
+  # MA-27 — invariant « 1 mandat ACTIF/pod » tenu À L'ÉCRITURE. Un re-mandate d'un pod portant une
+  # `:assigned` existante doit la SUPERSÉDER (→ `:cleared`) : sinon la vieille `:assigned` FUYAIT à côté du
+  # nouveau pending (invisible aux gardes — `find_active`/`max_by` la masquait sans la retirer). RED avant le
+  # fix (`supersede_pending` gardait les `:assigned`) → 2 actives ; GREEN après (`supersede_active`) → 1.
+  test "MA-27 re-mandate d'un pod avec :assigned existante → 1 SEULE active (l'ancienne :cleared)",
+       %{
+         q: q
+       } do
+    {:ok, old} = TaskQueue.enqueue(q, "pod-Z", %{brief: "ancien mandat"})
+    # pull → l'ancien passe :assigned (le pod « travaille dessus »).
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-Z")
+    assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-Z")
+
+    # RE-MANDATE : un nouveau mandat frais (re-dispatch forge) arrive PENDANT l'ancien :assigned.
+    {:ok, fresh} = TaskQueue.enqueue(q, "pod-Z", %{brief: "nouveau mandat"})
+
+    tasks = :sys.get_state(q).tasks |> Map.values()
+
+    active =
+      Enum.filter(
+        tasks,
+        &(&1.pod_id == "pod-Z" and &1.state in [:pending, :assigned, :in_progress])
+      )
+
+    # 1 SEULE active = le frais (:pending). L'ancien :assigned est superséded → :cleared.
+    assert [%{state: :pending} = only] = active
+    assert only.id == fresh.id
+
+    old_now = Enum.find(tasks, &(&1.id == old.id))
+    assert old_now.state == :cleared
+
+    # Sémantique re-mandate validée : le pod prend le NOUVEAU mandat au prochain pull (seul actif restant).
+    fresh_id = fresh.id
+    assert {:ok, %{brief: "nouveau mandat", id: ^fresh_id}} = TaskQueue.get_for_pod(q, "pod-Z")
+
+    # Et le vieux mandat ne peut plus muter la queue : son submit tombe sur une active = le frais
+    # (task_id mismatch) — jamais une complétion de l'ancien fantôme.
+    assert {:error, :task_id_mismatch} =
+             TaskQueue.submit_result(q, "pod-Z", %{"task_id" => old.id, "verdict" => "stale"})
+  end
+
+  # MA-27 — `clear_for_pod` purge TOUTES les actives du pod (pas seulement la + récente via `find_active`).
+  # Avec l'invariant tenu à l'enqueue il n'y en a normalement qu'une ; le test pose volontairement DEUX
+  # actives (en court-circuitant l'unicité via la map d'état directe) pour prouver que clear est TOTAL.
+  test "MA-27 clear_for_pod purge TOUTES les actives du pod (clear total, pas seulement la + récente)",
+       %{
+         q: q
+       } do
+    {:ok, t1} = TaskQueue.enqueue(q, "pod-M", %{brief: "m1"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-M")
+
+    # Injecte une 2e active (:assigned) pour le MÊME pod, en contournant supersede_active (qui en prod
+    # garantit l'unicité) — on veut prouver que clear_for_pod ne LAISSE PAS de stale même s'il y en avait.
+    :sys.replace_state(q, fn st ->
+      ghost = %Fleet.TaskQueue.Task{
+        id: "ghost-uuid",
+        pod_id: "pod-M",
+        enqueued_at: DateTime.add(t1.enqueued_at, -60, :second),
+        state: :assigned
+      }
+
+      %{st | tasks: Map.put(st.tasks, ghost.id, ghost)}
+    end)
+
+    assert :ok = TaskQueue.clear_for_pod(q, "pod-M")
+
+    tasks = :sys.get_state(q).tasks |> Map.values()
+
+    active =
+      Enum.filter(
+        tasks,
+        &(&1.pod_id == "pod-M" and &1.state in [:pending, :assigned, :in_progress])
+      )
+
+    assert active == []
+    assert Enum.all?(tasks, &(&1.pod_id != "pod-M" or &1.state == :cleared))
+  end
 end

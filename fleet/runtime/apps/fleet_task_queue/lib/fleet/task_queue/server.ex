@@ -132,15 +132,17 @@ defmodule Fleet.TaskQueue.Server do
       metadata: attrs[:metadata] || attrs["metadata"] || %{}
     }
 
-    # AXIOME cleanup (2026-06-21) : un mandat FRAIS supersède le `:pending` existant du pod (jamais pullé).
-    # Un seul pending/pod ; le forge-frais gagne sur le stale. Empêche l'empilement intra-session ET garantit
-    # que `get_task` sert le mandat COURANT, pas un résidu (le symptôme "en cours" servi à la place du rework).
-    # Les `:assigned/:in_progress` NE sont PAS touchés (le pod travaille dessus). DN task-queue : 1 mandat
-    # actif/pod ; ≥2 pending = duplication de re-dispatch, à superséder.
-    {state, superseded} = supersede_pending(state, pod_id)
+    # MA-27 — AXIOME « 1 mandat ACTIF/pod » tenu À L'ÉCRITURE. Un mandat FRAIS SUPERSÈDE TOUTE active du pod :
+    # le `:pending` jamais pullé (drop) ET l'`:assigned`/`:in_progress` en cours (→ `:cleared`). Un re-mandate
+    # remplace l'ancien : le pod prendra le nouveau (seul actif restant) au prochain `get_for_pod`. Avant ce fix
+    # `supersede_pending` GARDAIT les `:assigned` → une vieille tâche assignée FUYAIT à côté du nouveau pending,
+    # invisible aux gardes (`find_active` = `max_by(enqueued_at)` masquait la fuite en servant la + récente, mais
+    # la stale restait ACTIVE → état « 2 actives/pod » non borné, invariant violé). En tenant l'unicité À
+    # L'ÉCRITURE, `find_active`/`max_by` devient moot (au plus 1 active/pod par construction).
+    {state, superseded} = supersede_active(state, pod_id)
 
     if superseded > 0,
-      do: Logger.debug("TaskQueue: enqueue pod=#{pod_id} supersède #{superseded} :pending stale")
+      do: Logger.debug("TaskQueue: enqueue pod=#{pod_id} supersède #{superseded} active(s) stale")
 
     new_state = state |> put_task(task) |> persist()
     # F144/F019 : payload = `%{task_id}` (cohérent avec tous les autres task_* events), PAS le
@@ -194,11 +196,16 @@ defmodule Fleet.TaskQueue.Server do
               new_state,
               # role/ticket_id additifs (traça 2026-06-14 : le DeliveryPublisher stampe l'identité de
               # l'agent d'origine sur le commit forge). Les consumers existants ignorent les clés extra.
+              # MA-03 — `metadata` additif : le verdict task_completed porte le metadata de la TÂCHE (qui
+              # survit dans le broker au crash du HopConsumer seul). Pour une éval gatekeeper il porte le
+              # contexte de reprise (`gate_eval`/`payload`/`pipeline`/…) → le HopConsumer redémarré (gate_evals
+              # RAM vide) RECONSTRUIT l'eval_ctx du metadata au lieu d'un `{:noreply}` silencieux (wedge à vie).
               event(:task_completed, completed, %{
                 task_id: completed.id,
                 role: completed.role,
                 ticket_id: completed.ticket_id,
-                result: result
+                result: result,
+                metadata: completed.metadata
               })
             )
 
@@ -207,15 +214,27 @@ defmodule Fleet.TaskQueue.Server do
     end
   end
 
+  # MA-27 — purge TOUTES les actives du pod (pas seulement la + récente via `find_active`). Avec l'invariant
+  # « 1 active/pod » tenu à l'enqueue (`supersede_active`), il n'y en a normalement qu'une ; mais un clear doit
+  # rester TOTAL (pas de stale `:assigned` résiduelle qui échapperait au clear et fuirait — symétrique du fix
+  # enqueue). Un broadcast `:task_cleared` par tâche clearée ; aucune active → no-op idempotent.
   def handle_call({:clear_for_pod, pod_id}, _from, state) do
-    case find_active(state.tasks, pod_id) do
-      nil ->
+    active =
+      state.tasks
+      |> Map.values()
+      |> Enum.filter(&(&1.pod_id == pod_id and &1.state in @active_states))
+
+    case active do
+      [] ->
         {:reply, :ok, state}
 
-      %Task{} = task ->
-        cleared = %{task | state: :cleared}
-        new_state = state |> put_task(cleared) |> persist()
-        broadcast(new_state, event(:task_cleared, cleared, %{task_id: cleared.id}))
+      tasks ->
+        cleared = Enum.map(tasks, &%{&1 | state: :cleared})
+        new_state = Enum.reduce(cleared, state, &put_task(&2, &1)) |> persist()
+
+        for t <- cleared,
+            do: broadcast(new_state, event(:task_cleared, t, %{task_id: t.id}))
+
         {:reply, :ok, new_state}
     end
   end
@@ -288,17 +307,28 @@ defmodule Fleet.TaskQueue.Server do
     |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
   end
 
-  # AXIOME cleanup : retire les `:pending` du pod (superséded par un mandat frais à l'enqueue). Garde tout
-  # le reste — autres pods, ET les `:assigned/:in_progress` du pod (il travaille dessus). Borne la queue à
-  # 1 mandat actif/pod (DN task-queue) → un re-dispatch ne peut plus EMPILER des pending stale. Retourne
-  # `{state, n_dropped}`.
-  defp supersede_pending(state, pod_id) do
-    {drop, keep} =
-      Enum.split_with(state.tasks, fn {_id, t} ->
-        t.pod_id == pod_id and t.state == :pending
+  # MA-27 — supersède TOUTE active du pod (un mandat frais à l'enqueue remplace l'ancien). Le `:pending`
+  # jamais pullé est DROPPÉ (jamais servi → rien à tracer) ; l'`:assigned`/`:in_progress` en cours est
+  # transitionné `:cleared` (le pod l'abandonne : `submit_result` du vieux mandat tombera sur `find_active`
+  # = nil → `:no_active_task`/`:double_submit_ignored`, jamais une mutation du nouveau). Garde tout le reste
+  # (autres pods, terminaux du pod). Borne la queue à 1 active/pod À L'ÉCRITURE (DN task-queue). Retourne
+  # `{state, n_superseded}`.
+  defp supersede_active(state, pod_id) do
+    tasks =
+      Map.new(state.tasks, fn {id, t} ->
+        if t.pod_id == pod_id and t.state in @active_states do
+          {id, %{t | state: :cleared}}
+        else
+          {id, t}
+        end
       end)
 
-    {%{state | tasks: Map.new(keep)}, length(drop)}
+    superseded =
+      Enum.count(state.tasks, fn {_id, t} ->
+        t.pod_id == pod_id and t.state in @active_states
+      end)
+
+    {%{state | tasks: tasks}, superseded}
   end
 
   defp has_completed?(tasks, pod_id) do

@@ -32,7 +32,7 @@ Flux : `fleet_spawner`/`fleet_pipeline` **enqueue** (source) → `fleet_task_que
 
 ## Invariants
 
-- **Un mandat actif par pod** (`find_active`, tri `enqueued_at` DESC). Le wake d'un pod long-lived reçoit le mandat le plus récent après complétion du précédent.
+- **Un mandat actif par pod**, tenu À L'ÉCRITURE (MA-27) : un enqueue frais **supersède** TOUTE active du pod (`supersede_active` — le `:pending` est droppé, l'`:assigned`/`:in_progress` passe `:cleared`) ; `clear_for_pod` purge TOUTES les actives. Le wake d'un pod long-lived reçoit donc l'unique mandat courant (le frais remplace l'ancien). `find_active` (tri `enqueued_at` DESC) reste la lecture mais ne masque plus de stale : par construction il y a au plus 1 active/pod.
 - **Complétion event-driven** : émet `%Fleet.Event{source: :task_queue}` sur le bus `fleet.events` (topic `Fleet.PubSub`), `correlation_id = task.id`. Les 6 events couvrent enqueue/assign/complete/etc. (cf. DN §C). Plus de string-topic, plus de poll de fichier.
 - **Rétention bornée** (F148) : les tâches terminales (`:completed`/`:failed`/`:cleared`) sont élaguées au-delà de `:retention_terminal_max` (défaut 500, les plus récentes conservées) → `tasks` en mémoire et `state.json` sont bornés. Les tâches **actives** ne sont jamais élaguées ; une tâche juste complétée (la plus récente) survit → la détection de double-submit (`has_completed?`) reste correcte.
 
