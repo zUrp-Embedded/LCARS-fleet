@@ -123,6 +123,65 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
              Clone.clone_work_doc(pod_dir, profile)
   end
 
+  # MA-22/F-BOOT-FM-03 — parité `rm_rf` : un `work/` résiduel (pod prédécesseur mort) ne doit pas
+  # wedger le re-dispatch sur « destination already exists ».
+  test "clone_work_doc idempotent : work/ résiduel → nettoyé + re-cloné", %{tmp_dir: tmp} do
+    src = make_source_repo(Path.join(tmp, "src-doc-idem"))
+    pod_dir = Path.join(tmp, "pod-doc-idem")
+    File.mkdir_p!(pod_dir)
+    profile = cap(%{"repo_path" => src, "base_branch" => "main", "work_branch" => "work/ops"})
+
+    assert {:ok, doc} = Clone.clone_work_doc(pod_dir, profile)
+    File.write!(Path.join(doc, "stale.txt"), "résidu d'un pod doc mort")
+
+    # re-dispatch sur le MÊME pod_dir : sans rm_rf → clone refuse (dest non vide) ; avec → re-clone propre.
+    assert {:ok, ^doc} = Clone.clone_work_doc(pod_dir, profile)
+    assert File.exists?(Path.join(doc, "BACKLOG.md"))
+    refute File.exists?(Path.join(doc, "stale.txt"))
+  end
+
+  # ============================================================
+  # MOVE-1/MA-22 — le clone est BORNÉ par construction : un git qui PEND est tué dans la deadline,
+  # le pod ne reste PAS zombie (l'appelant reçoit une erreur typée au lieu de figer pour toujours).
+  # ============================================================
+  test "clone qui pend (serveur git muet) → tué dans le timeout, erreur typée (pas de hang)",
+       %{tmp_dir: tmp} do
+    # Faux serveur git : un socket TCP qui ACCEPTE la connexion mais ne répond JAMAIS. `git clone
+    # git://127.0.0.1:PORT/x` se connecte, envoie sa requête, et attend une réponse qui ne vient pas →
+    # hang. Sans la borne, `clone_or_skip` figerait le process appelant (en prod : le Pod GenServer →
+    # pod zombie). Avec la borne (`:git_timeout_ms`), git est tué et on rend `{:clone_failed,
+    # {:git_timeout, ms}}` RAPIDEMENT.
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+    {:ok, port} = :inet.port(listen)
+    # Un acceptor qui accepte puis dort : la connexion s'établit mais reste muette.
+    acceptor =
+      spawn(fn ->
+        case :gen_tcp.accept(listen, 10_000) do
+          {:ok, sock} -> Process.sleep(:infinity) && sock
+          _ -> :ok
+        end
+      end)
+
+    on_exit(fn ->
+      Process.exit(acceptor, :kill)
+      :gen_tcp.close(listen)
+    end)
+
+    pod_dir = Path.join(tmp, "pod-hang")
+    File.mkdir_p!(pod_dir)
+    profile = cap(%{"repo_path" => "git://127.0.0.1:#{port}/x", "base_branch" => "main"})
+
+    t0 = System.monotonic_time(:millisecond)
+    result = Clone.clone_or_skip(pod_dir, profile, git_timeout_ms: 400)
+    elapsed = System.monotonic_time(:millisecond) - t0
+
+    # Erreur TYPÉE (le wrapper a coupé), pas un succès silencieux ni un crash non géré.
+    assert {:error, {:clone_failed, {:git_timeout, 400}}} = result
+
+    # On a rendu en ~400ms + marge, PAS attendu indéfiniment → la borne a bien tué le git pendant.
+    assert elapsed < 5_000, "le clone a pendu #{elapsed}ms — la borne n'a pas coupé"
+  end
+
   # O5 (Brick 5) — test `set_git_identity` RETIRÉ avec la fonction. L'identité git du pod n'est plus
   # posée par un `git config` mutable dans le workspace (falsifiable F-01) mais injectée en env au
   # lancement (bwrap_launch.sh) ; l'enforcement F-01 est la gate `DeliverableGate` au push (couverte

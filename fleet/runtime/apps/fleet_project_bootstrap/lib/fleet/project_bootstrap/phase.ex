@@ -83,45 +83,68 @@ defmodule Fleet.ProjectBootstrap.Phase do
           feature = "feature/#{slug}"
           ref_args = if ref, do: ["--reference", ref], else: []
 
-          with {_, 0} <-
-                 System.cmd(
-                   "git",
+          # MOVE-1/MA-22 : la deadline du clone RÉSEAU est calibrable par l'appelant (`:git_timeout_ms`),
+          # défaut = celui du wrapper (30s). Le spawner peut la resserrer ; les tests l'utilisent pour
+          # prouver le bornage (clone vers une URL qui pend → tué dans le délai, pas de pod zombie).
+          git_opts = Keyword.take(opts, [:git_timeout_ms]) |> rename_timeout_key()
+
+          # MOVE-1/MA-22 — clone/checkout BORNÉS par construction via `Fleet.Credentials.Shell.git/2`
+          # (Task.async + yield(timeout) || brutal_kill, `GIT_TERMINAL_PROMPT=0` posé par `git_env/0`).
+          # Avant, `System.cmd("git", ["clone", …])` était non borné : un clone réseau hung (ou un git
+          # qui prompte faute de credential, sans TTY) figeait le `Fleet.Spawner.Pod` (GenServer) → pod
+          # zombie / ticket wedgé. Le wrapper tue le git enfant si la deadline expire et rend une erreur
+          # typée → le pod ne reste pas figé. `Shell.git/2` injecte `git_env/0` (anti-prompt + auth forge).
+          with {:ok, {_, 0}} <-
+                 Fleet.Credentials.Shell.git(
                    ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
-                   stderr_to_stdout: true,
-                   env: Fleet.Credentials.ForgeAuth.git_env()
+                   git_opts
                  ),
                # #596 R1 (F-03) : si l'Executor a PINNÉ une base_sha (ls-remote hors-pod), on épingle
                # HEAD dessus AVANT la feature-branch. Élimine la fenêtre « le pod clone une base que
                # l'Executor n'a pas capturée » (course same-role) : `base..HEAD` ne contiendra QUE les
                # commits du pod. F-03 = axiome au boundary clone, pas « observable post-hoc ».
-               {_, 0} <- pin_base_sha(ws, project["base_sha"]),
-               {_, 0} <-
-                 System.cmd("git", ["-C", ws, "checkout", "-b", feature], stderr_to_stdout: true) do
+               {:ok, {_, 0}} <- pin_base_sha(ws, project["base_sha"]),
+               # `checkout -b` est local (pas réseau, ne prompte pas) mais passe AUSSI par le wrapper
+               # borné : pas de `System.cmd git` nu sur ce chemin (la frontière du move = aucun git non
+               # borné inexprimable). Env bare (pas d'auth/réseau).
+               {:ok, {_, 0}} <-
+                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-b", feature], env: []) do
             {:ok, ws, feature}
           else
-            {out, code} -> {:error, {:clone_failed, {code, String.slice(out, 0, 500)}}}
+            {:ok, {out, code}} -> {:error, {:clone_failed, {code, String.slice(out, 0, 500)}}}
+            {:error, {:timeout, ms}} -> {:error, {:clone_failed, {:git_timeout, ms}}}
+            {:error, {:exit, reason}} -> {:error, {:clone_failed, {:git_exit, reason}}}
           end
       end
     end
 
+    # Traduit l'opt PUBLIC `:git_timeout_ms` (vocabulaire bootstrap) en `:timeout_ms` (vocabulaire
+    # `Shell.git/2`). Absent → `[]` (le wrapper applique son défaut 30s). Garde la frontière du wrapper
+    # honnête (un appelant ne peut pas, par mégarde, passer `:env`/`:cd` arbitraires au clone réseau).
+    defp rename_timeout_key([]), do: []
+    defp rename_timeout_key(git_timeout_ms: ms), do: [timeout_ms: ms]
+
     # Épingle HEAD du workspace sur `sha` (capturé hors-pod par l'Executor). Le clone `--branch base`
     # contient déjà `sha` dans le cas nominal (sha = tip) et fast-forward (sha = ancêtre) → `reset
-    # --hard` local suffit. Cas pathologique (force-push remote a effacé `sha`) → fetch ciblé puis
-    # reset ; échec des deux = {out, code≠0} remonté au `with` → `{:clone_failed, ...}`. nil/"" = no-op.
-    defp pin_base_sha(_ws, sha) when sha in [nil, ""], do: {"", 0}
+    # --hard` local suffit. Cas pathologique (force-push remote a effacé `sha`) → `fetch` ciblé puis
+    # reset. MOVE-1/MA-22 : le `fetch` est RÉSEAU (peut hung/prompter) → BORNÉ via `Shell.git/2` (le
+    # `reset` local l'est aussi, pour ne laisser aucun `System.cmd git` nu). Retour homogène avec
+    # `Shell.git/2` (`{:ok, {out, code}}` | `{:error, {:timeout|:exit, _}}`), consommé par le `with`
+    # de `clone_or_skip`. nil/"" = no-op succès.
+    defp pin_base_sha(_ws, sha) when sha in [nil, ""], do: {:ok, {"", 0}}
 
     defp pin_base_sha(ws, sha) when is_binary(sha) do
-      case System.cmd("git", ["-C", ws, "reset", "--hard", sha], stderr_to_stdout: true) do
-        {_, 0} = ok ->
+      case Fleet.Credentials.Shell.git(["-C", ws, "reset", "--hard", sha], env: []) do
+        {:ok, {_, 0}} = ok ->
           ok
 
         _ ->
-          case System.cmd("git", ["-C", ws, "fetch", "origin", sha],
-                 stderr_to_stdout: true,
-                 env: Fleet.Credentials.ForgeAuth.git_env()
-               ) do
-            {_, 0} ->
-              System.cmd("git", ["-C", ws, "reset", "--hard", sha], stderr_to_stdout: true)
+          # Le `reset` local a échoué (`sha` absent localement) → fetch RÉSEAU ciblé (auth forge + borne
+          # anti-prompt via `git_env/0`), puis re-reset local. Échec du fetch (incl. timeout/exit) →
+          # remonté tel quel au `with` → `{:clone_failed, ...}`.
+          case Fleet.Credentials.Shell.git(["-C", ws, "fetch", "origin", sha]) do
+            {:ok, {_, 0}} ->
+              Fleet.Credentials.Shell.git(["-C", ws, "reset", "--hard", sha], env: [])
 
             other ->
               other
@@ -152,19 +175,32 @@ defmodule Fleet.ProjectBootstrap.Phase do
         ref = project["reference_repo_path"]
         ref_args = if ref, do: ["--reference", ref], else: []
 
+        # MA-22/F-BOOT-FM-03 — PARITÉ avec `clone_or_skip` : un pod prédécesseur MORT laisse son `work/`
+        # sur disque ; le pod_id étant déterministe, le re-dispatch retombe sur le même `pod_dir` →
+        # `git clone` refuserait (« destination already exists and is not an empty directory ») → même
+        # wedge permanent que le workspace (sauf que `clone_work_doc` n'avait pas le `rm_rf`). Clean
+        # slate : le `work/` résiduel ne peut venir que d'un prédécesseur mort (le pod possède son
+        # pod_dir) → un re-clone frais est toujours correct.
+        _ = File.rm_rf(doc)
+
         # --single-branch : la branche doc est orpheline ⇒ inutile de fetch le reste de l'historique.
-        case System.cmd(
-               "git",
+        # MOVE-1/MA-22 : clone RÉSEAU BORNÉ via `Shell.git/2` (anti-prompt + auth forge via `git_env/0`,
+        # tué dans la deadline si hung → pas de pod figé sur le clone de la doc).
+        case Fleet.Credentials.Shell.git(
                ["clone"] ++
-                 ref_args ++ ["--branch", work_branch, "--single-branch", repo_url, doc],
-               stderr_to_stdout: true,
-               env: Fleet.Credentials.ForgeAuth.git_env()
+                 ref_args ++ ["--branch", work_branch, "--single-branch", repo_url, doc]
              ) do
-          {_, 0} ->
+          {:ok, {_, 0}} ->
             {:ok, doc}
 
-          {out, code} ->
+          {:ok, {out, code}} ->
             {:error, {:work_doc_clone_failed, {work_branch, code, String.slice(out, 0, 500)}}}
+
+          {:error, {:timeout, ms}} ->
+            {:error, {:work_doc_clone_failed, {work_branch, :git_timeout, ms}}}
+
+          {:error, {:exit, reason}} ->
+            {:error, {:work_doc_clone_failed, {work_branch, :git_exit, reason}}}
         end
       end
     end

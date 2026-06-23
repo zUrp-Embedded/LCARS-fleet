@@ -1,7 +1,7 @@
 # fleet_project_bootstrap — core du pod (Ring 1)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-17
+**Dernière révision** : 2026-06-23
 **Statut** : ACTIF — chemin PROD câblé (`Phase.Clone`). Scaffold `prepare/3` partiellement mort (conformance-only).
 **Dérivé de** : 04_design-notes/ring1/fleet_project_bootstrap.md + session 2026-05-17/18 (rings finalisés)
 
@@ -28,11 +28,19 @@ par `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace`) — **pas** via `p
     `Pod` RECOMPUTE via `pod_workspace_path/1`).
 - **`clone_work_doc/2`** — clone la branche DOC orpheline (`spec.project.work_branch`, conv. `work/ops`)
   dans `<pod_dir>/work` : plans, backlog, conventions sur lesquels l'agent s'appuie. Skip si pas de
-  `work_branch`/`repo_path` ; FAIL-LOUD si déclarée mais clone échoué (I-CBC).
+  `work_branch`/`repo_path` ; FAIL-LOUD si déclarée mais clone échoué (I-CBC). `rm_rf` du `work/`
+  résiduel avant clone (parité idempotence avec `clone_or_skip` — un prédécesseur mort ne wedge pas le
+  re-dispatch, MA-22/F-BOOT-FM-03).
 
-Auth git : `Fleet.Credentials.ForgeAuth.git_env/0` (token via env hors argv). Identité git posée
-en env au lancement par `bwrap_launch.sh` (pas de `git config` mutable — garantie F-01 côté monde
-via `Fleet.Pipeline.DeliverableGate.check_identity/3`).
+Auth git : `Fleet.Credentials.ForgeAuth.git_env/0` (token via env hors argv, `GIT_TERMINAL_PROMPT=0`).
+Identité git posée en env au lancement par `bwrap_launch.sh` (pas de `git config` mutable — garantie
+F-01 côté monde via `Fleet.Pipeline.DeliverableGate.check_identity/3`).
+
+**Git BORNÉ par construction (MOVE-1/MA-22)** : clone/fetch/checkout passent par
+`Fleet.Credentials.Shell.git/2` (deadline + SIGKILL du process OS à l'expiration) — un git réseau qui
+pend (ou qui prompterait sans TTY) est tué dans la deadline et rend `{:clone_failed, {:git_timeout|:git_exit, _}}`
+au lieu de figer le `Fleet.Spawner.Pod` (GenServer) → plus de pod zombie. La deadline du clone réseau
+est calibrable via l'opt `:git_timeout_ms` de `clone_or_skip/3`.
 
 Les autres concerns du bootstrap sont assurés en prod par des chemins **INDÉPENDANTS de `prepare/3`** :
 le CLAUDE.md par `do_project` (pod.ex), les mounts/creds par bwrap (adr-f).
@@ -66,5 +74,6 @@ hors-Clone ne tournent donc qu'en test :
 ## Frontière vendor
 
 N0 (vendor-agnostic). Aucune dépendance vendor : git + EEx + paths. Dépend vers le bas de
-`fleet_credentials` (`ForgeAuth.git_env/0`) et `fleet_cap_profile` (`Fleet.CapProfile`).
-Ne PEUT PAS dépendre de `fleet_spawner` (cycle compile) — d'où la ré-encodage de `"workspace"`.
+`fleet_credentials` (`ForgeAuth.git_env/0` ET `Fleet.Credentials.Shell.git/2` pour le git borné) et
+`fleet_cap_profile` (`Fleet.CapProfile`). Ne PEUT PAS dépendre de `fleet_spawner` (cycle compile) —
+d'où la ré-encodage de `"workspace"`.
