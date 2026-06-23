@@ -1064,10 +1064,16 @@ defmodule Fleet.Pilot.HopConsumer do
        ) do
     case decision do
       "continue" ->
-        case advance(carte, stage) do
-          {:ok, {next_assignee, next_stage}} ->
-            intent = if is_nil(next_assignee), do: :promote, else: :advance
-
+        # MA-12 — le split producteur/juge n'est PAS optionnel. AVANT : `intent = if is_nil(next_assignee),
+        # do: :promote, else: :advance` → sur un stage TERMINAL (next_assignee nil), `apply_verdict`
+        # hardcodait `:promote` quel que soit le RÔLE qui finit → un PRODUCTEUR jugé « continue » sur un
+        # terminal MERGEAIT le code SANS passer par les juges PR (réouverture de #8.F). On route par le MÊME
+        # `tag_advance(advance(…), producer?(role, state))` que `gate_decide` (chemin :pass) : un producteur
+        # terminal → `:review` (ouvre la PR + demande les juges, JAMAIS d'auto-merge d'un livrable) ; un juge
+        # terminal (consultant mandate-review, #8.E) → `:promote` (il a validé le dernier gate de sa carte) ;
+        # un stage suivant → `:advance`. Une seule source de vérité pour l'intent terminal.
+        case tag_advance(advance(carte, stage), producer?(role, state)) do
+          {:ok, intent, {next_assignee, next_stage}} ->
             complete_business_hop(
               payload,
               n,

@@ -105,6 +105,18 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
         }
       }
     end
+
+    # MA-12 : carte 1-stage `build`(engineer, PRODUCTEUR) TERMINAL avec gate SOFT → escalade gatekeeper.
+    # Le verdict gatekeeper « continue » sur ce terminal producteur devait :promote (merge SANS juges,
+    # régression #8.F) ; le fix route par tag_advance(_, producer?) → :review (PR + juges).
+    def load!("softterm") do
+      %{
+        "name" => "softterm",
+        "stages" => %{
+          "build" => %{"role" => "engineer", "needs" => [], "gate" => %{"type" => "soft"}}
+        }
+      }
+    end
   end
 
   defp dmode,
@@ -386,6 +398,47 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute_received :closed
     assert_received {:comment, body}
     assert body =~ "illisible ou absent"
+  end
+
+  # ── MA-12 : verdict « continue » sur PRODUCTEUR TERMINAL → :review (PR + juges), JAMAIS :promote ──
+  # Le bug : `apply_verdict` "continue" hardcodait `intent = if is_nil(next_assignee), do: :promote` →
+  # sur un terminal, TOUJOURS :promote, ignorant le rôle qui finit → un PRODUCTEUR jugé continue mergeait
+  # SANS juges (réouverture #8.F). Le fix route par tag_advance(advance(...), producer?(role)) — même split
+  # que le chemin gate :pass. NB : ce chemin (verdict gatekeeper "continue") est DISTINCT du test
+  # `gate :pass producteur terminal` plus haut (qui passe par gate_decide, pas apply_verdict).
+
+  # ctx de reprise pour une carte softterm (build engineer = producteur TERMINAL, gate soft).
+  defp softterm_ctx do
+    %{
+      n: 1,
+      role: "engineer",
+      payload: %{
+        "ticket_id" => "issue-1",
+        "workspace" => "/ws",
+        "base_sha" => "cafe",
+        "role" => "engineer",
+        "pipeline" => "softterm",
+        "stage" => "build",
+        "result" => %{"sev" => "high"}
+      },
+      carte: Carte.load!("softterm"),
+      stage: "build"
+    }
+  end
+
+  test "MA-12 : verdict continue sur producteur TERMINAL → :review (ouvre PR + request_review), JAMAIS merge" do
+    assert {:ok, :review_requested} =
+             HopConsumer.resume_gate(
+               softterm_ctx(),
+               %{"result" => %{"decision" => "continue", "reason" => "RAS"}},
+               hc()
+             )
+
+    # le producteur terminal OUVRE la PR + demande le(s) juge(s) — il ne merge JAMAIS seul.
+    assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
+    assert_received {:request_review, 7, _revs}
+    # LE finding : AUCUN merge direct (le bug :promote aurait mergé sans juges).
+    refute_received {:merge, _}
   end
 
   # ── #8.E : verdict d'un juge de MANDAT (mandate-review/consultant) via pod.completed ──────────
