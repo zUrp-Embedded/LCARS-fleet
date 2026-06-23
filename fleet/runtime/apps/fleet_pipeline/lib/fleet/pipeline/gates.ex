@@ -92,11 +92,32 @@ defmodule Fleet.Pipeline.Gates do
   defp eval_by_type(%{"gate" => %{"type" => "terminal"} = gate}, outputs, _ctx) do
     rules = Map.get(gate, "rules", [])
 
-    if Enum.all?(rules, &is_binary/1) do
-      eval_terminal_string(rules, gate, outputs)
-    else
-      eval_terminal_map(rules, outputs)
+    # MA-11 (variante) : `rules` doit être une LISTE. Une forme dégénérée (`rules`
+    # absente=`[]` OK, mais `rules` = string/map/nil non-liste) ne tombe plus dans
+    # `Enum.all?`/`evaluate_rules` (BadMapError/Protocol.UndefinedError) — fail-closed.
+    cond do
+      not is_list(rules) ->
+        {:fail, "gate terminal malformée : `rules` doit être une liste (forme rejetée)"}
+
+      Enum.all?(rules, &is_binary/1) ->
+        eval_terminal_string(rules, gate, outputs)
+
+      true ->
+        eval_terminal_map(rules, outputs)
     end
+  end
+
+  # MA-11 — CLAUSE CATCH-ALL FAIL-CLOSED (la garde qui meurt = l'absence de garde).
+  # `eval_by_type` était une somme OUVERTE : un gate malformé (`{type:hard}` SANS `rule`
+  # ni `rules` ; `rules` non-liste ; `type` inconnu ; `gate` non-map) ne matchait AUCUNE
+  # clause → `FunctionClauseError` remontait au `handle_info(pod.completed)` non gardé →
+  # CRASH du HopConsumer (SINGLETON) → `gate_evals` perdus, fin-de-hop jamais déclenchée.
+  # Cette clause RÉ-FERME la somme : tout gate qui n'est pas une forme connue-valide est
+  # REJETÉ fail-closed (`{:fail, …}`), JAMAIS un crash, JAMAIS un `:pass` silencieux.
+  # L'éval devient TOTALE. (Idéal ultérieur — flag : un ADT fermé parsé au LOAD rendrait
+  # ces formes INCONSTRUCTIBLES en amont ; ici on ferme au boundary d'éval, minimum viable.)
+  defp eval_by_type(%{"gate" => gate}, _outputs, _ctx) do
+    {:fail, "gate malformée : type/forme non reconnu (#{inspect(gate)}) — fail-closed"}
   end
 
   # v1 — terminal map rules + fallback gatekeeper async sur :nontranchable.
@@ -168,20 +189,53 @@ defmodule Fleet.Pipeline.Gates do
             :pass | :nontranchable | {:fail, String.t()}
     def evaluate_rules(rules, outputs) when is_list(rules) do
       Enum.reduce_while(rules, {:pass, false}, fn rule, {acc, any_undecided?} ->
-        matched? = Fleet.Pipeline.Gates.Hard.matches?(Map.get(rule, "match", %{}), outputs)
-        required? = Map.get(rule, "required", true)
         name = Map.get(rule, "name", "anon")
+        required? = Map.get(rule, "required", true)
 
-        cond do
-          matched? -> {:cont, {acc, any_undecided?}}
-          required? -> {:halt, {{:fail, "terminal rule required '#{name}' fail"}, any_undecided?}}
-          true -> {:cont, {acc, true}}
+        # FAIL-OPEN RULE (F-T1-S11-54, §F.2) — une rule SANS clé `match` (ou `match`
+        # non-map) défautait à `%{}` → `Hard.matches?(%{}, _)` = `Enum.all?(%{}, …)` =
+        # `true` PAR VACUITÉ → la rule PASSAIT quoi qu'il arrive (fail-OPEN, pire que le
+        # crash : la gate validait n'importe quel output). Une définition de gate sans
+        # critère de match est MALFORMÉE → on la REJETTE fail-closed, jamais match-tout.
+        # (Distinction nette du `match: %{}` LITTÉRAL — improbable mais légitime = « pas
+        # de contrainte » : ici on n'autorise que la clé ABSENTE/non-map à devenir un fail,
+        # le `%{}` explicite reste un match vacant assumé.)
+        case rule_match(rule) do
+          :no_match ->
+            {:halt,
+             {{:fail,
+               "terminal rule '#{name}' SANS clé `match` valide — gate malformée (fail-closed)"},
+              any_undecided?}}
+
+          {:ok, match} ->
+            matched? = Fleet.Pipeline.Gates.Hard.matches?(match, outputs)
+
+            cond do
+              matched? ->
+                {:cont, {acc, any_undecided?}}
+
+              required? ->
+                {:halt, {{:fail, "terminal rule required '#{name}' fail"}, any_undecided?}}
+
+              true ->
+                {:cont, {acc, true}}
+            end
         end
       end)
       |> case do
         {:pass, false} -> :pass
         {:pass, true} -> :nontranchable
         {{:fail, reason}, _} -> {:fail, reason}
+      end
+    end
+
+    # FAIL-OPEN RULE — `match` PRÉSENT et map → `{:ok, match}` (y compris `%{}` littéral,
+    # un match vacant explicitement choisi). `match` ABSENT ou non-map → `:no_match` (la
+    # rule est rejetée par `evaluate_rules`, plus de défaut `%{}` qui ferait match-tout).
+    defp rule_match(rule) when is_map(rule) do
+      case Map.fetch(rule, "match") do
+        {:ok, match} when is_map(match) -> {:ok, match}
+        _ -> :no_match
       end
     end
   end

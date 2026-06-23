@@ -151,4 +151,83 @@ defmodule Fleet.Pipeline.GatesTest do
       assert :pass = Gates.evaluate(stage, %{}, %{})
     end
   end
+
+  describe "MA-11 — somme fermée : gate malformée → {:fail} fail-closed (PAS de crash)" do
+    test "hard SANS rule ni rules → {:fail} (était un FunctionClauseError → crash singleton)" do
+      # Avant le catch-all : aucune clause ne matchait `{type:hard}` sans `rule`/`rules`
+      # → FunctionClauseError remontait au HopConsumer (singleton) → crash.
+      stage = %{"gate" => %{"type" => "hard"}}
+      assert {:fail, reason} = Gates.evaluate(stage, %{"x" => 1}, %{})
+      assert reason =~ "malformée"
+    end
+
+    test "hard avec rules NON-LISTE (string) → {:fail}, pas BadMapError" do
+      stage = %{"gate" => %{"type" => "hard", "rules" => "all_tests_pass"}}
+      assert {:fail, _} = Gates.evaluate(stage, %{}, %{})
+    end
+
+    test "type INCONNU → {:fail} fail-closed (jamais :pass silencieux)" do
+      stage = %{"gate" => %{"type" => "bizarre"}}
+      assert {:fail, _} = Gates.evaluate(stage, %{}, %{})
+    end
+
+    test "gate NON-MAP (string) → {:fail}, pas de crash" do
+      stage = %{"gate" => "always"}
+      assert {:fail, _} = Gates.evaluate(stage, %{}, %{})
+    end
+
+    test "terminal avec rules NON-LISTE (map) → {:fail}, pas BadMapError (variante MA-11)" do
+      stage = %{"gate" => %{"type" => "terminal", "rules" => %{"a" => 1}}}
+      assert {:fail, _} = Gates.evaluate(stage, %{}, %{})
+    end
+
+    test "le crash réel : aucune forme de gate ne lève — evaluate est TOTALE" do
+      for gate <- [%{"type" => "hard"}, %{"type" => "x"}, "str", 42, %{}, %{"rules" => 1}] do
+        result = Gates.evaluate(%{"gate" => gate}, %{"out" => 1}, %{})
+
+        assert match?(:pass, result) or match?({:fail, _}, result) or
+                 match?({:dispatch_gatekeeper, _}, result),
+               "gate #{inspect(gate)} a rendu #{inspect(result)} (devrait être total, jamais un raise)"
+      end
+    end
+  end
+
+  describe "FAIL-OPEN RULE (F-T1-S11-54) — terminal rule SANS `match` → fail-closed, PAS match-tout" do
+    test "rule SANS clé match → {:fail} (était :pass par vacuité Enum.all?(%{}) = true)" do
+      # Le piège : `Map.get(rule, "match", %{})` → Hard.matches?(%{}, outputs) = true
+      # quel que soit outputs → la gate passait TOUJOURS (fail-OPEN).
+      stage = %{
+        "gate" => %{
+          "type" => "terminal",
+          "rules" => [%{"name" => "no_match_rule", "required" => true}]
+        }
+      }
+
+      assert {:fail, reason} = Gates.evaluate(stage, %{"anything" => "goes"}, %{})
+      assert reason =~ "SANS clé `match`"
+    end
+
+    test "rule avec match non-map (string) → {:fail}, pas match-tout" do
+      stage = %{
+        "gate" => %{
+          "type" => "terminal",
+          "rules" => [%{"name" => "bad_match", "match" => "not_a_map"}]
+        }
+      }
+
+      assert {:fail, _} = Gates.evaluate(stage, %{"x" => 1}, %{})
+    end
+
+    test "rule avec match: %{} LITTÉRAL reste un match vacant assumé → :pass (non régressé)" do
+      # On rejette la clé ABSENTE/non-map, pas le `%{}` explicite (= « pas de contrainte » choisi).
+      stage = %{
+        "gate" => %{
+          "type" => "terminal",
+          "rules" => [%{"name" => "empty_explicit", "match" => %{}}]
+        }
+      }
+
+      assert :pass = Gates.evaluate(stage, %{"x" => 1}, %{})
+    end
+  end
 end
