@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-19 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
+**Dernière révision** : 2026-06-23 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -51,7 +51,10 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
 - `Fleet.Pilot.HopConsumer` — consumer Bus de la **fin-de-hop** (`pod.completed` → `HopCompleter`) ;
   gatekeeper §L441 (escalade soft/terminal → `resume_gate`). **Singleton** : la complétion lourde
   (git push ≤30s) est offloadée en `Task.Supervisor` (`:hop_runner` / `HopTaskSupervisor`, F067) → ne
-  bloque pas la tête de ligne.
+  bloque pas la tête de ligne. **MA-03 — verdict auto-descriptif** : le contexte de reprise d'une escalade
+  voyage dans le `metadata` de la **tâche** d'éval (qui survit dans le broker à un crash du HopConsumer
+  seul) ; au restart (`gate_evals` RAM vide) le verdict (`task_completed`) est **reconstruit** du metadata
+  au lieu d'un drop silencieux (plus d'issue wedgée à vie). `gate_evals` n'est qu'une optimisation fast-path.
 - `Fleet.Pilot.HopCompleter` — orchestrateur de fin-de-hop PR-natif (`complete_pr/2`). **②.1d single-brique
   (sans carte)** : producteur → `:review` (ouvre la PR **au nom de l'eng** via token de rôle + `request_review`
   des juges `:reviewer_roles` + **assigne l'humain** + unlock issue/PR) ; juge → `:reviewed` (poste la review

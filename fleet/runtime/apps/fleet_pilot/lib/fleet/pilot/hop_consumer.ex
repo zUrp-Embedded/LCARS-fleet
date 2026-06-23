@@ -37,9 +37,11 @@ defmodule Fleet.Pilot.HopConsumer do
       projet) le payload embarque `workspace` + `base_sha` + `role` (enrichi à la
       source, `Fleet.Spawner.Pod.pod_completed_payload`). **Ce consumer les
       traite.** L'event porte tout l'état → consumer stateless POUR LE HAPPY PATH
-      (pass/fail) ; seules les escalades gatekeeper en attente vivent en RAM
-      (`gate_evals`) — parité Executor (fragile au restart ; recovery forge =
-      hors-scope).
+      (pass/fail) ; les escalades gatekeeper en attente vivent en RAM (`gate_evals`)
+      comme **optimisation fast-path** — mais ce n'est plus une dépendance dure :
+      MA-03 rend le verdict **auto-descriptif** (le metadata de la tâche d'éval
+      porte le contexte de reprise → un crash du HopConsumer seul, broker vivant,
+      reconstruit `eval_ctx` du metadata au lieu de jeter le verdict en silence).
 
   ## Traduction event → hop
 
@@ -101,8 +103,9 @@ defmodule Fleet.Pilot.HopConsumer do
     # :gatekeeper_autoboot). Sans ça, en stage-only rien ne boote/registre le gatekeeper →
     # pod_id/0 nil → toute escalade soft/terminal échoue {:error,:no_gatekeeper}.
     :gatekeeper_boot_fun,
-    # B (§L441) — escalades en attente, keyées par correlation_id (= task.id du
-    # mandat d'éval). Valeur = contexte de reprise `%{n, role, payload, carte, stage}`.
+    # B (§L441) — escalades en attente, keyées par correlation_id (= task.id du mandat d'éval). Valeur =
+    # contexte de reprise `%{n, role, payload, carte, stage}`. MA-03 : OPTIMISATION fast-path uniquement
+    # (le verdict est auto-descriptif via le metadata de la tâche → reconstructible au restart).
     gate_evals: %{},
     # F067 : seam d'offload de la complétion. Défaut nil → `run_completion` retombe sur SYNC (l'outcome
     # remonte, seams `maybe_complete`/`resume_gate` + tous les tests inchangés). Prod = async Task.Supervisor.
@@ -246,26 +249,28 @@ defmodule Fleet.Pilot.HopConsumer do
       )
       when is_binary(corr) do
     case Map.pop(state.gate_evals, corr) do
+      # MA-03 — FAST-PATH absent : le contexte n'est pas en RAM. DEUX cas EXCLUSIFS :
+      #  (a) le metadata du verdict porte `gate_eval` (escalade gatekeeper) → on RECONSTRUIT l'eval_ctx du
+      #      metadata (verdict auto-descriptif) → resume. C'est le wedge fermé : crash du HopConsumer seul
+      #      (broker vivant → la tâche + son metadata survivent) → le verdict arrive au HopConsumer redémarré
+      #      (gate_evals vide) → reconstruction au lieu de `{:noreply}` silencieux (issue verrouillée à vie).
+      #  (b) sinon → `{:noreply}` (cas NORMAL : chaque pod stage-dispatch émet un `task_completed` sans
+      #      `gate_eval` → ce n'est pas une escalade gatekeeper → on l'ignore comme avant).
       {nil, _} ->
-        {:noreply, state}
+        case reconstruct_eval_ctx(ev.payload, state) do
+          {:ok, eval_ctx} ->
+            do_resume_gate(eval_ctx, ev, corr, state)
+            {:noreply, state}
 
-      {eval_ctx, gate_evals} ->
-        state = %{state | gate_evals: gate_evals}
-
-        # F-037 : la reprise pousse/écrit sur le repo du HOP escaladé (porté par le `pod.completed`
-        # d'origine, conservé dans `eval_ctx.payload`), pas sur la config. Le verdict du gatekeeper arrive
-        # via un `task_completed` (autre event, sans repo) → on re-dérive depuis le payload d'origine.
-        case resume_gate(eval_ctx, ev.payload, hop_state(eval_ctx.payload, state)) do
-          # F067 : outcome loggé par `run_completion` ; ici on ne logge que l'erreur de DÉCISION (pré-complétion).
-          {:ok, _outcome} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning(
-              "HopConsumer gate resume FAIL corr=#{inspect(corr)}: #{inspect(reason)}"
-            )
+          :not_gate_eval ->
+            {:noreply, state}
         end
 
+      # FAST-PATH : le contexte est en RAM (chemin nominal, pas de crash) → resume direct. EXCLUSIF du cas
+      # reconstruction (corr présent ici ⊻ absent là) → jamais de double-resume.
+      {eval_ctx, gate_evals} ->
+        state = %{state | gate_evals: gate_evals}
+        do_resume_gate(eval_ctx, ev, corr, state)
         {:noreply, state}
     end
   end
@@ -327,6 +332,54 @@ defmodule Fleet.Pilot.HopConsumer do
 
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
+
+  # MA-03 — exécute la reprise (commun fast-path / reconstruction). F-037 : la reprise pousse/écrit sur le
+  # repo du HOP escaladé (porté par le `pod.completed` d'origine, conservé dans `eval_ctx.payload`), pas sur la
+  # config. Le verdict du gatekeeper arrive via un `task_completed` (autre event, sans repo) → on re-dérive
+  # depuis le payload d'origine.
+  defp do_resume_gate(eval_ctx, ev, corr, state) do
+    case resume_gate(eval_ctx, ev.payload, hop_state(eval_ctx.payload, state)) do
+      # F067 : outcome loggé par `run_completion` ; ici on ne logge que l'erreur de DÉCISION (pré-complétion).
+      {:ok, _outcome} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("HopConsumer gate resume FAIL corr=#{inspect(corr)}: #{inspect(reason)}")
+    end
+  end
+
+  # MA-03 — RECONSTRUIT l'eval_ctx depuis le metadata du verdict (verdict auto-descriptif), quand le
+  # fast-path RAM (`gate_evals`) est vide (crash du HopConsumer seul). Le metadata voyage dans
+  # `ev.payload[:metadata]` (posé par `task_queue/server.ex` ; clé atom). `:not_gate_eval` si absent ou pas une
+  # éval gatekeeper → cas normal `{:noreply}`. `carte` re-chargée du `pipeline` (Loader seam — dérivable, pas
+  # embarquée : trop grosse). Si le metadata est une éval mais malformé (payload/role/n manquants) → fail-loud
+  # (`:not_gate_eval` log) plutôt qu'un resume sur contexte tronqué.
+  defp reconstruct_eval_ctx(payload, state) when is_map(payload) do
+    meta = Map.get(payload, :metadata) || Map.get(payload, "metadata") || %{}
+
+    if is_map(meta) and meta["gate_eval"] == true do
+      with rp when is_map(rp) <- meta["resume_payload"],
+           pipeline when is_binary(pipeline) <- meta["pipeline"],
+           stage when is_binary(stage) <- meta["stage"],
+           role when is_binary(role) <- meta["resume_role"],
+           n when is_integer(n) <- meta["resume_n"],
+           {:ok, carte} <- load_carte(state, pipeline) do
+        {:ok, %{n: n, role: role, payload: rp, carte: carte, stage: stage}}
+      else
+        other ->
+          Logger.warning(
+            "HopConsumer: metadata gate_eval mais reconstruction eval_ctx impossible " <>
+              "(#{inspect(other)}) — verdict NON repris (fail-loud, pas de resume sur contexte tronqué)"
+          )
+
+          :not_gate_eval
+      end
+    else
+      :not_gate_eval
+    end
+  end
+
+  defp reconstruct_eval_ctx(_, _), do: :not_gate_eval
 
   # ============================================================
   # Traduction event → hop (pure sauf l'appel HopCompleter / enqueue mandat)
@@ -816,7 +869,10 @@ defmodule Fleet.Pilot.HopConsumer do
           tag(:rework, rebound(carte, n, state))
 
         {:dispatch_gatekeeper, _info} ->
-          case dispatch_gatekeeper(carte, stage, result, state) do
+          # MA-03 — `payload`/`n`/`role` passés au dispatch : ils sont EMBARQUÉS dans le metadata de la
+          # tâche d'éval (contexte de reprise auto-descriptif). Le HopConsumer redémarré (gate_evals RAM
+          # vide) reconstruit l'eval_ctx du metadata au lieu de jeter le verdict en silence.
+          case dispatch_gatekeeper(carte, stage, result, payload, n, payload["role"], state) do
             {:ok, corr} ->
               {:escalate, corr,
                %{n: n, role: payload["role"], payload: payload, carte: carte, stage: stage}}
@@ -852,7 +908,7 @@ defmodule Fleet.Pilot.HopConsumer do
   # `correlation_id` (= task.id) pour la corrélation `task_queue.task_completed`. Pas de
   # gatekeeper booté / enqueue raté → `{:error, _}` (l'appelant fail-loud ; jamais un pass
   # silencieux).
-  defp dispatch_gatekeeper(carte, stage, outputs, state) do
+  defp dispatch_gatekeeper(carte, stage, outputs, payload, n, role, state) do
     case state.gatekeeper_pod_id_fun.() do
       pod_id when is_binary(pod_id) ->
         gate = get_in(carte, ["stages", stage, "gate"])
@@ -866,6 +922,12 @@ defmodule Fleet.Pilot.HopConsumer do
             outputs: outputs
           })
 
+        # MA-03 — VERDICT AUTO-DESCRIPTIF : le metadata de la tâche d'éval porte le contexte de REPRISE
+        # (`payload`/`n`/`role` en plus du stage/pipeline déjà présents). Cette tâche survit dans le broker
+        # (TaskQueue = autre process) à un crash du HopConsumer seul → le verdict (`task_completed`) ramène
+        # ce metadata → le HopConsumer redémarré (gate_evals RAM vidé) reconstruit l'eval_ctx
+        # (`carte = Loader.load!(pipeline)`) au lieu d'un `{:noreply}` silencieux (issue wedgée à vie). Aucune
+        # NOUVELLE source : `payload` porte déjà `workspace`/`base_sha`/`gate_base_sha` — on l'embarque tel quel.
         attrs = %{
           role: "gatekeeper",
           brief: brief,
@@ -874,7 +936,10 @@ defmodule Fleet.Pilot.HopConsumer do
             "stage" => stage,
             "pipeline" => pipeline,
             "gate" => gate,
-            "outputs" => outputs
+            "outputs" => outputs,
+            "resume_payload" => payload,
+            "resume_n" => n,
+            "resume_role" => role
           }
         }
 

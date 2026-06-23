@@ -479,10 +479,153 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
       type: :task_completed,
       correlation_id: "inconnu",
       timestamp: DateTime.utc_now(),
+      # MA-03 : payload SANS metadata gate_eval (cas NORMAL — un pod stage-dispatch ordinaire) → ignoré.
       payload: %{result: %{"decision" => "continue"}}
     })
 
     assert %{gate_evals: evals} = :sys.get_state(pid)
     assert evals == %{}
+  end
+
+  # ── MA-03 : le verdict gatekeeper SURVIT au restart du HopConsumer (verdict auto-descriptif) ──
+  # Le wedge fermé : crash du HopConsumer SEUL (broker vivant). Le contexte de reprise n'est plus en RAM
+  # (`gate_evals` vide au restart) ; il VOYAGE dans le metadata de la TÂCHE d'éval (qui survit dans le broker)
+  # → ramené par `task_completed` → reconstruction → resume. Avant MA-03 : `{nil,_} -> {:noreply}` silencieux
+  # (verdict jeté, issue verrouillée à vie).
+
+  # Le metadata de la tâche d'éval, tel que `dispatch_gatekeeper` l'embarque + tel que `task_queue/server.ex`
+  # le pose dans le payload de `task_completed`. Porte le contexte de reprise (resume_payload/n/role).
+  defp gate_eval_meta do
+    %{
+      "gate_eval" => true,
+      "stage" => "build",
+      "pipeline" => "soft",
+      "gate" => %{"type" => "soft"},
+      "outputs" => %{"sev" => "high"},
+      "resume_payload" => build_done("soft", %{"sev" => "high"}),
+      "resume_n" => 1,
+      "resume_role" => "engineer"
+    }
+  end
+
+  # Stubs forge/deliverable qui RELAIENT vers le pid de test porté dans `forge_opts[:test_pid]`. Nécessaire
+  # pour les tests GenServer : les effets forge tournent DANS le process du HopConsumer (`self()` ≠ test) →
+  # un `send(self(), …)` n'atteindrait pas le test. Le pid est threadé via `forge_opts` (déjà passé au
+  # forge_client par `HopCompleter`). DelivStub n'a pas d'opts → on relaie via le pid stocké à l'init du test.
+  defmodule RelayForge do
+    defp relay(opts, msg), do: send(Keyword.fetch!(opts, :test_pid), msg)
+    def post_comment(_r, _n, body, o), do: relay(o, {:comment, body}) && {:ok, :posted}
+    def set_state_label(_r, _n, _s, _o), do: {:ok, :set}
+    def set_assignee(_r, _n, l, o), do: relay(o, {:assignee, l}) && {:ok, :set}
+    def remove_label(_r, _n, _l, o), do: relay(o, :unlocked) && {:ok, :removed}
+    def add_label(_r, _n, label, o), do: relay(o, {:label, label}) && {:ok, :added}
+    def close_issue(_r, _n, o), do: relay(o, :closed) && {:ok, :closed}
+    def count_signed_hops(_r, _n, _o), do: {:ok, 0}
+    def post_route(_r, _n, p, s, o), do: relay(o, {:route, p, s}) && {:ok, :posted}
+    def open_pr(_r, head, base, _t, o), do: relay(o, {:open_pr, head, base, o[:body]}) && {:ok, 7}
+    def get_pr_for_branch(_r, _head, _base, _o), do: {:ok, 7}
+    def list_open_pulls(_r, _o), do: {:ok, []}
+    def request_review(_r, pr, revs, o), do: relay(o, {:request_review, pr, revs}) && :ok
+    def post_review(_r, pr, ev, body, o), do: relay(o, {:review, pr, ev, body}) && :ok
+    def merge_pr(_r, pr, o), do: relay(o, {:merge, pr}) && :ok
+  end
+
+  defp fresh_hop_consumer do
+    # `deliverable: DelivStub` → son `{:publish, _}` part vers le GenServer (`self()` côté pod) ; on n'assert
+    # PAS dessus (les effets observables passent par RelayForge/forge_opts). Le push réussit (mode git_native).
+    {:ok, pid} =
+      HopConsumer.start_link(
+        repo: "o/r",
+        remote: "origin",
+        subscribe: false,
+        forge_opts: [test_pid: self()],
+        forge_client: RelayForge,
+        loader: Carte,
+        deliverable: DelivStub,
+        deliverable_mode_fun: dmode(),
+        task_queue: StubQueue,
+        spawner: StubSpawner,
+        gatekeeper_pod_id_fun: fn -> "gk-perm" end,
+        role_emails: fn r -> ["#{r}@lcars.local"] end
+      )
+
+    pid
+  end
+
+  test "MA-03 : verdict gatekeeper RECONSTRUIT après restart (gate_evals VIDE) -> complétion, PAS de drop silencieux" do
+    # 1. escalade sur un 1er HopConsumer → gate_evals peuplé.
+    pid1 = fresh_hop_consumer()
+
+    send(pid1, %Fleet.Event{
+      source: :spawner,
+      type: :"pod.completed",
+      timestamp: DateTime.utc_now(),
+      payload: build_done("soft", %{"sev" => "high"})
+    })
+
+    assert Map.has_key?(:sys.get_state(pid1).gate_evals, "corr-1")
+
+    # 2. CRASH du HopConsumer SEUL (broker resterait vivant en prod) → on le stoppe + on en démarre un NEUF.
+    #    Le neuf a gate_evals VIDE — exactement l'état post-crash où l'ancien code jetait le verdict.
+    :ok = GenServer.stop(pid1)
+    pid2 = fresh_hop_consumer()
+    assert :sys.get_state(pid2).gate_evals == %{}
+
+    # 3. Le verdict revient (le metadata de la tâche a survécu dans le broker → posé dans task_completed).
+    send(pid2, %Fleet.Event{
+      source: :task_queue,
+      type: :task_completed,
+      correlation_id: "corr-1",
+      timestamp: DateTime.utc_now(),
+      payload: %{
+        result: %{"decision" => "continue", "reason" => "RAS"},
+        metadata: gate_eval_meta()
+      }
+    })
+
+    # 4. RECONSTRUCTION + COMPLÉTION : le verdict `continue` ouvre la PR + request_review + route — PAS un
+    #    {:noreply} silencieux. (`:sys.get_state` après le send sérialise le handle_info → l'effet a eu lieu.)
+    _ = :sys.get_state(pid2)
+    assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
+    assert_received {:request_review, 7, ["reviewer"]}
+    assert_received {:route, "soft", "review"}
+    assert_received :unlocked
+  end
+
+  test "MA-03 : restart + verdict abandon RECONSTRUIT -> close (terminal), pas de drop" do
+    :ok = GenServer.stop(fresh_hop_consumer())
+    pid = fresh_hop_consumer()
+    assert :sys.get_state(pid).gate_evals == %{}
+
+    send(pid, %Fleet.Event{
+      source: :task_queue,
+      type: :task_completed,
+      correlation_id: "corr-1",
+      timestamp: DateTime.utc_now(),
+      payload: %{result: %{"decision" => "abandon"}, metadata: gate_eval_meta()}
+    })
+
+    _ = :sys.get_state(pid)
+    assert_received :closed
+    refute_received {:publish, _}
+  end
+
+  test "MA-03 : task_completed gate_eval mais metadata TRONQUÉ (resume_payload absent) -> pas de resume (fail-loud), pas de crash" do
+    pid = fresh_hop_consumer()
+
+    bad_meta = gate_eval_meta() |> Map.delete("resume_payload")
+
+    send(pid, %Fleet.Event{
+      source: :task_queue,
+      type: :task_completed,
+      correlation_id: "corr-1",
+      timestamp: DateTime.utc_now(),
+      payload: %{result: %{"decision" => "continue"}, metadata: bad_meta}
+    })
+
+    # Le singleton ne crashe pas, et n'agit PAS sur un contexte tronqué (pas de PR ouverte à l'aveugle).
+    assert Process.alive?(pid)
+    assert :sys.get_state(pid).gate_evals == %{}
+    refute_received {:open_pr, _, _, _}
   end
 end
