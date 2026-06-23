@@ -337,6 +337,23 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert {:error, {:http, 503, _}} =
                ForgeClient.list_open_issues("fleet/lcars", opts(handlers))
     end
+
+    # MA-20 — une page 2xx de forme INATTENDUE (non-liste, ex. un objet d'erreur 200, ou une réponse
+    # tronquée par un proxy) ne doit PLUS rendre `{:ok, []}` (un vide silencieux que le poller lit
+    # « rien à dispatcher ») : la collection n'est pas dérivable → `{:error, {:unexpected_page_shape, …}}`.
+    test "MA-20 — page 2xx non-liste → {:error, :unexpected_page_shape}, PAS {:ok, []}" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues"} => {200, %{"message" => "this is not a list"}}
+      }
+
+      result = ForgeClient.list_open_issues("fleet/lcars", opts(handlers))
+
+      assert {:error, {:unexpected_page_shape, path, page, %{"message" => _}}} = result
+      assert page == 1
+      assert is_binary(path) and String.contains?(path, "/issues")
+      # Garde anti-régression : surtout PAS un succès vide menteur.
+      refute match?({:ok, []}, result)
+    end
   end
 
   describe "list_open_pulls/2 + parse_feature_branch/1 (dispatch juge PR-driven)" do

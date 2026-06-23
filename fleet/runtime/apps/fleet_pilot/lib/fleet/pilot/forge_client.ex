@@ -915,7 +915,9 @@ defmodule Fleet.Pilot.ForgeClient do
 
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     # F-030 : paginé — un comment système signé au-delà de 50 ne doit pas échapper au dédup (sinon
-    # double-post au replay) ; le `case` non-liste reste géré par paginate (renvoie {:ok, acc}).
+    # double-post au replay). MA-20 : une page de forme inattendue rend désormais `{:error, …}` (plus de
+    # `{:ok, acc}` tronqué) → tombe dans le `_ -> false` (pas de signature trouvée = on poste, fail-safe
+    # dédup : au pire un double-post au replay, jamais une suppression silencieuse d'un marqueur).
     case paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
         # F058 (suivi review) : le dédup garde une ÉCRITURE système → ne fait foi que des comments
@@ -1248,9 +1250,17 @@ defmodule Fleet.Pilot.ForgeClient do
           do_paginate(config, path_base, query, page + 1, acc)
         end
 
-      # Réponse 2xx non-liste (forme inattendue) : on remonte ce qu'on a (l'appelant tranche).
-      {:ok, _non_list} ->
-        {:ok, acc}
+      # MA-20 — Réponse 2xx de forme INATTENDUE (non-liste) sur un endpoint de collection. AVANT : on
+      # rendait `{:ok, acc}` → page 1 non-liste → `{:ok, []}` indistinguable d'une collection vide → le
+      # poller croyait « rien à dispatcher » (route → :none, budget rework sous-compté) ; un caller
+      # source-de-vérité travaillait sur une vue VIDE silencieuse. C'est exactement le faux-succès que le
+      # paginate fail-loud (commentaire l.1231) prétendait empêcher pour les erreurs HTTP — la forme
+      # inattendue était le trou. Désormais ERREUR TYPÉE : la collection n'est PAS dérivable de cette page →
+      # `{:error, {:unexpected_page_shape, …}}`. Les callers (`list_scoped_issues`, `get_route`,
+      # `count_signed_hops`, `get_predecessor_result`, `comment_signed?`) propagent déjà `{:error, _}`
+      # (spec `{:error, term()}`) — pas de `{:ok, []}` qui ment.
+      {:ok, non_list} ->
+        {:error, {:unexpected_page_shape, path, page, non_list}}
 
       {:error, _} = err ->
         err
