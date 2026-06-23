@@ -343,7 +343,14 @@ defmodule Fleet.Pilot.StageDispatcher do
   #     au tick suivant) ;
   #   récurrence → `{:escalated, _}` (résolution déjà tentée, conflit persiste) → ESCALADE ARCH. PAS de boucle.
   defp dispatch_conflict_resolution(pr_number, head, reason, ctx) do
-    subject = "#{ctx.repo}#pr-#{pr_number}"
+    # MA-14 — le n° de PR est encodé DIGIT-FREE (base-26 a..z) DANS le subject. `IncidentRegistry.signature`
+    # passe le subject par `normalize` (`~r/\d+/ → "N"`, PARTAGÉ pod/wake — on ne le touche PAS) : un `pr-8`
+    # décimal devenait `pr-N` ≡ `pr-12` → après le 1er conflit d'un repo, TOUTE PR suivante en conflit était
+    # vue « récurrente » → escaladée arch au lieu d'être résolue (neutralisait la résolution F-PARALLEL dès le
+    # 2ᵉ ticket parallèle). En encodant le numéro en LETTRES (`pr-i` pour 8, `pr-m` pour 12), `normalize` ne
+    # le collapse plus → la clé incident est DISTINCTE par PR. (Le repo, lui, peut porter des digits collapsés
+    # par normalize : sans incidence — une session de conflits est dans UN repo, l'axe de distinction est la PR.)
+    subject = "#{ctx.repo}#pr-#{encode_pr_letters(pr_number)}"
 
     # Reason STABLE pour le compteur : la dedup inclut la reason → un message http qui varie casserait le seuil.
     # Le détail réel (`reason`) va dans le commentaire d'escalade, pas dans la clé. Seam test : router vers un
@@ -372,6 +379,20 @@ defmodule Fleet.Pilot.StageDispatcher do
       {:escalated, _} ->
         escalate_conflict_to_arch(pr_number, head, reason, ctx)
     end
+  end
+
+  # MA-14 — encode un n° de PR en LETTRES (base-26 bijective a..z) → DIGIT-FREE, donc INVISIBLE à `normalize`
+  # (`~r/\d+/ → "N"`) côté IncidentRegistry. Bijectif (chaque numéro → une chaîne unique : 1→a … 26→z, 27→aa)
+  # → deux PR distinctes ont des clés incident DISTINCTES (l'invariant que MA-14 RÉTABLIT pour F-PARALLEL).
+  # Numéro ≤ 0 / non-entier (anomalie forge) → `"x"` constant (digit-free, ne crash pas la clé).
+  defp encode_pr_letters(n) when is_integer(n) and n > 0, do: encode_pr_letters(n, [])
+  defp encode_pr_letters(_), do: "x"
+
+  defp encode_pr_letters(0, acc), do: List.to_string(acc)
+
+  defp encode_pr_letters(n, acc) do
+    rem0 = rem(n - 1, 26)
+    encode_pr_letters(div(n - 1, 26), [?a + rem0 | acc])
   end
 
   # Conflit non auto-résolu (1 tentative déjà faite) → l'arch tranche. Commentaire signé gatekeeper (dédupliqué)

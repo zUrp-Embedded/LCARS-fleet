@@ -677,6 +677,61 @@ defmodule Fleet.Pilot.StageDispatcherTest do
                StageDispatcher.dispatch_review(pr, opts)
     end
 
+    test "MA-14 : 2 PR DISTINCTES en conflit (même repo) → la 2ᵉ N'est PAS vue récurrente (clé distincte) → résolue" do
+      # État illégal AVANT MA-14 : `IncidentRegistry.normalize` (`~r/\d+/ → "N"`) collapsait `pr-6` ≡ `pr-12`
+      # → après le 1er conflit (PR #6 enregistré), TOUTE PR suivante en conflit du repo était vue « récurrente »
+      # → escaladée arch au lieu d'être résolue (neutralisait F-PARALLEL dès le 2ᵉ ticket parallèle). Le fix
+      # encode le n° de PR DIGIT-FREE au call-site (`pr-i`/`pr-q`…) → clés DISTINCTES → chaque PR a sa 1ʳᵉ chance.
+      tmp = Path.join(System.tmp_dir!(), "mc2-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf(tmp) end)
+
+      reg = :"reg_mc2_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Fleet.Pilot.IncidentRegistry,
+         name: reg,
+         wal_path: Path.join(tmp, "incidents.json"),
+         sync_debounce_ms: 5,
+         retry_ms: 50,
+         get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+         put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end}
+      )
+
+      opts =
+        dispatch_opts(
+          incident_registry_server: reg,
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 409, "not fast-forward"}}
+          ]
+        )
+
+      # PR #6 (issue 42) en conflit → 1ʳᵉ occurrence → RÉSOLUTION (re-spawn producteur).
+      pr6 =
+        pr(%{
+          "number" => 6,
+          "head" => %{"ref" => "lcars/issue-42-engineer"},
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}]
+        })
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+               StageDispatcher.dispatch_review(pr6, opts)
+
+      # PR #12 (issue DIFFÉRENTE 50), AUTRE PR du même repo, AUSSI en conflit. AVANT le fix : `pr-12` collapse
+      # vers la même clé que `pr-6` (déjà vu) → ESCALADE prématurée. APRÈS : clé distincte → 1ʳᵉ occurrence →
+      # RÉSOLUTION (pas d'escalade). C'est le cœur de F-PARALLEL rétabli.
+      pr12 =
+        pr(%{
+          "number" => 12,
+          "head" => %{"ref" => "lcars/issue-50-engineer"},
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}]
+        })
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-50-engineer", "engineer"}} =
+               StageDispatcher.dispatch_review(pr12, opts)
+    end
+
     test "②.1d : un juge a demandé des changements (les autres approuvent) -> re-spawn le PRODUCTEUR" do
       # tous les juges demandés ont un verdict (pending vide), mais un :changes_requested → rework.
       pr =
