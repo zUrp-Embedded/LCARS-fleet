@@ -1,6 +1,6 @@
 defmodule Fleet.API.Readiness do
   @moduledoc """
-  Read-model P05 — état opérationnel **LIVE** du daemon (anti-vert-creux).
+  Read-model — état opérationnel **LIVE** du daemon (anti-vert-creux).
 
   « Release démarrée ≠ système opérationnel. » `/api/health` répond 200 dès
   que Cowboy a bind `:8080` ; ça ne dit RIEN de l'état de câblage réel
@@ -8,10 +8,10 @@ defmodule Fleet.API.Readiness do
   `deep/0` introspecte le système **vivant** (config chargée, registre de
   process, `:persistent_term`) et rend chaque sous-système en clair.
 
-  ## Plan distinct de `mix lcars.contracts.check` (P01)
+  ## Plan distinct de `mix lcars.contracts.check`
 
   `contracts.check` est un gate **source-conformance** (grep statique des
-  sources + exit≠0, plan build/CI — R7). Il n'est PAS rejouable depuis une
+  sources + exit≠0, joué au build/CI). Il n'est PAS rejouable depuis une
   release (ni sources ni Mix au runtime). `deep/0` est son **jumeau runtime**
   sur l'autre plan : l'**état opérationnel live**. Les deux sont
   complémentaires — l'un verrouille la conformité du code, l'autre expose ce
@@ -22,10 +22,10 @@ defmodule Fleet.API.Readiness do
     * `:operational` — wiré et fonctionnel comme attendu
     * `:inactive` — **volontairement** off (gate config/env), attendu, PAS une
       faute (ex. Pilot off-par-défaut, rollout progressif) — visible mais ne
-      dégrade pas le verdict global (R21)
+      dégrade PAS le verdict global
     * `:degraded` — DEVRAIT être opérationnel mais ne l'est pas → le signal
       anti-vert-creux (ex. registry vide en prod, drain NoOp, launch Stub).
-      Bascule le verdict global en `degraded` (R22)
+      Bascule le verdict global en `degraded`
 
   Chaque probe est défensif : une exception est rabattue en `:degraded`
   plutôt que de faire planter l'endpoint (read-model résilient).
@@ -74,8 +74,8 @@ defmodule Fleet.API.Readiness do
   # ── Probes (chacune : %{id, state, detail}) ──────────────────────────
 
   # Registry events chargé ⇒ `Bus.broadcast/2` fail-loud actif. Vide ⇒
-  # escape-hatch boot (validation OFF) — le bug registry-vide-prod que B2 a
-  # corrigé ; si on le revoit live, c'est dégradé, pas vert-creux.
+  # escape-hatch boot (validation OFF) = registry-vide-en-prod, un bug réel
+  # (broadcasts non validés) ; le sonder ici l'expose comme dégradé, pas vert-creux.
   defp event_registry do
     size = MapSet.size(Fleet.EventRouter.Bus.authorized_event_types())
 
@@ -92,18 +92,18 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # F-010 : le rail forge-state-machine (Poller stage + HopConsumer) EST désormais sondé — sa mort
+  # Le rail forge-state-machine (Poller stage + HopConsumer) est sondé — sa mort
   # runtime (singleton tombé) bascule en `:degraded` au lieu d'un vert-creux. Délégué à fleet_pilot,
   # qui possède la topologie du rail (`Fleet.Pilot.Application.stage_status/0`) — pas de fuite des
   # noms de process Ring 2 dans Ring 4. `:inactive` si stage off (n'altère pas le verdict global).
-  # (Ex-probe `pilot.dispatcher` legacy AutoDispatcher RAM = retirée ②.3/BL-050.)
+  # (Le rail forge-state-machine est l'UNIQUE rail de dispatch : pas de sonde dispatcher RAM legacy.)
   defp pilot_stage do
     {state, detail} = Fleet.Pilot.Application.stage_status()
     probe("pilot.stage", state, detail)
   end
 
   # Backend d'escalade Cat 5 coord : `NotWiredYet` (ou absent) ⇒ escalades
-  # audit-only silencieuses ⇒ `:degraded` (R22). Vrai backend ⇒ operational.
+  # audit-only silencieuses ⇒ `:degraded`. Vrai backend ⇒ operational.
   # NB : `Fleet.Coord` est un module PUR (Policies = fonctions pures, aucun
   # GenServer — cf. fleet_coord/application.ex) ; il n'y a pas de process à
   # sonder pour la liveness. La présence du backend en config = operational
@@ -146,10 +146,10 @@ defmodule Fleet.API.Readiness do
   # aucun spawn réel ⇒ `:degraded` ; backend réel (LauncherPort/Tmux) ⇒
   # operational ; absent ⇒ degraded.
   defp launch_backend do
-    # F010 : MÊME défaut que la résolution réelle (`pod.ex` → `LauncherPortBackend`). Sans ce défaut,
-    # un prod standard (clé non-set : runtime.exs ne la pose plus) lisait `nil` → `:degraded` PERMANENT
-    # sur une fleet pourtant saine (les pods lancent via le défaut LauncherPortBackend) → la sonde
-    # anti-vert-creux criait au loup. Avec le défaut aligné, nil n'arrive plus.
+    # MÊME défaut que la résolution réelle (`pod.ex` → `LauncherPortBackend`). Ce défaut DOIT être
+    # aligné : un prod standard (clé non-set, runtime.exs ne la pose pas) lirait sinon `nil` → `:degraded`
+    # PERMANENT sur une fleet pourtant saine (les pods lancent via le défaut LauncherPortBackend) → la
+    # sonde anti-vert-creux crierait au loup. Avec le défaut aligné, nil n'arrive pas.
     backend =
       Application.get_env(
         :fleet_spawner,

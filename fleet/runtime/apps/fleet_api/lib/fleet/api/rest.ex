@@ -4,11 +4,11 @@ defmodule Fleet.API.Rest do
 
   ## Routes MVP
 
-    * `GET /api/health` — readiness probe (200 dès Cowboy bind, ch16 `lcars-readiness`)
-    * `GET /api/readiness/deep` — état opérationnel LIVE (P05) via
+    * `GET /api/health` — readiness probe (200 dès Cowboy bind ; consommé par `lcars-readiness`)
+    * `GET /api/readiness/deep` — état opérationnel LIVE via
       `Fleet.API.Readiness.deep/0` — anti-vert-creux
     * `GET /api/pipelines` / `tickets` / `pods` — lecture état (stubs MVP)
-    * `POST /api/admin/spawn` — valide le cap-profile (MA-18 : 400 si absent, 422 si
+    * `POST /api/admin/spawn` — valide le cap-profile (400 si absent, 422 si
       inconnu) PUIS broadcast `admin.spawn.request` event + 202
     * `POST /api/config/update` — atomic write + git commit auto via
       `GitCommitter` (canon trace strate 1)
@@ -16,11 +16,11 @@ defmodule Fleet.API.Rest do
   ## Auth — AUCUNE (par design ; frontière = réseau/container)
 
   Pas d'auth applicative. Le HMAC `X-Auth-Token` (bearer statique sur la constante
-  `"fleet-api-v1"` — pas une signature de requête) a été RETIRÉ (F006/F016/F018/SEC-3) :
+  `"fleet-api-v1"` — pas une signature de requête) a été RETIRÉ :
   intra-container non-exposé = zéro surface, et une auth bricolée donne un faux sentiment
   de sécurité (pire que rien). **La frontière est l'isolation réseau** : ne PAS publier
   `:8080` hors du container (bind loopback / `docker exec`) ; tunnel (WireGuard/Tailscale)
-  pour un accès distant. Threat-model §0 = LAN / humains de confiance.
+  pour un accès distant. Threat-model assumé = LAN / humains de confiance.
   """
 
   use Plug.Router
@@ -32,12 +32,12 @@ defmodule Fleet.API.Rest do
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
   plug(:dispatch)
 
-  # Public health probe (200 dès Cowboy bind, consommé ch16 `lcars-readiness`)
+  # Public health probe (200 dès Cowboy bind, consommé par `lcars-readiness`)
   get "/api/health" do
     send_json(conn, %{status: "ok", ts: DateTime.utc_now() |> DateTime.to_iso8601()})
   end
 
-  # P05 — readiness deep : état opérationnel LIVE (anti-vert-creux). Vue de câblage
+  # Readiness deep : état opérationnel LIVE (anti-vert-creux). Vue de câblage
   # interne (pas un probe public comme /api/health). 200 même si `status: degraded`
   # — la dégradation est une donnée, pas une erreur HTTP.
   get "/api/readiness/deep" do
@@ -71,10 +71,10 @@ defmodule Fleet.API.Rest do
   defp do_admin_spawn(conn) do
     payload = conn.body_params || %{}
 
-    # MA-18 — VALIDER le cap-profile AVANT l'ACK. Avant : le 202 partait dès le broadcast ; un
-    # `cap_profile_name` inexistant n'était détecté QUE plus tard dans `PublishConsumer`, où
+    # VALIDER le cap-profile AVANT l'ACK. Si le 202 partait dès le broadcast, un
+    # `cap_profile_name` inexistant ne serait détecté QUE plus tard dans `PublishConsumer`, où
     # `CapProfile.load` KO = un simple warning, ZÉRO pod spawné. L'appelant (`lcars spawn <rôle>`)
-    # voyait « mis en file (202) » pour un rôle qui ne produira jamais de pod → 202 menteur. Le
+    # verrait « mis en file (202) » pour un rôle qui ne produira jamais de pod → 202 menteur. Le
     # contrat HTTP doit être honnête : le cap-profile fait partie de l'admission, pas d'un best-effort
     # async. On le résout ICI (même loader que le consumer, source unique `Fleet.CapProfile.load/1`).
     case validate_cap_profile(payload) do
@@ -99,7 +99,7 @@ defmodule Fleet.API.Rest do
     end
   end
 
-  # MA-18 — résout le cap-profile demandé (`cap_profile_name` ou `role`, mêmes clés que
+  # Résout le cap-profile demandé (`cap_profile_name` ou `role`, mêmes clés que
   # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing}` (400) ; load KO →
   # `{:error, {:cap_profile, name, reason}}` (422) ; chargé → `:ok` (l'admission passe).
   defp validate_cap_profile(payload) do
@@ -116,7 +116,7 @@ defmodule Fleet.API.Rest do
   end
 
   defp do_broadcast_spawn(conn, payload) do
-    # BL-021 chantier 9 (B) — migrated to schema canon %Fleet.Event{source: :api}.
+    # Schéma canon %Fleet.Event{source: :api} (la struct, pas un map ad-hoc).
     event = %Fleet.Event{
       source: :api,
       type: :"admin.spawn.request",
@@ -157,7 +157,7 @@ defmodule Fleet.API.Rest do
     end
   end
 
-  # #594 D2 — dashboard V2 Elixir natif. Mount Fleet.API.Dashboard sous
+  # Dashboard V2 Elixir natif. Mount Fleet.API.Dashboard sous
   # /dashboard (UI GET-only). Pas d'auth — comme toute l'API (cf. moduledoc § Auth).
   forward("/dashboard", to: Fleet.API.Dashboard)
 

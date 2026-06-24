@@ -1,6 +1,6 @@
 defmodule Fleet.TaskQueue.Task do
   @moduledoc """
-  Le mandat — unité de la TaskQueue. Cf. DN `orchestration/task-queue` §A.
+  Le mandat — unité de la TaskQueue.
 
   `id` = UUID v4 du mandat (= `correlation_id` canonique, propagé end-to-end).
   Distinct de `pod_id` (UUID de session du pod cible).
@@ -37,7 +37,7 @@ defmodule Fleet.TaskQueue.Task do
     :completed_at,
     :result,
     state: :pending,
-    # NB (F150) : champ HISTORIQUE jamais incrémenté (toujours 0). Le retry borné système-side N'est PAS
+    # NB : champ VESTIGIAL jamais incrémenté (toujours 0). Le retry borné système-side N'est PAS
     # ici — il vit dans `Fleet.Pipeline.Executor` (`retry_counts`, autorité per-run), volontairement HORS
     # du Task pod-facing (le compteur ne doit pas être influençable par le pod). Conservé pour compat de
     # schéma (sérialisé) ; à câbler en miroir d'observabilité ou retirer (décision de design, pas un oubli).
@@ -68,9 +68,9 @@ defmodule Fleet.TaskQueue.Task do
   @doc """
   Désérialise depuis la map persistée. `{:error, :invalid}` si champ requis absent OU `state` inconnu.
 
-  Parser UNIQUE (fix audit deep-02) : l'ancienne clause « minimale » (mêmes clés requises) MASQUAIT
-  `rich_from_map` → la recovery perdait `brief`/`role`/`ticket_id`/`deadline`/`result`/`metadata`. Et
-  `String.to_existing_atom` RAISE sur un `state.json` corrompu → bypassait le fallback `:corrupt`.
+  Parser UNIQUE → `rich_from_map`, qui reconstruit TOUS les champs : pas de clause « minimale »
+  concurrente qui masquerait la recovery de `brief`/`role`/`ticket_id`/`deadline`/`result`/`metadata`.
+  `state` via liste fermée (pas `to_existing_atom`, qui RAISE sur un `state.json` corrompu et bypasse `:corrupt`).
   """
   @spec from_map(map()) :: {:ok, t()} | {:error, :invalid}
   def from_map(map) when is_map(map), do: rich_from_map(map)
@@ -82,8 +82,8 @@ defmodule Fleet.TaskQueue.Task do
        )
        when is_binary(id) and is_binary(pod_id) and is_binary(enq) and is_binary(state) do
     # `enqueued_at` est REQUIS (@enforce_keys + clé de tri DateTime de find_active) : un ISO invalide
-    # doit FAIL-LOUD ici, PAS devenir nil silencieusement (sinon boot OK puis crash au tri — audit
-    # Codex after-9b3aea3d). Les autres DateTime (deadline/assigned/completed) sont optionnels → nil OK.
+    # doit FAIL-LOUD ici, PAS devenir nil silencieusement (sinon boot OK puis crash au tri).
+    # Les autres DateTime (deadline/assigned/completed) sont optionnels → nil OK.
     with {:ok, st} <- parse_state(state),
          {:ok, eat} <- parse_required_dt(enq) do
       {:ok,

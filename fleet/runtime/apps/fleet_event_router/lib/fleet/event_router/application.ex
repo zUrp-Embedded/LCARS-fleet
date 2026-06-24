@@ -3,10 +3,10 @@ defmodule Fleet.EventRouter.Application do
 
   use Application
 
-  # Z5 #9 — actions gitea que `WebhooksGitea` peut émettre (`gitea.<action>`). Source UNIQUE :
+  # Actions gitea que `WebhooksGitea` peut émettre (`gitea.<action>`). Source UNIQUE :
   # pré-enregistrement des atomes (preregister_event_atoms) ET garde de cohérence registry
   # (test `gitea_event_types/0 ⊆ events.yaml`). Ajouter une action ici SANS la clé events.yaml
-  # = drop muet en prod → le test casse (regression #9 verrouillée).
+  # = drop muet en prod → le test casse (cette cohérence est verrouillée par le test).
   @gitea_event_types ~w(gitea.opened gitea.closed gitea.push gitea.unknown gitea.reopened
                         gitea.merged gitea.edited gitea.created gitea.synchronized gitea.deleted)
 
@@ -17,9 +17,9 @@ defmodule Fleet.EventRouter.Application do
   @impl Application
   def start(_type, _args) do
     preregister_event_atoms()
-    # BL-027 — registry events.yaml → authorized_event_types (validation broadcast
-    # fail-loud, prod-on/test-off). Remplace le chargement par le GenServer Dispatch
-    # (retiré : table de dispatch inerte, consommation = subscribers directs).
+    # Charge le registry events.yaml → peuple `authorized_event_types` (validation broadcast
+    # fail-loud, active en prod, off en test). Il n'y a pas de GenServer de dispatch : la
+    # consommation se fait par subscribers PubSub directs, ce registry n'est qu'une allow-list.
     Fleet.EventRouter.Catalog.load!()
 
     children =
@@ -34,21 +34,21 @@ defmodule Fleet.EventRouter.Application do
   end
 
   # Pré-enregistre les atoms event_type connus au boot (depuis events.yaml +
-  # ensemble fixe os.signal.<sig>) pour permettre `String.to_existing_atom`
-  # côté `Fleet.EventRouter.Bus.broadcast/3` (mitigation atom leak DoS — M1
-  # reviewer ch11).
+  # ensemble fixe os.signal.<sig>) pour que les émetteurs dynamiques puissent les
+  # résoudre via `String.to_existing_atom` au lieu de `to_atom` — un type forgé venu
+  # de l'extérieur ne crée donc pas d'atome (mitigation atom leak DoS).
   defp preregister_event_atoms do
-    # F035 : parse events.yaml via la source unique `Catalog.event_type_strings/0`
+    # Parse events.yaml via la source unique `Catalog.event_type_strings/0`
     # (plus de localisation + parse inline dupliqués avec `Catalog.do_load/0`).
     yaml_events = Fleet.EventRouter.Catalog.event_type_strings()
 
     signal_events = ~w(os.signal.sigusr1 os.signal.sigterm os.signal.sighup)
     fallback_events = ~w(unknown_event)
 
-    # BL-021 chantier 9 (B) — webhook gitea broadcasts gitea.<action> dynamique
-    # (action body ou X-Gitea-Event header). Pré-enregistre les types vus en pratique
-    # pour autoriser le schema canon `:gitea.<action>` via `to_existing_atom`.
-    # Z5 #9 : ces types DOIVENT aussi être clés d'events.yaml, sinon `Bus.broadcast`
+    # Le webhook gitea broadcaste un `gitea.<action>` dynamique (action du body ou
+    # header X-Gitea-Event). On pré-enregistre les types vus en pratique pour autoriser
+    # le schema canon `:gitea.<action>` via `to_existing_atom`.
+    # Ces types DOIVENT aussi être clés d'events.yaml, sinon `Bus.broadcast` fait
     # fail-loud `UnregisteredError` → drop muet du webhook. Garde : test
     # `gitea_event_types/0 ⊆ registry` (event_registry_gitea_test).
     Enum.each(

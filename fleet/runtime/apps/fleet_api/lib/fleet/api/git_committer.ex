@@ -2,9 +2,9 @@ defmodule Fleet.API.GitCommitter do
   @moduledoc """
   GenServer wrapper atomic write + git auto commit.
 
-  Canon trace strate 1 directive active = traçable git
-  (architecture-cible §L380). Tout changement config via API/UI →
-  commit auto git côté backend.
+  Canon trace strate 1 : toute directive active doit être traçable en
+  git. Tout changement de config via API/UI → commit auto git côté
+  backend (l'historique git EST la trace d'audit des changements config).
 
   ## Workflow
 
@@ -13,7 +13,7 @@ defmodule Fleet.API.GitCommitter do
   2. `git add <file>` (cwd = repo config)
   3. `git commit -m "config: <file> updated by <user>"`
 
-  ## Vulcan #2 — sérialisation
+  ## Sérialisation
 
   Le GenServer **sérialise** tous les commits (call queue) pour éviter
   les race conditions sur le repo git partagé :
@@ -71,7 +71,7 @@ defmodule Fleet.API.GitCommitter do
 
   Returns `{:ok, sha}` (commit SHA) ou `{:error, reason}`.
 
-  Vulcan #2 : sérialisé via le GenServer (call queue FIFO).
+  Sérialisé via le GenServer (call queue FIFO) — un commit à la fois.
   """
   @spec commit_config_change(
           file_path :: String.t(),
@@ -96,9 +96,9 @@ defmodule Fleet.API.GitCommitter do
     end
   end
 
-  # Confinement (finding sécu) : `file_path` DOIT rester sous le repo. Rejette les
-  # chemins absolus et toute traversée `..` qui résoudrait hors de `cwd`. Le @doc
-  # disait "doit être relatif au repo" — c'était un contrat NON enforcé.
+  # Confinement : `file_path` DOIT rester sous le repo. Rejette les chemins
+  # absolus et toute traversée `..` qui résoudrait hors de `cwd` — le @doc
+  # annonce "relatif au repo", cette fonction est ce qui l'ENFORCE (pas qu'un contrat docstring).
   defp safe_abs_path(cwd, file_path) do
     if Path.type(file_path) != :relative do
       {:error, "absolute path"}
@@ -117,8 +117,8 @@ defmodule Fleet.API.GitCommitter do
   defp do_commit(cwd, file_path, abs_path, content, user_id) do
     tmp_path = abs_path <> ".tmp"
 
-    # Snapshot pour rollback (finding atomicité) : le rename arrive AVANT git, donc
-    # un échec git laissait le fichier modifié non commité. On restaure l'état d'origine.
+    # Snapshot pour rollback : le rename arrive AVANT git, donc un échec git
+    # laisserait le fichier modifié SANS commit. On restaure l'état d'origine.
     original =
       case File.read(abs_path) do
         {:ok, bytes} -> {:existed, bytes}
@@ -147,7 +147,7 @@ defmodule Fleet.API.GitCommitter do
   end
 
   defp git_add_commit(cwd, file_path, user_id) do
-    # F008/F009 : séparateur `--` AVANT le path. Sans lui, un file_path commençant par `-`
+    # Séparateur `--` AVANT le path. Sans lui, un file_path commençant par `-`
     # (`--renormalize`) que `safe_abs_path` laisse passer (Path.type relative) est interprété par
     # git comme une OPTION (injection d'options). Et `git commit -- <pathspec>` borne le commit au
     # SEUL fichier écrit (sans `--`, `commit` balaye tout l'index staged, y compris un changement

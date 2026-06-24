@@ -1,7 +1,7 @@
 defmodule Fleet.Spawner.SessionId do
   @moduledoc """
-  Builder du `session_id` claude DÉTERMINISTE (hexspeak) d'un pod fleet (BL-055 ;
-  `work/beyond_#5/#5.2/CHANTIER-uuid-deterministe.md`).
+  Builder du `session_id` claude DÉTERMINISTE (hexspeak) d'un pod fleet : keyé sur
+  (repo, rôle), stable, sans suffixe timestamp.
 
   Format : `<T>badcafe-feed-4dad-babe-<REPO4>dec0de<P><R>`
 
@@ -31,8 +31,8 @@ defmodule Fleet.Spawner.SessionId do
       6  consultant                1badcafe
       7..F  réservés (placeholders, rôles non encore écrits)
 
-  Le QUOI (rôle/tier/projet) vit ici ; le QUI vit sur l'axe OS (UID hérité, ADR-E) — jamais dupliqués
-  (BL-055 : UID-dans-UUID rejeté). Module PUR (zéro process, zéro IO) → testable en isolation.
+  Le QUOI (rôle/tier/projet) vit ici ; le QUI vit sur l'axe OS (UID hérité — le pod tourne sous
+  l'UID de l'humain) — jamais dupliqués (UID-dans-UUID rejeté). Module PUR (zéro process, zéro IO).
   """
   import Bitwise
 

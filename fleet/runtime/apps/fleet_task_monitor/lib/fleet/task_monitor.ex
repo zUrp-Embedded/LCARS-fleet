@@ -1,27 +1,27 @@
 defmodule Fleet.TaskMonitor do
   @moduledoc """
   Monitor fleet → détournement du tool natif `TaskList` Claude Code
-  v2.1.x (DN ring1/fleet-task-monitor). GenServer : subscribe
-  `Fleet.EventRouter.Bus` topic `fleet.events`, mappe les events
-  fleet en mutations TaskCreate/TaskUpdate format JSON V2 Anthropic,
-  écrit en bind-mount shared avec le pod architect-permanent.
+  v2.1.x. GenServer : subscribe `Fleet.EventRouter.Bus` topic
+  `fleet.events`, mappe les events fleet en mutations
+  TaskCreate/TaskUpdate format JSON V2 Anthropic, écrit en bind-mount
+  shared avec le pod architect-permanent.
 
-  ## Raison runtime (Iron Law OTP)
+  ## Pourquoi un GenServer
 
   GenServer justifié : (1) état d'abonnement PubSub persistant
-  cross-message, (2) sérialise les writes FS concurrents (DN §"Framing
-  concurrency" : « Concurrent writes core impossibles par construction
-  (1 GenServer sérialise) »). Pas un wrapper stateless.
+  cross-message, (2) sérialise les writes FS concurrents — un seul
+  GenServer rend les writes concourants impossibles par construction.
+  Pas un wrapper stateless.
 
-  ## Contrat Bus canon (D1 — schema unique `%Fleet.Event{}`, R2b)
+  ## Contrat Bus canon — schema unique `%Fleet.Event{}`
 
   Message reçu = `%Fleet.Event{source: _, type: atom, payload: map,
-  correlation_id: ticket | nil, pod_id: pod | nil}` (BL-021 chantier 9 +
-  R2b). Dispatch sur `type` (consommateur dashboard multi-source) ;
+  correlation_id: ticket | nil, pod_id: pod | nil}`. Dispatch sur
+  `type` (consommateur dashboard multi-source) ;
   `correlation_id` porte le ticket, `pod_id` le pod. La forme tuple
-  legacy `{atom, map}` n'est plus représentable côté consommateur
-  (I-CBC). Le `{:fleet_event, ...}` du pseudo-code DN (2026-05-18) était
-  pré-canon — stale.
+  legacy `{atom, map}` n'est PLUS représentable côté consommateur :
+  ce schéma struct est le seul accepté, l'ancien `{:fleet_event, ...}`
+  est mort.
 
   ## Test-seam
 
@@ -46,7 +46,7 @@ defmodule Fleet.TaskMonitor do
   @default_list_id "fleet-monitor-v1"
   @prefix "lcars-fleet-"
 
-  # Statuts V2 Anthropic (reverse v2.1.88, DN §"Format JSON V2")
+  # Statuts V2 Anthropic (reverse-engineered de Claude Code v2.1.88)
   @statuses ~w(pending in_progress completed failed cancelled)
 
   # ----------------------------------------------------------------
@@ -104,7 +104,7 @@ defmodule Fleet.TaskMonitor do
   def handle_info(_other, state), do: {:noreply, state}
 
   # ----------------------------------------------------------------
-  # Mapping events fleet → tasks (pur, testable — DN §"Mapping")
+  # Mapping events fleet → tasks (pur, testable)
   # ----------------------------------------------------------------
 
   @doc """
@@ -191,9 +191,9 @@ defmodule Fleet.TaskMonitor do
 
     case File.read(path) do
       {:ok, body} ->
-        # #56 : `Jason.decode!` crashait le monitor sur un JSON corrompu (write partiel,
-        # édition manuelle, corruption disque). Garde non-bang → corrompu = même traitement
-        # defensif que le fichier absent (re-matérialise depuis le patch), pas un crash.
+        # `Jason.decode!` (bang) ferait crasher le monitor sur un JSON corrompu (write
+        # partiel, édition manuelle, corruption disque). Garde non-bang → corrompu = même
+        # traitement défensif que le fichier absent (re-matérialise depuis le patch), pas un crash.
         case Jason.decode(body) do
           {:ok, existing} when is_map(existing) ->
             write_raw(path, Map.merge(existing, patch))

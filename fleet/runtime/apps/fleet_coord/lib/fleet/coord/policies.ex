@@ -6,12 +6,12 @@ defmodule Fleet.Coord.Policies do
   Lookup table chargée une fois au boot via `init_policies!/0`
   depuis `priv/config/coord-policies.yaml` (ou path config) et
   persistée dans `:persistent_term` (clé
-  `{__MODULE__, :policies}`). Pattern cohérent ch9 ETS read-only,
-  ch11 schema cache, ch13 schema cache.
+  `{__MODULE__, :policies}`) : lecture O(1) sans process, table figée
+  au boot (même pattern que les caches read-only chargés une fois).
 
-  **Aucune logique de raisonnement LLM** dans ce module
-  (méta-axiome architecture-cible §L441 — soft gate + hook
-  délèguent LLM via spawn pod jetable cap-profile dédié).
+  **Aucune logique de raisonnement LLM** dans ce module : pur lookup
+  table déclaratif (méta-axiome — tout jugement LLM est consolidé sur
+  le gatekeeper, spawné côté pipeline, jamais ici).
 
   ## Format `coord-policies.yaml`
 
@@ -25,10 +25,10 @@ defmodule Fleet.Coord.Policies do
 
   ## Actions broadcastées
 
-    * `notify_dashboard` → `coord.notify.dashboard` event
-    * `escalate_human` → `coord.escalate.human` event
-    * autres → `coord.action.<action>` event (extensible PR sans
-      recompile)
+    * `notify_dashboard` → event `coord.notification_routed`
+    * `escalate_human` → event `coord.escalation_triggered`
+    * autres → event `coord.action_dispatched` (action en payload —
+      extensible sans recompile)
   """
 
   alias Fleet.EventRouter.Bus
@@ -45,14 +45,14 @@ defmodule Fleet.Coord.Policies do
   def init_policies! do
     path = Application.get_env(:fleet_coord, :policies_path, default_policies_path())
 
-    # F025 → RÉVISION DOCTRINE 2026-06-17 (fork crash-boot « deploy cassé => on boot pas »).
-    # Le dégradé F025 (policies absentes/malformées → table vide → coord boote « vert » mais TOUTE
-    # décision/escalade tombe `:not_found`) avait été introduit pour éviter un crash umbrella opaque.
-    # Mais c'est précisément le « truc blessé qu'on garde en vie » que la doctrine rejette : un fichier
-    # policies absent/malformé = artefact de deploy cassé → fail-loud. On restaure le `raise` dans
-    # `Application.start` (le @doc « Fail-fast au boot » redevient vrai — il mentait pendant F025) :
-    # fleet_coord ne démarre pas → le BEAM sort non-zéro → le launcher redéploie/escalade (cf. BL-053
-    # dead-man's switch). On NE limpe PAS sur une table de routage vide. (Pattern A.)
+    # FAIL-LOUD au boot : un fichier policies absent/malformé = artefact de deploy cassé, pas un
+    # état runtime à tolérer. On `raise` (propagé par `Application.start`) plutôt que de dégrader
+    # sur une table de routage VIDE — ce dégradé ferait booter coord « vert » alors que TOUTE
+    # décision/escalade tomberait ensuite `:not_found` (un « truc blessé qu'on garde en vie »).
+    # Conséquence voulue : fleet_coord ne démarre pas → le BEAM sort non-zéro → le launcher
+    # redéploie/escalade (dead-man's switch). Le contrat « Fail-fast au boot » du @doc est ainsi
+    # tenu littéralement. Règle générale : panne de chargement annoncée fail-loud DOIT crasher le
+    # boot, jamais log-and-continue derrière un statut vert.
     policies =
       case YamlElixir.read_from_file(path) do
         {:ok, %{} = data} ->
@@ -72,14 +72,14 @@ defmodule Fleet.Coord.Policies do
   end
 
   @doc """
-  Dispatch d'une décision validée Gatekeeper — DN 9 C2.3 amendement.
+  Dispatch d'une décision validée Gatekeeper.
 
   Arité étendue : `correlation_id` explicite (task.id UUID v4 du mandat
   ayant produit le verdict, peut être nil hors mandat).
 
   Lookup `{decision, reason}` → table policies → broadcast schema canon
-  `%Fleet.Event{source: :coord, type, correlation_id, …}` (DN 9 C2.1+C2.2).
-  Compat shim `handle_decision/1` retiré au chantier 9 (B) BL-021.
+  `%Fleet.Event{source: :coord, type, correlation_id, …}`.
+  Le compat shim `handle_decision/1` (sans correlation_id) est retiré.
 
   Returns :
     * `:ok` — policy match + broadcast effectué
@@ -100,11 +100,11 @@ defmodule Fleet.Coord.Policies do
   end
 
   @doc """
-  Dispatch d'une escalade Cat 5 — DN 9 C2.3 amendement.
+  Dispatch d'une escalade Cat 5.
 
   Arité étendue : `correlation_id` explicite (extrait de l'event upstream
-  ayant déclenché l'escalade, peut être nil hors mandat). Compat shim
-  `handle_escalation/2` retiré au chantier 9 (B) BL-021.
+  ayant déclenché l'escalade, peut être nil hors mandat). Le compat
+  shim `handle_escalation/2` (sans correlation_id) est retiré.
   """
   @spec handle_escalation(
           source :: atom() | String.t(),
@@ -144,10 +144,10 @@ defmodule Fleet.Coord.Policies do
     end
   end
 
-  # DN 9 C2.1+C2.2 — dispatch_action arité 4 (path, payload, correlation_id).
-  # Émet schema canon strict %Fleet.Event{source: :coord, type, correlation_id, ...}
-  # SUR le topic "fleet.events" (DN 11 broadcast/2) ET legacy compat shim
-  # broadcast/3 (chantier 3 BL-021 retire le legacy).
+  # dispatch_action arité 4 (path, payload, correlation_id). Émet le schema canon strict
+  # %Fleet.Event{source: :coord, type, correlation_id, ...} sur le topic "fleet.events" via
+  # `Bus.broadcast/2` (struct). Le correlation_id est propagé sur le broadcast pour relier
+  # l'event à son mandat d'origine.
 
   defp dispatch_action("notify_dashboard", path, payload, correlation_id) do
     canon_event(:notification_routed, "dashboard", path, payload, correlation_id)
@@ -184,9 +184,9 @@ defmodule Fleet.Coord.Policies do
   defp canon_action(action, path, payload, correlation_id) do
     event = %Fleet.Event{
       source: :coord,
-      # R09 : clé registry = `coord.action_dispatched` (préfixe coord, cohérent
-      # coord.notification_routed/escalation_triggered). L'ancien `:action_dispatched`
-      # nu était hors registry → broadcast rejeté (UnregisteredError) → drop silencieux.
+      # Clé registry = `coord.action_dispatched` (préfixe coord, cohérent avec
+      # coord.notification_routed/escalation_triggered). Un `:action_dispatched` nu
+      # serait hors registry → broadcast rejeté (UnregisteredError) → drop silencieux.
       type: :"coord.action_dispatched",
       timestamp: DateTime.utc_now(),
       pod_id: extract_pod_id(payload),
@@ -209,8 +209,8 @@ defmodule Fleet.Coord.Policies do
   defp canon_type(:escalation_triggered),
     do: :"coord.escalation_triggered"
 
-  # Broadcast canon strict — silencieux si UnregisteredError (registry pas
-  # peuplé) pour ne pas casser le boot. (Z5 ER-D2 : `SchemaError` retiré, jamais levé.)
+  # Broadcast canon strict — toléré silencieusement si UnregisteredError (registry pas
+  # encore peuplé au boot order) pour ne pas casser le boot ; toute autre erreur remonte.
   defp safe_canon_broadcast(%Fleet.Event{} = event) do
     Bus.broadcast("fleet.events", event)
   rescue

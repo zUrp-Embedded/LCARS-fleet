@@ -17,22 +17,22 @@ defmodule Fleet.API do
     * `Fleet.API.GitCommitter` — pure functions wrapper atomic write
       rename + `git add` + `git commit` (canon trace strate 1)
 
-  ## D1 décidé (split deferred)
+  ## Split différé
 
   MVP : 1 app umbrella `fleet_api` unique (REST + WS dans même
   supervision). Pas de duplication subscribe bus, simplicité OTP
   supervision tree.
 
-  **Deferred** : split en `fleet_bus_socket` (irréductible côté
+  **Différé** : split en `fleet_bus_socket` (irréductible côté
   event_router) + `fleet_rest_facade` (optionnel surcouche). Critère
   opérationnalisable post-implem **90 jours** : si 1er client observé
   consume bus NDJSON brut sans REST surcouche (ex CLI custom, autre
-  dashboard expérimental, MCP server externe) → ADR + amendement
-  design note. Référence : `architecture-cible.md` §L368 + §L791.
+  dashboard expérimental, MCP server externe) → on splitte ; tant
+  qu'aucun tel client n'existe, le split serait spéculatif.
 
   ## Frontière vendor
 
-  N0 (vendor-agnostic, pas d'inférence — orchestration via PubSub bus
-  ch11 PROMOTED).
+  N0 (vendor-agnostic, pas d'inférence — orchestration via le bus
+  PubSub ; aucune inférence vendor dans cette couche).
   """
 end

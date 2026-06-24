@@ -1,7 +1,7 @@
 defmodule Fleet.Pipeline.Gates.Predicate do
   @moduledoc """
   Évaluateur de prédicats des gate `rules` v2.5 (strings) contre les `outputs`
-  auto-rapportés par le pod (R3/D2). Module **pur** (pas d'état runtime).
+  auto-rapportés par le pod. Module **pur** (pas d'état runtime).
 
   ## Grammaire (bornée au corpus canon `standard-qa` / `audit-only`)
 
@@ -28,7 +28,7 @@ defmodule Fleet.Pipeline.Gates.Predicate do
   `"very critical"` — borné au corpus actuel (operandes mono-mot/nombre). À
   durcir si un pipeline futur introduit des operandes à espaces.
 
-  ## Fail-closed (I-CBC)
+  ## Fail-closed
 
   Un fait référencé **absent** des outputs, ou un type incompatible (ex. `>=`
   sur un non-nombre), rend le prédicat **faux** — jamais un pass silencieux sur

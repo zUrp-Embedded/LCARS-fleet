@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-17
+**Dernière révision** : 2026-06-24
 **Statut** : guide runtime v2 (salvage cow-boy).
 **Référencé par** : —
 
@@ -82,5 +82,5 @@ When a test needs the real backend, it instantiates it directly (e.g. `start_sup
 
 - Each app's `README.md` is the **contract**: list of submodules, public API, configuration knobs, dependencies. When adding modules, update the README.
 - Header comments at the top of shell scripts use the LCARS format (`SOURCE: / AUTHOR: / STARDATE: / STATUS:`). Stardate gets updated by the `/push-github` skill — don't hand-edit it before pushing.
-- Bug-fix comments often carry an incident reference like `#578` / `#582` / `B4` / `D6` — these point to past regressions. Keep the reference when modifying nearby code; it's load-bearing for future debugging.
+- **Self-contained comments (passe 3 canon, 2026-06-24)**: a comment must be understandable by reading THIS file alone — no cryptic tags (`#578`, `BL-050`, `I-CBC`, `ADR-G`, grid codes like `A2.1`/`D2`…) and no pointer to the specs. Inline the WHY / the invariant / the gotcha in plain words; the code IS the doc (primary reader = an agent). When you write a new comment, carry the meaning, not an incident coordinate. (The old "keep the incident reference, it's load-bearing" rule is retired — the de-referencing decoder lives in the `beyond/` archive if ever needed.)
 - `apps/*/tmp/` is gitignored ExUnit `@tag :tmp_dir` artefacts — never check in.

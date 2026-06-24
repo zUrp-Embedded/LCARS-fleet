@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.WakeRecovery do
   @moduledoc """
-  Durcissement de `Fleet.Spawner.wake_pod/1` (#5.2). Un échec de wake (pod injoignable : `:not_found`,
+  Durcissement de `Fleet.Spawner.wake_pod/1`. Un échec de wake (pod injoignable : `:not_found`,
   tmux absent/mort) n'est PAS bloquant en soi. Le modèle :
 
     - **déjà vu** — l'incident est dans le registre persistant `Fleet.Pilot.IncidentRegistry` (donc déjà

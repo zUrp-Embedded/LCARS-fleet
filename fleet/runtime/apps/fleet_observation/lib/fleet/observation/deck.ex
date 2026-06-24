@@ -1,28 +1,28 @@
 defmodule Fleet.Observation.Deck do
   @moduledoc """
-  Plug.Router de l'observation deck `:8091` (squelette BL-026, incrément B).
+  Plug.Router de l'observation deck `:8091`.
 
   ## Routes
 
     * `GET /` — shell LCARS : header BRIDGE (LED santé + horloge) + les 7 decks
-      (PODS live, les autres en attente du read-model — incrément C).
+      (PODS live, les autres alimentés par la projection du read-model).
     * `GET /health` — sonde de vivacité du deck.
     * `GET /api/pods` — JSON des pods vivants (`Fleet.Spawner.list_pods/0`,
       projetés en vue JSON-safe). Lecture seule, no-auth, intra-release.
     * `GET /static/*` — assets (`priv/static/lcars-tva.css`, `assets/*.svg`).
 
-  ## Frontière (BL-026)
+  ## Frontière read
 
-  Squelette : `/api/pods` lit `Fleet.Spawner.list_pods/0` (Ring 1 read direct).
-  L'incrément C interpose `Fleet.Observation.ReadModel` (projection du stream
-  `%Fleet.Event{}` + snapshot boot) ; le deck lira **la projection**, jamais
-  l'état GenServer interne. cf. `DESIGN-observabilite.md`.
+  `/api/pods` lit `Fleet.Spawner.list_pods/0` (Ring 1 read direct, snapshot live).
+  `/api/projection` lit `Fleet.Observation.ReadModel` (projection du stream
+  `%Fleet.Event{}`) ; le deck lit **la projection**, jamais
+  l'état GenServer interne d'un tiers.
   """
 
   use Plug.Router
 
-  # Rôles connus → icône SVG (priv/static/assets). starfleet exclu de l'affichage
-  # (non-négo #2 : l'asset existe mais aucun panel starfleet).
+  # Rôles connus → icône SVG (priv/static/assets). starfleet exclu de l'affichage :
+  # domaine système hors-bande, pas le rail fleet (l'asset existe mais aucun panel l'instrumente).
   @known_roles ~w(architect consultant engineer gatekeeper qualifier reviewer vulcan)
 
   plug(Plug.Static,
@@ -56,7 +56,7 @@ defmodule Fleet.Observation.Deck do
     |> send_resp(200, body)
   end
 
-  # Projection event-dérivée (read-model BL-026) : alimente FLOW/GATEKEEPER/
+  # Projection event-dérivée (read-model) : alimente FLOW/GATEKEEPER/
   # STREAM/COORDINATION/DIAGNOSTICS/BRIDGE. Read ETS direct (bypass GenServer).
   get "/api/projection" do
     body = Jason.encode!(Fleet.Observation.ReadModel.projection())

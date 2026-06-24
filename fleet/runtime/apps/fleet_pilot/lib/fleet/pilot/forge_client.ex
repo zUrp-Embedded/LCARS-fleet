@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @moduledoc """
   Client minimal Gitea REST API pour `fleet_pilot`. Une seule
   opération : `add_label/4` (PUT label set idempotent) — utilisée par
-  `Fleet.Pilot.AutoDispatcher` pour poser le lock `lcars-dispatched`
+  le dispatcher pour poser le lock `lcars-dispatched`
   avant invoke pipeline.
 
   ## Configuration
@@ -20,9 +20,9 @@ defmodule Fleet.Pilot.ForgeClient do
 
   ## Idempotence
 
-  Pattern `GET issue labels + PUT label set` (cf. v1.5
-  `gitea/gitea-client.py:135-138` : ticket 153-D — POST append cause
-  doublons). Re-call sur label déjà présent = `{:ok, :already_present}`,
+  Pattern `GET issue labels + PUT label set` (un POST en
+  append créerait des doublons de label, d'où le set
+  idempotent). Re-call sur label déjà présent = `{:ok, :already_present}`,
   zéro round-trip d'écriture.
 
   ## Pas de cache
@@ -88,7 +88,7 @@ defmodule Fleet.Pilot.ForgeClient do
   catch-up, ça couvre largement la fenêtre de catch-up post-crash. Si
   le poller doit traiter +50 issues entre 2 ticks, c'est un signe que
   l'interval est trop long ou la forge en burst — sujet de tuning, pas
-  de PR (cf. v1.5 `LcarsFleetPoller` même limite).
+  une limite à lever.
   """
   @spec list_open_issues_without_label(String.t(), String.t(), Keyword.t()) ::
           {:ok, [map()]} | {:error, term()}
@@ -106,8 +106,8 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Liste les issues ouvertes du `repo` ASSIGNÉES À MOI (scoping multi-user forge-side, #5.2 D1). Brique du
-  bail dispatch repo-serialise (compte les pipelines actifs, in-flight inclus). PAGINÉ (F-030). Délègue à
+  Liste les issues ouvertes du `repo` ASSIGNÉES À MOI (scoping multi-user forge-side). Brique du
+  bail dispatch repo-serialise (compte les pipelines actifs, in-flight inclus). PAGINÉ. Délègue à
   `list_scoped_issues` — issues ET PR passent par le MÊME endpoint `/issues?type=…` (un seul code de scoping).
   """
   @spec list_open_issues(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
@@ -115,9 +115,9 @@ defmodule Fleet.Pilot.ForgeClient do
     list_scoped_issues(repo, "issues", opts)
   end
 
-  # #5.2 — UN SEUL lister sur `/issues`, paramétré par `type` (issues|pulls) + scopé assignee FORGE-SIDE.
-  # Source unique du listing/scoping (state/type/assigned_by), paginée (F-030). La forge filtre
-  # (`assigned_by` — vérifié live Gitea 1.26.1, marche sur /issues pour les 2 types) → le poller ne voit
+  # UN SEUL lister sur `/issues`, paramétré par `type` (issues|pulls) + scopé assignee FORGE-SIDE.
+  # Source unique du listing/scoping (state/type/assigned_by), paginée. La forge filtre
+  # (`assigned_by` — Gitea 1.26.1 marche sur /issues pour les 2 types) → le poller ne voit
   # QUE les siennes (le bail devient par-humain, cohérent N-fleets-par-humain). Le scoping vit ICI, en un
   # seul endroit — decide/dispatch_review n'ont plus à re-vérifier l'ownership.
   defp list_scoped_issues(repo, type, opts) when type in ["issues", "pulls"] do
@@ -126,7 +126,7 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # #5.2 D1 — suffixe query `&assigned_by=<login>` si `opts[:assigned_by]` posé, sinon "". Pur/testable.
+  # Suffixe query `&assigned_by=<login>` si `opts[:assigned_by]` posé, sinon "". Pur/testable.
   @doc false
   def assigned_by_qs(opts) do
     case Keyword.get(opts, :assigned_by) do
@@ -148,12 +148,12 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Write-ops — primitives mécaniques de fin-de-hop (DN forge-state-machine §5)
+  # Write-ops — primitives mécaniques de fin-de-hop (la forge EST la machine à états).
   # Toutes idempotentes (skip si l'état cible est déjà atteint).
   # ============================================================
 
   @doc """
-  Réassigne l'issue à `login` (1-assignee strict, DN §10). PATCH `assignees: [login]`
+  Réassigne l'issue à `login` (1-assignee strict, invariant de la carte). PATCH `assignees: [login]`
   remplace la liste. Idempotent : `{:ok, :already}` si `login` est déjà le seul assignee.
   """
   @spec set_assignee(String.t(), integer(), String.t(), Keyword.t()) ::
@@ -175,14 +175,14 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # #5.2 D4 — `set_state_label` (transition `state:*`, DN §5 étape 3) RETIRÉ : l'état vit dans la
-  # route-comment (source unique), pas dans un label `state:*` (qui n'était plus lu que par le
-  # `routing.ex` legacy supprimé). Les verrous (`lcars-in-flight`) passent par `add_label`/`remove_label`.
+  # Pas de `set_state_label` (transition `state:*`) : l'état vit dans la
+  # route-comment (source unique), pas dans un label `state:*`. Les verrous
+  # (`lcars-in-flight`) passent par `add_label`/`remove_label`.
 
   @doc """
-  Poste un comment (DN §5 étape 2). Si `:dedup_signature` est fourni et qu'un comment **système**
+  Poste un comment. Si `:dedup_signature` est fourni et qu'un comment **système**
   existant la contient déjà, no-op (`{:ok, :already}`) — la signature `[hop:<role>:<sha>]` rend le
-  replay idempotent. Le dédup ne fait foi QUE des comments du bot (F058 suivi-review) : sinon un
+  replay idempotent. Le dédup ne fait foi QUE des comments du bot : sinon un
   user forge postant la signature en avance supprimerait le comment système (→ `count_signed_hops`
   sous-compterait). Bot irrésoluble → dédup non filtré (fail-open vers la sûreté du replay).
   """
@@ -205,7 +205,7 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Retire le label `label_name` (DN §5 étape 5 : release du verrou `lcars-in-flight`).
+  Retire le label `label_name` (release du verrou `lcars-in-flight` en fin-de-hop).
   Idempotent : `{:ok, :already_absent}` si le label n'est pas présent.
   """
   @spec remove_label(String.t(), integer(), String.t(), Keyword.t()) ::
@@ -230,7 +230,7 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Ferme l'issue (DN §14 terminal de chaîne). PATCH `state: closed`. Idempotent côté Gitea.
+  Ferme l'issue (terminal de chaîne). PATCH `state: closed`. Idempotent côté Gitea.
   """
   @spec close_issue(String.t(), integer(), Keyword.t()) :: {:ok, :closed} | {:error, term()}
   def close_issue(repo, issue_number, opts \\ []) do
@@ -242,7 +242,7 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Onboarding projet (Rail 1 e2e 2026-06-14) — création repo + issue.
+  # Onboarding projet — création repo + issue.
   # Greffe sur le plumbing http_post existant ; le token système (lcars-system)
   # doit porter write:organization (repo) + write:issue.
   # ============================================================
@@ -286,7 +286,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @doc """
   Ajoute/met à jour un **collaborateur** sur `repo` avec `permission` (`"read"|"write"|"admin"`) —
   Gitea `PUT /repos/{repo}/collaborators/{username}`. Idempotent (re-PUT = même perm). Requiert
-  repo-admin (token système). ②.1d : l'onboarding donne le **write** aux comptes de rôle (engineer/
+  repo-admin (token système). L'onboarding donne le **write** aux comptes de rôle (engineer/
   qualifier/reviewer/gatekeeper) pour que leurs reviews comptent au gate de branch-protection et que
   le gatekeeper puisse merger.
   """
@@ -303,8 +303,8 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Recherche les repos dont un TOPIC matche `topic` — Gitea `GET /repos/search?q=&topic=true`. #5.2
-  multi-projet : le poller découvre SES projets via le topic per-humain `lcars-fleet-<human>` (posé par
+  Recherche les repos dont un TOPIC matche `topic` — Gitea `GET /repos/search?q=&topic=true`.
+  Multi-projet : le poller découvre SES projets via le topic per-humain `lcars-fleet-<human>` (posé par
   l'onboarding). Retourne les `full_name` (`"owner/name"`). Forme inattendue / aucun résultat → `{:ok, []}`.
   (limit=50 : un humain a < 50 projets actifs ; pagination = backlog si besoin.)
   """
@@ -320,7 +320,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Ajoute le `topic` au `repo` — Gitea `PUT /repos/{repo}/topics/{topic}`. Idempotent (re-PUT = no-op).
-  #5.2 multi-projet : l'onboarding tague le repo neuf `lcars-fleet-<human>` → découvrable par le poller.
+  Multi-projet : l'onboarding tague le repo neuf `lcars-fleet-<human>` → découvrable par le poller.
   """
   @spec add_topic(String.t(), String.t(), Keyword.t()) :: :ok | {:error, term()}
   def add_topic(repo, topic, opts \\ []) when is_binary(repo) and is_binary(topic) do
@@ -348,7 +348,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @doc """
   Repo du **dernier ticket travaillé** par `human`, SCOPÉ aux repos où il est **collaborateur**. Sert de
   projet par défaut quand l'arch appelle `create_ticket` sans `project` explicite (≠ « dernier créé », jugé
-  mauvais). Mécanique (vérifiée live Gitea :3000) : issue-search global `assigned_by=<human>` → tri
+  mauvais). Mécanique : issue-search global `assigned_by=<human>` → tri
   CLIENT-SIDE par `updated_at` desc (le `sort=` Gitea s'est révélé peu fiable) → 1ʳᵉ issue dont le repo passe
   `collaborator?/3` (l'`assigned_by` seul inclut des repos non-collaborateur, ex. vieux tickets de test). `:none`
   si rien (fleet neuve / forge down) → l'appelant retombe sur le fallback config `:delegation_repo`.
@@ -380,8 +380,8 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   L'**id forge numérique** du repo (`GET /repos/<repo>` → `.id`). C'est l'identité du projet pour le
-  `session_id` déterministe (`Fleet.Spawner.SessionId`, segment `<REPO4>` — BL-055) : la FORGE est la
-  source de vérité, on ne dérive PAS un id du néant. Id Gitea = entier séquentiel stable (vérifié live :
+  `session_id` déterministe (`Fleet.Spawner.SessionId`, segment `<REPO4>`) : la FORGE est la
+  source de vérité, on ne dérive PAS un id du néant. Id Gitea = entier séquentiel stable (ex.
   `fleet/lcars` = 145). `{:error, _}` si le repo n'existe pas / forge down → l'appelant retombe sur un
   UUID random (best-effort, zéro collision).
   """
@@ -401,7 +401,7 @@ defmodule Fleet.Pilot.ForgeClient do
   `rule` = map d'options Gitea (`rule_name`, `required_approvals`, `dismiss_stale_approvals`,
   `block_on_rejected_reviews`, `enable_push`, …). C'est le **gate forge-enforcé** : sur le repo
   sandbox, la forge refuse le merge tant que les gardes (N approvals, pas de REQUEST_CHANGES) ne sont
-  pas vertes → l'arbitre est la forge, pas le runtime (cible DN §1.4). Requiert repo-admin.
+  pas vertes → l'arbitre est la forge, pas le runtime. Requiert repo-admin.
   Idempotent : une règle déjà posée (409/422) → `:ok`.
   """
   @spec protect_branch(String.t(), map(), Keyword.t()) :: :ok | {:error, term()}
@@ -444,9 +444,9 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Pull requests (BL-044 / Corr.3 git-native) — la PR est la surface de la phase
+  # Pull requests (git-native) — la PR est la surface de la phase
   # REVIEW+PROMOTE : domicile durable des verdicts de gate (review native Gitea) et
-  # entonnoir unique vers `main`. Barrière §4 : le SYSTÈME ouvre/review/merge, le pod
+  # entonnoir unique vers `main`. Barrière : le SYSTÈME ouvre/review/merge, le pod
   # n'a jamais le token. Primitives IDEMPOTENTES (rejouables sans casser).
   # ============================================================
 
@@ -567,11 +567,11 @@ defmodule Fleet.Pilot.ForgeClient do
   reste **LINÉAIRE** (pas de merge commit, doctrine append-only préservée) ET gère un `main` qui a
   avancé sous la PR (MULTI-TICKET PARALLÈLE : 2 tickets disjoints → 2 PR du même `main` → la 1ʳᵉ
   merge avance `main`, la 2ᵉ n'est plus FF-able mais reste mergeable → `rebase` la passe ; `fast-forward-only`
-  la wedgeait à l'infini — fait live DUR, PoC morse).
+  la wedgerait à l'infini).
 
   **PAS de cascade FF→rebase** : une 1ʳᵉ tentative qui échoue rejette la PR en état « checking »
   (Gitea recalcule la mergeabilité de façon ASYNCHRONE), et la 2ᵉ tentative dos-à-dos tape dans cette
-  fenêtre → `405 « Please try again later »` (prouvé live : double-appel = double-405 ; `rebase` seul
+  fenêtre → `405 « Please try again later »` (double-appel = double-405 ; `rebase` seul
   sur une PR stable = 200). Donc UN SEUL appel, et le `405 try-again-later` est traité comme un
   **TRANSITOIRE** (retry borné `@merge_checking_retries` × `merge_retry_delay_ms`, défaut 800ms — la
   mergeabilité se stabilise en ~1 calcul). Tout autre échec (vrai conflit, pas d'approbations sous
@@ -590,7 +590,7 @@ defmodule Fleet.Pilot.ForgeClient do
   # UN appel `Do: method` ; retry borné UNIQUEMENT sur le transitoire « try again later » (mergeabilité
   # en cours de calcul côté Gitea). Toute autre erreur = définitive → remonte (fail-loud).
   defp do_merge(config, repo, index, method, delay, attempts_left) do
-    # #7 (2026-06-18) : `delete_branch_after_merge` → Gitea supprime la feature-branch
+    # `delete_branch_after_merge` → Gitea supprime la feature-branch
     # `lcars/issue-N-role` après merge (hygiène : pas d'empilement de branches mortes). No-op si
     # branche protégée/absente ; le merge reste l'autorité (la suppression est un effet de bord).
     case http_post(config, "/repos/#{repo}/pulls/#{index}/merge", %{
@@ -626,11 +626,11 @@ defmodule Fleet.Pilot.ForgeClient do
   defp merge_checking?(_), do: false
 
   @doc """
-  Liste les PR OUVERTES du `repo` ASSIGNÉES À MOI (scoping multi-user forge-side, #5.2 D1), shape PR
+  Liste les PR OUVERTES du `repo` ASSIGNÉES À MOI (scoping multi-user forge-side), shape PR
   COMPLÈTE : `number`, `head.ref` (feature-branch `lcars/issue-N-role`), `head.sha`, `requested_reviewers`,
-  `labels`. PAGINÉ (F-030). Brique du dispatch juge PR-driven.
+  `labels`. PAGINÉ. Brique du dispatch juge PR-driven.
 
-  Hybride (Gitea vérifié live 1.26.1) : `/pulls` n'a PAS `assigned_by`, mais `/issues?type=pulls&assigned_by`
+  Hybride (Gitea 1.26.1) : `/pulls` n'a PAS `assigned_by`, mais `/issues?type=pulls&assigned_by`
   filtre l'assignee (en rendant une shape ISSUE, sans head/requested_reviewers). Donc on FILTRE via
   `list_scoped_issues(type: pulls)` — MÊME code de scoping/pagination que les issues — puis on récupère la
   shape PR complète via `get_pull/3`, 1 par numéro. Le scoping reste 100% forge-side, comme les issues.
@@ -658,7 +658,7 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  @doc "GET une PR unique → shape complète (head/head.sha/requested_reviewers). #5.2 — brique de list_open_pulls."
+  @doc "GET une PR unique → shape complète (head/head.sha/requested_reviewers). Brique de list_open_pulls."
   @spec get_pull(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
   def get_pull(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
     with {:ok, config} <- resolve_config(opts),
@@ -669,7 +669,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Extrait `{issue_number, role}` d'une feature-branch systeme `lcars/issue-<n>-<role>` (format pose
-  par `HopConsumer.build_deliverable_opts` / `StageDispatcher`, convention F071). Sert au dispatch
+  par `HopConsumer.build_deliverable_opts` / `StageDispatcher`). Sert au dispatch
   juge PR-driven a remonter de la PR (head.ref) au ticket. `:error` si le ref n'est pas une
   feature-branch fleet (PR externe / branche manuelle -> ignoree par le dispatch, jamais misroutee).
   """
@@ -687,19 +687,19 @@ defmodule Fleet.Pilot.ForgeClient do
   Verdict de review **PAR juge** d'une PR (Gitea `GET /repos/{repo}/pulls/{index}/reviews`) : la
   DERNIÈRE review décisive non-dismissed de CHAQUE reviewer, clé = login **downcasé**.
 
-  **②.1d — pourquoi par-juge et pas `requested_reviewers`** : Gitea 1.26 ne vide PAS `requested_reviewers`
-  quand un juge a reviewé, et la DELETE est un no-op sur un reviewer déjà actif (vérifié live #6) → on
+  **Pourquoi par-juge et pas `requested_reviewers`** : Gitea 1.26 ne vide PAS `requested_reviewers`
+  quand un juge a reviewé, et la DELETE est un no-op sur un reviewer déjà actif → on
   ne peut PAS s'appuyer dessus pour savoir « qui reste à juger ». La SOURCE DE VÉRITÉ = la liste des
   reviews : un juge a un **verdict décisif** ssi sa dernière review non-dismissed est APPROVED ou
   REQUEST_CHANGES. Le poller dispatch un juge demandé qui n'a PAS encore de verdict, et tranche
   (merge/rework) quand tous les demandés en ont un.
 
-  **Commit-scoping (`:head_sha`, live #7)** : un verdict ne vaut que pour le COMMIT qu'il a jugé. Passer
+  **Commit-scoping (`:head_sha`)** : un verdict ne vaut que pour le COMMIT qu'il a jugé. Passer
   `head_sha: pr.head.sha` (chemin prod) → seules les reviews `commit_id == head_sha` comptent ; une review
   sur un commit antérieur est PÉRIMÉE (le code n'existe plus). Crucial pour le REQUEST_CHANGES : Gitea ne
   le dismisse JAMAIS au push (≠ approbations stale, dismissées par branch-protection) — sans scoping, un
   REQUEST_CHANGES périmé reste « actif », son juge n'est jamais re-dispatché (il a déjà un verdict) et la
-  PR boucle en rework infini. Le scoping le rend `pending` → re-jugé sur le code courant.
+  PR bouclerait en rework infini. Le scoping le rend `pending` → re-jugé sur le code courant.
   Les reviews COMMENT/PENDING/REQUEST_REVIEW ne sont PAS décisives (ignorées).
 
   ## Returns
@@ -719,9 +719,9 @@ defmodule Fleet.Pilot.ForgeClient do
   État de jury d'une PR en UN fetch (`GET .../pulls/{index}/reviews`) : `verdicts` (décisifs par juge,
   commit-scopés via `:head_sha` — cf. `pr_review_verdicts`) ET `reviewers` (le SET du jury).
 
-  **F-E8 — le SET du jury ne se lit PAS de `pr.requested_reviewers`** : ce champ est VOLATIL (Gitea
-  l'altère de façon non fiable — un juge a pu en DISPARAÎTRE sans avoir voté, ce qui faisait merger sur
-  demi-jury, live PoC-7). Source STABLE = les review-records, qui persistent : un `REQUEST_REVIEW` =
+  **Le SET du jury ne se lit PAS de `pr.requested_reviewers`** : ce champ est VOLATIL (Gitea
+  l'altère de façon non fiable — un juge peut en DISPARAÎTRE sans avoir voté, ce qui ferait merger sur
+  demi-jury). Source STABLE = les review-records, qui persistent : un `REQUEST_REVIEW` =
   « ce juge a été demandé » ; un `APPROVED`/`REQUEST_CHANGES` = « il a voté ». Le caller (`dispatch_review`)
   unionne avec `requested_reviewers` (défensif) et calcule `pending = jury -- verdicts` → un juge
   jamais-voté reste `pending` (spawné), JAMAIS sauté.
@@ -751,7 +751,7 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # F-E8 — le SET du jury = tout login ayant un review-record « de jury » : demandé (`REQUEST_REVIEW`) OU
+  # Le SET du jury = tout login ayant un review-record « de jury » : demandé (`REQUEST_REVIEW`) OU
   # ayant voté (`APPROVED`/`REQUEST_CHANGES`). Exclut `COMMENT`/`PENDING` (bruit non-juge). Source STABLE
   # (les records persistent) vs `requested_reviewers` volatil → un juge tombé du champ sans voter reste
   # dans le jury → `pending` → spawné, plus de merge sur demi-jury.
@@ -769,7 +769,7 @@ defmodule Fleet.Pilot.ForgeClient do
   # celui posé sur le commit COURANT (`commit_id == head_sha`) compte ; une review sur un commit antérieur
   # est PÉRIMÉE — le code jugé n'existe plus, le juge doit re-juger. Indispensable car Gitea ne dismisse
   # PAS un REQUEST_CHANGES au push (seules les approbations stale via branch-protection le sont) : sans ce
-  # filtre, un REQUEST_CHANGES périmé qui n'est jamais re-dispatché bloque la PR pour TOUJOURS (live #7).
+  # filtre, un REQUEST_CHANGES périmé qui n'est jamais re-dispatché bloque la PR pour TOUJOURS.
   defp verdicts_by_reviewer(reviews, head_sha) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))
@@ -793,8 +793,8 @@ defmodule Fleet.Pilot.ForgeClient do
   pour nourrir le **rework** du producteur. Renvoie la DERNIÈRE review REQUEST_CHANGES par reviewer
   avec son `body` — le verdict structuré gravé par le juge (`reason`/`details`/`chain`, via
   `HopConsumer.judge_review_body`). Sans ce body, le `rework_mandate` dit « corrige selon la review »
-  SANS le contenu de la review → l'engineer devine à l'aveugle (famine d'info, fix #1, DOUBLE :
-  jumeau de l'`outputs: {}` du juge ; prouvé live morse — l'eng a rendu `blocked_dep` plutôt que
+  SANS le contenu de la review → l'engineer devine à l'aveugle (famine d'info, DOUBLE :
+  jumeau de l'`outputs: {}` du juge ; sans le body l'eng rend `blocked_dep` plutôt que
   deviner). Pas de commit-scoping ici : on veut le DERNIER feedback par reviewer (`List.last`), pas
   un verdict décisif courant (le rework s'exécute AVANT le prochain push, le REQUEST_CHANGES porte
   sur le head courant). Les reviews sans body (verdict générique) sont écartées (rien d'actionnable).
@@ -819,7 +819,7 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  MA-06 — compte les rounds de REWORK déjà déclenchés sur une PR = nb de reviews `REQUEST_CHANGES`
+  Compte les rounds de REWORK déjà déclenchés sur une PR = nb de reviews `REQUEST_CHANGES`
   non-dismissed (Gitea `GET .../pulls/{index}/reviews`). Chaque round (juge demande des changements →
   l'eng re-pousse → re-review) ajoute une review REQUEST_CHANGES → le compteur est **forge-natif** et
   MONOTONE (les reviews persistent), comme `count_signed_hops` pour le rebond de gate. Sert au frein
@@ -885,12 +885,12 @@ defmodule Fleet.Pilot.ForgeClient do
           branch: Keyword.get(opts, :branch, "main")
         }
         |> maybe_put_new_branch(Keyword.get(opts, :new_branch))
-        # Traça à 2 niveaux (git-natif, 2026-06-14) : `author` = le WORKER (qui a écrit),
+        # Traça à 2 niveaux : `author` = le WORKER (qui a écrit),
         # `committer` = l'HUMAIN commanditaire (qui a fait bosser la fleet ; le système fait l'I/O,
         # mais le commit attribue les deux niveaux). forge-aveugle préservé (le pod ne pousse jamais).
         |> maybe_put_identity(:author, Keyword.get(opts, :author))
         |> maybe_put_identity(:committer, Keyword.get(opts, :committer))
-        # BL #12 : `sha` présent ⇒ UPDATE du fichier existant (Gitea l'exige) ; absent ⇒ CREATE.
+        # `sha` présent ⇒ UPDATE du fichier existant (Gitea l'exige) ; absent ⇒ CREATE.
         |> maybe_put_sha(Keyword.get(opts, :sha))
 
       case http_put(config, "/repos/#{repo}/contents/#{path}", body) do
@@ -945,23 +945,23 @@ defmodule Fleet.Pilot.ForgeClient do
   defp maybe_put_identity(body, _key, _), do: body
 
   defp comment_signed?(config, repo, issue_number, sig, opts) do
-    # F-030 : paginé — un comment système signé au-delà de 50 ne doit pas échapper au dédup (sinon
-    # double-post au replay). MA-20 : une page de forme inattendue rend désormais `{:error, …}` (plus de
+    # Paginé — un comment système signé au-delà de 50 ne doit pas échapper au dédup (sinon
+    # double-post au replay). Une page de forme inattendue rend `{:error, …}` (et non un
     # `{:ok, acc}` tronqué) → tombe dans le `_ -> false` (pas de signature trouvée = on poste, fail-safe
     # dédup : au pire un double-post au replay, jamais une suppression silencieuse d'un marqueur).
     case paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
-        # F058 (suivi review) : le dédup garde une ÉCRITURE système → ne fait foi que des comments
+        # Le dédup garde une ÉCRITURE système → ne fait foi que des comments
         # du bot. Sinon un user forge poste la signature en avance → le comment système est skipé →
         # `count_signed_hops` sous-compte (budget anti-runaway sur-permissif). Bot irrésoluble →
         # fail-OPEN (dédup non filtré) : au pire un comment dupliqué au replay, jamais une suppression
         # silencieuse d'un marqueur load-bearing.
         trusted =
           cond do
-            # F-arch-MCP : marqueur NON load-bearing (ex. `[merge:pr-N]`, posté par le compte de RÔLE
-            # gatekeeper et non le bot système) → dédup AUTHOR-AGNOSTIC. Le filtre bot-only de F058 ne
+            # Marqueur NON load-bearing (ex. `[merge:pr-N]`, posté par le compte de RÔLE
+            # gatekeeper et non le bot système) → dédup AUTHOR-AGNOSTIC. Le filtre bot-only ne
             # protège QUE les marqueurs comptés (`[hop:role:sha]` → count_signed_hops) : un comment de
-            # sceau gatekeeper échappait au dédup bot-only (double-post au replay/retry).
+            # sceau gatekeeper échapperait sinon au dédup bot-only (double-post au replay/retry).
             Keyword.get(opts, :dedup_any_author, false) ->
               comments
 
@@ -980,7 +980,7 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Marqueur ROUTE — position carte sur la forge (A2.1, DN forge-state-machine §8)
+  # Marqueur ROUTE — position carte sur la forge.
   # `[lcars-route:<pipeline>:<stage>]` : grave (pipeline, stage) sur l'issue, car l'assignee
   # (= rôle) seul n'identifie pas le stage (un rôle peut être sur N stages, cf. CarteNav).
   # Écrit à l'assignation (entrée + reassign), lu par StageDispatcher au spawn.
@@ -1011,8 +1011,8 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
-      # F058 : ne faire foi QUE des comments écrits par le compte SYSTÈME (bot). Un user forge
-      # (humain/attaquant) qui poste `[lcars-route:evil:stage]` pilotait sinon la navigation.
+      # Ne faire foi QUE des comments écrits par le compte SYSTÈME (bot). Un user forge
+      # (humain/attaquant) qui poste `[lcars-route:evil:stage]` piloterait sinon la navigation.
       comments
       |> Enum.filter(&system_authored?(&1, bot))
       |> Enum.map(& &1["body"])
@@ -1035,7 +1035,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @hop_marker_rx ~r/\[hop:[^:\]]+:[^:\]]+\]/
 
   @doc """
-  Format du marqueur de hop signé `[hop:<role>:<sha>]` (F064 : co-localisé avec son
+  Format du marqueur de hop signé `[hop:<role>:<sha>]` (co-localisé avec son
   parseur `@hop_marker_rx` / `count_signed_hops` — un changement de format se fait ICI,
   le regex en face, jamais l'un sans l'autre). Posé par `HopCompleter` en fin-de-hop,
   sert aussi de `:dedup_signature` (replay idempotent).
@@ -1048,13 +1048,13 @@ defmodule Fleet.Pilot.ForgeClient do
   @doc """
   Compte les comments portant un marqueur de hop signé `[hop:<role>:<sha>]`
   (posés par `HopCompleter` à chaque fin-de-hop). Sert de compteur **forge-natif**
-  au bound anti-runaway du rebond de gate (A2.3) : combien de hops ont déjà été
+  au bound anti-runaway du rebond de gate : combien de hops ont déjà été
   joués sur l'issue. Monotone (les comments ne sont pas retirés), idempotent à lire.
 
   `{:error, _}` sur échec HTTP/config — le caller NE rebondit PAS à l'aveugle si le
   budget n'est pas vérifiable (un rebond non vérifiable pourrait boucler).
 
-  PAGINÉ (F-030) : même si le budget de rework (`nb_stages * (max_rounds+1)`) reste en
+  PAGINÉ : même si le budget de rework (`nb_stages * (max_rounds+1)`) reste en
   général sous 50, le compteur est source-de-vérité du bound anti-runaway — un hop signé
   perdu au-delà de 50 sous-compterait le budget (sur-permissif). On lit donc TOUTES les pages.
   """
@@ -1065,7 +1065,7 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
-      # F059 : compter SEULEMENT les hops signés par le SYSTÈME — sinon un user forge forge des
+      # Compter SEULEMENT les hops signés par le SYSTÈME — sinon un user forge forge des
       # `[hop:role:sha]` pour gonfler le compteur et faire TRIPPER le budget anti-runaway (DoS rework).
       # Bot irrésoluble → {:error} (via le with) : le caller NE rebondit PAS sur un budget non vérifiable.
       count =
@@ -1083,7 +1083,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Format du bloc ` ```result ` (sérialise les `outputs` d'un stage dans le comment de hop).
-  F064 : co-localisé avec son parseur `parse_result_block/1` — round-trip garanti. `nil`/vide →
+  Co-localisé avec son parseur `parse_result_block/1` — round-trip garanti. `nil`/vide →
   `""` (pas de bruit). JSON fencé si ≤ 8 KB ; au-delà, une note pointant vers le livrable de la
   branche (jamais de JSON tronqué = invalide). Préfixe `\\n\\n` inclus (séparateur du corps).
   """
@@ -1102,7 +1102,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Extrait le dernier bloc ` ```result ` posté dans un comment de hop — le `result_K`
-  gravé par `HopCompleter` quand le stage avance vers un gatekeeper (A2.3b N-04). Sert
+  gravé par `HopCompleter` quand le stage avance vers un gatekeeper. Sert
   à `StageDispatcher` pour donner au pod gatekeeper **quoi juger** dans son mandat
   (option B : pas de clone de branche). `:none` si aucun ; `{:error, _}` HTTP/config.
   """
@@ -1113,7 +1113,7 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
-      # F060 (le plus grave) : le bloc ```result nourrit le MANDAT DE JUGEMENT du gatekeeper. Ne
+      # Le bloc ```result nourrit le MANDAT DE JUGEMENT du gatekeeper. Ne
       # l'extraire QUE de comments SYSTÈME — sinon un user forge injecte ce que le juge évalue.
       comments
       |> Enum.filter(&system_authored?(&1, bot))
@@ -1141,7 +1141,7 @@ defmodule Fleet.Pilot.ForgeClient do
   def parse_result_block(_), do: nil
 
   @doc false
-  # Pur (F058/F059/F060) : un comment est DE CONFIANCE ssi son auteur = le compte système (bot)
+  # Pur : un comment est DE CONFIANCE ssi son auteur = le compte système (bot)
   # de la fleet. Un user forge (humain/attaquant) a un autre login → ses marqueurs sont ignorés.
   def system_authored?(comment, bot_login)
       when is_map(comment) and is_binary(bot_login) and bot_login != "" do
@@ -1198,9 +1198,9 @@ defmodule Fleet.Pilot.ForgeClient do
   # names », doc swagger) → plus de résolution repo-id côté client (qui ratait les org-labels). Les
   # labels-verrous du wire-protocol vivent au niveau ORG `fleet` (config fleet, une fois, pas par-repo).
   #
-  # F-E5 — SELF-HEAL : Gitea ignore EN SILENCE un nom de label qui n'existe NI au repo NI à l'org (POST
+  # SELF-HEAL : Gitea ignore EN SILENCE un nom de label qui n'existe NI au repo NI à l'org (POST
   # 200, mais le label n'est PAS posé) → le verrou protocole serait fantôme → boucle de re-dispatch
-  # (live PoC-7 : `lcars-awaits-arch` absent de l'org). On ne se fie donc PAS au seul 200 : on VÉRIFIE
+  # (ex. `lcars-awaits-arch` absent de l'org). On ne se fie donc PAS au seul 200 : on VÉRIFIE
   # que le label est dans la réponse ; absent → on le CRÉE (org du repo) puis on ré-essaie ; toujours
   # absent → fail-loud `{:label_not_added}` (jamais un :ok menteur). Plus de dépendance à des labels
   # créés à la main.
@@ -1232,8 +1232,8 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # F-E5 — crée le label protocole manquant au niveau de l'ORG du repo (convention LCARS : les labels
-  # `lcars-*` sont des labels d'ORG, partagés par tous les repos de la fleet — vérifié live). Couleur/
+  # Crée le label protocole manquant au niveau de l'ORG du repo (convention LCARS : les labels
+  # `lcars-*` sont des labels d'ORG, partagés par tous les repos de la fleet). Couleur/
   # description par défaut (le NOM porte le protocole ; la couleur est cosmétique). Tolérant : un échec
   # (créé en concurrence, ou repo non-org) → `:ok` — c'est le re-POST + sa vérif qui tranchent (sinon
   # le fail-loud d'`add_issue_label` remonte).
@@ -1254,7 +1254,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @page_limit 50
 
-  # F-030 : lecture PAGINÉE d'une collection source-de-vérité (issues / pulls / comments). Gitea
+  # Lecture PAGINÉE d'une collection source-de-vérité (issues / pulls / comments). Gitea
   # plafonne `limit` à 50/page — une seule page rate les items 51+ (tickets/PR ignorés, marqueurs de
   # hop sous-comptés). On boucle `page=1,2,...` (`@page_limit` items/page) en accumulant jusqu'à la
   # DERNIÈRE page : une page rendant < @page_limit items (ou vide) est la dernière (invariant Gitea :
@@ -1281,15 +1281,15 @@ defmodule Fleet.Pilot.ForgeClient do
           do_paginate(config, path_base, query, page + 1, acc)
         end
 
-      # MA-20 — Réponse 2xx de forme INATTENDUE (non-liste) sur un endpoint de collection. AVANT : on
-      # rendait `{:ok, acc}` → page 1 non-liste → `{:ok, []}` indistinguable d'une collection vide → le
-      # poller croyait « rien à dispatcher » (route → :none, budget rework sous-compté) ; un caller
-      # source-de-vérité travaillait sur une vue VIDE silencieuse. C'est exactement le faux-succès que le
-      # paginate fail-loud (commentaire l.1231) prétendait empêcher pour les erreurs HTTP — la forme
-      # inattendue était le trou. Désormais ERREUR TYPÉE : la collection n'est PAS dérivable de cette page →
+      # Réponse 2xx de forme INATTENDUE (non-liste) sur un endpoint de collection. Rendre
+      # `{:ok, acc}` ferait passer une vue VIDE pour une collection vide : page 1 non-liste →
+      # `{:ok, []}` indistinguable d'une collection réellement vide → le poller croirait « rien à
+      # dispatcher » (route → :none, budget rework sous-compté), un caller source-de-vérité
+      # travaillerait sur une vue VIDE silencieuse — le faux-succès que le fail-loud HTTP
+      # empêche déjà pour les erreurs réseau, la forme inattendue en étant le trou. D'où une
+      # ERREUR TYPÉE : la collection n'est PAS dérivable de cette page →
       # `{:error, {:unexpected_page_shape, …}}`. Les callers (`list_scoped_issues`, `get_route`,
-      # `count_signed_hops`, `get_predecessor_result`, `comment_signed?`) propagent déjà `{:error, _}`
-      # (spec `{:error, term()}`) — pas de `{:ok, []}` qui ment.
+      # `count_signed_hops`, `get_predecessor_result`, `comment_signed?`) propagent déjà `{:error, _}`.
       {:ok, non_list} ->
         {:error, {:unexpected_page_shape, path, page, non_list}}
 
@@ -1308,8 +1308,8 @@ defmodule Fleet.Pilot.ForgeClient do
 
     # `retry: false` — le retry HTTP est délégué au caller :
     # `Fleet.Pilot.Poller` a son propre backoff exponentiel + jitter
-    # (5min cap, anti-thundering-herd), et `AutoDispatcher` traite un
-    # event à la fois en serial. Le retry built-in Req (1s/2s/4s sur
+    # (5min cap, anti-thundering-herd) et sérialise le traitement d'un
+    # event à la fois. Le retry built-in Req (1s/2s/4s sur
     # 5xx) duplicaterait cette logique + ralentirait les tests d'erreur
     # de 7s par cas.
     req_opts =
@@ -1380,7 +1380,7 @@ defmodule Fleet.Pilot.ForgeClient do
           path ->
             case File.read(path) do
               {:ok, content} ->
-                # F-031 : un fichier token VIDE (ou whitespace-only) trimait en "" → header
+                # Un fichier token VIDE (ou whitespace-only) trime en "" → header
                 # `authorization: token ` envoyé tel quel → 401 TARDIF côté forge (échec opaque,
                 # diagnostiqué loin de la source). On tranche ICI, à la config, fail-loud explicite.
                 case String.trim(content) do

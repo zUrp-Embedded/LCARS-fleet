@@ -1,16 +1,16 @@
 defmodule Fleet.Spawner.SeedStore do
   @moduledoc """
-  Seed-store des pods (chantier pod-seed, volet 2). À la mort d'un pod-PROJET, son JSONl de session
+  Seed-store des pods. À la mort d'un pod-PROJET, son JSONl de session
   ACTIF (sa mémoire) est checkpointé vers `<seed_root>/<projet>/pods/<role>.jsonl` + une carte
-  `<role>.json` (`{uuid, slug}`) pour le rappel ultérieur (`--resume`). Cf.
-  `DOC-pod-session-seed-mechanism`. **Best-effort** : un échec de checkpoint ne tue JAMAIS le pod
+  `<role>.json` (`{uuid, slug}`) pour le rappel ultérieur (`--resume`).
+  **Best-effort** : un échec de checkpoint ne tue JAMAIS le pod
   (le seed est un bonus de mémoire, pas une dépendance du lifecycle).
 
   - `seed_root` : `:fleet_spawner, :seed_store_root` (défaut `/home/projects.work`).
   - JSONl ACTIF = le plus récemment modifié sous `<pod_dir>/.claude/projects/*/` — gère la rotation
     d'UUID par `/clear` (on prend la session VIVANTE, pas l'UUID de lancement `state.session_id`).
   - La carte `<role>.json` porte le `uuid` + le `slug` (cwd-slug) : le rappel restaure le JSONl à
-    `projects/<slug>/<uuid>.jsonl` puis `--resume <uuid>` (cf. volet 3).
+    `projects/<slug>/<uuid>.jsonl` puis `--resume <uuid>`.
 
   NB git : le `cp` dépose le seed ; la mise sous git du work repo est un geste SÉPARÉ (hors hot-path
   du teardown — pas de `git` dans la mort d'un pod).
@@ -31,8 +31,8 @@ defmodule Fleet.Spawner.SeedStore do
         File.mkdir_p!(dest_dir)
 
         # On ne garde QUE le PREMIER ROUND (seed minimal résumable = le setup/mandat initial du pod),
-        # PAS la session entière — le travail se re-dérive de la forge (axiome source-unique). PROVEN :
-        # ce sous-ensemble `--resume` correctement avec le seul contexte du round 1.
+        # PAS la session entière — le travail se re-dérive de la forge (axiome source-unique).
+        # Ce sous-ensemble `--resume` correctement avec le seul contexte du round 1.
         File.write!(Path.join(dest_dir, "#{role}.jsonl"), first_round(jsonl))
 
         File.write!(
@@ -118,7 +118,7 @@ defmodule Fleet.Spawner.SeedStore do
 
   @doc """
   Slug claude d'un `cwd` : chaque caractère hors `[A-Za-z0-9-]` → `-` (PAS de collapse des `-`).
-  PROVEN claude 2.1.183 (`/home/x/pod_a-b` → `-home-x-pod-a-b`).
+  Ex. `/home/x/pod_a-b` → `-home-x-pod-a-b`.
   """
   @spec slugify(String.t()) :: String.t()
   def slugify(path), do: String.replace(path, ~r/[^A-Za-z0-9-]/, "-")

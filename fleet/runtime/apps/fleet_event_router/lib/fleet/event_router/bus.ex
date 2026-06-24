@@ -2,7 +2,7 @@ defmodule Fleet.EventRouter.Bus do
   @moduledoc """
   Bus events Phoenix.PubSub instance `Fleet.PubSub` topic `fleet.events`.
 
-  ## API — schema canon strict (DN 11 C3.1+C3.2)
+  ## API — schema canon strict
 
     * `broadcast/2 (topic, %Fleet.Event{} = event)` — émet la struct directement
       (les subscribers reçoivent `%Fleet.Event{}`, pas un tuple). Fail-loud
@@ -15,16 +15,16 @@ defmodule Fleet.EventRouter.Bus do
     * `authorized_event_types/0` — MapSet atoms chargé au boot par `Catalog.load!/0`
     * `set_authorized_event_types/1` — appelé par `Catalog.load!/0` au boot
 
-  ## Z5 (ER-D2) — shim legacy retiré
+  ## Pourquoi struct-only (pas de shim tuple)
 
-  `broadcast/2 (event_type, payload)` + `broadcast/3 (event_type, payload, opts)`
-  (build_event + soft-validate JSON + émission `{atom, map}` tuple) ont été RETIRÉS :
-  la migration BL-021 était fonctionnellement faite (TOUS les producteurs — pod,
-  executor, starfleet, coord, webhooks, signals — émettent la struct via `broadcast/2`),
-  le legacy était un husk vestigial. Avec lui partent `Fleet.Event.SchemaError`
-  (défini, JAMAIS levé) et `Fleet.EventRouter.Schema` (soft-validate, plus aucun appelant).
+  Il n'existe AUCUNE variante `broadcast(event_type, payload[, opts])` qui construirait
+  un event + soft-validerait un JSON + émettrait un tuple `{atom, map}`. TOUS les
+  producteurs (pod, executor, starfleet, coord, webhooks, signals) émettent la struct
+  via `broadcast/2`. C'est pourquoi il n'y a ni `Fleet.Event.SchemaError` ni
+  `Fleet.EventRouter.Schema` : pas de soft-validate JSON, la seule validation est le
+  registry (`UnregisteredError`).
 
-  ## Registry obligatoire (C3.2)
+  ## Registry obligatoire
 
   Le set `authorized_event_types` est chargé par `Fleet.EventRouter.Catalog` au boot
   depuis `priv/events.yaml` via `:persistent_term`. Tant que le set est vide (boot
@@ -45,8 +45,8 @@ defmodule Fleet.EventRouter.Bus do
   Diffuse un event au schema canon strict `%Fleet.Event{}` sur le topic
   donné (typiquement `"fleet.events"`).
 
-  Fail-loud strict (DN 11 C3.1+C3.2) : raise `Fleet.Event.UnregisteredError`
-  si `event.type` n'est pas dans le registry `events.yaml` (set chargé par
+  Fail-loud strict : raise `Fleet.Event.UnregisteredError` si `event.type`
+  n'est pas dans le registry `events.yaml` (set chargé par
   `Fleet.EventRouter.Catalog` au boot).
 
   Émet la struct directement — les subscribers reçoivent `%Fleet.Event{}`,
@@ -89,14 +89,14 @@ defmodule Fleet.EventRouter.Bus do
 
     cond do
       MapSet.size(types) == 0 ->
-        # Registry pas encore chargé (boot order ou test sans Dispatch) — pass.
-        # BL-021 chantier 9 (B) — l'escape hatch est CONSERVÉ comme safety net
-        # de boot order. Le flip strict_canon (raise même si registry vide) a
-        # été tenté mais nécessite que Dispatch démarre dans TOUS les contextes
-        # de test (ou que chaque test setup peuple le registry manuellement) —
-        # coût test élevé pour bénéfice marginal (les producteurs sont déjà
-        # migrés au schema canon, et le rescue UnregisteredError des appelants
-        # protège déjà du raise si un type inconnu passait).
+        # Registry pas encore chargé (boot order, ou test avec `load_event_registry: false`)
+        # — on laisse passer. Cet escape-hatch est un safety net VOULU : exiger le registry
+        # même vide forcerait chaque test à le peupler à la main (ou à démarrer tout le boot),
+        # pour un bénéfice marginal. Les producteurs émettent déjà tous le schema canon, et le
+        # rescue `UnregisteredError` côté appelants couvre déjà le cas où un type inconnu
+        # passerait. Dès que le set est peuplé, la branche `type in types` tranche : un event
+        # hors registry raise. (Tant que vide, c'est l'initialisation, pas une validation
+        # désactivée — l'ordre de boot charge le registry juste après le démarrage du Bus.)
         :ok
 
       type in types ->

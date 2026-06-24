@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.TicketId do
   @moduledoc """
-  Source UNIQUE du format `ticket_id` stage-mode `"issue-<n>"` (F071).
+  Source UNIQUE du format `ticket_id` stage-mode `"issue-<n>"`.
 
   `compose/1` et `parse/1` vivent ici → le writer (`Fleet.Pilot.StageDispatcher`) et le parser
   (`Fleet.Pilot.HopConsumer.parse_issue_number`, qui délègue) ne peuvent plus dériver l'un de
@@ -12,8 +12,8 @@ defmodule Fleet.Pilot.TicketId do
   @doc ~S'''
   Compose le ticket_id stage d'un numéro d'issue forge : `compose(42) => "issue-42"`.
 
-  Tolérant (équivalent exact de l'ancien `"issue-\#{number}"` : `to_string/1`), pour un refacto
-  sans changement de comportement ; le `number` attendu reste l'entier `issue["number"]`.
+  Tolérant : sémantiquement `"issue-" <> to_string(number)` (interpolation directe), donc tout terme
+  est accepté ; le `number` attendu reste l'entier `issue["number"]`.
   '''
   @spec compose(integer()) :: String.t()
   def compose(number), do: @prefix <> to_string(number)

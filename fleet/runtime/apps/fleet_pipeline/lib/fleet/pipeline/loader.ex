@@ -11,7 +11,7 @@ defmodule Fleet.Pipeline.Loader do
     * `:fleet_pipeline, :schema_path` — path schema JSON
       (default `priv/schema/pipeline-v1.json` du package)
 
-  ## M7 — opts explicit pour async tests
+  ## Opts explicites pour tests async
 
   `load!/2` accepte des `opts` qui surchargent l'Application env :
     * `:pipelines_root` — path racine
@@ -19,18 +19,18 @@ defmodule Fleet.Pipeline.Loader do
 
   Les tests utilisent `load!(name, pipelines_root: dir)` pour rester
   `async: true` (pas de couplage Application env global). `load!/1`
-  reste pour les call sites prod qui peuvent vivre avec Application env
-  (Executor lit la config app au boot).
+  reste pour les call sites prod qui peuvent vivre avec l'Application env
+  (lue au boot).
   """
 
   @doc """
   Charge un pipeline YAML par nom, valide le schema, puis **normalise** vers
-  la forme interne unique `%{"name" => ..., "stages" => ...}` (U1, R3/D2).
+  la forme interne unique `%{"name" => ..., "stages" => ...}`.
 
   Le format source (flat v1 `name/stages` top-level OU enveloppe v2.5
-  `kind/metadata/spec.stages`) est déballé ici, au LOAD. En aval, l'Executor /
-  Toposort / StageRunner consomment toujours `pipeline["stages"]` sans connaître
-  le format d'origine — une seule forme représentable (I-CBC au load).
+  `kind/metadata/spec.stages`) est déballé ici, au LOAD. En aval, les consommateurs
+  lisent toujours `pipeline["stages"]` sans connaître le format d'origine : une
+  seule forme représentable (un format divergent est rendu irreprésentable au load).
 
   Raises `YamlElixir.FileNotFoundError` si fichier introuvable,
   `RuntimeError` si schema invalide.
@@ -39,8 +39,8 @@ defmodule Fleet.Pipeline.Loader do
   def load!(pipeline_name, opts \\ []) when is_binary(pipeline_name) and is_list(opts) do
     yaml_path = Path.join(pipelines_root(opts), "#{pipeline_name}.yaml")
     yaml = YamlElixir.read_from_file!(yaml_path)
-    # R0.8-brick3 : détection format par présence `spec` (enveloppe V2.5)
-    # vs flat v1 (`stages` top-level). `apiVersion` retiré (versioning code).
+    # Détection du format par présence de `spec` (enveloppe V2.5) vs flat v1
+    # (`stages` top-level). Pas de champ `apiVersion` (le versioning vit dans le code).
     schema_file =
       if Map.has_key?(yaml, "spec"), do: "pipeline-v2.5.json", else: "pipeline-v1.json"
 
@@ -55,7 +55,7 @@ defmodule Fleet.Pipeline.Loader do
     end
   end
 
-  # U1 — Loader-normalizer (R3/D2). Le schema a déjà garanti la structure
+  # Normalizer. Le schema a déjà garanti la structure
   # (v2.5 ⇒ `spec.stages` présent ; v1 ⇒ `stages` top-level). On déballe vers
   # `%{"name", "stages"}`. Les champs d'enveloppe non consommés (`metadata`
   # autre que `name`, `spec.on_escalation`/`on_failure`, `cycle`,
@@ -75,9 +75,9 @@ defmodule Fleet.Pipeline.Loader do
       Application.app_dir(:fleet_pipeline, "priv/canon/pipelines")
   end
 
-  # F088 — schema résolu (read+decode+resolve) caché en `:persistent_term`, keyé par
+  # Schema résolu (read+decode+resolve) caché en `:persistent_term`, keyé par
   # le path RÉSOLU (les overrides `:schema_path` des tests ont leur propre entrée →
-  # pas de pollution prod↔test). Lazy-init, mirroring `Starfleet.Gatekeeper`.
+  # pas de pollution prod↔test). Lazy-init, sur le modèle de `Starfleet.Gatekeeper`.
   defp resolved_schema(schema_file, opts) do
     path = schema_path(schema_file, opts)
     key = {__MODULE__, :schema, path}

@@ -13,7 +13,7 @@ defmodule Fleet.Spawner.LaunchBackend do
       config :fleet_spawner, :launch_backend,
         Fleet.Spawner.LaunchBackend.LauncherPortBackend
 
-  ## Contrat N1 — `.claude.json` (F115/F157)
+  ## Contrat N1 — `.claude.json`
 
   La projection N0 (`Fleet.Spawner.Pod`) n'écrit PLUS `<pod_dir>/.claude.json` : c'est de la
   connaissance schéma-vendor. **Tout vendor launcher** (`claude_launch.sh` et tout futur
@@ -33,11 +33,11 @@ defmodule Fleet.Spawner.LaunchBackend do
       * `:pod_id` — string
       * `:pod_dir` — path absolu pod
       * `:launcher_path` — path absolu du launcher N0 choisi par containment
-        (`bwrap_launch.sh` défaut | `host_launch.sh` si containment: none) — LAUNCH-Q
+        (`bwrap_launch.sh` défaut | `host_launch.sh` si containment: none)
       * `:claude_launch_path` — path absolu `claude_launch.sh`
     * `env` — map ENV vars à injecter (OAuth + custom)
 
-  R0.8-brick4 : `:budget_sec`/`:budget_usd` retirés. Le timeout de réponse
+  Pas de `:budget_sec`/`:budget_usd`. Le timeout de réponse
   est géré côté Pod GenServer (Process.send_after :result_deadline,
   default par lifetime_scope) ; pas d'API = pas de budget USD.
 

@@ -31,12 +31,12 @@ defmodule Fleet.Pilot.Poller do
     * seams test : `:forge_client`, `:loader`, `:carte_loader`, `:spawner`, `:clock` (injectés si non-nil).
     * `:start_tick?` — défaut `true` ; `false` = pas de 1er tick auto (tests drivent via `force_poll/1`).
 
-  ## Historique — mode legacy RETIRÉ (②.3 / BL-050, 2026-06-16)
+  ## Historique — mode legacy RETIRÉ (2026-06-16)
 
   L'ancien mode `do_poll` legacy (route-table → `Dispatcher.dispatch` → `Fleet.Pipeline.start_pipeline`
   = Executor RAM, via l'état de l'`AutoDispatcher`) a été **supprimé** avec le rail legacy
-  (`auto_dispatcher`/`dispatcher`/`pipeline_invoker`). Le module `Routing` lui-même a été retiré en
-  #5.2 D4 (code mort). Seul le mode stage subsiste ; le moteur RAM tombe en aval.
+  (`auto_dispatcher`/`dispatcher`/`pipeline_invoker`). Le module `Routing` lui-même a été retiré
+  comme code mort. Seul le mode stage subsiste ; le moteur RAM tombe en aval.
   """
 
   use GenServer
@@ -47,9 +47,9 @@ defmodule Fleet.Pilot.Poller do
   # Verrou pipeline (source unique `Fleet.Pilot.Labels`) — lu par la réconciliation d'orphelins.
   @in_flight Fleet.Pilot.Labels.in_flight()
 
-  # MA-01 (bug B) — verrou HUMAIN posé sur l'ISSUE à l'escalade (verdict gatekeeper escalate/halt/redirect,
-  # ou conflit non résolu). Le poller calcule le SET des issues qui le portent (déjà listées au tick → zéro
-  # I/O) et le thread aux pulls → `dispatch_review` skippe le juge d'une PR dont l'issue parente attend l'arch.
+  # Verrou HUMAIN posé sur l'ISSUE à l'escalade (verdict gatekeeper escalate/halt/redirect, ou conflit non
+  # résolu). Le poller calcule le SET des issues qui le portent (déjà listées au tick → zéro I/O) et le thread
+  # aux pulls → `dispatch_review` skippe le juge d'une PR dont l'issue parente attend l'arch.
   @awaits_arch Fleet.Pilot.Labels.awaits_arch()
 
   @default_interval_ms 30_000
@@ -59,7 +59,7 @@ defmodule Fleet.Pilot.Poller do
   defstruct [
     :repo,
     :interval_ms,
-    # #5.2 D1 — l'humain de CETTE fleet (OS user, `Human.current!()`). Scoping multi-user : on ne dispatche
+    # L'humain de CETTE fleet (OS user, `Human.current!()`). Scoping multi-user : on ne dispatche
     # QUE ses tickets (sinon le poller d'Alice spawne pour Bob). Seam test : opt `:human`.
     :my_human,
     :forge_client_override,
@@ -74,12 +74,12 @@ defmodule Fleet.Pilot.Poller do
     error_count: 0,
     err_streak: 0,
     last_error: nil,
-    # F-033 : nb d'erreurs de DISPATCH (par item) du dernier tick. La liste forge
+    # nb d'erreurs de DISPATCH (par item) du dernier tick. La liste forge
     # (`list_open_*`) peut réussir alors que des `dispatch_*` échouent — ces erreurs
     # incrémentent `err_streak` (backoff partiel via `next_delay`) au lieu d'être noyées.
     last_tally_errors: 0,
-    # Réconciliation verrou (B) : refs `{:issue|:pr, n}` vues ORPHELINES (verrou `lcars-in-flight`
-    # sans pod vivant) au tick précédent. Grace 2-tick (cf. PodWarden) → on ne réclame qu'au 2ᵉ
+    # Réconciliation verrou : refs `{:issue|:pr, n}` vues ORPHELINES (verrou `lcars-in-flight`
+    # sans pod vivant) au tick précédent. Grace 2-tick (même grace que le PodWarden) → on ne réclame qu'au 2ᵉ
     # tick consécutif (évite de déverrouiller un pod fraîchement dispatché ou en cours de mort).
     orphan_lock_suspects: MapSet.new()
   ]
@@ -129,10 +129,10 @@ defmodule Fleet.Pilot.Poller do
 
   @impl GenServer
   def init(opts) do
-    # #5.2 MULTI-PROJET : plus de `:repo` obligatoire — le poller DÉCOUVRE ses projets par topic
+    # Multi-projet : plus de `:repo` obligatoire — le poller DÉCOUVRE ses projets par topic
     # (`fleet_topic(my_human)`, repos `lcars-fleet-<human>`). `:repo` reste accepté (tests/legacy/seam)
     # mais n'est plus la source (do_poll l'écrase par itération). `my_human` = la VRAIE source requise
-    # (#5.2 D1 ; `Human.current!()` fail-loud — un poller qui ne sait pas QUI il est ne peut pas scoper).
+    # (`Human.current!()` fail-loud — un poller qui ne sait pas QUI il est ne peut pas scoper).
     state = %__MODULE__{
       repo: Keyword.get(opts, :repo),
       my_human: Keyword.get(opts, :human) || Fleet.Credentials.Human.current!(),
@@ -208,7 +208,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # Retourne `{result, new_state}` — rescue-wrappé. Partagé par le tick (qui jette le
-  # result) ET force_poll (qui le renvoie) : F184, force_poll ne bypasse plus le rescue.
+  # result) ET force_poll (qui le renvoie) → force_poll ne bypasse pas le rescue.
   defp safe_poll(state) do
     do_poll(state)
   rescue
@@ -217,10 +217,10 @@ defmodule Fleet.Pilot.Poller do
     kind, reason -> poll_crash(state, {kind, reason}, "exit/throw")
   end
 
-  # F-S1-8 : rescue ET catch :exit/:throw — un `GenServer.call` vers une dép morte (enqueue→TaskQueue,
+  # rescue ET catch :exit/:throw — un `GenServer.call` vers une dép morte (enqueue→TaskQueue,
   # spawn→Spawner) lève `:exit`, PAS `{:error}` ; sans le catch, la boucle crashait (≠ « state preserved »
-  # annoncé). On dégrade gracieusement (err_streak + backoff, state conservé), comme `live_owned_refs` et le
-  # skill elixir « catch :exit on GenServer.call ».
+  # annoncé). On dégrade gracieusement (err_streak + backoff, state conservé), comme `live_owned_refs` (un
+  # `GenServer.call` peut toujours `:exit` si la cible meurt — ne jamais le laisser remonter nu).
   defp poll_crash(state, detail, kind_label) do
     Logger.error(
       "fleet_pilot Poller unexpected #{kind_label} in do_poll: #{inspect(detail)} — state preserved"
@@ -239,12 +239,12 @@ defmodule Fleet.Pilot.Poller do
   # Internals — GenServer poll orchestration
   # ============================================================
 
-  # Mode STAGE uniquement (le legacy `do_poll`/Executor RAM a été retiré, ②.3). Le scan est dans
+  # Mode STAGE uniquement (le legacy `do_poll`/Executor RAM a été retiré). Le scan est dans
   # `stage_do_poll/1` ; ce wrapper conserve le point d'entrée unique (jitter/backoff/safety-net partagés).
-  # #5.2 MULTI-PROJET : découverte forge-driven. Le poller scanne TOUS les projets de SON humain (repos
+  # Découverte forge-driven. Le poller scanne TOUS les projets de SON humain (repos
   # taggés `lcars-fleet-<human>` par l'onboarding), pas un `:repo` hard-codé. Per-repo : la logique stage
   # INCHANGÉE (state.repo posé par itération). Découverte OK → forge up → err_streak reset ; le scoping
-  # ticket `assigned_by=my_human` (déjà, #5.2 D1) reste le garde anti-vol même si un repo d'Alice fuyait.
+  # ticket `assigned_by=my_human` reste le garde anti-vol même si un repo d'Alice fuyait.
   # Découverte KO → backoff (handle_poll_error). Le bail repo-sérialisé reste per-repo (concurrent across,
   # séquentiel within).
   #
@@ -253,7 +253,7 @@ defmodule Fleet.Pilot.Poller do
   # de RÉCONCILIATION (`orphan_lock_suspects`, grace 2-tick) DOIT persister cross-tick : sans le re-thread,
   # la grace ne s'accumule jamais → un verrou orphelin n'est JAMAIS réclamé (le pipe wedge). On l'agrège
   # (union sur tous les repos) dans le state rendu. `poll_count` +1/tick (observabilité).
-  # MA-02 — les refs de verrou sont désormais REPO-QUALIFIÉES (`{repo, :issue|:pr, n}`, cf. `live_owned_refs`/
+  # Les refs de verrou sont REPO-QUALIFIÉES (`{repo, :issue|:pr, n}`, voir `live_owned_refs`/
   # `reconcile_orphan_locks`/`parse_pod_ref`) : l'union cross-repo des suspects ne collisionne plus sur le seul
   # numéro → un pod vivant #N/repoB NE masque PLUS un orphelin #N/repoA, et la grace 2-tick ne se contamine
   # plus entre repos (plus de double-spawn). La clé porte l'identité.
@@ -324,7 +324,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # ============================================================
-  # Mode STAGE — réacteur assignee-driven (DN forge-state-machine §3/§6)
+  # Mode STAGE — réacteur assignee-driven (la forge EST la machine à états ; ce module en est le réacteur).
   # Découplé du legacy AutoDispatcher : pas de routes, pas d'Executor.
   # ============================================================
 
@@ -332,10 +332,10 @@ defmodule Fleet.Pilot.Poller do
     started = System.monotonic_time()
     forge = stage_forge_client(state)
 
-    # Bail repo-serialise : on liste TOUS les ouverts (in-flight inclus) pour compter les
-    # pipelines actifs. Corr.3 4-C : on liste AUSSI les PR ouvertes -> les JUGES sont dispatches
+    # Bail repo-sérialisé : on liste TOUS les ouverts (in-flight inclus) pour compter les
+    # pipelines actifs. On liste AUSSI les PR ouvertes → les JUGES sont dispatchés
     # via les requested_reviewers de la PR (plus l'assignee issue). decide skip les in-flight.
-    # #5.2 D1 — scoping multi-user FORGE-SIDE : MÊME filtre `assigned_by` pour issues ET PR (les deux passent
+    # Scoping multi-user FORGE-SIDE : MÊME filtre `assigned_by` pour issues ET PR (les deux passent
     # par /issues?type=… côté ForgeClient). Le poller ne voit QUE les items de SON humain → le scoping vit en
     # UN endroit (la liste), decide/dispatch_review ne re-vérifient plus l'ownership. Bail par-humain.
     scoped_opts = Keyword.put(state.forge_opts, :assigned_by, state.my_human)
@@ -344,19 +344,19 @@ defmodule Fleet.Pilot.Poller do
          {:ok, pulls} <- forge.list_open_pulls(state.repo, scoped_opts) do
       pr_issue_ids = pulls_issue_ids(pulls)
 
-      # Réconciliation verrou (B) AVANT dispatch : un `lcars-in-flight` orphelin (pod mort sans avoir
+      # Réconciliation verrou AVANT dispatch : un `lcars-in-flight` orphelin (pod mort sans avoir
       # complété → reapé, mais le label survit côté forge) bloquerait la brique pour TOUJOURS
       # (`dispatch_*` skip `:in_flight`). On le réclame (grace 2-tick) → le prochain tick re-dispatche.
-      # Sans ça, un seul stall de pod wedge le pipe définitivement (live #8).
+      # Sans ça, un seul stall de pod wedge le pipe définitivement.
       new_suspects = reconcile_orphan_locks(issues, pulls, pr_issue_ids, state, forge)
 
-      # F-S1-6 : opts de dispatch calculées UNE fois/tick (partagées issues + pulls), pas 2×.
+      # opts de dispatch calculées UNE fois/tick (partagées issues + pulls), pas 2×.
       opts = stage_dispatch_opts(state)
 
-      # MA-01 (bug B) — SET des issues `lcars-awaits-arch` (déjà listées au tick → ZÉRO I/O ajouté), threadé
+      # SET des issues `lcars-awaits-arch` (déjà listées au tick → ZÉRO I/O ajouté), threadé
       # aux pulls via `:awaits_arch_ids` → `dispatch_review` skippe le juge d'une PR dont l'issue parente
       # attend l'arch (symétrique de `decide/1` côté issue). Sans ça : l'escalade pose `awaits-arch` sur
-      # l'ISSUE mais `dispatch_review` ne lit QUE les labels de la PR → re-spawn du juge par tick (churn live).
+      # l'ISSUE mais `dispatch_review` ne lit QUE les labels de la PR → re-spawn du juge par tick (churn).
       awaits_arch_ids = awaits_arch_ids(issues)
       pulls_opts = Keyword.put(opts, :awaits_arch_ids, awaits_arch_ids)
 
@@ -380,12 +380,12 @@ defmodule Fleet.Pilot.Poller do
           "duration_ms=#{duration_ms}"
       )
 
-      # F-033 : la liste forge a réussi, mais des `dispatch_*` PAR ITEM ont pu échouer
-      # (`tally.errors > 0` — ex. enqueue broker KO, spawn KO). Avant ce fix, `err_streak`
-      # était remis à 0 inconditionnellement → ces erreurs ne ralentissaient JAMAIS le
-      # poller (il martelait la forge au plein régime malgré l'échec). On réutilise le
-      # mécanisme `err_streak`/`next_delay` (backoff partiel) : streak incrémenté tant que
-      # des items échouent, reset à 0 seulement quand le tick est propre.
+      # La liste forge a réussi, mais des `dispatch_*` PAR ITEM ont pu échouer
+      # (`tally.errors > 0` — ex. enqueue broker KO, spawn KO). Si `err_streak` était remis à 0
+      # inconditionnellement, ces erreurs ne ralentiraient JAMAIS le poller (il martèlerait la
+      # forge au plein régime malgré l'échec). On réutilise le mécanisme `err_streak`/`next_delay`
+      # (backoff partiel) : streak incrémenté tant que des items échouent, reset à 0 seulement
+      # quand le tick est propre.
       {next_streak, next_last_error} =
         if tally.errors > 0 do
           {state.err_streak + 1, {:dispatch_errors, tally.errors}}
@@ -408,7 +408,7 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # ── Réconciliation verrou orphelin (B, brique 2 du README) ────────────────────────────────────
+  # ── Réconciliation verrou orphelin ────────────────────────────────────────────────────────────
   # Un verrou `lcars-in-flight` est ORPHELIN si la brique le porte mais qu'aucun pod vivant ne la
   # travaille. Cause : un pod mort (deadline `:result_timeout`, crash, restart BEAM) reapé par
   # le PodWarden — qui retire le PROCESS mais PAS le label forge. Symétrie cassée → le poller le
@@ -424,7 +424,7 @@ defmodule Fleet.Pilot.Poller do
       owned ->
         repo = state.repo
 
-        # MA-02 — orphelins REPO-QUALIFIÉS (`{repo, :issue|:pr, n}`) : la clé de verrou porte le repo, donc
+        # Orphelins REPO-QUALIFIÉS (`{repo, :issue|:pr, n}`) : la clé de verrou porte le repo, donc
         # `owned` (refs repo-scopées des pods vivants de CE repo) et `orphan_lock_suspects` (cross-tick, tous
         # repos) ne collisionnent plus sur le seul numéro. Un orphelin #N/repoA n'est plus masqué par un pod
         # vivant #N/repoB, et la grace 2-tick ne se contamine plus entre repos.
@@ -454,16 +454,16 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # Refs `{repo, :issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes STABLES
-  # (`<repo-slug>-issue-<n>-<role>` / `<repo-slug>-pr-<n>-<role>` ; plus de suffixe `-<ts>` depuis BL-055).
+  # (`<repo-slug>-issue-<n>-<role>` / `<repo-slug>-pr-<n>-<role>` ; pas de suffixe timestamp).
   # Filtre par **tâche active** (TaskQueue) : un verrou n'est légitimement tenu QUE pendant qu'un pod a une
   # tâche active dessus. Un pod VIVANT mais IDLE (long-lived entre deux reworks, ex. l'engineer) ne « possède »
-  # PAS le verrou — sinon il masquerait un juge MORT et la réconciliation ne réclamerait jamais (wedge live #8).
+  # PAS le verrou — sinon il masquerait un juge MORT et la réconciliation ne réclamerait jamais (wedge).
   # `:error` si l'énumération échoue (fail-safe : on ne réclame rien à l'aveugle).
   #
-  # MA-02 — SCOPE REPO : on ne garde QUE les pods de `state.repo` (préfixe `PodId.scope_prefix/1`), et la ref
-  # rendue PORTE le repo (`{repo, :issue|:pr, n}`). Sans ça, un pod vivant #N/repoB « possédait » la ref
-  # `{:issue, N}` globale → il MASQUAIT l'orphelin #N/repoA (verrou jamais réclamé = wedge) ET la grace 2-tick
-  # se contaminait cross-repo (double-spawn). La clé de verrou est désormais REPO-QUALIFIÉE = l'identité réelle.
+  # SCOPE REPO : on ne garde QUE les pods de `state.repo` (préfixe `PodId.scope_prefix/1`), et la ref
+  # rendue PORTE le repo (`{repo, :issue|:pr, n}`). Sans ça, un pod vivant #N/repoB « posséderait » la ref
+  # `{:issue, N}` globale → il MASQUERAIT l'orphelin #N/repoA (verrou jamais réclamé = wedge) ET la grace
+  # 2-tick se contaminerait cross-repo (double-spawn). La clé de verrou REPO-QUALIFIÉE = l'identité réelle.
   defp live_owned_refs(state) do
     spawner = state.spawner || Fleet.Spawner
     tq = state.task_queue || Fleet.TaskQueue
@@ -495,9 +495,9 @@ defmodule Fleet.Pilot.Poller do
 
   defp pod_has_active_task?(_tq, _), do: false
 
-  # MA-02 / F-037 / #25 : les pod_id sont **repo-scopés** (`<repo-slug>-issue-<n>-<role>`, cf.
-  # `Fleet.Pilot.PodId`). On ANCRE le parse sur le préfixe de scope du REPO COURANT (`PodId.scope_prefix/1`),
-  # suivi immédiatement du marqueur de phase `issue|pr-<n>-`. Double effet :
+  # Les pod_id sont **repo-scopés** (`<repo-slug>-issue-<n>-<role>`, voir `Fleet.Pilot.PodId`). On ANCRE le
+  # parse sur le préfixe de scope du REPO COURANT (`PodId.scope_prefix/1`), suivi immédiatement du marqueur
+  # de phase `issue|pr-<n>-`. Double effet :
   #   1. SCOPE — un pod d'un AUTRE repo ne matche pas (son slug diffère) → il ne « possède » pas une ref de
   #      `state.repo` → fin du masquage cross-repo (#N/repoB masquant l'orphelin #N/repoA).
   #   2. DÉSAMBIGUÏSATION — l'ancrage exige `<slug>-(issue|pr)-` : un slug `fleet-poc` n'avale pas le pod
@@ -521,7 +521,7 @@ defmodule Fleet.Pilot.Poller do
     @in_flight in Enum.map(Map.get(item, "labels") || [], & &1["name"])
   end
 
-  # MA-01 (bug B) — SET des numéros d'issue portant `lcars-awaits-arch`. Dérivé des `issues` DÉJÀ listées
+  # SET des numéros d'issue portant `lcars-awaits-arch`. Dérivé des `issues` DÉJÀ listées
   # par le tick (aucun appel forge supplémentaire) → threadé aux pulls (`:awaits_arch_ids`) pour que
   # `dispatch_review` skippe le juge d'une PR dont l'issue parente attend l'arch.
   defp awaits_arch_ids(issues) do
@@ -563,16 +563,16 @@ defmodule Fleet.Pilot.Poller do
     }
   end
 
-  # Tally vierge (source unique — F-S1-5). Les chemins d'erreur utilisent `%{zero_tally() | errors: 1}`.
+  # Tally vierge (source unique). Les chemins d'erreur utilisent `%{zero_tally() | errors: 1}`.
   defp zero_tally, do: %{dispatched: 0, skipped: 0, errors: 0}
 
-  # Chemin PR-driven (Corr.3 4-C) : chaque PR ouverte avec une review demandee -> dispatch le juge.
-  # Non garde par le bail (les juges d'un pipeline DEJA actif doivent avancer ; le bail ne borne
-  # que l'ENTREE de nouveaux pipelines, cote issues).
+  # Chemin PR-driven : chaque PR ouverte avec une review demandée → dispatch le juge.
+  # Non gardé par le bail (les juges d'un pipeline DÉJÀ actif doivent avancer ; le bail ne borne
+  # que l'ENTRÉE de nouveaux pipelines, côté issues).
   defp stage_process_pulls(pulls, opts) do
     Enum.reduce(pulls, zero_tally(), fn pr, acc ->
       case StageDispatcher.dispatch_review(pr, opts) do
-        # ②.1d : `:ok` couvre `{:spawned, _, _}` (juge/rework spawné) ET `{:merged, _}` (PR scellée).
+        # `:ok` couvre `{:spawned, _, _}` (juge/rework spawné) ET `{:merged, _}` (PR scellée).
         {:ok, _} -> %{acc | dispatched: acc.dispatched + 1}
         {:skipped, _reason} -> %{acc | skipped: acc.skipped + 1}
         {:error, _reason} -> %{acc | errors: acc.errors + 1}
@@ -581,14 +581,14 @@ defmodule Fleet.Pilot.Poller do
   end
 
   defp stage_process_issues(issues, pr_issue_ids, state, opts) do
-    # #8 cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, gravée à l'onboard) — plus de
+    # Cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, gravée à l'onboard) — plus de
     # routing par label. Le poller lit la route → dispatch (carte_role). Le bail « 1 pipeline actif/repo »
     # se lit AUSSI sur la route (robuste, append-only). On classe chaque issue UNE fois :
     #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er stage = pipeline démarré) → tient le bail ;
     #     on dispatche son stage courant (continue le hop, ou skip si in-flight).
     #   - EN FILE (routée au 1er stage, ou routeless à onboarder, pas encore dispatchée) → démarre seulement
     #     si le bail est libre ; sinon attend (sérialisation → feature-branches séquentielles → FF merge).
-    # F-S1-1 : `classify_issue` lit la route (+ charge la carte) UNE fois et la THREAD au dispatch via
+    # `classify_issue` lit la route (+ charge la carte) UNE fois et la THREAD au dispatch via
     # `prefetch` (mergé aux opts) → fin du double get_route / double load carte (la classif du bail et le
     # dispatch lisaient la MÊME donnée 2×).
     classified =
@@ -607,7 +607,7 @@ defmodule Fleet.Pilot.Poller do
           item_opts = Keyword.merge(opts, prefetch)
 
           cond do
-            # Corr.3 4-C : issue avec PR fleet ouverte → phase JUGE (dispatchée via les pulls). SKIP côté
+            # Issue avec PR fleet ouverte → phase JUGE (dispatchée via les pulls). SKIP côté
             # issue (sinon re-spawn du producteur). La PR tient le bail.
             pr? ->
               {%{acc | skipped: acc.skipped + 1}, lease}
@@ -642,14 +642,14 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # #8 — démarrage d'un pipeline EN FILE (bail libre) : dispatch ; si un pod est effectivement spawné, le
+  # Démarrage d'un pipeline EN FILE (bail libre) : dispatch ; si un pod est effectivement spawné, le
   # bail devient TENU (les autres tickets en file du même tick attendent → sérialisation 1 pipeline/repo).
   defp start_pipeline(payload, opts, acc) do
     {acc2, _} = stage_do_dispatch(payload, opts, acc, false)
     {acc2, acc2.dispatched > acc.dispatched}
   end
 
-  # F-S1-1 — classifie une issue (bail) ET pré-résout ce que `dispatch_issue` relirait sinon. Renvoie
+  # Classifie une issue (bail) ET pré-résout ce que `dispatch_issue` relirait sinon. Renvoie
   # `{engaged?, prefetch_kw}` ; `prefetch_kw` (mergé aux opts de dispatch) porte `:prefetched_route` +
   # `:prefetched_carte` → lecture forge/disque UNE seule fois. ENGAGÉ = pod en vol (`in-flight`) OU route
   # avancée au-delà du 1er stage (pipeline démarré, entre deux hops). Fast-path : in-flight → pas de lecture
@@ -703,9 +703,9 @@ defmodule Fleet.Pilot.Poller do
   # (loader/spawner/task_queue/clock) ne sont injectés QUE s'ils sont set sur le
   # state — sinon StageDispatcher applique ses défauts réels (passer nil
   # écraserait le défaut).
-  # F-028 : `:task_queue` était porté par le state (lu dans `live_owned_refs/1`)
-  # mais JAMAIS transmis ici → StageDispatcher retombait sur `Fleet.TaskQueue`
-  # global pour l'enqueue du mandat (seam de broker non honoré côté dispatch).
+  # `:task_queue` est porté par le state (lu dans `live_owned_refs/1`) et DOIT être transmis ici,
+  # sinon StageDispatcher retombe sur `Fleet.TaskQueue` global pour l'enqueue du mandat
+  # (seam de broker non honoré côté dispatch).
   defp stage_dispatch_opts(state) do
     [
       repo: state.repo,
@@ -713,7 +713,7 @@ defmodule Fleet.Pilot.Poller do
       forge_opts: state.forge_opts
     ]
     |> maybe_put_seam(:loader, state.loader)
-    # #8 : `carte_role` (dispatch) charge la carte de la route → il lui faut le loader de CARTE (comme
+    # `carte_role` (dispatch) charge la carte de la route → il lui faut le loader de CARTE (comme
     # fonction load!/1). Live : nil → défaut `Fleet.Pipeline.Loader.load!` (priv). Test : dérivé du module
     # stub. (Distinct de `:loader` = cap-profiles.)
     |> maybe_put_seam(:carte_loader, carte_loader_fun(state))

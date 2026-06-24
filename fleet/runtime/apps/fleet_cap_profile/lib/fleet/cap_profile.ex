@@ -10,8 +10,8 @@ defmodule Fleet.CapProfile do
   Schema is pinned to `apiVersion: lcars/v2.5`. Every profile is matched
   against `priv/schema/cap-profile-v2.5.json` at load time. Modops are
   matched against `priv/schema/modop-profile.json` (strict — reserved
-  keys forbidden, mitigates the "containment override by modop" finding
-  from PoC-11).
+  keys forbidden, so a modop cannot override the base profile's
+  containment/name/kind).
 
   Composition is deterministic: deep-merge last-wins in declared order,
   canonical JSON encoding (recursive key sort), `:crypto` sha256.
@@ -21,8 +21,8 @@ defmodule Fleet.CapProfile do
 
   require Logger
 
-  # R0.8-brick3 : `api_version` field retiré (cf. feedback "pas d'apiVersion
-  # dans YAML LCARS" — versioning par le code v2 release, pas champ embarqué).
+  # Pas de champ `api_version` : le versioning du schéma est porté par le code
+  # (release v2), pas par un champ embarqué dans le YAML.
   defstruct [:kind, :metadata, :spec]
 
   @type t :: %__MODULE__{
@@ -33,8 +33,8 @@ defmodule Fleet.CapProfile do
 
   @kind_pinned "CapabilityProfile"
 
-  # G24-9 (F-CONT-RISK) — server tools natifs Anthropic must be denied.
-  # Strict entries match by equality, prefix entries by `String.starts_with?/2`.
+  # g24_9 — refuser les server-tools natifs Anthropic : ils tournent côté serveur, PAS dans le pod → le sandbox bwrap ne les contient pas par construction.
+  # Entrées strict = égalité, entrées prefix = `String.starts_with?/2`.
   @disallowed_minimum_strict ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution)
   @disallowed_minimum_prefix ~w(tool_search_)
 
@@ -43,9 +43,9 @@ defmodule Fleet.CapProfile do
 
   # Fast-path guard for top-level reserved keys. `metadata.containment`
   # and `metadata.name` are also reserved — enforced by the JSON schema
-  # `priv/schema/modop-profile.json` (`not/anyOf` clause). R0.8-brick3 :
-  # `apiVersion` retiré ; kind reste réservé (différenciation cap-profile
-  # vs modop côté merge).
+  # `priv/schema/modop-profile.json` (`not/anyOf` clause). `kind` reste
+  # réservé (il différencie cap-profile vs modop côté merge) ; `apiVersion`
+  # n'est PAS réservé (champ inexistant — versioning par le code).
   @reserved_modop_keys ~w(kind)
 
   # ============================================================
@@ -76,7 +76,7 @@ defmodule Fleet.CapProfile do
 
   @doc """
   Compose un cap-profile à partir d'un rôle de base et d'une liste ordonnée
-  de modops. Deep-merge last-wins, ordre déclaré = précédence (PoC-16).
+  de modops. Deep-merge last-wins, ordre déclaré = précédence.
 
   Le résultat est revalidé contre le schema cap-profile post-merge.
 
@@ -103,31 +103,31 @@ defmodule Fleet.CapProfile do
 
   @doc """
   Valide un `%Fleet.CapProfile{}` contre les invariants G24 **purs**
-  (canon cap-profile v2.5 + F-CONT-RISK gate). Fonction pure : aucune
+  (canon cap-profile v2.5 + gate containment). Fonction pure : aucune
   lecture de process ni de FS (cf. moduledoc) — même struct ⇒ même verdict.
 
   ## Invariants implémentés
-    * Structuraux PROMUS chantier 1 : `:g24_1` (containment), `:g24_3`
-      (kind), `:g24_4` (lifetime_scope enum), `:g24_6` (modop incompatible),
-      `:g24_8` (metadata.name), `:g24_9_strict`/`:g24_9_prefix` (F-CONT-RISK
-      disallowedTools minimum).
-    * Belt-and-suspenders v2.5 (BL-022, doublonnent le JSON-schema `allOf`
-      pour un atome verbeux côté Elixir) : `:g24_10` (boot_at_start ⟹
+    * Structuraux : `:g24_1` (containment), `:g24_3` (kind), `:g24_4`
+      (lifetime_scope enum), `:g24_6` (modop incompatible), `:g24_8`
+      (metadata.name), `:g24_9_strict`/`:g24_9_prefix` (deny-list containment
+      = minimum de `disallowedTools`).
+    * Belt-and-suspenders v2.5 (doublonnent le JSON-schema `allOf` pour un
+      atome d'erreur verbeux côté Elixir) : `:g24_10` (boot_at_start ⟹
       forever), `:g24_11` (subagent_template ⟹ one-shot), `:g24_12`
       (host_native ⟹ containment none).
     * Couverture NON portée par le schéma : `:g24_14` (pairing
       monk_registry ⟺ monk_instance — both-or-neither).
 
-  ## Hors `validate/1` (réconciliation BL-022 ↔ BL-006, justifiée)
-    * **G24-13** (`mcp_channels` non-vide ⟹ `Fleet.MCP.Server` vivant) :
+  ## Hors `validate/1` (exclus parce qu'impurs — le contrat est « pure data transformer »)
+    * **g24_13** (`mcp_channels` non-vide ⟹ `Fleet.MCP.Server` vivant) :
       check de **liveness runtime**, donc impur (non-déterministe) — viole
       le contrat « pure data transformer ». Concern de spawn-time, pas un
-      invariant statique du profil. NON implémenté ici (sp-monde-invoqué :
-      la liveness est bornée au boundary de spawn, pas dans le validateur).
-    * **G24-12 `system_user` privilégié** : le pseudo-code DN l'exigeait
-      mais `system_user` n'existe pas au schéma v2.5 (BL-006 F-6 ;
-      G24-12 réel = `containment: none` seul, aligné sur l'`allOf` JSON).
-    * **G24-14 existence FS du registry + lookup `monk_instance`** : I/O,
+      invariant statique du profil. La liveness est bornée au boundary de
+      spawn (le monde valide), pas dans le validateur pur.
+    * **g24_12 `system_user` privilégié** : le pseudo-code l'exigeait mais
+      `system_user` n'existe pas au schéma v2.5 ; g24_12 réel = `containment:
+      none` seul, aligné sur l'`allOf` JSON.
+    * **g24_14 existence FS du registry + lookup `monk_instance`** : I/O,
       donc impur — c'est un check load-time (`compose/2`), pas `validate/1`.
 
   ## Exit codes
@@ -140,7 +140,7 @@ defmodule Fleet.CapProfile do
   @impl Fleet.CapProfile.Loader
   @spec validate(t()) :: :ok | {:error, [atom()]}
   def validate(%__MODULE__{} = profile) do
-    # R0.8-brick3 : G24-2 (check_api_version) retiré — apiVersion n'existe plus.
+    # Pas de check apiVersion (l'ancien g24_2) : le champ apiVersion n'existe pas.
     violations =
       [
         {:g24_1, &check_containment/1},
@@ -223,11 +223,11 @@ defmodule Fleet.CapProfile do
   pas option de cap-profile).
 
   **Raise** si le fichier baseline est absent, illisible, ou de format
-  invalide. audit elixir #3 : la baseline est doctrinalement "intangible"
-  — un fail-open silencieux (retour `[]`) désactiverait la denylist
-  universelle sans alerter, contradictoire avec l'intention. Fail-closed
-  cohérent avec la doctrine. Le caller (`pod.ex do_allocate`) catch via
-  `rescue` et transitionne `:failed` proprement (Vulcan #5 préservé).
+  invalide. La baseline est doctrinalement "intangible" : un fail-open
+  silencieux (retour `[]`) désactiverait la denylist universelle sans
+  alerter, contradictoire avec l'intention → fail-closed. Le caller
+  (`pod.ex do_allocate`) catch via `rescue` et transitionne `:failed`
+  proprement.
 
   Pure modulo I/O fichier ; pas de cache (lu une fois par résolution cap-
   profile, fréquence faible).
@@ -239,7 +239,7 @@ defmodule Fleet.CapProfile do
     |> Enum.map(&"Bash(git #{&1}:*)")
   end
 
-  # F021 — baseline priv IMMUABLE : read+parse une fois, caché en `:persistent_term`
+  # Baseline priv IMMUABLE : read+parse une fois, caché en `:persistent_term`
   # (lazy-init ; une erreur n'est pas cachée — le bang re-raise au prochain appel).
   defp load_baseline_git_ops_denied! do
     key = {__MODULE__, :baseline_git_ops_denied}
@@ -276,9 +276,9 @@ defmodule Fleet.CapProfile do
 
   @doc """
   Returns the canonical JSON sha256 (lowercase hex) of a composed map
-  or struct. Used by callers to assert deterministic composition
-  (PoC-16 pattern). Underlying map iteration order is irrelevant — the
-  canonical encoder sorts keys recursively before encoding.
+  or struct. Used by callers to assert deterministic composition.
+  Underlying map iteration order is irrelevant — the canonical encoder
+  sorts keys recursively before encoding.
   """
   @spec sha256(t() | map()) :: String.t()
   def sha256(%__MODULE__{} = profile), do: profile |> struct_to_map() |> sha256()
@@ -304,7 +304,7 @@ defmodule Fleet.CapProfile do
           :error -> {:error, :not_found}
         end
 
-      # F-040 : catalogue corrompu (un YAML non-décodable) → on ne peut PAS résoudre par name.
+      # Catalogue corrompu (un YAML non-décodable) → on ne peut PAS résoudre par name.
       # Le contrat load/compose (moduledoc) classe « YAML mal formé » en `:invalid_schema` — pas
       # `:not_found` (qui ferait croire le rôle absent). On honore le contrat.
       {:error, {:invalid_yaml, _path}} ->
@@ -315,8 +315,8 @@ defmodule Fleet.CapProfile do
   @doc """
   Liste les NOMS (`metadata.name`) des cap-profiles du catalogue (`dir`, défaut `root_dir/0`).
 
-  **Source UNIQUE** (#582, F110/F111) : tout énumérateur (`Fleet.Spawner.PermanentBoot`) ET `load/1`
-  résolvent par CETTE clé — la prop `name`, **jamais** le nom de fichier (cosmétique). Trié.
+  **Source UNIQUE** : tout énumérateur (`Fleet.Spawner.PermanentBoot`) ET `load/1` résolvent par
+  CETTE clé — la prop `name`, **jamais** le nom de fichier (cosmétique). Trié.
   Collision de `name` entre deux fichiers → `{:error, :name_collision}` (fail-loud : pas de résolution
   silencieuse au petit bonheur du filesystem).
   """
@@ -335,18 +335,18 @@ defmodule Fleet.CapProfile do
   end
 
   # Index `metadata.name => raw` en scannant `<dir>/*.yaml` + `<dir>/archivistes/*.yaml` +
-  # `<dir>/monks/*.yaml` (F-041 : les profils Memory-X canon vivent sous `monks/` ; Memory-X VA vivre,
-  # donc PermanentBoot — qui énumère via `list/1` — doit les voir). Le `modop/` reste exclu : les
-  # overlays n'ont pas d'identité de rôle. Fragment sans `metadata.name` → ignoré (baseline/overlay).
+  # `<dir>/monks/*.yaml` (les profils Memory-X canon vivent sous `monks/` ; PermanentBoot — qui
+  # énumère via `list/1` — doit les voir). Le `modop/` reste exclu : les overlays n'ont pas d'identité
+  # de rôle. Fragment sans `metadata.name` → ignoré (baseline/overlay).
   # Collision `name` → fail-loud (`:name_collision`).
   #
-  # F-040 (Pattern A) : un YAML NON-DÉCODABLE dans le catalogue n'est PLUS skippé en silence.
-  # Avant, le skip rendait le rôle INVISIBLE de l'index → `load` le voyait `:not_found` (rôle
-  # absent) au lieu de `:invalid_schema` (rôle corrompu), et `list/1` (énuméré par PermanentBoot)
-  # l'amputait du boot sans bruit → deploy « vert » incomplet. Un fichier corrompu = artefact de
-  # deploy cassé → on propage `{:error, {:invalid_yaml, path}}` (fail-loud). Conséquence assumée :
-  # un seul fichier illisible empoisonne tout l'index (catalogue corrompu = on n'en charge AUCUN) —
-  # cohérent avec « on ne sauve pas un truc blessé ».
+  # Un YAML NON-DÉCODABLE dans le catalogue n'est PAS skippé en silence (sinon le rôle serait
+  # INVISIBLE de l'index → `load` le verrait `:not_found` (rôle absent) au lieu de `:invalid_schema`
+  # (rôle corrompu), et `list/1` (énuméré par PermanentBoot) l'amputerait du boot sans bruit → deploy
+  # « vert » incomplet). Un fichier corrompu = artefact de deploy cassé → on propage
+  # `{:error, {:invalid_yaml, path}}` (fail-loud). Conséquence assumée : un seul fichier illisible
+  # empoisonne tout l'index (catalogue corrompu = on n'en charge AUCUN) — cohérent avec « on ne sauve
+  # pas un truc blessé ».
   defp name_index(dir) do
     files =
       Path.wildcard(Path.join(dir, "*.yaml")) ++
@@ -415,12 +415,12 @@ defmodule Fleet.CapProfile do
   @doc """
   Racine du catalogue cap-profiles (`<root_dir>/<role>.yaml`). **Source UNIQUE** : tout
   énumérateur (ex. `Fleet.Spawner.PermanentBoot`) DOIT scanner ce dir, sinon enum et load
-  se désaccordent (#582, Fable F110/F111).
+  se désaccordent.
   """
   @spec root_dir() :: String.t()
   def root_dir do
-    # I-CBC : un :root_dir explicitement nil (ex. fuite d'env cross-test en
-    # umbrella) ne doit JAMAIS atteindre Path.join → coalesce vers le défaut.
+    # Un :root_dir explicitement nil (ex. fuite d'env cross-test en umbrella) ne doit JAMAIS
+    # atteindre Path.join → coalesce vers le défaut (état nil rendu inoffensif au boundary).
     # Défaut = le priv BUNDLÉ (`:code.priv_dir`) → résout en RELEASE (lib/fleet_cap_profile-vsn/priv/…)
     # comme en dev (_build/…/priv) SANS aucun env. L'ancien défaut `"cap-profiles"` (relatif au CWD) n'a
     # jamais été correct hors d'un `LCARS_CAPPROFILES_ROOT` explicite → `:enoent` en release (étanchéité).
@@ -454,7 +454,7 @@ defmodule Fleet.CapProfile do
   defp load_schema(:cap_profile), do: load_schema_file("cap-profile-v2.5.json")
   defp load_schema(:modop), do: load_schema_file("modop-profile.json")
 
-  # F022 — schema priv IMMUABLE : read+decode+resolve une fois, caché en `:persistent_term`
+  # Schema priv IMMUABLE : read+decode+resolve une fois, caché en `:persistent_term`
   # keyé par le path RÉSOLU (les overrides test de `schema_dir/0` ont leur entrée). Lazy-init,
   # erreurs non-cachées.
   defp load_schema_file(name) do
@@ -546,10 +546,10 @@ defmodule Fleet.CapProfile do
 
   @doc """
   Accesseur canon du `lifetime_scope` d'un cap-profile (`spec.invocation.lifetime_scope`,
-  schéma v2.5). Rework #4 : source unique — l'extraction était ré-implémentée dans
-  spawner/stage_runner/sp_builder/pod avec des défauts incohérents. `default` par
-  défaut `"one-shot"` (le défaut canon) ; les lecteurs qui veulent distinguer
-  l'absence (ex. mandate_guard) passent `nil`.
+  schéma v2.5). **Source unique** : l'extraction ne doit PAS être ré-implémentée chez les
+  lecteurs (spawner/stage_runner/sp_builder/pod) — sinon défauts incohérents. `default` par
+  défaut `"one-shot"` (le défaut canon) ; les lecteurs qui veulent distinguer l'absence
+  (ex. mandate_guard) passent `nil`.
   """
   @spec lifetime_scope(t(), term()) :: String.t() | term()
   def lifetime_scope(%__MODULE__{spec: spec}, default \\ "one-shot") do
@@ -557,10 +557,10 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Accesseur canon du `deliverable_mode` (`spec.deliverable_mode`, schéma v2.5, modèle O5). Source
-  unique — la sélection du mode de publication (`Fleet.Pipeline.Deliverable.publish/1`) se lit ICI,
-  pas ré-implémentée chez les lecteurs. `default` `"payload"` (le défaut canon, back-compat PASSE-7 :
-  un profil sans champ = legacy le-système-écrit-le-payload). Les code-rôles déclarent `git_native`.
+  Accesseur canon du `deliverable_mode` (`spec.deliverable_mode`, schéma v2.5). **Source unique** :
+  la sélection du mode de publication (`Fleet.Pipeline.Deliverable.publish/1`) se lit ICI, pas
+  ré-implémentée chez les lecteurs. `default` `"payload"` (le défaut canon, back-compat : un profil
+  sans champ = le-système-écrit-le-payload). Les code-rôles déclarent `git_native`.
   """
   @spec deliverable_mode(t(), term()) :: String.t() | term()
   def deliverable_mode(%__MODULE__{spec: spec}, default \\ "payload") do
@@ -570,17 +570,17 @@ defmodule Fleet.CapProfile do
   @doc """
   Accesseur canon du `mandate_kind` (`spec.mandate_kind`, schéma v2.5). Dual D'ENTRÉE de
   `deliverable_mode` (sortie) : il déclare la **forme du mandat** que le rôle reçoit, par catalogue
-  et PAS par nom magique (F077, `differentiation-par-catalogue`).
+  et PAS par nom magique de rôle.
 
     * `"worker"` (défaut) — le mandat est une instruction exécutable (corps de l'issue) : le rôle
       AGIT (engineer, architect…).
-    * `"judge"` — le rôle JUGE : il reçoit un `GateBrief` I-CBC **désamorcé** (contexte + livrable +
-      contrat de verdict, AUCUNE instruction exécutable — bug PASSE-9). Le gatekeeper le déclare.
+    * `"judge"` — le rôle JUGE : il reçoit un `GateBrief` structurellement **désamorcé** (contexte + livrable +
+      contrat de verdict, AUCUNE instruction exécutable — sinon le juge exécuterait le body). Le gatekeeper le déclare.
 
   `default` `"worker"` est **fail-safe** : un profil sans champ reçoit un mandat exécutable (le cas
   ultra-majoritaire) ; jamais l'inverse (un worker désamorcé par erreur ne ferait rien). Un rôle
-  juge DOIT déclarer `judge` explicitement — la judge-ness est une propriété de sécurité (I-CBC),
-  pas une inférence.
+  juge DOIT déclarer `judge` explicitement — la judge-ness est une propriété de sécurité (rendue
+  structurellement vraie, jamais inférée).
   """
   @spec mandate_kind(t(), term()) :: String.t() | term()
   def mandate_kind(%__MODULE__{spec: spec}, default \\ "worker") do
@@ -595,12 +595,12 @@ defmodule Fleet.CapProfile do
     }
   end
 
-  # Rework #1 (axe « contrôle côté producteur ») : `metadata`/`spec` sont
-  # garantis à **clés STRING en profondeur**, ici à la production (boundary
-  # unique `to_struct`). Les lecteurs (ProjectBootstrap, sp_builder, spawner)
-  # accèdent en clés string SANS double-lookup atom|string défensif — la forme
-  # incohérente devient irreprésentable (I-CBC). Les structs (DateTime…) et
-  # scalaires passent tels quels ; seules les CLÉS de map sont stringifiées.
+  # `metadata`/`spec` sont garantis à **clés STRING en profondeur**, ici à la
+  # production (boundary unique `to_struct`). Les lecteurs (ProjectBootstrap,
+  # sp_builder, spawner) accèdent en clés string SANS double-lookup atom|string
+  # défensif — la forme incohérente (clés mixtes) devient structurellement
+  # impossible en aval. Les structs (DateTime…) et scalaires passent tels quels ;
+  # seules les CLÉS de map sont stringifiées.
   defp stringify_keys(map) when is_map(map) and not is_struct(map),
     do: Map.new(map, fn {k, v} -> {to_string(k), stringify_keys(v)} end)
 
@@ -628,35 +628,35 @@ defmodule Fleet.CapProfile do
   end
 
   defp check_lifetime_scope(%__MODULE__{spec: spec}) do
-    # Canon : lifetime_scope nesté dans spec.invocation (schema
-    # cap-profile-v2.5.json + 7 cap-profiles 05_data-canon). Le code
-    # lisait spec-level (forme pré-alignement schema) → aligné canon.
+    # Canon : lifetime_scope est nesté sous `spec.invocation` (schema
+    # cap-profile-v2.5.json + cap-profiles canon), pas au niveau de `spec` —
+    # lire `spec.lifetime_scope` directement raterait la valeur.
     if get_in(spec, ["invocation", "lifetime_scope"]) in @lifetime_scope_enum,
       do: :ok,
       else: :error
   end
 
-  # G24-5 (check_git_ops_denied) retiré : Face 2 doctrine (commit 4e0b3b3c)
-  # a tranché que les workers PEUVENT push si le cap-profile l'autorise via
-  # `allowedTools` claude CLI. L'invariant qui exigeait `"push"` dans
-  # `git_ops_denied` est obsolète. Le mécanisme générique catalogue →
-  # disallowedTools claude CLI (via `with_resolved_disallowed_tools/1` +
-  # baseline `_baseline-git-denied.yaml`) est le successeur : interdit
-  # universellement les patterns destructeurs (`push --force`, `reset --hard`,
-  # `--no-verify`, etc.) sans interdire `push` en bloc.
+  # Pas de check `git_ops_denied` (l'ancien g24_5) : les workers PEUVENT
+  # push si le cap-profile l'autorise via `allowedTools` claude CLI.
+  # L'invariant qui exigeait `"push"` dans `git_ops_denied` serait donc
+  # obsolète. Le mécanisme générique catalogue → disallowedTools claude CLI
+  # (via `with_resolved_disallowed_tools/1` + baseline `_baseline-git-denied.yaml`)
+  # est le successeur : il interdit universellement les patterns destructeurs
+  # (`push --force`, `reset --hard`, `--no-verify`, etc.) sans interdire
+  # `push` en bloc.
 
   defp check_modop_incompatible(%__MODULE__{spec: spec}) do
-    # R13 : `modop_set` est une MAP (schéma v2.5 : default/optional/incompatible),
+    # `modop_set` est une MAP (schéma v2.5 : default/optional/incompatible),
     # pas une liste. Les paires incompatibles sont sous `spec.modop_set.incompatible` ;
-    # les modops ACTIFS = `default` ++ `optional`. L'ancien code lisait
-    # `spec.modop_incompatible` (clé inexistante → toujours []) et traitait
-    # `spec.modop_set` comme une liste → l'invariant ne tirait jamais.
+    # les modops ACTIFS = `default` ++ `optional`. Ne PAS lire `spec.modop_incompatible`
+    # (clé inexistante → toujours []) ni traiter `spec.modop_set` comme une liste,
+    # sinon l'invariant ne tire jamais.
     modop_set = Map.get(spec, "modop_set", %{})
 
-    # modop_set canon = MAP (default/optional/incompatible). Un profil legacy/vide peut
-    # le porter en LISTE (`[]`) → `Map.get` crasherait (BadMapError — jamais vu car
-    # validate/1 n'était appelée qu'en test, CAP-D1). I-CBC : forme non-map = aucune
-    # paire incompatible déclarée → pas de conflit, pas de crash au boundary spawn.
+    # modop_set canon = MAP (default/optional/incompatible). Un profil legacy/vide peut le porter
+    # en LISTE (`[]`) → `Map.get` crasherait (BadMapError). On traite la forme non-map comme « aucune
+    # paire incompatible déclarée » → pas de conflit, pas de crash au boundary spawn (le mauvais
+    # type est rendu inoffensif, pas rattrapé par un rescue).
     {pairs, active} =
       if is_map(modop_set) do
         {Map.get(modop_set, "incompatible", []),
@@ -676,12 +676,12 @@ defmodule Fleet.CapProfile do
     if conflict?, do: :error, else: :ok
   end
 
-  # R0.8-brick4 : G24-7 (check_budget) retiré. Pas d'API = pas de budget
-  # (cf. feedback "Pas de budget dans cap-profiles"). Le timeout de réponse
-  # (auparavant mal nommé budget.maxDurationSec) est désormais un default
-  # codé par lifetime_scope dans Fleet.Spawner.Pod.monitor_timeout_ms/1 ;
-  # un override par cap-profile (e.g. `spec.timeouts.response_sec`) est
-  # accepté optionnel mais non-requis.
+  # Pas de check budget (l'ancien g24_7) : pas d'API = pas de budget. Le
+  # timeout de réponse (jadis mal nommé budget.maxDurationSec) est désormais
+  # un default codé par lifetime_scope dans
+  # `Fleet.Spawner.Pod.monitor_timeout_ms/1` ; un override par cap-profile
+  # (e.g. `spec.timeouts.response_sec`) est accepté optionnel mais
+  # non-requis.
 
   defp check_metadata_name(%__MODULE__{metadata: meta}) do
     case Map.get(meta, "name") do
@@ -707,16 +707,16 @@ defmodule Fleet.CapProfile do
   end
 
   # ------------------------------------------------------------
-  # G24-10..14 — extensions v2.5 (BL-022)
+  # G24-10..14 — extensions v2.5
   #
   # Clés/valeurs STRING : le struct est stringifié en profondeur
-  # (`to_struct` Rework #1). Le pseudo-code DN `fleet_cap_profile.md`
-  # (atomes `:invocation`/`:forever`/`:one_shot`) le précède — il est
-  # transposé string ici (`"forever"`, `"one-shot"` tiret, `"none"`).
+  # (`to_struct`). Les valeurs comparées sont donc des strings, pas des
+  # atomes (`"forever"`, `"one-shot"` avec tiret, `"none"`) — comparer à un
+  # atome `:forever` raterait toujours.
   # ------------------------------------------------------------
 
   # G24-10 : boot_at_start: true ⟹ lifetime_scope: forever.
-  # Doublonne l'`allOf` JSON-schema (belt-and-suspenders, atome verbeux).
+  # Doublonne l'`allOf` JSON-schema (belt-and-suspenders, atome d'erreur verbeux).
   defp check_boot_at_start_forever(%__MODULE__{spec: spec}) do
     if get_in(spec, ["invocation", "boot_at_start"]) == true and
          get_in(spec, ["invocation", "lifetime_scope"]) != "forever" do
@@ -728,8 +728,8 @@ defmodule Fleet.CapProfile do
 
   # G24-11 : subagent_template non-vide ⟹ lifetime_scope: one-shot.
   # `subagent_template` (invocation) implique un dispatch one-shot ; distinct
-  # de `knowledge.sp_template` (ADR #565, pod permanent monk/archivist) qui
-  # n'est PAS contraint ici. nil ou "" = pas de template → pas de contrainte
+  # de `knowledge.sp_template` (template SP d'un pod permanent monk/archivist)
+  # qui n'est PAS contraint ici. nil ou "" = pas de template → pas de contrainte
   # (cohérent `minLength: 1` du schéma).
   defp check_subagent_template_one_shot(%__MODULE__{spec: spec}) do
     template = get_in(spec, ["invocation", "subagent_template"])
@@ -742,10 +742,10 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  # G24-12 : host_native: true ⟹ metadata.containment: none (D-01).
-  # `containment` vit dans `metadata` (pas `spec`). La clause `system_user`
-  # du pseudo-code DN est ABANDONNÉE : champ inexistant au schéma v2.5
-  # (BL-006 F-6). Aligné sur l'`allOf` JSON (containment seul).
+  # G24-12 : host_native: true ⟹ metadata.containment: none.
+  # `containment` vit dans `metadata` (pas `spec`). Pas de clause `system_user` :
+  # ce champ n'existe pas au schéma v2.5. Aligné sur l'`allOf` JSON
+  # (containment seul).
   defp check_host_native_containment(%__MODULE__{spec: spec, metadata: meta}) do
     if get_in(spec, ["invocation", "host_native"]) == true and
          Map.get(meta, "containment") != "none" do

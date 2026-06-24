@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.IncidentRegistry do
   @moduledoc """
-  Mémoire PERSISTANTE cross-session des incidents système (#5.2) — **owner résilient**.
+  Mémoire PERSISTANTE cross-session des incidents système — **owner résilient**.
 
   Un gestionnaire d'erreurs doit être PLUS fiable que ce qu'il surveille : sa mémoire ne peut pas dépendre
   (synchrone, copie unique, race-prone) du substrat qu'elle surveille. D'où ce GenServer — l'Iron Law est
@@ -117,7 +117,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
     end
   end
 
-  # Bloc « écran capturé » (fallback-ACK déporté #5.2 [5]) attaché au ticket — vide si pas de pane.
+  # Bloc « écran capturé » (fallback-ACK déporté) attaché au ticket — vide si pas de pane.
   defp pane_block(pane) when is_binary(pane) and pane != "" do
     "\n## Écran capturé (ce que l'agent affichait au moment de l'échec)\n```\n#{pane}\n```\n"
   end

@@ -1,11 +1,11 @@
 defmodule Fleet.Spawner.PodWarden do
   @moduledoc """
-  Reaper PÉRIODIQUE des pods orphelins (BL-036b, dogfood F7). Complète le reap-on-(re)launch
-  (`Fleet.Spawner.Pod.reap_orphan_pod/1`, BL-036) qui ne couvre QUE le re-spawn : ici on attrape les
+  Reaper PÉRIODIQUE des pods orphelins. Complète le reap-on-(re)launch
+  (`Fleet.Spawner.Pod.reap_orphan_pod/1`) qui ne couvre QUE le re-spawn : ici on attrape les
   orphelins JAMAIS re-spawnés.
 
   Un orphelin = une socket tmux par-pod vivante (claude tourne, consomme OAuth + RAM) SANS Pod GenServer
-  correspondant dans le `Fleet.Spawner.Registry`. Cause (F7) : un crash du Pod GenServer ne tue pas le
+  correspondant dans le `Fleet.Spawner.Registry`. Cause : un crash du Pod GenServer ne tue pas le
   bwrap/tmux (`--die-with-parent` = BEAM, pas GenServer). Sous `:temporary` le GenServer n'est jamais
   ressuscité → l'orphelin persiste jusqu'au crash du BEAM.
 
@@ -17,7 +17,7 @@ defmodule Fleet.Spawner.PodWarden do
 
   Gaté `:start_pod_warden` (défaut true prod, false test).
 
-  > La mémoire d'échec de wake (re-roll/escalade #5.2) ne vit PAS ici : un compteur de session serait
+  > La mémoire d'échec de wake (re-roll/escalade) ne vit PAS ici : un compteur de session serait
   > éphémère. Elle est ancrée dans le PROJET via `Fleet.Pilot.IncidentRegistry` (registre `work/ops`,
   > cross-session). PodWarden reste le gardien du SUBSTRAT (reap des orphelins).
   """
@@ -67,7 +67,7 @@ defmodule Fleet.Spawner.PodWarden do
   end
 
   # ============================================================
-  # I/O (le reap est le même mécanisme que Pod.reap_orphan_pod/1, prouvé live F7)
+  # I/O (le reap est le même mécanisme que Pod.reap_orphan_pod/1)
   # ============================================================
 
   defp reap(pod_id) do
@@ -75,7 +75,7 @@ defmodule Fleet.Spawner.PodWarden do
       "PodWarden: pod #{pod_id} = orphelin persistant (sock vivante, aucun GenServer) — reap (BL-036b)"
     )
 
-    # Kill (tmux kill-server + pkill -f ancré) centralisé dans PodTmux.kill_holder/1 (F-034).
+    # Kill (tmux kill-server + pkill -f ancré) centralisé dans PodTmux.kill_holder/1.
     PodTmux.kill_holder(pod_id)
     _ = File.rm_rf(Path.dirname(PodTmux.sock_path(pod_id)))
     :ok

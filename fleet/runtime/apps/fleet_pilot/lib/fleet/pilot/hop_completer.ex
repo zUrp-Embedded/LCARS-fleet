@@ -1,35 +1,35 @@
 defmodule Fleet.Pilot.HopCompleter do
   @moduledoc """
-  Primitive de **fin-de-hop** (DN `orchestration/forge-state-machine.md` §5).
-  Quand un pod (stage courant) a terminé, le **SYSTÈME** — pas le pod, qui n'a
-  ni token ni outil forge (barrière §4) — applique la transition vers le stage
-  suivant. C'est la pièce qui REMPLACE le chaînage inter-stage de l'Executor
-  (RAM) par une séquence forge-driven idempotente.
+  Primitive de **fin-de-hop** (la forge EST la machine à états ; ce module en
+  applique les transitions). Quand un pod (stage courant) a terminé, le
+  **SYSTÈME** — pas le pod, qui n'a ni token ni outil forge (forge-aveugle) —
+  applique la transition vers le stage suivant. C'est la pièce qui REMPLACE le
+  chaînage inter-stage de l'Executor (RAM) par une séquence forge-driven idempotente.
 
-  ## Séquence ordonnée idempotente (§5)
+  ## Séquence ordonnée idempotente
 
   L'atomicité est impossible (Gitea n'a pas de transaction ; un hop = ~5
   écritures HTTP). On la remplace par un ORDRE où le trigger du poller (PATCH
   assignee) est l'**avant-dernier** et le verrou est levé en **dernier** :
 
-    1. **Commit + push livrable** — délégué à `Deliverable.publish` (O5 : gate
-       I-CBC F-03/F-01/F-02 + push borné). Indissociables : le commit local seul
+    1. **Commit + push livrable** — délégué à `Deliverable.publish` (gate de
+       cohérence workspace + push borné). Indissociables : le commit local seul
        n'est pas vu par la forge. Retourne le `commit_sha` qui signe le hop.
     2. **Comment signé** `[hop:<role>:<sha>]` — dédup par signature (replay-safe).
-       *(Ancienne étape 3 « PATCH `state:*` » RETIRÉE — #5.2 D4 : l'état vit dans la route-comment,
-       pas dans un label `state:*`. Les n° de step suivants gardent leur mapping DN §5.)*
+       *(Pas d'étape 3 « PATCH `state:*` » : l'état vit dans la route-comment,
+       pas dans un label `state:*`. Les n° de step suivants gardent leur mapping.)*
     4. **Routage du stage suivant** :
          * `next_assignee` présent (multi-stage) → `set_assignee(next)` ; le
-           poller ne verra le suivant que quand 1-3 sont OK. **(branche A2 — le
-           calcul de `next_assignee` depuis la carte est hors A1.)**
+           poller ne verra le suivant que quand 1-3 sont OK. **(le calcul de
+           `next_assignee` depuis la carte est en amont, pas ici.)**
          * `next_assignee == nil` (1-stage / terminal) → `close_issue`.
     5. **Retire `lcars-in-flight`** — en DERNIER : le poller ne re-spawn le
        suivant que quand TOUT est fini.
 
   **Garantie crash** : un crash à n'importe quelle étape laisse le verrou posé
-  (sauf après 5) → le poller ne re-spawn pas ; la recovery (§7) rejoue la
-  séquence, les étapes faites skippent (write-ops idempotentes + dédup comment +
-  push idempotent). Pas de double-livrable ni double-comment.
+  (sauf après 5) → le poller ne re-spawn pas ; la recovery rejoue la séquence,
+  les étapes faites skippent (write-ops idempotentes + dédup comment + push
+  idempotent). Pas de double-livrable ni double-comment.
 
   ## Seams
 
@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.HopCompleter do
   alias Fleet.Pilot.ForgeClient
   alias Fleet.Pilot.Labels
 
-  # F072 : vocabulaire protocole = source unique Fleet.Pilot.Labels.
+  # Vocabulaire protocole = source unique Fleet.Pilot.Labels.
   @in_flight_label Labels.in_flight()
 
   @typedoc """
@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.HopCompleter do
         }
 
   @doc """
-  Applique la séquence de fin-de-hop §5. Idempotente sur replay.
+  Applique la séquence ordonnée de fin-de-hop. Idempotente sur replay.
 
   `opts` : seams `:deliverable` / `:forge_client` / `:forge_opts`.
 
@@ -91,7 +91,7 @@ defmodule Fleet.Pilot.HopCompleter do
 
     with {:ok, sha} <- step1_publish(hop, deliverable),
          {:ok, _} <- step2_comment(forge, repo, n, role, sha, hop, forge_opts),
-         # F-E7 — gap AVANT la route : le comment de verdict prend un `created_at` strictement antérieur à
+         # Gap AVANT la route : le comment de verdict prend un `created_at` strictement antérieur à
          # la route (sinon même seconde → ordre dashboard arbitraire, « logiquement avant, affiché après »).
          :ok <- space_writes(opts),
          {:ok, routed} <- step4_route(forge, repo, n, hop, forge_opts),
@@ -105,16 +105,16 @@ defmodule Fleet.Pilot.HopCompleter do
   @awaits_arch_label Labels.awaits_arch()
 
   @doc """
-  Fin-de-hop ALTERNATIVE (A2.3b, DN `gatekeeper-forge-encoding-v2` §3/§6) : un verdict
-  gatekeeper **humain** (`escalate_user`/`halt_wait_input`/`redirect`/absent/invalide).
+  Fin-de-hop ALTERNATIVE : un verdict gatekeeper **humain**
+  (`escalate_user`/`halt_wait_input`/`redirect`/absent/invalide).
   Le SYSTÈME pose `lcars-awaits-arch` + retire le verrou ; NE close PAS, NE reassign PAS.
-  L'issue attend une action humaine **via l'arch** (`convention-tickets-gitea-v2` §7/§8) ;
+  L'issue attend une action humaine **via l'arch** (le sas unique vers l'humain) ;
   le poller la **SKIP** (`StageDispatcher.decide` → `:awaits_arch`).
 
   Pas de livrable git ici (le verdict vit dans le comment signé ; `verdict.json` =
   item `submit_result` séparé). Ordre : comment → `lcars-awaits-arch` → unlock (DERNIER,
-  même principe §5 : un crash laisse le verrou → poller skip → recovery rejoue,
-  idempotent via dédup comment + add/remove label idempotents).
+  même principe que la séquence nominale : un crash laisse le verrou → poller skip →
+  recovery rejoue, idempotent via dédup comment + add/remove label idempotents).
 
   `hop` : `:repo`, `:issue_number`, `:role`, `:decision`. Returns `{:ok, :awaiting_arch}`
   | `{:error, {:await_arch, reason}}`.
@@ -130,15 +130,15 @@ defmodule Fleet.Pilot.HopCompleter do
 
     signature = "[hop:#{role}:await:#{decision}]"
 
-    # `:comment_body` (optionnel) = trace fournie par l'appelant (ex. HopConsumer B porte le
+    # `:comment_body` (optionnel) = trace fournie par l'appelant (ex. HopConsumer porte le
     # verdict gatekeeper attribué + halt_invalid distingué). Absent → corps par défaut.
     lead =
       Map.get(hop, :comment_body) ||
         "Verdict du juge **#{role}** : `#{inspect(decision)}`."
 
-    # #5.2 — ADRESSÉ à l'arch (le sas unique vers l'humain ; l'humain n'a pas d'autre canal vers la fleet).
+    # ADRESSÉ à l'arch (le sas unique vers l'humain ; l'humain n'a pas d'autre canal vers la fleet).
     # L'arch reprend le mandat (corrige + re-soumet) ou tranche avec son humain. PAS de re-assign (assignee
-    # = humain owner, DN §1) : l'arch query son inbox `lcars-awaits-arch` ; l'issue reste hors-dispatch.
+    # = humain owner) : l'arch query son inbox `lcars-awaits-arch` ; l'issue reste hors-dispatch.
     body =
       "**Architecte** (auteur du mandat) — " <>
         lead <>
@@ -146,7 +146,7 @@ defmodule Fleet.Pilot.HopCompleter do
         "(il n'a pas d'autre canal vers la fleet que toi). L'issue reste hors-dispatch tant que " <>
         "`lcars-awaits-arch` est posé.\n\n" <> signature
 
-    # F-E6 — le commentaire de VERDICT est AU NOM DU JUGE (`as_role` : le texte dit « Verdict du juge X »,
+    # Le commentaire de VERDICT est AU NOM DU JUGE (`as_role` : le texte dit « Verdict du juge X »,
     # l'auteur forge doit être X, pas le compte système — sinon traça menteuse, masque le worker). Les
     # labels (add/remove) restent SYSTÈME : l'état protocole appartient au système, pas au juge.
     with {:ok, _} <-
@@ -156,7 +156,7 @@ defmodule Fleet.Pilot.HopCompleter do
              body,
              forge_opts |> as_role(role) |> Keyword.put(:dedup_signature, signature)
            ),
-         # F-E7 — gap AVANT les labels : le comment de verdict prend un `created_at` antérieur (lecture cohérente).
+         # Gap AVANT les labels : le comment de verdict prend un `created_at` antérieur (lecture cohérente).
          :ok <- space_writes(opts),
          {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
          {:ok, _} <- forge.remove_label(repo, n, @in_flight_label, forge_opts) do
@@ -171,13 +171,13 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   @doc """
-  **PR-natif (Corr.3, BL-044)** — livraison engineer → PR. Le SYSTÈME (barrière §4) pousse les
-  commits du pod (mode `git_native`, gate I-CBC déléguée à `Deliverable.publish`) sur la
+  **PR-natif** — livraison engineer → PR. Le SYSTÈME (le pod est forge-aveugle) pousse les
+  commits du pod (mode `git_native`, gate de cohérence déléguée à `Deliverable.publish`) sur la
   feature-branch, PUIS **ouvre la PR** `feature → base`. La PR devient la surface review+promote :
   domicile des verdicts (reviews natives) + entonnoir unique vers `main`. `body` porte `Closes #N`
   → la forge auto-close l'issue au merge (lien ticket↔PR maintenu nativement).
 
-  Remplace le push `lcars/issue-N-role` + comment `[hop:role:sha]` de la séquence §5 maison.
+  Remplace le push `lcars/issue-N-role` + comment `[hop:role:sha]` de la séquence maison.
   **Idempotent** : `open_pr` retrouve une PR déjà ouverte pour la même head (replay-safe).
 
   `hop` : `:repo`, `:issue_number`, `:role`, `:deliverable_opts` (dont `:target_branch` = la head),
@@ -201,10 +201,10 @@ defmodule Fleet.Pilot.HopCompleter do
     title = Map.get(hop, :title, "Livrable ##{n} — brique livrée par #{role} (engineer)")
     body = Map.get(hop, :pr_body, default_pr_body(n, role))
 
-    # ②.1e — la PR est ouverte AU NOM DE L'ENG (token de rôle, `as_role`), pas du compte système :
+    # La PR est ouverte AU NOM DE L'ENG (token de rôle, `as_role`), pas du compte système :
     # l'auteur de la PR sur la forge = Engineer (l'eng a fait le boulot). Token absent → fallback
-    # système loggué (RoleToken, honnête-dégradé). Barrière §4 : c'est le SYSTÈME qui poste avec le
-    # token de rôle, jamais le pod (forge-aveugle).
+    # système loggué (RoleToken, honnête-dégradé). C'est le SYSTÈME qui poste avec le token de
+    # rôle, jamais le pod (forge-aveugle).
     with {:ok, sha} <- step1_publish(hop, deliverable),
          {:ok, pr} <-
            open_pr_step(forge, repo, head, base, title, body, as_role(forge_opts, role)) do
@@ -214,7 +214,7 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # Corps de PR par défaut — descriptif (traça honnête : QUI a fait QUOI) + `Closes #N` (auto-close
-  # natif au merge → close APRÈS merge, jamais avant). [[feedback_verbose_descriptive_traceable]]
+  # natif au merge → close APRÈS merge, jamais avant).
   defp default_pr_body(n, role) do
     "Livrable de la brique ##{n}, produit par **#{role}** (engineer). Le système a poussé le commit " <>
       "(l'eng code dans son workspace, le système publie — barrière forge-aveugle, le pod n'a pas de " <>
@@ -230,7 +230,7 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   @doc """
-  **PR-natif (Corr.3)** — verdict de juge → **review native** sur la PR. Remplace le comment
+  **PR-natif** — verdict de juge → **review native** sur la PR. Remplace le comment
   `[hop:role:sha]` maison : le verdict de gate vit comme review Gitea (APPROVED / REQUEST_CHANGES),
   traçable, lisible sans query custom. C'est le DOMICILE durable du verdict.
 
@@ -247,10 +247,10 @@ defmodule Fleet.Pilot.HopCompleter do
     event = Map.fetch!(hop, :review_event)
     body = Map.get(hop, :review_body, default_review_body(hop, event))
 
-    # ②.1e — la review native est postée AU NOM DU JUGE (token de rôle, `as_role`) : sur la forge,
+    # La review native est postée AU NOM DU JUGE (token de rôle, `as_role`) : sur la forge,
     # l'auteur de la review = qualifier/reviewer (avatar/traça honnête), pas le compte système. Token
-    # absent → fallback système loggué (RoleToken, honnête-dégradé). Barrière §4 préservée (le pod
-    # n'a pas de token ; c'est le SYSTÈME qui poste la review en son nom).
+    # absent → fallback système loggué (RoleToken, honnête-dégradé). Le pod n'a pas de token ;
+    # c'est le SYSTÈME qui poste la review en son nom (le pod reste forge-aveugle).
     # NB `ForgeClient.post_review/5` rend `:ok` (pas `{:ok, _}`) sur succes — matcher les deux
     # (un seam test peut rendre l'un ou l'autre ; le contrat reel = `:ok`).
     case forge.post_review(repo, pr, event, body, as_role(forge_opts, Map.get(hop, :role))) do
@@ -260,8 +260,8 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # Corps de review par défaut — descriptif (rôle juge + verdict + ce qui est jugé).
-  # [[feedback_verbose_descriptive_traceable]]
+  # Corps de review par défaut — descriptif (rôle juge + verdict + ce qui est jugé,
+  # lisible directement sur la PR).
   defp default_review_body(hop, event) do
     role = Map.get(hop, :role, "juge")
 
@@ -279,7 +279,7 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   @doc """
-  **PR-natif (Corr.3)** — PROMOTE : merge la PR en **fast-forward-only**. C'est le terminal `:pass`
+  **PR-natif** — PROMOTE : merge la PR en **fast-forward-only**. C'est le terminal `:pass`
   du dernier stage — auto-close de l'issue via `Closes #N`. Sous bail serial + funnel append-only,
   la feature est descendante linéaire de `main` → FF garanti. Échec FF = invariant serial violé
   (deux branches sur le même code) → fail-loud `{:merge, _}`, PAS un conflit à résoudre.
@@ -295,9 +295,9 @@ defmodule Fleet.Pilot.HopCompleter do
     issue_n = Map.fetch!(hop, :issue_number)
     producer = producer_of(Map.get(hop, :producer_branch))
 
-    # Sceau UNIQUE (F-arch-MCP) : commentaire gatekeeper + merge signé gatekeeper — EXACTEMENT le même
-    # chemin que `StageDispatcher.promote_pr`. Avant, ce terminal `:promote` (ex. après escalade §L441)
-    # mergeait avec `forge_opts` brut = token système, sans commentaire (merge attribué `lcars-system`).
+    # Sceau UNIQUE : commentaire gatekeeper + merge signé gatekeeper — EXACTEMENT le même chemin que
+    # `StageDispatcher.promote_pr`. Sans ce sceau, ce terminal `:promote` (ex. après escalade)
+    # mergerait avec `forge_opts` brut = token système, sans commentaire (merge attribué `lcars-system`).
     gk_opts = as_role(forge_opts, Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
 
     case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, gk_opts) do
@@ -317,9 +317,9 @@ defmodule Fleet.Pilot.HopCompleter do
   defp producer_of(_), do: "engineer"
 
   @doc """
-  **PR-natif (Corr.3) — orchestrateur de fin-de-hop.** Compose les primitives PR
+  **PR-natif — orchestrateur de fin-de-hop.** Compose les primitives PR
   (`open_deliverable_pr`/`record_review`/`promote`) + le routage selon l'`intent` de gate.
-  Remplace la sequence §5 `complete/2` (push `lcars/issue-N-role` + comment `[hop:role:sha]` +
+  Remplace la sequence maison `complete/2` (push `lcars/issue-N-role` + comment `[hop:role:sha]` +
   state + assignee/close + unlock) sur le happy-path : la PR devient le domicile review+promote,
   la forge auto-close l'issue au merge (`Closes #N`).
 
@@ -333,7 +333,7 @@ defmodule Fleet.Pilot.HopCompleter do
       un juge (lookup de la PR). Producteur : sa propre `deliverable_opts.target_branch` sert de head.
     * `:next_assignee` — role suivant (`:advance`) ou role de rebond (`:rework`) ; `nil` en terminal.
 
-  ## Routage (4-C, switch review-request)
+  ## Routage (switch review-request)
 
   Le trigger du stage suivant = la review-request native (`request_review`), plus `set_assignee` :
   le producteur reste assigne (Entry), les juges sont dispatches via la PR (`dispatch_review`). La
@@ -364,9 +364,9 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # VOIX DE L'ENG sur la PR (info SORTANTE, [[feedback_verbose_descriptive_traceable]]) : poste le
+  # VOIX DE L'ENG sur la PR (info SORTANTE, descriptive et traçable) : poste le
   # `summary` du producteur (ce qu'il a fait à la livraison / sa réponse à la review au rework) en
-  # commentaire PR, AU NOM DE L'ENG (`as_role` — traça honnête ②.1e ; le pod reste forge-aveugle, c'est
+  # commentaire PR, AU NOM DE L'ENG (`as_role` — traça honnête ; le pod reste forge-aveugle, c'est
   # le SYSTÈME qui poste). Best-effort : un échec de post ne casse PAS la complétion (le livrable = le
   # commit, déjà poussé). Absent/vide → rien (pas de commentaire vide). Couvre livraison ET rework (les
   # deux passent ici via open_deliverable_pr — PR neuve ou existante).
@@ -380,10 +380,10 @@ defmodule Fleet.Pilot.HopCompleter do
         role = Map.get(hop, :role, "engineer")
         role_opts = as_role(forge_opts, role)
 
-        # #6 (2026-06-18) : la voix de l'eng sur DEUX canaux à 2 buts distincts — la PR (revue du
+        # La voix de l'eng sur DEUX canaux à 2 buts distincts — la PR (revue du
         # diff, contexte code) ET le TICKET (réponse au mandat, « voici ce que j'ai fait », contexte
-        # issue). Avant, seul la PR était servie (trou). Best-effort, `as_role` (le pod reste forge-aveugle,
-        # le SYSTÈME poste en son nom — même geste que le commentaire gatekeeper sur le ticket).
+        # issue) ; servir la PR seule laisserait un trou côté ticket. Best-effort, `as_role` (le pod reste
+        # forge-aveugle, le SYSTÈME poste en son nom — même geste que le commentaire gatekeeper sur le ticket).
         _ =
           forge.post_comment(
             repo,
@@ -408,7 +408,7 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # Juge (payload) : retrouve la PR du producteur, enregistre la review native (verdict→event),
-  # PUIS route. La review native EST le domicile durable du verdict (vs le comment maison §5).
+  # PUIS route. La review native EST le domicile durable du verdict (vs le comment maison).
   defp complete_judge(hop, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
@@ -424,11 +424,11 @@ defmodule Fleet.Pilot.HopCompleter do
         end
 
       {:error, {:pr_lookup, :no_producer_branch}} = err ->
-        # #8.E — juge de MANDAT (judge_target:mandate) : PRÉ-PR, donc pas de PR ni de review native → le
+        # Juge de MANDAT (judge_target:mandate) : PRÉ-PR, donc pas de PR ni de review native → le
         # verdict se trace en COMMENTAIRE issue et l'avance est ISSUE-LEVEL (grave la route → le poller
         # dispatche le stage suivant). Réutilise `complete` (la MÊME complétion issue-level que
         # close_with_trace : publish sauté via deliverable_opts nil + hop_sha). Tout AUTRE juge sans PR =
-        # erreur (un livrable était attendu) → fail-loud INCHANGÉ (jamais un merge sur PR introuvable).
+        # erreur (un livrable était attendu) → fail-loud (jamais un merge sur PR introuvable).
         if Map.get(hop, :judge_target) == "mandate" do
           hop |> Map.merge(%{deliverable_opts: nil, hop_sha: "mandate-verdict"}) |> complete(opts)
         else
@@ -451,8 +451,8 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   defp review_hop(hop, pr) do
-    # ②.1d : un juge no-carte porte `:review_event` (mappé du gate-decision continue/abandon par
-    # HopConsumer). À défaut (legacy carte), on dérive de l'intent. Le `:review_event` explicite prime.
+    # Un juge no-carte porte `:review_event` (mappé du gate-decision continue/abandon par
+    # HopConsumer). À défaut (carte), on dérive de l'intent. Le `:review_event` explicite prime.
     event = Map.get(hop, :review_event) || review_event_for_intent(Map.fetch!(hop, :intent))
 
     hop
@@ -465,8 +465,8 @@ defmodule Fleet.Pilot.HopCompleter do
   defp review_event_for_intent(:rework), do: :request_changes
   defp review_event_for_intent(_), do: :approve
 
-  # Routage commun selon l'intent (Corr.3 4-C). Le trigger du stage suivant = la review-request
-  # native (`request_review`), plus `set_assignee` : le producteur reste assigne (Entry), les juges
+  # Routage commun selon l'intent. Le trigger du stage suivant = la review-request native
+  # (`request_review`), plus `set_assignee` : le producteur reste assigne (Entry), les juges
   # sont dispatches via la PR (`dispatch_review`). `post_route` (position carte) RESTE sur l'issue.
   # `lcars-in-flight` leve en DERNIER sur le bon numero : producteur -> l'ISSUE (verrou pose par
   # dispatch_issue) ; juge -> la PR (verrou pose par dispatch_review). `pr` = nil seulement sur un
@@ -474,13 +474,13 @@ defmodule Fleet.Pilot.HopCompleter do
   #   :promote -> merge FF (la PR `Closes #N` ferme l'issue), unlock ;
   #   :advance -> request_review(next) + post_route, unlock ;
   #   :rework  -> post_route(rebond), unlock. Re-dispatch : producteur via l'assignee Entry conserve
-  #               (pas de PR encore) ; juge -> re-spawn producteur sur changes-requested (4-C-iv).
+  #               (pas de PR encore) ; juge -> re-spawn producteur sur changes-requested.
   defp route(%{intent: :promote} = hop, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
-    # F-arch-MCP : transmet issue_number + producer_branch à `promote` (le sceau gatekeeper en a besoin
-    # pour le commentaire de fin). Avant, le hop était réduit à {repo, pr_number} → merge sans trace.
+    # Transmet issue_number + producer_branch à `promote` (le sceau gatekeeper en a besoin pour le
+    # commentaire de fin) ; réduire le hop à {repo, pr_number} mergerait sans trace.
     promote_hop = %{
       repo: hop.repo,
       pr_number: pr,
@@ -518,12 +518,12 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # ②.1d — producteur SANS carte (single-brique) : la PR est ouverte (`complete_producer`) → on met
+  # Producteur SANS carte (single-brique) : la PR est ouverte (`complete_producer`) → on met
   # les JUGES (`:reviewer_roles`, défaut qualifier+reviewer) en `requested_reviewers` (le poller
-  # `dispatch_review` les spawn un à un), on ASSIGNE l'HUMAIN à la PR (②.1e — voir quel humain a
+  # `dispatch_review` les spawn un à un), on ASSIGNE l'HUMAIN à la PR (voir quel humain a
   # drivé), puis on lève le verrou de l'ISSUE (la PR ouverte fait skip l'issue côté poller via
   # `pulls_issue_ids`). PAS de merge ici : le merge est piloté par l'état-PR (dispatch_review, quand
-  # tous les juges ont approuvé). Branch-protection OFF en dev (décision user) → LCARS agrège, interim.
+  # tous les juges ont approuvé). Branch-protection OFF en dev → LCARS agrège, interim.
   defp route(%{intent: :review} = hop, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
@@ -540,11 +540,11 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # ②.1d — juge SANS carte : la review native a déjà été postée par `complete_judge` (`record_review`,
+  # Juge SANS carte : la review native a déjà été postée par `complete_judge` (`record_review`,
   # signée par le token du juge). Il ne reste qu'à lever le verrou de la PR. Le merge/rework est décidé
   # par le poller (`dispatch_review`, REVIEWS-DRIVEN : il lit la liste des reviews — verdict décisif par
-  # juge — pas `requested_reviewers` que Gitea ne vide pas, live #6). Pas d'action sur `requested_reviewers`
-  # (la DELETE est un no-op sur un juge ayant déjà reviewé, vérifié live).
+  # juge — pas `requested_reviewers` que Gitea ne vide pas). Pas d'action sur `requested_reviewers`
+  # (la DELETE est un no-op sur un juge ayant déjà reviewé).
   defp route(%{intent: :reviewed} = hop, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
@@ -554,7 +554,7 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # Demande la review de TOUS les juges d'un coup (DN §1.4 : qualifier+reviewer en requested_reviewers).
+  # Demande la review de TOUS les juges d'un coup (qualifier+reviewer en requested_reviewers).
   # Liste vide = trou de config (jamais merger sans juge en interim) → fail-loud.
   defp request_reviews_step(_forge, _repo, _pr, [], _forge_opts),
     do: {:error, {:request_review, :no_reviewers}}
@@ -567,7 +567,7 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # ②.1e — assigne l'HUMAIN commanditaire à la PR (comme le ticket : voir QUEL humain a drivé les
+  # Assigne l'HUMAIN commanditaire à la PR (comme le ticket : voir QUEL humain a drivé les
   # agents). L'humain DRIVE, ne fait rien → il ne signe rien, mais il est l'assignee partout (traça du
   # driver). Assignee = champ de routing (pas d'authorship) → token système OK. Humain irrésoluble →
   # best-effort (le code EST livré) : log + on n'échoue pas le hop.
@@ -588,17 +588,17 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # Juges du modèle single-brique (DN §1.4) : config `:reviewer_roles` (data catalogue, défaut
+  # Juges du modèle single-brique : config `:reviewer_roles` (data catalogue, défaut
   # qualifier+reviewer), surchargée par `opts` pour les tests. Symétrique de `:producer_role`.
   defp reviewer_roles(opts) do
     Keyword.get(opts, :reviewer_roles) ||
       Application.get_env(:fleet_pilot, :reviewer_roles, ["qualifier", "reviewer"])
   end
 
-  # ②.1e — injecte le token du compte de RÔLE dans les forge_opts → le SYSTÈME poste EN SON NOM
+  # Injecte le token du compte de RÔLE dans les forge_opts → le SYSTÈME poste EN SON NOM
   # (avatar/traça honnête, même mécanique que `create_ticket`/arch). `nil` (token absent/illisible/vide)
   # → forge_opts inchangé → fallback token système ; `RoleToken.token/1` émet un `Logger.warning` sur
-  # ce dégradé (token absent/illisible/vide), il est donc OBSERVABLE ici. Barrière §4 préservée :
+  # ce dégradé (token absent/illisible/vide), il est donc OBSERVABLE ici. Le pod ne poste jamais :
   # c'est le système qui poste avec le token de rôle, jamais le pod (forge-aveugle).
   defp as_role(forge_opts, role) when is_binary(role) and role != "" do
     case Fleet.Credentials.RoleToken.token(role) do
@@ -609,7 +609,7 @@ defmodule Fleet.Pilot.HopCompleter do
 
   defp as_role(forge_opts, _role), do: forge_opts
 
-  # F-E7 — espace deux écritures forge d'un même hop d'au moins UNE SECONDE. Gitea horodate les events à
+  # Espace deux écritures forge d'un même hop d'au moins UNE SECONDE. Gitea horodate les events à
   # la seconde : deux écritures dans la même seconde tiennent une égalité de `created_at` que le feed
   # dashboard rend dans un ordre arbitraire (« logiquement avant, affiché après », constaté sur plusieurs
   # runs). On insère ce gap entre le commentaire HUMAIN (verdict) et l'écriture protocole suivante
@@ -680,13 +680,13 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # ── Étape 2 : comment signé [hop:role:sha], dédup ──────────────────────────
-  # F064 : la signature ET le bloc result viennent de ForgeClient (co-localisés avec leurs
+  # La signature ET le bloc result viennent de ForgeClient (co-localisés avec leurs
   # parseurs `@hop_marker_rx` / `parse_result_block`). On NE passe PAS par le seam `forge`
   # (un stub ne doit pas pouvoir désynchroniser le format du parseur réel).
   #
   # NB `:outputs` : embarque le `result_K` du stage qui finit → lisible sans query séparée
-  # (recovery, contexte). En B (§L441) HopConsumer ne pose plus `:outputs` (l'ex-cas A2.3b
-  # "avance vers un gatekeeper-stage" n'existe plus) → seam générique, inactif côté HopConsumer
+  # (recovery, contexte). HopConsumer ne pose plus `:outputs` (le cas « avance vers un
+  # gatekeeper-stage » n'existe plus) → seam générique, inactif côté HopConsumer
   # mais conservé (autres appelants / extensibilité).
   defp step2_comment(forge, repo, n, role, sha, hop, forge_opts) do
     signature = ForgeClient.hop_marker(role, sha)
@@ -695,7 +695,7 @@ defmodule Fleet.Pilot.HopCompleter do
       Map.get(hop, :comment_body, default_comment(role, sha)) <>
         ForgeClient.result_block(Map.get(hop, :outputs)) <> "\n\n" <> signature
 
-    # F-E6 — le comment signé du hop est AU NOM DU RÔLE qui finit (`as_role` : verdict du consultant /
+    # Le comment signé du hop est AU NOM DU RÔLE qui finit (`as_role` : verdict du consultant /
     # livrable de l'eng → auteur forge = le rôle, pas le compte système ; même geste que la PR/review/sceau).
     case forge.post_comment(
            repo,
@@ -708,9 +708,9 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # ── Étape 4 : assignee suivant (A2) OU close (1-stage terminal) ────────────
-  # (Étape 3 « PATCH state:* » retirée — #5.2 D4. N° de step conservés = mapping DN §5.)
-  # Reassign : grave la ROUTE du stage suivant AVANT le PATCH assignee (A2.1) — le poller
+  # ── Étape 4 : assignee suivant OU close (1-stage terminal) ─────────────────
+  # (Pas d'étape 3 « PATCH state:* » : l'état vit dans la route-comment. N° de step conservés.)
+  # Reassign : grave la ROUTE du stage suivant AVANT le PATCH assignee — le poller
   # ne doit voir le nouvel assignee qu'avec sa position carte déjà posée (sinon le spawn
   # suivant ne saurait pas quel stage il est). post_route idempotent (dédup marqueur).
   defp step4_route(forge, repo, n, hop, forge_opts) do
@@ -722,7 +722,7 @@ defmodule Fleet.Pilot.HopCompleter do
         end
 
       next when is_binary(next) ->
-        # #8.A : AVANCE = grave la route du stage suivant. PLUS de `set_assignee(next)` — l'assignee
+        # AVANCE = grave la route du stage suivant. PLUS de `set_assignee(next)` — l'assignee
         # reste l'HUMAIN (traça) ; le rôle du next stage (`next`) est dérivé de la route au dispatch
         # (`StageDispatcher.carte_role`), pas de l'assignee. `next` (next_role présent) distingue
         # AVANCE vs terminal (nil → close).

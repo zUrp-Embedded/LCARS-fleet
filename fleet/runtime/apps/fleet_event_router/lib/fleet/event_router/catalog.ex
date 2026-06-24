@@ -6,16 +6,16 @@ defmodule Fleet.EventRouter.Catalog do
   fonction stateless write-once dans un process). Appelée par
   `Fleet.EventRouter.Application.start/2`.
 
-  Rôle (post-fork « subscribers directs = canon », BL-027) : `events.yaml` est un
-  **registry pur** — ses clés sont les types d'events autorisés. La consommation
-  se fait par **subscribers directs** (`Bus.subscribe` + `handle_info`), PAS par
-  une table de dispatch (le GenServer `Dispatch` + `handle_event/1` était inerte,
-  retiré). `load!/0` **peuple `authorized_event_types`**
-  (`Bus.set_authorized_event_types/1`) → `Bus.broadcast/2` fail-loud sur tout type
-  hors registry (verrou anti-récurrence : un event émis non-registré crashe son
-  émetteur — les émetteurs dynamiques externes `webhooks_gitea`/`signals_os`/
-  `policies`/`Pod.best_effort_broadcast` rescue `UnregisteredError`, cf. audit BL-027 ; MA-04 : le
-  lifecycle `pod.completed` passe par `Pod.required_broadcast` qui PROPAGE l'échec au lieu de l'avaler).
+  Rôle : `events.yaml` est un **registry pur** — ses clés sont les types d'events
+  autorisés. La consommation se fait par **subscribers directs** (`Bus.subscribe` +
+  `handle_info`), il n'y a PAS de table de dispatch. `load!/0` **peuple
+  `authorized_event_types`** (`Bus.set_authorized_event_types/1`) → `Bus.broadcast/2`
+  fait fail-loud sur tout type hors registry : un event émis non-registré crashe son
+  émetteur. Les émetteurs dynamiques externes (`webhooks_gitea`/`signals_os`/
+  `policies`/`Pod.best_effort_broadcast`) rescue `UnregisteredError` pour ne pas mourir
+  sur un type inattendu ; en revanche le lifecycle `pod.completed` passe par
+  `Pod.required_broadcast` qui PROPAGE l'échec au lieu de l'avaler (un event
+  load-bearing avalé masquerait la fin de hop et laisserait le verrou tenu).
 
   La **pré-registration des atomes** (`String.to_existing_atom` côté émetteurs
   dynamiques) est faite séparément par `Application.preregister_event_atoms/0`
@@ -54,9 +54,9 @@ defmodule Fleet.EventRouter.Catalog do
         :ok
 
       :error ->
-        # F-008 (Pattern A crash-boot, fork « deploy cassé => on boot pas ») : avant, un events.yaml
-        # absent/invalide WARNait puis rendait :ok → `authorized_event_types` restait vide →
-        # `assert_authorized!` escape-hatch (MapSet vide) → le Bus broadcastait TOUT type SANS
+        # Crash-boot volontaire (« deploy cassé ⇒ on ne boot pas ») : un events.yaml absent/invalide
+        # qui WARNerait puis rendrait `:ok` laisserait `authorized_event_types` vide →
+        # `assert_authorized!` escape-hatch (MapSet vide) → le Bus broadcasterait TOUT type SANS
         # validation, deploy « vert » mais registry mort. `do_load` n'est atteint qu'en prod/dev
         # (`load_event_registry: true` ; test pose `false`) → ici on est forcément dans un boot réel
         # voulant le registry. Fail-loud : raise dans `Application.start` → le BEAM ne monte pas, le
@@ -69,9 +69,9 @@ defmodule Fleet.EventRouter.Catalog do
 
   @doc """
   Clés-types du registry events.yaml (strings). **Source unique du parse** — réutilisée
-  par `do_load/0` ET `Application.preregister_event_atoms/0` (dedup F035 : le fichier
-  n'est plus localisé/parsé 2× au boot, plus de risque de drift de shape). Rend `[]` si
-  events.yaml est absent/invalide.
+  par `do_load/0` ET `Application.preregister_event_atoms/0` : le fichier n'est localisé/
+  parsé qu'une fois au boot, donc pas de risque de drift de shape entre les deux. Rend `[]`
+  si events.yaml est absent/invalide.
   """
   @spec event_type_strings() :: [String.t()]
   def event_type_strings do
@@ -81,7 +81,7 @@ defmodule Fleet.EventRouter.Catalog do
     end
   end
 
-  # Le parse events.yaml en UN seul endroit (F035) : localise + lit + valide la shape.
+  # Le parse events.yaml en UN seul endroit : localise + lit + valide la shape.
   # `{:ok, events_map}` si présent et `events:` est une map (map vide incluse — `do_load`
   # doit set un MapSet vide, pas warner) ; `:error` si absent/invalide. Le caller tranche
   # le log : do_load → warning sur :error ; event_type_strings → [].
@@ -94,7 +94,7 @@ defmodule Fleet.EventRouter.Catalog do
     end
   end
 
-  @doc "Résout le path du registry events.yaml (env override ou priv/). Public : réutilisé par `Application.preregister_event_atoms/0` (dedup F035)."
+  @doc "Résout le path du registry events.yaml (env override ou priv/). Public : réutilisé par `Application.preregister_event_atoms/0` (source de parse unique)."
   def events_yaml_path do
     Application.get_env(
       :fleet_event_router,

@@ -20,14 +20,14 @@ defmodule Fleet.API.Application do
   ## Stratégie
 
   `:one_for_one` — GitCommitter + Cowboy listener restart `:permanent`.
-  Pré-enregistrement atomes events (cohérent ch11 M1 atom-leak DoS).
+  Pré-enregistrement atomes events (créés au compile-time, pas dérivés d'entrée externe → pas de fuite d'atomes DoS).
   """
 
   use Application
 
   # NB atome `api` (admin.spawn.request) : créé au compile-time par son vrai site
-  # (rest.ex) — pas besoin d'un attribut de pré-enregistrement dédié (F005,
-  # ex-@api_event_atoms retiré).
+  # (rest.ex) — pas besoin d'un attribut de pré-enregistrement dédié dans cette
+  # application (l'atome existe déjà via le `%Fleet.Event{type: :"admin.spawn.request"}`).
 
   @impl Application
   def start(_type, _args) do
@@ -37,7 +37,7 @@ defmodule Fleet.API.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, _} = ok ->
-        # B9 #576 — Type=notify unit attend sd_notify(READY=1). Émis
+        # Une unit systemd `Type=notify` attend sd_notify(READY=1). Émis
         # APRÈS Supervisor.start_link OK (listener Cowboy bind effectif
         # — sinon `is-active = activating` jusqu'à TimeoutStartSec=120s).
         # Inline gen_udp AF_UNIX SOCK_DGRAM (pas de dep Hex). Guard
@@ -79,7 +79,7 @@ defmodule Fleet.API.Application do
   end
 
   defp base_children do
-    # Vulcan #2 : GitCommitter GenServer sérialise les commits du repo
+    # GitCommitter GenServer sérialise les commits du repo
     # config (évite race conditions cross-caller sur snapshot/rename/
     # git add/commit/rollback). Pas de cycle, pas de state mutable —
     # juste un mutex de file FIFO.
@@ -91,12 +91,12 @@ defmodule Fleet.API.Application do
       port = Application.get_env(:fleet_api, :http_port, 8080)
 
       # Dispatch RAW (non pré-compilé) — Plug.Cowboy le compile en
-      # interne via to_args/5. Le passer DÉJÀ compilé (ancienne
-      # version) faisait re-compiler la structure interne cowboy →
-      # segments décomposés réinterprétés comme paths bruts →
-      # "ws" sans slash → ArgumentError. Bug réel prod, masqué en
-      # test par start_listener:false. Fix prod (#576 d9aacfd0 ne
-      # corrigeait QUE la régression test, pas ce bug-ci).
+      # interne via to_args/5. Le passer DÉJÀ compilé faisait
+      # re-compiler la structure interne cowboy → segments décomposés
+      # réinterprétés comme paths bruts → "ws" sans slash →
+      # ArgumentError. Bug PROD réel (pas couvert en test, où
+      # start_listener:false court-circuite le bind du listener — le
+      # dispatch n'est jamais compilé).
       dispatch = [
         {:_,
          [

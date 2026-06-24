@@ -9,7 +9,7 @@ defmodule Fleet.Spawner.PodTmux do
 
   Le mandat ne voyage PAS ici (il est pull par le pod via MCP `get_task`). Ce canal = le **KICK**
   (« yop » → déclenche get_task → traite → submit_result) + les slash-commands (`/clear`) + le health
-  (`has-session`). Voir la chaîne reverse #5b : les channels MCP sont `skipSlashCommands:true` → seul
+  (`has-session`). Les channels MCP sont `skipSlashCommands:true` → seul
   le send-keys tmux atteint les slash-commands.
 
   ## Le KILL PRIMAIRE n'est PAS ici (mais le fallback orphelin, si)
@@ -18,7 +18,7 @@ defmodule Fleet.Spawner.PodTmux do
   le namespace ; tuer juste la session tmux laisserait le holder vivant → namespace orphelin. La socket
   meurt avec le namespace quand le Port se ferme. **Exception RECOVERY** : quand il n'y a plus de Port
   (orphelin post-crash GenServer, reap), `kill_holder/1` ci-dessous fait le geste de secours
-  (tmux kill-server + `pkill -f` ancré, F-034).
+  (tmux kill-server + `pkill -f` ancré).
   """
 
   require Logger
@@ -33,8 +33,8 @@ defmodule Fleet.Spawner.PodTmux do
   @spec sock_base() :: String.t()
   def sock_base, do: Application.get_env(:fleet_spawner, :tmux_sock_base, default_sock_base())
 
-  # Doctrine 2026-06-11 (fleet sous l'humain) : défaut home-relatif `~/.lcars/run/tmux-sock`. Avant :
-  # `/run/lcars/tmux-sock` (RuntimeDirectory systemd, owned `lcars`, non-writable hors du daemon-lcars).
+  # Fleet tourne sous l'humain → défaut home-relatif `~/.lcars/run/tmux-sock` (un `/run/lcars/tmux-sock`
+  # serait un RuntimeDirectory systemd owned `lcars`, non-writable hors d'un daemon-lcars).
   # Fallback `/run/lcars/tmux-sock` si home irrésoluble (jamais en pratique).
   defp default_sock_base,
     do: Path.join(System.user_home() || "/run/lcars", ".lcars/run/tmux-sock")
@@ -44,9 +44,9 @@ defmodule Fleet.Spawner.PodTmux do
 
   Filename CONSTANT (`pod.sock`), pas `lcars-pod-<pod_id>.sock` : le dir `<pod_id>/`
   donne déjà l'unicité + l'isolation (bind-mount). Le double pod_id (dir + filename)
-  faisait dépasser la limite dure `sun_path` (108 octets) des sockets Unix dès que
-  `pod_id` est un UUID (chemin pipeline) → `error: File name too long` (jamais vu en
-  spawn direct à id court ; exposé par l'assemblage pipeline C3, 2026-06-06).
+  ferait dépasser la limite dure `sun_path` (108 octets) des sockets Unix dès que
+  `pod_id` est un UUID (chemin pipeline) → `error: File name too long` (un id court en
+  spawn direct passerait ; un pod_id UUID de pipeline, non).
   """
   @spec sock_path(String.t()) :: String.t()
   def sock_path(pod_id) when is_binary(pod_id),
@@ -65,11 +65,11 @@ defmodule Fleet.Spawner.PodTmux do
   `tmux kill-server` (sur le sock par-pod) tue tmux+claude ; `pkill -9 -f <pattern>` tue le holder
   (que kill-server laisse vivant — il porte le namespace).
 
-  **F-034** — le `pkill -9 -f <pod_id>` brut était un regex NON ÉCHAPPÉ et NON ANCRÉ :
-    1. un `pod_id` métacaractérisé sur-matchait ;
-    2. un `pod_id` préfixe d'un autre (`pr-8-engineer` vs `pr-8-engineer-v2`) tuait les deux ;
-    3. un `pod_id` vide/anormal → `pkill -f ""` aurait tué **TOUT le host, BEAM inclus** (self-kill).
-  Fix via `pkill_pattern/1` : garde de validité (refus fail-safe si le pod_id n'a pas la forme
+  Le pattern doit être échappé et ancré, jamais le `pod_id` brut : `pkill -9 -f <pod_id>` brut serait NON ÉCHAPPÉ et NON ANCRÉ :
+    1. un `pod_id` métacaractérisé sur-matcherait ;
+    2. un `pod_id` préfixe d'un autre (`pr-8-engineer` vs `pr-8-engineer-v2`) tuerait les deux ;
+    3. un `pod_id` vide/anormal → `pkill -f ""` tuerait **TOUT le host, BEAM inclus** (self-kill).
+  D'où `pkill_pattern/1` : garde de validité (refus fail-safe si le pod_id n'a pas la forme
   attendue) + `Regex.escape` + ancrage en token argv. Le holder porte le pod_id comme arg standalone
   (`bwrap_launch.sh <role> <pod_id> <pod_dir>`) → l'ancrage `(^| )id( |$)` le matche sans le manquer,
   tout en excluant les sur-matchs substring.
@@ -97,7 +97,7 @@ defmodule Fleet.Spawner.PodTmux do
   @doc """
   Pattern `pkill -f` pour un pod_id : ancré-en-token (`(^| )<escaped>( |$)`) et échappé, ou `:unsafe`
   si le pod_id ne matche pas la forme attendue (alphanumérique de tête + `.-_`, ≥4 chars). Public pour
-  test (F-034) — fonction pure. `:unsafe` ⇒ on NE lance PAS pkill (un pod_id vide/anormal produirait
+  test — fonction pure. `:unsafe` ⇒ on NE lance PAS pkill (un pod_id vide/anormal produirait
   un pattern catastrophique).
   """
   @spec pkill_pattern(String.t()) :: {:ok, String.t()} | :unsafe
@@ -125,8 +125,8 @@ defmodule Fleet.Spawner.PodTmux do
   universel (atteint aussi les slash-commands, contrairement aux channels MCP).
 
   Robustesse : le texte et l'`Enter` partent en DEUX send-keys distincts (cf. `send_keys_args/2`). Combinés
-  en un seul (`keys "Enter"`), le TUI de claude rate l'`Enter` par intermittence (vu live 2026-06-20 :
-  « yop » non soumis, fallait l'envoyer en 2 fois). send-keys est le SEUL canal out-of-band quand le Monitor
+  en un seul (`keys "Enter"`), le TUI de claude rate l'`Enter` par intermittence (le « yop » n'est pas
+  soumis tant qu'on ne renvoie pas l'Enter). send-keys est le SEUL canal out-of-band quand le Monitor
   est mort → il doit être robuste par construction, pas seulement par le retry de la boucle de kick.
   """
   @spec send_keys(String.t(), String.t()) :: :ok | {:error, term()}
@@ -154,7 +154,7 @@ defmodule Fleet.Spawner.PodTmux do
 
   @doc """
   Capture le contenu visible du pane du pod (`tmux capture-pane -p`) = l'écran du REPL. Canal d'observation
-  DÉPORTÉ, fallback-ACK (#5.2 [5]) : quand l'agent n'acke pas, on attache l'écran au ticket d'escalade
+  DÉPORTÉ, fallback-ACK : quand l'agent n'acke pas, on attache l'écran au ticket d'escalade
   (starfleet voit ce que l'agent affichait/faisait). Renvoie `""` si la capture échoue (best-effort).
   """
   @spec capture_pane(String.t()) :: String.t()

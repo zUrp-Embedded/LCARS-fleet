@@ -1,16 +1,16 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check do
-  @shortdoc "Vérifie les contrats inter-module au load (jumeau runtime du gate §11-PATH)"
+  @shortdoc "Vérifie les contrats inter-module au load (refuse le build si un contrat est rouvert)"
 
   @moduledoc """
-  Runtime Contract Checker (P01) — valide les contrats inter-module
-  AVANT exécution, et transforme chaque trou en refus explicite (exit≠0)
+  Runtime Contract Checker — valide les contrats inter-module AVANT
+  exécution, et transforme chaque trou en refus explicite (exit≠0)
   plutôt qu'en timeout/bug silencieux runtime.
 
-  C'est la **forme exécutable** de la worklist de remédiation REMED-RUNTIME-1
-  (cf. `PLAN-REMEDIATION-runtime-2026-06-04.md`) : chaque check = une classe
-  de dérive ; ROUGE tant que le fix n'est pas landé, VERT quand il l'est.
-  Au verrou R7, `contracts.check` exit 0 devient le garde-fou permanent
-  (boot/CI fail-loud) — le jumeau runtime du gate `§11-PATH` doctrine.
+  Chaque check garde une classe de dérive déjà rencontrée : ROUGE tant que le
+  fix n'est pas landé, VERT quand il l'est. Câblé en garde-fou permanent
+  (`contracts.check` exit 0 au boot/CI fail-loud, et `mix release` refuse de
+  bâtir si un check est rouge), il promeut chaque invariant d'une clôture
+  documentaire à une clôture mécanique : un agent qui re-dérive casse le build.
 
   ## Usage
 
@@ -30,9 +30,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @recursive false
 
   # Chaque check : %{id, remediation, status: :pass|:fail|:pending, evidence: [..], note}
-  # Les checks IMPLÉMENTÉS sont grounded sur le code réel (grep/introspection).
-  # Les PENDING nomment la remédiation qui les rendra exécutables (R2→R7).
-  # Tous les checks de remédiation sont implémentés (8/8). @pending_checks vide.
+  # Les checks IMPLÉMENTÉS sont fondés sur le code réel (grep/introspection).
+  # Les PENDING nommeraient la remédiation qui les rendrait exécutables.
+  # Tous les checks sont implémentés : `@pending_checks` est vide.
   @pending_checks []
 
   @impl Mix.Task
@@ -58,12 +58,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @doc """
   Exécute tous les checks et rend `{overall, checks}` SANS imprimer ni `exit`.
 
-  Forme réutilisable de la logique de check (R7 verrou I-CBC) : appelée par
-  `run/1` (CLI : print + exit) ET par le step de `mix release`
-  (`mix.exs` `verrou_contracts/1` : refuse de bâtir la release si rouge). Les
-  sources étant présentes au build (release bâtie depuis le projet), les checks
-  grep/introspection tournent ; un check rouge → release refusée = la
-  réalisation mécanique de « le boot refuse si un contrat est rouvert ».
+  Forme réutilisable de la logique de check : appelée par `run/1` (CLI : print +
+  exit) ET par le step de `mix release` (`mix.exs` `verrou_contracts/1` : refuse de
+  bâtir la release si rouge). Les sources étant présentes au build (release bâtie
+  depuis le projet), les checks grep/introspection tournent ; un check rouge →
+  release refusée = la réalisation mécanique de « le boot refuse de monter si un
+  contrat a été rouvert » (rendre l'état interdit impossible en amont, pas le rattraper).
 
   Suppose le code déjà compilé (le caller compile : `run/1` via `Mix.Task.run`,
   le step release après la phase compile).
@@ -91,8 +91,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_gatekeeper_not_a_stage(root),
         check_verdict_envelope_unwrapped(root),
         check_no_root_runtime_guard(root)
-        # NB rail F150 `pipeline.bounded_retry_system_side` RETIRÉ (②.3 / BL-050) : il vérifiait le
-        # retry borné système-side de l'`Executor` RAM (supprimé). L'équivalent côté rail forge = le
+        # NB il n'y a pas de rail `pipeline.bounded_retry_system_side` : il vérifiait le retry borné
+        # système-side de l'`Executor` RAM, qui n'existe plus. L'équivalent côté rail forge = le
         # `max_rework_rounds` (HopConsumer) ; à re-contractualiser si besoin (backlog).
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
@@ -103,13 +103,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # ── Checks implémentés ───────────────────────────────────────────────
 
-  # R03/R10 (→R2) : les consommateurs d'events doivent matcher %Fleet.Event{},
-  # pas le tuple legacy {atom, %{"event_type" => ...}}. Set R2 = Executor + WS
-  # (R2a, fait) + TaskMonitor (R2b). Hors R2 (autres sous-lots) :
-  # AutoDispatcher (Pilot→R4), MCP Bridge (channels→R6), Dispatch/AuditConsumer
-  # (dual legacy retiré au verrou→R5/R7).
+  # Les consommateurs d'events doivent matcher `%Fleet.Event{}`, jamais le tuple
+  # legacy `{atom, %{"event_type" => ...}}` — un consommateur resté sur le tuple est
+  # mort sur la struct canon (il ne matche plus rien) et le drift est silencieux.
+  # Ce check mesure le CODE réel des cibles ci-dessous et flague toute lecture
+  # `"event_type" =>` qui subsiste.
   defp check_event_consumers_canon(root) do
-    # NB cible `executor.ex` retirée (②.3 / BL-050 : l'Executor RAM était un consommateur d'events, supprimé).
+    # NB `executor.ex` n'est plus une cible : l'Executor RAM (un consommateur d'events) n'existe plus.
     targets = [
       "apps/fleet_api/lib/fleet/api/ws.ex",
       "apps/fleet_task_monitor/lib/fleet/task_monitor.ex"
@@ -120,8 +120,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # Le check mesure le CODE réel : une mention `"event_type" =>` en
     # commentaire (ex. « le tuple legacy {atom, %{"event_type" => ...}} est
     # RETIRÉ ») ne doit PAS compter comme une violation (sinon le gate flague
-    # sa propre documentation — clôture sur proxy). On retire le commentaire
-    # de fin de ligne avant de re-tester (R2b).
+    # sa propre documentation — clôture sur proxy). On retire donc le commentaire
+    # de fin de ligne avant de re-tester.
     evidence =
       Enum.flat_map(targets, fn rel ->
         Path.join(root, rel)
@@ -139,16 +139,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R01 (→R3) : le Loader doit normaliser v1/v2.5 vers une forme interne unique
-  # (déballer spec.stages). Sans ça l'Executor lit pipeline["stages"]=nil sur v2.5.
+  # Le Loader doit normaliser v1/v2.5 vers une forme interne unique (déballer
+  # spec.stages). Sans ça un consommateur lit `pipeline["stages"]=nil` sur du v2.5.
   defp check_pipeline_v25_normalized(root) do
     rel = "apps/fleet_pipeline/lib/fleet/pipeline/loader.ex"
     loader = Path.join(root, rel)
 
-    # Anti-vert-creux DURCI (F-couche3, 2026-06-14) : l'ancien rail matchait `~r/normalize|déball/i` sur
-    # TOUT le source → un simple COMMENTAIRE contenant « normalize » le rendait vert même sans le code. On
-    # matche désormais la CLAUSE DE CODE réelle qui déballe `spec.stages` (la normalisation v2.5) ET son
-    # appel, en STRIPPANT le commentaire de chaque ligne (un `# defp normalize(...)` commenté ne compte pas).
+    # Anti-vert-creux : matcher `~r/normalize|déball/i` sur TOUT le source rendrait le rail vert dès qu'un
+    # simple COMMENTAIRE contient « normalize », même sans le code. On matche donc la CLAUSE DE CODE réelle
+    # qui déballe `spec.stages` (la normalisation v2.5) ET son appel, en STRIPPANT le commentaire de chaque
+    # ligne (un `# defp normalize(...)` commenté ne compte pas).
     unwrap_clause? =
       loader
       |> grep_lines(~r/defp normalize\(%\{"spec"/)
@@ -183,8 +183,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R08 (→R5) : tout handler référencé dans events.yaml doit exister, sinon
-  # la route est un handler fantôme toléré silencieusement.
+  # Tout handler référencé dans events.yaml doit exister, sinon la route est un
+  # handler fantôme toléré silencieusement.
   defp check_events_handlers_exist(root) do
     yaml = Path.join(root, "apps/fleet_event_router/priv/events.yaml")
 
@@ -212,21 +212,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R06/R22 (→R4) : le backend de spawn coord par défaut doit être câblé,
-  # pas le placeholder NotWiredYet (qui rend les soft gates silencieusement KO).
-  # R06/R22 — invariant post-consolidation : la gate LLM (soft + terminal
-  # non-tranchable) est jugée par le **gatekeeper** côté pipeline ; `coord` ne
-  # porte plus de spawn de gate (placeholder `NotWiredYet` retiré du chemin
-  # actif). On vérifie le code RÉEL : (a) aucun `HookSpawner.NotWiredYet`
-  # résiduel dans le gate-path coord, (b) `Gates` est pur — aucune délégation
-  # `coord_backend()`/`CoordBackend` (la couture morte ne doit pas réapparaître).
+  # Invariant : la gate LLM (soft + terminal non-tranchable) est jugée par le
+  # **gatekeeper** côté pipeline ; `coord` ne porte aucun spawn de gate, et le
+  # placeholder `NotWiredYet` (qui rendrait les soft gates silencieusement KO) ne
+  # doit pas réapparaître dans le gate-path coord. On vérifie donc le code RÉEL,
+  # sans se fier à un commentaire :
+  # (a) aucun `HookSpawner.NotWiredYet` résiduel dans le lib coord, (b) `Gates`
+  # est pur — aucune délégation `coord_backend()`/`CoordBackend` (la couture
+  # morte ne doit pas revenir).
   defp check_coord_backend_wired(root) do
-    # F043 fix : `soft_gate.ex` a été retiré en R06 (gates consolidées gatekeeper).
-    # `grep_lines/2` rend `[]` sur un fichier absent → cette moitié `notwired`
-    # passait TOUJOURS vide = vert-creux (la classe d'échec que ce checker existe
-    # pour prévenir). On grep désormais TOUT le lib coord (glob de fichiers RÉELS,
-    # pas un fichier mort) pour le placeholder `NotWiredYet` qui ne doit pas
-    # réapparaître dans le gate-path coord.
+    # `soft_gate.ex` n'existe pas (gates consolidées sur le gatekeeper). Comme
+    # `grep_lines/2` rend `[]` sur un fichier absent, grepper un fichier mort
+    # passerait TOUJOURS vide = vert-creux (la classe d'échec que ce checker existe
+    # pour prévenir). On grep donc TOUT le lib coord (glob de fichiers RÉELS, pas un
+    # fichier mort) pour le placeholder `NotWiredYet` qui ne doit pas réapparaître
+    # dans le gate-path coord.
     notwired =
       Path.wildcard(Path.join(root, "apps/fleet_coord/lib/**/*.ex"))
       |> Enum.flat_map(fn file ->
@@ -255,10 +255,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R12 (→R4-pending) : `compose_claude_md/3` doit lire `spec.invocation.lifetime_scope`
-  # (le schéma v2.5 + les cap-profiles canon), pas `spec.lifetime_scope` (forme
-  # pré-v2.5) — sinon le CLAUDE.md du pod affiche toujours "unknown". Le jumeau
-  # `check_lifetime_scope/1` (cap_profile.ex) lit déjà le bon chemin.
+  # `compose_claude_md/3` doit lire `spec.invocation.lifetime_scope` (le schéma v2.5
+  # canon), pas `spec.lifetime_scope` (forme pré-v2.5) — sinon le CLAUDE.md du pod
+  # affiche toujours "unknown". Le jumeau `check_lifetime_scope/1` (cap_profile.ex)
+  # lit déjà le bon chemin.
   defp check_capprofile_lifetime_scope_path(root) do
     sp = "apps/fleet_sp_builder/lib/fleet/sp_builder.ex"
 
@@ -283,10 +283,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R13 (→R4-pending) : `check_modop_incompatible/1` doit lire
-  # `spec.modop_set.incompatible` (schéma v2.5) + comparer aux modops actifs
-  # (`default` ++ `optional`), pas `spec.modop_incompatible` (clé inexistante)
-  # ni `spec.modop_set` traité comme une liste → l'invariant ne tire jamais.
+  # `check_modop_incompatible/1` doit lire `spec.modop_set.incompatible` (schéma
+  # v2.5) + comparer aux modops actifs (`default` ++ `optional`), pas
+  # `spec.modop_incompatible` (clé inexistante) ni `spec.modop_set` traité comme
+  # une liste → sinon l'invariant ne tire jamais.
   defp check_capprofile_modop_incompatible_path(root) do
     cp = "apps/fleet_cap_profile/lib/fleet/cap_profile.ex"
 
@@ -308,12 +308,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R20/F103 : `TmuxBackend` (claude --remote-control HORS bwrap, control-path CASSÉ depuis la
-  # convergence PodTmux) a été SUPPRIMÉ. Le check garde la SUPPRESSION du module CASSÉ : rouge s'il
-  # réapparaît OU si runtime.exs re-référence TmuxBackend. NB (LAUNCH-Q) : il ne s'agit PAS d'interdire
-  # tout host-launch — `containment: none` est désormais servi par `bin/host_launch.sh` (mécanisme
-  # tmux-holder PROUVÉ de bwrap_launch, sélectionné par `do_launch` via `launcher_path`), pas par le
-  # remote-control nu de l'ex-TmuxBackend. Le rail interdit la résurrection du MÉCANISME cassé, pas la voie host.
+  # `TmuxBackend` (claude --remote-control HORS bwrap, dont le control-path est cassé) n'existe pas.
+  # Ce check garde cette suppression : rouge s'il réapparaît OU si runtime.exs re-référence TmuxBackend.
+  # NB il ne s'agit PAS d'interdire tout host-launch — `containment: none` est servi par
+  # `bin/host_launch.sh` (le mécanisme tmux-holder PROUVÉ de bwrap_launch, sélectionné par `do_launch`
+  # via `launcher_path`), pas par le remote-control nu de l'ex-TmuxBackend. Le rail interdit la
+  # résurrection du MÉCANISME cassé, pas la voie host.
   defp check_launch_backend_containment(root) do
     rt = "config/runtime.exs"
     tb = "apps/fleet_spawner/lib/fleet/spawner/launch_backend/tmux_backend.ex"
@@ -339,10 +339,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R14 (→R4-pending) : `maybe_provision_mcp_config/1` doit refuser (fail-loud)
-  # un backend RÉEL avec `mcp_server_spec` nil — un pod réel parle MCP, sans MCP
-  # il part cassé (timeout silencieux). Marqueur du fail-loud : l'erreur
-  # `:mcp_server_spec_required`. Rouge si absente (retour au `:ok` muet).
+  # `maybe_provision_mcp_config/1` doit refuser (fail-loud) un backend RÉEL avec
+  # `mcp_server_spec` nil — un pod réel parle MCP, sans MCP il part cassé (timeout
+  # silencieux). Marqueur du fail-loud : l'erreur `:mcp_server_spec_required`.
+  # Rouge si absente (retour au `:ok` muet).
   defp check_mcp_required_real_backend(root) do
     pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
 
@@ -363,9 +363,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R18 (→R4-pending) : `Fleet.Spawner.spawn_pod/3` doit refuser un pod `one-shot`
-  # sans mandat (sinon le pod part sans travail → timeout). Marqueur du guard :
-  # l'erreur `:mandate_required`. Rouge si absente (retour au brief générique muet).
+  # `Fleet.Spawner.spawn_pod/3` doit refuser un pod `one-shot` sans mandat (sinon
+  # le pod part sans travail → timeout). Marqueur du guard : l'erreur
+  # `:mandate_required`. Rouge si absente (retour au brief générique muet).
   defp check_spawn_has_mandate(root) do
     sp = "apps/fleet_spawner/lib/fleet/spawner.ex"
 
@@ -387,9 +387,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R11 (→R4-pending) : `Fleet.SPBuilder.filter_skills/2` doit échouer (fail-loud)
-  # si un skill PLAIN whitelisté est absent du disque (plus de filtrage silencieux
-  # qui laissait un pod réclamer un skill inexistant). Marqueur : `:skills_missing`.
+  # `Fleet.SPBuilder.filter_skills/2` doit échouer (fail-loud) si un skill PLAIN
+  # whitelisté est absent du disque — sinon un filtrage silencieux laisserait un pod
+  # réclamer un skill inexistant. Marqueur : `:skills_missing`.
   # Rouge si absent.
   defp check_skills_declared_present(root) do
     sp = "apps/fleet_sp_builder/lib/fleet/sp_builder.ex"
@@ -409,14 +409,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R09/F-08 (→R4-pending) : modèle réel post-B2 — la clé events.yaml EST le
-  # `type` de l'event (le `source` est un champ séparé, validé par
-  # `Fleet.Event.canonical_sources/0`). Le « rename <source>.<type> » de F-08 est
-  # superseded par B2 (Dispatch retiré, registry keye par type). L'invariant qui
-  # RESTE : tout type **consommé** (`handle_info(%Fleet.Event{type: :X})`, exemples
-  # moduledoc inclus) doit être une clé du registry — sinon consommateur mort
-  # (attend un type qui ne peut être broadcast sans UnregisteredError). Les
-  # émetteurs sont couverts par la validation fail-loud B2 au runtime.
+  # La clé events.yaml EST le `type` de l'event (le `source` est un champ séparé,
+  # validé par `Fleet.Event.canonical_sources/0`) ; le registry est keyé par type, il
+  # n'y a pas de table de dispatch keyée autrement. Invariant gardé ici : tout type
+  # **consommé** (`handle_info(%Fleet.Event{type: :X})`, exemples moduledoc inclus)
+  # doit être une clé du registry — sinon le consommateur est mort (il attend un type
+  # qui ne peut être broadcast sans `UnregisteredError`). Les émetteurs, eux, sont
+  # couverts par la validation fail-loud du broadcast au runtime (un type non-registré
+  # crashe son émetteur), donc ce check ne couvre que le versant consommation.
   defp check_events_registry_keys_aligned(root) do
     registry = registry_event_keys(root)
 
@@ -462,16 +462,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
-  # ── Rails de remédiation (STEP 0, 2026-06-09) ────────────────────────
-  # Drop-ins de `RAILS-R-xx-pret-a-graver-2026-06-09.md` (audit re-analyse).
-  # Promotion clôture-documentaire → clôture-contrainte des invariants que la
-  # branche cowboy a traversés faute de check : un agent qui re-dérive →
-  # `mix release` REFUSE (verrou_contracts), build rouge, fix immédiat.
+  # ── Rails de remédiation ─────────────────────────────────────────────
+  # Ces rails promeuvent des invariants d'une clôture documentaire à une clôture
+  # par contrainte : un invariant qu'on a déjà violé faute de check devient ici un
+  # check exécutable. Un agent qui re-dérive → `mix release` REFUSE
+  # (verrou_contracts), build rouge, fix immédiat.
 
-  # R-result-deadline (SPAWN-CR1, Z1) : timer :result_deadline ANNULÉ à l'arrivée
-  # du résultat (sinon tue les pods forever/pipe/run au cycle 2). Rouge si
-  # (a) aucun Process.cancel_timer dans pod.ex, OU (b) le band-aid
-  # `"forever" -> 60_000` (HACK) encore présent au lieu du vrai fix.
+  # Le timer `:result_deadline` doit être ANNULÉ à l'arrivée du résultat (sinon il
+  # tue au cycle 2 les pods long-lived forever/pipe/run). Rouge si
+  # (a) aucun `Process.cancel_timer` dans pod.ex, OU (b) le band-aid
+  # `"forever" -> 60_000` (un HACK) est encore présent au lieu du vrai fix.
   defp check_result_deadline_cancelled(root) do
     pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
     src = File.read!(Path.join(root, pod))
@@ -503,17 +503,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R-cap-validate (CAP-D1) : la porte G24 `Fleet.CapProfile.validate/1` (dont
-  # F-CONT-RISK g24_9 : deny server-tools natifs) DOIT être appelée sur le chemin
-  # de spawn (boundary do_allocate), pas seulement par les tests. Rouge si pod.ex
-  # ne l'appelle pas → porte de containment creuse (CAP-D1). NB Z2 : ce rail sera
-  # ÉTENDU en R-spawn-gates (3 callsites : validate + ScopeValidator + PlanValidator)
-  # au câblage du cluster de gates — cf. SYNTHESE §Z2.
-  # R-spawn-gates (Z2, ex-R-cap-validate étendu) : les 3 portes du spawn-boundary
-  # doivent être câblées dans pod.ex, pas test-only — (1) CapProfile.validate (G24 /
-  # F-CONT-RISK deny server-tools, do_allocate), (2) ScopeValidator.validate (couverture
-  # de scopes OAuth par-rôle), (3) PlanValidator.validate (abonnement payant). Rouge si
-  # l'une manque → porte de containment/credentials creuse (CAP-D1 / CRED-D1).
+  # Les 3 portes du spawn-boundary doivent être câblées dans pod.ex, PAS test-only,
+  # sinon ce sont des portes de containment/credentials CREUSES (appelées en test mais
+  # jamais en prod — le mode de défaillance « hollow-gate » que ce checker existe pour
+  # bloquer) :
+  #   (1) CapProfile.validate — porte de containment, dont le refus des server-tools
+  #       natifs ; appelée à `do_allocate` ;
+  #   (2) ScopeValidator.validate — couverture des scopes OAuth par-rôle ;
+  #   (3) PlanValidator.validate — abonnement payant.
+  # Rouge si l'une manque. Une porte qui ne tourne qu'en test ne garde rien en prod ;
+  # le câblage doit donc vivre sur le chemin de spawn réel (do_allocate / do_launch),
+  # exactement là où un pod est réellement alloué puis lancé.
   defp check_spawn_gates_wired(root) do
     pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
     abs = Path.join(root, pod)
@@ -543,13 +543,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R-gatekeeper-exception (GATE-D1) : le gatekeeper est un juge d'EXCEPTION-
-  # inférence (dispatché par une gate :soft/:nontranchable), JAMAIS un stage
-  # d'ordonnancement. Rouge si une carte déclare un stage `role: gatekeeper`
-  # (méta-axiome §L441 : raisonneur dans la mécanique = design défaillant).
-  # NB transcription : parenthèses externes autour de `(… || [])` — sans elles
+  # Le gatekeeper est un juge d'EXCEPTION-inférence (dispatché par une gate
+  # :soft/:nontranchable), JAMAIS un stage d'ordonnancement. Rouge si une carte
+  # déclare un stage `role: gatekeeper` — méta-axiome : un raisonneur LLM dans la
+  # mécanique de coordination est un signal de design défaillant.
+  # NB les parenthèses externes autour de `(… || [])` sont load-bearing : sans elles
   # `|>` (précédence > `||`) appliquerait flat_map à `[]`, pas à la liste de
-  # cartes (testé : `(true && l) || [] |> map` ⇒ `l`, map sauté). Drop-in corrigé.
+  # cartes (`(true && l) || [] |> map` ⇒ `l`, map sauté).
   defp check_gatekeeper_not_a_stage(root) do
     dir = "apps/fleet_pipeline/priv/canon/pipelines"
     abs = Path.join(root, dir)
@@ -560,7 +560,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         rel = Path.relative_to(path, root)
 
         # `\brole:` (ancre gauche) — ne vise QUE les stages `role: gatekeeper`,
-        # PAS `target_role: gatekeeper` (escalade légitime §L441, ex. standard-qa
+        # PAS `target_role: gatekeeper` (escalade légitime, ex. standard-qa
         # `on_escalation.target_role` : le gatekeeper EST la cible d'exception, pas un
         # stage). Sans l'ancre, `target_role:` contient `role:` → faux-positif.
         path
@@ -581,18 +581,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R-worker-envelope-unwrap (#11/#2, Z3) : HopConsumer doit déplier l'enveloppe worker
-  # `%{status,result}` avant de lire la décision (resume_gate/gate_result, B) OU d'évaluer
-  # la gate (gate_decide) — sinon decision/outputs enfouis → fausse escalade / hard-gate à tort.
+  # HopConsumer doit déplier l'enveloppe worker `%{status, result}` avant de lire la
+  # décision (resume_gate/gate_result) OU d'évaluer la gate (gate_decide) — sinon
+  # decision/outputs restent enfouis → fausse escalade / hard-gate à tort.
   defp check_verdict_envelope_unwrapped(root) do
     hop = "apps/fleet_pilot/lib/fleet/pilot/hop_consumer.ex"
     abs = Path.join(root, hop)
 
-    # Anti-vert-creux DURCI (F-couche3, 2026-06-14) : l'ancien `not File.exists?(abs) or …` rendait le rail
-    # VERT si `hop_consumer.ex` était SUPPRIMÉ (l'invariant verdict-route disparu mais pass quand même). Le
-    # verdict-route EST le hop_consumer : son absence est elle-même un défaut → on EXIGE le fichier ET le
-    # déballage (strip_comment : un `# unwrap_worker_envelope` commenté ne compte pas). Déplacer l'unwrap
-    # ailleurs = changement de design qui DOIT mettre à jour ce rail (ce que ce fail-on-absence force).
+    # Anti-vert-creux : un `not File.exists?(abs) or …` rendrait le rail VERT si `hop_consumer.ex` était
+    # SUPPRIMÉ (l'invariant verdict-route disparu mais pass quand même). Le verdict-route EST le
+    # hop_consumer : son absence est elle-même un défaut → on EXIGE le fichier ET le déballage
+    # (strip_comment : un `# unwrap_worker_envelope` commenté ne compte pas). Déplacer l'unwrap ailleurs
+    # = changement de design qui DOIT mettre à jour ce rail (ce que ce fail-on-absence force).
     unwrap_present? =
       File.exists?(abs) and
         abs
@@ -621,9 +621,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # R-no-root-runtime (présence du guard) : vérifie que le self-check anti-root
-  # existe dans le boot path (config/runtime.exs). Rouge s'il disparaît. Le boot
-  # guard runtime vit dans runtime.exs (bloc :prod) ; ce check garde sa présence.
+  # Vérifie que le self-check anti-root existe dans le boot path
+  # (config/runtime.exs). Rouge s'il disparaît. Le boot guard runtime vit dans
+  # runtime.exs (bloc :prod) ; ce check garde sa présence.
   defp check_no_root_runtime_guard(root) do
     rt = "config/runtime.exs"
 
@@ -671,7 +671,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   defp do_strip_comment([c | rest], acc, in_str), do: do_strip_comment(rest, [c | acc], in_str)
 
-  # ⚠ PIÈGE VERT-CREUX (cf. F043) : sur un fichier ABSENT, `grep_lines` rend `[]`
+  # ⚠ PIÈGE VERT-CREUX : sur un fichier ABSENT, `grep_lines` rend `[]`
   # — indistinguable de « présent mais 0 match ». Un check « pas de résidu X dans
   # le fichier Y » qui statue `pass` sur `evidence == []` passe donc TOUJOURS si Y
   # a été supprimé. Pour un check de RÉSIDU, grep un glob de fichiers réels

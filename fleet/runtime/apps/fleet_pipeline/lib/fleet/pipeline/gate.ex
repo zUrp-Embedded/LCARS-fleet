@@ -3,7 +3,7 @@ defmodule Fleet.Pipeline.Gate do
   Behaviour générique gate evaluation. Vendor-extensible — types MVP :
 
     * `:hard` — règle déclarative pattern match, pas bypass
-    * `:soft` — jugement LLM délégué au **gatekeeper** (R06) :
+    * `:soft` — jugement LLM délégué au **gatekeeper** :
       `{:dispatch_gatekeeper, info}`, spawn + ré-éval côté Executor
     * `:terminal` — règles déclaratives d'abord, `:nontranchable` →
       même `{:dispatch_gatekeeper, info}` (gatekeeper, juge unique)

@@ -1,28 +1,28 @@
 defmodule Fleet.Pipeline.Gatekeeper do
   @moduledoc """
-  Boot + registration du **gatekeeper permanent** (juge unique, pod Type 3).
+  Boot + registration du **gatekeeper permanent** (juge unique de la fleet).
 
   Le gatekeeper est un pod permanent **work-session** (`lifetime_scope: forever`,
   cap-profile `gatekeeper.yaml`, `boot_at_start: false`) : il n'est PAS booté au
-  démarrage de la fleet (≠ Type 1 `architect`), mais **à l'activation d'un
-  pipeline** (`Fleet.Pipeline.start_pipeline`). Une fois booté, il vit pour la
-  durée du travail et est adressé via **mandat MCP** (cf. `Fleet.Pipeline.Executor`,
-  qui ne le possède pas). Source : DN `spawn/permanent-pods-boot` Type 3 +
-  `orchestration/gatekeeper-exception` + `DEFINITION-pipeline-gatekeeper`.
+  démarrage de la fleet (≠ l'`architect`, lui booté au start), mais **à l'activation
+  d'un pipeline** (`Fleet.Pipeline.start_pipeline`). Une fois booté, il vit pour la
+  durée du travail et est adressé via **mandat MCP** — l'appelant qui le pilote ne
+  le possède pas (pas de lien de supervision : il est joint par son `pod_id`,
+  pas tenu comme enfant).
 
   ## Registration
 
   Le `pod_id` du gatekeeper est registré en `:persistent_term` (singleton), lu
-  par l'Executor via `pod_id/0`. Override config/test : `:fleet_pipeline,
+  par l'appelant via `pod_id/0`. Override config/test : `:fleet_pipeline,
   :gatekeeper_pod_id` (prioritaire — les tests de gate l'utilisent sans booter).
 
-  ## ⚠ MVP singleton vs canon per-projet
+  ## ⚠ MVP singleton vs cible per-projet
 
-  Le canon (`permanent-pods-boot` Type 3) prescrit **1 gatekeeper par projet
-  actif**. Le runtime n'a pas encore de modèle « projet » → MVP **singleton
-  work-session** (un gatekeeper pour le runtime). Le keying per-projet + le
-  teardown `project.complete → terminate` sont des **raffinements** (gate-build,
-  quand le modèle projet existe).
+  La cible prescrit **1 gatekeeper par projet actif**. Le runtime n'a pas encore
+  de modèle « projet » → MVP **singleton work-session** (un gatekeeper pour tout
+  le runtime). Le keying per-projet + le teardown `project.complete → terminate`
+  sont des **raffinements** différés : ils n'ont de sens que lorsque le modèle
+  « projet » existe.
 
   ## Autoboot config-gated
 
@@ -73,7 +73,7 @@ defmodule Fleet.Pipeline.Gatekeeper do
   @doc """
   Reboot du gatekeeper permanent : reap le holder survivant (cas ghost), dé-registre, re-boote frais.
   Sert de `respawn_fun` au re-roll de `Fleet.Pilot.WakeRecovery` quand le gatekeeper est injoignable
-  (#5.2 — `ensure_booted` seul ne suffit pas : présence-based, il no-op sur un pod registré-mais-cassé).
+  (`ensure_booted` seul ne suffit pas : présence-based, il no-op sur un pod registré-mais-cassé).
   Mêmes returns que `ensure_booted/1`.
   """
   @spec reboot(keyword()) :: {:ok, String.t() | :disabled} | {:error, term()}

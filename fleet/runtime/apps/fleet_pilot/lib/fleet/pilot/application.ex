@@ -5,7 +5,7 @@ defmodule Fleet.Pilot.Application do
   Démarre, si `:stage_dispatch?` est configuré (`config/runtime.exs` depuis l'env) et que la forge
   `base_url` résout, les trois process du rail forge-state-machine :
 
-    * `Fleet.Pilot.Poller` (mode stage) — **F-037 MULTI-PROJET** : DÉCOUVRE les repos de l'humain par
+    * `Fleet.Pilot.Poller` (mode stage) — **MULTI-PROJET** : DÉCOUVRE les repos de l'humain par
       topic (`lcars-fleet-<human>`, plus de `:poll_repo` hard-codé), dispatche les **issues assignées**
       (assignee=humain) vers le spawn du rôle **producteur** (`StageDispatcher`).
     * `Fleet.Pilot.HopConsumer` — consumer Bus : sur `pod.completed`, exécute la **fin-de-hop**
@@ -14,7 +14,7 @@ defmodule Fleet.Pilot.Application do
     * `Task.Supervisor` (`HopConsumer.task_supervisor/0`) — offload de la complétion de hop : le
       `git push` ≤30s ne bloque pas le singleton `HopConsumer`. Démarré AVANT le HopConsumer (qui s'y réfère).
 
-  ## Historique — rail legacy RETIRÉ (②.3 / BL-050, 2026-06-16)
+  ## Historique — rail legacy RETIRÉ (2026-06-16)
 
   L'ancien rail `AutoDispatcher` (webhook Gitea `gitea.*` → `Routing` catalogue → `Dispatcher` →
   `PipelineInvoker` → `Fleet.Pipeline.start_pipeline` = moteur RAM `Executor`) a été **supprimé** :
@@ -34,7 +34,7 @@ defmodule Fleet.Pilot.Application do
   end
 
   @doc """
-  Statut de liveness du rail stage forge-state-machine, pour la readiness (F-010). fleet_pilot
+  Statut de liveness du rail stage forge-state-machine, pour la readiness. fleet_pilot
   possède la topologie du rail → c'est lui qui sait si les singletons sont vivants (fleet_api ne
   fait que demander, pas de fuite des noms de process Ring 2 dans Ring 4).
 
@@ -62,10 +62,10 @@ defmodule Fleet.Pilot.Application do
   # Process du rail STAGE (la forge EST la machine à états). Démarré ssi `:stage_dispatch?` est
   # vrai. `[]` si `:stage_dispatch?` absent/false (app inerte volontaire — hermétisme test).
   #
-  # F-027 (Pattern A crash-boot) : si `:stage_dispatch?` est VRAI mais que la config essentielle ne
-  # résout pas, on ne renvoie plus `[]` en SILENCE (ex-`else _ -> []` qui démarrait l'app « verte » sans
-  # Poller/HopConsumer → rail forge mort, zéro crash, zéro log). L'opérateur a DEMANDÉ le mode stage →
-  # config incomplète = deploy cassé → fail-loud au boot.
+  # Si `:stage_dispatch?` est VRAI mais que la config essentielle ne résout pas, on ne retombe PAS sur
+  # `[]` en silence (ça démarrerait l'app « verte » sans Poller/HopConsumer → rail forge mort, zéro
+  # crash, zéro log). L'opérateur a DEMANDÉ le mode stage → config incomplète = deploy cassé →
+  # fail-loud au boot.
   defp stage_children do
     if Application.get_env(:fleet_pilot, :stage_dispatch?, false) do
       stage_children!()
@@ -75,14 +75,14 @@ defmodule Fleet.Pilot.Application do
   end
 
   @doc false
-  # Test seam (F-037) : expose les child-specs du rail SANS démarrer le superviseur (qui enregistrerait les
+  # Test seam : expose les child-specs du rail SANS démarrer le superviseur (qui enregistrerait les
   # singletons sous leurs noms globaux → conflits / boot parasites). Sert à vérifier la garde fail-loud.
   def stage_children_for_test, do: stage_children()
 
-  # F-037 MULTI-PROJET : plus de `:poll_repo` obligatoire ni de remote figé au boot — le Poller DÉCOUVRE
+  # MULTI-PROJET : plus de `:poll_repo` obligatoire ni de remote figé au boot — le Poller DÉCOUVRE
   # ses repos par topic (`lcars-fleet-<human>`) et le HopConsumer dérive le repo+remote PER-HOP de l'event.
   # La config essentielle qui reste = la forge `base_url` : sans elle, ni découverte (`search_repos_by_topic`)
-  # ni push (remote per-hop) ne marchent → rail mort. C'est la garde fail-loud F-027 re-pointée sur le réel.
+  # ni push (remote per-hop) ne marchent → rail mort. C'est la garde fail-loud, pointée sur le réel.
   defp stage_children! do
     unless forge_base_url() do
       raise "fleet_pilot: :stage_dispatch? activé mais la forge base_url est absente (config :fleet_pilot, " <>
@@ -93,14 +93,14 @@ defmodule Fleet.Pilot.Application do
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
 
     [
-      # F067 : superviseur de tasks pour l'offload de la complétion de hop (le git push ≤30s du
+      # Superviseur de tasks pour l'offload de la complétion de hop (le git push ≤30s du
       # HopConsumer ne bloque pas le singleton). Démarré AVANT le HopConsumer (qui s'y réfère).
       {Task.Supervisor, name: Fleet.Pilot.HopConsumer.task_supervisor()},
-      # #5.2 : mémoire persistante des incidents système (owner résilient). Utilisée par WakeRecovery
+      # Mémoire persistante des incidents système (owner résilient). Utilisée par WakeRecovery
       # (kick_gatekeeper / safe_wake) ; démarrée avec le rail, son seul consommateur. Boot best-effort
       # (forge injoignable au boot → WAL local seul, pas de crash).
       Fleet.Pilot.IncidentRegistry,
-      # F-037 : ni `:repo` au Poller (découverte par topic), ni `:repo`/`:remote` au HopConsumer (per-hop).
+      # Ni `:repo` au Poller (découverte par topic), ni `:repo`/`:remote` au HopConsumer (per-hop).
       # Le routing vit dans la route-comment (gravée par create_ticket) ; le Poller la lit (state-machine).
       {Fleet.Pilot.Poller, interval_ms: interval, stage_dispatch?: true},
       {Fleet.Pilot.HopConsumer,

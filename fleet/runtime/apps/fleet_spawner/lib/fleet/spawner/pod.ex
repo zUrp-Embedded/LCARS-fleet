@@ -10,7 +10,7 @@ defmodule Fleet.Spawner.Pod do
                                                         :failed
 
   Chaque transition est dirigée par `handle_continue/2`. L'`init/1`
-  démarre la chaîne avec `{:continue, :allocate}`. Si recovery state
+  démarre la chaîne avec `{:continue, :allocate}`. Si la recovery sur l'état
   FS détecte un `session_id` (pré-alloué au spawn, persisté `state.json`),
   l'`init/1` reprend directement en phase `:launching` (le respawn
   passera `--resume <session_id>`).
@@ -26,15 +26,15 @@ defmodule Fleet.Spawner.Pod do
   ## Recovery state FS
 
   `<state_fs_root>/<scope>/<id>/state.json` écrit dès post-ALLOCATE
-  (le `session_id` est pré-alloué au spawn — ADR-G IV.1/IV.2 : plus de
-  frame `init` NDJSON, modèle `-p` mort). `<scope>` ∈ `pods` (one-shot/forever) /
+  (le `session_id` est pré-alloué au spawn : plus de frame `init` NDJSON,
+  le modèle `-p` est mort). `<scope>` ∈ `pods` (one-shot/forever) /
   `pipes` (pipe) / `runs` (run). Au prochain `init/1`, lecture du fichier →
   reprise directe en phase `:launching` avec le `session_id`
   (`--resume <session_id>` au respawn).
   """
 
-  # DN-recovery B : tous les pods `:temporary` (le supervisor ne ressuscite
-  # jamais ; recovery délibérée). NB : `pod_child_spec/1` (spawner.ex) construit
+  # Tous les pods sont `:temporary` (le supervisor ne ressuscite jamais ; la
+  # recovery est délibérée). NB : `pod_child_spec/1` (spawner.ex) construit
   # le child_spec explicite et fixe lui aussi `restart: :temporary` — c'est lui
   # qui fait foi au spawn ; cette valeur de module reste alignée par honnêteté.
   use GenServer, restart: :temporary
@@ -44,8 +44,8 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.EventRouter.Bus
   alias Fleet.SPBuilder
 
-  # R-CORE.comm 2.2 — completion EVENT-DRIVEN : le résultat arrive via l'event Bus
-  # `task_queue.task_completed (struct %Fleet.Event{})` (émis par le central sur submit_result), PAS via un fichier.
+  # Complétion event-driven : le résultat arrive via l'event Bus
+  # `task_queue.task_completed` (%Fleet.Event{}, émis par le central sur submit_result), PAS via un fichier.
 
   @type phase ::
           :pending
@@ -76,8 +76,8 @@ defmodule Fleet.Spawner.Pod do
           pod_id: String.t(),
           ticket_id: String.t(),
           session_id: String.t() | nil,
-          # DN spawner-orchestrator §C-3 : `started_at` ISO8601 figé à la création du
-          # Pod GenServer, persisté tel quel dans `state.json` (point de recovery).
+          # `started_at` ISO8601 figé à la création du Pod GenServer, persisté tel
+          # quel dans `state.json` (point de recovery).
           started_at: DateTime.t(),
           cap_profile: Fleet.CapProfile.t(),
           env_vars: %{String.t() => String.t()},
@@ -87,13 +87,13 @@ defmodule Fleet.Spawner.Pod do
           init_message: map() | nil,
           last_error: term() | nil,
           opts: keyword(),
-          # R1.2 — Port owned par le Pod (détection exit + kill en RELEASE).
+          # Port owné par le Pod (détection exit + kill en RELEASE).
           port: port() | nil,
-          # R-CORE.comm 2.2 — résultat reçu via l'event Bus task_queue.task_completed (struct %Fleet.Event{}) (completion).
+          # Résultat reçu via l'event Bus task_queue.task_completed (%Fleet.Event{}, complétion).
           submitted_result: map() | nil,
           last_result: map() | nil,
           # Nom de la session tmux du pod (`lcars-pod-<id>` sur le sock PAR-POD, posé par
-          # LauncherPortBackend). Sert au kick/wake (PodTmux) et au teardown sock-aware (F124).
+          # LauncherPortBackend). Sert au kick/wake (PodTmux) et au teardown sock-aware.
           tmux_session: String.t() | nil
         }
 
@@ -149,7 +149,7 @@ defmodule Fleet.Spawner.Pod do
     info = %{
       pod_id: state.pod_id,
       ticket_id: state.ticket_id,
-      # MA-15 — le RÔLE est gravé au SPAWN (= `metadata.name` du cap-profile, source `cap_profile_name/1`),
+      # Le RÔLE est gravé au SPAWN (= `metadata.name` du cap-profile, source `cap_profile_name/1`),
       # exposé côté serveur via le Registry. C'est l'identité de rôle AUTHENTIFIÉE (le pod ne peut pas la
       # forger via le wire) : `PodTools` la résout depuis le `pod_id` au lieu du `_lcars_role` du fil
       # (non authentifié → usurpation `architect` par POST direct). Le wire propose, le SPAWN dispose.
@@ -171,12 +171,12 @@ defmodule Fleet.Spawner.Pod do
     {:reply, info, state}
   end
 
-  # LIFE-003 (DN-recovery B §5) : kill = transition de release DÉLIBÉRÉE, pas un
-  # kill brutal du supervisor. Teardown backend + libère la task (abort, pas
-  # succès → clear_for_pod) + état terminal `:killed`, puis arrêt :normal. Le
-  # fallback brutal (terminate_child) ne sert que si ce call timeout (cf. kill_pod/1).
+  # kill = transition de release DÉLIBÉRÉE, pas un kill brutal du supervisor.
+  # Teardown backend + libère la task (abort, pas succès → clear_for_pod) + état
+  # terminal `:killed`, puis arrêt :normal. Le fallback brutal (terminate_child)
+  # ne sert que si ce call timeout (cf. kill_pod/1).
   def handle_call(:kill, _from, state) do
-    # #chantier pod-seed v2 : checkpoint le seed même sur kill délibéré (mémoire préservée).
+    # Checkpoint le seed même sur kill délibéré (mémoire préservée).
     maybe_checkpoint_seed(state)
     teardown_backend(state)
     clear_pod_task(state.pod_id)
@@ -191,7 +191,7 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # ============================================================
-  # #593 D11 — handle_info Port lifecycle
+  # handle_info — cycle de vie du Port
   # ============================================================
   #
   # LauncherPortBackend.launch ouvre `Port.open` (sous le process Pod) et bloque
@@ -199,15 +199,15 @@ defmodule Fleet.Spawner.Pod do
   # (handle_continue :monitor → :extract → :release → :succeeded). Le
   # Port n'est PAS fermé : claude continue à streamer (assistant events,
   # result event final, exit_status). Sans clause handle_info, ces
-  # messages tombent dans le default → log unexpected message, state
+  # messages tombent dans le default → log unexpected message, la state
   # machine ne note JAMAIS la complétion réelle.
   #
-  # Format Port options actuelles (LauncherPortBackend ligne 47-53) : `:binary`
+  # Format Port options actuelles (LauncherPortBackend) : `:binary`
   # + `:exit_status`, PAS `{:line, _}` ni `{:packet, :line}` → on reçoit
   # `{port, {:data, binary_chunk}}` (multi-events ou partial), buffering
   # + split sur "\n" requis.
 
-  # R-CORE.comm ADR-G — completion event-driven : le broker fleet_task_queue broadcast
+  # Complétion event-driven : le broker fleet_task_queue broadcast
   # %Fleet.Event{task_completed} sur fleet.events. On ne réagit qu'au NÔTRE (pod_id) en :monitoring.
   @impl GenServer
   def handle_info(
@@ -215,8 +215,8 @@ defmodule Fleet.Spawner.Pod do
         %{phase: :monitoring, pod_id: pid} = state
       ) do
     result = payload[:result] || payload["result"] || %{}
-    # Z1 #3 : le résultat est arrivé → annuler le deadline AVANT d'extraire (sinon le
-    # timer du cycle courant fire plus tard en :monitoring et tue le pod sain).
+    # Le résultat est arrivé → annuler le deadline AVANT d'extraire (sinon le timer
+    # du cycle courant fire plus tard en :monitoring et tue le pod sain).
     state = cancel_result_deadline(state)
     {:noreply, Map.put(state, :submitted_result, result), {:continue, :extract}}
   end
@@ -225,12 +225,12 @@ defmodule Fleet.Spawner.Pod do
   def handle_info(%Fleet.Event{source: :task_queue, type: :task_completed}, state),
     do: {:noreply, state}
 
-  # Deadline : timeout de RÉPONSE. Au FIRE, on distingue (Z1) :
+  # Deadline : timeout de RÉPONSE. Au FIRE, on distingue :
   #   - task active (pending/assigned/in_progress) → le pod n'a PAS répondu à temps → échec.
   #   - aucune task active → le pod attendait juste sa prochaine task (idle) ; ce n'est
-  #     PAS un timeout de réponse → on laisse lapser, PAS de kill (sinon on re-crée
-  #     l'idle-kill que le band-aid 60ks masquait). La vérif est à l'instant du fire
-  #     (≠ à l'armement) → couvre la race d'enqueue worker ET l'inter-stage pipe d'un coup.
+  #     PAS un timeout de réponse → on laisse lapser, PAS de kill (sinon on re-crée un
+  #     idle-kill : tuer un pod sain qui attend du travail). La vérif est à l'instant du
+  #     fire (≠ à l'armement) → couvre la race d'enqueue worker ET l'inter-stage pipe d'un coup.
   def handle_info(:result_deadline, %{phase: :monitoring} = state) do
     if pod_has_active_task?(state.pod_id) do
       transition_failed(state, {:result_timeout, state.pod_id})
@@ -241,8 +241,8 @@ defmodule Fleet.Spawner.Pod do
 
   def handle_info(:result_deadline, state), do: {:noreply, state}
 
-  # F-RESULT-DEADLINE-LOOP — watchdog de LIVENESS (pas de durée). Tick récurrent (workers seulement, armé
-  # par arm_result_deadline) : si le pod a BOUGÉ depuis le tick précédent (taille jsonl ↑ OU jiffies CPU ↑)
+  # Watchdog de LIVENESS (pas de durée). Tick récurrent (workers seulement, armé par
+  # arm_result_deadline) : si le pod a BOUGÉ depuis le tick précédent (taille jsonl ↑ OU jiffies CPU ↑)
   # → ré-arme le deadline (repousse le kill) ; sinon → laisse le deadline courir. Résultat : un engineer qui
   # bosse ne timeout JAMAIS ; le `:result_deadline` ne fire que sur silence total. Hors :monitoring → no-op
   # (tick résiduel après transition).
@@ -263,13 +263,13 @@ defmodule Fleet.Spawner.Pod do
 
   def handle_info({port, {:exit_status, exit_code}}, %{port: port} = state)
       when is_port(port) do
-    # R-CORE.comm 2.2 — completion event-driven : si le résultat a été extrait (event
-    # task_queue.task_completed (struct %Fleet.Event{}) reçu → :output_extracted), l'exit est l'arrêt normal post-release.
+    # Complétion event-driven : si le résultat a été extrait (event
+    # task_queue.task_completed reçu → :output_extracted), l'exit est l'arrêt normal post-release.
     # Sinon le process est mort SANS soumettre de résultat → échec (plus de salvage fichier).
     if MapSet.member?(state.conditions, :output_extracted) do
       {:stop, :normal, state}
     else
-      # STATE-004 : process mort SANS résultat soumis → task active orpheline. Libère.
+      # Process mort SANS résultat soumis → task active orpheline. Libère.
       clear_pod_task(state.pod_id)
 
       best_effort_broadcast("pod.failed", %{
@@ -284,10 +284,10 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # #5.2 — Boucle KICK ack-driven UNIFIÉE (bootstrap + wake-fallback, paramétrée : cap/retry/mot-clé/ACK).
+  # Boucle KICK ack-driven UNIFIÉE (bootstrap + wake-fallback, paramétrée : cap/retry/mot-clé/ACK).
   # Tick borné (le pod est en :monitoring). Le contrôle = l'ACK de l'agent (`acked?/3`), JAMAIS un proxy :
   #   - ACK (pull pour un wake / poll pour un bootstrap) → stop + cancel timer ;
-  #   - cap sans ACK → broadcast `wake.failed` (escalade ring-propre, #5.2 [3c/6]) + cancel ;
+  #   - cap sans ACK → broadcast `wake.failed` (escalade ring-propre) + cancel ;
   #   - tmux joignable → kick_send (mot-clé `yop` bootstrap / `wake` fallback) + reschedule ;
   #   - tmux pas encore up → reschedule sans consommer de send-keys.
   # Une erreur send-keys n'interrompt pas le pod (le monitor time-out couvre).
@@ -295,8 +295,8 @@ defmodule Fleet.Spawner.Pod do
       when is_binary(session) do
     # Un pod SANS mandat en attente (interactif/forever comme l'architecte, ou permanent booté
     # à froid comme le gatekeeper) n'a RIEN à puller : ses mandats arrivent plus tard via
-    # `wake_pod`. R3b se contente alors d'un BOOTSTRAP — réveil du REPL + armement du Monitor
-    # (cf. SP) — borné et ESPACÉ (pas de rafale de 12 yops qui distrait l'agent). Un worker
+    # `wake_pod`. On se contente alors d'un BOOTSTRAP — réveil du REPL + armement du Monitor
+    # — borné et ESPACÉ (pas de rafale de 12 yops qui distrait l'agent). Un worker
     # (mandat enqueué au spawn) garde le kick fréquent jusqu'au pull. Détection race-safe :
     # l'enqueue StageRunner (ms après spawn) précède largement le 1er kick (+2s) → un worker a
     # déjà son mandat `pending`, un pod permanent a `pod_status == {:ok, nil}`.
@@ -309,9 +309,9 @@ defmodule Fleet.Spawner.Pod do
     retry = if bootstrap?, do: kick_bootstrap_retry_ms(), else: kick_retry_ms()
 
     cond do
-      # #5.2 F3 : ACK (pull pour un wake / poll pour un bootstrap, cf. acked?/3) = l'agent a tendu la main →
-      # on STOPPE la boucle (cancel timer ; le porteur/flag prend le relais). On NE se fie PLUS au pgrep
-      # (proxy « process watch.sh existe ») mais à l'ACTE de l'agent (last_poll/pod_status TaskQueue, [1]).
+      # ACK (pull pour un wake / poll pour un bootstrap, cf. acked?/3) = l'agent a tendu la main →
+      # on STOPPE la boucle (cancel timer ; le porteur/flag prend le relais). On se fie à l'ACTE de
+      # l'agent (last_poll/pod_status TaskQueue), pas à un proxy host-side (« process watch.sh existe »).
       acked?(mandate_pulled?(state.pod_id), bootstrap?, polled) ->
         Logger.debug(
           "pod #{state.pod_id} acké (pull/poll) → kick stoppé (porteur prend le relais)"
@@ -320,16 +320,16 @@ defmodule Fleet.Spawner.Pod do
         {:noreply, cancel_kick(state)}
 
       n >= cap ->
-        # #5.2 [3c] : cap épuisé = l'agent n'a JAMAIS acké (ni flag, ni send-keys). bootstrap = jamais
+        # Cap épuisé = l'agent n'a JAMAIS acké (ni flag, ni send-keys). bootstrap = jamais
         # pollé (démarrage KO) ; wake/worker = jamais pull (mandat non-acké). Ring-propre : on BROADCAST
-        # (Ring 1) → un consumer fleet_pilot (Ring 2) `record_or_escalate` → récurrent = `:sp_suspect` [6].
+        # (Ring 1) → un consumer fleet_pilot (Ring 2) `record_or_escalate` → récurrent = `:sp_suspect`.
         phase = if bootstrap?, do: :bootstrap, else: :wake
 
         Logger.warning(
           "pod #{state.pod_id} kick (#{phase}) abandonné après #{n} tentatives — agent jamais acké → escalade #5.2"
         )
 
-        # #5.2 [5] : capture l'écran (fallback-ACK déporté, best-effort) → le consumer l'attache au ticket.
+        # Capture l'écran (fallback-ACK déporté, best-effort) → le consumer l'attache au ticket.
         best_effort_broadcast("wake.failed", %{
           "pod_id" => state.pod_id,
           "reason" => {:no_ack, phase},
@@ -353,7 +353,7 @@ defmodule Fleet.Spawner.Pod do
   # Catch-all silencieux : autres messages (down, monitor, etc.) ignorés.
   def handle_info(_other, state), do: {:noreply, state}
 
-  # F112 : ré-armement de la deadline de réponse — déclenché par `wake_pod` quand une nouvelle tâche
+  # Ré-armement de la deadline de réponse — déclenché par `wake_pod` quand une nouvelle tâche
   # est assignée à un pod long-lived. Seulement en :monitoring (hors-monitoring = pas de fenêtre de
   # réponse active) ; sinon no-op. arm_result_deadline annule l'ancien timer + en arme un neuf.
   @impl GenServer
@@ -363,32 +363,32 @@ defmodule Fleet.Spawner.Pod do
 
   def handle_cast(:rearm_deadline, state), do: {:noreply, state}
 
-  # #5.2 : `wake_pod` arme la boucle ack-driven. Le porteur (flag) vient d'être touché ; la boucle est le
+  # `wake_pod` arme la boucle ack-driven. Le porteur (flag) vient d'être touché ; la boucle est le
   # FALLBACK — elle ne send-keys `"wake"` QUE si le pull n'arrive pas (mandate_pulled? faux), puis escalade
   # au cap. 1er tick après `kick_first_delay_ms` : on laisse le flag livrer d'abord (pas de double-trigger).
   def handle_cast(:arm_kick, state) do
     {:noreply, arm_kick(state)}
   end
 
-  # (R1.2 — parser NDJSON `parse_chunks`/`handle_event` retiré : modèle -p mort.
-  #  La complétion vient du livrable fichier, pas d'un event `result` NDJSON.)
+  # (Parser NDJSON `parse_chunks`/`handle_event` retiré : le modèle -p est mort.
+  #  La complétion vient de l'event Bus task_queue.task_completed, pas d'un event `result` NDJSON.)
 
-  # MA-04 — classification load-bearing vs best-effort (cf. task_queue/server.ex, même move).
-  # AVANT : un `safe_broadcast` unique avalait TOUTE exception en `:ok`, y compris pour `pod.completed`
-  # dont le HopConsumer DÉPEND pour finir le hop. Un `pod.completed` avalé = le pod « réussit » (release/
+  # Classification load-bearing vs best-effort du broadcast (cf. task_queue/server.ex, même move).
+  # Un `safe_broadcast` unique qui avalerait TOUTE exception en `:ok` engloutirait aussi `pod.completed`
+  # dont le HopConsumer DÉPEND pour finir le hop : un `pod.completed` avalé = le pod « réussit » (release/
   # kill pour un one-shot) MAIS la fin-de-hop ne se déclenche jamais → verrou forge conservé à vie (wedge
-  # silencieux, F-008+F-009 ×4 rapports). On SÉPARE :
+  # silencieux). D'où la SÉPARATION :
   #   - `best_effort_broadcast/2` : OBSERVABILITÉ/escalade (`pod.failed`, `wake.failed`). Un échec est
   #     non-bloquant (rescue → log) — un consumer fleet_pilot les enregistre en best-effort, personne ne
   #     FINIT un hop dessus.
   #   - `required_broadcast/2` : LIFECYCLE load-bearing (`pod.completed`). L'échec n'est PAS avalé : il
   #     remonte `{:error, {:broadcast_failed, _}}` → `do_extract` NE release/kill PAS le pod sur une
-  #     complétion orpheline ; il reste vivant (re-wake re-fire l'extract), fail-loud.
-  # (Durcissement ultérieur flaggé : constructeur `%Fleet.Event{}` prouvé-enregistré au build — hors-scope.)
+  #     complétion orpheline ; il reste vivant (re-wake re-fire l'extract), fail-loud. Les deux passent
+  #     par l'enveloppe canon stricte `%Fleet.Event{source: :spawner}` (build_spawner_event).
 
   # Broadcast Bus avec rescue : un crash event_router (bus down, atom invalide) ne doit JAMAIS faire crash
   # le Pod GenServer. RÉSERVÉ aux events NON-lifecycle (observabilité/escalade).
-  # BL-021 chantier 9 (B) — schema canon strict %Fleet.Event{source: :spawner}.
+  # Enveloppe : schema canon strict %Fleet.Event{source: :spawner}.
   defp best_effort_broadcast(event_type, payload) when is_binary(event_type) do
     event_bus().broadcast("fleet.events", build_spawner_event(event_type, payload))
   rescue
@@ -400,7 +400,7 @@ defmodule Fleet.Spawner.Pod do
       :ok
   end
 
-  # MA-04 — broadcast LIFECYCLE load-bearing (`pod.completed`) : l'échec n'est PAS avalé. Retourne `:ok` ou
+  # Broadcast LIFECYCLE load-bearing (`pod.completed`) : l'échec n'est PAS avalé. Retourne `:ok` ou
   # `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé ERROR : un
   # `pod.completed` non diffusé = wedge potentiel (le hop ne finit pas, verrou conservé).
   defp required_broadcast(event_type, payload) when is_binary(event_type) do
@@ -426,13 +426,13 @@ defmodule Fleet.Spawner.Pod do
       {:error, {:broadcast_failed, e}}
   end
 
-  # MA-04 — seam du bus (défaut = le vrai `Fleet.EventRouter.Bus`). App-env override (même pattern que les
+  # Seam du bus (défaut = le vrai `Fleet.EventRouter.Bus`). App-env override (même pattern que les
   # autres seams pod : claude_dir, state_fs_root…) → un test injecte un bus stub qui rend `{:error,_}` / lève
   # sur `pod.completed`, sans toucher le registry global.
   defp event_bus, do: Application.get_env(:fleet_spawner, :event_bus, Bus)
 
   # Construit l'enveloppe canon %Fleet.Event{source: :spawner} (factorisé — un seul site de construction
-  # pour best_effort/required, BL-021 schema canon strict).
+  # pour best_effort/required, schema canon strict).
   defp build_spawner_event(event_type, payload) do
     %Fleet.Event{
       source: :spawner,
@@ -449,10 +449,10 @@ defmodule Fleet.Spawner.Pod do
   # ============================================================
 
   defp do_allocate(state) do
-    # Vulcan #5 : I/O non-bang via safe_*. audit elixir #3 :
-    # `with_resolved_disallowed_tools` peut raise sur baseline corrupt
-    # (fail-closed intangible) — catch via rescue + transition_failed clean
-    # plutôt que crash brutal du GenServer.
+    # I/O non-bang via safe_* (erreur propagée → transition_failed clean, pas de
+    # crash brutal du GenServer). `with_resolved_disallowed_tools` peut raise sur
+    # baseline corrompue (fail-closed intangible) → catch via rescue +
+    # transition_failed plutôt que crash brutal.
     cap_profile_path = Path.join(state.pod_dir, ".cap-profile.json")
 
     with {:ok, resolved} <- safe_resolve_disallowed(state.cap_profile),
@@ -476,12 +476,12 @@ defmodule Fleet.Spawner.Pod do
     e -> {:error, {:baseline_corrupt, Exception.message(e)}}
   end
 
-  # Z2 / CAP-D1 — porte de containment G24 (dont F-CONT-RISK g24_9 : deny des
-  # server-tools natifs Anthropic) câblée au boundary spawn. `validate/1` (toute la
-  # sémantique G24) n'était appelée QUE par les tests → porte creuse : un profil neuf
-  # ou un modop qui remplace `disallowedTools` bypassait silencieusement. Fail-loud :
-  # profil G24-invalide → :failed, le pod n'est JAMAIS lancé. Le JSON-schema (load/
-  # compose) ne couvre PAS g24_1/3/6/8/9/14 — d'où le besoin de validate/1 ici.
+  # Porte de containment (dont le deny des server-tools natifs Anthropic) câblée au
+  # boundary spawn. Si `validate/1` (toute la sémantique de containment) n'était appelée
+  # QUE par les tests, la porte serait creuse : un profil neuf ou un modop qui remplace
+  # `disallowedTools` bypasserait silencieusement. Fail-loud : profil containment-invalide
+  # → :failed, le pod n'est JAMAIS lancé. Le JSON-schema (load/compose) ne couvre PAS
+  # toutes ces règles de containment — d'où le besoin de validate/1 ici.
   defp gate_cap_profile(resolved) do
     case Fleet.CapProfile.validate(resolved) do
       :ok -> :ok
@@ -490,7 +490,7 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp do_clean(state) do
-    # GC d'UUID (BL-055) : avec des session_id DÉTERMINISTES + pod_dir survivant (kill -9 / crash →
+    # GC d'UUID : avec des session_id DÉTERMINISTES + pod_dir survivant (kill -9 / crash →
     # teardown raté → `safe_mkdir_p` PRÉSERVE le dir en :allocate), un re-spawn en `--session-id`
     # (resume=false) heurterait `Session ID already in use` si un `<uuid>.jsonl` traîne. On le supprime
     # → `--session-id` crée toujours frais. (resume=true → `SeedStore.restore` écrase le jsonl : pas de GC.)
@@ -516,10 +516,10 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp do_project(state) do
-    # Vulcan #5 : toutes les I/O dans la chaîne `with` (non-bang) → erreur
-    # propagée → transition_failed clean (state.json phase=failed écrit).
+    # Toutes les I/O dans la chaîne `with` (non-bang) → erreur propagée →
+    # transition_failed clean (state.json phase=failed écrit).
     #
-    # POC ticket-driven : le brief n'est PAS un prompt user-canal (safety
+    # Modèle ticket-driven : le brief n'est PAS un prompt user-canal (safety
     # guardrail refus). Il est :
     #   1. Écrit en `tickets/<ticket_id>.md` (claude le voit comme contenu
     #      projet via Read tool — pas comme injection)
@@ -531,13 +531,13 @@ defmodule Fleet.Spawner.Pod do
     skills_root = Application.get_env(:fleet_spawner, :skills_root, nil)
     repo_md = Path.join(state.pod_dir, "CLAUDE.md.repo-source")
 
-    # P1/C9 (2026-06-07) — `.claude/` est désormais POD-OWNED. bwrap ne bind QUE
-    # `.credentials.json` dedans (plus le .claude humain entier). Raison de la fuite : cwd=HOME=POD_DIR,
-    # donc les tiers settings `project`/`local` (racine = cwd) résolvaient dans `$POD_DIR/.claude/` =
-    # le `.claude` humain bindé → le settings.json humain (et ses hooks) lu comme settings *projet*.
-    # `--setting-sources project,local` n'y pouvait rien (il autorise project/local). Fix : `.claude/`
-    # pod-owned + aucun settings.json dedans → tiers project/local vides → 0 hook humain.
-    # cf JOURNAL-P1-hooks.md. Fichiers pod (settings/SP/protocole) en .lcars/ ; CLAUDE.md → racine pod.
+    # `.claude/` est POD-OWNED. bwrap ne bind QUE `.credentials.json` dedans (pas le .claude
+    # humain entier). Sinon fuite de hooks : cwd=HOME=POD_DIR, donc les tiers settings
+    # `project`/`local` (racine = cwd) résoudraient dans `$POD_DIR/.claude/` = le `.claude`
+    # humain bindé → le settings.json humain (et ses hooks) lu comme settings *projet*.
+    # `--setting-sources project,local` n'y peut rien (il autorise project/local). D'où :
+    # `.claude/` pod-owned + aucun settings.json dedans → tiers project/local vides → 0 hook
+    # humain. Fichiers pod (settings/SP/protocole) en .lcars/ ; CLAUDE.md → racine pod.
     pod_claude_dir = Path.join(state.pod_dir, ".claude")
     lcars_dir = Path.join(state.pod_dir, ".lcars")
     tickets_dir = Path.join(state.pod_dir, "tickets")
@@ -550,7 +550,7 @@ defmodule Fleet.Spawner.Pod do
          {:ok, protocole_user} <- read_protocole_user(),
          :ok <- safe_mkdir_p(lcars_dir),
          # `.claude/` pod-owned = cible du bind creds-only (bwrap_launch). On ne crée QUE le dir,
-         # aucun settings.json dedans → 0 hook humain (P1/C9). bwrap y monte `.credentials.json`.
+         # aucun settings.json dedans → 0 hook humain. bwrap y monte `.credentials.json`.
          :ok <- safe_mkdir_p(pod_claude_dir),
          :ok <-
            safe_write(
@@ -561,27 +561,27 @@ defmodule Fleet.Spawner.Pod do
          :ok <- safe_write(Path.join(state.pod_dir, "CLAUDE.md"), claude_md),
          :ok <- safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
          :ok <- safe_write(Path.join(lcars_dir, "settings.json"), pod_settings_json()),
-         # creds : plus de copie (adr-f). Seul `.credentials.json` de l'humain est monté RW par
+         # creds : plus de copie. Seul `.credentials.json` de l'humain est monté RW par
          # bwrap_launch.sh dans `pod_dir/.claude/` (refresh OAuth natif, écriture en place). `.claude/`
          # reste pod-owned → pas de hook humain. Les fichiers pod sont en .lcars/ + racine pod.
-         # F115/F157 : le `.claude.json` (onboarding + remote-control) est écrit par claude_launch.sh
-         # (frontière vendor N1) — PAS ici. La version N0 était clobberée à l'exec (claude_launch le
-         # ré-écrit sans condition) ET vivait dans N0 (connaissance vendor) : retirée (ADR-G / N1).
+         # Le `.claude.json` (onboarding + remote-control) est écrit par claude_launch.sh
+         # (frontière vendor N1) — PAS ici. Une version N0 serait clobberée à l'exec (claude_launch le
+         # ré-écrit sans condition) ET porterait de la connaissance vendor dans N0.
          :ok <- safe_mkdir_p(tickets_dir),
          :ok <-
            safe_write(
              Path.join(tickets_dir, "#{ticket_id_to_filename(state.ticket_id)}.md"),
              default_brief(state)
            ),
-         # F-arch-MCP : le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du mandat est
+         # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du mandat est
          # la TaskQueue (`get_task`). Un dispatch stage enqueue AVANT le spawn (StageDispatcher) ; mais
          # `admin.spawn` (lcars spawn --mandate) n'a PAS de dispatcher → sans cet enqueue, `get_task` rend
-         # `{done:true}` et le pod reste idle (forensic arch 3f12edd9). Idempotent (skip si déjà en file).
+         # `{done:true}` et le pod reste idle. Idempotent (skip si déjà en file).
          :ok <- maybe_enqueue_mandate(state),
          :ok <- maybe_provision_mcp_config(state),
          :ok <- provision_monitor_watch(state),
          :ok <- maybe_bootstrap_project_workspace(state),
-         # #pod-seed v4 : recall délibéré — restaure le seed AVANT le launch (après workspace = cwd réglé).
+         # Recall délibéré — restaure le seed AVANT le launch (après workspace = cwd réglé).
          :ok <- maybe_recall_restore(state) do
       new_state =
         state
@@ -596,18 +596,18 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # F115/F157 — `write_pod_claude_json` + `detect_claude_version` RETIRÉS. Le `.claude.json`
-  # (onboarding + remote-control pré-acceptés) est désormais l'unique responsabilité de
-  # `claude_launch.sh` (frontière vendor N1) : la version N0 était (1) systématiquement clobberée
-  # par le `cat >` du launcher juste avant l'exec — donc morte — et perdait au passage les 3 clés RC
+  # `write_pod_claude_json` + `detect_claude_version` RETIRÉS. Le `.claude.json`
+  # (onboarding + remote-control pré-acceptés) est l'unique responsabilité de
+  # `claude_launch.sh` (frontière vendor N1) : une version N0 serait (1) systématiquement clobberée
+  # par le `cat >` du launcher juste avant l'exec — donc morte — et perdrait au passage les 3 clés RC
   # (`remoteControlAtStartup`/`hasUsedRemoteControl`/`remoteDialogSeen`), ré-introduisant le blocage
-  # dialog RC qu'elle prétendait éviter ; (2) plaçait de la connaissance schéma-vendor dans N0. Les
-  # clés RC ont migré dans le launcher (clé `projects` correcte = `LCARS_POD_CWD`, pas `pod_dir`).
+  # dialog RC qu'elle prétendait éviter ; (2) placerait de la connaissance schéma-vendor dans N0. Les
+  # clés RC vivent dans le launcher (clé `projects` correcte = `LCARS_POD_CWD`, pas `pod_dir`).
 
-  # creds : write_claude_credentials/lead_credentials_path SUPPRIMÉS (adr-f).
+  # creds : write_claude_credentials/lead_credentials_path SUPPRIMÉS.
   # Plus de copie du `.credentials.json` du lead vers le pod : le claudeDir de
   # l'humain est monté RW par bwrap_launch.sh (CLAUDE_DIR → ~/.claude), refresh
-  # OAuth délégué au lockfile cross-process natif Anthropic. Historique : git.
+  # OAuth délégué au lockfile cross-process natif Anthropic.
 
   # settings.json minimal pour le claude REPL du pod.
   #
@@ -632,10 +632,10 @@ defmodule Fleet.Spawner.Pod do
     )
   end
 
-  # SP draft minimal POC — déclare le rôle agent worker + workflow yop →
+  # SP draft minimal — déclare le rôle agent worker + workflow yop →
   # get_task → submit_result + convention de retour (ok|failed). Le SP
-  # final par rôle = chantier séparé post-code.
-  # Draft SP role-aware (Rail 2 e2e 2026-06-14) : le draft d'un rôle est `agent-<role>-base.md` s'il
+  # final par rôle est un chantier séparé.
+  # Draft SP role-aware : le draft d'un rôle est `agent-<role>-base.md` s'il
   # EXISTE, sinon le draft worker générique. Convention catalogue (le draft suit le `metadata.name`),
   # plus de rôle gravé en `case` : l'architecte tombe sur son draft délégateur (qualité+économie +
   # create_ticket), tout rôle sans draft dédié sur le draft worker (get_task/submit_result). `role`
@@ -674,7 +674,7 @@ defmodule Fleet.Spawner.Pod do
   # (ex. `/home/starfleet/sp-sources/user/protocole-user.md`) qui définit
   # `yop` comme "reprise de session lire handoff" ou neutralisé (instance
   # v1 éclatée) → le claude REPL du pod ne déclenche PAS le workflow worker.
-  # Le gate U-RC live a hit ce piège (cf. chantier U-RC).
+  # (Piège réellement rencontré sur une instance dont le protocole-user redéfinissait `yop`.)
   defp read_protocole_user do
     case Application.get_env(:fleet_spawner, :protocole_user_path) do
       nil ->
@@ -694,11 +694,11 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp do_inject(state) do
-    # adr-f : plus de resolve_env OAuth (coffre/RT-env déprécié). Le pod
-    # s'authentifie via le claudeDir de l'humain, bindé RW par bwrap_launch.sh
-    # (env CLAUDE_DIR → ~/.claude, refresh natif Anthropic). La résolution
-    # per-humain vient de la registration (DN onboarding/catalogue déférée,
-    # adr-e) ; minimal ici = config `:fleet_spawner, :claude_dir`.
+    # Plus de resolve_env OAuth (coffre/RT-env déprécié). Le pod s'authentifie
+    # via le claudeDir de l'humain, bindé RW par bwrap_launch.sh (env CLAUDE_DIR
+    # → ~/.claude, refresh natif Anthropic). La résolution per-humain viendra de
+    # la registration (onboarding/catalogue déférés) ; minimal ici = config
+    # `:fleet_spawner, :claude_dir`.
     env_vars = %{"CLAUDE_DIR" => claude_dir()}
 
     new_state =
@@ -710,17 +710,17 @@ defmodule Fleet.Spawner.Pod do
     {:noreply, new_state, {:continue, :launch}}
   end
 
-  # L'humain qui fait tourner la fleet = l'user du process runtime lui-même. Décision 2026-06-09 :
-  # sur cette instance les SEULS users sont les users fleet → l'user courant EST l'humain. Pas de
-  # config, pas de défaut littéral (un défaut = masquage d'un trou de câblage, I-CBC). Le pod, enfant
+  # L'humain qui fait tourner la fleet = l'user du process runtime lui-même : les SEULS users de
+  # l'instance sont les users fleet → l'user courant EST l'humain. Pas de config, pas de défaut
+  # littéral (un défaut masquerait un trou de câblage au lieu de le faire échouer). Le pod, enfant
   # du runtime (Port/tmux), HÉRITE de cet UID → tourne dans le home de l'humain, bind ses creds. Si
   # demain quelqu'un d'autre installe LCARS, c'est SON user qui lance, SON home — rien à hardcoder.
   # Fail-loud si HOME/user irrésoluble (impossible en pratique, mais jamais rattrapé en silence).
   defp runtime_home, do: System.user_home!()
 
-  # F027 : source UNIQUE `Fleet.Credentials.Human` (plus de `id -un` shellé en double — sinon
-  # spawn-ownership et commit-identity peuvent diverger, casse F-01). Fail-loud (raise) conservé,
-  # rattrapé par le try/rescue de do_launch (F120).
+  # Source UNIQUE `Fleet.Credentials.Human` (pas de `id -un` shellé en double — sinon
+  # spawn-ownership et commit-identity peuvent diverger, ce qui casserait la gate d'identité forge).
+  # Fail-loud (raise), rattrapé par le try/rescue de do_launch.
   defp runtime_user, do: Fleet.Credentials.Human.current!()
 
   defp claude_dir do
@@ -742,12 +742,12 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Z2 gates 2&3 — porte credentials au spawn-boundary (CRED-D1 / F-AC-VALIDATE).
-  # Defense-in-depth : APRÈS maybe_put_auth_token (mode bind). Lit le claudeDir
-  # de l'humain UNE fois → valide scope-coverage (ScopeValidator, par-rôle via flags) +
-  # plan payant (PlanValidator). Le binaire claude impose déjà scope+plan (401) ; ces
-  # gates font échouer TÔT au lieu du 1ᵉʳ appel API du pod. Erreurs taguées
-  # `{:credentials_invalid, _}` pour les distinguer de l'auth-token au call-site.
+  # Porte credentials au spawn-boundary. Defense-in-depth : APRÈS maybe_put_auth_token
+  # (mode bind). Lit le claudeDir de l'humain UNE fois → valide scope-coverage
+  # (ScopeValidator, par-rôle via flags) + plan payant (PlanValidator). Le binaire claude
+  # impose déjà scope+plan (401) ; ces gates font échouer TÔT au lieu du 1ᵉʳ appel API du
+  # pod. Erreurs taguées `{:credentials_invalid, _}` pour les distinguer de l'auth-token au
+  # call-site.
   defp gate_credentials(human, cap_profile) do
     with {:ok, oauth} <- read_oauth_creds(claude_dir_for(human)),
          :ok <- gate_scopes(oauth, cap_profile),
@@ -756,9 +756,9 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # SOURCE UNIQUE de lecture du creds natif `<claude_dir>/.credentials.json` (F117/F118/F119) : un seul
+  # SOURCE UNIQUE de lecture du creds natif `<claude_dir>/.credentials.json` : un seul
   # File.read + Jason.decode + extraction du bloc `claudeAiOauth`. `gate_credentials/2` (scope+plan)
-  # consomme CE parse — source unique, plus de parsers driftables du même fichier.
+  # consomme CE parse — source unique, pas de parsers driftables du même fichier.
   defp read_oauth_creds(claude_dir) do
     creds_path = Path.join(claude_dir, ".credentials.json")
 
@@ -766,7 +766,7 @@ defmodule Fleet.Spawner.Pod do
          {:ok, %{"claudeAiOauth" => oauth}} when is_map(oauth) <- Jason.decode(raw) do
       {:ok, oauth}
     else
-      # Hygiène creds (F117/F118/F119) : la cause est CATÉGORISÉE, jamais le JSON décodé (qui porte
+      # Hygiène creds : la cause est CATÉGORISÉE, jamais le JSON décodé (qui porte
       # refreshToken/accessToken). `:malformed_json` (Jason) / `:no_oauth_block` (décodé sans bloc oauth
       # valide) / posix (File.read) — tous sûrs à propager et logger.
       {:error, %Jason.DecodeError{}} ->
@@ -821,17 +821,17 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # Binaire vendor = celui de l'HUMAIN (~/.local/bin/claude résolu), posé en LCARS_VENDOR_BIN.
-  # Honore le contrat bwrap_launch.sh:55 « autorité = LCARS_VENDOR_BIN (spawner) » : sans ça, bwrap
-  # retombe sur `command -v claude` = PATH du daemon → binaire système périmé (terrain : /usr/local/bin
-  # 2.1.114 au lieu du 2.1.159 user, outil Monitor absent). readlink -f ⇒ bwrap_launch dérive
-  # VENDOR_SHARE = dirname(dirname(bin)) juste. Absent ⇒ on ne pose rien (fallback bwrap conservé).
-  # Z4 (forge-identité B') — l'identité git du pod = l'HUMAIN du mandat (author ET committer ;
-  # le pod commite EN TANT QUE l'humain qui le run), résolue via le catalogue
-  # (`Fleet.Credentials.ForgeIdentity`). Remplace l'ancien DÉFAUT COOPÉRATIF role-based de
-  # `bwrap_launch.sh` (GIT_AUTHOR=LCARS-$ROLE) : le rôle ne signe plus l'identité — il passe en
-  # trailer `Co-authored-by` (A.2). bwrap_launch.sh forward ces GIT_AUTHOR_*/GIT_COMMITTER_*.
-  # Catalogue absent → fail-loud {:forge_identity_unresolved,_} (pas de pod sans identité
-  # vérifiable au push — la garantie reste côté MONDE, gate F-01 `allowed_emails=[humain]`).
+  # Honore le contrat bwrap_launch.sh « autorité = LCARS_VENDOR_BIN (spawner) » : sans ça, bwrap
+  # retombe sur `command -v claude` = PATH du daemon → binaire système périmé (version périmée,
+  # outil Monitor absent). readlink -f ⇒ bwrap_launch dérive VENDOR_SHARE = dirname(dirname(bin))
+  # juste. Absent ⇒ on ne pose rien (fallback bwrap conservé).
+  # Identité git du pod = l'HUMAIN du mandat (author ET committer ; le pod commite EN TANT QUE
+  # l'humain qui le run), résolue via le catalogue (`Fleet.Credentials.ForgeIdentity`). Remplace
+  # un DÉFAUT COOPÉRATIF role-based de `bwrap_launch.sh` (GIT_AUTHOR=LCARS-$ROLE) : le rôle ne
+  # signe plus l'identité — il passe en trailer `Co-authored-by`. bwrap_launch.sh forward ces
+  # GIT_AUTHOR_*/GIT_COMMITTER_*. Catalogue absent → fail-loud {:forge_identity_unresolved,_}
+  # (pas de pod sans identité vérifiable au push — la garantie reste côté MONDE, gate
+  # `allowed_emails=[humain]`).
   defp maybe_put_git_identity(env, human, role) do
     case Fleet.Credentials.ForgeIdentity.for_role(role, human: human) do
       {:ok, id} ->
@@ -847,18 +847,18 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Auth = mode `bind` UNIQUEMENT (token_arg retiré 2026-06-14). bwrap monte le `.credentials.json` de
-  # l'humain en RW → refresh OAuth natif (proactif 5min + réactif 401 + lockfile), full scope, PAS de
-  # falaise ~8h. token_arg fuyait le token en argv (`--setenv CLAUDE_CODE_OAUTH_TOKEN`) ET ne refreshait
-  # pas (expiresAt:null) → un eng long (>8h) perdait l'auth en plein travail. Plus de toggle.
+  # Auth = mode `bind` UNIQUEMENT. bwrap monte le `.credentials.json` de l'humain en RW → refresh
+  # OAuth natif (proactif 5min + réactif 401 + lockfile), full scope, PAS de falaise ~8h. Un mode
+  # token_arg fuirait le token en argv (`--setenv CLAUDE_CODE_OAUTH_TOKEN`) ET ne refresherait pas
+  # (expiresAt:null) → un eng long (>8h) perdrait l'auth en plein travail. Pas de toggle.
   defp maybe_put_auth_token(env, _human) do
     {:ok, Map.put(env, "LCARS_AUTH_MODE", "bind")}
   end
 
-  # Binaire vendor posé en LCARS_VENDOR_BIN (honore bwrap_launch.sh:55) = `~/.local/bin/claude` de
-  # l'HUMAIN (= l'user runtime), résolu via son home passwd. PLUS de fallback `lcars` : le pod EST
+  # Binaire vendor posé en LCARS_VENDOR_BIN (honore le contrat bwrap_launch.sh) = `~/.local/bin/claude`
+  # de l'HUMAIN (= l'user runtime), résolu via son home passwd. PAS de fallback `lcars` : le pod EST
   # l'humain, c'est SON binaire. Introuvable → fail-loud (sinon bwrap retombe sur `command -v claude`
-  # = binaire système périmé, outil Monitor absent — piège #4).
+  # = binaire système périmé, outil Monitor absent).
   defp maybe_put_vendor_bin(env, human) do
     case claude_bin_in_home(human) do
       bin when is_binary(bin) ->
@@ -877,31 +877,31 @@ defmodule Fleet.Spawner.Pod do
     env = Map.put(env, "LCARS_POD_CWD", pod_cwd(state))
 
     # Worker projet : le cwd `/home/<project>` est un REMAP du workspace réel → bwrap doit le binder
-    # (LCARS_POD_CWD_SRC, P3). Orchestrateur (mount catalogue) / permanent / legacy (relocalisés sous le
+    # (LCARS_POD_CWD_SRC). Orchestrateur (mount catalogue) / permanent / legacy (relocalisés sous le
     # bind HOME) → déjà bindés, pas de SRC à créer.
     if rc_project(state),
       do: Map.put(env, "LCARS_POD_CWD_SRC", pod_cwd_real(state)),
       else: env
   end
 
-  # cwd VU PAR L'AGENT dans le pod (= LCARS_POD_CWD + base du slug recall). #monde-propre : pour un
-  # pod-PROJET, l'agent voit `/home/<project>` (containment : ni human ni pod_id) ; bwrap y bind le
-  # workspace RÉEL (`pod_cwd_real`). Sinon (pas de projet nommé) = le réel. Le pod_dir RÉEL ne bouge
-  # PAS (reste `/home/<human>/pods/...`) — seul le CWD intra-pod est remappé.
+  # cwd VU PAR L'AGENT dans le pod (= LCARS_POD_CWD + base du slug recall). Pour un pod-PROJET,
+  # l'agent voit `/home/<project>` (containment : ni human ni pod_id) ; bwrap y bind le workspace
+  # RÉEL (`pod_cwd_real`). Sinon (pas de projet nommé) = le réel. Le pod_dir RÉEL ne bouge PAS
+  # (reste `/home/<human>/pods/...`) — seul le CWD intra-pod est remappé.
   defp pod_cwd(state) do
     cond do
-      # Worker projet → /home/<project> (P3).
+      # Worker projet → /home/<project>.
       project = rc_project(state) -> "/home/#{project}"
       # Orchestrateur → son mount RW déclaré (arch → /home/projects.work). Data-driven (cap-profile).
       rw = first_rw_mount(state) -> rw
       # Permanent / legacy (projet sans rc_name) → le chemin RÉEL relocalisé (pod_dir → sandbox_home).
-      # Stage B : sandbox_home=/home/.pod → workspace/home relocalisés ; gaté off → pod_dir = identité.
+      # Home-relocalisé : sandbox_home=/home/.pod → workspace/home relocalisés ; off → pod_dir = identité.
       true -> String.replace_prefix(pod_cwd_real(state), state.pod_dir, sandbox_home(state))
     end
   end
 
-  # Home INTRA-POD (#monde-propre Stage B). bwrap → /home/.pod (le pod_dir réel masqué derrière) ; sinon
-  # (host) → le pod_dir réel (pas de relocalisation). Doit matcher LCARS_POD_HOME posé par maybe_put_sandbox_home.
+  # Home INTRA-POD. bwrap → /home/.pod (le pod_dir réel masqué derrière) ; sinon (host) → le pod_dir
+  # réel (pas de relocalisation). Doit matcher LCARS_POD_HOME posé par maybe_put_sandbox_home.
   defp sandbox_home(state) do
     case cap_profile_containment(state.cap_profile) do
       "bwrap" -> "/home/.pod"
@@ -909,17 +909,17 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # #monde-propre Stage A : cwd d'un orchestrateur = son 1er mount RW (DÉJÀ bindé via LCARS_POD_MOUNTS,
-  # donc pas de bind à créer). nil si aucun rw. Réutilise l'accesseur unique cap_profile_mounts (anti-fork).
+  # cwd d'un orchestrateur = son 1er mount RW (DÉJÀ bindé via LCARS_POD_MOUNTS, donc pas de bind à
+  # créer). nil si aucun rw. Réutilise l'accesseur unique cap_profile_mounts (pas de logique dupliquée).
   defp first_rw_mount(state) do
     state.cap_profile
     |> cap_profile_mounts()
     |> Enum.find_value(fn m -> if (m["mode"] || m[:mode]) == "rw", do: m["path"] || m[:path] end)
   end
 
-  # #monde-propre Stage B : relocalise le home intra-pod (bwrap UNIQUEMENT). LCARS_POD_HOME=/home/.pod →
-  # bwrap_launch masque le pod_dir réel derrière (SANDBOX_HOME) : l'agent ne voit ni human ni pod_id, et
-  # `ls /home` ne montre que les mounts. Host pods (containment none) : pas relocalisés (home réel).
+  # Relocalise le home intra-pod (bwrap UNIQUEMENT). LCARS_POD_HOME=/home/.pod → bwrap_launch masque
+  # le pod_dir réel derrière (SANDBOX_HOME) : l'agent ne voit ni human ni pod_id, et `ls /home` ne
+  # montre que les mounts. Host pods (containment none) : pas relocalisés (home réel).
   defp maybe_put_sandbox_home(env, state) do
     case cap_profile_containment(state.cap_profile) do
       "bwrap" -> Map.put(env, "LCARS_POD_HOME", sandbox_home(state))
@@ -936,8 +936,8 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Nom de projet PROPRE depuis `rc_name` (`<project>_<role>`, source canonique sanitizée — dispatcher
-  # P1). `nil` si pas de rc_name (pods permanents / admin → pas de remap cwd). Partagé avec le checkpoint.
+  # Nom de projet PROPRE depuis `rc_name` (`<project>_<role>`, source canonique sanitizée par le
+  # dispatcher). `nil` si pas de rc_name (pods permanents / admin → pas de remap cwd). Partagé avec le checkpoint.
   defp rc_project(state) do
     with rc when is_binary(rc) <- Keyword.get(state.opts, :rc_name),
          role <- cap_profile_name(state.cap_profile),
@@ -948,7 +948,7 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # #pod-seed v4 : recall délibéré. Si `opts[:recall_seed_jsonl]` est fourni (par `Fleet.Spawner.recall`),
+  # Recall délibéré. Si `opts[:recall_seed_jsonl]` est fourni (par `Fleet.Spawner.recall`),
   # restaure le seed à `projects/<slugify(cwd)>/<session_id>.jsonl` AVANT le launch ; claude
   # `--resume <session_id>` (resume:true via opts) le retrouve. Gaté : absent → no-op (spawn normal
   # intact). Le seed est validé (read_map) côté `Spawner.recall` ; absent ICI = fail-loud (transition_failed).
@@ -1012,32 +1012,32 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp do_launch(state) do
-    # BL-036 (dogfood F7) : un crash du Pod GenServer ne tue PAS le bwrap/tmux/claude (`--die-with-parent`
-    # = BEAM, pas GenServer) → pod ORPHELIN vivant (OAuth+RAM). Avant tout (re)launch, on REAP un éventuel
-    # orphelin du même pod_id : no-op pour un pod neuf ; sur recovery (:recreate, BL-035) ça nettoie le
-    # mort-vivant AVANT de relancer (sinon collision sock/process). Rend la recovery viable en prod
-    # (le probe F7 le faisait à la main). Reaper périodique (orphelins jamais re-spawnés) = reste BL-036b.
+    # Un crash du Pod GenServer ne tue PAS le bwrap/tmux/claude (`--die-with-parent` = BEAM, pas
+    # GenServer) → pod ORPHELIN vivant (OAuth+RAM). Avant tout (re)launch, on REAP un éventuel
+    # orphelin du même pod_id : no-op pour un pod neuf ; sur recovery (:recreate) ça nettoie le
+    # mort-vivant AVANT de relancer (sinon collision sock/process), ce qui rend la recovery viable
+    # en prod. Le reaper périodique (orphelins jamais re-spawnés) est un mécanisme distinct (PodWarden).
     reap_orphan_pod(state.pod_id)
     role = cap_profile_name(state.cap_profile)
     containment = cap_profile_containment(state.cap_profile)
 
-    # LAUNCH-Q : le launcher N0 dépend du containment, lu ICI (avant ce fix : bwrap aveugle pour tous).
+    # Le launcher N0 dépend du containment, lu ICI (sinon bwrap aveugle pour tous).
     # "none" (host_native : architect, starfleet) → host_launch.sh (host, sans sandbox) ;
     # sinon la chaîne bwrap. `PermanentBoot` reste générique — la branche vit sur le chemin de lancement.
     launcher_path = if containment == "none", do: host_launch_path(), else: bwrap_launch_path()
 
-    # R0.8-brick4 : plus de budget côté pod (OAuth pool, pas d'API). Le timeout
+    # Pas de budget côté pod (OAuth pool, pas d'API). Le timeout
     # de réponse est géré par `monitor_timeout_ms/1` côté Pod GenServer
     # (Process.send_after :result_deadline). Les backends qui n'ont pas
     # leur propre script de lancement (StubBackend) n'ont pas
-    # besoin de la valeur ; LauncherPortBackend (legacy bwrap+print) recevait
-    # `budget_sec`/`budget_usd` comme args du script — ces clés sont retirées
-    # de l'API LaunchBackend (cf. behaviour `Fleet.Spawner.LaunchBackend`).
+    # besoin de la valeur ; les clés `budget_sec`/`budget_usd` sont
+    # retirées de l'API LaunchBackend (cf. behaviour
+    # `Fleet.Spawner.LaunchBackend`).
     args = %{
       role: role,
       pod_id: state.pod_id,
       pod_dir: state.pod_dir,
-      # LAUNCH-Q : launcher N0 sélectionné par containment (host_launch.sh | bwrap_launch.sh). L'exe du
+      # Launcher N0 sélectionné par containment (host_launch.sh | bwrap_launch.sh). L'exe du
       # Port (build_spawn) ; l'argv reste identique des deux côtés (même contrat <role> <pod_id> <pod_dir>
       # <command...>). Le command opaque (claude_launch.sh …) est claude_launch_path ci-dessous.
       launcher_path: launcher_path,
@@ -1047,10 +1047,10 @@ defmodule Fleet.Spawner.Pod do
       session_id: state.session_id
     }
 
-    # F120 : la résolution humain + le pipeline env peuvent RAISE (runtime_user /
+    # La résolution humain + le pipeline env peuvent RAISE (runtime_user /
     # claude_dir_from_passwd / maybe_put_vendor_bin = fail-loud sur host sans claude
-    # per-user ou home irrésoluble). Un raise ICI crashait le Pod GenServer SANS
-    # transition_failed → task orphaned :pending + state.json à la phase périmée. On
+    # per-user ou home irrésoluble). Un raise non rattrapé ICI crasherait le Pod GenServer SANS
+    # transition_failed → task orpheline :pending + state.json à la phase périmée. On
     # rabat tout raise de construction-env sur transition_failed (même cleanup que les
     # autres échecs launch : clear_pod_task + phase=failed).
     launch_env =
@@ -1061,49 +1061,49 @@ defmodule Fleet.Spawner.Pod do
           state.env_vars
           |> Map.merge(skills_plugins_env(state.cap_profile))
           |> Map.merge(mcp_channel_env(state.pod_id, cap_profile_name(state.cap_profile)))
-          # HOME — LAUNCH-Q : dépend du containment.
-          #   bwrap (défaut) : HOME=pod_dir (U4 — cohérent ; bwrap fait `--setenv HOME` de toute façon,
+          # HOME — dépend du containment.
+          #   bwrap (défaut) : HOME=pod_dir (cohérent ; bwrap fait `--setenv HOME` de toute façon,
           #     cette valeur est ignorée sous le sandbox).
           #   none (host)    : HOME = home RÉEL de l'humain → claude lit son `~/.claude` natif. C'est l'auth
           #     `:bind` réalisée NATIVEMENT sur l'hôte (refresh OAuth, full scope, pas de falaise 8h — l'arch
           #     est un pod forever). host_launch.sh ne re-setenv PAS (pas de namespace) : ce HOME EST l'env réel.
           |> Map.put("HOME", launch_home(containment, human, state.pod_dir))
-          # Chaîne de session (DN spawner-orchestrator §D) : bwrap_launch les `--setenv` dans le pod,
+          # Chaîne de session : bwrap_launch les `--setenv` dans le pod,
           # claude_launch les lit `:?` strict (no-boot sinon).
           |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
           |> Map.put("LCARS_POD_RESUME", if(state.resume, do: "1", else: "0"))
-          # Mode permission (#kill-yolo) : défaut `default` → claude_launch passe `--permission-mode default`
+          # Mode permission : défaut `default` → claude_launch passe `--permission-mode default`
           # (allow/deny lists ENFORCED) au lieu de `--dangerously-skip-permissions` (héritage « agents dans la
           # nature » qui bypasse TOUT). Monde shapé (bwrap RO/RW + cap-profile) → le bypass est inutile, il ne
-          # faisait que neutraliser nos listes. Override par cap-profile `spec.invocation.permission_mode`
+          # ferait que neutraliser nos listes. Override par cap-profile `spec.invocation.permission_mode`
           # (ex. "bypassPermissions" pour ré-ouvrir le yolo explicitement). NB : l'enforcement de l'écriture =
           # le MOUNT (RO/RW), pas la tool-list → les juges gardent Write/Edit (rapports), bornés par le mount.
           |> Map.put("LCARS_PERMISSION_MODE", permission_mode(state.cap_profile))
           # Nom RC Desktop : `<projet>_<role>` fourni par le dispatch (`opts[:rc_name]`) ; défaut = role
-          # seul (pods permanents / sans projet). #chantier pod-seed. claude_launch le passe en
-          # `--remote-control "<nom>"` EXACT (zéro suffixe auto → fini les « noms random qui s'empilent »).
+          # seul (pods permanents / sans projet). claude_launch le passe en
+          # `--remote-control "<nom>"` EXACT (zéro suffixe auto → pas de « noms random qui s'empilent »).
           # Sessions RC per-user (l'humain ne voit QUE les siennes). Visibilité Desktop gatée côté
-          # claude_launch.sh (lit `invocation.remote_control` du cap-profile). NB : la VALEUR est désormais
-          # le nom EXACT, pas un préfixe — le nom d'env legacy (`_NAME_PREFIX`) est conservé (moins de churn).
+          # claude_launch.sh (lit `invocation.remote_control` du cap-profile). NB : la VALEUR est le nom
+          # EXACT, pas un préfixe — le nom d'env legacy (`_NAME_PREFIX`) est conservé (moins de churn).
           |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", Keyword.get(state.opts, :rc_name, role))
           # Base sock tmux : bwrap_launch crée la socket sous <base>/<pod_id>/, PodTmux (host) y tape.
           # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. (Défaut /run/lcars/tmux-sock partagé.)
           |> Map.put("LCARS_TMUX_SOCK_BASE", Fleet.Spawner.PodTmux.sock_base())
           # Le pod est celui de l'HUMAIN : creds ET binaire vendor suivent /home/<human> (même règle que
-          # pod_dir). Quel binaire = robuste ici (depuis ~/.local/bin, pas le pari `command -v`). Le pod
-          # tourne SOUS l'UID de l'humain PAR CONSTRUCTION : le daemon tourne *as* l'humain (unit
-          # `User=<humain>`, doctrine 2026-06-11 — chaque humain = SA fleet sous son user), le pod = Port
-          # BEAM hérite cet UID → ownership/perms/isolation OS gratis, PAS de systemd-run --uid. (Seul
-          # starfleet a un user dédié, hors-fleet.)
+          # pod_dir). Le binaire est résolu robustement ici (depuis ~/.local/bin, pas le pari `command -v`).
+          # Le pod tourne SOUS l'UID de l'humain PAR CONSTRUCTION : le runtime tourne *as* l'humain
+          # (chaque humain = SA fleet sous son user), le pod = Port BEAM hérite cet UID →
+          # ownership/perms/isolation OS gratis, PAS de systemd-run --uid. (Seul starfleet a un user
+          # dédié, hors-fleet.)
           |> Map.put("CLAUDE_DIR", claude_dir_for(human))
           |> maybe_put_vendor_bin(human)
           |> maybe_put_pod_cwd(state)
-          # #monde-propre Stage B : relocalise le home intra-pod (bwrap only) → bwrap masque le pod_dir réel.
+          # Relocalise le home intra-pod (bwrap only) → bwrap masque le pod_dir réel.
           |> maybe_put_sandbox_home(state)
           # LCARS_POD_DIR (racine pod vue par l'agent, où vivent watch.sh/turn.flag) n'est PAS posée ici —
           # ce serait du dead code : bwrap_launch `--clearenv` la strippe, et host_launch l'`export`e
-          # lui-même (= $POD_DIR, F-E1 `3152af3d`). Le SP/watch.sh lisent `${LCARS_POD_DIR:-$HOME}` :
-          # host → la var ; bwrap → fallback `$HOME` (= /home/.pod = racine pod). (Map.put 5001703f réverté.)
+          # lui-même (= $POD_DIR). Le SP/watch.sh lisent `${LCARS_POD_DIR:-$HOME}` :
+          # host → la var ; bwrap → fallback `$HOME` (= /home/.pod = racine pod).
           # Mounts CATALOGUE (cap-profile-driven) → bwrap_launch les bind. Vide / host_launch = inerte.
           # `system_mounts` préfixe le dir des launchers (install) → claude_launch.sh visible dans le sandbox.
           |> Map.put(
@@ -1116,7 +1116,7 @@ defmodule Fleet.Spawner.Pod do
         e -> {:error, {:launch_env_unresolved, Exception.message(e)}}
       end
 
-    # R15 : l'étape auth sort du pipe (pose LCARS_AUTH_MODE=bind, fail-loud sur erreur). Z2 : la porte
+    # L'étape auth sort du pipe (pose LCARS_AUTH_MODE=bind, fail-loud sur erreur). La porte
     # credentials (scope/plan) suit, taguée {:credentials_invalid, _} pour un refus distinct de l'auth.
     case launch_env do
       {:ok, human, env} ->
@@ -1134,9 +1134,9 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # BL-036 : reap un orphelin (bwrap/tmux/claude survivant à un crash GenServer) du même pod_id avant
+  # Reap un orphelin (bwrap/tmux/claude survivant à un crash GenServer) du même pod_id avant
   # un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). Le kill (tmux kill-server +
-  # pkill -f ancré) est centralisé dans `PodTmux.kill_holder/1` (F-034 : anti self-kill).
+  # pkill -f ancré) est centralisé dans `PodTmux.kill_holder/1` (anti self-kill).
   defp reap_orphan_pod(pod_id) do
     if Fleet.Spawner.PodTmux.alive?(pod_id) do
       Logger.warning("pod #{pod_id} : orphelin vivant détecté avant launch (BL-036) — reap")
@@ -1153,8 +1153,8 @@ defmodule Fleet.Spawner.Pod do
   defp do_launch_backend(state, args, env) do
     case launch_backend().launch(args, env) do
       {:ok, %{init_message: init_msg, ndjson_log: ndjson_log} = launched} ->
-        # #593 D11 — extract port (LauncherPortBackend l'inclut, StubBackend non).
-        # nil-able : tests stub n'ont pas de Port → handle_info clauses
+        # Extrait le port (LauncherPortBackend l'inclut, StubBackend non).
+        # nil-able : un test stub n'a pas de Port → les clauses handle_info
         # ne matchent jamais → comportement legacy préservé.
         port = Map.get(launched, :port)
 
@@ -1168,21 +1168,21 @@ defmodule Fleet.Spawner.Pod do
           |> Map.put(:ndjson_log_path, ndjson_log)
           |> Map.put(:port, port)
           |> Map.put(:tmux_session, tmux_session)
-          # session_id PRÉ-ALLOUÉ (state) — plus de capture `init_msg["session_id"]` (modèle -p mort ;
-          # init_msg est nil en RC interactif). L'UUID a été alloué à l'init / restauré en recovery.
+          # session_id PRÉ-ALLOUÉ (state) — pas de capture `init_msg["session_id"]` (le modèle -p est
+          # mort ; init_msg est nil en RC interactif). L'UUID a été alloué à l'init / restauré en recovery.
           |> Map.put(:session_id, state.session_id)
           |> add_condition(:process_launched)
           |> add_condition(:stream_alive)
 
         write_state_fs(new_state)
 
-        # U4 — Brief delivery au pod long-lived RC.
+        # Brief delivery au pod long-lived RC.
         #
         # Path actuel : PodTmux send-keys sur le sock par-pod (universel, bwrap ET host).
-        #   Pourquoi pas MCP channel push : reverse #5b §2.3 → gate 2
-        #   `isChannelsEnabled = tengu_harbor` GrowthBook flag default false côté
-        #   Anthropic. send-keys (control plane) reste universel, le brief est
-        #   injecté tel quel dans le REPL, claude l'exécute comme prompt.
+        #   Pourquoi pas le push par MCP channel : la feature channels est gardée par un
+        #   flag `isChannelsEnabled` default false côté Anthropic. send-keys (control
+        #   plane) reste universel, le brief est injecté tel quel dans le REPL, claude
+        #   l'exécute comme prompt.
         #
         # Path LauncherPortBackend : pas applicable (brief.md sur disk lu par claude_launch).
         # Path Stub (tests) : no-op (pas de tmux_session retourné).
@@ -1196,9 +1196,9 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp do_monitor(state) do
-    # R-CORE.comm 2.2 — completion EVENT-DRIVEN (Iron Law : un seul mécanisme). On souscrit au Bus
-    # (Ring 0) et on attend `task_queue.task_completed (struct %Fleet.Event{}){pod_id == mien}` émis par le central (fleet_mcp)
-    # sur submit_result. PLUS de poll du fichier result.md (mode fichier retiré). Deadline = budget
+    # Complétion EVENT-DRIVEN (un seul mécanisme). On souscrit au Bus (Ring 0) et on attend
+    # `task_queue.task_completed` (%Fleet.Event{}, pod_id == mien) émis par le central (fleet_mcp)
+    # sur submit_result. Pas de poll du fichier result.md (mode fichier retiré). Deadline = budget
     # durée → :failed si aucun résultat. pod.ex (Ring 1) ne lit JAMAIS fleet_mcp (Ring 4) en direct.
     Bus.subscribe()
     new_state = arm_result_deadline(%{state | phase: :monitoring})
@@ -1206,9 +1206,9 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp do_extract(state) do
-    # R-CORE.comm 2.2 — le résultat vient de l'event Bus (state.submitted_result), plus d'un fichier.
+    # Le résultat vient de l'event Bus (state.submitted_result), pas d'un fichier.
     #
-    # Branche lifetime_scope (chantier engineer long-lived) :
+    # Branche selon lifetime_scope :
     #   - `one-shot` : extract → release → kill (cycle complet 1 task = 1 vie pod).
     #   - autres (`pipe`/`run`/`forever`) : pod long-lived. Le
     #     broadcast pod.completed remonte le résultat au pipeline / starfleet
@@ -1219,12 +1219,12 @@ defmodule Fleet.Spawner.Pod do
     #     (`Fleet.Spawner.kill_pod/1` invoqué par gatekeeper au promote/abandon)
     #     ou timeout result_deadline → transition_failed.
     #
-    # Cf. doctrine `00_doctrine/moon-shot-ref/#02_methodology/pipeline-
-    # implementation.md` Phase III étapes 11.0-11.3 + boucles renvoi-au-dev.
+    # Le cycle promote/renvoi-au-dev d'un pod long-lived est piloté côté pipeline,
+    # pas ici (do_extract ne fait que remonter le résultat et ré-armer le monitoring).
     result = state.submitted_result || %{}
 
-    # MA-04 — `pod.completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir le hop).
-    # Diffusion via `required_broadcast` : son échec n'est PLUS avalé. Si elle échoue, on NE progresse PAS
+    # `pod.completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir le hop).
+    # Diffusion via `required_broadcast` : son échec n'est PAS avalé. Si elle échoue, on NE progresse PAS
     # vers release/kill (one-shot) ni vers le re-monitoring qui DROPPE `submitted_result` (long-lived) : le
     # pod RESTE vivant avec son résultat RETENU + deadline ré-armée → un re-wake re-fire `do_extract` (la
     # complétion sera ré-émise) au lieu d'une complétion ORPHELINE (pod tué, hop jamais fini, verrou à vie).
@@ -1245,7 +1245,7 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # MA-04 — progression normale APRÈS un `pod.completed` diffusé avec succès (extrait du chemin pour que
+  # Progression normale APRÈS un `pod.completed` diffusé avec succès (extrait du chemin pour que
   # l'échec de broadcast n'avance JAMAIS vers release/kill ni vers le drop de `submitted_result`).
   defp do_extract_proceed(state, result) do
     new_state =
@@ -1259,11 +1259,11 @@ defmodule Fleet.Spawner.Pod do
         {:noreply, new_state, {:continue, :release}}
 
       _other ->
-        # Z1 #15 : reset :output_extracted au re-monitoring (sinon un crash REPL au
-        # cycle 2 est masqué en {:stop,:normal} via la garde l.230 → pod.failed/clear
-        # jamais émis). Z1 #16 : arm_result_deadline annule le timer du cycle précédent
-        # avant de ré-armer (pas d'accumulation). Bus.subscribe pas re-appelé : déjà
-        # subscribed depuis do_monitor au 1er cycle.
+        # Reset :output_extracted au re-monitoring (sinon un crash REPL au cycle 2 est
+        # masqué en {:stop,:normal} via la garde du handler exit_status → pod.failed/clear
+        # jamais émis). arm_result_deadline annule le timer du cycle précédent avant de
+        # ré-armer (pas d'accumulation). Bus.subscribe pas re-appelé : déjà subscribed
+        # depuis do_monitor au 1er cycle.
         new_state =
           new_state
           |> Map.put(:phase, :monitoring)
@@ -1275,13 +1275,13 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Rework #4 : délègue à la source unique `Fleet.CapProfile.lifetime_scope/1`.
+  # Délègue à la source unique `Fleet.CapProfile.lifetime_scope/1`.
   defp lifetime_scope(%Fleet.CapProfile{} = cp), do: Fleet.CapProfile.lifetime_scope(cp)
 
-  # R1.3 (hole C1) : pod.completed porte le contexte pipeline (pipeline_id+stage) si
-  # le pod a été spawné par fleet_pipeline (via spawn_opts). L'Executor corrèle alors
-  # le pod terminé à sa stage. Pod hors-pipeline → opts sans ces clés → payload nu
-  # (le bridge Executor ignore : pas de pipeline_id ⇒ no-op).
+  # pod.completed porte le contexte pipeline (pipeline_id+stage) si le pod a été spawné
+  # par fleet_pipeline (via spawn_opts). L'Executor corrèle alors le pod terminé à sa
+  # stage. Pod hors-pipeline → opts sans ces clés → payload nu (le bridge Executor
+  # ignore : pas de pipeline_id ⇒ no-op).
   defp pod_completed_payload(state, result) do
     base = %{
       "pod_id" => state.pod_id,
@@ -1293,7 +1293,7 @@ defmodule Fleet.Spawner.Pod do
 
     case {Keyword.get(opts, :pipeline_id), Keyword.get(opts, :stage)} do
       {nil, _} ->
-        # Pod stage-dispatch (assignee-driven, DN forge-state-machine) hors pipeline.
+        # Pod stage-dispatch (assignee-driven) hors pipeline.
         # S'il porte un PROJET (repo cloné), le payload embarque le contexte de
         # fin-de-hop : le consumer `Fleet.Pilot.HopConsumer` est stateless (l'event
         # porte l'état, pas de query `pod_info` racy). workspace+base_sha+role
@@ -1303,14 +1303,14 @@ defmodule Fleet.Spawner.Pod do
           %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
             base
             |> Map.merge(%{
-              # F121 : autorité unique du sous-dossier workspace (Fleet.Spawner), pas un littéral recopié.
+              # Autorité unique du sous-dossier workspace (Fleet.Spawner), pas un littéral recopié.
               "workspace" => Fleet.Spawner.pod_workspace_path(state.pod_dir),
               "base_sha" => proj["base_sha"],
-              # F-PARALLEL-PR-CONFLICT — base de la GATE F-03, DÉCONFLÉE de la clone-base (`base_sha`). Pour
+              # Base de la GATE de livraison, DÉCONFLÉE de la clone-base (`base_sha`). Pour
               # une résolution par rebase, le livrable doit DESCENDRE de `main` (cible du rebase), pas de
-              # l'ancien tip de feature (réécrit → `base_not_ancestor`, bug live PR#4). Le resolver l'égale à
-              # `base_sha` pour le forward (build/rework) → comportement inchangé. Fallback `base_sha` : projet
-              # d'un spawn antérieur au champ (re-mandate vivant dont le project est figé au build initial).
+              # l'ancien tip de feature (réécrit → `base_not_ancestor`). Le resolver l'égale à `base_sha`
+              # pour le forward (build/rework) → comportement inchangé. Fallback `base_sha` : projet d'un
+              # spawn antérieur au champ (re-mandate vivant dont le project est figé au build initial).
               "gate_base_sha" => proj["gate_base_sha"] || proj["base_sha"],
               "role" => cap_profile_name(state.cap_profile)
             })
@@ -1326,9 +1326,9 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # A2.1 : contexte carte (pipeline+stage) injecté au spawn par StageDispatcher via `:pipeline`/
+  # Contexte carte (pipeline+stage) injecté au spawn par StageDispatcher via `:pipeline`/
   # `:stage` (≠ `:pipeline_id` du chemin pipeline legacy). Permet au HopConsumer de naviguer la
-  # carte (CarteNav.next_stage). Absent (1-stage A1) → payload inchangé.
+  # carte (CarteNav.next_stage). Absent (carte 1-stage) → payload inchangé.
   defp maybe_put_carte_ctx(payload, opts) do
     case {Keyword.get(opts, :pipeline), Keyword.get(opts, :stage)} do
       {p, s} when is_binary(p) and is_binary(s) ->
@@ -1339,7 +1339,7 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # F-037 MULTI-PROJET : embarque le REPO du projet dans `pod.completed` → le HopConsumer (singleton
+  # Multi-projet : embarque le REPO du projet dans `pod.completed` → le HopConsumer (singleton
   # multi-projet) sait sur quel repo agir + où pousser, sans le re-dériver de la config (« l'event porte
   # tout l'état »). `"repository" => %{"full_name"}` = identifiant forge (API) ; `"remote"` = l'URL de push
   # (= `repo_path`, l'URL clonée). Projet sans `"repo"` (cap_profile statique legacy : pas de full_name) →
@@ -1358,12 +1358,12 @@ defmodule Fleet.Spawner.Pod do
   defp maybe_put_remote(payload, _), do: payload
 
   defp do_release(state) do
-    # R1.2 — tue le pod interactif (Port.close → claude/bwrap/script terminés) puis ARRÊT NORMAL
-    # du GenServer (H-S1 : avant, le Pod restait vivant après :succeeded → memory leak du
-    # DynamicSupervisor). Sous `:temporary` (DN-recovery B) l'arrêt :normal n'est jamais ressuscité.
+    # Tue le pod interactif (Port.close → claude/bwrap/script terminés) puis ARRÊT NORMAL
+    # du GenServer (sinon le Pod resterait vivant après :succeeded → memory leak du
+    # DynamicSupervisor). Sous `:temporary` l'arrêt :normal n'est jamais ressuscité.
     # NB : pas de clear_for_pod ici — do_release = succès post-EXTRACT, la task a déjà été
     # soumise/complétée (pas de task active à libérer).
-    # #chantier pod-seed v2 : checkpoint le seed AVANT de tuer le backend (JSONl encore intact).
+    # Checkpoint le seed AVANT de tuer le backend (JSONl encore intact).
     maybe_checkpoint_seed(state)
     teardown_backend(state)
 
@@ -1376,10 +1376,10 @@ defmodule Fleet.Spawner.Pod do
     {:stop, :normal, new_state}
   end
 
-  # #chantier pod-seed v2 : à la mort d'un pod-PROJET (rc_name = `<projet>_<role>` présent),
-  # checkpointe son JSONl de session ACTIF vers le seed-store (`projects.work/<projet>/pods/<role>`)
-  # pour rappel ultérieur (`--resume`). Permanents (sans rc_name) → pas de seed-store. Best-effort
-  # (SeedStore ne raise jamais ici ; un échec ne casse pas le teardown).
+  # À la mort d'un pod-PROJET (rc_name = `<projet>_<role>` présent), checkpointe son JSONl de
+  # session ACTIF vers le seed-store (`projects.work/<projet>/pods/<role>`) pour rappel ultérieur
+  # (`--resume`). Permanents (sans rc_name) → pas de seed-store. Best-effort (SeedStore ne raise
+  # jamais ici ; un échec ne casse pas le teardown).
   defp maybe_checkpoint_seed(state) do
     case rc_project(state) do
       nil ->
@@ -1399,30 +1399,30 @@ defmodule Fleet.Spawner.Pod do
 
   # Teardown du backend du pod. Port vivant → Port.close (le SIGTERM du holder bwrap fait tomber
   # namespace+tmux+claude). Port déjà mort mais session bwrap/tmux/claude survivante → kill
-  # SOCK-AWARE (F124).
+  # SOCK-AWARE.
   defp teardown_backend(state) do
     cond do
       is_port(state.port) and Port.info(state.port) ->
         terminate_pod_port(state.port)
 
       is_binary(state.tmux_session) ->
-        # F124 : la session du pod bwrap (`lcars-pod-<id>`) vit sur le sock PAR-POD (PodTmux), PAS
-        # le serveur tmux par défaut. L'ancien `TmuxBackend.kill_session` ciblait le défaut → no-op
-        # silencieux → le claude sandboxé continuait à consommer l'OAuth. On kill via le sock par-pod
-        # (même geste que reap_orphan_pod), centralisé dans `PodTmux.kill_holder/1` (F-034 : anti self-kill).
+        # La session du pod bwrap (`lcars-pod-<id>`) vit sur le sock PAR-POD (PodTmux), PAS
+        # le serveur tmux par défaut. Un kill ciblant le défaut serait un no-op silencieux →
+        # le claude sandboxé continuerait à consommer l'OAuth. On kill via le sock par-pod
+        # (même geste que reap_orphan_pod), centralisé dans `PodTmux.kill_holder/1` (anti self-kill).
         Fleet.Spawner.PodTmux.kill_holder(state.pod_id)
 
       true ->
         :ok
     end
 
-    # #2 (2026-06-18) : retire le sock-dir APRÈS le kill. Le kill est PROUVÉ FIABLE live (terminate_pod_port
-    # ET kill_holder tuent claude+namespace, dissection 2 probes 2026-06-18) → la garde « ne pas retirer le
-    # sock-dir tant que le kill n'est pas sûr » du chantier précédent est levée. Sans ça, le sock-dir traînait
-    # après un teardown gracieux → le PodWarden le ramassait ~60s plus tard en loguant un FAUX « orphelin
-    # persistant » (bruit qui masque les vrais). L'PodWarden reste le filet des VRAIS orphelins (GenServer
-    # crashé → teardown jamais exécuté → sock-dir + claude survivent → reap). Gardé `tmux_session` : pods réels
-    # (bwrap/host), pas StubBackend (sock_path nominal, rm_rf no-op de toute façon).
+    # Retire le sock-dir APRÈS le kill. Le kill est fiable (terminate_pod_port ET kill_holder tuent
+    # claude+namespace) → pas besoin de garder le sock-dir « tant que le kill n'est pas sûr ». Sans ce
+    # nettoyage, le sock-dir traînerait après un teardown gracieux → le PodWarden le ramasserait ~60s
+    # plus tard en loguant un FAUX « orphelin persistant » (bruit qui masque les vrais). Le PodWarden
+    # reste le filet des VRAIS orphelins (GenServer crashé → teardown jamais exécuté → sock-dir + claude
+    # survivent → reap). Gardé `tmux_session` : pods réels (bwrap/host), pas StubBackend (sock_path
+    # nominal, rm_rf no-op de toute façon).
     if is_binary(state.tmux_session) do
       _ = File.rm_rf(Path.dirname(Fleet.Spawner.PodTmux.sock_path(state.pod_id)))
     end
@@ -1432,13 +1432,13 @@ defmodule Fleet.Spawner.Pod do
 
   @doc """
   Tue le pod (chaîne bwrap OU host — geste générique). Le holder (`sleep infinity`) IGNORE l'EOF stdin →
-  `Port.close` seul l'ORPHELINE (pod survit — PROVEN e2e Elixir 2026-06-01). On SIGTERM le process holder
+  `Port.close` seul l'ORPHELINE (le pod survit). On SIGTERM donc le process holder
   par son os_pid :
   - **bwrap** : bwrap propage au holder → PID1 exit → namespace + serveur tmux + claude tombent ensemble
     (`--die-with-parent` = filet si le BEAM meurt avant d'arriver ici).
-  - **host** (LAUNCH-Q) : pas de namespace → le holder `host_launch.sh` trap le SIGTERM → `tmux
+  - **host** : pas de namespace → le holder `host_launch.sh` trap le SIGTERM → `tmux
     kill-server` explicite sur le sock par-pod (teardown self-contained ; cf. `bin/host_launch.sh`).
-  Port.close ensuite (libère le port BEAM). Public pour test direct du fix.
+  Port.close ensuite (libère le port BEAM). Public pour test direct.
   """
   @spec terminate_pod_port(port()) :: :ok
   def terminate_pod_port(port) do
@@ -1457,8 +1457,8 @@ defmodule Fleet.Spawner.Pod do
   Ferme le port BEAM en absorbant l'`ArgumentError` de RACE : le port peut se fermer
   entre notre check et le close (claude finit tout seul après submit_result → son process
   exit → le port disparaît). La garde `Port.info` seule est insuffisante (TOCTOU) — un port
-  déjà fermé EST l'état voulu, donc on rescue plutôt que crash (observé F-C4b-3 : do_release
-  → `:erlang.port_close` ArgumentError → GenServer du pod crashe sur une complétion RÉUSSIE).
+  déjà fermé EST l'état voulu, donc on rescue plutôt que crash (sinon `:erlang.port_close`
+  ArgumentError dans do_release → GenServer du pod crashe sur une complétion RÉUSSIE).
   Public pour test direct.
   """
   @spec safe_port_close(port()) :: :ok
@@ -1477,7 +1477,7 @@ defmodule Fleet.Spawner.Pod do
   Efface la TOMBSTONE d'un `pod_id` AVANT un (re)spawn délibéré (appelé par
   `Fleet.Spawner.spawn_pod/3`).
 
-  Sous l'id pod DÉTERMINISTE (BL-055), un re-dispatch retombe sur le MÊME `pod_id`
+  Sous l'id pod DÉTERMINISTE, un re-dispatch retombe sur le MÊME `pod_id`
   (`issue-N-role`). Si un `state.json` TERMINAL (`:succeeded`/`:released`/`:killed`)
   subsiste d'un cycle précédent — même d'une AUTRE issue #N sur un autre repo, l'id
   ne porte que le numéro —, `recover_or_init` le lit → `recovery_action` rend
@@ -1528,13 +1528,13 @@ defmodule Fleet.Spawner.Pod do
   end
 
   @doc """
-  Décision de recovery (DN-recovery B) d'un pod (re)spawné dont un `state.json`
-  snapshot existe. PURE, fonction de la **phase observée** (pas du scope : le
-  scope joue au niveau orchestrateur — faut-il re-spawner un pod absent — pas au
-  niveau action-sur-snapshot). Sous `:temporary` le supervisor ne ressuscite
-  jamais : c'est un (re)spawn délibéré qui appelle `init/1`, et la décision est
-  explicite (plus de reprise implicite `first_continue_for(:monitoring)` sur
-  backend mort — LIFE-002).
+  Décision de recovery d'un pod (re)spawné dont un `state.json` snapshot existe.
+  PURE, fonction de la **phase observée** (pas du scope : le scope joue au niveau
+  orchestrateur — faut-il re-spawner un pod absent — pas au niveau
+  action-sur-snapshot). Sous `:temporary` le supervisor ne ressuscite jamais :
+  c'est un (re)spawn délibéré qui appelle `init/1`, et la décision est explicite
+  (pas de reprise implicite `first_continue_for(:monitoring)` sur un backend
+  mort).
 
     * `:release`  — phase terminale (`:succeeded`/`:released`) → rien à relancer.
     * `:resume`   — en vol (`:launching`/`:monitoring`/`:extracting`/`:releasing`) →
@@ -1552,14 +1552,14 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # `:resume` (préserver le travail) seulement si (1) le GATE global est ON et (2) le pod
-  # porte un contexte reprenable. Sinon `:recreate` (reroll, sûr). F-C4b-1 — `--resume`
-  # jamais prouvé live (« pas poncé »), deux cas l'invalident :
+  # porte un contexte reprenable. Sinon `:recreate` (reroll, sûr). `--resume` est fragile,
+  # deux cas l'invalident :
   #   * gate OFF (`:recovery_resume_enabled` false) → `:recreate` PARTOUT. Escape-hatch :
   #     si `--resume` se révèle mauvais à l'usage (session morte → claude exit → boot raté
-  #     silencieux, observé C4b), on coupe et tout reroll proprement.
+  #     silencieux), on coupe et tout reroll proprement.
   #   * `one-shot` → `:recreate` TOUJOURS (indépendant du gate) : la clear-policy fait
-  #     `/clear` chaque cycle (IV.6) → pas de contexte à reprendre, ET le sessionId LOCAL
-  #     régénéré par `/clear` diverge du `session_id` snapshot → `--resume` reprendrait la
+  #     `/clear` chaque cycle → pas de contexte à reprendre, ET le sessionId LOCAL régénéré
+  #     par `/clear` diverge du `session_id` snapshot → `--resume` reprendrait la
   #     mauvaise/ancienne session. Le reroll est correct ET sûr.
   #   * `pipe`/`forever` (ou scope inconnu/nil) + gate ON → `:resume` : préserve le travail
   #     mid-mandat (engineer en cours, gatekeeper avec contexte accumulé). Reste exposé au
@@ -1572,12 +1572,12 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # BL-035 (dogfood F7, 2026-06-07) : défaut basculé à FALSE. F-C4b-1 n'est plus une crainte — c'est
-  # PROUVÉ live : recovery `:resume` relance claude `--resume <session-MORTE>` → claude exit → pod
-  # ZOMBIE (Elixir croit :monitoring, REPL mort, OAuth consommé). Un crash = la session claude n'existe
-  # plus serveur-side, `--resume` est voué à l'échec. `:recreate` (session neuve) relance un REPL VIVANT
-  # et la tâche (toujours en queue) re-drive le travail. Le gate reste un opt-in (`true`) si un jour
-  # `--resume` est prouvé ressusciter une session serveur-side (douteux).
+  # Défaut FALSE : recovery `:resume` relancerait claude `--resume <session-MORTE>` → claude exit →
+  # pod ZOMBIE (Elixir croit :monitoring, REPL mort, OAuth consommé). Après un crash, la session
+  # claude n'existe plus serveur-side, donc `--resume` est voué à l'échec. `:recreate` (session
+  # neuve) relance un REPL VIVANT et la tâche (toujours en queue) re-drive le travail. Le gate reste
+  # un opt-in (`true`) si un jour `--resume` se révèle capable de ressusciter une session
+  # serveur-side (douteux).
   defp resume_enabled?, do: Application.get_env(:fleet_spawner, :recovery_resume_enabled, false)
 
   # :resume → session reprise + RE-LAUNCH (le backend est mort sous `:temporary`).
@@ -1597,16 +1597,16 @@ defmodule Fleet.Spawner.Pod do
     base |> Map.put(:phase, phase) |> Map.put(:recovery, :release)
   end
 
-  # DN-recovery B : un pod (re)spawné avec un snapshot suit la décision explicite
-  # de `recover_or_init`/`recovery_action`. `:resume` RE-MATÉRIALISE (→ :project :
+  # Un pod (re)spawné avec un snapshot suit la décision explicite de
+  # `recover_or_init`/`recovery_action`. `:resume` RE-MATÉRIALISE (→ :project :
   # le SP + les fichiers .lcars NE sont PAS dans le snapshot minimal, ils se
   # re-composent depuis le cap-profile, déterministe) PUIS launch(resume) —
-  # `do_project` pose `state.sp` ; aller directement à :launch laissait sp=nil →
-  # `build_spawn` `:invalid_args` (bug exposé live par le gatekeeper-permanent qui
-  # recovere d'un `phase:monitoring`, 2026-06-06). JAMAIS reprendre en `:monitor`
-  # sur backend mort (LIFE-002). NB : `do_project` re-clone le workspace si
-  # `spec.project.repo_path` — idempotence du clone = STATE-003 (séparé) ; pour les
-  # pods sans projet (gatekeeper, judges) c'est un no-op.
+  # `do_project` pose `state.sp` ; aller directement à :launch laisserait sp=nil →
+  # `build_spawn` `:invalid_args` (cas d'un gatekeeper-permanent qui recovere
+  # d'un `phase:monitoring`). JAMAIS reprendre en `:monitor` sur un backend mort.
+  # NB : `do_project` re-clone le workspace si `spec.project.repo_path` —
+  # l'idempotence du clone est gérée ailleurs ; pour les pods sans projet
+  # (gatekeeper, judges) c'est un no-op.
   defp first_continue_for(%{recovery: :resume}), do: :project
   defp first_continue_for(%{recovery: :recreate}), do: :allocate
   defp first_continue_for(%{recovery: :release}), do: :release
@@ -1637,10 +1637,10 @@ defmodule Fleet.Spawner.Pod do
 
   defp phase_from_string(_), do: nil
 
-  # BL-055 : session_id DÉTERMINISTE hexspeak (`Fleet.Spawner.SessionId`) si le rôle est catalogué.
+  # session_id DÉTERMINISTE hexspeak (`Fleet.Spawner.SessionId`) si le rôle est catalogué.
   # - fleet-level (arch, gatekeeper) → repo `0000` (une instance/rôle, pas de collision).
   # - project-bound (eng, juges) → SEULEMENT si `opts[:repo_id]` fourni ; sinon random (pas de
-  #   collision inter-projet/rework tant que le pipeline ne passe pas le repo — M5).
+  #   collision inter-projet/rework tant que le pipeline ne passe pas le repo).
   # - starfleet / rôle inconnu → `UUID.uuid4()`. `opts[:session_id]` (seed arch, recall) PRIME au call-site.
   defp deterministic_session_id(%Fleet.CapProfile{metadata: meta}, opts) do
     role = Map.get(meta || %{}, "name", "")
@@ -1660,7 +1660,7 @@ defmodule Fleet.Spawner.Pod do
 
   defp deterministic_session_id(_, _), do: UUID.uuid4()
 
-  # Mode permission du pod (#kill-yolo) : `spec.invocation.permission_mode` du cap-profile, défaut
+  # Mode permission du pod : `spec.invocation.permission_mode` du cap-profile, défaut
   # `"default"` (→ `--permission-mode default`, listes allow/deny ENFORCED). Non-vide → claude_launch
   # passe `--permission-mode <mode>` ; pour ré-ouvrir le bypass, un cap-profile pose `"bypassPermissions"`.
   defp permission_mode(%Fleet.CapProfile{spec: spec}),
@@ -1677,16 +1677,16 @@ defmodule Fleet.Spawner.Pod do
       conditions: MapSet.new(),
       pod_id: args.pod_id,
       ticket_id: args.ticket_id,
-      # Session UUID PRÉ-ALLOUÉ au spawn (DN spawner-orchestrator §A) : `--session-id <uuid>` à la
-      # 1ʳᵉ création ; `recover_or_init` le RESTAURE depuis state.json → `--resume <uuid>`. Remplace
+      # Session UUID PRÉ-ALLOUÉ au spawn : `--session-id <uuid>` à la 1ʳᵉ création ;
+      # `recover_or_init` le RESTAURE depuis state.json → `--resume <uuid>`. Remplace
       # le modèle -p (capture `init_msg["session_id"]`, mort). `resume`=false ; recovery le passe à true.
       session_id:
         Keyword.get(args.opts, :session_id) ||
           deterministic_session_id(args.cap_profile, args.opts),
-      # DN spawner-orchestrator §C-3 (BL-021 chantier 4) : timestamp ISO8601 figé
-      # à la création du GenServer, persisté tel quel dans state.json.
+      # Timestamp ISO8601 figé à la création du GenServer, persisté tel quel dans
+      # state.json.
       started_at: DateTime.utc_now(),
-      # défaut false ; la recovery (apply_recovery) ET le recall délibéré (#pod-seed v4, opts[:resume])
+      # défaut false ; la recovery (apply_recovery) ET le recall délibéré (opts[:resume])
       # le passent à true → claude `--resume <session_id>`.
       resume: Keyword.get(args.opts, :resume, false),
       # SP composé (do_project) stocké en state pour l'argv4 inline de claude_launch
@@ -1704,11 +1704,11 @@ defmodule Fleet.Spawner.Pod do
       submitted_result: nil,
       last_result: nil,
       tmux_session: nil,
-      # Z1 — ref du timer :result_deadline (timeout de RÉPONSE). nil = non armé.
+      # Ref du timer :result_deadline (timeout de RÉPONSE). nil = non armé.
       # Armé seulement pour les scopes bornés (pas `forever`), annulé à l'arrivée du
       # résultat / avant ré-arme. Cf. arm_result_deadline/1.
       result_deadline_ref: nil,
-      # #5.2 F2 — ref du timer {:kick_attempt}. 1 SEUL vivant (cancel+rearm, cf. arm_kick/1) : un wake_pod
+      # Ref du timer {:kick_attempt}. 1 SEUL vivant (cancel+rearm, cf. arm_kick/1) : un wake_pod
       # pendant le bootstrap ne crée pas une 2e boucle. nil = boucle non armée / stoppée.
       kick_ref: nil
     }
@@ -1739,33 +1739,33 @@ defmodule Fleet.Spawner.Pod do
     Path.join([root, scope, pod_id, "state.json"])
   end
 
-  # Doctrine 2026-06-11 (fleet sous l'humain) : le state FS des pods suit le HOME de l'humain
-  # (= l'user runtime), comme `~/pods` (pod_dir) et `~/.lcars/workspaces`, PAS `/var/lib/lcars`.
+  # Fleet sous l'humain : le state FS des pods suit le HOME de l'humain (= l'user runtime),
+  # comme `~/pods` (pod_dir) et `~/.lcars/workspaces`, PAS `/var/lib/lcars`.
   # Override via env `LCARS_STATE_FS_ROOT` (→ `config :fleet_spawner, :state_fs_root`). Fallback
-  # `/var/lib/lcars` si home irrésoluble (jamais en pratique). Cf. PLAN-multiuser-spawn §A.3.
+  # `/var/lib/lcars` si home irrésoluble (jamais en pratique).
   defp default_state_fs_root,
     do: Path.join(System.user_home() || "/var/lib/lcars", ".lcars/state")
 
-  # F122 : accesseur UNIQUE du rôle (= metadata.name). Avant, 3 sites inlinaient
+  # Accesseur UNIQUE du rôle (= metadata.name). Si plusieurs sites inlinaient
   # `Map.get(metadata, "name", "engineer")` (launch/payload/brief) tandis que la persistance
-  # state.json passait par ici (défaut "unknown") → un profil SANS metadata.name se lançait
-  # "engineer" mais persistait "unknown" (mésattribution silencieuse tout le hop). Tous unifiés ici.
+  # state.json passait par ici (défaut "unknown"), un profil SANS metadata.name se lancerait
+  # "engineer" mais persisterait "unknown" (mésattribution silencieuse tout le hop). D'où l'unification ici.
   defp cap_profile_name(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
     Map.get(meta, "name") || Map.get(meta, :name) || "unknown"
   end
 
   defp cap_profile_name(_), do: "unknown"
 
-  # LAUNCH-Q : `metadata.containment` ∈ {"bwrap","none"} (cap_profile G24-1, défaut conservateur "bwrap").
+  # `metadata.containment` ∈ {"bwrap","none"} (défaut conservateur "bwrap").
   # "none" = host_native (architect, starfleet) → host_launch.sh (PAS de sandbox) ; sinon la
-  # chaîne bwrap. Lu ICI, sur le chemin de lancement — avant ce fix `do_launch` bwrappait tout aveuglément.
+  # chaîne bwrap. Lu ICI, sur le chemin de lancement (sinon `do_launch` bwrapperait tout aveuglément).
   defp cap_profile_containment(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
     Map.get(meta, "containment") || Map.get(meta, :containment) || "bwrap"
   end
 
   defp cap_profile_containment(_), do: "bwrap"
 
-  # Mounts CATALOGUE (cap-profile-driven, réaligné #5.2) : le monde projeté dans le sandbox bwrap est
+  # Mounts CATALOGUE (cap-profile-driven) : le monde projeté dans le sandbox bwrap est
   # DÉCLARÉ par le cap-profile (`metadata.mounts`), pas hardcodé dans le launcher. bwrap_launch les bind
   # (RO/RW) au MÊME path, après la tmpfs /home. Vide ⇒ aucun mount extra (worker bare). Inerte pour
   # containment: none (host = accès natif).
@@ -1800,24 +1800,24 @@ defmodule Fleet.Spawner.Pod do
 
   defp mounts_env(_), do: ""
 
-  # LAUNCH-Q : HOME du pod selon containment. host (none) = home réel de l'humain (claude → `~/.claude`
+  # HOME du pod selon containment. host (none) = home réel de l'humain (claude → `~/.claude`
   # natif, refresh OAuth) ; bwrap = pod_dir (ignoré sous le sandbox de toute façon). `claude_dir_for/1`
   # honore l'override config `:claude_dir` (tests) et fail-loud si le passwd de l'humain est introuvable.
   # NB mono-humain : si `:claude_dir` est overridé (path GLOBAL, non lié à `human`), `Path.dirname` rend
-  # son parent pour TOUT pod host. OK en prod mono-humain (1 daemon = 1 humain, unit `User=<humain>`) ;
-  # TODO multi-humain : dériver le home par-humain via `passwd_home/1` quand l'override n'est pas posé.
+  # son parent pour TOUT pod host. OK en prod mono-humain (1 runtime = 1 humain) ; en multi-humain il
+  # faudrait dériver le home par-humain via `passwd_home/1` quand l'override n'est pas posé.
   defp launch_home("none", human, _pod_dir), do: Path.dirname(claude_dir_for(human))
   defp launch_home(_containment, _human, pod_dir), do: pod_dir
 
   defp scope_for("pipe"), do: "pipes"
   defp scope_for("run"), do: "runs"
-  # DN spawner-orchestrator §C-3 + cap-profiles-schema §B (F-Q5) : `forever` partage
-  # le scope FS `pods/` avec `one_shot` (les deux = pods avec lifetime propre).
+  # `forever` partage le scope FS `pods/` avec `one_shot` (les deux = pods avec
+  # lifetime propre).
   defp scope_for("forever"), do: "pods"
   defp scope_for(_), do: "pods"
 
   defp write_state_fs(state) do
-    # DN spawner-orchestrator §C-3 + BL-021 chantier 4 : schéma complet
+    # Schéma complet du snapshot :
     # {v, session_id, cap_profile_name, started_at, phase, conditions, ticket_id}.
     payload = %{
       "v" => 1,
@@ -1831,9 +1831,9 @@ defmodule Fleet.Spawner.Pod do
 
     tmp = state.state_fs_path <> ".tmp"
 
-    # Vulcan #5 : write_state_fs est appelé depuis transition_failed et autres
-    # sites — un crash ici provoquerait une régression du fix. Non-bang (le
-    # {:stop, ...} prévu se passe quand même).
+    # write_state_fs est appelé depuis transition_failed et d'autres sites — un
+    # crash ici ferait régresser le cleanup. Non-bang (le {:stop, ...} prévu se
+    # passe quand même).
     result =
       with :ok <- File.mkdir_p(Path.dirname(state.state_fs_path)),
            :ok <- File.write(tmp, Jason.encode!(payload, pretty: true)),
@@ -1846,9 +1846,9 @@ defmodule Fleet.Spawner.Pod do
         :ok
 
       {:error, reason} ->
-        # F-038 : échec d'écriture state.json = perte du point de recovery durable. C'est une
-        # ERREUR (pas un warning) — `:ok` reste rendu (non-fatal, cf. Vulcan #5 : ne pas crasher
-        # ici) mais le breach est désormais LOUD (error-level → monitoring / checklist BL-053).
+        # Échec d'écriture state.json = perte du point de recovery durable. C'est une
+        # ERREUR (pas un warning) — `:ok` reste rendu (non-fatal : ne pas crasher ici)
+        # mais le breach est LOUD (error-level → monitoring).
         Logger.error(
           "pod #{state.pod_id} write_state_fs ÉCHEC — point de recovery durable perdu " <>
             "(non-fatal) : #{inspect(reason)}"
@@ -1865,8 +1865,8 @@ defmodule Fleet.Spawner.Pod do
   defp transition_failed(state, reason) do
     Logger.warning("pod #{state.pod_id} failed: #{inspect(reason)}")
 
-    # STATE-004 (couplage DN-recovery B) : le pod meurt sans relaunch → libérer
-    # sa task active sinon elle reste orpheline (assigned/pending sans pod).
+    # Le pod meurt sans relaunch → libérer sa task active sinon elle reste
+    # orpheline (assigned/pending sans pod).
     clear_pod_task(state.pod_id)
 
     new_state =
@@ -1876,10 +1876,10 @@ defmodule Fleet.Spawner.Pod do
 
     write_state_fs(new_state)
 
-    # #5.2 : signale l'échec sur le Bus → un consumer fleet_pilot l'enregistre au registre d'incidents
+    # Signale l'échec sur le Bus → un consumer fleet_pilot l'enregistre au registre d'incidents
     # (parité avec wake-`{:error}` : un échec de pod récurrent devient un pattern → root-cause). `reason` =
     # terme brut (le consumer le catégorise). Ring-propre : Ring 1 PUBLIE, Ring 2 consomme (pas d'appel
-    # montant). Jumeau du broadcast `pod.failed` du handler exit_status (l.248).
+    # montant). Jumeau du broadcast `pod.failed` du handler exit_status.
     best_effort_broadcast("pod.failed", %{
       "pod_id" => state.pod_id,
       "ticket_id" => state.ticket_id,
@@ -1893,14 +1893,14 @@ defmodule Fleet.Spawner.Pod do
     Map.update!(state, :conditions, &MapSet.put(&1, condition))
   end
 
-  # Z1 #15 : retire une condition. `:output_extracted` DOIT être reset au re-monitoring
+  # Retire une condition. `:output_extracted` DOIT être reset au re-monitoring
   # d'un pod long-lived (do_extract _other) — sinon un crash REPL au cycle 2 reste masqué
-  # en {:stop, :normal} (la garde l.230 reste vraie) → pod.failed/clear jamais émis.
+  # en {:stop, :normal} (la garde du handler exit_status reste vraie) → pod.failed/clear jamais émis.
   defp remove_condition(state, condition) do
     Map.update!(state, :conditions, &MapSet.delete(&1, condition))
   end
 
-  # STATE-004 : libère la task active d'un pod qui meurt sans l'avoir complétée.
+  # Libère la task active d'un pod qui meurt sans l'avoir complétée.
   # Appel direct best-effort (non-fatal) : le Pod est sinon découplé de TaskQueue
   # (complétion event-driven via le bus) — on ne fait pas crasher la mort d'un
   # pod si TaskQueue est indisponible (ex. contexte de test sans broker).
@@ -1917,14 +1917,14 @@ defmodule Fleet.Spawner.Pod do
       :ok
   end
 
-  # Z1 — gestion du timer :result_deadline (timeout de RÉPONSE).
+  # Gestion du timer :result_deadline (timeout de RÉPONSE).
   #
-  # arm : annule TOUJOURS le timer précédent (pas d'accumulation #16, pas de stale-kill
-  # #3) puis arme un nouveau — SAUF pour un pod `forever` (permanent : gatekeeper/
+  # arm : annule TOUJOURS le timer précédent (pas d'accumulation, pas de stale-kill)
+  # puis arme un nouveau — SAUF pour un pod `forever` (permanent : gatekeeper/
   # architect/monk) qui ne porte PAS de timeout de réponse (idle = normal, slow-task =
   # légitime ; gouverné par kill_pod externe). Stocke la ref dans l'état.
-  # #5.2 — mécanique « timer géré » FACTORISÉE (la LOI : 2 occurrences identiques [deadline F112 + kick F2]
-  # = 1 moteur paramétré). Un ref de timer vit sous `key` dans le state ; (re)armer = cancel l'ancien +
+  # Mécanique « timer géré » FACTORISÉE (deadline + kick = même moteur paramétré).
+  # Un ref de timer vit sous `key` dans le state ; (re)armer = cancel l'ancien +
   # send_after + stocker ; annuler = cancel + nil. 1 seul timer vivant par clé. Les appelants gardent leur
   # POLITIQUE (forever-skip, quel message, quel délai) — cf. arm_result_deadline / schedule_kick.
   defp arm_managed_timer(state, key, msg, delay) do
@@ -1941,7 +1941,7 @@ defmodule Fleet.Spawner.Pod do
     Map.put(state, key, nil)
   end
 
-  # Deadline de RÉPONSE (F112). Politique : pas d'armement pour un pod `forever` (un permanent n'a pas de
+  # Deadline de RÉPONSE. Politique : pas d'armement pour un pod `forever` (un permanent n'a pas de
   # fenêtre de réponse bornée) → on garantit juste l'absence de timer.
   defp arm_result_deadline(state) do
     if lifetime_scope(state.cap_profile) == "forever" do
@@ -1950,11 +1950,11 @@ defmodule Fleet.Spawner.Pod do
       |> cancel_managed_timer(:result_deadline_ref)
       |> cancel_managed_timer(:liveness_tick_ref)
     else
-      # F-RESULT-DEADLINE-LOOP (2026-06-22) : le deadline N'EST PAS un budget « temps pour finir » (un vrai
-      # livrable a une durée inconnaissable a priori) — c'est un watchdog de SILENCE. Le `:liveness_tick`
-      # ré-arme ce deadline tant que le pod BOUGE (taille jsonl ↑ OU jiffies CPU /proc ↑) → un agent qui
-      # bosse ne timeout JAMAIS ; le deadline ne tombe que sur silence total = stuck/mort. Rend enfin VRAIE
-      # la promesse du commentaire kick (« le deadline se ré-arme sur activité »).
+      # Le deadline N'EST PAS un budget « temps pour finir » (un vrai livrable a une durée inconnaissable
+      # a priori) — c'est un watchdog de SILENCE. Le `:liveness_tick` ré-arme ce deadline tant que le pod
+      # BOUGE (taille jsonl ↑ OU jiffies CPU /proc ↑) → un agent qui bosse ne timeout JAMAIS ; le deadline
+      # ne tombe que sur silence total = stuck/mort. C'est ce qui rend VRAIE la promesse du commentaire
+      # kick (« le deadline se ré-arme sur activité »).
       state
       |> arm_managed_timer(:result_deadline_ref, :result_deadline, monitor_timeout_ms(state))
       |> schedule_liveness_tick()
@@ -2025,7 +2025,7 @@ defmodule Fleet.Spawner.Pod do
   # parenthèses, peut contenir espaces/`)`) : on découpe après le DERNIER `)` (champ 3 = index 0 du reste →
   # utime = index 11, stime = index 12). `nil` si pas de port / process parti / proc illisible. NB : mesure
   # le process PARENT (un tool enfant CPU-lourd n'y figure pas — couvert par le OU-jsonl + la fenêtre de
-  # silence ; tail case documenté backlog F-RESULT-DEADLINE-LOOP).
+  # silence).
   defp proc_cpu_jiffies(state) do
     with port when is_port(port) <- Map.get(state, :port),
          {:os_pid, pid} <- Port.info(port, :os_pid),
@@ -2051,12 +2051,12 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # R0.8-brick4 : timeout de RÉPONSE (pas budget de durée de vie) au tool MCP
-  # submit_result. Si pas de réponse dans le délai → :result_deadline →
-  # transition_failed → le pod MEURT (tous `:temporary`, DN-recovery B) : PAS de
-  # relaunch OTP. Conséquence (couplage) : la task active est à libérer
-  # (`TaskQueue.clear_for_pod`, STATE-004) sinon elle reste orpheline, et le
-  # re-dispatch est délibéré (recovery boot-orchestrator).
+  # Timeout de RÉPONSE (pas budget de durée de vie) au tool MCP submit_result.
+  # Si pas de réponse dans le délai → :result_deadline → transition_failed → le
+  # pod MEURT (tous `:temporary`) : PAS de relaunch OTP. Conséquence (couplage) :
+  # la task active est à libérer (`TaskQueue.clear_for_pod`) sinon elle reste
+  # orpheline (assigned/pending sans pod), et le re-dispatch est délibéré
+  # (recovery boot-orchestrator).
   #
   # Override par cap-profile optionnel : `spec.timeouts.response_sec`. Sinon
   # default codé par scope (one-shot=300s par défaut ; pour les pods
@@ -2073,19 +2073,19 @@ defmodule Fleet.Spawner.Pod do
           default_response_timeout_sec(state.cap_profile)
       end
 
-    # F126 : `Process.send_after` exige un entier non-négatif. `is_number(override)` accepte les
+    # `Process.send_after` exige un entier non-négatif. `is_number(override)` accepte les
     # FLOATS (un cap-profile `timeouts.response_sec: 1.5` passe la validation) → `sec * 1000` = float
-    # → ArgumentError dans arm_result_deadline qui CRASHE le Pod sans transition_failed. `round/1`
+    # → ArgumentError dans arm_result_deadline qui CRASHERAIT le Pod sans transition_failed. `round/1`
     # coerce → entier (ms), quel que soit l'override.
     round(sec * 1000)
   end
 
   defp default_response_timeout_sec(%Fleet.CapProfile{spec: spec}) do
-    # Z1 (2026-06-09) — band-aid `forever -> 60_000` (≈16.6h) REVERTÉ. Le vrai fix est
-    # appliqué : arm_result_deadline n'arme PAS pour `forever` (un permanent n'a pas de
-    # timeout de réponse), et le fire ne tue que si une task est réellement active. La
-    # valeur `forever` ci-dessous est donc inerte (forever n'arme jamais) ; conservée
-    # par cohérence si un override `spec.timeouts.response_sec` la réactivait un jour.
+    # Pas de band-aid `forever -> 60_000` : arm_result_deadline n'arme PAS pour `forever`
+    # (un permanent n'a pas de timeout de réponse), et le fire ne tue que si une task est
+    # réellement active. La valeur `forever` ci-dessous est donc inerte (forever n'arme
+    # jamais) ; conservée par cohérence si un override `spec.timeouts.response_sec` la
+    # réactivait un jour.
     case get_in(spec, ["invocation", "lifetime_scope"]) do
       "forever" -> 60
       _other -> 300
@@ -2103,13 +2103,13 @@ defmodule Fleet.Spawner.Pod do
   end
 
   @doc false
-  # DN ring1/pod-bootstrap-superpowers : LCARS_SKILLS_PLUGINS = noms
-  # plugins uniques extraits des skills QUALIFIÉS `plugin:skill` du
-  # cap-profile.spec.knowledge.skills. Consommé par bin/bwrap_launch.sh
-  # (mount-bind RO). Anti-M1 : un skill non-qualifié (sans `:`) n'est
-  # PAS un plugin → filtré. Vide → pas d'env var (rétro-compatible).
-  # Public @doc false : pure, testable directement (pas d'intégration
-  # mock-backend lourde pour de la logique triviale).
+  # LCARS_SKILLS_PLUGINS = noms plugins uniques extraits des skills
+  # QUALIFIÉS `plugin:skill` du cap-profile.spec.knowledge.skills.
+  # Consommé par bin/bwrap_launch.sh (mount-bind RO). Un skill
+  # non-qualifié (sans `:`) n'est PAS un plugin → filtré. Vide → pas
+  # d'env var (rétro-compatible). Public @doc false : pure, testable
+  # directement (pas d'intégration mock-backend lourde pour de la
+  # logique triviale).
   def skills_plugins_env(%Fleet.CapProfile{spec: spec}) do
     plugins =
       (spec || %{})
@@ -2139,7 +2139,7 @@ defmodule Fleet.Spawner.Pod do
   # "appelle ce tool", etc.).
   # Convertit ticket_id (peut contenir `/`, `#`, etc. — ex.
   # "fleet/lcars#600" depuis Gitea) en filename safe (sans `/` qui
-  # créerait des sous-dirs). Convention POC : remplace `/` par `_` et
+  # créerait des sous-dirs). Convention : remplace `/` par `_` et
   # garde `#` (lisible humain).
   defp ticket_id_to_filename(ticket_id) when is_binary(ticket_id) do
     String.replace(ticket_id, "/", "_")
@@ -2147,9 +2147,9 @@ defmodule Fleet.Spawner.Pod do
 
   defp default_brief(state) do
     mandate = Keyword.get(state.opts || [], :mandate)
-    # F128 : interpoler le RÔLE résolu, ne pas hardcoder "engineer". Un gatekeeper (juge) sans
-    # mandat explicite ne doit PAS être amorcé "worker engineer" (priming I-CBC PASSE-9). Cadre
-    # neutre "pod LCARS (rôle X)" — le mandat (GateBrief pour le juge) porte la persona réelle.
+    # Interpoler le RÔLE résolu, ne pas hardcoder "engineer". Un gatekeeper (juge) sans
+    # mandat explicite ne doit PAS être amorcé "worker engineer" (un mauvais priming de persona).
+    # Cadre neutre "pod LCARS (rôle X)" — le mandat (GateBrief pour le juge) porte la persona réelle.
     role = cap_profile_name(state.cap_profile)
 
     body =
@@ -2173,7 +2173,7 @@ defmodule Fleet.Spawner.Pod do
     """
   end
 
-  # F-arch-MCP — enqueue le mandat dans la TaskQueue (le canal CANONIQUE `get_task`), idempotent :
+  # Enqueue le mandat dans la TaskQueue (le canal CANONIQUE `get_task`), idempotent :
   #   - pas de mandat (pod permanent/interactif booté à froid) → rien à puller → bootstrap (skip) ;
   #   - mandat DÉJÀ en file (`pod_status != {:ok, nil}` : dispatch stage, StageDispatcher a enqueué AVANT
   #     le spawn) → pas de double-enqueue (skip) ;
@@ -2217,7 +2217,7 @@ defmodule Fleet.Spawner.Pod do
     Application.get_env(:fleet_spawner, :bwrap_launch_path, "/usr/local/bin/bwrap_launch.sh")
   end
 
-  # LAUNCH-Q : launcher N0 host (containment: none) — frère sans-sandbox de bwrap_launch, même argv-shape.
+  # Launcher N0 host (containment: none) — frère sans-sandbox de bwrap_launch, même argv-shape.
   defp host_launch_path do
     Application.get_env(:fleet_spawner, :host_launch_path, "/usr/local/bin/host_launch.sh")
   end
@@ -2226,13 +2226,13 @@ defmodule Fleet.Spawner.Pod do
     Application.get_env(:fleet_spawner, :claude_launch_path, "/usr/local/bin/claude_launch.sh")
   end
 
-  # R-CORE.comm — serveur MCP fleet (canal de comm UNIQUE pod↔fleet ; jamais de scraping).
-  # Config = chemin pod-accessible (hors /home,/tmp, comme bwrap/claude_launch). IRON LAW : un pod
+  # Serveur MCP fleet (canal de comm UNIQUE pod↔fleet ; jamais de scraping).
+  # Config = chemin pod-accessible (hors /home,/tmp, comme bwrap/claude_launch). Un pod
   # RÉEL parle MCP, point — il n'y a PAS de mode fichier alternatif. `nil` n'est légitime QUE pour
   # les tests à launch-stub (claude pas lancé) ; un backend réel (LauncherPortBackend) sans spec MCP est un
   # bug de config (le brief instruit submit_result, impossible sans serveur).
   #
-  # UN mécanisme paramétré (Iron Law) : la config fournit la spec serveur (`command`/`args`/`env`),
+  # UN seul mécanisme paramétré : la config fournit la spec serveur (`command`/`args`/`env`),
   # pod.ex y force `alwaysLoad`. La spec décide — PROD : pont stdio→central (env LCARS_FLEET_MCP_URL),
   # TESTS : fixture file-backed. Même mécanisme, spec différente.
   defp mcp_server_spec, do: Application.get_env(:fleet_spawner, :mcp_server_spec)
@@ -2244,48 +2244,48 @@ defmodule Fleet.Spawner.Pod do
   # tasks ciblées via wake_pod).
   #
   # `LCARS_ROLE` (= `metadata.name` du cap-profile = rôle métier) : bridge.py l'injecte en `_lcars_role`.
-  # MA-15 — ce champ du fil est désormais INDICATIF (surface de tools du pod, descriptif), PLUS la source de
-  # la décision de token de rôle : `PodTools.create_ticket` résout le rôle depuis le SPAWN (`pod_id → role`
-  # gravé côté serveur, `Fleet.Spawner.pod_info`), pas du wire (non authentifié → usurpation). Posé ICI
+  # Ce champ du fil est INDICATIF (surface de tools du pod, descriptif), PAS la source de la décision
+  # de token de rôle : `PodTools.create_ticket` résout le rôle depuis le SPAWN (`pod_id → role` gravé
+  # côté serveur, `Fleet.Spawner.pod_info`), pas du wire (non authentifié → usurpation). Posé ICI
   # (env du process pod) → couvre host_launch ET bwrap (qui le re-`--setenv` dans son sandbox).
   #
-  # BL-021 chantier 7 — purge ADR-G C5.1 : `LCARS_FLEET_MCP_CHANNEL_URL` retiré
-  # (push channel ChannelHTTP supprimé, drive via tools pull `get_task`).
+  # `LCARS_FLEET_MCP_CHANNEL_URL` n'est plus posé (push channel ChannelHTTP supprimé,
+  # le drive se fait via les tools pull `get_task`).
   defp mcp_channel_env(pod_id, role) when is_binary(pod_id) do
     base = %{"LCARS_POD_ID" => pod_id}
     if is_binary(role) and role != "", do: Map.put(base, "LCARS_ROLE", role), else: base
   end
 
-  # Kick AUTONOME « yop » readiness-gated (R3b / F-C4b-2). Déclenche le pull du mandat
+  # Kick AUTONOME « yop » readiness-gated. Déclenche le pull du mandat
   # par MCP get_task — le mandat n'est PAS injecté (il vit dans tickets/ + TaskQueue).
   # No-op si pas de tmux_session (StubBackend ; LauncherPortBackend en pose un, bwrap ou host).
   #
   # Pourquoi pas un délai FIXE : le claude REPL n'est pas prêt à un instant connu — il
   # boote (tmux server up, banner, init MCP servers via .mcp-fleet.json), durée variable.
-  # Un yop à délai fixe arrive trop tôt et est perdu (observé C4b live : « no server
-  # running on .../pod.sock » à T+5s). On planifie donc une BOUCLE bornée : à chaque tick,
-  # si le serveur tmux est joignable (`PodTmux.alive?`) on envoie yop ; on s'arrête dès que
-  # le mandat est pull (task ≠ pending) ou au cap. Non-bloquant (send_after + handle_info),
-  # le pod passe à :monitor entretemps. Intervalles configurables (test : valeurs ~ms).
+  # Un yop à délai fixe arrive trop tôt et est perdu (le sock du serveur tmux n'existe pas
+  # encore). On planifie donc une BOUCLE bornée : à chaque tick, si le serveur tmux est
+  # joignable (`PodTmux.alive?`) on envoie yop ; on s'arrête dès que le mandat est pull
+  # (task ≠ pending) ou au cap. Non-bloquant (send_after + handle_info), le pod passe à
+  # :monitor entretemps. Intervalles configurables (test : valeurs ~ms).
   defp kick_first_delay_ms, do: Application.get_env(:fleet_spawner, :kick_first_delay_ms, 2_000)
   defp kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
   defp kick_max_attempts, do: Application.get_env(:fleet_spawner, :kick_max_attempts, 12)
 
   # Bootstrap (pod sans mandat) : kicks BORNÉS + ESPACÉS jusqu'à ce que le REPL claude réponde (appel
-  # get_task = ack). F-KICK-COLDSTART (2026-06-22, vu live mon-moins-super-projet #2) : l'ancien défaut
-  # (4×8s ≈ 32s, calé sur un boot ~15s) était trop court pour le COLD-START réel de claude en bwrap
-  # (binaire ~238 MB, caches froids, contention multi-fleet) → tous les kicks tombaient avant REPL prêt →
-  # pod jamais onboardé. Élargi à 30×8s ≈ 4 min : couvre le cold-start, et le deadline résultat se RÉ-ARME
-  # sur activité (donc dès le mandat reçu, plus de timeout). Une fois acké, le réveil-par-flag prend le relais.
+  # get_task = ack). La fenêtre doit couvrir le COLD-START réel de claude en bwrap (binaire ~238 MB,
+  # caches froids, contention multi-fleet) : un défaut trop court (≈32s, calé sur un boot ~15s)
+  # verrait tous les kicks tomber avant REPL prêt → pod jamais onboardé. D'où 30×8s ≈ 4 min : couvre
+  # le cold-start, et le deadline résultat se RÉ-ARME sur activité (donc dès le mandat reçu, plus de
+  # timeout). Une fois acké, le réveil-par-flag prend le relais.
   defp kick_bootstrap_max, do: Application.get_env(:fleet_spawner, :kick_bootstrap_max, 30)
 
   defp kick_bootstrap_retry_ms,
     do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
 
-  # #5.2 F2 — boucle de kick (timer géré `:kick_ref`, 1 seul vivant). Politique : 1er tick après
+  # Boucle de kick (timer géré `:kick_ref`, 1 seul vivant). Politique : 1er tick après
   # kick_first_delay_ms (on laisse le flag porteur livrer d'abord) ; armé au bootstrap (inject_brief) ET à
   # chaque wake (cast :arm_kick) → un wake_pod pendant le bootstrap ne crée pas une 2e boucle. Mécanique
-  # FACTORISÉE dans arm_managed_timer/cancel_managed_timer (cf. deadline F112).
+  # FACTORISÉE dans arm_managed_timer/cancel_managed_timer (cf. la deadline de réponse).
   defp arm_kick(state), do: schedule_kick(state, 0, kick_first_delay_ms())
 
   defp schedule_kick(state, n, delay),
@@ -2294,13 +2294,13 @@ defmodule Fleet.Spawner.Pod do
   defp cancel_kick(state), do: cancel_managed_timer(state, :kick_ref)
 
   @doc false
-  # #5.2 F3 — ACK (décision PURE, testable) = l'agent a tendu la main. C'est LE contrôle de la boucle :
+  # ACK (décision PURE, testable) = l'agent a tendu la main. C'est LE contrôle de la boucle :
   # pas d'ACK → on (re)trigger ; ACK → stop ; cap sans ACK → escalade. Wake → `pulled?` (mandate_pulled? :
   # le pull PROUVE get_task) ; bootstrap (permanent sans mandat) → `polled` (last_poll = up + SP lu).
   def acked?(pulled?, bootstrap?, polled), do: pulled? or (bootstrap? and polled)
 
-  # L'agent a-t-il POLLÉ (appelé get_task) ? = ACK in-band RÉEL (#5.2) : l'agent a tendu la main via l'API
-  # officielle (last_poll, tracké par le TaskQueue en [1]), pas un proxy host-side comme l'ancien
+  # L'agent a-t-il POLLÉ (appelé get_task) ? = ACK in-band RÉEL : l'agent a tendu la main via l'API
+  # officielle (last_poll, tracké par le TaskQueue), pas un proxy host-side comme un
   # `pgrep watch.sh` (« le process existe » ≠ « l'agent agit »). Sert à stopper le kick bootstrap dès que
   # l'agent est up. Override test : `:polled_fun`.
   defp polled?(%{pod_id: pod_id} = state) when is_binary(pod_id) do
@@ -2311,7 +2311,7 @@ defmodule Fleet.Spawner.Pod do
   rescue
     _ -> false
   catch
-    # F1 : `last_poll` est un GenServer.call → TaskQueue down/restarting EXIT (ne raise pas), `rescue` ne
+    # `last_poll` est un GenServer.call → TaskQueue down/restarting EXIT (ne raise pas), `rescue` ne
     # l'attrape pas. MÊME garde que mandate_pulled?/no_pending_mandate? : un hoquet broker ne crashe PAS le pod.
     :exit, _ -> false
   end
@@ -2355,7 +2355,7 @@ defmodule Fleet.Spawner.Pod do
   defp inject_brief_to_tmux_pod(%{tmux_session: nil} = state), do: state
 
   defp inject_brief_to_tmux_pod(%{tmux_session: session} = state) when is_binary(session) do
-    # #5.2 — arme (cancel+rearm, 1 seul timer) la boucle de kick ack-driven. Le 1er send-keys sera `yop`
+    # Arme (cancel+rearm, 1 seul timer) la boucle de kick ack-driven. Le 1er send-keys sera `yop`
     # (bootstrap : pas encore pollé) ; le SP `agent-worker-base.md` porte le workflow get_task→submit_result.
     arm_kick(state)
   end
@@ -2367,7 +2367,7 @@ defmodule Fleet.Spawner.Pod do
   # (kill délibéré / deadline broker — le pod n'a rien pull, ne PAS arrêter le kick sur
   # un faux « pull » ; au pire on kicke jusqu'au cap, harmless, le result_deadline couvre).
   # Best-effort : exception/exit broker → false (on retentera). Sert à ARRÊTER la boucle.
-  # Z1 — le pod a-t-il une task ACTIVE (pending/assigned/in_progress) là, maintenant ?
+  # Le pod a-t-il une task ACTIVE (pending/assigned/in_progress) là, maintenant ?
   # Utilisé au FIRE de :result_deadline : oui = vrai timeout de réponse (kill) ; non =
   # le pod attendait juste sa prochaine task (idle), on laisse lapser. Même source que
   # mandate_pulled?/no_pending_mandate? (TaskQueue.pod_status), même garde rescue/catch
@@ -2411,18 +2411,18 @@ defmodule Fleet.Spawner.Pod do
 
   # Provisionne $POD_DIR/.mcp-fleet.json (serveur MCP UNIQUE du pod). claude_launch le détecte
   # (--mcp-config --strict-mcp-config). Force `alwaysLoad:true` (VISIBILITÉ : sinon tout tool MCP est
-  # déféré derrière ToolSearch — isDeferredTool isMcp→defer — absent du prompt turn-1 ; clé serveur
-  # 2.1.150 dé-défère + attend la connexion regular-required. PERMISSION = mcp__fleet__* dans le
-  # cap-profile allowedTools. cf corpus #0_ref_mcp-tool-deferral-oneshot.md). Le pod soumet via
-  # submit_result → le central broadcaste task_queue.task_completed (struct %Fleet.Event{}) (brick 2.1) → pod.ex extrait (event-driven).
-  # #596 — cablage Fleet.ProjectBootstrap.Phase.Clone pour les pods porteurs d'un projet
-  # (`repo_path`). Corr.3 : le projet EFFECTIF vient du MANDAT (effective_project : opts[:project]
-  # injecte par le dispatch ticket->repo) ou du cap_profile statique (pods permanents). Present :
+  # déféré derrière ToolSearch — absent du prompt turn-1 ; cette clé dé-défère + attend la connexion
+  # regular-required. La PERMISSION reste mcp__fleet__* dans le cap-profile allowedTools). Le pod
+  # soumet via submit_result → le central broadcaste task_queue.task_completed (%Fleet.Event{}) →
+  # pod.ex extrait (event-driven).
+  # Câblage de Fleet.ProjectBootstrap.Phase.Clone pour les pods porteurs d'un projet
+  # (`repo_path`) : le projet EFFECTIF vient du MANDAT (effective_project : opts[:project]
+  # injecté par le dispatch ticket->repo) ou du cap_profile statique (pods permanents). Présent :
   # clone le repo dans `<pod_dir>/workspace/` + checkout feature branch ; le cwd du REPL pointe sur
-  # ce workspace (maybe_put_pod_cwd -> LCARS_POD_CWD), l'agent code DANS sa branche (plus de no-op,
-  # plus de "cwd reste pod_dir" : ces deux affirmations etaient doc-stale pre-Corr.3).
+  # ce workspace (maybe_put_pod_cwd -> LCARS_POD_CWD) → l'agent code DANS sa branche (pas dans le
+  # pod_dir nu, et le clone est idempotent au respawn).
   #
-  # Découplage architectural : Pipeline.WorkspaceProvisioner (Face 2) câble
+  # Découplage architectural : Pipeline.WorkspaceProvisioner câble
   # ProjectBootstrap pour les stages git (workspace per-stage). pod.ex câble
   # ProjectBootstrap pour les pods one-shot avec projet (workspace per-pod).
   # 2 sites callers d'un même mécanisme, paramétré par cap-profile.
@@ -2463,11 +2463,11 @@ defmodule Fleet.Spawner.Pod do
           # avec cwd=workspace il doit être DANS le cwd (sinon l'agent code sans sa codebase-doc en cwd).
           _ = File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md"))
 
-          # Identité git du rôle : O5 — plus de `git config` mutable dans le workspace (F-01
-          # falsifiable, le pod l'écrasait). L'identité est injectée en env IMMUABLE-par-défaut au
-          # lancement (bwrap_launch.sh : GIT_AUTHOR_*/GIT_COMMITTER_* = LCARS-<role> + GIT_CONFIG_GLOBAL
-          # /dev/null). La garantie F-01 vit côté monde : la gate DeliverableGate rejette au push tout
-          # commit hors identité autorisée. Voir JOURNAL-deliverable-model-2026-06-07 (Brick 5).
+          # Identité git du rôle : pas de `git config` mutable dans le workspace (falsifiable — le pod
+          # pourrait l'écraser). L'identité est injectée en env IMMUABLE-par-défaut au lancement
+          # (bwrap_launch.sh : GIT_AUTHOR_*/GIT_COMMITTER_* = LCARS-<role> + GIT_CONFIG_GLOBAL
+          # /dev/null). La garantie vit côté monde : la gate DeliverableGate rejette au push tout
+          # commit hors identité autorisée.
 
           Logger.info(
             "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})" <>
@@ -2487,16 +2487,16 @@ defmodule Fleet.Spawner.Pod do
       {nil, Fleet.Spawner.LaunchBackend.StubBackend} ->
         :ok
 
-      # R14 (verrou I-CBC) : un backend RÉEL sans spec MCP est un bug de config —
-      # le pod réel parle MCP (le brief instruit submit_result, impossible sans
-      # serveur). Refus net (propagé au with do_project → transition_failed)
-      # plutôt qu'un pod lancé puis bloqué en timeout silencieux.
+      # Un backend RÉEL sans spec MCP est un bug de config — le pod réel parle MCP
+      # (le brief instruit submit_result, impossible sans serveur). Refus net
+      # (propagé au with do_project → transition_failed) qui rend l'état fautif
+      # irreprésentable, plutôt qu'un pod lancé puis bloqué en timeout silencieux.
       {nil, backend} ->
         {:error, {:mcp_server_spec_required, backend}}
 
       {spec, _backend} when is_map(spec) ->
-        # Vulcan #5 : non-bang + retour {:ok|:error} propagé au with chain
-        # do_project (où l'erreur déclenche transition_failed proprement).
+        # Non-bang + retour {:ok|:error} propagé au with chain do_project
+        # (où l'erreur déclenche transition_failed proprement).
         with {:ok, fleet_entry} <- build_fleet_mcp_entry(spec, state) do
           config = %{"mcpServers" => %{"fleet" => fleet_entry}}
 
@@ -2511,34 +2511,34 @@ defmodule Fleet.Spawner.Pod do
   # Construit l'entrée serveur MCP `fleet` du `.mcp-fleet.json`, en provisionnant
   # le bridge stdio DANS le pod_dir.
   #
-  # PASSE-9 root-cause (2026-06-08) : le bwrap est un SANCTUAIRE — il ne monte que
+  # Le bwrap est un SANCTUAIRE — il ne monte que
   # `/usr`, `/etc`, `/sys`, `$POD_DIR`, `$GIT_MIRROR`, le vendor et le sock-dir.
-  # `/var/lib/lcars` n'y est PAS monté. Or l'ancienne spec lançait le bridge via
-  # son chemin HÔTE (`/var/lib/lcars/bin/...py`) avec un log sous `/var/lib/lcars/`
-  # → DANS le sandbox ce chemin n'existe pas → `bash -c` échoue → le serveur MCP
+  # `/var/lib/lcars` n'y est PAS monté. Lancer le bridge via son chemin HÔTE
+  # (`/var/lib/lcars/bin/...py`) avec un log sous `/var/lib/lcars/` échouerait :
+  # DANS le sandbox ce chemin n'existe pas → `bash -c` échoue → le serveur MCP
   # `fleet` ne démarre jamais → le tool `mcp__fleet__get_task` n'est jamais chargé
-  # → l'agent improvise du curl et timeout. Le bridge marchait en test direct car
-  # il tournait sur l'HÔTE, pas dans le sandbox.
+  # → l'agent improvise du curl et timeout. (Un tel bridge marche en test direct
+  # car il tourne sur l'HÔTE, pas dans le sandbox.)
   #
-  # Fix (couche N1, le provisioning) : `bwrap_launch.sh` reste MCP-agnostique (N0).
+  # Côté N1 (le provisioning) : `bwrap_launch.sh` reste MCP-agnostique (N0).
   # On copie le bridge sous `pod_dir/.lcars/` et on résout les placeholders
   # `{{BRIDGE}}`/`{{BRIDGE_LOG}}` de la spec.
   #
-  # ⚠ RÉGRESSION monde-propre (Stage B) corrigée ici : l'ancienne version assumait que le pod_dir était
-  # bind AU MÊME chemin absolu hôte+sandbox (`--bind "$POD_DIR" "$POD_DIR"`) → elle posait le path HÔTE
-  # (`state.pod_dir = /home/<human>/pods/pod_<id>`) dans le `.mcp-fleet.json`. Depuis le chantier
-  # monde-propre, bwrap RELOCALISE le pod_dir derrière `/home/.pod` (`sandbox_home`) → le path hôte
-  # N'EXISTE PLUS dans le namespace → `bash -c "exec python3 <hôte>.py 2>><hôte>.log"` avorte au redirect
-  # (dossier parent absent) AVANT d'exec python → serveur MCP `fleet` jamais up → 0 tool `mcp__fleet__*`
-  # (prouvé live 2026-06-22 : arch + gatekeeper + consultants, le pont n'a jamais démarré). DEUX chemins
-  # distincts désormais : le bridge est COPIÉ sur le path HÔTE (où le spawner écrit), mais le `.mcp-fleet.json`
-  # référence le path IN-NAMESPACE (`sandbox_home/.lcars/…`, ce que claude exécute dans le sandbox). Host pods
-  # (containment none) : `sandbox_home == state.pod_dir` → identité (rétro-compat stricte).
+  # ⚠ Piège de relocalisation : poser le path HÔTE (`state.pod_dir = /home/<human>/pods/pod_<id>`) dans
+  # le `.mcp-fleet.json` casserait dès lors que bwrap RELOCALISE le pod_dir derrière `/home/.pod`
+  # (`sandbox_home`) → le path hôte N'EXISTE PLUS dans le namespace → `bash -c "exec python3 <hôte>.py
+  # 2>><hôte>.log"` avorterait au redirect (dossier parent absent) AVANT d'exec python → serveur MCP
+  # `fleet` jamais up → 0 tool `mcp__fleet__*`. D'où DEUX chemins distincts : le bridge est COPIÉ sur le
+  # path HÔTE (où le spawner écrit), mais le `.mcp-fleet.json` référence le path IN-NAMESPACE
+  # (`sandbox_home/.lcars/…`, ce que claude exécute dans le sandbox). Host pods (containment none) :
+  # `sandbox_home == state.pod_dir` → identité (rétro-compat stricte). Sans cette séparation, un pod
+  # bwrap n'aurait aucun tool `mcp__fleet__*` (le pont ne démarrerait jamais) — donc aucun moyen de
+  # puller son mandat ni de soumettre son résultat.
   #
-  # Injecte aussi `LCARS_POD_ID` dans l'env du serveur (ceinture A2.3b PASSE-7 : le
-  # bridge l.37 le lit pour corréler `get_task` au bon pod ; ne pas dépendre de
-  # l'héritage env claude→bridge) et force `alwaysLoad:true` (sinon les tools MCP
-  # sont déférés derrière ToolSearch, absents du prompt turn-1).
+  # Injecte aussi `LCARS_POD_ID` dans l'env du serveur (le bridge le lit pour corréler
+  # `get_task` au bon pod ; ne pas dépendre de l'héritage env claude→bridge) et force
+  # `alwaysLoad:true` (sinon les tools MCP sont déférés derrière ToolSearch, absents du
+  # prompt turn-1).
   defp build_fleet_mcp_entry(spec, state) do
     # HÔTE : où le spawner ÉCRIT réellement le pont (le pod_dir réel sur le disque).
     host_bridge = Path.join([state.pod_dir, ".lcars", "fleet_mcp_bridge.py"])
@@ -2587,8 +2587,8 @@ defmodule Fleet.Spawner.Pod do
 
   # Provisionne le monitor in-pod (`watch.sh`) dans le pod_dir (= HOME bwrap). L'agent
   # l'arme via l'outil natif `Monitor` (cf. SP `agent-worker-base.md`) → réveil-par-flag
-  # (`turn.flag` touché par la fleet), zéro send-keys de CONTENU (ADR-G pt3 : send-keys =
-  # kick `yop` + slash uniquement). L'asset vit en `priv/` (résolu app_dir, comme le SP
+  # (`turn.flag` touché par la fleet), zéro send-keys de CONTENU (send-keys =
+  # kick `yop` + slash-commands uniquement). L'asset vit en `priv/` (résolu app_dir, comme le SP
   # draft). chmod best-effort : l'agent lance `bash ~/watch.sh`, le bit exec n'est pas requis.
   defp provision_monitor_watch(state) do
     src = Application.app_dir(:fleet_spawner, "priv/watch.sh")
@@ -2607,9 +2607,9 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # ============================================================
-  # Safe FS helpers — Vulcan #5
+  # Safe FS helpers
   # ============================================================
-  # Bang variants (File.mkdir_p!, File.write!, File.rename!) raise sur
+  # Les variantes bang (File.mkdir_p!, File.write!, File.rename!) raise sur
   # erreur → kill brutal du GenServer → supervisor restart sans transition
   # propre → state.json potentiellement obsolète/corrompu côté recovery.
   # Ces helpers retournent {:ok|:error} avec contexte (path + reason) →

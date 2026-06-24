@@ -1,8 +1,8 @@
 defmodule Fleet.Pipeline.Git do
   @moduledoc """
-  Mécanisme système-side de publication git post-EXTRACT (face 2 décision
-  archi git, 2026-05-24). Composé par `Fleet.Pipeline.Executor` sur
-  `pod.completed` lorsque la stage déclare `post_extract.git`.
+  Mécanisme système-side de publication git post-EXTRACT. Composé par le rail
+  d'orchestration sur `pod.completed`, lorsque la stage déclare `post_extract.git`,
+  pour transformer le travail du pod en commit (puis push) côté monde.
 
   Pure data → action :
     * input  : workspace path, identités auteur/committer, message, branch,
@@ -11,10 +11,10 @@ defmodule Fleet.Pipeline.Git do
     * output : `{:ok, %{commit_sha, pushed?}}` ou `{:error, term()}`
 
   Fail-closed strict : `--force` et `--no-verify` ne sont **JAMAIS** composés
-  par le module. Si un cas futur nécessite override, ce sera une décision
+  par le module. Si un cas futur nécessite un override, ce sera une décision
   explicite avec audit, pas une option par défaut.
 
-  D-04 préservée : `author_*` reflète l'identité du worker (role) ;
+  Identités distinctes : `author_*` reflète l'identité du worker (role) ;
   `committer_*` reflète l'identité système. Natif git
   (`GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`).
   """
@@ -44,16 +44,16 @@ defmodule Fleet.Pipeline.Git do
     :branch
   ]
 
-  # `commit/1` (O5) ne pousse pas → `:branch`/`:remote` sont des concerns de push,
+  # `commit/1` ne pousse pas → `:branch`/`:remote` sont des concerns de push,
   # absents ici. L'identité (author/committer) + message + workspace suffisent.
   @commit_required_keys @required_keys -- [:branch]
 
-  # F-07 (re-audit O5, consultant fire-mode) — le workspace est CO-ÉCRIT par un pod adversaire ;
-  # `.git/hooks/` y est inscriptible par le pod. `git commit`/`git push` sont lancés ICI, côté MONDE
-  # (runtime Elixir, HORS bwrap) → un `pre-push`/`pre-commit` posé par le pod s'exécuterait avec les
-  # privilèges du runtime = RCE hors-pod. `core.hooksPath=/dev/null` neutralise TOUS les hooks du
-  # workspace pour les ops système-side (flag git natif, tournevis). I-CBC : le monde REFUSE d'exécuter
-  # le code du pod, plutôt que d'espérer que le pod n'en pose pas. N'affecte PAS la doctrine
+  # Le workspace est CO-ÉCRIT par un pod adversaire ; `.git/hooks/` y est inscriptible par le pod.
+  # `git commit`/`git push` sont lancés ICI, côté MONDE (runtime Elixir, HORS bwrap) → un
+  # `pre-push`/`pre-commit` posé par le pod s'exécuterait avec les privilèges du runtime = RCE hors-pod.
+  # `core.hooksPath=/dev/null` neutralise TOUS les hooks du workspace pour les ops système-side (flag
+  # git natif, tournevis) : le monde REFUSE d'exécuter le code du pod plutôt que d'espérer que le pod
+  # n'en pose pas (mauvais état rendu impossible, pas détecté). N'affecte PAS la doctrine
   # `--no-verify JAMAIS` (qui protège l'appelant du module ; ici on neutralise le hook adversaire, pas
   # la vérif d'intégrité de l'appelant). Les ops read-only de la gate (log/diff/merge-base) n'exécutent
   # pas de hook → pas concernées.
@@ -82,10 +82,10 @@ defmodule Fleet.Pipeline.Git do
   end
 
   @doc """
-  Commit-only (O5) — `git add <paths> → git commit` dans `workspace`, **sans push**. Sépare le
-  CONTENU (le système commite le payload) de la PUBLICATION (`push/3` après la gate I-CBC). Utilisé
+  Commit-only — `git add <paths> → git commit` dans `workspace`, **sans push**. Sépare le
+  CONTENU (le système commite le payload) de la PUBLICATION (`push/3` après la gate de livrable). Utilisé
   par `Fleet.Pipeline.Deliverable` en mode `payload` ; `publish/1` reste le chemin couplé legacy
-  (PASSE-7). Pas de `:branch`/`:remote` requis (concerns de push). Retourne le SHA du HEAD commité.
+  (add+commit+push en un). Pas de `:branch`/`:remote` requis (concerns de push). Retourne le SHA du HEAD commité.
   """
   @spec commit(opts) :: {:ok, String.t()} | {:error, term()}
   def commit(opts) when is_map(opts) do
@@ -133,7 +133,7 @@ defmodule Fleet.Pipeline.Git do
 
   defp check_push_remote(%{push?: true} = opts) do
     case Map.get(opts, :remote) do
-      # F-046 : rejet leading-`-` au plus tôt (publish/maybe_push) — `push/3` re-valide aussi.
+      # Rejet leading-`-` au plus tôt (publish/maybe_push) — `push/3` re-valide aussi.
       r when is_binary(r) and r != "" ->
         if String.starts_with?(r, "-"), do: {:error, {:invalid_remote, r}}, else: :ok
 
@@ -161,7 +161,7 @@ defmodule Fleet.Pipeline.Git do
 
     case validate_add_paths(paths) do
       :ok ->
-        # F-014 : `--` termine les options → un pathspec commençant par `-` (ex. `add_paths = ["--all"]`
+        # `--` termine les options → un pathspec commençant par `-` (ex. `add_paths = ["--all"]`
         # depuis un input non fiable) est traité comme un CHEMIN littéral, pas une option git. `System.cmd`
         # n'utilise pas de shell, mais GIT parse ses propres options : un arg leading-`-` est une option.
         case System.cmd("git", ["add", "--" | paths], cd: opts.workspace, stderr_to_stdout: true) do
@@ -174,7 +174,7 @@ defmodule Fleet.Pipeline.Git do
     end
   end
 
-  # F-014 : `add_paths` doit être une liste non vide de chemins binaires non vides (belt-and-suspenders
+  # `add_paths` doit être une liste non vide de chemins binaires non vides (belt-and-suspenders
   # avec le séparateur `--`).
   defp validate_add_paths(paths) when is_list(paths) and paths != [] do
     if Enum.all?(paths, &(is_binary(&1) and &1 != "")),
@@ -192,11 +192,11 @@ defmodule Fleet.Pipeline.Git do
   end
 
   defp run_commit(opts) do
-    # audit elixir #2 : ancienne classification grep "nothing to commit" sur
-    # stderr → i18n-dependent (LC_ALL=fr_FR → "rien à valider" → grep rate →
-    # mauvaise classification). Pre-check via `git diff --cached --quiet`
-    # (codes RC stable across locales : 0 = pas de diff staged, 1 = diff
-    # staged). Évite le commit entièrement quand `:nothing_to_commit`.
+    # Pas de classification par grep "nothing to commit" sur stderr : ce serait
+    # i18n-dependent (LC_ALL=fr_FR → "rien à valider" → grep rate → mauvaise
+    # classification). Pre-check via `git diff --cached --quiet` (codes RC stables
+    # across locales : 0 = pas de diff staged, 1 = diff staged). Évite le commit
+    # entièrement quand `:nothing_to_commit`.
     case has_staged_changes?(opts.workspace) do
       false ->
         {:error, :nothing_to_commit}
@@ -245,10 +245,10 @@ defmodule Fleet.Pipeline.Git do
   end
 
   @doc """
-  Push-only (O5) — pousse `refspec` du `workspace` vers `remote`, **borné** (timeout). PAS d'add/commit :
+  Push-only — pousse `refspec` du `workspace` vers `remote`, **borné** (timeout). PAS d'add/commit :
   la branche est déjà commitée (par le pod en mode `git_native`, ou par `publish/1` en mode `payload`).
-  `refspec` peut être `local_ref:target_branch` pour que la ref poussée soit **choisie par le système**
-  (F-04). Partagé par `Fleet.Pipeline.Deliverable` (les 2 modes) et `maybe_push/1` (compat `publish/1`).
+  `refspec` peut être `local_ref:target_branch` pour que la ref poussée soit **choisie par le système**.
+  Partagé par `Fleet.Pipeline.Deliverable` (les 2 modes) et `maybe_push/1` (compat `publish/1`).
   """
   @spec push(Path.t(), String.t(), String.t()) :: {:ok, true} | {:error, term()}
   def push(workspace, remote, refspec) do
@@ -258,7 +258,7 @@ defmodule Fleet.Pipeline.Git do
     end
   end
 
-  # F-046 : `remote`/`refspec` ne doivent PAS commencer par `-`. Sinon `git push` les lit comme des
+  # `remote`/`refspec` ne doivent PAS commencer par `-`. Sinon `git push` les lit comme des
   # OPTIONS (`--receive-pack=<cmd>` → exécution côté remote, `-c <config>`, `--exec=`) → injection
   # d'options via un input non fiable. `System.cmd` n'utilise pas de shell, mais git parse ses options :
   # un positional attendu qui commence par `-` est avalé comme option. On rejette fail-closed.
@@ -274,10 +274,10 @@ defmodule Fleet.Pipeline.Git do
         {:ok, true}
 
       {:ok, {out, rc}} ->
-        # F-PARALLEL-PR-CONFLICT : une RÉSOLUTION DE CONFLIT rebase la feature-branch → historique réécrit →
-        # push rejeté « non-fast-forward ». La feature-branch est SYSTÈME-owned (seul le système la pousse ; le
-        # pod est forge-aveugle, pas de pousseur concurrent) → un retry `--force` est sûr : le système écrase
-        # SA PROPRE branche avec le rebase. Sans ça, le rebase ne land JAMAIS (vu live, PR#4 arduino-morse).
+        # Une RÉSOLUTION DE CONFLIT rebase la feature-branch → historique réécrit → push rejeté
+        # « non-fast-forward ». La feature-branch est SYSTÈME-owned (seul le système la pousse ; le pod
+        # est forge-aveugle, pas de pousseur concurrent) → un retry `--force` est sûr : le système écrase
+        # SA PROPRE branche avec le rebase. Sans ça, le rebase de résolution ne land JAMAIS.
         if non_fast_forward?(out),
           do: force_push(workspace, remote, refspec),
           else: {:error, {:git_push_failed, rc, String.trim(out)}}
@@ -299,8 +299,8 @@ defmodule Fleet.Pipeline.Git do
     end
   end
 
-  # `git push [extra] remote refspec` borné. audit elixir #1 BLOQUANT — `git push` n'a pas de timeout natif.
-  # Push réseau hung (DNS, TLS, packfile interrompu) bloquerait l'Executor GenServer. Task.async + yield +
+  # `git push [extra] remote refspec` borné — `git push` n'a pas de timeout natif.
+  # Push réseau hung (DNS, TLS, packfile interrompu) bloquerait le GenServer appelant. Task.async + yield +
   # shutdown :brutal_kill : pas de retour dans `timeout_ms` → on tue le Task (port → process git via SIGKILL).
   defp run_push(workspace, remote, refspec, extra) do
     task =
@@ -308,7 +308,7 @@ defmodule Fleet.Pipeline.Git do
         System.cmd("git", @hooks_off ++ ["push"] ++ extra ++ [remote, refspec],
           cd: workspace,
           stderr_to_stdout: true,
-          # F087/F095 : token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth.
+          # Token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth.
           env: Fleet.Credentials.ForgeAuth.git_env()
         )
       end)
@@ -316,11 +316,11 @@ defmodule Fleet.Pipeline.Git do
     Task.yield(task, push_timeout_ms()) || Task.shutdown(task, :brutal_kill)
   end
 
-  # MA-05 — Rejet « non-fast-forward » SEUL (l'historique distant a divergé du local — ici un rebase de
+  # Rejet « non-fast-forward » SEUL (l'historique distant a divergé du local — ici un rebase de
   # résolution réécrit la feature-branch SYSTÈME-owned → `--force` sûr). Détecté sur la sortie git (stderr
   # fusionné) en se limitant aux DIAGNOSTICS PROPRES du non-fast-forward : `non-fast-forward` / `fetch first`.
-  # Le substring `rejected` NU est RETIRÉ : git l'émet AUSSI pour un rejet de HOOK (`[remote rejected] …
-  # pre-receive hook declined`) ou de branche protégée — un retry `--force` y serait à tort une RÉÉCRITURE
+  # On NE matche PAS le substring `rejected` NU : git l'émet AUSSI pour un rejet de HOOK (`[remote rejected]
+  # … pre-receive hook declined`) ou de branche protégée — un retry `--force` y serait à tort une RÉÉCRITURE
   # FORCÉE par-dessus une protection serveur (perte de données / contournement de garde). On ne force que
   # quand la cause EST une divergence d'historique, jamais sur un refus de politique remote (fail-closed :
   # un rejet non-explicitement-NFF remonte tel quel `{:git_push_failed, …}`, pas de force aveugle).
@@ -342,6 +342,6 @@ defmodule Fleet.Pipeline.Git do
     Application.get_env(:fleet_pipeline, :git_push_timeout_ms, 30_000)
   end
 
-  # F087/F095 — `forge_auth_args/0` RETIRÉ. L'auth forge système-side est désormais
+  # Pas de `forge_auth_args/0`. L'auth forge système-side est portée par
   # `Fleet.Credentials.ForgeAuth.git_env/0` (source unique, token via env hors argv/cmdline).
 end

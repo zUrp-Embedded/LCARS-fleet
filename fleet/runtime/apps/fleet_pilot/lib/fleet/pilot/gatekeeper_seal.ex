@@ -1,14 +1,14 @@
 defmodule Fleet.Pilot.GatekeeperSeal do
   @moduledoc """
   **Sceau de fusion gatekeeper** — UN seul chemin pour sceller une PR : commentaire de fin honnête
-  (②.1e) sur l'issue + merge **signé au nom du `gatekeeper`** (token de rôle via `gk_opts`).
+  sur l'issue + merge **signé au nom du `gatekeeper`** (token de rôle via `gk_opts`).
 
-  Partagé par les **deux** points de merge, qui forkaient (F-arch-MCP) :
-  - `Fleet.Pilot.StageDispatcher.promote_pr` (juges APPROVED en direct) — signait déjà gatekeeper ;
-  - `Fleet.Pilot.HopCompleter.promote` (terminal `:promote`, ex. après escalade gatekeeper §L441) —
-    mergait avec `forge_opts` **brut = token système**, sans commentaire (merge attribué `lcars-system`).
+  Chemin UNIQUE partagé par les **deux** points de merge (sinon ils divergeraient) :
+  - `Fleet.Pilot.StageDispatcher.promote_pr` (juges APPROVED en direct) ;
+  - `Fleet.Pilot.HopCompleter.promote` (terminal `:promote`, ex. après escalade gatekeeper).
 
-  Désormais les deux appellent `seal_and_merge/6` → même signature, même trace, partout.
+  Les deux appellent `seal_and_merge/6` → même signature gatekeeper, même trace, partout (sans ce
+  point unique, un merge passerait en token système brut, sans commentaire, attribué `lcars-system`).
 
   Le `gk_opts` est construit par l'appelant (`as_role(forge_opts, gatekeeper_role())`) : ce module ne
   duplique PAS `as_role` (général, par-fichier), il porte le rôle gatekeeper (config, source unique ici).
@@ -16,7 +16,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
   @default_gatekeeper_role "gatekeeper"
 
-  @doc "Rôle gardien des PRs (signe les fusions, ②.1e) : config `:fleet_pilot, :gatekeeper_role` (défaut \"gatekeeper\"). Source unique."
+  @doc "Rôle gardien des PRs (signe les fusions) : config `:fleet_pilot, :gatekeeper_role` (défaut \"gatekeeper\"). Source unique."
   @spec gatekeeper_role() :: String.t()
   def gatekeeper_role,
     do: Application.get_env(:fleet_pilot, :gatekeeper_role, @default_gatekeeper_role)
@@ -25,7 +25,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   Scelle la PR : **merge D'ABORD** (`gk_opts` = token gatekeeper), PUIS poste le commentaire de fin
   « ✅ livrée et fusionnée » — SEULEMENT si le merge a réussi (best-effort, le merge fait foi ; Gitea
   accepte un commentaire sur l'issue auto-close). On ne prétend JAMAIS « fusionnée » avant de l'avoir
-  vérifié (F-MERGE-CLAIM-BEFORE-REALITY). Merge KO → aucun commentaire de réussite, l'erreur remonte.
+  vérifié. Merge KO → aucun commentaire de réussite, l'erreur remonte.
 
   `gk_opts` = `forge_opts` déjà passé par `as_role(_, gatekeeper_role())` côté appelant.
   Returns `:ok | {:error, {:merge, reason}}`.
@@ -41,13 +41,13 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     comment_opts =
       gk_opts |> Keyword.put(:dedup_signature, signature) |> Keyword.put(:dedup_any_author, true)
 
-    # F-MERGE-CLAIM-BEFORE-REALITY (2026-06-22) : MERGER D'ABORD, ne commenter « ✅ livrée et fusionnée » QUE
-    # si le merge a RÉELLEMENT réussi. L'ancien ordre (comment → merge) postait la réussite AVANT de la
-    # vérifier → sur un conflit, un commentaire MENSONGER « fusionnée » restait figé : fail silencieux sur LE
-    # point crucial du workflow (on contrôlait l'INTENTION, pas la RÉALITÉ du merge). Le sceau devient
-    # best-effort POST-merge (le merge fait foi ; Gitea accepte un commentaire sur l'issue auto-close par
-    # `Closes #N`). Merge KO → AUCUN « fusionnée », l'erreur remonte (la résolution du conflit = backlog
-    # F-PARALLEL-PR-CONFLICT).
+    # MERGER D'ABORD, ne commenter « ✅ livrée et fusionnée » QUE si le merge a RÉELLEMENT réussi. L'ordre
+    # inverse (comment → merge) posterait la réussite AVANT de la vérifier → sur un conflit, un commentaire
+    # MENSONGER « fusionnée » resterait figé : fail silencieux sur LE point crucial du workflow (on
+    # contrôlerait l'INTENTION, pas la RÉALITÉ du merge). Le sceau est donc best-effort POST-merge (le merge
+    # fait foi ; Gitea accepte un commentaire sur l'issue auto-close par `Closes #N`). Merge KO → AUCUN
+    # « fusionnée », l'erreur remonte (la résolution du conflit entre PR parallèles est traitée ailleurs, par
+    # le re-dispatch).
     case do_merge(forge, repo, pr_number, gk_opts) do
       :ok ->
         _ = comment(forge, repo, issue_n, body, comment_opts)
@@ -75,7 +75,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   end
 
   @doc """
-  Commentaire de fin DESCRIPTIF + HONNÊTE (②.1e, traça user) : qui a livré, qui a validé, qui a scellé,
+  Commentaire de fin DESCRIPTIF + HONNÊTE (traça user) : qui a livré, qui a validé, qui a scellé,
   et que la branch-protection est OFF (interim dev → LCARS agrège, rien maquillé).
   """
   @spec promote_comment(integer(), integer(), String.t()) :: String.t()

@@ -1,8 +1,8 @@
 defmodule Fleet.Credentials.ForgeIdentity do
   @moduledoc """
-  Z4 (forge-identité B') — résout l'identité git d'un livrable : **author = l'humain
+  Résout l'identité git d'un livrable : **author = l'humain
   du mandat**, le rôle LCARS étant porté par un trailer **vérifié** `Co-authored-by:
-  LCARS-<role>` (non-négo #1 : l'identité n'est JAMAIS aplatie sur un compte partagé ;
+  LCARS-<role>` (non négociable : l'identité n'est JAMAIS aplatie sur un compte partagé ;
   la signature machine est un trailer vérifié, pas l'auteur).
 
   ## D'où vient l'humain
@@ -11,7 +11,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   la fleet ENTIÈRE tourne sous l'user OS de l'humain qui la lance (`User=<humain>`) —
   chaque humain = sa fleet sous son user, isolation OS par construction ; le pod (Port
   BEAM) hérite cet UID. Donc l'user courant EST l'humain. Pas de défaut littéral
-  (masquerait un trou de câblage — I-CBC) : `id -un` irrésoluble → fail-loud.
+  (masquerait un trou de câblage) : `id -un` irrésoluble → fail-loud.
 
   ## D'où vient son name/email git — l'OS, pas un catalogue
 
@@ -30,21 +30,21 @@ defmodule Fleet.Credentials.ForgeIdentity do
   ou `config :fleet_credentials, :forge_identity_override` — `git config` varie par runner.)
 
   **Pré-requis déploiement nominal** : l'humain a `git config --global user.email` configuré.
-  Sinon le fallback `<login>@<hostname>` n'est PAS stable (review Fable) — l'email est résolu
+  Sinon le fallback `<login>@<hostname>` n'est PAS stable — l'email est résolu
   deux fois indépendamment (au spawn → `GIT_AUTHOR_EMAIL` du pod ; au check → `allowed_emails`
-  de la gate F-01) ; si le gitconfig est complété ou le hostname change entre les deux, les
-  emails divergent et F-01 rejette un commit légitime. Avec `git config user.email` posé, stable.
+  de la gate d'identité de commit) ; si le gitconfig est complété ou le hostname change entre les deux,
+  les emails divergent et la gate rejette un commit légitime. Avec `git config user.email` posé, stable.
 
   ## Trailer rôle
 
   `Co-authored-by: LCARS-<role> <<role>@lcars.local>` — le trailer est ce que la gate
-  F-01 vérifie (présence + rôle ↔ stage). Pure string, vérifiable mécaniquement.
+  d'identité de commit vérifie (présence + rôle ↔ stage). Pure string, vérifiable mécaniquement.
 
-  ## allowed_emails (gate F-01)
+  ## allowed_emails (gate d'identité de commit)
 
     * `git_native` — le pod commite EN TANT QUE l'humain → author=committer=humain →
       `[human_email]`.
-    * `payload` — le SYSTÈME commite (author=humain, committer=système, D-04) →
+    * `payload` — le SYSTÈME commite (author=humain, committer=système) →
       `[human_email, "system@lcars.local"]`.
   """
 
@@ -87,7 +87,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   @doc """
   Identité git de l'HUMAIN qui run la fleet (name + email robustes : git config → GECOS → login ; ne FAIL
   jamais sur un user OS). Sert de `committer` aux commits SYSTÈME (ex. onboard projet, author=`lcars-system`)
-  → trace qui a initié, SANS dépendre du `~/.gitconfig` humain (F-GIT-IDENTITY : sans ça, un humain non
+  → trace qui a initié, SANS dépendre du `~/.gitconfig` humain (sans ça, un humain non
   configuré → committer « empty ident name » → commit refusé). `opts` identiques à `for_role/2`.
   """
   @spec human_identity(keyword()) ::
@@ -101,9 +101,9 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   @doc """
-  Instruction de signature à injecter dans le mandat du pod (F090/F091) — SOURCE UNIQUE du trailer.
+  Instruction de signature à injecter dans le mandat du pod — SOURCE UNIQUE du trailer.
   Dérive de `coauthor_trailer/1` : tout mandat (StageRunner ET StageSpawner) doit l'utiliser, sinon
-  la chaîne (instruction côté pod / needle de la gate F-01) se désaccorde du canon.
+  la chaîne (instruction côté pod / needle de la gate d'identité de commit) se désaccorde du canon.
   """
   @spec coauthor_instruction(String.t()) :: String.t()
   def coauthor_instruction(role) when is_binary(role) do
@@ -113,7 +113,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   @doc """
-  Emails d'identité acceptés par la gate F-01 selon le mode. `git_native` → l'humain
+  Emails d'identité acceptés par la gate d'identité de commit selon le mode. `git_native` → l'humain
   seul (il commite) ; `payload` → l'humain (author) + système (committer).
   """
   @spec allowed_emails(:git_native | :payload, String.t()) :: [String.t()]
@@ -122,7 +122,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
 
   @doc """
   Identité système (committer en mode payload). Le système N'EST PAS l'humain : il
-  matérialise le commit, l'author reste l'humain (D-04).
+  matérialise le commit, l'author reste l'humain.
   """
   @spec system_email() :: String.t()
   def system_email, do: @system_email
@@ -134,7 +134,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
       h when is_binary(h) and h != "" ->
         {:ok, h}
 
-      # F027 : source UNIQUE `Fleet.Credentials.Human` (plus de `id -un` shellé en double).
+      # Source UNIQUE `Fleet.Credentials.Human` (jamais de `id -un` shellé en double).
       _ ->
         Fleet.Credentials.Human.current()
     end

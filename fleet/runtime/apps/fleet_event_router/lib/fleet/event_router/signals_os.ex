@@ -44,7 +44,7 @@ defmodule Fleet.EventRouter.SignalsOS do
 
   @impl GenServer
   def handle_info({:signal, sig}, state) when is_atom(sig) do
-    # BL-021 chantier 9 (B) — schema canon strict %Fleet.Event{source: :event_router}.
+    # Schema canon strict : %Fleet.Event{source: :event_router}.
     type_str = "os.signal.#{sig}"
 
     try do

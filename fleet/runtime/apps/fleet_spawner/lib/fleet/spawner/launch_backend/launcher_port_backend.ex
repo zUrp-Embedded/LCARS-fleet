@@ -2,23 +2,23 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   @moduledoc """
   Backend RÉEL — lance la chaîne `<launcher N0> → bin/claude_launch.sh` via
   `Port.open/2` `:spawn_executable`, **non-privilégié**. Le launcher N0 est choisi
-  par le spawner selon `containment` (LAUNCH-Q) : `bin/bwrap_launch.sh` (défaut, bwrap
+  par le spawner selon `containment` : `bin/bwrap_launch.sh` (défaut, bwrap
   fait l'isolation userns/mountns) ou `bin/host_launch.sh` (containment: none, host
   sans sandbox). L'`exe` du Port = `args.launcher_path` ; l'argv est identique des
   deux côtés (même contrat `<role> <pod_id> <pod_dir> <command...>`).
 
-  ## R1.2 — modèle INTERACTIF (post -p/stream-json)
+  ## Modèle INTERACTIF (claude sous PTY, livrable = fichier)
 
-  `claude_launch` lance désormais `claude` INTERACTIF sous PTY (R1.1) ; le livrable
+  `claude_launch` lance `claude` INTERACTIF sous PTY ; le livrable
   est un FICHIER (`$POD_DIR/output/result.md`, lu par `Pod` EXTRACT), PAS un flux
-  NDJSON stdout. Donc `launch/2` **n'attend plus** de frame `init` : il ouvre le
+  NDJSON stdout. Donc `launch/2` **n'attend pas** de frame `init` : il ouvre le
   Port et **retourne immédiatement**. Le **Pod owns le Port** — `launch/2` tourne
   dans le process Pod (`do_launch`), donc les messages `{port, {:data, _}}` /
   `{port, {:exit_status, _}}` arrivent à `Pod.handle_info`. Détection d'exit,
   monitoring du livrable et kill = lifecycle Pod, pas ici.
 
   Retour : `{:ok, %{port: port, init_message: nil, ndjson_log: nil}}` | `{:error, reason}`.
-  Tests : `build_spawn/1` pur (vecteur args, anti-M1) + smoke fake-exe (Port ouvert / exe absent).
+  Tests : `build_spawn/1` pur (ordre/contenu du vecteur args) + smoke fake-exe (Port ouvert / exe absent).
   """
 
   @behaviour Fleet.Spawner.LaunchBackend
@@ -51,15 +51,15 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   end
 
   @doc """
-  Pur : construit `{:ok, executable, argv}` pour `Port.open`. Risque anti-M1
-  (ordre/contenu du vecteur) → testé isolément.
+  Pur : construit `{:ok, executable, argv}` pour `Port.open`. L'ordre/contenu du
+  vecteur est sensible → testé isolément.
 
   `<launcher_path> <role> <pod_id> <pod_dir>` puis `<command...>` =
   `claude_launch <role> <pod_id> <pod_dir>`. `launcher_path` = bwrap_launch (défaut)
-  ou host_launch (containment: none) — **même argv** (LAUNCH-Q). Le **SP n'est PLUS dans
+  ou host_launch (containment: none) — **même argv**. Le **SP n'est PAS dans
   l'argv** (fuite /proc/cmdline + ARG_MAX) : claude_launch le lit depuis
   `pod_dir/.lcars/system-prompt.md` via `--system-prompt-file` (écrit par `Fleet.Spawner` do_project).
-  R0.8-brick4 : budget retiré (pas d'API). Identité/session
+  Pas de budget (pas d'API). Identité/session
   (`LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX`) voyagent par l'ENV du Port (`launch/2`
   `env`), que bwrap_launch `--setenv` dans le pod (host_launch l'hérite directement, sans namespace).
   """
@@ -73,9 +73,9 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
       })
       when is_binary(role) and is_binary(pod_id) and is_binary(pod_dir) and
              is_binary(launcher) and is_binary(claude) do
-    # SP plus en argv (fuite /proc/cmdline + frôle ARG_MAX) : claude_launch le lit depuis
-    # pod_dir/.lcars/system-prompt.md via --system-prompt-file (vérifié empirique 2026-06-14, claude 2.1.177 :
-    # -file = replace + TRUSTED). Supprime aussi la fragilité sp=nil → :invalid_args au recovery.
+    # SP pas en argv (fuite /proc/cmdline + frôle ARG_MAX) : claude_launch le lit depuis
+    # pod_dir/.lcars/system-prompt.md via --system-prompt-file (--system-prompt-file = replace +
+    # TRUSTED). Supprime aussi la fragilité sp=nil → :invalid_args au recovery.
     argv = [role, pod_id, pod_dir, claude, role, pod_id, pod_dir]
     {:ok, launcher, argv}
   end

@@ -1,21 +1,21 @@
 defmodule Fleet.Credentials.PlanValidator do
   @moduledoc """
-  Gate plan/abonnement (F-AC-VALIDATE) : le claudeDir de l'humain doit porter un
+  Gate plan/abonnement : le claudeDir de l'humain doit porter un
   abonnement payant pour faire tourner des pods claude_code. Lit
   `claudeAiOauth.subscriptionType` du `.credentials.json` natif — PAS de SDK, pas
   d'appel réseau (transformateur pur, même contrat que `Fleet.Credentials.ScopeValidator`).
 
   ## Valeurs canon
 
-  Source CC désobfusquée (`inbox/src` #0_ref_oauth-token-lifecycle) :
+  Valeurs émises par le binaire claude dans `.credentials.json` :
   `subscriptionType: "max" | "pro" | "team" | "enterprise" | null`. `null`/absent =
   pas d'abonnement → refus. Toute valeur payante connue → `:ok` (insensible à la casse).
 
   ## Défense en profondeur
 
   Le binaire claude impose DÉJÀ le plan (401/login). Ce gate fait échouer le spawn
-  TÔT (fail-fast au boundary) plutôt qu'au 1ᵉʳ appel API du pod — porte annoncée par la
-  DN `security/fleet_credentials.md` (F-AC-VALIDATE) qui n'existait pas (CRED-D1).
+  TÔT (fail-fast au boundary) plutôt qu'au 1ᵉʳ appel API du pod : un refus clair côté
+  runtime au lieu d'un pod spawné qui mourra sur le premier appel API non autorisé.
 
   ## Exit codes
 

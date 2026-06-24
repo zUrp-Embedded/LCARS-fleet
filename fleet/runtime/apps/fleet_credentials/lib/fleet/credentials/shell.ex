@@ -1,7 +1,7 @@
 defmodule Fleet.Credentials.Shell do
   @moduledoc """
   Exécution bornée PAR CONSTRUCTION d'une commande externe (git, et plus généralement tout binaire
-  lent/réseau). MOVE-1/MA-22 — la frontière qui rend INEXPRIMABLE un `System.cmd("git", …)` non borné
+  lent/réseau). La frontière qui rend INEXPRIMABLE un `System.cmd("git", …)` non borné
   sur le chemin PROJECT : un appel externe a TOUJOURS une deadline, et la deadline tue le process
   enfant (port → SIGKILL) si elle expire.
 
@@ -9,7 +9,7 @@ defmodule Fleet.Credentials.Shell do
 
   `System.cmd/3` n'a **aucun timeout natif**. Un git réseau hung (DNS lent, TLS qui pend, packfile
   interrompu) — ou pire, un git qui ouvre un PROMPT interactif faute de credential (sans TTY → pend à
-  l'infini, MA-22) — bloque le process appelant. Sur le chemin PROJECT ce process est un GenServer (le
+  l'infini) — bloque le process appelant. Sur le chemin PROJECT ce process est un GenServer (le
   `Fleet.Spawner.Pod` qui clone, le `Fleet.Pilot.Poller` qui merge) : figé, il ne traite plus aucun
   message → **pod zombie / ticket wedgé**. Le patron borné existait déjà ponctuellement
   (`Fleet.Pipeline.Git.run_push` : `Task.async` + `yield(timeout) || shutdown(:brutal_kill)`) ; ce
@@ -81,7 +81,7 @@ defmodule Fleet.Credentials.Shell do
   `Task.shutdown(:brutal_kill)`) borne le **BEAM** (le GenServer ne reste pas figé), MAIS — vérifié au
   sol 2026-06-23 — `brutal_kill` tue le Task BEAM **sans fermer le port** ni tuer le `System.cmd`
   enfant : le process git/sleep SURVIT détaché et continue de consommer ressources/credentials. Pour
-  fermer le wedge de bout en bout (MA-22 : « pas de pod zombie »), on lance via `Port.open` pour TENIR
+  fermer le wedge de bout en bout (invariant « pas de pod zombie »), on lance via `Port.open` pour TENIR
   l'`os_pid` du process enfant et, à la deadline, on FERME le port ET on envoie `SIGKILL` à l'os_pid →
   le process externe est réellement mort. Pas de chemin pour appeler ce module sans deadline.
   """

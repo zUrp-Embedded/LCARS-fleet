@@ -2,9 +2,9 @@ defmodule Fleet.TaskQueue do
   @moduledoc """
   API publique du broker d'orchestration cross-pod LCARS.
 
-  Cf. DN `orchestration/task-queue` §C. `fleet_spawner` enqueue (source),
-  `fleet_task_queue` distribue/collecte (broker), `fleet_mcp` sert via tools
-  `get_task`/`submit_result` (frontière vendor), `fleet_coord` oriente post-résultat.
+  `fleet_spawner` enqueue (source), `fleet_task_queue` distribue/collecte (broker),
+  `fleet_mcp` sert via tools `get_task`/`submit_result` (frontière vendor),
+  `fleet_coord` oriente post-résultat.
 
   Chaque fonction a une variante test-seam (`server` explicite, ex. `enqueue/3`,
   `get_for_pod/2`) pour l'isolation des tests via serveur anonyme (`name: nil`).
@@ -35,9 +35,9 @@ defmodule Fleet.TaskQueue do
   @doc """
   Soumet le résultat (servi par fleet_mcp `submit_result`). Idempotent (2e appel =
   `:double_submit_ignored`). Si `result` porte un `task_id` ≠ mandat actif du pod
-  → `:task_id_mismatch` (validation correlation §A.70), aucune mutation.
+  → `:task_id_mismatch` (le correlation_id du livrable ne matche pas), aucune mutation.
 
-  MA-04 — le broadcast `task_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour
+  Le broadcast `task_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour
   finir le hop). Si sa diffusion échoue, le retour est `{:error, {:broadcast_failed, _}}` (la tâche
   reste `:completed`+persistée, mais le caller NE reçoit PAS un faux succès — plus de `:ok` qui ment).
   """
@@ -85,7 +85,7 @@ defmodule Fleet.TaskQueue do
 
   @doc """
   Dernier poll du pod (`DateTime | nil`) = **ACK in-band** : l'agent a appelé `get_for_pod` (même sans
-  mandat → signal bootstrap « up + armé »). #5.2 — consommé par la boucle wake ack-driven. Query Port.
+  mandat → signal bootstrap « up + armé »). Consommé par la boucle wake ack-driven. Query Port.
   """
   @spec last_poll(String.t()) :: DateTime.t() | nil
   def last_poll(pod_id), do: last_poll(@server, pod_id)

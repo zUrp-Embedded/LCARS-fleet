@@ -11,7 +11,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     * `POST /webhook/gitea` — body JSON Gitea, header
       `X-Gitea-Signature` HMAC SHA256. 200 ok (broadcast réussi) /
       401 hmac mismatch / 422 event drift (type inconnu/forgé ou hors
-      registry `events.yaml` — la forge doit retry/alerter, F-009) /
+      registry `events.yaml` — la forge doit retry/alerter) /
       415 invalid body / 500 error.
     * `GET /health` — liveness `200 ok`.
     * fallback 404.
@@ -45,13 +45,13 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     case verify_hmac(conn) do
       :ok ->
         body = conn.body_params || %{}
-        # M20 : ne pas défaulter aveuglément sur "push". Préférer l'action (routing
-        # events.yaml gitea.opened/closed), sinon l'event authoritatif (header X-Gitea-Event),
-        # sinon "unknown" — un event actionless non-push n'est plus mislabelé "push".
+        # Ne PAS défaulter aveuglément sur "push" : préférer l'action (routée par
+        # events.yaml, ex. gitea.opened/closed), sinon l'event authoritatif (header X-Gitea-Event),
+        # sinon "unknown" — un event sans action et non-push ne doit pas être mislabelé "push".
         event_type = "gitea." <> (body["action"] || gitea_event_header(conn) || "unknown")
         ticket_id = extract_ticket(body)
 
-        # BL-021 chantier 9 (B) — schema canon strict %Fleet.Event{source: :event_router}.
+        # Schema canon strict : %Fleet.Event{source: :event_router}.
         try do
           type_atom = String.to_existing_atom(event_type)
 
@@ -69,10 +69,10 @@ defmodule Fleet.EventRouter.WebhooksGitea do
           _ = Fleet.EventRouter.Bus.broadcast("fleet.events", event)
           send_resp(conn, 200, "ok")
         rescue
-          # F-009 : un event droppé ne doit PLUS être ACK 200. Les deux cas ci-dessous
-          # sont du DRIFT (pas un drop intentionnel — il n'existe aucune catégorie
-          # « connu mais volontairement non-routé » dans ce handler) : on renvoie 422
-          # pour que la forge Gitea journalise/retry/alerte au lieu de croire l'event livré.
+          # Un event droppé ne doit JAMAIS être ACK 200. Les deux cas ci-dessous sont
+          # du DRIFT (pas un drop intentionnel — il n'existe aucune catégorie « connu
+          # mais volontairement non-routé » dans ce handler) : on renvoie 422 pour que
+          # la forge Gitea journalise/retry/alerte au lieu de croire l'event livré.
           ArgumentError ->
             # Atome inconnu du BEAM (String.to_existing_atom a échoué) = type `gitea.*`
             # jamais déclaré → drift producteur/registry forgé.
@@ -83,10 +83,10 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
             send_resp(conn, 422, Jason.encode!(%{error: "unknown event type", type: event_type}))
 
-          # Z5 #9 : NE PLUS avaler en silence. Un type `gitea.*` dont l'atome existe mais
-          # qui n'est pas dans `events.yaml` = drift registry/producteur → drop muet (webhook
+          # NE PAS avaler en silence. Un type `gitea.*` dont l'atome existe mais qui n'est
+          # pas dans `events.yaml` = drift registry/producteur → sinon drop muet (webhook
           # 200 mais event jamais routé). On le rend VISIBLE (le registry doit lister toute
-          # action émise par WebhooksGitea ; cf. events.yaml section gitea).
+          # action émise par WebhooksGitea ; voir events.yaml section gitea).
           _e in Fleet.Event.UnregisteredError ->
             Logger.warning(
               "fleet_event_router webhook gitea type #{inspect(event_type)} hors registry " <>
@@ -136,12 +136,12 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
     case File.read(secret_path) do
       {:ok, secret} ->
-        # MA-13 — un fichier secret EXISTANT mais VIDE/whitespace passait par ce chemin `{:ok, secret}` →
+        # Un fichier secret EXISTANT mais VIDE/whitespace passerait par ce chemin `{:ok, secret}` →
         # `compute_hmac("", body)` → HMAC à CLÉ VIDE → quiconque connaît l'algo forge une signature valide
-        # (fail-OPEN : la vérif HMAC est neutralisée sans le savoir). Un secret trimmé vide est REJETÉ
-        # fail-closed comme un secret absent (jamais d'HMAC à clé vide). (Gated par opt-in
-        # `LCARS_FLEET_WEBHOOKS`, mais on ferme le fail-open : un webhooks activé sur un secret vide est un
-        # trou, pas une config valide.)
+        # (fail-OPEN : la vérif HMAC serait neutralisée sans qu'on le sache). Un secret trimmé vide est donc
+        # REJETÉ fail-closed comme un secret absent (jamais d'HMAC à clé vide). (Le listener webhooks est
+        # gated par opt-in `LCARS_FLEET_WEBHOOKS`, mais on ferme quand même le fail-open : un webhooks activé
+        # sur un secret vide est un trou, pas une config valide.)
         case String.trim(secret) do
           "" ->
             Logger.error(
@@ -179,7 +179,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     conn |> get_req_header("x-gitea-event") |> List.first()
   end
 
-  # M21 : extraire le ticket des issues ET des pull requests (pas seulement issue.id).
+  # Extraire le ticket des issues ET des pull requests (pas seulement issue.id).
   defp extract_ticket(%{"issue" => %{"id" => id}}), do: "fleet/lcars##{id}"
   defp extract_ticket(%{"pull_request" => %{"id" => id}}), do: "fleet/lcars##{id}"
   defp extract_ticket(_), do: nil

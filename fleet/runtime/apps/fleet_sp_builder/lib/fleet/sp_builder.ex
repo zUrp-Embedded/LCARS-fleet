@@ -10,7 +10,7 @@ defmodule Fleet.SPBuilder do
   `compose_claude_md/3`, `filter_skills/2`) implementing the
   `Fleet.SPBuilder.Composer` behaviour.
 
-  ## 6 niveaux d'injection canoniques (cf. architecture-cible §`fleet_sp_builder/`)
+  ## 6 niveaux d'injection canoniques
 
     * N0  — poids modèle (rien runtime)
     * N1  — server prompt Anthropic (config console)
@@ -21,12 +21,12 @@ defmodule Fleet.SPBuilder do
 
   Frontière vendor : ce module reste vendor-agnostic. L'INJECTION du SP dans le
   pod est faite par la **frontière N1** (`bin/claude_launch.sh` → `--system-prompt "$SP"`
-  en argv, REPL interactif, ADR-G), PAS ici.
+  en argv, REPL interactif), PAS ici.
 
-  SPB-E1 (2026-06-10) — réfs MORTES purgées du moduledoc : `claude -p` / `--system-prompt-file`
-  (= mode metered mort ADR-G, le réel est `--system-prompt` interactif), `Fleet.Claude.SPInjection`
-  + `fleet_claude_bridge` (module + app INEXISTANTS, retirés ADR-G — il n'y a pas d'app claude-bridge,
-  la frontière N1 EST le script `bin/`).
+  La frontière N1 EST le script `bin/` : il n'existe AUCUNE app claude-bridge ni
+  module `Fleet.Claude.SPInjection`, et AUCUN mode metered (`claude -p`,
+  `--system-prompt-file`). Le seul mode réel est `--system-prompt "$SP"` injecté en
+  argv au REPL interactif — ne pas réintroduire ces réfs dans le moduledoc.
 
   Déterminisme sha256 : 2 exécutions sur même input produisent un
   `stable_sha256` identique (stable parts uniquement, exclut
@@ -36,8 +36,8 @@ defmodule Fleet.SPBuilder do
   @behaviour Fleet.SPBuilder.Composer
 
   # `stable_sha256` est un hex string `String.t()` (encodé via
-  # `Base.encode16(case: :lower)`). Précise la design note L93 qui
-  # déclarait `binary()` (sous-type plus large). Hex printable et
+  # `Base.encode16(case: :lower)`) — type plus précis que `binary()`
+  # (sous-type plus large). Hex printable et
   # comparable en tests.
   @type composed :: %{
           sp_md: String.t(),
@@ -160,9 +160,9 @@ defmodule Fleet.SPBuilder do
       assigns = [
         role: get_in(cap_profile.metadata, ["name"]) || "unknown",
         containment: get_in(cap_profile.metadata, ["containment"]) || "unknown",
-        # R12 : lifetime_scope est nesté sous spec.invocation (schéma v2.5 +
+        # lifetime_scope est nesté sous spec.invocation (schéma v2.5 +
         # cap-profiles canon ; cohérent avec check_lifetime_scope/1). L'ancien
-        # chemin spec.lifetime_scope (pré-v2.5) rendait toujours "unknown".
+        # chemin spec.lifetime_scope (pré-v2.5) rend toujours "unknown".
         lifetime_scope: Fleet.CapProfile.lifetime_scope(cap_profile, "unknown"),
         git_ops_denied: get_in(cap_profile.spec, ["scope", "git_ops_denied"]) || [],
         repo_claude_md_sections: repo_sections
@@ -175,8 +175,8 @@ defmodule Fleet.SPBuilder do
   @doc """
   Filtre `skills_root` selon la whitelist `cap_profile.spec["knowledge"]["skills"]`.
 
-  Retourne la liste des paths absolus à mount-bind dans le pod. R11 : un skill
-  PLAIN whitelisté mais absent du FS est un **fail-loud** (plus de filtrage
+  Retourne la liste des paths absolus à mount-bind dans le pod. Un skill
+  PLAIN whitelisté mais absent du FS est un **fail-loud** (pas de filtrage
   silencieux — un pod ne doit pas réclamer un skill inexistant). Les skills
   QUALIFIÉS `plugin:skill` sont livrés via `LCARS_SKILLS_PLUGINS` (pas comme
   paths) → exclus de ce check de présence.
@@ -194,7 +194,7 @@ defmodule Fleet.SPBuilder do
     if File.dir?(skills_root) do
       whitelist = get_in(cap_profile.spec, ["knowledge", "skills"]) || []
 
-      # R11 : les skills QUALIFIÉS `plugin:skill` sont livrés via
+      # Les skills QUALIFIÉS `plugin:skill` sont livrés via
       # `LCARS_SKILLS_PLUGINS` (skills_plugins_env → bwrap charge le plugin),
       # PAS comme paths montés → exclus du check de présence sur disque.
       plain = Enum.reject(whitelist, &String.contains?(&1, ":"))
@@ -204,9 +204,9 @@ defmodule Fleet.SPBuilder do
         |> Enum.map(&{&1, Path.join(skills_root, &1)})
         |> Enum.split_with(fn {_name, path} -> File.exists?(path) end)
 
-      # R11 (verrou I-CBC) : un skill whitelisté mais ABSENT du disque est un
-      # fail-loud (`{:error, {:skills_missing, names}}`) — plus de filtrage
-      # silencieux qui laissait un pod réclamer un skill inexistant.
+      # Un skill whitelisté mais ABSENT du disque est un fail-loud (erreur en amont
+      # qui rend l'état « skill manquant » irreprésentable, pas rattrapé en aval) :
+      # `{:error, {:skills_missing, names}}`, pas un filtrage silencieux du pod.
       case missing do
         [] -> {:ok, Enum.map(present, fn {_name, path} -> path end)}
         _ -> {:error, {:skills_missing, Enum.map(missing, fn {name, _path} -> name end)}}
@@ -217,23 +217,23 @@ defmodule Fleet.SPBuilder do
   end
 
   @doc """
-  Lot 4/6 (DN ring2/fleet_memory.md L478) — résout l'injection monk :
-  si le cap-profile porte `spec.knowledge.{monk_registry, monk_instance}`,
-  lit le registry YAML (kind MemoryRegistry), trouve l'entrée
+  Résout l'injection monk : si le cap-profile porte
+  `spec.knowledge.{monk_registry, monk_instance}`, lit le registry YAML
+  (registry mémoire, shape `spec.monks`), trouve l'entrée
   `monk_instance` → `{:ok, %{persona_hint, corpus_paths}}`. Sinon
-  `:not_a_monk` (le flux compose/3 reste byte-identique chantier-2 —
-  construction-additive, non-recouvrement).
+  `:not_a_monk`. L'injection est purement ADDITIVE : pour un non-monk,
+  le flux compose/3 reste byte-identique (aucune branche ne le traverse).
 
   ## opts
     * `:monk_registry_root` — racine résolvant le path relatif du registry
       (test-seam ; défaut config `:fleet_sp_builder, :monk_registry_root`
       puis `Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")`).
 
-  R0.8-brick1 : le champ `monk_registry` dans le cap-profile = basename
-  (ex `alpha.yaml`) — le code resolve via `:monk_registry_root`. Le path
-  doctrine `05_data-canon/...` est mort : R0.7 a réabsorbé in-repo.
+  Le champ `monk_registry` dans le cap-profile = basename (ex `alpha.yaml`)
+  — le code le résout via `:monk_registry_root`. Ce n'est PAS un path absolu :
+  le registry vit in-repo sous la racine, jamais un chemin doctrine externe.
 
-  Fonction **pure** (lecture FS only, aucun process — Iron Law).
+  Fonction **pure** (lecture FS only, aucun process).
   """
   @spec resolve_monk_injection(Fleet.CapProfile.t(), keyword()) ::
           {:ok, %{persona_hint: String.t(), corpus_paths: [String.t()]}}
@@ -268,9 +268,9 @@ defmodule Fleet.SPBuilder do
   end
 
   defp read_registry(path) do
-    # R0.8-brick2 : `kind: MemoryRegistry` retiré (1 seul kind par dossier
-    # `monks/*.yaml`, le path déclare le rôle). Validation = présence de
-    # `spec.monks` au shape attendu, pas d'attribut `kind` embarqué.
+    # Pas d'attribut `kind` (un seul kind par dossier `monks/*.yaml`, le path
+    # déclare le rôle). Validation = présence de `spec.monks` au shape attendu
+    # (liste), pas un `kind` embarqué dans le YAML.
     case YamlElixir.read_from_file(path) do
       {:ok, %{"spec" => %{"monks" => monks}} = reg} when is_list(monks) ->
         {:ok, reg}
@@ -293,7 +293,7 @@ defmodule Fleet.SPBuilder do
   end
 
   # Wrapper compose/3 : :not_a_monk → injection vide (flux byte-identique
-  # chantier-2) ; {:error,_} → propagé (fail-loud, GO-0/D2).
+  # pour un non-monk) ; {:error,_} → propagé (fail-loud).
   defp monk_injection_or_empty(cap_profile, opts) do
     case resolve_monk_injection(cap_profile, opts) do
       {:ok, inj} -> {:ok, inj}

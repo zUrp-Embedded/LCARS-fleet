@@ -14,15 +14,15 @@ defmodule Fleet.Coord.Application do
   `:one_for_one` mais avec `[]` children (tree minimal). Le supervisor
   existe pour cohérence umbrella OTP.
 
-  ## Z5 (COORD-D1) — vocab d'events mort retiré
+  ## Pas de pré-enregistrement d'atomes d'events
 
-  `@coord_event_atoms` (`coord.notify.dashboard` / `coord.escalate.human` /
-  `coord.action.*`) + l'accesseur `coord_event_atoms/0` étaient un **vocab mort** :
-  disjoint des events RÉELLEMENT émis (`coord.notification_routed` /
-  `coord.escalation_triggered` / `coord.action_dispatched`, internés par les
-  littéraux de `policies.ex` + enregistrés dans `events.yaml`), **0 caller**, jamais
-  broadcastés. Le pré-enregistrement d'atomes était donc sans objet (les vrais atomes
-  sont internés au compile-time par les littéraux `:"coord.*"` de `policies.ex`).
+  Le supervisor NE pré-déclare aucun vocab d'atomes : ce serait sans objet. Les
+  events réellement émis (`coord.notification_routed` / `coord.escalation_triggered` /
+  `coord.action_dispatched`) sont internés au compile-time par les littéraux
+  `:"coord.*"` de `policies.ex` et enregistrés dans `events.yaml` — pas besoin d'un
+  `String.to_existing_atom` côté boot. (Toute liste d'atomes posée ici serait un
+  vocab mort, disjoint de l'émis et jamais broadcasté, comme l'ancien
+  `@coord_event_atoms` `coord.notify.dashboard`/`coord.action.*` à 0 caller.)
   """
 
   use Application

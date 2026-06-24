@@ -1,15 +1,15 @@
 defmodule Fleet.MCP.PodTools do
   @moduledoc """
-  Couche TOOL MCP pod-facing (drive métier ADR-G) — les RPC que le pod (client MCP
+  Couche TOOL MCP pod-facing (drive métier) — les RPC que le pod (client MCP
   claude) appelle pour communiquer avec le fleet, sans scraping ni injection clavier :
     - `get_task`      : canal IN  — le pod PULL son mandat depuis `Fleet.TaskQueue`.
       `{"done": true}` quand aucun mandat (le pod s'arrête). Sinon
       `{"done": false, "task": {"task_id", "ticket_id", "role", "brief", ...}}`.
     - `submit_result` : canal OUT — le pod PUSH son livrable (`payload`).
 
-  Médiation serveur-side (ADR-C III.2) : le pod ne touche jamais la TaskQueue
-  directement ; tout passe par ces tools. Le serveur est **passeur de
-  `correlation_id`** (DN `drive/mcp-server` §A) : `task_id` exposé côté `get_task`,
+  Médiation serveur-side : le pod ne touche jamais la TaskQueue directement (la queue,
+  son schéma, son stockage restent invisibles au pod) ; tout passe par ces tools. Le
+  serveur est **passeur de `correlation_id`** : `task_id` exposé côté `get_task`,
   validé côté `submit_result` (le broker rejette un `task_id` ≠ mandat actif).
 
   Le broker `Fleet.TaskQueue` broadcast lui-même `%Fleet.Event{task_completed}` sur
@@ -124,7 +124,7 @@ defmodule Fleet.MCP.PodTools do
   def handle_tool_call("get_task", arguments, state) do
     case pod_id(arguments) do
       nil ->
-        # F045 : pod_id absent = erreur de config (LCARS_POD_ID perdu), PAS une fin de mandat.
+        # pod_id absent = erreur de config (LCARS_POD_ID perdu), PAS une fin de mandat.
         # Symétrique avec submit_result. Ne jamais masquer en {"done": true} — sinon le pod
         # s'arrête en croyant avoir tout fini alors qu'il n'a jamais pu s'identifier.
         {:error, :pod_id_required, state}
@@ -153,10 +153,10 @@ defmodule Fleet.MCP.PodTools do
             {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
 
           {:error, :no_active_task} ->
-            # F046 : pas de mandat actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
-            # réassigné depuis) → DROP. Le signaler isError (comme :task_id_mismatch / :pod_id_required F045)
-            # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (classe F045).
-            # (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST déjà enregistré.)
+            # pas de mandat actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
+            # réassigné depuis) → DROP. Le signaler isError (comme :task_id_mismatch / :pod_id_required)
+            # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (échec masqué
+            # en succès). (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST enregistré.)
             {:error, :no_active_task, state}
 
           {:error, :double_submit_ignored} ->
@@ -165,8 +165,8 @@ defmodule Fleet.MCP.PodTools do
           {:error, :task_id_mismatch} ->
             {:error, :task_id_mismatch, state}
 
-          # MA-04 — le broadcast lifecycle `task_completed` a échoué : le hop ne finira PAS (le HopConsumer
-          # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès, classe F045) — le pod doit
+          # le broadcast lifecycle `task_completed` a échoué : le hop ne finira PAS (le HopConsumer
+          # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès) — le pod doit
           # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
           # son livrable accepté alors que le verrou forge reste posé à vie.
           {:error, {:broadcast_failed, _reason}} ->
@@ -180,11 +180,11 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # create_ticket — canal DÉLÉGATION : l'architecte délègue une brique d'implémentation à la fleet.
-  # Modèle forge-state-machine (BL-050) : pose une issue PRÊTE pour le poller — auteur=arch (traça),
-  # **assignee=humain owner** (point fixe DN §1) — et S'ARRÊTE. Plus de `start_pipeline` (rail RAM
-  # retiré). Le POLLER prend le relais : issue assignée non verrouillée → spawn le rôle PRODUCTEUR
-  # (`:producer_role`, invariant DN §1 — pas de marqueur par-ticket : un label `lcars-stage:` ré-
-  # encoderait une constante). Dispatch runtime via modules-en-variable (pas de dep compile-time pilot).
+  # Modèle forge-state-machine : pose une issue PRÊTE pour le poller — auteur=arch (traça),
+  # **assignee=humain owner** (point fixe : routing + ownership) — et S'ARRÊTE. Plus de
+  # `start_pipeline` (rail RAM retiré). Le POLLER prend le relais : issue assignée non verrouillée →
+  # spawn le rôle PRODUCTEUR (`:producer_role`, invariant — pas de marqueur par-ticket : un label
+  # `lcars-stage:` ré-encoderait une constante). Dispatch runtime via modules-en-variable (pas de dep compile-time pilot).
   def handle_tool_call(
         "create_ticket",
         %{"title" => title, "brief" => brief, "project" => repo} = args,
@@ -193,9 +193,9 @@ defmodule Fleet.MCP.PodTools do
       when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
     forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 
-    # MA-15 — l'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT. Le rôle est résolu
+    # l'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT. Le rôle est résolu
     # depuis le SPAWN (binding `pod_id → role` gravé côté serveur, lu via `Fleet.Spawner.pod_info`), PAS du
-    # `_lcars_role` du fil. Le wire n'est pas authentifié : un pod (Bash + loopback joignable) pouvait POST
+    # `_lcars_role` du fil. Le wire n'est pas authentifié : un pod (Bash + loopback joignable) peut POST
     # direct `_lcars_role: architect` et usurper le token arch. Le `pod_id` du wire indexe le Registry serveur
     # → le rôle rendu est celui réellement enregistré au spawn de CE pod. nil/introuvable → fallback token
     # système (loggué — dégradé, pas masquage). Agnostique : JAMAIS un rôle hardcodé.
@@ -214,7 +214,7 @@ defmodule Fleet.MCP.PodTools do
           []
       end
 
-    # assignee = l'HUMAIN owner (point fixe DN §1 : routing + ownership, jamais le rôle). Login forge
+    # assignee = l'HUMAIN owner (point fixe : routing + ownership, jamais le rôle). Login forge
     # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue ;
     # Gitea matche l'assignee insensible à la casse → `starfleet` résout `Starfleet`). Pas de label :
     # le rôle producteur est un invariant côté poller, pas un sticker par-ticket.
@@ -224,7 +224,7 @@ defmodule Fleet.MCP.PodTools do
 
         case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
           {:ok, number} ->
-            # #5.2 D2 — DÉCOUPLAGE : create_ticket CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
+            # DÉCOUPLAGE : create_ticket CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
             # (graver la carte) n'est PLUS ici : c'est la responsabilité du SYSTÈME — le POLLER grave la carte
             # par défaut (mandate-gate) sur toute issue assignée routeless (cf. fleet_pilot). Un seul acteur
             # crée+assigne ; le système route. (Uniforme : un ticket humain routeless est onboardé pareil.)
@@ -250,8 +250,8 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # create_ticket SANS `project` valide → REFUS STRUCTUREL. La bonne volonté ne s'impose pas : pas de routage
-  # par défaut (F-TICKET-ROUTE-FOOTGUN — l'arch omettait `project` → misroute silencieux vers le dernier projet
-  # travaillé). `project` est REQUIS ; sans lui, AUCUN ticket n'est créé.
+  # par défaut (un `project` omis routait en silence vers le dernier projet travaillé → misroute). `project`
+  # est REQUIS ; sans lui, AUCUN ticket n'est créé.
   def handle_tool_call("create_ticket", %{"title" => title, "brief" => brief}, state)
       when is_binary(title) and is_binary(brief) do
     {:error,
@@ -265,11 +265,11 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # create_project (Rail 1 e2e 2026-06-14) — canal ONBOARDING : l'architecte démarre un projet neuf.
+  # create_project — canal ONBOARDING : l'architecte démarre un projet neuf.
   # Le SYSTÈME exécute la séquence mécanique (repo forge + dual-worktree main/work-ops + scaffold + push)
   # via Fleet.Pilot.ProjectOnboard, dispatch runtime (pas de dep compile-time fleet_pilot). Le projet créé
   # est posé comme `:delegation_repo` = **contexte/fallback** (lu par get_ticket_status + ultime recours de
-  # create_ticket) — PLUS le défaut primaire de create_ticket (devenu `last_worked_repo`, F-037). L'arch
+  # create_ticket) — PLUS le défaut primaire de create_ticket (devenu le dernier repo travaillé). L'arch
   # référence le projet en passant `project:` explicite (cf. description du tool).
   def handle_tool_call("create_project", %{"name" => name} = args, state) when is_binary(name) do
     onboard = Fleet.Pilot.ProjectOnboard
@@ -335,9 +335,9 @@ defmodule Fleet.MCP.PodTools do
     {:error, :unknown_tool, state}
   end
 
-  # #5.2 D2 — `delegation_carte` + `grave_initial_route` RETIRÉS : le routage (graver la carte) a migré
+  # Pas de `delegation_carte` ni de `grave_initial_route` ici : le routage (graver la carte) vit
   # côté système (fleet_pilot : le poller onboarde toute issue assignée routeless sur la carte par défaut,
-  # cf. StageDispatcher.ensure_carte_or_onboard). create_ticket ne fait plus QUE créer+assigner.
+  # cf. StageDispatcher.ensure_carte_or_onboard). create_ticket ne fait QUE créer+assigner.
 
   # La PR EN COURS du ticket #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
   # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.
@@ -377,7 +377,7 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  # MA-15 — résout le RÔLE de l'appelant depuis le SPAWN (binding `pod_id → role` gravé côté serveur), pas
+  # Résout le RÔLE de l'appelant depuis le SPAWN (binding `pod_id → role` gravé côté serveur), pas
   # du `_lcars_role` du fil (non authentifié → usurpation). Le `pod_id` indexe le Registry du Spawner
   # (`Fleet.Spawner.pod_info/1` → `info.role`, = `metadata.name` du cap-profile au spawn). Seam test
   # `:role_resolver` (app-env) ; défaut = dispatch RUNTIME vers `Fleet.Spawner` (pas de dep compile-time
@@ -401,7 +401,7 @@ defmodule Fleet.MCP.PodTools do
     _, _ -> nil
   end
 
-  # JSON envelope du mandat exposé au pod (DN drive/mcp-server §A) — task_id = correlation_id.
+  # JSON envelope du mandat exposé au pod — task_id = correlation_id.
   defp envelope(%Fleet.TaskQueue.Task{} = t) do
     %{
       "task_id" => t.id,

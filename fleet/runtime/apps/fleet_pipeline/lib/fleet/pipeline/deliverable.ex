@@ -1,13 +1,13 @@
 defmodule Fleet.Pipeline.Deliverable do
   @moduledoc """
-  Publication unifiée du livrable d'un pod (modèle O5) — **un seul** module, deux modes sélectionnés
+  Publication unifiée du livrable d'un pod — **un seul** module, deux modes sélectionnés
   par `spec.deliverable_mode` au catalogue (condition d'entrée), PAS deux modules déguisés. Filtre
-  unification user : « différenciation par catalogue, pas par branche de code » (même règle que
+  unification : « différenciation par catalogue, pas par branche de code » (même règle que
   `lifetime_scope`).
 
   Frontière pod↔système. Le pod produit du CONTENU (un payload de fichiers, OU des commits git natifs) ;
   le système le transforme en livrable durable poussé sur la forge. Le pod n'a conscience NI des
-  branches NI de la forge (forge-aveugle) — c'est le système qui choisit la branche cible (F-04) et
+  branches NI de la forge (forge-aveugle) — c'est le système qui choisit la branche cible et
   pousse. `git` donne l'isolation du livrable ; `bwrap` donne l'isolation du FS.
 
   ## Les trois temps (ordre fixe, identique aux 2 modes pour 2 et 3)
@@ -15,9 +15,9 @@ defmodule Fleet.Pipeline.Deliverable do
       1. CONTENU (seule branche du mode) :
          :payload    → `apply_payload` (écrit les fichiers) + `Git.commit` (le SYSTÈME commite)
          :git_native → l'agent a déjà commité → on vérifie juste qu'un commit existe (base != HEAD)
-      2. GATE I-CBC DURCIE — PARTAGÉE : `DeliverableGate.verify` (base ancêtre F-03, identité F-01,
-         secrets F-02). Un livrable invalide est irreprésentable au push (pas rattrapé après).
-      3. PUSH borné — `Git.push(remote, local_ref:target_branch)` (F-04) sinon fail-loud (R15).
+      2. GATE DURCIE — PARTAGÉE : `DeliverableGate.verify` (base ancêtre, identité, secrets).
+         Un livrable invalide est rendu irreprésentable au push (pas rattrapé après).
+      3. PUSH borné — `Git.push(remote, local_ref:target_branch)` sinon fail-loud.
 
   `base_sha` est verrouillée HORS du pod (au clone, par `WorkspaceProvisioner`) — le pod ne peut pas
   la falsifier. La gate lit le `.git` du workspace en read-only et ne croit AUCUNE assertion du pod.
@@ -42,7 +42,7 @@ defmodule Fleet.Pipeline.Deliverable do
           optional(:target_branch) => String.t(),
           optional(:push?) => boolean(),
           optional(:local_ref) => String.t(),
-          # Z4 (A.2) — rôle attendu pour le trailer `Co-authored-by` (F-01) ; nil/absent → skip.
+          # Rôle attendu pour le trailer `Co-authored-by` ; nil/absent → skip.
           optional(:coauthor_role) => String.t() | nil,
           # mode :payload uniquement
           optional(:files) => [map()],
@@ -53,7 +53,7 @@ defmodule Fleet.Pipeline.Deliverable do
 
   @type result :: %{commit_sha: String.t(), pushed?: boolean(), mode: mode()}
 
-  # R5 (#596) — `core.hooksPath=/dev/null` sur toute invocation git côté monde sur le workspace pod
+  # `core.hooksPath=/dev/null` sur toute invocation git côté monde sur le workspace pod
   # (défense en profondeur ; head_sha/head_advanced sont des rev-parse sans hook, mais coût nul).
   @hooks_off ["-c", "core.hooksPath=/dev/null"]
 
@@ -61,8 +61,8 @@ defmodule Fleet.Pipeline.Deliverable do
   @payload_keys [:files, :identity, :message]
   @identity_keys [:author_name, :author_email, :committer_name, :committer_email]
 
-  # Composants du refspec poussé (`<local_ref>:<target_branch>`). Système-choisis (F-04), mais gardés
-  # au boundary I-CBC : un mandat/catalogue malformé ne doit pas atteindre `git push` brut. Aligné sur
+  # Composants du refspec poussé (`<local_ref>:<target_branch>`). Système-choisis, mais gardés au
+  # boundary (un mandat/catalogue malformé ne doit pas atteindre `git push` brut). Aligné sur
   # `Git.@branch_re` (check-ref-format grosso-modo) ; rejette `..`, espaces, leading `-`.
   @ref_re ~r/^[A-Za-z0-9][A-Za-z0-9._\/\-]*$/
 
@@ -122,7 +122,7 @@ defmodule Fleet.Pipeline.Deliverable do
 
   defp check_mode_keys(_opts), do: :ok
 
-  # Push (défaut true) requiert remote + target_branch + un refspec bien formé (F-04 gardé). Si push?
+  # Push (défaut true) requiert remote + target_branch + un refspec bien formé. Si push?
   # explicitement false (commit local), ils sont facultatifs.
   defp check_push_keys(opts) do
     if push?(opts) do
@@ -159,7 +159,7 @@ defmodule Fleet.Pipeline.Deliverable do
   # existe (HEAD a avancé depuis base). Range vide = le mandat n'a produit aucun commit → fail-loud
   # (la gate, elle, passe sur range vide par vacuité ; la présence d'un commit est un concern mode-side).
   # Le cas « HEAD != base mais historique réécrit » passe ici (avancé) et est rattrapé par la gate
-  # (F-03 base_not_ancestor) — pas de double check ici.
+  # (`base_not_ancestor`) — pas de double check ici.
   defp materialize_content(%{mode: :git_native} = opts) do
     if head_advanced?(opts.workspace, opts.base_sha),
       do: :ok,
@@ -175,9 +175,9 @@ defmodule Fleet.Pipeline.Deliverable do
     end
   end
 
-  # Atomicité best-effort + sécu path traversal (porté de l'Executor O1 ; audit externe 2026-05-24
-  # #3+#4). 2 passes : (1) valide TOUS les paths avant toute écriture ; (2) écrit. Source unique de
-  # l'application payload (I-CBC : une seule autorité de placement du livrable).
+  # Atomicité best-effort + sécu path traversal. 2 passes : (1) valide TOUS les paths avant toute
+  # écriture ; (2) écrit. Source unique de l'application payload : une seule autorité de placement
+  # du livrable (un placement divergent est rendu irreprésentable).
   defp apply_payload_files(workspace, files) when is_list(files) and files != [] do
     with :ok <- validate_payload_files(workspace, files) do
       write_validated_files(workspace, files)
@@ -190,7 +190,7 @@ defmodule Fleet.Pipeline.Deliverable do
     expanded_ws = Path.expand(workspace)
 
     Enum.reduce_while(files, :ok, fn
-      # F081 (review) : `rel_path` non-vide — un path "" passait les checks (Path.expand → workspace,
+      # `rel_path` non-vide — un path "" passe les checks (Path.expand → workspace,
       # symlink_in_chain? sur [] → false) puis File.write sur le dir = :eisdir opaque. Rejet propre.
       %{"path" => rel_path, "content" => content}, :ok
       when is_binary(rel_path) and rel_path != "" and is_binary(content) ->
@@ -200,7 +200,7 @@ defmodule Fleet.Pipeline.Deliverable do
           not (full == expanded_ws or String.starts_with?(full, expanded_ws <> "/")) ->
             {:halt, {:error, {:path_traversal, rel_path}}}
 
-          # F081 : `Path.expand` est LEXICAL (résout `..`, PAS les symlinks). Un symlink checké-in
+          # `Path.expand` est LEXICAL (résout `..`, PAS les symlinks). Un symlink checké-in
           # dans le repo cloné (`out -> /home/<human>/.claude`) passe le check de préfixe ci-dessus,
           # mais `File.write` SUIT le symlink → écriture HORS workspace. On rejette si un composant
           # EXISTANT du chemin (dossiers parents OU fichier cible déjà présent) est un symlink.

@@ -1,20 +1,20 @@
 defmodule Fleet.Spawner.PublishConsumer do
   @moduledoc """
-  B10 C3 / #583 Sprint 1 — consumer `admin.spawn.request` broadcast.
+  Consumer du broadcast `admin.spawn.request`.
 
   Subscribe `Fleet.EventRouter.Bus` topic `fleet.events`, filtre
   `:"admin.spawn.request"`, dispatche `Fleet.Spawner.spawn_pod/3`.
 
-  Payload attendu (rest.ex:55 broadcast conn.body_params) :
+  Payload attendu (rest.ex broadcast les conn.body_params) :
     * `"cap_profile_name"` ou `"role"` — string, nom canon CapProfile (chargé via `Fleet.CapProfile.load/1`)
     * `"ticket_id"` — string (sinon ticket_id enveloppe Bus)
     * `"opts"` — map keyword (optionnel)
 
   Erreurs (load fail / spawn fail) → log warning, **pas de crash**
-  (consumer reste alive, leçon D2 fail-loud non-fatal). Anti-fake-
-  wired : la chaîne broadcast→consume→spawn est end-to-end ; sans
-  consumer, /api/admin/spawn HTTP 202 mais zéro spawn — exactement
-  le finding C3 PARTIAL B10.
+  (consumer reste alive, fail-loud non-fatal). La chaîne doit être
+  câblée bout-à-bout : broadcast→consume→spawn est end-to-end ; sans
+  consumer, /api/admin/spawn renvoie HTTP 202 mais ne spawne rien
+  (succès affiché, zéro pod).
 
   Test-seam : `:subscribe` (default true) + `:spawner` backend
   (default `Fleet.Spawner`, overridable pour mock).
@@ -38,7 +38,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   end
 
   @impl true
-  # BL-021 chantier 9 (B) — schema canon strict.
+  # Schema canon strict.
   def handle_info(
         %Fleet.Event{source: :api, type: :"admin.spawn.request", payload: payload},
         state
@@ -56,10 +56,10 @@ defmodule Fleet.Spawner.PublishConsumer do
     {:noreply, %{state | count: state.count + 1}}
   end
 
-  # Z5 (#50/#51) — clause tuple legacy `{:"admin.spawn.request", event}` + catch-all tuple
-  # RETIRÉES : post-ER-D2 plus AUCUN producteur n'émet le tuple `{atom, map}` (tous en
-  # `%Fleet.Event{}`). Le chemin canon (clause struct ci-dessus) reçoit l'event ; les clauses
-  # tuple étaient mortes. Le catch-all `_other` couvre tout message non-event.
+  # Pas de clause tuple legacy `{:"admin.spawn.request", event}` : AUCUN producteur n'émet le
+  # tuple `{atom, map}` (tous en `%Fleet.Event{}`). Le chemin canon (clause struct ci-dessus)
+  # reçoit l'event ; une clause tuple serait morte. Le catch-all `_other` couvre tout message
+  # non-event.
 
   # autres events broadcasts sur fleet.events → ignore
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
@@ -109,8 +109,8 @@ defmodule Fleet.Spawner.PublishConsumer do
   @doc """
   Convertit une map de payload (clés string) en keyword list pour `spawn_pod`.
 
-  finding Vulcan (atom-leak DoS) : `String.to_atom` sur des clés POST arbitraires
-  permettait d'épuiser la table d'atomes du BEAM. On n'accepte QUE les clés déjà
+  (atom-leak DoS) : `String.to_atom` sur des clés POST arbitraires
+  permettrait d'épuiser la table d'atomes du BEAM. On n'accepte QUE les clés déjà
   connues comme atomes (`to_existing_atom`) ; toute clé inconnue est ignorée.
   Public pour test direct (le chemin via le consumer exige `CapProfile.load` + env
   global → non async-safe).

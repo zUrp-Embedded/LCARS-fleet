@@ -2,7 +2,7 @@ defmodule Fleet.Observation.Application do
   @moduledoc """
   Application supervisor `fleet_observation` (Ring 4 — observation deck).
 
-  Frontière read / observabilité du core remédié (BL-026). Un listener
+  Frontière read / observabilité du core. Un listener
   Cowboy dédié sur `:8091` sert `Fleet.Observation.Deck` (HTML LCARS +
   endpoints read JSON). Coexiste avec les autres surfaces — **on ne coupe
   rien** (ménage à la fin) :
@@ -14,8 +14,8 @@ defmodule Fleet.Observation.Application do
   ## Principe cardinal
 
   Le deck **ne touche pas au core** : il dépend vers le bas (lit Ring 1/2/3),
-  aucune app du core ne dépend de lui. Lecture seule, no-auth, intra-release
-  (ADR-C « 5-zéros »). cf. `DESIGN-observabilite.md`.
+  aucune app du core ne dépend de lui. Lecture seule, intra-release, no-auth
+  (frontière = isolation réseau/container, comme `fleet_api`) : il observe, il ne mute rien.
 
   ## Configuration
 
@@ -27,10 +27,10 @@ defmodule Fleet.Observation.Application do
 
   ## Stratégie
 
-  `:one_for_one` — le listener Cowboy restart `:permanent`. Incrément B =
-  squelette (le deck lit `Spawner.list_pods/0` en direct). Incrément C
-  ajoutera `Fleet.Observation.ReadModel` (GenServer + ETS, abonné au bus)
-  sous ce superviseur, et le deck lira la projection.
+  `:one_for_one` — le listener Cowboy restart `:permanent`. Le superviseur
+  porte aussi `Fleet.Observation.ReadModel` (GenServer + ETS, abonné au bus) :
+  le deck PODS lit `Spawner.list_pods/0` en direct, les decks event-dérivés
+  lisent la projection du ReadModel.
   """
 
   use Application
@@ -42,9 +42,9 @@ defmodule Fleet.Observation.Application do
     Supervisor.start_link(children, opts)
   end
 
-  # ReadModel = abonné unique au bus (incrément C). Gardé `:test` : un abonné
-  # global en test = consommateur Bus parasite (interdit par l'invariant
-  # hermétique). Les tests démarrent le ReadModel manuellement avec subscribe:false.
+  # ReadModel = abonné unique au bus. Gardé `:test` : un abonné global en test
+  # = consommateur Bus parasite (interdit par l'invariant hermétique). Les tests
+  # démarrent le ReadModel manuellement avec subscribe:false.
   defp readmodel_children do
     if Application.get_env(:fleet_observation, :start_readmodel, true) do
       [Fleet.Observation.ReadModel]

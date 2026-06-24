@@ -1,39 +1,39 @@
 defmodule Fleet.API.Dashboard do
   @moduledoc """
-  Plug.Router dashboard V2 Elixir natif (chantier #594 D2).
+  Plug.Router dashboard V2 Elixir natif.
 
-  Per `work/beyond_#4/03_plan/plan-dashboard.md` ruling user 2026-05-20 :
+  Voie retenue (natif intra-release, pas de proxy Python externe) :
   - Voie B (Plug+Cowboy+EEx) — `plug 1.19` + `plug_cowboy 2.8` déjà deps
-  - Pas de proxy Python (`dashboard-server.py` v1.5 décommissionné D9)
-  - Accès direct GenServers/Registry/PubSub intra-release (ADR-C 5-zéros)
+  - Pas de proxy Python (`dashboard-server.py` v1.5 décommissionné)
+  - Accès direct GenServers/Registry/PubSub intra-release (lit l'état via appel direct des modules, sans réseau ni auth)
   - Esthétique LCARS conservée (clean-room copy CSS, attribution
     `starfleet#1` + `starfleet#2`)
 
   ## Routes
 
     * `GET /dashboard` — render EEx layout `priv/dashboard/index.html.eex`
-      (header LCARS + rail nav + main grid panels D3-D7 placeholders)
+      (header LCARS + rail nav + main grid panels placeholders)
     * `GET /dashboard/static/*` — sert `priv/dashboard/static/` via
-      `Plug.Static` (lcars-tva.css, futurs JS/images D3-D7)
+      `Plug.Static` (lcars-tva.css, futurs JS/images des panels)
 
   ## Auth
 
   Pas d'auth HTTP — dashboard intra-release accède aux GenServers/PubSub
-  directement (ADR-C). Toute l'API `:8080` est no-auth par design (frontière =
+  directement. Toute l'API `:8080` est no-auth par design (frontière =
   isolation réseau du container, cf. `Fleet.API.Rest` § Auth).
 
-  ## Sous-tickets
+  ## État
 
-  D2 = squelette HTML + CSS + route. Sub-tickets dual-review D3-D7
-  rempliront les panels (data sources, MEMORY-X, build status,
-  coordination, OAUTH quota).
+  Squelette HTML + CSS + route en place. Les panels (data sources,
+  MEMORY-X, build status, coordination, quota OAUTH) restent à
+  remplir.
   """
 
   use Plug.Router
   require EEx
 
-  # F007 : template compilé UNE FOIS au build (plus de `EEx.eval_file` par requête =
-  # re-lecture+recompilation à chaque hit, + plus de 500 runtime sur template absent côté route NON
+  # Template compilé UNE FOIS au build (pas de `EEx.eval_file` par requête =
+  # re-lecture+recompilation à chaque hit, ni de 500 runtime sur template absent côté route NON
   # authentifiée). `function_from_file` génère `render_dashboard/1` au build ; un template manquant
   # casse le BUILD (détecté tôt), pas une 500. `@external_resource` → recompile si le `.eex` change.
   @dashboard_template Path.expand("../../../priv/dashboard/index.html.eex", __DIR__)

@@ -2,18 +2,18 @@ defmodule Fleet.Credentials.ScopeValidator do
   @moduledoc """
   Gate scope-coverage `oauth_scopes ⊇ scopes_requis_role`.
 
-  Câblé au **spawn** (`Fleet.Spawner.Pod` gate_credentials, do_launch — Z2/CRED-D1) :
-  lit les scopes du `.credentials.json` de l'humain (bindé natif, ADR-F) et refuse le
+  Câblé au **spawn** (`Fleet.Spawner.Pod` gate_credentials, do_launch) :
+  lit les scopes du `.credentials.json` de l'humain (bindé natif, pas de copie) et refuse le
   spawn (`{:credentials_invalid, {:insufficient_scopes, …}}`) si insuffisants. Défense en
   profondeur préflight (le binaire claude impose aussi les scopes via 401, mais on échoue
-  tôt et clair côté runtime). (CRED-D2 : plus de coffre ni `setup-credentials.sh` — ADR-F
-  bind le claudeDir humain, pas de coffre `/var/lib/lcars/credentials`.)
+  tôt et clair côté runtime). Pas de coffre ni `setup-credentials.sh` : le claudeDir humain
+  est bindé directement, il n'y a pas de coffre `/var/lib/lcars/credentials`.
 
   ## Profils de scopes
 
     * `default` — minimum opérationnel (`user:inference`,
       `user:sessions:claude_code`)
-    * `bridge_enabled` — ajoute `user:profile` (D-03 Bridge / Remote
+    * `bridge_enabled` — ajoute `user:profile` (Bridge / Remote
       Control opt-in, hors-MVP mais profil prêt)
     * `mcp_oauth` — ajoute `user:mcp_servers` (MCP OAuth
       Anthropic-mediated)
@@ -37,7 +37,7 @@ defmodule Fleet.Credentials.ScopeValidator do
 
   ## Inputs
 
-    * `oauth_scopes` — liste lue du coffre `oauth_scopes`
+    * `oauth_scopes` — liste lue du `.credentials.json` de l'humain
       (string-split sur whitespace côté caller)
     * `role_profile_flags` — map des flags activés sur le cap-profile,
       par ex. `%{"bridge_enabled" => true}`. Toute clé non listée

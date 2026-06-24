@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     * `/home/projects/<name>`       → worktree branche `main`     (le livrable, push origin)
     * `/home/projects.work/<name>`  → worktree branche `work/ops` (orphan : plans, backlog, ops)
 
-  C'est un **rail mécanique** (compliance structurelle, `docs/#03`) : l'arch *déclenche* via le tool
+  C'est un **rail mécanique** (compliance structurelle) : l'arch *déclenche* via le tool
   MCP `create_project`, le SYSTÈME *exécute* cette séquence déterministe — l'arch ne tape jamais de git.
 
   Séquence (idempotence repo via `create_repo` 409 ; échoue clair si le dossier local existe déjà) :
@@ -20,7 +20,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     6. scaffold `work/ops` (backlog.md, scratchpad.md, plans/)
     7. commit + push `-u work/ops`
 
-  Identité (M2, décision 2026-06-14 — l'onboarding est un acte d'INFRA système, pas du travail créatif) :
+  Identité (décision 2026-06-14 — l'onboarding est un acte d'INFRA système, pas du travail créatif) :
   `author=lcars-system` (le SYSTÈME génère le scaffold depuis des templates ; l'arch n'écrit aucun fichier,
   il **relaie** `name`+`pitch` — il est transparent dans l'attribution git, sa trace vit dans la demande),
   `committer`=l'humain (git config runtime = **l'user qui a initié le projet → tracé**),
@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   @projects_root "/home/projects"
   @work_root "/home/projects.work"
   # author de l'onboarding = le système (il GÉNÈRE le scaffold) — pas l'arch (simple relais), pas l'user
-  # (n'a rien écrit). committer = l'humain (git config) trace qui a initié. M2, 2026-06-14.
+  # (n'a rien écrit). committer = l'humain (git config) trace qui a initié (2026-06-14).
   @onboard_author %{name: "lcars-system", email: "lcars-system@lcars.local"}
 
   @type result :: %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}
@@ -47,7 +47,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     * `:org`           — org forge (défaut `"fleet"`)
     * `:description`   — description du repo (défaut `""`)
     * `:pitch`         — phrase de pitch (scaffold README/spec ; défaut = description)
-    * `:projects_root` / `:work_root` — racines FS (défauts ADR : `/home/projects`, `/home/projects.work`)
+    * `:projects_root` / `:work_root` — racines FS (défauts : `/home/projects`, `/home/projects.work`)
     * `:base_url` / `:token` — override forge (sinon config `:fleet_pilot, :forge`)
 
   Retourne `{:ok, %{repo, project_dir, work_dir}}` ou `{:error, term()}` (fail-fast, pas de rollback
@@ -78,14 +78,14 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  # ── F-037 MULTI-PROJET — rend le repo neuf DÉCOUVRABLE + ACCESSIBLE par la fleet de l'humain ──
+  # ── MULTI-PROJET — rend le repo neuf DÉCOUVRABLE + ACCESSIBLE par la fleet de l'humain ──
   # 1. TOPIC `lcars-fleet-<human>` (source UNIQUE `Fleet.Pilot.Poller.fleet_topic/1`, partagée avec le
   #    poller qui DÉCOUVRE par `search_repos_by_topic`) → un humain ne voit QUE ses projets (isolation REPO ;
   #    l'axe TICKET `assigned_by` est la ceinture). 2. COLLABORATEUR write = l'humain initiateur (les
   #    comptes-rôles, eux, sont ajoutés par `grant_fleet_roles` dans `lock_main`). `my_human` = l'user OS du
   #    runtime — l'onboarding tourne dans SA BEAM (MCP `create_project`), donc `Human.current!()` EST l'humain
   #    qui a initié → cohérent avec le scoping du poller (même source). Fail-loud si l'user est irrésoluble
-  #    (un repo taggé pour le mauvais humain ne serait jamais découvert — I-CBC).
+  #    (un repo taggé pour le mauvais humain ne serait jamais découvert).
   defp register_for_fleet(repo, opts) do
     my_human = Fleet.Credentials.Human.current!()
     topic = Fleet.Pilot.Poller.fleet_topic(my_human)
@@ -103,8 +103,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
   #    leurs reviews ne comptent pas au gate ET le gatekeeper ne peut pas merger (la protection
   #    deadlockerait). 2. `main` est protégée : N approvals (= nb de juges) + dismiss-stale (re-review
   #    au rework) + block-on-rejected (un REQUEST_CHANGES bloque) + pas de push direct (merge via PR).
-  # Mécanique (ce step, pas une action humaine) → tout projet onboardé a l'arbitre côté FORGE (cible DN
-  # §1.4). `work/ops` + feature-branches NON protégées (zones de mouvement direct du système).
+  # Mécanique (ce step, pas une action humaine) → tout projet onboardé a l'arbitre côté FORGE.
+  # `work/ops` + feature-branches NON protégées (zones de mouvement direct du système).
   defp lock_main(full_name, opts) do
     with :ok <- grant_fleet_roles(full_name, opts),
          :ok <- protect_main(full_name, opts) do
@@ -214,7 +214,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp commit(dir, message) do
     with :ok <- git(["-C", dir, "add", "-A"], auth: false) do
       # author = lcars-system (le système génère le scaffold, GIT_AUTHOR forcé) ; committer = git config
-      # runtime (= l'humain qui a initié → tracé, avatar). M2 (2026-06-14).
+      # runtime (= l'humain qui a initié → tracé, avatar) (2026-06-14).
       git(["-C", dir, "commit", "-m", message], auth: false, author: @onboard_author)
     end
   end
@@ -242,7 +242,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   # Commit (author posé) : GIT_AUTHOR = le système (scaffold généré, `@onboard_author`) + GIT_COMMITTER =
   # l'humain qui a initié (traça), résolu ROBUSTE via `ForgeIdentity.human_identity` (git config → GECOS →
-  # login) ⇒ ne dépend PAS du `~/.gitconfig` humain. F-GIT-IDENTITY (2026-06-22) : sans GIT_COMMITTER, un
+  # login) ⇒ ne dépend PAS du `~/.gitconfig` humain (2026-06-22) : sans GIT_COMMITTER, un
   # humain non-configuré → committer « empty ident name » → commit du scaffold refusé → create_project bloqué.
   defp identity_env(%{name: name, email: email}) do
     committer =

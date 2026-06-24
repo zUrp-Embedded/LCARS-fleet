@@ -1,23 +1,23 @@
 defmodule Fleet.MCP.Server do
   @moduledoc """
-  Garde de boot ADR-C de `fleet_mcp` (DN ring4/fleet_mcp.md §"Test récursif D7-bis").
+  Garde de boot de `fleet_mcp` : le serveur MCP est système-side, hors bwrap.
 
-  **Conformance ADR-C OBLIGATOIRE CI** (DN D7-bis ligne 338) : `fleet_mcp` ne doit
-  JAMAIS démarrer côté pod (substrat système-side hors-bwrap). Ce process, supervisé
-  par `Fleet.MCP.Supervisor`, porte la garde : `start_link/1` lit `:boot_environment`
-  (priorité opts > app env > défaut `:host`) et refuse (`{:error, :forbidden_in_pod}`)
-  si `:pod` → l'enfant échoue → le superviseur échoue → l'app ne boote pas dans un pod.
+  **Invariant de containment** : `fleet_mcp` ne doit JAMAIS démarrer côté pod (le pod
+  est CLIENT du serveur, pas son hôte). Ce process, supervisé par `Fleet.MCP.Supervisor`,
+  porte la garde : `start_link/1` lit `:boot_environment` (priorité opts > app env >
+  défaut `:host`) et refuse (`{:error, :forbidden_in_pod}`) si `:pod` → l'enfant échoue
+  → le superviseur échoue → l'app ne boote pas dans un pod. Assertable par un test de
+  conformance (`Process.whereis(Fleet.MCP.Server) == nil` côté pod).
 
-  ## Pourquoi ce process existe (et n'est PAS supprimé) — F049
+  ## Pourquoi ce process existe (et n'est PAS supprimé)
 
-  L'audit l'avait classé « husk » sur son ancienne API `register_channel`/`list_channels`
-  (registre de channels push). Cette API est **retirée** ici (0 appelant prod ; le push
-  channel est mort — PoC Channel KO chantier 7, ADR-G C5.1). MAIS la garde de containment
-  ci-dessus est **load-bearing** (testée par la conformance ADR-C) : on retire le husk, on
-  GARDE la garde. Le drive pod-facing (`get_task`/`submit_result`) vit dans
-  `Fleet.MCP.PodTools`, pas ici.
+  Son ancienne API `register_channel`/`list_channels` (registre de channels push) est
+  **retirée** ici (0 appelant prod ; le push channel est mort — PoC Channel Anthropic
+  KO). MAIS la garde de containment ci-dessus est **load-bearing** (testée par la
+  conformance) : on retire le husk, on GARDE la garde. Le drive pod-facing
+  (`get_task`/`submit_result`) vit dans `Fleet.MCP.PodTools`, pas ici.
 
-  **GenServer** (Iron Law) : aucun état métier ; le process existe pour être l'enfant
+  **GenServer sans état métier** : le process existe pour être l'enfant
   supervisé dont le `start_link` exécute la garde au boot (idle ensuite).
   """
 
@@ -36,7 +36,7 @@ defmodule Fleet.MCP.Server do
   @doc """
   Environnement de boot effectif : `opts[:boot_environment]` >
   `Application.get_env(:fleet_mcp, :boot_environment)` > `:host`.
-  Exposé pour la conformance CI (test ADR-C).
+  Exposé pour le test de conformance « zéro MCP server côté pod ».
   """
   @spec boot_environment(keyword()) :: atom()
   def boot_environment(opts \\ []) do

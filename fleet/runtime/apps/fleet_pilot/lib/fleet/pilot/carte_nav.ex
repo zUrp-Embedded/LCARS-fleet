@@ -1,25 +1,25 @@
 defmodule Fleet.Pilot.CarteNav do
   @moduledoc """
-  Navigation **pure** dans une carte (pipeline) — le chaînage forge-driven d'A2
-  (DN `orchestration/forge-state-machine.md` §8). Remplace la logique RAM
-  `Executor.next_stage_or_done` par une résolution **stateless** : étant donné la
+  Navigation **pure** dans une carte (pipeline) — le chaînage forge-driven des stages.
+  Remplace la logique RAM `Executor.next_stage_or_done` par une résolution
+  **stateless** : étant donné la
   carte (sortie `Fleet.Pipeline.Loader`) + le **nom du stage courant**, calcule le
   stage suivant (ou terminal).
 
   ## Pourquoi clé par NOM de stage, pas par rôle
 
-  La DN §8 dit « le runtime trouve le stage dont `role` = assignee ». **Insuffisant** :
+  Clé naïve « le stage dont `role` = assignee » : **insuffisant** —
   une carte peut avoir le même rôle sur plusieurs stages (ex. `standard-qa` :
   `architect` est sur `brainstorm` ET `plan`). L'assignee (= rôle) seul
   **n'identifie pas** le stage. La position canonique est donc le **nom du stage**, que
-  le runtime grave sur la forge (lock comment enrichi `[lock:role:stage:ts]`, cf.
-  A2.4/A2.1) et relit pour naviguer. `CarteNav` est keyé par nom de stage ; d'où vient
+  le runtime grave sur la forge (lock comment enrichi `[lock:role:stage:ts]`) et
+  relit pour naviguer. `CarteNav` est keyé par nom de stage ; d'où vient
   le nom (forge) est le concern de l'appelant.
 
-  ## Cardinalité (MVP linéaire, DN §8)
+  ## Cardinalité (MVP linéaire)
 
   La chaîne MVP est **linéaire** : chaque stage a 0 ou 1 successeur (le stage qui le
-  `needs`). Un DAG à branches parallèles (≥2 successeurs) est **hors-scope** (§13) →
+  `needs`). Un DAG à branches parallèles (≥2 successeurs) est **hors-scope** →
   `{:error, :dag_not_supported}` explicite (pas de choix silencieux). Idem entrée :
   exactement 1 racine (`needs: []`).
 
@@ -55,7 +55,7 @@ defmodule Fleet.Pilot.CarteNav do
   @doc """
   Stage suivant le stage courant (par `needs`). `:terminal` si aucun successeur
   (fin de chaîne) ; `{:error, :unknown_stage}` si le stage courant n'existe pas ;
-  `{:error, :dag_not_supported}` si ≥2 successeurs (branche parallèle, hors-scope §13).
+  `{:error, :dag_not_supported}` si ≥2 successeurs (branche parallèle, hors-scope).
   """
   @spec next_stage(carte(), stage_name()) ::
           {:ok, {stage_name(), role()}} | :terminal | {:error, atom()}
@@ -94,10 +94,10 @@ defmodule Fleet.Pilot.CarteNav do
     end
   end
 
-  # B (§L441) — `validate_explicit_stage/1` (biconditionnelle soft⟺gatekeeper, A2.3b)
-  # RETIRÉ. Une gate `soft` sur un stage métier est légitime : elle dispatche le
-  # gatekeeper (juge d'exception), elle ne désigne PAS un stage `role: gatekeeper`. Plus
-  # de stage gatekeeper → plus de garde-fou explicit-stage. cf. `HopConsumer.gate_decide`.
+  # Pas de garde-fou « explicit-stage » (biconditionnelle soft⟺gatekeeper) : une gate `soft`
+  # sur un stage métier est légitime — elle dispatche le gatekeeper (juge d'exception), elle ne
+  # désigne PAS un stage `role: gatekeeper`. Il n'existe pas de stage gatekeeper, donc rien à
+  # valider. cf. `HopConsumer.gate_decide`.
 
   # ── internals ──
   defp stages(carte), do: Map.get(carte, "stages", %{})

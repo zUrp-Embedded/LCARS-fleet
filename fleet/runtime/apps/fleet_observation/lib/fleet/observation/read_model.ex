@@ -1,6 +1,6 @@
 defmodule Fleet.Observation.ReadModel do
   @moduledoc """
-  Frontière read-model de l'observabilité (BL-026) — incrément C.
+  Frontière read-model de l'observabilité.
 
   **Un seul** processus consomme le stream `%Fleet.Event{}` (abonné au bus
   `Fleet.EventRouter.Bus`, topic `fleet.events`) et maintient une **projection**
@@ -10,7 +10,7 @@ defmodule Fleet.Observation.ReadModel do
   lectures ne le touchent pas).
 
   Le ReadModel **n'introspecte jamais** l'état interne d'un GenServer tiers : il
-  ne voit que les events publics. C'est la frontière read explicite de BL-026.
+  ne voit que les events publics. C'est la frontière read explicite du core.
 
   ## Projection (forme JSON-safe)
 
@@ -124,7 +124,7 @@ defmodule Fleet.Observation.ReadModel do
     {:noreply, %{state | proj: proj}}
   end
 
-  # Défensif (judged-not-proven) : tout autre message est ignoré, jamais un crash.
+  # Défensif : un message non-`%Fleet.Event{}` est ignoré, jamais un crash.
   def handle_info(_other, state), do: {:noreply, state}
 
   # ── Projection (pure) ────────────────────────────────────────────────────────

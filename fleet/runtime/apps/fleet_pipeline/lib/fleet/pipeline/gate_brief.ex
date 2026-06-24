@@ -18,12 +18,12 @@ defmodule Fleet.Pipeline.GateBrief do
   `ctx` : `%{stage: String, pipeline_id: term, gate: map | nil, outputs: map,
   request: String | nil, subject: :deliverable | :mandate}`.
 
-  `:subject` (#8.E) paramètre CE QUI est jugé — `:deliverable` (défaut, le livrable
+  `:subject` paramètre CE QUI est jugé — `:deliverable` (défaut, le livrable
   produit par un stage : gatekeeper, juges de PR) ou `:mandate` (le MANDAT rédigé
   par l'architecte, jugé AVANT toute production : mandate-review/consultant). Le
   contrat de verdict (`gate-decision-v1`) et la mécanique sont identiques — seul le
   cadrage du « truc à juger » change (sinon un juge de mandat chasserait un livrable
-  inexistant). Défaut `:deliverable` → texte historique inchangé.
+  inexistant). Défaut `:deliverable`.
   """
   @spec build(map()) :: String.t()
   def build(%{stage: stage, pipeline_id: pid} = ctx) do
@@ -73,9 +73,9 @@ defmodule Fleet.Pipeline.GateBrief do
     """
   end
 
-  # #8.E — cadrage du « truc à juger », paramétré par `:subject`. `:deliverable` reproduit le texte
-  # historique À L'IDENTIQUE (gatekeeper/juges-PR inchangés) ; `:mandate` cadre la revue de mandat
-  # (le mandat est rédigé par l'arch, PAS encore exécuté → le juge ne cherche pas un livrable).
+  # Cadrage du « truc à juger », paramétré par `:subject`. `:deliverable` = le cas du livrable
+  # produit (gatekeeper/juges-PR) ; `:mandate` cadre la revue de mandat (le mandat est rédigé par
+  # l'arch, PAS encore exécuté → le juge ne cherche pas un livrable).
   defp subject_phrases(:mandate, stage) do
     %{
       intro: "Le MANDAT à valider (rédigé par l'architecte) est cité plus bas.",
@@ -103,8 +103,8 @@ defmodule Fleet.Pipeline.GateBrief do
   defp gate_type(_), do: "—"
 
   # Demande d'origine = CONTEXTE de jugement, jamais une instruction à exécuter
-  # (sinon le gatekeeper refait la tâche du stage précédent au lieu de juger —
-  # bug PASSE-9). Encadrée et désamorcée explicitement.
+  # (sinon le gatekeeper refait la tâche du stage précédent au lieu de juger).
+  # Encadrée et désamorcée explicitement.
   defp render_request(req) when is_binary(req) and req != "" do
     """
 

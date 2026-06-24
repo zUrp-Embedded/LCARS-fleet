@@ -2,15 +2,15 @@ defmodule Fleet.Pipeline.Application do
   @moduledoc """
   Application `fleet_pipeline` — désormais une **lib carte/gate/delivery** (quasi-pure).
 
-  Le moteur RAM (`Fleet.Pipeline.Executor` + sa pile : Registry/PodRegistry/ExecutorSupervisor,
-  StageRunner, StageSpawner, Toposort, WorkspaceProvisioner) a été RETIRÉ (②.3 / BL-050, 2026-06-16) :
-  il ne reste plus AUCUN process à superviser ici. Le supervisor est donc **vide** — conservé
-  transitoirement ; `fleet_pipeline` est destiné à devenir `fleet_core` **lib-only** (Bloc C, sortie de
-  la clé `mod:` de `mix.exs`). Les survivants sont la lib consommée par le rail forge + 4 apps :
+  Il n'existe AUCUN moteur RAM (pas de `Fleet.Pipeline.Executor` ni sa pile Registry/PodRegistry/
+  ExecutorSupervisor, StageRunner, StageSpawner, Toposort, WorkspaceProvisioner) : aucun process n'est
+  supervisé ici (l'orchestration vit sur le rail forge-state-machine). Le supervisor est donc **vide**
+  — conservé transitoirement ; `fleet_pipeline` tend vers du **lib-only** (sortie de la clé `mod:` de
+  `mix.exs`). Le contenu réel est la lib consommée par le rail forge + 4 apps :
   `Loader` / `Gates` / `Gate` / `GateBrief` / `Deliverable` / `DeliverableGate` / `Git` / `Gatekeeper`.
 
-  Pré-enregistre encore les atomes events `pipeline.*` (legacy Executor ; plus émis, mais le Bus les
-  autorise via `String.to_existing_atom/1` — nettoyage en Bloc C).
+  Pré-enregistre encore les atomes events `pipeline.*` (plus émis, mais le Bus les autorise via
+  `String.to_existing_atom/1`).
   """
 
   use Application
@@ -23,13 +23,13 @@ defmodule Fleet.Pipeline.Application do
 
   @impl Application
   def start(_type, _args) do
-    # Plus aucun process (moteur RAM retiré) → supervisor vide. Conservé transitoirement (Bloc C : lib-only).
+    # Aucun process à superviser → supervisor vide. Conservé transitoirement (cible : lib-only).
     Supervisor.start_link([], strategy: :one_for_one, name: Fleet.Pipeline.Supervisor)
   end
 
   @doc """
-  Liste des atomes events `pipeline.*` pré-enregistrés (legacy Executor). Cohérent ch11 M1
-  atom-leak DoS mitigation (Bus `String.to_existing_atom/1`).
+  Liste des atomes events `pipeline.*` pré-enregistrés. Mitige le DoS par fuite d'atomes
+  (le Bus n'accepte que des atomes déjà existants via `String.to_existing_atom/1`).
   """
   @spec pipeline_event_atoms() :: [atom()]
   def pipeline_event_atoms, do: @pipeline_event_atoms

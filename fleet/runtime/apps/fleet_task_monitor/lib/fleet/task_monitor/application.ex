@@ -7,7 +7,7 @@ defmodule Fleet.TaskMonitor.Application do
   l'instancient directement avec opts isolés (tmp_dir, name unique,
   `subscribe: false`) → suite async-safe. `:one_for_one`.
 
-  ⚠ INERTE EN L'ÉTAT (F141, 2026-06-11) — NE PAS supposer ce module actif :
+  ⚠ INERTE EN L'ÉTAT — NE PAS supposer ce module actif :
     * `:start_monitor` n'est posé `true` NULLE PART (ni `runtime.exs` ni le
       service systemd) → le GenServer ne démarre jamais en prod.
     * `map_event/1` dispatche sur 9 types (`:dispatch_started`,
