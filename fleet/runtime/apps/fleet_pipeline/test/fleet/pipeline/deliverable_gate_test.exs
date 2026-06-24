@@ -225,6 +225,76 @@ defmodule Fleet.Pipeline.DeliverableGateTest do
   end
 
   # ============================================================
+  # F-02 evil-merge — secret/fichier dans l'ARBRE RÉSOLU d'un merge (absent des deux parents)
+  # ============================================================
+
+  # Construit un evil-merge : base → (feature: feat.txt) et (main: mainwork.txt) → merge no-ff dont
+  # l'ARBRE résolu contient `extra_files` (présents dans NI l'un NI l'autre parent ; base reste ancêtre ;
+  # auteur = identité engineer légitime). Retourne {dir, base_sha}.
+  defp setup_evil_merge(dir, extra_files) do
+    {dir, base} = setup_repo(dir)
+    {_, 0} = g(dir, ["checkout", "-q", "-b", "feature"])
+    commit_file(dir, "feat.txt", "feat", "feat")
+    {_, 0} = g(dir, ["checkout", "-q", "main"])
+    commit_file(dir, "mainwork.txt", "mainwork", "mainwork")
+    {_, 0} = g(dir, ["checkout", "-q", "feature"])
+    # merge no-ff de main dans feature (le HEAD livré est ce merge).
+    {_, 0} = g(dir, ["merge", "-q", "--no-ff", "-m", "merge main into feature", "main"])
+
+    # EVIL : on injecte dans l'arbre du merge des fichiers absents des DEUX parents, en amendant le
+    # commit de merge (il garde ses deux parents → reste un merge ; auteur engineer inchangé).
+    Enum.each(extra_files, fn {name, content} ->
+      File.write!(Path.join(dir, name), content)
+    end)
+
+    {_, 0} = g(dir, ["add", "-A"])
+    {_, 0} = g(dir, ["commit", "-q", "--amend", "--no-edit"])
+    {dir, base}
+  end
+
+  test "F-02 evil-merge — secret dans l'arbre résolu du merge (NI parent) → scan_secrets BLOQUE",
+       %{tmp_dir: tmp} do
+    # Distinct de MA-10 (chaîne LINÉAIRE, chaque commit a son diff). Ici le secret n'apparaît dans le
+    # diff d'AUCUN parent : il n'existe QUE dans l'arbre résolu du commit de MERGE. AVANT le fix
+    # `--diff-merges=first-parent`, `git log -p` n'émet aucun diff pour un merge → le scan ne voyait
+    # rien → le secret passait et était poussé. APRÈS, le delta du merge vs son 1er parent est scanné.
+    {dir, base} =
+      setup_evil_merge(Path.join(tmp, "evil-merge-secret"), [
+        {"f.txt", "key = sk-ant-api03-EvilMergeTree123"}
+      ])
+
+    # Sanity : f.txt n'existe dans AUCUN des deux parents du merge (le secret est UNIQUEMENT dans
+    # l'arbre résolu) → `git show HEAD^N:f.txt` échoue (rc 128, chemin inconnu du parent). C'est
+    # précisément ce qui rend `git log -p` aveugle sans `--diff-merges`.
+    {_p1, rc1} = g(dir, ["show", "HEAD^1:f.txt"])
+    {_p2, rc2} = g(dir, ["show", "HEAD^2:f.txt"])
+    assert rc1 != 0, "f.txt ne devrait PAS exister dans le 1er parent"
+    assert rc2 != 0, "f.txt ne devrait PAS exister dans le 2e parent"
+
+    assert {:error, {:secret_detected, "anthropic_key", _}} = Gate.scan_secrets(dir, base)
+    assert {:error, {:secret_detected, _, _}} = Gate.verify(dir, base, @role_emails)
+  end
+
+  test "F-02 evil-merge — fichier blacklisté (id_rsa) dans l'arbre résolu → BLOQUE par nom",
+       %{tmp_dir: tmp} do
+    {dir, base} =
+      setup_evil_merge(Path.join(tmp, "evil-merge-file"), [{"id_rsa", "-----PRIV-----"}])
+
+    assert {:error, {:secret_detected, "blacklisted_file", "id_rsa"}} =
+             Gate.scan_secrets(dir, base)
+  end
+
+  test "evil-merge PROPRE (arbre résolu sans secret) → verify OK (pas de faux positif sur les merges)",
+       %{tmp_dir: tmp} do
+    # `--diff-merges=first-parent` ne doit pas faire échouer un merge LÉGITIME : un merge dont l'arbre
+    # résolu ne contient ni secret ni fichier interdit, identité engineer, base ancêtre → :ok.
+    {dir, base} =
+      setup_evil_merge(Path.join(tmp, "clean-merge"), [{"notes.txt", "résumé du merge propre"}])
+
+    assert {:ok, :verified} = Gate.verify(dir, base, @role_emails)
+  end
+
+  # ============================================================
   # MA-24 — check_base_ancestor : rc TYPÉ (rc1 pas ancêtre / rc128 git_error / rc124 timeout)
   # ============================================================
 

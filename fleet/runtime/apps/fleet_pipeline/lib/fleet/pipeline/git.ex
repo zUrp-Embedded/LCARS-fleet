@@ -282,10 +282,10 @@ defmodule Fleet.Pipeline.Git do
           do: force_push(workspace, remote, refspec),
           else: {:error, {:git_push_failed, rc, String.trim(out)}}
 
-      nil ->
+      {:error, {:timeout, _ms}} ->
         {:error, {:git_push_timeout, push_timeout_ms()}}
 
-      {:exit, reason} ->
+      {:error, {:exit, reason}} ->
         {:error, {:git_push_exit, reason}}
     end
   end
@@ -294,26 +294,25 @@ defmodule Fleet.Pipeline.Git do
     case run_push(workspace, remote, refspec, ["--force"]) do
       {:ok, {_out, 0}} -> {:ok, true}
       {:ok, {out, rc}} -> {:error, {:git_push_failed, rc, String.trim(out)}}
-      nil -> {:error, {:git_push_timeout, push_timeout_ms()}}
-      {:exit, reason} -> {:error, {:git_push_exit, reason}}
+      {:error, {:timeout, _ms}} -> {:error, {:git_push_timeout, push_timeout_ms()}}
+      {:error, {:exit, reason}} -> {:error, {:git_push_exit, reason}}
     end
   end
 
-  # `git push [extra] remote refspec` borné — `git push` n'a pas de timeout natif.
-  # Push réseau hung (DNS, TLS, packfile interrompu) bloquerait le GenServer appelant. Task.async + yield +
-  # shutdown :brutal_kill : pas de retour dans `timeout_ms` → on tue le Task (port → process git via SIGKILL).
+  # `git push [extra] remote refspec` borné via `Fleet.Credentials.Shell` (source unique de la borne) —
+  # `git push` n'a pas de timeout natif. Un push réseau hung (DNS, TLS, packfile interrompu) bloquerait le
+  # GenServer appelant ; le wrapper lance dans un process-group dédié et, à la deadline MUR, tue le GROUPE
+  # entier (le push ET ses helpers de transport) + ferme le port. Remplace le patron `Task.async` +
+  # `shutdown(:brutal_kill)` qui ne tuait que le Task BEAM en laissant le process git (porteur du token
+  # forge dans son environ) fuir. `core.hooksPath=/dev/null` conservé (durcissement hooks inchangé).
   defp run_push(workspace, remote, refspec, extra) do
-    task =
-      Task.async(fn ->
-        System.cmd("git", @hooks_off ++ ["push"] ++ extra ++ [remote, refspec],
-          cd: workspace,
-          stderr_to_stdout: true,
-          # Token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth.
-          env: Fleet.Credentials.ForgeAuth.git_env()
-        )
-      end)
-
-    Task.yield(task, push_timeout_ms()) || Task.shutdown(task, :brutal_kill)
+    # Token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth, injectée
+    # explicitement (Shell.git/2 l'injecterait par défaut, mais on est explicites au site sensible).
+    Fleet.Credentials.Shell.git(@hooks_off ++ ["push"] ++ extra ++ [remote, refspec],
+      cd: workspace,
+      timeout_ms: push_timeout_ms(),
+      env: Fleet.Credentials.ForgeAuth.git_env()
+    )
   end
 
   # Rejet « non-fast-forward » SEUL (l'historique distant a divergé du local — ici un rebase de

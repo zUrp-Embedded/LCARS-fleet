@@ -3,7 +3,7 @@ defmodule Fleet.Credentials.Shell do
   Exécution bornée PAR CONSTRUCTION d'une commande externe (git, et plus généralement tout binaire
   lent/réseau). La frontière qui rend INEXPRIMABLE un `System.cmd("git", …)` non borné
   sur le chemin PROJECT : un appel externe a TOUJOURS une deadline, et la deadline tue le process
-  enfant (port → SIGKILL) si elle expire.
+  enfant — ET tous ses descendants — si elle expire.
 
   ## Pourquoi un wrapper, pas une discipline par call-site
 
@@ -11,19 +11,52 @@ defmodule Fleet.Credentials.Shell do
   interrompu) — ou pire, un git qui ouvre un PROMPT interactif faute de credential (sans TTY → pend à
   l'infini) — bloque le process appelant. Sur le chemin PROJECT ce process est un GenServer (le
   `Fleet.Spawner.Pod` qui clone, le `Fleet.Pilot.Poller` qui merge) : figé, il ne traite plus aucun
-  message → **pod zombie / ticket wedgé**. Le patron borné existait déjà ponctuellement
-  (`Fleet.Pipeline.Git.run_push` : `Task.async` + `yield(timeout) || shutdown(:brutal_kill)`) ; ce
-  module l'EXTRAIT et le DURCIT en helper réutilisable pour que la borne vive dans le TYPE de l'appel,
-  pas dans la vigilance de chaque site.
+  message → **pod zombie / ticket wedgé**. Ce module extrait le patron borné en helper réutilisable
+  pour que la borne vive dans le TYPE de l'appel, pas dans la vigilance de chaque site.
 
-  ## La deadline tue le process OS (durcissement vs le patron historique)
+  ## Deux propriétés DURES de la borne
 
-  Vérifié au sol (2026-06-23) : `Task.shutdown(:brutal_kill)` tue le **Task BEAM** mais ne ferme PAS le
-  port `System.cmd` ni ne tue le binaire enfant → un git/sleep qui pend SURVIT détaché (le GenServer
-  n'est plus figé, mais le process git fuit, continuant à consommer ressources/OAuth). On lance donc
-  via `Port.open` pour tenir l'`os_pid` ; à la deadline on envoie `SIGKILL` à l'os_pid PUIS on ferme le
-  port → le process externe est réellement mort. C'est ce qui ferme le wedge « pod zombie » de bout en
-  bout (le patron `Task` ne le faisait qu'au niveau BEAM).
+  ### 1. La deadline tue le process-GROUP entier, pas juste le top-level
+
+  Un `git` réseau ne s'exécute pas seul : il fork des helpers de transport (`git-remote-https`),
+  des credential helpers, des filtres. Tuer le SEUL process top-level (`kill -KILL <os_pid>`) laisse
+  ces descendants vivants après la deadline — ils continuent de consommer ressources/credentials et
+  l'extraheader d'auth forge reste dans leur environ. On lance donc la commande dans sa **propre
+  session/process-group** (`setsid`) et, à la deadline, on tue le **GROUPE entier**
+  (`kill -KILL -<pgid>`) : le top-level ET toute sa descendance meurent ensemble. Vérifié au sol
+  (2026-06-24) : un `bash -lc "sleep 30 & wait"` qui détache un descendant — `kill -KILL <top>` seul
+  laisse le `sleep` ZOMBIE, alors que `kill -KILL -<pgid>` l'emporte avec.
+
+  ### 2. La deadline est un MUR (wall-clock absolu), pas un idle-gap réarmable
+
+  Un git réseau-hung ne pend pas forcément en silence : il peut GOUTTER de l'output (un octet toutes
+  les `timeout-1` ms — keepalive, progress qui traîne). Une boucle `receive … after timeout_ms` qui
+  se RÉARME à chaque `{:data}` ne tuerait JAMAIS ce git : chaque octet repousse l'échéance. C'est
+  pourtant son scénario cible. On calcule donc une **deadline absolue** (`monotonic_now + timeout_ms`)
+  UNE fois au démarrage ; la boucle `receive` n'attend que le temps RESTANT (`deadline - now`),
+  jamais un `after timeout_ms` ré-armé. Le wall-clock total est borné quelle que soit la cadence de
+  l'output. Vérifié au sol : un process qui émet en continu (drip) est tué à la deadline mur.
+
+  ## Mécanisme du process-group (setsid + découverte du PGID)
+
+  `setsid` place la commande dans une nouvelle session ⇒ elle devient leader de son propre
+  process-group (`PGID == son PID`), distinct de celui du BEAM. On lance `setsid -w <cmd> <args>` :
+  l'option `-w` garde le wrapper `setsid` VIVANT comme parent (sinon il fork-and-die et l'`os_pid`
+  tenu par `Port.open` pointe sur un wrapper déjà mort, sans lien vers le vrai groupe). L'`os_pid`
+  du port est alors le PID de `setsid` ; le vrai process est son UNIQUE enfant, dont on lit le PGID
+  via `/proc/<child>/stat` (champ `pgrp`, Linux — cible documentée). La découverte du PGID se fait AU
+  MOMENT du timeout (pas juste après l'open : `setsid -w` n'a pas forcément encore forké le process
+  réel à cet instant → la découverte rendrait `nil`). Au timeout : `kill -s KILL -- -<child_pgid>`
+  (groupe entier) puis fermeture du port et `kill` du wrapper `setsid`.
+
+  ⚠ Le séparateur `--` du `kill` est LOAD-BEARING : `/usr/bin/kill` (util-linux) lit sinon le
+  `-<pgid>` (commence par `-`) comme une OPTION et rend rc 0 SANS tuer le groupe (vérifié au sol
+  2026-06-24). On passe donc le signal via `-s KILL` puis `--` puis la cible négative.
+
+  Si la découverte du groupe échoue (race rare, /proc indisponible), on retombe sur
+  `kill -KILL <os_pid>` du wrapper : dégradé honnête (le wrapper meurt, un descendant détaché PEUT
+  survivre) — mais c'est le cas-limite, pas le chemin nominal, et il est journalisé implicitement par
+  l'absence de groupe.
 
   ## Placement (cycle compile)
 
@@ -40,11 +73,13 @@ defmodule Fleet.Credentials.Shell do
   ## Résultat TYPÉ (non-ignorable)
 
       {:ok, {output, exit_code}}        # le process a rendu dans le délai (exit_code peut être ≠ 0)
-      {:error, {:timeout, timeout_ms}}  # délai dépassé → process OS TUÉ (SIGKILL) + port fermé
+      {:error, {:timeout, timeout_ms}}  # délai dépassé → process-GROUP OS TUÉ (SIGKILL) + port fermé
       {:error, {:exit, reason}}         # binaire introuvable / impossible à lancer ({:enoent, cmd})
 
   L'appelant DOIT matcher : un `{:error, {:timeout, _}}` n'est pas un succès silencieux.
   """
+
+  require Logger
 
   @default_timeout_ms 30_000
 
@@ -57,8 +92,8 @@ defmodule Fleet.Credentials.Shell do
   Exécute `git <args>` borné. `output` = stdout+stderr fusionnés (`stderr_to_stdout: true`, comme tous
   les sites git du codebase). Options :
 
-    * `:timeout_ms` — deadline (défaut #{@default_timeout_ms} ms). Au-delà, le process git OS est tué
-      (`SIGKILL` à l'os_pid + fermeture du port) et on rend `{:error, {:timeout, timeout_ms}}`.
+    * `:timeout_ms` — deadline MUR (défaut #{@default_timeout_ms} ms). Au-delà, le process-GROUP git OS
+      est tué (`SIGKILL` au groupe + fermeture du port) et on rend `{:error, {:timeout, timeout_ms}}`.
     * `:cd` — répertoire d'exécution.
     * `:env` — env du process enfant. **Défaut** : `Fleet.Credentials.ForgeAuth.git_env/0` (porte
       `GIT_TERMINAL_PROMPT=0` → un git sans credential ÉCHOUE au lieu de prompter/pendre). Passer
@@ -75,43 +110,56 @@ defmodule Fleet.Credentials.Shell do
   Exécute `cmd <args>` borné — primitive générique sous `git/2`. Mêmes options que `git/2`, mais
   **sans** env par défaut (`env: []` si absent) : `git/2` est le seul à injecter `git_env/0`.
 
-  ## La borne TUE le process OS (pas juste le BEAM)
+  ## La borne TUE le process-GROUP OS (pas juste le BEAM, pas juste le top-level)
 
-  Le patron historique (`Fleet.Pipeline.Git.run_push` : `Task.async` + `Task.yield` +
-  `Task.shutdown(:brutal_kill)`) borne le **BEAM** (le GenServer ne reste pas figé), MAIS — vérifié au
-  sol 2026-06-23 — `brutal_kill` tue le Task BEAM **sans fermer le port** ni tuer le `System.cmd`
-  enfant : le process git/sleep SURVIT détaché et continue de consommer ressources/credentials. Pour
-  fermer le wedge de bout en bout (invariant « pas de pod zombie »), on lance via `Port.open` pour TENIR
-  l'`os_pid` du process enfant et, à la deadline, on FERME le port ET on envoie `SIGKILL` à l'os_pid →
-  le process externe est réellement mort. Pas de chemin pour appeler ce module sans deadline.
+  Lancé via `setsid` (nouveau process-group) puis `Port.open` pour tenir l'`os_pid`. À la deadline
+  MUR (deadline absolue, pas idle-gap réarmable), on tue le **GROUPE entier** (`SIGKILL` à `-<pgid>`)
+  ET on ferme le port → la commande et TOUS ses descendants (helpers de transport git, credential
+  helpers, filtres) sont réellement morts. Pas de chemin pour appeler ce module sans deadline.
   """
   @spec run(String.t(), [String.t()], keyword()) :: result()
   def run(cmd, args, opts \\ []) when is_binary(cmd) and is_list(args) do
     timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
 
-    case System.find_executable(cmd) do
-      nil ->
+    case {System.find_executable(cmd), System.find_executable("setsid")} do
+      {nil, _} ->
         {:error, {:exit, {:enoent, cmd}}}
 
-      exe ->
+      {_exe, nil} ->
+        # `setsid` est la condition du process-group tué-par-construction (Linux : toujours présent
+        # via util-linux). Absent = on ne peut PAS garantir l'invariant « groupe entier tué » →
+        # fail-closed plutôt qu'un faux sentiment de sécurité avec un `System.cmd` nu.
+        {:error, {:exit, {:enoent, "setsid"}}}
+
+      {exe, setsid} ->
+        # On lance `setsid -w <exe> <args>` : `-w` garde le wrapper VIVANT (parent du vrai process),
+        # sinon il fork-and-die et l'os_pid du port ne pointe sur rien d'utile. L'exécutable du port
+        # est donc `setsid` ; ses args = `["-w", exe | args]`.
         port_opts =
           [
             :binary,
             :exit_status,
             :stderr_to_stdout,
             :hide,
-            {:args, args},
+            {:args, ["-w", exe | args]},
             {:env, to_charlist_env(Keyword.get(opts, :env, []))}
           ]
           |> maybe_put_cd(Keyword.get(opts, :cd))
 
-        port = Port.open({:spawn_executable, exe}, port_opts)
+        port = Port.open({:spawn_executable, setsid}, port_opts)
 
         # `Port.info(:os_pid)` rend `nil` si le port est DÉJÀ fermé (commande ultra-rapide finie entre
-        # open et info) → pas d'os_pid à killer (le process est déjà parti) ; les messages {:data}/
+        # open et info) → pas de groupe à tuer (le process est déjà parti) ; les messages {:data}/
         # {:exit_status} sont quand même dans la mailbox et `collect` les draine. nil = no-kill.
         os_pid = os_pid(port)
-        collect(port, os_pid, timeout_ms, [])
+
+        # Deadline ABSOLUE calculée UNE fois : la boucle `receive` n'attend que le temps RESTANT, donc
+        # un output qui goutte ne repousse jamais l'échéance (mur, pas idle-gap). Le PGID du groupe à
+        # tuer est découvert au MOMENT du timeout (dans `terminate`), pas ici : juste après `Port.open`,
+        # `setsid -w` n'a pas forcément encore forké le process réel (race) → la découverte immédiate
+        # rendrait `nil`. À la deadline, le process tourne depuis `timeout_ms` → il est là, fork inclus.
+        deadline = System.monotonic_time(:millisecond) + timeout_ms
+        collect(port, os_pid, timeout_ms, deadline, [])
     end
   end
 
@@ -122,24 +170,126 @@ defmodule Fleet.Credentials.Shell do
     end
   end
 
-  # Boucle de réception bornée : accumule la sortie, rend `{:ok, {output, exit_code}}` à l'exit ; à la
-  # deadline, SIGKILL l'os_pid (le process enfant ne survit pas) et ferme le port → `{:error, {:timeout}}`.
-  defp collect(port, os_pid, timeout_ms, acc) do
+  # PGID du process-group à tuer = celui de l'UNIQUE enfant de `setsid` (le vrai process). `setsid -w`
+  # garde le wrapper vivant → le lien PPID est stable le temps de la découverte. On scanne `/proc` pour
+  # le process dont le PPID = l'os_pid du wrapper, puis on lit son champ `pgrp` (champ 5 de
+  # `/proc/<pid>/stat`, après le `state` qui suit le `(comm)` — comm peut contenir espaces/parenthèses,
+  # d'où le découpage APRÈS le dernier `)`). Linux uniquement (cible documentée) ; toute anomalie → nil
+  # (le timeout retombe sur `kill <os_pid>`, dégradé honnête).
+  defp child_pgid(nil), do: nil
+
+  defp child_pgid(parent_os_pid) do
+    with {:ok, entries} <- File.ls("/proc"),
+         child when is_binary(child) <- find_child(entries, parent_os_pid),
+         {:ok, pgid} <- read_pgrp(child) do
+      pgid
+    else
+      _ -> nil
+    end
+  end
+
+  defp find_child(entries, parent_os_pid) do
+    parent = to_string(parent_os_pid)
+
+    Enum.find_value(entries, fn entry ->
+      if pid_dir?(entry) and ppid_of(entry) == parent, do: entry, else: nil
+    end)
+  end
+
+  defp pid_dir?(entry), do: Regex.match?(~r/^\d+$/, entry)
+
+  # PPID = champ 4 de /proc/<pid>/stat ; pgrp = champ 5. Le format est :
+  #   pid (comm) state ppid pgrp ...
+  # `comm` peut contenir des espaces et des parenthèses → on coupe APRÈS le DERNIER `)` puis on
+  # split sur l'espace : [state, ppid, pgrp, ...].
+  defp ppid_of(pid), do: stat_field(pid, 1)
+
+  defp read_pgrp(pid) do
+    case stat_field(pid, 2) do
+      nil ->
+        :error
+
+      s ->
+        case Integer.parse(s) do
+          {n, _} -> {:ok, n}
+          :error -> :error
+        end
+    end
+  end
+
+  defp stat_field(pid, index) do
+    case File.read("/proc/#{pid}/stat") do
+      {:ok, stat} ->
+        stat
+        |> String.split(")")
+        |> List.last()
+        |> String.trim()
+        |> String.split(" ")
+        |> Enum.at(index)
+
+      _ ->
+        nil
+    end
+  end
+
+  # Boucle de réception bornée par DEADLINE MUR : accumule la sortie, rend `{:ok, {output, exit_code}}`
+  # à l'exit ; à la deadline (temps RESTANT épuisé), tue le process-GROUP et ferme le port → `{:error,
+  # {:timeout, timeout_ms}}`. La valeur du `after` est `deadline - now` (jamais ré-armée à `timeout_ms`) :
+  # un output qui goutte fait progresser la boucle mais NE repousse PAS l'échéance.
+  defp collect(port, os_pid, timeout_ms, deadline, acc) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
     receive do
       {^port, {:data, data}} ->
-        collect(port, os_pid, timeout_ms, [data | acc])
+        collect(port, os_pid, timeout_ms, deadline, [data | acc])
 
       {^port, {:exit_status, code}} ->
         {:ok, {acc |> Enum.reverse() |> IO.iodata_to_binary(), code}}
     after
-      timeout_ms ->
-        # Tuer l'os_pid AVANT de fermer le port : le SIGKILL OS garantit que git/sleep meurt même si
-        # le close du port ne propage pas le signal (le trou du patron `brutal_kill`). `kill` best-effort
-        # (le process a pu mourir entre-temps). nil = process déjà parti, rien à killer. Puis close port.
-        if os_pid, do: System.cmd("kill", ["-KILL", to_string(os_pid)], stderr_to_stdout: true)
-        safe_close(port)
+      remaining ->
+        terminate(port, os_pid)
         {:error, {:timeout, timeout_ms}}
     end
+  end
+
+  # Tuer à la deadline. Le PGID du groupe à tuer = celui du process RÉEL (l'enfant de `setsid -w`),
+  # découvert MAINTENANT : le process tourne depuis `timeout_ms` (fork inclus) → la découverte est
+  # fiable, contrairement à juste après l'open où `setsid -w` n'a pas forcément encore forké. Cible
+  # PRIVILÉGIÉE = le process-GROUP entier : le top-level ET tous ses descendants (helpers de transport
+  # git, filtres) meurent ensemble. Fallback si le PGID n'a pas pu être découvert (process déjà parti /
+  # /proc indisponible) : on tue le wrapper `setsid` (dégradé honnête). `kill` best-effort (le process a
+  # pu mourir entre-temps). Puis fermeture du port. nil = rien à tuer.
+  defp terminate(port, os_pid) do
+    case child_pgid(os_pid) do
+      pgid when is_integer(pgid) ->
+        kill_group(pgid)
+
+        # Le wrapper setsid lui-même est leader d'une AUTRE session (celle du BEAM) → pas dans le
+        # groupe tué ; on l'achève séparément pour ne pas laisser le port à demi-vivant.
+        kill_pid(os_pid)
+
+      nil ->
+        kill_pid(os_pid)
+    end
+
+    safe_close(port)
+  end
+
+  # SIGKILL au process-GROUP entier (PID négatif = groupe en sémantique `kill(2)`). On passe le signal
+  # via `-s KILL` et on SÉPARE l'argument-cible par `--` : sinon `/usr/bin/kill` (util-linux) lit le
+  # `-<pgid>` (commence par `-`) comme une OPTION et NON comme une cible → il rend rc 0 SANS tuer le
+  # groupe (vérifié au sol 2026-06-24 : `kill -KILL -<pgid>` laisse le descendant vivant ; `kill -s KILL
+  # -- -<pgid>` le tue). Le `--` ferme le parsing d'options → le `-<pgid>` est interprété comme cible.
+  defp kill_group(pgid) do
+    System.cmd("kill", ["-s", "KILL", "--", "-#{pgid}"], stderr_to_stdout: true)
+  end
+
+  # SIGKILL à un PID unique (le wrapper setsid). `--` pour rester homogène (un PID positif n'est pas
+  # ambigu, mais on garde la même forme défensive).
+  defp kill_pid(nil), do: :ok
+
+  defp kill_pid(pid) do
+    System.cmd("kill", ["-s", "KILL", "--", to_string(pid)], stderr_to_stdout: true)
   end
 
   defp safe_close(port) do

@@ -74,6 +74,74 @@ defmodule Fleet.Credentials.ShellTest do
 
       assert String.trim(out) == "xyz"
     end
+
+    @tag :tmp_dir
+    test "un DESCENDANT détaché est tué au timeout (process-GROUP, pas juste le top-level)", %{
+      tmp_dir: tmp
+    } do
+      # INVARIANT C1 (process-group). Un git réseau fork des helpers de transport ; tuer le SEUL
+      # top-level les laisserait vivants. On simule avec un process qui DÉTACHE un descendant
+      # (`sleep & wait`) dont le PID est DISTINCT du top-level. Avant le fix (`kill <os_pid>` du seul
+      # top), le sleep descendant SURVIVAIT à la deadline ; avec le fix (`kill -<pgid>` du groupe), il
+      # meurt. On grave le pid du descendant dans un fichier puis on vérifie qu'il est mort après timeout.
+      desc_pid_file = Path.join(tmp, "descendant.pid")
+      script = Path.join(tmp, "fork_then_hang.sh")
+
+      # Le top-level lance `sleep 30` en BACKGROUND (PID distinct), grave ce pid, puis `wait`. Path via
+      # var d'env (nom de répertoire ExUnit non re-parsé par le shell).
+      File.write!(
+        script,
+        ~S(#!/bin/bash) <>
+          "\n" <>
+          ~S(sleep 30 &) <> "\n" <> ~S(echo $! > "$DESCPIDFILE") <> "\n" <> ~S(wait) <> "\n"
+      )
+
+      File.chmod!(script, 0o755)
+
+      assert {:error, {:timeout, 500}} =
+               Shell.run("/bin/bash", [script],
+                 timeout_ms: 500,
+                 env: [{"DESCPIDFILE", desc_pid_file}]
+               )
+
+      assert File.exists?(desc_pid_file),
+             "le script aurait dû démarrer et graver le pid du descendant avant d'être tué"
+
+      desc_pid = desc_pid_file |> File.read!() |> String.trim()
+
+      # Le descendant (PID ≠ top-level) doit être mort : la borne a tué le GROUPE, pas juste le top.
+      assert eventually_dead_os_pid?(desc_pid, 40),
+             "le DESCENDANT détaché (pid #{desc_pid}) survit à la deadline — la borne ne tue que le " <>
+               "top-level, pas le process-group (régression C1)"
+
+      # Filet : si le test échoue, ne pas laisser le sleep tourner 30s.
+      on_exit(fn -> System.cmd("kill", ["-KILL", desc_pid], stderr_to_stdout: true) end)
+    end
+
+    test "DEADLINE MUR : un process qui DRIPPE de l'output est tué à l'échéance (pas réarmée)" do
+      # INVARIANT C2 (deadline mur, pas idle-gap). Un git réseau-hung peut GOUTTER de l'output (un
+      # octet juste avant chaque échéance) ; une boucle `receive … after timeout_ms` RÉARMÉE à chaque
+      # {:data} ne le tuerait JAMAIS. Le process ci-dessous émet une ligne toutes les ~80ms en boucle
+      # infinie. Avec un timeout de 400ms, la deadline ABSOLUE le coupe vers 400ms quoi qu'il drippe ;
+      # une borne idle-gap se réarmerait à chaque ligne (gap 80ms < 400ms) et n'expirerait jamais → le
+      # test pendrait bien au-delà (on borne donc l'attente du test à 5s).
+      t0 = System.monotonic_time(:millisecond)
+
+      assert {:error, {:timeout, 400}} =
+               Shell.run(
+                 "/bin/sh",
+                 ["-c", "while true; do echo drip; sleep 0.08; done"],
+                 timeout_ms: 400
+               )
+
+      elapsed = System.monotonic_time(:millisecond) - t0
+
+      # La deadline mur a coupé peu après 400ms, PAS à l'infini (marge large pour CI lent). Un idle-gap
+      # réarmé ne serait jamais arrivé ici.
+      assert elapsed < 5_000,
+             "le drip a repoussé la deadline (#{elapsed}ms) → la borne se réarme à chaque output " <>
+               "(régression C2 : idle-gap au lieu de wall-clock)"
+    end
   end
 
   # async: false — ce describe mute l'env applicatif global `:fleet_credentials, :forge_auth` (que

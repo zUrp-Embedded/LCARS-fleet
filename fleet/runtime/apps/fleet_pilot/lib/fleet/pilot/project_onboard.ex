@@ -227,16 +227,31 @@ defmodule Fleet.Pilot.ProjectOnboard do
     git(args, auth: true)
   end
 
-  # System.cmd("git", ...) avec gestion d'erreur typée. `auth: true` → token forge en env (hors argv,
-  # ForgeAuth). `author: %{name,email}` → GIT_AUTHOR_* (committer laissé à la git config = l'humain).
+  # Git borné par construction via `Fleet.Credentials.Shell` (source unique de la borne) avec gestion
+  # d'erreur typée. Les ops réseau (clone, push : `auth: true`) peuvent hung/prompter ; le wrapper les
+  # lance dans un process-group dédié et, à la deadline MUR, tue le GROUPE entier (l'op ET ses helpers de
+  # transport, porteurs du token forge) + ferme le port. Les ops locales (worktree/add/commit) passent
+  # par le même chemin → aucun `System.cmd git` nu ne subsiste ici. `auth: true` → token forge en env
+  # (hors argv, ForgeAuth). `author: %{name,email}` → GIT_AUTHOR_* (committer laissé à la git config =
+  # l'humain). On passe TOUJOURS `:env` explicitement (donc Shell n'injecte pas son défaut `git_env/0`) :
+  # les ops locales tournent sans auth, mais l'anti-prompt n'y change rien (pas de réseau).
   defp git(args, opts) do
     env =
       if(Keyword.get(opts, :auth, false), do: ForgeAuth.git_env(), else: []) ++
         identity_env(Keyword.get(opts, :author))
 
-    case System.cmd("git", args, env: env, stderr_to_stdout: true) do
-      {_, 0} -> :ok
-      {out, code} -> {:error, {:git_failed, Enum.take(args, 3), code, String.slice(out, 0, 500)}}
+    case Fleet.Credentials.Shell.git(args, env: env) do
+      {:ok, {_out, 0}} ->
+        :ok
+
+      {:ok, {out, code}} ->
+        {:error, {:git_failed, Enum.take(args, 3), code, String.slice(out, 0, 500)}}
+
+      {:error, {:timeout, ms}} ->
+        {:error, {:git_timeout, Enum.take(args, 3), ms}}
+
+      {:error, {:exit, reason}} ->
+        {:error, {:git_exit, Enum.take(args, 3), reason}}
     end
   end
 

@@ -216,7 +216,21 @@ defmodule Fleet.Pipeline.DeliverableGate do
     # ajouté puis supprimé apparaît dans le commit d'ajout), là où `diff --name-only base..HEAD` ne verrait
     # que le NET (fichier supprimé en bout de chaîne → invisible). `--pretty=format:` supprime les en-têtes
     # de commit (on ne veut que les noms de fichiers).
-    case git(workspace, ["log", "-p", "--name-only", "--pretty=format:", "#{base_sha}..HEAD"]) do
+    #
+    # `--diff-merges=first-parent` : SANS lui, `git log -p` n'émet AUCUN diff pour un commit de MERGE → un
+    # fichier interdit introduit UNIQUEMENT dans l'arbre RÉSOLU d'un evil-merge (présent dans NI l'un NI
+    # l'autre parent, base toujours ancêtre, auteur légitime) passerait le scan et serait poussé. L'option
+    # fait émettre, pour chaque merge, le delta vs son PREMIER parent (= ce que le merge introduit dans la
+    # mainline) → le fichier de l'arbre résolu redevient visible. N'altère PAS le scan linéaire (chaque
+    # commit non-merge garde son diff par-commit).
+    case git(workspace, [
+           "log",
+           "-p",
+           "--name-only",
+           "--diff-merges=first-parent",
+           "--pretty=format:",
+           "#{base_sha}..HEAD"
+         ]) do
       {out, 0} ->
         files = String.split(out, "\n", trim: true)
 
@@ -234,7 +248,20 @@ defmodule Fleet.Pipeline.DeliverableGate do
     # `git log -p --unified=0` rend le diff DE CHAQUE COMMIT individuellement (pas le net) → un
     # secret introduit-puis-retiré porte sa ligne `+` dans le commit d'introduction. Seules les lignes
     # AJOUTÉES (`+`) comptent — on ne bloque pas sur du contexte préexistant.
-    case git(workspace, ["log", "-p", "--unified=0", "--pretty=format:", "#{base_sha}..HEAD"]) do
+    #
+    # `--diff-merges=first-parent` : SANS lui, `git log -p` n'émet AUCUN diff pour un commit de MERGE → un
+    # secret introduit UNIQUEMENT dans l'arbre RÉSOLU d'un evil-merge (présent dans NI l'un NI l'autre
+    # parent) passerait le scan et serait poussé dans l'historique forge. L'option fait émettre, pour
+    # chaque merge, le delta vs son PREMIER parent (= ce que le merge introduit dans la mainline) → la
+    # ligne `+` du secret de l'arbre résolu redevient visible. N'altère PAS le scan linéaire.
+    case git(workspace, [
+           "log",
+           "-p",
+           "--unified=0",
+           "--diff-merges=first-parent",
+           "--pretty=format:",
+           "#{base_sha}..HEAD"
+         ]) do
       {out, 0} ->
         added =
           out

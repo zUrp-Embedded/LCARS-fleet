@@ -1240,18 +1240,18 @@ defmodule Fleet.Pilot.StageDispatcher do
       get_in(Application.get_env(:fleet_pilot, :forge, []), [:base_url])
   end
 
-  # `git ls-remote <repo_url> <branch>` borné + auth runtime → SHA du tip (hors-pod).
-  # Symétrique de `Fleet.Pipeline.Executor.ls_remote_sha` (même rôle de pin de base).
+  # `git ls-remote <repo_url> <branch>` borné via `Fleet.Credentials.Shell` (source unique de la borne)
+  # + auth runtime → SHA du tip (hors-pod). Symétrique du pin de base côté pipeline. Le wrapper lance le
+  # ls-remote (RÉSEAU : peut hung/prompter) dans son propre process-group et, à la deadline MUR, tue le
+  # GROUPE entier (le ls-remote ET ses helpers de transport, porteurs du token forge) + ferme le port —
+  # là où le patron `Task.async` + `shutdown(:brutal_kill)` ne tuait que le Task BEAM en laissant fuir le
+  # process git.
   defp ls_remote_sha(repo_url, branch) do
     # Token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth.
-    git_env = Fleet.Credentials.ForgeAuth.git_env()
-
-    task =
-      Task.async(fn ->
-        System.cmd("git", ["ls-remote", repo_url, branch], stderr_to_stdout: true, env: git_env)
-      end)
-
-    case Task.yield(task, 15_000) || Task.shutdown(task, :brutal_kill) do
+    case Fleet.Credentials.Shell.git(["ls-remote", repo_url, branch],
+           timeout_ms: 15_000,
+           env: Fleet.Credentials.ForgeAuth.git_env()
+         ) do
       {:ok, {out, 0}} ->
         case out |> String.split("\n", trim: true) |> List.first() do
           nil -> {:error, :no_ref}
@@ -1261,10 +1261,10 @@ defmodule Fleet.Pilot.StageDispatcher do
       {:ok, {out, rc}} ->
         {:error, {rc, String.trim(out)}}
 
-      nil ->
+      {:error, {:timeout, _ms}} ->
         {:error, :timeout}
 
-      {:exit, reason} ->
+      {:error, {:exit, reason}} ->
         {:error, {:exit, reason}}
     end
   end

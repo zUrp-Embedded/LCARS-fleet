@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-23 (+ ProjectOnboard — onboarding dual-worktree Rail 1)
+**Dernière révision** : 2026-06-24 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -47,6 +47,9 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   (`git diff`) + porte le **critère** (body de l'issue, désamorcé I-CBC via `GateBrief :request`) ; le
   mandat **rework** injecte le **body des reviews REQUEST_CHANGES** (`ForgeClient.change_request_feedback/3`)
   — sans quoi le juge jugeait du `{}` et l'eng corrigeait à l'aveugle (wedge prouvé live morse).
+  Le pin de base (`ls-remote` du tip, hors-pod) passe par `Fleet.Credentials.Shell.git` : borné par
+  construction (process-group dédié, tué entier à la deadline mur) — remplace le `Task.async`+`brutal_kill`
+  qui ne tuait que le Task BEAM en laissant fuir le process git porteur du token forge.
 - `Fleet.Pilot.Poller` — scanne le repo, lit la **route-comment** (`[lcars-route:carte:stage]`, gravée par `create_ticket` = la state-machine de routing) → dispatche le rôle du stage (`carte_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du 1er stage). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
 - `Fleet.Pilot.Labels` — vocabulaire wire-protocol (source unique) : **uniquement** ce qui n'est pas
   dérivable de l'état forge — verrous `lcars-in-flight`/`lcars-awaits-human`, états `state:*` (legacy carte).
@@ -84,6 +87,11 @@ dual-dir de LCARS (un repo, **deux worktrees**) :
 
 - `/home/projects/<name>` → worktree `main` (livrable, push origin) ;
 - `/home/projects.work/<name>` → worktree **orphan** `work/ops` (plans/backlog/ops).
+
+Toutes les ops git de l'onboarding (clone/worktree/commit/push) passent par `Fleet.Credentials.Shell.git` :
+bornées par construction (process-group dédié, tué entier à la deadline mur) — aucun `System.cmd("git", …)`
+nu ne subsiste, et un clone/push réseau qui pend ne fige plus l'orchestration ni ne laisse fuir un process
+git porteur du token forge.
 
 Séquence : `ForgeClient.create_repo` (org `fleet`, `auto_init`) → `git clone main` → scaffold (README,
 .gitignore, .editorconfig, docs/spec.md) → commit+push `main` → `git worktree add --orphan -b work/ops`
