@@ -57,7 +57,12 @@ defmodule Fleet.MCP.Supervisor do
   # Démarré SSI `:pod_facing_port` est configuré (deploy host-side). nil → [] : aucun listener
   # (défaut ; tests et apps qui n'en ont pas besoin restent inchangés). Les pods s'y connectent via
   # le pont stdio (http://localhost:<port>/mcp). TaskQueue = état partagé (résultats corrélés pod_id).
-  defp pod_facing_children(opts) do
+  @doc """
+  Child specs du listener pod-facing (public pour le test de bind : l'option `:host`
+  passée à PodTools porte l'`:ip` d'écoute — loopback par défaut, compatible pods).
+  Retourne `[]` quand `:pod_facing_port` n'est pas configuré.
+  """
+  def pod_facing_children(opts) do
     case pod_facing_port(opts) do
       nil ->
         []
@@ -65,11 +70,20 @@ defmodule Fleet.MCP.Supervisor do
       port ->
         ref = Keyword.get(opts, :pod_facing_ranch_ref, :fleet_mcp_pod_facing)
 
+        # Bind loopback par défaut. Le transport HTTP ExMCP dérive l'ip d'écoute de
+        # son option `:host` (ExMCP.Server.Transport.parse_host/1, qui accepte un
+        # tuple IP tel quel) — on lui passe donc l'ip calculée par la source unique
+        # Fleet.EventRouter.BindAddress. Loopback est COMPATIBLE avec les pods : ils
+        # joignent le MCP via le pont stdio→HTTP sur http://127.0.0.1:<port>/mcp
+        # (cf. LCARS_FLEET_MCP_URL, bin/fleet_mcp_stdio_bridge.py) — même hôte, donc
+        # loopback ne casse rien. Exposition publique (rare) = LCARS_BIND_HOST.
+        ip = Fleet.EventRouter.BindAddress.ip()
+
         # Le broker (Fleet.TaskQueue.Server) est démarré par l'app fleet_task_queue,
         # pas ici : fleet_mcp sert la queue, ne la possède pas.
         [
           Supervisor.child_spec(
-            {Fleet.MCP.PodTools, [transport: :http, port: port, ranch_ref: ref]},
+            {Fleet.MCP.PodTools, [transport: :http, host: ip, port: port, ranch_ref: ref]},
             id: Fleet.MCP.PodTools
           )
         ]

@@ -86,7 +86,12 @@ defmodule Fleet.API.Application do
     [Fleet.API.GitCommitter]
   end
 
-  defp listener_children do
+  @doc """
+  Child specs du listener Cowboy (public pour le test de bind : l'`:ip` du listener
+  est un contrat de sécurité — loopback par défaut, override nommé seulement).
+  Retourne `[]` quand `:start_listener` est `false`.
+  """
+  def listener_children do
     if Application.get_env(:fleet_api, :start_listener, true) do
       port = Application.get_env(:fleet_api, :http_port, 8080)
 
@@ -105,9 +110,16 @@ defmodule Fleet.API.Application do
          ]}
       ]
 
+      # Bind loopback par défaut (frontière = isolation réseau, cf. Rest § Auth :
+      # surface no-auth qui inclut /api/admin/spawn et /api/config/update — ne JAMAIS
+      # l'exposer 0.0.0.0 par défaut). Le dashboard navigateur (:8080/dashboard + /ws)
+      # devient local-only : un accès distant passe par un tunnel/reverse-proxy.
+      # Exposition publique = opt-in nommé via Fleet.EventRouter.BindAddress (LCARS_BIND_HOST).
+      ip = Fleet.EventRouter.BindAddress.ip()
+
       [
         {Plug.Cowboy,
-         scheme: :http, plug: Fleet.API.Rest, options: [port: port, dispatch: dispatch]}
+         scheme: :http, plug: Fleet.API.Rest, options: [ip: ip, port: port, dispatch: dispatch]}
       ]
     else
       []

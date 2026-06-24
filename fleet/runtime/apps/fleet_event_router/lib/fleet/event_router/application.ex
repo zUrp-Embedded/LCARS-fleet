@@ -63,12 +63,28 @@ defmodule Fleet.EventRouter.Application do
     [Fleet.EventRouter.Bus]
   end
 
-  defp webhook_children do
+  @doc """
+  Child specs du listener Cowboy webhook (public pour le test de bind : l'`:ip` est
+  un contrat — loopback par défaut, override de surface `LCARS_WEBHOOK_BIND_HOST`).
+  Retourne `[]` quand `:start_webhooks` est `false`.
+  """
+  def webhook_children do
     if Application.get_env(:fleet_event_router, :start_webhooks, false) do
       port = Application.get_env(:fleet_event_router, :webhook_port, 8081)
 
+      # Bind loopback par défaut (invariant runtime : un listener n'écoute pas
+      # 0.0.0.0 par accident). Le webhook est l'unique surface dont l'exposition
+      # publique est un besoin légitime : si la forge Gitea est SUR UNE AUTRE
+      # MACHINE, ses POST n'atteignent pas une loopback. C'est exactement le rôle
+      # de l'override de surface `LCARS_WEBHOOK_BIND_HOST` (ex. `0.0.0.0`) — opt-in
+      # nommé qui n'ouvre QUE le webhook, pas les surfaces de commande (fleet_api,
+      # deck). Forge co-localisée (loopback) → aucun override nécessaire. La
+      # protection reste le HMAC SHA256 sur le secret partagé, indépendant du bind.
+      ip = Fleet.EventRouter.BindAddress.ip("LCARS_WEBHOOK_BIND_HOST")
+
       [
-        {Plug.Cowboy, scheme: :http, plug: Fleet.EventRouter.WebhooksGitea, options: [port: port]}
+        {Plug.Cowboy,
+         scheme: :http, plug: Fleet.EventRouter.WebhooksGitea, options: [ip: ip, port: port]}
       ]
     else
       []

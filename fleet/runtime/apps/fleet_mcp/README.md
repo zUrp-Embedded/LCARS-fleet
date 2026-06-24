@@ -1,7 +1,7 @@
 # fleet_mcp
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-23
+**Dernière révision** : 2026-06-24
 **Statut** : implémenté — serveur MCP pod-facing (`get_task` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
@@ -42,6 +42,12 @@ doit y être ajouté en miroir (dette connue : proxifier `tools/list` vers le ce
 
 - `:fleet_mcp, :pod_facing_port` — port d'écoute MCP côté pods.
 - `:fleet_mcp, :boot_environment` — environnement injecté au boot du serveur.
+- `LCARS_BIND_HOST` (env) — IP de bind du listener pod-facing. **Loopback
+  `127.0.0.1` par défaut** : les pods joignent le MCP via le pont stdio→HTTP sur
+  `http://127.0.0.1:<port>/mcp` (même hôte, cf. `LCARS_FLEET_MCP_URL` /
+  `bin/fleet_mcp_stdio_bridge.py`) → loopback est COMPATIBLE, ne casse rien.
+  Threadé via l'option `:host` du transport HTTP ExMCP. Source unique :
+  `Fleet.EventRouter.BindAddress` ; exposer = opt-in via cette env.
 
 ## Frontière vendor
 

@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-14 (P05 — readiness honnête `/api/readiness/deep` + `Fleet.API.Readiness` read-model anti-vert-creux)
+**Dernière révision** : 2026-06-24 (P05 — readiness honnête `/api/readiness/deep` + `Fleet.API.Readiness` read-model anti-vert-creux)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -66,6 +66,13 @@ Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 | `:fleet_api, :http_port` | `8080` | port Cowboy listener |
 | `:fleet_api, :start_listener` | `true` | bool — `false` en tests (`config/test.exs`) |
 | `:fleet_api, :git_repo_path` | `/var/lib/lcars/config` | racine repo config |
+| `LCARS_BIND_HOST` (env) | `127.0.0.1` (loopback) | IP de bind du listener — surface no-auth (`/api/admin/spawn`, `/api/config/update`) **local-only par défaut** ; exposer (ex. `0.0.0.0`) = opt-in explicite via cette env. Source unique : `Fleet.EventRouter.BindAddress`. |
+
+> **Bind loopback (frontière réseau).** Le listener écoute `{127,0,0,1}` par
+> défaut : la surface est no-auth et le contrat de sécurité est « isolation
+> réseau ». Le dashboard navigateur (`:8080/dashboard` + `/ws`) est donc
+> local-only ; un accès distant passe par un tunnel/reverse-proxy. Exposer
+> publiquement = poser `LCARS_BIND_HOST` (global, toutes surfaces).
 
 ## Tests
 

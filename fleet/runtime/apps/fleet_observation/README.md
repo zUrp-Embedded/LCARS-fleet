@@ -1,7 +1,7 @@
 # fleet_observation
 
 **Date** : 2026-06-10
-**Dernière révision** : 2026-06-10
+**Dernière révision** : 2026-06-24
 **Statut** : incréments A+B+C — BL-026 read-frontier live (PODS + read-model stream)
 **Référencé par** : —
 **Design** : `DESIGN-observabilite.md` (catalogue de l'observable + organisation LCARS)
@@ -55,6 +55,7 @@ DIAGNOSTICS + résumé BRIDGE) sont alimentés par la **projection read-model**
 | `:fleet_observation, :http_port` | `8091` | `runtime.exs` (`LCARS_OBSERVATION_PORT`) |
 | `:fleet_observation, :start_listener` | `true` | `false` en `:test` (invariant hermétique) |
 | `:fleet_observation, :start_readmodel` | `true` | `false` en `:test` (pas d'abonné Bus parasite) |
+| `LCARS_BIND_HOST` (env) | `127.0.0.1` (loopback) | IP de bind du deck — read-only no-auth, **local-only par défaut** (frontière = isolation réseau, comme `fleet_api`) ; accès distant = tunnel/reverse-proxy. Exposer = opt-in via cette env. Source unique : `Fleet.EventRouter.BindAddress`. |
 
 ## Dépendances
 

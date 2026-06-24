@@ -53,12 +53,22 @@ defmodule Fleet.Observation.Application do
     end
   end
 
-  defp listener_children do
+  @doc """
+  Child specs du listener Cowboy du deck (public pour le test de bind : l'`:ip`
+  est un contrat — loopback par défaut). Retourne `[]` si `:start_listener` est `false`.
+  """
+  def listener_children do
     if Application.get_env(:fleet_observation, :start_listener, true) do
       port = Application.get_env(:fleet_observation, :http_port, 8091)
 
+      # Bind loopback par défaut : le deck observe en lecture seule, no-auth
+      # (frontière = isolation réseau, comme fleet_api). Un accès distant au deck
+      # passe par tunnel/reverse-proxy. Exposition publique = opt-in nommé via
+      # Fleet.EventRouter.BindAddress (LCARS_BIND_HOST).
+      ip = Fleet.EventRouter.BindAddress.ip()
+
       [
-        {Plug.Cowboy, scheme: :http, plug: Fleet.Observation.Deck, options: [port: port]}
+        {Plug.Cowboy, scheme: :http, plug: Fleet.Observation.Deck, options: [ip: ip, port: port]}
       ]
     else
       []

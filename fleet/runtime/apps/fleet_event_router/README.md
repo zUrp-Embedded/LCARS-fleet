@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-23 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-06-24 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -25,6 +25,12 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
   `event_type_strings/0` (clés-types, réutilisée par `Application.preregister_event_atoms/0`,
   dedup F035) + `events_yaml_path/0` (résolution du path). Consommation = subscribers
   directs PubSub (BL-027 ; ex-`Dispatch` retiré, cf. § Catalogue)
+- `Fleet.EventRouter.BindAddress` — source UNIQUE de l'IP de bind des listeners
+  Cowboy du runtime (`ip/1`). Vit ici car substrat universel (comme `Fleet.Event`)
+  consommé par les 4 surfaces HTTP (`fleet_api`, `fleet_mcp`, `fleet_observation`,
+  webhook) sans inversion de layering. Invariant : loopback `{127,0,0,1}` par
+  défaut, exposition = opt-in nommé (`LCARS_BIND_HOST` global, override de surface
+  ex. `LCARS_WEBHOOK_BIND_HOST`)
 - `Fleet.Shutdown.Quiesce` — primitive partagée du drain de shutdown (flag
   `:persistent_term` `quiescing?/refuse!/resume!`). Vit ici car substrat
   universel (comme `Fleet.Event`) : lisible par `fleet_pipeline`/`fleet_api`
@@ -61,6 +67,14 @@ end
 - `:fleet_event_router, :start_signals` — boot SignalsOS GenServer
   (default `false` — éviter capture signaux dans les tests)
 - `:fleet_event_router, :webhook_port` — port HTTP webhooks (default 8081)
+- `LCARS_WEBHOOK_BIND_HOST` / `LCARS_BIND_HOST` (env) — IP de bind du listener
+  webhook. **Loopback `127.0.0.1` par défaut.** Le webhook est la SEULE surface
+  dont l'exposition publique est un besoin légitime : une forge Gitea sur une
+  autre machine POST dessus (loopback la bloquerait). `LCARS_WEBHOOK_BIND_HOST`
+  (ex. `0.0.0.0`) expose CE listener seul, sans toucher les surfaces de commande
+  (`fleet_api`, deck). `LCARS_BIND_HOST` (global) l'expose aussi ; l'override de
+  surface l'emporte. Protection = HMAC SHA256 (indépendant du bind). Source
+  unique : `Fleet.EventRouter.BindAddress`.
 - `:fleet_event_router, :webhook_secret_path` — path secret HMAC
   (default `/etc/fleet/webhook-secret`)
 - `:fleet_event_router, :events_yaml_path` — path catalogue YAML
