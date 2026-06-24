@@ -1099,6 +1099,26 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
+  describe "credential per-humain — anti cross-human (résidu de partage accepté)" do
+    test "le CLAUDE_DIR du spawn = le claudeDir per-humain résolu, jamais un dir global hardcodé partagé",
+         %{tmp_dir: tmp_dir} do
+      # Le `.credentials.json` partagé-writable entre pods du même humain est VOULU (seule mécanique
+      # multi-agent vendor sous abonnement ; cf. le gros bloc « ON N'Y TOUCHE PAS » autour de `claude_dir`
+      # dans pod.ex). Le résidu « un pod lit/écrase le creds de son humain » est ACCEPTÉ (écraser = self-DoS ;
+      # lire = son propre token, pod = AS l'humain). Le SEUL invariant à garder = PER-HUMAIN : le spawn porte
+      # le claudeDir résolu pour l'humain propriétaire (en prod = `~/.claude` de l'user runtime ; en test = la
+      # config `:claude_dir` que le setup pose à `<tmp>/.claude`), JAMAIS un dir GLOBAL hardcodé partagé entre
+      # humains (= l'exfil cross-humain, le seul vrai vecteur). Si quelqu'un câble un claudeDir partagé
+      # (`/var/lib/.../.claude`…), CLAUDE_DIR ≠ `<tmp>/.claude` → CE test casse.
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-cred-perhuman-#{System.unique_integer([:positive])}"
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+
+      assert_receive {:launch_called, _args, env}, 2_000
+      assert env["CLAUDE_DIR"] == Path.join(tmp_dir, ".claude")
+    end
+  end
+
   describe "R14 — mcp_server_spec obligatoire pour backend réel" do
     test "backend réel + mcp_server_spec nil → spawn refusé (fail-loud, pas de pod cassé)" do
       # Backend réel (non-Stub) sans spec MCP : le pod réel parle MCP → refus net

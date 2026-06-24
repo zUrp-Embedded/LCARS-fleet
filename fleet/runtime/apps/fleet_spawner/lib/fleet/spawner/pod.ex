@@ -736,12 +736,38 @@ defmodule Fleet.Spawner.Pod do
   # Fail-loud (raise), rattrapé par le try/rescue de do_launch.
   defp runtime_user, do: Fleet.Credentials.Human.current!()
 
+  # ════════════════════════════════════════════════════════════════════════════════════════
+  # MÉCANIQUE CREDENTIAL — ON N'Y TOUCHE PAS (et surtout pas pour la « durcir »).
+  #
+  # Le pod s'authentifie en montant le `.credentials.json` OAuth de SON humain (le `~/.claude`
+  # de l'user runtime), bindé RW par le launcher. Ce fichier est PARTAGÉ et WRITABLE entre tous
+  # les pods du même humain, et c'est VOULU : c'est la SEULE mécanique multi-agent que le vendor
+  # supporte sous abonnement — N process Claude Code se coordonnent pour rafraîchir l'unique token
+  # via un verrou cross-process sur `~/.claude/` (refresh natif, conçu « fleet-wide » côté vendor).
+  #
+  # Conséquence connue et ACCEPTÉE : un pod avec un shell peut lire le token de son PROPRE humain,
+  # et peut écraser le fichier partagé. Ce n'est PAS un trou à fixer :
+  #   - écraser/corrompre le creds = se suicider (sans creds, pas d'agent) → rien à défendre ;
+  #   - le lire = le pod tourne DÉJÀ AS l'humain (il hérite de son UID) → c'est SON propre token,
+  #     dans la frontière que l'OS lui accorde de toute façon.
+  # Le seul vrai vecteur — lire le token d'un AUTRE humain — est rendu impossible ICI : le claudeDir
+  # est dérivé PER-HUMAIN (`claude_dir_for/1` ; jamais un dir global partagé entre humains).
+  #
+  # Tout « fix » qui retirerait le bind RW, isolerait un credential par-pod, ou passerait par un
+  # broker CASSE forcément un des trois piliers durs :
+  #   - un token inference-only (`claude setup-token`) ne peut PAS tenir une session Remote Control
+  #     (= notre mode interactif) ;
+  #   - injecter l'access-token live = falaise ~8h sans refresh (déjà tenté, déjà reverté) ;
+  #   - un apiKeyHelper / une clé API = facturation MÉTRÉE = sortie de l'abonnement (interdit).
+  # Donc : per-humain OUI, partagé-writable OUI, broker NON. NE PAS « améliorer » ceci.
+  # ════════════════════════════════════════════════════════════════════════════════════════
   defp claude_dir do
     Application.get_env(:fleet_spawner, :claude_dir) || Path.join(runtime_home(), ".claude")
   end
 
   # Creds du pod = `~/.claude` de l'HUMAIN (= l'user runtime). Override config `:claude_dir` respecté
-  # (tests / déploiement non-standard) ; sinon dérivé de son home passwd.
+  # (tests / déploiement non-standard) ; sinon dérivé de son home passwd. Per-humain par construction
+  # (cf. le gros bloc ci-dessus) — JAMAIS un claudeDir partagé entre humains.
   defp claude_dir_for(human) do
     Application.get_env(:fleet_spawner, :claude_dir) || claude_dir_from_passwd(human)
   end
