@@ -518,6 +518,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   test "GenServer : pod.completed soft -> gate_evals stocke ; task_completed correle -> pop" do
     {:ok, pid} =
       HopConsumer.start_link(
+        # Nom UNIQUE par test : ce fichier est `async: true` et `start_link` sans `:name` retombe sur le nom
+        # global `Fleet.Pilot.HopConsumer` → deux tests GenServer co-schedulés se heurtent à `{:already_started}`.
+        # Un nom unique isole chaque instance (le test pilote `pid`, pas le nom).
+        name: :"hop_gate_#{System.unique_integer([:positive])}",
         repo: "o/r",
         remote: "origin",
         subscribe: false,
@@ -556,7 +560,15 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "GenServer : task_completed d'un corr inconnu -> ignore (pas de crash)" do
     {:ok, pid} =
-      HopConsumer.start_link(repo: "o/r", remote: "origin", subscribe: false, loader: Carte)
+      HopConsumer.start_link(
+        # Nom unique : `async: true` + `start_link` sans `:name` → collision `{:already_started}` sur le nom
+        # global entre tests GenServer co-schedulés. Isolation par nom unique (le test pilote `pid`).
+        name: :"hop_gate_#{System.unique_integer([:positive])}",
+        repo: "o/r",
+        remote: "origin",
+        subscribe: false,
+        loader: Carte
+      )
 
     send(pid, %Fleet.Event{
       source: :task_queue,
@@ -619,6 +631,9 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     # PAS dessus (les effets observables passent par RelayForge/forge_opts). Le push réussit (mode git_native).
     {:ok, pid} =
       HopConsumer.start_link(
+        # Nom unique : `async: true` + `start_link` sans `:name` → collision `{:already_started}` sur le nom
+        # global entre tests GenServer co-schedulés. Isolation par nom unique (le test pilote `pid`).
+        name: :"hop_gate_#{System.unique_integer([:positive])}",
         repo: "o/r",
         remote: "origin",
         subscribe: false,

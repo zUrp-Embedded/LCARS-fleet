@@ -90,7 +90,14 @@ defmodule Fleet.Pilot.ProjectOnboard do
     my_human = Fleet.Credentials.Human.current!()
     topic = Fleet.Pilot.Poller.fleet_topic(my_human)
 
+    # Le topic rend le repo DÉCOUVRABLE mais ne l'ADMET pas : il est mutable (un propriétaire de repo
+    # peut le poser lui-même). L'admission exige le SCEAU système — `post_onboard_marker` ouvre une issue
+    # `[lcars-onboarded:<human>]` SOUS le compte du token (= le bot système, `fc_opts` porte `FORGE_TOKEN`).
+    # Le poller n'admet un repo que s'il porte ce marqueur bot-authored (`ForgeClient.admitted?`) : un
+    # humain ne peut pas le forger faute du token système. Posé ICI, à l'onboarding système, en même temps
+    # que le topic — découvrabilité ET admission scellées par le même acte d'infra système.
     with :ok <- ForgeClient.add_topic(repo, topic, fc_opts(opts)),
+         {:ok, _} <- ForgeClient.post_onboard_marker(repo, my_human, fc_opts(opts)),
          :ok <- ForgeClient.add_collaborator(repo, my_human, "write", fc_opts(opts)) do
       :ok
     else

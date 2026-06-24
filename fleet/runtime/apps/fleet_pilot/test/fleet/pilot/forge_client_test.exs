@@ -1306,4 +1306,83 @@ defmodule Fleet.Pilot.ForgeClientTest do
       refute path =~ ~r{/\.\.(/|$)}
     end
   end
+
+  # ============================================================
+  # Marqueur d'ADMISSION système (F) — le sceau non forgeable qui ADMET un repo.
+  #
+  # `admitted?/3` ne fait foi du marqueur `[lcars-onboarded:<human>]` QUE s'il est posté par le bot
+  # système (`forge_bot_login`, ici injecté en opts pour l'hermétisme). On passe `forge_bot_login` en
+  # opts → pas de `GET /user` ni de cache `:persistent_term` cross-test.
+  # ============================================================
+  describe "admitted?/3 — sceau d'admission bot-authored (F)" do
+    @bot "lcars-system"
+
+    defp admit_opts(handlers), do: Keyword.put(opts(handlers), :forge_bot_login, @bot)
+
+    test "marqueur posté par le BOT système → admis" do
+      h = %{
+        {"GET", "/api/v1/repos/fleet/proj/issues"} =>
+          {200,
+           [
+             %{"title" => "[lcars-onboarded:alice]", "user" => %{"login" => @bot}}
+           ]}
+      }
+
+      assert ForgeClient.admitted?("fleet/proj", "alice", admit_opts(h))
+    end
+
+    test "MÊME titre de marqueur posté par un USER ordinaire → NON admis (auteur ≠ bot)" do
+      # Le vecteur : un humain ouvre une issue homonyme `[lcars-onboarded:alice]` pour s'auto-admettre.
+      # Le sceau = l'AUTEUR (bot), pas le titre → non forgeable faute du token système.
+      h = %{
+        {"GET", "/api/v1/repos/evil/proj/issues"} =>
+          {200,
+           [
+             %{"title" => "[lcars-onboarded:alice]", "user" => %{"login" => "mallory"}}
+           ]}
+      }
+
+      refute ForgeClient.admitted?("evil/proj", "alice", admit_opts(h))
+    end
+
+    test "aucune issue marqueur → NON admis (topic seul ne suffit pas)" do
+      h = %{{"GET", "/api/v1/repos/fleet/bare/issues"} => {200, []}}
+      refute ForgeClient.admitted?("fleet/bare", "alice", admit_opts(h))
+    end
+
+    test "marqueur pour un AUTRE humain → NON admis (scellé pour bob, pas alice)" do
+      h = %{
+        {"GET", "/api/v1/repos/fleet/bob-proj/issues"} =>
+          {200, [%{"title" => "[lcars-onboarded:bob]", "user" => %{"login" => @bot}}]}
+      }
+
+      refute ForgeClient.admitted?("fleet/bob-proj", "alice", admit_opts(h))
+    end
+
+    test "erreur HTTP de lecture → NON admis (fail-closed, jamais sur un doute)" do
+      h = %{{"GET", "/api/v1/repos/fleet/down/issues"} => {500, %{}}}
+      refute ForgeClient.admitted?("fleet/down", "alice", admit_opts(h))
+    end
+
+    test "post_onboard_marker idempotent : déjà scellé → {:ok, :already} (pas de doublon)" do
+      h = %{
+        {"GET", "/api/v1/repos/fleet/proj/issues"} =>
+          {200, [%{"title" => "[lcars-onboarded:alice]", "user" => %{"login" => @bot}}]}
+      }
+
+      assert {:ok, :already} =
+               ForgeClient.post_onboard_marker("fleet/proj", "alice", admit_opts(h))
+    end
+
+    test "post_onboard_marker absent → crée l'issue système (sceau)" do
+      # Pas de marqueur (GET issues vide) → POST crée l'issue d'admission. Le titre exact est couvert par
+      # `onboard_marker/1` (round-trip lecture/écriture) ; ici on prouve le CREATE quand le sceau manque.
+      h = %{
+        {"GET", "/api/v1/repos/fleet/neuf/issues"} => {200, []},
+        {"POST", "/api/v1/repos/fleet/neuf/issues"} => {201, %{"number" => 1}}
+      }
+
+      assert {:ok, 1} = ForgeClient.post_onboard_marker("fleet/neuf", "alice", admit_opts(h))
+    end
+  end
 end

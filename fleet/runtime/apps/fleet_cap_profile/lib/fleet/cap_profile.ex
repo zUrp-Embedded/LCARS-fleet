@@ -275,6 +275,21 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
+  Le mode de containment du profil (`metadata.containment`). `"bwrap"` = pod sandboxé (RO mounts +
+  tmpfs /home + bind credentials, défaut) ; `"none"` = host-native (architect-interactif, starfleet —
+  le pod tourne SUR L'HÔTE *as* l'humain, hors sandbox = le pouvoir le plus fort de la fleet).
+
+  **Source UNIQUE** de cette lecture (le spawner sélectionne le launcher N0 dessus, l'API spawn
+  l'interdit host-native). Défaut `"bwrap"` si la clé est absente : containment manquant ⇒ on présume
+  le mode confiné, jamais l'hôte — un trou de config ne doit JAMAIS ouvrir l'hôte par défaut.
+  """
+  @spec containment(t()) :: String.t()
+  def containment(%__MODULE__{metadata: meta}) when is_map(meta),
+    do: Map.get(meta, "containment") || Map.get(meta, :containment) || "bwrap"
+
+  def containment(%__MODULE__{}), do: "bwrap"
+
+  @doc """
   Returns the canonical JSON sha256 (lowercase hex) of a composed map
   or struct. Used by callers to assert deterministic composition.
   Underlying map iteration order is irrelevant — the canonical encoder

@@ -220,6 +220,62 @@ defmodule Fleet.API.RestTest do
     end
   end
 
+  # ============================================================
+  # F — host-native interdit via /api/admin/spawn
+  # ============================================================
+  #
+  # Un cap-profile `containment: none` (host-native : starfleet, architecte-interactif) lancé via cette
+  # porte spawn GÉNÉRIQUE no-auth = un pod HORS-SANDBOX tournant sur l'hôte *as* l'humain — le pouvoir le
+  # plus fort de la fleet. Il NE doit PAS être atteignable par ce chemin : refus 422 à l'admission, AVANT
+  # tout broadcast (aucun pod ne naît). Le host-native garde sa voie dédiée hors-bande.
+  describe "POST /api/admin/spawn — host-native interdit (F)" do
+    # PRÉ-CONDITION de la garde : les deux profils canon existent ET diffèrent sur le seul axe testé
+    # (containment). Si `starfleet` redevenait `bwrap` (ou disparaissait), ce test ne prouverait plus rien
+    # → on l'ancre explicitement (le test EST son propre garde anti-bitrot).
+    test "pré-condition : engineer=bwrap, starfleet=none (sinon la garde ne teste rien)" do
+      assert {:ok, eng} = Fleet.CapProfile.load("engineer")
+      assert Fleet.CapProfile.containment(eng) == "bwrap"
+      assert {:ok, sf} = Fleet.CapProfile.load("starfleet")
+      assert Fleet.CapProfile.containment(sf) == "none"
+    end
+
+    # Le cas nominal (bwrap) PASSE — la garde ne ferme QUE le host-native, pas le spawn légitime. C'est
+    # la moitié « accepté » de la régression : retirer la garde laisserait AUSSI passer le host-native
+    # ci-dessous, qui DOIT échouer ; les deux ensemble prouvent que c'est bien le containment qui tranche.
+    test "containment bwrap (engineer) → 202 + broadcast (chemin nominal intact)" do
+      conn =
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{"role" => "engineer"}))
+        |> put_req_header("content-type", "application/json")
+        |> Rest.call(@opts)
+
+      assert conn.status == 202
+
+      assert_receive %Fleet.Event{type: :"admin.spawn.request", payload: %{"role" => "engineer"}},
+                     500
+    end
+
+    # LE finding : un cap-profile host-native (starfleet) via la porte spawn générique → 422, AUCUN
+    # broadcast. Régression prouvée : retirer la branche `containment == "bwrap"` de `validate_cap_profile`
+    # (rest.ex) fait repasser ce cas en 202 + broadcast → un pod hôte naîtrait depuis l'API. La garde EST
+    # ce qui rend ce 422 vrai ; sans elle, le profil charge (`CapProfile.load` OK) et l'admission passait.
+    test "containment none (starfleet, host-native) → 422 AVANT spawn, aucun broadcast" do
+      for key <- ["role", "cap_profile_name"] do
+        conn =
+          conn(:post, "/api/admin/spawn", Jason.encode!(%{key => "starfleet"}))
+          |> put_req_header("content-type", "application/json")
+          |> Rest.call(@opts)
+
+        assert conn.status == 422,
+               "#{key}=starfleet (host-native) devait être refusé 422, reçu #{conn.status}"
+
+        {:ok, body} = Jason.decode(conn.resp_body)
+        assert body["error"] =~ "host-native"
+
+        refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
+      end
+    end
+  end
+
   describe "match _ (404)" do
     test "route inexistante → 404" do
       conn = conn(:get, "/api/nonexistent") |> Rest.call(@opts)

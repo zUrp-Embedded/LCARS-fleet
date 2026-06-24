@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-24 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
+**Dernière révision** : 2026-06-25 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -44,7 +44,7 @@ pilotables depuis l'API. Le DTO public est donc **plat et explicite** :
 
 | Champ | Forme | Rôle |
 |---|---|---|
-| `cap_profile_name` / `role` | string (l'un des deux, requis) | profil de capacités (validé : 400 si absent, 422 si inconnu) |
+| `cap_profile_name` / `role` | string (l'un des deux, requis) | profil de capacités (validé : 400 si absent, 422 si inconnu, **422 si host-native**) |
 | `ticket_id` | string | corrélation forge/event |
 | `mandate` | string | le travail du pod ; **replacé dans l'`opts` interne construit par l'API** |
 | `pod_id` | string path-safe | identifiant imposé (admin) ; accepté **uniquement** si `[A-Za-z0-9._-]` sans `..`, sinon 422 |
@@ -53,6 +53,14 @@ Toute clé top-level **hors** de cette liste (y compris un `opts` brut fourni pa
 le moindre broadcast (rien n'atteint le consumer/spawner). L'API reconstruit elle-même l'`opts` ; un `opts`
 client n'est jamais transmis. Défense en profondeur côté consumer : `PublishConsumer.to_keyword/1` ne gobe
 plus une liste brute (une liste non-keyword → `[]`).
+
+**Host-native interdit par cette porte.** Un cap-profile `metadata.containment: none` (host-native :
+starfleet, architecte-interactif) lance un pod **hors-sandbox**, sur l'hôte *as* l'humain — le pouvoir le
+plus fort de la fleet. La porte spawn générique (no-auth) le **REFUSE** : à l'admission, après le load du
+cap-profile, `Fleet.CapProfile.containment(cap)` doit valoir `"bwrap"` ; sinon **422** (`host_native_forbidden`)
+avant tout broadcast — aucun pod hôte ne peut naître via l'API. Le host-native garde sa voie dédiée hors-bande
+(starfleet / `bin/host_launch.sh`), jamais cette API. Source unique de containment partagée avec le spawner
+(`Fleet.CapProfile.containment/1`) → l'API et le lancement réel ne peuvent pas diverger de verdict.
 
 ## WebSocket protocol
 

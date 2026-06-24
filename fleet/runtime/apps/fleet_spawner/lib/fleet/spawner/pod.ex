@@ -1826,10 +1826,9 @@ defmodule Fleet.Spawner.Pod do
   # `metadata.containment` ∈ {"bwrap","none"} (défaut conservateur "bwrap").
   # "none" = host_native (architect, starfleet) → host_launch.sh (PAS de sandbox) ; sinon la
   # chaîne bwrap. Lu ICI, sur le chemin de lancement (sinon `do_launch` bwrapperait tout aveuglément).
-  defp cap_profile_containment(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
-    Map.get(meta, "containment") || Map.get(meta, :containment) || "bwrap"
-  end
-
+  # Délègue à la SOURCE UNIQUE `Fleet.CapProfile.containment/1` (même lecture/défaut que l'API spawn qui
+  # interdit le host-native) — pas de re-décodage local du champ.
+  defp cap_profile_containment(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.containment(cap)
   defp cap_profile_containment(_), do: "bwrap"
 
   # Mounts CATALOGUE (cap-profile-driven) : le monde projeté dans le sandbox bwrap est

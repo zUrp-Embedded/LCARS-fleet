@@ -57,6 +57,16 @@ defmodule Fleet.Pilot.PollerTest do
       )
     end
 
+    # F — frontière d'admission : le poller n'admet QUE les repos scellés système (`admitted?`). Défaut
+    # `true` (les tests single-repo restent : repo découvert = repo admis). Override par `:_test_admitted`
+    # (map repo → bool) pour exercer « topic seul (non admis) » vs « scellé système (admis) ».
+    def admitted?(repo, _human, opts) do
+      case Keyword.get(opts, :_test_admitted) do
+        nil -> true
+        admitted_map -> Map.get(admitted_map, repo, false)
+      end
+    end
+
     # #5.2 D1 — le scoping multi-user est FORGE-SIDE : le poller passe `assigned_by=<my_human>`. Le stub
     # CAPTURE ce scoping (→ `:_test_pid`) pour le vérifier, puis renvoie `:_test_issues` tel quel.
     def list_open_issues(_repo, opts) do
@@ -421,6 +431,98 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   # ============================================================
+  # F — frontière d'admission : topic SEUL ne suffit pas, il faut le sceau système (`admitted?`).
+  # ============================================================
+  #
+  # Le topic `lcars-fleet-<human>` (mutable) rend un repo DÉCOUVRABLE ; un user honnête peut se l'auto-
+  # poser sur un repo qu'il possède. L'admission exige le marqueur d'onboarding posé PAR le bot système
+  # (`ForgeClient.admitted?`, vérifié bot-authored server-side). Le poller n'admet/ne scanne QUE les repos
+  # scellés ; un repo tagué mais non onboardé est ÉCARTÉ avant tout dispatch.
+  describe "mode stage — frontière d'admission système (F)" do
+    # `list_open_issues` envoie `{:scoped, :issues, _}` au pid de test SSI le repo est scanné → c'est notre
+    # sonde « ce repo a-t-il franchi l'admission ». Un repo non admis NE déclenche PAS cet appel.
+    defp start_admission_poller(repos, admitted_map, issue) do
+      name = :"P_admit_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          human: "lordzurp",
+          start_tick?: false,
+          stage_dispatch?: true,
+          forge_client: StageStubForge,
+          forge_opts: [
+            _test_repos: repos,
+            _test_admitted: admitted_map,
+            _test_issues: {:ok, [issue]},
+            _test_pid: self()
+          ],
+          loader: StageStubLoader,
+          spawner: StageStubSpawner,
+          clock: fn :second -> 1_700_000_000 end
+        )
+
+      {name, pid}
+    end
+
+    @assigned_issue %{
+      "number" => 1,
+      "body" => "x",
+      "labels" => [],
+      "assignees" => [%{"login" => "lordzurp"}]
+    }
+
+    test "repo tagué mais SANS sceau système (topic seul) → ÉCARTÉ, jamais scanné/dispatché" do
+      # LE finding : le repo porte le topic (découvert) mais `admitted? = false` (pas de marqueur bot). Il
+      # ne doit PAS entrer dans la machine : aucun scan (`list_open_issues` jamais appelé → pas de `:scoped`),
+      # zéro dispatch. Régression prouvée : retirer le filtre `admitted_repos` de `do_poll` (poller.ex) fait
+      # repasser ce repo en scanné → `{:scoped, ...}` reçu + l'issue dispatchée. Le sceau EST la frontière.
+      {name, pid} =
+        start_admission_poller(
+          ["lordzurp/evil-untagged"],
+          %{"lordzurp/evil-untagged" => false},
+          @assigned_issue
+        )
+
+      assert %{dispatched: 0, skipped: 0, errors: 0} = Poller.force_poll(name)
+      refute_received {:scoped, :issues, _}
+      refute_received {:spawned, _, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "repo SCELLÉ système (marqueur bot) → admis, scanné (issue traitée)" do
+      # Le pendant : un repo avec `admitted? = true` (marqueur d'onboarding bot-authored) PASSE l'admission
+      # → il est scanné (`:scoped` reçu) et son issue assignée traitée (ici routeless → onboardée+déférée).
+      {name, pid} =
+        start_admission_poller(["lordzurp/sealed"], %{"lordzurp/sealed" => true}, @assigned_issue)
+
+      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
+      assert_received {:scoped, :issues, "lordzurp"}
+
+      GenServer.stop(pid)
+    end
+
+    test "mix découverte : seul le repo scellé est admis, le tagué-seul est écarté" do
+      # 2 repos découverts par topic ; un seul porte le sceau. Le poller scanne UNIQUEMENT le scellé → une
+      # seule sonde `:scoped` (le tagué-seul n'en produit aucune). L'isolation REPO devient le sceau système,
+      # pas le topic mutable.
+      {name, pid} =
+        start_admission_poller(
+          ["lordzurp/sealed", "lordzurp/evil-untagged"],
+          %{"lordzurp/sealed" => true, "lordzurp/evil-untagged" => false},
+          @assigned_issue
+        )
+
+      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
+      assert_received {:scoped, :issues, "lordzurp"}
+      refute_received {:scoped, :issues, _}
+
+      GenServer.stop(pid)
+    end
+  end
+
+  # ============================================================
   # Bail repo-serialise (incrément 3) : au plus 1 pipeline actif par repo.
   # ============================================================
   describe "mode stage — bail repo-serialise" do
@@ -597,6 +699,10 @@ defmodule Fleet.Pilot.PollerTest do
     defmodule MultiRepoForge do
       def search_repos_by_topic(_topic, opts),
         do: {:ok, Keyword.get(opts, :_test_repos, [])}
+
+      # Tous les repos multi-repo de ce describe sont scellés système (admis) — le test isole la
+      # réconciliation de verrou, pas l'admission (couverte dans le describe « frontière d'admission »).
+      def admitted?(_repo, _human, _opts), do: true
 
       def list_open_issues(repo, opts) do
         Map.get(Keyword.get(opts, :_test_issues_by_repo, %{}), repo, {:ok, []})

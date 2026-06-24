@@ -350,6 +350,101 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  # ============================================================
+  # Marqueur d'ADMISSION système — la frontière d'entrée dans la machine à agents.
+  #
+  # Le topic `lcars-fleet-<human>` rend un repo DÉCOUVRABLE, mais le topic est un champ Gitea
+  # MUTABLE (`PUT /topics/{topic}`) que le propriétaire d'un repo peut poser lui-même. Le topic SEUL
+  # admettrait donc n'importe quel repo qu'un user honnête a tagué + sur lequel il s'auto-assigne une
+  # issue — un repo que le SYSTÈME n'a jamais onboardé entrerait comme projet légitime. L'admission
+  # exige donc un sceau SERVEUR-SIDE NON FORGEABLE : un marqueur que SEUL le compte système peut poser.
+  #
+  # Le sceau = un marqueur d'onboarding écrit par le BOT système (le porteur de `FORGE_TOKEN`), vérifié
+  # `system_authored?` à la lecture — exactement le mécanisme déjà éprouvé pour les marqueurs route/hop/
+  # result (« un marqueur n'est cru que s'il est posté par le bot système »). Non forgeable parce qu'un
+  # user ordinaire n'a pas le token système pour l'écrire SOUS l'identité du bot, PAS parce qu'il est
+  # signé. Pas de crypto, pas de registre : le MÊME primitif de confiance, étendu à l'admission repo.
+  # ============================================================
+
+  @onboard_marker_prefix "[lcars-onboarded:"
+
+  @doc """
+  Format du marqueur d'admission `[lcars-onboarded:<human>]` (co-localisé avec son parseur
+  `admitted?/3` — un changement de format se fait ICI, jamais l'un sans l'autre). Posé par
+  l'onboarding via `post_onboard_marker/3` en COMMENT de l'issue système #1 (auto-créée par
+  `auto_init`/scaffold), lu+vérifié bot-authored par le poller à la découverte.
+  """
+  @spec onboard_marker(String.t()) :: String.t()
+  def onboard_marker(human) when is_binary(human), do: "#{@onboard_marker_prefix}#{human}]"
+
+  @doc """
+  Pose le marqueur d'admission `[lcars-onboarded:<human>]` sur `repo` — crée une issue SYSTÈME
+  dédiée (`title` = le marqueur) sous le compte du token (= le bot système). L'issue, postée par le
+  bot, EST le sceau : un user ordinaire ne peut pas la fabriquer SOUS l'identité du bot (il n'a pas le
+  token système). Idempotent best-effort : si une issue d'admission bot-authored existe déjà,
+  `{:ok, :already}` (pas de doublon). Appelé par `ProjectOnboard.register_for_fleet` (token système).
+
+  ## Returns
+    * `{:ok, issue_number}` — marqueur posé (issue système créée)
+    * `{:ok, :already}` — déjà présent (issue d'admission bot-authored existante)
+    * `{:error, term()}` — HTTP/transport/config / bot irrésoluble
+  """
+  @spec post_onboard_marker(String.t(), String.t(), Keyword.t()) ::
+          {:ok, integer() | :already} | {:error, term()}
+  def post_onboard_marker(repo, human, opts \\ []) when is_binary(repo) and is_binary(human) do
+    marker = onboard_marker(human)
+
+    case admitted?(repo, human, opts) do
+      true ->
+        {:ok, :already}
+
+      false ->
+        # Le marqueur vit dans le TITRE de l'issue système (lu sans pagination de comments, stable). Le
+        # corps explicite le rôle pour un humain qui tomberait dessus dans l'UI forge.
+        create_issue(
+          repo,
+          marker,
+          "Marqueur d'admission LCARS — ce repo est onboardé dans la machine à agents de `#{human}`.\n" <>
+            "Posté par le compte système ; ne pas modifier/fermer (sceau d'admission serveur-side).",
+          opts
+        )
+    end
+  end
+
+  @doc """
+  `repo` est-il ADMIS dans la machine à agents de `human` = porte-t-il le marqueur d'admission
+  `[lcars-onboarded:<human>]` posté PAR LE BOT SYSTÈME ? La frontière d'entrée du poller : le topic
+  seul (mutable) ne suffit PLUS, il faut ce sceau bot-authored. Lit les issues du repo et cherche
+  CELLE dont le titre = le marqueur ET l'auteur = le bot (`system_authored?`). Un user qui ouvre une
+  issue homonyme NE passe PAS (son login ≠ bot). `false` sur toute erreur / bot irrésoluble — FAIL-
+  CLOSED : un repo dont l'admission n'est pas VÉRIFIABLE n'est pas admis (jamais sur un doute).
+  """
+  @spec admitted?(String.t(), String.t(), Keyword.t()) :: boolean()
+  def admitted?(repo, human, opts \\ []) when is_binary(repo) and is_binary(human) do
+    marker = onboard_marker(human)
+
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, bot} <- forge_bot_login(config, opts),
+         {:ok, issues} when is_list(issues) <-
+           paginate(config, "/repos/#{encode_repo(repo)}/issues", "state=all&type=issues") do
+      Enum.any?(issues, fn issue ->
+        Map.get(issue, "title") == marker and system_authored_issue?(issue, bot)
+      end)
+    else
+      _ -> false
+    end
+  end
+
+  # Une ISSUE est de confiance ssi son AUTEUR (`user.login`) = le bot système. Pendant de
+  # `system_authored?/2` (qui vise les COMMENTS) côté issue — même invariant : un marqueur n'est cru
+  # que s'il vient du compte système (le porteur du token). Public-test non requis (couvert par `admitted?`).
+  defp system_authored_issue?(issue, bot_login)
+       when is_map(issue) and is_binary(bot_login) and bot_login != "" do
+    get_in(issue, ["user", "login"]) == bot_login
+  end
+
+  defp system_authored_issue?(_issue, _bot), do: false
+
   @doc """
   `username` est-il collaborateur de `repo` ? Gitea `GET /repos/{repo}/collaborators/{username}` (204 = oui,
   404 = non). `false` sur toute erreur (config/transport/404) — fail-safe (on ne défaut PAS sur un repo

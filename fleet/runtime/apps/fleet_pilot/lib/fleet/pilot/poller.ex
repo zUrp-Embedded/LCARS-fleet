@@ -261,8 +261,16 @@ defmodule Fleet.Pilot.Poller do
     forge = stage_forge_client(state)
 
     case forge.search_repos_by_topic(fleet_topic(state.my_human), state.forge_opts) do
-      {:ok, repos} ->
+      {:ok, discovered} ->
         base = %{state | err_streak: 0, poll_count: state.poll_count + 1, last_error: nil}
+
+        # FRONTIÈRE D'ADMISSION : le topic rend un repo DÉCOUVRABLE mais ne l'ADMET pas (topic mutable —
+        # un propriétaire de repo peut se l'auto-poser). On ne scanne QUE les repos qui portent le sceau
+        # système non forgeable (`admitted?` : marqueur `[lcars-onboarded:<human>]` posé PAR le bot, vérifié
+        # server-side). Un repo tagué mais jamais onboardé par le système (le vecteur du finding) est
+        # ÉCARTÉ ici, avant tout dispatch. Fail-closed : `admitted?` rend `false` sur doute (bot irrésoluble
+        # / erreur de lecture) → on n'admet jamais à l'aveugle.
+        repos = admitted_repos(forge, discovered, state)
 
         {tally, suspects} =
           Enum.reduce(repos, {zero_tally(), MapSet.new()}, fn repo, {acc_tally, acc_suspects} ->
@@ -275,6 +283,25 @@ defmodule Fleet.Pilot.Poller do
       {:error, reason} ->
         handle_poll_error(state, {:discover_repos, reason}, System.monotonic_time(), nil)
     end
+  end
+
+  # Filtre les repos découverts par topic à ceux SCELLÉS par le système (`admitted?`). Un repo écarté
+  # est loggé (un topic posé sans onboarding = soit un user qui s'auto-tague — refusé —, soit un
+  # onboarding incomplet à finir). Le sceau = le marqueur bot-authored, même primitif de confiance que
+  # les marqueurs route/hop ; le poller ne dispatche jamais sur un repo non admis.
+  defp admitted_repos(forge, discovered, state) do
+    Enum.filter(discovered, fn repo ->
+      if forge.admitted?(repo, state.my_human, state.forge_opts) do
+        true
+      else
+        Logger.warning(
+          "fleet_pilot Poller : repo #{repo} tagué #{fleet_topic(state.my_human)} mais SANS marqueur " <>
+            "d'admission système → ÉCARTÉ (topic seul ne suffit pas ; onboarding système requis)"
+        )
+
+        false
+      end
+    end)
   end
 
   @doc """

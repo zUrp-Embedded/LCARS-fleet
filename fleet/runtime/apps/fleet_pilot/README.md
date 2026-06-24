@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-24 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
+**Dernière révision** : 2026-06-25 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -50,7 +50,12 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   Le pin de base (`ls-remote` du tip, hors-pod) passe par `Fleet.Credentials.Shell.git` : borné par
   construction (process-group dédié, tué entier à la deadline mur) — remplace le `Task.async`+`brutal_kill`
   qui ne tuait que le Task BEAM en laissant fuir le process git porteur du token forge.
-- `Fleet.Pilot.Poller` — scanne le repo, lit la **route-comment** (`[lcars-route:carte:stage]`, gravée par `create_ticket` = la state-machine de routing) → dispatche le rôle du stage (`carte_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du 1er stage). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
+- `Fleet.Pilot.Poller` — **DÉCOUVRE** ses repos par topic (`lcars-fleet-<human>`) PUIS **ADMET** uniquement
+  ceux scellés système (`ForgeClient.admitted?` — marqueur d'onboarding bot-authored ; le topic mutable seul
+  ne suffit plus, cf. § Onboarding « sceau d'admission »). Sur chaque repo admis : scanne, lit la **route-comment**
+  (`[lcars-route:carte:stage]`, gravée par `create_ticket` = la state-machine de routing) → dispatche le rôle du
+  stage (`carte_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du
+  1er stage). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
 - `Fleet.Pilot.Labels` — vocabulaire wire-protocol (source unique) : **uniquement** ce qui n'est pas
   dérivable de l'état forge — verrous `lcars-in-flight`/`lcars-awaits-human`, états `state:*` (legacy carte).
 - `Fleet.Pilot.HopConsumer` — consumer Bus de la **fin-de-hop** (`pod.completed` → `HopCompleter`) ;
@@ -93,9 +98,19 @@ bornées par construction (process-group dédié, tué entier à la deadline mur
 nu ne subsiste, et un clone/push réseau qui pend ne fige plus l'orchestration ni ne laisse fuir un process
 git porteur du token forge.
 
+**Sceau d'admission (frontière d'entrée dans la machine).** Le topic `lcars-fleet-<human>` rend le repo
+**découvrable**, mais il est mutable (un propriétaire de repo peut se l'auto-poser) → le topic seul
+n'**admet** pas. `register_for_fleet` pose donc, en plus du topic, le **marqueur d'admission**
+`[lcars-onboarded:<human>]` via `ForgeClient.post_onboard_marker/3` : une issue système ouverte **sous le
+compte du token** (= le bot système). Le poller n'admet un repo que s'il porte ce marqueur **vérifié
+bot-authored** (`ForgeClient.admitted?/3`, `system_authored?` côté issue — MÊME primitif de confiance que
+les marqueurs route/hop/result). Non forgeable : un humain ordinaire n'a pas le token système pour poster
+SOUS l'identité du bot. Pas de crypto, pas de registre — fail-closed (`admitted?` rend `false` sur doute).
+
 Séquence : `ForgeClient.create_repo` (org `fleet`, `auto_init`) → `git clone main` → scaffold (README,
 .gitignore, .editorconfig, docs/spec.md) → commit+push `main` → `git worktree add --orphan -b work/ops`
-→ scaffold (backlog.md, scratchpad.md, plans/) → commit+push `work/ops` → **`lock_main`** (②.1d) : donne
+→ scaffold (backlog.md, scratchpad.md, plans/) → commit+push `work/ops` → **`register_for_fleet`** (topic +
+**marqueur d'admission système** + collaborateur write humain) → **`lock_main`** (②.1d) : donne
 le **write** aux comptes de rôle (engineer/qualifier/reviewer/gatekeeper — sinon leurs reviews ne comptent
 pas + le gatekeeper ne peut pas merger) **puis pose la branch-protection sur `main`** (N approvals = nb de
 juges, dismiss-stale, block-on-rejected, pas de push direct). Mécanique → tout projet onboardé a le **gate

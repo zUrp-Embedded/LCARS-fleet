@@ -134,6 +134,22 @@ defmodule Fleet.API.Rest do
           422,
           Jason.encode!(%{error: "cap_profile inconnu : #{name}", reason: inspect(reason)})
         )
+
+      {:error, {:host_native_forbidden, name}} ->
+        # 422 Unprocessable — le cap-profile existe mais il est HOST-NATIVE (`containment: none`) : un pod
+        # lancé hors-sandbox, SUR L'HÔTE *as* l'humain — le pouvoir le plus fort de la fleet (starfleet,
+        # architecte-interactif). Cette porte spawn GÉNÉRIQUE no-auth ne doit JAMAIS l'atteindre : le host-
+        # native a sa voie dédiée hors-bande (starfleet / `bin/host_launch.sh`). On REFUSE à l'admission,
+        # AVANT le moindre broadcast → aucun pod hôte ne peut naître via l'API. Fail-closed par construction.
+        send_resp(
+          conn,
+          422,
+          Jason.encode!(%{
+            error: "cap_profile host-native interdit via /api/admin/spawn : #{name}",
+            reason:
+              "containment != bwrap — le host-native passe par sa voie dédiée, pas l'API spawn"
+          })
+        )
     end
   end
 
@@ -200,13 +216,26 @@ defmodule Fleet.API.Rest do
 
   # Résout le cap-profile demandé (`cap_profile_name` ou `role`, mêmes clés que
   # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing}` (400) ; load KO →
-  # `{:error, {:cap_profile, name, reason}}` (422) ; chargé → `:ok` (l'admission passe).
+  # `{:error, {:cap_profile, name, reason}}` (422) ; HOST-NATIVE (`containment != bwrap`) →
+  # `{:error, {:host_native_forbidden, name}}` (422) ; chargé + sandboxé → `:ok` (l'admission passe).
+  #
+  # La garde host-native est ICI, à l'admission : un cap-profile `containment: none` (starfleet,
+  # architecte-interactif) lancerait un pod HORS-SANDBOX sur l'hôte *as* l'humain via cette porte spawn
+  # générique no-auth — le pouvoir le plus fort de la fleet, atteignable sans rien prouver. On le rend
+  # IRREPRÉSENTABLE par ce chemin : refus AVANT broadcast (rien n'atteint le consumer/spawner). Le host-
+  # native garde sa voie dédiée hors-bande. Même loader + même lecture de containment que le spawner
+  # (source unique `Fleet.CapProfile`) → pas de divergence de verdict entre l'API et le lancement réel.
   defp validate_cap_profile(payload) do
     case Map.get(payload, "cap_profile_name") || Map.get(payload, "role") do
       name when is_binary(name) and name != "" ->
         case Fleet.CapProfile.load(name) do
-          {:ok, _cap} -> :ok
-          {:error, reason} -> {:error, {:cap_profile, name, reason}}
+          {:ok, cap} ->
+            if Fleet.CapProfile.containment(cap) == "bwrap",
+              do: :ok,
+              else: {:error, {:host_native_forbidden, name}}
+
+          {:error, reason} ->
+            {:error, {:cap_profile, name, reason}}
         end
 
       _ ->
