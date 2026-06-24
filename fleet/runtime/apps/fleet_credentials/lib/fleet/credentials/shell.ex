@@ -88,6 +88,48 @@ defmodule Fleet.Credentials.Shell do
           | {:error, {:timeout, pos_integer()}}
           | {:error, {:exit, term()}}
 
+  # Neutralisation des MÉCANISMES git pilotables depuis le contenu d'un repo, à composer (`-c …`)
+  # par TOUTE op git système-side (lancée par le runtime Elixir, hors bwrap) sur un workspace co-écrit
+  # par un pod adversaire. SOURCE UNIQUE : un site qui oublie un de ces tournevis rouvre le trou ;
+  # cette liste est LA définition de « git système-side neutralisé », tous les sites la composent
+  # (ne JAMAIS recopier la liste ailleurs). Chaque flag rend INERTE un vecteur d'exécution de code que
+  # le pod pourrait armer dans le `.git/config`, le `.gitattributes` ou un includeIf :
+  #
+  #   * `core.hooksPath=/dev/null` — aucun hook (`pre-commit`/`pre-push`/… posé dans `.git/hooks/`,
+  #     ou un `core.hooksPath` pointé ailleurs par le pod) ne s'exécute côté monde.
+  #   * `core.fsmonitor=` — désarme un programme fsmonitor (lancé par git au scan de l'index).
+  #   * `core.sshCommand=` — désarme une commande ssh custom (lancée par fetch/push via ssh).
+  #   * `diff.external=` — désarme le driver de diff externe (lancé par `git log -p`/`diff`/`show`,
+  #     c.-à-d. par les ops de la gate de livrable qui scannent le diff `base..HEAD`).
+  #   * `core.attributesFile=/dev/null` — neutralise le fichier d'attributs GLOBAL (un `filter=`/`diff=`
+  #     déclaré hors-repo). NB : le `.gitattributes` IN-TREE n'est PAS désactivable par `-c` (git n'a
+  #     aucun switch « disable all filters ») ; un `filter.<nom>.clean` in-tree à nom arbitraire reste
+  #     exécutable par `git add`. Le seul verrou réel du vecteur IN-TREE est donc CÔTÉ CONTENU (refuser
+  #     fail-closed le payload qui écrirait `.git/**` ou un `.gitattributes` armant `filter=`/`diff=`,
+  #     fait par l'appelant qui place le contenu), pas ce flag. Ce flag ferme le vecteur config GLOBALE.
+  @git_safe_config_args [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=",
+    "-c",
+    "core.sshCommand=",
+    "-c",
+    "diff.external=",
+    "-c",
+    "core.attributesFile=/dev/null"
+  ]
+
+  @doc """
+  Arguments `-c <clé>=<val>` à préfixer à TOUTE invocation `git` système-side sur un workspace
+  co-écrit par un pod. Source UNIQUE de la neutralisation config (hooks, fsmonitor, sshCommand,
+  diff.external, attributesFile global) ; les sites la composent au lieu de recopier la liste.
+  Voir le commentaire de `@git_safe_config_args` pour le POURQUOI de chaque flag et la limite
+  IN-TREE (les filtres `.gitattributes` du repo se ferment côté CONTENU, pas par `-c`).
+  """
+  @spec git_safe_config_args() :: [String.t()]
+  def git_safe_config_args, do: @git_safe_config_args
+
   @doc """
   Exécute `git <args>` borné. `output` = stdout+stderr fusionnés (`stderr_to_stdout: true`, comme tous
   les sites git du codebase). Options :

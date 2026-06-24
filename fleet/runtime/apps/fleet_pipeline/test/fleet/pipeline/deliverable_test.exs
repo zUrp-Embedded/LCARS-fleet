@@ -166,6 +166,89 @@ defmodule Fleet.Pipeline.DeliverableTest do
       assert {:error, {:path_traversal, "../escape.txt"}} = Deliverable.publish(opts)
     end
 
+    test "WI-1 — payload `.gitattributes filter=` + filtre clean armé → REFUSÉ, le filtre NE tourne PAS",
+         %{tmp_dir: tmp} do
+      {ws, _bare, base} = setup_ws(tmp, "payload-clean-filter")
+
+      # Vecteur RCE : un filtre `clean` à commande arbitraire est armé dans `.git/config` du repo. Le
+      # payload tente d'ajouter le `.gitattributes` qui MAPPE `*.txt` vers ce filtre. Si le livrable n'est
+      # pas refusé, le `git add` système-side qui suit EXÉCUTE la commande du filtre côté monde (hors bwrap).
+      sentinel = Path.join(tmp, "clean_filter_ran")
+      File.rm(sentinel)
+
+      {_, 0} =
+        g(ws, ["config", "filter.pwn.clean", "sh -c 'touch #{sentinel}; cat'"])
+
+      opts = %{
+        mode: :payload,
+        workspace: ws,
+        base_sha: base,
+        allowed_emails: payload_allowed(),
+        remote: "origin",
+        target_branch: "deliverables/x",
+        files: [
+          %{"path" => ".gitattributes", "content" => "*.txt filter=pwn\n"},
+          %{"path" => "x.txt", "content" => "hello\n"}
+        ],
+        identity: payload_identity(),
+        message: "evil filter"
+      }
+
+      # Étage CONTENU (load-bearing) : le `.gitattributes` armant `filter=` est refusé AVANT toute écriture.
+      assert {:error, {:dangerous_gitattributes, ".gitattributes"}} = Deliverable.publish(opts)
+
+      # Le filtre n'a JAMAIS tourné (aucun git add système-side n'a eu lieu).
+      refute File.exists?(sentinel)
+      # Rien n'a été écrit (validation 2-passes : tout valider avant tout write).
+      refute File.exists?(Path.join(ws, ".gitattributes"))
+      refute File.exists?(Path.join(ws, "x.txt"))
+    end
+
+    test "WI-1 — payload écrivant sous `.git/` (ex. `.git/config`) → REFUSÉ avant écriture",
+         %{tmp_dir: tmp} do
+      {ws, _bare, base} = setup_ws(tmp, "payload-dotgit")
+
+      opts = %{
+        mode: :payload,
+        workspace: ws,
+        base_sha: base,
+        allowed_emails: payload_allowed(),
+        remote: "origin",
+        target_branch: "deliverables/x",
+        files: [
+          %{
+            "path" => ".git/config",
+            "content" => "[filter \"pwn\"]\n\tclean = touch /tmp/pwned\n"
+          }
+        ],
+        identity: payload_identity(),
+        message: "evil config"
+      }
+
+      assert {:error, {:dotgit_path, ".git/config"}} = Deliverable.publish(opts)
+    end
+
+    test "WI-1 — un `.gitattributes` BÉNIN (sans filter=/diff=) reste autorisé",
+         %{tmp_dir: tmp} do
+      {ws, bare, base} = setup_ws(tmp, "payload-benign-attrs")
+
+      opts = %{
+        mode: :payload,
+        workspace: ws,
+        base_sha: base,
+        allowed_emails: payload_allowed(),
+        remote: "origin",
+        target_branch: "deliverables/benign",
+        # `text`/`eol` n'exécutent aucune commande externe → non bloqués (pas de faux positif).
+        files: [%{"path" => ".gitattributes", "content" => "*.txt text eol=lf\n"}],
+        identity: payload_identity(),
+        message: "benign attrs"
+      }
+
+      assert {:ok, %{pushed?: true}} = Deliverable.publish(opts)
+      {_pushed, 0} = g(bare, ["rev-parse", "deliverables/benign"])
+    end
+
     test "F081 — symlink checké-in dans le workspace → BLOQUE (pas d'évasion via File.write)",
          %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-symlink")

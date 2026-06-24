@@ -16,7 +16,7 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 |---|---|
 | `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST |
 | `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
-| `Fleet.API.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380) |
+| `Fleet.API.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380). **Confinement RÉEL** (`safe_abs_path`, non-lexical) : refuse chemin absolu, composant `.git`, symlink-in-chain (résolu par `lstat` par composant — `File.write`/`rename` ne SUIT pas un lien hors-repo), et `file_path` == racine (sinon le `<root>.tmp` serait un sibling hors-repo). **Hooks neutralisés** : `git add`/`commit` composent `Fleet.Credentials.Shell.git_safe_config_args/0` (un hook/`core.hooksPath` du repo de config ne s'exécute pas côté monde). **Rollback correct** : sur échec git AVANT que le commit ne land → restaure le worktree ET désindexe (`git reset -- <file>`, pas de blob fantôme dans l'index) ; sur échec d'une étape APRÈS un commit qui a land → NE rollback PAS (le commit est durable, écraser le worktree le corromprait). `content` non-binaire refusé proprement (pas de crash `File.write`) |
 | `Fleet.API.Readiness` | read-model P05 — état opérationnel LIVE (anti-vert-creux). Introspecte config/process/persistent_term ; `deep/0` rend `status: operational\|degraded` + sous-systèmes. Jumeau runtime de `mix lcars.contracts.check` (plan source-conformance build/CI) sur le plan opérationnel. Fonctions pures (pas de process — Iron Law) |
 
 ## Routes REST
@@ -106,6 +106,9 @@ callbacks Cowboy directs pour WS (pas de socket réel).
 ## Dépendances
 
 * `fleet_event_router` (ch11 PROMOTED) — Bus PubSub
+* `fleet_pilot` (Ring 2) — readiness sonde la liveness du rail stage
+* `fleet_cap_profile` (ch1) — validation cap-profile à l'admission `/api/admin/spawn`
+* `fleet_credentials` (Ring 1) — `Fleet.Credentials.Shell.git_safe_config_args/0` (source unique de la neutralisation config git système-side, composée par `GitCommitter`)
 * `:plug`, `:plug_cowboy`, `:jason`
 
 ## D1 décidé (split deferred)

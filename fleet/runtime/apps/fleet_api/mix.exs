@@ -35,6 +35,10 @@ defmodule Fleet.API.MixProject do
       # MA-18 : valide le cap-profile AVANT d'ACK un `/api/admin/spawn` (même loader que le
       # PublishConsumer, source unique). Dép explicite (était transitive via fleet_pilot) — Ring 4 → Ring 1.
       {:fleet_cap_profile, in_umbrella: true},
+      # GitCommitter neutralise la config git pilotable-pod du repo de config via la SOURCE UNIQUE
+      # `Fleet.Credentials.Shell.git_safe_config_args/0` (pas de 2e copie de la liste de tournevis).
+      # Ring 4 → Ring 1, acyclique (fleet_credentials ne dépend que de cap_profile + event_router).
+      {:fleet_credentials, in_umbrella: true},
       {:plug, "~> 1.19"},
       {:plug_cowboy, "~> 2.8"},
       {:jason, "~> 1.4"}

@@ -48,16 +48,20 @@ defmodule Fleet.Pipeline.Git do
   # absents ici. L'identité (author/committer) + message + workspace suffisent.
   @commit_required_keys @required_keys -- [:branch]
 
-  # Le workspace est CO-ÉCRIT par un pod adversaire ; `.git/hooks/` y est inscriptible par le pod.
-  # `git commit`/`git push` sont lancés ICI, côté MONDE (runtime Elixir, HORS bwrap) → un
-  # `pre-push`/`pre-commit` posé par le pod s'exécuterait avec les privilèges du runtime = RCE hors-pod.
-  # `core.hooksPath=/dev/null` neutralise TOUS les hooks du workspace pour les ops système-side (flag
-  # git natif, tournevis) : le monde REFUSE d'exécuter le code du pod plutôt que d'espérer que le pod
-  # n'en pose pas (mauvais état rendu impossible, pas détecté). N'affecte PAS la doctrine
-  # `--no-verify JAMAIS` (qui protège l'appelant du module ; ici on neutralise le hook adversaire, pas
-  # la vérif d'intégrité de l'appelant). Les ops read-only de la gate (log/diff/merge-base) n'exécutent
-  # pas de hook → pas concernées.
-  @hooks_off ["-c", "core.hooksPath=/dev/null"]
+  # Le workspace est CO-ÉCRIT par un pod adversaire ; `.git/hooks/`, `.git/config` et un `.gitattributes`
+  # in-tree y sont posables par le pod. `git add`/`git commit`/`git push` sont lancés ICI, côté MONDE
+  # (runtime Elixir, HORS bwrap) → un hook (`pre-commit`/`pre-push`), un filtre `clean`, une `sshCommand`
+  # ou un `diff.external` armé par le pod s'exécuterait avec les privilèges du runtime = exécution de
+  # commande arbitraire hors sandbox. On compose la SOURCE UNIQUE de neutralisation config
+  # (`Fleet.Credentials.Shell.git_safe_config_args/0` : hooks + fsmonitor + sshCommand + diff.external +
+  # attributesFile global) sur chaque op qui peut exécuter du code config-driven : le monde REFUSE
+  # d'exécuter le code du pod plutôt que d'espérer qu'il n'en arme pas (mauvais état rendu impossible).
+  # N'affecte PAS la doctrine `--no-verify JAMAIS` (qui protège l'appelant du module ; ici on neutralise
+  # le mécanisme adversaire, pas la vérif d'intégrité de l'appelant). LIMITE honnête : un `filter.<nom>.clean`
+  # IN-TREE (armé par un `.gitattributes` + `.git/config` du repo) n'est PAS désactivable par `-c` — c'est
+  # le CONTENU validé en amont (`Deliverable` refuse les payloads écrivant `.git/**` ou un `.gitattributes`
+  # armant `filter=`) qui ferme ce vecteur-là ; ici on ferme les vecteurs config globale/système + hooks.
+  @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
   # Refuse branches/refs avec caractères ambigus (espace, ..., leading `-`).
   # Pas une défense anti-injection (System.cmd n'utilise pas de shell), juste
@@ -164,7 +168,14 @@ defmodule Fleet.Pipeline.Git do
         # `--` termine les options → un pathspec commençant par `-` (ex. `add_paths = ["--all"]`
         # depuis un input non fiable) est traité comme un CHEMIN littéral, pas une option git. `System.cmd`
         # n'utilise pas de shell, mais GIT parse ses propres options : un arg leading-`-` est une option.
-        case System.cmd("git", ["add", "--" | paths], cd: opts.workspace, stderr_to_stdout: true) do
+        # `@hooks_off` (neutralisation config) AVANT `add` : `git add` exécute le filtre `clean` armé par
+        # un `.gitattributes`+`.git/config` du pod = exécution de commande arbitraire côté monde. Le set
+        # neutralise les vecteurs config globale/système ; le vecteur in-tree (filtre nommé) est fermé en
+        # amont côté CONTENU par `Deliverable` (cf. le commentaire de `@hooks_off`).
+        case System.cmd("git", @hooks_off ++ ["add", "--" | paths],
+               cd: opts.workspace,
+               stderr_to_stdout: true
+             ) do
           {_out, 0} -> :ok
           {out, rc} -> {:error, {:git_add_failed, rc, String.trim(out)}}
         end

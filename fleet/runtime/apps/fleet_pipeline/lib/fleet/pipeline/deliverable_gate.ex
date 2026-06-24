@@ -282,10 +282,13 @@ defmodule Fleet.Pipeline.DeliverableGate do
   end
 
   # `git -C <ws> <args>` borné (push/diff réseau ou gros packfile ne bloquent pas le GenServer).
-  # Défense en profondeur : `core.hooksPath=/dev/null` sur TOUTE invocation git côté monde sur un
-  # workspace co-écrit par le pod — même si log/diff/merge-base n'exécutent pas de hook aujourd'hui,
-  # ça ferme toute classe future de hook-surprise (coût nul, flag git natif).
-  @hooks_off ["-c", "core.hooksPath=/dev/null"]
+  # Neutralisation config — SOURCE UNIQUE `Fleet.Credentials.Shell.git_safe_config_args/0` (hooks +
+  # fsmonitor + sshCommand + diff.external + attributesFile global), composée sur TOUTE invocation git côté
+  # monde sur un workspace co-écrit par le pod. LOAD-BEARING ici : `scan_secrets` lance `git log -p`, qui
+  # exécute un `diff.external`/textconv armé par le pod = exécution de commande arbitraire côté monde au
+  # moment du scan de livrable. Le `diff.external=` du set le désarme (les autres flags ferment hooks et
+  # consorts par uniformité, coût nul).
+  @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
   defp git(workspace, args) do
     task =

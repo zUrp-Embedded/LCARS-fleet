@@ -53,9 +53,11 @@ defmodule Fleet.Pipeline.Deliverable do
 
   @type result :: %{commit_sha: String.t(), pushed?: boolean(), mode: mode()}
 
-  # `core.hooksPath=/dev/null` sur toute invocation git côté monde sur le workspace pod
-  # (défense en profondeur ; head_sha/head_advanced sont des rev-parse sans hook, mais coût nul).
-  @hooks_off ["-c", "core.hooksPath=/dev/null"]
+  # Neutralisation config (hooks/fsmonitor/sshCommand/diff.external/attributesFile global) — SOURCE
+  # UNIQUE `Fleet.Credentials.Shell.git_safe_config_args/0`, composée sur toute invocation git côté monde
+  # sur le workspace pod (défense en profondeur ; head_sha/head_advanced sont des rev-parse, mais coût nul
+  # et on garde l'uniformité avec les ops qui, elles, exécuteraient du code config-driven).
+  @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
   @common_keys [:mode, :workspace, :base_sha, :allowed_emails]
   @payload_keys [:files, :identity, :message]
@@ -200,6 +202,24 @@ defmodule Fleet.Pipeline.Deliverable do
           not (full == expanded_ws or String.starts_with?(full, expanded_ws <> "/")) ->
             {:halt, {:error, {:path_traversal, rel_path}}}
 
+          # Un payload écrivant SOUS `.git/` (à n'importe quel niveau du chemin) réécrirait la config du
+          # repo — `.git/config` (armer un `filter.<nom>.clean = <cmd>` exécuté par le `git add` système-side
+          # qui suit), `.git/hooks/pre-commit`, etc. → exécution de commande arbitraire côté monde au commit.
+          # Le pod ne pose JAMAIS sa propre plomberie git via le payload : on refuse fail-closed tout
+          # composant `.git`. (Le commit système-side est ce qui transforme ce contenu en livrable, donc le
+          # payload est consommé APRÈS écriture → la garde DOIT être ici, avant l'écriture.)
+          dotgit_component?(rel_path) ->
+            {:halt, {:error, {:dotgit_path, rel_path}}}
+
+          # Un `.gitattributes` (à n'importe quel niveau) dont le contenu ARME un `filter=` ou un `diff=`
+          # détourne `git add`/`git log -p` système-side vers une commande externe (le driver `clean`/
+          # `textconv` correspondant). `core.attributesFile=/dev/null` ne neutralise QUE le fichier d'attributs
+          # GLOBAL ; le `.gitattributes` IN-TREE reste honoré et n'est PAS désactivable par `-c` (git n'a aucun
+          # « disable all filters »). Le SEUL verrou réel de ce vecteur est donc CE refus de contenu : on rejette
+          # fail-closed le payload qui armerait un attribut de filtrage/diff exécutable.
+          gitattributes_basename?(rel_path) and arms_filter_or_diff?(content) ->
+            {:halt, {:error, {:dangerous_gitattributes, rel_path}}}
+
           # `Path.expand` est LEXICAL (résout `..`, PAS les symlinks). Un symlink checké-in
           # dans le repo cloné (`out -> /home/<human>/.claude`) passe le check de préfixe ci-dessus,
           # mais `File.write` SUIT le symlink → écriture HORS workspace. On rejette si un composant
@@ -214,6 +234,28 @@ defmodule Fleet.Pipeline.Deliverable do
       bad, :ok ->
         {:halt, {:error, {:invalid_payload_file, inspect(bad)}}}
     end)
+  end
+
+  # Vrai si UN composant du chemin relatif est exactement `.git` (`.git/config`, `a/.git/hooks/x`, …).
+  # Comparaison sur les COMPOSANTS (pas un substring) : un fichier nommé `.gitignore` ou `foo.git`
+  # n'est PAS un composant `.git` et reste autorisé. Ferme la réécriture de la plomberie git du repo.
+  defp dotgit_component?(rel_path) do
+    rel_path |> Path.split() |> Enum.any?(&(&1 == ".git"))
+  end
+
+  # Vrai si le BASENAME du chemin est `.gitattributes` (à n'importe quel niveau : `.gitattributes`,
+  # `sub/.gitattributes`). C'est ce fichier qui mappe un pattern de fichiers vers un `filter`/`diff` driver.
+  defp gitattributes_basename?(rel_path) do
+    Path.basename(rel_path) == ".gitattributes"
+  end
+
+  # Vrai si le CONTENU d'un `.gitattributes` arme un attribut `filter=<x>` ou `diff=<x>` — ce sont les deux
+  # attributs qui détournent `git add` (`clean`) ou `git log -p`/`diff` (`textconv`) vers une commande
+  # externe configurée. On reste large (ligne contenant `filter=`/`diff=`, non-vide), fail-closed : mieux
+  # vaut refuser un `.gitattributes` bénin portant `diff=python` que laisser passer un armement. Les autres
+  # attributs (`text`, `eol`, `binary`, `merge=`…) n'exécutent pas de commande externe → non bloqués.
+  defp arms_filter_or_diff?(content) do
+    Regex.match?(~r/(^|\s)(filter|diff)=\S/m, content)
   end
 
   # Vrai si un composant EXISTANT du chemin (de workspace au fichier) est un symlink. `lstat` ne
