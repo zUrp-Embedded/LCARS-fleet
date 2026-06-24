@@ -1209,4 +1209,101 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert ForgeClient.assigned_by_qs(assigned_by: "") == ""
     end
   end
+
+  # ============================================================
+  # Confinement E (WI-E4) — un segment repo/path/ref hostile produit une URL SÛRE.
+  # Le bon traitement = ENCODAGE (pas slug : repo=`owner/name`, path=`dir/file` ont des `/` légitimes) :
+  # chaque COMPOSANT est encodé, les `/` STRUCTURELS préservés ; un `..`/`/`/espace/`?`/`#` injecté inerte.
+  # ============================================================
+
+  describe "encode_seg/encode_repo/encode_path — encodage par segment" do
+    test "encode_seg neutralise /, espace, ?, # dans un composant atomique" do
+      assert ForgeClient.encode_seg("a/b") == "a%2Fb"
+      assert ForgeClient.encode_seg("a b") == "a%20b"
+      assert ForgeClient.encode_seg("a?x=1") == "a%3Fx%3D1"
+      assert ForgeClient.encode_seg("a#f") == "a%23f"
+    end
+
+    test "encode_repo préserve le / structurel owner/name MAIS neutralise un composant de traversée" do
+      assert ForgeClient.encode_repo("fleet/lcars") == "fleet/lcars"
+
+      # VECTEUR RÉEL : `fleet/../admin` — le `..` est un COMPOSANT après split. www-form ne touche pas
+      # le `.` → sans le cas dédié il survivrait et le serveur normaliserait (traversée). On le rend inerte :
+      assert ForgeClient.encode_repo("fleet/../admin") == "fleet/%2E%2E/admin"
+      refute ForgeClient.encode_repo("fleet/../admin") =~ ~r{/\.\.(/|$)}
+      assert ForgeClient.encode_repo("fleet/a b") == "fleet/a%20b"
+      # un `/` injecté DANS un composant (faux séparateur) est encodé :
+      assert ForgeClient.encode_repo("fleet/x%2F..") == "fleet/x%252F.."
+    end
+
+    test "encode_path : / structurels préservés, tout composant .. inerte" do
+      assert ForgeClient.encode_path("docs/sub/file.md") == "docs/sub/file.md"
+
+      assert ForgeClient.encode_path("docs/../../../etc/passwd") ==
+               "docs/%2E%2E/%2E%2E/%2E%2E/etc/passwd"
+
+      refute ForgeClient.encode_path("docs/../../../etc/passwd") =~ ~r{/\.\.(/|$)}
+      assert ForgeClient.encode_path(".") == "%2E"
+    end
+  end
+
+  describe "URL réelle construite — un segment hostile ne traverse ni n'injecte" do
+    # Plug enregistreur : capture l'URL EXACTE vue côté serveur (request_path + query_string)
+    # APRÈS encodage client. C'est la preuve sur la construction d'URL réelle, pas que les helpers.
+    defmodule RecordingForge do
+      @behaviour Plug
+      @impl Plug
+      def init(agent), do: agent
+      @impl Plug
+      def call(conn, agent) do
+        Agent.update(agent, fn _ -> %{path: conn.request_path, query: conn.query_string} end)
+
+        conn
+        |> Plug.Conn.put_resp_header("content-type", "application/json")
+        |> Plug.Conn.send_resp(
+          200,
+          JSON.encode!(%{"content" => "", "sha" => "x", "state" => "open"})
+        )
+      end
+    end
+
+    defp rec_opts(agent) do
+      [base_url: "http://fake.test", token: "t", req_options: [plug: {RecordingForge, agent}]]
+    end
+
+    test "repo hostile (fleet/../admin) → aucun composant `..` brut dans le request_path" do
+      {:ok, agent} = Agent.start_link(fn -> nil end)
+      # Sans encodage : `/api/v1/repos/fleet/../admin/issues/1` → le serveur NORMALISE en
+      # `/api/v1/repos/admin/issues/1` (traversée vers un autre repo). L'encodage le rend inerte.
+      ForgeClient.get_issue("fleet/../admin", 1, rec_opts(agent))
+      %{path: path} = Agent.get(agent, & &1)
+
+      refute path =~ ~r{/\.\.(/|$)}, "le request_path ne doit contenir aucun composant `..` brut"
+      assert path =~ "%2E%2E"
+    end
+
+    test "ref hostile en query (?ref=main&admin=1) → encodé, pas d'injection de 2e param" do
+      {:ok, agent} = Agent.start_link(fn -> nil end)
+
+      # Sans encodage : `?ref=main&admin=1` injecterait un 2ᵉ paramètre `admin`. www-form encode le `&`.
+      ForgeClient.get_file(
+        "fleet/lcars",
+        "README.md",
+        Keyword.put(rec_opts(agent), :ref, "main&admin=1")
+      )
+
+      %{query: query} = Agent.get(agent, & &1)
+
+      assert query =~ "ref=main%26admin%3D1"
+      refute query =~ "&admin=1", "le `&` du ref ne doit pas démarrer un nouveau paramètre"
+    end
+
+    test "path hostile (../) dans get_file → aucun composant `..` brut dans le request_path" do
+      {:ok, agent} = Agent.start_link(fn -> nil end)
+      ForgeClient.get_file("fleet/lcars", "../../etc/passwd", rec_opts(agent))
+      %{path: path} = Agent.get(agent, & &1)
+
+      refute path =~ ~r{/\.\.(/|$)}
+    end
+  end
 end

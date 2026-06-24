@@ -20,7 +20,6 @@ defmodule Fleet.Credentials.RoleToken do
   require Logger
 
   @default_dir "/home/private"
-  @role_rx ~r/^[a-z0-9][a-z0-9_-]*$/
 
   @doc """
   Token forge du compte `role`, ou `nil` si absent/illisible/role invalide. Best-effort : le caller
@@ -29,7 +28,9 @@ defmodule Fleet.Credentials.RoleToken do
   """
   @spec token(String.t() | nil) :: String.t() | nil
   def token(role) when is_binary(role) do
-    if Regex.match?(@role_rx, role) do
+    # `role` est interpolé dans un path (`<dir>/<role>.gitea_token`) → validé via le smart-constructor
+    # slug (source UNIQUE du charset path-safe ; un `role` malformé est ignoré, fallback token système).
+    if Fleet.Slug.valid?(role) do
       path = Path.join(dir(), "#{role}.gitea_token")
 
       case File.read(path) do

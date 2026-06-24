@@ -652,13 +652,14 @@ defmodule Fleet.Spawner.Pod do
   # EXISTE, sinon le draft worker générique. Convention catalogue (le draft suit le `metadata.name`),
   # plus de rôle gravé en `case` : l'architecte tombe sur son draft délégateur (qualité+économie +
   # create_ticket), tout rôle sans draft dédié sur le draft worker (get_task/submit_result). `role`
-  # validé path-safe (interpolé dans un path).
+  # est interpolé dans un path (`agent-<role>-base.md`) → validé via le smart-constructor slug
+  # (source unique du charset path-safe ; un `role` malformé retombe juste sur le draft par défaut).
   defp read_agent_draft(%Fleet.CapProfile{metadata: meta}) do
     role = Map.get(meta || %{}, "name", "")
     default = "priv/sp_drafts/agent-worker-base.md"
 
     file =
-      if Regex.match?(~r/^[a-z0-9][a-z0-9_-]*$/, role) do
+      if Fleet.Slug.valid?(role) do
         candidate = "priv/sp_drafts/agent-#{role}-base.md"
 
         if File.exists?(Application.app_dir(:fleet_sp_builder, candidate)),
@@ -977,10 +978,17 @@ defmodule Fleet.Spawner.Pod do
 
   # Nom de projet PROPRE depuis `rc_name` (`<project>_<role>`, source canonique sanitizée par le
   # dispatcher). `nil` si pas de rc_name (pods permanents / admin → pas de remap cwd). Partagé avec le checkpoint.
+  #
+  # BOUNDARY de confinement E : ce `projet` est l'UNIQUE dérivation du nom de projet depuis `rc_name`
+  # (entrée de dispatch/recall, non maîtrisée), et il finit interpolé dans des chemins/segments — cwd
+  # `/home/<project>`, home intra-pod, dossier seed-store. On exige donc qu'il soit un slug ICI, au plus
+  # tôt : un `rc_name` malformé (`../evil_role`, `a/b_role`) → `nil` (pod sans remap ni seed, état neutre)
+  # plutôt qu'un `projet` traversant qui atteindrait un `Path.join`. Source unique → un seul point à tenir.
   defp rc_project(state) do
     with rc when is_binary(rc) <- Keyword.get(state.opts, :rc_name),
          role <- cap_profile_name(state.cap_profile),
-         stripped when stripped != rc <- String.replace_suffix(rc, "_" <> role, "") do
+         stripped when stripped != rc <- String.replace_suffix(rc, "_" <> role, ""),
+         true <- Fleet.Slug.valid?(stripped) do
       stripped
     else
       _ -> nil

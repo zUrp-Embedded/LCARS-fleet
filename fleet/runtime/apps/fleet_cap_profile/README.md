@@ -1,7 +1,7 @@
 # Fleet.CapProfile
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-05-22
+**Dernière révision** : 2026-06-24
 **Statut** : implémenté run #3.1 chantier #1 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_cap_profile.md
 
@@ -16,6 +16,18 @@ Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor.
 - `Fleet.CapProfile.compose/2` — compose role + modop_set, deep-merge last-wins
 - `Fleet.CapProfile.validate/1` — 9 invariants G24 (incl. G24-9 F-CONT-RISK)
 - `Fleet.CapProfile.sha256/1` — hash canonique stable d'un profile composé
+
+## Fleet.Slug — smart-constructor path-safe (utilitaire transverse)
+
+Source UNIQUE du charset path-safe `^[a-z0-9][a-z0-9_-]*$` (hébergé ici, Ring 1, réutilisé
+par spawner / pipeline / credentials / pilot). Tout nom de client/payload/catalogue interpolé
+dans un `Path.join` (feuille FS) ou un segment d'URL borné passe par lui — fail-closed.
+
+- `Fleet.Slug.cast/1` — `{:ok, slug}` ou `{:error, {:invalid_slug, raw}}`
+- `Fleet.Slug.cast!/1` — bang (raise `ArgumentError`) pour les sites où un nom invalide = bug appelant
+- `Fleet.Slug.valid?/1` — prédicat booléen
+- `Fleet.Slug.under_root?/2` — garde de confinement (dest résolu reste sous root)
+- `Fleet.Slug.confined_join/2` — caste + joint sous root + confine, en un geste (feuille FS)
 
 ## Schemas
 

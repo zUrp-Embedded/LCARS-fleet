@@ -382,19 +382,32 @@ defmodule Fleet.CapProfile do
   defp read_modops(modop_set) do
     result =
       Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
-        path = Path.join([root_dir(), "modop", name, "profile.yaml"])
+        # Le nom de modop vient du catalogue / d'un composeur (entrée non maîtrisée) et sert de
+        # COMPOSANT de chemin (`modop/<name>/profile.yaml`). Un nom avec `..`/`/` traverserait hors du
+        # modop_root (charger un YAML arbitraire de l'hôte comme « modop »). On le caste en slug AVANT
+        # tout `Path.join` ET on confine la feuille sous `<root>/modop/` : un nom malformé n'atteint
+        # jamais le FS (fail-closed → `:invalid_modop`, comme un fragment réservé/non conforme).
+        modop_root = Path.join(root_dir(), "modop")
 
-        if File.exists?(path) do
-          with {:ok, raw} <- decode_yaml(path),
-               :ok <- validate_modop_keys(raw),
-               :ok <- validate_against_schema(raw, :modop) do
-            {:cont, {:ok, [raw | acc]}}
+        with {:ok, dir} <- Fleet.Slug.confined_join(modop_root, name) do
+          path = Path.join(dir, "profile.yaml")
+
+          if File.exists?(path) do
+            with {:ok, raw} <- decode_yaml(path),
+                 :ok <- validate_modop_keys(raw),
+                 :ok <- validate_against_schema(raw, :modop) do
+              {:cont, {:ok, [raw | acc]}}
+            else
+              {:error, reason} -> {:halt, {:error, reason}}
+            end
           else
-            {:error, reason} -> {:halt, {:error, reason}}
+            Logger.warning("modop not found: #{inspect(name)} at #{path}")
+            {:halt, {:error, :modop_not_found}}
           end
         else
-          Logger.warning("modop not found: #{inspect(name)} at #{path}")
-          {:halt, {:error, :modop_not_found}}
+          {:error, _slug_or_escape} ->
+            Logger.warning("modop name non confiné (slug/traversal) : #{inspect(name)} — refusé")
+            {:halt, {:error, :invalid_modop}}
         end
       end)
 

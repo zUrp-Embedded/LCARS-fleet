@@ -108,4 +108,79 @@ defmodule Fleet.Spawner.SeedStoreTest do
   test "Spawner.recall : aucun seed pour (projet,role) → {:error, :no_seed}" do
     assert {:error, :no_seed} = Fleet.Spawner.recall("projet-inexistant", "engineer")
   end
+
+  # ============================================================
+  # Confinement E (WI-E1) — un nom de projet/rôle non-slug ne traverse JAMAIS le seed-store.
+  # ============================================================
+
+  test "checkpoint : projet traversant (../evil) → REFUSÉ, rien écrit hors store", %{
+    tmp: tmp,
+    root: root
+  } do
+    pod_dir = Path.join(tmp, "pod")
+    make_jsonl(pod_dir, "slug", "u1", "x\n")
+
+    # Cible d'évasion : `<root>/../evil/pods/...` = un dossier SŒUR de la racine seed-store.
+    evil_dir = Path.expand(Path.join(root, "../evil"))
+
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "../evil", "engineer")
+
+    # Régression prouvée : sans la garde slug+confinement, `Path.join([root, "../evil", "pods"])`
+    # écrirait `engineer.jsonl` ICI, hors de la racine. La garde le rend irreprésentable.
+    refute File.exists?(evil_dir)
+    refute File.exists?(Path.join([root, "..", "evil"]))
+  end
+
+  test "checkpoint : rôle traversant (a/b) → REFUSÉ", %{tmp: tmp} do
+    pod_dir = Path.join(tmp, "pod")
+    make_jsonl(pod_dir, "slug", "u1", "x\n")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "p", "a/b")
+  end
+
+  test "checkpoint : noms vides / NUL / contrôle → REFUSÉS", %{tmp: tmp} do
+    pod_dir = Path.join(tmp, "pod")
+    make_jsonl(pod_dir, "slug", "u1", "x\n")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "", "engineer")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "ok\x00evil", "engineer")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "ok\nevil", "engineer")
+  end
+
+  test "checkpoint : nom valide (my_checkpoint-1) → accepté", %{tmp: tmp, root: root} do
+    pod_dir = Path.join(tmp, "pod")
+    make_jsonl(pod_dir, "slug", "u1", "x\n")
+    assert :ok = SeedStore.checkpoint(pod_dir, "my_checkpoint-1", "engineer")
+    assert File.exists?(Path.join([root, "my_checkpoint-1", "pods", "engineer.jsonl"]))
+  end
+
+  test "read_map : projet traversant → :none (ne lit pas hors store)", %{tmp: tmp} do
+    pod_dir = Path.join(tmp, "pod")
+    make_jsonl(pod_dir, "slug", "u1", "x\n")
+    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer")
+    assert :none = SeedStore.read_map("../p", "engineer")
+    assert :none = SeedStore.read_map("p", "../engineer")
+  end
+
+  test "restore : uuid évadant le pod_dir → REFUSÉ (raise fail-loud), aucune écriture hors pod",
+       %{
+         tmp: tmp
+       } do
+    seed = Path.join(tmp, "seed.jsonl")
+    File.write!(seed, "mem\n")
+    pod_dir = Path.join(tmp, "recallpod")
+
+    # uuid hostile (lu d'un seed-map corrompu) : la feuille d'écriture est `pod_dir/.claude/projects/
+    # <slug>/` (3 niveaux sous le pod) → il faut 4 `../` pour franchir le pod_dir et viser un fichier hôte
+    # (`tmp/escaped.jsonl`). `restore` confine `dest` sous `pod_dir` via `under_root?` AVANT le `cp!` :
+    # une évasion DOIT lever (le caller rabat le raise sur transition_failed, le pod ne lance pas). Un uuid
+    # qui reste sous le pod (ex. `../../x` → `.claude/x.jsonl`) est légitime — le pod est éphémère et possédé ;
+    # le seul vrai vecteur fermé ici est l'écriture HORS du pod.
+    escape_target = Path.expand(Path.join(tmp, "escaped.jsonl"))
+    File.rm(escape_target)
+
+    assert_raise ArgumentError, fn ->
+      SeedStore.restore(seed, pod_dir, "/home/r/recallpod", "../../../../escaped")
+    end
+
+    refute File.exists?(escape_target)
+  end
 end

@@ -37,7 +37,13 @@ defmodule Fleet.Pipeline.Loader do
   """
   @spec load!(String.t(), keyword()) :: map()
   def load!(pipeline_name, opts \\ []) when is_binary(pipeline_name) and is_list(opts) do
-    yaml_path = Path.join(pipelines_root(opts), "#{pipeline_name}.yaml")
+    # Le nom de carte/pipeline vient du catalogue / d'un marqueur route forge (entrée non
+    # maîtrisée) et sert de COMPOSANT de chemin (`<root>/<name>.yaml`). Un nom avec `..`/`/`
+    # chargerait un YAML arbitraire de l'hôte comme « pipeline ». On le caste en slug AVANT le
+    # `Path.join` (fail-loud : `load!` est déjà bang, un nom malformé est un bug d'appelant) ;
+    # un slug ne peut contenir ni `/` ni `..` → la feuille reste sous la racine par construction.
+    name = Fleet.Slug.cast!(pipeline_name)
+    yaml_path = Path.join(pipelines_root(opts), "#{name}.yaml")
     yaml = YamlElixir.read_from_file!(yaml_path)
     # Détection du format par présence de `spec` (enveloppe V2.5) vs flat v1
     # (`stages` top-level). Pas de champ `apiVersion` (le versioning vit dans le code).

@@ -122,7 +122,11 @@ defmodule Fleet.Pilot.ForgeClient do
   # seul endroit — decide/dispatch_review n'ont plus à re-vérifier l'ownership.
   defp list_scoped_issues(repo, type, opts) when type in ["issues", "pulls"] do
     with {:ok, config} <- resolve_config(opts) do
-      paginate(config, "/repos/#{repo}/issues", "state=open&type=#{type}" <> assigned_by_qs(opts))
+      paginate(
+        config,
+        "/repos/#{encode_repo(repo)}/issues",
+        "state=open&type=#{type}" <> assigned_by_qs(opts)
+      )
     end
   end
 
@@ -143,7 +147,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec get_issue(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
   def get_issue(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
     with {:ok, config} <- resolve_config(opts) do
-      http_get(config, "/repos/#{repo}/issues/#{number}")
+      http_get(config, "/repos/#{encode_repo(repo)}/issues/#{number}")
     end
   end
 
@@ -161,13 +165,15 @@ defmodule Fleet.Pilot.ForgeClient do
   def set_assignee(repo, issue_number, login, opts \\ [])
       when is_binary(repo) and is_integer(issue_number) and is_binary(login) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, issue} <- http_get(config, "/repos/#{repo}/issues/#{issue_number}") do
+         {:ok, issue} <- http_get(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}") do
       current = Enum.map(Map.get(issue, "assignees") || [], & &1["login"])
 
       if current == [login] do
         {:ok, :already}
       else
-        case http_patch(config, "/repos/#{repo}/issues/#{issue_number}", %{assignees: [login]}) do
+        case http_patch(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}", %{
+               assignees: [login]
+             }) do
           {:ok, _} -> {:ok, :set}
           {:error, _} = err -> err
         end
@@ -196,7 +202,9 @@ defmodule Fleet.Pilot.ForgeClient do
       if sig && comment_signed?(config, repo, issue_number, sig, opts) do
         {:ok, :already}
       else
-        case http_post(config, "/repos/#{repo}/issues/#{issue_number}/comments", %{body: body}) do
+        case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", %{
+               body: body
+             }) do
           {:ok, _} -> {:ok, :posted}
           {:error, _} = err -> err
         end
@@ -221,7 +229,12 @@ defmodule Fleet.Pilot.ForgeClient do
           {:ok, :already_absent}
 
         %{"id" => id} ->
-          case request(config, :delete, "/repos/#{repo}/issues/#{issue_number}/labels/#{id}", nil) do
+          case request(
+                 config,
+                 :delete,
+                 "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels/#{id}",
+                 nil
+               ) do
             {:ok, _} -> {:ok, :removed}
             {:error, _} = err -> err
           end
@@ -236,7 +249,9 @@ defmodule Fleet.Pilot.ForgeClient do
   def close_issue(repo, issue_number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, _} <-
-           http_patch(config, "/repos/#{repo}/issues/#{issue_number}", %{state: "closed"}) do
+           http_patch(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}", %{
+             state: "closed"
+           }) do
       {:ok, :closed}
     end
   end
@@ -271,7 +286,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
       path =
         case Keyword.get(opts, :org) do
-          org when is_binary(org) and org != "" -> "/orgs/#{org}/repos"
+          org when is_binary(org) and org != "" -> "/orgs/#{encode_seg(org)}/repos"
           _ -> "/user/repos"
         end
 
@@ -295,7 +310,11 @@ defmodule Fleet.Pilot.ForgeClient do
   def add_collaborator(repo, username, permission, opts \\ [])
       when is_binary(repo) and is_binary(username) and is_binary(permission) do
     with {:ok, config} <- resolve_config(opts) do
-      case http_put(config, "/repos/#{repo}/collaborators/#{username}", %{permission: permission}) do
+      case http_put(
+             config,
+             "/repos/#{encode_repo(repo)}/collaborators/#{encode_seg(username)}",
+             %{permission: permission}
+           ) do
         {:ok, _} -> :ok
         {:error, _} = err -> err
       end
@@ -325,7 +344,8 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec add_topic(String.t(), String.t(), Keyword.t()) :: :ok | {:error, term()}
   def add_topic(repo, topic, opts \\ []) when is_binary(repo) and is_binary(topic) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, _} <- http_put(config, "/repos/#{repo}/topics/#{topic}", nil) do
+         {:ok, _} <-
+           http_put(config, "/repos/#{encode_repo(repo)}/topics/#{encode_seg(topic)}", nil) do
       :ok
     end
   end
@@ -338,7 +358,8 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec collaborator?(String.t(), String.t(), Keyword.t()) :: boolean()
   def collaborator?(repo, username, opts \\ []) when is_binary(repo) and is_binary(username) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, _} <- http_get(config, "/repos/#{repo}/collaborators/#{username}") do
+         {:ok, _} <-
+           http_get(config, "/repos/#{encode_repo(repo)}/collaborators/#{encode_seg(username)}") do
       true
     else
       _ -> false
@@ -388,7 +409,8 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec repo_id(String.t(), Keyword.t()) :: {:ok, integer()} | {:error, term()}
   def repo_id(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, %{"id" => id}} when is_integer(id) <- http_get(config, "/repos/#{repo}") do
+         {:ok, %{"id" => id}} when is_integer(id) <-
+           http_get(config, "/repos/#{encode_repo(repo)}") do
       {:ok, id}
     else
       {:ok, _} -> {:error, :no_id}
@@ -407,7 +429,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec protect_branch(String.t(), map(), Keyword.t()) :: :ok | {:error, term()}
   def protect_branch(repo, rule, opts \\ []) when is_binary(repo) and is_map(rule) do
     with {:ok, config} <- resolve_config(opts) do
-      case http_post(config, "/repos/#{repo}/branch_protections", rule) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/branch_protections", rule) do
         {:ok, _} -> :ok
         {:error, {:http, code, _}} when code in [409, 422] -> :ok
         {:error, _} = err -> err
@@ -436,7 +458,7 @@ defmodule Fleet.Pilot.ForgeClient do
         labels: Keyword.get(opts, :labels, [])
       }
 
-      case http_post(config, "/repos/#{repo}/issues", attrs) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/issues", attrs) do
         {:ok, %{"number" => number}} -> {:ok, number}
         {:error, _} = err -> err
       end
@@ -467,7 +489,7 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts) do
       attrs = %{head: head, base: base, title: title, body: Keyword.get(opts, :body, "")}
 
-      case http_post(config, "/repos/#{repo}/pulls", attrs) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/pulls", attrs) do
         {:ok, %{"number" => number}} -> {:ok, number}
         # PR déjà ouverte pour cette head (Gitea 409) → idempotence : on la retrouve.
         {:error, {:http, 409, _}} -> get_pr_for_branch(repo, head, base, opts)
@@ -490,7 +512,7 @@ defmodule Fleet.Pilot.ForgeClient do
   def get_pr_for_branch(repo, head, base, opts \\ [])
       when is_binary(repo) and is_binary(head) and is_binary(base) do
     with {:ok, config} <- resolve_config(opts) do
-      case http_get(config, "/repos/#{repo}/pulls?state=open&limit=50") do
+      case http_get(config, "/repos/#{encode_repo(repo)}/pulls?state=open&limit=50") do
         {:ok, pulls} when is_list(pulls) ->
           case Enum.find(pulls, &pr_matches_head?(&1, head, base)) do
             %{"number" => number} -> {:ok, number}
@@ -521,7 +543,7 @@ defmodule Fleet.Pilot.ForgeClient do
   def request_review(repo, index, reviewers, opts \\ [])
       when is_binary(repo) and is_integer(index) and is_list(reviewers) do
     with {:ok, config} <- resolve_config(opts) do
-      case http_post(config, "/repos/#{repo}/pulls/#{index}/requested_reviewers", %{
+      case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/requested_reviewers", %{
              reviewers: reviewers
            }) do
         {:ok, _} -> :ok
@@ -546,7 +568,7 @@ defmodule Fleet.Pilot.ForgeClient do
       when is_binary(repo) and is_integer(index) and is_binary(body) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, gitea_event} <- review_event(event) do
-      case http_post(config, "/repos/#{repo}/pulls/#{index}/reviews", %{
+      case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews", %{
              event: gitea_event,
              body: body
            }) do
@@ -593,7 +615,7 @@ defmodule Fleet.Pilot.ForgeClient do
     # `delete_branch_after_merge` → Gitea supprime la feature-branch
     # `lcars/issue-N-role` après merge (hygiène : pas d'empilement de branches mortes). No-op si
     # branche protégée/absente ; le merge reste l'autorité (la suppression est un effet de bord).
-    case http_post(config, "/repos/#{repo}/pulls/#{index}/merge", %{
+    case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
            "Do" => method,
            "delete_branch_after_merge" => true
          }) do
@@ -662,7 +684,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @spec get_pull(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
   def get_pull(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
     with {:ok, config} <- resolve_config(opts),
-         do: http_get(config, "/repos/#{repo}/pulls/#{number}")
+         do: http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{number}")
   end
 
   @feature_branch_rx ~r{^lcars/issue-(\d+)-(.+)$}
@@ -742,7 +764,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} when is_list(reviews) <-
-           http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
+           http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
       {:ok,
        %{verdicts: verdicts_by_reviewer(reviews, head_sha), reviewers: jury_reviewers(reviews)}}
     else
@@ -810,7 +832,7 @@ defmodule Fleet.Pilot.ForgeClient do
       when is_binary(repo) and is_integer(index) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} when is_list(reviews) <-
-           http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
+           http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
       {:ok, change_requests_by_reviewer(reviews)}
     else
       {:ok, _non_list} -> {:ok, []}
@@ -836,7 +858,7 @@ defmodule Fleet.Pilot.ForgeClient do
       when is_binary(repo) and is_integer(index) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} when is_list(reviews) <-
-           http_get(config, "/repos/#{repo}/pulls/#{index}/reviews") do
+           http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
       count =
         reviews
         |> Enum.reject(&Map.get(&1, "dismissed", false))
@@ -893,7 +915,7 @@ defmodule Fleet.Pilot.ForgeClient do
         # `sha` présent ⇒ UPDATE du fichier existant (Gitea l'exige) ; absent ⇒ CREATE.
         |> maybe_put_sha(Keyword.get(opts, :sha))
 
-      case http_put(config, "/repos/#{repo}/contents/#{path}", body) do
+      case http_put(config, "/repos/#{encode_repo(repo)}/contents/#{encode_path(path)}", body) do
         {:ok, %{"commit" => %{"sha" => sha}}} -> {:ok, sha}
         {:ok, _other} -> {:ok, :written}
         {:error, _} = err -> err
@@ -916,7 +938,10 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts) do
       ref = Keyword.get(opts, :ref, "main")
 
-      case http_get(config, "/repos/#{repo}/contents/#{path}?ref=#{ref}") do
+      case http_get(
+             config,
+             "/repos/#{encode_repo(repo)}/contents/#{encode_path(path)}?ref=#{URI.encode_www_form(ref)}"
+           ) do
         {:ok, %{"content" => b64, "sha" => sha}} ->
           case Base.decode64(b64, ignore: :whitespace) do
             {:ok, content} -> {:ok, %{content: content, sha: sha}}
@@ -949,7 +974,7 @@ defmodule Fleet.Pilot.ForgeClient do
     # double-post au replay). Une page de forme inattendue rend `{:error, …}` (et non un
     # `{:ok, acc}` tronqué) → tombe dans le `_ -> false` (pas de signature trouvée = on poste, fail-safe
     # dédup : au pire un double-post au replay, jamais une suppression silencieuse d'un marqueur).
-    case paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
+    case paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
         # Le dédup garde une ÉCRITURE système → ne fait foi que des comments
         # du bot. Sinon un user forge poste la signature en avance → le comment système est skipé →
@@ -1010,7 +1035,7 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts),
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
-           paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
+           paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       # Ne faire foi QUE des comments écrits par le compte SYSTÈME (bot). Un user forge
       # (humain/attaquant) qui poste `[lcars-route:evil:stage]` piloterait sinon la navigation.
       comments
@@ -1064,7 +1089,7 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts),
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
-           paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
+           paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       # Compter SEULEMENT les hops signés par le SYSTÈME — sinon un user forge forge des
       # `[hop:role:sha]` pour gonfler le compteur et faire TRIPPER le budget anti-runaway (DoS rework).
       # Bot irrésoluble → {:error} (via le with) : le caller NE rebondit PAS sur un budget non vérifiable.
@@ -1112,7 +1137,7 @@ defmodule Fleet.Pilot.ForgeClient do
     with {:ok, config} <- resolve_config(opts),
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
-           paginate(config, "/repos/#{repo}/issues/#{issue_number}/comments", "") do
+           paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       # Le bloc ```result nourrit le MANDAT DE JUGEMENT du gatekeeper. Ne
       # l'extraire QUE de comments SYSTÈME — sinon un user forge injecte ce que le juge évalue.
       comments
@@ -1183,11 +1208,67 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
+  # URL-segment safety — encodage des segments fournis par appelant/forge.
+  #
+  # `repo`/`path`/`ref`/`username`/`topic`/`org`/`label_name` viennent du mandat (issue/PR), du
+  # catalogue ou de la config et sont interpolés dans l'URL Gitea. Un segment hostile (`../`, espace,
+  # `?x=1`, `#frag`) traverserait l'API (`/repos/owner/../admin/...`) ou INJECTERAIT une query/fragment
+  # qui changerait le sens de la requête. On ENCODE donc chaque segment au plus près de l'interpolation —
+  # PAS un slug (un `repo` = `owner/name` ET un `path` de fichier contiennent légitimement des `/`), mais
+  # un encodage qui rend `..`/`/`/espace/`?`/`#` INERTES.
+  #
+  # Deux pièges traités :
+  #   1. un `/` injecté DANS un composant (`name = "x/../admin"`) fabriquerait un faux séparateur →
+  #      `encode_seg` percent-encode le `/` (`%2F`), il ne peut plus séparer.
+  #   2. un composant qui EST le séparateur de chemin `.`/`..` (`repo = "fleet/../admin"`, le `..` est un
+  #      composant entier après split) : `URI.encode_www_form` ne touche PAS le `.` (caractère unreserved),
+  #      donc un `..` brut SURVIVRAIT et le serveur normaliserait le chemin (traversée). On NEUTRALISE
+  #      donc tout composant `.`/`..`/vide en percent-encodant ses points (`..` → `%2E%2E`) → segment
+  #      littéral inerte sur le fil, jamais un opérateur de chemin. C'est le verrou réel du vecteur repo.
+  #
+  # `encode_seg/1` = un composant atomique (username, org, topic, label, ref-en-path) ;
+  # `encode_repo/1`/`encode_path/1` = multi-composant (`owner/name`, `dir/sub/file`), `/` structurels
+  # préservés, chaque composant passé par `encode_component/1`. Pour une QUERY (`?ref=…`),
+  # `URI.encode_www_form` directement (cf. `get_file`).
+
+  @doc false
+  # Encode un composant d'URL atomique (rend `/`, `..`, espace, `?`, `#` inertes). Public pour test.
+  def encode_seg(seg) when is_binary(seg), do: encode_component(seg)
+
+  @doc false
+  # Encode un `owner/name` en préservant le `/` structurel mais en neutralisant tout `/`/`..`/composant
+  # de traversée injecté DANS un composant (owner ou name). Public pour test.
+  def encode_repo(repo) when is_binary(repo) do
+    repo |> String.split("/") |> Enum.map_join("/", &encode_component/1)
+  end
+
+  @doc false
+  # Encode un path de fichier multi-segment (`dir/sub/file.md`) : `/` structurels préservés, chaque
+  # composant neutralisé → un `..`/`.` injecté est inerte, pas de traversée de l'API contents. Public pour test.
+  def encode_path(path) when is_binary(path) do
+    path |> String.split("/") |> Enum.map_join("/", &encode_component/1)
+  end
+
+  # UN composant de chemin sûr. Un composant de TRAVERSÉE (`.`/`..`) est percent-encodé sur ses points
+  # (`..` → `%2E%2E`) → segment littéral inerte que le serveur ne normalisera PAS comme un opérateur de
+  # chemin (le `.` est unreserved : `URI.encode_www_form` ne le toucherait pas, d'où ce cas dédié — c'est
+  # LE verrou du vecteur `owner/../admin`). Un composant vide (`//`) ne traverse pas → laissé tel quel.
+  # Tout autre composant passe par `URI.encode_www_form` (le `/` interne devient `%2F`, l'espace `%20`,
+  # `?`/`#` encodés). Le `+` (espace www-form) est re-traduit en `%20` (sémantique path-segment, pas form).
+  defp encode_component(comp) when comp in [".", ".."] do
+    String.replace(comp, ".", "%2E")
+  end
+
+  defp encode_component(comp) when is_binary(comp) do
+    comp |> URI.encode_www_form() |> String.replace("+", "%20")
+  end
+
+  # ============================================================
   # HTTP plumbing
   # ============================================================
 
   defp get_issue_labels(config, repo, issue_number) do
-    case http_get(config, "/repos/#{repo}/issues/#{issue_number}/labels") do
+    case http_get(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels") do
       {:ok, labels} when is_list(labels) -> {:ok, labels}
       {:error, _} = err -> err
     end
@@ -1225,7 +1306,9 @@ defmodule Fleet.Pilot.ForgeClient do
   # POST le label ET vérifie qu'il est réellement posé : la réponse Gitea = les labels de l'issue après
   # ajout. Un nom inconnu est ignoré en silence (200 sans le label) → `{:ok, false}` (à compenser).
   defp post_issue_label(config, repo, issue_number, label_name) do
-    case http_post(config, "/repos/#{repo}/issues/#{issue_number}/labels", %{labels: [label_name]}) do
+    case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels", %{
+           labels: [label_name]
+         }) do
       {:ok, body} when is_list(body) -> {:ok, Enum.any?(body, &(&1["name"] == label_name))}
       {:ok, _non_list} -> {:ok, false}
       {:error, _} = err -> err
@@ -1246,7 +1329,7 @@ defmodule Fleet.Pilot.ForgeClient do
       description: "label protocole lcars (auto-cree, F-E5)"
     }
 
-    case http_post(config, "/orgs/#{org}/labels", body) do
+    case http_post(config, "/orgs/#{encode_seg(org)}/labels", body) do
       {:ok, _} -> :ok
       {:error, _} -> :ok
     end

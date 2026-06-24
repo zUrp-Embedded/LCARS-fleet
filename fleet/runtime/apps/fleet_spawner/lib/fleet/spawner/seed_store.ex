@@ -20,6 +20,26 @@ defmodule Fleet.Spawner.SeedStore do
   @spec checkpoint(Path.t(), String.t(), String.t()) :: :ok | :none | {:error, term()}
   def checkpoint(pod_dir, projet, role)
       when is_binary(pod_dir) and is_binary(projet) and is_binary(role) do
+    # `projet` ET `role` sont des COMPOSANTS de chemin du seed-store (`<root>/<projet>/pods/<role>.jsonl`).
+    # Ils viennent de `rc_name` (entrée de dispatch/recall, non maîtrisée par construction) : un `..`/`/`
+    # traverserait hors du store (écrire un `.jsonl` arbitraire de l'hôte). On caste les deux en slug et on
+    # confine le dossier de destination sous la racine AVANT tout `mkdir_p!`/`write!` — un nom malformé
+    # n'atteint jamais le FS (`{:error, _}` best-effort, le checkpoint est un bonus de mémoire non-fatal).
+    with {:ok, projet_slug} <- Fleet.Slug.cast(projet),
+         {:ok, role_slug} <- Fleet.Slug.cast(role),
+         {:ok, projet_dir} <- Fleet.Slug.confined_join(root(), projet_slug) do
+      do_checkpoint(pod_dir, projet_slug, role_slug, Path.join(projet_dir, "pods"))
+    else
+      {:error, reason} ->
+        Logger.warning(
+          "SeedStore: checkpoint refusé (nom non confiné) projet=#{inspect(projet)} role=#{inspect(role)} : #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp do_checkpoint(pod_dir, projet, role, dest_dir) do
     case latest_jsonl(pod_dir) do
       :none ->
         :none
@@ -27,7 +47,6 @@ defmodule Fleet.Spawner.SeedStore do
       {:ok, jsonl} ->
         uuid = Path.basename(jsonl, ".jsonl")
         slug = Path.basename(Path.dirname(jsonl))
-        dest_dir = Path.join([root(), projet, "pods"])
         File.mkdir_p!(dest_dir)
 
         # On ne garde QUE le PREMIER ROUND (seed minimal résumable = le setup/mandat initial du pod),
@@ -89,10 +108,15 @@ defmodule Fleet.Spawner.SeedStore do
   """
   @spec read_map(String.t(), String.t()) :: {:ok, map()} | :none
   def read_map(projet, role) when is_binary(projet) and is_binary(role) do
-    dir = Path.join([root(), projet, "pods"])
-    jsonl = Path.join(dir, "#{role}.jsonl")
-
-    with {:ok, raw} <- File.read(Path.join(dir, "#{role}.json")),
+    # Lecture-feuille du seed-store : `projet`/`role` sont des composants de chemin. Mêmes castes que
+    # `checkpoint/3` (un `recall(projet, role)` exposé prend ces deux args d'un appelant) → un nom non
+    # confiné rend `:none` (seed introuvable) plutôt que de lire un `.json`/`.jsonl` arbitraire de l'hôte.
+    with {:ok, projet_slug} <- Fleet.Slug.cast(projet),
+         {:ok, role_slug} <- Fleet.Slug.cast(role),
+         {:ok, projet_dir} <- Fleet.Slug.confined_join(root(), projet_slug),
+         dir = Path.join(projet_dir, "pods"),
+         jsonl = Path.join(dir, "#{role_slug}.jsonl"),
+         {:ok, raw} <- File.read(Path.join(dir, "#{role_slug}.json")),
          {:ok, %{"uuid" => uuid} = m} <- Jason.decode(raw),
          true <- File.exists?(jsonl) do
       {:ok, %{uuid: uuid, slug: m["slug"], jsonl: jsonl}}
@@ -109,9 +133,20 @@ defmodule Fleet.Spawner.SeedStore do
   @spec restore(Path.t(), Path.t(), Path.t(), String.t()) :: {:ok, Path.t()}
   def restore(seed_jsonl, pod_dir, cwd, uuid)
       when is_binary(seed_jsonl) and is_binary(pod_dir) and is_binary(cwd) and is_binary(uuid) do
+    # `cwd` est déjà confiné par `slugify` (tout hors `[A-Za-z0-9-]` → `-`, donc ni `/` ni `..`). Le
+    # `uuid`, lui, vient du `.json` du seed (`read_map`) : si ce fichier portait un `uuid` hostile
+    # (`../../x`), il s'interpolerait dans la FEUILLE et écrirait hors du dossier `projects/<slug>/`. On
+    # confine donc le `dest` résolu sous le pod_dir AVANT le `cp!` — fail-loud (raise) si évasion (le
+    # caller `maybe_recall_restore` rabat ce raise sur `transition_failed`, le pod ne lance pas).
     dir = Path.join([pod_dir, ".claude", "projects", slugify(cwd)])
     File.mkdir_p!(dir)
-    dest = Path.join(dir, "#{uuid}.jsonl")
+    dest = Path.expand(Path.join(dir, "#{uuid}.jsonl"))
+
+    unless Fleet.Slug.under_root?(dest, pod_dir) do
+      raise ArgumentError,
+            "SeedStore.restore: uuid non confiné (#{inspect(uuid)}) — évasion refusée"
+    end
+
     File.cp!(seed_jsonl, dest)
     {:ok, dest}
   end

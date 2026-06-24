@@ -65,6 +65,33 @@ defmodule Fleet.Pipeline.LoaderTest do
       end
     end
 
+    # Confinement E (WI-E3) : un nom de carte/pipeline non-slug ne traverse JAMAIS la racine.
+    test "nom de pipeline traversant (../) → REFUSÉ avant Path.join", %{tmp_dir: tmp_dir} do
+      # Pose une cible d'évasion : `<root>/../escape.yaml`.
+      File.write!(Path.join([tmp_dir, "..", "escape.yaml"]), """
+      name: escape
+      version: 1
+      stages:
+        only:
+          role: noop
+          profile: empty
+      """)
+
+      # Sans la garde slug, `Path.join(root, "../escape.yaml")` lirait ce YAML hors-catalogue.
+      # `cast!` raise AVANT le Path.join.
+      assert_raise ArgumentError, ~r/slug invalide/, fn ->
+        Loader.load!("../escape")
+      end
+
+      File.rm(Path.join([tmp_dir, "..", "escape.yaml"]))
+    end
+
+    test "nom de pipeline avec slash → REFUSÉ", %{tmp_dir: _tmp_dir} do
+      assert_raise ArgumentError, ~r/slug invalide/, fn ->
+        Loader.load!("a/b")
+      end
+    end
+
     test "stage avec needs + inputs + gate hard valide", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "complex.yaml"), """
       name: complex

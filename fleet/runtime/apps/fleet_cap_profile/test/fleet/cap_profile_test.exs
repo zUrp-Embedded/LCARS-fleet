@@ -237,6 +237,29 @@ defmodule Fleet.CapProfileTest do
       assert p_b.spec["lifetime_scope"] == "pipe"
       assert Fleet.CapProfile.sha256(p_a) != Fleet.CapProfile.sha256(p_b)
     end
+
+    # Confinement E (WI-E2) : un nom de modop non-slug ne traverse JAMAIS hors modop_root.
+    test "rejects modop name with traversal (../) before Path.join", %{tmp_dir: tmp_dir} do
+      write_role(tmp_dir, "engineer", valid_profile_yaml())
+
+      # Pose une cible d'évasion atteignable par `<root>/modop/../../escape/profile.yaml`.
+      escape = Path.join([tmp_dir, "..", "escape"])
+      File.mkdir_p!(escape)
+      File.write!(Path.join(escape, "profile.yaml"), "spec:\n  lifetime_scope: pipe\n")
+
+      # Sans la garde slug+confinement, `Path.join([root, "modop", "../../escape"])` chargerait
+      # ce YAML hors-catalogue. La garde le refuse AVANT tout accès FS.
+      assert {:error, :invalid_modop} =
+               Fleet.CapProfile.compose("engineer", ["../../escape"])
+
+      File.rm_rf!(escape)
+    end
+
+    test "rejects modop name with slash or empty", %{tmp_dir: tmp_dir} do
+      write_role(tmp_dir, "engineer", valid_profile_yaml())
+      assert {:error, :invalid_modop} = Fleet.CapProfile.compose("engineer", ["a/b"])
+      assert {:error, :invalid_modop} = Fleet.CapProfile.compose("engineer", [""])
+    end
   end
 
   # ============================================================
