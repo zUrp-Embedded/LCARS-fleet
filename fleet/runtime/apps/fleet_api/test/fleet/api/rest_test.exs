@@ -114,6 +114,112 @@ defmodule Fleet.API.RestTest do
     end
   end
 
+  # ============================================================
+  # B2b — allowlist DTO d'admission de /api/admin/spawn
+  # ============================================================
+  #
+  # /api/admin/spawn est no-auth. Le PublishConsumer convertit ENSUITE `payload["opts"]` en opts internes du
+  # spawner — sans filtre, des opts privilégiés deviennent pilotables depuis l'API (racines disque, `human`,
+  # `project` → clone d'un repo attaquant dans le pod, `allow_no_mandate`, seams…). L'allowlist REFUSE tout
+  # champ non public AVANT le moindre broadcast : 422, et rien n'atteint le consumer/spawner.
+  describe "POST /api/admin/spawn — allowlist DTO (B2b)" do
+    # Chacun de ces payloads porte un champ interne du spawner via `opts` (ou directement) : doit être 422
+    # AVANT spawn, et AUCUN `admin.spawn.request` ne doit partir sur le bus.
+    @forbidden_payloads [
+      {"opts.pod_dir_root", %{"role" => "engineer", "opts" => %{"pod_dir_root" => "/tmp/evil"}}},
+      {"opts.state_fs_root",
+       %{"role" => "engineer", "opts" => %{"state_fs_root" => "/tmp/evil"}}},
+      {"opts.human", %{"role" => "engineer", "opts" => %{"human" => "victim"}}},
+      {"opts.project",
+       %{"role" => "engineer", "opts" => %{"project" => %{"repo_path" => "git@evil:repo"}}}},
+      {"opts.allow_no_mandate", %{"role" => "engineer", "opts" => %{"allow_no_mandate" => true}}},
+      {"opts.resume", %{"role" => "engineer", "opts" => %{"resume" => true}}},
+      {"opts.session_id", %{"role" => "engineer", "opts" => %{"session_id" => "x"}}},
+      {"opts.recall_seed_jsonl",
+       %{"role" => "engineer", "opts" => %{"recall_seed_jsonl" => "x"}}},
+      {"opts.rc_name", %{"role" => "engineer", "opts" => %{"rc_name" => "x"}}},
+      {"opts brut (liste)", %{"role" => "engineer", "opts" => ["module", "fun"]}},
+      {"clé top-level inconnue", %{"role" => "engineer", "evil_seam" => "M.f/1"}}
+    ]
+
+    for {label, payload} <- @forbidden_payloads do
+      test "REFUSE (#{label}) → 422 AVANT spawn, aucun broadcast" do
+        conn =
+          conn(:post, "/api/admin/spawn", Jason.encode!(unquote(Macro.escape(payload))))
+          |> put_req_header("content-type", "application/json")
+          |> Rest.call(@opts)
+
+        assert conn.status == 422,
+               "#{unquote(label)} devait être refusé 422, reçu #{conn.status}"
+
+        refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
+      end
+    end
+
+    test "spawn admin LÉGITIME (role + mandate) → 202 + broadcast (mandate replacé dans opts)" do
+      conn =
+        conn(
+          :post,
+          "/api/admin/spawn",
+          Jason.encode!(%{
+            "role" => "engineer",
+            "mandate" => "implémente X",
+            "ticket_id" => "issue-9"
+          })
+        )
+        |> put_req_header("content-type", "application/json")
+        |> Rest.call(@opts)
+
+      assert conn.status == 202
+
+      # Le payload diffusé est le DTO CANONIQUE reconstruit par l'API : `mandate` est passé dans `opts`
+      # (jamais un `opts` brut du client), `ticket_id` conservé.
+      assert_receive %Fleet.Event{
+                       source: :api,
+                       type: :"admin.spawn.request",
+                       payload: %{
+                         "role" => "engineer",
+                         "ticket_id" => "issue-9",
+                         "opts" => %{"mandate" => "implémente X"}
+                       }
+                     },
+                     500
+    end
+
+    test "pod_id path-safe accepté (placé dans opts), pod_id malformé → 422 avant spawn" do
+      # pod_id légitime (charset path-safe) : accepté, replacé dans opts.
+      ok =
+        conn(
+          :post,
+          "/api/admin/spawn",
+          Jason.encode!(%{"role" => "engineer", "pod_id" => "admin-pod-1"})
+        )
+        |> put_req_header("content-type", "application/json")
+        |> Rest.call(@opts)
+
+      assert ok.status == 202
+
+      assert_receive %Fleet.Event{
+                       type: :"admin.spawn.request",
+                       payload: %{"opts" => %{"pod_id" => "admin-pod-1"}}
+                     },
+                     500
+
+      # pod_id avec remontée de chemin (`..`) : refusé AVANT spawn (jamais interpolé dans un path FS).
+      bad =
+        conn(
+          :post,
+          "/api/admin/spawn",
+          Jason.encode!(%{"role" => "engineer", "pod_id" => "../../etc/evil"})
+        )
+        |> put_req_header("content-type", "application/json")
+        |> Rest.call(@opts)
+
+      assert bad.status == 422
+      refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
+    end
+  end
+
   describe "match _ (404)" do
     test "route inexistante → 404" do
       conn = conn(:get, "/api/nonexistent") |> Rest.call(@opts)

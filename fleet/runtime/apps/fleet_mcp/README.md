@@ -1,7 +1,7 @@
 # fleet_mcp
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-24
+**Dernière révision** : 2026-06-24 (B2a — gate architecte serveur-side des tools privilégiés)
 **Statut** : implémenté — serveur MCP pod-facing (`get_task` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
@@ -36,29 +36,52 @@ d'un humain partagent l'UID) → la capability secrète est le bon mécanisme.
 fausse → `:pod_capability_mismatch`, pod inconnu → `:pod_unknown`, pod_id absent → `:pod_id_required`. Le
 rôle se résout sur le pod_id **VÉRIFIÉ** (même appel `pod_info` → `{role, capability}`, pas de drift).
 
+## Autorisation architecte — tools privilégiés (gate serveur-side)
+
+`create_project`, `create_ticket` et `get_ticket_status` sont des actes d'**architecte** : créer un repo
+forge, écrire/pousser dans `/home/projects`, déléguer du travail, suivre une délégation. Avant, la seule
+barrière était la **visibilité côté pont** (`fleet_mcp_stdio_bridge.py` ne liste ces tools que si
+`LCARS_ROLE==architect`) — ce n'est **pas** une autorisation : un pod worker qui a `Bash` + joint le central
+en loopback peut reconstruire le JSON-RPC et appeler ces tools directement, hors filtre client.
+
+Le garde `require_architect/1` ferme ce trou **serveur-side** : il enveloppe `verify_pod` (identité prouvée
+par la capability par-pod) **puis** exige que le rôle gravé au spawn soit `architect`. Le rôle vient du pod
+**vérifié**, jamais du `_lcars_role` du wire. Tout rôle autre (engineer, reviewer, rôle nil/inconnu) →
+`{:error, :forbidden_not_architect}` ; identité non prouvée → l'erreur de `verify_pod` est propagée
+(`:pod_unknown`, `:pod_capability_*`, `:pod_id_required`). Fail-closed : aucun cas ne retombe sur un accès
+autorisé. Le vrai architecte (`permanent-architect`) passe ; les workers sont refusés.
+
 ## Outils MCP (pod-facing)
 
 - `get_task` — le pod récupère son mandat (corrélé `pod_id` **vérifié par capability**).
 - `submit_result` — le pod soumet son livrable (`payload`) ; **`task_id` OBLIGATOIRE** = le `task_id` rendu
   par `get_task` (le broker corrèle sur CE mandat précis, jamais « la dernière active » du pod_id — 2e verrou
   anti-impersonation après la capability). task_id absent → `:task_id_required` ; ≠ mandat actif → `:task_id_mismatch`.
-- `create_ticket` (délégation) — l'architecte délègue une brique : crée l'issue forge **prête pour le
-  poller** (`Fleet.Pilot.ForgeClient.create_issue`, dispatch runtime) — auteur=arch (token de rôle de
-  l'appelant **résolu depuis le SPAWN VÉRIFIÉ** : `verify_pod` prouve l'identité (capability) PUIS rend le
-  `role` gravé au spawn via `Fleet.Spawner.pod_info`, **PAS** le `_lcars_role` du wire non authentifié —
-  MA-15 / SEC-MCP-003). **Fail-closed** : pod non prouvé → REFUS (plus de repli compte système, qui était un
-  trou — un pod inconnu postait en système) ; token de rôle absent → `:role_token_unavailable` (jamais en
-  système). **assignee=humain** owner (login OS, `Fleet.Credentials.Human`) — puis **STOP**. Pas de label :
-  le rôle producteur est un invariant côté poller, pas un marqueur par-ticket. Le poller prend le relais
-  (forge-state-machine, BL-050 : plus de `start_pipeline`/rail RAM). Seams test : `:forge_client`, `:pod_resolver`.
-- `create_project` (Rail 1 — onboarding) — l'architecte démarre un projet neuf : `Fleet.Pilot.ProjectOnboard.onboard/2`
-  (repo forge + dual-worktree `main`/`work/ops` + scaffold + push). Le projet créé devient la cible de
-  délégation (`:delegation_repo`) → enchaîner `create_ticket`. Dispatch runtime (pas de dep compile-time `fleet_pilot`).
+- `create_ticket` (délégation, **architecte only**) — l'architecte délègue une brique : crée l'issue forge
+  **prête pour le poller** (`Fleet.Pilot.ForgeClient.create_issue`, dispatch runtime). Gate `require_architect`
+  (identité prouvée par capability **puis** rôle du spawn == `architect`, jamais le `_lcars_role` du wire —
+  MA-15 / SEC-MCP-003). **Fail-closed** : worker non-architecte → `:forbidden_not_architect` ; pod non prouvé
+  → REFUS (`:pod_unknown` etc., plus de repli compte système) ; token de rôle absent → `:role_token_unavailable`
+  (jamais en système). auteur=arch (token du compte de rôle de l'appelant), **assignee=humain** owner (login
+  OS, `Fleet.Credentials.Human`) — puis **STOP**. Pas de label : le rôle producteur est un invariant côté
+  poller. Le poller prend le relais (forge-state-machine, BL-050). Seams test : `:forge_client`, `:pod_resolver`.
+- `create_project` (Rail 1 — onboarding, **architecte only**) — l'architecte démarre un projet neuf :
+  `Fleet.Pilot.ProjectOnboard.onboard/2` (repo forge + dual-worktree `main`/`work/ops` + scaffold + push).
+  Gate `require_architect` **avant** toute création de repo / écriture disque (un worker ne peut pas onboarder).
+  Le projet créé devient la cible de délégation (`:delegation_repo`) → enchaîner `create_ticket`. Dispatch
+  runtime (pas de dep compile-time `fleet_pilot`). Seams test : `:project_onboard`, `:pod_resolver`.
+- `get_ticket_status` (suivi, **architecte only**) — lit l'état d'un ticket délégué (issue + PR). Gate
+  `require_architect` (cohérent avec create_ticket/create_project : seul l'architecte suit ses délégations).
+  Lecture seule (`ForgeClient`). Seams test : `:forge_client`, `:pod_resolver`.
 
 NB **bridge stdio** (`bin/fleet_mcp_stdio_bridge.py`) : la liste `TOOLS` est hardcodée — tout nouveau tool
 doit y être ajouté en miroir (dette connue : proxifier `tools/list` vers le central). Le pont injecte aussi
 l'identité du pod dans chaque tool-call : `_lcars_pod_id` (corrélation) + `_lcars_pod_capability` (preuve,
-depuis l'env `LCARS_POD_CAPABILITY` posé au spawn) + `_lcars_role` (indicatif, jamais autorité).
+depuis l'env `LCARS_POD_CAPABILITY` posé au spawn) + `_lcars_role` (indicatif, jamais autorité). Le filtre
+de visibilité des tools privilégiés côté pont (`LCARS_ROLE==architect`) reste une commodité UX (ne pas
+montrer un tool inutilisable) — l'**autorisation** est désormais serveur-side (`require_architect`) : un pod
+worker qui reconstruit le JSON-RPC pour appeler `create_project`/`create_ticket`/`get_ticket_status` hors du
+filtre client est refusé par le central, pas par le pont.
 
 ## Configuration
 

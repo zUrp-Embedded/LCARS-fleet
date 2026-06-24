@@ -211,18 +211,19 @@ defmodule Fleet.MCP.PodTools do
       when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
     forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 
-    # l'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT. Le rôle vient du pod
-    # VÉRIFIÉ — `verify_pod` prouve d'abord l'identité (capability par-pod) PUIS rend le rôle gravé au spawn
-    # (`Fleet.Spawner.pod_info`), JAMAIS le `_lcars_role` du wire (non authentifié → un pod pourrait POST
-    # `_lcars_role: architect` et usurper le token arch). Capability absente/fausse / pod inconnu → REFUS :
-    # plus de fallback token-système silencieux sur rôle nil (c'était précisément un trou — un pod inconnu
-    # postait sous le compte système). Fail-closed : pas de pod prouvé = pas de ticket.
-    with {:ok, _pid, role} when is_binary(role) and role != "" <- verify_pod(args),
+    # Déléguer un ticket est un acte d'ARCHITECTE : `require_architect` prouve l'identité (capability
+    # par-pod, comme tout tool corrélé pod) PUIS exige que le rôle gravé au spawn soit `architect`. Un pod
+    # worker (engineer, reviewer) ou inconnu est REFUSÉ ICI, serveur-side — la seule barrière n'est plus la
+    # visibilité côté pont (un pod qui reconstruit le JSON-RPC contournait le filtre client). Le rôle vient
+    # du spawn vérifié, JAMAIS du `_lcars_role` du wire (non authentifié → un pod pourrait prétendre
+    # architect). L'arch poste ensuite l'issue EN SON NOM : token du compte de rôle de l'appelant.
+    with {:ok, _pid, role} <- require_architect(args),
          token when is_binary(token) <- Fleet.Credentials.RoleToken.token(role) do
       do_create_ticket(forge, repo, title, brief, [token: token], state)
     else
       {:error, reason} ->
-        # Identité non prouvée (capability manquante/fausse, pod inconnu) → on ne crée RIEN.
+        # Identité non prouvée (capability manquante/fausse, pod inconnu) ou rôle non-architecte → on ne
+        # crée RIEN.
         {:error, reason, state}
 
       _ ->
@@ -254,14 +255,77 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # create_project — canal ONBOARDING : l'architecte démarre un projet neuf.
-  # Le SYSTÈME exécute la séquence mécanique (repo forge + dual-worktree main/work-ops + scaffold + push)
-  # via Fleet.Pilot.ProjectOnboard, dispatch runtime (pas de dep compile-time fleet_pilot). Le projet créé
-  # est posé comme `:delegation_repo` = **contexte/fallback** (lu par get_ticket_status + ultime recours de
-  # create_ticket) — PLUS le défaut primaire de create_ticket (devenu le dernier repo travaillé). L'arch
-  # référence le projet en passant `project:` explicite (cf. description du tool).
+  # create_project — canal ONBOARDING : l'architecte démarre un projet neuf. La gate architecte est
+  # appliquée AVANT toute mécanique (cf. require_architect ci-dessous) ; do_create_project porte la séquence.
   def handle_tool_call("create_project", %{"name" => name} = args, state) when is_binary(name) do
-    onboard = Fleet.Pilot.ProjectOnboard
+    # Onboarder un projet CRÉE un repo forge ET écrit/pousse dans `/home/projects` : un acte d'ARCHITECTE.
+    # `require_architect` prouve l'identité (capability par-pod) PUIS exige le rôle `architect` gravé au
+    # spawn. Un pod worker (engineer) ou inconnu qui joindrait le MCP central — même en reconstruisant le
+    # JSON-RPC, sans passer par le filtre de visibilité du pont — est REFUSÉ ici, serveur-side, AVANT toute
+    # création de repo ou écriture disque. Fail-closed : pas d'architecte prouvé = pas de projet.
+    case require_architect(args) do
+      {:error, reason} ->
+        {:error, reason, state}
+
+      {:ok, _pid, _role} ->
+        do_create_project(name, args, state)
+    end
+  end
+
+  def handle_tool_call("create_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  # get_ticket_status — canal SUIVI (architecte). Lit l'état d'un ticket délégué pour séquencer le
+  # multi-ticket. « Livré » = issue fermée par le merge (`Closes #N`). Lecture seule (ForgeClient).
+  # Suivre l'état d'un ticket délégué reste réservé à l'architecte (cohérent avec create_ticket /
+  # create_project) : `require_architect` exige l'identité prouvée ET le rôle architect avant toute lecture.
+  def handle_tool_call("get_ticket_status", %{"number" => number} = args, state)
+      when is_integer(number) do
+    case require_architect(args) do
+      {:error, reason} ->
+        {:error, reason, state}
+
+      {:ok, _pid, _role} ->
+        repo = Application.get_env(:fleet_mcp, :delegation_repo, "fleet/fleet-test")
+        forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
+
+        issue_state =
+          case forge.get_issue(repo, number, []) do
+            {:ok, issue} -> Map.get(issue, "state", "unknown")
+            _ -> "unknown"
+          end
+
+        result = %{
+          "repo" => repo,
+          "issue" => number,
+          "issue_state" => issue_state,
+          # « livré » = la PR a fermé l'issue (merge FF `Closes #N`). Signal de séquencement multi-ticket :
+          # l'arch n'enchaîne le ticket N+1 que sur `delivered: true`.
+          "delivered" => issue_state == "closed",
+          "pr" => ticket_pr_status(forge, repo, number)
+        }
+
+        {:ok, %{content: [json(result)]}, state}
+    end
+  end
+
+  def handle_tool_call("get_ticket_status", _bad, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call(_unknown, _arguments, state) do
+    {:error, :unknown_tool, state}
+  end
+
+  # Séquence d'onboarding proprement dite, exécutée UNIQUEMENT après la gate architecte. Le SYSTÈME exécute
+  # la mécanique (repo forge + dual-worktree main/work-ops + scaffold + push) via Fleet.Pilot.ProjectOnboard,
+  # dispatch runtime (pas de dep compile-time fleet_pilot). Le projet créé est posé comme `:delegation_repo`
+  # = contexte/fallback (lu par get_ticket_status). L'arch référence le projet en passant `project:` explicite.
+  defp do_create_project(name, args, state) do
+    # Seam `:project_onboard` (app-env, comme `:forge_client`/`:pod_resolver`) — défaut = la vraie séquence
+    # `Fleet.Pilot.ProjectOnboard` (dispatch runtime, pas de dep compile-time fleet_pilot), overridable en test.
+    onboard = Application.get_env(:fleet_mcp, :project_onboard, Fleet.Pilot.ProjectOnboard)
     org = Application.get_env(:fleet_mcp, :delegation_org, "fleet")
     pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
@@ -284,44 +348,6 @@ defmodule Fleet.MCP.PodTools do
       {:error, reason} ->
         {:error, {:onboard_failed, inspect(reason)}, state}
     end
-  end
-
-  def handle_tool_call("create_project", _bad_args, state) do
-    {:error, :invalid_arguments, state}
-  end
-
-  # get_ticket_status — canal SUIVI (architecte). Lit l'état d'un ticket délégué pour séquencer le
-  # multi-ticket. « Livré » = issue fermée par le merge (`Closes #N`). Lecture seule (ForgeClient).
-  def handle_tool_call("get_ticket_status", %{"number" => number}, state)
-      when is_integer(number) do
-    repo = Application.get_env(:fleet_mcp, :delegation_repo, "fleet/fleet-test")
-    forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
-
-    issue_state =
-      case forge.get_issue(repo, number, []) do
-        {:ok, issue} -> Map.get(issue, "state", "unknown")
-        _ -> "unknown"
-      end
-
-    result = %{
-      "repo" => repo,
-      "issue" => number,
-      "issue_state" => issue_state,
-      # « livré » = la PR a fermé l'issue (merge FF `Closes #N`). Signal de séquencement multi-ticket :
-      # l'arch n'enchaîne le ticket N+1 que sur `delivered: true`.
-      "delivered" => issue_state == "closed",
-      "pr" => ticket_pr_status(forge, repo, number)
-    }
-
-    {:ok, %{content: [json(result)]}, state}
-  end
-
-  def handle_tool_call("get_ticket_status", _bad, state) do
-    {:error, :invalid_arguments, state}
-  end
-
-  def handle_tool_call(_unknown, _arguments, state) do
-    {:error, :unknown_tool, state}
   end
 
   # Pose l'issue (auteur = compte de rôle via `author_opts`, assignee = humain owner) et l'étiquette de visu.
@@ -393,6 +419,30 @@ defmodule Fleet.MCP.PodTools do
 
       _ ->
         nil
+    end
+  end
+
+  # ============================================================
+  # Autorisation architecte — gate commune des tools privilégiés
+  # ============================================================
+  #
+  # `create_project`, `create_ticket` et `get_ticket_status` sont des actes d'ARCHITECTE : créer un repo
+  # forge, écrire/pousser dans `/home/projects`, déléguer du travail, suivre une délégation. Avant ce garde,
+  # la seule barrière était la VISIBILITÉ côté pont (`fleet_mcp_stdio_bridge.py` ne liste ces tools que si
+  # `LCARS_ROLE==architect`) — ce n'est PAS une autorisation : un pod worker qui a Bash + joint le central
+  # en loopback peut reconstruire le JSON-RPC et appeler ces tools directement, hors filtre client.
+  #
+  # `require_architect` ferme ce trou serveur-side : il enveloppe `verify_pod` (identité prouvée par la
+  # capability par-pod) PUIS exige que le rôle gravé au spawn soit `architect`. Le rôle vient du pod
+  # VÉRIFIÉ, jamais du `_lcars_role` du wire (non authentifié → un pod pourrait prétendre architect).
+  # Tout rôle autre (engineer, reviewer, rôle nil/inconnu) → `{:error, :forbidden_not_architect}`. Une
+  # identité non prouvée propage l'erreur de `verify_pod` telle quelle (capability absente/fausse, pod
+  # inconnu). Fail-closed de bout en bout : aucun cas ne retombe sur un accès autorisé.
+  defp require_architect(args) do
+    case verify_pod(args) do
+      {:ok, pid, "architect"} -> {:ok, pid, "architect"}
+      {:ok, _pid, _other_role} -> {:error, :forbidden_not_architect}
+      {:error, _reason} = err -> err
     end
   end
 

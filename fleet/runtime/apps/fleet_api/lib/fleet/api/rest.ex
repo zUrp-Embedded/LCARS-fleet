@@ -8,7 +8,8 @@ defmodule Fleet.API.Rest do
     * `GET /api/readiness/deep` — état opérationnel LIVE via
       `Fleet.API.Readiness.deep/0` — anti-vert-creux
     * `GET /api/pipelines` / `tickets` / `pods` — lecture état (stubs MVP)
-    * `POST /api/admin/spawn` — valide le cap-profile (400 si absent, 422 si
+    * `POST /api/admin/spawn` — filtre le payload par allowlist DTO (422 si un champ interne du
+      spawner / une clé inconnue est présent), valide le cap-profile (400 si absent, 422 si
       inconnu) PUIS broadcast `admin.spawn.request` event + 202
     * `POST /api/config/update` — atomic write + git commit auto via
       `GitCommitter` (canon trace strate 1)
@@ -69,8 +70,45 @@ defmodule Fleet.API.Rest do
   end
 
   defp do_admin_spawn(conn) do
-    payload = conn.body_params || %{}
+    raw = conn.body_params || %{}
 
+    # ALLOWLIST D'ADMISSION (AVANT tout) : `/api/admin/spawn` est une surface no-auth. Le PublishConsumer
+    # convertit ENSUITE `payload["opts"]` en opts internes du spawner via `to_keyword/1` — sans filtre, des
+    # opts privilégiés (`pod_dir_root`, `state_fs_root`, `human`, `project` → clone d'un repo attaquant dans
+    # le pod, `recall_seed_jsonl`, `resume`, `session_id`, `rc_name`, `allow_no_mandate`, seams module/fun…)
+    # deviendraient pilotables depuis l'API. On n'accepte donc qu'un DTO public PLAT et explicite ; toute
+    # clé hors allowlist → 422 AVANT le moindre broadcast (rien n'atteint le consumer/spawner). Le payload
+    # canonique reconstruit ici est la SEULE chose diffusée — l'API construit elle-même l'`opts` interne,
+    # un `opts` brut fourni par le client est rejeté comme clé inconnue.
+    case parse_admin_spawn_dto(raw) do
+      {:ok, payload} ->
+        validate_and_broadcast_spawn(conn, payload)
+
+      {:error, {:forbidden_fields, fields}} ->
+        # 422 Unprocessable — la requête porte des champs non publics (opts internes du spawner / seams /
+        # racines disque). On REFUSE à la frontière plutôt que de laisser le consumer les interpréter.
+        send_resp(
+          conn,
+          422,
+          Jason.encode!(%{
+            error: "champs non autorisés sur /api/admin/spawn",
+            forbidden: Enum.sort(fields)
+          })
+        )
+
+      {:error, {:invalid_pod_id, value}} ->
+        send_resp(
+          conn,
+          422,
+          Jason.encode!(%{
+            error: "pod_id invalide (attendu [A-Za-z0-9._-], sans '..')",
+            value: inspect(value)
+          })
+        )
+    end
+  end
+
+  defp validate_and_broadcast_spawn(conn, payload) do
     # VALIDER le cap-profile AVANT l'ACK. Si le 202 partait dès le broadcast, un
     # `cap_profile_name` inexistant ne serait détecté QUE plus tard dans `PublishConsumer`, où
     # `CapProfile.load` KO = un simple warning, ZÉRO pod spawné. L'appelant (`lcars spawn <rôle>`)
@@ -98,6 +136,67 @@ defmodule Fleet.API.Rest do
         )
     end
   end
+
+  # Champs publics admis au top-level du DTO `/api/admin/spawn`. Tout le reste est REFUSÉ.
+  #   * `cap_profile_name` / `role` — le profil de capacités (l'un des deux, requis ; validé plus bas)
+  #   * `ticket_id` — corrélation forge/event (string libre)
+  #   * `mandate` — le travail du pod (string) ; replacé dans l'`opts` interne construit par l'API
+  #   * `pod_id` — identifiant de pod imposé (rare, admin) ; n'est accepté QUE s'il est path-safe
+  #     (même règle que `Fleet.Spawner` : `[A-Za-z0-9._-]`, pas de `..`), sinon 422
+  @admin_spawn_public_fields ~w(cap_profile_name role ticket_id mandate pod_id)
+
+  # Parse le payload entrant vers un DTO public allowlisté. Le `opts` interne du spawner n'est JAMAIS pris
+  # du client : l'API le (re)construit à partir des seuls champs publics (`mandate`, `pod_id`). Toute clé
+  # top-level inconnue ou interdite (y compris un `opts` brut) → `{:error, {:forbidden_fields, ...}}`.
+  defp parse_admin_spawn_dto(raw) when is_map(raw) do
+    extraneous = Map.keys(raw) -- @admin_spawn_public_fields
+
+    cond do
+      extraneous != [] ->
+        {:error, {:forbidden_fields, extraneous}}
+
+      true ->
+        with {:ok, opts} <- build_admin_opts(raw) do
+          payload =
+            raw
+            |> Map.take(["cap_profile_name", "role", "ticket_id"])
+            |> maybe_put_opts(opts)
+
+          {:ok, payload}
+        end
+    end
+  end
+
+  defp parse_admin_spawn_dto(_), do: {:ok, %{}}
+
+  # Construit l'`opts` du spawn à partir des seuls champs publics. `pod_id` n'est retenu que path-safe.
+  defp build_admin_opts(raw) do
+    opts = if is_binary(raw["mandate"]), do: %{"mandate" => raw["mandate"]}, else: %{}
+
+    case Map.fetch(raw, "pod_id") do
+      :error ->
+        {:ok, opts}
+
+      {:ok, pod_id} when is_binary(pod_id) ->
+        if valid_pod_id?(pod_id),
+          do: {:ok, Map.put(opts, "pod_id", pod_id)},
+          else: {:error, {:invalid_pod_id, pod_id}}
+
+      {:ok, other} ->
+        {:error, {:invalid_pod_id, other}}
+    end
+  end
+
+  defp maybe_put_opts(payload, opts) when map_size(opts) == 0, do: payload
+  defp maybe_put_opts(payload, opts), do: Map.put(payload, "opts", opts)
+
+  # Même contrat que `Fleet.Spawner` : un pod_id est interpolé dans des paths FS (`~/pods/pod_<id>`),
+  # donc seul un charset path-safe sans remontée `..` est admis. Dupliqué ici (frontière API) plutôt que
+  # d'exposer la fonction privée du spawner — la règle est une constante de sécurité, pas une logique.
+  defp valid_pod_id?(id) when is_binary(id),
+    do: Regex.match?(~r/^[A-Za-z0-9._-]+$/, id) and not String.contains?(id, "..")
+
+  defp valid_pod_id?(_), do: false
 
   # Résout le cap-profile demandé (`cap_profile_name` ou `role`, mêmes clés que
   # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing}` (400) ; load KO →

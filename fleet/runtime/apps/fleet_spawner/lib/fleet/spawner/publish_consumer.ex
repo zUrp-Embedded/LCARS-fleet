@@ -114,6 +114,11 @@ defmodule Fleet.Spawner.PublishConsumer do
   connues comme atomes (`to_existing_atom`) ; toute clé inconnue est ignorée.
   Public pour test direct (le chemin via le consumer exige `CapProfile.load` + env
   global → non async-safe).
+
+  Défense en profondeur : une LISTE n'est rendue telle quelle que si c'est déjà une keyword-list propre
+  (paires `{atom, _}`). Une liste issue d'un tableau JSON décodé n'en est jamais une (clés string → liste
+  de maps/scalaires) — elle serait donc filtrée à `[]` plutôt que gobée brute comme opts du spawner.
+  Le verrou principal reste l'allowlist d'admission de `/api/admin/spawn` (Fleet.API.Rest) ; ceci en double.
   """
   def to_keyword(map) when is_map(map) do
     Enum.flat_map(map, fn {k, v} ->
@@ -125,6 +130,9 @@ defmodule Fleet.Spawner.PublishConsumer do
     end)
   end
 
-  def to_keyword(list) when is_list(list), do: list
+  def to_keyword(list) when is_list(list) do
+    if Keyword.keyword?(list), do: list, else: []
+  end
+
   def to_keyword(_), do: []
 end

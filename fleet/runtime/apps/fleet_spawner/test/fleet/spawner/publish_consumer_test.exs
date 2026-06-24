@@ -98,5 +98,14 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       assert PublishConsumer.to_keyword(mandate: 1) == [mandate: 1]
       assert PublishConsumer.to_keyword(nil) == []
     end
+
+    test "liste NON keyword (tableau JSON décodé) → [] (défense en profondeur, plus gobée brute)" do
+      # Un `opts` arrivé comme tableau JSON (`["module","fun"]` ou `[%{...}]`) n'est JAMAIS une keyword-list
+      # (clés string → maps/scalaires). Avant, `to_keyword(list) = list` le rendait tel quel → opts arbitraires
+      # injectés. Désormais filtré à []. (Le verrou principal reste l'allowlist d'admission de /api/admin/spawn.)
+      assert PublishConsumer.to_keyword(["module", "fun"]) == []
+      assert PublishConsumer.to_keyword([%{"pod_dir_root" => "/evil"}]) == []
+      assert PublishConsumer.to_keyword([{"string_key", 1}]) == []
+    end
   end
 end

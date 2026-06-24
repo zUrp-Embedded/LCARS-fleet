@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-24 (P05 — readiness honnête `/api/readiness/deep` + `Fleet.API.Readiness` read-model anti-vert-creux)
+**Dernière révision** : 2026-06-24 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -28,11 +28,31 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 | GET | `/api/pipelines` | — | liste état pipelines |
 | GET | `/api/tickets` | — | liste tickets |
 | GET | `/api/pods` | — | liste pods |
-| POST | `/api/admin/spawn` | — | broadcast `admin.spawn.request` (ch6) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
+| POST | `/api/admin/spawn` | — | broadcast `admin.spawn.request` (ch6) ; **DTO public allowlisté** (422 sur champ interne) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
 | POST | `/api/config/update` | — | atomic write + git commit |
 
 **Pas d'auth applicative** (HMAC retiré — bearer statique sans surface intra-container).
 Frontière = isolation réseau du container (ne pas publier `:8080` ; tunnel pour le remote).
+
+### `/api/admin/spawn` — allowlist DTO (admission)
+
+Surface no-auth : le payload entrant est **filtré à l'admission**, avant tout broadcast. Le `PublishConsumer`
+convertit ensuite `payload["opts"]` en opts internes du spawner — sans filtre, des opts privilégiés
+(`pod_dir_root`, `state_fs_root`, `human`, `project` → clone d'un repo attaquant dans le pod,
+`recall_seed_jsonl`, `resume`, `session_id`, `rc_name`, `allow_no_mandate`, seams module/fun…) deviendraient
+pilotables depuis l'API. Le DTO public est donc **plat et explicite** :
+
+| Champ | Forme | Rôle |
+|---|---|---|
+| `cap_profile_name` / `role` | string (l'un des deux, requis) | profil de capacités (validé : 400 si absent, 422 si inconnu) |
+| `ticket_id` | string | corrélation forge/event |
+| `mandate` | string | le travail du pod ; **replacé dans l'`opts` interne construit par l'API** |
+| `pod_id` | string path-safe | identifiant imposé (admin) ; accepté **uniquement** si `[A-Za-z0-9._-]` sans `..`, sinon 422 |
+
+Toute clé top-level **hors** de cette liste (y compris un `opts` brut fourni par le client) → **422** avant
+le moindre broadcast (rien n'atteint le consumer/spawner). L'API reconstruit elle-même l'`opts` ; un `opts`
+client n'est jamais transmis. Défense en profondeur côté consumer : `PublishConsumer.to_keyword/1` ne gobe
+plus une liste brute (une liste non-keyword → `[]`).
 
 ## WebSocket protocol
 

@@ -259,6 +259,24 @@ defmodule Fleet.MCP.PodToolsTest do
     def last_worked_repo(_human, _opts) do
       Application.get_env(:fleet_mcp, :test_last_worked, :none)
     end
+
+    # Lecture (get_ticket_status) : issue fictive ouverte, aucune PR — suffit à prouver que la GATE a
+    # laissé passer (le contenu importe peu, on teste l'autorisation, pas la forge).
+    def get_issue(_repo, _number, _opts), do: {:ok, %{"state" => "open"}}
+    def list_open_pulls(_repo, _opts), do: {:ok, []}
+  end
+
+  # Stub d'onboarding (seam `:project_onboard`) : ne touche NI forge NI disque — rend un repo fictif. Sert
+  # à prouver que la gate architecte laisse passer `create_project` sans exécuter la vraie séquence.
+  defmodule StubOnboard do
+    def onboard(name, _opts) do
+      {:ok,
+       %{
+         repo: "fleet/#{name}",
+         project_dir: "/tmp/projects/#{name}",
+         work_dir: "/tmp/projects.work/#{name}"
+       }}
+    end
   end
 
   describe "create_ticket (délégation arch → ticket forge prêt pour le poller)" do
@@ -267,18 +285,25 @@ defmodule Fleet.MCP.PodToolsTest do
     setup %{tmp_dir: tmp} do
       prev_forge = Application.get_env(:fleet_mcp, :forge_client)
       prev_repo = Application.get_env(:fleet_mcp, :delegation_repo)
+      prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
       prev_tokdir = Application.get_env(:fleet_credentials, :role_tokens_dir)
       Application.put_env(:fleet_mcp, :forge_client, StubForge)
       Application.put_env(:fleet_mcp, :delegation_repo, "fleet/demo")
 
-      # Le rôle du pod (résolu par le `:pod_resolver` global = "engineer") doit avoir son token sur disque,
-      # sinon create_ticket REFUSE (`:role_token_unavailable`, fail-closed — plus de repli compte système).
+      # Déléguer est un acte d'ARCHITECTE : le `:pod_resolver` doit rendre le rôle `architect` (sinon
+      # `require_architect` refuse `:forbidden_not_architect`). Le token du compte architect doit aussi être
+      # sur disque, sinon create_ticket REFUSE (`:role_token_unavailable`, fail-closed).
+      Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
+        {:ok, %{role: "architect", capability: cap_for(pod_id)}}
+      end)
+
       Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
-      File.write!(Path.join(tmp, "engineer.gitea_token"), "ENG_TOKEN\n")
+      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
 
       on_exit(fn ->
         restore(:forge_client, prev_forge)
         restore(:delegation_repo, prev_repo)
+        restore(:pod_resolver, prev_resolver)
 
         if prev_tokdir,
           do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev_tokdir),
@@ -372,7 +397,7 @@ defmodule Fleet.MCP.PodToolsTest do
   # MA-15 / SEC-MCP-003 — le rôle vient du SPAWN VÉRIFIÉ (capability), jamais du `_lcars_role` du wire
   # ============================================================
 
-  describe "MA-15 — rôle lié au spawn prouvé (le `_lcars_role` du wire est ignoré pour le token)" do
+  describe "MA-15 — rôle lié au spawn prouvé (le `_lcars_role` du wire est ignoré, et seul architect délègue)" do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
@@ -382,10 +407,10 @@ defmodule Fleet.MCP.PodToolsTest do
 
       Application.put_env(:fleet_mcp, :forge_client, StubForge)
 
-      # Tokens de rôle sur disque : seul `engineer` (= le rôle du SPAWN) a un token. `architect` (= ce que le
-      # wire prétend) N'A PAS de fichier → si le fix marchait mal (lecture du wire), le token serait nil.
+      # Token `architect` sur disque (le cas légitime). Les tests qui veulent prouver un REFUS le font sur le
+      # RÔLE (resolver ≠ architect ou pod inconnu), AVANT même que le token n'entre en jeu.
       Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
-      File.write!(Path.join(tmp, "engineer.gitea_token"), "ENG_TOKEN\n")
+      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
 
       on_exit(fn ->
         restore(:forge_client, prev_forge)
@@ -399,10 +424,11 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "wire prétend architect, le spawn (vérifié) dit engineer → token ENGINEER, pas architect" do
+    test "wire prétend architect, le spawn (vérifié) dit engineer → REFUS :forbidden_not_architect" do
       # Binding serveur `pod_id → {role, capability}` : le pod p1 a été SPAWNÉ comme engineer (Registry du
-      # Spawner). Le résolveur stub MODÉLISE ce binding ET CAPTURE qu'on l'interroge bien avec le pod_id (jamais
-      # le `_lcars_role`). La capability est vérifiée AVANT la résolution → identité prouvée, puis rôle du spawn.
+      # Spawner). Le résolveur stub MODÉLISE ce binding ET CAPTURE qu'on l'interroge bien par pod_id (jamais
+      # par le `_lcars_role`). Le pod MENT « architect » sur le fil non authentifié — sans effet : le rôle
+      # autoritaire vient du spawn (engineer), et déléguer est réservé à l'architecte → REFUS, AUCUNE issue.
       test_pid = self()
 
       Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
@@ -413,7 +439,7 @@ defmodule Fleet.MCP.PodToolsTest do
           else: {:error, :pod_unknown}
       end)
 
-      assert {:ok, _, %{}} =
+      assert {:error, :forbidden_not_architect, %{}} =
                PodTools.handle_tool_call(
                  "create_ticket",
                  %{
@@ -422,7 +448,7 @@ defmodule Fleet.MCP.PodToolsTest do
                    "project" => "fleet/demo",
                    "_lcars_pod_id" => "p1",
                    "_lcars_pod_capability" => "CAP-p1",
-                   # Le pod MENT : il prétend être architect sur le fil non authentifié.
+                   # Le pod MENT : il prétend être architect sur le fil non authentifié → ignoré.
                    "_lcars_role" => "architect"
                  },
                  %{}
@@ -431,23 +457,38 @@ defmodule Fleet.MCP.PodToolsTest do
       # Le résolveur a été interrogé avec le POD_ID (le spawn), PAS le `_lcars_role` du wire.
       assert_received {:resolved_from, "p1"}
 
-      # Le token posté = celui du rôle du SPAWN (engineer) → l'usurpation architect est neutralisée.
+      # Le mensonge du wire n'a RIEN ouvert : aucune issue créée par un engineer déguisé en architecte.
+      refute_received {:create_issue, _, _, _, _}
+    end
+
+    test "spawn vérifié dit architect → délégation acceptée, token ARCHITECT (rôle du spawn)" do
+      # Le pendant positif : quand le rôle gravé au spawn EST architect, la délégation passe et l'issue est
+      # postée sous le token du compte architect (résolu depuis le rôle du spawn, jamais le wire).
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
+        {:ok, %{role: "architect", capability: "CAP-a"}}
+      end)
+
+      assert {:ok, _, %{}} =
+               PodTools.handle_tool_call(
+                 "create_ticket",
+                 %{
+                   "title" => "T",
+                   "brief" => "fais X",
+                   "project" => "fleet/demo",
+                   "_lcars_pod_id" => "p-arch",
+                   "_lcars_pod_capability" => "CAP-a"
+                 },
+                 %{}
+               )
+
       assert_received {:create_issue, "fleet/demo", "T", "fais X", opts}
-      assert opts[:token] == "ENG_TOKEN"
+      assert opts[:token] == "ARCH_TOKEN"
     end
 
     test "pod inconnu du Registry (resolver → :pod_unknown) → REFUS, PLUS de fallback token système" do
       # Le trou supprimé : un pod inconnu ne doit JAMAIS poster sous le compte système. Token architect
-      # PRÉSENT sur disque : si le code lisait le wire OU repliait en système, il créerait l'issue. Le rôle
-      # est irrésoluble (pod absent) → REFUS net (`:pod_unknown`), AUCUNE issue créée. Fail-closed.
-      File.write!(
-        Path.join(
-          Application.get_env(:fleet_credentials, :role_tokens_dir),
-          "architect.gitea_token"
-        ),
-        "ARCH_TOKEN\n"
-      )
-
+      # PRÉSENT sur disque : si le code lisait le wire OU repliait en système, il créerait l'issue. Le pod
+      # est irrésoluble (absent) → REFUS net (`:pod_unknown` propagé par require_architect), AUCUNE issue.
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:error, :pod_unknown} end)
 
       assert {:error, :pod_unknown, %{}} =
@@ -468,11 +509,18 @@ defmodule Fleet.MCP.PodToolsTest do
       refute_received {:create_issue, _, _, _, _}
     end
 
-    test "pod prouvé mais token de rôle absent sur disque → REFUS :role_token_unavailable (fail-closed)" do
-      # Le rôle est résolu (pod prouvé) mais son compte n'a pas de token provisionné. On REFUSE plutôt que
-      # poster en système (le repli supprimé). Modélise un rôle SANS fichier token (`reviewer`).
+    test "pod prouvé architect mais token absent sur disque → REFUS :role_token_unavailable (fail-closed)" do
+      # Le rôle est architect (autorisé) mais son compte n'a pas de token provisionné. On REFUSE plutôt que
+      # poster en système (le repli supprimé). On efface le token architect posé par le setup pour ce cas.
+      File.rm(
+        Path.join(
+          Application.get_env(:fleet_credentials, :role_tokens_dir),
+          "architect.gitea_token"
+        )
+      )
+
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
-        {:ok, %{role: "reviewer", capability: "CAP-x"}}
+        {:ok, %{role: "architect", capability: "CAP-x"}}
       end)
 
       assert {:error, :role_token_unavailable, %{}} =
@@ -482,13 +530,114 @@ defmodule Fleet.MCP.PodToolsTest do
                    "title" => "T",
                    "brief" => "fais X",
                    "project" => "fleet/demo",
-                   "_lcars_pod_id" => "p-rev",
+                   "_lcars_pod_id" => "p-arch2",
                    "_lcars_pod_capability" => "CAP-x"
                  },
                  %{}
                )
 
       refute_received {:create_issue, _, _, _, _}
+    end
+  end
+
+  # ============================================================
+  # B2a — autorisation architecte serveur-side des tools privilégiés
+  # ============================================================
+  #
+  # `create_project`, `create_ticket`, `get_ticket_status` exigent le rôle `architect` PROUVÉ (verify_pod +
+  # rôle du spawn). Avant, la seule barrière était la visibilité côté pont (filtre client) ; un pod worker
+  # qui reconstruit le JSON-RPC contournait. Ces tests verrouillent la gate serveur-side : tout rôle non
+  # architecte (engineer, reviewer, rôle nil/inconnu) → REFUS sur les 3 tools ; architect → passe.
+  describe "B2a — gate architecte (refus de tout rôle non architecte sur les tools privilégiés)" do
+    @describetag :tmp_dir
+
+    # Les 3 tools privilégiés avec un jeu d'arguments métier VALIDE (pour que seul le rôle décide du refus,
+    # pas un mauvais argument). Chacun renvoie {tool, args_métier}.
+    @privileged_tools [
+      {"create_project", %{"name" => "demo-proj"}},
+      {"create_ticket", %{"title" => "T", "brief" => "B", "project" => "fleet/demo"}},
+      {"get_ticket_status", %{"number" => 1}}
+    ]
+
+    # Rôles non autorisés à déléguer/onboarder/suivre. `nil` modélise un pod sans rôle gravé (binding
+    # incomplet) — doit AUSSI être refusé (fail-closed, jamais d'accès par rôle absent).
+    @non_architect_roles ["engineer", "reviewer", "starfleet", "scout", nil]
+
+    setup %{tmp_dir: tmp} do
+      prev_forge = Application.get_env(:fleet_mcp, :forge_client)
+      prev_onboard = Application.get_env(:fleet_mcp, :project_onboard)
+      prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
+      prev_repo = Application.get_env(:fleet_mcp, :delegation_repo)
+      prev_tokdir = Application.get_env(:fleet_credentials, :role_tokens_dir)
+
+      Application.put_env(:fleet_mcp, :forge_client, StubForge)
+      Application.put_env(:fleet_mcp, :project_onboard, StubOnboard)
+      Application.put_env(:fleet_mcp, :delegation_repo, "fleet/demo")
+      Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
+      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
+
+      on_exit(fn ->
+        restore(:forge_client, prev_forge)
+        restore(:project_onboard, prev_onboard)
+        restore(:pod_resolver, prev_resolver)
+        restore(:delegation_repo, prev_repo)
+
+        if prev_tokdir,
+          do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev_tokdir),
+          else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
+      end)
+
+      :ok
+    end
+
+    test "tout rôle NON architecte (prouvé) est REFUSÉ sur les 3 tools — sans aucun effet de bord" do
+      for role <- @non_architect_roles do
+        # Le pod est PROUVÉ (capability OK) — c'est le RÔLE qui refuse, pas l'identité. Le resolver grave
+        # `role` (y compris nil) sur le pod prouvé.
+        Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
+          {:ok, %{role: role, capability: cap_for(pod_id)}}
+        end)
+
+        for {tool, biz_args} <- @privileged_tools do
+          pod = uniq("pod-#{role || "nil"}")
+
+          assert {:error, :forbidden_not_architect, %{}} =
+                   PodTools.handle_tool_call(tool, pod_args(pod, biz_args), %{}),
+                 "tool=#{tool} role=#{inspect(role)} aurait dû être REFUSÉ"
+        end
+
+        # Aucun effet de bord : ni issue créée, ni onboarding (StubForge/StubOnboard send au mailbox).
+        refute_received {:create_issue, _, _, _, _}
+      end
+    end
+
+    test "pod inconnu (resolver → :pod_unknown) REFUSÉ sur les 3 tools (identité non prouvée)" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:error, :pod_unknown} end)
+
+      for {tool, biz_args} <- @privileged_tools do
+        pod = uniq("ghost")
+
+        assert {:error, :pod_unknown, %{}} =
+                 PodTools.handle_tool_call(tool, pod_args(pod, biz_args), %{}),
+               "tool=#{tool} pod inconnu aurait dû être REFUSÉ"
+      end
+    end
+
+    test "architect prouvé → les 3 tools PASSENT la gate (pas de :forbidden / :pod_unknown)" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
+        {:ok, %{role: "architect", capability: cap_for(pod_id)}}
+      end)
+
+      for {tool, biz_args} <- @privileged_tools do
+        pod = uniq("pod-arch")
+        result = PodTools.handle_tool_call(tool, pod_args(pod, biz_args), %{})
+
+        # architect prouvé → la gate laisse passer : résultat métier :ok (stubs forge/onboard). Un refus
+        # de rôle/identité ne matcherait pas {:ok, _, _}, donc cet assert le couvre — pas de `refute`
+        # redondant (le type-narrowing le prouverait toujours-vrai = assertion morte).
+        assert match?({:ok, _, _}, result),
+               "tool=#{tool} : architect devrait passer la gate et obtenir un :ok métier (#{inspect(result)})"
+      end
     end
   end
 
