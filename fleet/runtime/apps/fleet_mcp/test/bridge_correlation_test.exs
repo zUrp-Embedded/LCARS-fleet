@@ -17,7 +17,23 @@ defmodule Fleet.MCP.BridgeCorrelationTest do
     ref = :"fleet_mcp_1ab_#{System.unique_integer([:positive])}"
     {:ok, _http} = PodTools.start_link(transport: :http, port: 0, ranch_ref: ref)
     port = :ranch.get_port(ref)
-    on_exit(fn -> :ranch.stop_listener(ref) end)
+
+    # Identité prouvée par capability : le résolveur stubbé reconnaît tout pod via `"CAP-" <> pod_id`.
+    # Chaque pont fournira SA capability via l'env `LCARS_POD_CAPABILITY` (cf. submit_via_bridge).
+    prev = Application.get_env(:fleet_mcp, :pod_resolver)
+
+    Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
+      {:ok, %{role: "engineer", capability: "CAP-" <> pod_id}}
+    end)
+
+    on_exit(fn ->
+      :ranch.stop_listener(ref)
+
+      if prev,
+        do: Application.put_env(:fleet_mcp, :pod_resolver, prev),
+        else: Application.delete_env(:fleet_mcp, :pod_resolver)
+    end)
+
     %{url: "http://localhost:#{port}/mcp"}
   end
 
@@ -25,13 +41,13 @@ defmodule Fleet.MCP.BridgeCorrelationTest do
     u = System.unique_integer([:positive])
     pa = "pod-alpha-#{u}"
     pb = "pod-beta-#{u}"
-    {:ok, _} = TaskQueue.enqueue(pa, %{brief: "a"})
-    {:ok, _} = TaskQueue.enqueue(pb, %{brief: "b"})
+    {:ok, ta} = TaskQueue.enqueue(pa, %{brief: "a"})
+    {:ok, tb} = TaskQueue.enqueue(pb, %{brief: "b"})
 
     Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
 
-    submit_via_bridge(url, pa, %{"answer" => "from-alpha"})
-    submit_via_bridge(url, pb, %{"answer" => "from-beta"})
+    submit_via_bridge(url, pa, ta.id, %{"answer" => "from-alpha"})
+    submit_via_bridge(url, pb, tb.id, %{"answer" => "from-beta"})
 
     # Séparation stricte : chaque pod a son event de complétion, avec SON résultat.
     assert_receive %Fleet.Event{
@@ -54,7 +70,7 @@ defmodule Fleet.MCP.BridgeCorrelationTest do
     assert {:ok, :completed} = TaskQueue.pod_status(pb)
   end
 
-  defp submit_via_bridge(url, pod_id, payload) do
+  defp submit_via_bridge(url, pod_id, task_id, payload) do
     python = System.find_executable("python3")
 
     p =
@@ -65,13 +81,21 @@ defmodule Fleet.MCP.BridgeCorrelationTest do
         args: [@bridge],
         env: [
           {~c"LCARS_FLEET_MCP_URL", String.to_charlist(url)},
-          {~c"LCARS_POD_ID", String.to_charlist(pod_id)}
+          {~c"LCARS_POD_ID", String.to_charlist(pod_id)},
+          # La capability par-pod : le pont l'injecte en `_lcars_pod_capability` (comme le ferait le spawn).
+          {~c"LCARS_POD_CAPABILITY", String.to_charlist("CAP-" <> pod_id)}
         ]
       ])
 
     rpc(p, 1, "initialize", %{})
     _ = recv(p, 1)
-    rpc(p, 2, "tools/call", %{"name" => "submit_result", "arguments" => %{"payload" => payload}})
+
+    # task_id REQUIS = le corrélateur du mandat clôturé (le pod l'a obtenu de get_task / de l'enqueue).
+    rpc(p, 2, "tools/call", %{
+      "name" => "submit_result",
+      "arguments" => %{"payload" => payload, "task_id" => task_id}
+    })
+
     assert %{"result" => %{"content" => [%{"type" => "text"}]}} = recv(p, 2)
     Port.close(p)
   end

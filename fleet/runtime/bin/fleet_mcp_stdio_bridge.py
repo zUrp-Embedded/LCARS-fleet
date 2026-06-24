@@ -22,6 +22,10 @@
 # ENV :
 #   LCARS_FLEET_MCP_URL          : endpoint MCP central tools (ex http://localhost:PORT/mcp). REQUIS.
 #   LCARS_POD_ID                 : identité pod (corrélation des tool calls). OPT.
+#   LCARS_POD_CAPABILITY         : secret par-pod prouvant l'identité au central. Le pod_id seul est
+#                                  DEVINABLE (déterministe), donc insuffisant : le central exige cette
+#                                  capability, injectée UNIQUEMENT dans l'env de CE pod au spawn. Le pont
+#                                  la propage telle quelle (zéro logique) ; un pont sans elle est refusé.
 # Protocole : JSON-RPC newline-delimited sur stdin/stdout (côté claude) ; POST JSON-RPC (côté central).
 import json
 import os
@@ -30,6 +34,7 @@ import urllib.request
 
 CENTRAL_URL = os.environ.get("LCARS_FLEET_MCP_URL", "")
 POD_ID = os.environ.get("LCARS_POD_ID", "")
+POD_CAPABILITY = os.environ.get("LCARS_POD_CAPABILITY", "")
 ROLE = os.environ.get("LCARS_ROLE", "")
 PROTO = "2024-11-05"
 _req_id = [1000]
@@ -175,12 +180,18 @@ def main():
         elif method == "tools/call":
             p = msg.get("params", {})
             try:
-                # Injecte l'identité du pod (pod_id + rôle) dans les arguments forwardés : corrélation
-                # côté central + résolution du compte de rôle (ex create_ticket → token du rôle appelant).
-                if POD_ID or ROLE:
+                # Injecte l'identité du pod dans les arguments forwardés :
+                #   - `_lcars_pod_id`         : corrélation (quel pod) — DEVINABLE, ne prouve rien seul.
+                #   - `_lcars_pod_capability` : le secret par-pod qui PROUVE l'identité au central (le
+                #     central refuse si elle ne correspond pas à celle enregistrée pour le pod_id).
+                #   - `_lcars_role`           : indicatif (surface de tools), JAMAIS la source de décision
+                #     de rôle côté central (qui résout le rôle depuis le pod_id VÉRIFIÉ).
+                if POD_ID or POD_CAPABILITY or ROLE:
                     args = dict(p.get("arguments") or {})
                     if POD_ID:
                         args["_lcars_pod_id"] = POD_ID
+                    if POD_CAPABILITY:
+                        args["_lcars_pod_capability"] = POD_CAPABILITY
                     if ROLE:
                         args["_lcars_role"] = ROLE
                     p = {**p, "arguments": args}

@@ -12,6 +12,24 @@ defmodule Fleet.MCP.ResultEventTest do
   alias Fleet.MCP.PodTools
   alias Fleet.TaskQueue
 
+  # Identité prouvée par capability (même modèle de test que pod_tools_test) : le résolveur stubbé reconnaît
+  # tout pod via `"CAP-" <> pod_id`. Le pod légitime présente cette capability → la gate passe.
+  setup do
+    prev = Application.get_env(:fleet_mcp, :pod_resolver)
+
+    Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
+      {:ok, %{role: "engineer", capability: "CAP-" <> pod_id}}
+    end)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:fleet_mcp, :pod_resolver, prev),
+        else: Application.delete_env(:fleet_mcp, :pod_resolver)
+    end)
+
+    :ok
+  end
+
   test "submit_result → broker broadcast %Fleet.Event{task_completed} (pod_id + correlation_id)" do
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})
@@ -23,10 +41,17 @@ defmodule Fleet.MCP.ResultEventTest do
     assert {:ok, %{content: [%{"type" => "text"}]}, %{}} =
              PodTools.handle_tool_call(
                "submit_result",
-               %{"payload" => payload, "_lcars_pod_id" => pod},
+               %{
+                 "payload" => payload,
+                 "task_id" => tid,
+                 "_lcars_pod_id" => pod,
+                 "_lcars_pod_capability" => "CAP-" <> pod
+               },
                %{}
              )
 
+    # Le livrable broadcasté = le `payload` métier EXACT (le task_id, corrélateur de transport, est retiré
+    # du result stocké par le broker → pas de pollution du livrable).
     assert_receive %Fleet.Event{
                      source: :task_queue,
                      type: :task_completed,

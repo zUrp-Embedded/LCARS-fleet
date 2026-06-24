@@ -17,7 +17,23 @@ defmodule Fleet.MCP.BridgeStdioHttpTest do
     ref = :"fleet_mcp_inc3c_#{System.unique_integer([:positive])}"
     {:ok, _http} = PodTools.start_link(transport: :http, port: 0, ranch_ref: ref)
     port = :ranch.get_port(ref)
-    on_exit(fn -> :ranch.stop_listener(ref) end)
+
+    # Identité prouvée par capability : le résolveur stubbé reconnaît tout pod via `"CAP-" <> pod_id`.
+    # Le pont fournira SA capability via l'env `LCARS_POD_CAPABILITY` et l'injectera en `_lcars_pod_capability`.
+    prev = Application.get_env(:fleet_mcp, :pod_resolver)
+
+    Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
+      {:ok, %{role: "engineer", capability: "CAP-" <> pod_id}}
+    end)
+
+    on_exit(fn ->
+      :ranch.stop_listener(ref)
+
+      if prev,
+        do: Application.put_env(:fleet_mcp, :pod_resolver, prev),
+        else: Application.delete_env(:fleet_mcp, :pod_resolver)
+    end)
+
     %{url: "http://localhost:#{port}/mcp"}
   end
 
@@ -36,14 +52,16 @@ defmodule Fleet.MCP.BridgeStdioHttpTest do
         args: [@bridge],
         env: [
           {~c"LCARS_FLEET_MCP_URL", String.to_charlist(url)},
-          {~c"LCARS_POD_ID", String.to_charlist(pod)}
+          {~c"LCARS_POD_ID", String.to_charlist(pod)},
+          # Capability par-pod : le pont l'injecte en `_lcars_pod_capability` (comme le ferait le spawn).
+          {~c"LCARS_POD_CAPABILITY", String.to_charlist("CAP-" <> pod)}
         ]
       ])
 
     rpc(p, 1, "initialize", %{})
     assert %{"result" => %{"serverInfo" => %{"name" => "fleet-stdio-bridge"}}} = recv(p, 1)
 
-    # get_task À TRAVERS le pont → forwardé au central (avec _lcars_pod_id injecté) → mandat nonce.
+    # get_task À TRAVERS le pont → forwardé au central (avec _lcars_pod_id + _lcars_pod_capability injectés) → mandat nonce.
     rpc(p, 2, "tools/call", %{"name" => "get_task", "arguments" => %{}})
     assert %{"result" => %{"content" => [%{"text" => t}]}} = recv(p, 2)
 
@@ -52,10 +70,10 @@ defmodule Fleet.MCP.BridgeStdioHttpTest do
 
     assert is_binary(tid)
 
-    # submit_result À TRAVERS le pont → forwardé au central → clôt le mandat dans le broker.
+    # submit_result À TRAVERS le pont (task_id REQUIS = celui rendu) → forwardé au central → clôt le mandat.
     rpc(p, 3, "tools/call", %{
       "name" => "submit_result",
-      "arguments" => %{"payload" => %{"answer" => nonce}}
+      "arguments" => %{"payload" => %{"answer" => nonce}, "task_id" => tid}
     })
 
     assert %{"result" => %{"content" => [%{"type" => "text"}]}} = recv(p, 3)

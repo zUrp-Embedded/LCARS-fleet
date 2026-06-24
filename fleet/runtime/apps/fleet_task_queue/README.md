@@ -23,7 +23,7 @@ Flux : `fleet_spawner`/`fleet_pipeline` **enqueue** (source) → `fleet_task_que
 
 - `enqueue/2` `(pod_id, attrs)` — pousse un mandat (`%{brief, role, metadata}`). Source.
 - `get_for_pod/1` `(pod_id)` — rend le mandat actif du pod (**idempotent** : résiste à `/clear` / re-`get`).
-- `submit_result/2` `(pod_id, result)` — livre (**idempotent** : double soumission ignorée ; rejette un `task_id` ≠ mandat actif, §A.70). **MA-04** : le broadcast `task_completed` est lifecycle load-bearing → un échec de diffusion rend `{:error, {:broadcast_failed, _}}` (PAS un `:ok` muet ; le hop ne finirait pas).
+- `submit_result/2` `(pod_id, result)` — livre (**idempotent** : double soumission ignorée). Le `result` porte le `task_id` du mandat clôturé (corrélateur) : ≠ mandat actif du pod → rejet `:task_id_mismatch`, aucune mutation (§A.70). C'est le 2e verrou anti-impersonation après la capability `fleet_mcp` : un pod ne peut clôturer qu'EXACTEMENT son mandat actif, jamais « la dernière active » d'un autre (côté `fleet_mcp`, `submit_result` rend ce `task_id` **OBLIGATOIRE**). Le `task_id` est un corrélateur de transport → **retiré du `result` stocké/broadcasté** (pas de pollution du livrable métier). **MA-04** : le broadcast `task_completed` est lifecycle load-bearing → un échec de diffusion rend `{:error, {:broadcast_failed, _}}` (PAS un `:ok` muet ; le hop ne finirait pas).
 - `list_pending/0` — mandats en attente.
 - `clear_for_pod/1` `(pod_id)` — purge le mandat d'un pod.
 - `pod_status/1` `(pod_id)` — état courant côté broker.

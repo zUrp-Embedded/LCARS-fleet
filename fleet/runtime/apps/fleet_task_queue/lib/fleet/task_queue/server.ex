@@ -157,6 +157,7 @@ defmodule Fleet.TaskQueue.Server do
       do: Logger.debug("TaskQueue: enqueue pod=#{pod_id} supersède #{superseded} active(s) stale")
 
     new_state = state |> put_task(task) |> persist()
+
     # payload = `%{task_id}` (cohérent avec tous les autres task_* events), PAS le `%Task{}` brut —
     # Task n'a pas de @derive Jason.Encoder, donc un `%{task: task}` ferait crasher `Jason.encode!`
     # chez tout consommateur d'events JSON (Fleet.API.WS à chaque enqueue). Aucun consommateur n'a
@@ -197,11 +198,18 @@ defmodule Fleet.TaskQueue.Server do
       %Task{} = task ->
         case result["task_id"] || result[:task_id] do
           tid when tid != nil and tid != task.id ->
-            # correlation_id du livrable ≠ mandat actif du pod → rejet, aucune mutation.
+            # correlation_id du livrable ≠ mandat actif du pod → rejet, aucune mutation. C'est le 2e verrou
+            # anti-impersonation (le 1er = la capability côté fleet_mcp) : même un pod prouvé ne peut clôturer
+            # qu'EXACTEMENT son mandat actif, jamais « la dernière active » d'un autre. fleet_mcp rend le
+            # task_id OBLIGATOIRE côté pod → ce corrélateur est toujours présent et vérifié.
             {:reply, {:error, :task_id_mismatch}, state}
 
           _ok ->
-            completed = %{task | state: :completed, completed_at: now(), result: result}
+            # `task_id` retiré du livrable STOCKÉ : c'est un corrélateur de transport (preuve « je clôs CE
+            # mandat »), pas une donnée métier du résultat. Le mandat est déjà identifié par `task.id` ; le
+            # garder dans `result` ne ferait que dupliquer/polluer le livrable broadcasté.
+            clean_result = result |> Map.delete("task_id") |> Map.delete(:task_id)
+            completed = %{task | state: :completed, completed_at: now(), result: clean_result}
             new_state = state |> put_task(completed) |> persist()
 
             # `task_completed` est LIFECYCLE load-bearing : le HopConsumer en DÉPEND pour finir le
@@ -221,7 +229,7 @@ defmodule Fleet.TaskQueue.Server do
                 task_id: completed.id,
                 role: completed.role,
                 ticket_id: completed.ticket_id,
-                result: result,
+                result: clean_result,
                 metadata: completed.metadata
               })
 

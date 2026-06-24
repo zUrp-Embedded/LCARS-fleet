@@ -10,11 +10,29 @@ defmodule Fleet.MCP.PodToolsHttpTest do
   alias Fleet.MCP.PodTools
   alias Fleet.TaskQueue
 
+  # Identité prouvée par capability : le résolveur stubbé reconnaît tout pod via `"CAP-" <> pod_id`.
+  # Le client passe cette capability dans les args du tool (ce que le pont injecte en prod).
+  defp cap_for(pod), do: "CAP-" <> pod
+
   setup do
     ref = :"fleet_mcp_inc3b2_#{System.unique_integer([:positive])}"
     {:ok, _http} = PodTools.start_link(transport: :sse, port: 0, ranch_ref: ref)
     port = :ranch.get_port(ref)
-    on_exit(fn -> :ranch.stop_listener(ref) end)
+
+    prev = Application.get_env(:fleet_mcp, :pod_resolver)
+
+    Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
+      {:ok, %{role: "engineer", capability: cap_for(pod_id)}}
+    end)
+
+    on_exit(fn ->
+      :ranch.stop_listener(ref)
+
+      if prev,
+        do: Application.put_env(:fleet_mcp, :pod_resolver, prev),
+        else: Application.delete_env(:fleet_mcp, :pod_resolver)
+    end)
+
     %{port: port}
   end
 
@@ -26,25 +44,36 @@ defmodule Fleet.MCP.PodToolsHttpTest do
     {:ok, client} =
       ExMCP.Client.start_link(transport: :http, url: "http://localhost:#{port}/mcp")
 
-    # Canal IN sur le fil HTTP — le pod s'identifie via `_lcars_pod_id` (= ce que le pont injecte).
-    {:ok, r1} = ExMCP.Client.call_tool(client, "get_task", %{"_lcars_pod_id" => pod})
+    # Canal IN sur le fil HTTP — le pod s'identifie via pod_id + capability (= ce que le pont injecte).
+    {:ok, r1} =
+      ExMCP.Client.call_tool(client, "get_task", %{
+        "_lcars_pod_id" => pod,
+        "_lcars_pod_capability" => cap_for(pod)
+      })
 
     assert {:ok, %{"done" => false, "task" => %{"brief" => ^nonce, "task_id" => tid}}} =
              Jason.decode(extract_text(r1))
 
     assert is_binary(tid)
 
-    # Canal OUT sur le fil HTTP.
+    # Canal OUT sur le fil HTTP (task_id REQUIS = celui rendu par get_task).
     {:ok, _r2} =
       ExMCP.Client.call_tool(client, "submit_result", %{
         "payload" => %{"answer" => nonce},
-        "_lcars_pod_id" => pod
+        "task_id" => tid,
+        "_lcars_pod_id" => pod,
+        "_lcars_pod_capability" => cap_for(pod)
       })
 
     assert {:ok, :completed} = TaskQueue.pod_status(pod)
 
     # Plus de mandat actif → done.
-    {:ok, r3} = ExMCP.Client.call_tool(client, "get_task", %{"_lcars_pod_id" => pod})
+    {:ok, r3} =
+      ExMCP.Client.call_tool(client, "get_task", %{
+        "_lcars_pod_id" => pod,
+        "_lcars_pod_capability" => cap_for(pod)
+      })
+
     assert {:ok, %{"done" => true}} = Jason.decode(extract_text(r3))
   end
 
@@ -59,10 +88,14 @@ defmodule Fleet.MCP.PodToolsHttpTest do
     {:ok, client} =
       ExMCP.Client.start_link(transport: :http, url: "http://localhost:#{port}/mcp")
 
+    # Pod prouvé (capability OK) + task_id présent : c'est l'ABSENCE de mandat actif qui fait isError,
+    # pas l'identité (on teste bien le chemin :no_active_task, pas un refus de gate).
     result =
       ExMCP.Client.call_tool(client, "submit_result", %{
         "payload" => %{"x" => 1},
-        "_lcars_pod_id" => pod
+        "task_id" => "no-such-task",
+        "_lcars_pod_id" => pod,
+        "_lcars_pod_capability" => cap_for(pod)
       })
 
     # ExMCP.Client rend la réponse tool en struct (`is_error:` atom, pas `"isError"` string) — forme

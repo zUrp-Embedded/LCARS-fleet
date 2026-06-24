@@ -40,13 +40,21 @@ defmodule Fleet.MCP.PodTools do
   deftool "submit_result" do
     meta do
       name("Submit Result")
-      description("Retourne le résultat structuré d'une tâche au fleet LCARS, dans `payload`.")
+
+      description(
+        "Retourne le résultat structuré d'une tâche au fleet LCARS, dans `payload`. `task_id` REQUIS = " <>
+          "le `task_id` rendu par `get_task` (la tâche que tu clôs) : le fleet corrèle ton livrable à CETTE " <>
+          "tâche précise, jamais à « la dernière en date »."
+      )
     end
 
     input_schema(%{
       "type" => "object",
-      "properties" => %{"payload" => %{"type" => "object"}},
-      "required" => ["payload"]
+      "properties" => %{
+        "payload" => %{"type" => "object"},
+        "task_id" => %{"type" => "string"}
+      },
+      "required" => ["payload", "task_id"]
     })
   end
 
@@ -122,14 +130,14 @@ defmodule Fleet.MCP.PodTools do
 
   @impl true
   def handle_tool_call("get_task", arguments, state) do
-    case pod_id(arguments) do
-      nil ->
-        # pod_id absent = erreur de config (LCARS_POD_ID perdu), PAS une fin de mandat.
-        # Symétrique avec submit_result. Ne jamais masquer en {"done": true} — sinon le pod
-        # s'arrête en croyant avoir tout fini alors qu'il n'a jamais pu s'identifier.
-        {:error, :pod_id_required, state}
+    # Identité PROUVÉE avant tout : le pod_id est devinable, donc on n'y touche QU'APRÈS avoir vérifié
+    # que le wire présente la capability enregistrée pour ce pod (anti-usurpation). Capability absente /
+    # fausse / pod inconnu → REFUS net, jamais un fallback anonyme (le pod ne lirait pas le mandat d'un autre).
+    case verify_pod(arguments) do
+      {:error, reason} ->
+        {:error, reason, state}
 
-      pid ->
+      {:ok, pid, _role} ->
         result =
           case TaskQueue.get_for_pod(pid) do
             {:ok, task} -> %{"done" => false, "task" => envelope(task)}
@@ -142,13 +150,23 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("submit_result", %{"payload" => payload} = args, state)
       when is_map(payload) do
-    case pod_id(args) do
-      nil ->
-        {:error, :pod_id_required, state}
+    # `task_id` OBLIGATOIRE (plus de « tâche active la plus récente » sur un pod_id non prouvé) ET
+    # identité prouvée par capability. Les deux ferment l'impersonation : un pod ne peut clôturer la tâche
+    # d'un autre ni en présentant son pod_id (capability), ni en omettant le task_id (corrélation explicite).
+    case verify_pod(args) do
+      {:error, reason} ->
+        {:error, reason, state}
 
-      pid ->
-        # Le broker valide pod_id ↔ task_id (si présent) et broadcast %Fleet.Event{task_completed}.
-        case TaskQueue.submit_result(pid, payload) do
+      {:ok, _pid, _role}
+      when not is_map_key(args, "task_id") and not is_map_key(args, :task_id) ->
+        # Le pod DOIT nommer la tâche qu'il clôt. Sans task_id, le broker tomberait sur « la dernière
+        # active de ce pod_id » — exactement le levier d'impersonation à supprimer. On exige le corrélateur
+        # explicite, et le broker (ci-dessous) vérifie qu'il appartient bien au pod prouvé.
+        {:error, :task_id_required, state}
+
+      {:ok, pid, _role} ->
+        # Le broker valide pod_id ↔ task_id (présent par construction ici) et broadcast %Fleet.Event{task_completed}.
+        case TaskQueue.submit_result(pid, payload_with_task_id(args, payload)) do
           {:ok, _task} ->
             {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
 
@@ -193,59 +211,30 @@ defmodule Fleet.MCP.PodTools do
       when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
     forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 
-    # l'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT. Le rôle est résolu
-    # depuis le SPAWN (binding `pod_id → role` gravé côté serveur, lu via `Fleet.Spawner.pod_info`), PAS du
-    # `_lcars_role` du fil. Le wire n'est pas authentifié : un pod (Bash + loopback joignable) peut POST
-    # direct `_lcars_role: architect` et usurper le token arch. Le `pod_id` du wire indexe le Registry serveur
-    # → le rôle rendu est celui réellement enregistré au spawn de CE pod. nil/introuvable → fallback token
-    # système (loggué — dégradé, pas masquage). Agnostique : JAMAIS un rôle hardcodé.
-    role = resolve_pod_role(args)
-
-    author_opts =
-      case Fleet.Credentials.RoleToken.token(role) do
-        t when is_binary(t) ->
-          [token: t]
-
-        _ ->
-          Logger.warning(
-            "create_ticket: token de rôle introuvable pour #{inspect(role)} — issue postée par le compte système"
-          )
-
-          []
-      end
-
-    # assignee = l'HUMAIN owner (point fixe : routing + ownership, jamais le rôle). Login forge
-    # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue ;
-    # Gitea matche l'assignee insensible à la casse → `starfleet` résout `Starfleet`). Pas de label :
-    # le rôle producteur est un invariant côté poller, pas un sticker par-ticket.
-    case Fleet.Credentials.Human.current() do
-      {:ok, human} ->
-        issue_opts = Keyword.put(author_opts, :assignees, [human])
-
-        case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
-          {:ok, number} ->
-            # DÉCOUPLAGE : create_ticket CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
-            # (graver la carte) n'est PLUS ici : c'est la responsabilité du SYSTÈME — le POLLER grave la carte
-            # par défaut (mandate-gate) sur toute issue assignée routeless (cf. fleet_pilot). Un seul acteur
-            # crée+assigne ; le système route. (Uniforme : un ticket humain routeless est onboardé pareil.)
-            # type:feature = ÉTIQUETTE de visu (humain), best-effort — JAMAIS du routing.
-            _ = apply(forge, :add_label, [repo, number, "type:feature", []])
-
-            result = %{
-              "status" => "ticket_created",
-              "ticket" => "#{repo}##{number}",
-              "repo" => repo,
-              "assignee" => human
-            }
-
-            {:ok, %{content: [json(result)]}, state}
-
-          {:error, reason} ->
-            {:error, {:ticket_creation_failed, inspect(reason)}, state}
-        end
-
+    # l'arch poste l'issue EN SON NOM : token du compte de rôle de l'APPELANT. Le rôle vient du pod
+    # VÉRIFIÉ — `verify_pod` prouve d'abord l'identité (capability par-pod) PUIS rend le rôle gravé au spawn
+    # (`Fleet.Spawner.pod_info`), JAMAIS le `_lcars_role` du wire (non authentifié → un pod pourrait POST
+    # `_lcars_role: architect` et usurper le token arch). Capability absente/fausse / pod inconnu → REFUS :
+    # plus de fallback token-système silencieux sur rôle nil (c'était précisément un trou — un pod inconnu
+    # postait sous le compte système). Fail-closed : pas de pod prouvé = pas de ticket.
+    with {:ok, _pid, role} when is_binary(role) and role != "" <- verify_pod(args),
+         token when is_binary(token) <- Fleet.Credentials.RoleToken.token(role) do
+      do_create_ticket(forge, repo, title, brief, [token: token], state)
+    else
       {:error, reason} ->
-        {:error, {:human_unresolved, inspect(reason)}, state}
+        # Identité non prouvée (capability manquante/fausse, pod inconnu) → on ne crée RIEN.
+        {:error, reason, state}
+
+      _ ->
+        # Pod prouvé mais token de rôle introuvable sur disque = trou de provisioning (le compte de rôle
+        # n'a pas son token). On REFUSE plutôt que de poster sous le compte système (fail-closed) :
+        # poster en système masquerait la traça (qui a délégué ?) et contournerait le least-privilege.
+        Logger.warning(
+          "create_ticket REFUSÉ : token du rôle appelant introuvable (provisioning incomplet) — " <>
+            "pas de repli compte système"
+        )
+
+        {:error, :role_token_unavailable, state}
     end
   end
 
@@ -335,6 +324,44 @@ defmodule Fleet.MCP.PodTools do
     {:error, :unknown_tool, state}
   end
 
+  # Pose l'issue (auteur = compte de rôle via `author_opts`, assignee = humain owner) et l'étiquette de visu.
+  # Extrait de create_ticket pour garder le handler centré sur la GATE d'identité (verify_pod + token).
+  defp do_create_ticket(forge, repo, title, brief, author_opts, state) do
+    # assignee = l'HUMAIN owner (point fixe : routing + ownership, jamais le rôle). Login forge
+    # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue ;
+    # Gitea matche l'assignee insensible à la casse → `starfleet` résout `Starfleet`). Pas de label :
+    # le rôle producteur est un invariant côté poller, pas un sticker par-ticket.
+    case Fleet.Credentials.Human.current() do
+      {:ok, human} ->
+        issue_opts = Keyword.put(author_opts, :assignees, [human])
+
+        case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
+          {:ok, number} ->
+            # DÉCOUPLAGE : create_ticket CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
+            # (graver la carte) n'est PLUS ici : c'est la responsabilité du SYSTÈME — le POLLER grave la carte
+            # par défaut (mandate-gate) sur toute issue assignée routeless (cf. fleet_pilot). Un seul acteur
+            # crée+assigne ; le système route. (Uniforme : un ticket humain routeless est onboardé pareil.)
+            # type:feature = ÉTIQUETTE de visu (humain), best-effort — JAMAIS du routing.
+            _ = apply(forge, :add_label, [repo, number, "type:feature", []])
+
+            result = %{
+              "status" => "ticket_created",
+              "ticket" => "#{repo}##{number}",
+              "repo" => repo,
+              "assignee" => human
+            }
+
+            {:ok, %{content: [json(result)]}, state}
+
+          {:error, reason} ->
+            {:error, {:ticket_creation_failed, inspect(reason)}, state}
+        end
+
+      {:error, reason} ->
+        {:error, {:human_unresolved, inspect(reason)}, state}
+    end
+  end
+
   # Pas de `delegation_carte` ni de `grave_initial_route` ici : le routage (graver la carte) vit
   # côté système (fleet_pilot : le poller onboarde toute issue assignée routeless sur la carte par défaut,
   # cf. StageDispatcher.ensure_carte_or_onboard). create_ticket ne fait QUE créer+assigner.
@@ -369,36 +396,105 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  # Le pont stdio (`fleet-mcp-stdio-bridge`) injecte `_lcars_pod_id` dans tous les tool calls.
-  defp pod_id(args) do
-    case Map.get(args || %{}, "_lcars_pod_id") do
-      id when is_binary(id) and id != "" -> id
-      _ -> nil
+  # ============================================================
+  # Identité du pod — prouvée par capability, JAMAIS crue sur le wire
+  # ============================================================
+  #
+  # Le pont stdio injecte `_lcars_pod_id` (qui pod) ET `_lcars_pod_capability` (le secret par-pod
+  # généré au spawn). Le serveur ne croit PAS le pod_id seul — il est déterministe et devinable : un pod
+  # (qui a Bash + joint le central en loopback) pourrait POST le pod_id d'un autre pour lire son mandat ou
+  # clôturer sa tâche. La capability ferme ce trou : seul le pod LÉGITIME la connaît (elle ne vit que dans
+  # SON env), et le central la VÉRIFIE contre celle enregistrée au spawn (`Fleet.Spawner.pod_info`) avant
+  # de servir tout tool corrélé pod. Le rôle se résout sur ce MÊME pod prouvé (même appel = pas de drift).
+  #
+  # Retours :
+  #   - `{:ok, pod_id, role}` — capability présentée == capability enregistrée pour ce pod_id ;
+  #   - `{:error, :pod_id_required}`      — pas de pod_id sur le wire (anomalie de config du pont) ;
+  #   - `{:error, :pod_capability_required}` — pas de capability sur le wire (pont sans secret = refus) ;
+  #   - `{:error, :pod_unknown}`          — pod_id inconnu du registre serveur (jamais spawné, ou mort) ;
+  #   - `{:error, :pod_capability_mismatch}` — capability fausse (impersonation : pod_id d'un autre).
+  #
+  # Fail-closed de bout en bout : aucun de ces cas ne retombe sur un accès anonyme ou un token système.
+  defp verify_pod(args) do
+    args = args || %{}
+
+    with {:ok, pid} <- extract_pod_id(args),
+         {:ok, cap} <- extract_capability(args),
+         {:ok, %{role: role, capability: registered}} <- resolve_pod(pid),
+         true <- secure_compare(cap, registered) do
+      {:ok, pid, role}
+    else
+      {:error, _} = err -> err
+      # `resolve_pod` a rendu un pod sans capability enregistrée, ou la comparaison a échoué.
+      :pod_unknown -> {:error, :pod_unknown}
+      false -> {:error, :pod_capability_mismatch}
     end
   end
 
-  # Résout le RÔLE de l'appelant depuis le SPAWN (binding `pod_id → role` gravé côté serveur), pas
-  # du `_lcars_role` du fil (non authentifié → usurpation). Le `pod_id` indexe le Registry du Spawner
-  # (`Fleet.Spawner.pod_info/1` → `info.role`, = `metadata.name` du cap-profile au spawn). Seam test
-  # `:role_resolver` (app-env) ; défaut = dispatch RUNTIME vers `Fleet.Spawner` (pas de dep compile-time
-  # fleet_spawner, comme `Fleet.Pilot.ProjectOnboard`). pod_id absent / pod inconnu / Spawner indisponible →
-  # `nil` → fallback token système (dégradé loggué, jamais l'usurpation silencieuse).
-  defp resolve_pod_role(args) do
-    resolver = Application.get_env(:fleet_mcp, :role_resolver, &default_role_resolver/1)
-    resolver.(pod_id(args))
+  defp extract_pod_id(args) do
+    case Map.get(args, "_lcars_pod_id") do
+      id when is_binary(id) and id != "" -> {:ok, id}
+      _ -> {:error, :pod_id_required}
+    end
   end
 
-  defp default_role_resolver(nil), do: nil
-
-  defp default_role_resolver(pod_id) when is_binary(pod_id) do
-    case apply(Fleet.Spawner, :pod_info, [pod_id]) do
-      {:ok, %{role: role}} when is_binary(role) and role != "" -> role
-      _ -> nil
+  defp extract_capability(args) do
+    case Map.get(args, "_lcars_pod_capability") do
+      cap when is_binary(cap) and cap != "" -> {:ok, cap}
+      _ -> {:error, :pod_capability_required}
     end
+  end
+
+  # Résout `pod_id → %{role, capability}` depuis le registre du Spawner (gravé au spawn). Seam test
+  # `:pod_resolver` (app-env) qui prend le pod_id et rend `{:ok, %{role, capability}}` | `{:error, _}` ;
+  # défaut = dispatch RUNTIME vers `Fleet.Spawner.pod_info/1` (pas de dep compile-time fleet_spawner, comme
+  # `Fleet.Pilot.ProjectOnboard`). Pod inconnu / Spawner indisponible → `:pod_unknown` (fail-closed).
+  defp resolve_pod(pod_id) when is_binary(pod_id) do
+    resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
+
+    case resolver.(pod_id) do
+      {:ok, %{capability: cap} = info} when is_binary(cap) and cap != "" ->
+        {:ok, %{role: Map.get(info, :role), capability: cap}}
+
+      _ ->
+        :pod_unknown
+    end
+  end
+
+  defp default_pod_resolver(pod_id) when is_binary(pod_id) do
+    apply(Fleet.Spawner, :pod_info, [pod_id])
   rescue
-    _ -> nil
+    _ -> {:error, :pod_unknown}
   catch
-    _, _ -> nil
+    _, _ -> {:error, :pod_unknown}
+  end
+
+  # Comparaison à temps constant (la capability est un secret) : on ne veut pas qu'un timing observable
+  # révèle la longueur du préfixe commun (qui permettrait de deviner la capability octet par octet). Tailles
+  # différentes → false immédiat (la taille n'est pas secrète). Tailles égales → XOR octet-à-octet puis
+  # OR cumulé : le temps ne dépend QUE de la longueur, jamais du contenu. Implémentation autonome
+  # (`:crypto.exor`, toujours dispo en OTP 25) — pas de dép sur `Plug.Crypto` que fleet_mcp ne déclare pas.
+  defp secure_compare(a, b) when is_binary(a) and is_binary(b) do
+    byte_size(a) == byte_size(b) and constant_time_equal?(a, b)
+  end
+
+  defp secure_compare(_, _), do: false
+
+  defp constant_time_equal?(a, b) do
+    :crypto.exor(a, b)
+    |> :binary.bin_to_list()
+    |> Enum.reduce(0, &Bitwise.bor/2) == 0
+  end
+
+  # Fusionne le `task_id` (argument top-level REQUIS du wire) dans le map résultat envoyé au broker,
+  # qui corrèle sur `result["task_id"]`. Le pod a obtenu ce task_id de `get_task` ; le broker rejette
+  # (`:task_id_mismatch`) s'il ne correspond pas à SON mandat actif → un pod ne peut pas clôturer la
+  # tâche d'un autre même en ayant passé la gate capability (double verrou : capability + corrélateur).
+  defp payload_with_task_id(args, payload) do
+    case Map.get(args, "task_id") || Map.get(args, :task_id) do
+      tid when is_binary(tid) and tid != "" -> Map.put(payload, "task_id", tid)
+      _ -> payload
+    end
   end
 
   # JSON envelope du mandat exposé au pod — task_id = correlation_id.

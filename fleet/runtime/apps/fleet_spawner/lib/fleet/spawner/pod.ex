@@ -76,6 +76,14 @@ defmodule Fleet.Spawner.Pod do
           pod_id: String.t(),
           ticket_id: String.t(),
           session_id: String.t() | nil,
+          # Secret aléatoire par-pod, généré au spawn. C'est la PREUVE D'IDENTITÉ du pod auprès
+          # du serveur MCP central : non-dérivable du pod_id (qui, lui, est déterministe et devinable),
+          # injecté UNIQUEMENT dans l'env de CE pod, et stocké ICI côté serveur (lu par `pod_info/1`).
+          # Le central refuse tout tool-call dont la capability présentée ne correspond pas à celle
+          # enregistrée pour le pod_id → un pod ne peut plus se faire passer pour un autre en présentant
+          # son pod_id deviné. Régénérée à chaque (re)spawn (l'env du pont est ré-écrit au même cycle →
+          # toujours cohérente) ; pas dans le snapshot state.json (rien à reprendre, tout est recréé).
+          capability: String.t(),
           # `started_at` ISO8601 figé à la création du Pod GenServer, persisté tel
           # quel dans `state.json` (point de recovery).
           started_at: DateTime.t(),
@@ -154,6 +162,11 @@ defmodule Fleet.Spawner.Pod do
       # forger via le wire) : `PodTools` la résout depuis le `pod_id` au lieu du `_lcars_role` du fil
       # (non authentifié → usurpation `architect` par POST direct). Le wire propose, le SPAWN dispose.
       role: cap_profile_name(state.cap_profile),
+      # capability : le secret par-pod (généré au spawn). Le serveur MCP central le lit ici (via
+      # `Fleet.Spawner.pod_info`) pour VÉRIFIER que le tool-call vient bien de CE pod et pas d'un autre
+      # qui aurait deviné son pod_id. C'est le pendant authentifié du pod_id : le wire propose une identité,
+      # le central la prouve contre cette capability enregistrée au spawn.
+      capability: state.capability,
       phase: state.phase,
       conditions: MapSet.to_list(state.conditions),
       session_id: state.session_id,
@@ -1060,7 +1073,13 @@ defmodule Fleet.Spawner.Pod do
         env =
           state.env_vars
           |> Map.merge(skills_plugins_env(state.cap_profile))
-          |> Map.merge(mcp_channel_env(state.pod_id, cap_profile_name(state.cap_profile)))
+          |> Map.merge(
+            mcp_channel_env(
+              state.pod_id,
+              cap_profile_name(state.cap_profile),
+              state.capability
+            )
+          )
           # HOME — dépend du containment.
           #   bwrap (défaut) : HOME=pod_dir (cohérent ; bwrap fait `--setenv HOME` de toute façon,
           #     cette valeur est ignorée sous le sandbox).
@@ -1683,6 +1702,13 @@ defmodule Fleet.Spawner.Pod do
       session_id:
         Keyword.get(args.opts, :session_id) ||
           deterministic_session_id(args.cap_profile, args.opts),
+      # Capability par-pod = preuve d'identité auprès du serveur MCP central. Générée FRAÎCHE à
+      # chaque (re)spawn (256 bits aléatoires) : non-dérivable du pod_id déterministe, donc indevinable
+      # même en connaissant le pod_id. Elle est stockée ici (lue par `pod_info`) ET injectée dans l'env
+      # du pont MCP de CE pod (cf. mcp_channel_env / build_fleet_mcp_entry) → les deux côtés portent la
+      # MÊME valeur, posée au même cycle. Pas persistée dans state.json : au recovery, tout (env du pont
+      # + ce state) est régénéré ensemble, donc une nouvelle capability cohérente.
+      capability: generate_capability(),
       # Timestamp ISO8601 figé à la création du GenServer, persisté tel quel dans
       # state.json.
       started_at: DateTime.utc_now(),
@@ -1712,6 +1738,13 @@ defmodule Fleet.Spawner.Pod do
       # pendant le bootstrap ne crée pas une 2e boucle. nil = boucle non armée / stoppée.
       kick_ref: nil
     }
+  end
+
+  # Génère le secret par-pod (256 bits aléatoires cryptographiques, encodé URL-safe sans padding pour
+  # voyager proprement en JSON / variable d'env). C'est l'UNIQUE site de génération de capability : le
+  # secret est posé dans le state du pod ET dans l'env de son pont MCP, jamais re-tiré ailleurs.
+  defp generate_capability do
+    :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
   end
 
   defp pod_dir_for(pod_id, _cap_profile, opts) do
@@ -2249,10 +2282,19 @@ defmodule Fleet.Spawner.Pod do
   # côté serveur, `Fleet.Spawner.pod_info`), pas du wire (non authentifié → usurpation). Posé ICI
   # (env du process pod) → couvre host_launch ET bwrap (qui le re-`--setenv` dans son sandbox).
   #
+  # `LCARS_POD_CAPABILITY` (= le secret par-pod, généré au spawn) : bridge.py l'injecte en
+  # `_lcars_pod_capability` dans chaque tool-call, exactement comme `LCARS_POD_ID` → `_lcars_pod_id`.
+  # Le central VÉRIFIE cette capability contre celle enregistrée pour le pod_id avant de servir le moindre
+  # tool corrélé pod (get_task/submit_result/résolution de rôle) : un pod qui présente le pod_id deviné
+  # d'un AUTRE pod n'a pas sa capability → REFUS. C'est la fermeture du trou d'usurpation : le pod_id seul
+  # ne prouve plus rien. TOUJOURS posée (tout pod spawné par la fleet en reçoit une) ; un pod sans elle
+  # ne peut RIEN faire au central (fail-closed, pas de fallback anonyme).
+  #
   # `LCARS_FLEET_MCP_CHANNEL_URL` n'est plus posé (push channel ChannelHTTP supprimé,
   # le drive se fait via les tools pull `get_task`).
-  defp mcp_channel_env(pod_id, role) when is_binary(pod_id) do
-    base = %{"LCARS_POD_ID" => pod_id}
+  defp mcp_channel_env(pod_id, role, capability)
+       when is_binary(pod_id) and is_binary(capability) do
+    base = %{"LCARS_POD_ID" => pod_id, "LCARS_POD_CAPABILITY" => capability}
     if is_binary(role) and role != "", do: Map.put(base, "LCARS_ROLE", role), else: base
   end
 
@@ -2535,10 +2577,12 @@ defmodule Fleet.Spawner.Pod do
   # bwrap n'aurait aucun tool `mcp__fleet__*` (le pont ne démarrerait jamais) — donc aucun moyen de
   # puller son mandat ni de soumettre son résultat.
   #
-  # Injecte aussi `LCARS_POD_ID` dans l'env du serveur (le bridge le lit pour corréler
-  # `get_task` au bon pod ; ne pas dépendre de l'héritage env claude→bridge) et force
-  # `alwaysLoad:true` (sinon les tools MCP sont déférés derrière ToolSearch, absents du
-  # prompt turn-1).
+  # Injecte aussi `LCARS_POD_ID` ET `LCARS_POD_CAPABILITY` dans l'env du serveur (le bridge les lit
+  # pour corréler `get_task` au bon pod ET prouver son identité au central ; ne pas dépendre de l'héritage
+  # env claude→bridge) et force `alwaysLoad:true` (sinon les tools MCP sont déférés derrière ToolSearch,
+  # absents du prompt turn-1). La capability est posée ICI, dans l'env du SEUL pont de CE pod : un autre pod
+  # ne peut pas la lire (son `.mcp-fleet.json` porte SA propre capability). C'est ce qui rend le pod_id
+  # non-suffisant pour usurper — il faut AUSSI le secret, qui ne quitte jamais l'env de son pod.
   defp build_fleet_mcp_entry(spec, state) do
     # HÔTE : où le spawner ÉCRIT réellement le pont (le pod_dir réel sur le disque).
     host_bridge = Path.join([state.pod_dir, ".lcars", "fleet_mcp_bridge.py"])
@@ -2556,16 +2600,17 @@ defmodule Fleet.Spawner.Pod do
           |> String.replace("{{BRIDGE_LOG}}", ns_log)
         end)
 
+      pod_env = %{
+        "LCARS_POD_ID" => state.pod_id,
+        "LCARS_POD_CAPABILITY" => state.capability
+      }
+
       entry =
         spec
         |> Map.drop(["bridge_source"])
         |> Map.put("args", args)
         |> Map.put("alwaysLoad", true)
-        |> Map.update(
-          "env",
-          %{"LCARS_POD_ID" => state.pod_id},
-          &Map.put(&1, "LCARS_POD_ID", state.pod_id)
-        )
+        |> Map.update("env", pod_env, &Map.merge(&1, pod_env))
 
       {:ok, entry}
     end
