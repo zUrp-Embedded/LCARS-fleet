@@ -70,20 +70,21 @@ defmodule Fleet.MCP.Supervisor do
       port ->
         ref = Keyword.get(opts, :pod_facing_ranch_ref, :fleet_mcp_pod_facing)
 
-        # Bind loopback par défaut. Le transport HTTP ExMCP dérive l'ip d'écoute de
-        # son option `:host` (ExMCP.Server.Transport.parse_host/1, qui accepte un
-        # tuple IP tel quel) — on lui passe donc l'ip calculée par la source unique
-        # Fleet.EventRouter.BindAddress. Loopback est COMPATIBLE avec les pods : ils
-        # joignent le MCP via le pont stdio→HTTP sur http://127.0.0.1:<port>/mcp
-        # (cf. LCARS_FLEET_MCP_URL, bin/fleet_mcp_stdio_bridge.py) — même hôte, donc
-        # loopback ne casse rien. Exposition publique (rare) = LCARS_BIND_HOST.
-        ip = Fleet.EventRouter.BindAddress.ip()
+        # Bind loopback par défaut. Le transport HTTP ExMCP veut son `:host` sous forme de STRING : il
+        # fait `to_string(host)` (Logger « Starting MCP HTTP server on <host>… ») AVANT son `parse_host`,
+        # donc lui passer le TUPLE `{127,0,0,1}` CRASHE le listener (`Protocol.UndefinedError String.Chars`
+        # pour Tuple) → `Fleet.MCP.PodTools` ne démarre pas → app fleet_mcp down → node down au boot. On lui
+        # passe donc la STRING de la source unique (`BindAddress.host_string/0`) ; ExMCP la re-parse en tuple
+        # ranch. (À NE PAS confondre avec Plug.Cowboy des autres listeners, qui veut `options: [ip: <tuple>]`.)
+        # Loopback est COMPATIBLE avec les pods : ils joignent le MCP via le pont stdio→HTTP sur
+        # http://127.0.0.1:<port>/mcp (cf. LCARS_FLEET_MCP_URL) — même hôte. Exposition publique = LCARS_BIND_HOST.
+        host = Fleet.EventRouter.BindAddress.host_string()
 
         # Le broker (Fleet.TaskQueue.Server) est démarré par l'app fleet_task_queue,
         # pas ici : fleet_mcp sert la queue, ne la possède pas.
         [
           Supervisor.child_spec(
-            {Fleet.MCP.PodTools, [transport: :http, host: ip, port: port, ranch_ref: ref]},
+            {Fleet.MCP.PodTools, [transport: :http, host: host, port: port, ranch_ref: ref]},
             id: Fleet.MCP.PodTools
           )
         ]

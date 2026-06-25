@@ -57,6 +57,19 @@ defmodule Fleet.EventRouter.BindAddress do
     end
   end
 
+  @doc """
+  L'adresse de bind sous forme de STRING (`"127.0.0.1"`), pour les transports qui veulent un host
+  textuel et non un tuple. CONTRAT ExMCP : `ExMCP.Server.Transport.start_http_server/4` fait
+  `Logger.info("…on \#{host}:…")` — donc `to_string(host)` — AVANT son `parse_host`, ce qui CRASHE
+  (`Protocol.UndefinedError String.Chars` pour Tuple) si on lui passe le tuple `ip/1`. On lui passe
+  donc cette string ; ExMCP la re-parse en tuple côté ranch. (Plug.Cowboy, lui, veut `options: [ip:
+  <tuple>]` → utiliser `ip/1` pour Cowboy, `host_string/1` pour ExMCP.)
+  """
+  @spec host_string(String.t() | nil) :: String.t()
+  def host_string(surface_env \\ nil) do
+    surface_env |> ip() |> :inet.ntoa() |> to_string()
+  end
+
   @doc "La loopback IPv4 — défaut sûr exposé pour les tests."
   @spec loopback() :: :inet.ip_address()
   def loopback, do: @loopback
