@@ -71,4 +71,62 @@ defmodule Fleet.MCP.ResultEventTest do
 
     refute_receive %Fleet.Event{source: :task_queue, type: :task_completed}, 200
   end
+
+  test "submit_result avec task_id NICHÉ dans le payload (pas top-level) → accepté + clôt le mandat" do
+    # Régression live (e2e) : un agent juge range son task_id DANS le payload de verdict au lieu du
+    # paramètre top-level. Le broker corrèle pod_id ↔ task_id quel que soit l'emplacement → le livrable
+    # NE DOIT PAS être perdu (sinon le hop review timeout → escalade → pipeline gelé, observé sur le
+    # qualifier qui tâtonnait `payload:{decision, task_id}` à l'infini contre `:task_id_required`).
+    pod = "pod-evt-#{System.unique_integer([:positive])}"
+    {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})
+    tid = task.id
+    Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
+
+    # task_id ABSENT du top-level, présent DANS le payload — la forme exacte produite par le juge en e2e.
+    verdict = %{"decision" => "continue", "reason" => "ok", "task_id" => tid}
+
+    assert {:ok, %{content: [%{"type" => "text"}]}, %{}} =
+             PodTools.handle_tool_call(
+               "submit_result",
+               %{
+                 "payload" => verdict,
+                 "_lcars_pod_id" => pod,
+                 "_lcars_pod_capability" => "CAP-" <> pod
+               },
+               %{}
+             )
+
+    # Le corrélateur de transport est retiré du livrable STOCKÉ, même rangé dans le payload (pas de pollution).
+    assert_receive %Fleet.Event{
+                     source: :task_queue,
+                     type: :task_completed,
+                     pod_id: ^pod,
+                     correlation_id: ^tid,
+                     payload: %{result: result}
+                   },
+                   2_000
+
+    assert result == %{"decision" => "continue", "reason" => "ok"}
+  end
+
+  test "submit_result sans task_id NI au top-level NI dans le payload → :task_id_required (garde tenue)" do
+    # La tolérance d'emplacement ne rouvre PAS le fallback supprimé : task_id absent des DEUX = refus net
+    # (sinon le broker retomberait sur « la dernière active du pod » — le levier d'impersonation).
+    pod = "pod-evt-#{System.unique_integer([:positive])}"
+    {:ok, _task} = TaskQueue.enqueue(pod, %{brief: "x"})
+    Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
+
+    assert {:error, :task_id_required, %{}} =
+             PodTools.handle_tool_call(
+               "submit_result",
+               %{
+                 "payload" => %{"decision" => "continue"},
+                 "_lcars_pod_id" => pod,
+                 "_lcars_pod_capability" => "CAP-" <> pod
+               },
+               %{}
+             )
+
+    refute_receive %Fleet.Event{source: :task_queue, type: :task_completed}, 200
+  end
 end

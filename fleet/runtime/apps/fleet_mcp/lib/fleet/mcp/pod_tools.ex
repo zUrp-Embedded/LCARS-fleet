@@ -157,38 +157,43 @@ defmodule Fleet.MCP.PodTools do
       {:error, reason} ->
         {:error, reason, state}
 
-      {:ok, _pid, _role}
-      when not is_map_key(args, "task_id") and not is_map_key(args, :task_id) ->
-        # Le pod DOIT nommer la tâche qu'il clôt. Sans task_id, le broker tomberait sur « la dernière
-        # active de ce pod_id » — exactement le levier d'impersonation à supprimer. On exige le corrélateur
-        # explicite, et le broker (ci-dessous) vérifie qu'il appartient bien au pod prouvé.
-        {:error, :task_id_required, state}
-
       {:ok, pid, _role} ->
-        # Le broker valide pod_id ↔ task_id (présent par construction ici) et broadcast %Fleet.Event{task_completed}.
-        case TaskQueue.submit_result(pid, payload_with_task_id(args, payload)) do
-          {:ok, _task} ->
-            {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
+        # Le corrélateur est cherché au top-level (format canonique du wire) PUIS dans le payload : un
+        # agent juge range parfois son task_id DANS le payload de verdict au lieu du paramètre top-level.
+        # Absent des DEUX → refus (le pod doit nommer la tâche qu'il clôt ; sans corrélateur le broker
+        # tomberait sur « la dernière active » — le levier d'impersonation supprimé). Présent quelque part
+        # → on le normalise au top-level du map broker, qui le valide pod_id ↔ task_id : l'emplacement
+        # d'origine n'affaiblit RIEN (le fallback retiré était implicite/devinable ; ici il reste explicite).
+        case effective_task_id(args, payload) do
+          nil ->
+            {:error, :task_id_required, state}
 
-          {:error, :no_active_task} ->
-            # pas de mandat actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
-            # réassigné depuis) → DROP. Le signaler isError (comme :task_id_mismatch / :pod_id_required)
-            # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (échec masqué
-            # en succès). (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST enregistré.)
-            {:error, :no_active_task, state}
+          task_id ->
+            # Le broker valide pod_id ↔ task_id et broadcast %Fleet.Event{task_completed}.
+            case TaskQueue.submit_result(pid, Map.put(payload, "task_id", task_id)) do
+              {:ok, _task} ->
+                {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
 
-          {:error, :double_submit_ignored} ->
-            {:ok, %{content: [text("Resultat deja recu (ignore).")]}, state}
+              {:error, :no_active_task} ->
+                # pas de mandat actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
+                # réassigné depuis) → DROP. Le signaler isError (comme :task_id_mismatch / :pod_id_required)
+                # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (échec masqué
+                # en succès). (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST enregistré.)
+                {:error, :no_active_task, state}
 
-          {:error, :task_id_mismatch} ->
-            {:error, :task_id_mismatch, state}
+              {:error, :double_submit_ignored} ->
+                {:ok, %{content: [text("Resultat deja recu (ignore).")]}, state}
 
-          # le broadcast lifecycle `task_completed` a échoué : le hop ne finira PAS (le HopConsumer
-          # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès) — le pod doit
-          # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
-          # son livrable accepté alors que le verrou forge reste posé à vie.
-          {:error, {:broadcast_failed, _reason}} ->
-            {:error, :broadcast_failed, state}
+              {:error, :task_id_mismatch} ->
+                {:error, :task_id_mismatch, state}
+
+              # le broadcast lifecycle `task_completed` a échoué : le hop ne finira PAS (le HopConsumer
+              # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès) — le pod doit
+              # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
+              # son livrable accepté alors que le verrou forge reste posé à vie.
+              {:error, {:broadcast_failed, _reason}} ->
+                {:error, :broadcast_failed, state}
+            end
         end
     end
   end
@@ -536,16 +541,20 @@ defmodule Fleet.MCP.PodTools do
     |> Enum.reduce(0, &Bitwise.bor/2) == 0
   end
 
-  # Fusionne le `task_id` (argument top-level REQUIS du wire) dans le map résultat envoyé au broker,
-  # qui corrèle sur `result["task_id"]`. Le pod a obtenu ce task_id de `get_task` ; le broker rejette
-  # (`:task_id_mismatch`) s'il ne correspond pas à SON mandat actif → un pod ne peut pas clôturer la
-  # tâche d'un autre même en ayant passé la gate capability (double verrou : capability + corrélateur).
-  defp payload_with_task_id(args, payload) do
-    case Map.get(args, "task_id") || Map.get(args, :task_id) do
-      tid when is_binary(tid) and tid != "" -> Map.put(payload, "task_id", tid)
-      _ -> payload
-    end
+  # Le `task_id` (corrélateur anti-impersonation) cherché au top-level du wire PUIS dans le payload : un
+  # agent juge range parfois le corrélateur DANS son payload de verdict plutôt qu'au paramètre top-level.
+  # Renvoie le task_id non vide trouvé (top-level prioritaire), ou nil si absent des deux. Le broker
+  # corrèle ensuite sur `result["task_id"]` et rejette (`:task_id_mismatch`) s'il ne correspond pas à SON
+  # mandat actif → un pod ne peut pas clôturer la tâche d'un autre même via la gate capability (double
+  # verrou : capability + corrélateur). L'emplacement (top-level vs payload) n'entre PAS dans la sécurité :
+  # le task_id reste explicite et validé ; seul le fallback « dernière active » (implicite) était le trou.
+  defp effective_task_id(args, payload) do
+    present_task_id(Map.get(args, "task_id") || Map.get(args, :task_id)) ||
+      present_task_id(Map.get(payload, "task_id") || Map.get(payload, :task_id))
   end
+
+  defp present_task_id(tid) when is_binary(tid) and tid != "", do: tid
+  defp present_task_id(_), do: nil
 
   # JSON envelope du mandat exposé au pod — task_id = correlation_id.
   defp envelope(%Fleet.TaskQueue.Task{} = t) do
