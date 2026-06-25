@@ -1040,8 +1040,8 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # Enqueue le mandat dans le broker `Fleet.TaskQueue` ciblé pod_id — le claude REPL le pull via
   # `mcp__fleet__get_task` → `PodTools.get_task` → `TaskQueue.get_for_pod` (PAS un Read fichier).
-  # MÊME mécanisme que `StageRunner.push_task_for_pod` : sans cet
-  # enqueue, `TaskQueue.pod_status(pod_id) == nil` → le pod se croit bootstrap (rien à puller) → idle.
+  # Sans cet enqueue, `TaskQueue.pod_status(pod_id) == nil` → le pod se croit bootstrap
+  # (rien à puller) → idle.
   # Le `brief` = le MANDAT role-aware déjà construit (build_mandate) : GateBrief désamorcé pour le
   # gatekeeper, corps de l'issue pour un worker. Un `issue["body"]` brut ferait
   # puller au juge le mandat BUILD exécutable. `metadata.issue` corrèle au ticket.

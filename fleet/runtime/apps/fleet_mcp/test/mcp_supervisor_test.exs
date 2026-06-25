@@ -14,4 +14,27 @@ defmodule Fleet.MCP.SupervisorTest do
     # Bridge retiré (husk mort) — ne doit plus être dans l'arbre.
     assert Process.whereis(Fleet.MCP.Bridge) == nil
   end
+
+  describe "pod_facing_status/0 — sonde le PROCESS, pas le knob (anti-vert-creux)" do
+    # En ambient test : `:pod_facing_port` absent → le superviseur a booté SANS PodTools.
+    test ":inactive quand pod_facing_port non configuré (off volontaire)" do
+      # garde-fou : l'ambient ne pose pas le port
+      assert is_nil(Application.get_env(:fleet_mcp, :pod_facing_port))
+      assert {:inactive, detail} = Fleet.MCP.Supervisor.pod_facing_status()
+      assert detail.note =~ "non configuré"
+    end
+
+    # Cas VERT-CREUX corrigé : le knob dit ON (port posé) mais le listener PodTools
+    # ne tourne pas (le superviseur ambient a booté sans, le port arrive après coup).
+    # La sonde doit rendre :degraded (et NON :operational sur la seule présence du knob).
+    test ":degraded quand port configuré mais PodTools non vivant" do
+      Application.put_env(:fleet_mcp, :pod_facing_port, 64_999)
+      on_exit(fn -> Application.delete_env(:fleet_mcp, :pod_facing_port) end)
+
+      assert {:degraded, detail} = Fleet.MCP.Supervisor.pod_facing_status()
+      assert detail.pod_facing_port == 64_999
+      assert detail.pod_tools == false
+      assert detail.note =~ "PodTools non vivant"
+    end
+  end
 end

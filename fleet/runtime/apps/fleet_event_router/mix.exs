@@ -29,8 +29,9 @@ defmodule Fleet.EventRouter.MixProject do
   defp deps do
     # phoenix_pubsub 2.x : stdlib mature, distribution-ready Erlang clusters.
     # plug + plug_cowboy : HTTP minimaliste webhooks Gitea (port :8081).
-    # yaml_elixir : dispatch table déclarative `config/events.yaml`.
-    # ex_json_schema : schema NDJSON soft validation au broadcast.
+    # yaml_elixir : parse le registry pur `priv/events.yaml` (clés = types autorisés).
+    # ex_json_schema : gate structurel build-time du canon events.yaml (events_schema_test),
+    #   PAS une validation au broadcast (le broadcast vérifie l'appartenance au registry).
     [
       {:phoenix_pubsub, "~> 2.1"},
       {:plug, "~> 1.15"},

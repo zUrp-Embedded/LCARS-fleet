@@ -99,8 +99,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
                    ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
                    git_opts
                  ),
-               # Si l'Executor a PINNÉ une base_sha (ls-remote hors-pod), on épingle HEAD dessus AVANT la
-               # feature-branch. Élimine la fenêtre « le pod clone une base que l'Executor n'a pas
+               # Si le rail forge-driven a PINNÉ une base_sha (ls-remote hors-pod), on épingle HEAD dessus
+               # AVANT la feature-branch. Élimine la fenêtre « le pod clone une base que le rail n'a pas
                # capturée » (course same-role) : `base..HEAD` ne contiendra QUE les commits du pod.
                # Axiome posé AU boundary clone (pas vérifié « observable post-hoc »).
                {:ok, {_, 0}} <- pin_base_sha(ws, project["base_sha"]),
@@ -124,7 +124,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     defp rename_timeout_key([]), do: []
     defp rename_timeout_key(git_timeout_ms: ms), do: [timeout_ms: ms]
 
-    # Épingle HEAD du workspace sur `sha` (capturé hors-pod par l'Executor). Le clone `--branch base`
+    # Épingle HEAD du workspace sur `sha` (capturé hors-pod par le rail forge-driven). Le clone `--branch base`
     # contient déjà `sha` dans le cas nominal (sha = tip) et fast-forward (sha = ancêtre) → `reset
     # --hard` local suffit. Cas pathologique (force-push remote a effacé `sha`) → `fetch` ciblé puis
     # reset. Le `fetch` est RÉSEAU (peut hung/prompter) → BORNÉ via `Shell.git/2` (le `reset` local

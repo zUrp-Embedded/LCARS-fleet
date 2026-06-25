@@ -28,16 +28,18 @@ defmodule Fleet.Pilot.MixProject do
 
   defp deps do
     # Service auto-orchestration tickets Gitea (M-033 backlog, doctrine
-    # topologie-ring.md §"Élagage" : client du core, pas core). Subscribe
-    # Bus `Fleet.EventRouter.Bus` puis invoke `Fleet.Pipeline.start_pipeline`
-    # via behaviour swappable (PipelineInvoker) pour testabilité.
+    # topologie-ring.md §"Élagage" : client du core, pas core). Découvre ses
+    # projets par topic et pilote le rail forge-state-machine (la forge EST la
+    # machine à états) ; il utilise les fonctions pures de `fleet_pipeline`
+    # (gates, loader, deliverable). Le moteur RAM `start_pipeline`/`PipelineInvoker`
+    # est retiré.
     [
       {:fleet_event_router, in_umbrella: true},
       {:fleet_pipeline, in_umbrella: true},
       # Z4 — `Fleet.Credentials.ForgeIdentity` (allowed_emails F-01 = l'humain du mandat).
       {:fleet_credentials, in_umbrella: true},
-      # Corr.3 — `Fleet.CapProfile.deliverable_mode` : classer producteur (git_native) / juge
-      # (payload) au hop PR-natif (source unique catalogue, meme mecanique que l'Executor).
+      # `Fleet.CapProfile.deliverable_mode` : classer producteur (git_native) / juge
+      # (payload) au hop PR-natif (source unique = le catalogue cap-profile).
       {:fleet_cap_profile, in_umbrella: true},
       {:yaml_elixir, "~> 2.12"},
       {:req, "~> 0.5"}

@@ -4,7 +4,7 @@
 # Statut: actif — pipeline canonique V2 compatible Fleet.Pipeline.Loader chantier 12 PROMOTED
 # Dérivé de: design-notes/ring2/pipelines.md (audit-only existant) + format Loader chantier 12
 # Référencé par: 06_modops/docs/cascade-mix-v2-rationale.md
-# Consommé par: Fleet.Pipeline.Loader (chantier 12 PROMOTED) → Executor.
+# Consommé par: Fleet.Pipeline.Loader → rail forge-driven (le moteur RAM Executor est supprimé).
 #
 # rev3 (B / §L441) : le stage `gatekeeper-decision` (role: gatekeeper) est RETIRÉ.
 #   Le gatekeeper est un juge d'EXCEPTION dispatché par une gate non-tranchable, JAMAIS

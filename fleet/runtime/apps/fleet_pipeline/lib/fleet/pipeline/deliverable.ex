@@ -19,8 +19,9 @@ defmodule Fleet.Pipeline.Deliverable do
          Un livrable invalide est rendu irreprésentable au push (pas rattrapé après).
       3. PUSH borné — `Git.push(remote, local_ref:target_branch)` sinon fail-loud.
 
-  `base_sha` est verrouillée HORS du pod (au clone, par `WorkspaceProvisioner`) — le pod ne peut pas
-  la falsifier. La gate lit le `.git` du workspace en read-only et ne croit AUCUNE assertion du pod.
+  `base_sha` est verrouillée HORS du pod (capturée par le rail forge-driven, épinglée au clone par
+  `ProjectBootstrap.pin_base_sha`) — le pod ne peut pas la falsifier. La gate lit le `.git` du
+  workspace en read-only et ne croit AUCUNE assertion du pod.
 
   Garde-fou unification : la SEULE divergence de mode est le temps 1 (qui commite). Les temps 2 et 3
   sont strictement partagés. Si un jour le `case mode` métastase (un `if` qui sépare 80 % du tronc),

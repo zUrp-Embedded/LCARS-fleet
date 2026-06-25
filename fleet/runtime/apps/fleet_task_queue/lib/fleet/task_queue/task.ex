@@ -38,9 +38,9 @@ defmodule Fleet.TaskQueue.Task do
     :result,
     state: :pending,
     # NB : champ VESTIGIAL jamais incrémenté (toujours 0). Le retry borné système-side N'est PAS
-    # ici — il vit dans `Fleet.Pipeline.Executor` (`retry_counts`, autorité per-run), volontairement HORS
-    # du Task pod-facing (le compteur ne doit pas être influençable par le pod). Conservé pour compat de
-    # schéma (sérialisé) ; à câbler en miroir d'observabilité ou retirer (décision de design, pas un oubli).
+    # ici (il ne doit pas être influençable par le pod) : c'est le rail forge-driven qui borne le
+    # rework, hors du Task pod-facing. Conservé pour compat de schéma (sérialisé) ; à câbler en
+    # miroir d'observabilité ou retirer (décision de design, pas un oubli).
     retry_count: 0,
     metadata: %{}
   ]

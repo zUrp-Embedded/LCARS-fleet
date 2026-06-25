@@ -139,8 +139,8 @@ defmodule Fleet.Spawner do
   # Échappatoire admin/diagnostic explicite : `opts[:allow_no_mandate]`.
   defp mandate_guard(%Fleet.CapProfile{spec: spec}, opts) do
     mandate = Keyword.get(opts, :mandate)
-    # `nil` ET `""` (mandat vide — ex. `StageSpawner.build_mandate` sur un
-    # stage_ctx vide/malformé) comptent tous deux comme « pas de mandat ».
+    # `nil` ET `""` (mandat vide — ex. un `build_mandate` sur un contexte de stage
+    # vide/malformé) comptent tous deux comme « pas de mandat ».
     has_mandate? = is_binary(mandate) and mandate != ""
     scope = get_in(spec, ["invocation", "lifetime_scope"])
 
@@ -220,8 +220,8 @@ defmodule Fleet.Spawner do
   @doc """
   Résout le workspace livrable d'un pod (`<pod_dir>/workspace`) depuis le pod_dir ENREGISTRÉ.
   Le monde lit où IL a placé le pod (record spawner via `pod_info`), pas une assertion du pod :
-  le pod ne nomme jamais le chemin de son propre audit. Sert à l'Executor pour gater le
-  workspace en mode `git_native`.
+  le pod ne nomme jamais le chemin de son propre audit. Sert au rail forge-driven
+  (`Pilot.HopCompleter` → `Deliverable`) pour gater le workspace en mode `git_native`.
   """
   @spec pod_workspace_dir(String.t()) :: {:ok, Path.t()} | {:error, :not_found}
   def pod_workspace_dir(pod_id) when is_binary(pod_id) do

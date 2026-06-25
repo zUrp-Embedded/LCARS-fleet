@@ -10,11 +10,17 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   Chain trace propagation : `chain` payload étendu avec
   `"starfleet.cat5.<source>"` puis transmis au broadcast + au coord.
 
-  ## Sources Cat 5 supportés
+  ## Sources Cat 5 supportées
 
-    * `:pod_drift` — chantier 9 PROMOTED `fleet_ipc_filter` 3 strikes
-    * `:pipeline_failed` — chantier 12 PROMOTED `fleet_pipeline` gate fail
-    * `:oauth_refresh_failed` — chantier 6 PROMOTED `fleet_spawner` PoC-10
+  Les 3 sources sont câblées de bout en bout (DriftMonitor → Cat5Escalator →
+  broadcast + coord) mais leurs events d'ENTRÉE n'ont aujourd'hui aucun producteur
+  live — l'escalateur est prêt, dormant tant qu'un producteur n'émet pas :
+
+    * `:pod_drift` — sur `pod.drift` (drift_count ≥ 3). Émetteur prévu (filtre IPC
+      pod-side comptant les strikes) jamais implémenté → 0 producteur.
+    * `:pipeline_failed` — sur `pipeline.failed`. Producteur historique = moteur RAM
+      `Fleet.Pipeline.Executor`, SUPPRIMÉ ; le rail forge-driven ne le ré-émet pas.
+    * `:oauth_refresh_failed` — sur `oauth.refresh.failed`. Pas de producteur câblé.
 
   ## Format payload broadcast
 

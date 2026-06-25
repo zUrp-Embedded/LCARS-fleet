@@ -311,8 +311,8 @@ defmodule Fleet.Spawner.Pod do
     # `wake_pod`. On se contente alors d'un BOOTSTRAP — réveil du REPL + armement du Monitor
     # — borné et ESPACÉ (pas de rafale de 12 yops qui distrait l'agent). Un worker
     # (mandat enqueué au spawn) garde le kick fréquent jusqu'au pull. Détection race-safe :
-    # l'enqueue StageRunner (ms après spawn) précède largement le 1er kick (+2s) → un worker a
-    # déjà son mandat `pending`, un pod permanent a `pod_status == {:ok, nil}`.
+    # l'enqueue du mandat (ms après spawn, par le rail forge-driven) précède largement le 1er kick
+    # (+2s) → un worker a déjà son mandat `pending`, un pod permanent a `pod_status == {:ok, nil}`.
     bootstrap? = no_pending_mandate?(state.pod_id)
 
     # polled? = l'agent a déjà appelé get_task (ACK in-band). Calculé 1× : sert au bootstrap-stop ET au
@@ -1331,10 +1331,10 @@ defmodule Fleet.Spawner.Pod do
   # Délègue à la source unique `Fleet.CapProfile.lifetime_scope/1`.
   defp lifetime_scope(%Fleet.CapProfile{} = cp), do: Fleet.CapProfile.lifetime_scope(cp)
 
-  # pod.completed porte le contexte pipeline (pipeline_id+stage) si le pod a été spawné
-  # par fleet_pipeline (via spawn_opts). L'Executor corrèle alors le pod terminé à sa
-  # stage. Pod hors-pipeline → opts sans ces clés → payload nu (le bridge Executor
-  # ignore : pas de pipeline_id ⇒ no-op).
+  # pod.completed porte le contexte pipeline (pipeline_id+stage) SI le pod est spawné
+  # avec ces clés en spawn_opts. C'était le cas avec le moteur RAM `Fleet.Pipeline.Executor`
+  # (supprimé) ; plus aucun appelant ne les pose aujourd'hui → en pratique le payload est nu.
+  # Conservé : un consommateur qui reçoit un payload nu ignore le contexte pipeline (no-op).
   defp pod_completed_payload(state, result) do
     base = %{
       "pod_id" => state.pod_id,
@@ -2195,8 +2195,8 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # Brief du pod = sa TÂCHE (livrée par l'orchestrateur, modèle PUSH).
-  # Le travail vient de `opts[:mandate]` (Pipeline → StageRunner construit le mandat depuis
-  # la stage ; ou pod direct via Fleet.Spawner.spawn_pod opts).
+  # Le travail vient de `opts[:mandate]` (le rail forge-driven construit le mandat via
+  # `Pilot.StageDispatcher.build_mandate` ; ou pod direct via `Fleet.Spawner.spawn_pod` opts).
   #
   # Ton naturel (pas multi-section formalisée "## Tâche / ## Livrable") : claude REPL en
   # mode interactif peut interpréter un format trop structuré comme tentative de prompt
@@ -2497,9 +2497,9 @@ defmodule Fleet.Spawner.Pod do
   # ce workspace (maybe_put_pod_cwd -> LCARS_POD_CWD) → l'agent code DANS sa branche (pas dans le
   # pod_dir nu, et le clone est idempotent au respawn).
   #
-  # Découplage architectural : Pipeline.WorkspaceProvisioner câble
-  # ProjectBootstrap pour les stages git (workspace per-stage). pod.ex câble
-  # ProjectBootstrap pour les pods one-shot avec projet (workspace per-pod).
+  # Découplage architectural : c'est `pod.ex` qui câble `ProjectBootstrap` pour les pods
+  # avec projet (workspace per-pod). (Le provisioning de workspace per-stage du moteur RAM
+  # `Pipeline.WorkspaceProvisioner` est supprimé ; le rail forge-driven épingle la base au clone.)
   # 2 sites callers d'un même mécanisme, paramétré par cap-profile.
   # Projet EFFECTIF = celui du MANDAT (`opts[:project]`, injecté par le dispatch ticket→repo via
   # `spawn_opts`) sinon le cap_profile statique (pods permanents sur un repo fixe). Rend la feature

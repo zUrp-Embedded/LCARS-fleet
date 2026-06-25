@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:lcars:events-v1",
   "title": "LCARS Events Catalogue v1",
-  "description": "Structural schema for 05_data-canon/config/events.yaml (parsed YAML map). DERIVED FROM: 05_data-canon/config/events.yaml. GO-7: date 2026-05-19, statut actif, derive Lot 0bis plan-implementation.md. Validated by ex_json_schema at Fleet.EventRouter.Dispatch.init/1. Structural only: handler module *existence* is checked at runtime by the router, not here.",
+  "description": "Structural schema for apps/fleet_event_router/priv/events.yaml (parsed YAML map). The runtime loader (Fleet.EventRouter.Catalog.load!/0) does NOT validate against this schema — it only populates authorized_event_types. This schema is exercised by events_schema_test.exs (ex_json_schema) as a build-time structural gate on the canon. Structural only: handler module *existence*, producer/consumer wiring, and asymmetries are out of scope here.",
   "type": "object",
   "required": ["events"],
   "additionalProperties": false,

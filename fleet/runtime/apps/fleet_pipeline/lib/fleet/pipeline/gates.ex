@@ -7,8 +7,8 @@ defmodule Fleet.Pipeline.Gates do
     * **hard** — règle déclarative `Hard.match?/2`. Pas de bypass.
     * **soft** — jugement LLM délégué au **gatekeeper**. `Gates` est
       PUR : il retourne `{:dispatch_gatekeeper, info}` (décision d'escalade) ;
-      l'Executor spawn le gatekeeper + collecte la décision sur son
-      `pod.completed`. La délégation du jugement est consolidée sur le gatekeeper.
+      le rail forge-driven (`Pilot.HopConsumer`) spawn le gatekeeper + collecte
+      sa décision. La délégation du jugement est consolidée sur le gatekeeper.
     * **terminal** — `Terminal.evaluate_rules/2` règles déclaratives
       d'abord ; `:nontranchable` → **même `{:dispatch_gatekeeper, info}`**
       que le soft gate.
@@ -16,7 +16,8 @@ defmodule Fleet.Pipeline.Gates do
 
   Le gatekeeper est le **juge unique de la fleet** : soft gate et terminal
   non-tranchable y passent tous deux. `Gates` ne fait AUCUN spawn (pur) — c'est
-  l'Executor qui possède le nom de stage + le lifecycle (`:awaiting_gate`).
+  le rail forge-driven (`Pilot.HopConsumer`) qui possède le nom de stage + le
+  lifecycle d'attente du verdict.
 
   ## Deux formes de `rules` (v1 map vs v2.5 string)
 
@@ -35,9 +36,9 @@ defmodule Fleet.Pipeline.Gates do
   Terminal v2.5 `human_approval_required: true` → **HALT fail-closed** (aucun
   human-in-loop câblé : le moteur mécanique n'auto-approuve jamais). `Gates`
   ne retourne JAMAIS `:retry` (le retry n'est pas une décision de gate). Un retry
-  BORNÉ existe, mais c'est l'**Executor** qui le pilote (`reject_stage`, compteur
-  `retry_counts`, borne `stage_max_retries`), pas la gate ; la borne écarte le
-  risque de re-spawn-en-boucle. L'orchestration severity (`fallback_invoke_gatekeeper`,
+  BORNÉ existe, mais c'est le **rail forge-driven** (`Pilot.HopConsumer`) qui le
+  pilote (compteur de rework borné), pas la gate ; la borne écarte le risque de
+  re-spawn-en-boucle. L'orchestration severity (`fallback_invoke_gatekeeper`,
   `on_*_severity`) reste hors-scope de cet évaluateur.
   """
 
@@ -78,9 +79,9 @@ defmodule Fleet.Pipeline.Gates do
   # Soft gate = jugement LLM délégué au **gatekeeper** (juge unique de la
   # fleet : il fait tourner la fleet, récupère les problèmes). `Gates` reste PUR :
   # il décide qu'il faut le gatekeeper (`{:dispatch_gatekeeper, info}`) ; le spawn
-  # async + la corrélation `pod.completed` sont faits par l'Executor (qui possède
-  # le nom de stage + le lifecycle). Pas de spawn coord ni de cap-profile dédié :
-  # le jugement est consolidé sur le gatekeeper unique.
+  # async + la corrélation `pod.completed` sont faits par le rail forge-driven
+  # (`Pilot.HopConsumer`, qui possède le nom de stage + le lifecycle). Pas de spawn
+  # coord ni de cap-profile dédié : le jugement est consolidé sur le gatekeeper unique.
   defp eval_by_type(%{"gate" => %{"type" => "soft"}}, _outputs, _ctx) do
     {:dispatch_gatekeeper, %{kind: :soft}}
   end
@@ -131,7 +132,7 @@ defmodule Fleet.Pipeline.Gates do
 
       :nontranchable ->
         # Règles non tranchantes → le gatekeeper décide (async, même mécanique
-        # que le soft gate). L'Executor spawn + ré-évalue (`:awaiting_gate`).
+        # que le soft gate). Le rail forge-driven (`Pilot.HopConsumer`) spawn + ré-évalue.
         {:dispatch_gatekeeper, %{kind: :terminal}}
     end
   end
@@ -140,7 +141,7 @@ defmodule Fleet.Pipeline.Gates do
   # {:fail} ; (2) `human_approval_required` → HALT fail-closed (le moteur
   # mécanique ne peut PAS accorder l'aval humain ; aucun human-in-loop câblé →
   # jamais d'auto-approbation. Gates ne rend pas `:retry` ; le retry borné est
-  # côté Executor — pas ici) ;
+  # côté rail forge-driven (`Pilot.HopConsumer`) — pas ici) ;
   # (3) sinon → :pass. L'orchestration severity (fallback_invoke_gatekeeper,
   # on_*_severity) n'est pas portée ici — couche séparée.
   defp eval_terminal_string(rules, gate, outputs) do

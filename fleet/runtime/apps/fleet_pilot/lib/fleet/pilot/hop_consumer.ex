@@ -24,15 +24,19 @@ defmodule Fleet.Pilot.HopConsumer do
   Le juge est **rare par construction** : le moteur ne peut pas le sur-convoquer
   (le `soft`/non-tranchable est une *condition runtime*, pas un *tag de stage*).
   Pas de stage `role: gatekeeper`, pas de biconditionnelle `soft⟺gatekeeper` —
-  toute la machinerie explicit-stage est retirée. Jumeau forge-driven de
-  `Fleet.Pipeline.Executor.do_dispatch_gatekeeper`/`handle_gate_decision` (RAM).
+  toute la machinerie explicit-stage est retirée. Ce module REMPLACE l'ancien
+  chaînage gatekeeper du moteur RAM `Fleet.Pipeline.Executor` (`do_dispatch_gatekeeper`/
+  `handle_gate_decision`), SUPPRIMÉ : il refait la même décision, mais forge-driven.
 
-  ## Pourquoi un consumer séparé de l'Executor
+  ## Garde résiduelle `pipeline_id`
 
-  Deux stacks cohabitent (dual-run, le temps que l'Executor RAM soit retiré) :
+  Le moteur RAM `Fleet.Pipeline.Executor` (corrélation pipeline↔stage en mémoire)
+  est SUPPRIMÉ — il n'y a plus de dual-run : ce consumer est le seul rail. Plus
+  aucun pod n'est spawné avec `opts[:pipeline_id]` (l'Executor était le seul
+  producteur). La branche `pipeline_id` présent → skip (L.399) subsiste comme
+  **garde défensive** (un payload pipeline résiduel ne serait pas traité par
+  erreur), jamais déclenchée en pratique.
 
-    * **Pipeline pods** — payload porte `pipeline_id` → l'`Executor` les corrèle
-      à leur stage. **Ce consumer les IGNORE** (`pipeline_id` présent → skip).
     * **Stage-dispatch pods** — pas de `pipeline_id`, mais (s'ils portent un
       projet) le payload embarque `workspace` + `base_sha` + `role` (enrichi à la
       source, `Fleet.Spawner.Pod.pod_completed_payload`). **Ce consumer les
@@ -245,9 +249,8 @@ defmodule Fleet.Pilot.HopConsumer do
   end
 
   # Décision du gatekeeper reçue : le mandat d'éval (corrélé par
-  # `correlation_id` = task.id de l'enqueue) est complété. Jumeau forge-driven de
-  # `Executor.handle_info(:task_completed)`. On ne traite QUE les corr qu'on a en
-  # attente (les autres task_completed — autres stacks, autres pods — sont ignorés).
+  # `correlation_id` = task.id de l'enqueue) est complété. On ne traite QUE les corr
+  # qu'on a en attente (les autres task_completed — autres pods — sont ignorés).
   def handle_info(
         %Fleet.Event{source: :task_queue, type: :task_completed, correlation_id: corr} = ev,
         state
@@ -727,9 +730,8 @@ defmodule Fleet.Pilot.HopConsumer do
     end)
   end
 
-  # Defaut du seam : resout le deliverable_mode du role via le catalogue cap-profile (source unique,
-  # meme mecanique que l'Executor). Irresoluble → `"payload"` (fail-safe : un role non chargeable
-  # n'est pas traite comme producteur).
+  # Defaut du seam : resout le deliverable_mode du role via le catalogue cap-profile (source unique).
+  # Irresoluble → `"payload"` (fail-safe : un role non chargeable n'est pas traite comme producteur).
   defp default_deliverable_mode(role) do
     case Fleet.CapProfile.load(role) do
       {:ok, cap} -> Fleet.CapProfile.deliverable_mode(cap)
@@ -907,7 +909,7 @@ defmodule Fleet.Pilot.HopConsumer do
   defp tag(intent, {:ok, routing}), do: {:ok, intent, routing}
   defp tag(_intent, other), do: other
 
-  # Jumeau forge-driven de `Fleet.Pipeline.Executor.do_dispatch_gatekeeper`.
+  # Convocation forge-driven du gatekeeper sur escalade de gate.
   # Enqueue un mandat d'éval au gatekeeper PERMANENT (work-session, adressé par pod_id —
   # l'overseer n'est PAS spawné/possédé ici), le kick (best-effort), et retourne le
   # `correlation_id` (= task.id) pour la corrélation `task_queue.task_completed`. Pas de
@@ -1126,9 +1128,8 @@ defmodule Fleet.Pilot.HopConsumer do
   end
 
   # Verdict `abandon` : close terminal forge, SANS push (le travail métier est rejeté).
-  # NB : l'Executor (RAM, pipeline-centric) n'a PAS de notion "close issue" — il fait
-  # `broadcast_pipeline_failed` + stop ; ici (forge-driven) l'équivalent est close_issue.
-  # Point commun : aucun des deux n'extrait/pousse le livrable sur un verdict non-continue.
+  # Le terminal-échec du rail forge-driven EST la fermeture de l'issue (la forge porte l'état),
+  # pas un signal d'échec en mémoire : aucun livrable n'est extrait/poussé sur un verdict non-continue.
   # `deliverable_opts: nil` + `hop_sha` → HopCompleter saute l'étape publish, garde la
   # séquence idempotente (comment trace → close → unlock).
   defp close_with_trace(n, role, trace, state) do
@@ -1167,7 +1168,6 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # Extrait la décision du payload `task_completed`. DEUX enveloppes : (1) TaskQueue pose
   # `:result` (clé atom) ; (2) enveloppe worker `%{"status","result"}` (clés string).
-  # Jumeau de `Executor.gate_result/1`.
   defp gate_result(payload) when is_map(payload) do
     (Map.get(payload, :result) || Map.get(payload, "result"))
     |> unwrap_worker_envelope()
@@ -1176,7 +1176,7 @@ defmodule Fleet.Pilot.HopConsumer do
   defp gate_result(_), do: nil
 
   # Vocab canon gate-decision-v1.json. Fail-closed : nil/inconnu → "halt_invalid" (jamais
-  # "continue" sur décision absente/malformée → route en await_arch). Jumeau Executor.
+  # "continue" sur décision absente/malformée → route en await_arch).
   @gate_decisions ~w(continue abandon redirect escalate_user halt_wait_input)
   defp gate_decision(result) when is_map(result) do
     case result["decision"] do
@@ -1187,8 +1187,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
   defp gate_decision(_), do: "halt_invalid"
 
-  # Déplie l'enveloppe worker `%{"status","result"}` (jumeau de
-  # `Fleet.Pipeline.Executor.unwrap_worker_envelope`). Le worker rend soit directement
+  # Déplie l'enveloppe worker `%{"status","result"}`. Le worker rend soit directement
   # `%{"decision"=>...}` / les outputs, soit l'enveloppe `%{"status"=>"ok","result"=>...}`.
   # Sans dépliage : decision/outputs enfouis → fausse escalade / hard-gate à tort.
   defp unwrap_worker_envelope(%{"decision" => _} = direct), do: direct

@@ -169,7 +169,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         cond do
           not unwrap_clause? ->
             [
-              "#{rel} : clause `defp normalize(%{\"spec\" => %{\"stages\" => ...}})` (déballage v2.5) absente → Executor lit stages=nil"
+              "#{rel} : clause `defp normalize(%{\"spec\" => %{\"stages\" => ...}})` (déballage v2.5) absente → un consommateur de la carte lit stages=nil"
             ]
 
           not called? ->
@@ -617,7 +617,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             []
         end,
       note:
-        "déplier %{status,result} avant de lire decision (HopConsumer #11) ; idem avant Gates.evaluate côté Executor (#2, vérifié par test). Rail EXIGE le fichier (pas de pass-si-absent — anti-vert-creux durci)"
+        "déplier %{status,result} avant de lire decision (HopConsumer) ; idem avant Gates.evaluate côté HopConsumer (le rail forge-driven, vérifié par test). Rail EXIGE le fichier (pas de pass-si-absent — anti-vert-creux durci)"
     }
   end
 

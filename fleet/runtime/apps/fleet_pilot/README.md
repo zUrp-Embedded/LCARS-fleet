@@ -9,10 +9,11 @@ Service d'auto-orchestration tickets Gitea (M-033 backlog, doctrine
 `beyond_#4/01_architecture/topologie-ring.md` §"Élagage" : **client du
 core ring 1, pas core**).
 
-Reçoit les events `gitea.*` du Bus (`Fleet.EventRouter.Bus`), filtre via
-catalogue déclaratif `priv/config/forge-routing.yaml` (axes
-`type:` × `state:` × `assignee`), puis spawn le rôle producteur via le rail
-forge-state-machine décrit ci-dessous (mode **stage**).
+Découvre ses projets par topic (`lcars-fleet-<humain>`) et spawn le rôle
+producteur via le rail forge-state-machine décrit ci-dessous (mode **stage**) :
+la forge EST la machine à états (label de route gravé sur le ticket). Le
+catalogue déclaratif `forge-routing.yaml` (axes `type:` × `state:` × `assignee`)
+a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le lisait.
 
 > **OBSOLÈTE — dispatch legacy RETIRÉ.** L'ancien chemin invoquait
 > `Fleet.Pipeline.start_pipeline/2` (moteur RAM `Fleet.Pipeline.Executor`) avec

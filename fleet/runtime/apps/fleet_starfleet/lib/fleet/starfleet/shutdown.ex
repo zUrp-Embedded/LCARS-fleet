@@ -40,18 +40,19 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
   ## `refuse_new_jobs/1`
 
-  Active `Fleet.Shutdown.Quiesce` → les points d'entrée top-level
-  (`Fleet.Pipeline.start_pipeline/3`, REST `/api/admin/spawn`) refusent le
-  travail neuf. Le travail interne d'un pipeline en vol n'est PAS gaté.
+  Active `Fleet.Shutdown.Quiesce` → le point d'entrée top-level REST
+  `/api/admin/spawn` (`Fleet.API.Rest` lit `quiescing?`) refuse le travail neuf.
+  (Le moteur RAM `Fleet.Pipeline.start_pipeline/3`, autre point d'entrée gaté
+  historiquement, est SUPPRIMÉ.) Le travail interne d'un hop en vol n'est PAS gaté.
 
   ## `in_flight_count/0` — périmètre (décision user)
 
-  **Tout pod vivant compte** (éphémère ET permanent) + pipelines en cours +
-  mandats en file non-assignés :
+  **Tout pod vivant compte** (éphémère ET permanent) + mandats en file
+  non-assignés. Il n'y a PLUS de pipelines RAM à compter : le moteur
+  `Fleet.Pipeline.Executor` est supprimé (un pod vivant = un hop en cours).
 
     * `Fleet.Spawner.count_pods/0` — pods actifs (couvre aussi le travail
       assigné : un mandat assigné ⇒ son pod est vivant ⇒ compté ici)
-    * `Fleet.Pipeline.count_running/0` — Executors vivants
     * `Fleet.TaskQueue.list_pending/0` — mandats en file **pas encore assignés**
 
   **Pas de double-comptage** : `list_pending` filtre `state == :pending` STRICT
@@ -68,8 +69,8 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   ## Layering
 
   `fleet_starfleet` dépend de `fleet_spawner` (`count_pods` en appel direct).
-  Il NE dépend PAS de `fleet_pipeline`/`fleet_task_queue` (pas d'inversion) →
-  leurs comptes sont lus par dispatch dynamique guardé (résilient si absents).
+  Il NE dépend PAS de `fleet_task_queue` (pas d'inversion) → `list_pending` est lu
+  par dispatch dynamique guardé (`dyn/3`, résilient si l'app est absente).
   """
   @behaviour Fleet.Starfleet.Shutdown.Dispatcher
 

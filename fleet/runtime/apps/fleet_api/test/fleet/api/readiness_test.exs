@@ -131,6 +131,29 @@ defmodule Fleet.API.ReadinessTest do
     end
   end
 
+  describe "mcp.pod_facing (sonde le PROCESS, pas le knob)" do
+    # Ambient test : pas de :pod_facing_port → listener off volontaire → :inactive.
+    test "inactive quand pod_facing non configuré" do
+      assert %{state: :inactive} = sub(Readiness.deep(), "mcp.pod_facing")
+    end
+
+    # VERT-CREUX corrigé : knob :pod_facing_port posé mais PodTools non vivant
+    # (superviseur ambient booté sans listener) → la probe doit dégrader, PAS rester
+    # operational sur la seule présence du port.
+    test "degraded quand port posé mais le listener PodTools ne tourne pas" do
+      Application.put_env(:fleet_mcp, :pod_facing_port, 64_998)
+      Application.put_env(:fleet_spawner, :mcp_server_spec, %{"some" => "spec"})
+
+      on_exit(fn ->
+        Application.delete_env(:fleet_mcp, :pod_facing_port)
+        Application.delete_env(:fleet_spawner, :mcp_server_spec)
+      end)
+
+      assert %{state: :degraded, detail: %{pod_tools: false}} =
+               sub(Readiness.deep(), "mcp.pod_facing")
+    end
+  end
+
   describe "deep/1 — agrégation (probes injectées)" do
     defp op(id), do: {id, fn -> %{id: id, state: :operational, detail: %{}} end}
     defp deg(id), do: {id, fn -> %{id: id, state: :degraded, detail: %{}} end}

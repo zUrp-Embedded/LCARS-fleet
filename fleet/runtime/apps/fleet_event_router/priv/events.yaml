@@ -9,7 +9,9 @@
 # `Dispatch` (table `event → handle_event/1`, jamais câblée) a été RETIRÉ. Qui
 # consomme quel event est documenté dans le moduledoc de chaque consommateur
 # (`AuditConsumer`, `DriftMonitor`, `Spawner.PublishConsumer`,
-# `API.WS`, `Pipeline.Executor`, …).
+# `API.WS`, `Pilot.HopConsumer`, …). (Le moteur RAM `Pipeline.Executor`, qui
+# fut consommateur, est supprimé : le rail forge-driven `Pilot.HopConsumer` l'a
+# remplacé.)
 #
 # Valeurs = `[]` (registry pur). Le schéma (`events-v1.json`) tolère une liste de
 # handlers `Fleet.*` non vide pour un éventuel futur ré-câblage, mais le runtime
@@ -46,7 +48,7 @@ events:
   # pré-enregistrés (`event_router/application.ex` `to_existing_atom`) émettent CES 10
   # actions. N'avoir que opened/closed → les 8 autres broadcastaient en `UnregisteredError`
   # SILENCIEUX (rescue `:ok`) → webhook 200 OK mais event jamais routé (drop muet). Registry
-  # aligné sur le producteur (sinon AutoDispatcher ne voit jamais reopened/merged/edited/…).
+  # aligné sur le producteur (sinon un subscriber `gitea.*` ne voit jamais reopened/merged/edited/…).
   gitea.opened: []
   gitea.closed: []
   gitea.reopened: []
@@ -57,7 +59,6 @@ events:
   gitea.deleted: []
   gitea.push: []
   gitea.unknown: []
-  tick: []
 
   # --- Signaux OS (SignalsOS, source :event_router) ---
   # R09 : émis par SignalsOS sur SIGUSR1/SIGTERM/SIGHUP — registrés ici pour
@@ -76,16 +77,31 @@ events:
   fleet.boot_failed: []
 
   # --- Coord (Policies, source :coord) ---
+  # ASYMÉTRIE VOULUE (producteur réel, 0 consommateur routé) : `Coord.Policies` émet
+  # ces 3 events (notify_dashboard / escalate_human / autres), mais aucun subscriber
+  # n'écoute encore `coord.*` sur le Bus. Clés légitimes (un producteur les émet → drop
+  # silencieux évité) ; un consommateur (dashboard / opérateur) viendra s'abonner.
   coord.notification_routed: []
   coord.escalation_triggered: []
   coord.action_dispatched: []
 
-  # --- Pipeline (Executor, source :pipeline) ---
+  # --- Pipeline (source :pipeline) ---
+  # ASYMÉTRIE INVERSE (consommateur réel, 0 producteur courant) : `pipeline.failed`
+  # est consommé par `Starfleet.DriftMonitor` (→ Cat 5) et `pipeline.completed` matché
+  # par `API.WS` (`pipeline.*`). Le producteur était le moteur RAM `Pipeline.Executor`,
+  # SUPPRIMÉ — le rail forge-driven (`Pilot.HopConsumer`) ferme l'issue au lieu d'émettre
+  # `pipeline.failed`. Clés conservées (consommateur câblé) ; à ré-émettre si le rail
+  # forge-driven publie un signal d'échec/complétion de pipeline.
   pipeline.failed: []
   pipeline.completed: []
   pipeline.stage.completed: []
 
   # --- post_extract.git ---
+  # ASYMÉTRIE INVERSE (consommateur réel, 0 producteur courant) : consommés par
+  # `Starfleet.AuditConsumer`. Le producteur était le moteur RAM `Pipeline.Executor`
+  # (publication post-extract), SUPPRIMÉ. `Pipeline.Git.publish/1` ne broadcast pas
+  # lui-même. Clés conservées (consommateur câblé) ; à ré-émettre par le rail forge-driven
+  # si la publication git redevient observable sur le Bus.
   git.published: []
   git.publish_failed: []
 

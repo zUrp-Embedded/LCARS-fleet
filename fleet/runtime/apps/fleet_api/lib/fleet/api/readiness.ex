@@ -172,26 +172,36 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # MCP pod-facing : transport pull/push des pods. `pod_facing_port` +
-  # `mcp_server_spec` tous deux présents ⇒ operational ; tous deux absents ⇒
-  # `:inactive` (non configuré, attendu hors-MCP) ; un seul ⇒ `:degraded`.
+  # MCP pod-facing : transport pull des pods. Sonde le PROCESS RÉEL (le listener
+  # `Fleet.MCP.PodTools` tourne-t-il ?) délégué au propriétaire de la topologie
+  # `Fleet.MCP.Supervisor.pod_facing_status/0` — PAS la seule présence du knob
+  # (`:pod_facing_port` posé mais listener mort = vert-creux). Délégation = pas de
+  # fuite des noms de process Ring 3 dans Ring 4 (même pattern que `pilot.stage`).
+  # Le `mcp_server_spec` (côté spawner) reste sondé en config : c'est le spec injecté
+  # AUX pods, pas un process — sa présence/absence est l'état réel à ce niveau.
+  # `:inactive` (port off) n'altère pas le verdict global ; `:degraded` (port on,
+  # listener mort, OU port on/spec absent) le bascule.
   defp mcp_pod_facing do
-    port = Application.get_env(:fleet_mcp, :pod_facing_port)
-    spec = Application.get_env(:fleet_spawner, :mcp_server_spec)
+    {port_state, port_detail} = Fleet.MCP.Supervisor.pod_facing_status()
+    spec_present? = not is_nil(Application.get_env(:fleet_spawner, :mcp_server_spec))
+    detail = Map.put(port_detail, :mcp_server_spec, spec_present?)
 
-    cond do
-      is_nil(port) and is_nil(spec) ->
-        probe("mcp.pod_facing", :inactive, %{note: "MCP pod-facing non configuré"})
+    case port_state do
+      :inactive ->
+        probe("mcp.pod_facing", :inactive, Map.put(detail, :note, "MCP pod-facing non configuré"))
 
-      not is_nil(port) and not is_nil(spec) ->
-        probe("mcp.pod_facing", :operational, %{pod_facing_port: port, mcp_server_spec: true})
+      :operational when spec_present? ->
+        probe("mcp.pod_facing", :operational, detail)
 
-      true ->
-        probe("mcp.pod_facing", :degraded, %{
-          pod_facing_port: port,
-          mcp_server_spec: not is_nil(spec),
-          note: "MCP partiellement configuré (port ou spec manquant)"
-        })
+      :operational ->
+        probe(
+          "mcp.pod_facing",
+          :degraded,
+          Map.put(detail, :note, "listener vivant mais mcp_server_spec absent (pods non câblés)")
+        )
+
+      :degraded ->
+        probe("mcp.pod_facing", :degraded, detail)
     end
   end
 

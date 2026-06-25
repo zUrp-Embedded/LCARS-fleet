@@ -4,7 +4,8 @@ defmodule Fleet.Pipeline.Gate do
 
     * `:hard` — règle déclarative pattern match, pas bypass
     * `:soft` — jugement LLM délégué au **gatekeeper** :
-      `{:dispatch_gatekeeper, info}`, spawn + ré-éval côté Executor
+      `{:dispatch_gatekeeper, info}`, spawn + ré-éval côté rail forge-driven
+      (`Pilot.HopConsumer`)
     * `:terminal` — règles déclaratives d'abord, `:nontranchable` →
       même `{:dispatch_gatekeeper, info}` (gatekeeper, juge unique)
   """

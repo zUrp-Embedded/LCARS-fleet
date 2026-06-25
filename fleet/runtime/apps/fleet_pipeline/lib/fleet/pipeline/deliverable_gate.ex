@@ -157,7 +157,7 @@ defmodule Fleet.Pipeline.DeliverableGate do
   `{:missing_coauthor_trailer, expected_role, [sha…]}` (le push n'a pas lieu).
 
   Câblé dans `verify/4` via `expected_role` (opt-in). git_native → le pod signe
-  son rôle (mandat instruit, `StageRunner.build_mandate`) ; payload système → `nil` (skip).
+  son rôle (mandat instruit par `Pilot.StageDispatcher.build_mandate`) ; payload système → `nil` (skip).
   L'author git = l'humain ; le rôle = CE trailer, vérifié au boundary monde.
   """
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}

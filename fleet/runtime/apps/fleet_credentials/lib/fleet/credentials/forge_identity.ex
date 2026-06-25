@@ -102,8 +102,9 @@ defmodule Fleet.Credentials.ForgeIdentity do
 
   @doc """
   Instruction de signature à injecter dans le mandat du pod — SOURCE UNIQUE du trailer.
-  Dérive de `coauthor_trailer/1` : tout mandat (StageRunner ET StageSpawner) doit l'utiliser, sinon
-  la chaîne (instruction côté pod / needle de la gate d'identité de commit) se désaccorde du canon.
+  Dérive de `coauthor_trailer/1` : tout mandat (construit par `Pilot.StageDispatcher.build_mandate`)
+  doit l'utiliser, sinon la chaîne (instruction côté pod / needle de la gate d'identité de commit)
+  se désaccorde du canon.
   """
   @spec coauthor_instruction(String.t()) :: String.t()
   def coauthor_instruction(role) when is_binary(role) do

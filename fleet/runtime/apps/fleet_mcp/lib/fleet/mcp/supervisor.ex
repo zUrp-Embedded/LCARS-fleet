@@ -93,4 +93,43 @@ defmodule Fleet.MCP.Supervisor do
   defp pod_facing_port(opts) do
     Keyword.get(opts, :pod_facing_port) || Application.get_env(:fleet_mcp, :pod_facing_port)
   end
+
+  @doc """
+  État LIVE du listener pod-facing — `{state, detail}` pour la readiness (anti-vert-creux).
+  Sonde le PROCESS réel (l'enfant `Fleet.MCP.PodTools` est-il vivant sous ce superviseur ?),
+  pas la seule présence du knob `:pod_facing_port` :
+
+    * `:inactive`    — `:pod_facing_port` non configuré → aucun listener attendu (off volontaire).
+    * `:operational` — port configuré ET l'enfant `Fleet.MCP.PodTools` tourne (pid vivant).
+    * `:degraded`    — port configuré MAIS l'enfant est absent/mort (le knob dit ON, le listener
+      ne tourne pas — vert-creux évité), ou le superviseur lui-même n'est pas démarré.
+  """
+  @spec pod_facing_status() :: {:inactive | :operational | :degraded, map()}
+  def pod_facing_status do
+    port = pod_facing_port([])
+
+    cond do
+      is_nil(port) ->
+        {:inactive, %{note: "pod_facing_port non configuré"}}
+
+      pod_tools_alive?() ->
+        {:operational, %{pod_facing_port: port, pod_tools: true}}
+
+      true ->
+        {:degraded, %{pod_facing_port: port, pod_tools: false, note: "PodTools non vivant"}}
+    end
+  end
+
+  # PodTools vivant = enfant `Fleet.MCP.PodTools` présent dans le superviseur avec un pid.
+  # Si le superviseur n'est pas démarré (`which_children` exit), on rabat sur false (pas vivant).
+  defp pod_tools_alive? do
+    Enum.any?(Supervisor.which_children(__MODULE__), fn
+      {Fleet.MCP.PodTools, pid, _type, _mods} when is_pid(pid) -> Process.alive?(pid)
+      _ -> false
+    end)
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
+  end
 end

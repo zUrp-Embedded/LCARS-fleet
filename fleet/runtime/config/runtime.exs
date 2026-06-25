@@ -224,12 +224,6 @@ if config_env() != :test do
     config :fleet_pipeline, workspaces_root: path
   end
 
-  # R7 I-CBC — en prod, un échec de broadcast d'event lifecycle pipeline est
-  # loggé (Logger.error) mais NE crash PAS l'Executor (préserver l'état du
-  # pipeline). Hors prod, défaut `true` = fail-loud (re-raise) pour que le dev
-  # voie le trou. (Ce fichier n'est pas évalué en `:test` → test garde true.)
-  config :fleet_pipeline, reraise_broadcast_errors: false
-
   # ============================================================
   # fleet_starfleet (ch13) — log audit Cat 5
   # ============================================================
@@ -287,14 +281,11 @@ if config_env() != :test do
   config :fleet_observation, start_listener: true
 
   # ============================================================
-  # fleet_pilot — knob legacy `start_dispatcher` / `LCARS_PILOT_DISPATCHER` RETIRÉ (②.3 / BL-050) :
-  # le rail AutoDispatcher (webhook→route→Executor RAM) est supprimé. Seul le rail forge-state-machine
-  # subsiste (config `LCARS_PILOT_STAGE` / `LCARS_PILOT_POLL_REPO`, plus bas).
+  # fleet_pilot — le knob legacy `start_dispatcher` / `LCARS_PILOT_DISPATCHER` et le catalogue
+  # `LCARS_PILOT_ROUTING_PATH` (→ `forge-routing.yaml`) sont SUPPRIMÉS avec le rail AutoDispatcher
+  # (webhook→route→Executor RAM). Aucun code ne lisait plus `:forge_routing_path`. Seul le rail
+  # forge-state-machine subsiste (config `LCARS_PILOT_STAGE` / `LCARS_PILOT_POLL_REPO`, plus bas).
   # ============================================================
-
-  if path = System.get_env("LCARS_PILOT_ROUTING_PATH") do
-    config :fleet_pilot, forge_routing_path: path
-  end
 
   # F-037 MULTI-PROJET : le Poller ne scanne PLUS un repo fixe — il DÉCOUVRE ses projets par topic
   # (`lcars-fleet-<human>`, posé à l'onboarding). `LCARS_PILOT_POLL_REPO` n'est donc PLUS requis pour que

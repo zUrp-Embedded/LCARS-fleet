@@ -2,15 +2,19 @@ defmodule Fleet.Starfleet.DriftMonitor do
   @moduledoc """
   GenServer pure subscriber `Fleet.EventRouter.Bus` topic `fleet.events`.
 
-  Pas de state runtime (compteur drift maintenu chantier 9 PROMOTED
-  `fleet_ipc_filter` ETS — DriftMonitor lit `drift_count` payload
-  broadcast, pas de duplication compteur local).
+  Pas de state runtime : le seuil est évalué sur le `drift_count` porté par le
+  payload `pod.drift` lui-même (`drift_count/1`), pas par un compteur local.
+
+  ⚠ `pod.drift` est un event SANS producteur courant : l'émetteur prévu
+  (un filtre IPC pod-side qui compterait les strikes) n'a jamais été implémenté.
+  Le handler `pod.drift` ci-dessous est donc câblé mais dormant tant qu'aucun
+  producteur n'émet l'event. Les 3 autres handlers ont des producteurs réels.
 
   ## Events handlés
 
   | event_type | trigger Cat 5 |
   |---|---|
-  | `pod_drift` | si `drift_count >= 3` |
+  | `pod.drift` | si `drift_count >= 3` (dormant : 0 producteur) |
   | `pipeline.failed` | inconditionnel |
   | `oauth.refresh.failed` | inconditionnel |
   | `audit.verdict` | validate JSON décision puis dispatch CoordBackend |

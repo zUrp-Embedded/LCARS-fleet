@@ -84,7 +84,8 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     {_, 0} = git(["commit", "-q", "-m", "c1"], src)
     {c1, 0} = git(["rev-parse", "HEAD"], src)
     c1 = String.trim(c1)
-    # C2 = tip courant ; un Executor qui a ls-remote AVANT C2 a capturé C1.
+
+    # C2 = tip courant ; le rail (ls-remote hors-pod) qui a capturé la base AVANT C2 a épinglé C1.
     File.write!(Path.join(src, "b.txt"), "2")
     {_, 0} = git(["add", "."], src)
     {_, 0} = git(["commit", "-q", "-m", "c2"], src)

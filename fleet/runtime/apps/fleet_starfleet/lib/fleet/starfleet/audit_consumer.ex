@@ -4,12 +4,19 @@ defmodule Fleet.Starfleet.AuditConsumer do
 
   Subscribe `Fleet.EventRouter.Bus` topic `fleet.events`, log
   audit-grade pour events :
-    * `:"pod.refuse_pattern_match"` — REFUSE_PATTERNS hit (ipc_filter)
-    * `:"pod.drift"` — pod drift threshold reached
+    * `:"pod.completed"` / `:"pod.failed"` — Pod GenServer Port stream lifecycle
+      (producteurs réels : `Fleet.Spawner.Pod`).
     * `:"fleet.boot_complete"` / `:"fleet.boot_partial"` / `:"fleet.boot_failed"`
-      — BootOrchestrator lifecycle (Sprint 1).
-    * `:"pod.completed"` / `:"pod.failed"` / `:"pod.terminated"`
-      — Pod GenServer Port stream lifecycle (#593 D11).
+      — BootOrchestrator lifecycle.
+    * task-queue : `:task_enqueued` / `:task_assigned` / `:task_completed` /
+      `:task_cleared` / `:task_failed` / `:state_corrupt` (producteur `Fleet.TaskQueue`).
+
+  Handlers DORMANTS (clause défensive, event SANS producteur courant ni clé
+  registry — conservés car testés directement et prêts si un producteur revient) :
+    * `:"pod.refuse_pattern_match"` — hit de pattern refusé (émetteur pod-side jamais
+      implémenté).
+    * `:"pod.drift"` — seuil de drift (même émetteur prévu, jamais implémenté).
+    * `:"pod.terminated"` — retiré du registry (non produit).
 
   Pattern GenServer subscribe au boot (init/1), `handle_info({atom,
   event}, state)` dispatch par atome. Pas de side effect runtime

@@ -1,5 +1,12 @@
 defmodule Fleet.TaskMonitor do
   @moduledoc """
+  ⚠ DORMANT MAIS INTENTIONNEL — tracker prévu, PAS du code mort. Le GenServer
+  n'est démarré nulle part en prod (`:start_monitor` jamais posé `true` ;
+  cf. `Fleet.TaskMonitor.Application`) et `map_event/1` mappe des types qui n'ont
+  pas (encore) de producteur. Conservé tel quel : son rôle (read-model
+  d'observabilité des tâches) est un chantier prévu, à ré-armer ou recâbler sur
+  les events réels (`pod.completed`/`task_*`) — pas à supprimer ici.
+
   Monitor fleet → détournement du tool natif `TaskList` Claude Code
   v2.1.x. GenServer : subscribe `Fleet.EventRouter.Bus` topic
   `fleet.events`, mappe les events fleet en mutations
