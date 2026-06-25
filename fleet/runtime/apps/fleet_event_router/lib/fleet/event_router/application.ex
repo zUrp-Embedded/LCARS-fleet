@@ -27,8 +27,15 @@ defmodule Fleet.EventRouter.Application do
         webhook_children() ++
         signals_children()
 
+    # Bornes de restart EXPLICITES (alignées sur les autres superviseurs d'app, ex. TaskQueue 3/60) :
+    # au-delà de 3 crashes en 60s, l'enfant est en boucle de crash (Bus / listener webhook / SignalsOS
+    # qui ne tient pas) → on remonte au superviseur d'app racine plutôt que de marteler un redémarrage
+    # qui ne réussira pas. Le défaut OTP (3/5) est trop serré pour un blip transitoire ; on l'allonge à
+    # 60s, rendu explicite pour que la fenêtre soit un choix, pas un implicite.
     Supervisor.start_link(children,
       strategy: :one_for_one,
+      max_restarts: 3,
+      max_seconds: 60,
       name: Fleet.EventRouter.Supervisor
     )
   end

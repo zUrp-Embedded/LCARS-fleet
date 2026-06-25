@@ -27,9 +27,13 @@ defmodule Fleet.EventRouter.Bus do
   ## Registry obligatoire
 
   Le set `authorized_event_types` est chargé par `Fleet.EventRouter.Catalog` au boot
-  depuis `priv/events.yaml` via `:persistent_term`. Tant que le set est vide (boot
-  order), `broadcast/2` laisse passer sans check (initialisation). Dès que peuplé,
-  tout event hors set raise `UnregisteredError`.
+  depuis `priv/events.yaml` via `:persistent_term`. Dès que peuplé, tout event hors
+  set raise `UnregisteredError`.
+
+  Le comportement quand le set est VIDE (boot précoce / test `load_event_registry:
+  false`) est **explicite** via `:fleet_event_router, :permit_when_registry_empty` :
+  `true` (défaut) = laisse passer (safety-net d'init voulu) ; `false` = fail-closed
+  (raise tant que le registry n'est pas chargé). Voir `assert_authorized!/1`.
   """
 
   @pubsub_name Fleet.PubSub
@@ -84,20 +88,38 @@ defmodule Fleet.EventRouter.Bus do
     :ok
   end
 
+  # Comportement quand le registry est VIDE — rendu EXPLICITE et configurable, plus un trou silencieux.
+  #
+  # Le registry est vide dans deux situations légitimes : (1) au boot, entre le démarrage du Bus et
+  # `Catalog.load!/0` qui le peuple ; (2) en test avec `load_event_registry: false` (hermétisme — pas
+  # de boot complet pour valider un type). Dans ces fenêtres, valider contre un set vide rejetterait
+  # TOUT event. Le flag `:permit_when_registry_empty` choisit le régime :
+  #
+  #   * `true` (défaut) — registry vide ⇒ on LAISSE PASSER. Safety-net VOULU : ne pas casser le boot
+  #     précoce ni forcer chaque test à peupler le registry à la main. Ce n'est PAS une validation
+  #     désactivée — dès que le set est peuplé (`Catalog.load!` au boot, juste après le démarrage du
+  #     Bus), la branche `type in types` tranche et tout event hors registry raise. Les producteurs
+  #     émettent déjà tous le schema canon, et le rescue `UnregisteredError` côté appelants couvre le
+  #     résidu. C'est une admission INTENTIONNELLE de la fenêtre d'init, pas un by-pass silencieux.
+  #   * `false` — registry vide ⇒ FAIL-CLOSED (raise `UnregisteredError`). Pour un déploiement qui
+  #     veut interdire tout broadcast tant que le registry n'est pas chargé (aucun event ne doit
+  #     partir non validé, même au boot). À n'activer que si le boot garantit `Catalog.load!` AVANT
+  #     le 1er broadcast, sinon le boot lui-même crashe.
+  @permit_empty_default true
+
   defp assert_authorized!(%Fleet.Event{type: type} = event) do
     types = authorized_event_types()
 
     cond do
       MapSet.size(types) == 0 ->
-        # Registry pas encore chargé (boot order, ou test avec `load_event_registry: false`)
-        # — on laisse passer. Cet escape-hatch est un safety net VOULU : exiger le registry
-        # même vide forcerait chaque test à le peupler à la main (ou à démarrer tout le boot),
-        # pour un bénéfice marginal. Les producteurs émettent déjà tous le schema canon, et le
-        # rescue `UnregisteredError` côté appelants couvre déjà le cas où un type inconnu
-        # passerait. Dès que le set est peuplé, la branche `type in types` tranche : un event
-        # hors registry raise. (Tant que vide, c'est l'initialisation, pas une validation
-        # désactivée — l'ordre de boot charge le registry juste après le démarrage du Bus.)
-        :ok
+        if permit_when_registry_empty?() do
+          :ok
+        else
+          raise Fleet.Event.UnregisteredError,
+                "registry events.yaml VIDE et :permit_when_registry_empty = false (fail-closed) — " <>
+                  "broadcast de #{inspect(type)} (source=#{inspect(event.source)}) refusé tant que " <>
+                  "le registry n'est pas chargé (Catalog.load!/0 doit tourner avant tout broadcast)."
+        end
 
       type in types ->
         :ok
@@ -108,6 +130,12 @@ defmodule Fleet.EventRouter.Bus do
                 "(source=#{inspect(event.source)}). Add entry to events.yaml or " <>
                 "use Fleet.EventRouter.Bus.set_authorized_event_types/1 in tests."
     end
+  end
+
+  # Flag de régime registry-vide. Défaut `true` (safety-net d'init voulu). Lu à chaque broadcast
+  # (pas mémoïsé) → un test peut le flipper sans redémarrer le Bus.
+  defp permit_when_registry_empty? do
+    Application.get_env(:fleet_event_router, :permit_when_registry_empty, @permit_empty_default)
   end
 
   @doc """

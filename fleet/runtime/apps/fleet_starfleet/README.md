@@ -1,7 +1,7 @@
 # fleet_starfleet (chantier 13)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-05 (R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
+**Dernière révision** : 2026-06-25 (test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
 

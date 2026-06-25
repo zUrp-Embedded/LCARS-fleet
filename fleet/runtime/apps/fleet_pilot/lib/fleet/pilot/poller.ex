@@ -70,6 +70,10 @@ defmodule Fleet.Pilot.Poller do
     spawner: nil,
     task_queue: nil,
     clock: nil,
+    # Seam de recovery de wake threadé jusqu'à `StageDispatcher.dispatch_issue` (défaut nil → la vraie
+    # `WakeRecovery.wake/3`). Rend testable le contrat « wake raté ⇒ pipeline démarré, bail PRIS » sans hit
+    # IncidentRegistry/tmux réels.
+    wake_recovery: nil,
     poll_count: 0,
     error_count: 0,
     err_streak: 0,
@@ -144,7 +148,8 @@ defmodule Fleet.Pilot.Poller do
       carte_loader: Keyword.get(opts, :carte_loader),
       spawner: Keyword.get(opts, :spawner),
       task_queue: Keyword.get(opts, :task_queue),
-      clock: Keyword.get(opts, :clock)
+      clock: Keyword.get(opts, :clock),
+      wake_recovery: Keyword.get(opts, :wake_recovery)
     }
 
     if Keyword.get(opts, :start_tick?, true) do
@@ -641,7 +646,7 @@ defmodule Fleet.Pilot.Poller do
 
             # Pipeline ENGAGÉ → dispatche son stage courant ; il DÉTIENT le bail → lease inchangé.
             engaged ->
-              stage_do_dispatch(payload, item_opts, acc, lease)
+              dispatch_engaged(payload, item_opts, acc, lease)
 
             # EN FILE, bail tenu par un autre pipeline → attend.
             lease ->
@@ -656,24 +661,54 @@ defmodule Fleet.Pilot.Poller do
     tally
   end
 
-  defp stage_do_dispatch(payload, opts, acc, lease) do
+  # Dispatch d'un item + mise à jour du tally ET du bail. Deux concerns DISTINCTS, que le retour de
+  # `dispatch_issue` mélange :
+  #
+  #   * BAIL — le pipeline a-t-il DÉMARRÉ (pod spawné + verrou `lcars-in-flight` posé) ? L'ordre canonique
+  #     du spawn (`StageDispatcher.spawn_stage`) est verrou → pod → enqueue → WAKE, le wake EN DERNIER. Donc
+  #     `{:error, {:wake_unreached, …}}` veut dire : le pipeline EST démarré (verrou + pod + mandat en place),
+  #     SEUL le réveil tmux a raté. Le pipeline tient donc le bail repo-sérialisé — sinon un 2e ticket du même
+  #     repo dans le même tick démarrerait un 2e pipeline (deux feature-branches concurrentes → conflit de merge).
+  #   * TALLY/backoff — y a-t-il une anomalie à SURFACER ? Le wake raté reste compté en `errors` (il alimente
+  #     `err_streak`/telemetry → backoff partiel) : un kick injoignable ne doit PAS être avalé en succès
+  #     silencieux (le pod ne tourne pas tant qu'il n'est pas réveillé).
+  #
+  # D'où le 3ᵉ cas `wake_unreached` = (démarré pour le BAIL, anomalie pour le TALLY). On retourne
+  # `{tally, started?}` ; `started?` (= un pod a réellement été mis en vol ce tick) pilote la prise de bail,
+  # INDÉPENDAMMENT du fait que le dispatch ait fini sans erreur.
+  defp stage_do_dispatch(payload, opts, acc) do
     case StageDispatcher.dispatch_issue(payload, opts) do
       {:ok, {:spawned, _pod_id, _role}} ->
-        {%{acc | dispatched: acc.dispatched + 1}, lease}
+        {%{acc | dispatched: acc.dispatched + 1}, true}
+
+      # Pipeline DÉMARRÉ (verrou + pod + mandat posés) mais wake injoignable. Le bail est PRIS (started?
+      # = true) ; l'anomalie reste comptée en `errors` (backoff + telemetry honnêtes, jamais avalée).
+      {:error, {:wake_unreached, _pod_id, _role, _reason}} ->
+        {%{acc | errors: acc.errors + 1}, true}
 
       {:skipped, _reason} ->
-        {%{acc | skipped: acc.skipped + 1}, lease}
+        {%{acc | skipped: acc.skipped + 1}, false}
 
+      # Vrai échec de dispatch (rien démarré — la compensation a retiré le verrou + tué le pod frais) → bail LIBRE.
       {:error, _reason} ->
-        {%{acc | errors: acc.errors + 1}, lease}
+        {%{acc | errors: acc.errors + 1}, false}
     end
   end
 
-  # Démarrage d'un pipeline EN FILE (bail libre) : dispatch ; si un pod est effectivement spawné, le
-  # bail devient TENU (les autres tickets en file du même tick attendent → sérialisation 1 pipeline/repo).
+  # Dispatch d'un pipeline ENGAGÉ (il tient DÉJÀ le bail) : le bail reste inchangé quoi qu'il arrive
+  # (le tally est mis à jour, `started?` est ignoré — l'engagement vient de la classification, pas de ce hop).
+  defp dispatch_engaged(payload, opts, acc, lease) do
+    {acc2, _started?} = stage_do_dispatch(payload, opts, acc)
+    {acc2, lease}
+  end
+
+  # Démarrage d'un pipeline EN FILE (bail libre) : dispatch ; si un pod a effectivement été mis en vol
+  # (spawné OU wake_unreached = verrou+pod posés), le bail devient TENU → les autres tickets en file du même
+  # tick attendent (sérialisation 1 pipeline/repo). Un wake raté tient le bail (le pipeline est démarré),
+  # PAS un échec de dispatch (rien démarré).
   defp start_pipeline(payload, opts, acc) do
-    {acc2, _} = stage_do_dispatch(payload, opts, acc, false)
-    {acc2, acc2.dispatched > acc.dispatched}
+    {acc2, started?} = stage_do_dispatch(payload, opts, acc)
+    {acc2, started?}
   end
 
   # Classifie une issue (bail) ET pré-résout ce que `dispatch_issue` relirait sinon. Renvoie
@@ -696,8 +731,16 @@ defmodule Fleet.Pilot.Poller do
 
       case forge.get_route(state.repo, n, state.forge_opts) do
         {:ok, {carte, stage} = route} when is_binary(carte) and is_binary(stage) ->
+          # Le bail se lit sur la ROUTE (append-only, robuste), JAMAIS sur le succès du chargement de la
+          # carte. Une route PRÉSENTE = un pipeline déjà entré dans la machine. ENGAGÉ ssi le stage courant
+          # n'est pas le 1er de la carte (pipeline avancé entre deux hops). Si la carte échoue à charger
+          # TRANSITOIREMENT (réseau/forge nil), on NE PEUT PAS exclure que ce pipeline soit avancé → fail-closed :
+          # on le classe ENGAGÉ (bail TENU). Sinon une carte-nil ferait perdre le bail d'un pipeline engagé →
+          # un 2e ticket du même repo démarrerait un 2e pipeline (perte de sérialisation). Le dispatch de SON
+          # stage fail-loud si la carte manque (carte re-lue côté StageDispatcher), mais le bail NE se libère
+          # pas pour autant. Carte revenue au tick suivant → classification précise reprise.
           carte_map = load_carte_or_nil(carte, state)
-          engaged = not is_nil(carte_map) and not first_stage?(carte_map, stage)
+          engaged = is_nil(carte_map) or not first_stage?(carte_map, stage)
           {engaged, [prefetched_route: route, prefetched_carte: carte_map]}
 
         :none ->
@@ -747,6 +790,8 @@ defmodule Fleet.Pilot.Poller do
     |> maybe_put_seam(:spawner, state.spawner)
     |> maybe_put_seam(:task_queue, state.task_queue)
     |> maybe_put_seam(:clock, state.clock)
+    # Threadé jusqu'à `dispatch_issue` : seul nil retombe sur le défaut réel (la vraie `WakeRecovery.wake/3`).
+    |> maybe_put_seam(:wake_recovery, state.wake_recovery)
   end
 
   defp carte_loader_fun(%__MODULE__{carte_loader: nil}), do: nil

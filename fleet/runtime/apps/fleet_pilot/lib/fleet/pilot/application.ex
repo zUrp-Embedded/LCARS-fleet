@@ -29,7 +29,24 @@ defmodule Fleet.Pilot.Application do
   @impl Application
   def start(_type, _args) do
     children = stage_children()
-    opts = [strategy: :one_for_one, name: Fleet.Pilot.Supervisor]
+
+    # `:one_for_one` (pas `:rest_for_one`) bien que les enfants se réfèrent dans l'ordre
+    # (Task.Supervisor + IncidentRegistry démarrés AVANT Poller + HopConsumer qui les utilisent) :
+    # ces références sont par NOM GLOBAL (résolu à CHAQUE appel — `Task.Supervisor.start_child(name, …)`,
+    # `IncidentRegistry` via son nom de process), JAMAIS un pid capturé à l'init. Donc si IncidentRegistry
+    # ou le Task.Supervisor crashe et redémarre, le Poller/HopConsumer le re-trouve sous le même nom au
+    # prochain appel — inutile de les redémarrer en cascade (ce que ferait `:rest_for_one`). L'isolation
+    # par-process (un crash n'en tue qu'un) est le bon régime ici.
+    #
+    # Bornes de restart EXPLICITES (alignées TaskQueue 3/60) : >3 crashes/60s d'un singleton du rail =
+    # boucle de crash → on remonte au superviseur racine plutôt que de marteler. Fenêtre rendue choix.
+    opts = [
+      strategy: :one_for_one,
+      max_restarts: 3,
+      max_seconds: 60,
+      name: Fleet.Pilot.Supervisor
+    ]
+
     Supervisor.start_link(children, opts)
   end
 

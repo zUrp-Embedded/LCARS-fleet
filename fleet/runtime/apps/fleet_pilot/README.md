@@ -56,6 +56,13 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   (`[lcars-route:carte:stage]`, gravée par `create_ticket` = la state-machine de routing) → dispatche le rôle du
   stage (`carte_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du
   1er stage). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
+  **Bail fail-closed (2 invariants)** : (1) le bail se prend dès qu'un pipeline est DÉMARRÉ (verrou posé +
+  pod spawné), jamais sur le succès d'une étape postérieure — un dispatch qui rend `{:error,{:wake_unreached,_}}`
+  (verrou+pod+mandat en place, seul le réveil tmux a raté) PREND le bail intra-tick (sinon un 2e ticket du même
+  repo démarrerait un 2e pipeline) ; l'anomalie reste comptée en `errors`/`last_tally_errors`, jamais avalée.
+  (2) l'engagement se lit sur la ROUTE (append-only, robuste), pas sur le chargement de la carte : un échec
+  TRANSITOIRE de carte (réseau/forge nil) sur un pipeline routé le classe ENGAGÉ (bail TENU, fail-closed) —
+  le dispatch de son stage fail-loud si la carte manque, mais le bail ne se libère pas.
 - `Fleet.Pilot.Labels` — vocabulaire wire-protocol (source unique) : **uniquement** ce qui n'est pas
   dérivable de l'état forge — verrous `lcars-in-flight`/`lcars-awaits-human`, états `state:*` (legacy carte).
 - `Fleet.Pilot.HopConsumer` — consumer Bus de la **fin-de-hop** (`pod.completed` → `HopCompleter`) ;
@@ -84,6 +91,14 @@ Knobs : `:stage_dispatch?` + `:poll_repo` + `:poll_interval_ms` (stage), `:produ
 défaut `gatekeeper`), `:hop_runner` (offload complétion, F067), `:wake_recovery` (seam recovery de wake,
 défaut `&Fleet.Pilot.WakeRecovery.wake/3` ; MA-17 : le retour du wake est load-bearing → un kick injoignable
 remonte `{:error,{:wake_unreached,_}}` au dispatch (tally honnête) / une telemetry au gatekeeper, jamais avalé).
+
+**Supervision (`Application`)** : `:one_for_one` avec bornes explicites `max_restarts: 3 / max_seconds: 60`
+(alignées sur les autres superviseurs d'app du runtime). `:one_for_one` (pas `:rest_for_one`) malgré l'ordre
+de démarrage (Task.Supervisor + `IncidentRegistry` AVANT `Poller` + `HopConsumer`) : les enfants se réfèrent
+par **nom global** (résolu à chaque appel), jamais par pid capturé à l'init → le redémarrage d'un singleton
+ne nécessite pas la cascade. Chaque consommateur Bus (`HopConsumer`) se ré-abonne par construction : le
+`Bus.subscribe()` vit dans `init/1`, qu'OTP rejoue à chaque restart (un consommateur redémarré n'est jamais
+sourd ; contrat verrouillé par test côté `fleet_starfleet`).
 
 ## Onboarding projet (Rail 1 — « idée → le projet existe »)
 

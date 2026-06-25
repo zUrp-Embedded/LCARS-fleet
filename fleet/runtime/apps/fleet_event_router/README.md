@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-24 (BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur, validation broadcast active prod ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-06-25 (registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -64,6 +64,12 @@ end
   — registry vide → validation broadcast off). En prod (`true`), un events.yaml
   absent/invalide **raise** (crash-boot, F-008/Pattern A : pas de Bus sans
   validation — un deploy cassé ne démarre pas)
+- `:fleet_event_router, :permit_when_registry_empty` — régime du Bus quand
+  `authorized_event_types` est **vide** (boot précoce / test sans registry).
+  `true` (défaut) = laisse passer (safety-net d'init voulu, pas un by-pass : dès
+  que le set est peuplé la validation tranche) ; `false` = **fail-closed** (raise
+  tant que `Catalog.load!` n'a pas chargé le registry). Le comportement vide est
+  ainsi EXPLICITE, plus un trou silencieux. Voir `Bus.assert_authorized!/1`
 - `:fleet_event_router, :start_signals` — boot SignalsOS GenServer
   (default `false` — éviter capture signaux dans les tests)
 - `:fleet_event_router, :webhook_port` — port HTTP webhooks (default 8081)

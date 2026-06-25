@@ -183,6 +183,27 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_status(_pod_id), do: {:ok, :running}
   end
 
+  # Recovery de wake qui ÉCHOUE (pod injoignable, re-roll non réparé) → `StageDispatcher.dispatch_issue`
+  # surface `{:error, {:wake_unreached, …}}` : le pipeline EST démarré (verrou + pod + mandat posés en amont,
+  # ordre canonique), seul le réveil tmux a raté. Sert à prouver le contrat « wake raté ⇒ bail PRIS ».
+  defmodule FailingWakeRecovery do
+    def wake(_pod_id, _respawn_fun, _opts), do: {:error, {:escalated, :not_found}}
+  end
+
+  # Loader de CARTE qui RATE TRANSITOIREMENT sur `qa-2` (carte → nil) mais charge `qa-build` normalement.
+  # Simule un échec réseau/forge de chargement de carte sur un pipeline routé-avancé : le bail ne doit PAS
+  # se libérer pour autant (fail-closed). `load!/1` LÈVE pour `qa-2` → le poller (load_carte_or_nil) ET le
+  # StageDispatcher (load_carte) le rescue-ent en nil/`{:error}`.
+  defmodule NilCarteForQa2Loader do
+    def load!("qa-2"), do: raise("carte qa-2 indisponible (échec transitoire simulé)")
+
+    def load!("qa-build"),
+      do: %{
+        "name" => "qa-build",
+        "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}
+      }
+  end
+
   defp start_stage_poller(issues_response, pulls_response \\ {:ok, []}) do
     name = :"P_stage_#{System.unique_integer([:positive])}"
 
@@ -526,23 +547,26 @@ defmodule Fleet.Pilot.PollerTest do
   # Bail repo-serialise (incrément 3) : au plus 1 pipeline actif par repo.
   # ============================================================
   describe "mode stage — bail repo-serialise" do
-    defp start_entry_poller(issues_response, routes) do
+    # `extra_opts` surcharge les opts (Keyword.merge en dernier) : injecte un seam (`wake_recovery`) ou
+    # remplace un défaut (`carte_loader`) sans dupliquer le harnais.
+    defp start_entry_poller(issues_response, routes, extra_opts \\ []) do
       name = :"P_lease_#{System.unique_integer([:positive])}"
 
-      {:ok, pid} =
-        Poller.start_link(
-          name: name,
-          repo: "lordzurp/lcars-test",
-          human: "lordzurp",
-          start_tick?: false,
-          stage_dispatch?: true,
-          forge_client: StageStubForge,
-          forge_opts: [_test_issues: issues_response, _test_routes: routes],
-          loader: StageStubLoader,
-          carte_loader: StageStubCarteLoader,
-          spawner: StageStubSpawner,
-          clock: fn :second -> 1_700_000_000 end
-        )
+      base = [
+        name: name,
+        repo: "lordzurp/lcars-test",
+        human: "lordzurp",
+        start_tick?: false,
+        stage_dispatch?: true,
+        forge_client: StageStubForge,
+        forge_opts: [_test_issues: issues_response, _test_routes: routes],
+        loader: StageStubLoader,
+        carte_loader: StageStubCarteLoader,
+        spawner: StageStubSpawner,
+        clock: fn :second -> 1_700_000_000 end
+      ]
+
+      {:ok, pid} = Poller.start_link(Keyword.merge(base, extra_opts))
 
       {name, pid}
     end
@@ -614,6 +638,91 @@ defmodule Fleet.Pilot.PollerTest do
       {name, pid} = start_entry_poller({:ok, issues}, %{15 => {"qa-build", "build"}})
 
       assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "wake raté sur le 1er ticket PREND le bail intra-tick → le 2e ne démarre PAS (un seul pipeline)" do
+      # Régression : l'ordre canonique du spawn est verrou → pod → enqueue → WAKE (le wake EN DERNIER). Donc
+      # `{:error, {:wake_unreached, …}}` = pipeline DÉMARRÉ (verrou + pod + mandat posés), seul le réveil tmux
+      # a raté. Le pipeline DOIT tenir le bail repo-sérialisé. Deux issues du MÊME repo EN FILE dans le même
+      # tick ; le wake de la 1re échoue (FailingWakeRecovery). Le 1er pipeline est démarré → bail PRIS → le 2e
+      # ticket est SKIPPÉ (un seul pipeline démarre). Le wake raté n'est PAS avalé : il reste compté en `errors`
+      # (et alimente err_streak/telemetry).
+      #
+      # Régression prouvée : reviens à l'ancien `stage_do_dispatch` (wake_unreached → errors SANS prendre le
+      # bail) + `start_pipeline` qui ne prend le bail que si `dispatched` augmente → le bail reste libre → le 2e
+      # ticket DÉMARRE un 2e pipeline → le tally devient `skipped:0, errors:2` (deux feature-branches
+      # concurrentes), l'assert `skipped:1` échoue.
+      issues = [
+        %{
+          "number" => 16,
+          "body" => "file1",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        },
+        %{
+          "number" => 17,
+          "body" => "file2",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      {name, pid} =
+        start_entry_poller(
+          {:ok, issues},
+          %{16 => {"qa-build", "build"}, 17 => {"qa-build", "build"}},
+          wake_recovery: &FailingWakeRecovery.wake/3
+        )
+
+      # 1er ticket : pipeline démarré mais wake injoignable → errors:1, bail PRIS. 2e ticket : bail tenu →
+      # skipped:1. Un SEUL pipeline démarre. Le wake raté est SURFACÉ (errors), pas avalé.
+      assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
+
+      # Le wake raté n'est PAS avalé : il remonte dans le signal d'anomalie per-item `last_tally_errors`
+      # (le streak/backoff est réservé à l'échec de DÉCOUVERTE en archi multi-repo — la forge est up ici).
+      assert %{last_tally_errors: 1} = Poller.stats(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "pipeline routé-avancé à carte NIL tient le bail (échec transitoire de carte ne libère pas le bail)" do
+      # Régression : le bail se lit sur la ROUTE (append-only, robuste), JAMAIS sur le succès du chargement de
+      # la carte. #18 routé qa-2:deploy (2e stage ≠ 1er = pipeline AVANCÉ = ENGAGÉ) mais sa carte échoue à
+      # charger TRANSITOIREMENT (NilCarteForQa2Loader lève sur qa-2). Le pipeline reste ENGAGÉ (fail-closed) →
+      # tient le bail. #19 routé qa-build:build (1er stage = EN FILE, carte qa-build charge OK), même repo →
+      # bail tenu → SKIPPÉ. Aucun 2e pipeline ne démarre malgré la carte-nil.
+      #
+      # Régression prouvée : reviens à `engaged = not is_nil(carte_map) and not first_stage?(...)` → la
+      # carte-nil de #18 le classe `engaged=false` → il sort du lease set → #19 voit le bail LIBRE → DÉMARRE un
+      # 2e pipeline → le tally devient `dispatched:1` (au lieu de `dispatched:0, skipped:1`), l'assert échoue.
+      issues = [
+        %{
+          "number" => 18,
+          "body" => "avance",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        },
+        %{
+          "number" => 19,
+          "body" => "file",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      {name, pid} =
+        start_entry_poller(
+          {:ok, issues},
+          %{18 => {"qa-2", "deploy"}, 19 => {"qa-build", "build"}},
+          carte_loader: NilCarteForQa2Loader
+        )
+
+      # #18 engagé (carte-nil mais route avancée → fail-closed) tient le bail : son stage est dispatché mais
+      # fail-loud (carte manquante côté StageDispatcher → errors:1), le bail reste TENU. #19 → bail tenu →
+      # skipped:1. Aucun 2e pipeline démarré (dispatched:0).
+      assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
 
       GenServer.stop(pid)
     end
