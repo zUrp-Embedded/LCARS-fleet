@@ -36,6 +36,14 @@ defmodule Fleet.API.MixProject do
       # `Fleet.MCP.Supervisor.pod_facing_status/0` (le PROCESS, pas le knob) — dép vers le
       # bas (Ring 4 → Ring 3), acyclique (fleet_mcp ne dépend pas de fleet_api).
       {:fleet_mcp, in_umbrella: true},
+      # La readiness lit le backend de lancement résolu via la source unique
+      # `Fleet.Spawner.LaunchBackend.resolved/0` (le défaut canon vit côté spawner, pas re-copié) —
+      # dép vers le bas (Ring 4 → Ring 1), acyclique (fleet_spawner ne dépend pas de fleet_api).
+      {:fleet_spawner, in_umbrella: true},
+      # La readiness lit le backend dispatcher de shutdown résolu via la source unique
+      # `Fleet.Starfleet.Shutdown.configured_dispatcher/0` (même défaut que le process à l'init) —
+      # dép vers le bas (Ring 4 → Ring 3), acyclique (fleet_starfleet ne dépend pas de fleet_api).
+      {:fleet_starfleet, in_umbrella: true},
       # MA-18 : valide le cap-profile AVANT d'ACK un `/api/admin/spawn` (même loader que le
       # PublishConsumer, source unique). Dép explicite (était transitive via fleet_pilot) — Ring 4 → Ring 1.
       {:fleet_cap_profile, in_umbrella: true},

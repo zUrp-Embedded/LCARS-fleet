@@ -2298,13 +2298,9 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  defp launch_backend do
-    Application.get_env(
-      :fleet_spawner,
-      :launch_backend,
-      Fleet.Spawner.LaunchBackend.LauncherPortBackend
-    )
-  end
+  # Délègue à la source unique du backend (config + défaut canon vivent dans LaunchBackend) —
+  # le spawn et la readiness lisent le MÊME résolveur, pas deux copies du défaut.
+  defp launch_backend, do: Fleet.Spawner.LaunchBackend.resolved()
 
   defp bwrap_launch_path do
     Application.get_env(:fleet_spawner, :bwrap_launch_path, "/usr/local/bin/bwrap_launch.sh")

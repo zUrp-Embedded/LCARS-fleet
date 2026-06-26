@@ -152,11 +152,28 @@ defmodule Fleet.Starfleet.Shutdown do
 
   @default_grace_ms 45_000
 
+  # Défaut canon du backend dispatcher : NoOp (drain inerte) tant que le vrai
+  # backend prod `AggregateDispatcher` n'est pas câblé (runtime.exs). Posé ICI une
+  # seule fois — voir `configured_dispatcher/0`.
+  @default_dispatcher Fleet.Starfleet.Shutdown.NoOpDispatcher
+
   # --- API ---
 
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
+  end
+
+  @doc """
+  Backend dispatcher résolu depuis la config (`:fleet_starfleet, :shutdown_dispatcher`),
+  défaut `NoOpDispatcher`. SOURCE UNIQUE du défaut : ce process le lit à l'`init` et la
+  readiness (sonde anti-vert-creux) le lit aussi — aucun des deux ne re-déclare le défaut,
+  donc pas de drift entre le drain réel et ce que la readiness croit câblé. (L'override de
+  test `opts[:dispatcher]` reste géré localement par l'`init`, hors config.)
+  """
+  @spec configured_dispatcher() :: module()
+  def configured_dispatcher do
+    Application.get_env(:fleet_starfleet, :shutdown_dispatcher, @default_dispatcher)
   end
 
   @doc "Phase 1 : refuse nouveaux jobs + drain (max grace_ms)."
@@ -177,13 +194,9 @@ defmodule Fleet.Starfleet.Shutdown do
 
   @impl true
   def init(opts) do
-    backend =
-      opts[:dispatcher] ||
-        Application.get_env(
-          :fleet_starfleet,
-          :shutdown_dispatcher,
-          Fleet.Starfleet.Shutdown.NoOpDispatcher
-        )
+    # `opts[:dispatcher]` = override de test injecté ; sinon le backend résolu depuis la
+    # config via la source unique (défaut canon NoOp inclus).
+    backend = opts[:dispatcher] || configured_dispatcher()
 
     {:ok, %{status: :running, backend: backend, in_flight: 0}}
   end

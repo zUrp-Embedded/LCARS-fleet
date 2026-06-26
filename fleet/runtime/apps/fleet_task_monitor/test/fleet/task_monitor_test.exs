@@ -83,9 +83,19 @@ defmodule Fleet.TaskMonitorTest do
     test "event inconnu → :ignore (défensif)" do
       assert :ignore = TaskMonitor.map_event(ev(:something_else))
 
-      # défensif : payload absent ne crash pas, défauts sains
-      assert {:create, "lcars-fleet-dispatch-?", %{"status" => "in_progress"}} =
+      # défensif : payload absent ne crash pas. Le ticket = correlation_id ; absent (nil) → pas
+      # de défaut fabriqué "?", l'id porte l'absence honnêtement (suffixe vide).
+      assert {:create, "lcars-fleet-dispatch-", %{"status" => "in_progress"}} =
                TaskMonitor.map_event(ev(:dispatch_started))
+    end
+
+    test "ticket = correlation_id (canon) ; legacy payload[\"ticket\"] ignoré" do
+      # correlation_id est la SEULE source du ticket : même si un payload legacy porte
+      # un "ticket", l'id suit le correlation_id, pas le payload.
+      assert {:update, "lcars-fleet-dispatch-491", _} =
+               TaskMonitor.map_event(
+                 ev(:dispatch_completed, ticket: "491", payload: %{"ticket" => "999"})
+               )
     end
   end
 

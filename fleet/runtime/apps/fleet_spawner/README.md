@@ -1,7 +1,7 @@
 # Fleet.Spawner
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-24 (doc-rot F-019 : state_fs_root `~/.lcars/state`, `:token_arg` retiré, restart tous `:temporary`, recovery câblée release/resume/recreate)
+**Dernière révision** : 2026-06-26 (doc-rot F-019 : state_fs_root `~/.lcars/state`, `:token_arg` retiré, restart tous `:temporary`, recovery câblée release/resume/recreate)
 **Statut** : implémenté run #3.1 chantier #6, convergé ADR-G run #5 2026-06-01
 
 Pilote le lifecycle pod LCARS v2 (Ring 1 pod primitive). Cycle 8 phases
@@ -28,7 +28,7 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
 - `Fleet.Spawner.Registry` — `Registry` unique, lookup `pod_id → pid`
 - `Fleet.Spawner.Pod` — GenServer state machine 8 phases
 - `Fleet.Spawner.PodTmux` — ops contrôle host→pod sur le **socket tmux PAR-POD** (kick/clear/alive ; `tmux -S <sock>`, conventions partagées avec `bin/bwrap_launch.sh` ET `bin/host_launch.sh`)
-- `Fleet.Spawner.LaunchBackend` (behaviour) + `LauncherPortBackend` (**unique backend réel** ; l'exe du Port = `args.launcher_path`, choisi par `containment` — cf. infra) / `StubBackend` (tests)
+- `Fleet.Spawner.LaunchBackend` (behaviour) + `LauncherPortBackend` (**unique backend réel** ; l'exe du Port = `args.launcher_path`, choisi par `containment` — cf. infra) / `StubBackend` (tests). `LaunchBackend.resolved/0` = **source unique** du backend (config `:launch_backend` + défaut canon `LauncherPortBackend`), lue au spawn ET par la readiness (`fleet_api`) — aucune re-déclaration du défaut.
 - `Fleet.Spawner.SessionId` — builder **PUR** du `session_id` claude déterministe hexspeak (`<T>badcafe-feed-4dad-babe-<REPO4>dec0de<P><R>` : tier-kill `0badcafe`/`1badcafe` + catalogue rôle→R ; `starfleet` refusé = hors-fleet). BL-055 / `CHANTIER-uuid-deterministe.md` ; câblé au spawn (cf. « Session UUID » infra)
 
 ## Chaîne de lancement (ADR-G — RC interactif, plus de `-p`)

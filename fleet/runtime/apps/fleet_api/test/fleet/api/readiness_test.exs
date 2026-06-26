@@ -97,6 +97,18 @@ defmodule Fleet.API.ReadinessTest do
       Application.put_env(:fleet_starfleet, :shutdown_dispatcher, Fleet.Coord)
       assert %{state: :operational} = sub(Readiness.deep(), "shutdown.dispatcher")
     end
+
+    # Drift-kill : clé non posée → readiness lit le défaut canon du PROPRIÉTAIRE
+    # (`Fleet.Starfleet.Shutdown.configured_dispatcher/0` → NoOpDispatcher), pas un défaut re-déclaré.
+    test "clé absente → défaut canon partagé (NoOpDispatcher) → degraded" do
+      Application.delete_env(:fleet_starfleet, :shutdown_dispatcher)
+
+      assert %{state: :degraded, detail: %{backend: "NoOpDispatcher"}} =
+               sub(Readiness.deep(), "shutdown.dispatcher")
+
+      assert Fleet.Starfleet.Shutdown.configured_dispatcher() ==
+               Fleet.Starfleet.Shutdown.NoOpDispatcher
+    end
   end
 
   describe "launch.backend" do
@@ -119,6 +131,18 @@ defmodule Fleet.API.ReadinessTest do
       )
 
       assert %{state: :operational} = sub(Readiness.deep(), "launch.backend")
+    end
+
+    # Drift-kill : clé non posée → readiness lit le défaut canon du PROPRIÉTAIRE
+    # (`Fleet.Spawner.LaunchBackend.resolved/0` → LauncherPortBackend, ce qui lance vraiment les pods),
+    # donc operational, PAS un `:degraded` fantôme dû à un `nil` ou un défaut re-copié périmé.
+    test "clé absente → défaut canon partagé (LauncherPortBackend) → operational" do
+      Application.delete_env(:fleet_spawner, :launch_backend)
+
+      assert %{state: :operational} = sub(Readiness.deep(), "launch.backend")
+
+      assert Fleet.Spawner.LaunchBackend.resolved() ==
+               Fleet.Spawner.LaunchBackend.LauncherPortBackend
     end
   end
 

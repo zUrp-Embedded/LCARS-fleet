@@ -52,4 +52,19 @@ defmodule Fleet.Spawner.LaunchBackend do
   """
   @callback launch(args :: map(), env :: %{String.t() => String.t()}) ::
               {:ok, %{required(atom()) => any()}} | {:error, term()}
+
+  # Défaut canon : le vrai backend de spawn (Port → bwrap_launch → claude_launch).
+  # Posé ICI une seule fois ; les tests le swappent via config `:launch_backend` (StubBackend).
+  @default_backend Fleet.Spawner.LaunchBackend.LauncherPortBackend
+
+  @doc """
+  Backend de lancement résolu : config `:fleet_spawner, :launch_backend` sinon le défaut
+  canon `LauncherPortBackend`. SOURCE UNIQUE du défaut — le spawner (au moment du spawn)
+  et la readiness (sonde anti-vert-creux) lisent ici ; aucun des deux ne re-déclare le défaut,
+  donc aucun drift possible entre « ce qui lance » et « ce que la readiness croit lancé ».
+  """
+  @spec resolved() :: module()
+  def resolved do
+    Application.get_env(:fleet_spawner, :launch_backend, @default_backend)
+  end
 end

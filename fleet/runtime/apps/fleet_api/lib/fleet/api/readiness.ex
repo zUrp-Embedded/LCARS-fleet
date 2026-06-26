@@ -125,12 +125,10 @@ defmodule Fleet.API.Readiness do
   # 0 in-flight = honnête-dégradé (le drain ne draine pas). Operational quand le
   # backend prod `AggregateDispatcher` est câblé (seam `:shutdown_dispatcher`).
   defp shutdown_dispatcher do
-    backend =
-      Application.get_env(
-        :fleet_starfleet,
-        :shutdown_dispatcher,
-        Fleet.Starfleet.Shutdown.NoOpDispatcher
-      )
+    # Lit le backend via la SOURCE UNIQUE du propriétaire (`Fleet.Starfleet.Shutdown`, qui
+    # l'utilise aussi à son init) au lieu de re-déclarer le défaut `NoOpDispatcher` ici — pas
+    # de second défaut à garder aligné.
+    backend = Fleet.Starfleet.Shutdown.configured_dispatcher()
 
     if backend == Fleet.Starfleet.Shutdown.NoOpDispatcher do
       probe("shutdown.dispatcher", :degraded, %{
@@ -146,16 +144,11 @@ defmodule Fleet.API.Readiness do
   # aucun spawn réel ⇒ `:degraded` ; backend réel (LauncherPort/Tmux) ⇒
   # operational ; absent ⇒ degraded.
   defp launch_backend do
-    # MÊME défaut que la résolution réelle (`pod.ex` → `LauncherPortBackend`). Ce défaut DOIT être
-    # aligné : un prod standard (clé non-set, runtime.exs ne la pose pas) lirait sinon `nil` → `:degraded`
-    # PERMANENT sur une fleet pourtant saine (les pods lancent via le défaut LauncherPortBackend) → la
-    # sonde anti-vert-creux crierait au loup. Avec le défaut aligné, nil n'arrive pas.
-    backend =
-      Application.get_env(
-        :fleet_spawner,
-        :launch_backend,
-        Fleet.Spawner.LaunchBackend.LauncherPortBackend
-      )
+    # Lit le backend via la SOURCE UNIQUE du propriétaire (`Fleet.Spawner.LaunchBackend.resolved/0`,
+    # que le spawner appelle aussi au spawn) au lieu de re-copier le défaut `LauncherPortBackend` ici.
+    # Conséquence : sur une fleet saine où la clé n'est pas posée, readiness lit le MÊME défaut que
+    # ce qui lance réellement les pods → pas de `:degraded` permanent fantôme, pas de défaut à aligner.
+    backend = Fleet.Spawner.LaunchBackend.resolved()
 
     cond do
       is_nil(backend) ->

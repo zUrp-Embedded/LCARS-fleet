@@ -128,7 +128,7 @@ defmodule Fleet.TaskMonitor do
 
     case type do
       :dispatch_started ->
-        n = ticket(event, p)
+        n = ticket(event)
 
         {:create, id("dispatch-#{n}"),
          task(
@@ -139,10 +139,10 @@ defmodule Fleet.TaskMonitor do
          )}
 
       :dispatch_completed ->
-        {:update, id("dispatch-#{ticket(event, p)}"), %{"status" => "completed"}}
+        {:update, id("dispatch-#{ticket(event)}"), %{"status" => "completed"}}
 
       :dispatch_failed ->
-        {:update, id("dispatch-#{ticket(event, p)}"), %{"status" => "failed"}}
+        {:update, id("dispatch-#{ticket(event)}"), %{"status" => "failed"}}
 
       :gatekeeper_spawned ->
         s = get(p, "slug", "?")
@@ -154,12 +154,12 @@ defmodule Fleet.TaskMonitor do
         {:update, id("gk-#{get(p, "slug", "?")}"), %{"status" => "completed"}}
 
       :pipeline_stage_transition ->
-        n = ticket(event, p)
+        n = ticket(event)
 
         {:update, id("dispatch-#{n}"), %{"title" => "⚙️ pipeline ##{n} → #{get(p, "stage", "?")}"}}
 
       :ticket_new_route_architect ->
-        n = ticket(event, p)
+        n = ticket(event)
 
         {:create, id("ticket-#{n}"),
          task(id("ticket-#{n}"), "📥 Ticket ##{n}: #{get(p, "title", "")}", "pending", %{
@@ -167,7 +167,7 @@ defmodule Fleet.TaskMonitor do
          })}
 
       :ticket_label_change ->
-        n = ticket(event, p)
+        n = ticket(event)
 
         {:update, id("ticket-#{n}"), %{"title" => "📥 Ticket ##{n}: #{get(p, "state", "")}"}}
 
@@ -255,9 +255,10 @@ defmodule Fleet.TaskMonitor do
     }
   end
 
-  # correlation_id canon (ticket) prioritaire, sinon payload "ticket", sinon "?"
-  defp ticket(%Fleet.Event{correlation_id: corr}, payload),
-    do: corr || get(payload, "ticket", "?")
+  # Le ticket d'un event = son `correlation_id` (source canon, posée par le producteur).
+  # Pas de source legacy (ancien `payload["ticket"]`) ni de défaut fabriqué : un event sans
+  # correlation_id rend `nil` (honnête — l'absence de ticket n'est pas un ticket "?").
+  defp ticket(%Fleet.Event{correlation_id: corr}), do: corr
 
   defp get(map, key, default) when is_map(map), do: Map.get(map, key, default)
   defp get(_, _, default), do: default

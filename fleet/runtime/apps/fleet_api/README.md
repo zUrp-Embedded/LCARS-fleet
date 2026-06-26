@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-25 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
+**Dernière révision** : 2026-06-26 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -115,6 +115,8 @@ callbacks Cowboy directs pour WS (pas de socket réel).
 
 * `fleet_event_router` (ch11 PROMOTED) — Bus PubSub
 * `fleet_pilot` (Ring 2) — readiness sonde la liveness du rail stage
+* `fleet_spawner` (Ring 1) — readiness lit le backend de lancement résolu via `Fleet.Spawner.LaunchBackend.resolved/0` (source unique du défaut, pas re-copié)
+* `fleet_starfleet` (Ring 3) — readiness lit le backend dispatcher de shutdown résolu via `Fleet.Starfleet.Shutdown.configured_dispatcher/0` (source unique du défaut)
 * `fleet_cap_profile` (ch1) — validation cap-profile à l'admission `/api/admin/spawn`
 * `fleet_credentials` (Ring 1) — `Fleet.Credentials.Shell.git_safe_config_args/0` (source unique de la neutralisation config git système-side, composée par `GitCommitter`)
 * `:plug`, `:plug_cowboy`, `:jason`
