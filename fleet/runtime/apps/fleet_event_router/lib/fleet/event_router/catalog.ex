@@ -47,11 +47,22 @@ defmodule Fleet.EventRouter.Catalog do
 
   defp do_load do
     case parse_events() do
-      {:ok, events} ->
+      {:ok, events} when map_size(events) > 0 ->
         set = events |> Map.keys() |> Enum.map(&String.to_atom/1) |> MapSet.new()
         Fleet.EventRouter.Bus.set_authorized_event_types(set)
         Logger.info("fleet_event_router: registry events.yaml chargé (#{MapSet.size(set)} types)")
         :ok
+
+      {:ok, events} when map_size(events) == 0 ->
+        # events.yaml VALIDE mais VIDE (`events: {}`) en régime réel : poser ce MapSet vide via
+        # set_authorized_event_types laisserait le Bus (permissif sur registry vide par défaut)
+        # broadcaster TOUT type SANS validation — exactement le même fail-open silencieux que le cas
+        # absent/invalide ci-dessous, deploy « vert » mais registry mort. `do_load` n'est atteint
+        # qu'en boot réel (`load_event_registry: true` ; test pose `false`) → un registry vide ici =
+        # deploy cassé. Fail-loud au boot, comme un events.yaml absent/invalide.
+        raise "fleet_event_router: events.yaml VIDE (events: {}) à #{events_yaml_path()} — un " <>
+                "registry vide laisserait le Bus broadcaster TOUT type sans validation (deploy cassé). " <>
+                "Fail-loud au boot, comme un events.yaml absent/invalide."
 
       :error ->
         # Crash-boot volontaire (« deploy cassé ⇒ on ne boot pas ») : un events.yaml absent/invalide
@@ -82,9 +93,12 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   # Le parse events.yaml en UN seul endroit : localise + lit + valide la shape.
-  # `{:ok, events_map}` si présent et `events:` est une map (map vide incluse — `do_load`
-  # doit set un MapSet vide, pas warner) ; `:error` si absent/invalide. Le caller tranche
-  # le log : do_load → warning sur :error ; event_type_strings → [].
+  # `{:ok, events_map}` si présent et `events:` est une map (map VIDE incluse — `parse_events` ne
+  # tranche pas le verdict sur le vide, il rend juste `{:ok, %{}}`) ; `:error` si absent/invalide.
+  # Ce sont les DEUX callers qui tranchent le vide :
+  #   * do_load → FAIL-LOUD (raise) sur map vide en régime réel — un registry vide ouvrirait le Bus
+  #     à TOUT type sans validation — ET sur `:error` (même raison).
+  #   * event_type_strings → `[]` sur map vide (preregister n'a rien à pré-enregistrer) comme sur :error.
   defp parse_events do
     path = events_yaml_path()
 

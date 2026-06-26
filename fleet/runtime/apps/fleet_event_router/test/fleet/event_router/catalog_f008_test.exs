@@ -35,4 +35,36 @@ defmodule Fleet.EventRouter.CatalogF008Test do
     Application.put_env(:fleet_event_router, :load_event_registry, false)
     assert :ok = Catalog.load!()
   end
+
+  # Trou fail-open jumeau de F-008 : un events.yaml VALIDE mais VIDE (`events: {}`) parse OK
+  # (`{:ok, %{}}`) → l'ancien `do_load` posait un MapSet vide → le Bus (permissif sur registry vide
+  # par défaut) broadcastait TOUT type sans validation, boot « vert » mais registry mort. En régime
+  # réel (`load_event_registry: true`) `do_load` doit désormais raise comme pour un fichier absent.
+  @tag :tmp_dir
+  test "events.yaml VIDE (events: {}) + registry voulu (prod) → raise (fail-open registry-vide fermé)",
+       %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "events.yaml")
+    File.write!(path, "events: {}\n")
+
+    Application.put_env(:fleet_event_router, :load_event_registry, true)
+    Application.put_env(:fleet_event_router, :events_yaml_path, path)
+
+    assert_raise RuntimeError, ~r/events\.yaml VIDE/, fn ->
+      Catalog.load!()
+    end
+  end
+
+  # Non-régression de l'AUTRE lecteur du parse : `event_type_strings/0` (source de
+  # `preregister_event_atoms/0`) doit toujours rendre `[]` sur un events.yaml vide — il n'a rien à
+  # pré-enregistrer et NE doit PAS fail-loud (sinon `Application.preregister_event_atoms/0` casserait).
+  @tag :tmp_dir
+  test "event_type_strings/0 rend [] sur events.yaml VIDE (preregister inchangé, pas de raise)",
+       %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "events.yaml")
+    File.write!(path, "events: {}\n")
+
+    Application.put_env(:fleet_event_router, :events_yaml_path, path)
+
+    assert [] = Catalog.event_type_strings()
+  end
 end
