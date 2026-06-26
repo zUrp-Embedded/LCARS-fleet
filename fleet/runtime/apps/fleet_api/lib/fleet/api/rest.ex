@@ -244,15 +244,9 @@ defmodule Fleet.API.Rest do
   end
 
   defp do_broadcast_spawn(conn, payload) do
-    # Schéma canon %Fleet.Event{source: :api} (la struct, pas un map ad-hoc).
-    event = %Fleet.Event{
-      source: :api,
-      type: :"admin.spawn.request",
-      timestamp: DateTime.utc_now(),
-      pod_id: nil,
-      correlation_id: nil,
-      payload: payload
-    }
+    # Schéma canon %Fleet.Event{source: :api} construit via le constructeur canonique
+    # (source validée contre l'enum, timestamp DateTime garanti), pas un struct littéral.
+    event = Fleet.Event.new(:api, :"admin.spawn.request", payload: payload)
 
     case safe_broadcast(event) do
       :ok -> send_resp(conn, 202, ~s|{"status":"queued"}|)

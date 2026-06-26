@@ -16,13 +16,10 @@ defmodule Fleet.API.R1SeamWSTest do
   test "T2 — WS.websocket_info forwarde la struct canon %Fleet.Event{}" do
     state = %{topics: []}
 
-    event = %Fleet.Event{
-      source: :pipeline,
-      type: :"pipeline.completed",
-      timestamp: DateTime.utc_now(),
-      correlation_id: nil,
-      payload: %{"pipeline_id" => "p1", "outputs" => %{}}
-    }
+    event =
+      Fleet.Event.new(:pipeline, :"pipeline.completed",
+        payload: %{"pipeline_id" => "p1", "outputs" => %{}}
+      )
 
     # RED : la struct tombe dans `websocket_info(_msg, state)` (ws.ex:85) →
     # {[], state} → aucune frame. Après R2 : forward struct → frame "event".

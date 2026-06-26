@@ -535,24 +535,19 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
         role_emails: fn r -> ["#{r}@lcars.local"] end
       )
 
-    send(pid, %Fleet.Event{
-      source: :spawner,
-      type: :"pod.completed",
-      timestamp: DateTime.utc_now(),
-      payload: build_done("soft", %{})
-    })
+    send(pid, Fleet.Event.new(:spawner, :"pod.completed", payload: build_done("soft", %{})))
 
     state = :sys.get_state(pid)
     assert Map.has_key?(state.gate_evals, "corr-1")
     assert %{stage: "build"} = state.gate_evals["corr-1"]
 
-    send(pid, %Fleet.Event{
-      source: :task_queue,
-      type: :task_completed,
-      correlation_id: "corr-1",
-      timestamp: DateTime.utc_now(),
-      payload: %{result: %{"decision" => "continue"}}
-    })
+    send(
+      pid,
+      Fleet.Event.new(:task_queue, :task_completed,
+        correlation_id: "corr-1",
+        payload: %{result: %{"decision" => "continue"}}
+      )
+    )
 
     assert %{gate_evals: evals} = :sys.get_state(pid)
     refute Map.has_key?(evals, "corr-1")
@@ -570,14 +565,14 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
         loader: Carte
       )
 
-    send(pid, %Fleet.Event{
-      source: :task_queue,
-      type: :task_completed,
-      correlation_id: "inconnu",
-      timestamp: DateTime.utc_now(),
-      # MA-03 : payload SANS metadata gate_eval (cas NORMAL — un pod stage-dispatch ordinaire) → ignoré.
-      payload: %{result: %{"decision" => "continue"}}
-    })
+    send(
+      pid,
+      Fleet.Event.new(:task_queue, :task_completed,
+        correlation_id: "inconnu",
+        # MA-03 : payload SANS metadata gate_eval (cas NORMAL — un pod stage-dispatch ordinaire) → ignoré.
+        payload: %{result: %{"decision" => "continue"}}
+      )
+    )
 
     assert %{gate_evals: evals} = :sys.get_state(pid)
     assert evals == %{}
@@ -655,12 +650,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     # 1. escalade sur un 1er HopConsumer → gate_evals peuplé.
     pid1 = fresh_hop_consumer()
 
-    send(pid1, %Fleet.Event{
-      source: :spawner,
-      type: :"pod.completed",
-      timestamp: DateTime.utc_now(),
-      payload: build_done("soft", %{"sev" => "high"})
-    })
+    send(
+      pid1,
+      Fleet.Event.new(:spawner, :"pod.completed", payload: build_done("soft", %{"sev" => "high"}))
+    )
 
     assert Map.has_key?(:sys.get_state(pid1).gate_evals, "corr-1")
 
@@ -671,16 +664,16 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert :sys.get_state(pid2).gate_evals == %{}
 
     # 3. Le verdict revient (le metadata de la tâche a survécu dans le broker → posé dans task_completed).
-    send(pid2, %Fleet.Event{
-      source: :task_queue,
-      type: :task_completed,
-      correlation_id: "corr-1",
-      timestamp: DateTime.utc_now(),
-      payload: %{
-        result: %{"decision" => "continue", "reason" => "RAS"},
-        metadata: gate_eval_meta()
-      }
-    })
+    send(
+      pid2,
+      Fleet.Event.new(:task_queue, :task_completed,
+        correlation_id: "corr-1",
+        payload: %{
+          result: %{"decision" => "continue", "reason" => "RAS"},
+          metadata: gate_eval_meta()
+        }
+      )
+    )
 
     # 4. RECONSTRUCTION + COMPLÉTION : le verdict `continue` ouvre la PR + request_review + route — PAS un
     #    {:noreply} silencieux. (`:sys.get_state` après le send sérialise le handle_info → l'effet a eu lieu.)
@@ -696,13 +689,13 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     pid = fresh_hop_consumer()
     assert :sys.get_state(pid).gate_evals == %{}
 
-    send(pid, %Fleet.Event{
-      source: :task_queue,
-      type: :task_completed,
-      correlation_id: "corr-1",
-      timestamp: DateTime.utc_now(),
-      payload: %{result: %{"decision" => "abandon"}, metadata: gate_eval_meta()}
-    })
+    send(
+      pid,
+      Fleet.Event.new(:task_queue, :task_completed,
+        correlation_id: "corr-1",
+        payload: %{result: %{"decision" => "abandon"}, metadata: gate_eval_meta()}
+      )
+    )
 
     _ = :sys.get_state(pid)
     assert_received :closed
@@ -714,13 +707,13 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
     bad_meta = gate_eval_meta() |> Map.delete("resume_payload")
 
-    send(pid, %Fleet.Event{
-      source: :task_queue,
-      type: :task_completed,
-      correlation_id: "corr-1",
-      timestamp: DateTime.utc_now(),
-      payload: %{result: %{"decision" => "continue"}, metadata: bad_meta}
-    })
+    send(
+      pid,
+      Fleet.Event.new(:task_queue, :task_completed,
+        correlation_id: "corr-1",
+        payload: %{result: %{"decision" => "continue"}, metadata: bad_meta}
+      )
+    )
 
     # Le singleton ne crashe pas, et n'agit PAS sur un contexte tronqué (pas de PR ouverte à l'aveugle).
     assert Process.alive?(pid)

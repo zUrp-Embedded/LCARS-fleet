@@ -27,12 +27,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   test "admin.spawn.request avec name absent → log warn, alive, count++" do
     {pid, _} = start_consumer()
 
-    send(pid, %Fleet.Event{
-      source: :api,
-      type: :"admin.spawn.request",
-      timestamp: DateTime.utc_now(),
-      payload: %{}
-    })
+    send(pid, Fleet.Event.new(:api, :"admin.spawn.request"))
 
     # Mi14 : :sys.get_state = barrière FIFO (send traité avant) → pas de sleep arbitraire.
     assert Process.alive?(pid)
@@ -43,12 +38,12 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   test "admin.spawn.request avec name ghost → CapProfile.load fail → log warn, alive" do
     {pid, _} = start_consumer()
 
-    send(pid, %Fleet.Event{
-      source: :api,
-      type: :"admin.spawn.request",
-      timestamp: DateTime.utc_now(),
-      payload: %{"cap_profile_name" => "ghost-role-xyz"}
-    })
+    send(
+      pid,
+      Fleet.Event.new(:api, :"admin.spawn.request",
+        payload: %{"cap_profile_name" => "ghost-role-xyz"}
+      )
+    )
 
     assert Process.alive?(pid)
     assert %{count: 1} = :sys.get_state(pid)
@@ -58,19 +53,9 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   test "event autre que admin.spawn.request → ignore (alive, pas spawn_called)" do
     {pid, _} = start_consumer()
 
-    send(pid, %Fleet.Event{
-      source: :spawner,
-      type: :"pod.drift",
-      timestamp: DateTime.utc_now(),
-      payload: %{}
-    })
+    send(pid, Fleet.Event.new(:spawner, :"pod.drift"))
 
-    send(pid, %Fleet.Event{
-      source: :coord,
-      type: :"coord.action_dispatched",
-      timestamp: DateTime.utc_now(),
-      payload: %{}
-    })
+    send(pid, Fleet.Event.new(:coord, :"coord.action_dispatched"))
 
     _ = :sys.get_state(pid)
     assert Process.alive?(pid)

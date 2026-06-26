@@ -137,18 +137,14 @@ defmodule Fleet.Starfleet.MCPMonitor do
   end
 
   defp broadcast_crashed(target, previous, new) do
-    event = %Fleet.Event{
-      source: :starfleet,
-      type: :mcp_server_crashed,
-      timestamp: DateTime.utc_now(),
-      pod_id: nil,
-      correlation_id: nil,
-      payload: %{
-        "target" => inspect(target),
-        "previous_status" => Atom.to_string(previous),
-        "new_status" => Atom.to_string(new)
-      }
-    }
+    event =
+      Fleet.Event.new(:starfleet, :mcp_server_crashed,
+        payload: %{
+          "target" => inspect(target),
+          "previous_status" => Atom.to_string(previous),
+          "new_status" => Atom.to_string(new)
+        }
+      )
 
     Bus.broadcast("fleet.events", event)
   rescue

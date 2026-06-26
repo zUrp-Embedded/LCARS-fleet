@@ -36,19 +36,11 @@ defmodule Fleet.EventRouter.R1SeamBroadcastTest do
 
     :ok = Catalog.load!()
 
-    registered = %Fleet.Event{
-      source: :spawner,
-      type: :"pod.completed",
-      timestamp: DateTime.utc_now(),
-      payload: %{}
-    }
+    registered = Fleet.Event.new(:spawner, :"pod.completed")
 
-    unregistered = %Fleet.Event{
-      source: :spawner,
-      type: :"phantom.unregistered.type",
-      timestamp: DateTime.utc_now(),
-      payload: %{}
-    }
+    # Source valide (:spawner) mais TYPE hors registry : `new/3` la construit (l'enum du `type`
+    # n'est pas enforcé), c'est `Bus.broadcast` qui doit rejeter — ce que ce test vérifie.
+    unregistered = Fleet.Event.new(:spawner, :"phantom.unregistered.type")
 
     # Type registré → passe.
     assert :ok = Bus.broadcast("fleet.events", registered)

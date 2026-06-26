@@ -146,18 +146,14 @@ defmodule Fleet.Starfleet.MCPWatcher do
   end
 
   defp broadcast_alert(package, current, upstream) do
-    event = %Fleet.Event{
-      source: :starfleet,
-      type: :sdk_upstream_alert,
-      timestamp: DateTime.utc_now(),
-      pod_id: nil,
-      correlation_id: nil,
-      payload: %{
-        "package" => package,
-        "current" => current,
-        "upstream" => upstream
-      }
-    }
+    event =
+      Fleet.Event.new(:starfleet, :sdk_upstream_alert,
+        payload: %{
+          "package" => package,
+          "current" => current,
+          "upstream" => upstream
+        }
+      )
 
     Bus.broadcast("fleet.events", event)
   rescue

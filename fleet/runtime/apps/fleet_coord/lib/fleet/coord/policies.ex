@@ -165,40 +165,36 @@ defmodule Fleet.Coord.Policies do
   end
 
   defp canon_event(type, target, path, payload, correlation_id) do
-    event = %Fleet.Event{
-      source: :coord,
-      type: canon_type(type),
-      timestamp: DateTime.utc_now(),
-      pod_id: extract_pod_id(payload),
-      correlation_id: correlation_id,
-      payload: %{
-        "target" => target,
-        "path" => path,
-        "message" => normalize_payload(payload)
-      }
-    }
+    event =
+      Fleet.Event.new(:coord, canon_type(type),
+        pod_id: extract_pod_id(payload),
+        correlation_id: correlation_id,
+        payload: %{
+          "target" => target,
+          "path" => path,
+          "message" => normalize_payload(payload)
+        }
+      )
 
     safe_canon_broadcast(event)
   end
 
   defp canon_action(action, path, payload, correlation_id) do
-    event = %Fleet.Event{
-      source: :coord,
-      # Clé registry = `coord.action_dispatched` (préfixe coord, cohérent avec
-      # coord.notification_routed/escalation_triggered). Un `:action_dispatched` nu
-      # serait hors registry → broadcast rejeté (UnregisteredError) → drop silencieux.
-      type: :"coord.action_dispatched",
-      timestamp: DateTime.utc_now(),
-      pod_id: extract_pod_id(payload),
-      correlation_id: correlation_id,
-      payload: %{
-        "action" => action,
-        "path" => path,
-        "verdict" => extract_verdict(payload),
-        "reason" => extract_reason(payload),
-        "message" => normalize_payload(payload)
-      }
-    }
+    # Clé registry = `coord.action_dispatched` (préfixe coord, cohérent avec
+    # coord.notification_routed/escalation_triggered). Un `:action_dispatched` nu
+    # serait hors registry → broadcast rejeté (UnregisteredError) → drop silencieux.
+    event =
+      Fleet.Event.new(:coord, :"coord.action_dispatched",
+        pod_id: extract_pod_id(payload),
+        correlation_id: correlation_id,
+        payload: %{
+          "action" => action,
+          "path" => path,
+          "verdict" => extract_verdict(payload),
+          "reason" => extract_reason(payload),
+          "message" => normalize_payload(payload)
+        }
+      )
 
     safe_canon_broadcast(event)
   end

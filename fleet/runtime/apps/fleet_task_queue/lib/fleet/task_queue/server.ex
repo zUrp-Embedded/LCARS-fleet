@@ -114,14 +114,10 @@ defmodule Fleet.TaskQueue.Server do
   @impl GenServer
   def handle_continue({:corrupt, found}, state) do
     # Fallback non-bloquant : state vide + event de boot anomaly post-init.
-    best_effort_broadcast(state, %Fleet.Event{
-      source: :task_queue,
-      type: :state_corrupt,
-      timestamp: now(),
-      pod_id: nil,
-      correlation_id: nil,
-      payload: %{expected: 1, found: found}
-    })
+    best_effort_broadcast(
+      state,
+      Fleet.Event.new(:task_queue, :state_corrupt, payload: %{expected: 1, found: found})
+    )
 
     {:noreply, state}
   end
@@ -418,14 +414,11 @@ defmodule Fleet.TaskQueue.Server do
   # ============================================================
 
   defp event(type, %Task{} = task, payload) do
-    %Fleet.Event{
-      source: :task_queue,
-      type: type,
-      timestamp: now(),
+    Fleet.Event.new(:task_queue, type,
       pod_id: task.pod_id,
       correlation_id: task.id,
       payload: payload
-    }
+    )
   end
 
   # Classification load-bearing vs best-effort. Un `broadcast/2` unique qui avalerait TOUTE exception en

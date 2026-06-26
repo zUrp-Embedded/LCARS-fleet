@@ -57,14 +57,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
           payload = Map.put(body, "ticket_id", ticket_id)
 
-          event = %Fleet.Event{
-            source: :event_router,
-            type: type_atom,
-            timestamp: DateTime.utc_now(),
-            pod_id: nil,
-            correlation_id: nil,
-            payload: payload
-          }
+          event = Fleet.Event.new(:event_router, type_atom, payload: payload)
 
           _ = Fleet.EventRouter.Bus.broadcast("fleet.events", event)
           send_resp(conn, 200, "ok")

@@ -177,14 +177,15 @@ defmodule Fleet.Spawner.PodTest do
   # %Fleet.Event{task_completed} sur fleet.events (= ce qui arrive quand l'agent appelle
   # submit_result via fleet_mcp). Le pod doit être en :monitoring (subscribed) avant l'appel.
   defp submit_result_event(pod_id, payload) do
-    Phoenix.PubSub.broadcast(Fleet.PubSub, "fleet.events", %Fleet.Event{
-      source: :task_queue,
-      type: :task_completed,
-      timestamp: DateTime.utc_now(),
-      pod_id: pod_id,
-      correlation_id: "test-corr-#{pod_id}",
-      payload: %{result: payload}
-    })
+    Phoenix.PubSub.broadcast(
+      Fleet.PubSub,
+      "fleet.events",
+      Fleet.Event.new(:task_queue, :task_completed,
+        pod_id: pod_id,
+        correlation_id: "test-corr-#{pod_id}",
+        payload: %{result: payload}
+      )
+    )
   end
 
   defp state_fs_path(pod_id, scope_dir \\ "pods") do

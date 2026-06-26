@@ -79,17 +79,15 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   end
 
   defp broadcast_canon(source, enriched, correlation_id) do
-    event = %Fleet.Event{
-      source: :starfleet,
-      # R09 : to_existing_atom (pas to_atom) — anti atom-leak M1 ; les 3 atomes
-      # `starfleet.audit_cat5_<src>` sont registrés (events.yaml + préregistre
-      # Starfleet.Application). Une source inattendue → ArgumentError → rescue.
-      type: String.to_existing_atom("starfleet.audit_cat5_#{source}"),
-      timestamp: DateTime.utc_now(),
-      pod_id: extract_pod_id(enriched),
-      correlation_id: correlation_id,
-      payload: enriched
-    }
+    # to_existing_atom (pas to_atom) — anti atom-leak ; les 3 atomes
+    # `starfleet.audit_cat5_<src>` sont registrés (events.yaml + préregistre
+    # Starfleet.Application). Une source de type inattendue → ArgumentError → rescue.
+    event =
+      Fleet.Event.new(:starfleet, String.to_existing_atom("starfleet.audit_cat5_#{source}"),
+        pod_id: extract_pod_id(enriched),
+        correlation_id: correlation_id,
+        payload: enriched
+      )
 
     Bus.broadcast("fleet.events", event)
   rescue

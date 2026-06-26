@@ -50,14 +50,8 @@ defmodule Fleet.EventRouter.SignalsOS do
     try do
       type_atom = String.to_existing_atom(type_str)
 
-      event = %Fleet.Event{
-        source: :event_router,
-        type: type_atom,
-        timestamp: DateTime.utc_now(),
-        pod_id: nil,
-        correlation_id: nil,
-        payload: %{"signal" => Atom.to_string(sig)}
-      }
+      event =
+        Fleet.Event.new(:event_router, type_atom, payload: %{"signal" => Atom.to_string(sig)})
 
       _ = Fleet.EventRouter.Bus.broadcast("fleet.events", event)
     rescue

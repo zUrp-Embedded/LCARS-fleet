@@ -70,12 +70,7 @@ defmodule Fleet.API.WSTest do
 
   describe "websocket_info/2 events" do
     test "event matching topic → frame event JSON" do
-      event = %Fleet.Event{
-        source: :pipeline,
-        type: :"pipeline.completed",
-        timestamp: DateTime.utc_now(),
-        payload: %{"id" => "p1"}
-      }
+      event = Fleet.Event.new(:pipeline, :"pipeline.completed", payload: %{"id" => "p1"})
 
       assert {[{:text, frame}], state} =
                WS.websocket_info(event, %{topics: ["pipeline.*"]})
@@ -91,24 +86,14 @@ defmodule Fleet.API.WSTest do
     end
 
     test "event non matching → no frame, state inchangé" do
-      event = %Fleet.Event{
-        source: :starfleet,
-        type: :"audit.log",
-        timestamp: DateTime.utc_now(),
-        payload: %{}
-      }
+      event = Fleet.Event.new(:starfleet, :"audit.log")
 
       assert {[], state} = WS.websocket_info(event, %{topics: ["pipeline.*"]})
       assert state == %{topics: ["pipeline.*"]}
     end
 
     test "topics vide → match all" do
-      event = %Fleet.Event{
-        source: :pipeline,
-        type: :anything,
-        timestamp: DateTime.utc_now(),
-        payload: %{}
-      }
+      event = Fleet.Event.new(:pipeline, :anything)
 
       assert {[{:text, frame}], _} = WS.websocket_info(event, %{topics: []})
       assert frame =~ "anything"

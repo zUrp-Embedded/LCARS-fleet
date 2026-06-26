@@ -53,14 +53,10 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   defp emit_canon(type, payload, cid \\ nil, pod_id \\ nil) do
-    Bus.broadcast("fleet.events", %Fleet.Event{
-      source: :event_router,
-      type: type,
-      timestamp: DateTime.utc_now(),
-      pod_id: pod_id,
-      correlation_id: cid,
-      payload: payload
-    })
+    Bus.broadcast(
+      "fleet.events",
+      Fleet.Event.new(:event_router, type, pod_id: pod_id, correlation_id: cid, payload: payload)
+    )
   end
 
   describe "pod.drift event" do

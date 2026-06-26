@@ -13,8 +13,7 @@ defmodule Fleet.EventRouter.BusTest do
   # Le chemin canon `broadcast/2 (topic, %Fleet.Event{})` est testé ici + dans
   # r1_seam_broadcast_test (registry / UnregisteredError).
 
-  defp ev(type),
-    do: %Fleet.Event{source: :spawner, type: type, timestamp: DateTime.utc_now(), payload: %{}}
+  defp ev(type), do: Fleet.Event.new(:spawner, type)
 
   describe "subscribe/unsubscribe" do
     test "unsubscribe stoppe la réception" do

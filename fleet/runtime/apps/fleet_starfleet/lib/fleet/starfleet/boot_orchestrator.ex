@@ -145,14 +145,7 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
   # BL-021 chantier 9 (B) — broadcast schema canon %Fleet.Event{source: :starfleet}.
   defp emit_canon(type, payload) do
-    event = %Fleet.Event{
-      source: :starfleet,
-      type: type,
-      timestamp: DateTime.utc_now(),
-      pod_id: nil,
-      correlation_id: nil,
-      payload: payload
-    }
+    event = Fleet.Event.new(:starfleet, type, payload: payload)
 
     Bus.broadcast("fleet.events", event)
   rescue

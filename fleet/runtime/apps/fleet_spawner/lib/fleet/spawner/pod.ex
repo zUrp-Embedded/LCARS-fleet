@@ -447,14 +447,10 @@ defmodule Fleet.Spawner.Pod do
   # Construit l'enveloppe canon %Fleet.Event{source: :spawner} (factorisé — un seul site de construction
   # pour best_effort/required, schema canon strict).
   defp build_spawner_event(event_type, payload) do
-    %Fleet.Event{
-      source: :spawner,
-      type: String.to_existing_atom(event_type),
-      timestamp: DateTime.utc_now(),
+    Fleet.Event.new(:spawner, String.to_existing_atom(event_type),
       pod_id: Map.get(payload, "pod_id"),
-      correlation_id: nil,
       payload: payload
-    }
+    )
   end
 
   # ============================================================

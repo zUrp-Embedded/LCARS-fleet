@@ -16,14 +16,11 @@ defmodule Fleet.TaskMonitorTest do
   # ignorée par le consommateur (dashboard multi-source) — on garde une
   # source plausible par event (cf. intersections cross-docs DN).
   defp ev(type, opts \\ []) do
-    %Event{
-      source: Keyword.get(opts, :source, :spawner),
-      type: type,
-      timestamp: DateTime.utc_now(),
+    Event.new(Keyword.get(opts, :source, :spawner), type,
       correlation_id: Keyword.get(opts, :ticket),
       pod_id: Keyword.get(opts, :pod_id),
       payload: Keyword.get(opts, :payload, %{})
-    }
+    )
   end
 
   describe "map_event/1 — mapping pur (DN §Mapping)" do

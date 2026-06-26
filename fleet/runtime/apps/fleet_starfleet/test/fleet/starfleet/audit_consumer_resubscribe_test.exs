@@ -38,13 +38,7 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
 
   @topic "fleet.events.resubscribe_test"
 
-  defp ev,
-    do: %Fleet.Event{
-      source: :spawner,
-      type: :"pod.completed",
-      timestamp: DateTime.utc_now(),
-      payload: %{}
-    }
+  defp ev, do: Fleet.Event.new(:spawner, :"pod.completed")
 
   @tag :resubscribe
   test "consommateur tué → redémarré par le superviseur → reçoit les events POST-restart" do

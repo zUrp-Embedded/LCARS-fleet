@@ -8,15 +8,15 @@ defmodule Fleet.Observation.ReadModelTest do
 
   alias Fleet.Observation.ReadModel
 
+  # `type` est passé en string par les call-sites (routage ReadModel par préfixe string) ;
+  # le constructeur canonique veut un atom() → on convertit (String.to_atom, OK en test : set borné).
+  # La projection re-stringifie le type, donc les assertions sur clés string restent valides.
   defp ev(type, opts) do
-    %Fleet.Event{
-      type: type,
-      source: Keyword.get(opts, :source, :spawner),
-      timestamp: DateTime.utc_now(),
+    Fleet.Event.new(Keyword.get(opts, :source, :spawner), String.to_atom(type),
       pod_id: Keyword.get(opts, :pod_id),
       correlation_id: Keyword.get(opts, :correlation_id),
       payload: Keyword.get(opts, :payload, %{})
-    }
+    )
   end
 
   defp sync(pid), do: :sys.get_state(pid)

@@ -31,8 +31,7 @@ defmodule Fleet.EventRouter.BusRegistryEmptyTest do
     :ok
   end
 
-  defp ev(type),
-    do: %Fleet.Event{source: :spawner, type: type, timestamp: DateTime.utc_now(), payload: %{}}
+  defp ev(type), do: Fleet.Event.new(:spawner, type)
 
   # Échantillon de types arbitraires (registered ou pas) — un mini-balayage qui exerce la propriété
   # « le verdict ne dépend QUE du régime, pas du type précis » quand le registry est vide.

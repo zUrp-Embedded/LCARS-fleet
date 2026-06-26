@@ -424,13 +424,10 @@ defmodule Fleet.Pilot.HopConsumerTest do
           subscribe: false
         )
 
-      send(pid, %Fleet.Event{
-        source: :spawner,
-        type: :"pod.completed",
-        timestamp: DateTime.utc_now(),
-        pod_id: "pod-abc",
-        payload: stage_payload()
-      })
+      send(
+        pid,
+        Fleet.Event.new(:spawner, :"pod.completed", pod_id: "pod-abc", payload: stage_payload())
+      )
 
       # init a cable hop_runner -> la completion est routee vers le runner (msg au process test).
       assert_receive {:offloaded_gs, _exec}, 1_000
@@ -451,23 +448,13 @@ defmodule Fleet.Pilot.HopConsumerTest do
 
       # Le completer fait send(self()) DANS le GenServer -> on verifie juste que
       # l'event est route sans crash (le hop est unit-teste via maybe_complete).
-      event = %Fleet.Event{
-        source: :spawner,
-        type: :"pod.completed",
-        timestamp: DateTime.utc_now(),
-        pod_id: "pod-abc",
-        payload: stage_payload()
-      }
+      event =
+        Fleet.Event.new(:spawner, :"pod.completed", pod_id: "pod-abc", payload: stage_payload())
 
       send(pid, event)
       assert Process.alive?(pid)
       # un event non-spawner est ignore sans crash
-      send(pid, %Fleet.Event{
-        source: :task_queue,
-        type: :task_completed,
-        timestamp: DateTime.utc_now(),
-        payload: %{}
-      })
+      send(pid, Fleet.Event.new(:task_queue, :task_completed))
 
       assert Process.alive?(pid)
 
