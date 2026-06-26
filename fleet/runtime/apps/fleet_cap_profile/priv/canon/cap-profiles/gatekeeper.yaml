@@ -6,6 +6,12 @@ kind: CapabilityProfile
 metadata:
   name: gatekeeper
   containment: bwrap
+  # Coordonnees d'identite du role, lues par le builder de session_id (source unique du QUOI) :
+  # role_index = slot role dans l'UUID hexspeak ; protected = tier epargne par le kill des workers ;
+  # fleet_level = instance unique sans dimension projet (repo 0000).
+  role_index: 2
+  protected: false
+  fleet_level: true
 spec:
   scope:
     allowedTools:

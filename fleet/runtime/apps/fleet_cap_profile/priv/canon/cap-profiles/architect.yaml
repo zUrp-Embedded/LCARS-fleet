@@ -10,6 +10,12 @@ metadata:
   # nocif : contamination doctrine BUG-3 + zéro sandbox). En bwrap, HOME=pod_dir → claude lit pod_dir/.claude,
   # plus le ~/.claude humain → BUG-3 disparaît à la racine. Interactif via `lcars attach` (marche sur bwrap).
   containment: bwrap
+  # Coordonnees d'identite du role, lues par le builder de session_id (source unique du QUOI) :
+  # role_index = slot role dans l'UUID hexspeak ; protected = tier epargne par le kill des workers ;
+  # fleet_level = instance unique sans dimension projet (repo 0000).
+  role_index: 1
+  protected: true
+  fleet_level: true
   mounts:
     - path: /home/projects        # RO : lire le code pour cadrer les briefs (tous les projets d'un coup)
       mode: ro
