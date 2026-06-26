@@ -12,9 +12,16 @@
         "^[a-zA-Z0-9_-]+$": {
           "type": "object",
           "required": ["role", "profile"],
+          "additionalProperties": false,
           "properties": {
             "role": {"type": "string", "minLength": 1},
             "profile": {"type": "string", "minLength": 1},
+            "mandate_kind": {"enum": ["worker", "judge"]},
+            "judge_target": {"enum": ["mandate", "deliverable"]},
+            "effect": {
+              "enum": ["reversible", "fire_once"],
+              "description": "réservé : idempotence/fire-once, pas encore consommé par aucune logique"
+            },
             "needs": {
               "type": "array",
               "items": {"type": "string"}
@@ -35,6 +42,7 @@
               "type": "array",
               "items": {"type": "string"}
             },
+            "timeout_sec": {"type": "integer", "minimum": 1},
             "gate": {
               "oneOf": [
                 {"type": "null"},

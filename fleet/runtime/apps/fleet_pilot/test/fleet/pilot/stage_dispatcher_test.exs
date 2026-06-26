@@ -474,6 +474,56 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:mandate] =~ "Livraison (git-native)"
     end
 
+    test "SÉCU : mandate_kind hors-vocab au stage → raise (jamais retombé sur worker en silence)" do
+      payload = eng_issue()
+
+      # `reviewer` n'est PAS du vocabulaire {worker, judge}. AVANT le fix, ce hors-vocab tombait sur la
+      # clause `_worker` → mandat EXÉCUTABLE pour un rôle qui aurait dû être désamorcé. La judge-ness est
+      # une propriété de sécurité : elle ne s'infère pas par omission → fail-loud.
+      carte = %{
+        "name" => "g",
+        "stages" => %{
+          "review" => %{"role" => "engineer", "needs" => [], "mandate_kind" => "reviewer"}
+        }
+      }
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: {:ok, {"g", "review"}}],
+          carte_loader: fn "g" -> carte end
+        )
+
+      assert_raise ArgumentError, ~r/hors vocabulaire \{worker, judge\}/, fn ->
+        StageDispatcher.dispatch_issue(payload, opts)
+      end
+    end
+
+    test "SÉCU : judge_target hors-vocab (kind=judge) → raise (la cible d'un juge ne s'infère pas)" do
+      payload = eng_issue()
+
+      carte = %{
+        "name" => "g",
+        "stages" => %{
+          "review" => %{
+            "role" => "engineer",
+            "needs" => [],
+            "mandate_kind" => "judge",
+            "judge_target" => "subject"
+          }
+        }
+      }
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: {:ok, {"g", "review"}}],
+          carte_loader: fn "g" -> carte end
+        )
+
+      assert_raise ArgumentError, ~r/hors vocabulaire \{mandate, deliverable\}/, fn ->
+        StageDispatcher.dispatch_issue(payload, opts)
+      end
+    end
+
     test "#8.E : judge_target:mandate → brief en cadrage MANDAT (juge le ticket.body, pas un livrable)" do
       # F-S2-1 : le mandat = body de l'ISSUE en main (payload), PAS un get_issue redondant.
       payload = eng_issue(%{"body" => "MON MANDAT A JUGER"})

@@ -119,5 +119,62 @@ defmodule Fleet.Pipeline.LoaderTest do
       assert stage_b["needs"] == ["a"]
       assert stage_b["gate"]["type"] == "hard"
     end
+
+    test "v1 — mandate_kind/judge_target/timeout_sec valides → load OK (alignés v2.5)", %{
+      tmp_dir: tmp_dir
+    } do
+      File.write!(Path.join(tmp_dir, "typed.yaml"), """
+      name: typed
+      version: 1
+      stages:
+        review:
+          role: reviewer
+          profile: noop
+          mandate_kind: judge
+          judge_target: mandate
+          timeout_sec: 600
+      """)
+
+      assert %{"stages" => %{"review" => stage}} = Loader.load!("typed")
+      assert stage["mandate_kind"] == "judge"
+      assert stage["judge_target"] == "mandate"
+    end
+
+    # Propriété de SÉCURITÉ (frontière) : un mandate_kind hors {worker, judge} est rejeté au LOAD
+    # (fail-closed à la frontière). Il ne peut JAMAIS atteindre le dispatcher pour y être inféré en
+    # worker (mandat exécutable pour un rôle qui aurait dû être désamorcé).
+    test "v1 — mandate_kind hors-vocab → rejet au load (raise)", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "bad_kind.yaml"), """
+      name: bad_kind
+      version: 1
+      stages:
+        review:
+          role: reviewer
+          profile: noop
+          mandate_kind: reviewer
+      """)
+
+      assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
+        Loader.load!("bad_kind")
+      end
+    end
+
+    # additionalProperties:false : un champ inconnu au stage est rejeté au load (anti-typo /
+    # anti-champ-fantôme) au lieu d'être silencieusement ignoré.
+    test "v1 — champ de stage inconnu → rejet au load (raise)", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "unknown_field.yaml"), """
+      name: unknown_field
+      version: 1
+      stages:
+        s:
+          role: noop
+          profile: empty
+          bogus_field: oops
+      """)
+
+      assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
+        Loader.load!("unknown_field")
+      end
+    end
   end
 end

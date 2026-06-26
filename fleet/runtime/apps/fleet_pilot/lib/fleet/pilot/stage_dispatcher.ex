@@ -811,20 +811,39 @@ defmodule Fleet.Pilot.StageDispatcher do
          stage_spec
        ) do
     # Le `mandate_kind` du STAGE (carte) PRIME sur celui du profil (override per-stage) — réutilise
-    # un profil worker (consultant) en JUGE sans profil-doublon. Absent → défaut profil ("worker").
+    # un profil worker (consultant) en JUGE sans profil-doublon. ABSENT au stage → défaut profil
+    # (lui-même "worker" par défaut, fail-safe) via le `||` : l'absence n'est PAS une anomalie. Ce
+    # qui suit traite la valeur PRÉSENTE-mais-hors-vocab, distincte de l'absence.
     kind = Map.get(stage_spec, "mandate_kind") || Fleet.CapProfile.mandate_kind(profile)
 
+    # Somme TOTALE et fail-loud. La judge-ness (et la cible d'un juge) est une propriété de
+    # SÉCURITÉ : elle ne s'infère JAMAIS par omission de clause. Un kind/target hors-vocab (typo, ou
+    # valeur d'un futur vocabulaire) NE DOIT PAS retomber silencieusement sur worker — sinon un rôle
+    # juge recevrait un corps d'issue EXÉCUTABLE (mandat actif) au lieu d'un brief désamorcé. On
+    # rejette bruyamment (raise) plutôt que de construire un mandat dangereux en silence.
     case {kind, Map.get(stage_spec, "judge_target")} do
       # Juge de MANDAT (judge_target:mandate) → juge le ticket.body (exécutable ?), PAS un livrable
-      # (pas de code en amont). judge_target absent/deliverable → juge un livrable (PR), brief inchangé.
+      # (pas de code en amont).
       {"judge", "mandate"} ->
         build_mandate_review_mandate(role, issue, forge, repo, number, forge_opts, route)
 
-      {"judge", _deliverable} ->
+      # Juge de LIVRABLE : judge_target ABSENT (nil → défaut canon) ou "deliverable" explicite →
+      # juge un livrable (PR), brief inchangé.
+      {"judge", target} when target in [nil, "deliverable"] ->
         build_judge_mandate(role, forge, repo, number, forge_opts, route)
 
-      _worker ->
+      # judge_target PRÉSENT mais hors {mandate, deliverable} → anomalie : on ne devine pas la cible.
+      {"judge", other} ->
+        raise ArgumentError,
+              "judge_target #{inspect(other)} hors vocabulaire {mandate, deliverable} — la cible d'un juge ne s'infère pas"
+
+      {"worker", _} ->
         build_worker_mandate(role, issue)
+
+      # kind ∉ {worker, judge} (mandate_kind présent mais hors-vocab) → fail-loud.
+      {other, _} ->
+        raise ArgumentError,
+              "mandate_kind #{inspect(other)} hors vocabulaire {worker, judge} — la judge-ness ne s'infère pas"
     end
   end
 
