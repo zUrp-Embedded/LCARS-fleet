@@ -14,12 +14,18 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     end
   end
 
-  defp start_consumer do
+  # Spawner qui LÈVE dans `spawn_pod` → exerce le rescue de `handle_info` (spawn droppé). CapProfile.load
+  # doit d'abord réussir pour atteindre spawn_pod : on passe un rôle canon réel ("engineer").
+  defmodule RaisingSpawner do
+    def spawn_pod(_cap_profile, _ticket_id, _opts), do: raise("boom spawn (test E-04)")
+  end
+
+  defp start_consumer(spawner \\ StubSpawner) do
     Process.put(:test_pid, self())
     name = :"pc_#{System.unique_integer([:positive])}"
 
     {:ok, pid} =
-      start_supervised({PublishConsumer, name: name, subscribe: false, spawner: StubSpawner})
+      start_supervised({PublishConsumer, name: name, subscribe: false, spawner: spawner})
 
     {pid, name}
   end
@@ -48,6 +54,35 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     assert Process.alive?(pid)
     assert %{count: 1} = :sys.get_state(pid)
     refute_received {:spawn_called, _, _}
+  end
+
+  test "dispatch qui LÈVE → event spawn.failed émis sur le Bus (le drop n'est plus silencieux)" do
+    # E-04 : l'API REST a déjà répondu 202 « queued » ; si le dispatch lève, le spawn est droppé.
+    # Sans `spawn.failed`, l'admin croit le pod en file → aucun signal. On capture l'alarme sur le Bus.
+    :ok = Fleet.EventRouter.Bus.subscribe()
+    {pid, _} = start_consumer(RaisingSpawner)
+
+    send(
+      pid,
+      Fleet.Event.new(:api, :"admin.spawn.request",
+        payload: %{"cap_profile_name" => "engineer", "ticket_id" => "tk-42"}
+      )
+    )
+
+    assert_receive %Fleet.Event{
+      source: :spawner,
+      type: :"spawn.failed",
+      payload: %{
+        "cap_profile_name" => "engineer",
+        "ticket_id" => "tk-42",
+        "reason" => reason
+      }
+    }
+
+    assert reason =~ "boom spawn"
+    # Le drop est non-fatal : le consumer reste vivant et a compté l'event.
+    assert Process.alive?(pid)
+    assert %{count: 1} = :sys.get_state(pid)
   end
 
   test "event autre que admin.spawn.request → ignore (alive, pas spawn_called)" do

@@ -48,9 +48,19 @@ defmodule Fleet.Spawner.PublishConsumer do
       handle_spawn_request(payload, payload, state)
     rescue
       e ->
-        Logger.warning(
-          "PublishConsumer: handle_spawn_request rescue (non-fatal) — #{Exception.message(e)}"
+        # Le dispatch a LEVÉ → le spawn est droppé. MAIS l'API REST a déjà répondu HTTP 202 « queued »
+        # au client AVANT ce traitement async (broadcast→consume→spawn) : sans signal, l'admin croit le
+        # pod en file alors qu'il n'existe pas (succès affiché, zéro pod, zéro alarme). On loggue ERROR
+        # (load-bearing) ET on émet `spawn.failed` sur le Bus — alarme du cycle spawn, jumelle de
+        # `pod.failed`. Le consumer reste vivant (rescue non-fatal) : un drop ne tue pas le broker.
+        reason = Exception.message(e)
+
+        Logger.error(
+          "PublishConsumer: handle_spawn_request a LEVÉ — spawn DROPPÉ alors que l'API a répondu 202 " <>
+            "« queued » (l'admin croit le pod en file) — #{reason}"
         )
+
+        emit_spawn_failed(payload, reason)
     end
 
     {:noreply, %{state | count: state.count + 1}}
@@ -104,6 +114,40 @@ defmodule Fleet.Spawner.PublishConsumer do
             )
         end
     end
+  end
+
+  # Alarme `spawn.failed` (cycle spawn) — émise quand le dispatch d'un `admin.spawn.request` a LEVÉ et
+  # que le spawn est donc droppé. Best-effort vis-à-vis du PROCESS (un Bus down ne doit pas tuer le
+  # consumer → rescue), MAIS l'échec du broadcast n'est PAS avalé en silence : Logger.error, car perdre
+  # l'alarme re-silencerait le drop qu'on vient de rendre visible (cohérent avec `pod.failed` côté Pod,
+  # best-effort observabilité aussi mais loggué fort si la diffusion casse). Enveloppe canon stricte
+  # via `Fleet.Event.new/3` (`source: :spawner`, type `:"spawn.failed"`, présent au registry events.yaml).
+  defp emit_spawn_failed(payload, reason) when is_map(payload) do
+    event =
+      Fleet.Event.new(:spawner, :"spawn.failed",
+        payload: %{
+          "cap_profile_name" => Map.get(payload, "cap_profile_name") || Map.get(payload, "role"),
+          "ticket_id" => Map.get(payload, "ticket_id"),
+          "reason" => reason
+        }
+      )
+
+    case Bus.broadcast("fleet.events", event) do
+      :ok ->
+        :ok
+
+      {:error, broadcast_reason} ->
+        Logger.error(
+          "PublishConsumer: broadcast spawn.failed ÉCHEC — alarme de spawn droppé NON diffusée : " <>
+            "#{inspect(broadcast_reason)}"
+        )
+    end
+  rescue
+    e ->
+      Logger.error(
+        "PublishConsumer: broadcast spawn.failed a LEVÉ — alarme de spawn droppé NON diffusée : " <>
+          "#{Exception.message(e)}"
+      )
   end
 
   @doc """

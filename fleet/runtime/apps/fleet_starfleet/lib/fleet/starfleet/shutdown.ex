@@ -66,13 +66,39 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   procède (l'arrêt umbrella termine les pods de toute façon). C'est le
   comportement choisi : donner à chaque arrêt le budget de grâce complet.
 
+  **Fail-CLOSED quand le comptage échoue** : si un composant (Spawner / broker
+  task_queue) est PRÉSENT mais injoignable — typiquement un restart EN PLEIN
+  quiesce — son comptage rend un sentinel > 0 (jamais `0`) → le drain ne conclut
+  jamais « vide » sur une ignorance, il attend son timeout (le garde-fou).
+  L'ancien `0` était fail-OPEN : sous-comptage ⇒ drain déclaré complet à tort ⇒
+  arrêt PENDANT du travail en vol. Une app task_queue GENUINEMENT absente du
+  build reste `0` (il n'y a réellement rien à drainer) — on distingue « absent »
+  de « planté » via les applications réellement démarrées, pas le code path
+  (en umbrella tous les modules sont chargeables, ça ne distinguerait rien).
+
   ## Layering
 
-  `fleet_starfleet` dépend de `fleet_spawner` (`count_pods` en appel direct).
-  Il NE dépend PAS de `fleet_task_queue` (pas d'inversion) → `list_pending` est lu
-  par dispatch dynamique guardé (`dyn/3`, résilient si l'app est absente).
+  `fleet_starfleet` dépend de `fleet_spawner` (`count_pods` en appel direct — le
+  seam app-env `:spawner_mod` n'existe QUE pour injecter un stub en test, défaut
+  = le vrai `Fleet.Spawner`). Il NE dépend PAS de `fleet_task_queue` (pas
+  d'inversion) → `list_pending` est lu par `apply` (module en variable, aucune
+  dépendance compile-time), résilient si l'app est absente.
   """
   @behaviour Fleet.Starfleet.Shutdown.Dispatcher
+
+  require Logger
+
+  # Sentinel « comptage in-flight indisponible ». La condition de fin de drain (`do_wait_drain`) ne
+  # conclut « vide » que sur `in_flight == 0` → toute valeur > 0 EMPÊCHE de conclure et force le drain
+  # à attendre son timeout (le garde-fou, jamais un blocage indéfini). 1 = minimal « pas vide ». On
+  # rend cette valeur quand le comptage ÉCHOUE (composant injoignable) : fail-CLOSED (« je ne sais pas
+  # ⇒ je ne déclare PAS le drain complet »), à l'opposé du fail-open `0` qui coupait pendant du travail.
+  @count_unavailable 1
+
+  # Module spawner — défaut le vrai `Fleet.Spawner` (appel direct, dép compile-time réelle). App-env
+  # seam UNIQUEMENT pour injecter un stub en test (induire un count_pods qui lève/exit) ; la prod ne
+  # pose jamais cette clé → comportement = appel direct `Fleet.Spawner.count_pods/0`.
+  @spawner_default Fleet.Spawner
 
   @impl true
   def refuse_new_jobs(_opts), do: Fleet.Shutdown.Quiesce.refuse!()
@@ -85,33 +111,78 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
     spawner_pods() + tasks_pending()
   end
 
+  # Pods vivants. fleet_spawner est une dép compile-time DURE (toujours présente en prod) : un
+  # `count_pods` qui lève/exit = le Spawner est injoignable, ANORMAL — typiquement un restart EN PLEIN
+  # quiesce. On ne masque PLUS en `0` (le `0` faisait sous-compter l'in-flight → drain déclaré complet
+  # à tort → arrêt PENDANT du travail en vol, fail-open). À la place : Logger.error + sentinel « pas
+  # vide » → le drain ne conclut pas, il attend son timeout (garde-fou).
   defp spawner_pods do
-    Fleet.Spawner.count_pods()
+    spawner_mod().count_pods()
   rescue
-    _ -> 0
+    e ->
+      Logger.error(
+        "Fleet.Starfleet.Shutdown: comptage pods vivants indisponible (Spawner injoignable — restart " <>
+          "en plein quiesce ?) — drain ne peut PAS conclure 0, on reste prudent : #{Exception.message(e)}"
+      )
+
+      @count_unavailable
   catch
-    :exit, _ -> 0
+    :exit, reason ->
+      Logger.error(
+        "Fleet.Starfleet.Shutdown: comptage pods vivants indisponible (Spawner exit #{inspect(reason)} " <>
+          "— restart en plein quiesce ?) — drain ne peut PAS conclure 0, on reste prudent"
+      )
+
+      @count_unavailable
   end
 
+  defp spawner_mod, do: Application.get_env(:fleet_starfleet, :spawner_mod, @spawner_default)
+
+  # Mandats en file non-assignés. `fleet_starfleet` ne dépend PAS de `fleet_task_queue` (pas
+  # d'inversion de layering) → appel par `apply` (module en variable : aucune référence d'appel remote
+  # → aucune dép compile-time). Deux régimes à NE PAS confondre :
+  #   * app task_queue ABSENTE de ce build/env (légitime : test isolé starfleet, déploiement sans le
+  #     broker) → il n'y a réellement AUCUNE file à drainer → `0` HONNÊTE (pas un masque d'échec).
+  #   * app PRÉSENTE mais l'appel lève/exit (broker en restart pendant le quiesce) → ANORMAL : on ne
+  #     masque PAS en `0` (sous-comptage ⇒ drain conclurait « vide » à tort) → sentinel « pas vide ».
+  # En umbrella tous les modules sont chargeables, donc « module chargé » ne distingue pas absent de
+  # planté : on tranche sur l'app RÉELLEMENT démarrée (`started_applications`), pas sur le code path.
   defp tasks_pending do
-    case dyn(Fleet.TaskQueue, :list_pending, []) do
-      list when is_list(list) -> length(list)
-      _ -> 0
+    if task_queue_running?() do
+      case safe_count_pending() do
+        {:ok, n} ->
+          n
+
+        :error ->
+          Logger.error(
+            "Fleet.Starfleet.Shutdown: comptage mandats en file indisponible (broker task_queue " <>
+              "présent mais injoignable — restart en plein quiesce ?) — drain ne peut PAS conclure 0, prudent"
+          )
+
+          @count_unavailable
+      end
+    else
+      0
     end
   end
 
-  # Dispatch dynamique guardé vers des apps non prises en dépendance
-  # compile-time (pas d'inversion de layering) — cf. moduledoc.
-  defp dyn(mod, fun, args) do
-    if Code.ensure_loaded?(mod) and function_exported?(mod, fun, length(args)) do
-      apply(mod, fun, args)
-    else
-      :unavailable
+  defp task_queue_running? do
+    List.keymember?(Application.started_applications(), :fleet_task_queue, 0)
+  end
+
+  # Module en VARIABLE pour l'`apply` : pas d'appel remote `Fleet.TaskQueue.x()` littéral → aucune
+  # dépendance compile-time vers fleet_task_queue (le layering interdit l'inversion).
+  defp safe_count_pending do
+    mod = Fleet.TaskQueue
+
+    case apply(mod, :list_pending, []) do
+      list when is_list(list) -> {:ok, length(list)}
+      _ -> :error
     end
   rescue
-    _ -> :unavailable
+    _ -> :error
   catch
-    :exit, _ -> :unavailable
+    :exit, _ -> :error
   end
 end
 

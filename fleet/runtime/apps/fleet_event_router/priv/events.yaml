@@ -34,6 +34,13 @@ events:
   # `Pilot.HopConsumer` (`type: :"wake.failed"` → escalade `:sp_suspect`, pane attaché au ticket).
   # Producteur ET consumer réels → clé légitime (était absente = consommé-hors-registry, I-CBC rouge).
   wake.failed: []
+  # spawn.failed : émis par `Spawner.PublishConsumer` (source :spawner) quand le dispatch d'un
+  # `admin.spawn.request` LÈVE (CapProfile/spawn_pod plante de façon inattendue) → le spawn est droppé.
+  # L'API REST a déjà répondu HTTP 202 « queued » au client AVANT ce dispatch async → sans cet event le
+  # drop est SILENCIEUX (l'admin croit le pod en file ; zéro pod, zéro alarme). Jumelle de `pod.failed`,
+  # même cycle. Payload `cap_profile_name`/`ticket_id`/`reason`. Producteur réel ; consumer (dashboard/
+  # opérateur) à venir — clé légitime (sans elle le broadcast ferait UnregisteredError → re-drop muet).
+  spawn.failed: []
 
   # --- Credentials ---
   oauth.refresh.failed: []
