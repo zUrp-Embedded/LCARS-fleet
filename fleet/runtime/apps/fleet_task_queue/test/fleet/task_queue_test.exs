@@ -87,6 +87,19 @@ defmodule Fleet.TaskQueueTest do
     assert %DateTime{} = TaskQueue.last_poll(q, "pod-W")
   end
 
+  test "last_poll : clear_for_pod oublie le poll du pod (pas d'accumulation de pod_id morts)", %{
+    q: q
+  } do
+    # Le pod a tendu la main (poll gravé), puis est décommissionné via clear_for_pod.
+    {:error, :no_task} = TaskQueue.get_for_pod(q, "pod-dead")
+    assert %DateTime{} = TaskQueue.last_poll(q, "pod-dead")
+
+    assert :ok = TaskQueue.clear_for_pod(q, "pod-dead")
+    # Le clear est le point de purge canonique du pod → son last-poll est oublié (sinon `polls`
+    # accumulerait indéfiniment les pod_id morts).
+    assert TaskQueue.last_poll(q, "pod-dead") == nil
+  end
+
   test "2. get_for_pod idempotent (résiste au /clear one_shot, pas de double dispatch)", %{q: q} do
     {:ok, t1} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     assert_receive %Fleet.Event{type: :task_enqueued}

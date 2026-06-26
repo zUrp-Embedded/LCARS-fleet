@@ -245,6 +245,13 @@ defmodule Fleet.TaskQueue.Server do
   # rester TOTAL (pas de stale `:assigned` résiduelle qui échapperait au clear et fuirait — symétrique de
   # l'enqueue). Un broadcast `:task_cleared` par tâche clearée ; aucune active → no-op idempotent.
   def handle_call({:clear_for_pod, pod_id}, _from, state) do
+    # Le clear décommissionne le pod → on retire AUSSI son last-poll de `state.polls` (symétrique de
+    # la purge des `tasks` ci-dessous). Sans ça, `polls` (un timestamp par pod, JAMAIS persisté) accumule
+    # indéfiniment les pod_id morts : `record_poll` n'ajoute que des entrées, et `prune_terminal` n'élague
+    # que `tasks`. `clear_for_pod` est le point de purge canonique du pod → c'est ici qu'un poll devient
+    # obsolète. `Map.delete` idempotent : no-op si le pod n'a jamais pollé ou n'a aucune active.
+    state = %{state | polls: Map.delete(state.polls, pod_id)}
+
     active =
       state.tasks
       |> Map.values()

@@ -21,7 +21,7 @@ audit, escalade Cat 5 seulement.
 | `Fleet.Starfleet.Gatekeeper` | pure functions validation JSON décision (PoC-π3 figé) + schema strict `priv/schema/decision-v1.json` `ex_json_schema` au load fail-fast + cache schema `:persistent_term` |
 | `Fleet.Starfleet.DriftMonitor` | GenServer subscribe `fleet.events`, 4 handlers (`pod_drift`, `pipeline.failed`, `oauth.refresh.failed`, `audit.verdict`) |
 | `Fleet.Starfleet.Cat5Escalator` | pure functions `escalate/2` → log `AuditLog` + broadcast `audit.cat5.<source>` + délégation `CoordBackend` ch14 |
-| `Fleet.Starfleet.AuditLog` | wrapper `File.write/3` non-bang fail-safe sur `/var/log/fleet-starfleet.jsonl` (root:adm 640) |
+| `Fleet.Starfleet.AuditLog` | wrapper `File.write/3` non-bang fail-safe sur `~/.lcars/log/fleet-starfleet.jsonl` (NDJSON append). **Rotation au seuil** (`:audit_log_max_bytes`, défaut 10 MB) → 1 backup `.1` : l'audit local est une convenance forensics, le durable = forge |
 | `Fleet.Starfleet.CoordBackend` | seam wrap `Fleet.Coord` ch14 (default `NotWiredYet` cohérent canon §0 #1) |
 | `Fleet.Starfleet.Shutdown` | GenServer grace shutdown coordonné (`begin/1`, `drain_in_flight/1`) — DN ring0 `lcars-fleet_service`. Seam `:shutdown_dispatcher` (behaviour `Shutdown.Dispatcher`). `configured_dispatcher/0` = **source unique** du backend résolu (config + défaut canon `NoOpDispatcher`), lue à l'`init` ET par la readiness (`fleet_api`) — pas de second défaut à aligner |
 | `Fleet.Starfleet.Shutdown.NoOpDispatcher` | backend défaut — drain immédiat 0 in-flight (honnête-dégradé, `Fleet.Dispatcher` absent) |

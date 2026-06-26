@@ -55,4 +55,40 @@ defmodule Fleet.Starfleet.AuditLogTest do
       assert parsed["ts"] == "2026-01-01T00:00:00Z"
     end
   end
+
+  describe "rotation" do
+    test "au seuil : backup .1 créé, fichier courant repassé sous le seuil, aucune ligne perdue",
+         %{log_path: log_path} do
+      # Seuil > une ligne mais bas → la rotation se déclenche après quelques écritures.
+      threshold = 300
+      Application.put_env(:fleet_starfleet, :audit_log_max_bytes, threshold)
+      on_exit(fn -> Application.delete_env(:fleet_starfleet, :audit_log_max_bytes) end)
+
+      # On écrit jusqu'à la 1re apparition du backup .1 (cap large anti-boucle) : s'arrêter à la
+      # PREMIÈRE rotation garantit qu'une seule a eu lieu → le test ne dépend pas du nb d'octets/ligne
+      # et ne tombe pas dans le cas (assumé) où un 2e cycle écrase le .1.
+      written =
+        Enum.reduce_while(1..1000, [], fn n, acc ->
+          :ok = AuditLog.write(%{"n" => n})
+          if File.exists?(log_path <> ".1"), do: {:halt, [n | acc]}, else: {:cont, [n | acc]}
+        end)
+        |> Enum.reverse()
+
+      # Rotation effectuée.
+      assert File.exists?(log_path <> ".1")
+
+      # Le fichier courant a redémarré neuf (la ligne qui a déclenché la rotation) → sous le seuil.
+      assert %File.Stat{size: size} = File.stat!(log_path)
+      assert size < threshold
+
+      # Aucune ligne perdue entre les deux fichiers : leur union = exactement toutes les écritures.
+      ns =
+        [log_path <> ".1", log_path]
+        |> Enum.flat_map(fn p -> p |> File.read!() |> String.split("\n", trim: true) end)
+        |> Enum.map(fn line -> Jason.decode!(line)["n"] end)
+        |> Enum.sort()
+
+      assert ns == written
+    end
+  end
 end
