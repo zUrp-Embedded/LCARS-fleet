@@ -654,8 +654,8 @@ defmodule Fleet.Spawner.Pod do
   # create_ticket), tout rôle sans draft dédié sur le draft worker (get_task/submit_result). `role`
   # est interpolé dans un path (`agent-<role>-base.md`) → validé via le smart-constructor slug
   # (source unique du charset path-safe ; un `role` malformé retombe juste sur le draft par défaut).
-  defp read_agent_draft(%Fleet.CapProfile{metadata: meta}) do
-    role = Map.get(meta || %{}, "name", "")
+  defp read_agent_draft(%Fleet.CapProfile{} = cap) do
+    role = Fleet.CapProfile.name(cap)
     default = "priv/sp_drafts/agent-worker-base.md"
 
     file =
@@ -1695,8 +1695,8 @@ defmodule Fleet.Spawner.Pod do
   # - project-bound (eng, juges) → SEULEMENT si `opts[:repo_id]` fourni ; sinon random (pas de
   #   collision inter-projet/rework tant que le pipeline ne passe pas le repo).
   # - starfleet / rôle inconnu → `UUID.uuid4()`. `opts[:session_id]` (seed arch, recall) PRIME au call-site.
-  defp deterministic_session_id(%Fleet.CapProfile{metadata: meta}, opts) do
-    role = Map.get(meta || %{}, "name", "")
+  defp deterministic_session_id(%Fleet.CapProfile{} = cap_profile, opts) do
+    role = Fleet.CapProfile.name(cap_profile)
     repo = Keyword.get(opts, :repo_id)
 
     cond do
@@ -1813,15 +1813,15 @@ defmodule Fleet.Spawner.Pod do
   defp default_state_fs_root,
     do: Path.join(System.user_home() || "/var/lib/lcars", ".lcars/state")
 
-  # Accesseur UNIQUE du rôle (= metadata.name). Si plusieurs sites inlinaient
-  # `Map.get(metadata, "name", "engineer")` (launch/payload/brief) tandis que la persistance
-  # state.json passait par ici (défaut "unknown"), un profil SANS metadata.name se lancerait
-  # "engineer" mais persisterait "unknown" (mésattribution silencieuse tout le hop). D'où l'unification ici.
-  defp cap_profile_name(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
-    Map.get(meta, "name") || Map.get(meta, :name) || "unknown"
-  end
-
-  defp cap_profile_name(_), do: "unknown"
+  # Accesseur UNIQUE du rôle (= metadata.name) pour TOUS les sites du pod (launch/payload/brief/
+  # persistance state.json) : sans cette source unique, des défauts divergents inlinés ("engineer"
+  # côté launch, "unknown" côté state) mésattribueraient silencieusement un profil sans name tout le
+  # hop. Délègue à la SOURCE UNIQUE `Fleet.CapProfile.name/1`, qui RAISE si le name est absent/vide —
+  # PAS de défaut fabriqué : un cap-profile sans name est un état que le domaine interdit (le
+  # `minLength:1` du schema le garantit déjà à load). Pas de clause catch-all non-struct : `state.cap_profile`
+  # est TOUJOURS un `%CapProfile{}` (l'unique entrée `Fleet.Spawner.spawn_pod/3` gate sur la struct, et
+  # `initial_state`/recovery ne la remplacent jamais) — un state corrompu doit fail-loud par function-clause.
+  defp cap_profile_name(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.name(cap)
 
   # `metadata.containment` ∈ {"bwrap","none"} (défaut conservateur "bwrap").
   # "none" = host_native (architect, starfleet) → host_launch.sh (PAS de sandbox) ; sinon la

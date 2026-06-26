@@ -158,8 +158,8 @@ defmodule Fleet.SPBuilder do
   def compose_claude_md(%Fleet.CapProfile{} = cap_profile, repo_claude_md_path, _opts \\ []) do
     with {:ok, repo_sections} <- read_repo_sections(repo_claude_md_path) do
       assigns = [
-        role: get_in(cap_profile.metadata, ["name"]) || "unknown",
-        containment: get_in(cap_profile.metadata, ["containment"]) || "unknown",
+        role: Fleet.CapProfile.name(cap_profile),
+        containment: Fleet.CapProfile.containment(cap_profile),
         # lifetime_scope est nesté sous spec.invocation (schéma v2.5 +
         # cap-profiles canon ; cohérent avec check_lifetime_scope/1). L'ancien
         # chemin spec.lifetime_scope (pré-v2.5) rend toujours "unknown".

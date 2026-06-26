@@ -225,7 +225,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     ne réinvoque pas `/init`.
     """
     @spec init_mimic(Path.t(), Fleet.CapProfile.t()) :: {:ok, Path.t()} | {:error, term()}
-    def init_mimic(workspace, %Fleet.CapProfile{spec: spec, metadata: metadata}) do
+    def init_mimic(workspace, %Fleet.CapProfile{spec: spec} = cap) do
       tpl =
         Application.app_dir(:fleet_project_bootstrap, "priv/templates/claude-md-vanilla.md.eex")
 
@@ -234,7 +234,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
       assigns = [
         project_name: project["name"] || "project",
         project_intent: project["intent"] || "",
-        pod_role: metadata["name"] || "worker"
+        pod_role: Fleet.CapProfile.name(cap)
       ]
 
       with {:ok, tpl_src} <- File.read(tpl),

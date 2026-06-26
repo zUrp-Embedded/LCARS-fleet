@@ -181,8 +181,8 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
-  defp spawn_one(%Fleet.CapProfile{metadata: meta} = cp, spawner) do
-    name = Map.get(meta, "name") || Map.get(meta, :name) || "unknown"
+  defp spawn_one(%Fleet.CapProfile{} = cp, spawner) do
+    name = Fleet.CapProfile.name(cp)
 
     # pod_id DÉTERMINISTE (stable, sans suffixe timestamp) → re-spawn idempotent (même id : reap-orphan +
     # relance si mort, `{:already_started}` no-op si vivant ; plus de holder-leak/accumulation).
