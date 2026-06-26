@@ -10,13 +10,16 @@ kind: CapabilityProfile
 metadata:
   name: starfleet
   containment: none
-  # Coordonnees d'identite du role, lues par le builder de session_id (source unique du QUOI) :
-  # role_index = slot role dans l'UUID hexspeak ; protected = tier epargne par le kill des workers ;
+  # Coordonnees d'identite du role (le metadata EST la source unique du QUOI), lues via Fleet.CapProfile
+  # par le spawner pour minter le session_id hexspeak (l'encodeur SessionId ne catalogue plus) :
+  # role_index = slot role dans l'UUID ; protected = tier epargne par le kill des workers ;
   # fleet_level = instance unique sans dimension projet (repo 0000).
-  # starfleet n'a PAS de pod (hors-fleet, build refuse) ; ces champs reservent son slot R=0.
+  # starfleet n'a PAS de pod aujourd'hui (sysadmin host-natif, hors-fleet) ; ces champs reservent son slot R=0.
   role_index: 0
   protected: true
-  fleet_level: false
+  # fleet_level true : le sysadmin-runtime ne touche pas aux projets -> fleet-level (repo 0000).
+  # Inerte tant que starfleet ne spawne pas de pod.
+  fleet_level: true
 spec:
   scope:
     allowedTools:

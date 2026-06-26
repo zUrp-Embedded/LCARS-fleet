@@ -634,6 +634,44 @@ defmodule Fleet.CapProfileTest do
   end
 
   # ============================================================
+  # Catalogue rôle → session_id : role_index / protected? / fleet_level? / catalogued?
+  # (la source du QUOI a migré ici depuis Fleet.Spawner.SessionId — l'encodeur ne catalogue plus)
+  # ============================================================
+
+  describe "accesseurs catalogue (role_index/protected?/fleet_level?/catalogued?)" do
+    defp role_struct(metadata),
+      do: %Fleet.CapProfile{kind: "CapabilityProfile", metadata: metadata, spec: %{}}
+
+    test "role_index/1 lit metadata.role_index entier, raise si absent ou non-entier" do
+      assert Fleet.CapProfile.role_index(role_struct(%{"role_index" => 3})) == 3
+
+      assert_raise ArgumentError, fn ->
+        Fleet.CapProfile.role_index(role_struct(%{"name" => "ad-hoc"}))
+      end
+
+      assert_raise ArgumentError, fn ->
+        Fleet.CapProfile.role_index(role_struct(%{"role_index" => "3"}))
+      end
+    end
+
+    test "protected?/1 + fleet_level?/1 lisent le bool, défaut false (conservateur) si absent" do
+      assert Fleet.CapProfile.protected?(role_struct(%{"protected" => true}))
+      refute Fleet.CapProfile.protected?(role_struct(%{"protected" => false}))
+      refute Fleet.CapProfile.protected?(role_struct(%{"name" => "x"}))
+
+      assert Fleet.CapProfile.fleet_level?(role_struct(%{"fleet_level" => true}))
+      refute Fleet.CapProfile.fleet_level?(role_struct(%{"fleet_level" => false}))
+      refute Fleet.CapProfile.fleet_level?(role_struct(%{"name" => "x"}))
+    end
+
+    test "catalogued?/1 : true ssi role_index entier présent (test de présence SANS raise)" do
+      assert Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => 0}))
+      refute Fleet.CapProfile.catalogued?(role_struct(%{"name" => "ad-hoc"}))
+      refute Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => "0"}))
+    end
+  end
+
+  # ============================================================
   # Property-based generators
   # ============================================================
 

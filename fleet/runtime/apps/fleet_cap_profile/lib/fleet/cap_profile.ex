@@ -311,6 +311,56 @@ defmodule Fleet.CapProfile do
   def name(%__MODULE__{}), do: raise(ArgumentError, "CapProfile sans name — état interdit")
 
   @doc """
+  Index du rôle dans l'UUID hexspeak (`metadata.role_index`, 0..15) — le nibble `R` du session_id
+  déterministe. C'est ICI que vit le catalogue rôle → slot : l'encodeur `Fleet.Spawner.SessionId`
+  ne catalogue plus, il reçoit cet index. **Source UNIQUE** de cette lecture.
+
+  **Sans défaut fabriqué** : un cap-profile sans `role_index` entier n'est pas un rôle catalogué (pas
+  d'identité hexspeak à reconstruire) → on **raise** (fail-loud, comme `name/1`). Pour brancher SANS
+  risquer le raise, tester d'abord la présence avec `catalogued?/1`.
+  """
+  @spec role_index(t()) :: 0..15
+  def role_index(%__MODULE__{metadata: %{"role_index" => r}}) when is_integer(r), do: r
+
+  def role_index(%__MODULE__{}),
+    do: raise(ArgumentError, "CapProfile sans role_index entier — pas un rôle catalogué")
+
+  @doc """
+  Le rôle est-il un TIER PROTÉGÉ (`metadata.protected`) ? `true` = épargné par le kill des workers
+  (`pkill -f 1badcafe`) et encodé `0badcafe` dans le session_id. **Source UNIQUE** de cette lecture.
+
+  Défaut `false` (non-protégé) si la clé est absente ou non-booléenne : défaut conservateur — un trou
+  de config ne PROMEUT jamais un rôle au tier protégé.
+  """
+  @spec protected?(t()) :: boolean()
+  def protected?(%__MODULE__{metadata: %{"protected" => p}}) when is_boolean(p), do: p
+  def protected?(%__MODULE__{}), do: false
+
+  @doc """
+  Le rôle est-il FLEET-LEVEL (`metadata.fleet_level`) ? `true` = une seule instance, repo toujours
+  `0000` (pas de dimension projet). `false` = project-bound → le session_id EXIGE le repo (sinon
+  collision inter-projet). **Source UNIQUE** de cette lecture.
+
+  Défaut `false` (project-bound) si la clé est absente ou non-booléenne : défaut conservateur — on ne
+  promeut jamais un rôle au statut fleet-level (repo 0000) par accident.
+  """
+  @spec fleet_level?(t()) :: boolean()
+  def fleet_level?(%__MODULE__{metadata: %{"fleet_level" => f}}) when is_boolean(f), do: f
+  def fleet_level?(%__MODULE__{}), do: false
+
+  @doc """
+  Le cap-profile est-il un rôle CATALOGUÉ (porte un `role_index` entier) ? Prédicat SANS raise — c'est
+  le test de présence que `Fleet.Spawner.Pod.deterministic_session_id` interroge AVANT d'appeler
+  `role_index/1` : un rôle non catalogué (ad-hoc, hors-fleet) n'a pas d'identité déterministe à
+  reconstruire → un session_id random y est légitime, pas une erreur.
+  """
+  @spec catalogued?(t()) :: boolean()
+  def catalogued?(%__MODULE__{metadata: meta}) when is_map(meta),
+    do: is_integer(Map.get(meta, "role_index"))
+
+  def catalogued?(%__MODULE__{}), do: false
+
+  @doc """
   Returns the canonical JSON sha256 (lowercase hex) of a composed map
   or struct. Used by callers to assert deterministic composition.
   Underlying map iteration order is irrelevant — the canonical encoder

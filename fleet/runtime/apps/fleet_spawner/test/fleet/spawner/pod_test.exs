@@ -107,7 +107,15 @@ defmodule Fleet.Spawner.PodTest do
   defp valid_profile do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
-      metadata: %{"name" => "engineer", "containment" => "bwrap"},
+      # role_index/protected/fleet_level : le catalogue rôle vit dans le metadata (source du QUOI),
+      # lu par deterministic_session_id. engineer = slot 3, worker (1badcafe), project-bound (repo exigé).
+      metadata: %{
+        "name" => "engineer",
+        "containment" => "bwrap",
+        "role_index" => 3,
+        "protected" => false,
+        "fleet_level" => false
+      },
       spec: %{
         "lifetime_scope" => "one-shot",
         "systemPrompt" => "engineer-role.md",
@@ -460,7 +468,18 @@ defmodule Fleet.Spawner.PodTest do
     end
 
     defp gatekeeper_args(pod_id, opts \\ []) do
-      gk = %{valid_profile() | metadata: %{"name" => "gatekeeper", "containment" => "bwrap"}}
+      # gatekeeper = slot 2, worker (1badcafe), fleet-level (repo 0000) — catalogue dans le metadata.
+      gk = %{
+        valid_profile()
+        | metadata: %{
+            "name" => "gatekeeper",
+            "containment" => "bwrap",
+            "role_index" => 2,
+            "protected" => false,
+            "fleet_level" => true
+          }
+      }
+
       %{cap_profile: gk, ticket_id: "ticket-1", pod_id: pod_id, opts: opts}
     end
 

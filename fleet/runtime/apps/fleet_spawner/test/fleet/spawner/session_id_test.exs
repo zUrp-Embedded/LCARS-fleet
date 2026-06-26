@@ -1,91 +1,70 @@
 defmodule Fleet.Spawner.SessionIdTest do
   @moduledoc """
-  Builder hexspeak déterministe (`Fleet.Spawner.SessionId`) — pur, async.
-  Verrouille le scheme `<T>badcafe-feed-4dad-babe-<REPO4>dec0de<P><R>` (BL-055).
+  Encodeur hexspeak déterministe (`Fleet.Spawner.SessionId.encode/4`) — pur, async.
+  Verrouille le scheme `<T>badcafe-feed-4dad-babe-<REPO4>dec0de<P><R>`. Le catalogue rôle → slot vit
+  désormais dans le cap-profile (`metadata.role_index/protected/fleet_level`, testé côté
+  `Fleet.CapProfileTest`) ; ici on ne teste que l'arithmétique de la string, pas un catalogue.
+  Les UUID restent IDENTIQUES à l'ancien builder (preuve de non-régression : même scheme).
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Spawner.SessionId
 
-  describe "build/3 — UUID hexspeak déterministe" do
-    test "arch = protégé 0badcafe, rôle 01, fleet-level" do
-      assert {:ok, "0badcafe-feed-4dad-babe-0000dec0de01"} = SessionId.build("architect")
+  describe "encode/4 — UUID hexspeak déterministe" do
+    test "ex-architect (role_index 1, protégé, fleet-level repo 0) → 0badcafe-…01" do
+      assert SessionId.encode(1, true, 0) == "0badcafe-feed-4dad-babe-0000dec0de01"
     end
 
-    test "gatekeeper = worker 1badcafe, rôle 02" do
-      assert {:ok, "1badcafe-feed-4dad-babe-0000dec0de02"} = SessionId.build("gatekeeper")
+    test "ex-gatekeeper (role_index 2, worker, fleet-level repo 0) → 1badcafe-…02" do
+      assert SessionId.encode(2, false, 0) == "1badcafe-feed-4dad-babe-0000dec0de02"
     end
 
-    test "engineer = worker, rôle 03" do
-      assert {:ok, "1badcafe-feed-4dad-babe-0000dec0de03"} = SessionId.build("engineer")
+    test "ex-engineer (role_index 3, worker) repo 0000 → 1badcafe-…03" do
+      assert SessionId.encode(3, false, 0) == "1badcafe-feed-4dad-babe-0000dec0de03"
+    end
+
+    test "ex-starfleet (role_index 0, protégé) → 0badcafe-…00 — PLUS de refus de rôle (encodeur total)" do
+      assert SessionId.encode(0, true, 0) == "0badcafe-feed-4dad-babe-0000dec0de00"
     end
 
     test "repo project-bound encodé en 4 chiffres DÉCIMAUX (la forge crée l'id en décimal → grep direct)" do
-      assert {:ok, "1badcafe-feed-4dad-babe-0161dec0de03"} = SessionId.build("engineer", 161)
-      assert {:ok, "1badcafe-feed-4dad-babe-9999dec0de03"} = SessionId.build("engineer", 9999)
+      assert SessionId.encode(3, false, 161) == "1badcafe-feed-4dad-babe-0161dec0de03"
+      assert SessionId.encode(3, false, 9999) == "1badcafe-feed-4dad-babe-9999dec0de03"
     end
 
     test "pool dans le nibble haut de XX (P=1, R=3 → 13)" do
-      assert {:ok, "1badcafe-feed-4dad-babe-0000dec0de13"} =
-               SessionId.build("engineer", 0x0000, 1)
+      assert SessionId.encode(3, false, 0x0000, 1) == "1badcafe-feed-4dad-babe-0000dec0de13"
     end
 
     test "déterministe : même entrée → même UUID" do
-      assert SessionId.build("reviewer", 0x12) == SessionId.build("reviewer", 0x12)
+      assert SessionId.encode(5, false, 0x12) == SessionId.encode(5, false, 0x12)
     end
 
     test "format UUID valide (version 4, variant RFC4122)" do
-      {:ok, id} = SessionId.build("qualifier")
+      id = SessionId.encode(4, false, 0)
       assert id =~ ~r/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
     end
 
-    test "starfleet REFUSÉ — hors-fleet, jamais de pod fleet" do
-      assert {:error, :starfleet_hors_fleet} = SessionId.build("starfleet")
+    test "tier : protégé → 0badcafe, worker → 1badcafe (pkill -f 1badcafe épargne le protégé)" do
+      assert "0badcafe" <> _ = SessionId.encode(1, true, 0)
+      assert "1badcafe" <> _ = SessionId.encode(3, false, 0)
     end
 
-    test "rôle inconnu / slot réservé → erreur typée" do
-      assert {:error, :unknown_role} = SessionId.build("vulcan")
-      assert {:error, :unknown_role} = SessionId.build("")
-    end
-  end
-
-  describe "deterministic?/1 + build!/3 + tier" do
-    test "deterministic? : catalogués oui, starfleet/inconnu non" do
-      assert SessionId.deterministic?("architect")
-      assert SessionId.deterministic?("gatekeeper")
-      refute SessionId.deterministic?("starfleet")
-      refute SessionId.deterministic?("vulcan")
-    end
-
-    test "build! rend la string, ou raise sur refus" do
-      assert "0badcafe-feed-4dad-babe-0000dec0de01" = SessionId.build!("architect")
-      assert_raise ArgumentError, fn -> SessionId.build!("starfleet") end
-    end
-
-    test "fleet_level? : arch + gatekeeper (repo 0000), project-bound & starfleet non" do
-      assert SessionId.fleet_level?("architect")
-      assert SessionId.fleet_level?("gatekeeper")
-      refute SessionId.fleet_level?("engineer")
-      refute SessionId.fleet_level?("starfleet")
-    end
-
-    test "tier : arch protégé (0badcafe), workers (1badcafe) — pkill -f 1badcafe épargne l'arch" do
-      assert {:ok, "0badcafe" <> _} = SessionId.build("architect")
-
-      for w <- ~w(gatekeeper engineer qualifier reviewer consultant) do
-        assert {:ok, "1badcafe" <> _} = SessionId.build(w)
-      end
+    test "entrée hors-borne = bug appelant → function-clause (encodeur total, pas de {:error, _})" do
+      assert_raise FunctionClauseError, fn -> SessionId.encode(16, false, 0) end
+      assert_raise FunctionClauseError, fn -> SessionId.encode(1, true, 10_000) end
     end
   end
 
-  describe "verrou anti-drift seed↔builder" do
-    test "le base seed arch porte EXACTEMENT le session_id du builder (= ce que permanent_boot extrait)" do
+  describe "verrou anti-drift seed↔encodeur" do
+    test "le base seed arch porte EXACTEMENT le session_id encodé (= ce que permanent_boot extrait)" do
       seed = Path.join([:code.priv_dir(:fleet_spawner), "base_seeds", "architect.jsonl"])
 
       # même extraction que Fleet.Spawner.PermanentBoot.base_seed_uuid/1 (1er sessionId).
       [_, first_session_id] = Regex.run(~r/"sessionId":"([^"]+)"/, File.read!(seed))
 
-      assert first_session_id == SessionId.build!("architect")
+      # arch = role_index 1, protégé, fleet-level (repo 0000) — son cap-profile canon le déclare.
+      assert first_session_id == SessionId.encode(1, true, 0x0000)
       assert first_session_id == "0badcafe-feed-4dad-babe-0000dec0de01"
     end
   end
