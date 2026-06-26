@@ -460,10 +460,16 @@ defmodule Fleet.Pilot.HopCompleter do
     |> Map.put(:review_event, event)
   end
 
-  # Verdict de gate → event de review native. `:rework` (gate fail) = REQUEST_CHANGES ; `:advance`/
-  # `:promote` (gate pass) = APPROVED. Le `:review_body` (optionnel) prime sur le corps genere.
+  # Verdict de gate (juge-carte) → event de review native. SEULS les intents gate-PASS approuvent,
+  # et chacun EXPLICITEMENT : `:advance` (un stage suit) et `:promote` (terminal) = APPROVED.
+  # `:rework` (gate fail) = REQUEST_CHANGES. Le `:review_body` (optionnel) prime sur le corps genere.
+  # Defaut FAIL-CLOSED : tout autre intent (un futur `:reject`/`:abandon`, ou un hop qui a perdu son
+  # `:review_event`) ne s'auto-approuve JAMAIS — approuver par OMISSION est le pire defaut pour un
+  # verdict. Le catch-all bloque (REQUEST_CHANGES) ; approuver reste un choix gravé, intent par intent.
+  defp review_event_for_intent(:advance), do: :approve
+  defp review_event_for_intent(:promote), do: :approve
   defp review_event_for_intent(:rework), do: :request_changes
-  defp review_event_for_intent(_), do: :approve
+  defp review_event_for_intent(_), do: :request_changes
 
   # Routage commun selon l'intent. Le trigger du stage suivant = la review-request native
   # (`request_review`), plus `set_assignee` : le producteur reste assigne (Entry), les juges

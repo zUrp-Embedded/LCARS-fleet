@@ -494,6 +494,19 @@ defmodule Fleet.Pilot.HopCompleterTest do
       refute_received {:merge, _}
     end
 
+    test "juge intent inattendu sans :review_event → review FAIL-CLOSED (REQUEST_CHANGES, jamais approve par omission)" do
+      # Dérivation par intent (`:review_event` absent) : un intent qui n'est PAS un gate-pass explicite
+      # (`:advance`/`:promote`) ne doit JAMAIS s'auto-approuver. Ici `:reviewed` (un juge no-carte qui
+      # aurait perdu son verdict) tombe sur le catch-all fail-closed → REQUEST_CHANGES, pas APPROVED.
+      # Sous l'ancien `_ -> :approve`, ce hop validait par omission (le pire défaut pour un verdict).
+      hop = judge_hop(:reviewed, %{role: "qualifier"})
+
+      assert {:ok, :reviewed} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+
+      assert_received {:review, 7, :request_changes, _}
+      refute_received {:merge, _}
+    end
+
     test "②.1d producteur :review (no-carte) → ouvre PR, request_review(qualifier+reviewer), assigne l'humain, unlock issue+PR, PAS de merge" do
       hop = producer_hop(:review)
 

@@ -55,6 +55,24 @@ defmodule Fleet.API.WSTest do
       assert new_state.topics == ["pipeline.*", "pod.*"]
     end
 
+    test "topic non-string ([123]) → rejet à l'admission, error frame, state INCHANGÉ (pas d'ACK)" do
+      # Vecteur non-auth : un topic non-string crasherait topic_matches?/2 en aval. Rejet net,
+      # pas de subscribe → l'état ne doit PAS prendre les topics véreux.
+      msg = Jason.encode!(%{action: "subscribe", topics: [123]})
+
+      assert {[{:text, frame}], state} = WS.websocket_handle({:text, msg}, %{topics: []})
+      assert frame =~ "error"
+      assert state == %{topics: []}
+    end
+
+    test "liste mixte (string + non-string) → rejet à l'admission, state inchangé" do
+      msg = Jason.encode!(%{action: "subscribe", topics: ["pipeline.*", 5]})
+
+      assert {[{:text, frame}], state} = WS.websocket_handle({:text, msg}, %{topics: ["old.*"]})
+      assert frame =~ "error"
+      assert state == %{topics: ["old.*"]}
+    end
+
     test "JSON malformé → error frame, state inchangé" do
       assert {[{:text, frame}], state} = WS.websocket_handle({:text, "not json"}, %{topics: []})
       assert frame =~ "invalid_msg"

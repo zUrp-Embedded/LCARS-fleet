@@ -176,10 +176,13 @@ defmodule Fleet.Pipeline.Gates do
   defmodule Terminal do
     @moduledoc """
     Terminal rules : liste de règles. Chaque entrée peut avoir une clé
-    `"required"` (booléen) :
+    `"required"` (booléen). Défaut STRICT : clé ABSENTE ⇒ `required: true`
+    (`Map.get(rule, "required", true)`) — un critère sans `required` explicite
+    est EXIGÉ, pas optionnel.
 
-      * `required: true` + match négatif → `{:fail, reason}`
-      * `required: false` (ou absent) + match négatif → contribue à
+      * `required: true` **ou clé absente** + match négatif → `{:fail, reason}`
+        (fail-closed)
+      * `required: false` (EXPLICITE) + match négatif → contribue à
         `:nontranchable` (fallback gatekeeper)
       * tous match positifs → `:pass`
 

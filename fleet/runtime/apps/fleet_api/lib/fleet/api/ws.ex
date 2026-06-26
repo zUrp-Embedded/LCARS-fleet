@@ -48,8 +48,16 @@ defmodule Fleet.API.WS do
   def websocket_handle({:text, msg}, state) do
     case Jason.decode(msg) do
       {:ok, %{"action" => "subscribe", "topics" => topics}} when is_list(topics) ->
-        frame = Jason.encode!(%{type: "subscribed", topics: topics})
-        {[{:text, frame}], %{state | topics: topics}}
+        # Le WS est no-auth : un client envoie n'importe quoi. Un topic non-string passerait l'ACK
+        # puis crasherait `topic_matches?` en aval (`String.ends_with?(123, ".*")`) au 1er event —
+        # vecteur de crash non authentifié. On valide donc à l'ADMISSION que CHAQUE topic est une
+        # string ; sinon rejet net, état INCHANGÉ (pas d'ACK, pas de subscribe).
+        if Enum.all?(topics, &is_binary/1) do
+          frame = Jason.encode!(%{type: "subscribed", topics: topics})
+          {[{:text, frame}], %{state | topics: topics}}
+        else
+          {[{:text, ~s|{"type":"error","reason":"topics must be strings"}|}], state}
+        end
 
       {:ok, _other} ->
         {[{:text, ~s|{"type":"error","reason":"unknown action"}|}], state}
