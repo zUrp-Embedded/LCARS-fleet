@@ -34,6 +34,14 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
 - `Fleet.Spawner.Pod.McpProvision` — **île d'écritures FS** du provisioning MCP, extraite de `Pod` (aucun state/Port/timer). Deux entrées, appelées par `Pod` qui lui passe le placement résolu (`pod_dir`, `sandbox_home`) et le backend (`launch_backend()`), jamais le `state` ni de rappel vers un private de Pod :
   - `maybe_provision_mcp_config(pod_dir, sandbox_home, pod_id, capability, backend)` — appelée dans la `with` de `do_project` ; écrit `<pod_dir>/.mcp-fleet.json` (`alwaysLoad:true`) + copie le bridge stdio dans le pod. Retourne `:ok` | `{:error, {:mcp_server_spec_required, backend}}` (backend RÉEL sans spec → fail-loud) | `{:error, reason}` FS (`{:write_failed,…}` / `{:mcp_bridge_provision_failed,…}`), propagé au `with` → `transition_failed`.
   - `mcp_channel_env(pod_id, role, capability)` — env vars MCP (`LCARS_POD_ID`/`LCARS_POD_CAPABILITY`/`LCARS_ROLE`) mergées dans l'env de launch par `do_launch`.
+- `Fleet.Spawner.Pod.LaunchSpec` — **île de lectures PURES** du placement / launch-env, extraite de `Pod` (aucun state/Port/timer, aucune écriture FS). Résout chemins + env vars à partir de `cap_profile`/`opts`/`pod_dir` (passés en arguments par `Pod` ; accès cap-profile via la source unique `Fleet.CapProfile`, jamais le `state` ni de rappel vers un private de `Pod`). Builders d'env mergés par `do_launch` + accesseurs partagés :
+  - `pod_mounts_env(cap_profile, claude_launch_path)` — sérialise `LCARS_POD_MOUNTS` (mount système du dir des launchers ++ mounts catalogue du cap-profile).
+  - `maybe_put_pod_cwd(env, opts, cap_profile, pod_dir)` / `maybe_put_sandbox_home(env, cap_profile, pod_dir)` — posent `LCARS_POD_CWD`(+`_SRC`) et `LCARS_POD_HOME` (relocalisation bwrap).
+  - `launch_home(containment, pod_dir, claude_dir)` — `HOME` du pod (host → parent du `claude_dir` résolu par `Pod` ; bwrap → `pod_dir`).
+  - `permission_mode(cap_profile)` (`LCARS_PERMISSION_MODE`) / `skills_plugins_env(cap_profile)` (`LCARS_SKILLS_PLUGINS`).
+  - `sandbox_home(cap_profile, pod_dir)` — home intra-pod ; aussi passé à `McpProvision` par `do_project`.
+  - `pod_cwd(opts, cap_profile, pod_dir)` — cwd vu par l'agent ; aussi appelé par le recall (`maybe_recall_restore`).
+  - `effective_project(opts, cap_profile)` (mandat > statique) / `rc_project(opts, cap_profile)` (nom de projet slugifié) — **publics car partagés hors-placement** (`pod_completed_payload`, bootstrap workspace, `maybe_checkpoint_seed`) : source unique, pas de re-dérivation côté `Pod`.
 
 ## Chaîne de lancement (ADR-G — RC interactif, plus de `-p`)
 

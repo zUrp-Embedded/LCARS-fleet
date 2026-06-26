@@ -42,6 +42,7 @@ defmodule Fleet.Spawner.Pod do
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Spawner.Pod.LaunchSpec
   alias Fleet.Spawner.Pod.McpProvision
   alias Fleet.SPBuilder
 
@@ -630,7 +631,7 @@ defmodule Fleet.Spawner.Pod do
          :ok <-
            McpProvision.maybe_provision_mcp_config(
              state.pod_dir,
-             sandbox_home(state),
+             LaunchSpec.sandbox_home(state.cap_profile, state.pod_dir),
              state.pod_id,
              state.capability,
              launch_backend()
@@ -874,92 +875,6 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # cwd du pod = la branche CODE (`<pod_dir>/workspace`) quand un projet est cloné — l'agent démarre
-  # DANS son code, pas dans le pod_dir nu (mundo invocado : « sa branche code »). La branche DOC est à
-  # côté (`<pod_dir>/work`). bwrap_launch lit `LCARS_POD_CWD` (défaut `$POD_DIR`). Pas de projet → cwd
-  # = pod_dir (pods permanents/memory-X sans repo).
-  defp maybe_put_pod_cwd(env, state) do
-    env = Map.put(env, "LCARS_POD_CWD", pod_cwd(state))
-
-    # Worker projet : le cwd `/home/<project>` est un REMAP du workspace réel → bwrap doit le binder
-    # (LCARS_POD_CWD_SRC). Orchestrateur (mount catalogue) / permanent / legacy (relocalisés sous le
-    # bind HOME) → déjà bindés, pas de SRC à créer.
-    if rc_project(state),
-      do: Map.put(env, "LCARS_POD_CWD_SRC", pod_cwd_real(state)),
-      else: env
-  end
-
-  # cwd VU PAR L'AGENT dans le pod (= LCARS_POD_CWD + base du slug recall). Pour un pod-PROJET,
-  # l'agent voit `/home/<project>` (containment : ni human ni pod_id) ; bwrap y bind le workspace
-  # RÉEL (`pod_cwd_real`). Sinon (pas de projet nommé) = le réel. Le pod_dir RÉEL ne bouge PAS
-  # (reste `/home/<human>/pods/...`) — seul le CWD intra-pod est remappé.
-  defp pod_cwd(state) do
-    cond do
-      # Worker projet → /home/<project>.
-      project = rc_project(state) -> "/home/#{project}"
-      # Orchestrateur → son mount RW déclaré (arch → /home/projects.work). Data-driven (cap-profile).
-      rw = first_rw_mount(state) -> rw
-      # Permanent / legacy (projet sans rc_name) → le chemin RÉEL relocalisé (pod_dir → sandbox_home).
-      # Home-relocalisé : sandbox_home=/home/.pod → workspace/home relocalisés ; off → pod_dir = identité.
-      true -> String.replace_prefix(pod_cwd_real(state), state.pod_dir, sandbox_home(state))
-    end
-  end
-
-  # Home INTRA-POD. bwrap → /home/.pod (le pod_dir réel masqué derrière) ; sinon (host) → le pod_dir
-  # réel (pas de relocalisation). Doit matcher LCARS_POD_HOME posé par maybe_put_sandbox_home.
-  defp sandbox_home(state) do
-    case cap_profile_containment(state.cap_profile) do
-      "bwrap" -> "/home/.pod"
-      _ -> state.pod_dir
-    end
-  end
-
-  # cwd d'un orchestrateur = son 1er mount RW (DÉJÀ bindé via LCARS_POD_MOUNTS, donc pas de bind à
-  # créer). nil si aucun rw. Réutilise l'accesseur unique cap_profile_mounts (pas de logique dupliquée).
-  defp first_rw_mount(state) do
-    state.cap_profile
-    |> cap_profile_mounts()
-    |> Enum.find_value(fn m -> if (m["mode"] || m[:mode]) == "rw", do: m["path"] || m[:path] end)
-  end
-
-  # Relocalise le home intra-pod (bwrap UNIQUEMENT). LCARS_POD_HOME=/home/.pod → bwrap_launch masque
-  # le pod_dir réel derrière (SANDBOX_HOME) : l'agent ne voit ni human ni pod_id, et `ls /home` ne
-  # montre que les mounts. Host pods (containment none) : pas relocalisés (home réel).
-  defp maybe_put_sandbox_home(env, state) do
-    case cap_profile_containment(state.cap_profile) do
-      "bwrap" -> Map.put(env, "LCARS_POD_HOME", sandbox_home(state))
-      _ -> env
-    end
-  end
-
-  # Workspace RÉEL (hôte) sous le pod_dir : `pod_dir/workspace` si projet cloné, sinon `pod_dir`.
-  # C'est la SOURCE du bind cwd (bwrap mappe ce réel sur le `/home/<project>` vu par l'agent).
-  defp pod_cwd_real(state) do
-    case effective_project(state)["repo_path"] do
-      nil -> state.pod_dir
-      _ -> Fleet.Spawner.pod_workspace_path(state.pod_dir)
-    end
-  end
-
-  # Nom de projet PROPRE depuis `rc_name` (`<project>_<role>`, source canonique sanitizée par le
-  # dispatcher). `nil` si pas de rc_name (pods permanents / admin → pas de remap cwd). Partagé avec le checkpoint.
-  #
-  # BOUNDARY de confinement E : ce `projet` est l'UNIQUE dérivation du nom de projet depuis `rc_name`
-  # (entrée de dispatch/recall, non maîtrisée), et il finit interpolé dans des chemins/segments — cwd
-  # `/home/<project>`, home intra-pod, dossier seed-store. On exige donc qu'il soit un slug ICI, au plus
-  # tôt : un `rc_name` malformé (`../evil_role`, `a/b_role`) → `nil` (pod sans remap ni seed, état neutre)
-  # plutôt qu'un `projet` traversant qui atteindrait un `Path.join`. Source unique → un seul point à tenir.
-  defp rc_project(state) do
-    with rc when is_binary(rc) <- Keyword.get(state.opts, :rc_name),
-         role <- cap_profile_name(state.cap_profile),
-         stripped when stripped != rc <- String.replace_suffix(rc, "_" <> role, ""),
-         true <- Fleet.Slug.valid?(stripped) do
-      stripped
-    else
-      _ -> nil
-    end
-  end
-
   # Recall délibéré. Si `opts[:recall_seed_jsonl]` est fourni (par `Fleet.Spawner.recall`),
   # restaure le seed à `projects/<slugify(cwd)>/<session_id>.jsonl` AVANT le launch ; claude
   # `--resume <session_id>` (resume:true via opts) le retrouve. Gaté : absent → no-op (spawn normal
@@ -975,7 +890,7 @@ defmodule Fleet.Spawner.Pod do
             Fleet.Spawner.SeedStore.restore(
               jsonl,
               state.pod_dir,
-              pod_cwd(state),
+              LaunchSpec.pod_cwd(state.opts, state.cap_profile, state.pod_dir),
               state.session_id
             )
 
@@ -1068,10 +983,13 @@ defmodule Fleet.Spawner.Pod do
     launch_env =
       try do
         human = Keyword.get(state.opts, :human) || runtime_user()
+        # Creds résolus UNE fois (fail-loud si passwd humain introuvable) : sert au HOME host
+        # (`launch_home`, parent du claude_dir) ET à CLAUDE_DIR. Valeur déterministe (config + passwd).
+        claude_dir = claude_dir_for(human)
 
         env =
           state.env_vars
-          |> Map.merge(skills_plugins_env(state.cap_profile))
+          |> Map.merge(LaunchSpec.skills_plugins_env(state.cap_profile))
           |> Map.merge(
             McpProvision.mcp_channel_env(
               state.pod_id,
@@ -1085,7 +1003,7 @@ defmodule Fleet.Spawner.Pod do
           #   none (host)    : HOME = home RÉEL de l'humain → claude lit son `~/.claude` natif. C'est l'auth
           #     `:bind` réalisée NATIVEMENT sur l'hôte (refresh OAuth, full scope, pas de falaise 8h — l'arch
           #     est un pod forever). host_launch.sh ne re-setenv PAS (pas de namespace) : ce HOME EST l'env réel.
-          |> Map.put("HOME", launch_home(containment, human, state.pod_dir))
+          |> Map.put("HOME", LaunchSpec.launch_home(containment, state.pod_dir, claude_dir))
           # Chaîne de session : bwrap_launch les `--setenv` dans le pod,
           # claude_launch les lit `:?` strict (no-boot sinon).
           |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
@@ -1096,7 +1014,7 @@ defmodule Fleet.Spawner.Pod do
           # ferait que neutraliser nos listes. Override par cap-profile `spec.invocation.permission_mode`
           # (ex. "bypassPermissions" pour ré-ouvrir le yolo explicitement). NB : l'enforcement de l'écriture =
           # le MOUNT (RO/RW), pas la tool-list → les juges gardent Write/Edit (rapports), bornés par le mount.
-          |> Map.put("LCARS_PERMISSION_MODE", permission_mode(state.cap_profile))
+          |> Map.put("LCARS_PERMISSION_MODE", LaunchSpec.permission_mode(state.cap_profile))
           # Nom RC Desktop : `<projet>_<role>` fourni par le dispatch (`opts[:rc_name]`) ; défaut = role
           # seul (pods permanents / sans projet). claude_launch le passe en
           # `--remote-control "<nom>"` EXACT (zéro suffixe auto → pas de « noms random qui s'empilent »).
@@ -1113,11 +1031,11 @@ defmodule Fleet.Spawner.Pod do
           # (chaque humain = SA fleet sous son user), le pod = Port BEAM hérite cet UID →
           # ownership/perms/isolation OS gratis, PAS de systemd-run --uid. (Seul starfleet a un user
           # dédié, hors-fleet.)
-          |> Map.put("CLAUDE_DIR", claude_dir_for(human))
+          |> Map.put("CLAUDE_DIR", claude_dir)
           |> maybe_put_vendor_bin(human)
-          |> maybe_put_pod_cwd(state)
+          |> LaunchSpec.maybe_put_pod_cwd(state.opts, state.cap_profile, state.pod_dir)
           # Relocalise le home intra-pod (bwrap only) → bwrap masque le pod_dir réel.
-          |> maybe_put_sandbox_home(state)
+          |> LaunchSpec.maybe_put_sandbox_home(state.cap_profile, state.pod_dir)
           # LCARS_POD_DIR (racine pod vue par l'agent, où vivent watch.sh/turn.flag) n'est PAS posée ici —
           # ce serait du dead code : bwrap_launch `--clearenv` la strippe, et host_launch l'`export`e
           # lui-même (= $POD_DIR). Le SP/watch.sh lisent `${LCARS_POD_DIR:-$HOME}` :
@@ -1126,7 +1044,7 @@ defmodule Fleet.Spawner.Pod do
           # `system_mounts` préfixe le dir des launchers (install) → claude_launch.sh visible dans le sandbox.
           |> Map.put(
             "LCARS_POD_MOUNTS",
-            mounts_env(system_mounts() ++ cap_profile_mounts(state.cap_profile))
+            LaunchSpec.pod_mounts_env(state.cap_profile, claude_launch_path())
           )
 
         {:ok, human, env}
@@ -1317,7 +1235,7 @@ defmodule Fleet.Spawner.Pod do
         # porte l'état, pas de query `pod_info` racy). workspace+base_sha+role
         # suffisent au `Deliverable.publish` côté système. Pod sans projet
         # (memory-X, architect) → payload nu (base), filtré en aval.
-        case effective_project(state) do
+        case LaunchSpec.effective_project(state.opts, state.cap_profile) do
           %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
             base
             |> Map.merge(%{
@@ -1399,7 +1317,7 @@ defmodule Fleet.Spawner.Pod do
   # (`--resume`). Permanents (sans rc_name) → pas de seed-store. Best-effort (SeedStore ne raise
   # jamais ici ; un échec ne casse pas le teardown).
   defp maybe_checkpoint_seed(state) do
-    case rc_project(state) do
+    case LaunchSpec.rc_project(state.opts, state.cap_profile) do
       nil ->
         :ok
 
@@ -1724,14 +1642,6 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Mode permission du pod : `spec.invocation.permission_mode` du cap-profile, défaut
-  # `"default"` (→ `--permission-mode default`, listes allow/deny ENFORCED). Non-vide → claude_launch
-  # passe `--permission-mode <mode>` ; pour ré-ouvrir le bypass, un cap-profile pose `"bypassPermissions"`.
-  defp permission_mode(%Fleet.CapProfile{spec: spec}),
-    do: get_in(spec || %{}, ["invocation", "permission_mode"]) || "default"
-
-  defp permission_mode(_), do: "default"
-
   defp initial_state(args) do
     state_fs_path = state_fs_path_for(args.pod_id, args.cap_profile, args.opts)
     pod_dir = pod_dir_for(args.pod_id, args.cap_profile, args.opts)
@@ -1858,50 +1768,6 @@ defmodule Fleet.Spawner.Pod do
   # interdit le host-native) — pas de re-décodage local du champ.
   defp cap_profile_containment(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.containment(cap)
   defp cap_profile_containment(_), do: "bwrap"
-
-  # Mounts CATALOGUE (cap-profile-driven) : le monde projeté dans le sandbox bwrap est
-  # DÉCLARÉ par le cap-profile (`metadata.mounts`), pas hardcodé dans le launcher. bwrap_launch les bind
-  # (RO/RW) au MÊME path, après la tmpfs /home. Vide ⇒ aucun mount extra (worker bare). Inerte pour
-  # containment: none (host = accès natif).
-  defp cap_profile_mounts(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
-    Map.get(meta, "mounts") || Map.get(meta, :mounts) || []
-  end
-
-  defp cap_profile_mounts(_), do: []
-
-  # Mount SYSTÈME universel : le dir des launchers (= `dirname(claude_launch_path)`) doit être VISIBLE
-  # dans le sandbox bwrap, car `claude_launch.sh` y tourne en PID1. `/usr/local/bin` l'était par accident
-  # (`--ro-bind /usr`) ; depuis l'install (`/local/LCARS_v2/bin`) ou le source dev (`/home/.../bin`) il faut
-  # le bind explicite. Dérivé du path launcher (= paramètre d'install) → suit le déploiement sans hardcode.
-  # Passe par le canal catalogue `LCARS_POD_MOUNTS` (appliqué APRÈS `--tmpfs /home` → re-expose même un
-  # chemin `/home/...`) ⇒ sanctuaire `bwrap_launch.sh` INTACT. Skip si déjà sous `/usr` (couvert par
-  # `--ro-bind /usr` → bind redondant inutile ; cas du défaut legacy `/usr/local/bin`, dont les tests).
-  defp system_mounts do
-    bin = Path.dirname(claude_launch_path())
-    if String.starts_with?(bin, "/usr/"), do: [], else: [%{"mode" => "ro", "path" => bin}]
-  end
-
-  # Sérialise les mounts pour bwrap_launch (`LCARS_POD_MOUNTS`) : une ligne "mode:path" par mount.
-  defp mounts_env(mounts) when is_list(mounts) do
-    mounts
-    |> Enum.map(fn m ->
-      mode = Map.get(m, "mode") || Map.get(m, :mode)
-      path = Map.get(m, "path") || Map.get(m, :path)
-      "#{mode}:#{path}"
-    end)
-    |> Enum.join("\n")
-  end
-
-  defp mounts_env(_), do: ""
-
-  # HOME du pod selon containment. host (none) = home réel de l'humain (claude → `~/.claude`
-  # natif, refresh OAuth) ; bwrap = pod_dir (ignoré sous le sandbox de toute façon). `claude_dir_for/1`
-  # honore l'override config `:claude_dir` (tests) et fail-loud si le passwd de l'humain est introuvable.
-  # NB mono-humain : si `:claude_dir` est overridé (path GLOBAL, non lié à `human`), `Path.dirname` rend
-  # son parent pour TOUT pod host. OK en prod mono-humain (1 runtime = 1 humain) ; en multi-humain il
-  # faudrait dériver le home par-humain via `passwd_home/1` quand l'override n'est pas posé.
-  defp launch_home("none", human, _pod_dir), do: Path.dirname(claude_dir_for(human))
-  defp launch_home(_containment, _human, pod_dir), do: pod_dir
 
   defp scope_for("pipe"), do: "pipes"
   defp scope_for("run"), do: "runs"
@@ -2196,32 +2062,6 @@ defmodule Fleet.Spawner.Pod do
     Fleet.SPBuilder.filter_skills(cap_profile, root)
   end
 
-  @doc false
-  # LCARS_SKILLS_PLUGINS = noms plugins uniques extraits des skills
-  # QUALIFIÉS `plugin:skill` du cap-profile.spec.knowledge.skills.
-  # Consommé par bin/bwrap_launch.sh (mount-bind RO). Un skill
-  # non-qualifié (sans `:`) n'est PAS un plugin → filtré. Vide → pas
-  # d'env var (rétro-compatible). Public @doc false : pure, testable
-  # directement (pas d'intégration mock-backend lourde pour de la
-  # logique triviale).
-  def skills_plugins_env(%Fleet.CapProfile{spec: spec}) do
-    plugins =
-      (spec || %{})
-      |> Map.get("knowledge", %{})
-      |> Kernel.||(%{})
-      |> Map.get("skills", [])
-      |> Kernel.||([])
-      |> Enum.filter(&(is_binary(&1) and String.contains?(&1, ":")))
-      |> Enum.map(&(&1 |> String.split(":", parts: 2) |> hd()))
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.uniq()
-
-    case plugins do
-      [] -> %{}
-      list -> %{"LCARS_SKILLS_PLUGINS" => Enum.join(list, " ")}
-    end
-  end
-
   # Brief du pod = sa TÂCHE (livrée par l'orchestrateur, modèle PUSH).
   # Le travail vient de `opts[:mandate]` (le rail forge-driven construit le mandat via
   # `Pilot.StageDispatcher.build_mandate` ; ou pod direct via `Fleet.Spawner.spawn_pod` opts).
@@ -2485,17 +2325,10 @@ defmodule Fleet.Spawner.Pod do
   # Découplage architectural : c'est `pod.ex` qui câble `ProjectBootstrap` pour les pods
   # avec projet (workspace per-pod). (Le provisioning de workspace per-stage du moteur RAM
   # `Pipeline.WorkspaceProvisioner` est supprimé ; le rail forge-driven épingle la base au clone.)
-  # 2 sites callers d'un même mécanisme, paramétré par cap-profile.
-  # Projet EFFECTIF = celui du MANDAT (`opts[:project]`, injecté par le dispatch ticket→repo via
-  # `spawn_opts`) sinon le cap_profile statique (pods permanents sur un repo fixe). Rend la feature
-  # pod-projet utilisable : un engineer dispatché sur un ticket reçoit LE repo du ticket, pas un projet
-  # figé au catalogue. `%{}` si ni l'un ni l'autre (pods sans projet : memory-X, architect).
-  defp effective_project(state) do
-    Keyword.get(state.opts || [], :project) || get_in(state.cap_profile.spec, ["project"]) || %{}
-  end
-
+  # 2 sites callers d'un même mécanisme, paramétré par cap-profile. Le projet EFFECTIF
+  # (mandat > statique) est résolu par `LaunchSpec.effective_project/2` (source unique).
   defp maybe_bootstrap_project_workspace(state) do
-    project = effective_project(state)
+    project = LaunchSpec.effective_project(state.opts, state.cap_profile)
 
     case project["repo_path"] do
       nil ->
