@@ -1,7 +1,7 @@
 # fleet_pipeline (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-24 (push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
+**Dernière révision** : 2026-06-27 (push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
 **Statut** : lib-only (salvage post-moteur-RAM) — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
@@ -28,7 +28,8 @@ carte YAML, évaluation de gates, et publication de livrable.
 
 | Module | Rôle (vérifié dans le code) |
 |---|---|
-| `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`pipeline-v1.json` flat OU `pipeline-v2.5.json` enveloppe, détecté par présence de la clé `spec`), puis **normalise** (U1) vers la forme interne unique `%{"name", "stages"}`. Schema résolu caché en `:persistent_term` (F088). Fonctions pures ; `opts` (`:pipelines_root`, `:schema_path`) pour tests async |
+| `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`pipeline-v1.json` flat OU `pipeline-v2.5.json` enveloppe, détecté par présence de la clé `spec`), puis **normalise** (U1) vers la forme interne unique `%{"name", "stages"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché en `:persistent_term` (F088). Fonctions pures ; `opts` (`:pipelines_root`, `:schema_path`) pour tests async |
+| `Fleet.Pipeline.GraphValidator` | `validate/1` : linter de GRAPHE **pur** (`stages` → `:ok \| {:error, {kind, detail}}`) sur les invariants inter-stages que le JSON Schema ne peut pas exprimer (il valide chaque stage isolément). Vérifie : `:phantom_edge` (chaque `needs` réfère un stage déclaré — anti-arête-fantôme/typo silencieux), `:no_root`/`:multiple_roots` (exactement 1 racine `needs: []`), `:unreachable` (tout stage atteignable depuis la racine), `:cycle` (DAG, tri topologique de Kahn — couvre aussi « aucun terminal atteignable », condition équivalente pour ce runtime séquentiel), `:fan_out` (aucun stage à ≥2 successeurs ; runtime séquentiel, aligné `CarteNav`). `describe/1` rend le message lisible par invariant (composé par le Loader dans son raise). Autonome — ne dépend PAS de `CarteNav` (la dépendance inverse fleet_pipeline→fleet_pilot est interdite) |
 | `Fleet.Pipeline.Gate` | `@callback evaluate/3` — behaviour générique d'évaluation de gate, vendor-extensible compile-time |
 | `Fleet.Pipeline.Gates` | implémentation du behaviour `Gate`. `evaluate/3` dispatche par type (`:hard \| :soft \| :terminal \| nil`). **Pur** : pour soft / terminal-non-tranchable il retourne `{:dispatch_gatekeeper, info}` (décision d'escalade), il ne spawn rien. Modules imbriqués `Gates.Hard` (subset-match récursif des `rule` map v1) et `Gates.Terminal` (`required`/`:nontranchable` sur `rules` map v1) |
 | `Fleet.Pipeline.Gates.Predicate` | `eval?/2` — évaluateur **pur** des rule-strings v2.5 (`"all_tests_pass"`, `"severity_max != critical"`, conjonction `AND`) contre les `outputs` auto-rapportés. Grammaire bornée au corpus canon ; **fail-closed** (fait absent / type incompatible → faux) |

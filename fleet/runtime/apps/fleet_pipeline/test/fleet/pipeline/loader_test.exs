@@ -177,4 +177,48 @@ defmodule Fleet.Pipeline.LoaderTest do
       end
     end
   end
+
+  describe "load!/2 — validation de graphe" do
+    # Schema-VALIDE (needs = array de strings) mais graphe-INVALIDE : `b` réfère un stage
+    # inexistant. Le schéma laisse passer (contrainte inter-stages inexprimable en draft-07) ;
+    # le linter de graphe raise au load — sinon arête fantôme silencieuse → pipeline figé.
+    test "carte au needs fantôme (passe le schéma) → raise du linter de graphe", %{
+      tmp_dir: tmp_dir
+    } do
+      File.write!(Path.join(tmp_dir, "phantom.yaml"), """
+      name: phantom
+      version: 1
+      stages:
+        a:
+          role: noop
+          profile: empty
+        b:
+          role: noop
+          profile: empty
+          needs: [typo]
+      """)
+
+      assert_raise RuntimeError, ~r/arête fantôme/, fn ->
+        Loader.load!("phantom")
+      end
+    end
+
+    # Garde-fou anti-régression : toutes les cartes canon doivent passer le linter de graphe.
+    # Une carte canon qui échoue ici = soit un vrai bug de carte, soit un invariant trop strict.
+    test "toutes les cartes canon passent le linter" do
+      canon_dir = Application.app_dir(:fleet_pipeline, "priv/canon/pipelines")
+
+      names =
+        canon_dir
+        |> File.ls!()
+        |> Enum.filter(&String.ends_with?(&1, ".yaml"))
+        |> Enum.map(&Path.basename(&1, ".yaml"))
+
+      refute names == [], "aucune carte canon trouvée dans #{canon_dir}"
+
+      for name <- names do
+        assert %{"name" => _, "stages" => _} = Loader.load!(name, pipelines_root: canon_dir)
+      end
+    end
+  end
 end

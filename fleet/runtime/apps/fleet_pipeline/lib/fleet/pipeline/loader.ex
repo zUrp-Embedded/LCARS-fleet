@@ -2,7 +2,13 @@ defmodule Fleet.Pipeline.Loader do
   @moduledoc """
   Pure functions parse YAML `pipelines/<name>.yaml` via `yaml_elixir`
   + validate schema strict `priv/schema/pipeline-v1.json` au load
-  (`ex_json_schema` fail-fast).
+  (`ex_json_schema` fail-fast), puis valide le GRAPHE (`Fleet.Pipeline.GraphValidator`).
+
+  Le schéma valide chaque stage ISOLÉMENT (draft-07 ne sait pas exprimer une
+  contrainte inter-stages) : les invariants de graphe (`needs` → stage existant,
+  racine unique, acyclicité, atteignabilité, pas de fan-out) sont vérifiés APRÈS la
+  normalisation par le linter de graphe, qui raise sur violation (même contrat
+  fail-loud que le schéma).
 
   ## Configuration
 
@@ -54,10 +60,27 @@ defmodule Fleet.Pipeline.Loader do
 
     case ExJsonSchema.Validator.validate(schema, yaml) do
       :ok ->
-        normalize(yaml)
+        pipeline = normalize(yaml)
+        validate_graph!(pipeline, pipeline_name)
+        pipeline
 
       {:error, errors} ->
         raise "Fleet.Pipeline.Loader: schema #{schema_file} invalide pour #{pipeline_name}: #{inspect(errors)}"
+    end
+  end
+
+  # Le schéma a validé chaque stage isolément, jamais le graphe : un `needs` mal
+  # orthographié (arête fantôme) le passe et fige le pipeline en silence. On valide donc
+  # le graphe (data pure, normalisée) et on raise comme le schéma. Le linter vit DANS
+  # fleet_pipeline (autonome) : le Loader ne peut pas dépendre de CarteNav (fleet_pilot),
+  # ce serait une dépendance inverse.
+  defp validate_graph!(%{"stages" => stages}, pipeline_name) do
+    case Fleet.Pipeline.GraphValidator.validate(stages) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        raise "Fleet.Pipeline.Loader: carte #{pipeline_name} — #{Fleet.Pipeline.GraphValidator.describe(reason)}"
     end
   end
 
