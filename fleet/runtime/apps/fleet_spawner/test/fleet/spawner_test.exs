@@ -73,7 +73,15 @@ defmodule Fleet.SpawnerTest do
   defp valid_profile do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
-      metadata: %{"name" => "engineer", "containment" => "bwrap"},
+      # role_index/protected/fleet_level : le catalogue rôle vit dans le metadata (source du QUOI),
+      # lu par deterministic_session_id. engineer = slot 3, worker (1badcafe), project-bound (repo exigé).
+      metadata: %{
+        "name" => "engineer",
+        "containment" => "bwrap",
+        "role_index" => 3,
+        "protected" => false,
+        "fleet_level" => false
+      },
       spec: %{
         "systemPrompt" => "engineer-role.md",
         "scope" => %{"disallowedTools" => @min_disallowed, "git_ops_denied" => []},
