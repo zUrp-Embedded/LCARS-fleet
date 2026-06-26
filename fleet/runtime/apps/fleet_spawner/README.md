@@ -28,6 +28,7 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
 - `Fleet.Spawner.Registry` — `Registry` unique, lookup `pod_id → pid`
 - `Fleet.Spawner.Pod` — GenServer state machine 8 phases
 - `Fleet.Spawner.PodTmux` — ops contrôle host→pod sur le **socket tmux PAR-POD** (kick/clear/alive ; `tmux -S <sock>`, conventions partagées avec `bin/bwrap_launch.sh` ET `bin/host_launch.sh`)
+- `Fleet.Spawner.PodWarden` — reaper **périodique** du substrat (gaté `:start_pod_warden`, défaut true prod / false test ; intervalle `:pod_warden_interval_ms`, défaut 60s). Cf. **Reaper périodique** infra.
 - `Fleet.Spawner.LaunchBackend` (behaviour) + `LauncherPortBackend` (**unique backend réel** ; l'exe du Port = `args.launcher_path`, choisi par `containment` — cf. infra) / `StubBackend` (tests). `LaunchBackend.resolved/0` = **source unique** du backend (config `:launch_backend` + défaut canon `LauncherPortBackend`), lue au spawn ET par la readiness (`fleet_api`) — aucune re-déclaration du défaut.
 - `Fleet.Spawner.SessionId` — builder **PUR** du `session_id` claude déterministe hexspeak (`<T>badcafe-feed-4dad-babe-<REPO4>dec0de<P><R>` : tier-kill `0badcafe`/`1badcafe` + catalogue rôle→R ; `starfleet` refusé = hors-fleet). BL-055 / `CHANTIER-uuid-deterministe.md` ; câblé au spawn (cf. « Session UUID » infra)
 
@@ -70,6 +71,28 @@ Trois actions (`apply_recovery/4`) :
 > serveur-side). Gate OFF ⇒ `:recreate` PARTOUT (session neuve, REPL vivant, la tâche en queue
 > re-drive le travail). Opt-in `true` si un jour `--resume` est prouvé ressusciter une session.
 
+## Reaper périodique (PodWarden)
+
+À chaque tick (`:pod_warden_interval_ms`, 60s), `PodWarden` réconcilie deux empreintes laissées sur
+disque par des pods morts contre les Pods VIVANTS (`Fleet.Spawner.Registry`), avec **grace 2-tick**
+(suspect au 1ᵉʳ tick, nettoyé au 2ᵉ tick consécutif — évite de tuer un pod en cours de boot/re-spawn) :
+
+- **Sockets tmux orphelines** — sock vivante (claude tourne, OAuth+RAM) SANS Pod GenServer (crash du
+  GenServer sous `:temporary` → le bwrap/tmux survit). Reap = `PodTmux.kill_holder/1`.
+- **pod_dirs orphelins (GC du cimetière)** — un pod terminal (`succeeded`/`released`/`killed`) jamais
+  re-mandaté laisse son `pod_dir` (`~/pods/pod_<id>`, **clone git complet**) + son state-dir
+  (`<state_fs_root>/<scope>/<id>/`) sur disque pour toujours (sinon `clear_terminal_snapshot/3` ne les
+  efface qu'au re-spawn du MÊME pod_id). Le warden scanne `Fleet.Spawner.Pod.state_fs_root/0`
+  (`<root>/<scope>/<id>/state.json`), garde les tombstones **terminales ET orphelines** (pod_id absent
+  du Registry) et efface les deux dossiers via le geste PARTAGÉ `Fleet.Spawner.Pod.rm_terminal_artifacts/2`
+  (DRY avec le re-spawn). **Sûr** : le seed `--resume` vit dans le seed-store
+  (`projects.work/<projet>/pods/`), PAS dans le pod_dir → le `rm` ne casse pas le resume ; le pod_dir est
+  reconstructible du SEUL pod_id (`Pod.pod_dir/1` n'utilise pas le cap_profile) → GC par scan sans contexte.
+
+Choix **2-tick** (vs TTL) : même mécanisme prouvé que le sock-reap, aucune config neuve, et le state.json
+ne porte pas de `terminal_at` (un TTL retomberait sur le mtime, signal fragile). Tout le nettoyage est
+`rescue`-protégé (un GC qui lève ne tue pas le warden).
+
 ## Configuration
 
 - `:fleet_spawner, :state_fs_root` — racine FS state recovery (default **`~/.lcars/state`** = home de l'humain, doctrine fleet-sous-l'humain 2026-06-11 ; `/var/lib/lcars` n'est que le FALLBACK si le home est irrésoluble. Override env `LCARS_STATE_FS_ROOT`)
@@ -81,6 +104,8 @@ Trois actions (`apply_recovery/4`) :
 - `:fleet_spawner, :auth_mode` — **`:bind` UNIQUEMENT** (le mode `:token_arg` a été **retiré 2026-06-14**, plus de toggle) : bwrap bind RW le `.credentials.json` humain → refresh OAuth natif (proactif 5min + réactif 401 + lockfile), full scope, pas de falaise ~8h. Posé en `LCARS_AUTH_MODE=bind` (seule valeur acceptée par `bin/bwrap_launch.sh`). L'ex-`:token_arg` fuyait le token en argv ET ne refreshait pas (un eng >8h perdait l'auth en vol) → supprimé. Lecture du creds natif = **source unique** `read_oauth_creds/1` (F117/F118/F119 : gate scope/plan partagent UN parse).
 - `:fleet_spawner, :mcp_server_spec` — config `.mcp-fleet.json` (cf. audit P1 : `nil` toléré, devrait fail-fast pour un vrai backend)
 - `:fleet_spawner, :skills_root` — racine skills à filtrer (default `nil`)
+- `:fleet_spawner, :start_pod_warden` — démarre le reaper périodique (default **true** prod, **false** test)
+- `:fleet_spawner, :pod_warden_interval_ms` — intervalle du tick warden (default **60_000**)
 
 ### `containment: none` — host_launch.sh (LAUNCH-Q, remplace l'ex-TmuxBackend)
 

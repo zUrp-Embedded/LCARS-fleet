@@ -1550,8 +1550,7 @@ defmodule Fleet.Spawner.Pod do
     with {:ok, json} <- File.read(state_fs_path),
          {:ok, %{"phase" => phase_str}} <- Jason.decode(json),
          phase when phase in [:succeeded, :released, :killed] <- phase_from_string(phase_str) do
-      _ = File.rm_rf(Path.dirname(state_fs_path))
-      _ = File.rm_rf(pod_dir_for(pod_id, cap_profile, opts))
+      rm_terminal_artifacts(Path.dirname(state_fs_path), pod_dir_for(pod_id, cap_profile, opts))
 
       Logger.info(
         "Pod.clear_terminal_snapshot #{pod_id}: tombstone :#{phase} effacée (re-spawn FRESH, BL-055)"
@@ -1561,6 +1560,23 @@ defmodule Fleet.Spawner.Pod do
     else
       _ -> :ok
     end
+  end
+
+  @doc """
+  Efface les DEUX dossiers qui composent l'empreinte disque d'un pod terminé : son **state-dir** (le
+  dossier du `state.json`) et son **pod_dir** (clone git + `.lcars`/`.claude`/`tickets`) — deux arbres
+  distincts. Idempotent (`rm_rf` ne lève pas sur l'absent). Geste PARTAGÉ, un seul site qui sait quels
+  deux dossiers forment l'empreinte d'un pod : appelé par `clear_terminal_snapshot/3` (au re-spawn du
+  même pod_id) ET par le `PodWarden` (GC périodique des tombstones orphelines jamais re-mandatées). Ne
+  lit ni ne vérifie la phase : l'appelant garantit déjà que le pod est terminal. Sûr car le seed
+  `--resume` vit ailleurs (seed-store `projects.work/<projet>/pods/`), pas dans le pod_dir.
+  """
+  @spec rm_terminal_artifacts(String.t(), String.t()) :: :ok
+  def rm_terminal_artifacts(state_dir, pod_dir)
+      when is_binary(state_dir) and is_binary(pod_dir) do
+    _ = File.rm_rf(state_dir)
+    _ = File.rm_rf(pod_dir)
+    :ok
   end
 
   defp recover_or_init(args) do
@@ -1807,6 +1823,16 @@ defmodule Fleet.Spawner.Pod do
     :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
   end
 
+  @doc """
+  pod_dir d'un pod : `<pod_dir_root>/pod_<pod_id>` (clone git complet + `.lcars`/`.claude`/`tickets`).
+  Le cap_profile N'ENTRE PAS dans le calcul — le pod_dir ne dépend que du pod_id et de la base — donc il
+  est reconstructible depuis le SEUL pod_id. C'est ce qui rend le GC par scan possible : le `PodWarden`
+  trouve une tombstone (state.json) par son pod_id et en dérive le pod_dir à effacer, sans jamais avoir
+  le cap_profile hors-contexte. Config `:fleet_spawner, :pod_dir_root`, défaut `~/pods`.
+  """
+  @spec pod_dir(String.t(), keyword()) :: String.t()
+  def pod_dir(pod_id, opts \\ []) when is_binary(pod_id), do: pod_dir_for(pod_id, nil, opts)
+
   defp pod_dir_for(pod_id, _cap_profile, opts) do
     # Le pod vit SOUS LE HOME DE L'HUMAIN (= l'user runtime) : `~/pods/pod_<id>`, 0700, isolé OS
     # gratis (le pod hérite de l'UID du runtime). Le home ENCODE déjà l'humain (pas de `/home/<human>`
@@ -1821,16 +1847,22 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp state_fs_path_for(pod_id, cap_profile, opts) do
-    root =
-      Keyword.get(
-        opts,
-        :state_fs_root,
-        Application.get_env(:fleet_spawner, :state_fs_root, default_state_fs_root())
-      )
-
+    root = Keyword.get(opts, :state_fs_root, state_fs_root())
     scope = scope_for(Fleet.CapProfile.lifetime_scope(cap_profile, nil))
     Path.join([root, scope, pod_id, "state.json"])
   end
+
+  @doc """
+  Racine FS des snapshots `state.json` (chaque pod : `<root>/<scope>/<pod_id>/state.json`, scope ∈
+  {pipes,runs,pods}). C'est la base SCANNABLE pour énumérer les tombstones — le pendant côté state de
+  `PodTmux.sock_base/0` côté sockets. Config `:fleet_spawner, :state_fs_root`, défaut `~/.lcars/state`.
+  Public car le `PodWarden` la balaie pour GC les pod_dirs orphelins. Un `opts[:state_fs_root]`
+  (override par-spawn) prime au call-site de `state_fs_path_for`, mais le warden, lui, balaie la racine
+  GLOBALE (config) — les spawns à racine custom (tests) sont hors de son rayon par construction.
+  """
+  @spec state_fs_root() :: String.t()
+  def state_fs_root,
+    do: Application.get_env(:fleet_spawner, :state_fs_root, default_state_fs_root())
 
   # Fleet sous l'humain : le state FS des pods suit le HOME de l'humain (= l'user runtime),
   # comme `~/pods` (pod_dir) et `~/.lcars/workspaces`, PAS `/var/lib/lcars`.
