@@ -1167,6 +1167,75 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
+  describe "terminate/2 — teardown GARANTI du backend sur tout {:stop} (filet OTP)" do
+    # AVANT le fix : `transition_failed` ({:stop, {:shutdown, _}}) ne tardownait PAS le backend → le
+    # process claude/holder restait ORPHELIN vivant (OAuth+RAM) jusqu'au reaper périodique (~60s, si ON).
+    # terminate/2 le garantit : OTP l'appelle sur TOUT {:stop}. On observe via un fake-port VIVANT (sleep)
+    # dont l'os_pid DOIT être SIGTERM au teardown (le port stub est posé par interactive_reply(port:)).
+    test "transition_failed (result_timeout) → terminate/2 tardownent le backend (os_pid SIGTERM)" do
+      Process.flag(:trap_exit, true)
+
+      fake_port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
+      {:os_pid, os_pid} = Port.info(fake_port, :os_pid)
+      assert os_alive?(os_pid)
+
+      StubBackend.set_reply(interactive_reply(port: fake_port))
+
+      pod_id = "pod-term-tf-#{System.unique_integer([:positive])}"
+
+      # Task active → au FIRE du deadline (response_sec=1s), pod_has_active_task? = true → transition_failed.
+      {:ok, _t} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "fais X", role: "engineer"})
+      on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
+
+      args = %{
+        cap_profile: short_timeout(valid_profile()),
+        ticket_id: "t1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id]
+      }
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _, _}, 2_000
+
+      # transition_failed → {:stop, {:shutdown, {:result_timeout, _}}} → terminate/2 → teardown_backend.
+      assert_receive {:EXIT, ^pid, {:shutdown, {:result_timeout, _}}}, 5_000
+
+      Process.sleep(400)
+
+      refute os_alive?(os_pid),
+             "backend orphelin : terminate/2 n'a pas torn down le port sur transition_failed"
+    end
+
+    # Le chemin succès (`do_release`) tardownent DÉJÀ explicitement, AVANT le {:stop} ; terminate/2 re-appelle
+    # teardown_backend (le filet). Le double appel doit être IDEMPOTENT : pas de crash (sinon l'EXIT ne serait
+    # pas :normal), backend bien mort. (Le double `terminate_pod_port` sur port fermé est prouvé unitairement
+    # juste au-dessus ; ici on verrouille le double appel sur le chemin de vie COMPLET.)
+    test "double teardown (do_release explicite + terminate/2 filet) idempotent — EXIT :normal, backend mort" do
+      Process.flag(:trap_exit, true)
+
+      fake_port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
+      {:os_pid, os_pid} = Port.info(fake_port, :os_pid)
+      assert os_alive?(os_pid)
+
+      StubBackend.set_reply(interactive_reply(port: fake_port, session_id: "s-idem"))
+
+      pod_id = "pod-term-idem-#{System.unique_integer([:positive])}"
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "t-idem"))
+      assert_receive {:launch_called, _, _}, 2_000
+      assert %{phase: :monitoring} = GenServer.call(pid, :info)
+
+      # one-shot : submit_result → extract → release (teardown #1) → {:stop, :normal} → terminate (teardown #2).
+      submit_result_event(pod_id, %{"answer" => "OK"})
+
+      assert_receive {:EXIT, ^pid, :normal}, 3_000
+
+      Process.sleep(400)
+
+      refute os_alive?(os_pid),
+             "backend pas torn down sur le chemin succès (do_release + terminate/2)"
+    end
+  end
+
   describe "auth — mode bind unique (token_arg retiré 2026-06-14)" do
     test "tout spawn pose LCARS_AUTH_MODE=bind, jamais de token en clair (LCARS_ANTHROPIC_AUTH_TOKEN)" do
       # Plus de switch : bind est le seul mode (bwrap monte le .credentials.json RW → refresh OAuth natif,

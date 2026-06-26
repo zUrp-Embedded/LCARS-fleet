@@ -203,6 +203,45 @@ defmodule Fleet.Spawner.Pod do
     {:stop, :normal, :ok, new_state}
   end
 
+  # Teardown GARANTI du backend à la mort du Pod GenServer, quel que soit le chemin d'arrêt. OTP appelle
+  # `terminate/2` sur TOUT `{:stop, _, _}` (succès, kill, échec de transition, exit-avant-résultat) ET sur
+  # un crash de callback (raise/exit dans un `handle_*`). On NE trappe PAS les exits : ça ne couvrirait QUE
+  # le `:shutdown` envoyé par le superviseur (cas où le BEAM s'arrête de toute façon et où `--die-with-parent`
+  # fait déjà tomber claude+tmux), au prix de changer la sémantique des liens du process.
+  #
+  # Les chemins succès (`do_release`) et kill (`handle_call :kill`) appellent DÉJÀ `teardown_backend`
+  # explicitement AVANT leur `{:stop}` — on les garde : l'ordre « checkpoint le seed AVANT de tuer le
+  # backend » y est co-localisé, et le `:ok` rendu par `kill_pod` y signifie « teardown fait » (sémantique
+  # synchrone). `terminate/2` est le FILET pour les autres arrêts (échec de transition, exit-avant-résultat)
+  # qui, sinon, laisseraient le backend ORPHELIN vivant : claude continue à brûler l'OAuth et la RAM
+  # jusqu'à ce que le reaper périodique le repêche bien plus tard, et seulement s'il tourne. Couvre aussi
+  # l'orphelin d'un crash de `handle_*` (bonus du callback OTP).
+  #
+  # `teardown_backend/1` est idempotent (Port déjà fermé → la garde `Port.info` court-circuite la branche
+  # port ; le kill tmux = `kill-server` + `pkill` ancré, no-op sur une cible déjà morte ; `File.rm_rf` ne
+  # lève pas sur l'absent), donc le double appel sur les chemins succès/kill est inoffensif. Protégé par
+  # rescue/catch : `terminate` ne doit JAMAIS lever, sinon il masque la vraie raison d'arrêt — un échec de
+  # teardown est loggé, pas propagé.
+  @impl GenServer
+  def terminate(reason, state) do
+    teardown_backend(state)
+    :ok
+  rescue
+    e ->
+      Logger.warning(
+        "pod #{Map.get(state, :pod_id)} terminate: teardown a levé (non-fatal ; arrêt=#{inspect(reason)}) — #{Exception.message(e)}"
+      )
+
+      :ok
+  catch
+    kind, value ->
+      Logger.warning(
+        "pod #{Map.get(state, :pod_id)} terminate: teardown #{kind} (non-fatal ; arrêt=#{inspect(reason)}) — #{inspect(value)}"
+      )
+
+      :ok
+  end
+
   # ============================================================
   # handle_info — cycle de vie du Port
   # ============================================================
