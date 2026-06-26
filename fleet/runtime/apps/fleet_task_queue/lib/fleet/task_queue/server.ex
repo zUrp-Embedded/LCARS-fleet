@@ -494,9 +494,10 @@ defmodule Fleet.TaskQueue.Server do
 
   # Le fleet tourne sous l'humain → défaut home-relatif `~/.lcars/task-queue`, comme le pod state_fs_root
   # (`Fleet.Spawner.Pod.default_state_fs_root`) : un `/var/lib/lcars` en dur ne serait pas ownable hors du
-  # compte `lcars`. Fallback `/var/lib/lcars` si le home est irrésoluble (jamais en pratique).
+  # compte `lcars`. HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un
+  # chemin fabriqué : l'état .lcars ne doit pas se disperser en silence.
   defp default_state_path do
-    Path.join(System.user_home() || "/var/lib/lcars", ".lcars/task-queue/state.json")
+    Path.join(System.user_home!(), ".lcars/task-queue/state.json")
   end
 
   defp persist(%{persist: false} = state), do: state

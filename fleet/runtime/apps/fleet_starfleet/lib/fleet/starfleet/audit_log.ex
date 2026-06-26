@@ -56,8 +56,10 @@ defmodule Fleet.Starfleet.AuditLog do
 
   # Doctrine 2026-06-11 (fleet sous l'humain) : défaut home-relatif `~/.lcars/log`. L'audit LOCAL =
   # convenance forensics ; le vrai audit = forge (commits multi-author, tamper-evident, ADR-E). Avant :
-  # `/var/log/fleet-starfleet.jsonl` (root:adm, non-writable hors root). Fallback `/var/log`.
+  # `/var/log/fleet-starfleet.jsonl` (root:adm, non-writable hors root).
+  # HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un chemin
+  # fabriqué : l'état .lcars ne doit pas se disperser en silence.
   defp default_audit_path do
-    Path.join(System.user_home() || "/var/log", ".lcars/log/fleet-starfleet.jsonl")
+    Path.join(System.user_home!(), ".lcars/log/fleet-starfleet.jsonl")
   end
 end

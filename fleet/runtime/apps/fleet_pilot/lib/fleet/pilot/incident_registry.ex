@@ -337,10 +337,12 @@ defmodule Fleet.Pilot.IncidentRegistry do
       opts[:path] ||
         Application.get_env(:fleet_pilot, :incident_registry_path, "work/system-incidents.json")
 
+  # HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un chemin
+  # fabriqué : l'état .lcars ne doit pas se disperser en silence (p.ex. orphelin sous /tmp).
   defp wal_path(opts),
     do:
       opts[:wal_path] || Application.get_env(:fleet_pilot, :incident_registry_wal_path) ||
-        Path.join([System.user_home() || System.tmp_dir!(), ".lcars", "system-incidents.json"])
+        Path.join([System.user_home!(), ".lcars", "system-incidents.json"])
 
   defp author(opts),
     do:

@@ -1834,10 +1834,11 @@ defmodule Fleet.Spawner.Pod do
 
   # Fleet sous l'humain : le state FS des pods suit le HOME de l'humain (= l'user runtime),
   # comme `~/pods` (pod_dir) et `~/.lcars/workspaces`, PAS `/var/lib/lcars`.
-  # Override via env `LCARS_STATE_FS_ROOT` (→ `config :fleet_spawner, :state_fs_root`). Fallback
-  # `/var/lib/lcars` si home irrésoluble (jamais en pratique).
+  # Override via env `LCARS_STATE_FS_ROOT` (→ `config :fleet_spawner, :state_fs_root`).
+  # HOME irrésoluble = runtime cassé → fail-loud via `runtime_home()` (la source unique locale,
+  # `System.user_home!()`), jamais un chemin fabriqué : l'état .lcars ne doit pas se disperser en silence.
   defp default_state_fs_root,
-    do: Path.join(System.user_home() || "/var/lib/lcars", ".lcars/state")
+    do: Path.join(runtime_home(), ".lcars/state")
 
   # Accesseur UNIQUE du rôle (= metadata.name) pour TOUS les sites du pod (launch/payload/brief/
   # persistance state.json) : sans cette source unique, des défauts divergents inlinés ("engineer"

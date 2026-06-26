@@ -35,9 +35,10 @@ defmodule Fleet.Spawner.PodTmux do
 
   # Fleet tourne sous l'humain → défaut home-relatif `~/.lcars/run/tmux-sock` (un `/run/lcars/tmux-sock`
   # serait un RuntimeDirectory systemd owned `lcars`, non-writable hors d'un daemon-lcars).
-  # Fallback `/run/lcars/tmux-sock` si home irrésoluble (jamais en pratique).
+  # HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un chemin
+  # fabriqué : l'état .lcars ne doit pas se disperser en silence.
   defp default_sock_base,
-    do: Path.join(System.user_home() || "/run/lcars", ".lcars/run/tmux-sock")
+    do: Path.join(System.user_home!(), ".lcars/run/tmux-sock")
 
   @doc """
   Chemin socket du pod — convention bwrap_launch.sh : `<base>/<pod_id>/pod.sock`.
