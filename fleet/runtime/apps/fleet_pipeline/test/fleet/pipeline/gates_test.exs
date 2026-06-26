@@ -181,8 +181,31 @@ defmodule Fleet.Pipeline.GatesTest do
       assert {:fail, _} = Gates.evaluate(stage, %{}, %{})
     end
 
+    test "hard avec rules = LISTE d'items NON-STRING (maps) → {:fail}, pas FunctionClauseError (crash singleton)" do
+      # Asymétrie : le hard gate v2.5 (`is_list(rules)`) appelait `Predicate.eval?` sur
+      # CHAQUE item SANS filtrer les non-strings (le terminal, lui, filtre via
+      # `Enum.all?(rules, &is_binary/1)`). Une carte v1 — ou un override non schématisé —
+      # portant un hard gate à `rules` = liste de maps levait FunctionClauseError dans
+      # Predicate → ça remontait non-wrappé au HopConsumer (singleton) → crash. Le filet
+      # `Predicate.eval?/2` total (item non-string → false) rend la gate fail-closed.
+      stage = %{
+        "gate" => %{"type" => "hard", "rules" => [%{"name" => "r1", "match" => %{"a" => 1}}]}
+      }
+
+      assert {:fail, _} = Gates.evaluate(stage, %{"a" => 1}, %{})
+    end
+
     test "le crash réel : aucune forme de gate ne lève — evaluate est TOTALE" do
-      for gate <- [%{"type" => "hard"}, %{"type" => "x"}, "str", 42, %{}, %{"rules" => 1}] do
+      for gate <- [
+            %{"type" => "hard"},
+            %{"type" => "hard", "rules" => [%{"x" => 1}]},
+            %{"type" => "hard", "rules" => [42, "all_tests_pass"]},
+            %{"type" => "x"},
+            "str",
+            42,
+            %{},
+            %{"rules" => 1}
+          ] do
         result = Gates.evaluate(%{"gate" => gate}, %{"out" => 1}, %{})
 
         assert match?(:pass, result) or match?({:fail, _}, result) or

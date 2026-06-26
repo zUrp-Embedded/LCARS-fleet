@@ -77,4 +77,19 @@ defmodule Fleet.Pipeline.Gates.PredicateTest do
              )
     end
   end
+
+  describe "totalité fail-closed (rule non-string / outputs non-map → false, pas de crash)" do
+    test "rule non-string (map) → faux (le hard gate appelle eval? sur des items non filtrés)" do
+      refute Predicate.eval?(%{"name" => "r1"}, %{"all_tests_pass" => true})
+    end
+
+    test "rule non-string (entier) → faux" do
+      refute Predicate.eval?(42, %{"all_tests_pass" => true})
+    end
+
+    test "rule string mais outputs non-map → faux (jamais FunctionClauseError)" do
+      refute Predicate.eval?("all_tests_pass", "pas une map")
+      refute Predicate.eval?("all_tests_pass", nil)
+    end
+  end
 end

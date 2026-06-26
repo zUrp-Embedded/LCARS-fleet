@@ -66,12 +66,22 @@ defmodule Fleet.Pipeline.Gates.Predicate do
       iex> Fleet.Pipeline.Gates.Predicate.eval?("all_tests_pass", %{})
       false
   """
-  @spec eval?(String.t(), map()) :: boolean()
+  @spec eval?(term(), term()) :: boolean()
   def eval?(rule, outputs) when is_binary(rule) and is_map(outputs) do
     rule
     |> String.split(~r/\s+AND\s+/)
     |> Enum.all?(&eval_term(String.trim(&1), outputs))
   end
+
+  # Clause TOTALE fail-closed. Le hard gate v2.5 applique `eval?` à CHAQUE item de
+  # `rules` sans garantir que ce soit une string : asymétrie connue avec le terminal
+  # gate, qui lui filtre ses items non-string en amont (`Enum.all?(rules, &is_binary/1)`).
+  # Un `rule` non-string (ex. une rule-map d'un gate v1 mal aiguillée vers le chemin
+  # hard v2.5, ou un override non schématisé) — ou des `outputs` non-map — rend `false` :
+  # le hard gate ÉCHOUE (`Enum.all?` devient false → `{:fail, …}` dans Gates), JAMAIS un
+  # FunctionClauseError qui remonterait crasher le HopConsumer (singleton). L'éval est
+  # rendue TOTALE, symétrique du catch-all fail-closed du terminal.
+  def eval?(_rule, _outputs), do: false
 
   defp eval_term(term, outputs) do
     case parse(term) do
