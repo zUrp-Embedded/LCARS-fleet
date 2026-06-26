@@ -1,7 +1,7 @@
 # Fleet.Credentials
 
 **Date** : 2026-05-28
-**Dernière révision** : 2026-06-24 (Shell durci : process-group via setsid + deadline mur — remédiation Lot C)
+**Dernière révision** : 2026-06-27 (Shell durci : process-group via setsid + deadline mur — remédiation Lot C)
 **Statut** : actif — aligné ADR-F PROMOTED 2026-05-26
 **DERIVED FROM** : `01_architecture/adr-f-credentials-anthropic-natif.md` + `04_design-notes/ring0/fleet_credentials.md`
 
@@ -45,6 +45,7 @@ Deux slots cohabitent dans le même fichier :
 
 ## Modules LCARS-side (les seules choses qu'on code)
 
+- `Fleet.Credentials.Gate` — **entrée unique** du gating credentials au spawn-boundary. `validate(claude_dir, cap_profile) :: :ok | {:error, {:credentials_invalid, reason}}` : lit le `.credentials.json` du claudeDir humain UNE fois (bloc `claudeAiOauth`), valide les scopes (par-rôle, via les flags du cap-profile) puis le plan payant, premier échec court-circuite. C'est ici que **vit physiquement** la lecture du fichier (`read_oauth_creds/1`, source unique d'un seul `File.read` + `Jason.decode`) — réconcilie le contrat (le modèle dit déjà « les gates lisent le fichier directement ») avec le code (la lecture était jusque-là dans `Fleet.Spawner.Pod` ; déplacée ici). Transformateur pur, sans état ni process : le chemin du claudeDir est résolu par l'appelant (per-humain) et passé en argument. Consommé par `Fleet.Spawner.Pod` au lancement du pod.
 - `Fleet.Credentials.ScopeValidator` — gate **scope-coverage** : vérifie `oauth_scopes ⊇ scopes_requis_role` en lisant `claudeAiOauth.scopes` depuis `.credentials.json`. Profils :
   - `default` : requiert `user:inference` + `user:sessions:claude_code` (Remote Control)
   - `bridge_enabled` : profil bridge — scopes exacts dérivés au câblage

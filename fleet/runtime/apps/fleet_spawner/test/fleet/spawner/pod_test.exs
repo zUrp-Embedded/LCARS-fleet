@@ -1340,7 +1340,7 @@ defmodule Fleet.Spawner.PodTest do
   describe "mundo invocado — intégration e2e (#1 creds-inject + cwd + doc-mount dans un spawn)" do
     test "pod-projet : auth bind + cwd=workspace + code & doc clonés",
          %{tmp_dir: tmp_dir} do
-      # creds fixture per-human (gate_credentials lit ce claudeDir)
+      # creds fixture per-human (Fleet.Credentials.Gate.validate lit ce claudeDir)
       fake_claude = Path.join(tmp_dir, "fake-claude")
       File.mkdir_p!(fake_claude)
 
@@ -1357,7 +1357,7 @@ defmodule Fleet.Spawner.PodTest do
         })
       )
 
-      # claude_dir override → gate_credentials lit ce claudeDir (validation scope/plan). Mode = bind.
+      # claude_dir override → Fleet.Credentials.Gate.validate lit ce claudeDir (validation scope/plan). Mode = bind.
       Application.put_env(:fleet_spawner, :claude_dir, fake_claude)
       on_exit(fn -> Application.delete_env(:fleet_spawner, :claude_dir) end)
 

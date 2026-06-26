@@ -817,84 +817,6 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Porte credentials au spawn-boundary. Defense-in-depth : APRÈS maybe_put_auth_token
-  # (mode bind). Lit le claudeDir de l'humain UNE fois → valide scope-coverage
-  # (ScopeValidator, par-rôle via flags) + plan payant (PlanValidator). Le binaire claude
-  # impose déjà scope+plan (401) ; ces gates font échouer TÔT au lieu du 1ᵉʳ appel API du
-  # pod. Erreurs taguées `{:credentials_invalid, _}` pour les distinguer de l'auth-token au
-  # call-site.
-  defp gate_credentials(human, cap_profile) do
-    with {:ok, oauth} <- read_oauth_creds(claude_dir_for(human)),
-         :ok <- gate_scopes(oauth, cap_profile),
-         :ok <- gate_plan(oauth) do
-      :ok
-    end
-  end
-
-  # SOURCE UNIQUE de lecture du creds natif `<claude_dir>/.credentials.json` : un seul
-  # File.read + Jason.decode + extraction du bloc `claudeAiOauth`. `gate_credentials/2` (scope+plan)
-  # consomme CE parse — source unique, pas de parsers driftables du même fichier.
-  defp read_oauth_creds(claude_dir) do
-    creds_path = Path.join(claude_dir, ".credentials.json")
-
-    with {:ok, raw} <- File.read(creds_path),
-         {:ok, %{"claudeAiOauth" => oauth}} when is_map(oauth) <- Jason.decode(raw) do
-      {:ok, oauth}
-    else
-      # Hygiène creds : la cause est CATÉGORISÉE, jamais le JSON décodé (qui porte
-      # refreshToken/accessToken). `:malformed_json` (Jason) / `:no_oauth_block` (décodé sans bloc oauth
-      # valide) / posix (File.read) — tous sûrs à propager et logger.
-      {:error, %Jason.DecodeError{}} ->
-        {:error, {:credentials_invalid, {:credentials_unreadable, creds_path, :malformed_json}}}
-
-      {:ok, _decoded} ->
-        {:error, {:credentials_invalid, {:credentials_unreadable, creds_path, :no_oauth_block}}}
-
-      {:error, posix} ->
-        {:error, {:credentials_invalid, {:credentials_unreadable, creds_path, posix}}}
-    end
-  end
-
-  # ScopeValidator par-rôle : les scopes requis dépendent des flags du cap-profile
-  # (bridge_enabled→user:profile, mcp_oauth→user:mcp_servers ; défaut = inference+sessions).
-  defp gate_scopes(oauth, cap_profile) do
-    scopes =
-      case Map.get(oauth, "scopes") do
-        l when is_list(l) -> l
-        # certains formats portent les scopes en string whitespace-séparée (cf. ScopeValidator)
-        s when is_binary(s) -> String.split(s)
-        _ -> []
-      end
-
-    case Fleet.Credentials.ScopeValidator.validate(scopes, role_profile_flags(cap_profile)) do
-      :ok -> :ok
-      {:error, reason} -> {:error, {:credentials_invalid, reason}}
-    end
-  end
-
-  defp gate_plan(oauth) do
-    case Map.get(oauth, "subscriptionType") do
-      type when is_binary(type) ->
-        case Fleet.Credentials.PlanValidator.validate(type) do
-          :ok -> :ok
-          {:error, reason} -> {:error, {:credentials_invalid, reason}}
-        end
-
-      _ ->
-        {:error, {:credentials_invalid, :subscription_type_missing}}
-    end
-  end
-
-  defp role_profile_flags(%Fleet.CapProfile{spec: spec}) do
-    inv = Map.get(spec, "invocation", %{})
-    inv = if is_map(inv), do: inv, else: %{}
-
-    %{
-      "bridge_enabled" => Map.get(inv, "bridge_enabled", false) == true,
-      "mcp_oauth" => Map.get(inv, "mcp_oauth", false) == true
-    }
-  end
-
   # Binaire vendor = celui de l'HUMAIN (~/.local/bin/claude résolu), posé en LCARS_VENDOR_BIN.
   # Honore le contrat bwrap_launch.sh « autorité = LCARS_VENDOR_BIN (spawner) » : sans ça, bwrap
   # retombe sur `command -v claude` = PATH du daemon → binaire système périmé (version périmée,
@@ -1210,7 +1132,7 @@ defmodule Fleet.Spawner.Pod do
       {:ok, human, env} ->
         with {:ok, env} <- maybe_put_auth_token(env, human),
              {:ok, env} <- maybe_put_git_identity(env, human, role),
-             :ok <- gate_credentials(human, state.cap_profile) do
+             :ok <- Fleet.Credentials.Gate.validate(claude_dir_for(human), state.cap_profile) do
           do_launch_backend(state, args, env)
         else
           {:error, {:credentials_invalid, _} = reason} -> transition_failed(state, reason)

@@ -2,8 +2,8 @@ defmodule Fleet.Credentials.ScopeValidator do
   @moduledoc """
   Gate scope-coverage `oauth_scopes ⊇ scopes_requis_role`.
 
-  Câblé au **spawn** (`Fleet.Spawner.Pod` gate_credentials, do_launch) :
-  lit les scopes du `.credentials.json` de l'humain (bindé natif, pas de copie) et refuse le
+  Câblé au **spawn** via `Fleet.Credentials.Gate.validate/2` (appelée par
+  `Fleet.Spawner.Pod` au lancement) : lit les scopes du `.credentials.json` de l'humain (bindé natif, pas de copie) et refuse le
   spawn (`{:credentials_invalid, {:insufficient_scopes, …}}`) si insuffisants. Défense en
   profondeur préflight (le binaire claude impose aussi les scopes via 401, mais on échoue
   tôt et clair côté runtime). Pas de coffre ni `setup-credentials.sh` : le claudeDir humain
