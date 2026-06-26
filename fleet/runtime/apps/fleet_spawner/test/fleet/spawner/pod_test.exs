@@ -9,6 +9,13 @@ defmodule Fleet.Spawner.PodTest do
   # profil spawné DOIT les porter, sinon la gate le rejette (:cap_profile_invalid).
   @min_disallowed ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution tool_search_web)
 
+  # repo_id de test pour les rôles PROJECT-BOUND (engineer = défaut `valid_profile/0`, et tout dérivé).
+  # Leur session_id hexspeak EXIGE un repo résolu : sans lui, le mint REFUSE (raise) au lieu de fabriquer
+  # un UUID random — l'absence de repo signale une forge qui n'a pas résolu l'id (forge down). En prod le
+  # repo vient du dispatcher ; ces tests spawnent le pod en direct, donc on pose ce repo neutre dans `opts`
+  # pour exercer le lifecycle. Valeur arbitraire (≠ des id hexspeak codés en dur ailleurs dans ce fichier).
+  @test_repo_id 7
+
   @moduletag :tmp_dir
 
   # MA-04 — bus stub : `broadcast/2` LÈVE (simule UnregisteredError / PubSub down). Le Pod
@@ -119,7 +126,13 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   defp build_args(pod_id, ticket_id) do
-    %{cap_profile: valid_profile(), ticket_id: ticket_id, pod_id: pod_id, opts: []}
+    # engineer = project-bound → repo_id obligatoire pour minter son session_id déterministe.
+    %{
+      cap_profile: valid_profile(),
+      ticket_id: ticket_id,
+      pod_id: pod_id,
+      opts: [repo_id: @test_repo_id]
+    }
   end
 
   # Repo source pour les tests projet : `main` (src.txt) + branche orpheline `work/ops` (BACKLOG.md).
@@ -301,7 +314,7 @@ defmodule Fleet.Spawner.PodTest do
         cap_profile: valid_profile(),
         ticket_id: "ticket-1",
         pod_id: pod_id,
-        opts: [mandate: mandate]
+        opts: [mandate: mandate, repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
@@ -330,7 +343,7 @@ defmodule Fleet.Spawner.PodTest do
         cap_profile: valid_profile(),
         ticket_id: "ticket-mq",
         pod_id: pod_id,
-        opts: [mandate: mandate]
+        opts: [mandate: mandate, repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
@@ -358,7 +371,7 @@ defmodule Fleet.Spawner.PodTest do
         cap_profile: valid_profile(),
         ticket_id: "ticket-mq2",
         pod_id: pod_id,
-        opts: [mandate: "autre-mandat"]
+        opts: [mandate: "autre-mandat", repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
@@ -388,7 +401,13 @@ defmodule Fleet.Spawner.PodTest do
         })
 
       pod_id = "pod-gitops-#{System.unique_integer([:positive])}"
-      args = %{cap_profile: profile, ticket_id: "ticket-1", pod_id: pod_id, opts: []}
+
+      args = %{
+        cap_profile: profile,
+        ticket_id: "ticket-1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id]
+      }
 
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _, _}, 2_000
@@ -472,17 +491,26 @@ defmodule Fleet.Spawner.PodTest do
       assert content["session_id"] == "0badcafe-feed-4dad-babe-0000dec0de01"
     end
 
-    test "project-bound (engineer) SANS repo_id → random (pas de collision inter-projet)" do
-      pod_id = "pod-eng-rand-#{System.unique_integer([:positive])}"
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
-      assert_receive {:launch_called, _args, _env}, 2_000
-      GenServer.call(pid, :info)
+    test "project-bound (engineer) SANS repo_id → spawn REFUSÉ (identité inconstructible, forge non résolue)" do
+      # engineer = project-bound : son session_id hexspeak EXIGE un repo résolu. SANS repo (la forge n'a
+      # pas rendu l'id — forge down / amont cassé), le mint REFUSE plutôt que de fabriquer un UUID random :
+      # un random masquerait la forge absente et poserait une identité NON reconstructible. Le pod ne
+      # démarre donc PAS — init/1 raise → start_link rend {:error, {%ArgumentError{}, _stacktrace}}, aucun
+      # launch. (Le stop propre côté dispatch est en amont ; ici on fail-loud au mint, dernier recours.)
+      Process.flag(:trap_exit, true)
+      pod_id = "pod-eng-norepo-#{System.unique_integer([:positive])}"
 
-      content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
-      refute content["session_id"] == "1badcafe-feed-4dad-babe-0000dec0de03"
+      assert {:error, {%ArgumentError{message: msg}, _stack}} =
+               spawn_via_supervisor(%{
+                 cap_profile: valid_profile(),
+                 ticket_id: "ticket-1",
+                 pod_id: pod_id,
+                 opts: []
+               })
 
-      assert content["session_id"] =~
-               ~r/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      assert msg =~ "project-bound"
+      assert msg =~ "sans repo_id"
+      refute_received {:launch_called, _args, _env}
     end
 
     test "project-bound (engineer) AVEC repo_id → hexspeak déterministe (repo DÉCIMAL encodé)" do
@@ -543,7 +571,13 @@ defmodule Fleet.Spawner.PodTest do
       cp = valid_profile()
       inv = Map.put(cp.spec["invocation"] || %{}, "permission_mode", "bypassPermissions")
       cp = %{cp | spec: Map.put(cp.spec, "invocation", inv)}
-      args = %{cap_profile: cp, ticket_id: "ticket-1", pod_id: pod_id, opts: []}
+
+      args = %{
+        cap_profile: cp,
+        ticket_id: "ticket-1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id]
+      }
 
       {:ok, _pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, env}, 2_000
@@ -568,7 +602,7 @@ defmodule Fleet.Spawner.PodTest do
           cap_profile: host_profile(),
           ticket_id: "t1",
           pod_id: pod_id,
-          opts: []
+          opts: [repo_id: @test_repo_id]
         })
 
       assert_receive {:launch_called, args, env}, 2_000
@@ -603,7 +637,12 @@ defmodule Fleet.Spawner.PodTest do
       pod_id = "pod-nocont-#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
-        spawn_via_supervisor(%{cap_profile: profile, ticket_id: "t1", pod_id: pod_id, opts: []})
+        spawn_via_supervisor(%{
+          cap_profile: profile,
+          ticket_id: "t1",
+          pod_id: pod_id,
+          opts: [repo_id: @test_repo_id]
+        })
 
       assert_receive {:EXIT, ^pid,
                       {:shutdown, {:allocate_failed, {:cap_profile_invalid, violations}}}},
@@ -634,7 +673,7 @@ defmodule Fleet.Spawner.PodTest do
         cap_profile: short_timeout(valid_profile()),
         ticket_id: "t1",
         pod_id: pod_id,
-        opts: []
+        opts: [repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
@@ -654,7 +693,7 @@ defmodule Fleet.Spawner.PodTest do
         cap_profile: short_timeout(valid_profile()),
         ticket_id: "t1",
         pod_id: pod_id,
-        opts: []
+        opts: [repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
@@ -683,7 +722,13 @@ defmodule Fleet.Spawner.PodTest do
       profile =
         put_in(profile.spec["invocation"], %{"lifetime_scope" => "forever", "max_alive_sec" => 60})
 
-      args = %{cap_profile: short_timeout(profile), ticket_id: "t1", pod_id: pod_id, opts: []}
+      args = %{
+        cap_profile: short_timeout(profile),
+        ticket_id: "t1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id]
+      }
+
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _, _}, 2_000
 
@@ -712,7 +757,7 @@ defmodule Fleet.Spawner.PodTest do
         cap_profile: short_timeout(valid_profile()),
         ticket_id: "t1",
         pod_id: pod_id,
-        opts: [liveness_tick_ms: 100, liveness_probe_fun: probe]
+        opts: [liveness_tick_ms: 100, liveness_probe_fun: probe, repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
@@ -747,7 +792,7 @@ defmodule Fleet.Spawner.PodTest do
         cap_profile: short_timeout(valid_profile()),
         ticket_id: "t1",
         pod_id: pod_id,
-        opts: [liveness_tick_ms: 100, liveness_probe_fun: probe]
+        opts: [liveness_tick_ms: 100, liveness_probe_fun: probe, repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
@@ -770,7 +815,12 @@ defmodule Fleet.Spawner.PodTest do
       pod_id = "pod-g24-invalid-#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
-        spawn_via_supervisor(%{cap_profile: profile, ticket_id: "t1", pod_id: pod_id, opts: []})
+        spawn_via_supervisor(%{
+          cap_profile: profile,
+          ticket_id: "t1",
+          pod_id: pod_id,
+          opts: [repo_id: @test_repo_id]
+        })
 
       assert_receive {:EXIT, ^pid,
                       {:shutdown, {:allocate_failed, {:cap_profile_invalid, violations}}}},
@@ -885,7 +935,13 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply(interactive_reply(session_id: "s-pipe"))
 
       pod_id = "pod-pipe-#{System.unique_integer([:positive])}"
-      args = %{cap_profile: pipe_profile(), ticket_id: "ticket-1", pod_id: pod_id, opts: []}
+
+      args = %{
+        cap_profile: pipe_profile(),
+        ticket_id: "ticket-1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id]
+      }
 
       Bus.subscribe()
 
@@ -919,7 +975,13 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply(interactive_reply(session_id: "s-pipe2"))
 
       pod_id = "pod-pipe-2cy-#{System.unique_integer([:positive])}"
-      args = %{cap_profile: pipe_profile(), ticket_id: "ticket-1", pod_id: pod_id, opts: []}
+
+      args = %{
+        cap_profile: pipe_profile(),
+        ticket_id: "ticket-1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id]
+      }
 
       Bus.subscribe()
 
@@ -961,7 +1023,13 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply(interactive_reply(session_id: "s-pipe-kill"))
 
       pod_id = "pod-pipe-kill-#{System.unique_integer([:positive])}"
-      args = %{cap_profile: pipe_profile(), ticket_id: "ticket-1", pod_id: pod_id, opts: []}
+
+      args = %{
+        cap_profile: pipe_profile(),
+        ticket_id: "ticket-1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id]
+      }
 
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _, _}, 2_000
@@ -1038,7 +1106,8 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply(interactive_reply(session_id: "ignored"))
 
       # valid_profile() = one-shot → /clear chaque cycle, pas de contexte → :recreate.
-      # Le pod relance avec une session NEUVE (UUID), PAS --resume session-old.
+      # Le pod relance avec une session NEUVE (ici le mint déterministe de l'engineer, repo de test résolu),
+      # PAS --resume session-old : ce qu'on prouve = recreate ≠ resume, pas la forme de l'id.
       {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
       assert_receive {:launch_called, args, env}, 2_000
       refute args.session_id == "session-old"
@@ -1224,7 +1293,12 @@ defmodule Fleet.Spawner.PodTest do
       pod_id = "pod-mundo-#{System.unique_integer([:positive])}"
 
       {:ok, _pid} =
-        spawn_via_supervisor(%{cap_profile: profile, ticket_id: "t-1", pod_id: pod_id, opts: []})
+        spawn_via_supervisor(%{
+          cap_profile: profile,
+          ticket_id: "t-1",
+          pod_id: pod_id,
+          opts: [repo_id: @test_repo_id]
+        })
 
       assert_receive {:launch_called, _args, env}, 3_000
 
@@ -1269,7 +1343,8 @@ defmodule Fleet.Spawner.PodTest do
         ticket_id: "t-1",
         pod_id: pod_id,
         opts: [
-          project: %{"repo_path" => src, "base_branch" => "main", "work_branch" => "work/ops"}
+          project: %{"repo_path" => src, "base_branch" => "main", "work_branch" => "work/ops"},
+          repo_id: @test_repo_id
         ]
       }
 

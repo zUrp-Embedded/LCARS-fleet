@@ -7,6 +7,13 @@ defmodule Fleet.SpawnerTest do
   # (Z2 ; cf. cap_profile.ex @disallowed_minimum_strict/_prefix).
   @min_disallowed ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution tool_search_web)
 
+  # repo_id de test pour les rôles PROJECT-BOUND (engineer = `valid_profile/0` et `forever_profile/0`).
+  # Leur session_id hexspeak EXIGE un repo résolu : sans lui le mint REFUSE (raise) plutôt que de fabriquer
+  # un UUID random — l'absence de repo signale une forge non résolue (forge down). En prod le dispatcher
+  # pose ce repo ; ces tests spawnent en direct, donc on le passe en `opts`. Omis volontairement dans les
+  # cas qui DOIVENT échouer avant le mint (refus mandat, pod_id non path-safe).
+  @test_repo_id 7
+
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp_dir} do
@@ -129,7 +136,8 @@ defmodule Fleet.SpawnerTest do
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(valid_profile(), "ticket-mandate",
                  mandate: "répare le bug X",
-                 pod_id: "pod-r18-mandate-#{System.unique_integer([:positive])}"
+                 pod_id: "pod-r18-mandate-#{System.unique_integer([:positive])}",
+                 repo_id: @test_repo_id
                )
     end
 
@@ -137,14 +145,16 @@ defmodule Fleet.SpawnerTest do
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(valid_profile(), "ticket-admin",
                  allow_no_mandate: true,
-                 pod_id: "pod-r18-admin-#{System.unique_integer([:positive])}"
+                 pod_id: "pod-r18-admin-#{System.unique_integer([:positive])}",
+                 repo_id: @test_repo_id
                )
     end
 
     test "long-lived (forever) sans mandat → {:ok, _} (exempté, pull via MCP)" do
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(forever_profile(), "ticket-forever",
-                 pod_id: "pod-r18-forever-#{System.unique_integer([:positive])}"
+                 pod_id: "pod-r18-forever-#{System.unique_integer([:positive])}",
+                 repo_id: @test_repo_id
                )
     end
   end
@@ -155,7 +165,8 @@ defmodule Fleet.SpawnerTest do
     assert {:ok, pid} =
              Fleet.Spawner.spawn_pod(valid_profile(), "ticket-1",
                pod_id: pod_id,
-               allow_no_mandate: true
+               allow_no_mandate: true,
+               repo_id: @test_repo_id
              )
 
     assert is_pid(pid)
@@ -181,7 +192,8 @@ defmodule Fleet.SpawnerTest do
     {:ok, _pid} =
       Fleet.Spawner.spawn_pod(valid_profile(), "ticket-orphan",
         pod_id: pod_id,
-        allow_no_mandate: true
+        allow_no_mandate: true,
+        repo_id: @test_repo_id
       )
 
     # la task active passe à `:cleared` (≠ `:pending`/`:assigned`) — best-effort, async → poll borné
@@ -202,7 +214,12 @@ defmodule Fleet.SpawnerTest do
 
     # 1er spawn → récupère le state_fs_path réel, puis kill (kill_pod n'écrit pas
     # de state sous B — pas de do_release), donc notre snapshot ci-dessous fait foi.
-    {:ok, _} = Fleet.Spawner.spawn_pod(forever_profile(), "ticket-rec", pod_id: pod_id)
+    {:ok, _} =
+      Fleet.Spawner.spawn_pod(forever_profile(), "ticket-rec",
+        pod_id: pod_id,
+        repo_id: @test_repo_id
+      )
+
     assert {:ok, %{state_fs_path: path}} = Fleet.Spawner.pod_info(pod_id)
     :ok = Fleet.Spawner.kill_pod(pod_id)
     assert wait_until(fn -> match?({:error, :not_found}, Fleet.Spawner.pod_info(pod_id)) end)
@@ -225,7 +242,11 @@ defmodule Fleet.SpawnerTest do
     )
 
     # re-spawn même pod_id → recovery_action(forever, :monitoring) = :resume
-    {:ok, _} = Fleet.Spawner.spawn_pod(forever_profile(), "ticket-rec", pod_id: pod_id)
+    {:ok, _} =
+      Fleet.Spawner.spawn_pod(forever_profile(), "ticket-rec",
+        pod_id: pod_id,
+        repo_id: @test_repo_id
+      )
 
     # :resume RE-MATÉRIALISE (:home_projected = do_project a re-composé le SP, pas
     # dans le snapshot) PUIS re-lance (:process_launched). Sans le re-project, sp=nil
@@ -251,7 +272,12 @@ defmodule Fleet.SpawnerTest do
     pod_id = "pod-killclean-#{System.unique_integer([:positive])}"
     {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
 
-    {:ok, _pid} = Fleet.Spawner.spawn_pod(forever_profile(), "ticket-kill", pod_id: pod_id)
+    {:ok, _pid} =
+      Fleet.Spawner.spawn_pod(forever_profile(), "ticket-kill",
+        pod_id: pod_id,
+        repo_id: @test_repo_id
+      )
+
     assert wait_until(fn -> match?({:ok, _}, Fleet.Spawner.pod_info(pod_id)) end)
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
@@ -271,7 +297,11 @@ defmodule Fleet.SpawnerTest do
     pod_id = "pod-kill-#{System.unique_integer([:positive])}"
 
     {:ok, _pid} =
-      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-2", pod_id: pod_id, allow_no_mandate: true)
+      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-2",
+        pod_id: pod_id,
+        allow_no_mandate: true,
+        repo_id: @test_repo_id
+      )
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
     # Mi14 : terminate_child est sync sur la mort, MAIS le cleanup Registry (via monitor) est
@@ -286,10 +316,16 @@ defmodule Fleet.SpawnerTest do
 
   test "spawn_pod uses UUID by default if no :pod_id opt given" do
     {:ok, pid1} =
-      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-1", allow_no_mandate: true)
+      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-1",
+        allow_no_mandate: true,
+        repo_id: @test_repo_id
+      )
 
     {:ok, pid2} =
-      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-2", allow_no_mandate: true)
+      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-2",
+        allow_no_mandate: true,
+        repo_id: @test_repo_id
+      )
 
     assert pid1 != pid2
   end
@@ -302,7 +338,8 @@ defmodule Fleet.SpawnerTest do
     {:ok, _pid} =
       Fleet.Spawner.spawn_pod(valid_profile(), "ticket-count",
         pod_id: pod_id,
-        allow_no_mandate: true
+        allow_no_mandate: true,
+        repo_id: @test_repo_id
       )
 
     # Mi14 : count_children reflète l'enfant actif dès {:ok} de start_child. Le pod que JE
@@ -323,7 +360,8 @@ defmodule Fleet.SpawnerTest do
       {:ok, _pid} =
         Fleet.Spawner.spawn_pod(valid_profile(), "ticket-wake",
           pod_id: pod_id,
-          allow_no_mandate: true
+          allow_no_mandate: true,
+          repo_id: @test_repo_id
         )
 
       # StubBackend ne pose pas tmux_session dans launched → pod_info renvoie

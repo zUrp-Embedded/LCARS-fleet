@@ -1691,11 +1691,23 @@ defmodule Fleet.Spawner.Pod do
 
   defp phase_from_string(_), do: nil
 
-  # session_id DÉTERMINISTE hexspeak (`Fleet.Spawner.SessionId`) si le rôle est catalogué.
-  # - fleet-level (arch, gatekeeper) → repo `0000` (une instance/rôle, pas de collision).
-  # - project-bound (eng, juges) → SEULEMENT si `opts[:repo_id]` fourni ; sinon random (pas de
-  #   collision inter-projet/rework tant que le pipeline ne passe pas le repo).
-  # - starfleet / rôle inconnu → `UUID.uuid4()`. `opts[:session_id]` (seed arch, recall) PRIME au call-site.
+  # session_id DÉTERMINISTE hexspeak (`Fleet.Spawner.SessionId`) calculé au spawn pour un rôle catalogué.
+  # `opts[:session_id]` (seed explicite, ex. recall arch) PRIME au call-site et court-circuite ce calcul.
+  #
+  #   * fleet-level (arch, gatekeeper) — une seule instance par rôle → repo `0000`, pas de dimension projet.
+  #   * project-bound (eng, juges) — l'identité hexspeak EXIGE le repo (sinon collision inter-projet/rework).
+  #       - AVEC repo → on minte l'id déterministe.
+  #       - SANS repo → on REFUSE (raise). L'absence de repo signifie que la forge n'a pas résolu l'id
+  #         (forge down / amont cassé) ; la forge est un organe de LCARS, forge down = stop. On ne fabrique
+  #         JAMAIS un UUID random pour masquer ça — un random silencieux donnerait une fausse identité, NON
+  #         reconstructible. C'est un filet de dernier recours : le stop propre vit en amont (côté dispatch) ;
+  #         ici on fail-loud plutôt que de mentir.
+  #   * rôle NON catalogué (ad-hoc/inconnu, hors `@role_index` de SessionId, ou starfleet hors-fleet) —
+  #     aucune identité déterministe à reconstruire → `UUID.uuid4()` est légitime.
+  #
+  # Pas de clause non-struct : `cap_profile` est TOUJOURS un `%CapProfile{}` ici (l'unique entrée
+  # `Fleet.Spawner.spawn_pod/3` gate sur la struct, et `initial_state`/recovery ne la remplacent jamais) —
+  # un state corrompu doit fail-loud par function-clause, pas pondre un UUID de complaisance.
   defp deterministic_session_id(%Fleet.CapProfile{} = cap_profile, opts) do
     role = Fleet.CapProfile.name(cap_profile)
     repo = Keyword.get(opts, :repo_id)
@@ -1707,12 +1719,15 @@ defmodule Fleet.Spawner.Pod do
       Fleet.Spawner.SessionId.deterministic?(role) and is_integer(repo) ->
         Fleet.Spawner.SessionId.build!(role, repo)
 
+      Fleet.Spawner.SessionId.deterministic?(role) ->
+        raise ArgumentError,
+              "deterministic_session_id: rôle project-bound #{role} sans repo_id — " <>
+                "la forge n'a pas résolu l'id (forge down ?). On ne fabrique pas d'UUID random."
+
       true ->
         UUID.uuid4()
     end
   end
-
-  defp deterministic_session_id(_, _), do: UUID.uuid4()
 
   # Mode permission du pod : `spec.invocation.permission_mode` du cap-profile, défaut
   # `"default"` (→ `--permission-mode default`, listes allow/deny ENFORCED). Non-vide → claude_launch
