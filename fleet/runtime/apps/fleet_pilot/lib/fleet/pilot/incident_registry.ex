@@ -61,21 +61,43 @@ defmodule Fleet.Pilot.IncidentRegistry do
   @doc """
   Enregistre un échec, OU escalade s'il est récurrent (déjà vu). Pour les chemins SANS re-roll (ex.
   `pod.failed` / `result_timeout`) : 1er = `note` (toléré, possiblement random) ; récurrence = escalade
-  (pattern → root-cause). Renvoie `:recorded` | `{:escalated, reason}`.
+  (pattern → root-cause).
+
+  Retour HONNÊTE — il porte ce qui s'est VRAIMENT passé, jamais un succès par optimisme :
+
+    - `:recorded` — 1re fois, incident gravé en mémoire + WAL local.
+    - `{:escalated, ticket_number}` — récurrence, ticket sysadmin RÉELLEMENT ouvert (le numéro le PROUVE).
+    - `{:escalation_failed, reason}` — récurrence détectée mais l'ouverture du ticket a échoué (forge down ?) :
+      AUCUN ticket n'existe. L'incident reste en mémoire/WAL local (gravé au 1er passage), mais l'alarme
+      sysadmin N'est PAS passée → l'appelant doit le CRIER, pas rassurer.
+    - `{:record_failed, reason}` — 1re fois mais l'owner (GenServer) est indisponible : l'incident n'a PAS
+      été gravé du tout (ni mémoire ni WAL) → une récurrence ne pourra pas être détectée.
   """
   @spec record_or_escalate(String.t(), String.t(), term(), keyword()) ::
-          :recorded | {:escalated, term()}
+          :recorded
+          | {:escalated, integer()}
+          | {:escalation_failed, term()}
+          | {:record_failed, term()}
   def record_or_escalate(op, subject, reason, opts \\ [])
       when is_binary(op) and is_binary(subject) do
     sig = signature(op, subject, reason)
 
     if seen_before?(sig, opts) do
       # `escalate_kind` (défaut `:recurrence`) : le wake passe `:sp_suspect` (récurrence = SP, pas l'agent).
-      _ = escalate(Keyword.get(opts, :escalate_kind, :recurrence), subject, reason, sig, opts)
-      {:escalated, reason}
+      # On PROPAGE le résultat de l'escalade : `{:escalated, num}` ne sort QUE si le ticket a vraiment été
+      # ouvert (le numéro le prouve). Forge down → `{:escalation_failed, _}` ; l'incident reste dans le WAL
+      # local (gravé au 1er passage, ce qui a rendu `seen_before?` vrai), seul le TICKET manque.
+      case escalate(Keyword.get(opts, :escalate_kind, :recurrence), subject, reason, sig, opts) do
+        {:ok, num} -> {:escalated, num}
+        {:error, e} -> {:escalation_failed, e}
+      end
     else
-      _ = note(sig, reason, opts)
-      :recorded
+      # `note` grave en mémoire + WAL local. `{:error, _}` = owner indisponible → RIEN n'est gravé : on le
+      # signale (`{:record_failed, _}`), on ne ment pas un `:recorded`.
+      case note(sig, reason, opts) do
+        :ok -> :recorded
+        {:error, e} -> {:record_failed, e}
+      end
     end
   end
 

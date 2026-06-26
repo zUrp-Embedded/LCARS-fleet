@@ -303,6 +303,17 @@ defmodule Fleet.Pilot.HopConsumer do
           Logger.warning(
             "HopConsumer pod.failed #{pod_id} RÉCURRENT → escaladé (#{inspect(reason)})"
           )
+
+        {:escalation_failed, e} ->
+          Logger.error(
+            "HopConsumer pod.failed #{pod_id} RÉCURRENT mais escalade ÉCHOUÉE — AUCUN ticket " <>
+              "sysadmin créé (forge down ?) : #{inspect(e)}"
+          )
+
+        {:record_failed, e} ->
+          Logger.error(
+            "HopConsumer pod.failed #{pod_id} : incident NON gravé (registre indisponible) : #{inspect(e)}"
+          )
       end
     end)
 
@@ -331,6 +342,17 @@ defmodule Fleet.Pilot.HopConsumer do
         {:escalated, _} ->
           Logger.warning(
             "HopConsumer wake.failed #{pod_id} RÉCURRENT → SP suspect, escaladé (#{inspect(reason)})"
+          )
+
+        {:escalation_failed, e} ->
+          Logger.error(
+            "HopConsumer wake.failed #{pod_id} RÉCURRENT (SP suspect) mais escalade ÉCHOUÉE — AUCUN " <>
+              "ticket sysadmin créé (forge down ?) : #{inspect(e)}"
+          )
+
+        {:record_failed, e} ->
+          Logger.error(
+            "HopConsumer wake.failed #{pod_id} : incident NON gravé (registre indisponible) : #{inspect(e)}"
           )
       end
     end)

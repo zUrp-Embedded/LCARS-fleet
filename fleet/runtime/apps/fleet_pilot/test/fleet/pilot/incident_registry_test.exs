@@ -145,7 +145,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
           put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
         )
 
-      assert {:escalated, :result_timeout} =
+      # Retour = le NUMÉRO du ticket (1, rendu par le stub), pas le reason : un `{:escalated, num}` PROUVE
+      # qu'un ticket existe vraiment. (Avant le fix d'honnêteté, le retour portait le reason et sortait même
+      # quand l'ouverture du ticket échouait — cf. le test « forge DOWN » ci-dessous.)
+      assert {:escalated, 1} =
                Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
                  server: name,
                  create_issue_fun: fn repo, title, _b, iopts ->
@@ -156,6 +159,28 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received {:issue, "fleet/lcars", title, iopts}
       assert title =~ "récurrence"
       assert iopts[:labels] == ["error_system"]
+    end
+
+    test "record_or_escalate : déjà vu + forge DOWN → {:escalation_failed,_}, JAMAIS {:escalated} (aucun ticket)",
+         %{tmp_dir: tmp} do
+      sig = Reg.signature("pod", "issue-7-engineer", :result_timeout)
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o ->
+            {:ok, %{content: JSON.encode!(%{sig => %{"count" => 1}}), sha: "s"}}
+          end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      # `create_issue` échoue aux DEUX tentatives (avec assignee, puis fallback label-only) = forge down.
+      # Le retour doit DIRE l'échec — surtout pas un `{:escalated, _}` rassurant alors qu'aucun ticket
+      # sysadmin n'a été ouvert.
+      assert {:escalation_failed, :forge_down} =
+               Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
+                 server: name,
+                 create_issue_fun: fn _r, _t, _b, _o -> {:error, :forge_down} end
+               )
     end
 
     test "record_or_escalate escalate_kind :sp_suspect → ticket pointe le SP (wake récurrent)", %{

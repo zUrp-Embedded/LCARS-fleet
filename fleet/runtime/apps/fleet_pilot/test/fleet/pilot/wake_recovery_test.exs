@@ -1,6 +1,8 @@
 defmodule Fleet.Pilot.WakeRecoveryTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Fleet.Pilot.WakeRecovery
 
   test "wake :ok → :ok, ni re-roll ni note ni escalade" do
@@ -79,6 +81,26 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
     assert_received {:issue, "fleet/lcars", title, _iopts}
     assert title =~ "récurrence"
+  end
+
+  test "fail + DÉJÀ VU + forge DOWN → {:error,{:escalation_failed,_}} (PAS escalated) + log LOUD" do
+    opts = [
+      wake_fun: fn _ -> {:error, :dead} end,
+      seen_before_fun: fn _ -> true end,
+      # échec aux DEUX tentatives (avec assignee + fallback label-only) = forge réellement down
+      create_issue_fun: fn _r, _t, _b, _o -> {:error, :forge_down} end
+    ]
+
+    log =
+      capture_log(fn ->
+        # AUCUN ticket ouvert → le retour DIT l'échec, pas un `:escalated` rassurant ; l'appelant ne croit
+        # pas qu'un sysadmin a été prévenu alors que l'alarme n'est pas passée.
+        assert {:error, {:escalation_failed, :forge_down}} =
+                 WakeRecovery.wake("pod-down", fn -> flunk("pas de re-roll si déjà vu") end, opts)
+      end)
+
+    assert log =~ "escalade"
+    assert log =~ "AUCUN ticket sysadmin"
   end
 
   test "escalade : create_issue échoue avec assignee → fallback label-only" do

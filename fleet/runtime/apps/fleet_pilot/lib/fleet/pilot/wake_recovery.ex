@@ -25,7 +25,9 @@ defmodule Fleet.Pilot.WakeRecovery do
   Réveille `pod_id` avec recovery. `respawn_fun/0` = le re-spawn type-spécifique injecté par l'appelant
   (reboot du gatekeeper ; re-spawn worker). Pré-requis : le mandat est DÉJÀ en file.
 
-  Returns `:ok` | `{:error, term()}` (du re-wake) | `{:error, {:escalated, reason}}`.
+  Returns `:ok` | `{:error, term()}` (du re-wake) | `{:error, {:escalated, reason}}` (ticket sysadmin
+  RÉELLEMENT ouvert) | `{:error, {:escalation_failed, reason}}` (récurrence/re-roll KO mais l'ouverture du
+  ticket a échoué — forge down ? — AUCUN ticket n'existe : retour HONNÊTE, pas un `:escalated` rassurant).
   """
   @spec wake(String.t(), (-> any()), keyword()) :: :ok | {:error, term()}
   def wake(pod_id, respawn_fun, opts \\ [])
@@ -49,8 +51,7 @@ defmodule Fleet.Pilot.WakeRecovery do
         "WakeRecovery #{pod_id} : #{inspect(reason)} DÉJÀ VU (#{sig}) → escalade directe (récurrence)"
       )
 
-      _ = IncidentRegistry.escalate(:recurrence, pod_id, reason, sig, opts)
-      {:error, {:escalated, reason}}
+      escalate_or_signal(:recurrence, pod_id, reason, sig, opts)
     else
       Logger.warning("WakeRecovery #{pod_id} : #{inspect(reason)} (1er — #{sig}) → re-roll")
       _ = respawn_fun.()
@@ -70,8 +71,27 @@ defmodule Fleet.Pilot.WakeRecovery do
           "WakeRecovery #{pod_id} : re-roll n'a pas réparé (#{inspect(err)}) → escalade immédiate"
         )
 
-        _ = IncidentRegistry.escalate(:reroll_failed, pod_id, reason, sig, opts)
+        escalate_or_signal(:reroll_failed, pod_id, reason, sig, opts)
+    end
+  end
+
+  # Ouvre le ticket sysadmin ET propage le résultat CONSTATÉ (jamais `:escalated` par optimisme) :
+  #   - ticket ouvert (`{:ok, _}`) → `{:error, {:escalated, reason}}` (wake raté + alarme passée) ;
+  #   - ouverture KO (`{:error, _}`, forge down ?) → log LOUD + `{:error, {:escalation_failed, _}}` :
+  #     AUCUN ticket n'existe, l'appelant ne doit pas croire qu'un sysadmin a été prévenu.
+  # Partagé par les 2 portes d'escalade (récurrence directe / re-roll épuisé) — même propagation.
+  defp escalate_or_signal(kind, pod_id, reason, sig, opts) do
+    case IncidentRegistry.escalate(kind, pod_id, reason, sig, opts) do
+      {:ok, _num} ->
         {:error, {:escalated, reason}}
+
+      {:error, e} ->
+        Logger.error(
+          "WakeRecovery #{pod_id} : escalade (#{kind}) ÉCHOUÉE — AUCUN ticket sysadmin créé " <>
+            "(forge down ?) : #{inspect(e)} ; l'incident N'EST PAS escaladé"
+        )
+
+        {:error, {:escalation_failed, e}}
     end
   end
 end

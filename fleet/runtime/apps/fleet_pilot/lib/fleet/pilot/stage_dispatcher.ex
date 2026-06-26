@@ -405,16 +405,43 @@ defmodule Fleet.Pilot.StageDispatcher do
            reg_opts
          ) do
       :recorded ->
-        case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
-          {:ok, {_n, producer_role}} ->
-            dispatch_pr_role(:resolve_conflict, pr_number, head, producer_role, ctx)
+        resolve_first_conflict(head, pr_number, ctx)
 
-          :error ->
-            {:skipped, :not_fleet_branch}
-        end
+      {:record_failed, e} ->
+        # Registre indisponible : l'incident n'est PAS mémorisé (une récurrence ne sera pas détectée),
+        # mais c'est bien une 1re occurrence → on tente quand même la résolution. On le CRIE.
+        Logger.error(
+          "StageDispatcher merge-conflict #{subject} : incident NON gravé (registre indisponible) — " <>
+            "1re résolution tentée SANS mémoire (récurrence non détectable) : #{inspect(e)}"
+        )
+
+        resolve_first_conflict(head, pr_number, ctx)
 
       {:escalated, _} ->
         escalate_conflict_to_arch(pr_number, head, reason, ctx)
+
+      {:escalation_failed, e} ->
+        # Récurrence DÉTECTÉE (le conflit persiste) → on escalade à l'arch comme prévu. Mais le ticket
+        # sysadmin (error_system) n'a PAS pu être ouvert (forge down ?) — on le CRIE, on ne rassure pas.
+        Logger.error(
+          "StageDispatcher merge-conflict #{subject} RÉCURRENT mais ticket sysadmin ÉCHOUÉ — AUCUN " <>
+            "ticket error_system créé (forge down ?) ; escalade arch tentée tout de même : #{inspect(e)}"
+        )
+
+        escalate_conflict_to_arch(pr_number, head, reason, ctx)
+    end
+  end
+
+  # 1re occurrence d'un conflit : on tente la résolution (re-spawn du producteur en mode rebase/résous).
+  # Partagé entre `:recorded` (incident gravé) et `{:record_failed, _}` (registre indisponible — on tente
+  # quand même, c'est bien un 1er passage du point de vue dispatch).
+  defp resolve_first_conflict(head, pr_number, ctx) do
+    case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+      {:ok, {_n, producer_role}} ->
+        dispatch_pr_role(:resolve_conflict, pr_number, head, producer_role, ctx)
+
+      :error ->
+        {:skipped, :not_fleet_branch}
     end
   end
 
