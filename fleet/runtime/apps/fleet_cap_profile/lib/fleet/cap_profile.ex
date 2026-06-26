@@ -23,6 +23,10 @@ defmodule Fleet.CapProfile do
 
   # Pas de champ `api_version` : le versioning du schéma est porté par le code
   # (release v2), pas par un champ embarqué dans le YAML.
+  # @enforce_keys : un cap-profile n'existe pas sans ses trois faces (kind/metadata/spec).
+  # Le boundary unique de construction `to_struct/1` les peuple toujours → additif, ne casse
+  # pas la construction normale ; ce qu'il interdit = un `%CapProfile{}` partiel bricolé hors load.
+  @enforce_keys [:kind, :metadata, :spec]
   defstruct [:kind, :metadata, :spec]
 
   @type t :: %__MODULE__{
@@ -288,6 +292,23 @@ defmodule Fleet.CapProfile do
     do: Map.get(meta, "containment") || Map.get(meta, :containment) || "bwrap"
 
   def containment(%__MODULE__{}), do: "bwrap"
+
+  @doc """
+  Le `name` du profil (`metadata["name"]`) — l'identité du rôle/pod portée par le cap-profile.
+
+  **Source UNIQUE** de cette lecture. Lit la clé STRING `"name"` (l'invariant `stringify_keys` du
+  boundary `to_struct/1` garantit les clés string en profondeur).
+
+  **Sans défaut fabriqué** : un cap-profile sans name est un état que le domaine interdit. Si `name`
+  est absent ou vide (`nil`/`""`/clé manquante), on **raise** (fail-loud) — on ne fabrique JAMAIS un
+  `"unknown"`/`"worker"` qui masquerait le trou. À l'usage normal le `minLength: 1` du schema le
+  garantit déjà à `load` ; cet accesseur est le filet pour un struct construit hors `load`.
+  """
+  @spec name(t()) :: String.t()
+  def name(%__MODULE__{metadata: %{"name" => name}}) when is_binary(name) and byte_size(name) > 0,
+    do: name
+
+  def name(%__MODULE__{}), do: raise(ArgumentError, "CapProfile sans name — état interdit")
 
   @doc """
   Returns the canonical JSON sha256 (lowercase hex) of a composed map

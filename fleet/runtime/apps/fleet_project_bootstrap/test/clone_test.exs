@@ -29,7 +29,11 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
   end
 
   defp cap(project) do
-    %Fleet.CapProfile{spec: %{"project" => project}, metadata: %{"name" => "engineer"}}
+    %Fleet.CapProfile{
+      kind: "CapabilityProfile",
+      spec: %{"project" => project},
+      metadata: %{"name" => "engineer"}
+    }
   end
 
   test "clone code (workspace) + doc (work) côte à côte", %{tmp_dir: tmp} do
