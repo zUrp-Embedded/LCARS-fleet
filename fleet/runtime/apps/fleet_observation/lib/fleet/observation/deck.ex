@@ -85,10 +85,11 @@ defmodule Fleet.Observation.Deck do
     }
   end
 
-  # Le rôle peut vivre sous `:role` ou dans la métadonnée cap-profile. On reste
-  # défensif : rôle inconnu → nil (le client affiche l'icône générique).
+  # Le rôle vit UNIQUEMENT sous `:role` (gravé au spawn = nom du cap-profile, la
+  # source unique). Hors catalogue d'affichage `@known_roles` → nil : le client
+  # rend alors l'icône générique.
   defp role_of(info) do
-    role = Map.get(info, :role) || get_in(info, [:cap_profile, "metadata", "name"])
+    role = Map.get(info, :role)
     if is_binary(role) and role in @known_roles, do: role, else: nil
   end
 
