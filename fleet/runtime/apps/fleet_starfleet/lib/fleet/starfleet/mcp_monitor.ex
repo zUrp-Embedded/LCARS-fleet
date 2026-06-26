@@ -148,8 +148,22 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
     Bus.broadcast("fleet.events", event)
   rescue
-    _e in Fleet.Event.UnregisteredError -> :ok
-    _e in [ArgumentError, FunctionClauseError] -> :ok
+    # UnregisteredError = boot-order toléré : registry pas encore peuplé, broadcast
+    # rejeté, pas une alarme — silencieux.
+    _e in Fleet.Event.UnregisteredError ->
+      :ok
+
+    # ArgumentError/FunctionClauseError = bug de CONSTRUCTION de l'event, PAS du boot.
+    # Ne JAMAIS l'avaler en :ok muet : ça masquerait l'alerte « MCP a crashé ». On la
+    # rend VISIBLE puis on neutralise — ce broadcast tourne DANS le GenServer lui-même ;
+    # le laisser crasher redémarrerait le moniteur avec status remis à :unknown, perdant
+    # la détection de transition :ok → :crashed (sa raison d'être), et bouclerait à chaque tick.
+    e in [ArgumentError, FunctionClauseError] ->
+      Logger.error(
+        "MCPMonitor: alerte mcp_server_crashed NON émise — event malformé (bug de construction) : #{inspect(e)}"
+      )
+
+      :ok
   end
 
   defp schedule_check(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do

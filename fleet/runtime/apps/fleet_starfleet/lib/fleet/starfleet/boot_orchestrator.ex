@@ -149,7 +149,21 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
     Bus.broadcast("fleet.events", event)
   rescue
-    _e in Fleet.Event.UnregisteredError -> :ok
-    _e in [ArgumentError, FunctionClauseError] -> :ok
+    # UnregisteredError = boot-order toléré : registry pas encore peuplé, broadcast
+    # rejeté, pas une alarme — silencieux.
+    _e in Fleet.Event.UnregisteredError ->
+      :ok
+
+    # ArgumentError/FunctionClauseError = bug de CONSTRUCTION de l'event, PAS du boot.
+    # Ne JAMAIS l'avaler en :ok muet : ça masquerait un boot_failed / boot_partial. On le
+    # rend VISIBLE puis on neutralise — cette Task :transient ne doit JAMAIS crasher (un
+    # crash relance toute la séquence boot, re-spawnant les pods permanents, et bouclerait
+    # sur un event malformé).
+    e in [ArgumentError, FunctionClauseError] ->
+      Logger.error(
+        "BootOrchestrator: event lifecycle #{type} NON émis — event malformé (bug de construction) : #{inspect(e)}"
+      )
+
+      :ok
   end
 end

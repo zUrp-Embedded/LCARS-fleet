@@ -31,6 +31,8 @@ defmodule Fleet.Starfleet.Cat5Escalator do
       }
   """
 
+  require Logger
+
   alias Fleet.EventRouter.Bus
   alias Fleet.Starfleet.AuditLog
 
@@ -91,10 +93,24 @@ defmodule Fleet.Starfleet.Cat5Escalator do
 
     Bus.broadcast("fleet.events", event)
   rescue
-    # Boot order ou type pas inscrit registry — silent (DN 11 C3.2 fail-loud
-    # est appliqué chantier 3 flip strict_canon).
-    _e in Fleet.Event.UnregisteredError -> :ok
-    _e in [ArgumentError, FunctionClauseError] -> :ok
+    # UnregisteredError = boot-order toléré : le registry n'est pas encore peuplé,
+    # le broadcast est rejeté, on n'en fait pas une alarme — silencieux.
+    _e in Fleet.Event.UnregisteredError ->
+      :ok
+
+    # ArgumentError/FunctionClauseError = bug de CONSTRUCTION de l'event (source hors
+    # enum, ou atome `starfleet.audit_cat5_<src>` jamais préregistré donc refusé par
+    # to_existing_atom), PAS du boot. Ne JAMAIS l'avaler en :ok muet : ça ferait
+    # disparaître en silence une escalade Cat-5 (sévérité max). On le rend VISIBLE puis
+    # on neutralise — l'escalade est déjà au journal d'audit, et ce broadcast tourne
+    # synchrone dans le GenServer DriftMonitor : le laisser crasher tuerait le subscriber
+    # Cat-5 et le ferait boucler sur un producteur malformé.
+    e in [ArgumentError, FunctionClauseError] ->
+      Logger.error(
+        "Cat5Escalator: escalade Cat-5 NON broadcastée — event malformé (bug de construction) : #{inspect(e)}"
+      )
+
+      :ok
   end
 
   defp extract_pod_id(%{"pod_id" => pid}) when is_binary(pid), do: pid

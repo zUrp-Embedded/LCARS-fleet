@@ -2,6 +2,8 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
   use ExUnit.Case, async: false
   @moduletag :tmp_dir
 
+  import ExUnit.CaptureLog
+
   alias Fleet.EventRouter.Bus
   alias Fleet.Starfleet.Cat5Escalator
 
@@ -81,6 +83,22 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
                        payload: %{"source" => "oauth_refresh_failed"}
                      },
                      500
+    end
+
+    test "source dont l'atome canon n'est pas préregistré : escalade NON broadcastée mais LOUD (pas de :ok muet)" do
+      # `starfleet.audit_cat5_bogus_cat5_src` n'a jamais été préregistré → le
+      # `String.to_existing_atom/1` de `broadcast_canon` lève ArgumentError. C'est un
+      # bug de construction de l'event, pas un boot-order : le rescue ne l'avale plus en
+      # silence, il l'émet en Logger.error (sinon une escalade Cat-5 disparaîtrait muette).
+      # `escalate/3` reste :ok (contrat fail-safe), mais AUCUN event canon ne part sur le bus.
+      log =
+        capture_log(fn ->
+          assert :ok = Cat5Escalator.escalate(:bogus_cat5_src, %{"pod_id" => "p1"}, "cid-x")
+        end)
+
+      assert log =~ "escalade Cat-5 NON broadcastée"
+      assert log =~ "event malformé"
+      refute_receive %Fleet.Event{source: :starfleet}, 200
     end
   end
 end
