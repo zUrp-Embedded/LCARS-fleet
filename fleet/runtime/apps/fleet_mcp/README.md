@@ -1,7 +1,7 @@
 # fleet_mcp
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-24 (B2a — gate architecte serveur-side des tools privilégiés)
+**Dernière révision** : 2026-06-26 (B2a — gate architecte serveur-side des tools privilégiés)
 **Statut** : implémenté — serveur MCP pod-facing (`get_task` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
@@ -68,11 +68,14 @@ autorisé. Le vrai architecte (`permanent-architect`) passe ; les workers sont r
 - `create_project` (Rail 1 — onboarding, **architecte only**) — l'architecte démarre un projet neuf :
   `Fleet.Pilot.ProjectOnboard.onboard/2` (repo forge + dual-worktree `main`/`work/ops` + scaffold + push).
   Gate `require_architect` **avant** toute création de repo / écriture disque (un worker ne peut pas onboarder).
-  Le projet créé devient la cible de délégation (`:delegation_repo`) → enchaîner `create_ticket`. Dispatch
+  Le repo créé est RENDU dans le résultat (`repo`/`delegation_target`) → l'arch le passe explicitement à
+  `create_ticket` / `get_ticket_status` (plus de mémoire globale `:delegation_repo`). Dispatch
   runtime (pas de dep compile-time `fleet_pilot`). Seams test : `:project_onboard`, `:pod_resolver`.
-- `get_ticket_status` (suivi, **architecte only**) — lit l'état d'un ticket délégué (issue + PR). Gate
-  `require_architect` (cohérent avec create_ticket/create_project : seul l'architecte suit ses délégations).
-  Lecture seule (`ForgeClient`). Seams test : `:forge_client`, `:pod_resolver`.
+- `get_ticket_status` (suivi, **architecte only**) — lit l'état d'un ticket délégué (issue + PR) du repo
+  passé en `project` (**REQUIS** : `owner/name` du ticket ; pas de routage par défaut — sans `project` →
+  `:project_required`, jamais d'état lu sur le mauvais projet). Gate `require_architect` (cohérent avec
+  create_ticket/create_project : seul l'architecte suit ses délégations). Lecture seule (`ForgeClient`).
+  Seams test : `:forge_client`, `:pod_resolver`.
 
 NB **bridge stdio** (`bin/fleet_mcp_stdio_bridge.py`) : la liste `TOOLS` est hardcodée — tout nouveau tool
 doit y être ajouté en miroir (dette connue : proxifier `tools/list` vers le central). Le pont injecte aussi

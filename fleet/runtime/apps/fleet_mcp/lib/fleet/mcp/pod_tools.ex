@@ -113,18 +113,23 @@ defmodule Fleet.MCP.PodTools do
       name("Get Ticket Status")
 
       description(
-        "Consulte l'état d'un ticket délégué (issue + PR liée) du projet de délégation courant : " <>
-          "issue ouverte/fermée, PR mergée ou non, verdicts de review. Utilise-le pour SUIVRE un " <>
-          "ticket avant d'enchaîner — ex. valider la livraison (issue fermée par le merge) du ticket N " <>
-          "AVANT de poster le ticket N+1. `number` = le numéro d'issue. " <>
+        "Consulte l'état d'un ticket délégué (issue + PR liée) : issue ouverte/fermée, PR mergée " <>
+          "ou non, verdicts de review. Utilise-le pour SUIVRE un ticket avant d'enchaîner — ex. valider " <>
+          "la livraison (issue fermée par le merge) du ticket N AVANT de poster le ticket N+1. " <>
+          "`number` = le numéro d'issue. `project` = le repo `owner/name` DU ticket, **REQUIS** : le repo " <>
+          "retourné par `create_project` (ou celui passé à `create_ticket`). La fleet ne route PLUS par " <>
+          "défaut — sans `project`, la lecture est REFUSÉE (jamais d'état lu sur le mauvais projet). " <>
           "Retourne {\"delivered\":bool,\"issue_state\":...,\"pr\":...}."
       )
     end
 
     input_schema(%{
       "type" => "object",
-      "properties" => %{"number" => %{"type" => "integer"}},
-      "required" => ["number"]
+      "properties" => %{
+        "number" => %{"type" => "integer"},
+        "project" => %{"type" => "string"}
+      },
+      "required" => ["number", "project"]
     })
   end
 
@@ -283,16 +288,22 @@ defmodule Fleet.MCP.PodTools do
 
   # get_ticket_status — canal SUIVI (architecte). Lit l'état d'un ticket délégué pour séquencer le
   # multi-ticket. « Livré » = issue fermée par le merge (`Closes #N`). Lecture seule (ForgeClient).
+  # Le repo est PASSÉ explicitement (`project` = owner/name du ticket), JAMAIS lu d'une mémoire globale :
+  # un arch qui suit plusieurs projets en parallèle nomme CELUI qu'il interroge. Sinon le « dernier projet
+  # onboardé » servirait l'état du mauvais repo (issue_state/delivered faux → multi-ticket mis-séquencé).
   # Suivre l'état d'un ticket délégué reste réservé à l'architecte (cohérent avec create_ticket /
   # create_project) : `require_architect` exige l'identité prouvée ET le rôle architect avant toute lecture.
-  def handle_tool_call("get_ticket_status", %{"number" => number} = args, state)
-      when is_integer(number) do
+  def handle_tool_call(
+        "get_ticket_status",
+        %{"number" => number, "project" => repo} = args,
+        state
+      )
+      when is_integer(number) and is_binary(repo) and repo != "" do
     case require_architect(args) do
       {:error, reason} ->
         {:error, reason, state}
 
       {:ok, _pid, _role} ->
-        repo = Application.get_env(:fleet_mcp, :delegation_repo, "fleet/fleet-test")
         forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 
         issue_state =
@@ -315,6 +326,18 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
+  # get_ticket_status SANS `project` valide → REFUS STRUCTUREL (miroir de create_ticket). Pas de routage
+  # par défaut : un `project` omis lirait l'état sur le dernier projet onboardé → état faux, le multi-ticket
+  # est mis-séquencé. `project` est REQUIS ; sans lui (ou vide), AUCUNE lecture.
+  def handle_tool_call("get_ticket_status", %{"number" => number}, state)
+      when is_integer(number) do
+    {:error,
+     {:project_required,
+      "get_ticket_status REFUSÉ — `project` est REQUIS (le repo `owner/name` du ticket). Aucun routage " <>
+        "par défaut. Passe `project` = le repo retourné par create_project, ou celui passé à create_ticket."},
+     state}
+  end
+
   def handle_tool_call("get_ticket_status", _bad, state) do
     {:error, :invalid_arguments, state}
   end
@@ -325,8 +348,9 @@ defmodule Fleet.MCP.PodTools do
 
   # Séquence d'onboarding proprement dite, exécutée UNIQUEMENT après la gate architecte. Le SYSTÈME exécute
   # la mécanique (repo forge + dual-worktree main/work-ops + scaffold + push) via Fleet.Pilot.ProjectOnboard,
-  # dispatch runtime (pas de dep compile-time fleet_pilot). Le projet créé est posé comme `:delegation_repo`
-  # = contexte/fallback (lu par get_ticket_status). L'arch référence le projet en passant `project:` explicite.
+  # dispatch runtime (pas de dep compile-time fleet_pilot). Le repo créé est RENDU dans le `result`
+  # (`repo`/`delegation_target`) : l'arch le récupère et le passe explicitement à `create_ticket` /
+  # `get_ticket_status`. Aucune mémoire globale de « projet courant » — le repo voyage par argument.
   defp do_create_project(name, args, state) do
     # Seam `:project_onboard` (app-env, comme `:forge_client`/`:pod_resolver`) — défaut = la vraie séquence
     # `Fleet.Pilot.ProjectOnboard` (dispatch runtime, pas de dep compile-time fleet_pilot), overridable en test.
@@ -338,8 +362,6 @@ defmodule Fleet.MCP.PodTools do
 
     case apply(onboard, :onboard, [name, opts]) do
       {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
-        Application.put_env(:fleet_mcp, :delegation_repo, repo)
-
         result = %{
           "status" => "onboarded",
           "repo" => repo,

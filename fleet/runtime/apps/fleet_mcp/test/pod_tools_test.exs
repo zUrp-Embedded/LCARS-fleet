@@ -254,8 +254,9 @@ defmodule Fleet.MCP.PodToolsTest do
       {:ok, :added}
     end
 
-    # F-037 — défaut create_ticket (dernier projet travaillé). Configurable par test via `:test_last_worked`
-    # (défaut `:none` → resolve_target_repo retombe sur `:delegation_repo`).
+    # Stub `last_worked_repo` (réglable par test via `:test_last_worked`, défaut `:none`). create_ticket
+    # exige désormais `project` explicite et ne consulte plus ce « dernier travaillé » : le stub sert au
+    # test « explicite prime » (il rend un repo concurrent que le `project` passé doit ignorer).
     def last_worked_repo(_human, _opts) do
       Application.get_env(:fleet_mcp, :test_last_worked, :none)
     end
@@ -279,16 +280,111 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
+  # Stub forge qui CAPTURE le repo interrogé par get_ticket_status (preuve que le repo vient du `project`
+  # passé en argument, pas d'une mémoire globale). L'état d'issue rendu est réglable par `:test_issue_state`.
+  defmodule RecordingForge do
+    def get_issue(repo, number, _opts) do
+      send(self(), {:get_issue, repo, number})
+      {:ok, %{"state" => Application.get_env(:fleet_mcp, :test_issue_state, "open")}}
+    end
+
+    def list_open_pulls(_repo, _opts), do: {:ok, []}
+  end
+
+  describe "get_ticket_status (suivi arch — repo PASSÉ en `project`, plus de global mutable)" do
+    setup do
+      prev_forge = Application.get_env(:fleet_mcp, :forge_client)
+      prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
+
+      Application.put_env(:fleet_mcp, :forge_client, RecordingForge)
+
+      # Suivre un ticket est un acte d'ARCHITECTE : le resolver grave le rôle architect sur le pod prouvé.
+      Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
+        {:ok, %{role: "architect", capability: cap_for(pod_id)}}
+      end)
+
+      on_exit(fn ->
+        restore(:forge_client, prev_forge)
+        restore(:pod_resolver, prev_resolver)
+        Application.delete_env(:fleet_mcp, :test_issue_state)
+      end)
+
+      :ok
+    end
+
+    test "lit l'état du repo PASSÉ dans `project` (pas d'un projet courant globalisé)" do
+      pod = uniq("pod-arch")
+
+      assert {:ok, %{content: [%{"text" => txt}]}, %{}} =
+               PodTools.handle_tool_call(
+                 "get_ticket_status",
+                 pod_args(pod, %{"number" => 42, "project" => "fleet/specific"}),
+                 %{}
+               )
+
+      # Le repo interrogé côté forge EST le `project` passé — pas un « dernier projet onboardé ». C'est le
+      # cœur du fix : deux projets suivis en parallèle ne se contaminent plus via un global réécrit.
+      assert_received {:get_issue, "fleet/specific", 42}
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["repo"] == "fleet/specific"
+      assert result["issue"] == 42
+    end
+
+    test "`delivered: true` quand l'issue est fermée (séquencement multi-ticket)" do
+      Application.put_env(:fleet_mcp, :test_issue_state, "closed")
+      pod = uniq("pod-arch")
+
+      assert {:ok, %{content: [%{"text" => txt}]}, %{}} =
+               PodTools.handle_tool_call(
+                 "get_ticket_status",
+                 pod_args(pod, %{"number" => 7, "project" => "fleet/other"}),
+                 %{}
+               )
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["issue_state"] == "closed"
+      assert result["delivered"] == true
+    end
+
+    test "REFUSE si `project` omis — pas de routage par défaut (miroir create_ticket)" do
+      # Le pod est légitime (capability OK) ET architecte — c'est le `project` manquant qui refuse. Sans
+      # repo explicite, get_ticket_status lirait l'état du mauvais projet (le trou qu'on ferme).
+      pod = uniq("pod-arch")
+
+      assert {:error, {:project_required, msg}, %{}} =
+               PodTools.handle_tool_call(
+                 "get_ticket_status",
+                 pod_args(pod, %{"number" => 42}),
+                 %{}
+               )
+
+      assert msg =~ "project"
+      # Refus STRUCTUREL avant toute mécanique : aucune lecture forge tentée.
+      refute_received {:get_issue, _, _}
+    end
+
+    test "REFUSE si `project` vide" do
+      pod = uniq("pod-arch")
+
+      assert {:error, {:project_required, _}, %{}} =
+               PodTools.handle_tool_call(
+                 "get_ticket_status",
+                 pod_args(pod, %{"number" => 42, "project" => ""}),
+                 %{}
+               )
+
+      refute_received {:get_issue, _, _}
+    end
+  end
+
   describe "create_ticket (délégation arch → ticket forge prêt pour le poller)" do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
       prev_forge = Application.get_env(:fleet_mcp, :forge_client)
-      prev_repo = Application.get_env(:fleet_mcp, :delegation_repo)
       prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
       prev_tokdir = Application.get_env(:fleet_credentials, :role_tokens_dir)
       Application.put_env(:fleet_mcp, :forge_client, StubForge)
-      Application.put_env(:fleet_mcp, :delegation_repo, "fleet/demo")
 
       # Déléguer est un acte d'ARCHITECTE : le `:pod_resolver` doit rendre le rôle `architect` (sinon
       # `require_architect` refuse `:forbidden_not_architect`). Le token du compte architect doit aussi être
@@ -302,7 +398,6 @@ defmodule Fleet.MCP.PodToolsTest do
 
       on_exit(fn ->
         restore(:forge_client, prev_forge)
-        restore(:delegation_repo, prev_repo)
         restore(:pod_resolver, prev_resolver)
 
         if prev_tokdir,
@@ -556,7 +651,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @privileged_tools [
       {"create_project", %{"name" => "demo-proj"}},
       {"create_ticket", %{"title" => "T", "brief" => "B", "project" => "fleet/demo"}},
-      {"get_ticket_status", %{"number" => 1}}
+      {"get_ticket_status", %{"number" => 1, "project" => "fleet/demo"}}
     ]
 
     # Rôles non autorisés à déléguer/onboarder/suivre. `nil` modélise un pod sans rôle gravé (binding
@@ -567,12 +662,10 @@ defmodule Fleet.MCP.PodToolsTest do
       prev_forge = Application.get_env(:fleet_mcp, :forge_client)
       prev_onboard = Application.get_env(:fleet_mcp, :project_onboard)
       prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
-      prev_repo = Application.get_env(:fleet_mcp, :delegation_repo)
       prev_tokdir = Application.get_env(:fleet_credentials, :role_tokens_dir)
 
       Application.put_env(:fleet_mcp, :forge_client, StubForge)
       Application.put_env(:fleet_mcp, :project_onboard, StubOnboard)
-      Application.put_env(:fleet_mcp, :delegation_repo, "fleet/demo")
       Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
       File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
 
@@ -580,7 +673,6 @@ defmodule Fleet.MCP.PodToolsTest do
         restore(:forge_client, prev_forge)
         restore(:project_onboard, prev_onboard)
         restore(:pod_resolver, prev_resolver)
-        restore(:delegation_repo, prev_repo)
 
         if prev_tokdir,
           do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev_tokdir),

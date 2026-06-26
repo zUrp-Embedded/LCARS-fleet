@@ -467,7 +467,8 @@ defmodule Fleet.Pilot.ForgeClient do
   mauvais). Mécanique : issue-search global `assigned_by=<human>` → tri
   CLIENT-SIDE par `updated_at` desc (le `sort=` Gitea s'est révélé peu fiable) → 1ʳᵉ issue dont le repo passe
   `collaborator?/3` (l'`assigned_by` seul inclut des repos non-collaborateur, ex. vieux tickets de test). `:none`
-  si rien (fleet neuve / forge down) → l'appelant retombe sur le fallback config `:delegation_repo`.
+  si rien (fleet neuve / forge down). Il n'y a plus de repli config global : le repo cible d'une délégation
+  est désormais passé explicitement par l'arch (`project`), jamais lu d'une mémoire de « projet courant ».
   """
   @spec last_worked_repo(String.t(), Keyword.t()) :: {:ok, String.t()} | :none
   def last_worked_repo(human, opts \\ []) when is_binary(human) do
