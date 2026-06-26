@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-25 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
+**Dernière révision** : 2026-06-27 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -66,6 +66,10 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   le dispatch de son stage fail-loud si la carte manque, mais le bail ne se libère pas.
 - `Fleet.Pilot.Labels` — vocabulaire wire-protocol (source unique) : **uniquement** ce qui n'est pas
   dérivable de l'état forge — verrous `lcars-in-flight`/`lcars-awaits-human`, états `state:*` (legacy carte).
+  Le reste du vocab wire-protocol vit dans `Fleet.Pilot.ForgeClient`, build+parse **co-localisés** (un seul
+  point si le format change) : la feature-branch `lcars/issue-<n>-<role>` (`feature_branch/2` construit,
+  `parse_feature_branch/1` lit) et l'adaptateur credential→wire `as_role/2` (injecte le token du compte de
+  rôle dans `forge_opts[:token]` — source unique partagée par `HopCompleter`/`StageDispatcher`/sceaux gatekeeper).
 - `Fleet.Pilot.HopConsumer` — consumer Bus de la **fin-de-hop** (`pod.completed` → `HopCompleter`) ;
   gatekeeper §L441 (escalade soft/terminal → `resume_gate`). **Singleton** : la complétion lourde
   (git push ≤30s) est offloadée en `Task.Supervisor` (`:hop_runner` / `HopTaskSupervisor`, F067) → ne

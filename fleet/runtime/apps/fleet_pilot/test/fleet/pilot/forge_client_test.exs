@@ -398,6 +398,15 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert :error = ForgeClient.parse_feature_branch(nil)
     end
 
+    test "feature_branch/2 construit le format ET parse∘build == identité (build+parse co-localisés)" do
+      assert "lcars/issue-42-engineer" = ForgeClient.feature_branch(42, "engineer")
+
+      for {n, role} <- [{1, "engineer"}, {12, "reviewer"}, {999, "qualifier"}] do
+        assert {:ok, {^n, ^role}} =
+                 ForgeClient.parse_feature_branch(ForgeClient.feature_branch(n, role))
+      end
+    end
+
     test "pr_review_verdicts : dernière review décisive par reviewer (login↓ → verdict)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>

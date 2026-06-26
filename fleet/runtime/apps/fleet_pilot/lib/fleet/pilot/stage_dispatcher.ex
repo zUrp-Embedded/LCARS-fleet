@@ -122,7 +122,7 @@ defmodule Fleet.Pilot.StageDispatcher do
           # contexte perdu. Stable → un re-dispatch retombe sur le MÊME pod : s'il est vivant (eng pipe),
           # on le RE-MANDATE (garde son contexte), sinon on spawn. (Idempotence — cf. spawn_or_remandate.)
           # pod_id REPO-SCOPÉ via `Fleet.Pilot.PodId` (clé GLOBALE → désambiguïse cross-repo/run).
-          # La branche reste repo-LOCALE (`lcars/issue-N-role`, branch_for/2) — pas de collision dans un
+          # La branche reste repo-LOCALE (`lcars/issue-N-role`, `Fleet.Pilot.ForgeClient.feature_branch/2`) — pas de collision dans un
           # repo → NON scopée ; pod_id et branche construits indépendamment depuis (n, role). pod_id opaque
           # (jamais re-parsé) → seule exigence : tous les sites passent par le helper (format unique).
           pod_id = Fleet.Pilot.PodId.for_issue(repo, number, role)
@@ -488,7 +488,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp escalate_to_arch(issue_n, signature, body, ctx) do
     gk_opts =
       ctx.forge_opts
-      |> as_role(Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
+      |> Fleet.Pilot.ForgeClient.as_role(Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
       |> Keyword.put(:dedup_signature, signature)
       |> Keyword.put(:dedup_any_author, true)
 
@@ -611,7 +611,11 @@ defmodule Fleet.Pilot.StageDispatcher do
     with {:ok, {issue_n, producer}} <- parse_feature_branch_or_skip(head) do
       # Sceau UNIQUE partagé avec `HopCompleter.promote` : commentaire gatekeeper + merge
       # signé gatekeeper. Un chemin de merge séparé forkerait en token système (l'escalade signerait `system`).
-      gk_opts = as_role(ctx.forge_opts, Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
+      gk_opts =
+        Fleet.Pilot.ForgeClient.as_role(
+          ctx.forge_opts,
+          Fleet.Pilot.GatekeeperSeal.gatekeeper_role()
+        )
 
       case Fleet.Pilot.GatekeeperSeal.seal_and_merge(
              ctx.forge,
@@ -643,20 +647,6 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # `promote_comment` + le rôle gatekeeper + le merge vivent dans `Fleet.Pilot.GatekeeperSeal`
   # (sceau UNIQUE partagé avec `HopCompleter.promote` — pas de fork de signature de merge).
-
-  # Injecte le token du compte de RÔLE dans les forge_opts → le SYSTÈME poste/merge EN SON NOM
-  # (avatar/traça honnête, même mécanique que `create_ticket`/arch et `HopCompleter`). `nil` (token
-  # absent/illisible/vide) → forge_opts inchangé → fallback token système ; `RoleToken.token/1` émet
-  # un `Logger.warning` sur ce dégradé, il est donc OBSERVABLE ici. Frontière forge :
-  # le système poste avec le token de rôle, jamais le pod (forge-aveugle).
-  defp as_role(forge_opts, role) when is_binary(role) and role != "" do
-    case Fleet.Credentials.RoleToken.token(role) do
-      t when is_binary(t) -> Keyword.put(forge_opts, :token, t)
-      _ -> forge_opts
-    end
-  end
-
-  defp as_role(forge_opts, _role), do: forge_opts
 
   # Nom RC Desktop = `<projet>_<role>` (projet = segment final du repo, ex.
   # `fleet/poc-8` → `poc-8`). Label EXACT (claude_launch → `--remote-control "<nom>"`, zéro suffixe

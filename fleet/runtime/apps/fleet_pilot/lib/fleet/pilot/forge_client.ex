@@ -786,10 +786,20 @@ defmodule Fleet.Pilot.ForgeClient do
   @feature_branch_rx ~r{^lcars/issue-(\d+)-(.+)$}
 
   @doc """
-  Extrait `{issue_number, role}` d'une feature-branch systeme `lcars/issue-<n>-<role>` (format pose
-  par `HopConsumer.build_deliverable_opts` / `StageDispatcher`). Sert au dispatch
-  juge PR-driven a remonter de la PR (head.ref) au ticket. `:error` si le ref n'est pas une
-  feature-branch fleet (PR externe / branche manuelle -> ignoree par le dispatch, jamais misroutee).
+  Construit la feature-branch systeme `lcars/issue-<n>-<role>` — le BUILDER unique du format,
+  co-localise avec son parseur `parse_feature_branch/1` et le regex `@feature_branch_rx` : un
+  changement de format se fait ICI, build et parse ensemble, jamais l'un sans l'autre (plus de drift).
+  Identite garantie : `parse_feature_branch(feature_branch(n, role)) == {:ok, {n, role}}`.
+  """
+  @spec feature_branch(integer(), String.t()) :: String.t()
+  def feature_branch(n, role) when is_integer(n) and is_binary(role),
+    do: "lcars/issue-#{n}-#{role}"
+
+  @doc """
+  Extrait `{issue_number, role}` d'une feature-branch systeme `lcars/issue-<n>-<role>` (format
+  construit par `feature_branch/2`, son inverse co-localise). Sert au dispatch juge PR-driven a
+  remonter de la PR (head.ref) au ticket. `:error` si le ref n'est pas une feature-branch fleet (PR
+  externe / branche manuelle -> ignoree par le dispatch, jamais misroutee).
   """
   @spec parse_feature_branch(String.t()) :: {:ok, {integer(), String.t()}} | :error
   def parse_feature_branch(head) when is_binary(head) do
@@ -1519,6 +1529,31 @@ defmodule Fleet.Pilot.ForgeClient do
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  # ============================================================
+  # Identite forge — adaptateur credential -> wire (token de role)
+  # ============================================================
+
+  @doc """
+  Injecte le token du compte de RÔLE (`role`) dans `forge_opts`, sous la clé `:token` que
+  `resolve_config`/`resolve_token` relisent → le SYSTÈME poste/merge EN SON NOM sur la forge (avatar +
+  traça honnête, au lieu du compte système). C'est l'adaptateur UNIQUE credential→wire — source unique
+  partagée par `HopCompleter`, `StageDispatcher` et les sceaux gatekeeper (le writer du `:token` est ici,
+  collé à son reader). `Fleet.Credentials.RoleToken` fournit le token, `forge_opts[:token]` le porte
+  jusqu'à la requête. Rôle vide/absent OU token absent/illisible/vide → `forge_opts` inchangé → fallback
+  sur le token (système) déjà présent ; `RoleToken.token/1` émet un `Logger.warning` sur ce dégradé, donc
+  observable côté appelant. Le pod ne poste jamais : c'est le système qui poste avec le token de rôle,
+  jamais le pod (forge-aveugle).
+  """
+  @spec as_role(keyword(), String.t() | nil) :: keyword()
+  def as_role(forge_opts, role) when is_binary(role) and role != "" do
+    case Fleet.Credentials.RoleToken.token(role) do
+      t when is_binary(t) -> Keyword.put(forge_opts, :token, t)
+      _ -> forge_opts
+    end
+  end
+
+  def as_role(forge_opts, _role), do: forge_opts
 
   # ============================================================
   # Config resolution

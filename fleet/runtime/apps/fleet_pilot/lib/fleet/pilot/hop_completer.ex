@@ -154,7 +154,7 @@ defmodule Fleet.Pilot.HopCompleter do
              repo,
              n,
              body,
-             forge_opts |> as_role(role) |> Keyword.put(:dedup_signature, signature)
+             forge_opts |> ForgeClient.as_role(role) |> Keyword.put(:dedup_signature, signature)
            ),
          # Gap AVANT les labels : le comment de verdict prend un `created_at` antérieur (lecture cohérente).
          :ok <- space_writes(opts),
@@ -207,7 +207,15 @@ defmodule Fleet.Pilot.HopCompleter do
     # rôle, jamais le pod (forge-aveugle).
     with {:ok, sha} <- step1_publish(hop, deliverable),
          {:ok, pr} <-
-           open_pr_step(forge, repo, head, base, title, body, as_role(forge_opts, role)) do
+           open_pr_step(
+             forge,
+             repo,
+             head,
+             base,
+             title,
+             body,
+             ForgeClient.as_role(forge_opts, role)
+           ) do
       Logger.info("HopCompleter: ##{n} #{role} → PR ##{pr} (head=#{head}, sha=#{sha})")
       {:ok, %{commit_sha: sha, pr_number: pr}}
     end
@@ -253,7 +261,13 @@ defmodule Fleet.Pilot.HopCompleter do
     # c'est le SYSTÈME qui poste la review en son nom (le pod reste forge-aveugle).
     # NB `ForgeClient.post_review/5` rend `:ok` (pas `{:ok, _}`) sur succes — matcher les deux
     # (un seam test peut rendre l'un ou l'autre ; le contrat reel = `:ok`).
-    case forge.post_review(repo, pr, event, body, as_role(forge_opts, Map.get(hop, :role))) do
+    case forge.post_review(
+           repo,
+           pr,
+           event,
+           body,
+           ForgeClient.as_role(forge_opts, Map.get(hop, :role))
+         ) do
       :ok -> {:ok, :reviewed}
       {:ok, _} -> {:ok, :reviewed}
       {:error, reason} -> {:error, {:review, reason}}
@@ -298,7 +312,7 @@ defmodule Fleet.Pilot.HopCompleter do
     # Sceau UNIQUE : commentaire gatekeeper + merge signé gatekeeper — EXACTEMENT le même chemin que
     # `StageDispatcher.promote_pr`. Sans ce sceau, ce terminal `:promote` (ex. après escalade)
     # mergerait avec `forge_opts` brut = token système, sans commentaire (merge attribué `lcars-system`).
-    gk_opts = as_role(forge_opts, Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
+    gk_opts = ForgeClient.as_role(forge_opts, Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
 
     case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, gk_opts) do
       :ok -> {:ok, :promoted}
@@ -378,7 +392,7 @@ defmodule Fleet.Pilot.HopCompleter do
         repo = Map.fetch!(hop, :repo)
         n = Map.fetch!(hop, :issue_number)
         role = Map.get(hop, :role, "engineer")
-        role_opts = as_role(forge_opts, role)
+        role_opts = ForgeClient.as_role(forge_opts, role)
 
         # La voix de l'eng sur DEUX canaux à 2 buts distincts — la PR (revue du
         # diff, contexte code) ET le TICKET (réponse au mandat, « voici ce que j'ai fait », contexte
@@ -601,20 +615,6 @@ defmodule Fleet.Pilot.HopCompleter do
       Application.get_env(:fleet_pilot, :reviewer_roles, ["qualifier", "reviewer"])
   end
 
-  # Injecte le token du compte de RÔLE dans les forge_opts → le SYSTÈME poste EN SON NOM
-  # (avatar/traça honnête, même mécanique que `create_ticket`/arch). `nil` (token absent/illisible/vide)
-  # → forge_opts inchangé → fallback token système ; `RoleToken.token/1` émet un `Logger.warning` sur
-  # ce dégradé (token absent/illisible/vide), il est donc OBSERVABLE ici. Le pod ne poste jamais :
-  # c'est le système qui poste avec le token de rôle, jamais le pod (forge-aveugle).
-  defp as_role(forge_opts, role) when is_binary(role) and role != "" do
-    case Fleet.Credentials.RoleToken.token(role) do
-      t when is_binary(t) -> Keyword.put(forge_opts, :token, t)
-      _ -> forge_opts
-    end
-  end
-
-  defp as_role(forge_opts, _role), do: forge_opts
-
   # Espace deux écritures forge d'un même hop d'au moins UNE SECONDE. Gitea horodate les events à
   # la seconde : deux écritures dans la même seconde tiennent une égalité de `created_at` que le feed
   # dashboard rend dans un ordre arbitraire (« logiquement avant, affiché après », constaté sur plusieurs
@@ -707,7 +707,7 @@ defmodule Fleet.Pilot.HopCompleter do
            repo,
            n,
            body,
-           forge_opts |> as_role(role) |> Keyword.put(:dedup_signature, signature)
+           forge_opts |> ForgeClient.as_role(role) |> Keyword.put(:dedup_signature, signature)
          ) do
       {:ok, _} = ok -> ok
       {:error, reason} -> {:error, {:comment, reason}}

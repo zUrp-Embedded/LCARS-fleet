@@ -422,8 +422,12 @@ defmodule Fleet.MCP.PodTools do
   # La PR EN COURS du ticket #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
   # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.
   defp ticket_pr_status(forge, repo, number) do
-    # Feature-branch du ticket = `lcars/issue-<n>-<role>` ; le `-` final distingue #1 de #12. Match
-    # inline (pas de call cross-app vers fleet_pilot : fleet_mcp dispatch le forge en runtime).
+    # Feature-branch du ticket = `lcars/issue-<n>-<role>` ; le `-` final distingue #1 de #12. Format
+    # CANONIQUE = `Fleet.Pilot.ForgeClient.feature_branch/2` (collé à son parseur `parse_feature_branch/1`).
+    # Construit ICI en dur (le préfixe `lcars/issue-<n>-`, sans rôle, sert au matching de head.ref) :
+    # fleet_mcp n'a PAS de dep compile-time vers fleet_pilot (le forge est résolu en runtime via
+    # `Application.get_env`) — ajouter une dep d'app juste pour ce préfixe serait disproportionné. Compromis
+    # assumé : si le format change, suivre le builder canonique ci-dessus.
     prefix = "lcars/issue-#{number}-"
 
     case forge.list_open_pulls(repo, []) do

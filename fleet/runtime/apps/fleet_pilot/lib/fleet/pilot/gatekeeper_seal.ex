@@ -10,8 +10,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   Les deux appellent `seal_and_merge/6` → même signature gatekeeper, même trace, partout (sans ce
   point unique, un merge passerait en token système brut, sans commentaire, attribué `lcars-system`).
 
-  Le `gk_opts` est construit par l'appelant (`as_role(forge_opts, gatekeeper_role())`) : ce module ne
-  duplique PAS `as_role` (général, par-fichier), il porte le rôle gatekeeper (config, source unique ici).
+  Le `gk_opts` est construit par l'appelant (`Fleet.Pilot.ForgeClient.as_role(forge_opts, gatekeeper_role())`) :
+  ce module ne duplique PAS `as_role` (source unique = `Fleet.Pilot.ForgeClient.as_role/2`), il porte le
+  rôle gatekeeper (config, source unique ici).
   """
 
   @default_gatekeeper_role "gatekeeper"
@@ -27,7 +28,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   accepte un commentaire sur l'issue auto-close). On ne prétend JAMAIS « fusionnée » avant de l'avoir
   vérifié. Merge KO → aucun commentaire de réussite, l'erreur remonte.
 
-  `gk_opts` = `forge_opts` déjà passé par `as_role(_, gatekeeper_role())` côté appelant.
+  `gk_opts` = `forge_opts` déjà passé par `Fleet.Pilot.ForgeClient.as_role(_, gatekeeper_role())` côté appelant.
   Returns `:ok | {:error, {:merge, reason}}`.
   """
   @spec seal_and_merge(module(), String.t(), integer(), integer(), String.t(), keyword()) ::

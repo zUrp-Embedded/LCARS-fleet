@@ -709,13 +709,13 @@ defmodule Fleet.Pilot.HopConsumer do
   # AMONT du producteur (architect) sont hors-scope (decision engineer-first, mapping PR).
   defp classify_pr_role(payload, n, role, state) do
     if producer?(role, state) do
-      {:producer, branch_for(n, role)}
+      # Format feature-branch = source unique `Fleet.Pilot.ForgeClient.feature_branch/2` (collé à son
+      # parseur `parse_feature_branch/1`) — pas de construction `lcars/issue-...` en dur ici.
+      {:producer, Fleet.Pilot.ForgeClient.feature_branch(n, role)}
     else
       {:judge, judge_producer_branch(payload, n, state)}
     end
   end
-
-  defp branch_for(n, role), do: "lcars/issue-#{n}-#{role}"
 
   defp producer?(role, state) when is_binary(role),
     do: state.deliverable_mode_fun.(role) == "git_native"
@@ -778,7 +778,8 @@ defmodule Fleet.Pilot.HopConsumer do
       # La gate d'identité vérifie le trailer `Co-authored-by: LCARS-<role>` (signature rôle).
       coauthor_role: role,
       remote: state.remote,
-      target_branch: "lcars/issue-#{n}-#{role}",
+      # Format feature-branch = source unique `Fleet.Pilot.ForgeClient.feature_branch/2` (collé au parseur).
+      target_branch: Fleet.Pilot.ForgeClient.feature_branch(n, role),
       push?: true,
       local_ref: "HEAD"
     }
