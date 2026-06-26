@@ -1443,7 +1443,8 @@ defmodule Fleet.Spawner.Pod do
           Fleet.Spawner.SeedStore.checkpoint(
             state.pod_dir,
             projet,
-            cap_profile_name(state.cap_profile)
+            cap_profile_name(state.cap_profile),
+            state.session_id
           )
 
         :ok

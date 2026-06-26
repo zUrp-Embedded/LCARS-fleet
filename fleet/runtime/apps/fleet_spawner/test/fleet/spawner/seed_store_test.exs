@@ -37,9 +37,10 @@ defmodule Fleet.Spawner.SeedStoreTest do
     content =
       ~s({"type":"user","message":"r1"}\n{"type":"assistant","message":"ok"}\n{"type":"user","message":"r2"}\n)
 
+    # L'uuid du jsonl vivant ("uuid-abc") n'est PLUS l'identité stockée ; le builder passé l'est.
     make_jsonl(pod_dir, "-home-x-poc8-engineer", "uuid-abc", content)
 
-    assert :ok = SeedStore.checkpoint(pod_dir, "poc-8", "engineer")
+    assert :ok = SeedStore.checkpoint(pod_dir, "poc-8", "engineer", "builder-det")
 
     seed = File.read!(Path.join([root, "poc-8", "pods", "engineer.jsonl"]))
     # round 1 (user + assistant) gardé ; round 2 jeté.
@@ -49,24 +50,33 @@ defmodule Fleet.Spawner.SeedStoreTest do
 
     map = Path.join([root, "poc-8", "pods", "engineer.json"]) |> File.read!() |> Jason.decode!()
 
+    # uuid = le builder passé (source unique). slug = cwd-slug du jsonl vivant (contenu).
     assert %{
-             "uuid" => "uuid-abc",
+             "uuid" => "builder-det",
              "slug" => "-home-x-poc8-engineer",
              "role" => "engineer",
              "projet" => "poc-8"
            } = map
   end
 
-  test "checkpoint : prend le JSONl le PLUS RÉCENT (rotation /clear)", %{tmp: tmp, root: root} do
+  test "checkpoint : carte = builder passé, PAS l'uuid du jsonl vivant (rotation /clear)", %{
+    tmp: tmp,
+    root: root
+  } do
     pod_dir = Path.join(tmp, "pod")
     old = make_jsonl(pod_dir, "slug", "old-uuid", "old\n")
     File.touch!(old, {{2020, 1, 1}, {0, 0, 0}})
     make_jsonl(pod_dir, "slug", "new-uuid", "new\n")
 
-    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer")
+    # Deux jsonl vivants (un `/clear` a rotaté l'uuid). NOUVEAU contrat : la carte porte le BUILDER
+    # passé (source unique), INDÉPENDAMMENT de l'uuid du jsonl vivant — ni l'ancien, ni le récent.
+    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
 
     map = Path.join([root, "p", "pods", "engineer.json"]) |> File.read!() |> Jason.decode!()
-    assert map["uuid"] == "new-uuid"
+    assert map["uuid"] == "builder-det"
+    refute map["uuid"] == "new-uuid"
+
+    # Le CONTENU vient toujours du jsonl ACTIF = le plus récent (la session vivante, post-/clear).
     assert File.read!(Path.join([root, "p", "pods", "engineer.jsonl"])) == "new\n"
   end
 
@@ -74,7 +84,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
     pod_dir = Path.join(tmp, "empty-pod")
     File.mkdir_p!(pod_dir)
 
-    assert :none = SeedStore.checkpoint(pod_dir, "p", "engineer")
+    assert :none = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
     refute File.exists?(Path.join(root, "p"))
   end
 
@@ -88,9 +98,10 @@ defmodule Fleet.Spawner.SeedStoreTest do
   test "read_map : carte + jsonl présents → {:ok, uuid}, sinon :none", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer")
+    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
 
-    assert {:ok, %{uuid: "u1"}} = SeedStore.read_map("p", "engineer")
+    # read_map relit l'uuid de la carte = le builder stocké, PAS l'uuid du jsonl vivant ("u1").
+    assert {:ok, %{uuid: "builder-det"}} = SeedStore.read_map("p", "engineer")
     assert :none = SeedStore.read_map("p", "inexistant")
   end
 
@@ -123,7 +134,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
     # Cible d'évasion : `<root>/../evil/pods/...` = un dossier SŒUR de la racine seed-store.
     evil_dir = Path.expand(Path.join(root, "../evil"))
 
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "../evil", "engineer")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "../evil", "engineer", "builder-det")
 
     # Régression prouvée : sans la garde slug+confinement, `Path.join([root, "../evil", "pods"])`
     # écrirait `engineer.jsonl` ICI, hors de la racine. La garde le rend irreprésentable.
@@ -134,28 +145,28 @@ defmodule Fleet.Spawner.SeedStoreTest do
   test "checkpoint : rôle traversant (a/b) → REFUSÉ", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "p", "a/b")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "p", "a/b", "builder-det")
   end
 
   test "checkpoint : noms vides / NUL / contrôle → REFUSÉS", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "", "engineer")
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "ok\x00evil", "engineer")
-    assert {:error, _} = SeedStore.checkpoint(pod_dir, "ok\nevil", "engineer")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "", "engineer", "builder-det")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "ok\x00evil", "engineer", "builder-det")
+    assert {:error, _} = SeedStore.checkpoint(pod_dir, "ok\nevil", "engineer", "builder-det")
   end
 
   test "checkpoint : nom valide (my_checkpoint-1) → accepté", %{tmp: tmp, root: root} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert :ok = SeedStore.checkpoint(pod_dir, "my_checkpoint-1", "engineer")
+    assert :ok = SeedStore.checkpoint(pod_dir, "my_checkpoint-1", "engineer", "builder-det")
     assert File.exists?(Path.join([root, "my_checkpoint-1", "pods", "engineer.jsonl"]))
   end
 
   test "read_map : projet traversant → :none (ne lit pas hors store)", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
-    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer")
+    assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
     assert :none = SeedStore.read_map("../p", "engineer")
     assert :none = SeedStore.read_map("p", "../engineer")
   end

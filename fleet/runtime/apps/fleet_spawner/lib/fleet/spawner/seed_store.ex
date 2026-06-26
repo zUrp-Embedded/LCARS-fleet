@@ -1,25 +1,38 @@
 defmodule Fleet.Spawner.SeedStore do
   @moduledoc """
-  Seed-store des pods. À la mort d'un pod-PROJET, son JSONl de session
+  Seed-store des pods. À la mort d'un pod-PROJET, le PREMIER ROUND de son JSONl de session
   ACTIF (sa mémoire) est checkpointé vers `<seed_root>/<projet>/pods/<role>.jsonl` + une carte
   `<role>.json` (`{uuid, slug}`) pour le rappel ultérieur (`--resume`).
   **Best-effort** : un échec de checkpoint ne tue JAMAIS le pod
   (le seed est un bonus de mémoire, pas une dépendance du lifecycle).
 
   - `seed_root` : `:fleet_spawner, :seed_store_root` (défaut `/home/projects.work`).
-  - JSONl ACTIF = le plus récemment modifié sous `<pod_dir>/.claude/projects/*/` — gère la rotation
-    d'UUID par `/clear` (on prend la session VIVANTE, pas l'UUID de lancement `state.session_id`).
-  - La carte `<role>.json` porte le `uuid` + le `slug` (cwd-slug) : le rappel restaure le JSONl à
-    `projects/<slug>/<uuid>.jsonl` puis `--resume <uuid>`.
+  - L'`uuid` de la carte = le BUILDER DÉTERMINISTE du slot Desktop (le `session_id` pré-alloué au
+    spawn, passé en argument) : c'est la SOURCE UNIQUE de l'identité du pod. Il n'est PAS dérivé de
+    l'UUID du jsonl vivant — un `/clear` rotate l'UUID vivant, et un seed qui le suivrait ferait
+    reprendre au pod un slot bâtard (≠ builder) au recall.
+  - Le CONTENU et le `slug` viennent, eux, du jsonl ACTIF = le plus récemment modifié sous
+    `<pod_dir>/.claude/projects/*/` (la session VIVANTE, robuste à la rotation `/clear`). Sans jsonl
+    vivant (`:none`), il n'y a aucun contenu à checkpointer → rien n'est écrit.
+  - La carte `<role>.json` porte donc l'`uuid` (= builder) + le `slug` (cwd-slug du jsonl vivant) :
+    le rappel restaure le JSONl à `projects/<slug>/<uuid>.jsonl` puis `--resume <uuid>`.
 
   NB git : le `cp` dépose le seed ; la mise sous git du work repo est un geste SÉPARÉ (hors hot-path
   du teardown — pas de `git` dans la mort d'un pod).
   """
   require Logger
 
-  @spec checkpoint(Path.t(), String.t(), String.t()) :: :ok | :none | {:error, term()}
-  def checkpoint(pod_dir, projet, role)
-      when is_binary(pod_dir) and is_binary(projet) and is_binary(role) do
+  @doc """
+  Checkpointe le seed d'un pod-PROJET mourant. `session_id` = le BUILDER DÉTERMINISTE du slot
+  Desktop (le `session_id` pré-alloué au spawn) : c'est l'`uuid` stocké dans la carte, SOURCE UNIQUE
+  de l'identité du pod — PAS l'UUID du jsonl vivant (qu'un `/clear` aurait pu rotater). Le contenu
+  (premier round) et le `slug` viennent du jsonl ACTIF. Sans jsonl vivant → `:none`.
+  Best-effort : confinement des noms + `{:error, _}` non-fatal.
+  """
+  @spec checkpoint(Path.t(), String.t(), String.t(), String.t()) ::
+          :ok | :none | {:error, term()}
+  def checkpoint(pod_dir, projet, role, session_id)
+      when is_binary(pod_dir) and is_binary(projet) and is_binary(role) and is_binary(session_id) do
     # `projet` ET `role` sont des COMPOSANTS de chemin du seed-store (`<root>/<projet>/pods/<role>.jsonl`).
     # Ils viennent de `rc_name` (entrée de dispatch/recall, non maîtrisée par construction) : un `..`/`/`
     # traverserait hors du store (écrire un `.jsonl` arbitraire de l'hôte). On caste les deux en slug et on
@@ -28,7 +41,7 @@ defmodule Fleet.Spawner.SeedStore do
     with {:ok, projet_slug} <- Fleet.Slug.cast(projet),
          {:ok, role_slug} <- Fleet.Slug.cast(role),
          {:ok, projet_dir} <- Fleet.Slug.confined_join(root(), projet_slug) do
-      do_checkpoint(pod_dir, projet_slug, role_slug, Path.join(projet_dir, "pods"))
+      do_checkpoint(pod_dir, projet_slug, role_slug, session_id, Path.join(projet_dir, "pods"))
     else
       {:error, reason} ->
         Logger.warning(
@@ -39,13 +52,17 @@ defmodule Fleet.Spawner.SeedStore do
     end
   end
 
-  defp do_checkpoint(pod_dir, projet, role, dest_dir) do
+  defp do_checkpoint(pod_dir, projet, role, session_id, dest_dir) do
     case latest_jsonl(pod_dir) do
       :none ->
         :none
 
       {:ok, jsonl} ->
-        uuid = Path.basename(jsonl, ".jsonl")
+        # L'uuid stocké = le BUILDER DÉTERMINISTE (`session_id` pré-alloué au spawn), source UNIQUE
+        # de l'identité du slot Desktop. On NE le dérive PAS de `Path.basename(jsonl)` : un `/clear`
+        # rotate l'UUID du jsonl vivant, et un seed qui le suivrait ferait reprendre un slot bâtard
+        # (≠ builder) au recall. Seuls le `slug` (cwd-slug) et le CONTENU viennent du jsonl vivant.
+        uuid = session_id
         slug = Path.basename(Path.dirname(jsonl))
         File.mkdir_p!(dest_dir)
 
@@ -59,7 +76,10 @@ defmodule Fleet.Spawner.SeedStore do
           Jason.encode!(%{"uuid" => uuid, "slug" => slug, "projet" => projet, "role" => role})
         )
 
-        Logger.info("SeedStore: checkpoint #{projet}/#{role} (uuid=#{uuid}) → #{dest_dir}")
+        Logger.info(
+          "SeedStore: checkpoint #{projet}/#{role} (uuid=#{uuid} = builder déterministe) → #{dest_dir}"
+        )
+
         :ok
     end
   rescue
@@ -109,7 +129,7 @@ defmodule Fleet.Spawner.SeedStore do
   @spec read_map(String.t(), String.t()) :: {:ok, map()} | :none
   def read_map(projet, role) when is_binary(projet) and is_binary(role) do
     # Lecture-feuille du seed-store : `projet`/`role` sont des composants de chemin. Mêmes castes que
-    # `checkpoint/3` (un `recall(projet, role)` exposé prend ces deux args d'un appelant) → un nom non
+    # `checkpoint/4` (un `recall(projet, role)` exposé prend ces deux args d'un appelant) → un nom non
     # confiné rend `:none` (seed introuvable) plutôt que de lire un `.json`/`.jsonl` arbitraire de l'hôte.
     with {:ok, projet_slug} <- Fleet.Slug.cast(projet),
          {:ok, role_slug} <- Fleet.Slug.cast(role),
