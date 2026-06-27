@@ -22,6 +22,8 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   est passé par le Pod (source unique `Fleet.Spawner.LaunchBackend.resolved/0`).
   """
 
+  alias Fleet.Spawner.Pod.Fs
+
   # Serveur MCP fleet (canal de comm UNIQUE pod↔fleet ; jamais de scraping).
   # Config = chemin pod-accessible (hors /home,/tmp, comme bwrap/claude_launch). Un pod
   # RÉEL parle MCP, point — il n'y a PAS de mode fichier alternatif. `nil` n'est légitime QUE pour
@@ -83,7 +85,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
                build_fleet_mcp_entry(spec, pod_dir, sandbox_home, pod_id, capability) do
           config = %{"mcpServers" => %{"fleet" => fleet_entry}}
 
-          safe_write(
+          Fs.safe_write(
             Path.join(pod_dir, ".mcp-fleet.json"),
             Jason.encode!(config, pretty: true)
           )
@@ -168,16 +170,6 @@ defmodule Fleet.Spawner.Pod.McpProvision do
       :ok
     else
       {:error, reason} -> {:error, {:mcp_bridge_provision_failed, source, reason}}
-    end
-  end
-
-  # Variante non-bang de File.write (mêmes sémantiques que le safe_write de Pod) : retourne
-  # {:error, {:write_failed, path, reason}} au lieu de raise → propagation via `with` →
-  # transition_failed clean. Local à l'île MCP (pas de rappel reverse vers Pod).
-  defp safe_write(path, content) do
-    case File.write(path, content) do
-      :ok -> :ok
-      {:error, reason} -> {:error, {:write_failed, path, reason}}
     end
   end
 end

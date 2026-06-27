@@ -42,6 +42,7 @@ defmodule Fleet.Spawner.Pod do
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Spawner.Pod.Fs
   alias Fleet.Spawner.Pod.LaunchSpec
   alias Fleet.Spawner.Pod.McpProvision
   alias Fleet.SPBuilder
@@ -507,9 +508,9 @@ defmodule Fleet.Spawner.Pod do
 
     with {:ok, resolved} <- safe_resolve_disallowed(state.cap_profile),
          :ok <- gate_cap_profile(resolved),
-         :ok <- safe_mkdir_p(state.pod_dir),
+         :ok <- Fs.safe_mkdir_p(state.pod_dir),
          :ok <-
-           safe_write(
+           Fs.safe_write(
              cap_profile_path,
              Jason.encode!(Map.from_struct(resolved), pretty: true)
            ) do
@@ -598,28 +599,28 @@ defmodule Fleet.Spawner.Pod do
          {:ok, _skills_paths} <- maybe_filter_skills(state.cap_profile, skills_root),
          {:ok, agent_draft} <- read_agent_draft(state.cap_profile),
          {:ok, protocole_user} <- read_protocole_user(),
-         :ok <- safe_mkdir_p(lcars_dir),
+         :ok <- Fs.safe_mkdir_p(lcars_dir),
          # `.claude/` pod-owned = cible du bind creds-only (bwrap_launch). On ne crée QUE le dir,
          # aucun settings.json dedans → 0 hook humain. bwrap y monte `.credentials.json`.
-         :ok <- safe_mkdir_p(pod_claude_dir),
+         :ok <- Fs.safe_mkdir_p(pod_claude_dir),
          :ok <-
-           safe_write(
+           Fs.safe_write(
              Path.join(lcars_dir, "system-prompt.md"),
              sp_compose.sp_md <> "\n\n---\n\n" <> agent_draft
            ),
          # CLAUDE.md custom à la RACINE du pod (projet/cwd, non masquée) ; le reste en .lcars/.
-         :ok <- safe_write(Path.join(state.pod_dir, "CLAUDE.md"), claude_md),
-         :ok <- safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
-         :ok <- safe_write(Path.join(lcars_dir, "settings.json"), pod_settings_json()),
+         :ok <- Fs.safe_write(Path.join(state.pod_dir, "CLAUDE.md"), claude_md),
+         :ok <- Fs.safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
+         :ok <- Fs.safe_write(Path.join(lcars_dir, "settings.json"), pod_settings_json()),
          # creds : plus de copie. Seul `.credentials.json` de l'humain est monté RW par
          # bwrap_launch.sh dans `pod_dir/.claude/` (refresh OAuth natif, écriture en place). `.claude/`
          # reste pod-owned → pas de hook humain. Les fichiers pod sont en .lcars/ + racine pod.
          # Le `.claude.json` (onboarding + remote-control) est écrit par claude_launch.sh
          # (frontière vendor N1) — PAS ici. Une version N0 serait clobberée à l'exec (claude_launch le
          # ré-écrit sans condition) ET porterait de la connaissance vendor dans N0.
-         :ok <- safe_mkdir_p(tickets_dir),
+         :ok <- Fs.safe_mkdir_p(tickets_dir),
          :ok <-
-           safe_write(
+           Fs.safe_write(
              Path.join(tickets_dir, "#{ticket_id_to_filename(state.ticket_id)}.md"),
              default_brief(state)
            ),
@@ -2385,37 +2386,13 @@ defmodule Fleet.Spawner.Pod do
 
     case File.read(src) do
       {:ok, content} ->
-        with :ok <- safe_write(dst, content) do
+        with :ok <- Fs.safe_write(dst, content) do
           _ = File.chmod(dst, 0o755)
           :ok
         end
 
       {:error, reason} ->
         {:error, {:watch_asset_unreadable, reason}}
-    end
-  end
-
-  # ============================================================
-  # Safe FS helpers
-  # ============================================================
-  # Les variantes bang (File.mkdir_p!, File.write!, File.rename!) raise sur
-  # erreur → kill brutal du GenServer → supervisor restart sans transition
-  # propre → state.json potentiellement obsolète/corrompu côté recovery.
-  # Ces helpers retournent {:ok|:error} avec contexte (path + reason) →
-  # propagation via `with` → transition_failed clean (state.json
-  # phase=failed écrit avant {:stop, ...}).
-
-  defp safe_mkdir_p(path) do
-    case File.mkdir_p(path) do
-      :ok -> :ok
-      {:error, reason} -> {:error, {:mkdir_failed, path, reason}}
-    end
-  end
-
-  defp safe_write(path, content) do
-    case File.write(path, content) do
-      :ok -> :ok
-      {:error, reason} -> {:error, {:write_failed, path, reason}}
     end
   end
 end
