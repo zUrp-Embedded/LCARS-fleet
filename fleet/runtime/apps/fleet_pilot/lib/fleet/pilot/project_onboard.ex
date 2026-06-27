@@ -29,7 +29,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   """
 
   alias Fleet.Pilot.ForgeClient
-  alias Fleet.Credentials.ForgeAuth
+  alias Fleet.Pilot.GitOps
 
   require Logger
 
@@ -208,21 +208,23 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp clone_main(url, proj_dir) do
     File.mkdir_p!(Path.dirname(proj_dir))
-    git(["clone", "--branch", "main", url, proj_dir], cd: nil, auth: true)
+    GitOps.run(["clone", "--branch", "main", url, proj_dir], cd: nil, auth: true)
   end
 
   defp add_work_ops(proj_dir, work_dir) do
     File.mkdir_p!(Path.dirname(work_dir))
 
     # git 2.43 : --orphan -b <branch> <path> → worktree lié, branche orpheline (merge-base vide).
-    git(["-C", proj_dir, "worktree", "add", "--orphan", "-b", "work/ops", work_dir], auth: false)
+    GitOps.run(["-C", proj_dir, "worktree", "add", "--orphan", "-b", "work/ops", work_dir],
+      auth: false
+    )
   end
 
   defp commit(dir, message) do
-    with :ok <- git(["-C", dir, "add", "-A"], auth: false) do
+    with :ok <- GitOps.run(["-C", dir, "add", "-A"], auth: false) do
       # author = lcars-system (le système génère le scaffold, GIT_AUTHOR forcé) ; committer = git config
       # runtime (= l'humain qui a initié → tracé, avatar) (2026-06-14).
-      git(["-C", dir, "commit", "-m", message], auth: false, author: @onboard_author)
+      GitOps.run(["-C", dir, "commit", "-m", message], auth: false, author: @onboard_author)
     end
   end
 
@@ -231,52 +233,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
       ["-C", dir, "push"] ++
         if(set_upstream?, do: ["-u"], else: []) ++ ["origin", branch]
 
-    git(args, auth: true)
+    GitOps.run(args, auth: true)
   end
-
-  # Git borné par construction via `Fleet.Credentials.Shell` (source unique de la borne) avec gestion
-  # d'erreur typée. Les ops réseau (clone, push : `auth: true`) peuvent hung/prompter ; le wrapper les
-  # lance dans un process-group dédié et, à la deadline MUR, tue le GROUPE entier (l'op ET ses helpers de
-  # transport, porteurs du token forge) + ferme le port. Les ops locales (worktree/add/commit) passent
-  # par le même chemin → aucun `System.cmd git` nu ne subsiste ici. `auth: true` → token forge en env
-  # (hors argv, ForgeAuth). `author: %{name,email}` → GIT_AUTHOR_* (committer laissé à la git config =
-  # l'humain). On passe TOUJOURS `:env` explicitement (donc Shell n'injecte pas son défaut `git_env/0`) :
-  # les ops locales tournent sans auth, mais l'anti-prompt n'y change rien (pas de réseau).
-  defp git(args, opts) do
-    env =
-      if(Keyword.get(opts, :auth, false), do: ForgeAuth.git_env(), else: []) ++
-        identity_env(Keyword.get(opts, :author))
-
-    case Fleet.Credentials.Shell.git(args, env: env) do
-      {:ok, {_out, 0}} ->
-        :ok
-
-      {:ok, {out, code}} ->
-        {:error, {:git_failed, Enum.take(args, 3), code, String.slice(out, 0, 500)}}
-
-      {:error, {:timeout, ms}} ->
-        {:error, {:git_timeout, Enum.take(args, 3), ms}}
-
-      {:error, {:exit, reason}} ->
-        {:error, {:git_exit, Enum.take(args, 3), reason}}
-    end
-  end
-
-  # Commit (author posé) : GIT_AUTHOR = le système (scaffold généré, `@onboard_author`) + GIT_COMMITTER =
-  # l'humain qui a initié (traça), résolu ROBUSTE via `ForgeIdentity.human_identity` (git config → GECOS →
-  # login) ⇒ ne dépend PAS du `~/.gitconfig` humain (2026-06-22) : sans GIT_COMMITTER, un
-  # humain non-configuré → committer « empty ident name » → commit du scaffold refusé → create_project bloqué.
-  defp identity_env(%{name: name, email: email}) do
-    committer =
-      case Fleet.Credentials.ForgeIdentity.human_identity() do
-        {:ok, %{name: cn, email: ce}} -> [{"GIT_COMMITTER_NAME", cn}, {"GIT_COMMITTER_EMAIL", ce}]
-        _ -> []
-      end
-
-    [{"GIT_AUTHOR_NAME", name}, {"GIT_AUTHOR_EMAIL", email}] ++ committer
-  end
-
-  defp identity_env(_), do: []
 
   # ── scaffold (standard, état de l'art — ajustable) ───────────────────────
 

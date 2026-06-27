@@ -114,6 +114,19 @@ hors du rail Poller/HopConsumer. `ForgeClient.request/4` route via ce pool (`fin
 forge >1s** (`Logger.warning "ForgeClient … LENT …ms"`) — l'observabilité qui localise un appel forge lent
 au run réel. Câblage du pool verrouillé par `forge_finch_test.exs` (sonde le process, pas un knob).
 
+Le rail stage démarre aussi `Fleet.Pilot.WorktreeSync` (AVANT Poller/HopConsumer) — sérialiseur qui
+PROJETTE le livrable sur le clone local après merge. Au merge terminal, `origin/main` avance sur la forge
+mais le worktree `main` de `/home/projects/<name>` (« le livrable » de `ProjectOnboard`) reste figé à
+l'onboarding ; `GatekeeperSeal.seal_and_merge` (point UNIQUE des deux chemins de merge) lui caste
+`sync(repo)` → `fetch` + `reset --hard origin/main`. **Pourquoi un process** : la sérialisation. Les deux
+déclencheurs de merge — poller (`promote_pr`) et HopConsumer (`HopCompleter.promote`, offloadé en `Task`) —
+peuvent tourner en même temps ; deux `reset --hard` sur le même worktree corrompent l'index. Le bail
+« 1 pipeline/repo » est un invariant LOGIQUE du poller, pas un verrou disque → le GenServer ferme la race
+par construction (un `git` à la fois). Best-effort et convergent (le merge fait foi ; un alignement raté =
+disque en retard, jamais une perte — le livrable est sur la forge). Le git borné est factorisé dans
+`Fleet.Pilot.GitOps` (partagé avec `ProjectOnboard`). Verrouillé par `worktree_sync_test.exs` (alignement
+git réel + sérialisation) et le câblage merge→projection (`gatekeeper_seal_worktree_test.exs`).
+
 ## Onboarding projet (Rail 1 — « idée → le projet existe »)
 
 `Fleet.Pilot.ProjectOnboard` — `onboard/2` : crée mécaniquement un projet en répliquant l'archi

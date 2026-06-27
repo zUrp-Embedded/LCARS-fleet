@@ -52,12 +52,22 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     case do_merge(forge, repo, pr_number, gk_opts) do
       :ok ->
         _ = comment(forge, repo, issue_n, body, comment_opts)
+
+        # Projette le livrable sur le clone local `/home/projects/<name>` (best-effort). La SÉRIALISATION
+        # vit DANS le GenServer dédié (un `git` à la fois sur un worktree, contre la race entre les deux
+        # déclencheurs de merge) — ici on ne fait que DÉCLENCHER, le merge n'attend pas. Le merge fait foi :
+        # un alignement raté = disque en retard, jamais une perte (le livrable est sur la forge).
+        _ = worktree_sync().sync(repo)
         :ok
 
       {:error, _} = err ->
         err
     end
   end
+
+  # Seam (test) : le sérialiseur d'alignement du clone local après merge. Défaut = le GenServer prod.
+  defp worktree_sync,
+    do: Application.get_env(:fleet_pilot, :worktree_sync, Fleet.Pilot.WorktreeSync)
 
   defp comment(forge, repo, issue_n, body, opts) do
     case forge.post_comment(repo, issue_n, body, opts) do

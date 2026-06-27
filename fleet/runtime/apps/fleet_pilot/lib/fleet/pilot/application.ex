@@ -129,6 +129,11 @@ defmodule Fleet.Pilot.Application do
       # (kick_gatekeeper / safe_wake) ; démarrée avec le rail, son seul consommateur. Boot best-effort
       # (forge injoignable au boot → WAL local seul, pas de crash).
       Fleet.Pilot.IncidentRegistry,
+      # Sérialiseur d'alignement du clone local après merge : projette le livrable (`origin/main`) sur
+      # `/home/projects/<name>`. Démarré AVANT Poller + HopConsumer — ses deux déclencheurs de merge
+      # (`promote_pr` / `HopCompleter.promote`) — pour qu'il sérialise leurs alignements potentiellement
+      # concurrents (un `git` à la fois par worktree, contre la corruption d'index).
+      Fleet.Pilot.WorktreeSync,
       # Ni `:repo` au Poller (découverte par topic), ni `:repo`/`:remote` au HopConsumer (per-hop).
       # Le routing vit dans la route-comment (gravée par create_ticket) ; le Poller la lit (state-machine).
       {Fleet.Pilot.Poller, interval_ms: interval, stage_dispatch?: true},
