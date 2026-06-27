@@ -290,22 +290,20 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # Filtre les repos découverts par topic à ceux SCELLÉS par le système (`admitted?`). Un repo écarté
-  # est loggé (un topic posé sans onboarding = soit un user qui s'auto-tague — refusé —, soit un
-  # onboarding incomplet à finir). Le sceau = le marqueur bot-authored, même primitif de confiance que
-  # les marqueurs route/hop ; le poller ne dispatche jamais sur un repo non admis.
+  # Filtre les repos découverts par topic à ceux SCELLÉS par le système (`admitted?` = marqueur
+  # bot-authored, même primitif de confiance que les marqueurs route/hop). Le poller ne dispatche
+  # jamais sur un repo non admis.
+  #
+  # Filtrage SILENCIEUX, à dessein : écarter un repo découvrable-mais-non-scellé est le fonctionnement
+  # NOMINAL de la frontière (fail-closed), ré-évalué à CHAQUE tick (~30s) — pas un événement. Le logger
+  # (en warning, qui plus est) crachait une ligne par repo écarté par tick : un repo tagué mais jamais
+  # onboardé reste écarté indéfiniment → des centaines de warnings d'un état stable qui noient la trace.
+  # Un repo réellement « à finir d'onboarder » se constate sur la forge (repos portant le topic sans le
+  # sceau), pas dans le log de poll. Seules les ERREURS de découverte/dispatch sont loggées
+  # (handle_poll_error) ; un filtrage de routine est muet.
   defp admitted_repos(forge, discovered, state) do
     Enum.filter(discovered, fn repo ->
-      if forge.admitted?(repo, state.my_human, state.forge_opts) do
-        true
-      else
-        Logger.warning(
-          "fleet_pilot Poller : repo #{repo} tagué #{fleet_topic(state.my_human)} mais SANS marqueur " <>
-            "d'admission système → ÉCARTÉ (topic seul ne suffit pas ; onboarding système requis)"
-        )
-
-        false
-      end
+      forge.admitted?(repo, state.my_human, state.forge_opts)
     end)
   end
 
@@ -400,16 +398,15 @@ defmodule Fleet.Pilot.Poller do
 
       duration_ms = elapsed_ms(started)
 
+      # Tick réussi = SILENCIEUX. Ce poll est un cron ~30s en boucle ; logger chaque passage nominal
+      # (le plus souvent dispatched=0, rien à faire) noie la trace sous des centaines de lignes de
+      # routine. Les métriques (durée, dispatched/skipped/errors) partent en telemetry ci-dessous ;
+      # les échecs de poll sont loggés (handle_poll_error) et chaque dispatch per-item se trace à son
+      # niveau. On loggue quand ça plante, pas quand ça tourne.
       :telemetry.execute(
         [:fleet_pilot, :poller, :poll],
         %{duration_ms: duration_ms},
         Map.merge(tally, %{status: :ok, mode: :stage, repo: state.repo})
-      )
-
-      Logger.info(
-        "fleet_pilot Poller tick mode=stage repo=#{state.repo} " <>
-          "dispatched=#{tally.dispatched} skipped=#{tally.skipped} errors=#{tally.errors} " <>
-          "duration_ms=#{duration_ms}"
       )
 
       # La liste forge a réussi, mais des `dispatch_*` PAR ITEM ont pu échouer
