@@ -8,14 +8,11 @@ defmodule Fleet.API do
   ## Sous-modules
 
     * `Fleet.API.Rest` — Plug.Router HTTP `:8080` endpoints REST
-      (GET pipelines/tickets/pods/health + POST admin/spawn,
-      config/update) — **no-auth par design** (frontière = isolation
-      réseau/container ; le HMAC `X-Auth-Token` a été RETIRÉ, cf.
-      `Fleet.API.Rest` §Auth)
+      (GET pipelines/tickets/pods/health + POST admin/spawn) — lecture
+      no-auth, écriture gardée (le HMAC `X-Auth-Token` a été RETIRÉ ;
+      frontière = isolation réseau/container, cf. `Fleet.API.Rest` §Auth)
     * `Fleet.API.WS` — Cowboy WebSocket handler `:8080/ws` subscribe
       Phoenix.PubSub bus + filtre per-client topics + heartbeat 30s
-    * `Fleet.API.GitCommitter` — pure functions wrapper atomic write
-      rename + `git add` + `git commit` (canon trace strate 1)
 
   ## Split différé
 

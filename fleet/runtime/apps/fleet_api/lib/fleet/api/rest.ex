@@ -11,22 +11,26 @@ defmodule Fleet.API.Rest do
     * `POST /api/admin/spawn` — filtre le payload par allowlist DTO (422 si un champ interne du
       spawner / une clé inconnue est présent), valide le cap-profile (400 si absent, 422 si
       inconnu) PUIS broadcast `admin.spawn.request` event + 202
-    * `POST /api/config/update` — atomic write + git commit auto via
-      `GitCommitter` (canon trace strate 1)
 
-  ## Auth — AUCUNE (par design ; frontière = réseau/container)
+  ## Auth — lecture no-auth, écriture gardée (pas de blanket no-auth)
 
-  Pas d'auth applicative. Le HMAC `X-Auth-Token` (bearer statique sur la constante
-  `"fleet-api-v1"` — pas une signature de requête) a été RETIRÉ :
-  intra-container non-exposé = zéro surface, et une auth bricolée donne un faux sentiment
-  de sécurité (pire que rien). **La frontière est l'isolation réseau** : ne PAS publier
-  `:8080` hors du container (bind loopback / `docker exec`) ; tunnel (WireGuard/Tailscale)
-  pour un accès distant. Threat-model assumé = LAN / humains de confiance.
+  Pas d'auth applicative *pour la lecture*. Le HMAC `X-Auth-Token` (bearer statique sur la
+  constante `"fleet-api-v1"` — pas une signature de requête) a été RETIRÉ : intra-container
+  non-exposé = zéro surface, et une auth bricolée donne un faux sentiment de sécurité (pire
+  que rien). **La frontière est l'isolation réseau** : ne PAS publier `:8080` hors du
+  container (bind loopback / `docker exec`) ; tunnel (WireGuard/Tailscale) pour un accès
+  distant. Threat-model assumé = LAN / humains de confiance.
+
+  La lecture (dashboard GET, observation) reste no-auth — légitime, inchangé. **L'écriture de
+  config a été retirée** : il n'existe plus de porte d'écriture générique sur le repo de config.
+  Une directive active (cap-profiles, coord-policies, pipelines) ne se modifie QUE par git/forge
+  (la source de vérité tracée), jamais par un POST no-auth. La SEULE écriture restante est
+  `POST /api/admin/spawn`, qui n'est PAS couverte par un blanket no-auth : elle garde ses gardes
+  propres (allowlist DTO + host-native refusé à l'admission).
   """
 
   use Plug.Router
 
-  alias Fleet.API.GitCommitter
   alias Fleet.EventRouter.Bus
 
   plug(:match)
@@ -259,24 +263,6 @@ defmodule Fleet.API.Rest do
   rescue
     e in Fleet.Event.UnregisteredError -> {:error, e.message}
     e in [ArgumentError, FunctionClauseError] -> {:error, inspect(e)}
-  end
-
-  post "/api/config/update" do
-    case conn.body_params do
-      %{"file_path" => path, "content" => content} ->
-        user_id = conn.assigns[:user_id] || "api-user"
-
-        case GitCommitter.commit_config_change(path, content, user_id) do
-          {:ok, sha} ->
-            send_json(conn, %{commit_sha: sha})
-
-          {:error, reason} ->
-            send_resp(conn, 500, Jason.encode!(%{error: reason}))
-        end
-
-      _ ->
-        send_resp(conn, 400, ~s|{"error":"missing file_path or content"}|)
-    end
   end
 
   # Dashboard V2 Elixir natif. Mount Fleet.API.Dashboard sous

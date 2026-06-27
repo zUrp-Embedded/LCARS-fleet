@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-24
+**Dernière révision** : 2026-06-27
 **Statut** : guide runtime v2 (salvage cow-boy).
 **Référencé par** : —
 
@@ -64,7 +64,7 @@ Three config files, evaluated in this order:
 **Critical invariant** in `config/runtime.exs`: the entire file is wrapped in `if config_env() != :test do ... end`. Without that guard, `mix test` reads runtime.exs (Mix evaluates it in every env), flips `start_listener: true`, and Cowboy tries to bind `:8080` → umbrella boot crash. If you add runtime config, keep it inside the guard unless you genuinely want test eval.
 
 Env vars consumed at boot (template: `etc/fleet_v2.env.template`):
-`LCARS_LOG_LEVEL`, `LCARS_CAPPROFILES_ROOT`, `LCARS_PIPELINES_ROOT`, `LCARS_COORD_POLICIES_PATH`, `LCARS_STARFLEET_AUDIT_LOG`, `LCARS_BOOT_PERMANENT_AT_START`, `LCARS_CONFIG_REPO`, `FLEET_WEBHOOK_SECRET_PATH`, `FLEET_API_PORT`.
+`LCARS_LOG_LEVEL`, `LCARS_CAPPROFILES_ROOT`, `LCARS_PIPELINES_ROOT`, `LCARS_COORD_POLICIES_PATH`, `LCARS_STARFLEET_AUDIT_LOG`, `LCARS_BOOT_PERMANENT_AT_START`, `FLEET_WEBHOOK_SECRET_PATH`, `FLEET_API_PORT`.
 Run #5 (ADR-G / MCP / pilot — added 2026-06-02): `LCARS_FLEET_MCP_URL` / `_POD_FACING_PORT` / `_BRIDGE_PATH`, `LCARS_PILOT_POLL_REPO` / `_POLL_INTERVAL_MS` / `_ROUTING_PATH`, `FORGE_BASE_URL` / `FORGE_TOKEN` / `FORGE_TOKEN_FILE`.
 
 ## Test hermeticity

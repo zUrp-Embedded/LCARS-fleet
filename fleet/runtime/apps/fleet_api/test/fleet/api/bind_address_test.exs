@@ -3,10 +3,10 @@ defmodule Fleet.API.BindAddressTest do
   Contrat de bind du listener REST/WS `:8080`.
 
   Le child-spec Cowboy DOIT porter `ip: {127,0,0,1}` par défaut : la surface est
-  no-auth (frontière = isolation réseau, cf. Rest § Auth) et inclut
-  `/api/admin/spawn` + `/api/config/update` — l'exposer 0.0.0.0 par défaut serait
-  un trou. L'exposition publique est un opt-in nommé (`LCARS_BIND_HOST`), jamais le
-  défaut. Ce test attrape toute régression future qui oublierait de threader l'ip.
+  no-auth (frontière = isolation réseau, cf. Rest § Auth) et sa seule écriture
+  restante, `/api/admin/spawn`, est gardée mais non authentifiée — l'exposer 0.0.0.0
+  par défaut serait un trou. L'exposition publique est un opt-in nommé (`LCARS_BIND_HOST`),
+  jamais le défaut. Ce test attrape toute régression future qui oublierait de threader l'ip.
   """
   use ExUnit.Case, async: false
 

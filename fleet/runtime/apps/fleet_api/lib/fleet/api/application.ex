@@ -2,24 +2,20 @@ defmodule Fleet.API.Application do
   @moduledoc """
   Application supervisor `fleet_api`.
 
-  Démarre :
+  Démarre le Cowboy listener `:8080` avec dispatch :
 
-    1. `Fleet.API.GitCommitter` (mutex FIFO commits config)
-    2. Cowboy listener `:8080` avec dispatch :
-       - `/ws` → `Fleet.API.WS` (WebSocket handler)
-       - `/_*` → `Fleet.API.Rest` (Plug.Router REST)
+    - `/ws` → `Fleet.API.WS` (WebSocket handler)
+    - `/_*` → `Fleet.API.Rest` (Plug.Router REST)
 
   ## Configuration
 
     * `:fleet_api, :http_port` — port HTTP (default `8080`)
     * `:fleet_api, :start_listener` — booléen (default `true`).
       Tests peuvent set à `false` pour démarrer Cowboy manuellement.
-    * `:fleet_api, :git_repo_path` — racine repo config
-      (default `/var/lib/lcars/config`)
 
   ## Stratégie
 
-  `:one_for_one` — GitCommitter + Cowboy listener restart `:permanent`.
+  `:one_for_one` — Cowboy listener restart `:permanent`.
   Pré-enregistrement atomes events (créés au compile-time, pas dérivés d'entrée externe → pas de fuite d'atomes DoS).
   """
 
@@ -31,7 +27,7 @@ defmodule Fleet.API.Application do
 
   @impl Application
   def start(_type, _args) do
-    children = base_children() ++ listener_children()
+    children = listener_children()
 
     opts = [strategy: :one_for_one, name: Fleet.API.Supervisor]
 
@@ -78,14 +74,6 @@ defmodule Fleet.API.Application do
     end
   end
 
-  defp base_children do
-    # GitCommitter GenServer sérialise les commits du repo
-    # config (évite race conditions cross-caller sur snapshot/rename/
-    # git add/commit/rollback). Pas de cycle, pas de state mutable —
-    # juste un mutex de file FIFO.
-    [Fleet.API.GitCommitter]
-  end
-
   @doc """
   Child specs du listener Cowboy (public pour le test de bind : l'`:ip` du listener
   est un contrat de sécurité — loopback par défaut, override nommé seulement).
@@ -110,9 +98,9 @@ defmodule Fleet.API.Application do
          ]}
       ]
 
-      # Bind loopback par défaut (frontière = isolation réseau, cf. Rest § Auth :
-      # surface no-auth qui inclut /api/admin/spawn et /api/config/update — ne JAMAIS
-      # l'exposer 0.0.0.0 par défaut). Le dashboard navigateur (:8080/dashboard + /ws)
+      # Bind loopback par défaut (frontière = isolation réseau, cf. Rest § Auth : la seule
+      # écriture restante, /api/admin/spawn, est no-auth mais gardée — ne JAMAIS l'exposer
+      # 0.0.0.0 par défaut). Le dashboard navigateur (:8080/dashboard + /ws)
       # devient local-only : un accès distant passe par un tunnel/reverse-proxy.
       # Exposition publique = opt-in nommé via Fleet.EventRouter.BindAddress (LCARS_BIND_HOST).
       ip = Fleet.EventRouter.BindAddress.ip()

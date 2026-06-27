@@ -251,7 +251,7 @@ if config_env() != :test do
   end
 
   # ============================================================
-  # fleet_api (ch15) — port HTTP + git config repo (pas d'auth app, cf. rest.ex § Auth)
+  # fleet_api (ch15) — port HTTP (pas d'auth app, cf. rest.ex § Auth)
   # ============================================================
   http_port =
     case System.get_env("FLEET_API_PORT") do
@@ -261,10 +261,6 @@ if config_env() != :test do
 
   config :fleet_api, http_port: http_port
   config :fleet_api, start_listener: true
-
-  if path = System.get_env("LCARS_CONFIG_REPO") do
-    config :fleet_api, git_repo_path: path
-  end
 
   # ============================================================
   # fleet_observation — observation deck read-only :8091 (BL-026)

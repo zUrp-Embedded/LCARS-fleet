@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-26 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
+**Dernière révision** : 2026-06-27 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -16,7 +16,6 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 |---|---|
 | `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST |
 | `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
-| `Fleet.API.GitCommitter` | atomic write rename + `git add` + `git commit` (canon trace strate 1, architecture-cible §L380). **Confinement RÉEL** (`safe_abs_path`, non-lexical) : refuse chemin absolu, composant `.git`, symlink-in-chain (résolu par `lstat` par composant — `File.write`/`rename` ne SUIT pas un lien hors-repo), et `file_path` == racine (sinon le `<root>.tmp` serait un sibling hors-repo). **Hooks neutralisés** : `git add`/`commit` composent `Fleet.Credentials.Shell.git_safe_config_args/0` (un hook/`core.hooksPath` du repo de config ne s'exécute pas côté monde). **Rollback correct** : sur échec git AVANT que le commit ne land → restaure le worktree ET désindexe (`git reset -- <file>`, pas de blob fantôme dans l'index) ; sur échec d'une étape APRÈS un commit qui a land → NE rollback PAS (le commit est durable, écraser le worktree le corromprait). `content` non-binaire refusé proprement (pas de crash `File.write`) |
 | `Fleet.API.Readiness` | read-model P05 — état opérationnel LIVE (anti-vert-creux). Introspecte config/process/persistent_term ; `deep/0` rend `status: operational\|degraded` + sous-systèmes. Jumeau runtime de `mix lcars.contracts.check` (plan source-conformance build/CI) sur le plan opérationnel. Fonctions pures (pas de process — Iron Law) |
 
 ## Routes REST
@@ -29,7 +28,6 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 | GET | `/api/tickets` | — | liste tickets |
 | GET | `/api/pods` | — | liste pods |
 | POST | `/api/admin/spawn` | — | broadcast `admin.spawn.request` (ch6) ; **DTO public allowlisté** (422 sur champ interne) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
-| POST | `/api/config/update` | — | atomic write + git commit |
 
 **Pas d'auth applicative** (HMAC retiré — bearer statique sans surface intra-container).
 Frontière = isolation réseau du container (ne pas publier `:8080` ; tunnel pour le remote).
@@ -78,23 +76,13 @@ S → C: {"type": "error", "reason": "..."}
 Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
 `pipeline.completed`). Liste vide = subscribe-all.
 
-## Public API
-
-```elixir
-# GitCommitter atomic write + git commit
-{:ok, sha} = Fleet.API.GitCommitter.commit_config_change(
-  "intensity.json", ~s|{"level":"low"}|, "user1"
-)
-```
-
 ## Configuration
 
 | Knob | Default | Rôle |
 |---|---|---|
 | `:fleet_api, :http_port` | `8080` | port Cowboy listener |
 | `:fleet_api, :start_listener` | `true` | bool — `false` en tests (`config/test.exs`) |
-| `:fleet_api, :git_repo_path` | `/var/lib/lcars/config` | racine repo config |
-| `LCARS_BIND_HOST` (env) | `127.0.0.1` (loopback) | IP de bind du listener — surface no-auth (`/api/admin/spawn`, `/api/config/update`) **local-only par défaut** ; exposer (ex. `0.0.0.0`) = opt-in explicite via cette env. Source unique : `Fleet.EventRouter.BindAddress`. |
+| `LCARS_BIND_HOST` (env) | `127.0.0.1` (loopback) | IP de bind du listener — surface no-auth dont la seule écriture restante (`/api/admin/spawn`, gardée) est **local-only par défaut** ; exposer (ex. `0.0.0.0`) = opt-in explicite via cette env. Source unique : `Fleet.EventRouter.BindAddress`. |
 
 > **Bind loopback (frontière réseau).** Le listener écoute `{127,0,0,1}` par
 > défaut : la surface est no-auth et le contrat de sécurité est « isolation
@@ -118,7 +106,6 @@ callbacks Cowboy directs pour WS (pas de socket réel).
 * `fleet_spawner` (Ring 1) — readiness lit le backend de lancement résolu via `Fleet.Spawner.LaunchBackend.resolved/0` (source unique du défaut, pas re-copié)
 * `fleet_starfleet` (Ring 3) — readiness lit le backend dispatcher de shutdown résolu via `Fleet.Starfleet.Shutdown.configured_dispatcher/0` (source unique du défaut)
 * `fleet_cap_profile` (ch1) — validation cap-profile à l'admission `/api/admin/spawn`
-* `fleet_credentials` (Ring 1) — `Fleet.Credentials.Shell.git_safe_config_args/0` (source unique de la neutralisation config git système-side, composée par `GitCommitter`)
 * `:plug`, `:plug_cowboy`, `:jason`
 
 ## D1 décidé (split deferred)
