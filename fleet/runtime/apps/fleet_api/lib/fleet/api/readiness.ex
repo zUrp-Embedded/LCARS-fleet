@@ -165,24 +165,21 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # MCP pod-facing : transport pull des pods. Sonde le PROCESS RÉEL (le listener
-  # `Fleet.MCP.PodTools` tourne-t-il ?) délégué au propriétaire de la topologie
-  # `Fleet.MCP.Supervisor.pod_facing_status/0` — PAS la seule présence du knob
-  # (`:pod_facing_port` posé mais listener mort = vert-creux). Délégation = pas de
-  # fuite des noms de process Ring 3 dans Ring 4 (même pattern que `pilot.stage`).
-  # Le `mcp_server_spec` (côté spawner) reste sondé en config : c'est le spec injecté
-  # AUX pods, pas un process — sa présence/absence est l'état réel à ce niveau.
-  # `:inactive` (port off) n'altère pas le verdict global ; `:degraded` (port on,
-  # listener mort, OU port on/spec absent) le bascule.
+  # MCP pod-facing : transport pull des pods. Sonde le PROCESS RÉEL (le
+  # DynamicSupervisor d'accepteurs de socket per-pod tourne-t-il ?) délégué au
+  # propriétaire de la topologie `Fleet.MCP.Supervisor.pod_facing_status/0` — pas
+  # un knob de config. Délégation = pas de fuite des noms de process Ring 3 dans
+  # Ring 4 (même pattern que `pilot.stage`). Le `mcp_server_spec` (côté spawner)
+  # reste sondé en config : c'est le spec injecté AUX pods, pas un process — sa
+  # présence/absence est l'état réel à ce niveau. Substrat vivant + spec présent →
+  # `:operational` ; substrat mort, OU vivant mais spec absent (pods non câblés) →
+  # `:degraded`.
   defp mcp_pod_facing do
-    {port_state, port_detail} = Fleet.MCP.Supervisor.pod_facing_status()
+    {sub_state, sub_detail} = Fleet.MCP.Supervisor.pod_facing_status()
     spec_present? = not is_nil(Application.get_env(:fleet_spawner, :mcp_server_spec))
-    detail = Map.put(port_detail, :mcp_server_spec, spec_present?)
+    detail = Map.put(sub_detail, :mcp_server_spec, spec_present?)
 
-    case port_state do
-      :inactive ->
-        probe("mcp.pod_facing", :inactive, Map.put(detail, :note, "MCP pod-facing non configuré"))
-
+    case sub_state do
       :operational when spec_present? ->
         probe("mcp.pod_facing", :operational, detail)
 
@@ -190,7 +187,11 @@ defmodule Fleet.API.Readiness do
         probe(
           "mcp.pod_facing",
           :degraded,
-          Map.put(detail, :note, "listener vivant mais mcp_server_spec absent (pods non câblés)")
+          Map.put(
+            detail,
+            :note,
+            "substrat socket vivant mais mcp_server_spec absent (pods non câblés)"
+          )
         )
 
       :degraded ->

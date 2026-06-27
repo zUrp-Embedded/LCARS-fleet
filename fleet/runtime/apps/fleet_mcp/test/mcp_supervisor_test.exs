@@ -1,40 +1,28 @@
 defmodule Fleet.MCP.SupervisorTest do
   @moduledoc """
-  Z7.3 (2026-06-10) — remplace l'ex-`mcp_bridge_supervisor_test.exs` (dont ~90 %
-  testait le `Fleet.MCP.Bridge` mort, retiré MCP-D1). Ne garde que le smoke
-  d'intégration utile : l'umbrella a booté `Fleet.MCP.Supervisor` + son seul enfant
-  permanent `Fleet.MCP.Server` (PodTools = SSI `:pod_facing_port`, absent en test).
-  La conformance ADR-C `Server` refuse `:pod` est couverte par `mcp_server_test.exs`.
+  Smoke d'intégration du superviseur racine `fleet_mcp` : l'umbrella a booté
+  `Fleet.MCP.Supervisor` + ses enfants permanents — `Fleet.MCP.Server` (garde de
+  boot), le `Registry` `Fleet.MCP.PodSocketRegistry`, et le DynamicSupervisor
+  d'accepteurs de socket `Fleet.MCP.PodSocketSupervisor` (démarré host-side
+  inconditionnellement, sans aucune socket tant qu'aucun pod n'est provisionné).
   """
   use ExUnit.Case, async: false
 
-  test "Supervisor umbrella : Server vivant (boot host), plus de Bridge" do
+  test "Supervisor umbrella : Server + substrat socket pod-facing vivants, plus de Bridge" do
     assert is_pid(Process.whereis(Fleet.MCP.Supervisor))
     assert is_pid(Process.whereis(Fleet.MCP.Server))
+    assert is_pid(Process.whereis(Fleet.MCP.PodSocketRegistry))
+    assert is_pid(Process.whereis(Fleet.MCP.PodSocketSupervisor))
     # Bridge retiré (husk mort) — ne doit plus être dans l'arbre.
     assert Process.whereis(Fleet.MCP.Bridge) == nil
   end
 
-  describe "pod_facing_status/0 — sonde le PROCESS, pas le knob (anti-vert-creux)" do
-    # En ambient test : `:pod_facing_port` absent → le superviseur a booté SANS PodTools.
-    test ":inactive quand pod_facing_port non configuré (off volontaire)" do
-      # garde-fou : l'ambient ne pose pas le port
-      assert is_nil(Application.get_env(:fleet_mcp, :pod_facing_port))
-      assert {:inactive, detail} = Fleet.MCP.Supervisor.pod_facing_status()
-      assert detail.note =~ "non configuré"
-    end
-
-    # Cas VERT-CREUX corrigé : le knob dit ON (port posé) mais le listener PodTools
-    # ne tourne pas (le superviseur ambient a booté sans, le port arrive après coup).
-    # La sonde doit rendre :degraded (et NON :operational sur la seule présence du knob).
-    test ":degraded quand port configuré mais PodTools non vivant" do
-      Application.put_env(:fleet_mcp, :pod_facing_port, 64_999)
-      on_exit(fn -> Application.delete_env(:fleet_mcp, :pod_facing_port) end)
-
-      assert {:degraded, detail} = Fleet.MCP.Supervisor.pod_facing_status()
-      assert detail.pod_facing_port == 64_999
-      assert detail.pod_tools == false
-      assert detail.note =~ "PodTools non vivant"
+  describe "pod_facing_status/0 — sonde le PROCESS (le DynamicSupervisor d'accepteurs), pas un knob" do
+    test ":operational quand le DynamicSupervisor d'accepteurs tourne (host-side)" do
+      assert {:operational, detail} = Fleet.MCP.Supervisor.pod_facing_status()
+      assert detail.acceptor_supervisor == true
+      # Aucun pod provisionné dans l'ambient test → zéro accepteur/socket actif.
+      assert detail.sockets == 0
     end
   end
 end

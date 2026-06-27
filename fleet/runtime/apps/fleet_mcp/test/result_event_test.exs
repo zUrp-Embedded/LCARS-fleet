@@ -1,34 +1,19 @@
 defmodule Fleet.MCP.ResultEventTest do
   @moduledoc """
-  Completion event-driven (ADR-G) — sur `submit_result`, le **broker** `fleet_task_queue`
+  Completion event-driven — sur `submit_result`, le **broker** `fleet_task_queue`
   broadcast `%Fleet.Event{source: :task_queue, type: :task_completed}` sur `fleet.events`.
 
   `pod.ex` (Ring 1) y souscrit pour déclencher sa complétion SANS lire fleet_mcp (Ring 4)
   en direct. Ici on prouve l'émission via le tool `submit_result` (PUR, pas de claude).
-  `fleet_mcp` n'émet plus le string-topic `pod.result_submitted` — c'est le broker qui possède l'event.
+  L'identité du pod vient du `state` (`%{pod_id: pod}`) — porté par l'accepteur de socket
+  en prod, jamais des arguments.
   """
   use ExUnit.Case, async: false
 
   alias Fleet.MCP.PodTools
   alias Fleet.TaskQueue
 
-  # Identité prouvée par capability (même modèle de test que pod_tools_test) : le résolveur stubbé reconnaît
-  # tout pod via `"CAP-" <> pod_id`. Le pod légitime présente cette capability → la gate passe.
-  setup do
-    prev = Application.get_env(:fleet_mcp, :pod_resolver)
-
-    Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
-      {:ok, %{role: "engineer", capability: "CAP-" <> pod_id}}
-    end)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_mcp, :pod_resolver, prev),
-        else: Application.delete_env(:fleet_mcp, :pod_resolver)
-    end)
-
-    :ok
-  end
+  defp pod_state(pod), do: %{pod_id: pod}
 
   test "submit_result → broker broadcast %Fleet.Event{task_completed} (pod_id + correlation_id)" do
     pod = "pod-evt-#{System.unique_integer([:positive])}"
@@ -38,16 +23,11 @@ defmodule Fleet.MCP.ResultEventTest do
 
     payload = %{"answer" => "42", "nonce" => "evt-#{System.unique_integer([:positive])}"}
 
-    assert {:ok, %{content: [%{"type" => "text"}]}, %{}} =
+    assert {:ok, %{content: [%{"type" => "text"}]}, _} =
              PodTools.handle_tool_call(
                "submit_result",
-               %{
-                 "payload" => payload,
-                 "task_id" => tid,
-                 "_lcars_pod_id" => pod,
-                 "_lcars_pod_capability" => "CAP-" <> pod
-               },
-               %{}
+               %{"payload" => payload, "task_id" => tid},
+               pod_state(pod)
              )
 
     # Le livrable broadcasté = le `payload` métier EXACT (le task_id, corrélateur de transport, est retiré
@@ -62,7 +42,7 @@ defmodule Fleet.MCP.ResultEventTest do
                    2_000
   end
 
-  test "submit_result sans _lcars_pod_id → erreur (pas de broadcast)" do
+  test "submit_result sans pod_id dans le state → erreur (pas de broadcast)" do
     Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
     payload = %{"answer" => "anon-#{System.unique_integer([:positive])}"}
 
@@ -85,15 +65,11 @@ defmodule Fleet.MCP.ResultEventTest do
     # task_id ABSENT du top-level, présent DANS le payload — la forme exacte produite par le juge en e2e.
     verdict = %{"decision" => "continue", "reason" => "ok", "task_id" => tid}
 
-    assert {:ok, %{content: [%{"type" => "text"}]}, %{}} =
+    assert {:ok, %{content: [%{"type" => "text"}]}, _} =
              PodTools.handle_tool_call(
                "submit_result",
-               %{
-                 "payload" => verdict,
-                 "_lcars_pod_id" => pod,
-                 "_lcars_pod_capability" => "CAP-" <> pod
-               },
-               %{}
+               %{"payload" => verdict},
+               pod_state(pod)
              )
 
     # Le corrélateur de transport est retiré du livrable STOCKÉ, même rangé dans le payload (pas de pollution).
@@ -116,15 +92,11 @@ defmodule Fleet.MCP.ResultEventTest do
     {:ok, _task} = TaskQueue.enqueue(pod, %{brief: "x"})
     Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
 
-    assert {:error, :task_id_required, %{}} =
+    assert {:error, :task_id_required, _} =
              PodTools.handle_tool_call(
                "submit_result",
-               %{
-                 "payload" => %{"decision" => "continue"},
-                 "_lcars_pod_id" => pod,
-                 "_lcars_pod_capability" => "CAP-" <> pod
-               },
-               %{}
+               %{"payload" => %{"decision" => "continue"}},
+               pod_state(pod)
              )
 
     refute_receive %Fleet.Event{source: :task_queue, type: :task_completed}, 200

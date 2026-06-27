@@ -155,26 +155,25 @@ defmodule Fleet.API.ReadinessTest do
     end
   end
 
-  describe "mcp.pod_facing (sonde le PROCESS, pas le knob)" do
-    # Ambient test : pas de :pod_facing_port → listener off volontaire → :inactive.
-    test "inactive quand pod_facing non configuré" do
-      assert %{state: :inactive} = sub(Readiness.deep(), "mcp.pod_facing")
+  describe "mcp.pod_facing (sonde le PROCESS — le DynamicSupervisor d'accepteurs de socket)" do
+    # Substrat socket per-pod vivant (booté host-side dans l'umbrella) + spec injecté AUX pods présent
+    # → operational. On pose le spec (absent en ambient) pour isoler ce cas.
+    test "operational quand le substrat socket tourne ET mcp_server_spec présent" do
+      Application.put_env(:fleet_spawner, :mcp_server_spec, %{"some" => "spec"})
+      on_exit(fn -> Application.delete_env(:fleet_spawner, :mcp_server_spec) end)
+
+      assert %{state: :operational, detail: %{acceptor_supervisor: true}} =
+               sub(Readiness.deep(), "mcp.pod_facing")
     end
 
-    # VERT-CREUX corrigé : knob :pod_facing_port posé mais PodTools non vivant
-    # (superviseur ambient booté sans listener) → la probe doit dégrader, PAS rester
-    # operational sur la seule présence du port.
-    test "degraded quand port posé mais le listener PodTools ne tourne pas" do
-      Application.put_env(:fleet_mcp, :pod_facing_port, 64_998)
-      Application.put_env(:fleet_spawner, :mcp_server_spec, %{"some" => "spec"})
+    # Ambient test : substrat vivant MAIS mcp_server_spec absent (pods non câblés) → la probe dégrade
+    # (anti-vert-creux : le substrat tourne mais rien n'est injecté aux pods).
+    test "degraded quand substrat vivant mais mcp_server_spec absent (pods non câblés)" do
+      Application.delete_env(:fleet_spawner, :mcp_server_spec)
 
-      on_exit(fn ->
-        Application.delete_env(:fleet_mcp, :pod_facing_port)
-        Application.delete_env(:fleet_spawner, :mcp_server_spec)
-      end)
-
-      assert %{state: :degraded, detail: %{pod_tools: false}} =
-               sub(Readiness.deep(), "mcp.pod_facing")
+      assert %{state: :degraded, detail: detail} = sub(Readiness.deep(), "mcp.pod_facing")
+      assert detail.mcp_server_spec == false
+      assert detail.note =~ "mcp_server_spec absent"
     end
   end
 

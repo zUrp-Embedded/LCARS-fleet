@@ -134,73 +134,69 @@ defmodule Fleet.MCP.PodTools do
   end
 
   @impl true
-  def handle_tool_call("get_task", arguments, state) do
-    # Identité PROUVÉE avant tout : le pod_id est devinable, donc on n'y touche QU'APRÈS avoir vérifié
-    # que le wire présente la capability enregistrée pour ce pod (anti-usurpation). Capability absente /
-    # fausse / pod inconnu → REFUS net, jamais un fallback anonyme (le pod ne lirait pas le mandat d'un autre).
-    case verify_pod(arguments) do
-      {:error, reason} ->
-        {:error, reason, state}
+  def handle_tool_call("get_task", _arguments, %{pod_id: pod_id} = state)
+      when is_binary(pod_id) and pod_id != "" do
+    # Identité = le canal : `pod_id` vient de l'accepteur de socket (un pod = une socket), jamais du wire.
+    # On ne lit donc PAS d'identité dans les arguments — il n'y a rien à prouver, la socket discrimine.
+    result =
+      case TaskQueue.get_for_pod(pod_id) do
+        {:ok, task} -> %{"done" => false, "task" => envelope(task)}
+        {:error, :no_task} -> %{"done" => true}
+      end
 
-      {:ok, pid, _role} ->
-        result =
-          case TaskQueue.get_for_pod(pid) do
-            {:ok, task} -> %{"done" => false, "task" => envelope(task)}
-            {:error, :no_task} -> %{"done" => true}
-          end
+    {:ok, %{content: [json(result)]}, state}
+  end
 
-        {:ok, %{content: [json(result)]}, state}
+  def handle_tool_call("get_task", _arguments, state) do
+    # `pod_id` absent du state = anomalie de l'accepteur (il DOIT toujours le porter). Erreur typée, pas une
+    # fin de mandat masquée en done:true (sinon le pod s'arrêterait en croyant avoir fini). Fail-closed.
+    {:error, :pod_id_required, state}
+  end
+
+  def handle_tool_call("submit_result", %{"payload" => payload} = args, %{pod_id: pod_id} = state)
+      when is_map(payload) and is_binary(pod_id) and pod_id != "" do
+    # Identité = le canal (`state.pod_id`, porté par l'accepteur). Reste le `task_id` OBLIGATOIRE : il
+    # corrèle le livrable à UN mandat précis (le broker rejette un task_id ≠ mandat actif du pod). C'est un
+    # verrou orthogonal au transport — le pod doit nommer la tâche qu'il clôt, sans quoi le broker tomberait
+    # sur « la dernière active » du pod. Le corrélateur est cherché au top-level (format canonique) PUIS
+    # dans le payload (un agent juge le range parfois dans son payload de verdict). Absent des DEUX → refus.
+    case effective_task_id(args, payload) do
+      nil ->
+        {:error, :task_id_required, state}
+
+      task_id ->
+        # Le broker valide pod_id ↔ task_id et broadcast %Fleet.Event{task_completed}.
+        case TaskQueue.submit_result(pod_id, Map.put(payload, "task_id", task_id)) do
+          {:ok, _task} ->
+            {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
+
+          {:error, :no_active_task} ->
+            # pas de mandat actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
+            # réassigné depuis) → DROP. Le signaler isError (comme :task_id_mismatch / :pod_id_required)
+            # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (échec masqué
+            # en succès). (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST enregistré.)
+            {:error, :no_active_task, state}
+
+          {:error, :double_submit_ignored} ->
+            {:ok, %{content: [text("Resultat deja recu (ignore).")]}, state}
+
+          {:error, :task_id_mismatch} ->
+            {:error, :task_id_mismatch, state}
+
+          # le broadcast lifecycle `task_completed` a échoué : le hop ne finira PAS (le HopConsumer
+          # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès) — le pod doit
+          # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
+          # son livrable accepté alors que le verrou forge reste posé à vie.
+          {:error, {:broadcast_failed, _reason}} ->
+            {:error, :broadcast_failed, state}
+        end
     end
   end
 
-  def handle_tool_call("submit_result", %{"payload" => payload} = args, state)
-      when is_map(payload) do
-    # `task_id` OBLIGATOIRE (plus de « tâche active la plus récente » sur un pod_id non prouvé) ET
-    # identité prouvée par capability. Les deux ferment l'impersonation : un pod ne peut clôturer la tâche
-    # d'un autre ni en présentant son pod_id (capability), ni en omettant le task_id (corrélation explicite).
-    case verify_pod(args) do
-      {:error, reason} ->
-        {:error, reason, state}
-
-      {:ok, pid, _role} ->
-        # Le corrélateur est cherché au top-level (format canonique du wire) PUIS dans le payload : un
-        # agent juge range parfois son task_id DANS le payload de verdict au lieu du paramètre top-level.
-        # Absent des DEUX → refus (le pod doit nommer la tâche qu'il clôt ; sans corrélateur le broker
-        # tomberait sur « la dernière active » — le levier d'impersonation supprimé). Présent quelque part
-        # → on le normalise au top-level du map broker, qui le valide pod_id ↔ task_id : l'emplacement
-        # d'origine n'affaiblit RIEN (le fallback retiré était implicite/devinable ; ici il reste explicite).
-        case effective_task_id(args, payload) do
-          nil ->
-            {:error, :task_id_required, state}
-
-          task_id ->
-            # Le broker valide pod_id ↔ task_id et broadcast %Fleet.Event{task_completed}.
-            case TaskQueue.submit_result(pid, Map.put(payload, "task_id", task_id)) do
-              {:ok, _task} ->
-                {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
-
-              {:error, :no_active_task} ->
-                # pas de mandat actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
-                # réassigné depuis) → DROP. Le signaler isError (comme :task_id_mismatch / :pod_id_required)
-                # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (échec masqué
-                # en succès). (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST enregistré.)
-                {:error, :no_active_task, state}
-
-              {:error, :double_submit_ignored} ->
-                {:ok, %{content: [text("Resultat deja recu (ignore).")]}, state}
-
-              {:error, :task_id_mismatch} ->
-                {:error, :task_id_mismatch, state}
-
-              # le broadcast lifecycle `task_completed` a échoué : le hop ne finira PAS (le HopConsumer
-              # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès) — le pod doit
-              # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
-              # son livrable accepté alors que le verrou forge reste posé à vie.
-              {:error, {:broadcast_failed, _reason}} ->
-                {:error, :broadcast_failed, state}
-            end
-        end
-    end
+  def handle_tool_call("submit_result", %{"payload" => payload}, state) when is_map(payload) do
+    # Payload valide mais `pod_id` absent du state = anomalie de l'accepteur → refus typé, jamais de
+    # fallback anonyme (un livrable sans pod identifié n'a nulle part où aller).
+    {:error, :pod_id_required, state}
   end
 
   def handle_tool_call("submit_result", _bad_args, state) do
@@ -215,25 +211,23 @@ defmodule Fleet.MCP.PodTools do
   # `lcars-stage:` ré-encoderait une constante). Dispatch runtime via modules-en-variable (pas de dep compile-time pilot).
   def handle_tool_call(
         "create_ticket",
-        %{"title" => title, "brief" => brief, "project" => repo} = args,
+        %{"title" => title, "brief" => brief, "project" => repo},
         state
       )
       when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
     forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 
-    # Déléguer un ticket est un acte d'ARCHITECTE : `require_architect` prouve l'identité (capability
-    # par-pod, comme tout tool corrélé pod) PUIS exige que le rôle gravé au spawn soit `architect`. Un pod
-    # worker (engineer, reviewer) ou inconnu est REFUSÉ ICI, serveur-side — la seule barrière n'est plus la
-    # visibilité côté pont (un pod qui reconstruit le JSON-RPC contournait le filtre client). Le rôle vient
-    # du spawn vérifié, JAMAIS du `_lcars_role` du wire (non authentifié → un pod pourrait prétendre
-    # architect). L'arch poste ensuite l'issue EN SON NOM : token du compte de rôle de l'appelant.
-    with {:ok, _pid, role} <- require_architect(args),
+    # Déléguer un ticket est un acte d'ARCHITECTE : `require_architect` résout le rôle depuis l'identité du
+    # canal (`state.pod_id`, porté par l'accepteur de socket) PUIS exige que ce rôle gravé au spawn soit
+    # `architect`. Un pod worker (engineer, reviewer) ou inconnu est REFUSÉ ICI, serveur-side. Le rôle vient
+    # du spawn (résolu par pod_id), JAMAIS d'un champ du wire. L'arch poste ensuite l'issue EN SON NOM :
+    # token du compte de rôle de l'appelant.
+    with {:ok, role} <- require_architect(state),
          token when is_binary(token) <- Fleet.Credentials.RoleToken.token(role) do
       do_create_ticket(forge, repo, title, brief, [token: token], state)
     else
       {:error, reason} ->
-        # Identité non prouvée (capability manquante/fausse, pod inconnu) ou rôle non-architecte → on ne
-        # crée RIEN.
+        # Rôle non-architecte, ou pod inconnu du registre → on ne crée RIEN.
         {:error, reason, state}
 
       _ ->
@@ -269,15 +263,14 @@ defmodule Fleet.MCP.PodTools do
   # appliquée AVANT toute mécanique (cf. require_architect ci-dessous) ; do_create_project porte la séquence.
   def handle_tool_call("create_project", %{"name" => name} = args, state) when is_binary(name) do
     # Onboarder un projet CRÉE un repo forge ET écrit/pousse dans `/home/projects` : un acte d'ARCHITECTE.
-    # `require_architect` prouve l'identité (capability par-pod) PUIS exige le rôle `architect` gravé au
-    # spawn. Un pod worker (engineer) ou inconnu qui joindrait le MCP central — même en reconstruisant le
-    # JSON-RPC, sans passer par le filtre de visibilité du pont — est REFUSÉ ici, serveur-side, AVANT toute
-    # création de repo ou écriture disque. Fail-closed : pas d'architecte prouvé = pas de projet.
-    case require_architect(args) do
+    # `require_architect` résout le rôle depuis l'identité du canal (`state.pod_id`) PUIS exige le rôle
+    # `architect` gravé au spawn. Un pod worker (engineer) ou inconnu est REFUSÉ ici, serveur-side, AVANT
+    # toute création de repo ou écriture disque. Fail-closed : pas d'architecte = pas de projet.
+    case require_architect(state) do
       {:error, reason} ->
         {:error, reason, state}
 
-      {:ok, _pid, _role} ->
+      {:ok, _role} ->
         do_create_project(name, args, state)
     end
   end
@@ -292,18 +285,18 @@ defmodule Fleet.MCP.PodTools do
   # un arch qui suit plusieurs projets en parallèle nomme CELUI qu'il interroge. Sinon le « dernier projet
   # onboardé » servirait l'état du mauvais repo (issue_state/delivered faux → multi-ticket mis-séquencé).
   # Suivre l'état d'un ticket délégué reste réservé à l'architecte (cohérent avec create_ticket /
-  # create_project) : `require_architect` exige l'identité prouvée ET le rôle architect avant toute lecture.
+  # create_project) : `require_architect` résout le rôle depuis l'identité du canal et exige `architect`.
   def handle_tool_call(
         "get_ticket_status",
-        %{"number" => number, "project" => repo} = args,
+        %{"number" => number, "project" => repo},
         state
       )
       when is_integer(number) and is_binary(repo) and repo != "" do
-    case require_architect(args) do
+    case require_architect(state) do
       {:error, reason} ->
         {:error, reason, state}
 
-      {:ok, _pid, _role} ->
+      {:ok, _role} ->
         forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 
         issue_state =
@@ -378,7 +371,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # Pose l'issue (auteur = compte de rôle via `author_opts`, assignee = humain owner) et l'étiquette de visu.
-  # Extrait de create_ticket pour garder le handler centré sur la GATE d'identité (verify_pod + token).
+  # Extrait de create_ticket pour garder le handler centré sur la GATE (require_architect + token).
   defp do_create_ticket(forge, repo, title, brief, author_opts, state) do
     # assignee = l'HUMAIN owner (point fixe : routing + ownership, jamais le rôle). Login forge
     # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue ;
@@ -458,87 +451,39 @@ defmodule Fleet.MCP.PodTools do
   # ============================================================
   #
   # `create_project`, `create_ticket` et `get_ticket_status` sont des actes d'ARCHITECTE : créer un repo
-  # forge, écrire/pousser dans `/home/projects`, déléguer du travail, suivre une délégation. Avant ce garde,
-  # la seule barrière était la VISIBILITÉ côté pont (`fleet_mcp_stdio_bridge.py` ne liste ces tools que si
-  # `LCARS_ROLE==architect`) — ce n'est PAS une autorisation : un pod worker qui a Bash + joint le central
-  # en loopback peut reconstruire le JSON-RPC et appeler ces tools directement, hors filtre client.
-  #
-  # `require_architect` ferme ce trou serveur-side : il enveloppe `verify_pod` (identité prouvée par la
-  # capability par-pod) PUIS exige que le rôle gravé au spawn soit `architect`. Le rôle vient du pod
-  # VÉRIFIÉ, jamais du `_lcars_role` du wire (non authentifié → un pod pourrait prétendre architect).
-  # Tout rôle autre (engineer, reviewer, rôle nil/inconnu) → `{:error, :forbidden_not_architect}`. Une
-  # identité non prouvée propage l'erreur de `verify_pod` telle quelle (capability absente/fausse, pod
-  # inconnu). Fail-closed de bout en bout : aucun cas ne retombe sur un accès autorisé.
-  defp require_architect(args) do
-    case verify_pod(args) do
-      {:ok, pid, "architect"} -> {:ok, pid, "architect"}
-      {:ok, _pid, _other_role} -> {:error, :forbidden_not_architect}
+  # forge, écrire/pousser dans `/home/projects`, déléguer du travail, suivre une délégation. La barrière
+  # est serveur-side : `require_architect` résout le rôle depuis l'identité du CANAL (`state.pod_id`, porté
+  # par l'accepteur de socket — pas de champ du wire) PUIS exige que ce rôle gravé au spawn soit `architect`.
+  # Un pod worker (engineer, reviewer), un rôle nil/inconnu ou un pod absent du registre → REFUS. Fail-closed
+  # de bout en bout : aucun cas ne retombe sur un accès autorisé. (Le filtre de visibilité côté pont reste
+  # une commodité UX — ne pas montrer un tool inutilisable — mais l'autorisation vit ICI.)
+  defp require_architect(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
+    case resolve_role(pod_id) do
+      {:ok, "architect"} -> {:ok, "architect"}
+      {:ok, _other_role} -> {:error, :forbidden_not_architect}
       {:error, _reason} = err -> err
     end
   end
 
+  defp require_architect(_state), do: {:error, :pod_id_required}
+
   # ============================================================
-  # Identité du pod — prouvée par capability, JAMAIS crue sur le wire
+  # Rôle du pod — résolu depuis le pod_id du CANAL, jamais cru sur le wire
   # ============================================================
   #
-  # Le pont stdio injecte `_lcars_pod_id` (qui pod) ET `_lcars_pod_capability` (le secret par-pod
-  # généré au spawn). Le serveur ne croit PAS le pod_id seul — il est déterministe et devinable : un pod
-  # (qui a Bash + joint le central en loopback) pourrait POST le pod_id d'un autre pour lire son mandat ou
-  # clôturer sa tâche. La capability ferme ce trou : seul le pod LÉGITIME la connaît (elle ne vit que dans
-  # SON env), et le central la VÉRIFIE contre celle enregistrée au spawn (`Fleet.Spawner.pod_info`) avant
-  # de servir tout tool corrélé pod. Le rôle se résout sur ce MÊME pod prouvé (même appel = pas de drift).
-  #
-  # Retours :
-  #   - `{:ok, pod_id, role}` — capability présentée == capability enregistrée pour ce pod_id ;
-  #   - `{:error, :pod_id_required}`      — pas de pod_id sur le wire (anomalie de config du pont) ;
-  #   - `{:error, :pod_capability_required}` — pas de capability sur le wire (pont sans secret = refus) ;
-  #   - `{:error, :pod_unknown}`          — pod_id inconnu du registre serveur (jamais spawné, ou mort) ;
-  #   - `{:error, :pod_capability_mismatch}` — capability fausse (impersonation : pod_id d'un autre).
-  #
-  # Fail-closed de bout en bout : aucun de ces cas ne retombe sur un accès anonyme ou un token système.
-  defp verify_pod(args) do
-    args = args || %{}
-
-    with {:ok, pid} <- extract_pod_id(args),
-         {:ok, cap} <- extract_capability(args),
-         {:ok, %{role: role, capability: registered}} <- resolve_pod(pid),
-         true <- secure_compare(cap, registered) do
-      {:ok, pid, role}
-    else
-      {:error, _} = err -> err
-      # `resolve_pod` a rendu un pod sans capability enregistrée, ou la comparaison a échoué.
-      :pod_unknown -> {:error, :pod_unknown}
-      false -> {:error, :pod_capability_mismatch}
-    end
-  end
-
-  defp extract_pod_id(args) do
-    case Map.get(args, "_lcars_pod_id") do
-      id when is_binary(id) and id != "" -> {:ok, id}
-      _ -> {:error, :pod_id_required}
-    end
-  end
-
-  defp extract_capability(args) do
-    case Map.get(args, "_lcars_pod_capability") do
-      cap when is_binary(cap) and cap != "" -> {:ok, cap}
-      _ -> {:error, :pod_capability_required}
-    end
-  end
-
-  # Résout `pod_id → %{role, capability}` depuis le registre du Spawner (gravé au spawn). Seam test
-  # `:pod_resolver` (app-env) qui prend le pod_id et rend `{:ok, %{role, capability}}` | `{:error, _}` ;
-  # défaut = dispatch RUNTIME vers `Fleet.Spawner.pod_info/1` (pas de dep compile-time fleet_spawner, comme
-  # `Fleet.Pilot.ProjectOnboard`). Pod inconnu / Spawner indisponible → `:pod_unknown` (fail-closed).
-  defp resolve_pod(pod_id) when is_binary(pod_id) do
+  # L'identité (quel pod) est le canal lui-même : `state.pod_id` est porté par l'accepteur de socket (un pod
+  # = une socket montée dans son seul sandbox), donc il n'y a plus rien à prouver — pas de capability, pas de
+  # pod_id lu sur le fil. Reste à résoudre le RÔLE (architect / engineer / …) pour gater les tools privilégiés :
+  # il est gravé au SPAWN et lu depuis le registre du Spawner (`Fleet.Spawner.pod_info`), jamais d'un champ
+  # du wire (qu'un pod pourrait forger). Seam test `:pod_resolver` (app-env) : prend le pod_id et rend
+  # `{:ok, %{role: role}}` | `{:error, _}`. Défaut = dispatch RUNTIME vers `Fleet.Spawner.pod_info/1` (pas de
+  # dep compile-time fleet_spawner). Pod inconnu / Spawner indisponible → `:pod_unknown` (fail-closed).
+  defp resolve_role(pod_id) when is_binary(pod_id) do
     resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
 
     case resolver.(pod_id) do
-      {:ok, %{capability: cap} = info} when is_binary(cap) and cap != "" ->
-        {:ok, %{role: Map.get(info, :role), capability: cap}}
-
-      _ ->
-        :pod_unknown
+      {:ok, %{role: role}} -> {:ok, role}
+      _ -> {:error, :pod_unknown}
     end
   end
 
@@ -550,30 +495,13 @@ defmodule Fleet.MCP.PodTools do
     _, _ -> {:error, :pod_unknown}
   end
 
-  # Comparaison à temps constant (la capability est un secret) : on ne veut pas qu'un timing observable
-  # révèle la longueur du préfixe commun (qui permettrait de deviner la capability octet par octet). Tailles
-  # différentes → false immédiat (la taille n'est pas secrète). Tailles égales → XOR octet-à-octet puis
-  # OR cumulé : le temps ne dépend QUE de la longueur, jamais du contenu. Implémentation autonome
-  # (`:crypto.exor`, toujours dispo en OTP 25) — pas de dép sur `Plug.Crypto` que fleet_mcp ne déclare pas.
-  defp secure_compare(a, b) when is_binary(a) and is_binary(b) do
-    byte_size(a) == byte_size(b) and constant_time_equal?(a, b)
-  end
-
-  defp secure_compare(_, _), do: false
-
-  defp constant_time_equal?(a, b) do
-    :crypto.exor(a, b)
-    |> :binary.bin_to_list()
-    |> Enum.reduce(0, &Bitwise.bor/2) == 0
-  end
-
-  # Le `task_id` (corrélateur anti-impersonation) cherché au top-level du wire PUIS dans le payload : un
-  # agent juge range parfois le corrélateur DANS son payload de verdict plutôt qu'au paramètre top-level.
-  # Renvoie le task_id non vide trouvé (top-level prioritaire), ou nil si absent des deux. Le broker
-  # corrèle ensuite sur `result["task_id"]` et rejette (`:task_id_mismatch`) s'il ne correspond pas à SON
-  # mandat actif → un pod ne peut pas clôturer la tâche d'un autre même via la gate capability (double
-  # verrou : capability + corrélateur). L'emplacement (top-level vs payload) n'entre PAS dans la sécurité :
-  # le task_id reste explicite et validé ; seul le fallback « dernière active » (implicite) était le trou.
+  # Le `task_id` (corrélateur) cherché au top-level du wire PUIS dans le payload : un agent juge range
+  # parfois le corrélateur DANS son payload de verdict plutôt qu'au paramètre top-level. Renvoie le task_id
+  # non vide trouvé (top-level prioritaire), ou nil si absent des deux. Le broker corrèle ensuite sur
+  # `result["task_id"]` et rejette (`:task_id_mismatch`) s'il ne correspond pas à SON mandat actif → un pod
+  # ne peut pas clôturer la tâche d'un autre (verrou orthogonal au transport). L'emplacement (top-level vs
+  # payload) n'entre PAS dans la sécurité : le task_id reste explicite et validé ; seul le fallback
+  # « dernière active » (implicite) était le trou.
   defp effective_task_id(args, payload) do
     present_task_id(Map.get(args, "task_id") || Map.get(args, :task_id)) ||
       present_task_id(Map.get(payload, "task_id") || Map.get(payload, :task_id))

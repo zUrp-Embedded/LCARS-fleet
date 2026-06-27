@@ -7,8 +7,10 @@ defmodule Fleet.MCP.Application do
   Au boot, délègue à `Fleet.MCP.Supervisor` :
     - `Fleet.MCP.Server` (garde de boot : refuse `start_link` côté pod ;
       ex-registre de channels push retiré, husk mort)
-    - `Fleet.MCP.PodTools` (HTTP transport pour `get_task`/`submit_result`,
-      démarré SSI `:pod_facing_port` configuré)
+    - `Fleet.MCP.PodSocketRegistry` + `Fleet.MCP.PodSocketSupervisor`
+      (substrat des sockets AF_UNIX per-pod : un accepteur par pod sert
+      `get_task`/`submit_result` ; l'identité EST le canal — cf.
+      `Fleet.MCP.PodSocketAcceptor`)
 
   Substrat channels MORT retiré : `Fleet.MCP.Bridge`
   (pont PubSub↔channels, re-broadcast vers 0 subscriber, channels push retirés)
@@ -27,11 +29,12 @@ defmodule Fleet.MCP.Application do
 
   ## Transport
 
-  Le serveur tourne sur ExMCP.Native (round-trip validé empiriquement,
-  pas de bascule Hermes). L'app délègue à
-  `Fleet.MCP.Supervisor`. Containment : dans un pod
-  (`boot_environment: :pod`) `Fleet.MCP.Server` refuse → l'app ne boote pas
-  (substrat système-side hors bwrap, voulu).
+  Pod-facing = une **socket AF_UNIX par pod** (`Fleet.MCP.PodSocketAcceptor`,
+  fan-out par `Fleet.MCP.PodSocketSupervisor`) : l'identité EST le canal, pas un
+  secret présenté. La couche TOOL (`Fleet.MCP.PodTools`) reste wrappée derrière
+  le DSL `ExMCP.Server` (deftool / json / text) ; seul le transport HTTP partagé
+  a été retiré. Containment : dans un pod (`boot_environment: :pod`)
+  `Fleet.MCP.Server` refuse → l'app ne boote pas (système-side hors bwrap, voulu).
   """
 
   use Application

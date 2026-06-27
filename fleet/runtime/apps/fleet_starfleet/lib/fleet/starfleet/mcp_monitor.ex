@@ -1,6 +1,7 @@
 defmodule Fleet.Starfleet.MCPMonitor do
   @moduledoc """
-  Health check passif du **drive MCP pod-facing** (`Fleet.MCP.PodTools`).
+  Health check passif du **substrat MCP pod-facing** (le DynamicSupervisor des
+  sockets per-pod, `Fleet.MCP.PodSocketSupervisor`).
 
   DN 13 `orchestration/fleet_starfleet.md` §Extensions V2 (BL-021 chantier 8).
 
@@ -17,18 +18,16 @@ defmodule Fleet.Starfleet.MCPMonitor do
   Le retour `:crashed → :ok` log juste (recovery silencieuse, pas d'event
   dédié dans la DN MVP).
 
-  ## Cible (F049 — résolu)
+  ## Cible
 
-  Le drive porteur (`get_task`/`submit_result`) est `Fleet.MCP.PodTools`, démarré
-  en `transport: :http` → c'est un listener Cowboy/Ranch, **pas** un process nommé
-  (`Process.whereis(Fleet.MCP.PodTools)` rend `nil` — un pointage direct rendrait le
-  moniteur aveugle, l'erreur attrapée par le panel). On vérifie donc sa liveness par
-  l'**arbre de supervision** : cible `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodTools}`
-  → `Supervisor.which_children/1` cherche l'enfant et teste que son pid est vivant.
-  Robuste (OTP pur, zéro dépendance aux internes ExMCP/Ranch) et sémantiquement juste :
-  PodTools absent (pod-facing non configuré) → `:crashed` silencieux (aucun broadcast
-  depuis `:unknown`, rien à monitorer). Une cible **atome** reste supportée
-  (`Process.whereis`, pour les tests + tout process nommé).
+  Le substrat pod-facing (`get_task`/`submit_result`) est servi par une socket
+  AF_UNIX par pod, fan-out par le DynamicSupervisor `Fleet.MCP.PodSocketSupervisor`.
+  On vérifie sa liveness par l'**arbre de supervision** : cible
+  `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}` →
+  `Supervisor.which_children/1` cherche l'enfant et teste que son pid est vivant.
+  Robuste (OTP pur) et sémantiquement juste : substrat absent → `:crashed`
+  silencieux (aucun broadcast depuis `:unknown`, rien à monitorer). Une cible
+  **atome** reste supportée (`Process.whereis`, pour les tests + tout process nommé).
 
   ## Event broadcast
 
@@ -39,8 +38,8 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
     * `:fleet_starfleet, :mcp_monitor_check_interval_ms` — default `60_000` (1 min)
     * `:fleet_starfleet, :mcp_monitor_target` — cible (default
-      `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodTools}`). Accepte un atome
-      (process nommé) OU `{:supervised, sup, child_id}`. Les tests injectent une cible factice.
+      `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}`). Accepte un
+      atome (process nommé) OU `{:supervised, sup, child_id}`. Les tests injectent une cible factice.
   """
 
   use GenServer
@@ -49,10 +48,11 @@ defmodule Fleet.Starfleet.MCPMonitor do
   alias Fleet.EventRouter.Bus
 
   @default_interval_ms 60_000
-  # F049 — on monitore le DRIVE pod-facing (PodTools) via l'arbre de supervision
-  # (`which_children`), PAS `Process.whereis` : PodTools en `:http` est un listener
-  # Ranch, pas un process nommé. Cf. moduledoc §Cible + `check_target/1`.
-  @default_target {:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodTools}
+  # On monitore le substrat pod-facing (le DynamicSupervisor d'accepteurs de socket
+  # per-pod) via l'arbre de supervision (`which_children`) : enfant
+  # `Fleet.MCP.PodSocketSupervisor` vivant sous `Fleet.MCP.Supervisor` → :ok.
+  # Cf. moduledoc §Cible + `check_target/1`.
+  @default_target {:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do

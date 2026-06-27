@@ -1,35 +1,31 @@
 defmodule Fleet.MCP.Supervisor do
   @moduledoc """
-  Superviseur racine `fleet_mcp` : démarre le serveur MCP système-side et,
-  optionnellement, le listener pod-facing.
+  Superviseur racine `fleet_mcp` : démarre le serveur MCP système-side et le
+  substrat des sockets pod-facing.
 
   Stratégie `:one_for_one`, `max_restarts: 3`, `max_seconds: 60`.
   Enfants :
-    - `Fleet.MCP.Server` (garde de boot : refuse côté pod ; ex-husk channels
-      retiré) ;
-    - `Fleet.MCP.PodTools` (HTTP transport pour `get_task`/`submit_result`)
-      démarré SSI `:pod_facing_port` configuré.
+    - `Fleet.MCP.Server` (garde de boot : refuse côté pod) ;
+    - `Fleet.MCP.PodSocketRegistry` (Registry unique, clé = `pod_id` → accepteur) ;
+    - `Fleet.MCP.PodSocketSupervisor` (DynamicSupervisor des accepteurs de socket
+      AF_UNIX per-pod) — démarré inconditionnellement host-side (rien n'est créé
+      tant qu'aucun pod n'est provisionné).
 
-  `Fleet.MCP.Bridge` RETIRÉ : pont PubSub↔channels
-  mort (re-broadcast vers 0 subscriber, les channels push `fleet-control.*` ayant
-  été retirés ; `mcp_to_pubsub` demi-implémenté ; config purgée). Le
-  drive pod-facing vit dans `PodTools` (pull `get_task`/`submit_result`), PAS dans
-  un push channel. ⚠ "bridge" est homonyme : le pont **stdio→HTTP**
-  (`bin/fleet_mcp_stdio_bridge.py`, tests `bridge_*`) est VIVANT (transport drive),
-  rien à voir avec ce `Fleet.MCP.Bridge` PubSub mort.
+  Transport pod-facing = une **socket AF_UNIX par pod** (l'identité EST le canal,
+  cf. `Fleet.MCP.PodSocketAcceptor`). L'ex-transport HTTP loopback partagé
+  (`PodTools` en `transport: :http`, Plug.Cowboy/Ranch, `:pod_facing_port`) est
+  RETIRÉ : il était partagé par tous les pods, donc le `pod_id` y était devinable
+  (d'où l'ancienne capability). La socket per-pod ferme ce trou par construction.
 
-  Purge des channels push : retrait `ChannelHTTP.QueueOwner`,
-  `PushDispatcher`, et l'enfant `channel_http_children` (Plug.Cowboy long-poll
-  push channel). PoC Channel Anthropic KO (4 itérations) →
-  drive ré-implémenté via tools MCP pull (`get_task`/`submit_result`) +
-  kick send-keys.
+  `Fleet.MCP.Bridge` (pont PubSub↔channels) reste RETIRÉ (husk mort). ⚠ "bridge"
+  est homonyme : le pont **stdio→socket** (`bin/fleet_mcp_stdio_bridge.py`) est
+  VIVANT (transport drive), rien à voir avec ce `Fleet.MCP.Bridge` PubSub mort.
 
-  Containment : si `boot_environment == :pod`,
-  `Fleet.MCP.Server.start_link/1` renvoie `{:error, :forbidden_in_pod}` →
-  l'enfant échoue → ce superviseur échoue → `fleet_mcp` ne boote pas dans
-  un pod. Comportement voulu (serveur système-side, hors bwrap).
-  Phoenix.PubSub `Fleet.PubSub` est démarré par `fleet_event_router`
-  — dépendance umbrella, non démarré ici (pas de double-start).
+  Containment : si `boot_environment == :pod`, `Fleet.MCP.Server.start_link/1`
+  renvoie `{:error, :forbidden_in_pod}` → l'enfant échoue → ce superviseur échoue
+  → `fleet_mcp` ne boote pas dans un pod (serveur système-side, hors bwrap).
+  Phoenix.PubSub `Fleet.PubSub` est démarré par `fleet_event_router` (dépendance
+  umbrella), non démarré ici (pas de double-start).
   """
 
   use Supervisor
@@ -41,10 +37,13 @@ defmodule Fleet.MCP.Supervisor do
 
   @impl Supervisor
   def init(opts) do
-    children =
-      [
-        {Fleet.MCP.Server, opts}
-      ] ++ pod_facing_children(opts)
+    children = [
+      {Fleet.MCP.Server, opts},
+      # Registry de résolution `pod_id → accepteur` (noms `:via`), démarré AVANT le
+      # DynamicSupervisor qui s'y enregistre.
+      {Registry, keys: :unique, name: Fleet.MCP.PodSocketRegistry},
+      Fleet.MCP.PodSocketSupervisor
+    ]
 
     Supervisor.init(children,
       strategy: :one_for_one,
@@ -53,84 +52,38 @@ defmodule Fleet.MCP.Supervisor do
     )
   end
 
-  # Serveur MCP pod-facing CENTRAL (PodTools en transport :http + TaskQueue).
-  # Démarré SSI `:pod_facing_port` est configuré (deploy host-side). nil → [] : aucun listener
-  # (défaut ; tests et apps qui n'en ont pas besoin restent inchangés). Les pods s'y connectent via
-  # le pont stdio (http://localhost:<port>/mcp). TaskQueue = état partagé (résultats corrélés pod_id).
   @doc """
-  Child specs du listener pod-facing (public pour le test de bind : l'option `:host`
-  passée à PodTools porte l'`:ip` d'écoute — loopback par défaut, compatible pods).
-  Retourne `[]` quand `:pod_facing_port` n'est pas configuré.
+  État LIVE du substrat pod-facing — `{state, detail}` pour la readiness
+  (anti-vert-creux). Sonde le PROCESS réel (le DynamicSupervisor d'accepteurs
+  `Fleet.MCP.PodSocketSupervisor` tourne-t-il ?), pas un knob de config :
+
+    * `:operational` — le DynamicSupervisor d'accepteurs est vivant (host-side) ;
+      `detail.sockets` = nombre d'accepteurs (= sockets pod) actifs.
+    * `:degraded`    — le DynamicSupervisor est absent/mort (devrait tourner
+      host-side mais ne tourne pas — vert-creux évité).
   """
-  def pod_facing_children(opts) do
-    case pod_facing_port(opts) do
-      nil ->
-        []
-
-      port ->
-        ref = Keyword.get(opts, :pod_facing_ranch_ref, :fleet_mcp_pod_facing)
-
-        # Bind loopback par défaut. Le transport HTTP ExMCP veut son `:host` sous forme de STRING : il
-        # fait `to_string(host)` (Logger « Starting MCP HTTP server on <host>… ») AVANT son `parse_host`,
-        # donc lui passer le TUPLE `{127,0,0,1}` CRASHE le listener (`Protocol.UndefinedError String.Chars`
-        # pour Tuple) → `Fleet.MCP.PodTools` ne démarre pas → app fleet_mcp down → node down au boot. On lui
-        # passe donc la STRING de la source unique (`BindAddress.host_string/0`) ; ExMCP la re-parse en tuple
-        # ranch. (À NE PAS confondre avec Plug.Cowboy des autres listeners, qui veut `options: [ip: <tuple>]`.)
-        # Loopback est COMPATIBLE avec les pods : ils joignent le MCP via le pont stdio→HTTP sur
-        # http://127.0.0.1:<port>/mcp (cf. LCARS_FLEET_MCP_URL) — même hôte. Exposition publique = LCARS_BIND_HOST.
-        host = Fleet.EventRouter.BindAddress.host_string()
-
-        # Le broker (Fleet.TaskQueue.Server) est démarré par l'app fleet_task_queue,
-        # pas ici : fleet_mcp sert la queue, ne la possède pas.
-        [
-          Supervisor.child_spec(
-            {Fleet.MCP.PodTools, [transport: :http, host: host, port: port, ranch_ref: ref]},
-            id: Fleet.MCP.PodTools
-          )
-        ]
-    end
-  end
-
-  defp pod_facing_port(opts) do
-    Keyword.get(opts, :pod_facing_port) || Application.get_env(:fleet_mcp, :pod_facing_port)
-  end
-
-  @doc """
-  État LIVE du listener pod-facing — `{state, detail}` pour la readiness (anti-vert-creux).
-  Sonde le PROCESS réel (l'enfant `Fleet.MCP.PodTools` est-il vivant sous ce superviseur ?),
-  pas la seule présence du knob `:pod_facing_port` :
-
-    * `:inactive`    — `:pod_facing_port` non configuré → aucun listener attendu (off volontaire).
-    * `:operational` — port configuré ET l'enfant `Fleet.MCP.PodTools` tourne (pid vivant).
-    * `:degraded`    — port configuré MAIS l'enfant est absent/mort (le knob dit ON, le listener
-      ne tourne pas — vert-creux évité), ou le superviseur lui-même n'est pas démarré.
-  """
-  @spec pod_facing_status() :: {:inactive | :operational | :degraded, map()}
+  @spec pod_facing_status() :: {:operational | :degraded, map()}
   def pod_facing_status do
-    port = pod_facing_port([])
-
-    cond do
-      is_nil(port) ->
-        {:inactive, %{note: "pod_facing_port non configuré"}}
-
-      pod_tools_alive?() ->
-        {:operational, %{pod_facing_port: port, pod_tools: true}}
-
-      true ->
-        {:degraded, %{pod_facing_port: port, pod_tools: false, note: "PodTools non vivant"}}
+    if acceptor_supervisor_alive?() do
+      {:operational, %{acceptor_supervisor: true, sockets: active_sockets()}}
+    else
+      {:degraded, %{acceptor_supervisor: false, note: "PodSocketSupervisor non vivant"}}
     end
   end
 
-  # PodTools vivant = enfant `Fleet.MCP.PodTools` présent dans le superviseur avec un pid.
-  # Si le superviseur n'est pas démarré (`which_children` exit), on rabat sur false (pas vivant).
-  defp pod_tools_alive? do
-    Enum.any?(Supervisor.which_children(__MODULE__), fn
-      {Fleet.MCP.PodTools, pid, _type, _mods} when is_pid(pid) -> Process.alive?(pid)
+  defp acceptor_supervisor_alive? do
+    case Process.whereis(Fleet.MCP.PodSocketSupervisor) do
+      pid when is_pid(pid) -> Process.alive?(pid)
       _ -> false
-    end)
+    end
+  end
+
+  defp active_sockets do
+    %{active: active} = DynamicSupervisor.count_children(Fleet.MCP.PodSocketSupervisor)
+    active
   rescue
-    _ -> false
+    _ -> 0
   catch
-    :exit, _ -> false
+    :exit, _ -> 0
   end
 end

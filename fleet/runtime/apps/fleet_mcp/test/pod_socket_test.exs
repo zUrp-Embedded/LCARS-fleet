@@ -1,0 +1,155 @@
+defmodule Fleet.MCP.PodSocketTest do
+  @moduledoc """
+  Transport pod-facing AF_UNIX per-pod (`Fleet.MCP.PodSocketAcceptor` /
+  `Fleet.MCP.PodSocketSupervisor`) round-trip contre le **vrai broker**
+  `Fleet.TaskQueue`.
+
+  Un client `:gen_tcp {:local}` (à la place du pont stdio + claude) parle à la
+  socket du pod en JSON-RPC newline-framed. PUR Elixir (client + serveur BEAM).
+
+  Le cœur de R9 : l'identité EST le canal. Le `pod_id` vient du nom du socket
+  (porté par l'accepteur), JAMAIS du wire — un faux `_lcars_pod_id` dans les
+  arguments est ignoré. La capability a disparu (plus rien à présenter).
+
+  `:sock_base` est posé sur un dir tmp COURT (le chemin AF_UNIX est borné à 108
+  octets — `sun_path` ; le dir per-pod + `sock` tient large).
+  """
+  use ExUnit.Case, async: false
+
+  alias Fleet.MCP.PodSocketSupervisor
+  alias Fleet.TaskQueue
+
+  setup do
+    base = Path.join(System.tmp_dir!(), "lcars-mcp-sock-#{System.unique_integer([:positive])}")
+    prev = Application.get_env(:fleet_mcp, :sock_base)
+    Application.put_env(:fleet_mcp, :sock_base, base)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:fleet_mcp, :sock_base, prev),
+        else: Application.delete_env(:fleet_mcp, :sock_base)
+
+      File.rm_rf(base)
+    end)
+
+    %{base: base}
+  end
+
+  test "round-trip get_task/submit_result via la socket per-pod" do
+    pod = uniq("p")
+    nonce = "sock-#{System.unique_integer([:positive])}"
+    {:ok, _} = TaskQueue.enqueue(pod, %{brief: nonce})
+
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+    # Le fichier DOIT exister au retour (le bind bwrap échouerait sinon).
+    assert File.exists?(path)
+
+    # Canal IN sur le fil socket.
+    assert {:ok, %{"done" => false, "task" => %{"brief" => ^nonce, "task_id" => tid}}} =
+             content(call(path, 1, "get_task", %{}))
+
+    assert is_binary(tid)
+
+    # Canal OUT sur le fil socket (task_id REQUIS = celui rendu).
+    assert %{"result" => %{"content" => [%{"type" => "text"}]}} =
+             call(path, 2, "submit_result", %{"payload" => %{"answer" => nonce}, "task_id" => tid})
+
+    assert {:ok, :completed} = TaskQueue.pod_status(pod)
+
+    # Plus de mandat actif → done.
+    assert {:ok, %{"done" => true}} = content(call(path, 3, "get_task", %{}))
+  end
+
+  test "l'identité EST le canal : un faux `_lcars_pod_id` dans les args est IGNORÉ" do
+    victim = uniq("victim")
+    attacker = uniq("attacker")
+    {:ok, _} = TaskQueue.enqueue(victim, %{brief: "secret-de-victim"})
+    {:ok, _} = TaskQueue.enqueue(attacker, %{brief: "le-mandat-de-attacker"})
+
+    {:ok, apath} = PodSocketSupervisor.ensure_pod_socket(attacker)
+
+    on_exit(fn ->
+      PodSocketSupervisor.release_pod_socket(attacker)
+      PodSocketSupervisor.release_pod_socket(victim)
+    end)
+
+    # L'attaquant POST le pod_id de la victime dans les arguments — mais sa socket reste SA socket. Le
+    # central ne lit JAMAIS le pod_id du wire → il sert le mandat de l'accepteur (attacker), pas victim.
+    assert {:ok, %{"done" => false, "task" => %{"brief" => "le-mandat-de-attacker"}}} =
+             content(call(apath, 1, "get_task", %{"_lcars_pod_id" => victim}))
+  end
+
+  test "2 pods → chaque socket ne sert QUE son pod (séparation par canal)" do
+    pa = uniq("pa")
+    pb = uniq("pb")
+    {:ok, _} = TaskQueue.enqueue(pa, %{brief: "for-A"})
+    {:ok, _} = TaskQueue.enqueue(pb, %{brief: "for-B"})
+
+    {:ok, path_a} = PodSocketSupervisor.ensure_pod_socket(pa)
+    {:ok, path_b} = PodSocketSupervisor.ensure_pod_socket(pb)
+
+    on_exit(fn ->
+      PodSocketSupervisor.release_pod_socket(pa)
+      PodSocketSupervisor.release_pod_socket(pb)
+    end)
+
+    assert {:ok, %{"task" => %{"brief" => "for-A"}}} = content(call(path_a, 1, "get_task", %{}))
+    assert {:ok, %{"task" => %{"brief" => "for-B"}}} = content(call(path_b, 1, "get_task", %{}))
+  end
+
+  test "ensure_pod_socket idempotent (même chemin) ; release ferme ET retire le fichier" do
+    pod = uniq("idem")
+    {:ok, path1} = PodSocketSupervisor.ensure_pod_socket(pod)
+    {:ok, path2} = PodSocketSupervisor.ensure_pod_socket(pod)
+    assert path1 == path2
+    assert File.exists?(path1)
+
+    assert :ok = PodSocketSupervisor.release_pod_socket(pod)
+    # Le close libère le FD, le release retire le FICHIER (sinon fuite).
+    refute File.exists?(path1)
+
+    # Idempotent : re-release sur un pod déjà libéré ne casse rien.
+    assert :ok = PodSocketSupervisor.release_pod_socket(pod)
+  end
+
+  test "erreur d'outil → result avec isError:true (convention MCP, pas erreur protocole)" do
+    pod = uniq("err")
+    {:ok, _} = TaskQueue.enqueue(pod, %{brief: "x"})
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    # Active le mandat puis submit SANS task_id → :task_id_required → frame `result` avec isError:true
+    # (une erreur d'outil est un résultat MCP, pas une erreur de protocole).
+    _ = call(path, 1, "get_task", %{})
+
+    assert %{"result" => %{"isError" => true, "content" => [%{"text" => txt}]}} =
+             call(path, 2, "submit_result", %{"payload" => %{"x" => 1}})
+
+    assert txt =~ "task_id_required"
+  end
+
+  defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
+
+  # Un appel JSON-RPC tools/call sur la socket : connecte, envoie une ligne, lit la réponse, ferme.
+  defp call(path, id, tool, args) do
+    {:ok, sock} =
+      :gen_tcp.connect({:local, path}, 0, [:binary, {:packet, :line}, {:active, false}])
+
+    req =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "id" => id,
+        "method" => "tools/call",
+        "params" => %{"name" => tool, "arguments" => args}
+      })
+
+    :ok = :gen_tcp.send(sock, req <> "\n")
+    {:ok, line} = :gen_tcp.recv(sock, 0, 5_000)
+    :gen_tcp.close(sock)
+    Jason.decode!(line)
+  end
+
+  # Décode le JSON du premier bloc text d'un résultat tool (le payload métier get_task/submit_result).
+  defp content(%{"result" => %{"content" => [%{"text" => t} | _]}}), do: Jason.decode(t)
+end
