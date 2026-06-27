@@ -28,7 +28,10 @@ defmodule Fleet.Pilot.Application do
 
   @impl Application
   def start(_type, _args) do
-    children = stage_children()
+    # Le pool forge démarre INCONDITIONNELLEMENT, avant le rail stage : le ForgeClient est aussi appelé
+    # par `create_ticket` (fleet_mcp) hors du rail Poller/HopConsumer, donc le pool doit exister dès que
+    # fleet_pilot boote. Lazy (aucune connexion tant qu'aucune requête) → inoffensif hors prod/tests.
+    children = [forge_finch_spec() | stage_children()]
 
     # `:one_for_one` (pas `:rest_for_one`) bien que les enfants se réfèrent dans l'ordre
     # (Task.Supervisor + IncidentRegistry démarrés AVANT Poller + HopConsumer qui les utilisent) :
@@ -48,6 +51,15 @@ defmodule Fleet.Pilot.Application do
     ]
 
     Supervisor.start_link(children, opts)
+  end
+
+  # Pool HTTP dédié au ForgeClient. `conn_max_idle_time: 30_000` ferme toute connexion restée idle >30s
+  # AVANT que la forge ne la ferme côté serveur (le défaut Finch `:infinity` la garderait jusqu'à ce
+  # qu'elle devienne stale → 1er appel suivant pendu jusqu'au receive_timeout, cause suspectée du ~30s
+  # cumulé de create_ticket). Pool HTTP/1 simple, lazy. `Req.request(finch: Fleet.Pilot.ForgeFinch)`
+  # côté ForgeClient l'utilise.
+  defp forge_finch_spec do
+    {Finch, name: Fleet.Pilot.ForgeFinch, pools: %{default: [conn_max_idle_time: 30_000]}}
   end
 
   @doc """

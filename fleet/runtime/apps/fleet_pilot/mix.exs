@@ -42,7 +42,12 @@ defmodule Fleet.Pilot.MixProject do
       # (payload) au hop PR-natif (source unique = le catalogue cap-profile).
       {:fleet_cap_profile, in_umbrella: true},
       {:yaml_elixir, "~> 2.12"},
-      {:req, "~> 0.5"}
+      {:req, "~> 0.5"},
+      # Pool HTTP dédié au ForgeClient (`Fleet.Pilot.ForgeFinch`) : `conn_max_idle_time` court contre
+      # les connexions stale (le défaut Finch `:infinity` laisse une connexion idle traîner → le serveur
+      # forge la ferme côté lui → le 1er appel après idle pend jusqu'au receive_timeout). Req l'amène en
+      # transitif ; dep DIRECTE car on instancie un Finch nommé dans l'arbre de supervision.
+      {:finch, "~> 0.22"}
     ]
   end
 end

@@ -1510,12 +1510,30 @@ defmodule Fleet.Pilot.ForgeClient do
           {"accept", "application/json"}
         ],
         receive_timeout: 10_000,
-        retry: false
+        retry: false,
+        # Pool dédié à `conn_max_idle_time` court (cf. `Fleet.Pilot.Application.forge_finch_spec`) : évite
+        # qu'une connexion idle devienne stale et fasse pendre le 1er appel jusqu'au receive_timeout. Dans
+        # la liste de BASE (avant le merge) → un test qui injecte `plug:` via `req_options` prime (le plug
+        # court-circuite l'adapter Finch), l'hermétisme des tests reste intact.
+        finch: Fleet.Pilot.ForgeFinch
       ]
       |> maybe_put(:json, body)
       |> Keyword.merge(config.req_options)
 
-    case Req.request(req_opts) do
+    started = System.monotonic_time(:millisecond)
+    result = Req.request(req_opts)
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    # INSTRUMENTATION : un appel à la forge LOCALE qui dépasse 1s est anormal → on le trace (méthode,
+    # path, durée, issue). C'est l'instrument qui dira au prochain run POURQUOI create_ticket cumule
+    # ~30s (3 appels forge : create_issue + add_label[GET+PUT]) — connexion stale ? endpoint qui pend ?
+    if elapsed > 1_000 do
+      Logger.warning(
+        "ForgeClient #{method} #{path} LENT #{elapsed}ms → #{forge_result_tag(result)}"
+      )
+    end
+
+    case result do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
         {:ok, body}
 
@@ -1526,6 +1544,10 @@ defmodule Fleet.Pilot.ForgeClient do
         {:error, {:transport, exception}}
     end
   end
+
+  # Résumé compact d'un résultat Req pour le log d'instrumentation (status HTTP ou erreur transport).
+  defp forge_result_tag({:ok, %Req.Response{status: status}}), do: "http #{status}"
+  defp forge_result_tag({:error, exception}), do: "transport #{inspect(exception)}"
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)

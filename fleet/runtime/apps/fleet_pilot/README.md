@@ -105,6 +105,15 @@ ne nécessite pas la cascade. Chaque consommateur Bus (`HopConsumer`) se ré-abo
 `Bus.subscribe()` vit dans `init/1`, qu'OTP rejoue à chaque restart (un consommateur redémarré n'est jamais
 sourd ; contrat verrouillé par test côté `fleet_starfleet`).
 
+Le superviseur démarre aussi, **inconditionnellement** (avant le rail stage), `Fleet.Pilot.ForgeFinch` —
+pool HTTP/1 dédié au `ForgeClient` avec `conn_max_idle_time: 30_000`. Le défaut Finch `:infinity` laisse une
+connexion idle traîner jusqu'à ce que la forge la ferme côté serveur → le 1er appel après idle pend jusqu'au
+`receive_timeout` (10s), et `create_ticket` (qui enchaîne 3 appels : `create_issue` + `add_label`[GET+PUT])
+cumulait ainsi jusqu'à ~30s. Inconditionnel car `create_ticket` (côté `fleet_mcp`) appelle le `ForgeClient`
+hors du rail Poller/HopConsumer. `ForgeClient.request/4` route via ce pool (`finch:`) et **trace tout appel
+forge >1s** (`Logger.warning "ForgeClient … LENT …ms"`) — l'observabilité qui localise un appel forge lent
+au run réel. Câblage du pool verrouillé par `forge_finch_test.exs` (sonde le process, pas un knob).
+
 ## Onboarding projet (Rail 1 — « idée → le projet existe »)
 
 `Fleet.Pilot.ProjectOnboard` — `onboard/2` : crée mécaniquement un projet en répliquant l'archi
