@@ -56,6 +56,32 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_receive {:put, _}, 1000
     end
 
+    test "WAL multi-ligne : un incident par ligne (diff git lisible), reste JSON valide",
+         %{tmp_dir: tmp} do
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      assert :ok = Reg.note("wake:a:1", :dead, server: name, now: "2026-06-20T10:00:00Z")
+      assert :ok = Reg.note("wake:b:2", :dead, server: name, now: "2026-06-20T10:01:00Z")
+
+      assert {:ok, content} = File.read(Path.join(tmp, "incidents.json"))
+
+      # 2 incidents → 4 lignes (`{`, incident a, incident b, `}`) : UN incident par ligne. Mord si on
+      # revient au `JSON.encode!` compact (qui collerait tout sur une ligne → diff git illisible).
+      lines = content |> String.trim_trailing() |> String.split("\n")
+      assert length(lines) == 4
+      assert hd(lines) == "{"
+      assert List.last(lines) == "}"
+      assert Enum.any?(lines, &String.starts_with?(&1, ~s(  "wake:a:1":)))
+      assert Enum.any?(lines, &String.starts_with?(&1, ~s(  "wake:b:2":)))
+
+      # ...et reste un JSON valide : `decode/1` relit les deux incidents tels quels.
+      assert {:ok, %{"wake:a:1" => _, "wake:b:2" => _}} = JSON.decode(content)
+    end
+
     test "boot : merge WAL local ∪ forge (les 2 sources de vérité)", %{tmp_dir: tmp} do
       File.write!(
         Path.join(tmp, "incidents.json"),

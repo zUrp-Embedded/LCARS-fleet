@@ -274,7 +274,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
       committer: ident
     ]
 
-    case putter.(repo(opts), path(opts), JSON.encode!(merged), put_opts) do
+    case putter.(repo(opts), path(opts), encode_registry(merged), put_opts) do
       {:ok, _} -> {:ok, merged}
       {:error, _} = err -> err
     end
@@ -291,7 +291,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   defp write_wal(path, registry) do
     tmp = path <> ".tmp"
 
-    with :ok <- File.write(tmp, JSON.encode!(registry)), :ok <- File.rename(tmp, path) do
+    with :ok <- File.write(tmp, encode_registry(registry)), :ok <- File.rename(tmp, path) do
       :ok
     else
       {:error, reason} ->
@@ -314,6 +314,21 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {:ok, reg} when is_map(reg) -> reg
       _ -> %{}
     end
+  end
+
+  # Encode le registre avec UN incident par ligne, clés triées. Le diff git du fichier (commité sur
+  # work/ops ET le WAL local) montre alors un incident ajouté = une ligne ajoutée, au lieu d'un blob
+  # JSON mono-ligne où le moindre ajout réécrit tout. Reste un JSON valide — `decode/1` le relit tel
+  # quel ; le tri par clé garantit un ordre stable (sinon l'ordre map ferait du bruit dans le diff).
+  defp encode_registry(registry) when map_size(registry) == 0, do: "{}\n"
+
+  defp encode_registry(registry) do
+    body =
+      registry
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map_join(",\n", fn {k, v} -> "  #{JSON.encode!(k)}: #{JSON.encode!(v)}" end)
+
+    "{\n" <> body <> "\n}\n"
   end
 
   defp merge(a, b), do: Map.merge(a, b, fn _sig, ea, eb -> merge_entry(ea, eb) end)

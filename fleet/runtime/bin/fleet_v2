@@ -190,6 +190,9 @@ cmd_stop() {
 }
 
 cmd_status() {
+  # Version EN TÊTE : « quel build tourne ? » constatable d'un coup d'œil, sans aller lire build_info.txt
+  # à la main (réutilise cmd_version, même donnée que `fleet_v2 version` / l'endpoint /api/version).
+  cmd_version
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
     echo "fleet_v2: BEAM vivant. Logs : $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION"
     LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}" \
