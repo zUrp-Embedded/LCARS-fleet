@@ -7,6 +7,8 @@ defmodule Fleet.MCP.Supervisor do
   Enfants :
     - `Fleet.MCP.Server` (garde de boot : refuse côté pod) ;
     - `Fleet.MCP.PodSocketRegistry` (Registry unique, clé = `pod_id` → accepteur) ;
+    - `Fleet.MCP.ConnectionTaskSupervisor` (Task.Supervisor : un worker par connexion
+      acceptée, pour que `serve` ne tourne plus inline dans l'accepteur) ;
     - `Fleet.MCP.PodSocketSupervisor` (DynamicSupervisor des accepteurs de socket
       AF_UNIX per-pod) — démarré inconditionnellement host-side (rien n'est créé
       tant qu'aucun pod n'est provisionné).
@@ -42,6 +44,14 @@ defmodule Fleet.MCP.Supervisor do
       # Registry de résolution `pod_id → accepteur` (noms `:via`), démarré AVANT le
       # DynamicSupervisor qui s'y enregistre.
       {Registry, keys: :unique, name: Fleet.MCP.PodSocketRegistry},
+      # Workers de connexion : chaque connexion acceptée sur une socket pod est servie dans SA propre
+      # Task (cf. `Fleet.MCP.PodSocketAcceptor`). Démarré AVANT le DynamicSupervisor des accepteurs
+      # (qui y `start_child` dès qu'une connexion arrive). Sans lui, l'accepteur servait chaque connexion
+      # inline et en série → un handler lent (ex. appel forge qui pend) gelait tout le pod (connexions
+      # suivantes jamais servies → readline timeout). Une Task par connexion = un handler lent n'affecte
+      # que sa connexion. `restart: :temporary` (défaut Task.Supervisor) : une connexion qui crash meurt
+      # seule, sans redémarrage.
+      {Task.Supervisor, name: Fleet.MCP.ConnectionTaskSupervisor},
       Fleet.MCP.PodSocketSupervisor
     ]
 

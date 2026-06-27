@@ -42,6 +42,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # quand même retiré au démarrage — cf. `rm_stale/1`).
   @socket_opts [:binary, {:packet, :line}, {:active, false}, {:reuseaddr, true}]
 
+  # Task.Supervisor (arbre `Fleet.MCP.Supervisor`) où chaque connexion acceptée est servie dans sa
+  # propre Task. Sépare le SERVICE d'une connexion (potentiellement lent) de la BOUCLE d'accept.
+  @conn_sup Fleet.MCP.ConnectionTaskSupervisor
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     pod_id = Keyword.fetch!(opts, :pod_id)
@@ -68,7 +72,25 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id} = state) do
     case :gen_tcp.accept(lsock) do
       {:ok, sock} ->
-        serve(sock, pod_id)
+        # CONCURRENT : chaque connexion est servie dans sa PROPRE Task, jamais inline ici. Servir
+        # inline (l'ancien `serve(sock, pod_id)`) bloquait la boucle d'accept tant qu'UN handler pendait
+        # (ex. un appel forge lent de ~30 s) : on ne revenait jamais à `accept`, donc toute connexion
+        # suivante du pod restait dans le backlog kernel sans être servie → `readline` timeout côté pont
+        # (le pod gelait entier). Une Task par connexion → on re-`accept` tout de suite ; un handler lent
+        # n'affecte que sa connexion. `controlling_process` donne la socket au worker (l'accepteur peut
+        # re-accept / mourir sans tuer les connexions en vol) ; transfert en échec (worker déjà mort) →
+        # on ferme la socket plutôt que la fuir.
+        case Task.Supervisor.start_child(@conn_sup, fn -> serve(sock, pod_id) end) do
+          {:ok, pid} ->
+            case :gen_tcp.controlling_process(sock, pid) do
+              :ok -> :ok
+              {:error, _} -> :gen_tcp.close(sock)
+            end
+
+          {:error, _} ->
+            :gen_tcp.close(sock)
+        end
+
         {:noreply, state, {:continue, :accept}}
 
       # Listen socket fermé = on nous a arrêtés (release) → stop net, pas une erreur.

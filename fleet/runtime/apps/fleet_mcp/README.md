@@ -20,7 +20,15 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 - `Fleet.MCP.PodSocketAcceptor` — accepteur d'**une** socket AF_UNIX par pod. Un pod = un
   process = une socket : toute ligne reçue vient de CE pod (son `pod_id` est l'état immuable
   de l'accepteur, porté au démarrage). Décode le JSON-RPC newline-framed et dispatche les
-  `tools/call` vers `PodTools.handle_tool_call/3`.
+  `tools/call` vers `PodTools.handle_tool_call/3`. **Chaque connexion acceptée est servie dans
+  sa propre `Task`** (via `Fleet.MCP.ConnectionTaskSupervisor`, socket transférée par
+  `controlling_process`) et l'accepteur re-`accept` aussitôt : un handler lent (ex. un appel
+  forge qui pend) ne gèle PAS le pod — les connexions suivantes sont servies en parallèle, pas
+  coincées dans le backlog kernel (sinon `readline` timeout côté pont, cf. test « accepteur
+  CONCURRENT »).
+- `Fleet.MCP.ConnectionTaskSupervisor` — `Task.Supervisor` (`restart: :temporary`) des workers
+  de connexion, un par connexion acceptée. Sépare le SERVICE d'une connexion (potentiellement
+  lent) de la BOUCLE d'`accept`.
 - `Fleet.MCP.PodSocketSupervisor` — DynamicSupervisor des accepteurs (fan-out un-par-pod) +
   API de cycle de vie pour le spawner (`ensure_pod_socket` / `release_pod_socket`).
 - `Fleet.MCP.Server` — **garde de boot ADR-C** : `start_link/1` refuse

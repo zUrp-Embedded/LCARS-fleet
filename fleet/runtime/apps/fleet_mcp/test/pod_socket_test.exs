@@ -61,6 +61,28 @@ defmodule Fleet.MCP.PodSocketTest do
     assert {:ok, %{"done" => true}} = content(call(path, 3, "get_task", %{}))
   end
 
+  test "accepteur CONCURRENT : une connexion ouverte-muette ne bloque pas les autres (anti-gel du pod)" do
+    pod = uniq("concurrent")
+    nonce = "live-#{System.unique_integer([:positive])}"
+    {:ok, _} = TaskQueue.enqueue(pod, %{brief: nonce})
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    # Connexion A : ouverte et MUETTE — l'accepteur entre en `recv` dessus. En mode SÉQUENTIEL (l'ancien
+    # `serve` inline), il y resterait coincé et ne re-`accept`erait JAMAIS. On ne ferme A qu'à la fin du
+    # test (on_exit), sinon on ne prouve rien.
+    {:ok, mute} =
+      :gen_tcp.connect({:local, path}, 0, [:binary, {:packet, :line}, {:active, false}])
+
+    on_exit(fn -> :gen_tcp.close(mute) end)
+
+    # Connexion B : appel normal PENDANT que A est ouverte-muette. Séquentiel → B reste dans le backlog
+    # kernel, jamais servie → `recv` timeout (le helper `call` lèverait à 5 s). Concurrent → B est servie
+    # dans sa propre Task et répond. C'est la preuve directe du fix (le `serial.py` du forensics, en ExUnit) :
+    # ce test ÉCHOUE si l'accepteur redevient inline, il PASSE avec une Task par connexion.
+    assert {:ok, %{"task" => %{"brief" => ^nonce}}} = content(call(path, 1, "get_task", %{}))
+  end
+
   test "l'identité EST le canal : un faux `_lcars_pod_id` dans les args est IGNORÉ" do
     victim = uniq("victim")
     attacker = uniq("attacker")
