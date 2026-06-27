@@ -16,8 +16,16 @@ setup() {
 
   POD_DIR="$TMP_BASE/pod-engineer-test"; mkdir -p "$POD_DIR/.claude"
   export CLAUDE_DIR="$TMP_BASE/claudedir"; mkdir -p "$CLAUDE_DIR"
+  # Creds humain : le launcher bind `.credentials.json` (auth :bind, refresh OAuth natif en place) → le
+  # fichier DOIT exister host-side sinon le launcher fail au boundary. Fixture vide (le stub bwrap ne le
+  # lit pas, on ne teste que l'assemblage). Aligne le fixture sur le contrat creds du launcher.
+  : > "$CLAUDE_DIR/.credentials.json"
   export LCARS_GIT_MIRROR="$TMP_BASE/git-mirror"; mkdir -p "$LCARS_GIT_MIRROR"
   export LCARS_TMUX_SOCK_BASE="$TMP_BASE/sock"; mkdir -p "$LCARS_TMUX_SOCK_BASE"
+
+  # Socket MCP per-pod : le central la provisionne AVANT le launch (le dir DOIT pré-exister, bwrap le
+  # MONTE sans le créer). On simule ce provisioning ici pour le pod_id `pod-1` utilisé par les tests.
+  export LCARS_FLEET_MCP_SOCK_BASE="$TMP_BASE/mcp-sock"; mkdir -p "$LCARS_FLEET_MCP_SOCK_BASE/pod-1"
 
   # Vendor stub (juste -x + un share dir). Autorité explicite (pas de résolution PATH).
   export LCARS_VENDOR_NAME="claude"
@@ -29,6 +37,13 @@ setup() {
   # Session : posées par le spawner en prod.
   export LCARS_POD_SESSION_ID="test-session-uuid"
   export LCARS_POD_SESSION_NAME_PREFIX="lordzurp_engineer"
+
+  # Identité git du mandat = l'HUMAIN (posée par le spawner via ForgeIdentity ; lue `:?` strict par le
+  # launcher → le `--setenv GIT_*` no-boot sinon). Fixture déterministe pour atteindre l'assemblage.
+  export GIT_AUTHOR_NAME="Test Human"
+  export GIT_AUTHOR_EMAIL="test-human@lcars.invalid"
+  export GIT_COMMITTER_NAME="Test Human"
+  export GIT_COMMITTER_EMAIL="test-human@lcars.invalid"
 
   # Stub bwrap : echo l'invocation complète (incl la commande tmux) → assertions d'assemblage.
   export LCARS_BWRAP_BIN="$TMP_BASE/bwrap-stub"
@@ -98,6 +113,10 @@ teardown() { rm -rf "$TMP_BASE"; }
   export LCARS_TMUX_SOCK_BASE="/nonexistent/sock-base"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"sock parent"* ]]
 }
+@test "setup: exit 1 quand le dir socket MCP per-pod absent (contrat de provisioning central)" {
+  rm -rf "$LCARS_FLEET_MCP_SOCK_BASE/pod-1"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"dir socket MCP"* ]]
+}
 
 # ============== Assemblage bwrap (stub echo) — v2 ==============
 
@@ -111,10 +130,13 @@ teardown() { rm -rf "$TMP_BASE"; }
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
   [[ "$output" == *"--unshare-all"* ]]; [[ "$output" == *"--share-net"* ]]
 }
-@test "asm: bind pod_dir + claudeDir→.claude + git-mirror RO" {
+@test "asm: bind pod_dir + creds (.credentials.json single-file) + git-mirror RO" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
   [[ "$output" == *"--bind $POD_DIR $POD_DIR"* ]]
-  [[ "$output" == *"--bind $CLAUDE_DIR $POD_DIR/.claude"* ]]
+  # Auth :bind = SEUL `.credentials.json` bindé (PAS le `.claude` humain entier : sinon ses hooks
+  # fuitent comme settings projet et jamment le boot). Refresh OAuth natif s'écrit en place sur ce
+  # fichier. SANDBOX_HOME=$POD_DIR ici (pas de LCARS_POD_HOME) → cible sous $POD_DIR/.claude/.
+  [[ "$output" == *"--bind $CLAUDE_DIR/.credentials.json $POD_DIR/.claude/.credentials.json"* ]]
   [[ "$output" == *"--ro-bind $LCARS_GIT_MIRROR $LCARS_GIT_MIRROR"* ]]
 }
 @test "asm: relocation vendor → pod/.local/bin (binaire per-user)" {
@@ -124,6 +146,15 @@ teardown() { rm -rf "$TMP_BASE"; }
 @test "asm: bind socket-dir par-pod" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
   [[ "$output" == *"--bind $LCARS_TMUX_SOCK_BASE/pod-1 $LCARS_TMUX_SOCK_BASE/pod-1"* ]]
+}
+@test "asm: socket MCP per-pod — bind du DIR + setenv socket, JAMAIS la base en bloc (frontière tenant)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  # DIR per-pod bindé au même chemin host==namespace (le central y a déjà créé `sock`).
+  [[ "$output" == *"--bind $LCARS_FLEET_MCP_SOCK_BASE/pod-1 $LCARS_FLEET_MCP_SOCK_BASE/pod-1"* ]]
+  # Chemin du socket posé pour le bridge (lu par bridge.py).
+  [[ "$output" == *"--setenv LCARS_FLEET_MCP_SOCKET $LCARS_FLEET_MCP_SOCK_BASE/pod-1/sock"* ]]
+  # JAMAIS la base en bloc : exposerait les sockets des pods sœurs (fuite tenant multi-humain).
+  [[ "$output" != *"--bind $LCARS_FLEET_MCP_SOCK_BASE $LCARS_FLEET_MCP_SOCK_BASE"* ]]
 }
 @test "asm: --setenv CLAUDE_CODE_DISABLE_AUTO_MEMORY 1 (pod stateless)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$output" == *"--setenv CLAUDE_CODE_DISABLE_AUTO_MEMORY 1"* ]]
@@ -178,7 +209,10 @@ teardown() { rm -rf "$TMP_BASE"; }
 # ==================== Frontière N0/N1 ========================
 
 @test "frontière: aucun flag claude/vendor (N0 ne connaît pas claude)" {
-  ! grep -vE "^\s*#" "$SCRIPT" | grep -E "\-\-remote-control|\-\-system-prompt|\-\-mcp-config|\-\-allowedTools|\-\-permission-mode|\-p |\-\-print"
+  # On exclut `mkdir -p` : c'est un builtin shell (création défensive de .claude/), PAS le flag print
+  # `-p` de claude. bwrap_launch ne passe les flags claude QUE via la commande opaque ${COMMAND[@]},
+  # jamais en littéral dans la source → tout `-p ` littéral restant serait suspect, sauf ce mkdir.
+  ! grep -vE "^\s*#" "$SCRIPT" | grep -vE "mkdir -p" | grep -E "\-\-remote-control|\-\-system-prompt|\-\-mcp-config|\-\-allowedTools|\-\-permission-mode|\-p |\-\-print"
 }
 @test "frontière: invocable avec n'importe quel command (vendor-agnostic)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /usr/bin/env FOO=bar

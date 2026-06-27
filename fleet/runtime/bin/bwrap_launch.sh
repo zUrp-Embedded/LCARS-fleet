@@ -131,6 +131,19 @@ TMUX_SESSION_NAME="lcars-pod-$POD_ID"
 # pod_id UUID (chemin pipeline) → "File name too long". MÊME chemin côté Elixir
 # (Fleet.Spawner.PodTmux.sock_path = <base>/<pod_id>/pod.sock).
 TMUX_SOCK="$POD_SOCK_DIR/pod.sock"
+
+# Socket MCP per-pod (canal AF_UNIX entre le bridge du pod et le central). MÊME structure que la
+# socket-dir tmux ci-dessus : un dir par-pod + un filename court ("sock") tiennent le chemin sous la
+# limite sun_path (108 octets) même pour un pod_id long. On bindera SEULEMENT ce dir per-pod
+# ($MCP_SOCK_DIR), JAMAIS la base : binder la base exposerait les sockets des pods sœurs dans CE
+# sandbox → fuite de la frontière tenant multi-humain. DIFFÉRENCE avec tmux : le fichier socket (et son
+# dir) est créé HORS du sandbox par la BEAM AVANT ce launch (le central provisionne la socket per-pod)
+# → bwrap MONTE un dir PRÉ-EXISTANT, il ne le crée PAS (pas de `install -d`). La base défaut s'aligne
+# sur le défaut central (`/run/lcars/mcp`) ; un humain qui lance sa fleet sous son home l'override via
+# LCARS_FLEET_MCP_SOCK_BASE (posée par le launcher fleet_v2, lue aussi côté Elixir) — UNE seule source.
+MCP_SOCK_BASE="${LCARS_FLEET_MCP_SOCK_BASE:-/run/lcars/mcp}"
+MCP_SOCK_DIR="$MCP_SOCK_BASE/$POD_ID"
+MCP_SOCK="$MCP_SOCK_DIR/sock"
 POD_VENDOR_BIN="$SANDBOX_HOME/.local/bin/$VENDOR_NAME"
 
 # =============================================================
@@ -159,6 +172,12 @@ fi
 [[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT absent (provisioning systemd-tmpfiles.d / LCARS_TMUX_SOCK_BASE)" >&2; exit 1; }
 install -d -m 0700 "$POD_SOCK_DIR"
 install -d -m 0755 "$POD_DIR/.local/bin"
+
+# Le dir socket MCP per-pod DOIT pré-exister : le central crée le fichier socket AVANT ce launch (à la
+# différence de la socket-dir tmux ci-dessus, que tmux remplit DANS le sandbox). On le MONTE, on ne le
+# crée PAS — son absence = rupture du contrat de provisioning, fail clair au boundary plutôt qu'un bind
+# d'un chemin fantôme qui ferait échouer bwrap plus loin avec un message opaque.
+[[ -d "$MCP_SOCK_DIR" ]] || { echo "ERR: dir socket MCP $MCP_SOCK_DIR absent (le central doit le provisionner avant le launch)" >&2; exit 1; }
 
 # =============================================================
 # Plugins Claude Code natifs (bind RO host→pod, whitelist LCARS_SKILLS_PLUGINS).
@@ -300,6 +319,7 @@ exec "$BWRAP_BIN" \
   --ro-bind "$VENDOR_BIN" "$POD_VENDOR_BIN" \
   --ro-bind "$VENDOR_SHARE" "$SANDBOX_HOME/.local/share/$VENDOR_NAME" \
   --bind "$POD_SOCK_DIR" "$POD_SOCK_DIR" \
+  --bind "$MCP_SOCK_DIR" "$MCP_SOCK_DIR" \
   ${PLUGIN_BINDS[@]+"${PLUGIN_BINDS[@]}"} \
   ${CATALOG_BINDS[@]+"${CATALOG_BINDS[@]}"} \
   --chdir "$WORKDIR" \
@@ -308,6 +328,7 @@ exec "$BWRAP_BIN" \
   --setenv TERM "${TERM:-xterm-256color}" \
   --setenv LANG "${LANG:-C.UTF-8}" \
   --setenv LCARS_POD_ID "$POD_ID" \
+  --setenv LCARS_FLEET_MCP_SOCKET "$MCP_SOCK" \
   --setenv LCARS_ROLE "$ROLE" \
   --setenv LCARS_POD_CWD "$WORKDIR" \
   --setenv LCARS_POD_HOME "$SANDBOX_HOME" \
