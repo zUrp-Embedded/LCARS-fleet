@@ -36,6 +36,7 @@ import json
 import os
 import socket
 import sys
+import time
 
 SOCKET_PATH = os.environ.get("LCARS_FLEET_MCP_SOCKET", "")
 ROLE = os.environ.get("LCARS_ROLE", "")
@@ -61,14 +62,33 @@ def central_call(method, params):
     # premier `\n`. Retourne le champ result (ou lève : socket absente / connexion refusée / timeout /
     # réponse vide remontent comme exception — l'appelant tools/call la traduit en erreur JSON-RPC
     # propre vers claude, jamais un crash silencieux).
+    #
+    # INSTRUMENTATION (diagnostic timeout) : chaque étape (connect/send/readline) est chronométrée et
+    # l'étape courante gardée dans `stage`. Un échec loggue DONC où ça a bloqué — `connect` lent = le
+    # central n'accepte pas la connexion (accepteur occupé/sérialisé) ; `readline` lent = il a accepté
+    # mais ne répond pas. Sans ça le pod ne voit qu'un « timed out » muet, indistinguable. Un appel
+    # réussi mais lent (>1s) est aussi loggué avec le détail par étape.
     _req_id[0] += 1
     rpc = {"jsonrpc": "2.0", "id": _req_id[0], "method": method, "params": params}
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(30)
+    t0 = time.monotonic()
+    stage = "connect"
     try:
         s.connect(SOCKET_PATH)
+        t_conn = time.monotonic()
+        stage = "send"
         s.sendall((json.dumps(rpc) + "\n").encode())
+        t_send = time.monotonic()
+        stage = "readline"
         resp_line = s.makefile("rb").readline()
+        t_recv = time.monotonic()
+        if t_recv - t0 > 1.0:
+            log(f"central_call {method} LENT {t_recv-t0:.2f}s "
+                f"(connect={t_conn-t0:.3f}s send={t_send-t_conn:.3f}s readline={t_recv-t_send:.3f}s)")
+    except Exception as e:
+        log(f"central_call {method} ECHEC etape='{stage}' apres {time.monotonic()-t0:.2f}s : {e!r}")
+        raise
     finally:
         s.close()
     if not resp_line:
