@@ -339,27 +339,61 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # `maybe_provision_mcp_config/1` doit refuser (fail-loud) un backend RÉEL avec
-  # `mcp_server_spec` nil — un pod réel parle MCP, sans MCP il part cassé (timeout
-  # silencieux). Marqueur du fail-loud : l'erreur `:mcp_server_spec_required`.
-  # Rouge si absente (retour au `:ok` muet).
+  # Un backend RÉEL sans `mcp_server_spec` doit être refusé (fail-loud) — un pod réel
+  # parle MCP, sans MCP il part cassé (timeout silencieux). Le provisioning MCP a été
+  # extrait de pod.ex vers son propre module ; ce check garde la garde à DEUX niveaux,
+  # les deux requis (sinon fail) :
+  #   niveau 1 (câblage) — pod.ex APPELLE `McpProvision.maybe_provision_mcp_config(` dans
+  #     sa with-chain de provisioning (sans cet appel, la garde, fût-elle présente dans
+  #     le module dédié, ne tournerait jamais sur le chemin de spawn) ;
+  #   niveau 2 (garde réelle) — `mcp_provision.ex` porte le fail-loud, marqueur l'erreur
+  #     `:mcp_server_spec_required` dans le TUPLE de retour `{:error, {:mcp_server_spec_required, …}}`.
+  # Rouge si l'un des deux manque ; évidence claire pointant le fichier fautif.
+  #
+  # ⚠ Anti-vert-creux durci (niveau 2) : le moduledoc de `mcp_provision.ex` DOCUMENTE le même
+  # tuple `{:error, {:mcp_server_spec_required, backend}}` (en inline-code). Grepper l'atome nu
+  # laisserait le check VERT même si la clause de code réelle était retirée (la doc gardant le
+  # token présent) — exactement le vert-creux que ce checker existe pour bloquer. On exige donc
+  # le token dans une LIGNE DE CODE qui EST le tuple d'erreur (`^\s*{:error,` après strip_comment) ;
+  # la ligne de doc (prose préfixée d'un backtick, pas `{:error,`) ne compte pas. Débrancher la
+  # clause réelle re-ROUGIT, quoi que dise la doc.
   defp check_mcp_required_real_backend(root) do
     pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
+    mcp = "apps/fleet_spawner/lib/fleet/spawner/pod/mcp_provision.ex"
 
-    present? =
+    wired? =
       Path.join(root, pod)
+      |> grep_lines(~r/McpProvision\.maybe_provision_mcp_config\(/)
+      |> Enum.any?(fn {_ln, line} ->
+        Regex.match?(~r/McpProvision\.maybe_provision_mcp_config\(/, strip_comment(line))
+      end)
+
+    guard? =
+      Path.join(root, mcp)
       |> grep_lines(~r/:mcp_server_spec_required/)
       |> Enum.any?(fn {_ln, line} ->
-        Regex.match?(~r/:mcp_server_spec_required/, strip_comment(line))
+        stripped = strip_comment(line)
+
+        Regex.match?(~r/:mcp_server_spec_required/, stripped) and
+          Regex.match?(~r/^\s*\{:error,/, stripped)
       end)
+
+    evidence =
+      [
+        {not wired?,
+         "#{pod} : McpProvision.maybe_provision_mcp_config non appelé (provisioning MCP débranché du chemin de spawn)"},
+        {not guard?, "#{mcp} : pas de fail-loud :mcp_server_spec_required (garde réelle absente)"}
+      ]
+      |> Enum.filter(&elem(&1, 0))
+      |> Enum.map(&elem(&1, 1))
 
     %{
       id: "mcp.required_for_real_backend",
       remediation: "R14",
-      status: if(present?, do: :pass, else: :fail),
-      evidence:
-        if(present?, do: [], else: ["#{pod} : pas de fail-loud :mcp_server_spec_required"]),
-      note: "maybe_provision_mcp_config doit refuser un backend réel sans mcp_server_spec"
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
+      note:
+        "pod.ex câble McpProvision.maybe_provision_mcp_config (niveau 1) ET mcp_provision.ex refuse fail-loud :mcp_server_spec_required un backend réel sans spec (niveau 2) — les 2 requis"
     }
   end
 
@@ -503,35 +537,44 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # Les 3 portes du spawn-boundary doivent être câblées dans pod.ex, PAS test-only,
-  # sinon ce sont des portes de containment/credentials CREUSES (appelées en test mais
-  # jamais en prod — le mode de défaillance « hollow-gate » que ce checker existe pour
-  # bloquer) :
-  #   (1) CapProfile.validate — porte de containment, dont le refus des server-tools
-  #       natifs ; appelée à `do_allocate` ;
-  #   (2) ScopeValidator.validate — couverture des scopes OAuth par-rôle ;
-  #   (3) PlanValidator.validate — abonnement payant.
-  # Rouge si l'une manque. Une porte qui ne tourne qu'en test ne garde rien en prod ;
-  # le câblage doit donc vivre sur le chemin de spawn réel (do_allocate / do_launch),
-  # exactement là où un pod est réellement alloué puis lancé.
+  # Les portes du spawn-boundary doivent être câblées sur le chemin de spawn réel,
+  # PAS test-only, sinon ce sont des portes de containment/credentials CREUSES (appelées
+  # en test mais jamais en prod — le mode de défaillance « hollow-gate » que ce checker
+  # existe pour bloquer). La porte containment reste directe dans pod.ex ; les portes
+  # scope+plan ont été regroupées derrière une porte credentials dédiée (Fleet.Credentials.Gate),
+  # câblée au spawn. Ce check vérifie DEUX niveaux, 4 vérifs (toutes requises) :
+  #   niveau 1 — câblage dans pod.ex sur le chemin de spawn réel :
+  #     (1) CapProfile.validate — porte de containment (refus des server-tools natifs), à do_allocate ;
+  #     (2) Fleet.Credentials.Gate.validate — la porte credentials (scope+plan) appelée à do_launch ;
+  #   niveau 2 — la porte credentials délègue RÉELLEMENT (pas une coquille vide) dans gate.ex :
+  #     (3) ScopeValidator.validate — couverture des scopes OAuth par-rôle ;
+  #     (4) PlanValidator.validate — abonnement payant.
+  # Rouge si l'une manque. Une porte qui ne tourne qu'en test, ou une porte câblée mais
+  # qui ne délègue rien, ne garde rien en prod.
   defp check_spawn_gates_wired(root) do
     pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
-    abs = Path.join(root, pod)
+    gate = "apps/fleet_credentials/lib/fleet/credentials/gate.ex"
 
-    gates = [
-      {~r/CapProfile\.validate\(/, "CapProfile.validate (G24/F-CONT-RISK)"},
-      {~r/ScopeValidator\.validate\(/, "ScopeValidator.validate (scope-coverage)"},
-      {~r/PlanValidator\.validate\(/, "PlanValidator.validate (plan payant)"}
+    # Chaque vérif = {fichier_relatif, regex, label}. Le label nomme le fichier attendu.
+    checks = [
+      {pod, ~r/CapProfile\.validate\(/, "CapProfile.validate (containment G24/F-CONT-RISK)"},
+      {pod, ~r/Fleet\.Credentials\.Gate\.validate\(/,
+       "Fleet.Credentials.Gate.validate (porte scope+plan câblée au spawn)"},
+      {gate, ~r/ScopeValidator\.validate\(/,
+       "ScopeValidator.validate (délégation scope-coverage)"},
+      {gate, ~r/PlanValidator\.validate\(/, "PlanValidator.validate (délégation plan payant)"}
     ]
 
     evidence =
-      gates
-      |> Enum.reject(fn {re, _label} ->
-        abs
+      checks
+      |> Enum.reject(fn {rel, re, _label} ->
+        Path.join(root, rel)
         |> grep_lines(re)
         |> Enum.any?(fn {_ln, line} -> Regex.match?(re, strip_comment(line)) end)
       end)
-      |> Enum.map(fn {_re, label} -> "#{pod} : #{label} non câblée au spawn (porte creuse)" end)
+      |> Enum.map(fn {rel, _re, label} ->
+        "#{rel} : #{label} absente (porte creuse / délégation vide)"
+      end)
 
     %{
       id: "spawn.gates_wired",
@@ -539,7 +582,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "les 3 portes spawn (cap.validate G24 + scope + plan) câblées dans pod.ex (do_allocate + do_launch), pas test-only"
+        "porte containment (CapProfile.validate) + porte credentials (Fleet.Credentials.Gate.validate) câblées au spawn dans pod.ex, ET la porte délègue réellement scope (ScopeValidator) + plan (PlanValidator) dans gate.ex — 4 vérifs, 2 niveaux"
     }
   end
 

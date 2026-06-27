@@ -13,7 +13,7 @@ defmodule Fleet.Event do
 
   Construire un event = `Fleet.Event.new(source, type, opts)` (« parse, don't validate »). C'est le
   seul point de construction des producteurs : il garantit `source ∈ enum` et `timestamp` = `%DateTime{}`.
-  Les consommateurs, eux, pattern-matchent la struct (`%Fleet.Event{source: :x, type: :y} = ev`) — ils
+  Les consommateurs, eux, pattern-matchent la struct (`%Fleet.Event{source: :task_queue, type: :task_completed} = ev`) — ils
   ne la construisent pas.
 
   Convention de nommage d'un event = `<source>.<type>` (ex. `:spawner.pod_degraded`,
