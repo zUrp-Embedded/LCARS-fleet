@@ -165,24 +165,27 @@ if config_env() != :test do
   # de backend hors-bwrap à activer. La chaîne bwrap est la seule voie (sanctuaire).
 
   # ============================================================
-  # fleet_mcp — port HTTP pod-facing (PodTools transport :http +
-  # TaskQueue centrale, R-CORE.comm Ring 4)
+  # fleet_mcp — base des sockets MCP per-pod (transport AF_UNIX, R9)
   # ============================================================
-  # Démarre `Fleet.MCP.PodTools` HTTP + `Fleet.MCP.TaskQueue` quand set.
-  # Les pods s'y connectent via le bridge.py stdio → http://127.0.0.1:
-  # <port>/mcp. Sans ce port, les pods n'ont AUCUN tool mcp__fleet__*
-  # (workflow worker impossible).
-  if port = System.get_env("LCARS_FLEET_MCP_POD_FACING_PORT") do
-    config :fleet_mcp, pod_facing_port: parse_int.("LCARS_FLEET_MCP_POD_FACING_PORT", port)
+  # Le transport pod-facing n'est plus un listener HTTP partagé (`:pod_facing_port` retiré — dead config
+  # sans lecteur depuis la bascule socket) mais une socket AF_UNIX PAR POD (`<base>/<pod_id>/sock`, créée
+  # par `Fleet.MCP.PodSocketSupervisor.ensure_pod_socket`, lue par le pod via `LCARS_FLEET_MCP_SOCKET`).
+  # Défaut `:sock_base` = `/run/lcars/mcp` (côté fleet_mcp). Quand le runtime est lancé par un HUMAIN (pas
+  # un service système), `/run/lcars` n'est pas writable sans privilège → override SOUS son home, EXACTEMENT
+  # comme `LCARS_TMUX_SOCK_BASE` le fait pour la socket tmux des pods. La socket est bindée au MÊME chemin
+  # absolu dans le sandbox bwrap (`--bind X X`) → host == namespace (pas de remap du chemin).
+  if sock_base = System.get_env("LCARS_FLEET_MCP_SOCK_BASE") do
+    config :fleet_mcp, sock_base: sock_base
   end
 
   # ============================================================
   # fleet_spawner — mcp_server_spec (config du `.mcp-fleet.json`
   # écrit dans chaque pod par pod.ex maybe_provision_mcp_config)
   # ============================================================
-  # Le pod claude REPL démarre le bridge.py via cette spec ; le bridge
-  # forward stdio → HTTP central (LCARS_FLEET_MCP_URL). `LCARS_POD_ID`
-  # est ajouté per-pod par pod.ex (build_fleet_mcp_entry).
+  # Le pod claude REPL démarre le bridge.py via cette spec ; le bridge parle au central via la socket
+  # AF_UNIX per-pod dont le chemin est injecté PER-POD par pod.ex en `LCARS_FLEET_MCP_SOCKET`
+  # (build_fleet_mcp_entry) — plus de `LCARS_FLEET_MCP_URL` (l'ancien transport HTTP loopback partagé a
+  # disparu, R9). `LCARS_POD_ID` est lui aussi ajouté per-pod par pod.ex.
   #
   # PASSE-9 (2026-06-08) : le bridge NE peut PAS être lancé via son chemin hôte
   # (`/var/lib/lcars/bin/...`) — le sandbox bwrap ne monte PAS `/var/lib/lcars`.
@@ -190,10 +193,10 @@ if config_env() != :test do
   # sous `pod_dir/.lcars/` et résout les placeholders `{{BRIDGE}}`/`{{BRIDGE_LOG}}`
   # sur ce chemin pod-local (pod_dir est le SEUL espace RW monté dans le sandbox,
   # au même chemin absolu hôte+sandbox). Cf. pod.ex build_fleet_mcp_entry.
-  mcp_url = System.get_env("LCARS_FLEET_MCP_URL")
-  bridge_path = System.get_env("LCARS_FLEET_MCP_BRIDGE_PATH")
-
-  if mcp_url && bridge_path do
+  #
+  # Gate sur `bridge_path` SEUL (le bridge doit être copiable) : la cible de comm n'est plus une URL mais
+  # la socket per-pod, résolue au runtime côté pod, pas une config statique de boot.
+  if bridge_path = System.get_env("LCARS_FLEET_MCP_BRIDGE_PATH") do
     config :fleet_spawner, :mcp_server_spec, %{
       # Chemin HÔTE du bridge, copié per-pod par pod.ex (pas lancé en place).
       "bridge_source" => bridge_path,
@@ -204,10 +207,9 @@ if config_env() != :test do
         # pod_dir/.lcars/, RW dans le sandbox). PAS de chemin hôte ici : invisible
         # dans le sandbox bwrap.
         "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"
-      ],
-      "env" => %{
-        "LCARS_FLEET_MCP_URL" => mcp_url
-      }
+      ]
+      # Pas de clé "env" statique : `LCARS_FLEET_MCP_SOCKET` (socket per-pod) + `LCARS_POD_ID` sont
+      # injectés PER-POD par pod.ex (build_fleet_mcp_entry), pas figés ici.
     }
   end
 

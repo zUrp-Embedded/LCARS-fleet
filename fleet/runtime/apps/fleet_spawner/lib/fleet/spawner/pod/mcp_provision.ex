@@ -16,7 +16,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
     `:ok` (StubBackend sans spec, ou écriture réussie) | `{:error, {:mcp_server_spec_required, backend}}`
     (backend RÉEL sans spec, fail-loud) | `{:error, reason}` (échec FS : `{:write_failed, …}` /
     `{:mcp_bridge_provision_failed, …}`). L'erreur est propagée au `with` → `transition_failed`.
-  - `mcp_channel_env/3` — env vars MCP à merger dans l'env de launch (`do_launch`). Retourne une map.
+  - `mcp_channel_env/2` — env vars MCP du process pod à merger dans l'env de launch (`do_launch`). Retourne une map.
 
   La spec serveur MCP est lue en config (`:fleet_spawner, :mcp_server_spec`) ; le backend résolu
   est passé par le Pod (source unique `Fleet.Spawner.LaunchBackend.resolved/0`).
@@ -31,8 +31,8 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # bug de config (le brief instruit submit_result, impossible sans serveur).
   #
   # UN seul mécanisme paramétré : la config fournit la spec serveur (`command`/`args`/`env`),
-  # on y force `alwaysLoad`. La spec décide — PROD : pont stdio→central (env LCARS_FLEET_MCP_URL),
-  # TESTS : fixture file-backed. Même mécanisme, spec différente.
+  # on y force `alwaysLoad`. La spec décide — PROD : pont stdio→central via une socket AF_UNIX per-pod
+  # (chemin posé per-pod en `LCARS_FLEET_MCP_SOCKET`), TESTS : fixture file-backed. Même mécanisme, spec différente.
   defp mcp_server_spec, do: Application.get_env(:fleet_spawner, :mcp_server_spec)
 
   # Env vars MCP à propager au pod (consommés par bridge.py côté pod). `LCARS_POD_ID`
@@ -47,25 +47,21 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # côté serveur, `Fleet.Spawner.pod_info`), pas du wire (non authentifié → usurpation). Posé ICI
   # (env du process pod) → couvre host_launch ET bwrap (qui le re-`--setenv` dans son sandbox).
   #
-  # `LCARS_POD_CAPABILITY` (= le secret par-pod, généré au spawn) : bridge.py l'injecte en
-  # `_lcars_pod_capability` dans chaque tool-call, exactement comme `LCARS_POD_ID` → `_lcars_pod_id`.
-  # Le central VÉRIFIE cette capability contre celle enregistrée pour le pod_id avant de servir le moindre
-  # tool corrélé pod (get_task/submit_result/résolution de rôle) : un pod qui présente le pod_id deviné
-  # d'un AUTRE pod n'a pas sa capability → REFUS. C'est la fermeture du trou d'usurpation : le pod_id seul
-  # ne prouve plus rien. TOUJOURS posée (tout pod spawné par la fleet en reçoit une) ; un pod sans elle
-  # ne peut RIEN faire au central (fail-closed, pas de fallback anonyme).
-  #
-  # `LCARS_FLEET_MCP_CHANNEL_URL` n'est plus posé (push channel ChannelHTTP supprimé,
-  # le drive se fait via les tools pull `get_task`).
-  def mcp_channel_env(pod_id, role, capability)
-      when is_binary(pod_id) and is_binary(capability) do
-    base = %{"LCARS_POD_ID" => pod_id, "LCARS_POD_CAPABILITY" => capability}
+  # Plus de `LCARS_POD_CAPABILITY` : l'identité du pod n'est plus un secret présenté sur le fil mais le
+  # CANAL lui-même. Chaque pod a sa socket MCP AF_UNIX (montée dans son seul sandbox) → « quelle socket
+  # reçoit » = « quel pod ». Le central n'a donc plus de secret à vérifier (cf. Fleet.MCP.PodSocketAcceptor).
+  # Le chemin de cette socket voyage en `LCARS_FLEET_MCP_SOCKET` dans l'env du SERVEUR MCP (build_fleet_mcp_entry),
+  # pas ici (l'env du process pod claude).
+  def mcp_channel_env(pod_id, role) when is_binary(pod_id) do
+    base = %{"LCARS_POD_ID" => pod_id}
     if is_binary(role) and role != "", do: Map.put(base, "LCARS_ROLE", role), else: base
   end
 
   # Écrit `<pod_dir>/.mcp-fleet.json` (+ copie le bridge stdio dans le pod). `backend` est résolu
   # par le Pod (`Fleet.Spawner.LaunchBackend.resolved/0`) et passé ici ; la spec serveur est lue en config.
-  def maybe_provision_mcp_config(pod_dir, sandbox_home, pod_id, capability, backend) do
+  # `socket_path` = chemin host de la socket MCP per-pod (rendu par `ensure_pod_socket`, do_project) ;
+  # posé tel quel en `LCARS_FLEET_MCP_SOCKET` du serveur (host==namespace, cf. build_fleet_mcp_entry).
+  def maybe_provision_mcp_config(pod_dir, sandbox_home, pod_id, socket_path, backend) do
     case {mcp_server_spec(), backend} do
       # Seam test explicite : StubBackend ne lance pas claude → pas de MCP requis.
       {nil, Fleet.Spawner.LaunchBackend.StubBackend} ->
@@ -82,7 +78,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
         # Non-bang + retour {:ok|:error} propagé au with chain do_project
         # (où l'erreur déclenche transition_failed proprement).
         with {:ok, fleet_entry} <-
-               build_fleet_mcp_entry(spec, pod_dir, sandbox_home, pod_id, capability) do
+               build_fleet_mcp_entry(spec, pod_dir, sandbox_home, pod_id, socket_path) do
           config = %{"mcpServers" => %{"fleet" => fleet_entry}}
 
           Fs.safe_write(
@@ -120,13 +116,16 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # bwrap n'aurait aucun tool `mcp__fleet__*` (le pont ne démarrerait jamais) — donc aucun moyen de
   # puller son mandat ni de soumettre son résultat.
   #
-  # Injecte aussi `LCARS_POD_ID` ET `LCARS_POD_CAPABILITY` dans l'env du serveur (le bridge les lit
-  # pour corréler `get_task` au bon pod ET prouver son identité au central ; ne pas dépendre de l'héritage
-  # env claude→bridge) et force `alwaysLoad:true` (sinon les tools MCP sont déférés derrière ToolSearch,
-  # absents du prompt turn-1). La capability est posée ICI, dans l'env du SEUL pont de CE pod : un autre pod
-  # ne peut pas la lire (son `.mcp-fleet.json` porte SA propre capability). C'est ce qui rend le pod_id
-  # non-suffisant pour usurper — il faut AUSSI le secret, qui ne quitte jamais l'env de son pod.
-  defp build_fleet_mcp_entry(spec, pod_dir, sandbox_home, pod_id, capability) do
+  # Injecte `LCARS_POD_ID` ET `LCARS_FLEET_MCP_SOCKET` dans l'env du serveur (le bridge les lit pour
+  # corréler `get_task` au bon pod ET savoir SUR QUELLE socket parler au central ; ne pas dépendre de
+  # l'héritage env claude→bridge) et force `alwaysLoad:true` (sinon les tools MCP sont déférés derrière
+  # ToolSearch, absents du prompt turn-1).
+  #
+  # ⚠ Host vs namespace pour la SOCKET : contrairement au bridge (host_bridge pour la copie, ns_bridge pour
+  # l'argv), le `socket_path` est posé TEL QUEL. Le bind bwrap (R9) montera la socket au MÊME chemin absolu
+  # (`--bind X X`) → host == namespace → AUCUN remap. (Host pods, containment none : pas de namespace du
+  # tout, le chemin host EST le chemin vu par le pont.) D'où : pas de `sandbox_home` dans le chemin socket.
+  defp build_fleet_mcp_entry(spec, pod_dir, sandbox_home, pod_id, socket_path) do
     # HÔTE : où le spawner ÉCRIT réellement le pont (le pod_dir réel sur le disque).
     host_bridge = Path.join([pod_dir, ".lcars", "fleet_mcp_bridge.py"])
 
@@ -145,7 +144,8 @@ defmodule Fleet.Spawner.Pod.McpProvision do
 
       pod_env = %{
         "LCARS_POD_ID" => pod_id,
-        "LCARS_POD_CAPABILITY" => capability
+        # Chemin host de la socket per-pod, posé tel quel (host == namespace, cf. note ci-dessus).
+        "LCARS_FLEET_MCP_SOCKET" => socket_path
       }
 
       entry =

@@ -1313,10 +1313,11 @@ defmodule Fleet.Spawner.PodTest do
       # MCP n'a jamais démarré → 0 tool mcp__fleet__* → TOUS les pods aveugles (data-plane mort, prouvé
       # arch+gatekeeper+consultants). Le config doit porter le path sandbox (`sandbox_home`), la COPIE du
       # pont visant elle le pod_dir hôte. valid_profile = containment bwrap → sandbox_home = /home/.pod.
+      # Plus de clé "env" statique dans la spec : la socket per-pod (LCARS_FLEET_MCP_SOCKET) est injectée
+      # PER-POD par pod.ex (build_fleet_mcp_entry) depuis le provisionneur de socket (stub en test).
       Application.put_env(:fleet_spawner, :mcp_server_spec, %{
         "command" => "bash",
-        "args" => ["-c", "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"],
-        "env" => %{"LCARS_FLEET_MCP_URL" => "http://127.0.0.1:21022/mcp"}
+        "args" => ["-c", "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"]
       })
 
       on_exit(fn -> Application.delete_env(:fleet_spawner, :mcp_server_spec) end)
@@ -1334,6 +1335,15 @@ defmodule Fleet.Spawner.PodTest do
       assert cmd =~ "/home/.pod/.lcars/fleet_mcp_bridge.log"
       # JAMAIS le pod_dir hôte (invisible in-sandbox → c'était LE bug).
       refute cmd =~ pod_dir
+
+      # R9 — l'env du serveur MCP porte la socket per-pod (chemin host rendu par le provisionneur stub,
+      # contient le pod_id) en `LCARS_FLEET_MCP_SOCKET` + `LCARS_POD_ID` ; plus de `LCARS_POD_CAPABILITY`
+      # (identité = le canal/la socket, pas un secret sur le fil) ni de `LCARS_FLEET_MCP_URL` (HTTP retiré).
+      env = get_in(config, ["mcpServers", "fleet", "env"])
+      assert env["LCARS_FLEET_MCP_SOCKET"] =~ pod_id
+      assert env["LCARS_POD_ID"] == pod_id
+      refute Map.has_key?(env, "LCARS_POD_CAPABILITY")
+      refute Map.has_key?(env, "LCARS_FLEET_MCP_URL")
     end
   end
 

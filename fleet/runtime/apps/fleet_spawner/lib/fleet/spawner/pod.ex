@@ -79,14 +79,6 @@ defmodule Fleet.Spawner.Pod do
           pod_id: String.t(),
           ticket_id: String.t(),
           session_id: String.t() | nil,
-          # Secret aléatoire par-pod, généré au spawn. C'est la PREUVE D'IDENTITÉ du pod auprès
-          # du serveur MCP central : non-dérivable du pod_id (qui, lui, est déterministe et devinable),
-          # injecté UNIQUEMENT dans l'env de CE pod, et stocké ICI côté serveur (lu par `pod_info/1`).
-          # Le central refuse tout tool-call dont la capability présentée ne correspond pas à celle
-          # enregistrée pour le pod_id → un pod ne peut plus se faire passer pour un autre en présentant
-          # son pod_id deviné. Régénérée à chaque (re)spawn (l'env du pont est ré-écrit au même cycle →
-          # toujours cohérente) ; pas dans le snapshot state.json (rien à reprendre, tout est recréé).
-          capability: String.t(),
           # `started_at` ISO8601 figé à la création du Pod GenServer, persisté tel
           # quel dans `state.json` (point de recovery).
           started_at: DateTime.t(),
@@ -165,11 +157,9 @@ defmodule Fleet.Spawner.Pod do
       # forger via le wire) : `PodTools` la résout depuis le `pod_id` au lieu du `_lcars_role` du fil
       # (non authentifié → usurpation `architect` par POST direct). Le wire propose, le SPAWN dispose.
       role: cap_profile_name(state.cap_profile),
-      # capability : le secret par-pod (généré au spawn). Le serveur MCP central le lit ici (via
-      # `Fleet.Spawner.pod_info`) pour VÉRIFIER que le tool-call vient bien de CE pod et pas d'un autre
-      # qui aurait deviné son pod_id. C'est le pendant authentifié du pod_id : le wire propose une identité,
-      # le central la prouve contre cette capability enregistrée au spawn.
-      capability: state.capability,
+      # Plus de `capability` exposée ici : l'identité du pod n'est plus un secret présenté sur le fil mais
+      # le CANAL lui-même — chaque pod a sa socket MCP AF_UNIX, montée dans son seul sandbox (R9). « Quelle
+      # socket reçoit » = « quel pod » → le central n'a plus de secret à vérifier (cf. Fleet.MCP.PodSocketAcceptor).
       phase: state.phase,
       conditions: MapSet.to_list(state.conditions),
       session_id: state.session_id,
@@ -225,6 +215,11 @@ defmodule Fleet.Spawner.Pod do
   # lève pas sur l'absent), donc le double appel sur les chemins succès/kill est inoffensif. Protégé par
   # rescue/catch : `terminate` ne doit JAMAIS lever, sinon il masque la vraie raison d'arrêt — un échec de
   # teardown est loggé, pas propagé.
+  #
+  # Le FILET libère AUSSI la socket MCP per-pod du pod (transport AF_UNIX, R9) : la clause `after` la
+  # release sur TOUT chemin (succès, kill, échec de transition, crash) — même si `teardown_backend` lève
+  # (le `after` court quand même). Sans elle, le fichier socket + son dir per-pod FUITERAIENT à chaque mort
+  # (fermer la socket libère le FD, PAS le fichier — même famille de fuite FS que le pod_dir orphelin).
   @impl GenServer
   def terminate(reason, state) do
     teardown_backend(state)
@@ -243,6 +238,11 @@ defmodule Fleet.Spawner.Pod do
       )
 
       :ok
+  after
+    # Toujours exécuté (succès OU rescue/catch du teardown) → la socket est libérée même si le teardown
+    # backend lève. `release_pod_socket/1` est self-protégé (ne lève jamais) : un raise ici se propagerait
+    # hors de `terminate`, ce qui masquerait la vraie raison d'arrêt.
+    release_pod_socket(state)
   end
 
   # ============================================================
@@ -629,12 +629,16 @@ defmodule Fleet.Spawner.Pod do
          # `admin.spawn` (lcars spawn --mandate) n'a PAS de dispatcher → sans cet enqueue, `get_task` rend
          # `{done:true}` et le pod reste idle. Idempotent (skip si déjà en file).
          :ok <- maybe_enqueue_mandate(state),
+         # Provisionne la socket MCP per-pod AVANT le launch (le bind bwrap échoue si le fichier socket
+         # n'existe pas encore). Le chemin host rendu est posé en `LCARS_FLEET_MCP_SOCKET` du `.mcp-fleet.json`
+         # (cf. McpProvision). Échec → propagé au `with` → transition_failed (pod sans canal = inutile).
+         {:ok, mcp_socket_path} <- ensure_pod_socket(state.pod_id),
          :ok <-
            McpProvision.maybe_provision_mcp_config(
              state.pod_dir,
              LaunchSpec.sandbox_home(state.cap_profile, state.pod_dir),
              state.pod_id,
-             state.capability,
+             mcp_socket_path,
              launch_backend()
            ),
          :ok <- provision_monitor_watch(state),
@@ -994,8 +998,7 @@ defmodule Fleet.Spawner.Pod do
           |> Map.merge(
             McpProvision.mcp_channel_env(
               state.pod_id,
-              cap_profile_name(state.cap_profile),
-              state.capability
+              cap_profile_name(state.cap_profile)
             )
           )
           # HOME — dépend du containment.
@@ -1658,13 +1661,6 @@ defmodule Fleet.Spawner.Pod do
       session_id:
         Keyword.get(args.opts, :session_id) ||
           deterministic_session_id(args.cap_profile, args.opts),
-      # Capability par-pod = preuve d'identité auprès du serveur MCP central. Générée FRAÎCHE à
-      # chaque (re)spawn (256 bits aléatoires) : non-dérivable du pod_id déterministe, donc indevinable
-      # même en connaissant le pod_id. Elle est stockée ici (lue par `pod_info`) ET injectée dans l'env
-      # du pont MCP de CE pod (cf. McpProvision : mcp_channel_env / build_fleet_mcp_entry) → les deux côtés portent la
-      # MÊME valeur, posée au même cycle. Pas persistée dans state.json : au recovery, tout (env du pont
-      # + ce state) est régénéré ensemble, donc une nouvelle capability cohérente.
-      capability: generate_capability(),
       # Timestamp ISO8601 figé à la création du GenServer, persisté tel quel dans
       # state.json.
       started_at: DateTime.utc_now(),
@@ -1694,13 +1690,6 @@ defmodule Fleet.Spawner.Pod do
       # pendant le bootstrap ne crée pas une 2e boucle. nil = boucle non armée / stoppée.
       kick_ref: nil
     }
-  end
-
-  # Génère le secret par-pod (256 bits aléatoires cryptographiques, encodé URL-safe sans padding pour
-  # voyager proprement en JSON / variable d'env). C'est l'UNIQUE site de génération de capability : le
-  # secret est posé dans le state du pod ET dans l'env de son pont MCP, jamais re-tiré ailleurs.
-  defp generate_capability do
-    :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
   end
 
   @doc """
@@ -2143,6 +2132,45 @@ defmodule Fleet.Spawner.Pod do
   # Délègue à la source unique du backend (config + défaut canon vivent dans LaunchBackend) —
   # le spawn et la readiness lisent le MÊME résolveur, pas deux copies du défaut.
   defp launch_backend, do: Fleet.Spawner.LaunchBackend.resolved()
+
+  # SEAM RUNTIME du provisionneur de socket MCP per-pod. `fleet_spawner` est Ring 1, `fleet_mcp` est
+  # Ring 3 : une dep mix.exs `fleet_spawner → fleet_mcp` serait une dépendance INVERSÉE (ring bas → ring
+  # haut), INTERDITE. On résout donc le module au RUNTIME (`Application.get_env` + `apply`), exactement
+  # comme `Fleet.MCP.PodTools` appelle `Fleet.Pilot.ForgeClient`/`ProjectOnboard`/`Fleet.Spawner` : le
+  # défaut est un ATOM littéral (pas un `alias`/appel direct) → AUCUNE dep compile-time, donc aucun cycle.
+  # L'umbrella démarre toutes les apps → `Fleet.MCP.PodSocketSupervisor` est vivant quand le pod tourne.
+  # Override en test : `:mcp_socket_provisioner` = un stub qui rend un chemin SANS créer de vrai socket
+  # `/run/lcars/...` (mirror du pattern `launch_backend: StubBackend`).
+  defp mcp_socket_provisioner,
+    do:
+      Application.get_env(:fleet_spawner, :mcp_socket_provisioner, Fleet.MCP.PodSocketSupervisor)
+
+  # ENSURE (do_project, avant le launch) : crée le listener + le fichier socket de CE pod (idempotent côté
+  # central) et rend `{:ok, socket_path}` (chemin host). Le fichier DOIT exister avant le bind bwrap.
+  defp ensure_pod_socket(pod_id) when is_binary(pod_id) do
+    apply(mcp_socket_provisioner(), :ensure_pod_socket, [pod_id])
+  end
+
+  # RELEASE (filet terminate/2, clause `after`) : arrête le listener ET retire le fichier socket (idempotent
+  # côté central). Self-protégé (rescue/catch → log, rend `:ok`) : il tourne dans l'`after` de `terminate`,
+  # un raise s'y propagerait et masquerait la raison d'arrêt. Clause `_state` (pod_id absent) = no-op.
+  defp release_pod_socket(%{pod_id: pod_id}) when is_binary(pod_id) do
+    _ = apply(mcp_socket_provisioner(), :release_pod_socket, [pod_id])
+    :ok
+  rescue
+    e ->
+      Logger.warning(
+        "pod #{pod_id} release_pod_socket a levé (non-fatal) — #{Exception.message(e)}"
+      )
+
+      :ok
+  catch
+    kind, value ->
+      Logger.warning("pod #{pod_id} release_pod_socket #{kind} (non-fatal) — #{inspect(value)}")
+      :ok
+  end
+
+  defp release_pod_socket(_state), do: :ok
 
   defp bwrap_launch_path do
     Application.get_env(:fleet_spawner, :bwrap_launch_path, "/usr/local/bin/bwrap_launch.sh")
