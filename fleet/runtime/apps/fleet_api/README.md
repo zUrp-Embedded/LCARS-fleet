@@ -17,6 +17,7 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 | `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST |
 | `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
 | `Fleet.API.Readiness` | read-model P05 — état opérationnel LIVE (anti-vert-creux). Introspecte config/process/persistent_term ; `deep/0` rend `status: operational\|degraded` + sous-systèmes. Jumeau runtime de `mix lcars.contracts.check` (plan source-conformance build/CI) sur le plan opérationnel. Fonctions pures (pas de process — Iron Law) |
+| `Fleet.API.BuildInfo` | version du build **constatable** (« quel commit tourne ? »). `current/0` rend `%{sha, dirty, ref, source}` — SHA git court + flag dirty + ref, `source` ∈ `:release\|:working_tree\|:unknown` (provenance explicite). Totale (ne lève jamais), mémoïsée en `:persistent_term`. Fonctions pures (pas de process — Iron Law) |
 
 ## Routes REST
 
@@ -27,6 +28,7 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 | GET | `/api/pipelines` | — | liste état pipelines |
 | GET | `/api/tickets` | — | liste tickets |
 | GET | `/api/pods` | — | liste pods |
+| GET | `/api/version` | — | version du build servi — JSON `{sha, dirty, ref, source}` (`Fleet.API.BuildInfo.current/0`). Lecture → no-auth légitime. **Constatable** : la version est lue, pas déduite |
 | POST | `/api/admin/spawn` | — | broadcast `admin.spawn.request` (ch6) ; **DTO public allowlisté** (422 sur champ interne) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
 
 **Pas d'auth applicative** (HMAC retiré — bearer statique sans surface intra-container).
@@ -59,6 +61,26 @@ cap-profile, `Fleet.CapProfile.containment(cap)` doit valoir `"bwrap"` ; sinon *
 avant tout broadcast — aucun pod hôte ne peut naître via l'API. Le host-native garde sa voie dédiée hors-bande
 (starfleet / `bin/host_launch.sh`), jamais cette API. Source unique de containment partagée avec le spawner
 (`Fleet.CapProfile.containment/1`) → l'API et le lancement réel ne peuvent pas diverger de verdict.
+
+### Version constatable (`Fleet.API.BuildInfo`)
+
+« Quel commit tourne ? » doit se **constater**, pas se déduire — une release est
+auto-contenue (ERTS bundlé, pas de repo git ni de Mix au runtime). `BuildInfo.current/0`
+rend `%{sha, dirty, ref, source}` ; le champ `source` rend la provenance **explicite** :
+
+| `source` | Quand | Donnée |
+|---|---|---|
+| `:release` | `priv/build_info.txt` présent (embarqué au `mix release`, step `write_build_info/1` du `mix.exs` racine, après `:assemble`) | parse du fichier — la release ne touche jamais git |
+| `:working_tree` | pas de fichier (mode source/dev) | git LIVE (`rev-parse --short HEAD`, `--abbrev-ref HEAD`, `status --porcelain`) |
+| `:unknown` | ni fichier ni git exploitable (git absent, pas un repo) | `%{sha: "unknown", dirty: false, ref: nil}` |
+
+`current/0` est **totale** (ne lève jamais → n'empêche jamais le boot) et mémoïsée en
+`:persistent_term` (un seul `git` sur la vie du BEAM, pas un par requête). `priv/build_info.txt`
+est **généré au release uniquement** (gitignored), jamais dans le source.
+
+Trois surfaces exposent la même donnée : l'endpoint `GET /api/version`, un `Logger.info` au
+boot de `fleet_api` (`LCARS fleet — build <sha><-dirty?> ref=<ref> (source=<source>)`), et la
+commande `bin/fleet_v2 version` (lit le priv embarqué en release, git LIVE en source).
 
 ## WebSocket protocol
 

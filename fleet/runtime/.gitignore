@@ -28,3 +28,7 @@ apps/*/tmp/
 
 # ExUnit scratch dirs (per-app)
 tmp/
+
+# Version du build embarquée au `mix release` (générée par le step
+# write_build_info/1 — JAMAIS dans le source ; le runtime source la dérive de git)
+apps/fleet_api/priv/build_info.txt

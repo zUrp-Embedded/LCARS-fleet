@@ -61,6 +61,13 @@ defmodule Fleet.API.Rest do
     send_json(conn, %{pods: []})
   end
 
+  # Version du build servi — SHA git court + dirty + ref + source (cf.
+  # `Fleet.API.BuildInfo`). Rend la version CONSTATABLE (e2e, debug) sans la
+  # déduire. LECTURE → no-auth légitime, cohérent avec le § Auth ci-dessus.
+  get "/api/version" do
+    send_json(conn, Fleet.API.BuildInfo.current())
+  end
+
   post "/api/admin/spawn" do
     # Chokepoint « nouveau pod opérateur » : refusé pendant un drain de
     # shutdown (Fleet.Shutdown.Quiesce). 503 = indisponible temporairement.

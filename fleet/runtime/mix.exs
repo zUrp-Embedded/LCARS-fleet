@@ -118,8 +118,19 @@ defmodule LcarsFleetRuntime.MixProject do
           # Lecture seule, no-auth intra-release ; ne touche pas au core.
           fleet_observation: :permanent
         ],
-        steps: [&verrou_contracts/1, :assemble, :tar]
+        steps: [&verrou_contracts/1, :assemble, &write_build_info/1, :tar]
       ]
     ]
+  end
+
+  # Step de `mix release` : embarque la version du build (SHA git court + dirty
+  # + ref) dans le priv de `fleet_api` assemblé, AVANT le tar. Le runtime
+  # relira ce fichier (`source=release`) → la version servie est constatable
+  # sans git ni repo (la release est auto-contenue). Tourne après `:assemble`
+  # (le priv est copié, on écrit dedans avant l'archivage). Délègue à
+  # `Fleet.API.BuildInfo` — module disponible sur le code path au release, comme
+  # `Mix.Tasks.Lcars.Contracts.Check` l'est pour `verrou_contracts/1`.
+  defp write_build_info(release) do
+    Fleet.API.BuildInfo.write_release_file(release)
   end
 end

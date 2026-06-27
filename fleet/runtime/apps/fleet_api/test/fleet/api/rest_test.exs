@@ -66,6 +66,18 @@ defmodule Fleet.API.RestTest do
       conn = conn(:get, "/api/pods") |> Rest.call(@opts)
       assert conn.status == 200
     end
+
+    test "GET /api/version → 200 + JSON version constatable (sha/dirty/ref/source)" do
+      conn = conn(:get, "/api/version") |> Rest.call(@opts)
+      assert conn.status == 200
+      {:ok, body} = Jason.decode(conn.resp_body)
+      # SHAPE (pas un SHA littéral — non-hermétique) : les 4 clefs du contrat BuildInfo.
+      assert %{"sha" => sha, "dirty" => dirty, "source" => source} = body
+      assert is_binary(sha) and sha != ""
+      assert is_boolean(dirty)
+      assert source in ["release", "working_tree", "unknown"]
+      assert Map.has_key?(body, "ref")
+    end
   end
 
   describe "POST /api/admin/spawn" do

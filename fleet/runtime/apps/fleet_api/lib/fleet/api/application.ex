@@ -40,11 +40,24 @@ defmodule Fleet.API.Application do
         # NOTIFY_SOCKET (no-op dev/test sans systemd). Rescue : ne
         # jamais crash l'app sur notify failure.
         notify_systemd_ready()
+        log_build_info()
         ok
 
       err ->
         err
     end
+  end
+
+  # Trace de boot : la version du build servi, lisible dans les logs de la fleet
+  # qui tourne (« quel commit tourne ? » constatable, pas déduit). Totale —
+  # `BuildInfo.current/0` ne lève jamais. Mémoïsé : ce premier appel au boot
+  # remplit le cache (un seul `git` sur toute la vie du BEAM).
+  defp log_build_info do
+    info = Fleet.API.BuildInfo.current()
+    dirty = if info.dirty, do: "-dirty", else: ""
+    require Logger
+
+    Logger.info("LCARS fleet — build #{info.sha}#{dirty} ref=#{info.ref} (source=#{info.source})")
   end
 
   # sd_notify minimal — protocole : ouvrir AF_UNIX SOCK_DGRAM, écrire

@@ -199,9 +199,37 @@ cmd_status() {
   fi
 }
 
+# Version du build : constatable (« quel commit tourne ? »), pas déduite. MÊME donnée que
+# l'endpoint REST /api/version et le log de boot (SHA git court + dirty + ref). Source selon le
+# déploiement, comme cmd_start : en RELEASE le SHA est embarqué dans le priv au build (le repo
+# n'est pas là), en SOURCE/dev on interroge git LIVE.
+cmd_version() {
+  local rel_root="$RUNTIME_DIR/rel/fleet_umbrella"
+  local build_file
+  build_file="$(ls -1 "$rel_root"/lib/fleet_api-*/priv/build_info.txt 2>/dev/null | head -1 || true)"
+
+  if [[ -n "$build_file" && -f "$build_file" ]]; then
+    # RELEASE : lire le fichier embarqué (clef=valeur, posé par write_build_info/1).
+    local sha dirty ref dflag=""
+    sha="$(sed -n 's/^sha=//p' "$build_file")"
+    dirty="$(sed -n 's/^dirty=//p' "$build_file")"
+    ref="$(sed -n 's/^ref=//p' "$build_file")"
+    [[ "$dirty" == "true" ]] && dflag="-dirty"
+    echo "fleet_v2: build ${sha:-unknown}${dflag} ref=${ref} (source=release)"
+  else
+    # SOURCE/dev : git LIVE dans le repo (échec git → unknown, jamais d'erreur dure).
+    local sha ref dflag=""
+    sha="$(git -C "$RUNTIME_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    ref="$(git -C "$RUNTIME_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+    [[ -n "$(git -C "$RUNTIME_DIR" status --porcelain 2>/dev/null)" ]] && dflag="-dirty"
+    echo "fleet_v2: build ${sha}${dflag} ref=${ref} (source=working_tree)"
+  fi
+}
+
 case "${1:-help}" in
-  start)  shift; cmd_start "$@" ;;
-  stop)   shift; cmd_stop "$@" ;;
-  status) shift; cmd_status "$@" ;;
-  *) echo "usage: fleet_v2 {start|stop|status}" >&2; exit 1 ;;
+  start)   shift; cmd_start "$@" ;;
+  stop)    shift; cmd_stop "$@" ;;
+  status)  shift; cmd_status "$@" ;;
+  version) shift; cmd_version "$@" ;;
+  *) echo "usage: fleet_v2 {start|stop|status|version}" >&2; exit 1 ;;
 esac
