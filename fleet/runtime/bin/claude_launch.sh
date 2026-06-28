@@ -152,16 +152,28 @@ dbg "step CAP_PROFILE OK"
 
 VER="$("$CLAUDE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 POD_CWD="${LCARS_POD_CWD:-$POD_DIR}"
-# F115/F157 : ÉCRIVAIN UNIQUE du .claude.json (N1, frontière vendor). Les 3 clés remote-control
-# (remoteControlAtStartup/hasUsedRemoteControl/remoteDialogSeen) sont posées ICI — avant, pod.ex (N0)
-# les écrivait puis ce `cat >` les clobberait → le dialog RC re-bloquait au boot (ADR-G). La clé
+# Visibilité Claude Desktop — flag lu ICI car il GATE remoteControlAtStartup du .claude.json ci-dessous.
+# `spec.invocation.remote_control: false` (juges qualifier/reviewer) = pod INVISIBLE Desktop. Il y a DEUX
+# leviers RC à garder cohérents, sinon le juge apparait quand meme : (1) le flag --remote-control (RC_FLAGS,
+# plus bas) ET (2) remoteControlAtStartup dans .claude.json. Si remoteControlAtStartup reste true en dur,
+# claude ACTIVE le RC au boot MEME sans le flag -> le juge fuit dans Desktop. On conditionne donc les DEUX
+# au meme flag (une seule lecture du jq, partagée).
+# PIÈGE jq : `.x // true` traite `false` ET null comme « vide » → `false // true` = true. Donc l'ancien
+# `// true` AVALAIT le remote_control:false des juges (RC forcé = LE bug). Le défaut-si-null-SEULEMENT
+# garde le false explicite : null -> true (engineer/arch, absent), false -> false (juges), true -> true.
+REMOTE_CONTROL=$("$JQ_BIN" -r '.spec.invocation.remote_control | if . == null then true else . end' "$CAP_PROFILE_JSON" 2>/dev/null)
+RC_STARTUP=$([[ "$REMOTE_CONTROL" != "false" ]] && echo true || echo false)
+
+# Écrivain UNIQUE du .claude.json (frontière vendor N1 ; pod.ex N0 ne l'écrit plus, ce `cat >` le
+# clobberait). remoteControlAtStartup = conditionnel (cf. ci-dessus) ; hasUsedRemoteControl/remoteDialogSeen
+# restent true : ils PRE-ACCEPTENT le dialog RC (sinon il re-bloque le boot interactif) SANS forcer le RC.
 # `projects` = le CWD réel de l'agent ($POD_CWD), pas $POD_DIR.
 cat > "$POD_DIR/.claude.json" <<JSONEOF
 { "hasCompletedOnboarding": true, "lastOnboardingVersion": "${VER:-2.1.150}", "migrationVersion": 13,
-  "remoteControlAtStartup": true, "hasUsedRemoteControl": true, "remoteDialogSeen": true,
+  "remoteControlAtStartup": $RC_STARTUP, "hasUsedRemoteControl": true, "remoteDialogSeen": true,
   "projects": { "$POD_CWD": { "allowedTools": [], "hasTrustDialogAccepted": true, "projectOnboardingSeenCount": 10 } } }
 JSONEOF
-dbg "step claude.json provisionné (VER=${VER:-?}, RC keys posées)"
+dbg "step claude.json provisionné (VER=${VER:-?}, remoteControlAtStartup=$RC_STARTUP)"
 
 # =============================================================
 # Tools depuis cap-profile JSON resolved (string-keyed, cohérent fleet_cap_profile L100).
@@ -191,11 +203,10 @@ MODEL_FLAGS=();  [[ -n "$MODEL"  ]] && MODEL_FLAGS=(--model "$MODEL")
 EFFORT_FLAGS=(); [[ -n "$EFFORT" ]] && EFFORT_FLAGS=(--effort "$EFFORT")
 dbg "step jq invocation model='$MODEL' effort='$EFFORT'"
 
-# Visibilité Claude Desktop : `invocation.remote_control: false` (juges qualifier/reviewer) → on OMET
-# `--remote-control` (+ son nom de session) → le pod tourne INTERACTIF sous le PTY tmux (MCP/wake
-# intacts) mais reste INVISIBLE dans Desktop (RC = couche d'attache Desktop seule). Absent/true = visible.
+# Flag --remote-control : OMIS si remote_control:false (juge) → le pod tourne INTERACTIF sous le PTY tmux
+# (MCP/wake intacts) mais reste INVISIBLE Desktop. REMOTE_CONTROL déjà lu plus haut (il gate aussi
+# remoteControlAtStartup du .claude.json — les deux leviers RC partagent la même lecture).
 # Debug à la demande : un `/remote-control <slot>` envoyé en send-key rallume la visibilité d'un juge.
-REMOTE_CONTROL=$("$JQ_BIN" -r '.spec.invocation.remote_control // true' "$CAP_PROFILE_JSON" 2>/dev/null)
 RC_FLAGS=()
 # #chantier pod-seed : nom RC EXACT via `--remote-control "<nom>"` (le nom optionnel positionnel),
 # PAS `--remote-control-session-name-prefix` (qui colle un suffixe auto = « noms random qui s'empilent »).
