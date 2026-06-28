@@ -184,6 +184,29 @@ defmodule Fleet.Spawner.Pod do
   # Teardown backend + libère la task (abort, pas succès → clear_for_pod) + état
   # terminal `:killed`, puis arrêt :normal. Le fallback brutal (terminate_child)
   # ne sert que si ce call timeout (cf. kill_pod/1).
+  # SLOT-FREEZE : reset COLD in-place du workspace d'un pipe RESIDENT pour le ticket suivant (cable par
+  # le gate a l'etape 4). PAS de rm_rf (bind mount vivant) — reset --hard base + clean + checkout -B
+  # feature/work via ProjectBootstrap.reset_in_place, puis /clear du REPL. Appele quand le pod est :ready
+  # (livrable du ticket precedent confirme sur la forge -> le push a deja LU le workspace : reset sur).
+  def handle_call({:reprovision_pipe_workspace, project, opts}, _from, state) do
+    eff_cap = %{state.cap_profile | spec: Map.put(state.cap_profile.spec, "project", project)}
+
+    case Fleet.ProjectBootstrap.Phase.Clone.reset_in_place(state.pod_dir, eff_cap, opts) do
+      {:ok, ws, branch} ->
+        _ = Fleet.Spawner.PodTmux.send_keys(state.pod_id, "/clear")
+
+        Logger.info(
+          "pod #{state.pod_id} workspace reprovisionne COLD (#{ws} branch=#{branch}) + /clear"
+        )
+
+        {:reply, :ok, state}
+
+      {:error, reason} = err ->
+        Logger.error("pod #{state.pod_id} reprovision workspace ECHOUE : #{inspect(reason)}")
+        {:reply, err, state}
+    end
+  end
+
   def handle_call(:kill, _from, state) do
     # Checkpoint le seed même sur kill délibéré (mémoire préservée).
     maybe_checkpoint_seed(state)

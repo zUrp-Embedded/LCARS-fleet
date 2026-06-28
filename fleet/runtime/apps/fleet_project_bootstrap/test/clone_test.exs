@@ -191,4 +191,65 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
   # posée par un `git config` mutable dans le workspace (falsifiable F-01) mais injectée en env au
   # lancement (bwrap_launch.sh) ; l'enforcement F-01 est la gate `DeliverableGate` au push (couverte
   # par deliverable_gate_test.exs + executor_post_extract_test.exs cas git_native usurpation).
+
+  # ============================================================
+  # SLOT-FREEZE — reset_in_place : reset COLD du workspace d'un pipe RESIDENT pour le ticket suivant,
+  # SANS rm_rf (le ws est bind-monte dans le sandbox bwrap vivant — rm_rf casserait le mount).
+  # ============================================================
+  test "reset_in_place — commit + untracked du ticket precedent wipes, retour base_sha sur feature/work, .git PRESERVE (pas de rm_rf)",
+       %{tmp_dir: tmp} do
+    src = make_source_repo(Path.join(tmp, "src-reset"))
+    {base, 0} = git(["rev-parse", "HEAD"], src)
+    base = String.trim(base)
+    pod_dir = Path.join(tmp, "pod-reset")
+    File.mkdir_p!(pod_dir)
+    profile = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => base})
+
+    # SPAWN : clone -> workspace sur feature/work @ base.
+    assert {:ok, ws, "feature/work"} = Clone.clone_or_skip(pod_dir, profile, [])
+
+    # Sentinelle DANS .git : un rm_rf+reclone l'effacerait ; un reset IN-PLACE la preserve.
+    sentinel = Path.join(ws, ".git/SENTINEL_INPLACE")
+    File.write!(sentinel, "x")
+
+    # L'ENG bosse le ticket precedent : un COMMIT (woody) + un fichier UNTRACKED (buzz = le bug de
+    # stacking, du travail non committe qui trainait).
+    {_, 0} = git(["config", "user.email", "e@lcars.local"], ws)
+    {_, 0} = git(["config", "user.name", "eng"], ws)
+    File.write!(Path.join(ws, "woody.sh"), "echo woody")
+    {_, 0} = git(["add", "."], ws)
+    {_, 0} = git(["commit", "-q", "-m", "ticket precedent"], ws)
+    File.write!(Path.join(ws, "buzz.sh"), "echo buzz")
+
+    # RESET in-place pour le ticket suivant (meme base_sha) : retourne le MEME ws.
+    assert {:ok, ^ws, "feature/work"} = Clone.reset_in_place(pod_dir, profile, [])
+
+    # 1. retour a base_sha (le commit "ticket precedent" est parti).
+    {head, 0} = git(["rev-parse", "HEAD"], ws)
+    assert String.trim(head) == base
+    # 2. le committe ET l'untracked sont nettoyes (plus de stacking possible).
+    refute File.exists?(Path.join(ws, "woody.sh"))
+    refute File.exists?(Path.join(ws, "buzz.sh"))
+    # 3. sur feature/work, propre.
+    {branch, 0} = git(["rev-parse", "--abbrev-ref", "HEAD"], ws)
+    assert String.trim(branch) == "feature/work"
+    {status, 0} = git(["status", "--porcelain"], ws)
+    assert String.trim(status) == ""
+
+    # 4. IN-PLACE : la sentinelle .git a SURVECU -> pas de rm_rf (le bind mount serait preserve en vrai).
+    assert File.exists?(sentinel)
+  end
+
+  test "reset_in_place — base_sha absent → fail-loud {:reset_failed, :no_base_sha} (pas de reset aveugle)",
+       %{tmp_dir: tmp} do
+    src = make_source_repo(Path.join(tmp, "src-nobase"))
+    pod_dir = Path.join(tmp, "pod-nobase")
+    File.mkdir_p!(pod_dir)
+    profile = cap(%{"repo_path" => src, "base_branch" => "main"})
+
+    assert {:ok, _ws, _} = Clone.clone_or_skip(pod_dir, profile, [])
+
+    # Sans base_sha le dispatcher n'a rien epingle = bug appelant -> on refuse plutot que reset a l'aveugle.
+    assert {:error, {:reset_failed, :no_base_sha}} = Clone.reset_in_place(pod_dir, profile, [])
+  end
 end

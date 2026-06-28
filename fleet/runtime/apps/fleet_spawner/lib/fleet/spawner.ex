@@ -200,6 +200,30 @@ defmodule Fleet.Spawner do
     end
   end
 
+  @doc """
+  Reprovisionne le workspace d'un pod pipe RESIDENT pour son ticket suivant (slot-freeze) : reset git
+  IN-PLACE (PAS de rm_rf — le ws est bind-monte dans le sandbox vivant) sur la base du nouveau `project`
+  + `/clear` du contexte REPL. Appele par le dispatcher au re-mandate d'un pipe `:ready`. Retourne
+  `:ok` | `{:error, _}` (incl. `:not_found` si le pod n'existe pas, `{:reset_failed, _}` si le git echoue).
+  """
+  @spec reprovision_pipe_workspace(String.t(), map(), keyword()) :: :ok | {:error, term()}
+  def reprovision_pipe_workspace(pod_id, project, opts \\ [])
+      when is_binary(pod_id) and is_map(project) do
+    case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
+      [{pid, _}] ->
+        # Git ops bornees (Shell.git 30s chacune) mais reset+clean+checkout peuvent cumuler → call
+        # genereux (60s). Un :exit (pod mort pendant le call) → erreur typee, pas de crash appelant.
+        try do
+          GenServer.call(pid, {:reprovision_pipe_workspace, project, opts}, 60_000)
+        catch
+          :exit, reason -> {:error, {:reprovision_call_failed, reason}}
+        end
+
+      [] ->
+        {:error, :not_found}
+    end
+  end
+
   # Le workspace livrable d'un pod = `<pod_dir>/workspace` (sous `$POD_DIR`, bound bwrap RW).
   # Sous-dossier centralisé ICI — autorité unique de la convention de placement.
   # `Pod` (maybe_put_pod_cwd + pod.completed) le dérive via `pod_workspace_path/1`, plus de

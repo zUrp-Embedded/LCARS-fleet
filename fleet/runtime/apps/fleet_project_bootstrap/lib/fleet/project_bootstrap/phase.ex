@@ -121,6 +121,49 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # Traduit l'opt PUBLIC `:git_timeout_ms` (vocabulaire bootstrap) en `:timeout_ms` (vocabulaire
     # `Shell.git/2`). Absent → `[]` (le wrapper applique son défaut 30s). Garde la frontière du wrapper
     # honnête (un appelant ne peut pas, par mégarde, passer `:env`/`:cd` arbitraires au clone réseau).
+    @doc """
+    Reset IN-PLACE du workspace d'un pod RESIDENT (pipe slot-freeze) — PAS de rm_rf. Le `ws` est
+    bind-monte dans le sandbox bwrap VIVANT du pipe : supprimer le dir casserait le mount (l'agent se
+    retrouve dans un cwd deleted) + echouerait. On nettoie l'etat git du ticket PRECEDENT SUR PLACE :
+    reset --hard sur le `base_sha` du NOUVEAU ticket (`pin_base_sha` reutilise, gere le fetch si la base
+    a avance) + `clean -fdx` (vire l'untracked, ex. un fichier non committe) + `checkout -B feature/<slug>`
+    (recree la branche de travail PROPRE depuis la base — `-B` force car la branche existe deja). Le `ws`
+    DOIT exister (clone du spawn, jamais rm_rf en pipe) ; `base_sha` est REQUIS (le dispatcher l'epingle
+    au re-mandate). Retour homogene avec clone_or_skip : `{:ok, ws, feature}` | `{:error, {:reset_failed, _}}`.
+    """
+    @spec reset_in_place(Path.t(), Fleet.CapProfile.t(), keyword()) ::
+            {:ok, Path.t(), String.t()} | {:error, term()}
+    def reset_in_place(pod_dir, %Fleet.CapProfile{spec: spec}, opts \\ []) do
+      project = spec["project"] || %{}
+      ws = Path.join(pod_dir, "workspace")
+      slug = Keyword.get(opts, :slug, "work")
+      feature = "feature/#{slug}"
+
+      case project["base_sha"] do
+        sha when is_binary(sha) and sha != "" ->
+          # pin_base_sha REUTILISE (reset --hard sha + fetch cible en fallback si la base a avance).
+          # clean + checkout bornes via Shell.git (aucun `System.cmd git` nu ; env bare, local).
+          with {:ok, {_, 0}} <- pin_base_sha(ws, sha),
+               {:ok, {_, 0}} <- Fleet.Credentials.Shell.git(["-C", ws, "clean", "-fdx"], env: []),
+               {:ok, {_, 0}} <-
+                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-B", feature], env: []) do
+            {:ok, ws, feature}
+          else
+            {:ok, {out, code}} -> {:error, {:reset_failed, {code, String.slice(out, 0, 500)}}}
+            {:error, {:timeout, ms}} -> {:error, {:reset_failed, {:git_timeout, ms}}}
+            {:error, {:exit, reason}} -> {:error, {:reset_failed, {:git_exit, reason}}}
+          end
+
+        _ ->
+          # base_sha absent = bug appelant (le dispatcher DOIT l'epingler au re-mandate) → fail-loud
+          # plutot qu'un reset sur une base indefinie (qui garderait l'etat du ticket precedent).
+          {:error, {:reset_failed, :no_base_sha}}
+      end
+    end
+
+    # Traduit l'opt PUBLIC `:git_timeout_ms` (vocabulaire bootstrap) en `:timeout_ms` (vocabulaire
+    # `Shell.git/2`). Absent → `[]` (le wrapper applique son défaut 30s). Garde la frontière du wrapper
+    # honnête (un appelant ne peut pas, par mégarde, passer `:env`/`:cd` arbitraires au clone réseau).
     defp rename_timeout_key([]), do: []
     defp rename_timeout_key(git_timeout_ms: ms), do: [timeout_ms: ms]
 
