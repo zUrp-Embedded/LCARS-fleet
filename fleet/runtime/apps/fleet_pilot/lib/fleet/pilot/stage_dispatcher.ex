@@ -124,13 +124,7 @@ defmodule Fleet.Pilot.StageDispatcher do
              # une issue qu'on ne traite pas ; le poller re-dispatch au tick suivant).
              scope = Fleet.CapProfile.slot_scope(profile),
              pod_id = pod_id_for_scope(scope, repo, number, role),
-             :ok <-
-               serialize_project_scope(
-                 scope,
-                 Fleet.CapProfile.lifetime_scope(profile),
-                 spawner,
-                 pod_id
-               ) do
+             :ok <- serialize_project_scope(scope, spawner, pod_id) do
           # pod_id et branche (`lcars/issue-N-role`) construits indépendamment depuis (n, role) ; pod_id
           # opaque (jamais re-parsé). La branche reste repo-LOCALE (pas de collision intra-repo).
 
@@ -581,12 +575,7 @@ defmodule Fleet.Pilot.StageDispatcher do
       # (occupé par un autre ticket) → on DÉFÈRE, jamais re-mandater-pendant-occupé. Juges (instance) et
       # rework instance → `:ok` (no-op, jamais gated). Appel uniforme via `slot_scope`. `{:skipped,
       # :role_busy}` remonte au poller (qui gère `{:skipped, _}` → retry au tick suivant).
-      case serialize_project_scope(
-             Fleet.CapProfile.slot_scope(profile),
-             Fleet.CapProfile.lifetime_scope(profile),
-             ctx.spawner,
-             pod_id
-           ) do
+      case serialize_project_scope(Fleet.CapProfile.slot_scope(profile), ctx.spawner, pod_id) do
         {:skipped, :role_busy} ->
           {:skipped, :role_busy}
 
@@ -1182,17 +1171,17 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp pod_id_for_scope("instance", repo, number, role),
     do: Fleet.Pilot.PodId.for_issue(repo, number, role)
 
-  # Sérialisation des rôles project-scoped, MODULÉE par le lifetime. On ne défère QUE le couple
-  # `project` + `one-shot` quand le pod est vivant : un one-shot occupé NE PEUT PAS prendre un 2ᵉ mandat
-  # (il meurt après sa tâche), donc le remandate le wedgerait → on défère (`{:skipped, :role_busy}`),
-  # AVANT tout verrou ; le poller re-dispatch au tick suivant. Un `pipe` (process RÉSIDENT) EST
-  # re-mandatable → `:ok` : spawn_stage remandate le pod vivant (1 process re-mandaté = 1 slot Desktop).
-  # `instance` → `:ok` (fan-out par ticket, jamais gated).
-  defp serialize_project_scope("project", "one-shot", spawner, pod_id) do
+  # Sérialisation des rôles project-scoped : UNE identité (repo, rôle) vivante à la fois (1 slot Desktop
+  # ⟹ 1 (cwd, session-id) ⟹ séquentiel). Si le pod projet est DÉJÀ vivant (occupé par un autre ticket),
+  # on DÉFÈRE (`{:skipped, :role_busy}`) — AVANT tout verrou/enqueue (sinon on verrouillerait une issue
+  # qu'on ne traite pas). Le poller re-dispatch au tick suivant ; le pod one-shot meurt en fin de tâche
+  # → spawn frais pour le ticket suivant. Les rôles `instance` ne sont JAMAIS gated (ids distincts par
+  # ticket → pas de partage d'identité, fan-out assumé). Appelable UNIFORMÉMENT (instance → :ok no-op).
+  defp serialize_project_scope("project", spawner, pod_id) do
     if pod_alive?(spawner, pod_id), do: {:skipped, :role_busy}, else: :ok
   end
 
-  defp serialize_project_scope(_scope, _lifetime, _spawner, _pod_id), do: :ok
+  defp serialize_project_scope("instance", _spawner, _pod_id), do: :ok
 
   defp maybe_spawn(_spawner, true = _alive?, _profile, _ticket_id, _spawn_opts),
     do: {:ok, :remandated}
