@@ -68,7 +68,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
            Recovery.phase_from_string(phase_str) do
       rm_terminal_artifacts(
         Path.dirname(state_fs_path),
-        Paths.pod_dir_for(pod_id, cap_profile, opts)
+        Paths.pod_dir_for(pod_id, opts)
       )
 
       Logger.info(
@@ -98,6 +98,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
     :ok
   end
 
+  @spec write_state_fs(map()) :: :ok
   def write_state_fs(state) do
     # Schéma complet du snapshot :
     # {v, session_id, cap_profile_name, started_at, phase, conditions, ticket_id}.

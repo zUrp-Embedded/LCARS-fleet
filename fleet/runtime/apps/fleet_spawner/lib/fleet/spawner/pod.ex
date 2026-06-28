@@ -1054,7 +1054,7 @@ defmodule Fleet.Spawner.Pod do
 
   defp initial_state(args) do
     state_fs_path = Paths.state_fs_path_for(args.pod_id, args.cap_profile, args.opts)
-    pod_dir = Paths.pod_dir_for(args.pod_id, args.cap_profile, args.opts)
+    pod_dir = Paths.pod_dir_for(args.pod_id, args.opts)
 
     %{
       phase: :pending,

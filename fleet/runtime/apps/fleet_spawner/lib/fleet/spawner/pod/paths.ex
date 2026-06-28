@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   - `pod_dir/2` (PUBLIC, aussi appelé par `PodWarden`) — pod_dir reconstructible du SEUL pod_id, ce qui
     rend le GC par scan possible (le warden dérive le pod_dir à effacer depuis la tombstone, sans cap_profile).
   - `state_fs_root/0` (PUBLIC, aussi balayé par `PodWarden`) — racine scannable des `state.json`.
-  - `pod_dir_for/3`, `state_fs_path_for/3`, `runtime_home/0` — résolutions appelées par `Pod`
+  - `pod_dir_for/2`, `state_fs_path_for/3`, `runtime_home/0` — résolutions appelées par `Pod`
     (`initial_state`, `clear_terminal_snapshot`) et `Pod.LaunchEnv` (`claude_dir` → `runtime_home/0`) ;
     publiques car franchies depuis ces modules.
   """
@@ -34,9 +34,9 @@ defmodule Fleet.Spawner.Pod.Paths do
   le cap_profile hors-contexte. Config `:fleet_spawner, :pod_dir_root`, défaut `~/pods`.
   """
   @spec pod_dir(String.t(), keyword()) :: String.t()
-  def pod_dir(pod_id, opts \\ []) when is_binary(pod_id), do: pod_dir_for(pod_id, nil, opts)
+  def pod_dir(pod_id, opts \\ []) when is_binary(pod_id), do: pod_dir_for(pod_id, opts)
 
-  def pod_dir_for(pod_id, _cap_profile, opts) do
+  def pod_dir_for(pod_id, opts) do
     # Le pod vit SOUS LE HOME DE L'HUMAIN (= l'user runtime) : `~/pods/pod_<id>`, 0700, isolé OS
     # gratis (le pod hérite de l'UID du runtime). Le home ENCODE déjà l'humain (pas de `/home/<human>`
     # construit). `:pod_dir_root` (opts ou config) = override tests/déploiement non-standard ; non-set
