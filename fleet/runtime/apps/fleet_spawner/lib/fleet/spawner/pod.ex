@@ -303,6 +303,13 @@ defmodule Fleet.Spawner.Pod do
     # Le résultat est arrivé → annuler le deadline AVANT d'extraire (sinon le timer
     # du cycle courant fire plus tard en :monitoring et tue le pod sain).
     state = cancel_result_deadline(state)
+
+    # SLOT-FREEZE : un pipe traite N tickets ; son `ticket_id` fige au SPAWN est stale des le 2e. On ADOPTE
+    # le ticket_id de la TACHE complétée (porte par l'event task_completed : payload.ticket_id =
+    # completed.ticket_id) -> le livrable (pod_completed_payload -> HopConsumer push HEAD:lcars/issue-N)
+    # est attribue a la BONNE brique. Sinon le 2e livrable+ ecrase la branche/PR du 1er ticket (bug
+    # hello-buddy : Bob#3 pousse sur la PR de Zorro#4, 2 notes empilees, juges flip-flop).
+    state = adopt_task_ticket_id(state, payload)
     {:noreply, Map.put(state, :submitted_result, result), {:continue, :extract}}
   end
 
@@ -1991,6 +1998,17 @@ defmodule Fleet.Spawner.Pod do
 
   defp publish_deadline_ms,
     do: Application.get_env(:fleet_spawner, :publish_deadline_ms, 120_000)
+
+  # SLOT-FREEZE : adopte le ticket_id de la tache complétée (de l'event task_completed) comme ticket
+  # courant du pod. Un pipe re-mandate change de brique a chaque tache ; sans ca state.ticket_id resterait
+  # celui du spawn -> toutes les attributions (livrable, logs) pointeraient la 1ere brique. Absent/vide ->
+  # on garde l'existant (pas de regression sur le one-shot, ou ticket_id == spawn == tache unique).
+  defp adopt_task_ticket_id(state, payload) do
+    case payload[:ticket_id] || payload["ticket_id"] do
+      t when is_binary(t) and t != "" -> %{state | ticket_id: t}
+      _ -> state
+    end
+  end
 
   defp cancel_result_deadline(state) do
     state

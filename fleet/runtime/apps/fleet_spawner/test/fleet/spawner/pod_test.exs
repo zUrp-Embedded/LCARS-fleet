@@ -262,6 +262,40 @@ defmodule Fleet.Spawner.PodTest do
       GenServer.stop(pid)
     end
 
+    test "SLOT-FREEZE : le pod ADOPTE le ticket_id de la TACHE -> le livrable suit la BONNE brique (pas celle du spawn)" do
+      # Regression hello-buddy : le pipe gardait son ticket_id de SPAWN (issue-4) pour TOUS ses livrables ->
+      # la 2e brique (issue-3) partait sur la branche/PR de issue-4 (ecrasement). Ici le pod spawn sur
+      # "issue-4" mais la tache complétée porte "issue-3" -> le pod.completed (consomme par le HopConsumer
+      # qui pousse HEAD:lcars/issue-N) doit porter "issue-3", la brique reellement traitee.
+      Process.flag(:trap_exit, true)
+      Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
+      StubBackend.set_reply(interactive_reply(session_id: "s-adopt"))
+      pod_id = "pod-adopt-#{System.unique_integer([:positive])}"
+
+      assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-4"))
+      assert_receive {:launch_called, _, _}, 2_000
+      assert %{phase: :monitoring} = GenServer.call(pid, :info)
+
+      # task_completed pour la brique issue-3 (re-mandate), PAS le spawn issue-4 (ticket_id dans le payload,
+      # comme le vrai event TaskQueue qui porte completed.ticket_id).
+      Phoenix.PubSub.broadcast(
+        Fleet.PubSub,
+        "fleet.events",
+        Fleet.Event.new(:task_queue, :task_completed,
+          pod_id: pod_id,
+          correlation_id: "c-adopt",
+          payload: %{result: %{"answer" => "OK"}, ticket_id: "issue-3"}
+        )
+      )
+
+      # Le pod.completed (= le livrable broadcaste au HopConsumer) porte le ticket ADOPTE issue-3.
+      assert_receive %Fleet.Event{
+                       type: :"pod.completed",
+                       payload: %{"ticket_id" => "issue-3"}
+                     },
+                     3_000
+    end
+
     test "POD_DIR + artefacts créés (pod en MONITORING tant que pas de livrable)" do
       StubBackend.set_reply(interactive_reply())
 
