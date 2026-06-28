@@ -51,6 +51,7 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.Spawner.Pod.McpProvision
   alias Fleet.Spawner.Pod.Paths
   alias Fleet.Spawner.Pod.Recovery
+  alias Fleet.Spawner.Pod.StateFs
   alias Fleet.Spawner.Pod.TaskProbe
   alias Fleet.SPBuilder
 
@@ -226,7 +227,7 @@ defmodule Fleet.Spawner.Pod do
       |> Map.put(:phase, :killed)
       |> add_condition(:home_released)
 
-    write_state_fs(new_state)
+    StateFs.write_state_fs(new_state)
     {:stop, :normal, :ok, new_state}
   end
 
@@ -1107,7 +1108,7 @@ defmodule Fleet.Spawner.Pod do
           |> add_condition(:process_launched)
           |> add_condition(:stream_alive)
 
-        write_state_fs(new_state)
+        StateFs.write_state_fs(new_state)
 
         # Brief delivery au pod long-lived RC.
         #
@@ -1309,7 +1310,7 @@ defmodule Fleet.Spawner.Pod do
       |> Map.put(:phase, :succeeded)
       |> add_condition(:home_released)
 
-    write_state_fs(new_state)
+    StateFs.write_state_fs(new_state)
     {:stop, :normal, new_state}
   end
 
@@ -1431,28 +1432,8 @@ defmodule Fleet.Spawner.Pod do
   intacte — on ne touche QUE les tombstones).
   """
   @spec clear_terminal_snapshot(String.t(), Fleet.CapProfile.t(), keyword()) :: :ok
-  def clear_terminal_snapshot(pod_id, %Fleet.CapProfile{} = cap_profile, opts \\ [])
-      when is_binary(pod_id) and is_list(opts) do
-    state_fs_path = Paths.state_fs_path_for(pod_id, cap_profile, opts)
-
-    with {:ok, json} <- File.read(state_fs_path),
-         {:ok, %{"phase" => phase_str}} <- Jason.decode(json),
-         phase when phase in [:succeeded, :released, :killed] <-
-           Recovery.phase_from_string(phase_str) do
-      rm_terminal_artifacts(
-        Path.dirname(state_fs_path),
-        Paths.pod_dir_for(pod_id, cap_profile, opts)
-      )
-
-      Logger.info(
-        "Pod.clear_terminal_snapshot #{pod_id}: tombstone :#{phase} effacée (re-spawn FRESH, BL-055)"
-      )
-
-      :ok
-    else
-      _ -> :ok
-    end
-  end
+  def clear_terminal_snapshot(pod_id, cap_profile, opts \\ []),
+    do: StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
 
   @doc """
   Efface les DEUX dossiers qui composent l'empreinte disque d'un pod terminé : son **state-dir** (le
@@ -1464,12 +1445,7 @@ defmodule Fleet.Spawner.Pod do
   `--resume` vit ailleurs (seed-store `projects.work/<projet>/pods/`), pas dans le pod_dir.
   """
   @spec rm_terminal_artifacts(String.t(), String.t()) :: :ok
-  def rm_terminal_artifacts(state_dir, pod_dir)
-      when is_binary(state_dir) and is_binary(pod_dir) do
-    _ = File.rm_rf(state_dir)
-    _ = File.rm_rf(pod_dir)
-    :ok
-  end
+  defdelegate rm_terminal_artifacts(state_dir, pod_dir), to: StateFs
 
   defp recover_or_init(args) do
     base = initial_state(args)
@@ -1640,48 +1616,6 @@ defmodule Fleet.Spawner.Pod do
   defp cap_profile_containment(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.containment(cap)
   defp cap_profile_containment(_), do: "bwrap"
 
-  defp write_state_fs(state) do
-    # Schéma complet du snapshot :
-    # {v, session_id, cap_profile_name, started_at, phase, conditions, ticket_id}.
-    payload = %{
-      "v" => 1,
-      "session_id" => state.session_id,
-      "cap_profile_name" => cap_profile_name(state.cap_profile),
-      "started_at" => DateTime.to_iso8601(state.started_at),
-      "phase" => Atom.to_string(state.phase),
-      "conditions" => state.conditions |> MapSet.to_list() |> Enum.map(&Atom.to_string/1),
-      "ticket_id" => state.ticket_id
-    }
-
-    tmp = state.state_fs_path <> ".tmp"
-
-    # write_state_fs est appelé depuis transition_failed et d'autres sites — un
-    # crash ici ferait régresser le cleanup. Non-bang (le {:stop, ...} prévu se
-    # passe quand même).
-    result =
-      with :ok <- File.mkdir_p(Path.dirname(state.state_fs_path)),
-           :ok <- File.write(tmp, Jason.encode!(payload, pretty: true)),
-           :ok <- File.rename(tmp, state.state_fs_path) do
-        :ok
-      end
-
-    case result do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        # Échec d'écriture state.json = perte du point de recovery durable. C'est une
-        # ERREUR (pas un warning) — `:ok` reste rendu (non-fatal : ne pas crasher ici)
-        # mais le breach est LOUD (error-level → monitoring).
-        Logger.error(
-          "pod #{state.pod_id} write_state_fs ÉCHEC — point de recovery durable perdu " <>
-            "(non-fatal) : #{inspect(reason)}"
-        )
-
-        :ok
-    end
-  end
-
   # ============================================================
   # Helpers
   # ============================================================
@@ -1698,7 +1632,7 @@ defmodule Fleet.Spawner.Pod do
       |> Map.put(:phase, :failed)
       |> Map.put(:last_error, reason)
 
-    write_state_fs(new_state)
+    StateFs.write_state_fs(new_state)
 
     # Signale l'échec sur le Bus → un consumer fleet_pilot l'enregistre au registre d'incidents
     # (parité avec wake-`{:error}` : un échec de pod récurrent devient un pattern → root-cause). `reason` =
