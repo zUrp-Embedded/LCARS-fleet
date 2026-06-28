@@ -68,23 +68,23 @@ spec:
     # reviewer, consultant) sont déjà one-shot : modèle désormais UNIFORME pour
     # tous les workers de dispatch.
     #
-    # Décision 2026-06-17 (ferme le fork pipe-vs-one-shot, item #1) : one-shot
-    # retenu — state-sur-forge, pas de pod résident à maintenir vivant/réveiller.
-    # RÉVERSIBLE sans rien défaire : l'archi eng-reuse (id déterministe + dispatch
-    # idempotent + branche `pod_alive?` → remandate de StageDispatcher) reste en
-    # place mais DORMANTE (un pod one-shot est toujours mort au rework → toujours
-    # spawn frais). Rebasculer = remettre `lifetime_scope: pipe` ICI, point. Cf.
-    # BL-055 + `04_design-notes/ring1/permanent-pods-boot.md` §"Task-level éphémère".
-    lifetime_scope: one-shot
+    # Decision 2026-06-17 : one-shot. REOUVERTE 2026-06-28 (slot-freeze) : PIPE retenu pour donner 1 SLOT
+    # Claude Desktop par projet. Le slot Desktop = la connexion d'un PROCESS (atteste live) : un one-shot
+    # respawne N fois = N slots ; un pipe = 1 process resident re-mandate = 1 slot. Le cold par ticket
+    # (workspace propre + /clear) est gere SANS rm_rf (bind mount bwrap vivant) par le pipeline de
+    # re-mandate idle-aware : do_extract pose :publishing -> deliverable.published (POST-push) leve :ready
+    # -> le gate StageDispatcher reprovisionne in-place (reset_in_place + /clear) au re-mandate d'un pipe
+    # :ready. Reversible : remettre `one-shot` ici (le gate retombe sur la voie one-shot, INCHANGEE).
+    # Cf. BL-055 + DESIGN-eng-1slot.md (#5.3).
+    lifetime_scope: pipe
     model: opus        # catalogue → --model (alias/nom complet ; tunable)
     effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
     # subagent_template null : l'engineer exécute son mandat DIRECTEMENT
     # (get_task → travail → submit_result via tools MCP), pas via un subagent
-    # dispatché. Note : maintenant que `lifetime_scope: one-shot`, la garde
-    # G24-11 (subagent_template ⟹ one-shot) serait SATISFAITE si on voulait
-    # réintroduire un subagent_template `implementer` ; on reste sur l'exécution
-    # directe (plus simple). Pattern subagent fire-mode-quick → cap-profile séparé.
+    # dispatché. Note : `lifetime_scope: pipe` ⟹ réintroduire un subagent_template `implementer`
+    # VIOLERAIT G24-11 (subagent_template ⟹ one-shot) ; on reste sur l'exécution directe (plus simple).
+    # Pattern subagent fire-mode-quick → cap-profile séparé.
     subagent_template: null
     # `fleet-forge.engineer` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4) : l'engineer
     # n'a aucun canal d'écriture forge. Il lit son mandat / rend son livrable via MCP get_task/
