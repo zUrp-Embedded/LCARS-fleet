@@ -102,6 +102,12 @@ events:
   pipeline.failed: []
   pipeline.completed: []
   pipeline.stage.completed: []
+  # deliverable.published (slot-freeze) : emis par Pilot.HopCompleter (source :pipeline — la publication
+  # EST une op pipeline via Deliverable.publish) APRES push + PR confirmes, porte `pod_id` (le pod
+  # producteur, depuis le payload pod.completed). Consomme par Spawner.Pod : un pod resident (pipe) passe
+  # :publishing -> :ready (son workspace a ete LU/pousse, il peut etre reset pour le ticket suivant sans
+  # courser le push). Producteur reel.
+  deliverable.published: []
 
   # --- post_extract.git ---
   # ASYMÉTRIE INVERSE (consommateur réel, 0 producteur courant) : consommés par

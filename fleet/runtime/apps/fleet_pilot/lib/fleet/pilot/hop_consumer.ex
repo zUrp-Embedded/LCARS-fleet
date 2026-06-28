@@ -573,6 +573,9 @@ defmodule Fleet.Pilot.HopConsumer do
     hop =
       %{
         repo: state.repo,
+        # pod_id du PRODUCTEUR (depuis le payload pod.completed) : porte jusqu'a l'emission de
+        # `deliverable.published` (slot-freeze) pour adresser le pod resident a remettre :ready.
+        pod_id: payload["pod_id"],
         issue_number: n,
         role: role,
         pr_role: pr_role,

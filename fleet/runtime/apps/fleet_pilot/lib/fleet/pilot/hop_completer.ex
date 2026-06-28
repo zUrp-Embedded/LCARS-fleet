@@ -374,8 +374,43 @@ defmodule Fleet.Pilot.HopCompleter do
   defp complete_producer(hop, opts) do
     with {:ok, %{pr_number: pr}} <- open_deliverable_pr(hop, opts) do
       _ = maybe_post_eng_summary(hop, pr, opts)
+      _ = emit_deliverable_published(hop, pr)
       route(hop, pr, opts)
     end
+  end
+
+  # SLOT-FREEZE : signale que le livrable du producteur est CONFIRME sur la forge (commit pousse + PR
+  # ouverte). Emis APRES open_deliverable_pr (donc le push a deja LU le workspace) → un pod pipe resident
+  # peut alors reset son workspace pour le ticket suivant SANS courser le push. Porte le `pod_id` (le pod
+  # producteur, depuis le payload pod.completed). Source :pipeline (la publication est une op pipeline).
+  # Best-effort : un echec d'emission ne casse PAS la completion (le livrable est deja publie) — le
+  # backstop cote pod (deadline :publishing) couvre un rate. No-op si pas de pod_id (legacy/test).
+  defp emit_deliverable_published(hop, pr) do
+    case Map.get(hop, :pod_id) do
+      pod_id when is_binary(pod_id) ->
+        event =
+          Fleet.Event.new(:pipeline, :"deliverable.published",
+            pod_id: pod_id,
+            payload: %{
+              "repo" => Map.fetch!(hop, :repo),
+              "issue" => Map.fetch!(hop, :issue_number),
+              "pr" => pr
+            }
+          )
+
+        case Fleet.EventRouter.Bus.broadcast("fleet.events", event) do
+          :ok ->
+            :ok
+
+          other ->
+            Logger.warning("HopCompleter: deliverable.published non diffuse (#{inspect(other)})")
+        end
+
+      _ ->
+        :noop
+    end
+  rescue
+    e -> Logger.warning("HopCompleter: deliverable.published a leve (#{inspect(e)})")
   end
 
   # VOIX DE L'ENG sur la PR (info SORTANTE, descriptive et traçable) : poste le
