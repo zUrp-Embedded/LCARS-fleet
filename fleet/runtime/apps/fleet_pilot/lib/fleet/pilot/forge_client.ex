@@ -379,15 +379,18 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Pose le marqueur d'admission `[lcars-onboarded:<human>]` sur `repo` — crée une issue SYSTÈME
-  dédiée (`title` = le marqueur) sous le compte du token (= le bot système). L'issue, postée par le
-  bot, EST le sceau : un user ordinaire ne peut pas la fabriquer SOUS l'identité du bot (il n'a pas le
-  token système). Idempotent best-effort : si une issue d'admission bot-authored existe déjà,
-  `{:ok, :already}` (pas de doublon). Appelé par `ProjectOnboard.register_for_fleet` (token système).
+  dédiée (`title` = le marqueur) sous le compte du token (= le bot système), PUIS la ferme aussitôt.
+  L'issue, postée par le bot, EST le sceau : un user ordinaire ne peut pas la fabriquer SOUS l'identité
+  du bot (il n'a pas le token système). La fermeture est cosmétique (tracker propre, pas d'issue ouverte
+  parasite) et best-effort : l'admission tient sur titre+auteur, pas sur l'état (`admitted?` lit
+  `state=all`), donc un sceau fermé — ou laissé ouvert sur échec de fermeture — reste valide. Idempotent
+  best-effort : si une issue d'admission bot-authored existe déjà, `{:ok, :already}` (pas de doublon).
+  Appelé par `ProjectOnboard.register_for_fleet` (token système).
 
   ## Returns
-    * `{:ok, issue_number}` — marqueur posé (issue système créée)
+    * `{:ok, issue_number}` — marqueur posé (issue système créée puis fermée)
     * `{:ok, :already}` — déjà présent (issue d'admission bot-authored existante)
-    * `{:error, term()}` — HTTP/transport/config / bot irrésoluble
+    * `{:error, term()}` — HTTP/transport/config / bot irrésoluble (création du sceau échouée)
   """
   @spec post_onboard_marker(String.t(), String.t(), Keyword.t()) ::
           {:ok, integer() | :already} | {:error, term()}
@@ -401,13 +404,22 @@ defmodule Fleet.Pilot.ForgeClient do
       false ->
         # Le marqueur vit dans le TITRE de l'issue système (lu sans pagination de comments, stable). Le
         # corps explicite le rôle pour un humain qui tomberait dessus dans l'UI forge.
-        create_issue(
-          repo,
-          marker,
-          "Marqueur d'admission LCARS — ce repo est onboardé dans la machine à agents de `#{human}`.\n" <>
-            "Posté par le compte système ; ne pas modifier/fermer (sceau d'admission serveur-side).",
-          opts
-        )
+        with {:ok, issue_number} <-
+               create_issue(
+                 repo,
+                 marker,
+                 "Marqueur d'admission LCARS — ce repo est onboardé dans la machine à agents de `#{human}`.\n" <>
+                   "Sceau serveur-side posé par le compte système, puis fermé aussitôt : l'admission ne " <>
+                   "dépend QUE du titre + de l'auteur (le bot), jamais de l'état de l'issue. Ne pas renommer.",
+                 opts
+               ) do
+          # Fermé immédiatement pour ne pas laisser d'issue ouverte parasite dans le tracker du repo.
+          # Best-effort : l'admission tient sur titre+auteur, pas sur l'état (le lecteur `admitted?` lit
+          # `state=all`) → un échec de fermeture laisse un sceau OUVERT tout aussi valide, l'onboarding ne
+          # doit pas échouer pour ça. On garde donc le numéro et on ignore le retour de la fermeture.
+          _ = close_issue(repo, issue_number, opts)
+          {:ok, issue_number}
+        end
     end
   end
 

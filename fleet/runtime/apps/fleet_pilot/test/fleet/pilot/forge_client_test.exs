@@ -1383,12 +1383,17 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.post_onboard_marker("fleet/proj", "alice", admit_opts(h))
     end
 
-    test "post_onboard_marker absent → crée l'issue système (sceau)" do
-      # Pas de marqueur (GET issues vide) → POST crée l'issue d'admission. Le titre exact est couvert par
-      # `onboard_marker/1` (round-trip lecture/écriture) ; ici on prouve le CREATE quand le sceau manque.
+    test "post_onboard_marker absent → crée l'issue système PUIS la ferme (sceau, tracker propre)" do
+      # Pas de marqueur (GET issues vide) → POST crée l'issue d'admission, puis PATCH `state:closed` la ferme
+      # aussitôt (l'admission lit `state=all`, donc un sceau fermé reste valide). Le titre exact est couvert
+      # par `onboard_marker/1` ; ici on prouve le CREATE+CLOSE quand le sceau manque. La fermeture est
+      # best-effort : sans ce handler PATCH, le fallback 500 de FakeForge serait ignoré et le retour
+      # resterait `{:ok, 1}` — on le mappe quand même pour expliciter l'appel attendu.
       h = %{
         {"GET", "/api/v1/repos/fleet/neuf/issues"} => {200, []},
-        {"POST", "/api/v1/repos/fleet/neuf/issues"} => {201, %{"number" => 1}}
+        {"POST", "/api/v1/repos/fleet/neuf/issues"} => {201, %{"number" => 1}},
+        {"PATCH", "/api/v1/repos/fleet/neuf/issues/1"} =>
+          {200, %{"number" => 1, "state" => "closed"}}
       }
 
       assert {:ok, 1} = ForgeClient.post_onboard_marker("fleet/neuf", "alice", admit_opts(h))
