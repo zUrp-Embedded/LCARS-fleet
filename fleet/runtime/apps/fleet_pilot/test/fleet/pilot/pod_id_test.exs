@@ -11,6 +11,23 @@ defmodule Fleet.Pilot.PodIdTest do
     assert PodId.for_pr("fleet/poc-8", 6, "qualifier") == "fleet-poc-8-pr-6-qualifier"
   end
 
+  test "for_repo : pod_id PROJET keyé repo seul, format <slug>-role (slot_scope: project)" do
+    assert PodId.for_repo("fleet/poc-8", "engineer") == "fleet-poc-8-engineer"
+
+    # MÊME id quel que soit le ticket → 1 identité par (repo, rôle) → 1 slot Desktop stable.
+    assert PodId.for_repo("fleet/poc-8", "engineer") == PodId.for_repo("fleet/poc-8", "engineer")
+
+    # Distinct des ids d'instance (jamais `-issue-`/`-pr-`) → pas de fan-out, pas de collision.
+    refute PodId.for_repo("fleet/poc-8", "engineer") =~ "-issue-"
+
+    refute PodId.for_repo("fleet/poc-8", "engineer") ==
+             PodId.for_issue("fleet/poc-8", 1, "engineer")
+
+    # Repo-scopé : deux repos → identités distinctes.
+    refute PodId.for_repo("fleet/repo-a", "engineer") ==
+             PodId.for_repo("fleet/repo-b", "engineer")
+  end
+
   test "slug path-safe (F076) : `/` → `-`, char hors-charset → `-`, résultat dans [A-Za-z0-9._-]" do
     id = PodId.for_issue("owner/repo.name", 2, "reviewer")
     assert id == "owner-repo.name-issue-2-reviewer"

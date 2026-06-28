@@ -27,6 +27,17 @@ defmodule Fleet.Pilot.PodId do
   def for_pr(repo, n, role), do: "#{slug(repo)}-pr-#{n}-#{role}"
 
   @doc """
+  pod_id PROJET (keyé repo SEUL, sans numéro) : `<repo-slug>-<role>`. Pour les rôles `slot_scope:
+  project` (engineer, singletons fleet-level) : UNE identité par (repo, rôle) → un re-dispatch de
+  N'IMPORTE quelle issue/PR du repo retombe sur le MÊME pod_id → UN slot Desktop stable (cwd +
+  session-id figés), dispatch sérialisé par (repo, rôle). À opposer à `for_issue`/`for_pr` (keyés par
+  instance → fan-out). Réutilise `scope_prefix/1` (source unique du slug). Le rôle (`engineer`, …) ne
+  contient jamais `-issue-`/`-pr-` → pas de collision avec un id d'instance.
+  """
+  @spec for_repo(String.t(), String.t()) :: String.t()
+  def for_repo(repo, role) when is_binary(role), do: scope_prefix(repo) <> role
+
+  @doc """
   Préfixe de scope REPO d'un pod_id : `<repo-slug>-`. C'est l'ANCRE qui qualifie une clé de
   verrou par repo. Tout pod_id du repo commence par lui (`for_issue`/`for_pr` posent `<slug>-issue|pr-…`).
   Source UNIQUE du slug (le même que `for_issue`/`for_pr`) → la réconciliation scope ses refs par repo
