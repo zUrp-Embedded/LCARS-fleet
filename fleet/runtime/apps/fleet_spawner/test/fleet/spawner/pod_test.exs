@@ -983,6 +983,14 @@ defmodule Fleet.Spawner.PodTest do
       })
     end
 
+    # Pipe à livrable git async : seul ce mode a un push (lu par le workspace, confirmé par
+    # deliverable.published) à protéger du re-mandate → :publishing au submit. pipe_profile() seul
+    # défaute deliverable_mode à "payload" (gatekeeper/architect-like : verdict/interactif, pas de push).
+    defp git_native_pipe_profile do
+      profile = pipe_profile()
+      put_in(profile.spec["deliverable_mode"], "git_native")
+    end
+
     test "cycle 1 submit_result → pod.completed broadcastée, pod reste en :monitoring" do
       StubBackend.set_reply(interactive_reply(session_id: "s-pipe"))
 
@@ -1096,6 +1104,72 @@ defmodule Fleet.Spawner.PodTest do
       # de surface : le pod accepte un kill brutal sans race state.json.
       Process.exit(pid, :kill)
       assert_receive {:EXIT, ^pid, :killed}, 2_000
+    end
+
+    # SLOT-FREEZE garde — :publishing n'est armée QUE pour un livrable git async (maybe_enter_publishing).
+    test "submit d'un pipe git_native → condition :publishing armée (push à protéger)" do
+      StubBackend.set_reply(interactive_reply(session_id: "s-pub-git"))
+
+      pod_id = "pod-pub-git-#{System.unique_integer([:positive])}"
+
+      args = %{
+        cap_profile: git_native_pipe_profile(),
+        ticket_id: "ticket-1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id]
+      }
+
+      Bus.subscribe()
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _, _}, 2_000
+      assert %{phase: :monitoring} = GenServer.call(pid, :info)
+
+      submit_result_event(pod_id, %{"cycle" => 1})
+
+      assert_receive %Fleet.Event{source: :spawner, type: :"pod.completed"}, 2_000
+
+      # publish_deadline est à 120s (jamais fire ici) et deliverable.published n'est pas émis
+      # (HopCompleter off en test) → :publishing reste présente après le retour à :monitoring.
+      Process.sleep(50)
+      info = GenServer.call(pid, :info)
+      assert info.phase == :monitoring
+      assert :publishing in info.conditions
+
+      Process.exit(pid, :kill)
+    end
+
+    # Le nouveau comportement : un pipe payload (pas de push async) n'arme PLUS :publishing — sinon il
+    # armerait un deadline 120s jamais levé par deliverable.published (émis seulement pour git_native).
+    test "submit d'un pipe payload → PAS de condition :publishing (rien à protéger)" do
+      StubBackend.set_reply(interactive_reply(session_id: "s-pub-payload"))
+
+      pod_id = "pod-pub-payload-#{System.unique_integer([:positive])}"
+
+      # pipe_profile() = deliverable_mode défaut "payload".
+      args = %{
+        cap_profile: pipe_profile(),
+        ticket_id: "ticket-1",
+        pod_id: pod_id,
+        opts: [repo_id: @test_repo_id]
+      }
+
+      Bus.subscribe()
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _, _}, 2_000
+      assert %{phase: :monitoring} = GenServer.call(pid, :info)
+
+      submit_result_event(pod_id, %{"cycle" => 1})
+
+      assert_receive %Fleet.Event{source: :spawner, type: :"pod.completed"}, 2_000
+
+      Process.sleep(50)
+      info = GenServer.call(pid, :info)
+      assert info.phase == :monitoring
+      refute :publishing in info.conditions
+
+      Process.exit(pid, :kill)
     end
   end
 

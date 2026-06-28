@@ -853,7 +853,9 @@ defmodule Fleet.Spawner.Pod do
           # SLOT-FREEZE : enter_publishing -> le pipe est :publishing tant que son livrable n'est pas
           # confirme sur la forge (le HopConsumer le LIT + push en async) ; il n'est pas re-mandatable
           # tant qu'il publie (etape 4), sinon on courserait le push. Leve par deliverable.published.
-          |> enter_publishing()
+          # Conditionne au livrable git async (cf. maybe_enter_publishing) : un pod payload n'a rien a
+          # proteger et n'arme donc pas un deadline jamais leve.
+          |> maybe_enter_publishing()
           |> arm_result_deadline()
 
         {:noreply, new_state}
@@ -1216,6 +1218,19 @@ defmodule Fleet.Spawner.Pod do
         Liveness.monitor_timeout_ms(state)
       )
       |> schedule_liveness_tick()
+    end
+  end
+
+  # SLOT-FREEZE : seul un pod à livrable git_native a un push async (lu par le workspace puis confirmé
+  # par l'event deliverable.published) qu'il faut protéger du reset/re-mandate → :publishing. Un pod
+  # payload (gatekeeper = verdict, architect = interactif : pas de push) n'a rien à protéger ; le mettre
+  # :publishing armerait un deadline 120s jamais levé par deliverable.published (émis seulement pour les
+  # producteurs git_native) → WARNING récurrent + sémantique fausse. Donc on conditionne.
+  defp maybe_enter_publishing(state) do
+    if Fleet.CapProfile.deliverable_mode(state.cap_profile) == "git_native" do
+      enter_publishing(state)
+    else
+      state
     end
   end
 
