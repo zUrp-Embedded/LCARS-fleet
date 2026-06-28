@@ -503,24 +503,50 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # (verrou_contracts), build rouge, fix immédiat.
 
   # Le timer `:result_deadline` doit être ANNULÉ à l'arrivée du résultat (sinon il
-  # tue au cycle 2 les pods long-lived forever/pipe/run). Rouge si
-  # (a) aucun `Process.cancel_timer` dans pod.ex, OU (b) le band-aid
-  # `"forever" -> 60_000` (un HACK) est encore présent au lieu du vrai fix.
+  # tue au cycle 2 les pods long-lived forever/pipe/run). Depuis la migration `Pod` →
+  # `gen_statem`, l'annulation n'est plus une impl maison (`Process.cancel_timer`) mais
+  # NATIVE : `:result_deadline` est un **state_timeout de l'état `:monitoring`**, et la
+  # transition `:monitoring → :extracting` (déclenchée par l'arrivée du résultat,
+  # `task_completed`) annule AUTOMATIQUEMENT ce state_timeout (un state_timeout est
+  # cancellé au changement d'état). Ce check vérifie donc les DEUX piliers de cet
+  # invariant natif dans pod.ex :
+  #   (a) `:result_deadline` est bien armé/géré comme un `:state_timeout` (sinon il ne
+  #       s'annulerait pas tout seul au changement d'état) ;
+  #   (b) la transition annulante `{:next_state, :extracting, …}` existe (sinon le résultat
+  #       arriverait sans jamais quitter `:monitoring` → deadline non annulé → kill cycle 2).
+  # Rouge si l'un manque, OU si le band-aid `"forever" -> 60_000` (un HACK) réapparaît.
   defp check_result_deadline_cancelled(root) do
     pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
     src = File.read!(Path.join(root, pod))
 
-    has_cancel? =
+    # (a) :result_deadline géré comme state_timeout (une ligne de CODE porte les deux tokens :
+    #     l'armement `{:state_timeout, _, :result_deadline}` ET le handler `:state_timeout, :result_deadline`).
+    state_timeout? =
       Path.join(root, pod)
-      |> grep_lines(~r/Process\.cancel_timer/)
-      |> Enum.any?(fn {_l, line} -> Regex.match?(~r/cancel_timer/, strip_comment(line)) end)
+      |> grep_lines(~r/:state_timeout.*:result_deadline|:result_deadline.*:state_timeout/)
+      |> Enum.any?(fn {_l, line} ->
+        stripped = strip_comment(line)
+
+        Regex.match?(~r/:state_timeout/, stripped) and
+          Regex.match?(~r/:result_deadline/, stripped)
+      end)
+
+    # (b) la transition annulante :monitoring → :extracting (annule nativement le state_timeout).
+    cancels_via_transition? =
+      Path.join(root, pod)
+      |> grep_lines(~r/:next_state,\s*:extracting/)
+      |> Enum.any?(fn {_l, line} ->
+        Regex.match?(~r/:next_state,\s*:extracting/, strip_comment(line))
+      end)
 
     has_hack? = Regex.match?(~r/"forever"\s*->\s*60_?000\b/, src)
 
     evidence =
       [
-        {not has_cancel?,
-         "#{pod} : aucun Process.cancel_timer — timer :result_deadline jamais annulé (SPAWN-CR1, tue les pods permanents)"},
+        {not state_timeout?,
+         "#{pod} : :result_deadline n'est pas un :state_timeout de :monitoring — il ne s'annulerait plus tout seul au changement d'état (SPAWN-CR1, tue les pods permanents au cycle 2)"},
+        {not cancels_via_transition?,
+         "#{pod} : pas de transition `{:next_state, :extracting, …}` — le résultat arriverait sans quitter :monitoring → state_timeout :result_deadline jamais annulé"},
         {has_hack?,
          "#{pod} : band-aid `forever -> 60_000` encore présent — revert vers 60s + vrai fix (n'armer que si task active)"}
       ]
@@ -533,7 +559,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "annuler le timer à l'arrivée du résultat + n'armer que si task active ; revert le band-aid 60ks"
+        "result_deadline = state_timeout de :monitoring, annulé NATIVEMENT par la transition :monitoring → :extracting à l'arrivée du résultat ; n'arme que si pas forever + fire ne tue que si task active ; pas de band-aid 60ks"
     }
   end
 

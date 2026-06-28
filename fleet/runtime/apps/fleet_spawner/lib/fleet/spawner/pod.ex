@@ -1,44 +1,68 @@
 defmodule Fleet.Spawner.Pod do
   @moduledoc """
-  GenServer state machine du cycle 8 phases ALLOCATE → RELEASE pour un pod.
+  `gen_statem` (OTP natif) du cycle de vie d'un pod : la chaîne de boot
+  ALLOCATE → … → MONITORING, puis EXTRACTING → RELEASING au résultat.
 
-  ## Phases
+  ## États (= les anciennes `phase`)
 
-      :pending → :allocating → :cleaning → :projecting → :injecting →
-      :launching → :monitoring → :extracting → :releasing → :succeeded
-                                                          ↓
-                                                        :failed
+      :allocating → :cleaning → :projecting → :injecting → :launching →
+      :monitoring  ⇄  :extracting → :releasing  ──▶ (arrêt :normal, phase :succeeded)
+                                                ↑
+            (un pod long-lived revient en :monitoring depuis :extracting)
 
-  Chaque transition est dirigée par `handle_continue/2`. L'`init/1`
-  démarre la chaîne avec `{:continue, :allocate}`. Si la recovery sur l'état
-  FS lit un `state.json` snapshot, `recovery_action/1` tranche sur la phase :
-  terminale → `:release` (rien à relancer), tout le reste → `:recreate`
-  (re-spawn FRESH depuis `:allocate`, session neuve).
+  Toute sortie d'erreur passe par `transition_failed/2` → arrêt `{:shutdown, reason}`
+  (le snapshot `state.json` grave alors la phase `failed`). Un `kill` délibéré grave
+  `killed`. Sous `:temporary` (child_spec de `spawner.ex`) le superviseur ne ressuscite
+  jamais ; la recovery au prochain `init/1` est explicite (cf. `Pod.Recovery`).
+
+  ## La chaîne de boot = un évènement interne `:proceed`
+
+  `init/1` retourne `{:ok, <état de départ>, data, [{:next_event, :internal, :proceed}]}`.
+  Chaque état de boot porte `handle_event(:internal, :proceed, <état>, data)` qui exécute
+  le travail (en déléguant aux modules `Pod.*`) puis transitionne via
+  `{:next_state, suivant, data, [{:next_event, :internal, :proceed}]}`. Les évènements
+  internes ont PRIORITÉ sur la boîte aux lettres → toute la cascade de boot s'exécute
+  AVANT qu'un appel externe (`:info`/`:kill`) ne soit traité — c'est exactement la
+  sémantique de l'ancienne chaîne `handle_continue` (vérifié : un `:enter` ne peut PAS
+  émettre `next_event` ni changer d'état sur cette OTP — `bad_state_enter_action` —, donc
+  le travail vit dans `:proceed`, pas dans `:enter`).
+
+  Le `:state_enter` n'est utilisé que pour `:monitoring` (souscription au Bus à la 1ʳᵉ
+  entrée + armement des watchdogs) : il s'exécute uniformément que l'on entre depuis
+  `:launching` (1ᵉʳ cycle) ou depuis `:extracting` (ré-armement d'un pod long-lived).
 
   ## Conditions
 
-  Set d'événements observables ajoutés au passage des phases :
-  `:home_projected`, `:context_injected`, `:process_launched`,
-  `:stream_alive`, `:init_validated`, `:output_extracted`,
-  `:home_released`. Permet à `pod_info/1` de distinguer "phase X
-  atteinte" de "condition Y vérifiée".
+  `data.conditions` (MapSet) accumule les évènements observables franchis :
+  `:home_projected`, `:context_injected`, `:process_launched`, `:stream_alive`,
+  `:output_extracted`, `:home_released`, plus le FLAG `:publishing` (un pipe git_native
+  entre son submit et la confirmation forge `deliverable.published`). `:publishing` reste
+  un flag, PAS un état : un pod publishing est fonctionnellement en `:monitoring` (il peut
+  recevoir une tâche) ; le flag ne fait que gater le reset/re-mandate EXTERNE
+  (`pipe_remandate_state` lit `pod_info.conditions`).
+
+  ## Timers NATIFS (plus de timer maison)
+
+  - `:result_deadline` = **state_timeout de `:monitoring`** : annulé AUTOMATIQUEMENT en
+    quittant `:monitoring` (la transition `:monitoring → :extracting` sur `task_completed`
+    réalise nativement l'invariant « le deadline est annulé à l'arrivée du résultat »).
+  - `:liveness` = **generic timeout** récurrent en `:monitoring` (ré-arme le deadline si le
+    pod a bougé).
+  - `:publish_deadline` = generic timeout (fail-safe du flag `:publishing`).
+  - `:kick` = generic timeout (boucle de réveil ack-driven, bornée).
 
   ## Recovery state FS
 
-  `<state_fs_root>/<scope>/<id>/state.json` écrit dès post-ALLOCATE
-  (le `session_id` est pré-alloué au spawn : plus de frame `init` NDJSON,
-  le modèle `-p` est mort). `<scope>` ∈ `pods` (one-shot/forever) /
-  `pipes` (pipe) / `runs` (run). Au prochain `init/1`, lecture du fichier →
-  `recovery_action/1` sur la phase : terminale → `:release`, sinon →
-  `:recreate` (session neuve, from scratch). La recovery ne reprend JAMAIS
-  une session morte par `--resume` (= pod zombie, prouvé live).
+  `<state_fs_root>/<scope>/<id>/state.json` écrit aux 4 sites de transition (launch, kill,
+  release, fail). Au prochain `init/1`, `recover_or_init` lit le fichier → `Pod.Recovery`
+  tranche : phase terminale → `:release` (rien à relancer), tout le reste → `:recreate`
+  (from scratch, session neuve). On ne tente JAMAIS `--resume` sur une session morte.
   """
 
-  # Tous les pods sont `:temporary` (le supervisor ne ressuscite jamais ; la
-  # recovery est délibérée). NB : `pod_child_spec/1` (spawner.ex) construit
-  # le child_spec explicite et fixe lui aussi `restart: :temporary` — c'est lui
-  # qui fait foi au spawn ; cette valeur de module reste alignée par honnêteté.
-  use GenServer, restart: :temporary
+  # `@behaviour :gen_statem` (PAS `use GenServer`). Le `restart: :temporary` ne vient PAS
+  # d'ici : `pod_child_spec/1` (spawner.ex) construit le child_spec explicite et fixe
+  # `restart: :temporary` — c'est lui qui fait foi au spawn.
+  @behaviour :gen_statem
 
   require Logger
 
@@ -61,9 +85,8 @@ defmodule Fleet.Spawner.Pod do
   # Complétion event-driven : le résultat arrive via l'event Bus
   # `task_queue.task_completed` (%Fleet.Event{}, émis par le central sur submit_result), PAS via un fichier.
 
-  @type phase ::
-          :pending
-          | :allocating
+  @type state_name ::
+          :allocating
           | :cleaning
           | :projecting
           | :injecting
@@ -71,31 +94,26 @@ defmodule Fleet.Spawner.Pod do
           | :monitoring
           | :extracting
           | :releasing
-          | :succeeded
-          | :failed
-          | :unknown
 
   @type condition ::
           :home_projected
           | :context_injected
           | :process_launched
           | :stream_alive
-          | :init_validated
           | :output_extracted
           | :home_released
           # SLOT-FREEZE : un pipe est :publishing entre son submit et la confirmation que son livrable est
           # sur la forge (event deliverable.published). Levee -> pret a reset/re-mandater (etape 4).
           | :publishing
 
-  @type state :: %{
-          phase: phase(),
+  @type data :: %{
           conditions: MapSet.t(condition()),
           pod_id: String.t(),
           ticket_id: String.t(),
           session_id: String.t() | nil,
-          # `started_at` ISO8601 figé à la création du Pod GenServer, persisté tel
-          # quel dans `state.json` (point de recovery).
+          # `started_at` ISO8601 figé à la création du Pod, persisté tel quel dans `state.json`.
           started_at: DateTime.t(),
+          resume: boolean(),
           cap_profile: Fleet.CapProfile.t(),
           env_vars: %{String.t() => String.t()},
           pod_dir: Path.t(),
@@ -109,7 +127,9 @@ defmodule Fleet.Spawner.Pod do
           last_result: map() | nil,
           # Nom de la session tmux du pod (`lcars-pod-<id>` sur le sock PAR-POD, posé par
           # LauncherPortBackend). Sert au kick/wake (PodTmux) et au teardown sock-aware.
-          tmux_session: String.t() | nil
+          tmux_session: String.t() | nil,
+          # Dernier échantillon de liveness (taille jsonl, jiffies CPU) ; nil avant le 1er tick.
+          liveness_sample: term()
         }
 
   # ============================================================
@@ -117,22 +137,22 @@ defmodule Fleet.Spawner.Pod do
   # ============================================================
 
   @doc """
-  Démarre un Pod GenServer pour un nouveau pod éphémère.
+  Démarre un Pod `gen_statem` pour un nouveau pod éphémère.
 
   Invoqué par `Fleet.Spawner.spawn_pod/3` via le child_spec passé à
-  `DynamicSupervisor.start_child/2`. L'`init/1` enchaîne ensuite
-  les phases via `handle_continue/2`.
+  `DynamicSupervisor.start_child/2`. L'`init/1` enchaîne ensuite la chaîne de boot
+  via l'évènement interne `:proceed`.
   """
-  @spec start_link(map()) :: GenServer.on_start()
+  @spec start_link(map()) :: {:ok, pid()} | :ignore | {:error, term()}
   def start_link(args) do
-    GenServer.start_link(__MODULE__, args, name: name(args.pod_id))
+    :gen_statem.start_link(name(args.pod_id), __MODULE__, args, [])
   end
 
   @doc """
-  Renvoie le nom registry-via du Pod GenServer pour un `pod_id`.
+  Renvoie le nom registry-via du Pod pour un `pod_id`.
 
-  Utilisé pour `GenServer.call` ciblé + `kill_pod` lookup
-  (`Fleet.Spawner.Registry`).
+  Utilisé pour `GenServer.call`/`GenServer.cast` ciblés (compatibles `gen_statem`) +
+  `kill_pod` lookup (`Fleet.Spawner.Registry`).
   """
   @spec name(String.t()) :: {:via, Registry, {Fleet.Spawner.Registry, String.t()}}
   def name(pod_id) when is_binary(pod_id) do
@@ -140,457 +160,115 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # ============================================================
-  # GenServer callbacks
+  # gen_statem callbacks
   # ============================================================
 
-  @impl GenServer
+  @impl :gen_statem
+  def callback_mode, do: [:handle_event_function, :state_enter]
+
+  @impl :gen_statem
   def init(args) do
-    state = recover_or_init(args)
-    {:ok, state, {:continue, Recovery.first_continue_for(state)}}
-  end
-
-  @impl GenServer
-  def handle_continue(:allocate, state), do: do_allocate(state)
-  def handle_continue(:clean, state), do: do_clean(state)
-  def handle_continue(:project, state), do: do_project(state)
-  def handle_continue(:inject, state), do: do_inject(state)
-  def handle_continue(:launch, state), do: do_launch(state)
-  def handle_continue(:monitor, state), do: do_monitor(state)
-  def handle_continue(:extract, state), do: do_extract(state)
-  def handle_continue(:release, state), do: do_release(state)
-
-  @impl GenServer
-  def handle_call(:info, _from, state) do
-    info = %{
-      pod_id: state.pod_id,
-      ticket_id: state.ticket_id,
-      # Le RÔLE est gravé au SPAWN (= `metadata.name` du cap-profile, source `cap_profile_name/1`),
-      # exposé côté serveur via le Registry. C'est l'identité de rôle AUTHENTIFIÉE (le pod ne peut pas la
-      # forger via le wire) : `PodTools` la résout depuis le `pod_id` au lieu du `_lcars_role` du fil
-      # (non authentifié → usurpation `architect` par POST direct). Le wire propose, le SPAWN dispose.
-      role: cap_profile_name(state.cap_profile),
-      # Plus de `capability` exposée ici : l'identité du pod n'est plus un secret présenté sur le fil mais
-      # le CANAL lui-même — chaque pod a sa socket MCP AF_UNIX, montée dans son seul sandbox (R9). « Quelle
-      # socket reçoit » = « quel pod » → le central n'a plus de secret à vérifier (cf. Fleet.MCP.PodSocketAcceptor).
-      phase: state.phase,
-      conditions: MapSet.to_list(state.conditions),
-      # SLOT-FREEZE : le gate du dispatcher distingue un pipe IDLE (re-mandatable) d'un pipe qui TRAVAILLE
-      # encore une tache (pending/assigned/in_progress) — sans ca il resetterait un workspace en plein
-      # travail. Combine a :publishing pour decider :ready (idle ET dernier livrable confirme sur la forge).
-      has_active_task: TaskProbe.pod_has_active_task?(state.pod_id),
-      session_id: state.session_id,
-      pod_dir: state.pod_dir,
-      state_fs_path: state.state_fs_path,
-      last_error: state.last_error,
-      last_result: state.last_result,
-      # tmux_session : nom de la session tmux du pod, posé par LauncherPortBackend (les deux
-      # launchers N0 bwrap/host créent un tmux par-pod), nil pour StubBackend. Exposé pour
-      # Fleet.Spawner.wake_pod/1 (décide trigger+armement vs `:not_a_tmux_pod` ; la boucle send-keys ensuite).
-      tmux_session: state.tmux_session
-    }
-
-    {:reply, info, state}
-  end
-
-  # kill = transition de release DÉLIBÉRÉE, pas un kill brutal du supervisor.
-  # Teardown backend + libère la task (abort, pas succès → clear_for_pod) + état
-  # terminal `:killed`, puis arrêt :normal. Le fallback brutal (terminate_child)
-  # ne sert que si ce call timeout (cf. kill_pod/1).
-  # SLOT-FREEZE : reset COLD in-place du workspace d'un pipe RESIDENT pour le ticket suivant (cable par
-  # le gate a l'etape 4). PAS de rm_rf (bind mount vivant) — reset --hard base + clean + checkout -B
-  # feature/work via ProjectBootstrap.reset_in_place, puis /clear du REPL. Appele quand le pod est :ready
-  # (livrable du ticket precedent confirme sur la forge -> le push a deja LU le workspace : reset sur).
-  def handle_call({:reprovision_pipe_workspace, project, opts}, _from, state) do
-    eff_cap = %{state.cap_profile | spec: Map.put(state.cap_profile.spec, "project", project)}
-
-    case Fleet.ProjectBootstrap.Phase.Clone.reset_in_place(state.pod_dir, eff_cap, opts) do
-      {:ok, ws, branch} ->
-        _ = Fleet.Spawner.PodTmux.send_keys(state.pod_id, "/clear")
-
-        Logger.info(
-          "pod #{state.pod_id} workspace reprovisionne COLD (#{ws} branch=#{branch}) + /clear"
-        )
-
-        {:reply, :ok, state}
-
-      {:error, reason} = err ->
-        Logger.error("pod #{state.pod_id} reprovision workspace ECHOUE : #{inspect(reason)}")
-        {:reply, err, state}
+    # `recover_or_init` (via `deterministic_session_id`) RAISE pour un rôle project-bound sans
+    # repo_id (forge non résolue) — on ne fabrique JAMAIS un UUID de complaisance. On rend alors
+    # `{:stop, {exception, stacktrace}}` : `start_link` renvoie `{:error, {%ArgumentError{}, stack}}`
+    # (forme identique à l'ancien GenServer dont l'init_it formatait la même paire — fail-loud, aucun launch).
+    try do
+      recovered = recover_or_init(args)
+      start_state = continue_to_state(Recovery.first_continue_for(recovered))
+      # `data` = le state map MOINS `phase` (= l'état gen_statem) et `recovery` (consommé ici).
+      data = Map.drop(recovered, [:phase, :recovery])
+      {:ok, start_state, data, [{:next_event, :internal, :proceed}]}
+    rescue
+      e -> {:stop, {e, __STACKTRACE__}}
     end
   end
 
-  def handle_call(:kill, _from, state) do
-    # Checkpoint le seed même sur kill délibéré (mémoire préservée).
-    maybe_checkpoint_seed(state)
-    Backend.teardown_backend(state)
-    clear_pod_task(state.pod_id)
-
-    new_state =
-      state
-      |> Map.put(:phase, :killed)
-      |> add_condition(:home_released)
-
-    StateFs.write_state_fs(new_state)
-    {:stop, :normal, :ok, new_state}
-  end
-
-  # Teardown GARANTI du backend à la mort du Pod GenServer, quel que soit le chemin d'arrêt. OTP appelle
-  # `terminate/2` sur TOUT `{:stop, _, _}` (succès, kill, échec de transition, exit-avant-résultat) ET sur
-  # un crash de callback (raise/exit dans un `handle_*`). On NE trappe PAS les exits : ça ne couvrirait QUE
-  # le `:shutdown` envoyé par le superviseur (cas où le BEAM s'arrête de toute façon et où `--die-with-parent`
-  # fait déjà tomber claude+tmux), au prix de changer la sémantique des liens du process.
-  #
-  # Les chemins succès (`do_release`) et kill (`handle_call :kill`) appellent DÉJÀ `teardown_backend`
-  # explicitement AVANT leur `{:stop}` — on les garde : l'ordre « checkpoint le seed AVANT de tuer le
-  # backend » y est co-localisé, et le `:ok` rendu par `kill_pod` y signifie « teardown fait » (sémantique
-  # synchrone). `terminate/2` est le FILET pour les autres arrêts (échec de transition, exit-avant-résultat)
-  # qui, sinon, laisseraient le backend ORPHELIN vivant : claude continue à brûler l'OAuth et la RAM
-  # jusqu'à ce que le reaper périodique le repêche bien plus tard, et seulement s'il tourne. Couvre aussi
-  # l'orphelin d'un crash de `handle_*` (bonus du callback OTP).
-  #
-  # `teardown_backend/1` est idempotent (Port déjà fermé → la garde `Port.info` court-circuite la branche
-  # port ; le kill tmux = `kill-server` + `pkill` ancré, no-op sur une cible déjà morte ; `File.rm_rf` ne
-  # lève pas sur l'absent), donc le double appel sur les chemins succès/kill est inoffensif. Protégé par
-  # rescue/catch : `terminate` ne doit JAMAIS lever, sinon il masque la vraie raison d'arrêt — un échec de
-  # teardown est loggé, pas propagé.
-  #
-  # Le FILET libère AUSSI la socket MCP per-pod du pod (transport AF_UNIX, R9) : la clause `after` la
-  # release sur TOUT chemin (succès, kill, échec de transition, crash) — même si `teardown_backend` lève
-  # (le `after` court quand même). Sans elle, le fichier socket + son dir per-pod FUITERAIENT à chaque mort
-  # (fermer la socket libère le FD, PAS le fichier — même famille de fuite FS que le pod_dir orphelin).
-  @impl GenServer
-  def terminate(reason, state) do
-    Backend.teardown_backend(state)
-    :ok
-  rescue
-    e ->
-      Logger.warning(
-        "pod #{Map.get(state, :pod_id)} terminate: teardown a levé (non-fatal ; arrêt=#{inspect(reason)}) — #{Exception.message(e)}"
-      )
-
-      :ok
-  catch
-    kind, value ->
-      Logger.warning(
-        "pod #{Map.get(state, :pod_id)} terminate: teardown #{kind} (non-fatal ; arrêt=#{inspect(reason)}) — #{inspect(value)}"
-      )
-
-      :ok
-  after
-    # Toujours exécuté (succès OU rescue/catch du teardown) → la socket est libérée même si le teardown
-    # backend lève. `release_pod_socket/1` est self-protégé (ne lève jamais) : un raise ici se propagerait
-    # hors de `terminate`, ce qui masquerait la vraie raison d'arrêt.
-    Backend.release_pod_socket(state)
-  end
+  # Mappe le `{:continue, X}` historique de `Pod.Recovery.first_continue_for/1` (qu'on NE modifie
+  # PAS — module Pod.*) vers le NOM d'état gen_statem. En pratique recover_or_init pose toujours
+  # `recovery: :recreate`/`:release` → l'état de départ est :allocating ou :releasing ; les autres
+  # mappings couvrent les clauses phase-based (défensif).
+  defp continue_to_state(:allocate), do: :allocating
+  defp continue_to_state(:clean), do: :cleaning
+  defp continue_to_state(:project), do: :projecting
+  defp continue_to_state(:inject), do: :injecting
+  defp continue_to_state(:launch), do: :launching
+  defp continue_to_state(:monitor), do: :monitoring
+  defp continue_to_state(:extract), do: :extracting
+  defp continue_to_state(:release), do: :releasing
 
   # ============================================================
-  # handle_info — cycle de vie du Port
-  # ============================================================
-  #
-  # LauncherPortBackend.launch ouvre `Port.open` (sous le process Pod) et bloque
-  # jusqu'à la 1ʳᵉ frame `init` NDJSON. Après, le Pod reprend la main
-  # (handle_continue :monitor → :extract → :release → :succeeded). Le
-  # Port n'est PAS fermé : claude continue à streamer (assistant events,
-  # result event final, exit_status). Sans clause handle_info, ces
-  # messages tombent dans le default → log unexpected message, la state
-  # machine ne note JAMAIS la complétion réelle.
-  #
-  # Format Port options actuelles (LauncherPortBackend) : `:binary`
-  # + `:exit_status`, PAS `{:line, _}` ni `{:packet, :line}` → on reçoit
-  # `{port, {:data, binary_chunk}}` (multi-events ou partial), buffering
-  # + split sur "\n" requis.
-
-  # Complétion event-driven : le broker fleet_task_queue broadcast
-  # %Fleet.Event{task_completed} sur fleet.events. On ne réagit qu'au NÔTRE (pod_id) en :monitoring.
-  @impl GenServer
-  def handle_info(
-        %Fleet.Event{source: :task_queue, type: :task_completed, pod_id: pid, payload: payload},
-        %{phase: :monitoring, pod_id: pid} = state
-      ) do
-    result = payload[:result] || payload["result"] || %{}
-    # Le résultat est arrivé → annuler le deadline AVANT d'extraire (sinon le timer
-    # du cycle courant fire plus tard en :monitoring et tue le pod sain).
-    state = cancel_result_deadline(state)
-
-    # SLOT-FREEZE : un pipe traite N tickets ; son `ticket_id` fige au SPAWN est stale des le 2e. On ADOPTE
-    # le ticket_id de la TACHE complétée (porte par l'event task_completed : payload.ticket_id =
-    # completed.ticket_id) -> le livrable (pod_completed_payload -> HopConsumer push HEAD:lcars/issue-N)
-    # est attribue a la BONNE brique. Sinon le 2e livrable+ ecrase la branche/PR du 1er ticket (bug
-    # hello-buddy : Bob#3 pousse sur la PR de Zorro#4, 2 notes empilees, juges flip-flop).
-    state = adopt_task_ticket_id(state, payload)
-    {:noreply, Map.put(state, :submitted_result, result), {:continue, :extract}}
-  end
-
-  # %Fleet.Event{task_completed} d'un autre pod, ou hors phase :monitoring → ignore.
-  def handle_info(%Fleet.Event{source: :task_queue, type: :task_completed}, state),
-    do: {:noreply, state}
-
-  # SLOT-FREEZE : le livrable de CE pod est confirme sur la forge (push + PR OK -> le push a deja LU le
-  # workspace). On leve :publishing -> le pod est :ready (reset/re-mandate surs, etape 4). Matche par
-  # pod_id (bind `pid` des deux cotes). Les deliverable.published d'AUTRES pods -> ignores (catch-all).
-  def handle_info(
-        %Fleet.Event{type: :"deliverable.published", pod_id: pid},
-        %{pod_id: pid} = state
-      ) do
-    if MapSet.member?(state.conditions, :publishing) do
-      Logger.info("pod #{state.pod_id} livrable confirme sur forge -> :ready")
-    end
-
-    {:noreply, leave_publishing(state)}
-  end
-
-  def handle_info(%Fleet.Event{type: :"deliverable.published"}, state), do: {:noreply, state}
-
-  # Deadline : timeout de RÉPONSE. Au FIRE, on distingue :
-  #   - task active (pending/assigned/in_progress) → le pod n'a PAS répondu à temps → échec.
-  #   - aucune task active → le pod attendait juste sa prochaine task (idle) ; ce n'est
-  #     PAS un timeout de réponse → on laisse lapser, PAS de kill (sinon on re-crée un
-  #     idle-kill : tuer un pod sain qui attend du travail). La vérif est à l'instant du
-  #     fire (≠ à l'armement) → couvre la race d'enqueue worker ET l'inter-stage pipe d'un coup.
-  def handle_info(:result_deadline, %{phase: :monitoring} = state) do
-    if TaskProbe.pod_has_active_task?(state.pod_id) do
-      transition_failed(state, {:result_timeout, state.pod_id})
-    else
-      {:noreply, Map.put(state, :result_deadline_ref, nil)}
-    end
-  end
-
-  def handle_info(:result_deadline, state), do: {:noreply, state}
-
-  # SLOT-FREEZE fail-safe : la confirmation deliverable.published n'est pas arrivee dans le delai (role
-  # sans livrable git, ou push KO). On leve :publishing quand meme — sinon le pod resterait jamais-:ready
-  # donc jamais re-mandate (wedge). Logge WARNING : une confirmation manquee doit etre visible.
-  def handle_info(:publish_deadline, state) do
-    if MapSet.member?(state.conditions, :publishing) do
-      Logger.warning(
-        "pod #{state.pod_id} :publishing -> :ready par DEADLINE (deliverable.published non recu a temps)"
-      )
-    end
-
-    {:noreply, leave_publishing(state)}
-  end
-
-  # Watchdog de LIVENESS (pas de durée). Tick récurrent (workers seulement, armé par
-  # arm_result_deadline) : si le pod a BOUGÉ depuis le tick précédent (taille jsonl ↑ OU jiffies CPU ↑)
-  # → ré-arme le deadline (repousse le kill) ; sinon → laisse le deadline courir. Résultat : un engineer qui
-  # bosse ne timeout JAMAIS ; le `:result_deadline` ne fire que sur silence total. Hors :monitoring → no-op
-  # (tick résiduel après transition).
-  def handle_info(:liveness_tick, %{phase: :monitoring} = state) do
-    sample = Liveness.liveness_sample(state)
-    moved? = Liveness.liveness_moved?(Map.get(state, :liveness_sample), sample)
-    state = Map.put(state, :liveness_sample, sample)
-
-    state =
-      if moved?,
-        do: arm_result_deadline(state),
-        else: schedule_liveness_tick(state)
-
-    {:noreply, state}
-  end
-
-  def handle_info(:liveness_tick, state), do: {:noreply, state}
-
-  def handle_info({port, {:exit_status, exit_code}}, %{port: port} = state)
-      when is_port(port) do
-    # Complétion event-driven : si le résultat a été extrait (event
-    # task_queue.task_completed reçu → :output_extracted), l'exit est l'arrêt normal post-release.
-    # Sinon le process est mort SANS soumettre de résultat → échec (plus de salvage fichier).
-    if MapSet.member?(state.conditions, :output_extracted) do
-      {:stop, :normal, state}
-    else
-      # Process mort SANS résultat soumis → task active orpheline. Libère.
-      clear_pod_task(state.pod_id)
-
-      Events.best_effort_broadcast("pod.failed", %{
-        "pod_id" => state.pod_id,
-        "ticket_id" => state.ticket_id,
-        "reason" => "exited_before_result",
-        "exit_code" => exit_code
-      })
-
-      Logger.warning("pod #{state.pod_id} exited before submitting result (exit=#{exit_code})")
-      {:stop, {:shutdown, {:exited_before_result, exit_code}}, state}
-    end
-  end
-
-  # Boucle KICK ack-driven UNIFIÉE (bootstrap + wake-fallback, paramétrée : cap/retry/mot-clé/ACK).
-  # Tick borné (le pod est en :monitoring). Le contrôle = l'ACK de l'agent (`acked?/3`), JAMAIS un proxy :
-  #   - ACK (pull pour un wake / poll pour un bootstrap) → stop + cancel timer ;
-  #   - cap sans ACK → broadcast `wake.failed` (escalade ring-propre) + cancel ;
-  #   - tmux joignable → kick_send (mot-clé `yop` bootstrap / `wake` fallback) + reschedule ;
-  #   - tmux pas encore up → reschedule sans consommer de send-keys.
-  # Une erreur send-keys n'interrompt pas le pod (le monitor time-out couvre).
-  def handle_info({:kick_attempt, n}, %{tmux_session: session} = state)
-      when is_binary(session) do
-    # Un pod SANS mandat en attente (interactif/forever comme l'architecte, ou permanent booté
-    # à froid comme le gatekeeper) n'a RIEN à puller : ses mandats arrivent plus tard via
-    # `wake_pod`. On se contente alors d'un BOOTSTRAP — réveil du REPL + armement du Monitor
-    # — borné et ESPACÉ (pas de rafale de 12 yops qui distrait l'agent). Un worker
-    # (mandat enqueué au spawn) garde le kick fréquent jusqu'au pull. Détection race-safe :
-    # l'enqueue du mandat (ms après spawn, par le rail forge-driven) précède largement le 1er kick
-    # (+2s) → un worker a déjà son mandat `pending`, un pod permanent a `pod_status == {:ok, nil}`.
-    bootstrap? = TaskProbe.no_pending_mandate?(state.pod_id)
-
-    # polled? = l'agent a déjà appelé get_task (ACK in-band). Calculé 1× : sert au bootstrap-stop ET au
-    # choix du mot-clé (pas encore pollé = bootstrap-arm "yop" ; déjà pollé = pod running → fallback "wake").
-    polled = TaskProbe.polled?(state)
-    cap = if bootstrap?, do: Kick.kick_bootstrap_max(), else: Kick.kick_max_attempts()
-    retry = if bootstrap?, do: Kick.kick_bootstrap_retry_ms(), else: Kick.kick_retry_ms()
-
-    cond do
-      # ACK (pull pour un wake / poll pour un bootstrap, cf. acked?/3) = l'agent a tendu la main →
-      # on STOPPE la boucle (cancel timer ; le porteur/flag prend le relais). On se fie à l'ACTE de
-      # l'agent (last_poll/pod_status TaskQueue), pas à un proxy host-side (« process watch.sh existe »).
-      Kick.acked?(TaskProbe.mandate_pulled?(state.pod_id), bootstrap?, polled) ->
-        Logger.debug(
-          "pod #{state.pod_id} acké (pull/poll) → kick stoppé (porteur prend le relais)"
-        )
-
-        {:noreply, cancel_kick(state)}
-
-      n >= cap ->
-        # Cap épuisé = l'agent n'a JAMAIS acké (ni flag, ni send-keys). bootstrap = jamais
-        # pollé (démarrage KO) ; wake/worker = jamais pull (mandat non-acké). Ring-propre : on BROADCAST
-        # (Ring 1) → un consumer fleet_pilot (Ring 2) `record_or_escalate` → récurrent = `:sp_suspect`.
-        phase = if bootstrap?, do: :bootstrap, else: :wake
-
-        Logger.warning(
-          "pod #{state.pod_id} kick (#{phase}) abandonné après #{n} tentatives — agent jamais acké → escalade #5.2"
-        )
-
-        # Capture l'écran (fallback-ACK déporté, best-effort) → le consumer l'attache au ticket.
-        Events.best_effort_broadcast("wake.failed", %{
-          "pod_id" => state.pod_id,
-          "reason" => {:no_ack, phase},
-          "pane" => Fleet.Spawner.PodTmux.capture_pane(state.pod_id)
-        })
-
-        {:noreply, cancel_kick(state)}
-
-      Fleet.Spawner.PodTmux.alive?(state.pod_id) ->
-        _ = Kick.kick_send(state, polled)
-        {:noreply, schedule_kick(state, n + 1, retry)}
-
-      true ->
-        {:noreply, schedule_kick(state, n + 1, retry)}
-    end
-  end
-
-  # Pas de tmux_session (StubBackend, ou session disparue/kill race) → pas de kick.
-  def handle_info({:kick_attempt, _n}, state), do: {:noreply, state}
-
-  # Catch-all silencieux : autres messages (down, monitor, etc.) ignorés.
-  def handle_info(_other, state), do: {:noreply, state}
-
-  # Ré-armement de la deadline de réponse — déclenché par `wake_pod` quand une nouvelle tâche
-  # est assignée à un pod long-lived. Seulement en :monitoring (hors-monitoring = pas de fenêtre de
-  # réponse active) ; sinon no-op. arm_result_deadline annule l'ancien timer + en arme un neuf.
-  @impl GenServer
-  def handle_cast(:rearm_deadline, %{phase: :monitoring} = state) do
-    {:noreply, arm_result_deadline(state)}
-  end
-
-  def handle_cast(:rearm_deadline, state), do: {:noreply, state}
-
-  # `wake_pod` arme la boucle ack-driven. Le porteur (flag) vient d'être touché ; la boucle est le
-  # FALLBACK — elle ne send-keys `"wake"` QUE si le pull n'arrive pas (mandate_pulled? faux), puis escalade
-  # au cap. 1er tick après `kick_first_delay_ms` : on laisse le flag livrer d'abord (pas de double-trigger).
-  def handle_cast(:arm_kick, state) do
-    {:noreply, arm_kick(state)}
-  end
-
-  # (Parser NDJSON `parse_chunks`/`handle_event` retiré : le modèle -p est mort.
-  #  La complétion vient de l'event Bus task_queue.task_completed, pas d'un event `result` NDJSON.)
-
-  # ============================================================
-  # Phases
+  # state_enter — armement de :monitoring (le seul état qui en a besoin)
   # ============================================================
 
-  defp do_allocate(state) do
-    # I/O non-bang via safe_* (erreur propagée → transition_failed clean, pas de
-    # crash brutal du GenServer). `with_resolved_disallowed_tools` peut raise sur
-    # baseline corrompue (fail-closed intangible) → catch via rescue +
-    # transition_failed plutôt que crash brutal.
-    cap_profile_path = Path.join(state.pod_dir, ".cap-profile.json")
+  # On souscrit au Bus à la 1ʳᵉ entrée (depuis :launching) UNIQUEMENT : une re-souscription au
+  # retour depuis :extracting (pod long-lived) doublerait les messages. Puis on (ré)arme les
+  # watchdogs de réponse (state_timeout :result_deadline + generic timeout :liveness).
+  @impl :gen_statem
+  def handle_event(:enter, old_state, :monitoring, data) do
+    unless old_state == :extracting, do: Bus.subscribe()
+    {:keep_state_and_data, arm_result_deadline_actions(data)}
+  end
 
-    with {:ok, resolved} <- safe_resolve_disallowed(state.cap_profile),
+  # Tous les autres états : l'entrée ne fait rien (le travail vit dans `:proceed`).
+  def handle_event(:enter, _old_state, _state, _data), do: :keep_state_and_data
+
+  # ============================================================
+  # Chaîne de boot — évènement interne :proceed (priorité sur la mailbox)
+  # ============================================================
+
+  # ALLOCATE — I/O non-bang via safe_* (erreur → transition_failed clean, pas de crash brutal).
+  # `with_resolved_disallowed_tools` peut raise sur baseline corrompue (fail-closed intangible)
+  # → catch via safe_resolve_disallowed + transition_failed.
+  def handle_event(:internal, :proceed, :allocating, data) do
+    cap_profile_path = Path.join(data.pod_dir, ".cap-profile.json")
+
+    with {:ok, resolved} <- safe_resolve_disallowed(data.cap_profile),
          :ok <- gate_cap_profile(resolved),
-         :ok <- Fs.safe_mkdir_p(state.pod_dir),
+         :ok <- Fs.safe_mkdir_p(data.pod_dir),
          :ok <-
            Fs.safe_write(
              cap_profile_path,
              Jason.encode!(Map.from_struct(resolved), pretty: true)
            ) do
-      new_state = %{state | phase: :cleaning}
-      {:noreply, new_state, {:continue, :clean}}
+      {:next_state, :cleaning, data, [{:next_event, :internal, :proceed}]}
     else
-      {:error, reason} -> transition_failed(state, {:allocate_failed, reason})
+      {:error, reason} -> transition_failed(data, {:allocate_failed, reason})
     end
   end
 
-  defp safe_resolve_disallowed(cap_profile) do
-    {:ok, Fleet.CapProfile.with_resolved_disallowed_tools(cap_profile)}
-  rescue
-    e -> {:error, {:baseline_corrupt, Exception.message(e)}}
-  end
-
-  # Porte de containment (dont le deny des server-tools natifs Anthropic) câblée au
-  # boundary spawn. Si `validate/1` (toute la sémantique de containment) n'était appelée
-  # QUE par les tests, la porte serait creuse : un profil neuf ou un modop qui remplace
-  # `disallowedTools` bypasserait silencieusement. Fail-loud : profil containment-invalide
-  # → :failed, le pod n'est JAMAIS lancé. Le JSON-schema (load/compose) ne couvre PAS
-  # toutes ces règles de containment — d'où le besoin de validate/1 ici.
-  defp gate_cap_profile(resolved) do
-    case Fleet.CapProfile.validate(resolved) do
-      :ok -> :ok
-      {:error, violations} -> {:error, {:cap_profile_invalid, violations}}
-    end
-  end
-
-  defp do_clean(state) do
+  def handle_event(:internal, :proceed, :cleaning, data) do
     # GC d'UUID : avec des session_id DÉTERMINISTES + pod_dir survivant (kill -9 / crash →
     # teardown raté → `safe_mkdir_p` PRÉSERVE le dir en :allocate), un re-spawn en `--session-id`
     # (resume=false) heurterait `Session ID already in use` si un `<uuid>.jsonl` traîne. On le supprime
     # → `--session-id` crée toujours frais. (resume=true → `SeedStore.restore` écrase le jsonl : pas de GC.)
-    unless state.resume, do: Scaffold.gc_stale_session_jsonl(state)
-
-    new_state = %{state | phase: :projecting}
-    {:noreply, new_state, {:continue, :project}}
+    unless data.resume, do: Scaffold.gc_stale_session_jsonl(data)
+    {:next_state, :projecting, data, [{:next_event, :internal, :proceed}]}
   end
 
-  defp do_project(state) do
-    # Toutes les I/O dans la chaîne `with` (non-bang) → erreur propagée →
-    # transition_failed clean (state.json phase=failed écrit).
-    #
-    # Modèle ticket-driven : le brief n'est PAS un prompt user-canal (safety
-    # guardrail refus). Il est :
-    #   1. Écrit en `tickets/<ticket_id>.md` (claude le voit comme contenu
-    #      projet via Read tool — pas comme injection)
-    #   2. Pushé dans la TaskQueue centrale (le pod PULL via tool MCP
-    #      get_task déclenché par le mot-clé `yop`)
-    # Le SP draft `agent-worker-base.md` (append au SP composé) déclare le
-    # workflow yop → get_task → traite → submit_result + convention fail.
-    # Le `.claude/protocole-user.md` est injecté pour le mot-clé `yop`.
+  # PROJECT — toutes les I/O dans la chaîne `with` (non-bang) → erreur propagée → transition_failed
+  # clean (state.json phase=failed écrit). Modèle ticket-driven : le brief est écrit en
+  # `tickets/<ticket_id>.md` (lu comme contenu projet, pas comme injection-prompt) ET pushé en
+  # TaskQueue (le pod PULL via le tool MCP get_task, déclenché par le mot-clé `yop`).
+  def handle_event(:internal, :proceed, :projecting, data) do
     skills_root = Application.get_env(:fleet_spawner, :skills_root, nil)
-    repo_md = Path.join(state.pod_dir, "CLAUDE.md.repo-source")
+    repo_md = Path.join(data.pod_dir, "CLAUDE.md.repo-source")
 
     # `.claude/` est POD-OWNED. bwrap ne bind QUE `.credentials.json` dedans (pas le .claude
     # humain entier). Sinon fuite de hooks : cwd=HOME=POD_DIR, donc les tiers settings
-    # `project`/`local` (racine = cwd) résoudraient dans `$POD_DIR/.claude/` = le `.claude`
-    # humain bindé → le settings.json humain (et ses hooks) lu comme settings *projet*.
-    # `--setting-sources project,local` n'y peut rien (il autorise project/local). D'où :
-    # `.claude/` pod-owned + aucun settings.json dedans → tiers project/local vides → 0 hook
-    # humain. Fichiers pod (settings/SP/protocole) en .lcars/ ; CLAUDE.md → racine pod.
-    pod_claude_dir = Path.join(state.pod_dir, ".claude")
-    lcars_dir = Path.join(state.pod_dir, ".lcars")
-    tickets_dir = Path.join(state.pod_dir, "tickets")
+    # `project`/`local` résoudraient dans `$POD_DIR/.claude/` = le `.claude` humain bindé → le
+    # settings.json humain (et ses hooks) lu comme settings *projet*. D'où : `.claude/` pod-owned
+    # + aucun settings.json dedans → tiers project/local vides → 0 hook humain. Fichiers pod
+    # (settings/SP/protocole) en .lcars/ ; CLAUDE.md → racine pod.
+    pod_claude_dir = Path.join(data.pod_dir, ".claude")
+    lcars_dir = Path.join(data.pod_dir, ".lcars")
+    tickets_dir = Path.join(data.pod_dir, "tickets")
 
     with {:ok, sp_compose} <-
-           SPBuilder.compose(state.cap_profile, [], pod_id: state.pod_id, job_id: state.ticket_id),
+           SPBuilder.compose(data.cap_profile, [], pod_id: data.pod_id, job_id: data.ticket_id),
          {:ok, claude_md} <-
-           SPBuilder.compose_claude_md(state.cap_profile, Scaffold.maybe_path(repo_md)),
-         {:ok, _skills_paths} <- Scaffold.maybe_filter_skills(state.cap_profile, skills_root),
-         {:ok, agent_draft} <- Scaffold.read_agent_draft(state.cap_profile),
+           SPBuilder.compose_claude_md(data.cap_profile, Scaffold.maybe_path(repo_md)),
+         {:ok, _skills_paths} <- Scaffold.maybe_filter_skills(data.cap_profile, skills_root),
+         {:ok, agent_draft} <- Scaffold.read_agent_draft(data.cap_profile),
          {:ok, protocole_user} <- Scaffold.read_protocole_user(),
          :ok <- Fs.safe_mkdir_p(lcars_dir),
          # `.claude/` pod-owned = cible du bind creds-only (bwrap_launch). On ne crée QUE le dir,
@@ -602,304 +280,559 @@ defmodule Fleet.Spawner.Pod do
              sp_compose.sp_md <> "\n\n---\n\n" <> agent_draft
            ),
          # CLAUDE.md custom à la RACINE du pod (projet/cwd, non masquée) ; le reste en .lcars/.
-         :ok <- Fs.safe_write(Path.join(state.pod_dir, "CLAUDE.md"), claude_md),
+         :ok <- Fs.safe_write(Path.join(data.pod_dir, "CLAUDE.md"), claude_md),
          :ok <- Fs.safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
          :ok <-
            Fs.safe_write(Path.join(lcars_dir, "settings.json"), Scaffold.pod_settings_json()),
-         # creds : plus de copie. Seul `.credentials.json` de l'humain est monté RW par
-         # bwrap_launch.sh dans `pod_dir/.claude/` (refresh OAuth natif, écriture en place). `.claude/`
-         # reste pod-owned → pas de hook humain. Les fichiers pod sont en .lcars/ + racine pod.
-         # Le `.claude.json` (onboarding + remote-control) est écrit par claude_launch.sh
-         # (frontière vendor N1) — PAS ici. Une version N0 serait clobberée à l'exec (claude_launch le
-         # ré-écrit sans condition) ET porterait de la connaissance vendor dans N0.
          :ok <- Fs.safe_mkdir_p(tickets_dir),
          :ok <-
            Fs.safe_write(
-             Path.join(tickets_dir, "#{Scaffold.ticket_id_to_filename(state.ticket_id)}.md"),
-             Scaffold.default_brief(state)
+             Path.join(tickets_dir, "#{Scaffold.ticket_id_to_filename(data.ticket_id)}.md"),
+             Scaffold.default_brief(data)
            ),
-         # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du mandat est
-         # la TaskQueue (`get_task`). Un dispatch stage enqueue AVANT le spawn (StageDispatcher) ; mais
-         # `admin.spawn` (lcars spawn --mandate) n'a PAS de dispatcher → sans cet enqueue, `get_task` rend
-         # `{done:true}` et le pod reste idle. Idempotent (skip si déjà en file).
-         :ok <- Scaffold.maybe_enqueue_mandate(state),
-         # Provisionne la socket MCP per-pod AVANT le launch (le bind bwrap échoue si le fichier socket
-         # n'existe pas encore). Le chemin host rendu est posé en `LCARS_FLEET_MCP_SOCKET` du `.mcp-fleet.json`
-         # (cf. McpProvision). Échec → propagé au `with` → transition_failed (pod sans canal = inutile).
-         {:ok, mcp_socket_path} <- Backend.ensure_pod_socket(state.pod_id),
+         # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du mandat est la
+         # TaskQueue (`get_task`). Idempotent (skip si déjà en file). Sans cet enqueue, un
+         # `admin.spawn` (sans dispatcher) verrait `get_task` rendre `{done:true}` → pod idle.
+         :ok <- Scaffold.maybe_enqueue_mandate(data),
+         # Provisionne la socket MCP per-pod AVANT le launch (le bind bwrap échoue si le fichier
+         # socket n'existe pas encore). Échec → propagé au `with` → transition_failed.
+         {:ok, mcp_socket_path} <- Backend.ensure_pod_socket(data.pod_id),
          :ok <-
            McpProvision.maybe_provision_mcp_config(
-             state.pod_dir,
-             LaunchSpec.sandbox_home(state.cap_profile, state.pod_dir),
-             state.pod_id,
+             data.pod_dir,
+             LaunchSpec.sandbox_home(data.cap_profile, data.pod_dir),
+             data.pod_id,
              mcp_socket_path,
              Backend.launch_backend()
            ),
-         :ok <- Scaffold.provision_monitor_watch(state),
-         :ok <- Scaffold.maybe_bootstrap_project_workspace(state),
+         :ok <- Scaffold.provision_monitor_watch(data),
+         :ok <- Scaffold.maybe_bootstrap_project_workspace(data),
          # Recall délibéré — restaure le seed AVANT le launch (après workspace = cwd réglé).
-         :ok <- Scaffold.maybe_recall_restore(state) do
-      new_state =
-        state
-        |> Map.put(:phase, :injecting)
-        # SP plus stocké en state (plus en argv) : la SOURCE = .lcars/system-prompt.md (écrit ci-dessus),
-        # lu par claude_launch via --system-prompt-file.
-        |> add_condition(:home_projected)
-
-      {:noreply, new_state, {:continue, :inject}}
+         :ok <- Scaffold.maybe_recall_restore(data) do
+      # SP plus stocké en data (plus en argv) : la SOURCE = .lcars/system-prompt.md (écrit ci-dessus),
+      # lu par claude_launch via --system-prompt-file.
+      data = add_condition(data, :home_projected)
+      {:next_state, :injecting, data, [{:next_event, :internal, :proceed}]}
     else
-      {:error, reason} -> transition_failed(state, {:project_failed, reason})
+      {:error, reason} -> transition_failed(data, {:project_failed, reason})
     end
   end
 
-  # `write_pod_claude_json` + `detect_claude_version` RETIRÉS. Le `.claude.json`
-  # (onboarding + remote-control pré-acceptés) est l'unique responsabilité de
-  # `claude_launch.sh` (frontière vendor N1) : une version N0 serait (1) systématiquement clobberée
-  # par le `cat >` du launcher juste avant l'exec — donc morte — et perdrait au passage les 3 clés RC
-  # (`remoteControlAtStartup`/`hasUsedRemoteControl`/`remoteDialogSeen`), ré-introduisant le blocage
-  # dialog RC qu'elle prétendait éviter ; (2) placerait de la connaissance schéma-vendor dans N0. Les
-  # clés RC vivent dans le launcher (clé `projects` correcte = `LCARS_POD_CWD`, pas `pod_dir`).
-
-  # creds : write_claude_credentials/lead_credentials_path SUPPRIMÉS.
-  # Plus de copie du `.credentials.json` du lead vers le pod : le claudeDir de
-  # l'humain est monté RW par bwrap_launch.sh (CLAUDE_DIR → ~/.claude), refresh
-  # OAuth délégué au lockfile cross-process natif Anthropic.
-
-  defp do_inject(state) do
-    # Plus de resolve_env OAuth (coffre/RT-env déprécié). Le pod s'authentifie
-    # via le claudeDir de l'humain, bindé RW par bwrap_launch.sh (env CLAUDE_DIR
-    # → ~/.claude, refresh natif Anthropic). La résolution per-humain viendra de
-    # la registration (onboarding/catalogue déférés) ; minimal ici = config
-    # `:fleet_spawner, :claude_dir`.
+  def handle_event(:internal, :proceed, :injecting, data) do
+    # Plus de resolve_env OAuth (coffre/RT-env déprécié). Le pod s'authentifie via le claudeDir de
+    # l'humain, bindé RW par bwrap_launch.sh (env CLAUDE_DIR → ~/.claude, refresh natif Anthropic).
     env_vars = %{"CLAUDE_DIR" => LaunchEnv.claude_dir()}
 
-    new_state =
-      state
-      |> Map.put(:phase, :launching)
+    data =
+      data
       |> Map.put(:env_vars, env_vars)
       |> add_condition(:context_injected)
 
-    {:noreply, new_state, {:continue, :launch}}
+    {:next_state, :launching, data, [{:next_event, :internal, :proceed}]}
   end
 
-  defp do_launch(state) do
-    # Un crash du Pod GenServer ne tue PAS le bwrap/tmux/claude (`--die-with-parent` = BEAM, pas
-    # GenServer) → pod ORPHELIN vivant (OAuth+RAM). Avant tout (re)launch, on REAP un éventuel
+  def handle_event(:internal, :proceed, :launching, data) do
+    # Un crash du Pod ne tue PAS le bwrap/tmux/claude (`--die-with-parent` = BEAM, pas le process
+    # gen_statem) → pod ORPHELIN vivant (OAuth+RAM). Avant tout (re)launch, on REAP un éventuel
     # orphelin du même pod_id : no-op pour un pod neuf ; sur recovery (:recreate) ça nettoie le
-    # mort-vivant AVANT de relancer (sinon collision sock/process), ce qui rend la recovery viable
-    # en prod. Le reaper périodique (orphelins jamais re-spawnés) est un mécanisme distinct (PodWarden).
-    Backend.reap_orphan_pod(state.pod_id)
-    role = cap_profile_name(state.cap_profile)
-    containment = cap_profile_containment(state.cap_profile)
+    # mort-vivant AVANT de relancer (sinon collision sock/process), ce qui rend la recovery viable.
+    Backend.reap_orphan_pod(data.pod_id)
+    role = cap_profile_name(data.cap_profile)
+    containment = cap_profile_containment(data.cap_profile)
 
     # Le launcher N0 dépend du containment, lu ICI (sinon bwrap aveugle pour tous).
     # "none" (host_native : architect, starfleet) → host_launch.sh (host, sans sandbox) ;
-    # sinon la chaîne bwrap. `PermanentBoot` reste générique — la branche vit sur le chemin de lancement.
+    # sinon la chaîne bwrap.
     launcher_path =
       if containment == "none", do: Backend.host_launch_path(), else: Backend.bwrap_launch_path()
 
-    # Pas de budget côté pod (OAuth pool, pas d'API). Le timeout
-    # de réponse est géré par `monitor_timeout_ms/1` côté Pod GenServer
-    # (Process.send_after :result_deadline). Les backends qui n'ont pas
-    # leur propre script de lancement (StubBackend) n'ont pas
-    # besoin de la valeur ; les clés `budget_sec`/`budget_usd` sont
-    # retirées de l'API LaunchBackend (cf. behaviour
-    # `Fleet.Spawner.LaunchBackend`).
     args = %{
       role: role,
-      pod_id: state.pod_id,
-      pod_dir: state.pod_dir,
-      # Launcher N0 sélectionné par containment (host_launch.sh | bwrap_launch.sh). L'exe du
-      # Port (build_spawn) ; l'argv reste identique des deux côtés (même contrat <role> <pod_id> <pod_dir>
-      # <command...>). Le command opaque (claude_launch.sh …) est claude_launch_path ci-dessous.
+      pod_id: data.pod_id,
+      pod_dir: data.pod_dir,
+      # Launcher N0 sélectionné par containment (host_launch.sh | bwrap_launch.sh). L'argv reste
+      # identique des deux côtés (même contrat <role> <pod_id> <pod_dir> <command...>). Le command
+      # opaque (claude_launch.sh …) est claude_launch_path ci-dessous.
       launcher_path: launcher_path,
       claude_launch_path: Backend.claude_launch_path(),
       # SP plus dans l'argv (fuite /proc/cmdline + frôle ARG_MAX) : claude_launch lit
-      # pod_dir/.lcars/system-prompt.md via --system-prompt-file (écrit en do_project). C'est la SOURCE.
-      session_id: state.session_id
+      # pod_dir/.lcars/system-prompt.md via --system-prompt-file (écrit en projecting). C'est la SOURCE.
+      session_id: data.session_id
     }
 
-    # Construction de l'env complet + résolution/validation des credentials extraites dans
-    # `Pod.LaunchEnv.build/4` (la mécanique credential sanctuarisée y a migré VERBATIM). Rend
-    # `{:ok, env}` (auth bind posée + identité git de l'humain + porte scope/plan franchie) ou un
-    # `{:error, reason}` DÉJÀ taggé (`:launch_env_unresolved` sur raise de résolution humain/passwd/
-    # vendor-bin ; `:credentials_invalid` sur refus de la porte ; `:auth_token_required` sur échec
-    # auth/identité git) → transition_failed (même cleanup que les autres échecs launch :
-    # clear_pod_task + phase=failed). `role`/`containment`/`claude_launch_path()` sont résolus ICI
-    # (côté Pod) et passés à build : `role` == `cap_profile_name(state.cap_profile)`.
-    case LaunchEnv.build(state, role, containment, Backend.claude_launch_path()) do
-      {:ok, env} -> do_launch_backend(state, args, env)
-      {:error, reason} -> transition_failed(state, reason)
+    # Construction de l'env complet + résolution/validation des credentials dans `Pod.LaunchEnv.build/4`.
+    # Rend `{:ok, env}` (auth bind posée + identité git de l'humain + porte scope/plan franchie) ou un
+    # `{:error, reason}` DÉJÀ taggé (:launch_env_unresolved / :credentials_invalid / :auth_token_required)
+    # → transition_failed (même cleanup que les autres échecs launch).
+    case LaunchEnv.build(data, role, containment, Backend.claude_launch_path()) do
+      {:ok, env} -> do_launch_backend(data, args, env)
+      {:error, reason} -> transition_failed(data, reason)
     end
   end
 
-  defp do_launch_backend(state, args, env) do
+  # EXTRACT — le résultat vient de l'event Bus (data.submitted_result), pas d'un fichier.
+  # `pod.completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir le hop).
+  # Diffusion via `required_broadcast` : son échec n'est PAS avalé. Si elle échoue, on NE progresse
+  # PAS vers release/kill (one-shot) ni vers le re-monitoring qui DROPPE `submitted_result`
+  # (long-lived) : le pod RESTE en :monitoring avec son résultat RETENU + deadline ré-armée (par
+  # l'enter de :monitoring) → un re-wake re-fire l'extract au lieu d'une complétion ORPHELINE.
+  def handle_event(:internal, :proceed, :extracting, data) do
+    result = data.submitted_result || %{}
+
+    case Events.required_broadcast("pod.completed", pod_completed_payload(data, result)) do
+      :ok ->
+        do_extract_proceed(data, result)
+
+      {:error, _reason} ->
+        # Fail-loud (déjà loggé ERROR par required_broadcast). Retour à :monitoring : son enter
+        # ré-arme le deadline. submitted_result RETENU (pas de drop) → le re-wake re-déclenche.
+        {:next_state, :monitoring, data}
+    end
+  end
+
+  # RELEASE — tue le pod interactif (Port.close → claude/bwrap/script terminés) puis ARRÊT NORMAL
+  # (sinon memory leak du DynamicSupervisor). Sous `:temporary` l'arrêt :normal n'est jamais
+  # ressuscité. Pas de clear_for_pod ici — release = succès post-EXTRACT (task déjà complétée).
+  # Checkpoint le seed AVANT de tuer le backend (JSONl encore intact).
+  def handle_event(:internal, :proceed, :releasing, data) do
+    maybe_checkpoint_seed(data)
+    Backend.teardown_backend(data)
+    data = add_condition(data, :home_released)
+    StateFs.write_state_fs(put_phase(data, :succeeded))
+    {:stop, :normal, data}
+  end
+
+  # Défensif : un :proceed dans un état qui n'en attend pas (recovery directe en :monitoring, dead
+  # path) ne crashe pas — le travail de :monitoring est dans son `:enter`, pas dans `:proceed`.
+  def handle_event(:internal, :proceed, _state, _data), do: :keep_state_and_data
+
+  # ============================================================
+  # Appels synchrones ({:call, from}) — compatibles GenServer.call
+  # ============================================================
+
+  def handle_event({:call, from}, :info, state, data) do
+    info = %{
+      pod_id: data.pod_id,
+      ticket_id: data.ticket_id,
+      # Le RÔLE est gravé au SPAWN (= `metadata.name` du cap-profile), exposé via le Registry. C'est
+      # l'identité de rôle AUTHENTIFIÉE (le pod ne peut pas la forger via le wire).
+      role: cap_profile_name(data.cap_profile),
+      # `phase` = le NOM d'état gen_statem reconstruit pour pod_info (les consommateurs en dépendent :
+      # des tests lisent phase, et le dispatcher lit conditions+has_active_task ci-dessous).
+      phase: state,
+      conditions: MapSet.to_list(data.conditions),
+      # SLOT-FREEZE : le gate du dispatcher distingue un pipe IDLE (re-mandatable) d'un pipe qui
+      # TRAVAILLE encore une tache. Combine a :publishing pour decider :ready.
+      has_active_task: TaskProbe.pod_has_active_task?(data.pod_id),
+      session_id: data.session_id,
+      pod_dir: data.pod_dir,
+      state_fs_path: data.state_fs_path,
+      last_error: data.last_error,
+      last_result: data.last_result,
+      # tmux_session : nom de la session tmux du pod (posé par LauncherPortBackend, nil pour
+      # StubBackend). Exposé pour Fleet.Spawner.wake_pod/1.
+      tmux_session: data.tmux_session
+    }
+
+    {:keep_state_and_data, [{:reply, from, info}]}
+  end
+
+  # SLOT-FREEZE : reset COLD in-place du workspace d'un pipe RESIDENT pour le ticket suivant. PAS de
+  # rm_rf (bind mount vivant) — reset --hard base + clean + checkout -B feature/work via
+  # ProjectBootstrap.reset_in_place, puis /clear du REPL. Appele quand le pod est :ready (livrable
+  # du ticket precedent confirme sur la forge -> le push a deja LU le workspace : reset sur).
+  def handle_event({:call, from}, {:reprovision_pipe_workspace, project, opts}, _state, data) do
+    eff_cap = %{data.cap_profile | spec: Map.put(data.cap_profile.spec, "project", project)}
+
+    case Fleet.ProjectBootstrap.Phase.Clone.reset_in_place(data.pod_dir, eff_cap, opts) do
+      {:ok, ws, branch} ->
+        _ = Fleet.Spawner.PodTmux.send_keys(data.pod_id, "/clear")
+
+        Logger.info(
+          "pod #{data.pod_id} workspace reprovisionne COLD (#{ws} branch=#{branch}) + /clear"
+        )
+
+        {:keep_state_and_data, [{:reply, from, :ok}]}
+
+      {:error, reason} = err ->
+        Logger.error("pod #{data.pod_id} reprovision workspace ECHOUE : #{inspect(reason)}")
+        {:keep_state_and_data, [{:reply, from, err}]}
+    end
+  end
+
+  # kill = transition de release DÉLIBÉRÉE, pas un kill brutal du supervisor. Checkpoint le seed +
+  # teardown backend + libère la task (abort, pas succès → clear) + grave phase :killed, puis arrêt
+  # :normal en répondant :ok au caller. Le fallback brutal (terminate_child) ne sert que si ce call
+  # timeout (cf. kill_pod/1).
+  def handle_event({:call, from}, :kill, _state, data) do
+    maybe_checkpoint_seed(data)
+    Backend.teardown_backend(data)
+    clear_pod_task(data.pod_id)
+    data = add_condition(data, :home_released)
+    StateFs.write_state_fs(put_phase(data, :killed))
+    {:stop_and_reply, :normal, [{:reply, from, :ok}], data}
+  end
+
+  # ============================================================
+  # Casts — compatibles GenServer.cast
+  # ============================================================
+
+  # Ré-armement de la deadline de réponse — déclenché par `wake_pod` quand une nouvelle tâche est
+  # assignée à un pod long-lived. Seulement en :monitoring (hors = pas de fenêtre de réponse active).
+  def handle_event(:cast, :rearm_deadline, :monitoring, data) do
+    {:keep_state_and_data, arm_result_deadline_actions(data)}
+  end
+
+  def handle_event(:cast, :rearm_deadline, _state, _data), do: :keep_state_and_data
+
+  # `wake_pod` arme la boucle ack-driven. Le porteur (flag) vient d'être touché ; la boucle est le
+  # FALLBACK — elle ne send-keys `"wake"` QUE si le pull n'arrive pas, puis escalade au cap. Le
+  # generic timeout :kick à le même nom → (re)l'armer RESTART le timer (un wake pendant le bootstrap
+  # ne crée pas une 2e boucle). 1er tick après kick_first_delay_ms (on laisse le flag livrer d'abord).
+  def handle_event(:cast, :arm_kick, _state, _data) do
+    {:keep_state_and_data, [schedule_kick_action(0, Kick.kick_first_delay_ms())]}
+  end
+
+  # ============================================================
+  # Timers natifs
+  # ============================================================
+
+  # Deadline (= state_timeout de :monitoring) : timeout de RÉPONSE. Au FIRE, on distingue :
+  #   - task active (pending/assigned/in_progress) → le pod n'a PAS répondu à temps → échec.
+  #   - aucune task active → le pod attendait juste sa prochaine task (idle) ; ce n'est PAS un
+  #     timeout de réponse → on laisse lapser, PAS de kill (sinon idle-kill d'un pod sain). La vérif
+  #     est à l'instant du fire (≠ à l'armement) → couvre la race d'enqueue worker ET l'inter-stage.
+  # Le state_timeout, une fois fired, n'est plus armé → pas de re-fire tant que le liveness ne ré-arme pas.
+  def handle_event(:state_timeout, :result_deadline, :monitoring, data) do
+    if TaskProbe.pod_has_active_task?(data.pod_id) do
+      transition_failed(data, {:result_timeout, data.pod_id})
+    else
+      :keep_state_and_data
+    end
+  end
+
+  # Watchdog de LIVENESS (generic timeout récurrent, workers seulement). Si le pod a BOUGÉ depuis le
+  # tick précédent (taille jsonl ↑ OU jiffies CPU ↑) → ré-arme le deadline (repousse le kill) + le
+  # tick ; sinon → re-planifie juste le tick (le deadline state_timeout continue de courir). Résultat :
+  # un engineer qui bosse ne timeout JAMAIS ; le deadline ne tombe que sur silence total.
+  def handle_event({:timeout, :liveness}, :tick, :monitoring, data) do
+    sample = Liveness.liveness_sample(data)
+    moved? = Liveness.liveness_moved?(Map.get(data, :liveness_sample), sample)
+    data = Map.put(data, :liveness_sample, sample)
+
+    actions =
+      if moved?,
+        do: arm_result_deadline_actions(data),
+        else: [liveness_tick_action(data)]
+
+    {:keep_state, data, actions}
+  end
+
+  # Tick résiduel hors :monitoring (generic timeout pas auto-annulé au changement d'état) → no-op.
+  def handle_event({:timeout, :liveness}, :tick, _state, _data), do: :keep_state_and_data
+
+  # SLOT-FREEZE fail-safe : la confirmation deliverable.published n'est pas arrivee dans le delai (role
+  # sans livrable git, ou push KO). On leve :publishing quand meme — sinon le pod resterait jamais-:ready
+  # donc jamais re-mandate (wedge). Logge WARNING : une confirmation manquee doit etre visible.
+  def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
+    if MapSet.member?(data.conditions, :publishing) do
+      Logger.warning(
+        "pod #{data.pod_id} :publishing -> :ready par DEADLINE (deliverable.published non recu a temps)"
+      )
+    end
+
+    {:keep_state, leave_publishing(data), [cancel_publish_deadline_action()]}
+  end
+
+  # Boucle KICK ack-driven UNIFIÉE (bootstrap + wake-fallback, paramétrée : cap/retry/mot-clé/ACK).
+  # Tick borné. Le contrôle = l'ACK de l'agent (`acked?/3`), JAMAIS un proxy :
+  #   - ACK (pull pour un wake / poll pour un bootstrap) → cancel le generic timeout :kick ;
+  #   - cap sans ACK → broadcast `wake.failed` (escalade ring-propre) + cancel ;
+  #   - tmux joignable → kick_send (mot-clé `yop` bootstrap / `wake` fallback) + reschedule ;
+  #   - tmux pas encore up → reschedule sans consommer de send-keys.
+  # Une erreur send-keys n'interrompt pas le pod (le monitor time-out couvre).
+  def handle_event({:timeout, :kick}, {:attempt, n}, _state, %{tmux_session: session} = data)
+      when is_binary(session) do
+    # Un pod SANS mandat en attente (interactif/forever, ou permanent booté à froid) n'a RIEN à
+    # puller : ses mandats arrivent plus tard via `wake_pod`. On se contente d'un BOOTSTRAP — réveil
+    # du REPL — borné et ESPACÉ. Un worker (mandat enqueué au spawn) garde le kick fréquent jusqu'au pull.
+    bootstrap? = TaskProbe.no_pending_mandate?(data.pod_id)
+
+    # polled? = l'agent a déjà appelé get_task (ACK in-band). Calculé 1× : sert au bootstrap-stop ET
+    # au choix du mot-clé (pas encore pollé = bootstrap-arm "yop" ; déjà pollé = pod running → "wake").
+    polled = TaskProbe.polled?(data)
+    cap = if bootstrap?, do: Kick.kick_bootstrap_max(), else: Kick.kick_max_attempts()
+    retry = if bootstrap?, do: Kick.kick_bootstrap_retry_ms(), else: Kick.kick_retry_ms()
+
+    cond do
+      # ACK = l'agent a tendu la main → on STOPPE la boucle (cancel le generic timeout :kick).
+      Kick.acked?(TaskProbe.mandate_pulled?(data.pod_id), bootstrap?, polled) ->
+        Logger.debug(
+          "pod #{data.pod_id} acké (pull/poll) → kick stoppé (porteur prend le relais)"
+        )
+
+        {:keep_state_and_data, [cancel_kick_action()]}
+
+      n >= cap ->
+        # Cap épuisé = l'agent n'a JAMAIS acké. Ring-propre : on BROADCAST (Ring 1) → un consumer
+        # fleet_pilot (Ring 2) `record_or_escalate` → récurrent = `:sp_suspect`.
+        phase = if bootstrap?, do: :bootstrap, else: :wake
+
+        Logger.warning(
+          "pod #{data.pod_id} kick (#{phase}) abandonné après #{n} tentatives — agent jamais acké → escalade #5.2"
+        )
+
+        Events.best_effort_broadcast("wake.failed", %{
+          "pod_id" => data.pod_id,
+          "reason" => {:no_ack, phase},
+          "pane" => Fleet.Spawner.PodTmux.capture_pane(data.pod_id)
+        })
+
+        {:keep_state_and_data, [cancel_kick_action()]}
+
+      Fleet.Spawner.PodTmux.alive?(data.pod_id) ->
+        _ = Kick.kick_send(data, polled)
+        {:keep_state_and_data, [schedule_kick_action(n + 1, retry)]}
+
+      true ->
+        {:keep_state_and_data, [schedule_kick_action(n + 1, retry)]}
+    end
+  end
+
+  # Pas de tmux_session (StubBackend, ou session disparue/kill race) → pas de kick.
+  def handle_event({:timeout, :kick}, {:attempt, _n}, _state, _data), do: :keep_state_and_data
+
+  # ============================================================
+  # Évènements Port / Bus (event type :info) + catch-all
+  # ============================================================
+  #
+  # Complétion event-driven : le broker fleet_task_queue broadcast %Fleet.Event{task_completed} sur
+  # fleet.events. On ne réagit qu'au NÔTRE (pod_id) en :monitoring. Le résultat est arrivé → la
+  # transition :monitoring → :extracting ANNULE NATIVEMENT le state_timeout :result_deadline (= l'invariant
+  # result_deadline_cancelled) ; on annule en plus le generic timeout :liveness (lui ne s'annule pas
+  # au changement d'état). SLOT-FREEZE : on ADOPTE le ticket_id de la TACHE complétée (porté par
+  # l'event) → le livrable est attribué à la BONNE brique (sinon le 2e livrable écrase la branche/PR du 1er).
+  def handle_event(
+        :info,
+        %Fleet.Event{source: :task_queue, type: :task_completed, pod_id: pid, payload: payload},
+        :monitoring,
+        %{pod_id: pid} = data
+      ) do
+    result = payload[:result] || payload["result"] || %{}
+
+    data =
+      data
+      |> adopt_task_ticket_id(payload)
+      |> Map.put(:submitted_result, result)
+
+    {:next_state, :extracting, data,
+     [cancel_liveness_action(), {:next_event, :internal, :proceed}]}
+  end
+
+  # %Fleet.Event{task_completed} d'un autre pod, ou hors :monitoring → ignore.
+  def handle_event(
+        :info,
+        %Fleet.Event{source: :task_queue, type: :task_completed},
+        _state,
+        _data
+      ),
+      do: :keep_state_and_data
+
+  # SLOT-FREEZE : le livrable de CE pod est confirme sur la forge (push + PR OK -> le push a deja LU le
+  # workspace). On leve :publishing -> le pod est :ready (reset/re-mandate surs, etape 4) + on annule
+  # le publish_deadline. Matche par pod_id ; les deliverable.published d'AUTRES pods -> ignores.
+  def handle_event(
+        :info,
+        %Fleet.Event{type: :"deliverable.published", pod_id: pid},
+        _state,
+        %{pod_id: pid} = data
+      ) do
+    if MapSet.member?(data.conditions, :publishing) do
+      Logger.info("pod #{data.pod_id} livrable confirme sur forge -> :ready")
+    end
+
+    {:keep_state, leave_publishing(data), [cancel_publish_deadline_action()]}
+  end
+
+  def handle_event(:info, %Fleet.Event{type: :"deliverable.published"}, _state, _data),
+    do: :keep_state_and_data
+
+  # Cycle de vie du Port : si le résultat a été extrait (event task_completed reçu → :output_extracted),
+  # l'exit est l'arrêt normal post-release. Sinon le process est mort SANS soumettre de résultat → échec.
+  def handle_event(:info, {port, {:exit_status, exit_code}}, _state, %{port: port} = data)
+      when is_port(port) do
+    if MapSet.member?(data.conditions, :output_extracted) do
+      {:stop, :normal, data}
+    else
+      # Process mort SANS résultat soumis → task active orpheline. Libère.
+      clear_pod_task(data.pod_id)
+
+      Events.best_effort_broadcast("pod.failed", %{
+        "pod_id" => data.pod_id,
+        "ticket_id" => data.ticket_id,
+        "reason" => "exited_before_result",
+        "exit_code" => exit_code
+      })
+
+      Logger.warning("pod #{data.pod_id} exited before submitting result (exit=#{exit_code})")
+      {:stop, {:shutdown, {:exited_before_result, exit_code}}, data}
+    end
+  end
+
+  # Catch-all silencieux : autres messages info (down, monitor, exit_status d'un port étranger, etc.).
+  def handle_event(:info, _msg, _state, _data), do: :keep_state_and_data
+
+  # ============================================================
+  # terminate/3 — filet teardown GARANTI (anti-orphelin + anti-fuite socket)
+  # ============================================================
+  #
+  # OTP appelle `terminate/3` sur TOUT `{:stop, _, _}` (succès, kill, échec de transition,
+  # exit-avant-résultat) ET sur un crash de callback. Les chemins succès (releasing) et kill
+  # appellent DÉJÀ `teardown_backend` explicitement AVANT leur arrêt — on les garde (l'ordre
+  # « checkpoint le seed AVANT de tuer le backend » y est co-localisé). `terminate/3` est le FILET
+  # pour les autres arrêts (échec de transition, exit-avant-résultat) qui sinon laisseraient le
+  # backend ORPHELIN vivant (claude brûle l'OAuth+RAM). `teardown_backend/1` est idempotent (port
+  # déjà fermé court-circuité, kill tmux no-op sur cible morte, File.rm_rf ne lève pas sur l'absent),
+  # donc le double appel est inoffensif. Protégé par rescue/catch : `terminate` ne doit JAMAIS lever
+  # (sinon il masque la vraie raison d'arrêt). Le `after` libère la socket MCP per-pod sur TOUT chemin
+  # (même si teardown_backend lève) — sans elle, le fichier socket + son dir per-pod FUITERAIENT.
+  @impl :gen_statem
+  def terminate(reason, _state, data) do
+    Backend.teardown_backend(data)
+    :ok
+  rescue
+    e ->
+      Logger.warning(
+        "pod #{Map.get(data, :pod_id)} terminate: teardown a levé (non-fatal ; arrêt=#{inspect(reason)}) — #{Exception.message(e)}"
+      )
+
+      :ok
+  catch
+    kind, value ->
+      Logger.warning(
+        "pod #{Map.get(data, :pod_id)} terminate: teardown #{kind} (non-fatal ; arrêt=#{inspect(reason)}) — #{inspect(value)}"
+      )
+
+      :ok
+  after
+    # Toujours exécuté → la socket est libérée même si teardown_backend lève. `release_pod_socket/1`
+    # est self-protégé (ne lève jamais) : un raise ici se propagerait hors de `terminate`.
+    Backend.release_pod_socket(data)
+  end
+
+  # ============================================================
+  # Launch backend
+  # ============================================================
+
+  defp do_launch_backend(data, args, env) do
     case Backend.launch_backend().launch(args, env) do
       {:ok, launched} when is_map(launched) ->
-        # Extrait le port (LauncherPortBackend l'inclut, StubBackend non).
-        # nil-able : un test stub n'a pas de Port → les clauses handle_info
-        # ne matchent jamais → comportement legacy préservé.
+        # Extrait le port (LauncherPortBackend l'inclut, StubBackend non). nil-able : un test stub
+        # n'a pas de Port → les clauses exit_status ne matchent jamais → comportement legacy préservé.
         port = Map.get(launched, :port)
 
-        # tmux_session posé par LauncherPortBackend (les deux launchers N0 bwrap/host) ; nil pour StubBackend.
+        # tmux_session posé par LauncherPortBackend (bwrap ET host) ; nil pour StubBackend.
         tmux_session = Map.get(launched, :tmux_session)
 
-        new_state =
-          state
-          |> Map.put(:phase, :monitoring)
+        data =
+          data
           |> Map.put(:port, port)
           |> Map.put(:tmux_session, tmux_session)
-          # session_id PRÉ-ALLOUÉ (state) — pas de capture `init_msg["session_id"]` (le modèle -p est
-          # mort ; init_msg est nil en RC interactif). L'UUID a été alloué à l'init / restauré en recovery.
-          |> Map.put(:session_id, state.session_id)
+          # session_id PRÉ-ALLOUÉ (data) — pas de capture init_msg (le modèle -p est mort).
+          |> Map.put(:session_id, data.session_id)
           |> add_condition(:process_launched)
           |> add_condition(:stream_alive)
 
-        StateFs.write_state_fs(new_state)
+        StateFs.write_state_fs(put_phase(data, :monitoring))
 
-        # Brief delivery au pod long-lived RC.
-        #
-        # Path actuel : PodTmux send-keys sur le sock par-pod (universel, bwrap ET host).
-        #   Pourquoi pas le push par MCP channel : la feature channels est gardée par un
-        #   flag `isChannelsEnabled` default false côté Anthropic. send-keys (control
-        #   plane) reste universel, le brief est injecté tel quel dans le REPL, claude
-        #   l'exécute comme prompt.
-        #
-        # Path LauncherPortBackend : pas applicable (brief.md sur disk lu par claude_launch).
-        # Path Stub (tests) : no-op (pas de tmux_session retourné).
-        new_state = inject_brief_to_tmux_pod(new_state)
-
-        {:noreply, new_state, {:continue, :monitor}}
+        # Brief delivery au pod long-lived RC : PodTmux send-keys sur le sock par-pod (universel,
+        # bwrap ET host). Path Stub (tests) : no-op (pas de tmux_session retourné → kick non armé).
+        # On arme la boucle de kick ack-driven en ACTION de transition (1er tick = bootstrap "yop").
+        {:next_state, :monitoring, data, brief_kick_actions(data)}
 
       {:error, reason} ->
-        transition_failed(state, {:launch_failed, reason})
+        transition_failed(data, {:launch_failed, reason})
     end
   end
 
-  defp do_monitor(state) do
-    # Complétion EVENT-DRIVEN (un seul mécanisme). On souscrit au Bus (Ring 0) et on attend
-    # `task_queue.task_completed` (%Fleet.Event{}, pod_id == mien) émis par le central (fleet_mcp)
-    # sur submit_result. Pas de poll du fichier result.md (mode fichier retiré). Deadline = budget
-    # durée → :failed si aucun résultat. pod.ex (Ring 1) ne lit JAMAIS fleet_mcp (Ring 4) en direct.
-    Bus.subscribe()
-    new_state = arm_result_deadline(%{state | phase: :monitoring})
-    {:noreply, new_state}
-  end
+  # Le 1er send-keys sera `yop` (bootstrap) ; le SP `agent-worker-base.md` porte le workflow
+  # get_task→submit_result. Pas de tmux_session (StubBackend/kill race) → aucune action.
+  defp brief_kick_actions(%{tmux_session: nil}), do: []
 
-  defp do_extract(state) do
-    # Le résultat vient de l'event Bus (state.submitted_result), pas d'un fichier.
-    #
-    # Branche selon lifetime_scope :
-    #   - `one-shot` : extract → release → kill (cycle complet 1 task = 1 vie pod).
-    #   - autres (`pipe`/`run`/`forever`) : pod long-lived. Le
-    #     broadcast pod.completed remonte le résultat au pipeline / starfleet
-    #     (qui décide promote/renvoi), mais le pod RESTE vivant. Retour à
-    #     :monitoring, reset submitted_result, re-arm result_deadline pour
-    #     attendre la prochaine task (réveillée par `Fleet.Spawner.wake_pod/1`
-    #     → send-keys `yop`). Release uniquement sur signal externe
-    #     (`Fleet.Spawner.kill_pod/1` invoqué par gatekeeper au promote/abandon)
-    #     ou timeout result_deadline → transition_failed.
-    #
-    # Le cycle promote/renvoi-au-dev d'un pod long-lived est piloté côté pipeline,
-    # pas ici (do_extract ne fait que remonter le résultat et ré-armer le monitoring).
-    result = state.submitted_result || %{}
+  defp brief_kick_actions(%{tmux_session: session}) when is_binary(session),
+    do: [schedule_kick_action(0, Kick.kick_first_delay_ms())]
 
-    # `pod.completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir le hop).
-    # Diffusion via `required_broadcast` : son échec n'est PAS avalé. Si elle échoue, on NE progresse PAS
-    # vers release/kill (one-shot) ni vers le re-monitoring qui DROPPE `submitted_result` (long-lived) : le
-    # pod RESTE vivant avec son résultat RETENU + deadline ré-armée → un re-wake re-fire `do_extract` (la
-    # complétion sera ré-émise) au lieu d'une complétion ORPHELINE (pod tué, hop jamais fini, verrou à vie).
-    case Events.required_broadcast("pod.completed", pod_completed_payload(state, result)) do
-      :ok ->
-        do_extract_proceed(state, result)
+  # ============================================================
+  # Extract — progression / payload pod.completed
+  # ============================================================
 
-      {:error, _reason} ->
-        # Fail-loud (déjà loggé ERROR par required_broadcast). Pod conservé en :monitoring, résultat
-        # RETENU (pas de drop), deadline ré-armée : le re-wake/poll re-déclenchera l'extract. PAS de
-        # release/kill sur une complétion non diffusée.
-        retry_state =
-          state
-          |> Map.put(:phase, :monitoring)
-          |> arm_result_deadline()
-
-        {:noreply, retry_state}
-    end
-  end
-
-  # Progression normale APRÈS un `pod.completed` diffusé avec succès (extrait du chemin pour que
-  # l'échec de broadcast n'avance JAMAIS vers release/kill ni vers le drop de `submitted_result`).
-  defp do_extract_proceed(state, result) do
-    new_state =
-      state
+  # Progression normale APRÈS un `pod.completed` diffusé avec succès. Branche selon lifetime_scope :
+  #   - `one-shot` : extract → release → arrêt (1 task = 1 vie pod).
+  #   - autres (pipe/run/forever) : pod long-lived. Retour à :monitoring (son enter ré-arme le
+  #     deadline), reset submitted_result + :output_extracted. Release uniquement sur kill_pod externe
+  #     ou timeout deadline. (Extrait du chemin pour qu'un échec de broadcast n'avance JAMAIS ici.)
+  defp do_extract_proceed(data, result) do
+    data =
+      data
       |> Map.put(:last_result, result)
       |> add_condition(:output_extracted)
 
-    case lifetime_scope(state.cap_profile) do
+    case lifetime_scope(data.cap_profile) do
       "one-shot" ->
-        new_state = Map.put(new_state, :phase, :releasing)
-        {:noreply, new_state, {:continue, :release}}
+        {:next_state, :releasing, data, [{:next_event, :internal, :proceed}]}
 
       _other ->
-        # Reset :output_extracted au re-monitoring (sinon un crash REPL au cycle 2 est
-        # masqué en {:stop,:normal} via la garde du handler exit_status → pod.failed/clear
-        # jamais émis). arm_result_deadline annule le timer du cycle précédent avant de
-        # ré-armer (pas d'accumulation). Bus.subscribe pas re-appelé : déjà subscribed
-        # depuis do_monitor au 1er cycle.
-        new_state =
-          new_state
-          |> Map.put(:phase, :monitoring)
+        # Reset :output_extracted au re-monitoring (sinon un crash REPL au cycle 2 est masqué en
+        # {:stop, :normal} via la garde du handler exit_status → pod.failed/clear jamais émis).
+        # Bus.subscribe pas re-appelé : l'enter de :monitoring ne souscrit que depuis :launching.
+        data =
+          data
           |> Map.put(:submitted_result, nil)
           |> remove_condition(:output_extracted)
-          # SLOT-FREEZE : enter_publishing -> le pipe est :publishing tant que son livrable n'est pas
-          # confirme sur la forge (le HopConsumer le LIT + push en async) ; il n'est pas re-mandatable
-          # tant qu'il publie (etape 4), sinon on courserait le push. Leve par deliverable.published.
-          # Conditionne au livrable git async (cf. maybe_enter_publishing) : un pod payload n'a rien a
-          # proteger et n'arme donc pas un deadline jamais leve.
-          |> maybe_enter_publishing()
-          |> arm_result_deadline()
 
-        {:noreply, new_state}
+        # SLOT-FREEZE : enter_publishing -> le pipe est :publishing tant que son livrable n'est pas
+        # confirme sur la forge (deliverable.published) ; il n'est pas re-mandatable tant qu'il publie.
+        # Conditionne au livrable git async : un pod payload n'a rien a proteger et n'arme donc pas
+        # un deadline jamais leve.
+        {data, pub_actions} = maybe_enter_publishing(data)
+
+        # Retour à :monitoring : son `:enter` ré-arme result_deadline + liveness.
+        {:next_state, :monitoring, data, pub_actions}
     end
   end
 
   # Délègue à la source unique `Fleet.CapProfile.lifetime_scope/1`.
   defp lifetime_scope(%Fleet.CapProfile{} = cp), do: Fleet.CapProfile.lifetime_scope(cp)
 
-  # pod.completed porte le contexte pipeline (pipeline_id+stage) SI le pod est spawné
-  # avec ces clés en spawn_opts. C'était le cas avec le moteur RAM `Fleet.Pipeline.Executor`
-  # (supprimé) ; plus aucun appelant ne les pose aujourd'hui → en pratique le payload est nu.
-  # Conservé : un consommateur qui reçoit un payload nu ignore le contexte pipeline (no-op).
-  defp pod_completed_payload(state, result) do
+  # pod.completed porte le contexte pipeline (pipeline_id+stage) SI le pod est spawné avec ces clés.
+  # Plus aucun appelant ne les pose aujourd'hui → en pratique le payload est nu (un consommateur qui
+  # reçoit un payload nu ignore le contexte pipeline, no-op).
+  defp pod_completed_payload(data, result) do
     base = %{
-      "pod_id" => state.pod_id,
-      "ticket_id" => state.ticket_id,
+      "pod_id" => data.pod_id,
+      "ticket_id" => data.ticket_id,
       "result" => result
     }
 
-    opts = state.opts || []
+    opts = data.opts || []
 
     case {Keyword.get(opts, :pipeline_id), Keyword.get(opts, :stage)} do
       {nil, _} ->
-        # Pod stage-dispatch (assignee-driven) hors pipeline.
-        # S'il porte un PROJET (repo cloné), le payload embarque le contexte de
-        # fin-de-hop : le consumer `Fleet.Pilot.HopConsumer` est stateless (l'event
-        # porte l'état, pas de query `pod_info` racy). workspace+base_sha+role
-        # suffisent au `Deliverable.publish` côté système. Pod sans projet
-        # (memory-X, architect) → payload nu (base), filtré en aval.
-        case LaunchSpec.effective_project(state.opts, state.cap_profile) do
+        # Pod stage-dispatch (assignee-driven) hors pipeline. S'il porte un PROJET (repo cloné), le
+        # payload embarque le contexte de fin-de-hop : le consumer HopConsumer est stateless (l'event
+        # porte l'état). Pod sans projet (memory-X, architect) → payload nu (base), filtré en aval.
+        case LaunchSpec.effective_project(data.opts, data.cap_profile) do
           %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
             base
             |> Map.merge(%{
               # Autorité unique du sous-dossier workspace (Fleet.Spawner), pas un littéral recopié.
-              "workspace" => Fleet.Spawner.pod_workspace_path(state.pod_dir),
+              "workspace" => Fleet.Spawner.pod_workspace_path(data.pod_dir),
               "base_sha" => proj["base_sha"],
-              # Base de la GATE de livraison, DÉCONFLÉE de la clone-base (`base_sha`). Pour
-              # une résolution par rebase, le livrable doit DESCENDRE de `main` (cible du rebase), pas de
-              # l'ancien tip de feature (réécrit → `base_not_ancestor`). Le resolver l'égale à `base_sha`
-              # pour le forward (build/rework) → comportement inchangé. Fallback `base_sha` : projet d'un
-              # spawn antérieur au champ (re-mandate vivant dont le project est figé au build initial).
+              # Base de la GATE de livraison, DÉCONFLÉE de la clone-base (`base_sha`). Pour une
+              # résolution par rebase, le livrable doit DESCENDRE de `main` (cible du rebase). Le
+              # resolver l'égale à `base_sha` pour le forward (build/rework). Fallback `base_sha`.
               "gate_base_sha" => proj["gate_base_sha"] || proj["base_sha"],
-              "role" => cap_profile_name(state.cap_profile)
+              "role" => cap_profile_name(data.cap_profile)
             })
             |> maybe_put_repo(proj)
             |> maybe_put_carte_ctx(opts)
@@ -913,9 +846,8 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Contexte carte (pipeline+stage) injecté au spawn par StageDispatcher via `:pipeline`/
-  # `:stage` (≠ `:pipeline_id` du chemin pipeline legacy). Permet au HopConsumer de naviguer la
-  # carte (CarteNav.next_stage). Absent (carte 1-stage) → payload inchangé.
+  # Contexte carte (pipeline+stage) injecté au spawn par StageDispatcher via `:pipeline`/`:stage`.
+  # Permet au HopConsumer de naviguer la carte. Absent (carte 1-stage) → payload inchangé.
   defp maybe_put_carte_ctx(payload, opts) do
     case {Keyword.get(opts, :pipeline), Keyword.get(opts, :stage)} do
       {p, s} when is_binary(p) and is_binary(s) ->
@@ -926,11 +858,9 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Multi-projet : embarque le REPO du projet dans `pod.completed` → le HopConsumer (singleton
-  # multi-projet) sait sur quel repo agir + où pousser, sans le re-dériver de la config (« l'event porte
-  # tout l'état »). `"repository" => %{"full_name"}` = identifiant forge (API) ; `"remote"` = l'URL de push
-  # (= `repo_path`, l'URL clonée). Projet sans `"repo"` (cap_profile statique legacy : pas de full_name) →
-  # payload inchangé → le HopConsumer retombe sur son repo/remote de config (fallback single-repo).
+  # Multi-projet : embarque le REPO du projet dans `pod.completed` → le HopConsumer sait sur quel
+  # repo agir + où pousser. `"repository" => %{"full_name"}` = identifiant forge ; `"remote"` = l'URL
+  # de push. Projet sans `"repo"` → payload inchangé → fallback single-repo du HopConsumer.
   defp maybe_put_repo(payload, %{"repo" => repo} = proj) when is_binary(repo) and repo != "" do
     payload
     |> Map.put("repository", %{"full_name" => repo})
@@ -944,41 +874,21 @@ defmodule Fleet.Spawner.Pod do
 
   defp maybe_put_remote(payload, _), do: payload
 
-  defp do_release(state) do
-    # Tue le pod interactif (Port.close → claude/bwrap/script terminés) puis ARRÊT NORMAL
-    # du GenServer (sinon le Pod resterait vivant après :succeeded → memory leak du
-    # DynamicSupervisor). Sous `:temporary` l'arrêt :normal n'est jamais ressuscité.
-    # NB : pas de clear_for_pod ici — do_release = succès post-EXTRACT, la task a déjà été
-    # soumise/complétée (pas de task active à libérer).
-    # Checkpoint le seed AVANT de tuer le backend (JSONl encore intact).
-    maybe_checkpoint_seed(state)
-    Backend.teardown_backend(state)
-
-    new_state =
-      state
-      |> Map.put(:phase, :succeeded)
-      |> add_condition(:home_released)
-
-    StateFs.write_state_fs(new_state)
-    {:stop, :normal, new_state}
-  end
-
-  # À la mort d'un pod-PROJET (rc_name = `<projet>_<role>` présent), checkpointe son JSONl de
-  # session ACTIF vers le seed-store (`projects.work/<projet>/pods/<role>`) pour rappel ultérieur
-  # (`--resume`). Permanents (sans rc_name) → pas de seed-store. Best-effort (SeedStore ne raise
-  # jamais ici ; un échec ne casse pas le teardown).
-  defp maybe_checkpoint_seed(state) do
-    case LaunchSpec.rc_project(state.opts, state.cap_profile) do
+  # À la mort d'un pod-PROJET (rc_name présent), checkpointe son JSONl de session ACTIF vers le
+  # seed-store pour rappel ultérieur (`--resume`). Permanents (sans rc_name) → pas de seed-store.
+  # Best-effort (SeedStore ne raise jamais ici).
+  defp maybe_checkpoint_seed(data) do
+    case LaunchSpec.rc_project(data.opts, data.cap_profile) do
       nil ->
         :ok
 
       projet ->
         _ =
           Fleet.Spawner.SeedStore.checkpoint(
-            state.pod_dir,
+            data.pod_dir,
             projet,
-            cap_profile_name(state.cap_profile),
-            state.session_id
+            cap_profile_name(data.cap_profile),
+            data.session_id
           )
 
         :ok
@@ -1003,28 +913,16 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # session_id DÉTERMINISTE hexspeak calculé au spawn pour un rôle catalogué. La SOURCE du QUOI
-  # (index de rôle, tier protégé, fleet-level) est le cap-profile (`metadata.role_index`/`protected`/
-  # `fleet_level`, lus via `Fleet.CapProfile`) ; `Fleet.Spawner.SessionId.encode/4` n'est qu'un encodeur
-  # pur de ce triplet. `opts[:session_id]` (seed explicite, ex. recall arch) PRIME au call-site et
-  # court-circuite ce calcul.
+  # (index de rôle, tier protégé, fleet-level) est le cap-profile ; `Fleet.Spawner.SessionId.encode/4`
+  # n'est qu'un encodeur pur. `opts[:session_id]` (seed explicite, ex. recall arch) PRIME.
   #
-  #   * rôle NON catalogué (pas de `role_index` au cap-profile : ad-hoc/inconnu, hors-fleet) — aucune
-  #     identité déterministe à reconstruire → `UUID.uuid4()` est légitime.
-  #   * fleet-level (arch, gatekeeper) — une seule instance par rôle → repo `0000`, pas de dimension projet.
-  #   * project-bound (eng, juges) — l'identité hexspeak EXIGE le repo (sinon collision inter-projet/rework).
+  #   * rôle NON catalogué — `UUID.uuid4()` est légitime.
+  #   * fleet-level (arch, gatekeeper) — repo `0000`, pas de dimension projet.
+  #   * project-bound (eng, juges) — l'identité hexspeak EXIGE le repo.
   #       - AVEC repo → on minte l'id déterministe.
-  #       - SANS repo → on REFUSE (raise). L'absence de repo signifie que la forge n'a pas résolu l'id
-  #         (forge down / amont cassé) ; la forge est un organe de LCARS, forge down = stop. On ne fabrique
-  #         JAMAIS un UUID random pour masquer ça — un random silencieux donnerait une fausse identité, NON
-  #         reconstructible. C'est un filet de dernier recours : le stop propre vit en amont (côté dispatch) ;
-  #         ici on fail-loud plutôt que de mentir.
-  #
-  # Ordre des bras VOLONTAIRE : non-catalogué d'abord (sinon `role_index/1` raise sur un ad-hoc), puis
-  # fleet-level (repo 0000), puis repo résolu, puis le refus.
-  #
-  # Pas de clause non-struct : `cap_profile` est TOUJOURS un `%CapProfile{}` ici (l'unique entrée
-  # `Fleet.Spawner.spawn_pod/3` gate sur la struct, et `initial_state`/recovery ne la remplacent jamais) —
-  # un state corrompu doit fail-loud par function-clause, pas pondre un UUID de complaisance.
+  #       - SANS repo → on REFUSE (raise) : l'absence de repo signale une forge qui n'a pas résolu
+  #         l'id (forge down). On ne fabrique JAMAIS un UUID random pour masquer ça (fausse identité,
+  #         non reconstructible). Filet de dernier recours : le stop propre vit en amont (dispatch).
   defp deterministic_session_id(%Fleet.CapProfile{} = cap_profile, opts) do
     repo = Keyword.get(opts, :repo_id)
 
@@ -1059,22 +957,21 @@ defmodule Fleet.Spawner.Pod do
     pod_dir = Paths.pod_dir_for(args.pod_id, args.opts)
 
     %{
+      # `phase: :pending` n'est lu que par `Pod.Recovery.first_continue_for/1` dans `init/1` (pour
+      # choisir l'état de départ), puis DROPPÉ du data gen_statem (la phase EST l'état).
       phase: :pending,
       conditions: MapSet.new(),
       pod_id: args.pod_id,
       ticket_id: args.ticket_id,
-      # Session UUID PRÉ-ALLOUÉ au spawn : `--session-id <uuid>` à la 1ʳᵉ création.
-      # Remplace le modèle -p (capture `init_msg["session_id"]`, mort). La recovery
+      # Session UUID PRÉ-ALLOUÉ au spawn : `--session-id <uuid>` à la 1ʳᵉ création. La recovery
       # depuis state.json ne réutilise PAS ce sid (recreate = session neuve).
       session_id:
         Keyword.get(args.opts, :session_id) ||
           deterministic_session_id(args.cap_profile, args.opts),
-      # Timestamp ISO8601 figé à la création du GenServer, persisté tel quel dans
-      # state.json.
+      # Timestamp ISO8601 figé à la création, persisté tel quel dans state.json.
       started_at: DateTime.utc_now(),
-      # défaut false ; SEUL le recall délibéré (`opts[:resume]`) le passe à true →
-      # claude `--resume <session_id>` (ressuscite un pod archivé). La recovery sur
-      # state.json ne resume jamais (terminale → release, sinon → recreate fresh).
+      # défaut false ; SEUL le recall délibéré (`opts[:resume]`) le passe à true → claude
+      # `--resume <session_id>`. La recovery sur state.json ne resume jamais.
       resume: Keyword.get(args.opts, :resume, false),
       cap_profile: args.cap_profile,
       env_vars: %{},
@@ -1086,31 +983,17 @@ defmodule Fleet.Spawner.Pod do
       submitted_result: nil,
       last_result: nil,
       tmux_session: nil,
-      # Ref du timer :result_deadline (timeout de RÉPONSE). nil = non armé.
-      # Armé seulement pour les scopes bornés (pas `forever`), annulé à l'arrivée du
-      # résultat / avant ré-arme. Cf. arm_result_deadline/1.
-      result_deadline_ref: nil,
-      # Ref du timer {:kick_attempt}. 1 SEUL vivant (cancel+rearm, cf. arm_kick/1) : un wake_pod
-      # pendant le bootstrap ne crée pas une 2e boucle. nil = boucle non armée / stoppée.
-      kick_ref: nil
+      liveness_sample: nil
     }
   end
 
-  # Accesseur UNIQUE du rôle (= metadata.name) pour TOUS les sites du pod (launch/payload/brief/
-  # persistance state.json) : sans cette source unique, des défauts divergents inlinés ("engineer"
-  # côté launch, "unknown" côté state) mésattribueraient silencieusement un profil sans name tout le
-  # hop. Délègue à la SOURCE UNIQUE `Fleet.CapProfile.name/1`, qui RAISE si le name est absent/vide —
-  # PAS de défaut fabriqué : un cap-profile sans name est un état que le domaine interdit (le
-  # `minLength:1` du schema le garantit déjà à load). Pas de clause catch-all non-struct : `state.cap_profile`
-  # est TOUJOURS un `%CapProfile{}` (l'unique entrée `Fleet.Spawner.spawn_pod/3` gate sur la struct, et
-  # `initial_state`/recovery ne la remplacent jamais) — un state corrompu doit fail-loud par function-clause.
+  # Accesseur UNIQUE du rôle (= metadata.name) pour TOUS les sites du pod. Délègue à la SOURCE
+  # UNIQUE `Fleet.CapProfile.name/1`, qui RAISE si le name est absent/vide — PAS de défaut fabriqué.
   defp cap_profile_name(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.name(cap)
 
-  # `metadata.containment` ∈ {"bwrap","none"} (défaut conservateur "bwrap").
-  # "none" = host_native (architect, starfleet) → host_launch.sh (PAS de sandbox) ; sinon la
-  # chaîne bwrap. Lu ICI, sur le chemin de lancement (sinon `do_launch` bwrapperait tout aveuglément).
-  # Délègue à la SOURCE UNIQUE `Fleet.CapProfile.containment/1` (même lecture/défaut que l'API spawn qui
-  # interdit le host-native) — pas de re-décodage local du champ.
+  # `metadata.containment` ∈ {"bwrap","none"} (défaut conservateur "bwrap"). "none" = host_native →
+  # host_launch.sh (PAS de sandbox) ; sinon la chaîne bwrap. Délègue à la SOURCE UNIQUE
+  # `Fleet.CapProfile.containment/1`.
   defp cap_profile_containment(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.containment(cap)
   defp cap_profile_containment(_), do: "bwrap"
 
@@ -1118,47 +1001,43 @@ defmodule Fleet.Spawner.Pod do
   # Helpers
   # ============================================================
 
-  defp transition_failed(state, reason) do
-    Logger.warning("pod #{state.pod_id} failed: #{inspect(reason)}")
+  # Reconstruit un map avec `:phase` (l'état gen_statem) pour les modules Pod.* qui en dépendent —
+  # `StateFs.write_state_fs/1` lit `state.phase` + `state.conditions`. La phase n'est plus dans
+  # `data` (elle EST l'état) : on l'y réinjecte au moment d'écrire le snapshot recovery.
+  defp put_phase(data, phase), do: Map.put(data, :phase, phase)
 
-    # Le pod meurt sans relaunch → libérer sa task active sinon elle reste
-    # orpheline (assigned/pending sans pod).
-    clear_pod_task(state.pod_id)
+  # Échec de transition : le pod meurt sans relaunch → libérer sa task active (sinon orpheline),
+  # graver state.json phase=failed, signaler sur le Bus, puis arrêt `{:shutdown, reason}` (terminate/3
+  # est le filet teardown du backend). Jumeau du broadcast `pod.failed` du handler exit_status.
+  defp transition_failed(data, reason) do
+    Logger.warning("pod #{data.pod_id} failed: #{inspect(reason)}")
 
-    new_state =
-      state
-      |> Map.put(:phase, :failed)
-      |> Map.put(:last_error, reason)
+    clear_pod_task(data.pod_id)
+    data = Map.put(data, :last_error, reason)
+    StateFs.write_state_fs(put_phase(data, :failed))
 
-    StateFs.write_state_fs(new_state)
-
-    # Signale l'échec sur le Bus → un consumer fleet_pilot l'enregistre au registre d'incidents
-    # (parité avec wake-`{:error}` : un échec de pod récurrent devient un pattern → root-cause). `reason` =
-    # terme brut (le consumer le catégorise). Ring-propre : Ring 1 PUBLIE, Ring 2 consomme (pas d'appel
-    # montant). Jumeau du broadcast `pod.failed` du handler exit_status.
     Events.best_effort_broadcast("pod.failed", %{
-      "pod_id" => state.pod_id,
-      "ticket_id" => state.ticket_id,
+      "pod_id" => data.pod_id,
+      "ticket_id" => data.ticket_id,
       "reason" => reason
     })
 
-    {:stop, {:shutdown, reason}, new_state}
+    {:stop, {:shutdown, reason}, data}
   end
 
-  defp add_condition(state, condition) do
-    Map.update!(state, :conditions, &MapSet.put(&1, condition))
+  defp add_condition(data, condition) do
+    Map.update!(data, :conditions, &MapSet.put(&1, condition))
   end
 
-  # Retire une condition. `:output_extracted` DOIT être reset au re-monitoring
-  # d'un pod long-lived (do_extract _other) — sinon un crash REPL au cycle 2 reste masqué
-  # en {:stop, :normal} (la garde du handler exit_status reste vraie) → pod.failed/clear jamais émis.
-  defp remove_condition(state, condition) do
-    Map.update!(state, :conditions, &MapSet.delete(&1, condition))
+  # Retire une condition. `:output_extracted` DOIT être reset au re-monitoring d'un pod long-lived —
+  # sinon un crash REPL au cycle 2 reste masqué en {:stop, :normal} (la garde du handler exit_status
+  # reste vraie) → pod.failed/clear jamais émis.
+  defp remove_condition(data, condition) do
+    Map.update!(data, :conditions, &MapSet.delete(&1, condition))
   end
 
-  # Libère la task active d'un pod qui meurt sans l'avoir complétée.
-  # Appel direct best-effort (non-fatal) : le Pod est sinon découplé de TaskQueue
-  # (complétion event-driven via le bus) — on ne fait pas crasher la mort d'un
+  # Libère la task active d'un pod qui meurt sans l'avoir complétée. Best-effort (non-fatal) : le Pod
+  # est sinon découplé de TaskQueue (complétion event-driven) — on ne fait pas crasher la mort d'un
   # pod si TaskQueue est indisponible (ex. contexte de test sans broker).
   defp clear_pod_task(pod_id) do
     Fleet.TaskQueue.clear_for_pod(pod_id)
@@ -1173,128 +1052,97 @@ defmodule Fleet.Spawner.Pod do
       :ok
   end
 
-  # Gestion du timer :result_deadline (timeout de RÉPONSE).
-  #
-  # arm : annule TOUJOURS le timer précédent (pas d'accumulation, pas de stale-kill)
-  # puis arme un nouveau — SAUF pour un pod `forever` (permanent : gatekeeper/
-  # architect/monk) qui ne porte PAS de timeout de réponse (idle = normal, slow-task =
-  # légitime ; gouverné par kill_pod externe). Stocke la ref dans l'état.
-  # Mécanique « timer géré » FACTORISÉE (deadline + kick = même moteur paramétré).
-  # Un ref de timer vit sous `key` dans le state ; (re)armer = cancel l'ancien +
-  # send_after + stocker ; annuler = cancel + nil. 1 seul timer vivant par clé. Les appelants gardent leur
-  # POLITIQUE (forever-skip, quel message, quel délai) — cf. arm_result_deadline / schedule_kick.
-  defp arm_managed_timer(state, key, msg, delay) do
-    state = cancel_managed_timer(state, key)
-    Map.put(state, key, Process.send_after(self(), msg, delay))
-  end
+  # ============================================================
+  # Actions de timer natif (state_timeout + generic timeouts)
+  # ============================================================
 
-  defp cancel_managed_timer(state, key) do
-    case Map.get(state, key) do
-      ref when is_reference(ref) -> Process.cancel_timer(ref)
-      _ -> :ok
-    end
-
-    Map.put(state, key, nil)
-  end
-
-  # Deadline de RÉPONSE. Politique : pas d'armement pour un pod `forever` (un permanent n'a pas de
-  # fenêtre de réponse bornée) → on garantit juste l'absence de timer.
-  defp arm_result_deadline(state) do
-    if lifetime_scope(state.cap_profile) == "forever" do
-      # Un permanent (arch) n'a pas de fenêtre de réponse bornée → ni deadline ni watchdog liveness.
-      state
-      |> cancel_managed_timer(:result_deadline_ref)
-      |> cancel_managed_timer(:liveness_tick_ref)
+  # Deadline de RÉPONSE (state_timeout de :monitoring) + watchdog liveness (generic timeout récurrent).
+  # Politique préservée : pas d'armement pour un pod `forever` (un permanent n'a pas de fenêtre de
+  # réponse bornée ; idle = normal, slow-task légitime, gouverné par kill_pod externe) → on émet les
+  # ACTIONS d'annulation (time :infinity) pour garantir l'absence de deadline ET de liveness.
+  # Sinon : le deadline N'EST PAS un budget « temps pour finir » — c'est un watchdog de SILENCE. Le
+  # `:liveness` ré-arme ce deadline tant que le pod BOUGE → un agent qui bosse ne timeout JAMAIS.
+  defp arm_result_deadline_actions(data) do
+    if lifetime_scope(data.cap_profile) == "forever" do
+      [{:state_timeout, :infinity, :result_deadline}, {{:timeout, :liveness}, :infinity, :tick}]
     else
-      # Le deadline N'EST PAS un budget « temps pour finir » (un vrai livrable a une durée inconnaissable
-      # a priori) — c'est un watchdog de SILENCE. Le `:liveness_tick` ré-arme ce deadline tant que le pod
-      # BOUGE (taille jsonl ↑ OU jiffies CPU /proc ↑) → un agent qui bosse ne timeout JAMAIS ; le deadline
-      # ne tombe que sur silence total = stuck/mort. C'est ce qui rend VRAIE la promesse du commentaire
-      # kick (« le deadline se ré-arme sur activité »).
-      state
-      |> arm_managed_timer(
-        :result_deadline_ref,
-        :result_deadline,
-        Liveness.monitor_timeout_ms(state)
-      )
-      |> schedule_liveness_tick()
+      [
+        {:state_timeout, Liveness.monitor_timeout_ms(data), :result_deadline},
+        liveness_tick_action(data)
+      ]
     end
   end
 
-  # SLOT-FREEZE : seul un pod à livrable git_native a un push async (lu par le workspace puis confirmé
-  # par l'event deliverable.published) qu'il faut protéger du reset/re-mandate → :publishing. Un pod
-  # payload (gatekeeper = verdict, architect = interactif : pas de push) n'a rien à protéger ; le mettre
-  # :publishing armerait un deadline 120s jamais levé par deliverable.published (émis seulement pour les
-  # producteurs git_native) → WARNING récurrent + sémantique fausse. Donc on conditionne.
-  defp maybe_enter_publishing(state) do
-    if Fleet.CapProfile.deliverable_mode(state.cap_profile) == "git_native" do
-      enter_publishing(state)
+  defp liveness_tick_action(data),
+    do: {{:timeout, :liveness}, Liveness.liveness_tick_ms(data), :tick}
+
+  # Annule le generic timeout :liveness (un generic timeout NE s'annule PAS au changement d'état,
+  # contrairement au state_timeout :result_deadline). Émis sur :monitoring → :extracting.
+  defp cancel_liveness_action, do: {{:timeout, :liveness}, :infinity, :tick}
+
+  # ============================================================
+  # Publishing (FLAG dans data.conditions) + generic timeout :publish_deadline
+  # ============================================================
+
+  # SLOT-FREEZE : seul un pod à livrable git_native a un push async (confirmé par deliverable.published)
+  # qu'il faut protéger du reset/re-mandate → :publishing. Un pod payload (gatekeeper/architect : pas de
+  # push) n'a rien à protéger ; le mettre :publishing armerait un deadline 120s jamais levé → WARNING
+  # récurrent + sémantique fausse. Rend `{data, actions}` (la condition + l'armement du publish_deadline).
+  defp maybe_enter_publishing(data) do
+    if Fleet.CapProfile.deliverable_mode(data.cap_profile) == "git_native" do
+      {add_condition(data, :publishing),
+       [{{:timeout, :publish_deadline}, publish_deadline_ms(), :fire}]}
     else
-      state
+      {data, []}
     end
   end
 
-  # SLOT-FREEZE : un pipe entre :publishing au submit (condition + deadline fail-safe). La levee
-  # (deliverable.published OU deadline) retire la condition et annule le timer. publish_deadline_ms est
-  # genereux (> le timeout de push git 30s + marge) : il ne fire QUE si la confirmation n'arrive jamais.
-  defp enter_publishing(state) do
-    state
-    |> add_condition(:publishing)
-    |> arm_managed_timer(:publish_deadline_ref, :publish_deadline, publish_deadline_ms())
-  end
+  # La levée (deliverable.published OU deadline) retire la condition ; l'annulation du timer est
+  # émise en ACTION par les appelants (cancel_publish_deadline_action/0).
+  defp leave_publishing(data), do: remove_condition(data, :publishing)
 
-  defp leave_publishing(state) do
-    state
-    |> remove_condition(:publishing)
-    |> cancel_managed_timer(:publish_deadline_ref)
-  end
+  defp cancel_publish_deadline_action, do: {{:timeout, :publish_deadline}, :infinity, :fire}
 
   defp publish_deadline_ms,
     do: Application.get_env(:fleet_spawner, :publish_deadline_ms, 120_000)
 
   # SLOT-FREEZE : adopte le ticket_id de la tache complétée (de l'event task_completed) comme ticket
-  # courant du pod. Un pipe re-mandate change de brique a chaque tache ; sans ca state.ticket_id resterait
-  # celui du spawn -> toutes les attributions (livrable, logs) pointeraient la 1ere brique. Absent/vide ->
-  # on garde l'existant (pas de regression sur le one-shot, ou ticket_id == spawn == tache unique).
-  defp adopt_task_ticket_id(state, payload) do
+  # courant du pod. Un pipe re-mandate change de brique a chaque tache ; sans ca state.ticket_id
+  # resterait celui du spawn -> toutes les attributions pointeraient la 1ere brique. Absent/vide ->
+  # on garde l'existant.
+  defp adopt_task_ticket_id(data, payload) do
     case payload[:ticket_id] || payload["ticket_id"] do
-      t when is_binary(t) and t != "" -> %{state | ticket_id: t}
-      _ -> state
+      t when is_binary(t) and t != "" -> %{data | ticket_id: t}
+      _ -> data
     end
   end
 
-  defp cancel_result_deadline(state) do
-    state
-    |> cancel_managed_timer(:result_deadline_ref)
-    |> cancel_managed_timer(:liveness_tick_ref)
+  # ============================================================
+  # Kick (generic timeout :kick) — actions d'armement
+  # ============================================================
+
+  # Boucle de kick (generic timeout nommé `:kick`, 1 seul vivant par nom). (Re)l'armer RESTART le
+  # timer (un wake_pod pendant le bootstrap ne crée pas une 2e boucle). Les bornes/cadences + la
+  # décision/I-O vivent dans `Pod.Kick` ; ici on ne fabrique que l'ACTION de timer.
+  defp schedule_kick_action(n, delay), do: {{:timeout, :kick}, delay, {:attempt, n}}
+
+  # Cancel = poser le generic timeout :kick à :infinity (= pas de timer).
+  defp cancel_kick_action, do: {{:timeout, :kick}, :infinity, {:attempt, 0}}
+
+  defp safe_resolve_disallowed(cap_profile) do
+    {:ok, Fleet.CapProfile.with_resolved_disallowed_tools(cap_profile)}
+  rescue
+    e -> {:error, {:baseline_corrupt, Exception.message(e)}}
   end
 
-  defp schedule_liveness_tick(state),
-    do:
-      arm_managed_timer(
-        state,
-        :liveness_tick_ref,
-        :liveness_tick,
-        Liveness.liveness_tick_ms(state)
-      )
-
-  # Boucle de kick (timer géré `:kick_ref`, 1 seul vivant). Politique : 1er tick après
-  # kick_first_delay_ms (on laisse le flag porteur livrer d'abord) ; armé au bootstrap (inject_brief) ET à
-  # chaque wake (cast :arm_kick) → un wake_pod pendant le bootstrap ne crée pas une 2e boucle. Mécanique
-  # FACTORISÉE dans arm_managed_timer/cancel_managed_timer (cf. la deadline de réponse). Les bornes/cadences
-  # + la décision/I-O du kick vivent dans `Pod.Kick` ; ici on n'ARME que le timer.
-  defp arm_kick(state), do: schedule_kick(state, 0, Kick.kick_first_delay_ms())
-
-  defp schedule_kick(state, n, delay),
-    do: arm_managed_timer(state, :kick_ref, {:kick_attempt, n}, delay)
-
-  defp cancel_kick(state), do: cancel_managed_timer(state, :kick_ref)
-
-  defp inject_brief_to_tmux_pod(%{tmux_session: nil} = state), do: state
-
-  defp inject_brief_to_tmux_pod(%{tmux_session: session} = state) when is_binary(session) do
-    # Arme (cancel+rearm, 1 seul timer) la boucle de kick ack-driven. Le 1er send-keys sera `yop`
-    # (bootstrap : pas encore pollé) ; le SP `agent-worker-base.md` porte le workflow get_task→submit_result.
-    arm_kick(state)
+  # Porte de containment (dont le deny des server-tools natifs Anthropic) câblée au boundary spawn.
+  # Si `validate/1` (toute la sémantique de containment) n'était appelée QUE par les tests, la porte
+  # serait creuse : un profil neuf bypasserait silencieusement. Fail-loud : profil invalide → :failed,
+  # le pod n'est JAMAIS lancé. Le JSON-schema ne couvre PAS toutes ces règles — d'où validate/1 ici.
+  defp gate_cap_profile(resolved) do
+    case Fleet.CapProfile.validate(resolved) do
+      :ok -> :ok
+      {:error, violations} -> {:error, {:cap_profile_invalid, violations}}
+    end
   end
 end
