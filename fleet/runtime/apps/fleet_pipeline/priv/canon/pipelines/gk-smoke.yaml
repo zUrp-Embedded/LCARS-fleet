@@ -1,37 +1,32 @@
-# Pipeline V2 — gk-smoke (dogfood live B : business → escalade gatekeeper)
+# Pipeline — gk-smoke (smoke-test escalade gatekeeper, pattern B)
 #
-# Date: 2026-06-08 — 2026-06-10 rev2 (gatekeeper pattern B / §L441)
+# Date: 2026-06-08 — 2026-06-29 rev3 (enveloppe v2.5 unique)
 # Statut: SMOKE — carte minimale 2 stages pour valider la chaîne forge-driven AVEC
 #         une ESCALADE gatekeeper (pattern B) sur de vrais pods.
-#         build(engineer, livrable git) → review(reviewer, gate soft → escalade).
-# Consommé par: Fleet.Pipeline.Loader (format flat v1) + stage-mode forge-driven
-#               (Entry/StageDispatcher/HopConsumer). Routé via LCARS_PILOT_STAGE_ROUTING.
+#         build(engineer, livrable git) -> review(reviewer, gate soft -> escalade).
 #
-# rev2 (B / §L441) : `review` n'est PLUS un stage `role: gatekeeper` (A2.3b explicit-stage,
-#   retiré — §L441 : le gatekeeper n'est jamais un stage d'ordonnancement). C'est un stage
-#   métier `reviewer` avec une gate `soft` : Gates.evaluate → {:dispatch_gatekeeper} →
-#   HopConsumer enqueue un mandat d'éval au gatekeeper PERMANENT (juge d'exception) et
-#   reprend sur son verdict. Smoke-test du chemin d'escalade B de bout en bout.
+# review n'est PAS un stage gatekeeper : c'est un stage metier reviewer avec une
+# gate `soft`. A l'evaluation, une gate soft retourne une decision d'escalade vers
+# le gatekeeper permanent (juge unique) qui tranche, et le rail reprend sur son
+# verdict (continue -> avance ; abandon -> close ; humain -> await_arch). Smoke-test
+# du chemin d'escalade de bout en bout.
 
-name: gk-smoke
-version: 1
-
-stages:
-  build:
-    role: engineer
-    # noop modop = rôle de base inchangé. L'engineer commite en LOCAL (barrière §4),
-    # le SYSTÈME pousse. Pas de gate → avance directe vers review.
-    profile: noop
-    timeout_sec: 900
-
-  review:
-    role: reviewer
-    profile: noop
-    needs: [build]
-    # gate soft (B) = condition runtime non-tranchable → escalade au gatekeeper permanent
-    # (PAS un verdict-de-stage A2.3b). HopConsumer dispatch le mandat + reprend sur le
-    # task_completed corrélé (continue → avance ; abandon → close ; humain → await_arch).
-    gate:
-      type: soft
-      max_rounds: 1
-    timeout_sec: 900
+kind: Pipeline
+metadata:
+  name: gk-smoke
+  description: "Smoke-test escalade gatekeeper (pattern B) : build engineer -> review reviewer (gate soft)"
+spec:
+  stages:
+    build:
+      role: engineer
+      profile: noop
+      needs: []
+      timeout_sec: 900
+    review:
+      role: reviewer
+      profile: noop
+      needs: [build]
+      gate:
+        type: soft
+        max_rounds: 1
+      timeout_sec: 900

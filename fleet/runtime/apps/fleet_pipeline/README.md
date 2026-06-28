@@ -1,7 +1,7 @@
 # fleet_pipeline (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-27 (push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
+**Dernière révision** : 2026-06-29 (push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
 **Statut** : lib-only (salvage post-moteur-RAM) — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
@@ -28,7 +28,7 @@ carte YAML, évaluation de gates, et publication de livrable.
 
 | Module | Rôle (vérifié dans le code) |
 |---|---|
-| `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`pipeline-v1.json` flat OU `pipeline-v2.5.json` enveloppe, détecté par présence de la clé `spec`), puis **normalise** (U1) vers la forme interne unique `%{"name", "stages"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché en `:persistent_term` (F088). Fonctions pures ; `opts` (`:pipelines_root`, `:schema_path`) pour tests async |
+| `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`pipeline-v2.5.json`, enveloppe `kind/metadata/spec`), puis **normalise** vers la forme interne unique `%{"name", "stages"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché en `:persistent_term`. Fonctions pures ; `opts` (`:pipelines_root`, `:schema_path`) pour tests async |
 | `Fleet.Pipeline.GraphValidator` | `validate/1` : linter de GRAPHE **pur** (`stages` → `:ok \| {:error, {kind, detail}}`) sur les invariants inter-stages que le JSON Schema ne peut pas exprimer (il valide chaque stage isolément). Vérifie : `:phantom_edge` (chaque `needs` réfère un stage déclaré — anti-arête-fantôme/typo silencieux), `:no_root`/`:multiple_roots` (exactement 1 racine `needs: []`), `:unreachable` (tout stage atteignable depuis la racine), `:cycle` (DAG, tri topologique de Kahn — couvre aussi « aucun terminal atteignable », condition équivalente pour ce runtime séquentiel), `:fan_out` (aucun stage à ≥2 successeurs ; runtime séquentiel, aligné `CarteNav`). `describe/1` rend le message lisible par invariant (composé par le Loader dans son raise). Autonome — ne dépend PAS de `CarteNav` (la dépendance inverse fleet_pipeline→fleet_pilot est interdite) |
 | `Fleet.Pipeline.Gate` | `@callback evaluate/3` — behaviour générique d'évaluation de gate, vendor-extensible compile-time |
 | `Fleet.Pipeline.Gates` | implémentation du behaviour `Gate`. `evaluate/3` dispatche par type (`:hard \| :soft \| :terminal \| nil`). **Pur** : pour soft / terminal-non-tranchable il retourne `{:dispatch_gatekeeper, info}` (décision d'escalade), il ne spawn rien. Modules imbriqués `Gates.Hard` (subset-match récursif des `rule` map v1) et `Gates.Terminal` (`required`/`:nontranchable` sur `rules` map v1) |
@@ -42,35 +42,35 @@ carte YAML, évaluation de gates, et publication de livrable.
 ## Format pipeline YAML
 
 ```yaml
-name: intensity-low
-version: 1
-stages:
-  scout:
-    role: scout
-    profile: empty
-    outputs:
-      - report_id
-  archive:
-    role: archiviste
-    profile: empty
-    needs: [scout]
-    inputs:
-      - from_stage: scout
-        key: report_id
-    gate:
-      type: hard
-      rule:
-        status: ok
+kind: Pipeline
+metadata:
+  name: intensity-low
+spec:
+  stages:
+    scout:
+      role: scout
+      profile: empty
+      outputs:
+        - report_id
+    archive:
+      role: archiviste
+      profile: empty
+      needs: [scout]
+      inputs:
+        - report_id
+      gate:
+        type: hard
+        rule:
+          status: ok
 ```
 
-Champs stage : `role` (string, required), `profile` (string, required),
-`needs` (array string), `condition` (string), `inputs`, `outputs`
-(array string), `gate`, `coordHook` (string, deferred ch14). Deux
-formats acceptés (détectés au load par `Loader`, normalisés ensuite vers
-`%{"name", "stages"}`) : **flat v1** (`name/version/stages` top-level) et
-**enveloppe v2.5** (`kind/metadata/spec.stages`). En v2.5, `inputs` = array de
-descriptifs string (`ticket.body`) et `gate.rules` = array de prédicats string ;
-en v1, `inputs` = array `{from_stage, key}` et `gate.rule(s)` = maps.
+Enveloppe unique **v2.5** (`kind/metadata/spec.stages`), déballée au load par
+`Loader` vers la forme interne `%{"name", "stages"}`. Champs stage : `role`
+(string, required), `profile` (string, required), `needs` (array string),
+`condition` (string), `inputs` (array de descriptifs string, ex. `ticket.body`),
+`outputs` (array string), `gate`, `coordHook` (string, deferred ch14). Le
+**contenu** de gate (`rule`/`rules` en maps OU `gate.rules` en prédicats string)
+est un axe orthogonal à l'enveloppe — cf. § Types de gates.
 
 ## Types de gates
 

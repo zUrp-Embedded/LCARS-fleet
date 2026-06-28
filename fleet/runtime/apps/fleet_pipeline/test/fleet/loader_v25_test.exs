@@ -1,15 +1,13 @@
 defmodule Fleet.Pipeline.LoaderV25Test do
   @moduledoc """
-  Lot 6 inc1 — extension additive Loader format V2.5 (enveloppe
-  kind/metadata/spec) sans casser le flat chantier-12. Détection
-  présence `spec` top-level → pipeline-v2.5.json ; sinon → pipeline-v1.json.
+  Loader — enveloppe pipeline V2.5 (`kind/metadata/spec`), seule forme acceptée.
 
-  U1 (R3/D2) — `Loader.load!` NORMALISE désormais le résultat vers la forme
-  interne unique `%{"name", "stages"}` : l'enveloppe v2.5 est déballée au load
-  (les tests assertent la forme normalisée, plus le YAML brut). La détection de
-  format + validation schema restent inchangées (v2.5 vs v1).
+  `Loader.load!` NORMALISE le résultat vers la forme interne unique
+  `%{"name", "stages"}` : l'enveloppe v2.5 est déballée au load (les tests
+  assertent la forme normalisée, pas le YAML brut), puis le schema
+  `pipeline-v2.5.json` valide la structure (fail-loud).
 
-  M7 — `async: true` : on passe `:pipelines_root` via opts à `Loader.load!/2`
+  `async: true` : on passe `:pipelines_root` via opts à `Loader.load!/2`
   (pas de couplage Application env global).
   """
   use ExUnit.Case, async: true
@@ -31,25 +29,6 @@ defmodule Fleet.Pipeline.LoaderV25Test do
     pipe = Loader.load!("audit-only", pipelines_root: @canon_pipelines)
     assert pipe["name"] == "audit-only"
     assert is_map(pipe["stages"])
-    refute Map.has_key?(pipe, "spec")
-  end
-
-  @tag :tmp_dir
-  test "régression : flat chantier-12 (sans spec top-level) → forme normalisée identique",
-       %{tmp_dir: dir} do
-    flat = """
-    name: legacy-flat
-    version: 1
-    stages:
-      only:
-        role: engineer
-        profile: engineer.yaml
-    """
-
-    File.write!(Path.join(dir, "legacy-flat.yaml"), flat)
-    pipe = Loader.load!("legacy-flat", pipelines_root: dir)
-    assert pipe["name"] == "legacy-flat"
-    assert is_map(pipe["stages"]["only"])
     refute Map.has_key?(pipe, "spec")
   end
 
@@ -125,17 +104,19 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   @tag :tmp_dir
   test "M7 — load!/2 opt :schema_path override Application env", %{tmp_dir: dir} do
     yaml = """
-    name: legacy-flat
-    version: 1
-    stages:
-      only:
-        role: engineer
-        profile: engineer.yaml
+    kind: Pipeline
+    metadata:
+      name: override-target
+    spec:
+      stages:
+        only:
+          role: engineer
+          profile: engineer.yaml
     """
 
-    File.write!(Path.join(dir, "legacy-flat.yaml"), yaml)
+    File.write!(Path.join(dir, "override-target.yaml"), yaml)
     # No global put_env — async: true safe.
-    loaded = Loader.load!("legacy-flat", pipelines_root: dir)
-    assert loaded["name"] == "legacy-flat"
+    loaded = Loader.load!("override-target", pipelines_root: dir)
+    assert loaded["name"] == "override-target"
   end
 end

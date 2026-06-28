@@ -4,7 +4,7 @@
 # Statut: utilitaire — référence dans un pipeline qui n'a pas besoin
 #         d'overlay modop sur le rôle. CapProfile.compose(role, ["noop"])
 #         retourne le cap-profile du rôle inchangé.
-# Référencé par: pipelines/judge-ping.yaml + tests stub
+# Référencé par: tests stub
 #
 # Pourquoi : Fleet.Pipeline schema v1 exige `stages.<name>.profile` non-
 # vide (chaîne minLength 1). Pour les stages qui n'ont PAS besoin

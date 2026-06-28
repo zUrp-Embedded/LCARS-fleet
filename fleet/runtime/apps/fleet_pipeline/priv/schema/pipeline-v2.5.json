@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:lcars:pipeline-v2.5",
   "title": "LCARS Pipeline v2.5 (enveloppe kind/metadata/spec)",
-  "description": "Structural schema DÉRIVÉ DU CANON RÉEL 06_modops/pipelines/{standard-qa,audit-only}.yaml. R0.8-brick3 : apiVersion retiré (versioning par le code v2 release). Loader détecte enveloppe v2.5 par présence `spec` top-level vs flat v1 `stages`.",
+  "description": "Structural schema dérivé du canon réel des pipelines (standard-qa, audit-only). Enveloppe unique kind/metadata/spec ; pas de champ apiVersion (le versioning vit dans le code, pas dans le YAML).",
   "type": "object",
   "required": ["kind", "metadata", "spec"],
   "additionalProperties": false,

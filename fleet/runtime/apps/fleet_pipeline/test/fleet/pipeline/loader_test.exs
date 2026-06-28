@@ -17,24 +17,29 @@ defmodule Fleet.Pipeline.LoaderTest do
   describe "load!/1" do
     test "pipeline minimal valide → map", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "minimal.yaml"), """
-      name: minimal
-      version: 1
-      stages:
-        only:
-          role: noop
-          profile: empty
+      kind: Pipeline
+      metadata:
+        name: minimal
+      spec:
+        stages:
+          only:
+            role: noop
+            profile: empty
       """)
 
-      # U1 (R3) : forme normalisée `%{"name", "stages"}` — `version` (marqueur
-      # de format source) est écarté, aucun consommateur runtime ne le lit.
+      # Forme normalisée `%{"name", "stages"}` : l'enveloppe (kind/metadata/spec)
+      # est déballée au load, seuls `name` (depuis metadata) et `stages` survivent.
       assert %{"name" => "minimal", "stages" => %{"only" => _}} =
                Loader.load!("minimal")
     end
 
     test "schema invalide (champ stages manquant) → raise", %{tmp_dir: tmp_dir} do
+      # Enveloppe v2.5 valide mais `spec.stages` absent → `spec` exige `stages`.
       File.write!(Path.join(tmp_dir, "invalid.yaml"), """
-      name: invalid
-      version: 1
+      kind: Pipeline
+      metadata:
+        name: invalid
+      spec: {}
       """)
 
       assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
@@ -44,14 +49,16 @@ defmodule Fleet.Pipeline.LoaderTest do
 
     test "schema invalide (gate type non-supporté) → raise", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "bad_gate.yaml"), """
-      name: bad_gate
-      version: 1
-      stages:
-        s1:
-          role: noop
-          profile: empty
-          gate:
-            type: hocus_pocus
+      kind: Pipeline
+      metadata:
+        name: bad_gate
+      spec:
+        stages:
+          s1:
+            role: noop
+            profile: empty
+            gate:
+              type: hocus_pocus
       """)
 
       assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
@@ -69,12 +76,14 @@ defmodule Fleet.Pipeline.LoaderTest do
     test "nom de pipeline traversant (../) → REFUSÉ avant Path.join", %{tmp_dir: tmp_dir} do
       # Pose une cible d'évasion : `<root>/../escape.yaml`.
       File.write!(Path.join([tmp_dir, "..", "escape.yaml"]), """
-      name: escape
-      version: 1
-      stages:
-        only:
-          role: noop
-          profile: empty
+      kind: Pipeline
+      metadata:
+        name: escape
+      spec:
+        stages:
+          only:
+            role: noop
+            profile: empty
       """)
 
       # Sans la garde slug, `Path.join(root, "../escape.yaml")` lirait ce YAML hors-catalogue.
@@ -94,25 +103,26 @@ defmodule Fleet.Pipeline.LoaderTest do
 
     test "stage avec needs + inputs + gate hard valide", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "complex.yaml"), """
-      name: complex
-      version: "1.0"
-      stages:
-        a:
-          role: scout
-          profile: empty
-          outputs:
-            - result_id
-        b:
-          role: archiviste
-          profile: empty
-          needs: [a]
-          inputs:
-            - from_stage: a
-              key: result_id
-          gate:
-            type: hard
-            rule:
-              status: ok
+      kind: Pipeline
+      metadata:
+        name: complex
+      spec:
+        stages:
+          a:
+            role: scout
+            profile: empty
+            outputs:
+              - result_id
+          b:
+            role: archiviste
+            profile: empty
+            needs: [a]
+            inputs:
+              - result_id
+            gate:
+              type: hard
+              rule:
+                status: ok
       """)
 
       assert %{"stages" => %{"a" => _, "b" => stage_b}} = Loader.load!("complex")
@@ -120,19 +130,21 @@ defmodule Fleet.Pipeline.LoaderTest do
       assert stage_b["gate"]["type"] == "hard"
     end
 
-    test "v1 — mandate_kind/judge_target/timeout_sec valides → load OK (alignés v2.5)", %{
+    test "v2.5 — mandate_kind/judge_target/timeout_sec valides → load OK", %{
       tmp_dir: tmp_dir
     } do
       File.write!(Path.join(tmp_dir, "typed.yaml"), """
-      name: typed
-      version: 1
-      stages:
-        review:
-          role: reviewer
-          profile: noop
-          mandate_kind: judge
-          judge_target: mandate
-          timeout_sec: 600
+      kind: Pipeline
+      metadata:
+        name: typed
+      spec:
+        stages:
+          review:
+            role: reviewer
+            profile: noop
+            mandate_kind: judge
+            judge_target: mandate
+            timeout_sec: 600
       """)
 
       assert %{"stages" => %{"review" => stage}} = Loader.load!("typed")
@@ -143,15 +155,17 @@ defmodule Fleet.Pipeline.LoaderTest do
     # Propriété de SÉCURITÉ (frontière) : un mandate_kind hors {worker, judge} est rejeté au LOAD
     # (fail-closed à la frontière). Il ne peut JAMAIS atteindre le dispatcher pour y être inféré en
     # worker (mandat exécutable pour un rôle qui aurait dû être désamorcé).
-    test "v1 — mandate_kind hors-vocab → rejet au load (raise)", %{tmp_dir: tmp_dir} do
+    test "v2.5 — mandate_kind hors-vocab → rejet au load (raise)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "bad_kind.yaml"), """
-      name: bad_kind
-      version: 1
-      stages:
-        review:
-          role: reviewer
-          profile: noop
-          mandate_kind: reviewer
+      kind: Pipeline
+      metadata:
+        name: bad_kind
+      spec:
+        stages:
+          review:
+            role: reviewer
+            profile: noop
+            mandate_kind: reviewer
       """)
 
       assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
@@ -161,15 +175,17 @@ defmodule Fleet.Pipeline.LoaderTest do
 
     # additionalProperties:false : un champ inconnu au stage est rejeté au load (anti-typo /
     # anti-champ-fantôme) au lieu d'être silencieusement ignoré.
-    test "v1 — champ de stage inconnu → rejet au load (raise)", %{tmp_dir: tmp_dir} do
+    test "v2.5 — champ de stage inconnu → rejet au load (raise)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "unknown_field.yaml"), """
-      name: unknown_field
-      version: 1
-      stages:
-        s:
-          role: noop
-          profile: empty
-          bogus_field: oops
+      kind: Pipeline
+      metadata:
+        name: unknown_field
+      spec:
+        stages:
+          s:
+            role: noop
+            profile: empty
+            bogus_field: oops
       """)
 
       assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
@@ -186,16 +202,18 @@ defmodule Fleet.Pipeline.LoaderTest do
       tmp_dir: tmp_dir
     } do
       File.write!(Path.join(tmp_dir, "phantom.yaml"), """
-      name: phantom
-      version: 1
-      stages:
-        a:
-          role: noop
-          profile: empty
-        b:
-          role: noop
-          profile: empty
-          needs: [typo]
+      kind: Pipeline
+      metadata:
+        name: phantom
+      spec:
+        stages:
+          a:
+            role: noop
+            profile: empty
+          b:
+            role: noop
+            profile: empty
+            needs: [typo]
       """)
 
       assert_raise RuntimeError, ~r/arête fantôme/, fn ->

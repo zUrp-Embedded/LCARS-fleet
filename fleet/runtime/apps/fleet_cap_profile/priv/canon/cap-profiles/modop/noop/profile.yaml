@@ -1,4 +1,4 @@
 # Modop noop — overlay vide (identité). compose(role, ["noop"]) = cap-profile du rôle inchangé.
 # (gap-fill C7 : le root <cap-profiles>/modop/ doit porter noop ; le canon/modop/noop sibling
-#  n'est pas résolu par root_dir. Référencé par gk-smoke/judge-ping stages sans overlay.)
+#  n'est pas résolu par root_dir. Référencé par gk-smoke stages sans overlay.)
 {}
