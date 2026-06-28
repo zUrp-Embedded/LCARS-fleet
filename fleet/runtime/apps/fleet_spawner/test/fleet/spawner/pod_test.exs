@@ -162,12 +162,10 @@ defmodule Fleet.Spawner.PodTest do
     dir
   end
 
-  # R1.2 — modèle interactif : le backend retourne init_message: nil (pas de frame NDJSON).
+  # Modèle interactif : le backend ouvre le Port et retourne immédiatement (pas de frame NDJSON).
   defp interactive_reply(opts \\ []) do
     {:ok,
      %{
-       init_message: nil,
-       ndjson_log: nil,
        port: Keyword.get(opts, :port),
        session_id: Keyword.get(opts, :session_id, "stub-sess")
      }}

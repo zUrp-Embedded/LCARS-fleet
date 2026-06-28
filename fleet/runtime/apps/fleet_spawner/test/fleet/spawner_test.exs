@@ -48,13 +48,7 @@ defmodule Fleet.SpawnerTest do
 
     Application.put_env(:fleet_spawner, :claude_dir, setup_claude)
 
-    StubBackend.set_reply(
-      {:ok,
-       %{
-         init_message: StubBackend.valid_init_message(),
-         ndjson_log: "/tmp/stub.ndjson"
-       }}
-    )
+    StubBackend.set_reply({:ok, %{}})
 
     on_exit(fn ->
       StubBackend.clear()

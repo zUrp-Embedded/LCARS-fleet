@@ -52,8 +52,7 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
     test "LAUNCH-Q : l'exe du Port = launcher_path (host_launch quand containment: none), argv inchangé" do
       # Le backend est agnostique du containment : il exécute le launcher que le spawner a choisi.
       # Même vecteur d'args ⇒ même argv ; seul l'exe (argv0 du Port) change (host vs bwrap).
-      assert {:ok, "/h/host_launch.sh",
-              ["architect", "pod-7", "/p", "/opt/claude_launch.sh" | _]} =
+      assert {:ok, "/h/host_launch.sh", ["architect", "pod-7", "/p", "/opt/claude_launch.sh" | _]} =
                LauncherPortBackend.build_spawn(%{
                  role: "architect",
                  pod_id: "pod-7",
@@ -70,13 +69,12 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
 
   describe "launch/2 (R1.2 — Port ouvert, PAS d'attente init NDJSON)" do
     @tag :tmp_dir
-    test "exe valide → {:ok, port ouvert, init_message nil} immédiat (pas de blocage)", %{
+    test "exe valide → {:ok, port ouvert} immédiat (pas de blocage)", %{
       tmp_dir: dir
     } do
       bwrap = fake_exe(dir, "fake_bwrap.sh", "sleep 2")
 
-      assert {:ok,
-              %{init_message: nil, ndjson_log: nil, port: port, tmux_session: "lcars-pod-pod-42"}} =
+      assert {:ok, %{port: port, tmux_session: "lcars-pod-pod-42"}} =
                LauncherPortBackend.launch(args(dir, bwrap), %{"K" => "V"})
 
       assert is_port(port)

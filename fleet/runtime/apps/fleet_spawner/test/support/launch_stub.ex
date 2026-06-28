@@ -29,19 +29,4 @@ defmodule Fleet.Spawner.LaunchBackend.StubBackend do
     Application.delete_env(:fleet_spawner, :stub_launch_parent)
     :ok
   end
-
-  def valid_init_message do
-    %{
-      "tools" => ["Read", "Glob", "Grep"],
-      "model" => "claude-sonnet-4-6",
-      "permission_mode" => "default",
-      "api_key_source" => "oauth",
-      "cwd" => "/tmp/pod-stub",
-      "claude_code_version" => "2.1.138",
-      "mcp_servers" => [],
-      "slash_commands" => ["memory-query"],
-      "agents" => ["Explore"],
-      "session_id" => "stub-session-#{System.unique_integer([:positive])}"
-    }
-  end
 end

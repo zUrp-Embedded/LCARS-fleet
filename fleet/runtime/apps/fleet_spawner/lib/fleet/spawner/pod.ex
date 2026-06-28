@@ -93,10 +93,8 @@ defmodule Fleet.Spawner.Pod do
           started_at: DateTime.t(),
           cap_profile: Fleet.CapProfile.t(),
           env_vars: %{String.t() => String.t()},
-          ndjson_log_path: Path.t() | nil,
           pod_dir: Path.t(),
           state_fs_path: Path.t(),
-          init_message: map() | nil,
           last_error: term() | nil,
           opts: keyword(),
           # Port owné par le Pod (détection exit + kill en RELEASE).
@@ -179,7 +177,6 @@ defmodule Fleet.Spawner.Pod do
       pod_dir: state.pod_dir,
       state_fs_path: state.state_fs_path,
       last_error: state.last_error,
-      init_message: state.init_message,
       last_result: state.last_result,
       # tmux_session : nom de la session tmux du pod, posé par LauncherPortBackend (les deux
       # launchers N0 bwrap/host créent un tmux par-pod), nil pour StubBackend. Exposé pour
@@ -654,7 +651,7 @@ defmodule Fleet.Spawner.Pod do
         state
         |> Map.put(:phase, :injecting)
         # SP plus stocké en state (plus en argv) : la SOURCE = .lcars/system-prompt.md (écrit ci-dessus),
-        # lu par claude_launch via --system-prompt-file. Supprime la fragilité sp=nil au recovery.
+        # lu par claude_launch via --system-prompt-file.
         |> add_condition(:home_projected)
 
       {:noreply, new_state, {:continue, :inject}}
@@ -1089,7 +1086,7 @@ defmodule Fleet.Spawner.Pod do
 
   defp do_launch_backend(state, args, env) do
     case launch_backend().launch(args, env) do
-      {:ok, %{init_message: init_msg, ndjson_log: ndjson_log} = launched} ->
+      {:ok, launched} when is_map(launched) ->
         # Extrait le port (LauncherPortBackend l'inclut, StubBackend non).
         # nil-able : un test stub n'a pas de Port → les clauses handle_info
         # ne matchent jamais → comportement legacy préservé.
@@ -1101,8 +1098,6 @@ defmodule Fleet.Spawner.Pod do
         new_state =
           state
           |> Map.put(:phase, :monitoring)
-          |> Map.put(:init_message, init_msg)
-          |> Map.put(:ndjson_log_path, ndjson_log)
           |> Map.put(:port, port)
           |> Map.put(:tmux_session, tmux_session)
           # session_id PRÉ-ALLOUÉ (state) — pas de capture `init_msg["session_id"]` (le modèle -p est
@@ -1626,15 +1621,10 @@ defmodule Fleet.Spawner.Pod do
       # claude `--resume <session_id>` (ressuscite un pod archivé). La recovery sur
       # state.json ne resume jamais (terminale → release, sinon → recreate fresh).
       resume: Keyword.get(args.opts, :resume, false),
-      # SP composé (do_project) stocké en state pour l'argv4 inline de claude_launch
-      # (--system-prompt) ; pas de fichier SP côté pod (.lcars/system-prompt.md = miroir lisible).
-      sp: nil,
       cap_profile: args.cap_profile,
       env_vars: %{},
-      ndjson_log_path: nil,
       pod_dir: pod_dir,
       state_fs_path: state_fs_path,
-      init_message: nil,
       last_error: nil,
       opts: args.opts,
       port: nil,

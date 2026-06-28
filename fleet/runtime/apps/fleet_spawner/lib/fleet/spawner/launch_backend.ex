@@ -4,9 +4,9 @@ defmodule Fleet.Spawner.LaunchBackend do
   (chantier 5) avec ENV vars OAuth résolues.
 
   Le default `Fleet.Spawner.LaunchBackend.LauncherPortBackend` utilise
-  `Port.open/2` (`:spawn_executable`) et lit la sortie. Tests
-  swappent via `Fleet.Spawner.LaunchBackend.StubBackend` pour
-  retourner des données canned (init message NDJSON, exit code).
+  `Port.open/2` (`:spawn_executable`) et retourne immédiatement (modèle
+  interactif, pas de flux NDJSON à lire). Tests swappent via
+  `Fleet.Spawner.LaunchBackend.StubBackend` pour retourner un Port canned.
 
   Configurable via :
 
@@ -43,12 +43,9 @@ defmodule Fleet.Spawner.LaunchBackend do
 
   ## Returns
 
-    * `{:ok, %{port: port, init_message: map() | nil, ndjson_log: path}}`
-      — pod lancé, init message capturé (ou nil si pas encore reçu)
+    * `{:ok, %{port: port, tmux_session: String.t() | nil}}`
+      — pod lancé (Port ouvert immédiatement, modèle interactif sous PTY)
     * `{:error, reason}` — échec
-
-  Les implémentations sont libres de bloquer pour récupérer le
-  premier `init` message (boot validation) avant de retourner.
   """
   @callback launch(args :: map(), env :: %{String.t() => String.t()}) ::
               {:ok, %{required(atom()) => any()}} | {:error, term()}

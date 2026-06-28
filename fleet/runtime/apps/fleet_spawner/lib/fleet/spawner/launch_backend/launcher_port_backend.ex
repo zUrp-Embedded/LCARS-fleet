@@ -17,7 +17,7 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   `{port, {:exit_status, _}}` arrivent à `Pod.handle_info`. Détection d'exit,
   monitoring du livrable et kill = lifecycle Pod, pas ici.
 
-  Retour : `{:ok, %{port: port, init_message: nil, ndjson_log: nil}}` | `{:error, reason}`.
+  Retour : `{:ok, %{port: port, tmux_session: name}}` | `{:error, reason}`.
   Tests : `build_spawn/1` pur (ordre/contenu du vecteur args) + smoke fake-exe (Port ouvert / exe absent).
   """
 
@@ -41,8 +41,6 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
       {:ok,
        %{
          port: port,
-         init_message: nil,
-         ndjson_log: nil,
          # tmux_session présent ⇒ pod KICKABLE (PodTmux send-keys sur le sock par-pod). Le sock est
          # dérivé du pod_id (convention bwrap_launch.sh), pas besoin de le porter dans l'état.
          tmux_session: Fleet.Spawner.PodTmux.session_name(args.pod_id)
@@ -75,7 +73,7 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
              is_binary(launcher) and is_binary(claude) do
     # SP pas en argv (fuite /proc/cmdline + frôle ARG_MAX) : claude_launch le lit depuis
     # pod_dir/.lcars/system-prompt.md via --system-prompt-file (--system-prompt-file = replace +
-    # TRUSTED). Supprime aussi la fragilité sp=nil → :invalid_args au recovery.
+    # TRUSTED).
     argv = [role, pod_id, pod_dir, claude, role, pod_id, pod_dir]
     {:ok, launcher, argv}
   end
