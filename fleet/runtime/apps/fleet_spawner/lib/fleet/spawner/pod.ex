@@ -45,6 +45,7 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.Spawner.Pod.Events
   alias Fleet.Spawner.Pod.Fs
   alias Fleet.Spawner.Pod.LaunchSpec
+  alias Fleet.Spawner.Pod.Liveness
   alias Fleet.Spawner.Pod.McpProvision
   alias Fleet.Spawner.Pod.Paths
   alias Fleet.SPBuilder
@@ -370,8 +371,8 @@ defmodule Fleet.Spawner.Pod do
   # bosse ne timeout JAMAIS ; le `:result_deadline` ne fire que sur silence total. Hors :monitoring → no-op
   # (tick résiduel après transition).
   def handle_info(:liveness_tick, %{phase: :monitoring} = state) do
-    sample = liveness_sample(state)
-    moved? = liveness_moved?(Map.get(state, :liveness_sample), sample)
+    sample = Liveness.liveness_sample(state)
+    moved? = Liveness.liveness_moved?(Map.get(state, :liveness_sample), sample)
     state = Map.put(state, :liveness_sample, sample)
 
     state =
@@ -1871,7 +1872,11 @@ defmodule Fleet.Spawner.Pod do
       # ne tombe que sur silence total = stuck/mort. C'est ce qui rend VRAIE la promesse du commentaire
       # kick (« le deadline se ré-arme sur activité »).
       state
-      |> arm_managed_timer(:result_deadline_ref, :result_deadline, monitor_timeout_ms(state))
+      |> arm_managed_timer(
+        :result_deadline_ref,
+        :result_deadline,
+        Liveness.monitor_timeout_ms(state)
+      )
       |> schedule_liveness_tick()
     end
   end
@@ -1912,129 +1917,13 @@ defmodule Fleet.Spawner.Pod do
   end
 
   defp schedule_liveness_tick(state),
-    do: arm_managed_timer(state, :liveness_tick_ref, :liveness_tick, liveness_tick_ms(state))
-
-  defp liveness_tick_ms(state) do
-    keyword_opt(state, :liveness_tick_ms) ||
-      Application.get_env(:fleet_spawner, :liveness_tick_ms, 30_000)
-  end
-
-  # Lit une option per-pod depuis `state.opts` (keyword passé au spawn) → `nil` si absente/illisible. Permet
-  # d'injecter en test SANS config globale (async-safe) : `:liveness_probe_fun`, `:liveness_tick_ms`.
-  defp keyword_opt(state, key) do
-    case Map.get(state, :opts) do
-      opts when is_list(opts) -> Keyword.get(opts, key)
-      _ -> nil
-    end
-  end
-
-  # Sonde de liveness : `{taille_jsonl, jiffies_cpu}` — deux signaux complémentaires (le jsonl couvre « a
-  # produit une sortie », le CPU couvre « moud sans sortie encore »). Injectable (test) via l'opt per-pod
-  # `:liveness_probe_fun` (fun/1) ou la config. `nil` sur un signal = indisponible (pas de fichier / pas de
-  # port) → ne compte pas comme mouvement (biais anti-kill : on ne tue pas sur un nil).
-  defp liveness_sample(state) do
-    case keyword_opt(state, :liveness_probe_fun) ||
-           Application.get_env(:fleet_spawner, :liveness_probe_fun) do
-      fun when is_function(fun, 1) -> fun.(state)
-      _ -> {jsonl_size(state), proc_cpu_jiffies(state)}
-    end
-  end
-
-  # Mouvement = au moins UN des deux signaux a crû. Pas de baseline (1er tick) → vivant (bénéfice du doute).
-  defp liveness_moved?(nil, _now), do: true
-  defp liveness_moved?({pj, pc}, {nj, nc}), do: grew?(pj, nj) or grew?(pc, nc)
-
-  defp grew?(prev, now) when is_integer(prev) and is_integer(now), do: now > prev
-  defp grew?(_, _), do: false
-
-  # Taille cumulée des `<session_id>.jsonl` du pod (append-only → croît à chaque message/tool-result).
-  # `nil` si aucun jsonl (session pas encore écrite).
-  defp jsonl_size(state) do
-    [state.pod_dir, ".claude", "projects", "*", "#{state.session_id}.jsonl"]
-    |> Path.join()
-    |> Path.wildcard()
-    |> Enum.map(fn f ->
-      case File.stat(f) do
-        {:ok, %{size: s}} -> s
-        _ -> 0
-      end
-    end)
-    |> case do
-      [] -> nil
-      sizes -> Enum.sum(sizes)
-    end
-  end
-
-  # utime+stime (jiffies) du process claude via `/proc/<os_pid>/stat`. Robuste au `comm` (champ 2, entre
-  # parenthèses, peut contenir espaces/`)`) : on découpe après le DERNIER `)` (champ 3 = index 0 du reste →
-  # utime = index 11, stime = index 12). `nil` si pas de port / process parti / proc illisible. NB : mesure
-  # le process PARENT (un tool enfant CPU-lourd n'y figure pas — couvert par le OU-jsonl + la fenêtre de
-  # silence).
-  defp proc_cpu_jiffies(state) do
-    with port when is_port(port) <- Map.get(state, :port),
-         {:os_pid, pid} <- Port.info(port, :os_pid),
-         {:ok, raw} <- File.read("/proc/#{pid}/stat") do
-      fields =
-        raw |> String.split(")") |> List.last() |> String.trim() |> String.split(~r/\s+/)
-
-      case {to_int(Enum.at(fields, 11)), to_int(Enum.at(fields, 12))} do
-        {u, s} when is_integer(u) and is_integer(s) -> u + s
-        _ -> nil
-      end
-    else
-      _ -> nil
-    end
-  end
-
-  defp to_int(nil), do: nil
-
-  defp to_int(str) when is_binary(str) do
-    case Integer.parse(str) do
-      {n, _} -> n
-      :error -> nil
-    end
-  end
-
-  # Timeout de RÉPONSE (pas budget de durée de vie) au tool MCP submit_result.
-  # Si pas de réponse dans le délai → :result_deadline → transition_failed → le
-  # pod MEURT (tous `:temporary`) : PAS de relaunch OTP. Conséquence (couplage) :
-  # la task active est à libérer (`TaskQueue.clear_for_pod`) sinon elle reste
-  # orpheline (assigned/pending sans pod), et le re-dispatch est délibéré
-  # (recovery boot-orchestrator).
-  #
-  # Override par cap-profile optionnel : `spec.timeouts.response_sec`. Sinon
-  # default codé par scope (one-shot=300s par défaut ; pour les pods
-  # always-on/forever 60s, response time monk = sub-minute).
-  defp monitor_timeout_ms(state) do
-    override = get_in(state.cap_profile.spec, ["timeouts", "response_sec"])
-
-    sec =
-      cond do
-        is_number(override) and override > 0 ->
-          override
-
-        true ->
-          default_response_timeout_sec(state.cap_profile)
-      end
-
-    # `Process.send_after` exige un entier non-négatif. `is_number(override)` accepte les
-    # FLOATS (un cap-profile `timeouts.response_sec: 1.5` passe la validation) → `sec * 1000` = float
-    # → ArgumentError dans arm_result_deadline qui CRASHERAIT le Pod sans transition_failed. `round/1`
-    # coerce → entier (ms), quel que soit l'override.
-    round(sec * 1000)
-  end
-
-  defp default_response_timeout_sec(%Fleet.CapProfile{spec: spec}) do
-    # Pas de band-aid `forever -> 60_000` : arm_result_deadline n'arme PAS pour `forever`
-    # (un permanent n'a pas de timeout de réponse), et le fire ne tue que si une task est
-    # réellement active. La valeur `forever` ci-dessous est donc inerte (forever n'arme
-    # jamais) ; conservée par cohérence si un override `spec.timeouts.response_sec` la
-    # réactivait un jour.
-    case get_in(spec, ["invocation", "lifetime_scope"]) do
-      "forever" -> 60
-      _other -> 300
-    end
-  end
+    do:
+      arm_managed_timer(
+        state,
+        :liveness_tick_ref,
+        :liveness_tick,
+        Liveness.liveness_tick_ms(state)
+      )
 
   defp maybe_path(path) do
     if File.exists?(path), do: path, else: nil
