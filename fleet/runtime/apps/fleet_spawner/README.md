@@ -49,6 +49,9 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
   - `pod_dir(pod_id, opts \\ [])` — `<pod_dir_root>/pod_<pod_id>` (clone git + `.lcars`/`.claude`/`tickets`), reconstructible du SEUL pod_id (cap_profile hors-calcul → GC par scan). **Public**, aussi appelé par `PodWarden` ; `Fleet.Spawner.Pod.pod_dir/2` garde un wrapper délégant (contrat préservé).
   - `state_fs_root/0` — racine SCANNABLE des `state.json` (`<root>/<scope>/<pod_id>/state.json`, scope ∈ {pipes,runs,pods}). **Public**, balayée par `PodWarden` ; `Fleet.Spawner.Pod.state_fs_root/0` garde un wrapper délégant.
   - `state_fs_path_for(pod_id, cap_profile, opts)` / `pod_dir_for(pod_id, cap_profile, opts)` / `runtime_home/0` — résolutions appelées par `Pod` (`initial_state`, `clear_terminal_snapshot`, `claude_dir`).
+- `Fleet.Spawner.Pod.Events` — **cluster broadcast BUS** du cycle de vie pod, extrait de `Pod` (aucun state/Port/timer). Diffuse sur `fleet.events` sous l'enveloppe canon stricte `%Fleet.Event{source: :spawner}` ; le `Pod` lui passe `event_type`/`payload`, le bus est lu via le seam app-env `:fleet_spawner, :event_bus` (défaut `Fleet.EventRouter.Bus`, injectable en test). La SÉPARATION load-bearing vs best-effort est le cœur du module (`build_spawner_event`/`event_bus` restent internes) :
+  - `best_effort_broadcast(event_type, payload)` — OBSERVABILITÉ/escalade (`pod.failed`, `wake.failed`) ; échec non-bloquant (rescue → log), rend toujours `:ok`.
+  - `required_broadcast(event_type, payload)` — LIFECYCLE load-bearing (`pod.completed`) ; échec NON avalé → `:ok` | `{:error, {:broadcast_failed, _}}`, `do_extract` ne release/kill PAS le pod sur une complétion orpheline (fail-loud).
 
 ## Chaîne de lancement (ADR-G — RC interactif, plus de `-p`)
 
