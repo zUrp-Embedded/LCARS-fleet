@@ -57,6 +57,11 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
   - `liveness_moved?(prev, now)` — `true` si au moins un signal a crû (pas de baseline 1er tick → vivant, bénéfice du doute) ; appelé par le même handler.
   - `liveness_tick_ms(state)` — cadence du tick (opt per-pod sinon config, défaut 30 s) ; appelé par `schedule_liveness_tick` qui RESTE dans `Pod` (il ARME le timer).
   - `monitor_timeout_ms(state)` — délai (ms) du `:result_deadline` (override `spec.timeouts.response_sec` sinon défaut par scope, `round/1` coerce les floats) ; appelé par `arm_result_deadline`.
+- `Fleet.Spawner.Pod.Kick` — **décision + I-O de la boucle de réveil ack-driven (« kick »)**, extrait de `Pod` (aucun state propre, aucun timer armé ici). RESTENT au cœur du `Pod` : l'ARMEMENT du timer (`arm_kick`/`schedule_kick`/`cancel_kick`), le HANDLER `handle_info({:kick_attempt, n}, ...)` qui orchestre cap/retry/ACK et appelle ce module, et les sondes TaskQueue (`polled?`/`mandate_pulled?`/`no_pending_mandate?`) que le handler réduit en booléens avant de les passer. Lit `state.pod_id` + la config `:fleet_spawner` (bornes + knob `:wake_send_keys`). Dépend de `Fleet.Spawner.PodTmux` (envoi de send-keys) ; aucune dépendance vers `Pod` (pas de cycle). `do_send_keys` reste interne (appelé seulement par `kick_send`) :
+  - `kick_first_delay_ms/0` / `kick_retry_ms/0` / `kick_max_attempts/0` / `kick_bootstrap_retry_ms/0` / `kick_bootstrap_max/0` — bornes/cadences (config `:fleet_spawner`, défauts 2 000 / 2 500 / 12 / 8 000 / 30 ms·tentatives) ; `kick_first_delay_ms` appelé par `arm_kick`, les autres par le handler (branche wake vs bootstrap).
+  - `acked?(pulled?, bootstrap?, polled)` — décision PURE de STOP de la boucle (l'agent a tendu la main : pull pour un wake, poll pour un bootstrap) ; appelé par le handler. `Fleet.Spawner.Pod.acked?/3` garde un wrapper délégant (le test exerce l'API publique).
+  - `kick_keyword(polled, fallback_on?)` — décision PURE du mot-clé (`yop` bootstrap / `wake` fallback gaté `:wake_send_keys` / `nil`) ; appelé par `kick_send`. `Fleet.Spawner.Pod.kick_keyword/2` garde un wrapper délégant (le test exerce l'API publique).
+  - `kick_send(state, polled)` — choisit le mot-clé puis le pousse dans le tmux du pod (no-op si `nil`) ; appelé par le handler.
 
 ## Chaîne de lancement (ADR-G — RC interactif, plus de `-p`)
 
