@@ -72,6 +72,9 @@ defmodule Fleet.Spawner.Pod do
           | :init_validated
           | :output_extracted
           | :home_released
+          # SLOT-FREEZE : un pipe est :publishing entre son submit et la confirmation que son livrable est
+          # sur la forge (event deliverable.published). Levee -> pret a reset/re-mandater (etape 4).
+          | :publishing
 
   @type state :: %{
           phase: phase(),
@@ -280,6 +283,22 @@ defmodule Fleet.Spawner.Pod do
   def handle_info(%Fleet.Event{source: :task_queue, type: :task_completed}, state),
     do: {:noreply, state}
 
+  # SLOT-FREEZE : le livrable de CE pod est confirme sur la forge (push + PR OK -> le push a deja LU le
+  # workspace). On leve :publishing -> le pod est :ready (reset/re-mandate surs, etape 4). Matche par
+  # pod_id (bind `pid` des deux cotes). Les deliverable.published d'AUTRES pods -> ignores (catch-all).
+  def handle_info(
+        %Fleet.Event{type: :"deliverable.published", pod_id: pid},
+        %{pod_id: pid} = state
+      ) do
+    if MapSet.member?(state.conditions, :publishing) do
+      Logger.info("pod #{state.pod_id} livrable confirme sur forge -> :ready")
+    end
+
+    {:noreply, leave_publishing(state)}
+  end
+
+  def handle_info(%Fleet.Event{type: :"deliverable.published"}, state), do: {:noreply, state}
+
   # Deadline : timeout de RÉPONSE. Au FIRE, on distingue :
   #   - task active (pending/assigned/in_progress) → le pod n'a PAS répondu à temps → échec.
   #   - aucune task active → le pod attendait juste sa prochaine task (idle) ; ce n'est
@@ -295,6 +314,19 @@ defmodule Fleet.Spawner.Pod do
   end
 
   def handle_info(:result_deadline, state), do: {:noreply, state}
+
+  # SLOT-FREEZE fail-safe : la confirmation deliverable.published n'est pas arrivee dans le delai (role
+  # sans livrable git, ou push KO). On leve :publishing quand meme — sinon le pod resterait jamais-:ready
+  # donc jamais re-mandate (wedge). Logge WARNING : une confirmation manquee doit etre visible.
+  def handle_info(:publish_deadline, state) do
+    if MapSet.member?(state.conditions, :publishing) do
+      Logger.warning(
+        "pod #{state.pod_id} :publishing -> :ready par DEADLINE (deliverable.published non recu a temps)"
+      )
+    end
+
+    {:noreply, leave_publishing(state)}
+  end
 
   # Watchdog de LIVENESS (pas de durée). Tick récurrent (workers seulement, armé par
   # arm_result_deadline) : si le pod a BOUGÉ depuis le tick précédent (taille jsonl ↑ OU jiffies CPU ↑)
@@ -1209,6 +1241,10 @@ defmodule Fleet.Spawner.Pod do
           |> Map.put(:phase, :monitoring)
           |> Map.put(:submitted_result, nil)
           |> remove_condition(:output_extracted)
+          # SLOT-FREEZE : enter_publishing -> le pipe est :publishing tant que son livrable n'est pas
+          # confirme sur la forge (le HopConsumer le LIT + push en async) ; il n'est pas re-mandatable
+          # tant qu'il publie (etape 4), sinon on courserait le push. Leve par deliverable.published.
+          |> enter_publishing()
           |> arm_result_deadline()
 
         {:noreply, new_state}
@@ -1910,6 +1946,24 @@ defmodule Fleet.Spawner.Pod do
       |> schedule_liveness_tick()
     end
   end
+
+  # SLOT-FREEZE : un pipe entre :publishing au submit (condition + deadline fail-safe). La levee
+  # (deliverable.published OU deadline) retire la condition et annule le timer. publish_deadline_ms est
+  # genereux (> le timeout de push git 30s + marge) : il ne fire QUE si la confirmation n'arrive jamais.
+  defp enter_publishing(state) do
+    state
+    |> add_condition(:publishing)
+    |> arm_managed_timer(:publish_deadline_ref, :publish_deadline, publish_deadline_ms())
+  end
+
+  defp leave_publishing(state) do
+    state
+    |> remove_condition(:publishing)
+    |> cancel_managed_timer(:publish_deadline_ref)
+  end
+
+  defp publish_deadline_ms,
+    do: Application.get_env(:fleet_spawner, :publish_deadline_ms, 120_000)
 
   defp cancel_result_deadline(state) do
     state
