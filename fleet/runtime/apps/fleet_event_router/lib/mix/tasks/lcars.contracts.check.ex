@@ -553,13 +553,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # qui ne délègue rien, ne garde rien en prod.
   defp check_spawn_gates_wired(root) do
     pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
+
+    # La construction env + la porte credentials vivent dans Pod.LaunchEnv (le cluster env/creds extrait
+    # de do_launch). do_launch (pod.ex) appelle LaunchEnv.build, qui câble Gate.validate. La porte est
+    # donc câblée au spawn par DEUX faits conjoints : pod.ex appelle LaunchEnv.build ET LaunchEnv.build
+    # contient Gate.validate (plus fort que l'ancienne vérif mono-fichier où tout était inline dans pod.ex).
+    launch_env = "apps/fleet_spawner/lib/fleet/spawner/pod/launch_env.ex"
     gate = "apps/fleet_credentials/lib/fleet/credentials/gate.ex"
 
     # Chaque vérif = {fichier_relatif, regex, label}. Le label nomme le fichier attendu.
     checks = [
-      {pod, ~r/CapProfile\.validate\(/, "CapProfile.validate (containment G24/F-CONT-RISK)"},
-      {pod, ~r/Fleet\.Credentials\.Gate\.validate\(/,
-       "Fleet.Credentials.Gate.validate (porte scope+plan câblée au spawn)"},
+      {pod, ~r/CapProfile\.validate\(/,
+       "CapProfile.validate (containment G24/F-CONT-RISK, do_allocate)"},
+      {pod, ~r/LaunchEnv\.build\(/,
+       "Pod.LaunchEnv.build câblé au spawn (do_launch enchaîne env + portes credentials)"},
+      {launch_env, ~r/Fleet\.Credentials\.Gate\.validate\(/,
+       "Fleet.Credentials.Gate.validate (porte scope+plan, dans LaunchEnv.build)"},
       {gate, ~r/ScopeValidator\.validate\(/,
        "ScopeValidator.validate (délégation scope-coverage)"},
       {gate, ~r/PlanValidator\.validate\(/, "PlanValidator.validate (délégation plan payant)"}
@@ -582,7 +591,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "porte containment (CapProfile.validate) + porte credentials (Fleet.Credentials.Gate.validate) câblées au spawn dans pod.ex, ET la porte délègue réellement scope (ScopeValidator) + plan (PlanValidator) dans gate.ex — 4 vérifs, 2 niveaux"
+        "porte containment (CapProfile.validate, do_allocate) dans pod.ex + porte credentials câblée au spawn via Pod.LaunchEnv (do_launch appelle LaunchEnv.build, qui enchaîne Fleet.Credentials.Gate.validate), ET la porte délègue réellement scope (ScopeValidator) + plan (PlanValidator) dans gate.ex — 5 vérifs, 2 niveaux"
     }
   end
 
