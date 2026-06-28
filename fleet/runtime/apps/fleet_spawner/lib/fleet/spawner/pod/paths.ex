@@ -22,7 +22,8 @@ defmodule Fleet.Spawner.Pod.Paths do
     rend le GC par scan possible (le warden dérive le pod_dir à effacer depuis la tombstone, sans cap_profile).
   - `state_fs_root/0` (PUBLIC, aussi balayé par `PodWarden`) — racine scannable des `state.json`.
   - `pod_dir_for/3`, `state_fs_path_for/3`, `runtime_home/0` — résolutions appelées par `Pod`
-    (`initial_state`, `clear_terminal_snapshot`, `claude_dir`) ; publiques car franchies depuis `Pod`.
+    (`initial_state`, `clear_terminal_snapshot`) et `Pod.LaunchEnv` (`claude_dir` → `runtime_home/0`) ;
+    publiques car franchies depuis ces modules.
   """
 
   @doc """

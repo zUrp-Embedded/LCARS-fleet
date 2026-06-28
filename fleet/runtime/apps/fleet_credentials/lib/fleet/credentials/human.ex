@@ -5,7 +5,7 @@ defmodule Fleet.Credentials.Human do
   Doctrine 2026-06-11 : la fleet ENTIÈRE tourne sous l'user de l'humain qui la lance
   (`User=<humain>`) → l'user courant EST l'humain. SOURCE UNIQUE de `id -un` : tout consommateur
   passe ici, jamais un `id -un` shellé en propre. Sinon deux résolveurs à politique d'échec
-  divergente (`ForgeIdentity.resolve_human` → `{:error}` ; `Fleet.Spawner.Pod.runtime_user` → raise) ;
+  divergente (`ForgeIdentity.resolve_human` → `{:error}` ; `Fleet.Spawner.Pod.LaunchEnv.runtime_user` → raise) ;
   si la règle évolue, spawn-ownership (pod_dir/UID) et commit-identity (git author) divergent.
   """
 
