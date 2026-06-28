@@ -30,6 +30,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   alias Fleet.Pilot.ForgeClient
   alias Fleet.Pilot.GitOps
+  alias Fleet.Pilot.Roles
 
   require Logger
 
@@ -131,7 +132,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp protect_main(repo, opts) do
     rule = %{
       rule_name: "main",
-      required_approvals: length(reviewer_roles(opts)),
+      required_approvals: length(Roles.reviewer_roles(opts)),
       dismiss_stale_approvals: true,
       block_on_rejected_reviews: true,
       enable_push: false
@@ -145,17 +146,12 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   # Comptes de rôle qui agissent sur un repo = producteur + juges + gatekeeper (config, data catalogue).
   defp fleet_roles(opts),
-    do: [producer_role(opts)] ++ reviewer_roles(opts) ++ [gatekeeper_role(opts)]
+    do: [producer_role(opts)] ++ Roles.reviewer_roles(opts) ++ [gatekeeper_role(opts)]
 
   defp producer_role(opts),
     do:
       Keyword.get(opts, :producer_role) ||
         Application.get_env(:fleet_pilot, :producer_role, "engineer")
-
-  defp reviewer_roles(opts),
-    do:
-      Keyword.get(opts, :reviewer_roles) ||
-        Application.get_env(:fleet_pilot, :reviewer_roles, ["qualifier", "reviewer"])
 
   defp gatekeeper_role(opts),
     do:

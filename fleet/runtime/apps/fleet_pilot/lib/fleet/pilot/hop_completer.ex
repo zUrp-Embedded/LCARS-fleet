@@ -43,6 +43,7 @@ defmodule Fleet.Pilot.HopCompleter do
 
   alias Fleet.Pilot.ForgeClient
   alias Fleet.Pilot.Labels
+  alias Fleet.Pilot.Roles
 
   # Vocabulaire protocole = source unique Fleet.Pilot.Labels.
   @in_flight_label Labels.in_flight()
@@ -587,7 +588,7 @@ defmodule Fleet.Pilot.HopCompleter do
     # Unlock DES DEUX numéros (idempotent : remove_label no-op si absent). 1re livraison → le verrou est
     # sur l'ISSUE (posé par `dispatch_issue`) ; RE-livraison de rework → le verrou est sur la PR (posé
     # par `dispatch_review` :rework). On lève les deux pour ne stuck ni l'un ni l'autre.
-    with :ok <- request_reviews_step(forge, repo, pr, reviewer_roles(opts), forge_opts),
+    with :ok <- request_reviews_step(forge, repo, pr, Roles.reviewer_roles(opts), forge_opts),
          {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
          {:ok, _} <- unlock(forge, repo, hop.issue_number, forge_opts),
          {:ok, _} <- unlock(forge, repo, pr, forge_opts) do
@@ -641,13 +642,6 @@ defmodule Fleet.Pilot.HopCompleter do
 
         {:ok, :no_human}
     end
-  end
-
-  # Juges du modèle single-brique : config `:reviewer_roles` (data catalogue, défaut
-  # qualifier+reviewer), surchargée par `opts` pour les tests. Symétrique de `:producer_role`.
-  defp reviewer_roles(opts) do
-    Keyword.get(opts, :reviewer_roles) ||
-      Application.get_env(:fleet_pilot, :reviewer_roles, ["qualifier", "reviewer"])
   end
 
   # Espace deux écritures forge d'un même hop d'au moins UNE SECONDE. Gitea horodate les events à

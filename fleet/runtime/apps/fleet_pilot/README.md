@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-27 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
+**Dernière révision** : 2026-06-28 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -92,7 +92,7 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   (Legacy carte multi-stage : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
 
 Knobs : `:stage_dispatch?` + `:poll_repo` + `:poll_interval_ms` (stage), `:producer_role` (défaut `engineer`),
-`:reviewer_roles` (juges PR, défaut `["qualifier", "reviewer"]`), `:gatekeeper_role` (scelle les fusions,
+`:reviewer_roles` (juges PR, défaut data posé en `config/config.exs` — source unique, lu via `Fleet.Pilot.Roles`), `:gatekeeper_role` (scelle les fusions,
 défaut `gatekeeper`), `:hop_runner` (offload complétion, F067), `:wake_recovery` (seam recovery de wake,
 défaut `&Fleet.Pilot.WakeRecovery.wake/3` ; MA-17 : le retour du wake est load-bearing → un kick injoignable
 remonte `{:error,{:wake_unreached,_}}` au dispatch (tally honnête) / une telemetry au gatekeeper, jamais avalé).
