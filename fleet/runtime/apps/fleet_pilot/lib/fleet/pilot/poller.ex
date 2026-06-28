@@ -500,13 +500,51 @@ defmodule Fleet.Pilot.Poller do
 
     spawner.list_pods()
     |> Enum.filter(&pod_has_active_task?(tq, &1[:pod_id]))
-    |> Enum.flat_map(&parse_pod_ref(&1[:pod_id], repo))
+    |> Enum.flat_map(&owned_refs_for_pod(&1[:pod_id], repo, tq))
     |> MapSet.new()
   rescue
     _ -> :error
   catch
     _, _ -> :error
   end
+
+  # Refs qu'un pod ACTIF possede. Per-ticket (instance) : derivees du pod_id (`-issue-N-` / `-pr-N-`).
+  # SLOT-FREEZE — project pipe (pod_id `<repo>-engineer`, AUCUN `-issue-N-`) : parse_pod_ref rend [] (son
+  # id n'encode pas la brique), donc on derive la brique de sa TACHE ACTIVE (`ticket_id` = `issue-N`).
+  # Sinon le poller croit l'eng resident proprietaire d'AUCUN verrou -> reclame le sien -> boucle.
+  defp owned_refs_for_pod(pod_id, repo, tq) do
+    case parse_pod_ref(pod_id, repo) do
+      [] -> project_pod_owned_refs(pod_id, repo, tq)
+      refs -> refs
+    end
+  end
+
+  # Un pod project-scoped de CE repo (prefixe scope) possede la ref de sa tache active (`issue-N` ->
+  # {repo, :issue, N}). Garde le SCOPE repo : un eng d'un autre repo ne possede pas une ref de state.repo.
+  # function_exported? : un stub task_queue sans la fn -> [] (conservateur, ne masque rien).
+  defp project_pod_owned_refs(pod_id, repo, tq) do
+    with true <- String.starts_with?(pod_id, Fleet.Pilot.PodId.scope_prefix(repo)),
+         true <- function_exported?(tq, :pod_active_ticket_id, 1),
+         {:ok, ticket_id} when is_binary(ticket_id) <- tq.pod_active_ticket_id(pod_id),
+         {:ok, n} <- parse_issue_ticket(ticket_id) do
+      [{repo, :issue, n}]
+    else
+      _ -> []
+    end
+  rescue
+    _ -> []
+  catch
+    _, _ -> []
+  end
+
+  defp parse_issue_ticket("issue-" <> rest) do
+    case Integer.parse(rest) do
+      {n, ""} -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp parse_issue_ticket(_), do: :error
 
   # Un pod a-t-il une tâche ACTIVE (assignée, non close) ? `{:ok, nil}` = idle. Tolérant (toute
   # anomalie → `false` : un pod dont on ne peut établir l'activité ne masque pas un orphelin).

@@ -84,6 +84,20 @@ defmodule Fleet.TaskQueue do
     do: GenServer.call(server, {:pod_status, pod_id})
 
   @doc """
+  Ticket de la DERNIERE tache du pod (`{:ok, ticket_id | nil}`). Sert au poller (slot-freeze) : un eng
+  PIPE project-scoped (pod_id `<repo>-engineer`, SANS `-issue-N-`) ne dit pas dans son id quelle brique
+  il tient -> la reconciliation de verrou la derive de sa tache active (le `ticket_id`, ex. `issue-3`).
+  Rend la DERNIERE tache (pas seulement :pending/:assigned) pour couvrir la fenetre de publication
+  (submit -> :completed -> push) ou le pod tient ENCORE le verrou de la brique livree. Query Port.
+  """
+  @spec pod_active_ticket_id(String.t()) :: {:ok, String.t() | nil}
+  def pod_active_ticket_id(pod_id), do: pod_active_ticket_id(@server, pod_id)
+
+  @spec pod_active_ticket_id(GenServer.server(), String.t()) :: {:ok, String.t() | nil}
+  def pod_active_ticket_id(server, pod_id) when is_binary(pod_id),
+    do: GenServer.call(server, {:pod_active_ticket_id, pod_id})
+
+  @doc """
   Dernier poll du pod (`DateTime | nil`) = **ACK in-band** : l'agent a appelé `get_for_pod` (même sans
   mandat → signal bootstrap « up + armé »). Consommé par la boucle wake ack-driven. Query Port.
   """

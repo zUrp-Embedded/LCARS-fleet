@@ -291,6 +291,18 @@ defmodule Fleet.TaskQueue.Server do
     {:reply, {:ok, status}, state}
   end
 
+  # SLOT-FREEZE : ticket de la DERNIERE tache du pod (couvre :completed = fenetre de publication). Le
+  # poller s'en sert pour qu'un eng pipe project-scoped possede le verrou de sa brique active/en-cours.
+  def handle_call({:pod_active_ticket_id, pod_id}, _from, state) do
+    ticket =
+      case latest_for_pod(state.tasks, pod_id) do
+        nil -> nil
+        %Task{ticket_id: t} -> t
+      end
+
+    {:reply, {:ok, ticket}, state}
+  end
+
   # Last-poll du pod (`DateTime | nil`) = l'ACK in-band du bootstrap (« l'agent a tendu la main »,
   # même sans mandat). Le consommateur (boucle wake ack-driven) compare avec son instant de trigger.
   def handle_call({:last_poll, pod_id}, _from, state) do

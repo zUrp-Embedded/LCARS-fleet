@@ -189,6 +189,25 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_status(_pod_id), do: {:ok, :running}
   end
 
+  # SLOT-FREEZE : un eng PIPE project-scoped (pod_id `<repo>-engineer`, SANS `-issue-N-` — l'eng resident
+  # qui traite N tickets sequentiellement, 1 process = 1 slot Desktop).
+  defmodule ProjectPipeSpawner do
+    def spawn_pod(_profile, ticket_id, _opts), do: {:ok, "pod-#{ticket_id}"}
+    def list_pods, do: [%{pod_id: "lordzurp-lcars-test-engineer"}]
+  end
+
+  # TaskQueue stub : l'eng project travaille la BRIQUE 8 (ticket_id "issue-8") -> il possede #8.
+  defmodule ProjectTaskQueueIssue8 do
+    def pod_status(_pod_id), do: {:ok, :running}
+    def pod_active_ticket_id(_pod_id), do: {:ok, "issue-8"}
+  end
+
+  # TaskQueue stub : l'eng project travaille une AUTRE brique (9) -> il ne possede PAS #8.
+  defmodule ProjectTaskQueueIssue9 do
+    def pod_status(_pod_id), do: {:ok, :running}
+    def pod_active_ticket_id(_pod_id), do: {:ok, "issue-9"}
+  end
+
   # Recovery de wake qui ÉCHOUE (pod injoignable, re-roll non réparé) → `StageDispatcher.dispatch_issue`
   # surface `{:error, {:wake_unreached, …}}` : le pipeline EST démarré (verrou + pod + mandat posés en amont,
   # ordre canonique), seul le réveil tmux a raté. Sert à prouver le contrat « wake raté ⇒ bail PRIS ».
@@ -332,6 +351,81 @@ defmodule Fleet.Pilot.PollerTest do
       Poller.force_poll(name)
       Poller.force_poll(name)
       refute_received {:remove_label, 8, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "SLOT-FREEZE : un eng PIPE project-scoped tient le verrou de sa BRIQUE ACTIVE (pas de mis-reclamation -> pas de loop)" do
+      # Regression du loop hello-avengers : le pod project `<repo>-engineer` (sans `-issue-N-`) n'etait
+      # reconnu proprietaire d'AUCUN verrou (parse_pod_ref -> []) -> le poller reclamait le sien ->
+      # re-dispatch en boucle. Ici l'eng (tache active sur #8 via son ticket_id "issue-8") est reconnu
+      # proprietaire -> #8 JAMAIS reclame, meme apres 2 ticks.
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_proj_lock_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          stage_dispatch?: true,
+          forge_client: StageStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StageStubLoader,
+          spawner: ProjectPipeSpawner,
+          task_queue: ProjectTaskQueueIssue8,
+          clock: fn :second -> 1_700_000_000 end
+        )
+
+      Poller.force_poll(name)
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "SLOT-FREEZE : un eng PIPE project sur une AUTRE brique (9) ne masque PAS l'orphelin #8 (scope precis)" do
+      # L'eng possede SEULEMENT sa brique active (9), pas tout le repo -> un verrou #8 sans pod actif dessus
+      # reste un VRAI orphelin -> reclame apres la grace 2-tick (sinon un orphelin legitime wedgerait).
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_proj_other_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          stage_dispatch?: true,
+          forge_client: StageStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StageStubLoader,
+          spawner: ProjectPipeSpawner,
+          task_queue: ProjectTaskQueueIssue9,
+          clock: fn :second -> 1_700_000_000 end
+        )
+
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+      Poller.force_poll(name)
+      assert_received {:remove_label, 8, _}
 
       GenServer.stop(pid)
     end
