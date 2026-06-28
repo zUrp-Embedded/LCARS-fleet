@@ -116,16 +116,17 @@ defmodule Fleet.Pilot.StageDispatcher do
                    Keyword.get(opts, :prefetched_carte)
                  ),
                  :role_resolution
-               ) do
-          # pod_id DÉTERMINISTE STABLE keyé sur (issue, rôle), SANS suffixe timestamp : un id à timestamp
-          # serait unique par hop → re-spawn à chaque rework, l'eng pipe (long-lived) lingérerait,
-          # contexte perdu. Stable → un re-dispatch retombe sur le MÊME pod : s'il est vivant (eng pipe),
-          # on le RE-MANDATE (garde son contexte), sinon on spawn. (Idempotence — cf. spawn_or_remandate.)
-          # pod_id REPO-SCOPÉ via `Fleet.Pilot.PodId` (clé GLOBALE → désambiguïse cross-repo/run).
-          # La branche reste repo-LOCALE (`lcars/issue-N-role`, `Fleet.Pilot.ForgeClient.feature_branch/2`) — pas de collision dans un
-          # repo → NON scopée ; pod_id et branche construits indépendamment depuis (n, role). pod_id opaque
-          # (jamais re-parsé) → seule exigence : tous les sites passent par le helper (format unique).
-          pod_id = Fleet.Pilot.PodId.for_issue(repo, number, role)
+               ),
+             # Identité du pod + sérialisation LUES du catalogue (`slot_scope`), jamais devinées :
+             # `pod_id_for_scope/4` (instance → for_issue, fan-out par ticket | project → for_repo, UNE
+             # identité par projet) et `serialize_project_scope/3` (gate AVANT tout verrou : un rôle
+             # project-scoped déjà vivant → on défère `{:skipped, :role_busy}`, sinon on verrouillerait
+             # une issue qu'on ne traite pas ; le poller re-dispatch au tick suivant).
+             scope = Fleet.CapProfile.slot_scope(profile),
+             pod_id = pod_id_for_scope(scope, repo, number, role),
+             :ok <- serialize_project_scope(scope, spawner, pod_id) do
+          # pod_id et branche (`lcars/issue-N-role`) construits indépendamment depuis (n, role) ; pod_id
+          # opaque (jamais re-parsé). La branche reste repo-LOCALE (pas de collision intra-repo).
 
           # La FORME du mandat (worker exécutable | juge désamorcé) est lue du cap-profile
           # (`mandate_kind`), PAS d'un nom magique "gatekeeper" en ring2 (differentiation-par-catalogue).
@@ -184,6 +185,12 @@ defmodule Fleet.Pilot.StageDispatcher do
             log_ctx
           )
         else
+          {:skipped, :role_busy} ->
+            # Rôle project-scoped déjà occupé par un autre ticket du repo → DÉFÉRÉ sans verrou ni
+            # enqueue ; le poller re-dispatch au tick suivant (sérialisation par-(repo,rôle) via la
+            # boucle de poll ; le pod one-shot meurt en fin de tâche → spawn frais pour le suivant).
+            {:skipped, :role_busy}
+
           {:onboarded, _stage} ->
             # Issue routeless onboardée sur la carte par défaut → on DÉFÈRE (skip ; le tick suivant
             # la voit routée → dispatch). Entrée système : create_ticket crée, le poller route.
@@ -551,35 +558,65 @@ defmodule Fleet.Pilot.StageDispatcher do
     # verrou orphelin. La route (pipeline, stage) est lue sur l'ISSUE (le pipeline-state y reste).
     with {:ok, project} <- tag_err(resolver.(repo, review_opts), :project_resolution),
          {:ok, route} <- tag_err(route_for(forge, repo, issue_n, forge_opts), :route_resolution) do
-      # Id déterministe stable. Le REWORK (producteur) keye sur l'ISSUE → MÊME id que
-      # dispatch_issue → retombe sur l'eng pipe vivant pour le RE-MANDATER (garde son contexte de
-      # diagnostic across reworks). Le JUGE (one-shot) keye sur la PR → re-spawn frais à chaque review.
+      # pod_id : rework/conflict = le PRODUCTEUR, routé par `slot_scope` (project → for_repo = MÊME
+      # identité que dispatch_issue, UNE par projet ; instance → for_issue). Le JUGE keye sur la PR
+      # (for_pr, fan-out par review). Le rework re-lit son état DEPUIS LA FORGE (PR + findings) →
+      # changer l'identité du pod ne perd aucun contexte.
       pod_id =
         case kind do
-          # Repo-scopé. Rework + résolution-de-conflit keyent sur l'ISSUE → MÊME id que dispatch_issue
-          # (l'eng pipe garde son contexte) ; juge keye sur la PR. Helper unique (Fleet.Pilot.PodId).
           k when k in [:rework, :resolve_conflict] ->
-            Fleet.Pilot.PodId.for_issue(repo, issue_n, role)
+            pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
 
           _ ->
             Fleet.Pilot.PodId.for_pr(repo, pr_number, role)
         end
 
-      # :judge -> GateBrief desamorce (état exécutable rendu irreprésentable en amont) ; :rework -> brief au PRODUCTEUR (corrige + push).
-      mandate =
-        review_mandate(kind, profile, role, forge, repo, issue_n, forge_opts, route, pr_number)
+      # Gate de sérialisation (MÊME règle que dispatch_issue) : un producteur project-scoped déjà vivant
+      # (occupé par un autre ticket) → on DÉFÈRE, jamais re-mandater-pendant-occupé. Juges (instance) et
+      # rework instance → `:ok` (no-op, jamais gated). Appel uniforme via `slot_scope`. `{:skipped,
+      # :role_busy}` remonte au poller (qui gère `{:skipped, _}` → retry au tick suivant).
+      case serialize_project_scope(Fleet.CapProfile.slot_scope(profile), ctx.spawner, pod_id) do
+        {:skipped, :role_busy} ->
+          {:skipped, :role_busy}
 
-      spawn_opts =
-        [mandate: mandate, pod_id: pod_id, rc_name: rc_name(repo, role)]
-        |> maybe_put_project(project)
-        |> maybe_put_route(route)
-        |> maybe_put_repo_id(resolve_repo_id(forge, repo, forge_opts))
+        :ok ->
+          # :judge -> GateBrief désamorcé ; :rework -> brief au PRODUCTEUR (corrige + push).
+          mandate =
+            review_mandate(
+              kind,
+              profile,
+              role,
+              forge,
+              repo,
+              issue_n,
+              forge_opts,
+              route,
+              pr_number
+            )
 
-      # Spawn LEAF partagé avec dispatch_issue (verrou → pod → enqueue → wake + compensation).
-      # Verrou keyé sur la PR (pr_number) ; ticket_id + enqueue keyés sur l'ISSUE (issue_n — le
-      # pipeline-state y reste, et le rework retombe sur l'eng pipe `issue-N-producer`).
-      log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
-      spawn_stage(ctx, pod_id, role, profile, mandate, spawn_opts, pr_number, issue_n, log_ctx)
+          spawn_opts =
+            [mandate: mandate, pod_id: pod_id, rc_name: rc_name(repo, role)]
+            |> maybe_put_project(project)
+            |> maybe_put_route(route)
+            |> maybe_put_repo_id(resolve_repo_id(forge, repo, forge_opts))
+
+          # Spawn LEAF partagé avec dispatch_issue (verrou → pod → enqueue → wake + compensation).
+          # Verrou keyé sur la PR (pr_number) ; ticket_id + enqueue keyés sur l'ISSUE (issue_n — le
+          # pipeline-state y reste).
+          log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
+
+          spawn_stage(
+            ctx,
+            pod_id,
+            role,
+            profile,
+            mandate,
+            spawn_opts,
+            pr_number,
+            issue_n,
+            log_ctx
+          )
+      end
     else
       {:error, {phase, reason}} ->
         Logger.warning(
@@ -626,10 +663,13 @@ defmodule Fleet.Pilot.StageDispatcher do
              gk_opts
            ) do
         :ok ->
-          # Die-on-promote : le lot est SCELLÉ (mergé) → l'eng pipe `issue-N-producer` (long-lived,
-          # qui gardait son contexte across reworks) a fini sa vie → kill best-effort (no-op s'il est déjà
-          # mort). Sans ça il lingère idle pour toujours = leak terminal de la réutilisation d'eng.
-          # MÊME helper repo-scopé que le spawn/rework → le kill cible bien le pod existant.
+          # Die-on-promote (best-effort). Le producteur est `one-shot` : il est DÉJÀ mort en fin de
+          # build/rework → ce kill est un no-op dans le cas nominal. On garde DÉLIBÉRÉMENT `for_issue`
+          # (pas `for_repo`) : pour un producteur `slot_scope: project`, `for_issue(issue_n, producer)`
+          # cible un pod_id PHANTÔME (`<repo>-issue-N-engineer` n'existe pas — l'identité projet est
+          # `<repo>-engineer`) → no-op SÛR. Utiliser `for_repo` ici TUERAIT l'eng s'il code déjà une
+          # AUTRE issue (pod projet partagé) = bug « kill the wrong eng ». À revisiter SEULEMENT si un
+          # producteur PIPE (long-lived) est réintroduit (cleanup ciblé non-naïf nécessaire alors).
           _ = safe_kill(ctx.spawner, Fleet.Pilot.PodId.for_issue(ctx.repo, issue_n, producer))
 
           Logger.info(
@@ -1120,6 +1160,28 @@ defmodule Fleet.Pilot.StageDispatcher do
   rescue
     _ -> false
   end
+
+  # Granularité d'identité du pod, dérivée du catalogue (`slot_scope` du cap-profile, source unique) :
+  #   "instance" → keyé TICKET (`for_issue`) : fan-out, un id distinct par issue/PR (juges éphémères).
+  #   "project"  → keyé REPO seul (`for_repo`) : UNE identité par (repo, rôle) → un slot Desktop stable.
+  # Total sur l'enum slot_scope (l'accessor `Fleet.CapProfile.slot_scope/1` garantit project|instance).
+  defp pod_id_for_scope("project", repo, _number, role),
+    do: Fleet.Pilot.PodId.for_repo(repo, role)
+
+  defp pod_id_for_scope("instance", repo, number, role),
+    do: Fleet.Pilot.PodId.for_issue(repo, number, role)
+
+  # Sérialisation des rôles project-scoped : UNE identité (repo, rôle) vivante à la fois (1 slot Desktop
+  # ⟹ 1 (cwd, session-id) ⟹ séquentiel). Si le pod projet est DÉJÀ vivant (occupé par un autre ticket),
+  # on DÉFÈRE (`{:skipped, :role_busy}`) — AVANT tout verrou/enqueue (sinon on verrouillerait une issue
+  # qu'on ne traite pas). Le poller re-dispatch au tick suivant ; le pod one-shot meurt en fin de tâche
+  # → spawn frais pour le ticket suivant. Les rôles `instance` ne sont JAMAIS gated (ids distincts par
+  # ticket → pas de partage d'identité, fan-out assumé). Appelable UNIFORMÉMENT (instance → :ok no-op).
+  defp serialize_project_scope("project", spawner, pod_id) do
+    if pod_alive?(spawner, pod_id), do: {:skipped, :role_busy}, else: :ok
+  end
+
+  defp serialize_project_scope("instance", _spawner, _pod_id), do: :ok
 
   defp maybe_spawn(_spawner, true = _alive?, _profile, _ticket_id, _spawn_opts),
     do: {:ok, :remandated}

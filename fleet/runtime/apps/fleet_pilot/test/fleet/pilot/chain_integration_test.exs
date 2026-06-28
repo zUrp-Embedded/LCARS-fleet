@@ -238,7 +238,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => "engineer"},
+           metadata: %{"name" => "engineer", "slot_scope" => "project"},
            spec: %{}
          }}
 
@@ -247,7 +247,11 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => role},
+           metadata: %{
+             "name" => role,
+             "slot_scope" =>
+               if(role in ["gatekeeper", "architect"], do: "project", else: "instance")
+           },
            spec: %{"mandate_kind" => "judge"}
          }}
 

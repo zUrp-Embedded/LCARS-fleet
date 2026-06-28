@@ -127,7 +127,13 @@ defmodule Fleet.Pilot.PollerTest do
 
   defmodule StageStubLoader do
     def load("engineer"),
-      do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
+      do:
+        {:ok,
+         %Fleet.CapProfile{
+           kind: "CapabilityProfile",
+           metadata: %{"slot_scope" => "project"},
+           spec: %{}
+         }}
 
     # Corr.3 : juge de PR (qualifier/reviewer) -> mandate_kind: judge (mandat GateBrief desamorce).
     def load(role) when role in ["qualifier", "reviewer"],
@@ -135,7 +141,7 @@ defmodule Fleet.Pilot.PollerTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => role},
+           metadata: %{"name" => role, "slot_scope" => "instance"},
            spec: %{"mandate_kind" => "judge"}
          }}
 

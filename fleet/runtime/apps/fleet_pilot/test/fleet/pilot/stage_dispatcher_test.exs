@@ -109,7 +109,13 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
   defmodule StubLoader do
     def load("engineer"),
-      do: {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
+      do:
+        {:ok,
+         %Fleet.CapProfile{
+           kind: "CapabilityProfile",
+           metadata: %{"slot_scope" => "project"},
+           spec: %{}
+         }}
 
     # F077 : un rôle juge déclare `mandate_kind: judge` dans son cap-profile (pas un nom magique).
     def load("gatekeeper"),
@@ -117,7 +123,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => "gatekeeper"},
+           metadata: %{"name" => "gatekeeper", "slot_scope" => "project"},
            spec: %{"mandate_kind" => "judge"}
          }}
 
@@ -127,7 +133,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => role},
+           metadata: %{"name" => role, "slot_scope" => "instance"},
            spec: %{"mandate_kind" => "judge"}
          }}
 
@@ -137,7 +143,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
-           metadata: %{"name" => "consultant"},
+           metadata: %{"name" => "consultant", "slot_scope" => "instance"},
            spec: %{"mandate_kind" => "judge"}
          }}
 
@@ -164,8 +170,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
   end
 
-  # BL-055 : spawner dont le pod est DÉJÀ VIVANT (`pod_info` → `{:ok, _}`) → le dispatcher doit
-  # RE-MANDATER (enqueue + wake), JAMAIS re-spawn.
+  # Spawner dont le pod est DÉJÀ VIVANT (`pod_info` → `{:ok, _}`). Sert à tester le GATE de
+  # sérialisation : un rôle project-scoped déjà vivant → le dispatcher DÉFÈRE (`:role_busy`), il ne
+  # spawn ni ne remandate un pod occupé. (Le remandate-sur-vivant reste possible pour les `instance`.)
   defmodule StubSpawnerAlive do
     def spawn_pod(_profile, ticket_id, opts) do
       send(self(), {:spawned, ticket_id, opts})
@@ -204,7 +211,13 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   defmodule CountingLoader do
     def load(role) do
       send(self(), {:f075_loaded, role})
-      {:ok, %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}}
+
+      {:ok,
+       %Fleet.CapProfile{
+         kind: "CapabilityProfile",
+         metadata: %{"slot_scope" => "project"},
+         spec: %{}
+       }}
     end
   end
 
@@ -246,7 +259,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     test "spawn : ordre label-verrou → pod (plus de comment-lock), retourne {:ok, {:spawned, pod, role}}" do
       payload = eng_issue()
 
-      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts())
 
       # le mandat = issue.body + l'instruction de LIVRAISON git-native (commit local + trailer),
@@ -267,7 +280,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert opts[:mandate] =~ "blocked"
 
       # le mandat est ENQUEUÉ en TaskQueue (sinon le pod se croit bootstrap → idle ; bug PASSE-9)
-      assert_received {:enqueued, "lordzurp-lcars-test-issue-42-engineer", attrs}
+      assert_received {:enqueued, "lordzurp-lcars-test-engineer", attrs}
       assert attrs.brief =~ "fais le hello"
       assert attrs.role == "engineer"
 
@@ -275,33 +288,39 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # "issue-#{number}" pour `ticket_id` ne serait pas attrapé (le pod_id ≠ ticket_id).
       assert attrs.ticket_id == "issue-42"
       # kick best-effort émis
-      assert_received {:woke, "lordzurp-lcars-test-issue-42-engineer"}
+      assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
 
-    test "BL-055 : pod déjà vivant (id stable) → RE-MANDATE (enqueue+wake), PAS de re-spawn" do
+    test "GATE slot_scope: engineer (project) déjà vivant → DÉFÈRE :role_busy (sérialisé, pas de remandate)" do
       payload = eng_issue()
 
-      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+      # StubSpawnerAlive : pod_info → {:ok,_} = le pod projet `<repo>-engineer` est DÉJÀ vivant (un autre
+      # ticket du repo en cours). Le gate sérialise les rôles project-scoped : on DÉFÈRE, on ne remandate
+      # PAS un pod occupé (ça wedgerait — un one-shot mid-tâche ne pull pas un 2ᵉ mandat). Le poller
+      # re-dispatch au tick suivant ; le pod meurt en fin de tâche → spawn frais pour le suivant.
+      assert {:skipped, :role_busy} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts(spawner: StubSpawnerAlive))
 
-      # idempotent : le dispatcher a CONSULTÉ pod_info, l'a vu vivant → AUCUN spawn_pod.
-      assert_received {:pod_info, "lordzurp-lcars-test-issue-42-engineer"}
+      # Le gate a CONSULTÉ pod_info (avec l'id PROJET) pour voir le pod vivant...
+      assert_received {:pod_info, "lordzurp-lcars-test-engineer"}
+      # ...puis a DÉFÉRÉ sans AUCUN effet de bord : pas de spawn, pas d'enqueue, pas de wake.
       refute_received {:spawned, _, _}
-      # le mandat de rework est quand même enqueué + le pod réveillé (re-mandate).
-      assert_received {:enqueued, "lordzurp-lcars-test-issue-42-engineer", _attrs}
-      assert_received {:woke, "lordzurp-lcars-test-issue-42-engineer"}
+      refute_received {:enqueued, _, _}
+      refute_received {:woke, _}
     end
 
-    test "BL-055 : pod vivant + enqueue KO → verrou retiré mais pod PAS tué (contexte préservé)" do
-      assert {:error, {:enqueue_failed, :broker_down}} =
+    test "GATE slot_scope: engineer (project) vivant → défère AVANT verrou/enqueue (rien à compenser)" do
+      # Le gate défère AVANT de poser le verrou ou d'enqueuer → le task_queue défaillant n'est JAMAIS
+      # atteint. Donc aucun verrou à retirer, aucun pod à tuer : la défère est sans effet de bord.
+      assert {:skipped, :role_busy} =
                StageDispatcher.dispatch_issue(
                  eng_issue(),
                  dispatch_opts(spawner: StubSpawnerAlive, task_queue: FailTaskQueue)
                )
 
-      # compensation : on retire le verrou MAIS on ne tue PAS l'eng vivant (un re-mandate raté ≠ kill).
-      assert_received {:removed_label, "lcars-in-flight"}
+      refute_received {:removed_label, _}
       refute_received {:killed, _}
+      refute_received {:enqueued, _, _}
     end
 
     test "F181 : échec POST-verrou (enqueue KO) → verrou retiré + pod tué (pas de stuck)" do
@@ -314,7 +333,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # le pod avait spawné → tué (sinon orphelin) ; le verrou lcars-in-flight → retiré (sinon le
       # poller skipperait l'issue à jamais).
       assert_received {:spawned, "issue-42", _}
-      assert_received {:killed, "lordzurp-lcars-test-issue-42-engineer"}
+      assert_received {:killed, "lordzurp-lcars-test-engineer"}
       assert_received {:removed_label, "lcars-in-flight"}
     end
 
@@ -339,14 +358,13 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       refute match?({:ok, {:spawned, _, _}}, result)
 
       assert {:error,
-              {:wake_unreached, "lordzurp-lcars-test-issue-42-engineer", "engineer",
-               {:escalated, :dead}}} =
+              {:wake_unreached, "lordzurp-lcars-test-engineer", "engineer", {:escalated, :dead}}} =
                result
 
       # Le pod ET le mandat RESTENT en place (mandat enqueué, le re-wake/escalade couvre) : PAS de
       # compensation (ce n'est pas un échec POST-verrou, c'est un wake injoignable). Le verrou tient.
       assert_received {:spawned, "issue-42", _}
-      assert_received {:enqueued, "lordzurp-lcars-test-issue-42-engineer", _}
+      assert_received {:enqueued, "lordzurp-lcars-test-engineer", _}
       refute_received {:removed_label, _}
       refute_received {:killed, _}
     end
@@ -357,7 +375,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       payload = eng_issue()
       clean_wake = fn _pod_id, _respawn, _opts -> :ok end
 
-      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts(wake_recovery: clean_wake))
 
       refute_received {:removed_label, _}
@@ -382,7 +400,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       opts = dispatch_opts(project_resolver: fn _repo, _opts -> {:ok, project} end)
 
-      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
@@ -677,9 +695,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert_received {:merged, 6}
       refute_received {:spawned, _, _}
 
-      # BL-055 die-on-promote : le producteur (id déterministe issue-42-engineer) est tué au
-      # merge. En one-shot il est déjà mort (kill = no-op de sûreté) ; en pipe c'est le vrai
-      # release terminal. Inconditionnel côté dispatcher → couvre les deux profils.
+      # Die-on-promote : le kill-site cible `for_issue` (id `...-issue-42-engineer`). Pour l'eng
+      # one-shot project-scoped c'est un pod_id PHANTÔME → no-op SÛR (cf. stage_dispatcher : utiliser
+      # for_repo ici tuerait l'eng s'il code une AUTRE issue). On asserte l'APPEL au kill avec l'id
+      # issue-keyé (même s'il no-op), inconditionnel côté dispatcher.
       assert_received {:killed, "lordzurp-lcars-test-issue-42-engineer"}
     end
 
@@ -718,7 +737,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       # 1ʳᵉ fois : tous approuvé MAIS merge en CONFLIT → on RÉSOUT (re-spawn le producteur en mode résolution),
       # PAS de merge, PAS d'escalade. Le mandat porte l'instruction rebase+résous.
-      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_review(pr, opts)
 
       assert_received {:spawned, _ticket, spawn_opts}
@@ -770,7 +789,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}]
         })
 
-      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_review(pr6, opts)
 
       # PR #12 (issue DIFFÉRENTE 50), AUTRE PR du même repo, AUSSI en conflit. AVANT le fix : `pr-12` collapse
@@ -783,7 +802,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}]
         })
 
-      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-50-engineer", "engineer"}} =
+      # pod_id projet (slot_scope: project) : MÊME id que pr6 (`...-engineer`) — l'identité est
+      # par-projet, pas par-issue. La distinctness testée ici vit dans la CLÉ DE RÉCURRENCE
+      # (digit-free `pr-i`/`pr-q`), pas dans le pod_id. pr12 = 1ʳᵉ occurrence → résolue (pas escaladée).
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_review(pr12, opts)
     end
 
@@ -804,7 +826,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       # producteur = role git_native de head (lcars/issue-42-engineer) = engineer ; verrou sur la PR.
-      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_review(pr, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
@@ -817,7 +839,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       # Voix de l'eng (rework) : le mandat demande un `summary` = réponse au reviewer, posté sur la PR.
       assert spawn_opts[:mandate] =~ "summary"
-      assert_received {:enqueued, "lordzurp-lcars-test-issue-42-engineer", attrs}
+      assert_received {:enqueued, "lordzurp-lcars-test-engineer", attrs}
       assert attrs.role == "engineer"
     end
 
@@ -834,7 +856,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           ]
         )
 
-      assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-engineer", "engineer"}} =
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_review(pr, opts)
     end
 
