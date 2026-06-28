@@ -1199,15 +1199,6 @@ defmodule Fleet.Spawner.Pod do
         {:noreply, new_state, {:continue, :release}}
 
       _other ->
-        # COLD entre tâches (pipe avec workspace projet) : on RÉINITIALISE le workspace de façon
-        # DÉTERMINISTE — rm_rf + re-clone frais sur la branche du projet (le même mécanisme que le spawn
-        # one-shot) + `/clear` du contexte REPL. Sans ça, un pod résident re-mandaté garde l'état git du
-        # ticket précédent (mauvaise branche checkout) et le travail du ticket suivant se STACK sur la
-        # branche du précédent → mauvais mapping branche↔PR → la forge ne voit jamais le livrable sur SA
-        # branche → re-dispatch en boucle. Au point de bascule de tâche (post-submit) l'agent est idle :
-        # reset sûr. No-op si le rôle n'a pas de workspace projet (cf. la garde dans la fonction).
-        new_state = maybe_reset_project_workspace(new_state)
-
         # Reset :output_extracted au re-monitoring (sinon un crash REPL au cycle 2 est
         # masqué en {:stop,:normal} via la garde du handler exit_status → pod.failed/clear
         # jamais émis). arm_result_deadline annule le timer du cycle précédent avant de
@@ -2410,37 +2401,6 @@ defmodule Fleet.Spawner.Pod do
           {:error, reason} -> {:error, {:project_workspace_clone_failed, reason}}
         end
     end
-  end
-
-  # COLD entre tâches d'un pipe : le workspace résident est WIPÉ puis re-cloné frais (re-checkout de la
-  # branche du projet) — exactement le workspace neuf que le one-shot obtient via rm_rf+respawn, mais SANS
-  # tuer le process (le slot Desktop = la connexion du process ; on la garde). Puis `/clear` du contexte
-  # REPL → l'agent reprend FROID, sur une branche propre, au mandat suivant. `/clear` rotate l'UUID de
-  # session mais PAS la connexion remote-control → le slot Desktop survit (c'est ce qui rend le cold
-  # viable sur un pipe). Garde : SEULEMENT `pipe` + workspace projet (un `forever` interactif comme
-  # l'architecte ne doit pas voir son workspace reset à chaque tâche ; un rôle sans `repo_path` n'a pas
-  # de workspace). Déterministe, jamais confié à l'agent — on ne fait pas confiance à un agent pour git.
-  defp maybe_reset_project_workspace(state) do
-    project = LaunchSpec.effective_project(state.opts, state.cap_profile)
-
-    if lifetime_scope(state.cap_profile) == "pipe" and project["repo_path"] do
-      workspace = Fleet.Spawner.pod_workspace_path(state.pod_dir)
-      _ = File.rm_rf(workspace)
-
-      case maybe_bootstrap_project_workspace(state) do
-        :ok ->
-          _ = Fleet.Spawner.PodTmux.send_keys(state.pod_id, "/clear")
-
-          Logger.info(
-            "pod #{state.pod_id} workspace reset COLD entre tâches (re-clone frais + /clear)"
-          )
-
-        {:error, reason} ->
-          Logger.error("pod #{state.pod_id} reset workspace COLD échoué : #{inspect(reason)}")
-      end
-    end
-
-    state
   end
 
   # Provisionne le monitor in-pod (`watch.sh`) dans le pod_dir (= HOME bwrap). L'agent
