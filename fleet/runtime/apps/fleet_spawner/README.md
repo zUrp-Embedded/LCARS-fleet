@@ -78,7 +78,7 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
   tmux-holder, SANS bwrap** : le pod tourne sur l'hôte comme l'humain (`HOME` = home réel → `~/.claude`
   natif). Teardown self-contained (trap → `tmux kill-server`, pas de cascade namespace).
 
-- **Session UUID pré-allouée** au spawn (`initial_state`, `opts[:session_id] || UUID.uuid4()`) → `state.json` ; propagée par `--setenv LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX` (lus `:?` strict par `claude_launch.sh`). 1ʳᵉ création → `--session-id` ; recovery visée → `--resume` (cf. **Recovery**).
+- **Session UUID pré-allouée** au spawn (`initial_state`, `opts[:session_id] || UUID.uuid4()`) → `state.json` ; propagée par `--setenv LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX` (lus `:?` strict par `claude_launch.sh`). 1ʳᵉ création → `--session-id` ; RECALL délibéré (`opts[:resume]`) → `--resume` (cf. **Recovery**).
 - **SP composé** (`do_project` via `Fleet.SPBuilder`) écrit dans `.lcars/system-prompt.md` et lu par `claude_launch.sh` via **`--system-prompt-file`** (HORS argv — fuite `/proc/cmdline` + frôle ARG_MAX ; 2026-06-14). `.lcars/` est lisible in-sandbox (≠ `.claude/system-prompt.md` masqué par le bind `CLAUDE_DIR→.claude`). Empirique 2.1.177 : `--system-prompt-file` = replace + **trusted** (le inline `--system-prompt` passe au filtre anti-injection).
 - **Monde-invoqué** provisionné dans `pod_dir`, **hors `.claude/`** (masqué) : `.lcars/{settings.json,system-prompt.md,protocole-user.md}`, `CLAUDE.md` (racine), `tickets/<id>.md`, `.mcp-fleet.json` (`alwaysLoad:true`), `.cap-profile.json`.
 - **Mandat** : pull par le pod via MCP `get_task` (déclenché par le kick « yop »), PAS injecté. **Complétion** : `%Fleet.Event{task_completed}` du broker `Fleet.TaskQueue` (event-driven, plus de frame NDJSON).
@@ -89,24 +89,25 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
 
 State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` (champs : `pod_id`,
 `ticket_id`, `session_id`, `phase`). Au (re)spawn, `recover_or_init/1` lit le snapshot et applique
-`recovery_action(phase, scope)` — décision **pure** sur la phase observée (DN-recovery B). Sous
+`recovery_action(phase)` — décision **pure** sur la seule phase observée. Sous
 `:temporary` le supervisor ne ressuscite jamais : c'est un (re)spawn délibéré qui appelle `init/1` et
-la décision est explicite (plus de reprise implicite sur backend mort — LIFE-002).
+la décision est explicite (plus de reprise implicite sur backend mort).
 
-Trois actions (`apply_recovery/4`) :
-- **`:release`** — phase terminale (`:succeeded` / `:released` / `:killed`) → rien à relancer.
-- **`:resume`** — en vol (`:launching` / `:monitoring` / `:extracting` / `:releasing`) → reprend la
-  session (`session_id` + `resume=true`) en **RE-LANÇANT** le backend (mort sous `:temporary`) via
-  `--resume`. Conditionné au gate `:recovery_resume_enabled` (cf. infra) ET au scope (jamais pour
-  `one-shot` : `/clear` chaque cycle → pas de contexte à reprendre).
-- **`:recreate`** — `:failed` / `:pending` / phase ambiguë (ou gate OFF, ou `one-shot`) → from scratch,
-  session neuve.
+Deux actions (`apply_recovery/4`) :
+- **`:release`** — phase terminale (`:succeeded` / `:released` / `:killed`) → rien à relancer ; le pod
+  s'arrête proprement (le backend est déjà mort).
+- **`:recreate`** — tout le reste : `:failed` / `:pending` / phase EN VOL
+  (`:launching` / `:monitoring` / `:extracting` / `:releasing`) / phase ambiguë → respawn **FRESH**,
+  session NEUVE. Une phase en vol sur un (re)spawn signifie un backend mort (sous `:temporary`) : la
+  recovery NE tente JAMAIS `--resume` sur une session morte côté serveur (claude exit → pod zombie,
+  prouvé live). On reroll et le mandat re-vit via la **TaskQueue** : la tâche restée en queue re-drive
+  un REPL neuf.
 
-> **Gate `:recovery_resume_enabled` (default `false`, BL-035)** : `:resume` n'est PRIS que si le gate
-> est ON ET le scope reprenable (`pipe`/`forever`). Défaut FALSE car prouvé live (dogfood F7) :
-> `--resume <session-MORTE>` après crash → claude exit → pod ZOMBIE (la session n'existe plus
-> serveur-side). Gate OFF ⇒ `:recreate` PARTOUT (session neuve, REPL vivant, la tâche en queue
-> re-drive le travail). Opt-in `true` si un jour `--resume` est prouvé ressusciter une session.
+> **RECALL — chemin séparé et vivant.** La recovery (ci-dessus) ne reprend JAMAIS une session. Le seul
+> chemin qui pose `--resume` est le RECALL délibéré : `opts[:resume]` → `state.resume` → env
+> `LCARS_POD_RESUME=1` (lu par `claude_launch.sh`), optionnellement seedé par `opts[:recall_seed_jsonl]`
+> (restore JSONL via `maybe_recall_restore`). C'est une RE-LANCE explicite demandée par l'appelant (ex.
+> recall architecte), distincte de la recovery de crash.
 
 ## Reaper périodique (PodWarden)
 

@@ -1102,44 +1102,7 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   describe "recovery depuis state FS" do
-    test "pipe scope : init/1 lit state.json en vol → :resume (--resume session-old) → :succeeded" do
-      # BL-035 : `:resume` est désormais opt-in (défaut OFF). Ce test exerce le chemin :resume → gate ON.
-      Application.put_env(:fleet_spawner, :recovery_resume_enabled, true)
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :recovery_resume_enabled) end)
-
-      pod_id = "pod-recover-#{System.unique_integer([:positive])}"
-      Process.flag(:trap_exit, true)
-
-      # pipe pod → state FS sous `pipes/` (scope-dérivé), pas `pods/`.
-      state_path = state_fs_path(pod_id, "pipes")
-      File.mkdir_p!(Path.dirname(state_path))
-
-      File.write!(
-        state_path,
-        Jason.encode!(%{
-          "v" => 1,
-          "pod_id" => pod_id,
-          "ticket_id" => "ticket-old",
-          "session_id" => "session-old",
-          "phase" => "launching"
-        })
-      )
-
-      StubBackend.set_reply(interactive_reply(session_id: "session-old"))
-
-      # pipe = porte un contexte → recovery :resume → relance avec --resume session-old.
-      pipe_args = %{build_args(pod_id, "ticket-1") | cap_profile: pipe_profile()}
-      {:ok, pid} = spawn_via_supervisor(pipe_args)
-      assert_receive {:launch_called, args, _env}, 2_000
-      # LE point F-C4b-1 : le travail est repris (--resume session-old), pas reroll.
-      assert args.session_id == "session-old"
-
-      # pipe = long-lived : après reprise il atteint :monitoring et y RESTE (pas de
-      # release auto sur submit ; cf. cycle pipe). On vérifie la reprise, pas la complétion.
-      assert %{phase: :monitoring} = GenServer.call(pid, :info)
-    end
-
-    test "one-shot scope : recovery in-flight → :recreate (session NEUVE, pas --resume) — F-C4b-1" do
+    test "in-flight → :recreate (session NEUVE, pas --resume)" do
       pod_id = "pod-recover-os-#{System.unique_integer([:positive])}"
       Process.flag(:trap_exit, true)
 
@@ -1159,9 +1122,10 @@ defmodule Fleet.Spawner.PodTest do
 
       StubBackend.set_reply(interactive_reply(session_id: "ignored"))
 
-      # valid_profile() = one-shot → /clear chaque cycle, pas de contexte → :recreate.
-      # Le pod relance avec une session NEUVE (ici le mint déterministe de l'engineer, repo de test résolu),
-      # PAS --resume session-old : ce qu'on prouve = recreate ≠ resume, pas la forme de l'id.
+      # Toute phase EN VOL sur un (re)spawn → :recreate (le backend est mort sous
+      # `:temporary`, jamais de --resume sur une session morte). Le pod relance avec une
+      # session NEUVE (ici le mint déterministe de l'engineer, repo de test résolu), PAS
+      # --resume session-old : ce qu'on prouve = recreate ≠ resume, pas la forme de l'id.
       {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
       assert_receive {:launch_called, args, env}, 2_000
       refute args.session_id == "session-old"

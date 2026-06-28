@@ -191,8 +191,8 @@ defmodule Fleet.Spawner.PermanentBoot do
     # Si une base existe pour ce rôle → boot-from-base (UUID FIXE porté par
     # la base + restore + `--resume`) → entrée Claude Desktop UNIQUE réutilisée à chaque boot + contexte
     # FRAIS (la base capturée hors-fleet, pas la session accumulée du run précédent). Sinon → recreate
-    # (session neuve, comportement par défaut). Distinct de `:recovery_resume_enabled` (OFF) = recovery de
-    # CRASH ; ici c'est le boot DÉLIBÉRÉ propre.
+    # (session neuve, comportement par défaut). Distinct de la recovery de CRASH (qui ne reprend jamais
+    # une session — elle reroll FRESH) ; ici c'est le boot DÉLIBÉRÉ propre.
     opts = boot_opts(name, pod_id)
 
     case spawner.(cp, pod_id, opts) do

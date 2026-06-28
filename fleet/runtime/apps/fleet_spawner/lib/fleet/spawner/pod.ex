@@ -11,9 +11,9 @@ defmodule Fleet.Spawner.Pod do
 
   Chaque transition est dirigée par `handle_continue/2`. L'`init/1`
   démarre la chaîne avec `{:continue, :allocate}`. Si la recovery sur l'état
-  FS détecte un `session_id` (pré-alloué au spawn, persisté `state.json`),
-  l'`init/1` reprend directement en phase `:launching` (le respawn
-  passera `--resume <session_id>`).
+  FS lit un `state.json` snapshot, `recovery_action/1` tranche sur la phase :
+  terminale → `:release` (rien à relancer), tout le reste → `:recreate`
+  (re-spawn FRESH depuis `:allocate`, session neuve).
 
   ## Conditions
 
@@ -29,8 +29,9 @@ defmodule Fleet.Spawner.Pod do
   (le `session_id` est pré-alloué au spawn : plus de frame `init` NDJSON,
   le modèle `-p` est mort). `<scope>` ∈ `pods` (one-shot/forever) /
   `pipes` (pipe) / `runs` (run). Au prochain `init/1`, lecture du fichier →
-  reprise directe en phase `:launching` avec le `session_id`
-  (`--resume <session_id>` au respawn).
+  `recovery_action/1` sur la phase : terminale → `:release`, sinon →
+  `:recreate` (session neuve, from scratch). La recovery ne reprend JAMAIS
+  une session morte par `--resume` (= pod zombie, prouvé live).
   """
 
   # Tous les pods sont `:temporary` (le supervisor ne ressuscite jamais ; la
@@ -1430,8 +1431,8 @@ defmodule Fleet.Spawner.Pod do
   Un (re)spawn est TOUJOURS délibéré (sous `:temporary` le superviseur ne ressuscite
   jamais) → une tombstone terminale n'a rien à protéger ici : on l'efface + le pod_dir
   → `init` repart FRESH (`:allocate`). **No-op** si pas de snapshot, snapshot illisible,
-  ou phase EN VOL (`:launching`/`:monitoring`/… → la recovery `:resume`/`:recreate`
-  reste intacte — on ne touche QUE les tombstones).
+  ou phase EN VOL (`:launching`/`:monitoring`/… → la recovery `:recreate` reste
+  intacte — on ne touche QUE les tombstones).
   """
   @spec clear_terminal_snapshot(String.t(), Fleet.CapProfile.t(), keyword()) :: :ok
   def clear_terminal_snapshot(pod_id, %Fleet.CapProfile{} = cap_profile, opts \\ [])
@@ -1480,8 +1481,7 @@ defmodule Fleet.Spawner.Pod do
          {:ok, %{"session_id" => sid, "phase" => phase_str}} when is_binary(sid) <-
            Jason.decode(json) do
       phase = phase_from_string(phase_str) || :launching
-      scope = Fleet.CapProfile.lifetime_scope(base.cap_profile)
-      apply_recovery(base, recovery_action(phase, scope), sid, phase)
+      apply_recovery(base, recovery_action(phase), sid, phase)
     else
       _ -> base
     end
@@ -1489,64 +1489,25 @@ defmodule Fleet.Spawner.Pod do
 
   @doc """
   Décision de recovery d'un pod (re)spawné dont un `state.json` snapshot existe.
-  PURE, fonction de la **phase observée** (pas du scope : le scope joue au niveau
-  orchestrateur — faut-il re-spawner un pod absent — pas au niveau
-  action-sur-snapshot). Sous `:temporary` le supervisor ne ressuscite jamais :
-  c'est un (re)spawn délibéré qui appelle `init/1`, et la décision est explicite
-  (pas de reprise implicite `first_continue_for(:monitoring)` sur un backend
-  mort).
+  PURE, fonction de la seule **phase observée**. Sous `:temporary` le supervisor
+  ne ressuscite jamais : c'est un (re)spawn délibéré qui appelle `init/1`, et la
+  décision est explicite (pas de reprise implicite
+  `first_continue_for(:monitoring)` sur un backend mort).
 
-    * `:release`  — phase terminale (`:succeeded`/`:released`) → rien à relancer.
-    * `:resume`   — en vol (`:launching`/`:monitoring`/`:extracting`/`:releasing`) →
-                    reprend la session (`--resume`) en RE-LANÇANT le backend (mort) ;
-                    jamais `:monitor` direct. Préserve le travail, tout scope.
-    * `:recreate` — `:failed` / `:pending` / phase ambiguë → from scratch, session neuve.
+    * `:release`  — phase terminale (`:succeeded`/`:released`/`:killed`) → rien à relancer.
+    * `:recreate` — tout le reste (`:failed`/`:pending`/phase EN VOL `:launching`/
+                    `:monitoring`/`:extracting`/`:releasing`/ambiguë) → from scratch,
+                    session neuve. Une phase en vol sur un (re)spawn = backend mort
+                    (sous `:temporary`) : on reroll. On NE tente PAS de `--resume` sur
+                    une session morte côté serveur → claude exit → pod zombie (prouvé
+                    live) ; la tâche reste en queue et re-drive un REPL neuf.
   """
-  @spec recovery_action(atom(), String.t() | nil) :: :release | :resume | :recreate
-  def recovery_action(phase, scope \\ nil) do
+  @spec recovery_action(atom()) :: :release | :recreate
+  def recovery_action(phase) do
     cond do
       phase in [:succeeded, :released, :killed] -> :release
-      phase in [:launching, :monitoring, :extracting, :releasing] -> resume_or_recreate(scope)
       true -> :recreate
     end
-  end
-
-  # `:resume` (préserver le travail) seulement si (1) le GATE global est ON et (2) le pod
-  # porte un contexte reprenable. Sinon `:recreate` (reroll, sûr). `--resume` est fragile,
-  # deux cas l'invalident :
-  #   * gate OFF (`:recovery_resume_enabled` false) → `:recreate` PARTOUT. Escape-hatch :
-  #     si `--resume` se révèle mauvais à l'usage (session morte → claude exit → boot raté
-  #     silencieux), on coupe et tout reroll proprement.
-  #   * `one-shot` → `:recreate` TOUJOURS (indépendant du gate) : la clear-policy fait
-  #     `/clear` chaque cycle → pas de contexte à reprendre, ET le sessionId LOCAL régénéré
-  #     par `/clear` diverge du `session_id` snapshot → `--resume` reprendrait la
-  #     mauvaise/ancienne session. Le reroll est correct ET sûr.
-  #   * `pipe`/`forever` (ou scope inconnu/nil) + gate ON → `:resume` : préserve le travail
-  #     mid-mandat (engineer en cours, gatekeeper avec contexte accumulé). Reste exposé au
-  #     cas « session morte » → c'est le gate qui sert d'interrupteur si ça se passe mal.
-  defp resume_or_recreate(scope) do
-    cond do
-      not resume_enabled?() -> :recreate
-      scope == "one-shot" -> :recreate
-      true -> :resume
-    end
-  end
-
-  # Défaut FALSE : recovery `:resume` relancerait claude `--resume <session-MORTE>` → claude exit →
-  # pod ZOMBIE (Elixir croit :monitoring, REPL mort, OAuth consommé). Après un crash, la session
-  # claude n'existe plus serveur-side, donc `--resume` est voué à l'échec. `:recreate` (session
-  # neuve) relance un REPL VIVANT et la tâche (toujours en queue) re-drive le travail. Le gate reste
-  # un opt-in (`true`) si un jour `--resume` se révèle capable de ressusciter une session
-  # serveur-side (douteux).
-  defp resume_enabled?, do: Application.get_env(:fleet_spawner, :recovery_resume_enabled, false)
-
-  # :resume → session reprise + RE-LAUNCH (le backend est mort sous `:temporary`).
-  defp apply_recovery(base, :resume, sid, phase) do
-    base
-    |> Map.put(:session_id, sid)
-    |> Map.put(:resume, true)
-    |> Map.put(:phase, phase)
-    |> Map.put(:recovery, :resume)
   end
 
   # :recreate → fresh, nouvelle session (base intacte : session_id neuf, resume=false).
@@ -1558,16 +1519,10 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # Un pod (re)spawné avec un snapshot suit la décision explicite de
-  # `recover_or_init`/`recovery_action`. `:resume` RE-MATÉRIALISE (→ :project :
-  # le SP + les fichiers .lcars NE sont PAS dans le snapshot minimal, ils se
-  # re-composent depuis le cap-profile, déterministe) PUIS launch(resume) —
-  # `do_project` pose `state.sp` ; aller directement à :launch laisserait sp=nil →
-  # `build_spawn` `:invalid_args` (cas d'un gatekeeper-permanent qui recovere
-  # d'un `phase:monitoring`). JAMAIS reprendre en `:monitor` sur un backend mort.
-  # NB : `do_project` re-clone le workspace si `spec.project.repo_path` —
-  # l'idempotence du clone est gérée ailleurs ; pour les pods sans projet
-  # (gatekeeper, judges) c'est un no-op.
-  defp first_continue_for(%{recovery: :resume}), do: :project
+  # `recover_or_init`/`recovery_action` : `:recreate` repart de zéro (`:allocate`,
+  # session neuve), `:release` s'arrête (phase terminale, rien à relancer). JAMAIS
+  # reprendre en `:monitor` sur un backend mort (le supervisor ne ressuscite jamais
+  # sous `:temporary`).
   defp first_continue_for(%{recovery: :recreate}), do: :allocate
   defp first_continue_for(%{recovery: :release}), do: :release
   defp first_continue_for(%{phase: :pending}), do: :allocate
@@ -1658,17 +1613,18 @@ defmodule Fleet.Spawner.Pod do
       conditions: MapSet.new(),
       pod_id: args.pod_id,
       ticket_id: args.ticket_id,
-      # Session UUID PRÉ-ALLOUÉ au spawn : `--session-id <uuid>` à la 1ʳᵉ création ;
-      # `recover_or_init` le RESTAURE depuis state.json → `--resume <uuid>`. Remplace
-      # le modèle -p (capture `init_msg["session_id"]`, mort). `resume`=false ; recovery le passe à true.
+      # Session UUID PRÉ-ALLOUÉ au spawn : `--session-id <uuid>` à la 1ʳᵉ création.
+      # Remplace le modèle -p (capture `init_msg["session_id"]`, mort). La recovery
+      # depuis state.json ne réutilise PAS ce sid (recreate = session neuve).
       session_id:
         Keyword.get(args.opts, :session_id) ||
           deterministic_session_id(args.cap_profile, args.opts),
       # Timestamp ISO8601 figé à la création du GenServer, persisté tel quel dans
       # state.json.
       started_at: DateTime.utc_now(),
-      # défaut false ; la recovery (apply_recovery) ET le recall délibéré (opts[:resume])
-      # le passent à true → claude `--resume <session_id>`.
+      # défaut false ; SEUL le recall délibéré (`opts[:resume]`) le passe à true →
+      # claude `--resume <session_id>` (ressuscite un pod archivé). La recovery sur
+      # state.json ne resume jamais (terminale → release, sinon → recreate fresh).
       resume: Keyword.get(args.opts, :resume, false),
       # SP composé (do_project) stocké en state pour l'argv4 inline de claude_launch
       # (--system-prompt) ; pas de fichier SP côté pod (.lcars/system-prompt.md = miroir lisible).
