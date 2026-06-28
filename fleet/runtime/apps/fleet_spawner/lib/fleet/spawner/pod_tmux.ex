@@ -59,7 +59,7 @@ defmodule Fleet.Spawner.PodTmux do
 
   @doc """
   Kill le **holder** d'un pod (le process bwrap/host_launch qui tient le namespace + serveur tmux),
-  geste de RECOVERY partagé (DRY) par `Pod.reap_orphan_pod`, `Pod.terminate` (fallback tmux_session)
+  geste de RECOVERY partagé (DRY) par `Pod.Backend.reap_orphan_pod`, `Pod.terminate` (fallback tmux_session)
   et `PodWarden.reap`. Le kill PRIMAIRE reste `Port.close` (cf. § « Le KILL n'est PAS ici ») ; ceci
   est le chemin ORPHELIN/fallback où il n'y a plus de Port vivant.
 

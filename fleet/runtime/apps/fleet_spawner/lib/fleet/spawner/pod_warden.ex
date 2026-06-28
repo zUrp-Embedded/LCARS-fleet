@@ -10,7 +10,7 @@ defmodule Fleet.Spawner.PodWarden do
   GenServer correspondant. Cause : un crash du Pod GenServer ne tue pas le bwrap/tmux
   (`--die-with-parent` = BEAM, pas GenServer). Sous `:temporary` le GenServer n'est jamais ressuscité
   → l'orphelin persiste jusqu'au crash du BEAM. Complète le reap-on-(re)launch
-  (`Fleet.Spawner.Pod.reap_orphan_pod/1`) qui ne couvre QUE le re-spawn. Le reap réutilise le mécanisme
+  (`Fleet.Spawner.Pod.Backend.reap_orphan_pod/1`) qui ne couvre QUE le re-spawn. Le reap réutilise le mécanisme
   prouvé live (`PodTmux.kill_holder` : tmux kill-server + pkill ancré + nettoyage du sock-dir).
 
   ## 2. pod_dirs orphelins — GC du cimetière (`gc_one/1`)
@@ -138,7 +138,7 @@ defmodule Fleet.Spawner.PodWarden do
   # I/O (rescue-protégé : un nettoyage qui lève ne tue pas le warden)
   # ============================================================
 
-  # Reap d'une socket orpheline (mécanisme partagé avec Pod.reap_orphan_pod/1).
+  # Reap d'une socket orpheline (mécanisme partagé avec Pod.Backend.reap_orphan_pod/1).
   defp reap(pod_id) do
     Logger.warning(
       "PodWarden: pod #{pod_id} = orphelin persistant (sock vivante, aucun GenServer) — reap (BL-036b)"

@@ -43,6 +43,7 @@ defmodule Fleet.Spawner.Pod do
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Spawner.Pod.Backend
   alias Fleet.Spawner.Pod.Events
   alias Fleet.Spawner.Pod.Fs
   alias Fleet.Spawner.Pod.Kick
@@ -221,7 +222,7 @@ defmodule Fleet.Spawner.Pod do
   def handle_call(:kill, _from, state) do
     # Checkpoint le seed même sur kill délibéré (mémoire préservée).
     maybe_checkpoint_seed(state)
-    teardown_backend(state)
+    Backend.teardown_backend(state)
     clear_pod_task(state.pod_id)
 
     new_state =
@@ -259,7 +260,7 @@ defmodule Fleet.Spawner.Pod do
   # (fermer la socket libère le FD, PAS le fichier — même famille de fuite FS que le pod_dir orphelin).
   @impl GenServer
   def terminate(reason, state) do
-    teardown_backend(state)
+    Backend.teardown_backend(state)
     :ok
   rescue
     e ->
@@ -279,7 +280,7 @@ defmodule Fleet.Spawner.Pod do
     # Toujours exécuté (succès OU rescue/catch du teardown) → la socket est libérée même si le teardown
     # backend lève. `release_pod_socket/1` est self-protégé (ne lève jamais) : un raise ici se propagerait
     # hors de `terminate`, ce qui masquerait la vraie raison d'arrêt.
-    release_pod_socket(state)
+    Backend.release_pod_socket(state)
   end
 
   # ============================================================
@@ -625,14 +626,14 @@ defmodule Fleet.Spawner.Pod do
          # Provisionne la socket MCP per-pod AVANT le launch (le bind bwrap échoue si le fichier socket
          # n'existe pas encore). Le chemin host rendu est posé en `LCARS_FLEET_MCP_SOCKET` du `.mcp-fleet.json`
          # (cf. McpProvision). Échec → propagé au `with` → transition_failed (pod sans canal = inutile).
-         {:ok, mcp_socket_path} <- ensure_pod_socket(state.pod_id),
+         {:ok, mcp_socket_path} <- Backend.ensure_pod_socket(state.pod_id),
          :ok <-
            McpProvision.maybe_provision_mcp_config(
              state.pod_dir,
              LaunchSpec.sandbox_home(state.cap_profile, state.pod_dir),
              state.pod_id,
              mcp_socket_path,
-             launch_backend()
+             Backend.launch_backend()
            ),
          :ok <- Scaffold.provision_monitor_watch(state),
          :ok <- Scaffold.maybe_bootstrap_project_workspace(state),
@@ -687,14 +688,15 @@ defmodule Fleet.Spawner.Pod do
     # orphelin du même pod_id : no-op pour un pod neuf ; sur recovery (:recreate) ça nettoie le
     # mort-vivant AVANT de relancer (sinon collision sock/process), ce qui rend la recovery viable
     # en prod. Le reaper périodique (orphelins jamais re-spawnés) est un mécanisme distinct (PodWarden).
-    reap_orphan_pod(state.pod_id)
+    Backend.reap_orphan_pod(state.pod_id)
     role = cap_profile_name(state.cap_profile)
     containment = cap_profile_containment(state.cap_profile)
 
     # Le launcher N0 dépend du containment, lu ICI (sinon bwrap aveugle pour tous).
     # "none" (host_native : architect, starfleet) → host_launch.sh (host, sans sandbox) ;
     # sinon la chaîne bwrap. `PermanentBoot` reste générique — la branche vit sur le chemin de lancement.
-    launcher_path = if containment == "none", do: host_launch_path(), else: bwrap_launch_path()
+    launcher_path =
+      if containment == "none", do: Backend.host_launch_path(), else: Backend.bwrap_launch_path()
 
     # Pas de budget côté pod (OAuth pool, pas d'API). Le timeout
     # de réponse est géré par `monitor_timeout_ms/1` côté Pod GenServer
@@ -711,7 +713,7 @@ defmodule Fleet.Spawner.Pod do
       # Port (build_spawn) ; l'argv reste identique des deux côtés (même contrat <role> <pod_id> <pod_dir>
       # <command...>). Le command opaque (claude_launch.sh …) est claude_launch_path ci-dessous.
       launcher_path: launcher_path,
-      claude_launch_path: claude_launch_path(),
+      claude_launch_path: Backend.claude_launch_path(),
       # SP plus dans l'argv (fuite /proc/cmdline + frôle ARG_MAX) : claude_launch lit
       # pod_dir/.lcars/system-prompt.md via --system-prompt-file (écrit en do_project). C'est la SOURCE.
       session_id: state.session_id
@@ -725,30 +727,14 @@ defmodule Fleet.Spawner.Pod do
     # auth/identité git) → transition_failed (même cleanup que les autres échecs launch :
     # clear_pod_task + phase=failed). `role`/`containment`/`claude_launch_path()` sont résolus ICI
     # (côté Pod) et passés à build : `role` == `cap_profile_name(state.cap_profile)`.
-    case LaunchEnv.build(state, role, containment, claude_launch_path()) do
+    case LaunchEnv.build(state, role, containment, Backend.claude_launch_path()) do
       {:ok, env} -> do_launch_backend(state, args, env)
       {:error, reason} -> transition_failed(state, reason)
     end
   end
 
-  # Reap un orphelin (bwrap/tmux/claude survivant à un crash GenServer) du même pod_id avant
-  # un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). Le kill (tmux kill-server +
-  # pkill -f ancré) est centralisé dans `PodTmux.kill_holder/1` (anti self-kill).
-  defp reap_orphan_pod(pod_id) do
-    if Fleet.Spawner.PodTmux.alive?(pod_id) do
-      Logger.warning("pod #{pod_id} : orphelin vivant détecté avant launch (BL-036) — reap")
-      Fleet.Spawner.PodTmux.kill_holder(pod_id)
-    end
-
-    :ok
-  rescue
-    e ->
-      Logger.warning("pod #{pod_id} reap_orphan échec (non-bloquant): #{inspect(e)}")
-      :ok
-  end
-
   defp do_launch_backend(state, args, env) do
-    case launch_backend().launch(args, env) do
+    case Backend.launch_backend().launch(args, env) do
       {:ok, launched} when is_map(launched) ->
         # Extrait le port (LauncherPortBackend l'inclut, StubBackend non).
         # nil-able : un test stub n'a pas de Port → les clauses handle_info
@@ -964,7 +950,7 @@ defmodule Fleet.Spawner.Pod do
     # soumise/complétée (pas de task active à libérer).
     # Checkpoint le seed AVANT de tuer le backend (JSONl encore intact).
     maybe_checkpoint_seed(state)
-    teardown_backend(state)
+    Backend.teardown_backend(state)
 
     new_state =
       state
@@ -997,77 +983,14 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Teardown du backend du pod. Port vivant → Port.close (le SIGTERM du holder bwrap fait tomber
-  # namespace+tmux+claude). Port déjà mort mais session bwrap/tmux/claude survivante → kill
-  # SOCK-AWARE.
-  defp teardown_backend(state) do
-    cond do
-      is_port(state.port) and Port.info(state.port) ->
-        terminate_pod_port(state.port)
-
-      is_binary(state.tmux_session) ->
-        # La session du pod bwrap (`lcars-pod-<id>`) vit sur le sock PAR-POD (PodTmux), PAS
-        # le serveur tmux par défaut. Un kill ciblant le défaut serait un no-op silencieux →
-        # le claude sandboxé continuerait à consommer l'OAuth. On kill via le sock par-pod
-        # (même geste que reap_orphan_pod), centralisé dans `PodTmux.kill_holder/1` (anti self-kill).
-        Fleet.Spawner.PodTmux.kill_holder(state.pod_id)
-
-      true ->
-        :ok
-    end
-
-    # Retire le sock-dir APRÈS le kill. Le kill est fiable (terminate_pod_port ET kill_holder tuent
-    # claude+namespace) → pas besoin de garder le sock-dir « tant que le kill n'est pas sûr ». Sans ce
-    # nettoyage, le sock-dir traînerait après un teardown gracieux → le PodWarden le ramasserait ~60s
-    # plus tard en loguant un FAUX « orphelin persistant » (bruit qui masque les vrais). Le PodWarden
-    # reste le filet des VRAIS orphelins (GenServer crashé → teardown jamais exécuté → sock-dir + claude
-    # survivent → reap). Gardé `tmux_session` : pods réels (bwrap/host), pas StubBackend (sock_path
-    # nominal, rm_rf no-op de toute façon).
-    if is_binary(state.tmux_session) do
-      _ = File.rm_rf(Path.dirname(Fleet.Spawner.PodTmux.sock_path(state.pod_id)))
-    end
-
-    :ok
-  end
-
-  @doc """
-  Tue le pod (chaîne bwrap OU host — geste générique). Le holder (`sleep infinity`) IGNORE l'EOF stdin →
-  `Port.close` seul l'ORPHELINE (le pod survit). On SIGTERM donc le process holder
-  par son os_pid :
-  - **bwrap** : bwrap propage au holder → PID1 exit → namespace + serveur tmux + claude tombent ensemble
-    (`--die-with-parent` = filet si le BEAM meurt avant d'arriver ici).
-  - **host** : pas de namespace → le holder `host_launch.sh` trap le SIGTERM → `tmux
-    kill-server` explicite sur le sock par-pod (teardown self-contained ; cf. `bin/host_launch.sh`).
-  Port.close ensuite (libère le port BEAM). Public pour test direct.
-  """
+  # `terminate_pod_port`/`safe_port_close` (geste OS de teardown du Port + close race-safe) vivent dans
+  # `Pod.Backend` ; `teardown_backend`/`do_release`/`terminate` appellent `Backend.*`. Wrappers délégants
+  # CONSERVÉS avec @spec : `pod_test.exs` exerce les API publiques `Fleet.Spawner.Pod.terminate_pod_port/1`
+  # et `Fleet.Spawner.Pod.safe_port_close/1`.
   @spec terminate_pod_port(port()) :: :ok
-  def terminate_pod_port(port) do
-    case Port.info(port, :os_pid) do
-      {:os_pid, os_pid} ->
-        System.cmd("kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
-
-      _ ->
-        :ok
-    end
-
-    safe_port_close(port)
-  end
-
-  @doc """
-  Ferme le port BEAM en absorbant l'`ArgumentError` de RACE : le port peut se fermer
-  entre notre check et le close (claude finit tout seul après submit_result → son process
-  exit → le port disparaît). La garde `Port.info` seule est insuffisante (TOCTOU) — un port
-  déjà fermé EST l'état voulu, donc on rescue plutôt que crash (sinon `:erlang.port_close`
-  ArgumentError dans do_release → GenServer du pod crashe sur une complétion RÉUSSIE).
-  Public pour test direct.
-  """
+  defdelegate terminate_pod_port(port), to: Backend
   @spec safe_port_close(port()) :: :ok
-  def safe_port_close(port) do
-    Port.close(port)
-    :ok
-  rescue
-    ArgumentError -> :ok
-  end
+  defdelegate safe_port_close(port), to: Backend
 
   # ============================================================
   # Recovery / state FS
@@ -1427,62 +1350,6 @@ defmodule Fleet.Spawner.Pod do
         :liveness_tick,
         Liveness.liveness_tick_ms(state)
       )
-
-  # Délègue à la source unique du backend (config + défaut canon vivent dans LaunchBackend) —
-  # le spawn et la readiness lisent le MÊME résolveur, pas deux copies du défaut.
-  defp launch_backend, do: Fleet.Spawner.LaunchBackend.resolved()
-
-  # SEAM RUNTIME du provisionneur de socket MCP per-pod. `fleet_spawner` est Ring 1, `fleet_mcp` est
-  # Ring 3 : une dep mix.exs `fleet_spawner → fleet_mcp` serait une dépendance INVERSÉE (ring bas → ring
-  # haut), INTERDITE. On résout donc le module au RUNTIME (`Application.get_env` + `apply`), exactement
-  # comme `Fleet.MCP.PodTools` appelle `Fleet.Pilot.ForgeClient`/`ProjectOnboard`/`Fleet.Spawner` : le
-  # défaut est un ATOM littéral (pas un `alias`/appel direct) → AUCUNE dep compile-time, donc aucun cycle.
-  # L'umbrella démarre toutes les apps → `Fleet.MCP.PodSocketSupervisor` est vivant quand le pod tourne.
-  # Override en test : `:mcp_socket_provisioner` = un stub qui rend un chemin SANS créer de vrai socket
-  # `/run/lcars/...` (mirror du pattern `launch_backend: StubBackend`).
-  defp mcp_socket_provisioner,
-    do:
-      Application.get_env(:fleet_spawner, :mcp_socket_provisioner, Fleet.MCP.PodSocketSupervisor)
-
-  # ENSURE (do_project, avant le launch) : crée le listener + le fichier socket de CE pod (idempotent côté
-  # central) et rend `{:ok, socket_path}` (chemin host). Le fichier DOIT exister avant le bind bwrap.
-  defp ensure_pod_socket(pod_id) when is_binary(pod_id) do
-    apply(mcp_socket_provisioner(), :ensure_pod_socket, [pod_id])
-  end
-
-  # RELEASE (filet terminate/2, clause `after`) : arrête le listener ET retire le fichier socket (idempotent
-  # côté central). Self-protégé (rescue/catch → log, rend `:ok`) : il tourne dans l'`after` de `terminate`,
-  # un raise s'y propagerait et masquerait la raison d'arrêt. Clause `_state` (pod_id absent) = no-op.
-  defp release_pod_socket(%{pod_id: pod_id}) when is_binary(pod_id) do
-    _ = apply(mcp_socket_provisioner(), :release_pod_socket, [pod_id])
-    :ok
-  rescue
-    e ->
-      Logger.warning(
-        "pod #{pod_id} release_pod_socket a levé (non-fatal) — #{Exception.message(e)}"
-      )
-
-      :ok
-  catch
-    kind, value ->
-      Logger.warning("pod #{pod_id} release_pod_socket #{kind} (non-fatal) — #{inspect(value)}")
-      :ok
-  end
-
-  defp release_pod_socket(_state), do: :ok
-
-  defp bwrap_launch_path do
-    Application.get_env(:fleet_spawner, :bwrap_launch_path, "/usr/local/bin/bwrap_launch.sh")
-  end
-
-  # Launcher N0 host (containment: none) — frère sans-sandbox de bwrap_launch, même argv-shape.
-  defp host_launch_path do
-    Application.get_env(:fleet_spawner, :host_launch_path, "/usr/local/bin/host_launch.sh")
-  end
-
-  defp claude_launch_path do
-    Application.get_env(:fleet_spawner, :claude_launch_path, "/usr/local/bin/claude_launch.sh")
-  end
 
   # Boucle de kick (timer géré `:kick_ref`, 1 seul vivant). Politique : 1er tick après
   # kick_first_delay_ms (on laisse le flag porteur livrer d'abord) ; armé au bootstrap (inject_brief) ET à
