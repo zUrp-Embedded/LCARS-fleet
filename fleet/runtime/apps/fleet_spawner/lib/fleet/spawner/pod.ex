@@ -50,6 +50,7 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.Spawner.Pod.Liveness
   alias Fleet.Spawner.Pod.McpProvision
   alias Fleet.Spawner.Pod.Paths
+  alias Fleet.Spawner.Pod.Recovery
   alias Fleet.Spawner.Pod.TaskProbe
   alias Fleet.SPBuilder
 
@@ -141,7 +142,7 @@ defmodule Fleet.Spawner.Pod do
   @impl GenServer
   def init(args) do
     state = recover_or_init(args)
-    {:ok, state, {:continue, first_continue_for(state)}}
+    {:ok, state, {:continue, Recovery.first_continue_for(state)}}
   end
 
   @impl GenServer
@@ -1436,7 +1437,8 @@ defmodule Fleet.Spawner.Pod do
 
     with {:ok, json} <- File.read(state_fs_path),
          {:ok, %{"phase" => phase_str}} <- Jason.decode(json),
-         phase when phase in [:succeeded, :released, :killed] <- phase_from_string(phase_str) do
+         phase when phase in [:succeeded, :released, :killed] <-
+           Recovery.phase_from_string(phase_str) do
       rm_terminal_artifacts(
         Path.dirname(state_fs_path),
         Paths.pod_dir_for(pod_id, cap_profile, opts)
@@ -1475,8 +1477,8 @@ defmodule Fleet.Spawner.Pod do
     with {:ok, json} <- File.read(base.state_fs_path),
          {:ok, %{"session_id" => sid, "phase" => phase_str}} when is_binary(sid) <-
            Jason.decode(json) do
-      phase = phase_from_string(phase_str) || :launching
-      apply_recovery(base, recovery_action(phase), sid, phase)
+      phase = Recovery.phase_from_string(phase_str) || :launching
+      Recovery.apply_recovery(base, Recovery.recovery_action(phase), sid, phase)
     else
       _ -> base
     end
@@ -1498,54 +1500,12 @@ defmodule Fleet.Spawner.Pod do
                     live) ; la tâche reste en queue et re-drive un REPL neuf.
   """
   @spec recovery_action(atom()) :: :release | :recreate
-  def recovery_action(phase) do
-    cond do
-      phase in [:succeeded, :released, :killed] -> :release
-      true -> :recreate
-    end
-  end
-
-  # :recreate → fresh, nouvelle session (base intacte : session_id neuf, resume=false).
-  defp apply_recovery(base, :recreate, _sid, _phase), do: Map.put(base, :recovery, :recreate)
-
-  # :release → terminal ; le pod stoppera proprement (do_release sur backend nil).
-  defp apply_recovery(base, :release, _sid, phase) do
-    base |> Map.put(:phase, phase) |> Map.put(:recovery, :release)
-  end
-
-  # Un pod (re)spawné avec un snapshot suit la décision explicite de
-  # `recover_or_init`/`recovery_action` : `:recreate` repart de zéro (`:allocate`,
-  # session neuve), `:release` s'arrête (phase terminale, rien à relancer). JAMAIS
-  # reprendre en `:monitor` sur un backend mort (le supervisor ne ressuscite jamais
-  # sous `:temporary`).
-  defp first_continue_for(%{recovery: :recreate}), do: :allocate
-  defp first_continue_for(%{recovery: :release}), do: :release
-  defp first_continue_for(%{phase: :pending}), do: :allocate
-  defp first_continue_for(%{phase: :launching}), do: :launch
-  defp first_continue_for(%{phase: phase}), do: phase_to_continue(phase)
-
-  defp phase_to_continue(:allocating), do: :allocate
-  defp phase_to_continue(:cleaning), do: :clean
-  defp phase_to_continue(:projecting), do: :project
-  defp phase_to_continue(:injecting), do: :inject
-  defp phase_to_continue(:launching), do: :launch
-  defp phase_to_continue(:monitoring), do: :monitor
-  defp phase_to_continue(:extracting), do: :extract
-  defp phase_to_continue(:releasing), do: :release
-  defp phase_to_continue(_), do: :allocate
-
-  defp phase_from_string(s) when is_binary(s) do
-    s
-    |> String.to_existing_atom()
-    |> case do
-      atom when is_atom(atom) -> atom
-      _ -> nil
-    end
-  rescue
-    ArgumentError -> nil
-  end
-
-  defp phase_from_string(_), do: nil
+  # La DÉCISION de recovery (pure sur la phase), sa projection dans le state (`apply_recovery`), le mapping
+  # phase→`{:continue, _}` (`first_continue_for`) et le décodage de phase (`phase_from_string`) vivent dans
+  # `Pod.Recovery` ; `recover_or_init`/`init/1`/`clear_terminal_snapshot` appellent `Recovery.*`. Wrapper
+  # délégant CONSERVÉ avec @doc/@spec : le test `recovery_test.exs` exerce l'API publique
+  # `Fleet.Spawner.Pod.recovery_action/1`.
+  defdelegate recovery_action(phase), to: Recovery
 
   # session_id DÉTERMINISTE hexspeak calculé au spawn pour un rôle catalogué. La SOURCE du QUOI
   # (index de rôle, tier protégé, fleet-level) est le cap-profile (`metadata.role_index`/`protected`/
