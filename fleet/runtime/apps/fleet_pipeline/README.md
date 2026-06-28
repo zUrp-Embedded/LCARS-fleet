@@ -31,7 +31,7 @@ carte YAML, évaluation de gates, et publication de livrable.
 | `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`pipeline-v2.5.json`, enveloppe `kind/metadata/spec`), puis **normalise** vers la forme interne unique `%{"name", "stages"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché en `:persistent_term`. Fonctions pures ; `opts` (`:pipelines_root`, `:schema_path`) pour tests async |
 | `Fleet.Pipeline.GraphValidator` | `validate/1` : linter de GRAPHE **pur** (`stages` → `:ok \| {:error, {kind, detail}}`) sur les invariants inter-stages que le JSON Schema ne peut pas exprimer (il valide chaque stage isolément). Vérifie : `:phantom_edge` (chaque `needs` réfère un stage déclaré — anti-arête-fantôme/typo silencieux), `:no_root`/`:multiple_roots` (exactement 1 racine `needs: []`), `:unreachable` (tout stage atteignable depuis la racine), `:cycle` (DAG, tri topologique de Kahn — couvre aussi « aucun terminal atteignable », condition équivalente pour ce runtime séquentiel), `:fan_out` (aucun stage à ≥2 successeurs ; runtime séquentiel, aligné `CarteNav`). `describe/1` rend le message lisible par invariant (composé par le Loader dans son raise). Autonome — ne dépend PAS de `CarteNav` (la dépendance inverse fleet_pipeline→fleet_pilot est interdite) |
 | `Fleet.Pipeline.Gate` | `@callback evaluate/3` — behaviour générique d'évaluation de gate, vendor-extensible compile-time |
-| `Fleet.Pipeline.Gates` | implémentation du behaviour `Gate`. `evaluate/3` dispatche par type (`:hard \| :soft \| :terminal \| nil`). **Pur** : pour soft / terminal-non-tranchable il retourne `{:dispatch_gatekeeper, info}` (décision d'escalade), il ne spawn rien. Modules imbriqués `Gates.Hard` (subset-match récursif des `rule` map v1) et `Gates.Terminal` (`required`/`:nontranchable` sur `rules` map v1) |
+| `Fleet.Pipeline.Gates` | implémentation du behaviour `Gate`. `evaluate/3` dispatche par type (`:hard \| :soft \| :terminal \| nil`). **Pur** : seul le `soft` retourne `{:dispatch_gatekeeper, info}` (décision d'escalade), il ne spawn rien. `rules` (hard ET terminal) = liste de prédicats string délégués à `Gates.Predicate`. Somme fermée : toute forme inconnue/malformée → `{:fail}` fail-closed (l'éval est TOTALE) |
 | `Fleet.Pipeline.Gates.Predicate` | `eval?/2` — évaluateur **pur** des rule-strings v2.5 (`"all_tests_pass"`, `"severity_max != critical"`, conjonction `AND`) contre les `outputs` auto-rapportés. Grammaire bornée au corpus canon ; **fail-closed** (fait absent / type incompatible → faux) |
 | `Fleet.Pipeline.GateBrief` | `build/1` — fonction pure qui construit le **brief markdown** (texte du mandat) que le gatekeeper pull via MCP `get_task` : contexte + livrable à juger + question + options canon + contrat de sortie `gate-decision-v1.json` |
 | `Fleet.Pipeline.Gatekeeper` | seam de **boot + registration** du gatekeeper permanent (juge unique, pod Type 3, `lifetime_scope: forever`, cap-profile `gatekeeper.yaml`). `ensure_booted/1` (idempotent, config-gated par `:gatekeeper_autoboot`), `pod_id/0` (lecture `:persistent_term` ou override config `:gatekeeper_pod_id`). Seul module non-pur survivant : il appelle `Fleet.CapProfile.load/1` + `Fleet.Spawner.spawn_pod/3` (injectables en test) |
@@ -60,8 +60,8 @@ spec:
         - report_id
       gate:
         type: hard
-        rule:
-          status: ok
+        rules:
+          - all_tests_pass
 ```
 
 Enveloppe unique **v2.5** (`kind/metadata/spec.stages`), déballée au load par
@@ -69,26 +69,23 @@ Enveloppe unique **v2.5** (`kind/metadata/spec.stages`), déballée au load par
 (string, required), `profile` (string, required), `needs` (array string),
 `condition` (string), `inputs` (array de descriptifs string, ex. `ticket.body`),
 `outputs` (array string), `gate`, `coordHook` (string, deferred ch14). Le
-**contenu** de gate (`rule`/`rules` en maps OU `gate.rules` en prédicats string)
-est un axe orthogonal à l'enveloppe — cf. § Types de gates.
+**contenu** de gate (`gate.rules` = liste de prédicats string) est un axe
+orthogonal à l'enveloppe — cf. § Types de gates.
 
 ## Types de gates
 
 `Fleet.Pipeline.Gates.evaluate/3` retourne `:pass`, `{:fail, reason}`, ou
 `{:dispatch_gatekeeper, info}` (PUR — aucun spawn) :
 
-* **`hard`** — pas de bypass. v1 `rule` map (`Gates.Hard.matches?/2`,
-  subset match récursif) OU v2.5 `rules` strings (tous les prédicats vrais via
-  `Gates.Predicate.eval?/2`). `:pass` / `{:fail, reason}`.
+* **`hard`** — pas de bypass. `rules` = liste de prédicats string (tous vrais
+  via `Gates.Predicate.eval?/2`). `:pass` / `{:fail, reason}`.
 * **`soft`** — jugement LLM délégué au **gatekeeper** (juge unique de la fleet,
   pod permanent work-session). `Gates` retourne `{:dispatch_gatekeeper, %{kind: :soft}}` ;
   le consommateur (rail forge) adresse un mandat d'éval au gatekeeper (MCP, via
   `Fleet.TaskQueue`, ciblé par `pod_id`) et collecte la décision. Pas de gatekeeper
-  booté → fail-loud.
-* **`terminal`** — v1 `rules` maps (`Gates.Terminal.evaluate_rules/2` : `required: true`
-  mismatch → `{:fail}` ; non-required mismatch → `:nontranchable` → **même
-  `{:dispatch_gatekeeper, %{kind: :terminal}}`** que `soft`). v2.5 `rules` strings →
-  tous vrais → `:pass`. `rules` OPTIONNEL (gate `finish`). **`human_approval_required: true`
+  booté → fail-loud. **Seul** le `soft` dispatche au gatekeeper.
+* **`terminal`** — `rules` = liste de prédicats string (tous vrais → `:pass`,
+  sinon `{:fail}`). `rules` OPTIONNEL (gate `finish`). **`human_approval_required: true`
   → HALT fail-closed `{:fail}`** (aucun human-in-loop câblé ; le moteur mécanique
   n'auto-approuve jamais).
 

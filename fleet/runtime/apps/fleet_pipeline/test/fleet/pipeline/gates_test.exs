@@ -13,78 +13,10 @@ defmodule Fleet.Pipeline.GatesTest do
     end
   end
 
-  describe "evaluate/3 — hard" do
-    test "rule match outputs → :pass" do
-      stage = %{"gate" => %{"type" => "hard", "rule" => %{"status" => "ok"}}}
-      assert Gates.evaluate(stage, %{"status" => "ok", "extra" => 1}, %{}) == :pass
-    end
-
-    test "rule mismatch → {:fail, _}" do
-      stage = %{"gate" => %{"type" => "hard", "rule" => %{"status" => "ok"}}}
-      assert {:fail, "hard gate rule mismatch"} = Gates.evaluate(stage, %{"status" => "ko"}, %{})
-    end
-
-    test "nested rule match" do
-      stage = %{
-        "gate" => %{
-          "type" => "hard",
-          "rule" => %{"data" => %{"count" => 3}}
-        }
-      }
-
-      assert Gates.evaluate(stage, %{"data" => %{"count" => 3, "extra" => true}}, %{}) ==
-               :pass
-    end
-  end
-
   describe "evaluate/3 — soft (décision pure → dispatch gatekeeper)" do
     test "soft gate → {:dispatch_gatekeeper, kind: :soft} (Gates pur, pas de spawn ni retry)" do
       stage = %{"gate" => %{"type" => "soft"}}
       assert {:dispatch_gatekeeper, %{kind: :soft}} = Gates.evaluate(stage, %{}, %{user: "test"})
-    end
-  end
-
-  describe "evaluate/3 — terminal" do
-    test "toutes règles match → :pass" do
-      stage = %{
-        "gate" => %{
-          "type" => "terminal",
-          "rules" => [
-            %{"name" => "r1", "match" => %{"a" => 1}},
-            %{"name" => "r2", "match" => %{"b" => 2}}
-          ]
-        }
-      }
-
-      assert Gates.evaluate(stage, %{"a" => 1, "b" => 2}, %{}) == :pass
-    end
-
-    test "règle required mismatch → {:fail, _}" do
-      stage = %{
-        "gate" => %{
-          "type" => "terminal",
-          "rules" => [
-            %{"name" => "must_have_status", "required" => true, "match" => %{"status" => "ok"}}
-          ]
-        }
-      }
-
-      assert {:fail, msg} = Gates.evaluate(stage, %{"status" => "ko"}, %{})
-      assert msg =~ "must_have_status"
-    end
-
-    test "règle non-required mismatch → {:dispatch_gatekeeper, kind: :terminal}" do
-      stage = %{
-        "gate" => %{
-          "type" => "terminal",
-          "rules" => [
-            %{"name" => "soft_check", "required" => false, "match" => %{"clean" => true}}
-          ]
-        }
-      }
-
-      assert {:dispatch_gatekeeper, %{kind: :terminal}} =
-               Gates.evaluate(stage, %{"clean" => false}, %{ticket_id: "t#1"})
     end
   end
 
@@ -212,45 +144,6 @@ defmodule Fleet.Pipeline.GatesTest do
                  match?({:dispatch_gatekeeper, _}, result),
                "gate #{inspect(gate)} a rendu #{inspect(result)} (devrait être total, jamais un raise)"
       end
-    end
-  end
-
-  describe "FAIL-OPEN RULE (F-T1-S11-54) — terminal rule SANS `match` → fail-closed, PAS match-tout" do
-    test "rule SANS clé match → {:fail} (était :pass par vacuité Enum.all?(%{}) = true)" do
-      # Le piège : `Map.get(rule, "match", %{})` → Hard.matches?(%{}, outputs) = true
-      # quel que soit outputs → la gate passait TOUJOURS (fail-OPEN).
-      stage = %{
-        "gate" => %{
-          "type" => "terminal",
-          "rules" => [%{"name" => "no_match_rule", "required" => true}]
-        }
-      }
-
-      assert {:fail, reason} = Gates.evaluate(stage, %{"anything" => "goes"}, %{})
-      assert reason =~ "SANS clé `match`"
-    end
-
-    test "rule avec match non-map (string) → {:fail}, pas match-tout" do
-      stage = %{
-        "gate" => %{
-          "type" => "terminal",
-          "rules" => [%{"name" => "bad_match", "match" => "not_a_map"}]
-        }
-      }
-
-      assert {:fail, _} = Gates.evaluate(stage, %{"x" => 1}, %{})
-    end
-
-    test "rule avec match: %{} LITTÉRAL reste un match vacant assumé → :pass (non régressé)" do
-      # On rejette la clé ABSENTE/non-map, pas le `%{}` explicite (= « pas de contrainte » choisi).
-      stage = %{
-        "gate" => %{
-          "type" => "terminal",
-          "rules" => [%{"name" => "empty_explicit", "match" => %{}}]
-        }
-      }
-
-      assert :pass = Gates.evaluate(stage, %{"x" => 1}, %{})
     end
   end
 end

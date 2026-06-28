@@ -121,8 +121,8 @@ defmodule Fleet.Pipeline.LoaderTest do
               - result_id
             gate:
               type: hard
-              rule:
-                status: ok
+              rules:
+                - all_tests_pass
       """)
 
       assert %{"stages" => %{"a" => _, "b" => stage_b}} = Loader.load!("complex")

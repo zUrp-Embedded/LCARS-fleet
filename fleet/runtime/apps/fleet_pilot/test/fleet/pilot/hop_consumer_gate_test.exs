@@ -63,7 +63,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
           "build" => %{
             "role" => "engineer",
             "needs" => [],
-            "gate" => %{"type" => "hard", "rule" => %{"ok" => true}}
+            "gate" => %{"type" => "hard", "rules" => ["ok"]}
           },
           "review" => %{"role" => "reviewer", "needs" => ["build"]}
         }

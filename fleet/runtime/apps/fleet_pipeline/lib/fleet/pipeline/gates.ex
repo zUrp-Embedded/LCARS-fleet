@@ -4,42 +4,37 @@ defmodule Fleet.Pipeline.Gates do
 
   Types :
 
-    * **hard** — règle déclarative `Hard.match?/2`. Pas de bypass.
+    * **hard** — `rules` = liste de prédicats STRING évalués contre `outputs`
+      par `Fleet.Pipeline.Gates.Predicate`. Tous vrais → `:pass`, sinon
+      `{:fail, …}`. Pas de bypass.
     * **soft** — jugement LLM délégué au **gatekeeper**. `Gates` est
       PUR : il retourne `{:dispatch_gatekeeper, info}` (décision d'escalade) ;
       le rail forge-driven (`Pilot.HopConsumer`) spawn le gatekeeper + collecte
       sa décision. La délégation du jugement est consolidée sur le gatekeeper.
-    * **terminal** — `Terminal.evaluate_rules/2` règles déclaratives
-      d'abord ; `:nontranchable` → **même `{:dispatch_gatekeeper, info}`**
-      que le soft gate.
+    * **terminal** — `rules` = liste de prédicats STRING (Predicate), mais
+      OPTIONNELLE (le gate `finish` du canon est terminal + `human_approval`
+      SANS rules). Une rule non satisfaite → `{:fail}` ;
+      `human_approval_required: true` → **HALT fail-closed** (aucun human-in-loop
+      câblé : le moteur mécanique n'auto-approuve jamais) ; sinon → `:pass`.
     * **nil / absent** — `:pass` direct.
 
-  Le gatekeeper est le **juge unique de la fleet** : soft gate et terminal
-  non-tranchable y passent tous deux. `Gates` ne fait AUCUN spawn (pur) — c'est
-  le rail forge-driven (`Pilot.HopConsumer`) qui possède le nom de stage + le
-  lifecycle d'attente du verdict.
+  Les `rules` (hard ET terminal) sont des prédicats STRING — `"all_tests_pass"`,
+  `"severity_max != critical"` — évalués contre `outputs` par
+  `Fleet.Pipeline.Gates.Predicate`. Seul le **soft** gate dispatche au
+  gatekeeper (le juge unique de la fleet) : `Gates` ne fait AUCUN spawn (pur),
+  c'est le rail forge-driven (`Pilot.HopConsumer`) qui possède le nom de stage
+  + le lifecycle d'attente du verdict.
 
-  ## Deux formes de `rules` (v1 map vs v2.5 string)
+  `Gates` ne retourne JAMAIS `:retry` (le retry n'est pas une décision de gate).
+  Un retry BORNÉ existe, mais c'est le **rail forge-driven**
+  (`Pilot.HopConsumer`) qui le pilote (compteur de rework borné), pas la gate ;
+  la borne écarte le risque de re-spawn-en-boucle. L'orchestration severity
+  (`fallback_invoke_gatekeeper`, `on_*_severity`) reste hors-scope de cet
+  évaluateur.
 
-    * **v1 map** — hard `"rule"` (singulier) / terminal `"rules"` (liste de
-      maps `%{"name","match","required"}`). Subset match `outputs ⊇ rule`
-      récursif (`Hard.matches?/2`, `Terminal.evaluate_rules/2`).
-
-          Hard.matches?(%{"status" => "ok"}, %{"status" => "ok", "extra" => 1})
-          # => true
-
-    * **v2.5 string** — hard ET terminal `"rules"` = liste de prédicats
-      string (`"all_tests_pass"`, `"severity_max != critical"`) évalués contre
-      `outputs` par `Fleet.Pipeline.Gates.Predicate`. Routage par forme : tous
-      les items binaires → chemin v2.5 ; sinon → chemin v1.
-
-  Terminal v2.5 `human_approval_required: true` → **HALT fail-closed** (aucun
-  human-in-loop câblé : le moteur mécanique n'auto-approuve jamais). `Gates`
-  ne retourne JAMAIS `:retry` (le retry n'est pas une décision de gate). Un retry
-  BORNÉ existe, mais c'est le **rail forge-driven** (`Pilot.HopConsumer`) qui le
-  pilote (compteur de rework borné), pas la gate ; la borne écarte le risque de
-  re-spawn-en-boucle. L'orchestration severity (`fallback_invoke_gatekeeper`,
-  `on_*_severity`) reste hors-scope de cet évaluateur.
+  Toute forme de gate inconnue/malformée tombe sur le catch-all fail-closed
+  (`{:fail, …}`) — l'éval est TOTALE, jamais un crash, jamais un `:pass`
+  silencieux.
   """
 
   @behaviour Fleet.Pipeline.Gate
@@ -56,16 +51,7 @@ defmodule Fleet.Pipeline.Gates do
   defp eval_by_type(%{"gate" => nil}, _outputs, _ctx), do: :pass
   defp eval_by_type(stage, _outputs, _ctx) when not is_map_key(stage, "gate"), do: :pass
 
-  # v1 — hard gate, `rule` map subset (Hard.matches?/2).
-  defp eval_by_type(%{"gate" => %{"type" => "hard", "rule" => rule}}, outputs, _ctx) do
-    if __MODULE__.Hard.matches?(rule, outputs) do
-      :pass
-    else
-      {:fail, "hard gate rule mismatch"}
-    end
-  end
-
-  # v2.5 — hard gate, `rules` = liste de prédicats string évalués contre
+  # hard gate, `rules` = liste de prédicats string évalués contre
   # les outputs (Predicate). Pas de bypass : tous vrais → :pass, sinon {:fail}.
   defp eval_by_type(%{"gate" => %{"type" => "hard", "rules" => rules}}, outputs, _ctx)
        when is_list(rules) do
@@ -87,15 +73,16 @@ defmodule Fleet.Pipeline.Gates do
   end
 
   # Terminal : `rules` est OPTIONNEL (le gate `finish` du canon est terminal +
-  # human_approval SANS rules) → on défaute à `[]`. Items strings (ou liste
-  # vide/absente) → chemin v2.5 (Predicate + human_approval cohérent, même sans
-  # rules) ; items maps → chemin v1 (evaluate_rules + fallback gatekeeper).
+  # human_approval SANS rules) → on défaute à `[]`. Seules des rules STRING sont
+  # acceptées (Predicate) ; toute autre forme est rejetée fail-closed.
   defp eval_by_type(%{"gate" => %{"type" => "terminal"} = gate}, outputs, _ctx) do
     rules = Map.get(gate, "rules", [])
 
-    # `rules` doit être une LISTE. Une forme dégénérée (`rules` absente=`[]` OK, mais
-    # `rules` = string/map/nil non-liste) ne doit PAS tomber dans `Enum.all?`/
-    # `evaluate_rules` (sinon BadMapError/Protocol.UndefinedError) — fail-closed.
+    # `rules` doit être une LISTE de strings. Une forme dégénérée (`rules` =
+    # string/map/nil non-liste, ou liste avec un item non-string) ne doit PAS
+    # atteindre `eval_terminal_string` (Predicate suppose des strings) — fail-closed.
+    # Le `not is_list` garde aussi `Enum.all?` d'un Protocol.UndefinedError sur un
+    # non-énumérable (ex. entier).
     cond do
       not is_list(rules) ->
         {:fail, "gate terminal malformée : `rules` doit être une liste (forme rejetée)"}
@@ -104,13 +91,14 @@ defmodule Fleet.Pipeline.Gates do
         eval_terminal_string(rules, gate, outputs)
 
       true ->
-        eval_terminal_map(rules, outputs)
+        {:fail,
+         "gate terminal malformée : `rules` doit être une liste de strings (forme rejetée)"}
     end
   end
 
   # CLAUSE CATCH-ALL FAIL-CLOSED (la garde qui meurt = l'absence de garde).
   # Sans elle, `eval_by_type` serait une somme OUVERTE : un gate malformé (`{type:hard}` SANS
-  # `rule` ni `rules` ; `rules` non-liste ; `type` inconnu ; `gate` non-map) ne matcherait AUCUNE
+  # `rules` ; `rules` non-liste ; `type` inconnu ; `gate` non-map) ne matcherait AUCUNE
   # clause → `FunctionClauseError` remonterait au `handle_info(pod.completed)` non gardé →
   # CRASH du HopConsumer (SINGLETON) → `gate_evals` perdus, fin-de-hop jamais déclenchée.
   # Cette clause FERME la somme : tout gate qui n'est pas une forme connue-valide est
@@ -121,23 +109,7 @@ defmodule Fleet.Pipeline.Gates do
     {:fail, "gate malformée : type/forme non reconnu (#{inspect(gate)}) — fail-closed"}
   end
 
-  # v1 — terminal map rules + fallback gatekeeper async sur :nontranchable.
-  defp eval_terminal_map(rules, outputs) do
-    case __MODULE__.Terminal.evaluate_rules(rules, outputs) do
-      :pass ->
-        :pass
-
-      {:fail, reason} ->
-        {:fail, reason}
-
-      :nontranchable ->
-        # Règles non tranchantes → le gatekeeper décide (async, même mécanique
-        # que le soft gate). Le rail forge-driven (`Pilot.HopConsumer`) spawn + ré-évalue.
-        {:dispatch_gatekeeper, %{kind: :terminal}}
-    end
-  end
-
-  # v2.5 — terminal string rules. Ordre : (1) une rule non satisfaite →
+  # terminal string rules. Ordre : (1) une rule non satisfaite →
   # {:fail} ; (2) `human_approval_required` → HALT fail-closed (le moteur
   # mécanique ne peut PAS accorder l'aval humain ; aucun human-in-loop câblé →
   # jamais d'auto-approbation. Gates ne rend pas `:retry` ; le retry borné est
@@ -155,92 +127,6 @@ defmodule Fleet.Pipeline.Gates do
 
       true ->
         :pass
-    end
-  end
-
-  defmodule Hard do
-    @moduledoc """
-    Hard rule = map subset match récursif sur outputs.
-    """
-
-    @spec matches?(rule :: term(), outputs :: term()) :: boolean()
-    def matches?(rule, outputs) when is_map(rule) and is_map(outputs) do
-      Enum.all?(rule, fn {k, v} ->
-        Map.has_key?(outputs, k) and matches?(v, Map.fetch!(outputs, k))
-      end)
-    end
-
-    def matches?(rule, outputs), do: rule == outputs
-  end
-
-  defmodule Terminal do
-    @moduledoc """
-    Terminal rules : liste de règles. Chaque entrée peut avoir une clé
-    `"required"` (booléen). Défaut STRICT : clé ABSENTE ⇒ `required: true`
-    (`Map.get(rule, "required", true)`) — un critère sans `required` explicite
-    est EXIGÉ, pas optionnel.
-
-      * `required: true` **ou clé absente** + match négatif → `{:fail, reason}`
-        (fail-closed)
-      * `required: false` (EXPLICITE) + match négatif → contribue à
-        `:nontranchable` (fallback gatekeeper)
-      * tous match positifs → `:pass`
-
-    Format rule item : `%{"name" => str, "required" => bool, "match" => map}`.
-    """
-
-    @spec evaluate_rules(rules :: [map()], outputs :: map()) ::
-            :pass | :nontranchable | {:fail, String.t()}
-    def evaluate_rules(rules, outputs) when is_list(rules) do
-      Enum.reduce_while(rules, {:pass, false}, fn rule, {acc, any_undecided?} ->
-        name = Map.get(rule, "name", "anon")
-        required? = Map.get(rule, "required", true)
-
-        # Une rule SANS clé `match` (ou `match` non-map) ne doit PAS défauter à `%{}` :
-        # `Hard.matches?(%{}, _)` = `Enum.all?(%{}, …)` = `true` PAR VACUITÉ → la rule
-        # passerait quoi qu'il arrive (fail-OPEN, pire que le crash : la gate validerait
-        # n'importe quel output). Une définition de gate sans critère de match est
-        # MALFORMÉE → on la REJETTE fail-closed, jamais match-tout. (Distinction nette du
-        # `match: %{}` LITTÉRAL — improbable mais légitime = « pas de contrainte » : seule
-        # la clé ABSENTE/non-map devient un fail, le `%{}` explicite reste un match vacant
-        # assumé.)
-        case rule_match(rule) do
-          :no_match ->
-            {:halt,
-             {{:fail,
-               "terminal rule '#{name}' SANS clé `match` valide — gate malformée (fail-closed)"},
-              any_undecided?}}
-
-          {:ok, match} ->
-            matched? = Fleet.Pipeline.Gates.Hard.matches?(match, outputs)
-
-            cond do
-              matched? ->
-                {:cont, {acc, any_undecided?}}
-
-              required? ->
-                {:halt, {{:fail, "terminal rule required '#{name}' fail"}, any_undecided?}}
-
-              true ->
-                {:cont, {acc, true}}
-            end
-        end
-      end)
-      |> case do
-        {:pass, false} -> :pass
-        {:pass, true} -> :nontranchable
-        {{:fail, reason}, _} -> {:fail, reason}
-      end
-    end
-
-    # `match` PRÉSENT et map → `{:ok, match}` (y compris `%{}` littéral, un match vacant
-    # explicitement choisi). `match` ABSENT ou non-map → `:no_match` (la rule est rejetée
-    # par `evaluate_rules` ; pas de défaut `%{}` qui ferait match-tout).
-    defp rule_match(rule) when is_map(rule) do
-      case Map.fetch(rule, "match") do
-        {:ok, match} when is_map(match) -> {:ok, match}
-        _ -> :no_match
-      end
     end
   end
 end
