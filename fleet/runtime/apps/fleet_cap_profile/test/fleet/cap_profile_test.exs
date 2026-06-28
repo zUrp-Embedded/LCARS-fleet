@@ -30,6 +30,7 @@ defmodule Fleet.CapProfileTest do
     metadata:
       name: test-role
       containment: bwrap
+      slot_scope: instance
     spec:
       scope:
         disallowedTools:
@@ -668,6 +669,21 @@ defmodule Fleet.CapProfileTest do
       assert Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => 0}))
       refute Fleet.CapProfile.catalogued?(role_struct(%{"name" => "ad-hoc"}))
       refute Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => "0"}))
+    end
+
+    test "slot_scope/1 lit metadata.slot_scope ∈ {project, instance}, raise si absent ou invalide" do
+      assert Fleet.CapProfile.slot_scope(role_struct(%{"slot_scope" => "project"})) == "project"
+      assert Fleet.CapProfile.slot_scope(role_struct(%{"slot_scope" => "instance"})) == "instance"
+
+      # Sans défaut fabriqué (comme role_index/1) : absent → raise.
+      assert_raise ArgumentError, fn ->
+        Fleet.CapProfile.slot_scope(role_struct(%{"name" => "ad-hoc"}))
+      end
+
+      # Valeur hors enum → raise (le code ne devine jamais une politique de slot).
+      assert_raise ArgumentError, fn ->
+        Fleet.CapProfile.slot_scope(role_struct(%{"slot_scope" => "global"}))
+      end
     end
   end
 

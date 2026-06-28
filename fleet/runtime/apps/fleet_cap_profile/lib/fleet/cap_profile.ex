@@ -349,6 +349,29 @@ defmodule Fleet.CapProfile do
   def fleet_level?(%__MODULE__{}), do: false
 
   @doc """
+  Granularité d'identité/slot du rôle (`metadata.slot_scope`) — axe ORTHOGONAL à `lifetime_scope`.
+  `"project"` : pod_id par (repo, rôle) → UNE identité par projet → UN slot Desktop stable (cwd +
+  session-id figés), dispatch sérialisé par (repo, rôle) (engineer, singletons fleet-level). `"instance"` :
+  pod_id par (repo, numéro, rôle) → fan-out par issue/PR (juges éphémères). **Source UNIQUE** de cette
+  lecture : `Fleet.Pilot.StageDispatcher` choisit `PodId.for_repo` vs `for_issue`/`for_pr` là-dessus.
+
+  **Sans défaut fabriqué** (comme `role_index/1` / `name/1`) : la politique de slot est une propriété de
+  routage déclarée explicitement par CHAQUE rôle — un profil sans `slot_scope ∈ {project, instance}` est
+  un trou de catalogue → on **raise** (fail-loud), jamais d'inférence silencieuse en code.
+  """
+  @spec slot_scope(t()) :: String.t()
+  def slot_scope(%__MODULE__{metadata: %{"slot_scope" => s}}) when s in ["project", "instance"],
+    do: s
+
+  def slot_scope(%__MODULE__{}),
+    do:
+      raise(
+        ArgumentError,
+        "CapProfile sans metadata.slot_scope ∈ {project, instance} — politique de slot non déclarée " <>
+          "(catalogue-only, pas de défaut : déclarer le scope dans le cap-profile du rôle)"
+      )
+
+  @doc """
   Le cap-profile est-il un rôle CATALOGUÉ (porte un `role_index` entier) ? Prédicat SANS raise — c'est
   le test de présence que `Fleet.Spawner.Pod.deterministic_session_id` interroge AVANT d'appeler
   `role_index/1` : un rôle non catalogué (ad-hoc, hors-fleet) n'a pas d'identité déterministe à

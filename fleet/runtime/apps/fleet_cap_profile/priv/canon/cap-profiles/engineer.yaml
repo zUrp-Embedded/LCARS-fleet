@@ -12,6 +12,7 @@ metadata:
   role_index: 3
   protected: false
   fleet_level: false
+  slot_scope: project   # 1 identite par projet -> 1 slot Desktop stable ; eng one-shot serialise par repo
 spec:
   scope:
     allowedTools:

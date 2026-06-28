@@ -12,6 +12,7 @@ metadata:
   role_index: 2
   protected: false
   fleet_level: true
+  slot_scope: project   # singleton fleet-level (le pipe gatekeeper)
 spec:
   scope:
     allowedTools:

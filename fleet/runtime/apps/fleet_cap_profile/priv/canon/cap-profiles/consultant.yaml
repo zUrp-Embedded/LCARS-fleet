@@ -12,6 +12,7 @@ metadata:
   role_index: 6
   protected: false
   fleet_level: false
+  slot_scope: instance  # fan-out par issue (consultant-as-judge ephemere, invisible Desktop)
 spec:
   scope:
     allowedTools:

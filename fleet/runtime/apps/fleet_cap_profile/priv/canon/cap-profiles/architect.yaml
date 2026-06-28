@@ -16,6 +16,7 @@ metadata:
   role_index: 1
   protected: true
   fleet_level: true
+  slot_scope: project   # singleton fleet-level (repo 0000)
   mounts:
     - path: /home/projects        # RO : lire le code pour cadrer les briefs (tous les projets d'un coup)
       mode: ro
