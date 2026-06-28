@@ -52,6 +52,7 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.Spawner.Pod.McpProvision
   alias Fleet.Spawner.Pod.Paths
   alias Fleet.Spawner.Pod.Recovery
+  alias Fleet.Spawner.Pod.Scaffold
   alias Fleet.Spawner.Pod.StateFs
   alias Fleet.Spawner.Pod.TaskProbe
   alias Fleet.SPBuilder
@@ -550,25 +551,10 @@ defmodule Fleet.Spawner.Pod do
     # teardown raté → `safe_mkdir_p` PRÉSERVE le dir en :allocate), un re-spawn en `--session-id`
     # (resume=false) heurterait `Session ID already in use` si un `<uuid>.jsonl` traîne. On le supprime
     # → `--session-id` crée toujours frais. (resume=true → `SeedStore.restore` écrase le jsonl : pas de GC.)
-    unless state.resume, do: gc_stale_session_jsonl(state)
+    unless state.resume, do: Scaffold.gc_stale_session_jsonl(state)
 
     new_state = %{state | phase: :projecting}
     {:noreply, new_state, {:continue, :project}}
-  end
-
-  # Supprime tout `<session_id>.jsonl` résiduel sous le pod_dir (tous cwd-slugs) → libère l'UUID pour
-  # `--session-id`. Best-effort : un échec ne casse pas le spawn.
-  defp gc_stale_session_jsonl(state) do
-    [state.pod_dir, ".claude", "projects", "*", "#{state.session_id}.jsonl"]
-    |> Path.join()
-    |> Path.wildcard()
-    |> Enum.each(fn f ->
-      _ = File.rm(f)
-
-      Logger.info(
-        "Pod.gc #{state.pod_id}: jsonl stale #{Path.basename(f)} retiré (GC UUID → session frais)"
-      )
-    end)
   end
 
   defp do_project(state) do
@@ -600,10 +586,11 @@ defmodule Fleet.Spawner.Pod do
 
     with {:ok, sp_compose} <-
            SPBuilder.compose(state.cap_profile, [], pod_id: state.pod_id, job_id: state.ticket_id),
-         {:ok, claude_md} <- SPBuilder.compose_claude_md(state.cap_profile, maybe_path(repo_md)),
-         {:ok, _skills_paths} <- maybe_filter_skills(state.cap_profile, skills_root),
-         {:ok, agent_draft} <- read_agent_draft(state.cap_profile),
-         {:ok, protocole_user} <- read_protocole_user(),
+         {:ok, claude_md} <-
+           SPBuilder.compose_claude_md(state.cap_profile, Scaffold.maybe_path(repo_md)),
+         {:ok, _skills_paths} <- Scaffold.maybe_filter_skills(state.cap_profile, skills_root),
+         {:ok, agent_draft} <- Scaffold.read_agent_draft(state.cap_profile),
+         {:ok, protocole_user} <- Scaffold.read_protocole_user(),
          :ok <- Fs.safe_mkdir_p(lcars_dir),
          # `.claude/` pod-owned = cible du bind creds-only (bwrap_launch). On ne crée QUE le dir,
          # aucun settings.json dedans → 0 hook humain. bwrap y monte `.credentials.json`.
@@ -616,7 +603,8 @@ defmodule Fleet.Spawner.Pod do
          # CLAUDE.md custom à la RACINE du pod (projet/cwd, non masquée) ; le reste en .lcars/.
          :ok <- Fs.safe_write(Path.join(state.pod_dir, "CLAUDE.md"), claude_md),
          :ok <- Fs.safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
-         :ok <- Fs.safe_write(Path.join(lcars_dir, "settings.json"), pod_settings_json()),
+         :ok <-
+           Fs.safe_write(Path.join(lcars_dir, "settings.json"), Scaffold.pod_settings_json()),
          # creds : plus de copie. Seul `.credentials.json` de l'humain est monté RW par
          # bwrap_launch.sh dans `pod_dir/.claude/` (refresh OAuth natif, écriture en place). `.claude/`
          # reste pod-owned → pas de hook humain. Les fichiers pod sont en .lcars/ + racine pod.
@@ -626,14 +614,14 @@ defmodule Fleet.Spawner.Pod do
          :ok <- Fs.safe_mkdir_p(tickets_dir),
          :ok <-
            Fs.safe_write(
-             Path.join(tickets_dir, "#{ticket_id_to_filename(state.ticket_id)}.md"),
-             default_brief(state)
+             Path.join(tickets_dir, "#{Scaffold.ticket_id_to_filename(state.ticket_id)}.md"),
+             Scaffold.default_brief(state)
            ),
          # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du mandat est
          # la TaskQueue (`get_task`). Un dispatch stage enqueue AVANT le spawn (StageDispatcher) ; mais
          # `admin.spawn` (lcars spawn --mandate) n'a PAS de dispatcher → sans cet enqueue, `get_task` rend
          # `{done:true}` et le pod reste idle. Idempotent (skip si déjà en file).
-         :ok <- maybe_enqueue_mandate(state),
+         :ok <- Scaffold.maybe_enqueue_mandate(state),
          # Provisionne la socket MCP per-pod AVANT le launch (le bind bwrap échoue si le fichier socket
          # n'existe pas encore). Le chemin host rendu est posé en `LCARS_FLEET_MCP_SOCKET` du `.mcp-fleet.json`
          # (cf. McpProvision). Échec → propagé au `with` → transition_failed (pod sans canal = inutile).
@@ -646,10 +634,10 @@ defmodule Fleet.Spawner.Pod do
              mcp_socket_path,
              launch_backend()
            ),
-         :ok <- provision_monitor_watch(state),
-         :ok <- maybe_bootstrap_project_workspace(state),
+         :ok <- Scaffold.provision_monitor_watch(state),
+         :ok <- Scaffold.maybe_bootstrap_project_workspace(state),
          # Recall délibéré — restaure le seed AVANT le launch (après workspace = cwd réglé).
-         :ok <- maybe_recall_restore(state) do
+         :ok <- Scaffold.maybe_recall_restore(state) do
       new_state =
         state
         |> Map.put(:phase, :injecting)
@@ -676,91 +664,6 @@ defmodule Fleet.Spawner.Pod do
   # l'humain est monté RW par bwrap_launch.sh (CLAUDE_DIR → ~/.claude), refresh
   # OAuth délégué au lockfile cross-process natif Anthropic.
 
-  # settings.json minimal pour le claude REPL du pod.
-  #
-  # `skipDangerousModePermissionPrompt: true` — pré-accepte le warning
-  # interactif que claude affiche au premier boot sous
-  # `--dangerously-skip-permissions`. Sans cette clé, le pod tmux session
-  # se fige sur "By proceeding, you accept..." (option 1/2 + Enter).
-  # Pattern repris du consultant LCARS v1 (`/home/consultant/.claude/
-  # settings.json`).
-  #
-  # `hasCompletedOnboarding: true` — skip aussi l'onboarding step. Le
-  # `.claude.json` legacy n'a pas vocation à être touché ici (config
-  # globale du user host).
-  defp pod_settings_json do
-    Jason.encode!(
-      %{
-        "hasCompletedOnboarding" => true,
-        "hasAcknowledgedCostThreshold" => true,
-        "skipDangerousModePermissionPrompt" => true
-      },
-      pretty: true
-    )
-  end
-
-  # SP draft minimal — déclare le rôle agent worker + workflow yop →
-  # get_task → submit_result + convention de retour (ok|failed). Le SP
-  # final par rôle est un chantier séparé.
-  # Draft SP role-aware : le draft d'un rôle est `agent-<role>-base.md` s'il
-  # EXISTE, sinon le draft worker générique. Convention catalogue (le draft suit le `metadata.name`),
-  # plus de rôle gravé en `case` : l'architecte tombe sur son draft délégateur (qualité+économie +
-  # create_ticket), tout rôle sans draft dédié sur le draft worker (get_task/submit_result). `role`
-  # est interpolé dans un path (`agent-<role>-base.md`) → validé via le smart-constructor slug
-  # (source unique du charset path-safe ; un `role` malformé retombe juste sur le draft par défaut).
-  defp read_agent_draft(%Fleet.CapProfile{} = cap) do
-    role = Fleet.CapProfile.name(cap)
-    default = "priv/sp_drafts/agent-worker-base.md"
-
-    file =
-      if Fleet.Slug.valid?(role) do
-        candidate = "priv/sp_drafts/agent-#{role}-base.md"
-
-        if File.exists?(Application.app_dir(:fleet_sp_builder, candidate)),
-          do: candidate,
-          else: default
-      else
-        default
-      end
-
-    path = Application.app_dir(:fleet_sp_builder, file)
-
-    case File.read(path) do
-      {:ok, content} -> {:ok, content}
-      {:error, reason} -> {:error, {:agent_draft_missing, path, reason}}
-    end
-  end
-
-  # protocole-user.md (mots-clés personnalisés `yop`/`SeeU`).
-  #
-  # Default = `priv/sp_drafts/protocole-user-worker.md` shippé avec
-  # fleet_sp_builder : version WORKER (yop = trigger workflow ticket-driven,
-  # SeeU = no-op). Override par config `:fleet_spawner, :protocole_user_path`
-  # si besoin (instance utilisateur custom).
-  #
-  # PIÈGE évité : pointer sur le protocole-user d'une instance humaine
-  # (ex. `/home/starfleet/sp-sources/user/protocole-user.md`) qui définit
-  # `yop` comme "reprise de session lire handoff" ou neutralisé (instance
-  # v1 éclatée) → le claude REPL du pod ne déclenche PAS le workflow worker.
-  # (Piège réellement rencontré sur une instance dont le protocole-user redéfinissait `yop`.)
-  defp read_protocole_user do
-    case Application.get_env(:fleet_spawner, :protocole_user_path) do
-      nil ->
-        path = Application.app_dir(:fleet_sp_builder, "priv/sp_drafts/protocole-user-worker.md")
-
-        case File.read(path) do
-          {:ok, content} -> {:ok, content}
-          {:error, reason} -> {:error, {:protocole_user_worker_missing, path, reason}}
-        end
-
-      path when is_binary(path) ->
-        case File.read(path) do
-          {:ok, content} -> {:ok, content}
-          {:error, reason} -> {:error, {:protocole_user_missing, path, reason}}
-        end
-    end
-  end
-
   defp do_inject(state) do
     # Plus de resolve_env OAuth (coffre/RT-env déprécié). Le pod s'authentifie
     # via le claudeDir de l'humain, bindé RW par bwrap_launch.sh (env CLAUDE_DIR
@@ -776,32 +679,6 @@ defmodule Fleet.Spawner.Pod do
       |> add_condition(:context_injected)
 
     {:noreply, new_state, {:continue, :launch}}
-  end
-
-  # Recall délibéré. Si `opts[:recall_seed_jsonl]` est fourni (par `Fleet.Spawner.recall`),
-  # restaure le seed à `projects/<slugify(cwd)>/<session_id>.jsonl` AVANT le launch ; claude
-  # `--resume <session_id>` (resume:true via opts) le retrouve. Gaté : absent → no-op (spawn normal
-  # intact). Le seed est validé (read_map) côté `Spawner.recall` ; absent ICI = fail-loud (transition_failed).
-  defp maybe_recall_restore(state) do
-    case Keyword.get(state.opts, :recall_seed_jsonl) do
-      nil ->
-        :ok
-
-      jsonl when is_binary(jsonl) ->
-        if File.exists?(jsonl) do
-          {:ok, _} =
-            Fleet.Spawner.SeedStore.restore(
-              jsonl,
-              state.pod_dir,
-              LaunchSpec.pod_cwd(state.opts, state.cap_profile, state.pod_dir),
-              state.session_id
-            )
-
-          :ok
-        else
-          {:error, {:recall_seed_missing, jsonl}}
-        end
-    end
   end
 
   defp do_launch(state) do
@@ -1551,93 +1428,6 @@ defmodule Fleet.Spawner.Pod do
         Liveness.liveness_tick_ms(state)
       )
 
-  defp maybe_path(path) do
-    if File.exists?(path), do: path, else: nil
-  end
-
-  defp maybe_filter_skills(_cap_profile, nil), do: {:ok, []}
-
-  defp maybe_filter_skills(cap_profile, root) do
-    Fleet.SPBuilder.filter_skills(cap_profile, root)
-  end
-
-  # Brief du pod = sa TÂCHE (livrée par l'orchestrateur, modèle PUSH).
-  # Le travail vient de `opts[:mandate]` (le rail forge-driven construit le mandat via
-  # `Pilot.StageDispatcher.build_mandate` ; ou pod direct via `Fleet.Spawner.spawn_pod` opts).
-  #
-  # Ton naturel (pas multi-section formalisée "## Tâche / ## Livrable") : claude REPL en
-  # mode interactif peut interpréter un format trop structuré comme tentative de prompt
-  # injection et refuser. Le contexte fleet (convention submit_result) est posé en
-  # préambule conversationnel, pas comme directive impérative ("EXACTEMENT ce payload",
-  # "appelle ce tool", etc.).
-  # Convertit ticket_id (peut contenir `/`, `#`, etc. — ex.
-  # "fleet/lcars#600" depuis Gitea) en filename safe (sans `/` qui
-  # créerait des sous-dirs). Convention : remplace `/` par `_` et
-  # garde `#` (lisible humain).
-  defp ticket_id_to_filename(ticket_id) when is_binary(ticket_id) do
-    String.replace(ticket_id, "/", "_")
-  end
-
-  defp default_brief(state) do
-    mandate = Keyword.get(state.opts || [], :mandate)
-    # Interpoler le RÔLE résolu, ne pas hardcoder "engineer". Un gatekeeper (juge) sans
-    # mandat explicite ne doit PAS être amorcé "worker engineer" (un mauvais priming de persona).
-    # Cadre neutre "pod LCARS (rôle X)" — le mandat (GateBrief pour le juge) porte la persona réelle.
-    role = cap_profile_name(state.cap_profile)
-
-    body =
-      if is_binary(mandate) and mandate != "" do
-        mandate
-      else
-        "(Pas de mandat fourni — ticket #{state.ticket_id}.)"
-      end
-
-    """
-    Salut. Tu es un pod LCARS (rôle #{role}, pod #{state.pod_id}) ; cette session
-    a été lancée par le fleet pour traiter une demande référencée ticket #{state.ticket_id}.
-
-    Le fleet attend que tu utilises le tool MCP `submit_result` quand ton travail est
-    terminé — c'est la convention LCARS, le canal de retour structuré équivalent d'un
-    Slack DM signed-off. Pas besoin d'écrire de fichier toi-même.
-
-    Voici la demande :
-
-    #{body}
-    """
-  end
-
-  # Enqueue le mandat dans la TaskQueue (le canal CANONIQUE `get_task`), idempotent :
-  #   - pas de mandat (pod permanent/interactif booté à froid) → rien à puller → bootstrap (skip) ;
-  #   - mandat DÉJÀ en file (`pod_status != {:ok, nil}` : dispatch stage, StageDispatcher a enqueué AVANT
-  #     le spawn) → pas de double-enqueue (skip) ;
-  #   - sinon (`admin.spawn` / `lcars spawn --mandate` : aucun dispatcher) → on enqueue ici, sinon
-  #     `get_task` rend `{done:true}` et le pod reste idle (cf. StageDispatcher.enqueue_mandate).
-  # Mirror des `attrs` de StageDispatcher (`ticket_id`/`role`/`brief`/`metadata`).
-  defp maybe_enqueue_mandate(state) do
-    mandate = Keyword.get(state.opts || [], :mandate)
-
-    cond do
-      not (is_binary(mandate) and mandate != "") ->
-        :ok
-
-      not TaskProbe.no_pending_mandate?(state.pod_id) ->
-        :ok
-
-      true ->
-        attrs = %{
-          ticket_id: state.ticket_id,
-          role: cap_profile_name(state.cap_profile),
-          brief: mandate,
-          metadata: %{"source" => "admin.spawn"}
-        }
-
-        case Fleet.TaskQueue.enqueue(state.pod_id, attrs) do
-          {:ok, _task} -> :ok
-          {:error, reason} -> {:error, {:mandate_enqueue_failed, reason}}
-        end
-    end
-  end
-
   # Délègue à la source unique du backend (config + défaut canon vivent dans LaunchBackend) —
   # le spawn et la readiness lisent le MÊME résolveur, pas deux copies du défaut.
   defp launch_backend, do: Fleet.Spawner.LaunchBackend.resolved()
@@ -1723,91 +1513,5 @@ defmodule Fleet.Spawner.Pod do
     # Arme (cancel+rearm, 1 seul timer) la boucle de kick ack-driven. Le 1er send-keys sera `yop`
     # (bootstrap : pas encore pollé) ; le SP `agent-worker-base.md` porte le workflow get_task→submit_result.
     arm_kick(state)
-  end
-
-  # Provisionne $POD_DIR/.mcp-fleet.json (serveur MCP UNIQUE du pod). claude_launch le détecte
-  # (--mcp-config --strict-mcp-config). Force `alwaysLoad:true` (VISIBILITÉ : sinon tout tool MCP est
-  # déféré derrière ToolSearch — absent du prompt turn-1 ; cette clé dé-défère + attend la connexion
-  # regular-required. La PERMISSION reste mcp__fleet__* dans le cap-profile allowedTools). Le pod
-  # soumet via submit_result → le central broadcaste task_queue.task_completed (%Fleet.Event{}) →
-  # pod.ex extrait (event-driven).
-  # Câblage de Fleet.ProjectBootstrap.Phase.Clone pour les pods porteurs d'un projet
-  # (`repo_path`) : le projet EFFECTIF vient du MANDAT (effective_project : opts[:project]
-  # injecté par le dispatch ticket->repo) ou du cap_profile statique (pods permanents). Présent :
-  # clone le repo dans `<pod_dir>/workspace/` + checkout feature branch ; le cwd du REPL pointe sur
-  # ce workspace (maybe_put_pod_cwd -> LCARS_POD_CWD) → l'agent code DANS sa branche (pas dans le
-  # pod_dir nu, et le clone est idempotent au respawn).
-  #
-  # Découplage architectural : c'est `pod.ex` qui câble `ProjectBootstrap` pour les pods
-  # avec projet (workspace per-pod). (Le provisioning de workspace per-stage du moteur RAM
-  # `Pipeline.WorkspaceProvisioner` est supprimé ; le rail forge-driven épingle la base au clone.)
-  # 2 sites callers d'un même mécanisme, paramétré par cap-profile. Le projet EFFECTIF
-  # (mandat > statique) est résolu par `LaunchSpec.effective_project/2` (source unique).
-  defp maybe_bootstrap_project_workspace(state) do
-    project = LaunchSpec.effective_project(state.opts, state.cap_profile)
-
-    case project["repo_path"] do
-      nil ->
-        :ok
-
-      _repo_path ->
-        # cap_profile porteur du projet EFFECTIF (mandat > statique) pour les Clone.* (qui lisent spec.project).
-        eff_cap = %{state.cap_profile | spec: Map.put(state.cap_profile.spec, "project", project)}
-
-        with {:ok, workspace, branch} <-
-               Fleet.ProjectBootstrap.Phase.Clone.clone_or_skip(
-                 state.pod_dir,
-                 eff_cap,
-                 []
-               ),
-             # Doc-mount (mundo invocado) : la branche `work/ops` (plans/backlog/conventions) à côté
-             # du code. nil si le projet n'a pas de branche doc ; fail-loud si déclarée mais absente.
-             {:ok, doc} <-
-               Fleet.ProjectBootstrap.Phase.Clone.clone_work_doc(
-                 state.pod_dir,
-                 eff_cap
-               ) do
-          # CLAUDE.md composé (pod-identité + conventions repo) à la racine du CWD (workspace) :
-          # l'agent pop dans un projet déjà documenté. Le do_project l'écrit au pod_dir (parent) ;
-          # avec cwd=workspace il doit être DANS le cwd (sinon l'agent code sans sa codebase-doc en cwd).
-          _ = File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md"))
-
-          # Identité git du rôle : pas de `git config` mutable dans le workspace (falsifiable — le pod
-          # pourrait l'écraser). L'identité est injectée en env IMMUABLE-par-défaut au lancement
-          # (bwrap_launch.sh : GIT_AUTHOR_*/GIT_COMMITTER_* = LCARS-<role> + GIT_CONFIG_GLOBAL
-          # /dev/null). La garantie vit côté monde : la gate DeliverableGate rejette au push tout
-          # commit hors identité autorisée.
-
-          Logger.info(
-            "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})" <>
-              if(doc, do: " doc=#{doc}", else: " (pas de branche doc)")
-          )
-
-          :ok
-        else
-          {:error, reason} -> {:error, {:project_workspace_clone_failed, reason}}
-        end
-    end
-  end
-
-  # Provisionne le monitor in-pod (`watch.sh`) dans le pod_dir (= HOME bwrap). L'agent
-  # l'arme via l'outil natif `Monitor` (cf. SP `agent-worker-base.md`) → réveil-par-flag
-  # (`turn.flag` touché par la fleet), zéro send-keys de CONTENU (send-keys =
-  # kick `yop` + slash-commands uniquement). L'asset vit en `priv/` (résolu app_dir, comme le SP
-  # draft). chmod best-effort : l'agent lance `bash ~/watch.sh`, le bit exec n'est pas requis.
-  defp provision_monitor_watch(state) do
-    src = Application.app_dir(:fleet_spawner, "priv/watch.sh")
-    dst = Path.join(state.pod_dir, "watch.sh")
-
-    case File.read(src) do
-      {:ok, content} ->
-        with :ok <- Fs.safe_write(dst, content) do
-          _ = File.chmod(dst, 0o755)
-          :ok
-        end
-
-      {:error, reason} ->
-        {:error, {:watch_asset_unreadable, reason}}
-    end
   end
 end
