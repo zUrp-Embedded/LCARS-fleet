@@ -165,6 +165,10 @@ defmodule Fleet.Spawner.Pod do
       # socket reçoit » = « quel pod » → le central n'a plus de secret à vérifier (cf. Fleet.MCP.PodSocketAcceptor).
       phase: state.phase,
       conditions: MapSet.to_list(state.conditions),
+      # SLOT-FREEZE : le gate du dispatcher distingue un pipe IDLE (re-mandatable) d'un pipe qui TRAVAILLE
+      # encore une tache (pending/assigned/in_progress) — sans ca il resetterait un workspace en plein
+      # travail. Combine a :publishing pour decider :ready (idle ET dernier livrable confirme sur la forge).
+      has_active_task: pod_has_active_task?(state.pod_id),
       session_id: state.session_id,
       pod_dir: state.pod_dir,
       state_fs_path: state.state_fs_path,

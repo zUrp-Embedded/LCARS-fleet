@@ -207,6 +207,55 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     def enqueue(_pod_id, _attrs), do: {:error, :broker_down}
   end
 
+  # SLOT-FREEZE : engineer en PIPE (lifetime_scope: pipe) → le gate prend la voie pipe-aware (vs one-shot).
+  defmodule StubLoaderPipe do
+    def load("engineer"),
+      do:
+        {:ok,
+         %Fleet.CapProfile{
+           kind: "CapabilityProfile",
+           metadata: %{"slot_scope" => "project"},
+           spec: %{"invocation" => %{"lifetime_scope" => "pipe"}}
+         }}
+
+    def load(_), do: {:error, :not_found}
+  end
+
+  # Spawner pipe CONFIGURABLE via le process dict (`:pipe_state`) — un seul stub pour les 4 etats du gate.
+  # pod_info expose conditions + has_active_task (comme le vrai pod) ; reprovision_pipe_workspace trace.
+  defmodule StubSpawnerPipe do
+    def spawn_pod(_p, t, o) do
+      send(self(), {:spawned, t, o})
+      {:ok, self()}
+    end
+
+    def wake_pod(p) do
+      send(self(), {:woke, p})
+      :ok
+    end
+
+    def kill_pod(p) do
+      send(self(), {:killed, p})
+      :ok
+    end
+
+    def reprovision_pipe_workspace(p, project, opts) do
+      send(self(), {:reprovisioned, p, project, opts})
+      Process.get(:reprovision_result, :ok)
+    end
+
+    def pod_info(p) do
+      send(self(), {:pod_info, p})
+
+      case Process.get(:pipe_state, :dead) do
+        :dead -> {:error, :not_found}
+        :ready -> {:ok, %{conditions: [], has_active_task: false}}
+        :busy_active -> {:ok, %{conditions: [], has_active_task: true}}
+        :publishing -> {:ok, %{conditions: [:publishing], has_active_task: false}}
+      end
+    end
+  end
+
   # F075 : loader qui SIGNALE chaque load(role) → permet d'asserter UN SEUL load par dispatch.
   defmodule CountingLoader do
     def load(role) do
@@ -615,6 +664,101 @@ defmodule Fleet.Pilot.StageDispatcherTest do
                StageDispatcher.dispatch_issue(payload, opts)
 
       # résolution AVANT toute écriture forge : pas de spawn, pas de verrou orphelin
+      refute_received {:spawned, _, _}
+    end
+
+    # ====================================================================
+    # SLOT-FREEZE — gate PIPE-aware : un engineer PIPE (resident) est re-mandate selon son etat.
+    #   dead  -> spawn frais ; busy (tache active OU :publishing) -> DEFERE ; ready -> reprovision COLD +
+    #   remandate. (project["base_sha"] est passe au reset ; le slug = la branche feature du ticket.)
+    # ====================================================================
+    test "GATE pipe DEAD (1er ticket) : spawn frais, PAS de reprovision" do
+      Process.put(:pipe_state, :dead)
+
+      opts =
+        dispatch_opts(
+          loader: StubLoaderPipe,
+          spawner: StubSpawnerPipe,
+          project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
+        )
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
+               StageDispatcher.dispatch_issue(eng_issue(), opts)
+
+      assert_received {:spawned, "issue-42", _opts}
+      refute_received {:reprovisioned, _, _, _}
+    end
+
+    test "GATE pipe BUSY (tache active) : DEFERE :role_busy, ni reprovision ni spawn (pod en plein travail)" do
+      Process.put(:pipe_state, :busy_active)
+
+      opts =
+        dispatch_opts(
+          loader: StubLoaderPipe,
+          spawner: StubSpawnerPipe,
+          project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
+        )
+
+      assert {:skipped, :role_busy} = StageDispatcher.dispatch_issue(eng_issue(), opts)
+
+      refute_received {:reprovisioned, _, _, _}
+      refute_received {:spawned, _, _}
+    end
+
+    test "GATE pipe PUBLISHING (livrable en vol) : DEFERE :role_busy (pas de reset pendant le push)" do
+      Process.put(:pipe_state, :publishing)
+
+      opts =
+        dispatch_opts(
+          loader: StubLoaderPipe,
+          spawner: StubSpawnerPipe,
+          project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
+        )
+
+      assert {:skipped, :role_busy} = StageDispatcher.dispatch_issue(eng_issue(), opts)
+
+      refute_received {:reprovisioned, _, _, _}
+      refute_received {:spawned, _, _}
+    end
+
+    test "GATE pipe READY (idle + livrable confirme) : reprovision COLD (base_sha + slug) PUIS re-mandate" do
+      Process.put(:pipe_state, :ready)
+
+      opts =
+        dispatch_opts(
+          loader: StubLoaderPipe,
+          spawner: StubSpawnerPipe,
+          project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
+        )
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
+               StageDispatcher.dispatch_issue(eng_issue(), opts)
+
+      # reset cold appele AVANT le remandate, avec le projet (base_sha) + le slug du ticket.
+      assert_received {:reprovisioned, "lordzurp-lcars-test-engineer",
+                       %{"base_sha" => "basesha1"}, [slug: _slug]}
+
+      # re-mandate (pod vivant) -> enqueue + wake, PAS de re-spawn frais.
+      refute_received {:spawned, _, _}
+      assert_received {:enqueued, "lordzurp-lcars-test-engineer", _}
+      assert_received {:woke, "lordzurp-lcars-test-engineer"}
+    end
+
+    test "GATE pipe READY mais reset KO -> DEFERE :role_busy (pas de remandate sur workspace sale)" do
+      Process.put(:pipe_state, :ready)
+      Process.put(:reprovision_result, {:error, {:reset_failed, :git_exit}})
+
+      opts =
+        dispatch_opts(
+          loader: StubLoaderPipe,
+          spawner: StubSpawnerPipe,
+          project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
+        )
+
+      assert {:skipped, :role_busy} = StageDispatcher.dispatch_issue(eng_issue(), opts)
+
+      assert_received {:reprovisioned, _, _, _}
+      refute_received {:enqueued, _, _}
       refute_received {:spawned, _, _}
     end
   end

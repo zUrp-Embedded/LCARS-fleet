@@ -124,7 +124,16 @@ defmodule Fleet.Pilot.StageDispatcher do
              # une issue qu'on ne traite pas ; le poller re-dispatch au tick suivant).
              scope = Fleet.CapProfile.slot_scope(profile),
              pod_id = pod_id_for_scope(scope, repo, number, role),
-             :ok <- serialize_project_scope(scope, spawner, pod_id) do
+             slug = feature_slug(issue),
+             :ok <-
+               serialize_project_scope(
+                 scope,
+                 Fleet.CapProfile.lifetime_scope(profile),
+                 spawner,
+                 pod_id,
+                 project,
+                 slug
+               ) do
           # pod_id et branche (`lcars/issue-N-role`) construits indépendamment depuis (n, role) ; pod_id
           # opaque (jamais re-parsé). La branche reste repo-LOCALE (pas de collision intra-repo).
 
@@ -152,8 +161,9 @@ defmodule Fleet.Pilot.StageDispatcher do
               pod_id: pod_id,
               rc_name: rc_name(repo, role),
               # Nom de branche LOCALE parlant (titre du ticket sanitizé), pas
-              # le pod_id. Sert à phase.ex → `feature/<slug>`.
-              slug: feature_slug(issue)
+              # le pod_id. Sert à phase.ex → `feature/<slug>`. Calculé une fois (réutilisé par le gate
+              # pour la reprovision in-place d'un pipe : même branche au reset qu'au spawn).
+              slug: slug
             ]
             |> maybe_put_project(project)
             |> maybe_put_route(route)
@@ -575,7 +585,14 @@ defmodule Fleet.Pilot.StageDispatcher do
       # (occupé par un autre ticket) → on DÉFÈRE, jamais re-mandater-pendant-occupé. Juges (instance) et
       # rework instance → `:ok` (no-op, jamais gated). Appel uniforme via `slot_scope`. `{:skipped,
       # :role_busy}` remonte au poller (qui gère `{:skipped, _}` → retry au tick suivant).
-      case serialize_project_scope(Fleet.CapProfile.slot_scope(profile), ctx.spawner, pod_id) do
+      case serialize_project_scope(
+             Fleet.CapProfile.slot_scope(profile),
+             Fleet.CapProfile.lifetime_scope(profile),
+             ctx.spawner,
+             pod_id,
+             project,
+             "work"
+           ) do
         {:skipped, :role_busy} ->
           {:skipped, :role_busy}
 
@@ -1171,17 +1188,82 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp pod_id_for_scope("instance", repo, number, role),
     do: Fleet.Pilot.PodId.for_issue(repo, number, role)
 
-  # Sérialisation des rôles project-scoped : UNE identité (repo, rôle) vivante à la fois (1 slot Desktop
-  # ⟹ 1 (cwd, session-id) ⟹ séquentiel). Si le pod projet est DÉJÀ vivant (occupé par un autre ticket),
-  # on DÉFÈRE (`{:skipped, :role_busy}`) — AVANT tout verrou/enqueue (sinon on verrouillerait une issue
-  # qu'on ne traite pas). Le poller re-dispatch au tick suivant ; le pod one-shot meurt en fin de tâche
-  # → spawn frais pour le ticket suivant. Les rôles `instance` ne sont JAMAIS gated (ids distincts par
-  # ticket → pas de partage d'identité, fan-out assumé). Appelable UNIFORMÉMENT (instance → :ok no-op).
-  defp serialize_project_scope("project", spawner, pod_id) do
+  # Serialisation des roles project-scoped : UNE identite (repo, role) vivante a la fois (1 slot Desktop).
+  # Module par le lifetime :
+  #   instance         -> jamais gated (ids distincts par ticket, fan-out assume).
+  #   project one-shot  -> vivant = occupe par un autre ticket -> DEFERE ; il meurt en fin de tache +
+  #                        spawn frais au ticket suivant (comportement baseline, INCHANGE).
+  #   project pipe      -> process RESIDENT, selon son etat (pipe_remandate_state) :
+  #                          dead  -> :ok (spawn frais, 1er ticket) ;
+  #                          busy  -> DEFERE (travaille encore une tache OU publie son dernier livrable :
+  #                                   resetter son workspace maintenant le corromprait / courserait le push) ;
+  #                          ready -> reset COLD in-place du workspace pour le nouveau mandat + /clear, PUIS
+  #                                   :ok (spawn_stage re-mandate sur un workspace propre, bonne branche).
+  # Tout AVANT le verrou/enqueue (sinon on verrouillerait une issue qu'on ne traite pas). `{:skipped,
+  # :role_busy}` remonte au poller (retry au tick suivant). La base du reset = `project["base_sha"]` :
+  # nouveau ticket -> main tip (fresh) ; rework -> tip de la PR (continue le travail de l'eng). 1 seule fn.
+  defp serialize_project_scope("instance", _lifetime, _spawner, _pod_id, _project, _slug), do: :ok
+
+  defp serialize_project_scope("project", "one-shot", spawner, pod_id, _project, _slug) do
     if pod_alive?(spawner, pod_id), do: {:skipped, :role_busy}, else: :ok
   end
 
-  defp serialize_project_scope("instance", _spawner, _pod_id), do: :ok
+  defp serialize_project_scope("project", _pipe, spawner, pod_id, project, slug) do
+    case pipe_remandate_state(spawner, pod_id) do
+      :dead -> :ok
+      :busy -> {:skipped, :role_busy}
+      :ready -> reprovision_then_proceed(spawner, pod_id, project, slug)
+    end
+  end
+
+  # Etat d'un pipe project-scoped face a un NOUVEAU mandat. :ready = idle ET dernier livrable confirme (ni
+  # tache active ni :publishing) — la SEULE situation ou resetter le workspace est sur (le push a deja lu
+  # le commit, l'agent n'ecrit plus). pod_info expose conditions + has_active_task (le pod sait les deux).
+  defp pipe_remandate_state(spawner, pod_id) do
+    case safe_pod_info(spawner, pod_id) do
+      {:ok, %{conditions: conds, has_active_task: active}} ->
+        cond do
+          active -> :busy
+          :publishing in conds -> :busy
+          true -> :ready
+        end
+
+      # pod_info sans has_active_task (stub partiel) : conservateur -> :busy (un pipe vivant d'etat
+      # inconnu n'est PAS resette, juste defere). Absent/erreur -> :dead (spawn frais).
+      {:ok, _partial} ->
+        :busy
+
+      :error ->
+        :dead
+    end
+  end
+
+  defp safe_pod_info(spawner, pod_id) do
+    if function_exported?(spawner, :pod_info, 1) do
+      case spawner.pod_info(pod_id) do
+        {:ok, info} -> {:ok, info}
+        _ -> :error
+      end
+    else
+      :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  # Reset COLD in-place du workspace + /clear AVANT le remandate, puis :ok (proceed). Reset KO -> DEFERE
+  # (retry au tick suivant). Pas de project (legacy) ou spawner sans la fn (stub) -> :ok sans reset
+  # (degrade honnete : on ne bloque pas, mais sans la garantie cold de ce tour).
+  defp reprovision_then_proceed(spawner, pod_id, project, slug) do
+    if is_map(project) and function_exported?(spawner, :reprovision_pipe_workspace, 3) do
+      case spawner.reprovision_pipe_workspace(pod_id, project, slug: slug) do
+        :ok -> :ok
+        {:error, _} -> {:skipped, :role_busy}
+      end
+    else
+      :ok
+    end
+  end
 
   defp maybe_spawn(_spawner, true = _alive?, _profile, _ticket_id, _spawn_opts),
     do: {:ok, :remandated}
