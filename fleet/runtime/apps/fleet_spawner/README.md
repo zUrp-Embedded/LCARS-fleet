@@ -1,7 +1,7 @@
 # Fleet.Spawner
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-27 (doc-rot F-019 : state_fs_root `~/.lcars/state`, `:token_arg` retiré, restart tous `:temporary`, recovery câblée release/resume/recreate)
+**Dernière révision** : 2026-06-28 (doc-rot F-019 : state_fs_root `~/.lcars/state`, `:token_arg` retiré, restart tous `:temporary`, recovery câblée release/resume/recreate)
 **Statut** : implémenté run #3.1 chantier #6, convergé ADR-G run #5 2026-06-01
 
 Pilote le lifecycle pod LCARS v2 (Ring 1 pod primitive). Cycle 8 phases
@@ -45,6 +45,10 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
   - `sandbox_home(cap_profile, pod_dir)` — home intra-pod ; aussi passé à `McpProvision` par `do_project`.
   - `pod_cwd(opts, cap_profile, pod_dir)` — cwd vu par l'agent ; aussi appelé par le recall (`maybe_recall_restore`).
   - `effective_project(opts, cap_profile)` (mandat > statique) / `rc_project(opts, cap_profile)` (nom de projet slugifié) — **publics car partagés hors-placement** (`pod_completed_payload`, bootstrap workspace, `maybe_checkpoint_seed`) : source unique, pas de re-dérivation côté `Pod`.
+- `Fleet.Spawner.Pod.Paths` — **île de résolution de CHEMINS** du substrat pod, extraite de `Pod` (aucun state/Port/timer, aucune écriture FS — que du calcul déterministe). Dérive du `pod_id` (+ scope cap-profile + overrides `opts`/config) les deux empreintes disque d'un pod et leur racine scannable ; tout descend du HOME de l'humain (fleet-sous-l'humain) sauf override explicite :
+  - `pod_dir(pod_id, opts \\ [])` — `<pod_dir_root>/pod_<pod_id>` (clone git + `.lcars`/`.claude`/`tickets`), reconstructible du SEUL pod_id (cap_profile hors-calcul → GC par scan). **Public**, aussi appelé par `PodWarden` ; `Fleet.Spawner.Pod.pod_dir/2` garde un wrapper délégant (contrat préservé).
+  - `state_fs_root/0` — racine SCANNABLE des `state.json` (`<root>/<scope>/<pod_id>/state.json`, scope ∈ {pipes,runs,pods}). **Public**, balayée par `PodWarden` ; `Fleet.Spawner.Pod.state_fs_root/0` garde un wrapper délégant.
+  - `state_fs_path_for(pod_id, cap_profile, opts)` / `pod_dir_for(pod_id, cap_profile, opts)` / `runtime_home/0` — résolutions appelées par `Pod` (`initial_state`, `clear_terminal_snapshot`, `claude_dir`).
 
 ## Chaîne de lancement (ADR-G — RC interactif, plus de `-p`)
 
