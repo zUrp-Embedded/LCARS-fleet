@@ -49,6 +49,7 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.Spawner.Pod.Liveness
   alias Fleet.Spawner.Pod.McpProvision
   alias Fleet.Spawner.Pod.Paths
+  alias Fleet.Spawner.Pod.TaskProbe
   alias Fleet.SPBuilder
 
   # Complétion event-driven : le résultat arrive via l'event Bus
@@ -172,7 +173,7 @@ defmodule Fleet.Spawner.Pod do
       # SLOT-FREEZE : le gate du dispatcher distingue un pipe IDLE (re-mandatable) d'un pipe qui TRAVAILLE
       # encore une tache (pending/assigned/in_progress) — sans ca il resetterait un workspace en plein
       # travail. Combine a :publishing pour decider :ready (idle ET dernier livrable confirme sur la forge).
-      has_active_task: pod_has_active_task?(state.pod_id),
+      has_active_task: TaskProbe.pod_has_active_task?(state.pod_id),
       session_id: state.session_id,
       pod_dir: state.pod_dir,
       state_fs_path: state.state_fs_path,
@@ -344,7 +345,7 @@ defmodule Fleet.Spawner.Pod do
   #     idle-kill : tuer un pod sain qui attend du travail). La vérif est à l'instant du
   #     fire (≠ à l'armement) → couvre la race d'enqueue worker ET l'inter-stage pipe d'un coup.
   def handle_info(:result_deadline, %{phase: :monitoring} = state) do
-    if pod_has_active_task?(state.pod_id) do
+    if TaskProbe.pod_has_active_task?(state.pod_id) do
       transition_failed(state, {:result_timeout, state.pod_id})
     else
       {:noreply, Map.put(state, :result_deadline_ref, nil)}
@@ -425,11 +426,11 @@ defmodule Fleet.Spawner.Pod do
     # (mandat enqueué au spawn) garde le kick fréquent jusqu'au pull. Détection race-safe :
     # l'enqueue du mandat (ms après spawn, par le rail forge-driven) précède largement le 1er kick
     # (+2s) → un worker a déjà son mandat `pending`, un pod permanent a `pod_status == {:ok, nil}`.
-    bootstrap? = no_pending_mandate?(state.pod_id)
+    bootstrap? = TaskProbe.no_pending_mandate?(state.pod_id)
 
     # polled? = l'agent a déjà appelé get_task (ACK in-band). Calculé 1× : sert au bootstrap-stop ET au
     # choix du mot-clé (pas encore pollé = bootstrap-arm "yop" ; déjà pollé = pod running → fallback "wake").
-    polled = polled?(state)
+    polled = TaskProbe.polled?(state)
     cap = if bootstrap?, do: Kick.kick_bootstrap_max(), else: Kick.kick_max_attempts()
     retry = if bootstrap?, do: Kick.kick_bootstrap_retry_ms(), else: Kick.kick_retry_ms()
 
@@ -437,7 +438,7 @@ defmodule Fleet.Spawner.Pod do
       # ACK (pull pour un wake / poll pour un bootstrap, cf. acked?/3) = l'agent a tendu la main →
       # on STOPPE la boucle (cancel timer ; le porteur/flag prend le relais). On se fie à l'ACTE de
       # l'agent (last_poll/pod_status TaskQueue), pas à un proxy host-side (« process watch.sh existe »).
-      Kick.acked?(mandate_pulled?(state.pod_id), bootstrap?, polled) ->
+      Kick.acked?(TaskProbe.mandate_pulled?(state.pod_id), bootstrap?, polled) ->
         Logger.debug(
           "pod #{state.pod_id} acké (pull/poll) → kick stoppé (porteur prend le relais)"
         )
@@ -1995,7 +1996,7 @@ defmodule Fleet.Spawner.Pod do
       not (is_binary(mandate) and mandate != "") ->
         :ok
 
-      not no_pending_mandate?(state.pod_id) ->
+      not TaskProbe.no_pending_mandate?(state.pod_id) ->
         :ok
 
       true ->
@@ -2086,25 +2087,6 @@ defmodule Fleet.Spawner.Pod do
   @doc false
   defdelegate acked?(pulled?, bootstrap?, polled), to: Kick
 
-  # L'agent a-t-il POLLÉ (appelé get_task) ? = ACK in-band RÉEL : l'agent a tendu la main via l'API
-  # officielle (last_poll, tracké par le TaskQueue), pas un proxy host-side comme un
-  # `pgrep watch.sh` (« le process existe » ≠ « l'agent agit »). Sert à stopper le kick bootstrap dès que
-  # l'agent est up. Override test : `:polled_fun`.
-  defp polled?(%{pod_id: pod_id} = state) when is_binary(pod_id) do
-    case Map.get(state, :polled_fun) || Application.get_env(:fleet_spawner, :polled_fun) do
-      fun when is_function(fun, 1) -> fun.(state)
-      _ -> Fleet.TaskQueue.last_poll(pod_id) != nil
-    end
-  rescue
-    _ -> false
-  catch
-    # `last_poll` est un GenServer.call → TaskQueue down/restarting EXIT (ne raise pas), `rescue` ne
-    # l'attrape pas. MÊME garde que mandate_pulled?/no_pending_mandate? : un hoquet broker ne crashe PAS le pod.
-    :exit, _ -> false
-  end
-
-  defp polled?(_), do: false
-
   # `kick_keyword/2` (décision PURE du mot-clé) + `kick_send/2`/`do_send_keys/2` (I-O d'envoi) vivent dans
   # `Pod.Kick` ; le handler appelle `Kick.kick_send`. Wrapper délégant CONSERVÉ : le test `pod_test.exs`
   # exerce l'API publique `Fleet.Spawner.Pod.kick_keyword/2`.
@@ -2117,55 +2099,6 @@ defmodule Fleet.Spawner.Pod do
     # Arme (cancel+rearm, 1 seul timer) la boucle de kick ack-driven. Le 1er send-keys sera `yop`
     # (bootstrap : pas encore pollé) ; le SP `agent-worker-base.md` porte le workflow get_task→submit_result.
     arm_kick(state)
-  end
-
-  # Le mandat est-il déjà pull par le pod ? « Pull » = la task est dans un état qui
-  # PROUVE que claude a appelé get_task : `:assigned | :in_progress | :completed`.
-  # Volontairement PAS : `:pending`/`nil` (pas encore pull / pas encore enqueué — on
-  # continue de kicker, ce qui couvre aussi la race spawn↔enqueue), ni `:cleared`/`:failed`
-  # (kill délibéré / deadline broker — le pod n'a rien pull, ne PAS arrêter le kick sur
-  # un faux « pull » ; au pire on kicke jusqu'au cap, harmless, le result_deadline couvre).
-  # Best-effort : exception/exit broker → false (on retentera). Sert à ARRÊTER la boucle.
-  # Le pod a-t-il une task ACTIVE (pending/assigned/in_progress) là, maintenant ?
-  # Utilisé au FIRE de :result_deadline : oui = vrai timeout de réponse (kill) ; non =
-  # le pod attendait juste sa prochaine task (idle), on laisse lapser. Même source que
-  # mandate_pulled?/no_pending_mandate? (TaskQueue.pod_status), même garde rescue/catch
-  # (TaskQueue indisponible ⇒ pas de task active connue ⇒ pas de kill, fail-safe).
-  defp pod_has_active_task?(pod_id) do
-    case Fleet.TaskQueue.pod_status(pod_id) do
-      {:ok, s} when s in [:pending, :assigned, :in_progress] -> true
-      _ -> false
-    end
-  rescue
-    _ -> false
-  catch
-    :exit, _ -> false
-  end
-
-  defp mandate_pulled?(pod_id) do
-    case Fleet.TaskQueue.pod_status(pod_id) do
-      {:ok, s} when s in [:assigned, :in_progress, :completed] -> true
-      _ -> false
-    end
-  rescue
-    _ -> false
-  catch
-    :exit, _ -> false
-  end
-
-  # AUCUN mandat (task) en attente pour ce pod : `pod_status == {:ok, nil}` (jamais enqueué).
-  # Distingue le pod permanent/interactif (rien à puller à froid → bootstrap) du worker (mandat
-  # `pending` enqueué au spawn). En cas d'erreur → `false` (défaut sûr : on traite comme un
-  # worker, kick fréquent — on ne suspend pas par erreur les kicks d'un vrai mandat).
-  defp no_pending_mandate?(pod_id) do
-    case Fleet.TaskQueue.pod_status(pod_id) do
-      {:ok, nil} -> true
-      _ -> false
-    end
-  rescue
-    _ -> false
-  catch
-    :exit, _ -> false
   end
 
   # Provisionne $POD_DIR/.mcp-fleet.json (serveur MCP UNIQUE du pod). claude_launch le détecte
