@@ -114,7 +114,8 @@ defmodule Fleet.Pilot.StageDispatcherTest do
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"slot_scope" => "project"},
-           spec: %{}
+           # eng = pipe (process résident re-mandaté) → le dispatcher REMANDATE le pod vivant, pas défère.
+           spec: %{"invocation" => %{"lifetime_scope" => "pipe"}}
          }}
 
     # F077 : un rôle juge déclare `mandate_kind: judge` dans son cap-profile (pas un nom magique).
@@ -171,8 +172,8 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   end
 
   # Spawner dont le pod est DÉJÀ VIVANT (`pod_info` → `{:ok, _}`). Sert à tester le GATE de
-  # sérialisation : un rôle project-scoped déjà vivant → le dispatcher DÉFÈRE (`:role_busy`), il ne
-  # spawn ni ne remandate un pod occupé. (Le remandate-sur-vivant reste possible pour les `instance`.)
+  # RE-MANDATE : un rôle project-scoped+pipe (ou instance) déjà vivant → le dispatcher RE-MANDATE le pod
+  # vivant (enqueue + wake), il NE re-spawn PAS. (Un project+one-shot vivant serait DÉFÉRÉ `:role_busy`.)
   defmodule StubSpawnerAlive do
     def spawn_pod(_profile, ticket_id, opts) do
       send(self(), {:spawned, ticket_id, opts})
@@ -291,36 +292,33 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
 
-    test "GATE slot_scope: engineer (project) déjà vivant → DÉFÈRE :role_busy (sérialisé, pas de remandate)" do
+    test "engineer (project + pipe) déjà vivant → RE-MANDATE (enqueue+wake), PAS de re-spawn ni défère" do
       payload = eng_issue()
 
-      # StubSpawnerAlive : pod_info → {:ok,_} = le pod projet `<repo>-engineer` est DÉJÀ vivant (un autre
-      # ticket du repo en cours). Le gate sérialise les rôles project-scoped : on DÉFÈRE, on ne remandate
-      # PAS un pod occupé (ça wedgerait — un one-shot mid-tâche ne pull pas un 2ᵉ mandat). Le poller
-      # re-dispatch au tick suivant ; le pod meurt en fin de tâche → spawn frais pour le suivant.
-      assert {:skipped, :role_busy} =
+      # StubSpawnerAlive : pod_info → {:ok,_} = le pod projet `<repo>-engineer` (pipe) est DÉJÀ vivant.
+      # Un pipe est RÉSIDENT et re-mandatable → le gate ne défère PAS (project+pipe → :ok) ; spawn_stage
+      # RE-MANDATE le pod vivant (enqueue + wake), AUCUN nouveau spawn. 1 process re-mandaté = 1 slot.
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts(spawner: StubSpawnerAlive))
 
-      # Le gate a CONSULTÉ pod_info (avec l'id PROJET) pour voir le pod vivant...
+      # idempotent : pod_info consulté, vu vivant → AUCUN spawn_pod, mais mandat enqueué + pod réveillé.
       assert_received {:pod_info, "lordzurp-lcars-test-engineer"}
-      # ...puis a DÉFÉRÉ sans AUCUN effet de bord : pas de spawn, pas d'enqueue, pas de wake.
       refute_received {:spawned, _, _}
-      refute_received {:enqueued, _, _}
-      refute_received {:woke, _}
+      assert_received {:enqueued, "lordzurp-lcars-test-engineer", _attrs}
+      assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
 
-    test "GATE slot_scope: engineer (project) vivant → défère AVANT verrou/enqueue (rien à compenser)" do
-      # Le gate défère AVANT de poser le verrou ou d'enqueuer → le task_queue défaillant n'est JAMAIS
-      # atteint. Donc aucun verrou à retirer, aucun pod à tuer : la défère est sans effet de bord.
-      assert {:skipped, :role_busy} =
+    test "engineer (pipe) vivant + enqueue KO → verrou retiré mais pod PAS tué (contexte préservé)" do
+      # Remandate d'un pipe vivant dont l'enqueue échoue (POST-verrou) : compensation = retirer le verrou
+      # MAIS NE PAS tuer l'eng vivant (un re-mandate raté ≠ kill ; on préserve son contexte résident).
+      assert {:error, {:enqueue_failed, :broker_down}} =
                StageDispatcher.dispatch_issue(
                  eng_issue(),
                  dispatch_opts(spawner: StubSpawnerAlive, task_queue: FailTaskQueue)
                )
 
-      refute_received {:removed_label, _}
+      assert_received {:removed_label, "lcars-in-flight"}
       refute_received {:killed, _}
-      refute_received {:enqueued, _, _}
     end
 
     test "F181 : échec POST-verrou (enqueue KO) → verrou retiré + pod tué (pas de stuck)" do

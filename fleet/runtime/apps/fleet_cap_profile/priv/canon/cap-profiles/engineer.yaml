@@ -75,7 +75,7 @@ spec:
     # place mais DORMANTE (un pod one-shot est toujours mort au rework → toujours
     # spawn frais). Rebasculer = remettre `lifetime_scope: pipe` ICI, point. Cf.
     # BL-055 + `04_design-notes/ring1/permanent-pods-boot.md` §"Task-level éphémère".
-    lifetime_scope: one-shot
+    lifetime_scope: pipe   # eng = pipe : 1 process resident re-mandate sur les tickets = 1 slot Desktop ; reversible -> one-shot
     model: opus        # catalogue → --model (alias/nom complet ; tunable)
     effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
