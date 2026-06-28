@@ -983,53 +983,9 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # `terminate_pod_port`/`safe_port_close` (geste OS de teardown du Port + close race-safe) vivent dans
-  # `Pod.Backend` ; `teardown_backend`/`do_release`/`terminate` appellent `Backend.*`. Wrappers délégants
-  # CONSERVÉS avec @spec : `pod_test.exs` exerce les API publiques `Fleet.Spawner.Pod.terminate_pod_port/1`
-  # et `Fleet.Spawner.Pod.safe_port_close/1`.
-  @spec terminate_pod_port(port()) :: :ok
-  defdelegate terminate_pod_port(port), to: Backend
-  @spec safe_port_close(port()) :: :ok
-  defdelegate safe_port_close(port), to: Backend
-
   # ============================================================
   # Recovery / state FS
   # ============================================================
-
-  @doc """
-  Efface la TOMBSTONE d'un `pod_id` AVANT un (re)spawn délibéré (appelé par
-  `Fleet.Spawner.spawn_pod/3`).
-
-  Sous l'id pod DÉTERMINISTE, un re-dispatch retombe sur le MÊME `pod_id`
-  (`issue-N-role`). Si un `state.json` TERMINAL (`:succeeded`/`:released`/`:killed`)
-  subsiste d'un cycle précédent — même d'une AUTRE issue #N sur un autre repo, l'id
-  ne porte que le numéro —, `recover_or_init` le lit → `recovery_action` rend
-  `:release` → le pod s'arrête AUSSITÔT (`do_release` sur backend nil, `{:stop,
-  :normal}` MUET) sans rien lancer. Le poller voit alors le verrou in-flight sans
-  complétion → réclame l'orphelin → re-dispatch → MÊME tombstone → boucle infinie
-  (le pod ne lance jamais de claude).
-
-  Un (re)spawn est TOUJOURS délibéré (sous `:temporary` le superviseur ne ressuscite
-  jamais) → une tombstone terminale n'a rien à protéger ici : on l'efface + le pod_dir
-  → `init` repart FRESH (`:allocate`). **No-op** si pas de snapshot, snapshot illisible,
-  ou phase EN VOL (`:launching`/`:monitoring`/… → la recovery `:recreate` reste
-  intacte — on ne touche QUE les tombstones).
-  """
-  @spec clear_terminal_snapshot(String.t(), Fleet.CapProfile.t(), keyword()) :: :ok
-  def clear_terminal_snapshot(pod_id, cap_profile, opts \\ []),
-    do: StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
-
-  @doc """
-  Efface les DEUX dossiers qui composent l'empreinte disque d'un pod terminé : son **state-dir** (le
-  dossier du `state.json`) et son **pod_dir** (clone git + `.lcars`/`.claude`/`tickets`) — deux arbres
-  distincts. Idempotent (`rm_rf` ne lève pas sur l'absent). Geste PARTAGÉ, un seul site qui sait quels
-  deux dossiers forment l'empreinte d'un pod : appelé par `clear_terminal_snapshot/3` (au re-spawn du
-  même pod_id) ET par le `PodWarden` (GC périodique des tombstones orphelines jamais re-mandatées). Ne
-  lit ni ne vérifie la phase : l'appelant garantit déjà que le pod est terminal. Sûr car le seed
-  `--resume` vit ailleurs (seed-store `projects.work/<projet>/pods/`), pas dans le pod_dir.
-  """
-  @spec rm_terminal_artifacts(String.t(), String.t()) :: :ok
-  defdelegate rm_terminal_artifacts(state_dir, pod_dir), to: StateFs
 
   defp recover_or_init(args) do
     base = initial_state(args)
@@ -1043,29 +999,6 @@ defmodule Fleet.Spawner.Pod do
       _ -> base
     end
   end
-
-  @doc """
-  Décision de recovery d'un pod (re)spawné dont un `state.json` snapshot existe.
-  PURE, fonction de la seule **phase observée**. Sous `:temporary` le supervisor
-  ne ressuscite jamais : c'est un (re)spawn délibéré qui appelle `init/1`, et la
-  décision est explicite (pas de reprise implicite
-  `first_continue_for(:monitoring)` sur un backend mort).
-
-    * `:release`  — phase terminale (`:succeeded`/`:released`/`:killed`) → rien à relancer.
-    * `:recreate` — tout le reste (`:failed`/`:pending`/phase EN VOL `:launching`/
-                    `:monitoring`/`:extracting`/`:releasing`/ambiguë) → from scratch,
-                    session neuve. Une phase en vol sur un (re)spawn = backend mort
-                    (sous `:temporary`) : on reroll. On NE tente PAS de `--resume` sur
-                    une session morte côté serveur → claude exit → pod zombie (prouvé
-                    live) ; la tâche reste en queue et re-drive un REPL neuf.
-  """
-  @spec recovery_action(atom()) :: :release | :recreate
-  # La DÉCISION de recovery (pure sur la phase), sa projection dans le state (`apply_recovery`), le mapping
-  # phase→`{:continue, _}` (`first_continue_for`) et le décodage de phase (`phase_from_string`) vivent dans
-  # `Pod.Recovery` ; `recover_or_init`/`init/1`/`clear_terminal_snapshot` appellent `Recovery.*`. Wrapper
-  # délégant CONSERVÉ avec @doc/@spec : le test `recovery_test.exs` exerce l'API publique
-  # `Fleet.Spawner.Pod.recovery_action/1`.
-  defdelegate recovery_action(phase), to: Recovery
 
   # session_id DÉTERMINISTE hexspeak calculé au spawn pour un rôle catalogué. La SOURCE du QUOI
   # (index de rôle, tier protégé, fleet-level) est le cap-profile (`metadata.role_index`/`protected`/
@@ -1160,27 +1093,6 @@ defmodule Fleet.Spawner.Pod do
       kick_ref: nil
     }
   end
-
-  @doc """
-  pod_dir d'un pod : `<pod_dir_root>/pod_<pod_id>` (clone git complet + `.lcars`/`.claude`/`tickets`).
-  Reconstructible du SEUL pod_id (le cap_profile N'ENTRE PAS dans le calcul) → c'est ce qui rend le GC
-  par scan possible (le `PodWarden` dérive le pod_dir à effacer depuis la tombstone). Délégation mince
-  vers `Fleet.Spawner.Pod.Paths.pod_dir/2` (résolution de chemins extraite) ; l'API publique
-  `Fleet.Spawner.Pod.pod_dir/2` reste appelée par le `PodWarden`, contrat préservé. Config
-  `:fleet_spawner, :pod_dir_root`, défaut `~/pods`.
-  """
-  @spec pod_dir(String.t(), keyword()) :: String.t()
-  def pod_dir(pod_id, opts \\ []) when is_binary(pod_id), do: Paths.pod_dir(pod_id, opts)
-
-  @doc """
-  Racine FS des snapshots `state.json` (`<root>/<scope>/<pod_id>/state.json`, scope ∈ {pipes,runs,pods}) :
-  base SCANNABLE des tombstones, balayée par le `PodWarden` pour GC les pod_dirs orphelins. Délégation
-  mince vers `Fleet.Spawner.Pod.Paths.state_fs_root/0` (résolution de chemins extraite) ; l'API publique
-  `Fleet.Spawner.Pod.state_fs_root/0` reste appelée par le `PodWarden`, contrat préservé. Config
-  `:fleet_spawner, :state_fs_root`, défaut `~/.lcars/state`.
-  """
-  @spec state_fs_root() :: String.t()
-  def state_fs_root, do: Paths.state_fs_root()
 
   # Accesseur UNIQUE du rôle (= metadata.name) pour TOUS les sites du pod (launch/payload/brief/
   # persistance state.json) : sans cette source unique, des défauts divergents inlinés ("engineer"
@@ -1362,17 +1274,6 @@ defmodule Fleet.Spawner.Pod do
     do: arm_managed_timer(state, :kick_ref, {:kick_attempt, n}, delay)
 
   defp cancel_kick(state), do: cancel_managed_timer(state, :kick_ref)
-
-  # `acked?/3` (décision PURE de stop de la boucle) vit dans `Pod.Kick` ; le handler appelle `Kick.acked?`.
-  # Wrapper délégant CONSERVÉ : le test `pod_test.exs` exerce l'API publique `Fleet.Spawner.Pod.acked?/3`.
-  @doc false
-  defdelegate acked?(pulled?, bootstrap?, polled), to: Kick
-
-  # `kick_keyword/2` (décision PURE du mot-clé) + `kick_send/2`/`do_send_keys/2` (I-O d'envoi) vivent dans
-  # `Pod.Kick` ; le handler appelle `Kick.kick_send`. Wrapper délégant CONSERVÉ : le test `pod_test.exs`
-  # exerce l'API publique `Fleet.Spawner.Pod.kick_keyword/2`.
-  @doc false
-  defdelegate kick_keyword(polled, fallback_on?), to: Kick
 
   defp inject_brief_to_tmux_pod(%{tmux_session: nil} = state), do: state
 

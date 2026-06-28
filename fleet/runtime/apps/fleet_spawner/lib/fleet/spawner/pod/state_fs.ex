@@ -12,10 +12,10 @@ defmodule Fleet.Spawner.Pod.StateFs do
     (post-ALLOCATE, transitions, `transition_failed`).
   - `clear_terminal_snapshot/3` — efface la tombstone d'un `pod_id` AVANT un (re)spawn délibéré (no-op si
     pas de snapshot, snapshot illisible, ou phase EN VOL — on ne touche QUE les tombstones terminales).
-    Appelé par `Fleet.Spawner.spawn_pod/3` via le wrapper `Pod.clear_terminal_snapshot/3`.
+    Appelé DIRECTEMENT par `Fleet.Spawner.spawn_pod/3` via `Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`.
   - `rm_terminal_artifacts/2` — efface les DEUX dossiers de l'empreinte disque d'un pod terminé (state-dir
     + pod_dir), geste PARTAGÉ appelé par `clear_terminal_snapshot/3` (local, même module) ET par le
-    `PodWarden` (GC périodique des tombstones orphelines) via le defdelegate `Pod.rm_terminal_artifacts/2`.
+    `PodWarden` (GC périodique des tombstones orphelines) via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`.
 
   Île d'I-O (File + Logger), pas de calcul pur : ne porte aucun state, aucun Port, aucun timer. Le `Pod`
   lui passe le `state` (write) ou `pod_id`/`cap_profile`/`opts` (clear/rm) en arguments ; le module ne
@@ -23,13 +23,14 @@ defmodule Fleet.Spawner.Pod.StateFs do
   chemins state.json/pod_dir), `Fleet.Spawner.Pod.Recovery` (`phase_from_string`) et `Fleet.CapProfile`
   (source unique du `name` du snapshot) — déjà des deps de l'app.
 
-  ## Contrat (appelé par `Pod`)
+  ## Contrat (appelants)
 
   - `write_state_fs/1` — appelé aux 4 sites internes du `Pod`.
-  - `clear_terminal_snapshot/3` — `Fleet.Spawner.Pod.clear_terminal_snapshot/3` garde un wrapper délégant
-    (valeur par défaut `opts \\ []`, appelé par `spawner.ex` ET le test `pod_test.exs`).
-  - `rm_terminal_artifacts/2` — `Fleet.Spawner.Pod.rm_terminal_artifacts/2` garde un defdelegate (appelé
-    par le `PodWarden`).
+  - `clear_terminal_snapshot/3` — appelé DIRECTEMENT via `Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`
+    (valeur par défaut `opts \\ []`) par `Fleet.Spawner.spawn_pod/3` ET le test `pod_test.exs` (plus de
+    wrapper délégant côté `Pod`).
+  - `rm_terminal_artifacts/2` — appelé DIRECTEMENT via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`
+    par le `PodWarden` (plus de defdelegate côté `Pod`).
   """
 
   require Logger

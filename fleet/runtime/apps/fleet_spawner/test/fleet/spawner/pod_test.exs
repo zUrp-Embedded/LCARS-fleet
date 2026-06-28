@@ -72,35 +72,35 @@ defmodule Fleet.Spawner.PodTest do
 
   describe "kick_keyword/2 (#5.2 — mot-clé du kick selon l'ACK)" do
     test "pas encore pollé → 'yop' (bootstrap-arm, JAMAIS gaté)" do
-      assert Fleet.Spawner.Pod.kick_keyword(false, true) == "yop"
-      assert Fleet.Spawner.Pod.kick_keyword(false, false) == "yop"
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true) == "yop"
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false) == "yop"
     end
 
     test "déjà pollé + knob on → 'wake' (fallback)" do
-      assert Fleet.Spawner.Pod.kick_keyword(true, true) == "wake"
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true) == "wake"
     end
 
     test "déjà pollé + knob off → nil (flag-only, pas de send-keys)" do
-      assert Fleet.Spawner.Pod.kick_keyword(true, false) == nil
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, false) == nil
     end
   end
 
   describe "acked?/3 (#5.2 F3 — le contrôle de la boucle = l'ACK, pas un proxy)" do
     test "wake : pull du mandat = ACK (peu importe polled)" do
-      assert Fleet.Spawner.Pod.acked?(true, false, false)
-      assert Fleet.Spawner.Pod.acked?(true, false, true)
+      assert Fleet.Spawner.Pod.Kick.acked?(true, false, false)
+      assert Fleet.Spawner.Pod.Kick.acked?(true, false, true)
     end
 
     test "bootstrap : poll = ACK (pas de mandat à puller, last_poll suffit)" do
-      assert Fleet.Spawner.Pod.acked?(false, true, true)
+      assert Fleet.Spawner.Pod.Kick.acked?(false, true, true)
     end
 
     test "bootstrap pas encore pollé → PAS d'ACK (on continue à kicker 'yop')" do
-      refute Fleet.Spawner.Pod.acked?(false, true, false)
+      refute Fleet.Spawner.Pod.Kick.acked?(false, true, false)
     end
 
     test "worker pas encore pull → PAS d'ACK même si pollé (polled ne compte QUE pour bootstrap)" do
-      refute Fleet.Spawner.Pod.acked?(false, false, true)
+      refute Fleet.Spawner.Pod.Kick.acked?(false, false, true)
     end
   end
 
@@ -1140,7 +1140,7 @@ defmodule Fleet.Spawner.PodTest do
       {:os_pid, os_pid} = Port.info(port, :os_pid)
       assert os_alive?(os_pid)
 
-      assert :ok = Fleet.Spawner.Pod.terminate_pod_port(port)
+      assert :ok = Fleet.Spawner.Pod.Backend.terminate_pod_port(port)
       Process.sleep(400)
       refute os_alive?(os_pid)
     end
@@ -1153,13 +1153,13 @@ defmodule Fleet.Spawner.PodTest do
       port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
       true = Port.close(port)
       # port maintenant fermé : un Port.close brut lèverait ArgumentError.
-      assert :ok = Fleet.Spawner.Pod.safe_port_close(port)
+      assert :ok = Fleet.Spawner.Pod.Backend.safe_port_close(port)
     end
 
     test "terminate_pod_port sur un port déjà fermé → :ok (idempotent teardown)" do
       port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
       true = Port.close(port)
-      assert :ok = Fleet.Spawner.Pod.terminate_pod_port(port)
+      assert :ok = Fleet.Spawner.Pod.Backend.terminate_pod_port(port)
     end
   end
 
@@ -1469,7 +1469,7 @@ defmodule Fleet.Spawner.PodTest do
       snap = write_snapshot!(tmp, pod_id, "succeeded")
       pod_dir = seed_pod_dir!(tmp, pod_id)
 
-      assert :ok = Fleet.Spawner.Pod.clear_terminal_snapshot(pod_id, valid_profile())
+      assert :ok = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, valid_profile())
 
       refute File.exists?(snap)
       refute File.exists?(pod_dir)
@@ -1481,7 +1481,7 @@ defmodule Fleet.Spawner.PodTest do
         snap = write_snapshot!(tmp, pod_id, phase)
         pod_dir = seed_pod_dir!(tmp, pod_id)
 
-        assert :ok = Fleet.Spawner.Pod.clear_terminal_snapshot(pod_id, valid_profile())
+        assert :ok = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, valid_profile())
         refute File.exists?(snap)
         refute File.exists?(pod_dir)
       end
@@ -1492,7 +1492,7 @@ defmodule Fleet.Spawner.PodTest do
       snap = write_snapshot!(tmp, pod_id, "monitoring")
       pod_dir = seed_pod_dir!(tmp, pod_id)
 
-      assert :ok = Fleet.Spawner.Pod.clear_terminal_snapshot(pod_id, valid_profile())
+      assert :ok = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, valid_profile())
 
       assert File.exists?(snap)
       assert File.exists?(pod_dir)
@@ -1500,7 +1500,10 @@ defmodule Fleet.Spawner.PodTest do
 
     test "no-op idempotent si aucun snapshot", %{tmp_dir: _tmp} do
       assert :ok =
-               Fleet.Spawner.Pod.clear_terminal_snapshot("issue-404-engineer", valid_profile())
+               Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(
+                 "issue-404-engineer",
+                 valid_profile()
+               )
     end
   end
 

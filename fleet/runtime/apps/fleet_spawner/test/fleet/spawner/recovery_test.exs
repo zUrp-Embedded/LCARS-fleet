@@ -3,7 +3,7 @@ defmodule Fleet.Spawner.RecoveryTest do
   # aucune mutation de config globale (le gate `:recovery_resume_enabled` a disparu).
   use ExUnit.Case, async: true
 
-  alias Fleet.Spawner.Pod
+  alias Fleet.Spawner.Pod.Recovery
 
   # `recovery_action/1` pure : la PHASE seule décide. Phase terminale → :release
   # (rien à relancer) ; tout le reste → :recreate (from scratch, session neuve).
@@ -13,21 +13,21 @@ defmodule Fleet.Spawner.RecoveryTest do
   # (re)spawn délibéré → décision explicite.
 
   test "phase terminale → :release (rien à relancer)" do
-    assert :release = Pod.recovery_action(:succeeded)
-    assert :release = Pod.recovery_action(:released)
-    assert :release = Pod.recovery_action(:killed)
+    assert :release = Recovery.recovery_action(:succeeded)
+    assert :release = Recovery.recovery_action(:released)
+    assert :release = Recovery.recovery_action(:killed)
   end
 
   test "phase :failed / :pending / ambiguë → :recreate (from scratch, session neuve)" do
-    assert :recreate = Pod.recovery_action(:failed)
-    assert :recreate = Pod.recovery_action(:pending)
-    assert :recreate = Pod.recovery_action(:allocating)
+    assert :recreate = Recovery.recovery_action(:failed)
+    assert :recreate = Recovery.recovery_action(:pending)
+    assert :recreate = Recovery.recovery_action(:allocating)
   end
 
   test "phase EN VOL → :recreate (backend mort sous :temporary, session morte irrécupérable)" do
-    assert :recreate = Pod.recovery_action(:launching)
-    assert :recreate = Pod.recovery_action(:monitoring)
-    assert :recreate = Pod.recovery_action(:extracting)
-    assert :recreate = Pod.recovery_action(:releasing)
+    assert :recreate = Recovery.recovery_action(:launching)
+    assert :recreate = Recovery.recovery_action(:monitoring)
+    assert :recreate = Recovery.recovery_action(:extracting)
+    assert :recreate = Recovery.recovery_action(:releasing)
   end
 end

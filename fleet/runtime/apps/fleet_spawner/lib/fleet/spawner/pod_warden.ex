@@ -17,11 +17,11 @@ defmodule Fleet.Spawner.PodWarden do
 
   Le pod_dir (`~/pods/pod_<id>`, clone git complet + `.lcars`/`.claude`/`tickets`) et son state-dir
   (`~/.lcars/state/<scope>/<id>/`) survivent comme TOMBSTONE après la mort du pod. Ils ne sont effacés
-  qu'au re-spawn du MÊME pod_id (`Fleet.Spawner.Pod.clear_terminal_snapshot/3`). Donc un worker
+  qu'au re-spawn du MÊME pod_id (`Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`). Donc un worker
   par-issue à usage unique — jamais re-mandaté — laisse son clone git sur disque POUR TOUJOURS :
   accumulation monotone. Ici on balaie les tombstones TERMINALES (phase `succeeded`/`released`/`killed`)
   et ORPHELINES (aucun Pod GenServer vivant) et on efface les deux dossiers via le geste partagé
-  `Fleet.Spawner.Pod.rm_terminal_artifacts/2` (le re-spawn re-clonerait FRESH de toute façon). Sûr car
+  `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2` (le re-spawn re-clonerait FRESH de toute façon). Sûr car
   le seed `--resume` vit dans le seed-store (`projects.work/<projet>/pods/`), PAS dans le pod_dir.
 
   ## Grace 2-tick (les deux duties)
@@ -45,13 +45,13 @@ defmodule Fleet.Spawner.PodWarden do
   use GenServer
   require Logger
 
-  alias Fleet.Spawner.Pod
+  alias Fleet.Spawner.Pod.{Paths, StateFs}
   alias Fleet.Spawner.PodTmux
 
   @default_interval_ms 60_000
 
   # Phases terminales d'un pod (le pod a FINI). Une tombstone dans l'une d'elles n'a plus rien à
-  # protéger → candidate au GC. Miroir du set lu par `Pod.clear_terminal_snapshot`/`recovery_action`
+  # protéger → candidate au GC. Miroir du set lu par `Pod.StateFs.clear_terminal_snapshot`/`Pod.Recovery.recovery_action`
   # (ici en strings car la phase vient du JSON brut du state.json — pas d'atome à matérialiser).
   @terminal_phases ~w(succeeded released killed)
 
@@ -151,23 +151,23 @@ defmodule Fleet.Spawner.PodWarden do
     e -> Logger.warning("PodWarden reap #{pod_id} échec (non-bloquant): #{inspect(e)}")
   end
 
-  # GC d'un pod_dir orphelin (mécanisme partagé avec Pod.clear_terminal_snapshot/3).
+  # GC d'un pod_dir orphelin (mécanisme partagé avec Pod.StateFs.clear_terminal_snapshot/3).
   defp gc_one(%{pod_id: pod_id, state_dir: state_dir, pod_dir: pod_dir}) do
     Logger.info("PodWarden: pod_dir orphelin GC : pod_#{pod_id}, libère #{pod_dir}")
-    Pod.rm_terminal_artifacts(state_dir, pod_dir)
+    StateFs.rm_terminal_artifacts(state_dir, pod_dir)
     :ok
   rescue
     e -> Logger.warning("PodWarden GC pod_#{pod_id} échec (non-bloquant): #{inspect(e)}")
   end
 
-  # Énumère les tombstones sous la racine GLOBALE des state.json (`Pod.state_fs_root/0` :
+  # Énumère les tombstones sous la racine GLOBALE des state.json (`Pod.Paths.state_fs_root/0` :
   # `<root>/<scope>/<pod_id>/state.json`). Pour chacune : le pod_id (= nom du dossier), sa phase (brute),
   # son state-dir (trouvé par le scan) et son pod_dir (dérivé du seul pod_id, cap_profile inutile). Une
   # entrée sans `state.json` lisible/décodable est ignorée — la phase est la SEULE preuve de terminalité,
   # donc on ne GC jamais un dossier qu'on ne peut pas confirmer terminal. rescue → [] : un FS cassé ne tue
   # pas le tick.
   defp scan_tombstones do
-    root = Pod.state_fs_root()
+    root = Paths.state_fs_root()
 
     for scope <- subdirs(root),
         pod_id <- subdirs(Path.join(root, scope)),
@@ -185,7 +185,7 @@ defmodule Fleet.Spawner.PodWarden do
 
     with {:ok, json} <- File.read(Path.join(state_dir, "state.json")),
          {:ok, %{"phase" => phase}} when is_binary(phase) <- Jason.decode(json) do
-      %{pod_id: pod_id, phase: phase, state_dir: state_dir, pod_dir: Pod.pod_dir(pod_id)}
+      %{pod_id: pod_id, phase: phase, state_dir: state_dir, pod_dir: Paths.pod_dir(pod_id)}
     else
       _ -> nil
     end

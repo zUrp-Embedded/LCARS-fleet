@@ -83,7 +83,7 @@ defmodule Fleet.Spawner do
           # précédent subsiste, `recover_or_init` la lirait → `:release` → stop MUET sans launch → boucle
           # orphelin côté poller. On efface la tombstone (state + pod_dir) AVANT spawn → init FRESH.
           # No-op si pas de snapshot / snapshot en vol (recovery :resume/:recreate intacte).
-          _ = Fleet.Spawner.Pod.clear_terminal_snapshot(pod_id, cap_profile, opts)
+          _ = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
 
           args = %{
             cap_profile: cap_profile,

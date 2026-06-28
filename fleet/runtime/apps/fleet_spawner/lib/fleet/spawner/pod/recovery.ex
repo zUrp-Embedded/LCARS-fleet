@@ -22,8 +22,8 @@ defmodule Fleet.Spawner.Pod.Recovery do
 
   ## Contrat (appelé par `Pod`)
 
-  - `recovery_action/1` — appelé par `recover_or_init` ; `Fleet.Spawner.Pod.recovery_action/1` garde un
-    wrapper délégant (le test `recovery_test.exs` exerce l'API publique).
+  - `recovery_action/1` — appelé par `recover_or_init` ; le test `recovery_test.exs` l'exerce DIRECTEMENT
+    via `Fleet.Spawner.Pod.Recovery.recovery_action/1` (plus de wrapper délégant côté `Pod`).
   - `apply_recovery/4` — appelé par `recover_or_init` (projette la décision dans le state).
   - `first_continue_for/1` — appelé par `init/1` (premier `{:continue, _}` de la state machine).
   - `phase_from_string/1` — appelé par `recover_or_init` ET `clear_terminal_snapshot`.

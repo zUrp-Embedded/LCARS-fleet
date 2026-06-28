@@ -30,9 +30,9 @@ defmodule Fleet.Spawner.Pod.Kick do
   - `kick_retry_ms/0` / `kick_max_attempts/0` / `kick_bootstrap_retry_ms/0` / `kick_bootstrap_max/0` —
     cadence + cap, branche wake vs bootstrap (appelés par le handler `handle_info({:kick_attempt, n}, ...)`).
   - `acked?/3` (décision PURE) — l'agent a-t-il tendu la main ? STOP de la boucle (appelé par le handler ;
-    `Fleet.Spawner.Pod.acked?/3` garde un wrapper délégant pour le test).
-  - `kick_keyword/2` (décision PURE) — mot-clé selon l'ACK (`yop`/`wake`/`nil`) (appelé par `kick_send` et,
-    via `Fleet.Spawner.Pod.kick_keyword/2` délégant, par le test).
+    le test l'exerce DIRECTEMENT via `Fleet.Spawner.Pod.Kick.acked?/3`, plus de wrapper délégant côté `Pod`).
+  - `kick_keyword/2` (décision PURE) — mot-clé selon l'ACK (`yop`/`wake`/`nil`) (appelé par `kick_send` ;
+    le test l'exerce DIRECTEMENT via `Fleet.Spawner.Pod.Kick.kick_keyword/2`, plus de wrapper délégant).
   - `kick_send/2` — choisit le mot-clé puis l'envoie au tmux du pod (appelé par le handler).
 
   `do_send_keys/2` est interne (appelé UNIQUEMENT par `kick_send`).
