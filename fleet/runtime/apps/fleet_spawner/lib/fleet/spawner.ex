@@ -49,6 +49,20 @@ defmodule Fleet.Spawner do
   require Logger
 
   @doc """
+  Valide qu'un `pod_id` est sûr comme composant de chemins et de noms de socket/session.
+
+  Le `pod_id` est interpolé dans le pod dir (`~/pods/pod_<id>`), le state FS,
+  les sockets tmux/MCP et les noms de session. Cette fonction est donc l'autorité
+  publique pour les frontières qui acceptent un `pod_id` fourni par un caller
+  externe ou inter-app.
+  """
+  @spec valid_pod_id?(term()) :: boolean()
+  def valid_pod_id?(id) when is_binary(id),
+    do: Regex.match?(~r/^[A-Za-z0-9._-]+$/, id) and not String.contains?(id, "..")
+
+  def valid_pod_id?(_), do: false
+
+  @doc """
   Spawn a new pod.
 
   ## Inputs
@@ -430,11 +444,4 @@ defmodule Fleet.Spawner do
 
   defp generate_pod_id, do: UUID.uuid4()
 
-  # pod_id path-safe (interpolé dans pod_dir / sock_path / state recovery — cf. Pod.pod_dir_for).
-  # Charset blanc [A-Za-z0-9._-] (couvre UUID, `permanent-<name>-<ts>`, `issue-<n>-<role>-<ts>`) + rejet
-  # explicite de `..` (seul construct traversal qui passerait le charset ; `/` est déjà hors charset).
-  defp valid_pod_id?(id) when is_binary(id),
-    do: Regex.match?(~r/^[A-Za-z0-9._-]+$/, id) and not String.contains?(id, "..")
-
-  defp valid_pod_id?(_), do: false
 end

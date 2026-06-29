@@ -1,7 +1,7 @@
 # Fleet.Spawner
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-28 (doc-rot F-019 : state_fs_root `~/.lcars/state`, `:token_arg` retiré, restart tous `:temporary`, recovery câblée release/resume/recreate)
+**Dernière révision** : 2026-06-29 (doc-rot F-019 : state_fs_root `~/.lcars/state`, `:token_arg` retiré, restart tous `:temporary`, recovery câblée release/resume/recreate)
 **Statut** : implémenté run #3.1 chantier #6, convergé ADR-G run #5 2026-06-01
 
 Pilote le lifecycle pod LCARS v2 (Ring 1 pod primitive). Cycle 8 phases
@@ -20,6 +20,8 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
 - `Fleet.Spawner.list_pods/0` — énumère les `:info` des pods vivants (read seam observabilité BL-026)
 - `Fleet.Spawner.count_pods/0` — nombre de pods actifs
 - `Fleet.Spawner.wake_pod/1` — kick « yop » host→pod (déclenche `get_task`)
+- `Fleet.Spawner.valid_pod_id?/1` — autorité publique du contrat `pod_id` path-safe (`[A-Za-z0-9._-]`,
+  sans `..`), utilisée aussi par les frontières qui acceptent un pod_id externe.
 - `Fleet.Spawner.restart_strategy_for/1` — retourne **`:temporary` pour TOUT scope** (le DynamicSupervisor ne ressuscite jamais un pod ; `lifetime_scope` pilote la RECOVERY, plus le restart)
 
 ## Architecture OTP

@@ -15,16 +15,16 @@ defmodule Fleet.Pilot.PodId do
   La feature-branch (`lcars/issue-N-role`) reste **repo-LOCALE** (elle vit DANS le repo → pas de
   collision) → NON scopée. pod_id et branche sont construits indépendamment depuis `(n, role)`.
 
-  Path-safe (charset `[A-Za-z0-9._-]`) car interpolé dans des paths FS / noms tmux.
+  Path-safe (contrat `Fleet.Spawner.valid_pod_id?/1`) car interpolé dans des paths FS / noms tmux.
   """
 
   @doc "pod_id producteur (keyé ISSUE) : `<repo-slug>-issue-<n>-<role>`."
   @spec for_issue(String.t(), integer() | String.t(), String.t()) :: String.t()
-  def for_issue(repo, n, role), do: "#{slug(repo)}-issue-#{n}-#{role}"
+  def for_issue(repo, n, role), do: Enum.join([slug(repo), "issue", component(n), component(role)], "-")
 
   @doc "pod_id juge (keyé PR) : `<repo-slug>-pr-<n>-<role>`."
   @spec for_pr(String.t(), integer() | String.t(), String.t()) :: String.t()
-  def for_pr(repo, n, role), do: "#{slug(repo)}-pr-#{n}-#{role}"
+  def for_pr(repo, n, role), do: Enum.join([slug(repo), "pr", component(n), component(role)], "-")
 
   @doc """
   pod_id PROJET (keyé repo SEUL, sans numéro) : `<repo-slug>-<role>`. Pour les rôles `slot_scope:
@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.PodId do
   contient jamais `-issue-`/`-pr-` → pas de collision avec un id d'instance.
   """
   @spec for_repo(String.t(), String.t()) :: String.t()
-  def for_repo(repo, role) when is_binary(role), do: scope_prefix(repo) <> role
+  def for_repo(repo, role) when is_binary(role), do: scope_prefix(repo) <> component(role)
 
   @doc """
   Préfixe de scope REPO d'un pod_id : `<repo-slug>-`. C'est l'ANCRE qui qualifie une clé de
@@ -47,9 +47,19 @@ defmodule Fleet.Pilot.PodId do
   def scope_prefix(repo) when is_binary(repo), do: "#{slug(repo)}-"
 
   # `owner/name` → `owner-name` ; tout char hors-charset path-safe → `-`.
+  # Les runs de `.` sont réduits pour satisfaire le contrat spawner (`..` interdit
+  # même si le charset l'autorise).
   defp slug(repo) when is_binary(repo) do
     repo
     |> String.replace("/", "-")
+    |> component()
+  end
+
+  defp component(n) when is_integer(n), do: Integer.to_string(n)
+
+  defp component(value) when is_binary(value) do
+    value
     |> String.replace(~r/[^A-Za-z0-9._-]/, "-")
+    |> String.replace(~r/\.{2,}/, ".")
   end
 end

@@ -36,6 +36,10 @@ defmodule Fleet.Pilot.MixProject do
     [
       {:fleet_event_router, in_umbrella: true},
       {:fleet_pipeline, in_umbrella: true},
+      # `fleet_pilot` pilote le rail forge-driven en s'appuyant sur le spawner réel
+      # (wake/kill/pod_info/reprovision et contrat pod_id). Dépendance directe :
+      # le couplage existe dans le code, donc il doit être visible au build graph.
+      {:fleet_spawner, in_umbrella: true},
       # Z4 — `Fleet.Credentials.ForgeIdentity` (allowed_emails F-01 = l'humain du mandat).
       {:fleet_credentials, in_umbrella: true},
       # `Fleet.CapProfile.deliverable_mode` : classer producteur (git_native) / juge

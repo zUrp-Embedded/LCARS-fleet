@@ -218,12 +218,9 @@ defmodule Fleet.API.Rest do
   defp maybe_put_opts(payload, opts), do: Map.put(payload, "opts", opts)
 
   # Même contrat que `Fleet.Spawner` : un pod_id est interpolé dans des paths FS (`~/pods/pod_<id>`),
-  # donc seul un charset path-safe sans remontée `..` est admis. Dupliqué ici (frontière API) plutôt que
-  # d'exposer la fonction privée du spawner — la règle est une constante de sécurité, pas une logique.
-  defp valid_pod_id?(id) when is_binary(id),
-    do: Regex.match?(~r/^[A-Za-z0-9._-]+$/, id) and not String.contains?(id, "..")
-
-  defp valid_pod_id?(_), do: false
+  # donc seul un charset path-safe sans remontée `..` est admis. L'autorité de cette règle vit côté
+  # spawner, qui possède les chemins et sockets dérivés du pod_id ; l'API ne recopie pas la regex.
+  defp valid_pod_id?(id), do: Fleet.Spawner.valid_pod_id?(id)
 
   # Résout le cap-profile demandé (`cap_profile_name` ou `role`, mêmes clés que
   # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing}` (400) ; load KO →

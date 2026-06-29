@@ -33,9 +33,17 @@ defmodule Fleet.Pilot.PodIdTest do
     assert id == "owner-repo.name-issue-2-reviewer"
     refute id =~ "/"
     assert id =~ ~r/\A[A-Za-z0-9._-]+\z/
+    assert Fleet.Spawner.valid_pod_id?(id)
 
     # un char exotique (espace) est neutralisé en `-` (jamais dans un path/nom tmux)
     assert PodId.for_issue("a/b c", 1, "x") == "a-b-c-issue-1-x"
+  end
+
+  test "slug neutralise aussi `..`, interdit par le contrat pod_id du spawner" do
+    id = PodId.for_issue("owner/../repo", 2, "reviewer")
+
+    refute id =~ ".."
+    assert Fleet.Spawner.valid_pod_id?(id)
   end
 
   test "déterministe (BL-055) : mêmes (repo, n, role) → même id (le re-dispatch retombe sur le pod)" do

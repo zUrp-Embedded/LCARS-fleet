@@ -107,6 +107,16 @@ defmodule Fleet.SpawnerTest do
   end
 
   describe "R18 — refus spawn one-shot sans mandat" do
+    test "valid_pod_id?/1 est l'autorité publique du charset pod_id" do
+      for ok <- ["pod-1", "permanent-architect", "repo.issue_1-role", UUID.uuid4()] do
+        assert Fleet.Spawner.valid_pod_id?(ok), "pod_id #{inspect(ok)} devrait être accepté"
+      end
+
+      for bad <- ["../etc/passwd", "a/b", "..", "pod_..", "x y", "", nil, 42] do
+        refute Fleet.Spawner.valid_pod_id?(bad), "pod_id #{inspect(bad)} devrait être refusé"
+      end
+    end
+
     test "one-shot + pas de mandat → {:error, :mandate_required}" do
       assert {:error, :mandate_required} =
                Fleet.Spawner.spawn_pod(valid_profile(), "ticket-no-mandate")
