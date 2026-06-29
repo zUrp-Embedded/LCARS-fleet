@@ -1,94 +1,88 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-29
-**Statut** : guide runtime v2 (salvage cow-boy).
+**Dernière révision** : 2026-06-29 (expurgé : data dupliquée sortie vers ses sources, fonction primaire = guide de navigation)
+**Statut** : guide runtime v2.
 **Référencé par** : —
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Ce fichier oriente un agent (Claude Code) dans ce dépôt : où vivent les choses, les invariants à ne pas casser, les conventions. Il ne recopie PAS ce qui a une source de vérité ailleurs (env vars, contrats d'app) — il y pointe.
 
 ## Project
 
-LCARS Fleet runtime — Elixir/OTP umbrella implementing the LCARS v2 fleet runtime (launched per-human via `bin/fleet_v2`). It is the runtime layer of the larger LCARS project at `/home/projects/LCARS/`; design notes that drive each app live in `04_design-notes/` (one per "chantier"). Each app under `apps/fleet_*/` corresponds to a numbered chantier (e.g. `fleet_api` = chantier 15, the launch substrate `bin/fleet_v2` = chantier 16) and its `README.md` is the canonical contract.
+LCARS Fleet runtime — umbrella Elixir/OTP, couche runtime du projet LCARS (`/home/projects/LCARS/`), lancée par humain via `bin/fleet_v2`. Les design-notes qui pilotent chaque app vivent dans `04_design-notes/` (une par « chantier »). Chaque app `apps/fleet_*/` correspond à un chantier numéroté, et **son `README.md` est le contrat canonique** (sous-modules, API publique, knobs de config, dépendances). Pour comprendre une app, lis son README d'abord.
 
 ## Build / test / release
 
 ```bash
 mix deps.get
-mix compile --warnings-as-errors    # required gate
-mix test                            # full umbrella
+mix compile --warnings-as-errors    # gate obligatoire
 
-mix test apps/fleet_api             # one app
-mix test apps/fleet_api/test/fleet/api/rest_test.exs:42   # single test (line number)
+mix test                            # umbrella complet
+( cd apps/fleet_api && mix test )   # une app — ⚠ PAS `mix test apps/fleet_api` depuis la racine
+                                    #   (Mix n'y trouve aucun fichier de test → 0 lancé = faux-vert)
+( cd apps/fleet_api && mix test test/fleet/api/rest_test.exs:42 )   # un seul test (n° de ligne)
 
-MIX_ENV=prod mix release            # builds _build/prod/rel/fleet_umbrella (self-contained, ERTS bundled)
+MIX_ENV=prod mix release            # _build/prod/rel/fleet_umbrella (self-contained, ERTS bundlé)
 ```
 
-Elixir `~> 1.18`. Release tag is `fleet_umbrella` and includes all apps as `:permanent` (see `mix.exs`).
-
-Deploy/run procedure (launch via `bin/fleet_v2`, env file, launcher install) is in `etc/README.md` — do not re-derive it.
+Elixir `~> 1.18`. Le release `fleet_umbrella` embarque toutes les apps en `:permanent` (cf. `mix.exs`). La procédure deploy/run (lancement `bin/fleet_v2`, env file, install des launchers) est dans `etc/README.md` — ne pas la re-dériver.
 
 ## Architecture
 
-### Umbrella layout
+### Umbrella + rings
 
-15 apps under `apps/fleet_*/`, each a normal OTP app with `lib/fleet/<name>/application.ex` as its supervisor entry. Shared `config/` lives at the umbrella root.
+Les apps `apps/fleet_*/` (chacune un OTP app normal, `lib/fleet/<name>/application.ex` = son superviseur) sont étagées en **rings** (couches de substrat, déclarées dans chaque README). De bas en haut :
 
-Apps are grouped into **rings** (substrate layering, declared in each README under "Frontière vendor"):
-- **Ring 0** — OS substrate: per-human launch via `bin/fleet_v2` (chantier 16, in `etc/` + `bin/`, not an app; the `User=lcars` systemd unit was retired 2026-06-16 — model = human-launches, ADR-E)
-- **Ring 1** — pod primitives + vendor frontier: `fleet_spawner`, `fleet_credentials`, `fleet_cap_profile`, `fleet_sp_builder`, `fleet_project_bootstrap`, plus `bin/bwrap_launch.sh` + `bin/host_launch.sh` (launchers N0 containment, sélectionnés par `metadata.containment` — LAUNCH-Q) + `bin/claude_launch.sh` (launcher vendor N1). (`fleet_pod_runtime` retiré 2026-06-10 — app morte post-ADR-G, PODRT-D1.) (La frontière vendor N1 = ces scripts `bin/` ; il n'y a **pas** d'app `fleet_claude_bridge` — retirée au pivot ADR-G. Noms corrigés 2026-06-02 : `fleet_cap_profile`/`fleet_sp_builder`, pas `fleet_capprofile`/`fleet_spbuilder`.)
-- **Ring 2** — orchestration backbone: `fleet_event_router` (Phoenix.PubSub bus `Fleet.PubSub` on topic `fleet.events`), `fleet_task_queue` (broker de mandats — `get_task`/`submit_result`, run #5), `fleet_pilot` (dispatcher webhook→pipeline, off par défaut — **client du core**, dépend compile-time du Ring 3 `fleet_pipeline` ; pas backbone pur, cf. son README « client du core ring 1, pas core »). (`fleet_ipc_filter` retiré : jamais implémenté.) **`fleet_task_monitor` n'est PAS backbone actif** : app dormante — son GenServer n'est démarré nulle part (`:start_monitor` n'est jamais posé `true`, ni runtime.exs ni ailleurs) et il mapperait des events sans producteur câblé. Le rôle read-model/observabilité est tenu par `fleet_observation` (Ring 4). Candidat suppression/recâblage au ménage final d'observabilité.
-- **Ring 3** — coordination + policy: `fleet_coord`, `fleet_pipeline`, `fleet_starfleet` (Cat-5 audit), `fleet_mcp`
-- **Ring 4** — external surface: `fleet_api` (REST `:8080` + WS `/ws`, **no-auth** par design — frontière = isolation réseau/container, cf. `Fleet.API.Rest` § Auth) ; `fleet_observation` (read-only observation deck `:8091`, BL-026 — dépend vers le bas Ring 1/2/3, aucune app du core ne dépend de lui)
+- **Ring 0 — substrat OS** : lancement per-humain via `bin/fleet_v2` (dans `etc/` + `bin/`, pas une app). Modèle = **l'humain lance sa fleet** (pas de service systemd `User=lcars`).
+- **Ring 1 — primitives pod + frontière vendor** : `fleet_spawner`, `fleet_credentials`, `fleet_cap_profile`, `fleet_sp_builder`, `fleet_project_bootstrap` + les launchers shell `bin/` (voir Pod sandboxing).
+- **Ring 2 — backbone d'orchestration** : `fleet_event_router` (bus PubSub `fleet.events`), `fleet_task_queue` (broker de mandats `get_task`/`submit_result`), `fleet_pilot` (dispatcher forge→pipeline, off par défaut — **client du core**, dépend du Ring 3 `fleet_pipeline`). `fleet_task_monitor` est **dormant** (jamais démarré ; le read-model/observabilité est tenu par `fleet_observation`) — candidat suppression.
+- **Ring 3 — coordination + policy** : `fleet_coord`, `fleet_pipeline`, `fleet_starfleet` (audit), `fleet_mcp`.
+- **Ring 4 — surface externe** : `fleet_api` (REST + WS, **no-auth par design** — la frontière est l'isolation réseau/container, cf. `Fleet.API.Rest` § Auth) ; `fleet_observation` (observation deck read-only — dépend vers le bas, rien du core ne dépend de lui).
 
-### Vendor frontier (N0 / N1)
+Les ports et chemins concrets sont posés par `bin/fleet_v2` / lus dans `config/runtime.exs` — pas listés ici.
 
-Anything that talks to a specific vendor (Claude SDK, future OpenAI) is **N1** and isolated behind a shell launcher in `bin/` (`claude_launch.sh` — there is **no** `fleet_claude_bridge` app; the N1 frontier IS the `bin/` script, ADR-G). Everything else is **N0** (vendor-agnostic). New vendor → new `bin/<vendor>_launch.sh` co-located with `claude_launch.sh`, same arg shape, **never** edit `bwrap_launch.sh`. Mixing vendor flags into N0 code breaks the contract.
+### Frontière vendor (N0 / N1)
+
+Tout ce qui parle à un vendor précis (Claude SDK, futur OpenAI) est **N1**, isolé derrière un launcher shell dans `bin/` (`claude_launch.sh`). **Il n'y a pas d'app `fleet_claude_bridge` : la frontière vendor N1 EST le script `bin/`.** Tout le reste est **N0** (vendor-agnostic). Nouveau vendor → nouveau `bin/<vendor>_launch.sh` co-localisé, même forme d'arguments. Mélanger des flags vendor dans du code N0 casse le contrat.
 
 ### Pod sandboxing
 
-Pods (per-role agent processes) are launched via one of two N0 launchers, chosen by `metadata.containment` in `do_launch` (LAUNCH-Q): `bwrap_launch.sh` (default, `containment: bwrap` — bwrap sandbox, RO mounts + tmpfs /home + bind credentials) or `host_launch.sh` (`containment: none` — architect-interactive, starfleet — same tmux-holder mechanism **without** the sandbox: the pod runs on the host as the human, `HOME` = real home → native `~/.claude`). Both `exec`/run the vendor launcher (`claude_launch.sh`). **Never edit `bwrap_launch.sh`** (sanctuaire); a new containment need = a new co-located N0 launcher, same arg shape. bwrap needs `@mount @namespace` syscalls (`unshare`/`mount`/`setns`/`pivot_root`) — the **container** must grant them (cap-add/seccomp); the retired systemd unit used to. Pod working dirs default to **`/home/<human>/pods/pod_<id>`** (per-human, `0700`, ADR-E — the pod lives under the owning human's home, isolated by OS ownership; **not** a shared `/home/pods`/`/var/lib/lcars/pods`). Not under `/tmp` (bwrap tmpfs would orphan writes). The pod runs *as* the human by **UID inheritance**: the BEAM is launched as the human (`bin/fleet_v2`, or `sshd` in the container) → the pod Port inherits the UID — **no** `systemd-run --uid`, no drop (proven live 2026-06-15).
+Un pod (process agent par rôle) est lancé par l'un des deux launchers N0, choisi par `metadata.containment` du cap-profile :
+- `bin/bwrap_launch.sh` (défaut, `containment: bwrap`) — sandbox bwrap (mounts RO + tmpfs `/home` + bind credentials). **Ne JAMAIS éditer `bwrap_launch.sh` (sanctuaire)** : un nouveau besoin de containment = un nouveau launcher N0 co-localisé, même forme d'arguments.
+- `bin/host_launch.sh` (`containment: none`) — même mécanique tmux **sans** sandbox : le pod tourne sur l'hôte *comme* l'humain (`HOME` = home réel → `~/.claude` natif). Pour l'architecte-interactif / starfleet.
 
-### Event bus
+Les deux `exec` le launcher vendor `claude_launch.sh`. Le pod tourne *comme* l'humain par **héritage d'UID** : le BEAM est lancé par l'humain → le Port du pod hérite l'UID (pas de `systemd-run --uid`, pas de drop). Le pod_dir est **`/home/<humain>/pods/pod_<id>`** (per-humain, `0700`, isolé par l'ownership OS — pas un dossier partagé, pas sous `/tmp` que le tmpfs bwrap orphelinerait). bwrap exige les syscalls `unshare`/`mount`/`setns`/`pivot_root` → le **container** doit les accorder (cap-add/seccomp).
 
-`Fleet.EventRouter.Bus` (Phoenix.PubSub) is the single broadcast/subscribe substrate. Apps publish to `fleet.events` and consume via `subscribe/1`. In `:test` env hermeticity comes from consumers being off plus `fleet_event_router, load_event_registry: false` (Bus broadcasts skip validation), not a backend swap (see "Test hermeticity" below).
+### Bus d'événements
+
+`Fleet.EventRouter.Bus` (Phoenix.PubSub) est l'unique substrat broadcast/subscribe. Les apps publient sur `fleet.events` et consomment via `subscribe/1`. En `:test`, l'hermétisme vient des consumers coupés + `load_event_registry: false` (le Bus skip la validation), pas d'un backend de remplacement (cf. Test hermeticity).
 
 ## Configuration layering
 
-Three config files, evaluated in this order:
+Trois fichiers de config, évalués dans cet ordre :
 
-1. `config/config.exs` — compile-time defaults (sets prod/dev event backend to `PubSub`)
-2. `config/<env>.exs` — `test.exs` overrides for hermetic tests (StubBackend launcher, consumers off, `load_event_registry: false`, `start_listener: false`)
-3. `config/runtime.exs` — boot config, reads env vars from the human's run env (`~/.lcars/fleet_v2.env`, posed by `bin/fleet_v2`)
+1. `config/config.exs` — défauts compile-time (backend event = PubSub en prod/dev).
+2. `config/<env>.exs` — `test.exs` pose le baseline hermétique (StubBackend, consumers off, `load_event_registry: false`, `start_listener: false`).
+3. `config/runtime.exs` — config de boot, lit les env vars de l'env humain (`~/.lcars/fleet_v2.env`, posé par `bin/fleet_v2`). **C'est la source de vérité des env vars** ; le catalogue complet (noms + valeurs par défaut) est dans `etc/fleet_v2.env.template`.
 
-**Critical invariant** in `config/runtime.exs`: the entire file is wrapped in `if config_env() != :test do ... end`. Without that guard, `mix test` reads runtime.exs (Mix evaluates it in every env), flips `start_listener: true`, and Cowboy tries to bind `:8080` → umbrella boot crash. If you add runtime config, keep it inside the guard unless you genuinely want test eval.
+**Invariant critique** dans `config/runtime.exs` : tout le fichier est wrappé dans `if config_env() != :test do … end`. Sans ce garde, `mix test` évalue runtime.exs (Mix le lit dans tous les envs), met `start_listener: true`, et Cowboy tente de bind le port → crash du boot umbrella. Toute config runtime ajoutée reste DANS le garde, sauf si tu veux vraiment l'éval en test.
 
-Env vars consumed at boot (source of truth: `config/runtime.exs`, all guarded out of `:test`; template: `etc/fleet_v2.env.template`). `bin/fleet_v2` poses the per-human ports + on-switches; everything else defaults under `~/.lcars/*`.
-
-**Active** (grouped by domain):
-- Logger / catalogues: `LCARS_LOG_LEVEL`, `LCARS_CAPPROFILES_ROOT`, `LCARS_PIPELINES_ROOT`, `LCARS_WORKSPACES_ROOT`, `LCARS_COORD_POLICIES_PATH`, `LCARS_STARFLEET_AUDIT_LOG`.
-- Ports / listeners: `FLEET_API_PORT`, `LCARS_OBSERVATION_PORT`, `LCARS_FLEET_WEBHOOKS` (+ `LCARS_FLEET_WEBHOOK_PORT`), `FLEET_WEBHOOK_SECRET_PATH`.
-- Pods / boot / kick: `LCARS_BOOT_PERMANENT_AT_START`, `LCARS_STATE_PATH` (task-queue state), `LCARS_STATE_FS_ROOT` (pod recovery state), `LCARS_SEED_STORE_ROOT`, `LCARS_KICK_FIRST_DELAY_MS` / `_RETRY_MS` / `_MAX_ATTEMPTS`.
-- Sockets transport: `LCARS_TMUX_SOCK_BASE` (tmux socket per-pod), `LCARS_FLEET_MCP_SOCK_BASE` (MCP AF_UNIX socket per-pod), `LCARS_FLEET_MCP_BRIDGE_PATH` (stdio→socket bridge path, gates `mcp_server_spec`).
-- Launchers (absolute paths): `LCARS_BWRAP_LAUNCH_PATH`, `LCARS_HOST_LAUNCH_PATH`, `LCARS_CLAUDE_LAUNCH_PATH`.
-- Pilot / forge: `FORGE_BASE_URL` (required when stage-mode is on), `FORGE_TOKEN` / `FORGE_TOKEN_FILE` / `FORGE_PUSH_TOKEN`, `FORGE_BOT_LOGIN`, `FORGE_ROLE_TOKENS_DIR`, `LCARS_PILOT_STAGE` (on-switch), `LCARS_PILOT_POLL_INTERVAL_MS`, `LCARS_PILOT_POLL_REPO` (legacy/test override only — real discovery is by forge topic, **not** required).
-
-**Retired / forbidden** (do NOT reintroduce — each was removed because it had no reader or was unsafe): `LCARS_FLEET_MCP_URL` and `LCARS_FLEET_MCP_POD_FACING_PORT` (the shared HTTP-loopback MCP transport — replaced by the per-pod AF_UNIX socket); `LCARS_PILOT_DISPATCHER` + `LCARS_PILOT_ROUTING_PATH` (legacy AutoDispatcher rail + `forge-routing.yaml`, both deleted); `LCARS_PILOT_STAGE_ROUTING` (label routing retired — routing lives in the route-comment); `LCARS_HOP_REMOTE` (push remote is per-hop now); `LCARS_CREDENTIALS_ROOT` (ADR-F: no vault); `LCARS_PODS_ROOT` / `LCARS_POD_HUMAN` (pod_dir + human derived from the runtime UID, never config); `LCARS_LAUNCH_BACKEND` / `LCARS_UNSAFE_ALLOW_HOST_TMUX` (the off-bwrap TmuxBackend was removed).
+Plusieurs env vars ont été **retirées** (plus aucun lecteur, ou dangereuses) — ne pas les réintroduire : le transport MCP HTTP-loopback partagé (remplacé par une socket AF_UNIX par-pod), le vault de credentials, le routing par label, le drop-UID / TmuxBackend hors-bwrap. Le modèle actuel (socket par-pod, UID runtime hérité) les remplace.
 
 ## Test hermeticity
 
-`config/test.exs` enforces a hermetic baseline that other tests rely on. Do not weaken it:
+`config/test.exs` impose un baseline hermétique dont les autres tests dépendent. Ne pas l'affaiblir :
 
-- `fleet_api, start_listener: false` — tests use `Plug.Test` for REST and direct Cowboy handler callbacks for WS, never a real socket
-- consumers off (`start_*: false`) + `fleet_event_router, load_event_registry: false` — no parasitic Bus broadcasts in async tests
-- `fleet_spawner, launch_backend: StubBackend` — no real bwrap spawn; tests re-set in `setup` and **do not** delete in `on_exit` (other tests rely on the default)
-- `fleet_starfleet, start_audit_consumer: false` + `start_boot_orchestrator: false`, `fleet_spawner, start_publish_consumer: false` — consumers off by default; tests that need them start manually with isolated opts
+- `fleet_api, start_listener: false` — les tests REST passent par `Plug.Test`, WS par callbacks Cowboy directs, jamais une vraie socket.
+- consumers off (`start_*: false`) + `load_event_registry: false` — pas de broadcast Bus parasite en async.
+- `fleet_spawner, launch_backend: StubBackend` — pas de vrai spawn bwrap ; les tests le re-posent en `setup` et **ne le suppriment pas** en `on_exit` (d'autres tests comptent sur le défaut).
+- `fleet_starfleet, start_audit_consumer: false` + `start_boot_orchestrator: false`, `fleet_spawner, start_publish_consumer: false` — consumers off par défaut ; un test qui en a besoin le démarre manuellement avec des opts isolés.
 
-When a test needs the real backend, it instantiates it directly (e.g. `start_supervised` with explicit args), it does not flip the global config.
+Quand un test a besoin du vrai backend, il l'instancie directement (`start_supervised` avec args explicites), il ne flippe pas la config globale.
 
 ## Code conventions
 
-- Each app's `README.md` is the **contract**: list of submodules, public API, configuration knobs, dependencies. When adding modules, update the README.
-- Header comments at the top of shell scripts use the LCARS format (`SOURCE: / AUTHOR: / STARDATE: / STATUS:`). Stardate gets updated by the `/push-github` skill — don't hand-edit it before pushing.
-- **Self-contained comments (passe 3 canon, 2026-06-24)**: a comment must be understandable by reading THIS file alone — no cryptic tags (`#578`, `BL-050`, `I-CBC`, `ADR-G`, grid codes like `A2.1`/`D2`…) and no pointer to the specs. Inline the WHY / the invariant / the gotcha in plain words; the code IS the doc (primary reader = an agent). When you write a new comment, carry the meaning, not an incident coordinate. (The old "keep the incident reference, it's load-bearing" rule is retired — the de-referencing decoder lives in the `beyond/` archive if ever needed.)
-- `apps/*/tmp/` is gitignored ExUnit `@tag :tmp_dir` artefacts — never check in.
+- Le `README.md` de chaque app est le **contrat** (sous-modules, API publique, knobs de config, dépendances). Quand tu ajoutes un module, mets à jour le README.
+- En-têtes des scripts shell au format LCARS (`SOURCE: / AUTHOR: / STARDATE: / STATUS:`). La stardate est posée par la skill `/push-github` — ne pas l'éditer à la main avant de pousser.
+- **Commentaires self-contained** : un commentaire doit se comprendre en lisant CE fichier seul — pas de tag cryptique (`#578`, `BL-050`, codes de grille…) ni de pointeur vers les specs. Inline le POURQUOI / l'invariant / le piège en clair ; le code EST la doc (lecteur primaire = un agent). Porte le sens, pas une coordonnée d'incident.
+- `apps/*/tmp/` = artefacts ExUnit `@tag :tmp_dir` gitignorés — ne jamais committer.
