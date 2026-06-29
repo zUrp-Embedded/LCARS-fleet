@@ -63,6 +63,16 @@ defmodule Fleet.Spawner do
   def valid_pod_id?(_), do: false
 
   @doc """
+  Règle R18 : un cap-profile one-shot exige un mandat. Autorité partagée (mandate_guard +
+  les frontières qui valident à l'admission, ex. l'API). nil/absent → false (exempté),
+  comme mandate_guard.
+  """
+  @spec mandate_required?(Fleet.CapProfile.t()) :: boolean()
+  def mandate_required?(%Fleet.CapProfile{spec: spec}) do
+    get_in(spec, ["invocation", "lifetime_scope"]) == "one-shot"
+  end
+
+  @doc """
   Spawn a new pod.
 
   ## Inputs
@@ -151,7 +161,7 @@ defmodule Fleet.Spawner do
   # claude attend → timeout). Les pods long-lived (`forever`/`run`/`pipe`) pullent leurs
   # tâches via MCP (`yop` → get_task) → exemptés (épargne les pods permanents/gatekeeper).
   # Échappatoire admin/diagnostic explicite : `opts[:allow_no_mandate]`.
-  defp mandate_guard(%Fleet.CapProfile{spec: spec}, opts) do
+  defp mandate_guard(%Fleet.CapProfile{spec: spec} = cap_profile, opts) do
     mandate = Keyword.get(opts, :mandate)
     # `nil` ET `""` (mandat vide — ex. un `build_mandate` sur un contexte de stage
     # vide/malformé) comptent tous deux comme « pas de mandat ».
@@ -165,7 +175,10 @@ defmodule Fleet.Spawner do
       Keyword.get(opts, :allow_no_mandate, false) ->
         :ok
 
-      scope == "one-shot" ->
+      # Même verdict que `scope == "one-shot"`, mais via le prédicat PUBLIC partagé
+      # `mandate_required?/1` (autorité unique de la règle one-shot→mandat, aussi appelée
+      # à l'admission par l'API) → pas de règle dupliquée qui pourrait diverger.
+      mandate_required?(cap_profile) ->
         # Diagnosable (pas un refus muet) : distingue clairement le cas.
         Logger.warning(
           "Fleet.Spawner.spawn_pod refusé (R18) : pod one-shot sans mandat — " <>
@@ -443,5 +456,4 @@ defmodule Fleet.Spawner do
   end
 
   defp generate_pod_id, do: UUID.uuid4()
-
 end

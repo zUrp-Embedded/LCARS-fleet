@@ -22,6 +22,10 @@ par pod, via le GenServer `Fleet.Spawner.Pod` (`handle_continue/2`).
 - `Fleet.Spawner.wake_pod/1` — kick « yop » host→pod (déclenche `get_task`)
 - `Fleet.Spawner.valid_pod_id?/1` — autorité publique du contrat `pod_id` path-safe (`[A-Za-z0-9._-]`,
   sans `..`), utilisée aussi par les frontières qui acceptent un pod_id externe.
+- `Fleet.Spawner.mandate_required?/1` — **autorité publique de la règle R18** (un cap-profile `one-shot`
+  exige un mandat). Même lecture `get_in` nil-aware que `mandate_guard` (scope absent → `false`, exempté).
+  Appelée par `mandate_guard` au spawn ET par les frontières qui valident à l'admission (ex. `fleet_api`
+  `/api/admin/spawn`) → règle non dupliquée, pas de divergence.
 - `Fleet.Spawner.restart_strategy_for/1` — retourne **`:temporary` pour TOUT scope** (le DynamicSupervisor ne ressuscite jamais un pod ; `lifetime_scope` pilote la RECOVERY, plus le restart)
 
 ## Architecture OTP

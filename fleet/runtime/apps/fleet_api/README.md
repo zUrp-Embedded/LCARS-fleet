@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-27 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
+**Dernière révision** : 2026-06-29 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -46,7 +46,7 @@ pilotables depuis l'API. Le DTO public est donc **plat et explicite** :
 |---|---|---|
 | `cap_profile_name` / `role` | string (l'un des deux, requis) | profil de capacités (validé : 400 si absent, 422 si inconnu, **422 si host-native**) |
 | `ticket_id` | string | corrélation forge/event |
-| `mandate` | string | le travail du pod ; **replacé dans l'`opts` interne construit par l'API** |
+| `mandate` | string | le travail du pod ; **replacé dans l'`opts` interne construit par l'API** ; **requis** pour un cap-profile `one-shot` (422 sinon — miroir R18) |
 | `pod_id` | string path-safe | identifiant imposé (admin) ; accepté **uniquement** si `[A-Za-z0-9._-]` sans `..`, sinon 422 |
 
 Toute clé top-level **hors** de cette liste (y compris un `opts` brut fourni par le client) → **422** avant
@@ -61,6 +61,13 @@ cap-profile, `Fleet.CapProfile.containment(cap)` doit valoir `"bwrap"` ; sinon *
 avant tout broadcast — aucun pod hôte ne peut naître via l'API. Le host-native garde sa voie dédiée hors-bande
 (starfleet / `bin/host_launch.sh`), jamais cette API. Source unique de containment partagée avec le spawner
 (`Fleet.CapProfile.containment/1`) → l'API et le lancement réel ne peuvent pas diverger de verdict.
+
+**Mandat requis pour un one-shot (miroir R18).** Un cap-profile `one-shot` (reviewer/qualifier/consultant)
+lancé SANS `mandate` partirait sans travail → le spawner le refuse (`mandate_required`, ZÉRO pod). Sans garde
+à l'admission, le 202 « mis en file » serait un **202 menteur** (jumeau du cap-profile menteur). L'API vérifie
+donc à l'admission : `Fleet.Spawner.mandate_required?(cap) and not has_mandate?` → **422** avant tout broadcast.
+`mandate_required?/1` est l'**autorité partagée** (même lecture que `mandate_guard`) → pas de règle dupliquée.
+Un one-shot légitime porte son `mandate` dans le DTO → il passe (202).
 
 ### Version constatable (`Fleet.API.BuildInfo`)
 

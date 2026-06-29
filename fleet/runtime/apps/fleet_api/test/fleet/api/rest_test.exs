@@ -288,6 +288,68 @@ defmodule Fleet.API.RestTest do
     end
   end
 
+  # ============================================================
+  # flow-02 — one-shot sans mandat interdit (miroir R18 à l'admission)
+  # ============================================================
+  #
+  # Un cap-profile one-shot (reviewer/qualifier/consultant) lancé SANS `mandate` partirait sans
+  # travail → `Fleet.Spawner.mandate_guard` le refuse (`mandate_required`, ZÉRO pod) APRÈS un 202
+  # « mis en file » = 202 menteur (jumeau du cap-profile menteur MA-18). L'admission le REFUSE
+  # désormais à la frontière (422, aucun broadcast), via l'autorité partagée `mandate_required?/1`.
+  describe "POST /api/admin/spawn — one-shot sans mandat interdit (flow-02)" do
+    # PRÉ-CONDITION : `reviewer` canon est bien one-shot + bwrap (sinon ce test ne prouve rien).
+    test "pré-condition : reviewer = one-shot + bwrap" do
+      assert {:ok, rev} = Fleet.CapProfile.load("reviewer")
+      assert Fleet.CapProfile.lifetime_scope(rev) == "one-shot"
+      assert Fleet.CapProfile.containment(rev) == "bwrap"
+    end
+
+    # LE finding : one-shot SANS mandate → 422 (plus 202 menteur), AUCUN broadcast. Régression
+    # prouvée : retirer la garde `mandate_required?` du call-site fait repasser ce cas en 202 +
+    # broadcast, puis le spawner refuse en silence (zéro pod) → 202 menteur.
+    test "reviewer (one-shot) SANS mandate → 422 AVANT spawn, aucun broadcast" do
+      for key <- ["role", "cap_profile_name"] do
+        conn =
+          conn(:post, "/api/admin/spawn", Jason.encode!(%{key => "reviewer"}))
+          |> put_req_header("content-type", "application/json")
+          |> Rest.call(@opts)
+
+        assert conn.status == 422,
+               "#{key}=reviewer (one-shot sans mandat) devait être refusé 422, reçu #{conn.status}"
+
+        {:ok, body} = Jason.decode(conn.resp_body)
+        assert body["error"] =~ "mandat"
+
+        refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
+      end
+    end
+
+    # La moitié « accepté » : un one-shot LÉGITIME porte son `mandate` → passe (202 + broadcast,
+    # mandate replacé dans opts). Prouve que la garde ne ferme QUE le one-shot SANS travail.
+    test "reviewer (one-shot) AVEC mandate → 202 + broadcast (pas de faux rejet)" do
+      conn =
+        conn(
+          :post,
+          "/api/admin/spawn",
+          Jason.encode!(%{"role" => "reviewer", "mandate" => "revue le PR #42"})
+        )
+        |> put_req_header("content-type", "application/json")
+        |> Rest.call(@opts)
+
+      assert conn.status == 202
+
+      assert_receive %Fleet.Event{
+                       source: :api,
+                       type: :"admin.spawn.request",
+                       payload: %{
+                         "role" => "reviewer",
+                         "opts" => %{"mandate" => "revue le PR #42"}
+                       }
+                     },
+                     500
+    end
+  end
+
   describe "match _ (404)" do
     test "route inexistante → 404" do
       conn = conn(:get, "/api/nonexistent") |> Rest.call(@opts)

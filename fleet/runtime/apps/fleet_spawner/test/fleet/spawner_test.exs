@@ -117,6 +117,23 @@ defmodule Fleet.SpawnerTest do
       end
     end
 
+    test "mandate_required?/1 — autorité partagée : one-shot → true, autres scopes / absent → false" do
+      # one-shot EXPLICITE = la seule forme qui exige un mandat.
+      assert Fleet.Spawner.mandate_required?(valid_profile())
+
+      # forever/run/pipe/permanent : long-lived, pull via MCP → exemptés.
+      for scope <- ["forever", "run", "pipe", "permanent"] do
+        cap = put_in(valid_profile().spec["invocation"], %{"lifetime_scope" => scope})
+
+        refute Fleet.Spawner.mandate_required?(cap),
+               "scope #{scope} ne devrait PAS exiger de mandat"
+      end
+
+      # lifetime_scope absent (profil non validé ?) : nil-aware → false (exempté), comme mandate_guard.
+      no_scope = put_in(valid_profile().spec["invocation"], %{})
+      refute Fleet.Spawner.mandate_required?(no_scope)
+    end
+
     test "one-shot + pas de mandat → {:error, :mandate_required}" do
       assert {:error, :mandate_required} =
                Fleet.Spawner.spawn_pod(valid_profile(), "ticket-no-mandate")

@@ -10,7 +10,8 @@ defmodule Fleet.API.Rest do
     * `GET /api/pipelines` / `tickets` / `pods` — lecture état (stubs MVP)
     * `POST /api/admin/spawn` — filtre le payload par allowlist DTO (422 si un champ interne du
       spawner / une clé inconnue est présent), valide le cap-profile (400 si absent, 422 si
-      inconnu) PUIS broadcast `admin.spawn.request` event + 202
+      inconnu / host-native), exige un `mandate` pour un cap-profile one-shot (422 sinon — miroir
+      R18, évite le 202 menteur) PUIS broadcast `admin.spawn.request` event + 202
 
   ## Auth — lecture no-auth, écriture gardée (pas de blanket no-auth)
 
@@ -127,8 +128,30 @@ defmodule Fleet.API.Rest do
     # contrat HTTP doit être honnête : le cap-profile fait partie de l'admission, pas d'un best-effort
     # async. On le résout ICI (même loader que le consumer, source unique `Fleet.CapProfile.load/1`).
     case validate_cap_profile(payload) do
-      :ok ->
-        do_broadcast_spawn(conn, payload)
+      {:ok, cap} ->
+        # MIROIR de R18 (Fleet.Spawner.mandate_guard) à l'ADMISSION : un cap-profile one-shot
+        # (reviewer/qualifier/consultant) lancé SANS `mandate` partirait sans travail → le spawner
+        # le refuse (`mandate_required`, ZÉRO pod). Sans cette garde, le 202 « mis en file » serait un
+        # 202 menteur (jumeau exact du cap-profile menteur). On vérifie ICI, avant l'ACK.
+        # `Fleet.Spawner.mandate_required?/1` EST l'autorité partagée (même lecture `get_in` nil-aware
+        # que `mandate_guard`) → on n'a PAS recopié la règle (pas de divergence possible). Un one-shot
+        # LÉGITIME porte son `mandate` dans le DTO (allowlist) → `has_mandate?` vrai → il passe.
+        mandate = get_in(payload, ["opts", "mandate"])
+        has_mandate? = is_binary(mandate) and mandate != ""
+
+        if Fleet.Spawner.mandate_required?(cap) and not has_mandate? do
+          send_resp(
+            conn,
+            422,
+            Jason.encode!(%{
+              error: "mandat requis (cap-profile one-shot)",
+              reason:
+                "lifetime_scope one-shot sans `mandate` : le pod partirait sans travail (R18). Fournir `mandate`."
+            })
+          )
+        else
+          do_broadcast_spawn(conn, payload)
+        end
 
       {:error, :missing} ->
         send_resp(
@@ -225,7 +248,8 @@ defmodule Fleet.API.Rest do
   # Résout le cap-profile demandé (`cap_profile_name` ou `role`, mêmes clés que
   # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing}` (400) ; load KO →
   # `{:error, {:cap_profile, name, reason}}` (422) ; HOST-NATIVE (`containment != bwrap`) →
-  # `{:error, {:host_native_forbidden, name}}` (422) ; chargé + sandboxé → `:ok` (l'admission passe).
+  # `{:error, {:host_native_forbidden, name}}` (422) ; chargé + sandboxé → `{:ok, cap}` (l'admission
+  # continue ; le cap chargé est rendu pour la garde mandat one-shot R18 du call-site, sans re-load).
   #
   # La garde host-native est ICI, à l'admission : un cap-profile `containment: none` (starfleet,
   # architecte-interactif) lancerait un pod HORS-SANDBOX sur l'hôte *as* l'humain via cette porte spawn
@@ -239,7 +263,7 @@ defmodule Fleet.API.Rest do
         case Fleet.CapProfile.load(name) do
           {:ok, cap} ->
             if Fleet.CapProfile.containment(cap) == "bwrap",
-              do: :ok,
+              do: {:ok, cap},
               else: {:error, {:host_native_forbidden, name}}
 
           {:error, reason} ->
