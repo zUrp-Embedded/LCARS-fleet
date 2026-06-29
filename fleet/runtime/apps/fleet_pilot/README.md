@@ -54,6 +54,12 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
   Le pin de base (`ls-remote` du tip, hors-pod) passe par `Fleet.Credentials.Shell.git` : borné par
   construction (process-group dédié, tué entier à la deadline mur) — remplace le `Task.async`+`brutal_kill`
   qui ne tuait que le Task BEAM en laissant fuir le process git porteur du token forge.
+- `Fleet.Pilot.MandateBuilder` — **autorité du FORMAT des mandats** : worker / judge / mandate-review /
+  rework / conflit + instructions de voix de l'eng. `StageDispatcher` CHOISIT quel mandat selon l'état forge
+  (`build_mandate/9` dispatche sur `mandate_kind`/`judge_target`), `MandateBuilder` le FORME. La **judge-ness**
+  est fail-loud (kind/target hors-vocab → `raise` ; un juge ne reçoit JAMAIS un corps d'issue exécutable) ;
+  le mandat juge est **désamorcé** via `Fleet.Pipeline.GateBrief` (critère rendu comme contexte). `forge` =
+  arg injecté (seam). API publique : `build_mandate/9`, `rework_mandate/6`, `resolve_conflict_mandate/6`.
 - `Fleet.Pilot.Poller` — **DÉCOUVRE** ses repos par topic (`lcars-fleet-<human>`) PUIS **ADMET** uniquement
   ceux scellés système (`ForgeClient.admitted?` — marqueur d'onboarding bot-authored ; le topic mutable seul
   ne suffit plus, cf. § Onboarding « sceau d'admission »). Sur chaque repo admis : scanne, lit la **route-comment**

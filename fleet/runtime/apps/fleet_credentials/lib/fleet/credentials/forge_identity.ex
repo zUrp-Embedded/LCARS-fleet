@@ -102,7 +102,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
 
   @doc """
   Instruction de signature à injecter dans le mandat du pod — SOURCE UNIQUE du trailer.
-  Dérive de `coauthor_trailer/1` : tout mandat (construit par `Pilot.StageDispatcher.build_mandate`)
+  Dérive de `coauthor_trailer/1` : tout mandat (construit par `Pilot.MandateBuilder.build_mandate`)
   doit l'utiliser, sinon la chaîne (instruction côté pod / needle de la gate d'identité de commit)
   se désaccorde du canon.
   """

@@ -148,7 +148,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
   # Brief du pod = sa TÂCHE (livrée par l'orchestrateur, modèle PUSH).
   # Le travail vient de `opts[:mandate]` (le rail forge-driven construit le mandat via
-  # `Pilot.StageDispatcher.build_mandate` ; ou pod direct via `Fleet.Spawner.spawn_pod` opts).
+  # `Pilot.MandateBuilder.build_mandate` ; ou pod direct via `Fleet.Spawner.spawn_pod` opts).
   #
   # Ton naturel (pas multi-section formalisée "## Tâche / ## Livrable") : claude REPL en
   # mode interactif peut interpréter un format trop structuré comme tentative de prompt
