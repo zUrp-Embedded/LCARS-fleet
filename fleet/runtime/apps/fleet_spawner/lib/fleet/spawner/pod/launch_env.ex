@@ -95,7 +95,8 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # EXACT, pas un préfixe — le nom d'env legacy (`_NAME_PREFIX`) est conservé (moins de churn).
           |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", Keyword.get(state.opts, :rc_name, role))
           # Base sock tmux : bwrap_launch crée la socket sous <base>/<pod_id>/, PodTmux (host) y tape.
-          # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. (Défaut /run/lcars/tmux-sock partagé.)
+          # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. La valeur = PodTmux.sock_base (défaut
+          # home-relatif `~/.lcars/run/tmux-sock` pour une fleet lancée par un humain ; jamais /run/lcars).
           |> Map.put("LCARS_TMUX_SOCK_BASE", Fleet.Spawner.PodTmux.sock_base())
           # Le pod est celui de l'HUMAIN : creds ET binaire vendor suivent /home/<human> (même règle que
           # pod_dir). Le binaire est résolu robustement ici (depuis ~/.local/bin, pas le pari `command -v`).

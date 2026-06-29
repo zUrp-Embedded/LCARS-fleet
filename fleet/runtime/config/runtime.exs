@@ -137,10 +137,12 @@ if config_env() != :test do
   # runtime, point. Override éventuel = `config :fleet_spawner, pod_dir_root: …` directement (tests).
   # ============================================================
 
-  # tmux sock-dir base — défaut `/run/lcars/tmux-sock` (provisionné par le service systemd via
-  # RuntimeDirectory). Override quand le runtime est lancé par un HUMAIN (pas le service) → un chemin
-  # SOUS son home, writable sans privilège. Pose à la fois le côté runtime (`:tmux_sock_base`) et,
-  # via do_launch, l'env `LCARS_TMUX_SOCK_BASE` que bwrap_launch lit (les deux côtés coïncident).
+  # tmux sock-dir base — le défaut côté Elixir est home-relatif `~/.lcars/run/tmux-sock`
+  # (`Fleet.Spawner.PodTmux.sock_base`, fleet lancée par un humain : un chemin writable sans privilège).
+  # Cet env (posé par bin/fleet_v2) le surcharge explicitement pour que TOUS les côtés calculent le même
+  # chemin. Pose à la fois le côté runtime (`:tmux_sock_base`) et, via do_launch, l'env
+  # `LCARS_TMUX_SOCK_BASE` que les launchers lisent. (`/run/lcars/tmux-sock` = ancien RuntimeDirectory du
+  # service systemd retiré, jamais le défaut courant.)
   if sock_base = System.get_env("LCARS_TMUX_SOCK_BASE") do
     config :fleet_spawner, tmux_sock_base: sock_base
   end
@@ -327,8 +329,9 @@ if config_env() != :test do
   # A2/A3 — runtime STAGE-MODE (forge = machine à états) + BL-045b auth push
   # ============================================================
   # OFF par défaut. `LCARS_PILOT_STAGE=true` démarre Poller(stage) + HopConsumer
-  # (cf. Fleet.Pilot.Application.stage_children). F-037 : requiert FORGE_BASE_URL (découverte + push),
-  # plus LCARS_PILOT_POLL_REPO (découverte par topic).
+  # (cf. Fleet.Pilot.Application.stage_children!). F-037 : requiert UNIQUEMENT FORGE_BASE_URL — c'est la
+  # seule garde fail-loud du boot stage (découverte des projets par topic + push per-hop). LCARS_PILOT_POLL_REPO
+  # n'est PAS requis (override legacy/test seulement ; la découverte réelle est par topic forge, pas un repo fixe).
   if System.get_env("LCARS_PILOT_STAGE") == "true" do
     config :fleet_pilot, stage_dispatch?: true
   end

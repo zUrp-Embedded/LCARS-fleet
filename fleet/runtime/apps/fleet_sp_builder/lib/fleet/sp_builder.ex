@@ -19,14 +19,17 @@ defmodule Fleet.SPBuilder do
     * N3  — `~/.claude/CLAUDE.md` composé via `compose_claude_md/3`
     * N3bis — `~/.claude/skills/` filtrés via `filter_skills/2`
 
-  Frontière vendor : ce module reste vendor-agnostic. L'INJECTION du SP dans le
-  pod est faite par la **frontière N1** (`bin/claude_launch.sh` → `--system-prompt "$SP"`
-  en argv, REPL interactif), PAS ici.
+  Frontière vendor : ce module reste vendor-agnostic — il COMPOSE le contenu, il
+  n'injecte rien. L'INJECTION du SP dans le pod est faite par la **frontière N1**
+  (`bin/claude_launch.sh`), qui lit le SP composé depuis
+  `<pod_dir>/.lcars/system-prompt.md` et le passe à `claude` via **`--system-prompt-file`**
+  (HORS argv : le SP en argv fuitait `/proc/<pid>/cmdline` et frôlait ARG_MAX, d'où le
+  passage en mode fichier le 2026-06-14 — `.lcars/` est lisible in-sandbox, contrairement à
+  `.claude/` masqué par le bind creds). REPL interactif (Remote Control), jamais headless.
 
-  La frontière N1 EST le script `bin/` : il n'existe AUCUNE app claude-bridge ni
-  module `Fleet.Claude.SPInjection`, et AUCUN mode metered (`claude -p`,
-  `--system-prompt-file`). Le seul mode réel est `--system-prompt "$SP"` injecté en
-  argv au REPL interactif — ne pas réintroduire ces réfs dans le moduledoc.
+  La frontière N1 EST le script `bin/` : il n'existe AUCUNE app claude-bridge ni module
+  `Fleet.Claude.SPInjection`, et AUCUN mode metered (`claude -p`) — ne pas réintroduire ces
+  réfs dans le moduledoc.
 
   Déterminisme sha256 : 2 exécutions sur même input produisent un
   `stable_sha256` identique (stable parts uniquement, exclut

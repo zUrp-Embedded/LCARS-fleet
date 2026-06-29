@@ -1,7 +1,7 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-16
+**Dernière révision** : 2026-06-29
 **Statut** : modèle humain-lance (systemd retiré 2026-06-16)
 **Référencé par** : `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -13,7 +13,7 @@ gratis, pas de drop, pas de `/var/lib/lcars`). L'état va sous `~/.lcars/*` de c
 ## Lancer la fleet — `bin/fleet_v2`
 
 ```bash
-cp etc/fleet_v2.env.template ~/.lcars/fleet_v2.env   # éditer : FORGE + repo surveillé
+cp etc/fleet_v2.env.template ~/.lcars/fleet_v2.env   # éditer : FORGE (découverte des projets par topic, pas de repo fixe)
 bin/fleet_v2 start          # démarre le BEAM sous toi, boote l'arch, attache son REPL claude
 bin/fleet_v2 status         # BEAM vivant ? pods vivants ?
 bin/fleet_v2 stop           # arrête la fleet

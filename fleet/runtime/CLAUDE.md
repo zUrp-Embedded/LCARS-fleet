@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-27
+**Dernière révision** : 2026-06-29
 **Statut** : guide runtime v2 (salvage cow-boy).
 **Référencé par** : —
 
@@ -37,7 +37,7 @@ Deploy/run procedure (launch via `bin/fleet_v2`, env file, launcher install) is 
 Apps are grouped into **rings** (substrate layering, declared in each README under "Frontière vendor"):
 - **Ring 0** — OS substrate: per-human launch via `bin/fleet_v2` (chantier 16, in `etc/` + `bin/`, not an app; the `User=lcars` systemd unit was retired 2026-06-16 — model = human-launches, ADR-E)
 - **Ring 1** — pod primitives + vendor frontier: `fleet_spawner`, `fleet_credentials`, `fleet_cap_profile`, `fleet_sp_builder`, `fleet_project_bootstrap`, plus `bin/bwrap_launch.sh` + `bin/host_launch.sh` (launchers N0 containment, sélectionnés par `metadata.containment` — LAUNCH-Q) + `bin/claude_launch.sh` (launcher vendor N1). (`fleet_pod_runtime` retiré 2026-06-10 — app morte post-ADR-G, PODRT-D1.) (La frontière vendor N1 = ces scripts `bin/` ; il n'y a **pas** d'app `fleet_claude_bridge` — retirée au pivot ADR-G. Noms corrigés 2026-06-02 : `fleet_cap_profile`/`fleet_sp_builder`, pas `fleet_capprofile`/`fleet_spbuilder`.)
-- **Ring 2** — orchestration backbone: `fleet_event_router` (Phoenix.PubSub bus `Fleet.PubSub` on topic `fleet.events`), `fleet_task_queue` (broker de mandats — `get_task`/`submit_result`, run #5), `fleet_task_monitor`, `fleet_pilot` (dispatcher webhook→pipeline, off par défaut — **client du core**, dépend compile-time du Ring 3 `fleet_pipeline` ; pas backbone pur, cf. son README « client du core ring 1, pas core »). (`fleet_ipc_filter` retiré : jamais implémenté.)
+- **Ring 2** — orchestration backbone: `fleet_event_router` (Phoenix.PubSub bus `Fleet.PubSub` on topic `fleet.events`), `fleet_task_queue` (broker de mandats — `get_task`/`submit_result`, run #5), `fleet_pilot` (dispatcher webhook→pipeline, off par défaut — **client du core**, dépend compile-time du Ring 3 `fleet_pipeline` ; pas backbone pur, cf. son README « client du core ring 1, pas core »). (`fleet_ipc_filter` retiré : jamais implémenté.) **`fleet_task_monitor` n'est PAS backbone actif** : app dormante — son GenServer n'est démarré nulle part (`:start_monitor` n'est jamais posé `true`, ni runtime.exs ni ailleurs) et il mapperait des events sans producteur câblé. Le rôle read-model/observabilité est tenu par `fleet_observation` (Ring 4). Candidat suppression/recâblage au ménage final d'observabilité.
 - **Ring 3** — coordination + policy: `fleet_coord`, `fleet_pipeline`, `fleet_starfleet` (Cat-5 audit), `fleet_mcp`
 - **Ring 4** — external surface: `fleet_api` (REST `:8080` + WS `/ws`, **no-auth** par design — frontière = isolation réseau/container, cf. `Fleet.API.Rest` § Auth) ; `fleet_observation` (read-only observation deck `:8091`, BL-026 — dépend vers le bas Ring 1/2/3, aucune app du core ne dépend de lui)
 
@@ -63,9 +63,17 @@ Three config files, evaluated in this order:
 
 **Critical invariant** in `config/runtime.exs`: the entire file is wrapped in `if config_env() != :test do ... end`. Without that guard, `mix test` reads runtime.exs (Mix evaluates it in every env), flips `start_listener: true`, and Cowboy tries to bind `:8080` → umbrella boot crash. If you add runtime config, keep it inside the guard unless you genuinely want test eval.
 
-Env vars consumed at boot (template: `etc/fleet_v2.env.template`):
-`LCARS_LOG_LEVEL`, `LCARS_CAPPROFILES_ROOT`, `LCARS_PIPELINES_ROOT`, `LCARS_COORD_POLICIES_PATH`, `LCARS_STARFLEET_AUDIT_LOG`, `LCARS_BOOT_PERMANENT_AT_START`, `FLEET_WEBHOOK_SECRET_PATH`, `FLEET_API_PORT`.
-Run #5 (ADR-G / MCP / pilot — added 2026-06-02): `LCARS_FLEET_MCP_URL` / `_POD_FACING_PORT` / `_BRIDGE_PATH`, `LCARS_PILOT_POLL_REPO` / `_POLL_INTERVAL_MS` / `_ROUTING_PATH`, `FORGE_BASE_URL` / `FORGE_TOKEN` / `FORGE_TOKEN_FILE`.
+Env vars consumed at boot (source of truth: `config/runtime.exs`, all guarded out of `:test`; template: `etc/fleet_v2.env.template`). `bin/fleet_v2` poses the per-human ports + on-switches; everything else defaults under `~/.lcars/*`.
+
+**Active** (grouped by domain):
+- Logger / catalogues: `LCARS_LOG_LEVEL`, `LCARS_CAPPROFILES_ROOT`, `LCARS_PIPELINES_ROOT`, `LCARS_WORKSPACES_ROOT`, `LCARS_COORD_POLICIES_PATH`, `LCARS_STARFLEET_AUDIT_LOG`.
+- Ports / listeners: `FLEET_API_PORT`, `LCARS_OBSERVATION_PORT`, `LCARS_FLEET_WEBHOOKS` (+ `LCARS_FLEET_WEBHOOK_PORT`), `FLEET_WEBHOOK_SECRET_PATH`.
+- Pods / boot / kick: `LCARS_BOOT_PERMANENT_AT_START`, `LCARS_STATE_PATH` (task-queue state), `LCARS_STATE_FS_ROOT` (pod recovery state), `LCARS_SEED_STORE_ROOT`, `LCARS_KICK_FIRST_DELAY_MS` / `_RETRY_MS` / `_MAX_ATTEMPTS`.
+- Sockets transport: `LCARS_TMUX_SOCK_BASE` (tmux socket per-pod), `LCARS_FLEET_MCP_SOCK_BASE` (MCP AF_UNIX socket per-pod), `LCARS_FLEET_MCP_BRIDGE_PATH` (stdio→socket bridge path, gates `mcp_server_spec`).
+- Launchers (absolute paths): `LCARS_BWRAP_LAUNCH_PATH`, `LCARS_HOST_LAUNCH_PATH`, `LCARS_CLAUDE_LAUNCH_PATH`.
+- Pilot / forge: `FORGE_BASE_URL` (required when stage-mode is on), `FORGE_TOKEN` / `FORGE_TOKEN_FILE` / `FORGE_PUSH_TOKEN`, `FORGE_BOT_LOGIN`, `FORGE_ROLE_TOKENS_DIR`, `LCARS_PILOT_STAGE` (on-switch), `LCARS_PILOT_POLL_INTERVAL_MS`, `LCARS_PILOT_POLL_REPO` (legacy/test override only — real discovery is by forge topic, **not** required).
+
+**Retired / forbidden** (do NOT reintroduce — each was removed because it had no reader or was unsafe): `LCARS_FLEET_MCP_URL` and `LCARS_FLEET_MCP_POD_FACING_PORT` (the shared HTTP-loopback MCP transport — replaced by the per-pod AF_UNIX socket); `LCARS_PILOT_DISPATCHER` + `LCARS_PILOT_ROUTING_PATH` (legacy AutoDispatcher rail + `forge-routing.yaml`, both deleted); `LCARS_PILOT_STAGE_ROUTING` (label routing retired — routing lives in the route-comment); `LCARS_HOP_REMOTE` (push remote is per-hop now); `LCARS_CREDENTIALS_ROOT` (ADR-F: no vault); `LCARS_PODS_ROOT` / `LCARS_POD_HUMAN` (pod_dir + human derived from the runtime UID, never config); `LCARS_LAUNCH_BACKEND` / `LCARS_UNSAFE_ALLOW_HOST_TMUX` (the off-bwrap TmuxBackend was removed).
 
 ## Test hermeticity
 

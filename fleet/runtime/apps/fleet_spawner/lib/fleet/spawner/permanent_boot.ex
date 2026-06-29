@@ -1,8 +1,9 @@
 defmodule Fleet.Spawner.PermanentBoot do
   @moduledoc """
-  Boot des pods permanents Type 1 fleet-level au démarrage
-  `lcars-fleet-v2.service`. Extension `fleet_spawner`
-  (PAS refactor).
+  Boot des pods permanents Type 1 fleet-level **au démarrage du runtime fleet_v2
+  lancé par l'humain** (`bin/fleet_v2 start` démarre la BEAM sous l'UID de l'humain
+  puis boote le pod architect permanent — modèle humain-lance, plus de service
+  système, systemd retiré). Extension `fleet_spawner` (PAS refactor).
 
 
   ## Garde anti-violation CRITIQUE
@@ -12,9 +13,9 @@ defmodule Fleet.Spawner.PermanentBoot do
   `host_native != true`. Le 3e terme est la **garde anti-violation** :
   `starfleet` (host_native: true, dérogation canon) ne DOIT
   JAMAIS être spawné via fleet_spawner bwrap
-  (il boote via `lcars-starfleet.service` systemd séparé). Garde
-  défensive même si un profil host_native portait `boot_at_start: true`
-  par erreur.
+  (il boote à part, host-native hors de fleet_spawner — `host_launch.sh`,
+  containment: none). Garde défensive même si un profil host_native portait
+  `boot_at_start: true` par erreur.
 
   ## Clés string, pas atom
 

@@ -15,9 +15,10 @@
 #                              Ctrl-b d pour détacher SANS tuer le pod.
 #
 # `attach` requiert que l'opérateur ait le MÊME UID que le daemon (les sock-dirs par-pod sont `0700`).
-# Doctrine cible : daemon `User=<humain>` → l'humain attache directement (substrate-pending). Déploiement
-# courant `User=lcars` → lancer `lcars` comme cet user (ou `sudo -u lcars lcars attach …`). Vaut pour les
-# pods bwrap (sock bind-monté host-side) comme host (LAUNCH-Q).
+# Modèle courant : chaque humain lance SA fleet via `bin/fleet_v2` → la BEAM et les pods tournent sous SON
+# UID → il attache directement ses propres pods, sans privilège ni passe-droit. (Plus de service système
+# `User=lcars` : le modèle systemd est retiré.) Vaut pour les pods bwrap (sock bind-monté host-side) comme
+# host (LAUNCH-Q).
 #
 # Config (env) :
 #   LCARS_API_URL         base REST du daemon (défaut http://localhost:8080)
@@ -99,7 +100,7 @@ cmd_spawn() {
   body="$(curl -sS -m 10 -X POST "$API_URL/api/admin/spawn" \
             -H 'content-type: application/json' -d "$payload" \
             -w $'\n%{http_code}' 2>/dev/null)" \
-    || die "daemon injoignable sur $API_URL (lcars-fleet.service démarré ? port publié ?)"
+    || die "daemon injoignable sur $API_URL (fleet_v2 démarrée pour cet utilisateur ? LCARS_API_URL/port correct ?)"
 
   http="${body##*$'\n'}"; body="${body%$'\n'*}"
   case "$http" in

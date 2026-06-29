@@ -119,7 +119,7 @@
         <span class="panel-meta">— placeholder D4 —</span>
       </div>
       <div class="panel-body">
-        <p class="placeholder-text">Sub-ticket D4 : 15 apps OTP started, /api/health 200, lcars-fleet.service active.</p>
+        <p class="placeholder-text">Sub-ticket D4 : 15 apps OTP started, /api/health 200, runtime fleet_v2 actif (daemon/session per-humain).</p>
       </div>
     </section>
 

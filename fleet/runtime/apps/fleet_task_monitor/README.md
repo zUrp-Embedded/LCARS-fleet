@@ -1,8 +1,8 @@
 # Fleet.TaskMonitor
 
 **Date** : 2026-06-02 (créé — dette README, convention CLAUDE.md:82)
-**Dernière révision** : 2026-06-04 (R2b — migration consommation canon `%Fleet.Event{}`, `map_event/1`)
-**Statut** : implémenté, **config-gated** (`:start_monitor` défaut `false`)
+**Dernière révision** : 2026-06-29 (R2b — migration consommation canon `%Fleet.Event{}`, `map_event/1`)
+**Statut** : implémenté mais **dormant/inerte** — `:start_monitor` (défaut `false`) n'est posé `true` nulle part (ni runtime.exs ni service), et ses events mappés n'ont aucun producteur câblé. Rôle read-model couvert par `fleet_observation`. Candidat suppression/recâblage (ménage final d'observabilité)
 **Dérivé de** : DN `ring1/fleet-task-monitor`
 
 Détourne le tool natif **`TaskList`** de Claude Code (v2.1.x) pour le pod **architect-permanent** :
@@ -14,8 +14,10 @@ qui voit ainsi l'état de la fleet dans son panneau Tasks natif. **Core write-on
 
 - `Fleet.TaskMonitor` — le GenServer (subscribe Bus + mappe + écrit FS). Démarrage gaté.
 - `Fleet.TaskMonitor.Application` — superviseur : démarre `Fleet.TaskMonitor` ssi
-  `:fleet_task_monitor, :start_monitor` (défaut `false` ; activé par `lcars-fleet.service` en prod ;
-  tests/CI l'instancient en direct avec opts isolés, suite async-safe).
+  `:fleet_task_monitor, :start_monitor` (défaut `false`). Ce flag n'est posé `true` **nulle part** — ni
+  `runtime.exs` ni aucun service (le modèle systemd `User=lcars` est retiré, chaque humain lance sa fleet
+  via `bin/fleet_v2`) → le GenServer ne démarre jamais en prod. Tests/CI l'instancient en direct avec opts
+  isolés (suite async-safe).
 
 ## API publique
 

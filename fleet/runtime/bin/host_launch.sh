@@ -51,8 +51,10 @@ set -euo pipefail
 
 TMUX_BIN="${LCARS_TMUX_BIN:-/usr/bin/tmux}"
 
-# Socket-dir par-pod — MÊME convention que bwrap_launch.sh (parent provisionné systemd-tmpfiles.d).
-# MÊME chemin côté Elixir (Fleet.Spawner.PodTmux.sock_path = <base>/<pod_id>/pod.sock).
+# Socket-dir par-pod — MÊME convention que bwrap_launch.sh. Le parent est normalement fourni par
+# `bin/fleet_v2`, qui exporte `LCARS_TMUX_SOCK_BASE` sous `~/.lcars/run/tmux-sock` (fleet lancée par un
+# humain) et crée le dir au start. MÊME chemin côté Elixir (PodTmux.sock_path = <base>/<pod_id>/pod.sock).
+# (Le défaut littéral `/run/lcars/tmux-sock` ci-dessous = fallback d'invocation directe legacy seulement.)
 SOCK_PARENT="${LCARS_TMUX_SOCK_BASE:-/run/lcars/tmux-sock}"
 
 # =============================================================
@@ -94,8 +96,9 @@ fi
 [[ -x "$TMUX_BIN" ]] || { echo "ERR: tmux missing/not-x: $TMUX_BIN (N0 PTY host)" >&2; exit 2; }
 [[ -d "$POD_DIR"  ]] || { echo "ERR: pod_dir $POD_DIR missing (caller responsibility)" >&2; exit 1; }
 [[ -d "$WORKDIR"  ]] || { echo "ERR: workdir $WORKDIR inaccessible" >&2; exit 1; }
-# Parent socket provisionné à l'install (systemd-tmpfiles.d) — fail-fast au boundary, comme bwrap_launch.
-[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT absent (provisioning systemd-tmpfiles.d / LCARS_TMUX_SOCK_BASE)" >&2; exit 1; }
+# Parent socket normalement posé par fleet_v2 (LCARS_TMUX_SOCK_BASE → ~/.lcars/run/tmux-sock, mkdir au
+# start) — fail-fast au boundary, comme bwrap_launch.
+[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT absent (fleet lancée via fleet_v2 ? LCARS_TMUX_SOCK_BASE correct ?)" >&2; exit 1; }
 install -d -m 0700 "$POD_SOCK_DIR"
 
 # =============================================================

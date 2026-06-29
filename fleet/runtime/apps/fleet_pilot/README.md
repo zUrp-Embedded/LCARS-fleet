@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-28 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
+**Dernière révision** : 2026-06-29 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -27,9 +27,12 @@ a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le l
 
 Le mode **stage** (la forge EST la machine à états : ticket **assigné** à l'humain owner, non
 verrouillé → spawn le rôle **PRODUCTEUR** ; l'**assignee = l'humain**, point fixe — DN §1)
-double puis remplace le dispatch legacy ci-dessus. Activé par `:stage_dispatch?` + `:poll_repo` ;
-le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Application`
-`guard_no_duplicate_poller!`, F054 ; legacy `AutoDispatcher` retiré à F-09). Submodules :
+double puis remplace le dispatch legacy ci-dessus. Activé par `:stage_dispatch?` + la forge `base_url`
+(`:forge[:base_url]` / `FORGE_BASE_URL`) — c'est la **seule** garde fail-loud du boot stage
+(`Fleet.Pilot.Application.stage_children!`) : sans `base_url`, ni découverte par topic ni push per-hop.
+`:poll_repo` n'est **plus** une condition d'activation (override legacy/test mono-repo seulement, cf. § Knobs) :
+la découverte des repos se fait par topic (`lcars-fleet-<human>`), pas par repo fixe, et le repo+remote de
+chaque hop voyagent dans l'event `pod.completed`. Submodules :
 
 - `Fleet.Pilot.StageDispatcher` — `decide/2` (issue assignée non verrouillée → `{:spawn, role, profile}`
   où `role` = **rôle producteur invariant** `:producer_role`, défaut `engineer` — pas un marqueur
@@ -91,7 +94,9 @@ le legacy par `:start_dispatcher` — **mutuellement exclusifs** (garde `Applica
   Identité ②.1e via `Fleet.Credentials.RoleToken` (poste EN SON NOM ; token absent → fallback système loggué).
   (Legacy carte multi-stage : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
 
-Knobs : `:stage_dispatch?` + `:poll_repo` + `:poll_interval_ms` (stage), `:producer_role` (défaut `engineer`),
+Knobs : `:stage_dispatch?` + `:poll_interval_ms` (stage ; la forge `base_url` est l'unique config requise),
+`:poll_repo` (override legacy/test mono-repo seulement — accepté par le Poller mais écrasé à chaque tick par la
+découverte topic ; **pas** la source en prod), `:producer_role` (défaut `engineer`),
 `:reviewer_roles` (juges PR, défaut data posé en `config/config.exs` — source unique, lu via `Fleet.Pilot.Roles`), `:gatekeeper_role` (scelle les fusions,
 défaut `gatekeeper`), `:hop_runner` (offload complétion, F067), `:wake_recovery` (seam recovery de wake,
 défaut `&Fleet.Pilot.WakeRecovery.wake/3` ; MA-17 : le retour du wake est load-bearing → un kick injoignable

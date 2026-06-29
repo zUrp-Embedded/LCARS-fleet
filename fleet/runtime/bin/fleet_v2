@@ -13,7 +13,8 @@
 #   - la spec MCP (3 env requis sinon le pod ne lance pas : :mcp_server_spec_required) ;
 #   - les on-switches (arch permanent + machine stage-mode forge-driven).
 #
-# Config humaine : ~/.lcars/fleet_v2.env (cf. etc/fleet_v2.env.template) — forge + repo surveillé.
+# Config humaine : ~/.lcars/fleet_v2.env (cf. etc/fleet_v2.env.template) — forge (les projets sont
+#         découverts par topic `lcars-fleet-<humain>`, plus de repo fixe surveillé).
 # Gestes : fleet_v2 {start|stop|status}.
 
 set -euo pipefail
@@ -37,7 +38,9 @@ compute_ports() {
   base=$(( 21000 + (uid % 500) * 10 ))
   API_PORT="${FLEET_API_PORT:-$base}"
   OBS_PORT="${LCARS_OBSERVATION_PORT:-$(( base + 1 ))}"
-  MCP_PORT="${LCARS_FLEET_MCP_POD_FACING_PORT:-$(( base + 2 ))}"
+  # base+2 RÉSERVÉ (ex-port HTTP MCP pod-facing, retiré) : le transport MCP n'est plus un listener HTTP
+  # partagé mais une socket AF_UNIX par pod (cf. LCARS_FLEET_MCP_SOCK_BASE). Slot laissé vide pour ne pas
+  # décaler le port webhook ci-dessous.
   WEBHOOK_PORT="${LCARS_FLEET_WEBHOOK_PORT:-$(( base + 3 ))}"
 }
 
@@ -54,10 +57,9 @@ setup_env() {
 
   compute_ports
 
-  # Ports per-humain (lus par runtime.exs : fleet_api / fleet_observation / fleet_mcp / event_router).
+  # Ports per-humain (lus par runtime.exs : fleet_api / fleet_observation / event_router).
   export FLEET_API_PORT="$API_PORT"
   export LCARS_OBSERVATION_PORT="$OBS_PORT"
-  export LCARS_FLEET_MCP_POD_FACING_PORT="$MCP_PORT"
   export LCARS_FLEET_WEBHOOK_PORT="$WEBHOOK_PORT"
 
   # Spec MCP — chemin du bridge stdio du pod (co-localisé avec ce launcher). Le transport pod↔central
@@ -148,7 +150,7 @@ cmd_start() {
   fi
 
   echo "fleet_v2: démarrage du BEAM sous $(id -un) (uid $(id -u)) — $mode" >&2
-  echo "fleet_v2: ports — API $API_PORT · obs $OBS_PORT · MCP $MCP_PORT · webhook $WEBHOOK_PORT" >&2
+  echo "fleet_v2: ports — API $API_PORT · obs $OBS_PORT · webhook $WEBHOOK_PORT" >&2
   echo "fleet_v2: découverte multi-projet par topic lcars-fleet-<humain> (F-037, plus de repo fixe)" >&2
 
   # Socket tmux DÉDIÉ (serveur frais) → capture l'env exporté ci-dessus. Le BEAM y tourne détaché, survit
