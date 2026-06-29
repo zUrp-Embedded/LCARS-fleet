@@ -526,7 +526,7 @@ defmodule Fleet.Pilot.Poller do
     with true <- String.starts_with?(pod_id, Fleet.Pilot.PodId.scope_prefix(repo)),
          true <- function_exported?(tq, :pod_active_ticket_id, 1),
          {:ok, ticket_id} when is_binary(ticket_id) <- tq.pod_active_ticket_id(pod_id),
-         {:ok, n} <- parse_issue_ticket(ticket_id) do
+         {:ok, n} <- Fleet.Pilot.TicketId.parse(ticket_id) do
       [{repo, :issue, n}]
     else
       _ -> []
@@ -536,15 +536,6 @@ defmodule Fleet.Pilot.Poller do
   catch
     _, _ -> []
   end
-
-  defp parse_issue_ticket("issue-" <> rest) do
-    case Integer.parse(rest) do
-      {n, ""} -> {:ok, n}
-      _ -> :error
-    end
-  end
-
-  defp parse_issue_ticket(_), do: :error
 
   # Un pod a-t-il une tâche ACTIVE (assignée, non close) ? `{:ok, nil}` = idle. Tolérant (toute
   # anomalie → `false` : un pod dont on ne peut établir l'activité ne masque pas un orphelin).

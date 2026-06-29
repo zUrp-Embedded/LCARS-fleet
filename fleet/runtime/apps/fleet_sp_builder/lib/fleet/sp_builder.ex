@@ -329,23 +329,34 @@ defmodule Fleet.SPBuilder do
     end
   end
 
+  # Aucun modop demandé (chemin PROD : `SPBuilder.compose(cap, [], …)` côté pod.ex) → rien à lire,
+  # `modop_root` jamais résolu : ce root sert UNIQUEMENT la fonctionnalité (config-pilotée) des fragments
+  # de modop, non câblée dans la chaîne de spawn actuelle.
+  defp read_modop_fragments([]), do: {:ok, []}
+
   defp read_modop_fragments(modop_bundles) do
-    result =
-      Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
-        path = Path.join([modop_root(), name, "sp.md"])
+    case modop_root() do
+      {:ok, root} ->
+        result =
+          Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
+            path = Path.join([root, name, "sp.md"])
 
-        case File.read(path) do
-          {:ok, content} ->
-            {:cont, {:ok, [{name, content} | acc]}}
+            case File.read(path) do
+              {:ok, content} ->
+                {:cont, {:ok, [{name, content} | acc]}}
 
-          {:error, _reason} ->
-            {:halt, {:error, {:modop_bundle_missing, name}}}
+              {:error, _reason} ->
+                {:halt, {:error, {:modop_bundle_missing, name}}}
+            end
+          end)
+
+        case result do
+          {:ok, fragments} -> {:ok, Enum.reverse(fragments)}
+          error -> error
         end
-      end)
 
-    case result do
-      {:ok, fragments} -> {:ok, Enum.reverse(fragments)}
-      error -> error
+      :error ->
+        {:error, :modop_root_unconfigured}
     end
   end
 
@@ -421,11 +432,26 @@ defmodule Fleet.SPBuilder do
   # Path resolution (config knobs for testability)
   # ============================================================
 
+  # `sp_role_root` — base sous laquelle résout le chemin `spec.systemPrompt` d'un cap-profile. Défaut =
+  # le canon cap-profiles BUNDLÉ (`Application.app_dir(:fleet_cap_profile, …)`, MÊME source que
+  # `Fleet.CapProfile.root_dir/0`, dont sp_builder dépend déjà) → résout en RELEASE comme en dev SANS env.
+  # L'ancien défaut relatif `"cap-profiles"` (relatif au CWD) donnait `:enoent` en release. Override config (test).
   defp sp_role_root do
-    Application.get_env(:fleet_sp_builder, :sp_role_root, "cap-profiles")
+    Application.get_env(:fleet_sp_builder, :sp_role_root) ||
+      Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles")
   end
 
+  # `modop_root` — base des fragments SP de modop (`<root>/<name>/sp.md`). CONFIG-OBLIGATOIRE (fail-loud) :
+  # les fragments canon vivent dans `fleet_pipeline/priv/canon/modop-bundles` (Ring 3), HORS du graphe de
+  # deps de sp_builder (Ring 1) → on ne peut PAS y pointer un défaut bundlé sans violer le ring (et
+  # `Application.app_dir(:fleet_pipeline, …)` lèverait « unknown application » en test isolé). Donc AUCUN
+  # défaut relatif trompeur (l'ancien `"modop"` relatif au CWD = `:enoent` muet en release) : sans config,
+  # `:error` → `read_modop_fragments` rend `{:error, :modop_root_unconfigured}` (fail-loud explicite). La
+  # chaîne de spawn PROD ne passe aucun modop (`compose(cap, [], …)`) → ce root n'est jamais requis en prod.
   defp modop_root do
-    Application.get_env(:fleet_sp_builder, :modop_root, "modop")
+    case Application.fetch_env(:fleet_sp_builder, :modop_root) do
+      {:ok, root} -> {:ok, root}
+      :error -> :error
+    end
   end
 end

@@ -56,6 +56,7 @@ defmodule Fleet.Coord.Policies do
     policies =
       case YamlElixir.read_from_file(path) do
         {:ok, %{} = data} ->
+          validate_against_schema!(data, path)
           data
 
         {:ok, other} ->
@@ -69,6 +70,33 @@ defmodule Fleet.Coord.Policies do
 
     :persistent_term.put(@policies_key, policies)
     :ok
+  end
+
+  # Validation STRUCTURELLE du YAML parsé contre `priv/schema/coord-policies-v1.json` (ExJsonSchema). Le
+  # schema s'annonçait « Validated by ex_json_schema at init_policies!/0 » mais NE l'était PAS : le code
+  # n'acceptait que « est une map » → un coord-policies malformé (mapping sans `action`, `escalation_path`
+  # non-array, clé hors pattern, propriété additionnelle…) passait silencieusement et cassait ensuite chaque
+  # lookup. Désormais FAIL-LOUD au boot, MÊME contrat dead-man's-switch que fichier absent/illisible (le BEAM
+  # sort non-zéro, le launcher escalade) plutôt qu'une table de routage structurellement cassée tenue en vie.
+  # Le schema est STRUCTURAL-ONLY (cf. son `$id`) : la résolvabilité des handlers d'action et l'existence des
+  # cibles d'escalade restent vérifiées au runtime par Fleet.Coord, pas ici.
+  defp validate_against_schema!(data, path) do
+    schema =
+      :code.priv_dir(:fleet_coord)
+      |> to_string()
+      |> Path.join("schema/coord-policies-v1.json")
+      |> File.read!()
+      |> Jason.decode!()
+      |> ExJsonSchema.Schema.resolve()
+
+    case ExJsonSchema.Validator.validate(schema, data) do
+      :ok ->
+        :ok
+
+      {:error, errors} ->
+        raise "fleet_coord: policies #{path} INVALIDE vs coord-policies-v1.json (#{inspect(errors)}) — " <>
+                "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
+    end
   end
 
   @doc """

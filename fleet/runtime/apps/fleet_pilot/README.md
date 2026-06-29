@@ -97,8 +97,10 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
 Knobs : `:stage_dispatch?` + `:poll_interval_ms` (stage ; la forge `base_url` est l'unique config requise),
 `:poll_repo` (override legacy/test mono-repo seulement — accepté par le Poller mais écrasé à chaque tick par la
 découverte topic ; **pas** la source en prod), `:producer_role` (défaut `engineer`),
-`:reviewer_roles` (juges PR, défaut data posé en `config/config.exs` — source unique, lu via `Fleet.Pilot.Roles`), `:gatekeeper_role` (scelle les fusions,
-défaut `gatekeeper`), `:hop_runner` (offload complétion, F067), `:wake_recovery` (seam recovery de wake,
+`:reviewer_roles` (juges PR, défaut data posé en `config/config.exs`), `:gatekeeper_role` (scelle les fusions,
+défaut `gatekeeper`) — **les trois rôles ont leur AUTORITÉ UNIQUE dans `Fleet.Pilot.Roles`**
+(`producer_role/1`, `reviewer_roles/1`, `gatekeeper_role/1` : config + overrides opts) ; `ProjectOnboard` et
+`GatekeeperSeal` (qui re-exporte `gatekeeper_role/0`) délèguent ici, plus aucun défaut réécrit chez l'appelant, `:hop_runner` (offload complétion, F067), `:wake_recovery` (seam recovery de wake,
 défaut `&Fleet.Pilot.WakeRecovery.wake/3` ; MA-17 : le retour du wake est load-bearing → un kick injoignable
 remonte `{:error,{:wake_unreached,_}}` au dispatch (tally honnête) / une telemetry au gatekeeper, jamais avalé).
 

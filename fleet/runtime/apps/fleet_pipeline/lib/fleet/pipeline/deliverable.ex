@@ -64,11 +64,6 @@ defmodule Fleet.Pipeline.Deliverable do
   @payload_keys [:files, :identity, :message]
   @identity_keys [:author_name, :author_email, :committer_name, :committer_email]
 
-  # Composants du refspec poussé (`<local_ref>:<target_branch>`). Système-choisis, mais gardés au
-  # boundary (un mandat/catalogue malformé ne doit pas atteindre `git push` brut). Aligné sur
-  # `Git.@branch_re` (check-ref-format grosso-modo) ; rejette `..`, espaces, leading `-`.
-  @ref_re ~r/^[A-Za-z0-9][A-Za-z0-9._\/\-]*$/
-
   @doc """
   Publie le livrable : CONTENU (mode) → GATE (partagée) → PUSH. Retourne `{:ok, %{commit_sha,
   pushed?, mode}}` ou le PREMIER `{:error, reason}` (fail-loud à chaque temps ; aucun push si la gate
@@ -139,13 +134,12 @@ defmodule Fleet.Pipeline.Deliverable do
     end
   end
 
-  defp check_ref(ref) when is_binary(ref) do
-    if Regex.match?(@ref_re, ref) and not String.contains?(ref, ".."),
-      do: :ok,
-      else: {:error, {:invalid_ref, ref}}
+  # Validation du refspec (`<local_ref>:<target_branch>`) déléguée à l'AUTORITÉ UNIQUE
+  # `Fleet.Pipeline.GitRef` (la regex check-ref-format vivait ici en double avec `Git`). On garde la
+  # forme d'erreur typée propre à ce module (qui porte le `ref` fautif).
+  defp check_ref(ref) do
+    if Fleet.Pipeline.GitRef.valid?(ref), do: :ok, else: {:error, {:invalid_ref, ref}}
   end
-
-  defp check_ref(ref), do: {:error, {:invalid_ref, ref}}
 
   # ============================================================
   # Temps 1 — CONTENU (seule divergence de mode)

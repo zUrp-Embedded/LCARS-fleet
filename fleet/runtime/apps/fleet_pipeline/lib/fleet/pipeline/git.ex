@@ -63,13 +63,6 @@ defmodule Fleet.Pipeline.Git do
   # armant `filter=`) qui ferme ce vecteur-là ; ici on ferme les vecteurs config globale/système + hooks.
   @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
-  # Refuse branches/refs avec caractères ambigus (espace, ..., leading `-`).
-  # Pas une défense anti-injection (System.cmd n'utilise pas de shell), juste
-  # un garde-fou contre des entrées catalogue manifestement cassées. Aligne
-  # grosso-modo sur git check-ref-format : commence par alphanumérique, puis
-  # `[A-Za-z0-9._/-]`, et rejette le substring `..`.
-  @branch_re ~r/^[A-Za-z0-9][A-Za-z0-9._\/\-]*$/
-
   @doc """
   Compose la séquence git système-side (add → commit → [push]) dans
   `workspace`. Pure data → action ; pas d'état conservé.
@@ -127,13 +120,11 @@ defmodule Fleet.Pipeline.Git do
   defp check_workspace_string(ws) when is_binary(ws) and ws != "", do: :ok
   defp check_workspace_string(_ws), do: {:error, :invalid_workspace}
 
-  defp check_branch(branch) when is_binary(branch) do
-    if Regex.match?(@branch_re, branch) and not String.contains?(branch, ".."),
-      do: :ok,
-      else: {:error, :invalid_branch}
+  # Validation de la branche déléguée à l'AUTORITÉ UNIQUE `Fleet.Pipeline.GitRef` (la regex check-ref-format
+  # vivait ici en double avec `Deliverable`). On garde la forme d'erreur typée propre à ce module.
+  defp check_branch(branch) do
+    if Fleet.Pipeline.GitRef.valid?(branch), do: :ok, else: {:error, :invalid_branch}
   end
-
-  defp check_branch(_branch), do: {:error, :invalid_branch}
 
   defp check_push_remote(%{push?: true} = opts) do
     case Map.get(opts, :remote) do

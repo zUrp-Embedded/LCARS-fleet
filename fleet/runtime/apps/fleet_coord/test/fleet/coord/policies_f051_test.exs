@@ -39,4 +39,20 @@ defmodule Fleet.Coord.PoliciesF051Test do
       Policies.init_policies!()
     end
   end
+
+  # Finding 13 : une MAP YAML valide mais structurellement INVALIDE vs `coord-policies-v1.json` (ici un
+  # mapping sans `action`) doit FAIL-FAST au boot — avant, le code n'acceptait que « est une map » et la
+  # validation schema ne tournait qu'en test, jamais dans `init_policies!/0`. Le raise précède le
+  # `:persistent_term.put` → la table chargée au boot reste intacte (les autres tests gardent une table valide).
+  test "Finding 13 : map valide mais INVALIDE vs schema (mapping sans action) → raise fail-loud" do
+    tmp = Path.join(System.tmp_dir!(), "coord-pol-bad-#{System.unique_integer([:positive])}.yaml")
+    File.write!(tmp, "mappings:\n  \"audit.proven\":\n    escalation_path: []\n")
+    on_exit(fn -> File.rm(tmp) end)
+
+    Application.put_env(:fleet_coord, :policies_path, tmp)
+
+    assert_raise RuntimeError, ~r/INVALIDE vs coord-policies-v1\.json/, fn ->
+      Policies.init_policies!()
+    end
+  end
 end

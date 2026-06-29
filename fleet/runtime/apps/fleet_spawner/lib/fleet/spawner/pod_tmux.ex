@@ -97,13 +97,21 @@ defmodule Fleet.Spawner.PodTmux do
 
   @doc """
   Pattern `pkill -f` pour un pod_id : ancré-en-token (`(^| )<escaped>( |$)`) et échappé, ou `:unsafe`
-  si le pod_id ne matche pas la forme attendue (alphanumérique de tête + `.-_`, ≥4 chars). Public pour
-  test — fonction pure. `:unsafe` ⇒ on NE lance PAS pkill (un pod_id vide/anormal produirait
-  un pattern catastrophique).
+  si le pod_id ne convient pas. Public pour test — fonction pure. `:unsafe` ⇒ on NE lance PAS pkill
+  (un pod_id vide/anormal produirait un pattern catastrophique).
+
+  Deux gardes, dans cet ordre :
+    1. path-safety déléguée à l'AUTORITÉ UNIQUE du charset pod_id, `Fleet.Spawner.valid_pod_id?/1` (charset
+       `[A-Za-z0-9._-]`, pas de `..`) — plus de regex de charset concurrente qui pourrait diverger de
+       l'admission au spawn ;
+    2. delta STRICT propre au domaine pkill : tête alphanumérique + longueur ≥4. C'est un sur-blindage local
+       (un pattern trop court/large tuerait le BEAM — anti self-kill), pas un second format : tout pod_id réel
+       (validé au spawn) passe la garde 1 à l'identique ; seul un id anormal `..`/court est rejeté ici.
   """
   @spec pkill_pattern(String.t()) :: {:ok, String.t()} | :unsafe
   def pkill_pattern(pod_id) when is_binary(pod_id) do
-    if Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._\-]{3,}\z/, pod_id) do
+    if Fleet.Spawner.valid_pod_id?(pod_id) and
+         Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._\-]{3,}\z/, pod_id) do
       {:ok, "(^| )#{Regex.escape(pod_id)}( |$)"}
     else
       :unsafe

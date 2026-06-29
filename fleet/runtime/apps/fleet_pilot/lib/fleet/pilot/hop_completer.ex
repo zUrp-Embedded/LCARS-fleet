@@ -322,10 +322,13 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # Producteur extrait du `producer_branch` (`lcars/issue-N-<producteur>`) pour le commentaire de sceau.
+  # Le format de la feature-branch a une AUTORITÉ UNIQUE : `ForgeClient.parse_feature_branch/1` (collée à
+  # son builder `feature_branch/2`). On délègue le parse au lieu d'une regex locale → plus de drift possible.
+  # Fallback `engineer` si la branche n'est pas une feature-branch fleet (head non reconnu / absent).
   defp producer_of(branch) when is_binary(branch) do
-    case Regex.run(~r{issue-\d+-(.+)$}, branch) do
-      [_, producer] -> producer
-      _ -> "engineer"
+    case ForgeClient.parse_feature_branch(branch) do
+      {:ok, {_n, producer}} -> producer
+      :error -> "engineer"
     end
   end
 

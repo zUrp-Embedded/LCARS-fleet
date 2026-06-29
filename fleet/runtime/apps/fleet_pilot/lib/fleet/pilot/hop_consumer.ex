@@ -1201,9 +1201,11 @@ defmodule Fleet.Pilot.HopConsumer do
 
   defp gate_result(_), do: nil
 
-  # Vocab canon gate-decision-v1.json. Fail-closed : nil/inconnu → "halt_invalid" (jamais
-  # "continue" sur décision absente/malformée → route en await_arch).
-  @gate_decisions ~w(continue abandon redirect escalate_user halt_wait_input)
+  # Vocab canon = AUTORITÉ UNIQUE `Fleet.Pipeline.GateDecision` (évalué au compile → liste literal,
+  # utilisable dans le guard `in` ci-dessous ; ce module se recompile si la liste canon change).
+  # Fail-closed : nil/inconnu → "halt_invalid" (jamais "continue" sur décision absente/malformée →
+  # route en await_arch). `halt_invalid` n'est PAS dans la liste canon (c'est le fallback interne).
+  @gate_decisions Fleet.Pipeline.GateDecision.decisions()
   defp gate_decision(result) when is_map(result) do
     case result["decision"] do
       d when d in @gate_decisions -> d

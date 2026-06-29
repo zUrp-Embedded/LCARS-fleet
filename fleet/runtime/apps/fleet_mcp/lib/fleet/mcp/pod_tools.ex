@@ -415,29 +415,30 @@ defmodule Fleet.MCP.PodTools do
   # La PR EN COURS du ticket #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
   # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.
   defp ticket_pr_status(forge, repo, number) do
-    # Feature-branch du ticket = `lcars/issue-<n>-<role>` ; le `-` final distingue #1 de #12. Format
-    # CANONIQUE = `Fleet.Pilot.ForgeClient.feature_branch/2` (collé à son parseur `parse_feature_branch/1`).
-    # Construit ICI en dur (le préfixe `lcars/issue-<n>-`, sans rôle, sert au matching de head.ref) :
-    # fleet_mcp n'a PAS de dep compile-time vers fleet_pilot (le forge est résolu en runtime via
-    # `Application.get_env`) — ajouter une dep d'app juste pour ce préfixe serait disproportionné. Compromis
-    # assumé : si le format change, suivre le builder canonique ci-dessus.
-    prefix = "lcars/issue-#{number}-"
-
+    # La PR du ticket #n = celle dont le head est la feature-branch `lcars/issue-<n>-<role>`. Le parse
+    # de ce format est délégué à l'AUTORITÉ UNIQUE `parse_feature_branch/1` (co-localisée avec son builder
+    # `feature_branch/2`) au lieu de reconstruire le préfixe en dur : un changement de format se fait alors
+    # dans le seul ForgeClient. L'autorité est appelée via le `forge` INJECTÉ (résolu runtime, défaut
+    # `Fleet.Pilot.ForgeClient`) — donc aucune dep compile-time de fleet_mcp vers fleet_pilot.
     case forge.list_open_pulls(repo, []) do
       {:ok, pulls} ->
         Enum.find_value(pulls, fn pr ->
           head = get_in(pr, ["head", "ref"]) || ""
 
-          if String.starts_with?(head, prefix) do
-            verdicts =
-              case forge.pr_review_verdicts(repo, pr["number"],
-                     head_sha: get_in(pr, ["head", "sha"])
-                   ) do
-                {:ok, v} -> v
-                _ -> %{}
-              end
+          case forge.parse_feature_branch(head) do
+            {:ok, {^number, _role}} ->
+              verdicts =
+                case forge.pr_review_verdicts(repo, pr["number"],
+                       head_sha: get_in(pr, ["head", "sha"])
+                     ) do
+                  {:ok, v} -> v
+                  _ -> %{}
+                end
 
-            %{"number" => pr["number"], "merged" => pr["merged"], "verdicts" => verdicts}
+              %{"number" => pr["number"], "merged" => pr["merged"], "verdicts" => verdicts}
+
+            _ ->
+              nil
           end
         end)
 

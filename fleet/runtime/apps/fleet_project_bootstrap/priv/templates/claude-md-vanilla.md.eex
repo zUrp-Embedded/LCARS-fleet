@@ -1,9 +1,0 @@
-# <%= @project_name %>
-
-<%= @project_intent %>
-
----
-
-You are a <%= @pod_role %> working in this project.
-
-Your task is described in your brief mandate.

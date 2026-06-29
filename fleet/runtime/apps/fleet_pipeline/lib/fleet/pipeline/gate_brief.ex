@@ -10,7 +10,9 @@ defmodule Fleet.Pipeline.GateBrief do
   structurées vont aussi dans `task.metadata` ; ce brief est la forme lisible.
   """
 
-  @decisions ~w(continue abandon redirect escalate_user halt_wait_input)
+  # Vocab des décisions = AUTORITÉ UNIQUE `Fleet.Pipeline.GateDecision` (évalué au compile, donc
+  # ce brief se recompile si la liste canon change — plus de vocabulaire local qui dérive du validateur).
+  @decisions Fleet.Pipeline.GateDecision.decisions()
 
   @doc """
   Rend le brief markdown depuis le contexte de gate.

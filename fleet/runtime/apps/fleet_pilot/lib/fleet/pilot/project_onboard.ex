@@ -144,19 +144,11 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  # Comptes de rôle qui agissent sur un repo = producteur + juges + gatekeeper (config, data catalogue).
+  # Comptes de rôle qui agissent sur un repo = producteur + juges + gatekeeper. Les trois viennent de
+  # l'AUTORITÉ UNIQUE `Fleet.Pilot.Roles` (config + overrides opts) — plus de défaut `engineer`/`gatekeeper`
+  # réécrit ici.
   defp fleet_roles(opts),
-    do: [producer_role(opts)] ++ Roles.reviewer_roles(opts) ++ [gatekeeper_role(opts)]
-
-  defp producer_role(opts),
-    do:
-      Keyword.get(opts, :producer_role) ||
-        Application.get_env(:fleet_pilot, :producer_role, "engineer")
-
-  defp gatekeeper_role(opts),
-    do:
-      Keyword.get(opts, :gatekeeper_role) ||
-        Application.get_env(:fleet_pilot, :gatekeeper_role, "gatekeeper")
+    do: [Roles.producer_role(opts)] ++ Roles.reviewer_roles(opts) ++ [Roles.gatekeeper_role(opts)]
 
   defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])
 

@@ -123,6 +123,17 @@ defmodule Fleet.SPBuilderTest do
       refute sp_md =~ "Role base"
     end
 
+    test "modop_root config-OBLIGATOIRE : modop sans config → {:error, :modop_root_unconfigured} (fail-loud)" do
+      # EXERCE le DÉFAUT runtime (sans put_env) : on retire l'override du setup → modop_root non configuré.
+      # cap-profile sans systemPrompt (cas prod) → sp_role_base vide, on isole le modop_root non configuré.
+      # Plus de défaut relatif `"modop"` (qui donnait un `:enoent` muet en release) : fail-loud explicite.
+      Application.delete_env(:fleet_sp_builder, :modop_root)
+      profile = valid_cap_profile(%{"systemPrompt" => nil})
+
+      assert {:error, :modop_root_unconfigured} =
+               Fleet.SPBuilder.compose(profile, ["fire-mode"])
+    end
+
     test "preloaded_paths section is included when given", %{sp_role_root: sp_root} do
       write_sp_role(sp_root, "engineer-role.md", "# Role")
 

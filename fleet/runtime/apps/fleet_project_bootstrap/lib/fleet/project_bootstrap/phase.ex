@@ -1,40 +1,21 @@
 # `Fleet.CapProfile` garantit des clés STRING (normalisation à `to_struct`) →
-# les phases accèdent `cap_profile.spec["..."]` directement, sans accesseur
+# `Phase.Clone` accède `cap_profile.spec["..."]` directement, sans accesseur
 # tolérant atom|string ni double-lookup défensif (le profil porte déjà la
 # forme canonique, inutile de la re-vérifier ici).
 defmodule Fleet.ProjectBootstrap.Phase do
   @moduledoc """
-  Les 5 sous-phases de `Fleet.ProjectBootstrap.prepare/3`. Fonctions pures
-  (aucun process : File / Path / git / EEx). Erreurs typées par phase
-  (codes de sortie distincts).
+  `Phase.Clone` — la seule phase CÂBLÉE en prod du bootstrap de pod. Fonctions pures
+  (aucun process : File / Path / git). Erreurs typées (codes de sortie distincts).
+  Câblée DIRECTEMENT par `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` →
+  `clone_or_skip`/`clone_work_doc`, et `reset_in_place` au re-mandate slot-freeze).
   Accès cap-profile : clés STRING directes (`cap_profile.spec["..."]`) —
   `Fleet.CapProfile` garantit la forme à la production.
+
+  (L'orchestrateur `prepare/3` et les 4 phases non-Clone — Allocate / InitMimic /
+  BindCredentials / PrepareMountBinds — ont été RETIRÉS : chemin mort jamais câblé en
+  prod, les concerns correspondants sont assurés ailleurs — CLAUDE.md par `do_project`
+  côté pod.ex, mounts/creds par `bwrap_launch.sh`.)
   """
-
-  defmodule Allocate do
-    @moduledoc """
-    Phase 1 — ALLOCATE pod_dir = `<pod_dir_base>/pod-<id>`.
-
-    `:pod_dir_base` est **REQUIS** dans `opts` — **aucun défaut `/tmp`** : les pods vivent sous
-    `/home/<human>/pods/pod_<id>` (per-human, isolé par ownership OS), JAMAIS `/tmp` (la tmpfs bwrap
-    orphelinerait les writes). Prod injecte la racine calculée côté `Fleet.Spawner.Pod` (qui connaît
-    l'humain) ; les tests injectent leur `tmp_dir`. Le défaut explicite-ou-rien évite de réintroduire
-    le piège `/tmp` si `prepare/3` était un jour câblé (aujourd'hui le spawner emprunte direct `Clone`,
-    sans passer par cette phase).
-    """
-    @spec allocate(String.t(), struct(), keyword()) :: {:ok, Path.t()} | {:error, term()}
-    def allocate(pod_id, _cap_profile, opts) when is_binary(pod_id) and pod_id != "" do
-      base = Keyword.fetch!(opts, :pod_dir_base)
-      pod_dir = Path.join(base, "pod-#{pod_id}")
-
-      case File.mkdir_p(pod_dir) do
-        :ok -> {:ok, pod_dir}
-        {:error, reason} -> {:error, {:allocate_failed, reason}}
-      end
-    end
-
-    def allocate(_, _, _), do: {:error, {:allocate_failed, :invalid_pod_id}}
-  end
 
   defmodule Clone do
     @moduledoc """
@@ -259,93 +240,5 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # que le pod ne peut pas surcharger. La garantie vit côté monde :
     # `Fleet.Pipeline.DeliverableGate.check_identity/3` rejette au push tout commit hors identité
     # autorisée (le pod ne PEUT PAS pousser un livrable usurpé).
-  end
-
-  defmodule InitMimic do
-    @moduledoc """
-    Phase 3 — `/init` mimic vanilla : rend `templates/claude-md-vanilla.md`
-    (EEx) → `<workspace>/CLAUDE.md`. L'agent découvre un projet post-/init,
-    ne réinvoque pas `/init`.
-    """
-    @spec init_mimic(Path.t(), Fleet.CapProfile.t()) :: {:ok, Path.t()} | {:error, term()}
-    def init_mimic(workspace, %Fleet.CapProfile{spec: spec} = cap) do
-      tpl =
-        Application.app_dir(:fleet_project_bootstrap, "priv/templates/claude-md-vanilla.md.eex")
-
-      project = spec["project"] || %{}
-
-      assigns = [
-        project_name: project["name"] || "project",
-        project_intent: project["intent"] || "",
-        pod_role: Fleet.CapProfile.name(cap)
-      ]
-
-      with {:ok, tpl_src} <- File.read(tpl),
-           rendered <- EEx.eval_string(tpl_src, assigns: assigns),
-           path <- Path.join(workspace, "CLAUDE.md"),
-           :ok <- File.write(path, rendered) do
-        {:ok, path}
-      else
-        {:error, r} -> {:error, {:init_mimic_failed, r}}
-      end
-    end
-  end
-
-  defmodule BindCredentials do
-    @moduledoc """
-    Phase 4 — creds via **claudeDir natif bind**. Pas d'injection d'env OAuth :
-    le claudeDir du compte de l'humain est monté RW par `bwrap_launch.sh` en
-    `~/.claude` (CLAUDE_DIR), refresh délégué au lockfile cross-process natif
-    Anthropic. Le path CLAUDE_DIR est résolu par `Fleet.Spawner` depuis la
-    registration de l'humain (onboarding/catalogue déféré). Cette phase ne
-    produit donc aucun env à injecter.
-    """
-
-    @doc """
-    Retourne un env vide : aucune variable OAuth injectée (le coffre custom et le
-    chemin RT-env historiques sont dépréciés au profit du claudeDir natif). Les
-    creds vivent dans le claudeDir bindé par bwrap. Le pattern `%Fleet.CapProfile{}`
-    garde le contrat (struct invalide → erreur typée).
-    """
-    @spec bind_credentials(Path.t(), Fleet.CapProfile.t()) ::
-            {:ok, %{String.t() => String.t()}} | {:error, term()}
-    def bind_credentials(_pod_dir, %Fleet.CapProfile{}) do
-      {:ok, %{}}
-    end
-
-    def bind_credentials(_pod_dir, _not_a_cap_profile) do
-      {:error, {:credentials_resolve_failed, :not_a_cap_profile}}
-    end
-  end
-
-  defmodule PrepareMountBinds do
-    @moduledoc """
-    Phase 5 — calcule les paths plugins à mount-bind RO (effectivement bindés
-    en phase LAUNCH par bwrap_launch.sh). Selon `spec.knowledge.skills/plugins`.
-    `~/.claude/CLAUDE.md` NON montée (le CLAUDE.md vanilla de la phase 3 prend
-    la place).
-    """
-    @spec prepare_mount_binds(Path.t(), Fleet.CapProfile.t()) ::
-            {:ok, [{Path.t(), Path.t(), :ro | :rw}]} | {:error, term()}
-    def prepare_mount_binds(pod_dir, %Fleet.CapProfile{spec: spec}) do
-      knowledge = spec["knowledge"] || %{}
-      skills = knowledge["skills"] || []
-      home = System.user_home!()
-
-      binds =
-        if skills == [] do
-          []
-        else
-          [
-            # Target = HOME du pod (= $POD_DIR, cf. bwrap_launch.sh --setenv HOME),
-            # PAS /home/<role> : le rôle n'est pas un user Linux, le chemin in-pod
-            # est virtuel. Cohérent avec le bind plugins de bwrap_launch.sh.
-            {Path.join(home, ".claude/plugins/superpowers"),
-             Path.join(pod_dir, ".claude/plugins/superpowers"), :ro}
-          ]
-        end
-
-      {:ok, binds}
-    end
   end
 end

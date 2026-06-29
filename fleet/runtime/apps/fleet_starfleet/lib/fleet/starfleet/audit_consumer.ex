@@ -16,7 +16,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
     * `:"pod.refuse_pattern_match"` — hit de pattern refusé (émetteur pod-side jamais
       implémenté).
     * `:"pod.drift"` — seuil de drift (même émetteur prévu, jamais implémenté).
-    * `:"pod.terminated"` — retiré du registry (non produit).
 
   Pattern GenServer subscribe au boot (init/1), `handle_info({atom,
   event}, state)` dispatch par atome. Pas de side effect runtime
@@ -97,7 +96,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
         %Fleet.Event{source: :spawner, type: type, payload: payload},
         state
       )
-      when type in [:"pod.completed", :"pod.failed", :"pod.terminated"] do
+      when type in [:"pod.completed", :"pod.failed"] do
     log_pod_lifecycle_event(type, payload)
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
@@ -172,16 +171,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
     )
   end
 
-  defp log_event(:"pod.terminated", event) do
-    payload = Map.get(event, "payload", %{})
-
-    Logger.info(
-      "AUDIT pod.terminated pod=#{Map.get(payload, "pod_id", "?")} " <>
-        "exit_code=#{Map.get(payload, "exit_code", "?")} " <>
-        "had_result=#{Map.get(payload, "had_result", "?")}"
-    )
-  end
-
   defp log_event(_other, _event), do: :ok
 
   # BL-021 chantier 2d — task_queue lifecycle (DN orchestration/task-queue §E)
@@ -245,13 +234,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
       "AUDIT pod.failed pod=#{Map.get(payload, "pod_id", "?")} " <>
         "ticket=#{Map.get(payload, "ticket_id", "?")} " <>
         "reason=#{inspect(Map.get(payload, "reason"))}"
-    )
-  end
-
-  defp log_pod_lifecycle_event(:"pod.terminated", payload) do
-    Logger.info(
-      "AUDIT pod.terminated pod=#{Map.get(payload, "pod_id", "?")} " <>
-        "exit_code=#{Map.get(payload, "exit_code", "?")}"
     )
   end
 

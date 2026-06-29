@@ -21,10 +21,6 @@ defmodule Fleet.Observation.Deck do
 
   use Plug.Router
 
-  # Rôles connus → icône SVG (priv/static/assets). starfleet exclu de l'affichage :
-  # domaine système hors-bande, pas le rail fleet (l'asset existe mais aucun panel l'instrumente).
-  @known_roles ~w(architect consultant engineer gatekeeper qualifier reviewer vulcan)
-
   plug(Plug.Static,
     at: "/static",
     from: {:fleet_observation, "priv/static"},
@@ -48,7 +44,8 @@ defmodule Fleet.Observation.Deck do
   end
 
   get "/api/pods" do
-    pods = Fleet.Spawner.list_pods() |> Enum.map(&pod_view/1)
+    known = display_roles()
+    pods = Fleet.Spawner.list_pods() |> Enum.map(&pod_view(&1, known))
     body = Jason.encode!(%{pods: pods, count: length(pods)})
 
     conn
@@ -73,10 +70,10 @@ defmodule Fleet.Observation.Deck do
   # Vue JSON-safe d'un pod : sous-ensemble du `:info`. Le runtime peut mettre
   # des termes non-encodables (`last_error`/`last_result`) → exclus. `phase`
   # (atom) + listes/strings/nil s'encodent. `role` ajouté pour l'icône.
-  defp pod_view(info) do
+  defp pod_view(info, known) do
     %{
       pod_id: info.pod_id,
-      role: role_of(info),
+      role: role_of(info, known),
       ticket_id: Map.get(info, :ticket_id),
       phase: info.phase,
       conditions: Map.get(info, :conditions, []),
@@ -85,12 +82,33 @@ defmodule Fleet.Observation.Deck do
     }
   end
 
-  # Le rôle vit UNIQUEMENT sous `:role` (gravé au spawn = nom du cap-profile, la
-  # source unique). Hors catalogue d'affichage `@known_roles` → nil : le client
-  # rend alors l'icône générique.
-  defp role_of(info) do
+  # Le rôle vit UNIQUEMENT sous `:role` (gravé au spawn = nom du cap-profile, la source unique). Hors
+  # catalogue d'AFFICHAGE → nil : le client rend l'icône générique. Ce n'est PAS un masquage du pod
+  # (le pod reste listé) ni une autorité de rôle runtime — juste le choix d'icône.
+  defp role_of(info, known) do
     role = Map.get(info, :role)
-    if is_binary(role) and role in @known_roles, do: role, else: nil
+    if is_binary(role) and role in known, do: role, else: nil
+  end
+
+  # Catalogue d'AFFICHAGE (rôle → icône SVG dédiée) DÉRIVÉ des assets réellement présents dans
+  # `priv/static/assets` : tout `<role>.svg` déposé là est reconnu automatiquement → plus de liste codée
+  # en dur à garder en sync avec les fichiers (la duplication liste↔assets disparaît, l'asset est l'autorité).
+  # Exclusions : les `favicon*.svg` (chrome, pas un rôle) et `starfleet` (domaine système hors-bande,
+  # l'asset existe mais aucun panel ne l'instrumente). `File.ls` KO (dir absent) → `[]` : dégradation sûre
+  # (tous les pods en icône générique, jamais de crash). Résolu via `app_dir` = même priv que `Plug.Static`.
+  defp display_roles do
+    case File.ls(Application.app_dir(:fleet_observation, "priv/static/assets")) do
+      {:ok, files} ->
+        for f <- files,
+            String.ends_with?(f, ".svg"),
+            role = Path.rootname(f),
+            not String.starts_with?(role, "favicon"),
+            role != "starfleet",
+            do: role
+
+      _ ->
+        []
+    end
   end
 
   defp page do
