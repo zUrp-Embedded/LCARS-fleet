@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.StageDispatcher do
   @moduledoc """
-  Dispatch `ticket assigné → spawn le rôle de la carte` : la forge EST la machine à états, ce module
-  réagit à ses transitions. Le poller voit un ticket **assigné-à-moi** (scoping multi-user porté
+  Dispatch `issue assigné → spawn le rôle de la carte` : la forge EST la machine à états, ce module
+  réagit à ses transitions. Le poller voit un issue **assigné-à-moi** (scoping multi-user porté
   forge-side, en amont), non verrouillé, et le pousse à son stage courant.
 
   ## Décision (`decide/1`) — PORTE pure
@@ -13,9 +13,9 @@ defmodule Fleet.Pilot.StageDispatcher do
   ## Effets (`dispatch_issue/2`)
 
   Sur `:engage` : résout projet + route, puis :
-    * **route absente** (issue routeless — create_ticket ne grave plus, ou ticket humain brut) →
+    * **route absente** (issue routeless — create_issue ne grave plus, ou issue humain brut) →
       `ensure_carte_or_onboard` grave la **carte par défaut** (brief-gate) → `{:skipped, :onboarded}`
-      (on défère ; le tick suivant la voit routée). C'est l'ENTRÉE système : create_ticket crée, le poller route.
+      (on défère ; le tick suivant la voit routée). C'est l'ENTRÉE système : create_issue crée, le poller route.
     * **route présente** → `carte_role` dérive `{role, profile, stage_spec}` de la POSITION carte (PAS de
       producteur en dur — la route décide ; route absente à ce point = anomalie → fail-loud, jamais l'eng en
       silence), puis l'**ordre canonique du spawn** (label `lcars-in-flight` AVANT pod, sinon double-spawn).
@@ -99,7 +99,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
         # PROJET + ROUTE résolus AVANT toute écriture forge (read-only) : un échec transitoire ne laisse pas
         # de verrou orphelin. project = base_sha pinné (hors-pod) ; route = (pipeline, stage) gravée forge-side.
-        # ROUTELESS = pas encore onboardée (create_ticket ne grave plus) → `ensure_carte_or_onboard`
+        # ROUTELESS = pas encore onboardée (create_issue ne grave plus) → `ensure_carte_or_onboard`
         # grave la carte par défaut + renvoie `{:onboarded, _}` → on DÉFÈRE (skip ; le tick suivant la voit
         # routée). Routée → `carte_role` dérive le rôle de la POSITION carte (PAS de producteur en dur ;
         # route absente à ce point = anomalie post-onboard → fail-loud, JAMAIS l'eng en silence).
@@ -122,7 +122,7 @@ defmodule Fleet.Pilot.StageDispatcher do
                  :role_resolution
                ),
              # Identité du pod + sérialisation LUES du catalogue (`slot_scope`), jamais devinées :
-             # `pod_id_for_scope/4` (instance → for_issue, fan-out par ticket | project → for_repo, UNE
+             # `pod_id_for_scope/4` (instance → for_issue, fan-out par issue | project → for_repo, UNE
              # identité par projet) et `serialize_project_scope/3` (gate AVANT tout verrou : un rôle
              # project-scoped déjà vivant → on défère `{:skipped, :role_busy}`, sinon on verrouillerait
              # une issue qu'on ne traite pas ; le poller re-dispatch au tick suivant).
@@ -164,7 +164,7 @@ defmodule Fleet.Pilot.StageDispatcher do
               brief: brief,
               pod_id: pod_id,
               rc_name: rc_name(repo, role),
-              # Nom de branche LOCALE parlant (titre du ticket sanitizé), pas
+              # Nom de branche LOCALE parlant (titre du issue sanitizé), pas
               # le pod_id. Sert à phase.ex → `feature/<slug>`. Calculé une fois (réutilisé par le gate
               # pour la reprovision in-place d'un pipe : même branche au reset qu'au spawn).
               slug: slug
@@ -174,7 +174,7 @@ defmodule Fleet.Pilot.StageDispatcher do
             |> maybe_put_repo_id(resolve_repo_id(forge, repo, forge_opts))
 
           # Spawn LEAF partagé avec dispatch_by_verdicts (verrou → pod → enqueue → wake +
-          # compensation). Producteur : verrou + ticket_id keyés sur l'ISSUE (number).
+          # compensation). Producteur : verrou + issue_id keyés sur l'ISSUE (number).
           log_ctx =
             "issue=#{repo}##{number} " <>
               "project=#{if(project, do: project["base_sha"], else: "none")} route=#{inspect(route)}"
@@ -200,14 +200,14 @@ defmodule Fleet.Pilot.StageDispatcher do
           )
         else
           {:skipped, :role_busy} ->
-            # Rôle project-scoped déjà occupé par un autre ticket du repo → DÉFÉRÉ sans verrou ni
+            # Rôle project-scoped déjà occupé par un autre issue du repo → DÉFÉRÉ sans verrou ni
             # enqueue ; le poller re-dispatch au tick suivant (sérialisation par-(repo,rôle) via la
             # boucle de poll ; le pod one-shot meurt en fin de tâche → spawn frais pour le suivant).
             {:skipped, :role_busy}
 
           {:onboarded, _stage} ->
             # Issue routeless onboardée sur la carte par défaut → on DÉFÈRE (skip ; le tick suivant
-            # la voit routée → dispatch). Entrée système : create_ticket crée, le poller route.
+            # la voit routée → dispatch). Entrée système : create_issue crée, le poller route.
             {:skipped, :onboarded}
 
           {:error, {phase, reason}} ->
@@ -226,7 +226,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   assignee-issue pour les JUGES (le producteur reste issue-assignee-driven, via `dispatch_issue`).
 
   Le pipeline-state (route = position carte) reste sur l'ISSUE : `dispatch_review` remonte de
-  `head.ref` (`lcars/issue-N-role`) au ticket et lit la route gravee. Le verrou `lcars-in-flight`
+  `head.ref` (`lcars/issue-N-role`) au issue et lit la route gravee. Le verrou `lcars-in-flight`
   est pose sur la PR (pas l'issue) : il empeche le re-spawn du juge entre le spawn et la review
   postee (apres quoi Gitea retire le reviewer de `requested_reviewers`). Idempotent (verrou PR +
   dedup du lock comment).
@@ -405,7 +405,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     # passe le subject par `normalize` (`~r/\d+/ → "N"`, PARTAGÉ pod/wake — on ne le touche PAS) : un `pr-8`
     # décimal deviendrait `pr-N` ≡ `pr-12` → après le 1er conflit d'un repo, TOUTE PR suivante en conflit serait
     # vue « récurrente » → escaladée arch au lieu d'être résolue (la résolution parallèle neutralisée dès le
-    # 2ᵉ ticket parallèle). En encodant le numéro en LETTRES (`pr-i` pour 8, `pr-m` pour 12), `normalize` ne
+    # 2ᵉ issue parallèle). En encodant le numéro en LETTRES (`pr-i` pour 8, `pr-m` pour 12), `normalize` ne
     # le collapse plus → la clé incident est DISTINCTE par PR. (Le repo, lui, peut porter des digits collapsés
     # par normalize : sans incidence — une session de conflits est dans UN repo, l'axe de distinction est la PR.)
     subject = "#{ctx.repo}#pr-#{encode_pr_letters(pr_number)}"
@@ -442,11 +442,11 @@ defmodule Fleet.Pilot.StageDispatcher do
         escalate_conflict_to_arch(pr_number, head, reason, ctx)
 
       {:escalation_failed, e} ->
-        # Récurrence DÉTECTÉE (le conflit persiste) → on escalade à l'arch comme prévu. Mais le ticket
+        # Récurrence DÉTECTÉE (le conflit persiste) → on escalade à l'arch comme prévu. Mais le issue
         # sysadmin (error_system) n'a PAS pu être ouvert (forge down ?) — on le CRIE, on ne rassure pas.
         Logger.error(
-          "StageDispatcher merge-conflict #{subject} RÉCURRENT mais ticket sysadmin ÉCHOUÉ — AUCUN " <>
-            "ticket error_system créé (forge down ?) ; escalade arch tentée tout de même : #{inspect(e)}"
+          "StageDispatcher merge-conflict #{subject} RÉCURRENT mais issue sysadmin ÉCHOUÉ — AUCUN " <>
+            "issue error_system créé (forge down ?) ; escalade arch tentée tout de même : #{inspect(e)}"
         )
 
         escalate_conflict_to_arch(pr_number, head, reason, ctx)
@@ -586,7 +586,7 @@ defmodule Fleet.Pilot.StageDispatcher do
         end
 
       # Gate de sérialisation (MÊME règle que dispatch_issue) : un producteur project-scoped déjà vivant
-      # (occupé par un autre ticket) → on DÉFÈRE, jamais re-briefer-pendant-occupé. Juges (instance) et
+      # (occupé par un autre issue) → on DÉFÈRE, jamais re-briefer-pendant-occupé. Juges (instance) et
       # rework instance → `:ok` (no-op, jamais gated). Appel uniforme via `slot_scope`. `{:skipped,
       # :role_busy}` remonte au poller (qui gère `{:skipped, _}` → retry au tick suivant).
       case serialize_project_scope(
@@ -622,7 +622,7 @@ defmodule Fleet.Pilot.StageDispatcher do
             |> maybe_put_repo_id(resolve_repo_id(forge, repo, forge_opts))
 
           # Spawn LEAF partagé avec dispatch_issue (verrou → pod → enqueue → wake + compensation).
-          # Verrou keyé sur la PR (pr_number) ; ticket_id + enqueue keyés sur l'ISSUE (issue_n — le
+          # Verrou keyé sur la PR (pr_number) ; issue_id + enqueue keyés sur l'ISSUE (issue_n — le
           # pipeline-state y reste).
           log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
 
@@ -662,7 +662,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # (gardien des PRs — « c'est dans son nom » ; token de rôle, `as_role`). Comment HONNÊTE
   # (on ne ment pas, on montre) : livré par l'eng, validé par les juges (APPROVED), mergé
   # par le système (branch-protection OFF en dev → LCARS agrège, pas Gitea — explicité). Le merge
-  # `rebase` (LINÉAIRE, gère un `main` avancé sous une PR parallèle — multi-ticket, cf. merge_pr)
+  # `rebase` (LINÉAIRE, gère un `main` avancé sous une PR parallèle — multi-issue, cf. merge_pr)
   # auto-close l'issue via `Closes #N` du body PR → close APRÈS merge, jamais avant. Pas de verrou
   # (poller mono-process) ; PR déjà mergée → 409 → la PR disparaît au tick suivant (idempotent).
   defp promote_pr(pr_number, head, ctx) do
@@ -721,7 +721,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp project_name(repo),
     do: repo |> String.split("/") |> List.last() |> String.replace(~r/[^A-Za-z0-9-]/, "-")
 
-  # Slug parlant du titre du ticket pour la branche LOCALE (`feature/<slug>`).
+  # Slug parlant du titre du issue pour la branche LOCALE (`feature/<slug>`).
   # Sanitizé + tronqué ; vide → `work`. Aucune fuite de pod_id/human.
   defp feature_slug(issue) do
     (issue["title"] || "")
@@ -844,7 +844,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   # Onboarding système. Route présente → passthrough `{:ok, route}`. Route nil (issue routeless :
-  # create_ticket ne grave plus la carte ; ou ticket humain brut) → grave la carte par défaut (brief-gate)
+  # create_issue ne grave plus la carte ; ou issue humain brut) → grave la carte par défaut (brief-gate)
   # = elle ENTRE dans le gate → `{:onboarded, stage}` (dispatch_issue défère : skip ce tick, le suivant la
   # voit routée). Route postée par le SYSTÈME (forge token système). Échec → `{:error, {:onboard, _}}`.
   defp ensure_carte_or_onboard(_forge, _repo, _number, route, _carte_loader, _forge_opts)
@@ -896,10 +896,10 @@ defmodule Fleet.Pilot.StageDispatcher do
   # (rien à puller) → idle.
   # Le `brief` = le BRIEF role-aware déjà construit (build_brief) : GateBrief désamorcé pour le
   # gatekeeper, corps de l'issue pour un worker. Un `issue["body"]` brut ferait
-  # puller au juge le brief BUILD exécutable. `metadata.issue` corrèle au ticket.
+  # puller au juge le brief BUILD exécutable. `metadata.issue` corrèle au issue.
   defp enqueue_brief(task_queue, pod_id, role, number, brief) do
     attrs = %{
-      ticket_id: Fleet.Pilot.TicketId.compose(number),
+      issue_id: Fleet.Pilot.IssueId.compose(number),
       role: role,
       brief: brief,
       metadata: %{"issue" => number}
@@ -936,7 +936,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   # Granularité d'identité du pod, dérivée du catalogue (`slot_scope` du cap-profile, source unique) :
-  #   "instance" → keyé TICKET (`for_issue`) : fan-out, un id distinct par issue/PR (juges éphémères).
+  #   "instance" → keyé ISSUE (`for_issue`) : fan-out, un id distinct par issue/PR (juges éphémères).
   #   "project"  → keyé REPO seul (`for_repo`) : UNE identité par (repo, rôle) → un slot Desktop stable.
   # Total sur l'enum slot_scope (l'accessor `Fleet.CapProfile.slot_scope/1` garantit project|instance).
   defp pod_id_for_scope("project", repo, _number, role),
@@ -947,18 +947,18 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # Serialisation des roles project-scoped : UNE identite (repo, role) vivante a la fois (1 slot Desktop).
   # Module par le lifetime :
-  #   instance         -> jamais gated (ids distincts par ticket, fan-out assume).
-  #   project one-shot  -> vivant = occupe par un autre ticket -> DEFERE ; il meurt en fin de tache +
-  #                        spawn frais au ticket suivant (comportement baseline, INCHANGE).
+  #   instance         -> jamais gated (ids distincts par issue, fan-out assume).
+  #   project one-shot  -> vivant = occupe par un autre issue -> DEFERE ; il meurt en fin de tache +
+  #                        spawn frais au issue suivant (comportement baseline, INCHANGE).
   #   project pipe      -> process RESIDENT, selon son etat (pipe_rebrief_state) :
-  #                          dead  -> :ok (spawn frais, 1er ticket) ;
+  #                          dead  -> :ok (spawn frais, 1er issue) ;
   #                          busy  -> DEFERE (travaille encore une tache OU publie son dernier livrable :
   #                                   resetter son workspace maintenant le corromprait / courserait le push) ;
   #                          ready -> reset COLD in-place du workspace pour le nouveau brief + /clear, PUIS
   #                                   :ok (spawn_stage re-brief sur un workspace propre, bonne branche).
   # Tout AVANT le verrou/enqueue (sinon on verrouillerait une issue qu'on ne traite pas). `{:skipped,
   # :role_busy}` remonte au poller (retry au tick suivant). La base du reset = `project["base_sha"]` :
-  # nouveau ticket -> main tip (fresh) ; rework -> tip de la PR (continue le travail de l'eng). 1 seule fn.
+  # nouveau issue -> main tip (fresh) ; rework -> tip de la PR (continue le travail de l'eng). 1 seule fn.
   defp serialize_project_scope("instance", _lifetime, _spawner, _pod_id, _project, _slug), do: :ok
 
   defp serialize_project_scope("project", "one-shot", spawner, pod_id, _project, _slug) do
@@ -1022,11 +1022,11 @@ defmodule Fleet.Pilot.StageDispatcher do
     end
   end
 
-  defp maybe_spawn(_spawner, true = _alive?, _profile, _ticket_id, _spawn_opts),
+  defp maybe_spawn(_spawner, true = _alive?, _profile, _issue_id, _spawn_opts),
     do: {:ok, :rebriefed}
 
-  defp maybe_spawn(spawner, false = _alive?, profile, ticket_id, spawn_opts) do
-    case spawner.spawn_pod(profile, ticket_id, spawn_opts) do
+  defp maybe_spawn(spawner, false = _alive?, profile, issue_id, spawn_opts) do
+    case spawner.spawn_pod(profile, issue_id, spawn_opts) do
       {:ok, _pid} -> {:ok, :spawned}
       {:error, _} = err -> err
     end
@@ -1040,7 +1040,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # (`maybe_spawn` : RE-BRIEFE si vivant) → enqueue du brief (que le pod pull via get_work_item) →
   # wake+recovery. Échec POST-verrou → compensation : retrait du verrou (+ kill SI frais spawn,
   # JAMAIS un re-brief vivant). `lock_target` = l'objet verrouillé (issue number | PR number) ;
-  # `ticket_number` = le ticket (issue) pour le `ticket_id` ET l'enqueue ; `log_ctx` = contexte de log caller.
+  # `issue_number` = le numéro d'issue pour le `issue_id` ET l'enqueue ; `log_ctx` = contexte de log caller.
   defp spawn_stage(
          ctx,
          pod_id,
@@ -1049,7 +1049,7 @@ defmodule Fleet.Pilot.StageDispatcher do
          brief,
          spawn_opts,
          lock_target,
-         ticket_number,
+         issue_number,
          log_ctx
        ) do
     %{forge: forge, spawner: spawner, task_queue: task_queue, repo: repo, forge_opts: forge_opts} =
@@ -1059,12 +1059,12 @@ defmodule Fleet.Pilot.StageDispatcher do
     # forge/spawner/task_queue : permet de tester le tally honnête sans hit IncidentRegistry/forge réels.
     wake_recovery = Map.get(ctx, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3)
 
-    ticket_id = Fleet.Pilot.TicketId.compose(ticket_number)
+    issue_id = Fleet.Pilot.IssueId.compose(issue_number)
     alive_before? = pod_alive?(spawner, pod_id)
 
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
-         {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, ticket_id, spawn_opts),
-         :ok <- enqueue_brief(task_queue, pod_id, role, ticket_number, brief) do
+         {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
+         :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief) do
       # Le retour de `WakeRecovery.wake` est LOAD-BEARING : `{:error, {:escalated, _}}`
       # (pod injoignable, escaladé à starfleet) ou `{:error, _}` (re-wake KO) signifie que le pod n'est
       # PAS réveillé. Jeter ce retour (`_ = wake(...)`) ferait toujours rendre `spawn_stage`
@@ -1075,7 +1075,7 @@ defmodule Fleet.Pilot.StageDispatcher do
       # le compte en `errors` (tally honnête + err_streak/telemetry reflètent l'injoignabilité réelle).
       case wake_recovery.(
              pod_id,
-             fn -> maybe_spawn(spawner, false, profile, ticket_id, spawn_opts) end,
+             fn -> maybe_spawn(spawner, false, profile, issue_id, spawn_opts) end,
              wake_fun: fn p -> safe_wake(spawner, p) end
            ) do
         :ok ->
@@ -1121,7 +1121,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # Résolution projet (base_sha pinné hors-pod)
   # ============================================================
 
-  # Construit `%{repo_path, base_branch, base_sha}` pour le repo du ticket.
+  # Construit `%{repo_path, base_branch, base_sha}` pour le repo du issue.
   # `base_url` ← `:forge_opts[:base_url]` ou config app ; `base_branch` ← `:base_branch`
   # (défaut "main"). Pas de forge configurée → `{:ok, nil}` (pod sans repo, ex. tests
   # locaux). L'auth de clone/ls-remote est portée par le runtime (`Fleet.Credentials.ForgeAuth.

@@ -40,12 +40,12 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # Brief de RÉSOLUTION DE CONFLIT : la PR est APPROUVÉE mais `main` a avancé (un
-  # autre ticket parallèle a fusionné) → conflit. Le PRODUCTEUR (git_native, il a écrit le contenu) RÉCONCILIE :
+  # autre issue parallèle a fusionné) → conflit. Le PRODUCTEUR (git_native, il a écrit le contenu) RÉCONCILIE :
   # rebase sur `main` + résolution en gardant TOUT (le sien + main). Pas un re-code. Le système pousse ;
   # le push rebasé invalide les vieilles reviews (head_sha) → les juges re-valident le fusionné, gatekeeper scelle.
   def resolve_conflict_brief(role, _forge, _repo, pr, _forge_opts, _route) do
     [
-      "RÉSOLUTION DE CONFLIT — ta PR ##{pr} a été APPROUVÉE, mais `main` a avancé depuis (un autre ticket " <>
+      "RÉSOLUTION DE CONFLIT — ta PR ##{pr} a été APPROUVÉE, mais `main` a avancé depuis (un autre issue " <>
         "parallèle a été fusionné) et ta branche **conflicte** avec `main`. On ne te demande PAS de re-coder : " <>
         "juste de RÉCONCILIER les deux versions.",
       "**Procédure (git-native)** : dans ton workspace, `git fetch origin` puis `git rebase origin/main`. Pour " <>
@@ -125,7 +125,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     # juge recevrait un corps d'issue EXÉCUTABLE (brief actif) au lieu d'un brief désamorcé. On
     # rejette bruyamment (raise) plutôt que de construire un brief dangereux en silence.
     case {kind, Map.get(stage_spec, "judge_target")} do
-      # Juge de BRIEF (judge_target:brief) → juge le ticket.body (exécutable ?), PAS un livrable
+      # Juge de BRIEF (judge_target:brief) → juge le issue.body (exécutable ?), PAS un livrable
       # (pas de code en amont).
       {"judge", "brief"} ->
         build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route)
@@ -231,7 +231,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # Brief d'un juge de BRIEF (brief-review, judge_target:brief). Le consultant juge le BRIEF
-  # (ticket.body rédigé par l'arch) AVANT que l'engineer ne parte : exécutable sans nouvelle question ? On
+  # (issue.body rédigé par l'arch) AVANT que l'engineer ne parte : exécutable sans nouvelle question ? On
   # réutilise le MÊME GateBrief (contrat gate-decision-v1 + options canon) que les autres juges — seul le
   # `subject: :brief` recadre le « truc à juger ». Le BRIEF va dans `outputs` (le truc À JUGER ; ≠
   # build_judge_brief où outputs = le livrable/code) ; pas de `request` (le critère d'exécutabilité est

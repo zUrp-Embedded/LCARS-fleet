@@ -32,8 +32,8 @@ par `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` au spawn, `reset_in
   `work_branch`/`repo_path` ; FAIL-LOUD si déclarée mais clone échoué. `rm_rf` du `work/` résiduel avant
   clone (parité idempotence avec `clone_or_skip`).
 - **`reset_in_place/3`** — reset COLD IN-PLACE du `workspace` d'un pod RÉSIDENT (pipe slot-freeze) pour le
-  ticket suivant, SANS `rm_rf` (le `ws` est bind-monté dans le sandbox bwrap VIVANT — le supprimer
-  casserait le mount). Reset `--hard` sur le `base_sha` du NOUVEAU ticket (REQUIS — fail-loud
+  issue suivant, SANS `rm_rf` (le `ws` est bind-monté dans le sandbox bwrap VIVANT — le supprimer
+  casserait le mount). Reset `--hard` sur le `base_sha` du NOUVEAU issue (REQUIS — fail-loud
   `{:reset_failed, :no_base_sha}` sinon) + `clean -fdx` + `checkout -B feature/<slug>`.
 
 Auth git : `Fleet.Credentials.ForgeAuth.git_env/0` (token via env hors argv, `GIT_TERMINAL_PROMPT=0`).

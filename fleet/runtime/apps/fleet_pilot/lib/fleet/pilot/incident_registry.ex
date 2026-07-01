@@ -66,9 +66,9 @@ defmodule Fleet.Pilot.IncidentRegistry do
   Retour HONNÊTE — il porte ce qui s'est VRAIMENT passé, jamais un succès par optimisme :
 
     - `:recorded` — 1re fois, incident gravé en mémoire + WAL local.
-    - `{:escalated, ticket_number}` — récurrence, ticket sysadmin RÉELLEMENT ouvert (le numéro le PROUVE).
-    - `{:escalation_failed, reason}` — récurrence détectée mais l'ouverture du ticket a échoué (forge down ?) :
-      AUCUN ticket n'existe. L'incident reste en mémoire/WAL local (gravé au 1er passage), mais l'alarme
+    - `{:escalated, issue_number}` — récurrence, issue sysadmin RÉELLEMENT ouvert (le numéro le PROUVE).
+    - `{:escalation_failed, reason}` — récurrence détectée mais l'ouverture du issue a échoué (forge down ?) :
+      AUCUN issue n'existe. L'incident reste en mémoire/WAL local (gravé au 1er passage), mais l'alarme
       sysadmin N'est PAS passée → l'appelant doit le CRIER, pas rassurer.
     - `{:record_failed, reason}` — 1re fois mais l'owner (GenServer) est indisponible : l'incident n'a PAS
       été gravé du tout (ni mémoire ni WAL) → une récurrence ne pourra pas être détectée.
@@ -84,9 +84,9 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
     if seen_before?(sig, opts) do
       # `escalate_kind` (défaut `:recurrence`) : le wake passe `:sp_suspect` (récurrence = SP, pas l'agent).
-      # On PROPAGE le résultat de l'escalade : `{:escalated, num}` ne sort QUE si le ticket a vraiment été
+      # On PROPAGE le résultat de l'escalade : `{:escalated, num}` ne sort QUE si le issue a vraiment été
       # ouvert (le numéro le prouve). Forge down → `{:escalation_failed, _}` ; l'incident reste dans le WAL
-      # local (gravé au 1er passage, ce qui a rendu `seen_before?` vrai), seul le TICKET manque.
+      # local (gravé au 1er passage, ce qui a rendu `seen_before?` vrai), seul le ISSUE manque.
       case escalate(Keyword.get(opts, :escalate_kind, :recurrence), subject, reason, sig, opts) do
         {:ok, num} -> {:escalated, num}
         {:error, e} -> {:escalation_failed, e}
@@ -102,7 +102,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   @doc """
-  Ouvre un ticket système (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin) pour un
+  Ouvre un issue système (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin) pour un
   incident. `kind` : `:recurrence` | `:reroll_failed` | `:pod_failed`. Label = signal DURABLE (toujours) ;
   assignee best-effort (fallback label-only si le compte n'existe pas). **Partagé** par WakeRecovery et les
   consumers d'échec (DRY). Returns `{:ok, number}` | `{:error, term}`.
@@ -111,13 +111,13 @@ defmodule Fleet.Pilot.IncidentRegistry do
           {:ok, integer()} | {:error, term()}
   def escalate(kind, subject, reason, sig, opts \\ []) do
     create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Pilot.ForgeClient.create_issue/4)
-    repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_ticket_repo, "fleet/lcars")
+    repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_issue_repo, "fleet/lcars")
 
     label =
-      opts[:label] || Application.get_env(:fleet_pilot, :system_ticket_label, "error_system")
+      opts[:label] || Application.get_env(:fleet_pilot, :system_issue_label, "error_system")
 
     assignee =
-      opts[:assignee] || Application.get_env(:fleet_pilot, :system_ticket_assignee, "starfleet")
+      opts[:assignee] || Application.get_env(:fleet_pilot, :system_issue_assignee, "starfleet")
 
     {kind_label, kind_note} = kind_describe(kind)
     title = "[#{label}] #{kind_label} : #{subject}"
@@ -129,7 +129,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
     #{kind_note}
 
     Domaine SYSADMIN (substrat : tmux / bwrap / launch / REPL) — PAS un problème de projet.
-    (Ticket auto — durcissement #5.2.)
+    (Issue auto — durcissement #5.2.)
     #{pane_block(opts[:pane])}
     """
 
@@ -139,7 +139,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
     end
   end
 
-  # Bloc « écran capturé » (fallback-ACK déporté) attaché au ticket — vide si pas de pane.
+  # Bloc « écran capturé » (fallback-ACK déporté) attaché au issue — vide si pas de pane.
   defp pane_block(pane) when is_binary(pane) and pane != "" do
     "\n## Écran capturé (ce que l'agent affichait au moment de l'échec)\n```\n#{pane}\n```\n"
   end

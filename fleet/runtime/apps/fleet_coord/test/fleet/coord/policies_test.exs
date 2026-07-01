@@ -20,7 +20,7 @@ defmodule Fleet.Coord.PoliciesTest do
                        type: :"coord.notification_routed",
                        payload: %{
                          "target" => "dashboard",
-                         "path" => ["dashboard", "ticket_comment"],
+                         "path" => ["dashboard", "issue_comment"],
                          "message" => message
                        }
                      },

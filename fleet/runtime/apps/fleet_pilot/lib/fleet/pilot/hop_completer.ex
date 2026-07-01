@@ -177,7 +177,7 @@ defmodule Fleet.Pilot.HopCompleter do
   commits du pod (mode `git_native`, gate de cohérence déléguée à `Deliverable.publish`) sur la
   feature-branch, PUIS **ouvre la PR** `feature → base`. La PR devient la surface review+promote :
   domicile des verdicts (reviews natives) + entonnoir unique vers `main`. `body` porte `Closes #N`
-  → la forge auto-close l'issue au merge (lien ticket↔PR maintenu nativement).
+  → la forge auto-close l'issue au merge (lien issue↔PR maintenu nativement).
 
   Remplace le push `lcars/issue-N-role` + comment `[hop:role:sha]` de la séquence maison.
   **Idempotent** : `open_pr` retrouve une PR déjà ouverte pour la même head (replay-safe).
@@ -386,7 +386,7 @@ defmodule Fleet.Pilot.HopCompleter do
 
   # SLOT-FREEZE : signale que le livrable du producteur est CONFIRME sur la forge (commit pousse + PR
   # ouverte). Emis APRES open_deliverable_pr (donc le push a deja LU le workspace) → un pod pipe resident
-  # peut alors reset son workspace pour le ticket suivant SANS courser le push. Porte le `pod_id` (le pod
+  # peut alors reset son workspace pour le issue suivant SANS courser le push. Porte le `pod_id` (le pod
   # producteur, depuis le payload pod.completed). Source :pipeline (la publication est une op pipeline).
   # Best-effort : un echec d'emission ne casse PAS la completion (le livrable est deja publie) — le
   # backstop cote pod (deadline :publishing) couvre un rate. No-op si pas de pod_id (legacy/test).
@@ -435,9 +435,9 @@ defmodule Fleet.Pilot.HopCompleter do
         role_opts = ForgeClient.as_role(forge_opts, role)
 
         # La voix de l'eng sur DEUX canaux à 2 buts distincts — la PR (revue du
-        # diff, contexte code) ET le TICKET (réponse au brief, « voici ce que j'ai fait », contexte
-        # issue) ; servir la PR seule laisserait un trou côté ticket. Best-effort, `as_role` (le pod reste
-        # forge-aveugle, le SYSTÈME poste en son nom — même geste que le commentaire gatekeeper sur le ticket).
+        # diff, contexte code) ET le ISSUE (réponse au brief, « voici ce que j'ai fait », contexte
+        # issue) ; servir la PR seule laisserait un trou côté issue. Best-effort, `as_role` (le pod reste
+        # forge-aveugle, le SYSTÈME poste en son nom — même geste que le commentaire gatekeeper sur le issue).
         _ =
           forge.post_comment(
             repo,
@@ -450,7 +450,7 @@ defmodule Fleet.Pilot.HopCompleter do
           forge.post_comment(
             repo,
             n,
-            "## 🔧 Note de l'#{role} sur le ticket\n\n#{summary}",
+            "## 🔧 Note de l'#{role} sur le issue\n\n#{summary}",
             role_opts
           )
 
@@ -627,7 +627,7 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # Assigne l'HUMAIN commanditaire à la PR (comme le ticket : voir QUEL humain a drivé les
+  # Assigne l'HUMAIN commanditaire à la PR (comme le issue : voir QUEL humain a drivé les
   # agents). L'humain DRIVE, ne fait rien → il ne signe rien, mais il est l'assignee partout (traça du
   # driver). Assignee = champ de routing (pas d'authorship) → token système OK. Humain irrésoluble →
   # best-effort (le code EST livré) : log + on n'échoue pas le hop.

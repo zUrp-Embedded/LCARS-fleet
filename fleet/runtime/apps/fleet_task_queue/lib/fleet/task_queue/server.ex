@@ -131,7 +131,7 @@ defmodule Fleet.TaskQueue.Server do
     task = %WorkItem{
       id: UUID.uuid4(),
       pod_id: pod_id,
-      ticket_id: attrs[:ticket_id] || attrs["ticket_id"],
+      issue_id: attrs[:issue_id] || attrs["issue_id"],
       role: attrs[:role] || attrs["role"],
       brief: attrs[:brief] || attrs["brief"],
       deadline: attrs[:deadline] || attrs["deadline"],
@@ -219,7 +219,7 @@ defmodule Fleet.TaskQueue.Server do
             # pod « tâche close » alors que le hop ne finira jamais → verrou conservé à vie) : on propage
             # `{:error, {:broadcast_failed, _}}`. La tâche RESTE `:completed`+persistée (le livrable n'est
             # pas perdu ; le rail forge-driven re-dérive au besoin), mais le pod voit un échec honnête.
-            # role/ticket_id additifs : le DeliveryPublisher stampe l'identité de l'agent d'origine
+            # role/issue_id additifs : le DeliveryPublisher stampe l'identité de l'agent d'origine
             # sur le commit forge. Les consumers existants ignorent les clés extra.
             # `metadata` additif : le verdict work_item_completed porte le metadata de la TÂCHE (qui
             # survit dans le broker au crash du HopConsumer seul). Pour une éval gatekeeper il porte le
@@ -229,7 +229,7 @@ defmodule Fleet.TaskQueue.Server do
               event(:work_item_completed, completed, %{
                 work_item_id: completed.id,
                 role: completed.role,
-                ticket_id: completed.ticket_id,
+                issue_id: completed.issue_id,
                 result: clean_result,
                 metadata: completed.metadata
               })
@@ -300,16 +300,16 @@ defmodule Fleet.TaskQueue.Server do
     {:reply, {:ok, status}, state}
   end
 
-  # SLOT-FREEZE : ticket de la DERNIERE tache du pod (couvre :completed = fenetre de publication). Le
+  # SLOT-FREEZE : issue de la DERNIERE tache du pod (couvre :completed = fenetre de publication). Le
   # poller s'en sert pour qu'un eng pipe project-scoped possede le verrou de sa brique active/en-cours.
-  def handle_call({:pod_active_ticket_id, pod_id}, _from, state) do
-    ticket =
+  def handle_call({:pod_active_issue_id, pod_id}, _from, state) do
+    issue =
       case latest_for_pod(state.tasks, pod_id) do
         nil -> nil
-        %WorkItem{ticket_id: t} -> t
+        %WorkItem{issue_id: t} -> t
       end
 
-    {:reply, {:ok, ticket}, state}
+    {:reply, {:ok, issue}, state}
   end
 
   # Last-poll du pod (`DateTime | nil`) = l'ACK in-band du bootstrap (« l'agent a tendu la main »,

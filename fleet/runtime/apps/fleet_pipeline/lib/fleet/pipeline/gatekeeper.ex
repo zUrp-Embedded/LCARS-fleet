@@ -35,7 +35,7 @@ defmodule Fleet.Pipeline.Gatekeeper do
 
   @pt_key {__MODULE__, :pod_id}
   @pod_id "gatekeeper-permanent"
-  @ticket_id "permanent-gatekeeper"
+  @issue_id "permanent-gatekeeper"
 
   @doc """
   `pod_id` du gatekeeper permanent à adresser, ou `nil` si aucun n'est booté.
@@ -107,7 +107,7 @@ defmodule Fleet.Pipeline.Gatekeeper do
   # spawner rattrape (le 2e reçoit `{:already_started, _}` sur le `@pod_id` stable)
   # → un seul pod spawné, les deux registrent le même pod_id. Sain (singleton).
   defp do_spawn(spawner, cp) do
-    case spawner.(cp, @ticket_id, pod_id: @pod_id) do
+    case spawner.(cp, @issue_id, pod_id: @pod_id) do
       {:ok, _pid} -> :ok
       {:ok, _pid, _info} -> :ok
       {:error, {:already_started, _pid}} -> :ok

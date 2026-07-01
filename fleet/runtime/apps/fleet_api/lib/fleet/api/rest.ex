@@ -189,11 +189,11 @@ defmodule Fleet.API.Rest do
 
   # Champs publics admis au top-level du DTO `/api/admin/spawn`. Tout le reste est REFUSÉ.
   #   * `cap_profile_name` / `role` — le profil de capacités (l'un des deux, requis ; validé plus bas)
-  #   * `ticket_id` — corrélation forge/event (string libre)
+  #   * `issue_id` — corrélation forge/event (string libre)
   #   * `brief` — le travail du pod (string) ; replacé dans l'`opts` interne construit par l'API
   #   * `pod_id` — identifiant de pod imposé (rare, admin) ; n'est accepté QUE s'il est path-safe
   #     (même règle que `Fleet.Spawner` : `[A-Za-z0-9._-]`, pas de `..`), sinon 422
-  @admin_spawn_public_fields ~w(cap_profile_name role ticket_id brief pod_id)
+  @admin_spawn_public_fields ~w(cap_profile_name role issue_id brief pod_id)
 
   # Parse le payload entrant vers un DTO public allowlisté. Le `opts` interne du spawner n'est JAMAIS pris
   # du client : l'API le (re)construit à partir des seuls champs publics (`brief`, `pod_id`). Toute clé
@@ -209,7 +209,7 @@ defmodule Fleet.API.Rest do
         with {:ok, opts} <- build_admin_opts(raw) do
           payload =
             raw
-            |> Map.take(["cap_profile_name", "role", "ticket_id"])
+            |> Map.take(["cap_profile_name", "role", "issue_id"])
             |> maybe_put_opts(opts)
 
           {:ok, payload}

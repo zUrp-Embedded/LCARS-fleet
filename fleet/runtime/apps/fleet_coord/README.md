@@ -1,7 +1,7 @@
 # fleet_coord (chantier 14)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-29 (R06 — retrait SoftGate/Hook/HookSpawner : gates LLM consolidées sur le gatekeeper côté pipeline ; coord = policies déclaratives pures)
+**Dernière révision** : 2026-07-01 (R06 — retrait SoftGate/Hook/HookSpawner : gates LLM consolidées sur le gatekeeper côté pipeline ; coord = policies déclaratives pures)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_coord.md`, `STATUS-CHANTIERS.md`
 
@@ -54,7 +54,7 @@ ne délègue plus la gate LLM à coord.)
 mappings:
   "halt.gatekeeper.refuse":
     action: notify_dashboard
-    escalation_path: [dashboard, ticket_comment]
+    escalation_path: [dashboard, issue_comment]
   "escalate.pod_drift":
     action: escalate_human
     escalation_path: [dashboard, starfleet_alert]

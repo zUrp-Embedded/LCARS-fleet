@@ -93,14 +93,14 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
     log =
       capture_log(fn ->
-        # AUCUN ticket ouvert → le retour DIT l'échec, pas un `:escalated` rassurant ; l'appelant ne croit
+        # AUCUN issue ouvert → le retour DIT l'échec, pas un `:escalated` rassurant ; l'appelant ne croit
         # pas qu'un sysadmin a été prévenu alors que l'alarme n'est pas passée.
         assert {:error, {:escalation_failed, :forge_down}} =
                  WakeRecovery.wake("pod-down", fn -> flunk("pas de re-roll si déjà vu") end, opts)
       end)
 
     assert log =~ "escalade"
-    assert log =~ "AUCUN ticket sysadmin"
+    assert log =~ "AUCUN issue sysadmin"
   end
 
   test "escalade : create_issue échoue avec assignee → fallback label-only" do

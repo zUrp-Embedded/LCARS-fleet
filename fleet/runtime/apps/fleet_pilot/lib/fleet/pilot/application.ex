@@ -32,7 +32,7 @@ defmodule Fleet.Pilot.Application do
   @impl Application
   def start(_type, _args) do
     # Le pool forge démarre INCONDITIONNELLEMENT, avant le rail stage : le ForgeClient est aussi appelé
-    # par `create_ticket` (fleet_mcp) hors du rail Poller/HopConsumer, donc le pool doit exister dès que
+    # par `create_issue` (fleet_mcp) hors du rail Poller/HopConsumer, donc le pool doit exister dès que
     # fleet_pilot boote. Lazy (aucune connexion tant qu'aucune requête) → inoffensif hors prod/tests.
     children = [forge_finch_spec() | stage_children()]
 
@@ -59,7 +59,7 @@ defmodule Fleet.Pilot.Application do
   # Pool HTTP dédié au ForgeClient. `conn_max_idle_time: 30_000` ferme toute connexion restée idle >30s
   # AVANT que la forge ne la ferme côté serveur (le défaut Finch `:infinity` la garderait jusqu'à ce
   # qu'elle devienne stale → 1er appel suivant pendu jusqu'au receive_timeout, cause suspectée du ~30s
-  # cumulé de create_ticket). Pool HTTP/1 simple, lazy. `Req.request(finch: Fleet.Pilot.ForgeFinch)`
+  # cumulé de create_issue). Pool HTTP/1 simple, lazy. `Req.request(finch: Fleet.Pilot.ForgeFinch)`
   # côté ForgeClient l'utilise.
   defp forge_finch_spec do
     {Finch, name: Fleet.Pilot.ForgeFinch, pools: %{default: [conn_max_idle_time: 30_000]}}
@@ -143,7 +143,7 @@ defmodule Fleet.Pilot.Application do
       # concurrents (un `git` à la fois par worktree, contre la corruption d'index).
       Fleet.Pilot.WorktreeSync,
       # Ni `:repo` au Poller (découverte par topic), ni `:repo`/`:remote` au HopConsumer (per-hop).
-      # Le routing vit dans la route-comment (gravée par create_ticket) ; le Poller la lit (state-machine).
+      # Le routing vit dans la route-comment (gravée par create_issue) ; le Poller la lit (state-machine).
       {Fleet.Pilot.Poller, interval_ms: interval, stage_dispatch?: true},
       {Fleet.Pilot.HopConsumer,
        forge_opts: [], hop_runner: &Fleet.Pilot.HopConsumer.offload_async/1}

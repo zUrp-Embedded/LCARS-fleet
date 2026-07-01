@@ -49,7 +49,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
   ## Traduction event → hop
 
-    * `issue_number` ← `ticket_id` (`"issue-N"` → `N`)
+    * `issue_number` ← `issue_id` (`"issue-N"` → `N`)
     * `repo` ← **l'event** (`payload["repository"]["full_name"]`), per-hop. MULTI-PROJET :
       le HopConsumer est un singleton qui traite les hops de TOUS les projets de l'humain → le repo
       (et le `remote` où pousser) ne peut PAS être figé en config ; il VOYAGE dans l'event (« l'event
@@ -233,17 +233,17 @@ defmodule Fleet.Pilot.HopConsumer do
       # à l'aveugle avant le verdict).
       {:escalate, corr, eval_ctx} ->
         Logger.info(
-          "HopConsumer gate→gatekeeper: #{p["ticket_id"]} stage=#{eval_ctx.stage} corr=#{inspect(corr)}"
+          "HopConsumer gate→gatekeeper: #{p["issue_id"]} stage=#{eval_ctx.stage} corr=#{inspect(corr)}"
         )
 
         {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
 
       {:skip, reason} ->
-        Logger.debug("HopConsumer skip #{p["ticket_id"]} (#{reason})")
+        Logger.debug("HopConsumer skip #{p["issue_id"]} (#{reason})")
         {:noreply, state}
 
       {:error, reason} ->
-        Logger.warning("HopConsumer fin-de-hop FAIL #{p["ticket_id"]}: #{inspect(reason)}")
+        Logger.warning("HopConsumer fin-de-hop FAIL #{p["issue_id"]}: #{inspect(reason)}")
         {:noreply, state}
     end
   end
@@ -354,10 +354,10 @@ defmodule Fleet.Pilot.HopConsumer do
         {:skip, :no_project}
 
       true ->
-        case parse_issue_number(payload["ticket_id"]) do
+        case parse_issue_number(payload["issue_id"]) do
           # Repo + remote de CE hop dérivés de l'event (per-hop), pas de la config.
           {:ok, n} -> run_hop(payload, n, hop_state(payload, state))
-          :error -> {:skip, {:bad_ticket_id, payload["ticket_id"]}}
+          :error -> {:skip, {:bad_issue_id, payload["issue_id"]}}
         end
     end
   end
@@ -1210,11 +1210,11 @@ defmodule Fleet.Pilot.HopConsumer do
       is_binary(p["role"])
   end
 
-  # Le format ticket_id "issue-<n>" a une SOURCE UNIQUE (Fleet.Pilot.TicketId) — writer
+  # Le format issue_id "issue-<n>" a une SOURCE UNIQUE (Fleet.Pilot.IssueId) — writer
   # (StageDispatcher) et parser ne peuvent plus dériver. `parse_issue_number` reste l'API publique
   # (appelée par `maybe_complete` + testée hop_consumer_test) mais délègue.
   @doc false
-  defdelegate parse_issue_number(ticket_id), to: Fleet.Pilot.TicketId, as: :parse
+  defdelegate parse_issue_number(issue_id), to: Fleet.Pilot.IssueId, as: :parse
 
   # La gate d'identité `allowed_emails` = l'HUMAIN du brief (le pod git_native
   # commite EN TANT QUE l'humain, cf. `bwrap_launch.sh`/`ForgeIdentity`), PLUS le rôle. Même

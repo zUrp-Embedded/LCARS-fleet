@@ -82,7 +82,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # ── MULTI-PROJET — rend le repo neuf DÉCOUVRABLE + ACCESSIBLE par la fleet de l'humain ──
   # 1. TOPIC `lcars-fleet-<human>` (source UNIQUE `Fleet.Pilot.Poller.fleet_topic/1`, partagée avec le
   #    poller qui DÉCOUVRE par `search_repos_by_topic`) → un humain ne voit QUE ses projets (isolation REPO ;
-  #    l'axe TICKET `assigned_by` est la ceinture). 2. COLLABORATEUR write = l'humain initiateur (les
+  #    l'axe ISSUE `assigned_by` est la ceinture). 2. COLLABORATEUR write = l'humain initiateur (les
   #    comptes-rôles, eux, sont ajoutés par `grant_fleet_roles` dans `lock_main`). `my_human` = l'user OS du
   #    runtime — l'onboarding tourne dans SA BEAM (MCP `create_project`), donc `Human.current!()` EST l'humain
   #    qui a initié → cohérent avec le scoping du poller (même source). Fail-loud si l'user est irrésoluble

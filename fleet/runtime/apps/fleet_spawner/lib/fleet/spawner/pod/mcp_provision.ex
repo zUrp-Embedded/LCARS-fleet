@@ -43,7 +43,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   #
   # `LCARS_ROLE` (= `metadata.name` du cap-profile = rôle métier) : bridge.py l'injecte en `_lcars_role`.
   # Ce champ du fil est INDICATIF (surface de tools du pod, descriptif), PAS la source de la décision
-  # de token de rôle : `PodTools.create_ticket` résout le rôle depuis le SPAWN (`pod_id → role` gravé
+  # de token de rôle : `PodTools.create_issue` résout le rôle depuis le SPAWN (`pod_id → role` gravé
   # côté serveur, `Fleet.Spawner.pod_info`), pas du wire (non authentifié → usurpation). Posé ICI
   # (env du process pod) → couvre host_launch ET bwrap (qui le re-`--setenv` dans son sandbox).
   #

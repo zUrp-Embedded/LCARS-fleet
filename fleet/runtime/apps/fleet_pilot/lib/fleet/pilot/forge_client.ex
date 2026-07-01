@@ -88,7 +88,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @doc """
   Liste les issues ouvertes du `repo` qui n'ont PAS le label `exclude_label`
   (filtrage client-side : Gitea n'expose pas la négation côté query).
-  Utilisé par `Fleet.Pilot.Poller` (catch-up tickets sans
+  Utilisé par `Fleet.Pilot.Poller` (catch-up issues sans
   `lcars-dispatched`).
 
   ## Returns
@@ -155,8 +155,8 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Lit une issue par numéro (Gitea `GET /repos/{repo}/issues/{n}`). Lecture seule : `state`
-  (open/closed), labels, assignees… Utilisé par le tool MCP `get_ticket_status` (l'arch SUIT un
-  ticket délégué — ex. valider la livraison avant d'enchaîner). `{:error, {:http, 404, _}}` si absent.
+  (open/closed), labels, assignees… Utilisé par le tool MCP `get_issue_status` (l'arch SUIT un
+  issue délégué — ex. valider la livraison avant d'enchaîner). `{:error, {:http, 404, _}}` si absent.
   """
   @spec get_issue(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
   def get_issue(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
@@ -287,7 +287,7 @@ defmodule Fleet.Pilot.ForgeClient do
   def admitted?(repo, human, opts \\ []), do: Repo.admitted?(repo, human, opts)
 
   @doc """
-  Crée une issue (ticket) sur `repo`. `opts[:assignees]` = logins, `opts[:labels]` = IDs entiers
+  Crée une issue sur `repo`. `opts[:assignees]` = logins, `opts[:labels]` = IDs entiers
   (le label `type:*` de routage se pose plutôt via `add_label/4` après, résolution name→id).
   Retourne le numéro d'issue.
 
@@ -325,7 +325,7 @@ defmodule Fleet.Pilot.ForgeClient do
   Ouvre une pull request `head` → `base` sur `repo` (Gitea `POST /repos/{repo}/pulls`).
   IDEMPOTENT : si une PR ouverte existe déjà pour cette `head`, retourne son numéro (le
   409 Gitea n'est pas une erreur). `opts[:body]` = corps — y mettre `Closes #N` pour
-  l'auto-close de l'issue au merge (la forge maintient le lien ticket↔PR).
+  l'auto-close de l'issue au merge (la forge maintient le lien issue↔PR).
 
   ## Returns
     * `{:ok, number}` — PR ouverte (ou déjà existante)
@@ -436,7 +436,7 @@ defmodule Fleet.Pilot.ForgeClient do
   Merge (PROMOTE) la PR `index` en **`rebase`** (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
   `Do: rebase` par défaut) : rejoue les commits de la PR sur le `main` courant puis fast-forward →
   reste **LINÉAIRE** (pas de merge commit, doctrine append-only préservée) ET gère un `main` qui a
-  avancé sous la PR (MULTI-TICKET PARALLÈLE : 2 tickets disjoints → 2 PR du même `main` → la 1ʳᵉ
+  avancé sous la PR (MULTI-ISSUE PARALLÈLE : 2 issues disjoints → 2 PR du même `main` → la 1ʳᵉ
   merge avance `main`, la 2ᵉ n'est plus FF-able mais reste mergeable → `rebase` la passe ; `fast-forward-only`
   la wedgerait à l'infini).
 
@@ -616,7 +616,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Lit la position carte courante = le **dernier** marqueur `[lcars-route:p:s]` de l'issue.
-  `:none` si aucun (ticket hors-carte / 1-stage). `{:error, _}` sur échec HTTP/config.
+  `:none` si aucun (issue hors-carte / 1-stage). `{:error, _}` sur échec HTTP/config.
   """
   @spec get_route(String.t(), integer(), Keyword.t()) ::
           {:ok, {String.t(), String.t()}} | :none | {:error, term()}

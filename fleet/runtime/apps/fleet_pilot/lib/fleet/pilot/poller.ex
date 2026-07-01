@@ -60,7 +60,7 @@ defmodule Fleet.Pilot.Poller do
     :repo,
     :interval_ms,
     # L'humain de CETTE fleet (OS user, `Human.current!()`). Scoping multi-user : on ne dispatche
-    # QUE ses tickets (sinon le poller d'Alice spawne pour Bob). Seam test : opt `:human`.
+    # QUE ses issues (sinon le poller d'Alice spawne pour Bob). Seam test : opt `:human`.
     :my_human,
     :forge_client_override,
     stage_dispatch?: false,
@@ -249,7 +249,7 @@ defmodule Fleet.Pilot.Poller do
   # Découverte forge-driven. Le poller scanne TOUS les projets de SON humain (repos
   # taggés `lcars-fleet-<human>` par l'onboarding), pas un `:repo` hard-codé. Per-repo : la logique stage
   # INCHANGÉE (state.repo posé par itération). Découverte OK → forge up → err_streak reset ; le scoping
-  # ticket `assigned_by=my_human` reste le garde anti-vol même si un repo d'Alice fuyait.
+  # issue `assigned_by=my_human` reste le garde anti-vol même si un repo d'Alice fuyait.
   # Découverte KO → backoff (handle_poll_error). Le bail repo-sérialisé reste per-repo (concurrent across,
   # séquentiel within).
   #
@@ -311,7 +311,7 @@ defmodule Fleet.Pilot.Poller do
   Topic forge per-humain des projets de la fleet : `lcars-fleet-<human-sanitisé>`. **Source UNIQUE**
   partagée par l'onboarding (qui TAGUE le repo neuf) et le poller (qui DÉCOUVRE). Sanitize Gitea-topic
   (lowercase, `[a-z0-9-]`). C'est l'axe d'isolation REPO (Alice ne découvre pas les projets de Bob) ;
-  l'axe TICKET (`assigned_by`) est la ceinture.
+  l'axe ISSUE (`assigned_by`) est la ceinture.
   """
   @spec fleet_topic(String.t()) :: String.t()
   def fleet_topic(human) when is_binary(human) do
@@ -508,9 +508,9 @@ defmodule Fleet.Pilot.Poller do
     _, _ -> :error
   end
 
-  # Refs qu'un pod ACTIF possede. Per-ticket (instance) : derivees du pod_id (`-issue-N-` / `-pr-N-`).
+  # Refs qu'un pod ACTIF possede. Per-issue (instance) : derivees du pod_id (`-issue-N-` / `-pr-N-`).
   # SLOT-FREEZE — project pipe (pod_id `<repo>-engineer`, AUCUN `-issue-N-`) : parse_pod_ref rend [] (son
-  # id n'encode pas la brique), donc on derive la brique de sa TACHE ACTIVE (`ticket_id` = `issue-N`).
+  # id n'encode pas la brique), donc on derive la brique de sa TACHE ACTIVE (`issue_id` = `issue-N`).
   # Sinon le poller croit l'eng resident proprietaire d'AUCUN verrou -> reclame le sien -> boucle.
   defp owned_refs_for_pod(pod_id, repo, tq) do
     case parse_pod_ref(pod_id, repo) do
@@ -524,9 +524,9 @@ defmodule Fleet.Pilot.Poller do
   # function_exported? : un stub task_queue sans la fn -> [] (conservateur, ne masque rien).
   defp project_pod_owned_refs(pod_id, repo, tq) do
     with true <- String.starts_with?(pod_id, Fleet.Pilot.PodId.scope_prefix(repo)),
-         true <- function_exported?(tq, :pod_active_ticket_id, 1),
-         {:ok, ticket_id} when is_binary(ticket_id) <- tq.pod_active_ticket_id(pod_id),
-         {:ok, n} <- Fleet.Pilot.TicketId.parse(ticket_id) do
+         true <- function_exported?(tq, :pod_active_issue_id, 1),
+         {:ok, issue_id} when is_binary(issue_id) <- tq.pod_active_issue_id(pod_id),
+         {:ok, n} <- Fleet.Pilot.IssueId.parse(issue_id) do
       [{repo, :issue, n}]
     else
       _ -> []
@@ -686,7 +686,7 @@ defmodule Fleet.Pilot.Poller do
   #   * BAIL — le pipeline a-t-il DÉMARRÉ (pod spawné + verrou `lcars-in-flight` posé) ? L'ordre canonique
   #     du spawn (`StageDispatcher.spawn_stage`) est verrou → pod → enqueue → WAKE, le wake EN DERNIER. Donc
   #     `{:error, {:wake_unreached, …}}` veut dire : le pipeline EST démarré (verrou + pod + brief en place),
-  #     SEUL le réveil tmux a raté. Le pipeline tient donc le bail repo-sérialisé — sinon un 2e ticket du même
+  #     SEUL le réveil tmux a raté. Le pipeline tient donc le bail repo-sérialisé — sinon un 2e issue du même
   #     repo dans le même tick démarrerait un 2e pipeline (deux feature-branches concurrentes → conflit de merge).
   #   * TALLY/backoff — y a-t-il une anomalie à SURFACER ? Le wake raté reste compté en `errors` (il alimente
   #     `err_streak`/telemetry → backoff partiel) : un kick injoignable ne doit PAS être avalé en succès
@@ -722,7 +722,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # Démarrage d'un pipeline EN FILE (bail libre) : dispatch ; si un pod a effectivement été mis en vol
-  # (spawné OU wake_unreached = verrou+pod posés), le bail devient TENU → les autres tickets en file du même
+  # (spawné OU wake_unreached = verrou+pod posés), le bail devient TENU → les autres issues en file du même
   # tick attendent (sérialisation 1 pipeline/repo). Un wake raté tient le bail (le pipeline est démarré),
   # PAS un échec de dispatch (rien démarré).
   defp start_pipeline(payload, opts, acc) do
@@ -755,7 +755,7 @@ defmodule Fleet.Pilot.Poller do
           # n'est pas le 1er de la carte (pipeline avancé entre deux hops). Si la carte échoue à charger
           # TRANSITOIREMENT (réseau/forge nil), on NE PEUT PAS exclure que ce pipeline soit avancé → fail-closed :
           # on le classe ENGAGÉ (bail TENU). Sinon une carte-nil ferait perdre le bail d'un pipeline engagé →
-          # un 2e ticket du même repo démarrerait un 2e pipeline (perte de sérialisation). Le dispatch de SON
+          # un 2e issue du même repo démarrerait un 2e pipeline (perte de sérialisation). Le dispatch de SON
           # stage fail-loud si la carte manque (carte re-lue côté StageDispatcher), mais le bail NE se libère
           # pas pour autant. Carte revenue au tick suivant → classification précise reprise.
           carte_map = load_carte_or_nil(carte, state)

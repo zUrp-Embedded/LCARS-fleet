@@ -8,8 +8,8 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   alias Fleet.Spawner.PublishConsumer
 
   defmodule StubSpawner do
-    def spawn_pod(_cap_profile, ticket_id, opts) do
-      send(Process.get(:test_pid), {:spawn_called, ticket_id, opts})
+    def spawn_pod(_cap_profile, issue_id, opts) do
+      send(Process.get(:test_pid), {:spawn_called, issue_id, opts})
       {:ok, :stub_pod}
     end
   end
@@ -17,7 +17,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   # Spawner qui LÈVE dans `spawn_pod` → exerce le rescue de `handle_info` (spawn droppé). CapProfile.load
   # doit d'abord réussir pour atteindre spawn_pod : on passe un rôle canon réel ("engineer").
   defmodule RaisingSpawner do
-    def spawn_pod(_cap_profile, _ticket_id, _opts), do: raise("boom spawn (test E-04)")
+    def spawn_pod(_cap_profile, _issue_id, _opts), do: raise("boom spawn (test E-04)")
   end
 
   defp start_consumer(spawner \\ StubSpawner) do
@@ -65,7 +65,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     send(
       pid,
       Fleet.Event.new(:api, :"admin.spawn.request",
-        payload: %{"cap_profile_name" => "engineer", "ticket_id" => "tk-42"}
+        payload: %{"cap_profile_name" => "engineer", "issue_id" => "tk-42"}
       )
     )
 
@@ -74,7 +74,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       type: :"spawn.failed",
       payload: %{
         "cap_profile_name" => "engineer",
-        "ticket_id" => "tk-42",
+        "issue_id" => "tk-42",
         "reason" => reason
       }
     }

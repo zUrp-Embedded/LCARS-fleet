@@ -6,7 +6,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
   relu au prochain `init/1` par `recover_or_init` côté `Pod`) et l'EFFACEMENT des tombstones terminales :
 
   - `write_state_fs/1` — sérialise le snapshot `{v, session_id, cap_profile_name, started_at, phase,
-    conditions, ticket_id}` du `state` dans `state.state_fs_path` (écriture ATOMIQUE `.tmp`+`rename`,
+    conditions, issue_id}` du `state` dans `state.state_fs_path` (écriture ATOMIQUE `.tmp`+`rename`,
     `mkdir_p` de la racine). Un échec d'écriture = perte du point de recovery durable → LOUD (error-level →
     monitoring) mais NON-fatal (`:ok` rendu, on ne crashe pas le pod ici). Appelé à 4 sites du `Pod`
     (post-ALLOCATE, transitions, `transition_failed`).
@@ -101,7 +101,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
   @spec write_state_fs(map()) :: :ok
   def write_state_fs(state) do
     # Schéma complet du snapshot :
-    # {v, session_id, cap_profile_name, started_at, phase, conditions, ticket_id}.
+    # {v, session_id, cap_profile_name, started_at, phase, conditions, issue_id}.
     payload = %{
       "v" => 1,
       "session_id" => state.session_id,
@@ -109,7 +109,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
       "started_at" => DateTime.to_iso8601(state.started_at),
       "phase" => Atom.to_string(state.phase),
       "conditions" => state.conditions |> MapSet.to_list() |> Enum.map(&Atom.to_string/1),
-      "ticket_id" => state.ticket_id
+      "issue_id" => state.issue_id
     }
 
     tmp = state.state_fs_path <> ".tmp"

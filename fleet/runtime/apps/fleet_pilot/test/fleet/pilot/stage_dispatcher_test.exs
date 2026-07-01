@@ -13,9 +13,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     }
   end
 
-  # Ticket-producteur du modèle forge-state-machine (DN §1) : assignee = l'HUMAIN owner. Le rôle
+  # Issue-producteur du modèle forge-state-machine (DN §1) : assignee = l'HUMAIN owner. Le rôle
   # producteur est un INVARIANT côté poller (`:producer_role`, défaut engineer), pas un marqueur
-  # par-ticket. `fields` override (labels, body…).
+  # par-issue. `fields` override (labels, body…).
   defp eng_issue(fields \\ %{}) do
     issue(Map.merge(%{"assignees" => [%{"login" => "lordzurp"}]}, fields))
   end
@@ -153,8 +153,8 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   defmodule StubSpawner do
     # Fidèle au contrat réel `Spawner.spawn_pod/3` : retourne `{:ok, pid()}`, PAS une string
     # (un retour string masquait le bug d'interpolation PID attrapé par le dogfood PASSE-9).
-    def spawn_pod(_profile, ticket_id, opts) do
-      send(self(), {:spawned, ticket_id, opts})
+    def spawn_pod(_profile, issue_id, opts) do
+      send(self(), {:spawned, issue_id, opts})
       {:ok, self()}
     end
 
@@ -174,8 +174,8 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   # sérialisation : un rôle project-scoped déjà vivant → le dispatcher DÉFÈRE (`:role_busy`), il ne
   # spawn ni ne rebrief un pod occupé. (Le rebrief-sur-vivant reste possible pour les `instance`.)
   defmodule StubSpawnerAlive do
-    def spawn_pod(_profile, ticket_id, opts) do
-      send(self(), {:spawned, ticket_id, opts})
+    def spawn_pod(_profile, issue_id, opts) do
+      send(self(), {:spawned, issue_id, opts})
       {:ok, self()}
     end
 
@@ -333,9 +333,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert attrs.brief =~ "fais le hello"
       assert attrs.role == "engineer"
 
-      # F071 : verrouille le 2ᵉ site `TicketId.compose` (enqueue_brief) — sinon un retour au littéral
-      # "issue-#{number}" pour `ticket_id` ne serait pas attrapé (le pod_id ≠ ticket_id).
-      assert attrs.ticket_id == "issue-42"
+      # F071 : verrouille le 2ᵉ site `IssueId.compose` (enqueue_brief) — sinon un retour au littéral
+      # "issue-#{number}" pour `issue_id` ne serait pas attrapé (le pod_id ≠ issue_id).
+      assert attrs.issue_id == "issue-42"
       # kick best-effort émis
       assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
@@ -344,7 +344,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       payload = eng_issue()
 
       # StubSpawnerAlive : pod_info → {:ok,_} = le pod projet `<repo>-engineer` est DÉJÀ vivant (un autre
-      # ticket du repo en cours). Le gate sérialise les rôles project-scoped : on DÉFÈRE, on ne rebrief
+      # issue du repo en cours). Le gate sérialise les rôles project-scoped : on DÉFÈRE, on ne rebrief
       # PAS un pod occupé (ça wedgerait — un one-shot mid-tâche ne pull pas un 2ᵉ brief). Le poller
       # re-dispatch au tick suivant ; le pod meurt en fin de tâche → spawn frais pour le suivant.
       assert {:skipped, :role_busy} =
@@ -591,7 +591,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       end
     end
 
-    test "#8.E : judge_target:brief → brief en cadrage BRIEF (juge le ticket.body, pas un livrable)" do
+    test "#8.E : judge_target:brief → brief en cadrage BRIEF (juge le issue.body, pas un livrable)" do
       # F-S2-1 : le brief = body de l'ISSUE en main (payload), PAS un get_issue redondant.
       payload = eng_issue(%{"body" => "MON BRIEF A JUGER"})
 
@@ -670,9 +670,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     # ====================================================================
     # SLOT-FREEZE — gate PIPE-aware : un engineer PIPE (resident) est re-brief selon son etat.
     #   dead  -> spawn frais ; busy (tache active OU :publishing) -> DEFERE ; ready -> reprovision COLD +
-    #   rebrief. (project["base_sha"] est passe au reset ; le slug = la branche feature du ticket.)
+    #   rebrief. (project["base_sha"] est passe au reset ; le slug = la branche feature du issue.)
     # ====================================================================
-    test "GATE pipe DEAD (1er ticket) : spawn frais, PAS de reprovision" do
+    test "GATE pipe DEAD (1er issue) : spawn frais, PAS de reprovision" do
       Process.put(:pipe_state, :dead)
 
       opts =
@@ -734,7 +734,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(eng_issue(), opts)
 
-      # reset cold appele AVANT le rebrief, avec le projet (base_sha) + le slug du ticket.
+      # reset cold appele AVANT le rebrief, avec le projet (base_sha) + le slug du issue.
       assert_received {:reprovisioned, "lordzurp-lcars-test-engineer",
                        %{"base_sha" => "basesha1"}, [slug: _slug]}
 
@@ -776,7 +776,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       )
     end
 
-    test "PR avec review demandee -> spawn le juge (ticket=ISSUE, verrou sur la PR)" do
+    test "PR avec review demandee -> spawn le juge (issue=ISSUE, verrou sur la PR)" do
       opts =
         dispatch_opts(
           forge_opts: [
@@ -788,7 +788,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert {:ok, {:spawned, "lordzurp-lcars-test-pr-6-qualifier", "qualifier"}} =
                StageDispatcher.dispatch_review(pr(), opts)
 
-      # ticket_id = l'ISSUE (remontee de head.ref lcars/issue-42-engineer), PAS la PR
+      # issue_id = l'ISSUE (remontee de head.ref lcars/issue-42-engineer), PAS la PR
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:pipeline] == "poc" and spawn_opts[:stage] == "spec-review"
       # brief juge desamorce (brief_kind: judge) — pas un corps executable
@@ -801,9 +801,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:brief] =~ "git diff origin/main...HEAD"
       assert spawn_opts[:brief] =~ "implémente le décodeur morse"
 
-      # enqueue cible le pod_id pr-... ; ticket_id = l'issue
+      # enqueue cible le pod_id pr-... ; issue_id = l'issue
       assert_received {:enqueued, "lordzurp-lcars-test-pr-6-qualifier", attrs}
-      assert attrs.ticket_id == "issue-42"
+      assert attrs.issue_id == "issue-42"
       assert attrs.role == "qualifier"
       assert_received {:woke, "lordzurp-lcars-test-pr-6-qualifier"}
     end
@@ -884,7 +884,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_review(pr, opts)
 
-      assert_received {:spawned, _ticket, spawn_opts}
+      assert_received {:spawned, _issue, spawn_opts}
       assert spawn_opts[:brief] =~ "RÉSOLUTION DE CONFLIT"
       refute_received {:merged, _}
 
@@ -898,7 +898,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     test "MA-14 : 2 PR DISTINCTES en conflit (même repo) → la 2ᵉ N'est PAS vue récurrente (clé distincte) → résolue" do
       # État illégal AVANT MA-14 : `IncidentRegistry.normalize` (`~r/\d+/ → "N"`) collapsait `pr-6` ≡ `pr-12`
       # → après le 1er conflit (PR #6 enregistré), TOUTE PR suivante en conflit du repo était vue « récurrente »
-      # → escaladée arch au lieu d'être résolue (neutralisait F-PARALLEL dès le 2ᵉ ticket parallèle). Le fix
+      # → escaladée arch au lieu d'être résolue (neutralisait F-PARALLEL dès le 2ᵉ issue parallèle). Le fix
       # encode le n° de PR DIGIT-FREE au call-site (`pr-i`/`pr-q`…) → clés DISTINCTES → chaque PR a sa 1ʳᵉ chance.
       tmp = Path.join(System.tmp_dir!(), "mc2-#{System.unique_integer([:positive])}")
       File.mkdir_p!(tmp)
@@ -1140,7 +1140,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       gg.(["commit", "-q", "-m", "feat"])
       {ft, 0} = System.cmd("git", ["-C", src, "rev-parse", "HEAD"], stderr_to_stdout: true)
 
-      # `main` avance (ticket parallèle fusionné) → C1
+      # `main` avance (issue parallèle fusionné) → C1
       gg.(["checkout", "-q", "main"])
       File.write!(Path.join(src, "para.txt"), "para")
       gg.(["add", "."])

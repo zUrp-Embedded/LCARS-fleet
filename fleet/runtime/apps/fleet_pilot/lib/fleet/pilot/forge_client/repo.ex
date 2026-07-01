@@ -217,7 +217,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   @doc """
   `username` est-il collaborateur de `repo` ? Gitea `GET /repos/{repo}/collaborators/{username}` (204 = oui,
   404 = non). `false` sur toute erreur (config/transport/404) — fail-safe (on ne défaut PAS sur un repo
-  inaccessible). Sert au scoping « projet par défaut = repos où l'humain est collaborateur » (create_ticket).
+  inaccessible). Sert au scoping « projet par défaut = repos où l'humain est collaborateur » (create_issue).
   """
   @spec collaborator?(String.t(), String.t(), Keyword.t()) :: boolean()
   def collaborator?(repo, username, opts \\ []) when is_binary(repo) and is_binary(username) do
@@ -231,11 +231,11 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Repo du **dernier ticket travaillé** par `human`, SCOPÉ aux repos où il est **collaborateur**. Sert de
-  projet par défaut quand l'arch appelle `create_ticket` sans `project` explicite (≠ « dernier créé », jugé
+  Repo du **dernier issue travaillé** par `human`, SCOPÉ aux repos où il est **collaborateur**. Sert de
+  projet par défaut quand l'arch appelle `create_issue` sans `project` explicite (≠ « dernier créé », jugé
   mauvais). Mécanique : issue-search global `assigned_by=<human>` → tri
   CLIENT-SIDE par `updated_at` desc (le `sort=` Gitea s'est révélé peu fiable) → 1ʳᵉ issue dont le repo passe
-  `collaborator?/3` (l'`assigned_by` seul inclut des repos non-collaborateur, ex. vieux tickets de test). `:none`
+  `collaborator?/3` (l'`assigned_by` seul inclut des repos non-collaborateur, ex. vieux issues de test). `:none`
   si rien (fleet neuve / forge down). Il n'y a plus de repli config global : le repo cible d'une délégation
   est désormais passé explicitement par l'arch (`project`), jamais lu d'une mémoire de « projet courant ».
   """

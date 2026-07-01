@@ -14,7 +14,7 @@ defmodule Fleet.Pilot.PodIdTest do
   test "for_repo : pod_id PROJET keyé repo seul, format <slug>-role (slot_scope: project)" do
     assert PodId.for_repo("fleet/poc-8", "engineer") == "fleet-poc-8-engineer"
 
-    # MÊME id quel que soit le ticket → 1 identité par (repo, rôle) → 1 slot Desktop stable.
+    # MÊME id quel que soit le issue → 1 identité par (repo, rôle) → 1 slot Desktop stable.
     assert PodId.for_repo("fleet/poc-8", "engineer") == PodId.for_repo("fleet/poc-8", "engineer")
 
     # Distinct des ids d'instance (jamais `-issue-`/`-pr-`) → pas de fan-out, pas de collision.

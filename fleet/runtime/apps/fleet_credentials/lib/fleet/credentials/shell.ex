@@ -11,7 +11,7 @@ defmodule Fleet.Credentials.Shell do
   interrompu) — ou pire, un git qui ouvre un PROMPT interactif faute de credential (sans TTY → pend à
   l'infini) — bloque le process appelant. Sur le chemin PROJECT ce process est un GenServer (le
   `Fleet.Spawner.Pod` qui clone, le `Fleet.Pilot.Poller` qui merge) : figé, il ne traite plus aucun
-  message → **pod zombie / ticket wedgé**. Ce module extrait le patron borné en helper réutilisable
+  message → **pod zombie / issue wedgé**. Ce module extrait le patron borné en helper réutilisable
   pour que la borne vive dans le TYPE de l'appel, pas dans la vigilance de chaque site.
 
   ## Deux propriétés DURES de la borne

@@ -27,7 +27,7 @@ defmodule Fleet.Starfleet.AuditConsumerTest do
     send(
       pid,
       {:"pod.refuse_pattern_match",
-       %{"pod_id" => "p1", "ticket_id" => "T", "payload" => %{"pattern" => "force-push"}}}
+       %{"pod_id" => "p1", "issue_id" => "T", "payload" => %{"pattern" => "force-push"}}}
     )
 
     assert %{events_count: 1} = :sys.get_state(pid)

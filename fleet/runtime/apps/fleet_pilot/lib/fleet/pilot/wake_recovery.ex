@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.WakeRecovery do
         - re-wake OK → **récupéré** → on GRAVE l'incident dans le registre (ancre pour la prochaine fois) ;
         - re-wake FAIL → le re-roll n'a pas réparé → **escalade IMMÉDIATE** (problème actif).
 
-  Escalade = ticket système (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin), `reason`
+  Escalade = issue système (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin), `reason`
   préservé, 2 portes distinctes (`:recurrence` / `:reroll_failed`). Frontière : un wake raté = **problème
   de FLEET → starfleet** (qui peut re-spawner/réparer), PAS le gatekeeper (juge de projet). **La mémoire
   vit dans le PROJET** (registre `work/ops`), pas la session : session exécute, projet se souvient,
@@ -25,9 +25,9 @@ defmodule Fleet.Pilot.WakeRecovery do
   Réveille `pod_id` avec recovery. `respawn_fun/0` = le re-spawn type-spécifique injecté par l'appelant
   (reboot du gatekeeper ; re-spawn worker). Pré-requis : le brief est DÉJÀ en file.
 
-  Returns `:ok` | `{:error, term()}` (du re-wake) | `{:error, {:escalated, reason}}` (ticket sysadmin
+  Returns `:ok` | `{:error, term()}` (du re-wake) | `{:error, {:escalated, reason}}` (issue sysadmin
   RÉELLEMENT ouvert) | `{:error, {:escalation_failed, reason}}` (récurrence/re-roll KO mais l'ouverture du
-  ticket a échoué — forge down ? — AUCUN ticket n'existe : retour HONNÊTE, pas un `:escalated` rassurant).
+  issue a échoué — forge down ? — AUCUN issue n'existe : retour HONNÊTE, pas un `:escalated` rassurant).
   """
   @spec wake(String.t(), (-> any()), keyword()) :: :ok | {:error, term()}
   def wake(pod_id, respawn_fun, opts \\ [])
@@ -75,10 +75,10 @@ defmodule Fleet.Pilot.WakeRecovery do
     end
   end
 
-  # Ouvre le ticket sysadmin ET propage le résultat CONSTATÉ (jamais `:escalated` par optimisme) :
-  #   - ticket ouvert (`{:ok, _}`) → `{:error, {:escalated, reason}}` (wake raté + alarme passée) ;
+  # Ouvre le issue sysadmin ET propage le résultat CONSTATÉ (jamais `:escalated` par optimisme) :
+  #   - issue ouvert (`{:ok, _}`) → `{:error, {:escalated, reason}}` (wake raté + alarme passée) ;
   #   - ouverture KO (`{:error, _}`, forge down ?) → log LOUD + `{:error, {:escalation_failed, _}}` :
-  #     AUCUN ticket n'existe, l'appelant ne doit pas croire qu'un sysadmin a été prévenu.
+  #     AUCUN issue n'existe, l'appelant ne doit pas croire qu'un sysadmin a été prévenu.
   # Partagé par les 2 portes d'escalade (récurrence directe / re-roll épuisé) — même propagation.
   defp escalate_or_signal(kind, pod_id, reason, sig, opts) do
     case IncidentRegistry.escalate(kind, pod_id, reason, sig, opts) do
@@ -87,7 +87,7 @@ defmodule Fleet.Pilot.WakeRecovery do
 
       {:error, e} ->
         Logger.error(
-          "WakeRecovery #{pod_id} : escalade (#{kind}) ÉCHOUÉE — AUCUN ticket sysadmin créé " <>
+          "WakeRecovery #{pod_id} : escalade (#{kind}) ÉCHOUÉE — AUCUN issue sysadmin créé " <>
             "(forge down ?) : #{inspect(e)} ; l'incident N'EST PAS escaladé"
         )
 

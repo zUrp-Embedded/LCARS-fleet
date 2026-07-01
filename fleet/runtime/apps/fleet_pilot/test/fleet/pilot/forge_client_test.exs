@@ -85,7 +85,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
-  describe "last_worked_repo/2 — défaut create_ticket (dernier travaillé, scopé collaborateur)" do
+  describe "last_worked_repo/2 — défaut create_issue (dernier travaillé, scopé collaborateur)" do
     test "tri client-side par updated_at desc + filtre collaborateur (le plus récent non-collab est écarté)" do
       # Input volontairement DANS LE DÉSORDRE + le plus récent (poc-old, 23:00) est NON-collaborateur.
       # Attendu : tri desc → [poc-old, alpha, beta] ; poc-old écarté (404) → alpha (22:38, le 1er collab).

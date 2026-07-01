@@ -117,7 +117,7 @@ defmodule Fleet.API.RestTest do
     # MA-18 — ni `cap_profile_name` ni `role` → 400 (requête mal formée), pas un 202 ni un broadcast.
     test "MA-18 — ni cap_profile_name ni role → 400" do
       conn =
-        conn(:post, "/api/admin/spawn", Jason.encode!(%{ticket_id: "issue-1"}))
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{issue_id: "issue-1"}))
         |> put_req_header("content-type", "application/json")
         |> Rest.call(@opts)
 
@@ -176,7 +176,7 @@ defmodule Fleet.API.RestTest do
           Jason.encode!(%{
             "role" => "engineer",
             "brief" => "implémente X",
-            "ticket_id" => "issue-9"
+            "issue_id" => "issue-9"
           })
         )
         |> put_req_header("content-type", "application/json")
@@ -185,13 +185,13 @@ defmodule Fleet.API.RestTest do
       assert conn.status == 202
 
       # Le payload diffusé est le DTO CANONIQUE reconstruit par l'API : `brief` est passé dans `opts`
-      # (jamais un `opts` brut du client), `ticket_id` conservé.
+      # (jamais un `opts` brut du client), `issue_id` conservé.
       assert_receive %Fleet.Event{
                        source: :api,
                        type: :"admin.spawn.request",
                        payload: %{
                          "role" => "engineer",
-                         "ticket_id" => "issue-9",
+                         "issue_id" => "issue-9",
                          "opts" => %{"brief" => "implémente X"}
                        }
                      },

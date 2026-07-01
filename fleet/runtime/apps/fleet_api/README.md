@@ -45,7 +45,7 @@ pilotables depuis l'API. Le DTO public est donc **plat et explicite** :
 | Champ | Forme | Rôle |
 |---|---|---|
 | `cap_profile_name` / `role` | string (l'un des deux, requis) | profil de capacités (validé : 400 si absent, 422 si inconnu, **422 si host-native**) |
-| `ticket_id` | string | corrélation forge/event |
+| `issue_id` | string | corrélation forge/event |
 | `brief` | string | le travail du pod ; **replacé dans l'`opts` interne construit par l'API** ; **requis** pour un cap-profile `one-shot` (422 sinon — miroir R18) |
 | `pod_id` | string path-safe | identifiant imposé (admin) ; accepté **uniquement** si `[A-Za-z0-9._-]` sans `..`, sinon 422 |
 

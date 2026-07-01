@@ -171,9 +171,9 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
           put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
         )
 
-      # Retour = le NUMÉRO du ticket (1, rendu par le stub), pas le reason : un `{:escalated, num}` PROUVE
-      # qu'un ticket existe vraiment. (Avant le fix d'honnêteté, le retour portait le reason et sortait même
-      # quand l'ouverture du ticket échouait — cf. le test « forge DOWN » ci-dessous.)
+      # Retour = le NUMÉRO du issue (1, rendu par le stub), pas le reason : un `{:escalated, num}` PROUVE
+      # qu'un issue existe vraiment. (Avant le fix d'honnêteté, le retour portait le reason et sortait même
+      # quand l'ouverture du issue échouait — cf. le test « forge DOWN » ci-dessous.)
       assert {:escalated, 1} =
                Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
                  server: name,
@@ -187,7 +187,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert iopts[:labels] == ["error_system"]
     end
 
-    test "record_or_escalate : déjà vu + forge DOWN → {:escalation_failed,_}, JAMAIS {:escalated} (aucun ticket)",
+    test "record_or_escalate : déjà vu + forge DOWN → {:escalation_failed,_}, JAMAIS {:escalated} (aucun issue)",
          %{tmp_dir: tmp} do
       sig = Reg.signature("pod", "issue-7-engineer", :result_timeout)
 
@@ -200,7 +200,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
         )
 
       # `create_issue` échoue aux DEUX tentatives (avec assignee, puis fallback label-only) = forge down.
-      # Le retour doit DIRE l'échec — surtout pas un `{:escalated, _}` rassurant alors qu'aucun ticket
+      # Le retour doit DIRE l'échec — surtout pas un `{:escalated, _}` rassurant alors qu'aucun issue
       # sysadmin n'a été ouvert.
       assert {:escalation_failed, :forge_down} =
                Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
@@ -209,7 +209,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
                )
     end
 
-    test "record_or_escalate escalate_kind :sp_suspect → ticket pointe le SP (wake récurrent)", %{
+    test "record_or_escalate escalate_kind :sp_suspect → issue pointe le SP (wake récurrent)", %{
       tmp_dir: tmp
     } do
       pid = self()
@@ -236,7 +236,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received {:issue, title, body}
       assert title =~ "SP suspect"
       assert body =~ "PROMPT"
-      # [5] : l'écran capturé (fallback-ack déporté) est attaché au ticket
+      # [5] : l'écran capturé (fallback-ack déporté) est attaché au issue
       assert body =~ "ECRAN-TEST-42"
       assert body =~ "Écran capturé"
     end

@@ -52,7 +52,7 @@ receive do
 end
 
 # (Compat shim legacy 3-arity {atom, map} — à retirer ch3 BL-021)
-# Fleet.EventRouter.Bus.broadcast("pod.allocate", %{...}, ticket_id: "...")
+# Fleet.EventRouter.Bus.broadcast("pod.allocate", %{...}, issue_id: "...")
 ```
 
 ## Configuration

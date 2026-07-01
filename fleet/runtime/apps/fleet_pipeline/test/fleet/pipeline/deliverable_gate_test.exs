@@ -112,10 +112,10 @@ defmodule Fleet.Pipeline.DeliverableGateTest do
     {ft, 0} = g(dir, ["rev-parse", "HEAD"])
     feature_tip = String.trim(ft)
 
-    # un ticket PARALLÈLE a fusionné → `main` avance (C1). Fichier DIFFÉRENT : la gate ne vérifie QUE
+    # un issue PARALLÈLE a fusionné → `main` avance (C1). Fichier DIFFÉRENT : la gate ne vérifie QUE
     # l'ascendance + l'identité + les secrets ; la RÉSOLUTION du conflit de contenu est le boulot du pod.
     {_, 0} = g(dir, ["checkout", "-q", "main"])
-    commit_file(dir, "parallel.md", "# autre ticket", "feat: ticket parallèle")
+    commit_file(dir, "parallel.md", "# autre issue", "feat: issue parallèle")
     {m1, 0} = g(dir, ["rev-parse", "HEAD"])
     main_c1 = String.trim(m1)
 

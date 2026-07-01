@@ -18,7 +18,7 @@ defmodule Fleet.Coord.Policies do
       mappings:
         "halt.gatekeeper.refuse":
           action: notify_dashboard
-          escalation_path: [dashboard, ticket_comment]
+          escalation_path: [dashboard, issue_comment]
         "escalate.pod_drift":
           action: escalate_human
           escalation_path: [dashboard, starfleet_alert]

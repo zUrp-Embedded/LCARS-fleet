@@ -27,7 +27,7 @@ defmodule Fleet.Pilot.MixProject do
   end
 
   defp deps do
-    # Service auto-orchestration tickets Gitea (M-033 backlog, doctrine
+    # Service auto-orchestration issues Gitea (M-033 backlog, doctrine
     # topologie-ring.md §"Élagage" : client du core, pas core). Découvre ses
     # projets par topic et pilote le rail forge-state-machine (la forge EST la
     # machine à états) ; il utilise les fonctions pures de `fleet_pipeline`

@@ -42,7 +42,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
   @doc """
   Extrait `{issue_number, role}` d'une feature-branch systeme `lcars/issue-<n>-<role>` (format
   construit par `feature_branch/2`, son inverse co-localise). Sert au dispatch juge PR-driven a
-  remonter de la PR (head.ref) au ticket. `:error` si le ref n'est pas une feature-branch fleet (PR
+  remonter de la PR (head.ref) au issue. `:error` si le ref n'est pas une feature-branch fleet (PR
   externe / branche manuelle -> ignoree par le dispatch, jamais misroutee).
   """
   @spec parse_feature_branch(String.t()) :: {:ok, {integer(), String.t()}} | :error

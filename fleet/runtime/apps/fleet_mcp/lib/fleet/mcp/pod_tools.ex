@@ -4,7 +4,7 @@ defmodule Fleet.MCP.PodTools do
   claude) appelle pour communiquer avec le fleet, sans scraping ni injection clavier :
     - `get_work_item`      : canal IN  — le pod PULL son brief depuis `Fleet.TaskQueue`.
       `{"done": true}` quand aucun brief (le pod s'arrête). Sinon
-      `{"done": false, "work_item": {"work_item_id", "ticket_id", "role", "brief", ...}}`.
+      `{"done": false, "work_item": {"work_item_id", "issue_id", "role", "brief", ...}}`.
     - `submit_result` : canal OUT — le pod PUSH son livrable (`payload`).
 
   Médiation serveur-side : le pod ne touche jamais la TaskQueue directement (la queue,
@@ -58,18 +58,18 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "create_ticket" do
+  deftool "create_issue" do
     meta do
-      name("Create Ticket")
+      name("Create Issue")
 
       description(
-        "Délègue une brique d'implémentation à la fleet LCARS : crée un ticket (issue forge) prêt " <>
+        "Délègue une brique d'implémentation à la fleet LCARS : crée une issue forge prête " <>
           "pour la livraison forge-native (engineer → PR → review → merge). Utilise-le pour DÉLÉGUER " <>
           "plutôt que de coder toi-même (la fleet livre mieux et préserve ton contexte). " <>
           "`brief` = le brief clair pour l'engineer. `project` = le repo `owner/name` OÙ LIVRER, **REQUIS** : " <>
           "le repo retourné par `create_project`, ou le projet désigné par l'humain. La fleet ne route PLUS par " <>
-          "défaut — sans `project`, le ticket est REFUSÉ (jamais de misroute silencieux vers un autre projet). " <>
-          "Retourne {\"status\":\"ticket_created\",\"repo\":...}."
+          "défaut — sans `project`, le issue est REFUSÉ (jamais de misroute silencieux vers un autre projet). " <>
+          "Retourne {\"status\":\"issue_created\",\"repo\":...}."
       )
     end
 
@@ -93,7 +93,7 @@ defmodule Fleet.MCP.PodTools do
           "(`/home/projects/<name>` sur `main`, `/home/projects.work/<name>` sur `work/ops`) + " <>
           "le scaffold de base, et le pousse. Utilise-le quand l'humain veut LANCER un projet neuf. " <>
           "`name` = slug kebab-case. Retourne {\"status\":\"onboarded\",\"repo\":...} ; enchaîne ensuite " <>
-          "`create_ticket` en lui passant `project: <le repo retourné>` pour livrer DANS ce projet."
+          "`create_issue` en lui passant `project: <le repo retourné>` pour livrer DANS ce projet."
       )
     end
 
@@ -108,16 +108,16 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "get_ticket_status" do
+  deftool "get_issue_status" do
     meta do
-      name("Get Ticket Status")
+      name("Get Issue Status")
 
       description(
-        "Consulte l'état d'un ticket délégué (issue + PR liée) : issue ouverte/fermée, PR mergée " <>
-          "ou non, verdicts de review. Utilise-le pour SUIVRE un ticket avant d'enchaîner — ex. valider " <>
-          "la livraison (issue fermée par le merge) du ticket N AVANT de poster le ticket N+1. " <>
-          "`number` = le numéro d'issue. `project` = le repo `owner/name` DU ticket, **REQUIS** : le repo " <>
-          "retourné par `create_project` (ou celui passé à `create_ticket`). La fleet ne route PLUS par " <>
+        "Consulte l'état d'un issue délégué (issue + PR liée) : issue ouverte/fermée, PR mergée " <>
+          "ou non, verdicts de review. Utilise-le pour SUIVRE un issue avant d'enchaîner — ex. valider " <>
+          "la livraison (issue fermée par le merge) du issue N AVANT de poster le issue N+1. " <>
+          "`number` = le numéro d'issue. `project` = le repo `owner/name` DU issue, **REQUIS** : le repo " <>
+          "retourné par `create_project` (ou celui passé à `create_issue`). La fleet ne route PLUS par " <>
           "défaut — sans `project`, la lecture est REFUSÉE (jamais d'état lu sur le mauvais projet). " <>
           "Retourne {\"delivered\":bool,\"issue_state\":...,\"pr\":...}."
       )
@@ -203,28 +203,28 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # create_ticket — canal DÉLÉGATION : l'architecte délègue une brique d'implémentation à la fleet.
+  # create_issue — canal DÉLÉGATION : l'architecte délègue une brique d'implémentation à la fleet.
   # Modèle forge-state-machine : pose une issue PRÊTE pour le poller — auteur=arch (traça),
   # **assignee=humain owner** (point fixe : routing + ownership) — et S'ARRÊTE. Plus de
   # `start_pipeline` (rail RAM retiré). Le POLLER prend le relais : issue assignée non verrouillée →
-  # spawn le rôle PRODUCTEUR (`:producer_role`, invariant — pas de marqueur par-ticket : un label
+  # spawn le rôle PRODUCTEUR (`:producer_role`, invariant — pas de marqueur par-issue : un label
   # `lcars-stage:` ré-encoderait une constante). Dispatch runtime via modules-en-variable (pas de dep compile-time pilot).
   def handle_tool_call(
-        "create_ticket",
+        "create_issue",
         %{"title" => title, "brief" => brief, "project" => repo},
         state
       )
       when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
     forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 
-    # Déléguer un ticket est un acte d'ARCHITECTE : `require_architect` résout le rôle depuis l'identité du
+    # Déléguer un issue est un acte d'ARCHITECTE : `require_architect` résout le rôle depuis l'identité du
     # canal (`state.pod_id`, porté par l'accepteur de socket) PUIS exige que ce rôle gravé au spawn soit
     # `architect`. Un pod worker (engineer, reviewer) ou inconnu est REFUSÉ ICI, serveur-side. Le rôle vient
     # du spawn (résolu par pod_id), JAMAIS d'un champ du wire. L'arch poste ensuite l'issue EN SON NOM :
     # token du compte de rôle de l'appelant.
     with {:ok, role} <- require_architect(state),
          token when is_binary(token) <- Fleet.Credentials.RoleToken.token(role) do
-      do_create_ticket(forge, repo, title, brief, [token: token], state)
+      do_create_issue(forge, repo, title, brief, [token: token], state)
     else
       {:error, reason} ->
         # Rôle non-architecte, ou pod inconnu du registre → on ne crée RIEN.
@@ -235,7 +235,7 @@ defmodule Fleet.MCP.PodTools do
         # n'a pas son token). On REFUSE plutôt que de poster sous le compte système (fail-closed) :
         # poster en système masquerait la traça (qui a délégué ?) et contournerait le least-privilege.
         Logger.warning(
-          "create_ticket REFUSÉ : token du rôle appelant introuvable (provisioning incomplet) — " <>
+          "create_issue REFUSÉ : token du rôle appelant introuvable (provisioning incomplet) — " <>
             "pas de repli compte système"
         )
 
@@ -243,19 +243,19 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  # create_ticket SANS `project` valide → REFUS STRUCTUREL. La bonne volonté ne s'impose pas : pas de routage
+  # create_issue SANS `project` valide → REFUS STRUCTUREL. La bonne volonté ne s'impose pas : pas de routage
   # par défaut (un `project` omis routait en silence vers le dernier projet travaillé → misroute). `project`
-  # est REQUIS ; sans lui, AUCUN ticket n'est créé.
-  def handle_tool_call("create_ticket", %{"title" => title, "brief" => brief}, state)
+  # est REQUIS ; sans lui, AUCUN issue n'est créé.
+  def handle_tool_call("create_issue", %{"title" => title, "brief" => brief}, state)
       when is_binary(title) and is_binary(brief) do
     {:error,
      {:project_required,
-      "create_ticket REFUSÉ — `project` est REQUIS (le repo `owner/name` où livrer). Aucun routage par " <>
+      "create_issue REFUSÉ — `project` est REQUIS (le repo `owner/name` où livrer). Aucun routage par " <>
         "défaut. Passe `project` = le repo retourné par create_project, ou le projet désigné par l'humain."},
      state}
   end
 
-  def handle_tool_call("create_ticket", _bad_args, state) do
+  def handle_tool_call("create_issue", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
@@ -279,15 +279,15 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # get_ticket_status — canal SUIVI (architecte). Lit l'état d'un ticket délégué pour séquencer le
-  # multi-ticket. « Livré » = issue fermée par le merge (`Closes #N`). Lecture seule (ForgeClient).
-  # Le repo est PASSÉ explicitement (`project` = owner/name du ticket), JAMAIS lu d'une mémoire globale :
+  # get_issue_status — canal SUIVI (architecte). Lit l'état d'un issue délégué pour séquencer le
+  # multi-issue. « Livré » = issue fermée par le merge (`Closes #N`). Lecture seule (ForgeClient).
+  # Le repo est PASSÉ explicitement (`project` = owner/name du issue), JAMAIS lu d'une mémoire globale :
   # un arch qui suit plusieurs projets en parallèle nomme CELUI qu'il interroge. Sinon le « dernier projet
-  # onboardé » servirait l'état du mauvais repo (issue_state/delivered faux → multi-ticket mis-séquencé).
-  # Suivre l'état d'un ticket délégué reste réservé à l'architecte (cohérent avec create_ticket /
+  # onboardé » servirait l'état du mauvais repo (issue_state/delivered faux → multi-issue mis-séquencé).
+  # Suivre l'état d'un issue délégué reste réservé à l'architecte (cohérent avec create_issue /
   # create_project) : `require_architect` résout le rôle depuis l'identité du canal et exige `architect`.
   def handle_tool_call(
-        "get_ticket_status",
+        "get_issue_status",
         %{"number" => number, "project" => repo},
         state
       )
@@ -309,29 +309,29 @@ defmodule Fleet.MCP.PodTools do
           "repo" => repo,
           "issue" => number,
           "issue_state" => issue_state,
-          # « livré » = la PR a fermé l'issue (merge FF `Closes #N`). Signal de séquencement multi-ticket :
-          # l'arch n'enchaîne le ticket N+1 que sur `delivered: true`.
+          # « livré » = la PR a fermé l'issue (merge FF `Closes #N`). Signal de séquencement multi-issue :
+          # l'arch n'enchaîne le issue N+1 que sur `delivered: true`.
           "delivered" => issue_state == "closed",
-          "pr" => ticket_pr_status(forge, repo, number)
+          "pr" => issue_pr_status(forge, repo, number)
         }
 
         {:ok, %{content: [json(result)]}, state}
     end
   end
 
-  # get_ticket_status SANS `project` valide → REFUS STRUCTUREL (miroir de create_ticket). Pas de routage
-  # par défaut : un `project` omis lirait l'état sur le dernier projet onboardé → état faux, le multi-ticket
+  # get_issue_status SANS `project` valide → REFUS STRUCTUREL (miroir de create_issue). Pas de routage
+  # par défaut : un `project` omis lirait l'état sur le dernier projet onboardé → état faux, le multi-issue
   # est mis-séquencé. `project` est REQUIS ; sans lui (ou vide), AUCUNE lecture.
-  def handle_tool_call("get_ticket_status", %{"number" => number}, state)
+  def handle_tool_call("get_issue_status", %{"number" => number}, state)
       when is_integer(number) do
     {:error,
      {:project_required,
-      "get_ticket_status REFUSÉ — `project` est REQUIS (le repo `owner/name` du ticket). Aucun routage " <>
-        "par défaut. Passe `project` = le repo retourné par create_project, ou celui passé à create_ticket."},
+      "get_issue_status REFUSÉ — `project` est REQUIS (le repo `owner/name` du issue). Aucun routage " <>
+        "par défaut. Passe `project` = le repo retourné par create_project, ou celui passé à create_issue."},
      state}
   end
 
-  def handle_tool_call("get_ticket_status", _bad, state) do
+  def handle_tool_call("get_issue_status", _bad, state) do
     {:error, :invalid_arguments, state}
   end
 
@@ -342,8 +342,8 @@ defmodule Fleet.MCP.PodTools do
   # Séquence d'onboarding proprement dite, exécutée UNIQUEMENT après la gate architecte. Le SYSTÈME exécute
   # la mécanique (repo forge + dual-worktree main/work-ops + scaffold + push) via Fleet.Pilot.ProjectOnboard,
   # dispatch runtime (pas de dep compile-time fleet_pilot). Le repo créé est RENDU dans le `result`
-  # (`repo`/`delegation_target`) : l'arch le récupère et le passe explicitement à `create_ticket` /
-  # `get_ticket_status`. Aucune mémoire globale de « projet courant » — le repo voyage par argument.
+  # (`repo`/`delegation_target`) : l'arch le récupère et le passe explicitement à `create_issue` /
+  # `get_issue_status`. Aucune mémoire globale de « projet courant » — le repo voyage par argument.
   defp do_create_project(name, args, state) do
     # Seam `:project_onboard` (app-env, comme `:forge_client`/`:pod_resolver`) — défaut = la vraie séquence
     # `Fleet.Pilot.ProjectOnboard` (dispatch runtime, pas de dep compile-time fleet_pilot), overridable en test.
@@ -371,28 +371,28 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # Pose l'issue (auteur = compte de rôle via `author_opts`, assignee = humain owner) et l'étiquette de visu.
-  # Extrait de create_ticket pour garder le handler centré sur la GATE (require_architect + token).
-  defp do_create_ticket(forge, repo, title, brief, author_opts, state) do
+  # Extrait de create_issue pour garder le handler centré sur la GATE (require_architect + token).
+  defp do_create_issue(forge, repo, title, brief, author_opts, state) do
     # assignee = l'HUMAIN owner (point fixe : routing + ownership, jamais le rôle). Login forge
     # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue ;
     # Gitea matche l'assignee insensible à la casse → `starfleet` résout `Starfleet`). Pas de label :
-    # le rôle producteur est un invariant côté poller, pas un sticker par-ticket.
+    # le rôle producteur est un invariant côté poller, pas un sticker par-issue.
     case Fleet.Credentials.Human.current() do
       {:ok, human} ->
         issue_opts = Keyword.put(author_opts, :assignees, [human])
 
         case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
           {:ok, number} ->
-            # DÉCOUPLAGE : create_ticket CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
+            # DÉCOUPLAGE : create_issue CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
             # (graver la carte) n'est PLUS ici : c'est la responsabilité du SYSTÈME — le POLLER grave la carte
             # par défaut (brief-gate) sur toute issue assignée routeless (cf. fleet_pilot). Un seul acteur
-            # crée+assigne ; le système route. (Uniforme : un ticket humain routeless est onboardé pareil.)
+            # crée+assigne ; le système route. (Uniforme : un issue humain routeless est onboardé pareil.)
             # type:feature = ÉTIQUETTE de visu (humain), best-effort — JAMAIS du routing.
             _ = apply(forge, :add_label, [repo, number, "type:feature", []])
 
             result = %{
-              "status" => "ticket_created",
-              "ticket" => "#{repo}##{number}",
+              "status" => "issue_created",
+              "issue" => "#{repo}##{number}",
               "repo" => repo,
               "assignee" => human
             }
@@ -400,7 +400,7 @@ defmodule Fleet.MCP.PodTools do
             {:ok, %{content: [json(result)]}, state}
 
           {:error, reason} ->
-            {:error, {:ticket_creation_failed, inspect(reason)}, state}
+            {:error, {:issue_creation_failed, inspect(reason)}, state}
         end
 
       {:error, reason} ->
@@ -410,12 +410,12 @@ defmodule Fleet.MCP.PodTools do
 
   # Pas de `delegation_carte` ni de `grave_initial_route` ici : le routage (graver la carte) vit
   # côté système (fleet_pilot : le poller onboarde toute issue assignée routeless sur la carte par défaut,
-  # cf. StageDispatcher.ensure_carte_or_onboard). create_ticket ne fait QUE créer+assigner.
+  # cf. StageDispatcher.ensure_carte_or_onboard). create_issue ne fait QUE créer+assigner.
 
-  # La PR EN COURS du ticket #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
+  # La PR EN COURS du issue #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
   # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.
-  defp ticket_pr_status(forge, repo, number) do
-    # La PR du ticket #n = celle dont le head est la feature-branch `lcars/issue-<n>-<role>`. Le parse
+  defp issue_pr_status(forge, repo, number) do
+    # La PR du issue #n = celle dont le head est la feature-branch `lcars/issue-<n>-<role>`. Le parse
     # de ce format est délégué à l'AUTORITÉ UNIQUE `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1`
     # (co-localisée avec son builder `feature_branch/2`) au lieu de reconstruire le préfixe en dur : un
     # changement de format se fait dans le seul ForgeProtocol. On l'atteint via le `forge` INJECTÉ (résolu
@@ -453,7 +453,7 @@ defmodule Fleet.MCP.PodTools do
   # Autorisation architecte — gate commune des tools privilégiés
   # ============================================================
   #
-  # `create_project`, `create_ticket` et `get_ticket_status` sont des actes d'ARCHITECTE : créer un repo
+  # `create_project`, `create_issue` et `get_issue_status` sont des actes d'ARCHITECTE : créer un repo
   # forge, écrire/pousser dans `/home/projects`, déléguer du travail, suivre une délégation. La barrière
   # est serveur-side : `require_architect` résout le rôle depuis l'identité du CANAL (`state.pod_id`, porté
   # par l'accepteur de socket — pas de champ du wire) PUIS exige que ce rôle gravé au spawn soit `architect`.
@@ -517,7 +517,7 @@ defmodule Fleet.MCP.PodTools do
   defp envelope(%Fleet.TaskQueue.WorkItem{} = t) do
     %{
       "work_item_id" => t.id,
-      "ticket_id" => t.ticket_id,
+      "issue_id" => t.issue_id,
       "role" => t.role,
       "brief" => t.brief,
       "deadline" => iso(t.deadline),

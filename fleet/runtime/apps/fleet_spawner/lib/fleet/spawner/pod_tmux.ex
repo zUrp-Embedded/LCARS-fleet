@@ -163,7 +163,7 @@ defmodule Fleet.Spawner.PodTmux do
 
   @doc """
   Capture le contenu visible du pane du pod (`tmux capture-pane -p`) = l'écran du REPL. Canal d'observation
-  DÉPORTÉ, fallback-ACK : quand l'agent n'acke pas, on attache l'écran au ticket d'escalade
+  DÉPORTÉ, fallback-ACK : quand l'agent n'acke pas, on attache l'écran au issue d'escalade
   (starfleet voit ce que l'agent affichait/faisait). Renvoie `""` si la capture échoue (best-effort).
   """
   @spec capture_pane(String.t()) :: String.t()

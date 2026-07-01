@@ -3,7 +3,7 @@ mappings:
     action: notify_dashboard
     escalation_path:
       - dashboard
-      - ticket_comment
+      - issue_comment
   "escalate.pod_drift":
     action: escalate_human
     escalation_path:
@@ -13,7 +13,7 @@ mappings:
     action: notify_dashboard
     escalation_path:
       - dashboard
-      - ticket_comment
+      - issue_comment
   "escalate.oauth_refresh_failed":
     action: escalate_human
     escalation_path:

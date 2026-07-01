@@ -63,7 +63,7 @@ defmodule Fleet.Pipeline.GateBrief do
     `decision` ∈ #{Enum.join(@decisions, " | ")}
     - `continue` : #{s.continue} → avancer au stage suivant
     - `redirect` : renvoyer à l'architecte (ex. brief trop gros → demander la découpe)
-    - `abandon` : abandonner le ticket (non récupérable)
+    - `abandon` : abandonner le issue (non récupérable)
     - `escalate_user` : dépasse le gatekeeper → l'user tranche
     - `halt_wait_input` : information manquante → halt en attente
 

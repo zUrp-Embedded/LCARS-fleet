@@ -136,12 +136,12 @@ defmodule Fleet.SpawnerTest do
 
     test "one-shot + pas de brief → {:error, :brief_required}" do
       assert {:error, :brief_required} =
-               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-no-brief")
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-no-brief")
     end
 
     test "one-shot + brief VIDE (ex. StageSpawner ctx vide) → {:error, :brief_required}" do
       assert {:error, :brief_required} =
-               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-empty-brief", brief: "")
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-empty-brief", brief: "")
     end
 
     test "F076 — pod_id non path-safe (.. ou / ou vide) → {:error, :invalid_pod_id}, aucun spawn" do
@@ -152,7 +152,7 @@ defmodule Fleet.SpawnerTest do
       for bad <- ["../etc/passwd", "a/b", "..", "pod_..", "x y", ""] do
         assert match?(
                  {:error, :invalid_pod_id},
-                 Fleet.Spawner.spawn_pod(valid_profile(), "ticket-1",
+                 Fleet.Spawner.spawn_pod(valid_profile(), "issue-1",
                    pod_id: bad,
                    brief: "do x"
                  )
@@ -163,7 +163,7 @@ defmodule Fleet.SpawnerTest do
 
     test "one-shot + brief → {:ok, _}" do
       assert {:ok, _pid} =
-               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-brief",
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-brief",
                  brief: "répare le bug X",
                  pod_id: "pod-r18-brief-#{System.unique_integer([:positive])}",
                  repo_id: @test_repo_id
@@ -172,7 +172,7 @@ defmodule Fleet.SpawnerTest do
 
     test "one-shot + allow_no_brief (admin/diagnostic) → {:ok, _}" do
       assert {:ok, _pid} =
-               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-admin",
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-admin",
                  allow_no_brief: true,
                  pod_id: "pod-r18-admin-#{System.unique_integer([:positive])}",
                  repo_id: @test_repo_id
@@ -181,7 +181,7 @@ defmodule Fleet.SpawnerTest do
 
     test "long-lived (forever) sans brief → {:ok, _} (exempté, pull via MCP)" do
       assert {:ok, _pid} =
-               Fleet.Spawner.spawn_pod(forever_profile(), "ticket-forever",
+               Fleet.Spawner.spawn_pod(forever_profile(), "issue-forever",
                  pod_id: "pod-r18-forever-#{System.unique_integer([:positive])}",
                  repo_id: @test_repo_id
                )
@@ -192,7 +192,7 @@ defmodule Fleet.SpawnerTest do
     pod_id = "pod-public-api-#{System.unique_integer([:positive])}"
 
     assert {:ok, pid} =
-             Fleet.Spawner.spawn_pod(valid_profile(), "ticket-1",
+             Fleet.Spawner.spawn_pod(valid_profile(), "issue-1",
                pod_id: pod_id,
                allow_no_brief: true,
                repo_id: @test_repo_id
@@ -219,7 +219,7 @@ defmodule Fleet.SpawnerTest do
     StubBackend.set_reply({:error, :stub_launch_fail})
 
     {:ok, _pid} =
-      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-orphan",
+      Fleet.Spawner.spawn_pod(valid_profile(), "issue-orphan",
         pod_id: pod_id,
         allow_no_brief: true,
         repo_id: @test_repo_id
@@ -238,7 +238,7 @@ defmodule Fleet.SpawnerTest do
     {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
 
     {:ok, _pid} =
-      Fleet.Spawner.spawn_pod(forever_profile(), "ticket-kill",
+      Fleet.Spawner.spawn_pod(forever_profile(), "issue-kill",
         pod_id: pod_id,
         repo_id: @test_repo_id
       )
@@ -262,7 +262,7 @@ defmodule Fleet.SpawnerTest do
     pod_id = "pod-kill-#{System.unique_integer([:positive])}"
 
     {:ok, _pid} =
-      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-2",
+      Fleet.Spawner.spawn_pod(valid_profile(), "issue-2",
         pod_id: pod_id,
         allow_no_brief: true,
         repo_id: @test_repo_id
@@ -281,13 +281,13 @@ defmodule Fleet.SpawnerTest do
 
   test "spawn_pod uses UUID by default if no :pod_id opt given" do
     {:ok, pid1} =
-      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-1",
+      Fleet.Spawner.spawn_pod(valid_profile(), "issue-uuid-1",
         allow_no_brief: true,
         repo_id: @test_repo_id
       )
 
     {:ok, pid2} =
-      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-2",
+      Fleet.Spawner.spawn_pod(valid_profile(), "issue-uuid-2",
         allow_no_brief: true,
         repo_id: @test_repo_id
       )
@@ -301,7 +301,7 @@ defmodule Fleet.SpawnerTest do
     pod_id = "pod-count-#{System.unique_integer([:positive])}"
 
     {:ok, _pid} =
-      Fleet.Spawner.spawn_pod(valid_profile(), "ticket-count",
+      Fleet.Spawner.spawn_pod(valid_profile(), "issue-count",
         pod_id: pod_id,
         allow_no_brief: true,
         repo_id: @test_repo_id
@@ -323,7 +323,7 @@ defmodule Fleet.SpawnerTest do
       pod_id = "pod-wake-stub-#{System.unique_integer([:positive])}"
 
       {:ok, _pid} =
-        Fleet.Spawner.spawn_pod(valid_profile(), "ticket-wake",
+        Fleet.Spawner.spawn_pod(valid_profile(), "issue-wake",
           pod_id: pod_id,
           allow_no_brief: true,
           repo_id: @test_repo_id

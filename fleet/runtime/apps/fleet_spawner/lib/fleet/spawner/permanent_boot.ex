@@ -67,7 +67,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   validation au loader canonique `Fleet.CapProfile.load/1` (DRY — pas de
   re-parse YAML) → garde `select_permanent/1` (host_native exclu) →
   `spawn_pod/3`
-  (signature réelle `(%CapProfile{}, ticket_id, opts)`).
+  (signature réelle `(%CapProfile{}, issue_id, opts)`).
 
   ## Échec de LOAD vs échec de SPAWN
 
@@ -92,7 +92,7 @@ defmodule Fleet.Spawner.PermanentBoot do
       `:fleet_spawner, :cap_profiles_dir`)
     * `:loader` — `(role :: String.t()) -> {:ok, cp} | {:error, term}`
       (défaut `&Fleet.CapProfile.load/1`)
-    * `:spawner` — `(cp, ticket_id, opts) -> {:ok, pid} | {:error, term}`
+    * `:spawner` — `(cp, issue_id, opts) -> {:ok, pid} | {:error, term}`
       (défaut `&Fleet.Spawner.spawn_pod/3`)
   """
   @spec boot_permanent_pods(keyword()) :: {:ok, [String.t()]} | {:error, term()}

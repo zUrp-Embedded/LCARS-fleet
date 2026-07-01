@@ -2,22 +2,22 @@
 
 **Date** : 2026-05-26
 **Dernière révision** : 2026-07-01 (atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors HopConsumer — events `*.failed` → registre, concern séparé)
-**Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
+**Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
-Service d'auto-orchestration tickets Gitea (M-033 backlog, doctrine
+Service d'auto-orchestration issues Gitea (M-033 backlog, doctrine
 `beyond_#4/01_architecture/topologie-ring.md` §"Élagage" : **client du
 core ring 1, pas core**).
 
 Découvre ses projets par topic (`lcars-fleet-<humain>`) et spawn le rôle
 producteur via le rail forge-state-machine décrit ci-dessous (mode **stage**) :
-la forge EST la machine à états (label de route gravé sur le ticket). Le
+la forge EST la machine à états (label de route gravé sur le issue). Le
 catalogue déclaratif `forge-routing.yaml` (axes `type:` × `state:` × `assignee`)
 a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le lisait.
 
 > **OBSOLÈTE — dispatch legacy RETIRÉ.** L'ancien chemin invoquait
 > `Fleet.Pipeline.start_pipeline/2` (moteur RAM `Fleet.Pipeline.Executor`) avec
-> le ticket_id + le brief (issue.body) comme `ask`, et posait un label
+> le issue_id + le brief (issue.body) comme `ask`, et posait un label
 > `lcars-dispatched` (lock atomique) pour l'idempotence inter-restart. Ce moteur
 > RAM a été **supprimé** (②.3 / BL-050 — cf. `fleet_pipeline` `Application`,
 > `start_pipeline`/`Executor` n'existent plus) et le `AutoDispatcher` retiré à
@@ -25,7 +25,7 @@ a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le l
 
 ## Mode stage (forge-state-machine — A2/A3, actif)
 
-Le mode **stage** (la forge EST la machine à états : ticket **assigné** à l'humain owner, non
+Le mode **stage** (la forge EST la machine à états : issue **assigné** à l'humain owner, non
 verrouillé → spawn le rôle **PRODUCTEUR** ; l'**assignee = l'humain**, point fixe — DN §1)
 double puis remplace le dispatch legacy ci-dessus. Activé par `:stage_dispatch?` + la forge `base_url`
 (`:forge[:base_url]` / `FORGE_BASE_URL`) — c'est la **seule** garde fail-loud du boot stage
@@ -36,7 +36,7 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
 
 - `Fleet.Pilot.StageDispatcher` — `decide/2` (issue assignée non verrouillée → `{:spawn, role, profile}`
   où `role` = **rôle producteur invariant** `:producer_role`, défaut `engineer` — pas un marqueur
-  par-ticket, DN §1) + `dispatch_issue/2` (ordre canonique label-verrou → comment → pod). Les **juges**
+  par-issue, DN §1) + `dispatch_issue/2` (ordre canonique label-verrou → comment → pod). Les **juges**
   sont dispatchés PR-driven via `dispatch_review/2` (②.1d, **PR = machine à états**, DN §1.4-1.5,
   sans branch-protection — LCARS agrège, interim) : reviewers en attente → spawn le prochain juge (un à
   un, sérialisé par le verrou PR ; clone la **feature-branch** pour voir le diff) ; round terminé +
@@ -45,7 +45,7 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
   (défaut 2) → **escalade arch** au lieu de re-spawn → fin du churn infini) ; `:approved` → **merge `rebase` scellé
   `:gatekeeper_role`** via `Fleet.Pilot.GatekeeperSeal` (**sceau UNIQUE** partagé avec `HopCompleter.promote`,
   F-arch-MCP : comment gatekeeper + merge signé gatekeeper, plus de fork où l'escalade mergeait en token
-  système ; LINÉAIRE + gère un `main` avancé sous une PR parallèle — multi-ticket, cf. `ForgeClient.merge_pr`
+  système ; LINÉAIRE + gère un `main` avancé sous une PR parallèle — multi-issue, cf. `ForgeClient.merge_pr`
   ; comment de fin honnête + close via `Closes #N`). **Passage de substance
   (anti-famine-d'info, fix #1)** : le brief **juge** (git-native) le POINTE sur son workspace
   (`git diff`) + porte le **critère** (body de l'issue, désamorcé I-CBC via `GateBrief :request`) ; le
@@ -63,12 +63,12 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
 - `Fleet.Pilot.Poller` — **DÉCOUVRE** ses repos par topic (`lcars-fleet-<human>`) PUIS **ADMET** uniquement
   ceux scellés système (`ForgeClient.admitted?` — marqueur d'onboarding bot-authored ; le topic mutable seul
   ne suffit plus, cf. § Onboarding « sceau d'admission »). Sur chaque repo admis : scanne, lit la **route-comment**
-  (`[lcars-route:carte:stage]`, gravée par `create_ticket` = la state-machine de routing) → dispatche le rôle du
+  (`[lcars-route:carte:stage]`, gravée par `create_issue` = la state-machine de routing) → dispatche le rôle du
   stage (`carte_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du
   1er stage). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
   **Bail fail-closed (2 invariants)** : (1) le bail se prend dès qu'un pipeline est DÉMARRÉ (verrou posé +
   pod spawné), jamais sur le succès d'une étape postérieure — un dispatch qui rend `{:error,{:wake_unreached,_}}`
-  (verrou+pod+brief en place, seul le réveil tmux a raté) PREND le bail intra-tick (sinon un 2e ticket du même
+  (verrou+pod+brief en place, seul le réveil tmux a raté) PREND le bail intra-tick (sinon un 2e issue du même
   repo démarrerait un 2e pipeline) ; l'anomalie reste comptée en `errors`/`last_tally_errors`, jamais avalée.
   (2) l'engagement se lit sur la ROUTE (append-only, robuste), pas sur le chargement de la carte : un échec
   TRANSITOIRE de carte (réseau/forge nil) sur un pipeline routé le classe ENGAGÉ (bail TENU, fail-closed) —
@@ -142,8 +142,8 @@ sourd ; contrat verrouillé par test côté `fleet_starfleet`).
 Le superviseur démarre aussi, **inconditionnellement** (avant le rail stage), `Fleet.Pilot.ForgeFinch` —
 pool HTTP/1 dédié au `ForgeClient` avec `conn_max_idle_time: 30_000`. Le défaut Finch `:infinity` laisse une
 connexion idle traîner jusqu'à ce que la forge la ferme côté serveur → le 1er appel après idle pend jusqu'au
-`receive_timeout` (10s), et `create_ticket` (qui enchaîne 3 appels : `create_issue` + `add_label`[GET+PUT])
-cumulait ainsi jusqu'à ~30s. Inconditionnel car `create_ticket` (côté `fleet_mcp`) appelle le `ForgeClient`
+`receive_timeout` (10s), et `create_issue` (qui enchaîne 3 appels : `create_issue` + `add_label`[GET+PUT])
+cumulait ainsi jusqu'à ~30s. Inconditionnel car `create_issue` (côté `fleet_mcp`) appelle le `ForgeClient`
 hors du rail Poller/HopConsumer. `Fleet.Pilot.ForgeClient.Transport.request/4` route via ce pool (`finch:`) et
 **trace tout appel forge >1s** (`Logger.warning "ForgeClient … LENT …ms"`) — l'observabilité qui localise un appel forge lent
 au run réel. Câblage du pool verrouillé par `forge_finch_test.exs` (sonde le process, pas un knob).

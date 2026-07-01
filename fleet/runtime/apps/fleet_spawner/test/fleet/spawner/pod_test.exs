@@ -133,11 +133,11 @@ defmodule Fleet.Spawner.PodTest do
     Fleet.Spawner.Pod.start_link(args)
   end
 
-  defp build_args(pod_id, ticket_id) do
+  defp build_args(pod_id, issue_id) do
     # engineer = project-bound → repo_id obligatoire pour minter son session_id déterministe.
     %{
       cap_profile: valid_profile(),
-      ticket_id: ticket_id,
+      issue_id: issue_id,
       pod_id: pod_id,
       opts: [repo_id: @test_repo_id]
     }
@@ -211,7 +211,7 @@ defmodule Fleet.Spawner.PodTest do
 
       pod_id = "pod-happy-#{System.unique_integer([:positive])}"
 
-      assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
 
       assert_receive {:launch_called, _args, env}, 2_000
       # adr-f : plus d'OAuth env injecté ; le pod reçoit CLAUDE_DIR (claudeDir
@@ -243,7 +243,7 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply(interactive_reply(session_id: "s-ma04"))
       pod_id = "pod-ma04-#{System.unique_integer([:positive])}"
 
-      assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      assert {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
       assert_receive {:launch_called, _args, _env}, 2_000
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
@@ -260,8 +260,8 @@ defmodule Fleet.Spawner.PodTest do
       GenServer.stop(pid)
     end
 
-    test "SLOT-FREEZE : le pod ADOPTE le ticket_id de la TACHE -> le livrable suit la BONNE brique (pas celle du spawn)" do
-      # Regression hello-buddy : le pipe gardait son ticket_id de SPAWN (issue-4) pour TOUS ses livrables ->
+    test "SLOT-FREEZE : le pod ADOPTE le issue_id de la TACHE -> le livrable suit la BONNE brique (pas celle du spawn)" do
+      # Regression hello-buddy : le pipe gardait son issue_id de SPAWN (issue-4) pour TOUS ses livrables ->
       # la 2e brique (issue-3) partait sur la branche/PR de issue-4 (ecrasement). Ici le pod spawn sur
       # "issue-4" mais la tache complétée porte "issue-3" -> le pod.completed (consomme par le HopConsumer
       # qui pousse HEAD:lcars/issue-N) doit porter "issue-3", la brique reellement traitee.
@@ -274,22 +274,22 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _, _}, 2_000
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # work_item_completed pour la brique issue-3 (re-brief), PAS le spawn issue-4 (ticket_id dans le payload,
-      # comme le vrai event TaskQueue qui porte completed.ticket_id).
+      # work_item_completed pour la brique issue-3 (re-brief), PAS le spawn issue-4 (issue_id dans le payload,
+      # comme le vrai event TaskQueue qui porte completed.issue_id).
       Phoenix.PubSub.broadcast(
         Fleet.PubSub,
         "fleet.events",
         Fleet.Event.new(:task_queue, :work_item_completed,
           pod_id: pod_id,
           correlation_id: "c-adopt",
-          payload: %{result: %{"answer" => "OK"}, ticket_id: "issue-3"}
+          payload: %{result: %{"answer" => "OK"}, issue_id: "issue-3"}
         )
       )
 
-      # Le pod.completed (= le livrable broadcaste au HopConsumer) porte le ticket ADOPTE issue-3.
+      # Le pod.completed (= le livrable broadcaste au HopConsumer) porte le issue ADOPTE issue-3.
       assert_receive %Fleet.Event{
                        type: :"pod.completed",
-                       payload: %{"ticket_id" => "issue-3"}
+                       payload: %{"issue_id" => "issue-3"}
                      },
                      3_000
     end
@@ -299,7 +299,7 @@ defmodule Fleet.Spawner.PodTest do
 
       pod_id = "pod-dir-#{System.unique_integer([:positive])}"
       # PAS de livrable → le pod reste en :monitoring (poll), GenServer vivant.
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
       assert_receive {:launch_called, _args, _env}, 2_000
 
       info = GenServer.call(pid, :info)
@@ -321,9 +321,9 @@ defmodule Fleet.Spawner.PodTest do
       assert File.exists?(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
       assert File.exists?(Path.join(info.pod_dir, "CLAUDE.md"))
       assert File.exists?(Path.join(info.pod_dir, ".lcars/protocole-user.md"))
-      # Ticket-driven (pivot doctrine) : le brief vit dans tickets/<ticket_id>.md
+      # Issue-driven (pivot doctrine) : le brief vit dans tickets/<issue_id>.md
       # (pas context/brief.md). Claude le lit comme contenu projet.
-      assert File.exists?(Path.join(info.pod_dir, "tickets/ticket-1.md"))
+      assert File.exists?(Path.join(info.pod_dir, "tickets/issue-1.md"))
 
       # Monitor in-pod (réveil-par-flag, ADR-G) : watch.sh provisionné au pod_dir,
       # exécutable. L'agent l'arme via l'outil Monitor (cf. SP).
@@ -345,7 +345,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — le travail (opts[:brief]) est livré dans tickets/<ticket_id>.md" do
+    test "PUSH — le travail (opts[:brief]) est livré dans tickets/<issue_id>.md" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-brief-#{System.unique_integer([:positive])}"
@@ -353,7 +353,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: valid_profile(),
-        ticket_id: "ticket-1",
+        issue_id: "issue-1",
         pod_id: pod_id,
         opts: [brief: brief, repo_id: @test_repo_id]
       }
@@ -362,13 +362,13 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, _env}, 2_000
 
       info = GenServer.call(pid, :info)
-      # Ticket-driven : le brief est dans tickets/<ticket_id>.md, pas en prompt
+      # Issue-driven : le brief est dans tickets/<issue_id>.md, pas en prompt
       # canal-user (safety guardrail REPL).
-      ticket = File.read!(Path.join(info.pod_dir, "tickets/ticket-1.md"))
+      issue = File.read!(Path.join(info.pod_dir, "tickets/issue-1.md"))
       # F128 : cadre neutre + rôle interpolé (plus de priming "worker engineer").
-      assert ticket =~ "pod LCARS (rôle engineer"
-      assert ticket =~ brief
-      assert ticket =~ "submit_result"
+      assert issue =~ "pod LCARS (rôle engineer"
+      assert issue =~ brief
+      assert issue =~ "submit_result"
 
       Process.exit(pid, :kill)
     end
@@ -382,7 +382,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: valid_profile(),
-        ticket_id: "ticket-mq",
+        issue_id: "issue-mq",
         pod_id: pod_id,
         opts: [brief: brief, repo_id: @test_repo_id]
       }
@@ -410,7 +410,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: valid_profile(),
-        ticket_id: "ticket-mq2",
+        issue_id: "issue-mq2",
         pod_id: pod_id,
         opts: [brief: "autre-brief", repo_id: @test_repo_id]
       }
@@ -445,7 +445,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: profile,
-        ticket_id: "ticket-1",
+        issue_id: "issue-1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -470,7 +470,7 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-state-#{System.unique_integer([:positive])}"
-      args = build_args(pod_id, "ticket-1") |> Map.put(:opts, session_id: "sess-xyz")
+      args = build_args(pod_id, "issue-1") |> Map.put(:opts, session_id: "sess-xyz")
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
       # Barrière de sync : :launch_called est émis PENDANT launch_backend.launch, avant que
@@ -479,11 +479,11 @@ defmodule Fleet.Spawner.PodTest do
 
       # state.json écrit en LAUNCH (avant MONITOR) → présent même sans livrable.
       # BL-021 chantier 4 : schéma C-3 complet (v, session_id, cap_profile_name,
-      # started_at, phase, conditions, ticket_id). `pod_id` n'est PLUS persisté
+      # started_at, phase, conditions, issue_id). `pod_id` n'est PLUS persisté
       # (la clé de recovery = path /var/lib/lcars/<scope>/<pod_id>/state.json).
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
       assert content["v"] == 1
-      assert content["ticket_id"] == "ticket-1"
+      assert content["issue_id"] == "issue-1"
       assert content["session_id"] == "sess-xyz"
       assert is_binary(content["cap_profile_name"])
       assert is_binary(content["started_at"])
@@ -513,7 +513,7 @@ defmodule Fleet.Spawner.PodTest do
           }
       }
 
-      %{cap_profile: gk, ticket_id: "ticket-1", pod_id: pod_id, opts: opts}
+      %{cap_profile: gk, issue_id: "issue-1", pod_id: pod_id, opts: opts}
     end
 
     test "rôle fleet-level (gatekeeper) → session_id hexspeak déterministe 1badcafe-...02" do
@@ -555,7 +555,7 @@ defmodule Fleet.Spawner.PodTest do
       assert {:error, {%ArgumentError{message: msg}, _stack}} =
                spawn_via_supervisor(%{
                  cap_profile: valid_profile(),
-                 ticket_id: "ticket-1",
+                 issue_id: "issue-1",
                  pod_id: pod_id,
                  opts: []
                })
@@ -567,7 +567,7 @@ defmodule Fleet.Spawner.PodTest do
 
     test "project-bound (engineer) AVEC repo_id → hexspeak déterministe (repo DÉCIMAL encodé)" do
       pod_id = "pod-eng-repo-#{System.unique_integer([:positive])}"
-      args = build_args(pod_id, "ticket-1") |> Map.put(:opts, repo_id: 161)
+      args = build_args(pod_id, "issue-1") |> Map.put(:opts, repo_id: 161)
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
       GenServer.call(pid, :info)
@@ -613,7 +613,7 @@ defmodule Fleet.Spawner.PodTest do
 
     test "défaut = 'default' (claude_launch → --permission-mode default, listes enforced)" do
       pod_id = "pod-perm-#{System.unique_integer([:positive])}"
-      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
       assert_receive {:launch_called, _args, env}, 2_000
       assert env["LCARS_PERMISSION_MODE"] == "default"
     end
@@ -626,7 +626,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: cp,
-        ticket_id: "ticket-1",
+        issue_id: "issue-1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -652,7 +652,7 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} =
         spawn_via_supervisor(%{
           cap_profile: host_profile(),
-          ticket_id: "t1",
+          issue_id: "t1",
           pod_id: pod_id,
           opts: [repo_id: @test_repo_id]
         })
@@ -691,7 +691,7 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} =
         spawn_via_supervisor(%{
           cap_profile: profile,
-          ticket_id: "t1",
+          issue_id: "t1",
           pod_id: pod_id,
           opts: [repo_id: @test_repo_id]
         })
@@ -723,7 +723,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: short_timeout(valid_profile()),
-        ticket_id: "t1",
+        issue_id: "t1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -743,7 +743,7 @@ defmodule Fleet.Spawner.PodTest do
       # masquait ; ici prouvé corrigé à la racine (vérif au fire, pas à l'armement).
       args = %{
         cap_profile: short_timeout(valid_profile()),
-        ticket_id: "t1",
+        issue_id: "t1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -776,7 +776,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: short_timeout(profile),
-        ticket_id: "t1",
+        issue_id: "t1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -807,7 +807,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: short_timeout(valid_profile()),
-        ticket_id: "t1",
+        issue_id: "t1",
         pod_id: pod_id,
         opts: [liveness_tick_ms: 100, liveness_probe_fun: probe, repo_id: @test_repo_id]
       }
@@ -842,7 +842,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: short_timeout(valid_profile()),
-        ticket_id: "t1",
+        issue_id: "t1",
         pod_id: pod_id,
         opts: [liveness_tick_ms: 100, liveness_probe_fun: probe, repo_id: @test_repo_id]
       }
@@ -869,7 +869,7 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} =
         spawn_via_supervisor(%{
           cap_profile: profile,
-          ticket_id: "t1",
+          issue_id: "t1",
           pod_id: pod_id,
           opts: [repo_id: @test_repo_id]
         })
@@ -944,7 +944,7 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply({:error, :bwrap_failed})
 
       pod_id = "pod-launch-fail-#{System.unique_integer([:positive])}"
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
 
       assert_receive {:EXIT, ^pid, {:shutdown, {:launch_failed, :bwrap_failed}}}, 2_000
     end
@@ -998,7 +998,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: pipe_profile(),
-        ticket_id: "ticket-1",
+        issue_id: "issue-1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -1038,7 +1038,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: pipe_profile(),
-        ticket_id: "ticket-1",
+        issue_id: "issue-1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -1086,7 +1086,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: pipe_profile(),
-        ticket_id: "ticket-1",
+        issue_id: "issue-1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -1114,7 +1114,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: git_native_pipe_profile(),
-        ticket_id: "ticket-1",
+        issue_id: "issue-1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -1149,7 +1149,7 @@ defmodule Fleet.Spawner.PodTest do
       # pipe_profile() = deliverable_mode défaut "payload".
       args = %{
         cap_profile: pipe_profile(),
-        ticket_id: "ticket-1",
+        issue_id: "issue-1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -1186,7 +1186,7 @@ defmodule Fleet.Spawner.PodTest do
         Jason.encode!(%{
           "v" => 1,
           "pod_id" => pod_id,
-          "ticket_id" => "ticket-old",
+          "issue_id" => "issue-old",
           "session_id" => "session-old",
           "phase" => "launching"
         })
@@ -1198,7 +1198,7 @@ defmodule Fleet.Spawner.PodTest do
       # `:temporary`, jamais de --resume sur une session morte). Le pod relance avec une
       # session NEUVE (ici le mint déterministe de l'engineer, repo de test résolu), PAS
       # --resume session-old : ce qu'on prouve = recreate ≠ resume, pas la forme de l'id.
-      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
       assert_receive {:launch_called, args, env}, 2_000
       refute args.session_id == "session-old"
       assert env["LCARS_POD_RESUME"] == "0"
@@ -1259,7 +1259,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: short_timeout(valid_profile()),
-        ticket_id: "t1",
+        issue_id: "t1",
         pod_id: pod_id,
         opts: [repo_id: @test_repo_id]
       }
@@ -1313,7 +1313,7 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-auth-bind-#{System.unique_integer([:positive])}"
 
-      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
 
       assert_receive {:launch_called, _args, env}, 2_000
       assert env["LCARS_AUTH_MODE"] == "bind"
@@ -1340,7 +1340,7 @@ defmodule Fleet.Spawner.PodTest do
       # (`/var/lib/.../.claude`…), CLAUDE_DIR ≠ `<tmp>/.claude` → CE test casse.
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-cred-perhuman-#{System.unique_integer([:positive])}"
-      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
 
       assert_receive {:launch_called, _args, env}, 2_000
       assert env["CLAUDE_DIR"] == Path.join(tmp_dir, ".claude")
@@ -1367,7 +1367,7 @@ defmodule Fleet.Spawner.PodTest do
 
       Process.flag(:trap_exit, true)
       pod_id = "pod-mcp-missing-#{System.unique_integer([:positive])}"
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
 
       assert_receive {:EXIT, ^pid,
                       {:shutdown, {:project_failed, {:mcp_server_spec_required, _backend}}}},
@@ -1394,7 +1394,7 @@ defmodule Fleet.Spawner.PodTest do
 
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-mcp-ns-#{System.unique_integer([:positive])}"
-      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "ticket-1"))
+      {:ok, pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
       assert_receive {:launch_called, _args, _env}, 2_000
 
       %{pod_dir: pod_dir} = GenServer.call(pid, :info)
@@ -1464,7 +1464,7 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, _pid} =
         spawn_via_supervisor(%{
           cap_profile: profile,
-          ticket_id: "t-1",
+          issue_id: "t-1",
           pod_id: pod_id,
           opts: [repo_id: @test_repo_id]
         })
@@ -1509,7 +1509,7 @@ defmodule Fleet.Spawner.PodTest do
 
       args = %{
         cap_profile: profile,
-        ticket_id: "t-1",
+        issue_id: "t-1",
         pod_id: pod_id,
         opts: [
           project: %{"repo_path" => src, "base_branch" => "main", "work_branch" => "work/ops"},

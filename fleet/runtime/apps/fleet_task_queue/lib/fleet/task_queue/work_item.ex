@@ -11,7 +11,7 @@ defmodule Fleet.TaskQueue.WorkItem do
   @type t :: %__MODULE__{
           id: String.t(),
           pod_id: String.t(),
-          ticket_id: String.t() | nil,
+          issue_id: String.t() | nil,
           role: String.t() | nil,
           brief: String.t() | nil,
           deadline: DateTime.t() | nil,
@@ -28,7 +28,7 @@ defmodule Fleet.TaskQueue.WorkItem do
   defstruct [
     :id,
     :pod_id,
-    :ticket_id,
+    :issue_id,
     :role,
     :brief,
     :deadline,
@@ -51,7 +51,7 @@ defmodule Fleet.TaskQueue.WorkItem do
     %{
       "id" => t.id,
       "pod_id" => t.pod_id,
-      "ticket_id" => t.ticket_id,
+      "issue_id" => t.issue_id,
       "role" => t.role,
       "brief" => t.brief,
       "deadline" => iso(t.deadline),
@@ -69,7 +69,7 @@ defmodule Fleet.TaskQueue.WorkItem do
   Désérialise depuis la map persistée. `{:error, :invalid}` si champ requis absent OU `state` inconnu.
 
   Parser UNIQUE → `rich_from_map`, qui reconstruit TOUS les champs : pas de clause « minimale »
-  concurrente qui masquerait la recovery de `brief`/`role`/`ticket_id`/`deadline`/`result`/`metadata`.
+  concurrente qui masquerait la recovery de `brief`/`role`/`issue_id`/`deadline`/`result`/`metadata`.
   `state` via liste fermée (pas `to_existing_atom`, qui RAISE sur un `state.json` corrompu et bypasse `:corrupt`).
   """
   @spec from_map(map()) :: {:ok, t()} | {:error, :invalid}
@@ -90,7 +90,7 @@ defmodule Fleet.TaskQueue.WorkItem do
        %__MODULE__{
          id: id,
          pod_id: pod_id,
-         ticket_id: m["ticket_id"],
+         issue_id: m["issue_id"],
          role: m["role"],
          brief: m["brief"],
          deadline: parse(m["deadline"]),

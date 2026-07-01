@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.ForgeClient.Files do
   Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea
   `PUT /repos/{repo}/contents/{path}`. **Le SYSTÈME publie** (forge-aveugle : le pod ne
   pousse jamais ; c'est ce chemin qui grave durablement le livrable d'un engineer). Création
-  (pas d'update sha) : viser un `path` neuf (ticket-namespacé). Branche existante requise
+  (pas d'update sha) : viser un `path` neuf (issue-namespacé). Branche existante requise
   (défaut `main`) — `opts[:new_branch]` pour brancher depuis `branch`.
 
   ## Returns

@@ -49,13 +49,13 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         # events.yaml, ex. gitea.opened/closed), sinon l'event authoritatif (header X-Gitea-Event),
         # sinon "unknown" — un event sans action et non-push ne doit pas être mislabelé "push".
         event_type = "gitea." <> (body["action"] || gitea_event_header(conn) || "unknown")
-        ticket_id = extract_ticket(body)
+        issue_id = extract_issue(body)
 
         # Schema canon strict : %Fleet.Event{source: :event_router}.
         try do
           type_atom = String.to_existing_atom(event_type)
 
-          payload = Map.put(body, "ticket_id", ticket_id)
+          payload = Map.put(body, "issue_id", issue_id)
 
           event = Fleet.Event.new(:event_router, type_atom, payload: payload)
 
@@ -172,8 +172,8 @@ defmodule Fleet.EventRouter.WebhooksGitea do
     conn |> get_req_header("x-gitea-event") |> List.first()
   end
 
-  # Extraire le ticket des issues ET des pull requests (pas seulement issue.id).
-  defp extract_ticket(%{"issue" => %{"id" => id}}), do: "fleet/lcars##{id}"
-  defp extract_ticket(%{"pull_request" => %{"id" => id}}), do: "fleet/lcars##{id}"
-  defp extract_ticket(_), do: nil
+  # Extraire le issue des issues ET des pull requests (pas seulement issue.id).
+  defp extract_issue(%{"issue" => %{"id" => id}}), do: "fleet/lcars##{id}"
+  defp extract_issue(%{"pull_request" => %{"id" => id}}), do: "fleet/lcars##{id}"
+  defp extract_issue(_), do: nil
 end

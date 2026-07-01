@@ -59,7 +59,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
        %{tmp_dir: tmp} do
     # Régression live 2026-06-22 : un pod timeout/crash laisse son workspace ; le pod_id étant
     # DÉTERMINISTE, le re-dispatch retombe sur le même pod_dir → `git clone` refusait (dest non vide)
-    # → wedge permanent du ticket. Le fix nettoie le résidu avant de re-cloner.
+    # → wedge permanent du issue. Le fix nettoie le résidu avant de re-cloner.
     src = make_source_repo(Path.join(tmp, "src-idem"))
     pod_dir = Path.join(tmp, "pod-idem-1")
     File.mkdir_p!(pod_dir)
@@ -193,10 +193,10 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
   # par deliverable_gate_test.exs + executor_post_extract_test.exs cas git_native usurpation).
 
   # ============================================================
-  # SLOT-FREEZE — reset_in_place : reset COLD du workspace d'un pipe RESIDENT pour le ticket suivant,
+  # SLOT-FREEZE — reset_in_place : reset COLD du workspace d'un pipe RESIDENT pour le issue suivant,
   # SANS rm_rf (le ws est bind-monte dans le sandbox bwrap vivant — rm_rf casserait le mount).
   # ============================================================
-  test "reset_in_place — commit + untracked du ticket precedent wipes, retour base_sha sur feature/work, .git PRESERVE (pas de rm_rf)",
+  test "reset_in_place — commit + untracked du issue precedent wipes, retour base_sha sur feature/work, .git PRESERVE (pas de rm_rf)",
        %{tmp_dir: tmp} do
     src = make_source_repo(Path.join(tmp, "src-reset"))
     {base, 0} = git(["rev-parse", "HEAD"], src)
@@ -212,19 +212,19 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     sentinel = Path.join(ws, ".git/SENTINEL_INPLACE")
     File.write!(sentinel, "x")
 
-    # L'ENG bosse le ticket precedent : un COMMIT (woody) + un fichier UNTRACKED (buzz = le bug de
+    # L'ENG bosse le issue precedent : un COMMIT (woody) + un fichier UNTRACKED (buzz = le bug de
     # stacking, du travail non committe qui trainait).
     {_, 0} = git(["config", "user.email", "e@lcars.local"], ws)
     {_, 0} = git(["config", "user.name", "eng"], ws)
     File.write!(Path.join(ws, "woody.sh"), "echo woody")
     {_, 0} = git(["add", "."], ws)
-    {_, 0} = git(["commit", "-q", "-m", "ticket precedent"], ws)
+    {_, 0} = git(["commit", "-q", "-m", "issue precedent"], ws)
     File.write!(Path.join(ws, "buzz.sh"), "echo buzz")
 
-    # RESET in-place pour le ticket suivant (meme base_sha) : retourne le MEME ws.
+    # RESET in-place pour le issue suivant (meme base_sha) : retourne le MEME ws.
     assert {:ok, ^ws, "feature/work"} = Clone.reset_in_place(pod_dir, profile, [])
 
-    # 1. retour a base_sha (le commit "ticket precedent" est parti).
+    # 1. retour a base_sha (le commit "issue precedent" est parti).
     {head, 0} = git(["rev-parse", "HEAD"], ws)
     assert String.trim(head) == base
     # 2. le committe ET l'untracked sont nettoyes (plus de stacking possible).

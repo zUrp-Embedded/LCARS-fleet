@@ -78,7 +78,7 @@ defmodule Fleet.Spawner do
   ## Inputs
 
     * `cap_profile` — struct `%Fleet.CapProfile{}` issue de `Fleet.CapProfile.compose/2`
-    * `ticket_id` — événement source (ticket Gitea, signal OS, etc.)
+    * `issue_id` — événement source (issue Gitea, signal OS, etc.)
     * `opts` :
       * `:pod_id` (default `UUID.uuid4()`) — doit être **path-safe** (`[A-Za-z0-9._-]`, pas de `..`),
         car interpolé dans des paths FS (`~/pods/pod_<id>`, sock, state recovery) ;
@@ -90,8 +90,8 @@ defmodule Fleet.Spawner do
   """
   @spec spawn_pod(Fleet.CapProfile.t(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
-  def spawn_pod(%Fleet.CapProfile{} = cap_profile, ticket_id, opts \\ [])
-      when is_binary(ticket_id) and is_list(opts) do
+  def spawn_pod(%Fleet.CapProfile{} = cap_profile, issue_id, opts \\ [])
+      when is_binary(issue_id) and is_list(opts) do
     case brief_guard(cap_profile, opts) do
       :ok ->
         pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
@@ -111,7 +111,7 @@ defmodule Fleet.Spawner do
 
           args = %{
             cap_profile: cap_profile,
-            ticket_id: ticket_id,
+            issue_id: issue_id,
             pod_id: pod_id,
             opts: opts
           }
@@ -228,7 +228,7 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Reprovisionne le workspace d'un pod pipe RESIDENT pour son ticket suivant (slot-freeze) : reset git
+  Reprovisionne le workspace d'un pod pipe RESIDENT pour son issue suivant (slot-freeze) : reset git
   IN-PLACE (PAS de rm_rf — le ws est bind-monte dans le sandbox vivant) sur la base du nouveau `project`
   + `/clear` du contexte REPL. Appele par le dispatcher au re-brief d'un pipe `:ready`. Retourne
   `:ok` | `{:error, _}` (incl. `:not_found` si le pod n'existe pas, `{:reset_failed, _}` si le git echoue).
@@ -353,7 +353,7 @@ defmodule Fleet.Spawner do
 
   Use-cases :
     - pipeline `standard-qa` : après findings reviewer/gatekeeper, push task corrective + wake_pod(eng) ;
-    - starfleet/fleet_pilot : nouveau ticket assigné au même pod long-lived → push + wake.
+    - starfleet/fleet_pilot : nouveau issue assigné au même pod long-lived → push + wake.
 
   Renvoie — signale UNIQUEMENT si le trigger a pu PARTIR ; le wake RÉEL est ASYNC :
     - `:ok` — flag touché + boucle & deadline armées. **N'affirme PAS que l'agent s'est réveillé** : le

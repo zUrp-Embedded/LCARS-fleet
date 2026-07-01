@@ -31,14 +31,14 @@ events:
   pod.drift: []
   # wake.failed (#5.2 [5]) : émis par `Spawner.Pod` quand le kick d'onboarding est abandonné après N
   # tentatives (agent jamais acké) — payload `pod_id`/`reason`/`pane`. Consommé par
-  # `Pilot.HopConsumer` (`type: :"wake.failed"` → escalade `:sp_suspect`, pane attaché au ticket).
+  # `Pilot.HopConsumer` (`type: :"wake.failed"` → escalade `:sp_suspect`, pane attaché au issue).
   # Producteur ET consumer réels → clé légitime (était absente = consommé-hors-registry, I-CBC rouge).
   wake.failed: []
   # spawn.failed : émis par `Spawner.PublishConsumer` (source :spawner) quand le dispatch d'un
   # `admin.spawn.request` LÈVE (CapProfile/spawn_pod plante de façon inattendue) → le spawn est droppé.
   # L'API REST a déjà répondu HTTP 202 « queued » au client AVANT ce dispatch async → sans cet event le
   # drop est SILENCIEUX (l'admin croit le pod en file ; zéro pod, zéro alarme). Jumelle de `pod.failed`,
-  # même cycle. Payload `cap_profile_name`/`ticket_id`/`reason`. Producteur réel ; consumer (dashboard/
+  # même cycle. Payload `cap_profile_name`/`issue_id`/`reason`. Producteur réel ; consumer (dashboard/
   # opérateur) à venir — clé légitime (sans elle le broadcast ferait UnregisteredError → re-drop muet).
   spawn.failed: []
 
@@ -105,7 +105,7 @@ events:
   # deliverable.published (slot-freeze) : emis par Pilot.HopCompleter (source :pipeline — la publication
   # EST une op pipeline via Deliverable.publish) APRES push + PR confirmes, porte `pod_id` (le pod
   # producteur, depuis le payload pod.completed). Consomme par Spawner.Pod : un pod resident (pipe) passe
-  # :publishing -> :ready (son workspace a ete LU/pousse, il peut etre reset pour le ticket suivant sans
+  # :publishing -> :ready (son workspace a ete LU/pousse, il peut etre reset pour le issue suivant sans
   # courser le push). Producteur reel.
   deliverable.published: []
 

@@ -259,8 +259,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   end
 
   defmodule SpawnStub do
-    def spawn_pod(_profile, ticket_id, opts) do
-      send(self(), {:spawned, ticket_id, opts})
+    def spawn_pod(_profile, issue_id, opts) do
+      send(self(), {:spawned, issue_id, opts})
       {:ok, self()}
     end
 
@@ -292,7 +292,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
   defp completed(spawn_opts, role, result \\ nil) do
     base = %{
-      "ticket_id" => "issue-1",
+      "issue_id" => "issue-1",
       "workspace" => "/ws",
       "base_sha" => "cafe",
       "role" => role,
@@ -367,7 +367,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   test "chaine engineer-first PR-driven : build(engineer) ouvre PR -> review(reviewer) -> merge close" do
     pid = new_issue()
 
-    # 1. ENTREE : #8 cohérence — le routing vit dans la ROUTE-COMMENT (gravée par create_ticket). Ici on
+    # 1. ENTREE : #8 cohérence — le routing vit dans la ROUTE-COMMENT (gravée par create_issue). Ici on
     #    la grave directement (carte poc-mini, 1er stage build). L'assignee reste l'HUMAIN (jamais touché ;
     #    le rôle du stage est dérivé de la route au dispatch via carte_role). Plus de routing par label.
     SimForge.post_route("o/r", 1, "poc-mini", "build", [])
@@ -408,7 +408,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   defp drive_to_review do
     pid = new_issue()
 
-    # Route gravée directement (carte gkchain, 1er stage build) — comme create_ticket (route-comment).
+    # Route gravée directement (carte gkchain, 1er stage build) — comme create_issue (route-comment).
     SimForge.post_route("o/r", 1, "gkchain", "build", [])
 
     assert {:ok, {:spawned, _, "engineer"}} =

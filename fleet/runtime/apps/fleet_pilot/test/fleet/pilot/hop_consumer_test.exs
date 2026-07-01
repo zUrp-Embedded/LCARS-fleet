@@ -67,7 +67,7 @@ defmodule Fleet.Pilot.HopConsumerTest do
     Map.merge(
       %{
         "pod_id" => "pod-abc",
-        "ticket_id" => "issue-42",
+        "issue_id" => "issue-42",
         "result" => %{"ok" => true},
         "workspace" => "/pods/pod-abc/workspace",
         "base_sha" => "cafe1234",
@@ -195,10 +195,10 @@ defmodule Fleet.Pilot.HopConsumerTest do
       assert {:skip, :no_project} = HopConsumer.maybe_complete(payload, state())
     end
 
-    test "ticket_id non parseable -> skip" do
-      payload = stage_payload(%{"ticket_id" => "owner/repo#42"})
+    test "issue_id non parseable -> skip" do
+      payload = stage_payload(%{"issue_id" => "owner/repo#42"})
 
-      assert {:skip, {:bad_ticket_id, "owner/repo#42"}} =
+      assert {:skip, {:bad_issue_id, "owner/repo#42"}} =
                HopConsumer.maybe_complete(payload, state())
     end
   end

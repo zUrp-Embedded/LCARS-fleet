@@ -29,8 +29,8 @@ defmodule Fleet.Pipeline.GatekeeperTest do
   defp ok_loader(_role), do: {:ok, :stub_cp}
 
   defp recording_spawner do
-    fn _cp, ticket, opts ->
-      send(self(), {:spawned, ticket, opts[:pod_id]})
+    fn _cp, issue, opts ->
+      send(self(), {:spawned, issue, opts[:pod_id]})
       {:ok, :stub_pid}
     end
   end

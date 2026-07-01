@@ -11,9 +11,9 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 ## Modules
 
 - `Fleet.MCP.PodTools` — outils MCP **pod-facing** : `get_work_item` (le pod tire son
-  brief depuis la TaskQueue), `submit_result` (le pod rend son livrable), `create_ticket`
+  brief depuis la TaskQueue), `submit_result` (le pod rend son livrable), `create_issue`
   (l'arch délègue une implémentation), `create_project` (l'arch onboard un projet neuf) et
-  `get_ticket_status` (l'arch suit une délégation). `handle_tool_call/3` = fonctions pures,
+  `get_issue_status` (l'arch suit une délégation). `handle_tool_call/3` = fonctions pures,
   réutilisables hors transport ; l'identité du pod arrive par le `state` (`%{pod_id: ...}`),
   jamais par les arguments. Reste wrappé derrière `use ExMCP.Server` pour le DSL `deftool` /
   `json` / `text` (schémas + format de contenu MCP).
@@ -70,7 +70,7 @@ structure que la socket-dir tmux des pods.
 
 ## Autorisation architecte — tools privilégiés (gate serveur-side)
 
-`create_project`, `create_ticket` et `get_ticket_status` sont des actes d'**architecte** : créer
+`create_project`, `create_issue` et `get_issue_status` sont des actes d'**architecte** : créer
 un repo forge, écrire/pousser dans `/home/projects`, déléguer, suivre une délégation. Le garde
 `require_architect/1` résout le **rôle** depuis l'identité du canal (`state.pod_id` → registre du
 Spawner, `Fleet.Spawner.pod_info`, seam test `:pod_resolver`) **puis** exige `architect`. Le rôle
@@ -84,7 +84,7 @@ vient du spawn, jamais d'un champ du wire. Tout rôle autre (engineer, reviewer,
 - `submit_result` — le pod soumet son livrable (`payload`) ; **`work_item_id` OBLIGATOIRE** = le `work_item_id`
   rendu par `get_work_item` (le broker corrèle sur CE brief précis, jamais « la dernière active » du pod —
   verrou orthogonal au transport). work_item_id absent → `:work_item_id_required` ; ≠ brief actif → `:work_item_id_mismatch`.
-- `create_ticket` (délégation, **architecte only**) — crée l'issue forge **prête pour le poller**
+- `create_issue` (délégation, **architecte only**) — crée l'issue forge **prête pour le poller**
   (`Fleet.Pilot.ForgeClient.create_issue`, dispatch runtime). Gate `require_architect`. Fail-closed :
   worker → `:forbidden_not_architect` ; pod inconnu → `:pod_unknown` ; token de rôle absent →
   `:role_token_unavailable` (jamais en système). auteur=arch (token du compte de rôle), **assignee=humain**
@@ -92,8 +92,8 @@ vient du spawn, jamais d'un champ du wire. Tout rôle autre (engineer, reviewer,
 - `create_project` (onboarding, **architecte only**) — `Fleet.Pilot.ProjectOnboard.onboard/2`
   (repo forge + dual-worktree `main`/`work/ops` + scaffold + push). Gate `require_architect` **avant**
   toute création/écriture. Le repo créé est RENDU dans le résultat (`repo`/`delegation_target`) → l'arch
-  le passe explicitement à `create_ticket`/`get_ticket_status`. Seams test : `:project_onboard`, `:pod_resolver`.
-- `get_ticket_status` (suivi, **architecte only**) — lit l'état d'un ticket (issue + PR) du repo passé
+  le passe explicitement à `create_issue`/`get_issue_status`. Seams test : `:project_onboard`, `:pod_resolver`.
+- `get_issue_status` (suivi, **architecte only**) — lit l'état d'un issue (issue + PR) du repo passé
   en `project` (**REQUIS** ; sans lui → `:project_required`, jamais d'état lu sur le mauvais projet). Gate
   `require_architect`. Lecture seule (`ForgeClient`). Seams test : `:forge_client`, `:pod_resolver`.
 

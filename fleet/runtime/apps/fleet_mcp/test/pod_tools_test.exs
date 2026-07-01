@@ -6,7 +6,7 @@ defmodule Fleet.MCP.PodToolsTest do
   PUR Elixir : appelle `handle_tool_call/3` en direct (pas de transport, pas de claude).
   L'identité du pod vient du `state` (`%{pod_id: pod}`) — porté par l'accepteur de socket
   en prod (un pod = une socket, l'identité EST le canal), JAMAIS des arguments. Les tools
-  privilégiés (`create_ticket`/`create_project`/`get_ticket_status`) résolvent le RÔLE
+  privilégiés (`create_issue`/`create_project`/`get_issue_status`) résolvent le RÔLE
   depuis le pod_id via le seam `:pod_resolver` (modélise le registre du Spawner).
   """
   use ExUnit.Case, async: false
@@ -157,7 +157,7 @@ defmodule Fleet.MCP.PodToolsTest do
       {:ok, :added}
     end
 
-    # Lecture (get_ticket_status) : issue fictive ouverte, aucune PR — suffit à prouver que la GATE a
+    # Lecture (get_issue_status) : issue fictive ouverte, aucune PR — suffit à prouver que la GATE a
     # laissé passer (le contenu importe peu, on teste l'autorisation, pas la forge).
     def get_issue(_repo, _number, _opts), do: {:ok, %{"state" => "open"}}
     def list_open_pulls(_repo, _opts), do: {:ok, []}
@@ -176,7 +176,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # Stub forge qui CAPTURE le repo interrogé par get_ticket_status (preuve que le repo vient du `project`
+  # Stub forge qui CAPTURE le repo interrogé par get_issue_status (preuve que le repo vient du `project`
   # passé en argument, pas d'une mémoire globale). L'état d'issue rendu est réglable par `:test_issue_state`.
   defmodule RecordingForge do
     def get_issue(repo, number, _opts) do
@@ -187,14 +187,14 @@ defmodule Fleet.MCP.PodToolsTest do
     def list_open_pulls(_repo, _opts), do: {:ok, []}
   end
 
-  describe "get_ticket_status (suivi arch — repo PASSÉ en `project`, plus de global mutable)" do
+  describe "get_issue_status (suivi arch — repo PASSÉ en `project`, plus de global mutable)" do
     setup do
       prev_forge = Application.get_env(:fleet_mcp, :forge_client)
       prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
 
       Application.put_env(:fleet_mcp, :forge_client, RecordingForge)
 
-      # Suivre un ticket est un acte d'ARCHITECTE : le resolver grave le rôle architect sur le pod du canal.
+      # Suivre un issue est un acte d'ARCHITECTE : le resolver grave le rôle architect sur le pod du canal.
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
 
       on_exit(fn ->
@@ -211,7 +211,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "get_ticket_status",
+                 "get_issue_status",
                  %{"number" => 42, "project" => "fleet/specific"},
                  pod_state(pod)
                )
@@ -224,13 +224,13 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["issue"] == 42
     end
 
-    test "`delivered: true` quand l'issue est fermée (séquencement multi-ticket)" do
+    test "`delivered: true` quand l'issue est fermée (séquencement multi-issue)" do
       Application.put_env(:fleet_mcp, :test_issue_state, "closed")
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "get_ticket_status",
+                 "get_issue_status",
                  %{"number" => 7, "project" => "fleet/other"},
                  pod_state(pod)
                )
@@ -240,14 +240,14 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["delivered"] == true
     end
 
-    test "REFUSE si `project` omis — pas de routage par défaut (miroir create_ticket)" do
+    test "REFUSE si `project` omis — pas de routage par défaut (miroir create_issue)" do
       # Le pod est légitime (architecte) — c'est le `project` manquant qui refuse. Sans repo explicite,
-      # get_ticket_status lirait l'état du mauvais projet (le trou qu'on ferme).
+      # get_issue_status lirait l'état du mauvais projet (le trou qu'on ferme).
       pod = uniq("pod-arch")
 
       assert {:error, {:project_required, msg}, _} =
                PodTools.handle_tool_call(
-                 "get_ticket_status",
+                 "get_issue_status",
                  %{"number" => 42},
                  pod_state(pod)
                )
@@ -261,7 +261,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, {:project_required, _}, _} =
                PodTools.handle_tool_call(
-                 "get_ticket_status",
+                 "get_issue_status",
                  %{"number" => 42, "project" => ""},
                  pod_state(pod)
                )
@@ -270,7 +270,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  describe "create_ticket (délégation arch → ticket forge prêt pour le poller)" do
+  describe "create_issue (délégation arch → issue forge prêt pour le poller)" do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
@@ -281,7 +281,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       # Déléguer est un acte d'ARCHITECTE : le `:pod_resolver` doit rendre le rôle `architect` (sinon
       # `require_architect` refuse `:forbidden_not_architect`). Le token du compte architect doit aussi être
-      # sur disque, sinon create_ticket REFUSE (`:role_token_unavailable`, fail-closed).
+      # sur disque, sinon create_issue REFUSE (`:role_token_unavailable`, fail-closed).
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
 
       Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
@@ -304,7 +304,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "create_ticket",
+                 "create_issue",
                  %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
                  pod_state(pod)
                )
@@ -319,8 +319,8 @@ defmodule Fleet.MCP.PodToolsTest do
       assert_received {:add_label, "fleet/demo", 77, "type:feature", _}
 
       assert {:ok, result} = Jason.decode(txt)
-      assert result["status"] == "ticket_created"
-      assert result["ticket"] == "fleet/demo#77"
+      assert result["status"] == "issue_created"
+      assert result["issue"] == "fleet/demo#77"
       assert result["assignee"] == human
     end
 
@@ -329,7 +329,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "create_ticket",
+                 "create_issue",
                  %{"title" => "T", "brief" => "fais X", "project" => "fleet/explicit"},
                  pod_state(pod)
                )
@@ -344,7 +344,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, {:project_required, msg}, _} =
                PodTools.handle_tool_call(
-                 "create_ticket",
+                 "create_issue",
                  %{"title" => "T", "brief" => "fais X"},
                  pod_state(pod)
                )
@@ -358,7 +358,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, {:project_required, _}, _} =
                PodTools.handle_tool_call(
-                 "create_ticket",
+                 "create_issue",
                  %{"title" => "T", "brief" => "fais X", "project" => ""},
                  pod_state(pod)
                )
@@ -414,7 +414,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call(
-                 "create_ticket",
+                 "create_issue",
                  %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
                  %{pod_id: "p1"}
                )
@@ -431,7 +431,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "create_ticket",
+                 "create_issue",
                  %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
                  %{pod_id: "p-arch"}
                )
@@ -447,7 +447,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :pod_unknown, _} =
                PodTools.handle_tool_call(
-                 "create_ticket",
+                 "create_issue",
                  %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
                  %{pod_id: "ghost"}
                )
@@ -469,7 +469,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :role_token_unavailable, _} =
                PodTools.handle_tool_call(
-                 "create_ticket",
+                 "create_issue",
                  %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
                  %{pod_id: "p-arch2"}
                )
@@ -482,7 +482,7 @@ defmodule Fleet.MCP.PodToolsTest do
   # Gate architecte serveur-side des tools privilégiés
   # ============================================================
   #
-  # `create_project`, `create_ticket`, `get_ticket_status` exigent le rôle `architect` résolu depuis le
+  # `create_project`, `create_issue`, `get_issue_status` exigent le rôle `architect` résolu depuis le
   # pod_id du canal. Tout rôle non architecte (engineer, reviewer, rôle nil/inconnu), un pod inconnu, ou un
   # state sans pod_id → REFUS sur les 3 tools ; architect → passe.
   describe "gate architecte (refus de tout rôle non architecte sur les tools privilégiés)" do
@@ -491,8 +491,8 @@ defmodule Fleet.MCP.PodToolsTest do
     # Les 3 tools privilégiés avec un jeu d'arguments métier VALIDE (pour que seul le rôle décide du refus).
     @privileged_tools [
       {"create_project", %{"name" => "demo-proj"}},
-      {"create_ticket", %{"title" => "T", "brief" => "B", "project" => "fleet/demo"}},
-      {"get_ticket_status", %{"number" => 1, "project" => "fleet/demo"}}
+      {"create_issue", %{"title" => "T", "brief" => "B", "project" => "fleet/demo"}},
+      {"get_issue_status", %{"number" => 1, "project" => "fleet/demo"}}
     ]
 
     # Rôles non autorisés à déléguer/onboarder/suivre. `nil` modélise un pod sans rôle gravé (binding

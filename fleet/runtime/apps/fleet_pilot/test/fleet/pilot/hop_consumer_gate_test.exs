@@ -150,7 +150,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   # pod.completed du stage producteur `build` (engineer) qui vient de finir, avec son result.
   defp build_done(pipeline, result) do
     %{
-      "ticket_id" => "issue-1",
+      "issue_id" => "issue-1",
       "workspace" => "/ws",
       "base_sha" => "cafe",
       "role" => "engineer",
@@ -413,7 +413,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
       n: 1,
       role: "engineer",
       payload: %{
-        "ticket_id" => "issue-1",
+        "issue_id" => "issue-1",
         "workspace" => "/ws",
         "base_sha" => "cafe",
         "role" => "engineer",
@@ -448,7 +448,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   # pod.completed du stage brief-review (consultant) qui vient de rendre son verdict.
   defp brief_done(result),
     do: %{
-      "ticket_id" => "issue-1",
+      "issue_id" => "issue-1",
       "workspace" => "/ws",
       "base_sha" => "cafe",
       "role" => "consultant",

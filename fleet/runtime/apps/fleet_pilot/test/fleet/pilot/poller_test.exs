@@ -92,7 +92,7 @@ defmodule Fleet.Pilot.PollerTest do
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
 
     # #8 : la route vit dans le route-comment (state-machine). Stub configurable par `_test_routes`
-    # (map n → {carte, stage}). Défaut :none (ticket non routé → A1 producteur).
+    # (map n → {carte, stage}). Défaut :none (issue non routé → A1 producteur).
     def get_route(_repo, n, opts) do
       case Map.get(Keyword.get(opts, :_test_routes, %{}), n) do
         {carte, stage} -> {:ok, {carte, stage}}
@@ -150,7 +150,7 @@ defmodule Fleet.Pilot.PollerTest do
 
   # Loader de CARTE (load!/1) — distinct du loader CapProfile ci-dessus (load/1).
   defmodule StageStubCarteLoader do
-    # 1-stage (producteur engineer) : un ticket routé ici (stage=build=1er) est EN FILE (pas démarré).
+    # 1-stage (producteur engineer) : un issue routé ici (stage=build=1er) est EN FILE (pas démarré).
     def load!("qa-build") do
       %{"name" => "qa-build", "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}}
     end
@@ -168,9 +168,9 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   defmodule StageStubSpawner do
-    def spawn_pod(_profile, ticket_id, opts) do
-      send(self(), {:spawned, ticket_id, opts})
-      {:ok, "pod-#{ticket_id}"}
+    def spawn_pod(_profile, issue_id, opts) do
+      send(self(), {:spawned, issue_id, opts})
+      {:ok, "pod-#{issue_id}"}
     end
 
     # Réconciliation (B) : aucun pod vivant par défaut → tout verrou `lcars-in-flight` est candidat
@@ -180,7 +180,7 @@ defmodule Fleet.Pilot.PollerTest do
 
   # F-037 / #25 : un pod VIVANT à pod_id REPO-SCOPÉ (`<repo-slug>-issue-<n>-<role>`, format PodId réel).
   defmodule LivePodSpawner do
-    def spawn_pod(_profile, ticket_id, _opts), do: {:ok, "pod-#{ticket_id}"}
+    def spawn_pod(_profile, issue_id, _opts), do: {:ok, "pod-#{issue_id}"}
     def list_pods, do: [%{pod_id: "lordzurp-lcars-test-issue-8-engineer"}]
   end
 
@@ -190,22 +190,22 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   # SLOT-FREEZE : un eng PIPE project-scoped (pod_id `<repo>-engineer`, SANS `-issue-N-` — l'eng resident
-  # qui traite N tickets sequentiellement, 1 process = 1 slot Desktop).
+  # qui traite N issues sequentiellement, 1 process = 1 slot Desktop).
   defmodule ProjectPipeSpawner do
-    def spawn_pod(_profile, ticket_id, _opts), do: {:ok, "pod-#{ticket_id}"}
+    def spawn_pod(_profile, issue_id, _opts), do: {:ok, "pod-#{issue_id}"}
     def list_pods, do: [%{pod_id: "lordzurp-lcars-test-engineer"}]
   end
 
-  # TaskQueue stub : l'eng project travaille la BRIQUE 8 (ticket_id "issue-8") -> il possede #8.
+  # TaskQueue stub : l'eng project travaille la BRIQUE 8 (issue_id "issue-8") -> il possede #8.
   defmodule ProjectTaskQueueIssue8 do
     def pod_status(_pod_id), do: {:ok, :running}
-    def pod_active_ticket_id(_pod_id), do: {:ok, "issue-8"}
+    def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
   end
 
   # TaskQueue stub : l'eng project travaille une AUTRE brique (9) -> il ne possede PAS #8.
   defmodule ProjectTaskQueueIssue9 do
     def pod_status(_pod_id), do: {:ok, :running}
-    def pod_active_ticket_id(_pod_id), do: {:ok, "issue-9"}
+    def pod_active_issue_id(_pod_id), do: {:ok, "issue-9"}
   end
 
   # Recovery de wake qui ÉCHOUE (pod injoignable, re-roll non réparé) → `StageDispatcher.dispatch_issue`
@@ -358,7 +358,7 @@ defmodule Fleet.Pilot.PollerTest do
     test "SLOT-FREEZE : un eng PIPE project-scoped tient le verrou de sa BRIQUE ACTIVE (pas de mis-reclamation -> pas de loop)" do
       # Regression du loop hello-avengers : le pod project `<repo>-engineer` (sans `-issue-N-`) n'etait
       # reconnu proprietaire d'AUCUN verrou (parse_pod_ref -> []) -> le poller reclamait le sien ->
-      # re-dispatch en boucle. Ici l'eng (tache active sur #8 via son ticket_id "issue-8") est reconnu
+      # re-dispatch en boucle. Ici l'eng (tache active sur #8 via son issue_id "issue-8") est reconnu
       # proprietaire -> #8 JAMAIS reclame, meme apres 2 ticks.
       issues = [
         %{
@@ -510,8 +510,8 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "ticket ROUTÉ (route-comment) + assignee → démarre → dispatche le rôle du stage (carte_role)" do
-      # #8 cohérence : le routing vient de la ROUTE-COMMENT (gravée par create_ticket), plus du label.
+    test "issue ROUTÉ (route-comment) + assignee → démarre → dispatche le rôle du stage (carte_role)" do
+      # #8 cohérence : le routing vient de la ROUTE-COMMENT (gravée par create_issue), plus du label.
       # #10 routé qa-build:build (1er stage = en file), assigné humain, bail libre → DÉMARRE → le poller
       # dispatche le rôle du stage courant (build → engineer via carte_role).
       issues = [
@@ -671,7 +671,7 @@ defmodule Fleet.Pilot.PollerTest do
       {name, pid}
     end
 
-    test "un pipeline ENGAGÉ (route avancée) tient le bail et bloque un ticket EN FILE" do
+    test "un pipeline ENGAGÉ (route avancée) tient le bail et bloque un issue EN FILE" do
       # #8 : le bail se lit sur la ROUTE (state-machine), PLUS sur state:*. #11 routé qa-2:deploy (2e
       # stage ≠ 1er = pipeline AVANCÉ entre deux hops) → ENGAGÉ → tient le bail ET son stage courant est
       # dispatché (continue le hop). #12 routé qa-build:build (1er stage = EN FILE) → bail tenu → attend.
@@ -698,7 +698,7 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "deux tickets EN FILE -> un seul démarre, l'autre attend (bail pris dans le tick)" do
+    test "deux issues EN FILE -> un seul démarre, l'autre attend (bail pris dans le tick)" do
       issues = [
         %{
           "number" => 13,
@@ -725,7 +725,7 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "bail libre (aucun pipeline engagé) -> le ticket EN FILE démarre" do
+    test "bail libre (aucun pipeline engagé) -> le issue EN FILE démarre" do
       issues = [
         %{
           "number" => 15,
@@ -742,17 +742,17 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "wake raté sur le 1er ticket PREND le bail intra-tick → le 2e ne démarre PAS (un seul pipeline)" do
+    test "wake raté sur le 1er issue PREND le bail intra-tick → le 2e ne démarre PAS (un seul pipeline)" do
       # Régression : l'ordre canonique du spawn est verrou → pod → enqueue → WAKE (le wake EN DERNIER). Donc
       # `{:error, {:wake_unreached, …}}` = pipeline DÉMARRÉ (verrou + pod + brief posés), seul le réveil tmux
       # a raté. Le pipeline DOIT tenir le bail repo-sérialisé. Deux issues du MÊME repo EN FILE dans le même
       # tick ; le wake de la 1re échoue (FailingWakeRecovery). Le 1er pipeline est démarré → bail PRIS → le 2e
-      # ticket est SKIPPÉ (un seul pipeline démarre). Le wake raté n'est PAS avalé : il reste compté en `errors`
+      # issue est SKIPPÉ (un seul pipeline démarre). Le wake raté n'est PAS avalé : il reste compté en `errors`
       # (et alimente err_streak/telemetry).
       #
       # Régression prouvée : reviens à l'ancien `stage_do_dispatch` (wake_unreached → errors SANS prendre le
       # bail) + `start_pipeline` qui ne prend le bail que si `dispatched` augmente → le bail reste libre → le 2e
-      # ticket DÉMARRE un 2e pipeline → le tally devient `skipped:0, errors:2` (deux feature-branches
+      # issue DÉMARRE un 2e pipeline → le tally devient `skipped:0, errors:2` (deux feature-branches
       # concurrentes), l'assert `skipped:1` échoue.
       issues = [
         %{
@@ -776,7 +776,7 @@ defmodule Fleet.Pilot.PollerTest do
           wake_recovery: &FailingWakeRecovery.wake/3
         )
 
-      # 1er ticket : pipeline démarré mais wake injoignable → errors:1, bail PRIS. 2e ticket : bail tenu →
+      # 1er issue : pipeline démarré mais wake injoignable → errors:1, bail PRIS. 2e issue : bail tenu →
       # skipped:1. Un SEUL pipeline démarre. Le wake raté est SURFACÉ (errors), pas avalé.
       assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
 
@@ -935,7 +935,7 @@ defmodule Fleet.Pilot.PollerTest do
 
     # Un seul pod vivant : `repoB#8` (pod_id repo-scopé pour repoB). repoA n'a AUCUN pod.
     defmodule RepoBPodSpawner do
-      def spawn_pod(_profile, ticket_id, _opts), do: {:ok, "pod-#{ticket_id}"}
+      def spawn_pod(_profile, issue_id, _opts), do: {:ok, "pod-#{issue_id}"}
       def list_pods, do: [%{pod_id: "owner-repoB-issue-8-engineer"}]
     end
 

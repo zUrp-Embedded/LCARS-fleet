@@ -18,7 +18,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   - `gc_stale_session_jsonl(state)` — appelé par `do_clean` (GC de l'UUID de session avant un re-spawn
     `--session-id`).
   - `pod_settings_json/0`, `read_agent_draft(cap_profile)`, `read_protocole_user/0`,
-    `maybe_path(path)`, `maybe_filter_skills(cap_profile, root)`, `ticket_id_to_filename(ticket_id)`,
+    `maybe_path(path)`, `maybe_filter_skills(cap_profile, root)`, `issue_id_to_filename(issue_id)`,
     `default_brief(state)`, `maybe_enqueue_brief(state)`, `provision_monitor_watch(state)`,
     `maybe_bootstrap_project_workspace(state)`, `maybe_recall_restore(state)` — étapes appelées dans la
     `with` de `do_project`.
@@ -80,7 +80,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   # Draft SP role-aware : le draft d'un rôle est `agent-<role>-base.md` s'il
   # EXISTE, sinon le draft worker générique. Convention catalogue (le draft suit le `metadata.name`),
   # plus de rôle gravé en `case` : l'architecte tombe sur son draft délégateur (qualité+économie +
-  # create_ticket), tout rôle sans draft dédié sur le draft worker (get_work_item/submit_result). `role`
+  # create_issue), tout rôle sans draft dédié sur le draft worker (get_work_item/submit_result). `role`
   # est interpolé dans un path (`agent-<role>-base.md`) → validé via le smart-constructor slug
   # (source unique du charset path-safe ; un `role` malformé retombe juste sur le draft par défaut).
   def read_agent_draft(%Fleet.CapProfile{} = cap) do
@@ -109,7 +109,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   # protocole-user.md (mots-clés personnalisés `yop`/`SeeU`).
   #
   # Default = `priv/sp_drafts/protocole-user-worker.md` shippé avec
-  # fleet_sp_builder : version WORKER (yop = trigger workflow ticket-driven,
+  # fleet_sp_builder : version WORKER (yop = trigger workflow issue-driven,
   # SeeU = no-op). Override par config `:fleet_spawner, :protocole_user_path`
   # si besoin (instance utilisateur custom).
   #
@@ -155,12 +155,12 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   # injection et refuser. Le contexte fleet (convention submit_result) est posé en
   # préambule conversationnel, pas comme directive impérative ("EXACTEMENT ce payload",
   # "appelle ce tool", etc.).
-  # Convertit ticket_id (peut contenir `/`, `#`, etc. — ex.
+  # Convertit issue_id (peut contenir `/`, `#`, etc. — ex.
   # "fleet/lcars#600" depuis Gitea) en filename safe (sans `/` qui
   # créerait des sous-dirs). Convention : remplace `/` par `_` et
   # garde `#` (lisible humain).
-  def ticket_id_to_filename(ticket_id) when is_binary(ticket_id) do
-    String.replace(ticket_id, "/", "_")
+  def issue_id_to_filename(issue_id) when is_binary(issue_id) do
+    String.replace(issue_id, "/", "_")
   end
 
   def default_brief(state) do
@@ -174,12 +174,12 @@ defmodule Fleet.Spawner.Pod.Scaffold do
       if is_binary(brief) and brief != "" do
         brief
       else
-        "(Pas de brief fourni — ticket #{state.ticket_id}.)"
+        "(Pas de brief fourni — issue #{state.issue_id}.)"
       end
 
     """
     Salut. Tu es un pod LCARS (rôle #{role}, pod #{state.pod_id}) ; cette session
-    a été lancée par le fleet pour traiter une demande référencée ticket #{state.ticket_id}.
+    a été lancée par le fleet pour traiter une demande référencée issue #{state.issue_id}.
 
     Le fleet attend que tu utilises le tool MCP `submit_result` quand ton travail est
     terminé — c'est la convention LCARS, le canal de retour structuré équivalent d'un
@@ -197,7 +197,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   #     le spawn) → pas de double-enqueue (skip) ;
   #   - sinon (`admin.spawn` / `lcars spawn --brief` : aucun dispatcher) → on enqueue ici, sinon
   #     `get_work_item` rend `{done:true}` et le pod reste idle (cf. StageDispatcher.enqueue_brief).
-  # Mirror des `attrs` de StageDispatcher (`ticket_id`/`role`/`brief`/`metadata`).
+  # Mirror des `attrs` de StageDispatcher (`issue_id`/`role`/`brief`/`metadata`).
   def maybe_enqueue_brief(state) do
     brief = Keyword.get(state.opts || [], :brief)
 
@@ -210,7 +210,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
       true ->
         attrs = %{
-          ticket_id: state.ticket_id,
+          issue_id: state.issue_id,
           role: Fleet.CapProfile.name(state.cap_profile),
           brief: brief,
           metadata: %{"source" => "admin.spawn"}
@@ -225,7 +225,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
   # Câblage de Fleet.ProjectBootstrap.Phase.Clone pour les pods porteurs d'un projet
   # (`repo_path`) : le projet EFFECTIF vient du BRIEF (effective_project : opts[:project]
-  # injecté par le dispatch ticket->repo) ou du cap_profile statique (pods permanents). Présent :
+  # injecté par le dispatch issue->repo) ou du cap_profile statique (pods permanents). Présent :
   # clone le repo dans `<pod_dir>/workspace/` + checkout feature branch ; le cwd du REPL pointe sur
   # ce workspace (maybe_put_pod_cwd -> LCARS_POD_CWD) → l'agent code DANS sa branche (pas dans le
   # pod_dir nu, et le clone est idempotent au respawn).

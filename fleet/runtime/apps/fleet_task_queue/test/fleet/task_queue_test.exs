@@ -234,7 +234,7 @@ defmodule Fleet.TaskQueueTest do
       pod_id: "p1",
       enqueued_at: ~U[2026-06-02 00:00:00Z],
       state: :assigned,
-      ticket_id: "tk1",
+      issue_id: "tk1",
       role: "engineer",
       brief: "fais X",
       metadata: %{"stage" => "qa"},
@@ -246,7 +246,7 @@ defmodule Fleet.TaskQueueTest do
     assert %{
              brief: "fais X",
              role: "engineer",
-             ticket_id: "tk1",
+             issue_id: "tk1",
              state: :assigned,
              metadata: %{"stage" => "qa"},
              result: %{"ok" => true}

@@ -7,7 +7,7 @@ defmodule Fleet.Spawner.PublishConsumer do
 
   Payload attendu (rest.ex broadcast les conn.body_params) :
     * `"cap_profile_name"` ou `"role"` — string, nom canon CapProfile (chargé via `Fleet.CapProfile.load/1`)
-    * `"ticket_id"` — string (sinon ticket_id enveloppe Bus)
+    * `"issue_id"` — string (sinon issue_id enveloppe Bus)
     * `"opts"` — map keyword (optionnel)
 
   Erreurs (load fail / spawn fail) → log warning, **pas de crash**
@@ -75,14 +75,14 @@ defmodule Fleet.Spawner.PublishConsumer do
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
-  # `payload` = map applicative ; `envelope` = struct/map qui peut porter `ticket_id`
+  # `payload` = map applicative ; `envelope` = struct/map qui peut porter `issue_id`
   # à la racine (cas legacy tuple — la struct canon le porte dans le payload aussi).
   defp handle_spawn_request(payload, envelope, state) do
     name = Map.get(payload, "cap_profile_name") || Map.get(payload, "role")
 
-    ticket_id =
-      Map.get(payload, "ticket_id") ||
-        (is_map(envelope) and Map.get(envelope, "ticket_id")) ||
+    issue_id =
+      Map.get(payload, "issue_id") ||
+        (is_map(envelope) and Map.get(envelope, "issue_id")) ||
         ""
 
     opts = Map.get(payload, "opts", []) |> to_keyword()
@@ -97,13 +97,13 @@ defmodule Fleet.Spawner.PublishConsumer do
       true ->
         case Fleet.CapProfile.load(name) do
           {:ok, cap_profile} ->
-            case state.spawner.spawn_pod(cap_profile, to_string(ticket_id), opts) do
+            case state.spawner.spawn_pod(cap_profile, to_string(issue_id), opts) do
               {:ok, _pod_ref} ->
-                Logger.info("PublishConsumer: spawn dispatché name=#{name} ticket=#{ticket_id}")
+                Logger.info("PublishConsumer: spawn dispatché name=#{name} issue=#{issue_id}")
 
               {:error, reason} ->
                 Logger.warning(
-                  "PublishConsumer: spawn_pod fail name=#{name} ticket=#{ticket_id} " <>
+                  "PublishConsumer: spawn_pod fail name=#{name} issue=#{issue_id} " <>
                     "reason=#{inspect(reason)}"
                 )
             end
@@ -127,7 +127,7 @@ defmodule Fleet.Spawner.PublishConsumer do
       Fleet.Event.new(:spawner, :"spawn.failed",
         payload: %{
           "cap_profile_name" => Map.get(payload, "cap_profile_name") || Map.get(payload, "role"),
-          "ticket_id" => Map.get(payload, "ticket_id"),
+          "issue_id" => Map.get(payload, "issue_id"),
           "reason" => reason
         }
       )

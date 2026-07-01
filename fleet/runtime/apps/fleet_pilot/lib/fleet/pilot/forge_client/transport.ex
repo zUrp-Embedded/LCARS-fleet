@@ -191,7 +191,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
 
   @doc false
   # Lecture PAGINÉE d'une collection source-de-vérité (issues / pulls / comments). Gitea
-  # plafonne `limit` à 50/page — une seule page rate les items 51+ (tickets/PR ignorés, marqueurs de
+  # plafonne `limit` à 50/page — une seule page rate les items 51+ (issues/PR ignorés, marqueurs de
   # hop sous-comptés). On boucle `page=1,2,...` (`@page_limit` items/page) en accumulant jusqu'à la
   # DERNIÈRE page : une page rendant < @page_limit items (ou vide) est la dernière (invariant Gitea :
   # une page pleine implique « peut-être une suite »). Comportement identique à l'ancien ≤50 items :
@@ -278,7 +278,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     elapsed = System.monotonic_time(:millisecond) - started
 
     # INSTRUMENTATION : un appel à la forge LOCALE qui dépasse 1s est anormal → on le trace (méthode,
-    # path, durée, issue). C'est l'instrument qui dira au prochain run POURQUOI create_ticket cumule
+    # path, durée, issue). C'est l'instrument qui dira au prochain run POURQUOI create_issue cumule
     # ~30s (3 appels forge : create_issue + add_label[GET+PUT]) — connexion stale ? endpoint qui pend ?
     if elapsed > 1_000 do
       Logger.warning(

@@ -134,7 +134,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
         {:escalation_failed, e} ->
           Logger.error(
-            "IncidentConsumer #{op}.failed #{pod_id} RÉCURRENT mais escalade ÉCHOUÉE — AUCUN ticket " <>
+            "IncidentConsumer #{op}.failed #{pod_id} RÉCURRENT mais escalade ÉCHOUÉE — AUCUN issue " <>
               "sysadmin créé (forge down ?) : #{inspect(e)}"
           )
 

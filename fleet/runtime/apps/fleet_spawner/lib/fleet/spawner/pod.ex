@@ -109,7 +109,7 @@ defmodule Fleet.Spawner.Pod do
   @type data :: %{
           conditions: MapSet.t(condition()),
           pod_id: String.t(),
-          ticket_id: String.t(),
+          issue_id: String.t(),
           session_id: String.t() | nil,
           # `started_at` ISO8601 figé à la création du Pod, persisté tel quel dans `state.json`.
           started_at: DateTime.t(),
@@ -246,8 +246,8 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # PROJECT — toutes les I/O dans la chaîne `with` (non-bang) → erreur propagée → transition_failed
-  # clean (state.json phase=failed écrit). Modèle ticket-driven : le brief est écrit en
-  # `tickets/<ticket_id>.md` (lu comme contenu projet, pas comme injection-prompt) ET pushé en
+  # clean (state.json phase=failed écrit). Modèle issue-driven : le brief est écrit en
+  # `tickets/<issue_id>.md` (lu comme contenu projet, pas comme injection-prompt) ET pushé en
   # TaskQueue (le pod PULL via le tool MCP get_work_item, déclenché par le mot-clé `yop`).
   def handle_event(:internal, :proceed, :projecting, data) do
     skills_root = Application.get_env(:fleet_spawner, :skills_root, nil)
@@ -264,7 +264,7 @@ defmodule Fleet.Spawner.Pod do
     tickets_dir = Path.join(data.pod_dir, "tickets")
 
     with {:ok, sp_compose} <-
-           SPBuilder.compose(data.cap_profile, [], pod_id: data.pod_id, job_id: data.ticket_id),
+           SPBuilder.compose(data.cap_profile, [], pod_id: data.pod_id, job_id: data.issue_id),
          {:ok, claude_md} <-
            SPBuilder.compose_claude_md(data.cap_profile, Scaffold.maybe_path(repo_md)),
          {:ok, _skills_paths} <- Scaffold.maybe_filter_skills(data.cap_profile, skills_root),
@@ -287,7 +287,7 @@ defmodule Fleet.Spawner.Pod do
          :ok <- Fs.safe_mkdir_p(tickets_dir),
          :ok <-
            Fs.safe_write(
-             Path.join(tickets_dir, "#{Scaffold.ticket_id_to_filename(data.ticket_id)}.md"),
+             Path.join(tickets_dir, "#{Scaffold.issue_id_to_filename(data.issue_id)}.md"),
              Scaffold.default_brief(data)
            ),
          # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du brief est la
@@ -413,7 +413,7 @@ defmodule Fleet.Spawner.Pod do
   def handle_event({:call, from}, :info, state, data) do
     info = %{
       pod_id: data.pod_id,
-      ticket_id: data.ticket_id,
+      issue_id: data.issue_id,
       # Le RÔLE est gravé au SPAWN (= `metadata.name` du cap-profile), exposé via le Registry. C'est
       # l'identité de rôle AUTHENTIFIÉE (le pod ne peut pas la forger via le wire).
       role: cap_profile_name(data.cap_profile),
@@ -437,10 +437,10 @@ defmodule Fleet.Spawner.Pod do
     {:keep_state_and_data, [{:reply, from, info}]}
   end
 
-  # SLOT-FREEZE : reset COLD in-place du workspace d'un pipe RESIDENT pour le ticket suivant. PAS de
+  # SLOT-FREEZE : reset COLD in-place du workspace d'un pipe RESIDENT pour le issue suivant. PAS de
   # rm_rf (bind mount vivant) — reset --hard base + clean + checkout -B feature/work via
   # ProjectBootstrap.reset_in_place, puis /clear du REPL. Appele quand le pod est :ready (livrable
-  # du ticket precedent confirme sur la forge -> le push a deja LU le workspace : reset sur).
+  # du issue precedent confirme sur la forge -> le push a deja LU le workspace : reset sur).
   def handle_event({:call, from}, {:reprovision_pipe_workspace, project, opts}, _state, data) do
     eff_cap = %{data.cap_profile | spec: Map.put(data.cap_profile.spec, "project", project)}
 
@@ -610,7 +610,7 @@ defmodule Fleet.Spawner.Pod do
   # fleet.events. On ne réagit qu'au NÔTRE (pod_id) en :monitoring. Le résultat est arrivé → la
   # transition :monitoring → :extracting ANNULE NATIVEMENT le state_timeout :result_deadline (= l'invariant
   # result_deadline_cancelled) ; on annule en plus le generic timeout :liveness (lui ne s'annule pas
-  # au changement d'état). SLOT-FREEZE : on ADOPTE le ticket_id de la TACHE complétée (porté par
+  # au changement d'état). SLOT-FREEZE : on ADOPTE le issue_id de la TACHE complétée (porté par
   # l'event) → le livrable est attribué à la BONNE brique (sinon le 2e livrable écrase la branche/PR du 1er).
   def handle_event(
         :info,
@@ -627,7 +627,7 @@ defmodule Fleet.Spawner.Pod do
 
     data =
       data
-      |> adopt_task_ticket_id(payload)
+      |> adopt_task_issue_id(payload)
       |> Map.put(:submitted_result, result)
 
     {:next_state, :extracting, data,
@@ -674,7 +674,7 @@ defmodule Fleet.Spawner.Pod do
 
       Events.best_effort_broadcast("pod.failed", %{
         "pod_id" => data.pod_id,
-        "ticket_id" => data.ticket_id,
+        "issue_id" => data.issue_id,
         "reason" => "exited_before_result",
         "exit_code" => exit_code
       })
@@ -815,7 +815,7 @@ defmodule Fleet.Spawner.Pod do
   defp pod_completed_payload(data, result) do
     base = %{
       "pod_id" => data.pod_id,
-      "ticket_id" => data.ticket_id,
+      "issue_id" => data.issue_id,
       "result" => result
     }
 
@@ -967,7 +967,7 @@ defmodule Fleet.Spawner.Pod do
       phase: :pending,
       conditions: MapSet.new(),
       pod_id: args.pod_id,
-      ticket_id: args.ticket_id,
+      issue_id: args.issue_id,
       # Session UUID PRÉ-ALLOUÉ au spawn : `--session-id <uuid>` à la 1ʳᵉ création. La recovery
       # depuis state.json ne réutilise PAS ce sid (recreate = session neuve).
       session_id:
@@ -1023,7 +1023,7 @@ defmodule Fleet.Spawner.Pod do
 
     Events.best_effort_broadcast("pod.failed", %{
       "pod_id" => data.pod_id,
-      "ticket_id" => data.ticket_id,
+      "issue_id" => data.issue_id,
       "reason" => reason
     })
 
@@ -1111,13 +1111,13 @@ defmodule Fleet.Spawner.Pod do
   defp publish_deadline_ms,
     do: Application.get_env(:fleet_spawner, :publish_deadline_ms, 120_000)
 
-  # SLOT-FREEZE : adopte le ticket_id de la tache complétée (de l'event work_item_completed) comme ticket
-  # courant du pod. Un pipe re-brief change de brique a chaque tache ; sans ca state.ticket_id
+  # SLOT-FREEZE : adopte le issue_id de la tache complétée (de l'event work_item_completed) comme issue
+  # courant du pod. Un pipe re-brief change de brique a chaque tache ; sans ca state.issue_id
   # resterait celui du spawn -> toutes les attributions pointeraient la 1ere brique. Absent/vide ->
   # on garde l'existant.
-  defp adopt_task_ticket_id(data, payload) do
-    case payload[:ticket_id] || payload["ticket_id"] do
-      t when is_binary(t) and t != "" -> %{data | ticket_id: t}
+  defp adopt_task_issue_id(data, payload) do
+    case payload[:issue_id] || payload["issue_id"] do
+      t when is_binary(t) and t != "" -> %{data | issue_id: t}
       _ -> data
     end
   end

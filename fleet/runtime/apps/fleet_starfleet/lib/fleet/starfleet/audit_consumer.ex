@@ -121,7 +121,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
 
     Logger.warning(
       "AUDIT pod.refuse_pattern_match pod=#{Map.get(event, "pod_id", "?")} " <>
-        "ticket=#{Map.get(event, "ticket_id", "?")} " <>
+        "issue=#{Map.get(event, "issue_id", "?")} " <>
         "pattern=#{inspect(Map.get(payload, "pattern", "?"))}"
     )
   end
@@ -156,7 +156,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
 
     Logger.info(
       "AUDIT pod.completed pod=#{Map.get(payload, "pod_id", "?")} " <>
-        "ticket=#{Map.get(payload, "ticket_id", "?")} " <>
+        "issue=#{Map.get(payload, "issue_id", "?")} " <>
         "duration_ms=#{get_in(payload, ["result", "duration_ms"]) || "?"}"
     )
   end
@@ -166,7 +166,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
 
     Logger.warning(
       "AUDIT pod.failed pod=#{Map.get(payload, "pod_id", "?")} " <>
-        "ticket=#{Map.get(payload, "ticket_id", "?")} " <>
+        "issue=#{Map.get(payload, "issue_id", "?")} " <>
         "result=#{inspect(Map.get(payload, "result"))}"
     )
   end
@@ -224,7 +224,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
   defp log_pod_lifecycle_event(:"pod.completed", payload) do
     Logger.info(
       "AUDIT pod.completed pod=#{Map.get(payload, "pod_id", "?")} " <>
-        "ticket=#{Map.get(payload, "ticket_id", "?")} " <>
+        "issue=#{Map.get(payload, "issue_id", "?")} " <>
         "duration_ms=#{get_in(payload, ["result", "duration_ms"]) || "?"}"
     )
   end
@@ -232,7 +232,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
   defp log_pod_lifecycle_event(:"pod.failed", payload) do
     Logger.warning(
       "AUDIT pod.failed pod=#{Map.get(payload, "pod_id", "?")} " <>
-        "ticket=#{Map.get(payload, "ticket_id", "?")} " <>
+        "issue=#{Map.get(payload, "issue_id", "?")} " <>
         "reason=#{inspect(Map.get(payload, "reason"))}"
     )
   end

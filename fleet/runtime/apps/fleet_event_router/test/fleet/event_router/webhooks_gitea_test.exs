@@ -41,7 +41,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{
                        source: :event_router,
                        type: :"gitea.opened",
-                       payload: %{"action" => "opened", "ticket_id" => "fleet/lcars#42"}
+                       payload: %{"action" => "opened", "issue_id" => "fleet/lcars#42"}
                      },
                      500
     end
@@ -68,7 +68,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{source: :event_router, type: :"gitea.unknown"}, 500
     end
 
-    test "M21 : ticket extrait d'une pull request (pas seulement issue)", %{secret: secret} do
+    test "M21 : issue extrait d'une pull request (pas seulement issue)", %{secret: secret} do
       body = %{"action" => "opened", "pull_request" => %{"id" => 99}}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
@@ -77,7 +77,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{
                        source: :event_router,
                        type: :"gitea.opened",
-                       payload: %{"ticket_id" => "fleet/lcars#99"}
+                       payload: %{"issue_id" => "fleet/lcars#99"}
                      },
                      500
     end

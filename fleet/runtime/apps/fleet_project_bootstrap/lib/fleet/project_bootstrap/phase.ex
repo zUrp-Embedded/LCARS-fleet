@@ -47,7 +47,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # Idempotence du re-dispatch déterministe : un pod prédécesseur MORT (timeout/crash) laisse son
           # workspace sur disque ; comme le pod_id est déterministe (`<repo-slug>-issue-N-role`), le
           # re-dispatch retombe sur le MÊME pod_dir → `git clone` refuserait (« destination already exists
-          # and is not an empty directory ») → wedge PERMANENT du ticket (un pod qui timeout boucle sinon à
+          # and is not an empty directory ») → wedge PERMANENT du issue (un pod qui timeout boucle sinon à
           # l'infini sur clone_failed). Le pod POSSÈDE son pod_dir (garde spawn = 1 pod/pod_id) → un `ws`
           # résiduel ne peut venir que d'un prédécesseur mort → clean slate (le `base_sha` est ré-épinglé
           # juste après, un clone frais est toujours correct).
@@ -57,7 +57,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
           base = project["base_branch"] || "main"
 
           # Monde propre : branche = `feature/<slug>` SANS le pod_id (l'agent ne doit pas relire son
-          # pod_id dans sa propre branche — containment). Le slug vient du dispatcher (titre du ticket
+          # pod_id dans sa propre branche — containment). Le slug vient du dispatcher (titre du issue
           # sanitizé) ; défaut `work`. Le slug ne porte aucun préfixe `pod-`/`pod_` (la branche ne
           # divulgue pas l'identité du pod).
           slug = Keyword.get(opts, :slug, "work")
@@ -72,7 +72,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # Clone/checkout BORNÉS par construction via `Fleet.Credentials.Shell.git/2` (Task.async +
           # yield(timeout) || brutal_kill, `GIT_TERMINAL_PROMPT=0` posé par `git_env/0`). Un `git` non
           # borné figerait le `Fleet.Spawner.Pod` (GenServer) si le clone réseau hung — ou si le git
-          # prompte faute de credential, sans TTY → pod zombie / ticket wedgé. Le wrapper tue le git
+          # prompte faute de credential, sans TTY → pod zombie / issue wedgé. Le wrapper tue le git
           # enfant si la deadline expire et rend une erreur typée → le pod ne reste pas figé. `Shell.git/2`
           # injecte `git_env/0` (anti-prompt + auth forge).
           with {:ok, {_, 0}} <-
@@ -105,8 +105,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
     @doc """
     Reset IN-PLACE du workspace d'un pod RESIDENT (pipe slot-freeze) — PAS de rm_rf. Le `ws` est
     bind-monte dans le sandbox bwrap VIVANT du pipe : supprimer le dir casserait le mount (l'agent se
-    retrouve dans un cwd deleted) + echouerait. On nettoie l'etat git du ticket PRECEDENT SUR PLACE :
-    reset --hard sur le `base_sha` du NOUVEAU ticket (`pin_base_sha` reutilise, gere le fetch si la base
+    retrouve dans un cwd deleted) + echouerait. On nettoie l'etat git du issue PRECEDENT SUR PLACE :
+    reset --hard sur le `base_sha` du NOUVEAU issue (`pin_base_sha` reutilise, gere le fetch si la base
     a avance) + `clean -fdx` (vire l'untracked, ex. un fichier non committe) + `checkout -B feature/<slug>`
     (recree la branche de travail PROPRE depuis la base — `-B` force car la branche existe deja). Le `ws`
     DOIT exister (clone du spawn, jamais rm_rf en pipe) ; `base_sha` est REQUIS (le dispatcher l'epingle
@@ -137,7 +137,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
         _ ->
           # base_sha absent = bug appelant (le dispatcher DOIT l'epingler au re-brief) → fail-loud
-          # plutot qu'un reset sur une base indefinie (qui garderait l'etat du ticket precedent).
+          # plutot qu'un reset sur une base indefinie (qui garderait l'etat du issue precedent).
           {:error, {:reset_failed, :no_base_sha}}
       end
     end
