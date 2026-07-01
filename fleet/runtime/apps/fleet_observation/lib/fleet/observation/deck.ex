@@ -37,6 +37,15 @@ defmodule Fleet.Observation.Deck do
     |> send_resp(200, page())
   end
 
+  # Tableau basique : un bloc fixe par rôle (`@dashboard_roles`), état du/des pod(s)
+  # correspondant(s) rendu CÔTÉ SERVEUR (pas de JS). Auto-refresh par `<meta refresh>`.
+  # Réutilise le même snapshot live que `/api/pods` (`Fleet.Spawner.list_pods/0`).
+  get "/table" do
+    conn
+    |> put_resp_content_type("text/html")
+    |> send_resp(200, table_page())
+  end
+
   get "/health" do
     conn
     |> put_resp_content_type("application/json")
@@ -110,6 +119,91 @@ defmodule Fleet.Observation.Deck do
         []
     end
   end
+
+  # ── Tableau basique `/table` (rendu serveur, zéro CSS) ───────────────────────
+
+  # Une ligne fixe par rôle d'agent, TOUJOURS présente (« absent » si aucun pod vivant
+  # ne le porte). La liste des rôles DÉRIVE du catalogue cap-profiles (`dashboard_roles/0`,
+  # source unique du domaine), pas d'une constante. On groupe les pods vivants par `role`
+  # (un même rôle peut en porter plusieurs : on les liste tous).
+  # `border="1"` est le minimum pour que les cellules soient visibles.
+  defp table_page do
+    roles = dashboard_roles()
+    by_role = Enum.group_by(Fleet.Spawner.list_pods(), &Map.get(&1, :role))
+    rows = Enum.map_join(roles, "\n", &role_rows(&1, Map.get(by_role, &1, [])))
+
+    """
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="3">
+    <title>fleet pods</title>
+    </head>
+    <body>
+    <table border="1">
+    <tr><th>role</th><th>pod_id</th><th>phase</th><th>ticket</th><th>conditions</th><th>tmux</th><th>session</th></tr>
+    #{rows}
+    </table>
+    </body>
+    </html>
+    """
+  end
+
+  defp role_rows(role, []) do
+    "<tr><td>#{h(role)}</td><td colspan=\"6\">— absent —</td></tr>"
+  end
+
+  defp role_rows(role, pods) do
+    Enum.map_join(pods, "\n", fn p ->
+      "<tr>" <>
+        "<td>#{h(role)}</td>" <>
+        "<td>#{h(Map.get(p, :pod_id))}</td>" <>
+        "<td>#{h(Map.get(p, :phase))}</td>" <>
+        "<td>#{h(Map.get(p, :ticket_id))}</td>" <>
+        "<td>#{h(Enum.join(Map.get(p, :conditions, []), ", "))}</td>" <>
+        "<td>#{h(Map.get(p, :tmux_session))}</td>" <>
+        "<td>#{h(Map.get(p, :session_id))}</td>" <>
+        "</tr>"
+    end)
+  end
+
+  # Rôles à afficher = catalogue cap-profiles (`Fleet.CapProfile.list/0`, source unique du domaine)
+  # filtré aux rôles qui tournent comme POD de fleet (donc peuvent avoir un état). Trié pour un ordre
+  # stable. Catalogue illisible → `[]` (dégradation sûre, jamais de crash du deck).
+  defp dashboard_roles do
+    case Fleet.CapProfile.list() do
+      {:ok, names} ->
+        names
+        |> Enum.reject(&memory_x_role?/1)
+        |> Enum.filter(&pod_role?/1)
+        |> Enum.sort()
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  # Garde EN DUR temporaire (validée user) : `CapProfile.list/0` ramasse aussi les profils Memory-X
+  # des sous-dossiers `monks/` / `archivistes/` — ce ne sont pas des rôles d'agent à afficher. Absente
+  # de CE repo aujourd'hui (donc inerte ici) mais `list/0` scanne réellement ces sous-dossiers, donc ce
+  # n'est pas une garde sur du vide : elle mord dès qu'un de ces profils existe. Propre à terme = un champ
+  # sémantique (`monk_registry`/`monk_instance` non-nul), pas un préfixe de nom.
+  defp memory_x_role?(name), do: String.starts_with?(name, "monk") or String.starts_with?(name, "archivist")
+
+  # Rôle qui tourne comme POD de fleet (peut donc porter un état pod) : `host_native != true`.
+  # Même discriminateur sémantique que `Fleet.Spawner.PermanentBoot.boot_at_start?/1` — exclut `starfleet`
+  # (host-natif, boote via systemd, « n'a PAS de pod ») sans coder son nom en dur. Profil illisible → exclu.
+  defp pod_role?(name) do
+    case Fleet.CapProfile.load(name) do
+      {:ok, %Fleet.CapProfile{spec: spec}} -> get_in(spec, ["invocation", "host_native"]) != true
+      _ -> false
+    end
+  end
+
+  # Échappe pour le HTML — toute valeur (atom phase, string, nil) → texte sûr.
+  defp h(nil), do: ""
+  defp h(v), do: v |> to_string() |> Plug.HTML.html_escape()
 
   defp page do
     """

@@ -26,6 +26,8 @@ defmodule Fleet.Observation.MixProject do
     [
       # Ring 1 read — énumération des pods vivants (list_pods/0, lecture seule).
       {:fleet_spawner, in_umbrella: true},
+      # Ring 1 read — catalogue cap-profiles : source des rôles affichés (`/table`, list/0 + load/1).
+      {:fleet_cap_profile, in_umbrella: true},
       # Ring 2 bus — abonnement au stream %Fleet.Event{} (read-model BL-026, incrément C).
       {:fleet_event_router, in_umbrella: true},
       {:plug, "~> 1.19"},
