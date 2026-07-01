@@ -102,8 +102,8 @@ defmodule Fleet.Coord.Policies do
   @doc """
   Dispatch d'une décision validée Gatekeeper.
 
-  Arité étendue : `correlation_id` explicite (task.id UUID v4 du mandat
-  ayant produit le verdict, peut être nil hors mandat).
+  Arité étendue : `correlation_id` explicite (task.id UUID v4 du work item
+  ayant produit le verdict, peut être nil hors work item).
 
   Lookup `{decision, reason}` → table policies → broadcast schema canon
   `%Fleet.Event{source: :coord, type, correlation_id, …}`.
@@ -131,7 +131,7 @@ defmodule Fleet.Coord.Policies do
   Dispatch d'une escalade Cat 5.
 
   Arité étendue : `correlation_id` explicite (extrait de l'event upstream
-  ayant déclenché l'escalade, peut être nil hors mandat). Le compat
+  ayant déclenché l'escalade, peut être nil hors work item). Le compat
   shim `handle_escalation/2` (sans correlation_id) est retiré.
   """
   @spec handle_escalation(
@@ -175,7 +175,7 @@ defmodule Fleet.Coord.Policies do
   # dispatch_action arité 4 (path, payload, correlation_id). Émet le schema canon strict
   # %Fleet.Event{source: :coord, type, correlation_id, ...} sur le topic "fleet.events" via
   # `Bus.broadcast/2` (struct). Le correlation_id est propagé sur le broadcast pour relier
-  # l'event à son mandat d'origine.
+  # l'event à son work item d'origine.
 
   defp dispatch_action("notify_dashboard", path, payload, correlation_id) do
     canon_event(:notification_routed, "dashboard", path, payload, correlation_id)

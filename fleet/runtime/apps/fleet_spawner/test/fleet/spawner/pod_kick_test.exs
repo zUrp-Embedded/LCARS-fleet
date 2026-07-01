@@ -72,7 +72,8 @@ defmodule Fleet.Spawner.PodKickTest do
   test "brief déjà pull (task :assigned) → stop (cancel), aucun reschedule" do
     pod = fake_pod()
     {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
-    # get_for_pod = ce que fait le pod via MCP get_task → la task passe :pending → :assigned
+
+    # get_for_pod = ce que fait le pod via MCP get_work_item → la task passe :pending → :assigned
     {:ok, _} = Fleet.TaskQueue.get_for_pod(pod)
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 

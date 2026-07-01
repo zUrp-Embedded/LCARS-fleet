@@ -8,8 +8,8 @@ defmodule Fleet.Starfleet.AuditConsumer do
       (producteurs réels : `Fleet.Spawner.Pod`).
     * `:"fleet.boot_complete"` / `:"fleet.boot_partial"` / `:"fleet.boot_failed"`
       — BootOrchestrator lifecycle.
-    * task-queue : `:task_enqueued` / `:task_assigned` / `:task_completed` /
-      `:task_cleared` / `:task_failed` / `:state_corrupt` (producteur `Fleet.TaskQueue`).
+    * task-queue : `:work_item_enqueued` / `:work_item_assigned` / `:work_item_completed` /
+      `:work_item_cleared` / `:work_item_failed` / `:state_corrupt` (producteur `Fleet.TaskQueue`).
 
   Handlers DORMANTS (clause défensive, event SANS producteur courant ni clé
   registry — conservés car testés directement et prêts si un producteur revient) :
@@ -174,23 +174,23 @@ defmodule Fleet.Starfleet.AuditConsumer do
   defp log_event(_other, _event), do: :ok
 
   # BL-021 chantier 2d — task_queue lifecycle (DN orchestration/task-queue §E)
-  defp log_task_queue_event(:task_enqueued, %Fleet.Event{pod_id: pid, correlation_id: tid}) do
-    Logger.info("AUDIT task_queue.task_enqueued pod=#{pid} task=#{tid}")
+  defp log_task_queue_event(:work_item_enqueued, %Fleet.Event{pod_id: pid, correlation_id: tid}) do
+    Logger.info("AUDIT task_queue.work_item_enqueued pod=#{pid} work_item=#{tid}")
   end
 
-  defp log_task_queue_event(:task_assigned, %Fleet.Event{pod_id: pid, correlation_id: tid}) do
-    Logger.info("AUDIT task_queue.task_assigned pod=#{pid} task=#{tid}")
+  defp log_task_queue_event(:work_item_assigned, %Fleet.Event{pod_id: pid, correlation_id: tid}) do
+    Logger.info("AUDIT task_queue.work_item_assigned pod=#{pid} work_item=#{tid}")
   end
 
-  defp log_task_queue_event(:task_completed, %Fleet.Event{pod_id: pid, correlation_id: tid}) do
-    Logger.info("AUDIT task_queue.task_completed pod=#{pid} task=#{tid}")
+  defp log_task_queue_event(:work_item_completed, %Fleet.Event{pod_id: pid, correlation_id: tid}) do
+    Logger.info("AUDIT task_queue.work_item_completed pod=#{pid} work_item=#{tid}")
   end
 
-  defp log_task_queue_event(:task_cleared, %Fleet.Event{pod_id: pid, correlation_id: tid}) do
-    Logger.info("AUDIT task_queue.task_cleared pod=#{pid} task=#{tid}")
+  defp log_task_queue_event(:work_item_cleared, %Fleet.Event{pod_id: pid, correlation_id: tid}) do
+    Logger.info("AUDIT task_queue.work_item_cleared pod=#{pid} work_item=#{tid}")
   end
 
-  defp log_task_queue_event(:task_failed, %Fleet.Event{
+  defp log_task_queue_event(:work_item_failed, %Fleet.Event{
          pod_id: pid,
          correlation_id: tid,
          payload: p
@@ -198,7 +198,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
     reason = Map.get(p, :reason) || Map.get(p, "reason") || "?"
 
     Logger.warning(
-      "AUDIT task_queue.task_failed pod=#{pid} task=#{tid} reason=#{inspect(reason)}"
+      "AUDIT task_queue.work_item_failed pod=#{pid} work_item=#{tid} reason=#{inspect(reason)}"
     )
   end
 

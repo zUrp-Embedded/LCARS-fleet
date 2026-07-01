@@ -19,43 +19,43 @@ defmodule Fleet.MCP.PodToolsTest do
   # State porté par l'accepteur de socket : l'identité = le canal, pas un champ du wire.
   defp pod_state(pod), do: %{pod_id: pod}
 
-  test "round-trip get_task/submit_result d'un brief enqueué pour le pod" do
+  test "round-trip get_work_item/submit_result d'un brief enqueué pour le pod" do
     pod = uniq("pod-rt")
     nonce = "rt-#{System.unique_integer([:positive])}"
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: nonce, role: "engineer"})
 
-    # Canal IN : get_task renvoie le brief (brief = nonce) + task_id (correlation).
+    # Canal IN : get_work_item renvoie le brief (brief = nonce) + work_item_id (correlation).
     assert {:ok, %{content: [%{"type" => "text", "text" => t1}]}, %{pod_id: ^pod}} =
-             PodTools.handle_tool_call("get_task", %{}, pod_state(pod))
+             PodTools.handle_tool_call("get_work_item", %{}, pod_state(pod))
 
-    assert {:ok, %{"done" => false, "task" => task}} = Jason.decode(t1)
+    assert {:ok, %{"done" => false, "work_item" => task}} = Jason.decode(t1)
     assert task["brief"] == nonce
-    assert is_binary(task["task_id"])
-    tid = task["task_id"]
+    assert is_binary(task["work_item_id"])
+    tid = task["work_item_id"]
     refute Map.has_key?(task, "_lcars_pod_id")
 
-    # Canal OUT : submit_result encaisse le livrable → brief :completed (task_id REQUIS = celui rendu).
+    # Canal OUT : submit_result encaisse le livrable → brief :completed (work_item_id REQUIS = celui rendu).
     assert {:ok, %{content: [%{"type" => "text"}]}, %{pod_id: ^pod}} =
              PodTools.handle_tool_call(
                "submit_result",
-               %{"payload" => %{"answer" => nonce}, "task_id" => tid},
+               %{"payload" => %{"answer" => nonce}, "work_item_id" => tid},
                pod_state(pod)
              )
 
     assert {:ok, :completed} = TaskQueue.pod_status(pod)
 
-    # Plus de brief actif → get_task suivant = done (le pod s'arrête).
+    # Plus de brief actif → get_work_item suivant = done (le pod s'arrête).
     assert {:ok, %{content: [%{"text" => t2}]}, %{pod_id: ^pod}} =
-             PodTools.handle_tool_call("get_task", %{}, pod_state(pod))
+             PodTools.handle_tool_call("get_work_item", %{}, pod_state(pod))
 
     assert {:ok, %{"done" => true}} = Jason.decode(t2)
   end
 
-  test "get_task sans pod_id dans le state (anomalie accepteur) → erreur typée" do
+  test "get_work_item sans pod_id dans le state (anomalie accepteur) → erreur typée" do
     # Un pod_id absent du state = anomalie de l'accepteur (il DOIT toujours le porter), pas une fin de
     # brief. Ne JAMAIS masquer en done:true — sinon le pod s'arrête en croyant avoir fini.
     assert {:error, :pod_id_required, %{}} =
-             PodTools.handle_tool_call("get_task", %{}, %{})
+             PodTools.handle_tool_call("get_work_item", %{}, %{})
   end
 
   test "submit_result sans pod_id dans le state → erreur (le pod doit être identifié)" do
@@ -63,14 +63,14 @@ defmodule Fleet.MCP.PodToolsTest do
              PodTools.handle_tool_call("submit_result", %{"payload" => %{"x" => 1}}, %{})
   end
 
-  test "submit_result sans task_id → REFUS :task_id_required (plus de « dernière active » devinée)" do
-    # task_id OBLIGATOIRE : le pod DOIT nommer la tâche qu'il clôt. Sans lui, le broker tomberait sur la
+  test "submit_result sans work_item_id → REFUS :work_item_id_required (plus de « dernière active » devinée)" do
+    # work_item_id OBLIGATOIRE : le pod DOIT nommer la tâche qu'il clôt. Sans lui, le broker tomberait sur la
     # dernière active du pod_id. Le pod est identifié (state.pod_id) mais le corrélateur manque → refus net.
     pod = uniq("pod-notid")
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: "x"})
-    assert {:ok, _, _} = PodTools.handle_tool_call("get_task", %{}, pod_state(pod))
+    assert {:ok, _, _} = PodTools.handle_tool_call("get_work_item", %{}, pod_state(pod))
 
-    assert {:error, :task_id_required, %{pod_id: ^pod}} =
+    assert {:error, :work_item_id_required, %{pod_id: ^pod}} =
              PodTools.handle_tool_call(
                "submit_result",
                %{"payload" => %{"x" => 1}},
@@ -81,13 +81,13 @@ defmodule Fleet.MCP.PodToolsTest do
   test "submit_result sans brief actif → erreur :no_active_task (le drop n'est pas masqué)" do
     # Un pod qui submit sans brief actif (jamais assigné, ou clos/réassigné depuis) → son livrable n'a
     # NULLE PART où aller = DROP. Doit ressortir isError, PAS {:ok "ok"} — sinon le pod croit son livrable
-    # accepté. Symétrie avec :task_id_mismatch / :pod_id_required.
+    # accepté. Symétrie avec :work_item_id_mismatch / :pod_id_required.
     pod = uniq("pod-no-task")
 
     assert {:error, :no_active_task, %{pod_id: ^pod}} =
              PodTools.handle_tool_call(
                "submit_result",
-               %{"payload" => %{"x" => 1}, "task_id" => "whatever"},
+               %{"payload" => %{"x" => 1}, "work_item_id" => "whatever"},
                pod_state(pod)
              )
   end
@@ -99,14 +99,14 @@ defmodule Fleet.MCP.PodToolsTest do
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: "once"})
 
     assert {:ok, %{content: [%{"text" => t}]}, _} =
-             PodTools.handle_tool_call("get_task", %{}, pod_state(pod))
+             PodTools.handle_tool_call("get_work_item", %{}, pod_state(pod))
 
-    {:ok, %{"task" => %{"task_id" => tid}}} = Jason.decode(t)
+    {:ok, %{"work_item" => %{"work_item_id" => tid}}} = Jason.decode(t)
 
     assert {:ok, %{content: [%{"type" => "text"}]}, _} =
              PodTools.handle_tool_call(
                "submit_result",
-               %{"payload" => %{"a" => 1}, "task_id" => tid},
+               %{"payload" => %{"a" => 1}, "work_item_id" => tid},
                pod_state(pod)
              )
 
@@ -114,7 +114,7 @@ defmodule Fleet.MCP.PodToolsTest do
     assert {:ok, %{content: [%{"type" => "text"}]}, _} =
              PodTools.handle_tool_call(
                "submit_result",
-               %{"payload" => %{"a" => 2}, "task_id" => tid},
+               %{"payload" => %{"a" => 2}, "work_item_id" => tid},
                pod_state(pod)
              )
   end
@@ -134,14 +134,14 @@ defmodule Fleet.MCP.PodToolsTest do
       {:ok, _} = TaskQueue.enqueue(pod_b, %{brief: "for-B"})
 
       assert {:ok, %{content: [%{"text" => tb}]}, _} =
-               PodTools.handle_tool_call("get_task", %{}, pod_state(pod_b))
+               PodTools.handle_tool_call("get_work_item", %{}, pod_state(pod_b))
 
-      assert {:ok, %{"done" => false, "task" => %{"brief" => "for-B"}}} = Jason.decode(tb)
+      assert {:ok, %{"done" => false, "work_item" => %{"brief" => "for-B"}}} = Jason.decode(tb)
 
       assert {:ok, %{content: [%{"text" => ta}]}, _} =
-               PodTools.handle_tool_call("get_task", %{}, pod_state(pod_a))
+               PodTools.handle_tool_call("get_work_item", %{}, pod_state(pod_a))
 
-      assert {:ok, %{"done" => false, "task" => %{"brief" => "for-A"}}} = Jason.decode(ta)
+      assert {:ok, %{"done" => false, "work_item" => %{"brief" => "for-A"}}} = Jason.decode(ta)
     end
   end
 

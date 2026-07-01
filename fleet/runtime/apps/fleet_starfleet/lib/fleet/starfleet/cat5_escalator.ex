@@ -41,7 +41,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   amendement chirurgical.
 
   Arité étendue : `correlation_id` explicite extrait de l'event upstream
-  ayant déclenché l'escalade (peut être nil hors mandat).
+  ayant déclenché l'escalade (peut être nil hors work item).
 
   Étend le `chain` payload avec `"starfleet.cat5.<source>"` puis :
 

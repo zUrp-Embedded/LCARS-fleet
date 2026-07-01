@@ -143,7 +143,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
           # La FORME du brief (worker exécutable | juge désamorcé) est lue du cap-profile
           # (`brief_kind`), PAS d'un nom magique "gatekeeper" en ring2 (differentiation-par-catalogue).
-          # Calculé UNE fois → sert au spawn-file ET au brief TaskQueue (que le pod pull via get_task).
+          # Calculé UNE fois → sert au spawn-file ET au brief TaskQueue (que le pod pull via get_work_item).
           # Sans ça, enqueue_brief ré-enqueuerait `issue["body"]` brut → un juge pullerait le brief BUILD
           # exécutable au lieu du GateBrief.
           brief =
@@ -891,7 +891,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   # Enqueue le brief dans le broker `Fleet.TaskQueue` ciblé pod_id — le claude REPL le pull via
-  # `mcp__fleet__get_task` → `PodTools.get_task` → `TaskQueue.get_for_pod` (PAS un Read fichier).
+  # `mcp__fleet__get_work_item` → `PodTools.get_work_item` → `TaskQueue.get_for_pod` (PAS un Read fichier).
   # Sans cet enqueue, `TaskQueue.pod_status(pod_id) == nil` → le pod se croit bootstrap
   # (rien à puller) → idle.
   # Le `brief` = le BRIEF role-aware déjà construit (build_brief) : GateBrief désamorcé pour le
@@ -1037,7 +1037,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # LEAF de spawn partagé par dispatch_issue (producteur) ET do_dispatch_review (juge/rework).
   # ORDRE CANONIQUE : label-verrou `lcars-in-flight` AVANT pod (sinon double-spawn) → pod
-  # (`maybe_spawn` : RE-BRIEFE si vivant) → enqueue du brief (que le pod pull via get_task) →
+  # (`maybe_spawn` : RE-BRIEFE si vivant) → enqueue du brief (que le pod pull via get_work_item) →
   # wake+recovery. Échec POST-verrou → compensation : retrait du verrou (+ kill SI frais spawn,
   # JAMAIS un re-brief vivant). `lock_target` = l'objet verrouillé (issue number | PR number) ;
   # `ticket_number` = le ticket (issue) pour le `ticket_id` ET l'enqueue ; `log_ctx` = contexte de log caller.

@@ -9,7 +9,7 @@ defmodule Fleet.MCP.Application do
       ex-registre de channels push retiré, husk mort)
     - `Fleet.MCP.PodSocketRegistry` + `Fleet.MCP.PodSocketSupervisor`
       (substrat des sockets AF_UNIX per-pod : un accepteur par pod sert
-      `get_task`/`submit_result` ; l'identité EST le canal — cf.
+      `get_work_item`/`submit_result` ; l'identité EST le canal — cf.
       `Fleet.MCP.PodSocketAcceptor`)
 
   Substrat channels MORT retiré : `Fleet.MCP.Bridge`
@@ -22,7 +22,7 @@ defmodule Fleet.MCP.Application do
   Purge des channels push : retrait `Channel`, `ChannelHTTP`,
   `Channels.FleetControl/FleetForge`, `PushDispatcher`. PoC Channel Anthropic
   KO (4 itérations) → drive ré-implémenté via tools MCP pull
-  (`get_task`/`submit_result`) + kick send-keys.
+  (`get_work_item`/`submit_result`) + kick send-keys.
 
   Stratégie `:one_for_one`, `max_restarts: 3`, `max_seconds: 60`
   — portée par `Fleet.MCP.Supervisor`.

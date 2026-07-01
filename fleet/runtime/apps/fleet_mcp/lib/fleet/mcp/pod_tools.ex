@@ -2,17 +2,17 @@ defmodule Fleet.MCP.PodTools do
   @moduledoc """
   Couche TOOL MCP pod-facing (drive métier) — les RPC que le pod (client MCP
   claude) appelle pour communiquer avec le fleet, sans scraping ni injection clavier :
-    - `get_task`      : canal IN  — le pod PULL son brief depuis `Fleet.TaskQueue`.
+    - `get_work_item`      : canal IN  — le pod PULL son brief depuis `Fleet.TaskQueue`.
       `{"done": true}` quand aucun brief (le pod s'arrête). Sinon
-      `{"done": false, "task": {"task_id", "ticket_id", "role", "brief", ...}}`.
+      `{"done": false, "work_item": {"work_item_id", "ticket_id", "role", "brief", ...}}`.
     - `submit_result` : canal OUT — le pod PUSH son livrable (`payload`).
 
   Médiation serveur-side : le pod ne touche jamais la TaskQueue directement (la queue,
   son schéma, son stockage restent invisibles au pod) ; tout passe par ces tools. Le
-  serveur est **passeur de `correlation_id`** : `task_id` exposé côté `get_task`,
-  validé côté `submit_result` (le broker rejette un `task_id` ≠ brief actif).
+  serveur est **passeur de `correlation_id`** : `work_item_id` exposé côté `get_work_item`,
+  validé côté `submit_result` (le broker rejette un `work_item_id` ≠ brief actif).
 
-  Le broker `Fleet.TaskQueue` broadcast lui-même `%Fleet.Event{task_completed}` sur
+  Le broker `Fleet.TaskQueue` broadcast lui-même `%Fleet.Event{work_item_completed}` sur
   `fleet.events` (consommé par `fleet_spawner`/`fleet_coord`) — ce module n'émet
   plus d'event string-topic (`pod.result_submitted` supprimé).
   """
@@ -23,14 +23,14 @@ defmodule Fleet.MCP.PodTools do
 
   alias Fleet.TaskQueue
 
-  deftool "get_task" do
+  deftool "get_work_item" do
     meta do
-      name("Get Task")
+      name("Get Work Item")
 
       description(
         "Récupère ta prochaine tâche auprès du fleet LCARS. Retourne " <>
           "{\"done\":true} quand il n'y a plus de tâche (tu t'arrêtes alors), " <>
-          "sinon {\"done\":false,\"task\":{...}}."
+          "sinon {\"done\":false,\"work_item\":{...}}."
       )
     end
 
@@ -42,8 +42,8 @@ defmodule Fleet.MCP.PodTools do
       name("Submit Result")
 
       description(
-        "Retourne le résultat structuré d'une tâche au fleet LCARS, dans `payload`. `task_id` REQUIS = " <>
-          "le `task_id` rendu par `get_task` (la tâche que tu clôs) : le fleet corrèle ton livrable à CETTE " <>
+        "Retourne le résultat structuré d'une tâche au fleet LCARS, dans `payload`. `work_item_id` REQUIS = " <>
+          "le `work_item_id` rendu par `get_work_item` (la tâche que tu clôs) : le fleet corrèle ton livrable à CETTE " <>
           "tâche précise, jamais à « la dernière en date »."
       )
     end
@@ -52,9 +52,9 @@ defmodule Fleet.MCP.PodTools do
       "type" => "object",
       "properties" => %{
         "payload" => %{"type" => "object"},
-        "task_id" => %{"type" => "string"}
+        "work_item_id" => %{"type" => "string"}
       },
-      "required" => ["payload", "task_id"]
+      "required" => ["payload", "work_item_id"]
     })
   end
 
@@ -134,20 +134,20 @@ defmodule Fleet.MCP.PodTools do
   end
 
   @impl true
-  def handle_tool_call("get_task", _arguments, %{pod_id: pod_id} = state)
+  def handle_tool_call("get_work_item", _arguments, %{pod_id: pod_id} = state)
       when is_binary(pod_id) and pod_id != "" do
     # Identité = le canal : `pod_id` vient de l'accepteur de socket (un pod = une socket), jamais du wire.
     # On ne lit donc PAS d'identité dans les arguments — il n'y a rien à prouver, la socket discrimine.
     result =
       case TaskQueue.get_for_pod(pod_id) do
-        {:ok, task} -> %{"done" => false, "task" => envelope(task)}
+        {:ok, task} -> %{"done" => false, "work_item" => envelope(task)}
         {:error, :no_task} -> %{"done" => true}
       end
 
     {:ok, %{content: [json(result)]}, state}
   end
 
-  def handle_tool_call("get_task", _arguments, state) do
+  def handle_tool_call("get_work_item", _arguments, state) do
     # `pod_id` absent du state = anomalie de l'accepteur (il DOIT toujours le porter). Erreur typée, pas une
     # fin de brief masquée en done:true (sinon le pod s'arrêterait en croyant avoir fini). Fail-closed.
     {:error, :pod_id_required, state}
@@ -155,24 +155,24 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("submit_result", %{"payload" => payload} = args, %{pod_id: pod_id} = state)
       when is_map(payload) and is_binary(pod_id) and pod_id != "" do
-    # Identité = le canal (`state.pod_id`, porté par l'accepteur). Reste le `task_id` OBLIGATOIRE : il
-    # corrèle le livrable à UN brief précis (le broker rejette un task_id ≠ brief actif du pod). C'est un
+    # Identité = le canal (`state.pod_id`, porté par l'accepteur). Reste le `work_item_id` OBLIGATOIRE : il
+    # corrèle le livrable à UN brief précis (le broker rejette un work_item_id ≠ brief actif du pod). C'est un
     # verrou orthogonal au transport — le pod doit nommer la tâche qu'il clôt, sans quoi le broker tomberait
     # sur « la dernière active » du pod. Le corrélateur est cherché au top-level (format canonique) PUIS
     # dans le payload (un agent juge le range parfois dans son payload de verdict). Absent des DEUX → refus.
-    case effective_task_id(args, payload) do
+    case effective_work_item_id(args, payload) do
       nil ->
-        {:error, :task_id_required, state}
+        {:error, :work_item_id_required, state}
 
-      task_id ->
-        # Le broker valide pod_id ↔ task_id et broadcast %Fleet.Event{task_completed}.
-        case TaskQueue.submit_result(pod_id, Map.put(payload, "task_id", task_id)) do
+      work_item_id ->
+        # Le broker valide pod_id ↔ work_item_id et broadcast %Fleet.Event{work_item_completed}.
+        case TaskQueue.submit_result(pod_id, Map.put(payload, "work_item_id", work_item_id)) do
           {:ok, _task} ->
             {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
 
           {:error, :no_active_task} ->
             # pas de brief actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
-            # réassigné depuis) → DROP. Le signaler isError (comme :task_id_mismatch / :pod_id_required)
+            # réassigné depuis) → DROP. Le signaler isError (comme :work_item_id_mismatch / :pod_id_required)
             # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (échec masqué
             # en succès). (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST enregistré.)
             {:error, :no_active_task, state}
@@ -180,10 +180,10 @@ defmodule Fleet.MCP.PodTools do
           {:error, :double_submit_ignored} ->
             {:ok, %{content: [text("Resultat deja recu (ignore).")]}, state}
 
-          {:error, :task_id_mismatch} ->
-            {:error, :task_id_mismatch, state}
+          {:error, :work_item_id_mismatch} ->
+            {:error, :work_item_id_mismatch, state}
 
-          # le broadcast lifecycle `task_completed` a échoué : le hop ne finira PAS (le HopConsumer
+          # le broadcast lifecycle `work_item_completed` a échoué : le hop ne finira PAS (le HopConsumer
           # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès) — le pod doit
           # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
           # son livrable accepté alors que le verrou forge reste posé à vie.
@@ -498,25 +498,25 @@ defmodule Fleet.MCP.PodTools do
     _, _ -> {:error, :pod_unknown}
   end
 
-  # Le `task_id` (corrélateur) cherché au top-level du wire PUIS dans le payload : un agent juge range
-  # parfois le corrélateur DANS son payload de verdict plutôt qu'au paramètre top-level. Renvoie le task_id
+  # Le `work_item_id` (corrélateur) cherché au top-level du wire PUIS dans le payload : un agent juge range
+  # parfois le corrélateur DANS son payload de verdict plutôt qu'au paramètre top-level. Renvoie le work_item_id
   # non vide trouvé (top-level prioritaire), ou nil si absent des deux. Le broker corrèle ensuite sur
-  # `result["task_id"]` et rejette (`:task_id_mismatch`) s'il ne correspond pas à SON brief actif → un pod
+  # `result["work_item_id"]` et rejette (`:work_item_id_mismatch`) s'il ne correspond pas à SON brief actif → un pod
   # ne peut pas clôturer la tâche d'un autre (verrou orthogonal au transport). L'emplacement (top-level vs
-  # payload) n'entre PAS dans la sécurité : le task_id reste explicite et validé ; seul le fallback
+  # payload) n'entre PAS dans la sécurité : le work_item_id reste explicite et validé ; seul le fallback
   # « dernière active » (implicite) était le trou.
-  defp effective_task_id(args, payload) do
-    present_task_id(Map.get(args, "task_id") || Map.get(args, :task_id)) ||
-      present_task_id(Map.get(payload, "task_id") || Map.get(payload, :task_id))
+  defp effective_work_item_id(args, payload) do
+    present_work_item_id(Map.get(args, "work_item_id") || Map.get(args, :work_item_id)) ||
+      present_work_item_id(Map.get(payload, "work_item_id") || Map.get(payload, :work_item_id))
   end
 
-  defp present_task_id(tid) when is_binary(tid) and tid != "", do: tid
-  defp present_task_id(_), do: nil
+  defp present_work_item_id(tid) when is_binary(tid) and tid != "", do: tid
+  defp present_work_item_id(_), do: nil
 
-  # JSON envelope du brief exposé au pod — task_id = correlation_id.
-  defp envelope(%Fleet.TaskQueue.Task{} = t) do
+  # JSON envelope du brief exposé au pod — work_item_id = correlation_id.
+  defp envelope(%Fleet.TaskQueue.WorkItem{} = t) do
     %{
-      "task_id" => t.id,
+      "work_item_id" => t.id,
       "ticket_id" => t.ticket_id,
       "role" => t.role,
       "brief" => t.brief,

@@ -1,8 +1,8 @@
-defmodule Fleet.TaskQueue.Task do
+defmodule Fleet.TaskQueue.WorkItem do
   @moduledoc """
-  Le mandat — unité de la TaskQueue.
+  Le work item — unité de la TaskQueue.
 
-  `id` = UUID v4 du mandat (= `correlation_id` canonique, propagé end-to-end).
+  `id` = UUID v4 du work item (= `correlation_id` canonique, propagé end-to-end).
   Distinct de `pod_id` (UUID de session du pod cible).
   """
 
@@ -39,13 +39,13 @@ defmodule Fleet.TaskQueue.Task do
     state: :pending,
     # NB : champ VESTIGIAL jamais incrémenté (toujours 0). Le retry borné système-side N'est PAS
     # ici (il ne doit pas être influençable par le pod) : c'est le rail forge-driven qui borne le
-    # rework, hors du Task pod-facing. Conservé pour compat de schéma (sérialisé) ; à câbler en
+    # rework, hors du work item pod-facing. Conservé pour compat de schéma (sérialisé) ; à câbler en
     # miroir d'observabilité ou retirer (décision de design, pas un oubli).
     retry_count: 0,
     metadata: %{}
   ]
 
-  @doc "Sérialise un mandat en map JSON-able (persistence `state.json`)."
+  @doc "Sérialise un work item en map JSON-able (persistence `state.json`)."
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = t) do
     %{

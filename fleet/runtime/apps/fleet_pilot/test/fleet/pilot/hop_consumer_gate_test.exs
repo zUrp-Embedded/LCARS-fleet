@@ -515,7 +515,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   # ── B : cablage async (GenServer) — store gate_evals a l'escalade, pop a la reprise ──
 
-  test "GenServer : pod.completed soft -> gate_evals stocke ; task_completed correle -> pop" do
+  test "GenServer : pod.completed soft -> gate_evals stocke ; work_item_completed correle -> pop" do
     {:ok, pid} =
       HopConsumer.start_link(
         # Nom UNIQUE par test : ce fichier est `async: true` et `start_link` sans `:name` retombe sur le nom
@@ -543,7 +543,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
     send(
       pid,
-      Fleet.Event.new(:task_queue, :task_completed,
+      Fleet.Event.new(:task_queue, :work_item_completed,
         correlation_id: "corr-1",
         payload: %{result: %{"decision" => "continue"}}
       )
@@ -553,7 +553,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute Map.has_key?(evals, "corr-1")
   end
 
-  test "GenServer : task_completed d'un corr inconnu -> ignore (pas de crash)" do
+  test "GenServer : work_item_completed d'un corr inconnu -> ignore (pas de crash)" do
     {:ok, pid} =
       HopConsumer.start_link(
         # Nom unique : `async: true` + `start_link` sans `:name` → collision `{:already_started}` sur le nom
@@ -567,7 +567,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
     send(
       pid,
-      Fleet.Event.new(:task_queue, :task_completed,
+      Fleet.Event.new(:task_queue, :work_item_completed,
         correlation_id: "inconnu",
         # MA-03 : payload SANS metadata gate_eval (cas NORMAL — un pod stage-dispatch ordinaire) → ignoré.
         payload: %{result: %{"decision" => "continue"}}
@@ -581,11 +581,11 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   # ── MA-03 : le verdict gatekeeper SURVIT au restart du HopConsumer (verdict auto-descriptif) ──
   # Le wedge fermé : crash du HopConsumer SEUL (broker vivant). Le contexte de reprise n'est plus en RAM
   # (`gate_evals` vide au restart) ; il VOYAGE dans le metadata de la TÂCHE d'éval (qui survit dans le broker)
-  # → ramené par `task_completed` → reconstruction → resume. Avant MA-03 : `{nil,_} -> {:noreply}` silencieux
+  # → ramené par `work_item_completed` → reconstruction → resume. Avant MA-03 : `{nil,_} -> {:noreply}` silencieux
   # (verdict jeté, issue verrouillée à vie).
 
   # Le metadata de la tâche d'éval, tel que `dispatch_gatekeeper` l'embarque + tel que `task_queue/server.ex`
-  # le pose dans le payload de `task_completed`. Porte le contexte de reprise (resume_payload/n/role).
+  # le pose dans le payload de `work_item_completed`. Porte le contexte de reprise (resume_payload/n/role).
   defp gate_eval_meta do
     %{
       "gate_eval" => true,
@@ -663,10 +663,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     pid2 = fresh_hop_consumer()
     assert :sys.get_state(pid2).gate_evals == %{}
 
-    # 3. Le verdict revient (le metadata de la tâche a survécu dans le broker → posé dans task_completed).
+    # 3. Le verdict revient (le metadata de la tâche a survécu dans le broker → posé dans work_item_completed).
     send(
       pid2,
-      Fleet.Event.new(:task_queue, :task_completed,
+      Fleet.Event.new(:task_queue, :work_item_completed,
         correlation_id: "corr-1",
         payload: %{
           result: %{"decision" => "continue", "reason" => "RAS"},
@@ -691,7 +691,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
     send(
       pid,
-      Fleet.Event.new(:task_queue, :task_completed,
+      Fleet.Event.new(:task_queue, :work_item_completed,
         correlation_id: "corr-1",
         payload: %{result: %{"decision" => "abandon"}, metadata: gate_eval_meta()}
       )
@@ -702,14 +702,14 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute_received {:publish, _}
   end
 
-  test "MA-03 : task_completed gate_eval mais metadata TRONQUÉ (resume_payload absent) -> pas de resume (fail-loud), pas de crash" do
+  test "MA-03 : work_item_completed gate_eval mais metadata TRONQUÉ (resume_payload absent) -> pas de resume (fail-loud), pas de crash" do
     pid = fresh_hop_consumer()
 
     bad_meta = gate_eval_meta() |> Map.delete("resume_payload")
 
     send(
       pid,
-      Fleet.Event.new(:task_queue, :task_completed,
+      Fleet.Event.new(:task_queue, :work_item_completed,
         correlation_id: "corr-1",
         payload: %{result: %{"decision" => "continue"}, metadata: bad_meta}
       )

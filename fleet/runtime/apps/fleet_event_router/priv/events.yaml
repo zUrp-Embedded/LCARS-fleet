@@ -124,11 +124,11 @@ events:
   starfleet.audit_cat5_oauth_refresh_failed: []
 
   # --- TaskQueue lifecycle (source :task_queue) ---
-  task_enqueued: []
-  task_assigned: []
-  task_completed: []
-  task_cleared: []
-  task_failed: []
+  work_item_enqueued: []
+  work_item_assigned: []
+  work_item_completed: []
+  work_item_cleared: []
+  work_item_failed: []
   state_corrupt: []
 
   # --- Extensions V2 (MCPWatcher / MCPMonitor) ---

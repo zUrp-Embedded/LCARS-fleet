@@ -24,7 +24,7 @@ defmodule Fleet.Observation.ReadModelTest do
   test "routage par préfixe : chaque event tombe dans le bon deck" do
     pid = start_supervised!({ReadModel, subscribe: false})
 
-    send(pid, ev("task_completed", source: :task_queue))
+    send(pid, ev("work_item_completed", source: :task_queue))
     send(pid, ev("pipeline.completed", source: :pipeline))
     send(pid, ev("audit.verdict", source: :starfleet))
     send(pid, ev("coord.escalation_triggered", source: :coord))
@@ -34,7 +34,7 @@ defmodule Fleet.Observation.ReadModelTest do
 
     p = ReadModel.projection()
     assert p.total == 6
-    assert p.counts["task_completed"] == 1
+    assert p.counts["work_item_completed"] == 1
     assert [%{type: "pipeline.completed"}] = p.pipelines
     # audit.verdict ET coord.escalation_* → deck gatekeeper (2 entrées)
     assert [%{type: "coord.escalation_triggered"}, %{type: "audit.verdict"}] = p.gatekeeper

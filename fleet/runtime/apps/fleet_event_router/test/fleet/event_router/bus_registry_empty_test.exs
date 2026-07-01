@@ -38,7 +38,7 @@ defmodule Fleet.EventRouter.BusRegistryEmptyTest do
   @arbitrary_types [
     :"pod.completed",
     :"phantom.never.registered",
-    :task_completed,
+    :work_item_completed,
     :"some.random.type.xyz",
     :wake_failed
   ]

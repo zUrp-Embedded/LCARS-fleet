@@ -3,7 +3,7 @@ defmodule Fleet.TaskQueue do
   API publique du broker d'orchestration cross-pod LCARS.
 
   `fleet_spawner` enqueue (source), `fleet_task_queue` distribue/collecte (broker),
-  `fleet_mcp` sert via tools `get_task`/`submit_result` (frontière vendor),
+  `fleet_mcp` sert via tools `get_work_item`/`submit_result` (frontière vendor),
   `fleet_coord` oriente post-résultat.
 
   Chaque fonction a une variante test-seam (`server` explicite, ex. `enqueue/3`,
@@ -14,60 +14,60 @@ defmodule Fleet.TaskQueue do
 
   @server Server
 
-  @doc "Enqueue un mandat pour le pod identifié. Génère un `task.id` (UUID v4 = correlation_id)."
-  @spec enqueue(String.t(), map()) :: {:ok, Fleet.TaskQueue.Task.t()} | {:error, term()}
+  @doc "Enqueue un work item pour le pod identifié. Génère un `task.id` (UUID v4 = correlation_id)."
+  @spec enqueue(String.t(), map()) :: {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, term()}
   def enqueue(pod_id, task_attrs), do: enqueue(@server, pod_id, task_attrs)
 
   @spec enqueue(GenServer.server(), String.t(), map()) ::
-          {:ok, Fleet.TaskQueue.Task.t()} | {:error, term()}
+          {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, term()}
   def enqueue(server, pod_id, task_attrs) when is_binary(pod_id) and is_map(task_attrs),
     do: GenServer.call(server, {:enqueue, pod_id, task_attrs})
 
-  @doc "Récupère le mandat actif du pod (servi par fleet_mcp `get_task`). Idempotent jusqu'à submit/clear."
-  @spec get_for_pod(String.t()) :: {:ok, Fleet.TaskQueue.Task.t()} | {:error, :no_task}
+  @doc "Récupère le work item actif du pod (servi par fleet_mcp `get_work_item`). Idempotent jusqu'à submit/clear."
+  @spec get_for_pod(String.t()) :: {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, :no_task}
   def get_for_pod(pod_id), do: get_for_pod(@server, pod_id)
 
   @spec get_for_pod(GenServer.server(), String.t()) ::
-          {:ok, Fleet.TaskQueue.Task.t()} | {:error, :no_task}
+          {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, :no_task}
   def get_for_pod(server, pod_id) when is_binary(pod_id),
     do: GenServer.call(server, {:get_for_pod, pod_id})
 
   @doc """
   Soumet le résultat (servi par fleet_mcp `submit_result`). Idempotent (2e appel =
-  `:double_submit_ignored`). Si `result` porte un `task_id` ≠ mandat actif du pod
-  → `:task_id_mismatch` (le correlation_id du livrable ne matche pas), aucune mutation.
+  `:double_submit_ignored`). Si `result` porte un `work_item_id` ≠ work item actif du pod
+  → `:work_item_id_mismatch` (le correlation_id du livrable ne matche pas), aucune mutation.
 
-  Le broadcast `task_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour
+  Le broadcast `work_item_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour
   finir le hop). Si sa diffusion échoue, le retour est `{:error, {:broadcast_failed, _}}` (la tâche
   reste `:completed`+persistée, mais le caller NE reçoit PAS un faux succès — plus de `:ok` qui ment).
   """
   @spec submit_result(String.t(), map()) ::
-          {:ok, Fleet.TaskQueue.Task.t()}
+          {:ok, Fleet.TaskQueue.WorkItem.t()}
           | {:error,
              :no_active_task
              | :double_submit_ignored
-             | :task_id_mismatch
+             | :work_item_id_mismatch
              | {:broadcast_failed, term()}}
   def submit_result(pod_id, result), do: submit_result(@server, pod_id, result)
 
   @spec submit_result(GenServer.server(), String.t(), map()) ::
-          {:ok, Fleet.TaskQueue.Task.t()}
+          {:ok, Fleet.TaskQueue.WorkItem.t()}
           | {:error,
              :no_active_task
              | :double_submit_ignored
-             | :task_id_mismatch
+             | :work_item_id_mismatch
              | {:broadcast_failed, term()}}
   def submit_result(server, pod_id, result) when is_binary(pod_id) and is_map(result),
     do: GenServer.call(server, {:submit_result, pod_id, result})
 
-  @doc "Liste les mandats `:pending`. Query Port, pas de broadcast."
-  @spec list_pending() :: [Fleet.TaskQueue.Task.t()]
+  @doc "Liste les work items `:pending`. Query Port, pas de broadcast."
+  @spec list_pending() :: [Fleet.TaskQueue.WorkItem.t()]
   def list_pending, do: list_pending(@server)
 
-  @spec list_pending(GenServer.server()) :: [Fleet.TaskQueue.Task.t()]
+  @spec list_pending(GenServer.server()) :: [Fleet.TaskQueue.WorkItem.t()]
   def list_pending(server), do: GenServer.call(server, :list_pending)
 
-  @doc "Annule/clear le mandat actif du pod (teardown). Idempotent."
+  @doc "Annule/clear le work item actif du pod (teardown). Idempotent."
   @spec clear_for_pod(String.t()) :: :ok
   def clear_for_pod(pod_id), do: clear_for_pod(@server, pod_id)
 
@@ -75,7 +75,7 @@ defmodule Fleet.TaskQueue do
   def clear_for_pod(server, pod_id) when is_binary(pod_id),
     do: GenServer.call(server, {:clear_for_pod, pod_id})
 
-  @doc "Statut du mandat actif du pod (`{:ok, state | nil}`). Query Port."
+  @doc "Statut du work item actif du pod (`{:ok, state | nil}`). Query Port."
   @spec pod_status(String.t()) :: {:ok, atom() | nil}
   def pod_status(pod_id), do: pod_status(@server, pod_id)
 
@@ -99,7 +99,7 @@ defmodule Fleet.TaskQueue do
 
   @doc """
   Dernier poll du pod (`DateTime | nil`) = **ACK in-band** : l'agent a appelé `get_for_pod` (même sans
-  mandat → signal bootstrap « up + armé »). Consommé par la boucle wake ack-driven. Query Port.
+  work item → signal bootstrap « up + armé »). Consommé par la boucle wake ack-driven. Query Port.
   """
   @spec last_poll(String.t()) :: DateTime.t() | nil
   def last_poll(pod_id), do: last_poll(@server, pod_id)

@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-25 (registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-07-01 (registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -108,7 +108,7 @@ dans le moduledoc de chaque consommateur.
 > au boot (prod-on/test-off). Audit des ~15 émetteurs : les statiques émettent des
 > types registrés, les dynamiques externes (`webhooks_gitea`/`signals_os`/`policies`/
 > `Pod.best_effort_broadcast`) rescue `UnregisteredError` → activation sûre. MA-04 : le lifecycle
-> `pod.completed`/`task_completed` passe par `required_broadcast` (PROPAGE l'échec, ne l'avale pas).
+> `pod.completed`/`work_item_completed` passe par `required_broadcast` (PROPAGE l'échec, ne l'avale pas).
 
 ## Dépendances
 

@@ -454,7 +454,7 @@ defmodule Fleet.Pilot.HopConsumerTest do
       send(pid, event)
       assert Process.alive?(pid)
       # un event non-spawner est ignore sans crash
-      send(pid, Fleet.Event.new(:task_queue, :task_completed))
+      send(pid, Fleet.Event.new(:task_queue, :work_item_completed))
 
       assert Process.alive?(pid)
 

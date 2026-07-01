@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.HopConsumer do
       un brief d'éval au gatekeeper (work-session, adressé par `pod_id` via
       TaskQueue/MCP), on tient le contexte de reprise en RAM (`gate_evals`, keyé
       par `correlation_id`), et la décision revient async via
-      `%Fleet.Event{source: :task_queue, type: :task_completed}` → `resume_gate/3`.
+      `%Fleet.Event{source: :task_queue, type: :work_item_completed}` → `resume_gate/3`.
 
   Le juge est **rare par construction** : le moteur ne peut pas le sur-convoquer
   (le `soft`/non-tranchable est une *condition runtime*, pas un *tag de stage*).
@@ -228,7 +228,7 @@ defmodule Fleet.Pilot.HopConsumer do
         {:noreply, state}
 
       # Gate non-tranchable : le brief d'éval est enqueué au gatekeeper
-      # permanent ; on tient le contexte de reprise jusqu'au `task_completed` corrélé.
+      # permanent ; on tient le contexte de reprise jusqu'au `work_item_completed` corrélé.
       # L'issue reste verrouillée (in-flight) → le poller ne re-spawn pas (pas d'avance
       # à l'aveugle avant le verdict).
       {:escalate, corr, eval_ctx} ->
@@ -250,9 +250,9 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # Décision du gatekeeper reçue : le brief d'éval (corrélé par
   # `correlation_id` = task.id de l'enqueue) est complété. On ne traite QUE les corr
-  # qu'on a en attente (les autres task_completed — autres pods — sont ignorés).
+  # qu'on a en attente (les autres work_item_completed — autres pods — sont ignorés).
   def handle_info(
-        %Fleet.Event{source: :task_queue, type: :task_completed, correlation_id: corr} = ev,
+        %Fleet.Event{source: :task_queue, type: :work_item_completed, correlation_id: corr} = ev,
         state
       )
       when is_binary(corr) do
@@ -262,7 +262,7 @@ defmodule Fleet.Pilot.HopConsumer do
       #      metadata (verdict auto-descriptif) → resume. C'est le wedge fermé : crash du HopConsumer seul
       #      (broker vivant → la tâche + son metadata survivent) → le verdict arrive au HopConsumer redémarré
       #      (gate_evals vide) → reconstruction au lieu de `{:noreply}` silencieux (issue verrouillée à vie).
-      #  (b) sinon → `{:noreply}` (cas NORMAL : chaque pod stage-dispatch émet un `task_completed` sans
+      #  (b) sinon → `{:noreply}` (cas NORMAL : chaque pod stage-dispatch émet un `work_item_completed` sans
       #      `gate_eval` → ce n'est pas une escalade gatekeeper → on l'ignore).
       {nil, _} ->
         case reconstruct_eval_ctx(ev.payload, state) do
@@ -291,7 +291,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # Exécute la reprise (commun fast-path / reconstruction). La reprise pousse/écrit sur le
   # repo du HOP escaladé (porté par le `pod.completed` d'origine, conservé dans `eval_ctx.payload`), pas sur la
-  # config. Le verdict du gatekeeper arrive via un `task_completed` (autre event, sans repo) → on re-dérive
+  # config. Le verdict du gatekeeper arrive via un `work_item_completed` (autre event, sans repo) → on re-dérive
   # depuis le payload d'origine.
   defp do_resume_gate(eval_ctx, ev, corr, state) do
     case resume_gate(eval_ctx, ev.payload, hop_state(eval_ctx.payload, state)) do
@@ -783,7 +783,7 @@ defmodule Fleet.Pilot.HopConsumer do
   #                               représentable).
   #   {:dispatch_gatekeeper, _} → enqueue un brief d'éval au gatekeeper
   #                               permanent + `{:escalate, corr, eval_ctx}` (reprise async
-  #                               sur `task_completed`). Enqueue raté → fail-loud (l'issue
+  #                               sur `work_item_completed`). Enqueue raté → fail-loud (l'issue
   #                               reste verrouillée, pas d'avance à l'aveugle).
   defp gate_decide(carte, stage, payload, n, state) do
     spec =
@@ -864,7 +864,7 @@ defmodule Fleet.Pilot.HopConsumer do
   # Convocation forge-driven du gatekeeper sur escalade de gate.
   # Enqueue un brief d'éval au gatekeeper PERMANENT (work-session, adressé par pod_id —
   # l'overseer n'est PAS spawné/possédé ici), le kick (best-effort), et retourne le
-  # `correlation_id` (= task.id) pour la corrélation `task_queue.task_completed`. Pas de
+  # `correlation_id` (= task.id) pour la corrélation `task_queue.work_item_completed`. Pas de
   # gatekeeper booté / enqueue raté → `{:error, _}` (l'appelant fail-loud ; jamais un pass
   # silencieux).
   defp dispatch_gatekeeper(carte, stage, outputs, payload, n, role, state) do
@@ -883,7 +883,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
         # VERDICT AUTO-DESCRIPTIF : le metadata de la tâche d'éval porte le contexte de REPRISE
         # (`payload`/`n`/`role` en plus du stage/pipeline déjà présents). Cette tâche survit dans le broker
-        # (TaskQueue = autre process) à un crash du HopConsumer seul → le verdict (`task_completed`) ramène
+        # (TaskQueue = autre process) à un crash du HopConsumer seul → le verdict (`work_item_completed`) ramène
         # ce metadata → le HopConsumer redémarré (gate_evals RAM vidé) reconstruit l'eval_ctx
         # (`carte = Loader.load!(pipeline)`) au lieu d'un `{:noreply}` silencieux (issue wedgée à vie). Aucune
         # NOUVELLE source : `payload` porte déjà `workspace`/`base_sha`/`gate_base_sha` — on l'embarque tel quel.
@@ -985,8 +985,8 @@ defmodule Fleet.Pilot.HopConsumer do
 
   @doc false
   # Reprise après le verdict du gatekeeper. Exposé pour test (le GenServer
-  # appelle via handle_info(:task_completed)). `raw_payload` = payload brut du
-  # `task_completed` (déplié ici par `gate_result/1` : enveloppe TaskQueue + enveloppe
+  # appelle via handle_info(:work_item_completed)). `raw_payload` = payload brut du
+  # `work_item_completed` (déplié ici par `gate_result/1` : enveloppe TaskQueue + enveloppe
   # worker). Vocab canon `gate-decision-v1.json` :
   #   continue → avance (push livrable métier + reassign) ;
   #   abandon  → close (trace verdict, PAS de push : travail rejeté) ;
@@ -1005,7 +1005,7 @@ defmodule Fleet.Pilot.HopConsumer do
   end
 
   # APPLICATION d'un verdict de juge (gate-decision-v1). UNE fonction, partagée par TOUS les juges
-  # quelle que soit leur position : le gatekeeper (verdict async via `task_completed` → resume_gate) ET le
+  # quelle que soit leur position : le gatekeeper (verdict async via `work_item_completed` → resume_gate) ET le
   # consultant brief-review (verdict via `pod.completed` → gate_decide → run_hop). continue → avance la
   # carte ; abandon → close ; reste → await_arch. La SEULE diff (PR vs pré-PR) vit dans `complete_judge`
   # (trace = review native si PR, sinon commentaire issue), dérivée de l'état forge + `judge_target` du
@@ -1118,7 +1118,7 @@ defmodule Fleet.Pilot.HopConsumer do
     if is_binary(reason) and reason != "", do: base <> "\nMotif : #{reason}", else: base
   end
 
-  # Extrait la décision du payload `task_completed`. DEUX enveloppes : (1) TaskQueue pose
+  # Extrait la décision du payload `work_item_completed`. DEUX enveloppes : (1) TaskQueue pose
   # `:result` (clé atom) ; (2) enveloppe worker `%{"status","result"}` (clés string).
   defp gate_result(payload) when is_map(payload) do
     (Map.get(payload, :result) || Map.get(payload, "result"))

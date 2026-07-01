@@ -1,7 +1,7 @@
 defmodule Fleet.Pipeline.GateBrief do
   @moduledoc """
   Construit le **brief d'éval** (texte du brief) envoyé au gatekeeper pour
-  trancher une gate de pipeline. Le gatekeeper le pull via MCP `get_task`, juge
+  trancher une gate de pipeline. Le gatekeeper le pull via MCP `get_work_item`, juge
   (modop rubber-duck), et rend une décision JSON strict `gate-decision-v1.json`.
 
   Pure function. Template dérivé de `orchestration/gatekeeper-exception.md`

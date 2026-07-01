@@ -15,7 +15,7 @@ defmodule Fleet.MCP.Server do
   **retirée** ici (0 appelant prod ; le push channel est mort — PoC Channel Anthropic
   KO). MAIS la garde de containment ci-dessus est **load-bearing** (testée par la
   conformance) : on retire le husk, on GARDE la garde. Le drive pod-facing
-  (`get_task`/`submit_result`) vit dans `Fleet.MCP.PodTools`, pas ici.
+  (`get_work_item`/`submit_result`) vit dans `Fleet.MCP.PodTools`, pas ici.
 
   **GenServer sans état métier** : le process existe pour être l'enfant
   supervisé dont le `start_link` exécute la garde au boot (idle ensuite).

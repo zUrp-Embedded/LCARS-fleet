@@ -47,16 +47,16 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
   ## `in_flight_count/0` — périmètre (décision user)
 
-  **Tout pod vivant compte** (éphémère ET permanent) + mandats en file
+  **Tout pod vivant compte** (éphémère ET permanent) + work items en file
   non-assignés. Il n'y a PLUS de pipelines RAM à compter : le moteur
   `Fleet.Pipeline.Executor` est supprimé (un pod vivant = un hop en cours).
 
     * `Fleet.Spawner.count_pods/0` — pods actifs (couvre aussi le travail
-      assigné : un mandat assigné ⇒ son pod est vivant ⇒ compté ici)
-    * `Fleet.TaskQueue.list_pending/0` — mandats en file **pas encore assignés**
+      assigné : un work item assigné ⇒ son pod est vivant ⇒ compté ici)
+    * `Fleet.TaskQueue.list_pending/0` — work items en file **pas encore assignés**
 
   **Pas de double-comptage** : `list_pending` filtre `state == :pending` STRICT
-  (cf. `task_queue/server.ex` `handle_call(:list_pending)`) — les mandats
+  (cf. `task_queue/server.ex` `handle_call(:list_pending)`) — les work items
   `:assigned`/`:in_progress` en sont exclus et sont représentés par leur pod
   vivant (compté dans `count_pods`). Ni double-comptage ni sous-comptage.
 
@@ -107,7 +107,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   def in_flight_count do
     # `pipeline_running` RETIRÉ (②.3 / BL-050) : le moteur RAM (`Fleet.Pipeline.Executor`) est supprimé,
     # il n'y a plus de pipelines en RAM à drainer. L'in-flight = les **pods vivants** (le travail réel
-    # du rail forge : un pod = un hop en cours) + les mandats **en file** non encore pullés.
+    # du rail forge : un pod = un hop en cours) + les work items **en file** non encore pullés.
     spawner_pods() + tasks_pending()
   end
 
@@ -155,7 +155,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
         :error ->
           Logger.error(
-            "Fleet.Starfleet.Shutdown: comptage mandats en file indisponible (broker task_queue " <>
+            "Fleet.Starfleet.Shutdown: comptage work items en file indisponible (broker task_queue " <>
               "présent mais injoignable — restart en plein quiesce ?) — drain ne peut PAS conclure 0, prudent"
           )
 

@@ -2,7 +2,7 @@
 
 **Date** : 2026-05-18
 **Dernière révision** : 2026-07-01 (R9 — transport socket AF_UNIX per-pod, l'identité EST le canal)
-**Statut** : implémenté — serveur MCP pod-facing (`get_task` / `submit_result`)
+**Statut** : implémenté — serveur MCP pod-facing (`get_work_item` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
 Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
@@ -10,7 +10,7 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 
 ## Modules
 
-- `Fleet.MCP.PodTools` — outils MCP **pod-facing** : `get_task` (le pod tire son
+- `Fleet.MCP.PodTools` — outils MCP **pod-facing** : `get_work_item` (le pod tire son
   brief depuis la TaskQueue), `submit_result` (le pod rend son livrable), `create_ticket`
   (l'arch délègue une implémentation), `create_project` (l'arch onboard un projet neuf) et
   `get_ticket_status` (l'arch suit une délégation). `handle_tool_call/3` = fonctions pures,
@@ -51,7 +51,7 @@ même un `_lcars_pod_id` forgé dans les arguments est ignoré (le central lit `
 >256 bits vérifié serveur-side) pour fermer le trou d'usurpation. La socket per-pod rend cette
 > capability inutile : le canal discrimine. HTTP loopback + capability **retirés**.
 
-`handle_tool_call/3` lit `state.pod_id` directement pour `get_task`/`submit_result`. Le `pod_id`
+`handle_tool_call/3` lit `state.pod_id` directement pour `get_work_item`/`submit_result`. Le `pod_id`
 absent du state = anomalie de l'accepteur → `:pod_id_required` (fail-closed, jamais d'accès anonyme).
 
 ## API socket (seam `fleet_spawner → fleet_mcp`)
@@ -80,10 +80,10 @@ vient du spawn, jamais d'un champ du wire. Tout rôle autre (engineer, reviewer,
 
 ## Outils MCP (pod-facing)
 
-- `get_task` — le pod récupère son brief (corrélé `pod_id` du canal).
-- `submit_result` — le pod soumet son livrable (`payload`) ; **`task_id` OBLIGATOIRE** = le `task_id`
-  rendu par `get_task` (le broker corrèle sur CE brief précis, jamais « la dernière active » du pod —
-  verrou orthogonal au transport). task_id absent → `:task_id_required` ; ≠ brief actif → `:task_id_mismatch`.
+- `get_work_item` — le pod récupère son brief (corrélé `pod_id` du canal).
+- `submit_result` — le pod soumet son livrable (`payload`) ; **`work_item_id` OBLIGATOIRE** = le `work_item_id`
+  rendu par `get_work_item` (le broker corrèle sur CE brief précis, jamais « la dernière active » du pod —
+  verrou orthogonal au transport). work_item_id absent → `:work_item_id_required` ; ≠ brief actif → `:work_item_id_mismatch`.
 - `create_ticket` (délégation, **architecte only**) — crée l'issue forge **prête pour le poller**
   (`Fleet.Pilot.ForgeClient.create_issue`, dispatch runtime). Gate `require_architect`. Fail-closed :
   worker → `:forbidden_not_architect` ; pod inconnu → `:pod_unknown` ; token de rôle absent →
@@ -112,7 +112,7 @@ manuel des schémas du central. Le câblage du pont vers la socket per-pod (et l
 ## Frontière vendor
 
 `mcp_*` = N1 (ADR-C) : le SDK `ex_mcp` est wrappé derrière `Fleet.MCP.PodTools`
-(`use ExMCP.Server`, tools `get_task`/`submit_result`) pour les schémas + le format de contenu.
+(`use ExMCP.Server`, tools `get_work_item`/`submit_result`) pour les schémas + le format de contenu.
 Le **transport** pod-facing est une socket AF_UNIX per-pod gérée en `:gen_tcp` brut
 (`Fleet.MCP.PodSocketAcceptor`) — ExMCP ne fournit pas de socket per-pod ; bascule du SDK de
 schéma (Hermes) possible sans toucher les consommateurs.

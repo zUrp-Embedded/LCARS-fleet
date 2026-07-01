@@ -172,13 +172,13 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   # R-CORE.comm ADR-G — completion event-driven : simule le broker fleet_task_queue broadcastant
-  # %Fleet.Event{task_completed} sur fleet.events (= ce qui arrive quand l'agent appelle
+  # %Fleet.Event{work_item_completed} sur fleet.events (= ce qui arrive quand l'agent appelle
   # submit_result via fleet_mcp). Le pod doit être en :monitoring (subscribed) avant l'appel.
   defp submit_result_event(pod_id, payload) do
     Phoenix.PubSub.broadcast(
       Fleet.PubSub,
       "fleet.events",
-      Fleet.Event.new(:task_queue, :task_completed,
+      Fleet.Event.new(:task_queue, :work_item_completed,
         pod_id: pod_id,
         correlation_id: "test-corr-#{pod_id}",
         payload: %{result: payload}
@@ -274,12 +274,12 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _, _}, 2_000
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # task_completed pour la brique issue-3 (re-brief), PAS le spawn issue-4 (ticket_id dans le payload,
+      # work_item_completed pour la brique issue-3 (re-brief), PAS le spawn issue-4 (ticket_id dans le payload,
       # comme le vrai event TaskQueue qui porte completed.ticket_id).
       Phoenix.PubSub.broadcast(
         Fleet.PubSub,
         "fleet.events",
-        Fleet.Event.new(:task_queue, :task_completed,
+        Fleet.Event.new(:task_queue, :work_item_completed,
           pod_id: pod_id,
           correlation_id: "c-adopt",
           payload: %{result: %{"answer" => "OK"}, ticket_id: "issue-3"}
@@ -334,7 +334,7 @@ defmodule Fleet.Spawner.PodTest do
       assert Bitwise.band(mode, 0o100) != 0, "watch.sh doit être exécutable (owner)"
 
       # SP enrichi par agent-worker-base draft : doit contenir le workflow
-      # yop → get_task → submit_result + le protocole Monitor (réveil-par-flag).
+      # yop → get_work_item → submit_result + le protocole Monitor (réveil-par-flag).
       sp = File.read!(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
       assert sp =~ "agent worker LCARS"
       assert sp =~ "submit_result"
@@ -373,7 +373,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — admin.spawn (opts[:brief], aucun dispatcher) enqueue le brief dans la TaskQueue (canal get_task) [F-arch-MCP]" do
+    test "PUSH — admin.spawn (opts[:brief], aucun dispatcher) enqueue le brief dans la TaskQueue (canal get_work_item) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-mq-#{System.unique_integer([:positive])}"
@@ -390,7 +390,7 @@ defmodule Fleet.Spawner.PodTest do
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
 
-      # Sans cet enqueue, `get_task` rendait `{done:true}` → le pod (qui poll get_task) restait idle
+      # Sans cet enqueue, `get_work_item` rendait `{done:true}` → le pod (qui poll get_work_item) restait idle
       # (forensic arch 3f12edd9). Le brief est désormais dans le canal canonique.
       assert [%{brief: ^brief}] =
                Enum.filter(Fleet.TaskQueue.list_pending(), &(&1.pod_id == pod_id))

@@ -159,7 +159,7 @@ defmodule Fleet.Spawner do
   # Invariant rendu structurellement impossible à violer : un pod `one-shot` (1 tâche
   # puis meurt) DOIT porter un brief — sinon il part sans travail (brief générique →
   # claude attend → timeout). Les pods long-lived (`forever`/`run`/`pipe`) pullent leurs
-  # tâches via MCP (`yop` → get_task) → exemptés (épargne les pods permanents/gatekeeper).
+  # tâches via MCP (`yop` → get_work_item) → exemptés (épargne les pods permanents/gatekeeper).
   # Échappatoire admin/diagnostic explicite : `opts[:allow_no_brief]`.
   defp brief_guard(%Fleet.CapProfile{spec: spec} = cap_profile, opts) do
     brief = Keyword.get(opts, :brief)
@@ -341,14 +341,14 @@ defmodule Fleet.Spawner do
   **Rail porteur = réveil-par-flag** (`turn.flag` + outil Monitor in-pod), touché ICI. Déclenche le workflow
   agent-worker-base :
 
-      (flag touché → Monitor « ton tour ») → mcp__fleet__get_task → traite → mcp__fleet__submit_result
+      (flag touché → Monitor « ton tour ») → mcp__fleet__get_work_item → traite → mcp__fleet__submit_result
 
   `wake_pod` n'est QUE *trigger + armement du filet* : il touche le flag (porteur), puis ARME (cast)
   la boucle ack-driven du Pod (`:arm_kick` — le FALLBACK : send-keys `"wake"` UNIQUEMENT si le pull n'arrive
   pas) + ré-arme la deadline de RÉPONSE (`:rearm_deadline`). Il ne fait **pas** de send-keys lui-même.
 
   Pré-requis : le caller a déjà enqueué le brief dans `Fleet.TaskQueue` (ciblé `pod_id` ; le pod s'identifie
-  par `_lcars_pod_id` sur le fil) AVANT l'appel. Le CONTENU passe TOUJOURS par MCP (`get_task`), jamais par
+  par `_lcars_pod_id` sur le fil) AVANT l'appel. Le CONTENU passe TOUJOURS par MCP (`get_work_item`), jamais par
   le texte injecté.
 
   Use-cases :

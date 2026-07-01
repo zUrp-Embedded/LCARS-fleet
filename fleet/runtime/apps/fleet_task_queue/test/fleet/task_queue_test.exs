@@ -39,11 +39,11 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :task_enqueued,
+      type: :work_item_enqueued,
       pod_id: "pod-A",
       correlation_id: ^tid,
-      # F144 : payload = %{task_id} (cohérent + JSON-safe), plus le %Task{} brut.
-      payload: %{task_id: ^tid}
+      # F144 : payload = %{work_item_id} (cohérent + JSON-safe), plus le %WorkItem{} brut.
+      payload: %{work_item_id: ^tid}
     }
 
     {:ok, assigned} = TaskQueue.get_for_pod(q, "pod-A")
@@ -51,13 +51,13 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :task_assigned,
+      type: :work_item_assigned,
       pod_id: "pod-A",
       correlation_id: ^tid
     }
   end
 
-  test "AXIOME cleanup : enqueue supersède le :pending existant du pod (1 mandat actif/pod, le frais gagne)",
+  test "AXIOME cleanup : enqueue supersède le :pending existant du pod (1 work item actif/pod, le frais gagne)",
        %{q: q} do
     {:ok, _stale} = TaskQueue.enqueue(q, "pod-X", %{brief: "stale", role: "engineer"})
     {:ok, fresh} = TaskQueue.enqueue(q, "pod-X", %{brief: "frais", role: "engineer"})
@@ -72,16 +72,17 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, %{brief: "frais"}} = TaskQueue.get_for_pod(q, "pod-X")
   end
 
-  test "last_poll : get_for_pod enregistre le poll MÊME sans mandat (ACK bootstrap in-band)", %{
-    q: q
-  } do
+  test "last_poll : get_for_pod enregistre le poll MÊME sans work item (ACK bootstrap in-band)",
+       %{
+         q: q
+       } do
     assert TaskQueue.last_poll(q, "pod-boot") == nil
-    # pas de mandat → :no_task, mais l'agent a TENDU LA MAIN → le poll est gravé
+    # pas de work item → :no_task, mais l'agent a TENDU LA MAIN → le poll est gravé
     assert {:error, :no_task} = TaskQueue.get_for_pod(q, "pod-boot")
     assert %DateTime{} = TaskQueue.last_poll(q, "pod-boot")
   end
 
-  test "last_poll : tracké aussi sur un pull (avec mandat)", %{q: q} do
+  test "last_poll : tracké aussi sur un pull (avec work item)", %{q: q} do
     {:ok, _} = TaskQueue.enqueue(q, "pod-W", %{brief: "x", role: "engineer"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-W")
     assert %DateTime{} = TaskQueue.last_poll(q, "pod-W")
@@ -102,16 +103,16 @@ defmodule Fleet.TaskQueueTest do
 
   test "2. get_for_pod idempotent (résiste au /clear one_shot, pas de double dispatch)", %{q: q} do
     {:ok, t1} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
-    assert_receive %Fleet.Event{type: :task_enqueued}
+    assert_receive %Fleet.Event{type: :work_item_enqueued}
 
     {:ok, a1} = TaskQueue.get_for_pod(q, "pod-A")
-    assert_receive %Fleet.Event{type: :task_assigned}
+    assert_receive %Fleet.Event{type: :work_item_assigned}
 
-    # 2e appel → MÊME mandat, PAS de nouveau broadcast :task_assigned
+    # 2e appel → MÊME work item, PAS de nouveau broadcast :work_item_assigned
     {:ok, a2} = TaskQueue.get_for_pod(q, "pod-A")
     assert a1.id == t1.id
     assert a2.id == a1.id
-    refute_receive %Fleet.Event{type: :task_assigned}, 100
+    refute_receive %Fleet.Event{type: :work_item_assigned}, 100
   end
 
   test "3. submit_result happy path", %{q: q} do
@@ -126,17 +127,17 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :task_completed,
+      type: :work_item_completed,
       pod_id: "pod-A",
       correlation_id: ^tid,
       payload: %{result: %{"verdict" => "proven"}}
     }
   end
 
-  # MA-04 — LE finding : `task_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir
+  # MA-04 — LE finding : `work_item_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir
   # le hop). Si sa diffusion échoue, `submit_result` NE rend PLUS `{:ok}` muet (le pod croirait son livrable
   # accepté alors que le hop ne finit jamais → verrou forge à vie) — il propage `{:error,{:broadcast_failed,_}}`.
-  test "3b. MA-04 : broadcast task_completed qui RETOURNE {:error} → submit_result {:error,{:broadcast_failed,_}}, pas {:ok}",
+  test "3b. MA-04 : broadcast work_item_completed qui RETOURNE {:error} → submit_result {:error,{:broadcast_failed,_}}, pas {:ok}",
        %{tmp_dir: tmp_dir} do
     state_path = Path.join(tmp_dir, "state_failbus.json")
 
@@ -158,7 +159,7 @@ defmodule Fleet.TaskQueueTest do
 
   # MA-04 — variante : le broadcast LÈVE (UnregisteredError / PubSub down). Le `required_broadcast` rescue
   # et propage `{:error,{:broadcast_failed,_}}`, jamais `:ok` muet (le rescue ne ré-avale plus le lifecycle).
-  test "3c. MA-04 : broadcast task_completed qui LÈVE → {:error,{:broadcast_failed,_}}, pas {:ok}",
+  test "3c. MA-04 : broadcast work_item_completed qui LÈVE → {:error,{:broadcast_failed,_}}, pas {:ok}",
        %{tmp_dir: tmp_dir} do
     state_path = Path.join(tmp_dir, "state_raisebus.json")
 
@@ -181,12 +182,12 @@ defmodule Fleet.TaskQueueTest do
     {:ok, _} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
     {:ok, _} = TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
-    assert_receive %Fleet.Event{type: :task_completed}
+    assert_receive %Fleet.Event{type: :work_item_completed}
 
     assert {:error, :double_submit_ignored} =
              TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
 
-    refute_receive %Fleet.Event{type: :task_completed}, 100
+    refute_receive %Fleet.Event{type: :work_item_completed}, 100
   end
 
   test "5. recovery cross-restart", %{topic: topic, tmp_dir: tmp_dir} do
@@ -227,8 +228,8 @@ defmodule Fleet.TaskQueueTest do
     assert [] = TaskQueue.list_pending(q)
   end
 
-  test "6b. Task.from_map round-trip préserve les champs riches (fix deep-02 : recovery ne perd plus brief/role/metadata)" do
-    t = %Fleet.TaskQueue.Task{
+  test "6b. WorkItem.from_map round-trip préserve les champs riches (fix deep-02 : recovery ne perd plus brief/role/metadata)" do
+    t = %Fleet.TaskQueue.WorkItem{
       id: "t1",
       pod_id: "p1",
       enqueued_at: ~U[2026-06-02 00:00:00Z],
@@ -240,7 +241,7 @@ defmodule Fleet.TaskQueueTest do
       result: %{"ok" => true}
     }
 
-    assert {:ok, back} = Fleet.TaskQueue.Task.from_map(Fleet.TaskQueue.Task.to_map(t))
+    assert {:ok, back} = Fleet.TaskQueue.WorkItem.from_map(Fleet.TaskQueue.WorkItem.to_map(t))
 
     assert %{
              brief: "fais X",
@@ -284,7 +285,7 @@ defmodule Fleet.TaskQueueTest do
 
   test "6d. enqueued_at ISO invalide → {:error,:invalid} (champ requis, pas de nil silencieux — fix after-9b3aea3d)" do
     bad = %{"id" => "t1", "pod_id" => "p1", "enqueued_at" => "pas-une-date", "state" => "pending"}
-    assert {:error, :invalid} = Fleet.TaskQueue.Task.from_map(bad)
+    assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad)
   end
 
   test "6e. recovery ré-arme les deadlines actives — expirée pendant le downtime → fail (fix deep-02 P1)",
@@ -313,7 +314,7 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
                      source: :task_queue,
-                     type: :task_failed,
+                     type: :work_item_failed,
                      correlation_id: "t1",
                      payload: %{reason: :deadline_expired}
                    },
@@ -326,11 +327,11 @@ defmodule Fleet.TaskQueueTest do
     deadline = DateTime.add(DateTime.utc_now(), 200, :millisecond)
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x", deadline: deadline})
     tid = t.id
-    assert_receive %Fleet.Event{type: :task_enqueued}
+    assert_receive %Fleet.Event{type: :work_item_enqueued}
 
     assert_receive %Fleet.Event{
                      source: :task_queue,
-                     type: :task_failed,
+                     type: :work_item_failed,
                      correlation_id: ^tid,
                      payload: %{reason: :deadline_expired}
                    },
@@ -356,7 +357,7 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :task_cleared,
+      type: :work_item_cleared,
       pod_id: "pod-A",
       correlation_id: ^tid
     }
@@ -371,29 +372,34 @@ defmodule Fleet.TaskQueueTest do
     assert ev.source == :task_queue
     # enforce_keys présents
     assert ev.timestamp != nil and ev.type != nil
-    # correlation_id == task.id quand un mandat existe
+    # correlation_id == task.id quand un work item existe
     assert ev.correlation_id == t.id
     assert Fleet.Event.valid_source?(ev.source)
   end
 
-  test "11. submit_result avec task_id ≠ mandat actif → :task_id_mismatch (§A.70, pas de mutation)",
+  test "11. submit_result avec work_item_id ≠ work item actif → :work_item_id_mismatch (§A.70, pas de mutation)",
        %{q: q} do
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
-    assert_receive %Fleet.Event{type: :task_enqueued}
-    assert_receive %Fleet.Event{type: :task_assigned}
+    assert_receive %Fleet.Event{type: :work_item_enqueued}
+    assert_receive %Fleet.Event{type: :work_item_assigned}
 
-    # Le pod renvoie un task_id forgé/périmé ≠ son mandat actif → rejet.
-    assert {:error, :task_id_mismatch} =
-             TaskQueue.submit_result(q, "pod-A", %{"task_id" => "forged-uuid", "verdict" => "x"})
+    # Le pod renvoie un work_item_id forgé/périmé ≠ son work item actif → rejet.
+    assert {:error, :work_item_id_mismatch} =
+             TaskQueue.submit_result(q, "pod-A", %{
+               "work_item_id" => "forged-uuid",
+               "verdict" => "x"
+             })
 
-    # Aucune mutation : le mandat reste actif, pas de :task_completed.
+    # Aucune mutation : le work item reste actif, pas de :work_item_completed.
     assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-A")
-    refute_receive %Fleet.Event{type: :task_completed}, 100
+    refute_receive %Fleet.Event{type: :work_item_completed}, 100
 
-    # Avec le bon task_id → OK.
-    assert {:ok, _} = TaskQueue.submit_result(q, "pod-A", %{"task_id" => t.id, "verdict" => "ok"})
-    assert_receive %Fleet.Event{type: :task_completed}
+    # Avec le bon work_item_id → OK.
+    assert {:ok, _} =
+             TaskQueue.submit_result(q, "pod-A", %{"work_item_id" => t.id, "verdict" => "ok"})
+
+    assert_receive %Fleet.Event{type: :work_item_completed}
   end
 
   test "12. F148 — rétention borne les tâches terminales (actives intactes + double-submit du plus récent)",
@@ -414,7 +420,7 @@ defmodule Fleet.TaskQueueTest do
       {:ok, _} = TaskQueue.submit_result(q, pod, %{"verdict" => "ok"})
     end
 
-    # + un mandat ACTIF : ne doit JAMAIS être élagué.
+    # + un work item ACTIF : ne doit JAMAIS être élagué.
     {:ok, _} = TaskQueue.enqueue(q, "pod-active", %{brief: "en cours"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-active")
 
@@ -433,7 +439,7 @@ defmodule Fleet.TaskQueueTest do
              TaskQueue.submit_result(q, "pod-5", %{"verdict" => "retry"})
   end
 
-  # MA-27 — invariant « 1 mandat ACTIF/pod » tenu À L'ÉCRITURE. Un re-mandate d'un pod portant une
+  # MA-27 — invariant « 1 work item ACTIF/pod » tenu À L'ÉCRITURE. Un re-mandate d'un pod portant une
   # `:assigned` existante doit la SUPERSÉDER (→ `:cleared`) : sinon la vieille `:assigned` FUYAIT à côté du
   # nouveau pending (invisible aux gardes — `find_active`/`max_by` la masquait sans la retirer). RED avant le
   # fix (`supersede_pending` gardait les `:assigned`) → 2 actives ; GREEN après (`supersede_active`) → 1.
@@ -441,13 +447,13 @@ defmodule Fleet.TaskQueueTest do
        %{
          q: q
        } do
-    {:ok, old} = TaskQueue.enqueue(q, "pod-Z", %{brief: "ancien mandat"})
+    {:ok, old} = TaskQueue.enqueue(q, "pod-Z", %{brief: "ancien work item"})
     # pull → l'ancien passe :assigned (le pod « travaille dessus »).
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-Z")
     assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-Z")
 
-    # RE-MANDATE : un nouveau mandat frais (re-dispatch forge) arrive PENDANT l'ancien :assigned.
-    {:ok, fresh} = TaskQueue.enqueue(q, "pod-Z", %{brief: "nouveau mandat"})
+    # RE-MANDATE : un nouveau work item frais (re-dispatch forge) arrive PENDANT l'ancien :assigned.
+    {:ok, fresh} = TaskQueue.enqueue(q, "pod-Z", %{brief: "nouveau work item"})
 
     tasks = :sys.get_state(q).tasks |> Map.values()
 
@@ -464,14 +470,14 @@ defmodule Fleet.TaskQueueTest do
     old_now = Enum.find(tasks, &(&1.id == old.id))
     assert old_now.state == :cleared
 
-    # Sémantique re-mandate validée : le pod prend le NOUVEAU mandat au prochain pull (seul actif restant).
+    # Sémantique re-mandate validée : le pod prend le NOUVEAU work item au prochain pull (seul actif restant).
     fresh_id = fresh.id
-    assert {:ok, %{brief: "nouveau mandat", id: ^fresh_id}} = TaskQueue.get_for_pod(q, "pod-Z")
+    assert {:ok, %{brief: "nouveau work item", id: ^fresh_id}} = TaskQueue.get_for_pod(q, "pod-Z")
 
-    # Et le vieux mandat ne peut plus muter la queue : son submit tombe sur une active = le frais
-    # (task_id mismatch) — jamais une complétion de l'ancien fantôme.
-    assert {:error, :task_id_mismatch} =
-             TaskQueue.submit_result(q, "pod-Z", %{"task_id" => old.id, "verdict" => "stale"})
+    # Et le vieux work item ne peut plus muter la queue : son submit tombe sur une active = le frais
+    # (work_item_id mismatch) — jamais une complétion de l'ancien fantôme.
+    assert {:error, :work_item_id_mismatch} =
+             TaskQueue.submit_result(q, "pod-Z", %{"work_item_id" => old.id, "verdict" => "stale"})
   end
 
   # MA-27 — `clear_for_pod` purge TOUTES les actives du pod (pas seulement la + récente via `find_active`).
@@ -487,7 +493,7 @@ defmodule Fleet.TaskQueueTest do
     # Injecte une 2e active (:assigned) pour le MÊME pod, en contournant supersede_active (qui en prod
     # garantit l'unicité) — on veut prouver que clear_for_pod ne LAISSE PAS de stale même s'il y en avait.
     :sys.replace_state(q, fn st ->
-      ghost = %Fleet.TaskQueue.Task{
+      ghost = %Fleet.TaskQueue.WorkItem{
         id: "ghost-uuid",
         pod_id: "pod-M",
         enqueued_at: DateTime.add(t1.enqueued_at, -60, :second),

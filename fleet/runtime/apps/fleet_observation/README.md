@@ -1,7 +1,7 @@
 # fleet_observation
 
 **Date** : 2026-06-10
-**Dernière révision** : 2026-06-24
+**Dernière révision** : 2026-07-01
 **Statut** : incréments A+B+C — BL-026 read-frontier live (PODS + read-model stream)
 **Référencé par** : —
 **Design** : `DESIGN-observabilite.md` (catalogue de l'observable + organisation LCARS)
@@ -41,7 +41,7 @@ no-auth, intra-release (ADR-C « 5-zéros ») : il observe, il ne mute rien.
 ## Les 7 decks (cf. DESIGN §4)
 
 `BRIDGE` (santé/readiness/quiescence) · `PODS` (cartes par rôle, **live**) ·
-`FLOW` (mandats + pipelines) · `GATEKEEPER` (escalades Z3-B + verdicts) ·
+`FLOW` (work items + pipelines) · `GATEKEEPER` (escalades Z3-B + verdicts) ·
 `COORDINATION` (Pilot/coord/MCP) · `STREAM` (tail `%Fleet.Event{}`) ·
 `DIAGNOSTICS` (boot/oauth/mcp/sdk/signal/git). `PODS` = snapshot live
 (`/api/pods`) ; les decks event-dérivés (FLOW/GATEKEEPER/COORDINATION/STREAM/

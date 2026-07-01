@@ -38,7 +38,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # Env vars MCP à propager au pod (consommés par bridge.py côté pod). `LCARS_POD_ID`
   # est TOUJOURS posé : nécessaire pour que bridge.py injecte `_lcars_pod_id` dans
   # chaque tool call MCP (corrélation côté central PodTools, filtrage TaskQueue.next_for).
-  # Sans ça le pod est anonyme — get_task ne retournerait QUE les untargeted (rate les
+  # Sans ça le pod est anonyme — get_work_item ne retournerait QUE les untargeted (rate les
   # tasks ciblées via wake_pod).
   #
   # `LCARS_ROLE` (= `metadata.name` du cap-profile = rôle métier) : bridge.py l'injecte en `_lcars_role`.
@@ -97,7 +97,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # `/var/lib/lcars` n'y est PAS monté. Lancer le bridge via son chemin HÔTE
   # (`/var/lib/lcars/bin/...py`) avec un log sous `/var/lib/lcars/` échouerait :
   # DANS le sandbox ce chemin n'existe pas → `bash -c` échoue → le serveur MCP
-  # `fleet` ne démarre jamais → le tool `mcp__fleet__get_task` n'est jamais chargé
+  # `fleet` ne démarre jamais → le tool `mcp__fleet__get_work_item` n'est jamais chargé
   # → l'agent improvise du curl et timeout. (Un tel bridge marche en test direct
   # car il tourne sur l'HÔTE, pas dans le sandbox.)
   #
@@ -117,7 +117,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # puller son brief ni de soumettre son résultat.
   #
   # Injecte `LCARS_POD_ID` ET `LCARS_FLEET_MCP_SOCKET` dans l'env du serveur (le bridge les lit pour
-  # corréler `get_task` au bon pod ET savoir SUR QUELLE socket parler au central ; ne pas dépendre de
+  # corréler `get_work_item` au bon pod ET savoir SUR QUELLE socket parler au central ; ne pas dépendre de
   # l'héritage env claude→bridge) et force `alwaysLoad:true` (sinon les tools MCP sont déférés derrière
   # ToolSearch, absents du prompt turn-1).
   #

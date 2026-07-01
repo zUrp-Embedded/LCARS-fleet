@@ -20,7 +20,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
   ## Cible
 
-  Le substrat pod-facing (`get_task`/`submit_result`) est servi par une socket
+  Le substrat pod-facing (`get_work_item`/`submit_result`) est servi par une socket
   AF_UNIX par pod, fan-out par le DynamicSupervisor `Fleet.MCP.PodSocketSupervisor`.
   On vérifie sa liveness par l'**arbre de supervision** : cible
   `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}` →

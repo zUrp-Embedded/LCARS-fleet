@@ -35,7 +35,7 @@ defmodule Fleet.MCP.PodSocketTest do
     %{base: base}
   end
 
-  test "round-trip get_task/submit_result via la socket per-pod" do
+  test "round-trip get_work_item/submit_result via la socket per-pod" do
     pod = uniq("p")
     nonce = "sock-#{System.unique_integer([:positive])}"
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: nonce})
@@ -46,19 +46,22 @@ defmodule Fleet.MCP.PodSocketTest do
     assert File.exists?(path)
 
     # Canal IN sur le fil socket.
-    assert {:ok, %{"done" => false, "task" => %{"brief" => ^nonce, "task_id" => tid}}} =
-             content(call(path, 1, "get_task", %{}))
+    assert {:ok, %{"done" => false, "work_item" => %{"brief" => ^nonce, "work_item_id" => tid}}} =
+             content(call(path, 1, "get_work_item", %{}))
 
     assert is_binary(tid)
 
-    # Canal OUT sur le fil socket (task_id REQUIS = celui rendu).
+    # Canal OUT sur le fil socket (work_item_id REQUIS = celui rendu).
     assert %{"result" => %{"content" => [%{"type" => "text"}]}} =
-             call(path, 2, "submit_result", %{"payload" => %{"answer" => nonce}, "task_id" => tid})
+             call(path, 2, "submit_result", %{
+               "payload" => %{"answer" => nonce},
+               "work_item_id" => tid
+             })
 
     assert {:ok, :completed} = TaskQueue.pod_status(pod)
 
     # Plus de brief actif → done.
-    assert {:ok, %{"done" => true}} = content(call(path, 3, "get_task", %{}))
+    assert {:ok, %{"done" => true}} = content(call(path, 3, "get_work_item", %{}))
   end
 
   test "accepteur CONCURRENT : une connexion ouverte-muette ne bloque pas les autres (anti-gel du pod)" do
@@ -80,7 +83,8 @@ defmodule Fleet.MCP.PodSocketTest do
     # kernel, jamais servie → `recv` timeout (le helper `call` lèverait à 5 s). Concurrent → B est servie
     # dans sa propre Task et répond. C'est la preuve directe du fix (le `serial.py` du forensics, en ExUnit) :
     # ce test ÉCHOUE si l'accepteur redevient inline, il PASSE avec une Task par connexion.
-    assert {:ok, %{"task" => %{"brief" => ^nonce}}} = content(call(path, 1, "get_task", %{}))
+    assert {:ok, %{"work_item" => %{"brief" => ^nonce}}} =
+             content(call(path, 1, "get_work_item", %{}))
   end
 
   test "l'identité EST le canal : un faux `_lcars_pod_id` dans les args est IGNORÉ" do
@@ -98,8 +102,8 @@ defmodule Fleet.MCP.PodSocketTest do
 
     # L'attaquant POST le pod_id de la victime dans les arguments — mais sa socket reste SA socket. Le
     # central ne lit JAMAIS le pod_id du wire → il sert le brief de l'accepteur (attacker), pas victim.
-    assert {:ok, %{"done" => false, "task" => %{"brief" => "le-brief-de-attacker"}}} =
-             content(call(apath, 1, "get_task", %{"_lcars_pod_id" => victim}))
+    assert {:ok, %{"done" => false, "work_item" => %{"brief" => "le-brief-de-attacker"}}} =
+             content(call(apath, 1, "get_work_item", %{"_lcars_pod_id" => victim}))
   end
 
   test "2 pods → chaque socket ne sert QUE son pod (séparation par canal)" do
@@ -116,8 +120,11 @@ defmodule Fleet.MCP.PodSocketTest do
       PodSocketSupervisor.release_pod_socket(pb)
     end)
 
-    assert {:ok, %{"task" => %{"brief" => "for-A"}}} = content(call(path_a, 1, "get_task", %{}))
-    assert {:ok, %{"task" => %{"brief" => "for-B"}}} = content(call(path_b, 1, "get_task", %{}))
+    assert {:ok, %{"work_item" => %{"brief" => "for-A"}}} =
+             content(call(path_a, 1, "get_work_item", %{}))
+
+    assert {:ok, %{"work_item" => %{"brief" => "for-B"}}} =
+             content(call(path_b, 1, "get_work_item", %{}))
   end
 
   test "ensure_pod_socket idempotent (même chemin) ; release ferme ET retire le fichier" do
@@ -141,14 +148,14 @@ defmodule Fleet.MCP.PodSocketTest do
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # Active le brief puis submit SANS task_id → :task_id_required → frame `result` avec isError:true
+    # Active le brief puis submit SANS work_item_id → :work_item_id_required → frame `result` avec isError:true
     # (une erreur d'outil est un résultat MCP, pas une erreur de protocole).
-    _ = call(path, 1, "get_task", %{})
+    _ = call(path, 1, "get_work_item", %{})
 
     assert %{"result" => %{"isError" => true, "content" => [%{"text" => txt}]}} =
              call(path, 2, "submit_result", %{"payload" => %{"x" => 1}})
 
-    assert txt =~ "task_id_required"
+    assert txt =~ "work_item_id_required"
   end
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
@@ -172,6 +179,6 @@ defmodule Fleet.MCP.PodSocketTest do
     Jason.decode!(line)
   end
 
-  # Décode le JSON du premier bloc text d'un résultat tool (le payload métier get_task/submit_result).
+  # Décode le JSON du premier bloc text d'un résultat tool (le payload métier get_work_item/submit_result).
   defp content(%{"result" => %{"content" => [%{"text" => t} | _]}}), do: Jason.decode(t)
 end

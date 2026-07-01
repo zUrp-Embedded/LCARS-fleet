@@ -75,12 +75,12 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   end
 
   # SP draft minimal — déclare le rôle agent worker + workflow yop →
-  # get_task → submit_result + convention de retour (ok|failed). Le SP
+  # get_work_item → submit_result + convention de retour (ok|failed). Le SP
   # final par rôle est un chantier séparé.
   # Draft SP role-aware : le draft d'un rôle est `agent-<role>-base.md` s'il
   # EXISTE, sinon le draft worker générique. Convention catalogue (le draft suit le `metadata.name`),
   # plus de rôle gravé en `case` : l'architecte tombe sur son draft délégateur (qualité+économie +
-  # create_ticket), tout rôle sans draft dédié sur le draft worker (get_task/submit_result). `role`
+  # create_ticket), tout rôle sans draft dédié sur le draft worker (get_work_item/submit_result). `role`
   # est interpolé dans un path (`agent-<role>-base.md`) → validé via le smart-constructor slug
   # (source unique du charset path-safe ; un `role` malformé retombe juste sur le draft par défaut).
   def read_agent_draft(%Fleet.CapProfile{} = cap) do
@@ -191,12 +191,12 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     """
   end
 
-  # Enqueue le brief dans la TaskQueue (le canal CANONIQUE `get_task`), idempotent :
+  # Enqueue le brief dans la TaskQueue (le canal CANONIQUE `get_work_item`), idempotent :
   #   - pas de brief (pod permanent/interactif booté à froid) → rien à puller → bootstrap (skip) ;
   #   - brief DÉJÀ en file (`pod_status != {:ok, nil}` : dispatch stage, StageDispatcher a enqueué AVANT
   #     le spawn) → pas de double-enqueue (skip) ;
   #   - sinon (`admin.spawn` / `lcars spawn --brief` : aucun dispatcher) → on enqueue ici, sinon
-  #     `get_task` rend `{done:true}` et le pod reste idle (cf. StageDispatcher.enqueue_brief).
+  #     `get_work_item` rend `{done:true}` et le pod reste idle (cf. StageDispatcher.enqueue_brief).
   # Mirror des `attrs` de StageDispatcher (`ticket_id`/`role`/`brief`/`metadata`).
   def maybe_enqueue_brief(state) do
     brief = Keyword.get(state.opts || [], :brief)

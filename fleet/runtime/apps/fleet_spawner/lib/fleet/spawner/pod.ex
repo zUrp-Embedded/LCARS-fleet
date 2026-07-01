@@ -44,7 +44,7 @@ defmodule Fleet.Spawner.Pod do
   ## Timers NATIFS (plus de timer maison)
 
   - `:result_deadline` = **state_timeout de `:monitoring`** : annulé AUTOMATIQUEMENT en
-    quittant `:monitoring` (la transition `:monitoring → :extracting` sur `task_completed`
+    quittant `:monitoring` (la transition `:monitoring → :extracting` sur `work_item_completed`
     réalise nativement l'invariant « le deadline est annulé à l'arrivée du résultat »).
   - `:liveness` = **generic timeout** récurrent en `:monitoring` (ré-arme le deadline si le
     pod a bougé).
@@ -83,7 +83,7 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.SPBuilder
 
   # Complétion event-driven : le résultat arrive via l'event Bus
-  # `task_queue.task_completed` (%Fleet.Event{}, émis par le central sur submit_result), PAS via un fichier.
+  # `task_queue.work_item_completed` (%Fleet.Event{}, émis par le central sur submit_result), PAS via un fichier.
 
   @type state_name ::
           :allocating
@@ -122,7 +122,7 @@ defmodule Fleet.Spawner.Pod do
           opts: keyword(),
           # Port owné par le Pod (détection exit + kill en RELEASE).
           port: port() | nil,
-          # Résultat reçu via l'event Bus task_queue.task_completed (%Fleet.Event{}, complétion).
+          # Résultat reçu via l'event Bus task_queue.work_item_completed (%Fleet.Event{}, complétion).
           submitted_result: map() | nil,
           last_result: map() | nil,
           # Nom de la session tmux du pod (`lcars-pod-<id>` sur le sock PAR-POD, posé par
@@ -248,7 +248,7 @@ defmodule Fleet.Spawner.Pod do
   # PROJECT — toutes les I/O dans la chaîne `with` (non-bang) → erreur propagée → transition_failed
   # clean (state.json phase=failed écrit). Modèle ticket-driven : le brief est écrit en
   # `tickets/<ticket_id>.md` (lu comme contenu projet, pas comme injection-prompt) ET pushé en
-  # TaskQueue (le pod PULL via le tool MCP get_task, déclenché par le mot-clé `yop`).
+  # TaskQueue (le pod PULL via le tool MCP get_work_item, déclenché par le mot-clé `yop`).
   def handle_event(:internal, :proceed, :projecting, data) do
     skills_root = Application.get_env(:fleet_spawner, :skills_root, nil)
     repo_md = Path.join(data.pod_dir, "CLAUDE.md.repo-source")
@@ -291,8 +291,8 @@ defmodule Fleet.Spawner.Pod do
              Scaffold.default_brief(data)
            ),
          # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du brief est la
-         # TaskQueue (`get_task`). Idempotent (skip si déjà en file). Sans cet enqueue, un
-         # `admin.spawn` (sans dispatcher) verrait `get_task` rendre `{done:true}` → pod idle.
+         # TaskQueue (`get_work_item`). Idempotent (skip si déjà en file). Sans cet enqueue, un
+         # `admin.spawn` (sans dispatcher) verrait `get_work_item` rendre `{done:true}` → pod idle.
          :ok <- Scaffold.maybe_enqueue_brief(data),
          # Provisionne la socket MCP per-pod AVANT le launch (le bind bwrap échoue si le fichier
          # socket n'existe pas encore). Échec → propagé au `with` → transition_failed.
@@ -558,7 +558,7 @@ defmodule Fleet.Spawner.Pod do
     # du REPL — borné et ESPACÉ. Un worker (brief enqueué au spawn) garde le kick fréquent jusqu'au pull.
     bootstrap? = TaskProbe.no_pending_brief?(data.pod_id)
 
-    # polled? = l'agent a déjà appelé get_task (ACK in-band). Calculé 1× : sert au bootstrap-stop ET
+    # polled? = l'agent a déjà appelé get_work_item (ACK in-band). Calculé 1× : sert au bootstrap-stop ET
     # au choix du mot-clé (pas encore pollé = bootstrap-arm "yop" ; déjà pollé = pod running → "wake").
     polled = TaskProbe.polled?(data)
     cap = if bootstrap?, do: Kick.kick_bootstrap_max(), else: Kick.kick_max_attempts()
@@ -606,7 +606,7 @@ defmodule Fleet.Spawner.Pod do
   # Évènements Port / Bus (event type :info) + catch-all
   # ============================================================
   #
-  # Complétion event-driven : le broker fleet_task_queue broadcast %Fleet.Event{task_completed} sur
+  # Complétion event-driven : le broker fleet_task_queue broadcast %Fleet.Event{work_item_completed} sur
   # fleet.events. On ne réagit qu'au NÔTRE (pod_id) en :monitoring. Le résultat est arrivé → la
   # transition :monitoring → :extracting ANNULE NATIVEMENT le state_timeout :result_deadline (= l'invariant
   # result_deadline_cancelled) ; on annule en plus le generic timeout :liveness (lui ne s'annule pas
@@ -614,7 +614,12 @@ defmodule Fleet.Spawner.Pod do
   # l'event) → le livrable est attribué à la BONNE brique (sinon le 2e livrable écrase la branche/PR du 1er).
   def handle_event(
         :info,
-        %Fleet.Event{source: :task_queue, type: :task_completed, pod_id: pid, payload: payload},
+        %Fleet.Event{
+          source: :task_queue,
+          type: :work_item_completed,
+          pod_id: pid,
+          payload: payload
+        },
         :monitoring,
         %{pod_id: pid} = data
       ) do
@@ -629,10 +634,10 @@ defmodule Fleet.Spawner.Pod do
      [cancel_liveness_action(), {:next_event, :internal, :proceed}]}
   end
 
-  # %Fleet.Event{task_completed} d'un autre pod, ou hors :monitoring → ignore.
+  # %Fleet.Event{work_item_completed} d'un autre pod, ou hors :monitoring → ignore.
   def handle_event(
         :info,
-        %Fleet.Event{source: :task_queue, type: :task_completed},
+        %Fleet.Event{source: :task_queue, type: :work_item_completed},
         _state,
         _data
       ),
@@ -657,7 +662,7 @@ defmodule Fleet.Spawner.Pod do
   def handle_event(:info, %Fleet.Event{type: :"deliverable.published"}, _state, _data),
     do: :keep_state_and_data
 
-  # Cycle de vie du Port : si le résultat a été extrait (event task_completed reçu → :output_extracted),
+  # Cycle de vie du Port : si le résultat a été extrait (event work_item_completed reçu → :output_extracted),
   # l'exit est l'arrêt normal post-release. Sinon le process est mort SANS soumettre de résultat → échec.
   def handle_event(:info, {port, {:exit_status, exit_code}}, _state, %{port: port} = data)
       when is_port(port) do
@@ -756,7 +761,7 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # Le 1er send-keys sera `yop` (bootstrap) ; le SP `agent-worker-base.md` porte le workflow
-  # get_task→submit_result. Pas de tmux_session (StubBackend/kill race) → aucune action.
+  # get_work_item→submit_result. Pas de tmux_session (StubBackend/kill race) → aucune action.
   defp brief_kick_actions(%{tmux_session: nil}), do: []
 
   defp brief_kick_actions(%{tmux_session: session}) when is_binary(session),
@@ -1106,7 +1111,7 @@ defmodule Fleet.Spawner.Pod do
   defp publish_deadline_ms,
     do: Application.get_env(:fleet_spawner, :publish_deadline_ms, 120_000)
 
-  # SLOT-FREEZE : adopte le ticket_id de la tache complétée (de l'event task_completed) comme ticket
+  # SLOT-FREEZE : adopte le ticket_id de la tache complétée (de l'event work_item_completed) comme ticket
   # courant du pod. Un pipe re-brief change de brique a chaque tache ; sans ca state.ticket_id
   # resterait celui du spawn -> toutes les attributions pointeraient la 1ere brique. Absent/vide ->
   # on garde l'existant.

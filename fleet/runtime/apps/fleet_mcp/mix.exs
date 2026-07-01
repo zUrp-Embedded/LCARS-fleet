@@ -45,7 +45,7 @@ defmodule Fleet.MCP.MixProject do
     # ex_mcp : SDK MCP/ACP Elixir, multi-transport (stdio/HTTP-SSE/BEAM) — wrap opaque
     #          via Fleet.MCP.PodTools (`use ExMCP.Server`, bascule Hermes possible).
     # phoenix_pubsub : bus interne (fan-out broadcast — PAS via GenServer, anti-goulot OTP).
-    # jason : encode/decode JSON des payloads d'outils MCP (get_task/submit_result).
+    # jason : encode/decode JSON des payloads d'outils MCP (get_work_item/submit_result).
     # jose : pin override 1.11.10 — ex_mcp tire jose transitivement à 1.11.12 qui
     #        exige OTP27 (`dynamic()` undefined), or env = OTP25. 1.11.10 =
     #        dernière révision OTP25-compatible. Sanctionné starfleet #551
@@ -60,8 +60,8 @@ defmodule Fleet.MCP.MixProject do
       # fleet_event_router : Bus + Fleet.Event + Fleet.PubSub (Ring 0). Déjà en
       #   extra_applications (ordering OTP boot) ; ici en dep compile-time. Ring 4→0, pas de cycle.
       {:fleet_event_router, in_umbrella: true},
-      # fleet_task_queue : le broker d'orchestration que PodTools sert via get_task/submit_result
-      #   (drive métier ADR-G ; le broker broadcast lui-même %Fleet.Event{task_completed}).
+      # fleet_task_queue : le broker d'orchestration que PodTools sert via get_work_item/submit_result
+      #   (drive métier ADR-G ; le broker broadcast lui-même %Fleet.Event{work_item_completed}).
       #   Ring 4→Ring 2 (fleet_mcp sert la queue, n'orchestre pas — DN drive/mcp-server §E). Pas de cycle.
       {:fleet_task_queue, in_umbrella: true},
       # fleet_credentials : Fleet.Credentials.RoleToken — token forge du compte de rôle, pour que

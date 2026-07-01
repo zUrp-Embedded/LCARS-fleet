@@ -5,7 +5,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   Quatre questions best-effort que le cœur du `Pod` (handler de kick, deadline de réponse, enqueue de
   brief) pose au broker pour DÉCIDER, sans jamais porter d'état ni de timer :
 
-  - `polled?/1` — l'agent a-t-il déjà appelé `get_task` (ACK in-band réel, `last_poll`) ? Stoppe le kick
+  - `polled?/1` — l'agent a-t-il déjà appelé `get_work_item` (ACK in-band réel, `last_poll`) ? Stoppe le kick
     bootstrap dès que le REPL répond. Prend le `state` (lit `state.pod_id`).
   - `pod_has_active_task?/1` — le pod a-t-il une task ACTIVE (`pending|assigned|in_progress`) là, maintenant ?
     Au fire de `:result_deadline` : oui = vrai timeout de réponse (kill) ; non = idle, on laisse lapser.
@@ -29,7 +29,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   - `no_pending_brief?/1` — détection bootstrap (handler) + gate de `maybe_enqueue_brief`.
   """
 
-  # L'agent a-t-il POLLÉ (appelé get_task) ? = ACK in-band RÉEL : l'agent a tendu la main via l'API
+  # L'agent a-t-il POLLÉ (appelé get_work_item) ? = ACK in-band RÉEL : l'agent a tendu la main via l'API
   # officielle (last_poll, tracké par le TaskQueue), pas un proxy host-side comme un
   # `pgrep watch.sh` (« le process existe » ≠ « l'agent agit »). Sert à stopper le kick bootstrap dès que
   # l'agent est up.
@@ -66,7 +66,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
     do: match?({:ok, s} when s in [:pending, :assigned, :in_progress], safe_pod_status(pod_id))
 
   # Le brief est-il déjà pull par le pod ? « Pull » = la task est dans un état qui
-  # PROUVE que claude a appelé get_task : `:assigned | :in_progress | :completed`.
+  # PROUVE que claude a appelé get_work_item : `:assigned | :in_progress | :completed`.
   # Volontairement PAS : `:pending`/`nil` (pas encore pull / pas encore enqueué — on
   # continue de kicker, ce qui couvre aussi la race spawn↔enqueue), ni `:cleared`/`:failed`
   # (kill délibéré / deadline broker — le pod n'a rien pull, ne PAS arrêter le kick sur

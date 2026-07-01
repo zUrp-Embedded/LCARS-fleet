@@ -4,7 +4,7 @@ defmodule Fleet.Spawner.Pod.Kick do
 
   La boucle de kick réveille le REPL claude d'un pod fraîchement lancé (mot-clé `yop` bootstrap) ou
   re-déclenche un pull de brief resté en attente (mot-clé `wake` fallback), jusqu'à ce que l'agent
-  ACKE (il a tendu la main via get_task). Ce module porte les TROIS pièces sans état du tick :
+  ACKE (il a tendu la main via get_work_item). Ce module porte les TROIS pièces sans état du tick :
 
   - **les bornes/cadences** (`kick_first_delay_ms`, `kick_retry_ms`, `kick_max_attempts`,
     `kick_bootstrap_max`, `kick_bootstrap_retry_ms`) : config `:fleet_spawner` lue à chaque tick ;
@@ -43,7 +43,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   alias Fleet.Spawner.PodTmux
 
   # Kick AUTONOME « yop » readiness-gated. Déclenche le pull du brief
-  # par MCP get_task — le brief n'est PAS injecté (il vit dans tickets/ + TaskQueue).
+  # par MCP get_work_item — le brief n'est PAS injecté (il vit dans tickets/ + TaskQueue).
   # No-op si pas de tmux_session (StubBackend ; LauncherPortBackend en pose un, bwrap ou host).
   #
   # Pourquoi pas un délai FIXE : le claude REPL n'est pas prêt à un instant connu — il
@@ -58,7 +58,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   def kick_max_attempts, do: Application.get_env(:fleet_spawner, :kick_max_attempts, 12)
 
   # Bootstrap (pod sans brief) : kicks BORNÉS + ESPACÉS jusqu'à ce que le REPL claude réponde (appel
-  # get_task = ack). La fenêtre doit couvrir le COLD-START réel de claude en bwrap (binaire ~238 MB,
+  # get_work_item = ack). La fenêtre doit couvrir le COLD-START réel de claude en bwrap (binaire ~238 MB,
   # caches froids, contention multi-fleet) : un défaut trop court (≈32s, calé sur un boot ~15s)
   # verrait tous les kicks tomber avant REPL prêt → pod jamais onboardé. D'où 30×8s ≈ 4 min : couvre
   # le cold-start, et le deadline résultat se RÉ-ARME sur activité (donc dès le brief reçu, plus de
@@ -71,10 +71,10 @@ defmodule Fleet.Spawner.Pod.Kick do
   @doc false
   # ACK (décision PURE, testable) = l'agent a tendu la main. C'est LE contrôle de la boucle :
   # pas d'ACK → on (re)trigger ; ACK → stop ; cap sans ACK → escalade. Wake → `pulled?` (brief_pulled? :
-  # le pull PROUVE get_task) ; bootstrap (permanent sans brief) → `polled` (last_poll = up + SP lu).
+  # le pull PROUVE get_work_item) ; bootstrap (permanent sans brief) → `polled` (last_poll = up + SP lu).
   def acked?(pulled?, bootstrap?, polled), do: pulled? or (bootstrap? and polled)
 
-  # Mot-clé du kick selon `polled` (= l'agent a déjà appelé get_task) :
+  # Mot-clé du kick selon `polled` (= l'agent a déjà appelé get_work_item) :
   #   - pas encore pollé → `"yop"` : bootstrap-arm, IRRÉDUCTIBLE (seul moyen de démarrer/armer l'agent) ;
   #   - déjà pollé (pod running) → `"wake"` : FALLBACK (le porteur/flag aurait dû livrer), GATÉ par
   #     `:wake_send_keys` (off ⇒ flag-only : on valide le Monitor en isolation, pas de fallback).
@@ -88,7 +88,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   end
 
   @doc false
-  # Décision PURE du mot-clé (testable). `polled` = l'agent a déjà appelé get_task ; `fallback_on?` = knob
+  # Décision PURE du mot-clé (testable). `polled` = l'agent a déjà appelé get_work_item ; `fallback_on?` = knob
   # `:wake_send_keys`. `nil` ⇒ pas de send-keys (flag-only). Le `"yop"` (bootstrap) n'est JAMAIS gaté.
   def kick_keyword(polled, fallback_on?) do
     cond do
