@@ -22,8 +22,8 @@
 # devinable → il fallait alors présenter une capability secrète dans les args ; la socket per-pod ferme
 # ce trou par construction — il n'y a plus rien à présenter, le canal discrimine.)
 #
-# Transport-shim mono-thread, tools-only (get_task IN / submit_result OUT). Le push channel a été
-# retiré — drive 100% par pull `get_task`.
+# Transport-shim mono-thread, tools-only (get_work_item IN / submit_result OUT). Le push channel a été
+# retiré — drive 100% par pull `get_work_item`.
 #
 # ENV :
 #   LCARS_FLEET_MCP_SOCKET : chemin de la socket AF_UNIX du central pour CE pod (un fichier socket
@@ -105,12 +105,12 @@ def central_call(method, params):
 # inexistant pour lui (rien à interdire, rien à ré-autoriser). Pas de champ allowlist : le rôle EST
 # la surface. (alwaysLoad — visibilité hors-déferral — est porté par .mcp-fleet.json.)
 
-# Base — tout pod EST un task-worker : pull get_task IN / push submit_result OUT.
+# Base — tout pod EST un task-worker : pull get_work_item IN / push submit_result OUT.
 BASE_TOOLS = [
     {
-        "name": "get_task",
+        "name": "get_work_item",
         "description": "Recupere ta prochaine tache aupres du fleet LCARS. Retourne {\"done\":true} "
-                       "quand il n'y a plus de tache (tu t'arretes alors), sinon {\"done\":false,\"task\":{...}}.",
+                       "quand il n'y a plus de tache (tu t'arretes alors), sinon {\"done\":false,\"work_item\":{...}}.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -124,23 +124,23 @@ BASE_TOOLS = [
     },
 ]
 
-# Délégateur — l'ARCHITECTE EST celui qui ONBOARDE (create_project), DÉLÈGUE (create_ticket) et SUIT
-# l'avancement (get_ticket_status). Ces tools n'existent QUE dans son monde ; un worker/juge ne les
+# Délégateur — l'ARCHITECTE EST celui qui ONBOARDE (create_project), DÉLÈGUE (create_issue) et SUIT
+# l'avancement (get_issue_status). Ces tools n'existent QUE dans son monde ; un worker/juge ne les
 # voit pas du tout. tools/call forwarde au central (qui porte la logique : assignee=humain, etc.).
 ARCHITECT_TOOLS = [
     {
-        "name": "create_ticket",
-        # MA-19 : schéma SYNCHRONISÉ avec le central (apps/fleet_mcp/.../pod_tools.ex `create_ticket`).
+        "name": "create_issue",
+        # MA-19 : schéma SYNCHRONISÉ avec le central (apps/fleet_mcp/.../pod_tools.ex `create_issue`).
         # `project` est OBLIGATOIRE côté central (refus structurel sans lui — F-TICKET-ROUTE-FOOTGUN : pas de
         # routage par défaut, jamais de misroute silencieux). Le bridge l'exposait SANS `project` → l'arch
         # lisait un schéma stale, omettait `project`, et le central refusait. Toute évolution du schéma
         # central se reflète ICI (sync cross-langage Python↔Elixir manuelle — outil LAN, pas de dérivation).
-        "description": "Delegue une brique d'implementation a la fleet LCARS : cree un ticket (issue forge) "
+        "description": "Delegue une brique d'implementation a la fleet LCARS : cree une issue forge "
                        "pret pour la livraison forge-native (engineer -> PR -> review -> merge). Utilise-le pour "
                        "DELEGUER plutot que de coder toi-meme (la fleet livre mieux et preserve ton contexte). "
-                       "`brief` = le mandat clair pour l'engineer. `project` = le repo `owner/name` OU LIVRER, "
+                       "`brief` = le brief clair pour l'engineer. `project` = le repo `owner/name` OU LIVRER, "
                        "OBLIGATOIRE : le repo retourne par `create_project`, ou le projet designe par l'humain. "
-                       "Sans `project`, le ticket est REFUSE (jamais de misroute silencieux vers un autre projet).",
+                       "Sans `project`, l'issue est REFUSEE (jamais de misroute silencieux vers un autre projet).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -157,7 +157,7 @@ ARCHITECT_TOOLS = [
                        "(/home/projects/<name> sur main, /home/projects.work/<name> sur work/ops) + le "
                        "scaffold de base, et le pousse. Utilise-le quand l'humain veut LANCER un projet "
                        "neuf. `name` = slug kebab-case. Le projet cree devient la cible de delegation : "
-                       "enchaine ensuite create_ticket pour l'implementation.",
+                       "enchaine ensuite create_issue pour l'implementation.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -169,11 +169,11 @@ ARCHITECT_TOOLS = [
         },
     },
     {
-        "name": "get_ticket_status",
-        "description": "Consulte l'etat d'un ticket delegue (issue + PR liee) du projet courant : "
+        "name": "get_issue_status",
+        "description": "Consulte l'etat d'un issue delegue (issue + PR liee) du projet courant : "
                        "issue ouverte/fermee, PR mergee ou non, verdicts de review par juge. Utilise-le "
-                       "pour SUIVRE un ticket avant d'enchainer — ex: valider la livraison (PR mergee) du "
-                       "ticket N AVANT de poster le ticket N+1. `number` = le numero d'issue (ex: 1).",
+                       "pour SUIVRE un issue avant d'enchainer — ex: valider la livraison (PR mergee) du "
+                       "issue N AVANT de poster le issue N+1. `number` = le numero d'issue (ex: 1).",
         "inputSchema": {
             "type": "object",
             "properties": {"number": {"type": "integer"}},

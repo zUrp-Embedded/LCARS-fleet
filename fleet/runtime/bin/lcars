@@ -40,7 +40,7 @@ usage() {
 $PROG — CLI opérateur fleet LCARS v2
 
 USAGE
-  $PROG spawn <role> [--ticket <id>] [--mandate <texte>]
+  $PROG spawn <role> [--issue <id>] [--brief <texte>]
       Demande au daemon de lancer un pod du rôle <role> (= nom de cap-profile,
       ex: architect, engineer, consultant). Dispatch ASYNC → vérifier
       avec « $PROG list ». NB : les rôles boot_at_start (arch) démarrent seuls au
@@ -65,7 +65,7 @@ EOF
 # --- spawn -----------------------------------------------------------------
 
 cmd_spawn() {
-  local role="" ticket="" mandate="" have_mandate=0
+  local role="" issue="" brief="" have_brief=0
   [[ $# -ge 1 && "$1" != --* ]] || die "spawn: rôle requis (ex: $PROG spawn architect)"
   role="$1"; shift
   # Rôle = slug cap-profile (anti-injection JSON quand jq absent).
@@ -73,27 +73,29 @@ cmd_spawn() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --ticket) ticket="${2:?--ticket exige une valeur}"; shift 2 ;;
-      --mandate) mandate="${2:?--mandate exige une valeur}"; have_mandate=1; shift 2 ;;
+      --issue) issue="${2:?--issue exige une valeur}"; shift 2 ;;
+      --brief) brief="${2:?--brief exige une valeur}"; have_brief=1; shift 2 ;;
       *) die "spawn: argument inconnu '$1'" ;;
     esac
   done
-  [[ -z "$ticket" || "$ticket" =~ ^[A-Za-z0-9._-]+$ ]] || die "spawn: --ticket '$ticket' invalide"
+  [[ -z "$issue" || "$issue" =~ ^[A-Za-z0-9._-]+$ ]] || die "spawn: --issue '$issue' invalide"
 
-  # Payload JSON. Champ mandate = texte libre → jq pour un échappement correct ; sinon printf (slugs sûrs).
+  # Payload JSON. Champ brief = texte libre → jq pour un échappement correct ; sinon printf (slugs sûrs).
   local payload
-  if [[ "$have_mandate" -eq 1 ]]; then
-    command -v jq >/dev/null 2>&1 || die "spawn: --mandate exige jq (échappement JSON du texte libre)"
-    payload="$(jq -nc --arg r "$role" --arg t "$ticket" --arg m "$mandate" \
-      '{cap_profile_name:$r} + (if $t=="" then {} else {ticket_id:$t} end) + {opts:{mandate:$m}}')"
-  elif [[ -n "$ticket" ]]; then
-    payload="$(printf '{"cap_profile_name":"%s","ticket_id":"%s"}' "$role" "$ticket")"
+  if [[ "$have_brief" -eq 1 ]]; then
+    command -v jq >/dev/null 2>&1 || die "spawn: --brief exige jq (échappement JSON du texte libre)"
+    payload="$(jq -nc --arg r "$role" --arg t "$issue" --arg m "$brief" \
+      '{cap_profile_name:$r} + (if $t=="" then {} else {issue_id:$t} end) + {brief:$m}')"
+  elif [[ -n "$issue" ]]; then
+    payload="$(printf '{"cap_profile_name":"%s","issue_id":"%s"}' "$role" "$issue")"
   else
     payload="$(printf '{"cap_profile_name":"%s"}' "$role")"
   fi
 
-  # NB opts : la map JSON est convertie en keyword côté Elixir (to_keyword/1) via String.to_existing_atom
-  # → seules les clés dont l'atome est déjà chargé passent (`mandate` l'est). Une clé inconnue est ignorée.
+  # NB contrat : `/api/admin/spawn` n'accepte qu'un DTO PLAT allowlisté (`cap_profile_name` + `issue_id`
+  # + `brief`) — PAS d'`opts` brut : toute clé hors allowlist (y compris un `opts` fourni par le client)
+  # fait échouer le spawn en 422. L'API reconstruit elle-même l'`opts` interne du spawner à partir de
+  # `brief` (cf. rest.ex `parse_admin_spawn_dto` / `build_admin_opts`).
   local body http
   # curl SANS -f : un 4xx/5xx ne fait pas échouer curl (on lit le code via -w) ; seul un échec réseau
   # (exit ≠ 0) déclenche le `|| die`. stderr → /dev/null (on donne notre propre message), stdout = corps + code.

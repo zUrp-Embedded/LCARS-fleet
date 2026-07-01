@@ -9,12 +9,12 @@
 # Déroule la DN `beyond_#5/design-notes/spawn/launcher-claude.md` (PROMOTED 9/10,
 # validation user 2026-05-30, amendement M.F.5 2026-05-31 : RC-at-startup = flag
 # `--remote-control` PROVEN sous PTY). Supersède le modèle `script(1)`-PTY one-shot
-# (mandat = prompt CLI) — interdit par ADR-G IV.1/IV.2.
+# (brief = prompt CLI) — interdit par ADR-G IV.1/IV.2.
 #
 # Invoqué comme COMMAND par un launcher N0 — `bin/bwrap_launch.sh` (containment: bwrap)
 # OU `bin/host_launch.sh` (containment: none, host sans sandbox — LAUNCH-Q). Le PTY est
 # celui de tmux (fourni par le launcher N0) — ce launcher NE tient PLUS le PTY (plus de
-# `script -q`/inner-script) et NE porte PLUS le mandat (il arrive par MCP get_task).
+# `script -q`/inner-script) et NE porte PLUS le brief (il arrive par MCP get_work_item).
 # Containment + tmux + socket-par-pod = N0. Auth = claudeDir natif Anthropic (bind RW sous
 # bwrap ; HOME = home humain réel sous host), zéro env OAuth en mode :bind.
 #
@@ -181,10 +181,10 @@ dbg "step claude.json provisionné (VER=${VER:-?}, remoteControlAtStartup=$RC_ST
 
 ALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.allowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq allowedTools fail rc=$? out=$ALLOWED_TOOLS"; exit 1; }
 DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq disallowedTools fail rc=$? out=$DISALLOWED_TOOLS"; exit 1; }
-# #kill-yolo : protocole MCP fleet UNIVERSEL (tout pod fait get_task/submit_result) → append à l'allowlist.
+# #kill-yolo : protocole MCP fleet UNIVERSEL (tout pod fait get_work_item/submit_result) → append à l'allowlist.
 # En --permission-mode default, un tool MCP non listé PROMPTE (« Do you want to proceed? ») → hang headless.
-# (Les MCP role-specific — create_*/get_ticket_status de l'arch — restent au cap-profile.)
-ALLOWED_TOOLS="${ALLOWED_TOOLS:+$ALLOWED_TOOLS,}mcp__fleet__get_task,mcp__fleet__submit_result"
+# (Les MCP role-specific — create_*/get_issue_status de l'arch — restent au cap-profile.)
+ALLOWED_TOOLS="${ALLOWED_TOOLS:+$ALLOWED_TOOLS,}mcp__fleet__get_work_item,mcp__fleet__submit_result"
 dbg "step jq tools OK allowed='$ALLOWED_TOOLS' disallowed='$DISALLOWED_TOOLS'"
 
 # Mode permission (#kill-yolo) : override env (host) sinon `cap-profile.spec.invocation.permission_mode`,
@@ -298,7 +298,7 @@ dbg "step session flags : ${SESSION_FLAGS[*]}"
 
 # =============================================================
 # exec claude INTERACTIF marionnette-PTY (ADR-G). PAS -p, PAS stream-json, PAS budget, PAS de
-# prompt positionnel (mandat = MCP get_task, IV.4). PAS de script(1)/inner-script : le PTY est
+# prompt positionnel (brief = MCP get_work_item, IV.4). PAS de script(1)/inner-script : le PTY est
 # tmux (bwrap_launch, N0) ⇒ exec direct = argv propre de bout en bout (lève F-1b-04). RC-at-startup
 # = flag --remote-control (PROVEN sous PTY 2026-05-31 ; accepté silencieusement hors --help ; sans
 # TTY le binaire bascule en --print-like — le PTY tmux assure le mode interactif RC).

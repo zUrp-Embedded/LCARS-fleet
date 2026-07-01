@@ -337,7 +337,7 @@ if config_env() != :test do
   end
 
   # #8 cohérence : plus de routing par label (`LCARS_PILOT_STAGE_ROUTING` retiré). Le routing vit dans la
-  # route-comment, gravée par `create_ticket` (carte de délégation, défaut mandate-gate). type:* = visu.
+  # route-comment, gravée par `create_issue` (carte de délégation, défaut brief-gate). type:* = visu.
 
   # F-037 : `LCARS_HOP_REMOTE` retiré — le remote de push n'est plus un URL fixe (incompatible multi-projet) ;
   # il est PER-STEP-RUN, dérivé du `repo_path` du projet et embarqué dans l'event `pod.completed` (cf.
@@ -416,9 +416,9 @@ if config_env() != :test do
       System.get_env("LCARS_SEED_STORE_ROOT") ||
         Path.join(System.user_home() || "/var/lib/lcars", ".lcars/seeds")
 
-  # Kick d'onboarding du pod (nudge `yop` → claude appelle get_task). La fenêtre par défaut
+  # Kick d'onboarding du pod (nudge `yop` → claude appelle get_work_item). La fenêtre par défaut
   # (first 2s + 12×2.5s ≈ 32s) est trop courte face au cold-start claude en bwrap sur le service
-  # déployé (binaire 238MB, caches froids) → kick abandonné avant REPL prêt → pod sans mandat.
+  # déployé (binaire 238MB, caches froids) → kick abandonné avant REPL prêt → pod sans brief.
   # Élargir en deploy. Entiers via env.
   if v = System.get_env("LCARS_KICK_FIRST_DELAY_MS"),
     do: config(:fleet_spawner, kick_first_delay_ms: parse_int.("LCARS_KICK_FIRST_DELAY_MS", v))

@@ -8,7 +8,7 @@
 #
 # Émet UNE ligne stdout ("ton tour") chaque fois que la fleet écrit un token frais dans
 # le flag (wake-par-flag, zéro send-keys de contenu — ADR-G : send-keys = kick + slash
-# seulement). L'outil Monitor transforme chaque ligne en réveil de l'agent → get_task (MCP).
+# seulement). L'outil Monitor transforme chaque ligne en réveil de l'agent → get_work_item (MCP).
 set -uo pipefail
 FLAG="${1:?usage: watch.sh <flagfile>}"
 last=""

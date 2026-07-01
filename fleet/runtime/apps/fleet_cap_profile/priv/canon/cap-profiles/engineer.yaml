@@ -81,13 +81,13 @@ spec:
     effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
     # subagent_template null : l'engineer exécute son brief DIRECTEMENT
-    # (get_task → travail → submit_result via tools MCP), pas via un subagent
+    # (get_work_item → travail → submit_result via tools MCP), pas via un subagent
     # dispatché. Note : `lifetime_scope: pipe` ⟹ réintroduire un subagent_template `implementer`
     # VIOLERAIT G24-11 (subagent_template ⟹ one-shot) ; on reste sur l'exécution directe (plus simple).
     # Pattern subagent fire-mode-quick → cap-profile séparé.
     subagent_template: null
     # `fleet-forge.engineer` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4) : l'engineer
-    # n'a aucun canal d'écriture forge. Il lit son brief / rend son livrable via MCP get_task/
+    # n'a aucun canal d'écriture forge. Il lit son brief / rend son livrable via MCP get_work_item/
     # submit_result (le runtime fait commit/comment/PATCH côté système). fleet-control = Memory-X/coord.
     mcp_channels: ["fleet-control.engineer.*"]
     host_native: false
