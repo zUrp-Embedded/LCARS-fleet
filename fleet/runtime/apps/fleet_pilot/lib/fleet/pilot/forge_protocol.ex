@@ -12,7 +12,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
   **Invariant build+parse co-localisés** : chaque format a son BUILDER et son PARSEUR dans
   CE module, l'un collé à l'autre — un changement de format se fait ICI, les deux ensemble,
   jamais l'un sans l'autre (plus de drift entre ce qui est écrit et ce qui est relu).
-  Les consommateurs (`StageDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `Poller`) appellent ces
+  Les consommateurs (`StepDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `Poller`) appellent ces
   fonctions DIRECTEMENT. Seul `parse_feature_branch/1` est aussi ré-exporté par `ForgeClient`
   (`defdelegate`) : `fleet_mcp` l'atteint via le seam `:forge_client` pour éviter une dépendance
   compile-time vers fleet_pilot.
@@ -57,8 +57,8 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   # ============================================================
   # Marqueur ROUTE — position carte sur la forge.
-  # `[lcars-route:<pipeline>:<stage>]` : grave (pipeline, stage) sur l'issue, car l'assignee
-  # (= rôle) seul n'identifie pas le stage (un rôle peut être sur N stages, cf. CarteNav).
+  # `[lcars-route:<pipeline>:<step>]` : grave (pipeline, step) sur l'issue, car l'assignee
+  # (= rôle) seul n'identifie pas le step (un rôle peut être sur N steps, cf. CarteNav).
   # ============================================================
 
   # Littéral-SOURCE UNIQUE : builder ET parseur en dérivent.
@@ -68,21 +68,21 @@ defmodule Fleet.Pilot.ForgeProtocol do
   @route_marker_rx Regex.compile!(Regex.escape(@route_prefix) <> "([^:\\]]+):([^:\\]]+)\\]")
 
   @doc """
-  Construit le marqueur route `[lcars-route:<pipeline>:<stage>]` (builder unique, dérivé de
+  Construit le marqueur route `[lcars-route:<pipeline>:<step>]` (builder unique, dérivé de
   `@route_prefix` comme son parseur `parse_route_marker/1`). Posé par `ForgeClient.post_route/5`.
   """
   @spec route_marker(String.t(), String.t()) :: String.t()
-  # => "[lcars-route:<pipeline>:<stage>]"
-  def route_marker(pipeline, stage) when is_binary(pipeline) and is_binary(stage),
-    do: "#{@route_prefix}#{pipeline}:#{stage}]"
+  # => "[lcars-route:<pipeline>:<step>]"
+  def route_marker(pipeline, step) when is_binary(pipeline) and is_binary(step),
+    do: "#{@route_prefix}#{pipeline}:#{step}]"
 
   @doc false
-  # Pur : extrait `{pipeline, stage}` d'un body contenant `[lcars-route:p:s]`, sinon nil.
+  # Pur : extrait `{pipeline, step}` d'un body contenant `[lcars-route:p:s]`, sinon nil.
   def parse_route_marker(nil), do: nil
 
   def parse_route_marker(body) when is_binary(body) do
     case Regex.run(@route_marker_rx, body) do
-      [_, pipeline, stage] -> {:ok, {pipeline, stage}}
+      [_, pipeline, step] -> {:ok, {pipeline, step}}
       _ -> nil
     end
   end
@@ -115,14 +115,14 @@ defmodule Fleet.Pilot.ForgeProtocol do
   def step_run_marker?(_), do: false
 
   # ============================================================
-  # Bloc ` ```result ` — sérialise les `outputs` d'un stage dans le comment de step_run.
+  # Bloc ` ```result ` — sérialise les `outputs` d'un step dans le comment de step_run.
   # ============================================================
 
   @result_block_rx ~r/```result\n(.*?)\n```/s
   @result_fence_limit 8192
 
   @doc """
-  Format du bloc ` ```result ` (sérialise les `outputs` d'un stage dans le comment de step_run).
+  Format du bloc ` ```result ` (sérialise les `outputs` d'un step dans le comment de step_run).
   Co-localisé avec son parseur `parse_result_block/1` — round-trip garanti. `nil`/vide →
   `""` (pas de bruit). JSON fencé si ≤ 8 KB ; au-delà, une note pointant vers le livrable de la
   branche (jamais de JSON tronqué = invalide). Préfixe `\\n\\n` inclus (séparateur du corps).

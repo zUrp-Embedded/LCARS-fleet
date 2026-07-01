@@ -31,7 +31,7 @@
     "selection_priority": {"type": "array", "items": {"type": "string"}},
     "spec": {
       "type": "object",
-      "required": ["stages"],
+      "required": ["steps"],
       "additionalProperties": false,
       "properties": {
         "on_escalation": {"type": "object"},
@@ -44,7 +44,7 @@
             "cleanup": {"type": "boolean"}
           }
         },
-        "stages": {
+        "steps": {
           "type": "object",
           "minProperties": 1,
           "additionalProperties": false,

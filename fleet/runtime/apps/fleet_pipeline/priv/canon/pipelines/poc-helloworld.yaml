@@ -3,7 +3,7 @@
 # But : prouver la chaîne de délégation minimale — l'engineer reçoit un brief
 # (l'ask passe via le contexte start_pipeline → build_brief), implémente, et
 # rend son livrable via submit_result. PAS de gate human-approval (caillou C1) ;
-# 1 seul stage pour isoler la mécanique avant d'enrichir (qualifier/reviewer/gate).
+# 1 seul step pour isoler la mécanique avant d'enrichir (qualifier/reviewer/gate).
 #
 # Statut : draft défrichage — sera enrichi (gates qualité, clone forge, finish) une
 # fois la mécanique de base prouvée. Ne pas considérer comme canon.
@@ -11,10 +11,10 @@
 kind: Pipeline
 metadata:
   name: poc-helloworld
-  description: "PoC délégation : engineer implémente hello_world (1 stage, no human-gate)"
+  description: "PoC délégation : engineer implémente hello_world (1 step, no human-gate)"
 
 spec:
-  stages:
+  steps:
     implement:
       role: engineer
       profile: fire-mode   # NB: `profile` = MODOP overlay (pas le fichier cap-profile) ; `role` charge engineer.yaml. (dette C8: canon pipelines mal-authorés profile=<role>.yaml)

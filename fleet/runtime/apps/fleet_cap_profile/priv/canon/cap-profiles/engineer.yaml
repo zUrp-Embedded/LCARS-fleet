@@ -62,7 +62,7 @@ spec:
     # `Fleet.Spawner.Pod.do_extract`). L'engineer rend sa révision via MCP
     # `submit_result` puis MEURT ; le SYSTÈME publie sur la forge (forge-aveugle).
     # Un rework (renvoi-au-dev avec findings du gatekeeper) re-spawne un pod
-    # FRAIS sur l'id déterministe `issue-<n>-engineer` (`Fleet.Pilot.StageDispatcher`),
+    # FRAIS sur l'id déterministe `issue-<n>-engineer` (`Fleet.Pilot.StepDispatcher`),
     # qui relit son contexte depuis la forge (PR + findings) — l'état vit sur la
     # forge, pas en RAM (forge-state-machine, BL-043). Les judges (qualifier,
     # reviewer, consultant) sont déjà one-shot : modèle désormais UNIFORME pour
@@ -73,7 +73,7 @@ spec:
     # respawne N fois = N slots ; un pipe = 1 process resident re-brief = 1 slot. Le cold par ticket
     # (workspace propre + /clear) est gere SANS rm_rf (bind mount bwrap vivant) par le pipeline de
     # re-brief idle-aware : do_extract pose :publishing -> deliverable.published (POST-push) leve :ready
-    # -> le gate StageDispatcher reprovisionne in-place (reset_in_place + /clear) au re-brief d'un pipe
+    # -> le gate StepDispatcher reprovisionne in-place (reset_in_place + /clear) au re-brief d'un pipe
     # :ready. Reversible : remettre `one-shot` ici (le gate retombe sur la voie one-shot, INCHANGEE).
     # Cf. BL-055 + DESIGN-eng-1slot.md (#5.3).
     lifetime_scope: pipe

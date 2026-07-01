@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepRunConsumerGateTest do
   @moduledoc """
-  A2.3 / B (L441) — la gate du stage FINI decide la fin-de-step-run. Corr.3 engineer-first : le stage
+  A2.3 / B (L441) — la gate du step FINI decide la fin-de-step-run. Corr.3 engineer-first : le step
   producteur (engineer, git_native) finit, sa gate decide, et le step_run est PR-natif :
 
     * gate :pass               -> avance (request_review du juge suivant + pont set_assignee)
@@ -53,13 +53,13 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
   end
 
-  # Cartes engineer-first 2 stages : build(engineer, producteur) -> review(reviewer, juge).
+  # Cartes engineer-first 2 steps : build(engineer, producteur) -> review(reviewer, juge).
   # `gated` : hard gate sur build. `soft` : soft gate sur build (B -> escalade). `plain` : aucune.
   defmodule Carte do
     def load!("gated") do
       %{
         "name" => "gated",
-        "stages" => %{
+        "steps" => %{
           "build" => %{
             "role" => "engineer",
             "needs" => [],
@@ -73,7 +73,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def load!("soft") do
       %{
         "name" => "soft",
-        "stages" => %{
+        "steps" => %{
           "build" => %{"role" => "engineer", "needs" => [], "gate" => %{"type" => "soft"}},
           "review" => %{"role" => "reviewer", "needs" => ["build"]}
         }
@@ -83,18 +83,18 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def load!("plain") do
       %{
         "name" => "plain",
-        "stages" => %{
+        "steps" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "review" => %{"role" => "reviewer", "needs" => ["build"]}
         }
       }
     end
 
-    # #8.E : carte brief-gate — stage racine brief-review (consultant JUGE le BRIEF, pré-PR) -> build.
+    # #8.E : carte brief-gate — step racine brief-review (consultant JUGE le BRIEF, pré-PR) -> build.
     def load!("mandgate") do
       %{
         "name" => "mandgate",
-        "stages" => %{
+        "steps" => %{
           "brief-review" => %{
             "role" => "consultant",
             "needs" => [],
@@ -106,13 +106,13 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       }
     end
 
-    # MA-12 : carte 1-stage `build`(engineer, PRODUCTEUR) TERMINAL avec gate SOFT → escalade gatekeeper.
+    # MA-12 : carte 1-step `build`(engineer, PRODUCTEUR) TERMINAL avec gate SOFT → escalade gatekeeper.
     # Le verdict gatekeeper « continue » sur ce terminal producteur devait :promote (merge SANS juges,
     # régression #8.F) ; le fix route par tag_advance(_, producer?) → :review (PR + juges).
     def load!("softterm") do
       %{
         "name" => "softterm",
-        "stages" => %{
+        "steps" => %{
           "build" => %{"role" => "engineer", "needs" => [], "gate" => %{"type" => "soft"}}
         }
       }
@@ -147,7 +147,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     }
   end
 
-  # pod.completed du stage producteur `build` (engineer) qui vient de finir, avec son result.
+  # pod.completed du step producteur `build` (engineer) qui vient de finir, avec son result.
   defp build_done(pipeline, result) do
     %{
       "issue_id" => "issue-1",
@@ -155,7 +155,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       "base_sha" => "cafe",
       "role" => "engineer",
       "pipeline" => pipeline,
-      "stage" => "build",
+      "step" => "build",
       "result" => result
     }
   end
@@ -167,7 +167,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       role: "engineer",
       payload: build_done("soft", %{"x" => 1}),
       carte: Carte.load!("soft"),
-      stage: "build"
+      step: "build"
     }
   end
 
@@ -186,7 +186,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received :unlocked
   end
 
-  test "pas de gate sur le stage -> avance (comportement inchange)" do
+  test "pas de gate sur le step -> avance (comportement inchange)" do
     assert {:ok, :review_requested} =
              StepRunConsumer.maybe_complete(build_done("plain", %{}), hc())
 
@@ -210,7 +210,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   end
 
   test "gate {:fail} mais budget epuise -> rework_exhausted, AUCUNE ecriture forge" do
-    # budget = nb_stages(2) * (max_rework_rounds(2) + 1) = 6
+    # budget = nb_steps(2) * (max_rework_rounds(2) + 1) = 6
     payload = build_done("gated", %{})
 
     assert {:error, {:rework_exhausted, %{step_runs: 6, budget: 6}}} =
@@ -241,19 +241,19 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute Map.has_key?(d, :files)
   end
 
-  # ── B (L441) : escalade gatekeeper (gate soft sur le stage producteur) ────────
+  # ── B (L441) : escalade gatekeeper (gate soft sur le step producteur) ────────
 
   test "gate soft -> ESCALADE : brief enqueue, AUCUNE avance/ecriture forge" do
     assert {:escalate, "corr-1", ctx} =
              StepRunConsumer.maybe_complete(build_done("soft", %{"sev" => "high"}), hc())
 
-    assert ctx.stage == "build"
+    assert ctx.step == "build"
     assert ctx.role == "engineer"
 
     assert_received {:enqueue, "gatekeeper-permanent", attrs}
     assert attrs.role == "gatekeeper"
     assert attrs.metadata["gate_eval"] == true
-    assert attrs.metadata["stage"] == "build"
+    assert attrs.metadata["step"] == "build"
     assert is_binary(attrs.brief)
     assert attrs.metadata["outputs"] == %{"sev" => "high"}
     assert_received {:wake, "gatekeeper-permanent"}
@@ -430,11 +430,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         "base_sha" => "cafe",
         "role" => "engineer",
         "pipeline" => "softterm",
-        "stage" => "build",
+        "step" => "build",
         "result" => %{"sev" => "high"}
       },
       carte: Carte.load!("softterm"),
-      stage: "build"
+      step: "build"
     }
   end
 
@@ -457,7 +457,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   # MÊME apply_verdict que le gatekeeper (factorisé) ; le consultant est PRÉ-PR → avance ISSUE-LEVEL
   # (grave route, pas de PR) et trace attribuée au CONSULTANT (pas "gatekeeper").
 
-  # pod.completed du stage brief-review (consultant) qui vient de rendre son verdict.
+  # pod.completed du step brief-review (consultant) qui vient de rendre son verdict.
   defp brief_done(result),
     do: %{
       "issue_id" => "issue-1",
@@ -465,7 +465,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       "base_sha" => "cafe",
       "role" => "consultant",
       "pipeline" => "mandgate",
-      "stage" => "brief-review",
+      "step" => "brief-review",
       "result" => result
     }
 
@@ -513,7 +513,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   end
 
   # ── #8-fix « un producteur ne merge JAMAIS seul » ───────────────────────────────────────
-  test "producteur terminal (build, dernier stage de la carte) -> :review (PR + juges), JAMAIS :promote/merge" do
+  test "producteur terminal (build, dernier step de la carte) -> :review (PR + juges), JAMAIS :promote/merge" do
     # mandgate = brief-review -> build ; build (engineer, producteur) est TERMINAL. Avant le fix il
     # faisait :promote (merge sans juges = régression #8.F). Avec : :review -> ouvre la PR + demande
     # [qualifier, reviewer] ; le chemin PR-driven prouvé (dispatch_by_verdicts) scelle ensuite au gatekeeper.
@@ -551,7 +551,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     state = :sys.get_state(pid)
     assert Map.has_key?(state.gate_evals, "corr-1")
-    assert %{stage: "build"} = state.gate_evals["corr-1"]
+    assert %{step: "build"} = state.gate_evals["corr-1"]
 
     send(
       pid,
@@ -581,7 +581,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       pid,
       Fleet.Event.new(:task_queue, :work_item_completed,
         correlation_id: "inconnu",
-        # MA-03 : payload SANS metadata gate_eval (cas NORMAL — un pod stage-dispatch ordinaire) → ignoré.
+        # MA-03 : payload SANS metadata gate_eval (cas NORMAL — un pod step-dispatch ordinaire) → ignoré.
         payload: %{result: %{"decision" => "continue"}}
       )
     )
@@ -601,7 +601,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   defp gate_eval_meta do
     %{
       "gate_eval" => true,
-      "stage" => "build",
+      "step" => "build",
       "pipeline" => "soft",
       "gate" => %{"type" => "soft"},
       "outputs" => %{"sev" => "high"},

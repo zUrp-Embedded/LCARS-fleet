@@ -4,7 +4,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   sur l'issue + merge **signé au nom du `gatekeeper`** (token de rôle via `gk_opts`).
 
   Chemin UNIQUE partagé par les **deux** points de merge (sinon ils divergeraient) :
-  - `Fleet.Pilot.StageDispatcher.promote_pr` (juges APPROVED en direct) ;
+  - `Fleet.Pilot.StepDispatcher.promote_pr` (juges APPROVED en direct) ;
   - `Fleet.Pilot.StepRunCompleter.promote` (terminal `:promote`, ex. après escalade gatekeeper).
 
   Les deux appellent `seal_and_merge/6` → même signature gatekeeper, même trace, partout (sans ce
@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   Le `gk_opts` est construit par l'appelant (`Fleet.Pilot.ForgeClient.as_role(forge_opts, gatekeeper_role())`) :
   ce module ne duplique PAS `as_role` (source unique = `Fleet.Pilot.ForgeClient.as_role/2`). Le rôle
   gatekeeper a son AUTORITÉ UNIQUE dans `Fleet.Pilot.Roles` ; `gatekeeper_role/0` ici n'est qu'un
-  re-export pour les appelants du sceau (StageDispatcher, StepRunCompleter).
+  re-export pour les appelants du sceau (StepDispatcher, StepRunCompleter).
   """
 
   @doc "Rôle gardien des PRs (signe les fusions). Re-export de l'autorité unique `Fleet.Pilot.Roles.gatekeeper_role/0`."

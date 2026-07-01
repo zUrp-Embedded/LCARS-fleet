@@ -16,9 +16,9 @@ metadata:
   applicable_regime: [R1, R2]
 
 spec:
-  stages:
+  steps:
 
-    # --- Stage 1: brainstorm (design Socratique) ---
+    # --- Step 1: brainstorm (design Socratique) ---
     brainstorm:
       role: architect
       profile: architect.yaml
@@ -37,7 +37,7 @@ spec:
       condition: "intensity_level >= L2"  # skip brainstorm si L0/L1 fast-track
       timeout_sec: 1800
 
-    # --- Stage 2: plan (TodoWrite + tasks 2-5min) ---
+    # --- Step 2: plan (TodoWrite + tasks 2-5min) ---
     plan:
       role: architect
       profile: architect.yaml
@@ -56,7 +56,7 @@ spec:
         approval_prompt: "Plan approved? (yes/edit/restart)"
       timeout_sec: 1800
 
-    # --- Stage 3: implement (TDD + subagent-driven) ---
+    # --- Step 3: implement (TDD + subagent-driven) ---
     implement:
       role: engineer
       profile: engineer.yaml  # cap-profile.modop_set inclut tdd + subagent-driven + rubber-duck + fire-mode
@@ -74,10 +74,10 @@ spec:
           - "tdd_iron_law_respected"  # test written first per task (witnessed RED → GREEN)
           - "verification_checklist_complete"  # 8 items (cf. modop:tdd rev2)
         max_iterations_per_task: 3  # anti-storm canon LCARS
-      coordHook: before-next  # invoke fleet_coord chantier 14 hook entre stages
+      coordHook: before-next  # invoke fleet_coord chantier 14 hook entre steps
       timeout_sec: 3600
 
-    # --- Stage 4: spec-review (qualifier — spec compliance) ---
+    # --- Step 4: spec-review (qualifier — spec compliance) ---
     spec-review:
       role: qualifier
       profile: qualifier.yaml  # cap-profile inclut subagent_template: spec-reviewer
@@ -97,7 +97,7 @@ spec:
         max_revisions: 3
       timeout_sec: 600
 
-    # --- Stage 5: code-review (reviewer — code quality) ---
+    # --- Step 5: code-review (reviewer — code quality) ---
     code-review:
       role: reviewer
       profile: reviewer.yaml  # cap-profile inclut subagent_template: code-quality-reviewer
@@ -117,7 +117,7 @@ spec:
         max_revisions: 3
       timeout_sec: 600
 
-    # --- Stage 6: finish (merge/PR/keep/discard) ---
+    # --- Step 6: finish (merge/PR/keep/discard) ---
     finish:
       role: starfleet  # ou engineer selon project (LCARS = starfleet, worker projet = engineer)
       profile: starfleet.yaml  # ou engineer.yaml selon project (override runtime)

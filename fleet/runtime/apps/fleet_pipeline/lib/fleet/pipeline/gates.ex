@@ -22,7 +22,7 @@ defmodule Fleet.Pipeline.Gates do
   `"severity_max != critical"` — évalués contre `outputs` par
   `Fleet.Pipeline.Gates.Predicate`. Seul le **soft** gate dispatche au
   gatekeeper (le juge unique de la fleet) : `Gates` ne fait AUCUN spawn (pur),
-  c'est le rail forge-driven (`Pilot.StepRunConsumer`) qui possède le nom de stage
+  c'est le rail forge-driven (`Pilot.StepRunConsumer`) qui possède le nom de step
   + le lifecycle d'attente du verdict.
 
   `Gates` ne retourne JAMAIS `:retry` (le retry n'est pas une décision de gate).
@@ -44,12 +44,12 @@ defmodule Fleet.Pipeline.Gates do
   # Gates EST l'implémentation MVP du behaviour Fleet.Pipeline.Gate (hard/soft/terminal).
   # evaluate/3 = point d'entrée du contrat, délègue à eval_by_type pattern-matché ci-dessous.
   @impl Fleet.Pipeline.Gate
-  def evaluate(stage, outputs, ctx), do: eval_by_type(stage, outputs, ctx)
+  def evaluate(step, outputs, ctx), do: eval_by_type(step, outputs, ctx)
 
-  @spec eval_by_type(stage :: map(), outputs :: map(), ctx :: map()) ::
+  @spec eval_by_type(step :: map(), outputs :: map(), ctx :: map()) ::
           :pass | {:fail, String.t()} | {:dispatch_gatekeeper, map()}
   defp eval_by_type(%{"gate" => nil}, _outputs, _ctx), do: :pass
-  defp eval_by_type(stage, _outputs, _ctx) when not is_map_key(stage, "gate"), do: :pass
+  defp eval_by_type(step, _outputs, _ctx) when not is_map_key(step, "gate"), do: :pass
 
   # hard gate, `rules` = liste de prédicats string évalués contre
   # les outputs (Predicate). Pas de bypass : tous vrais → :pass, sinon {:fail}.
@@ -66,7 +66,7 @@ defmodule Fleet.Pipeline.Gates do
   # fleet : il fait tourner la fleet, récupère les problèmes). `Gates` reste PUR :
   # il décide qu'il faut le gatekeeper (`{:dispatch_gatekeeper, info}`) ; le spawn
   # async + la corrélation `pod.completed` sont faits par le rail forge-driven
-  # (`Pilot.StepRunConsumer`, qui possède le nom de stage + le lifecycle). Pas de spawn
+  # (`Pilot.StepRunConsumer`, qui possède le nom de step + le lifecycle). Pas de spawn
   # coord ni de cap-profile dédié : le jugement est consolidé sur le gatekeeper unique.
   defp eval_by_type(%{"gate" => %{"type" => "soft"}}, _outputs, _ctx) do
     {:dispatch_gatekeeper, %{kind: :soft}}

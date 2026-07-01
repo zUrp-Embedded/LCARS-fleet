@@ -28,8 +28,8 @@ carte YAML, évaluation de gates, et publication de livrable.
 
 | Module | Rôle (vérifié dans le code) |
 |---|---|
-| `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`pipeline-v2.5.json`, enveloppe `kind/metadata/spec`), puis **normalise** vers la forme interne unique `%{"name", "stages"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché en `:persistent_term`. Fonctions pures ; `opts` (`:pipelines_root`, `:schema_path`) pour tests async |
-| `Fleet.Pipeline.GraphValidator` | `validate/1` : linter de GRAPHE **pur** (`stages` → `:ok \| {:error, {kind, detail}}`) sur les invariants inter-stages que le JSON Schema ne peut pas exprimer (il valide chaque stage isolément). Vérifie : `:phantom_edge` (chaque `needs` réfère un stage déclaré — anti-arête-fantôme/typo silencieux), `:no_root`/`:multiple_roots` (exactement 1 racine `needs: []`), `:unreachable` (tout stage atteignable depuis la racine), `:cycle` (DAG, tri topologique de Kahn — couvre aussi « aucun terminal atteignable », condition équivalente pour ce runtime séquentiel), `:fan_out` (aucun stage à ≥2 successeurs ; runtime séquentiel, aligné `CarteNav`). `describe/1` rend le message lisible par invariant (composé par le Loader dans son raise). Autonome — ne dépend PAS de `CarteNav` (la dépendance inverse fleet_pipeline→fleet_pilot est interdite) |
+| `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`pipeline-v2.5.json`, enveloppe `kind/metadata/spec`), puis **normalise** vers la forme interne unique `%{"name", "steps"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché en `:persistent_term`. Fonctions pures ; `opts` (`:pipelines_root`, `:schema_path`) pour tests async |
+| `Fleet.Pipeline.GraphValidator` | `validate/1` : linter de GRAPHE **pur** (`steps` → `:ok \| {:error, {kind, detail}}`) sur les invariants inter-steps que le JSON Schema ne peut pas exprimer (il valide chaque step isolément). Vérifie : `:phantom_edge` (chaque `needs` réfère un step déclaré — anti-arête-fantôme/typo silencieux), `:no_root`/`:multiple_roots` (exactement 1 racine `needs: []`), `:unreachable` (tout step atteignable depuis la racine), `:cycle` (DAG, tri topologique de Kahn — couvre aussi « aucun terminal atteignable », condition équivalente pour ce runtime séquentiel), `:fan_out` (aucun step à ≥2 successeurs ; runtime séquentiel, aligné `CarteNav`). `describe/1` rend le message lisible par invariant (composé par le Loader dans son raise). Autonome — ne dépend PAS de `CarteNav` (la dépendance inverse fleet_pipeline→fleet_pilot est interdite) |
 | `Fleet.Pipeline.Gate` | `@callback evaluate/3` — behaviour générique d'évaluation de gate, vendor-extensible compile-time |
 | `Fleet.Pipeline.Gates` | implémentation du behaviour `Gate`. `evaluate/3` dispatche par type (`:hard \| :soft \| :terminal \| nil`). **Pur** : seul le `soft` retourne `{:dispatch_gatekeeper, info}` (décision d'escalade), il ne spawn rien. `rules` (hard ET terminal) = liste de prédicats string délégués à `Gates.Predicate`. Somme fermée : toute forme inconnue/malformée → `{:fail}` fail-closed (l'éval est TOTALE) |
 | `Fleet.Pipeline.Gates.Predicate` | `eval?/2` — évaluateur **pur** des rule-strings v2.5 (`"all_tests_pass"`, `"severity_max != critical"`, conjonction `AND`) contre les `outputs` auto-rapportés. Grammaire bornée au corpus canon ; **fail-closed** (fait absent / type incompatible → faux) |
@@ -48,7 +48,7 @@ kind: Pipeline
 metadata:
   name: intensity-low
 spec:
-  stages:
+  steps:
     scout:
       role: scout
       profile: empty
@@ -66,8 +66,8 @@ spec:
           - all_tests_pass
 ```
 
-Enveloppe unique **v2.5** (`kind/metadata/spec.stages`), déballée au load par
-`Loader` vers la forme interne `%{"name", "stages"}`. Champs stage : `role`
+Enveloppe unique **v2.5** (`kind/metadata/spec.steps`), déballée au load par
+`Loader` vers la forme interne `%{"name", "steps"}`. Champs step : `role`
 (string, required), `profile` (string, required), `needs` (array string),
 `condition` (string), `inputs` (array de descriptifs string, ex. `ticket.body`),
 `outputs` (array string), `gate`, `coordHook` (string, deferred ch14). Le

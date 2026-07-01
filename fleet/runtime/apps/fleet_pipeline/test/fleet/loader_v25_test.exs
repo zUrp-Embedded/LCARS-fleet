@@ -3,7 +3,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   Loader — enveloppe pipeline V2.5 (`kind/metadata/spec`), seule forme acceptée.
 
   `Loader.load!` NORMALISE le résultat vers la forme interne unique
-  `%{"name", "stages"}` : l'enveloppe v2.5 est déballée au load (les tests
+  `%{"name", "steps"}` : l'enveloppe v2.5 est déballée au load (les tests
   assertent la forme normalisée, pas le YAML brut), puis le schema
   `pipeline-v2.5.json` valide la structure (fail-loud).
 
@@ -17,30 +17,30 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   # R0.8-brick6 : canon pipelines réabsorbés in-repo.
   @canon_pipelines Application.app_dir(:fleet_pipeline, "priv/canon/pipelines")
 
-  test "canon standard-qa.yaml (V2.5) normalisé → name + stages top-level" do
+  test "canon standard-qa.yaml (V2.5) normalisé → name + steps top-level" do
     pipe = Loader.load!("standard-qa", pipelines_root: @canon_pipelines)
     assert pipe["name"] == "standard-qa"
-    assert is_map(pipe["stages"])
-    assert is_map(pipe["stages"]["brainstorm"])
+    assert is_map(pipe["steps"])
+    assert is_map(pipe["steps"]["brainstorm"])
     refute Map.has_key?(pipe, "spec")
   end
 
-  test "canon audit-only.yaml (V2.5) normalisé → name + stages top-level" do
+  test "canon audit-only.yaml (V2.5) normalisé → name + steps top-level" do
     pipe = Loader.load!("audit-only", pipelines_root: @canon_pipelines)
     assert pipe["name"] == "audit-only"
-    assert is_map(pipe["stages"])
+    assert is_map(pipe["steps"])
     refute Map.has_key?(pipe, "spec")
   end
 
   @tag :tmp_dir
-  test "V2.5 stage avec post_extract.git valide schema (face 2 décision archi git)",
+  test "V2.5 step avec post_extract.git valide schema (face 2 décision archi git)",
        %{tmp_dir: dir} do
     yaml = """
     kind: Pipeline
     metadata:
-      name: face2-stage
+      name: face2-step
     spec:
-      stages:
+      steps:
         publish:
           role: engineer
           profile: engineer
@@ -52,13 +52,13 @@ defmodule Fleet.Pipeline.LoaderV25Test do
               add_paths: ["docs/", "src/"]
     """
 
-    File.write!(Path.join(dir, "face2-stage.yaml"), yaml)
-    loaded = Loader.load!("face2-stage", pipelines_root: dir)
-    stage = get_in(loaded, ["stages", "publish"])
-    assert get_in(stage, ["post_extract", "git", "repo_url"]) == "http://gitea/fleet/lcars"
-    assert get_in(stage, ["post_extract", "git", "branch"]) == "feature/x"
-    assert get_in(stage, ["post_extract", "git", "push"]) == true
-    assert get_in(stage, ["post_extract", "git", "add_paths"]) == ["docs/", "src/"]
+    File.write!(Path.join(dir, "face2-step.yaml"), yaml)
+    loaded = Loader.load!("face2-step", pipelines_root: dir)
+    step = get_in(loaded, ["steps", "publish"])
+    assert get_in(step, ["post_extract", "git", "repo_url"]) == "http://gitea/fleet/lcars"
+    assert get_in(step, ["post_extract", "git", "branch"]) == "feature/x"
+    assert get_in(step, ["post_extract", "git", "push"]) == true
+    assert get_in(step, ["post_extract", "git", "add_paths"]) == ["docs/", "src/"]
   end
 
   @tag :tmp_dir
@@ -68,7 +68,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
     metadata:
       name: face2-missing-required
     spec:
-      stages:
+      steps:
         publish:
           role: engineer
           profile: engineer
@@ -91,7 +91,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
     metadata:
       name: bad
     spec:
-      stages: {}
+      steps: {}
     """
 
     File.write!(Path.join(dir, "bad.yaml"), bad)
@@ -108,7 +108,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
     metadata:
       name: override-target
     spec:
-      stages:
+      steps:
         only:
           role: engineer
           profile: engineer.yaml

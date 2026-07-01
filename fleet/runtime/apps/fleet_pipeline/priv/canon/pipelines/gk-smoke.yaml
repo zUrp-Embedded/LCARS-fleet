@@ -1,11 +1,11 @@
 # Pipeline — gk-smoke (smoke-test escalade gatekeeper, pattern B)
 #
 # Date: 2026-06-08 — 2026-06-29 rev3 (enveloppe v2.5 unique)
-# Statut: SMOKE — carte minimale 2 stages pour valider la chaîne forge-driven AVEC
+# Statut: SMOKE — carte minimale 2 steps pour valider la chaîne forge-driven AVEC
 #         une ESCALADE gatekeeper (pattern B) sur de vrais pods.
 #         build(engineer, livrable git) -> review(reviewer, gate soft -> escalade).
 #
-# review n'est PAS un stage gatekeeper : c'est un stage metier reviewer avec une
+# review n'est PAS un step gatekeeper : c'est un step metier reviewer avec une
 # gate `soft`. A l'evaluation, une gate soft retourne une decision d'escalade vers
 # le gatekeeper permanent (juge unique) qui tranche, et le rail reprend sur son
 # verdict (continue -> avance ; abandon -> close ; humain -> await_arch). Smoke-test
@@ -16,7 +16,7 @@ metadata:
   name: gk-smoke
   description: "Smoke-test escalade gatekeeper (pattern B) : build engineer -> review reviewer (gate soft)"
 spec:
-  stages:
+  steps:
     build:
       role: engineer
       profile: noop

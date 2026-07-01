@@ -88,7 +88,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # ── Rails de remédiation 2026-06-09 (STEP 0) ──
         check_result_deadline_cancelled(root),
         check_spawn_gates_wired(root),
-        check_gatekeeper_not_a_stage(root),
+        check_gatekeeper_not_a_step(root),
         check_verdict_envelope_unwrapped(root),
         check_no_root_runtime_guard(root)
         # NB il n'y a pas de rail `pipeline.bounded_retry_system_side` : il vérifiait le retry borné
@@ -140,14 +140,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # Le Loader doit normaliser v1/v2.5 vers une forme interne unique (déballer
-  # spec.stages). Sans ça un consommateur lit `pipeline["stages"]=nil` sur du v2.5.
+  # spec.steps). Sans ça un consommateur lit `pipeline["steps"]=nil` sur du v2.5.
   defp check_pipeline_v25_normalized(root) do
     rel = "apps/fleet_pipeline/lib/fleet/pipeline/loader.ex"
     loader = Path.join(root, rel)
 
     # Anti-vert-creux : matcher `~r/normalize|déball/i` sur TOUT le source rendrait le rail vert dès qu'un
     # simple COMMENTAIRE contient « normalize », même sans le code. On matche donc la CLAUSE DE CODE réelle
-    # qui déballe `spec.stages` (la normalisation v2.5) ET son appel, en STRIPPANT le commentaire de chaque
+    # qui déballe `spec.steps` (la normalisation v2.5) ET son appel, en STRIPPANT le commentaire de chaque
     # ligne (un `# defp normalize(...)` commenté ne compte pas).
     unwrap_clause? =
       loader
@@ -169,7 +169,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         cond do
           not unwrap_clause? ->
             [
-              "#{rel} : clause `defp normalize(%{\"spec\" => %{\"stages\" => ...}})` (déballage v2.5) absente → un consommateur de la carte lit stages=nil"
+              "#{rel} : clause `defp normalize(%{\"spec\" => %{\"steps\" => ...}})` (déballage v2.5) absente → un consommateur de la carte lit steps=nil"
             ]
 
           not called? ->
@@ -179,7 +179,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             []
         end,
       note:
-        "Loader DÉBALLE spec.stages via la CLAUSE DE CODE v2.5 (`defp normalize(%{\"spec\"…})`) ET l'appelle au load — matche le code, pas un commentaire (anti-vert-creux durci)"
+        "Loader DÉBALLE spec.steps via la CLAUSE DE CODE v2.5 (`defp normalize(%{\"spec\"…})`) ET l'appelle au load — matche le code, pas un commentaire (anti-vert-creux durci)"
     }
   end
 
@@ -622,13 +622,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # Le gatekeeper est un juge d'EXCEPTION-inférence (dispatché par une gate
-  # :soft/:nontranchable), JAMAIS un stage d'ordonnancement. Rouge si une carte
-  # déclare un stage `role: gatekeeper` — méta-axiome : un raisonneur LLM dans la
+  # :soft/:nontranchable), JAMAIS un step d'ordonnancement. Rouge si une carte
+  # déclare un step `role: gatekeeper` — méta-axiome : un raisonneur LLM dans la
   # mécanique de coordination est un signal de design défaillant.
   # NB les parenthèses externes autour de `(… || [])` sont load-bearing : sans elles
   # `|>` (précédence > `||`) appliquerait flat_map à `[]`, pas à la liste de
   # cartes (`(true && l) || [] |> map` ⇒ `l`, map sauté).
-  defp check_gatekeeper_not_a_stage(root) do
+  defp check_gatekeeper_not_a_step(root) do
     dir = "apps/fleet_pipeline/priv/canon/pipelines"
     abs = Path.join(root, dir)
 
@@ -637,25 +637,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       |> Enum.flat_map(fn path ->
         rel = Path.relative_to(path, root)
 
-        # `\brole:` (ancre gauche) — ne vise QUE les stages `role: gatekeeper`,
+        # `\brole:` (ancre gauche) — ne vise QUE les steps `role: gatekeeper`,
         # PAS `target_role: gatekeeper` (escalade légitime, ex. standard-qa
         # `on_escalation.target_role` : le gatekeeper EST la cible d'exception, pas un
-        # stage). Sans l'ancre, `target_role:` contient `role:` → faux-positif.
+        # step). Sans l'ancre, `target_role:` contient `role:` → faux-positif.
         path
         |> grep_lines(~r/\brole:\s*gatekeeper\b/)
         |> Enum.filter(fn {_ln, line} ->
           Regex.match?(~r/\brole:\s*gatekeeper\b/, strip_comment(line))
         end)
-        |> Enum.map(fn {ln, _} -> "#{rel}:#{ln} (stage role: gatekeeper)" end)
+        |> Enum.map(fn {ln, _} -> "#{rel}:#{ln} (step role: gatekeeper)" end)
       end)
 
     %{
-      id: "gatekeeper.not_an_ordering_stage",
+      id: "gatekeeper.not_an_ordering_step",
       remediation: "R-gatekeeper-exception",
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "gatekeeper = juge d'exception (dispatch sur gate non-tranchable), jamais un stage role:gatekeeper (§L441 ; GATE-D1)"
+        "gatekeeper = juge d'exception (dispatch sur gate non-tranchable), jamais un step role:gatekeeper (§L441 ; GATE-D1)"
     }
   end
 

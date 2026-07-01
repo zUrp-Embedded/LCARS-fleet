@@ -152,7 +152,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   non-dismissed (Gitea `GET .../pulls/{index}/reviews`). Chaque round (juge demande des changements →
   l'eng re-pousse → re-review) ajoute une review REQUEST_CHANGES → le compteur est **forge-natif** et
   MONOTONE (les reviews persistent), comme `count_signed_step_runs` pour le rebond de gate. Sert au frein
-  anti-churn du chemin PR-review (`StageDispatcher.dispatch_rework`) : au-delà du budget → escalade arch.
+  anti-churn du chemin PR-review (`StepDispatcher.dispatch_rework`) : au-delà du budget → escalade arch.
 
   Pas de commit-scoping : on veut l'HISTORIQUE des rounds (tous commits), pas le verdict courant.
 

@@ -97,10 +97,10 @@ defmodule Fleet.Spawner do
         pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
 
         # pod_id file dans des paths FS (pod_dir `~/pods/pod_<id>`, sock_path, state recovery)
-        # par interpolation. Défaut UUID = sûr, mais l'override `:pod_id` (stage `issue-N-role-ts`, role
+        # par interpolation. Défaut UUID = sûr, mais l'override `:pod_id` (step `issue-N-role-ts`, role
         # résolu forge ; permanent `permanent-<name>-ts` ; admin) n'est PAS forcément contrôlé → un `/` ou `..`
         # traverserait hors de `~/pods`. Guard charset path-safe + rejet `..` → refus CLAIR, jamais un
-        # path traversé (tous les pod_id légitimes — UUID / catalogue / stage — passent).
+        # path traversé (tous les pod_id légitimes — UUID / catalogue / step — passent).
         if valid_pod_id?(pod_id) do
           # id pod DÉTERMINISTE (stable, sans suffixe timestamp) : un re-dispatch retombe sur le même
           # `pod_id`. Si une TOMBSTONE terminale (`state.json` :succeeded/:released/:killed) d'un cycle
@@ -163,7 +163,7 @@ defmodule Fleet.Spawner do
   # Échappatoire admin/diagnostic explicite : `opts[:allow_no_brief]`.
   defp brief_guard(%Fleet.CapProfile{spec: spec} = cap_profile, opts) do
     brief = Keyword.get(opts, :brief)
-    # `nil` ET `""` (brief vide — ex. un `build_brief` sur un contexte de stage
+    # `nil` ET `""` (brief vide — ex. un `build_brief` sur un contexte de step
     # vide/malformé) comptent tous deux comme « pas de brief ».
     has_brief? = is_binary(brief) and brief != ""
     scope = get_in(spec, ["invocation", "lifetime_scope"])

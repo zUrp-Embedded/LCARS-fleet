@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.ChainIntegrationTest do
   @moduledoc """
-  Integration Corr.3 4-C (switch review-request) : la chaine multi-stage de bout en bout, modules
-  REELS (Entry, StageDispatcher, StepRunConsumer, StepRunCompleter, CarteNav) contre un sim forge stateful
+  Integration Corr.3 4-C (switch review-request) : la chaine multi-step de bout en bout, modules
+  REELS (Entry, StepDispatcher, StepRunConsumer, StepRunCompleter, CarteNav) contre un sim forge stateful
   PR-aware, en synchrone. Prouve le CABLAGE PR-driven engineer-first :
     entree -> spawn engineer (issue-assignee) -> engineer ouvre la PR + request_review ->
     spawn juge via dispatch_review (PR) -> merge terminal -> issue close (Closes #N).
@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.{StageDispatcher, StepRunConsumer, ForgeProtocol}
+  alias Fleet.Pilot.{StepDispatcher, StepRunConsumer, ForgeProtocol}
 
   # ── Sim forge stateful : 1 issue + N PR (objets separes, labels/requested_reviewers propres) ──
   defmodule Sim do
@@ -204,22 +204,22 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   end
 
   defmodule CarteLoader do
-    # engineer-first 2 stages : build(engineer, producteur) -> review(reviewer, juge).
+    # engineer-first 2 steps : build(engineer, producteur) -> review(reviewer, juge).
     def load!("poc-mini") do
       %{
         "name" => "poc-mini",
-        "stages" => %{
+        "steps" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "review" => %{"role" => "reviewer", "needs" => ["build"]}
         }
       }
     end
 
-    # B (L441) : escalade gatekeeper sur le stage juge `review` (gate soft).
+    # B (L441) : escalade gatekeeper sur le step juge `review` (gate soft).
     def load!("gkchain") do
       %{
         "name" => "gkchain",
-        "stages" => %{
+        "steps" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "review" => %{
             "role" => "reviewer",
@@ -297,7 +297,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       "base_sha" => "cafe",
       "role" => role,
       "pipeline" => spawn_opts[:pipeline],
-      "stage" => spawn_opts[:stage]
+      "step" => spawn_opts[:step]
     }
 
     if result, do: Map.put(base, "result", result), else: base
@@ -368,15 +368,15 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     pid = new_issue()
 
     # 1. ENTREE : #8 cohérence — le routing vit dans la ROUTE-COMMENT (gravée par create_issue). Ici on
-    #    la grave directement (carte poc-mini, 1er stage build). L'assignee reste l'HUMAIN (jamais touché ;
-    #    le rôle du stage est dérivé de la route au dispatch via carte_role). Plus de routing par label.
+    #    la grave directement (carte poc-mini, 1er step build). L'assignee reste l'HUMAIN (jamais touché ;
+    #    le rôle du step est dérivé de la route au dispatch via carte_role). Plus de routing par label.
     SimForge.post_route("o/r", 1, "poc-mini", "build", [])
     assert {:ok, {"poc-mini", "build"}} = SimForge.get_route("o/r", 1, [])
     assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
 
     # 2. DISPATCH build -> spawn engineer (route-driven : carte_role lit la route, pas l'assignee)
     assert {:ok, {:spawned, _, "engineer"}} =
-             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
+             StepDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
 
     assert_received {:spawned, "issue-1", o1}
 
@@ -393,10 +393,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     # 4. DISPATCH review via la PR (chemin PR-driven) -> spawn reviewer ; verrou sur la PR
     assert {:ok, {:spawned, _, "reviewer"}} =
-             StageDispatcher.dispatch_review(pr_payload, dispatch_opts())
+             StepDispatcher.dispatch_review(pr_payload, dispatch_opts())
 
     assert_received {:spawned, "issue-1", o2}
-    assert o2[:stage] == "review"
+    assert o2[:step] == "review"
     assert Enum.any?(Sim.get_pr(pid, pr_n)["labels"], &(&1["name"] == "lcars-in-flight"))
 
     # 5. reviewer finit -> :promote : review APPROVED + merge -> issue close (Closes #N)
@@ -406,15 +406,15 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     refute Enum.any?(Sim.get_pr(pid, pr_n)["labels"], &(&1["name"] == "lcars-in-flight"))
   end
 
-  # ── B (L441) : escalade gatekeeper (gate soft sur le stage juge review) ───────
+  # ── B (L441) : escalade gatekeeper (gate soft sur le step juge review) ───────
   defp drive_to_review do
     pid = new_issue()
 
-    # Route gravée directement (carte gkchain, 1er stage build) — comme create_issue (route-comment).
+    # Route gravée directement (carte gkchain, 1er step build) — comme create_issue (route-comment).
     SimForge.post_route("o/r", 1, "gkchain", "build", [])
 
     assert {:ok, {:spawned, _, "engineer"}} =
-             StageDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
+             StepDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
 
     assert_received {:spawned, "issue-1", o1}
 
@@ -428,10 +428,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     # dispatch review via la PR -> spawn reviewer
     assert {:ok, {:spawned, _, "reviewer"}} =
-             StageDispatcher.dispatch_review(pr_payload, dispatch_opts())
+             StepDispatcher.dispatch_review(pr_payload, dispatch_opts())
 
     assert_received {:spawned, "issue-1", o2}
-    assert o2[:stage] == "review"
+    assert o2[:step] == "review"
 
     # review finit AVEC gate soft -> escalade gatekeeper (brief enqueue, PAS d'avance).
     assert {:escalate, "t", eval_ctx} =
@@ -440,7 +440,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
                hc()
              )
 
-    assert eval_ctx.stage == "review"
+    assert eval_ctx.step == "review"
     assert eval_ctx.role == "reviewer"
     assert Sim.get(pid)["state"] == "open"
 
@@ -450,7 +450,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   test "B escalade continue : review(soft->escalade) -> verdict continue -> merge terminal close" do
     {pid, eval_ctx} = drive_to_review()
 
-    # verdict continue : review est le dernier stage -> :promote -> juge merge la PR du producteur.
+    # verdict continue : review est le dernier step -> :promote -> juge merge la PR du producteur.
     assert {:ok, :promoted} =
              StepRunConsumer.resume_gate(
                eval_ctx,

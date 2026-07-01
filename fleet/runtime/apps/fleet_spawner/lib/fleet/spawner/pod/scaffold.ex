@@ -193,11 +193,11 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
   # Enqueue le brief dans la TaskQueue (le canal CANONIQUE `get_work_item`), idempotent :
   #   - pas de brief (pod permanent/interactif booté à froid) → rien à puller → bootstrap (skip) ;
-  #   - brief DÉJÀ en file (`pod_status != {:ok, nil}` : dispatch stage, StageDispatcher a enqueué AVANT
+  #   - brief DÉJÀ en file (`pod_status != {:ok, nil}` : dispatch step, StepDispatcher a enqueué AVANT
   #     le spawn) → pas de double-enqueue (skip) ;
   #   - sinon (`admin.spawn` / `lcars spawn --brief` : aucun dispatcher) → on enqueue ici, sinon
-  #     `get_work_item` rend `{done:true}` et le pod reste idle (cf. StageDispatcher.enqueue_brief).
-  # Mirror des `attrs` de StageDispatcher (`issue_id`/`role`/`brief`/`metadata`).
+  #     `get_work_item` rend `{done:true}` et le pod reste idle (cf. StepDispatcher.enqueue_brief).
+  # Mirror des `attrs` de StepDispatcher (`issue_id`/`role`/`brief`/`metadata`).
   def maybe_enqueue_brief(state) do
     brief = Keyword.get(state.opts || [], :brief)
 
@@ -231,7 +231,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   # pod_dir nu, et le clone est idempotent au respawn).
   #
   # Découplage architectural : c'est `pod.ex` qui câble `ProjectBootstrap` pour les pods
-  # avec projet (workspace per-pod). (Le provisioning de workspace per-stage du moteur RAM
+  # avec projet (workspace per-pod). (Le provisioning de workspace per-step du moteur RAM
   # `Pipeline.WorkspaceProvisioner` est supprimé ; le rail forge-driven épingle la base au clone.)
   # 2 sites callers d'un même mécanisme, paramétré par cap-profile. Le projet EFFECTIF
   # (brief > statique) est résolu par `LaunchSpec.effective_project/2` (source unique).

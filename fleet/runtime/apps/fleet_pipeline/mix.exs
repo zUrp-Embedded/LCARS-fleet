@@ -28,7 +28,7 @@ defmodule Fleet.Pipeline.MixProject do
 
   defp deps do
     # Fleet.Spawner : `fleet_pipeline` l'appelle pour les fonctions pures de gate/livrable
-    # (le moteur RAM qui spawnait les stages est retiré ; le spawn réel est piloté par le
+    # (le moteur RAM qui spawnait les steps est retiré ; le spawn réel est piloté par le
     # rail forge-driven). Gatekeeper = juge unique sur soft/terminal gates (plus de backend coord).
     [
       {:fleet_cap_profile, in_umbrella: true},

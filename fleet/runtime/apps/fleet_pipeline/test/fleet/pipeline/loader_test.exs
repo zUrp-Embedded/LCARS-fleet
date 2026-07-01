@@ -21,20 +21,20 @@ defmodule Fleet.Pipeline.LoaderTest do
       metadata:
         name: minimal
       spec:
-        stages:
+        steps:
           only:
             role: noop
             profile: empty
       """)
 
-      # Forme normalisée `%{"name", "stages"}` : l'enveloppe (kind/metadata/spec)
-      # est déballée au load, seuls `name` (depuis metadata) et `stages` survivent.
-      assert %{"name" => "minimal", "stages" => %{"only" => _}} =
+      # Forme normalisée `%{"name", "steps"}` : l'enveloppe (kind/metadata/spec)
+      # est déballée au load, seuls `name` (depuis metadata) et `steps` survivent.
+      assert %{"name" => "minimal", "steps" => %{"only" => _}} =
                Loader.load!("minimal")
     end
 
-    test "schema invalide (champ stages manquant) → raise", %{tmp_dir: tmp_dir} do
-      # Enveloppe v2.5 valide mais `spec.stages` absent → `spec` exige `stages`.
+    test "schema invalide (champ steps manquant) → raise", %{tmp_dir: tmp_dir} do
+      # Enveloppe v2.5 valide mais `spec.steps` absent → `spec` exige `steps`.
       File.write!(Path.join(tmp_dir, "invalid.yaml"), """
       kind: Pipeline
       metadata:
@@ -53,7 +53,7 @@ defmodule Fleet.Pipeline.LoaderTest do
       metadata:
         name: bad_gate
       spec:
-        stages:
+        steps:
           s1:
             role: noop
             profile: empty
@@ -80,7 +80,7 @@ defmodule Fleet.Pipeline.LoaderTest do
       metadata:
         name: escape
       spec:
-        stages:
+        steps:
           only:
             role: noop
             profile: empty
@@ -101,13 +101,13 @@ defmodule Fleet.Pipeline.LoaderTest do
       end
     end
 
-    test "stage avec needs + inputs + gate hard valide", %{tmp_dir: tmp_dir} do
+    test "step avec needs + inputs + gate hard valide", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "complex.yaml"), """
       kind: Pipeline
       metadata:
         name: complex
       spec:
-        stages:
+        steps:
           a:
             role: scout
             profile: empty
@@ -125,9 +125,9 @@ defmodule Fleet.Pipeline.LoaderTest do
                 - all_tests_pass
       """)
 
-      assert %{"stages" => %{"a" => _, "b" => stage_b}} = Loader.load!("complex")
-      assert stage_b["needs"] == ["a"]
-      assert stage_b["gate"]["type"] == "hard"
+      assert %{"steps" => %{"a" => _, "b" => step_b}} = Loader.load!("complex")
+      assert step_b["needs"] == ["a"]
+      assert step_b["gate"]["type"] == "hard"
     end
 
     test "v2.5 — brief_kind/judge_target/timeout_sec valides → load OK", %{
@@ -138,7 +138,7 @@ defmodule Fleet.Pipeline.LoaderTest do
       metadata:
         name: typed
       spec:
-        stages:
+        steps:
           review:
             role: reviewer
             profile: noop
@@ -147,9 +147,9 @@ defmodule Fleet.Pipeline.LoaderTest do
             timeout_sec: 600
       """)
 
-      assert %{"stages" => %{"review" => stage}} = Loader.load!("typed")
-      assert stage["brief_kind"] == "judge"
-      assert stage["judge_target"] == "brief"
+      assert %{"steps" => %{"review" => step}} = Loader.load!("typed")
+      assert step["brief_kind"] == "judge"
+      assert step["judge_target"] == "brief"
     end
 
     # Propriété de SÉCURITÉ (frontière) : un brief_kind hors {worker, judge} est rejeté au LOAD
@@ -161,7 +161,7 @@ defmodule Fleet.Pipeline.LoaderTest do
       metadata:
         name: bad_kind
       spec:
-        stages:
+        steps:
           review:
             role: reviewer
             profile: noop
@@ -173,15 +173,15 @@ defmodule Fleet.Pipeline.LoaderTest do
       end
     end
 
-    # additionalProperties:false : un champ inconnu au stage est rejeté au load (anti-typo /
+    # additionalProperties:false : un champ inconnu au step est rejeté au load (anti-typo /
     # anti-champ-fantôme) au lieu d'être silencieusement ignoré.
-    test "v2.5 — champ de stage inconnu → rejet au load (raise)", %{tmp_dir: tmp_dir} do
+    test "v2.5 — champ de step inconnu → rejet au load (raise)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "unknown_field.yaml"), """
       kind: Pipeline
       metadata:
         name: unknown_field
       spec:
-        stages:
+        steps:
           s:
             role: noop
             profile: empty
@@ -195,8 +195,8 @@ defmodule Fleet.Pipeline.LoaderTest do
   end
 
   describe "load!/2 — validation de graphe" do
-    # Schema-VALIDE (needs = array de strings) mais graphe-INVALIDE : `b` réfère un stage
-    # inexistant. Le schéma laisse passer (contrainte inter-stages inexprimable en draft-07) ;
+    # Schema-VALIDE (needs = array de strings) mais graphe-INVALIDE : `b` réfère un step
+    # inexistant. Le schéma laisse passer (contrainte inter-steps inexprimable en draft-07) ;
     # le linter de graphe raise au load — sinon arête fantôme silencieuse → pipeline figé.
     test "carte au needs fantôme (passe le schéma) → raise du linter de graphe", %{
       tmp_dir: tmp_dir
@@ -206,7 +206,7 @@ defmodule Fleet.Pipeline.LoaderTest do
       metadata:
         name: phantom
       spec:
-        stages:
+        steps:
           a:
             role: noop
             profile: empty
@@ -235,7 +235,7 @@ defmodule Fleet.Pipeline.LoaderTest do
       refute names == [], "aucune carte canon trouvée dans #{canon_dir}"
 
       for name <- names do
-        assert %{"name" => _, "stages" => _} = Loader.load!(name, pipelines_root: canon_dir)
+        assert %{"name" => _, "steps" => _} = Loader.load!(name, pipelines_root: canon_dir)
       end
     end
   end

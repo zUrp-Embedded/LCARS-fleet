@@ -353,7 +353,7 @@ defmodule Fleet.CapProfile do
   `"project"` : pod_id par (repo, rôle) → UNE identité par projet → UN slot Desktop stable (cwd +
   session-id figés), dispatch sérialisé par (repo, rôle) (engineer, singletons fleet-level). `"instance"` :
   pod_id par (repo, numéro, rôle) → fan-out par issue/PR (juges éphémères). **Source UNIQUE** de cette
-  lecture : `Fleet.Pilot.StageDispatcher` choisit `PodId.for_repo` vs `for_issue`/`for_pr` là-dessus.
+  lecture : `Fleet.Pilot.StepDispatcher` choisit `PodId.for_repo` vs `for_issue`/`for_pr` là-dessus.
 
   **Sans défaut fabriqué** (comme `role_index/1` / `name/1`) : la politique de slot est une propriété de
   routage déclarée explicitement par CHAQUE rôle — un profil sans `slot_scope ∈ {project, instance}` est
@@ -669,7 +669,7 @@ defmodule Fleet.CapProfile do
   @doc """
   Accesseur canon du `lifetime_scope` d'un cap-profile (`spec.invocation.lifetime_scope`,
   schéma v2.5). **Source unique** : l'extraction ne doit PAS être ré-implémentée chez les
-  lecteurs (spawner/stage_runner/sp_builder/pod) — sinon défauts incohérents. `default` par
+  lecteurs (spawner/step_runner/sp_builder/pod) — sinon défauts incohérents. `default` par
   défaut `"one-shot"` (le défaut canon) ; les lecteurs qui veulent distinguer l'absence
   (ex. brief_guard) passent `nil`.
   """

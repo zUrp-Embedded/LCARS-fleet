@@ -26,8 +26,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       {:ok, :removed}
     end
 
-    def post_route(_repo, _n, pipeline, stage, _opts) do
-      send(self(), {:call, :route, pipeline, stage})
+    def post_route(_repo, _n, pipeline, step, _opts) do
+      send(self(), {:call, :route, pipeline, step})
       {:ok, :posted}
     end
   end
@@ -164,7 +164,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     )
   end
 
-  describe "complete/2 — 1-stage terminal (next_assignee nil)" do
+  describe "complete/2 — 1-step terminal (next_assignee nil)" do
     test "publie, comment signé, CLOSE, unlock — dans l'ordre §5" do
       assert {:ok, :completed} = StepRunCompleter.complete(base_step_run(), seams())
 
@@ -189,7 +189,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
   end
 
-  describe "complete/2 — multi-stage (next_assignee présent, branche A2)" do
+  describe "complete/2 — multi-step (next_assignee présent, branche A2)" do
     test "publie, comment, AVANCE (pas de close ni set_assignee, #8.A), unlock" do
       step_run = base_step_run(%{next_assignee: "qualifier"})
       assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
@@ -203,17 +203,17 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:call, :close}
     end
 
-    test "avance avec contexte carte → grave la ROUTE du stage suivant (sans set_assignee, #8.A)" do
+    test "avance avec contexte carte → grave la ROUTE du step suivant (sans set_assignee, #8.A)" do
       step_run =
         base_step_run(%{
           next_assignee: "qualifier",
           pipeline: "poc-cycle",
-          next_stage: "spec-review"
+          next_step: "spec-review"
         })
 
       assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
 
-      # #8.A : l'avance grave la ROUTE du stage suivant ; l'assignee (humain) N'est PLUS touché.
+      # #8.A : l'avance grave la ROUTE du step suivant ; l'assignee (humain) N'est PLUS touché.
       assert_received {:call, :route, "poc-cycle", "spec-review"}
       refute_received {:call, :assignee, _}
     end
@@ -448,7 +448,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:comment, _, _}
     end
 
-    test "producteur :promote (terminal 1-stage) → ouvre la PR, merge FF, unlock, pas de reassign" do
+    test "producteur :promote (terminal 1-step) → ouvre la PR, merge FF, unlock, pas de reassign" do
       assert {:ok, :promoted} =
                StepRunCompleter.complete_pr(producer_step_run(:promote), orch_opts())
 

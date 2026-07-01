@@ -1,8 +1,8 @@
-defmodule Fleet.Pilot.StageDispatcher do
+defmodule Fleet.Pilot.StepDispatcher do
   @moduledoc """
   Dispatch `issue assigné → spawn le rôle de la carte` : la forge EST la machine à états, ce module
   réagit à ses transitions. Le poller voit un issue **assigné-à-moi** (scoping multi-user porté
-  forge-side, en amont), non verrouillé, et le pousse à son stage courant.
+  forge-side, en amont), non verrouillé, et le pousse à son step courant.
 
   ## Décision (`decide/1`) — PORTE pure
 
@@ -16,7 +16,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     * **route absente** (issue routeless — create_issue ne grave plus, ou issue humain brut) →
       `ensure_carte_or_onboard` grave la **carte par défaut** (brief-gate) → `{:skipped, :onboarded}`
       (on défère ; le tick suivant la voit routée). C'est l'ENTRÉE système : create_issue crée, le poller route.
-    * **route présente** → `carte_role` dérive `{role, profile, stage_spec}` de la POSITION carte (PAS de
+    * **route présente** → `carte_role` dérive `{role, profile, step_spec}` de la POSITION carte (PAS de
       producteur en dur — la route décide ; route absente à ce point = anomalie → fail-loud, jamais l'eng en
       silence), puis l'**ordre canonique du spawn** (label `lcars-in-flight` AVANT pod, sinon double-spawn).
 
@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   require Logger
 
-  # Autorité du FORMAT des briefs (worker/judge/brief-review/rework/conflit). StageDispatcher
+  # Autorité du FORMAT des briefs (worker/judge/brief-review/rework/conflit). StepDispatcher
   # CHOISIT quel brief selon l'état forge ; BriefBuilder le FORME.
   alias Fleet.Pilot.BriefBuilder
 
@@ -68,7 +68,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   @doc """
   Dispatch effectif d'une issue : `decide/1` puis, sur `:engage`, résout projet+route et soit ONBOARDE
   (routeless → grave la carte par défaut → skip), soit dérive le rôle de la carte (`carte_role`) et
-  applique l'ordre canonique du spawn (verrou → pod → enqueue → wake, `spawn_stage`). Idempotent.
+  applique l'ordre canonique du spawn (verrou → pod → enqueue → wake, `spawn_step`). Idempotent.
 
   `opts` : `:repo` (obligatoire), `:forge_opts` (passé au ForgeClient), + seams
   `:forge_client` / `:loader` / `:carte_loader` / `:spawner` / `:task_queue` / `:clock` (défauts = modules réels).
@@ -98,7 +98,7 @@ defmodule Fleet.Pilot.StageDispatcher do
         forge_opts = Keyword.get(opts, :forge_opts, [])
 
         # PROJET + ROUTE résolus AVANT toute écriture forge (read-only) : un échec transitoire ne laisse pas
-        # de verrou orphelin. project = base_sha pinné (hors-pod) ; route = (pipeline, stage) gravée forge-side.
+        # de verrou orphelin. project = base_sha pinné (hors-pod) ; route = (pipeline, step) gravée forge-side.
         # ROUTELESS = pas encore onboardée (create_issue ne grave plus) → `ensure_carte_or_onboard`
         # grave la carte par défaut + renvoie `{:onboarded, _}` → on DÉFÈRE (skip ; le tick suivant la voit
         # routée). Routée → `carte_role` dérive le rôle de la POSITION carte (PAS de producteur en dur ;
@@ -111,7 +111,7 @@ defmodule Fleet.Pilot.StageDispatcher do
                tag_err(resolve_route(opts, forge, repo, number, forge_opts), :route_resolution),
              {:ok, route} <-
                ensure_carte_or_onboard(forge, repo, number, route, carte_loader, forge_opts),
-             {:ok, {role, profile, stage_spec}} <-
+             {:ok, {role, profile, step_spec}} <-
                tag_err(
                  carte_role(
                    route,
@@ -156,7 +156,7 @@ defmodule Fleet.Pilot.StageDispatcher do
               issue,
               forge_opts,
               route,
-              stage_spec
+              step_spec
             )
 
           spawn_opts =
@@ -179,7 +179,7 @@ defmodule Fleet.Pilot.StageDispatcher do
             "issue=#{repo}##{number} " <>
               "project=#{if(project, do: project["base_sha"], else: "none")} route=#{inspect(route)}"
 
-          spawn_stage(
+          spawn_step(
             %{
               forge: forge,
               spawner: spawner,
@@ -205,14 +205,14 @@ defmodule Fleet.Pilot.StageDispatcher do
             # boucle de poll ; le pod one-shot meurt en fin de tâche → spawn frais pour le suivant).
             {:skipped, :role_busy}
 
-          {:onboarded, _stage} ->
+          {:onboarded, _step} ->
             # Issue routeless onboardée sur la carte par défaut → on DÉFÈRE (skip ; le tick suivant
             # la voit routée → dispatch). Entrée système : create_issue crée, le poller route.
             {:skipped, :onboarded}
 
           {:error, {phase, reason}} ->
             Logger.warning(
-              "StageDispatcher: #{phase} issue=#{repo}##{number} → #{inspect(reason)} (skip, pas de verrou)"
+              "StepDispatcher: #{phase} issue=#{repo}##{number} → #{inspect(reason)} (skip, pas de verrou)"
             )
 
             {:error, {phase, reason}}
@@ -432,7 +432,7 @@ defmodule Fleet.Pilot.StageDispatcher do
         # Registre indisponible : l'incident n'est PAS mémorisé (une récurrence ne sera pas détectée),
         # mais c'est bien une 1re occurrence → on tente quand même la résolution. On le CRIE.
         Logger.error(
-          "StageDispatcher merge-conflict #{subject} : incident NON gravé (registre indisponible) — " <>
+          "StepDispatcher merge-conflict #{subject} : incident NON gravé (registre indisponible) — " <>
             "1re résolution tentée SANS mémoire (récurrence non détectable) : #{inspect(e)}"
         )
 
@@ -445,7 +445,7 @@ defmodule Fleet.Pilot.StageDispatcher do
         # Récurrence DÉTECTÉE (le conflit persiste) → on escalade à l'arch comme prévu. Mais le issue
         # sysadmin (error_system) n'a PAS pu être ouvert (forge down ?) — on le CRIE, on ne rassure pas.
         Logger.error(
-          "StageDispatcher merge-conflict #{subject} RÉCURRENT mais issue sysadmin ÉCHOUÉ — AUCUN " <>
+          "StepDispatcher merge-conflict #{subject} RÉCURRENT mais issue sysadmin ÉCHOUÉ — AUCUN " <>
             "issue error_system créé (forge down ?) ; escalade arch tentée tout de même : #{inspect(e)}"
         )
 
@@ -495,7 +495,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
       escalate_to_arch(issue_n, signature, body, ctx)
 
-      # `{:skipped, _}` = forme GÉRÉE par le poller (stage_process_pulls) → compté skipped, pas de crash.
+      # `{:skipped, _}` = forme GÉRÉE par le poller (step_process_pulls) → compté skipped, pas de crash.
       # Un `{:escalated, _}` ne serait dans AUCUNE clause du `case do_poll` → CaseClauseError à chaque tick :
       # un retour de dispatch DOIT être {:ok|:skipped|:error}, jamais une 4ᵉ forme.
       {:skipped, {:merge_conflict_escalated, pr_number}}
@@ -542,7 +542,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   defp do_dispatch_review(pr_number, issue_n, head, role, profile, kind, ctx) do
-    # Spawner/task_queue ne sont pas lus ici directement : ils transitent via `ctx` vers `spawn_stage`.
+    # Spawner/task_queue ne sont pas lus ici directement : ils transitent via `ctx` vers `spawn_step`.
     %{
       repo: repo,
       forge: forge,
@@ -569,7 +569,7 @@ defmodule Fleet.Pilot.StageDispatcher do
       |> maybe_gate_base_main(kind)
 
     # PROJET + ROUTE resolus AVANT toute ecriture forge (read-only) : un echec ne laisse pas de
-    # verrou orphelin. La route (pipeline, stage) est lue sur l'ISSUE (le pipeline-state y reste).
+    # verrou orphelin. La route (pipeline, step) est lue sur l'ISSUE (le pipeline-state y reste).
     with {:ok, project} <- tag_err(resolver.(repo, review_opts), :project_resolution),
          {:ok, route} <- tag_err(route_for(forge, repo, issue_n, forge_opts), :route_resolution) do
       # pod_id : rework/conflict = le PRODUCTEUR, routé par `slot_scope` (project → for_repo = MÊME
@@ -626,7 +626,7 @@ defmodule Fleet.Pilot.StageDispatcher do
           # pipeline-state y reste).
           log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
 
-          spawn_stage(
+          spawn_step(
             ctx,
             pod_id,
             role,
@@ -641,7 +641,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     else
       {:error, {phase, reason}} ->
         Logger.warning(
-          "StageDispatcher: #{phase} review role=#{role} pr=#{repo}##{pr_number} → #{inspect(reason)} (skip, pas de verrou)"
+          "StepDispatcher: #{phase} review role=#{role} pr=#{repo}##{pr_number} → #{inspect(reason)} (skip, pas de verrou)"
         )
 
         {:error, {phase, reason}}
@@ -694,7 +694,7 @@ defmodule Fleet.Pilot.StageDispatcher do
           _ = safe_kill(ctx.spawner, Fleet.Pilot.PodId.for_issue(ctx.repo, issue_n, producer))
 
           Logger.info(
-            "StageDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
+            "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
               "(juges OK → merge rebase, scellé gatekeeper, close via Closes ##{issue_n} ; eng tué)"
           )
 
@@ -740,8 +740,8 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   defp maybe_put_route(spawn_opts, nil), do: spawn_opts
 
-  defp maybe_put_route(spawn_opts, {pipeline, stage}),
-    do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:stage, stage)
+  defp maybe_put_route(spawn_opts, {pipeline, step}),
+    do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:step, step)
 
   # `repo_id` = id forge du projet → session_id déterministe des rôles project-bound
   # (eng, juges) via `Fleet.Spawner.SessionId` (segment `<REPO4>` DÉCIMAL). Forge sans `repo_id`/2
@@ -766,7 +766,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # Brief d'un dispatch PR : :judge -> GateBrief desamorce (via build_brief, le pod
   # juge l'issue) ; :rework -> brief de rework au PRODUCTEUR (corrige selon la review, re-pousse).
-  # Chemin PR-juge — pas de stage carte ici (juges PR-driven) → `stage_spec = %{}` :
+  # Chemin PR-juge — pas de step carte ici (juges PR-driven) → `step_spec = %{}` :
   # build_brief retombe sur le `brief_kind` du profil (judge pour qualifier/reviewer) ET sur le
   # `judge_target` par défaut (deliverable) → build_judge_brief (juge le livrable/PR).
   defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
@@ -803,8 +803,8 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp tag_err({:ok, _} = ok, _tag), do: ok
   defp tag_err({:error, reason}, tag), do: {:error, {tag, reason}}
 
-  # Carte-driven role : dérive `{role, profile, stage_spec}` de la POSITION carte (route gravée) +
-  # load du profil. route nil = anomalie → fail-loud (pas de fallback producteur). Carte/stage/
+  # Carte-driven role : dérive `{role, profile, step_spec}` de la POSITION carte (route gravée) +
+  # load du profil. route nil = anomalie → fail-loud (pas de fallback producteur). Carte/step/
   # profil non résolus = misconfig → `{:error, _}` (fail-loud).
   # `prefetched_carte` : carte déjà chargée par le poller (classification du bail) → on évite un
   # 2ᵉ load ; `nil` (tests, autres callers) → chargement via `carte_loader` (fallback).
@@ -819,15 +819,15 @@ defmodule Fleet.Pilot.StageDispatcher do
   # position carte (route gravée).
   defp carte_role(nil, _load_role, _carte_loader, _prefetched_carte), do: {:error, :unrouted}
 
-  defp carte_role({pipeline, stage}, load_role, carte_loader, prefetched_carte) do
+  defp carte_role({pipeline, step}, load_role, carte_loader, prefetched_carte) do
     with {:ok, carte} <- carte_or_load(prefetched_carte, pipeline, carte_loader),
-         {:ok, role} <- carte_stage_role(carte, pipeline, stage),
+         {:ok, role} <- carte_step_role(carte, pipeline, step),
          {:ok, profile} <- load_role.(role) do
-      # On remonte le STAGE_SPEC entier (extensible) plutôt qu'un champ isolé. build_brief y
-      # lit `brief_kind` (override per-stage : consultant worker → juge sans profil-doublon) ET
-      # `judge_target` (juge le BRIEF vs un livrable). route=nil (producteur initial) → stage_spec vide.
-      stage_spec = get_in(carte, ["stages", stage]) || %{}
-      {:ok, {role, profile, stage_spec}}
+      # On remonte le STEP_SPEC entier (extensible) plutôt qu'un champ isolé. build_brief y
+      # lit `brief_kind` (override per-step : consultant worker → juge sans profil-doublon) ET
+      # `judge_target` (juge le BRIEF vs un livrable). route=nil (producteur initial) → step_spec vide.
+      step_spec = get_in(carte, ["steps", step]) || %{}
+      {:ok, {role, profile, step_spec}}
     end
   end
 
@@ -845,7 +845,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   # Onboarding système. Route présente → passthrough `{:ok, route}`. Route nil (issue routeless :
   # create_issue ne grave plus la carte ; ou issue humain brut) → grave la carte par défaut (brief-gate)
-  # = elle ENTRE dans le gate → `{:onboarded, stage}` (dispatch_issue défère : skip ce tick, le suivant la
+  # = elle ENTRE dans le gate → `{:onboarded, step}` (dispatch_issue défère : skip ce tick, le suivant la
   # voit routée). Route postée par le SYSTÈME (forge token système). Échec → `{:error, {:onboard, _}}`.
   defp ensure_carte_or_onboard(_forge, _repo, _number, route, _carte_loader, _forge_opts)
        when not is_nil(route),
@@ -855,9 +855,9 @@ defmodule Fleet.Pilot.StageDispatcher do
     carte_name = default_carte()
 
     with {:ok, carte} <- load_carte(carte_name, carte_loader),
-         {:ok, {stage, _role}} <- Fleet.Pilot.CarteNav.first_stage(carte),
-         {:ok, _} <- forge.post_route(repo, number, carte_name, stage, forge_opts) do
-      {:onboarded, stage}
+         {:ok, {step, _role}} <- Fleet.Pilot.CarteNav.first_step(carte),
+         {:ok, _} <- forge.post_route(repo, number, carte_name, step, forge_opts) do
+      {:onboarded, step}
     else
       err -> {:error, {:onboard, err}}
     end
@@ -873,15 +873,15 @@ defmodule Fleet.Pilot.StageDispatcher do
     e -> {:error, {:carte_load_failed, pipeline, Exception.message(e)}}
   end
 
-  defp carte_stage_role(carte, pipeline, stage) do
-    case Fleet.Pilot.CarteNav.stage_role(carte, stage) do
+  defp carte_step_role(carte, pipeline, step) do
+    case Fleet.Pilot.CarteNav.step_role(carte, step) do
       {:ok, role} when is_binary(role) -> {:ok, role}
-      _ -> {:error, {:carte_stage_unknown, pipeline, stage}}
+      _ -> {:error, {:carte_step_unknown, pipeline, step}}
     end
   end
 
-  # Lit la position carte (pipeline, stage) gravée sur la forge. `:none` (hors-carte /
-  # 1-stage) → `{:ok, nil}` (producteur direct). Erreur HTTP → propagée (skip sans verrou).
+  # Lit la position carte (pipeline, step) gravée sur la forge. `:none` (hors-carte /
+  # 1-step) → `{:ok, nil}` (producteur direct). Erreur HTTP → propagée (skip sans verrou).
   defp route_for(forge, repo, number, forge_opts) do
     case forge.get_route(repo, number, forge_opts) do
       {:ok, {_p, _s} = route} -> {:ok, route}
@@ -955,7 +955,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   #                          busy  -> DEFERE (travaille encore une tache OU publie son dernier livrable :
   #                                   resetter son workspace maintenant le corromprait / courserait le push) ;
   #                          ready -> reset COLD in-place du workspace pour le nouveau brief + /clear, PUIS
-  #                                   :ok (spawn_stage re-brief sur un workspace propre, bonne branche).
+  #                                   :ok (spawn_step re-brief sur un workspace propre, bonne branche).
   # Tout AVANT le verrou/enqueue (sinon on verrouillerait une issue qu'on ne traite pas). `{:skipped,
   # :role_busy}` remonte au poller (retry au tick suivant). La base du reset = `project["base_sha"]` :
   # nouveau issue -> main tip (fresh) ; rework -> tip de la PR (continue le travail de l'eng). 1 seule fn.
@@ -1041,7 +1041,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # wake+recovery. Échec POST-verrou → compensation : retrait du verrou (+ kill SI frais spawn,
   # JAMAIS un re-brief vivant). `lock_target` = l'objet verrouillé (issue number | PR number) ;
   # `issue_number` = le numéro d'issue pour le `issue_id` ET l'enqueue ; `log_ctx` = contexte de log caller.
-  defp spawn_stage(
+  defp spawn_step(
          ctx,
          pod_id,
          role,
@@ -1067,7 +1067,7 @@ defmodule Fleet.Pilot.StageDispatcher do
          :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief) do
       # Le retour de `WakeRecovery.wake` est LOAD-BEARING : `{:error, {:escalated, _}}`
       # (pod injoignable, escaladé à starfleet) ou `{:error, _}` (re-wake KO) signifie que le pod n'est
-      # PAS réveillé. Jeter ce retour (`_ = wake(...)`) ferait toujours rendre `spawn_stage`
+      # PAS réveillé. Jeter ce retour (`_ = wake(...)`) ferait toujours rendre `spawn_step`
       # `{:ok, {:spawned}}` → le poller compterait `dispatched +1 / errors 0` MENTEUR (pod jamais réveillé,
       # mais tally clean). On le MATCHE donc : le verrou + le brief + le pod RESTENT en place (le
       # brief est enqueué, l'escalade système existe → pas un cul-de-sac, re-wake au prochain tick), mais
@@ -1080,7 +1080,7 @@ defmodule Fleet.Pilot.StageDispatcher do
            ) do
         :ok ->
           Logger.info(
-            "StageDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx}"
+            "StepDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx}"
           )
 
           {:ok, {:spawned, pod_id, role}}
@@ -1090,7 +1090,7 @@ defmodule Fleet.Pilot.StageDispatcher do
           # brief conservé, pod conservé. Seul le réveil a échoué → tally honnête + re-wake au tick suivant
           # (idempotent : alive_before? sera vrai, maybe_spawn no-op, re-wake retenté).
           Logger.warning(
-            "StageDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
+            "StepDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
               "MAIS wake INJOIGNABLE → #{inspect(reason)} (verrou+brief conservés, re-wake au prochain tick ; " <>
               "tally = error, pas dispatched silencieux)"
           )
@@ -1105,7 +1105,7 @@ defmodule Fleet.Pilot.StageDispatcher do
         _ = forge.remove_label(repo, lock_target, @in_flight_label, forge_opts)
 
         Logger.warning(
-          "StageDispatcher: dispatch role=#{role} pod=#{pod_id} #{log_ctx} → #{inspect(err)} " <>
+          "StepDispatcher: dispatch role=#{role} pod=#{pod_id} #{log_ctx} → #{inspect(err)} " <>
             "(verrou retiré#{if(not alive_before?, do: ", pod tué", else: "")} — re-dispatch au prochain tick)"
         )
 

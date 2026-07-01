@@ -1,7 +1,7 @@
-defmodule Fleet.Pilot.StageDispatcherTest do
+defmodule Fleet.Pilot.StepDispatcherTest do
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.StageDispatcher
+  alias Fleet.Pilot.StepDispatcher
 
   defp issue(fields) do
     %{
@@ -24,17 +24,17 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   # pas de rôle (vient de la route via carte_role), pas de load (carte_role charge).
   describe "decide/1 (porte pure)" do
     test "issue non verrouillée → :engage (rôle ET action spawn/onboard décidés en aval)" do
-      assert :engage = StageDispatcher.decide(eng_issue())
+      assert :engage = StepDispatcher.decide(eng_issue())
     end
 
     test "verrou lcars-in-flight présent → {:skip, :in_flight}" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}]})
-      assert {:skip, :in_flight} = StageDispatcher.decide(payload)
+      assert {:skip, :in_flight} = StepDispatcher.decide(payload)
     end
 
     test "verrou HUMAIN lcars-awaits-arch → {:skip, :awaits_arch} (A2.3b, pas de re-dispatch)" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-awaits-arch"}]})
-      assert {:skip, :awaits_arch} = StageDispatcher.decide(payload)
+      assert {:skip, :awaits_arch} = StepDispatcher.decide(payload)
     end
   end
 
@@ -42,12 +42,12 @@ defmodule Fleet.Pilot.StageDispatcherTest do
   defmodule StubForge do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
-    # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-carte / 1-stage).
+    # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-carte / 1-step).
     def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
 
     # #5.2 D2 — onboarding : grave la route initiale de la carte par défaut. Capture pour assertion.
-    def post_route(_repo, n, carte, stage, _opts) do
-      send(self(), {:routed, n, carte, stage})
+    def post_route(_repo, n, carte, step, _opts) do
+      send(self(), {:routed, n, carte, step})
       {:ok, :posted}
     end
 
@@ -281,12 +281,12 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         clock: fn :second -> 1_700_000_000 end,
         # résolveur stub par défaut : pas de projet (les tests d'ordre ne clonent rien).
         project_resolver: fn _repo, _opts -> {:ok, nil} end,
-        # #5.2 D2 — route par défaut (stage build=engineer) : depuis le découplage, une issue ROUTELESS
+        # #5.2 D2 — route par défaut (step build=engineer) : depuis le découplage, une issue ROUTELESS
         # est ONBOARDÉE (skip) au lieu de spawner. Les tests d'effet veulent un spawn → ils partent d'une
         # issue déjà routée. Les tests routés/onboard overrident `forge_opts`/`carte_loader`.
         forge_opts: [_test_route: {:ok, {"g", "build"}}],
         carte_loader: fn "g" ->
-          %{"stages" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+          %{"steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
         end
       ],
       extra
@@ -298,7 +298,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       payload = eng_issue()
 
       assert {:ok, {:spawned, _, "engineer"}} =
-               StageDispatcher.dispatch_issue(payload, dispatch_opts(loader: CountingLoader))
+               StepDispatcher.dispatch_issue(payload, dispatch_opts(loader: CountingLoader))
 
       # decide charge le profil et le threade ; dispatch le réutilise → load appelé EXACTEMENT une fois.
       assert_received {:f075_loaded, "engineer"}
@@ -309,7 +309,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       payload = eng_issue()
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_issue(payload, dispatch_opts())
+               StepDispatcher.dispatch_issue(payload, dispatch_opts())
 
       # le brief = issue.body + l'instruction de LIVRAISON git-native (commit local + trailer),
       # sinon le pod « submit les contenus » au lieu de committer → :no_deliverable_commit.
@@ -348,7 +348,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # PAS un pod occupé (ça wedgerait — un one-shot mid-tâche ne pull pas un 2ᵉ brief). Le poller
       # re-dispatch au tick suivant ; le pod meurt en fin de tâche → spawn frais pour le suivant.
       assert {:skipped, :role_busy} =
-               StageDispatcher.dispatch_issue(payload, dispatch_opts(spawner: StubSpawnerAlive))
+               StepDispatcher.dispatch_issue(payload, dispatch_opts(spawner: StubSpawnerAlive))
 
       # Le gate a CONSULTÉ pod_info (avec l'id PROJET) pour voir le pod vivant...
       assert_received {:pod_info, "lordzurp-lcars-test-engineer"}
@@ -362,7 +362,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # Le gate défère AVANT de poser le verrou ou d'enqueuer → le task_queue défaillant n'est JAMAIS
       # atteint. Donc aucun verrou à retirer, aucun pod à tuer : la défère est sans effet de bord.
       assert {:skipped, :role_busy} =
-               StageDispatcher.dispatch_issue(
+               StepDispatcher.dispatch_issue(
                  eng_issue(),
                  dispatch_opts(spawner: StubSpawnerAlive, task_queue: FailTaskQueue)
                )
@@ -377,7 +377,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       opts = dispatch_opts(task_queue: FailTaskQueue)
 
       assert {:error, {:enqueue_failed, :broker_down}} =
-               StageDispatcher.dispatch_issue(payload, opts)
+               StepDispatcher.dispatch_issue(payload, opts)
 
       # le pod avait spawné → tué (sinon orphelin) ; le verrou lcars-in-flight → retiré (sinon le
       # poller skipperait l'issue à jamais).
@@ -398,7 +398,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       escalating_wake = fn _pod_id, _respawn, _opts -> {:error, {:escalated, :dead}} end
 
       result =
-        StageDispatcher.dispatch_issue(
+        StepDispatcher.dispatch_issue(
           payload,
           dispatch_opts(wake_recovery: escalating_wake)
         )
@@ -425,7 +425,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       clean_wake = fn _pod_id, _respawn, _opts -> :ok end
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_issue(payload, dispatch_opts(wake_recovery: clean_wake))
+               StepDispatcher.dispatch_issue(payload, dispatch_opts(wake_recovery: clean_wake))
 
       refute_received {:removed_label, _}
       refute_received {:killed, _}
@@ -434,7 +434,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     test "skip in_flight : pas de spawn" do
       payload = eng_issue(%{"labels" => [%{"name" => "lcars-in-flight"}]})
 
-      assert {:skipped, :in_flight} = StageDispatcher.dispatch_issue(payload, dispatch_opts())
+      assert {:skipped, :in_flight} = StepDispatcher.dispatch_issue(payload, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 
@@ -450,21 +450,21 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       opts = dispatch_opts(project_resolver: fn _repo, _opts -> {:ok, project} end)
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_issue(payload, opts)
+               StepDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:project] == project
       assert spawn_opts[:brief] =~ "fais le hello"
     end
 
-    test "route gravée → rôle dérivé de la carte (stage build=engineer) + pipeline/stage injectés (A2.1, #8)" do
+    test "route gravée → rôle dérivé de la carte (step build=engineer) + pipeline/step injectés (A2.1, #8)" do
       payload = eng_issue()
 
-      # #8 : le rôle vient DÉSORMAIS de la carte (CarteNav.stage_role), pas de producer_role en dur.
-      # Ici le stage courant "build" porte role=engineer → rôle engineer (et route injectée, A2.1).
+      # #8 : le rôle vient DÉSORMAIS de la carte (CarteNav.step_role), pas de producer_role en dur.
+      # Ici le step courant "build" porte role=engineer → rôle engineer (et route injectée, A2.1).
       carte = %{
         "name" => "poc-cycle",
-        "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}
+        "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}
       }
 
       opts =
@@ -473,21 +473,21 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           carte_loader: fn "poc-cycle" -> carte end
         )
 
-      assert {:ok, {:spawned, _, "engineer"}} = StageDispatcher.dispatch_issue(payload, opts)
+      assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:pipeline] == "poc-cycle"
-      assert spawn_opts[:stage] == "build"
+      assert spawn_opts[:step] == "build"
     end
 
-    test "#8 : route sur un stage AMONT (brief-review/consultant) → spawn le CONSULTANT, pas l'eng" do
+    test "#8 : route sur un step AMONT (brief-review/consultant) → spawn le CONSULTANT, pas l'eng" do
       payload = eng_issue()
 
-      # La carte EST la machine à états : le 1er stage (racine `needs:[]`) est brief-review/consultant.
-      # decide() rendait "engineer" (DN §1) ; carte_role override avec le rôle du stage courant → consultant.
+      # La carte EST la machine à états : le 1er step (racine `needs:[]`) est brief-review/consultant.
+      # decide() rendait "engineer" (DN §1) ; carte_role override avec le rôle du step courant → consultant.
       carte = %{
         "name" => "brief-gate",
-        "stages" => %{
+        "steps" => %{
           "brief-review" => %{"role" => "consultant", "needs" => []},
           "build" => %{"role" => "engineer", "needs" => ["brief-review"]}
         }
@@ -500,17 +500,17 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-consultant", "consultant"}} =
-               StageDispatcher.dispatch_issue(payload, opts)
+               StepDispatcher.dispatch_issue(payload, opts)
     end
 
-    test "#8.B : brief_kind:judge AU STAGE override un profil worker (engineer) → brief JUGE" do
+    test "#8.B : brief_kind:judge AU STEP override un profil worker (engineer) → brief JUGE" do
       payload = eng_issue()
 
-      # Le stage déclare brief_kind:judge ; le rôle engineer a un profil WORKER. L'override per-stage
+      # Le step déclare brief_kind:judge ; le rôle engineer a un profil WORKER. L'override per-step
       # doit produire un brief JUGE (désamorcé), PAS le brief worker (issue body + "Livraison git-native").
       carte = %{
         "name" => "g",
-        "stages" => %{
+        "steps" => %{
           "review" => %{"role" => "engineer", "needs" => [], "brief_kind" => "judge"}
         }
       }
@@ -521,14 +521,14 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           carte_loader: fn "g" -> carte end
         )
 
-      assert {:ok, {:spawned, _, "engineer"}} = StageDispatcher.dispatch_issue(payload, opts)
+      assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
       assert_received {:spawned, "issue-42", spawn_opts}
       refute spawn_opts[:brief] =~ "Livraison (git-native)"
     end
 
-    test "#8.B : sans brief_kind au stage → défaut du profil (engineer=worker → brief worker)" do
+    test "#8.B : sans brief_kind au step → défaut du profil (engineer=worker → brief worker)" do
       payload = eng_issue()
-      carte = %{"name" => "g", "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+      carte = %{"name" => "g", "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
 
       opts =
         dispatch_opts(
@@ -536,12 +536,12 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           carte_loader: fn "g" -> carte end
         )
 
-      assert {:ok, {:spawned, _, "engineer"}} = StageDispatcher.dispatch_issue(payload, opts)
+      assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:brief] =~ "Livraison (git-native)"
     end
 
-    test "SÉCU : brief_kind hors-vocab au stage → raise (jamais retombé sur worker en silence)" do
+    test "SÉCU : brief_kind hors-vocab au step → raise (jamais retombé sur worker en silence)" do
       payload = eng_issue()
 
       # `reviewer` n'est PAS du vocabulaire {worker, judge}. AVANT le fix, ce hors-vocab tombait sur la
@@ -549,7 +549,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # une propriété de sécurité : elle ne s'infère pas par omission → fail-loud.
       carte = %{
         "name" => "g",
-        "stages" => %{
+        "steps" => %{
           "review" => %{"role" => "engineer", "needs" => [], "brief_kind" => "reviewer"}
         }
       }
@@ -561,7 +561,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert_raise ArgumentError, ~r/hors vocabulaire \{worker, judge\}/, fn ->
-        StageDispatcher.dispatch_issue(payload, opts)
+        StepDispatcher.dispatch_issue(payload, opts)
       end
     end
 
@@ -570,7 +570,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       carte = %{
         "name" => "g",
-        "stages" => %{
+        "steps" => %{
           "review" => %{
             "role" => "engineer",
             "needs" => [],
@@ -587,7 +587,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert_raise ArgumentError, ~r/hors vocabulaire \{brief, deliverable\}/, fn ->
-        StageDispatcher.dispatch_issue(payload, opts)
+        StepDispatcher.dispatch_issue(payload, opts)
       end
     end
 
@@ -597,7 +597,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       carte = %{
         "name" => "mg",
-        "stages" => %{
+        "steps" => %{
           "brief-review" => %{
             "role" => "consultant",
             "needs" => [],
@@ -614,30 +614,30 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-consultant", "consultant"}} =
-               StageDispatcher.dispatch_issue(payload, opts)
+               StepDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
       brief = spawn_opts[:brief]
       # cadrage BRIEF (subject:brief) + le brief à juger, PAS le cadrage livrable.
       assert brief =~ "Brief à juger"
       assert brief =~ "MON BRIEF A JUGER"
-      refute brief =~ "Livrable à juger (outputs du stage"
+      refute brief =~ "Livrable à juger (outputs du step"
       refute brief =~ "Livraison (git-native)"
     end
 
     test "#5.2 D2 — issue ROUTELESS → onboardée sur la carte par défaut (skip), PAS de spawn eng" do
       payload = eng_issue()
 
-      # route :none (override de la route par défaut) + carte par défaut brief-gate (1er stage brief-review).
+      # route :none (override de la route par défaut) + carte par défaut brief-gate (1er step brief-review).
       opts =
         dispatch_opts(
           forge_opts: [_test_route: :none],
           carte_loader: fn "brief-gate" ->
-            %{"stages" => %{"brief-review" => %{"role" => "consultant", "needs" => []}}}
+            %{"steps" => %{"brief-review" => %{"role" => "consultant", "needs" => []}}}
           end
         )
 
-      assert {:skipped, :onboarded} = StageDispatcher.dispatch_issue(payload, opts)
+      assert {:skipped, :onboarded} = StepDispatcher.dispatch_issue(payload, opts)
 
       # la carte par défaut a été GRAVÉE (le tick suivant dispatchera le consultant) ; AUCUN spawn eng.
       assert_received {:routed, 42, "brief-gate", "brief-review"}
@@ -649,7 +649,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       opts = dispatch_opts(forge_opts: [_test_route: {:error, :http_500}])
 
       assert {:error, {:route_resolution, :http_500}} =
-               StageDispatcher.dispatch_issue(payload, opts)
+               StepDispatcher.dispatch_issue(payload, opts)
 
       refute_received {:spawned, _, _}
     end
@@ -661,7 +661,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         dispatch_opts(project_resolver: fn _repo, _opts -> {:error, :ls_remote_timeout} end)
 
       assert {:error, {:project_resolution, :ls_remote_timeout}} =
-               StageDispatcher.dispatch_issue(payload, opts)
+               StepDispatcher.dispatch_issue(payload, opts)
 
       # résolution AVANT toute écriture forge : pas de spawn, pas de verrou orphelin
       refute_received {:spawned, _, _}
@@ -683,7 +683,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_issue(eng_issue(), opts)
+               StepDispatcher.dispatch_issue(eng_issue(), opts)
 
       assert_received {:spawned, "issue-42", _opts}
       refute_received {:reprovisioned, _, _, _}
@@ -699,7 +699,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
         )
 
-      assert {:skipped, :role_busy} = StageDispatcher.dispatch_issue(eng_issue(), opts)
+      assert {:skipped, :role_busy} = StepDispatcher.dispatch_issue(eng_issue(), opts)
 
       refute_received {:reprovisioned, _, _, _}
       refute_received {:spawned, _, _}
@@ -715,7 +715,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
         )
 
-      assert {:skipped, :role_busy} = StageDispatcher.dispatch_issue(eng_issue(), opts)
+      assert {:skipped, :role_busy} = StepDispatcher.dispatch_issue(eng_issue(), opts)
 
       refute_received {:reprovisioned, _, _, _}
       refute_received {:spawned, _, _}
@@ -732,7 +732,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_issue(eng_issue(), opts)
+               StepDispatcher.dispatch_issue(eng_issue(), opts)
 
       # reset cold appele AVANT le rebrief, avec le projet (base_sha) + le slug du issue.
       assert_received {:reprovisioned, "lordzurp-lcars-test-engineer",
@@ -755,7 +755,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           project_resolver: fn _r, _o -> {:ok, %{"base_sha" => "basesha1"}} end
         )
 
-      assert {:skipped, :role_busy} = StageDispatcher.dispatch_issue(eng_issue(), opts)
+      assert {:skipped, :role_busy} = StepDispatcher.dispatch_issue(eng_issue(), opts)
 
       assert_received {:reprovisioned, _, _, _}
       refute_received {:enqueued, _, _}
@@ -786,11 +786,11 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-pr-6-qualifier", "qualifier"}} =
-               StageDispatcher.dispatch_review(pr(), opts)
+               StepDispatcher.dispatch_review(pr(), opts)
 
       # issue_id = l'ISSUE (remontee de head.ref lcars/issue-42-engineer), PAS la PR
       assert_received {:spawned, "issue-42", spawn_opts}
-      assert spawn_opts[:pipeline] == "poc" and spawn_opts[:stage] == "spec-review"
+      assert spawn_opts[:pipeline] == "poc" and spawn_opts[:step] == "spec-review"
       # brief juge desamorce (brief_kind: judge) — pas un corps executable
       assert spawn_opts[:brief] =~ "JUGER"
 
@@ -810,14 +810,14 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
     test "PR verrouillee (lcars-in-flight) -> skip, pas de spawn" do
       pr = pr(%{"labels" => [%{"name" => "lcars-in-flight"}]})
-      assert {:skipped, :in_flight} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+      assert {:skipped, :in_flight} = StepDispatcher.dispatch_review(pr, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 
     test "PR sans reviewer + aucune review decisive -> skip :no_verdict (②.1d, PR en attente)" do
       pr = pr(%{"requested_reviewers" => []})
       # _test_review_state defaut :none
-      assert {:skipped, :no_verdict} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+      assert {:skipped, :no_verdict} = StepDispatcher.dispatch_review(pr, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 
@@ -834,13 +834,13 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           forge_opts: [_test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved}]
         )
 
-      assert {:ok, {:merged, 6}} = StageDispatcher.dispatch_review(pr, opts)
+      assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
       # le merge FF a bien ete declenche sur la PR (auto-close de l'issue via Closes #N)
       assert_received {:merged, 6}
       refute_received {:spawned, _, _}
 
       # Die-on-promote : le kill-site cible `for_issue` (id `...-issue-42-engineer`). Pour l'eng
-      # one-shot project-scoped c'est un pod_id PHANTÔME → no-op SÛR (cf. stage_dispatcher : utiliser
+      # one-shot project-scoped c'est un pod_id PHANTÔME → no-op SÛR (cf. step_dispatcher : utiliser
       # for_repo ici tuerait l'eng s'il code une AUTRE issue). On asserte l'APPEL au kill avec l'id
       # issue-keyé (même s'il no-op), inconditionnel côté dispatcher.
       assert_received {:killed, "lordzurp-lcars-test-issue-42-engineer"}
@@ -882,7 +882,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # 1ʳᵉ fois : tous approuvé MAIS merge en CONFLIT → on RÉSOUT (re-spawn le producteur en mode résolution),
       # PAS de merge, PAS d'escalade. Le brief porte l'instruction rebase+résous.
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_review(pr, opts)
+               StepDispatcher.dispatch_review(pr, opts)
 
       assert_received {:spawned, _issue, spawn_opts}
       assert spawn_opts[:brief] =~ "RÉSOLUTION DE CONFLIT"
@@ -892,7 +892,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # Garde-fou : PAS de boucle infinie. Retour `{:skipped, _}` = forme gérée par le poller (PAS `{:escalated, _}`
       # qui crashait do_poll en CaseClauseError, vu live arduino-morse PR#4).
       assert {:skipped, {:merge_conflict_escalated, 6}} =
-               StageDispatcher.dispatch_review(pr, opts)
+               StepDispatcher.dispatch_review(pr, opts)
     end
 
     test "MA-14 : 2 PR DISTINCTES en conflit (même repo) → la 2ᵉ N'est PAS vue récurrente (clé distincte) → résolue" do
@@ -934,7 +934,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         })
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_review(pr6, opts)
+               StepDispatcher.dispatch_review(pr6, opts)
 
       # PR #12 (issue DIFFÉRENTE 50), AUTRE PR du même repo, AUSSI en conflit. AVANT le fix : `pr-12` collapse
       # vers la même clé que `pr-6` (déjà vu) → ESCALADE prématurée. APRÈS : clé distincte → 1ʳᵉ occurrence →
@@ -950,7 +950,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # par-projet, pas par-issue. La distinctness testée ici vit dans la CLÉ DE RÉCURRENCE
       # (digit-free `pr-i`/`pr-q`), pas dans le pod_id. pr12 = 1ʳᵉ occurrence → résolue (pas escaladée).
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_review(pr12, opts)
+               StepDispatcher.dispatch_review(pr12, opts)
     end
 
     test "②.1d : un juge a demandé des changements (les autres approuvent) -> re-spawn le PRODUCTEUR" do
@@ -971,7 +971,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       # producteur = role git_native de head (lcars/issue-42-engineer) = engineer ; verrou sur la PR.
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_review(pr, opts)
+               StepDispatcher.dispatch_review(pr, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:brief] =~ "REWORK"
@@ -1001,7 +1001,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StageDispatcher.dispatch_review(pr, opts)
+               StepDispatcher.dispatch_review(pr, opts)
     end
 
     test "MA-06 : N rounds de rework PR (rounds > budget) -> ESCALADE ARCH (borné, pas de churn infini)" do
@@ -1020,7 +1020,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:skipped, {:rework_exhausted_escalated, 6}} =
-               StageDispatcher.dispatch_review(pr, opts)
+               StepDispatcher.dispatch_review(pr, opts)
 
       # PAS de re-spawn du producteur (fin du churn) ; le verrou humain awaits-arch est posé sur l'ISSUE.
       refute_received {:spawned, _, _}
@@ -1039,7 +1039,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:skipped, {:rework_exhausted_escalated, 6}} =
-               StageDispatcher.dispatch_review(pr, opts)
+               StepDispatcher.dispatch_review(pr, opts)
 
       refute_received {:spawned, _, _}
     end
@@ -1063,27 +1063,27 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-pr-6-reviewer", "reviewer"}} =
-               StageDispatcher.dispatch_review(pr, opts)
+               StepDispatcher.dispatch_review(pr, opts)
 
       refute_received {:merged, _}
     end
 
     test "PR sur branche non-fleet -> skip (jamais misroutee)" do
       pr = pr(%{"head" => %{"ref" => "refs/pull/6/head"}})
-      assert {:skipped, :not_fleet_branch} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+      assert {:skipped, :not_fleet_branch} = StepDispatcher.dispatch_review(pr, dispatch_opts())
       refute_received {:spawned, _, _}
     end
 
     test "reviewer = role inconnu -> skip :no_role" do
       pr = pr(%{"requested_reviewers" => [%{"login" => "lordzurp"}]})
-      assert {:skipped, :no_role} = StageDispatcher.dispatch_review(pr, dispatch_opts())
+      assert {:skipped, :no_role} = StepDispatcher.dispatch_review(pr, dispatch_opts())
     end
 
     test "F181 : echec POST-verrou (enqueue KO) -> verrou PR retire + pod tue" do
       opts = dispatch_opts(task_queue: FailTaskQueue, forge_opts: [_test_route: :none])
 
       assert {:error, {:enqueue_failed, :broker_down}} =
-               StageDispatcher.dispatch_review(pr(), opts)
+               StepDispatcher.dispatch_review(pr(), opts)
 
       assert_received {:killed, "lordzurp-lcars-test-pr-6-qualifier"}
       assert_received {:removed_label, "lcars-in-flight"}
@@ -1095,7 +1095,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # `dispatch_review` skippe (symétrique de `decide/1` côté issue) → fin du churn.
       opts = dispatch_opts(awaits_arch_ids: MapSet.new([42]))
 
-      assert {:skipped, :awaits_arch} = StageDispatcher.dispatch_review(pr(), opts)
+      assert {:skipped, :awaits_arch} = StepDispatcher.dispatch_review(pr(), opts)
       refute_received {:spawned, _, _}
       refute_received {:enqueued, _, _}
     end
@@ -1110,7 +1110,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-pr-6-qualifier", "qualifier"}} =
-               StageDispatcher.dispatch_review(pr(), opts)
+               StepDispatcher.dispatch_review(pr(), opts)
     end
   end
 
@@ -1158,7 +1158,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     test "resolve (gate_base_branch=main) : base_sha=feature_tip (clone) MAIS gate_base_sha=main",
          ctx do
       assert {:ok, proj} =
-               StageDispatcher.default_project_resolver("owner/proj",
+               StepDispatcher.default_project_resolver("owner/proj",
                  base_branch: "lcars/issue-3-engineer",
                  gate_base_branch: "main",
                  forge_opts: [base_url: ctx.base_url]
@@ -1173,7 +1173,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     test "forward (sans gate_base_branch) : gate_base_sha == base_sha (clone-base, inchangé)",
          ctx do
       assert {:ok, proj} =
-               StageDispatcher.default_project_resolver("owner/proj",
+               StepDispatcher.default_project_resolver("owner/proj",
                  base_branch: "lcars/issue-3-engineer",
                  forge_opts: [base_url: ctx.base_url]
                )

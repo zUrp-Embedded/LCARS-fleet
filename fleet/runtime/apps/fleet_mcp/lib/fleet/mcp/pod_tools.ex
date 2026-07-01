@@ -208,7 +208,7 @@ defmodule Fleet.MCP.PodTools do
   # **assignee=humain owner** (point fixe : routing + ownership) — et S'ARRÊTE. Plus de
   # `start_pipeline` (rail RAM retiré). Le POLLER prend le relais : issue assignée non verrouillée →
   # spawn le rôle PRODUCTEUR (`:producer_role`, invariant — pas de marqueur par-issue : un label
-  # `lcars-stage:` ré-encoderait une constante). Dispatch runtime via modules-en-variable (pas de dep compile-time pilot).
+  # `lcars-step:` ré-encoderait une constante). Dispatch runtime via modules-en-variable (pas de dep compile-time pilot).
   def handle_tool_call(
         "create_issue",
         %{"title" => title, "brief" => brief, "project" => repo},
@@ -410,7 +410,7 @@ defmodule Fleet.MCP.PodTools do
 
   # Pas de `delegation_carte` ni de `grave_initial_route` ici : le routage (graver la carte) vit
   # côté système (fleet_pilot : le poller onboarde toute issue assignée routeless sur la carte par défaut,
-  # cf. StageDispatcher.ensure_carte_or_onboard). create_issue ne fait QUE créer+assigner.
+  # cf. StepDispatcher.ensure_carte_or_onboard). create_issue ne fait QUE créer+assigner.
 
   # La PR EN COURS du issue #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
   # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.

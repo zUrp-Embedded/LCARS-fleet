@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.Poller do
   @moduledoc """
-  Réacteur du rail forge-state-machine (**mode STAGE uniquement**) : scan périodique du `repo`
-  configuré, délégation des issues + PR ouvertes au spawn des rôles via `StageDispatcher`.
+  Réacteur du rail forge-state-machine (**mode STEP uniquement**) : scan périodique du `repo`
+  configuré, délégation des issues + PR ouvertes au spawn des rôles via `StepDispatcher`.
 
   ## Rôle
 
@@ -9,9 +9,9 @@ defmodule Fleet.Pilot.Poller do
   surveillé, il liste les **issues** + **PR** ouvertes et délègue :
 
     * **issue assignée** (assignee=humain owner), non verrouillée, sans PR ouverte → spawn le rôle
-      **producteur** (`StageDispatcher.dispatch_issue` ; rôle = `:producer_role`, défaut engineer).
+      **producteur** (`StepDispatcher.dispatch_issue` ; rôle = `:producer_role`, défaut engineer).
     * **PR** avec reviewer demandé → spawn le **juge** ; PR `REQUEST_CHANGES` sans reviewer → re-spawn
-      le **producteur** pour le rework (`StageDispatcher.dispatch_review`).
+      le **producteur** pour le rework (`StepDispatcher.dispatch_review`).
     * verrou `lcars-in-flight` → skip (un pod travaille déjà la brique). **Bail repo-sérialisé** :
       au plus un pipeline actif par repo (feature-branches séquentielles → merge FF garanti).
 
@@ -27,7 +27,7 @@ defmodule Fleet.Pilot.Poller do
     * `:repo` — `"owner/name"`, obligatoire.
     * `:interval_ms` — défaut `30_000` (30s).
     * `:forge_opts` — keyword ForgeClient (base_url, token, req_options).
-    * `:stage_dispatch?` — historiquement le switch de mode ; aujourd'hui toujours `true` (seul mode).
+    * `:step_dispatch?` — historiquement le switch de mode ; aujourd'hui toujours `true` (seul mode).
     * seams test : `:forge_client`, `:loader`, `:carte_loader`, `:spawner`, `:clock` (injectés si non-nil).
     * `:start_tick?` — défaut `true` ; `false` = pas de 1er tick auto (tests drivent via `force_poll/1`).
 
@@ -36,13 +36,13 @@ defmodule Fleet.Pilot.Poller do
   L'ancien mode `do_poll` legacy (route-table → `Dispatcher.dispatch` → `Fleet.Pipeline.start_pipeline`
   = Executor RAM, via l'état de l'`AutoDispatcher`) a été **supprimé** avec le rail legacy
   (`auto_dispatcher`/`dispatcher`/`pipeline_invoker`). Le module `Routing` lui-même a été retiré
-  comme code mort. Seul le mode stage subsiste ; le moteur RAM tombe en aval.
+  comme code mort. Seul le mode step subsiste ; le moteur RAM tombe en aval.
   """
 
   use GenServer
   require Logger
 
-  alias Fleet.Pilot.StageDispatcher
+  alias Fleet.Pilot.StepDispatcher
 
   # Verrou pipeline (source unique `Fleet.Pilot.Labels`) — lu par la réconciliation d'orphelins.
   @in_flight Fleet.Pilot.Labels.in_flight()
@@ -63,14 +63,14 @@ defmodule Fleet.Pilot.Poller do
     # QUE ses issues (sinon le poller d'Alice spawne pour Bob). Seam test : opt `:human`.
     :my_human,
     :forge_client_override,
-    stage_dispatch?: false,
+    step_dispatch?: false,
     forge_opts: [],
     loader: nil,
     carte_loader: nil,
     spawner: nil,
     task_queue: nil,
     clock: nil,
-    # Seam de recovery de wake threadé jusqu'à `StageDispatcher.dispatch_issue` (défaut nil → la vraie
+    # Seam de recovery de wake threadé jusqu'à `StepDispatcher.dispatch_issue` (défaut nil → la vraie
     # `WakeRecovery.wake/3`). Rend testable le contrat « wake raté ⇒ pipeline démarré, bail PRIS » sans hit
     # IncidentRegistry/tmux réels.
     wake_recovery: nil,
@@ -92,7 +92,7 @@ defmodule Fleet.Pilot.Poller do
           repo: String.t(),
           interval_ms: pos_integer(),
           forge_client_override: module() | nil,
-          stage_dispatch?: boolean(),
+          step_dispatch?: boolean(),
           forge_opts: keyword(),
           loader: module() | nil,
           spawner: module() | nil,
@@ -142,7 +142,7 @@ defmodule Fleet.Pilot.Poller do
       my_human: Keyword.get(opts, :human) || Fleet.Credentials.Human.current!(),
       interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
       forge_client_override: Keyword.get(opts, :forge_client),
-      stage_dispatch?: Keyword.get(opts, :stage_dispatch?, false),
+      step_dispatch?: Keyword.get(opts, :step_dispatch?, false),
       forge_opts: Keyword.get(opts, :forge_opts, []),
       loader: Keyword.get(opts, :loader),
       carte_loader: Keyword.get(opts, :carte_loader),
@@ -157,7 +157,7 @@ defmodule Fleet.Pilot.Poller do
     end
 
     Logger.info(
-      "fleet_pilot Poller start mode=stage MULTI-PROJET topic=#{fleet_topic(state.my_human)} " <>
+      "fleet_pilot Poller start mode=step MULTI-PROJET topic=#{fleet_topic(state.my_human)} " <>
         "interval=#{state.interval_ms}ms jitter=±10%"
     )
 
@@ -244,10 +244,10 @@ defmodule Fleet.Pilot.Poller do
   # Internals — GenServer poll orchestration
   # ============================================================
 
-  # Mode STAGE uniquement (le legacy `do_poll`/Executor RAM a été retiré). Le scan est dans
-  # `stage_do_poll/1` ; ce wrapper conserve le point d'entrée unique (jitter/backoff/safety-net partagés).
+  # Mode STEP uniquement (le legacy `do_poll`/Executor RAM a été retiré). Le scan est dans
+  # `step_do_poll/1` ; ce wrapper conserve le point d'entrée unique (jitter/backoff/safety-net partagés).
   # Découverte forge-driven. Le poller scanne TOUS les projets de SON humain (repos
-  # taggés `lcars-fleet-<human>` par l'onboarding), pas un `:repo` hard-codé. Per-repo : la logique stage
+  # taggés `lcars-fleet-<human>` par l'onboarding), pas un `:repo` hard-codé. Per-repo : la logique step
   # INCHANGÉE (state.repo posé par itération). Découverte OK → forge up → err_streak reset ; le scoping
   # issue `assigned_by=my_human` reste le garde anti-vol même si un repo d'Alice fuyait.
   # Découverte KO → backoff (handle_poll_error). Le bail repo-sérialisé reste per-repo (concurrent across,
@@ -263,7 +263,7 @@ defmodule Fleet.Pilot.Poller do
   # numéro → un pod vivant #N/repoB NE masque PLUS un orphelin #N/repoA, et la grace 2-tick ne se contamine
   # plus entre repos (plus de double-spawn). La clé porte l'identité.
   defp do_poll(state) do
-    forge = stage_forge_client(state)
+    forge = step_forge_client(state)
 
     case forge.search_repos_by_topic(fleet_topic(state.my_human), state.forge_opts) do
       {:ok, discovered} ->
@@ -279,7 +279,7 @@ defmodule Fleet.Pilot.Poller do
 
         {tally, suspects} =
           Enum.reduce(repos, {zero_tally(), MapSet.new()}, fn repo, {acc_tally, acc_suspects} ->
-            {t, st} = stage_do_poll(%{base | repo: repo})
+            {t, st} = step_do_poll(%{base | repo: repo})
             {merge_tally(acc_tally, t), MapSet.union(acc_suspects, st.orphan_lock_suspects)}
           end)
 
@@ -354,13 +354,13 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # ============================================================
-  # Mode STAGE — réacteur assignee-driven (la forge EST la machine à états ; ce module en est le réacteur).
+  # Mode STEP — réacteur assignee-driven (la forge EST la machine à états ; ce module en est le réacteur).
   # Découplé du legacy AutoDispatcher : pas de routes, pas d'Executor.
   # ============================================================
 
-  defp stage_do_poll(state) do
+  defp step_do_poll(state) do
     started = System.monotonic_time()
-    forge = stage_forge_client(state)
+    forge = step_forge_client(state)
 
     # Bail repo-sérialisé : on liste TOUS les ouverts (in-flight inclus) pour compter les
     # pipelines actifs. On liste AUSSI les PR ouvertes → les JUGES sont dispatchés
@@ -381,7 +381,7 @@ defmodule Fleet.Pilot.Poller do
       new_suspects = reconcile_orphan_locks(issues, pulls, pr_issue_ids, state, forge)
 
       # opts de dispatch calculées UNE fois/tick (partagées issues + pulls), pas 2×.
-      opts = stage_dispatch_opts(state)
+      opts = step_dispatch_opts(state)
 
       # SET des issues `lcars-awaits-arch` (déjà listées au tick → ZÉRO I/O ajouté), threadé
       # aux pulls via `:awaits_arch_ids` → `dispatch_review` skippe le juge d'une PR dont l'issue parente
@@ -392,8 +392,8 @@ defmodule Fleet.Pilot.Poller do
 
       tally =
         merge_tally(
-          stage_process_issues(issues, pr_issue_ids, state, opts),
-          stage_process_pulls(pulls, pulls_opts)
+          step_process_issues(issues, pr_issue_ids, state, opts),
+          step_process_pulls(pulls, pulls_opts)
         )
 
       duration_ms = elapsed_ms(started)
@@ -406,7 +406,7 @@ defmodule Fleet.Pilot.Poller do
       :telemetry.execute(
         [:fleet_pilot, :poller, :poll],
         %{duration_ms: duration_ms},
-        Map.merge(tally, %{status: :ok, mode: :stage, repo: state.repo})
+        Map.merge(tally, %{status: :ok, mode: :step, repo: state.repo})
       )
 
       # La liste forge a réussi, mais des `dispatch_*` PAR ITEM ont pu échouer
@@ -620,9 +620,9 @@ defmodule Fleet.Pilot.Poller do
   # Chemin PR-driven : chaque PR ouverte avec une review demandée → dispatch le juge.
   # Non gardé par le bail (les juges d'un pipeline DÉJÀ actif doivent avancer ; le bail ne borne
   # que l'ENTRÉE de nouveaux pipelines, côté issues).
-  defp stage_process_pulls(pulls, opts) do
+  defp step_process_pulls(pulls, opts) do
     Enum.reduce(pulls, zero_tally(), fn pr, acc ->
-      case StageDispatcher.dispatch_review(pr, opts) do
+      case StepDispatcher.dispatch_review(pr, opts) do
         # `:ok` couvre `{:spawned, _, _}` (juge/rework spawné) ET `{:merged, _}` (PR scellée).
         {:ok, _} -> %{acc | dispatched: acc.dispatched + 1}
         {:skipped, _reason} -> %{acc | skipped: acc.skipped + 1}
@@ -631,13 +631,13 @@ defmodule Fleet.Pilot.Poller do
     end)
   end
 
-  defp stage_process_issues(issues, pr_issue_ids, state, opts) do
+  defp step_process_issues(issues, pr_issue_ids, state, opts) do
     # Cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, gravée à l'onboard) — plus de
     # routing par label. Le poller lit la route → dispatch (carte_role). Le bail « 1 pipeline actif/repo »
     # se lit AUSSI sur la route (robuste, append-only). On classe chaque issue UNE fois :
-    #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er stage = pipeline démarré) → tient le bail ;
-    #     on dispatche son stage courant (continue le step_run, ou skip si in-flight).
-    #   - EN FILE (routée au 1er stage, ou routeless à onboarder, pas encore dispatchée) → démarre seulement
+    #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er step = pipeline démarré) → tient le bail ;
+    #     on dispatche son step courant (continue le step_run, ou skip si in-flight).
+    #   - EN FILE (routée au 1er step, ou routeless à onboarder, pas encore dispatchée) → démarre seulement
     #     si le bail est libre ; sinon attend (sérialisation → feature-branches séquentielles → FF merge).
     # `classify_issue` lit la route (+ charge la carte) UNE fois et la THREAD au dispatch via
     # `prefetch` (mergé aux opts) → fin du double get_route / double load carte (la classif du bail et le
@@ -663,7 +663,7 @@ defmodule Fleet.Pilot.Poller do
             pr? ->
               {%{acc | skipped: acc.skipped + 1}, lease}
 
-            # Pipeline ENGAGÉ → dispatche son stage courant ; il DÉTIENT le bail → lease inchangé.
+            # Pipeline ENGAGÉ → dispatche son step courant ; il DÉTIENT le bail → lease inchangé.
             engaged ->
               dispatch_engaged(payload, item_opts, acc, lease)
 
@@ -684,7 +684,7 @@ defmodule Fleet.Pilot.Poller do
   # `dispatch_issue` mélange :
   #
   #   * BAIL — le pipeline a-t-il DÉMARRÉ (pod spawné + verrou `lcars-in-flight` posé) ? L'ordre canonique
-  #     du spawn (`StageDispatcher.spawn_stage`) est verrou → pod → enqueue → WAKE, le wake EN DERNIER. Donc
+  #     du spawn (`StepDispatcher.spawn_step`) est verrou → pod → enqueue → WAKE, le wake EN DERNIER. Donc
   #     `{:error, {:wake_unreached, …}}` veut dire : le pipeline EST démarré (verrou + pod + brief en place),
   #     SEUL le réveil tmux a raté. Le pipeline tient donc le bail repo-sérialisé — sinon un 2e issue du même
   #     repo dans le même tick démarrerait un 2e pipeline (deux feature-branches concurrentes → conflit de merge).
@@ -695,8 +695,8 @@ defmodule Fleet.Pilot.Poller do
   # D'où le 3ᵉ cas `wake_unreached` = (démarré pour le BAIL, anomalie pour le TALLY). On retourne
   # `{tally, started?}` ; `started?` (= un pod a réellement été mis en vol ce tick) pilote la prise de bail,
   # INDÉPENDAMMENT du fait que le dispatch ait fini sans erreur.
-  defp stage_do_dispatch(payload, opts, acc) do
-    case StageDispatcher.dispatch_issue(payload, opts) do
+  defp step_do_dispatch(payload, opts, acc) do
+    case StepDispatcher.dispatch_issue(payload, opts) do
       {:ok, {:spawned, _pod_id, _role}} ->
         {%{acc | dispatched: acc.dispatched + 1}, true}
 
@@ -717,7 +717,7 @@ defmodule Fleet.Pilot.Poller do
   # Dispatch d'un pipeline ENGAGÉ (il tient DÉJÀ le bail) : le bail reste inchangé quoi qu'il arrive
   # (le tally est mis à jour, `started?` est ignoré — l'engagement vient de la classification, pas de ce step_run).
   defp dispatch_engaged(payload, opts, acc, lease) do
-    {acc2, _started?} = stage_do_dispatch(payload, opts, acc)
+    {acc2, _started?} = step_do_dispatch(payload, opts, acc)
     {acc2, lease}
   end
 
@@ -726,14 +726,14 @@ defmodule Fleet.Pilot.Poller do
   # tick attendent (sérialisation 1 pipeline/repo). Un wake raté tient le bail (le pipeline est démarré),
   # PAS un échec de dispatch (rien démarré).
   defp start_pipeline(payload, opts, acc) do
-    {acc2, started?} = stage_do_dispatch(payload, opts, acc)
+    {acc2, started?} = step_do_dispatch(payload, opts, acc)
     {acc2, started?}
   end
 
   # Classifie une issue (bail) ET pré-résout ce que `dispatch_issue` relirait sinon. Renvoie
   # `{engaged?, prefetch_kw}` ; `prefetch_kw` (mergé aux opts de dispatch) porte `:prefetched_route` +
   # `:prefetched_carte` → lecture forge/disque UNE seule fois. ENGAGÉ = pod en vol (`in-flight`) OU route
-  # avancée au-delà du 1er stage (pipeline démarré, entre deux step_runs). Fast-path : in-flight → pas de lecture
+  # avancée au-delà du 1er step (pipeline démarré, entre deux step_runs). Fast-path : in-flight → pas de lecture
   # route (`decide` le skip de toute façon). Routeless (`:none`) → EN FILE, route nil threadée (onboard en
   # aval). Erreur HTTP get_route → EN FILE, RIEN threadé (le dispatch re-lit → fail-loud `:route_resolution`,
   # jamais de wedge du bail par une carte/route illisible).
@@ -745,21 +745,21 @@ defmodule Fleet.Pilot.Poller do
     if @in_flight in labels do
       {true, []}
     else
-      forge = stage_forge_client(state)
+      forge = step_forge_client(state)
       n = Map.get(issue, "number")
 
       case forge.get_route(state.repo, n, state.forge_opts) do
-        {:ok, {carte, stage} = route} when is_binary(carte) and is_binary(stage) ->
+        {:ok, {carte, step} = route} when is_binary(carte) and is_binary(step) ->
           # Le bail se lit sur la ROUTE (append-only, robuste), JAMAIS sur le succès du chargement de la
-          # carte. Une route PRÉSENTE = un pipeline déjà entré dans la machine. ENGAGÉ ssi le stage courant
+          # carte. Une route PRÉSENTE = un pipeline déjà entré dans la machine. ENGAGÉ ssi le step courant
           # n'est pas le 1er de la carte (pipeline avancé entre deux step_runs). Si la carte échoue à charger
           # TRANSITOIREMENT (réseau/forge nil), on NE PEUT PAS exclure que ce pipeline soit avancé → fail-closed :
           # on le classe ENGAGÉ (bail TENU). Sinon une carte-nil ferait perdre le bail d'un pipeline engagé →
           # un 2e issue du même repo démarrerait un 2e pipeline (perte de sérialisation). Le dispatch de SON
-          # stage fail-loud si la carte manque (carte re-lue côté StageDispatcher), mais le bail NE se libère
+          # step fail-loud si la carte manque (carte re-lue côté StepDispatcher), mais le bail NE se libère
           # pas pour autant. Carte revenue au tick suivant → classification précise reprise.
           carte_map = load_carte_or_nil(carte, state)
-          engaged = is_nil(carte_map) or not first_stage?(carte_map, stage)
+          engaged = is_nil(carte_map) or not first_step?(carte_map, step)
           {engaged, [prefetched_route: route, prefetched_carte: carte_map]}
 
         :none ->
@@ -779,26 +779,26 @@ defmodule Fleet.Pilot.Poller do
     _ -> nil
   end
 
-  # Le stage est-il le 1er de la carte (= routé mais pas avancé = EN FILE) ? Anomalie carte → `true`
+  # Le step est-il le 1er de la carte (= routé mais pas avancé = EN FILE) ? Anomalie carte → `true`
   # (traité « non engagé » : le dispatch fail-loud surfacera, jamais de wedge du bail par une carte illisible).
-  defp first_stage?(carte_map, stage) do
-    case Fleet.Pilot.CarteNav.first_stage(carte_map) do
-      {:ok, {first, _role}} -> stage == first
+  defp first_step?(carte_map, step) do
+    case Fleet.Pilot.CarteNav.first_step(carte_map) do
+      {:ok, {first, _role}} -> step == first
       _ -> true
     end
   end
 
-  # Construit les opts de StageDispatcher.dispatch_issue. Les seams
+  # Construit les opts de StepDispatcher.dispatch_issue. Les seams
   # (loader/spawner/task_queue/clock) ne sont injectés QUE s'ils sont set sur le
-  # state — sinon StageDispatcher applique ses défauts réels (passer nil
+  # state — sinon StepDispatcher applique ses défauts réels (passer nil
   # écraserait le défaut).
   # `:task_queue` est porté par le state (lu dans `live_owned_refs/1`) et DOIT être transmis ici,
-  # sinon StageDispatcher retombe sur `Fleet.TaskQueue` global pour l'enqueue du brief
+  # sinon StepDispatcher retombe sur `Fleet.TaskQueue` global pour l'enqueue du brief
   # (seam de broker non honoré côté dispatch).
-  defp stage_dispatch_opts(state) do
+  defp step_dispatch_opts(state) do
     [
       repo: state.repo,
-      forge_client: stage_forge_client(state),
+      forge_client: step_forge_client(state),
       forge_opts: state.forge_opts
     ]
     |> maybe_put_seam(:loader, state.loader)
@@ -819,8 +819,8 @@ defmodule Fleet.Pilot.Poller do
   defp maybe_put_seam(opts, _key, nil), do: opts
   defp maybe_put_seam(opts, key, value), do: Keyword.put(opts, key, value)
 
-  defp stage_forge_client(%__MODULE__{forge_client_override: nil}), do: Fleet.Pilot.ForgeClient
-  defp stage_forge_client(%__MODULE__{forge_client_override: fc}), do: fc
+  defp step_forge_client(%__MODULE__{forge_client_override: nil}), do: Fleet.Pilot.ForgeClient
+  defp step_forge_client(%__MODULE__{forge_client_override: fc}), do: fc
 
   defp elapsed_ms(started_native) do
     System.convert_time_unit(

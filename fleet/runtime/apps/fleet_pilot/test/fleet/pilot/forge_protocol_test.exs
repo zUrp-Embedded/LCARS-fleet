@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.ForgeProtocolTest do
                ForgeProtocol.parse_route_marker(ForgeProtocol.route_marker("poc-cycle", "build"))
     end
 
-    test "extrait {pipeline, stage} d'un marqueur" do
+    test "extrait {pipeline, step} d'un marqueur" do
       assert {:ok, {"poc-cycle", "build"}} =
                ForgeProtocol.parse_route_marker("[lcars-route:poc-cycle:build]")
     end

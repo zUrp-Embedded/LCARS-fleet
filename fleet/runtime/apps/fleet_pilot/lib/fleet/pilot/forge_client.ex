@@ -3,7 +3,7 @@ defmodule Fleet.Pilot.ForgeClient do
   Client Gitea REST API de `fleet_pilot` — la couche DOMAINE de la forge-state-machine
   (la forge EST la machine à états). Porte les ops sur issues/PR (read/write idempotentes),
   l'état de jury des PR, l'onboarding repo + sceau d'admission, et l'adaptateur credential→wire
-  `as_role/2`. C'est le module injecté par le seam `:forge_client` (StageDispatcher/Poller).
+  `as_role/2`. C'est le module injecté par le seam `:forge_client` (StepDispatcher/Poller).
 
   Deux couches vivent SOUS lui (ré-exportées ici pour préserver le contrat historique) :
 
@@ -597,26 +597,26 @@ defmodule Fleet.Pilot.ForgeClient do
 
   # ============================================================
   # Marqueur ROUTE — position carte sur la forge.
-  # `[lcars-route:<pipeline>:<stage>]` : grave (pipeline, stage) sur l'issue, car l'assignee
-  # (= rôle) seul n'identifie pas le stage (un rôle peut être sur N stages, cf. CarteNav).
-  # Écrit à l'assignation (entrée + reassign), lu par StageDispatcher au spawn.
+  # `[lcars-route:<pipeline>:<step>]` : grave (pipeline, step) sur l'issue, car l'assignee
+  # (= rôle) seul n'identifie pas le step (un rôle peut être sur N steps, cf. CarteNav).
+  # Écrit à l'assignation (entrée + reassign), lu par StepDispatcher au spawn.
   # ============================================================
 
   @doc """
-  Grave le marqueur route `[lcars-route:<pipeline>:<stage>]`. Idempotent (dédup sur le marqueur
+  Grave le marqueur route `[lcars-route:<pipeline>:<step>]`. Idempotent (dédup sur le marqueur
   exact → un replay ne duplique pas). Le dernier marqueur posé fait foi (cf. `get_route`).
   """
   @spec post_route(String.t(), integer(), String.t(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
-  def post_route(repo, issue_number, pipeline, stage, opts \\ [])
-      when is_binary(pipeline) and is_binary(stage) do
-    marker = ForgeProtocol.route_marker(pipeline, stage)
+  def post_route(repo, issue_number, pipeline, step, opts \\ [])
+      when is_binary(pipeline) and is_binary(step) do
+    marker = ForgeProtocol.route_marker(pipeline, step)
     post_comment(repo, issue_number, marker, Keyword.put(opts, :dedup_signature, marker))
   end
 
   @doc """
   Lit la position carte courante = le **dernier** marqueur `[lcars-route:p:s]` de l'issue.
-  `:none` si aucun (issue hors-carte / 1-stage). `{:error, _}` sur échec HTTP/config.
+  `:none` si aucun (issue hors-carte / 1-step). `{:error, _}` sur échec HTTP/config.
   """
   @spec get_route(String.t(), integer(), Keyword.t()) ::
           {:ok, {String.t(), String.t()}} | :none | {:error, term()}
@@ -626,7 +626,7 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, comments} when is_list(comments) <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       # Ne faire foi QUE des comments écrits par le compte SYSTÈME (bot). Un user forge
-      # (humain/attaquant) qui poste `[lcars-route:evil:stage]` piloterait sinon la navigation.
+      # (humain/attaquant) qui poste `[lcars-route:evil:step]` piloterait sinon la navigation.
       comments
       |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))
       |> Enum.map(& &1["body"])
@@ -644,7 +644,7 @@ defmodule Fleet.Pilot.ForgeClient do
   `{:error, _}` sur échec HTTP/config — le caller NE rebondit PAS à l'aveugle si le
   budget n'est pas vérifiable (un rebond non vérifiable pourrait boucler).
 
-  PAGINÉ : même si le budget de rework (`nb_stages * (max_rounds+1)`) reste en
+  PAGINÉ : même si le budget de rework (`nb_steps * (max_rounds+1)`) reste en
   général sous 50, le compteur est source-de-vérité du bound anti-runaway — un step_run signé
   perdu au-delà de 50 sous-compterait le budget (sur-permissif). On lit donc TOUTES les pages.
   """
@@ -670,8 +670,8 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Extrait le dernier bloc ` ```result ` posté dans un comment de step_run — le `result_K`
-  gravé par `StepRunCompleter` quand le stage avance vers un gatekeeper. Sert
-  à `StageDispatcher` pour donner au pod gatekeeper **quoi juger** dans son brief
+  gravé par `StepRunCompleter` quand le step avance vers un gatekeeper. Sert
+  à `StepDispatcher` pour donner au pod gatekeeper **quoi juger** dans son brief
   (option B : pas de clone de branche). `:none` si aucun ; `{:error, _}` HTTP/config.
   """
   @spec get_predecessor_result(String.t(), integer(), Keyword.t()) ::
@@ -767,7 +767,7 @@ defmodule Fleet.Pilot.ForgeClient do
   Injecte le token du compte de RÔLE (`role`) dans `forge_opts`, sous la clé `:token` que
   `resolve_config`/`resolve_token` relisent → le SYSTÈME poste/merge EN SON NOM sur la forge (avatar +
   traça honnête, au lieu du compte système). C'est l'adaptateur UNIQUE credential→wire — source unique
-  partagée par `StepRunCompleter`, `StageDispatcher` et les sceaux gatekeeper (le writer du `:token` est ici,
+  partagée par `StepRunCompleter`, `StepDispatcher` et les sceaux gatekeeper (le writer du `:token` est ici,
   collé à son reader). `Fleet.Credentials.RoleToken` fournit le token, `forge_opts[:token]` le porte
   jusqu'à la requête. Rôle vide/absent OU token absent/illisible/vide → `forge_opts` inchangé → fallback
   sur le token (système) déjà présent ; `RoleToken.token/1` émet un `Logger.warning` sur ce dégradé, donc

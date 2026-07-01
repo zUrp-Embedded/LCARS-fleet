@@ -326,14 +326,14 @@ if config_env() != :test do
   end
 
   # ============================================================
-  # A2/A3 — runtime STAGE-MODE (forge = machine à états) + BL-045b auth push
+  # A2/A3 — runtime STEP-MODE (forge = machine à états) + BL-045b auth push
   # ============================================================
-  # OFF par défaut. `LCARS_PILOT_STAGE=true` démarre Poller(stage) + StepRunConsumer
-  # (cf. Fleet.Pilot.Application.stage_children!). F-037 : requiert UNIQUEMENT FORGE_BASE_URL — c'est la
-  # seule garde fail-loud du boot stage (découverte des projets par topic + push per-step-run). LCARS_PILOT_POLL_REPO
+  # OFF par défaut. `LCARS_PILOT_STAGE=true` démarre Poller(step) + StepRunConsumer
+  # (cf. Fleet.Pilot.Application.step_children!). F-037 : requiert UNIQUEMENT FORGE_BASE_URL — c'est la
+  # seule garde fail-loud du boot step (découverte des projets par topic + push per-step-run). LCARS_PILOT_POLL_REPO
   # n'est PAS requis (override legacy/test seulement ; la découverte réelle est par topic forge, pas un repo fixe).
   if System.get_env("LCARS_PILOT_STAGE") == "true" do
-    config :fleet_pilot, stage_dispatch?: true
+    config :fleet_pilot, step_dispatch?: true
   end
 
   # #8 cohérence : plus de routing par label (`LCARS_PILOT_STAGE_ROUTING` retiré). Le routing vit dans la

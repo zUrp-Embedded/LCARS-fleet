@@ -10,7 +10,7 @@ Service d'auto-orchestration issues Gitea (M-033 backlog, doctrine
 core ring 1, pas core**).
 
 Découvre ses projets par topic (`lcars-fleet-<humain>`) et spawn le rôle
-producteur via le rail forge-state-machine décrit ci-dessous (mode **stage**) :
+producteur via le rail forge-state-machine décrit ci-dessous (mode **step**) :
 la forge EST la machine à états (label de route gravé sur le issue). Le
 catalogue déclaratif `forge-routing.yaml` (axes `type:` × `state:` × `assignee`)
 a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le lisait.
@@ -21,20 +21,20 @@ a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le l
 > `lcars-dispatched` (lock atomique) pour l'idempotence inter-restart. Ce moteur
 > RAM a été **supprimé** (②.3 / BL-050 — cf. `fleet_pipeline` `Application`,
 > `start_pipeline`/`Executor` n'existent plus) et le `AutoDispatcher` retiré à
-> F-09. Le dispatch actuel passe **uniquement** par le mode stage (§ ci-dessous).
+> F-09. Le dispatch actuel passe **uniquement** par le mode step (§ ci-dessous).
 
-## Mode stage (forge-state-machine — A2/A3, actif)
+## Mode step (forge-state-machine — A2/A3, actif)
 
-Le mode **stage** (la forge EST la machine à états : issue **assigné** à l'humain owner, non
+Le mode **step** (la forge EST la machine à états : issue **assigné** à l'humain owner, non
 verrouillé → spawn le rôle **PRODUCTEUR** ; l'**assignee = l'humain**, point fixe — DN §1)
-double puis remplace le dispatch legacy ci-dessus. Activé par `:stage_dispatch?` + la forge `base_url`
-(`:forge[:base_url]` / `FORGE_BASE_URL`) — c'est la **seule** garde fail-loud du boot stage
-(`Fleet.Pilot.Application.stage_children!`) : sans `base_url`, ni découverte par topic ni push per-step-run.
+double puis remplace le dispatch legacy ci-dessus. Activé par `:step_dispatch?` + la forge `base_url`
+(`:forge[:base_url]` / `FORGE_BASE_URL`) — c'est la **seule** garde fail-loud du boot step
+(`Fleet.Pilot.Application.step_children!`) : sans `base_url`, ni découverte par topic ni push per-step-run.
 `:poll_repo` n'est **plus** une condition d'activation (override legacy/test mono-repo seulement, cf. § Knobs) :
 la découverte des repos se fait par topic (`lcars-fleet-<human>`), pas par repo fixe, et le repo+remote de
 chaque step_run voyagent dans l'event `pod.completed`. Submodules :
 
-- `Fleet.Pilot.StageDispatcher` — `decide/2` (issue assignée non verrouillée → `{:spawn, role, profile}`
+- `Fleet.Pilot.StepDispatcher` — `decide/2` (issue assignée non verrouillée → `{:spawn, role, profile}`
   où `role` = **rôle producteur invariant** `:producer_role`, défaut `engineer` — pas un marqueur
   par-issue, DN §1) + `dispatch_issue/2` (ordre canonique label-verrou → comment → pod). Les **juges**
   sont dispatchés PR-driven via `dispatch_review/2` (②.1d, **PR = machine à états**, DN §1.4-1.5,
@@ -55,7 +55,7 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   construction (process-group dédié, tué entier à la deadline mur) — remplace le `Task.async`+`brutal_kill`
   qui ne tuait que le Task BEAM en laissant fuir le process git porteur du token forge.
 - `Fleet.Pilot.BriefBuilder` — **autorité du FORMAT des briefs** : worker / judge / brief-review /
-  rework / conflit + instructions de voix de l'eng. `StageDispatcher` CHOISIT quel brief selon l'état forge
+  rework / conflit + instructions de voix de l'eng. `StepDispatcher` CHOISIT quel brief selon l'état forge
   (`build_brief/9` dispatche sur `brief_kind`/`judge_target`), `BriefBuilder` le FORME. La **judge-ness**
   est fail-loud (kind/target hors-vocab → `raise` ; un juge ne reçoit JAMAIS un corps d'issue exécutable) ;
   le brief juge est **désamorcé** via `Fleet.Pipeline.GateBrief` (critère rendu comme contexte). `forge` =
@@ -63,16 +63,16 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
 - `Fleet.Pilot.Poller` — **DÉCOUVRE** ses repos par topic (`lcars-fleet-<human>`) PUIS **ADMET** uniquement
   ceux scellés système (`ForgeClient.admitted?` — marqueur d'onboarding bot-authored ; le topic mutable seul
   ne suffit plus, cf. § Onboarding « sceau d'admission »). Sur chaque repo admis : scanne, lit la **route-comment**
-  (`[lcars-route:carte:stage]`, gravée par `create_issue` = la state-machine de routing) → dispatche le rôle du
-  stage (`carte_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du
-  1er stage). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
+  (`[lcars-route:carte:step]`, gravée par `create_issue` = la state-machine de routing) → dispatche le rôle du
+  step (`carte_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du
+  1er step). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
   **Bail fail-closed (2 invariants)** : (1) le bail se prend dès qu'un pipeline est DÉMARRÉ (verrou posé +
   pod spawné), jamais sur le succès d'une étape postérieure — un dispatch qui rend `{:error,{:wake_unreached,_}}`
   (verrou+pod+brief en place, seul le réveil tmux a raté) PREND le bail intra-tick (sinon un 2e issue du même
   repo démarrerait un 2e pipeline) ; l'anomalie reste comptée en `errors`/`last_tally_errors`, jamais avalée.
   (2) l'engagement se lit sur la ROUTE (append-only, robuste), pas sur le chargement de la carte : un échec
   TRANSITOIRE de carte (réseau/forge nil) sur un pipeline routé le classe ENGAGÉ (bail TENU, fail-closed) —
-  le dispatch de son stage fail-loud si la carte manque, mais le bail ne se libère pas.
+  le dispatch de son step fail-loud si la carte manque, mais le bail ne se libère pas.
 - `Fleet.Pilot.Labels` / `Fleet.Pilot.ForgeProtocol` — **vocabulaire wire-protocol** (source unique, build+parse
   **co-localisés** : un seul point si un format change). `Labels` = les **labels-verrous** non dérivables de
   l'état forge (`lcars-in-flight`/`lcars-awaits-arch`). `ForgeProtocol` = les **formats purs** (aucun I/O) : la
@@ -82,7 +82,7 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   injecté par le seam `:forge_client`. Agrégat éclaté par **sous-domaine** : ce module ne garde que le **cœur
   couplé** (cycle de vie d'une issue : label/assignee/comment/close/create + PR open/review-request/merge +
   route/step_run) + l'adaptateur credential→wire `as_role/2` (token du compte de rôle dans `forge_opts[:token]`,
-  source unique partagée par `StepRunCompleter`/`StageDispatcher`/sceaux gatekeeper). Les concerns à **frontière
+  source unique partagée par `StepRunCompleter`/`StepDispatcher`/sceaux gatekeeper). Les concerns à **frontière
   nette** vivent dans des sous-modules :
     - `Fleet.Pilot.ForgeClient.Transport` — moteur HTTP/config/encodage-URL/pagination + login système (zéro
       protocole forge) ; `ForgeClient` l'**`import`e**.
@@ -119,9 +119,9 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   AU LIEU d'une publish vide (`:no_deliverable_commit` = wedge silencieux). Le brief dit à l'eng de marquer
   `blocked` plutôt que deviner à l'aveugle.
   Identité ②.1e via `Fleet.Credentials.RoleToken` (poste EN SON NOM ; token absent → fallback système loggué).
-  (Legacy carte multi-stage : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
+  (Legacy carte multi-step : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
 
-Knobs : `:stage_dispatch?` + `:poll_interval_ms` (stage ; la forge `base_url` est l'unique config requise),
+Knobs : `:step_dispatch?` + `:poll_interval_ms` (step ; la forge `base_url` est l'unique config requise),
 `:poll_repo` (override legacy/test mono-repo seulement — accepté par le Poller mais écrasé à chaque tick par la
 découverte topic ; **pas** la source en prod), `:producer_role` (défaut `engineer`),
 `:reviewer_roles` (juges PR, défaut data posé en `config/config.exs`), `:gatekeeper_role` (scelle les fusions,
@@ -139,7 +139,7 @@ ne nécessite pas la cascade. Chaque consommateur Bus (`StepRunConsumer`) se ré
 `Bus.subscribe()` vit dans `init/1`, qu'OTP rejoue à chaque restart (un consommateur redémarré n'est jamais
 sourd ; contrat verrouillé par test côté `fleet_starfleet`).
 
-Le superviseur démarre aussi, **inconditionnellement** (avant le rail stage), `Fleet.Pilot.ForgeFinch` —
+Le superviseur démarre aussi, **inconditionnellement** (avant le rail step), `Fleet.Pilot.ForgeFinch` —
 pool HTTP/1 dédié au `ForgeClient` avec `conn_max_idle_time: 30_000`. Le défaut Finch `:infinity` laisse une
 connexion idle traîner jusqu'à ce que la forge la ferme côté serveur → le 1er appel après idle pend jusqu'au
 `receive_timeout` (10s), et `create_issue` (qui enchaîne 3 appels : `create_issue` + `add_label`[GET+PUT])
@@ -148,7 +148,7 @@ hors du rail Poller/StepRunConsumer. `Fleet.Pilot.ForgeClient.Transport.request/
 **trace tout appel forge >1s** (`Logger.warning "ForgeClient … LENT …ms"`) — l'observabilité qui localise un appel forge lent
 au run réel. Câblage du pool verrouillé par `forge_finch_test.exs` (sonde le process, pas un knob).
 
-Le rail stage démarre aussi `Fleet.Pilot.WorktreeSync` (AVANT Poller/StepRunConsumer) — sérialiseur qui
+Le rail step démarre aussi `Fleet.Pilot.WorktreeSync` (AVANT Poller/StepRunConsumer) — sérialiseur qui
 PROJETTE le livrable sur le clone local après merge. Au merge terminal, `origin/main` avance sur la forge
 mais le worktree `main` de `/home/projects/<name>` (« le livrable » de `ProjectOnboard`) reste figé à
 l'onboarding ; `GatekeeperSeal.seal_and_merge` (point UNIQUE des deux chemins de merge) lui caste

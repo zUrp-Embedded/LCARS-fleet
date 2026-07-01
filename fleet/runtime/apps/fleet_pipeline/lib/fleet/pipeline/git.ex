@@ -1,7 +1,7 @@
 defmodule Fleet.Pipeline.Git do
   @moduledoc """
   Mécanisme système-side de publication git post-EXTRACT. Composé par le rail
-  d'orchestration sur `pod.completed`, lorsque la stage déclare `post_extract.git`,
+  d'orchestration sur `pod.completed`, lorsque la step déclare `post_extract.git`,
   pour transformer le travail du pod en commit (puis push) côté monde.
 
   Pure data → action :

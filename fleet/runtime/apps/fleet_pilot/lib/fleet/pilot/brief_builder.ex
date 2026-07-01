@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.BriefBuilder do
   @moduledoc """
   Autorité du FORMAT des briefs : worker / judge / brief-review / rework / conflit, plus les
-  instructions de voix de l'eng. `StageDispatcher` APPELLE (il choisit QUEL brief selon l'état forge),
+  instructions de voix de l'eng. `StepDispatcher` APPELLE (il choisit QUEL brief selon l'état forge),
   il ne FORME plus le brief lui-même.
 
   La judge-ness (et la cible d'un juge) est une propriété de SÉCURITÉ : elle ne s'infère JAMAIS par
@@ -111,20 +111,20 @@ defmodule Fleet.Pilot.BriefBuilder do
         issue,
         forge_opts,
         route,
-        stage_spec
+        step_spec
       ) do
-    # Le `brief_kind` du STAGE (carte) PRIME sur celui du profil (override per-stage) — réutilise
-    # un profil worker (consultant) en JUGE sans profil-doublon. ABSENT au stage → défaut profil
+    # Le `brief_kind` du STEP (carte) PRIME sur celui du profil (override per-step) — réutilise
+    # un profil worker (consultant) en JUGE sans profil-doublon. ABSENT au step → défaut profil
     # (lui-même "worker" par défaut, fail-safe) via le `||` : l'absence n'est PAS une anomalie. Ce
     # qui suit traite la valeur PRÉSENTE-mais-hors-vocab, distincte de l'absence.
-    kind = Map.get(stage_spec, "brief_kind") || Fleet.CapProfile.brief_kind(profile)
+    kind = Map.get(step_spec, "brief_kind") || Fleet.CapProfile.brief_kind(profile)
 
     # Somme TOTALE et fail-loud. La judge-ness (et la cible d'un juge) est une propriété de
     # SÉCURITÉ : elle ne s'infère JAMAIS par omission de clause. Un kind/target hors-vocab (typo, ou
     # valeur d'un futur vocabulaire) NE DOIT PAS retomber silencieusement sur worker — sinon un rôle
     # juge recevrait un corps d'issue EXÉCUTABLE (brief actif) au lieu d'un brief désamorcé. On
     # rejette bruyamment (raise) plutôt que de construire un brief dangereux en silence.
-    case {kind, Map.get(stage_spec, "judge_target")} do
+    case {kind, Map.get(step_spec, "judge_target")} do
       # Juge de BRIEF (judge_target:brief) → juge le issue.body (exécutable ?), PAS un livrable
       # (pas de code en amont).
       {"judge", "brief"} ->
@@ -204,7 +204,7 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> nil
       end
 
-    {pipeline, stage} =
+    {pipeline, step} =
       case route do
         {p, s} -> {p, s}
         _ -> {nil, role}
@@ -222,7 +222,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     # Sans le critère (`request`) ET le livrable (diff via `outputs`), le juge jugerait du `{}` → rework
     # infini (le Reviewer ne peut JAMAIS `continue` sur du vide) — c'est la famine d'info.
     Fleet.Pipeline.GateBrief.build(%{
-      stage: stage,
+      step: step,
       pipeline_id: pipeline,
       gate: nil,
       outputs: outputs,
@@ -241,14 +241,14 @@ defmodule Fleet.Pilot.BriefBuilder do
     # toujours issue-path). On l'utilise → pas de `get_issue` redondant. Fallback fetch si body absent (robustesse).
     brief = issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts)
 
-    {pipeline, stage} =
+    {pipeline, step} =
       case route do
         {p, s} -> {p, s}
         _ -> {nil, role}
       end
 
     Fleet.Pipeline.GateBrief.build(%{
-      stage: stage,
+      step: step,
       pipeline_id: pipeline,
       gate: nil,
       subject: :brief,

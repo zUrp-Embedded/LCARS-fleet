@@ -41,7 +41,7 @@ defmodule Fleet.API.ReadinessTest do
       assert is_list(degraded)
 
       # 6 sous-systèmes : event.registry, coord.backend, shutdown.dispatcher, launch.backend,
-      # mcp.pod_facing, + pilot.stage (F-010 : liveness du rail forge-state-machine, ex-vert-creux).
+      # mcp.pod_facing, + pilot.step (F-010 : liveness du rail forge-state-machine, ex-vert-creux).
       assert length(subsystems) == 6
       assert is_binary(ts)
 

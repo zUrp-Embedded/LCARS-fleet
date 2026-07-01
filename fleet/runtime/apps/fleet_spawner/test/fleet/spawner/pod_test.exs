@@ -398,13 +398,13 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — pas de double-enqueue si un brief est DÉJÀ en file (dispatch stage : enqueué avant le spawn) [F-arch-MCP]" do
+    test "PUSH — pas de double-enqueue si un brief est DÉJÀ en file (dispatch step : enqueué avant le spawn) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-mq2-#{System.unique_integer([:positive])}"
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
-      # Simule le dispatch stage : le brief role-aware est enqueué AVANT le spawn (StageDispatcher).
+      # Simule le dispatch step : le brief role-aware est enqueué AVANT le spawn (StepDispatcher).
       {:ok, _} =
         Fleet.TaskQueue.enqueue(pod_id, %{brief: "brief-du-dispatcher", role: "engineer"})
 

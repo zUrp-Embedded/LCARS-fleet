@@ -43,8 +43,8 @@ config :fleet_spawner, start_publish_consumer: false
 # BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
 config :fleet_spawner, start_pod_warden: false
 
-# fleet_pilot hermétisme test : le mode stage est OFF par défaut (`:stage_dispatch?` absent →
-# `stage_children` = [] → app inerte, pas de Poller/StepRunConsumer parasite). Le knob legacy
+# fleet_pilot hermétisme test : le mode step est OFF par défaut (`:step_dispatch?` absent →
+# `step_children` = [] → app inerte, pas de Poller/StepRunConsumer parasite). Le knob legacy
 # `start_dispatcher` a été retiré (②.3 / BL-050, rail AutoDispatcher supprimé).
 
 # F-E7 — pas de gap inter-écritures en test (le défaut prod = 2000ms ; StepRunCompleter.space_writes →

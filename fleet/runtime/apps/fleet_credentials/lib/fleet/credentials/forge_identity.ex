@@ -38,7 +38,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   ## Trailer rôle
 
   `Co-authored-by: LCARS-<role> <<role>@lcars.local>` — le trailer est ce que la gate
-  d'identité de commit vérifie (présence + rôle ↔ stage). Pure string, vérifiable mécaniquement.
+  d'identité de commit vérifie (présence + rôle ↔ step). Pure string, vérifiable mécaniquement.
 
   ## allowed_emails (gate d'identité de commit)
 

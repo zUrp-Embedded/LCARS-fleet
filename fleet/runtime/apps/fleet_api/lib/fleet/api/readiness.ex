@@ -67,7 +67,7 @@ defmodule Fleet.API.Readiness do
       {"shutdown.dispatcher", &shutdown_dispatcher/0},
       {"launch.backend", &launch_backend/0},
       {"mcp.pod_facing", &mcp_pod_facing/0},
-      {"pilot.stage", &pilot_stage/0}
+      {"pilot.step", &pilot_step/0}
     ]
   end
 
@@ -92,14 +92,14 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # Le rail forge-state-machine (Poller stage + StepRunConsumer) est sondé — sa mort
+  # Le rail forge-state-machine (Poller step + StepRunConsumer) est sondé — sa mort
   # runtime (singleton tombé) bascule en `:degraded` au lieu d'un vert-creux. Délégué à fleet_pilot,
-  # qui possède la topologie du rail (`Fleet.Pilot.Application.stage_status/0`) — pas de fuite des
-  # noms de process Ring 2 dans Ring 4. `:inactive` si stage off (n'altère pas le verdict global).
+  # qui possède la topologie du rail (`Fleet.Pilot.Application.step_status/0`) — pas de fuite des
+  # noms de process Ring 2 dans Ring 4. `:inactive` si step off (n'altère pas le verdict global).
   # (Le rail forge-state-machine est l'UNIQUE rail de dispatch : pas de sonde dispatcher RAM legacy.)
-  defp pilot_stage do
-    {state, detail} = Fleet.Pilot.Application.stage_status()
-    probe("pilot.stage", state, detail)
+  defp pilot_step do
+    {state, detail} = Fleet.Pilot.Application.step_status()
+    probe("pilot.step", state, detail)
   end
 
   # Backend d'escalade Cat 5 coord : `NotWiredYet` (ou absent) ⇒ escalades
@@ -169,7 +169,7 @@ defmodule Fleet.API.Readiness do
   # DynamicSupervisor d'accepteurs de socket per-pod tourne-t-il ?) délégué au
   # propriétaire de la topologie `Fleet.MCP.Supervisor.pod_facing_status/0` — pas
   # un knob de config. Délégation = pas de fuite des noms de process Ring 3 dans
-  # Ring 4 (même pattern que `pilot.stage`). Le `mcp_server_spec` (côté spawner)
+  # Ring 4 (même pattern que `pilot.step`). Le `mcp_server_spec` (côté spawner)
   # reste sondé en config : c'est le spec injecté AUX pods, pas un process — sa
   # présence/absence est l'état réel à ce niveau. Substrat vivant + spec présent →
   # `:operational` ; substrat mort, OU vivant mais spec absent (pods non câblés) →

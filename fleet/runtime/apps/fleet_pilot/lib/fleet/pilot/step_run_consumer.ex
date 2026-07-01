@@ -3,18 +3,18 @@ defmodule Fleet.Pilot.StepRunConsumer do
   Consumer Bus de la **fin-de-step-run** (la forge EST la machine à états ; ce module en réagit).
   Subscribe `Fleet.EventRouter.Bus` (topic `fleet.events`) ; sur chaque
   `%Fleet.Event{source: :spawner, type: :"pod.completed"}` d'un pod
-  **stage-dispatch** (assignee-driven), traduit l'event en `step_run` et délègue la
+  **step-dispatch** (assignee-driven), traduit l'event en `step_run` et délègue la
   séquence de complétion à `Fleet.Pilot.StepRunCompleter`.
 
-  ## Gatekeeper = exception (escalade), PAS un stage
+  ## Gatekeeper = exception (escalade), PAS un step
 
-  La gate du stage fini décide AVANT d'avancer (`Fleet.Pipeline.Gates.evaluate/3`,
+  La gate du step fini décide AVANT d'avancer (`Fleet.Pipeline.Gates.evaluate/3`,
   PUR) :
 
-    * `:pass`                  → avance dans la carte (next_stage).
-    * `{:fail, _}`             → REBOND borné vers le 1er stage (rework anti-runaway).
+    * `:pass`                  → avance dans la carte (next_step).
+    * `{:fail, _}`             → REBOND borné vers le 1er step (rework anti-runaway).
     * `{:dispatch_gatekeeper}` → **escalade** : une gate `soft` ou `terminal`
-      non-tranchable n'est PAS un stage d'ordonnancement — c'est une convocation
+      non-tranchable n'est PAS un step d'ordonnancement — c'est une convocation
       du **gatekeeper permanent** (juge d'exception). On enqueue
       un brief d'éval au gatekeeper (work-session, adressé par `pod_id` via
       TaskQueue/MCP), on tient le contexte de reprise en RAM (`gate_evals`, keyé
@@ -22,22 +22,22 @@ defmodule Fleet.Pilot.StepRunConsumer do
       `%Fleet.Event{source: :task_queue, type: :work_item_completed}` → `resume_gate/3`.
 
   Le juge est **rare par construction** : le moteur ne peut pas le sur-convoquer
-  (le `soft`/non-tranchable est une *condition runtime*, pas un *tag de stage*).
-  Pas de stage `role: gatekeeper`, pas de biconditionnelle `soft⟺gatekeeper` —
-  toute la machinerie explicit-stage est retirée. Ce module REMPLACE l'ancien
+  (le `soft`/non-tranchable est une *condition runtime*, pas un *tag de step*).
+  Pas de step `role: gatekeeper`, pas de biconditionnelle `soft⟺gatekeeper` —
+  toute la machinerie explicit-step est retirée. Ce module REMPLACE l'ancien
   chaînage gatekeeper du moteur RAM `Fleet.Pipeline.Executor` (`do_dispatch_gatekeeper`/
   `handle_gate_decision`), SUPPRIMÉ : il refait la même décision, mais forge-driven.
 
   ## Garde résiduelle `pipeline_id`
 
-  Le moteur RAM `Fleet.Pipeline.Executor` (corrélation pipeline↔stage en mémoire)
+  Le moteur RAM `Fleet.Pipeline.Executor` (corrélation pipeline↔step en mémoire)
   est SUPPRIMÉ — il n'y a plus de dual-run : ce consumer est le seul rail. Plus
   aucun pod n'est spawné avec `opts[:pipeline_id]` (l'Executor était le seul
   producteur). La branche `pipeline_id` présent → skip (L.399) subsiste comme
   **garde défensive** (un payload pipeline résiduel ne serait pas traité par
   erreur), jamais déclenchée en pratique.
 
-    * **Stage-dispatch pods** — pas de `pipeline_id`, mais (s'ils portent un
+    * **Step-dispatch pods** — pas de `pipeline_id`, mais (s'ils portent un
       projet) le payload embarque `workspace` + `base_sha` + `role` (enrichi à la
       source, `Fleet.Spawner.Pod.pod_completed_payload`). **Ce consumer les
       traite.** L'event porte tout l'état → consumer stateless POUR LE HAPPY PATH
@@ -60,7 +60,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       allowed_emails(role), remote, target_branch}` ; le SYSTÈME pousse
       (le pod a commité dans son workspace, le système vérifie+pousse) sur une branche système
       `lcars/issue-N-role` (merge-vers-main = ailleurs, pas ici).
-    * `next_assignee: nil` → **1-stage terminal** (close). Le multi-stage
+    * `next_assignee: nil` → **1-step terminal** (close). Le multi-step
       (lookup du suivant dans la carte) = le mode carte.
 
   ## Config / seams
@@ -103,15 +103,15 @@ defmodule Fleet.Pilot.StepRunConsumer do
     :task_queue,
     :spawner,
     :gatekeeper_pod_id_fun,
-    # Boot du gatekeeper permanent en stage-mode (ensure_booted idempotent, gardé
-    # :gatekeeper_autoboot). Sans ça, en stage-only rien ne boote/registre le gatekeeper →
+    # Boot du gatekeeper permanent en step-mode (ensure_booted idempotent, gardé
+    # :gatekeeper_autoboot). Sans ça, en step-only rien ne boote/registre le gatekeeper →
     # pod_id/0 nil → toute escalade soft/terminal échoue {:error,:no_gatekeeper}.
     :gatekeeper_boot_fun,
     # Seam du recovery de wake du gatekeeper (défaut = la vraie fn). Permet de tester que le
     # retour LOAD-BEARING du kick (`{:error,{:escalated,_}}`) est SURFACÉ (telemetry/warning), pas avalé.
     :wake_recovery,
     # Escalades en attente, keyées par correlation_id (= task.id du brief d'éval). Valeur =
-    # contexte de reprise `%{n, role, payload, carte, stage}`. OPTIMISATION fast-path uniquement
+    # contexte de reprise `%{n, role, payload, carte, step}`. OPTIMISATION fast-path uniquement
     # (le verdict est auto-descriptif via le metadata de la tâche → reconstructible au restart).
     gate_evals: %{},
     # Seam d'offload de la complétion. Défaut nil → `run_completion` retombe sur SYNC (l'outcome
@@ -127,7 +127,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   # Superviseur de tasks pour l'offload de la complétion (prod). Nom partagé entre
-  # `application.ex stage_children` (qui le démarre AVANT le StepRunConsumer) et `offload_async/1`.
+  # `application.ex step_children` (qui le démarre AVANT le StepRunConsumer) et `offload_async/1`.
   @step_run_task_supervisor Fleet.Pilot.StepRunTaskSupervisor
 
   @doc false
@@ -169,13 +169,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # nil → StepRunCompleter applique son défaut (Fleet.Pilot.ForgeClient). Injectable
       # pour un backend forge alternatif (ou un sim en dogfood bare).
       forge_client: Keyword.get(opts, :forge_client),
-      # Loader de carte (mode carte multi-stage) : résout le stage suivant. Défaut = Loader réel.
+      # Loader de carte (mode carte multi-step) : résout le step suivant. Défaut = Loader réel.
       loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader),
       # nil → StepRunCompleter applique son défaut (Fleet.Pipeline.Deliverable). Injectable (sim/test).
       deliverable: Keyword.get(opts, :deliverable),
       # Classification producteur/juge du step_run PR-natif. Defaut = catalogue cap-profile.
       deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
-      # Bound anti-runaway du rebond de gate. Budget de step_runs = nb_stages *
+      # Bound anti-runaway du rebond de gate. Budget de step_runs = nb_steps *
       # (max_rework_rounds + 1) : la 1re passe + N rounds de rework. Au-delà → stuck
       # surfacé (pas de boucle). Défaut 2 rounds.
       max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2),
@@ -189,7 +189,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # Seam du recovery de wake (défaut = la vraie fn).
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{},
-      # Prod (stage_children) injecte `&offload_async/1` ici ; sans cette
+      # Prod (step_children) injecte `&offload_async/1` ici ; sans cette
       # lecture, `run_completion` retomberait sur sync → le git push bloquerait le singleton (offload mort).
       step_run_runner: Keyword.get(opts, :step_run_runner)
     }
@@ -199,7 +199,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
         "fallback_repo=#{inspect(state.repo)} fallback_remote=#{inspect(state.remote)}"
     )
 
-    # En stage-mode, le StepRunConsumer EST le chemin actif → il assure le gatekeeper
+    # En step-mode, le StepRunConsumer EST le chemin actif → il assure le gatekeeper
     # permanent (handle_continue : boot hors init, OTP). Idempotent + gardé autoboot (no-op
     # en test où gatekeeper_autoboot=false ; no-op si le path RAM l'a déjà booté).
     {:ok, state, {:continue, :ensure_gatekeeper}}
@@ -236,7 +236,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # à l'aveugle avant le verdict).
       {:escalate, corr, eval_ctx} ->
         Logger.info(
-          "StepRunConsumer gate→gatekeeper: #{p["issue_id"]} stage=#{eval_ctx.stage} corr=#{inspect(corr)}"
+          "StepRunConsumer gate→gatekeeper: #{p["issue_id"]} step=#{eval_ctx.step} corr=#{inspect(corr)}"
         )
 
         {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
@@ -268,7 +268,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       #      metadata (verdict auto-descriptif) → resume. C'est le wedge fermé : crash du StepRunConsumer seul
       #      (broker vivant → la tâche + son metadata survivent) → le verdict arrive au StepRunConsumer redémarré
       #      (gate_evals vide) → reconstruction au lieu de `{:noreply}` silencieux (issue verrouillée à vie).
-      #  (b) sinon → `{:noreply}` (cas NORMAL : chaque pod stage-dispatch émet un `work_item_completed` sans
+      #  (b) sinon → `{:noreply}` (cas NORMAL : chaque pod step-dispatch émet un `work_item_completed` sans
       #      `gate_eval` → ce n'est pas une escalade gatekeeper → on l'ignore).
       {nil, _} ->
         case reconstruct_eval_ctx(ev.payload, state) do
@@ -324,11 +324,11 @@ defmodule Fleet.Pilot.StepRunConsumer do
     if is_map(meta) and meta["gate_eval"] == true do
       with rp when is_map(rp) <- meta["resume_payload"],
            pipeline when is_binary(pipeline) <- meta["pipeline"],
-           stage when is_binary(stage) <- meta["stage"],
+           step when is_binary(step) <- meta["step"],
            role when is_binary(role) <- meta["resume_role"],
            n when is_integer(n) <- meta["resume_n"],
            {:ok, carte} <- load_carte(state, pipeline) do
-        {:ok, %{n: n, role: role, payload: rp, carte: carte, stage: stage}}
+        {:ok, %{n: n, role: role, payload: rp, carte: carte, step: step}}
       else
         other ->
           Logger.warning(
@@ -403,10 +403,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
         escalate_blocked_producer(payload, n, role, state)
 
       true ->
-        # Si le payload porte le contexte carte (pipeline+stage), le stage suivant
+        # Si le payload porte le contexte carte (pipeline+step), le step suivant
         # est calculé par CarteNav (reassign vers le rôle suivant, ou close si terminal).
-        # Sans contexte carte (1-stage) → next_assignee nil → close. Une erreur de carte
-        # (DAG, stage inconnu) NE misroute PAS : elle remonte (le système n'avance pas à l'aveugle).
+        # Sans contexte carte (1-step) → next_assignee nil → close. Une erreur de carte
+        # (DAG, step inconnu) NE misroute PAS : elle remonte (le système n'avance pas à l'aveugle).
         case resolve_next(payload, n, state) do
           {:error, reason} ->
             {:error, reason}
@@ -415,13 +415,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
           {:escalate, corr, eval_ctx} ->
             {:escalate, corr, eval_ctx}
 
-          # Le stage qui finit est un JUGE (brief_kind:judge) : son verdict EST la décision →
+          # Le step qui finit est un JUGE (brief_kind:judge) : son verdict EST la décision →
           # `apply_verdict` (LA fonction de verdict, partagée avec le gatekeeper async). Pas de gate hard.
           {:judge_verdict, decision, trace, ctx} ->
             apply_verdict(decision, trace, ctx, state)
 
-          {:ok, intent, {next_assignee, next_stage}} ->
-            complete_business_step_run(payload, n, role, intent, next_assignee, next_stage, state)
+          {:ok, intent, {next_assignee, next_step}} ->
+            complete_business_step_run(payload, n, role, intent, next_assignee, next_step, state)
         end
     end
   end
@@ -487,7 +487,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   # Construit + applique le step_run PR-natif. Classe le role qui FINIT (producteur git_native
   # → ouvre la PR ; juge payload → review la PR du producteur) puis delegue le routage selon
-  # l'`intent` de gate a `StepRunCompleter.complete_pr`. `next_stage` ne sert plus (la route de complétion
+  # l'`intent` de gate a `StepRunCompleter.complete_pr`. `next_step` ne sert plus (la route de complétion
   # disparait avec le modèle PR-natif). `comment_body` (trace verdict gatekeeper sur continue) est porte
   # mais pas encore materialise sur la PR — gap transitionnel note (la trace vit dans le resultat de tache
   # du gatekeeper ; PR-trace = increment ulterieur).
@@ -497,7 +497,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
          role,
          intent,
          next_assignee,
-         next_stage,
+         next_step,
          state,
          comment_body \\ nil,
          judge_target \\ nil
@@ -515,9 +515,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
         pr_role: pr_role,
         intent: intent,
         next_assignee: next_assignee,
-        # Pont transitionnel : pipeline+next_stage gravent la route que le StageDispatcher lit
-        # pour spawner le stage suivant (retire a l'increment 4, switch sur la review-request).
-        next_stage: next_stage,
+        # Pont transitionnel : pipeline+next_step gravent la route que le StepDispatcher lit
+        # pour spawner le step suivant (retire a l'increment 4, switch sur la review-request).
+        next_step: next_step,
         pipeline: payload["pipeline"],
         producer_branch: producer_branch,
         base_branch: "main"
@@ -642,7 +642,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # pousse le code, ouvre la PR (head = sa propre branche). Juge = role payload (qualifier/reviewer
   # en AVAL) → review la PR du producteur (head = le head.ref de la PR ouverte de l'issue, résolu
   # sans carte via `parse_feature_branch`). Un juge sans producteur resoluble → `producer_branch`
-  # nil → `complete_pr` fail-loud `:no_producer_branch` (jamais un mauvais merge). Les stages design
+  # nil → `complete_pr` fail-loud `:no_producer_branch` (jamais un mauvais merge). Les steps design
   # AMONT du producteur (architect) sont hors-scope (decision engineer-first, mapping PR).
   defp classify_pr_role(payload, n, role, state) do
     if producer?(role, state) do
@@ -700,8 +700,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   # Livrable d'un step_run métier : `:git_native`. Le pod a commité dans son workspace,
   # le système vérifie (gate identité/ancêtre) + pousse. Il n'existe PAS
-  # de stage `role: gatekeeper` → pas de branche `:payload`/verdict.json ici (le verdict
-  # du gatekeeper est tracé par `resume_gate`, pas matérialisé comme livrable de stage).
+  # de step `role: gatekeeper` → pas de branche `:payload`/verdict.json ici (le verdict
+  # du gatekeeper est tracé par `resume_gate`, pas matérialisé comme livrable de step).
   defp build_deliverable_opts(role, payload, n, state) do
     %{
       mode: :git_native,
@@ -723,23 +723,23 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   # Résout le prochain assignee depuis la carte. Le contexte carte arrive dans le
-  # payload `pod.completed` : `pipeline` (nom de carte) + `stage` (nom du stage courant —
-  # le NOM, pas le rôle, cf. CarteNav qui indexe par nom de stage). Absent → 1-stage terminal.
+  # payload `pod.completed` : `pipeline` (nom de carte) + `step` (nom du step courant —
+  # le NOM, pas le rôle, cf. CarteNav qui indexe par nom de step). Absent → 1-step terminal.
   defp resolve_next(payload, n, state) do
-    case {payload["pipeline"], payload["stage"]} do
-      {pipeline, stage} when is_binary(pipeline) and is_binary(stage) ->
+    case {payload["pipeline"], payload["step"]} do
+      {pipeline, step} when is_binary(pipeline) and is_binary(step) ->
         with {:ok, carte} <- load_carte(state, pipeline) do
-          # Un pod dont le RÔLE ≠ le rôle déclaré du stage qu'il porte n'EST pas ce stage : c'est un
+          # Un pod dont le RÔLE ≠ le rôle déclaré du step qu'il porte n'EST pas ce step : c'est un
           # juge NO-CARTE (qualifier/reviewer dispatché par `dispatch_review`) ayant HÉRITÉ la route de
-          # l'issue (le stage du producteur). Le traiter via la carte le ferait avancer/merger à tort :
+          # l'issue (le step du producteur). Le traiter via la carte le ferait avancer/merger à tort :
           # un qualifier portant `build` tomberait en terminal non-producteur → `:promote`
           # → merge sur 1 juge, court-circuitant le quorum. → résolution no-carte (`:reviewed`) : il
           # enregistre sa review native, et le merge revient au quorum `dispatch_by_verdicts` (qui attend
-          # TOUS les juges). Un vrai stage de carte (rôle = rôle du stage) passe par la gate.
-          if inherited_route?(carte, stage, payload["role"]) do
+          # TOUS les juges). Un vrai step de carte (rôle = rôle du step) passe par la gate.
+          if inherited_route?(carte, step, payload["role"]) do
             no_carte_resolve(payload, state)
           else
-            gate_decide(carte, stage, payload, n, state)
+            gate_decide(carte, step, payload, n, state)
           end
         end
 
@@ -751,12 +751,12 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  # ROUTE HÉRITÉE = le stage EXISTE dans la carte MAIS son rôle déclaré ≠ le rôle du pod : c'est un
+  # ROUTE HÉRITÉE = le step EXISTE dans la carte MAIS son rôle déclaré ≠ le rôle du pod : c'est un
   # juge no-carte (dispatché sur la PR) qui a hérité la route du producteur → à résoudre en no-carte. Un
-  # stage INCONNU (route corrompue) n'est PAS « hérité » → `false` → laisse `gate_decide` fail-loud
-  # (`unknown_stage`, jamais un misroute silencieux). Un stage sans `role` → `false` (gate_decide tranche).
-  defp inherited_route?(carte, stage, role) do
-    case Fleet.Pilot.CarteNav.stage_spec(carte, stage) do
+  # step INCONNU (route corrompue) n'est PAS « hérité » → `false` → laisse `gate_decide` fail-loud
+  # (`unknown_step`, jamais un misroute silencieux). Un step sans `role` → `false` (gate_decide tranche).
+  defp inherited_route?(carte, step, role) do
+    case Fleet.Pilot.CarteNav.step_spec(carte, step) do
       {:ok, spec} ->
         case Map.get(spec, "role") do
           r when is_binary(r) -> r != role
@@ -781,23 +781,23 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  # La gate du stage FINI décide AVANT d'avancer.
+  # La gate du step FINI décide AVANT d'avancer.
   # `Gates.evaluate/3` est PUR (gate nil/absente → :pass) ; on lui passe la spec du
-  # stage qui vient de finir + le `result` du pod (outputs → prédicats hard).
+  # step qui vient de finir + le `result` du pod (outputs → prédicats hard).
   #
-  #   :pass                     → avance dans la carte (next_stage)
-  #   {:fail, _}                → REBOND vers le 1er stage (rework), BORNÉ (anti-runaway :
+  #   :pass                     → avance dans la carte (next_step)
+  #   {:fail, _}                → REBOND vers le 1er step (rework), BORNÉ (anti-runaway :
   #                               une boucle de rework infinie ne doit pas être
   #                               représentable).
   #   {:dispatch_gatekeeper, _} → enqueue un brief d'éval au gatekeeper
   #                               permanent + `{:escalate, corr, eval_ctx}` (reprise async
   #                               sur `work_item_completed`). Enqueue raté → fail-loud (l'issue
   #                               reste verrouillée, pas d'avance à l'aveugle).
-  defp gate_decide(carte, stage, payload, n, state) do
+  defp gate_decide(carte, step, payload, n, state) do
     spec =
-      case Fleet.Pilot.CarteNav.stage_spec(carte, stage) do
+      case Fleet.Pilot.CarteNav.step_spec(carte, step) do
         {:ok, s} -> s
-        # stage inconnu : pas de gate → next_stage tranchera ({:error,:unknown_stage}),
+        # step inconnu : pas de gate → next_step tranchera ({:error,:unknown_step}),
         # pas de misroute silencieux.
         :error -> %{}
       end
@@ -807,7 +807,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     result = unwrap_worker_envelope(payload["result"] || %{})
 
     if Map.get(spec, "brief_kind") == "judge" do
-      # Le stage qui finit EST un juge (brief_kind:judge, ex. brief-review/consultant). Son
+      # Le step qui finit EST un juge (brief_kind:judge, ex. brief-review/consultant). Son
       # result PORTE le verdict gate-decision-v1 : le juge a DÉJÀ tranché → PAS de Gates.evaluate (qui
       # jugerait les outputs du juge comme un hard-gate). Le verdict est appliqué par `apply_verdict` (LA
       # fonction, partagée avec le gatekeeper async). gate_decide reste un décideur PUR : il rend
@@ -820,7 +820,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
         role: payload["role"],
         payload: payload,
         carte: carte,
-        stage: stage,
+        step: step,
         judge_target: Map.get(spec, "judge_target")
       }
 
@@ -829,12 +829,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
       case Fleet.Pipeline.Gates.evaluate(spec, result, %{}) do
         :pass ->
           # L'intent terminal dépend du RÔLE qui finit (cf. tag_advance/2).
-          tag_advance(advance(carte, stage), producer?(payload["role"], state))
+          tag_advance(advance(carte, step), producer?(payload["role"], state))
 
         {:fail, reason} ->
-          Logger.info(
-            "StepRunConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}"
-          )
+          Logger.info("StepRunConsumer gate FAIL repo=#{state.repo}##{n} step=#{step}: #{reason}")
 
           tag(:rework, rebound(carte, n, state))
 
@@ -842,10 +840,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
           # `payload`/`n`/`role` passés au dispatch : ils sont EMBARQUÉS dans le metadata de la
           # tâche d'éval (contexte de reprise auto-descriptif). Le StepRunConsumer redémarré (gate_evals RAM
           # vide) reconstruit l'eval_ctx du metadata au lieu de jeter le verdict en silence.
-          case dispatch_gatekeeper(carte, stage, result, payload, n, payload["role"], state) do
+          case dispatch_gatekeeper(carte, step, result, payload, n, payload["role"], state) do
             {:ok, corr} ->
               {:escalate, corr,
-               %{n: n, role: payload["role"], payload: payload, carte: carte, stage: stage}}
+               %{n: n, role: payload["role"], payload: payload, carte: carte, step: step}}
 
             {:error, reason} ->
               {:error, {:gatekeeper_dispatch, reason}}
@@ -854,13 +852,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  # Invariant « un PRODUCTEUR ne merge JAMAIS seul » : `:pass` → `:advance` si un stage suit ;
+  # Invariant « un PRODUCTEUR ne merge JAMAIS seul » : `:pass` → `:advance` si un step suit ;
   # terminal (next_assignee nil) → selon le RÔLE qui finit :
   #   - PRODUCTEUR (git_native) → `:review` : son livrable ouvre une PR + demande les juges. JAMAIS
   #     d'auto-merge d'un livrable.
-  #   - JUGE-CARTE terminal (son rôle EST celui du stage) → `:promote` : il a validé le dernier gate de
-  #     SA carte (1 stage = 1 rôle = 1 juge) → merge terminal.
-  # Ici on ne voit QUE de vrais stages de carte (un juge NO-CARTE à route héritée est dévié vers
+  #   - JUGE-CARTE terminal (son rôle EST celui du step) → `:promote` : il a validé le dernier gate de
+  #     SA carte (1 step = 1 rôle = 1 juge) → merge terminal.
+  # Ici on ne voit QUE de vrais steps de carte (un juge NO-CARTE à route héritée est dévié vers
   # `no_carte_resolve` AVANT — cf. `resolve_next`/`inherited_route?` : sinon un qualifier portant
   # `build` mergerait sur 1 juge). Sans le split producteur/juge, une carte terminant sur un producteur
   # (brief-gate `brief-review→build`) mergerait le code SANS juges. `{:error,_}` tel quel.
@@ -878,22 +876,22 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # `correlation_id` (= task.id) pour la corrélation `task_queue.work_item_completed`. Pas de
   # gatekeeper booté / enqueue raté → `{:error, _}` (l'appelant fail-loud ; jamais un pass
   # silencieux).
-  defp dispatch_gatekeeper(carte, stage, outputs, payload, n, role, state) do
+  defp dispatch_gatekeeper(carte, step, outputs, payload, n, role, state) do
     case state.gatekeeper_pod_id_fun.() do
       pod_id when is_binary(pod_id) ->
-        gate = get_in(carte, ["stages", stage, "gate"])
+        gate = get_in(carte, ["steps", step, "gate"])
         pipeline = Map.get(carte, "name")
 
         brief =
           Fleet.Pipeline.GateBrief.build(%{
-            stage: stage,
+            step: step,
             pipeline_id: pipeline,
             gate: gate,
             outputs: outputs
           })
 
         # VERDICT AUTO-DESCRIPTIF : le metadata de la tâche d'éval porte le contexte de REPRISE
-        # (`payload`/`n`/`role` en plus du stage/pipeline déjà présents). Cette tâche survit dans le broker
+        # (`payload`/`n`/`role` en plus du step/pipeline déjà présents). Cette tâche survit dans le broker
         # (TaskQueue = autre process) à un crash du StepRunConsumer seul → le verdict (`work_item_completed`) ramène
         # ce metadata → le StepRunConsumer redémarré (gate_evals RAM vidé) reconstruit l'eval_ctx
         # (`carte = Loader.load!(pipeline)`) au lieu d'un `{:noreply}` silencieux (issue wedgée à vie). Aucune
@@ -903,7 +901,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
           brief: brief,
           metadata: %{
             "gate_eval" => true,
-            "stage" => stage,
+            "step" => step,
             "pipeline" => pipeline,
             "gate" => gate,
             "outputs" => outputs,
@@ -1005,7 +1003,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # La TRACE du verdict est durable : portée dans le comment signé du step_run (continue/abandon)
   # ou du await_arch — c'est ce dont l'absence a coulé la v1.
   def resume_gate(
-        %{n: _n, role: _role, payload: _payload, carte: _carte, stage: _stage} = ctx,
+        %{n: _n, role: _role, payload: _payload, carte: _carte, step: _step} = ctx,
         raw_payload,
         state
       ) do
@@ -1024,28 +1022,28 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp apply_verdict(
          decision,
          trace,
-         %{n: n, role: role, payload: payload, carte: carte, stage: stage} = ctx,
+         %{n: n, role: role, payload: payload, carte: carte, step: step} = ctx,
          state
        ) do
     case decision do
       "continue" ->
         # Le split producteur/juge n'est PAS optionnel. Si l'intent était `if is_nil(next_assignee),
-        # do: :promote, else: :advance`, alors sur un stage TERMINAL (next_assignee nil), `apply_verdict`
+        # do: :promote, else: :advance`, alors sur un step TERMINAL (next_assignee nil), `apply_verdict`
         # hardcoderait `:promote` quel que soit le RÔLE qui finit → un PRODUCTEUR jugé « continue » sur un
         # terminal MERGERAIT le code SANS passer par les juges PR. On route par le MÊME
         # `tag_advance(advance(…), producer?(role, state))` que `gate_decide` (chemin :pass) : un producteur
         # terminal → `:review` (ouvre la PR + demande les juges, JAMAIS d'auto-merge d'un livrable) ; un juge
         # terminal (consultant brief-review) → `:promote` (il a validé le dernier gate de sa carte) ;
-        # un stage suivant → `:advance`. Une seule source de vérité pour l'intent terminal.
-        case tag_advance(advance(carte, stage), producer?(role, state)) do
-          {:ok, intent, {next_assignee, next_stage}} ->
+        # un step suivant → `:advance`. Une seule source de vérité pour l'intent terminal.
+        case tag_advance(advance(carte, step), producer?(role, state)) do
+          {:ok, intent, {next_assignee, next_step}} ->
             complete_business_step_run(
               payload,
               n,
               role,
               intent,
               next_assignee,
-              next_stage,
+              next_step,
               state,
               trace,
               Map.get(ctx, :judge_target)
@@ -1159,28 +1157,28 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp unwrap_worker_envelope(%{"status" => _, "result" => inner}) when is_map(inner), do: inner
   defp unwrap_worker_envelope(other), do: other
 
-  defp advance(carte, stage) do
-    case Fleet.Pilot.CarteNav.next_stage(carte, stage) do
-      {:ok, {next_stage, next_role}} -> {:ok, {next_role, next_stage}}
+  defp advance(carte, step) do
+    case Fleet.Pilot.CarteNav.next_step(carte, step) do
+      {:ok, {next_step, next_role}} -> {:ok, {next_role, next_step}}
       :terminal -> {:ok, {nil, nil}}
       {:error, reason} -> {:error, {:carte_nav, reason}}
     end
   end
 
-  # Rebond borné. Budget = nb_stages * (max_rework_rounds + 1) step_runs signés. Le compteur
+  # Rebond borné. Budget = nb_steps * (max_rework_rounds + 1) step_runs signés. Le compteur
   # forge-natif = les comments `[step_run:role:sha]` déjà postés (monotone). Lu UNIQUEMENT ici
   # (branche fail) → zéro I/O sur le happy path. Budget illisible → on NE rebondit PAS à
   # l'aveugle (un rebond non vérifiable pourrait boucler) : on surface.
   defp rebound(carte, n, state) do
-    budget = stage_count(carte) * (state.max_rework_rounds + 1)
+    budget = step_count(carte) * (state.max_rework_rounds + 1)
 
     case count_step_runs(state, n) do
       {:ok, step_runs} when step_runs >= budget ->
         {:error, {:rework_exhausted, %{step_runs: step_runs, budget: budget}}}
 
       {:ok, _step_runs} ->
-        case Fleet.Pilot.CarteNav.first_stage(carte) do
-          {:ok, {first_stage, first_role}} -> {:ok, {first_role, first_stage}}
+        case Fleet.Pilot.CarteNav.first_step(carte) do
+          {:ok, {first_step, first_role}} -> {:ok, {first_role, first_step}}
           {:error, reason} -> {:error, {:carte_nav, reason}}
         end
 
@@ -1189,11 +1187,11 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  # Budget rework = tous les stages de la carte. Il n'existe PAS de stage
-  # `role: gatekeeper` (le juge est dispatché par gate, pas un stage) → pas d'exclusion
-  # à câbler (aucun gatekeeper-stage à exclure du compte).
-  defp stage_count(carte) do
-    carte |> Map.get("stages", %{}) |> map_size()
+  # Budget rework = tous les steps de la carte. Il n'existe PAS de step
+  # `role: gatekeeper` (le juge est dispatché par gate, pas un step) → pas d'exclusion
+  # à câbler (aucun gatekeeper-step à exclure du compte).
+  defp step_count(carte) do
+    carte |> Map.get("steps", %{}) |> map_size()
   end
 
   defp count_step_runs(state, n) do
@@ -1201,8 +1199,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
     forge.count_signed_step_runs(state.repo, n, state.forge_opts)
   end
 
-  # Pas de `validate_explicit_stage` (biconditionnelle soft⟺gatekeeper) :
-  # une gate soft sur un stage métier est LÉGITIME (→ escalade gatekeeper), pas
+  # Pas de `validate_explicit_step` (biconditionnelle soft⟺gatekeeper) :
+  # une gate soft sur un step métier est LÉGITIME (→ escalade gatekeeper), pas
   # une carte malformée. La carte est juste chargée (le Loader valide le schema).
   defp load_carte(state, pipeline) do
     {:ok, state.loader.load!(pipeline)}
@@ -1222,7 +1220,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   # Le format issue_id "issue-<n>" a une SOURCE UNIQUE (Fleet.Pilot.IssueId) — writer
-  # (StageDispatcher) et parser ne peuvent plus dériver. `parse_issue_number` reste l'API publique
+  # (StepDispatcher) et parser ne peuvent plus dériver. `parse_issue_number` reste l'API publique
   # (appelée par `maybe_complete` + testée step_run_consumer_test) mais délègue.
   @doc false
   defdelegate parse_issue_number(issue_id), to: Fleet.Pilot.IssueId, as: :parse

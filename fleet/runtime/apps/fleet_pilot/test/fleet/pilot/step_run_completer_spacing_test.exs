@@ -49,7 +49,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
       step_run_sha: "brief-verdict",
       next_assignee: "build",
       pipeline: "poc",
-      next_stage: "build",
+      next_step: "build",
       comment_body: "Verdict du consultant — continue"
     }
 

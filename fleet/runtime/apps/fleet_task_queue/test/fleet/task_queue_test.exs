@@ -237,7 +237,7 @@ defmodule Fleet.TaskQueueTest do
       issue_id: "tk1",
       role: "engineer",
       brief: "fais X",
-      metadata: %{"stage" => "qa"},
+      metadata: %{"step" => "qa"},
       result: %{"ok" => true}
     }
 
@@ -248,7 +248,7 @@ defmodule Fleet.TaskQueueTest do
              role: "engineer",
              issue_id: "tk1",
              state: :assigned,
-             metadata: %{"stage" => "qa"},
+             metadata: %{"step" => "qa"},
              result: %{"ok" => true}
            } = back
   end

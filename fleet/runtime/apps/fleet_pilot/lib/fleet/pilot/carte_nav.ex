@@ -1,49 +1,49 @@
 defmodule Fleet.Pilot.CarteNav do
   @moduledoc """
-  Navigation **pure** dans une carte (pipeline) — le chaînage forge-driven des stages.
-  Remplace la logique RAM `Executor.next_stage_or_done` par une résolution
+  Navigation **pure** dans une carte (pipeline) — le chaînage forge-driven des steps.
+  Remplace la logique RAM `Executor.next_step_or_done` par une résolution
   **stateless** : étant donné la
-  carte (sortie `Fleet.Pipeline.Loader`) + le **nom du stage courant**, calcule le
-  stage suivant (ou terminal).
+  carte (sortie `Fleet.Pipeline.Loader`) + le **nom du step courant**, calcule le
+  step suivant (ou terminal).
 
-  ## Pourquoi clé par NOM de stage, pas par rôle
+  ## Pourquoi clé par NOM de step, pas par rôle
 
-  Clé naïve « le stage dont `role` = assignee » : **insuffisant** —
-  une carte peut avoir le même rôle sur plusieurs stages (ex. `standard-qa` :
+  Clé naïve « le step dont `role` = assignee » : **insuffisant** —
+  une carte peut avoir le même rôle sur plusieurs steps (ex. `standard-qa` :
   `architect` est sur `brainstorm` ET `plan`). L'assignee (= rôle) seul
-  **n'identifie pas** le stage. La position canonique est donc le **nom du stage**, que
-  le runtime grave sur la forge (lock comment enrichi `[lock:role:stage:ts]`) et
-  relit pour naviguer. `CarteNav` est keyé par nom de stage ; d'où vient
+  **n'identifie pas** le step. La position canonique est donc le **nom du step**, que
+  le runtime grave sur la forge (lock comment enrichi `[lock:role:step:ts]`) et
+  relit pour naviguer. `CarteNav` est keyé par nom de step ; d'où vient
   le nom (forge) est le concern de l'appelant.
 
   ## Cardinalité (MVP linéaire)
 
-  La chaîne MVP est **linéaire** : chaque stage a 0 ou 1 successeur (le stage qui le
+  La chaîne MVP est **linéaire** : chaque step a 0 ou 1 successeur (le step qui le
   `needs`). Un DAG à branches parallèles (≥2 successeurs) est **hors-scope** →
   `{:error, :dag_not_supported}` explicite (pas de choix silencieux). Idem entrée :
   exactement 1 racine (`needs: []`).
 
   ## Format carte consommé
 
-  Sortie `Loader` : `%{"name" => ..., "stages" => %{name => %{"role", "needs", "gate"?, ...}}}`.
+  Sortie `Loader` : `%{"name" => ..., "steps" => %{name => %{"role", "needs", "gate"?, ...}}}`.
   Clés string (le Loader normalise v1/v2.5 vers cette forme). `CarteNav` ne charge pas —
   l'appelant passe la carte déjà chargée.
   """
 
   @type carte :: %{required(String.t()) => any()}
-  @type stage_name :: String.t()
+  @type step_name :: String.t()
   @type role :: String.t()
 
   @doc """
-  Stage d'entrée = l'unique racine (`needs: []`). `{:error, :no_root}` si aucune,
+  Step d'entrée = l'unique racine (`needs: []`). `{:error, :no_root}` si aucune,
   `{:error, :multiple_roots}` si ≥2 (entrée parallèle = hors-scope).
   """
-  @spec first_stage(carte()) :: {:ok, {stage_name(), role()}} | {:error, atom()}
-  def first_stage(carte) do
-    stages = stages(carte)
+  @spec first_step(carte()) :: {:ok, {step_name(), role()}} | {:error, atom()}
+  def first_step(carte) do
+    steps = steps(carte)
 
     roots =
-      Enum.filter(stages, fn {_name, spec} -> needs(spec) == [] end)
+      Enum.filter(steps, fn {_name, spec} -> needs(spec) == [] end)
 
     case roots do
       [{name, spec}] -> {:ok, {name, role(spec)}}
@@ -53,20 +53,20 @@ defmodule Fleet.Pilot.CarteNav do
   end
 
   @doc """
-  Stage suivant le stage courant (par `needs`). `:terminal` si aucun successeur
-  (fin de chaîne) ; `{:error, :unknown_stage}` si le stage courant n'existe pas ;
+  Step suivant le step courant (par `needs`). `:terminal` si aucun successeur
+  (fin de chaîne) ; `{:error, :unknown_step}` si le step courant n'existe pas ;
   `{:error, :dag_not_supported}` si ≥2 successeurs (branche parallèle, hors-scope).
   """
-  @spec next_stage(carte(), stage_name()) ::
-          {:ok, {stage_name(), role()}} | :terminal | {:error, atom()}
-  def next_stage(carte, current_stage) when is_binary(current_stage) do
-    stages = stages(carte)
+  @spec next_step(carte(), step_name()) ::
+          {:ok, {step_name(), role()}} | :terminal | {:error, atom()}
+  def next_step(carte, current_step) when is_binary(current_step) do
+    steps = steps(carte)
 
-    if not Map.has_key?(stages, current_stage) do
-      {:error, :unknown_stage}
+    if not Map.has_key?(steps, current_step) do
+      {:error, :unknown_step}
     else
       successors =
-        Enum.filter(stages, fn {_name, spec} -> current_stage in needs(spec) end)
+        Enum.filter(steps, fn {_name, spec} -> current_step in needs(spec) end)
 
       case successors do
         [] -> :terminal
@@ -76,31 +76,31 @@ defmodule Fleet.Pilot.CarteNav do
     end
   end
 
-  @doc "Rôle d'un stage nommé. `:error` si inconnu."
-  @spec stage_role(carte(), stage_name()) :: {:ok, role()} | :error
-  def stage_role(carte, stage_name) do
-    case Map.get(stages(carte), stage_name) do
+  @doc "Rôle d'un step nommé. `:error` si inconnu."
+  @spec step_role(carte(), step_name()) :: {:ok, role()} | :error
+  def step_role(carte, step_name) do
+    case Map.get(steps(carte), step_name) do
       nil -> :error
       spec -> {:ok, role(spec)}
     end
   end
 
-  @doc "Spec brute d'un stage (pour lire `gate`, `profile`, `timeout_sec`…). `:error` si inconnu."
-  @spec stage_spec(carte(), stage_name()) :: {:ok, map()} | :error
-  def stage_spec(carte, stage_name) do
-    case Map.get(stages(carte), stage_name) do
+  @doc "Spec brute d'un step (pour lire `gate`, `profile`, `timeout_sec`…). `:error` si inconnu."
+  @spec step_spec(carte(), step_name()) :: {:ok, map()} | :error
+  def step_spec(carte, step_name) do
+    case Map.get(steps(carte), step_name) do
       nil -> :error
       spec -> {:ok, spec}
     end
   end
 
-  # Pas de garde-fou « explicit-stage » (biconditionnelle soft⟺gatekeeper) : une gate `soft`
-  # sur un stage métier est légitime — elle dispatche le gatekeeper (juge d'exception), elle ne
-  # désigne PAS un stage `role: gatekeeper`. Il n'existe pas de stage gatekeeper, donc rien à
+  # Pas de garde-fou « explicit-step » (biconditionnelle soft⟺gatekeeper) : une gate `soft`
+  # sur un step métier est légitime — elle dispatche le gatekeeper (juge d'exception), elle ne
+  # désigne PAS un step `role: gatekeeper`. Il n'existe pas de step gatekeeper, donc rien à
   # valider. cf. `StepRunConsumer.gate_decide`.
 
   # ── internals ──
-  defp stages(carte), do: Map.get(carte, "stages", %{})
+  defp steps(carte), do: Map.get(carte, "steps", %{})
   defp needs(spec), do: Map.get(spec, "needs", [])
   defp role(spec), do: Map.get(spec, "role")
 end

@@ -48,9 +48,9 @@ defmodule Fleet.Pipeline.ModopsConsumptionTest do
   test "refs `profile` des pipelines v2.5 résolvent vers cap-profiles existants" do
     for pname <- ["standard-qa", "audit-only"] do
       pipe = YamlElixir.read_from_file!(Path.join([@canon, "pipelines", "#{pname}.yaml"]))
-      stages = get_in(pipe, ["spec", "stages"])
+      steps = get_in(pipe, ["spec", "steps"])
 
-      for {sname, spec} <- stages do
+      for {sname, spec} <- steps do
         profile = spec["profile"]
 
         assert is_binary(profile) and profile != "",

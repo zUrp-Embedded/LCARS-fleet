@@ -20,7 +20,7 @@ Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor.
   dessus, l'API `/api/admin/spawn` REFUSE le host-native dessus (un trou de config ne doit jamais ouvrir l'hôte)
 - `Fleet.CapProfile.slot_scope/1` — `metadata.slot_scope` (`"project"` = 1 identité/slot Desktop par projet ;
   `"instance"` = fan-out par issue ; **requis, sans défaut → raise**). **Source UNIQUE** : le dispatcher
-  (`Fleet.Pilot.StageDispatcher`) choisit `PodId.for_repo` vs `for_issue`/`for_pr` et sérialise les rôles
+  (`Fleet.Pilot.StepDispatcher`) choisit `PodId.for_repo` vs `for_issue`/`for_pr` et sérialise les rôles
   project-scoped là-dessus
 - `Fleet.CapProfile.sha256/1` — hash canonique stable d'un profile composé
 

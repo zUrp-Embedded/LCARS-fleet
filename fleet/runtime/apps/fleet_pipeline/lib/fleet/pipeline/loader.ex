@@ -4,8 +4,8 @@ defmodule Fleet.Pipeline.Loader do
   + validate schema strict `priv/schema/pipeline-v2.5.json` au load
   (`ex_json_schema` fail-fast), puis valide le GRAPHE (`Fleet.Pipeline.GraphValidator`).
 
-  Le schéma valide chaque stage ISOLÉMENT (draft-07 ne sait pas exprimer une
-  contrainte inter-stages) : les invariants de graphe (`needs` → stage existant,
+  Le schéma valide chaque step ISOLÉMENT (draft-07 ne sait pas exprimer une
+  contrainte inter-steps) : les invariants de graphe (`needs` → step existant,
   racine unique, acyclicité, atteignabilité, pas de fan-out) sont vérifiés APRÈS la
   normalisation par le linter de graphe, qui raise sur violation (même contrat
   fail-loud que le schéma).
@@ -35,10 +35,10 @@ defmodule Fleet.Pipeline.Loader do
 
   @doc """
   Charge un pipeline YAML par nom, valide le schema, puis **normalise** vers
-  la forme interne unique `%{"name" => ..., "stages" => ...}`.
+  la forme interne unique `%{"name" => ..., "steps" => ...}`.
 
-  L'enveloppe (`kind/metadata/spec.stages`) est déballée ici, au LOAD. En aval,
-  les consommateurs lisent toujours `pipeline["stages"]` sans rouvrir l'enveloppe :
+  L'enveloppe (`kind/metadata/spec.steps`) est déballée ici, au LOAD. En aval,
+  les consommateurs lisent toujours `pipeline["steps"]` sans rouvrir l'enveloppe :
   une seule forme représentable.
 
   Raises `YamlElixir.FileNotFoundError` si fichier introuvable,
@@ -58,7 +58,7 @@ defmodule Fleet.Pipeline.Loader do
 
     # Le schema est validé AVANT la normalisation : un YAML sans enveloppe v2.5
     # (kind/metadata/spec absents ou mal formés) échoue ici et raise — il n'atteint
-    # jamais `normalize/1` (qui ne matche que `spec.stages`), donc pas de
+    # jamais `normalize/1` (qui ne matche que `spec.steps`), donc pas de
     # FunctionClauseError opaque. Ne pas inverser cet ordre.
     case ExJsonSchema.Validator.validate(schema, yaml) do
       :ok ->
@@ -71,13 +71,13 @@ defmodule Fleet.Pipeline.Loader do
     end
   end
 
-  # Le schéma a validé chaque stage isolément, jamais le graphe : un `needs` mal
+  # Le schéma a validé chaque step isolément, jamais le graphe : un `needs` mal
   # orthographié (arête fantôme) le passe et fige le pipeline en silence. On valide donc
   # le graphe (data pure, normalisée) et on raise comme le schéma. Le linter vit DANS
   # fleet_pipeline (autonome) : le Loader ne peut pas dépendre de CarteNav (fleet_pilot),
   # ce serait une dépendance inverse.
-  defp validate_graph!(%{"stages" => stages}, pipeline_name) do
-    case Fleet.Pipeline.GraphValidator.validate(stages) do
+  defp validate_graph!(%{"steps" => steps}, pipeline_name) do
+    case Fleet.Pipeline.GraphValidator.validate(steps) do
       :ok ->
         :ok
 
@@ -86,13 +86,13 @@ defmodule Fleet.Pipeline.Loader do
     end
   end
 
-  # Normalizer. Le schema a déjà garanti la structure (`spec.stages` présent). On
-  # déballe l'enveloppe vers `%{"name", "stages"}`. Les champs d'enveloppe non
+  # Normalizer. Le schema a déjà garanti la structure (`spec.steps` présent). On
+  # déballe l'enveloppe vers `%{"name", "steps"}`. Les champs d'enveloppe non
   # consommés (`metadata` autre que `name`, `spec.on_escalation`/`on_failure`,
   # `cycle`, `selection_priority`) sont volontairement écartés — étendre cette forme
   # quand un consommateur réel apparaît (pas de portage spéculatif).
-  defp normalize(%{"spec" => %{"stages" => stages}} = yaml) when is_map(stages) do
-    %{"name" => get_in(yaml, ["metadata", "name"]), "stages" => stages}
+  defp normalize(%{"spec" => %{"steps" => steps}} = yaml) when is_map(steps) do
+    %{"name" => get_in(yaml, ["metadata", "name"]), "steps" => steps}
   end
 
   defp pipelines_root(opts) do

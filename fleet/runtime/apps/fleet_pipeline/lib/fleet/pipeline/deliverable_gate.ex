@@ -152,7 +152,7 @@ defmodule Fleet.Pipeline.DeliverableGate do
   @doc """
   Volet trailer de l'identité — chaque commit `base..HEAD` porte le trailer
   `Co-authored-by: LCARS-<role>` ATTENDU (la signature machine du rôle est vérifiée au
-  boundary monde, pas crue depuis le pod ; rôle ↔ stage = `expected_role`, posé par
+  boundary monde, pas crue depuis le pod ; rôle ↔ step = `expected_role`, posé par
   l'appelant). Range vide → `:ok` (vacuité). Un commit sans le trailer → fail-loud
   `{:missing_coauthor_trailer, expected_role, [sha…]}` (le push n'a pas lieu).
 

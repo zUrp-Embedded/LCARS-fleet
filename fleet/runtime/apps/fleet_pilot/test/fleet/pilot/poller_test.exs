@@ -4,7 +4,7 @@ defmodule Fleet.Pilot.PollerTest do
   alias Fleet.Pilot.Poller
 
   # Rail legacy (poll_once/4 → Routing → Dispatcher → Executor RAM) RETIRÉ (②.3 / BL-050). Ses tests
-  # (`describe "poll_once/4"`, stubs `StubForge`/`StubInvoker`) sont partis avec. Seul le mode stage
+  # (`describe "poll_once/4"`, stubs `StubForge`/`StubInvoker`) sont partis avec. Seul le mode step
   # subsiste ci-dessous (+ le lifecycle GenServer, partagé).
 
   describe "GenServer init / lifecycle" do
@@ -39,15 +39,15 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   # ============================================================
-  # Mode STAGE — assignee-driven (DN forge-state-machine)
+  # Mode STEP — assignee-driven (DN forge-state-machine)
   # ============================================================
 
-  # Forge stub pour le mode stage : list (filtre déjà appliqué côté API
+  # Forge stub pour le mode step : list (filtre déjà appliqué côté API
   # réelle, ici on renvoie tel quel) + les write-ops touchées par
-  # StageDispatcher.dispatch_issue (add_label / post_comment).
-  defmodule StageStubForge do
+  # StepDispatcher.dispatch_issue (add_label / post_comment).
+  defmodule StepStubForge do
     # F-037 — le poller DÉCOUVRE ses repos par topic AVANT de scanner. Défaut = LE repo de test (les tests
-    # single-repo restent identiques : 1 repo découvert → 1 `stage_do_poll`). `_test_repos` pour le multi-repo,
+    # single-repo restent identiques : 1 repo découvert → 1 `step_do_poll`). `_test_repos` pour le multi-repo,
     # `_test_discover` pour simuler une découverte en erreur (forge down → backoff).
     def search_repos_by_topic(_topic, opts) do
       Keyword.get(
@@ -78,7 +78,7 @@ defmodule Fleet.Pilot.PollerTest do
       Keyword.fetch!(opts, :_test_issues)
     end
 
-    # Corr.3 4-C : le mode stage liste AUSSI les PR (chemin juge), scopées pareil (assigned_by). Default {:ok, []}.
+    # Corr.3 4-C : le mode step liste AUSSI les PR (chemin juge), scopées pareil (assigned_by). Default {:ok, []}.
     def list_open_pulls(_repo, opts) do
       send(
         Keyword.get(opts, :_test_pid, self()),
@@ -92,10 +92,10 @@ defmodule Fleet.Pilot.PollerTest do
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
 
     # #8 : la route vit dans le route-comment (state-machine). Stub configurable par `_test_routes`
-    # (map n → {carte, stage}). Défaut :none (issue non routé → A1 producteur).
+    # (map n → {carte, step}). Défaut :none (issue non routé → A1 producteur).
     def get_route(_repo, n, opts) do
       case Map.get(Keyword.get(opts, :_test_routes, %{}), n) do
-        {carte, stage} -> {:ok, {carte, stage}}
+        {carte, step} -> {:ok, {carte, step}}
         _ -> :none
       end
     end
@@ -125,7 +125,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
   end
 
-  defmodule StageStubLoader do
+  defmodule StepStubLoader do
     def load("engineer"),
       do:
         {:ok,
@@ -149,17 +149,17 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   # Loader de CARTE (load!/1) — distinct du loader CapProfile ci-dessus (load/1).
-  defmodule StageStubCarteLoader do
-    # 1-stage (producteur engineer) : un issue routé ici (stage=build=1er) est EN FILE (pas démarré).
+  defmodule StepStubCarteLoader do
+    # 1-step (producteur engineer) : un issue routé ici (step=build=1er) est EN FILE (pas démarré).
     def load!("qa-build") do
-      %{"name" => "qa-build", "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+      %{"name" => "qa-build", "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
     end
 
-    # 2-stage : routé au 2e stage (deploy ≠ 1er) = pipeline AVANCÉ (entre deux step_runs) = ENGAGÉ.
+    # 2-step : routé au 2e step (deploy ≠ 1er) = pipeline AVANCÉ (entre deux step_runs) = ENGAGÉ.
     def load!("qa-2") do
       %{
         "name" => "qa-2",
-        "stages" => %{
+        "steps" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "deploy" => %{"role" => "engineer", "needs" => ["build"]}
         }
@@ -167,7 +167,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
   end
 
-  defmodule StageStubSpawner do
+  defmodule StepStubSpawner do
     def spawn_pod(_profile, issue_id, opts) do
       send(self(), {:spawned, issue_id, opts})
       {:ok, "pod-#{issue_id}"}
@@ -208,7 +208,7 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-9"}
   end
 
-  # Recovery de wake qui ÉCHOUE (pod injoignable, re-roll non réparé) → `StageDispatcher.dispatch_issue`
+  # Recovery de wake qui ÉCHOUE (pod injoignable, re-roll non réparé) → `StepDispatcher.dispatch_issue`
   # surface `{:error, {:wake_unreached, …}}` : le pipeline EST démarré (verrou + pod + brief posés en amont,
   # ordre canonique), seul le réveil tmux a raté. Sert à prouver le contrat « wake raté ⇒ bail PRIS ».
   defmodule FailingWakeRecovery do
@@ -218,19 +218,19 @@ defmodule Fleet.Pilot.PollerTest do
   # Loader de CARTE qui RATE TRANSITOIREMENT sur `qa-2` (carte → nil) mais charge `qa-build` normalement.
   # Simule un échec réseau/forge de chargement de carte sur un pipeline routé-avancé : le bail ne doit PAS
   # se libérer pour autant (fail-closed). `load!/1` LÈVE pour `qa-2` → le poller (load_carte_or_nil) ET le
-  # StageDispatcher (load_carte) le rescue-ent en nil/`{:error}`.
+  # StepDispatcher (load_carte) le rescue-ent en nil/`{:error}`.
   defmodule NilCarteForQa2Loader do
     def load!("qa-2"), do: raise("carte qa-2 indisponible (échec transitoire simulé)")
 
     def load!("qa-build"),
       do: %{
         "name" => "qa-build",
-        "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}
+        "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}
       }
   end
 
-  defp start_stage_poller(issues_response, pulls_response \\ {:ok, []}) do
-    name = :"P_stage_#{System.unique_integer([:positive])}"
+  defp start_step_poller(issues_response, pulls_response \\ {:ok, []}) do
+    name = :"P_step_#{System.unique_integer([:positive])}"
 
     {:ok, pid} =
       Poller.start_link(
@@ -238,22 +238,22 @@ defmodule Fleet.Pilot.PollerTest do
         repo: "lordzurp/lcars-test",
         human: "lordzurp",
         start_tick?: false,
-        stage_dispatch?: true,
-        forge_client: StageStubForge,
+        step_dispatch?: true,
+        forge_client: StepStubForge,
         forge_opts: [
           _test_issues: issues_response,
           _test_pulls: pulls_response,
           _test_pid: self()
         ],
-        loader: StageStubLoader,
-        spawner: StageStubSpawner,
+        loader: StepStubLoader,
+        spawner: StepStubSpawner,
         clock: fn :second -> 1_700_000_000 end
       )
 
     {name, pid}
   end
 
-  describe "mode stage — force_poll" do
+  describe "mode step — force_poll" do
     test "issue assignée ROUTELESS → onboardée sur la carte par défaut (skip, pas de spawn)" do
       issues = [
         %{
@@ -264,11 +264,11 @@ defmodule Fleet.Pilot.PollerTest do
         }
       ]
 
-      {name, pid} = start_stage_poller({:ok, issues})
+      {name, pid} = start_step_poller({:ok, issues})
 
       # #5.2 D2 — route nil → le poller ONBOARDE (grave la carte par défaut brief-gate via Loader) puis
       # DÉFÈRE → skip (le tick suivant la voit routée → dispatch). Le dispatch routé est testé dans le
-      # describe « route gravée » + stage_dispatcher_test. Au niveau Poller, le contrat = le tally.
+      # describe « route gravée » + step_dispatcher_test. Au niveau Poller, le contrat = le tally.
       assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
       refute_received {:spawned, _, _}
 
@@ -285,7 +285,7 @@ defmodule Fleet.Pilot.PollerTest do
         }
       ]
 
-      {name, pid} = start_stage_poller({:ok, issues})
+      {name, pid} = start_step_poller({:ok, issues})
 
       assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
       refute_received {:spawned, _, _}
@@ -294,7 +294,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "réconciliation (B) : verrou orphelin réclamé au 2e tick (grace), pas au 1er" do
-      # #8 verrouillé mais AUCUN pod vivant (StageStubSpawner.list_pods → []) = orphelin confirmé.
+      # #8 verrouillé mais AUCUN pod vivant (StepStubSpawner.list_pods → []) = orphelin confirmé.
       issues = [
         %{
           "number" => 8,
@@ -304,7 +304,7 @@ defmodule Fleet.Pilot.PollerTest do
         }
       ]
 
-      {name, pid} = start_stage_poller({:ok, issues})
+      {name, pid} = start_step_poller({:ok, issues})
 
       # 1er tick : #8 devient SUSPECT (grace 2-tick) — PAS encore réclamé.
       Poller.force_poll(name)
@@ -339,10 +339,10 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
-          stage_dispatch?: true,
-          forge_client: StageStubForge,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
-          loader: StageStubLoader,
+          loader: StepStubLoader,
           spawner: LivePodSpawner,
           task_queue: ActiveTaskQueue,
           clock: fn :second -> 1_700_000_000 end
@@ -377,10 +377,10 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
-          stage_dispatch?: true,
-          forge_client: StageStubForge,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
-          loader: StageStubLoader,
+          loader: StepStubLoader,
           spawner: ProjectPipeSpawner,
           task_queue: ProjectTaskQueueIssue8,
           clock: fn :second -> 1_700_000_000 end
@@ -413,10 +413,10 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
-          stage_dispatch?: true,
-          forge_client: StageStubForge,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
-          loader: StageStubLoader,
+          loader: StepStubLoader,
           spawner: ProjectPipeSpawner,
           task_queue: ProjectTaskQueueIssue9,
           clock: fn :second -> 1_700_000_000 end
@@ -433,7 +433,7 @@ defmodule Fleet.Pilot.PollerTest do
     test "D1 — le poller SCOPE les listes par assigned_by=my_human (forge-side, issues ET PR)" do
       # Le scoping multi-user vit dans la LISTE (forge-side) : le poller passe SON humain aux DEUX endpoints
       # (/issues?type=issues ET ?type=pulls). decide/dispatch_review ne re-vérifient plus l'ownership.
-      {name, pid} = start_stage_poller({:ok, []}, {:ok, []})
+      {name, pid} = start_step_poller({:ok, []}, {:ok, []})
 
       Poller.force_poll(name)
 
@@ -447,7 +447,7 @@ defmodule Fleet.Pilot.PollerTest do
       # Un repo qui liste mal (500) ne backoff PAS toute la fleet : la DÉCOUVERTE a réussi (forge up), donc
       # err_streak/error_count restent à 0 (réservés à l'échec de découverte). L'erreur per-item vit dans la
       # TALLY (errors:1) + `last_tally_errors`.
-      {name, pid} = start_stage_poller({:error, {:http, 500, "boom"}})
+      {name, pid} = start_step_poller({:error, {:http, 500, "boom"}})
 
       assert %{dispatched: 0, skipped: 0, errors: 1} = Poller.force_poll(name)
       assert %{err_streak: 0, error_count: 0, last_tally_errors: 1} = Poller.stats(name)
@@ -464,10 +464,10 @@ defmodule Fleet.Pilot.PollerTest do
           name: name,
           human: "lordzurp",
           start_tick?: false,
-          stage_dispatch?: true,
-          forge_client: StageStubForge,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
           forge_opts: [_test_discover: {:error, {:http, 503, "down"}}],
-          spawner: StageStubSpawner,
+          spawner: StepStubSpawner,
           clock: fn :second -> 1_700_000_000 end
         )
 
@@ -494,14 +494,14 @@ defmodule Fleet.Pilot.PollerTest do
           name: name,
           human: "lordzurp",
           start_tick?: false,
-          stage_dispatch?: true,
-          forge_client: StageStubForge,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
           forge_opts: [
             _test_repos: ["lordzurp/proj-a", "lordzurp/proj-b"],
             _test_issues: {:ok, [issue]}
           ],
-          loader: StageStubLoader,
-          spawner: StageStubSpawner,
+          loader: StepStubLoader,
+          spawner: StepStubSpawner,
           clock: fn :second -> 1_700_000_000 end
         )
 
@@ -510,10 +510,10 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "issue ROUTÉ (route-comment) + assignee → démarre → dispatche le rôle du stage (carte_role)" do
+    test "issue ROUTÉ (route-comment) + assignee → démarre → dispatche le rôle du step (carte_role)" do
       # #8 cohérence : le routing vient de la ROUTE-COMMENT (gravée par create_issue), plus du label.
-      # #10 routé qa-build:build (1er stage = en file), assigné humain, bail libre → DÉMARRE → le poller
-      # dispatche le rôle du stage courant (build → engineer via carte_role).
+      # #10 routé qa-build:build (1er step = en file), assigné humain, bail libre → DÉMARRE → le poller
+      # dispatche le rôle du step courant (build → engineer via carte_role).
       issues = [
         %{
           "number" => 10,
@@ -531,20 +531,20 @@ defmodule Fleet.Pilot.PollerTest do
           repo: "lordzurp/lcars-test",
           human: "lordzurp",
           start_tick?: false,
-          stage_dispatch?: true,
-          forge_client: StageStubForge,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
           forge_opts: [
             _test_issues: {:ok, issues},
             _test_routes: %{10 => {"qa-build", "build"}}
           ],
-          loader: StageStubLoader,
-          carte_loader: StageStubCarteLoader,
-          spawner: StageStubSpawner,
+          loader: StepStubLoader,
+          carte_loader: StepStubCarteLoader,
+          spawner: StepStubSpawner,
           clock: fn :second -> 1_700_000_000 end
         )
 
       # tally = le contrat au niveau Poller (le spawn part dans la mailbox du GenServer, pas du test ;
-      # le rôle dispatché par carte_role est unit-testé dans stage_dispatcher_test).
+      # le rôle dispatché par carte_role est unit-testé dans step_dispatcher_test).
       assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)
@@ -559,7 +559,7 @@ defmodule Fleet.Pilot.PollerTest do
   # poser sur un repo qu'il possède. L'admission exige le marqueur d'onboarding posé PAR le bot système
   # (`ForgeClient.admitted?`, vérifié bot-authored server-side). Le poller n'admet/ne scanne QUE les repos
   # scellés ; un repo tagué mais non onboardé est ÉCARTÉ avant tout dispatch.
-  describe "mode stage — frontière d'admission système (F)" do
+  describe "mode step — frontière d'admission système (F)" do
     # `list_open_issues` envoie `{:scoped, :issues, _}` au pid de test SSI le repo est scanné → c'est notre
     # sonde « ce repo a-t-il franchi l'admission ». Un repo non admis NE déclenche PAS cet appel.
     defp start_admission_poller(repos, admitted_map, issue) do
@@ -570,16 +570,16 @@ defmodule Fleet.Pilot.PollerTest do
           name: name,
           human: "lordzurp",
           start_tick?: false,
-          stage_dispatch?: true,
-          forge_client: StageStubForge,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
           forge_opts: [
             _test_repos: repos,
             _test_admitted: admitted_map,
             _test_issues: {:ok, [issue]},
             _test_pid: self()
           ],
-          loader: StageStubLoader,
-          spawner: StageStubSpawner,
+          loader: StepStubLoader,
+          spawner: StepStubSpawner,
           clock: fn :second -> 1_700_000_000 end
         )
 
@@ -646,7 +646,7 @@ defmodule Fleet.Pilot.PollerTest do
   # ============================================================
   # Bail repo-serialise (incrément 3) : au plus 1 pipeline actif par repo.
   # ============================================================
-  describe "mode stage — bail repo-serialise" do
+  describe "mode step — bail repo-serialise" do
     # `extra_opts` surcharge les opts (Keyword.merge en dernier) : injecte un seam (`wake_recovery`) ou
     # remplace un défaut (`carte_loader`) sans dupliquer le harnais.
     defp start_entry_poller(issues_response, routes, extra_opts \\ []) do
@@ -657,12 +657,12 @@ defmodule Fleet.Pilot.PollerTest do
         repo: "lordzurp/lcars-test",
         human: "lordzurp",
         start_tick?: false,
-        stage_dispatch?: true,
-        forge_client: StageStubForge,
+        step_dispatch?: true,
+        forge_client: StepStubForge,
         forge_opts: [_test_issues: issues_response, _test_routes: routes],
-        loader: StageStubLoader,
-        carte_loader: StageStubCarteLoader,
-        spawner: StageStubSpawner,
+        loader: StepStubLoader,
+        carte_loader: StepStubCarteLoader,
+        spawner: StepStubSpawner,
         clock: fn :second -> 1_700_000_000 end
       ]
 
@@ -673,8 +673,8 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "un pipeline ENGAGÉ (route avancée) tient le bail et bloque un issue EN FILE" do
       # #8 : le bail se lit sur la ROUTE (state-machine), PLUS sur state:*. #11 routé qa-2:deploy (2e
-      # stage ≠ 1er = pipeline AVANCÉ entre deux step_runs) → ENGAGÉ → tient le bail ET son stage courant est
-      # dispatché (continue le step_run). #12 routé qa-build:build (1er stage = EN FILE) → bail tenu → attend.
+      # step ≠ 1er = pipeline AVANCÉ entre deux step_runs) → ENGAGÉ → tient le bail ET son step courant est
+      # dispatché (continue le step_run). #12 routé qa-build:build (1er step = EN FILE) → bail tenu → attend.
       issues = [
         %{
           "number" => 11,
@@ -750,7 +750,7 @@ defmodule Fleet.Pilot.PollerTest do
       # issue est SKIPPÉ (un seul pipeline démarre). Le wake raté n'est PAS avalé : il reste compté en `errors`
       # (et alimente err_streak/telemetry).
       #
-      # Régression prouvée : reviens à l'ancien `stage_do_dispatch` (wake_unreached → errors SANS prendre le
+      # Régression prouvée : reviens à l'ancien `step_do_dispatch` (wake_unreached → errors SANS prendre le
       # bail) + `start_pipeline` qui ne prend le bail que si `dispatched` augmente → le bail reste libre → le 2e
       # issue DÉMARRE un 2e pipeline → le tally devient `skipped:0, errors:2` (deux feature-branches
       # concurrentes), l'assert `skipped:1` échoue.
@@ -789,12 +789,12 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "pipeline routé-avancé à carte NIL tient le bail (échec transitoire de carte ne libère pas le bail)" do
       # Régression : le bail se lit sur la ROUTE (append-only, robuste), JAMAIS sur le succès du chargement de
-      # la carte. #18 routé qa-2:deploy (2e stage ≠ 1er = pipeline AVANCÉ = ENGAGÉ) mais sa carte échoue à
+      # la carte. #18 routé qa-2:deploy (2e step ≠ 1er = pipeline AVANCÉ = ENGAGÉ) mais sa carte échoue à
       # charger TRANSITOIREMENT (NilCarteForQa2Loader lève sur qa-2). Le pipeline reste ENGAGÉ (fail-closed) →
-      # tient le bail. #19 routé qa-build:build (1er stage = EN FILE, carte qa-build charge OK), même repo →
+      # tient le bail. #19 routé qa-build:build (1er step = EN FILE, carte qa-build charge OK), même repo →
       # bail tenu → SKIPPÉ. Aucun 2e pipeline ne démarre malgré la carte-nil.
       #
-      # Régression prouvée : reviens à `engaged = not is_nil(carte_map) and not first_stage?(...)` → la
+      # Régression prouvée : reviens à `engaged = not is_nil(carte_map) and not first_step?(...)` → la
       # carte-nil de #18 le classe `engaged=false` → il sort du lease set → #19 voit le bail LIBRE → DÉMARRE un
       # 2e pipeline → le tally devient `dispatched:1` (au lieu de `dispatched:0, skipped:1`), l'assert échoue.
       issues = [
@@ -819,8 +819,8 @@ defmodule Fleet.Pilot.PollerTest do
           carte_loader: NilCarteForQa2Loader
         )
 
-      # #18 engagé (carte-nil mais route avancée → fail-closed) tient le bail : son stage est dispatché mais
-      # fail-loud (carte manquante côté StageDispatcher → errors:1), le bail reste TENU. #19 → bail tenu →
+      # #18 engagé (carte-nil mais route avancée → fail-closed) tient le bail : son step est dispatché mais
+      # fail-loud (carte manquante côté StepDispatcher → errors:1), le bail reste TENU. #19 → bail tenu →
       # skipped:1. Aucun 2e pipeline démarré (dispatched:0).
       assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
 
@@ -831,7 +831,7 @@ defmodule Fleet.Pilot.PollerTest do
   # ============================================================
   # Chemin PR-driven (Corr.3 4-C) : les juges sont dispatches via les requested_reviewers.
   # ============================================================
-  describe "mode stage — dispatch juge PR-driven" do
+  describe "mode step — dispatch juge PR-driven" do
     test "PR avec review demandee -> juge dispatche (chemin pulls)" do
       pulls = [
         %{
@@ -843,7 +843,7 @@ defmodule Fleet.Pilot.PollerTest do
         }
       ]
 
-      {name, pid} = start_stage_poller({:ok, []}, {:ok, pulls})
+      {name, pid} = start_step_poller({:ok, []}, {:ok, pulls})
 
       assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
 
@@ -872,7 +872,7 @@ defmodule Fleet.Pilot.PollerTest do
         }
       ]
 
-      {name, pid} = start_stage_poller({:ok, issues}, {:ok, pulls})
+      {name, pid} = start_step_poller({:ok, issues}, {:ok, pulls})
 
       # issue #99 skip (PR ouverte) + juge reviewer dispatche (pull) = {dispatched:1, skipped:1}
       assert %{dispatched: 1, skipped: 1, errors: 0} = Poller.force_poll(name)
@@ -890,7 +890,7 @@ defmodule Fleet.Pilot.PollerTest do
         }
       ]
 
-      {name, pid} = start_stage_poller({:ok, []}, {:ok, pulls})
+      {name, pid} = start_step_poller({:ok, []}, {:ok, pulls})
 
       assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
 
@@ -904,7 +904,7 @@ defmodule Fleet.Pilot.PollerTest do
 
   describe "MA-02 — réconciliation multi-repo (clé de verrou repo-qualifiée)" do
     # Forge multi-repo : chaque repo a SA liste d'issues (`_test_issues_by_repo`). `remove_label` porte le
-    # REPO (pour distinguer repoA#8 de repoB#8 — MÊME numéro). Le reste = StageStubForge.
+    # REPO (pour distinguer repoA#8 de repoB#8 — MÊME numéro). Le reste = StepStubForge.
     defmodule MultiRepoForge do
       def search_repos_by_topic(_topic, opts),
         do: {:ok, Keyword.get(opts, :_test_repos, [])}
@@ -964,14 +964,14 @@ defmodule Fleet.Pilot.PollerTest do
           name: name,
           human: "lordzurp",
           start_tick?: false,
-          stage_dispatch?: true,
+          step_dispatch?: true,
           forge_client: MultiRepoForge,
           forge_opts: [
             _test_repos: ["owner/repoA", "owner/repoB"],
             _test_issues_by_repo: issues_by_repo,
             _test_pid: self()
           ],
-          loader: StageStubLoader,
+          loader: StepStubLoader,
           spawner: RepoBPodSpawner,
           task_queue: ActiveTaskQueue2,
           clock: fn :second -> 1_700_000_000 end
@@ -1019,7 +1019,7 @@ defmodule Fleet.Pilot.PollerTest do
         }
       ]
 
-      {name, pid} = start_stage_poller({:ok, issues}, {:ok, pulls})
+      {name, pid} = start_step_poller({:ok, issues}, {:ok, pulls})
 
       # issue 42 skip (awaits-arch, decide) + PR 7 skip (awaits_arch threadé) → dispatched:0.
       assert %{dispatched: 0, errors: 0} = Poller.force_poll(name)

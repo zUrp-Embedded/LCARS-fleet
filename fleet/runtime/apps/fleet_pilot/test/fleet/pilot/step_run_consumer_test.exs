@@ -23,7 +23,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     def load!("poc-cycle") do
       %{
         "name" => "poc-cycle",
-        "stages" => %{
+        "steps" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "spec" => %{"role" => "qualifier", "needs" => ["build"]},
           "review" => %{"role" => "reviewer", "needs" => ["spec"]}
@@ -63,7 +63,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     )
   end
 
-  defp stage_payload(extra \\ %{}) do
+  defp step_payload(extra \\ %{}) do
     Map.merge(
       %{
         "pod_id" => "pod-abc",
@@ -81,7 +81,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     test "pod engineer porteur de projet (A1 single-brique) -> step_run producteur, intent :review (②.1d)" do
       # ②.1d : sans carte, le producteur ne merge PLUS directement (:promote) — il ouvre la PR et
       # DEMANDE les juges (:review). Le merge est ensuite piloté par l'état-PR (dispatch_review).
-      assert {:ok, :captured} = StepRunConsumer.maybe_complete(stage_payload(), state())
+      assert {:ok, :captured} = StepRunConsumer.maybe_complete(step_payload(), state())
 
       assert_received {:step_run, step_run, opts}
       assert step_run.repo == "lordzurp/lcars-test"
@@ -107,7 +107,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
     test "producteur : result.summary -> step_run.eng_summary (voix de l'eng, info SORTANTE)" do
       payload =
-        stage_payload(%{"result" => %{"ok" => true, "summary" => "j'ai fait X, choisi Y"}})
+        step_payload(%{"result" => %{"ok" => true, "summary" => "j'ai fait X, choisi Y"}})
 
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(payload, state())
       assert_received {:step_run, step_run, _}
@@ -116,19 +116,19 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
     test "producteur : summary non-string -> coercé safe_str (pas de crash singleton #8) ; absent -> aucune clé" do
       # map -> inspect (coercion défensive : un LLM peut rendre un objet)
-      p = stage_payload(%{"result" => %{"summary" => %{"raw" => 1}}})
+      p = step_payload(%{"result" => %{"summary" => %{"raw" => 1}}})
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(p, state())
       assert_received {:step_run, step_run, _}
       assert step_run.eng_summary =~ "raw"
       # sans summary -> pas de clé eng_summary (pas de voix vide)
-      assert {:ok, :captured} = StepRunConsumer.maybe_complete(stage_payload(), state())
+      assert {:ok, :captured} = StepRunConsumer.maybe_complete(step_payload(), state())
       assert_received {:step_run, hop2, _}
       refute Map.has_key?(hop2, :eng_summary)
     end
 
     test "producteur BLOQUÉ (result.blocked) -> await_arch (motif=summary), PAS complete_pr (anti-wedge)" do
       payload =
-        stage_payload(%{
+        step_payload(%{
           "result" => %{"blocked" => true, "summary" => "Manque la spec du protocole X"}
         })
 
@@ -147,7 +147,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     test "blocked seulement pour un PRODUCTEUR (un juge avec blocked passe par le chemin normal)" do
       # reviewer = juge (deliverable_mode payload) → blocked ignoré, chemin normal (step_run capturé).
       payload =
-        stage_payload(%{"role" => "reviewer", "result" => %{"blocked" => true}})
+        step_payload(%{"role" => "reviewer", "result" => %{"blocked" => true}})
 
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(payload, state())
       assert_received {:step_run, _step_run, _}
@@ -168,7 +168,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
       assert {:ok, :offloaded} =
                StepRunConsumer.maybe_complete(
-                 stage_payload(),
+                 step_payload(),
                  state(%{step_run_runner: recording})
                )
 
@@ -182,33 +182,33 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
   describe "maybe_complete/2 — filtres (skip)" do
     test "pipeline pod (pipeline_id present) -> skip, pas d'appel completer" do
-      payload = stage_payload(%{"pipeline_id" => "pl-1", "stage" => "build"})
+      payload = step_payload(%{"pipeline_id" => "pl-1", "step" => "build"})
       assert {:skip, :pipeline_pod} = StepRunConsumer.maybe_complete(payload, state())
       refute_received {:step_run, _, _}
     end
 
     test "pod sans projet (pas de base_sha) -> skip" do
-      payload = stage_payload(%{"base_sha" => nil, "workspace" => nil})
+      payload = step_payload(%{"base_sha" => nil, "workspace" => nil})
       assert {:skip, :no_project} = StepRunConsumer.maybe_complete(payload, state())
       refute_received {:step_run, _, _}
     end
 
     test "base_sha vide -> skip (pas de livrable git)" do
-      payload = stage_payload(%{"base_sha" => ""})
+      payload = step_payload(%{"base_sha" => ""})
       assert {:skip, :no_project} = StepRunConsumer.maybe_complete(payload, state())
     end
 
     test "issue_id non parseable -> skip" do
-      payload = stage_payload(%{"issue_id" => "owner/repo#42"})
+      payload = step_payload(%{"issue_id" => "owner/repo#42"})
 
       assert {:skip, {:bad_issue_id, "owner/repo#42"}} =
                StepRunConsumer.maybe_complete(payload, state())
     end
   end
 
-  describe "A2.4 — chainage carte (pipeline+stage -> intent + pr_role)" do
-    test "producteur stage milieu (build/engineer, gate pass) -> :advance vers qualifier" do
-      payload = stage_payload(%{"pipeline" => "poc-cycle", "stage" => "build"})
+  describe "A2.4 — chainage carte (pipeline+step -> intent + pr_role)" do
+    test "producteur step milieu (build/engineer, gate pass) -> :advance vers qualifier" do
+      payload = step_payload(%{"pipeline" => "poc-cycle", "step" => "build"})
 
       assert {:ok, :captured} =
                StepRunConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
@@ -221,9 +221,9 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert step_run.producer_branch == "lcars/issue-42-engineer"
     end
 
-    test "juge dernier stage (review/reviewer) -> :promote terminal, branche du producteur" do
+    test "juge dernier step (review/reviewer) -> :promote terminal, branche du producteur" do
       payload =
-        stage_payload(%{"role" => "reviewer", "pipeline" => "poc-cycle", "stage" => "review"})
+        step_payload(%{"role" => "reviewer", "pipeline" => "poc-cycle", "step" => "review"})
 
       assert {:ok, :captured} =
                StepRunConsumer.maybe_complete(
@@ -242,14 +242,14 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       refute Map.has_key?(step_run, :deliverable_opts)
     end
 
-    test "F-E8 : juge NO-CARTE à route héritée (rôle != rôle du stage) -> :reviewed, JAMAIS :promote" do
+    test "F-E8 : juge NO-CARTE à route héritée (rôle != rôle du step) -> :reviewed, JAMAIS :promote" do
       # Bug live PoC-7 : le qualifier (juge no-carte dispatché sur la PR) HÉRITE la route de l'issue
-      # (stage `build`, rôle engineer). Sans le garde `stage_role_matches?`, gate_decide(build) le voyait
+      # (step `build`, rôle engineer). Sans le garde `step_role_matches?`, gate_decide(build) le voyait
       # en terminal NON-producteur -> :promote -> MERGE sur 1 juge (quorum court-circuité). Avec : rôle
-      # `qualifier` != rôle du stage `build` -> résolution no-carte -> :reviewed (enregistre la review ;
+      # `qualifier` != rôle du step `build` -> résolution no-carte -> :reviewed (enregistre la review ;
       # le merge revient au quorum `dispatch_by_verdicts` qui attend TOUS les juges).
       payload =
-        stage_payload(%{"role" => "qualifier", "pipeline" => "poc-cycle", "stage" => "build"})
+        step_payload(%{"role" => "qualifier", "pipeline" => "poc-cycle", "step" => "build"})
 
       assert {:ok, :captured} =
                StepRunConsumer.maybe_complete(
@@ -263,7 +263,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
 
     test "carte introuvable -> {:error, {:carte_load, _}}, pas de step_run" do
-      payload = stage_payload(%{"pipeline" => "bad", "stage" => "build"})
+      payload = step_payload(%{"pipeline" => "bad", "step" => "build"})
 
       assert {:error, {:carte_load, _}} =
                StepRunConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
@@ -271,10 +271,10 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       refute_received {:step_run, _, _}
     end
 
-    test "stage inconnu dans la carte -> {:error, {:carte_nav, :unknown_stage}}, pas de misroute" do
-      payload = stage_payload(%{"pipeline" => "poc-cycle", "stage" => "ghost"})
+    test "step inconnu dans la carte -> {:error, {:carte_nav, :unknown_step}}, pas de misroute" do
+      payload = step_payload(%{"pipeline" => "poc-cycle", "step" => "ghost"})
 
-      assert {:error, {:carte_nav, :unknown_stage}} =
+      assert {:error, {:carte_nav, :unknown_step}} =
                StepRunConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
 
       refute_received {:step_run, _, _}
@@ -283,7 +283,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     test "sans contexte carte (A1 single-brique) -> producteur :review, pas d'appel loader (carte)" do
       # loader (carte) nil : si run_step_run appelait le loader de carte sans contexte carte, ca crasherait.
       # Le no-carte appelle deliverable_mode_fun (dmode), pas le loader de carte.
-      payload = stage_payload()
+      payload = step_payload()
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(payload, state())
       assert_received {:step_run, step_run, _opts}
       assert step_run.intent == :review
@@ -300,7 +300,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
             {"halt_wait_input", :request_changes},
             {"garbage_unparseable", :request_changes}
           ] do
-        payload = stage_payload(%{"role" => "qualifier", "result" => %{"decision" => decision}})
+        payload = step_payload(%{"role" => "qualifier", "result" => %{"decision" => decision}})
 
         # forge_client: StubForge → le juge resout la branche producteur via la PR ouverte (pas de HTTP).
         assert {:ok, :captured} =
@@ -320,7 +320,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       # le StepRunConsumer (SINGLETON) → fin-de-step-run perdue → verrou jamais levé → pipe wedgé. `safe_str` doit
       # absorber sans crasher et produire un corps de review en string.
       payload =
-        stage_payload(%{
+        step_payload(%{
           "role" => "qualifier",
           "result" => %{
             "decision" => "abandon",
@@ -357,7 +357,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       # MULTI-PROJET : le singleton StepRunConsumer traite N projets. Le repo (forge API) et le remote (push)
       # de CE step_run viennent du `pod.completed` (Spawner les embarque), PAS du fallback de config.
       payload =
-        stage_payload(%{
+        step_payload(%{
           "repository" => %{"full_name" => "alice/proj-a"},
           "remote" => "http://forge/alice/proj-a.git"
         })
@@ -376,7 +376,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     test "payload SANS repo → fallback config (single-repo legacy / test à payload nu)" do
       # Rétro-compat : un `pod.completed` qui ne porte pas son repo → le StepRunConsumer retombe sur son
       # repo/remote de config (le chemin de TOUS les tests pré-F-037).
-      assert {:ok, :captured} = StepRunConsumer.maybe_complete(stage_payload(), state())
+      assert {:ok, :captured} = StepRunConsumer.maybe_complete(step_payload(), state())
       assert_received {:step_run, step_run, _opts}
       assert step_run.repo == "lordzurp/lcars-test"
       assert step_run.deliverable_opts.remote == "origin"
@@ -403,7 +403,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
 
     test "F067 : start_link cable :step_run_runner -> la completion passe par le runner (chemin init/prod)" do
-      # RED-first : ce test passe par start_link -> init (le chemin PROD, que stage_children utilise),
+      # RED-first : ce test passe par start_link -> init (le chemin PROD, que step_children utilise),
       # PAS par un state construit en direct. Si init oublie de lire :step_run_runner des opts, le runner
       # injecte est ignore -> la completion s'execute en sync (bloquante) -> {:offloaded_gs} n'arrive
       # JAMAIS -> ce test echoue. C'est le filet du critique F067-init.
@@ -431,7 +431,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
       send(
         pid,
-        Fleet.Event.new(:spawner, :"pod.completed", pod_id: "pod-abc", payload: stage_payload())
+        Fleet.Event.new(:spawner, :"pod.completed", pod_id: "pod-abc", payload: step_payload())
       )
 
       # init a cable step_run_runner -> la completion est routee vers le runner (msg au process test).
@@ -454,7 +454,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       # Le completer fait send(self()) DANS le GenServer -> on verifie juste que
       # l'event est route sans crash (le step_run est unit-teste via maybe_complete).
       event =
-        Fleet.Event.new(:spawner, :"pod.completed", pod_id: "pod-abc", payload: stage_payload())
+        Fleet.Event.new(:spawner, :"pod.completed", pod_id: "pod-abc", payload: step_payload())
 
       send(pid, event)
       assert Process.alive?(pid)

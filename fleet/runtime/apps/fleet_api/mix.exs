@@ -29,8 +29,8 @@ defmodule Fleet.API.MixProject do
   defp deps do
     [
       {:fleet_event_router, in_umbrella: true},
-      # F-010 : readiness sonde la liveness du rail stage (Ring 2 fleet_pilot) via
-      # `Fleet.Pilot.Application.stage_status/0` — dép vers le bas (Ring 4 → Ring 2), acyclique.
+      # F-010 : readiness sonde la liveness du rail step (Ring 2 fleet_pilot) via
+      # `Fleet.Pilot.Application.step_status/0` — dép vers le bas (Ring 4 → Ring 2), acyclique.
       {:fleet_pilot, in_umbrella: true},
       # La readiness sonde la liveness du listener MCP pod-facing via
       # `Fleet.MCP.Supervisor.pod_facing_status/0` (le PROCESS, pas le knob) — dép vers le

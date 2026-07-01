@@ -7,14 +7,14 @@ defmodule Fleet.Pipeline.GateBriefTest do
   test "brief porte contexte + livrable + question + options canon + contrat JSON" do
     brief =
       GateBrief.build(%{
-        stage: "spec-review",
+        step: "spec-review",
         pipeline_id: "pipe-42",
         gate: %{"type" => "terminal", "rules" => ["severity_max != critical"]},
         outputs: %{"result" => %{"severity_max" => "important"}}
       })
 
     # Contexte
-    assert brief =~ "Stage jugé : spec-review"
+    assert brief =~ "Step jugé : spec-review"
     assert brief =~ "pipe-42"
     assert brief =~ "type terminal"
     # Livrable à juger (rendu JSON)
@@ -35,7 +35,7 @@ defmodule Fleet.Pipeline.GateBriefTest do
     # consigne à exécuter par le gatekeeper : il est cité en contexte, encadré.
     brief =
       GateBrief.build(%{
-        stage: "review",
+        step: "review",
         pipeline_id: "gk-smoke",
         gate: nil,
         outputs: %{"result" => %{"commit" => "abc"}},
@@ -54,13 +54,13 @@ defmodule Fleet.Pipeline.GateBriefTest do
   end
 
   test "sans request → pas de section demande d'origine" do
-    brief = GateBrief.build(%{stage: "s", pipeline_id: "p", gate: nil, outputs: %{}})
+    brief = GateBrief.build(%{step: "s", pipeline_id: "p", gate: nil, outputs: %{}})
     refute brief =~ "Demande d'origine"
   end
 
   test "gate nil + outputs vides → rendu défensif (pas de crash)" do
-    brief = GateBrief.build(%{stage: "audit", pipeline_id: "p", gate: nil, outputs: %{}})
-    assert brief =~ "Stage jugé : audit"
+    brief = GateBrief.build(%{step: "audit", pipeline_id: "p", gate: nil, outputs: %{}})
+    assert brief =~ "Step jugé : audit"
     assert brief =~ "type —"
     assert brief =~ "(aucun)"
   end
@@ -68,13 +68,13 @@ defmodule Fleet.Pipeline.GateBriefTest do
   test "outputs non-JSON-encodable → fallback inspect (défensif)" do
     brief =
       GateBrief.build(%{
-        stage: "s",
+        step: "s",
         pipeline_id: "p",
         gate: nil,
         outputs: %{"pid" => self()}
       })
 
     assert is_binary(brief)
-    assert brief =~ "Stage jugé : s"
+    assert brief =~ "Step jugé : s"
   end
 end

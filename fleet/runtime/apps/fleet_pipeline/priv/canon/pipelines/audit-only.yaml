@@ -6,9 +6,9 @@
 # Référencé par: 06_modops/docs/cascade-mix-v2-rationale.md
 # Consommé par: Fleet.Pipeline.Loader → rail forge-driven (le moteur RAM Executor est supprimé).
 #
-# rev3 (B / §L441) : le stage `gatekeeper-decision` (role: gatekeeper) est RETIRÉ.
+# rev3 (B / §L441) : le step `gatekeeper-decision` (role: gatekeeper) est RETIRÉ.
 #   Le gatekeeper est un juge d'EXCEPTION dispatché par une gate non-tranchable, JAMAIS
-#   un stage d'ordonnancement (§L441 ; GATE-D1). ⚠ SIGNAL (auditeur) : l'escalade
+#   un step d'ordonnancement (§L441 ; GATE-D1). ⚠ SIGNAL (auditeur) : l'escalade
 #   "si non-mécanique" n'est PLUS exprimée — en v2.5 les `rules` de gate sont
 #   string-only (schema `additionalProperties:false`, `items:string`) et le chemin
 #   terminal-string (`Gates.eval_terminal_string`) n'a PAS de branche `:nontranchable`.
@@ -19,14 +19,14 @@
 kind: Pipeline
 metadata:
   name: audit-only
-  description: "Audit indépendant — pas de code généré. Consultant fire-mode (1 stage). Escalade gatekeeper = à re-encoder en B (cf. en-tête)."
+  description: "Audit indépendant — pas de code généré. Consultant fire-mode (1 step). Escalade gatekeeper = à re-encoder en B (cf. en-tête)."
   applicable_intensity: [L0, L1, L2, L3, L4]
   applicable_regime: [R1, R2]
 
 spec:
-  stages:
+  steps:
 
-    # --- Stage 1: audit (consultant fire-mode) ---
+    # --- Step 1: audit (consultant fire-mode) ---
     audit:
       role: consultant
       profile: consultant.yaml  # cap-profile.modop_set inclut fire-mode + rubber-duck
@@ -43,7 +43,7 @@ spec:
         # NB (B/§L441, rev3) : `fallback_invoke_gatekeeper`/`on_blocking_severity` sont
         # INERTES — le chemin terminal-string (`Gates.eval_terminal_string`) ne les
         # évalue pas (pas de branche :nontranchable en v2.5). Conservés comme marqueur
-        # de l'escalade à re-encoder en B (cf. en-tête). Pas un stage gatekeeper.
+        # de l'escalade à re-encoder en B (cf. en-tête). Pas un step gatekeeper.
         fallback_invoke_gatekeeper: true
         on_blocking_severity: critical
       timeout_sec: 1800

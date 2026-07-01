@@ -501,7 +501,7 @@ defmodule Fleet.Spawner.Pod do
   #   - task active (pending/assigned/in_progress) → le pod n'a PAS répondu à temps → échec.
   #   - aucune task active → le pod attendait juste sa prochaine task (idle) ; ce n'est PAS un
   #     timeout de réponse → on laisse lapser, PAS de kill (sinon idle-kill d'un pod sain). La vérif
-  #     est à l'instant du fire (≠ à l'armement) → couvre la race d'enqueue worker ET l'inter-stage.
+  #     est à l'instant du fire (≠ à l'armement) → couvre la race d'enqueue worker ET l'inter-step.
   # Le state_timeout, une fois fired, n'est plus armé → pas de re-fire tant que le liveness ne ré-arme pas.
   def handle_event(:state_timeout, :result_deadline, :monitoring, data) do
     if TaskProbe.pod_has_active_task?(data.pod_id) do
@@ -809,7 +809,7 @@ defmodule Fleet.Spawner.Pod do
   # Délègue à la source unique `Fleet.CapProfile.lifetime_scope/1`.
   defp lifetime_scope(%Fleet.CapProfile{} = cp), do: Fleet.CapProfile.lifetime_scope(cp)
 
-  # pod.completed porte le contexte pipeline (pipeline_id+stage) SI le pod est spawné avec ces clés.
+  # pod.completed porte le contexte pipeline (pipeline_id+step) SI le pod est spawné avec ces clés.
   # Plus aucun appelant ne les pose aujourd'hui → en pratique le payload est nu (un consommateur qui
   # reçoit un payload nu ignore le contexte pipeline, no-op).
   defp pod_completed_payload(data, result) do
@@ -821,9 +821,9 @@ defmodule Fleet.Spawner.Pod do
 
     opts = data.opts || []
 
-    case {Keyword.get(opts, :pipeline_id), Keyword.get(opts, :stage)} do
+    case {Keyword.get(opts, :pipeline_id), Keyword.get(opts, :step)} do
       {nil, _} ->
-        # Pod stage-dispatch (assignee-driven) hors pipeline. S'il porte un PROJET (repo cloné), le
+        # Pod step-dispatch (assignee-driven) hors pipeline. S'il porte un PROJET (repo cloné), le
         # payload embarque le contexte de fin-de-step-run : le consumer StepRunConsumer est stateless (l'event
         # porte l'état). Pod sans projet (memory-X, architect) → payload nu (base), filtré en aval.
         case LaunchSpec.effective_project(data.opts, data.cap_profile) do
@@ -846,17 +846,17 @@ defmodule Fleet.Spawner.Pod do
             base
         end
 
-      {pipeline_id, stage} ->
-        Map.merge(base, %{"pipeline_id" => pipeline_id, "stage" => stage})
+      {pipeline_id, step} ->
+        Map.merge(base, %{"pipeline_id" => pipeline_id, "step" => step})
     end
   end
 
-  # Contexte carte (pipeline+stage) injecté au spawn par StageDispatcher via `:pipeline`/`:stage`.
-  # Permet au StepRunConsumer de naviguer la carte. Absent (carte 1-stage) → payload inchangé.
+  # Contexte carte (pipeline+step) injecté au spawn par StepDispatcher via `:pipeline`/`:step`.
+  # Permet au StepRunConsumer de naviguer la carte. Absent (carte 1-step) → payload inchangé.
   defp maybe_put_carte_ctx(payload, opts) do
-    case {Keyword.get(opts, :pipeline), Keyword.get(opts, :stage)} do
+    case {Keyword.get(opts, :pipeline), Keyword.get(opts, :step)} do
       {p, s} when is_binary(p) and is_binary(s) ->
-        Map.merge(payload, %{"pipeline" => p, "stage" => s})
+        Map.merge(payload, %{"pipeline" => p, "step" => s})
 
       _ ->
         payload

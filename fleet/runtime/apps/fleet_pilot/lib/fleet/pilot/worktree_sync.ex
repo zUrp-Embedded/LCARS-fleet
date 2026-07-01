@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.WorktreeSync do
 
   Le merge a DEUX déclencheurs qui peuvent tourner en même temps :
 
-    * le poller (`Fleet.Pilot.StageDispatcher.promote_pr`), mono-process ;
+    * le poller (`Fleet.Pilot.StepDispatcher.promote_pr`), mono-process ;
     * le StepRunConsumer (`Fleet.Pilot.StepRunCompleter.promote`), **offloadé dans une `Task`**.
 
   Deux `reset --hard` simultanés sur le MÊME worktree corrompent l'index (`index.lock`). Faire reposer

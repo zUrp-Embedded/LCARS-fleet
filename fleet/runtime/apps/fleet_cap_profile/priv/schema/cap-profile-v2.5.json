@@ -153,7 +153,7 @@
         "deliverable_mode": {
           "type": "string",
           "enum": ["payload", "git_native"],
-          "description": "Modèle O5 — forme du livrable du rôle, condition d'entrée de Fleet.Pipeline.Deliverable.publish/1 (différenciation par catalogue, pas par branche de code). `payload` : le pod produit un payload de fichiers, le SYSTÈME écrit+commite (verdict-rôles, legacy PASSE-7). `git_native` : le pod commite lui-même dans son workspace, le système vérifie (gate I-CBC) + pousse (code-rôles). Absent → défaut `payload` appliqué côté code (back-compat ; ne concerne que les stages avec post_extract.git)."
+          "description": "Modèle O5 — forme du livrable du rôle, condition d'entrée de Fleet.Pipeline.Deliverable.publish/1 (différenciation par catalogue, pas par branche de code). `payload` : le pod produit un payload de fichiers, le SYSTÈME écrit+commite (verdict-rôles, legacy PASSE-7). `git_native` : le pod commite lui-même dans son workspace, le système vérifie (gate I-CBC) + pousse (code-rôles). Absent → défaut `payload` appliqué côté code (back-compat ; ne concerne que les steps avec post_extract.git)."
         },
         "brief_kind": {
           "type": "string",

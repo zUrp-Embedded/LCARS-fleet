@@ -131,7 +131,7 @@ callbacks Cowboy directs pour WS (pas de socket réel).
 ## Dépendances
 
 * `fleet_event_router` (ch11 PROMOTED) — Bus PubSub
-* `fleet_pilot` (Ring 2) — readiness sonde la liveness du rail stage
+* `fleet_pilot` (Ring 2) — readiness sonde la liveness du rail step
 * `fleet_spawner` (Ring 1) — readiness lit le backend de lancement résolu via `Fleet.Spawner.LaunchBackend.resolved/0` (source unique du défaut, pas re-copié)
 * `fleet_starfleet` (Ring 3) — readiness lit le backend dispatcher de shutdown résolu via `Fleet.Starfleet.Shutdown.configured_dispatcher/0` (source unique du défaut)
 * `fleet_cap_profile` (ch1) — validation cap-profile à l'admission `/api/admin/spawn`

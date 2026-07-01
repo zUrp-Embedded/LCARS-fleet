@@ -17,21 +17,21 @@ defmodule Fleet.Pipeline.GateBrief do
   @doc """
   Rend le brief markdown depuis le contexte de gate.
 
-  `ctx` : `%{stage: String, pipeline_id: term, gate: map | nil, outputs: map,
+  `ctx` : `%{step: String, pipeline_id: term, gate: map | nil, outputs: map,
   request: String | nil, subject: :deliverable | :brief}`.
 
   `:subject` paramètre CE QUI est jugé — `:deliverable` (défaut, le livrable
-  produit par un stage : gatekeeper, juges de PR) ou `:brief` (le BRIEF rédigé
+  produit par un step : gatekeeper, juges de PR) ou `:brief` (le BRIEF rédigé
   par l'architecte, jugé AVANT toute production : brief-review/consultant). Le
   contrat de verdict (`gate-decision-v1`) et la mécanique sont identiques — seul le
   cadrage du « truc à juger » change (sinon un juge de brief chasserait un livrable
   inexistant). Défaut `:deliverable`.
   """
   @spec build(map()) :: String.t()
-  def build(%{stage: stage, pipeline_id: pid} = ctx) do
+  def build(%{step: step, pipeline_id: pid} = ctx) do
     gate = Map.get(ctx, :gate)
     outputs = Map.get(ctx, :outputs, %{})
-    s = subject_phrases(Map.get(ctx, :subject, :deliverable), stage)
+    s = subject_phrases(Map.get(ctx, :subject, :deliverable), step)
 
     """
     # Brief gatekeeper — éval de gate
@@ -41,7 +41,7 @@ defmodule Fleet.Pipeline.GateBrief do
 
     ## Contexte
     - Pipeline : #{inspect(pid)}
-    - Stage jugé : #{stage}
+    - Step jugé : #{step}
     - Gate : type #{gate_type(gate)}
     #{render_request(Map.get(ctx, :request))}
     ## Question à trancher
@@ -61,7 +61,7 @@ defmodule Fleet.Pipeline.GateBrief do
     `{"decision": "<...>", "reason": "<motif structuré>", "details": {...}, "chain": [...]}`
 
     `decision` ∈ #{Enum.join(@decisions, " | ")}
-    - `continue` : #{s.continue} → avancer au stage suivant
+    - `continue` : #{s.continue} → avancer au step suivant
     - `redirect` : renvoyer à l'architecte (ex. brief trop gros → demander la découpe)
     - `abandon` : abandonner le issue (non récupérable)
     - `escalate_user` : dépasse le gatekeeper → l'user tranche
@@ -78,11 +78,11 @@ defmodule Fleet.Pipeline.GateBrief do
   # Cadrage du « truc à juger », paramétré par `:subject`. `:deliverable` = le cas du livrable
   # produit (gatekeeper/juges-PR) ; `:brief` cadre la revue de brief (le brief est rédigé par
   # l'arch, PAS encore exécuté → le juge ne cherche pas un livrable).
-  defp subject_phrases(:brief, stage) do
+  defp subject_phrases(:brief, step) do
     %{
       intro: "Le BRIEF à valider (rédigé par l'architecte) est cité plus bas.",
       question:
-        "Le brief `#{stage}` a été rédigé par l'architecte et n'a PAS encore été exécuté. Au vu du " <>
+        "Le brief `#{step}` a été rédigé par l'architecte et n'a PAS encore été exécuté. Au vu du " <>
           "brief ci-dessous, est-il EXÉCUTABLE en l'état (clair, complet, cohérent, actionnable par un " <>
           "engineer sans nouvelle question) — `continue` — ou faut-il le renvoyer / escalader / abandonner ?",
       heading: "Brief à juger (rédigé par l'architecte — à valider AVANT toute exécution)",
@@ -90,13 +90,13 @@ defmodule Fleet.Pipeline.GateBrief do
     }
   end
 
-  defp subject_phrases(_deliverable, stage) do
+  defp subject_phrases(_deliverable, step) do
     %{
       intro: "Le livrable existe déjà (il est cité plus bas).",
       question:
-        "Le stage `#{stage}` a livré son résultat. Au vu du livrable ci-dessous et des\n" <>
+        "Le step `#{step}` a livré son résultat. Au vu du livrable ci-dessous et des\n" <>
           "règles de la gate, faut-il franchir la gate (`continue`) — ou abandonner /\nrenvoyer / escalader ?",
-      heading: "Livrable à juger (outputs du stage — DÉJÀ produit, à évaluer)",
+      heading: "Livrable à juger (outputs du step — DÉJÀ produit, à évaluer)",
       continue: "le livrable satisfait la gate"
     }
   end
@@ -105,7 +105,7 @@ defmodule Fleet.Pipeline.GateBrief do
   defp gate_type(_), do: "—"
 
   # Demande d'origine = CONTEXTE de jugement, jamais une instruction à exécuter
-  # (sinon le gatekeeper refait la tâche du stage précédent au lieu de juger).
+  # (sinon le gatekeeper refait la tâche du step précédent au lieu de juger).
   # Encadrée et désamorcée explicitement.
   defp render_request(req) when is_binary(req) and req != "" do
     """

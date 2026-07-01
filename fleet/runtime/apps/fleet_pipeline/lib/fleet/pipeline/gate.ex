@@ -10,6 +10,6 @@ defmodule Fleet.Pipeline.Gate do
       même `{:dispatch_gatekeeper, info}` (gatekeeper, juge unique)
   """
 
-  @callback evaluate(stage :: map(), outputs :: map(), ctx :: map()) ::
+  @callback evaluate(step :: map(), outputs :: map(), ctx :: map()) ::
               :pass | {:fail, reason :: String.t()} | {:dispatch_gatekeeper, map()}
 end
