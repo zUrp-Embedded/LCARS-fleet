@@ -671,7 +671,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @doc """
   Extrait le dernier bloc ` ```result ` posté dans un comment de hop — le `result_K`
   gravé par `HopCompleter` quand le stage avance vers un gatekeeper. Sert
-  à `StageDispatcher` pour donner au pod gatekeeper **quoi juger** dans son mandat
+  à `StageDispatcher` pour donner au pod gatekeeper **quoi juger** dans son brief
   (option B : pas de clone de branche). `:none` si aucun ; `{:error, _}` HTTP/config.
   """
   @spec get_predecessor_result(String.t(), integer(), Keyword.t()) ::
@@ -681,7 +681,7 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
-      # Le bloc ```result nourrit le MANDAT DE JUGEMENT du gatekeeper. Ne
+      # Le bloc ```result nourrit le BRIEF DE JUGEMENT du gatekeeper. Ne
       # l'extraire QUE de comments SYSTÈME — sinon un user forge injecte ce que le juge évalue.
       comments
       |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))

@@ -1,7 +1,7 @@
 # fleet_mcp
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-27 (R9 — transport socket AF_UNIX per-pod, l'identité EST le canal)
+**Dernière révision** : 2026-07-01 (R9 — transport socket AF_UNIX per-pod, l'identité EST le canal)
 **Statut** : implémenté — serveur MCP pod-facing (`get_task` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
@@ -11,7 +11,7 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 ## Modules
 
 - `Fleet.MCP.PodTools` — outils MCP **pod-facing** : `get_task` (le pod tire son
-  mandat depuis la TaskQueue), `submit_result` (le pod rend son livrable), `create_ticket`
+  brief depuis la TaskQueue), `submit_result` (le pod rend son livrable), `create_ticket`
   (l'arch délègue une implémentation), `create_project` (l'arch onboard un projet neuf) et
   `get_ticket_status` (l'arch suit une délégation). `handle_tool_call/3` = fonctions pures,
   réutilisables hors transport ; l'identité du pod arrive par le `state` (`%{pod_id: ...}`),
@@ -43,7 +43,7 @@ Le transport pod-facing est une **socket AF_UNIX par pod** : chaque pod a la sie
 dans son seul sandbox. Donc « quelle socket reçoit » = « quel pod » — le `pod_id` est porté
 par l'accepteur (du nom du socket), il n'est **jamais** lu du wire. Il n'y a plus rien à
 prouver : pas de capability à présenter, pas de `pod_id` à comparer. Un pod ne peut pas lire
-le mandat d'un autre ni clôturer sa tâche, par **construction** (il n'a pas l'autre socket) —
+le brief d'un autre ni clôturer sa tâche, par **construction** (il n'a pas l'autre socket) —
 même un `_lcars_pod_id` forgé dans les arguments est ignoré (le central lit `state.pod_id`).
 
 > Contexte : l'ex-transport HTTP loopback était PARTAGÉ par tous les pods → le `pod_id` y était
@@ -80,10 +80,10 @@ vient du spawn, jamais d'un champ du wire. Tout rôle autre (engineer, reviewer,
 
 ## Outils MCP (pod-facing)
 
-- `get_task` — le pod récupère son mandat (corrélé `pod_id` du canal).
+- `get_task` — le pod récupère son brief (corrélé `pod_id` du canal).
 - `submit_result` — le pod soumet son livrable (`payload`) ; **`task_id` OBLIGATOIRE** = le `task_id`
-  rendu par `get_task` (le broker corrèle sur CE mandat précis, jamais « la dernière active » du pod —
-  verrou orthogonal au transport). task_id absent → `:task_id_required` ; ≠ mandat actif → `:task_id_mismatch`.
+  rendu par `get_task` (le broker corrèle sur CE brief précis, jamais « la dernière active » du pod —
+  verrou orthogonal au transport). task_id absent → `:task_id_required` ; ≠ brief actif → `:task_id_mismatch`.
 - `create_ticket` (délégation, **architecte only**) — crée l'issue forge **prête pour le poller**
   (`Fleet.Pilot.ForgeClient.create_issue`, dispatch runtime). Gate `require_architect`. Fail-closed :
   worker → `:forbidden_not_architect` ; pod inconnu → `:pod_unknown` ; token de rôle absent →

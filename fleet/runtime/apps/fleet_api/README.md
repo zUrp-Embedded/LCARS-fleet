@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-29 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
+**Dernière révision** : 2026-07-01 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -39,14 +39,14 @@ Frontière = isolation réseau du container (ne pas publier `:8080` ; tunnel pou
 Surface no-auth : le payload entrant est **filtré à l'admission**, avant tout broadcast. Le `PublishConsumer`
 convertit ensuite `payload["opts"]` en opts internes du spawner — sans filtre, des opts privilégiés
 (`pod_dir_root`, `state_fs_root`, `human`, `project` → clone d'un repo attaquant dans le pod,
-`recall_seed_jsonl`, `resume`, `session_id`, `rc_name`, `allow_no_mandate`, seams module/fun…) deviendraient
+`recall_seed_jsonl`, `resume`, `session_id`, `rc_name`, `allow_no_brief`, seams module/fun…) deviendraient
 pilotables depuis l'API. Le DTO public est donc **plat et explicite** :
 
 | Champ | Forme | Rôle |
 |---|---|---|
 | `cap_profile_name` / `role` | string (l'un des deux, requis) | profil de capacités (validé : 400 si absent, 422 si inconnu, **422 si host-native**) |
 | `ticket_id` | string | corrélation forge/event |
-| `mandate` | string | le travail du pod ; **replacé dans l'`opts` interne construit par l'API** ; **requis** pour un cap-profile `one-shot` (422 sinon — miroir R18) |
+| `brief` | string | le travail du pod ; **replacé dans l'`opts` interne construit par l'API** ; **requis** pour un cap-profile `one-shot` (422 sinon — miroir R18) |
 | `pod_id` | string path-safe | identifiant imposé (admin) ; accepté **uniquement** si `[A-Za-z0-9._-]` sans `..`, sinon 422 |
 
 Toute clé top-level **hors** de cette liste (y compris un `opts` brut fourni par le client) → **422** avant
@@ -62,12 +62,12 @@ avant tout broadcast — aucun pod hôte ne peut naître via l'API. Le host-nati
 (starfleet / `bin/host_launch.sh`), jamais cette API. Source unique de containment partagée avec le spawner
 (`Fleet.CapProfile.containment/1`) → l'API et le lancement réel ne peuvent pas diverger de verdict.
 
-**Mandat requis pour un one-shot (miroir R18).** Un cap-profile `one-shot` (reviewer/qualifier/consultant)
-lancé SANS `mandate` partirait sans travail → le spawner le refuse (`mandate_required`, ZÉRO pod). Sans garde
+**Brief requis pour un one-shot (miroir R18).** Un cap-profile `one-shot` (reviewer/qualifier/consultant)
+lancé SANS `brief` partirait sans travail → le spawner le refuse (`brief_required`, ZÉRO pod). Sans garde
 à l'admission, le 202 « mis en file » serait un **202 menteur** (jumeau du cap-profile menteur). L'API vérifie
-donc à l'admission : `Fleet.Spawner.mandate_required?(cap) and not has_mandate?` → **422** avant tout broadcast.
-`mandate_required?/1` est l'**autorité partagée** (même lecture que `mandate_guard`) → pas de règle dupliquée.
-Un one-shot légitime porte son `mandate` dans le DTO → il passe (202).
+donc à l'admission : `Fleet.Spawner.brief_required?(cap) and not has_brief?` → **422** avant tout broadcast.
+`brief_required?/1` est l'**autorité partagée** (même lecture que `brief_guard`) → pas de règle dupliquée.
+Un one-shot légitime porte son `brief` dans le DTO → il passe (202).
 
 ### Version constatable (`Fleet.API.BuildInfo`)
 

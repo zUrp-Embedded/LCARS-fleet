@@ -51,10 +51,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       {:ok, :posted}
     end
 
-    # F077 : le mandat juge lit le result du prédécesseur (option B). Stub : forge_opts[:_test_pred].
+    # F077 : le brief juge lit le result du prédécesseur (option B). Stub : forge_opts[:_test_pred].
     def get_predecessor_result(_repo, _n, opts), do: Keyword.get(opts, :_test_pred, :none)
 
-    # Fix famine-d'info : build_judge_mandate lit le critère (body de l'issue) via get_issue.
+    # Fix famine-d'info : build_judge_brief lit le critère (body de l'issue) via get_issue.
     # Stub : forge_opts[:_test_issue_body] (défaut un body non-vide).
     def get_issue(_repo, n, opts),
       do: {:ok, %{"number" => n, "body" => Keyword.get(opts, :_test_issue_body, "critère stub")}}
@@ -117,34 +117,34 @@ defmodule Fleet.Pilot.StageDispatcherTest do
            spec: %{}
          }}
 
-    # F077 : un rôle juge déclare `mandate_kind: judge` dans son cap-profile (pas un nom magique).
+    # F077 : un rôle juge déclare `brief_kind: judge` dans son cap-profile (pas un nom magique).
     def load("gatekeeper"),
       do:
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"name" => "gatekeeper", "slot_scope" => "project"},
-           spec: %{"mandate_kind" => "judge"}
+           spec: %{"brief_kind" => "judge"}
          }}
 
-    # Corr.3 : un juge de PR (qualifier/reviewer) declare aussi mandate_kind: judge.
+    # Corr.3 : un juge de PR (qualifier/reviewer) declare aussi brief_kind: judge.
     def load(role) when role in ["qualifier", "reviewer"],
       do:
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"name" => role, "slot_scope" => "instance"},
-           spec: %{"mandate_kind" => "judge"}
+           spec: %{"brief_kind" => "judge"}
          }}
 
-    # #8 : le consultant relit le MANDAT (juge) → mandate_kind: judge.
+    # #8 : le consultant relit le BRIEF (juge) → brief_kind: judge.
     def load("consultant"),
       do:
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"name" => "consultant", "slot_scope" => "instance"},
-           spec: %{"mandate_kind" => "judge"}
+           spec: %{"brief_kind" => "judge"}
          }}
 
     def load(_), do: {:error, :not_found}
@@ -172,7 +172,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
   # Spawner dont le pod est DÉJÀ VIVANT (`pod_info` → `{:ok, _}`). Sert à tester le GATE de
   # sérialisation : un rôle project-scoped déjà vivant → le dispatcher DÉFÈRE (`:role_busy`), il ne
-  # spawn ni ne remandate un pod occupé. (Le remandate-sur-vivant reste possible pour les `instance`.)
+  # spawn ni ne rebrief un pod occupé. (Le rebrief-sur-vivant reste possible pour les `instance`.)
   defmodule StubSpawnerAlive do
     def spawn_pod(_profile, ticket_id, opts) do
       send(self(), {:spawned, ticket_id, opts})
@@ -311,41 +311,41 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts())
 
-      # le mandat = issue.body + l'instruction de LIVRAISON git-native (commit local + trailer),
+      # le brief = issue.body + l'instruction de LIVRAISON git-native (commit local + trailer),
       # sinon le pod « submit les contenus » au lieu de committer → :no_deliverable_commit.
       assert_received {:spawned, "issue-42", opts}
-      assert opts[:mandate] =~ "fais le hello"
+      assert opts[:brief] =~ "fais le hello"
 
       # #chantier pod-seed : nom RC Desktop = <projet>_<role> (projet = segment final du repo
       # "lordzurp/lcars-test" → "lcars-test"). Label exact, distinct du pod_id technique.
       assert opts[:rc_name] == "lcars-test_engineer"
-      assert opts[:mandate] =~ "git commit"
-      assert opts[:mandate] =~ "Co-authored-by: LCARS-engineer"
+      assert opts[:brief] =~ "git commit"
+      assert opts[:brief] =~ "Co-authored-by: LCARS-engineer"
 
-      # Voix de l'eng (info sortante) : le mandat demande un `summary` posté sur la PR par le système.
-      assert opts[:mandate] =~ "summary"
-      assert opts[:mandate] =~ "Ta voix"
-      # Blocked_dep : le mandat dit à l'eng de marquer `blocked: true` plutôt que deviner/wedge.
-      assert opts[:mandate] =~ "blocked"
+      # Voix de l'eng (info sortante) : le brief demande un `summary` posté sur la PR par le système.
+      assert opts[:brief] =~ "summary"
+      assert opts[:brief] =~ "Ta voix"
+      # Blocked_dep : le brief dit à l'eng de marquer `blocked: true` plutôt que deviner/wedge.
+      assert opts[:brief] =~ "blocked"
 
-      # le mandat est ENQUEUÉ en TaskQueue (sinon le pod se croit bootstrap → idle ; bug PASSE-9)
+      # le brief est ENQUEUÉ en TaskQueue (sinon le pod se croit bootstrap → idle ; bug PASSE-9)
       assert_received {:enqueued, "lordzurp-lcars-test-engineer", attrs}
       assert attrs.brief =~ "fais le hello"
       assert attrs.role == "engineer"
 
-      # F071 : verrouille le 2ᵉ site `TicketId.compose` (enqueue_mandate) — sinon un retour au littéral
+      # F071 : verrouille le 2ᵉ site `TicketId.compose` (enqueue_brief) — sinon un retour au littéral
       # "issue-#{number}" pour `ticket_id` ne serait pas attrapé (le pod_id ≠ ticket_id).
       assert attrs.ticket_id == "issue-42"
       # kick best-effort émis
       assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
 
-    test "GATE slot_scope: engineer (project) déjà vivant → DÉFÈRE :role_busy (sérialisé, pas de remandate)" do
+    test "GATE slot_scope: engineer (project) déjà vivant → DÉFÈRE :role_busy (sérialisé, pas de rebrief)" do
       payload = eng_issue()
 
       # StubSpawnerAlive : pod_info → {:ok,_} = le pod projet `<repo>-engineer` est DÉJÀ vivant (un autre
-      # ticket du repo en cours). Le gate sérialise les rôles project-scoped : on DÉFÈRE, on ne remandate
-      # PAS un pod occupé (ça wedgerait — un one-shot mid-tâche ne pull pas un 2ᵉ mandat). Le poller
+      # ticket du repo en cours). Le gate sérialise les rôles project-scoped : on DÉFÈRE, on ne rebrief
+      # PAS un pod occupé (ça wedgerait — un one-shot mid-tâche ne pull pas un 2ᵉ brief). Le poller
       # re-dispatch au tick suivant ; le pod meurt en fin de tâche → spawn frais pour le suivant.
       assert {:skipped, :role_busy} =
                StageDispatcher.dispatch_issue(payload, dispatch_opts(spawner: StubSpawnerAlive))
@@ -410,7 +410,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
               {:wake_unreached, "lordzurp-lcars-test-engineer", "engineer", {:escalated, :dead}}} =
                result
 
-      # Le pod ET le mandat RESTENT en place (mandat enqueué, le re-wake/escalade couvre) : PAS de
+      # Le pod ET le brief RESTENT en place (brief enqueué, le re-wake/escalade couvre) : PAS de
       # compensation (ce n'est pas un échec POST-verrou, c'est un wake injoignable). Le verrou tient.
       assert_received {:spawned, "issue-42", _}
       assert_received {:enqueued, "lordzurp-lcars-test-engineer", _}
@@ -454,7 +454,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:project] == project
-      assert spawn_opts[:mandate] =~ "fais le hello"
+      assert spawn_opts[:brief] =~ "fais le hello"
     end
 
     test "route gravée → rôle dérivé de la carte (stage build=engineer) + pipeline/stage injectés (A2.1, #8)" do
@@ -480,38 +480,38 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert spawn_opts[:stage] == "build"
     end
 
-    test "#8 : route sur un stage AMONT (mandate-review/consultant) → spawn le CONSULTANT, pas l'eng" do
+    test "#8 : route sur un stage AMONT (brief-review/consultant) → spawn le CONSULTANT, pas l'eng" do
       payload = eng_issue()
 
-      # La carte EST la machine à états : le 1er stage (racine `needs:[]`) est mandate-review/consultant.
+      # La carte EST la machine à états : le 1er stage (racine `needs:[]`) est brief-review/consultant.
       # decide() rendait "engineer" (DN §1) ; carte_role override avec le rôle du stage courant → consultant.
       carte = %{
-        "name" => "mandate-gate",
+        "name" => "brief-gate",
         "stages" => %{
-          "mandate-review" => %{"role" => "consultant", "needs" => []},
-          "build" => %{"role" => "engineer", "needs" => ["mandate-review"]}
+          "brief-review" => %{"role" => "consultant", "needs" => []},
+          "build" => %{"role" => "engineer", "needs" => ["brief-review"]}
         }
       }
 
       opts =
         dispatch_opts(
-          forge_opts: [_test_route: {:ok, {"mandate-gate", "mandate-review"}}],
-          carte_loader: fn "mandate-gate" -> carte end
+          forge_opts: [_test_route: {:ok, {"brief-gate", "brief-review"}}],
+          carte_loader: fn "brief-gate" -> carte end
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-consultant", "consultant"}} =
                StageDispatcher.dispatch_issue(payload, opts)
     end
 
-    test "#8.B : mandate_kind:judge AU STAGE override un profil worker (engineer) → mandat JUGE" do
+    test "#8.B : brief_kind:judge AU STAGE override un profil worker (engineer) → brief JUGE" do
       payload = eng_issue()
 
-      # Le stage déclare mandate_kind:judge ; le rôle engineer a un profil WORKER. L'override per-stage
-      # doit produire un mandat JUGE (désamorcé), PAS le mandat worker (issue body + "Livraison git-native").
+      # Le stage déclare brief_kind:judge ; le rôle engineer a un profil WORKER. L'override per-stage
+      # doit produire un brief JUGE (désamorcé), PAS le brief worker (issue body + "Livraison git-native").
       carte = %{
         "name" => "g",
         "stages" => %{
-          "review" => %{"role" => "engineer", "needs" => [], "mandate_kind" => "judge"}
+          "review" => %{"role" => "engineer", "needs" => [], "brief_kind" => "judge"}
         }
       }
 
@@ -523,10 +523,10 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       assert {:ok, {:spawned, _, "engineer"}} = StageDispatcher.dispatch_issue(payload, opts)
       assert_received {:spawned, "issue-42", spawn_opts}
-      refute spawn_opts[:mandate] =~ "Livraison (git-native)"
+      refute spawn_opts[:brief] =~ "Livraison (git-native)"
     end
 
-    test "#8.B : sans mandate_kind au stage → défaut du profil (engineer=worker → mandat worker)" do
+    test "#8.B : sans brief_kind au stage → défaut du profil (engineer=worker → brief worker)" do
       payload = eng_issue()
       carte = %{"name" => "g", "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}}
 
@@ -538,19 +538,19 @@ defmodule Fleet.Pilot.StageDispatcherTest do
 
       assert {:ok, {:spawned, _, "engineer"}} = StageDispatcher.dispatch_issue(payload, opts)
       assert_received {:spawned, "issue-42", spawn_opts}
-      assert spawn_opts[:mandate] =~ "Livraison (git-native)"
+      assert spawn_opts[:brief] =~ "Livraison (git-native)"
     end
 
-    test "SÉCU : mandate_kind hors-vocab au stage → raise (jamais retombé sur worker en silence)" do
+    test "SÉCU : brief_kind hors-vocab au stage → raise (jamais retombé sur worker en silence)" do
       payload = eng_issue()
 
       # `reviewer` n'est PAS du vocabulaire {worker, judge}. AVANT le fix, ce hors-vocab tombait sur la
-      # clause `_worker` → mandat EXÉCUTABLE pour un rôle qui aurait dû être désamorcé. La judge-ness est
+      # clause `_worker` → brief EXÉCUTABLE pour un rôle qui aurait dû être désamorcé. La judge-ness est
       # une propriété de sécurité : elle ne s'infère pas par omission → fail-loud.
       carte = %{
         "name" => "g",
         "stages" => %{
-          "review" => %{"role" => "engineer", "needs" => [], "mandate_kind" => "reviewer"}
+          "review" => %{"role" => "engineer", "needs" => [], "brief_kind" => "reviewer"}
         }
       }
 
@@ -574,7 +574,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           "review" => %{
             "role" => "engineer",
             "needs" => [],
-            "mandate_kind" => "judge",
+            "brief_kind" => "judge",
             "judge_target" => "subject"
           }
         }
@@ -586,30 +586,30 @@ defmodule Fleet.Pilot.StageDispatcherTest do
           carte_loader: fn "g" -> carte end
         )
 
-      assert_raise ArgumentError, ~r/hors vocabulaire \{mandate, deliverable\}/, fn ->
+      assert_raise ArgumentError, ~r/hors vocabulaire \{brief, deliverable\}/, fn ->
         StageDispatcher.dispatch_issue(payload, opts)
       end
     end
 
-    test "#8.E : judge_target:mandate → brief en cadrage MANDAT (juge le ticket.body, pas un livrable)" do
-      # F-S2-1 : le mandat = body de l'ISSUE en main (payload), PAS un get_issue redondant.
-      payload = eng_issue(%{"body" => "MON MANDAT A JUGER"})
+    test "#8.E : judge_target:brief → brief en cadrage BRIEF (juge le ticket.body, pas un livrable)" do
+      # F-S2-1 : le brief = body de l'ISSUE en main (payload), PAS un get_issue redondant.
+      payload = eng_issue(%{"body" => "MON BRIEF A JUGER"})
 
       carte = %{
         "name" => "mg",
         "stages" => %{
-          "mandate-review" => %{
+          "brief-review" => %{
             "role" => "consultant",
             "needs" => [],
-            "mandate_kind" => "judge",
-            "judge_target" => "mandate"
+            "brief_kind" => "judge",
+            "judge_target" => "brief"
           }
         }
       }
 
       opts =
         dispatch_opts(
-          forge_opts: [_test_route: {:ok, {"mg", "mandate-review"}}],
+          forge_opts: [_test_route: {:ok, {"mg", "brief-review"}}],
           carte_loader: fn "mg" -> carte end
         )
 
@@ -617,30 +617,30 @@ defmodule Fleet.Pilot.StageDispatcherTest do
                StageDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
-      mandate = spawn_opts[:mandate]
-      # cadrage MANDAT (subject:mandate) + le mandat à juger, PAS le cadrage livrable.
-      assert mandate =~ "Mandat à juger"
-      assert mandate =~ "MON MANDAT A JUGER"
-      refute mandate =~ "Livrable à juger (outputs du stage"
-      refute mandate =~ "Livraison (git-native)"
+      brief = spawn_opts[:brief]
+      # cadrage BRIEF (subject:brief) + le brief à juger, PAS le cadrage livrable.
+      assert brief =~ "Brief à juger"
+      assert brief =~ "MON BRIEF A JUGER"
+      refute brief =~ "Livrable à juger (outputs du stage"
+      refute brief =~ "Livraison (git-native)"
     end
 
     test "#5.2 D2 — issue ROUTELESS → onboardée sur la carte par défaut (skip), PAS de spawn eng" do
       payload = eng_issue()
 
-      # route :none (override de la route par défaut) + carte par défaut mandate-gate (1er stage mandate-review).
+      # route :none (override de la route par défaut) + carte par défaut brief-gate (1er stage brief-review).
       opts =
         dispatch_opts(
           forge_opts: [_test_route: :none],
-          carte_loader: fn "mandate-gate" ->
-            %{"stages" => %{"mandate-review" => %{"role" => "consultant", "needs" => []}}}
+          carte_loader: fn "brief-gate" ->
+            %{"stages" => %{"brief-review" => %{"role" => "consultant", "needs" => []}}}
           end
         )
 
       assert {:skipped, :onboarded} = StageDispatcher.dispatch_issue(payload, opts)
 
       # la carte par défaut a été GRAVÉE (le tick suivant dispatchera le consultant) ; AUCUN spawn eng.
-      assert_received {:routed, 42, "mandate-gate", "mandate-review"}
+      assert_received {:routed, 42, "brief-gate", "brief-review"}
       refute_received {:spawned, _, _}
     end
 
@@ -668,9 +668,9 @@ defmodule Fleet.Pilot.StageDispatcherTest do
     end
 
     # ====================================================================
-    # SLOT-FREEZE — gate PIPE-aware : un engineer PIPE (resident) est re-mandate selon son etat.
+    # SLOT-FREEZE — gate PIPE-aware : un engineer PIPE (resident) est re-brief selon son etat.
     #   dead  -> spawn frais ; busy (tache active OU :publishing) -> DEFERE ; ready -> reprovision COLD +
-    #   remandate. (project["base_sha"] est passe au reset ; le slug = la branche feature du ticket.)
+    #   rebrief. (project["base_sha"] est passe au reset ; le slug = la branche feature du ticket.)
     # ====================================================================
     test "GATE pipe DEAD (1er ticket) : spawn frais, PAS de reprovision" do
       Process.put(:pipe_state, :dead)
@@ -721,7 +721,7 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "GATE pipe READY (idle + livrable confirme) : reprovision COLD (base_sha + slug) PUIS re-mandate" do
+    test "GATE pipe READY (idle + livrable confirme) : reprovision COLD (base_sha + slug) PUIS re-brief" do
       Process.put(:pipe_state, :ready)
 
       opts =
@@ -734,17 +734,17 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_issue(eng_issue(), opts)
 
-      # reset cold appele AVANT le remandate, avec le projet (base_sha) + le slug du ticket.
+      # reset cold appele AVANT le rebrief, avec le projet (base_sha) + le slug du ticket.
       assert_received {:reprovisioned, "lordzurp-lcars-test-engineer",
                        %{"base_sha" => "basesha1"}, [slug: _slug]}
 
-      # re-mandate (pod vivant) -> enqueue + wake, PAS de re-spawn frais.
+      # re-brief (pod vivant) -> enqueue + wake, PAS de re-spawn frais.
       refute_received {:spawned, _, _}
       assert_received {:enqueued, "lordzurp-lcars-test-engineer", _}
       assert_received {:woke, "lordzurp-lcars-test-engineer"}
     end
 
-    test "GATE pipe READY mais reset KO -> DEFERE :role_busy (pas de remandate sur workspace sale)" do
+    test "GATE pipe READY mais reset KO -> DEFERE :role_busy (pas de rebrief sur workspace sale)" do
       Process.put(:pipe_state, :ready)
       Process.put(:reprovision_result, {:error, {:reset_failed, :git_exit}})
 
@@ -791,15 +791,15 @@ defmodule Fleet.Pilot.StageDispatcherTest do
       # ticket_id = l'ISSUE (remontee de head.ref lcars/issue-42-engineer), PAS la PR
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:pipeline] == "poc" and spawn_opts[:stage] == "spec-review"
-      # mandat juge desamorce (mandate_kind: judge) — pas un corps executable
-      assert spawn_opts[:mandate] =~ "JUGER"
+      # brief juge desamorce (brief_kind: judge) — pas un corps executable
+      assert spawn_opts[:brief] =~ "JUGER"
 
       # Fix famine-d'info (juge) : predecessor vide (git-native) → le juge est POINTÉ sur son
       # workspace ET reçoit le CRITÈRE (body de l'issue, désamorcé en contexte).
       # La base du diff est `origin/main` (clone mono-branche : le ref local `main` n'existe pas —
       # bug live morse : `git diff main..HEAD` → fatal unknown revision → halt_wait_input intermittent).
-      assert spawn_opts[:mandate] =~ "git diff origin/main...HEAD"
-      assert spawn_opts[:mandate] =~ "implémente le décodeur morse"
+      assert spawn_opts[:brief] =~ "git diff origin/main...HEAD"
+      assert spawn_opts[:brief] =~ "implémente le décodeur morse"
 
       # enqueue cible le pod_id pr-... ; ticket_id = l'issue
       assert_received {:enqueued, "lordzurp-lcars-test-pr-6-qualifier", attrs}
@@ -880,12 +880,12 @@ defmodule Fleet.Pilot.StageDispatcherTest do
         )
 
       # 1ʳᵉ fois : tous approuvé MAIS merge en CONFLIT → on RÉSOUT (re-spawn le producteur en mode résolution),
-      # PAS de merge, PAS d'escalade. Le mandat porte l'instruction rebase+résous.
+      # PAS de merge, PAS d'escalade. Le brief porte l'instruction rebase+résous.
       assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
                StageDispatcher.dispatch_review(pr, opts)
 
       assert_received {:spawned, _ticket, spawn_opts}
-      assert spawn_opts[:mandate] =~ "RÉSOLUTION DE CONFLIT"
+      assert spawn_opts[:brief] =~ "RÉSOLUTION DE CONFLIT"
       refute_received {:merged, _}
 
       # 2ᵉ fois (même conflit, même registry = récurrence) : la résolution a déjà été tentée → ESCALADE ARCH.
@@ -974,15 +974,15 @@ defmodule Fleet.Pilot.StageDispatcherTest do
                StageDispatcher.dispatch_review(pr, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
-      assert spawn_opts[:mandate] =~ "REWORK"
+      assert spawn_opts[:brief] =~ "REWORK"
 
       # Fix famine-d'info (rework) : le BODY de la review REQUEST_CHANGES est injecté (sinon « corrige
       # selon la review » est creux → l'eng devine à l'aveugle → blocked_dep/wedge, prouvé live morse).
-      assert spawn_opts[:mandate] =~ "le timing des points/traits est faux"
-      assert spawn_opts[:mandate] =~ "reviewer"
+      assert spawn_opts[:brief] =~ "le timing des points/traits est faux"
+      assert spawn_opts[:brief] =~ "reviewer"
 
-      # Voix de l'eng (rework) : le mandat demande un `summary` = réponse au reviewer, posté sur la PR.
-      assert spawn_opts[:mandate] =~ "summary"
+      # Voix de l'eng (rework) : le brief demande un `summary` = réponse au reviewer, posté sur la PR.
+      assert spawn_opts[:brief] =~ "summary"
       assert_received {:enqueued, "lordzurp-lcars-test-engineer", attrs}
       assert attrs.role == "engineer"
     end

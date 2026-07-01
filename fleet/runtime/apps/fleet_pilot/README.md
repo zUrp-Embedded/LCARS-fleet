@@ -47,19 +47,19 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
   F-arch-MCP : comment gatekeeper + merge signé gatekeeper, plus de fork où l'escalade mergeait en token
   système ; LINÉAIRE + gère un `main` avancé sous une PR parallèle — multi-ticket, cf. `ForgeClient.merge_pr`
   ; comment de fin honnête + close via `Closes #N`). **Passage de substance
-  (anti-famine-d'info, fix #1)** : le mandat **juge** (git-native) le POINTE sur son workspace
+  (anti-famine-d'info, fix #1)** : le brief **juge** (git-native) le POINTE sur son workspace
   (`git diff`) + porte le **critère** (body de l'issue, désamorcé I-CBC via `GateBrief :request`) ; le
-  mandat **rework** injecte le **body des reviews REQUEST_CHANGES** (`ForgeClient.change_request_feedback/3`)
+  brief **rework** injecte le **body des reviews REQUEST_CHANGES** (`ForgeClient.change_request_feedback/3`)
   — sans quoi le juge jugeait du `{}` et l'eng corrigeait à l'aveugle (wedge prouvé live morse).
   Le pin de base (`ls-remote` du tip, hors-pod) passe par `Fleet.Credentials.Shell.git` : borné par
   construction (process-group dédié, tué entier à la deadline mur) — remplace le `Task.async`+`brutal_kill`
   qui ne tuait que le Task BEAM en laissant fuir le process git porteur du token forge.
-- `Fleet.Pilot.MandateBuilder` — **autorité du FORMAT des mandats** : worker / judge / mandate-review /
-  rework / conflit + instructions de voix de l'eng. `StageDispatcher` CHOISIT quel mandat selon l'état forge
-  (`build_mandate/9` dispatche sur `mandate_kind`/`judge_target`), `MandateBuilder` le FORME. La **judge-ness**
+- `Fleet.Pilot.BriefBuilder` — **autorité du FORMAT des briefs** : worker / judge / brief-review /
+  rework / conflit + instructions de voix de l'eng. `StageDispatcher` CHOISIT quel brief selon l'état forge
+  (`build_brief/9` dispatche sur `brief_kind`/`judge_target`), `BriefBuilder` le FORME. La **judge-ness**
   est fail-loud (kind/target hors-vocab → `raise` ; un juge ne reçoit JAMAIS un corps d'issue exécutable) ;
-  le mandat juge est **désamorcé** via `Fleet.Pipeline.GateBrief` (critère rendu comme contexte). `forge` =
-  arg injecté (seam). API publique : `build_mandate/9`, `rework_mandate/6`, `resolve_conflict_mandate/6`.
+  le brief juge est **désamorcé** via `Fleet.Pipeline.GateBrief` (critère rendu comme contexte). `forge` =
+  arg injecté (seam). API publique : `build_brief/9`, `rework_brief/6`, `resolve_conflict_brief/6`.
 - `Fleet.Pilot.Poller` — **DÉCOUVRE** ses repos par topic (`lcars-fleet-<human>`) PUIS **ADMET** uniquement
   ceux scellés système (`ForgeClient.admitted?` — marqueur d'onboarding bot-authored ; le topic mutable seul
   ne suffit plus, cf. § Onboarding « sceau d'admission »). Sur chaque repo admis : scanne, lit la **route-comment**
@@ -68,7 +68,7 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
   1er stage). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
   **Bail fail-closed (2 invariants)** : (1) le bail se prend dès qu'un pipeline est DÉMARRÉ (verrou posé +
   pod spawné), jamais sur le succès d'une étape postérieure — un dispatch qui rend `{:error,{:wake_unreached,_}}`
-  (verrou+pod+mandat en place, seul le réveil tmux a raté) PREND le bail intra-tick (sinon un 2e ticket du même
+  (verrou+pod+brief en place, seul le réveil tmux a raté) PREND le bail intra-tick (sinon un 2e ticket du même
   repo démarrerait un 2e pipeline) ; l'anomalie reste comptée en `errors`/`last_tally_errors`, jamais avalée.
   (2) l'engagement se lit sur la ROUTE (append-only, robuste), pas sur le chargement de la carte : un échec
   TRANSITOIRE de carte (réseau/forge nil) sur un pipeline routé le classe ENGAGÉ (bail TENU, fail-closed) —
@@ -113,10 +113,10 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
   native **signée par le juge** + unlock PR — le merge/rework est décidé par le poller sur l'état-PR agrégé).
   **Voix de l'eng (info SORTANTE)** : si le producteur rend un `summary` dans `submit_result` (extrait par
   `HopConsumer`, coercé `safe_str`), le système le poste en **commentaire PR `as_role` engineer** (livraison
-  ET rework) — l'eng n'est plus muet sur la forge (jumeau sortant de l'anti-famine ; le mandat l'élicite).
+  ET rework) — l'eng n'est plus muet sur la forge (jumeau sortant de l'anti-famine ; le brief l'élicite).
   **Blocked_dep** : si le producteur rend `blocked: true` (dépendance/info manquante), `HopConsumer` route vers
   `await_human` (motif = son `summary` + `lcars-awaits-human` + unlock → poller SKIP, l'humain tranche via l'arch)
-  AU LIEU d'une publish vide (`:no_deliverable_commit` = wedge silencieux). Le mandat dit à l'eng de marquer
+  AU LIEU d'une publish vide (`:no_deliverable_commit` = wedge silencieux). Le brief dit à l'eng de marquer
   `blocked` plutôt que deviner à l'aveugle.
   Identité ②.1e via `Fleet.Credentials.RoleToken` (poste EN SON NOM ; token absent → fallback système loggué).
   (Legacy carte multi-stage : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)

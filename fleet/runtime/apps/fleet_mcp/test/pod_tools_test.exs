@@ -19,12 +19,12 @@ defmodule Fleet.MCP.PodToolsTest do
   # State porté par l'accepteur de socket : l'identité = le canal, pas un champ du wire.
   defp pod_state(pod), do: %{pod_id: pod}
 
-  test "round-trip get_task/submit_result d'un mandat enqueué pour le pod" do
+  test "round-trip get_task/submit_result d'un brief enqueué pour le pod" do
     pod = uniq("pod-rt")
     nonce = "rt-#{System.unique_integer([:positive])}"
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: nonce, role: "engineer"})
 
-    # Canal IN : get_task renvoie le mandat (brief = nonce) + task_id (correlation).
+    # Canal IN : get_task renvoie le brief (brief = nonce) + task_id (correlation).
     assert {:ok, %{content: [%{"type" => "text", "text" => t1}]}, %{pod_id: ^pod}} =
              PodTools.handle_tool_call("get_task", %{}, pod_state(pod))
 
@@ -34,7 +34,7 @@ defmodule Fleet.MCP.PodToolsTest do
     tid = task["task_id"]
     refute Map.has_key?(task, "_lcars_pod_id")
 
-    # Canal OUT : submit_result encaisse le livrable → mandat :completed (task_id REQUIS = celui rendu).
+    # Canal OUT : submit_result encaisse le livrable → brief :completed (task_id REQUIS = celui rendu).
     assert {:ok, %{content: [%{"type" => "text"}]}, %{pod_id: ^pod}} =
              PodTools.handle_tool_call(
                "submit_result",
@@ -44,7 +44,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     assert {:ok, :completed} = TaskQueue.pod_status(pod)
 
-    # Plus de mandat actif → get_task suivant = done (le pod s'arrête).
+    # Plus de brief actif → get_task suivant = done (le pod s'arrête).
     assert {:ok, %{content: [%{"text" => t2}]}, %{pod_id: ^pod}} =
              PodTools.handle_tool_call("get_task", %{}, pod_state(pod))
 
@@ -53,7 +53,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
   test "get_task sans pod_id dans le state (anomalie accepteur) → erreur typée" do
     # Un pod_id absent du state = anomalie de l'accepteur (il DOIT toujours le porter), pas une fin de
-    # mandat. Ne JAMAIS masquer en done:true — sinon le pod s'arrête en croyant avoir fini.
+    # brief. Ne JAMAIS masquer en done:true — sinon le pod s'arrête en croyant avoir fini.
     assert {:error, :pod_id_required, %{}} =
              PodTools.handle_tool_call("get_task", %{}, %{})
   end
@@ -78,8 +78,8 @@ defmodule Fleet.MCP.PodToolsTest do
              )
   end
 
-  test "submit_result sans mandat actif → erreur :no_active_task (le drop n'est pas masqué)" do
-    # Un pod qui submit sans mandat actif (jamais assigné, ou clos/réassigné depuis) → son livrable n'a
+  test "submit_result sans brief actif → erreur :no_active_task (le drop n'est pas masqué)" do
+    # Un pod qui submit sans brief actif (jamais assigné, ou clos/réassigné depuis) → son livrable n'a
     # NULLE PART où aller = DROP. Doit ressortir isError, PAS {:ok "ok"} — sinon le pod croit son livrable
     # accepté. Symétrie avec :task_id_mismatch / :pod_id_required.
     pod = uniq("pod-no-task")
@@ -92,7 +92,7 @@ defmodule Fleet.MCP.PodToolsTest do
              )
   end
 
-  test "submit_result en double (mandat déjà clos) → {:ok ignoré}, PAS une erreur (idempotent)" do
+  test "submit_result en double (brief déjà clos) → {:ok ignoré}, PAS une erreur (idempotent)" do
     # Un re-submit après une tâche close n'est PAS un livrable perdu (le 1er submit EST encaissé) →
     # :ok "déjà reçu", idempotent. À NE PAS confondre avec :no_active_task.
     pod = uniq("pod-dbl")
@@ -127,7 +127,7 @@ defmodule Fleet.MCP.PodToolsTest do
   end
 
   describe "routage par pod (multi-pod pipeline)" do
-    test "chaque pod ne voit QUE son propre mandat (séparation structurelle par canal)" do
+    test "chaque pod ne voit QUE son propre brief (séparation structurelle par canal)" do
       pod_a = uniq("pod-A")
       pod_b = uniq("pod-B")
       {:ok, _} = TaskQueue.enqueue(pod_a, %{brief: "for-A"})

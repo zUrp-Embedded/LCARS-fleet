@@ -25,7 +25,7 @@ defmodule Fleet.Spawner.PodKickTest do
   setup do
     Application.put_env(:fleet_spawner, :kick_retry_ms, 10)
     Application.put_env(:fleet_spawner, :kick_max_attempts, 3)
-    # Les fake_pods n'ont aucun mandat → chemin BOOTSTRAP (cap/retry dédiés). On les override
+    # Les fake_pods n'ont aucun brief → chemin BOOTSTRAP (cap/retry dédiés). On les override
     # aussi pour garder les tests rapides + bornés.
     Application.put_env(:fleet_spawner, :kick_bootstrap_retry_ms, 10)
     Application.put_env(:fleet_spawner, :kick_bootstrap_max, 3)
@@ -53,7 +53,7 @@ defmodule Fleet.Spawner.PodKickTest do
              )
   end
 
-  test "tmux pas encore up (serveur absent) + mandat non pull → retente (reschedule n+1)" do
+  test "tmux pas encore up (serveur absent) + brief non pull → retente (reschedule n+1)" do
     data = %{tmux_session: "sess", pod_id: fake_pod()}
 
     # `alive?` faux (pas de vrai serveur) → branche reschedule (action attempt n+1), pas yop perdu.
@@ -69,7 +69,7 @@ defmodule Fleet.Spawner.PodKickTest do
              Pod.handle_event({:timeout, :kick}, {:attempt, 3}, @state, data)
   end
 
-  test "mandat déjà pull (task :assigned) → stop (cancel), aucun reschedule" do
+  test "brief déjà pull (task :assigned) → stop (cancel), aucun reschedule" do
     pod = fake_pod()
     {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
     # get_for_pod = ce que fait le pod via MCP get_task → la task passe :pending → :assigned
@@ -83,8 +83,8 @@ defmodule Fleet.Spawner.PodKickTest do
              })
   end
 
-  test "pod SANS mandat → mode bootstrap : stop au cap bootstrap, pas au cap worker" do
-    # cap bootstrap (2) < cap worker (9). fake_pod = aucune task → no_pending_mandate? = true.
+  test "pod SANS brief → mode bootstrap : stop au cap bootstrap, pas au cap worker" do
+    # cap bootstrap (2) < cap worker (9). fake_pod = aucune task → no_pending_brief? = true.
     Application.put_env(:fleet_spawner, :kick_bootstrap_max, 2)
     Application.put_env(:fleet_spawner, :kick_max_attempts, 9)
 
@@ -95,13 +95,13 @@ defmodule Fleet.Spawner.PodKickTest do
              Pod.handle_event({:timeout, :kick}, {:attempt, 2}, @state, data)
   end
 
-  test "pod AVEC mandat pending → mode worker : continue au-delà du cap bootstrap" do
+  test "pod AVEC brief pending → mode worker : continue au-delà du cap bootstrap" do
     Application.put_env(:fleet_spawner, :kick_bootstrap_max, 2)
     Application.put_env(:fleet_spawner, :kick_max_attempts, 9)
 
     pod = fake_pod()
 
-    # enqueue SANS get_for_pod → task `:pending` (pas pull) → no_pending_mandate? = false (worker).
+    # enqueue SANS get_for_pod → task `:pending` (pas pull) → no_pending_brief? = false (worker).
     {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 

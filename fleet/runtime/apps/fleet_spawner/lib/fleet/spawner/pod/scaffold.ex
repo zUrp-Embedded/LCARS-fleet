@@ -3,7 +3,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   PRÉPARATION du substrat disque d'un pod (le « scaffold ») — île extraite de `Fleet.Spawner.Pod`.
 
   Tout ce qui POSE le contenu du pod_dir AVANT le launch : assets (`settings.json`, draft SP,
-  protocole-user, `watch.sh`), brief (`tickets/<id>.md`), enqueue du mandat dans la `TaskQueue`,
+  protocole-user, `watch.sh`), brief (`tickets/<id>.md`), enqueue du brief dans la `TaskQueue`,
   bootstrap du workspace projet (clone) et restauration du seed de recall. Le `Pod` lui passe le
   `state` (ou le `cap_profile`) en argument ; le module ne rappelle AUCUN private de `Pod` (pas de
   cycle).
@@ -19,7 +19,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     `--session-id`).
   - `pod_settings_json/0`, `read_agent_draft(cap_profile)`, `read_protocole_user/0`,
     `maybe_path(path)`, `maybe_filter_skills(cap_profile, root)`, `ticket_id_to_filename(ticket_id)`,
-    `default_brief(state)`, `maybe_enqueue_mandate(state)`, `provision_monitor_watch(state)`,
+    `default_brief(state)`, `maybe_enqueue_brief(state)`, `provision_monitor_watch(state)`,
     `maybe_bootstrap_project_workspace(state)`, `maybe_recall_restore(state)` — étapes appelées dans la
     `with` de `do_project`.
 
@@ -147,8 +147,8 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   end
 
   # Brief du pod = sa TÂCHE (livrée par l'orchestrateur, modèle PUSH).
-  # Le travail vient de `opts[:mandate]` (le rail forge-driven construit le mandat via
-  # `Pilot.MandateBuilder.build_mandate` ; ou pod direct via `Fleet.Spawner.spawn_pod` opts).
+  # Le travail vient de `opts[:brief]` (le rail forge-driven construit le brief via
+  # `Pilot.BriefBuilder.build_brief` ; ou pod direct via `Fleet.Spawner.spawn_pod` opts).
   #
   # Ton naturel (pas multi-section formalisée "## Tâche / ## Livrable") : claude REPL en
   # mode interactif peut interpréter un format trop structuré comme tentative de prompt
@@ -164,17 +164,17 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   end
 
   def default_brief(state) do
-    mandate = Keyword.get(state.opts || [], :mandate)
+    brief = Keyword.get(state.opts || [], :brief)
     # Interpoler le RÔLE résolu, ne pas hardcoder "engineer". Un gatekeeper (juge) sans
-    # mandat explicite ne doit PAS être amorcé "worker engineer" (un mauvais priming de persona).
-    # Cadre neutre "pod LCARS (rôle X)" — le mandat (GateBrief pour le juge) porte la persona réelle.
+    # brief explicite ne doit PAS être amorcé "worker engineer" (un mauvais priming de persona).
+    # Cadre neutre "pod LCARS (rôle X)" — le brief (GateBrief pour le juge) porte la persona réelle.
     role = Fleet.CapProfile.name(state.cap_profile)
 
     body =
-      if is_binary(mandate) and mandate != "" do
-        mandate
+      if is_binary(brief) and brief != "" do
+        brief
       else
-        "(Pas de mandat fourni — ticket #{state.ticket_id}.)"
+        "(Pas de brief fourni — ticket #{state.ticket_id}.)"
       end
 
     """
@@ -191,40 +191,40 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     """
   end
 
-  # Enqueue le mandat dans la TaskQueue (le canal CANONIQUE `get_task`), idempotent :
-  #   - pas de mandat (pod permanent/interactif booté à froid) → rien à puller → bootstrap (skip) ;
-  #   - mandat DÉJÀ en file (`pod_status != {:ok, nil}` : dispatch stage, StageDispatcher a enqueué AVANT
+  # Enqueue le brief dans la TaskQueue (le canal CANONIQUE `get_task`), idempotent :
+  #   - pas de brief (pod permanent/interactif booté à froid) → rien à puller → bootstrap (skip) ;
+  #   - brief DÉJÀ en file (`pod_status != {:ok, nil}` : dispatch stage, StageDispatcher a enqueué AVANT
   #     le spawn) → pas de double-enqueue (skip) ;
-  #   - sinon (`admin.spawn` / `lcars spawn --mandate` : aucun dispatcher) → on enqueue ici, sinon
-  #     `get_task` rend `{done:true}` et le pod reste idle (cf. StageDispatcher.enqueue_mandate).
+  #   - sinon (`admin.spawn` / `lcars spawn --brief` : aucun dispatcher) → on enqueue ici, sinon
+  #     `get_task` rend `{done:true}` et le pod reste idle (cf. StageDispatcher.enqueue_brief).
   # Mirror des `attrs` de StageDispatcher (`ticket_id`/`role`/`brief`/`metadata`).
-  def maybe_enqueue_mandate(state) do
-    mandate = Keyword.get(state.opts || [], :mandate)
+  def maybe_enqueue_brief(state) do
+    brief = Keyword.get(state.opts || [], :brief)
 
     cond do
-      not (is_binary(mandate) and mandate != "") ->
+      not (is_binary(brief) and brief != "") ->
         :ok
 
-      not TaskProbe.no_pending_mandate?(state.pod_id) ->
+      not TaskProbe.no_pending_brief?(state.pod_id) ->
         :ok
 
       true ->
         attrs = %{
           ticket_id: state.ticket_id,
           role: Fleet.CapProfile.name(state.cap_profile),
-          brief: mandate,
+          brief: brief,
           metadata: %{"source" => "admin.spawn"}
         }
 
         case Fleet.TaskQueue.enqueue(state.pod_id, attrs) do
           {:ok, _task} -> :ok
-          {:error, reason} -> {:error, {:mandate_enqueue_failed, reason}}
+          {:error, reason} -> {:error, {:brief_enqueue_failed, reason}}
         end
     end
   end
 
   # Câblage de Fleet.ProjectBootstrap.Phase.Clone pour les pods porteurs d'un projet
-  # (`repo_path`) : le projet EFFECTIF vient du MANDAT (effective_project : opts[:project]
+  # (`repo_path`) : le projet EFFECTIF vient du BRIEF (effective_project : opts[:project]
   # injecté par le dispatch ticket->repo) ou du cap_profile statique (pods permanents). Présent :
   # clone le repo dans `<pod_dir>/workspace/` + checkout feature branch ; le cwd du REPL pointe sur
   # ce workspace (maybe_put_pod_cwd -> LCARS_POD_CWD) → l'agent code DANS sa branche (pas dans le
@@ -234,7 +234,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   # avec projet (workspace per-pod). (Le provisioning de workspace per-stage du moteur RAM
   # `Pipeline.WorkspaceProvisioner` est supprimé ; le rail forge-driven épingle la base au clone.)
   # 2 sites callers d'un même mécanisme, paramétré par cap-profile. Le projet EFFECTIF
-  # (mandat > statique) est résolu par `LaunchSpec.effective_project/2` (source unique).
+  # (brief > statique) est résolu par `LaunchSpec.effective_project/2` (source unique).
   def maybe_bootstrap_project_workspace(state) do
     project = LaunchSpec.effective_project(state.opts, state.cap_profile)
 
@@ -243,7 +243,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
         :ok
 
       _repo_path ->
-        # cap_profile porteur du projet EFFECTIF (mandat > statique) pour les Clone.* (qui lisent spec.project).
+        # cap_profile porteur du projet EFFECTIF (brief > statique) pour les Clone.* (qui lisent spec.project).
         eff_cap = %{state.cap_profile | spec: Map.put(state.cap_profile.spec, "project", project)}
 
         with {:ok, workspace, branch} <-

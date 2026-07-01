@@ -1,7 +1,7 @@
 # fleet_project_bootstrap — core du pod (Ring 1)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-06-29
+**Dernière révision** : 2026-07-01
 **Statut** : ACTIF — chemin PROD câblé (`Phase.Clone`). Orchestrateur mort `prepare/3` + 4 phases non-Clone RETIRÉS.
 **Dérivé de** : 04_design-notes/ring1/fleet_project_bootstrap.md + session 2026-05-17/18 (rings finalisés)
 
@@ -16,7 +16,7 @@ hors workspace vanilla + plugins. ⚠ Cet invariant n'est PAS testé en herméti
 ## Ce que l'app fait VRAIMENT en prod (`Phase.Clone`)
 
 Le seul chemin câblé en production est `Fleet.ProjectBootstrap.Phase.Clone`, appelé **directement**
-par `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` au spawn, `reset_in_place` au re-mandate).
+par `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` au spawn, `reset_in_place` au re-brief).
 
 - **`clone_or_skip/3`** — clone la branche code dans `<pod_dir>/workspace` :
   - `spec.project.repo_path` présent → `git clone --branch <base_branch> [--reference <ref>]`, puis

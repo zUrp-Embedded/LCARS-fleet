@@ -11,7 +11,7 @@ defmodule Fleet.SpawnerTest do
   # Leur session_id hexspeak EXIGE un repo résolu : sans lui le mint REFUSE (raise) plutôt que de fabriquer
   # un UUID random — l'absence de repo signale une forge non résolue (forge down). En prod le dispatcher
   # pose ce repo ; ces tests spawnent en direct, donc on le passe en `opts`. Omis volontairement dans les
-  # cas qui DOIVENT échouer avant le mint (refus mandat, pod_id non path-safe).
+  # cas qui DOIVENT échouer avant le mint (refus brief, pod_id non path-safe).
   @test_repo_id 7
 
   @moduletag :tmp_dir
@@ -106,7 +106,7 @@ defmodule Fleet.SpawnerTest do
     end
   end
 
-  describe "R18 — refus spawn one-shot sans mandat" do
+  describe "R18 — refus spawn one-shot sans brief" do
     test "valid_pod_id?/1 est l'autorité publique du charset pod_id" do
       for ok <- ["pod-1", "permanent-architect", "repo.issue_1-role", UUID.uuid4()] do
         assert Fleet.Spawner.valid_pod_id?(ok), "pod_id #{inspect(ok)} devrait être accepté"
@@ -117,31 +117,31 @@ defmodule Fleet.SpawnerTest do
       end
     end
 
-    test "mandate_required?/1 — autorité partagée : one-shot → true, autres scopes / absent → false" do
-      # one-shot EXPLICITE = la seule forme qui exige un mandat.
-      assert Fleet.Spawner.mandate_required?(valid_profile())
+    test "brief_required?/1 — autorité partagée : one-shot → true, autres scopes / absent → false" do
+      # one-shot EXPLICITE = la seule forme qui exige un brief.
+      assert Fleet.Spawner.brief_required?(valid_profile())
 
       # forever/run/pipe/permanent : long-lived, pull via MCP → exemptés.
       for scope <- ["forever", "run", "pipe", "permanent"] do
         cap = put_in(valid_profile().spec["invocation"], %{"lifetime_scope" => scope})
 
-        refute Fleet.Spawner.mandate_required?(cap),
-               "scope #{scope} ne devrait PAS exiger de mandat"
+        refute Fleet.Spawner.brief_required?(cap),
+               "scope #{scope} ne devrait PAS exiger de brief"
       end
 
-      # lifetime_scope absent (profil non validé ?) : nil-aware → false (exempté), comme mandate_guard.
+      # lifetime_scope absent (profil non validé ?) : nil-aware → false (exempté), comme brief_guard.
       no_scope = put_in(valid_profile().spec["invocation"], %{})
-      refute Fleet.Spawner.mandate_required?(no_scope)
+      refute Fleet.Spawner.brief_required?(no_scope)
     end
 
-    test "one-shot + pas de mandat → {:error, :mandate_required}" do
-      assert {:error, :mandate_required} =
-               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-no-mandate")
+    test "one-shot + pas de brief → {:error, :brief_required}" do
+      assert {:error, :brief_required} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-no-brief")
     end
 
-    test "one-shot + mandat VIDE (ex. StageSpawner ctx vide) → {:error, :mandate_required}" do
-      assert {:error, :mandate_required} =
-               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-empty-mandate", mandate: "")
+    test "one-shot + brief VIDE (ex. StageSpawner ctx vide) → {:error, :brief_required}" do
+      assert {:error, :brief_required} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-empty-brief", brief: "")
     end
 
     test "F076 — pod_id non path-safe (.. ou / ou vide) → {:error, :invalid_pod_id}, aucun spawn" do
@@ -154,32 +154,32 @@ defmodule Fleet.SpawnerTest do
                  {:error, :invalid_pod_id},
                  Fleet.Spawner.spawn_pod(valid_profile(), "ticket-1",
                    pod_id: bad,
-                   mandate: "do x"
+                   brief: "do x"
                  )
                ),
                "pod_id #{inspect(bad)} aurait dû être rejeté (path-traversal)"
       end
     end
 
-    test "one-shot + mandat → {:ok, _}" do
+    test "one-shot + brief → {:ok, _}" do
       assert {:ok, _pid} =
-               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-mandate",
-                 mandate: "répare le bug X",
-                 pod_id: "pod-r18-mandate-#{System.unique_integer([:positive])}",
+               Fleet.Spawner.spawn_pod(valid_profile(), "ticket-brief",
+                 brief: "répare le bug X",
+                 pod_id: "pod-r18-brief-#{System.unique_integer([:positive])}",
                  repo_id: @test_repo_id
                )
     end
 
-    test "one-shot + allow_no_mandate (admin/diagnostic) → {:ok, _}" do
+    test "one-shot + allow_no_brief (admin/diagnostic) → {:ok, _}" do
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(valid_profile(), "ticket-admin",
-                 allow_no_mandate: true,
+                 allow_no_brief: true,
                  pod_id: "pod-r18-admin-#{System.unique_integer([:positive])}",
                  repo_id: @test_repo_id
                )
     end
 
-    test "long-lived (forever) sans mandat → {:ok, _} (exempté, pull via MCP)" do
+    test "long-lived (forever) sans brief → {:ok, _} (exempté, pull via MCP)" do
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(forever_profile(), "ticket-forever",
                  pod_id: "pod-r18-forever-#{System.unique_integer([:positive])}",
@@ -194,7 +194,7 @@ defmodule Fleet.SpawnerTest do
     assert {:ok, pid} =
              Fleet.Spawner.spawn_pod(valid_profile(), "ticket-1",
                pod_id: pod_id,
-               allow_no_mandate: true,
+               allow_no_brief: true,
                repo_id: @test_repo_id
              )
 
@@ -221,7 +221,7 @@ defmodule Fleet.SpawnerTest do
     {:ok, _pid} =
       Fleet.Spawner.spawn_pod(valid_profile(), "ticket-orphan",
         pod_id: pod_id,
-        allow_no_mandate: true,
+        allow_no_brief: true,
         repo_id: @test_repo_id
       )
 
@@ -264,7 +264,7 @@ defmodule Fleet.SpawnerTest do
     {:ok, _pid} =
       Fleet.Spawner.spawn_pod(valid_profile(), "ticket-2",
         pod_id: pod_id,
-        allow_no_mandate: true,
+        allow_no_brief: true,
         repo_id: @test_repo_id
       )
 
@@ -282,13 +282,13 @@ defmodule Fleet.SpawnerTest do
   test "spawn_pod uses UUID by default if no :pod_id opt given" do
     {:ok, pid1} =
       Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-1",
-        allow_no_mandate: true,
+        allow_no_brief: true,
         repo_id: @test_repo_id
       )
 
     {:ok, pid2} =
       Fleet.Spawner.spawn_pod(valid_profile(), "ticket-uuid-2",
-        allow_no_mandate: true,
+        allow_no_brief: true,
         repo_id: @test_repo_id
       )
 
@@ -303,7 +303,7 @@ defmodule Fleet.SpawnerTest do
     {:ok, _pid} =
       Fleet.Spawner.spawn_pod(valid_profile(), "ticket-count",
         pod_id: pod_id,
-        allow_no_mandate: true,
+        allow_no_brief: true,
         repo_id: @test_repo_id
       )
 
@@ -325,7 +325,7 @@ defmodule Fleet.SpawnerTest do
       {:ok, _pid} =
         Fleet.Spawner.spawn_pod(valid_profile(), "ticket-wake",
           pod_id: pod_id,
-          allow_no_mandate: true,
+          allow_no_brief: true,
           repo_id: @test_repo_id
         )
 

@@ -1,0 +1,51 @@
+# Pipeline V2 — brief-gate (#8, 2026-06-18)
+#
+# Date: 2026-06-18
+# Statut: actif — gate dure de revue de brief (consultant) AVANT dispatch engineer.
+# Dérivé de: DECISIONS-attribution-promotion-concurrence-2026-06-18 + design #8 (build-spec passe 2-4).
+# Consommé par: Fleet.Pipeline.Loader / Fleet.Pilot.Entry (type:->carte) + StageDispatcher.carte_role.
+#
+# La carte EST la machine à états : le 1er stage (racine needs:[]) est brief-review (consultant en
+# mode JUGE, brief_kind:judge per-stage — le profil consultant reste worker pour l'audit). L'engineer
+# (stage build) ne part QUE quand le consultant a validé le brief (gate dure mécanique : le poller ne
+# dispatche build qu'une fois la route avancée à `build`). Brief non-exécutable → escalade arch
+# (await_arch), PAS rework du consultant (re-juger ne corrige pas un mauvais brief — l'arch corrige).
+
+kind: Pipeline
+metadata:
+  name: brief-gate
+  description: "Revue du brief (consultant-juge) AVANT l'engineer. Brief exécutable → build ; non → escalade arch."
+  applicable_intensity: [L1, L2, L3, L4]
+  applicable_regime: [R1, R2]
+
+spec:
+  stages:
+
+    # --- Stage 1 (racine) : revue du brief par le consultant (mode JUGE) ---
+    brief-review:
+      role: consultant
+      profile: consultant.yaml      # profil worker (audit), passé en JUGE par brief_kind ci-dessous
+      brief_kind: judge           # #8.B : override per-stage → GateBrief désamorcé (verdict, pas de prod)
+      judge_target: brief         # #8.E : juge le BRIEF (ticket.body), PAS un livrable/PR → pré-PR,
+                                    #        avance issue-level, no-PR légitime (vs deliverable = fail-loud)
+      needs: []                     # racine DAG
+      inputs:
+        - ticket.body               # le brief rédigé par l'arch
+      # #8.E : verdict-de-juge-SUR-ISSUE (gate_decide branché sur brief_kind:judge) →
+      #   continue      → advance(build)         (brief exécutable)
+      #   abandon       → close                  (brief à jeter)
+      #   escalate_user → await_arch (arch)     (brief à retravailler par l'arch)
+      timeout_sec: 600
+
+    # --- Stage 2 : implémentation (engineer), gated par la validation du brief ---
+    build:
+      role: engineer
+      profile: engineer.yaml
+      needs: [brief-review]       # ne part QUE si brief-review a avancé la route ici
+      inputs:
+        - ticket.body
+      timeout_sec: 1800
+
+  on_failure:
+    notify_role: starfleet
+    cleanup: false

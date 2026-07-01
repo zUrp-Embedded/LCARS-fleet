@@ -139,12 +139,12 @@ defmodule Fleet.Pilot.HopCompleter do
         "Verdict du juge **#{role}** : `#{inspect(decision)}`."
 
     # ADRESSÉ à l'arch (le sas unique vers l'humain ; l'humain n'a pas d'autre canal vers la fleet).
-    # L'arch reprend le mandat (corrige + re-soumet) ou tranche avec son humain. PAS de re-assign (assignee
+    # L'arch reprend le brief (corrige + re-soumet) ou tranche avec son humain. PAS de re-assign (assignee
     # = humain owner) : l'arch query son inbox `lcars-awaits-arch` ; l'issue reste hors-dispatch.
     body =
-      "**Architecte** (auteur du mandat) — " <>
+      "**Architecte** (auteur du brief) — " <>
         lead <>
-        "\n\nReprends ce mandat : corrige-le puis re-soumets (relance le cycle), ou tranche avec ton humain " <>
+        "\n\nReprends ce brief : corrige-le puis re-soumets (relance le cycle), ou tranche avec ton humain " <>
         "(il n'a pas d'autre canal vers la fleet que toi). L'issue reste hors-dispatch tant que " <>
         "`lcars-awaits-arch` est posé.\n\n" <> signature
 
@@ -435,7 +435,7 @@ defmodule Fleet.Pilot.HopCompleter do
         role_opts = ForgeClient.as_role(forge_opts, role)
 
         # La voix de l'eng sur DEUX canaux à 2 buts distincts — la PR (revue du
-        # diff, contexte code) ET le TICKET (réponse au mandat, « voici ce que j'ai fait », contexte
+        # diff, contexte code) ET le TICKET (réponse au brief, « voici ce que j'ai fait », contexte
         # issue) ; servir la PR seule laisserait un trou côté ticket. Best-effort, `as_role` (le pod reste
         # forge-aveugle, le SYSTÈME poste en son nom — même geste que le commentaire gatekeeper sur le ticket).
         _ =
@@ -478,13 +478,13 @@ defmodule Fleet.Pilot.HopCompleter do
         end
 
       {:error, {:pr_lookup, :no_producer_branch}} = err ->
-        # Juge de MANDAT (judge_target:mandate) : PRÉ-PR, donc pas de PR ni de review native → le
+        # Juge de BRIEF (judge_target:brief) : PRÉ-PR, donc pas de PR ni de review native → le
         # verdict se trace en COMMENTAIRE issue et l'avance est ISSUE-LEVEL (grave la route → le poller
         # dispatche le stage suivant). Réutilise `complete` (la MÊME complétion issue-level que
         # close_with_trace : publish sauté via deliverable_opts nil + hop_sha). Tout AUTRE juge sans PR =
         # erreur (un livrable était attendu) → fail-loud (jamais un merge sur PR introuvable).
-        if Map.get(hop, :judge_target) == "mandate" do
-          hop |> Map.merge(%{deliverable_opts: nil, hop_sha: "mandate-verdict"}) |> complete(opts)
+        if Map.get(hop, :judge_target) == "brief" do
+          hop |> Map.merge(%{deliverable_opts: nil, hop_sha: "brief-verdict"}) |> complete(opts)
         else
           err
         end

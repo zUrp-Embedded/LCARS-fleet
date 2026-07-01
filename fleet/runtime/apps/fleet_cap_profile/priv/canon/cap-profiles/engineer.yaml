@@ -70,24 +70,24 @@ spec:
     #
     # Decision 2026-06-17 : one-shot. REOUVERTE 2026-06-28 (slot-freeze) : PIPE retenu pour donner 1 SLOT
     # Claude Desktop par projet. Le slot Desktop = la connexion d'un PROCESS (atteste live) : un one-shot
-    # respawne N fois = N slots ; un pipe = 1 process resident re-mandate = 1 slot. Le cold par ticket
+    # respawne N fois = N slots ; un pipe = 1 process resident re-brief = 1 slot. Le cold par ticket
     # (workspace propre + /clear) est gere SANS rm_rf (bind mount bwrap vivant) par le pipeline de
-    # re-mandate idle-aware : do_extract pose :publishing -> deliverable.published (POST-push) leve :ready
-    # -> le gate StageDispatcher reprovisionne in-place (reset_in_place + /clear) au re-mandate d'un pipe
+    # re-brief idle-aware : do_extract pose :publishing -> deliverable.published (POST-push) leve :ready
+    # -> le gate StageDispatcher reprovisionne in-place (reset_in_place + /clear) au re-brief d'un pipe
     # :ready. Reversible : remettre `one-shot` ici (le gate retombe sur la voie one-shot, INCHANGEE).
     # Cf. BL-055 + DESIGN-eng-1slot.md (#5.3).
     lifetime_scope: pipe
     model: opus        # catalogue → --model (alias/nom complet ; tunable)
     effort: high       # catalogue → --effort {low,medium,high,xhigh,max} ; tunable
     boot_at_start: false
-    # subagent_template null : l'engineer exécute son mandat DIRECTEMENT
+    # subagent_template null : l'engineer exécute son brief DIRECTEMENT
     # (get_task → travail → submit_result via tools MCP), pas via un subagent
     # dispatché. Note : `lifetime_scope: pipe` ⟹ réintroduire un subagent_template `implementer`
     # VIOLERAIT G24-11 (subagent_template ⟹ one-shot) ; on reste sur l'exécution directe (plus simple).
     # Pattern subagent fire-mode-quick → cap-profile séparé.
     subagent_template: null
     # `fleet-forge.engineer` RETIRÉ — barrière forge-aveugle (DN forge-state-machine §4) : l'engineer
-    # n'a aucun canal d'écriture forge. Il lit son mandat / rend son livrable via MCP get_task/
+    # n'a aucun canal d'écriture forge. Il lit son brief / rend son livrable via MCP get_task/
     # submit_result (le runtime fait commit/comment/PATCH côté système). fleet-control = Memory-X/coord.
     mcp_channels: ["fleet-control.engineer.*"]
     host_native: false

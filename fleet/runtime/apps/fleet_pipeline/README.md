@@ -1,7 +1,7 @@
 # fleet_pipeline (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-29 (push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
+**Dernière révision** : 2026-07-01 (push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
 **Statut** : lib-only (salvage post-moteur-RAM) — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
@@ -33,7 +33,7 @@ carte YAML, évaluation de gates, et publication de livrable.
 | `Fleet.Pipeline.Gate` | `@callback evaluate/3` — behaviour générique d'évaluation de gate, vendor-extensible compile-time |
 | `Fleet.Pipeline.Gates` | implémentation du behaviour `Gate`. `evaluate/3` dispatche par type (`:hard \| :soft \| :terminal \| nil`). **Pur** : seul le `soft` retourne `{:dispatch_gatekeeper, info}` (décision d'escalade), il ne spawn rien. `rules` (hard ET terminal) = liste de prédicats string délégués à `Gates.Predicate`. Somme fermée : toute forme inconnue/malformée → `{:fail}` fail-closed (l'éval est TOTALE) |
 | `Fleet.Pipeline.Gates.Predicate` | `eval?/2` — évaluateur **pur** des rule-strings v2.5 (`"all_tests_pass"`, `"severity_max != critical"`, conjonction `AND`) contre les `outputs` auto-rapportés. Grammaire bornée au corpus canon ; **fail-closed** (fait absent / type incompatible → faux) |
-| `Fleet.Pipeline.GateBrief` | `build/1` — fonction pure qui construit le **brief markdown** (texte du mandat) que le gatekeeper pull via MCP `get_task` : contexte + livrable à juger + question + options canon (consommées depuis `GateDecision`) + contrat de sortie `gate-decision-v1.json` |
+| `Fleet.Pipeline.GateBrief` | `build/1` — fonction pure qui construit le **brief markdown** (texte du brief) que le gatekeeper pull via MCP `get_task` : contexte + livrable à juger + question + options canon (consommées depuis `GateDecision`) + contrat de sortie `gate-decision-v1.json` |
 | `Fleet.Pipeline.GateDecision` | `decisions/0` — **AUTORITÉ UNIQUE** du vocabulaire des décisions gatekeeper (`continue`/`abandon`/`redirect`/`escalate_user`/`halt_wait_input`). `GateBrief` (énoncé) et `Fleet.Pilot.HopConsumer` (validation fail-closed) consomment cette liste → l'énoncé et la validation ne peuvent plus diverger. Le contrat WIRE `gate-decision-v1.json` reste le miroir JSON (égalité schema ⇔ module verrouillée par test) |
 | `Fleet.Pipeline.Gatekeeper` | seam de **boot + registration** du gatekeeper permanent (juge unique, pod Type 3, `lifetime_scope: forever`, cap-profile `gatekeeper.yaml`). `ensure_booted/1` (idempotent, config-gated par `:gatekeeper_autoboot`), `pod_id/0` (lecture `:persistent_term` ou override config `:gatekeeper_pod_id`). Seul module non-pur survivant : il appelle `Fleet.CapProfile.load/1` + `Fleet.Spawner.spawn_pod/3` (injectables en test) |
 | `Fleet.Pipeline.Deliverable` | publication unifiée du livrable d'un pod (modèle O5). **Un seul** module, deux modes choisis par `spec.deliverable_mode` au catalogue : `:payload` (le système écrit les fichiers + `Git.commit`) / `:git_native` (l'agent a déjà commité). Trois temps : CONTENU → gate I-CBC partagée (`DeliverableGate.verify`) → push borné (`Git.push`). Frontière pod↔système : le pod est forge-aveugle, le système choisit la branche cible et pousse. **Validation de payload fail-closed** (`validate_payload_files`, étage CONTENU load-bearing) : refuse le path-traversal, le symlink-in-chain, **tout composant `.git`** (`{:dotgit_path, …}` — interdit de réécrire `.git/config`/`.git/hooks`), et **tout `.gitattributes` armant `filter=`/`diff=`** (`{:dangerous_gitattributes, …}`). Ferme le vecteur RCE par filtre `clean` : sans cette garde, le `git add` système-side qui suit exécuterait la commande du filtre côté monde (hors bwrap). Un `.gitattributes` bénin (sans `filter=`/`diff=`) reste autorisé |
@@ -83,7 +83,7 @@ orthogonal à l'enveloppe — cf. § Types de gates.
   via `Gates.Predicate.eval?/2`). `:pass` / `{:fail, reason}`.
 * **`soft`** — jugement LLM délégué au **gatekeeper** (juge unique de la fleet,
   pod permanent work-session). `Gates` retourne `{:dispatch_gatekeeper, %{kind: :soft}}` ;
-  le consommateur (rail forge) adresse un mandat d'éval au gatekeeper (MCP, via
+  le consommateur (rail forge) adresse un brief d'éval au gatekeeper (MCP, via
   `Fleet.TaskQueue`, ciblé par `pod_id`) et collecte la décision. Pas de gatekeeper
   booté → fail-loud. **Seul** le `soft` dispatche au gatekeeper.
 * **`terminal`** — `rules` = liste de prédicats string (tous vrais → `:pass`,
@@ -125,7 +125,7 @@ mix test apps/fleet_pipeline   # suite complète
 
 * `fleet_cap_profile` (ch1) — résolution cap-profile YAML (boot gatekeeper)
 * `fleet_spawner` (ch6) — `Fleet.Spawner.spawn_pod/3` (boot gatekeeper, seam injectable)
-* `fleet_credentials` — `Fleet.Credentials.ForgeIdentity` (F-01 : `allowed_emails` = l'humain du mandat)
+* `fleet_credentials` — `Fleet.Credentials.ForgeIdentity` (F-01 : `allowed_emails` = l'humain du brief)
 * `fleet_event_router` (ch11) — Bus PubSub (pré-enregistrement des atomes events)
-* `fleet_task_queue` (run #5) — broker de mandats (adressage du gatekeeper par `pod_id`)
+* `fleet_task_queue` (run #5) — broker de briefs (adressage du gatekeeper par `pod_id`)
 * `:yaml_elixir`, `:jason`, `:ex_json_schema`

@@ -62,6 +62,6 @@ cycle:
 # Sélection pipeline
 selection_priority:
   - flag_pipeline_explicit
-  - ticket_body_mandate
+  - ticket_body_brief
   - intensity_json_pipeline_default
   - default

@@ -66,7 +66,7 @@ defmodule Fleet.Spawner.SeedStore do
         slug = Path.basename(Path.dirname(jsonl))
         File.mkdir_p!(dest_dir)
 
-        # On ne garde QUE le PREMIER ROUND (seed minimal résumable = le setup/mandat initial du pod),
+        # On ne garde QUE le PREMIER ROUND (seed minimal résumable = le setup/brief initial du pod),
         # PAS la session entière — le travail se re-dérive de la forge (axiome source-unique).
         # Ce sous-ensemble `--resume` correctement avec le seul contexte du round 1.
         File.write!(Path.join(dest_dir, "#{role}.jsonl"), first_round(jsonl))
@@ -88,7 +88,7 @@ defmodule Fleet.Spawner.SeedStore do
       {:error, e}
   end
 
-  # Premier round = les lignes jusqu'au 1er event `assistant` INCLUS (mandat/setup + 1ʳᵉ réponse).
+  # Premier round = les lignes jusqu'au 1er event `assistant` INCLUS (brief/setup + 1ʳᵉ réponse).
   # C'est le seed minimal résumable ; le reste de la session est jeté (re-dérivable forge).
   defp first_round(jsonl_path) do
     jsonl_path

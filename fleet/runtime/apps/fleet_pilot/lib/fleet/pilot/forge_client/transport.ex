@@ -130,7 +130,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   # ============================================================
   # URL-segment safety — encodage des segments fournis par appelant/forge.
   #
-  # `repo`/`path`/`ref`/`username`/`topic`/`org`/`label_name` viennent du mandat (issue/PR), du
+  # `repo`/`path`/`ref`/`username`/`topic`/`org`/`label_name` viennent du brief (issue/PR), du
   # catalogue ou de la config et sont interpolés dans l'URL Gitea. Un segment hostile (`../`, espace,
   # `?x=1`, `#frag`) traverserait l'API (`/repos/owner/../admin/...`) ou INJECTERAIT une query/fragment
   # qui changerait le sens de la requête. On ENCODE donc chaque segment au plus près de l'interpolation —

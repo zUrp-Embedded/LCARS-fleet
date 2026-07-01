@@ -198,7 +198,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   # retombe sur `command -v claude` = PATH du daemon → binaire système périmé (version périmée,
   # outil Monitor absent). readlink -f ⇒ bwrap_launch dérive VENDOR_SHARE = dirname(dirname(bin))
   # juste. Absent ⇒ on ne pose rien (fallback bwrap conservé).
-  # Identité git du pod = l'HUMAIN du mandat (author ET committer ; le pod commite EN TANT QUE
+  # Identité git du pod = l'HUMAIN du brief (author ET committer ; le pod commite EN TANT QUE
   # l'humain qui le run), résolue via le catalogue (`Fleet.Credentials.ForgeIdentity`). Remplace
   # un DÉFAUT COOPÉRATIF role-based de `bwrap_launch.sh` (GIT_AUTHOR=LCARS-$ROLE) : le rôle ne
   # signe plus l'identité — il passe en trailer `Co-authored-by`. bwrap_launch.sh forward ces

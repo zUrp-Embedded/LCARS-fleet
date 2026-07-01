@@ -5,9 +5,9 @@ defmodule Fleet.Spawner.PodTmux do
   bindée (sock-dir host↔pod). Keyé par `pod_id` (pas par l'état) — `sock_path`/`session_name` dérivés
   du pod_id + config sock-base.
 
-  ## Ce canal porte le CONTROL-PLANE, pas le mandat
+  ## Ce canal porte le CONTROL-PLANE, pas le brief
 
-  Le mandat ne voyage PAS ici (il est pull par le pod via MCP `get_task`). Ce canal = le **KICK**
+  Le brief ne voyage PAS ici (il est pull par le pod via MCP `get_task`). Ce canal = le **KICK**
   (« yop » → déclenche get_task → traite → submit_result) + les slash-commands (`/clear`) + le health
   (`has-session`). Les channels MCP sont `skipSlashCommands:true` → seul
   le send-keys tmux atteint les slash-commands.

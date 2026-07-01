@@ -56,8 +56,8 @@
               "properties": {
                 "role": {"type": "string", "minLength": 1},
                 "profile": {"type": "string", "minLength": 1},
-                "mandate_kind": {"enum": ["worker", "judge"]},
-                "judge_target": {"enum": ["mandate", "deliverable"]},
+                "brief_kind": {"enum": ["worker", "judge"]},
+                "judge_target": {"enum": ["brief", "deliverable"]},
                 "effect": {
                   "enum": ["reversible", "fire_once"],
                   "description": "réservé : idempotence/fire-once, pas encore consommé par aucune logique"

@@ -57,7 +57,7 @@ defmodule Fleet.MCP.PodSocketTest do
 
     assert {:ok, :completed} = TaskQueue.pod_status(pod)
 
-    # Plus de mandat actif → done.
+    # Plus de brief actif → done.
     assert {:ok, %{"done" => true}} = content(call(path, 3, "get_task", %{}))
   end
 
@@ -87,7 +87,7 @@ defmodule Fleet.MCP.PodSocketTest do
     victim = uniq("victim")
     attacker = uniq("attacker")
     {:ok, _} = TaskQueue.enqueue(victim, %{brief: "secret-de-victim"})
-    {:ok, _} = TaskQueue.enqueue(attacker, %{brief: "le-mandat-de-attacker"})
+    {:ok, _} = TaskQueue.enqueue(attacker, %{brief: "le-brief-de-attacker"})
 
     {:ok, apath} = PodSocketSupervisor.ensure_pod_socket(attacker)
 
@@ -97,8 +97,8 @@ defmodule Fleet.MCP.PodSocketTest do
     end)
 
     # L'attaquant POST le pod_id de la victime dans les arguments — mais sa socket reste SA socket. Le
-    # central ne lit JAMAIS le pod_id du wire → il sert le mandat de l'accepteur (attacker), pas victim.
-    assert {:ok, %{"done" => false, "task" => %{"brief" => "le-mandat-de-attacker"}}} =
+    # central ne lit JAMAIS le pod_id du wire → il sert le brief de l'accepteur (attacker), pas victim.
+    assert {:ok, %{"done" => false, "task" => %{"brief" => "le-brief-de-attacker"}}} =
              content(call(apath, 1, "get_task", %{"_lcars_pod_id" => victim}))
   end
 
@@ -141,7 +141,7 @@ defmodule Fleet.MCP.PodSocketTest do
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # Active le mandat puis submit SANS task_id → :task_id_required → frame `result` avec isError:true
+    # Active le brief puis submit SANS task_id → :task_id_required → frame `result` avec isError:true
     # (une erreur d'outil est un résultat MCP, pas une erreur de protocole).
     _ = call(path, 1, "get_task", %{})
 

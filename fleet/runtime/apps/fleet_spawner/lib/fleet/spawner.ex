@@ -41,7 +41,7 @@ defmodule Fleet.Spawner do
     * `{:error, :cap_profile_invalid, reason}` — struct invalide
     * `{:error, {:already_started, pid}}` — pod_id collision
     * `{:error, :invalid_pod_id}` — pod_id non path-safe (hors `[A-Za-z0-9._-]` ou contient `..`)
-    * `{:error, :mandate_required}` — pod one-shot sans mandat
+    * `{:error, :brief_required}` — pod one-shot sans brief
   """
 
   alias Fleet.Spawner.Pod
@@ -63,12 +63,12 @@ defmodule Fleet.Spawner do
   def valid_pod_id?(_), do: false
 
   @doc """
-  Règle R18 : un cap-profile one-shot exige un mandat. Autorité partagée (mandate_guard +
+  Règle R18 : un cap-profile one-shot exige un brief. Autorité partagée (brief_guard +
   les frontières qui valident à l'admission, ex. l'API). nil/absent → false (exempté),
-  comme mandate_guard.
+  comme brief_guard.
   """
-  @spec mandate_required?(Fleet.CapProfile.t()) :: boolean()
-  def mandate_required?(%Fleet.CapProfile{spec: spec}) do
+  @spec brief_required?(Fleet.CapProfile.t()) :: boolean()
+  def brief_required?(%Fleet.CapProfile{spec: spec}) do
     get_in(spec, ["invocation", "lifetime_scope"]) == "one-shot"
   end
 
@@ -84,15 +84,15 @@ defmodule Fleet.Spawner do
         car interpolé dans des paths FS (`~/pods/pod_<id>`, sock, state recovery) ;
         sinon `{:error, :invalid_pod_id}`.
       * `:state_fs_root` (override, default config `:fleet_spawner, :state_fs_root`)
-      * `:mandate` — le travail du pod (string). **Obligatoire** pour un
-        pod `one-shot` (sinon `{:error, :mandate_required}`).
-      * `:allow_no_mandate` — échappatoire admin/diagnostic (bool, default false).
+      * `:brief` — le travail du pod (string). **Obligatoire** pour un
+        pod `one-shot` (sinon `{:error, :brief_required}`).
+      * `:allow_no_brief` — échappatoire admin/diagnostic (bool, default false).
   """
   @spec spawn_pod(Fleet.CapProfile.t(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   def spawn_pod(%Fleet.CapProfile{} = cap_profile, ticket_id, opts \\ [])
       when is_binary(ticket_id) and is_list(opts) do
-    case mandate_guard(cap_profile, opts) do
+    case brief_guard(cap_profile, opts) do
       :ok ->
         pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
 
@@ -132,7 +132,7 @@ defmodule Fleet.Spawner do
   (`projects.work/<projet>/pods/`). Lit la carte (uuid+jsonl), spawn un pod en mode resume :
   `session_id` = l'uuid du seed, `resume: true`, le seed est restauré dans le pod AVANT le launch
   (do_project → maybe_recall_restore) → claude `--resume <uuid>` reprend le contexte. Nom Desktop
-  `<projet>_<role>`. `allow_no_mandate` (le pod resume son contexte, pas idle ; pas de mandat neuf).
+  `<projet>_<role>`. `allow_no_brief` (le pod resume son contexte, pas idle ; pas de brief neuf).
 
   `{:ok, pid}` | `{:error, :no_seed}` (aucun seed) | `{:error, term}`.
   """
@@ -150,49 +150,49 @@ defmodule Fleet.Spawner do
             resume: true,
             recall_seed_jsonl: jsonl,
             rc_name: "#{projet}_#{role}",
-            allow_no_mandate: true
+            allow_no_brief: true
           )
         end
     end
   end
 
   # Invariant rendu structurellement impossible à violer : un pod `one-shot` (1 tâche
-  # puis meurt) DOIT porter un mandat — sinon il part sans travail (brief générique →
+  # puis meurt) DOIT porter un brief — sinon il part sans travail (brief générique →
   # claude attend → timeout). Les pods long-lived (`forever`/`run`/`pipe`) pullent leurs
   # tâches via MCP (`yop` → get_task) → exemptés (épargne les pods permanents/gatekeeper).
-  # Échappatoire admin/diagnostic explicite : `opts[:allow_no_mandate]`.
-  defp mandate_guard(%Fleet.CapProfile{spec: spec} = cap_profile, opts) do
-    mandate = Keyword.get(opts, :mandate)
-    # `nil` ET `""` (mandat vide — ex. un `build_mandate` sur un contexte de stage
-    # vide/malformé) comptent tous deux comme « pas de mandat ».
-    has_mandate? = is_binary(mandate) and mandate != ""
+  # Échappatoire admin/diagnostic explicite : `opts[:allow_no_brief]`.
+  defp brief_guard(%Fleet.CapProfile{spec: spec} = cap_profile, opts) do
+    brief = Keyword.get(opts, :brief)
+    # `nil` ET `""` (brief vide — ex. un `build_brief` sur un contexte de stage
+    # vide/malformé) comptent tous deux comme « pas de brief ».
+    has_brief? = is_binary(brief) and brief != ""
     scope = get_in(spec, ["invocation", "lifetime_scope"])
 
     cond do
-      has_mandate? ->
+      has_brief? ->
         :ok
 
-      Keyword.get(opts, :allow_no_mandate, false) ->
+      Keyword.get(opts, :allow_no_brief, false) ->
         :ok
 
       # Même verdict que `scope == "one-shot"`, mais via le prédicat PUBLIC partagé
-      # `mandate_required?/1` (autorité unique de la règle one-shot→mandat, aussi appelée
+      # `brief_required?/1` (autorité unique de la règle one-shot→brief, aussi appelée
       # à l'admission par l'API) → pas de règle dupliquée qui pourrait diverger.
-      mandate_required?(cap_profile) ->
+      brief_required?(cap_profile) ->
         # Diagnosable (pas un refus muet) : distingue clairement le cas.
         Logger.warning(
-          "Fleet.Spawner.spawn_pod refusé (R18) : pod one-shot sans mandat — " <>
-            "fournir :mandate (le travail) ou :allow_no_mandate (admin/diagnostic)."
+          "Fleet.Spawner.spawn_pod refusé (R18) : pod one-shot sans brief — " <>
+            "fournir :brief (le travail) ou :allow_no_brief (admin/diagnostic)."
         )
 
-        {:error, :mandate_required}
+        {:error, :brief_required}
 
       is_nil(scope) ->
         # Profil sans lifetime_scope déclaré (non validé ?) : exemption par défaut
         # (on ne refuse que le one-shot EXPLICITE), mais on rend le trou visible.
         Logger.warning(
           "Fleet.Spawner.spawn_pod (R18) : lifetime_scope absent du cap-profile — " <>
-            "spawn autorisé sans mandat (exemption par défaut, profil à vérifier)."
+            "spawn autorisé sans brief (exemption par défaut, profil à vérifier)."
         )
 
         :ok
@@ -230,7 +230,7 @@ defmodule Fleet.Spawner do
   @doc """
   Reprovisionne le workspace d'un pod pipe RESIDENT pour son ticket suivant (slot-freeze) : reset git
   IN-PLACE (PAS de rm_rf — le ws est bind-monte dans le sandbox vivant) sur la base du nouveau `project`
-  + `/clear` du contexte REPL. Appele par le dispatcher au re-mandate d'un pipe `:ready`. Retourne
+  + `/clear` du contexte REPL. Appele par le dispatcher au re-brief d'un pipe `:ready`. Retourne
   `:ok` | `{:error, _}` (incl. `:not_found` si le pod n'existe pas, `{:reset_failed, _}` si le git echoue).
   """
   @spec reprovision_pipe_workspace(String.t(), map(), keyword()) :: :ok | {:error, term()}
@@ -347,7 +347,7 @@ defmodule Fleet.Spawner do
   la boucle ack-driven du Pod (`:arm_kick` — le FALLBACK : send-keys `"wake"` UNIQUEMENT si le pull n'arrive
   pas) + ré-arme la deadline de RÉPONSE (`:rearm_deadline`). Il ne fait **pas** de send-keys lui-même.
 
-  Pré-requis : le caller a déjà enqueué le mandat dans `Fleet.TaskQueue` (ciblé `pod_id` ; le pod s'identifie
+  Pré-requis : le caller a déjà enqueué le brief dans `Fleet.TaskQueue` (ciblé `pod_id` ; le pod s'identifie
   par `_lcars_pod_id` sur le fil) AVANT l'appel. Le CONTENU passe TOUJOURS par MCP (`get_task`), jamais par
   le texte injecté.
 

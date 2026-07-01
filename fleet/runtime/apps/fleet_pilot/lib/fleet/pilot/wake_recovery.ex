@@ -23,7 +23,7 @@ defmodule Fleet.Pilot.WakeRecovery do
 
   @doc """
   Réveille `pod_id` avec recovery. `respawn_fun/0` = le re-spawn type-spécifique injecté par l'appelant
-  (reboot du gatekeeper ; re-spawn worker). Pré-requis : le mandat est DÉJÀ en file.
+  (reboot du gatekeeper ; re-spawn worker). Pré-requis : le brief est DÉJÀ en file.
 
   Returns `:ok` | `{:error, term()}` (du re-wake) | `{:error, {:escalated, reason}}` (ticket sysadmin
   RÉELLEMENT ouvert) | `{:error, {:escalation_failed, reason}}` (récurrence/re-roll KO mais l'ouverture du

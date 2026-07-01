@@ -38,8 +38,8 @@ defmodule Fleet.Spawner.Pod do
   `:output_extracted`, `:home_released`, plus le FLAG `:publishing` (un pipe git_native
   entre son submit et la confirmation forge `deliverable.published`). `:publishing` reste
   un flag, PAS un état : un pod publishing est fonctionnellement en `:monitoring` (il peut
-  recevoir une tâche) ; le flag ne fait que gater le reset/re-mandate EXTERNE
-  (`pipe_remandate_state` lit `pod_info.conditions`).
+  recevoir une tâche) ; le flag ne fait que gater le reset/re-brief EXTERNE
+  (`pipe_rebrief_state` lit `pod_info.conditions`).
 
   ## Timers NATIFS (plus de timer maison)
 
@@ -103,7 +103,7 @@ defmodule Fleet.Spawner.Pod do
           | :output_extracted
           | :home_released
           # SLOT-FREEZE : un pipe est :publishing entre son submit et la confirmation que son livrable est
-          # sur la forge (event deliverable.published). Levee -> pret a reset/re-mandater (etape 4).
+          # sur la forge (event deliverable.published). Levee -> pret a reset/re-briefer (etape 4).
           | :publishing
 
   @type data :: %{
@@ -290,10 +290,10 @@ defmodule Fleet.Spawner.Pod do
              Path.join(tickets_dir, "#{Scaffold.ticket_id_to_filename(data.ticket_id)}.md"),
              Scaffold.default_brief(data)
            ),
-         # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du mandat est la
+         # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du brief est la
          # TaskQueue (`get_task`). Idempotent (skip si déjà en file). Sans cet enqueue, un
          # `admin.spawn` (sans dispatcher) verrait `get_task` rendre `{done:true}` → pod idle.
-         :ok <- Scaffold.maybe_enqueue_mandate(data),
+         :ok <- Scaffold.maybe_enqueue_brief(data),
          # Provisionne la socket MCP per-pod AVANT le launch (le bind bwrap échoue si le fichier
          # socket n'existe pas encore). Échec → propagé au `with` → transition_failed.
          {:ok, mcp_socket_path} <- Backend.ensure_pod_socket(data.pod_id),
@@ -421,7 +421,7 @@ defmodule Fleet.Spawner.Pod do
       # des tests lisent phase, et le dispatcher lit conditions+has_active_task ci-dessous).
       phase: state,
       conditions: MapSet.to_list(data.conditions),
-      # SLOT-FREEZE : le gate du dispatcher distingue un pipe IDLE (re-mandatable) d'un pipe qui
+      # SLOT-FREEZE : le gate du dispatcher distingue un pipe IDLE (re-briefable) d'un pipe qui
       # TRAVAILLE encore une tache. Combine a :publishing pour decider :ready.
       has_active_task: TaskProbe.pod_has_active_task?(data.pod_id),
       session_id: data.session_id,
@@ -533,7 +533,7 @@ defmodule Fleet.Spawner.Pod do
 
   # SLOT-FREEZE fail-safe : la confirmation deliverable.published n'est pas arrivee dans le delai (role
   # sans livrable git, ou push KO). On leve :publishing quand meme — sinon le pod resterait jamais-:ready
-  # donc jamais re-mandate (wedge). Logge WARNING : une confirmation manquee doit etre visible.
+  # donc jamais re-brief (wedge). Logge WARNING : une confirmation manquee doit etre visible.
   def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
     if MapSet.member?(data.conditions, :publishing) do
       Logger.warning(
@@ -553,10 +553,10 @@ defmodule Fleet.Spawner.Pod do
   # Une erreur send-keys n'interrompt pas le pod (le monitor time-out couvre).
   def handle_event({:timeout, :kick}, {:attempt, n}, _state, %{tmux_session: session} = data)
       when is_binary(session) do
-    # Un pod SANS mandat en attente (interactif/forever, ou permanent booté à froid) n'a RIEN à
-    # puller : ses mandats arrivent plus tard via `wake_pod`. On se contente d'un BOOTSTRAP — réveil
-    # du REPL — borné et ESPACÉ. Un worker (mandat enqueué au spawn) garde le kick fréquent jusqu'au pull.
-    bootstrap? = TaskProbe.no_pending_mandate?(data.pod_id)
+    # Un pod SANS brief en attente (interactif/forever, ou permanent booté à froid) n'a RIEN à
+    # puller : ses briefs arrivent plus tard via `wake_pod`. On se contente d'un BOOTSTRAP — réveil
+    # du REPL — borné et ESPACÉ. Un worker (brief enqueué au spawn) garde le kick fréquent jusqu'au pull.
+    bootstrap? = TaskProbe.no_pending_brief?(data.pod_id)
 
     # polled? = l'agent a déjà appelé get_task (ACK in-band). Calculé 1× : sert au bootstrap-stop ET
     # au choix du mot-clé (pas encore pollé = bootstrap-arm "yop" ; déjà pollé = pod running → "wake").
@@ -566,7 +566,7 @@ defmodule Fleet.Spawner.Pod do
 
     cond do
       # ACK = l'agent a tendu la main → on STOPPE la boucle (cancel le generic timeout :kick).
-      Kick.acked?(TaskProbe.mandate_pulled?(data.pod_id), bootstrap?, polled) ->
+      Kick.acked?(TaskProbe.brief_pulled?(data.pod_id), bootstrap?, polled) ->
         Logger.debug(
           "pod #{data.pod_id} acké (pull/poll) → kick stoppé (porteur prend le relais)"
         )
@@ -639,7 +639,7 @@ defmodule Fleet.Spawner.Pod do
       do: :keep_state_and_data
 
   # SLOT-FREEZE : le livrable de CE pod est confirme sur la forge (push + PR OK -> le push a deja LU le
-  # workspace). On leve :publishing -> le pod est :ready (reset/re-mandate surs, etape 4) + on annule
+  # workspace). On leve :publishing -> le pod est :ready (reset/re-brief surs, etape 4) + on annule
   # le publish_deadline. Matche par pod_id ; les deliverable.published d'AUTRES pods -> ignores.
   def handle_event(
         :info,
@@ -791,7 +791,7 @@ defmodule Fleet.Spawner.Pod do
           |> remove_condition(:output_extracted)
 
         # SLOT-FREEZE : enter_publishing -> le pipe est :publishing tant que son livrable n'est pas
-        # confirme sur la forge (deliverable.published) ; il n'est pas re-mandatable tant qu'il publie.
+        # confirme sur la forge (deliverable.published) ; il n'est pas re-briefable tant qu'il publie.
         # Conditionne au livrable git async : un pod payload n'a rien a proteger et n'arme donc pas
         # un deadline jamais leve.
         {data, pub_actions} = maybe_enter_publishing(data)
@@ -1085,7 +1085,7 @@ defmodule Fleet.Spawner.Pod do
   # ============================================================
 
   # SLOT-FREEZE : seul un pod à livrable git_native a un push async (confirmé par deliverable.published)
-  # qu'il faut protéger du reset/re-mandate → :publishing. Un pod payload (gatekeeper/architect : pas de
+  # qu'il faut protéger du reset/re-brief → :publishing. Un pod payload (gatekeeper/architect : pas de
   # push) n'a rien à protéger ; le mettre :publishing armerait un deadline 120s jamais levé → WARNING
   # récurrent + sémantique fausse. Rend `{data, actions}` (la condition + l'armement du publish_deadline).
   defp maybe_enter_publishing(data) do
@@ -1107,7 +1107,7 @@ defmodule Fleet.Spawner.Pod do
     do: Application.get_env(:fleet_spawner, :publish_deadline_ms, 120_000)
 
   # SLOT-FREEZE : adopte le ticket_id de la tache complétée (de l'event task_completed) comme ticket
-  # courant du pod. Un pipe re-mandate change de brique a chaque tache ; sans ca state.ticket_id
+  # courant du pod. Un pipe re-brief change de brique a chaque tache ; sans ca state.ticket_id
   # resterait celui du spawn -> toutes les attributions pointeraient la 1ere brique. Absent/vide ->
   # on garde l'existant.
   defp adopt_task_ticket_id(data, payload) do

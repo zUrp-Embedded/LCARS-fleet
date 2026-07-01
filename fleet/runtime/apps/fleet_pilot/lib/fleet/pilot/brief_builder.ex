@@ -1,12 +1,12 @@
-defmodule Fleet.Pilot.MandateBuilder do
+defmodule Fleet.Pilot.BriefBuilder do
   @moduledoc """
-  Autorité du FORMAT des mandats : worker / judge / mandate-review / rework / conflit, plus les
-  instructions de voix de l'eng. `StageDispatcher` APPELLE (il choisit QUEL mandat selon l'état forge),
-  il ne FORME plus le mandat lui-même.
+  Autorité du FORMAT des briefs : worker / judge / brief-review / rework / conflit, plus les
+  instructions de voix de l'eng. `StageDispatcher` APPELLE (il choisit QUEL brief selon l'état forge),
+  il ne FORME plus le brief lui-même.
 
   La judge-ness (et la cible d'un juge) est une propriété de SÉCURITÉ : elle ne s'infère JAMAIS par
-  omission de clause. `build_mandate/9` est une somme TOTALE et fail-loud sur `mandate_kind`/`judge_target`
-  hors-vocab (raise) — un juge ne doit JAMAIS recevoir un corps d'issue exécutable. Le mandat d'un juge est
+  omission de clause. `build_brief/9` est une somme TOTALE et fail-loud sur `brief_kind`/`judge_target`
+  hors-vocab (raise) — un juge ne doit JAMAIS recevoir un corps d'issue exécutable. Le brief d'un juge est
   DÉSAMORCÉ (`Fleet.Pipeline.GateBrief` : `request` rendu comme contexte, pas comme instruction exécutable).
 
   `forge` est un ARG injecté (seam) — jamais câblé en dur. Les autres deps (`Fleet.CapProfile`,
@@ -14,9 +14,9 @@ defmodule Fleet.Pilot.MandateBuilder do
   """
 
   # Brief de rework : le PRODUCTEUR (engineer) reprend sur une PR REQUEST_CHANGES.
-  # PORTE LA MÊME instruction git-native que `build_worker_mandate` (sinon `:no_deliverable_commit` : le
+  # PORTE LA MÊME instruction git-native que `build_worker_brief` (sinon `:no_deliverable_commit` : le
   # rework « re-pousse » mais le pod est FORGE-AVEUGLE et sans l'ordre de COMMITTER il ne livre rien —
-  # jumeau du mandat producteur). Le pod corrige + commite EN LOCAL ; le SYSTÈME pousse (frontière
+  # jumeau du brief producteur). Le pod corrige + commite EN LOCAL ; le SYSTÈME pousse (frontière
   # forge). Trailer obligatoire (gate de push).
   #
   # FAMINE D'INFO, moitié rework : sans le BODY des reviews REQUEST_CHANGES,
@@ -24,7 +24,7 @@ defmodule Fleet.Pilot.MandateBuilder do
   # l'aveugle (un eng prudent refuse de deviner → `blocked_dep` → wedge). On lit le feedback sur la forge
   # (le runtime, pas le pod : frontière forge préservée) et on l'injecte. Si la lecture échoue / aucun body,
   # on retombe sur l'instruction générique (le pod a quand même la PR clonée + son code).
-  def rework_mandate(role, forge, repo, pr, forge_opts, _route) do
+  def rework_brief(role, forge, repo, pr, forge_opts, _route) do
     [
       "REWORK — une review REQUEST_CHANGES a été déposée sur la PR ##{pr}. Corrige ton code selon le " <>
         "feedback de la review ci-dessous.",
@@ -43,7 +43,7 @@ defmodule Fleet.Pilot.MandateBuilder do
   # autre ticket parallèle a fusionné) → conflit. Le PRODUCTEUR (git_native, il a écrit le contenu) RÉCONCILIE :
   # rebase sur `main` + résolution en gardant TOUT (le sien + main). Pas un re-code. Le système pousse ;
   # le push rebasé invalide les vieilles reviews (head_sha) → les juges re-valident le fusionné, gatekeeper scelle.
-  def resolve_conflict_mandate(role, _forge, _repo, pr, _forge_opts, _route) do
+  def resolve_conflict_brief(role, _forge, _repo, pr, _forge_opts, _route) do
     [
       "RÉSOLUTION DE CONFLIT — ta PR ##{pr} a été APPROUVÉE, mais `main` a avancé depuis (un autre ticket " <>
         "parallèle a été fusionné) et ta branche **conflicte** avec `main`. On ne te demande PAS de re-coder : " <>
@@ -100,9 +100,9 @@ defmodule Fleet.Pilot.MandateBuilder do
     end
   end
 
-  # La forme du mandat est une propriété du rôle (cap-profile `mandate_kind`), PAS un nom
+  # La forme du brief est une propriété du rôle (cap-profile `brief_kind`), PAS un nom
   # magique en ring2. `judge` → GateBrief désamorcé ; tout le reste (`worker`, défaut) → corps d'issue.
-  def build_mandate(
+  def build_brief(
         profile,
         role,
         forge,
@@ -113,49 +113,49 @@ defmodule Fleet.Pilot.MandateBuilder do
         route,
         stage_spec
       ) do
-    # Le `mandate_kind` du STAGE (carte) PRIME sur celui du profil (override per-stage) — réutilise
+    # Le `brief_kind` du STAGE (carte) PRIME sur celui du profil (override per-stage) — réutilise
     # un profil worker (consultant) en JUGE sans profil-doublon. ABSENT au stage → défaut profil
     # (lui-même "worker" par défaut, fail-safe) via le `||` : l'absence n'est PAS une anomalie. Ce
     # qui suit traite la valeur PRÉSENTE-mais-hors-vocab, distincte de l'absence.
-    kind = Map.get(stage_spec, "mandate_kind") || Fleet.CapProfile.mandate_kind(profile)
+    kind = Map.get(stage_spec, "brief_kind") || Fleet.CapProfile.brief_kind(profile)
 
     # Somme TOTALE et fail-loud. La judge-ness (et la cible d'un juge) est une propriété de
     # SÉCURITÉ : elle ne s'infère JAMAIS par omission de clause. Un kind/target hors-vocab (typo, ou
     # valeur d'un futur vocabulaire) NE DOIT PAS retomber silencieusement sur worker — sinon un rôle
-    # juge recevrait un corps d'issue EXÉCUTABLE (mandat actif) au lieu d'un brief désamorcé. On
-    # rejette bruyamment (raise) plutôt que de construire un mandat dangereux en silence.
+    # juge recevrait un corps d'issue EXÉCUTABLE (brief actif) au lieu d'un brief désamorcé. On
+    # rejette bruyamment (raise) plutôt que de construire un brief dangereux en silence.
     case {kind, Map.get(stage_spec, "judge_target")} do
-      # Juge de MANDAT (judge_target:mandate) → juge le ticket.body (exécutable ?), PAS un livrable
+      # Juge de BRIEF (judge_target:brief) → juge le ticket.body (exécutable ?), PAS un livrable
       # (pas de code en amont).
-      {"judge", "mandate"} ->
-        build_mandate_review_mandate(role, issue, forge, repo, number, forge_opts, route)
+      {"judge", "brief"} ->
+        build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route)
 
       # Juge de LIVRABLE : judge_target ABSENT (nil → défaut canon) ou "deliverable" explicite →
       # juge un livrable (PR), brief inchangé.
       {"judge", target} when target in [nil, "deliverable"] ->
-        build_judge_mandate(role, forge, repo, number, forge_opts, route)
+        build_judge_brief(role, forge, repo, number, forge_opts, route)
 
-      # judge_target PRÉSENT mais hors {mandate, deliverable} → anomalie : on ne devine pas la cible.
+      # judge_target PRÉSENT mais hors {brief, deliverable} → anomalie : on ne devine pas la cible.
       {"judge", other} ->
         raise ArgumentError,
-              "judge_target #{inspect(other)} hors vocabulaire {mandate, deliverable} — la cible d'un juge ne s'infère pas"
+              "judge_target #{inspect(other)} hors vocabulaire {brief, deliverable} — la cible d'un juge ne s'infère pas"
 
       {"worker", _} ->
-        build_worker_mandate(role, issue)
+        build_worker_brief(role, issue)
 
-      # kind ∉ {worker, judge} (mandate_kind présent mais hors-vocab) → fail-loud.
+      # kind ∉ {worker, judge} (brief_kind présent mais hors-vocab) → fail-loud.
       {other, _} ->
         raise ArgumentError,
-              "mandate_kind #{inspect(other)} hors vocabulaire {worker, judge} — la judge-ness ne s'infère pas"
+              "brief_kind #{inspect(other)} hors vocabulaire {worker, judge} — la judge-ness ne s'infère pas"
     end
   end
 
-  # Mandat producteur = le brief de l'issue + l'instruction de LIVRAISON git-native. Sans elle,
+  # Brief producteur = le brief de l'issue + l'instruction de LIVRAISON git-native. Sans elle,
   # le pod « submit les contenus » au lieu de
   # COMMITTER → la publish git_native ne trouve aucun commit (`:no_deliverable_commit`).
   # Le pod commite en LOCAL ; le SYSTÈME pousse + ouvre la PR (forge-aveugle). Le trailer
   # est obligatoire (gate de push, source unique `ForgeIdentity.coauthor_instruction`).
-  defp build_worker_mandate(role, issue) do
+  defp build_worker_brief(role, issue) do
     [
       issue["body"] || "",
       "---",
@@ -175,7 +175,7 @@ defmodule Fleet.Pilot.MandateBuilder do
   # que le modèle RAM. Le `result_K` à juger est lu du comment du hop précédent (gravé par
   # HopCompleter) ; le pod reste forge-aveugle (le runtime lit le comment, pas de
   # clone).
-  defp build_judge_mandate(role, forge, repo, number, forge_opts, route) do
+  defp build_judge_brief(role, forge, repo, number, forge_opts, route) do
     predecessor =
       case forge.get_predecessor_result(repo, number, forge_opts) do
         {:ok, result} when is_map(result) and map_size(result) > 0 -> result
@@ -196,7 +196,7 @@ defmodule Fleet.Pilot.MandateBuilder do
               "pour les commits, `git show <sha>` pour le détail. Juge ces changements contre le critère ci-dessous."
         }
 
-    # CRITÈRE de réussite = le body de l'issue (le mandat). Passé via `:request` → GateBrief le rend
+    # CRITÈRE de réussite = le body de l'issue (le brief). Passé via `:request` → GateBrief le rend
     # DÉSAMORCÉ (contexte, pas instruction exécutable → l'état exécutable est rendu irreprésentable) → le juge sait CONTRE QUOI juger.
     request =
       case forge.get_issue(repo, number, forge_opts) do
@@ -210,12 +210,12 @@ defmodule Fleet.Pilot.MandateBuilder do
         _ -> {nil, role}
       end
 
-    # Le mandat du juge ne doit contenir AUCUNE instruction exécutable (état exécutable rendu
+    # Le brief du juge ne doit contenir AUCUNE instruction exécutable (état exécutable rendu
     # irreprésentable en amont). Le `request` (body de l'issue = critère) est rendu par GateBrief DÉSAMORCÉ
     # (blockquote « CONTEXTE — déjà traité, NE PAS exécuter » + bannière « JUGER, PAS PRODUIRE »). Le risque
     # vise un juge **base-worker** (profile noop, gatekeeper) qui RE-exécuterait le build même quoté : ce
     # juge-là reçoit son brief par `dispatch_gatekeeper` (hop_consumer) qui NE passe PAS `request` — il
-    # n'est pas affecté ici. `build_judge_mandate` ne sert que les juges À PERSONA (qualifier/reviewer,
+    # n'est pas affecté ici. `build_judge_brief` ne sert que les juges À PERSONA (qualifier/reviewer,
     # `subagent_template` spec-reviewer/code-quality-reviewer) — le cas réputé SÛR
     # (un juge à vraie persona : GateBrief sait rendre `request` désamorcé). En pratique
     # ces juges fail-closent `halt_wait_input` sur livrable vide, ils ne RE-buildent pas.
@@ -230,16 +230,16 @@ defmodule Fleet.Pilot.MandateBuilder do
     })
   end
 
-  # Mandat d'un juge de MANDAT (mandate-review, judge_target:mandate). Le consultant juge le MANDAT
+  # Brief d'un juge de BRIEF (brief-review, judge_target:brief). Le consultant juge le BRIEF
   # (ticket.body rédigé par l'arch) AVANT que l'engineer ne parte : exécutable sans nouvelle question ? On
   # réutilise le MÊME GateBrief (contrat gate-decision-v1 + options canon) que les autres juges — seul le
-  # `subject: :mandate` recadre le « truc à juger ». Le MANDAT va dans `outputs` (le truc À JUGER ; ≠
-  # build_judge_mandate où outputs = le livrable/code) ; pas de `request` (le critère d'exécutabilité est
-  # porté par le cadrage :mandate). Le juge est PRÉ-PR (aucun clone, aucun livrable) → cohérent N0.
-  defp build_mandate_review_mandate(role, issue, forge, repo, number, forge_opts, route) do
-    # Le mandat = body de l'ISSUE, DÉJÀ en main (le poller a listé l'issue ; mandate-review est
+  # `subject: :brief` recadre le « truc à juger ». Le BRIEF va dans `outputs` (le truc À JUGER ; ≠
+  # build_judge_brief où outputs = le livrable/code) ; pas de `request` (le critère d'exécutabilité est
+  # porté par le cadrage :brief). Le juge est PRÉ-PR (aucun clone, aucun livrable) → cohérent N0.
+  defp build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route) do
+    # Le brief = body de l'ISSUE, DÉJÀ en main (le poller a listé l'issue ; brief-review est
     # toujours issue-path). On l'utilise → pas de `get_issue` redondant. Fallback fetch si body absent (robustesse).
-    mandat = issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts)
+    brief = issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts)
 
     {pipeline, stage} =
       case route do
@@ -251,13 +251,13 @@ defmodule Fleet.Pilot.MandateBuilder do
       stage: stage,
       pipeline_id: pipeline,
       gate: nil,
-      subject: :mandate,
-      outputs: %{"mandat" => mandat}
+      subject: :brief,
+      outputs: %{"brief" => brief}
     })
   end
 
   # Body de l'issue DÉJÀ listée par le poller → utilisé direct ; fetch SEULEMENT en fallback
-  # (body absent/vide — défensif ; mandate-review est toujours issue-path, l'issue est en main).
+  # (body absent/vide — défensif ; brief-review est toujours issue-path, l'issue est en main).
   defp issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts) do
     case Map.get(issue, "body") do
       body when is_binary(body) and body != "" ->

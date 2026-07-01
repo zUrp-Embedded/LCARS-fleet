@@ -2,15 +2,15 @@ defmodule Fleet.MCP.PodTools do
   @moduledoc """
   Couche TOOL MCP pod-facing (drive métier) — les RPC que le pod (client MCP
   claude) appelle pour communiquer avec le fleet, sans scraping ni injection clavier :
-    - `get_task`      : canal IN  — le pod PULL son mandat depuis `Fleet.TaskQueue`.
-      `{"done": true}` quand aucun mandat (le pod s'arrête). Sinon
+    - `get_task`      : canal IN  — le pod PULL son brief depuis `Fleet.TaskQueue`.
+      `{"done": true}` quand aucun brief (le pod s'arrête). Sinon
       `{"done": false, "task": {"task_id", "ticket_id", "role", "brief", ...}}`.
     - `submit_result` : canal OUT — le pod PUSH son livrable (`payload`).
 
   Médiation serveur-side : le pod ne touche jamais la TaskQueue directement (la queue,
   son schéma, son stockage restent invisibles au pod) ; tout passe par ces tools. Le
   serveur est **passeur de `correlation_id`** : `task_id` exposé côté `get_task`,
-  validé côté `submit_result` (le broker rejette un `task_id` ≠ mandat actif).
+  validé côté `submit_result` (le broker rejette un `task_id` ≠ brief actif).
 
   Le broker `Fleet.TaskQueue` broadcast lui-même `%Fleet.Event{task_completed}` sur
   `fleet.events` (consommé par `fleet_spawner`/`fleet_coord`) — ce module n'émet
@@ -66,7 +66,7 @@ defmodule Fleet.MCP.PodTools do
         "Délègue une brique d'implémentation à la fleet LCARS : crée un ticket (issue forge) prêt " <>
           "pour la livraison forge-native (engineer → PR → review → merge). Utilise-le pour DÉLÉGUER " <>
           "plutôt que de coder toi-même (la fleet livre mieux et préserve ton contexte). " <>
-          "`brief` = le mandat clair pour l'engineer. `project` = le repo `owner/name` OÙ LIVRER, **REQUIS** : " <>
+          "`brief` = le brief clair pour l'engineer. `project` = le repo `owner/name` OÙ LIVRER, **REQUIS** : " <>
           "le repo retourné par `create_project`, ou le projet désigné par l'humain. La fleet ne route PLUS par " <>
           "défaut — sans `project`, le ticket est REFUSÉ (jamais de misroute silencieux vers un autre projet). " <>
           "Retourne {\"status\":\"ticket_created\",\"repo\":...}."
@@ -149,14 +149,14 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("get_task", _arguments, state) do
     # `pod_id` absent du state = anomalie de l'accepteur (il DOIT toujours le porter). Erreur typée, pas une
-    # fin de mandat masquée en done:true (sinon le pod s'arrêterait en croyant avoir fini). Fail-closed.
+    # fin de brief masquée en done:true (sinon le pod s'arrêterait en croyant avoir fini). Fail-closed.
     {:error, :pod_id_required, state}
   end
 
   def handle_tool_call("submit_result", %{"payload" => payload} = args, %{pod_id: pod_id} = state)
       when is_map(payload) and is_binary(pod_id) and pod_id != "" do
     # Identité = le canal (`state.pod_id`, porté par l'accepteur). Reste le `task_id` OBLIGATOIRE : il
-    # corrèle le livrable à UN mandat précis (le broker rejette un task_id ≠ mandat actif du pod). C'est un
+    # corrèle le livrable à UN brief précis (le broker rejette un task_id ≠ brief actif du pod). C'est un
     # verrou orthogonal au transport — le pod doit nommer la tâche qu'il clôt, sans quoi le broker tomberait
     # sur « la dernière active » du pod. Le corrélateur est cherché au top-level (format canonique) PUIS
     # dans le payload (un agent juge le range parfois dans son payload de verdict). Absent des DEUX → refus.
@@ -171,7 +171,7 @@ defmodule Fleet.MCP.PodTools do
             {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
 
           {:error, :no_active_task} ->
-            # pas de mandat actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
+            # pas de brief actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
             # réassigné depuis) → DROP. Le signaler isError (comme :task_id_mismatch / :pod_id_required)
             # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (échec masqué
             # en succès). (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST enregistré.)
@@ -385,7 +385,7 @@ defmodule Fleet.MCP.PodTools do
           {:ok, number} ->
             # DÉCOUPLAGE : create_ticket CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
             # (graver la carte) n'est PLUS ici : c'est la responsabilité du SYSTÈME — le POLLER grave la carte
-            # par défaut (mandate-gate) sur toute issue assignée routeless (cf. fleet_pilot). Un seul acteur
+            # par défaut (brief-gate) sur toute issue assignée routeless (cf. fleet_pilot). Un seul acteur
             # crée+assigne ; le système route. (Uniforme : un ticket humain routeless est onboardé pareil.)
             # type:feature = ÉTIQUETTE de visu (humain), best-effort — JAMAIS du routing.
             _ = apply(forge, :add_label, [repo, number, "type:feature", []])
@@ -501,7 +501,7 @@ defmodule Fleet.MCP.PodTools do
   # Le `task_id` (corrélateur) cherché au top-level du wire PUIS dans le payload : un agent juge range
   # parfois le corrélateur DANS son payload de verdict plutôt qu'au paramètre top-level. Renvoie le task_id
   # non vide trouvé (top-level prioritaire), ou nil si absent des deux. Le broker corrèle ensuite sur
-  # `result["task_id"]` et rejette (`:task_id_mismatch`) s'il ne correspond pas à SON mandat actif → un pod
+  # `result["task_id"]` et rejette (`:task_id_mismatch`) s'il ne correspond pas à SON brief actif → un pod
   # ne peut pas clôturer la tâche d'un autre (verrou orthogonal au transport). L'emplacement (top-level vs
   # payload) n'entre PAS dans la sécurité : le task_id reste explicite et validé ; seul le fallback
   # « dernière active » (implicite) était le trou.
@@ -513,7 +513,7 @@ defmodule Fleet.MCP.PodTools do
   defp present_task_id(tid) when is_binary(tid) and tid != "", do: tid
   defp present_task_id(_), do: nil
 
-  # JSON envelope du mandat exposé au pod — task_id = correlation_id.
+  # JSON envelope du brief exposé au pod — task_id = correlation_id.
   defp envelope(%Fleet.TaskQueue.Task{} = t) do
     %{
       "task_id" => t.id,

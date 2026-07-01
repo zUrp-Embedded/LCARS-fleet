@@ -82,7 +82,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_capprofile_modop_incompatible_path(root),
         check_launch_backend_containment(root),
         check_mcp_required_real_backend(root),
-        check_spawn_has_mandate(root),
+        check_spawn_has_brief(root),
         check_skills_declared_present(root),
         check_events_registry_keys_aligned(root),
         # ── Rails de remédiation 2026-06-09 (STEP 0) ──
@@ -397,27 +397,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # `Fleet.Spawner.spawn_pod/3` doit refuser un pod `one-shot` sans mandat (sinon
+  # `Fleet.Spawner.spawn_pod/3` doit refuser un pod `one-shot` sans brief (sinon
   # le pod part sans travail → timeout). Marqueur du guard : l'erreur
-  # `:mandate_required`. Rouge si absente (retour au brief générique muet).
-  defp check_spawn_has_mandate(root) do
+  # `:brief_required`. Rouge si absente (retour au brief générique muet).
+  defp check_spawn_has_brief(root) do
     sp = "apps/fleet_spawner/lib/fleet/spawner.ex"
 
     present? =
       Path.join(root, sp)
-      |> grep_lines(~r/:mandate_required/)
-      |> Enum.any?(fn {_ln, line} -> Regex.match?(~r/:mandate_required/, strip_comment(line)) end)
+      |> grep_lines(~r/:brief_required/)
+      |> Enum.any?(fn {_ln, line} -> Regex.match?(~r/:brief_required/, strip_comment(line)) end)
 
     %{
-      id: "spawn.has_mandate",
+      id: "spawn.has_brief",
       remediation: "R18",
       status: if(present?, do: :pass, else: :fail),
       evidence:
         if(present?,
           do: [],
-          else: ["#{sp} : pas de guard :mandate_required au boundary spawn_pod"]
+          else: ["#{sp} : pas de guard :brief_required au boundary spawn_pod"]
         ),
-      note: "spawn_pod doit refuser un pod one-shot sans mandat (hors allow_no_mandate)"
+      note: "spawn_pod doit refuser un pod one-shot sans brief (hors allow_no_brief)"
     }
   end
 

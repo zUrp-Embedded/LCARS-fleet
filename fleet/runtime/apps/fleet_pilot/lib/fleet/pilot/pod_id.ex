@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.PodId do
   distincts (multi-repo / délégation cross-repo). Le slug repo désambiguïse.
 
   DÉTERMINISTE (clé stable, sans suffixe timestamp) : même `(repo, n, role)` → même id → un re-dispatch retombe sur
-  le pod vivant pour le RE-MANDATER (garde son contexte). Le format vit ENTIEREMENT ici : `for_issue`/`for_pr`
+  le pod vivant pour le RE-BRIEFER (garde son contexte). Le format vit ENTIEREMENT ici : `for_issue`/`for_pr`
   le CONSTRUISENT, `parse_ref/2` l'ANCRE (phase + numero d'instance) pour la reconciliation de verrous. Un seul
   module connait le format -> aucun parseur distant ne le re-derive (un changement de format ne casse personne
   en silence). On ne reconstruit jamais `(n, role)` complets depuis l'id (le role n'est pas re-extrait) : l'id

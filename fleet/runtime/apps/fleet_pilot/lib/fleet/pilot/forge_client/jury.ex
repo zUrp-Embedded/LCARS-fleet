@@ -121,7 +121,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   Feedback des reviews REQUEST_CHANGES en vigueur d'une PR (Gitea `GET .../pulls/{index}/reviews`),
   pour nourrir le **rework** du producteur. Renvoie la DERNIÈRE review REQUEST_CHANGES par reviewer
   avec son `body` — le verdict structuré gravé par le juge (`reason`/`details`/`chain`, via
-  `HopConsumer.judge_review_body`). Sans ce body, le `rework_mandate` dit « corrige selon la review »
+  `HopConsumer.judge_review_body`). Sans ce body, le `rework_brief` dit « corrige selon la review »
   SANS le contenu de la review → l'engineer devine à l'aveugle (famine d'info, DOUBLE :
   jumeau de l'`outputs: {}` du juge ; sans le body l'eng rend `blocked_dep` plutôt que
   deviner). Pas de commit-scoping ici : on veut le DERNIER feedback par reviewer (`List.last`), pas

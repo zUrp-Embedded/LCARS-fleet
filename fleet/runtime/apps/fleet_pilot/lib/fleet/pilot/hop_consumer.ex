@@ -16,7 +16,7 @@ defmodule Fleet.Pilot.HopConsumer do
     * `{:dispatch_gatekeeper}` → **escalade** : une gate `soft` ou `terminal`
       non-tranchable n'est PAS un stage d'ordonnancement — c'est une convocation
       du **gatekeeper permanent** (juge d'exception). On enqueue
-      un mandat d'éval au gatekeeper (work-session, adressé par `pod_id` via
+      un brief d'éval au gatekeeper (work-session, adressé par `pod_id` via
       TaskQueue/MCP), on tient le contexte de reprise en RAM (`gate_evals`, keyé
       par `correlation_id`), et la décision revient async via
       `%Fleet.Event{source: :task_queue, type: :task_completed}` → `resume_gate/3`.
@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.HopConsumer do
     * `:role_emails` — `fn role -> [email] end` (défaut `"<role>@lcars.local"`),
       doit matcher l'identité git injectée au pod (la gate vérifie l'email du committer)
     * `:hop_completer` — seam (défaut `Fleet.Pilot.HopCompleter`)
-    * `:task_queue` — broker de mandats pour l'escalade gatekeeper (défaut `Fleet.TaskQueue`)
+    * `:task_queue` — broker de briefs pour l'escalade gatekeeper (défaut `Fleet.TaskQueue`)
     * `:spawner` — wake du gatekeeper après enqueue (défaut `Fleet.Spawner`)
     * `:gatekeeper_pod_id_fun` — `fn -> pod_id | nil end` (défaut `&Fleet.Pipeline.Gatekeeper.pod_id/0`)
     * `:subscribe` — bool défaut `true` (tests : `false` + envoi manuel)
@@ -110,7 +110,7 @@ defmodule Fleet.Pilot.HopConsumer do
     # Seam du recovery de wake du gatekeeper (défaut = la vraie fn). Permet de tester que le
     # retour LOAD-BEARING du kick (`{:error,{:escalated,_}}`) est SURFACÉ (telemetry/warning), pas avalé.
     :wake_recovery,
-    # Escalades en attente, keyées par correlation_id (= task.id du mandat d'éval). Valeur =
+    # Escalades en attente, keyées par correlation_id (= task.id du brief d'éval). Valeur =
     # contexte de reprise `%{n, role, payload, carte, stage}`. OPTIMISATION fast-path uniquement
     # (le verdict est auto-descriptif via le metadata de la tâche → reconstructible au restart).
     gate_evals: %{},
@@ -227,7 +227,7 @@ defmodule Fleet.Pilot.HopConsumer do
       {:ok, _outcome} ->
         {:noreply, state}
 
-      # Gate non-tranchable : le mandat d'éval est enqueué au gatekeeper
+      # Gate non-tranchable : le brief d'éval est enqueué au gatekeeper
       # permanent ; on tient le contexte de reprise jusqu'au `task_completed` corrélé.
       # L'issue reste verrouillée (in-flight) → le poller ne re-spawn pas (pas d'avance
       # à l'aveugle avant le verdict).
@@ -248,7 +248,7 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
-  # Décision du gatekeeper reçue : le mandat d'éval (corrélé par
+  # Décision du gatekeeper reçue : le brief d'éval (corrélé par
   # `correlation_id` = task.id de l'enqueue) est complété. On ne traite QUE les corr
   # qu'on a en attente (les autres task_completed — autres pods — sont ignorés).
   def handle_info(
@@ -338,7 +338,7 @@ defmodule Fleet.Pilot.HopConsumer do
   defp reconstruct_eval_ctx(_, _), do: :not_gate_eval
 
   # ============================================================
-  # Traduction event → hop (pure sauf l'appel HopCompleter / enqueue mandat)
+  # Traduction event → hop (pure sauf l'appel HopCompleter / enqueue brief)
   # ============================================================
 
   @doc false
@@ -407,7 +407,7 @@ defmodule Fleet.Pilot.HopConsumer do
           {:escalate, corr, eval_ctx} ->
             {:escalate, corr, eval_ctx}
 
-          # Le stage qui finit est un JUGE (mandate_kind:judge) : son verdict EST la décision →
+          # Le stage qui finit est un JUGE (brief_kind:judge) : son verdict EST la décision →
           # `apply_verdict` (LA fonction de verdict, partagée avec le gatekeeper async). Pas de gate hard.
           {:judge_verdict, decision, trace, ctx} ->
             apply_verdict(decision, trace, ctx, state)
@@ -446,7 +446,7 @@ defmodule Fleet.Pilot.HopConsumer do
         state.hop_completer.await_arch(hop, hc_opts)
       end)
 
-    # KICK l'arch : un producteur bloqué = l'arch (auteur du mandat) doit débloquer (clarifier/corriger).
+    # KICK l'arch : un producteur bloqué = l'arch (auteur du brief) doit débloquer (clarifier/corriger).
     _ = kick_architect(state)
     result
   end
@@ -515,7 +515,7 @@ defmodule Fleet.Pilot.HopConsumer do
         base_branch: "main"
       }
       |> put_unless_nil(:comment_body, comment_body)
-      # judge_target (mandate|nil) → complete_judge décide trace review-PR vs commentaire-issue ;
+      # judge_target (brief|nil) → complete_judge décide trace review-PR vs commentaire-issue ;
       # absent (chemin normal/gatekeeper) → comportement PR par défaut (fail-loud si pas de PR).
       |> put_unless_nil(:judge_target, judge_target)
       |> maybe_put_deliverable(pr_role, role, payload, n, state)
@@ -781,7 +781,7 @@ defmodule Fleet.Pilot.HopConsumer do
   #   {:fail, _}                → REBOND vers le 1er stage (rework), BORNÉ (anti-runaway :
   #                               une boucle de rework infinie ne doit pas être
   #                               représentable).
-  #   {:dispatch_gatekeeper, _} → enqueue un mandat d'éval au gatekeeper
+  #   {:dispatch_gatekeeper, _} → enqueue un brief d'éval au gatekeeper
   #                               permanent + `{:escalate, corr, eval_ctx}` (reprise async
   #                               sur `task_completed`). Enqueue raté → fail-loud (l'issue
   #                               reste verrouillée, pas d'avance à l'aveugle).
@@ -798,8 +798,8 @@ defmodule Fleet.Pilot.HopConsumer do
     # sinon la gate voit l'enveloppe au lieu des outputs (hard-gate à tort).
     result = unwrap_worker_envelope(payload["result"] || %{})
 
-    if Map.get(spec, "mandate_kind") == "judge" do
-      # Le stage qui finit EST un juge (mandate_kind:judge, ex. mandate-review/consultant). Son
+    if Map.get(spec, "brief_kind") == "judge" do
+      # Le stage qui finit EST un juge (brief_kind:judge, ex. brief-review/consultant). Son
       # result PORTE le verdict gate-decision-v1 : le juge a DÉJÀ tranché → PAS de Gates.evaluate (qui
       # jugerait les outputs du juge comme un hard-gate). Le verdict est appliqué par `apply_verdict` (LA
       # fonction, partagée avec le gatekeeper async). gate_decide reste un décideur PUR : il rend
@@ -852,7 +852,7 @@ defmodule Fleet.Pilot.HopConsumer do
   # Ici on ne voit QUE de vrais stages de carte (un juge NO-CARTE à route héritée est dévié vers
   # `no_carte_resolve` AVANT — cf. `resolve_next`/`inherited_route?` : sinon un qualifier portant
   # `build` mergerait sur 1 juge). Sans le split producteur/juge, une carte terminant sur un producteur
-  # (mandate-gate `mandate-review→build`) mergerait le code SANS juges. `{:error,_}` tel quel.
+  # (brief-gate `brief-review→build`) mergerait le code SANS juges. `{:error,_}` tel quel.
   defp tag_advance({:ok, {nil, nil}}, true), do: {:ok, :review, {nil, nil}}
   defp tag_advance({:ok, {nil, nil}}, false), do: {:ok, :promote, {nil, nil}}
   defp tag_advance({:ok, routing}, _producer?), do: {:ok, :advance, routing}
@@ -862,7 +862,7 @@ defmodule Fleet.Pilot.HopConsumer do
   defp tag(_intent, other), do: other
 
   # Convocation forge-driven du gatekeeper sur escalade de gate.
-  # Enqueue un mandat d'éval au gatekeeper PERMANENT (work-session, adressé par pod_id —
+  # Enqueue un brief d'éval au gatekeeper PERMANENT (work-session, adressé par pod_id —
   # l'overseer n'est PAS spawné/possédé ici), le kick (best-effort), et retourne le
   # `correlation_id` (= task.id) pour la corrélation `task_queue.task_completed`. Pas de
   # gatekeeper booté / enqueue raté → `{:error, _}` (l'appelant fail-loud ; jamais un pass
@@ -905,11 +905,11 @@ defmodule Fleet.Pilot.HopConsumer do
         case state.task_queue.enqueue(pod_id, attrs) do
           {:ok, %{id: corr}} ->
             # Le retour du kick est LOAD-BEARING : si le wake escalade (gatekeeper injoignable →
-            # starfleet) ou échoue, on ne l'AVALE PAS (`_ = kick`). Le mandat d'éval EST enqueué (corr
+            # starfleet) ou échoue, on ne l'AVALE PAS (`_ = kick`). Le brief d'éval EST enqueué (corr
             # valide) → l'escalade gatekeeper reste légitime ({:escalate, corr, …}) ; mais un kick non
             # joignable est SURFACÉ (telemetry + warning distinct), pas confondu avec un kick OK. Sans ça,
             # un gatekeeper jamais réveillé resterait invisible (le verdict ne reviendrait jamais, gate stallée
-            # en silence). `corr` retourné dans les deux cas (le mandat survit, le re-wake/escalade le couvre).
+            # en silence). `corr` retourné dans les deux cas (le brief survit, le re-wake/escalade le couvre).
             case kick_gatekeeper(state, pod_id) do
               :ok ->
                 {:ok, corr}
@@ -923,7 +923,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
                 Logger.warning(
                   "HopConsumer: gatekeeper #{pod_id} kické MAIS INJOIGNABLE (#{inspect(reason)}) — " <>
-                    "mandat d'éval enqueué (corr=#{inspect(corr)}), escalade WakeRecovery active ; le verdict " <>
+                    "brief d'éval enqueué (corr=#{inspect(corr)}), escalade WakeRecovery active ; le verdict " <>
                     "ne reviendra qu'au re-wake/réparation (pas un kick silencieux qui ment)"
                 )
 
@@ -940,7 +940,7 @@ defmodule Fleet.Pilot.HopConsumer do
   end
 
   # KICK le gatekeeper après l'enqueue. Pod PERMANENT déjà booté+idle (:monitoring) : son kick-loop de
-  # boot est fini, ce mandat arrive APRÈS → sans wake il ne pull jamais (gate qui stalle). Un wake
+  # boot est fini, ce brief arrive APRÈS → sans wake il ne pull jamais (gate qui stalle). Un wake
   # raté = panne FLEET (pod injoignable), PAS un pb projet → re-roll (reboot du gatekeeper) au 1er fail,
   # escalade système → starfleet au 2e. Pas de warn-et-oublie ici (le gatekeeper est un juge, pas un
   # sysadmin : il ne peut rien faire d'une erreur système).
@@ -1006,7 +1006,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # APPLICATION d'un verdict de juge (gate-decision-v1). UNE fonction, partagée par TOUS les juges
   # quelle que soit leur position : le gatekeeper (verdict async via `task_completed` → resume_gate) ET le
-  # consultant mandate-review (verdict via `pod.completed` → gate_decide → run_hop). continue → avance la
+  # consultant brief-review (verdict via `pod.completed` → gate_decide → run_hop). continue → avance la
   # carte ; abandon → close ; reste → await_arch. La SEULE diff (PR vs pré-PR) vit dans `complete_judge`
   # (trace = review native si PR, sinon commentaire issue), dérivée de l'état forge + `judge_target` du
   # ctx — PAS d'un fork ici. `trace` est déjà attribué au bon juge (label) par l'appelant.
@@ -1024,7 +1024,7 @@ defmodule Fleet.Pilot.HopConsumer do
         # terminal MERGERAIT le code SANS passer par les juges PR. On route par le MÊME
         # `tag_advance(advance(…), producer?(role, state))` que `gate_decide` (chemin :pass) : un producteur
         # terminal → `:review` (ouvre la PR + demande les juges, JAMAIS d'auto-merge d'un livrable) ; un juge
-        # terminal (consultant mandate-review) → `:promote` (il a validé le dernier gate de sa carte) ;
+        # terminal (consultant brief-review) → `:promote` (il a validé le dernier gate de sa carte) ;
         # un stage suivant → `:advance`. Une seule source de vérité pour l'intent terminal.
         case tag_advance(advance(carte, stage), producer?(role, state)) do
           {:ok, intent, {next_assignee, next_stage}} ->
@@ -1045,11 +1045,11 @@ defmodule Fleet.Pilot.HopConsumer do
         end
 
       "abandon" ->
-        # NE PAS enterrer en silence : le commentaire de close est ADRESSÉ à l'arch (auteur du mandat)
-        # + on KICKE l'arch (sas unique vers l'humain) → l'auteur APPREND que son mandat a été jeté.
+        # NE PAS enterrer en silence : le commentaire de close est ADRESSÉ à l'arch (auteur du brief)
+        # + on KICKE l'arch (sas unique vers l'humain) → l'auteur APPREND que son brief a été jeté.
         arch_trace =
-          "**Architecte** (auteur du mandat) — mandat ABANDONNÉ par le juge. " <>
-            trace <> " (Non récupérable ; re-crée un mandat corrigé si besoin.)"
+          "**Architecte** (auteur du brief) — brief ABANDONNÉ par le juge. " <>
+            trace <> " (Non récupérable ; re-crée un brief corrigé si besoin.)"
 
         result = close_with_trace(n, role, arch_trace, state)
         _ = kick_architect(state)
@@ -1216,7 +1216,7 @@ defmodule Fleet.Pilot.HopConsumer do
   @doc false
   defdelegate parse_issue_number(ticket_id), to: Fleet.Pilot.TicketId, as: :parse
 
-  # La gate d'identité `allowed_emails` = l'HUMAIN du mandat (le pod git_native
+  # La gate d'identité `allowed_emails` = l'HUMAIN du brief (le pod git_native
   # commite EN TANT QUE l'humain, cf. `bwrap_launch.sh`/`ForgeIdentity`), PLUS le rôle. Même
   # catalogue que le spawn → cohérent (commit humain ⟺ la gate autorise l'humain). Irrésoluble →
   # `[]` fail-closed (la gate rejette tout). Le rôle est vérifié via le trailer, pas l'email.

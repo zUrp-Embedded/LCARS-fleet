@@ -685,7 +685,7 @@ defmodule Fleet.Pilot.Poller do
   #
   #   * BAIL — le pipeline a-t-il DÉMARRÉ (pod spawné + verrou `lcars-in-flight` posé) ? L'ordre canonique
   #     du spawn (`StageDispatcher.spawn_stage`) est verrou → pod → enqueue → WAKE, le wake EN DERNIER. Donc
-  #     `{:error, {:wake_unreached, …}}` veut dire : le pipeline EST démarré (verrou + pod + mandat en place),
+  #     `{:error, {:wake_unreached, …}}` veut dire : le pipeline EST démarré (verrou + pod + brief en place),
   #     SEUL le réveil tmux a raté. Le pipeline tient donc le bail repo-sérialisé — sinon un 2e ticket du même
   #     repo dans le même tick démarrerait un 2e pipeline (deux feature-branches concurrentes → conflit de merge).
   #   * TALLY/backoff — y a-t-il une anomalie à SURFACER ? Le wake raté reste compté en `errors` (il alimente
@@ -700,7 +700,7 @@ defmodule Fleet.Pilot.Poller do
       {:ok, {:spawned, _pod_id, _role}} ->
         {%{acc | dispatched: acc.dispatched + 1}, true}
 
-      # Pipeline DÉMARRÉ (verrou + pod + mandat posés) mais wake injoignable. Le bail est PRIS (started?
+      # Pipeline DÉMARRÉ (verrou + pod + brief posés) mais wake injoignable. Le bail est PRIS (started?
       # = true) ; l'anomalie reste comptée en `errors` (backoff + telemetry honnêtes, jamais avalée).
       {:error, {:wake_unreached, _pod_id, _role, _reason}} ->
         {%{acc | errors: acc.errors + 1}, true}
@@ -793,7 +793,7 @@ defmodule Fleet.Pilot.Poller do
   # state — sinon StageDispatcher applique ses défauts réels (passer nil
   # écraserait le défaut).
   # `:task_queue` est porté par le state (lu dans `live_owned_refs/1`) et DOIT être transmis ici,
-  # sinon StageDispatcher retombe sur `Fleet.TaskQueue` global pour l'enqueue du mandat
+  # sinon StageDispatcher retombe sur `Fleet.TaskQueue` global pour l'enqueue du brief
   # (seam de broker non honoré côté dispatch).
   defp stage_dispatch_opts(state) do
     [

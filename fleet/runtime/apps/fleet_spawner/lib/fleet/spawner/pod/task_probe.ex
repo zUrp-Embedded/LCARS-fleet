@@ -3,15 +3,15 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   SONDES de l'état tâche/agent via le `Fleet.TaskQueue` — cluster extrait de `Fleet.Spawner.Pod`.
 
   Quatre questions best-effort que le cœur du `Pod` (handler de kick, deadline de réponse, enqueue de
-  mandat) pose au broker pour DÉCIDER, sans jamais porter d'état ni de timer :
+  brief) pose au broker pour DÉCIDER, sans jamais porter d'état ni de timer :
 
   - `polled?/1` — l'agent a-t-il déjà appelé `get_task` (ACK in-band réel, `last_poll`) ? Stoppe le kick
     bootstrap dès que le REPL répond. Prend le `state` (lit `state.pod_id`).
   - `pod_has_active_task?/1` — le pod a-t-il une task ACTIVE (`pending|assigned|in_progress`) là, maintenant ?
     Au fire de `:result_deadline` : oui = vrai timeout de réponse (kill) ; non = idle, on laisse lapser.
-  - `mandate_pulled?/1` — le mandat est-il déjà pull (`assigned|in_progress|completed`) ? Stoppe la boucle de wake.
-  - `no_pending_mandate?/1` — AUCUN mandat en attente (`{:ok, nil}`, jamais enqueué) ? Distingue le pod
-    permanent/interactif (bootstrap) du worker (mandat `pending` au spawn).
+  - `brief_pulled?/1` — le brief est-il déjà pull (`assigned|in_progress|completed`) ? Stoppe la boucle de wake.
+  - `no_pending_brief?/1` — AUCUN brief en attente (`{:ok, nil}`, jamais enqueué) ? Distingue le pod
+    permanent/interactif (bootstrap) du worker (brief `pending` au spawn).
 
   Les trois dernières prennent le `pod_id` (string) ; toutes lisent `Fleet.TaskQueue.pod_status/last_poll`
   derrière une garde `rescue`/`catch :exit` qui ramène `false` — un hoquet du broker (down/restarting,
@@ -25,8 +25,8 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
 
   - `polled?/1` — bootstrap-stop du kick (handler `handle_info({:kick_attempt, n}, ...)`).
   - `pod_has_active_task?/1` — `pod_info` (`has_active_task`) + fire de `:result_deadline`.
-  - `mandate_pulled?/1` — réduit en booléen passé à `Kick.acked?/3` par le handler.
-  - `no_pending_mandate?/1` — détection bootstrap (handler) + gate de `maybe_enqueue_mandate`.
+  - `brief_pulled?/1` — réduit en booléen passé à `Kick.acked?/3` par le handler.
+  - `no_pending_brief?/1` — détection bootstrap (handler) + gate de `maybe_enqueue_brief`.
   """
 
   # L'agent a-t-il POLLÉ (appelé get_task) ? = ACK in-band RÉEL : l'agent a tendu la main via l'API
@@ -39,7 +39,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
     _ -> false
   catch
     # `last_poll` est un GenServer.call → TaskQueue down/restarting EXIT (ne raise pas), `rescue` ne
-    # l'attrape pas. MÊME garde que mandate_pulled?/no_pending_mandate? : un hoquet broker ne crashe PAS le pod.
+    # l'attrape pas. MÊME garde que brief_pulled?/no_pending_brief? : un hoquet broker ne crashe PAS le pod.
     :exit, _ -> false
   end
 
@@ -60,25 +60,25 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   # Le pod a-t-il une task ACTIVE (pending/assigned/in_progress) là, maintenant ?
   # Utilisé au FIRE de :result_deadline : oui = vrai timeout de réponse (kill) ; non =
   # le pod attendait juste sa prochaine task (idle), on laisse lapser. Même source que
-  # mandate_pulled?/no_pending_mandate? (TaskQueue.pod_status via safe_pod_status), même
+  # brief_pulled?/no_pending_brief? (TaskQueue.pod_status via safe_pod_status), même
   # fail-safe (TaskQueue indisponible ⇒ `:error` ⇒ pas de task active connue ⇒ pas de kill).
   def pod_has_active_task?(pod_id),
     do: match?({:ok, s} when s in [:pending, :assigned, :in_progress], safe_pod_status(pod_id))
 
-  # Le mandat est-il déjà pull par le pod ? « Pull » = la task est dans un état qui
+  # Le brief est-il déjà pull par le pod ? « Pull » = la task est dans un état qui
   # PROUVE que claude a appelé get_task : `:assigned | :in_progress | :completed`.
   # Volontairement PAS : `:pending`/`nil` (pas encore pull / pas encore enqueué — on
   # continue de kicker, ce qui couvre aussi la race spawn↔enqueue), ni `:cleared`/`:failed`
   # (kill délibéré / deadline broker — le pod n'a rien pull, ne PAS arrêter le kick sur
   # un faux « pull » ; au pire on kicke jusqu'au cap, harmless, le result_deadline couvre).
   # Best-effort : exception/exit broker → false (on retentera). Sert à ARRÊTER la boucle.
-  def mandate_pulled?(pod_id),
+  def brief_pulled?(pod_id),
     do: match?({:ok, s} when s in [:assigned, :in_progress, :completed], safe_pod_status(pod_id))
 
-  # AUCUN mandat (task) en attente pour ce pod : `pod_status == {:ok, nil}` (jamais enqueué).
-  # Distingue le pod permanent/interactif (rien à puller à froid → bootstrap) du worker (mandat
+  # AUCUN brief (task) en attente pour ce pod : `pod_status == {:ok, nil}` (jamais enqueué).
+  # Distingue le pod permanent/interactif (rien à puller à froid → bootstrap) du worker (brief
   # `pending` enqueué au spawn). En cas d'erreur → `false` (défaut sûr : on traite comme un
-  # worker, kick fréquent — on ne suspend pas par erreur les kicks d'un vrai mandat).
-  def no_pending_mandate?(pod_id),
+  # worker, kick fréquent — on ne suspend pas par erreur les kicks d'un vrai brief).
+  def no_pending_brief?(pod_id),
     do: match?({:ok, nil}, safe_pod_status(pod_id))
 end

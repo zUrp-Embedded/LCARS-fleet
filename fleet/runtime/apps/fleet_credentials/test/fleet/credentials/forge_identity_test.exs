@@ -1,6 +1,6 @@
 defmodule Fleet.Credentials.ForgeIdentityTest do
   @moduledoc """
-  Z4 (forge-identité B') — l'author = l'humain du mandat (identité dérivée de l'OS),
+  Z4 (forge-identité B') — l'author = l'humain du brief (identité dérivée de l'OS),
   le rôle = trailer `Co-authored-by: LCARS-<role>` vérifié. Tests purs (humain +
   identité injectés via `:identity` — zéro IO ; la dérivation OS réelle git config/GECOS
   est validée en deploy-env, non hermétique en unit).

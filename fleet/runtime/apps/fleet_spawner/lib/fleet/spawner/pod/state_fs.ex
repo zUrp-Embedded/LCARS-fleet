@@ -86,7 +86,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
   dossier du `state.json`) et son **pod_dir** (clone git + `.lcars`/`.claude`/`tickets`) — deux arbres
   distincts. Idempotent (`rm_rf` ne lève pas sur l'absent). Geste PARTAGÉ, un seul site qui sait quels
   deux dossiers forment l'empreinte d'un pod : appelé par `clear_terminal_snapshot/3` (au re-spawn du
-  même pod_id) ET par le `PodWarden` (GC périodique des tombstones orphelines jamais re-mandatées). Ne
+  même pod_id) ET par le `PodWarden` (GC périodique des tombstones orphelines jamais re-briefées). Ne
   lit ni ne vérifie la phase : l'appelant garantit déjà que le pod est terminal. Sûr car le seed
   `--resume` vit ailleurs (seed-store `projects.work/<projet>/pods/`), pas dans le pod_dir.
   """

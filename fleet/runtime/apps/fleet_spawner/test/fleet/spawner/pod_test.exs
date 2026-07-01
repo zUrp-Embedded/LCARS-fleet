@@ -86,12 +86,12 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   describe "acked?/3 (#5.2 F3 — le contrôle de la boucle = l'ACK, pas un proxy)" do
-    test "wake : pull du mandat = ACK (peu importe polled)" do
+    test "wake : pull du brief = ACK (peu importe polled)" do
       assert Fleet.Spawner.Pod.Kick.acked?(true, false, false)
       assert Fleet.Spawner.Pod.Kick.acked?(true, false, true)
     end
 
-    test "bootstrap : poll = ACK (pas de mandat à puller, last_poll suffit)" do
+    test "bootstrap : poll = ACK (pas de brief à puller, last_poll suffit)" do
       assert Fleet.Spawner.Pod.Kick.acked?(false, true, true)
     end
 
@@ -274,7 +274,7 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _, _}, 2_000
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # task_completed pour la brique issue-3 (re-mandate), PAS le spawn issue-4 (ticket_id dans le payload,
+      # task_completed pour la brique issue-3 (re-brief), PAS le spawn issue-4 (ticket_id dans le payload,
       # comme le vrai event TaskQueue qui porte completed.ticket_id).
       Phoenix.PubSub.broadcast(
         Fleet.PubSub,
@@ -345,17 +345,17 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — le travail (opts[:mandate]) est livré dans tickets/<ticket_id>.md" do
+    test "PUSH — le travail (opts[:brief]) est livré dans tickets/<ticket_id>.md" do
       StubBackend.set_reply(interactive_reply())
 
-      pod_id = "pod-mandate-#{System.unique_integer([:positive])}"
-      mandate = "Compile le module X et retourne le nombre de warnings."
+      pod_id = "pod-brief-#{System.unique_integer([:positive])}"
+      brief = "Compile le module X et retourne le nombre de warnings."
 
       args = %{
         cap_profile: valid_profile(),
         ticket_id: "ticket-1",
         pod_id: pod_id,
-        opts: [mandate: mandate, repo_id: @test_repo_id]
+        opts: [brief: brief, repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
@@ -367,60 +367,60 @@ defmodule Fleet.Spawner.PodTest do
       ticket = File.read!(Path.join(info.pod_dir, "tickets/ticket-1.md"))
       # F128 : cadre neutre + rôle interpolé (plus de priming "worker engineer").
       assert ticket =~ "pod LCARS (rôle engineer"
-      assert ticket =~ mandate
+      assert ticket =~ brief
       assert ticket =~ "submit_result"
 
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — admin.spawn (opts[:mandate], aucun dispatcher) enqueue le mandat dans la TaskQueue (canal get_task) [F-arch-MCP]" do
+    test "PUSH — admin.spawn (opts[:brief], aucun dispatcher) enqueue le brief dans la TaskQueue (canal get_task) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-mq-#{System.unique_integer([:positive])}"
-      mandate = "Crée le projet poc-run-5 puis délègue digit_sum."
+      brief = "Crée le projet poc-run-5 puis délègue digit_sum."
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
       args = %{
         cap_profile: valid_profile(),
         ticket_id: "ticket-mq",
         pod_id: pod_id,
-        opts: [mandate: mandate, repo_id: @test_repo_id]
+        opts: [brief: brief, repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
 
       # Sans cet enqueue, `get_task` rendait `{done:true}` → le pod (qui poll get_task) restait idle
-      # (forensic arch 3f12edd9). Le mandat est désormais dans le canal canonique.
-      assert [%{brief: ^mandate}] =
+      # (forensic arch 3f12edd9). Le brief est désormais dans le canal canonique.
+      assert [%{brief: ^brief}] =
                Enum.filter(Fleet.TaskQueue.list_pending(), &(&1.pod_id == pod_id))
 
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — pas de double-enqueue si un mandat est DÉJÀ en file (dispatch stage : enqueué avant le spawn) [F-arch-MCP]" do
+    test "PUSH — pas de double-enqueue si un brief est DÉJÀ en file (dispatch stage : enqueué avant le spawn) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-mq2-#{System.unique_integer([:positive])}"
       on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod_id) end)
 
-      # Simule le dispatch stage : le mandat role-aware est enqueué AVANT le spawn (StageDispatcher).
+      # Simule le dispatch stage : le brief role-aware est enqueué AVANT le spawn (StageDispatcher).
       {:ok, _} =
-        Fleet.TaskQueue.enqueue(pod_id, %{brief: "mandat-du-dispatcher", role: "engineer"})
+        Fleet.TaskQueue.enqueue(pod_id, %{brief: "brief-du-dispatcher", role: "engineer"})
 
       args = %{
         cap_profile: valid_profile(),
         ticket_id: "ticket-mq2",
         pod_id: pod_id,
-        opts: [mandate: "autre-mandat", repo_id: @test_repo_id]
+        opts: [brief: "autre-brief", repo_id: @test_repo_id]
       }
 
       {:ok, pid} = spawn_via_supervisor(args)
       assert_receive {:launch_called, _args, _env}, 2_000
 
-      # Idempotent : un SEUL mandat en file, celui du dispatcher (pas "autre-mandat") — le spawn n'a pas
-      # ré-enqueué (garde `no_pending_mandate?`).
-      assert [%{brief: "mandat-du-dispatcher"}] =
+      # Idempotent : un SEUL brief en file, celui du dispatcher (pas "autre-brief") — le spawn n'a pas
+      # ré-enqueué (garde `no_pending_brief?`).
+      assert [%{brief: "brief-du-dispatcher"}] =
                Enum.filter(Fleet.TaskQueue.list_pending(), &(&1.pod_id == pod_id))
 
       Process.exit(pid, :kill)
@@ -984,7 +984,7 @@ defmodule Fleet.Spawner.PodTest do
     end
 
     # Pipe à livrable git async : seul ce mode a un push (lu par le workspace, confirmé par
-    # deliverable.published) à protéger du re-mandate → :publishing au submit. pipe_profile() seul
+    # deliverable.published) à protéger du re-brief → :publishing au submit. pipe_profile() seul
     # défaute deliverable_mode à "payload" (gatekeeper/architect-like : verdict/interactif, pas de push).
     defp git_native_pipe_profile do
       profile = pipe_profile()
@@ -1497,15 +1497,15 @@ defmodule Fleet.Spawner.PodTest do
       # config git locale ici.
     end
 
-    test "projet injecté par le MANDAT (opts[:project]) — pas besoin du cap_profile statique",
+    test "projet injecté par le BRIEF (opts[:project]) — pas besoin du cap_profile statique",
          %{tmp_dir: tmp_dir} do
-      src = source_repo_with_doc(Path.join(tmp_dir, "mandate-src"))
+      src = source_repo_with_doc(Path.join(tmp_dir, "brief-src"))
 
-      # cap_profile SANS project (project absent) ; le mandat l'injecte via opts.
+      # cap_profile SANS project (project absent) ; le brief l'injecte via opts.
       profile = valid_profile()
 
       StubBackend.set_reply(interactive_reply())
-      pod_id = "pod-mandate-#{System.unique_integer([:positive])}"
+      pod_id = "pod-brief-#{System.unique_integer([:positive])}"
 
       args = %{
         cap_profile: profile,
@@ -1522,7 +1522,7 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, env}, 3_000
       pod_dir = env["HOME"]
 
-      # le projet du mandat est cloné (code + doc) + cwd posé, sans aucun project au catalogue
+      # le projet du brief est cloné (code + doc) + cwd posé, sans aucun project au catalogue
       # #monde-propre Stage B : cwd INTRA-POD relocalisé (le pod_dir réel masqué derrière /home/.pod).
       # Legacy projet-sans-rc_name → le workspace relocalisé. (Un worker rc_name verrait /home/<project>.)
       assert env["LCARS_POD_CWD"] == "/home/.pod/workspace"

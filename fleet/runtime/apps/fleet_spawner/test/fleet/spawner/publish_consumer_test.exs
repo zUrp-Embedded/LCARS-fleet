@@ -106,8 +106,8 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
   describe "to_keyword/1 — anti atom-leak (finding Vulcan)" do
     test "clé connue (atom existant) convertie, clé inconnue ignorée (pas de String.to_atom)" do
-      # :mandate existe (littéral compilé ci-dessous + option spawn_opts) → conservée
-      assert PublishConsumer.to_keyword(%{"mandate" => "x"}) == [mandate: "x"]
+      # :brief existe (littéral compilé ci-dessous + option spawn_opts) → conservée
+      assert PublishConsumer.to_keyword(%{"brief" => "x"}) == [brief: "x"]
 
       # clé jamais vue comme atome → to_existing_atom raise → filtrée (anti DoS table d'atomes)
       garbage = "atom_inexistant_zzz_#{System.unique_integer([:positive])}"
@@ -115,7 +115,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     end
 
     test "keyword list passe telle quelle ; autre → []" do
-      assert PublishConsumer.to_keyword(mandate: 1) == [mandate: 1]
+      assert PublishConsumer.to_keyword(brief: 1) == [brief: 1]
       assert PublishConsumer.to_keyword(nil) == []
     end
 

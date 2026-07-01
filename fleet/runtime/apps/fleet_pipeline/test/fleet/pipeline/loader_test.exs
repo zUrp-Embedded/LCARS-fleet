@@ -130,7 +130,7 @@ defmodule Fleet.Pipeline.LoaderTest do
       assert stage_b["gate"]["type"] == "hard"
     end
 
-    test "v2.5 — mandate_kind/judge_target/timeout_sec valides → load OK", %{
+    test "v2.5 — brief_kind/judge_target/timeout_sec valides → load OK", %{
       tmp_dir: tmp_dir
     } do
       File.write!(Path.join(tmp_dir, "typed.yaml"), """
@@ -142,20 +142,20 @@ defmodule Fleet.Pipeline.LoaderTest do
           review:
             role: reviewer
             profile: noop
-            mandate_kind: judge
-            judge_target: mandate
+            brief_kind: judge
+            judge_target: brief
             timeout_sec: 600
       """)
 
       assert %{"stages" => %{"review" => stage}} = Loader.load!("typed")
-      assert stage["mandate_kind"] == "judge"
-      assert stage["judge_target"] == "mandate"
+      assert stage["brief_kind"] == "judge"
+      assert stage["judge_target"] == "brief"
     end
 
-    # Propriété de SÉCURITÉ (frontière) : un mandate_kind hors {worker, judge} est rejeté au LOAD
+    # Propriété de SÉCURITÉ (frontière) : un brief_kind hors {worker, judge} est rejeté au LOAD
     # (fail-closed à la frontière). Il ne peut JAMAIS atteindre le dispatcher pour y être inféré en
-    # worker (mandat exécutable pour un rôle qui aurait dû être désamorcé).
-    test "v2.5 — mandate_kind hors-vocab → rejet au load (raise)", %{tmp_dir: tmp_dir} do
+    # worker (brief exécutable pour un rôle qui aurait dû être désamorcé).
+    test "v2.5 — brief_kind hors-vocab → rejet au load (raise)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "bad_kind.yaml"), """
       kind: Pipeline
       metadata:
@@ -165,7 +165,7 @@ defmodule Fleet.Pipeline.LoaderTest do
           review:
             role: reviewer
             profile: noop
-            mandate_kind: reviewer
+            brief_kind: reviewer
       """)
 
       assert_raise RuntimeError, ~r/schema .*invalide/, fn ->

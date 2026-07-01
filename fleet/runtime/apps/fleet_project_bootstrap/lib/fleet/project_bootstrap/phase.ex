@@ -7,7 +7,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
   `Phase.Clone` — la seule phase CÂBLÉE en prod du bootstrap de pod. Fonctions pures
   (aucun process : File / Path / git). Erreurs typées (codes de sortie distincts).
   Câblée DIRECTEMENT par `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` →
-  `clone_or_skip`/`clone_work_doc`, et `reset_in_place` au re-mandate slot-freeze).
+  `clone_or_skip`/`clone_work_doc`, et `reset_in_place` au re-brief slot-freeze).
   Accès cap-profile : clés STRING directes (`cap_profile.spec["..."]`) —
   `Fleet.CapProfile` garantit la forme à la production.
 
@@ -110,7 +110,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     a avance) + `clean -fdx` (vire l'untracked, ex. un fichier non committe) + `checkout -B feature/<slug>`
     (recree la branche de travail PROPRE depuis la base — `-B` force car la branche existe deja). Le `ws`
     DOIT exister (clone du spawn, jamais rm_rf en pipe) ; `base_sha` est REQUIS (le dispatcher l'epingle
-    au re-mandate). Retour homogene avec clone_or_skip : `{:ok, ws, feature}` | `{:error, {:reset_failed, _}}`.
+    au re-brief). Retour homogene avec clone_or_skip : `{:ok, ws, feature}` | `{:error, {:reset_failed, _}}`.
     """
     @spec reset_in_place(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t()} | {:error, term()}
@@ -136,7 +136,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
           end
 
         _ ->
-          # base_sha absent = bug appelant (le dispatcher DOIT l'epingler au re-mandate) → fail-loud
+          # base_sha absent = bug appelant (le dispatcher DOIT l'epingler au re-brief) → fail-loud
           # plutot qu'un reset sur une base indefinie (qui garderait l'etat du ticket precedent).
           {:error, {:reset_failed, :no_base_sha}}
       end

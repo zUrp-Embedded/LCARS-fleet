@@ -671,7 +671,7 @@ defmodule Fleet.CapProfile do
   schéma v2.5). **Source unique** : l'extraction ne doit PAS être ré-implémentée chez les
   lecteurs (spawner/stage_runner/sp_builder/pod) — sinon défauts incohérents. `default` par
   défaut `"one-shot"` (le défaut canon) ; les lecteurs qui veulent distinguer l'absence
-  (ex. mandate_guard) passent `nil`.
+  (ex. brief_guard) passent `nil`.
   """
   @spec lifetime_scope(t(), term()) :: String.t() | term()
   def lifetime_scope(%__MODULE__{spec: spec}, default \\ "one-shot") do
@@ -690,23 +690,23 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Accesseur canon du `mandate_kind` (`spec.mandate_kind`, schéma v2.5). Dual D'ENTRÉE de
-  `deliverable_mode` (sortie) : il déclare la **forme du mandat** que le rôle reçoit, par catalogue
+  Accesseur canon du `brief_kind` (`spec.brief_kind`, schéma v2.5). Dual D'ENTRÉE de
+  `deliverable_mode` (sortie) : il déclare la **forme du brief** que le rôle reçoit, par catalogue
   et PAS par nom magique de rôle.
 
-    * `"worker"` (défaut) — le mandat est une instruction exécutable (corps de l'issue) : le rôle
+    * `"worker"` (défaut) — le brief est une instruction exécutable (corps de l'issue) : le rôle
       AGIT (engineer, architect…).
     * `"judge"` — le rôle JUGE : il reçoit un `GateBrief` structurellement **désamorcé** (contexte + livrable +
       contrat de verdict, AUCUNE instruction exécutable — sinon le juge exécuterait le body). Le gatekeeper le déclare.
 
-  `default` `"worker"` est **fail-safe** : un profil sans champ reçoit un mandat exécutable (le cas
+  `default` `"worker"` est **fail-safe** : un profil sans champ reçoit un brief exécutable (le cas
   ultra-majoritaire) ; jamais l'inverse (un worker désamorcé par erreur ne ferait rien). Un rôle
   juge DOIT déclarer `judge` explicitement — la judge-ness est une propriété de sécurité (rendue
   structurellement vraie, jamais inférée).
   """
-  @spec mandate_kind(t(), term()) :: String.t() | term()
-  def mandate_kind(%__MODULE__{spec: spec}, default \\ "worker") do
-    get_in(spec, ["mandate_kind"]) || default
+  @spec brief_kind(t(), term()) :: String.t() | term()
+  def brief_kind(%__MODULE__{spec: spec}, default \\ "worker") do
+    get_in(spec, ["brief_kind"]) || default
   end
 
   defp to_struct(raw) when is_map(raw) do

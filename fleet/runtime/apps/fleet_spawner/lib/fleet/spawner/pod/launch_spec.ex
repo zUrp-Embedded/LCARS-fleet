@@ -13,7 +13,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   ## Contrat (appelé par `Pod`)
 
-  - `effective_project/2` — projet EFFECTIF (mandat `opts[:project]` > statique `spec["project"]`).
+  - `effective_project/2` — projet EFFECTIF (brief `opts[:project]` > statique `spec["project"]`).
     Public car partagé hors-placement (`pod_completed_payload`, bootstrap workspace) : source unique.
   - `rc_project/2` — nom de projet slugifié depuis `rc_name`, ou `nil`. Public car partagé
     hors-placement (`maybe_checkpoint_seed`) : source unique.
@@ -23,7 +23,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     `skills_plugins_env/1`, `pod_mounts_env/2` — builders d'env, mergés par `do_launch`.
   """
 
-  # Projet EFFECTIF du pod : le mandat (`opts[:project]`, dynamique) prime sur le `spec["project"]`
+  # Projet EFFECTIF du pod : le brief (`opts[:project]`, dynamique) prime sur le `spec["project"]`
   # statique du cap-profile, défaut map vide. Pilote le placement (cwd projet) ET le payload de
   # fin-de-hop — d'où la visibilité publique (source unique, pas de re-dérivation côté Pod).
   def effective_project(opts, cap_profile) do

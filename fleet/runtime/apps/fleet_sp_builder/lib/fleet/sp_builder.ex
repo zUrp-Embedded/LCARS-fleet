@@ -15,7 +15,7 @@ defmodule Fleet.SPBuilder do
     * N0  — poids modèle (rien runtime)
     * N1  — server prompt Anthropic (config console)
     * N2  — `system-prompt.md` composé via `compose/3`
-    * N2bis — `~/context/brief.md` mandate-spécifique (référencé, pas composé)
+    * N2bis — `~/context/brief.md` brief-spécifique (référencé, pas composé)
     * N3  — `~/.claude/CLAUDE.md` composé via `compose_claude_md/3`
     * N3bis — `~/.claude/skills/` filtrés via `filter_skills/2`
 

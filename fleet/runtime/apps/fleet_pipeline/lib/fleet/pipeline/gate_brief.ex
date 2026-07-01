@@ -1,6 +1,6 @@
 defmodule Fleet.Pipeline.GateBrief do
   @moduledoc """
-  Construit le **brief d'éval** (texte du mandat) envoyé au gatekeeper pour
+  Construit le **brief d'éval** (texte du brief) envoyé au gatekeeper pour
   trancher une gate de pipeline. Le gatekeeper le pull via MCP `get_task`, juge
   (modop rubber-duck), et rend une décision JSON strict `gate-decision-v1.json`.
 
@@ -18,13 +18,13 @@ defmodule Fleet.Pipeline.GateBrief do
   Rend le brief markdown depuis le contexte de gate.
 
   `ctx` : `%{stage: String, pipeline_id: term, gate: map | nil, outputs: map,
-  request: String | nil, subject: :deliverable | :mandate}`.
+  request: String | nil, subject: :deliverable | :brief}`.
 
   `:subject` paramètre CE QUI est jugé — `:deliverable` (défaut, le livrable
-  produit par un stage : gatekeeper, juges de PR) ou `:mandate` (le MANDAT rédigé
-  par l'architecte, jugé AVANT toute production : mandate-review/consultant). Le
+  produit par un stage : gatekeeper, juges de PR) ou `:brief` (le BRIEF rédigé
+  par l'architecte, jugé AVANT toute production : brief-review/consultant). Le
   contrat de verdict (`gate-decision-v1`) et la mécanique sont identiques — seul le
-  cadrage du « truc à juger » change (sinon un juge de mandat chasserait un livrable
+  cadrage du « truc à juger » change (sinon un juge de brief chasserait un livrable
   inexistant). Défaut `:deliverable`.
   """
   @spec build(map()) :: String.t()
@@ -62,7 +62,7 @@ defmodule Fleet.Pipeline.GateBrief do
 
     `decision` ∈ #{Enum.join(@decisions, " | ")}
     - `continue` : #{s.continue} → avancer au stage suivant
-    - `redirect` : renvoyer à l'architecte (ex. mandat trop gros → demander la découpe)
+    - `redirect` : renvoyer à l'architecte (ex. brief trop gros → demander la découpe)
     - `abandon` : abandonner le ticket (non récupérable)
     - `escalate_user` : dépasse le gatekeeper → l'user tranche
     - `halt_wait_input` : information manquante → halt en attente
@@ -76,17 +76,17 @@ defmodule Fleet.Pipeline.GateBrief do
   end
 
   # Cadrage du « truc à juger », paramétré par `:subject`. `:deliverable` = le cas du livrable
-  # produit (gatekeeper/juges-PR) ; `:mandate` cadre la revue de mandat (le mandat est rédigé par
+  # produit (gatekeeper/juges-PR) ; `:brief` cadre la revue de brief (le brief est rédigé par
   # l'arch, PAS encore exécuté → le juge ne cherche pas un livrable).
-  defp subject_phrases(:mandate, stage) do
+  defp subject_phrases(:brief, stage) do
     %{
-      intro: "Le MANDAT à valider (rédigé par l'architecte) est cité plus bas.",
+      intro: "Le BRIEF à valider (rédigé par l'architecte) est cité plus bas.",
       question:
-        "Le mandat `#{stage}` a été rédigé par l'architecte et n'a PAS encore été exécuté. Au vu du " <>
-          "mandat ci-dessous, est-il EXÉCUTABLE en l'état (clair, complet, cohérent, actionnable par un " <>
+        "Le brief `#{stage}` a été rédigé par l'architecte et n'a PAS encore été exécuté. Au vu du " <>
+          "brief ci-dessous, est-il EXÉCUTABLE en l'état (clair, complet, cohérent, actionnable par un " <>
           "engineer sans nouvelle question) — `continue` — ou faut-il le renvoyer / escalader / abandonner ?",
-      heading: "Mandat à juger (rédigé par l'architecte — à valider AVANT toute exécution)",
-      continue: "le mandat est exécutable en l'état (clair, complet, actionnable)"
+      heading: "Brief à juger (rédigé par l'architecte — à valider AVANT toute exécution)",
+      continue: "le brief est exécutable en l'état (clair, complet, actionnable)"
     }
   end
 

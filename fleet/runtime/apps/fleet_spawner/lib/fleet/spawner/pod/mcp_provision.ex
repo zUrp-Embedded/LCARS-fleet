@@ -114,7 +114,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # (`sandbox_home/.lcars/…`, ce que claude exécute dans le sandbox). Host pods (containment none) :
   # `sandbox_home == pod_dir` → identité (rétro-compat stricte). Sans cette séparation, un pod
   # bwrap n'aurait aucun tool `mcp__fleet__*` (le pont ne démarrerait jamais) — donc aucun moyen de
-  # puller son mandat ni de soumettre son résultat.
+  # puller son brief ni de soumettre son résultat.
   #
   # Injecte `LCARS_POD_ID` ET `LCARS_FLEET_MCP_SOCKET` dans l'env du serveur (le bridge les lit pour
   # corréler `get_task` au bon pod ET savoir SUR QUELLE socket parler au central ; ne pas dépendre de

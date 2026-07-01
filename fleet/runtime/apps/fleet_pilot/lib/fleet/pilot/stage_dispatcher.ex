@@ -14,7 +14,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   Sur `:engage` : résout projet + route, puis :
     * **route absente** (issue routeless — create_ticket ne grave plus, ou ticket humain brut) →
-      `ensure_carte_or_onboard` grave la **carte par défaut** (mandate-gate) → `{:skipped, :onboarded}`
+      `ensure_carte_or_onboard` grave la **carte par défaut** (brief-gate) → `{:skipped, :onboarded}`
       (on défère ; le tick suivant la voit routée). C'est l'ENTRÉE système : create_ticket crée, le poller route.
     * **route présente** → `carte_role` dérive `{role, profile, stage_spec}` de la POSITION carte (PAS de
       producteur en dur — la route décide ; route absente à ce point = anomalie → fail-loud, jamais l'eng en
@@ -26,9 +26,9 @@ defmodule Fleet.Pilot.StageDispatcher do
 
   require Logger
 
-  # Autorité du FORMAT des mandats (worker/judge/mandate-review/rework/conflit). StageDispatcher
-  # CHOISIT quel mandat selon l'état forge ; MandateBuilder le FORME.
-  alias Fleet.Pilot.MandateBuilder
+  # Autorité du FORMAT des briefs (worker/judge/brief-review/rework/conflit). StageDispatcher
+  # CHOISIT quel brief selon l'état forge ; BriefBuilder le FORME.
+  alias Fleet.Pilot.BriefBuilder
 
   # Vocabulaire protocole = source unique Fleet.Pilot.Labels (constantes compile-time).
   @in_flight_label Fleet.Pilot.Labels.in_flight()
@@ -141,13 +141,13 @@ defmodule Fleet.Pilot.StageDispatcher do
           # pod_id et branche (`lcars/issue-N-role`) construits indépendamment depuis (n, role) ; pod_id
           # opaque (jamais re-parsé). La branche reste repo-LOCALE (pas de collision intra-repo).
 
-          # La FORME du mandat (worker exécutable | juge désamorcé) est lue du cap-profile
-          # (`mandate_kind`), PAS d'un nom magique "gatekeeper" en ring2 (differentiation-par-catalogue).
+          # La FORME du brief (worker exécutable | juge désamorcé) est lue du cap-profile
+          # (`brief_kind`), PAS d'un nom magique "gatekeeper" en ring2 (differentiation-par-catalogue).
           # Calculé UNE fois → sert au spawn-file ET au brief TaskQueue (que le pod pull via get_task).
-          # Sans ça, enqueue_mandate ré-enqueuerait `issue["body"]` brut → un juge pullerait le mandat BUILD
+          # Sans ça, enqueue_brief ré-enqueuerait `issue["body"]` brut → un juge pullerait le brief BUILD
           # exécutable au lieu du GateBrief.
-          mandate =
-            MandateBuilder.build_mandate(
+          brief =
+            BriefBuilder.build_brief(
               profile,
               role,
               forge,
@@ -161,7 +161,7 @@ defmodule Fleet.Pilot.StageDispatcher do
 
           spawn_opts =
             [
-              mandate: mandate,
+              brief: brief,
               pod_id: pod_id,
               rc_name: rc_name(repo, role),
               # Nom de branche LOCALE parlant (titre du ticket sanitizé), pas
@@ -192,7 +192,7 @@ defmodule Fleet.Pilot.StageDispatcher do
             pod_id,
             role,
             profile,
-            mandate,
+            brief,
             spawn_opts,
             number,
             number,
@@ -386,7 +386,7 @@ defmodule Fleet.Pilot.StageDispatcher do
       body =
         "**Architecte** — ⚠ Rework non convergent sur la PR ##{pr_number} (issue ##{issue_n}) : le budget " <>
           "de rounds de review est épuisé (`#{inspect(detail)}`). Le producteur ne satisfait pas les juges. " <>
-          "Reprends : re-cadre le mandat, tranche le désaccord, ou ferme la PR. L'issue reste hors-dispatch " <>
+          "Reprends : re-cadre le brief, tranche le désaccord, ou ferme la PR. L'issue reste hors-dispatch " <>
           "tant que `lcars-awaits-arch` est posé.\n\n" <> signature
 
       escalate_to_arch(issue_n, signature, body, ctx)
@@ -586,7 +586,7 @@ defmodule Fleet.Pilot.StageDispatcher do
         end
 
       # Gate de sérialisation (MÊME règle que dispatch_issue) : un producteur project-scoped déjà vivant
-      # (occupé par un autre ticket) → on DÉFÈRE, jamais re-mandater-pendant-occupé. Juges (instance) et
+      # (occupé par un autre ticket) → on DÉFÈRE, jamais re-briefer-pendant-occupé. Juges (instance) et
       # rework instance → `:ok` (no-op, jamais gated). Appel uniforme via `slot_scope`. `{:skipped,
       # :role_busy}` remonte au poller (qui gère `{:skipped, _}` → retry au tick suivant).
       case serialize_project_scope(
@@ -602,8 +602,8 @@ defmodule Fleet.Pilot.StageDispatcher do
 
         :ok ->
           # :judge -> GateBrief désamorcé ; :rework -> brief au PRODUCTEUR (corrige + push).
-          mandate =
-            review_mandate(
+          brief =
+            review_brief(
               kind,
               profile,
               role,
@@ -616,7 +616,7 @@ defmodule Fleet.Pilot.StageDispatcher do
             )
 
           spawn_opts =
-            [mandate: mandate, pod_id: pod_id, rc_name: rc_name(repo, role)]
+            [brief: brief, pod_id: pod_id, rc_name: rc_name(repo, role)]
             |> maybe_put_project(project)
             |> maybe_put_route(route)
             |> maybe_put_repo_id(resolve_repo_id(forge, repo, forge_opts))
@@ -631,7 +631,7 @@ defmodule Fleet.Pilot.StageDispatcher do
             pod_id,
             role,
             profile,
-            mandate,
+            brief,
             spawn_opts,
             pr_number,
             issue_n,
@@ -764,14 +764,14 @@ defmodule Fleet.Pilot.StageDispatcher do
     end
   end
 
-  # Mandat d'un dispatch PR : :judge -> GateBrief desamorce (via build_mandate, le pod
+  # Brief d'un dispatch PR : :judge -> GateBrief desamorce (via build_brief, le pod
   # juge l'issue) ; :rework -> brief de rework au PRODUCTEUR (corrige selon la review, re-pousse).
   # Chemin PR-juge — pas de stage carte ici (juges PR-driven) → `stage_spec = %{}` :
-  # build_mandate retombe sur le `mandate_kind` du profil (judge pour qualifier/reviewer) ET sur le
-  # `judge_target` par défaut (deliverable) → build_judge_mandate (juge le livrable/PR).
-  defp review_mandate(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
+  # build_brief retombe sur le `brief_kind` du profil (judge pour qualifier/reviewer) ET sur le
+  # `judge_target` par défaut (deliverable) → build_judge_brief (juge le livrable/PR).
+  defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
     do:
-      MandateBuilder.build_mandate(
+      BriefBuilder.build_brief(
         profile,
         role,
         forge,
@@ -783,10 +783,10 @@ defmodule Fleet.Pilot.StageDispatcher do
         %{}
       )
 
-  defp review_mandate(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
-    do: MandateBuilder.rework_mandate(role, forge, repo, pr, forge_opts, route)
+  defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr),
+    do: BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route)
 
-  defp review_mandate(
+  defp review_brief(
          :resolve_conflict,
          _profile,
          role,
@@ -797,7 +797,7 @@ defmodule Fleet.Pilot.StageDispatcher do
          route,
          pr
        ),
-       do: MandateBuilder.resolve_conflict_mandate(role, forge, repo, pr, forge_opts, route)
+       do: BriefBuilder.resolve_conflict_brief(role, forge, repo, pr, forge_opts, route)
 
   # Tag l'erreur d'une étape de résolution (préserve {:project_resolution, _} attendu).
   defp tag_err({:ok, _} = ok, _tag), do: ok
@@ -823,9 +823,9 @@ defmodule Fleet.Pilot.StageDispatcher do
     with {:ok, carte} <- carte_or_load(prefetched_carte, pipeline, carte_loader),
          {:ok, role} <- carte_stage_role(carte, pipeline, stage),
          {:ok, profile} <- load_role.(role) do
-      # On remonte le STAGE_SPEC entier (extensible) plutôt qu'un champ isolé. build_mandate y
-      # lit `mandate_kind` (override per-stage : consultant worker → juge sans profil-doublon) ET
-      # `judge_target` (juge le MANDAT vs un livrable). route=nil (producteur initial) → stage_spec vide.
+      # On remonte le STAGE_SPEC entier (extensible) plutôt qu'un champ isolé. build_brief y
+      # lit `brief_kind` (override per-stage : consultant worker → juge sans profil-doublon) ET
+      # `judge_target` (juge le BRIEF vs un livrable). route=nil (producteur initial) → stage_spec vide.
       stage_spec = get_in(carte, ["stages", stage]) || %{}
       {:ok, {role, profile, stage_spec}}
     end
@@ -844,7 +844,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   # Onboarding système. Route présente → passthrough `{:ok, route}`. Route nil (issue routeless :
-  # create_ticket ne grave plus la carte ; ou ticket humain brut) → grave la carte par défaut (mandate-gate)
+  # create_ticket ne grave plus la carte ; ou ticket humain brut) → grave la carte par défaut (brief-gate)
   # = elle ENTRE dans le gate → `{:onboarded, stage}` (dispatch_issue défère : skip ce tick, le suivant la
   # voit routée). Route postée par le SYSTÈME (forge token système). Échec → `{:error, {:onboard, _}}`.
   defp ensure_carte_or_onboard(_forge, _repo, _number, route, _carte_loader, _forge_opts)
@@ -863,9 +863,9 @@ defmodule Fleet.Pilot.StageDispatcher do
     end
   end
 
-  # Carte par défaut de l'onboarding (toute issue assignée routeless y entre ; défaut mandate-gate : le
-  # consultant review le mandat AVANT l'eng). Data-catalogue, pas un nom magique en dur.
-  defp default_carte, do: Application.get_env(:fleet_pilot, :delegation_carte, "mandate-gate")
+  # Carte par défaut de l'onboarding (toute issue assignée routeless y entre ; défaut brief-gate : le
+  # consultant review le brief AVANT l'eng). Data-catalogue, pas un nom magique en dur.
+  defp default_carte, do: Application.get_env(:fleet_pilot, :delegation_carte, "brief-gate")
 
   defp load_carte(pipeline, carte_loader) do
     {:ok, carte_loader.(pipeline)}
@@ -890,18 +890,18 @@ defmodule Fleet.Pilot.StageDispatcher do
     end
   end
 
-  # Enqueue le mandat dans le broker `Fleet.TaskQueue` ciblé pod_id — le claude REPL le pull via
+  # Enqueue le brief dans le broker `Fleet.TaskQueue` ciblé pod_id — le claude REPL le pull via
   # `mcp__fleet__get_task` → `PodTools.get_task` → `TaskQueue.get_for_pod` (PAS un Read fichier).
   # Sans cet enqueue, `TaskQueue.pod_status(pod_id) == nil` → le pod se croit bootstrap
   # (rien à puller) → idle.
-  # Le `brief` = le MANDAT role-aware déjà construit (build_mandate) : GateBrief désamorcé pour le
+  # Le `brief` = le BRIEF role-aware déjà construit (build_brief) : GateBrief désamorcé pour le
   # gatekeeper, corps de l'issue pour un worker. Un `issue["body"]` brut ferait
-  # puller au juge le mandat BUILD exécutable. `metadata.issue` corrèle au ticket.
-  defp enqueue_mandate(task_queue, pod_id, role, number, mandate) do
+  # puller au juge le brief BUILD exécutable. `metadata.issue` corrèle au ticket.
+  defp enqueue_brief(task_queue, pod_id, role, number, brief) do
     attrs = %{
       ticket_id: Fleet.Pilot.TicketId.compose(number),
       role: role,
-      brief: mandate,
+      brief: brief,
       metadata: %{"issue" => number}
     }
 
@@ -926,7 +926,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   # Dispatch idempotent. Un pod déjà VIVANT (id déterministe stable) = l'eng pipe long-lived
-  # → on le RE-MANDATE (enqueue + wake, garde son contexte), pas de re-spawn (plus de leak/orphelin).
+  # → on le RE-BRIEFE (enqueue + wake, garde son contexte), pas de re-spawn (plus de leak/orphelin).
   # `pod_alive?` défaute à `false` si le spawner n'expose pas `pod_info/1` (stubs de test) → chemin
   # spawn inchangé.
   defp pod_alive?(spawner, pod_id) do
@@ -950,12 +950,12 @@ defmodule Fleet.Pilot.StageDispatcher do
   #   instance         -> jamais gated (ids distincts par ticket, fan-out assume).
   #   project one-shot  -> vivant = occupe par un autre ticket -> DEFERE ; il meurt en fin de tache +
   #                        spawn frais au ticket suivant (comportement baseline, INCHANGE).
-  #   project pipe      -> process RESIDENT, selon son etat (pipe_remandate_state) :
+  #   project pipe      -> process RESIDENT, selon son etat (pipe_rebrief_state) :
   #                          dead  -> :ok (spawn frais, 1er ticket) ;
   #                          busy  -> DEFERE (travaille encore une tache OU publie son dernier livrable :
   #                                   resetter son workspace maintenant le corromprait / courserait le push) ;
-  #                          ready -> reset COLD in-place du workspace pour le nouveau mandat + /clear, PUIS
-  #                                   :ok (spawn_stage re-mandate sur un workspace propre, bonne branche).
+  #                          ready -> reset COLD in-place du workspace pour le nouveau brief + /clear, PUIS
+  #                                   :ok (spawn_stage re-brief sur un workspace propre, bonne branche).
   # Tout AVANT le verrou/enqueue (sinon on verrouillerait une issue qu'on ne traite pas). `{:skipped,
   # :role_busy}` remonte au poller (retry au tick suivant). La base du reset = `project["base_sha"]` :
   # nouveau ticket -> main tip (fresh) ; rework -> tip de la PR (continue le travail de l'eng). 1 seule fn.
@@ -966,17 +966,17 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   defp serialize_project_scope("project", _pipe, spawner, pod_id, project, slug) do
-    case pipe_remandate_state(spawner, pod_id) do
+    case pipe_rebrief_state(spawner, pod_id) do
       :dead -> :ok
       :busy -> {:skipped, :role_busy}
       :ready -> reprovision_then_proceed(spawner, pod_id, project, slug)
     end
   end
 
-  # Etat d'un pipe project-scoped face a un NOUVEAU mandat. :ready = idle ET dernier livrable confirme (ni
+  # Etat d'un pipe project-scoped face a un NOUVEAU brief. :ready = idle ET dernier livrable confirme (ni
   # tache active ni :publishing) — la SEULE situation ou resetter le workspace est sur (le push a deja lu
   # le commit, l'agent n'ecrit plus). pod_info expose conditions + has_active_task (le pod sait les deux).
-  defp pipe_remandate_state(spawner, pod_id) do
+  defp pipe_rebrief_state(spawner, pod_id) do
     case safe_pod_info(spawner, pod_id) do
       {:ok, %{conditions: conds, has_active_task: active}} ->
         cond do
@@ -1008,7 +1008,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     _ -> :error
   end
 
-  # Reset COLD in-place du workspace + /clear AVANT le remandate, puis :ok (proceed). Reset KO -> DEFERE
+  # Reset COLD in-place du workspace + /clear AVANT le rebrief, puis :ok (proceed). Reset KO -> DEFERE
   # (retry au tick suivant). Pas de project (legacy) ou spawner sans la fn (stub) -> :ok sans reset
   # (degrade honnete : on ne bloque pas, mais sans la garantie cold de ce tour).
   defp reprovision_then_proceed(spawner, pod_id, project, slug) do
@@ -1023,7 +1023,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   defp maybe_spawn(_spawner, true = _alive?, _profile, _ticket_id, _spawn_opts),
-    do: {:ok, :remandated}
+    do: {:ok, :rebriefed}
 
   defp maybe_spawn(spawner, false = _alive?, profile, ticket_id, spawn_opts) do
     case spawner.spawn_pod(profile, ticket_id, spawn_opts) do
@@ -1032,21 +1032,21 @@ defmodule Fleet.Pilot.StageDispatcher do
     end
   end
 
-  defp disposition(true = _alive_before?), do: "re-mandated (pod vivant, contexte gardé)"
+  defp disposition(true = _alive_before?), do: "re-briefed (pod vivant, contexte gardé)"
   defp disposition(false = _alive_before?), do: "spawned"
 
   # LEAF de spawn partagé par dispatch_issue (producteur) ET do_dispatch_review (juge/rework).
   # ORDRE CANONIQUE : label-verrou `lcars-in-flight` AVANT pod (sinon double-spawn) → pod
-  # (`maybe_spawn` : RE-MANDATE si vivant) → enqueue du mandat (que le pod pull via get_task) →
+  # (`maybe_spawn` : RE-BRIEFE si vivant) → enqueue du brief (que le pod pull via get_task) →
   # wake+recovery. Échec POST-verrou → compensation : retrait du verrou (+ kill SI frais spawn,
-  # JAMAIS un re-mandate vivant). `lock_target` = l'objet verrouillé (issue number | PR number) ;
+  # JAMAIS un re-brief vivant). `lock_target` = l'objet verrouillé (issue number | PR number) ;
   # `ticket_number` = le ticket (issue) pour le `ticket_id` ET l'enqueue ; `log_ctx` = contexte de log caller.
   defp spawn_stage(
          ctx,
          pod_id,
          role,
          profile,
-         mandate,
+         brief,
          spawn_opts,
          lock_target,
          ticket_number,
@@ -1064,13 +1064,13 @@ defmodule Fleet.Pilot.StageDispatcher do
 
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, ticket_id, spawn_opts),
-         :ok <- enqueue_mandate(task_queue, pod_id, role, ticket_number, mandate) do
+         :ok <- enqueue_brief(task_queue, pod_id, role, ticket_number, brief) do
       # Le retour de `WakeRecovery.wake` est LOAD-BEARING : `{:error, {:escalated, _}}`
       # (pod injoignable, escaladé à starfleet) ou `{:error, _}` (re-wake KO) signifie que le pod n'est
       # PAS réveillé. Jeter ce retour (`_ = wake(...)`) ferait toujours rendre `spawn_stage`
       # `{:ok, {:spawned}}` → le poller compterait `dispatched +1 / errors 0` MENTEUR (pod jamais réveillé,
-      # mais tally clean). On le MATCHE donc : le verrou + le mandat + le pod RESTENT en place (le
-      # mandat est enqueué, l'escalade système existe → pas un cul-de-sac, re-wake au prochain tick), mais
+      # mais tally clean). On le MATCHE donc : le verrou + le brief + le pod RESTENT en place (le
+      # brief est enqueué, l'escalade système existe → pas un cul-de-sac, re-wake au prochain tick), mais
       # le dispatch n'est PAS un succès silencieux — il remonte `{:error, {:wake_unreached, …}}` → le poller
       # le compte en `errors` (tally honnête + err_streak/telemetry reflètent l'injoignabilité réelle).
       case wake_recovery.(
@@ -1087,11 +1087,11 @@ defmodule Fleet.Pilot.StageDispatcher do
 
         {:error, reason} ->
           # PAS de compensation : verrou conservé (le pod est dispatché, l'objet EST in-flight),
-          # mandat conservé, pod conservé. Seul le réveil a échoué → tally honnête + re-wake au tick suivant
+          # brief conservé, pod conservé. Seul le réveil a échoué → tally honnête + re-wake au tick suivant
           # (idempotent : alive_before? sera vrai, maybe_spawn no-op, re-wake retenté).
           Logger.warning(
             "StageDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
-              "MAIS wake INJOIGNABLE → #{inspect(reason)} (verrou+mandat conservés, re-wake au prochain tick ; " <>
+              "MAIS wake INJOIGNABLE → #{inspect(reason)} (verrou+brief conservés, re-wake au prochain tick ; " <>
               "tally = error, pas dispatched silencieux)"
           )
 
@@ -1100,7 +1100,7 @@ defmodule Fleet.Pilot.StageDispatcher do
     else
       {:error, _} = err ->
         # Une étape POST-verrou a échoué → compensation (retrait du verrou, sinon stuck à jamais).
-        # Kill SEULEMENT si frais spawn (un re-mandate ne tue JAMAIS l'eng vivant + son contexte).
+        # Kill SEULEMENT si frais spawn (un re-brief ne tue JAMAIS l'eng vivant + son contexte).
         if not alive_before?, do: safe_kill(spawner, pod_id)
         _ = forge.remove_label(repo, lock_target, @in_flight_label, forge_opts)
 

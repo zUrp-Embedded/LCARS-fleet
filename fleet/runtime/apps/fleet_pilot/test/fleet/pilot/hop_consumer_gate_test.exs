@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
       do: send(self(), {:open_pr, head, base, o[:body]}) && {:ok, 7}
 
     def get_pr_for_branch(_r, head, base, _o), do: send(self(), {:get_pr, head, base}) && {:ok, 7}
-    # #8.E : un juge de MANDAT (mandate-review) est PRÉ-PR → aucune PR producteur ouverte.
+    # #8.E : un juge de BRIEF (brief-review) est PRÉ-PR → aucune PR producteur ouverte.
     def list_open_pulls(_r, _o), do: {:ok, []}
     def request_review(_r, pr, revs, _o), do: send(self(), {:request_review, pr, revs}) && :ok
     def post_review(_r, pr, ev, body, _o), do: send(self(), {:review, pr, ev, body}) && :ok
@@ -90,18 +90,18 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
       }
     end
 
-    # #8.E : carte mandate-gate — stage racine mandate-review (consultant JUGE le MANDAT, pré-PR) -> build.
+    # #8.E : carte brief-gate — stage racine brief-review (consultant JUGE le BRIEF, pré-PR) -> build.
     def load!("mandgate") do
       %{
         "name" => "mandgate",
         "stages" => %{
-          "mandate-review" => %{
+          "brief-review" => %{
             "role" => "consultant",
             "needs" => [],
-            "mandate_kind" => "judge",
-            "judge_target" => "mandate"
+            "brief_kind" => "judge",
+            "judge_target" => "brief"
           },
-          "build" => %{"role" => "engineer", "needs" => ["mandate-review"]}
+          "build" => %{"role" => "engineer", "needs" => ["brief-review"]}
         }
       }
     end
@@ -239,7 +239,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   # ── B (L441) : escalade gatekeeper (gate soft sur le stage producteur) ────────
 
-  test "gate soft -> ESCALADE : mandat enqueue, AUCUNE avance/ecriture forge" do
+  test "gate soft -> ESCALADE : brief enqueue, AUCUNE avance/ecriture forge" do
     assert {:escalate, "corr-1", ctx} =
              HopConsumer.maybe_complete(build_done("soft", %{"sev" => "high"}), hc())
 
@@ -261,7 +261,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   # MA-17 — le retour du kick gatekeeper est LOAD-BEARING. AVANT : `_ = kick_gatekeeper(...)` jetait le
   # retour de WakeRecovery.wake → un gatekeeper jamais réveillé restait INVISIBLE (le verdict ne reviendrait
-  # jamais, gate stallée en silence). Le mandat d'éval EST enqueué → l'escalade reste légitime
+  # jamais, gate stallée en silence). Le brief d'éval EST enqueué → l'escalade reste légitime
   # ({:escalate, corr, _}), mais le kick injoignable est SURFACÉ (telemetry), pas confondu avec un kick OK.
   test "MA-17 : kick gatekeeper INJOIGNABLE → escalade quand même MAIS surfacé en telemetry (pas avalé)" do
     ref =
@@ -274,7 +274,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     # Seam : le recovery de wake ESCALADE (gatekeeper injoignable, re-wake KO → starfleet).
     escalating = fn _pod, _respawn, _opts -> {:error, {:escalated, :dead}} end
 
-    # L'escalade reste légitime : le mandat est enqueué, corr retourné (le verdict reviendra au re-wake).
+    # L'escalade reste légitime : le brief est enqueué, corr retourné (le verdict reviendra au re-wake).
     assert {:escalate, "corr-1", _ctx} =
              HopConsumer.maybe_complete(
                build_done("soft", %{"sev" => "high"}),
@@ -441,26 +441,26 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute_received {:merge, _}
   end
 
-  # ── #8.E : verdict d'un juge de MANDAT (mandate-review/consultant) via pod.completed ──────────
+  # ── #8.E : verdict d'un juge de BRIEF (brief-review/consultant) via pod.completed ──────────
   # MÊME apply_verdict que le gatekeeper (factorisé) ; le consultant est PRÉ-PR → avance ISSUE-LEVEL
   # (grave route, pas de PR) et trace attribuée au CONSULTANT (pas "gatekeeper").
 
-  # pod.completed du stage mandate-review (consultant) qui vient de rendre son verdict.
-  defp mandate_done(result),
+  # pod.completed du stage brief-review (consultant) qui vient de rendre son verdict.
+  defp brief_done(result),
     do: %{
       "ticket_id" => "issue-1",
       "workspace" => "/ws",
       "base_sha" => "cafe",
       "role" => "consultant",
       "pipeline" => "mandgate",
-      "stage" => "mandate-review",
+      "stage" => "brief-review",
       "result" => result
     }
 
-  test "#8.E mandate-review continue -> AVANCE issue-level vers build (route+commentaire, PAS de PR, assignee intact)" do
+  test "#8.E brief-review continue -> AVANCE issue-level vers build (route+commentaire, PAS de PR, assignee intact)" do
     assert {:ok, :reassigned} =
              HopConsumer.maybe_complete(
-               mandate_done(%{"decision" => "continue", "reason" => "mandat clair"}),
+               brief_done(%{"decision" => "continue", "reason" => "brief clair"}),
                hc()
              )
 
@@ -475,10 +475,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert body =~ "continue"
   end
 
-  test "#8.E mandate-review escalate_user -> await_arch (arch) ; trace CONSULTANT, pas gatekeeper" do
+  test "#8.E brief-review escalate_user -> await_arch (arch) ; trace CONSULTANT, pas gatekeeper" do
     assert {:ok, :awaiting_arch} =
              HopConsumer.maybe_complete(
-               mandate_done(%{"decision" => "escalate_user", "reason" => "mandat ambigu"}),
+               brief_done(%{"decision" => "escalate_user", "reason" => "brief ambigu"}),
                hc()
              )
 
@@ -491,9 +491,9 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     refute body =~ "gatekeeper"
   end
 
-  test "#8.E mandate-review abandon -> close (mandat jeté), PAS de PR ni de push" do
+  test "#8.E brief-review abandon -> close (brief jeté), PAS de PR ni de push" do
     assert {:ok, :completed} =
-             HopConsumer.maybe_complete(mandate_done(%{"decision" => "abandon"}), hc())
+             HopConsumer.maybe_complete(brief_done(%{"decision" => "abandon"}), hc())
 
     assert_received :closed
     refute_received {:open_pr, _, _, _}
@@ -502,7 +502,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   # ── #8-fix « un producteur ne merge JAMAIS seul » ───────────────────────────────────────
   test "producteur terminal (build, dernier stage de la carte) -> :review (PR + juges), JAMAIS :promote/merge" do
-    # mandgate = mandate-review -> build ; build (engineer, producteur) est TERMINAL. Avant le fix il
+    # mandgate = brief-review -> build ; build (engineer, producteur) est TERMINAL. Avant le fix il
     # faisait :promote (merge sans juges = régression #8.F). Avec : :review -> ouvre la PR + demande
     # [qualifier, reviewer] ; le chemin PR-driven prouvé (dispatch_by_verdicts) scelle ensuite au gatekeeper.
     assert {:ok, :review_requested} =

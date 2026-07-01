@@ -46,7 +46,7 @@ defmodule Fleet.Pilot.HopCompleterSpacingTest do
       issue_number: 1,
       role: "consultant",
       deliverable_opts: nil,
-      hop_sha: "mandate-verdict",
+      hop_sha: "brief-verdict",
       next_assignee: "build",
       pipeline: "poc",
       next_stage: "build",
@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.HopCompleterSpacingTest do
       issue_number: 1,
       role: "consultant",
       deliverable_opts: nil,
-      hop_sha: "mandate-verdict",
+      hop_sha: "brief-verdict",
       next_assignee: nil,
       comment_body: "Verdict du consultant — abandon"
     }

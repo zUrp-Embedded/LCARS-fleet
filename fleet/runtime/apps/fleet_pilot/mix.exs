@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.MixProject do
       # (wake/kill/pod_info/reprovision et contrat pod_id). Dépendance directe :
       # le couplage existe dans le code, donc il doit être visible au build graph.
       {:fleet_spawner, in_umbrella: true},
-      # Z4 — `Fleet.Credentials.ForgeIdentity` (allowed_emails F-01 = l'humain du mandat).
+      # Z4 — `Fleet.Credentials.ForgeIdentity` (allowed_emails F-01 = l'humain du brief).
       {:fleet_credentials, in_umbrella: true},
       # `Fleet.CapProfile.deliverable_mode` : classer producteur (git_native) / juge
       # (payload) au hop PR-natif (source unique = le catalogue cap-profile).

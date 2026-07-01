@@ -88,4 +88,4 @@ spec:
   # F077 — le gatekeeper est un JUGE : il reçoit un GateBrief I-CBC DÉSAMORCÉ (contexte +
   # livrable + contrat de verdict, AUCUNE instruction exécutable — bug PASSE-9 #11/#12). Déclaré
   # par catalogue (pas un nom magique "gatekeeper" en ring2). Dual d'entrée de deliverable_mode.
-  mandate_kind: judge
+  brief_kind: judge

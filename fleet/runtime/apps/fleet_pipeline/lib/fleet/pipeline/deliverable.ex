@@ -153,7 +153,7 @@ defmodule Fleet.Pipeline.Deliverable do
   end
 
   # git_native : l'agent a commité dans le pod. On NE crée rien — on vérifie juste qu'un livrable
-  # existe (HEAD a avancé depuis base). Range vide = le mandat n'a produit aucun commit → fail-loud
+  # existe (HEAD a avancé depuis base). Range vide = le brief n'a produit aucun commit → fail-loud
   # (la gate, elle, passe sur range vide par vacuité ; la présence d'un commit est un concern mode-side).
   # Le cas « HEAD != base mais historique réécrit » passe ici (avancé) et est rattrapé par la gate
   # (`base_not_ancestor`) — pas de double check ici.

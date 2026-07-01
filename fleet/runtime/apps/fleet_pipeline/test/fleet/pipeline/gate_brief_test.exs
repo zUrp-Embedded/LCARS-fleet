@@ -31,7 +31,7 @@ defmodule Fleet.Pipeline.GateBriefTest do
   end
 
   test "request = contexte de jugement désamorcé (NE PAS exécuter) — pas une instruction (bug PASSE-9)" do
-    # Le body de l'issue (mandat du BUILD) ne doit JAMAIS être lisible comme une
+    # Le body de l'issue (brief du BUILD) ne doit JAMAIS être lisible comme une
     # consigne à exécuter par le gatekeeper : il est cité en contexte, encadré.
     brief =
       GateBrief.build(%{

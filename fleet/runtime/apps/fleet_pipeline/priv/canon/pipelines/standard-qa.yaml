@@ -158,6 +158,6 @@ cycle:
 # Sélection pipeline (cohérent intensity-json.md PROMOTED #3.2 + chantier 12 PROMOTED)
 selection_priority:
   - flag_pipeline_explicit  # --pipeline=standard-qa CLI override
-  - ticket_body_mandate     # mandate dans ticket gitea body
+  - ticket_body_brief     # brief dans ticket gitea body
   - intensity_json_pipeline_default  # intensity.json racine projet
   - default

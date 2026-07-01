@@ -2,7 +2,7 @@ defmodule Fleet.Pipeline.GitRef do
   @moduledoc """
   Source UNIQUE de la validation d'un nom de branche / ref git côté monde (système-side).
 
-  Garde-fou contre des entrées catalogue/mandat manifestement cassées (espace, `..`, leading `-`) :
+  Garde-fou contre des entrées catalogue/brief manifestement cassées (espace, `..`, leading `-`) :
   PAS une défense anti-injection (`System.cmd` n'utilise pas de shell), mais un boundary qui empêche
   qu'un nom malformé atteigne `git push`/`commit` brut. Aligné grosso-modo sur `git check-ref-format` :
   commence par alphanumérique, puis `[A-Za-z0-9._/-]`, et rejette le substring `..`.

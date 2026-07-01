@@ -6,7 +6,7 @@ defmodule Fleet.Pipeline.Gatekeeper do
   cap-profile `gatekeeper.yaml`, `boot_at_start: false`) : il n'est PAS booté au
   démarrage de la fleet (≠ l'`architect`, lui booté au start), mais **à l'activation
   d'un pipeline** (`Fleet.Pipeline.start_pipeline`). Une fois booté, il vit pour la
-  durée du travail et est adressé via **mandat MCP** — l'appelant qui le pilote ne
+  durée du travail et est adressé via **brief MCP** — l'appelant qui le pilote ne
   le possède pas (pas de lien de supervision : il est joint par son `pod_id`,
   pas tenu comme enfant).
 

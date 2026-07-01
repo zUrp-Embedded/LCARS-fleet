@@ -52,7 +52,7 @@ defmodule Fleet.MCP.ResultEventTest do
     refute_receive %Fleet.Event{source: :task_queue, type: :task_completed}, 200
   end
 
-  test "submit_result avec task_id NICHÉ dans le payload (pas top-level) → accepté + clôt le mandat" do
+  test "submit_result avec task_id NICHÉ dans le payload (pas top-level) → accepté + clôt le brief" do
     # Régression live (e2e) : un agent juge range son task_id DANS le payload de verdict au lieu du
     # paramètre top-level. Le broker corrèle pod_id ↔ task_id quel que soit l'emplacement → le livrable
     # NE DOIT PAS être perdu (sinon le hop review timeout → escalade → pipeline gelé, observé sur le

@@ -12,7 +12,7 @@ defmodule Fleet.Shutdown.Quiesce do
     * REST `POST /api/admin/spawn` — nouveau pod opérateur
 
   Le travail **interne** d'un pipeline déjà en vol (spawn de l'étape suivante,
-  enqueue de mandat) ne consulte PAS ce flag — sinon l'in-flight ne pourrait
+  enqueue de brief) ne consulte PAS ce flag — sinon l'in-flight ne pourrait
   plus se terminer, à l'opposé du but du drain.
 
   ## Pourquoi ici (fleet_event_router) et pas dans fleet_starfleet

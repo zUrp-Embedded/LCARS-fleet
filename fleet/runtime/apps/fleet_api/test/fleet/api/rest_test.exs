@@ -132,7 +132,7 @@ defmodule Fleet.API.RestTest do
   #
   # /api/admin/spawn est no-auth. Le PublishConsumer convertit ENSUITE `payload["opts"]` en opts internes du
   # spawner — sans filtre, des opts privilégiés deviennent pilotables depuis l'API (racines disque, `human`,
-  # `project` → clone d'un repo attaquant dans le pod, `allow_no_mandate`, seams…). L'allowlist REFUSE tout
+  # `project` → clone d'un repo attaquant dans le pod, `allow_no_brief`, seams…). L'allowlist REFUSE tout
   # champ non public AVANT le moindre broadcast : 422, et rien n'atteint le consumer/spawner.
   describe "POST /api/admin/spawn — allowlist DTO (B2b)" do
     # Chacun de ces payloads porte un champ interne du spawner via `opts` (ou directement) : doit être 422
@@ -144,7 +144,7 @@ defmodule Fleet.API.RestTest do
       {"opts.human", %{"role" => "engineer", "opts" => %{"human" => "victim"}}},
       {"opts.project",
        %{"role" => "engineer", "opts" => %{"project" => %{"repo_path" => "git@evil:repo"}}}},
-      {"opts.allow_no_mandate", %{"role" => "engineer", "opts" => %{"allow_no_mandate" => true}}},
+      {"opts.allow_no_brief", %{"role" => "engineer", "opts" => %{"allow_no_brief" => true}}},
       {"opts.resume", %{"role" => "engineer", "opts" => %{"resume" => true}}},
       {"opts.session_id", %{"role" => "engineer", "opts" => %{"session_id" => "x"}}},
       {"opts.recall_seed_jsonl",
@@ -168,14 +168,14 @@ defmodule Fleet.API.RestTest do
       end
     end
 
-    test "spawn admin LÉGITIME (role + mandate) → 202 + broadcast (mandate replacé dans opts)" do
+    test "spawn admin LÉGITIME (role + brief) → 202 + broadcast (brief replacé dans opts)" do
       conn =
         conn(
           :post,
           "/api/admin/spawn",
           Jason.encode!(%{
             "role" => "engineer",
-            "mandate" => "implémente X",
+            "brief" => "implémente X",
             "ticket_id" => "issue-9"
           })
         )
@@ -184,7 +184,7 @@ defmodule Fleet.API.RestTest do
 
       assert conn.status == 202
 
-      # Le payload diffusé est le DTO CANONIQUE reconstruit par l'API : `mandate` est passé dans `opts`
+      # Le payload diffusé est le DTO CANONIQUE reconstruit par l'API : `brief` est passé dans `opts`
       # (jamais un `opts` brut du client), `ticket_id` conservé.
       assert_receive %Fleet.Event{
                        source: :api,
@@ -192,7 +192,7 @@ defmodule Fleet.API.RestTest do
                        payload: %{
                          "role" => "engineer",
                          "ticket_id" => "issue-9",
-                         "opts" => %{"mandate" => "implémente X"}
+                         "opts" => %{"brief" => "implémente X"}
                        }
                      },
                      500
@@ -289,14 +289,14 @@ defmodule Fleet.API.RestTest do
   end
 
   # ============================================================
-  # flow-02 — one-shot sans mandat interdit (miroir R18 à l'admission)
+  # flow-02 — one-shot sans brief interdit (miroir R18 à l'admission)
   # ============================================================
   #
-  # Un cap-profile one-shot (reviewer/qualifier/consultant) lancé SANS `mandate` partirait sans
-  # travail → `Fleet.Spawner.mandate_guard` le refuse (`mandate_required`, ZÉRO pod) APRÈS un 202
+  # Un cap-profile one-shot (reviewer/qualifier/consultant) lancé SANS `brief` partirait sans
+  # travail → `Fleet.Spawner.brief_guard` le refuse (`brief_required`, ZÉRO pod) APRÈS un 202
   # « mis en file » = 202 menteur (jumeau du cap-profile menteur MA-18). L'admission le REFUSE
-  # désormais à la frontière (422, aucun broadcast), via l'autorité partagée `mandate_required?/1`.
-  describe "POST /api/admin/spawn — one-shot sans mandat interdit (flow-02)" do
+  # désormais à la frontière (422, aucun broadcast), via l'autorité partagée `brief_required?/1`.
+  describe "POST /api/admin/spawn — one-shot sans brief interdit (flow-02)" do
     # PRÉ-CONDITION : `reviewer` canon est bien one-shot + bwrap (sinon ce test ne prouve rien).
     test "pré-condition : reviewer = one-shot + bwrap" do
       assert {:ok, rev} = Fleet.CapProfile.load("reviewer")
@@ -304,10 +304,10 @@ defmodule Fleet.API.RestTest do
       assert Fleet.CapProfile.containment(rev) == "bwrap"
     end
 
-    # LE finding : one-shot SANS mandate → 422 (plus 202 menteur), AUCUN broadcast. Régression
-    # prouvée : retirer la garde `mandate_required?` du call-site fait repasser ce cas en 202 +
+    # LE finding : one-shot SANS brief → 422 (plus 202 menteur), AUCUN broadcast. Régression
+    # prouvée : retirer la garde `brief_required?` du call-site fait repasser ce cas en 202 +
     # broadcast, puis le spawner refuse en silence (zéro pod) → 202 menteur.
-    test "reviewer (one-shot) SANS mandate → 422 AVANT spawn, aucun broadcast" do
+    test "reviewer (one-shot) SANS brief → 422 AVANT spawn, aucun broadcast" do
       for key <- ["role", "cap_profile_name"] do
         conn =
           conn(:post, "/api/admin/spawn", Jason.encode!(%{key => "reviewer"}))
@@ -315,23 +315,23 @@ defmodule Fleet.API.RestTest do
           |> Rest.call(@opts)
 
         assert conn.status == 422,
-               "#{key}=reviewer (one-shot sans mandat) devait être refusé 422, reçu #{conn.status}"
+               "#{key}=reviewer (one-shot sans brief) devait être refusé 422, reçu #{conn.status}"
 
         {:ok, body} = Jason.decode(conn.resp_body)
-        assert body["error"] =~ "mandat"
+        assert body["error"] =~ "brief"
 
         refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
       end
     end
 
-    # La moitié « accepté » : un one-shot LÉGITIME porte son `mandate` → passe (202 + broadcast,
-    # mandate replacé dans opts). Prouve que la garde ne ferme QUE le one-shot SANS travail.
-    test "reviewer (one-shot) AVEC mandate → 202 + broadcast (pas de faux rejet)" do
+    # La moitié « accepté » : un one-shot LÉGITIME porte son `brief` → passe (202 + broadcast,
+    # brief replacé dans opts). Prouve que la garde ne ferme QUE le one-shot SANS travail.
+    test "reviewer (one-shot) AVEC brief → 202 + broadcast (pas de faux rejet)" do
       conn =
         conn(
           :post,
           "/api/admin/spawn",
-          Jason.encode!(%{"role" => "reviewer", "mandate" => "revue le PR #42"})
+          Jason.encode!(%{"role" => "reviewer", "brief" => "revue le PR #42"})
         )
         |> put_req_header("content-type", "application/json")
         |> Rest.call(@opts)
@@ -343,7 +343,7 @@ defmodule Fleet.API.RestTest do
                        type: :"admin.spawn.request",
                        payload: %{
                          "role" => "reviewer",
-                         "opts" => %{"mandate" => "revue le PR #42"}
+                         "opts" => %{"brief" => "revue le PR #42"}
                        }
                      },
                      500

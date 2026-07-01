@@ -10,7 +10,7 @@ defmodule Fleet.API.Rest do
     * `GET /api/pipelines` / `tickets` / `pods` — lecture état (stubs MVP)
     * `POST /api/admin/spawn` — filtre le payload par allowlist DTO (422 si un champ interne du
       spawner / une clé inconnue est présent), valide le cap-profile (400 si absent, 422 si
-      inconnu / host-native), exige un `mandate` pour un cap-profile one-shot (422 sinon — miroir
+      inconnu / host-native), exige un `brief` pour un cap-profile one-shot (422 sinon — miroir
       R18, évite le 202 menteur) PUIS broadcast `admin.spawn.request` event + 202
 
   ## Auth — lecture no-auth, écriture gardée (pas de blanket no-auth)
@@ -87,7 +87,7 @@ defmodule Fleet.API.Rest do
     # ALLOWLIST D'ADMISSION (AVANT tout) : `/api/admin/spawn` est une surface no-auth. Le PublishConsumer
     # convertit ENSUITE `payload["opts"]` en opts internes du spawner via `to_keyword/1` — sans filtre, des
     # opts privilégiés (`pod_dir_root`, `state_fs_root`, `human`, `project` → clone d'un repo attaquant dans
-    # le pod, `recall_seed_jsonl`, `resume`, `session_id`, `rc_name`, `allow_no_mandate`, seams module/fun…)
+    # le pod, `recall_seed_jsonl`, `resume`, `session_id`, `rc_name`, `allow_no_brief`, seams module/fun…)
     # deviendraient pilotables depuis l'API. On n'accepte donc qu'un DTO public PLAT et explicite ; toute
     # clé hors allowlist → 422 AVANT le moindre broadcast (rien n'atteint le consumer/spawner). Le payload
     # canonique reconstruit ici est la SEULE chose diffusée — l'API construit elle-même l'`opts` interne,
@@ -129,24 +129,24 @@ defmodule Fleet.API.Rest do
     # async. On le résout ICI (même loader que le consumer, source unique `Fleet.CapProfile.load/1`).
     case validate_cap_profile(payload) do
       {:ok, cap} ->
-        # MIROIR de R18 (Fleet.Spawner.mandate_guard) à l'ADMISSION : un cap-profile one-shot
-        # (reviewer/qualifier/consultant) lancé SANS `mandate` partirait sans travail → le spawner
-        # le refuse (`mandate_required`, ZÉRO pod). Sans cette garde, le 202 « mis en file » serait un
+        # MIROIR de R18 (Fleet.Spawner.brief_guard) à l'ADMISSION : un cap-profile one-shot
+        # (reviewer/qualifier/consultant) lancé SANS `brief` partirait sans travail → le spawner
+        # le refuse (`brief_required`, ZÉRO pod). Sans cette garde, le 202 « mis en file » serait un
         # 202 menteur (jumeau exact du cap-profile menteur). On vérifie ICI, avant l'ACK.
-        # `Fleet.Spawner.mandate_required?/1` EST l'autorité partagée (même lecture `get_in` nil-aware
-        # que `mandate_guard`) → on n'a PAS recopié la règle (pas de divergence possible). Un one-shot
-        # LÉGITIME porte son `mandate` dans le DTO (allowlist) → `has_mandate?` vrai → il passe.
-        mandate = get_in(payload, ["opts", "mandate"])
-        has_mandate? = is_binary(mandate) and mandate != ""
+        # `Fleet.Spawner.brief_required?/1` EST l'autorité partagée (même lecture `get_in` nil-aware
+        # que `brief_guard`) → on n'a PAS recopié la règle (pas de divergence possible). Un one-shot
+        # LÉGITIME porte son `brief` dans le DTO (allowlist) → `has_brief?` vrai → il passe.
+        brief = get_in(payload, ["opts", "brief"])
+        has_brief? = is_binary(brief) and brief != ""
 
-        if Fleet.Spawner.mandate_required?(cap) and not has_mandate? do
+        if Fleet.Spawner.brief_required?(cap) and not has_brief? do
           send_resp(
             conn,
             422,
             Jason.encode!(%{
-              error: "mandat requis (cap-profile one-shot)",
+              error: "brief requis (cap-profile one-shot)",
               reason:
-                "lifetime_scope one-shot sans `mandate` : le pod partirait sans travail (R18). Fournir `mandate`."
+                "lifetime_scope one-shot sans `brief` : le pod partirait sans travail (R18). Fournir `brief`."
             })
           )
         else
@@ -190,13 +190,13 @@ defmodule Fleet.API.Rest do
   # Champs publics admis au top-level du DTO `/api/admin/spawn`. Tout le reste est REFUSÉ.
   #   * `cap_profile_name` / `role` — le profil de capacités (l'un des deux, requis ; validé plus bas)
   #   * `ticket_id` — corrélation forge/event (string libre)
-  #   * `mandate` — le travail du pod (string) ; replacé dans l'`opts` interne construit par l'API
+  #   * `brief` — le travail du pod (string) ; replacé dans l'`opts` interne construit par l'API
   #   * `pod_id` — identifiant de pod imposé (rare, admin) ; n'est accepté QUE s'il est path-safe
   #     (même règle que `Fleet.Spawner` : `[A-Za-z0-9._-]`, pas de `..`), sinon 422
-  @admin_spawn_public_fields ~w(cap_profile_name role ticket_id mandate pod_id)
+  @admin_spawn_public_fields ~w(cap_profile_name role ticket_id brief pod_id)
 
   # Parse le payload entrant vers un DTO public allowlisté. Le `opts` interne du spawner n'est JAMAIS pris
-  # du client : l'API le (re)construit à partir des seuls champs publics (`mandate`, `pod_id`). Toute clé
+  # du client : l'API le (re)construit à partir des seuls champs publics (`brief`, `pod_id`). Toute clé
   # top-level inconnue ou interdite (y compris un `opts` brut) → `{:error, {:forbidden_fields, ...}}`.
   defp parse_admin_spawn_dto(raw) when is_map(raw) do
     extraneous = Map.keys(raw) -- @admin_spawn_public_fields
@@ -221,7 +221,7 @@ defmodule Fleet.API.Rest do
 
   # Construit l'`opts` du spawn à partir des seuls champs publics. `pod_id` n'est retenu que path-safe.
   defp build_admin_opts(raw) do
-    opts = if is_binary(raw["mandate"]), do: %{"mandate" => raw["mandate"]}, else: %{}
+    opts = if is_binary(raw["brief"]), do: %{"brief" => raw["brief"]}, else: %{}
 
     case Map.fetch(raw, "pod_id") do
       :error ->
@@ -249,7 +249,7 @@ defmodule Fleet.API.Rest do
   # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing}` (400) ; load KO →
   # `{:error, {:cap_profile, name, reason}}` (422) ; HOST-NATIVE (`containment != bwrap`) →
   # `{:error, {:host_native_forbidden, name}}` (422) ; chargé + sandboxé → `{:ok, cap}` (l'admission
-  # continue ; le cap chargé est rendu pour la garde mandat one-shot R18 du call-site, sans re-load).
+  # continue ; le cap chargé est rendu pour la garde brief one-shot R18 du call-site, sans re-load).
   #
   # La garde host-native est ICI, à l'admission : un cap-profile `containment: none` (starfleet,
   # architecte-interactif) lancerait un pod HORS-SANDBOX sur l'hôte *as* l'humain via cette porte spawn

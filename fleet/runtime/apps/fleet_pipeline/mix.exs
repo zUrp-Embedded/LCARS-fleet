@@ -33,10 +33,10 @@ defmodule Fleet.Pipeline.MixProject do
     [
       {:fleet_cap_profile, in_umbrella: true},
       {:fleet_spawner, in_umbrella: true},
-      # Z4 — `Fleet.Credentials.ForgeIdentity` (F-01 allowed_emails = l'humain du mandat).
+      # Z4 — `Fleet.Credentials.ForgeIdentity` (F-01 allowed_emails = l'humain du brief).
       {:fleet_credentials, in_umbrella: true},
       {:fleet_event_router, in_umbrella: true},
-      # Les mandats sont enqueués dans le broker Fleet.TaskQueue (le pod les pull) →
+      # Les briefs sont enqueués dans le broker Fleet.TaskQueue (le pod les pull) →
       # dépendance runtime réelle. Pas de cycle (fleet_task_queue → fleet_event_router seulement).
       {:fleet_task_queue, in_umbrella: true},
       {:jason, "~> 1.4"},

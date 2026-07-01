@@ -18,7 +18,7 @@ defmodule Fleet.Spawner.PodWarden do
   Le pod_dir (`~/pods/pod_<id>`, clone git complet + `.lcars`/`.claude`/`tickets`) et son state-dir
   (`~/.lcars/state/<scope>/<id>/`) survivent comme TOMBSTONE après la mort du pod. Ils ne sont effacés
   qu'au re-spawn du MÊME pod_id (`Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`). Donc un worker
-  par-issue à usage unique — jamais re-mandaté — laisse son clone git sur disque POUR TOUJOURS :
+  par-issue à usage unique — jamais re-briefé — laisse son clone git sur disque POUR TOUJOURS :
   accumulation monotone. Ici on balaie les tombstones TERMINALES (phase `succeeded`/`released`/`killed`)
   et ORPHELINES (aucun Pod GenServer vivant) et on efface les deux dossiers via le geste partagé
   `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2` (le re-spawn re-clonerait FRESH de toute façon). Sûr car

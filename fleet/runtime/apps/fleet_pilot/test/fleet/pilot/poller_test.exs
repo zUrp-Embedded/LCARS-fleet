@@ -101,7 +101,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     def get_predecessor_result(_repo, _n, _opts), do: :none
-    # Fix famine-d'info : build_judge_mandate lit le critère (body de l'issue) via get_issue.
+    # Fix famine-d'info : build_judge_brief lit le critère (body de l'issue) via get_issue.
     def get_issue(_repo, n, _opts), do: {:ok, %{"number" => n, "body" => "critère stub ##{n}"}}
 
     # ②.1d : par defaut aucun verdict de juge (les tests poller ne couvrent pas merge/rework) → tout
@@ -135,14 +135,14 @@ defmodule Fleet.Pilot.PollerTest do
            spec: %{}
          }}
 
-    # Corr.3 : juge de PR (qualifier/reviewer) -> mandate_kind: judge (mandat GateBrief desamorce).
+    # Corr.3 : juge de PR (qualifier/reviewer) -> brief_kind: judge (brief GateBrief desamorce).
     def load(role) when role in ["qualifier", "reviewer"],
       do:
         {:ok,
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"name" => role, "slot_scope" => "instance"},
-           spec: %{"mandate_kind" => "judge"}
+           spec: %{"brief_kind" => "judge"}
          }}
 
     def load(_), do: {:error, :not_found}
@@ -209,7 +209,7 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   # Recovery de wake qui ÉCHOUE (pod injoignable, re-roll non réparé) → `StageDispatcher.dispatch_issue`
-  # surface `{:error, {:wake_unreached, …}}` : le pipeline EST démarré (verrou + pod + mandat posés en amont,
+  # surface `{:error, {:wake_unreached, …}}` : le pipeline EST démarré (verrou + pod + brief posés en amont,
   # ordre canonique), seul le réveil tmux a raté. Sert à prouver le contrat « wake raté ⇒ bail PRIS ».
   defmodule FailingWakeRecovery do
     def wake(_pod_id, _respawn_fun, _opts), do: {:error, {:escalated, :not_found}}
@@ -266,7 +266,7 @@ defmodule Fleet.Pilot.PollerTest do
 
       {name, pid} = start_stage_poller({:ok, issues})
 
-      # #5.2 D2 — route nil → le poller ONBOARDE (grave la carte par défaut mandate-gate via Loader) puis
+      # #5.2 D2 — route nil → le poller ONBOARDE (grave la carte par défaut brief-gate via Loader) puis
       # DÉFÈRE → skip (le tick suivant la voit routée → dispatch). Le dispatch routé est testé dans le
       # describe « route gravée » + stage_dispatcher_test. Au niveau Poller, le contrat = le tally.
       assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
@@ -744,7 +744,7 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "wake raté sur le 1er ticket PREND le bail intra-tick → le 2e ne démarre PAS (un seul pipeline)" do
       # Régression : l'ordre canonique du spawn est verrou → pod → enqueue → WAKE (le wake EN DERNIER). Donc
-      # `{:error, {:wake_unreached, …}}` = pipeline DÉMARRÉ (verrou + pod + mandat posés), seul le réveil tmux
+      # `{:error, {:wake_unreached, …}}` = pipeline DÉMARRÉ (verrou + pod + brief posés), seul le réveil tmux
       # a raté. Le pipeline DOIT tenir le bail repo-sérialisé. Deux issues du MÊME repo EN FILE dans le même
       # tick ; le wake de la 1re échoue (FailingWakeRecovery). Le 1er pipeline est démarré → bail PRIS → le 2e
       # ticket est SKIPPÉ (un seul pipeline démarre). Le wake raté n'est PAS avalé : il reste compté en `errors`

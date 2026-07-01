@@ -1,13 +1,13 @@
 defmodule Fleet.Credentials.ForgeIdentity do
   @moduledoc """
   Résout l'identité git d'un livrable : **author = l'humain
-  du mandat**, le rôle LCARS étant porté par un trailer **vérifié** `Co-authored-by:
+  du brief**, le rôle LCARS étant porté par un trailer **vérifié** `Co-authored-by:
   LCARS-<role>` (non négociable : l'identité n'est JAMAIS aplatie sur un compte partagé ;
   la signature machine est un trailer vérifié, pas l'auteur).
 
   ## D'où vient l'humain
 
-  L'humain du mandat = **l'user du process runtime** (`id -un`). Doctrine 2026-06-11 :
+  L'humain du brief = **l'user du process runtime** (`id -un`). Doctrine 2026-06-11 :
   la fleet ENTIÈRE tourne sous l'user OS de l'humain qui la lance (`User=<humain>`) —
   chaque humain = sa fleet sous son user, isolation OS par construction ; le pod (Port
   BEAM) hérite cet UID. Donc l'user courant EST l'humain. Pas de défaut littéral
@@ -101,8 +101,8 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   @doc """
-  Instruction de signature à injecter dans le mandat du pod — SOURCE UNIQUE du trailer.
-  Dérive de `coauthor_trailer/1` : tout mandat (construit par `Pilot.MandateBuilder.build_mandate`)
+  Instruction de signature à injecter dans le brief du pod — SOURCE UNIQUE du trailer.
+  Dérive de `coauthor_trailer/1` : tout brief (construit par `Pilot.BriefBuilder.build_brief`)
   doit l'utiliser, sinon la chaîne (instruction côté pod / needle de la gate d'identité de commit)
   se désaccorde du canon.
   """

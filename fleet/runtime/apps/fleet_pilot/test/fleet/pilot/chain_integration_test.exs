@@ -89,7 +89,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     def get_predecessor_result(_pid, _r, _n, _o), do: :none
 
-    # Fix famine-d'info : build_judge_mandate lit le critère (body de l'issue) via get_issue.
+    # Fix famine-d'info : build_judge_brief lit le critère (body de l'issue) via get_issue.
     def get_issue(pid, _r, _n, _o), do: {:ok, get(pid)}
 
     # ── PR ──
@@ -232,7 +232,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   end
 
   defmodule CapLoader do
-    # engineer = worker (mandat = body) ; reviewer/qualifier = juge (mandate_kind judge).
+    # engineer = worker (brief = body) ; reviewer/qualifier = juge (brief_kind judge).
     def load("engineer"),
       do:
         {:ok,
@@ -252,7 +252,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
              "slot_scope" =>
                if(role in ["gatekeeper", "architect"], do: "project", else: "instance")
            },
-           spec: %{"mandate_kind" => "judge"}
+           spec: %{"brief_kind" => "judge"}
          }}
 
     def load(_), do: {:error, :not_found}
@@ -429,7 +429,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert_received {:spawned, "issue-1", o2}
     assert o2[:stage] == "review"
 
-    # review finit AVEC gate soft -> escalade gatekeeper (mandat enqueue, PAS d'avance).
+    # review finit AVEC gate soft -> escalade gatekeeper (brief enqueue, PAS d'avance).
     assert {:escalate, "t", eval_ctx} =
              HopConsumer.maybe_complete(
                completed(o2, "reviewer", %{"severity_max" => "ok"}),
