@@ -35,7 +35,7 @@ defmodule Fleet.Observation.ReadModelTest do
     p = ReadModel.projection()
     assert p.total == 6
     assert p.counts["work_item.completed"] == 1
-    assert [%{type: "workflow_map.completed"}] = p.pipelines
+    assert [%{type: "workflow_map.completed"}] = p.workflow_runs
     # audit.verdict ET coord.escalation_* → deck gatekeeper (2 entrées)
     assert [%{type: "coord.escalation_triggered"}, %{type: "audit.verdict"}] = p.gatekeeper
     assert [%{type: "gitea.opened"}] = p.coordination

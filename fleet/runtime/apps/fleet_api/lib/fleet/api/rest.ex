@@ -7,7 +7,7 @@ defmodule Fleet.API.Rest do
     * `GET /api/health` — readiness probe (200 dès Cowboy bind ; consommé par `lcars-readiness`)
     * `GET /api/readiness/deep` — état opérationnel LIVE via
       `Fleet.API.Readiness.deep/0` — anti-vert-creux
-    * `GET /api/pipelines` / `issues` / `pods` — lecture état (stubs MVP)
+    * `GET /api/workflow_runs` / `issues` / `pods` — lecture état (stubs MVP)
     * `POST /api/admin/spawn` — filtre le payload par allowlist DTO (422 si un champ interne du
       spawner / une clé inconnue est présent), valide le cap-profile (400 si absent, 422 si
       inconnu / host-native), exige un `brief` pour un cap-profile one-shot (422 sinon — miroir
@@ -24,7 +24,7 @@ defmodule Fleet.API.Rest do
 
   La lecture (dashboard GET, observation) reste no-auth — légitime, inchangé. **L'écriture de
   config a été retirée** : il n'existe plus de porte d'écriture générique sur le repo de config.
-  Une directive active (cap-profiles, coord-policies, pipelines) ne se modifie QUE par git/forge
+  Une directive active (cap-profiles, coord-policies, workflow_maps) ne se modifie QUE par git/forge
   (la source de vérité tracée), jamais par un POST no-auth. La SEULE écriture restante est
   `POST /api/admin/spawn`, qui n'est PAS couverte par un blanket no-auth : elle garde ses gardes
   propres (allowlist DTO + host-native refusé à l'admission).
@@ -50,8 +50,8 @@ defmodule Fleet.API.Rest do
     send_json(conn, Fleet.API.Readiness.deep())
   end
 
-  get "/api/pipelines" do
-    send_json(conn, %{pipelines: []})
+  get "/api/workflow_runs" do
+    send_json(conn, %{workflow_runs: []})
   end
 
   get "/api/issues" do

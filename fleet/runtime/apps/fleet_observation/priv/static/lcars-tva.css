@@ -231,14 +231,14 @@ html { scroll-behavior: smooth; }
 /* Detail panels cachés par défaut (mode-fleet overview) */
 .panel.detail-workers,
 .panel.detail-memory,
-.panel.detail-tickets,
+.panel.detail-issues,
 .panel.detail-stats,
 .panel.detail-health {
   display: none;
 }
 
-/* mode-fleet (overview) : cacher panel-tickets et panel-stats — accessibles via rail */
-.lcars-main.mode-fleet .panel-tickets,
+/* mode-fleet (overview) : cacher panel-issues et panel-stats — accessibles via rail */
+.lcars-main.mode-fleet .panel-issues,
 .lcars-main.mode-fleet .panel-stats {
   display: none;
 }
@@ -265,7 +265,7 @@ html { scroll-behavior: smooth; }
 /* En mode dédié, cacher tous les autres panels (sauf le mode + ses détails) */
 .lcars-main.mode-workers .panel:not(.panel-workers):not(.detail-workers),
 .lcars-main.mode-memory  .panel:not(.panel-memory):not(.detail-memory),
-.lcars-main.mode-tickets .panel:not(.panel-tickets):not(.detail-tickets),
+.lcars-main.mode-issues .panel:not(.panel-issues):not(.detail-issues),
 .lcars-main.mode-stats   .panel:not(.panel-stats):not(.detail-stats),
 .lcars-main.mode-health  .panel:not(.panel-health):not(.detail-health),
 .lcars-main.mode-system  .panel:not(.panel-system) {
@@ -275,7 +275,7 @@ html { scroll-behavior: smooth; }
 /* Réafficher detail-X uniquement dans mode-X correspondant */
 .lcars-main.mode-workers .panel.detail-workers,
 .lcars-main.mode-memory  .panel.detail-memory,
-.lcars-main.mode-tickets .panel.detail-tickets,
+.lcars-main.mode-issues .panel.detail-issues,
 .lcars-main.mode-stats   .panel.detail-stats,
 .lcars-main.mode-health  .panel.detail-health {
   display: flex;
@@ -286,8 +286,8 @@ html { scroll-behavior: smooth; }
 .lcars-main.mode-workers .detail-workers,
 .lcars-main.mode-memory  .panel-memory,
 .lcars-main.mode-memory  .detail-memory,
-.lcars-main.mode-tickets .panel-tickets,
-.lcars-main.mode-tickets .detail-tickets,
+.lcars-main.mode-issues .panel-issues,
+.lcars-main.mode-issues .detail-issues,
 .lcars-main.mode-stats   .panel-stats,
 .lcars-main.mode-stats   .detail-stats,
 .lcars-main.mode-health  .panel-health,

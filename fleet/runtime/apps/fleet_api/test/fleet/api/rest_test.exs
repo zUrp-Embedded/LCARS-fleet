@@ -51,10 +51,10 @@ defmodule Fleet.API.RestTest do
   end
 
   describe "GET endpoints (lecture état)" do
-    test "GET /api/pipelines → 200 JSON" do
-      conn = conn(:get, "/api/pipelines") |> Rest.call(@opts)
+    test "GET /api/workflow_runs → 200 JSON" do
+      conn = conn(:get, "/api/workflow_runs") |> Rest.call(@opts)
       assert conn.status == 200
-      assert {:ok, %{"pipelines" => _}} = Jason.decode(conn.resp_body)
+      assert {:ok, %{"workflow_runs" => _}} = Jason.decode(conn.resp_body)
     end
 
     test "GET /api/issues → 200 JSON" do

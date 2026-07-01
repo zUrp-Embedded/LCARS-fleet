@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.Poller do
     * **PR** avec reviewer demandé → spawn le **juge** ; PR `REQUEST_CHANGES` sans reviewer → re-spawn
       le **producteur** pour le rework (`StepDispatcher.dispatch_review`).
     * verrou `lcars-in-flight` → skip (un pod travaille déjà la brique). **Bail repo-sérialisé** :
-      au plus un pipeline actif par repo (feature-branches séquentielles → merge FF garanti).
+      au plus un workflow_run actif par repo (feature-branches séquentielles → merge FF garanti).
 
   ## Robustesse (port v1.5 `LcarsFleetPoller`, conservé)
 
@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.Poller do
 
   alias Fleet.Pilot.StepDispatcher
 
-  # Verrou pipeline (source unique `Fleet.Pilot.Labels`) — lu par la réconciliation d'orphelins.
+  # Verrou workflow_run (source unique `Fleet.Pilot.Labels`) — lu par la réconciliation d'orphelins.
   @in_flight Fleet.Pilot.Labels.in_flight()
 
   # Verrou HUMAIN posé sur l'ISSUE à l'escalade (verdict gatekeeper escalate/halt/redirect, ou conflit non
@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.Poller do
     task_queue: nil,
     clock: nil,
     # Seam de recovery de wake threadé jusqu'à `StepDispatcher.dispatch_issue` (défaut nil → la vraie
-    # `WakeRecovery.wake/3`). Rend testable le contrat « wake raté ⇒ pipeline démarré, bail PRIS » sans hit
+    # `WakeRecovery.wake/3`). Rend testable le contrat « wake raté ⇒ workflow_run démarré, bail PRIS » sans hit
     # IncidentRegistry/tmux réels.
     wake_recovery: nil,
     poll_count: 0,
@@ -363,7 +363,7 @@ defmodule Fleet.Pilot.Poller do
     forge = step_forge_client(state)
 
     # Bail repo-sérialisé : on liste TOUS les ouverts (in-flight inclus) pour compter les
-    # pipelines actifs. On liste AUSSI les PR ouvertes → les JUGES sont dispatchés
+    # workflow_runs actifs. On liste AUSSI les PR ouvertes → les JUGES sont dispatchés
     # via les requested_reviewers de la PR (plus l'assignee issue). decide skip les in-flight.
     # Scoping multi-user FORGE-SIDE : MÊME filtre `assigned_by` pour issues ET PR (les deux passent
     # par /issues?type=… côté ForgeClient). Le poller ne voit QUE les items de SON humain → le scoping vit en
@@ -592,7 +592,7 @@ defmodule Fleet.Pilot.Poller do
     forge.remove_label(state.repo, number, @in_flight, state.forge_opts)
   end
 
-  # Issues portant une PR fleet ouverte (`lcars/issue-N-role`) = pipelines en phase JUGE :
+  # Issues portant une PR fleet ouverte (`lcars/issue-N-role`) = workflow_runs en phase JUGE :
   # le producteur a fini, la suite est dispatchee via les pulls -> le chemin issue les SKIP
   # (sinon le poller re-spawnerait le producteur, encore assigne).
   defp pulls_issue_ids(pulls) do
@@ -618,8 +618,8 @@ defmodule Fleet.Pilot.Poller do
   defp zero_tally, do: %{dispatched: 0, skipped: 0, errors: 0}
 
   # Chemin PR-driven : chaque PR ouverte avec une review demandée → dispatch le juge.
-  # Non gardé par le bail (les juges d'un pipeline DÉJÀ actif doivent avancer ; le bail ne borne
-  # que l'ENTRÉE de nouveaux pipelines, côté issues).
+  # Non gardé par le bail (les juges d'un workflow_run DÉJÀ actif doivent avancer ; le bail ne borne
+  # que l'ENTRÉE de nouveaux workflow_runs, côté issues).
   defp step_process_pulls(pulls, opts) do
     Enum.reduce(pulls, zero_tally(), fn pr, acc ->
       case StepDispatcher.dispatch_review(pr, opts) do
@@ -633,9 +633,9 @@ defmodule Fleet.Pilot.Poller do
 
   defp step_process_issues(issues, pr_issue_ids, state, opts) do
     # Cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, gravée à l'onboard) — plus de
-    # routing par label. Le poller lit la route → dispatch (workflow_map_role). Le bail « 1 pipeline actif/repo »
+    # routing par label. Le poller lit la route → dispatch (workflow_map_role). Le bail « 1 workflow_run actif/repo »
     # se lit AUSSI sur la route (robuste, append-only). On classe chaque issue UNE fois :
-    #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er step = pipeline démarré) → tient le bail ;
+    #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er step = workflow_run démarré) → tient le bail ;
     #     on dispatche son step courant (continue le step_run, ou skip si in-flight).
     #   - EN FILE (routée au 1er step, ou routeless à onboarder, pas encore dispatchée) → démarre seulement
     #     si le bail est libre ; sinon attend (sérialisation → feature-branches séquentielles → FF merge).
@@ -667,13 +667,13 @@ defmodule Fleet.Pilot.Poller do
             engaged ->
               dispatch_engaged(payload, item_opts, acc, lease)
 
-            # EN FILE, bail tenu par un autre pipeline → attend.
+            # EN FILE, bail tenu par un autre workflow_run → attend.
             lease ->
               {%{acc | skipped: acc.skipped + 1}, lease}
 
             # EN FILE, bail libre → DÉMARRE (prend le bail si effectivement dispatché).
             true ->
-              start_pipeline(payload, item_opts, acc)
+              start_workflow_run(payload, item_opts, acc)
           end
       end)
 
@@ -683,11 +683,11 @@ defmodule Fleet.Pilot.Poller do
   # Dispatch d'un item + mise à jour du tally ET du bail. Deux concerns DISTINCTS, que le retour de
   # `dispatch_issue` mélange :
   #
-  #   * BAIL — le pipeline a-t-il DÉMARRÉ (pod spawné + verrou `lcars-in-flight` posé) ? L'ordre canonique
+  #   * BAIL — le workflow_run a-t-il DÉMARRÉ (pod spawné + verrou `lcars-in-flight` posé) ? L'ordre canonique
   #     du spawn (`StepDispatcher.spawn_step`) est verrou → pod → enqueue → WAKE, le wake EN DERNIER. Donc
-  #     `{:error, {:wake_unreached, …}}` veut dire : le pipeline EST démarré (verrou + pod + brief en place),
-  #     SEUL le réveil tmux a raté. Le pipeline tient donc le bail repo-sérialisé — sinon un 2e issue du même
-  #     repo dans le même tick démarrerait un 2e pipeline (deux feature-branches concurrentes → conflit de merge).
+  #     `{:error, {:wake_unreached, …}}` veut dire : le workflow_run EST démarré (verrou + pod + brief en place),
+  #     SEUL le réveil tmux a raté. Le workflow_run tient donc le bail repo-sérialisé — sinon un 2e issue du même
+  #     repo dans le même tick démarrerait un 2e workflow_run (deux feature-branches concurrentes → conflit de merge).
   #   * TALLY/backoff — y a-t-il une anomalie à SURFACER ? Le wake raté reste compté en `errors` (il alimente
   #     `err_streak`/telemetry → backoff partiel) : un kick injoignable ne doit PAS être avalé en succès
   #     silencieux (le pod ne tourne pas tant qu'il n'est pas réveillé).
@@ -714,18 +714,18 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # Dispatch d'un pipeline ENGAGÉ (il tient DÉJÀ le bail) : le bail reste inchangé quoi qu'il arrive
+  # Dispatch d'un workflow_run ENGAGÉ (il tient DÉJÀ le bail) : le bail reste inchangé quoi qu'il arrive
   # (le tally est mis à jour, `started?` est ignoré — l'engagement vient de la classification, pas de ce step_run).
   defp dispatch_engaged(payload, opts, acc, lease) do
     {acc2, _started?} = step_do_dispatch(payload, opts, acc)
     {acc2, lease}
   end
 
-  # Démarrage d'un pipeline EN FILE (bail libre) : dispatch ; si un pod a effectivement été mis en vol
+  # Démarrage d'un workflow_run EN FILE (bail libre) : dispatch ; si un pod a effectivement été mis en vol
   # (spawné OU wake_unreached = verrou+pod posés), le bail devient TENU → les autres issues en file du même
-  # tick attendent (sérialisation 1 pipeline/repo). Un wake raté tient le bail (le pipeline est démarré),
+  # tick attendent (sérialisation 1 workflow_run/repo). Un wake raté tient le bail (le workflow_run est démarré),
   # PAS un échec de dispatch (rien démarré).
-  defp start_pipeline(payload, opts, acc) do
+  defp start_workflow_run(payload, opts, acc) do
     {acc2, started?} = step_do_dispatch(payload, opts, acc)
     {acc2, started?}
   end
@@ -733,7 +733,7 @@ defmodule Fleet.Pilot.Poller do
   # Classifie une issue (bail) ET pré-résout ce que `dispatch_issue` relirait sinon. Renvoie
   # `{engaged?, prefetch_kw}` ; `prefetch_kw` (mergé aux opts de dispatch) porte `:prefetched_route` +
   # `:prefetched_workflow_map` → lecture forge/disque UNE seule fois. ENGAGÉ = pod en vol (`in-flight`) OU route
-  # avancée au-delà du 1er step (pipeline démarré, entre deux step_runs). Fast-path : in-flight → pas de lecture
+  # avancée au-delà du 1er step (workflow_run démarré, entre deux step_runs). Fast-path : in-flight → pas de lecture
   # route (`decide` le skip de toute façon). Routeless (`:none`) → EN FILE, route nil threadée (onboard en
   # aval). Erreur HTTP get_route → EN FILE, RIEN threadé (le dispatch re-lit → fail-loud `:route_resolution`,
   # jamais de wedge du bail par une workflow_map/route illisible).
@@ -752,11 +752,11 @@ defmodule Fleet.Pilot.Poller do
         {:ok, {workflow_map_name, step} = route}
         when is_binary(workflow_map_name) and is_binary(step) ->
           # Le bail se lit sur la ROUTE (append-only, robuste), JAMAIS sur le succès du chargement de la
-          # workflow_map. Une route PRÉSENTE = un pipeline déjà entré dans la machine. ENGAGÉ ssi le step courant
-          # n'est pas le 1er de la workflow_map (pipeline avancé entre deux step_runs). Si la workflow_map échoue à charger
-          # TRANSITOIREMENT (réseau/forge nil), on NE PEUT PAS exclure que ce pipeline soit avancé → fail-closed :
-          # on le classe ENGAGÉ (bail TENU). Sinon une workflow_map-nil ferait perdre le bail d'un pipeline engagé →
-          # un 2e issue du même repo démarrerait un 2e pipeline (perte de sérialisation). Le dispatch de SON
+          # workflow_map. Une route PRÉSENTE = un workflow_run déjà entré dans la machine. ENGAGÉ ssi le step courant
+          # n'est pas le 1er de la workflow_map (workflow_run avancé entre deux step_runs). Si la workflow_map échoue à charger
+          # TRANSITOIREMENT (réseau/forge nil), on NE PEUT PAS exclure que ce workflow_run soit avancé → fail-closed :
+          # on le classe ENGAGÉ (bail TENU). Sinon une workflow_map-nil ferait perdre le bail d'un workflow_run engagé →
+          # un 2e issue du même repo démarrerait un 2e workflow_run (perte de sérialisation). Le dispatch de SON
           # step fail-loud si la workflow_map manque (workflow_map re-lue côté StepDispatcher), mais le bail NE se libère
           # pas pour autant. WorkflowMap revenue au tick suivant → classification précise reprise.
           workflow_map = load_workflow_map_or_nil(workflow_map_name, state)

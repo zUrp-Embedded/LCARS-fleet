@@ -83,7 +83,7 @@ defmodule Fleet.Observation.Deck do
     %{
       pod_id: info.pod_id,
       role: role_of(info, known),
-      ticket_id: Map.get(info, :ticket_id),
+      issue_id: Map.get(info, :issue_id),
       phase: info.phase,
       conditions: Map.get(info, :conditions, []),
       session_id: Map.get(info, :session_id),
@@ -142,7 +142,7 @@ defmodule Fleet.Observation.Deck do
     </head>
     <body>
     <table border="1">
-    <tr><th>role</th><th>pod_id</th><th>phase</th><th>ticket</th><th>conditions</th><th>tmux</th><th>session</th></tr>
+    <tr><th>role</th><th>pod_id</th><th>phase</th><th>issue</th><th>conditions</th><th>tmux</th><th>session</th></tr>
     #{rows}
     </table>
     </body>
@@ -160,7 +160,7 @@ defmodule Fleet.Observation.Deck do
         "<td>#{h(role)}</td>" <>
         "<td>#{h(Map.get(p, :pod_id))}</td>" <>
         "<td>#{h(Map.get(p, :phase))}</td>" <>
-        "<td>#{h(Map.get(p, :ticket_id))}</td>" <>
+        "<td>#{h(Map.get(p, :issue_id))}</td>" <>
         "<td>#{h(Enum.join(Map.get(p, :conditions, []), ", "))}</td>" <>
         "<td>#{h(Map.get(p, :tmux_session))}</td>" <>
         "<td>#{h(Map.get(p, :session_id))}</td>" <>
@@ -189,7 +189,8 @@ defmodule Fleet.Observation.Deck do
   # de CE repo aujourd'hui (donc inerte ici) mais `list/0` scanne réellement ces sous-dossiers, donc ce
   # n'est pas une garde sur du vide : elle mord dès qu'un de ces profils existe. Propre à terme = un champ
   # sémantique (`monk_registry`/`monk_instance` non-nul), pas un préfixe de nom.
-  defp memory_x_role?(name), do: String.starts_with?(name, "monk") or String.starts_with?(name, "archivist")
+  defp memory_x_role?(name),
+    do: String.starts_with?(name, "monk") or String.starts_with?(name, "archivist")
 
   # Rôle qui tourne comme POD de fleet (peut donc porter un état pod) : `host_native != true`.
   # Même discriminateur sémantique que `Fleet.Spawner.PermanentBoot.boot_at_start?/1` — exclut `starfleet`
@@ -275,7 +276,7 @@ defmodule Fleet.Observation.Deck do
       return '<div class="pod-card">'
         + '<div class="pc-head"><img class="pc-icon" src="'+icon+'" alt=""><span class="pc-id">'+esc(p.pod_id)+'</span></div>'
         + '<div class="pc-row"><span class="pc-k">phase</span><span class="glyph">'+esc(p.phase)+'</span></div>'
-        + '<div class="pc-row"><span class="pc-k">ticket</span>'+esc(p.ticket_id)+'</div>'
+        + '<div class="pc-row"><span class="pc-k">issue</span>'+esc(p.issue_id)+'</div>'
         + '<div class="pc-row"><span class="pc-k">conditions</span>'+esc((p.conditions||[]).join(', '))+'</div>'
         + '<div class="pc-row"><span class="pc-k">tmux</span>'+esc(p.tmux_session)+'</div>'
         + '</div>';
@@ -308,18 +309,18 @@ defmodule Fleet.Observation.Deck do
         document.getElementById('bridge-body').innerHTML =
           '<span class="stat">events <b>'+(p.total||0)+'</b></span>'
           +'<span class="stat">types <b>'+Object.keys(c).length+'</b></span>'
-          +'<span class="stat">pipelines <b>'+(p.pipelines||[]).length+'</b></span>'
+          +'<span class="stat">workflow_runs <b>'+(p.workflow_runs||[]).length+'</b></span>'
           +'<span class="stat">gatekeeper <b>'+(p.gatekeeper||[]).length+'</b></span>'
           +'<span class="stat">diag <b>'+(p.diagnostics||[]).length+'</b></span>';
         document.getElementById('flow-tasks').innerHTML =
-          '<span class="stat">enqueued <b>'+n(c,'task_enqueued')+'</b></span>'
-          +'<span class="stat">assigned <b>'+n(c,'task_assigned')+'</b></span>'
-          +'<span class="stat">completed <b>'+n(c,'task_completed')+'</b></span>'
-          +'<span class="stat">failed <b>'+n(c,'task_failed')+'</b></span>'
-          +'<span class="stat">cleared <b>'+n(c,'task_cleared')+'</b></span>';
-        fillList('flow-body', p.pipelines, 'aucun pipeline observé');
+          '<span class="stat">enqueued <b>'+n(c,'work_item.enqueued')+'</b></span>'
+          +'<span class="stat">assigned <b>'+n(c,'work_item.assigned')+'</b></span>'
+          +'<span class="stat">completed <b>'+n(c,'work_item.completed')+'</b></span>'
+          +'<span class="stat">failed <b>'+n(c,'work_item.failed')+'</b></span>'
+          +'<span class="stat">cleared <b>'+n(c,'work_item.cleared')+'</b></span>';
+        fillList('flow-body', p.workflow_runs, 'aucun workflow_run observé');
         fillList('gk-body', p.gatekeeper, 'aucun verdict / escalade');
-        fillList('coord-body', p.coordination, 'aucune coordination / ticket');
+        fillList('coord-body', p.coordination, 'aucune coordination / issue');
         fillList('stream-body', p.stream, 'flux vide');
         fillList('diag-body', p.diagnostics, 'aucun signal diagnostic');
       }catch(e){}
