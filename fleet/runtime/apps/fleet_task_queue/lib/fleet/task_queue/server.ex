@@ -27,7 +27,7 @@ defmodule Fleet.TaskQueue.Server do
   ## Options
   `:name` (`nil` → anonyme, isolation tests), `:state_path`, `:persist`,
   `:topic` (défaut `"fleet.events"`), `:retention_terminal_max` (nombre max
-  de tâches TERMINALES conservées, défaut 500 ; borne `tasks` en mémoire ET la taille
+  de tâches TERMINALES conservées, défaut 500 ; borne `work_items` en mémoire ET la taille
   de `state.json` réécrit à chaque mutation. Les tâches ACTIVES ne comptent pas),
   `:bus` (seam, défaut `Fleet.EventRouter.Bus` ; module `broadcast/2` — injecté en test pour
   exercer le chemin lifecycle non-avalé `work_item_completed`).
@@ -47,7 +47,7 @@ defmodule Fleet.TaskQueue.Server do
   @default_topic "fleet.events"
   @active_states [:pending, :assigned, :in_progress]
   # Borne de rétention des tâches terminales (:completed/:failed/:cleared). Sans elle,
-  # `tasks` croît sans borne et `persist/1` réécrit un `state.json` toujours plus gros à CHAQUE
+  # `work_items` croît sans borne et `persist/1` réécrit un `state.json` toujours plus gros à CHAQUE
   # mutation. On garde les N plus récentes ; les actives ne comptent pas (cf. prune_terminal/2).
   @default_retention_terminal 500
 
@@ -71,7 +71,7 @@ defmodule Fleet.TaskQueue.Server do
     state_path = Keyword.get(opts, :state_path, default_path())
 
     base = %{
-      tasks: %{},
+      work_items: %{},
       # Last-poll par pod (l'agent a appelé get_for_pod = ACK in-band, MÊME sans work item → signal
       # bootstrap « l'agent est up + a tendu la main »). In-mem/éphémère : la récence vit en runtime, pas
       # persisté (un restart re-établit via les polls suivants).
@@ -93,9 +93,14 @@ defmodule Fleet.TaskQueue.Server do
     }
 
     case load_state(state_path, persist?) do
-      :empty -> {:ok, base}
-      {:ok, tasks} -> {:ok, %{base | tasks: tasks}, {:continue, :reschedule_deadlines}}
-      {:corrupt, found} -> {:ok, base, {:continue, {:corrupt, found}}}
+      :empty ->
+        {:ok, base}
+
+      {:ok, work_items} ->
+        {:ok, %{base | work_items: work_items}, {:continue, :reschedule_deadlines}}
+
+      {:corrupt, found} ->
+        {:ok, base, {:continue, {:corrupt, found}}}
     end
   end
 
@@ -104,7 +109,7 @@ defmodule Fleet.TaskQueue.Server do
     # Recovery : les deadlines ne sont armées qu'à l'enqueue. Après restart, on ré-arme
     # les tâches ACTIVES ; une deadline dépassée pendant le downtime → check immédiat (→ :work_item_failed via
     # handle_info), pas active-pour-toujours.
-    for {_id, %WorkItem{state: s} = t} <- state.tasks, s in @active_states do
+    for {_id, %WorkItem{state: s} = t} <- state.work_items, s in @active_states do
       maybe_schedule_deadline(t)
     end
 
@@ -141,7 +146,7 @@ defmodule Fleet.TaskQueue.Server do
     }
 
     # AXIOME « 1 work item ACTIF/pod » tenu À L'ÉCRITURE. Un work item FRAIS SUPERSÈDE TOUTE active du pod :
-    # le `:pending` jamais pullé (drop) ET l'`:assigned`/`:in_progress` en cours (→ `:cleared`). Un re-mandate
+    # le `:pending` jamais pullé (drop) ET l'`:assigned`/`:in_progress` en cours (→ `:cleared`). Un re-brief
     # remplace l'ancien : le pod prendra le nouveau (seul actif restant) au prochain `get_for_pod`. L'unicité
     # DOIT être tenue ici, pas seulement à la lecture : garder une `:assigned` stale à côté du nouveau pending
     # la laisserait ACTIVE et invisible aux gardes (`find_active` = `max_by(enqueued_at)` sert la + récente mais
@@ -168,7 +173,7 @@ defmodule Fleet.TaskQueue.Server do
     # (le cas `:no_task` est le signal bootstrap « l'agent est up + armé »).
     state = record_poll(state, pod_id)
 
-    case find_active(state.tasks, pod_id) do
+    case find_active(state.work_items, pod_id) do
       nil ->
         {:reply, {:error, :no_task}, state}
 
@@ -190,9 +195,9 @@ defmodule Fleet.TaskQueue.Server do
   end
 
   def handle_call({:submit_result, pod_id, result}, _from, state) do
-    case find_active(state.tasks, pod_id) do
+    case find_active(state.work_items, pod_id) do
       nil ->
-        if has_completed?(state.tasks, pod_id),
+        if has_completed?(state.work_items, pod_id),
           do: {:reply, {:error, :double_submit_ignored}, state},
           else: {:reply, {:error, :no_active_task}, state}
 
@@ -251,14 +256,14 @@ defmodule Fleet.TaskQueue.Server do
   # l'enqueue). Un broadcast `:work_item_cleared` par tâche clearée ; aucune active → no-op idempotent.
   def handle_call({:clear_for_pod, pod_id}, _from, state) do
     # Le clear décommissionne le pod → on retire AUSSI son last-poll de `state.polls` (symétrique de
-    # la purge des `tasks` ci-dessous). Sans ça, `polls` (un timestamp par pod, JAMAIS persisté) accumule
+    # la purge des `work_items` ci-dessous). Sans ça, `polls` (un timestamp par pod, JAMAIS persisté) accumule
     # indéfiniment les pod_id morts : `record_poll` n'ajoute que des entrées, et `prune_terminal` n'élague
-    # que `tasks`. `clear_for_pod` est le point de purge canonique du pod → c'est ici qu'un poll devient
+    # que `work_items`. `clear_for_pod` est le point de purge canonique du pod → c'est ici qu'un poll devient
     # obsolète. `Map.delete` idempotent : no-op si le pod n'a jamais pollé ou n'a aucune active.
     state = %{state | polls: Map.delete(state.polls, pod_id)}
 
     active =
-      state.tasks
+      state.work_items
       |> Map.values()
       |> Enum.filter(&(&1.pod_id == pod_id and &1.state in @active_states))
 
@@ -266,8 +271,8 @@ defmodule Fleet.TaskQueue.Server do
       [] ->
         {:reply, :ok, state}
 
-      tasks ->
-        cleared = Enum.map(tasks, &%{&1 | state: :cleared})
+      work_items ->
+        cleared = Enum.map(work_items, &%{&1 | state: :cleared})
         new_state = Enum.reduce(cleared, state, &put_task(&2, &1)) |> persist()
 
         for t <- cleared,
@@ -286,13 +291,13 @@ defmodule Fleet.TaskQueue.Server do
   # ============================================================
 
   def handle_call(:list_pending, _from, state) do
-    pending = state.tasks |> Map.values() |> Enum.filter(&(&1.state == :pending))
+    pending = state.work_items |> Map.values() |> Enum.filter(&(&1.state == :pending))
     {:reply, pending, state}
   end
 
   def handle_call({:pod_status, pod_id}, _from, state) do
     status =
-      case latest_for_pod(state.tasks, pod_id) do
+      case latest_for_pod(state.work_items, pod_id) do
         nil -> nil
         %WorkItem{state: s} -> s
       end
@@ -304,7 +309,7 @@ defmodule Fleet.TaskQueue.Server do
   # poller s'en sert pour qu'un eng pipe project-scoped possede le verrou de sa brique active/en-cours.
   def handle_call({:pod_active_issue_id, pod_id}, _from, state) do
     issue =
-      case latest_for_pod(state.tasks, pod_id) do
+      case latest_for_pod(state.work_items, pod_id) do
         nil -> nil
         %WorkItem{issue_id: t} -> t
       end
@@ -324,7 +329,7 @@ defmodule Fleet.TaskQueue.Server do
 
   @impl GenServer
   def handle_info({:check_deadline, work_item_id}, state) do
-    case Map.get(state.tasks, work_item_id) do
+    case Map.get(state.work_items, work_item_id) do
       %WorkItem{state: s} = task when s in @active_states ->
         failed = %{task | state: :failed}
         new_state = state |> put_task(failed) |> persist()
@@ -349,15 +354,15 @@ defmodule Fleet.TaskQueue.Server do
   # Helpers — sélection
   # ============================================================
 
-  defp find_active(tasks, pod_id) do
-    tasks
+  defp find_active(work_items, pod_id) do
+    work_items
     |> Map.values()
     |> Enum.filter(&(&1.pod_id == pod_id and &1.state in @active_states))
     |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
   end
 
-  defp latest_for_pod(tasks, pod_id) do
-    tasks
+  defp latest_for_pod(work_items, pod_id) do
+    work_items
     |> Map.values()
     |> Enum.filter(&(&1.pod_id == pod_id))
     |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
@@ -370,8 +375,8 @@ defmodule Fleet.TaskQueue.Server do
   # (autres pods, terminaux du pod). Borne la queue à 1 active/pod À L'ÉCRITURE. Retourne
   # `{state, n_superseded}`.
   defp supersede_active(state, pod_id) do
-    tasks =
-      Map.new(state.tasks, fn {id, t} ->
+    work_items =
+      Map.new(state.work_items, fn {id, t} ->
         if t.pod_id == pod_id and t.state in @active_states do
           {id, %{t | state: :cleared}}
         else
@@ -380,34 +385,34 @@ defmodule Fleet.TaskQueue.Server do
       end)
 
     superseded =
-      Enum.count(state.tasks, fn {_id, t} ->
+      Enum.count(state.work_items, fn {_id, t} ->
         t.pod_id == pod_id and t.state in @active_states
       end)
 
-    {%{state | tasks: tasks}, superseded}
+    {%{state | work_items: work_items}, superseded}
   end
 
-  defp has_completed?(tasks, pod_id) do
-    Enum.any?(Map.values(tasks), &(&1.pod_id == pod_id and &1.state == :completed))
+  defp has_completed?(work_items, pod_id) do
+    Enum.any?(Map.values(work_items), &(&1.pod_id == pod_id and &1.state == :completed))
   end
 
   defp record_poll(state, pod_id) when is_binary(pod_id),
     do: %{state | polls: Map.put(state.polls, pod_id, now())}
 
   defp put_task(state, %WorkItem{} = task) do
-    tasks = Map.put(state.tasks, task.id, task)
-    %{state | tasks: prune_terminal(tasks, state.retention_terminal_max)}
+    work_items = Map.put(state.work_items, task.id, task)
+    %{state | work_items: prune_terminal(work_items, state.retention_terminal_max)}
   end
 
   # Garde au plus `max` tâches TERMINALES (les plus récentes), élague les plus vieilles.
   # No-op tant qu'on est sous le cap. Les tâches ACTIVES ne comptent pas et ne sont JAMAIS coupées
   # (work items en cours). L'ordre par récence (≠ ordre d'enqueue) protège la détection double-submit :
   # une tâche juste complétée est la plus récente → jamais élaguée en premier (has_completed?/1).
-  defp prune_terminal(tasks, max) do
-    terminal = for {_id, t} <- tasks, t.state not in @active_states, do: t
+  defp prune_terminal(work_items, max) do
+    terminal = for {_id, t} <- work_items, t.state not in @active_states, do: t
 
     if length(terminal) <= max do
-      tasks
+      work_items
     else
       drop_ids =
         terminal
@@ -415,7 +420,7 @@ defmodule Fleet.TaskQueue.Server do
         |> Enum.drop(max)
         |> MapSet.new(& &1.id)
 
-      Map.reject(tasks, fn {id, _t} -> MapSet.member?(drop_ids, id) end)
+      Map.reject(work_items, fn {id, _t} -> MapSet.member?(drop_ids, id) end)
     end
   end
 
@@ -531,8 +536,11 @@ defmodule Fleet.TaskQueue.Server do
   defp persist(%{persist: false} = state), do: state
   defp persist(%{state_path: nil} = state), do: state
 
-  defp persist(%{state_path: path, tasks: tasks} = state) do
-    data = %{"v" => 1, "tasks" => Map.new(tasks, fn {id, t} -> {id, WorkItem.to_map(t)} end)}
+  defp persist(%{state_path: path, work_items: work_items} = state) do
+    data = %{
+      "v" => 1,
+      "work_items" => Map.new(work_items, fn {id, t} -> {id, WorkItem.to_map(t)} end)
+    }
 
     try do
       File.mkdir_p!(Path.dirname(path))
@@ -569,8 +577,8 @@ defmodule Fleet.TaskQueue.Server do
 
   defp decode_state(content) do
     case Jason.decode(content) do
-      {:ok, %{"v" => 1, "tasks" => tasks_map}} when is_map(tasks_map) ->
-        decode_tasks(tasks_map)
+      {:ok, %{"v" => 1, "work_items" => work_items_map}} when is_map(work_items_map) ->
+        decode_work_items(work_items_map)
 
       {:ok, %{"v" => v}} ->
         {:corrupt, v}
@@ -583,8 +591,8 @@ defmodule Fleet.TaskQueue.Server do
   # fail-loud : une tâche non-désérialisable (state corrompu / champ requis absent) → `{:corrupt, ...}`,
   # PAS un drop silencieux. `reduce_while` HALTE sur la 1re tâche corrompue plutôt que de la FILTRER (état
   # tronqué en silence) ; `WorkItem.from_map` rend `{:error, _}` au lieu de RAISER (le fallback `:corrupt` tient).
-  defp decode_tasks(tasks_map) do
-    Enum.reduce_while(tasks_map, {:ok, %{}}, fn {id, tm}, {:ok, acc} ->
+  defp decode_work_items(work_items_map) do
+    Enum.reduce_while(work_items_map, {:ok, %{}}, fn {id, tm}, {:ok, acc} ->
       case WorkItem.from_map(tm) do
         {:ok, t} -> {:cont, {:ok, Map.put(acc, id, t)}}
         {:error, reason} -> {:halt, {:corrupt, {:task, id, reason}}}

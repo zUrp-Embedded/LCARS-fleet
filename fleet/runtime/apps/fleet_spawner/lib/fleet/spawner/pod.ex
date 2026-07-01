@@ -247,7 +247,7 @@ defmodule Fleet.Spawner.Pod do
 
   # PROJECT — toutes les I/O dans la chaîne `with` (non-bang) → erreur propagée → transition_failed
   # clean (state.json phase=failed écrit). Modèle issue-driven : le brief est écrit en
-  # `tickets/<issue_id>.md` (lu comme contenu projet, pas comme injection-prompt) ET pushé en
+  # `issues/<issue_id>.md` (lu comme contenu projet, pas comme injection-prompt) ET pushé en
   # TaskQueue (le pod PULL via le tool MCP get_work_item, déclenché par le mot-clé `yop`).
   def handle_event(:internal, :proceed, :projecting, data) do
     skills_root = Application.get_env(:fleet_spawner, :skills_root, nil)
@@ -261,7 +261,7 @@ defmodule Fleet.Spawner.Pod do
     # (settings/SP/protocole) en .lcars/ ; CLAUDE.md → racine pod.
     pod_claude_dir = Path.join(data.pod_dir, ".claude")
     lcars_dir = Path.join(data.pod_dir, ".lcars")
-    tickets_dir = Path.join(data.pod_dir, "tickets")
+    issues_dir = Path.join(data.pod_dir, "issues")
 
     with {:ok, sp_compose} <-
            SPBuilder.compose(data.cap_profile, [], pod_id: data.pod_id, job_id: data.issue_id),
@@ -284,10 +284,10 @@ defmodule Fleet.Spawner.Pod do
          :ok <- Fs.safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
          :ok <-
            Fs.safe_write(Path.join(lcars_dir, "settings.json"), Scaffold.pod_settings_json()),
-         :ok <- Fs.safe_mkdir_p(tickets_dir),
+         :ok <- Fs.safe_mkdir_p(issues_dir),
          :ok <-
            Fs.safe_write(
-             Path.join(tickets_dir, "#{Scaffold.issue_id_to_filename(data.issue_id)}.md"),
+             Path.join(issues_dir, "#{Scaffold.issue_id_to_filename(data.issue_id)}.md"),
              Scaffold.default_brief(data)
            ),
          # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du brief est la

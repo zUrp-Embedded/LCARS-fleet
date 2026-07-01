@@ -115,11 +115,19 @@ BASE_TOOLS = [
     },
     {
         "name": "submit_result",
-        "description": "Retourne le resultat structure d'une tache au fleet LCARS, dans `payload`.",
+        # MA-19 : schema SYNCHRONISE avec le central (apps/fleet_mcp/.../pod_tools.ex `submit_result`).
+        # `work_item_id` est REQUIS cote central (le broker rejette un work_item_id != brief actif du pod).
+        # Le bridge doit l'annoncer, sinon claude omet le champ et le central refuse (:work_item_id_required).
+        "description": "Retourne le resultat structure d'une tache au fleet LCARS, dans `payload`. "
+                       "`work_item_id` REQUIS = le work_item_id rendu par get_work_item (la tache que tu clos) : "
+                       "le fleet correle ton livrable a CETTE tache precise, jamais a la derniere en date.",
         "inputSchema": {
             "type": "object",
-            "properties": {"payload": {"type": "object"}},
-            "required": ["payload"],
+            "properties": {
+                "payload": {"type": "object"},
+                "work_item_id": {"type": "string"},
+            },
+            "required": ["payload", "work_item_id"],
         },
     },
 ]
@@ -170,14 +178,23 @@ ARCHITECT_TOOLS = [
     },
     {
         "name": "get_issue_status",
-        "description": "Consulte l'etat d'un issue delegue (issue + PR liee) du projet courant : "
-                       "issue ouverte/fermee, PR mergee ou non, verdicts de review par juge. Utilise-le "
-                       "pour SUIVRE un issue avant d'enchainer — ex: valider la livraison (PR mergee) du "
-                       "issue N AVANT de poster le issue N+1. `number` = le numero d'issue (ex: 1).",
+        # MA-19 : schema SYNCHRONISE avec le central (apps/fleet_mcp/.../pod_tools.ex `get_issue_status`).
+        # `project` est OBLIGATOIRE cote central (refus structurel sans lui : pas de routage par defaut,
+        # jamais de lecture sur le mauvais projet). Le bridge l'expose donc, sinon l'arch omet `project`
+        # et le central refuse (:project_required).
+        "description": "Consulte l'etat d'un issue delegue (issue + PR liee) : issue ouverte/fermee, PR "
+                       "mergee ou non, verdicts de review. Utilise-le pour SUIVRE un issue avant d'enchainer — "
+                       "ex: valider la livraison (issue fermee par le merge) du issue N AVANT de poster le "
+                       "issue N+1. `number` = le numero d'issue. `project` = le repo `owner/name` DU issue, "
+                       "OBLIGATOIRE : le repo retourne par create_project (ou celui passe a create_issue). "
+                       "Sans `project`, la lecture est REFUSEE (jamais d'etat lu sur le mauvais projet).",
         "inputSchema": {
             "type": "object",
-            "properties": {"number": {"type": "integer"}},
-            "required": ["number"],
+            "properties": {
+                "number": {"type": "integer"},
+                "project": {"type": "string"},
+            },
+            "required": ["number", "project"],
         },
     },
 ]

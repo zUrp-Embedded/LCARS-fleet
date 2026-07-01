@@ -321,9 +321,9 @@ defmodule Fleet.Spawner.PodTest do
       assert File.exists?(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
       assert File.exists?(Path.join(info.pod_dir, "CLAUDE.md"))
       assert File.exists?(Path.join(info.pod_dir, ".lcars/protocole-user.md"))
-      # Issue-driven (pivot doctrine) : le brief vit dans tickets/<issue_id>.md
+      # Issue-driven (pivot doctrine) : le brief vit dans issues/<issue_id>.md
       # (pas context/brief.md). Claude le lit comme contenu projet.
-      assert File.exists?(Path.join(info.pod_dir, "tickets/issue-1.md"))
+      assert File.exists?(Path.join(info.pod_dir, "issues/issue-1.md"))
 
       # Monitor in-pod (réveil-par-flag, ADR-G) : watch.sh provisionné au pod_dir,
       # exécutable. L'agent l'arme via l'outil Monitor (cf. SP).
@@ -345,7 +345,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
-    test "PUSH — le travail (opts[:brief]) est livré dans tickets/<issue_id>.md" do
+    test "PUSH — le travail (opts[:brief]) est livré dans issues/<issue_id>.md" do
       StubBackend.set_reply(interactive_reply())
 
       pod_id = "pod-brief-#{System.unique_integer([:positive])}"
@@ -362,9 +362,9 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _args, _env}, 2_000
 
       info = GenServer.call(pid, :info)
-      # Issue-driven : le brief est dans tickets/<issue_id>.md, pas en prompt
+      # Issue-driven : le brief est dans issues/<issue_id>.md, pas en prompt
       # canal-user (safety guardrail REPL).
-      issue = File.read!(Path.join(info.pod_dir, "tickets/issue-1.md"))
+      issue = File.read!(Path.join(info.pod_dir, "issues/issue-1.md"))
       # F128 : cadre neutre + rôle interpolé (plus de priming "worker engineer").
       assert issue =~ "pod LCARS (rôle engineer"
       assert issue =~ brief

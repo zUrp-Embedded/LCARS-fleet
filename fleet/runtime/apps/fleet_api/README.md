@@ -26,7 +26,7 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 | GET | `/api/health` | — | readiness probe shallow (200 dès Cowboy bind, consommé ch16 `lcars-readiness`) |
 | GET | `/api/readiness/deep` | — | P05 — état opérationnel LIVE (`Fleet.API.Readiness.deep/0`). 200 même si `status: degraded` (dégradation = donnée, pas erreur HTTP). Vue de câblage interne (pas une probe externe) |
 | GET | `/api/pipelines` | — | liste état pipelines |
-| GET | `/api/tickets` | — | liste tickets |
+| GET | `/api/issues` | — | liste issues |
 | GET | `/api/pods` | — | liste pods |
 | GET | `/api/version` | — | version du build servi — JSON `{sha, dirty, ref, source}` (`Fleet.API.BuildInfo.current/0`). Lecture → no-auth légitime. **Constatable** : la version est lue, pas déduite |
 | POST | `/api/admin/spawn` | — | broadcast `admin.spawn.request` (ch6) ; **DTO public allowlisté** (422 sur champ interne) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |

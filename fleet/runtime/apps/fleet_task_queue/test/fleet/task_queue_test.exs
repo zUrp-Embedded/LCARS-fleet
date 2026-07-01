@@ -214,7 +214,7 @@ defmodule Fleet.TaskQueueTest do
     tmp_dir: tmp_dir
   } do
     path = Path.join(tmp_dir, "corrupt.json")
-    File.write!(path, Jason.encode!(%{"v" => 99, "tasks" => %{}}))
+    File.write!(path, Jason.encode!(%{"v" => 99, "work_items" => %{}}))
 
     {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qc)
 
@@ -261,7 +261,7 @@ defmodule Fleet.TaskQueueTest do
       path,
       Jason.encode!(%{
         "v" => 1,
-        "tasks" => %{
+        "work_items" => %{
           "t1" => %{
             "id" => "t1",
             "pod_id" => "p1",
@@ -298,7 +298,7 @@ defmodule Fleet.TaskQueueTest do
       path,
       Jason.encode!(%{
         "v" => 1,
-        "tasks" => %{
+        "work_items" => %{
           "t1" => %{
             "id" => "t1",
             "pod_id" => "p1",
@@ -424,9 +424,9 @@ defmodule Fleet.TaskQueueTest do
     {:ok, _} = TaskQueue.enqueue(q, "pod-active", %{brief: "en cours"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-active")
 
-    tasks = :sys.get_state(q).tasks |> Map.values()
-    terminal = Enum.filter(tasks, &(&1.state == :completed))
-    active = Enum.filter(tasks, &(&1.state in [:pending, :assigned, :in_progress]))
+    work_items = :sys.get_state(q).work_items |> Map.values()
+    terminal = Enum.filter(work_items, &(&1.state == :completed))
+    active = Enum.filter(work_items, &(&1.state in [:pending, :assigned, :in_progress]))
 
     # Borne dure : 5 complétées → au plus 3 conservées (2 élaguées).
     assert length(terminal) == 3
@@ -439,11 +439,11 @@ defmodule Fleet.TaskQueueTest do
              TaskQueue.submit_result(q, "pod-5", %{"verdict" => "retry"})
   end
 
-  # MA-27 — invariant « 1 work item ACTIF/pod » tenu À L'ÉCRITURE. Un re-mandate d'un pod portant une
+  # MA-27 — invariant « 1 work item ACTIF/pod » tenu À L'ÉCRITURE. Un re-brief d'un pod portant une
   # `:assigned` existante doit la SUPERSÉDER (→ `:cleared`) : sinon la vieille `:assigned` FUYAIT à côté du
   # nouveau pending (invisible aux gardes — `find_active`/`max_by` la masquait sans la retirer). RED avant le
   # fix (`supersede_pending` gardait les `:assigned`) → 2 actives ; GREEN après (`supersede_active`) → 1.
-  test "MA-27 re-mandate d'un pod avec :assigned existante → 1 SEULE active (l'ancienne :cleared)",
+  test "MA-27 re-brief d'un pod avec :assigned existante → 1 SEULE active (l'ancienne :cleared)",
        %{
          q: q
        } do
@@ -452,14 +452,14 @@ defmodule Fleet.TaskQueueTest do
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-Z")
     assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-Z")
 
-    # RE-MANDATE : un nouveau work item frais (re-dispatch forge) arrive PENDANT l'ancien :assigned.
+    # RE-BRIEF : un nouveau work item frais (re-dispatch forge) arrive PENDANT l'ancien :assigned.
     {:ok, fresh} = TaskQueue.enqueue(q, "pod-Z", %{brief: "nouveau work item"})
 
-    tasks = :sys.get_state(q).tasks |> Map.values()
+    work_items = :sys.get_state(q).work_items |> Map.values()
 
     active =
       Enum.filter(
-        tasks,
+        work_items,
         &(&1.pod_id == "pod-Z" and &1.state in [:pending, :assigned, :in_progress])
       )
 
@@ -467,10 +467,10 @@ defmodule Fleet.TaskQueueTest do
     assert [%{state: :pending} = only] = active
     assert only.id == fresh.id
 
-    old_now = Enum.find(tasks, &(&1.id == old.id))
+    old_now = Enum.find(work_items, &(&1.id == old.id))
     assert old_now.state == :cleared
 
-    # Sémantique re-mandate validée : le pod prend le NOUVEAU work item au prochain pull (seul actif restant).
+    # Sémantique re-brief validée : le pod prend le NOUVEAU work item au prochain pull (seul actif restant).
     fresh_id = fresh.id
     assert {:ok, %{brief: "nouveau work item", id: ^fresh_id}} = TaskQueue.get_for_pod(q, "pod-Z")
 
@@ -500,20 +500,20 @@ defmodule Fleet.TaskQueueTest do
         state: :assigned
       }
 
-      %{st | tasks: Map.put(st.tasks, ghost.id, ghost)}
+      %{st | work_items: Map.put(st.work_items, ghost.id, ghost)}
     end)
 
     assert :ok = TaskQueue.clear_for_pod(q, "pod-M")
 
-    tasks = :sys.get_state(q).tasks |> Map.values()
+    work_items = :sys.get_state(q).work_items |> Map.values()
 
     active =
       Enum.filter(
-        tasks,
+        work_items,
         &(&1.pod_id == "pod-M" and &1.state in [:pending, :assigned, :in_progress])
       )
 
     assert active == []
-    assert Enum.all?(tasks, &(&1.pod_id != "pod-M" or &1.state == :cleared))
+    assert Enum.all?(work_items, &(&1.pod_id != "pod-M" or &1.state == :cleared))
   end
 end

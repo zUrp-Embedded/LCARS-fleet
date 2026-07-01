@@ -15,7 +15,7 @@ defmodule Fleet.Spawner.PodWarden do
 
   ## 2. pod_dirs orphelins — GC du cimetière (`gc_one/1`)
 
-  Le pod_dir (`~/pods/pod_<id>`, clone git complet + `.lcars`/`.claude`/`tickets`) et son state-dir
+  Le pod_dir (`~/pods/pod_<id>`, clone git complet + `.lcars`/`.claude`/`issues`) et son state-dir
   (`~/.lcars/state/<scope>/<id>/`) survivent comme TOMBSTONE après la mort du pod. Ils ne sont effacés
   qu'au re-spawn du MÊME pod_id (`Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`). Donc un worker
   par-issue à usage unique — jamais re-briefé — laisse son clone git sur disque POUR TOUJOURS :

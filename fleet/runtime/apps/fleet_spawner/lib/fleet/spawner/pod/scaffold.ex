@@ -3,7 +3,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   PRÉPARATION du substrat disque d'un pod (le « scaffold ») — île extraite de `Fleet.Spawner.Pod`.
 
   Tout ce qui POSE le contenu du pod_dir AVANT le launch : assets (`settings.json`, draft SP,
-  protocole-user, `watch.sh`), brief (`tickets/<id>.md`), enqueue du brief dans la `TaskQueue`,
+  protocole-user, `watch.sh`), brief (`issues/<id>.md`), enqueue du brief dans la `TaskQueue`,
   bootstrap du workspace projet (clone) et restauration du seed de recall. Le `Pod` lui passe le
   `state` (ou le `cap_profile`) en argument ; le module ne rappelle AUCUN private de `Pod` (pas de
   cycle).

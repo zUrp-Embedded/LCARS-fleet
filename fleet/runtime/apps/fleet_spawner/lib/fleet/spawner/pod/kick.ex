@@ -43,7 +43,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   alias Fleet.Spawner.PodTmux
 
   # Kick AUTONOME « yop » readiness-gated. Déclenche le pull du brief
-  # par MCP get_work_item — le brief n'est PAS injecté (il vit dans tickets/ + TaskQueue).
+  # par MCP get_work_item — le brief n'est PAS injecté (il vit dans issues/ + TaskQueue).
   # No-op si pas de tmux_session (StubBackend ; LauncherPortBackend en pose un, bwrap ou host).
   #
   # Pourquoi pas un délai FIXE : le claude REPL n'est pas prêt à un instant connu — il

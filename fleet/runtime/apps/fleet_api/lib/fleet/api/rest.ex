@@ -7,7 +7,7 @@ defmodule Fleet.API.Rest do
     * `GET /api/health` — readiness probe (200 dès Cowboy bind ; consommé par `lcars-readiness`)
     * `GET /api/readiness/deep` — état opérationnel LIVE via
       `Fleet.API.Readiness.deep/0` — anti-vert-creux
-    * `GET /api/pipelines` / `tickets` / `pods` — lecture état (stubs MVP)
+    * `GET /api/pipelines` / `issues` / `pods` — lecture état (stubs MVP)
     * `POST /api/admin/spawn` — filtre le payload par allowlist DTO (422 si un champ interne du
       spawner / une clé inconnue est présent), valide le cap-profile (400 si absent, 422 si
       inconnu / host-native), exige un `brief` pour un cap-profile one-shot (422 sinon — miroir
@@ -54,8 +54,8 @@ defmodule Fleet.API.Rest do
     send_json(conn, %{pipelines: []})
   end
 
-  get "/api/tickets" do
-    send_json(conn, %{tickets: []})
+  get "/api/issues" do
+    send_json(conn, %{issues: []})
   end
 
   get "/api/pods" do

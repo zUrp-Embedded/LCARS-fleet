@@ -83,7 +83,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
 
   @doc """
   Efface les DEUX dossiers qui composent l'empreinte disque d'un pod terminé : son **state-dir** (le
-  dossier du `state.json`) et son **pod_dir** (clone git + `.lcars`/`.claude`/`tickets`) — deux arbres
+  dossier du `state.json`) et son **pod_dir** (clone git + `.lcars`/`.claude`/`issues`) — deux arbres
   distincts. Idempotent (`rm_rf` ne lève pas sur l'absent). Geste PARTAGÉ, un seul site qui sait quels
   deux dossiers forment l'empreinte d'un pod : appelé par `clear_terminal_snapshot/3` (au re-spawn du
   même pod_id) ET par le `PodWarden` (GC périodique des tombstones orphelines jamais re-briefées). Ne

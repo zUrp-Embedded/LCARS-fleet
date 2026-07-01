@@ -90,7 +90,7 @@ TOUT ce qui est observable, on triera l'affichage après — un manque tu, c'est
 ### Ring 1 — substrat pod
 | Observable | Détail | Source |
 |---|---|---|
-| **Pods vivants** | `pod_id`, rôle, `phase` (state machine), `conditions`, `ticket_id`, `session_id`, `tmux_session` | `Fleet.Spawner.list_pods/0` |
+| **Pods vivants** | `pod_id`, rôle, `phase` (state machine), `conditions`, `issue_id`, `session_id`, `tmux_session` | `Fleet.Spawner.list_pods/0` |
 | Phase pod | machine d'état du Pod (allocate→launch→…→completed/failed) | events `pod.*` |
 | `result_deadline` | timer de réponse armé/annulé (Z1) | events |
 | Identité forge | rôle→humain résolu (Z4), trailer co-author | (config, peu « live ») |
@@ -101,7 +101,7 @@ TOUT ce qui est observable, on triera l'affichage après — un manque tu, c'est
 |---|---|---|
 | **Event stream** | LE flux `%Fleet.Event{}` (type, source, trace_id, ts, payload) | `Fleet.EventRouter.Bus.subscribe/1` |
 | Registry events | clés `events.yaml` (ce qui est registrable) + drift producteur | `events.yaml` |
-| **File de mandats** | tasks pending/active/completed/failed (get_task/submit_result) | `fleet_task_queue` |
+| **File de mandats** | tasks pending/active/completed/failed (get_work_item/submit_result) | `fleet_task_queue` |
 | Vocab moniteur | `dispatch_*`, gatekeeper lifecycle, `pipeline_stage_transition`, routage ticket, `memory_query_active` | `Fleet.TaskMonitor.map_event/1` (TM-D1) |
 | Pilot | dispatcher on/off, routes chargées, poll repo/intervalle | `fleet_pilot` |
 

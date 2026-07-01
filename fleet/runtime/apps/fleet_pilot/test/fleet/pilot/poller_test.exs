@@ -794,7 +794,7 @@ defmodule Fleet.Pilot.PollerTest do
       # tient le bail. #19 routé qa-build:build (1er step = EN FILE, workflow_map qa-build charge OK), même repo →
       # bail tenu → SKIPPÉ. Aucun 2e pipeline ne démarre malgré la workflow_map-nil.
       #
-      # Régression prouvée : reviens à `engaged = not is_nil(workflow_map_map) and not first_step?(...)` → la
+      # Régression prouvée : reviens à `engaged = not is_nil(workflow_map) and not first_step?(...)` → la
       # workflow_map-nil de #18 le classe `engaged=false` → il sort du lease set → #19 voit le bail LIBRE → DÉMARRE un
       # 2e pipeline → le tally devient `dispatched:1` (au lieu de `dispatched:0, skipped:1`), l'assert échoue.
       issues = [

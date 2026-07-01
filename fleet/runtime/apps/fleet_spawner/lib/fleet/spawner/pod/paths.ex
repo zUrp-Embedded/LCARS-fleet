@@ -5,7 +5,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   Un seul rôle : dériver, à partir d'un `pod_id` (+ scope du cap-profile + overrides `opts`/config),
   les deux empreintes disque d'un pod et leur racine scannable :
 
-  - le **pod_dir** (`<pod_dir_root>/pod_<pod_id>` — clone git + `.lcars`/`.claude`/`tickets`),
+  - le **pod_dir** (`<pod_dir_root>/pod_<pod_id>` — clone git + `.lcars`/`.claude`/`issues`),
   - le **state.json** de recovery (`<state_fs_root>/<scope>/<pod_id>/state.json`) et sa racine.
 
   Toutes les valeurs descendent du HOME de l'humain qui lance la fleet (`runtime_home/0` =
@@ -27,7 +27,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   """
 
   @doc """
-  pod_dir d'un pod : `<pod_dir_root>/pod_<pod_id>` (clone git complet + `.lcars`/`.claude`/`tickets`).
+  pod_dir d'un pod : `<pod_dir_root>/pod_<pod_id>` (clone git complet + `.lcars`/`.claude`/`issues`).
   Le cap_profile N'ENTRE PAS dans le calcul — le pod_dir ne dépend que du pod_id et de la base — donc il
   est reconstructible depuis le SEUL pod_id. C'est ce qui rend le GC par scan possible : le `PodWarden`
   trouve une tombstone (state.json) par son pod_id et en dérive le pod_dir à effacer, sans jamais avoir
