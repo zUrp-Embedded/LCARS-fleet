@@ -78,13 +78,13 @@ defmodule Fleet.MCP.PodToolsTest do
              )
   end
 
-  test "submit_result sans brief actif → erreur :no_active_task (le drop n'est pas masqué)" do
+  test "submit_result sans brief actif → erreur :no_active_work_item (le drop n'est pas masqué)" do
     # Un pod qui submit sans brief actif (jamais assigné, ou clos/réassigné depuis) → son livrable n'a
     # NULLE PART où aller = DROP. Doit ressortir isError, PAS {:ok "ok"} — sinon le pod croit son livrable
     # accepté. Symétrie avec :work_item_id_mismatch / :pod_id_required.
     pod = uniq("pod-no-task")
 
-    assert {:error, :no_active_task, %{pod_id: ^pod}} =
+    assert {:error, :no_active_work_item, %{pod_id: ^pod}} =
              PodTools.handle_tool_call(
                "submit_result",
                %{"payload" => %{"x" => 1}, "work_item_id" => "whatever"},
@@ -94,7 +94,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
   test "submit_result en double (brief déjà clos) → {:ok ignoré}, PAS une erreur (idempotent)" do
     # Un re-submit après une tâche close n'est PAS un livrable perdu (le 1er submit EST encaissé) →
-    # :ok "déjà reçu", idempotent. À NE PAS confondre avec :no_active_task.
+    # :ok "déjà reçu", idempotent. À NE PAS confondre avec :no_active_work_item.
     pod = uniq("pod-dbl")
     {:ok, _} = TaskQueue.enqueue(pod, %{brief: "once"})
 

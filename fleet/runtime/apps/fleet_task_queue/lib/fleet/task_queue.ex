@@ -24,11 +24,11 @@ defmodule Fleet.TaskQueue do
     do: GenServer.call(server, {:enqueue, pod_id, task_attrs})
 
   @doc "Récupère le work item actif du pod (servi par fleet_mcp `get_work_item`). Idempotent jusqu'à submit/clear."
-  @spec get_for_pod(String.t()) :: {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, :no_task}
+  @spec get_for_pod(String.t()) :: {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, :no_work_item}
   def get_for_pod(pod_id), do: get_for_pod(@server, pod_id)
 
   @spec get_for_pod(GenServer.server(), String.t()) ::
-          {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, :no_task}
+          {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, :no_work_item}
   def get_for_pod(server, pod_id) when is_binary(pod_id),
     do: GenServer.call(server, {:get_for_pod, pod_id})
 
@@ -44,7 +44,7 @@ defmodule Fleet.TaskQueue do
   @spec submit_result(String.t(), map()) ::
           {:ok, Fleet.TaskQueue.WorkItem.t()}
           | {:error,
-             :no_active_task
+             :no_active_work_item
              | :double_submit_ignored
              | :work_item_id_mismatch
              | {:broadcast_failed, term()}}
@@ -53,7 +53,7 @@ defmodule Fleet.TaskQueue do
   @spec submit_result(GenServer.server(), String.t(), map()) ::
           {:ok, Fleet.TaskQueue.WorkItem.t()}
           | {:error,
-             :no_active_task
+             :no_active_work_item
              | :double_submit_ignored
              | :work_item_id_mismatch
              | {:broadcast_failed, term()}}

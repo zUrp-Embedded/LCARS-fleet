@@ -141,7 +141,7 @@ defmodule Fleet.MCP.PodTools do
     result =
       case TaskQueue.get_for_pod(pod_id) do
         {:ok, task} -> %{"done" => false, "work_item" => envelope(task)}
-        {:error, :no_task} -> %{"done" => true}
+        {:error, :no_work_item} -> %{"done" => true}
       end
 
     {:ok, %{content: [json(result)]}, state}
@@ -170,12 +170,12 @@ defmodule Fleet.MCP.PodTools do
           {:ok, _task} ->
             {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
 
-          {:error, :no_active_task} ->
+          {:error, :no_active_work_item} ->
             # pas de brief actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
             # réassigné depuis) → DROP. Le signaler isError (comme :work_item_id_mismatch / :pod_id_required)
             # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (échec masqué
             # en succès). (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST enregistré.)
-            {:error, :no_active_task, state}
+            {:error, :no_active_work_item, state}
 
           {:error, :double_submit_ignored} ->
             {:ok, %{content: [text("Resultat deja recu (ignore).")]}, state}

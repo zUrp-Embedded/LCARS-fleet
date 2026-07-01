@@ -77,8 +77,8 @@ defmodule Fleet.TaskQueueTest do
          q: q
        } do
     assert TaskQueue.last_poll(q, "pod-boot") == nil
-    # pas de work item → :no_task, mais l'agent a TENDU LA MAIN → le poll est gravé
-    assert {:error, :no_task} = TaskQueue.get_for_pod(q, "pod-boot")
+    # pas de work item → :no_work_item, mais l'agent a TENDU LA MAIN → le poll est gravé
+    assert {:error, :no_work_item} = TaskQueue.get_for_pod(q, "pod-boot")
     assert %DateTime{} = TaskQueue.last_poll(q, "pod-boot")
   end
 
@@ -92,7 +92,7 @@ defmodule Fleet.TaskQueueTest do
     q: q
   } do
     # Le pod a tendu la main (poll gravé), puis est décommissionné via clear_for_pod.
-    {:error, :no_task} = TaskQueue.get_for_pod(q, "pod-dead")
+    {:error, :no_work_item} = TaskQueue.get_for_pod(q, "pod-dead")
     assert %DateTime{} = TaskQueue.last_poll(q, "pod-dead")
 
     assert :ok = TaskQueue.clear_for_pod(q, "pod-dead")
@@ -434,7 +434,7 @@ defmodule Fleet.TaskQueueTest do
     assert [%{pod_id: "pod-active", state: :assigned}] = active
 
     # Le plus récent complété (pod-5) survit → double-submit TOUJOURS détecté, pas dégradé
-    # en :no_active_task par une rétention qui couperait la mauvaise tâche (récence, pas FIFO).
+    # en :no_active_work_item par une rétention qui couperait la mauvaise tâche (récence, pas FIFO).
     assert {:error, :double_submit_ignored} =
              TaskQueue.submit_result(q, "pod-5", %{"verdict" => "retry"})
   end

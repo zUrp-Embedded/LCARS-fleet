@@ -174,12 +174,12 @@ defmodule Fleet.TaskQueue.Server do
 
   def handle_call({:get_for_pod, pod_id}, _from, state) do
     # last-poll AVANT le case : l'agent a tendu la main = ACK in-band, qu'il reçoive un work item ou non
-    # (le cas `:no_task` est le signal bootstrap « l'agent est up + armé »).
+    # (le cas `:no_work_item` est le signal bootstrap « l'agent est up + armé »).
     state = record_poll(state, pod_id)
 
     case find_active(state.work_items, pod_id) do
       nil ->
-        {:reply, {:error, :no_task}, state}
+        {:reply, {:error, :no_work_item}, state}
 
       %WorkItem{state: :pending} = work_item ->
         assigned = %{work_item | state: :assigned, assigned_at: now()}
@@ -203,7 +203,7 @@ defmodule Fleet.TaskQueue.Server do
       nil ->
         if has_completed?(state.work_items, pod_id),
           do: {:reply, {:error, :double_submit_ignored}, state},
-          else: {:reply, {:error, :no_active_task}, state}
+          else: {:reply, {:error, :no_active_work_item}, state}
 
       %WorkItem{} = work_item ->
         case result["work_item_id"] || result[:work_item_id] do
@@ -382,7 +382,7 @@ defmodule Fleet.TaskQueue.Server do
   # Supersède TOUTE active du pod (un work item frais à l'enqueue remplace l'ancien). Le `:pending`
   # jamais pullé est DROPPÉ (jamais servi → rien à tracer) ; l'`:assigned`/`:in_progress` en cours est
   # transitionné `:cleared` (le pod l'abandonne : `submit_result` du vieux work item tombera sur `find_active`
-  # = nil → `:no_active_task`/`:double_submit_ignored`, jamais une mutation du nouveau). Garde tout le reste
+  # = nil → `:no_active_work_item`/`:double_submit_ignored`, jamais une mutation du nouveau). Garde tout le reste
   # (autres pods, terminaux du pod). Borne la queue à 1 active/pod À L'ÉCRITURE. Retourne
   # `{state, n_superseded}`.
   defp supersede_active(state, pod_id) do
