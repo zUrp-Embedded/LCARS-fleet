@@ -26,8 +26,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       {:ok, :removed}
     end
 
-    def post_route(_repo, _n, pipeline, step, _opts) do
-      send(self(), {:call, :route, pipeline, step})
+    def post_route(_repo, _n, workflow_map_name, step, _opts) do
+      send(self(), {:call, :route, workflow_map_name, step})
       {:ok, :posted}
     end
   end
@@ -197,17 +197,17 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:call, :comment, _, _}
 
       # #8.A : l'avance N'écrase PLUS l'assignee (= humain) ; le next-rôle est dérivé de la route au
-      # dispatch. (Ici pas de contexte carte → pas de route non plus, cf. cas défensif ci-dessous.)
+      # dispatch. (Ici pas de contexte workflow_map → pas de route non plus, cf. cas défensif ci-dessous.)
       refute_received {:call, :assignee, _}
       assert_received {:call, :unlock, "lcars-in-flight"}
       refute_received {:call, :close}
     end
 
-    test "avance avec contexte carte → grave la ROUTE du step suivant (sans set_assignee, #8.A)" do
+    test "avance avec contexte workflow_map → grave la ROUTE du step suivant (sans set_assignee, #8.A)" do
       step_run =
         base_step_run(%{
           next_assignee: "qualifier",
-          pipeline: "poc-cycle",
+          workflow_map: "poc-cycle",
           next_step: "spec-review"
         })
 
@@ -218,7 +218,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:call, :assignee, _}
     end
 
-    test "reassign sans contexte carte → pas de post_route (defensif)" do
+    test "reassign sans contexte workflow_map → pas de post_route (defensif)" do
       step_run = base_step_run(%{next_assignee: "qualifier"})
       assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
       refute_received {:call, :route, _, _}
@@ -510,7 +510,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
     test "juge intent inattendu sans :review_event → review FAIL-CLOSED (REQUEST_CHANGES, jamais approve par omission)" do
       # Dérivation par intent (`:review_event` absent) : un intent qui n'est PAS un gate-pass explicite
-      # (`:advance`/`:promote`) ne doit JAMAIS s'auto-approuver. Ici `:reviewed` (un juge no-carte qui
+      # (`:advance`/`:promote`) ne doit JAMAIS s'auto-approuver. Ici `:reviewed` (un juge no-workflow_map qui
       # aurait perdu son verdict) tombe sur le catch-all fail-closed → REQUEST_CHANGES, pas APPROVED.
       # Sous l'ancien `_ -> :approve`, ce step_run validait par omission (le pire défaut pour un verdict).
       step_run = judge_step_run(:reviewed, %{role: "qualifier"})
@@ -521,7 +521,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:merge, _}
     end
 
-    test "②.1d producteur :review (no-carte) → ouvre PR, request_review(qualifier+reviewer), assigne l'humain, unlock issue+PR, PAS de merge" do
+    test "②.1d producteur :review (no-workflow_map) → ouvre PR, request_review(qualifier+reviewer), assigne l'humain, unlock issue+PR, PAS de merge" do
       step_run = producer_step_run(:review)
 
       assert {:ok, :review_requested} =
@@ -544,7 +544,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:merge, _}
     end
 
-    test "②.1d juge :reviewed (no-carte) → review native (event explicite :approve), unlock la PR, PAS de merge ni request_review" do
+    test "②.1d juge :reviewed (no-workflow_map) → review native (event explicite :approve), unlock la PR, PAS de merge ni request_review" do
       step_run = judge_step_run(:reviewed, %{role: "qualifier", review_event: :approve})
 
       assert {:ok, :reviewed} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)

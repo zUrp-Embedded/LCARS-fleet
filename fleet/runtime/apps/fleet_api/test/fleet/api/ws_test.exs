@@ -6,25 +6,25 @@ defmodule Fleet.API.WSTest do
   describe "topic_matches?/2" do
     test "topics vide → match all" do
       assert WS.topic_matches?("anything", [])
-      assert WS.topic_matches?("pipeline.completed", [])
+      assert WS.topic_matches?("workflow_map.completed", [])
     end
 
     test "exact match" do
-      assert WS.topic_matches?("pipeline.completed", ["pipeline.completed"])
-      refute WS.topic_matches?("pod.started", ["pipeline.completed"])
+      assert WS.topic_matches?("workflow_map.completed", ["workflow_map.completed"])
+      refute WS.topic_matches?("pod.started", ["workflow_map.completed"])
     end
 
     test "wildcard suffix .*" do
-      assert WS.topic_matches?("pipeline.completed", ["pipeline.*"])
-      assert WS.topic_matches?("pipeline.failed", ["pipeline.*"])
-      assert WS.topic_matches?("pipeline.stage.completed", ["pipeline.*"])
-      refute WS.topic_matches?("pod.started", ["pipeline.*"])
+      assert WS.topic_matches?("workflow_map.completed", ["workflow_map.*"])
+      assert WS.topic_matches?("workflow_map.failed", ["workflow_map.*"])
+      assert WS.topic_matches?("workflow_map.step.completed", ["workflow_map.*"])
+      refute WS.topic_matches?("pod.started", ["workflow_map.*"])
     end
 
     test "multi patterns OR" do
-      assert WS.topic_matches?("pipeline.completed", ["pod.*", "pipeline.*"])
-      assert WS.topic_matches?("pod.started", ["pod.*", "pipeline.*"])
-      refute WS.topic_matches?("audit.log", ["pod.*", "pipeline.*"])
+      assert WS.topic_matches?("workflow_map.completed", ["pod.*", "workflow_map.*"])
+      assert WS.topic_matches?("pod.started", ["pod.*", "workflow_map.*"])
+      refute WS.topic_matches?("audit.log", ["pod.*", "workflow_map.*"])
     end
 
     test "exact + wildcard mix" do
@@ -45,14 +45,14 @@ defmodule Fleet.API.WSTest do
 
   describe "websocket_handle/2 subscribe action" do
     test "{action: subscribe, topics: [...]} → ack + state.topics updated" do
-      msg = Jason.encode!(%{action: "subscribe", topics: ["pipeline.*", "pod.*"]})
+      msg = Jason.encode!(%{action: "subscribe", topics: ["workflow_map.*", "pod.*"]})
 
       assert {[{:text, frame}], new_state} = WS.websocket_handle({:text, msg}, %{topics: []})
 
-      assert {:ok, %{"type" => "subscribed", "topics" => ["pipeline.*", "pod.*"]}} =
+      assert {:ok, %{"type" => "subscribed", "topics" => ["workflow_map.*", "pod.*"]}} =
                Jason.decode(frame)
 
-      assert new_state.topics == ["pipeline.*", "pod.*"]
+      assert new_state.topics == ["workflow_map.*", "pod.*"]
     end
 
     test "topic non-string ([123]) → rejet à l'admission, error frame, state INCHANGÉ (pas d'ACK)" do
@@ -66,7 +66,7 @@ defmodule Fleet.API.WSTest do
     end
 
     test "liste mixte (string + non-string) → rejet à l'admission, state inchangé" do
-      msg = Jason.encode!(%{action: "subscribe", topics: ["pipeline.*", 5]})
+      msg = Jason.encode!(%{action: "subscribe", topics: ["workflow_map.*", 5]})
 
       assert {[{:text, frame}], state} = WS.websocket_handle({:text, msg}, %{topics: ["old.*"]})
       assert frame =~ "error"
@@ -88,26 +88,26 @@ defmodule Fleet.API.WSTest do
 
   describe "websocket_info/2 events" do
     test "event matching topic → frame event JSON" do
-      event = Fleet.Event.new(:pipeline, :"pipeline.completed", payload: %{"id" => "p1"})
+      event = Fleet.Event.new(:pipeline, :"workflow_map.completed", payload: %{"id" => "p1"})
 
       assert {[{:text, frame}], state} =
-               WS.websocket_info(event, %{topics: ["pipeline.*"]})
+               WS.websocket_info(event, %{topics: ["workflow_map.*"]})
 
       assert {:ok,
               %{
                 "type" => "event",
-                "event_type" => "pipeline.completed",
+                "event_type" => "workflow_map.completed",
                 "payload" => %{"id" => "p1"}
               }} = Jason.decode(frame)
 
-      assert state == %{topics: ["pipeline.*"]}
+      assert state == %{topics: ["workflow_map.*"]}
     end
 
     test "event non matching → no frame, state inchangé" do
       event = Fleet.Event.new(:starfleet, :"audit.log")
 
-      assert {[], state} = WS.websocket_info(event, %{topics: ["pipeline.*"]})
-      assert state == %{topics: ["pipeline.*"]}
+      assert {[], state} = WS.websocket_info(event, %{topics: ["workflow_map.*"]})
+      assert state == %{topics: ["workflow_map.*"]}
     end
 
     test "topics vide → match all" do

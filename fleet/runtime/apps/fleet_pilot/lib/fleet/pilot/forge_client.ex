@@ -171,7 +171,7 @@ defmodule Fleet.Pilot.ForgeClient do
   # ============================================================
 
   @doc """
-  Réassigne l'issue à `login` (1-assignee strict, invariant de la carte). PATCH `assignees: [login]`
+  Réassigne l'issue à `login` (1-assignee strict, invariant de la workflow_map). PATCH `assignees: [login]`
   remplace la liste. Idempotent : `{:ok, :already}` si `login` est déjà le seul assignee.
   """
   @spec set_assignee(String.t(), integer(), String.t(), Keyword.t()) ::
@@ -596,9 +596,9 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Marqueur ROUTE — position carte sur la forge.
+  # Marqueur ROUTE — position workflow_map sur la forge.
   # `[lcars-route:<pipeline>:<step>]` : grave (pipeline, step) sur l'issue, car l'assignee
-  # (= rôle) seul n'identifie pas le step (un rôle peut être sur N steps, cf. CarteNav).
+  # (= rôle) seul n'identifie pas le step (un rôle peut être sur N steps, cf. WorkflowMapNav).
   # Écrit à l'assignation (entrée + reassign), lu par StepDispatcher au spawn.
   # ============================================================
 
@@ -615,8 +615,8 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Lit la position carte courante = le **dernier** marqueur `[lcars-route:p:s]` de l'issue.
-  `:none` si aucun (issue hors-carte / 1-step). `{:error, _}` sur échec HTTP/config.
+  Lit la position workflow_map courante = le **dernier** marqueur `[lcars-route:p:s]` de l'issue.
+  `:none` si aucun (issue hors-workflow_map / 1-step). `{:error, _}` sur échec HTTP/config.
   """
   @spec get_route(String.t(), integer(), Keyword.t()) ::
           {:ok, {String.t(), String.t()}} | :none | {:error, term()}

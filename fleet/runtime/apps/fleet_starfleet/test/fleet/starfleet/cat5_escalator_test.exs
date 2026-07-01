@@ -62,16 +62,16 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
 
     test "chain préexistant étendu" do
       payload = %{"chain" => ["pod.refuse", "ipc_filter.drift"], "n" => 1}
-      :ok = Cat5Escalator.escalate(:pipeline_failed, payload, nil)
+      :ok = Cat5Escalator.escalate(:workflow_map_failed, payload, nil)
 
       assert_receive %Fleet.Event{
                        source: :starfleet,
-                       type: :"starfleet.audit_cat5_pipeline_failed",
+                       type: :"starfleet.audit_cat5_workflow_map_failed",
                        payload: %{"chain" => chain}
                      },
                      500
 
-      assert chain == ["pod.refuse", "ipc_filter.drift", "starfleet.cat5.pipeline_failed"]
+      assert chain == ["pod.refuse", "ipc_filter.drift", "starfleet.cat5.workflow_map_failed"]
     end
 
     test "oauth_refresh_failed : source string serialisé" do

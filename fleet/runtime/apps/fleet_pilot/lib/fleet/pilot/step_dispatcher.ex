@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepDispatcher do
   @moduledoc """
-  Dispatch `issue assigné → spawn le rôle de la carte` : la forge EST la machine à états, ce module
+  Dispatch `issue assigné → spawn le rôle de la workflow_map` : la forge EST la machine à états, ce module
   réagit à ses transitions. Le poller voit un issue **assigné-à-moi** (scoping multi-user porté
   forge-side, en amont), non verrouillé, et le pousse à son step courant.
 
@@ -8,20 +8,20 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   À partir du payload d'une issue Gitea : `:engage` (procéder) | `{:skip, reason}` (`:in_flight` verrou posé,
   `:awaits_arch` verrou humain). decide ne fait QUE la porte — pas d'ownership (scoping forge-side amont),
-  pas de rôle ni de load (le RÔLE vient de la POSITION carte, via `carte_role` ; voir Effets).
+  pas de rôle ni de load (le RÔLE vient de la POSITION workflow_map, via `workflow_map_role` ; voir Effets).
 
   ## Effets (`dispatch_issue/2`)
 
   Sur `:engage` : résout projet + route, puis :
     * **route absente** (issue routeless — create_issue ne grave plus, ou issue humain brut) →
-      `ensure_carte_or_onboard` grave la **carte par défaut** (brief-gate) → `{:skipped, :onboarded}`
+      `ensure_workflow_map_or_onboard` grave la **workflow_map par défaut** (brief-gate) → `{:skipped, :onboarded}`
       (on défère ; le tick suivant la voit routée). C'est l'ENTRÉE système : create_issue crée, le poller route.
-    * **route présente** → `carte_role` dérive `{role, profile, step_spec}` de la POSITION carte (PAS de
+    * **route présente** → `workflow_map_role` dérive `{role, profile, step_spec}` de la POSITION workflow_map (PAS de
       producteur en dur — la route décide ; route absente à ce point = anomalie → fail-loud, jamais l'eng en
       silence), puis l'**ordre canonique du spawn** (label `lcars-in-flight` AVANT pod, sinon double-spawn).
 
   Les juges sont dispatchés PR-driven via `dispatch_review` (requested_reviewers). Les modules
-  `:forge_client` / `:loader` / `:carte_loader` / `:spawner` sont des **seams** (défauts = modules réels).
+  `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` sont des **seams** (défauts = modules réels).
   """
 
   require Logger
@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   Décision PURE (porte) : payload issue → `:engage` | `{:skip, reason}`. decide ne fait QUE la
   porte : verrou `lcars-in-flight` / `lcars-awaits-arch` → skip ; sinon → `:engage` (proceder). Le rôle ET
   l'action (spawn vs onboard) sont décidés EN AVAL (`dispatch_issue`) — d'où `:engage` et pas `:spawn`. Le SCOPING
-  (forge-side, en amont) et le ROUTAGE (route → rôle, via `carte_role`/onboard dans `dispatch_issue`) ne
+  (forge-side, en amont) et le ROUTAGE (route → rôle, via `workflow_map_role`/onboard dans `dispatch_issue`) ne
   sont PAS ici — decide ne charge rien et ne décide pas le rôle.
   """
   @spec decide(map()) :: decision()
@@ -67,11 +67,11 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   @doc """
   Dispatch effectif d'une issue : `decide/1` puis, sur `:engage`, résout projet+route et soit ONBOARDE
-  (routeless → grave la carte par défaut → skip), soit dérive le rôle de la carte (`carte_role`) et
+  (routeless → grave la workflow_map par défaut → skip), soit dérive le rôle de la workflow_map (`workflow_map_role`) et
   applique l'ordre canonique du spawn (verrou → pod → enqueue → wake, `spawn_step`). Idempotent.
 
   `opts` : `:repo` (obligatoire), `:forge_opts` (passé au ForgeClient), + seams
-  `:forge_client` / `:loader` / `:carte_loader` / `:spawner` / `:task_queue` / `:clock` (défauts = modules réels).
+  `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` / `:task_queue` / `:clock` (défauts = modules réels).
   """
   @spec dispatch_issue(map(), keyword()) ::
           {:ok, {:spawned, pod_id :: String.t(), role :: String.t()}}
@@ -84,8 +84,8 @@ defmodule Fleet.Pilot.StepDispatcher do
     task_queue = Keyword.get(opts, :task_queue, Fleet.TaskQueue)
     resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
 
-    # Chargeur de carte injectable (seam, comme les autres) — rend `carte_role` testable sans disque.
-    carte_loader = Keyword.get(opts, :carte_loader, &Fleet.Pipeline.Loader.load!/1)
+    # Chargeur de workflow_map injectable (seam, comme les autres) — rend `workflow_map_role` testable sans disque.
+    workflow_map_loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Pipeline.Loader.load!/1)
 
     case decide(payload) do
       {:skip, reason} ->
@@ -98,26 +98,26 @@ defmodule Fleet.Pilot.StepDispatcher do
         forge_opts = Keyword.get(opts, :forge_opts, [])
 
         # PROJET + ROUTE résolus AVANT toute écriture forge (read-only) : un échec transitoire ne laisse pas
-        # de verrou orphelin. project = base_sha pinné (hors-pod) ; route = (pipeline, step) gravée forge-side.
-        # ROUTELESS = pas encore onboardée (create_issue ne grave plus) → `ensure_carte_or_onboard`
-        # grave la carte par défaut + renvoie `{:onboarded, _}` → on DÉFÈRE (skip ; le tick suivant la voit
-        # routée). Routée → `carte_role` dérive le rôle de la POSITION carte (PAS de producteur en dur ;
+        # de verrou orphelin. project = base_sha pinné (hors-pod) ; route = (workflow_map_name, step) gravée forge-side.
+        # ROUTELESS = pas encore onboardée (create_issue ne grave plus) → `ensure_workflow_map_or_onboard`
+        # grave la workflow_map par défaut + renvoie `{:onboarded, _}` → on DÉFÈRE (skip ; le tick suivant la voit
+        # routée). Routée → `workflow_map_role` dérive le rôle de la POSITION workflow_map (PAS de producteur en dur ;
         # route absente à ce point = anomalie post-onboard → fail-loud, JAMAIS l'eng en silence).
-        # Route + carte pré-lues par le poller (classification du bail) → réutilisées via opts
-        # (`resolve_route` / `:prefetched_carte`) au lieu d'un 2ᵉ get_route + 2ᵉ load carte. Absentes (tests,
+        # Route + workflow_map pré-lues par le poller (classification du bail) → réutilisées via opts
+        # (`resolve_route` / `:prefetched_workflow_map`) au lieu d'un 2ᵉ get_route + 2ᵉ load workflow_map. Absentes (tests,
         # autres callers) → lecture/chargement normaux (fallback).
         with {:ok, project} <- tag_err(resolver.(repo, opts), :project_resolution),
              {:ok, route} <-
                tag_err(resolve_route(opts, forge, repo, number, forge_opts), :route_resolution),
              {:ok, route} <-
-               ensure_carte_or_onboard(forge, repo, number, route, carte_loader, forge_opts),
+               ensure_workflow_map_or_onboard(forge, repo, number, route, workflow_map_loader, forge_opts),
              {:ok, {role, profile, step_spec}} <-
                tag_err(
-                 carte_role(
+                 workflow_map_role(
                    route,
                    &loader.load/1,
-                   carte_loader,
-                   Keyword.get(opts, :prefetched_carte)
+                   workflow_map_loader,
+                   Keyword.get(opts, :prefetched_workflow_map)
                  ),
                  :role_resolution
                ),
@@ -206,7 +206,7 @@ defmodule Fleet.Pilot.StepDispatcher do
             {:skipped, :role_busy}
 
           {:onboarded, _step} ->
-            # Issue routeless onboardée sur la carte par défaut → on DÉFÈRE (skip ; le tick suivant
+            # Issue routeless onboardée sur la workflow_map par défaut → on DÉFÈRE (skip ; le tick suivant
             # la voit routée → dispatch). Entrée système : create_issue crée, le poller route.
             {:skipped, :onboarded}
 
@@ -225,7 +225,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   demandee (`requested_reviewers`) -> spawn le role juge pour la reviewer. Remplace le trigger
   assignee-issue pour les JUGES (le producteur reste issue-assignee-driven, via `dispatch_issue`).
 
-  Le pipeline-state (route = position carte) reste sur l'ISSUE : `dispatch_review` remonte de
+  Le pipeline-state (route = position workflow_map) reste sur l'ISSUE : `dispatch_review` remonte de
   `head.ref` (`lcars/issue-N-role`) au issue et lit la route gravee. Le verrou `lcars-in-flight`
   est pose sur la PR (pas l'issue) : il empeche le re-spawn du juge entre le spawn et la review
   postee (apres quoi Gitea retire le reviewer de `requested_reviewers`). Idempotent (verrou PR +
@@ -348,10 +348,10 @@ defmodule Fleet.Pilot.StepDispatcher do
   # pour corriger sur la même PR. Idempotent (verrou PR).
   #
   # FREIN ANTI-CHURN. Sans compteur, `dispatch_rework` re-spawnerait le producteur à chaque tick — le frein
-  # `rebound` (budget carte, StepRunConsumer) n'est jamais appelé sur CE chemin (PR-review-driven) → rework
+  # `rebound` (budget workflow_map, StepRunConsumer) n'est jamais appelé sur CE chemin (PR-review-driven) → rework
   # INFINI si l'eng ne satisfait jamais le juge, sans escalade. On borne les rounds par un compteur
   # FORGE-NATIF (`count_change_request_rounds` = nb de reviews REQUEST_CHANGES, monotone) aligné sur le frein
-  # carte (budget = `max_rework_rounds`, défaut 2, configurable via `:max_pr_rework_rounds`). Au-delà du
+  # workflow_map (budget = `max_rework_rounds`, défaut 2, configurable via `:max_pr_rework_rounds`). Au-delà du
   # budget → ESCALADE ARCH (label `awaits-arch` + commentaire), pas de re-spawn → fin du churn. Budget
   # illisible (`{:error}`) → on NE re-spawn PAS à l'aveugle : escalade (symétrique de `rebound` qui surface).
   defp dispatch_rework(pr_number, head, ctx) do
@@ -569,7 +569,7 @@ defmodule Fleet.Pilot.StepDispatcher do
       |> maybe_gate_base_main(kind)
 
     # PROJET + ROUTE resolus AVANT toute ecriture forge (read-only) : un echec ne laisse pas de
-    # verrou orphelin. La route (pipeline, step) est lue sur l'ISSUE (le pipeline-state y reste).
+    # verrou orphelin. La route (workflow_map_name, step) est lue sur l'ISSUE (le pipeline-state y reste).
     with {:ok, project} <- tag_err(resolver.(repo, review_opts), :project_resolution),
          {:ok, route} <- tag_err(route_for(forge, repo, issue_n, forge_opts), :route_resolution) do
       # pod_id : rework/conflict = le PRODUCTEUR, routé par `slot_scope` (project → for_repo = MÊME
@@ -740,8 +740,8 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   defp maybe_put_route(spawn_opts, nil), do: spawn_opts
 
-  defp maybe_put_route(spawn_opts, {pipeline, step}),
-    do: spawn_opts |> Keyword.put(:pipeline, pipeline) |> Keyword.put(:step, step)
+  defp maybe_put_route(spawn_opts, {workflow_map_name, step}),
+    do: spawn_opts |> Keyword.put(:workflow_map, workflow_map_name) |> Keyword.put(:step, step)
 
   # `repo_id` = id forge du projet → session_id déterministe des rôles project-bound
   # (eng, juges) via `Fleet.Spawner.SessionId` (segment `<REPO4>` DÉCIMAL). Forge sans `repo_id`/2
@@ -766,7 +766,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   # Brief d'un dispatch PR : :judge -> GateBrief desamorce (via build_brief, le pod
   # juge l'issue) ; :rework -> brief de rework au PRODUCTEUR (corrige selon la review, re-pousse).
-  # Chemin PR-juge — pas de step carte ici (juges PR-driven) → `step_spec = %{}` :
+  # Chemin PR-juge — pas de step workflow_map ici (juges PR-driven) → `step_spec = %{}` :
   # build_brief retombe sur le `brief_kind` du profil (judge pour qualifier/reviewer) ET sur le
   # `judge_target` par défaut (deliverable) → build_judge_brief (juge le livrable/PR).
   defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
@@ -803,37 +803,37 @@ defmodule Fleet.Pilot.StepDispatcher do
   defp tag_err({:ok, _} = ok, _tag), do: ok
   defp tag_err({:error, reason}, tag), do: {:error, {tag, reason}}
 
-  # Carte-driven role : dérive `{role, profile, step_spec}` de la POSITION carte (route gravée) +
-  # load du profil. route nil = anomalie → fail-loud (pas de fallback producteur). Carte/step/
+  # WorkflowMap-driven role : dérive `{role, profile, step_spec}` de la POSITION workflow_map (route gravée) +
+  # load du profil. route nil = anomalie → fail-loud (pas de fallback producteur). WorkflowMap/step/
   # profil non résolus = misconfig → `{:error, _}` (fail-loud).
-  # `prefetched_carte` : carte déjà chargée par le poller (classification du bail) → on évite un
-  # 2ᵉ load ; `nil` (tests, autres callers) → chargement via `carte_loader` (fallback).
-  @spec carte_role(
+  # `prefetched_workflow_map` : workflow_map déjà chargée par le poller (classification du bail) → on évite un
+  # 2ᵉ load ; `nil` (tests, autres callers) → chargement via `workflow_map_loader` (fallback).
+  @spec workflow_map_role(
           {String.t(), String.t()} | nil,
           (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()}),
           (String.t() -> map()),
           map() | nil
         ) :: {:ok, {String.t(), Fleet.CapProfile.t(), map()}} | {:error, term()}
-  # Route nil = ANOMALIE : le poller onboarde tout routeless AVANT dispatch (ensure_carte_or_onboard)
+  # Route nil = ANOMALIE : le poller onboarde tout routeless AVANT dispatch (ensure_workflow_map_or_onboard)
   # → si on arrive ici sans route, fail-loud, JAMAIS un fallback eng silencieux. Le rôle vient TOUJOURS de la
-  # position carte (route gravée).
-  defp carte_role(nil, _load_role, _carte_loader, _prefetched_carte), do: {:error, :unrouted}
+  # position workflow_map (route gravée).
+  defp workflow_map_role(nil, _load_role, _workflow_map_loader, _prefetched_workflow_map), do: {:error, :unrouted}
 
-  defp carte_role({pipeline, step}, load_role, carte_loader, prefetched_carte) do
-    with {:ok, carte} <- carte_or_load(prefetched_carte, pipeline, carte_loader),
-         {:ok, role} <- carte_step_role(carte, pipeline, step),
+  defp workflow_map_role({workflow_map_name, step}, load_role, workflow_map_loader, prefetched_workflow_map) do
+    with {:ok, workflow_map} <- workflow_map_or_load(prefetched_workflow_map, workflow_map_name, workflow_map_loader),
+         {:ok, role} <- workflow_map_step_role(workflow_map, workflow_map_name, step),
          {:ok, profile} <- load_role.(role) do
       # On remonte le STEP_SPEC entier (extensible) plutôt qu'un champ isolé. build_brief y
       # lit `brief_kind` (override per-step : consultant worker → juge sans profil-doublon) ET
       # `judge_target` (juge le BRIEF vs un livrable). route=nil (producteur initial) → step_spec vide.
-      step_spec = get_in(carte, ["steps", step]) || %{}
+      step_spec = get_in(workflow_map, ["steps", step]) || %{}
       {:ok, {role, profile, step_spec}}
     end
   end
 
-  # Carte pré-chargée (poller) → réutilisée ; sinon chargée via le seam.
-  defp carte_or_load(nil, pipeline, carte_loader), do: load_carte(pipeline, carte_loader)
-  defp carte_or_load(carte, _pipeline, _carte_loader), do: {:ok, carte}
+  # WorkflowMap pré-chargée (poller) → réutilisée ; sinon chargée via le seam.
+  defp workflow_map_or_load(nil, workflow_map_name, workflow_map_loader), do: load_workflow_map(workflow_map_name, workflow_map_loader)
+  defp workflow_map_or_load(workflow_map, _pipeline, _workflow_map_loader), do: {:ok, workflow_map}
 
   # Route pré-lue par le poller (classification) → réutilisée ici ; absente → lecture forge.
   defp resolve_route(opts, forge, repo, number, forge_opts) do
@@ -844,43 +844,43 @@ defmodule Fleet.Pilot.StepDispatcher do
   end
 
   # Onboarding système. Route présente → passthrough `{:ok, route}`. Route nil (issue routeless :
-  # create_issue ne grave plus la carte ; ou issue humain brut) → grave la carte par défaut (brief-gate)
+  # create_issue ne grave plus la workflow_map ; ou issue humain brut) → grave la workflow_map par défaut (brief-gate)
   # = elle ENTRE dans le gate → `{:onboarded, step}` (dispatch_issue défère : skip ce tick, le suivant la
   # voit routée). Route postée par le SYSTÈME (forge token système). Échec → `{:error, {:onboard, _}}`.
-  defp ensure_carte_or_onboard(_forge, _repo, _number, route, _carte_loader, _forge_opts)
+  defp ensure_workflow_map_or_onboard(_forge, _repo, _number, route, _workflow_map_loader, _forge_opts)
        when not is_nil(route),
        do: {:ok, route}
 
-  defp ensure_carte_or_onboard(forge, repo, number, nil, carte_loader, forge_opts) do
-    carte_name = default_carte()
+  defp ensure_workflow_map_or_onboard(forge, repo, number, nil, workflow_map_loader, forge_opts) do
+    workflow_map_name = default_workflow_map()
 
-    with {:ok, carte} <- load_carte(carte_name, carte_loader),
-         {:ok, {step, _role}} <- Fleet.Pilot.CarteNav.first_step(carte),
-         {:ok, _} <- forge.post_route(repo, number, carte_name, step, forge_opts) do
+    with {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader),
+         {:ok, {step, _role}} <- Fleet.Pilot.WorkflowMapNav.first_step(workflow_map),
+         {:ok, _} <- forge.post_route(repo, number, workflow_map_name, step, forge_opts) do
       {:onboarded, step}
     else
       err -> {:error, {:onboard, err}}
     end
   end
 
-  # Carte par défaut de l'onboarding (toute issue assignée routeless y entre ; défaut brief-gate : le
+  # WorkflowMap par défaut de l'onboarding (toute issue assignée routeless y entre ; défaut brief-gate : le
   # consultant review le brief AVANT l'eng). Data-catalogue, pas un nom magique en dur.
-  defp default_carte, do: Application.get_env(:fleet_pilot, :delegation_carte, "brief-gate")
+  defp default_workflow_map, do: Application.get_env(:fleet_pilot, :delegation_workflow_map, "brief-gate")
 
-  defp load_carte(pipeline, carte_loader) do
-    {:ok, carte_loader.(pipeline)}
+  defp load_workflow_map(workflow_map_name, workflow_map_loader) do
+    {:ok, workflow_map_loader.(workflow_map_name)}
   rescue
-    e -> {:error, {:carte_load_failed, pipeline, Exception.message(e)}}
+    e -> {:error, {:workflow_map_load_failed, workflow_map_name, Exception.message(e)}}
   end
 
-  defp carte_step_role(carte, pipeline, step) do
-    case Fleet.Pilot.CarteNav.step_role(carte, step) do
+  defp workflow_map_step_role(workflow_map, workflow_map_name, step) do
+    case Fleet.Pilot.WorkflowMapNav.step_role(workflow_map, step) do
       {:ok, role} when is_binary(role) -> {:ok, role}
-      _ -> {:error, {:carte_step_unknown, pipeline, step}}
+      _ -> {:error, {:workflow_map_step_unknown, workflow_map_name, step}}
     end
   end
 
-  # Lit la position carte (pipeline, step) gravée sur la forge. `:none` (hors-carte /
+  # Lit la position workflow_map (workflow_map_name, step) gravée sur la forge. `:none` (hors-workflow_map /
   # 1-step) → `{:ok, nil}` (producteur direct). Erreur HTTP → propagée (skip sans verrou).
   defp route_for(forge, repo, number, forge_opts) do
     case forge.get_route(repo, number, forge_opts) do

@@ -53,9 +53,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
   end
 
-  # Cartes engineer-first 2 steps : build(engineer, producteur) -> review(reviewer, juge).
+  # WorkflowMaps engineer-first 2 steps : build(engineer, producteur) -> review(reviewer, juge).
   # `gated` : hard gate sur build. `soft` : soft gate sur build (B -> escalade). `plain` : aucune.
-  defmodule Carte do
+  defmodule WorkflowMap do
     def load!("gated") do
       %{
         "name" => "gated",
@@ -90,7 +90,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       }
     end
 
-    # #8.E : carte brief-gate — step racine brief-review (consultant JUGE le BRIEF, pré-PR) -> build.
+    # #8.E : workflow_map brief-gate — step racine brief-review (consultant JUGE le BRIEF, pré-PR) -> build.
     def load!("mandgate") do
       %{
         "name" => "mandgate",
@@ -106,7 +106,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       }
     end
 
-    # MA-12 : carte 1-step `build`(engineer, PRODUCTEUR) TERMINAL avec gate SOFT → escalade gatekeeper.
+    # MA-12 : workflow_map 1-step `build`(engineer, PRODUCTEUR) TERMINAL avec gate SOFT → escalade gatekeeper.
     # Le verdict gatekeeper « continue » sur ce terminal producteur devait :promote (merge SANS juges,
     # régression #8.F) ; le fix route par tag_advance(_, producer?) → :review (PR + juges).
     def load!("softterm") do
@@ -133,7 +133,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       role_emails: fn r -> ["#{r}@lcars.local"] end,
       step_run_completer: Fleet.Pilot.StepRunCompleter,
       forge_client: StubForge,
-      loader: Carte,
+      loader: WorkflowMap,
       deliverable: DelivStub,
       deliverable_mode_fun: dmode(),
       max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2),
@@ -148,25 +148,25 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   end
 
   # pod.completed du step producteur `build` (engineer) qui vient de finir, avec son result.
-  defp build_done(pipeline, result) do
+  defp build_done(workflow_map_name, result) do
     %{
       "issue_id" => "issue-1",
       "workspace" => "/ws",
       "base_sha" => "cafe",
       "role" => "engineer",
-      "pipeline" => pipeline,
+      "workflow_map" => workflow_map_name,
       "step" => "build",
       "result" => result
     }
   end
 
-  # contexte de reprise tel que le construit gate_decide a l'escalade (carte "soft").
+  # contexte de reprise tel que le construit gate_decide a l'escalade (workflow_map "soft").
   defp soft_ctx do
     %{
       n: 1,
       role: "engineer",
       payload: build_done("soft", %{"x" => 1}),
-      carte: Carte.load!("soft"),
+      workflow_map: WorkflowMap.load!("soft"),
       step: "build"
     }
   end
@@ -180,7 +180,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
 
-    # plus de set_assignee (PR-driven) : la position carte est gravee (route), le trigger = la review
+    # plus de set_assignee (PR-driven) : la position workflow_map est gravee (route), le trigger = la review
     refute_received {:assignee, _}
     assert_received {:route, "gated", "review"}
     assert_received :unlocked
@@ -419,7 +419,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   # que le chemin gate :pass. NB : ce chemin (verdict gatekeeper "continue") est DISTINCT du test
   # `gate :pass producteur terminal` plus haut (qui passe par gate_decide, pas apply_verdict).
 
-  # ctx de reprise pour une carte softterm (build engineer = producteur TERMINAL, gate soft).
+  # ctx de reprise pour une workflow_map softterm (build engineer = producteur TERMINAL, gate soft).
   defp softterm_ctx do
     %{
       n: 1,
@@ -429,11 +429,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         "workspace" => "/ws",
         "base_sha" => "cafe",
         "role" => "engineer",
-        "pipeline" => "softterm",
+        "workflow_map" => "softterm",
         "step" => "build",
         "result" => %{"sev" => "high"}
       },
-      carte: Carte.load!("softterm"),
+      workflow_map: WorkflowMap.load!("softterm"),
       step: "build"
     }
   end
@@ -464,7 +464,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       "workspace" => "/ws",
       "base_sha" => "cafe",
       "role" => "consultant",
-      "pipeline" => "mandgate",
+      "workflow_map" => "mandgate",
       "step" => "brief-review",
       "result" => result
     }
@@ -513,7 +513,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   end
 
   # ── #8-fix « un producteur ne merge JAMAIS seul » ───────────────────────────────────────
-  test "producteur terminal (build, dernier step de la carte) -> :review (PR + juges), JAMAIS :promote/merge" do
+  test "producteur terminal (build, dernier step de la workflow_map) -> :review (PR + juges), JAMAIS :promote/merge" do
     # mandgate = brief-review -> build ; build (engineer, producteur) est TERMINAL. Avant le fix il
     # faisait :promote (merge sans juges = régression #8.F). Avec : :review -> ouvre la PR + demande
     # [qualifier, reviewer] ; le chemin PR-driven prouvé (dispatch_by_verdicts) scelle ensuite au gatekeeper.
@@ -538,7 +538,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         remote: "origin",
         subscribe: false,
         forge_client: StubForge,
-        loader: Carte,
+        loader: WorkflowMap,
         deliverable: DelivStub,
         deliverable_mode_fun: dmode(),
         task_queue: StubQueue,
@@ -574,7 +574,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         repo: "o/r",
         remote: "origin",
         subscribe: false,
-        loader: Carte
+        loader: WorkflowMap
       )
 
     send(
@@ -602,7 +602,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     %{
       "gate_eval" => true,
       "step" => "build",
-      "pipeline" => "soft",
+      "workflow_map" => "soft",
       "gate" => %{"type" => "soft"},
       "outputs" => %{"sev" => "high"},
       "resume_payload" => build_done("soft", %{"sev" => "high"}),
@@ -646,7 +646,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         subscribe: false,
         forge_opts: [test_pid: self()],
         forge_client: RelayForge,
-        loader: Carte,
+        loader: WorkflowMap,
         deliverable: DelivStub,
         deliverable_mode_fun: dmode(),
         task_queue: StubQueue,

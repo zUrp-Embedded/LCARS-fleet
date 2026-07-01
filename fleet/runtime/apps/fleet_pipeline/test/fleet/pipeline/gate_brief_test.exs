@@ -8,7 +8,7 @@ defmodule Fleet.Pipeline.GateBriefTest do
     brief =
       GateBrief.build(%{
         step: "spec-review",
-        pipeline_id: "pipe-42",
+        workflow_map_id: "pipe-42",
         gate: %{"type" => "terminal", "rules" => ["severity_max != critical"]},
         outputs: %{"result" => %{"severity_max" => "important"}}
       })
@@ -36,7 +36,7 @@ defmodule Fleet.Pipeline.GateBriefTest do
     brief =
       GateBrief.build(%{
         step: "review",
-        pipeline_id: "gk-smoke",
+        workflow_map_id: "gk-smoke",
         gate: nil,
         outputs: %{"result" => %{"commit" => "abc"}},
         request: "Crée SMOKE.md et commit."
@@ -54,12 +54,12 @@ defmodule Fleet.Pipeline.GateBriefTest do
   end
 
   test "sans request → pas de section demande d'origine" do
-    brief = GateBrief.build(%{step: "s", pipeline_id: "p", gate: nil, outputs: %{}})
+    brief = GateBrief.build(%{step: "s", workflow_map_id: "p", gate: nil, outputs: %{}})
     refute brief =~ "Demande d'origine"
   end
 
   test "gate nil + outputs vides → rendu défensif (pas de crash)" do
-    brief = GateBrief.build(%{step: "audit", pipeline_id: "p", gate: nil, outputs: %{}})
+    brief = GateBrief.build(%{step: "audit", workflow_map_id: "p", gate: nil, outputs: %{}})
     assert brief =~ "Step jugé : audit"
     assert brief =~ "type —"
     assert brief =~ "(aucun)"
@@ -69,7 +69,7 @@ defmodule Fleet.Pipeline.GateBriefTest do
     brief =
       GateBrief.build(%{
         step: "s",
-        pipeline_id: "p",
+        workflow_map_id: "p",
         gate: nil,
         outputs: %{"pid" => self()}
       })

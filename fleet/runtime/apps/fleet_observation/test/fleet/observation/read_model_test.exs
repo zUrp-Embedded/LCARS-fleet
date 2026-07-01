@@ -25,7 +25,7 @@ defmodule Fleet.Observation.ReadModelTest do
     pid = start_supervised!({ReadModel, subscribe: false})
 
     send(pid, ev("work_item_completed", source: :task_queue))
-    send(pid, ev("pipeline.completed", source: :pipeline))
+    send(pid, ev("workflow_map.completed", source: :pipeline))
     send(pid, ev("audit.verdict", source: :starfleet))
     send(pid, ev("coord.escalation_triggered", source: :coord))
     send(pid, ev("gitea.opened", source: :api))
@@ -35,7 +35,7 @@ defmodule Fleet.Observation.ReadModelTest do
     p = ReadModel.projection()
     assert p.total == 6
     assert p.counts["work_item_completed"] == 1
-    assert [%{type: "pipeline.completed"}] = p.pipelines
+    assert [%{type: "workflow_map.completed"}] = p.pipelines
     # audit.verdict ET coord.escalation_* → deck gatekeeper (2 entrées)
     assert [%{type: "coord.escalation_triggered"}, %{type: "audit.verdict"}] = p.gatekeeper
     assert [%{type: "gitea.opened"}] = p.coordination

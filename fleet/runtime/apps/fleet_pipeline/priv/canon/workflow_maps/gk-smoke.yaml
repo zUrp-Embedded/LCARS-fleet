@@ -1,7 +1,7 @@
 # Pipeline — gk-smoke (smoke-test escalade gatekeeper, pattern B)
 #
 # Date: 2026-06-08 — 2026-06-29 rev3 (enveloppe v2.5 unique)
-# Statut: SMOKE — carte minimale 2 steps pour valider la chaîne forge-driven AVEC
+# Statut: SMOKE — workflow_map minimale 2 steps pour valider la chaîne forge-driven AVEC
 #         une ESCALADE gatekeeper (pattern B) sur de vrais pods.
 #         build(engineer, livrable git) -> review(reviewer, gate soft -> escalade).
 #
@@ -11,7 +11,7 @@
 # verdict (continue -> avance ; abandon -> close ; humain -> await_arch). Smoke-test
 # du chemin d'escalade de bout en bout.
 
-kind: Pipeline
+kind: WorkflowMap
 metadata:
   name: gk-smoke
   description: "Smoke-test escalade gatekeeper (pattern B) : build engineer -> review reviewer (gate soft)"

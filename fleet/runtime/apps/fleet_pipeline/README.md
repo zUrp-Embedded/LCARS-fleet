@@ -5,7 +5,7 @@
 **Statut** : lib-only (salvage post-moteur-RAM) — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_pipeline.md`, `STATUS-CHANTIERS.md`
 
-Lib **carte / gate / delivery** (quasi-pure) consommée par le rail forge-state-machine
+Lib **workflow_map / gate / delivery** (quasi-pure) consommée par le rail forge-state-machine
 et les apps du core — Ring 3 (coordination + policy).
 
 Source : `04_design-notes/fleet_pipeline.md`.
@@ -22,14 +22,14 @@ sortie de la clé `mod:` de `mix.exs`, au Bloc C).
 `fleet_pipeline` n'expose donc **plus** de `start_pipeline/2-3`, de lookup
 `Registry` per-pipeline-run, ni de `count_running/0`. Ce qui reste est un jeu de
 **fonctions pures (et un seam de boot gatekeeper)** : parsing/normalisation de
-carte YAML, évaluation de gates, et publication de livrable.
+workflow_map YAML, évaluation de gates, et publication de livrable.
 
 ## Sous-modules
 
 | Module | Rôle (vérifié dans le code) |
 |---|---|
-| `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`pipeline-v2.5.json`, enveloppe `kind/metadata/spec`), puis **normalise** vers la forme interne unique `%{"name", "steps"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché en `:persistent_term`. Fonctions pures ; `opts` (`:pipelines_root`, `:schema_path`) pour tests async |
-| `Fleet.Pipeline.GraphValidator` | `validate/1` : linter de GRAPHE **pur** (`steps` → `:ok \| {:error, {kind, detail}}`) sur les invariants inter-steps que le JSON Schema ne peut pas exprimer (il valide chaque step isolément). Vérifie : `:phantom_edge` (chaque `needs` réfère un step déclaré — anti-arête-fantôme/typo silencieux), `:no_root`/`:multiple_roots` (exactement 1 racine `needs: []`), `:unreachable` (tout step atteignable depuis la racine), `:cycle` (DAG, tri topologique de Kahn — couvre aussi « aucun terminal atteignable », condition équivalente pour ce runtime séquentiel), `:fan_out` (aucun step à ≥2 successeurs ; runtime séquentiel, aligné `CarteNav`). `describe/1` rend le message lisible par invariant (composé par le Loader dans son raise). Autonome — ne dépend PAS de `CarteNav` (la dépendance inverse fleet_pipeline→fleet_pilot est interdite) |
+| `Fleet.Pipeline.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`workflow-map-v2.5.json`, enveloppe `kind/metadata/spec`), puis **normalise** vers la forme interne unique `%{"name", "steps"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché en `:persistent_term`. Fonctions pures ; `opts` (`:workflow_maps_root`, `:schema_path`) pour tests async |
+| `Fleet.Pipeline.GraphValidator` | `validate/1` : linter de GRAPHE **pur** (`steps` → `:ok \| {:error, {kind, detail}}`) sur les invariants inter-steps que le JSON Schema ne peut pas exprimer (il valide chaque step isolément). Vérifie : `:phantom_edge` (chaque `needs` réfère un step déclaré — anti-arête-fantôme/typo silencieux), `:no_root`/`:multiple_roots` (exactement 1 racine `needs: []`), `:unreachable` (tout step atteignable depuis la racine), `:cycle` (DAG, tri topologique de Kahn — couvre aussi « aucun terminal atteignable », condition équivalente pour ce runtime séquentiel), `:fan_out` (aucun step à ≥2 successeurs ; runtime séquentiel, aligné `WorkflowMapNav`). `describe/1` rend le message lisible par invariant (composé par le Loader dans son raise). Autonome — ne dépend PAS de `WorkflowMapNav` (la dépendance inverse fleet_pipeline→fleet_pilot est interdite) |
 | `Fleet.Pipeline.Gate` | `@callback evaluate/3` — behaviour générique d'évaluation de gate, vendor-extensible compile-time |
 | `Fleet.Pipeline.Gates` | implémentation du behaviour `Gate`. `evaluate/3` dispatche par type (`:hard \| :soft \| :terminal \| nil`). **Pur** : seul le `soft` retourne `{:dispatch_gatekeeper, info}` (décision d'escalade), il ne spawn rien. `rules` (hard ET terminal) = liste de prédicats string délégués à `Gates.Predicate`. Somme fermée : toute forme inconnue/malformée → `{:fail}` fail-closed (l'éval est TOTALE) |
 | `Fleet.Pipeline.Gates.Predicate` | `eval?/2` — évaluateur **pur** des rule-strings v2.5 (`"all_tests_pass"`, `"severity_max != critical"`, conjonction `AND`) contre les `outputs` auto-rapportés. Grammaire bornée au corpus canon ; **fail-closed** (fait absent / type incompatible → faux) |
@@ -44,7 +44,7 @@ carte YAML, évaluation de gates, et publication de livrable.
 ## Format pipeline YAML
 
 ```yaml
-kind: Pipeline
+kind: WorkflowMap
 metadata:
   name: intensity-low
 spec:
@@ -107,8 +107,8 @@ jamais projet). Le brief de jugement est rendu par `Fleet.Pipeline.GateBrief.bui
 ## Atom registration (legacy)
 
 `Fleet.Pipeline.Application` pré-enregistre encore au compile-time les atomes
-`pipeline.stage.completed | pipeline.completed | pipeline.failed` via l'attribut
-`@pipeline_event_atoms` (exposé par `pipeline_event_atoms/0`). Ces events étaient
+`workflow_map.step.completed | workflow_map.completed | workflow_map.failed` via l'attribut
+`@workflow_map_event_atoms` (exposé par `workflow_map_event_atoms/0`). Ces events étaient
 émis par l'`Executor` retiré et **ne sont plus émis** ; ils restent pré-enregistrés
 pour rester cohérents avec la mitigation atom-leak DoS de ch11 (`Bus` utilise
 `String.to_existing_atom/1`). Nettoyage prévu au Bloc C.

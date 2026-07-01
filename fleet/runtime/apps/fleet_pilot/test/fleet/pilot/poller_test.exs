@@ -92,10 +92,10 @@ defmodule Fleet.Pilot.PollerTest do
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
 
     # #8 : la route vit dans le route-comment (state-machine). Stub configurable par `_test_routes`
-    # (map n → {carte, step}). Défaut :none (issue non routé → A1 producteur).
+    # (map n → {workflow_map, step}). Défaut :none (issue non routé → A1 producteur).
     def get_route(_repo, n, opts) do
       case Map.get(Keyword.get(opts, :_test_routes, %{}), n) do
-        {carte, step} -> {:ok, {carte, step}}
+        {workflow_map, step} -> {:ok, {workflow_map, step}}
         _ -> :none
       end
     end
@@ -148,8 +148,8 @@ defmodule Fleet.Pilot.PollerTest do
     def load(_), do: {:error, :not_found}
   end
 
-  # Loader de CARTE (load!/1) — distinct du loader CapProfile ci-dessus (load/1).
-  defmodule StepStubCarteLoader do
+  # Loader de WORKFLOW_MAP (load!/1) — distinct du loader CapProfile ci-dessus (load/1).
+  defmodule StepStubWorkflowMapLoader do
     # 1-step (producteur engineer) : un issue routé ici (step=build=1er) est EN FILE (pas démarré).
     def load!("qa-build") do
       %{"name" => "qa-build", "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
@@ -215,12 +215,12 @@ defmodule Fleet.Pilot.PollerTest do
     def wake(_pod_id, _respawn_fun, _opts), do: {:error, {:escalated, :not_found}}
   end
 
-  # Loader de CARTE qui RATE TRANSITOIREMENT sur `qa-2` (carte → nil) mais charge `qa-build` normalement.
-  # Simule un échec réseau/forge de chargement de carte sur un pipeline routé-avancé : le bail ne doit PAS
-  # se libérer pour autant (fail-closed). `load!/1` LÈVE pour `qa-2` → le poller (load_carte_or_nil) ET le
-  # StepDispatcher (load_carte) le rescue-ent en nil/`{:error}`.
-  defmodule NilCarteForQa2Loader do
-    def load!("qa-2"), do: raise("carte qa-2 indisponible (échec transitoire simulé)")
+  # Loader de WORKFLOW_MAP qui RATE TRANSITOIREMENT sur `qa-2` (workflow_map → nil) mais charge `qa-build` normalement.
+  # Simule un échec réseau/forge de chargement de workflow_map sur un pipeline routé-avancé : le bail ne doit PAS
+  # se libérer pour autant (fail-closed). `load!/1` LÈVE pour `qa-2` → le poller (load_workflow_map_or_nil) ET le
+  # StepDispatcher (load_workflow_map) le rescue-ent en nil/`{:error}`.
+  defmodule NilWorkflowMapForQa2Loader do
+    def load!("qa-2"), do: raise("workflow_map qa-2 indisponible (échec transitoire simulé)")
 
     def load!("qa-build"),
       do: %{
@@ -254,7 +254,7 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   describe "mode step — force_poll" do
-    test "issue assignée ROUTELESS → onboardée sur la carte par défaut (skip, pas de spawn)" do
+    test "issue assignée ROUTELESS → onboardée sur la workflow_map par défaut (skip, pas de spawn)" do
       issues = [
         %{
           "number" => 7,
@@ -266,7 +266,7 @@ defmodule Fleet.Pilot.PollerTest do
 
       {name, pid} = start_step_poller({:ok, issues})
 
-      # #5.2 D2 — route nil → le poller ONBOARDE (grave la carte par défaut brief-gate via Loader) puis
+      # #5.2 D2 — route nil → le poller ONBOARDE (grave la workflow_map par défaut brief-gate via Loader) puis
       # DÉFÈRE → skip (le tick suivant la voit routée → dispatch). Le dispatch routé est testé dans le
       # describe « route gravée » + step_dispatcher_test. Au niveau Poller, le contrat = le tally.
       assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
@@ -510,10 +510,10 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "issue ROUTÉ (route-comment) + assignee → démarre → dispatche le rôle du step (carte_role)" do
+    test "issue ROUTÉ (route-comment) + assignee → démarre → dispatche le rôle du step (workflow_map_role)" do
       # #8 cohérence : le routing vient de la ROUTE-COMMENT (gravée par create_issue), plus du label.
       # #10 routé qa-build:build (1er step = en file), assigné humain, bail libre → DÉMARRE → le poller
-      # dispatche le rôle du step courant (build → engineer via carte_role).
+      # dispatche le rôle du step courant (build → engineer via workflow_map_role).
       issues = [
         %{
           "number" => 10,
@@ -538,13 +538,13 @@ defmodule Fleet.Pilot.PollerTest do
             _test_routes: %{10 => {"qa-build", "build"}}
           ],
           loader: StepStubLoader,
-          carte_loader: StepStubCarteLoader,
+          workflow_map_loader: StepStubWorkflowMapLoader,
           spawner: StepStubSpawner,
           clock: fn :second -> 1_700_000_000 end
         )
 
       # tally = le contrat au niveau Poller (le spawn part dans la mailbox du GenServer, pas du test ;
-      # le rôle dispatché par carte_role est unit-testé dans step_dispatcher_test).
+      # le rôle dispatché par workflow_map_role est unit-testé dans step_dispatcher_test).
       assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)
@@ -648,7 +648,7 @@ defmodule Fleet.Pilot.PollerTest do
   # ============================================================
   describe "mode step — bail repo-serialise" do
     # `extra_opts` surcharge les opts (Keyword.merge en dernier) : injecte un seam (`wake_recovery`) ou
-    # remplace un défaut (`carte_loader`) sans dupliquer le harnais.
+    # remplace un défaut (`workflow_map_loader`) sans dupliquer le harnais.
     defp start_entry_poller(issues_response, routes, extra_opts \\ []) do
       name = :"P_lease_#{System.unique_integer([:positive])}"
 
@@ -661,7 +661,7 @@ defmodule Fleet.Pilot.PollerTest do
         forge_client: StepStubForge,
         forge_opts: [_test_issues: issues_response, _test_routes: routes],
         loader: StepStubLoader,
-        carte_loader: StepStubCarteLoader,
+        workflow_map_loader: StepStubWorkflowMapLoader,
         spawner: StepStubSpawner,
         clock: fn :second -> 1_700_000_000 end
       ]
@@ -787,15 +787,15 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "pipeline routé-avancé à carte NIL tient le bail (échec transitoire de carte ne libère pas le bail)" do
+    test "pipeline routé-avancé à workflow_map NIL tient le bail (échec transitoire de workflow_map ne libère pas le bail)" do
       # Régression : le bail se lit sur la ROUTE (append-only, robuste), JAMAIS sur le succès du chargement de
-      # la carte. #18 routé qa-2:deploy (2e step ≠ 1er = pipeline AVANCÉ = ENGAGÉ) mais sa carte échoue à
-      # charger TRANSITOIREMENT (NilCarteForQa2Loader lève sur qa-2). Le pipeline reste ENGAGÉ (fail-closed) →
-      # tient le bail. #19 routé qa-build:build (1er step = EN FILE, carte qa-build charge OK), même repo →
-      # bail tenu → SKIPPÉ. Aucun 2e pipeline ne démarre malgré la carte-nil.
+      # la workflow_map. #18 routé qa-2:deploy (2e step ≠ 1er = pipeline AVANCÉ = ENGAGÉ) mais sa workflow_map échoue à
+      # charger TRANSITOIREMENT (NilWorkflowMapForQa2Loader lève sur qa-2). Le pipeline reste ENGAGÉ (fail-closed) →
+      # tient le bail. #19 routé qa-build:build (1er step = EN FILE, workflow_map qa-build charge OK), même repo →
+      # bail tenu → SKIPPÉ. Aucun 2e pipeline ne démarre malgré la workflow_map-nil.
       #
-      # Régression prouvée : reviens à `engaged = not is_nil(carte_map) and not first_step?(...)` → la
-      # carte-nil de #18 le classe `engaged=false` → il sort du lease set → #19 voit le bail LIBRE → DÉMARRE un
+      # Régression prouvée : reviens à `engaged = not is_nil(workflow_map_map) and not first_step?(...)` → la
+      # workflow_map-nil de #18 le classe `engaged=false` → il sort du lease set → #19 voit le bail LIBRE → DÉMARRE un
       # 2e pipeline → le tally devient `dispatched:1` (au lieu de `dispatched:0, skipped:1`), l'assert échoue.
       issues = [
         %{
@@ -816,11 +816,11 @@ defmodule Fleet.Pilot.PollerTest do
         start_entry_poller(
           {:ok, issues},
           %{18 => {"qa-2", "deploy"}, 19 => {"qa-build", "build"}},
-          carte_loader: NilCarteForQa2Loader
+          workflow_map_loader: NilWorkflowMapForQa2Loader
         )
 
-      # #18 engagé (carte-nil mais route avancée → fail-closed) tient le bail : son step est dispatché mais
-      # fail-loud (carte manquante côté StepDispatcher → errors:1), le bail reste TENU. #19 → bail tenu →
+      # #18 engagé (workflow_map-nil mais route avancée → fail-closed) tient le bail : son step est dispatché mais
+      # fail-loud (workflow_map manquante côté StepDispatcher → errors:1), le bail reste TENU. #19 → bail tenu →
       # skipped:1. Aucun 2e pipeline démarré (dispatched:0).
       assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
 

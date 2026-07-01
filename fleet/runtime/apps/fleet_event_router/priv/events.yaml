@@ -93,15 +93,15 @@ events:
   coord.action_dispatched: []
 
   # --- Pipeline (source :pipeline) ---
-  # ASYMÉTRIE INVERSE (consommateur réel, 0 producteur courant) : `pipeline.failed`
-  # est consommé par `Starfleet.DriftMonitor` (→ Cat 5) et `pipeline.completed` matché
-  # par `API.WS` (`pipeline.*`). Le producteur était le moteur RAM `Pipeline.Executor`,
+  # ASYMÉTRIE INVERSE (consommateur réel, 0 producteur courant) : `workflow_map.failed`
+  # est consommé par `Starfleet.DriftMonitor` (→ Cat 5) et `workflow_map.completed` matché
+  # par `API.WS` (`workflow_map.*`). Le producteur était le moteur RAM `Pipeline.Executor`,
   # SUPPRIMÉ — le rail forge-driven (`Pilot.StepRunConsumer`) ferme l'issue au lieu d'émettre
-  # `pipeline.failed`. Clés conservées (consommateur câblé) ; à ré-émettre si le rail
+  # `workflow_map.failed`. Clés conservées (consommateur câblé) ; à ré-émettre si le rail
   # forge-driven publie un signal d'échec/complétion de pipeline.
-  pipeline.failed: []
-  pipeline.completed: []
-  pipeline.stage.completed: []
+  workflow_map.failed: []
+  workflow_map.completed: []
+  workflow_map.step.completed: []
   # deliverable.published (slot-freeze) : emis par Pilot.StepRunCompleter (source :pipeline — la publication
   # EST une op pipeline via Deliverable.publish) APRES push + PR confirmes, porte `pod_id` (le pod
   # producteur, depuis le payload pod.completed). Consomme par Spawner.Pod : un pod resident (pipe) passe
@@ -120,7 +120,7 @@ events:
 
   # --- Cat 5 broadcasts (Cat5Escalator, source :starfleet) ---
   starfleet.audit_cat5_pod_drift: []
-  starfleet.audit_cat5_pipeline_failed: []
+  starfleet.audit_cat5_workflow_map_failed: []
   starfleet.audit_cat5_oauth_refresh_failed: []
 
   # --- TaskQueue lifecycle (source :task_queue) ---

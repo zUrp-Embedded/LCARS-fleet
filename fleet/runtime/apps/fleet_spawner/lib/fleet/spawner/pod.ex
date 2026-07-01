@@ -809,9 +809,9 @@ defmodule Fleet.Spawner.Pod do
   # Délègue à la source unique `Fleet.CapProfile.lifetime_scope/1`.
   defp lifetime_scope(%Fleet.CapProfile{} = cp), do: Fleet.CapProfile.lifetime_scope(cp)
 
-  # pod.completed porte le contexte pipeline (pipeline_id+step) SI le pod est spawné avec ces clés.
+  # pod.completed porte le contexte workflow_map (workflow_map_id+step) SI le pod est spawné avec ces clés.
   # Plus aucun appelant ne les pose aujourd'hui → en pratique le payload est nu (un consommateur qui
-  # reçoit un payload nu ignore le contexte pipeline, no-op).
+  # reçoit un payload nu ignore le contexte workflow_map, no-op).
   defp pod_completed_payload(data, result) do
     base = %{
       "pod_id" => data.pod_id,
@@ -821,9 +821,9 @@ defmodule Fleet.Spawner.Pod do
 
     opts = data.opts || []
 
-    case {Keyword.get(opts, :pipeline_id), Keyword.get(opts, :step)} do
+    case {Keyword.get(opts, :workflow_map_id), Keyword.get(opts, :step)} do
       {nil, _} ->
-        # Pod step-dispatch (assignee-driven) hors pipeline. S'il porte un PROJET (repo cloné), le
+        # Pod step-dispatch (assignee-driven) hors workflow_map. S'il porte un PROJET (repo cloné), le
         # payload embarque le contexte de fin-de-step-run : le consumer StepRunConsumer est stateless (l'event
         # porte l'état). Pod sans projet (memory-X, architect) → payload nu (base), filtré en aval.
         case LaunchSpec.effective_project(data.opts, data.cap_profile) do
@@ -840,23 +840,23 @@ defmodule Fleet.Spawner.Pod do
               "role" => cap_profile_name(data.cap_profile)
             })
             |> maybe_put_repo(proj)
-            |> maybe_put_carte_ctx(opts)
+            |> maybe_put_workflow_map_ctx(opts)
 
           _ ->
             base
         end
 
-      {pipeline_id, step} ->
-        Map.merge(base, %{"pipeline_id" => pipeline_id, "step" => step})
+      {workflow_map_id, step} ->
+        Map.merge(base, %{"workflow_map_id" => workflow_map_id, "step" => step})
     end
   end
 
-  # Contexte carte (pipeline+step) injecté au spawn par StepDispatcher via `:pipeline`/`:step`.
-  # Permet au StepRunConsumer de naviguer la carte. Absent (carte 1-step) → payload inchangé.
-  defp maybe_put_carte_ctx(payload, opts) do
-    case {Keyword.get(opts, :pipeline), Keyword.get(opts, :step)} do
+  # Contexte workflow_map (workflow_map+step) injecté au spawn par StepDispatcher via `:workflow_map`/`:step`.
+  # Permet au StepRunConsumer de naviguer la workflow_map. Absent (workflow_map 1-step) → payload inchangé.
+  defp maybe_put_workflow_map_ctx(payload, opts) do
+    case {Keyword.get(opts, :workflow_map), Keyword.get(opts, :step)} do
       {p, s} when is_binary(p) and is_binary(s) ->
-        Map.merge(payload, %{"pipeline" => p, "step" => s})
+        Map.merge(payload, %{"workflow_map" => p, "step" => s})
 
       _ ->
         payload

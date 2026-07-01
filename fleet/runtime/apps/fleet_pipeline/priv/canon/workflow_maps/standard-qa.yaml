@@ -8,7 +8,7 @@
 # Référencé par: 06_modops/docs/cascade-mix-v2-rationale.md, 06_modops/docs/pipeline-v2-loader-validation.md
 # Consommé par: Fleet.Pipeline.Loader (chantier 12 PROMOTED)
 
-kind: Pipeline
+kind: WorkflowMap
 metadata:
   name: standard-qa
   description: "Workflow méthodologique brainstorm → plan → implement (TDD) → spec-review → code-review → finish"

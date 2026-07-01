@@ -29,7 +29,7 @@ defmodule Fleet.Starfleet.Application do
   # `audit.cat5.*` (pointillés) étaient des vestiges jamais émis.
   @starfleet_event_atoms [
     :"starfleet.audit_cat5_pod_drift",
-    :"starfleet.audit_cat5_pipeline_failed",
+    :"starfleet.audit_cat5_workflow_map_failed",
     :"starfleet.audit_cat5_oauth_refresh_failed",
     :"audit.verdict",
     # B10/#583 Sprint 1 — events lifecycle BootOrchestrator

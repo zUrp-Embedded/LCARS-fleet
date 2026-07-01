@@ -8,7 +8,7 @@
 # Statut : draft défrichage — sera enrichi (gates qualité, clone forge, finish) une
 # fois la mécanique de base prouvée. Ne pas considérer comme canon.
 
-kind: Pipeline
+kind: WorkflowMap
 metadata:
   name: poc-helloworld
   description: "PoC délégation : engineer implémente hello_world (1 step, no human-gate)"

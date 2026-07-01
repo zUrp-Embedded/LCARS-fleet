@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def remove_label(_repo, _n, _label, _opts), do: {:ok, :removed}
     def close_issue(_repo, _n, _opts), do: {:ok, :closed}
-    def post_route(_repo, _n, _pipeline, _step, _opts), do: {:ok, :posted}
+    def post_route(_repo, _n, _workflow_map_name, _step, _opts), do: {:ok, :posted}
   end
 
   setup %{tmp_dir: tmp} do

@@ -1,19 +1,19 @@
-defmodule Fleet.Pilot.CarteNav do
+defmodule Fleet.Pilot.WorkflowMapNav do
   @moduledoc """
-  Navigation **pure** dans une carte (pipeline) — le chaînage forge-driven des steps.
+  Navigation **pure** dans une workflow_map (pipeline) — le chaînage forge-driven des steps.
   Remplace la logique RAM `Executor.next_step_or_done` par une résolution
   **stateless** : étant donné la
-  carte (sortie `Fleet.Pipeline.Loader`) + le **nom du step courant**, calcule le
+  workflow_map (sortie `Fleet.Pipeline.Loader`) + le **nom du step courant**, calcule le
   step suivant (ou terminal).
 
   ## Pourquoi clé par NOM de step, pas par rôle
 
   Clé naïve « le step dont `role` = assignee » : **insuffisant** —
-  une carte peut avoir le même rôle sur plusieurs steps (ex. `standard-qa` :
+  une workflow_map peut avoir le même rôle sur plusieurs steps (ex. `standard-qa` :
   `architect` est sur `brainstorm` ET `plan`). L'assignee (= rôle) seul
   **n'identifie pas** le step. La position canonique est donc le **nom du step**, que
   le runtime grave sur la forge (lock comment enrichi `[lock:role:step:ts]`) et
-  relit pour naviguer. `CarteNav` est keyé par nom de step ; d'où vient
+  relit pour naviguer. `WorkflowMapNav` est keyé par nom de step ; d'où vient
   le nom (forge) est le concern de l'appelant.
 
   ## Cardinalité (MVP linéaire)
@@ -23,14 +23,14 @@ defmodule Fleet.Pilot.CarteNav do
   `{:error, :dag_not_supported}` explicite (pas de choix silencieux). Idem entrée :
   exactement 1 racine (`needs: []`).
 
-  ## Format carte consommé
+  ## Format workflow_map consommé
 
   Sortie `Loader` : `%{"name" => ..., "steps" => %{name => %{"role", "needs", "gate"?, ...}}}`.
-  Clés string (le Loader normalise v1/v2.5 vers cette forme). `CarteNav` ne charge pas —
-  l'appelant passe la carte déjà chargée.
+  Clés string (le Loader normalise v1/v2.5 vers cette forme). `WorkflowMapNav` ne charge pas —
+  l'appelant passe la workflow_map déjà chargée.
   """
 
-  @type carte :: %{required(String.t()) => any()}
+  @type workflow_map :: %{required(String.t()) => any()}
   @type step_name :: String.t()
   @type role :: String.t()
 
@@ -38,9 +38,9 @@ defmodule Fleet.Pilot.CarteNav do
   Step d'entrée = l'unique racine (`needs: []`). `{:error, :no_root}` si aucune,
   `{:error, :multiple_roots}` si ≥2 (entrée parallèle = hors-scope).
   """
-  @spec first_step(carte()) :: {:ok, {step_name(), role()}} | {:error, atom()}
-  def first_step(carte) do
-    steps = steps(carte)
+  @spec first_step(workflow_map()) :: {:ok, {step_name(), role()}} | {:error, atom()}
+  def first_step(workflow_map) do
+    steps = steps(workflow_map)
 
     roots =
       Enum.filter(steps, fn {_name, spec} -> needs(spec) == [] end)
@@ -57,10 +57,10 @@ defmodule Fleet.Pilot.CarteNav do
   (fin de chaîne) ; `{:error, :unknown_step}` si le step courant n'existe pas ;
   `{:error, :dag_not_supported}` si ≥2 successeurs (branche parallèle, hors-scope).
   """
-  @spec next_step(carte(), step_name()) ::
+  @spec next_step(workflow_map(), step_name()) ::
           {:ok, {step_name(), role()}} | :terminal | {:error, atom()}
-  def next_step(carte, current_step) when is_binary(current_step) do
-    steps = steps(carte)
+  def next_step(workflow_map, current_step) when is_binary(current_step) do
+    steps = steps(workflow_map)
 
     if not Map.has_key?(steps, current_step) do
       {:error, :unknown_step}
@@ -77,18 +77,18 @@ defmodule Fleet.Pilot.CarteNav do
   end
 
   @doc "Rôle d'un step nommé. `:error` si inconnu."
-  @spec step_role(carte(), step_name()) :: {:ok, role()} | :error
-  def step_role(carte, step_name) do
-    case Map.get(steps(carte), step_name) do
+  @spec step_role(workflow_map(), step_name()) :: {:ok, role()} | :error
+  def step_role(workflow_map, step_name) do
+    case Map.get(steps(workflow_map), step_name) do
       nil -> :error
       spec -> {:ok, role(spec)}
     end
   end
 
   @doc "Spec brute d'un step (pour lire `gate`, `profile`, `timeout_sec`…). `:error` si inconnu."
-  @spec step_spec(carte(), step_name()) :: {:ok, map()} | :error
-  def step_spec(carte, step_name) do
-    case Map.get(steps(carte), step_name) do
+  @spec step_spec(workflow_map(), step_name()) :: {:ok, map()} | :error
+  def step_spec(workflow_map, step_name) do
+    case Map.get(steps(workflow_map), step_name) do
       nil -> :error
       spec -> {:ok, spec}
     end
@@ -100,7 +100,7 @@ defmodule Fleet.Pilot.CarteNav do
   # valider. cf. `StepRunConsumer.gate_decide`.
 
   # ── internals ──
-  defp steps(carte), do: Map.get(carte, "steps", %{})
+  defp steps(workflow_map), do: Map.get(workflow_map, "steps", %{})
   defp needs(spec), do: Map.get(spec, "needs", [])
   defp role(spec), do: Map.get(spec, "role")
 end

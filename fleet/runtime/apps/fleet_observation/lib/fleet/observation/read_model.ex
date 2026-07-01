@@ -18,7 +18,7 @@ defmodule Fleet.Observation.ReadModel do
         total: n,                      # events vus depuis le boot
         counts: %{type => n},          # tally par type (BRIDGE + FLOW dérivent d'ici)
         stream: [summary, ...],        # 100 derniers (la colonne vertébrale)
-        pipelines: [summary, ...],     # 20 derniers pipeline.*
+        pipelines: [summary, ...],     # 20 derniers workflow_map.*
         gatekeeper: [summary, ...],    # 20 derniers audit.verdict / coord.escalation_*
         coordination: [summary, ...],  # 20 derniers coord.* / gitea.*
         diagnostics: [summary, ...]    # 20 derniers boot/oauth/mcp/sdk/signal/git
@@ -57,7 +57,7 @@ defmodule Fleet.Observation.ReadModel do
   # L'ordre compte (premier préfixe matché gagne). Une mécanique unique
   # (`String.starts_with?`), le catalogue varie.
   @deck_prefixes [
-    {"pipeline.", :pipelines},
+    {"workflow_map.", :pipelines},
     {"audit.verdict", :gatekeeper},
     {"coord.escalation", :gatekeeper},
     {"coord.", :coordination},

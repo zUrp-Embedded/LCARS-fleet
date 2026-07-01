@@ -1,6 +1,6 @@
 defmodule Fleet.Pipeline.GraphValidator do
   @moduledoc """
-  Linter de GRAPHE **pur** d'une carte (pipeline). Vérifie les invariants
+  Linter de GRAPHE **pur** d'une workflow_map (pipeline). Vérifie les invariants
   inter-steps que le JSON Schema ne peut PAS exprimer : le schéma draft-07 valide
   chaque step ISOLÉMENT (sa forme, ses champs), jamais la relation entre steps.
   Un `needs` mal orthographié passe donc le schéma mais pose une arête fantôme — un
@@ -15,7 +15,7 @@ defmodule Fleet.Pipeline.GraphValidator do
   ## Le graphe
 
   Un step B avec `needs: [A]` pose l'arête A → B (A précède B, B est un successeur
-  de A). Une carte sans `needs` (ou `needs: []`) est une racine.
+  de A). Une workflow_map sans `needs` (ou `needs: []`) est une racine.
 
   ## Invariants (un `kind` par invariant)
 
@@ -29,10 +29,10 @@ defmodule Fleet.Pipeline.GraphValidator do
       pipeline. Pour ce runtime séquentiel (racine unique + pas de fan-out), « cycle »
       et « aucun terminal atteignable » sont la MÊME condition : une chaîne qui boucle
       n'a aucun step sans successeur. L'invariant « ≥1 terminal atteignable » est donc
-      garanti par la conjonction racine-unique + acyclicité — une carte sans terminal
+      garanti par la conjonction racine-unique + acyclicité — une workflow_map sans terminal
       est rejetée ici comme `:cycle` (pas de branche dédiée qui ne pourrait jamais tirer).
     * `:fan_out` — aucun step n'a ≥2 successeurs. Le runtime est SÉQUENTIEL :
-      `Fleet.Pilot.CarteNav.next_step/2` rejette déjà une branche parallèle à la
+      `Fleet.Pilot.WorkflowMapNav.next_step/2` rejette déjà une branche parallèle à la
       navigation (`:dag_not_supported`) ; on échoue ici au LOAD, plus tôt et cohérent.
 
   ## Ordre des vérifications
@@ -93,7 +93,7 @@ defmodule Fleet.Pipeline.GraphValidator do
   def describe({:fan_out, %{step: step, successors: succs}}),
     do:
       "le step #{inspect(step)} a #{length(succs)} successeurs #{inspect(succs)} — le runtime est séquentiel " <>
-        "(un seul successeur par step ; cf. Fleet.Pilot.CarteNav qui rejette le fan-out à la navigation)"
+        "(un seul successeur par step ; cf. Fleet.Pilot.WorkflowMapNav qui rejette le fan-out à la navigation)"
 
   # ── checks (chacun pur : data → :ok | {:error, {kind, detail}}) ──
 

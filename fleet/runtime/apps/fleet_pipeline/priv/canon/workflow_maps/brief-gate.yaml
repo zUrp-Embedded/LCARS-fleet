@@ -3,15 +3,15 @@
 # Date: 2026-06-18
 # Statut: actif — gate dure de revue de brief (consultant) AVANT dispatch engineer.
 # Dérivé de: DECISIONS-attribution-promotion-concurrence-2026-06-18 + design #8 (build-spec passe 2-4).
-# Consommé par: Fleet.Pipeline.Loader / Fleet.Pilot.Entry (type:->carte) + StepDispatcher.carte_role.
+# Consommé par: Fleet.Pipeline.Loader / Fleet.Pilot.Entry (type:->workflow_map) + StepDispatcher.workflow_map_role.
 #
-# La carte EST la machine à états : le 1er step (racine needs:[]) est brief-review (consultant en
+# La workflow_map EST la machine à états : le 1er step (racine needs:[]) est brief-review (consultant en
 # mode JUGE, brief_kind:judge per-step — le profil consultant reste worker pour l'audit). L'engineer
 # (step build) ne part QUE quand le consultant a validé le brief (gate dure mécanique : le poller ne
 # dispatche build qu'une fois la route avancée à `build`). Brief non-exécutable → escalade arch
 # (await_arch), PAS rework du consultant (re-juger ne corrige pas un mauvais brief — l'arch corrige).
 
-kind: Pipeline
+kind: WorkflowMap
 metadata:
   name: brief-gate
   description: "Revue du brief (consultant-juge) AVANT l'engineer. Brief exécutable → build ; non → escalade arch."

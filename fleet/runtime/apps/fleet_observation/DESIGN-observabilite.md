@@ -1,7 +1,7 @@
 # DESIGN — Observabilité du core LCARS Fleet (`fleet_observation`)
 
 **Date** : 2026-06-10
-**Dernière révision** : 2026-06-10
+**Dernière révision** : 2026-07-01
 **Statut** : design note exploratoire (incrément A — la base de travail). Mode exploration : pas de mauvaise réponse, on teste.
 **Référencé par** : `apps/fleet_observation/README.md` (à venir, incrément B)
 **Auteur** : agent de correction (suite de mission post-remédiation Z0→Z7)
@@ -155,7 +155,7 @@ Ce sont des idées **fonctionnelles** du v1, pas du décor — je les porte.
 | Deck | Panels | Rôle |
 |---|---|---|
 | **BRIDGE** | health global (LED), readiness deep résumé, quiescence, horloge, débit d'events | vue commande, coup d'œil 3 sec |
-| **PODS** | grille de **cartes par rôle** (icône SVG + phase/conditions/stale→CRASH/âge) | façon monitor v1, le cœur opérationnel |
+| **PODS** | grille de **workflow_maps par rôle** (icône SVG + phase/conditions/stale→CRASH/âge) | façon monitor v1, le cœur opérationnel |
 | **FLOW** | file de mandats (pending/active/done/failed) + pipelines par état + stages | le travail en cours |
 | **GATEKEEPER** | escalades Z3-B + verdicts + gate_evals en attente | le juge d'exception, rare-par-construction |
 | **COORDINATION** | routes Pilot, policies/actions coord, MCP config | le tissu de décision |
@@ -164,7 +164,7 @@ Ce sont des idées **fonctionnelles** du v1, pas du décor — je les porte.
 
 ### 4.3 Intégration des assets (`/tmp/LCARS_design/`)
 - **Icônes SVG de rôles** (architect, consultant, engineer, gatekeeper, qualifier, reviewer,
-  starfleet*, vulcan) → en-tête des cartes PODS / GATEKEEPER. (*starfleet : icône dispo mais
+  starfleet*, vulcan) → en-tête des workflow_maps PODS / GATEKEEPER. (*starfleet : icône dispo mais
   pas de panel starfleet — non-négo #2.)
 - **favicon.svg / favicon-minimal.svg** → onglet.
 - **CSS LCARS** (clean-room, repris du squelette :8089 `lcars-tva.css` + analyse *Charte LCARS*)
@@ -208,7 +208,7 @@ Ce sont des idées **fonctionnelles** du v1, pas du décor — je les porte.
 
 ## 7. Inspirations intégrées (traçabilité)
 - **`fleet-hub.py` v1** → split producteur/lecteur, REST read-only, snapshot+stale, topologie au boot.
-- **`fleet-monitor.py` v1** → grammaire couleur+glyphe, cartes par rôle, stale→CRASH, âge relatif, inbox.
+- **`fleet-monitor.py` v1** → grammaire couleur+glyphe, workflow_maps par rôle, stale→CRASH, âge relatif, inbox.
 - **`fleet_dashboard` :8089 (branche sœur)** → squelette LCARS (frame/panels/LED/clock), `pod_view`
   JSON-safe (exclure les termes non-encodables `last_error`/`last_result`), poll client 3 s.
 - **BL-026** → la frontière read-model, la liste des projections, le check P01 frontier-purity (futur).

@@ -91,21 +91,22 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     end
   end
 
-  describe "pipeline.failed event" do
-    test "broadcast → Cat5 escalade pipeline_failed" do
-      :ok = emit_canon(:"pipeline.failed", %{"pipeline_id" => "pl1", "reason" => "gate fail"})
+  describe "workflow_map.failed event" do
+    test "broadcast → Cat5 escalade workflow_map_failed" do
+      :ok =
+        emit_canon(:"workflow_map.failed", %{"workflow_map_id" => "pl1", "reason" => "gate fail"})
 
       wait_drift_monitor_drain()
 
       assert_receive %Fleet.Event{
                        source: :starfleet,
-                       type: :"starfleet.audit_cat5_pipeline_failed",
-                       payload: %{"pipeline_id" => "pl1"}
+                       type: :"starfleet.audit_cat5_workflow_map_failed",
+                       payload: %{"workflow_map_id" => "pl1"}
                      },
                      500
 
       assert Enum.any?(coord_invocations(), fn
-               {:escalation, :pipeline_failed, _, _} -> true
+               {:escalation, :workflow_map_failed, _, _} -> true
                _ -> false
              end)
     end

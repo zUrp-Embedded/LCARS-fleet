@@ -17,8 +17,8 @@ defmodule Fleet.API.R1SeamWSTest do
     state = %{topics: []}
 
     event =
-      Fleet.Event.new(:pipeline, :"pipeline.completed",
-        payload: %{"pipeline_id" => "p1", "outputs" => %{}}
+      Fleet.Event.new(:pipeline, :"workflow_map.completed",
+        payload: %{"workflow_map_id" => "p1", "outputs" => %{}}
       )
 
     # RED : la struct tombe dans `websocket_info(_msg, state)` (ws.ex:85) →
@@ -27,8 +27,8 @@ defmodule Fleet.API.R1SeamWSTest do
 
     assert %{
              "type" => "event",
-             "event_type" => "pipeline.completed",
-             "payload" => %{"pipeline_id" => "p1"}
+             "event_type" => "workflow_map.completed",
+             "payload" => %{"workflow_map_id" => "p1"}
            } = Jason.decode!(frame)
   end
 end

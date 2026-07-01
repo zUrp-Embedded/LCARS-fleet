@@ -63,16 +63,16 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
 - `Fleet.Pilot.Poller` — **DÉCOUVRE** ses repos par topic (`lcars-fleet-<human>`) PUIS **ADMET** uniquement
   ceux scellés système (`ForgeClient.admitted?` — marqueur d'onboarding bot-authored ; le topic mutable seul
   ne suffit plus, cf. § Onboarding « sceau d'admission »). Sur chaque repo admis : scanne, lit la **route-comment**
-  (`[lcars-route:carte:step]`, gravée par `create_issue` = la state-machine de routing) → dispatche le rôle du
-  step (`carte_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du
+  (`[lcars-route:workflow_map:step]`, gravée par `create_issue` = la state-machine de routing) → dispatche le rôle du
+  step (`workflow_map_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du
   1er step). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
   **Bail fail-closed (2 invariants)** : (1) le bail se prend dès qu'un pipeline est DÉMARRÉ (verrou posé +
   pod spawné), jamais sur le succès d'une étape postérieure — un dispatch qui rend `{:error,{:wake_unreached,_}}`
   (verrou+pod+brief en place, seul le réveil tmux a raté) PREND le bail intra-tick (sinon un 2e issue du même
   repo démarrerait un 2e pipeline) ; l'anomalie reste comptée en `errors`/`last_tally_errors`, jamais avalée.
-  (2) l'engagement se lit sur la ROUTE (append-only, robuste), pas sur le chargement de la carte : un échec
-  TRANSITOIRE de carte (réseau/forge nil) sur un pipeline routé le classe ENGAGÉ (bail TENU, fail-closed) —
-  le dispatch de son step fail-loud si la carte manque, mais le bail ne se libère pas.
+  (2) l'engagement se lit sur la ROUTE (append-only, robuste), pas sur le chargement de la workflow_map : un échec
+  TRANSITOIRE de workflow_map (réseau/forge nil) sur un pipeline routé le classe ENGAGÉ (bail TENU, fail-closed) —
+  le dispatch de son step fail-loud si la workflow_map manque, mais le bail ne se libère pas.
 - `Fleet.Pilot.Labels` / `Fleet.Pilot.ForgeProtocol` — **vocabulaire wire-protocol** (source unique, build+parse
   **co-localisés** : un seul point si un format change). `Labels` = les **labels-verrous** non dérivables de
   l'état forge (`lcars-in-flight`/`lcars-awaits-arch`). `ForgeProtocol` = les **formats purs** (aucun I/O) : la
@@ -108,7 +108,7 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   `&offload_async/1`). Extrait du `StepRunConsumer` : concern distinct de la complétion → blast-radius isolé
   (un burst d'échecs ne partage pas la mailbox de la fin-de-step-run) et nom du StepRunConsumer rendu honnête.
 - `Fleet.Pilot.StepRunCompleter` — orchestrateur de fin-de-step-run PR-natif (`complete_pr/2`). **②.1d single-brique
-  (sans carte)** : producteur → `:review` (ouvre la PR **au nom de l'eng** via token de rôle + `request_review`
+  (sans workflow_map)** : producteur → `:review` (ouvre la PR **au nom de l'eng** via token de rôle + `request_review`
   des juges `:reviewer_roles` + **assigne l'humain** + unlock issue/PR) ; juge → `:reviewed` (poste la review
   native **signée par le juge** + unlock PR — le merge/rework est décidé par le poller sur l'état-PR agrégé).
   **Voix de l'eng (info SORTANTE)** : si le producteur rend un `summary` dans `submit_result` (extrait par
@@ -119,7 +119,7 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   AU LIEU d'une publish vide (`:no_deliverable_commit` = wedge silencieux). Le brief dit à l'eng de marquer
   `blocked` plutôt que deviner à l'aveugle.
   Identité ②.1e via `Fleet.Credentials.RoleToken` (poste EN SON NOM ; token absent → fallback système loggué).
-  (Legacy carte multi-step : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
+  (Legacy workflow_map multi-step : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
 
 Knobs : `:step_dispatch?` + `:poll_interval_ms` (step ; la forge `base_url` est l'unique config requise),
 `:poll_repo` (override legacy/test mono-repo seulement — accepté par le Poller mais écrasé à chaque tick par la

@@ -8,7 +8,7 @@ defmodule Fleet.API.WS do
 
   ### Client → Server
 
-      {"action": "subscribe", "topics": ["pipeline.*", "audit.cat5.*"]}
+      {"action": "subscribe", "topics": ["workflow_map.*", "audit.cat5.*"]}
 
   Topics liste vide = subscribe all (default au connect).
 
@@ -17,13 +17,13 @@ defmodule Fleet.API.WS do
       {"type": "connected"}                   ← initial handshake
       {"type": "subscribed", "topics": [...]} ← ack subscribe
       {"type": "ping"}                        ← heartbeat 30s
-      {"type": "event", "event_type": "pipeline.completed", "payload": {...}}
+      {"type": "event", "event_type": "workflow_map.completed", "payload": {...}}
       {"type": "error", "reason": "..."}
 
   ## Filtre topics
 
   Pattern simple : exact match OU wildcard suffixe `*` (ex
-  `"pipeline.*"` match `"pipeline.completed"`).
+  `"workflow_map.*"` match `"workflow_map.completed"`).
   """
 
   @behaviour :cowboy_websocket
@@ -103,8 +103,8 @@ defmodule Fleet.API.WS do
   Vérifie si `event_type` (string) match au moins un pattern dans
   `topics`. Liste vide = match all (subscribe-all default).
 
-  Patterns : exact match OU wildcard suffixe `*` (ex `"pipeline.*"`
-  match `"pipeline.completed"`).
+  Patterns : exact match OU wildcard suffixe `*` (ex `"workflow_map.*"`
+  match `"workflow_map.completed"`).
   """
   @spec topic_matches?(String.t(), [String.t()]) :: boolean()
   def topic_matches?(_event_type, []), do: true

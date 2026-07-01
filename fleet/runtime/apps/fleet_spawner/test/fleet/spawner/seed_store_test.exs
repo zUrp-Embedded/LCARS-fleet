@@ -28,7 +28,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
     path
   end
 
-  test "checkpoint : garde le PREMIER ROUND seul (jusqu'au 1er assistant) + carte", %{
+  test "checkpoint : garde le PREMIER ROUND seul (jusqu'au 1er assistant) + workflow_map", %{
     tmp: tmp,
     root: root
   } do
@@ -59,16 +59,17 @@ defmodule Fleet.Spawner.SeedStoreTest do
            } = map
   end
 
-  test "checkpoint : carte = builder passé, PAS l'uuid du jsonl vivant (rotation /clear)", %{
-    tmp: tmp,
-    root: root
-  } do
+  test "checkpoint : workflow_map = builder passé, PAS l'uuid du jsonl vivant (rotation /clear)",
+       %{
+         tmp: tmp,
+         root: root
+       } do
     pod_dir = Path.join(tmp, "pod")
     old = make_jsonl(pod_dir, "slug", "old-uuid", "old\n")
     File.touch!(old, {{2020, 1, 1}, {0, 0, 0}})
     make_jsonl(pod_dir, "slug", "new-uuid", "new\n")
 
-    # Deux jsonl vivants (un `/clear` a rotaté l'uuid). NOUVEAU contrat : la carte porte le BUILDER
+    # Deux jsonl vivants (un `/clear` a rotaté l'uuid). NOUVEAU contrat : la workflow_map porte le BUILDER
     # passé (source unique), INDÉPENDAMMENT de l'uuid du jsonl vivant — ni l'ancien, ni le récent.
     assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
 
@@ -95,12 +96,12 @@ defmodule Fleet.Spawner.SeedStoreTest do
     assert SeedStore.slugify("/home/x/resume-test__9c62d00f") == "-home-x-resume-test--9c62d00f"
   end
 
-  test "read_map : carte + jsonl présents → {:ok, uuid}, sinon :none", %{tmp: tmp} do
+  test "read_map : workflow_map + jsonl présents → {:ok, uuid}, sinon :none", %{tmp: tmp} do
     pod_dir = Path.join(tmp, "pod")
     make_jsonl(pod_dir, "slug", "u1", "x\n")
     assert :ok = SeedStore.checkpoint(pod_dir, "p", "engineer", "builder-det")
 
-    # read_map relit l'uuid de la carte = le builder stocké, PAS l'uuid du jsonl vivant ("u1").
+    # read_map relit l'uuid de la workflow_map = le builder stocké, PAS l'uuid du jsonl vivant ("u1").
     assert {:ok, %{uuid: "builder-det"}} = SeedStore.read_map("p", "engineer")
     assert :none = SeedStore.read_map("p", "inexistant")
   end

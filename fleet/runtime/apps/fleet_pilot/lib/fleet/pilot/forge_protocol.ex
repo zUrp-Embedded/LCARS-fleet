@@ -56,9 +56,9 @@ defmodule Fleet.Pilot.ForgeProtocol do
   def parse_feature_branch(_), do: :error
 
   # ============================================================
-  # Marqueur ROUTE — position carte sur la forge.
-  # `[lcars-route:<pipeline>:<step>]` : grave (pipeline, step) sur l'issue, car l'assignee
-  # (= rôle) seul n'identifie pas le step (un rôle peut être sur N steps, cf. CarteNav).
+  # Marqueur ROUTE — position workflow_map sur la forge.
+  # `[lcars-route:<workflow_map_name>:<step>]` : grave (workflow_map_name, step) sur l'issue, car l'assignee
+  # (= rôle) seul n'identifie pas le step (un rôle peut être sur N steps, cf. WorkflowMapNav).
   # ============================================================
 
   # Littéral-SOURCE UNIQUE : builder ET parseur en dérivent.
@@ -68,21 +68,21 @@ defmodule Fleet.Pilot.ForgeProtocol do
   @route_marker_rx Regex.compile!(Regex.escape(@route_prefix) <> "([^:\\]]+):([^:\\]]+)\\]")
 
   @doc """
-  Construit le marqueur route `[lcars-route:<pipeline>:<step>]` (builder unique, dérivé de
+  Construit le marqueur route `[lcars-route:<workflow_map_name>:<step>]` (builder unique, dérivé de
   `@route_prefix` comme son parseur `parse_route_marker/1`). Posé par `ForgeClient.post_route/5`.
   """
   @spec route_marker(String.t(), String.t()) :: String.t()
-  # => "[lcars-route:<pipeline>:<step>]"
-  def route_marker(pipeline, step) when is_binary(pipeline) and is_binary(step),
-    do: "#{@route_prefix}#{pipeline}:#{step}]"
+  # => "[lcars-route:<workflow_map_name>:<step>]"
+  def route_marker(workflow_map_name, step) when is_binary(workflow_map_name) and is_binary(step),
+    do: "#{@route_prefix}#{workflow_map_name}:#{step}]"
 
   @doc false
-  # Pur : extrait `{pipeline, step}` d'un body contenant `[lcars-route:p:s]`, sinon nil.
+  # Pur : extrait `{workflow_map_name, step}` d'un body contenant `[lcars-route:p:s]`, sinon nil.
   def parse_route_marker(nil), do: nil
 
   def parse_route_marker(body) when is_binary(body) do
     case Regex.run(@route_marker_rx, body) do
-      [_, pipeline, step] -> {:ok, {pipeline, step}}
+      [_, workflow_map_name, step] -> {:ok, {workflow_map_name, step}}
       _ -> nil
     end
   end

@@ -1,7 +1,7 @@
 defmodule Fleet.Pipeline.GraphValidatorTest do
   @moduledoc """
   Linter de graphe PUR (data → décision), testé sans fichier (`async: true`).
-  Couvre chaque invariant : carte bien formée → :ok ; chaque violation → son `kind`.
+  Couvre chaque invariant : workflow_map bien formée → :ok ; chaque violation → son `kind`.
   """
   use ExUnit.Case, async: true
 
@@ -13,7 +13,7 @@ defmodule Fleet.Pipeline.GraphValidatorTest do
     if needs, do: Map.put(base, "needs", needs), else: base
   end
 
-  describe "carte bien formée → :ok" do
+  describe "workflow_map bien formée → :ok" do
     test "step unique (racine == terminal)" do
       assert GraphValidator.validate(%{"only" => step()}) == :ok
     end

@@ -6,7 +6,7 @@ defmodule Fleet.Slug do
   ## Le problème qu'il ferme
 
   Un nom fourni par un client / un payload / un catalogue (nom de checkpoint
-  `rc_name`, nom de modop, nom de carte/pipeline, nom de repo/branche forge…)
+  `rc_name`, nom de modop, nom de workflow_map/pipeline, nom de repo/branche forge…)
   finit souvent interpolé dans un `Path.join` (feuille FS) ou un segment
   d'URL. S'il porte `..`, `/`, un octet NUL ou un caractère de contrôle, il
   TRAVERSE hors de la racine attendue ou casse/injecte l'URL. Vérifier après
@@ -42,7 +42,7 @@ defmodule Fleet.Slug do
   Un `path` forge légitime peut contenir des `/` (`docs/sub/file.md`) : ce
   n'est pas un slug, il faut l'ENCODER (`URI.encode`/`URI.encode_www_form`)
   segment par segment, pas le refuser. Le slug est pour les noms qui DOIVENT
-  être atomiques (repo, branche bornée, nom de modop/carte/checkpoint).
+  être atomiques (repo, branche bornée, nom de modop/workflow_map/checkpoint).
 
   ## NE PAS confondre avec deux autres "slug" (domaines distincts, ne pas fusionner)
 

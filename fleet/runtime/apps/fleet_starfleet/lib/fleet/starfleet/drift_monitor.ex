@@ -15,7 +15,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   | event_type | trigger Cat 5 |
   |---|---|
   | `pod.drift` | si `drift_count >= 3` (dormant : 0 producteur) |
-  | `pipeline.failed` | inconditionnel |
+  | `workflow_map.failed` | inconditionnel |
   | `oauth.refresh.failed` | inconditionnel |
   | `audit.verdict` | validate JSON décision puis dispatch CoordBackend |
 
@@ -63,10 +63,10 @@ defmodule Fleet.Starfleet.DriftMonitor do
   end
 
   def handle_info(
-        %Fleet.Event{type: :"pipeline.failed", payload: payload, correlation_id: cid},
+        %Fleet.Event{type: :"workflow_map.failed", payload: payload, correlation_id: cid},
         state
       ) do
-    Cat5Escalator.escalate(:pipeline_failed, payload, cid)
+    Cat5Escalator.escalate(:workflow_map_failed, payload, cid)
     {:noreply, state}
   end
 

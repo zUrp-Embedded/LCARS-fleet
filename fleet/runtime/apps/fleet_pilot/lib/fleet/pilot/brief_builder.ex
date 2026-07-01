@@ -113,7 +113,7 @@ defmodule Fleet.Pilot.BriefBuilder do
         route,
         step_spec
       ) do
-    # Le `brief_kind` du STEP (carte) PRIME sur celui du profil (override per-step) — réutilise
+    # Le `brief_kind` du STEP (workflow_map) PRIME sur celui du profil (override per-step) — réutilise
     # un profil worker (consultant) en JUGE sans profil-doublon. ABSENT au step → défaut profil
     # (lui-même "worker" par défaut, fail-safe) via le `||` : l'absence n'est PAS une anomalie. Ce
     # qui suit traite la valeur PRÉSENTE-mais-hors-vocab, distincte de l'absence.
@@ -204,7 +204,7 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> nil
       end
 
-    {pipeline, step} =
+    {workflow_map_name, step} =
       case route do
         {p, s} -> {p, s}
         _ -> {nil, role}
@@ -223,7 +223,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     # infini (le Reviewer ne peut JAMAIS `continue` sur du vide) — c'est la famine d'info.
     Fleet.Pipeline.GateBrief.build(%{
       step: step,
-      pipeline_id: pipeline,
+      workflow_map_id: workflow_map_name,
       gate: nil,
       outputs: outputs,
       request: request
@@ -241,7 +241,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     # toujours issue-path). On l'utilise → pas de `get_issue` redondant. Fallback fetch si body absent (robustesse).
     brief = issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts)
 
-    {pipeline, step} =
+    {workflow_map_name, step} =
       case route do
         {p, s} -> {p, s}
         _ -> {nil, role}
@@ -249,7 +249,7 @@ defmodule Fleet.Pilot.BriefBuilder do
 
     Fleet.Pipeline.GateBrief.build(%{
       step: step,
-      pipeline_id: pipeline,
+      workflow_map_id: workflow_map_name,
       gate: nil,
       subject: :brief,
       outputs: %{"brief" => brief}

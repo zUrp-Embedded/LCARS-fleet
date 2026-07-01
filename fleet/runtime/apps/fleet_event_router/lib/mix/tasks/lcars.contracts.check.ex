@@ -169,7 +169,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         cond do
           not unwrap_clause? ->
             [
-              "#{rel} : clause `defp normalize(%{\"spec\" => %{\"steps\" => ...}})` (déballage v2.5) absente → un consommateur de la carte lit steps=nil"
+              "#{rel} : clause `defp normalize(%{\"spec\" => %{\"steps\" => ...}})` (déballage v2.5) absente → un consommateur de la workflow_map lit steps=nil"
             ]
 
           not called? ->
@@ -622,14 +622,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # Le gatekeeper est un juge d'EXCEPTION-inférence (dispatché par une gate
-  # :soft/:nontranchable), JAMAIS un step d'ordonnancement. Rouge si une carte
+  # :soft/:nontranchable), JAMAIS un step d'ordonnancement. Rouge si une workflow_map
   # déclare un step `role: gatekeeper` — méta-axiome : un raisonneur LLM dans la
   # mécanique de coordination est un signal de design défaillant.
   # NB les parenthèses externes autour de `(… || [])` sont load-bearing : sans elles
   # `|>` (précédence > `||`) appliquerait flat_map à `[]`, pas à la liste de
-  # cartes (`(true && l) || [] |> map` ⇒ `l`, map sauté).
+  # workflow_maps (`(true && l) || [] |> map` ⇒ `l`, map sauté).
   defp check_gatekeeper_not_a_step(root) do
-    dir = "apps/fleet_pipeline/priv/canon/pipelines"
+    dir = "apps/fleet_pipeline/priv/canon/workflow_maps"
     abs = Path.join(root, dir)
 
     evidence =

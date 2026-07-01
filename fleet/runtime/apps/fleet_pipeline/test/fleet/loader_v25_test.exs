@@ -5,9 +5,9 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   `Loader.load!` NORMALISE le résultat vers la forme interne unique
   `%{"name", "steps"}` : l'enveloppe v2.5 est déballée au load (les tests
   assertent la forme normalisée, pas le YAML brut), puis le schema
-  `pipeline-v2.5.json` valide la structure (fail-loud).
+  `workflow-map-v2.5.json` valide la structure (fail-loud).
 
-  `async: true` : on passe `:pipelines_root` via opts à `Loader.load!/2`
+  `async: true` : on passe `:workflow_maps_root` via opts à `Loader.load!/2`
   (pas de couplage Application env global).
   """
   use ExUnit.Case, async: true
@@ -15,10 +15,10 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   alias Fleet.Pipeline.Loader
 
   # R0.8-brick6 : canon pipelines réabsorbés in-repo.
-  @canon_pipelines Application.app_dir(:fleet_pipeline, "priv/canon/pipelines")
+  @canon_pipelines Application.app_dir(:fleet_pipeline, "priv/canon/workflow_maps")
 
   test "canon standard-qa.yaml (V2.5) normalisé → name + steps top-level" do
-    pipe = Loader.load!("standard-qa", pipelines_root: @canon_pipelines)
+    pipe = Loader.load!("standard-qa", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "standard-qa"
     assert is_map(pipe["steps"])
     assert is_map(pipe["steps"]["brainstorm"])
@@ -26,7 +26,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   end
 
   test "canon audit-only.yaml (V2.5) normalisé → name + steps top-level" do
-    pipe = Loader.load!("audit-only", pipelines_root: @canon_pipelines)
+    pipe = Loader.load!("audit-only", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "audit-only"
     assert is_map(pipe["steps"])
     refute Map.has_key?(pipe, "spec")
@@ -36,7 +36,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   test "V2.5 step avec post_extract.git valide schema (face 2 décision archi git)",
        %{tmp_dir: dir} do
     yaml = """
-    kind: Pipeline
+    kind: WorkflowMap
     metadata:
       name: face2-step
     spec:
@@ -53,7 +53,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
     """
 
     File.write!(Path.join(dir, "face2-step.yaml"), yaml)
-    loaded = Loader.load!("face2-step", pipelines_root: dir)
+    loaded = Loader.load!("face2-step", workflow_maps_root: dir)
     step = get_in(loaded, ["steps", "publish"])
     assert get_in(step, ["post_extract", "git", "repo_url"]) == "http://gitea/fleet/lcars"
     assert get_in(step, ["post_extract", "git", "branch"]) == "feature/x"
@@ -64,7 +64,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
   @tag :tmp_dir
   test "V2.5 post_extract.git sans repo_url ni branch → invalide", %{tmp_dir: dir} do
     yaml = """
-    kind: Pipeline
+    kind: WorkflowMap
     metadata:
       name: face2-missing-required
     spec:
@@ -79,15 +79,15 @@ defmodule Fleet.Pipeline.LoaderV25Test do
 
     File.write!(Path.join(dir, "face2-missing-required.yaml"), yaml)
 
-    assert_raise RuntimeError, ~r/pipeline-v2\.5\.json invalide/, fn ->
-      Loader.load!("face2-missing-required", pipelines_root: dir)
+    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalide/, fn ->
+      Loader.load!("face2-missing-required", workflow_maps_root: dir)
     end
   end
 
   @tag :tmp_dir
-  test "V2.5 structurellement invalide → raise schema pipeline-v2.5", %{tmp_dir: dir} do
+  test "V2.5 structurellement invalide → raise schema workflow-map-v2.5", %{tmp_dir: dir} do
     bad = """
-    kind: Pipeline
+    kind: WorkflowMap
     metadata:
       name: bad
     spec:
@@ -96,15 +96,15 @@ defmodule Fleet.Pipeline.LoaderV25Test do
 
     File.write!(Path.join(dir, "bad.yaml"), bad)
 
-    assert_raise RuntimeError, ~r/pipeline-v2\.5\.json invalide/, fn ->
-      Loader.load!("bad", pipelines_root: dir)
+    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalide/, fn ->
+      Loader.load!("bad", workflow_maps_root: dir)
     end
   end
 
   @tag :tmp_dir
   test "M7 — load!/2 opt :schema_path override Application env", %{tmp_dir: dir} do
     yaml = """
-    kind: Pipeline
+    kind: WorkflowMap
     metadata:
       name: override-target
     spec:
@@ -116,7 +116,7 @@ defmodule Fleet.Pipeline.LoaderV25Test do
 
     File.write!(Path.join(dir, "override-target.yaml"), yaml)
     # No global put_env — async: true safe.
-    loaded = Loader.load!("override-target", pipelines_root: dir)
+    loaded = Loader.load!("override-target", workflow_maps_root: dir)
     assert loaded["name"] == "override-target"
   end
 end

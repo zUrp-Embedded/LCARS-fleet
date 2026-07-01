@@ -40,7 +40,7 @@ no-auth, intra-release (ADR-C « 5-zéros ») : il observe, il ne mute rien.
 
 ## Les 7 decks (cf. DESIGN §4)
 
-`BRIDGE` (santé/readiness/quiescence) · `PODS` (cartes par rôle, **live**) ·
+`BRIDGE` (santé/readiness/quiescence) · `PODS` (workflow_maps par rôle, **live**) ·
 `FLOW` (work items + pipelines) · `GATEKEEPER` (escalades Z3-B + verdicts) ·
 `COORDINATION` (Pilot/coord/MCP) · `STREAM` (tail `%Fleet.Event{}`) ·
 `DIAGNOSTICS` (boot/oauth/mcp/sdk/signal/git). `PODS` = snapshot live

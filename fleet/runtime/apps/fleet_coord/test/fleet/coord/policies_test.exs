@@ -53,13 +53,18 @@ defmodule Fleet.Coord.PoliciesTest do
                      500
     end
 
-    test "pipeline_failed → notify_dashboard canon broadcast" do
-      assert :ok = Policies.handle_escalation(:pipeline_failed, %{"pipeline_id" => "pl1"}, nil)
+    test "workflow_map_failed → notify_dashboard canon broadcast" do
+      assert :ok =
+               Policies.handle_escalation(
+                 :workflow_map_failed,
+                 %{"workflow_map_id" => "pl1"},
+                 nil
+               )
 
       assert_receive %Fleet.Event{
                        source: :coord,
                        type: :"coord.notification_routed",
-                       payload: %{"message" => %{"pipeline_id" => "pl1"}}
+                       payload: %{"message" => %{"workflow_map_id" => "pl1"}}
                      },
                      500
     end

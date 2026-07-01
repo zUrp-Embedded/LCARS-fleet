@@ -8,7 +8,7 @@
 Bus events (Phoenix.PubSub) + registry events.yaml LCARS v2 (Ring 2 —
 colonne vertébrale orchestration). Consommation = subscribers directs
 PubSub (BL-027 ; table de dispatch retirée). Webhooks Gitea + signaux OS + events
-internes (`pod.*`, `pipeline.*`, `audit.verdict.*`,
+internes (`pod.*`, `workflow_map.*`, `audit.verdict.*`,
 `pod_drift`)
 publiés sur Phoenix.PubSub topic `fleet.events`.
 

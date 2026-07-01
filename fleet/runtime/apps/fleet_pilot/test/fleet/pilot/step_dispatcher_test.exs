@@ -21,7 +21,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   end
 
   # #5.2 D2 — decide = PORTE pure : verrou → skip, sinon :engage. Pas d'ownership (scoping forge-side amont),
-  # pas de rôle (vient de la route via carte_role), pas de load (carte_role charge).
+  # pas de rôle (vient de la route via workflow_map_role), pas de load (workflow_map_role charge).
   describe "decide/1 (porte pure)" do
     test "issue non verrouillée → :engage (rôle ET action spawn/onboard décidés en aval)" do
       assert :engage = StepDispatcher.decide(eng_issue())
@@ -42,12 +42,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   defmodule StubForge do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
-    # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-carte / 1-step).
+    # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-workflow_map / 1-step).
     def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
 
-    # #5.2 D2 — onboarding : grave la route initiale de la carte par défaut. Capture pour assertion.
-    def post_route(_repo, n, carte, step, _opts) do
-      send(self(), {:routed, n, carte, step})
+    # #5.2 D2 — onboarding : grave la route initiale de la workflow_map par défaut. Capture pour assertion.
+    def post_route(_repo, n, workflow_map, step, _opts) do
+      send(self(), {:routed, n, workflow_map, step})
       {:ok, :posted}
     end
 
@@ -283,9 +283,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         project_resolver: fn _repo, _opts -> {:ok, nil} end,
         # #5.2 D2 — route par défaut (step build=engineer) : depuis le découplage, une issue ROUTELESS
         # est ONBOARDÉE (skip) au lieu de spawner. Les tests d'effet veulent un spawn → ils partent d'une
-        # issue déjà routée. Les tests routés/onboard overrident `forge_opts`/`carte_loader`.
+        # issue déjà routée. Les tests routés/onboard overrident `forge_opts`/`workflow_map_loader`.
         forge_opts: [_test_route: {:ok, {"g", "build"}}],
-        carte_loader: fn "g" ->
+        workflow_map_loader: fn "g" ->
           %{"steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
         end
       ],
@@ -457,12 +457,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert spawn_opts[:brief] =~ "fais le hello"
     end
 
-    test "route gravée → rôle dérivé de la carte (step build=engineer) + pipeline/step injectés (A2.1, #8)" do
+    test "route gravée → rôle dérivé de la workflow_map (step build=engineer) + pipeline/step injectés (A2.1, #8)" do
       payload = eng_issue()
 
-      # #8 : le rôle vient DÉSORMAIS de la carte (CarteNav.step_role), pas de producer_role en dur.
+      # #8 : le rôle vient DÉSORMAIS de la workflow_map (WorkflowMapNav.step_role), pas de producer_role en dur.
       # Ici le step courant "build" porte role=engineer → rôle engineer (et route injectée, A2.1).
-      carte = %{
+      workflow_map = %{
         "name" => "poc-cycle",
         "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}
       }
@@ -470,22 +470,22 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       opts =
         dispatch_opts(
           forge_opts: [_test_route: {:ok, {"poc-cycle", "build"}}],
-          carte_loader: fn "poc-cycle" -> carte end
+          workflow_map_loader: fn "poc-cycle" -> workflow_map end
         )
 
       assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
 
       assert_received {:spawned, "issue-42", spawn_opts}
-      assert spawn_opts[:pipeline] == "poc-cycle"
+      assert spawn_opts[:workflow_map] == "poc-cycle"
       assert spawn_opts[:step] == "build"
     end
 
     test "#8 : route sur un step AMONT (brief-review/consultant) → spawn le CONSULTANT, pas l'eng" do
       payload = eng_issue()
 
-      # La carte EST la machine à états : le 1er step (racine `needs:[]`) est brief-review/consultant.
-      # decide() rendait "engineer" (DN §1) ; carte_role override avec le rôle du step courant → consultant.
-      carte = %{
+      # La workflow_map EST la machine à états : le 1er step (racine `needs:[]`) est brief-review/consultant.
+      # decide() rendait "engineer" (DN §1) ; workflow_map_role override avec le rôle du step courant → consultant.
+      workflow_map = %{
         "name" => "brief-gate",
         "steps" => %{
           "brief-review" => %{"role" => "consultant", "needs" => []},
@@ -496,7 +496,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       opts =
         dispatch_opts(
           forge_opts: [_test_route: {:ok, {"brief-gate", "brief-review"}}],
-          carte_loader: fn "brief-gate" -> carte end
+          workflow_map_loader: fn "brief-gate" -> workflow_map end
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-consultant", "consultant"}} =
@@ -508,7 +508,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       # Le step déclare brief_kind:judge ; le rôle engineer a un profil WORKER. L'override per-step
       # doit produire un brief JUGE (désamorcé), PAS le brief worker (issue body + "Livraison git-native").
-      carte = %{
+      workflow_map = %{
         "name" => "g",
         "steps" => %{
           "review" => %{"role" => "engineer", "needs" => [], "brief_kind" => "judge"}
@@ -518,7 +518,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       opts =
         dispatch_opts(
           forge_opts: [_test_route: {:ok, {"g", "review"}}],
-          carte_loader: fn "g" -> carte end
+          workflow_map_loader: fn "g" -> workflow_map end
         )
 
       assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
@@ -528,12 +528,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     test "#8.B : sans brief_kind au step → défaut du profil (engineer=worker → brief worker)" do
       payload = eng_issue()
-      carte = %{"name" => "g", "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+      workflow_map = %{"name" => "g", "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
 
       opts =
         dispatch_opts(
           forge_opts: [_test_route: {:ok, {"g", "build"}}],
-          carte_loader: fn "g" -> carte end
+          workflow_map_loader: fn "g" -> workflow_map end
         )
 
       assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
@@ -547,7 +547,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # `reviewer` n'est PAS du vocabulaire {worker, judge}. AVANT le fix, ce hors-vocab tombait sur la
       # clause `_worker` → brief EXÉCUTABLE pour un rôle qui aurait dû être désamorcé. La judge-ness est
       # une propriété de sécurité : elle ne s'infère pas par omission → fail-loud.
-      carte = %{
+      workflow_map = %{
         "name" => "g",
         "steps" => %{
           "review" => %{"role" => "engineer", "needs" => [], "brief_kind" => "reviewer"}
@@ -557,7 +557,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       opts =
         dispatch_opts(
           forge_opts: [_test_route: {:ok, {"g", "review"}}],
-          carte_loader: fn "g" -> carte end
+          workflow_map_loader: fn "g" -> workflow_map end
         )
 
       assert_raise ArgumentError, ~r/hors vocabulaire \{worker, judge\}/, fn ->
@@ -568,7 +568,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     test "SÉCU : judge_target hors-vocab (kind=judge) → raise (la cible d'un juge ne s'infère pas)" do
       payload = eng_issue()
 
-      carte = %{
+      workflow_map = %{
         "name" => "g",
         "steps" => %{
           "review" => %{
@@ -583,7 +583,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       opts =
         dispatch_opts(
           forge_opts: [_test_route: {:ok, {"g", "review"}}],
-          carte_loader: fn "g" -> carte end
+          workflow_map_loader: fn "g" -> workflow_map end
         )
 
       assert_raise ArgumentError, ~r/hors vocabulaire \{brief, deliverable\}/, fn ->
@@ -595,7 +595,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # F-S2-1 : le brief = body de l'ISSUE en main (payload), PAS un get_issue redondant.
       payload = eng_issue(%{"body" => "MON BRIEF A JUGER"})
 
-      carte = %{
+      workflow_map = %{
         "name" => "mg",
         "steps" => %{
           "brief-review" => %{
@@ -610,7 +610,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       opts =
         dispatch_opts(
           forge_opts: [_test_route: {:ok, {"mg", "brief-review"}}],
-          carte_loader: fn "mg" -> carte end
+          workflow_map_loader: fn "mg" -> workflow_map end
         )
 
       assert {:ok, {:spawned, "lordzurp-lcars-test-issue-42-consultant", "consultant"}} =
@@ -625,21 +625,21 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute brief =~ "Livraison (git-native)"
     end
 
-    test "#5.2 D2 — issue ROUTELESS → onboardée sur la carte par défaut (skip), PAS de spawn eng" do
+    test "#5.2 D2 — issue ROUTELESS → onboardée sur la workflow_map par défaut (skip), PAS de spawn eng" do
       payload = eng_issue()
 
-      # route :none (override de la route par défaut) + carte par défaut brief-gate (1er step brief-review).
+      # route :none (override de la route par défaut) + workflow_map par défaut brief-gate (1er step brief-review).
       opts =
         dispatch_opts(
           forge_opts: [_test_route: :none],
-          carte_loader: fn "brief-gate" ->
+          workflow_map_loader: fn "brief-gate" ->
             %{"steps" => %{"brief-review" => %{"role" => "consultant", "needs" => []}}}
           end
         )
 
       assert {:skipped, :onboarded} = StepDispatcher.dispatch_issue(payload, opts)
 
-      # la carte par défaut a été GRAVÉE (le tick suivant dispatchera le consultant) ; AUCUN spawn eng.
+      # la workflow_map par défaut a été GRAVÉE (le tick suivant dispatchera le consultant) ; AUCUN spawn eng.
       assert_received {:routed, 42, "brief-gate", "brief-review"}
       refute_received {:spawned, _, _}
     end
@@ -790,7 +790,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       # issue_id = l'ISSUE (remontee de head.ref lcars/issue-42-engineer), PAS la PR
       assert_received {:spawned, "issue-42", spawn_opts}
-      assert spawn_opts[:pipeline] == "poc" and spawn_opts[:step] == "spec-review"
+      assert spawn_opts[:workflow_map] == "poc" and spawn_opts[:step] == "spec-review"
       # brief juge desamorce (brief_kind: judge) — pas un corps executable
       assert spawn_opts[:brief] =~ "JUGER"
 
@@ -1006,7 +1006,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     test "MA-06 : N rounds de rework PR (rounds > budget) -> ESCALADE ARCH (borné, pas de churn infini)" do
       # État illégal AVANT MA-06 : `dispatch_rework` re-spawnait le producteur SANS compteur → si l'eng ne
-      # satisfait jamais le juge, rework INFINI (le frein carte `rebound` n'est pas appelé sur ce chemin). Le
+      # satisfait jamais le juge, rework INFINI (le frein workflow_map `rebound` n'est pas appelé sur ce chemin). Le
       # fix borne par un compteur forge-natif (nb REQUEST_CHANGES) : > budget (2) → escalade arch (pas de
       # re-spawn). On vérifie le retour {:skipped, {:rework_exhausted_escalated, _}} + le label awaits-arch posé.
       pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})

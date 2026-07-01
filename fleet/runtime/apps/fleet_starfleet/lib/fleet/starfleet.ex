@@ -12,7 +12,7 @@ defmodule Fleet.Starfleet do
     * `Fleet.Starfleet.Gatekeeper` — pure functions validation JSON
       décision (PoC-π3 figé `{decision, reason, details, chain}`)
     * `Fleet.Starfleet.DriftMonitor` — GenServer subscribe `fleet.events`,
-      4 handlers (`pod_drift`, `pipeline.failed`, `oauth.refresh.failed`,
+      4 handlers (`pod_drift`, `workflow_map.failed`, `oauth.refresh.failed`,
       `audit.verdict`)
     * `Fleet.Starfleet.Cat5Escalator` — pure functions broadcast
       `audit.cat5.<source>` + délégation `CoordBackend` ch14

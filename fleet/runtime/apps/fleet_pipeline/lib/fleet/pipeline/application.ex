@@ -1,6 +1,6 @@
 defmodule Fleet.Pipeline.Application do
   @moduledoc """
-  Application `fleet_pipeline` — désormais une **lib carte/gate/delivery** (quasi-pure).
+  Application `fleet_pipeline` — désormais une **lib workflow_map/gate/delivery** (quasi-pure).
 
   Il n'existe AUCUN moteur RAM (pas de `Fleet.Pipeline.Executor` ni sa pile Registry/PodRegistry/
   ExecutorSupervisor, StageRunner, StageSpawner, Toposort, WorkspaceProvisioner) : aucun process n'est
@@ -9,16 +9,16 @@ defmodule Fleet.Pipeline.Application do
   `mix.exs`). Le contenu réel est la lib consommée par le rail forge + 4 apps :
   `Loader` / `Gates` / `Gate` / `GateBrief` / `Deliverable` / `DeliverableGate` / `Git` / `Gatekeeper`.
 
-  Pré-enregistre encore les atomes events `pipeline.*` (plus émis, mais le Bus les autorise via
+  Pré-enregistre encore les atomes events `workflow_map.*` (plus émis, mais le Bus les autorise via
   `String.to_existing_atom/1`).
   """
 
   use Application
 
-  @pipeline_event_atoms [
-    :"pipeline.stage.completed",
-    :"pipeline.completed",
-    :"pipeline.failed"
+  @workflow_map_event_atoms [
+    :"workflow_map.step.completed",
+    :"workflow_map.completed",
+    :"workflow_map.failed"
   ]
 
   @impl Application
@@ -28,9 +28,9 @@ defmodule Fleet.Pipeline.Application do
   end
 
   @doc """
-  Liste des atomes events `pipeline.*` pré-enregistrés. Mitige le DoS par fuite d'atomes
+  Liste des atomes events `workflow_map.*` pré-enregistrés. Mitige le DoS par fuite d'atomes
   (le Bus n'accepte que des atomes déjà existants via `String.to_existing_atom/1`).
   """
-  @spec pipeline_event_atoms() :: [atom()]
-  def pipeline_event_atoms, do: @pipeline_event_atoms
+  @spec workflow_map_event_atoms() :: [atom()]
+  def workflow_map_event_atoms, do: @workflow_map_event_atoms
 end

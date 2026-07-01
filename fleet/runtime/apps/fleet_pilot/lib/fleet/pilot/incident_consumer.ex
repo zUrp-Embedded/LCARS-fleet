@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   ## Pourquoi un consumer SÉPARÉ du StepRunConsumer
 
   Les échecs de pod sont un concern **distinct** de la fin-de-step-run (complétion) : ils ne touchent ni la
-  carte, ni la gate, ni l'état de complétion — juste « cet incident, 1er ou récurrent ? » → registre.
+  workflow_map, ni la gate, ni l'état de complétion — juste « cet incident, 1er ou récurrent ? » → registre.
   Les deux handlers sont **stateless** (ils ne lisent aucun état du consumer). Les isoler dans leur
   propre singleton : (a) le StepRunConsumer (singleton de complétion) ne porte plus une 2ᵉ responsabilité
   bolted-on, (b) une rafale d'échecs ne partage plus la mailbox du chemin de complétion (blast-radius

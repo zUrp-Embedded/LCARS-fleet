@@ -129,7 +129,7 @@ defmodule Fleet.Spawner do
 
   @doc """
   RECALL délibéré : ramène vivant l'agent `(projet, role)` depuis son seed checkpointé
-  (`projects.work/<projet>/pods/`). Lit la carte (uuid+jsonl), spawn un pod en mode resume :
+  (`projects.work/<projet>/pods/`). Lit la workflow_map (uuid+jsonl), spawn un pod en mode resume :
   `session_id` = l'uuid du seed, `resume: true`, le seed est restauré dans le pod AVANT le launch
   (do_project → maybe_recall_restore) → claude `--resume <uuid>` reprend le contexte. Nom Desktop
   `<projet>_<role>`. `allow_no_brief` (le pod resume son contexte, pas idle ; pas de brief neuf).

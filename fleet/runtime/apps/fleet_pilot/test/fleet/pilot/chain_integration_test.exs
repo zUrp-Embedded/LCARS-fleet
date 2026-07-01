@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.ChainIntegrationTest do
   @moduledoc """
   Integration Corr.3 4-C (switch review-request) : la chaine multi-step de bout en bout, modules
-  REELS (Entry, StepDispatcher, StepRunConsumer, StepRunCompleter, CarteNav) contre un sim forge stateful
+  REELS (Entry, StepDispatcher, StepRunConsumer, StepRunCompleter, WorkflowMapNav) contre un sim forge stateful
   PR-aware, en synchrone. Prouve le CABLAGE PR-driven engineer-first :
     entree -> spawn engineer (issue-assignee) -> engineer ouvre la PR + request_review ->
     spawn juge via dispatch_review (PR) -> merge terminal -> issue close (Closes #N).
@@ -157,11 +157,11 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     defp review_state_of(:request_changes), do: :changes_requested
     defp review_state_of(_), do: :none
 
-    # ②.1d : verdicts par juge (reviews-driven). Le chemin CARTE merge via complete_judge :promote,
+    # ②.1d : verdicts par juge (reviews-driven). Le chemin WORKFLOW_MAP merge via complete_judge :promote,
     # pas via dispatch_review → dispatch_review n'est appelé qu'AVANT toute review ici → {} suffit.
     def pr_review_verdicts(_pid, _r, _pr, _o), do: {:ok, %{}}
 
-    # F-E8 : état de jury combiné. Le chemin CARTE merge via complete_judge :promote (pas dispatch_review)
+    # F-E8 : état de jury combiné. Le chemin WORKFLOW_MAP merge via complete_judge :promote (pas dispatch_review)
     # → dispatch_review n'est appelé qu'AVANT review → verdicts {} + jury [] (requested = requested_reviewers).
     def pr_review_state(_pid, _r, _pr, _o), do: {:ok, %{verdicts: %{}, reviewers: []}}
 
@@ -203,7 +203,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def pr_review_state(r, pr, o), do: Sim.pr_review_state(p(), r, pr, o)
   end
 
-  defmodule CarteLoader do
+  defmodule WorkflowMapLoader do
     # engineer-first 2 steps : build(engineer, producteur) -> review(reviewer, juge).
     def load!("poc-mini") do
       %{
@@ -296,7 +296,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       "workspace" => "/ws",
       "base_sha" => "cafe",
       "role" => role,
-      "pipeline" => spawn_opts[:pipeline],
+      "workflow_map" => spawn_opts[:workflow_map],
       "step" => spawn_opts[:step]
     }
 
@@ -310,10 +310,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       human: "human",
       forge_client: SimForge,
       loader: CapLoader,
-      # #8 (piece 1) : carte_role dérive le rôle de la POSITION carte → il faut le loader de CARTE
-      # (load!/1), distinct du loader de cap-profiles (`loader`, load/1). Sans lui, carte_role tombe
+      # #8 (piece 1) : workflow_map_role dérive le rôle de la POSITION workflow_map → il faut le loader de WORKFLOW_MAP
+      # (load!/1), distinct du loader de cap-profiles (`loader`, load/1). Sans lui, workflow_map_role tombe
       # sur le vrai Loader (priv) → "poc-mini"/"gkchain" introuvables → dispatch échoue.
-      carte_loader: &CarteLoader.load!/1,
+      workflow_map_loader: &WorkflowMapLoader.load!/1,
       spawner: SpawnStub,
       task_queue: TQStub,
       clock: fn :second -> 100 end,
@@ -331,7 +331,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       role_emails: fn r -> ["#{r}@lcars.local"] end,
       step_run_completer: Fleet.Pilot.StepRunCompleter,
       forge_client: SimForge,
-      loader: CarteLoader,
+      loader: WorkflowMapLoader,
       deliverable: DelivStub,
       deliverable_mode_fun: dmode(),
       max_rework_rounds: 2,
@@ -347,7 +347,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       Sim.start_link(%{
         "number" => 1,
         "state" => "open",
-        # `type:poc` = trigger d'entrée carte (legacy Entry, FALL ②.3). #8.A : l'assignee = l'HUMAIN
+        # `type:poc` = trigger d'entrée workflow_map (legacy Entry, FALL ②.3). #8.A : l'assignee = l'HUMAIN
         # (posé à la création par l'arch) ; il reste inchangé tout au long de la chaîne (Entry/advance ne
         # l'écrasent plus). `decide` spawn tant qu'il y a un assignee — l'état/position vit dans la route.
         "labels" => [%{"name" => "type:poc"}],
@@ -368,13 +368,13 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     pid = new_issue()
 
     # 1. ENTREE : #8 cohérence — le routing vit dans la ROUTE-COMMENT (gravée par create_issue). Ici on
-    #    la grave directement (carte poc-mini, 1er step build). L'assignee reste l'HUMAIN (jamais touché ;
-    #    le rôle du step est dérivé de la route au dispatch via carte_role). Plus de routing par label.
+    #    la grave directement (workflow_map poc-mini, 1er step build). L'assignee reste l'HUMAIN (jamais touché ;
+    #    le rôle du step est dérivé de la route au dispatch via workflow_map_role). Plus de routing par label.
     SimForge.post_route("o/r", 1, "poc-mini", "build", [])
     assert {:ok, {"poc-mini", "build"}} = SimForge.get_route("o/r", 1, [])
     assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
 
-    # 2. DISPATCH build -> spawn engineer (route-driven : carte_role lit la route, pas l'assignee)
+    # 2. DISPATCH build -> spawn engineer (route-driven : workflow_map_role lit la route, pas l'assignee)
     assert {:ok, {:spawned, _, "engineer"}} =
              StepDispatcher.dispatch_issue(wrap(pid), dispatch_opts())
 
@@ -410,7 +410,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   defp drive_to_review do
     pid = new_issue()
 
-    # Route gravée directement (carte gkchain, 1er step build) — comme create_issue (route-comment).
+    # Route gravée directement (workflow_map gkchain, 1er step build) — comme create_issue (route-comment).
     SimForge.post_route("o/r", 1, "gkchain", "build", [])
 
     assert {:ok, {:spawned, _, "engineer"}} =

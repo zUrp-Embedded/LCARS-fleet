@@ -1,7 +1,7 @@
 # fleet_starfleet (chantier 13)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-26 (test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
+**Dernière révision** : 2026-07-01 (test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
 
@@ -19,7 +19,7 @@ audit, escalade Cat 5 seulement.
 |---|---|
 | `Fleet.Starfleet.Decision` | struct sortie validate `{decision, reason, details, chain}` |
 | `Fleet.Starfleet.Gatekeeper` | pure functions validation JSON décision (PoC-π3 figé) + schema strict `priv/schema/decision-v1.json` `ex_json_schema` au load fail-fast + cache schema `:persistent_term` |
-| `Fleet.Starfleet.DriftMonitor` | GenServer subscribe `fleet.events`, 4 handlers (`pod_drift`, `pipeline.failed`, `oauth.refresh.failed`, `audit.verdict`) |
+| `Fleet.Starfleet.DriftMonitor` | GenServer subscribe `fleet.events`, 4 handlers (`pod_drift`, `workflow_map.failed`, `oauth.refresh.failed`, `audit.verdict`) |
 | `Fleet.Starfleet.Cat5Escalator` | pure functions `escalate/2` → log `AuditLog` + broadcast `audit.cat5.<source>` + délégation `CoordBackend` ch14 |
 | `Fleet.Starfleet.AuditLog` | wrapper `File.write/3` non-bang fail-safe sur `~/.lcars/log/fleet-starfleet.jsonl` (NDJSON append). **Rotation au seuil** (`:audit_log_max_bytes`, défaut 10 MB) → 1 backup `.1` : l'audit local est une convenance forensics, le durable = forge |
 | `Fleet.Starfleet.CoordBackend` | seam wrap `Fleet.Coord` ch14 (default `NotWiredYet` cohérent canon §0 #1) |
@@ -56,13 +56,13 @@ audit, escalade Cat 5 seulement.
 | event_type | trigger Cat 5 |
 |---|---|
 | `pod_drift` | si `drift_count >= 3` |
-| `pipeline.failed` | inconditionnel |
+| `workflow_map.failed` | inconditionnel |
 | `oauth.refresh.failed` | inconditionnel |
 | `audit.verdict` | `Gatekeeper.validate` puis `CoordBackend.handle_decision` |
 
 ## Atom registration
 
-Les events `audit.cat5.{pod_drift,pipeline_failed,oauth_refresh_failed}` +
+Les events `audit.cat5.{pod_drift,workflow_map_failed,oauth_refresh_failed}` +
 `audit.verdict` sont pré-enregistrés compile-time via l'attribut
 `@starfleet_event_atoms` de `Fleet.Starfleet.Application`. Cohérent
 ch11 M1 atom-leak DoS mitigation.

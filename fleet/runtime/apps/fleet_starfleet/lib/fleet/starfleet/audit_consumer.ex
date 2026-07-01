@@ -239,14 +239,14 @@ defmodule Fleet.Starfleet.AuditConsumer do
 
   defp log_git_event(:"git.published", payload) do
     Logger.info(
-      "AUDIT git.published pipeline=#{Map.get(payload, "pipeline_id", "?")} " <>
+      "AUDIT git.published pipeline=#{Map.get(payload, "workflow_map_id", "?")} " <>
         "sha=#{Map.get(payload, "commit_sha", "?")}"
     )
   end
 
   defp log_git_event(:"git.publish_failed", payload) do
     Logger.warning(
-      "AUDIT git.publish_failed pipeline=#{Map.get(payload, "pipeline_id", "?")} " <>
+      "AUDIT git.publish_failed pipeline=#{Map.get(payload, "workflow_map_id", "?")} " <>
         "reason=#{inspect(Map.get(payload, "reason"))}"
     )
   end

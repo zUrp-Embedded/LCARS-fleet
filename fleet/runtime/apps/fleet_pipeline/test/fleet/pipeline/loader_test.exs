@@ -5,10 +5,10 @@ defmodule Fleet.Pipeline.LoaderTest do
   alias Fleet.Pipeline.Loader
 
   setup %{tmp_dir: tmp_dir} do
-    Application.put_env(:fleet_pipeline, :pipelines_root, tmp_dir)
+    Application.put_env(:fleet_pipeline, :workflow_maps_root, tmp_dir)
 
     on_exit(fn ->
-      Application.delete_env(:fleet_pipeline, :pipelines_root)
+      Application.delete_env(:fleet_pipeline, :workflow_maps_root)
     end)
 
     :ok
@@ -17,7 +17,7 @@ defmodule Fleet.Pipeline.LoaderTest do
   describe "load!/1" do
     test "pipeline minimal valide → map", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "minimal.yaml"), """
-      kind: Pipeline
+      kind: WorkflowMap
       metadata:
         name: minimal
       spec:
@@ -36,7 +36,7 @@ defmodule Fleet.Pipeline.LoaderTest do
     test "schema invalide (champ steps manquant) → raise", %{tmp_dir: tmp_dir} do
       # Enveloppe v2.5 valide mais `spec.steps` absent → `spec` exige `steps`.
       File.write!(Path.join(tmp_dir, "invalid.yaml"), """
-      kind: Pipeline
+      kind: WorkflowMap
       metadata:
         name: invalid
       spec: {}
@@ -49,7 +49,7 @@ defmodule Fleet.Pipeline.LoaderTest do
 
     test "schema invalide (gate type non-supporté) → raise", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "bad_gate.yaml"), """
-      kind: Pipeline
+      kind: WorkflowMap
       metadata:
         name: bad_gate
       spec:
@@ -72,11 +72,11 @@ defmodule Fleet.Pipeline.LoaderTest do
       end
     end
 
-    # Confinement E (WI-E3) : un nom de carte/pipeline non-slug ne traverse JAMAIS la racine.
+    # Confinement E (WI-E3) : un nom de workflow_map/pipeline non-slug ne traverse JAMAIS la racine.
     test "nom de pipeline traversant (../) → REFUSÉ avant Path.join", %{tmp_dir: tmp_dir} do
       # Pose une cible d'évasion : `<root>/../escape.yaml`.
       File.write!(Path.join([tmp_dir, "..", "escape.yaml"]), """
-      kind: Pipeline
+      kind: WorkflowMap
       metadata:
         name: escape
       spec:
@@ -103,7 +103,7 @@ defmodule Fleet.Pipeline.LoaderTest do
 
     test "step avec needs + inputs + gate hard valide", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "complex.yaml"), """
-      kind: Pipeline
+      kind: WorkflowMap
       metadata:
         name: complex
       spec:
@@ -134,7 +134,7 @@ defmodule Fleet.Pipeline.LoaderTest do
       tmp_dir: tmp_dir
     } do
       File.write!(Path.join(tmp_dir, "typed.yaml"), """
-      kind: Pipeline
+      kind: WorkflowMap
       metadata:
         name: typed
       spec:
@@ -157,7 +157,7 @@ defmodule Fleet.Pipeline.LoaderTest do
     # worker (brief exécutable pour un rôle qui aurait dû être désamorcé).
     test "v2.5 — brief_kind hors-vocab → rejet au load (raise)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "bad_kind.yaml"), """
-      kind: Pipeline
+      kind: WorkflowMap
       metadata:
         name: bad_kind
       spec:
@@ -177,7 +177,7 @@ defmodule Fleet.Pipeline.LoaderTest do
     # anti-champ-fantôme) au lieu d'être silencieusement ignoré.
     test "v2.5 — champ de step inconnu → rejet au load (raise)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "unknown_field.yaml"), """
-      kind: Pipeline
+      kind: WorkflowMap
       metadata:
         name: unknown_field
       spec:
@@ -198,11 +198,11 @@ defmodule Fleet.Pipeline.LoaderTest do
     # Schema-VALIDE (needs = array de strings) mais graphe-INVALIDE : `b` réfère un step
     # inexistant. Le schéma laisse passer (contrainte inter-steps inexprimable en draft-07) ;
     # le linter de graphe raise au load — sinon arête fantôme silencieuse → pipeline figé.
-    test "carte au needs fantôme (passe le schéma) → raise du linter de graphe", %{
+    test "workflow_map au needs fantôme (passe le schéma) → raise du linter de graphe", %{
       tmp_dir: tmp_dir
     } do
       File.write!(Path.join(tmp_dir, "phantom.yaml"), """
-      kind: Pipeline
+      kind: WorkflowMap
       metadata:
         name: phantom
       spec:
@@ -221,10 +221,10 @@ defmodule Fleet.Pipeline.LoaderTest do
       end
     end
 
-    # Garde-fou anti-régression : toutes les cartes canon doivent passer le linter de graphe.
-    # Une carte canon qui échoue ici = soit un vrai bug de carte, soit un invariant trop strict.
-    test "toutes les cartes canon passent le linter" do
-      canon_dir = Application.app_dir(:fleet_pipeline, "priv/canon/pipelines")
+    # Garde-fou anti-régression : toutes les workflow_maps canon doivent passer le linter de graphe.
+    # Une workflow_map canon qui échoue ici = soit un vrai bug de workflow_map, soit un invariant trop strict.
+    test "toutes les workflow_maps canon passent le linter" do
+      canon_dir = Application.app_dir(:fleet_pipeline, "priv/canon/workflow_maps")
 
       names =
         canon_dir
@@ -232,10 +232,10 @@ defmodule Fleet.Pipeline.LoaderTest do
         |> Enum.filter(&String.ends_with?(&1, ".yaml"))
         |> Enum.map(&Path.basename(&1, ".yaml"))
 
-      refute names == [], "aucune carte canon trouvée dans #{canon_dir}"
+      refute names == [], "aucune workflow_map canon trouvée dans #{canon_dir}"
 
       for name <- names do
-        assert %{"name" => _, "steps" => _} = Loader.load!(name, pipelines_root: canon_dir)
+        assert %{"name" => _, "steps" => _} = Loader.load!(name, workflow_maps_root: canon_dir)
       end
     end
   end

@@ -48,7 +48,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
       deliverable_opts: nil,
       step_run_sha: "brief-verdict",
       next_assignee: "build",
-      pipeline: "poc",
+      workflow_map: "poc",
       next_step: "build",
       comment_body: "Verdict du consultant — continue"
     }

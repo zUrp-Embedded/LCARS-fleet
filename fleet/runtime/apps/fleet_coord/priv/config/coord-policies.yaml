@@ -9,7 +9,7 @@ mappings:
     escalation_path:
       - dashboard
       - starfleet_alert
-  "escalate.pipeline_failed":
+  "escalate.workflow_map_failed":
     action: notify_dashboard
     escalation_path:
       - dashboard

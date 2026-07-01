@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
   end
 
-  # Seam Loader (A2.4) : carte engineer-first lineaire (Corr.3) ; "bad" raise (introuvable).
+  # Seam Loader (A2.4) : workflow_map engineer-first lineaire (Corr.3) ; "bad" raise (introuvable).
   #   build(engineer, producteur) -> spec(qualifier, juge) -> review(reviewer, juge terminal)
   defmodule StubLoader do
     def load!("poc-cycle") do
@@ -31,11 +31,11 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       }
     end
 
-    def load!(_), do: raise("pipeline introuvable")
+    def load!(_), do: raise("workflow_map introuvable")
   end
 
   # Seam ForgeClient (②.1c) : le juge résout la branche producteur via la PR ouverte de l'issue
-  # (sans carte). Stub = une PR ouverte pour l'issue 42, head = la branche du producteur.
+  # (sans workflow_map). Stub = une PR ouverte pour l'issue 42, head = la branche du producteur.
   defmodule StubForge do
     def list_open_pulls(_repo, _opts) do
       {:ok, [%{"number" => 7, "head" => %{"ref" => "lcars/issue-42-engineer"}}]}
@@ -79,7 +79,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
   describe "maybe_complete/2 — traduction event -> step_run PR-natif" do
     test "pod engineer porteur de projet (A1 single-brique) -> step_run producteur, intent :review (②.1d)" do
-      # ②.1d : sans carte, le producteur ne merge PLUS directement (:promote) — il ouvre la PR et
+      # ②.1d : sans workflow_map, le producteur ne merge PLUS directement (:promote) — il ouvre la PR et
       # DEMANDE les juges (:review). Le merge est ensuite piloté par l'état-PR (dispatch_review).
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(step_payload(), state())
 
@@ -181,9 +181,9 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
   end
 
   describe "maybe_complete/2 — filtres (skip)" do
-    test "pipeline pod (pipeline_id present) -> skip, pas d'appel completer" do
-      payload = step_payload(%{"pipeline_id" => "pl-1", "step" => "build"})
-      assert {:skip, :pipeline_pod} = StepRunConsumer.maybe_complete(payload, state())
+    test "pipeline pod (workflow_map_id present) -> skip, pas d'appel completer" do
+      payload = step_payload(%{"workflow_map_id" => "pl-1", "step" => "build"})
+      assert {:skip, :workflow_map_pod} = StepRunConsumer.maybe_complete(payload, state())
       refute_received {:step_run, _, _}
     end
 
@@ -206,9 +206,9 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
   end
 
-  describe "A2.4 — chainage carte (pipeline+step -> intent + pr_role)" do
+  describe "A2.4 — chainage workflow_map (pipeline+step -> intent + pr_role)" do
     test "producteur step milieu (build/engineer, gate pass) -> :advance vers qualifier" do
-      payload = step_payload(%{"pipeline" => "poc-cycle", "step" => "build"})
+      payload = step_payload(%{"workflow_map" => "poc-cycle", "step" => "build"})
 
       assert {:ok, :captured} =
                StepRunConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
@@ -223,7 +223,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
     test "juge dernier step (review/reviewer) -> :promote terminal, branche du producteur" do
       payload =
-        step_payload(%{"role" => "reviewer", "pipeline" => "poc-cycle", "step" => "review"})
+        step_payload(%{"role" => "reviewer", "workflow_map" => "poc-cycle", "step" => "review"})
 
       assert {:ok, :captured} =
                StepRunConsumer.maybe_complete(
@@ -236,20 +236,20 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert step_run.intent == :promote
       assert step_run.next_assignee == nil
 
-      # le juge review la PR du producteur, résolue sans carte via la PR ouverte (head=producteur)
+      # le juge review la PR du producteur, résolue sans workflow_map via la PR ouverte (head=producteur)
       assert step_run.producer_branch == "lcars/issue-42-engineer"
       # un juge ne porte pas de deliverable_opts (il ne pousse pas)
       refute Map.has_key?(step_run, :deliverable_opts)
     end
 
-    test "F-E8 : juge NO-CARTE à route héritée (rôle != rôle du step) -> :reviewed, JAMAIS :promote" do
-      # Bug live PoC-7 : le qualifier (juge no-carte dispatché sur la PR) HÉRITE la route de l'issue
+    test "F-E8 : juge NO-WORKFLOW_MAP à route héritée (rôle != rôle du step) -> :reviewed, JAMAIS :promote" do
+      # Bug live PoC-7 : le qualifier (juge no-workflow_map dispatché sur la PR) HÉRITE la route de l'issue
       # (step `build`, rôle engineer). Sans le garde `step_role_matches?`, gate_decide(build) le voyait
       # en terminal NON-producteur -> :promote -> MERGE sur 1 juge (quorum court-circuité). Avec : rôle
-      # `qualifier` != rôle du step `build` -> résolution no-carte -> :reviewed (enregistre la review ;
+      # `qualifier` != rôle du step `build` -> résolution no-workflow_map -> :reviewed (enregistre la review ;
       # le merge revient au quorum `dispatch_by_verdicts` qui attend TOUS les juges).
       payload =
-        step_payload(%{"role" => "qualifier", "pipeline" => "poc-cycle", "step" => "build"})
+        step_payload(%{"role" => "qualifier", "workflow_map" => "poc-cycle", "step" => "build"})
 
       assert {:ok, :captured} =
                StepRunConsumer.maybe_complete(
@@ -262,27 +262,27 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert step_run.intent == :reviewed
     end
 
-    test "carte introuvable -> {:error, {:carte_load, _}}, pas de step_run" do
-      payload = step_payload(%{"pipeline" => "bad", "step" => "build"})
+    test "workflow_map introuvable -> {:error, {:workflow_map_load, _}}, pas de step_run" do
+      payload = step_payload(%{"workflow_map" => "bad", "step" => "build"})
 
-      assert {:error, {:carte_load, _}} =
+      assert {:error, {:workflow_map_load, _}} =
                StepRunConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
 
       refute_received {:step_run, _, _}
     end
 
-    test "step inconnu dans la carte -> {:error, {:carte_nav, :unknown_step}}, pas de misroute" do
-      payload = step_payload(%{"pipeline" => "poc-cycle", "step" => "ghost"})
+    test "step inconnu dans la workflow_map -> {:error, {:workflow_map_nav, :unknown_step}}, pas de misroute" do
+      payload = step_payload(%{"workflow_map" => "poc-cycle", "step" => "ghost"})
 
-      assert {:error, {:carte_nav, :unknown_step}} =
+      assert {:error, {:workflow_map_nav, :unknown_step}} =
                StepRunConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
 
       refute_received {:step_run, _, _}
     end
 
-    test "sans contexte carte (A1 single-brique) -> producteur :review, pas d'appel loader (carte)" do
-      # loader (carte) nil : si run_step_run appelait le loader de carte sans contexte carte, ca crasherait.
-      # Le no-carte appelle deliverable_mode_fun (dmode), pas le loader de carte.
+    test "sans contexte workflow_map (A1 single-brique) -> producteur :review, pas d'appel loader (workflow_map)" do
+      # loader (workflow_map) nil : si run_step_run appelait le loader de workflow_map sans contexte workflow_map, ca crasherait.
+      # Le no-workflow_map appelle deliverable_mode_fun (dmode), pas le loader de workflow_map.
       payload = step_payload()
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(payload, state())
       assert_received {:step_run, step_run, _opts}
@@ -290,7 +290,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert step_run.next_assignee == nil
     end
 
-    test "sans carte, un JUGE (role payload) -> :reviewed + review_event mappe du gate-decision (②.1d)" do
+    test "sans workflow_map, un JUGE (role payload) -> :reviewed + review_event mappe du gate-decision (②.1d)" do
       # role "qualifier" => dmode = "payload" => juge. Le verdict du pod (gate-decision) est mappe en
       # event de review : continue->approve ; TOUT le reste->request_changes (fail-closed DÉCISIF :
       # un COMMENT non-décisif ferait boucler le juge, vérifié live #6).

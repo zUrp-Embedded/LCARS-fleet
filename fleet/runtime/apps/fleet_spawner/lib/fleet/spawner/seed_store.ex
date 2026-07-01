@@ -1,20 +1,20 @@
 defmodule Fleet.Spawner.SeedStore do
   @moduledoc """
   Seed-store des pods. À la mort d'un pod-PROJET, le PREMIER ROUND de son JSONl de session
-  ACTIF (sa mémoire) est checkpointé vers `<seed_root>/<projet>/pods/<role>.jsonl` + une carte
+  ACTIF (sa mémoire) est checkpointé vers `<seed_root>/<projet>/pods/<role>.jsonl` + une workflow_map
   `<role>.json` (`{uuid, slug}`) pour le rappel ultérieur (`--resume`).
   **Best-effort** : un échec de checkpoint ne tue JAMAIS le pod
   (le seed est un bonus de mémoire, pas une dépendance du lifecycle).
 
   - `seed_root` : `:fleet_spawner, :seed_store_root` (défaut `/home/projects.work`).
-  - L'`uuid` de la carte = le BUILDER DÉTERMINISTE du slot Desktop (le `session_id` pré-alloué au
+  - L'`uuid` de la workflow_map = le BUILDER DÉTERMINISTE du slot Desktop (le `session_id` pré-alloué au
     spawn, passé en argument) : c'est la SOURCE UNIQUE de l'identité du pod. Il n'est PAS dérivé de
     l'UUID du jsonl vivant — un `/clear` rotate l'UUID vivant, et un seed qui le suivrait ferait
     reprendre au pod un slot bâtard (≠ builder) au recall.
   - Le CONTENU et le `slug` viennent, eux, du jsonl ACTIF = le plus récemment modifié sous
     `<pod_dir>/.claude/projects/*/` (la session VIVANTE, robuste à la rotation `/clear`). Sans jsonl
     vivant (`:none`), il n'y a aucun contenu à checkpointer → rien n'est écrit.
-  - La carte `<role>.json` porte donc l'`uuid` (= builder) + le `slug` (cwd-slug du jsonl vivant) :
+  - La workflow_map `<role>.json` porte donc l'`uuid` (= builder) + le `slug` (cwd-slug du jsonl vivant) :
     le rappel restaure le JSONl à `projects/<slug>/<uuid>.jsonl` puis `--resume <uuid>`.
 
   NB git : le `cp` dépose le seed ; la mise sous git du work repo est un geste SÉPARÉ (hors hot-path
@@ -24,7 +24,7 @@ defmodule Fleet.Spawner.SeedStore do
 
   @doc """
   Checkpointe le seed d'un pod-PROJET mourant. `session_id` = le BUILDER DÉTERMINISTE du slot
-  Desktop (le `session_id` pré-alloué au spawn) : c'est l'`uuid` stocké dans la carte, SOURCE UNIQUE
+  Desktop (le `session_id` pré-alloué au spawn) : c'est l'`uuid` stocké dans la workflow_map, SOURCE UNIQUE
   de l'identité du pod — PAS l'UUID du jsonl vivant (qu'un `/clear` aurait pu rotater). Le contenu
   (premier round) et le `slug` viennent du jsonl ACTIF. Sans jsonl vivant → `:none`.
   Best-effort : confinement des noms + `{:error, _}` non-fatal.
@@ -123,8 +123,8 @@ defmodule Fleet.Spawner.SeedStore do
   end
 
   @doc """
-  Lit la carte d'un seed checkpointé. `{:ok, %{uuid, slug, jsonl}}` (jsonl = chemin du seed dans le
-  store) si la carte ET le JSONl existent ; sinon `:none`.
+  Lit la workflow_map d'un seed checkpointé. `{:ok, %{uuid, slug, jsonl}}` (jsonl = chemin du seed dans le
+  store) si la workflow_map ET le JSONl existent ; sinon `:none`.
   """
   @spec read_map(String.t(), String.t()) :: {:ok, map()} | :none
   def read_map(projet, role) when is_binary(projet) and is_binary(role) do

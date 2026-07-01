@@ -207,8 +207,8 @@ if config_env() != :test do
   # ============================================================
   # fleet_pipeline (ch12) — racine catalogue pipelines YAML
   # ============================================================
-  if path = System.get_env("LCARS_PIPELINES_ROOT") do
-    config :fleet_pipeline, pipelines_root: path
+  if path = System.get_env("LCARS_WORKFLOW_MAPS_ROOT") do
+    config :fleet_pipeline, workflow_maps_root: path
   end
 
   # F092 : racine des workspaces de pipeline (scratch git). Défaut HORS /tmp (ADR-E :
@@ -273,7 +273,7 @@ if config_env() != :test do
   # fleet_pilot — le knob legacy `start_dispatcher` / `LCARS_PILOT_DISPATCHER` et le catalogue
   # `LCARS_PILOT_ROUTING_PATH` (→ `forge-routing.yaml`) sont SUPPRIMÉS avec le rail AutoDispatcher
   # (webhook→route→Executor RAM). Aucun code ne lisait plus `:forge_routing_path`. Seul le rail
-  # forge-state-machine subsiste (config `LCARS_PILOT_STAGE` / `LCARS_PILOT_POLL_REPO`, plus bas).
+  # forge-state-machine subsiste (config `LCARS_PILOT_STEP` / `LCARS_PILOT_POLL_REPO`, plus bas).
   # ============================================================
 
   # F-037 MULTI-PROJET : le Poller ne scanne PLUS un repo fixe — il DÉCOUVRE ses projets par topic
@@ -328,16 +328,16 @@ if config_env() != :test do
   # ============================================================
   # A2/A3 — runtime STEP-MODE (forge = machine à états) + BL-045b auth push
   # ============================================================
-  # OFF par défaut. `LCARS_PILOT_STAGE=true` démarre Poller(step) + StepRunConsumer
+  # OFF par défaut. `LCARS_PILOT_STEP=true` démarre Poller(step) + StepRunConsumer
   # (cf. Fleet.Pilot.Application.step_children!). F-037 : requiert UNIQUEMENT FORGE_BASE_URL — c'est la
   # seule garde fail-loud du boot step (découverte des projets par topic + push per-step-run). LCARS_PILOT_POLL_REPO
   # n'est PAS requis (override legacy/test seulement ; la découverte réelle est par topic forge, pas un repo fixe).
-  if System.get_env("LCARS_PILOT_STAGE") == "true" do
+  if System.get_env("LCARS_PILOT_STEP") == "true" do
     config :fleet_pilot, step_dispatch?: true
   end
 
-  # #8 cohérence : plus de routing par label (`LCARS_PILOT_STAGE_ROUTING` retiré). Le routing vit dans la
-  # route-comment, gravée par `create_issue` (carte de délégation, défaut brief-gate). type:* = visu.
+  # #8 cohérence : plus de routing par label (`LCARS_PILOT_STEP_ROUTING` retiré). Le routing vit dans la
+  # route-comment, gravée par `create_issue` (workflow_map de délégation, défaut brief-gate). type:* = visu.
 
   # F-037 : `LCARS_HOP_REMOTE` retiré — le remote de push n'est plus un URL fixe (incompatible multi-projet) ;
   # il est PER-STEP-RUN, dérivé du `repo_path` du projet et embarqué dans l'event `pod.completed` (cf.
@@ -376,8 +376,8 @@ if config_env() != :test do
     config :fleet_credentials, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
   end
 
-  # NB cap-profiles / cartes : déjà couverts par `LCARS_CAPPROFILES_ROOT` (→ :fleet_cap_profile
-  # :root_dir, plus haut) et `LCARS_PIPELINES_ROOT` (→ :fleet_pipeline :pipelines_root). Pas de
+  # NB cap-profiles / workflow_maps : déjà couverts par `LCARS_CAPPROFILES_ROOT` (→ :fleet_cap_profile
+  # :root_dir, plus haut) et `LCARS_WORKFLOW_MAPS_ROOT` (→ :fleet_pipeline :workflow_maps_root). Pas de
   # knob dupliqué ici (I-CBC, une source par config).
 
   # (Plus de knob `LCARS_POD_HUMAN` : l'humain = l'user du process runtime, dérivé in-code, jamais

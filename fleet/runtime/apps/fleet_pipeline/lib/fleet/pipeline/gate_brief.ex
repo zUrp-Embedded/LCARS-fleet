@@ -17,7 +17,7 @@ defmodule Fleet.Pipeline.GateBrief do
   @doc """
   Rend le brief markdown depuis le contexte de gate.
 
-  `ctx` : `%{step: String, pipeline_id: term, gate: map | nil, outputs: map,
+  `ctx` : `%{step: String, workflow_map_id: term, gate: map | nil, outputs: map,
   request: String | nil, subject: :deliverable | :brief}`.
 
   `:subject` paramètre CE QUI est jugé — `:deliverable` (défaut, le livrable
@@ -28,7 +28,7 @@ defmodule Fleet.Pipeline.GateBrief do
   inexistant). Défaut `:deliverable`.
   """
   @spec build(map()) :: String.t()
-  def build(%{step: step, pipeline_id: pid} = ctx) do
+  def build(%{step: step, workflow_map_id: pid} = ctx) do
     gate = Map.get(ctx, :gate)
     outputs = Map.get(ctx, :outputs, %{})
     s = subject_phrases(Map.get(ctx, :subject, :deliverable), step)

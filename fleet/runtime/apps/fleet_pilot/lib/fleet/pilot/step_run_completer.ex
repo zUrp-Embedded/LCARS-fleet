@@ -21,7 +21,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     4. **Routage du step suivant** :
          * `next_assignee` présent (multi-step) → `set_assignee(next)` ; le
            poller ne verra le suivant que quand 1-3 sont OK. **(le calcul de
-           `next_assignee` depuis la carte est en amont, pas ici.)**
+           `next_assignee` depuis la workflow_map est en amont, pas ici.)**
          * `next_assignee == nil` (1-step / terminal) → `close_issue`.
     5. **Retire `lcars-in-flight`** — en DERNIER : le poller ne re-spawn le
        suivant que quand TOUT est fini.
@@ -58,7 +58,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       (mode/workspace/base_sha/remote/target_branch/...). `nil` = pas de
       livrable git ; alors `:step_run_sha` requis.
     * `:step_run_sha` — override de la signature de step_run (défaut = commit_sha publié)
-    * `:next_assignee` — login du rôle suivant (carte) ; `nil` = terminal → close
+    * `:next_assignee` — login du rôle suivant (workflow_map) ; `nil` = terminal → close
     * `:comment_body` — corps lisible du comment (la signature machine est
       toujours ajoutée) ; défaut généré
   """
@@ -342,7 +342,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   state + assignee/close + unlock) sur le happy-path : la PR devient le domicile review+promote,
   la forge auto-close l'issue au merge (`Closes #N`).
 
-  Le step_run est **deja resolu** par l'appelant (`StepRunConsumer` connait la carte + le `deliverable_mode`) :
+  Le step_run est **deja resolu** par l'appelant (`StepRunConsumer` connait la workflow_map + le `deliverable_mode`) :
 
     * `:pr_role` — `:producer` (role git_native → pousse le code, ouvre la PR) | `:judge`
       (role payload → review la PR du producteur).
@@ -356,7 +356,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   Le trigger du step suivant = la review-request native (`request_review`), plus `set_assignee` :
   le producteur reste assigne (Entry), les juges sont dispatches via la PR (`dispatch_review`). La
-  position carte (`post_route`) reste gravee sur l'issue. Le verrou `lcars-in-flight` est leve en
+  position workflow_map (`post_route`) reste gravee sur l'issue. Le verrou `lcars-in-flight` est leve en
   DERNIER sur le bon numero : producteur -> l'ISSUE (verrou pose par `dispatch_issue`) ; juge -> la
   PR (verrou pose par `dispatch_review`).
 
@@ -509,8 +509,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp review_step_run(step_run, pr) do
-    # Un juge no-carte porte `:review_event` (mappé du gate-decision continue/abandon par
-    # StepRunConsumer). À défaut (carte), on dérive de l'intent. Le `:review_event` explicite prime.
+    # Un juge no-workflow_map porte `:review_event` (mappé du gate-decision continue/abandon par
+    # StepRunConsumer). À défaut (workflow_map), on dérive de l'intent. Le `:review_event` explicite prime.
     event =
       Map.get(step_run, :review_event) || review_event_for_intent(Map.fetch!(step_run, :intent))
 
@@ -519,7 +519,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     |> Map.put(:review_event, event)
   end
 
-  # Verdict de gate (juge-carte) → event de review native. SEULS les intents gate-PASS approuvent,
+  # Verdict de gate (juge-workflow_map) → event de review native. SEULS les intents gate-PASS approuvent,
   # et chacun EXPLICITEMENT : `:advance` (un step suit) et `:promote` (terminal) = APPROVED.
   # `:rework` (gate fail) = REQUEST_CHANGES. Le `:review_body` (optionnel) prime sur le corps genere.
   # Defaut FAIL-CLOSED : tout autre intent (un futur `:reject`/`:abandon`, ou un step_run qui a perdu son
@@ -532,7 +532,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   # Routage commun selon l'intent. Le trigger du step suivant = la review-request native
   # (`request_review`), plus `set_assignee` : le producteur reste assigne (Entry), les juges
-  # sont dispatches via la PR (`dispatch_review`). `post_route` (position carte) RESTE sur l'issue.
+  # sont dispatches via la PR (`dispatch_review`). `post_route` (position workflow_map) RESTE sur l'issue.
   # `lcars-in-flight` leve en DERNIER sur le bon numero : producteur -> l'ISSUE (verrou pose par
   # dispatch_issue) ; juge -> la PR (verrou pose par dispatch_review). `pr` = nil seulement sur un
   # rework producteur (pas de PR).
@@ -583,7 +583,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # Producteur SANS carte (single-brique) : la PR est ouverte (`complete_producer`) → on met
+  # Producteur SANS workflow_map (single-brique) : la PR est ouverte (`complete_producer`) → on met
   # les JUGES (`:reviewer_roles`, défaut qualifier+reviewer) en `requested_reviewers` (le poller
   # `dispatch_review` les spawn un à un), on ASSIGNE l'HUMAIN à la PR (voir quel humain a
   # drivé), puis on lève le verrou de l'ISSUE (la PR ouverte fait skip l'issue côté poller via
@@ -605,7 +605,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # Juge SANS carte : la review native a déjà été postée par `complete_judge` (`record_review`,
+  # Juge SANS workflow_map : la review native a déjà été postée par `complete_judge` (`record_review`,
   # signée par le token du juge). Il ne reste qu'à lever le verrou de la PR. Le merge/rework est décidé
   # par le poller (`dispatch_review`, REVIEWS-DRIVEN : il lit la liste des reviews — verdict décisif par
   # juge — pas `requested_reviewers` que Gitea ne vide pas). Pas d'action sur `requested_reviewers`
@@ -675,12 +675,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp lock_number(%{pr_role: :judge}, pr) when is_integer(pr), do: pr
   defp lock_number(%{issue_number: n}, _pr), do: n
 
-  # Grave la POSITION carte [lcars-route:p:s] sur l'issue (lue par StepDispatcher/dispatch_review
+  # Grave la POSITION workflow_map [lcars-route:p:s] sur l'issue (lue par StepDispatcher/dispatch_review
   # pour identifier le step du juge : l'assignee/le reviewer seul ne l'identifie pas, un role peut
   # etre sur N steps). Reste (autorite de navigation) ; seul le TRIGGER (set_assignee) est remplace
   # par la review-request. Grave si pipeline+next_step presents (sinon 1-step/terminal, pas de route).
   defp bridge_route(forge, repo, n, step_run, forge_opts) do
-    case {Map.get(step_run, :pipeline), Map.get(step_run, :next_step)} do
+    case {Map.get(step_run, :workflow_map), Map.get(step_run, :next_step)} do
       {p, s} when is_binary(p) and is_binary(s) ->
         case forge.post_route(repo, n, p, s, forge_opts) do
           {:ok, _} = ok -> ok
@@ -755,7 +755,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # ── Étape 4 : assignee suivant OU close (1-step terminal) ─────────────────
   # (Pas d'étape 3 « PATCH state:* » : l'état vit dans la route-comment. N° de step conservés.)
   # Reassign : grave la ROUTE du step suivant AVANT le PATCH assignee — le poller
-  # ne doit voir le nouvel assignee qu'avec sa position carte déjà posée (sinon le spawn
+  # ne doit voir le nouvel assignee qu'avec sa position workflow_map déjà posée (sinon le spawn
   # suivant ne saurait pas quel step il est). post_route idempotent (dédup marqueur).
   defp step4_route(forge, repo, n, step_run, forge_opts) do
     case Map.get(step_run, :next_assignee) do
@@ -768,7 +768,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       next when is_binary(next) ->
         # AVANCE = grave la route du step suivant. PLUS de `set_assignee(next)` — l'assignee
         # reste l'HUMAIN (traça) ; le rôle du next step (`next`) est dérivé de la route au dispatch
-        # (`StepDispatcher.carte_role`), pas de l'assignee. `next` (next_role présent) distingue
+        # (`StepDispatcher.workflow_map_role`), pas de l'assignee. `next` (next_role présent) distingue
         # AVANCE vs terminal (nil → close).
         case maybe_post_route(forge, repo, n, step_run, forge_opts) do
           {:ok, _} ->
@@ -785,7 +785,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp maybe_post_route(forge, repo, n, step_run, forge_opts) do
-    case {Map.get(step_run, :pipeline), Map.get(step_run, :next_step)} do
+    case {Map.get(step_run, :workflow_map), Map.get(step_run, :next_step)} do
       {p, s} when is_binary(p) and is_binary(s) -> forge.post_route(repo, n, p, s, forge_opts)
       _ -> {:ok, :no_route}
     end

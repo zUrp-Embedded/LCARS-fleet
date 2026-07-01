@@ -384,7 +384,7 @@ defmodule Fleet.MCP.PodTools do
         case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
           {:ok, number} ->
             # DÉCOUPLAGE : create_issue CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
-            # (graver la carte) n'est PLUS ici : c'est la responsabilité du SYSTÈME — le POLLER grave la carte
+            # (graver la workflow_map) n'est PLUS ici : c'est la responsabilité du SYSTÈME — le POLLER grave la workflow_map
             # par défaut (brief-gate) sur toute issue assignée routeless (cf. fleet_pilot). Un seul acteur
             # crée+assigne ; le système route. (Uniforme : un issue humain routeless est onboardé pareil.)
             # type:feature = ÉTIQUETTE de visu (humain), best-effort — JAMAIS du routing.
@@ -408,9 +408,9 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  # Pas de `delegation_carte` ni de `grave_initial_route` ici : le routage (graver la carte) vit
-  # côté système (fleet_pilot : le poller onboarde toute issue assignée routeless sur la carte par défaut,
-  # cf. StepDispatcher.ensure_carte_or_onboard). create_issue ne fait QUE créer+assigner.
+  # Pas de `delegation_workflow_map` ni de `grave_initial_route` ici : le routage (graver la workflow_map) vit
+  # côté système (fleet_pilot : le poller onboarde toute issue assignée routeless sur la workflow_map par défaut,
+  # cf. StepDispatcher.ensure_workflow_map_or_onboard). create_issue ne fait QUE créer+assigner.
 
   # La PR EN COURS du issue #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
   # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.

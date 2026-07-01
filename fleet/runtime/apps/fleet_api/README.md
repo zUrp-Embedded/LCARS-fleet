@@ -94,16 +94,16 @@ commande `bin/fleet_v2 version` (lit le priv embarqué en release, git LIVE en s
 ```
 GET /ws (upgrade)
 
-C → S: {"action": "subscribe", "topics": ["pipeline.*", "audit.cat5.*"]}
+C → S: {"action": "subscribe", "topics": ["workflow_map.*", "audit.cat5.*"]}
 S → C: {"type": "connected"}
 S → C: {"type": "subscribed", "topics": [...]}
 S → C: {"type": "ping"}                                  ← heartbeat 30s
-S → C: {"type": "event", "event_type": "pipeline.completed", "payload": {...}}
+S → C: {"type": "event", "event_type": "workflow_map.completed", "payload": {...}}
 S → C: {"type": "error", "reason": "..."}
 ```
 
-Topics : exact match OU wildcard suffixe `*` (ex `pipeline.*` match
-`pipeline.completed`). Liste vide = subscribe-all.
+Topics : exact match OU wildcard suffixe `*` (ex `workflow_map.*` match
+`workflow_map.completed`). Liste vide = subscribe-all.
 
 ## Configuration
 

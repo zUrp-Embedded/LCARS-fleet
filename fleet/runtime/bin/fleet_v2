@@ -91,7 +91,7 @@ setup_env() {
 
   # On-switches : l'arch boote (permanent), la machine step-mode tourne (forge-driven).
   export LCARS_BOOT_PERMANENT_AT_START=true
-  export LCARS_PILOT_STAGE="${LCARS_PILOT_STAGE:-true}"
+  export LCARS_PILOT_STEP="${LCARS_PILOT_STEP:-true}"
 
   # Distribution Erlang (node nommé, RPC debug) : gérée par MODE dans cmd_start, avec un nom DÉRIVÉ
   # PER-HUMAIN. ⚠ La release distribue `-sname fleet_umbrella` par DÉFAUT (nom FIXE partagé) → 2 humains =

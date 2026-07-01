@@ -18,14 +18,14 @@ defmodule Fleet.Starfleet.Cat5Escalator do
 
     * `:pod_drift` — sur `pod.drift` (drift_count ≥ 3). Émetteur prévu (filtre IPC
       pod-side comptant les strikes) jamais implémenté → 0 producteur.
-    * `:pipeline_failed` — sur `pipeline.failed`. Producteur historique = moteur RAM
+    * `:workflow_map_failed` — sur `workflow_map.failed`. Producteur historique = moteur RAM
       `Fleet.Pipeline.Executor`, SUPPRIMÉ ; le rail forge-driven ne le ré-émet pas.
     * `:oauth_refresh_failed` — sur `oauth.refresh.failed`. Pas de producteur câblé.
 
   ## Format payload broadcast
 
       %{
-        "source" => "pod_drift" | "pipeline_failed" | "oauth_refresh_failed",
+        "source" => "pod_drift" | "workflow_map_failed" | "oauth_refresh_failed",
         "chain" => [..., "starfleet.cat5.<source>"],
         ...payload original (pod_id, drift_count, reason, etc.)
       }

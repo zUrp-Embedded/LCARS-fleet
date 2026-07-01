@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.Poller do
     * `:interval_ms` — défaut `30_000` (30s).
     * `:forge_opts` — keyword ForgeClient (base_url, token, req_options).
     * `:step_dispatch?` — historiquement le switch de mode ; aujourd'hui toujours `true` (seul mode).
-    * seams test : `:forge_client`, `:loader`, `:carte_loader`, `:spawner`, `:clock` (injectés si non-nil).
+    * seams test : `:forge_client`, `:loader`, `:workflow_map_loader`, `:spawner`, `:clock` (injectés si non-nil).
     * `:start_tick?` — défaut `true` ; `false` = pas de 1er tick auto (tests drivent via `force_poll/1`).
 
   ## Historique — mode legacy RETIRÉ (2026-06-16)
@@ -66,7 +66,7 @@ defmodule Fleet.Pilot.Poller do
     step_dispatch?: false,
     forge_opts: [],
     loader: nil,
-    carte_loader: nil,
+    workflow_map_loader: nil,
     spawner: nil,
     task_queue: nil,
     clock: nil,
@@ -145,7 +145,7 @@ defmodule Fleet.Pilot.Poller do
       step_dispatch?: Keyword.get(opts, :step_dispatch?, false),
       forge_opts: Keyword.get(opts, :forge_opts, []),
       loader: Keyword.get(opts, :loader),
-      carte_loader: Keyword.get(opts, :carte_loader),
+      workflow_map_loader: Keyword.get(opts, :workflow_map_loader),
       spawner: Keyword.get(opts, :spawner),
       task_queue: Keyword.get(opts, :task_queue),
       clock: Keyword.get(opts, :clock),
@@ -633,14 +633,14 @@ defmodule Fleet.Pilot.Poller do
 
   defp step_process_issues(issues, pr_issue_ids, state, opts) do
     # Cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, gravée à l'onboard) — plus de
-    # routing par label. Le poller lit la route → dispatch (carte_role). Le bail « 1 pipeline actif/repo »
+    # routing par label. Le poller lit la route → dispatch (workflow_map_role). Le bail « 1 pipeline actif/repo »
     # se lit AUSSI sur la route (robuste, append-only). On classe chaque issue UNE fois :
     #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er step = pipeline démarré) → tient le bail ;
     #     on dispatche son step courant (continue le step_run, ou skip si in-flight).
     #   - EN FILE (routée au 1er step, ou routeless à onboarder, pas encore dispatchée) → démarre seulement
     #     si le bail est libre ; sinon attend (sérialisation → feature-branches séquentielles → FF merge).
-    # `classify_issue` lit la route (+ charge la carte) UNE fois et la THREAD au dispatch via
-    # `prefetch` (mergé aux opts) → fin du double get_route / double load carte (la classif du bail et le
+    # `classify_issue` lit la route (+ charge la workflow_map) UNE fois et la THREAD au dispatch via
+    # `prefetch` (mergé aux opts) → fin du double get_route / double load workflow_map (la classif du bail et le
     # dispatch lisaient la MÊME donnée 2×).
     classified =
       Enum.map(issues, fn issue ->
@@ -732,11 +732,11 @@ defmodule Fleet.Pilot.Poller do
 
   # Classifie une issue (bail) ET pré-résout ce que `dispatch_issue` relirait sinon. Renvoie
   # `{engaged?, prefetch_kw}` ; `prefetch_kw` (mergé aux opts de dispatch) porte `:prefetched_route` +
-  # `:prefetched_carte` → lecture forge/disque UNE seule fois. ENGAGÉ = pod en vol (`in-flight`) OU route
+  # `:prefetched_workflow_map` → lecture forge/disque UNE seule fois. ENGAGÉ = pod en vol (`in-flight`) OU route
   # avancée au-delà du 1er step (pipeline démarré, entre deux step_runs). Fast-path : in-flight → pas de lecture
   # route (`decide` le skip de toute façon). Routeless (`:none`) → EN FILE, route nil threadée (onboard en
   # aval). Erreur HTTP get_route → EN FILE, RIEN threadé (le dispatch re-lit → fail-loud `:route_resolution`,
-  # jamais de wedge du bail par une carte/route illisible).
+  # jamais de wedge du bail par une workflow_map/route illisible).
   defp classify_issue(_issue, true = _pr?, _state), do: {false, []}
 
   defp classify_issue(issue, false = _pr?, state) do
@@ -749,18 +749,19 @@ defmodule Fleet.Pilot.Poller do
       n = Map.get(issue, "number")
 
       case forge.get_route(state.repo, n, state.forge_opts) do
-        {:ok, {carte, step} = route} when is_binary(carte) and is_binary(step) ->
+        {:ok, {workflow_map_name, step} = route}
+        when is_binary(workflow_map_name) and is_binary(step) ->
           # Le bail se lit sur la ROUTE (append-only, robuste), JAMAIS sur le succès du chargement de la
-          # carte. Une route PRÉSENTE = un pipeline déjà entré dans la machine. ENGAGÉ ssi le step courant
-          # n'est pas le 1er de la carte (pipeline avancé entre deux step_runs). Si la carte échoue à charger
+          # workflow_map. Une route PRÉSENTE = un pipeline déjà entré dans la machine. ENGAGÉ ssi le step courant
+          # n'est pas le 1er de la workflow_map (pipeline avancé entre deux step_runs). Si la workflow_map échoue à charger
           # TRANSITOIREMENT (réseau/forge nil), on NE PEUT PAS exclure que ce pipeline soit avancé → fail-closed :
-          # on le classe ENGAGÉ (bail TENU). Sinon une carte-nil ferait perdre le bail d'un pipeline engagé →
+          # on le classe ENGAGÉ (bail TENU). Sinon une workflow_map-nil ferait perdre le bail d'un pipeline engagé →
           # un 2e issue du même repo démarrerait un 2e pipeline (perte de sérialisation). Le dispatch de SON
-          # step fail-loud si la carte manque (carte re-lue côté StepDispatcher), mais le bail NE se libère
-          # pas pour autant. Carte revenue au tick suivant → classification précise reprise.
-          carte_map = load_carte_or_nil(carte, state)
-          engaged = is_nil(carte_map) or not first_step?(carte_map, step)
-          {engaged, [prefetched_route: route, prefetched_carte: carte_map]}
+          # step fail-loud si la workflow_map manque (workflow_map re-lue côté StepDispatcher), mais le bail NE se libère
+          # pas pour autant. WorkflowMap revenue au tick suivant → classification précise reprise.
+          workflow_map = load_workflow_map_or_nil(workflow_map_name, state)
+          engaged = is_nil(workflow_map) or not first_step?(workflow_map, step)
+          {engaged, [prefetched_route: route, prefetched_workflow_map: workflow_map]}
 
         :none ->
           {false, [prefetched_route: nil]}
@@ -771,18 +772,18 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # Charge la carte (seam `carte_loader` ou Loader réel) ; `nil` sur échec (le dispatch re-tentera → fail-loud).
-  defp load_carte_or_nil(carte, state) do
-    loader = state.carte_loader || Fleet.Pipeline.Loader
-    loader.load!(carte)
+  # Charge la workflow_map (seam `workflow_map_loader` ou Loader réel) ; `nil` sur échec (le dispatch re-tentera → fail-loud).
+  defp load_workflow_map_or_nil(workflow_map_name, state) do
+    loader = state.workflow_map_loader || Fleet.Pipeline.Loader
+    loader.load!(workflow_map_name)
   rescue
     _ -> nil
   end
 
-  # Le step est-il le 1er de la carte (= routé mais pas avancé = EN FILE) ? Anomalie carte → `true`
-  # (traité « non engagé » : le dispatch fail-loud surfacera, jamais de wedge du bail par une carte illisible).
-  defp first_step?(carte_map, step) do
-    case Fleet.Pilot.CarteNav.first_step(carte_map) do
+  # Le step est-il le 1er de la workflow_map (= routé mais pas avancé = EN FILE) ? Anomalie workflow_map → `true`
+  # (traité « non engagé » : le dispatch fail-loud surfacera, jamais de wedge du bail par une workflow_map illisible).
+  defp first_step?(workflow_map, step) do
+    case Fleet.Pilot.WorkflowMapNav.first_step(workflow_map) do
       {:ok, {first, _role}} -> step == first
       _ -> true
     end
@@ -802,10 +803,10 @@ defmodule Fleet.Pilot.Poller do
       forge_opts: state.forge_opts
     ]
     |> maybe_put_seam(:loader, state.loader)
-    # `carte_role` (dispatch) charge la carte de la route → il lui faut le loader de CARTE (comme
+    # `workflow_map_role` (dispatch) charge la workflow_map de la route → il lui faut le loader de WORKFLOW_MAP (comme
     # fonction load!/1). Live : nil → défaut `Fleet.Pipeline.Loader.load!` (priv). Test : dérivé du module
     # stub. (Distinct de `:loader` = cap-profiles.)
-    |> maybe_put_seam(:carte_loader, carte_loader_fun(state))
+    |> maybe_put_seam(:workflow_map_loader, workflow_map_loader_fun(state))
     |> maybe_put_seam(:spawner, state.spawner)
     |> maybe_put_seam(:task_queue, state.task_queue)
     |> maybe_put_seam(:clock, state.clock)
@@ -813,8 +814,10 @@ defmodule Fleet.Pilot.Poller do
     |> maybe_put_seam(:wake_recovery, state.wake_recovery)
   end
 
-  defp carte_loader_fun(%__MODULE__{carte_loader: nil}), do: nil
-  defp carte_loader_fun(%__MODULE__{carte_loader: cl}), do: fn name -> cl.load!(name) end
+  defp workflow_map_loader_fun(%__MODULE__{workflow_map_loader: nil}), do: nil
+
+  defp workflow_map_loader_fun(%__MODULE__{workflow_map_loader: cl}),
+    do: fn name -> cl.load!(name) end
 
   defp maybe_put_seam(opts, _key, nil), do: opts
   defp maybe_put_seam(opts, key, value), do: Keyword.put(opts, key, value)
