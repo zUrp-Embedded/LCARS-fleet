@@ -108,7 +108,7 @@ dans le moduledoc de chaque consommateur.
 > au boot (prod-on/test-off). Audit des ~15 émetteurs : les statiques émettent des
 > types registrés, les dynamiques externes (`webhooks_gitea`/`signals_os`/`policies`/
 > `Pod.best_effort_broadcast`) rescue `UnregisteredError` → activation sûre. MA-04 : le lifecycle
-> `pod.completed`/`work_item_completed` passe par `required_broadcast` (PROPAGE l'échec, ne l'avale pas).
+> `pod.completed`/`work_item.completed` passe par `required_broadcast` (PROPAGE l'échec, ne l'avale pas).
 
 ## Dépendances
 

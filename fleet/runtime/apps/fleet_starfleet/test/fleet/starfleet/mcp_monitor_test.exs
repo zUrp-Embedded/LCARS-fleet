@@ -43,7 +43,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
 
       assert {:ok, :crashed} = GenServer.call(pid, :check_now)
       # Pas de broadcast : transition est unknown → crashed (pas :ok → :crashed).
-      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+      refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
       GenServer.stop(pid)
     end
 
@@ -60,7 +60,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
 
       # 1er check : target vivant → :ok (transition unknown → :ok, no broadcast).
       assert {:ok, :ok} = GenServer.call(monitor_pid, :check_now)
-      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+      refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
 
       # Tue le target → next check doit broadcast.
       ref = Process.monitor(target_pid)
@@ -71,7 +71,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
 
       assert_receive %Fleet.Event{
                        source: :starfleet,
-                       type: :mcp_server_crashed,
+                       type: :"mcp.server_crashed",
                        payload: %{
                          "target" => target_str,
                          "previous_status" => "ok",
@@ -96,7 +96,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
       # (transitions unknown → :crashed puis :crashed → :crashed).
       assert {:ok, :crashed} = GenServer.call(monitor_pid, :check_now)
       assert {:ok, :crashed} = GenServer.call(monitor_pid, :check_now)
-      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+      refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
       GenServer.stop(monitor_pid)
     end
 
@@ -118,7 +118,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
 
       # 2e check : :crashed → :ok (recovery, log info, pas de broadcast)
       assert {:ok, :ok} = GenServer.call(monitor_pid, :check_now)
-      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+      refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
 
       GenServer.stop(target_name)
       GenServer.stop(monitor_pid)
@@ -157,7 +157,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
 
       # enfant vivant → :ok (transition unknown → :ok, pas de broadcast)
       assert {:ok, :ok} = GenServer.call(mon, :check_now)
-      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+      refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
 
       # termine l'enfant `:temporary` → il DISPARAÎT de which_children (`[]`, vérifié ;
       # un enfant :permanent/:transient terminé resterait en `:undefined`). Les deux cas
@@ -167,7 +167,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
 
       assert_receive %Fleet.Event{
                        source: :starfleet,
-                       type: :mcp_server_crashed,
+                       type: :"mcp.server_crashed",
                        payload: %{"new_status" => "crashed", "previous_status" => "ok"}
                      },
                      500
@@ -187,7 +187,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
         )
 
       assert {:ok, :crashed} = GenServer.call(mon, :check_now)
-      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+      refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
 
       GenServer.stop(mon)
       Supervisor.stop(sup)
@@ -202,7 +202,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
         )
 
       assert {:ok, :crashed} = GenServer.call(mon, :check_now)
-      refute_receive %Fleet.Event{type: :mcp_server_crashed}, 200
+      refute_receive %Fleet.Event{type: :"mcp.server_crashed"}, 200
 
       GenServer.stop(mon)
     end

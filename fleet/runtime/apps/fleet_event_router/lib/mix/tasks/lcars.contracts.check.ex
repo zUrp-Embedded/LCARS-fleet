@@ -507,7 +507,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `gen_statem`, l'annulation n'est plus une impl maison (`Process.cancel_timer`) mais
   # NATIVE : `:result_deadline` est un **state_timeout de l'état `:monitoring`**, et la
   # transition `:monitoring → :extracting` (déclenchée par l'arrivée du résultat,
-  # `work_item_completed`) annule AUTOMATIQUEMENT ce state_timeout (un state_timeout est
+  # `work_item.completed`) annule AUTOMATIQUEMENT ce state_timeout (un state_timeout est
   # cancellé au changement d'état). Ce check vérifie donc les DEUX piliers de cet
   # invariant natif dans pod.ex :
   #   (a) `:result_deadline` est bien armé/géré comme un `:state_timeout` (sinon il ne

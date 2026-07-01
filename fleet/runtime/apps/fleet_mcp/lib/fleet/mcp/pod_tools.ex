@@ -12,7 +12,7 @@ defmodule Fleet.MCP.PodTools do
   serveur est **passeur de `correlation_id`** : `work_item_id` exposé côté `get_work_item`,
   validé côté `submit_result` (le broker rejette un `work_item_id` ≠ brief actif).
 
-  Le broker `Fleet.TaskQueue` broadcast lui-même `%Fleet.Event{work_item_completed}` sur
+  Le broker `Fleet.TaskQueue` broadcast lui-même `%Fleet.Event{work_item.completed}` sur
   `fleet.events` (consommé par `fleet_spawner`/`fleet_coord`) — ce module n'émet
   plus d'event string-topic (`pod.result_submitted` supprimé).
   """
@@ -165,7 +165,7 @@ defmodule Fleet.MCP.PodTools do
         {:error, :work_item_id_required, state}
 
       work_item_id ->
-        # Le broker valide pod_id ↔ work_item_id et broadcast %Fleet.Event{work_item_completed}.
+        # Le broker valide pod_id ↔ work_item_id et broadcast %Fleet.Event{work_item.completed}.
         case TaskQueue.submit_result(pod_id, Map.put(payload, "work_item_id", work_item_id)) do
           {:ok, _task} ->
             {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
@@ -183,7 +183,7 @@ defmodule Fleet.MCP.PodTools do
           {:error, :work_item_id_mismatch} ->
             {:error, :work_item_id_mismatch, state}
 
-          # le broadcast lifecycle `work_item_completed` a échoué : le step_run ne finira PAS (le StepRunConsumer
+          # le broadcast lifecycle `work_item.completed` a échoué : le step_run ne finira PAS (le StepRunConsumer
           # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès) — le pod doit
           # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
           # son livrable accepté alors que le verrou forge reste posé à vie.

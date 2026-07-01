@@ -44,7 +44,7 @@ defmodule Fleet.Spawner.Pod do
   ## Timers NATIFS (plus de timer maison)
 
   - `:result_deadline` = **state_timeout de `:monitoring`** : annulé AUTOMATIQUEMENT en
-    quittant `:monitoring` (la transition `:monitoring → :extracting` sur `work_item_completed`
+    quittant `:monitoring` (la transition `:monitoring → :extracting` sur `work_item.completed`
     réalise nativement l'invariant « le deadline est annulé à l'arrivée du résultat »).
   - `:liveness` = **generic timeout** récurrent en `:monitoring` (ré-arme le deadline si le
     pod a bougé).
@@ -83,7 +83,7 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.SPBuilder
 
   # Complétion event-driven : le résultat arrive via l'event Bus
-  # `task_queue.work_item_completed` (%Fleet.Event{}, émis par le central sur submit_result), PAS via un fichier.
+  # `task_queue.work_item.completed` (%Fleet.Event{}, émis par le central sur submit_result), PAS via un fichier.
 
   @type state_name ::
           :allocating
@@ -122,7 +122,7 @@ defmodule Fleet.Spawner.Pod do
           opts: keyword(),
           # Port owné par le Pod (détection exit + kill en RELEASE).
           port: port() | nil,
-          # Résultat reçu via l'event Bus task_queue.work_item_completed (%Fleet.Event{}, complétion).
+          # Résultat reçu via l'event Bus task_queue.work_item.completed (%Fleet.Event{}, complétion).
           submitted_result: map() | nil,
           last_result: map() | nil,
           # Nom de la session tmux du pod (`lcars-pod-<id>` sur le sock PAR-POD, posé par
@@ -606,7 +606,7 @@ defmodule Fleet.Spawner.Pod do
   # Évènements Port / Bus (event type :info) + catch-all
   # ============================================================
   #
-  # Complétion event-driven : le broker fleet_task_queue broadcast %Fleet.Event{work_item_completed} sur
+  # Complétion event-driven : le broker fleet_task_queue broadcast %Fleet.Event{work_item.completed} sur
   # fleet.events. On ne réagit qu'au NÔTRE (pod_id) en :monitoring. Le résultat est arrivé → la
   # transition :monitoring → :extracting ANNULE NATIVEMENT le state_timeout :result_deadline (= l'invariant
   # result_deadline_cancelled) ; on annule en plus le generic timeout :liveness (lui ne s'annule pas
@@ -616,7 +616,7 @@ defmodule Fleet.Spawner.Pod do
         :info,
         %Fleet.Event{
           source: :task_queue,
-          type: :work_item_completed,
+          type: :"work_item.completed",
           pod_id: pid,
           payload: payload
         },
@@ -634,10 +634,10 @@ defmodule Fleet.Spawner.Pod do
      [cancel_liveness_action(), {:next_event, :internal, :proceed}]}
   end
 
-  # %Fleet.Event{work_item_completed} d'un autre pod, ou hors :monitoring → ignore.
+  # %Fleet.Event{work_item.completed} d'un autre pod, ou hors :monitoring → ignore.
   def handle_event(
         :info,
-        %Fleet.Event{source: :task_queue, type: :work_item_completed},
+        %Fleet.Event{source: :task_queue, type: :"work_item.completed"},
         _state,
         _data
       ),
@@ -662,7 +662,7 @@ defmodule Fleet.Spawner.Pod do
   def handle_event(:info, %Fleet.Event{type: :"deliverable.published"}, _state, _data),
     do: :keep_state_and_data
 
-  # Cycle de vie du Port : si le résultat a été extrait (event work_item_completed reçu → :output_extracted),
+  # Cycle de vie du Port : si le résultat a été extrait (event work_item.completed reçu → :output_extracted),
   # l'exit est l'arrêt normal post-release. Sinon le process est mort SANS soumettre de résultat → échec.
   def handle_event(:info, {port, {:exit_status, exit_code}}, _state, %{port: port} = data)
       when is_port(port) do
@@ -1111,7 +1111,7 @@ defmodule Fleet.Spawner.Pod do
   defp publish_deadline_ms,
     do: Application.get_env(:fleet_spawner, :publish_deadline_ms, 120_000)
 
-  # SLOT-FREEZE : adopte le issue_id de la tache complétée (de l'event work_item_completed) comme issue
+  # SLOT-FREEZE : adopte le issue_id de la tache complétée (de l'event work_item.completed) comme issue
   # courant du pod. Un pipe re-brief change de brique a chaque tache ; sans ca state.issue_id
   # resterait celui du spawn -> toutes les attributions pointeraient la 1ere brique. Absent/vide ->
   # on garde l'existant.

@@ -31,7 +31,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
   ## Event broadcast
 
-  Schema canon `%Fleet.Event{source: :starfleet, type: :mcp_server_crashed,
+  Schema canon `%Fleet.Event{source: :starfleet, type: :"mcp.server_crashed",
   payload: %{previous_status, new_status, target}, correlation_id: nil}`.
 
   ## Configuration
@@ -138,7 +138,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
   defp broadcast_crashed(target, previous, new) do
     event =
-      Fleet.Event.new(:starfleet, :mcp_server_crashed,
+      Fleet.Event.new(:starfleet, :"mcp.server_crashed",
         payload: %{
           "target" => inspect(target),
           "previous_status" => Atom.to_string(previous),
@@ -160,7 +160,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
     # la détection de transition :ok → :crashed (sa raison d'être), et bouclerait à chaque tick.
     e in [ArgumentError, FunctionClauseError] ->
       Logger.error(
-        "MCPMonitor: alerte mcp_server_crashed NON émise — event malformé (bug de construction) : #{inspect(e)}"
+        "MCPMonitor: alerte mcp.server_crashed NON émise — event malformé (bug de construction) : #{inspect(e)}"
       )
 
       :ok

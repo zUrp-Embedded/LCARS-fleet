@@ -19,7 +19,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       un brief d'éval au gatekeeper (work-session, adressé par `pod_id` via
       TaskQueue/MCP), on tient le contexte de reprise en RAM (`gate_evals`, keyé
       par `correlation_id`), et la décision revient async via
-      `%Fleet.Event{source: :task_queue, type: :work_item_completed}` → `resume_gate/3`.
+      `%Fleet.Event{source: :task_queue, type: :"work_item.completed"}` → `resume_gate/3`.
 
   Le juge est **rare par construction** : le moteur ne peut pas le sur-convoquer
   (le `soft`/non-tranchable est une *condition runtime*, pas un *tag de step*).
@@ -231,7 +231,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
         {:noreply, state}
 
       # Gate non-tranchable : le brief d'éval est enqueué au gatekeeper
-      # permanent ; on tient le contexte de reprise jusqu'au `work_item_completed` corrélé.
+      # permanent ; on tient le contexte de reprise jusqu'au `work_item.completed` corrélé.
       # L'issue reste verrouillée (in-flight) → le poller ne re-spawn pas (pas d'avance
       # à l'aveugle avant le verdict).
       {:escalate, corr, eval_ctx} ->
@@ -256,9 +256,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   # Décision du gatekeeper reçue : le brief d'éval (corrélé par
   # `correlation_id` = task.id de l'enqueue) est complété. On ne traite QUE les corr
-  # qu'on a en attente (les autres work_item_completed — autres pods — sont ignorés).
+  # qu'on a en attente (les autres work_item.completed — autres pods — sont ignorés).
   def handle_info(
-        %Fleet.Event{source: :task_queue, type: :work_item_completed, correlation_id: corr} = ev,
+        %Fleet.Event{source: :task_queue, type: :"work_item.completed", correlation_id: corr} =
+          ev,
         state
       )
       when is_binary(corr) do
@@ -268,7 +269,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       #      metadata (verdict auto-descriptif) → resume. C'est le wedge fermé : crash du StepRunConsumer seul
       #      (broker vivant → la tâche + son metadata survivent) → le verdict arrive au StepRunConsumer redémarré
       #      (gate_evals vide) → reconstruction au lieu de `{:noreply}` silencieux (issue verrouillée à vie).
-      #  (b) sinon → `{:noreply}` (cas NORMAL : chaque pod step-dispatch émet un `work_item_completed` sans
+      #  (b) sinon → `{:noreply}` (cas NORMAL : chaque pod step-dispatch émet un `work_item.completed` sans
       #      `gate_eval` → ce n'est pas une escalade gatekeeper → on l'ignore).
       {nil, _} ->
         case reconstruct_eval_ctx(ev.payload, state) do
@@ -297,7 +298,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   # Exécute la reprise (commun fast-path / reconstruction). La reprise pousse/écrit sur le
   # repo du STEP_RUN escaladé (porté par le `pod.completed` d'origine, conservé dans `eval_ctx.payload`), pas sur la
-  # config. Le verdict du gatekeeper arrive via un `work_item_completed` (autre event, sans repo) → on re-dérive
+  # config. Le verdict du gatekeeper arrive via un `work_item.completed` (autre event, sans repo) → on re-dérive
   # depuis le payload d'origine.
   defp do_resume_gate(eval_ctx, ev, corr, state) do
     case resume_gate(eval_ctx, ev.payload, step_run_state(eval_ctx.payload, state)) do
@@ -791,7 +792,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   #                               représentable).
   #   {:dispatch_gatekeeper, _} → enqueue un brief d'éval au gatekeeper
   #                               permanent + `{:escalate, corr, eval_ctx}` (reprise async
-  #                               sur `work_item_completed`). Enqueue raté → fail-loud (l'issue
+  #                               sur `work_item.completed`). Enqueue raté → fail-loud (l'issue
   #                               reste verrouillée, pas d'avance à l'aveugle).
   defp gate_decide(workflow_map, step, payload, n, state) do
     spec =
@@ -843,7 +844,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
           case dispatch_gatekeeper(workflow_map, step, result, payload, n, payload["role"], state) do
             {:ok, corr} ->
               {:escalate, corr,
-               %{n: n, role: payload["role"], payload: payload, workflow_map: workflow_map, step: step}}
+               %{
+                 n: n,
+                 role: payload["role"],
+                 payload: payload,
+                 workflow_map: workflow_map,
+                 step: step
+               }}
 
             {:error, reason} ->
               {:error, {:gatekeeper_dispatch, reason}}
@@ -873,7 +880,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # Convocation forge-driven du gatekeeper sur escalade de gate.
   # Enqueue un brief d'éval au gatekeeper PERMANENT (work-session, adressé par pod_id —
   # l'overseer n'est PAS spawné/possédé ici), le kick (best-effort), et retourne le
-  # `correlation_id` (= task.id) pour la corrélation `task_queue.work_item_completed`. Pas de
+  # `correlation_id` (= task.id) pour la corrélation `task_queue.work_item.completed`. Pas de
   # gatekeeper booté / enqueue raté → `{:error, _}` (l'appelant fail-loud ; jamais un pass
   # silencieux).
   defp dispatch_gatekeeper(workflow_map, step, outputs, payload, n, role, state) do
@@ -892,7 +899,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
         # VERDICT AUTO-DESCRIPTIF : le metadata de la tâche d'éval porte le contexte de REPRISE
         # (`payload`/`n`/`role` en plus du step/workflow_map_name déjà présents). Cette tâche survit dans le broker
-        # (TaskQueue = autre process) à un crash du StepRunConsumer seul → le verdict (`work_item_completed`) ramène
+        # (TaskQueue = autre process) à un crash du StepRunConsumer seul → le verdict (`work_item.completed`) ramène
         # ce metadata → le StepRunConsumer redémarré (gate_evals RAM vidé) reconstruit l'eval_ctx
         # (`workflow_map = Loader.load!(workflow_map_name)`) au lieu d'un `{:noreply}` silencieux (issue wedgée à vie). Aucune
         # NOUVELLE source : `payload` porte déjà `workspace`/`base_sha`/`gate_base_sha` — on l'embarque tel quel.
@@ -994,8 +1001,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   @doc false
   # Reprise après le verdict du gatekeeper. Exposé pour test (le GenServer
-  # appelle via handle_info(:work_item_completed)). `raw_payload` = payload brut du
-  # `work_item_completed` (déplié ici par `gate_result/1` : enveloppe TaskQueue + enveloppe
+  # appelle via handle_info(:work_item.completed)). `raw_payload` = payload brut du
+  # `work_item.completed` (déplié ici par `gate_result/1` : enveloppe TaskQueue + enveloppe
   # worker). Vocab canon `gate-decision-v1.json` :
   #   continue → avance (push livrable métier + reassign) ;
   #   abandon  → close (trace verdict, PAS de push : travail rejeté) ;
@@ -1014,7 +1021,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   # APPLICATION d'un verdict de juge (gate-decision-v1). UNE fonction, partagée par TOUS les juges
-  # quelle que soit leur position : le gatekeeper (verdict async via `work_item_completed` → resume_gate) ET le
+  # quelle que soit leur position : le gatekeeper (verdict async via `work_item.completed` → resume_gate) ET le
   # consultant brief-review (verdict via `pod.completed` → gate_decide → run_step_run). continue → avance la
   # workflow_map ; abandon → close ; reste → await_arch. La SEULE diff (PR vs pré-PR) vit dans `complete_judge`
   # (trace = review native si PR, sinon commentaire issue), dérivée de l'état forge + `judge_target` du
@@ -1127,7 +1134,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     if is_binary(reason) and reason != "", do: base <> "\nMotif : #{reason}", else: base
   end
 
-  # Extrait la décision du payload `work_item_completed`. DEUX enveloppes : (1) TaskQueue pose
+  # Extrait la décision du payload `work_item.completed`. DEUX enveloppes : (1) TaskQueue pose
   # `:result` (clé atom) ; (2) enveloppe worker `%{"status","result"}` (clés string).
   defp gate_result(payload) when is_map(payload) do
     (Map.get(payload, :result) || Map.get(payload, "result"))

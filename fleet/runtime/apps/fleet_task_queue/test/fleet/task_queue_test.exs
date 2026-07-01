@@ -39,7 +39,7 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :work_item_enqueued,
+      type: :"work_item.enqueued",
       pod_id: "pod-A",
       correlation_id: ^tid,
       # F144 : payload = %{work_item_id} (cohérent + JSON-safe), plus le %WorkItem{} brut.
@@ -51,7 +51,7 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :work_item_assigned,
+      type: :"work_item.assigned",
       pod_id: "pod-A",
       correlation_id: ^tid
     }
@@ -103,16 +103,16 @@ defmodule Fleet.TaskQueueTest do
 
   test "2. get_for_pod idempotent (résiste au /clear one_shot, pas de double dispatch)", %{q: q} do
     {:ok, t1} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
-    assert_receive %Fleet.Event{type: :work_item_enqueued}
+    assert_receive %Fleet.Event{type: :"work_item.enqueued"}
 
     {:ok, a1} = TaskQueue.get_for_pod(q, "pod-A")
-    assert_receive %Fleet.Event{type: :work_item_assigned}
+    assert_receive %Fleet.Event{type: :"work_item.assigned"}
 
-    # 2e appel → MÊME work item, PAS de nouveau broadcast :work_item_assigned
+    # 2e appel → MÊME work item, PAS de nouveau broadcast :"work_item.assigned"
     {:ok, a2} = TaskQueue.get_for_pod(q, "pod-A")
     assert a1.id == t1.id
     assert a2.id == a1.id
-    refute_receive %Fleet.Event{type: :work_item_assigned}, 100
+    refute_receive %Fleet.Event{type: :"work_item.assigned"}, 100
   end
 
   test "3. submit_result happy path", %{q: q} do
@@ -127,17 +127,17 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :work_item_completed,
+      type: :"work_item.completed",
       pod_id: "pod-A",
       correlation_id: ^tid,
       payload: %{result: %{"verdict" => "proven"}}
     }
   end
 
-  # MA-04 — LE finding : `work_item_completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir
+  # MA-04 — LE finding : `work_item.completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir
   # le step_run). Si sa diffusion échoue, `submit_result` NE rend PLUS `{:ok}` muet (le pod croirait son livrable
   # accepté alors que le step_run ne finit jamais → verrou forge à vie) — il propage `{:error,{:broadcast_failed,_}}`.
-  test "3b. MA-04 : broadcast work_item_completed qui RETOURNE {:error} → submit_result {:error,{:broadcast_failed,_}}, pas {:ok}",
+  test "3b. MA-04 : broadcast work_item.completed qui RETOURNE {:error} → submit_result {:error,{:broadcast_failed,_}}, pas {:ok}",
        %{tmp_dir: tmp_dir} do
     state_path = Path.join(tmp_dir, "state_failbus.json")
 
@@ -159,7 +159,7 @@ defmodule Fleet.TaskQueueTest do
 
   # MA-04 — variante : le broadcast LÈVE (UnregisteredError / PubSub down). Le `required_broadcast` rescue
   # et propage `{:error,{:broadcast_failed,_}}`, jamais `:ok` muet (le rescue ne ré-avale plus le lifecycle).
-  test "3c. MA-04 : broadcast work_item_completed qui LÈVE → {:error,{:broadcast_failed,_}}, pas {:ok}",
+  test "3c. MA-04 : broadcast work_item.completed qui LÈVE → {:error,{:broadcast_failed,_}}, pas {:ok}",
        %{tmp_dir: tmp_dir} do
     state_path = Path.join(tmp_dir, "state_raisebus.json")
 
@@ -182,12 +182,12 @@ defmodule Fleet.TaskQueueTest do
     {:ok, _} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
     {:ok, _} = TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
-    assert_receive %Fleet.Event{type: :work_item_completed}
+    assert_receive %Fleet.Event{type: :"work_item.completed"}
 
     assert {:error, :double_submit_ignored} =
              TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
 
-    refute_receive %Fleet.Event{type: :work_item_completed}, 100
+    refute_receive %Fleet.Event{type: :"work_item.completed"}, 100
   end
 
   test "5. recovery cross-restart", %{topic: topic, tmp_dir: tmp_dir} do
@@ -209,7 +209,7 @@ defmodule Fleet.TaskQueueTest do
              q2 |> TaskQueue.list_pending() |> Enum.sort_by(& &1.pod_id)
   end
 
-  test "6. recovery schema mismatch → :state_corrupt + state vide (non-bloquant)", %{
+  test "6. recovery schema mismatch → state.corrupt + state vide (non-bloquant)", %{
     topic: topic,
     tmp_dir: tmp_dir
   } do
@@ -220,7 +220,7 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :state_corrupt,
+      type: :"state.corrupt",
       payload: %{expected: 1, found: 99}
     }
 
@@ -253,7 +253,7 @@ defmodule Fleet.TaskQueueTest do
            } = back
   end
 
-  test "6c. recovery d'une tâche au state INCONNU → :state_corrupt (fix deep-02 : fail-loud, pas de raise ni drop silencieux)",
+  test "6c. recovery d'une tâche au state INCONNU → state.corrupt (fix deep-02 : fail-loud, pas de raise ni drop silencieux)",
        %{topic: topic, tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "badstate.json")
 
@@ -276,8 +276,8 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :state_corrupt,
-      payload: %{found: {:task, "t1", :invalid}}
+      type: :"state.corrupt",
+      payload: %{found: {:work_item, "t1", :invalid}}
     }
 
     assert [] = TaskQueue.list_pending(q)
@@ -314,7 +314,7 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
                      source: :task_queue,
-                     type: :work_item_failed,
+                     type: :"work_item.failed",
                      correlation_id: "t1",
                      payload: %{reason: :deadline_expired}
                    },
@@ -327,11 +327,11 @@ defmodule Fleet.TaskQueueTest do
     deadline = DateTime.add(DateTime.utc_now(), 200, :millisecond)
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x", deadline: deadline})
     tid = t.id
-    assert_receive %Fleet.Event{type: :work_item_enqueued}
+    assert_receive %Fleet.Event{type: :"work_item.enqueued"}
 
     assert_receive %Fleet.Event{
                      source: :task_queue,
-                     type: :work_item_failed,
+                     type: :"work_item.failed",
                      correlation_id: ^tid,
                      payload: %{reason: :deadline_expired}
                    },
@@ -357,7 +357,7 @@ defmodule Fleet.TaskQueueTest do
 
     assert_receive %Fleet.Event{
       source: :task_queue,
-      type: :work_item_cleared,
+      type: :"work_item.cleared",
       pod_id: "pod-A",
       correlation_id: ^tid
     }
@@ -381,8 +381,8 @@ defmodule Fleet.TaskQueueTest do
        %{q: q} do
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
-    assert_receive %Fleet.Event{type: :work_item_enqueued}
-    assert_receive %Fleet.Event{type: :work_item_assigned}
+    assert_receive %Fleet.Event{type: :"work_item.enqueued"}
+    assert_receive %Fleet.Event{type: :"work_item.assigned"}
 
     # Le pod renvoie un work_item_id forgé/périmé ≠ son work item actif → rejet.
     assert {:error, :work_item_id_mismatch} =
@@ -391,15 +391,15 @@ defmodule Fleet.TaskQueueTest do
                "verdict" => "x"
              })
 
-    # Aucune mutation : le work item reste actif, pas de :work_item_completed.
+    # Aucune mutation : le work item reste actif, pas de :"work_item.completed".
     assert {:ok, :assigned} = TaskQueue.pod_status(q, "pod-A")
-    refute_receive %Fleet.Event{type: :work_item_completed}, 100
+    refute_receive %Fleet.Event{type: :"work_item.completed"}, 100
 
     # Avec le bon work_item_id → OK.
     assert {:ok, _} =
              TaskQueue.submit_result(q, "pod-A", %{"work_item_id" => t.id, "verdict" => "ok"})
 
-    assert_receive %Fleet.Event{type: :work_item_completed}
+    assert_receive %Fleet.Event{type: :"work_item.completed"}
   end
 
   test "12. F148 — rétention borne les tâches terminales (actives intactes + double-submit du plus récent)",

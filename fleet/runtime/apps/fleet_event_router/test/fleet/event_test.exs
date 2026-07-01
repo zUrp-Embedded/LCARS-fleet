@@ -49,7 +49,7 @@ defmodule Fleet.EventTest do
 
     test "pod_id / correlation_id / payload portés" do
       ev =
-        Event.new(:task_queue, :work_item_completed,
+        Event.new(:task_queue, :"work_item.completed",
           pod_id: "p1",
           correlation_id: "c1",
           payload: %{a: 1}

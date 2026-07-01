@@ -15,7 +15,7 @@ Flux : `fleet_spawner`/`fleet_pipeline` **enqueue** (source) → `fleet_task_que
 ## Sous-modules
 
 - `Fleet.TaskQueue` — façade API publique. Chaque fonction a une variante test-seam (`server` explicite, ex. `enqueue/3`) pour l'isolation via serveur anonyme (`name: nil`).
-- `Fleet.TaskQueue.Server` — le broker GenServer (un seul écrivain ; persistance `state.json` atomique v:1 ; recovery cross-restart fail-loud `:state_corrupt` ; deadline par tâche ; **rétention bornée** des tâches terminales, knob `:retention_terminal_max` défaut 500, F148).
+- `Fleet.TaskQueue.Server` — le broker GenServer (un seul écrivain ; persistance `state.json` atomique v:1 ; recovery cross-restart fail-loud `:"state.corrupt"` ; deadline par tâche ; **rétention bornée** des tâches terminales, knob `:retention_terminal_max` défaut 500, F148).
 - `Fleet.TaskQueue.WorkItem` — struct tâche + `to_map/1` / `from_map/1` (sérialisation state.json).
 - `Fleet.TaskQueue.Application` — superviseur (démarre le `Server` nommé).
 
@@ -23,7 +23,7 @@ Flux : `fleet_spawner`/`fleet_pipeline` **enqueue** (source) → `fleet_task_que
 
 - `enqueue/2` `(pod_id, attrs)` — pousse un work item (`%{brief, role, metadata}`). Source.
 - `get_for_pod/1` `(pod_id)` — rend le work item actif du pod (**idempotent** : résiste à `/clear` / re-`get`).
-- `submit_result/2` `(pod_id, result)` — livre (**idempotent** : double soumission ignorée). Le `result` porte le `work_item_id` du work item clôturé (corrélateur) : ≠ work item actif du pod → rejet `:work_item_id_mismatch`, aucune mutation (§A.70). C'est le 2e verrou anti-impersonation après la capability `fleet_mcp` : un pod ne peut clôturer qu'EXACTEMENT son work item actif, jamais « la dernière active » d'un autre (côté `fleet_mcp`, `submit_result` rend ce `work_item_id` **OBLIGATOIRE**). Le `work_item_id` est un corrélateur de transport → **retiré du `result` stocké/broadcasté** (pas de pollution du livrable métier). **MA-04** : le broadcast `work_item_completed` est lifecycle load-bearing → un échec de diffusion rend `{:error, {:broadcast_failed, _}}` (PAS un `:ok` muet ; le step_run ne finirait pas).
+- `submit_result/2` `(pod_id, result)` — livre (**idempotent** : double soumission ignorée). Le `result` porte le `work_item_id` du work item clôturé (corrélateur) : ≠ work item actif du pod → rejet `:work_item_id_mismatch`, aucune mutation (§A.70). C'est le 2e verrou anti-impersonation après la capability `fleet_mcp` : un pod ne peut clôturer qu'EXACTEMENT son work item actif, jamais « la dernière active » d'un autre (côté `fleet_mcp`, `submit_result` rend ce `work_item_id` **OBLIGATOIRE**). Le `work_item_id` est un corrélateur de transport → **retiré du `result` stocké/broadcasté** (pas de pollution du livrable métier). **MA-04** : le broadcast `work_item.completed` est lifecycle load-bearing → un échec de diffusion rend `{:error, {:broadcast_failed, _}}` (PAS un `:ok` muet ; le step_run ne finirait pas).
 - `list_pending/0` — work items en attente.
 - `clear_for_pod/1` `(pod_id)` — purge le work item d'un pod (et oublie son last-poll : le clear décommissionne le pod, donc son entrée dans la map `polls` interne ne doit pas survivre).
 - `pod_status/1` `(pod_id)` — état courant côté broker.

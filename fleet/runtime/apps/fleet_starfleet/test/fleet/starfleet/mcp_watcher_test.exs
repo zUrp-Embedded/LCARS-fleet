@@ -20,7 +20,7 @@ defmodule Fleet.Starfleet.MCPWatcherTest do
   end
 
   describe "check_now (sync trigger du code path timer)" do
-    test "mismatch current vs upstream → broadcast %Fleet.Event{:sdk_upstream_alert}" do
+    test "mismatch current vs upstream → broadcast %Fleet.Event{sdk.upstream_alert}" do
       fetcher = fn "ex_mcp" -> {:ok, "9.9.9-fake-upstream"} end
 
       {:ok, pid} =
@@ -34,7 +34,7 @@ defmodule Fleet.Starfleet.MCPWatcherTest do
 
       assert_receive %Fleet.Event{
                        source: :starfleet,
-                       type: :sdk_upstream_alert,
+                       type: :"sdk.upstream_alert",
                        payload: %{
                          "package" => "ex_mcp",
                          "upstream" => "9.9.9-fake-upstream",
@@ -64,7 +64,7 @@ defmodule Fleet.Starfleet.MCPWatcherTest do
 
       assert :ok = GenServer.call(pid, :check_now)
 
-      refute_receive %Fleet.Event{type: :sdk_upstream_alert}, 200
+      refute_receive %Fleet.Event{type: :"sdk.upstream_alert"}, 200
       GenServer.stop(pid)
     end
 
@@ -80,7 +80,7 @@ defmodule Fleet.Starfleet.MCPWatcherTest do
 
       assert :ok = GenServer.call(pid, :check_now)
 
-      refute_receive %Fleet.Event{type: :sdk_upstream_alert}, 200
+      refute_receive %Fleet.Event{type: :"sdk.upstream_alert"}, 200
       GenServer.stop(pid)
     end
 
@@ -98,7 +98,7 @@ defmodule Fleet.Starfleet.MCPWatcherTest do
       assert :ok = GenServer.call(pid, :check_now)
 
       assert_receive %Fleet.Event{
-                       type: :sdk_upstream_alert,
+                       type: :"sdk.upstream_alert",
                        payload: %{"package" => "custom_pkg", "upstream" => "1.2.3-fake"}
                      },
                      500

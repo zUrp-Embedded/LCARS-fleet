@@ -37,8 +37,8 @@ defmodule Fleet.Starfleet.Application do
     :"fleet.boot_partial",
     :"fleet.boot_failed",
     # BL-021 chantier 8 — Extensions V2 MCPWatcher + MCPMonitor
-    :sdk_upstream_alert,
-    :mcp_server_crashed
+    :"sdk.upstream_alert",
+    :"mcp.server_crashed"
   ]
 
   @impl Application

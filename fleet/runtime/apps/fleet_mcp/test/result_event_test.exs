@@ -1,7 +1,7 @@
 defmodule Fleet.MCP.ResultEventTest do
   @moduledoc """
   Completion event-driven — sur `submit_result`, le **broker** `fleet_task_queue`
-  broadcast `%Fleet.Event{source: :task_queue, type: :work_item_completed}` sur `fleet.events`.
+  broadcast `%Fleet.Event{source: :task_queue, type: :"work_item.completed"}` sur `fleet.events`.
 
   `pod.ex` (Ring 1) y souscrit pour déclencher sa complétion SANS lire fleet_mcp (Ring 4)
   en direct. Ici on prouve l'émission via le tool `submit_result` (PUR, pas de claude).
@@ -15,7 +15,7 @@ defmodule Fleet.MCP.ResultEventTest do
 
   defp pod_state(pod), do: %{pod_id: pod}
 
-  test "submit_result → broker broadcast %Fleet.Event{work_item_completed} (pod_id + correlation_id)" do
+  test "submit_result → broker broadcast %Fleet.Event{work_item.completed} (pod_id + correlation_id)" do
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})
     tid = task.id
@@ -34,7 +34,7 @@ defmodule Fleet.MCP.ResultEventTest do
     # du result stocké par le broker → pas de pollution du livrable).
     assert_receive %Fleet.Event{
                      source: :task_queue,
-                     type: :work_item_completed,
+                     type: :"work_item.completed",
                      pod_id: ^pod,
                      correlation_id: ^tid,
                      payload: %{result: ^payload}
@@ -49,7 +49,7 @@ defmodule Fleet.MCP.ResultEventTest do
     assert {:error, :pod_id_required, %{}} =
              PodTools.handle_tool_call("submit_result", %{"payload" => payload}, %{})
 
-    refute_receive %Fleet.Event{source: :task_queue, type: :work_item_completed}, 200
+    refute_receive %Fleet.Event{source: :task_queue, type: :"work_item.completed"}, 200
   end
 
   test "submit_result avec work_item_id NICHÉ dans le payload (pas top-level) → accepté + clôt le brief" do
@@ -75,7 +75,7 @@ defmodule Fleet.MCP.ResultEventTest do
     # Le corrélateur de transport est retiré du livrable STOCKÉ, même rangé dans le payload (pas de pollution).
     assert_receive %Fleet.Event{
                      source: :task_queue,
-                     type: :work_item_completed,
+                     type: :"work_item.completed",
                      pod_id: ^pod,
                      correlation_id: ^tid,
                      payload: %{result: result}
@@ -99,6 +99,6 @@ defmodule Fleet.MCP.ResultEventTest do
                pod_state(pod)
              )
 
-    refute_receive %Fleet.Event{source: :task_queue, type: :work_item_completed}, 200
+    refute_receive %Fleet.Event{source: :task_queue, type: :"work_item.completed"}, 200
   end
 end

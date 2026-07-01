@@ -12,8 +12,8 @@ defmodule Fleet.TaskQueue.Server do
   futur état broker-only-durable — il n'en existe AUCUN à ce jour.
 
   Broadcast `%Fleet.Event{source: :task_queue, ...}` sur `Phoenix.PubSub`
-  topic `fleet.events`, `correlation_id = task.id`. Recovery cross-restart via
-  `state.json` (fail-loud `:state_corrupt` sur schema mismatch au READ, fallback
+  topic `fleet.events`, `correlation_id = work_item.id`. Recovery cross-restart via
+  `state.json` (fail-loud `:state.corrupt` sur schema mismatch au READ, fallback
   non-bloquant). Côté WRITE : `persist/1` est best-effort — un échec d'écriture est
   loggé **error** (durabilité du point de recovery rompue), **non-fatal** (on
   ne crashe pas le broker sur un blip disque) ; la réconciliation passe par le rail
@@ -30,13 +30,13 @@ defmodule Fleet.TaskQueue.Server do
   de tâches TERMINALES conservées, défaut 500 ; borne `work_items` en mémoire ET la taille
   de `state.json` réécrit à chaque mutation. Les tâches ACTIVES ne comptent pas),
   `:bus` (seam, défaut `Fleet.EventRouter.Bus` ; module `broadcast/2` — injecté en test pour
-  exercer le chemin lifecycle non-avalé `work_item_completed`).
+  exercer le chemin lifecycle non-avalé `work_item.completed`).
 
   ## Broadcast — load-bearing vs best-effort
-  `work_item_completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir le step_run) →
+  `work_item.completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir le step_run) →
   `required_broadcast` : un échec n'est PAS avalé, il propage `{:error, {:broadcast_failed, _}}` au caller
   de `submit_result` (plus de `:ok` muet qui laisse le verrou forge à vie). Les autres events
-  (enqueued/assigned/cleared/failed-deadline/state_corrupt) = `best_effort_broadcast` (observabilité, rescue).
+  (enqueued/assigned/cleared/failed-deadline/state.corrupt) = `best_effort_broadcast` (observabilité, rescue).
   """
 
   use GenServer
@@ -80,7 +80,7 @@ defmodule Fleet.TaskQueue.Server do
       persist: persist?,
       topic: Keyword.get(opts, :topic, @default_topic),
       # Seam du bus (défaut = le vrai `Fleet.EventRouter.Bus`). Module avec `broadcast/2`. Permet
-      # de tester le chemin lifecycle non-avalé (un bus stub qui rend `{:error,_}` / lève sur work_item_completed)
+      # de tester le chemin lifecycle non-avalé (un bus stub qui rend `{:error,_}` / lève sur work_item.completed)
       # sans toucher le registry global `:persistent_term`.
       bus: Keyword.get(opts, :bus, Fleet.EventRouter.Bus),
       retention_terminal_max:
@@ -107,7 +107,7 @@ defmodule Fleet.TaskQueue.Server do
   @impl GenServer
   def handle_continue(:reschedule_deadlines, state) do
     # Recovery : les deadlines ne sont armées qu'à l'enqueue. Après restart, on ré-arme
-    # les tâches ACTIVES ; une deadline dépassée pendant le downtime → check immédiat (→ :work_item_failed via
+    # les tâches ACTIVES ; une deadline dépassée pendant le downtime → check immédiat (→ :"work_item.failed" via
     # handle_info), pas active-pour-toujours.
     for {_id, %WorkItem{state: s} = t} <- state.work_items, s in @active_states do
       maybe_schedule_deadline(t)
@@ -121,7 +121,7 @@ defmodule Fleet.TaskQueue.Server do
     # Fallback non-bloquant : state vide + event de boot anomaly post-init.
     best_effort_broadcast(
       state,
-      Fleet.Event.new(:task_queue, :state_corrupt, payload: %{expected: 1, found: found})
+      Fleet.Event.new(:task_queue, :"state.corrupt", payload: %{expected: 1, found: found})
     )
 
     {:noreply, state}
@@ -133,7 +133,7 @@ defmodule Fleet.TaskQueue.Server do
 
   @impl GenServer
   def handle_call({:enqueue, pod_id, attrs}, _from, state) do
-    task = %WorkItem{
+    work_item = %WorkItem{
       id: UUID.uuid4(),
       pod_id: pod_id,
       issue_id: attrs[:issue_id] || attrs["issue_id"],
@@ -157,15 +157,19 @@ defmodule Fleet.TaskQueue.Server do
     if superseded > 0,
       do: Logger.debug("TaskQueue: enqueue pod=#{pod_id} supersède #{superseded} active(s) stale")
 
-    new_state = state |> put_task(task) |> persist()
+    new_state = state |> put_work_item(work_item) |> persist()
 
-    # payload = `%{work_item_id}` (cohérent avec tous les autres task_* events), PAS le `%WorkItem{}` brut —
-    # WorkItem n'a pas de @derive Jason.Encoder, donc un `%{task: task}` ferait crasher `Jason.encode!`
+    # payload = `%{work_item_id}` (cohérent avec tous les autres work_item.* events), PAS le `%WorkItem{}` brut —
+    # WorkItem n'a pas de @derive Jason.Encoder, donc un `%{work_item: work_item}` ferait crasher `Jason.encode!`
     # chez tout consommateur d'events JSON (Fleet.API.WS à chaque enqueue). Aucun consommateur n'a
     # besoin du struct (deck = count, audit = pod_id/correlation_id).
-    best_effort_broadcast(new_state, event(:work_item_enqueued, task, %{work_item_id: task.id}))
-    maybe_schedule_deadline(task)
-    {:reply, {:ok, task}, new_state}
+    best_effort_broadcast(
+      new_state,
+      event(:"work_item.enqueued", work_item, %{work_item_id: work_item.id})
+    )
+
+    maybe_schedule_deadline(work_item)
+    {:reply, {:ok, work_item}, new_state}
   end
 
   def handle_call({:get_for_pod, pod_id}, _from, state) do
@@ -177,20 +181,20 @@ defmodule Fleet.TaskQueue.Server do
       nil ->
         {:reply, {:error, :no_task}, state}
 
-      %WorkItem{state: :pending} = task ->
-        assigned = %{task | state: :assigned, assigned_at: now()}
-        new_state = state |> put_task(assigned) |> persist()
+      %WorkItem{state: :pending} = work_item ->
+        assigned = %{work_item | state: :assigned, assigned_at: now()}
+        new_state = state |> put_work_item(assigned) |> persist()
 
         best_effort_broadcast(
           new_state,
-          event(:work_item_assigned, assigned, %{work_item_id: assigned.id})
+          event(:"work_item.assigned", assigned, %{work_item_id: assigned.id})
         )
 
         {:reply, {:ok, assigned}, new_state}
 
-      %WorkItem{} = task ->
+      %WorkItem{} = work_item ->
         # déjà :assigned/:in_progress → idempotent (pas de re-broadcast, pas de double dispatch)
-        {:reply, {:ok, task}, state}
+        {:reply, {:ok, work_item}, state}
     end
   end
 
@@ -201,9 +205,9 @@ defmodule Fleet.TaskQueue.Server do
           do: {:reply, {:error, :double_submit_ignored}, state},
           else: {:reply, {:error, :no_active_task}, state}
 
-      %WorkItem{} = task ->
+      %WorkItem{} = work_item ->
         case result["work_item_id"] || result[:work_item_id] do
-          tid when tid != nil and tid != task.id ->
+          tid when tid != nil and tid != work_item.id ->
             # correlation_id du livrable ≠ work item actif du pod → rejet, aucune mutation. C'est le 2e verrou
             # anti-impersonation (le 1er = la capability côté fleet_mcp) : même un pod prouvé ne peut clôturer
             # qu'EXACTEMENT son work item actif, jamais « la dernière active » d'un autre. fleet_mcp rend le
@@ -212,13 +216,20 @@ defmodule Fleet.TaskQueue.Server do
 
           _ok ->
             # `work_item_id` retiré du livrable STOCKÉ : c'est un corrélateur de transport (preuve « je clôs CE
-            # work item »), pas une donnée métier du résultat. Le work item est déjà identifié par `task.id` ; le
+            # work item »), pas une donnée métier du résultat. Le work item est déjà identifié par `work_item.id` ; le
             # garder dans `result` ne ferait que dupliquer/polluer le livrable broadcasté.
             clean_result = result |> Map.delete("work_item_id") |> Map.delete(:work_item_id)
-            completed = %{task | state: :completed, completed_at: now(), result: clean_result}
-            new_state = state |> put_task(completed) |> persist()
 
-            # `work_item_completed` est LIFECYCLE load-bearing : le StepRunConsumer en DÉPEND pour finir le
+            completed = %{
+              work_item
+              | state: :completed,
+                completed_at: now(),
+                result: clean_result
+            }
+
+            new_state = state |> put_work_item(completed) |> persist()
+
+            # `work_item.completed` est LIFECYCLE load-bearing : le StepRunConsumer en DÉPEND pour finir le
             # step_run (lever le verrou forge). Le broadcast passe par `required_broadcast` : son échec n'est PLUS
             # avalé en `:ok`. Si la diffusion échoue, on NE rend PAS `{:ok, completed}` (qui ferait croire au
             # pod « tâche close » alors que le step_run ne finira jamais → verrou conservé à vie) : on propage
@@ -226,12 +237,12 @@ defmodule Fleet.TaskQueue.Server do
             # pas perdu ; le rail forge-driven re-dérive au besoin), mais le pod voit un échec honnête.
             # role/issue_id additifs : le DeliveryPublisher stampe l'identité de l'agent d'origine
             # sur le commit forge. Les consumers existants ignorent les clés extra.
-            # `metadata` additif : le verdict work_item_completed porte le metadata de la TÂCHE (qui
+            # `metadata` additif : le verdict work_item.completed porte le metadata de la TÂCHE (qui
             # survit dans le broker au crash du StepRunConsumer seul). Pour une éval gatekeeper il porte le
             # contexte de reprise (`gate_eval`/`payload`/`pipeline`/…) → le StepRunConsumer redémarré (gate_evals
             # RAM vide) RECONSTRUIT l'eval_ctx du metadata au lieu d'un `{:noreply}` silencieux (wedge à vie).
             ev =
-              event(:work_item_completed, completed, %{
+              event(:"work_item.completed", completed, %{
                 work_item_id: completed.id,
                 role: completed.role,
                 issue_id: completed.issue_id,
@@ -253,7 +264,7 @@ defmodule Fleet.TaskQueue.Server do
   # Purge TOUTES les actives du pod (pas seulement la + récente via `find_active`). Avec l'invariant
   # « 1 active/pod » tenu à l'enqueue (`supersede_active`), il n'y en a normalement qu'une ; mais un clear doit
   # rester TOTAL (pas de stale `:assigned` résiduelle qui échapperait au clear et fuirait — symétrique de
-  # l'enqueue). Un broadcast `:work_item_cleared` par tâche clearée ; aucune active → no-op idempotent.
+  # l'enqueue). Un broadcast `:"work_item.cleared"` par tâche clearée ; aucune active → no-op idempotent.
   def handle_call({:clear_for_pod, pod_id}, _from, state) do
     # Le clear décommissionne le pod → on retire AUSSI son last-poll de `state.polls` (symétrique de
     # la purge des `work_items` ci-dessous). Sans ça, `polls` (un timestamp par pod, JAMAIS persisté) accumule
@@ -273,13 +284,13 @@ defmodule Fleet.TaskQueue.Server do
 
       work_items ->
         cleared = Enum.map(work_items, &%{&1 | state: :cleared})
-        new_state = Enum.reduce(cleared, state, &put_task(&2, &1)) |> persist()
+        new_state = Enum.reduce(cleared, state, &put_work_item(&2, &1)) |> persist()
 
         for t <- cleared,
             do:
               best_effort_broadcast(
                 new_state,
-                event(:work_item_cleared, t, %{work_item_id: t.id})
+                event(:"work_item.cleared", t, %{work_item_id: t.id})
               )
 
         {:reply, :ok, new_state}
@@ -330,15 +341,15 @@ defmodule Fleet.TaskQueue.Server do
   @impl GenServer
   def handle_info({:check_deadline, work_item_id}, state) do
     case Map.get(state.work_items, work_item_id) do
-      %WorkItem{state: s} = task when s in @active_states ->
-        failed = %{task | state: :failed}
-        new_state = state |> put_task(failed) |> persist()
+      %WorkItem{state: s} = work_item when s in @active_states ->
+        failed = %{work_item | state: :failed}
+        new_state = state |> put_work_item(failed) |> persist()
 
-        # `:work_item_failed` (deadline) = watchdog de l'IRRÉDUCTIBLE, pas une complétion
+        # `:"work_item.failed"` (deadline) = watchdog de l'IRRÉDUCTIBLE, pas une complétion
         # caller-facing : best-effort (un handle_info n'a personne à qui propager). La garde reste, honnête.
         best_effort_broadcast(
           new_state,
-          event(:work_item_failed, failed, %{work_item_id: failed.id, reason: :deadline_expired})
+          event(:"work_item.failed", failed, %{work_item_id: failed.id, reason: :deadline_expired})
         )
 
         {:noreply, new_state}
@@ -399,8 +410,8 @@ defmodule Fleet.TaskQueue.Server do
   defp record_poll(state, pod_id) when is_binary(pod_id),
     do: %{state | polls: Map.put(state.polls, pod_id, now())}
 
-  defp put_task(state, %WorkItem{} = task) do
-    work_items = Map.put(state.work_items, task.id, task)
+  defp put_work_item(state, %WorkItem{} = work_item) do
+    work_items = Map.put(state.work_items, work_item.id, work_item)
     %{state | work_items: prune_terminal(work_items, state.retention_terminal_max)}
   end
 
@@ -446,22 +457,22 @@ defmodule Fleet.TaskQueue.Server do
   # Helpers — events
   # ============================================================
 
-  defp event(type, %WorkItem{} = task, payload) do
+  defp event(type, %WorkItem{} = work_item, payload) do
     Fleet.Event.new(:task_queue, type,
-      pod_id: task.pod_id,
-      correlation_id: task.id,
+      pod_id: work_item.pod_id,
+      correlation_id: work_item.id,
       payload: payload
     )
   end
 
   # Classification load-bearing vs best-effort. Un `broadcast/2` unique qui avalerait TOUTE exception en
-  # `:ok` — y compris pour `work_item_completed`, dont le StepRunConsumer DÉPEND pour finir le step_run — serait piégeux :
-  # un `work_item_completed` avalé = submit OK rendu au pod, MAIS fin-de-step-run jamais déclenchée → verrou forge
+  # `:ok` — y compris pour `work_item.completed`, dont le StepRunConsumer DÉPEND pour finir le step_run — serait piégeux :
+  # un `work_item.completed` avalé = submit OK rendu au pod, MAIS fin-de-step-run jamais déclenchée → verrou forge
   # conservé à vie (wedge silencieux). On SÉPARE donc les deux régimes :
   #
-  #   - `best_effort_broadcast/2` : OBSERVABILITÉ pure (work_item_enqueued/assigned/cleared/failed-deadline,
-  #     state_corrupt). Un échec est non-bloquant (rescue → log) — personne ne FINIT un step_run dessus.
-  #   - `required_broadcast/2` : LIFECYCLE load-bearing (work_item_completed). L'échec n'est PAS avalé : il
+  #   - `best_effort_broadcast/2` : OBSERVABILITÉ pure (work_item.enqueued/assigned/cleared/failed-deadline,
+  #     state.corrupt). Un échec est non-bloquant (rescue → log) — personne ne FINIT un step_run dessus.
+  #   - `required_broadcast/2` : LIFECYCLE load-bearing (work_item.completed). L'échec n'est PAS avalé : il
   #     remonte `{:error, {:broadcast_failed, _}}` → le caller (`submit_result`) le propage au pod (qui ne
   #     reçoit PAS un faux "tâche close" et peut re-soumettre) au lieu d'un `:ok` qui ment.
   #
@@ -487,7 +498,7 @@ defmodule Fleet.TaskQueue.Server do
 
   # Broadcast LIFECYCLE load-bearing : l'échec n'est PAS avalé. Retourne `:ok` ou
   # `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé en ERROR (pas
-  # warning) : un `work_item_completed` non diffusé = wedge potentiel (step_run jamais fini), c'est un incident.
+  # warning) : un `work_item.completed` non diffusé = wedge potentiel (step_run jamais fini), c'est un incident.
   defp required_broadcast(state, %Fleet.Event{} = ev) do
     case state.bus.broadcast(state.topic, ev) do
       :ok ->
@@ -595,11 +606,11 @@ defmodule Fleet.TaskQueue.Server do
     Enum.reduce_while(work_items_map, {:ok, %{}}, fn {id, tm}, {:ok, acc} ->
       case WorkItem.from_map(tm) do
         {:ok, t} -> {:cont, {:ok, Map.put(acc, id, t)}}
-        {:error, reason} -> {:halt, {:corrupt, {:task, id, reason}}}
+        {:error, reason} -> {:halt, {:corrupt, {:work_item, id, reason}}}
       end
     end)
   end
 
-  # UUID v4 (`correlation_id = task.id`) via la dép `:uuid` (déjà shippée dans l'umbrella) —
+  # UUID v4 (`correlation_id = work_item.id`) via la dép `:uuid` (déjà shippée dans l'umbrella) —
   # source unique, pas de génération hand-rolled `:crypto` en parallèle.
 end

@@ -64,9 +64,9 @@ defmodule Fleet.Observation.ReadModel do
     {"gitea.", :coordination},
     {"fleet.boot", :diagnostics},
     {"oauth.", :diagnostics},
-    {"mcp_server", :diagnostics},
-    {"sdk_upstream", :diagnostics},
-    {"state_corrupt", :diagnostics},
+    {"mcp.server_crashed", :diagnostics},
+    {"sdk.upstream_alert", :diagnostics},
+    {"state.corrupt", :diagnostics},
     {"os.signal", :diagnostics},
     {"git.", :diagnostics}
   ]

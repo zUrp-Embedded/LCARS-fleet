@@ -12,7 +12,7 @@ defmodule Fleet.TaskMonitor.Application do
       service systemd) → le GenServer ne démarre jamais en prod.
     * `map_event/1` dispatche sur 9 types (`:dispatch_started`,
       `:gatekeeper_spawned`, …) qui n'ont AUCUN producteur dans l'arbre et
-      ne sont pas dans `events.yaml` (seuls `task_*`/`state_corrupt` le sont).
+      ne sont pas dans `events.yaml` (seuls `work_item.*`/`state.corrupt` le sont).
   Double-mort : non démarré, et mapperait des events que personne n'émet. Son
   rôle (read-model d'observabilité des tâches) est désormais couvert par
   `fleet_observation` (deck :8091). Sort — supprimer l'app OU la recâbler sur

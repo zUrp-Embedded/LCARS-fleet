@@ -100,7 +100,7 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   (git push ≤30s) est offloadée en `Task.Supervisor` (`:step_run_runner` / `StepRunTaskSupervisor`, F067) → ne
   bloque pas la tête de ligne. **MA-03 — verdict auto-descriptif** : le contexte de reprise d'une escalade
   voyage dans le `metadata` de la **tâche** d'éval (qui survit dans le broker à un crash du StepRunConsumer
-  seul) ; au restart (`gate_evals` RAM vide) le verdict (`work_item_completed`) est **reconstruit** du metadata
+  seul) ; au restart (`gate_evals` RAM vide) le verdict (`work_item.completed`) est **reconstruit** du metadata
   au lieu d'un drop silencieux (plus d'issue wedgée à vie). `gate_evals` n'est qu'une optimisation fast-path.
 - `Fleet.Pilot.IncidentConsumer` — consumer Bus **séparé** des events d'**échec** de pod (`pod.failed`/
   `wake.failed`, source `:spawner`) → `IncidentRegistry` (note 1er / escalade récurrent ; wake récurrent =

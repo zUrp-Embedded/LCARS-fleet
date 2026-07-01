@@ -459,7 +459,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       send(pid, event)
       assert Process.alive?(pid)
       # un event non-spawner est ignore sans crash
-      send(pid, Fleet.Event.new(:task_queue, :work_item_completed))
+      send(pid, Fleet.Event.new(:task_queue, :"work_item.completed"))
 
       assert Process.alive?(pid)
 

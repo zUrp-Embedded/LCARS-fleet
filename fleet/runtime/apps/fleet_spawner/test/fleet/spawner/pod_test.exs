@@ -172,13 +172,13 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   # R-CORE.comm ADR-G — completion event-driven : simule le broker fleet_task_queue broadcastant
-  # %Fleet.Event{work_item_completed} sur fleet.events (= ce qui arrive quand l'agent appelle
+  # %Fleet.Event{work_item.completed} sur fleet.events (= ce qui arrive quand l'agent appelle
   # submit_result via fleet_mcp). Le pod doit être en :monitoring (subscribed) avant l'appel.
   defp submit_result_event(pod_id, payload) do
     Phoenix.PubSub.broadcast(
       Fleet.PubSub,
       "fleet.events",
-      Fleet.Event.new(:task_queue, :work_item_completed,
+      Fleet.Event.new(:task_queue, :"work_item.completed",
         pod_id: pod_id,
         correlation_id: "test-corr-#{pod_id}",
         payload: %{result: payload}
@@ -274,12 +274,12 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive {:launch_called, _, _}, 2_000
       assert %{phase: :monitoring} = GenServer.call(pid, :info)
 
-      # work_item_completed pour la brique issue-3 (re-brief), PAS le spawn issue-4 (issue_id dans le payload,
+      # work_item.completed pour la brique issue-3 (re-brief), PAS le spawn issue-4 (issue_id dans le payload,
       # comme le vrai event TaskQueue qui porte completed.issue_id).
       Phoenix.PubSub.broadcast(
         Fleet.PubSub,
         "fleet.events",
-        Fleet.Event.new(:task_queue, :work_item_completed,
+        Fleet.Event.new(:task_queue, :"work_item.completed",
           pod_id: pod_id,
           correlation_id: "c-adopt",
           payload: %{result: %{"answer" => "OK"}, issue_id: "issue-3"}

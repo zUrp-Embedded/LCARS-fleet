@@ -61,7 +61,7 @@ defmodule Fleet.MCP.MixProject do
       #   extra_applications (ordering OTP boot) ; ici en dep compile-time. Ring 4→0, pas de cycle.
       {:fleet_event_router, in_umbrella: true},
       # fleet_task_queue : le broker d'orchestration que PodTools sert via get_work_item/submit_result
-      #   (drive métier ADR-G ; le broker broadcast lui-même %Fleet.Event{work_item_completed}).
+      #   (drive métier ADR-G ; le broker broadcast lui-même %Fleet.Event{work_item.completed}).
       #   Ring 4→Ring 2 (fleet_mcp sert la queue, n'orchestre pas — DN drive/mcp-server §E). Pas de cycle.
       {:fleet_task_queue, in_umbrella: true},
       # fleet_credentials : Fleet.Credentials.RoleToken — token forge du compte de rôle, pour que

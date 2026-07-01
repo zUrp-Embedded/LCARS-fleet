@@ -25,7 +25,7 @@ defmodule Fleet.Starfleet.MCPWatcher do
 
   ## Event broadcast
 
-  Schema canon `%Fleet.Event{source: :starfleet, type: :sdk_upstream_alert,
+  Schema canon `%Fleet.Event{source: :starfleet, type: :"sdk.upstream_alert",
   payload: %{current, upstream, package}, correlation_id: nil}`. Émis SSI
   current != upstream. Erreur de fetch ou versions identiques → no-op
   (log debug seulement).
@@ -147,7 +147,7 @@ defmodule Fleet.Starfleet.MCPWatcher do
 
   defp broadcast_alert(package, current, upstream) do
     event =
-      Fleet.Event.new(:starfleet, :sdk_upstream_alert,
+      Fleet.Event.new(:starfleet, :"sdk.upstream_alert",
         payload: %{
           "package" => package,
           "current" => current,
