@@ -22,23 +22,23 @@ Deux mots-clés déclenchent le **même** cycle de traitement (cf. `.claude/prot
 
 Le cycle :
 
-1. **Pull** : appelle le tool MCP `mcp__fleet__get_task` pour récupérer
+1. **Pull** : appelle le tool MCP `mcp__fleet__get_work_item` pour récupérer
    ta tâche courante.
-2. **Pas de tâche immédiate** : si `get_task` retourne `{"done": true}`,
+2. **Pas de tâche immédiate** : si `get_work_item` retourne `{"done": true}`,
    il n'y a rien à faire MAINTENANT. Tu **attends silencieusement le
    prochain réveil (`yop`/`wake`)** — il peut arriver dans 5 minutes ou 5 heures selon
    le pipeline. **Ne quitte PAS de ta propre initiative.**
-3. **Traite** : exécute la tâche reçue (champ `task` du retour get_task
+3. **Traite** : exécute la tâche reçue (champ `work_item` du retour get_work_item
    — peut contenir `description`, `inputs`, `outputs_expected`, etc.
-   selon le ticket).
+   selon l'issue).
 4. **Réponds** : appelle le tool MCP `mcp__fleet__submit_result` avec un
    payload structuré (cf. convention ci-dessous, status `ok` ou `failed`).
 5. **Attente prochain réveil (`yop`/`wake`)** : après `submit_result`, retour à l'étape 2
    en attente. Un nouveau réveil (`yop`/`wake`) peut être :
-   - un nouveau cycle (autre ticket) ;
+   - un nouveau cycle (autre work item) ;
    - une correction d'audit (renvoi-au-dev avec findings du gatekeeper)
      — dans ce cas tu raffines la **révision existante**, relue depuis la
-     forge (le PR + les findings que `get_task` te pointe), jamais de zéro.
+     forge (le PR + les findings que `get_work_item` te pointe), jamais de zéro.
 
 Ces deux tools MCP sont auto-approuvés au boot (allowedTools cap-profile
 résolus en runtime). Tu n'as pas à demander permission.
@@ -46,7 +46,7 @@ résolus en runtime). Tu n'as pas à demander permission.
 ## Réveil — flag Monitor (préféré) ou kick `yop`
 
 La fleet te réveille pour chaque cycle. **Le contenu passe TOUJOURS par MCP**
-(`get_task`) — jamais par le texte injecté dans ton terminal. Deux mécanismes
+(`get_work_item`) — jamais par le texte injecté dans ton terminal. Deux mécanismes
 de réveil, selon tes outils :
 
 **Préféré — réveil-par-flag (outil `Monitor`, zéro send-keys).** Si l'outil
@@ -69,7 +69,7 @@ première activation**, puis attends :
    arrière-plan ne te réveillerait PAS (tu resterais bloqué). Donc `Monitor`,
    JAMAIS `Bash`. Après l'avoir armé, ne fais rien d'autre — attends.
 
-À **chaque réveil du Monitor** (ligne « ton tour »), lance le cycle (`get_task`
+À **chaque réveil du Monitor** (ligne « ton tour »), lance le cycle (`get_work_item`
 → traite → `submit_result`), puis re-attends le prochain réveil.
 
 **Fallback — kick `yop`.** Si l'outil `Monitor` n'est pas disponible, la fleet
@@ -79,13 +79,13 @@ te réveille via le mot-clé `yop` (send-keys). Même cycle. Le `yop` est aussi 
 
 ## Durée de vie — pas de quit autonome
 
-Tu vis aussi longtemps que ton mandat est actif. Le system te kill quand
-le gatekeeper promote ton travail OU abandonne le mandat. Tu n'as **pas**
+Tu vis aussi longtemps que ton brief est actif. Le system te kill quand
+le gatekeeper promote ton travail OU abandonne le brief. Tu n'as **pas**
 à te soucier de quitter — c'est imposé par le system, pas par toi.
 
 Pour un **rework** (renvoi-au-dev), ton état autoritatif est sur la **forge**, pas
 dans ta mémoire de session : le travail déjà rendu et les findings vivent dans le
-PR et ses reviews. `get_task` t'y pointe — relis-les et raffine la révision
+PR et ses reviews. `get_work_item` t'y pointe — relis-les et raffine la révision
 existante, jamais de zéro. Que le system te maintienne vivant entre cycles ou te
 re-spawne frais (selon ton profil de vie), ça ne change rien à ta façon de bosser :
 la source de vérité reste la forge (forge-state-machine).
@@ -102,7 +102,7 @@ pour la fleet, pas un échec à cacher.
 ```json
 {
   "status": "ok",
-  "result": <ta sortie structurée selon le ticket>
+  "result": <ta sortie structurée selon l'issue>
 }
 ```
 

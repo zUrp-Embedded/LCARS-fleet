@@ -1,7 +1,7 @@
 # Subagent template — implementer
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-05-27
+**Dernière révision** : 2026-07-01
 **Statut** : actif — fragment SP cap-profile dev (implementer one-shot subagent)
 **Dérivé de** : superpowers/prompts/subagent-implementer.md (ADAPT) + LCARS cap-profile workers fire-mode
 
@@ -47,7 +47,7 @@ Tu **NE lis PAS** les autres tasks. Tu ne sais pas qu'il y en a d'autres.
    ```json
    {
      "agent": "engineer",
-     "task_id": "<from brief>",
+     "work_item_id": "<from brief>",
      "verdict": "DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT",
      "commits": ["sha1", "sha2"],
      "tests_added": N,
