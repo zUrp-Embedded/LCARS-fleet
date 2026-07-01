@@ -57,29 +57,29 @@ defmodule Fleet.Pilot.ForgeProtocolTest do
     end
   end
 
-  describe "hop_marker/2 + hop_marker?/1 (build+parse co-localisés)" do
-    test "hop_marker? reconnaît un marqueur produit par hop_marker" do
-      assert ForgeProtocol.hop_marker?(ForgeProtocol.hop_marker("engineer", "deadbeef"))
+  describe "step_run_marker/2 + step_run_marker?/1 (build+parse co-localisés)" do
+    test "step_run_marker? reconnaît un marqueur produit par step_run_marker" do
+      assert ForgeProtocol.step_run_marker?(ForgeProtocol.step_run_marker("engineer", "deadbeef"))
     end
 
-    test "hop_marker? false sur un body sans marqueur / non-binaire" do
-      refute ForgeProtocol.hop_marker?("juste un commentaire")
-      refute ForgeProtocol.hop_marker?(nil)
+    test "step_run_marker? false sur un body sans marqueur / non-binaire" do
+      refute ForgeProtocol.step_run_marker?("juste un commentaire")
+      refute ForgeProtocol.step_run_marker?(nil)
     end
   end
 
   describe "result_block/1 + parse_result_block/1 (round-trip)" do
-    test "extrait le map du bloc ```result (round-trip avec le format HopCompleter N-04)" do
+    test "extrait le map du bloc ```result (round-trip avec le format StepRunCompleter N-04)" do
       body =
         "Livrable de architect.\n\n```result\n" <>
-          ~s({"severity_max":"ok","findings":0}) <> "\n```\n\n[hop:architect:abc]"
+          ~s({"severity_max":"ok","findings":0}) <> "\n```\n\n[step_run:architect:abc]"
 
       assert {:ok, %{"severity_max" => "ok", "findings" => 0}} =
                ForgeProtocol.parse_result_block(body)
     end
 
     test "pas de bloc result → nil ; JSON invalide → nil ; nil → nil" do
-      assert nil == ForgeProtocol.parse_result_block("juste un commentaire\n[hop:x:y]")
+      assert nil == ForgeProtocol.parse_result_block("juste un commentaire\n[step_run:x:y]")
       assert nil == ForgeProtocol.parse_result_block("```result\npas du json\n```")
       assert nil == ForgeProtocol.parse_result_block(nil)
     end

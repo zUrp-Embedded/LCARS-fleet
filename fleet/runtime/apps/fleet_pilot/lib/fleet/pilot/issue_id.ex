@@ -3,8 +3,8 @@ defmodule Fleet.Pilot.IssueId do
   Source UNIQUE du format `issue_id` stage-mode `"issue-<n>"`.
 
   `compose/1` et `parse/1` vivent ici → le writer (`Fleet.Pilot.StageDispatcher`) et le parser
-  (`Fleet.Pilot.HopConsumer.parse_issue_number`, qui délègue) ne peuvent plus dériver l'un de
-  l'autre. Le `issue_id` corrèle un pod à son issue forge tout au long du hop (enqueue → fin-de-hop).
+  (`Fleet.Pilot.StepRunConsumer.parse_issue_number`, qui délègue) ne peuvent plus dériver l'un de
+  l'autre. Le `issue_id` corrèle un pod à son issue forge tout au long du step_run (enqueue → fin-de-step-run).
   """
 
   @prefix "issue-"

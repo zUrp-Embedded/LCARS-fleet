@@ -121,7 +121,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   Feedback des reviews REQUEST_CHANGES en vigueur d'une PR (Gitea `GET .../pulls/{index}/reviews`),
   pour nourrir le **rework** du producteur. Renvoie la DERNIÈRE review REQUEST_CHANGES par reviewer
   avec son `body` — le verdict structuré gravé par le juge (`reason`/`details`/`chain`, via
-  `HopConsumer.judge_review_body`). Sans ce body, le `rework_brief` dit « corrige selon la review »
+  `StepRunConsumer.judge_review_body`). Sans ce body, le `rework_brief` dit « corrige selon la review »
   SANS le contenu de la review → l'engineer devine à l'aveugle (famine d'info, DOUBLE :
   jumeau de l'`outputs: {}` du juge ; sans le body l'eng rend `blocked_dep` plutôt que
   deviner). Pas de commit-scoping ici : on veut le DERNIER feedback par reviewer (`List.last`), pas
@@ -151,13 +151,13 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   Compte les rounds de REWORK déjà déclenchés sur une PR = nb de reviews `REQUEST_CHANGES`
   non-dismissed (Gitea `GET .../pulls/{index}/reviews`). Chaque round (juge demande des changements →
   l'eng re-pousse → re-review) ajoute une review REQUEST_CHANGES → le compteur est **forge-natif** et
-  MONOTONE (les reviews persistent), comme `count_signed_hops` pour le rebond de gate. Sert au frein
+  MONOTONE (les reviews persistent), comme `count_signed_step_runs` pour le rebond de gate. Sert au frein
   anti-churn du chemin PR-review (`StageDispatcher.dispatch_rework`) : au-delà du budget → escalade arch.
 
   Pas de commit-scoping : on veut l'HISTORIQUE des rounds (tous commits), pas le verdict courant.
 
   `{:error, _}` sur échec HTTP/config — le caller NE re-spawn PAS à l'aveugle si le budget n'est pas
-  vérifiable (un re-spawn non borné pourrait churner), symétrique de `count_signed_hops`.
+  vérifiable (un re-spawn non borné pourrait churner), symétrique de `count_signed_step_runs`.
   """
   @spec count_change_request_rounds(String.t(), integer(), Keyword.t()) ::
           {:ok, non_neg_integer()} | {:error, term()}

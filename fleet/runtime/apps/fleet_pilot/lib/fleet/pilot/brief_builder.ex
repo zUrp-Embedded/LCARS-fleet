@@ -172,8 +172,8 @@ defmodule Fleet.Pilot.BriefBuilder do
   # Un pod **juge** doit savoir QUOI
   # juger ET comment rendre son verdict. On réutilise le brief canonique `Fleet.Pipeline.GateBrief`
   # (contexte + livrable + question + **contrat `gate-decision-v1.json` + options canon**) — le même
-  # que le modèle RAM. Le `result_K` à juger est lu du comment du hop précédent (gravé par
-  # HopCompleter) ; le pod reste forge-aveugle (le runtime lit le comment, pas de
+  # que le modèle RAM. Le `result_K` à juger est lu du comment du step_run précédent (gravé par
+  # StepRunCompleter) ; le pod reste forge-aveugle (le runtime lit le comment, pas de
   # clone).
   defp build_judge_brief(role, forge, repo, number, forge_opts, route) do
     predecessor =
@@ -214,7 +214,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     # irreprésentable en amont). Le `request` (body de l'issue = critère) est rendu par GateBrief DÉSAMORCÉ
     # (blockquote « CONTEXTE — déjà traité, NE PAS exécuter » + bannière « JUGER, PAS PRODUIRE »). Le risque
     # vise un juge **base-worker** (profile noop, gatekeeper) qui RE-exécuterait le build même quoté : ce
-    # juge-là reçoit son brief par `dispatch_gatekeeper` (hop_consumer) qui NE passe PAS `request` — il
+    # juge-là reçoit son brief par `dispatch_gatekeeper` (step_run_consumer) qui NE passe PAS `request` — il
     # n'est pas affecté ici. `build_judge_brief` ne sert que les juges À PERSONA (qualifier/reviewer,
     # `subagent_template` spec-reviewer/code-quality-reviewer) — le cas réputé SÛR
     # (un juge à vraie persona : GateBrief sait rendre `request` désamorcé). En pratique

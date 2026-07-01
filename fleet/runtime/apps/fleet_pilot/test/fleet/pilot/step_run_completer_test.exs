@@ -1,7 +1,7 @@
-defmodule Fleet.Pilot.HopCompleterTest do
+defmodule Fleet.Pilot.StepRunCompleterTest do
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.HopCompleter
+  alias Fleet.Pilot.StepRunCompleter
 
   # Forge stub qui ENREGISTRE l'ordre des appels (send au test) pour vérifier
   # la séquence canonique §5 : comment → state → (close|assignee) → unlock.
@@ -132,7 +132,7 @@ defmodule Fleet.Pilot.HopCompleterTest do
     def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
-  defp base_hop(extra \\ %{}) do
+  defp base_step_run(extra \\ %{}) do
     Map.merge(
       %{
         repo: "lordzurp/lcars-test",
@@ -148,8 +148,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
     [deliverable: StubDeliverable, forge_client: OrderForge, forge_opts: []]
   end
 
-  defp pr_hop(extra \\ %{}) do
-    base_hop(
+  defp pr_step_run(extra \\ %{}) do
+    base_step_run(
       Map.merge(
         %{
           deliverable_opts: %{
@@ -166,15 +166,15 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
   describe "complete/2 — 1-stage terminal (next_assignee nil)" do
     test "publie, comment signé, CLOSE, unlock — dans l'ordre §5" do
-      assert {:ok, :completed} = HopCompleter.complete(base_hop(), seams())
+      assert {:ok, :completed} = StepRunCompleter.complete(base_step_run(), seams())
 
       # Étape 1 : publish appelé avec les opts du livrable
       assert_received {:published, %{mode: :git_native, base_sha: "cafe"}}
 
       # Étapes 2→4 dans l'ordre canonique (mailbox FIFO ; étape 3 state:* retirée — #5.2 D4)
       assert_received {:call, :comment, body, sig}
-      assert sig == "[hop:engineer:deadbeef]"
-      assert body =~ "[hop:engineer:deadbeef]"
+      assert sig == "[step_run:engineer:deadbeef]"
+      assert body =~ "[step_run:engineer:deadbeef]"
 
       assert_received {:call, :close}
       assert_received {:call, :unlock, "lcars-in-flight"}
@@ -184,15 +184,15 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "comment signé porte la signature en dedup_signature (replay-safe)" do
-      HopCompleter.complete(base_hop(), seams())
-      assert_received {:call, :comment, _body, "[hop:engineer:deadbeef]"}
+      StepRunCompleter.complete(base_step_run(), seams())
+      assert_received {:call, :comment, _body, "[step_run:engineer:deadbeef]"}
     end
   end
 
   describe "complete/2 — multi-stage (next_assignee présent, branche A2)" do
     test "publie, comment, AVANCE (pas de close ni set_assignee, #8.A), unlock" do
-      hop = base_hop(%{next_assignee: "qualifier"})
-      assert {:ok, :reassigned} = HopCompleter.complete(hop, seams())
+      step_run = base_step_run(%{next_assignee: "qualifier"})
+      assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
 
       assert_received {:call, :comment, _, _}
 
@@ -204,10 +204,14 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "avance avec contexte carte → grave la ROUTE du stage suivant (sans set_assignee, #8.A)" do
-      hop =
-        base_hop(%{next_assignee: "qualifier", pipeline: "poc-cycle", next_stage: "spec-review"})
+      step_run =
+        base_step_run(%{
+          next_assignee: "qualifier",
+          pipeline: "poc-cycle",
+          next_stage: "spec-review"
+        })
 
-      assert {:ok, :reassigned} = HopCompleter.complete(hop, seams())
+      assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
 
       # #8.A : l'avance grave la ROUTE du stage suivant ; l'assignee (humain) N'est PLUS touché.
       assert_received {:call, :route, "poc-cycle", "spec-review"}
@@ -215,27 +219,27 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "reassign sans contexte carte → pas de post_route (defensif)" do
-      hop = base_hop(%{next_assignee: "qualifier"})
-      assert {:ok, :reassigned} = HopCompleter.complete(hop, seams())
+      step_run = base_step_run(%{next_assignee: "qualifier"})
+      assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
       refute_received {:call, :route, _, _}
     end
   end
 
-  describe "complete/2 — sans livrable git (juge en payload, hop_sha fourni)" do
-    test "utilise hop_sha comme signature, pas d'appel publish" do
-      hop =
-        base_hop(%{deliverable_opts: nil, hop_sha: "verdict-001"})
+  describe "complete/2 — sans livrable git (juge en payload, step_run_sha fourni)" do
+    test "utilise step_run_sha comme signature, pas d'appel publish" do
+      step_run =
+        base_step_run(%{deliverable_opts: nil, step_run_sha: "verdict-001"})
 
-      assert {:ok, :completed} = HopCompleter.complete(hop, seams())
+      assert {:ok, :completed} = StepRunCompleter.complete(step_run, seams())
       refute_received {:published, _}
-      assert_received {:call, :comment, _body, "[hop:engineer:verdict-001]"}
+      assert_received {:call, :comment, _body, "[step_run:engineer:verdict-001]"}
     end
 
-    test "erreur si ni livrable ni hop_sha" do
-      hop = base_hop(%{deliverable_opts: nil})
+    test "erreur si ni livrable ni step_run_sha" do
+      step_run = base_step_run(%{deliverable_opts: nil})
 
-      assert {:error, {:publish, :no_deliverable_no_hop_sha}} =
-               HopCompleter.complete(hop, seams())
+      assert {:error, {:publish, :no_deliverable_no_step_run_sha}} =
+               StepRunCompleter.complete(step_run, seams())
     end
   end
 
@@ -243,7 +247,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
     test "publish échoue → {:error, {:publish, _}}, aucune écriture forge" do
       opts = Keyword.put(seams(), :deliverable, FailDeliverable)
 
-      assert {:error, {:publish, :base_not_ancestor}} = HopCompleter.complete(base_hop(), opts)
+      assert {:error, {:publish, :base_not_ancestor}} =
+               StepRunCompleter.complete(base_step_run(), opts)
 
       refute_received {:call, :comment, _, _}
       refute_received {:call, :unlock, _}
@@ -256,7 +261,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
       opts = Keyword.put(seams(), :forge_client, CommentFailForge)
 
-      assert {:error, {:comment, {:http, 500, "boom"}}} = HopCompleter.complete(base_hop(), opts)
+      assert {:error, {:comment, {:http, 500, "boom"}}} =
+               StepRunCompleter.complete(base_step_run(), opts)
     end
   end
 
@@ -265,7 +271,7 @@ defmodule Fleet.Pilot.HopCompleterTest do
       opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: []]
 
       assert {:ok, %{commit_sha: "deadbeef", pr_number: 7}} =
-               HopCompleter.open_deliverable_pr(pr_hop(), opts)
+               StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
 
       assert_received {:published, %{target_branch: "feature/issue-42"}}
       assert_received {:open_pr, "feature/issue-42", "main", body}
@@ -274,7 +280,10 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
     test "base_branch override" do
       opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: []]
-      assert {:ok, _} = HopCompleter.open_deliverable_pr(pr_hop(%{base_branch: "develop"}), opts)
+
+      assert {:ok, _} =
+               StepRunCompleter.open_deliverable_pr(pr_step_run(%{base_branch: "develop"}), opts)
+
       assert_received {:open_pr, "feature/issue-42", "develop", _}
     end
 
@@ -282,7 +291,7 @@ defmodule Fleet.Pilot.HopCompleterTest do
       opts = [deliverable: FailDeliverable, forge_client: PrForge, forge_opts: []]
 
       assert {:error, {:publish, :base_not_ancestor}} =
-               HopCompleter.open_deliverable_pr(pr_hop(), opts)
+               StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
 
       refute_received {:open_pr, _, _, _}
     end
@@ -291,16 +300,16 @@ defmodule Fleet.Pilot.HopCompleterTest do
       opts = [deliverable: StubDeliverable, forge_client: PrFailForge, forge_opts: []]
 
       assert {:error, {:open_pr, {:http, 422, _}}} =
-               HopCompleter.open_deliverable_pr(pr_hop(), opts)
+               StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
     end
   end
 
   describe "record_review/2 + promote/2 (Corr.3 PR-natif)" do
     test "verdict :approve → review native APPROVED (corps généré du rôle)" do
-      hop = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
+      step_run = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
 
       assert {:ok, :reviewed} =
-               HopCompleter.record_review(hop, forge_client: PrForge, forge_opts: [])
+               StepRunCompleter.record_review(step_run, forge_client: PrForge, forge_opts: [])
 
       assert_received {:review, 7, :approve, body}
       assert body =~ "qualifier"
@@ -308,7 +317,7 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "verdict :request_changes avec corps explicite" do
-      hop = %{
+      step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
         role: "reviewer",
@@ -317,34 +326,36 @@ defmodule Fleet.Pilot.HopCompleterTest do
       }
 
       assert {:ok, :reviewed} =
-               HopCompleter.record_review(hop, forge_client: PrForge, forge_opts: [])
+               StepRunCompleter.record_review(step_run, forge_client: PrForge, forge_opts: [])
 
       assert_received {:review, 7, :request_changes, "il manque un test de la branche d'erreur"}
     end
 
     test "record_review propage l'erreur forge" do
-      hop = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
+      step_run = %{repo: "fleet/proj", pr_number: 7, role: "qualifier", review_event: :approve}
 
       assert {:error, {:review, {:http, 500, _}}} =
-               HopCompleter.record_review(hop, forge_client: PrFailForge, forge_opts: [])
+               StepRunCompleter.record_review(step_run, forge_client: PrFailForge, forge_opts: [])
     end
 
     test "promote → comment gatekeeper + merge FF, {:ok, :promoted}" do
-      hop = %{
+      step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
         issue_number: 42,
         producer_branch: "lcars/issue-42-engineer"
       }
 
-      assert {:ok, :promoted} = HopCompleter.promote(hop, forge_client: PrForge, forge_opts: [])
+      assert {:ok, :promoted} =
+               StepRunCompleter.promote(step_run, forge_client: PrForge, forge_opts: [])
+
       # Sceau (F-arch-MCP) : commentaire gatekeeper sur l'issue PUIS merge.
       assert_received {:comment, 42, _body, _opts}
       assert_received {:merge, 7}
     end
 
     test "promote : FF impossible (409) = invariant serial violé → {:merge, _} fail-loud" do
-      hop = %{
+      step_run = %{
         repo: "fleet/proj",
         pr_number: 7,
         issue_number: 42,
@@ -352,12 +363,12 @@ defmodule Fleet.Pilot.HopCompleterTest do
       }
 
       assert {:error, {:merge, {:http, 409, _}}} =
-               HopCompleter.promote(hop, forge_client: PrFailForge, forge_opts: [])
+               StepRunCompleter.promote(step_run, forge_client: PrFailForge, forge_opts: [])
     end
   end
 
   describe "complete_pr/2 — orchestrateur PR-natif (Corr.3)" do
-    defp producer_hop(intent, extra \\ %{}) do
+    defp producer_step_run(intent, extra \\ %{}) do
       Map.merge(
         %{
           repo: "fleet/proj",
@@ -378,7 +389,7 @@ defmodule Fleet.Pilot.HopCompleterTest do
       )
     end
 
-    defp judge_hop(intent, extra \\ %{}) do
+    defp judge_step_run(intent, extra \\ %{}) do
       Map.merge(
         %{
           repo: "fleet/proj",
@@ -401,9 +412,9 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "producteur :advance → ouvre la PR, request_review(next), unlock l'ISSUE (pas de set_assignee)" do
-      hop = producer_hop(:advance, %{next_assignee: "qualifier"})
+      step_run = producer_step_run(:advance, %{next_assignee: "qualifier"})
 
-      assert {:ok, :review_requested} = HopCompleter.complete_pr(hop, orch_opts())
+      assert {:ok, :review_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
 
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
       assert body =~ "Closes #42"
@@ -414,13 +425,13 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "producteur avec :eng_summary → poste la VOIX de l'eng en commentaire PR (fin du « eng muet »)" do
-      hop =
-        producer_hop(:advance, %{
+      step_run =
+        producer_step_run(:advance, %{
           next_assignee: "qualifier",
           eng_summary: "j'ai implémenté le décodeur, choisi un buffer circulaire"
         })
 
-      assert {:ok, :review_requested} = HopCompleter.complete_pr(hop, orch_opts())
+      assert {:ok, :review_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
 
       assert_received {:comment, 7, body}
       assert body =~ "j'ai implémenté le décodeur, choisi un buffer circulaire"
@@ -429,8 +440,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
     test "producteur SANS :eng_summary → AUCUN commentaire (pas de voix vide)" do
       assert {:ok, :review_requested} =
-               HopCompleter.complete_pr(
-                 producer_hop(:advance, %{next_assignee: "qualifier"}),
+               StepRunCompleter.complete_pr(
+                 producer_step_run(:advance, %{next_assignee: "qualifier"}),
                  orch_opts()
                )
 
@@ -438,7 +449,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "producteur :promote (terminal 1-stage) → ouvre la PR, merge FF, unlock, pas de reassign" do
-      assert {:ok, :promoted} = HopCompleter.complete_pr(producer_hop(:promote), orch_opts())
+      assert {:ok, :promoted} =
+               StepRunCompleter.complete_pr(producer_step_run(:promote), orch_opts())
 
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", _}
       assert_received {:merge, 7}
@@ -447,9 +459,9 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "producteur :rework (son propre gate fail) → PAS de PR, unlock l'ISSUE (re-spawn via assignee)" do
-      hop = producer_hop(:rework, %{next_assignee: "engineer"})
+      step_run = producer_step_run(:rework, %{next_assignee: "engineer"})
 
-      assert {:ok, :rework_requested} = HopCompleter.complete_pr(hop, orch_opts())
+      assert {:ok, :rework_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
 
       refute_received {:open_pr, _, _, _}
 
@@ -459,9 +471,10 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "juge :advance → retrouve la PR, review APPROVED, request_review(next), unlock la PR" do
-      hop = judge_hop(:advance, %{role: "qualifier", next_assignee: "reviewer"})
+      step_run = judge_step_run(:advance, %{role: "qualifier", next_assignee: "reviewer"})
 
-      assert {:ok, :review_requested} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+      assert {:ok, :review_requested} =
+               StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
 
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :approve, _}
@@ -472,9 +485,9 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "juge :promote (terminal) → review APPROVED puis merge FF, unlock la PR" do
-      hop = judge_hop(:promote, %{role: "reviewer"})
+      step_run = judge_step_run(:promote, %{role: "reviewer"})
 
-      assert {:ok, :promoted} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+      assert {:ok, :promoted} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
 
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :approve, _}
@@ -483,9 +496,10 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "juge :rework (gate fail) → review REQUEST_CHANGES, unlock la PR, PAS de merge" do
-      hop = judge_hop(:rework, %{role: "reviewer", next_assignee: "engineer"})
+      step_run = judge_step_run(:rework, %{role: "reviewer", next_assignee: "engineer"})
 
-      assert {:ok, :rework_requested} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+      assert {:ok, :rework_requested} =
+               StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
 
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :request_changes, _}
@@ -498,20 +512,23 @@ defmodule Fleet.Pilot.HopCompleterTest do
       # Dérivation par intent (`:review_event` absent) : un intent qui n'est PAS un gate-pass explicite
       # (`:advance`/`:promote`) ne doit JAMAIS s'auto-approuver. Ici `:reviewed` (un juge no-carte qui
       # aurait perdu son verdict) tombe sur le catch-all fail-closed → REQUEST_CHANGES, pas APPROVED.
-      # Sous l'ancien `_ -> :approve`, ce hop validait par omission (le pire défaut pour un verdict).
-      hop = judge_hop(:reviewed, %{role: "qualifier"})
+      # Sous l'ancien `_ -> :approve`, ce step_run validait par omission (le pire défaut pour un verdict).
+      step_run = judge_step_run(:reviewed, %{role: "qualifier"})
 
-      assert {:ok, :reviewed} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+      assert {:ok, :reviewed} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
 
       assert_received {:review, 7, :request_changes, _}
       refute_received {:merge, _}
     end
 
     test "②.1d producteur :review (no-carte) → ouvre PR, request_review(qualifier+reviewer), assigne l'humain, unlock issue+PR, PAS de merge" do
-      hop = producer_hop(:review)
+      step_run = producer_step_run(:review)
 
       assert {:ok, :review_requested} =
-               HopCompleter.complete_pr(hop, orch_opts(reviewer_roles: ["qualifier", "reviewer"]))
+               StepRunCompleter.complete_pr(
+                 step_run,
+                 orch_opts(reviewer_roles: ["qualifier", "reviewer"])
+               )
 
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
       assert body =~ "Closes #42"
@@ -528,9 +545,9 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "②.1d juge :reviewed (no-carte) → review native (event explicite :approve), unlock la PR, PAS de merge ni request_review" do
-      hop = judge_hop(:reviewed, %{role: "qualifier", review_event: :approve})
+      step_run = judge_step_run(:reviewed, %{role: "qualifier", review_event: :approve})
 
-      assert {:ok, :reviewed} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+      assert {:ok, :reviewed} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
 
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :approve, _}
@@ -544,9 +561,9 @@ defmodule Fleet.Pilot.HopCompleterTest do
     end
 
     test "②.1d juge :reviewed REQUEST_CHANGES → review request_changes, unlock la PR, pas de merge" do
-      hop = judge_hop(:reviewed, %{role: "qualifier", review_event: :request_changes})
+      step_run = judge_step_run(:reviewed, %{role: "qualifier", review_event: :request_changes})
 
-      assert {:ok, :reviewed} = HopCompleter.complete_pr(hop, forge_client: OrchForge)
+      assert {:ok, :reviewed} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
 
       assert_received {:review, 7, :request_changes, _}
       assert_received {:unlock, 7, _}
@@ -555,8 +572,8 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
     test "producteur : open_pr echoue → {:open_pr, _}, pas de route" do
       assert {:error, {:open_pr, {:http, 422, _}}} =
-               HopCompleter.complete_pr(
-                 producer_hop(:promote),
+               StepRunCompleter.complete_pr(
+                 producer_step_run(:promote),
                  deliverable: StubDeliverable,
                  forge_client: PrFailForge
                )
@@ -566,20 +583,20 @@ defmodule Fleet.Pilot.HopCompleterTest do
 
     test "juge : PR introuvable → {:pr_lookup, :pr_not_found} fail-loud" do
       assert {:error, {:pr_lookup, :pr_not_found}} =
-               HopCompleter.complete_pr(judge_hop(:promote), forge_client: NoPrForge)
+               StepRunCompleter.complete_pr(judge_step_run(:promote), forge_client: NoPrForge)
     end
 
     test "juge : producer_branch absent → {:pr_lookup, :no_producer_branch}" do
-      hop = judge_hop(:promote, %{producer_branch: nil})
+      step_run = judge_step_run(:promote, %{producer_branch: nil})
 
       assert {:error, {:pr_lookup, :no_producer_branch}} =
-               HopCompleter.complete_pr(hop, forge_client: OrchForge)
+               StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
     end
 
     test "producteur :promote : merge FF impossible (409) → {:merge, _} fail-loud" do
       assert {:error, {:merge, {:http, 409, _}}} =
-               HopCompleter.complete_pr(
-                 producer_hop(:promote),
+               StepRunCompleter.complete_pr(
+                 producer_step_run(:promote),
                  deliverable: StubDeliverable,
                  forge_client: MergeFailForge
                )

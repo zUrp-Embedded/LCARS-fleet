@@ -1,8 +1,8 @@
-defmodule Fleet.Pilot.HopCompleterAsRoleTest do
+defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   # async: false — mute la config globale `:role_tokens_dir` (cf. Fleet.Credentials.RoleTokenTest).
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.HopCompleter
+  alias Fleet.Pilot.StepRunCompleter
 
   @moduletag :tmp_dir
 
@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.HopCompleterAsRoleTest do
   end
 
   test "await_arch poste le verdict AU NOM DU JUGE (token de rôle écrase le système)" do
-    hop = %{
+    step_run = %{
       repo: "fleet/poc",
       issue_number: 3,
       role: "consultant",
@@ -45,7 +45,7 @@ defmodule Fleet.Pilot.HopCompleterAsRoleTest do
     }
 
     assert {:ok, :awaiting_arch} =
-             HopCompleter.await_arch(hop,
+             StepRunCompleter.await_arch(step_run,
                forge_client: TokenCaptureForge,
                forge_opts: [token: "system-token"]
              )
@@ -54,19 +54,19 @@ defmodule Fleet.Pilot.HopCompleterAsRoleTest do
     assert_received {:comment_token, "tok-consultant"}
   end
 
-  test "complete : le comment signé du hop est AU NOM DU RÔLE qui finit" do
-    hop = %{
+  test "complete : le comment signé du step_run est AU NOM DU RÔLE qui finit" do
+    step_run = %{
       repo: "fleet/poc",
       issue_number: 1,
       role: "consultant",
       deliverable_opts: nil,
-      hop_sha: "brief-verdict",
+      step_run_sha: "brief-verdict",
       next_assignee: nil,
       comment_body: "Verdict du consultant — continue"
     }
 
     assert {:ok, :completed} =
-             HopCompleter.complete(hop,
+             StepRunCompleter.complete(step_run,
                forge_client: TokenCaptureForge,
                forge_opts: [token: "system-token"]
              )

@@ -31,19 +31,19 @@ defmodule Fleet.Pilot.ApplicationStageStatusTest do
     assert {:inactive, _} = PilotApp.stage_status()
   end
 
-  test "operational quand stage on + Poller & HopConsumer vivants" do
+  test "operational quand stage on + Poller & StepRunConsumer vivants" do
     Application.put_env(:fleet_pilot, :stage_dispatch?, true)
     spawn_named(Fleet.Pilot.Poller)
-    spawn_named(Fleet.Pilot.HopConsumer)
+    spawn_named(Fleet.Pilot.StepRunConsumer)
 
-    assert {:operational, %{poller: true, hop_consumer: true}} = PilotApp.stage_status()
+    assert {:operational, %{poller: true, step_run_consumer: true}} = PilotApp.stage_status()
   end
 
   test "degraded quand stage on mais un singleton mort (vert-creux attrapé)" do
     Application.put_env(:fleet_pilot, :stage_dispatch?, true)
     spawn_named(Fleet.Pilot.Poller)
-    # HopConsumer non enregistré → considéré mort
+    # StepRunConsumer non enregistré → considéré mort
 
-    assert {:degraded, %{poller: true, hop_consumer: false}} = PilotApp.stage_status()
+    assert {:degraded, %{poller: true, step_run_consumer: false}} = PilotApp.stage_status()
   end
 end

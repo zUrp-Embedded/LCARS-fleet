@@ -10,7 +10,7 @@ defmodule Fleet.Pilot.ForgeClient do
     * `Fleet.Pilot.ForgeClient.Transport` — moteur HTTP/config/encodage/pagination + login système.
       Aucune connaissance du protocole forge. `ForgeClient` l'`import`e (`http_get`, `paginate`, …).
     * `Fleet.Pilot.ForgeProtocol` — vocabulaire PUR du wire-protocol (feature-branches, marqueurs
-      route/hop/onboard, blocs result, `system_authored?`), build+parse co-localisés. Les callers
+      route/step_run/onboard, blocs result, `system_authored?`), build+parse co-localisés. Les callers
       l'appellent DIRECTEMENT. Seul `parse_feature_branch/1` est ré-exporté ici (`defdelegate`) car
       `fleet_mcp` l'atteint via le seam `:forge_client` (évite une dep compile-time vers fleet_pilot).
 
@@ -49,7 +49,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
   # SEUL ré-export du vocab : `parse_feature_branch/1`. `fleet_mcp` (pod_tools) l'appelle via le seam
   # `forge` (résolu runtime, défaut ce module) pour ne PAS créer de dep compile-time vers fleet_pilot —
-  # le seam doit donc porter cette fonction. Le reste du vocab (`feature_branch`, `hop_marker`,
+  # le seam doit donc porter cette fonction. Le reste du vocab (`feature_branch`, `step_run_marker`,
   # `result_block`, marqueurs, `system_authored?`, `onboard_marker`) s'appelle directement sur
   # `Fleet.Pilot.ForgeProtocol` (impl + tests y vivent) ; ce module-ci ne le ré-exporte plus.
   defdelegate parse_feature_branch(head), to: ForgeProtocol
@@ -166,7 +166,7 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Write-ops — primitives mécaniques de fin-de-hop (la forge EST la machine à états).
+  # Write-ops — primitives mécaniques de fin-de-step-run (la forge EST la machine à états).
   # Toutes idempotentes (skip si l'état cible est déjà atteint).
   # ============================================================
 
@@ -201,9 +201,9 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Poste un comment. Si `:dedup_signature` est fourni et qu'un comment **système**
-  existant la contient déjà, no-op (`{:ok, :already}`) — la signature `[hop:<role>:<sha>]` rend le
+  existant la contient déjà, no-op (`{:ok, :already}`) — la signature `[step_run:<role>:<sha>]` rend le
   replay idempotent. Le dédup ne fait foi QUE des comments du bot : sinon un
-  user forge postant la signature en avance supprimerait le comment système (→ `count_signed_hops`
+  user forge postant la signature en avance supprimerait le comment système (→ `count_signed_step_runs`
   sous-compterait). Bot irrésoluble → dédup non filtré (fail-open vers la sûreté du replay).
   """
   @spec post_comment(String.t(), integer(), String.t(), Keyword.t()) ::
@@ -227,7 +227,7 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Retire le label `label_name` (release du verrou `lcars-in-flight` en fin-de-hop).
+  Retire le label `label_name` (release du verrou `lcars-in-flight` en fin-de-step-run).
   Idempotent : `{:ok, :already_absent}` si le label n'est pas présent.
   """
   @spec remove_label(String.t(), integer(), String.t(), Keyword.t()) ::
@@ -569,14 +569,14 @@ defmodule Fleet.Pilot.ForgeClient do
       {:ok, comments} when is_list(comments) ->
         # Le dédup garde une ÉCRITURE système → ne fait foi que des comments
         # du bot. Sinon un user forge poste la signature en avance → le comment système est skipé →
-        # `count_signed_hops` sous-compte (budget anti-runaway sur-permissif). Bot irrésoluble →
+        # `count_signed_step_runs` sous-compte (budget anti-runaway sur-permissif). Bot irrésoluble →
         # fail-OPEN (dédup non filtré) : au pire un comment dupliqué au replay, jamais une suppression
         # silencieuse d'un marqueur load-bearing.
         trusted =
           cond do
             # Marqueur NON load-bearing (ex. `[merge:pr-N]`, posté par le compte de RÔLE
             # gatekeeper et non le bot système) → dédup AUTHOR-AGNOSTIC. Le filtre bot-only ne
-            # protège QUE les marqueurs comptés (`[hop:role:sha]` → count_signed_hops) : un comment de
+            # protège QUE les marqueurs comptés (`[step_run:role:sha]` → count_signed_step_runs) : un comment de
             # sceau gatekeeper échapperait sinon au dédup bot-only (double-post au replay/retry).
             Keyword.get(opts, :dedup_any_author, false) ->
               comments
@@ -636,41 +636,41 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Compte les comments portant un marqueur de hop signé `[hop:<role>:<sha>]`
-  (posés par `HopCompleter` à chaque fin-de-hop). Sert de compteur **forge-natif**
-  au bound anti-runaway du rebond de gate : combien de hops ont déjà été
+  Compte les comments portant un marqueur de step_run signé `[step_run:<role>:<sha>]`
+  (posés par `StepRunCompleter` à chaque fin-de-step-run). Sert de compteur **forge-natif**
+  au bound anti-runaway du rebond de gate : combien de step_runs ont déjà été
   joués sur l'issue. Monotone (les comments ne sont pas retirés), idempotent à lire.
 
   `{:error, _}` sur échec HTTP/config — le caller NE rebondit PAS à l'aveugle si le
   budget n'est pas vérifiable (un rebond non vérifiable pourrait boucler).
 
   PAGINÉ : même si le budget de rework (`nb_stages * (max_rounds+1)`) reste en
-  général sous 50, le compteur est source-de-vérité du bound anti-runaway — un hop signé
+  général sous 50, le compteur est source-de-vérité du bound anti-runaway — un step_run signé
   perdu au-delà de 50 sous-compterait le budget (sur-permissif). On lit donc TOUTES les pages.
   """
-  @spec count_signed_hops(String.t(), integer(), Keyword.t()) ::
+  @spec count_signed_step_runs(String.t(), integer(), Keyword.t()) ::
           {:ok, non_neg_integer()} | {:error, term()}
-  def count_signed_hops(repo, issue_number, opts \\ []) do
+  def count_signed_step_runs(repo, issue_number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
-      # Compter SEULEMENT les hops signés par le SYSTÈME — sinon un user forge forge des
-      # `[hop:role:sha]` pour gonfler le compteur et faire TRIPPER le budget anti-runaway (DoS rework).
+      # Compter SEULEMENT les step_runs signés par le SYSTÈME — sinon un user forge forge des
+      # `[step_run:role:sha]` pour gonfler le compteur et faire TRIPPER le budget anti-runaway (DoS rework).
       # Bot irrésoluble → {:error} (via le with) : le caller NE rebondit PAS sur un budget non vérifiable.
       count =
         comments
         |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))
         |> Enum.map(& &1["body"])
-        |> Enum.count(&ForgeProtocol.hop_marker?/1)
+        |> Enum.count(&ForgeProtocol.step_run_marker?/1)
 
       {:ok, count}
     end
   end
 
   @doc """
-  Extrait le dernier bloc ` ```result ` posté dans un comment de hop — le `result_K`
-  gravé par `HopCompleter` quand le stage avance vers un gatekeeper. Sert
+  Extrait le dernier bloc ` ```result ` posté dans un comment de step_run — le `result_K`
+  gravé par `StepRunCompleter` quand le stage avance vers un gatekeeper. Sert
   à `StageDispatcher` pour donner au pod gatekeeper **quoi juger** dans son brief
   (option B : pas de clone de branche). `:none` si aucun ; `{:error, _}` HTTP/config.
   """
@@ -767,7 +767,7 @@ defmodule Fleet.Pilot.ForgeClient do
   Injecte le token du compte de RÔLE (`role`) dans `forge_opts`, sous la clé `:token` que
   `resolve_config`/`resolve_token` relisent → le SYSTÈME poste/merge EN SON NOM sur la forge (avatar +
   traça honnête, au lieu du compte système). C'est l'adaptateur UNIQUE credential→wire — source unique
-  partagée par `HopCompleter`, `StageDispatcher` et les sceaux gatekeeper (le writer du `:token` est ici,
+  partagée par `StepRunCompleter`, `StageDispatcher` et les sceaux gatekeeper (le writer du `:token` est ici,
   collé à son reader). `Fleet.Credentials.RoleToken` fournit le token, `forge_opts[:token]` le porte
   jusqu'à la requête. Rôle vide/absent OU token absent/illisible/vide → `forge_opts` inchangé → fallback
   sur le token (système) déjà présent ; `RoleToken.token/1` émet un `Logger.warning` sur ce dégradé, donc

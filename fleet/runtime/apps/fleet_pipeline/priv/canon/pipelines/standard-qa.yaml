@@ -2,7 +2,7 @@
 #
 # Date: 2026-05-18 (rev1) — 2026-05-18 rev2 post-validation Lot 5 item 17
 # Statut: actif — pipeline canonique V2 compatible Fleet.Pipeline.Loader chantier 12 PROMOTED
-# Dérivé de: design-notes/ring2/pipelines.md (standard-qa 6 hops) +
+# Dérivé de: design-notes/ring2/pipelines.md (standard-qa 6 step_runs) +
 #            superpowers workflow (brainstorm→plan→TDD→dual-review→finish) ADAPT +
 #            ring2/fleet_pipeline.md chantier 12 PROMOTED format Loader (§Pourquoi cette note existe L19)
 # Référencé par: 06_modops/docs/cascade-mix-v2-rationale.md, 06_modops/docs/pipeline-v2-loader-validation.md

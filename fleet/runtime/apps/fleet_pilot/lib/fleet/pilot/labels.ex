@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.Labels do
   @in_flight "lcars-in-flight"
   @awaits_arch "lcars-awaits-arch"
 
-  @doc "Verrou « pod en vol » : posé AVANT le spawn (anti double-spawn), levé en fin-de-hop."
+  @doc "Verrou « pod en vol » : posé AVANT le spawn (anti double-spawn), levé en fin-de-step-run."
   @spec in_flight() :: String.t()
   def in_flight, do: @in_flight
 

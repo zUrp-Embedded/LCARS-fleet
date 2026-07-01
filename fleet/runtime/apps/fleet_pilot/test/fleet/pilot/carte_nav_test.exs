@@ -102,5 +102,5 @@ defmodule Fleet.Pilot.CarteNavTest do
 
   # B (§L441) — les tests de `validate_explicit_stage/1` (biconditionnelle soft⟺gatekeeper,
   # A2.3b) sont RETIRÉS avec la fonction : une gate soft sur un stage métier est légitime
-  # (escalade gatekeeper), pas une carte malformée. cf. hop_consumer_gate_test (escalade B).
+  # (escalade gatekeeper), pas une carte malformée. cf. step_run_consumer_gate_test (escalade B).
 end

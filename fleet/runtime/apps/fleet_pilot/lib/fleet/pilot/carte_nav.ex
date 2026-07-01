@@ -97,7 +97,7 @@ defmodule Fleet.Pilot.CarteNav do
   # Pas de garde-fou « explicit-stage » (biconditionnelle soft⟺gatekeeper) : une gate `soft`
   # sur un stage métier est légitime — elle dispatche le gatekeeper (juge d'exception), elle ne
   # désigne PAS un stage `role: gatekeeper`. Il n'existe pas de stage gatekeeper, donc rien à
-  # valider. cf. `HopConsumer.gate_decide`.
+  # valider. cf. `StepRunConsumer.gate_decide`.
 
   # ── internals ──
   defp stages(carte), do: Map.get(carte, "stages", %{})

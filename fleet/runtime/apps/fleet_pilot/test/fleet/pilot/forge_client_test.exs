@@ -598,7 +598,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   # ============================================================
-  # Write-ops (primitives de fin-de-hop, DN forge-state-machine §5)
+  # Write-ops (primitives de fin-de-step-run, DN forge-state-machine §5)
   # ============================================================
 
   describe "set_assignee/4" do
@@ -644,8 +644,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.post_comment(
                  "fleet/lcars",
                  42,
-                 "[hop:engineer:abc] livrable",
-                 dedup_opts(handlers, "[hop:engineer:abc]")
+                 "[step_run:engineer:abc] livrable",
+                 dedup_opts(handlers, "[step_run:engineer:abc]")
                )
     end
 
@@ -656,7 +656,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
            [
              %{
                "user" => %{"login" => "lcars-bot"},
-               "body" => "déjà là [hop:engineer:abc] livrable"
+               "body" => "déjà là [step_run:engineer:abc] livrable"
              }
            ]}
       }
@@ -665,17 +665,18 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.post_comment(
                  "fleet/lcars",
                  42,
-                 "[hop:engineer:abc] livrable",
-                 dedup_opts(handlers, "[hop:engineer:abc]")
+                 "[step_run:engineer:abc] livrable",
+                 dedup_opts(handlers, "[step_run:engineer:abc]")
                )
     end
 
     test "F058 suivi-review : signature pré-postée par un ATTAQUANT → le système poste quand même" do
       # un user forge poste la signature en avance ; le dédup ne doit PAS la prendre pour une
-      # écriture système (sinon le comment système est supprimé → count_signed_hops sous-compte).
+      # écriture système (sinon le comment système est supprimé → count_signed_step_runs sous-compte).
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
-          {200, [%{"user" => %{"login" => "attacker"}, "body" => "[hop:engineer:abc] forgé"}]},
+          {200,
+           [%{"user" => %{"login" => "attacker"}, "body" => "[step_run:engineer:abc] forgé"}]},
         {"POST", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {201, %{"id" => 2}}
       }
 
@@ -683,15 +684,15 @@ defmodule Fleet.Pilot.ForgeClientTest do
                ForgeClient.post_comment(
                  "fleet/lcars",
                  42,
-                 "[hop:engineer:abc] livrable",
-                 dedup_opts(handlers, "[hop:engineer:abc]")
+                 "[step_run:engineer:abc] livrable",
+                 dedup_opts(handlers, "[step_run:engineer:abc]")
                )
     end
 
     test "dedup_any_author : un comment de RÔLE (non-bot, ex. Gatekeeper) signé → no-op (sceau merge)" do
       # F-arch-MCP : le sceau `[merge:pr-N]` est posté par le compte de rôle GATEKEEPER (pas le bot) → le
       # dédup bot-only le raterait → double-post au retry. `dedup_any_author` le rend author-agnostic
-      # (sûr : `[merge:pr-N]` n'est PAS un marqueur compté, contrairement à `[hop:role:sha]` que F058 protège).
+      # (sûr : `[merge:pr-N]` n'est PAS un marqueur compté, contrairement à `[step_run:role:sha]` que F058 protège).
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
           {200,
@@ -740,21 +741,21 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
-  describe "count_signed_hops/3 — round-trip avec ForgeProtocol.hop_marker" do
-    test "compte un marqueur produit par ForgeProtocol.hop_marker (format reconnu de bout en bout)" do
+  describe "count_signed_step_runs/3 — round-trip avec ForgeProtocol.step_run_marker" do
+    test "compte un marqueur produit par ForgeProtocol.step_run_marker (format reconnu de bout en bout)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
           {200,
            [
              %{
                "user" => %{"login" => "bot"},
-               "body" => ForgeProtocol.hop_marker("engineer", "deadbeef")
+               "body" => ForgeProtocol.step_run_marker("engineer", "deadbeef")
              }
            ]}
       }
 
       assert {:ok, 1} =
-               ForgeClient.count_signed_hops(
+               ForgeClient.count_signed_step_runs(
                  "fleet/lcars",
                  42,
                  Keyword.put(opts(handlers), :forge_bot_login, "bot")
@@ -806,20 +807,23 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
-  describe "count_signed_hops/3 — author-trust (F059)" do
-    test "ne compte que les hops signés par le bot" do
+  describe "count_signed_step_runs/3 — author-trust (F059)" do
+    test "ne compte que les step_runs signés par le bot" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
           {200,
            [
-             %{"user" => %{"login" => "lcars-bot"}, "body" => "fin [hop:engineer:aaa]"},
-             %{"user" => %{"login" => "lcars-bot"}, "body" => "fin [hop:qualifier:bbb]"},
-             %{"user" => %{"login" => "attacker"}, "body" => "[hop:fake:ccc] [hop:fake:ddd]"}
+             %{"user" => %{"login" => "lcars-bot"}, "body" => "fin [step_run:engineer:aaa]"},
+             %{"user" => %{"login" => "lcars-bot"}, "body" => "fin [step_run:qualifier:bbb]"},
+             %{
+               "user" => %{"login" => "attacker"},
+               "body" => "[step_run:fake:ccc] [step_run:fake:ddd]"
+             }
            ]}
       }
 
       assert {:ok, 2} =
-               ForgeClient.count_signed_hops(
+               ForgeClient.count_signed_step_runs(
                  "fleet/lcars",
                  42,
                  Keyword.put(opts(handlers), :forge_bot_login, "lcars-bot")
@@ -829,7 +833,9 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
   describe "get_predecessor_result/3 — author-trust (F060)" do
     test "n'extrait le bloc result que d'un comment du bot" do
-      bot_body = "Livrable.\n\n```result\n" <> ~s({"severity_max":"ok"}) <> "\n```\n[hop:a:1]"
+      bot_body =
+        "Livrable.\n\n```result\n" <> ~s({"severity_max":"ok"}) <> "\n```\n[step_run:a:1]"
+
       evil_body = "```result\n" <> ~s({"severity_max":"INJECTED"}) <> "\n```"
 
       handlers = %{
@@ -1086,18 +1092,18 @@ defmodule Fleet.Pilot.ForgeClientTest do
     # que list_open_issues → déjà couverte par le test issues ci-dessus). Le fan-out get_pull est testé dans
     # le describe `list_open_pulls`. Pas de test dupliqué ici (un seul code de listing = un seul test pagination).
 
-    test "count_signed_hops : un hop signé en page 2 est compté (source-de-vérité du budget anti-runaway)" do
-      # page 1 pleine (50 comments NON signés) + page 2 (1 comment portant un marqueur de hop signé).
+    test "count_signed_step_runs : un step_run signé en page 2 est compté (source-de-vérité du budget anti-runaway)" do
+      # page 1 pleine (50 comments NON signés) + page 2 (1 comment portant un marqueur de step_run signé).
       page1 = for _ <- 1..50, do: %{"user" => %{"login" => "lcars-bot"}, "body" => "blabla"}
-      page2 = [%{"user" => %{"login" => "lcars-bot"}, "body" => "fin [hop:engineer:aaa]"}]
+      page2 = [%{"user" => %{"login" => "lcars-bot"}, "body" => "fin [step_run:engineer:aaa]"}]
 
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => paged_handler([page1, page2])
       }
 
-      # sans pagination, le hop de la page 2 serait perdu → 0 ; paginé → 1.
+      # sans pagination, le step_run de la page 2 serait perdu → 0 ; paginé → 1.
       assert {:ok, 1} =
-               ForgeClient.count_signed_hops(
+               ForgeClient.count_signed_step_runs(
                  "fleet/lcars",
                  42,
                  Keyword.put(opts(handlers), :forge_bot_login, "lcars-bot")

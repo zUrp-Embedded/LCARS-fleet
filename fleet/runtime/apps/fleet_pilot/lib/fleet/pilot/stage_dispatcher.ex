@@ -348,7 +348,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # pour corriger sur la même PR. Idempotent (verrou PR).
   #
   # FREIN ANTI-CHURN. Sans compteur, `dispatch_rework` re-spawnerait le producteur à chaque tick — le frein
-  # `rebound` (budget carte, HopConsumer) n'est jamais appelé sur CE chemin (PR-review-driven) → rework
+  # `rebound` (budget carte, StepRunConsumer) n'est jamais appelé sur CE chemin (PR-review-driven) → rework
   # INFINI si l'eng ne satisfait jamais le juge, sans escalade. On borne les rounds par un compteur
   # FORGE-NATIF (`count_change_request_rounds` = nb de reviews REQUEST_CHANGES, monotone) aligné sur le frein
   # carte (budget = `max_rework_rounds`, défaut 2, configurable via `:max_pr_rework_rounds`). Au-delà du
@@ -667,7 +667,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # (poller mono-process) ; PR déjà mergée → 409 → la PR disparaît au tick suivant (idempotent).
   defp promote_pr(pr_number, head, ctx) do
     with {:ok, {issue_n, producer}} <- parse_feature_branch_or_skip(head) do
-      # Sceau UNIQUE partagé avec `HopCompleter.promote` : commentaire gatekeeper + merge
+      # Sceau UNIQUE partagé avec `StepRunCompleter.promote` : commentaire gatekeeper + merge
       # signé gatekeeper. Un chemin de merge séparé forkerait en token système (l'escalade signerait `system`).
       gk_opts =
         Fleet.Pilot.ForgeClient.as_role(
@@ -707,7 +707,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   # `promote_comment` + le rôle gatekeeper + le merge vivent dans `Fleet.Pilot.GatekeeperSeal`
-  # (sceau UNIQUE partagé avec `HopCompleter.promote` — pas de fork de signature de merge).
+  # (sceau UNIQUE partagé avec `StepRunCompleter.promote` — pas de fork de signature de merge).
 
   # Nom RC Desktop = `<projet>_<role>` (projet = segment final du repo, ex.
   # `fleet/poc-8` → `poc-8`). Label EXACT (claude_launch → `--remote-control "<nom>"`, zéro suffixe
@@ -1150,8 +1150,8 @@ defmodule Fleet.Pilot.StageDispatcher do
         with {:ok, sha} <- ls_remote_sha(repo_url, base_branch),
              {:ok, gate_sha} <- resolve_gate_base_sha(repo_url, gate_base_branch, sha) do
           # `"repo"` (full_name "owner/name") embarqué dans le projet → il voyage jusqu'au pod
-          # puis ressort dans `pod.completed` (`pod_completed_payload`) → le HopConsumer sait sur QUEL
-          # repo agir (multi-projet), sans le re-dériver. `repo_path` = l'URL de push (remote per-hop).
+          # puis ressort dans `pod.completed` (`pod_completed_payload`) → le StepRunConsumer sait sur QUEL
+          # repo agir (multi-projet), sans le re-dériver. `repo_path` = l'URL de push (remote per-step-run).
           {:ok,
            %{
              "repo" => repo,

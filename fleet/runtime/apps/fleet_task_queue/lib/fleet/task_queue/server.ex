@@ -33,7 +33,7 @@ defmodule Fleet.TaskQueue.Server do
   exercer le chemin lifecycle non-avalé `work_item_completed`).
 
   ## Broadcast — load-bearing vs best-effort
-  `work_item_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir le hop) →
+  `work_item_completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir le step_run) →
   `required_broadcast` : un échec n'est PAS avalé, il propage `{:error, {:broadcast_failed, _}}` au caller
   de `submit_result` (plus de `:ok` muet qui laisse le verrou forge à vie). Les autres events
   (enqueued/assigned/cleared/failed-deadline/state_corrupt) = `best_effort_broadcast` (observabilité, rescue).
@@ -213,17 +213,17 @@ defmodule Fleet.TaskQueue.Server do
             completed = %{task | state: :completed, completed_at: now(), result: clean_result}
             new_state = state |> put_task(completed) |> persist()
 
-            # `work_item_completed` est LIFECYCLE load-bearing : le HopConsumer en DÉPEND pour finir le
-            # hop (lever le verrou forge). Le broadcast passe par `required_broadcast` : son échec n'est PLUS
+            # `work_item_completed` est LIFECYCLE load-bearing : le StepRunConsumer en DÉPEND pour finir le
+            # step_run (lever le verrou forge). Le broadcast passe par `required_broadcast` : son échec n'est PLUS
             # avalé en `:ok`. Si la diffusion échoue, on NE rend PAS `{:ok, completed}` (qui ferait croire au
-            # pod « tâche close » alors que le hop ne finira jamais → verrou conservé à vie) : on propage
+            # pod « tâche close » alors que le step_run ne finira jamais → verrou conservé à vie) : on propage
             # `{:error, {:broadcast_failed, _}}`. La tâche RESTE `:completed`+persistée (le livrable n'est
             # pas perdu ; le rail forge-driven re-dérive au besoin), mais le pod voit un échec honnête.
             # role/issue_id additifs : le DeliveryPublisher stampe l'identité de l'agent d'origine
             # sur le commit forge. Les consumers existants ignorent les clés extra.
             # `metadata` additif : le verdict work_item_completed porte le metadata de la TÂCHE (qui
-            # survit dans le broker au crash du HopConsumer seul). Pour une éval gatekeeper il porte le
-            # contexte de reprise (`gate_eval`/`payload`/`pipeline`/…) → le HopConsumer redémarré (gate_evals
+            # survit dans le broker au crash du StepRunConsumer seul). Pour une éval gatekeeper il porte le
+            # contexte de reprise (`gate_eval`/`payload`/`pipeline`/…) → le StepRunConsumer redémarré (gate_evals
             # RAM vide) RECONSTRUIT l'eval_ctx du metadata au lieu d'un `{:noreply}` silencieux (wedge à vie).
             ev =
               event(:work_item_completed, completed, %{
@@ -450,12 +450,12 @@ defmodule Fleet.TaskQueue.Server do
   end
 
   # Classification load-bearing vs best-effort. Un `broadcast/2` unique qui avalerait TOUTE exception en
-  # `:ok` — y compris pour `work_item_completed`, dont le HopConsumer DÉPEND pour finir le hop — serait piégeux :
-  # un `work_item_completed` avalé = submit OK rendu au pod, MAIS fin-de-hop jamais déclenchée → verrou forge
+  # `:ok` — y compris pour `work_item_completed`, dont le StepRunConsumer DÉPEND pour finir le step_run — serait piégeux :
+  # un `work_item_completed` avalé = submit OK rendu au pod, MAIS fin-de-step-run jamais déclenchée → verrou forge
   # conservé à vie (wedge silencieux). On SÉPARE donc les deux régimes :
   #
   #   - `best_effort_broadcast/2` : OBSERVABILITÉ pure (work_item_enqueued/assigned/cleared/failed-deadline,
-  #     state_corrupt). Un échec est non-bloquant (rescue → log) — personne ne FINIT un hop dessus.
+  #     state_corrupt). Un échec est non-bloquant (rescue → log) — personne ne FINIT un step_run dessus.
   #   - `required_broadcast/2` : LIFECYCLE load-bearing (work_item_completed). L'échec n'est PAS avalé : il
   #     remonte `{:error, {:broadcast_failed, _}}` → le caller (`submit_result`) le propage au pod (qui ne
   #     reçoit PAS un faux "tâche close" et peut re-soumettre) au lieu d'un `:ok` qui ment.
@@ -482,7 +482,7 @@ defmodule Fleet.TaskQueue.Server do
 
   # Broadcast LIFECYCLE load-bearing : l'échec n'est PAS avalé. Retourne `:ok` ou
   # `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé en ERROR (pas
-  # warning) : un `work_item_completed` non diffusé = wedge potentiel (hop jamais fini), c'est un incident.
+  # warning) : un `work_item_completed` non diffusé = wedge potentiel (step_run jamais fini), c'est un incident.
   defp required_broadcast(state, %Fleet.Event{} = ev) do
     case state.bus.broadcast(state.topic, ev) do
       :ok ->
@@ -493,7 +493,7 @@ defmodule Fleet.TaskQueue.Server do
 
         Logger.error(
           "TaskQueue required_broadcast #{ev.type} ÉCHEC (pod=#{ev.pod_id}) : #{inspect(reason)} — " <>
-            "lifecycle NON diffusé (le hop ne finira pas ; propagé au caller, pas avalé)"
+            "lifecycle NON diffusé (le step_run ne finira pas ; propagé au caller, pas avalé)"
         )
 
         {:error, {:broadcast_failed, reason}}

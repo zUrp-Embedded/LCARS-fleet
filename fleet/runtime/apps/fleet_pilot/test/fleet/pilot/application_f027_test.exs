@@ -20,10 +20,10 @@ defmodule Fleet.Pilot.ApplicationF027Test do
   end
 
   # F-027 + F-037 : avant, `stage_dispatch?: true` + config incomplète → `stage_children` rendait `[]` en
-  # SILENCE → l'app pilot démarrait « verte » sans Poller/HopConsumer (rail forge mort, zéro log). Désormais :
+  # SILENCE → l'app pilot démarrait « verte » sans Poller/StepRunConsumer (rail forge mort, zéro log). Désormais :
   # l'opérateur a DEMANDÉ le mode stage → config incomplète = deploy cassé → raise au boot. F-037 a re-pointé
-  # la garde : ce n'est plus `:poll_repo` (le poller DÉCOUVRE par topic) ni un remote figé (per-hop), mais la
-  # forge `base_url` — sans elle, ni découverte (`search_repos_by_topic`) ni push (remote per-hop) ne marchent.
+  # la garde : ce n'est plus `:poll_repo` (le poller DÉCOUVRE par topic) ni un remote figé (per-step-run), mais la
+  # forge `base_url` — sans elle, ni découverte (`search_repos_by_topic`) ni push (remote per-step-run) ne marchent.
 
   test "F-037 : stage_dispatch? true sans forge base_url (:forge absent) → raise (rail mort évité)" do
     Application.put_env(:fleet_pilot, :stage_dispatch?, true)
@@ -54,6 +54,6 @@ defmodule Fleet.Pilot.ApplicationF027Test do
     # singletons sous leurs noms globaux et entrerait en conflit). `:poll_repo` absent → pas de raise.
     children = Fleet.Pilot.Application.stage_children_for_test()
     assert Enum.any?(children, &match?({Fleet.Pilot.Poller, _}, &1))
-    assert Enum.any?(children, &match?({Fleet.Pilot.HopConsumer, _}, &1))
+    assert Enum.any?(children, &match?({Fleet.Pilot.StepRunConsumer, _}, &1))
   end
 end

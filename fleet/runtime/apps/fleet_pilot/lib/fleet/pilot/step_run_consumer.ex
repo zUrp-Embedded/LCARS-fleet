@@ -1,10 +1,10 @@
-defmodule Fleet.Pilot.HopConsumer do
+defmodule Fleet.Pilot.StepRunConsumer do
   @moduledoc """
-  Consumer Bus de la **fin-de-hop** (la forge EST la machine à états ; ce module en réagit).
+  Consumer Bus de la **fin-de-step-run** (la forge EST la machine à états ; ce module en réagit).
   Subscribe `Fleet.EventRouter.Bus` (topic `fleet.events`) ; sur chaque
   `%Fleet.Event{source: :spawner, type: :"pod.completed"}` d'un pod
-  **stage-dispatch** (assignee-driven), traduit l'event en `hop` et délègue la
-  séquence de complétion à `Fleet.Pilot.HopCompleter`.
+  **stage-dispatch** (assignee-driven), traduit l'event en `step_run` et délègue la
+  séquence de complétion à `Fleet.Pilot.StepRunCompleter`.
 
   ## Gatekeeper = exception (escalade), PAS un stage
 
@@ -44,18 +44,18 @@ defmodule Fleet.Pilot.HopConsumer do
       (pass/fail) ; les escalades gatekeeper en attente vivent en RAM (`gate_evals`)
       comme **optimisation fast-path** — mais ce n'est plus une dépendance dure :
       le verdict est **auto-descriptif** (le metadata de la tâche d'éval
-      porte le contexte de reprise → un crash du HopConsumer seul, broker vivant,
+      porte le contexte de reprise → un crash du StepRunConsumer seul, broker vivant,
       reconstruit `eval_ctx` du metadata au lieu de jeter le verdict en silence).
 
-  ## Traduction event → hop
+  ## Traduction event → step_run
 
     * `issue_number` ← `issue_id` (`"issue-N"` → `N`)
-    * `repo` ← **l'event** (`payload["repository"]["full_name"]`), per-hop. MULTI-PROJET :
-      le HopConsumer est un singleton qui traite les hops de TOUS les projets de l'humain → le repo
+    * `repo` ← **l'event** (`payload["repository"]["full_name"]`), per-step-run. MULTI-PROJET :
+      le StepRunConsumer est un singleton qui traite les step_runs de TOUS les projets de l'humain → le repo
       (et le `remote` où pousser) ne peut PAS être figé en config ; il VOYAGE dans l'event (« l'event
       porte tout l'état »). `:repo`/`:remote` de config restent un **fallback** (single-repo legacy / test
-      avec payload nu). Le state effectif d'un hop est dérivé par `hop_state/2` à l'entrée.
-    * `remote` ← **l'event** (`payload["remote"]`, = le `repo_path` cloné = l'URL de push), per-hop.
+      avec payload nu). Le state effectif d'un step_run est dérivé par `step_run_state/2` à l'entrée.
+    * `remote` ← **l'event** (`payload["remote"]`, = le `repo_path` cloné = l'URL de push), per-step-run.
     * `deliverable_opts` ← `{mode: :git_native, workspace, base_sha,
       allowed_emails(role), remote, target_branch}` ; le SYSTÈME pousse
       (le pod a commité dans son workspace, le système vérifie+pousse) sur une branche système
@@ -65,19 +65,19 @@ defmodule Fleet.Pilot.HopConsumer do
 
   ## Config / seams
 
-    * `:repo` — `"owner/name"` — **fallback** (le repo per-hop vient de l'event)
-    * `:remote` — URL/nom du remote où le système pousse — **fallback** (per-hop vient de l'event)
-    * `:forge_opts` — passé au ForgeClient via HopCompleter
+    * `:repo` — `"owner/name"` — **fallback** (le repo per-step-run vient de l'event)
+    * `:remote` — URL/nom du remote où le système pousse — **fallback** (per-step-run vient de l'event)
+    * `:forge_opts` — passé au ForgeClient via StepRunCompleter
     * `:role_emails` — `fn role -> [email] end` (défaut `"<role>@lcars.local"`),
       doit matcher l'identité git injectée au pod (la gate vérifie l'email du committer)
-    * `:hop_completer` — seam (défaut `Fleet.Pilot.HopCompleter`)
+    * `:step_run_completer` — seam (défaut `Fleet.Pilot.StepRunCompleter`)
     * `:task_queue` — broker de briefs pour l'escalade gatekeeper (défaut `Fleet.TaskQueue`)
     * `:spawner` — wake du gatekeeper après enqueue (défaut `Fleet.Spawner`)
     * `:gatekeeper_pod_id_fun` — `fn -> pod_id | nil end` (défaut `&Fleet.Pipeline.Gatekeeper.pod_id/0`)
     * `:subscribe` — bool défaut `true` (tests : `false` + envoi manuel)
-    * `:hop_runner` — seam d'offload de la complétion. Défaut `nil` → **SYNC** (l'outcome remonte,
+    * `:step_run_runner` — seam d'offload de la complétion. Défaut `nil` → **SYNC** (l'outcome remonte,
       seams/tests inchangés). Prod (`application.ex`) injecte `&offload_async/1` → la complétion (git push
-      ≤30s + writes forge) tourne dans une `Task.Supervisor` : le **singleton HopConsumer ne bloque pas**
+      ≤30s + writes forge) tourne dans une `Task.Supervisor` : le **singleton StepRunConsumer ne bloque pas**
       (et un `.complete` qui crash est isolé par la task supervisée).
   """
 
@@ -91,12 +91,12 @@ defmodule Fleet.Pilot.HopConsumer do
     :remote,
     :forge_opts,
     :role_emails,
-    :hop_completer,
+    :step_run_completer,
     :forge_client,
     :loader,
     :deliverable,
     # Resout le deliverable_mode d'un role (`"git_native"` producteur / `"payload"` juge)
-    # pour classer le hop PR-natif. Defaut = catalogue cap-profile. Seam test (zero chargement).
+    # pour classer le step_run PR-natif. Defaut = catalogue cap-profile. Seam test (zero chargement).
     :deliverable_mode_fun,
     :max_rework_rounds,
     # Seams d'escalade gatekeeper.
@@ -116,7 +116,7 @@ defmodule Fleet.Pilot.HopConsumer do
     gate_evals: %{},
     # Seam d'offload de la complétion. Défaut nil → `run_completion` retombe sur SYNC (l'outcome
     # remonte, seams `maybe_complete`/`resume_gate` + tous les tests inchangés). Prod = async Task.Supervisor.
-    hop_runner: nil
+    step_run_runner: nil
   ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -127,23 +127,26 @@ defmodule Fleet.Pilot.HopConsumer do
   end
 
   # Superviseur de tasks pour l'offload de la complétion (prod). Nom partagé entre
-  # `application.ex stage_children` (qui le démarre AVANT le HopConsumer) et `offload_async/1`.
-  @hop_task_supervisor Fleet.Pilot.HopTaskSupervisor
+  # `application.ex stage_children` (qui le démarre AVANT le StepRunConsumer) et `offload_async/1`.
+  @step_run_task_supervisor Fleet.Pilot.StepRunTaskSupervisor
 
   @doc false
-  def task_supervisor, do: @hop_task_supervisor
+  def task_supervisor, do: @step_run_task_supervisor
 
-  # Runner ASYNC (prod, injecté en `:hop_runner`) — offload la complétion dans la
+  # Runner ASYNC (prod, injecté en `:step_run_runner`) — offload la complétion dans la
   # `Task.Supervisor` : le git push ≤30s + writes forge ne bloquent PAS le singleton. Rend
   # `{:ok, :offloaded}` (le vrai outcome est loggé dans la task). Échec de spawn → fail-loud loggé.
   @doc false
   def offload_async(fun) do
-    case Task.Supervisor.start_child(@hop_task_supervisor, fun) do
+    case Task.Supervisor.start_child(@step_run_task_supervisor, fun) do
       {:ok, _pid} ->
         {:ok, :offloaded}
 
       {:error, reason} ->
-        Logger.error("HopConsumer: offload Task échoué (#{inspect(reason)}) — complétion perdue")
+        Logger.error(
+          "StepRunConsumer: offload Task échoué (#{inspect(reason)}) — complétion perdue"
+        )
+
         {:error, {:offload_failed, reason}}
     end
   end
@@ -153,7 +156,7 @@ defmodule Fleet.Pilot.HopConsumer do
     if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
 
     # MULTI-PROJET : `:repo`/`:remote` ne sont PAS obligatoires — le singleton dérive le
-    # repo (+ remote de push) per-hop depuis l'event (`hop_state/2`). Ils restent acceptés comme FALLBACK
+    # repo (+ remote de push) per-step-run depuis l'event (`step_run_state/2`). Ils restent acceptés comme FALLBACK
     # (single-repo legacy / test avec payload nu). Pas de `{:stop, :missing_required_opt}` : un boot sans
     # repo est légitime (multi-projet) ; la garde fail-loud du rail vit côté `application.ex`
     # (forge base_url requis pour la découverte + le push).
@@ -162,17 +165,17 @@ defmodule Fleet.Pilot.HopConsumer do
       remote: Keyword.get(opts, :remote),
       forge_opts: Keyword.get(opts, :forge_opts, []),
       role_emails: Keyword.get(opts, :role_emails, &default_role_emails/1),
-      hop_completer: Keyword.get(opts, :hop_completer, Fleet.Pilot.HopCompleter),
-      # nil → HopCompleter applique son défaut (Fleet.Pilot.ForgeClient). Injectable
+      step_run_completer: Keyword.get(opts, :step_run_completer, Fleet.Pilot.StepRunCompleter),
+      # nil → StepRunCompleter applique son défaut (Fleet.Pilot.ForgeClient). Injectable
       # pour un backend forge alternatif (ou un sim en dogfood bare).
       forge_client: Keyword.get(opts, :forge_client),
       # Loader de carte (mode carte multi-stage) : résout le stage suivant. Défaut = Loader réel.
       loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader),
-      # nil → HopCompleter applique son défaut (Fleet.Pipeline.Deliverable). Injectable (sim/test).
+      # nil → StepRunCompleter applique son défaut (Fleet.Pipeline.Deliverable). Injectable (sim/test).
       deliverable: Keyword.get(opts, :deliverable),
-      # Classification producteur/juge du hop PR-natif. Defaut = catalogue cap-profile.
+      # Classification producteur/juge du step_run PR-natif. Defaut = catalogue cap-profile.
       deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
-      # Bound anti-runaway du rebond de gate. Budget de hops = nb_stages *
+      # Bound anti-runaway du rebond de gate. Budget de step_runs = nb_stages *
       # (max_rework_rounds + 1) : la 1re passe + N rounds de rework. Au-delà → stuck
       # surfacé (pas de boucle). Défaut 2 rounds.
       max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2),
@@ -188,15 +191,15 @@ defmodule Fleet.Pilot.HopConsumer do
       gate_evals: %{},
       # Prod (stage_children) injecte `&offload_async/1` ici ; sans cette
       # lecture, `run_completion` retomberait sur sync → le git push bloquerait le singleton (offload mort).
-      hop_runner: Keyword.get(opts, :hop_runner)
+      step_run_runner: Keyword.get(opts, :step_run_runner)
     }
 
     Logger.info(
-      "fleet_pilot HopConsumer start (MULTI-PROJET F-037 : repo/remote per-hop) " <>
+      "fleet_pilot StepRunConsumer start (MULTI-PROJET F-037 : repo/remote per-step-run) " <>
         "fallback_repo=#{inspect(state.repo)} fallback_remote=#{inspect(state.remote)}"
     )
 
-    # En stage-mode, le HopConsumer EST le chemin actif → il assure le gatekeeper
+    # En stage-mode, le StepRunConsumer EST le chemin actif → il assure le gatekeeper
     # permanent (handle_continue : boot hors init, OTP). Idempotent + gardé autoboot (no-op
     # en test où gatekeeper_autoboot=false ; no-op si le path RAM l'a déjà booté).
     {:ok, state, {:continue, :ensure_gatekeeper}}
@@ -209,11 +212,11 @@ defmodule Fleet.Pilot.HopConsumer do
         :ok
 
       {:ok, pod_id} ->
-        Logger.info("HopConsumer: gatekeeper permanent assuré (pod=#{pod_id})")
+        Logger.info("StepRunConsumer: gatekeeper permanent assuré (pod=#{pod_id})")
 
       {:error, reason} ->
         Logger.warning(
-          "HopConsumer: ensure gatekeeper échoué (#{inspect(reason)}) — escalades KO"
+          "StepRunConsumer: ensure gatekeeper échoué (#{inspect(reason)}) — escalades KO"
         )
     end
 
@@ -233,17 +236,20 @@ defmodule Fleet.Pilot.HopConsumer do
       # à l'aveugle avant le verdict).
       {:escalate, corr, eval_ctx} ->
         Logger.info(
-          "HopConsumer gate→gatekeeper: #{p["issue_id"]} stage=#{eval_ctx.stage} corr=#{inspect(corr)}"
+          "StepRunConsumer gate→gatekeeper: #{p["issue_id"]} stage=#{eval_ctx.stage} corr=#{inspect(corr)}"
         )
 
         {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
 
       {:skip, reason} ->
-        Logger.debug("HopConsumer skip #{p["issue_id"]} (#{reason})")
+        Logger.debug("StepRunConsumer skip #{p["issue_id"]} (#{reason})")
         {:noreply, state}
 
       {:error, reason} ->
-        Logger.warning("HopConsumer fin-de-hop FAIL #{p["issue_id"]}: #{inspect(reason)}")
+        Logger.warning(
+          "StepRunConsumer fin-de-step-run FAIL #{p["issue_id"]}: #{inspect(reason)}"
+        )
+
         {:noreply, state}
     end
   end
@@ -259,8 +265,8 @@ defmodule Fleet.Pilot.HopConsumer do
     case Map.pop(state.gate_evals, corr) do
       # FAST-PATH absent : le contexte n'est pas en RAM. DEUX cas EXCLUSIFS :
       #  (a) le metadata du verdict porte `gate_eval` (escalade gatekeeper) → on RECONSTRUIT l'eval_ctx du
-      #      metadata (verdict auto-descriptif) → resume. C'est le wedge fermé : crash du HopConsumer seul
-      #      (broker vivant → la tâche + son metadata survivent) → le verdict arrive au HopConsumer redémarré
+      #      metadata (verdict auto-descriptif) → resume. C'est le wedge fermé : crash du StepRunConsumer seul
+      #      (broker vivant → la tâche + son metadata survivent) → le verdict arrive au StepRunConsumer redémarré
       #      (gate_evals vide) → reconstruction au lieu de `{:noreply}` silencieux (issue verrouillée à vie).
       #  (b) sinon → `{:noreply}` (cas NORMAL : chaque pod stage-dispatch émet un `work_item_completed` sans
       #      `gate_eval` → ce n'est pas une escalade gatekeeper → on l'ignore).
@@ -285,27 +291,29 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # Les events d'ÉCHEC de pod (`pod.failed`/`wake.failed`) sont routés par `Fleet.Pilot.IncidentConsumer`
   # (consumer SÉPARÉ → registre d'incidents). Ici ils tombent dans le catch-all (no-op) : ce singleton ne
-  # porte QUE la fin-de-hop (complétion), pas la politique d'incidents (concern distinct, blast-radius isolé).
+  # porte QUE la fin-de-step-run (complétion), pas la politique d'incidents (concern distinct, blast-radius isolé).
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
   # Exécute la reprise (commun fast-path / reconstruction). La reprise pousse/écrit sur le
-  # repo du HOP escaladé (porté par le `pod.completed` d'origine, conservé dans `eval_ctx.payload`), pas sur la
+  # repo du STEP_RUN escaladé (porté par le `pod.completed` d'origine, conservé dans `eval_ctx.payload`), pas sur la
   # config. Le verdict du gatekeeper arrive via un `work_item_completed` (autre event, sans repo) → on re-dérive
   # depuis le payload d'origine.
   defp do_resume_gate(eval_ctx, ev, corr, state) do
-    case resume_gate(eval_ctx, ev.payload, hop_state(eval_ctx.payload, state)) do
+    case resume_gate(eval_ctx, ev.payload, step_run_state(eval_ctx.payload, state)) do
       # Outcome loggé par `run_completion` ; ici on ne logge que l'erreur de DÉCISION (pré-complétion).
       {:ok, _outcome} ->
         :ok
 
       {:error, reason} ->
-        Logger.warning("HopConsumer gate resume FAIL corr=#{inspect(corr)}: #{inspect(reason)}")
+        Logger.warning(
+          "StepRunConsumer gate resume FAIL corr=#{inspect(corr)}: #{inspect(reason)}"
+        )
     end
   end
 
   # RECONSTRUIT l'eval_ctx depuis le metadata du verdict (verdict auto-descriptif), quand le
-  # fast-path RAM (`gate_evals`) est vide (crash du HopConsumer seul). Le metadata voyage dans
+  # fast-path RAM (`gate_evals`) est vide (crash du StepRunConsumer seul). Le metadata voyage dans
   # `ev.payload[:metadata]` (posé par `task_queue/server.ex` ; clé atom). `:not_gate_eval` si absent ou pas une
   # éval gatekeeper → cas normal `{:noreply}`. `carte` re-chargée du `pipeline` (Loader seam — dérivable, pas
   # embarquée : trop grosse). Si le metadata est une éval mais malformé (payload/role/n manquants) → fail-loud
@@ -324,7 +332,7 @@ defmodule Fleet.Pilot.HopConsumer do
       else
         other ->
           Logger.warning(
-            "HopConsumer: metadata gate_eval mais reconstruction eval_ctx impossible " <>
+            "StepRunConsumer: metadata gate_eval mais reconstruction eval_ctx impossible " <>
               "(#{inspect(other)}) — verdict NON repris (fail-loud, pas de resume sur contexte tronqué)"
           )
 
@@ -338,7 +346,7 @@ defmodule Fleet.Pilot.HopConsumer do
   defp reconstruct_eval_ctx(_, _), do: :not_gate_eval
 
   # ============================================================
-  # Traduction event → hop (pure sauf l'appel HopCompleter / enqueue brief)
+  # Traduction event → step_run (pure sauf l'appel StepRunCompleter / enqueue brief)
   # ============================================================
 
   @doc false
@@ -355,21 +363,21 @@ defmodule Fleet.Pilot.HopConsumer do
 
       true ->
         case parse_issue_number(payload["issue_id"]) do
-          # Repo + remote de CE hop dérivés de l'event (per-hop), pas de la config.
-          {:ok, n} -> run_hop(payload, n, hop_state(payload, state))
+          # Repo + remote de CE step_run dérivés de l'event (per-step-run), pas de la config.
+          {:ok, n} -> run_step_run(payload, n, step_run_state(payload, state))
           :error -> {:skip, {:bad_issue_id, payload["issue_id"]}}
         end
     end
   end
 
-  # MULTI-PROJET — dérive le state EFFECTIF d'un hop : le `repo` (forge API : list_open_pulls,
-  # count_signed_hops, comments…) et le `remote` (URL de push du livrable) viennent de l'EVENT, pas de la
-  # config. Le singleton HopConsumer traite les hops de TOUS les projets de l'humain → figer repo/remote en
+  # MULTI-PROJET — dérive le state EFFECTIF d'un step_run : le `repo` (forge API : list_open_pulls,
+  # count_signed_step_runs, comments…) et le `remote` (URL de push du livrable) viennent de l'EVENT, pas de la
+  # config. Le singleton StepRunConsumer traite les step_runs de TOUS les projets de l'humain → figer repo/remote en
   # config serait faux dès le 2e projet. Le Spawner enrichit `pod.completed` à la source
   # (`Fleet.Spawner.Pod.pod_completed_payload` : `"repository" => %{"full_name"}` + `"remote"`). Payload nu
   # (sans repo : test/single-repo legacy) → on garde le state de config (fallback). `remote` absent mais
   # repo présent → fallback remote (rare ; un projet bien onboardé porte les deux).
-  defp hop_state(payload, state) do
+  defp step_run_state(payload, state) do
     case payload_repo(payload) do
       repo when is_binary(repo) and repo != "" ->
         %{state | repo: repo, remote: payload["remote"] || state.remote}
@@ -382,7 +390,7 @@ defmodule Fleet.Pilot.HopConsumer do
   defp payload_repo(payload),
     do: get_in(payload, ["repository", "full_name"]) || payload["repo"]
 
-  defp run_hop(payload, n, state) do
+  defp run_step_run(payload, n, state) do
     role = payload["role"]
 
     cond do
@@ -413,7 +421,7 @@ defmodule Fleet.Pilot.HopConsumer do
             apply_verdict(decision, trace, ctx, state)
 
           {:ok, intent, {next_assignee, next_stage}} ->
-            complete_business_hop(payload, n, role, intent, next_assignee, next_stage, state)
+            complete_business_step_run(payload, n, role, intent, next_assignee, next_stage, state)
         end
     end
   end
@@ -431,7 +439,7 @@ defmodule Fleet.Pilot.HopConsumer do
         do: "🚧 **#{role} BLOQUÉ** (dépendance/info manquante) — motif non fourni.",
         else: "🚧 **#{role} BLOQUÉ** (dépendance/info manquante) :\n\n#{reason}"
 
-    hop = %{
+    step_run = %{
       repo: state.repo,
       issue_number: n,
       role: role,
@@ -443,7 +451,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
     result =
       run_completion(state, "##{n} (blocked)", fn ->
-        state.hop_completer.await_arch(hop, hc_opts)
+        state.step_run_completer.await_arch(step_run, hc_opts)
       end)
 
     # KICK l'arch : un producteur bloqué = l'arch (auteur du brief) doit débloquer (clarifier/corriger).
@@ -451,39 +459,39 @@ defmodule Fleet.Pilot.HopConsumer do
     result
   end
 
-  # Exécute la complétion d'un hop via le seam `hop_runner`. SYNC (défaut) → exécute, logge
+  # Exécute la complétion d'un step_run via le seam `step_run_runner`. SYNC (défaut) → exécute, logge
   # l'outcome, et le REND (seams `maybe_complete`/`resume_gate` + tous les tests le reçoivent). ASYNC
   # (prod, Task.Supervisor) → offload : le git push ≤30s + writes forge ne bloquent PAS le singleton,
   # l'outcome est loggé DANS la task, le runner rend `{:ok, :offloaded}`. Ordering préservé (lock
   # lcars-in-flight + writes idempotentes). Un `.complete` qui crash en async est
-  # isolé par la task supervisée (ne tue pas le HopConsumer).
+  # isolé par la task supervisée (ne tue pas le StepRunConsumer).
   defp run_completion(state, label, fun) do
     exec = fn ->
       outcome = fun.()
 
       case outcome do
         {:error, reason} ->
-          Logger.warning("HopConsumer fin-de-hop FAIL #{label}: #{inspect(reason)}")
+          Logger.warning("StepRunConsumer fin-de-step-run FAIL #{label}: #{inspect(reason)}")
 
         _ ->
-          Logger.info("HopConsumer fin-de-hop #{label} → #{inspect(outcome)}")
+          Logger.info("StepRunConsumer fin-de-step-run #{label} → #{inspect(outcome)}")
       end
 
       outcome
     end
 
-    (state.hop_runner || (&run_sync/1)).(exec)
+    (state.step_run_runner || (&run_sync/1)).(exec)
   end
 
   defp run_sync(fun), do: fun.()
 
-  # Construit + applique le hop PR-natif. Classe le role qui FINIT (producteur git_native
+  # Construit + applique le step_run PR-natif. Classe le role qui FINIT (producteur git_native
   # → ouvre la PR ; juge payload → review la PR du producteur) puis delegue le routage selon
-  # l'`intent` de gate a `HopCompleter.complete_pr`. `next_stage` ne sert plus (la route de complétion
+  # l'`intent` de gate a `StepRunCompleter.complete_pr`. `next_stage` ne sert plus (la route de complétion
   # disparait avec le modèle PR-natif). `comment_body` (trace verdict gatekeeper sur continue) est porte
   # mais pas encore materialise sur la PR — gap transitionnel note (la trace vit dans le resultat de tache
   # du gatekeeper ; PR-trace = increment ulterieur).
-  defp complete_business_hop(
+  defp complete_business_step_run(
          payload,
          n,
          role,
@@ -496,7 +504,7 @@ defmodule Fleet.Pilot.HopConsumer do
        ) do
     {pr_role, producer_branch} = classify_pr_role(payload, n, role, state)
 
-    hop =
+    step_run =
       %{
         repo: state.repo,
         # pod_id du PRODUCTEUR (depuis le payload pod.completed) : porte jusqu'a l'emission de
@@ -528,56 +536,56 @@ defmodule Fleet.Pilot.HopConsumer do
       |> maybe_put(:deliverable, state.deliverable)
 
     run_completion(state, "##{n}", fn ->
-      state.hop_completer.complete_pr(hop, hc_opts)
+      state.step_run_completer.complete_pr(step_run, hc_opts)
     end)
   end
 
   # Le producteur (engineer) porte sa `deliverable_opts` (publish vers sa feature-branch) ; le juge
   # review (il ne pousse pas — son verdict est une review native), pas de livrable git.
-  defp maybe_put_deliverable(hop, :producer, role, payload, n, state),
-    do: Map.put(hop, :deliverable_opts, build_deliverable_opts(role, payload, n, state))
+  defp maybe_put_deliverable(step_run, :producer, role, payload, n, state),
+    do: Map.put(step_run, :deliverable_opts, build_deliverable_opts(role, payload, n, state))
 
-  defp maybe_put_deliverable(hop, :judge, _role, _payload, _n, _state), do: hop
+  defp maybe_put_deliverable(step_run, :judge, _role, _payload, _n, _state), do: step_run
 
   # Pour un JUGE no-carte (intent `:reviewed`), le verdict de review (APPROVE/REQUEST_CHANGES)
   # est lu du gate-decision rendu par le pod (GateBrief : `continue`/`abandon`). On le mappe ici et on
-  # le porte dans le hop (`:review_event`) → `HopCompleter.record_review` poste la review correspondante.
+  # le porte dans le step_run (`:review_event`) → `StepRunCompleter.record_review` poste la review correspondante.
   # `continue`→approve ; tout le reste (`abandon`/redirect/escalate/halt/illisible)→**request_changes**
   # (fail-closed DÉCISIF). PAS `:comment` : une review COMMENT n'est pas décisive → le juge resterait
   # « non tranché » et serait re-jugé en boucle. Un verdict non-`continue` = pas vert
   # → on bloque le merge (rework), jamais un merge sur verdict douteux. (escalade-gatekeeper d'un verdict
   # non-trivial = backlog ; ici fail-closed strict.)
-  defp maybe_put_review_event(hop, :judge, :reviewed, payload) do
+  defp maybe_put_review_event(step_run, :judge, :reviewed, payload) do
     result = unwrap_worker_envelope(payload["result"] || %{})
     event = review_event_for_decision(gate_decision(result))
-    hop = Map.put(hop, :review_event, event)
+    step_run = Map.put(step_run, :review_event, event)
 
     # Le juge PRODUIT un `reason`/`details`/`chain` dans sa gate-decision → on le REND sur la review
-    # (visu humaine + rework actionnable). Sinon `HopCompleter.record_review` retombe sur le corps
+    # (visu humaine + rework actionnable). Sinon `StepRunCompleter.record_review` retombe sur le corps
     # générique (« la brique ne satisfait pas son critère »), inactionnable — pour l'humain comme pour
     # le producteur en rework. On ne pose `:review_body` QUE s'il y a de la substance (sans
-    # quoi `Map.get(hop, :review_body, default)` renverrait `nil` au lieu du défaut).
+    # quoi `Map.get(step_run, :review_body, default)` renverrait `nil` au lieu du défaut).
     case judge_review_body(event, result) do
-      body when is_binary(body) and body != "" -> Map.put(hop, :review_body, body)
-      _ -> hop
+      body when is_binary(body) and body != "" -> Map.put(step_run, :review_body, body)
+      _ -> step_run
     end
   end
 
-  defp maybe_put_review_event(hop, _pr_role, _intent, _payload), do: hop
+  defp maybe_put_review_event(step_run, _pr_role, _intent, _payload), do: step_run
 
   # VOIX DE L'ENG (info SORTANTE) : le PRODUCTEUR peut rendre un `summary` markdown dans submit_result
   # (ce qu'il a fait / réponse à la review / motif blocked). On l'extrait du résultat (déplié de
-  # l'enveloppe worker) → `HopCompleter` le poste en commentaire PR (`as_role` engineer). Coercé par
+  # l'enveloppe worker) → `StepRunCompleter` le poste en commentaire PR (`as_role` engineer). Coercé par
   # `safe_str` (l'eng peut rendre un non-binaire → ne pas crasher le singleton). Absent/vide → rien
   # posé. Jumeau SORTANT de la famine d'info ENTRANTE — complète la « panne bidirectionnelle de substance ».
-  defp maybe_put_eng_summary(hop, :producer, payload) do
+  defp maybe_put_eng_summary(step_run, :producer, payload) do
     case eng_summary(payload) do
-      "" -> hop
-      summary -> Map.put(hop, :eng_summary, summary)
+      "" -> step_run
+      summary -> Map.put(step_run, :eng_summary, summary)
     end
   end
 
-  defp maybe_put_eng_summary(hop, _pr_role, _payload), do: hop
+  defp maybe_put_eng_summary(step_run, _pr_role, _payload), do: step_run
 
   defp eng_summary(payload) do
     case unwrap_worker_envelope(payload["result"] || %{}) do
@@ -612,8 +620,8 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # Coercion sûre des sorties LLM : un juge peut rendre `reason`/`details`/`chain` en objets ou listes
   # imbriqués → interpoler/`to_string` brut crashe (String.Chars non implémenté pour Map/List). Tout
-  # non-binaire est `inspect`é. CRITIQUE : la construction du corps NE DOIT PAS crasher le HopConsumer
-  # (SINGLETON) — sinon la fin-de-hop est perdue, le verrou jamais levé, le pipe wedgé.
+  # non-binaire est `inspect`é. CRITIQUE : la construction du corps NE DOIT PAS crasher le StepRunConsumer
+  # (SINGLETON) — sinon la fin-de-step-run est perdue, le verrou jamais levé, le pipe wedgé.
   defp safe_str(nil), do: ""
   defp safe_str(s) when is_binary(s), do: s
   defp safe_str(other), do: inspect(other)
@@ -690,7 +698,7 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
-  # Livrable d'un hop métier : `:git_native`. Le pod a commité dans son workspace,
+  # Livrable d'un step_run métier : `:git_native`. Le pod a commité dans son workspace,
   # le système vérifie (gate identité/ancêtre) + pousse. Il n'existe PAS
   # de stage `role: gatekeeper` → pas de branche `:payload`/verdict.json ici (le verdict
   # du gatekeeper est tracé par `resume_gate`, pas matérialisé comme livrable de stage).
@@ -803,7 +811,7 @@ defmodule Fleet.Pilot.HopConsumer do
       # result PORTE le verdict gate-decision-v1 : le juge a DÉJÀ tranché → PAS de Gates.evaluate (qui
       # jugerait les outputs du juge comme un hard-gate). Le verdict est appliqué par `apply_verdict` (LA
       # fonction, partagée avec le gatekeeper async). gate_decide reste un décideur PUR : il rend
-      # l'intention `{:judge_verdict, …}`, c'est run_hop qui agit.
+      # l'intention `{:judge_verdict, …}`, c'est run_step_run qui agit.
       decision = gate_decision(result)
       trace = verdict_comment(payload["role"], decision, result)
 
@@ -824,12 +832,15 @@ defmodule Fleet.Pilot.HopConsumer do
           tag_advance(advance(carte, stage), producer?(payload["role"], state))
 
         {:fail, reason} ->
-          Logger.info("HopConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}")
+          Logger.info(
+            "StepRunConsumer gate FAIL repo=#{state.repo}##{n} stage=#{stage}: #{reason}"
+          )
+
           tag(:rework, rebound(carte, n, state))
 
         {:dispatch_gatekeeper, _info} ->
           # `payload`/`n`/`role` passés au dispatch : ils sont EMBARQUÉS dans le metadata de la
-          # tâche d'éval (contexte de reprise auto-descriptif). Le HopConsumer redémarré (gate_evals RAM
+          # tâche d'éval (contexte de reprise auto-descriptif). Le StepRunConsumer redémarré (gate_evals RAM
           # vide) reconstruit l'eval_ctx du metadata au lieu de jeter le verdict en silence.
           case dispatch_gatekeeper(carte, stage, result, payload, n, payload["role"], state) do
             {:ok, corr} ->
@@ -883,8 +894,8 @@ defmodule Fleet.Pilot.HopConsumer do
 
         # VERDICT AUTO-DESCRIPTIF : le metadata de la tâche d'éval porte le contexte de REPRISE
         # (`payload`/`n`/`role` en plus du stage/pipeline déjà présents). Cette tâche survit dans le broker
-        # (TaskQueue = autre process) à un crash du HopConsumer seul → le verdict (`work_item_completed`) ramène
-        # ce metadata → le HopConsumer redémarré (gate_evals RAM vidé) reconstruit l'eval_ctx
+        # (TaskQueue = autre process) à un crash du StepRunConsumer seul → le verdict (`work_item_completed`) ramène
+        # ce metadata → le StepRunConsumer redémarré (gate_evals RAM vidé) reconstruit l'eval_ctx
         # (`carte = Loader.load!(pipeline)`) au lieu d'un `{:noreply}` silencieux (issue wedgée à vie). Aucune
         # NOUVELLE source : `payload` porte déjà `workspace`/`base_sha`/`gate_base_sha` — on l'embarque tel quel.
         attrs = %{
@@ -916,13 +927,13 @@ defmodule Fleet.Pilot.HopConsumer do
 
               {:error, reason} ->
                 :telemetry.execute(
-                  [:fleet_pilot, :hop_consumer, :gatekeeper_kick_unreached],
+                  [:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached],
                   %{count: 1},
                   %{pod_id: pod_id, corr: corr, reason: reason}
                 )
 
                 Logger.warning(
-                  "HopConsumer: gatekeeper #{pod_id} kické MAIS INJOIGNABLE (#{inspect(reason)}) — " <>
+                  "StepRunConsumer: gatekeeper #{pod_id} kické MAIS INJOIGNABLE (#{inspect(reason)}) — " <>
                     "brief d'éval enqueué (corr=#{inspect(corr)}), escalade WakeRecovery active ; le verdict " <>
                     "ne reviendra qu'au re-wake/réparation (pas un kick silencieux qui ment)"
                 )
@@ -967,7 +978,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
       other ->
         Logger.warning(
-          "HopConsumer: kick arch #{pod_id} → #{inspect(other)} (arch injoignable ? l'humain relance sa " <>
+          "StepRunConsumer: kick arch #{pod_id} → #{inspect(other)} (arch injoignable ? l'humain relance sa " <>
             "session — la fleet ne reboot PAS l'arch ; label+commentaire restent)"
         )
 
@@ -975,7 +986,7 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   rescue
     e ->
-      Logger.warning("HopConsumer: kick arch a levé #{inspect(e)} (non-bloquant)")
+      Logger.warning("StepRunConsumer: kick arch a levé #{inspect(e)} (non-bloquant)")
       :ok
   end
 
@@ -991,7 +1002,7 @@ defmodule Fleet.Pilot.HopConsumer do
   #   continue → avance (push livrable métier + reassign) ;
   #   abandon  → close (trace verdict, PAS de push : travail rejeté) ;
   #   redirect|escalate_user|halt_wait_input|invalide → await_arch (fail-closed).
-  # La TRACE du verdict est durable : portée dans le comment signé du hop (continue/abandon)
+  # La TRACE du verdict est durable : portée dans le comment signé du step_run (continue/abandon)
   # ou du await_arch — c'est ce dont l'absence a coulé la v1.
   def resume_gate(
         %{n: _n, role: _role, payload: _payload, carte: _carte, stage: _stage} = ctx,
@@ -1006,7 +1017,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # APPLICATION d'un verdict de juge (gate-decision-v1). UNE fonction, partagée par TOUS les juges
   # quelle que soit leur position : le gatekeeper (verdict async via `work_item_completed` → resume_gate) ET le
-  # consultant brief-review (verdict via `pod.completed` → gate_decide → run_hop). continue → avance la
+  # consultant brief-review (verdict via `pod.completed` → gate_decide → run_step_run). continue → avance la
   # carte ; abandon → close ; reste → await_arch. La SEULE diff (PR vs pré-PR) vit dans `complete_judge`
   # (trace = review native si PR, sinon commentaire issue), dérivée de l'état forge + `judge_target` du
   # ctx — PAS d'un fork ici. `trace` est déjà attribué au bon juge (label) par l'appelant.
@@ -1028,7 +1039,7 @@ defmodule Fleet.Pilot.HopConsumer do
         # un stage suivant → `:advance`. Une seule source de vérité pour l'intent terminal.
         case tag_advance(advance(carte, stage), producer?(role, state)) do
           {:ok, intent, {next_assignee, next_stage}} ->
-            complete_business_hop(
+            complete_business_step_run(
               payload,
               n,
               role,
@@ -1058,7 +1069,7 @@ defmodule Fleet.Pilot.HopConsumer do
       other ->
         # `comment_body: trace` → la trace verdict (attribuée au juge via son label, halt_invalid
         # distingué) est portée sur le comment await_arch (qui l'adresse à l'arch), parité continue/abandon.
-        hop = %{
+        step_run = %{
           repo: state.repo,
           issue_number: n,
           role: role,
@@ -1070,7 +1081,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
         result =
           run_completion(state, "##{n}", fn ->
-            state.hop_completer.await_arch(hop, hc_opts)
+            state.step_run_completer.await_arch(step_run, hc_opts)
           end)
 
         # KICK l'arch (notification active : il arme son monitor au spawn comme tout pod). Best-effort.
@@ -1082,15 +1093,15 @@ defmodule Fleet.Pilot.HopConsumer do
   # Verdict `abandon` : close terminal forge, SANS push (le travail métier est rejeté).
   # Le terminal-échec du rail forge-driven EST la fermeture de l'issue (la forge porte l'état),
   # pas un signal d'échec en mémoire : aucun livrable n'est extrait/poussé sur un verdict non-continue.
-  # `deliverable_opts: nil` + `hop_sha` → HopCompleter saute l'étape publish, garde la
+  # `deliverable_opts: nil` + `step_run_sha` → StepRunCompleter saute l'étape publish, garde la
   # séquence idempotente (comment trace → close → unlock).
   defp close_with_trace(n, role, trace, state) do
-    hop = %{
+    step_run = %{
       repo: state.repo,
       issue_number: n,
       role: role,
       deliverable_opts: nil,
-      hop_sha: "gate-abandon",
+      step_run_sha: "gate-abandon",
       next_assignee: nil,
       comment_body: trace
     }
@@ -1098,11 +1109,11 @@ defmodule Fleet.Pilot.HopConsumer do
     hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
 
     run_completion(state, "##{n}", fn ->
-      state.hop_completer.complete(hop, hc_opts)
+      state.step_run_completer.complete(step_run, hc_opts)
     end)
   end
 
-  # Trace lisible du verdict (portée dans le comment du hop → durable en forge). `judge_label`
+  # Trace lisible du verdict (portée dans le comment du step_run → durable en forge). `judge_label`
   # paramètre l'ATTRIBUTION (gatekeeper, consultant, …) → traça forge honnête (le bon juge nommé).
   # `halt_invalid` n'est PAS une décision rendue : c'est le fallback fail-closed interne (verdict
   # absent/malformé) → message distinct pour ne pas faire croire à un verdict "halt_invalid".
@@ -1156,18 +1167,18 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
-  # Rebond borné. Budget = nb_stages * (max_rework_rounds + 1) hops signés. Le compteur
-  # forge-natif = les comments `[hop:role:sha]` déjà postés (monotone). Lu UNIQUEMENT ici
+  # Rebond borné. Budget = nb_stages * (max_rework_rounds + 1) step_runs signés. Le compteur
+  # forge-natif = les comments `[step_run:role:sha]` déjà postés (monotone). Lu UNIQUEMENT ici
   # (branche fail) → zéro I/O sur le happy path. Budget illisible → on NE rebondit PAS à
   # l'aveugle (un rebond non vérifiable pourrait boucler) : on surface.
   defp rebound(carte, n, state) do
     budget = stage_count(carte) * (state.max_rework_rounds + 1)
 
-    case count_hops(state, n) do
-      {:ok, hops} when hops >= budget ->
-        {:error, {:rework_exhausted, %{hops: hops, budget: budget}}}
+    case count_step_runs(state, n) do
+      {:ok, step_runs} when step_runs >= budget ->
+        {:error, {:rework_exhausted, %{step_runs: step_runs, budget: budget}}}
 
-      {:ok, _hops} ->
+      {:ok, _step_runs} ->
         case Fleet.Pilot.CarteNav.first_stage(carte) do
           {:ok, {first_stage, first_role}} -> {:ok, {first_role, first_stage}}
           {:error, reason} -> {:error, {:carte_nav, reason}}
@@ -1185,9 +1196,9 @@ defmodule Fleet.Pilot.HopConsumer do
     carte |> Map.get("stages", %{}) |> map_size()
   end
 
-  defp count_hops(state, n) do
+  defp count_step_runs(state, n) do
     forge = state.forge_client || Fleet.Pilot.ForgeClient
-    forge.count_signed_hops(state.repo, n, state.forge_opts)
+    forge.count_signed_step_runs(state.repo, n, state.forge_opts)
   end
 
   # Pas de `validate_explicit_stage` (biconditionnelle soft⟺gatekeeper) :
@@ -1212,7 +1223,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
   # Le format issue_id "issue-<n>" a une SOURCE UNIQUE (Fleet.Pilot.IssueId) — writer
   # (StageDispatcher) et parser ne peuvent plus dériver. `parse_issue_number` reste l'API publique
-  # (appelée par `maybe_complete` + testée hop_consumer_test) mais délègue.
+  # (appelée par `maybe_complete` + testée step_run_consumer_test) mais délègue.
   @doc false
   defdelegate parse_issue_number(issue_id), to: Fleet.Pilot.IssueId, as: :parse
 
@@ -1227,7 +1238,7 @@ defmodule Fleet.Pilot.HopConsumer do
 
       {:error, reason} ->
         Logger.warning(
-          "HopConsumer: identité forge irrésoluble (role=#{role}): #{inspect(reason)} — " <>
+          "StepRunConsumer: identité forge irrésoluble (role=#{role}): #{inspect(reason)} — " <>
             "allowed_emails=[] (F-01 rejettera le push, fail-closed)"
         )
 

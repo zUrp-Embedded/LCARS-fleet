@@ -192,7 +192,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   @doc false
   # Lecture PAGINÉE d'une collection source-de-vérité (issues / pulls / comments). Gitea
   # plafonne `limit` à 50/page — une seule page rate les items 51+ (issues/PR ignorés, marqueurs de
-  # hop sous-comptés). On boucle `page=1,2,...` (`@page_limit` items/page) en accumulant jusqu'à la
+  # step_run sous-comptés). On boucle `page=1,2,...` (`@page_limit` items/page) en accumulant jusqu'à la
   # DERNIÈRE page : une page rendant < @page_limit items (ou vide) est la dernière (invariant Gitea :
   # une page pleine implique « peut-être une suite »). Comportement identique à l'ancien ≤50 items :
   # une collection ≤50 tient en page 1 (< 50 → stop), un seul round-trip. `query` = query-string SANS
@@ -225,7 +225,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
       # empêche déjà pour les erreurs réseau, la forme inattendue en étant le trou. D'où une
       # ERREUR TYPÉE : la collection n'est PAS dérivable de cette page →
       # `{:error, {:unexpected_page_shape, …}}`. Les callers (`list_scoped_issues`, `get_route`,
-      # `count_signed_hops`, `get_predecessor_result`, `comment_signed?`) propagent déjà `{:error, _}`.
+      # `count_signed_step_runs`, `get_predecessor_result`, `comment_signed?`) propagent déjà `{:error, _}`.
       {:ok, non_list} ->
         {:error, {:unexpected_page_shape, path, page, non_list}}
 

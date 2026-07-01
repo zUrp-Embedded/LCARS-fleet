@@ -4,12 +4,12 @@ defmodule Fleet.Pilot.IncidentConsumer do
   `Fleet.Pilot.IncidentRegistry` (note 1er / escalade récurrent). Subscribe `Fleet.EventRouter.Bus`
   (topic `fleet.events`).
 
-  ## Pourquoi un consumer SÉPARÉ du HopConsumer
+  ## Pourquoi un consumer SÉPARÉ du StepRunConsumer
 
-  Les échecs de pod sont un concern **distinct** de la fin-de-hop (complétion) : ils ne touchent ni la
+  Les échecs de pod sont un concern **distinct** de la fin-de-step-run (complétion) : ils ne touchent ni la
   carte, ni la gate, ni l'état de complétion — juste « cet incident, 1er ou récurrent ? » → registre.
   Les deux handlers sont **stateless** (ils ne lisent aucun état du consumer). Les isoler dans leur
-  propre singleton : (a) le HopConsumer (singleton de complétion) ne porte plus une 2ᵉ responsabilité
+  propre singleton : (a) le StepRunConsumer (singleton de complétion) ne porte plus une 2ᵉ responsabilité
   bolted-on, (b) une rafale d'échecs ne partage plus la mailbox du chemin de complétion (blast-radius
   réduit). La POLITIQUE d'escalade (1er=note / récurrent=root-cause, kinds, labels) vit dans
   `IncidentRegistry` ; ce module ne fait que **router l'event vers elle**.
@@ -46,7 +46,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   alias Fleet.EventRouter.Bus
 
   # Superviseur de tasks pour l'offload (prod). Nom partagé entre `application.ex` (qui le démarre AVANT
-  # ce consumer) et `offload_async/1`. Propre à ce consumer (pas celui du HopConsumer) : séparation nette.
+  # ce consumer) et `offload_async/1`. Propre à ce consumer (pas celui du StepRunConsumer) : séparation nette.
   @task_supervisor Fleet.Pilot.IncidentConsumer.TaskSupervisor
 
   defstruct record_fun: nil, runner: nil

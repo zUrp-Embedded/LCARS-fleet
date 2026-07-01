@@ -155,7 +155,7 @@ defmodule Fleet.Pilot.PollerTest do
       %{"name" => "qa-build", "stages" => %{"build" => %{"role" => "engineer", "needs" => []}}}
     end
 
-    # 2-stage : routé au 2e stage (deploy ≠ 1er) = pipeline AVANCÉ (entre deux hops) = ENGAGÉ.
+    # 2-stage : routé au 2e stage (deploy ≠ 1er) = pipeline AVANCÉ (entre deux step_runs) = ENGAGÉ.
     def load!("qa-2") do
       %{
         "name" => "qa-2",
@@ -673,8 +673,8 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "un pipeline ENGAGÉ (route avancée) tient le bail et bloque un issue EN FILE" do
       # #8 : le bail se lit sur la ROUTE (state-machine), PLUS sur state:*. #11 routé qa-2:deploy (2e
-      # stage ≠ 1er = pipeline AVANCÉ entre deux hops) → ENGAGÉ → tient le bail ET son stage courant est
-      # dispatché (continue le hop). #12 routé qa-build:build (1er stage = EN FILE) → bail tenu → attend.
+      # stage ≠ 1er = pipeline AVANCÉ entre deux step_runs) → ENGAGÉ → tient le bail ET son stage courant est
+      # dispatché (continue le step_run). #12 routé qa-build:build (1er stage = EN FILE) → bail tenu → attend.
       issues = [
         %{
           "number" => 11,

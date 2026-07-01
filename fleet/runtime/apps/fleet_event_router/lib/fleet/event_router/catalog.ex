@@ -15,7 +15,7 @@ defmodule Fleet.EventRouter.Catalog do
   `policies`/`Pod.best_effort_broadcast`) rescue `UnregisteredError` pour ne pas mourir
   sur un type inattendu ; en revanche le lifecycle `pod.completed` passe par
   `Pod.required_broadcast` qui PROPAGE l'échec au lieu de l'avaler (un event
-  load-bearing avalé masquerait la fin de hop et laisserait le verrou tenu).
+  load-bearing avalé masquerait la fin de step_run et laisserait le verrou tenu).
 
   La **pré-registration des atomes** (`String.to_existing_atom` côté émetteurs
   dynamiques) est faite séparément par `Application.preregister_event_atoms/0`

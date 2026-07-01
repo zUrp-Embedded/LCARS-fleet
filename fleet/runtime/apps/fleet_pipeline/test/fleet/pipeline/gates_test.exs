@@ -87,7 +87,7 @@ defmodule Fleet.Pipeline.GatesTest do
   describe "MA-11 — somme fermée : gate malformée → {:fail} fail-closed (PAS de crash)" do
     test "hard SANS rule ni rules → {:fail} (était un FunctionClauseError → crash singleton)" do
       # Avant le catch-all : aucune clause ne matchait `{type:hard}` sans `rule`/`rules`
-      # → FunctionClauseError remontait au HopConsumer (singleton) → crash.
+      # → FunctionClauseError remontait au StepRunConsumer (singleton) → crash.
       stage = %{"gate" => %{"type" => "hard"}}
       assert {:fail, reason} = Gates.evaluate(stage, %{"x" => 1}, %{})
       assert reason =~ "malformée"
@@ -118,7 +118,7 @@ defmodule Fleet.Pipeline.GatesTest do
       # CHAQUE item SANS filtrer les non-strings (le terminal, lui, filtre via
       # `Enum.all?(rules, &is_binary/1)`). Une carte v1 — ou un override non schématisé —
       # portant un hard gate à `rules` = liste de maps levait FunctionClauseError dans
-      # Predicate → ça remontait non-wrappé au HopConsumer (singleton) → crash. Le filet
+      # Predicate → ça remontait non-wrappé au StepRunConsumer (singleton) → crash. Le filet
       # `Predicate.eval?/2` total (item non-string → false) rend la gate fail-closed.
       stage = %{
         "gate" => %{"type" => "hard", "rules" => [%{"name" => "r1", "match" => %{"a" => 1}}]}

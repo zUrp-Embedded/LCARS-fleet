@@ -55,7 +55,7 @@ defmodule Fleet.MCP.ResultEventTest do
   test "submit_result avec work_item_id NICHÉ dans le payload (pas top-level) → accepté + clôt le brief" do
     # Régression live (e2e) : un agent juge range son work_item_id DANS le payload de verdict au lieu du
     # paramètre top-level. Le broker corrèle pod_id ↔ work_item_id quel que soit l'emplacement → le livrable
-    # NE DOIT PAS être perdu (sinon le hop review timeout → escalade → pipeline gelé, observé sur le
+    # NE DOIT PAS être perdu (sinon le step_run review timeout → escalade → pipeline gelé, observé sur le
     # qualifier qui tâtonnait `payload:{decision, work_item_id}` à l'infini contre `:work_item_id_required`).
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})

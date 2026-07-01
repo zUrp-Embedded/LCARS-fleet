@@ -17,7 +17,7 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
 
   # Consommateur minimal qui subscribe DANS init (le contrat sous test) et compte ce qu'il reçoit.
   # Topic dédié passé en opt → isolé des autres broadcasts. Modèle EXACT du pattern réel
-  # (AuditConsumer/HopConsumer/ReadModel/… : tous subscribent dans init/1).
+  # (AuditConsumer/StepRunConsumer/ReadModel/… : tous subscribent dans init/1).
   defmodule Counter do
     use GenServer
 

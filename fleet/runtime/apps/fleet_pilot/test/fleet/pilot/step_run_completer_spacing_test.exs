@@ -1,8 +1,8 @@
-defmodule Fleet.Pilot.HopCompleterSpacingTest do
-  # async: false — mute la config globale `:hop_write_spacing_ms` (cf. Fleet.Credentials.RoleTokenTest).
+defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
+  # async: false — mute la config globale `:step_run_write_spacing_ms` (cf. Fleet.Credentials.RoleTokenTest).
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.HopCompleter
+  alias Fleet.Pilot.StepRunCompleter
 
   # F-E7 — stub forge qui MARQUE l'ordre de chaque écriture ; le seam `:sleeper` marque le gap. On vérifie
   # que le gap est INSÉRÉ entre le commentaire de verdict et la route (sinon même seconde → tie dashboard).
@@ -28,25 +28,25 @@ defmodule Fleet.Pilot.HopCompleterSpacingTest do
   end
 
   defp set_spacing(ms) do
-    prev = Application.get_env(:fleet_pilot, :hop_write_spacing_ms)
-    Application.put_env(:fleet_pilot, :hop_write_spacing_ms, ms)
+    prev = Application.get_env(:fleet_pilot, :step_run_write_spacing_ms)
+    Application.put_env(:fleet_pilot, :step_run_write_spacing_ms, ms)
 
     on_exit(fn ->
       if prev,
-        do: Application.put_env(:fleet_pilot, :hop_write_spacing_ms, prev),
-        else: Application.delete_env(:fleet_pilot, :hop_write_spacing_ms)
+        do: Application.put_env(:fleet_pilot, :step_run_write_spacing_ms, prev),
+        else: Application.delete_env(:fleet_pilot, :step_run_write_spacing_ms)
     end)
   end
 
   test "complete : le gap configuré est INSÉRÉ entre le comment de verdict et la route" do
     set_spacing(2000)
 
-    hop = %{
+    step_run = %{
       repo: "fleet/poc",
       issue_number: 1,
       role: "consultant",
       deliverable_opts: nil,
-      hop_sha: "brief-verdict",
+      step_run_sha: "brief-verdict",
       next_assignee: "build",
       pipeline: "poc",
       next_stage: "build",
@@ -57,7 +57,11 @@ defmodule Fleet.Pilot.HopCompleterSpacingTest do
     sleeper = fn ms -> send(self(), {:call, {:slept, ms}}) end
 
     assert {:ok, :reassigned} =
-             HopCompleter.complete(hop, forge_client: SeqForge, forge_opts: [], sleeper: sleeper)
+             StepRunCompleter.complete(step_run,
+               forge_client: SeqForge,
+               forge_opts: [],
+               sleeper: sleeper
+             )
 
     # ordre : comment AVANT le gap (2s) AVANT la route → plus de tie même-seconde à l'affichage.
     assert [:comment, {:slept, 2000}, :route | _] = drain()
@@ -66,12 +70,12 @@ defmodule Fleet.Pilot.HopCompleterSpacingTest do
   test "spacing 0 (défaut test) → AUCUN gap (pas de sleep parasite dans la suite)" do
     set_spacing(0)
 
-    hop = %{
+    step_run = %{
       repo: "fleet/poc",
       issue_number: 1,
       role: "consultant",
       deliverable_opts: nil,
-      hop_sha: "brief-verdict",
+      step_run_sha: "brief-verdict",
       next_assignee: nil,
       comment_body: "Verdict du consultant — abandon"
     }
@@ -79,7 +83,11 @@ defmodule Fleet.Pilot.HopCompleterSpacingTest do
     sleeper = fn ms -> send(self(), {:call, {:slept, ms}}) end
 
     assert {:ok, :completed} =
-             HopCompleter.complete(hop, forge_client: SeqForge, forge_opts: [], sleeper: sleeper)
+             StepRunCompleter.complete(step_run,
+               forge_client: SeqForge,
+               forge_opts: [],
+               sleeper: sleeper
+             )
 
     # terminal (next_assignee nil → close) : comment puis close, et SURTOUT aucun {:slept, _}.
     seq = drain()

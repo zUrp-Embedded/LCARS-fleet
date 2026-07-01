@@ -231,9 +231,9 @@ defmodule Fleet.Spawner.PodTest do
       assert content["phase"] == "succeeded"
     end
 
-    # MA-04 — LE finding : `pod.completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir
-    # le hop). Si sa diffusion ÉCHOUE, le pod NE doit PAS release/kill sur une complétion orpheline (sinon
-    # le pod « réussit » mais le hop ne finit jamais → verrou forge à vie). Bus stub qui lève → le pod RESTE
+    # MA-04 — LE finding : `pod.completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir
+    # le step_run). Si sa diffusion ÉCHOUE, le pod NE doit PAS release/kill sur une complétion orpheline (sinon
+    # le pod « réussit » mais le step_run ne finit jamais → verrou forge à vie). Bus stub qui lève → le pod RESTE
     # vivant en :monitoring (résultat retenu, deadline ré-armée), PAS d'EXIT :normal.
     test "MA-04 : broadcast pod.completed qui échoue → pod PAS release/kill (reste vivant), fail-loud" do
       Process.flag(:trap_exit, true)
@@ -263,7 +263,7 @@ defmodule Fleet.Spawner.PodTest do
     test "SLOT-FREEZE : le pod ADOPTE le issue_id de la TACHE -> le livrable suit la BONNE brique (pas celle du spawn)" do
       # Regression hello-buddy : le pipe gardait son issue_id de SPAWN (issue-4) pour TOUS ses livrables ->
       # la 2e brique (issue-3) partait sur la branche/PR de issue-4 (ecrasement). Ici le pod spawn sur
-      # "issue-4" mais la tache complétée porte "issue-3" -> le pod.completed (consomme par le HopConsumer
+      # "issue-4" mais la tache complétée porte "issue-3" -> le pod.completed (consomme par le StepRunConsumer
       # qui pousse HEAD:lcars/issue-N) doit porter "issue-3", la brique reellement traitee.
       Process.flag(:trap_exit, true)
       Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
@@ -286,7 +286,7 @@ defmodule Fleet.Spawner.PodTest do
         )
       )
 
-      # Le pod.completed (= le livrable broadcaste au HopConsumer) porte le issue ADOPTE issue-3.
+      # Le pod.completed (= le livrable broadcaste au StepRunConsumer) porte le issue ADOPTE issue-3.
       assert_receive %Fleet.Event{
                        type: :"pod.completed",
                        payload: %{"issue_id" => "issue-3"}
@@ -1130,7 +1130,7 @@ defmodule Fleet.Spawner.PodTest do
       assert_receive %Fleet.Event{source: :spawner, type: :"pod.completed"}, 2_000
 
       # publish_deadline est à 120s (jamais fire ici) et deliverable.published n'est pas émis
-      # (HopCompleter off en test) → :publishing reste présente après le retour à :monitoring.
+      # (StepRunCompleter off en test) → :publishing reste présente après le retour à :monitoring.
       Process.sleep(50)
       info = GenServer.call(pid, :info)
       assert info.phase == :monitoring

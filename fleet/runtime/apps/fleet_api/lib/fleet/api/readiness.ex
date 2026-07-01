@@ -92,7 +92,7 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # Le rail forge-state-machine (Poller stage + HopConsumer) est sondé — sa mort
+  # Le rail forge-state-machine (Poller stage + StepRunConsumer) est sondé — sa mort
   # runtime (singleton tombé) bascule en `:degraded` au lieu d'un vert-creux. Délégué à fleet_pilot,
   # qui possède la topologie du rail (`Fleet.Pilot.Application.stage_status/0`) — pas de fuite des
   # noms de process Ring 2 dans Ring 4. `:inactive` si stage off (n'altère pas le verdict global).

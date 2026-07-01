@@ -44,12 +44,12 @@ config :fleet_spawner, start_publish_consumer: false
 config :fleet_spawner, start_pod_warden: false
 
 # fleet_pilot hermétisme test : le mode stage est OFF par défaut (`:stage_dispatch?` absent →
-# `stage_children` = [] → app inerte, pas de Poller/HopConsumer parasite). Le knob legacy
+# `stage_children` = [] → app inerte, pas de Poller/StepRunConsumer parasite). Le knob legacy
 # `start_dispatcher` a été retiré (②.3 / BL-050, rail AutoDispatcher supprimé).
 
-# F-E7 — pas de gap inter-écritures en test (le défaut prod = 2000ms ; HopCompleter.space_writes →
+# F-E7 — pas de gap inter-écritures en test (le défaut prod = 2000ms ; StepRunCompleter.space_writes →
 # Process.sleep). Tests rapides ET déterministes.
-config :fleet_pilot, hop_write_spacing_ms: 0
+config :fleet_pilot, step_run_write_spacing_ms: 0
 
 # R4 sous-lot C — hermétisme : pas d'autoboot du gatekeeper permanent en test
 # (start_pipeline ne spawnera pas de pod gatekeeper). Le test dédié

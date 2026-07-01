@@ -134,9 +134,9 @@ defmodule Fleet.TaskQueueTest do
     }
   end
 
-  # MA-04 — LE finding : `work_item_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir
-  # le hop). Si sa diffusion échoue, `submit_result` NE rend PLUS `{:ok}` muet (le pod croirait son livrable
-  # accepté alors que le hop ne finit jamais → verrou forge à vie) — il propage `{:error,{:broadcast_failed,_}}`.
+  # MA-04 — LE finding : `work_item_completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir
+  # le step_run). Si sa diffusion échoue, `submit_result` NE rend PLUS `{:ok}` muet (le pod croirait son livrable
+  # accepté alors que le step_run ne finit jamais → verrou forge à vie) — il propage `{:error,{:broadcast_failed,_}}`.
   test "3b. MA-04 : broadcast work_item_completed qui RETOURNE {:error} → submit_result {:error,{:broadcast_failed,_}}, pas {:ok}",
        %{tmp_dir: tmp_dir} do
     state_path = Path.join(tmp_dir, "state_failbus.json")

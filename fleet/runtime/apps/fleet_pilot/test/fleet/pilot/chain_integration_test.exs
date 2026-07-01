@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.ChainIntegrationTest do
   @moduledoc """
   Integration Corr.3 4-C (switch review-request) : la chaine multi-stage de bout en bout, modules
-  REELS (Entry, StageDispatcher, HopConsumer, HopCompleter, CarteNav) contre un sim forge stateful
+  REELS (Entry, StageDispatcher, StepRunConsumer, StepRunCompleter, CarteNav) contre un sim forge stateful
   PR-aware, en synchrone. Prouve le CABLAGE PR-driven engineer-first :
     entree -> spawn engineer (issue-assignee) -> engineer ouvre la PR + request_review ->
     spawn juge via dispatch_review (PR) -> merge terminal -> issue close (Closes #N).
@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.{StageDispatcher, HopConsumer, ForgeProtocol}
+  alias Fleet.Pilot.{StageDispatcher, StepRunConsumer, ForgeProtocol}
 
   # ── Sim forge stateful : 1 issue + N PR (objets separes, labels/requested_reviewers propres) ──
   defmodule Sim do
@@ -105,7 +105,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
             pr = %{
               "number" => num,
               # #5.2 D1 — fidèle au réel : le fleet assigne TOUJOURS l'humain à la PR (assign_human_step,
-              # hop_completer:560). Sinon dispatch_review skip :foreign (scoping PR client-side).
+              # step_run_completer:560). Sinon dispatch_review skip :foreign (scoping PR client-side).
               "assignees" => [%{"login" => "human"}],
               "head" => %{"ref" => head},
               "base" => %{"ref" => base},
@@ -324,12 +324,12 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   end
 
   defp hc do
-    %HopConsumer{
+    %StepRunConsumer{
       repo: "o/r",
       remote: "origin",
       forge_opts: [],
       role_emails: fn r -> ["#{r}@lcars.local"] end,
-      hop_completer: Fleet.Pilot.HopCompleter,
+      step_run_completer: Fleet.Pilot.StepRunCompleter,
       forge_client: SimForge,
       loader: CarteLoader,
       deliverable: DelivStub,
@@ -382,7 +382,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     # 3. engineer finit -> :advance : ouvre la PR + request_review(reviewer) + route review.
     #    L'assignee de l'issue reste l'HUMAIN (#8.A : plus de set_assignee), la suite est PR-driven.
-    assert {:ok, :review_requested} = HopConsumer.maybe_complete(completed(o1, "engineer"), hc())
+    assert {:ok, :review_requested} =
+             StepRunConsumer.maybe_complete(completed(o1, "engineer"), hc())
+
     assert {:ok, _pr_n} = SimForge.get_pr_for_branch("o/r", "lcars/issue-1-engineer", "main", [])
     assert {:ok, {"poc-mini", "review"}} = SimForge.get_route("o/r", 1, [])
     assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
@@ -398,7 +400,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert Enum.any?(Sim.get_pr(pid, pr_n)["labels"], &(&1["name"] == "lcars-in-flight"))
 
     # 5. reviewer finit -> :promote : review APPROVED + merge -> issue close (Closes #N)
-    assert {:ok, :promoted} = HopConsumer.maybe_complete(completed(o2, "reviewer"), hc())
+    assert {:ok, :promoted} = StepRunConsumer.maybe_complete(completed(o2, "reviewer"), hc())
     assert Sim.get(pid)["state"] == "closed"
     # verrou de la PR leve
     refute Enum.any?(Sim.get_pr(pid, pr_n)["labels"], &(&1["name"] == "lcars-in-flight"))
@@ -417,7 +419,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert_received {:spawned, "issue-1", o1}
 
     # build (pas de gate) finit -> avance review(reviewer) : ouvre la PR + request_review.
-    assert {:ok, :review_requested} = HopConsumer.maybe_complete(completed(o1, "engineer"), hc())
+    assert {:ok, :review_requested} =
+             StepRunConsumer.maybe_complete(completed(o1, "engineer"), hc())
+
     assert {:ok, {"gkchain", "review"}} = SimForge.get_route("o/r", 1, [])
     assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
     {pr_payload, _pr_n} = single_open_pr()
@@ -431,7 +435,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     # review finit AVEC gate soft -> escalade gatekeeper (brief enqueue, PAS d'avance).
     assert {:escalate, "t", eval_ctx} =
-             HopConsumer.maybe_complete(
+             StepRunConsumer.maybe_complete(
                completed(o2, "reviewer", %{"severity_max" => "ok"}),
                hc()
              )
@@ -448,7 +452,11 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     # verdict continue : review est le dernier stage -> :promote -> juge merge la PR du producteur.
     assert {:ok, :promoted} =
-             HopConsumer.resume_gate(eval_ctx, %{"result" => %{"decision" => "continue"}}, hc())
+             StepRunConsumer.resume_gate(
+               eval_ctx,
+               %{"result" => %{"decision" => "continue"}},
+               hc()
+             )
 
     assert Sim.get(pid)["state"] == "closed"
   end
@@ -457,7 +465,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     {pid, eval_ctx} = drive_to_review()
 
     assert {:ok, :awaiting_arch} =
-             HopConsumer.resume_gate(
+             StepRunConsumer.resume_gate(
                eval_ctx,
                %{"result" => %{"decision" => "escalate_user"}},
                hc()

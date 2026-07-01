@@ -43,7 +43,7 @@ defmodule Fleet.Pilot.MixProject do
       # Z4 — `Fleet.Credentials.ForgeIdentity` (allowed_emails F-01 = l'humain du brief).
       {:fleet_credentials, in_umbrella: true},
       # `Fleet.CapProfile.deliverable_mode` : classer producteur (git_native) / juge
-      # (payload) au hop PR-natif (source unique = le catalogue cap-profile).
+      # (payload) au step_run PR-natif (source unique = le catalogue cap-profile).
       {:fleet_cap_profile, in_umbrella: true},
       {:yaml_elixir, "~> 2.12"},
       {:req, "~> 0.5"},

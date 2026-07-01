@@ -9,7 +9,7 @@ defmodule Fleet.Pipeline.Gates do
       `{:fail, …}`. Pas de bypass.
     * **soft** — jugement LLM délégué au **gatekeeper**. `Gates` est
       PUR : il retourne `{:dispatch_gatekeeper, info}` (décision d'escalade) ;
-      le rail forge-driven (`Pilot.HopConsumer`) spawn le gatekeeper + collecte
+      le rail forge-driven (`Pilot.StepRunConsumer`) spawn le gatekeeper + collecte
       sa décision. La délégation du jugement est consolidée sur le gatekeeper.
     * **terminal** — `rules` = liste de prédicats STRING (Predicate), mais
       OPTIONNELLE (le gate `finish` du canon est terminal + `human_approval`
@@ -22,12 +22,12 @@ defmodule Fleet.Pipeline.Gates do
   `"severity_max != critical"` — évalués contre `outputs` par
   `Fleet.Pipeline.Gates.Predicate`. Seul le **soft** gate dispatche au
   gatekeeper (le juge unique de la fleet) : `Gates` ne fait AUCUN spawn (pur),
-  c'est le rail forge-driven (`Pilot.HopConsumer`) qui possède le nom de stage
+  c'est le rail forge-driven (`Pilot.StepRunConsumer`) qui possède le nom de stage
   + le lifecycle d'attente du verdict.
 
   `Gates` ne retourne JAMAIS `:retry` (le retry n'est pas une décision de gate).
   Un retry BORNÉ existe, mais c'est le **rail forge-driven**
-  (`Pilot.HopConsumer`) qui le pilote (compteur de rework borné), pas la gate ;
+  (`Pilot.StepRunConsumer`) qui le pilote (compteur de rework borné), pas la gate ;
   la borne écarte le risque de re-spawn-en-boucle. L'orchestration severity
   (`fallback_invoke_gatekeeper`, `on_*_severity`) reste hors-scope de cet
   évaluateur.
@@ -66,7 +66,7 @@ defmodule Fleet.Pipeline.Gates do
   # fleet : il fait tourner la fleet, récupère les problèmes). `Gates` reste PUR :
   # il décide qu'il faut le gatekeeper (`{:dispatch_gatekeeper, info}`) ; le spawn
   # async + la corrélation `pod.completed` sont faits par le rail forge-driven
-  # (`Pilot.HopConsumer`, qui possède le nom de stage + le lifecycle). Pas de spawn
+  # (`Pilot.StepRunConsumer`, qui possède le nom de stage + le lifecycle). Pas de spawn
   # coord ni de cap-profile dédié : le jugement est consolidé sur le gatekeeper unique.
   defp eval_by_type(%{"gate" => %{"type" => "soft"}}, _outputs, _ctx) do
     {:dispatch_gatekeeper, %{kind: :soft}}
@@ -100,7 +100,7 @@ defmodule Fleet.Pipeline.Gates do
   # Sans elle, `eval_by_type` serait une somme OUVERTE : un gate malformé (`{type:hard}` SANS
   # `rules` ; `rules` non-liste ; `type` inconnu ; `gate` non-map) ne matcherait AUCUNE
   # clause → `FunctionClauseError` remonterait au `handle_info(pod.completed)` non gardé →
-  # CRASH du HopConsumer (SINGLETON) → `gate_evals` perdus, fin-de-hop jamais déclenchée.
+  # CRASH du StepRunConsumer (SINGLETON) → `gate_evals` perdus, fin-de-step-run jamais déclenchée.
   # Cette clause FERME la somme : tout gate qui n'est pas une forme connue-valide est
   # REJETÉ fail-closed (`{:fail, …}`), JAMAIS un crash, JAMAIS un `:pass` silencieux.
   # L'éval est TOTALE. (Idéal ultérieur : un ADT fermé parsé au LOAD rendrait ces formes
@@ -113,7 +113,7 @@ defmodule Fleet.Pipeline.Gates do
   # {:fail} ; (2) `human_approval_required` → HALT fail-closed (le moteur
   # mécanique ne peut PAS accorder l'aval humain ; aucun human-in-loop câblé →
   # jamais d'auto-approbation. Gates ne rend pas `:retry` ; le retry borné est
-  # côté rail forge-driven (`Pilot.HopConsumer`) — pas ici) ;
+  # côté rail forge-driven (`Pilot.StepRunConsumer`) — pas ici) ;
   # (3) sinon → :pass. L'orchestration severity (fallback_invoke_gatekeeper,
   # on_*_severity) n'est pas portée ici — couche séparée.
   defp eval_terminal_string(rules, gate, outputs) do

@@ -2,7 +2,7 @@ defmodule Fleet.Pipeline.GateDecisionTest do
   @moduledoc """
   Verrouille l'AUTORITÉ unique du vocabulaire gatekeeper et son égalité avec le contrat WIRE
   `priv/schema/gate-decision-v1.json` : si l'un dérive de l'autre, ce test échoue (anti-drift
-  schema ⇔ code). `GateBrief` et `Fleet.Pilot.HopConsumer` consomment tous deux `decisions/0`.
+  schema ⇔ code). `GateBrief` et `Fleet.Pilot.StepRunConsumer` consomment tous deux `decisions/0`.
   """
   use ExUnit.Case, async: true
 

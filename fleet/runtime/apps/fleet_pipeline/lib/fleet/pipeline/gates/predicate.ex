@@ -79,7 +79,7 @@ defmodule Fleet.Pipeline.Gates.Predicate do
   # Un `rule` non-string (ex. une rule-map d'un gate v1 mal aiguillée vers le chemin
   # hard v2.5, ou un override non schématisé) — ou des `outputs` non-map — rend `false` :
   # le hard gate ÉCHOUE (`Enum.all?` devient false → `{:fail, …}` dans Gates), JAMAIS un
-  # FunctionClauseError qui remonterait crasher le HopConsumer (singleton). L'éval est
+  # FunctionClauseError qui remonterait crasher le StepRunConsumer (singleton). L'éval est
   # rendue TOTALE, symétrique du catch-all fail-closed du terminal.
   def eval?(_rule, _outputs), do: false
 

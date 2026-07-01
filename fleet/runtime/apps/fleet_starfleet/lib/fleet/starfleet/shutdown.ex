@@ -43,13 +43,13 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   Active `Fleet.Shutdown.Quiesce` → le point d'entrée top-level REST
   `/api/admin/spawn` (`Fleet.API.Rest` lit `quiescing?`) refuse le travail neuf.
   (Le moteur RAM `Fleet.Pipeline.start_pipeline/3`, autre point d'entrée gaté
-  historiquement, est SUPPRIMÉ.) Le travail interne d'un hop en vol n'est PAS gaté.
+  historiquement, est SUPPRIMÉ.) Le travail interne d'un step_run en vol n'est PAS gaté.
 
   ## `in_flight_count/0` — périmètre (décision user)
 
   **Tout pod vivant compte** (éphémère ET permanent) + work items en file
   non-assignés. Il n'y a PLUS de pipelines RAM à compter : le moteur
-  `Fleet.Pipeline.Executor` est supprimé (un pod vivant = un hop en cours).
+  `Fleet.Pipeline.Executor` est supprimé (un pod vivant = un step_run en cours).
 
     * `Fleet.Spawner.count_pods/0` — pods actifs (couvre aussi le travail
       assigné : un work item assigné ⇒ son pod est vivant ⇒ compté ici)
@@ -107,7 +107,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   def in_flight_count do
     # `pipeline_running` RETIRÉ (②.3 / BL-050) : le moteur RAM (`Fleet.Pipeline.Executor`) est supprimé,
     # il n'y a plus de pipelines en RAM à drainer. L'in-flight = les **pods vivants** (le travail réel
-    # du rail forge : un pod = un hop en cours) + les work items **en file** non encore pullés.
+    # du rail forge : un pod = un step_run en cours) + les work items **en file** non encore pullés.
     spawner_pods() + tasks_pending()
   end
 

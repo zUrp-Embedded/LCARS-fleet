@@ -37,8 +37,8 @@ defmodule Fleet.TaskQueue do
   `:double_submit_ignored`). Si `result` porte un `work_item_id` ≠ work item actif du pod
   → `:work_item_id_mismatch` (le correlation_id du livrable ne matche pas), aucune mutation.
 
-  Le broadcast `work_item_completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour
-  finir le hop). Si sa diffusion échoue, le retour est `{:error, {:broadcast_failed, _}}` (la tâche
+  Le broadcast `work_item_completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour
+  finir le step_run). Si sa diffusion échoue, le retour est `{:error, {:broadcast_failed, _}}` (la tâche
   reste `:completed`+persistée, mais le caller NE reçoit PAS un faux succès — plus de `:ok` qui ment).
   """
   @spec submit_result(String.t(), map()) ::

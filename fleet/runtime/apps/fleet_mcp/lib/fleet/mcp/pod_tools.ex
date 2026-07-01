@@ -183,7 +183,7 @@ defmodule Fleet.MCP.PodTools do
           {:error, :work_item_id_mismatch} ->
             {:error, :work_item_id_mismatch, state}
 
-          # le broadcast lifecycle `work_item_completed` a échoué : le hop ne finira PAS (le HopConsumer
+          # le broadcast lifecycle `work_item_completed` a échoué : le step_run ne finira PAS (le StepRunConsumer
           # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès) — le pod doit
           # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
           # son livrable accepté alors que le verrou forge reste posé à vie.

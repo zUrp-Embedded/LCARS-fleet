@@ -306,7 +306,7 @@ if config_env() != :test do
   end
 
   # F058/F059/F060 — login du compte SYSTÈME (propriétaire de FORGE_TOKEN). Les marqueurs
-  # forge (route / hop / result-block) ne font foi QUE s'ils sont écrits par ce login (un user
+  # forge (route / step_run / result-block) ne font foi QUE s'ils sont écrits par ce login (un user
   # forge qui en poste un faux est ignoré). Optionnel : si absent, ForgeClient le dérive une fois
   # via `GET /user` (l'authentifié du token) et le cache. Le surcharger ici évite ce round-trip et
   # lève toute ambiguïté en déploiement (token partagé, miroir, etc.).
@@ -328,9 +328,9 @@ if config_env() != :test do
   # ============================================================
   # A2/A3 — runtime STAGE-MODE (forge = machine à états) + BL-045b auth push
   # ============================================================
-  # OFF par défaut. `LCARS_PILOT_STAGE=true` démarre Poller(stage) + HopConsumer
+  # OFF par défaut. `LCARS_PILOT_STAGE=true` démarre Poller(stage) + StepRunConsumer
   # (cf. Fleet.Pilot.Application.stage_children!). F-037 : requiert UNIQUEMENT FORGE_BASE_URL — c'est la
-  # seule garde fail-loud du boot stage (découverte des projets par topic + push per-hop). LCARS_PILOT_POLL_REPO
+  # seule garde fail-loud du boot stage (découverte des projets par topic + push per-step-run). LCARS_PILOT_POLL_REPO
   # n'est PAS requis (override legacy/test seulement ; la découverte réelle est par topic forge, pas un repo fixe).
   if System.get_env("LCARS_PILOT_STAGE") == "true" do
     config :fleet_pilot, stage_dispatch?: true
@@ -340,8 +340,8 @@ if config_env() != :test do
   # route-comment, gravée par `create_ticket` (carte de délégation, défaut mandate-gate). type:* = visu.
 
   # F-037 : `LCARS_HOP_REMOTE` retiré — le remote de push n'est plus un URL fixe (incompatible multi-projet) ;
-  # il est PER-HOP, dérivé du `repo_path` du projet et embarqué dans l'event `pod.completed` (cf.
-  # `Fleet.Spawner.Pod.pod_completed_payload` + `Fleet.Pilot.HopConsumer.hop_state/2`). Auth push inchangée
+  # il est PER-STEP-RUN, dérivé du `repo_path` du projet et embarqué dans l'event `pod.completed` (cf.
+  # `Fleet.Spawner.Pod.pod_completed_payload` + `Fleet.Pilot.StepRunConsumer.step_run_state/2`). Auth push inchangée
   # (`Fleet.Credentials.ForgeAuth.git_env` → token via env, jamais dans l'URL).
 
   # BL-045b — auth push runtime (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token

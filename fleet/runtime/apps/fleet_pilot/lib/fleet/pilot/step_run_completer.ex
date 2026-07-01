@@ -1,6 +1,6 @@
-defmodule Fleet.Pilot.HopCompleter do
+defmodule Fleet.Pilot.StepRunCompleter do
   @moduledoc """
-  Primitive de **fin-de-hop** (la forge EST la machine à états ; ce module en
+  Primitive de **fin-de-step-run** (la forge EST la machine à états ; ce module en
   applique les transitions). Quand un pod (stage courant) a terminé, le
   **SYSTÈME** — pas le pod, qui n'a ni token ni outil forge (forge-aveugle) —
   applique la transition vers le stage suivant. C'est la pièce qui REMPLACE le
@@ -8,14 +8,14 @@ defmodule Fleet.Pilot.HopCompleter do
 
   ## Séquence ordonnée idempotente
 
-  L'atomicité est impossible (Gitea n'a pas de transaction ; un hop = ~5
+  L'atomicité est impossible (Gitea n'a pas de transaction ; un step_run = ~5
   écritures HTTP). On la remplace par un ORDRE où le trigger du poller (PATCH
   assignee) est l'**avant-dernier** et le verrou est levé en **dernier** :
 
     1. **Commit + push livrable** — délégué à `Deliverable.publish` (gate de
        cohérence workspace + push borné). Indissociables : le commit local seul
-       n'est pas vu par la forge. Retourne le `commit_sha` qui signe le hop.
-    2. **Comment signé** `[hop:<role>:<sha>]` — dédup par signature (replay-safe).
+       n'est pas vu par la forge. Retourne le `commit_sha` qui signe le step_run.
+    2. **Comment signé** `[step_run:<role>:<sha>]` — dédup par signature (replay-safe).
        *(Pas d'étape 3 « PATCH `state:*` » : l'état vit dans la route-comment,
        pas dans un label `state:*`. Les n° de step suivants gardent leur mapping.)*
     4. **Routage du stage suivant** :
@@ -34,9 +34,9 @@ defmodule Fleet.Pilot.HopCompleter do
   ## Seams
 
   `:deliverable` (défaut `Fleet.Pipeline.Deliverable`), `:forge_client` (défaut
-  `Fleet.Pilot.ForgeClient`) — stubés en test. `:deliverable_opts` quand le hop
+  `Fleet.Pilot.ForgeClient`) — stubés en test. `:deliverable_opts` quand le step_run
   produit un livrable git ; absent/`nil` = pas de livrable git (ex. verdict de
-  juge en mode payload — le `hop_sha` est alors fourni explicitement).
+  juge en mode payload — le `step_run_sha` est alors fourni explicitement).
   """
 
   require Logger
@@ -50,55 +50,55 @@ defmodule Fleet.Pilot.HopCompleter do
   @in_flight_label Labels.in_flight()
 
   @typedoc """
-  Décrit la fin-de-hop d'un rôle sur une issue.
+  Décrit la fin-de-step-run d'un rôle sur une issue.
 
     * `:repo` / `:issue_number` — cible forge (obligatoires)
     * `:role` — le rôle qui vient de finir (signe le comment)
     * `:deliverable_opts` — opts passés tel quel à `Deliverable.publish/1`
       (mode/workspace/base_sha/remote/target_branch/...). `nil` = pas de
-      livrable git ; alors `:hop_sha` requis.
-    * `:hop_sha` — override de la signature de hop (défaut = commit_sha publié)
+      livrable git ; alors `:step_run_sha` requis.
+    * `:step_run_sha` — override de la signature de step_run (défaut = commit_sha publié)
     * `:next_assignee` — login du rôle suivant (carte) ; `nil` = terminal → close
     * `:comment_body` — corps lisible du comment (la signature machine est
       toujours ajoutée) ; défaut généré
   """
-  @type hop :: %{
+  @type step_run :: %{
           required(:repo) => String.t(),
           required(:issue_number) => integer(),
           required(:role) => String.t(),
           optional(:deliverable_opts) => map() | nil,
-          optional(:hop_sha) => String.t(),
+          optional(:step_run_sha) => String.t(),
           optional(:next_assignee) => String.t() | nil,
           optional(:comment_body) => String.t()
         }
 
   @doc """
-  Applique la séquence ordonnée de fin-de-hop. Idempotente sur replay.
+  Applique la séquence ordonnée de fin-de-step-run. Idempotente sur replay.
 
   `opts` : seams `:deliverable` / `:forge_client` / `:forge_opts`.
 
   Retourne `{:ok, :completed}` (terminal → issue fermée) | `{:ok, :reassigned}`
   (multi-stage → assignee suivant posé) | `{:error, {step, reason}}`.
   """
-  @spec complete(hop(), keyword()) ::
+  @spec complete(step_run(), keyword()) ::
           {:ok, :completed | :reassigned} | {:error, {atom(), term()}}
-  def complete(hop, opts \\ []) when is_map(hop) do
+  def complete(step_run, opts \\ []) when is_map(step_run) do
     deliverable = Keyword.get(opts, :deliverable, Fleet.Pipeline.Deliverable)
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
-    repo = Map.fetch!(hop, :repo)
-    n = Map.fetch!(hop, :issue_number)
-    role = Map.fetch!(hop, :role)
+    repo = Map.fetch!(step_run, :repo)
+    n = Map.fetch!(step_run, :issue_number)
+    role = Map.fetch!(step_run, :role)
 
-    with {:ok, sha} <- step1_publish(hop, deliverable),
-         {:ok, _} <- step2_comment(forge, repo, n, role, sha, hop, forge_opts),
+    with {:ok, sha} <- step1_publish(step_run, deliverable),
+         {:ok, _} <- step2_comment(forge, repo, n, role, sha, step_run, forge_opts),
          # Gap AVANT la route : le comment de verdict prend un `created_at` strictement antérieur à
          # la route (sinon même seconde → ordre dashboard arbitraire, « logiquement avant, affiché après »).
          :ok <- space_writes(opts),
-         {:ok, routed} <- step4_route(forge, repo, n, hop, forge_opts),
+         {:ok, routed} <- step4_route(forge, repo, n, step_run, forge_opts),
          {:ok, _} <- step5_unlock(forge, repo, n, forge_opts) do
-      Logger.info("HopCompleter: #{repo}##{n} role=#{role} sha=#{sha} → #{routed}")
+      Logger.info("StepRunCompleter: #{repo}##{n} role=#{role} sha=#{sha} → #{routed}")
 
       {:ok, routed}
     end
@@ -107,7 +107,7 @@ defmodule Fleet.Pilot.HopCompleter do
   @awaits_arch_label Labels.awaits_arch()
 
   @doc """
-  Fin-de-hop ALTERNATIVE : un verdict gatekeeper **humain**
+  Fin-de-step_run ALTERNATIVE : un verdict gatekeeper **humain**
   (`escalate_user`/`halt_wait_input`/`redirect`/absent/invalide).
   Le SYSTÈME pose `lcars-awaits-arch` + retire le verrou ; NE close PAS, NE reassign PAS.
   L'issue attend une action humaine **via l'arch** (le sas unique vers l'humain) ;
@@ -118,24 +118,24 @@ defmodule Fleet.Pilot.HopCompleter do
   même principe que la séquence nominale : un crash laisse le verrou → poller skip →
   recovery rejoue, idempotent via dédup comment + add/remove label idempotents).
 
-  `hop` : `:repo`, `:issue_number`, `:role`, `:decision`. Returns `{:ok, :awaiting_arch}`
+  `step_run` : `:repo`, `:issue_number`, `:role`, `:decision`. Returns `{:ok, :awaiting_arch}`
   | `{:error, {:await_arch, reason}}`.
   """
   @spec await_arch(map(), keyword()) :: {:ok, :awaiting_arch} | {:error, {:await_arch, term()}}
-  def await_arch(hop, opts \\ []) when is_map(hop) do
+  def await_arch(step_run, opts \\ []) when is_map(step_run) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
-    repo = Map.fetch!(hop, :repo)
-    n = Map.fetch!(hop, :issue_number)
-    role = Map.fetch!(hop, :role)
-    decision = Map.get(hop, :decision)
+    repo = Map.fetch!(step_run, :repo)
+    n = Map.fetch!(step_run, :issue_number)
+    role = Map.fetch!(step_run, :role)
+    decision = Map.get(step_run, :decision)
 
-    signature = "[hop:#{role}:await:#{decision}]"
+    signature = "[step_run:#{role}:await:#{decision}]"
 
-    # `:comment_body` (optionnel) = trace fournie par l'appelant (ex. HopConsumer porte le
+    # `:comment_body` (optionnel) = trace fournie par l'appelant (ex. StepRunConsumer porte le
     # verdict gatekeeper attribué + halt_invalid distingué). Absent → corps par défaut.
     lead =
-      Map.get(hop, :comment_body) ||
+      Map.get(step_run, :comment_body) ||
         "Verdict du juge **#{role}** : `#{inspect(decision)}`."
 
     # ADRESSÉ à l'arch (le sas unique vers l'humain ; l'humain n'a pas d'autre canal vers la fleet).
@@ -163,7 +163,7 @@ defmodule Fleet.Pilot.HopCompleter do
          {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
          {:ok, _} <- forge.remove_label(repo, n, @in_flight_label, forge_opts) do
       Logger.info(
-        "HopCompleter: #{repo}##{n} role=#{role} → awaiting_arch (decision=#{inspect(decision)})"
+        "StepRunCompleter: #{repo}##{n} role=#{role} → awaiting_arch (decision=#{inspect(decision)})"
       )
 
       {:ok, :awaiting_arch}
@@ -179,10 +179,10 @@ defmodule Fleet.Pilot.HopCompleter do
   domicile des verdicts (reviews natives) + entonnoir unique vers `main`. `body` porte `Closes #N`
   → la forge auto-close l'issue au merge (lien issue↔PR maintenu nativement).
 
-  Remplace le push `lcars/issue-N-role` + comment `[hop:role:sha]` de la séquence maison.
+  Remplace le push `lcars/issue-N-role` + comment `[step_run:role:sha]` de la séquence maison.
   **Idempotent** : `open_pr` retrouve une PR déjà ouverte pour la même head (replay-safe).
 
-  `hop` : `:repo`, `:issue_number`, `:role`, `:deliverable_opts` (dont `:target_branch` = la head),
+  `step_run` : `:repo`, `:issue_number`, `:role`, `:deliverable_opts` (dont `:target_branch` = la head),
   `:base_branch` (défaut `"main"`), `:title`/`:pr_body` (optionnels). `opts` : seams `:deliverable`
   / `:forge_client` / `:forge_opts`.
 
@@ -190,24 +190,24 @@ defmodule Fleet.Pilot.HopCompleter do
   """
   @spec open_deliverable_pr(map(), keyword()) ::
           {:ok, %{commit_sha: String.t(), pr_number: integer()}} | {:error, {atom(), term()}}
-  def open_deliverable_pr(hop, opts \\ []) when is_map(hop) do
+  def open_deliverable_pr(step_run, opts \\ []) when is_map(step_run) do
     deliverable = Keyword.get(opts, :deliverable, Fleet.Pipeline.Deliverable)
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
-    repo = Map.fetch!(hop, :repo)
-    n = Map.fetch!(hop, :issue_number)
-    role = Map.get(hop, :role, "engineer")
-    base = Map.get(hop, :base_branch, "main")
-    head = Map.fetch!(Map.fetch!(hop, :deliverable_opts), :target_branch)
-    title = Map.get(hop, :title, "Livrable ##{n} — brique livrée par #{role} (engineer)")
-    body = Map.get(hop, :pr_body, default_pr_body(n, role))
+    repo = Map.fetch!(step_run, :repo)
+    n = Map.fetch!(step_run, :issue_number)
+    role = Map.get(step_run, :role, "engineer")
+    base = Map.get(step_run, :base_branch, "main")
+    head = Map.fetch!(Map.fetch!(step_run, :deliverable_opts), :target_branch)
+    title = Map.get(step_run, :title, "Livrable ##{n} — brique livrée par #{role} (engineer)")
+    body = Map.get(step_run, :pr_body, default_pr_body(n, role))
 
     # La PR est ouverte AU NOM DE L'ENG (token de rôle, `as_role`), pas du compte système :
     # l'auteur de la PR sur la forge = Engineer (l'eng a fait le boulot). Token absent → fallback
     # système loggué (RoleToken, honnête-dégradé). C'est le SYSTÈME qui poste avec le token de
     # rôle, jamais le pod (forge-aveugle).
-    with {:ok, sha} <- step1_publish(hop, deliverable),
+    with {:ok, sha} <- step1_publish(step_run, deliverable),
          {:ok, pr} <-
            open_pr_step(
              forge,
@@ -218,7 +218,7 @@ defmodule Fleet.Pilot.HopCompleter do
              body,
              ForgeClient.as_role(forge_opts, role)
            ) do
-      Logger.info("HopCompleter: ##{n} #{role} → PR ##{pr} (head=#{head}, sha=#{sha})")
+      Logger.info("StepRunCompleter: ##{n} #{role} → PR ##{pr} (head=#{head}, sha=#{sha})")
       {:ok, %{commit_sha: sha, pr_number: pr}}
     end
   end
@@ -241,21 +241,21 @@ defmodule Fleet.Pilot.HopCompleter do
 
   @doc """
   **PR-natif** — verdict de juge → **review native** sur la PR. Remplace le comment
-  `[hop:role:sha]` maison : le verdict de gate vit comme review Gitea (APPROVED / REQUEST_CHANGES),
+  `[step_run:role:sha]` maison : le verdict de gate vit comme review Gitea (APPROVED / REQUEST_CHANGES),
   traçable, lisible sans query custom. C'est le DOMICILE durable du verdict.
 
-  `hop` : `:repo`, `:pr_number`, `:role`, `:review_event` (`:approve` | `:request_changes` |
+  `step_run` : `:repo`, `:pr_number`, `:role`, `:review_event` (`:approve` | `:request_changes` |
   `:comment`), `:review_body` (optionnel, défaut généré du rôle + verdict).
   Returns `{:ok, :reviewed}` | `{:error, {:review, reason}}`.
   """
   @spec record_review(map(), keyword()) :: {:ok, :reviewed} | {:error, {:review, term()}}
-  def record_review(hop, opts \\ []) when is_map(hop) do
+  def record_review(step_run, opts \\ []) when is_map(step_run) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
-    repo = Map.fetch!(hop, :repo)
-    pr = Map.fetch!(hop, :pr_number)
-    event = Map.fetch!(hop, :review_event)
-    body = Map.get(hop, :review_body, default_review_body(hop, event))
+    repo = Map.fetch!(step_run, :repo)
+    pr = Map.fetch!(step_run, :pr_number)
+    event = Map.fetch!(step_run, :review_event)
+    body = Map.get(step_run, :review_body, default_review_body(step_run, event))
 
     # La review native est postée AU NOM DU JUGE (token de rôle, `as_role`) : sur la forge,
     # l'auteur de la review = qualifier/reviewer (avatar/traça honnête), pas le compte système. Token
@@ -268,7 +268,7 @@ defmodule Fleet.Pilot.HopCompleter do
            pr,
            event,
            body,
-           ForgeClient.as_role(forge_opts, Map.get(hop, :role))
+           ForgeClient.as_role(forge_opts, Map.get(step_run, :role))
          ) do
       :ok -> {:ok, :reviewed}
       {:ok, _} -> {:ok, :reviewed}
@@ -278,8 +278,8 @@ defmodule Fleet.Pilot.HopCompleter do
 
   # Corps de review par défaut — descriptif (rôle juge + verdict + ce qui est jugé,
   # lisible directement sur la PR).
-  defp default_review_body(hop, event) do
-    role = Map.get(hop, :role, "juge")
+  defp default_review_body(step_run, event) do
+    role = Map.get(step_run, :role, "juge")
 
     case event do
       :approve ->
@@ -300,16 +300,16 @@ defmodule Fleet.Pilot.HopCompleter do
   la feature est descendante linéaire de `main` → FF garanti. Échec FF = invariant serial violé
   (deux branches sur le même code) → fail-loud `{:merge, _}`, PAS un conflit à résoudre.
 
-  `hop` : `:repo`, `:pr_number`. Returns `{:ok, :promoted}` | `{:error, {:merge, reason}}`.
+  `step_run` : `:repo`, `:pr_number`. Returns `{:ok, :promoted}` | `{:error, {:merge, reason}}`.
   """
   @spec promote(map(), keyword()) :: {:ok, :promoted} | {:error, {:merge, term()}}
-  def promote(hop, opts \\ []) when is_map(hop) do
+  def promote(step_run, opts \\ []) when is_map(step_run) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
-    repo = Map.fetch!(hop, :repo)
-    pr = Map.fetch!(hop, :pr_number)
-    issue_n = Map.fetch!(hop, :issue_number)
-    producer = producer_of(Map.get(hop, :producer_branch))
+    repo = Map.fetch!(step_run, :repo)
+    pr = Map.fetch!(step_run, :pr_number)
+    issue_n = Map.fetch!(step_run, :issue_number)
+    producer = producer_of(Map.get(step_run, :producer_branch))
 
     # Sceau UNIQUE : commentaire gatekeeper + merge signé gatekeeper — EXACTEMENT le même chemin que
     # `StageDispatcher.promote_pr`. Sans ce sceau, ce terminal `:promote` (ex. après escalade)
@@ -336,13 +336,13 @@ defmodule Fleet.Pilot.HopCompleter do
   defp producer_of(_), do: "engineer"
 
   @doc """
-  **PR-natif — orchestrateur de fin-de-hop.** Compose les primitives PR
+  **PR-natif — orchestrateur de fin-de-step-run.** Compose les primitives PR
   (`open_deliverable_pr`/`record_review`/`promote`) + le routage selon l'`intent` de gate.
-  Remplace la sequence maison `complete/2` (push `lcars/issue-N-role` + comment `[hop:role:sha]` +
+  Remplace la sequence maison `complete/2` (push `lcars/issue-N-role` + comment `[step_run:role:sha]` +
   state + assignee/close + unlock) sur le happy-path : la PR devient le domicile review+promote,
   la forge auto-close l'issue au merge (`Closes #N`).
 
-  Le hop est **deja resolu** par l'appelant (`HopConsumer` connait la carte + le `deliverable_mode`) :
+  Le step_run est **deja resolu** par l'appelant (`StepRunConsumer` connait la carte + le `deliverable_mode`) :
 
     * `:pr_role` — `:producer` (role git_native → pousse le code, ouvre la PR) | `:judge`
       (role payload → review la PR du producteur).
@@ -365,22 +365,22 @@ defmodule Fleet.Pilot.HopCompleter do
   @spec complete_pr(map(), keyword()) ::
           {:ok, :promoted | :review_requested | :rework_requested | :reviewed}
           | {:error, {atom(), term()}}
-  def complete_pr(hop, opts \\ []) when is_map(hop) do
-    case Map.fetch!(hop, :pr_role) do
-      :producer -> complete_producer(hop, opts)
-      :judge -> complete_judge(hop, opts)
+  def complete_pr(step_run, opts \\ []) when is_map(step_run) do
+    case Map.fetch!(step_run, :pr_role) do
+      :producer -> complete_producer(step_run, opts)
+      :judge -> complete_judge(step_run, opts)
     end
   end
 
   # Producteur (engineer, git_native) : pousse le livrable + ouvre la PR, PUIS route. Sur un rework
   # de son PROPRE gate (code rejete), pas de PR — re-dispatch direct (le producteur recommence).
-  defp complete_producer(%{intent: :rework} = hop, opts), do: route(hop, nil, opts)
+  defp complete_producer(%{intent: :rework} = step_run, opts), do: route(step_run, nil, opts)
 
-  defp complete_producer(hop, opts) do
-    with {:ok, %{pr_number: pr}} <- open_deliverable_pr(hop, opts) do
-      _ = maybe_post_eng_summary(hop, pr, opts)
-      _ = emit_deliverable_published(hop, pr)
-      route(hop, pr, opts)
+  defp complete_producer(step_run, opts) do
+    with {:ok, %{pr_number: pr}} <- open_deliverable_pr(step_run, opts) do
+      _ = maybe_post_eng_summary(step_run, pr, opts)
+      _ = emit_deliverable_published(step_run, pr)
+      route(step_run, pr, opts)
     end
   end
 
@@ -390,15 +390,15 @@ defmodule Fleet.Pilot.HopCompleter do
   # producteur, depuis le payload pod.completed). Source :pipeline (la publication est une op pipeline).
   # Best-effort : un echec d'emission ne casse PAS la completion (le livrable est deja publie) — le
   # backstop cote pod (deadline :publishing) couvre un rate. No-op si pas de pod_id (legacy/test).
-  defp emit_deliverable_published(hop, pr) do
-    case Map.get(hop, :pod_id) do
+  defp emit_deliverable_published(step_run, pr) do
+    case Map.get(step_run, :pod_id) do
       pod_id when is_binary(pod_id) ->
         event =
           Fleet.Event.new(:pipeline, :"deliverable.published",
             pod_id: pod_id,
             payload: %{
-              "repo" => Map.fetch!(hop, :repo),
-              "issue" => Map.fetch!(hop, :issue_number),
+              "repo" => Map.fetch!(step_run, :repo),
+              "issue" => Map.fetch!(step_run, :issue_number),
               "pr" => pr
             }
           )
@@ -408,14 +408,16 @@ defmodule Fleet.Pilot.HopCompleter do
             :ok
 
           other ->
-            Logger.warning("HopCompleter: deliverable.published non diffuse (#{inspect(other)})")
+            Logger.warning(
+              "StepRunCompleter: deliverable.published non diffuse (#{inspect(other)})"
+            )
         end
 
       _ ->
         :noop
     end
   rescue
-    e -> Logger.warning("HopCompleter: deliverable.published a leve (#{inspect(e)})")
+    e -> Logger.warning("StepRunCompleter: deliverable.published a leve (#{inspect(e)})")
   end
 
   # VOIX DE L'ENG sur la PR (info SORTANTE, descriptive et traçable) : poste le
@@ -424,14 +426,14 @@ defmodule Fleet.Pilot.HopCompleter do
   # le SYSTÈME qui poste). Best-effort : un échec de post ne casse PAS la complétion (le livrable = le
   # commit, déjà poussé). Absent/vide → rien (pas de commentaire vide). Couvre livraison ET rework (les
   # deux passent ici via open_deliverable_pr — PR neuve ou existante).
-  defp maybe_post_eng_summary(hop, pr, opts) do
-    case Map.get(hop, :eng_summary) do
+  defp maybe_post_eng_summary(step_run, pr, opts) do
+    case Map.get(step_run, :eng_summary) do
       summary when is_binary(summary) and summary != "" ->
         forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
         forge_opts = Keyword.get(opts, :forge_opts, [])
-        repo = Map.fetch!(hop, :repo)
-        n = Map.fetch!(hop, :issue_number)
-        role = Map.get(hop, :role, "engineer")
+        repo = Map.fetch!(step_run, :repo)
+        n = Map.fetch!(step_run, :issue_number)
+        role = Map.get(step_run, :role, "engineer")
         role_opts = ForgeClient.as_role(forge_opts, role)
 
         # La voix de l'eng sur DEUX canaux à 2 buts distincts — la PR (revue du
@@ -463,28 +465,30 @@ defmodule Fleet.Pilot.HopCompleter do
 
   # Juge (payload) : retrouve la PR du producteur, enregistre la review native (verdict→event),
   # PUIS route. La review native EST le domicile durable du verdict (vs le comment maison).
-  defp complete_judge(hop, opts) do
+  defp complete_judge(step_run, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
-    repo = Map.fetch!(hop, :repo)
-    base = Map.get(hop, :base_branch, "main")
-    head = Map.get(hop, :producer_branch)
+    repo = Map.fetch!(step_run, :repo)
+    base = Map.get(step_run, :base_branch, "main")
+    head = Map.get(step_run, :producer_branch)
 
     case resolve_pr(forge, repo, head, base, forge_opts) do
       {:ok, pr} ->
         # Juge de LIVRABLE (la PR existe) : verdict tracé en review native + route PR (request next / merge).
-        with {:ok, :reviewed} <- record_review(review_hop(hop, pr), opts) do
-          route(hop, pr, opts)
+        with {:ok, :reviewed} <- record_review(review_step_run(step_run, pr), opts) do
+          route(step_run, pr, opts)
         end
 
       {:error, {:pr_lookup, :no_producer_branch}} = err ->
         # Juge de BRIEF (judge_target:brief) : PRÉ-PR, donc pas de PR ni de review native → le
         # verdict se trace en COMMENTAIRE issue et l'avance est ISSUE-LEVEL (grave la route → le poller
         # dispatche le stage suivant). Réutilise `complete` (la MÊME complétion issue-level que
-        # close_with_trace : publish sauté via deliverable_opts nil + hop_sha). Tout AUTRE juge sans PR =
+        # close_with_trace : publish sauté via deliverable_opts nil + step_run_sha). Tout AUTRE juge sans PR =
         # erreur (un livrable était attendu) → fail-loud (jamais un merge sur PR introuvable).
-        if Map.get(hop, :judge_target) == "brief" do
-          hop |> Map.merge(%{deliverable_opts: nil, hop_sha: "brief-verdict"}) |> complete(opts)
+        if Map.get(step_run, :judge_target) == "brief" do
+          step_run
+          |> Map.merge(%{deliverable_opts: nil, step_run_sha: "brief-verdict"})
+          |> complete(opts)
         else
           err
         end
@@ -504,12 +508,13 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  defp review_hop(hop, pr) do
+  defp review_step_run(step_run, pr) do
     # Un juge no-carte porte `:review_event` (mappé du gate-decision continue/abandon par
-    # HopConsumer). À défaut (carte), on dérive de l'intent. Le `:review_event` explicite prime.
-    event = Map.get(hop, :review_event) || review_event_for_intent(Map.fetch!(hop, :intent))
+    # StepRunConsumer). À défaut (carte), on dérive de l'intent. Le `:review_event` explicite prime.
+    event =
+      Map.get(step_run, :review_event) || review_event_for_intent(Map.fetch!(step_run, :intent))
 
-    hop
+    step_run
     |> Map.put(:pr_number, pr)
     |> Map.put(:review_event, event)
   end
@@ -517,7 +522,7 @@ defmodule Fleet.Pilot.HopCompleter do
   # Verdict de gate (juge-carte) → event de review native. SEULS les intents gate-PASS approuvent,
   # et chacun EXPLICITEMENT : `:advance` (un stage suit) et `:promote` (terminal) = APPROVED.
   # `:rework` (gate fail) = REQUEST_CHANGES. Le `:review_body` (optionnel) prime sur le corps genere.
-  # Defaut FAIL-CLOSED : tout autre intent (un futur `:reject`/`:abandon`, ou un hop qui a perdu son
+  # Defaut FAIL-CLOSED : tout autre intent (un futur `:reject`/`:abandon`, ou un step_run qui a perdu son
   # `:review_event`) ne s'auto-approuve JAMAIS — approuver par OMISSION est le pire defaut pour un
   # verdict. Le catch-all bloque (REQUEST_CHANGES) ; approuver reste un choix gravé, intent par intent.
   defp review_event_for_intent(:advance), do: :approve
@@ -535,45 +540,45 @@ defmodule Fleet.Pilot.HopCompleter do
   #   :advance -> request_review(next) + post_route, unlock ;
   #   :rework  -> post_route(rebond), unlock. Re-dispatch : producteur via l'assignee Entry conserve
   #               (pas de PR encore) ; juge -> re-spawn producteur sur changes-requested.
-  defp route(%{intent: :promote} = hop, pr, opts) do
+  defp route(%{intent: :promote} = step_run, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
     # Transmet issue_number + producer_branch à `promote` (le sceau gatekeeper en a besoin pour le
-    # commentaire de fin) ; réduire le hop à {repo, pr_number} mergerait sans trace.
-    promote_hop = %{
-      repo: hop.repo,
+    # commentaire de fin) ; réduire le step_run à {repo, pr_number} mergerait sans trace.
+    promote_step_run = %{
+      repo: step_run.repo,
       pr_number: pr,
-      issue_number: hop.issue_number,
-      producer_branch: Map.get(hop, :producer_branch)
+      issue_number: step_run.issue_number,
+      producer_branch: Map.get(step_run, :producer_branch)
     }
 
-    with {:ok, :promoted} <- promote(promote_hop, opts),
-         {:ok, _} <- unlock(forge, hop.repo, lock_number(hop, pr), forge_opts) do
+    with {:ok, :promoted} <- promote(promote_step_run, opts),
+         {:ok, _} <- unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts) do
       {:ok, :promoted}
     end
   end
 
-  defp route(%{intent: :advance} = hop, pr, opts) do
+  defp route(%{intent: :advance} = step_run, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
-    repo = hop.repo
-    next = Map.fetch!(hop, :next_assignee)
+    repo = step_run.repo
+    next = Map.fetch!(step_run, :next_assignee)
 
     with :ok <- request_review_step(forge, repo, pr, next, forge_opts),
-         {:ok, _} <- bridge_route(forge, repo, hop.issue_number, hop, forge_opts),
-         {:ok, _} <- unlock(forge, repo, lock_number(hop, pr), forge_opts) do
+         {:ok, _} <- bridge_route(forge, repo, step_run.issue_number, step_run, forge_opts),
+         {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts) do
       {:ok, :review_requested}
     end
   end
 
-  defp route(%{intent: :rework} = hop, pr, opts) do
+  defp route(%{intent: :rework} = step_run, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
-    repo = hop.repo
+    repo = step_run.repo
 
-    with {:ok, _} <- bridge_route(forge, repo, hop.issue_number, hop, forge_opts),
-         {:ok, _} <- unlock(forge, repo, lock_number(hop, pr), forge_opts) do
+    with {:ok, _} <- bridge_route(forge, repo, step_run.issue_number, step_run, forge_opts),
+         {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts) do
       {:ok, :rework_requested}
     end
   end
@@ -584,17 +589,17 @@ defmodule Fleet.Pilot.HopCompleter do
   # drivé), puis on lève le verrou de l'ISSUE (la PR ouverte fait skip l'issue côté poller via
   # `pulls_issue_ids`). PAS de merge ici : le merge est piloté par l'état-PR (dispatch_review, quand
   # tous les juges ont approuvé). Branch-protection OFF en dev → LCARS agrège, interim.
-  defp route(%{intent: :review} = hop, pr, opts) do
+  defp route(%{intent: :review} = step_run, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
-    repo = hop.repo
+    repo = step_run.repo
 
     # Unlock DES DEUX numéros (idempotent : remove_label no-op si absent). 1re livraison → le verrou est
     # sur l'ISSUE (posé par `dispatch_issue`) ; RE-livraison de rework → le verrou est sur la PR (posé
     # par `dispatch_review` :rework). On lève les deux pour ne stuck ni l'un ni l'autre.
     with :ok <- request_reviews_step(forge, repo, pr, Roles.reviewer_roles(opts), forge_opts),
          {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
-         {:ok, _} <- unlock(forge, repo, hop.issue_number, forge_opts),
+         {:ok, _} <- unlock(forge, repo, step_run.issue_number, forge_opts),
          {:ok, _} <- unlock(forge, repo, pr, forge_opts) do
       {:ok, :review_requested}
     end
@@ -605,11 +610,11 @@ defmodule Fleet.Pilot.HopCompleter do
   # par le poller (`dispatch_review`, REVIEWS-DRIVEN : il lit la liste des reviews — verdict décisif par
   # juge — pas `requested_reviewers` que Gitea ne vide pas). Pas d'action sur `requested_reviewers`
   # (la DELETE est un no-op sur un juge ayant déjà reviewé).
-  defp route(%{intent: :reviewed} = hop, pr, opts) do
+  defp route(%{intent: :reviewed} = step_run, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
-    with {:ok, _} <- unlock(forge, hop.repo, lock_number(hop, pr), forge_opts) do
+    with {:ok, _} <- unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts) do
       {:ok, :reviewed}
     end
   end
@@ -630,7 +635,7 @@ defmodule Fleet.Pilot.HopCompleter do
   # Assigne l'HUMAIN commanditaire à la PR (comme le issue : voir QUEL humain a drivé les
   # agents). L'humain DRIVE, ne fait rien → il ne signe rien, mais il est l'assignee partout (traça du
   # driver). Assignee = champ de routing (pas d'authorship) → token système OK. Humain irrésoluble →
-  # best-effort (le code EST livré) : log + on n'échoue pas le hop.
+  # best-effort (le code EST livré) : log + on n'échoue pas le step_run.
   defp assign_human_step(forge, repo, pr, forge_opts) do
     case Fleet.Credentials.Human.current() do
       {:ok, login} ->
@@ -641,23 +646,23 @@ defmodule Fleet.Pilot.HopCompleter do
 
       {:error, reason} ->
         Logger.warning(
-          "HopCompleter: humain commanditaire irrésoluble (#{inspect(reason)}) — PR ##{pr} non assignée"
+          "StepRunCompleter: humain commanditaire irrésoluble (#{inspect(reason)}) — PR ##{pr} non assignée"
         )
 
         {:ok, :no_human}
     end
   end
 
-  # Espace deux écritures forge d'un même hop d'au moins UNE SECONDE. Gitea horodate les events à
+  # Espace deux écritures forge d'un même step_run d'au moins UNE SECONDE. Gitea horodate les events à
   # la seconde : deux écritures dans la même seconde tiennent une égalité de `created_at` que le feed
   # dashboard rend dans un ordre arbitraire (« logiquement avant, affiché après », constaté sur plusieurs
   # runs). On insère ce gap entre le commentaire HUMAIN (verdict) et l'écriture protocole suivante
   # (route/label) → le commentaire prend un `created_at` strictement antérieur → ordre de lecture cohérent.
-  # Knob `:fleet_pilot, :hop_write_spacing_ms` (défaut 2000 ; 0 en test → pas de sleep). Seam `:sleeper`
-  # (test). NB : bloque brièvement le consumer (run_completion sync) — assumé : un hop est rare et bloque
+  # Knob `:fleet_pilot, :step_run_write_spacing_ms` (défaut 2000 ; 0 en test → pas de sleep). Seam `:sleeper`
+  # (test). NB : bloque brièvement le consumer (run_completion sync) — assumé : un step_run est rare et bloque
   # déjà sur le push + les écritures HTTP ; 2s achète une traça honnête (décision user).
   defp space_writes(opts) do
-    case Application.get_env(:fleet_pilot, :hop_write_spacing_ms, 2000) do
+    case Application.get_env(:fleet_pilot, :step_run_write_spacing_ms, 2000) do
       ms when is_integer(ms) and ms > 0 -> (opts[:sleeper] || (&Process.sleep/1)).(ms)
       _ -> :ok
     end
@@ -674,8 +679,8 @@ defmodule Fleet.Pilot.HopCompleter do
   # pour identifier le stage du juge : l'assignee/le reviewer seul ne l'identifie pas, un role peut
   # etre sur N stages). Reste (autorite de navigation) ; seul le TRIGGER (set_assignee) est remplace
   # par la review-request. Grave si pipeline+next_stage presents (sinon 1-stage/terminal, pas de route).
-  defp bridge_route(forge, repo, n, hop, forge_opts) do
-    case {Map.get(hop, :pipeline), Map.get(hop, :next_stage)} do
+  defp bridge_route(forge, repo, n, step_run, forge_opts) do
+    case {Map.get(step_run, :pipeline), Map.get(step_run, :next_stage)} do
       {p, s} when is_binary(p) and is_binary(s) ->
         case forge.post_route(repo, n, p, s, forge_opts) do
           {:ok, _} = ok -> ok
@@ -701,40 +706,40 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  # ── Étape 1 : commit + push livrable (ou hop_sha fourni si pas de git) ──────
-  defp step1_publish(hop, deliverable) do
-    case Map.get(hop, :deliverable_opts) do
+  # ── Étape 1 : commit + push livrable (ou step_run_sha fourni si pas de git) ──────
+  defp step1_publish(step_run, deliverable) do
+    case Map.get(step_run, :deliverable_opts) do
       nil ->
-        case Map.get(hop, :hop_sha) do
+        case Map.get(step_run, :step_run_sha) do
           sha when is_binary(sha) and sha != "" -> {:ok, sha}
-          _ -> {:error, {:publish, :no_deliverable_no_hop_sha}}
+          _ -> {:error, {:publish, :no_deliverable_no_step_run_sha}}
         end
 
       d_opts when is_map(d_opts) ->
         case deliverable.publish(d_opts) do
-          {:ok, %{commit_sha: sha}} -> {:ok, Map.get(hop, :hop_sha, sha)}
+          {:ok, %{commit_sha: sha}} -> {:ok, Map.get(step_run, :step_run_sha, sha)}
           {:error, reason} -> {:error, {:publish, reason}}
         end
     end
   end
 
-  # ── Étape 2 : comment signé [hop:role:sha], dédup ──────────────────────────
+  # ── Étape 2 : comment signé [step_run:role:sha], dédup ──────────────────────────
   # La signature ET le bloc result viennent de ForgeProtocol (vocab pur, co-localisés avec leurs
-  # parseurs `hop_marker?` / `parse_result_block`). On NE passe PAS par le seam `forge`
+  # parseurs `step_run_marker?` / `parse_result_block`). On NE passe PAS par le seam `forge`
   # (un stub ne doit pas pouvoir désynchroniser le format du parseur réel).
   #
   # NB `:outputs` : embarque le `result_K` du stage qui finit → lisible sans query séparée
-  # (recovery, contexte). HopConsumer ne pose plus `:outputs` (le cas « avance vers un
-  # gatekeeper-stage » n'existe plus) → seam générique, inactif côté HopConsumer
+  # (recovery, contexte). StepRunConsumer ne pose plus `:outputs` (le cas « avance vers un
+  # gatekeeper-stage » n'existe plus) → seam générique, inactif côté StepRunConsumer
   # mais conservé (autres appelants / extensibilité).
-  defp step2_comment(forge, repo, n, role, sha, hop, forge_opts) do
-    signature = ForgeProtocol.hop_marker(role, sha)
+  defp step2_comment(forge, repo, n, role, sha, step_run, forge_opts) do
+    signature = ForgeProtocol.step_run_marker(role, sha)
 
     body =
-      Map.get(hop, :comment_body, default_comment(role, sha)) <>
-        ForgeProtocol.result_block(Map.get(hop, :outputs)) <> "\n\n" <> signature
+      Map.get(step_run, :comment_body, default_comment(role, sha)) <>
+        ForgeProtocol.result_block(Map.get(step_run, :outputs)) <> "\n\n" <> signature
 
-    # Le comment signé du hop est AU NOM DU RÔLE qui finit (`as_role` : verdict du consultant /
+    # Le comment signé du step_run est AU NOM DU RÔLE qui finit (`as_role` : verdict du consultant /
     # livrable de l'eng → auteur forge = le rôle, pas le compte système ; même geste que la PR/review/sceau).
     case forge.post_comment(
            repo,
@@ -752,8 +757,8 @@ defmodule Fleet.Pilot.HopCompleter do
   # Reassign : grave la ROUTE du stage suivant AVANT le PATCH assignee — le poller
   # ne doit voir le nouvel assignee qu'avec sa position carte déjà posée (sinon le spawn
   # suivant ne saurait pas quel stage il est). post_route idempotent (dédup marqueur).
-  defp step4_route(forge, repo, n, hop, forge_opts) do
-    case Map.get(hop, :next_assignee) do
+  defp step4_route(forge, repo, n, step_run, forge_opts) do
+    case Map.get(step_run, :next_assignee) do
       nil ->
         case forge.close_issue(repo, n, forge_opts) do
           {:ok, _} -> {:ok, :completed}
@@ -765,10 +770,10 @@ defmodule Fleet.Pilot.HopCompleter do
         # reste l'HUMAIN (traça) ; le rôle du next stage (`next`) est dérivé de la route au dispatch
         # (`StageDispatcher.carte_role`), pas de l'assignee. `next` (next_role présent) distingue
         # AVANCE vs terminal (nil → close).
-        case maybe_post_route(forge, repo, n, hop, forge_opts) do
+        case maybe_post_route(forge, repo, n, step_run, forge_opts) do
           {:ok, _} ->
             Logger.debug(
-              "HopCompleter advance #{repo}##{n} → next stage role=#{next} (route gravée, assignee=humain inchangé)"
+              "StepRunCompleter advance #{repo}##{n} → next stage role=#{next} (route gravée, assignee=humain inchangé)"
             )
 
             {:ok, :reassigned}
@@ -779,8 +784,8 @@ defmodule Fleet.Pilot.HopCompleter do
     end
   end
 
-  defp maybe_post_route(forge, repo, n, hop, forge_opts) do
-    case {Map.get(hop, :pipeline), Map.get(hop, :next_stage)} do
+  defp maybe_post_route(forge, repo, n, step_run, forge_opts) do
+    case {Map.get(step_run, :pipeline), Map.get(step_run, :next_stage)} do
       {p, s} when is_binary(p) and is_binary(s) -> forge.post_route(repo, n, p, s, forge_opts)
       _ -> {:ok, :no_route}
     end
@@ -795,6 +800,6 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   defp default_comment(role, sha) do
-    "Livrable de **#{role}** poussé par le système (fin-de-hop). Source: `#{sha}`."
+    "Livrable de **#{role}** poussé par le système (fin-de-step-run). Source: `#{sha}`."
   end
 end

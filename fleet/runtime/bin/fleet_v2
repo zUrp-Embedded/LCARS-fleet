@@ -52,7 +52,7 @@ setup_env() {
 
   # F-037 multi-projet : le poller DÉCOUVRE ses repos par topic (lcars-fleet-<human>) → plus de
   # LCARS_PILOT_POLL_REPO requis. La garde fail-loud porte désormais sur FORGE_BASE_URL (découverte +
-  # push per-hop), alignée sur la garde Elixir `Fleet.Pilot.Application.stage_children!`.
+  # push per-step-run), alignée sur la garde Elixir `Fleet.Pilot.Application.stage_children!`.
   : "${FORGE_BASE_URL:?config manquante : FORGE_BASE_URL=http://forge (dans $env_file) — requis pour la découverte + le push}"
 
   compute_ports

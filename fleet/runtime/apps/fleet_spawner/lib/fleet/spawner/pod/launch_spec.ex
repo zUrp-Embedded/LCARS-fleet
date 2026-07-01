@@ -25,7 +25,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   # Projet EFFECTIF du pod : le brief (`opts[:project]`, dynamique) prime sur le `spec["project"]`
   # statique du cap-profile, défaut map vide. Pilote le placement (cwd projet) ET le payload de
-  # fin-de-hop — d'où la visibilité publique (source unique, pas de re-dérivation côté Pod).
+  # fin-de-step-run — d'où la visibilité publique (source unique, pas de re-dérivation côté Pod).
   def effective_project(opts, cap_profile) do
     Keyword.get(opts || [], :project) || get_in(cap_profile.spec, ["project"]) || %{}
   end

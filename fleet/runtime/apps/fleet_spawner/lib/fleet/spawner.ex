@@ -272,7 +272,7 @@ defmodule Fleet.Spawner do
   Résout le workspace livrable d'un pod (`<pod_dir>/workspace`) depuis le pod_dir ENREGISTRÉ.
   Le monde lit où IL a placé le pod (record spawner via `pod_info`), pas une assertion du pod :
   le pod ne nomme jamais le chemin de son propre audit. Sert au rail forge-driven
-  (`Pilot.HopCompleter` → `Deliverable`) pour gater le workspace en mode `git_native`.
+  (`Pilot.StepRunCompleter` → `Deliverable`) pour gater le workspace en mode `git_native`.
   """
   @spec pod_workspace_dir(String.t()) :: {:ok, Path.t()} | {:error, :not_found}
   def pod_workspace_dir(pod_id) when is_binary(pod_id) do

@@ -127,7 +127,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   # exige donc un sceau SERVEUR-SIDE NON FORGEABLE : un marqueur que SEUL le compte système peut poser.
   #
   # Le sceau = un marqueur d'onboarding écrit par le BOT système (le porteur de `FORGE_TOKEN`), vérifié
-  # `system_authored?` à la lecture — exactement le mécanisme déjà éprouvé pour les marqueurs route/hop/
+  # `system_authored?` à la lecture — exactement le mécanisme déjà éprouvé pour les marqueurs route/step_run/
   # result (« un marqueur n'est cru que s'il est posté par le bot système »). Non forgeable parce qu'un
   # user ordinaire n'a pas le token système pour l'écrire SOUS l'identité du bot, PAS parce qu'il est
   # signé. Pas de crypto, pas de registre : le MÊME primitif de confiance, étendu à l'admission repo.

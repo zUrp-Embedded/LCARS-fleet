@@ -371,7 +371,7 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # EXTRACT — le résultat vient de l'event Bus (data.submitted_result), pas d'un fichier.
-  # `pod.completed` est LIFECYCLE load-bearing (le HopConsumer en dépend pour finir le hop).
+  # `pod.completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir le step_run).
   # Diffusion via `required_broadcast` : son échec n'est PAS avalé. Si elle échoue, on NE progresse
   # PAS vers release/kill (one-shot) ni vers le re-monitoring qui DROPPE `submitted_result`
   # (long-lived) : le pod RESTE en :monitoring avec son résultat RETENU + deadline ré-armée (par
@@ -824,7 +824,7 @@ defmodule Fleet.Spawner.Pod do
     case {Keyword.get(opts, :pipeline_id), Keyword.get(opts, :stage)} do
       {nil, _} ->
         # Pod stage-dispatch (assignee-driven) hors pipeline. S'il porte un PROJET (repo cloné), le
-        # payload embarque le contexte de fin-de-hop : le consumer HopConsumer est stateless (l'event
+        # payload embarque le contexte de fin-de-step-run : le consumer StepRunConsumer est stateless (l'event
         # porte l'état). Pod sans projet (memory-X, architect) → payload nu (base), filtré en aval.
         case LaunchSpec.effective_project(data.opts, data.cap_profile) do
           %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
@@ -852,7 +852,7 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # Contexte carte (pipeline+stage) injecté au spawn par StageDispatcher via `:pipeline`/`:stage`.
-  # Permet au HopConsumer de naviguer la carte. Absent (carte 1-stage) → payload inchangé.
+  # Permet au StepRunConsumer de naviguer la carte. Absent (carte 1-stage) → payload inchangé.
   defp maybe_put_carte_ctx(payload, opts) do
     case {Keyword.get(opts, :pipeline), Keyword.get(opts, :stage)} do
       {p, s} when is_binary(p) and is_binary(s) ->
@@ -863,9 +863,9 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Multi-projet : embarque le REPO du projet dans `pod.completed` → le HopConsumer sait sur quel
+  # Multi-projet : embarque le REPO du projet dans `pod.completed` → le StepRunConsumer sait sur quel
   # repo agir + où pousser. `"repository" => %{"full_name"}` = identifiant forge ; `"remote"` = l'URL
-  # de push. Projet sans `"repo"` → payload inchangé → fallback single-repo du HopConsumer.
+  # de push. Projet sans `"repo"` → payload inchangé → fallback single-repo du StepRunConsumer.
   defp maybe_put_repo(payload, %{"repo" => repo} = proj) when is_binary(repo) and repo != "" do
     payload
     |> Map.put("repository", %{"full_name" => repo})

@@ -8,14 +8,14 @@ defmodule Fleet.Pilot.Application do
     * `Fleet.Pilot.Poller` (mode stage) — **MULTI-PROJET** : DÉCOUVRE les repos de l'humain par
       topic (`lcars-fleet-<human>`, plus de `:poll_repo` hard-codé), dispatche les **issues assignées**
       (assignee=humain) vers le spawn du rôle **producteur** (`StageDispatcher`).
-    * `Fleet.Pilot.HopConsumer` — consumer Bus : sur `pod.completed`, exécute la **fin-de-hop**
+    * `Fleet.Pilot.StepRunConsumer` — consumer Bus : sur `pod.completed`, exécute la **fin-de-step-run**
       (publish du livrable git-native → push système → ouverture PR → merge). Sans lui, la chaîne
       n'avance pas au-delà du spawn producteur.
-    * `Task.Supervisor` (`HopConsumer.task_supervisor/0`) — offload de la complétion de hop : le
-      `git push` ≤30s ne bloque pas le singleton `HopConsumer`. Démarré AVANT le HopConsumer (qui s'y réfère).
+    * `Task.Supervisor` (`StepRunConsumer.task_supervisor/0`) — offload de la complétion de step_run : le
+      `git push` ≤30s ne bloque pas le singleton `StepRunConsumer`. Démarré AVANT le StepRunConsumer (qui s'y réfère).
     * `Fleet.Pilot.IncidentConsumer` (+ sa `Task.Supervisor`) — consumer Bus SÉPARÉ des events d'ÉCHEC
-      de pod (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct de la fin-de-hop
-      (blast-radius isolé : un burst d'échecs ne partage pas la mailbox du HopConsumer).
+      de pod (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct de la fin-de-step-run
+      (blast-radius isolé : un burst d'échecs ne partage pas la mailbox du StepRunConsumer).
 
   ## Historique — rail legacy RETIRÉ (2026-06-16)
 
@@ -32,15 +32,15 @@ defmodule Fleet.Pilot.Application do
   @impl Application
   def start(_type, _args) do
     # Le pool forge démarre INCONDITIONNELLEMENT, avant le rail stage : le ForgeClient est aussi appelé
-    # par `create_issue` (fleet_mcp) hors du rail Poller/HopConsumer, donc le pool doit exister dès que
+    # par `create_issue` (fleet_mcp) hors du rail Poller/StepRunConsumer, donc le pool doit exister dès que
     # fleet_pilot boote. Lazy (aucune connexion tant qu'aucune requête) → inoffensif hors prod/tests.
     children = [forge_finch_spec() | stage_children()]
 
     # `:one_for_one` (pas `:rest_for_one`) bien que les enfants se réfèrent dans l'ordre
-    # (Task.Supervisor + IncidentRegistry démarrés AVANT Poller + HopConsumer qui les utilisent) :
+    # (Task.Supervisor + IncidentRegistry démarrés AVANT Poller + StepRunConsumer qui les utilisent) :
     # ces références sont par NOM GLOBAL (résolu à CHAQUE appel — `Task.Supervisor.start_child(name, …)`,
     # `IncidentRegistry` via son nom de process), JAMAIS un pid capturé à l'init. Donc si IncidentRegistry
-    # ou le Task.Supervisor crashe et redémarre, le Poller/HopConsumer le re-trouve sous le même nom au
+    # ou le Task.Supervisor crashe et redémarre, le Poller/StepRunConsumer le re-trouve sous le même nom au
     # prochain appel — inutile de les redémarrer en cascade (ce que ferait `:rest_for_one`). L'isolation
     # par-process (un crash n'en tue qu'un) est le bon régime ici.
     #
@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.Application do
   fait que demander, pas de fuite des noms de process Ring 2 dans Ring 4).
 
     * `{:inactive, _}`    — `:stage_dispatch?` off (rail volontairement absent, attendu hors prod-stage).
-    * `{:operational, _}` — Poller + HopConsumer vivants.
+    * `{:operational, _}` — Poller + StepRunConsumer vivants.
     * `{:degraded, _}`    — stage activé mais ≥1 singleton mort → **vert-creux attrapé** (le daemon
       tourne mais le rail forge n'avance plus).
   """
@@ -79,12 +79,12 @@ defmodule Fleet.Pilot.Application do
   def stage_status do
     if Application.get_env(:fleet_pilot, :stage_dispatch?, false) do
       poller? = is_pid(Process.whereis(Fleet.Pilot.Poller))
-      hop? = is_pid(Process.whereis(Fleet.Pilot.HopConsumer))
+      step_run? = is_pid(Process.whereis(Fleet.Pilot.StepRunConsumer))
 
-      if poller? and hop? do
-        {:operational, %{poller: true, hop_consumer: true}}
+      if poller? and step_run? do
+        {:operational, %{poller: true, step_run_consumer: true}}
       else
-        {:degraded, %{poller: poller?, hop_consumer: hop?}}
+        {:degraded, %{poller: poller?, step_run_consumer: step_run?}}
       end
     else
       {:inactive, %{note: "stage_dispatch? off"}}
@@ -95,7 +95,7 @@ defmodule Fleet.Pilot.Application do
   # vrai. `[]` si `:stage_dispatch?` absent/false (app inerte volontaire — hermétisme test).
   #
   # Si `:stage_dispatch?` est VRAI mais que la config essentielle ne résout pas, on ne retombe PAS sur
-  # `[]` en silence (ça démarrerait l'app « verte » sans Poller/HopConsumer → rail forge mort, zéro
+  # `[]` en silence (ça démarrerait l'app « verte » sans Poller/StepRunConsumer → rail forge mort, zéro
   # crash, zéro log). L'opérateur a DEMANDÉ le mode stage → config incomplète = deploy cassé →
   # fail-loud au boot.
   defp stage_children do
@@ -112,46 +112,46 @@ defmodule Fleet.Pilot.Application do
   def stage_children_for_test, do: stage_children()
 
   # MULTI-PROJET : plus de `:poll_repo` obligatoire ni de remote figé au boot — le Poller DÉCOUVRE
-  # ses repos par topic (`lcars-fleet-<human>`) et le HopConsumer dérive le repo+remote PER-HOP de l'event.
+  # ses repos par topic (`lcars-fleet-<human>`) et le StepRunConsumer dérive le repo+remote PER-STEP-RUN de l'event.
   # La config essentielle qui reste = la forge `base_url` : sans elle, ni découverte (`search_repos_by_topic`)
-  # ni push (remote per-hop) ne marchent → rail mort. C'est la garde fail-loud, pointée sur le réel.
+  # ni push (remote per-step-run) ne marchent → rail mort. C'est la garde fail-loud, pointée sur le réel.
   defp stage_children! do
     unless forge_base_url() do
       raise "fleet_pilot: :stage_dispatch? activé mais la forge base_url est absente (config :fleet_pilot, " <>
               ":forge[:base_url] / FORGE_BASE_URL) — le Poller ne peut pas DÉCOUVRIR ses projets " <>
-              "(search_repos_by_topic) ni le HopConsumer dériver le remote de push. Deploy cassé, fail-loud."
+              "(search_repos_by_topic) ni le StepRunConsumer dériver le remote de push. Deploy cassé, fail-loud."
     end
 
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
 
     [
-      # Superviseur de tasks pour l'offload de la complétion de hop (le git push ≤30s du
-      # HopConsumer ne bloque pas le singleton). Démarré AVANT le HopConsumer (qui s'y réfère).
-      {Task.Supervisor, name: Fleet.Pilot.HopConsumer.task_supervisor()},
+      # Superviseur de tasks pour l'offload de la complétion de step_run (le git push ≤30s du
+      # StepRunConsumer ne bloque pas le singleton). Démarré AVANT le StepRunConsumer (qui s'y réfère).
+      {Task.Supervisor, name: Fleet.Pilot.StepRunConsumer.task_supervisor()},
       # Mémoire persistante des incidents système (owner résilient). Consommée par WakeRecovery
       # (kick_gatekeeper / safe_wake) ET par l'IncidentConsumer (events `*.failed`). Boot best-effort
       # (forge injoignable au boot → WAL local seul, pas de crash).
       Fleet.Pilot.IncidentRegistry,
       # Consumer Bus SÉPARÉ des events d'ÉCHEC de pod (`pod.failed`/`wake.failed`) → IncidentRegistry.
       # Sa Task.Supervisor (offload du forge du registre) démarrée AVANT lui (il s'y réfère). Séparé du
-      # HopConsumer : concern distinct, le burst d'échecs ne partage pas la mailbox de la complétion.
+      # StepRunConsumer : concern distinct, le burst d'échecs ne partage pas la mailbox de la complétion.
       {Task.Supervisor, name: Fleet.Pilot.IncidentConsumer.task_supervisor()},
       {Fleet.Pilot.IncidentConsumer, runner: &Fleet.Pilot.IncidentConsumer.offload_async/1},
       # Sérialiseur d'alignement du clone local après merge : projette le livrable (`origin/main`) sur
-      # `/home/projects/<name>`. Démarré AVANT Poller + HopConsumer — ses deux déclencheurs de merge
-      # (`promote_pr` / `HopCompleter.promote`) — pour qu'il sérialise leurs alignements potentiellement
+      # `/home/projects/<name>`. Démarré AVANT Poller + StepRunConsumer — ses deux déclencheurs de merge
+      # (`promote_pr` / `StepRunCompleter.promote`) — pour qu'il sérialise leurs alignements potentiellement
       # concurrents (un `git` à la fois par worktree, contre la corruption d'index).
       Fleet.Pilot.WorktreeSync,
-      # Ni `:repo` au Poller (découverte par topic), ni `:repo`/`:remote` au HopConsumer (per-hop).
+      # Ni `:repo` au Poller (découverte par topic), ni `:repo`/`:remote` au StepRunConsumer (per-step-run).
       # Le routing vit dans la route-comment (gravée par create_issue) ; le Poller la lit (state-machine).
       {Fleet.Pilot.Poller, interval_ms: interval, stage_dispatch?: true},
-      {Fleet.Pilot.HopConsumer,
-       forge_opts: [], hop_runner: &Fleet.Pilot.HopConsumer.offload_async/1}
+      {Fleet.Pilot.StepRunConsumer,
+       forge_opts: [], step_run_runner: &Fleet.Pilot.StepRunConsumer.offload_async/1}
     ]
   end
 
   # Forge base_url résolue (config app `:forge`). `nil` si absente/vide. Source de la garde fail-loud
-  # ci-dessus (le rail stage multi-projet en a besoin pour découvrir ET pour dériver les remotes per-hop).
+  # ci-dessus (le rail stage multi-projet en a besoin pour découvrir ET pour dériver les remotes per-step-run).
   defp forge_base_url do
     case Keyword.get(Application.get_env(:fleet_pilot, :forge, []), :base_url) do
       base when is_binary(base) and base != "" -> base

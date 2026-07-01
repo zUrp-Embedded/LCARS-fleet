@@ -7,12 +7,12 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   Pendant de `Fleet.Pilot.Labels` (les deux portent le wire-protocol) : `Labels` = les
   **labels-verrous** (`lcars-in-flight`/`lcars-awaits-arch`) ; ici = **branches, marqueurs
-  route/hop/onboard, blocs result** et le **primitif de confiance** `system_authored?/2`.
+  route/step_run/onboard, blocs result** et le **primitif de confiance** `system_authored?/2`.
 
   **Invariant build+parse co-localisés** : chaque format a son BUILDER et son PARSEUR dans
   CE module, l'un collé à l'autre — un changement de format se fait ICI, les deux ensemble,
   jamais l'un sans l'autre (plus de drift entre ce qui est écrit et ce qui est relu).
-  Les consommateurs (`StageDispatcher`, `HopConsumer`, `HopCompleter`, `Poller`) appellent ces
+  Les consommateurs (`StageDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `Poller`) appellent ces
   fonctions DIRECTEMENT. Seul `parse_feature_branch/1` est aussi ré-exporté par `ForgeClient`
   (`defdelegate`) : `fleet_mcp` l'atteint via le seam `:forge_client` pour éviter une dépendance
   compile-time vers fleet_pilot.
@@ -88,41 +88,41 @@ defmodule Fleet.Pilot.ForgeProtocol do
   end
 
   # ============================================================
-  # Marqueur de HOP signé `[hop:<role>:<sha>]` — compteur forge-natif anti-runaway.
+  # Marqueur de STEP_RUN signé `[step_run:<role>:<sha>]` — compteur forge-natif anti-runaway.
   # ============================================================
 
   # Littéral-SOURCE UNIQUE : builder ET prédicat en dérivent.
-  @hop_prefix "[hop:"
+  @step_run_prefix "[step_run:"
   # Regex DÉRIVÉ du même littéral — `Regex.escape` neutralise le `[` du prefix. PAS d'ancre : le
   # marqueur est posé en fin de body de comment.
-  @hop_marker_rx Regex.compile!(Regex.escape(@hop_prefix) <> "[^:\\]]+:[^:\\]]+\\]")
+  @step_run_marker_rx Regex.compile!(Regex.escape(@step_run_prefix) <> "[^:\\]]+:[^:\\]]+\\]")
 
   @doc """
-  Format du marqueur de hop signé `[hop:<role>:<sha>]` (builder dérivé de `@hop_prefix`, tout comme
-  son prédicat `hop_marker?/1` — un changement de format se fait sur CE seul littéral). Posé par
-  `HopCompleter` en fin-de-hop, sert aussi de `:dedup_signature` (replay idempotent).
+  Format du marqueur de step_run signé `[step_run:<role>:<sha>]` (builder dérivé de `@step_run_prefix`, tout comme
+  son prédicat `step_run_marker?/1` — un changement de format se fait sur CE seul littéral). Posé par
+  `StepRunCompleter` en fin-de-step-run, sert aussi de `:dedup_signature` (replay idempotent).
   """
-  @spec hop_marker(String.t(), String.t()) :: String.t()
-  def hop_marker(role, sha) when is_binary(role) and is_binary(sha) do
-    # => "[hop:<role>:<sha>]"
-    "#{@hop_prefix}#{role}:#{sha}]"
+  @spec step_run_marker(String.t(), String.t()) :: String.t()
+  def step_run_marker(role, sha) when is_binary(role) and is_binary(sha) do
+    # => "[step_run:<role>:<sha>]"
+    "#{@step_run_prefix}#{role}:#{sha}]"
   end
 
   @doc false
-  # Pur : un body porte-t-il un marqueur de hop signé ? Inverse de `hop_marker/2` pour le comptage
-  # forge-natif (`ForgeClient.count_signed_hops`).
-  def hop_marker?(body) when is_binary(body), do: Regex.match?(@hop_marker_rx, body)
-  def hop_marker?(_), do: false
+  # Pur : un body porte-t-il un marqueur de step_run signé ? Inverse de `step_run_marker/2` pour le comptage
+  # forge-natif (`ForgeClient.count_signed_step_runs`).
+  def step_run_marker?(body) when is_binary(body), do: Regex.match?(@step_run_marker_rx, body)
+  def step_run_marker?(_), do: false
 
   # ============================================================
-  # Bloc ` ```result ` — sérialise les `outputs` d'un stage dans le comment de hop.
+  # Bloc ` ```result ` — sérialise les `outputs` d'un stage dans le comment de step_run.
   # ============================================================
 
   @result_block_rx ~r/```result\n(.*?)\n```/s
   @result_fence_limit 8192
 
   @doc """
-  Format du bloc ` ```result ` (sérialise les `outputs` d'un stage dans le comment de hop).
+  Format du bloc ` ```result ` (sérialise les `outputs` d'un stage dans le comment de step_run).
   Co-localisé avec son parseur `parse_result_block/1` — round-trip garanti. `nil`/vide →
   `""` (pas de bruit). JSON fencé si ≤ 8 KB ; au-delà, une note pointant vers le livrable de la
   branche (jamais de JSON tronqué = invalide). Préfixe `\\n\\n` inclus (séparateur du corps).

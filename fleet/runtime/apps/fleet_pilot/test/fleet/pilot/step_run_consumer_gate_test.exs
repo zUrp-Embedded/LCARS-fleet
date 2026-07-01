@@ -1,19 +1,19 @@
-defmodule Fleet.Pilot.HopConsumerGateTest do
+defmodule Fleet.Pilot.StepRunConsumerGateTest do
   @moduledoc """
-  A2.3 / B (L441) — la gate du stage FINI decide la fin-de-hop. Corr.3 engineer-first : le stage
-  producteur (engineer, git_native) finit, sa gate decide, et le hop est PR-natif :
+  A2.3 / B (L441) — la gate du stage FINI decide la fin-de-step-run. Corr.3 engineer-first : le stage
+  producteur (engineer, git_native) finit, sa gate decide, et le step_run est PR-natif :
 
     * gate :pass               -> avance (request_review du juge suivant + pont set_assignee)
-    * gate {:fail}             -> rebond producteur (re-dispatch, PAS de PR), BORNE (budget hops)
+    * gate {:fail}             -> rebond producteur (re-dispatch, PAS de PR), BORNE (budget step_runs)
     * budget epuise            -> {:error, {:rework_exhausted, _}} (aucune ecriture forge)
     * gate soft/non-tranchable -> ESCALADE gatekeeper (inchange) ; le verdict revient async :
       resume_gate continue->avance(PR), abandon->close(5), humain->await_arch(5).
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.HopConsumer
+  alias Fleet.Pilot.StepRunConsumer
 
-  # Sim forge : §5 (abandon/await) + primitives PR (Corr.3). Compteur de hops via forge_opts[:_hops].
+  # Sim forge : §5 (abandon/await) + primitives PR (Corr.3). Compteur de step_runs via forge_opts[:_step_runs].
   defmodule StubForge do
     def post_comment(_r, _n, body, _o), do: send(self(), {:comment, body}) && {:ok, :posted}
     def set_state_label(_r, _n, _s, _o), do: {:ok, :set}
@@ -21,7 +21,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     def remove_label(_r, _n, _l, _o), do: send(self(), :unlocked) && {:ok, :removed}
     def add_label(_r, _n, label, _o), do: send(self(), {:label, label}) && {:ok, :added}
     def close_issue(_r, _n, _o), do: send(self(), :closed) && {:ok, :closed}
-    def count_signed_hops(_r, _n, opts), do: {:ok, Keyword.get(opts, :_hops, 0)}
+    def count_signed_step_runs(_r, _n, opts), do: {:ok, Keyword.get(opts, :_step_runs, 0)}
     def post_route(_r, _n, p, s, _o), do: send(self(), {:route, p, s}) && {:ok, :posted}
 
     def open_pr(_r, head, base, _t, o),
@@ -126,12 +126,12 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     end
 
   defp hc(opts \\ []) do
-    %HopConsumer{
+    %StepRunConsumer{
       repo: "o/r",
       remote: "origin",
       forge_opts: Keyword.get(opts, :forge_opts, []),
       role_emails: fn r -> ["#{r}@lcars.local"] end,
-      hop_completer: Fleet.Pilot.HopCompleter,
+      step_run_completer: Fleet.Pilot.StepRunCompleter,
       forge_client: StubForge,
       loader: Carte,
       deliverable: DelivStub,
@@ -175,7 +175,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "gate :pass -> producteur :advance : ouvre la PR, request_review(reviewer), grave la route" do
     assert {:ok, :review_requested} =
-             HopConsumer.maybe_complete(build_done("gated", %{"ok" => true}), hc())
+             StepRunConsumer.maybe_complete(build_done("gated", %{"ok" => true}), hc())
 
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
@@ -187,7 +187,9 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   end
 
   test "pas de gate sur le stage -> avance (comportement inchange)" do
-    assert {:ok, :review_requested} = HopConsumer.maybe_complete(build_done("plain", %{}), hc())
+    assert {:ok, :review_requested} =
+             StepRunConsumer.maybe_complete(build_done("plain", %{}), hc())
+
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
     refute_received {:assignee, _}
@@ -198,7 +200,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     payload = build_done("gated", %{})
 
     assert {:ok, :rework_requested} =
-             HopConsumer.maybe_complete(payload, hc(forge_opts: [_hops: 0]))
+             StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 0]))
 
     # producteur rework : pas de set_assignee (l'engineer reste assigne par Entry) ; route rebondie
     refute_received {:assignee, _}
@@ -211,8 +213,8 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     # budget = nb_stages(2) * (max_rework_rounds(2) + 1) = 6
     payload = build_done("gated", %{})
 
-    assert {:error, {:rework_exhausted, %{hops: 6, budget: 6}}} =
-             HopConsumer.maybe_complete(payload, hc(forge_opts: [_hops: 6]))
+    assert {:error, {:rework_exhausted, %{step_runs: 6, budget: 6}}} =
+             StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 6]))
 
     refute_received {:assignee, _}
     refute_received {:open_pr, _, _, _}
@@ -224,14 +226,16 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     payload = build_done("gated", %{})
 
     assert {:ok, :rework_requested} =
-             HopConsumer.maybe_complete(payload, hc(forge_opts: [_hops: 5]))
+             StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 5]))
 
     assert {:error, {:rework_exhausted, _}} =
-             HopConsumer.maybe_complete(payload, hc(forge_opts: [_hops: 6]))
+             StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 6]))
   end
 
-  test "hop producteur ordinaire -> livrable git_native (le pod a commite) pousse a l'ouverture PR" do
-    assert {:ok, :review_requested} = HopConsumer.maybe_complete(build_done("plain", %{}), hc())
+  test "step_run producteur ordinaire -> livrable git_native (le pod a commite) pousse a l'ouverture PR" do
+    assert {:ok, :review_requested} =
+             StepRunConsumer.maybe_complete(build_done("plain", %{}), hc())
+
     assert_received {:publish, d}
     assert d.mode == :git_native
     refute Map.has_key?(d, :files)
@@ -241,7 +245,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "gate soft -> ESCALADE : brief enqueue, AUCUNE avance/ecriture forge" do
     assert {:escalate, "corr-1", ctx} =
-             HopConsumer.maybe_complete(build_done("soft", %{"sev" => "high"}), hc())
+             StepRunConsumer.maybe_complete(build_done("soft", %{"sev" => "high"}), hc())
 
     assert ctx.stage == "build"
     assert ctx.role == "engineer"
@@ -266,7 +270,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   test "MA-17 : kick gatekeeper INJOIGNABLE → escalade quand même MAIS surfacé en telemetry (pas avalé)" do
     ref =
       :telemetry_test.attach_event_handlers(self(), [
-        [:fleet_pilot, :hop_consumer, :gatekeeper_kick_unreached]
+        [:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached]
       ])
 
     on_exit(fn -> :telemetry.detach(ref) end)
@@ -276,7 +280,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
     # L'escalade reste légitime : le brief est enqueué, corr retourné (le verdict reviendra au re-wake).
     assert {:escalate, "corr-1", _ctx} =
-             HopConsumer.maybe_complete(
+             StepRunConsumer.maybe_complete(
                build_done("soft", %{"sev" => "high"}),
                hc(wake_recovery: escalating)
              )
@@ -284,15 +288,15 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert_received {:enqueue, "gatekeeper-permanent", _attrs}
 
     # LE finding : le kick injoignable est SURFACÉ (telemetry émise), pas avalé silencieusement.
-    assert_received {[:fleet_pilot, :hop_consumer, :gatekeeper_kick_unreached], ^ref, %{count: 1},
-                     %{pod_id: "gatekeeper-permanent", reason: {:escalated, :dead}}}
+    assert_received {[:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached], ^ref,
+                     %{count: 1}, %{pod_id: "gatekeeper-permanent", reason: {:escalated, :dead}}}
   end
 
   test "escalade : outputs ENVELOPPES %{status,result} -> deplies avant le brief (#2)" do
     enveloped = %{"status" => "ok", "result" => %{"sev" => "low"}}
 
     assert {:escalate, "corr-1", _ctx} =
-             HopConsumer.maybe_complete(build_done("soft", enveloped), hc())
+             StepRunConsumer.maybe_complete(build_done("soft", enveloped), hc())
 
     assert_received {:enqueue, _pod, attrs}
     assert attrs.metadata["outputs"] == %{"sev" => "low"}
@@ -302,7 +306,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     state = hc(gatekeeper_pod_id_fun: fn -> nil end)
 
     assert {:error, {:gatekeeper_dispatch, :no_gatekeeper}} =
-             HopConsumer.maybe_complete(build_done("soft", %{}), state)
+             StepRunConsumer.maybe_complete(build_done("soft", %{}), state)
 
     refute_received {:assignee, _}
     refute_received :unlocked
@@ -314,7 +318,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "verdict continue -> producteur :advance (ouvre PR + request_review + route)" do
     assert {:ok, :review_requested} =
-             HopConsumer.resume_gate(
+             StepRunConsumer.resume_gate(
                soft_ctx(),
                %{"result" => %{"decision" => "continue", "reason" => "RAS"}},
                hc()
@@ -331,13 +335,17 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "verdict continue ENVELOPPE %{status,result} -> deplie (gate_result), avance" do
     raw = %{result: %{"status" => "ok", "result" => %{"decision" => "continue"}}}
-    assert {:ok, :review_requested} = HopConsumer.resume_gate(soft_ctx(), raw, hc())
+    assert {:ok, :review_requested} = StepRunConsumer.resume_gate(soft_ctx(), raw, hc())
     assert_received {:route, "soft", "review"}
   end
 
   test "verdict abandon -> close (terminal §5), PAS de push business (travail rejete)" do
     assert {:ok, :completed} =
-             HopConsumer.resume_gate(soft_ctx(), %{"result" => %{"decision" => "abandon"}}, hc())
+             StepRunConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "abandon"}},
+               hc()
+             )
 
     assert_received :closed
     refute_received {:publish, _}
@@ -351,7 +359,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "verdict escalate_user -> await_arch (lcars-awaits-arch + unlock, pas close/reassign) + KICK arch" do
     assert {:ok, :awaiting_arch} =
-             HopConsumer.resume_gate(
+             StepRunConsumer.resume_gate(
                soft_ctx(),
                %{"result" => %{"decision" => "escalate_user"}},
                hc()
@@ -372,7 +380,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "verdict halt_wait_input -> await_arch" do
     assert {:ok, :awaiting_arch} =
-             HopConsumer.resume_gate(
+             StepRunConsumer.resume_gate(
                soft_ctx(),
                %{"result" => %{"decision" => "halt_wait_input"}},
                hc()
@@ -383,7 +391,11 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "verdict redirect -> await_arch (differe A2.x, pas de routage hors-DAG)" do
     assert {:ok, :awaiting_arch} =
-             HopConsumer.resume_gate(soft_ctx(), %{"result" => %{"decision" => "redirect"}}, hc())
+             StepRunConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "redirect"}},
+               hc()
+             )
 
     assert_received {:label, "lcars-awaits-arch"}
     refute_received {:assignee, _}
@@ -391,7 +403,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "verdict absent/invalide -> await_arch (fail-closed, jamais continue silencieux)" do
     assert {:ok, :awaiting_arch} =
-             HopConsumer.resume_gate(soft_ctx(), %{"result" => %{}}, hc())
+             StepRunConsumer.resume_gate(soft_ctx(), %{"result" => %{}}, hc())
 
     assert_received {:label, "lcars-awaits-arch"}
     refute_received {:assignee, _}
@@ -428,7 +440,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "MA-12 : verdict continue sur producteur TERMINAL → :review (ouvre PR + request_review), JAMAIS merge" do
     assert {:ok, :review_requested} =
-             HopConsumer.resume_gate(
+             StepRunConsumer.resume_gate(
                softterm_ctx(),
                %{"result" => %{"decision" => "continue", "reason" => "RAS"}},
                hc()
@@ -459,7 +471,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "#8.E brief-review continue -> AVANCE issue-level vers build (route+commentaire, PAS de PR, assignee intact)" do
     assert {:ok, :reassigned} =
-             HopConsumer.maybe_complete(
+             StepRunConsumer.maybe_complete(
                brief_done(%{"decision" => "continue", "reason" => "brief clair"}),
                hc()
              )
@@ -477,7 +489,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "#8.E brief-review escalate_user -> await_arch (arch) ; trace CONSULTANT, pas gatekeeper" do
     assert {:ok, :awaiting_arch} =
-             HopConsumer.maybe_complete(
+             StepRunConsumer.maybe_complete(
                brief_done(%{"decision" => "escalate_user", "reason" => "brief ambigu"}),
                hc()
              )
@@ -493,7 +505,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "#8.E brief-review abandon -> close (brief jeté), PAS de PR ni de push" do
     assert {:ok, :completed} =
-             HopConsumer.maybe_complete(brief_done(%{"decision" => "abandon"}), hc())
+             StepRunConsumer.maybe_complete(brief_done(%{"decision" => "abandon"}), hc())
 
     assert_received :closed
     refute_received {:open_pr, _, _, _}
@@ -506,7 +518,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     # faisait :promote (merge sans juges = régression #8.F). Avec : :review -> ouvre la PR + demande
     # [qualifier, reviewer] ; le chemin PR-driven prouvé (dispatch_by_verdicts) scelle ensuite au gatekeeper.
     assert {:ok, :review_requested} =
-             HopConsumer.maybe_complete(build_done("mandgate", %{}), hc())
+             StepRunConsumer.maybe_complete(build_done("mandgate", %{}), hc())
 
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["qualifier", "reviewer"]}
@@ -517,11 +529,11 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "GenServer : pod.completed soft -> gate_evals stocke ; work_item_completed correle -> pop" do
     {:ok, pid} =
-      HopConsumer.start_link(
+      StepRunConsumer.start_link(
         # Nom UNIQUE par test : ce fichier est `async: true` et `start_link` sans `:name` retombe sur le nom
-        # global `Fleet.Pilot.HopConsumer` → deux tests GenServer co-schedulés se heurtent à `{:already_started}`.
+        # global `Fleet.Pilot.StepRunConsumer` → deux tests GenServer co-schedulés se heurtent à `{:already_started}`.
         # Un nom unique isole chaque instance (le test pilote `pid`, pas le nom).
-        name: :"hop_gate_#{System.unique_integer([:positive])}",
+        name: :"step_run_gate_#{System.unique_integer([:positive])}",
         repo: "o/r",
         remote: "origin",
         subscribe: false,
@@ -555,10 +567,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
   test "GenServer : work_item_completed d'un corr inconnu -> ignore (pas de crash)" do
     {:ok, pid} =
-      HopConsumer.start_link(
+      StepRunConsumer.start_link(
         # Nom unique : `async: true` + `start_link` sans `:name` → collision `{:already_started}` sur le nom
         # global entre tests GenServer co-schedulés. Isolation par nom unique (le test pilote `pid`).
-        name: :"hop_gate_#{System.unique_integer([:positive])}",
+        name: :"step_run_gate_#{System.unique_integer([:positive])}",
         repo: "o/r",
         remote: "origin",
         subscribe: false,
@@ -578,8 +590,8 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     assert evals == %{}
   end
 
-  # ── MA-03 : le verdict gatekeeper SURVIT au restart du HopConsumer (verdict auto-descriptif) ──
-  # Le wedge fermé : crash du HopConsumer SEUL (broker vivant). Le contexte de reprise n'est plus en RAM
+  # ── MA-03 : le verdict gatekeeper SURVIT au restart du StepRunConsumer (verdict auto-descriptif) ──
+  # Le wedge fermé : crash du StepRunConsumer SEUL (broker vivant). Le contexte de reprise n'est plus en RAM
   # (`gate_evals` vide au restart) ; il VOYAGE dans le metadata de la TÂCHE d'éval (qui survit dans le broker)
   # → ramené par `work_item_completed` → reconstruction → resume. Avant MA-03 : `{nil,_} -> {:noreply}` silencieux
   # (verdict jeté, issue verrouillée à vie).
@@ -600,9 +612,9 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   end
 
   # Stubs forge/deliverable qui RELAIENT vers le pid de test porté dans `forge_opts[:test_pid]`. Nécessaire
-  # pour les tests GenServer : les effets forge tournent DANS le process du HopConsumer (`self()` ≠ test) →
+  # pour les tests GenServer : les effets forge tournent DANS le process du StepRunConsumer (`self()` ≠ test) →
   # un `send(self(), …)` n'atteindrait pas le test. Le pid est threadé via `forge_opts` (déjà passé au
-  # forge_client par `HopCompleter`). DelivStub n'a pas d'opts → on relaie via le pid stocké à l'init du test.
+  # forge_client par `StepRunCompleter`). DelivStub n'a pas d'opts → on relaie via le pid stocké à l'init du test.
   defmodule RelayForge do
     defp relay(opts, msg), do: send(Keyword.fetch!(opts, :test_pid), msg)
     def post_comment(_r, _n, body, o), do: relay(o, {:comment, body}) && {:ok, :posted}
@@ -611,7 +623,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     def remove_label(_r, _n, _l, o), do: relay(o, :unlocked) && {:ok, :removed}
     def add_label(_r, _n, label, o), do: relay(o, {:label, label}) && {:ok, :added}
     def close_issue(_r, _n, o), do: relay(o, :closed) && {:ok, :closed}
-    def count_signed_hops(_r, _n, _o), do: {:ok, 0}
+    def count_signed_step_runs(_r, _n, _o), do: {:ok, 0}
     def post_route(_r, _n, p, s, o), do: relay(o, {:route, p, s}) && {:ok, :posted}
     def open_pr(_r, head, base, _t, o), do: relay(o, {:open_pr, head, base, o[:body]}) && {:ok, 7}
     def get_pr_for_branch(_r, _head, _base, _o), do: {:ok, 7}
@@ -621,14 +633,14 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
     def merge_pr(_r, pr, o), do: relay(o, {:merge, pr}) && :ok
   end
 
-  defp fresh_hop_consumer do
+  defp fresh_step_run_consumer do
     # `deliverable: DelivStub` → son `{:publish, _}` part vers le GenServer (`self()` côté pod) ; on n'assert
     # PAS dessus (les effets observables passent par RelayForge/forge_opts). Le push réussit (mode git_native).
     {:ok, pid} =
-      HopConsumer.start_link(
+      StepRunConsumer.start_link(
         # Nom unique : `async: true` + `start_link` sans `:name` → collision `{:already_started}` sur le nom
         # global entre tests GenServer co-schedulés. Isolation par nom unique (le test pilote `pid`).
-        name: :"hop_gate_#{System.unique_integer([:positive])}",
+        name: :"step_run_gate_#{System.unique_integer([:positive])}",
         repo: "o/r",
         remote: "origin",
         subscribe: false,
@@ -647,8 +659,8 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   end
 
   test "MA-03 : verdict gatekeeper RECONSTRUIT après restart (gate_evals VIDE) -> complétion, PAS de drop silencieux" do
-    # 1. escalade sur un 1er HopConsumer → gate_evals peuplé.
-    pid1 = fresh_hop_consumer()
+    # 1. escalade sur un 1er StepRunConsumer → gate_evals peuplé.
+    pid1 = fresh_step_run_consumer()
 
     send(
       pid1,
@@ -657,10 +669,10 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
 
     assert Map.has_key?(:sys.get_state(pid1).gate_evals, "corr-1")
 
-    # 2. CRASH du HopConsumer SEUL (broker resterait vivant en prod) → on le stoppe + on en démarre un NEUF.
+    # 2. CRASH du StepRunConsumer SEUL (broker resterait vivant en prod) → on le stoppe + on en démarre un NEUF.
     #    Le neuf a gate_evals VIDE — exactement l'état post-crash où l'ancien code jetait le verdict.
     :ok = GenServer.stop(pid1)
-    pid2 = fresh_hop_consumer()
+    pid2 = fresh_step_run_consumer()
     assert :sys.get_state(pid2).gate_evals == %{}
 
     # 3. Le verdict revient (le metadata de la tâche a survécu dans le broker → posé dans work_item_completed).
@@ -685,8 +697,8 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   end
 
   test "MA-03 : restart + verdict abandon RECONSTRUIT -> close (terminal), pas de drop" do
-    :ok = GenServer.stop(fresh_hop_consumer())
-    pid = fresh_hop_consumer()
+    :ok = GenServer.stop(fresh_step_run_consumer())
+    pid = fresh_step_run_consumer()
     assert :sys.get_state(pid).gate_evals == %{}
 
     send(
@@ -703,7 +715,7 @@ defmodule Fleet.Pilot.HopConsumerGateTest do
   end
 
   test "MA-03 : work_item_completed gate_eval mais metadata TRONQUÉ (resume_payload absent) -> pas de resume (fail-loud), pas de crash" do
-    pid = fresh_hop_consumer()
+    pid = fresh_step_run_consumer()
 
     bad_meta = gate_eval_meta() |> Map.delete("resume_payload")
 

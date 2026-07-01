@@ -93,7 +93,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_no_root_runtime_guard(root)
         # NB il n'y a pas de rail `pipeline.bounded_retry_system_side` : il vérifiait le retry borné
         # système-side de l'`Executor` RAM, qui n'existe plus. L'équivalent côté rail forge = le
-        # `max_rework_rounds` (HopConsumer) ; à re-contractualiser si besoin (backlog).
+        # `max_rework_rounds` (StepRunConsumer) ; à re-contractualiser si besoin (backlog).
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
@@ -659,16 +659,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # HopConsumer doit déplier l'enveloppe worker `%{status, result}` avant de lire la
+  # StepRunConsumer doit déplier l'enveloppe worker `%{status, result}` avant de lire la
   # décision (resume_gate/gate_result) OU d'évaluer la gate (gate_decide) — sinon
   # decision/outputs restent enfouis → fausse escalade / hard-gate à tort.
   defp check_verdict_envelope_unwrapped(root) do
-    hop = "apps/fleet_pilot/lib/fleet/pilot/hop_consumer.ex"
-    abs = Path.join(root, hop)
+    step_run = "apps/fleet_pilot/lib/fleet/pilot/step_run_consumer.ex"
+    abs = Path.join(root, step_run)
 
-    # Anti-vert-creux : un `not File.exists?(abs) or …` rendrait le rail VERT si `hop_consumer.ex` était
+    # Anti-vert-creux : un `not File.exists?(abs) or …` rendrait le rail VERT si `step_run_consumer.ex` était
     # SUPPRIMÉ (l'invariant verdict-route disparu mais pass quand même). Le verdict-route EST le
-    # hop_consumer : son absence est elle-même un défaut → on EXIGE le fichier ET le déballage
+    # step_run_consumer : son absence est elle-même un défaut → on EXIGE le fichier ET le déballage
     # (strip_comment : un `# unwrap_worker_envelope` commenté ne compte pas). Déplacer l'unwrap ailleurs
     # = changement de design qui DOIT mettre à jour ce rail (ce que ce fail-on-absence force).
     unwrap_present? =
@@ -685,17 +685,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         cond do
           not File.exists?(abs) ->
             [
-              "#{hop} : ABSENT — le verdict-route (déballage enveloppe worker) a disparu (#11) ; si déplacé, MAJ ce rail"
+              "#{step_run} : ABSENT — le verdict-route (déballage enveloppe worker) a disparu (#11) ; si déplacé, MAJ ce rail"
             ]
 
           not unwrap_present? ->
-            ["#{hop} : verdict_route ne déplie pas l'enveloppe worker (#11)"]
+            ["#{step_run} : verdict_route ne déplie pas l'enveloppe worker (#11)"]
 
           true ->
             []
         end,
       note:
-        "déplier %{status,result} avant de lire decision (HopConsumer) ; idem avant Gates.evaluate côté HopConsumer (le rail forge-driven, vérifié par test). Rail EXIGE le fichier (pas de pass-si-absent — anti-vert-creux durci)"
+        "déplier %{status,result} avant de lire decision (StepRunConsumer) ; idem avant Gates.evaluate côté StepRunConsumer (le rail forge-driven, vérifié par test). Rail EXIGE le fichier (pas de pass-si-absent — anti-vert-creux durci)"
     }
   end
 

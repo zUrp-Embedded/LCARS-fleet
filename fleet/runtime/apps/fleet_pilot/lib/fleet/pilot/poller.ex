@@ -291,7 +291,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # Filtre les repos découverts par topic à ceux SCELLÉS par le système (`admitted?` = marqueur
-  # bot-authored, même primitif de confiance que les marqueurs route/hop). Le poller ne dispatche
+  # bot-authored, même primitif de confiance que les marqueurs route/step_run). Le poller ne dispatche
   # jamais sur un repo non admis.
   #
   # Filtrage SILENCIEUX, à dessein : écarter un repo découvrable-mais-non-scellé est le fonctionnement
@@ -636,7 +636,7 @@ defmodule Fleet.Pilot.Poller do
     # routing par label. Le poller lit la route → dispatch (carte_role). Le bail « 1 pipeline actif/repo »
     # se lit AUSSI sur la route (robuste, append-only). On classe chaque issue UNE fois :
     #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er stage = pipeline démarré) → tient le bail ;
-    #     on dispatche son stage courant (continue le hop, ou skip si in-flight).
+    #     on dispatche son stage courant (continue le step_run, ou skip si in-flight).
     #   - EN FILE (routée au 1er stage, ou routeless à onboarder, pas encore dispatchée) → démarre seulement
     #     si le bail est libre ; sinon attend (sérialisation → feature-branches séquentielles → FF merge).
     # `classify_issue` lit la route (+ charge la carte) UNE fois et la THREAD au dispatch via
@@ -715,7 +715,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # Dispatch d'un pipeline ENGAGÉ (il tient DÉJÀ le bail) : le bail reste inchangé quoi qu'il arrive
-  # (le tally est mis à jour, `started?` est ignoré — l'engagement vient de la classification, pas de ce hop).
+  # (le tally est mis à jour, `started?` est ignoré — l'engagement vient de la classification, pas de ce step_run).
   defp dispatch_engaged(payload, opts, acc, lease) do
     {acc2, _started?} = stage_do_dispatch(payload, opts, acc)
     {acc2, lease}
@@ -733,7 +733,7 @@ defmodule Fleet.Pilot.Poller do
   # Classifie une issue (bail) ET pré-résout ce que `dispatch_issue` relirait sinon. Renvoie
   # `{engaged?, prefetch_kw}` ; `prefetch_kw` (mergé aux opts de dispatch) porte `:prefetched_route` +
   # `:prefetched_carte` → lecture forge/disque UNE seule fois. ENGAGÉ = pod en vol (`in-flight`) OU route
-  # avancée au-delà du 1er stage (pipeline démarré, entre deux hops). Fast-path : in-flight → pas de lecture
+  # avancée au-delà du 1er stage (pipeline démarré, entre deux step_runs). Fast-path : in-flight → pas de lecture
   # route (`decide` le skip de toute façon). Routeless (`:none`) → EN FILE, route nil threadée (onboard en
   # aval). Erreur HTTP get_route → EN FILE, RIEN threadé (le dispatch re-lit → fail-loud `:route_resolution`,
   # jamais de wedge du bail par une carte/route illisible).
@@ -752,7 +752,7 @@ defmodule Fleet.Pilot.Poller do
         {:ok, {carte, stage} = route} when is_binary(carte) and is_binary(stage) ->
           # Le bail se lit sur la ROUTE (append-only, robuste), JAMAIS sur le succès du chargement de la
           # carte. Une route PRÉSENTE = un pipeline déjà entré dans la machine. ENGAGÉ ssi le stage courant
-          # n'est pas le 1er de la carte (pipeline avancé entre deux hops). Si la carte échoue à charger
+          # n'est pas le 1er de la carte (pipeline avancé entre deux step_runs). Si la carte échoue à charger
           # TRANSITOIREMENT (réseau/forge nil), on NE PEUT PAS exclure que ce pipeline soit avancé → fail-closed :
           # on le classe ENGAGÉ (bail TENU). Sinon une carte-nil ferait perdre le bail d'un pipeline engagé →
           # un 2e issue du même repo démarrerait un 2e pipeline (perte de sérialisation). Le dispatch de SON

@@ -5,7 +5,7 @@ defmodule Fleet.Spawner.Pod.Events do
   Un seul rôle : diffuser sur le bus `fleet.events` les events de cycle de vie d'un pod, sous
   l'enveloppe canon stricte `%Fleet.Event{source: :spawner}`. La SÉPARATION load-bearing vs
   best-effort (cf. le commentaire de section ci-dessous) est le cœur du module : un `pod.completed`
-  avalé en silence wedgerait le hop (verrou forge à vie), un `pod.failed`/`wake.failed` avalé n'est
+  avalé en silence wedgerait le step_run (verrou forge à vie), un `pod.failed`/`wake.failed` avalé n'est
   qu'une perte d'observabilité.
 
   Aucun state, aucun Port, aucun timer : le `Pod` passe `event_type` (binaire) + `payload` (map) en
@@ -30,12 +30,12 @@ defmodule Fleet.Spawner.Pod.Events do
 
   # Classification load-bearing vs best-effort du broadcast (cf. task_queue/server.ex, même move).
   # Un `safe_broadcast` unique qui avalerait TOUTE exception en `:ok` engloutirait aussi `pod.completed`
-  # dont le HopConsumer DÉPEND pour finir le hop : un `pod.completed` avalé = le pod « réussit » (release/
-  # kill pour un one-shot) MAIS la fin-de-hop ne se déclenche jamais → verrou forge conservé à vie (wedge
+  # dont le StepRunConsumer DÉPEND pour finir le step_run : un `pod.completed` avalé = le pod « réussit » (release/
+  # kill pour un one-shot) MAIS la fin-de-step-run ne se déclenche jamais → verrou forge conservé à vie (wedge
   # silencieux). D'où la SÉPARATION :
   #   - `best_effort_broadcast/2` : OBSERVABILITÉ/escalade (`pod.failed`, `wake.failed`). Un échec est
   #     non-bloquant (rescue → log) — un consumer fleet_pilot les enregistre en best-effort, personne ne
-  #     FINIT un hop dessus.
+  #     FINIT un step_run dessus.
   #   - `required_broadcast/2` : LIFECYCLE load-bearing (`pod.completed`). L'échec n'est PAS avalé : il
   #     remonte `{:error, {:broadcast_failed, _}}` → `do_extract` NE release/kill PAS le pod sur une
   #     complétion orpheline ; il reste vivant (re-wake re-fire l'extract), fail-loud. Les deux passent
@@ -57,7 +57,7 @@ defmodule Fleet.Spawner.Pod.Events do
 
   # Broadcast LIFECYCLE load-bearing (`pod.completed`) : l'échec n'est PAS avalé. Retourne `:ok` ou
   # `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé ERROR : un
-  # `pod.completed` non diffusé = wedge potentiel (le hop ne finit pas, verrou conservé).
+  # `pod.completed` non diffusé = wedge potentiel (le step_run ne finit pas, verrou conservé).
   def required_broadcast(event_type, payload) when is_binary(event_type) do
     case event_bus().broadcast("fleet.events", build_spawner_event(event_type, payload)) do
       :ok ->
@@ -66,7 +66,7 @@ defmodule Fleet.Spawner.Pod.Events do
       {:error, reason} ->
         Logger.error(
           "Pod required_broadcast #{event_type} ÉCHEC (pod=#{Map.get(payload, "pod_id")}) : " <>
-            "#{inspect(reason)} — lifecycle NON diffusé (le hop ne finira pas ; pod pas release/kill, fail-loud)"
+            "#{inspect(reason)} — lifecycle NON diffusé (le step_run ne finira pas ; pod pas release/kill, fail-loud)"
         )
 
         {:error, {:broadcast_failed, reason}}
