@@ -416,10 +416,12 @@ defmodule Fleet.MCP.PodTools do
   # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.
   defp ticket_pr_status(forge, repo, number) do
     # La PR du ticket #n = celle dont le head est la feature-branch `lcars/issue-<n>-<role>`. Le parse
-    # de ce format est délégué à l'AUTORITÉ UNIQUE `parse_feature_branch/1` (co-localisée avec son builder
-    # `feature_branch/2`) au lieu de reconstruire le préfixe en dur : un changement de format se fait alors
-    # dans le seul ForgeClient. L'autorité est appelée via le `forge` INJECTÉ (résolu runtime, défaut
-    # `Fleet.Pilot.ForgeClient`) — donc aucune dep compile-time de fleet_mcp vers fleet_pilot.
+    # de ce format est délégué à l'AUTORITÉ UNIQUE `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1`
+    # (co-localisée avec son builder `feature_branch/2`) au lieu de reconstruire le préfixe en dur : un
+    # changement de format se fait dans le seul ForgeProtocol. On l'atteint via le `forge` INJECTÉ (résolu
+    # runtime, défaut `Fleet.Pilot.ForgeClient`, qui ré-exporte `parse_feature_branch` vers ForgeProtocol) —
+    # donc aucune dep compile-time de fleet_mcp vers fleet_pilot (c'est pourquoi on garde l'appel via le seam
+    # plutôt qu'un appel direct à ForgeProtocol, qui lui créerait cette dépendance).
     case forge.list_open_pulls(repo, []) do
       {:ok, pulls} ->
         Enum.find_value(pulls, fn pr ->

@@ -42,6 +42,7 @@ defmodule Fleet.Pilot.HopCompleter do
   require Logger
 
   alias Fleet.Pilot.ForgeClient
+  alias Fleet.Pilot.ForgeProtocol
   alias Fleet.Pilot.Labels
   alias Fleet.Pilot.Roles
 
@@ -322,11 +323,11 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # Producteur extrait du `producer_branch` (`lcars/issue-N-<producteur>`) pour le commentaire de sceau.
-  # Le format de la feature-branch a une AUTORITÉ UNIQUE : `ForgeClient.parse_feature_branch/1` (collée à
+  # Le format de la feature-branch a une AUTORITÉ UNIQUE : `ForgeProtocol.parse_feature_branch/1` (collée à
   # son builder `feature_branch/2`). On délègue le parse au lieu d'une regex locale → plus de drift possible.
   # Fallback `engineer` si la branche n'est pas une feature-branch fleet (head non reconnu / absent).
   defp producer_of(branch) when is_binary(branch) do
-    case ForgeClient.parse_feature_branch(branch) do
+    case ForgeProtocol.parse_feature_branch(branch) do
       {:ok, {_n, producer}} -> producer
       :error -> "engineer"
     end
@@ -718,8 +719,8 @@ defmodule Fleet.Pilot.HopCompleter do
   end
 
   # ── Étape 2 : comment signé [hop:role:sha], dédup ──────────────────────────
-  # La signature ET le bloc result viennent de ForgeClient (co-localisés avec leurs
-  # parseurs `@hop_marker_rx` / `parse_result_block`). On NE passe PAS par le seam `forge`
+  # La signature ET le bloc result viennent de ForgeProtocol (vocab pur, co-localisés avec leurs
+  # parseurs `hop_marker?` / `parse_result_block`). On NE passe PAS par le seam `forge`
   # (un stub ne doit pas pouvoir désynchroniser le format du parseur réel).
   #
   # NB `:outputs` : embarque le `result_K` du stage qui finit → lisible sans query séparée
@@ -727,11 +728,11 @@ defmodule Fleet.Pilot.HopCompleter do
   # gatekeeper-stage » n'existe plus) → seam générique, inactif côté HopConsumer
   # mais conservé (autres appelants / extensibilité).
   defp step2_comment(forge, repo, n, role, sha, hop, forge_opts) do
-    signature = ForgeClient.hop_marker(role, sha)
+    signature = ForgeProtocol.hop_marker(role, sha)
 
     body =
       Map.get(hop, :comment_body, default_comment(role, sha)) <>
-        ForgeClient.result_block(Map.get(hop, :outputs)) <> "\n\n" <> signature
+        ForgeProtocol.result_block(Map.get(hop, :outputs)) <> "\n\n" <> signature
 
     # Le comment signé du hop est AU NOM DU RÔLE qui finit (`as_role` : verdict du consultant /
     # livrable de l'eng → auteur forge = le rôle, pas le compte système ; même geste que la PR/review/sceau).

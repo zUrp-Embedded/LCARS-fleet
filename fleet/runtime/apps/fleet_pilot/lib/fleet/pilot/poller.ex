@@ -553,23 +553,16 @@ defmodule Fleet.Pilot.Poller do
 
   defp pod_has_active_task?(_tq, _), do: false
 
-  # Les pod_id sont **repo-scopés** (`<repo-slug>-issue-<n>-<role>`, voir `Fleet.Pilot.PodId`). On ANCRE le
-  # parse sur le préfixe de scope du REPO COURANT (`PodId.scope_prefix/1`), suivi immédiatement du marqueur
-  # de phase `issue|pr-<n>-`. Double effet :
-  #   1. SCOPE — un pod d'un AUTRE repo ne matche pas (son slug diffère) → il ne « possède » pas une ref de
-  #      `state.repo` → fin du masquage cross-repo (#N/repoB masquant l'orphelin #N/repoA).
-  #   2. DÉSAMBIGUÏSATION — l'ancrage exige `<slug>-(issue|pr)-` : un slug `fleet-poc` n'avale pas le pod
-  #      `fleet-poc-2-issue-…` (après `fleet-poc-` vient `2`, pas `issue|pr`) → pas de faux positif de préfixe.
-  # La ref rendue PORTE le repo (`{repo, :issue|:pr, n}`) = la clé complète (l'identité réelle du verrou).
-  # (`PodId` reste « jamais re-parsé » sur sa SÉMANTIQUE — on ne reconstruit pas (n, role), on ANCRE pour
-  # corréler la phase+numéro à un repo connu.)
+  # Refs de verrou qu'un pod d'INSTANCE possede, deduites de son pod_id. Le FORMAT (`issue|pr` + numero)
+  # vit dans `Fleet.Pilot.PodId.parse_ref/2` (l'autorite qui le construit) ; ici on ne fait que SCOPER au
+  # repo courant et habiller la ref. Effet du scope : un pod d'un AUTRE repo rend `:error` (son slug
+  # differe) -> il ne « possede » pas une ref de `state.repo` -> fin du masquage cross-repo (#N/repoB
+  # masquant l'orphelin #N/repoA). La ref rendue PORTE le repo (`{repo, :issue|:pr, n}`) = la cle complete
+  # (l'identite reelle du verrou).
   defp parse_pod_ref(pod_id, repo) when is_binary(pod_id) and is_binary(repo) do
-    prefix = Regex.escape(Fleet.Pilot.PodId.scope_prefix(repo))
-
-    case Regex.run(~r/^#{prefix}(issue|pr)-(\d+)-/, pod_id) do
-      [_, "issue", n] -> [{repo, :issue, String.to_integer(n)}]
-      [_, "pr", n] -> [{repo, :pr, String.to_integer(n)}]
-      _ -> []
+    case Fleet.Pilot.PodId.parse_ref(pod_id, repo) do
+      {:ok, {phase, n}} -> [{repo, phase, n}]
+      :error -> []
     end
   end
 
@@ -605,7 +598,7 @@ defmodule Fleet.Pilot.Poller do
   defp pulls_issue_ids(pulls) do
     pulls
     |> Enum.flat_map(fn pr ->
-      case Fleet.Pilot.ForgeClient.parse_feature_branch(get_in(pr, ["head", "ref"]) || "") do
+      case Fleet.Pilot.ForgeProtocol.parse_feature_branch(get_in(pr, ["head", "ref"]) || "") do
         {:ok, {n, _role}} -> [n]
         :error -> []
       end

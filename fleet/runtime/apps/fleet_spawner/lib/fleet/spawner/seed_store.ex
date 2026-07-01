@@ -174,6 +174,11 @@ defmodule Fleet.Spawner.SeedStore do
   @doc """
   Slug claude d'un `cwd` : chaque caractère hors `[A-Za-z0-9-]` → `-` (PAS de collapse des `-`).
   Ex. `/home/x/pod_a-b` → `-home-x-pod-a-b`.
+
+  COMPAT VENDOR — reproduit BIT POUR BIT l'algo de slugification de Claude Code (prouve v2.1.183, cf.
+  seed_store_test). C'est ce qui permet de retrouver `~/.claude/projects/<slug>/<uuid>.jsonl` au resume.
+  NE PAS remplacer par `Fleet.Slug` ni `PodId.component` (charsets differents) : un slug qui ne matche pas
+  celui de Claude pointe sur un mauvais dossier -> resume casse. Domaine fige par un systeme externe.
   """
   @spec slugify(String.t()) :: String.t()
   def slugify(path), do: String.replace(path, ~r/[^A-Za-z0-9-]/, "-")

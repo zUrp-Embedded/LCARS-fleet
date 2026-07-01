@@ -303,7 +303,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   defp awaits_arch_issue?(head, opts) do
     ids = Keyword.get(opts, :awaits_arch_ids, MapSet.new())
 
-    case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
       {:ok, {n, _role}} -> MapSet.member?(ids, n)
       :error -> false
     end
@@ -355,7 +355,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # budget → ESCALADE ARCH (label `awaits-arch` + commentaire), pas de re-spawn → fin du churn. Budget
   # illisible (`{:error}`) → on NE re-spawn PAS à l'aveugle : escalade (symétrique de `rebound` qui surface).
   defp dispatch_rework(pr_number, head, ctx) do
-    case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
       {:ok, {_n, producer_role}} ->
         budget = Keyword.get(Map.get(ctx, :opts, []), :max_pr_rework_rounds, 2)
 
@@ -457,7 +457,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   # Partagé entre `:recorded` (incident gravé) et `{:record_failed, _}` (registre indisponible — on tente
   # quand même, c'est bien un 1er passage du point de vue dispatch).
   defp resolve_first_conflict(head, pr_number, ctx) do
-    case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
       {:ok, {_n, producer_role}} ->
         dispatch_pr_role(:resolve_conflict, pr_number, head, producer_role, ctx)
 
@@ -526,7 +526,7 @@ defmodule Fleet.Pilot.StageDispatcher do
   end
 
   defp parse_feature_branch_or_skip(head) do
-    case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
       {:ok, _} = ok -> ok
       :error -> {:skipped, :not_fleet_branch}
     end

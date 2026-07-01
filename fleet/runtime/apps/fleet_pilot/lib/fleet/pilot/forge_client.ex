@@ -1,44 +1,58 @@
 defmodule Fleet.Pilot.ForgeClient do
   @moduledoc """
-  Client minimal Gitea REST API pour `fleet_pilot`. Une seule
-  opération : `add_label/4` (PUT label set idempotent) — utilisée par
-  le dispatcher pour poser le lock `lcars-dispatched`
-  avant invoke pipeline.
+  Client Gitea REST API de `fleet_pilot` — la couche DOMAINE de la forge-state-machine
+  (la forge EST la machine à états). Porte les ops sur issues/PR (read/write idempotentes),
+  l'état de jury des PR, l'onboarding repo + sceau d'admission, et l'adaptateur credential→wire
+  `as_role/2`. C'est le module injecté par le seam `:forge_client` (StageDispatcher/Poller).
+
+  Deux couches vivent SOUS lui (ré-exportées ici pour préserver le contrat historique) :
+
+    * `Fleet.Pilot.ForgeClient.Transport` — moteur HTTP/config/encodage/pagination + login système.
+      Aucune connaissance du protocole forge. `ForgeClient` l'`import`e (`http_get`, `paginate`, …).
+    * `Fleet.Pilot.ForgeProtocol` — vocabulaire PUR du wire-protocol (feature-branches, marqueurs
+      route/hop/onboard, blocs result, `system_authored?`), build+parse co-localisés. Les callers
+      l'appellent DIRECTEMENT. Seul `parse_feature_branch/1` est ré-exporté ici (`defdelegate`) car
+      `fleet_mcp` l'atteint via le seam `:forge_client` (évite une dep compile-time vers fleet_pilot).
 
   ## Configuration
 
-  Résolue à l'appel via `opts` (Keyword) ou fallback
-  `Application.get_env(:fleet_pilot, :forge)` :
-
-    * `:base_url` — ex `"http://localhost:3000"` (laptop mirror) ou
-      `"http://10.42.0.118"` (forge NAS).
-    * `:token` — token Gitea. Lu depuis `:token_file` si absent.
-    * `:token_file` — path fichier (défaut `~/.gitea_token`, convention
-      v1.5).
-    * `:req_options` — options passées tel quel à `Req.new/1` (pour
-      tests : `[plug: ...]` pour intercepter HTTP).
+  Résolue à l'appel par `Transport.resolve_config/1` (cf. son moduledoc) : `:base_url`, `:token`
+  (ou `:token_file`, défaut `~/.gitea_token`), `:req_options` passées à `Req`.
 
   ## Idempotence
 
-  Pattern `GET issue labels + PUT label set` (un POST en
-  append créerait des doublons de label, d'où le set
-  idempotent). Re-call sur label déjà présent = `{:ok, :already_present}`,
-  zéro round-trip d'écriture.
-
-  ## Pas de cache
-
-  Chaque `add_label/4` re-fetche `/labels?limit=100` (mapping name→id).
-  ~2KB, LAN-rapide. Optimisation cache (`:persistent_term`) à voir si
-  contention mesurée.
+  Les write-ops sont idempotentes (skip si l'état cible est déjà atteint). Ex. `add_label/4` :
+  `GET issue labels + PUT label set` (un POST append créerait des doublons), re-call sur label
+  présent = `{:ok, :already_present}`, zéro round-trip d'écriture.
   """
 
   require Logger
 
-  @type config :: %{
-          base_url: String.t(),
-          token: String.t(),
-          req_options: Keyword.t()
-        }
+  alias Fleet.Pilot.ForgeProtocol
+  alias Fleet.Pilot.ForgeClient.Jury
+  alias Fleet.Pilot.ForgeClient.Repo
+
+  # Plomberie tirée de Transport sous les noms historiques → les call-sites domaine restent
+  # inchangés (`http_get(config, …)`, `paginate(…)`, `resolve_config(opts)`, …).
+  import Fleet.Pilot.ForgeClient.Transport,
+    only: [
+      resolve_config: 1,
+      http_get: 2,
+      http_post: 3,
+      http_patch: 3,
+      http_delete: 2,
+      paginate: 3,
+      forge_bot_login: 2,
+      encode_seg: 1,
+      encode_repo: 1
+    ]
+
+  # SEUL ré-export du vocab : `parse_feature_branch/1`. `fleet_mcp` (pod_tools) l'appelle via le seam
+  # `forge` (résolu runtime, défaut ce module) pour ne PAS créer de dep compile-time vers fleet_pilot —
+  # le seam doit donc porter cette fonction. Le reste du vocab (`feature_branch`, `hop_marker`,
+  # `result_block`, marqueurs, `system_authored?`, `onboard_marker`) s'appelle directement sur
+  # `Fleet.Pilot.ForgeProtocol` (impl + tests y vivent) ; ce module-ci ne le ré-exporte plus.
+  defdelegate parse_feature_branch(head), to: ForgeProtocol
 
   @doc """
   Ajoute le label `label_name` à l'issue `repo`/`issue_number` côté
@@ -229,11 +243,9 @@ defmodule Fleet.Pilot.ForgeClient do
           {:ok, :already_absent}
 
         %{"id" => id} ->
-          case request(
+          case http_delete(
                  config,
-                 :delete,
-                 "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels/#{id}",
-                 nil
+                 "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels/#{id}"
                ) do
             {:ok, _} -> {:ok, :removed}
             {:error, _} = err -> err
@@ -257,293 +269,22 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Onboarding projet — création repo + issue.
-  # Greffe sur le plumbing http_post existant ; le token système (lcars-system)
-  # doit porter write:organization (repo) + write:issue.
+  # Repo / onboarding — DÉLÉGUÉ à `Fleet.Pilot.ForgeClient.Repo`.
+  # Provisioning (create_repo/add_collaborator/add_topic/protect_branch) + sceau d'admission
+  # (post_onboard_marker/admitted?) + découverte (search_repos_by_topic/repo_id). Les ops de
+  # provisioning sont appelées EN DIRECT sur `ForgeClient.Repo` (par `ProjectOnboard`) ; seules les ops
+  # SEAM-FACED ci-dessous sont forwardées (le module injecté par le seam reste CE module). Doc + logique
+  # vivent dans `Repo` (qui dépend en retour de `create_issue`/`close_issue` du cœur pour le sceau).
   # ============================================================
 
-  @doc """
-  Crée un repo sur la forge. `opts[:org]` → `POST /orgs/<org>/repos` (repo d'org) ; sinon
-  `POST /user/repos` (compte du token). `auto_init: true` par défaut (commit initial + README
-  → clonable tout de suite). Idempotent best-effort : repo déjà présent (HTTP 409) → `{:ok, :already_exists}`.
+  @doc "Repos découverts par topic. Voir `Fleet.Pilot.ForgeClient.Repo.search_repos_by_topic/2`."
+  def search_repos_by_topic(topic, opts \\ []), do: Repo.search_repos_by_topic(topic, opts)
 
-  ## Returns
-    * `{:ok, full_name}` — repo créé (ex `"fleet/poc-helloworld"`)
-    * `{:ok, :already_exists}` — déjà présent (409)
-    * `{:error, term()}` — HTTP/transport/config
-  """
-  @spec create_repo(String.t(), Keyword.t()) ::
-          {:ok, String.t() | :already_exists} | {:error, term()}
-  def create_repo(name, opts \\ []) when is_binary(name) do
-    with {:ok, config} <- resolve_config(opts) do
-      body = %{
-        name: name,
-        description: Keyword.get(opts, :description, ""),
-        private: Keyword.get(opts, :private, false),
-        auto_init: Keyword.get(opts, :auto_init, true),
-        default_branch: Keyword.get(opts, :default_branch, "main")
-      }
+  @doc "Id forge numérique du repo. Voir `Fleet.Pilot.ForgeClient.Repo.repo_id/2`."
+  def repo_id(repo, opts \\ []), do: Repo.repo_id(repo, opts)
 
-      path =
-        case Keyword.get(opts, :org) do
-          org when is_binary(org) and org != "" -> "/orgs/#{encode_seg(org)}/repos"
-          _ -> "/user/repos"
-        end
-
-      case http_post(config, path, body) do
-        {:ok, %{"full_name" => full_name}} -> {:ok, full_name}
-        {:error, {:http, 409, _}} -> {:ok, :already_exists}
-        {:error, _} = err -> err
-      end
-    end
-  end
-
-  @doc """
-  Ajoute/met à jour un **collaborateur** sur `repo` avec `permission` (`"read"|"write"|"admin"`) —
-  Gitea `PUT /repos/{repo}/collaborators/{username}`. Idempotent (re-PUT = même perm). Requiert
-  repo-admin (token système). L'onboarding donne le **write** aux comptes de rôle (engineer/
-  qualifier/reviewer/gatekeeper) pour que leurs reviews comptent au gate de branch-protection et que
-  le gatekeeper puisse merger.
-  """
-  @spec add_collaborator(String.t(), String.t(), String.t(), Keyword.t()) ::
-          :ok | {:error, term()}
-  def add_collaborator(repo, username, permission, opts \\ [])
-      when is_binary(repo) and is_binary(username) and is_binary(permission) do
-    with {:ok, config} <- resolve_config(opts) do
-      case http_put(
-             config,
-             "/repos/#{encode_repo(repo)}/collaborators/#{encode_seg(username)}",
-             %{permission: permission}
-           ) do
-        {:ok, _} -> :ok
-        {:error, _} = err -> err
-      end
-    end
-  end
-
-  @doc """
-  Recherche les repos dont un TOPIC matche `topic` — Gitea `GET /repos/search?q=&topic=true`.
-  Multi-projet : le poller découvre SES projets via le topic per-humain `lcars-fleet-<human>` (posé par
-  l'onboarding). Retourne les `full_name` (`"owner/name"`). Forme inattendue / aucun résultat → `{:ok, []}`.
-  (limit=50 : un humain a < 50 projets actifs ; pagination = backlog si besoin.)
-  """
-  @spec search_repos_by_topic(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
-  def search_repos_by_topic(topic, opts \\ []) when is_binary(topic) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, body} <-
-           http_get(config, "/repos/search?topic=true&limit=50&q=" <> URI.encode_www_form(topic)) do
-      repos = if is_map(body), do: Map.get(body, "data", []), else: []
-      {:ok, repos |> List.wrap() |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
-    end
-  end
-
-  @doc """
-  Ajoute le `topic` au `repo` — Gitea `PUT /repos/{repo}/topics/{topic}`. Idempotent (re-PUT = no-op).
-  Multi-projet : l'onboarding tague le repo neuf `lcars-fleet-<human>` → découvrable par le poller.
-  """
-  @spec add_topic(String.t(), String.t(), Keyword.t()) :: :ok | {:error, term()}
-  def add_topic(repo, topic, opts \\ []) when is_binary(repo) and is_binary(topic) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, _} <-
-           http_put(config, "/repos/#{encode_repo(repo)}/topics/#{encode_seg(topic)}", nil) do
-      :ok
-    end
-  end
-
-  # ============================================================
-  # Marqueur d'ADMISSION système — la frontière d'entrée dans la machine à agents.
-  #
-  # Le topic `lcars-fleet-<human>` rend un repo DÉCOUVRABLE, mais le topic est un champ Gitea
-  # MUTABLE (`PUT /topics/{topic}`) que le propriétaire d'un repo peut poser lui-même. Le topic SEUL
-  # admettrait donc n'importe quel repo qu'un user honnête a tagué + sur lequel il s'auto-assigne une
-  # issue — un repo que le SYSTÈME n'a jamais onboardé entrerait comme projet légitime. L'admission
-  # exige donc un sceau SERVEUR-SIDE NON FORGEABLE : un marqueur que SEUL le compte système peut poser.
-  #
-  # Le sceau = un marqueur d'onboarding écrit par le BOT système (le porteur de `FORGE_TOKEN`), vérifié
-  # `system_authored?` à la lecture — exactement le mécanisme déjà éprouvé pour les marqueurs route/hop/
-  # result (« un marqueur n'est cru que s'il est posté par le bot système »). Non forgeable parce qu'un
-  # user ordinaire n'a pas le token système pour l'écrire SOUS l'identité du bot, PAS parce qu'il est
-  # signé. Pas de crypto, pas de registre : le MÊME primitif de confiance, étendu à l'admission repo.
-  # ============================================================
-
-  @onboard_marker_prefix "[lcars-onboarded:"
-
-  @doc """
-  Format du marqueur d'admission `[lcars-onboarded:<human>]` (co-localisé avec son parseur
-  `admitted?/3` — un changement de format se fait ICI, jamais l'un sans l'autre). Posé par
-  l'onboarding via `post_onboard_marker/3` en COMMENT de l'issue système #1 (auto-créée par
-  `auto_init`/scaffold), lu+vérifié bot-authored par le poller à la découverte.
-  """
-  @spec onboard_marker(String.t()) :: String.t()
-  def onboard_marker(human) when is_binary(human), do: "#{@onboard_marker_prefix}#{human}]"
-
-  @doc """
-  Pose le marqueur d'admission `[lcars-onboarded:<human>]` sur `repo` — crée une issue SYSTÈME
-  dédiée (`title` = le marqueur) sous le compte du token (= le bot système), PUIS la ferme aussitôt.
-  L'issue, postée par le bot, EST le sceau : un user ordinaire ne peut pas la fabriquer SOUS l'identité
-  du bot (il n'a pas le token système). La fermeture est cosmétique (tracker propre, pas d'issue ouverte
-  parasite) et best-effort : l'admission tient sur titre+auteur, pas sur l'état (`admitted?` lit
-  `state=all`), donc un sceau fermé — ou laissé ouvert sur échec de fermeture — reste valide. Idempotent
-  best-effort : si une issue d'admission bot-authored existe déjà, `{:ok, :already}` (pas de doublon).
-  Appelé par `ProjectOnboard.register_for_fleet` (token système).
-
-  ## Returns
-    * `{:ok, issue_number}` — marqueur posé (issue système créée puis fermée)
-    * `{:ok, :already}` — déjà présent (issue d'admission bot-authored existante)
-    * `{:error, term()}` — HTTP/transport/config / bot irrésoluble (création du sceau échouée)
-  """
-  @spec post_onboard_marker(String.t(), String.t(), Keyword.t()) ::
-          {:ok, integer() | :already} | {:error, term()}
-  def post_onboard_marker(repo, human, opts \\ []) when is_binary(repo) and is_binary(human) do
-    marker = onboard_marker(human)
-
-    case admitted?(repo, human, opts) do
-      true ->
-        {:ok, :already}
-
-      false ->
-        # Le marqueur vit dans le TITRE de l'issue système (lu sans pagination de comments, stable). Le
-        # corps explicite le rôle pour un humain qui tomberait dessus dans l'UI forge.
-        with {:ok, issue_number} <-
-               create_issue(
-                 repo,
-                 marker,
-                 "Marqueur d'admission LCARS — ce repo est onboardé dans la machine à agents de `#{human}`.\n" <>
-                   "Sceau serveur-side posé par le compte système, puis fermé aussitôt : l'admission ne " <>
-                   "dépend QUE du titre + de l'auteur (le bot), jamais de l'état de l'issue. Ne pas renommer.",
-                 opts
-               ) do
-          # Fermé immédiatement pour ne pas laisser d'issue ouverte parasite dans le tracker du repo.
-          # Best-effort : l'admission tient sur titre+auteur, pas sur l'état (le lecteur `admitted?` lit
-          # `state=all`) → un échec de fermeture laisse un sceau OUVERT tout aussi valide, l'onboarding ne
-          # doit pas échouer pour ça. On garde donc le numéro et on ignore le retour de la fermeture.
-          _ = close_issue(repo, issue_number, opts)
-          {:ok, issue_number}
-        end
-    end
-  end
-
-  @doc """
-  `repo` est-il ADMIS dans la machine à agents de `human` = porte-t-il le marqueur d'admission
-  `[lcars-onboarded:<human>]` posté PAR LE BOT SYSTÈME ? La frontière d'entrée du poller : le topic
-  seul (mutable) ne suffit PLUS, il faut ce sceau bot-authored. Lit les issues du repo et cherche
-  CELLE dont le titre = le marqueur ET l'auteur = le bot (`system_authored?`). Un user qui ouvre une
-  issue homonyme NE passe PAS (son login ≠ bot). `false` sur toute erreur / bot irrésoluble — FAIL-
-  CLOSED : un repo dont l'admission n'est pas VÉRIFIABLE n'est pas admis (jamais sur un doute).
-  """
-  @spec admitted?(String.t(), String.t(), Keyword.t()) :: boolean()
-  def admitted?(repo, human, opts \\ []) when is_binary(repo) and is_binary(human) do
-    marker = onboard_marker(human)
-
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, bot} <- forge_bot_login(config, opts),
-         {:ok, issues} when is_list(issues) <-
-           paginate(config, "/repos/#{encode_repo(repo)}/issues", "state=all&type=issues") do
-      Enum.any?(issues, fn issue ->
-        Map.get(issue, "title") == marker and system_authored_issue?(issue, bot)
-      end)
-    else
-      _ -> false
-    end
-  end
-
-  # Une ISSUE est de confiance ssi son AUTEUR (`user.login`) = le bot système. Pendant de
-  # `system_authored?/2` (qui vise les COMMENTS) côté issue — même invariant : un marqueur n'est cru
-  # que s'il vient du compte système (le porteur du token). Public-test non requis (couvert par `admitted?`).
-  defp system_authored_issue?(issue, bot_login)
-       when is_map(issue) and is_binary(bot_login) and bot_login != "" do
-    get_in(issue, ["user", "login"]) == bot_login
-  end
-
-  defp system_authored_issue?(_issue, _bot), do: false
-
-  @doc """
-  `username` est-il collaborateur de `repo` ? Gitea `GET /repos/{repo}/collaborators/{username}` (204 = oui,
-  404 = non). `false` sur toute erreur (config/transport/404) — fail-safe (on ne défaut PAS sur un repo
-  inaccessible). Sert au scoping « projet par défaut = repos où l'humain est collaborateur » (create_ticket).
-  """
-  @spec collaborator?(String.t(), String.t(), Keyword.t()) :: boolean()
-  def collaborator?(repo, username, opts \\ []) when is_binary(repo) and is_binary(username) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, _} <-
-           http_get(config, "/repos/#{encode_repo(repo)}/collaborators/#{encode_seg(username)}") do
-      true
-    else
-      _ -> false
-    end
-  end
-
-  @doc """
-  Repo du **dernier ticket travaillé** par `human`, SCOPÉ aux repos où il est **collaborateur**. Sert de
-  projet par défaut quand l'arch appelle `create_ticket` sans `project` explicite (≠ « dernier créé », jugé
-  mauvais). Mécanique : issue-search global `assigned_by=<human>` → tri
-  CLIENT-SIDE par `updated_at` desc (le `sort=` Gitea s'est révélé peu fiable) → 1ʳᵉ issue dont le repo passe
-  `collaborator?/3` (l'`assigned_by` seul inclut des repos non-collaborateur, ex. vieux tickets de test). `:none`
-  si rien (fleet neuve / forge down). Il n'y a plus de repli config global : le repo cible d'une délégation
-  est désormais passé explicitement par l'arch (`project`), jamais lu d'une mémoire de « projet courant ».
-  """
-  @spec last_worked_repo(String.t(), Keyword.t()) :: {:ok, String.t()} | :none
-  def last_worked_repo(human, opts \\ []) when is_binary(human) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, issues} <-
-           http_get(
-             config,
-             "/repos/issues/search?type=issues&state=all&limit=30&assigned_by=" <>
-               URI.encode_www_form(human)
-           ) do
-      issues
-      |> List.wrap()
-      |> Enum.sort_by(&(&1["updated_at"] || ""), :desc)
-      |> Enum.map(&get_in(&1, ["repository", "full_name"]))
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq()
-      |> Enum.find(&collaborator?(&1, human, opts))
-      |> case do
-        repo when is_binary(repo) -> {:ok, repo}
-        nil -> :none
-      end
-    else
-      _ -> :none
-    end
-  end
-
-  @doc """
-  L'**id forge numérique** du repo (`GET /repos/<repo>` → `.id`). C'est l'identité du projet pour le
-  `session_id` déterministe (`Fleet.Spawner.SessionId`, segment `<REPO4>`) : la FORGE est la
-  source de vérité, on ne dérive PAS un id du néant. Id Gitea = entier séquentiel stable (ex.
-  `fleet/lcars` = 145). `{:error, _}` si le repo n'existe pas / forge down → l'appelant retombe sur un
-  UUID random (best-effort, zéro collision).
-  """
-  @spec repo_id(String.t(), Keyword.t()) :: {:ok, integer()} | {:error, term()}
-  def repo_id(repo, opts \\ []) when is_binary(repo) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, %{"id" => id}} when is_integer(id) <-
-           http_get(config, "/repos/#{encode_repo(repo)}") do
-      {:ok, id}
-    else
-      {:ok, _} -> {:error, :no_id}
-      {:error, _} = err -> err
-    end
-  end
-
-  @doc """
-  Pose une règle de **branch-protection** sur `repo` — Gitea `POST /repos/{repo}/branch_protections`.
-  `rule` = map d'options Gitea (`rule_name`, `required_approvals`, `dismiss_stale_approvals`,
-  `block_on_rejected_reviews`, `enable_push`, …). C'est le **gate forge-enforcé** : sur le repo
-  sandbox, la forge refuse le merge tant que les gardes (N approvals, pas de REQUEST_CHANGES) ne sont
-  pas vertes → l'arbitre est la forge, pas le runtime. Requiert repo-admin.
-  Idempotent : une règle déjà posée (409/422) → `:ok`.
-  """
-  @spec protect_branch(String.t(), map(), Keyword.t()) :: :ok | {:error, term()}
-  def protect_branch(repo, rule, opts \\ []) when is_binary(repo) and is_map(rule) do
-    with {:ok, config} <- resolve_config(opts) do
-      case http_post(config, "/repos/#{encode_repo(repo)}/branch_protections", rule) do
-        {:ok, _} -> :ok
-        {:error, {:http, code, _}} when code in [409, 422] -> :ok
-        {:error, _} = err -> err
-      end
-    end
-  end
+  @doc "Repo admis (sceau bot-authored) ? Voir `Fleet.Pilot.ForgeClient.Repo.admitted?/3`."
+  def admitted?(repo, human, opts \\ []), do: Repo.admitted?(repo, human, opts)
 
   @doc """
   Crée une issue (ticket) sur `repo`. `opts[:assignees]` = logins, `opts[:labels]` = IDs entiers
@@ -795,297 +536,29 @@ defmodule Fleet.Pilot.ForgeClient do
          do: http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{number}")
   end
 
-  @feature_branch_rx ~r{^lcars/issue-(\d+)-(.+)$}
+  # ============================================================
+  # Jury PR — DÉLÉGUÉ à `Fleet.Pilot.ForgeClient.Jury`.
+  # Concern autonome (lecture des reviews, zéro couplage au cœur). Le module injecté par le seam
+  # `:forge_client` reste CE module → on FORWARDE (wrappers explicites : `defdelegate` ne gère pas les
+  # args par défaut). Doc + logique (commit-scoping, jury volatil) vivent dans `Jury`.
+  # ============================================================
 
-  @doc """
-  Construit la feature-branch systeme `lcars/issue-<n>-<role>` — le BUILDER unique du format,
-  co-localise avec son parseur `parse_feature_branch/1` et le regex `@feature_branch_rx` : un
-  changement de format se fait ICI, build et parse ensemble, jamais l'un sans l'autre (plus de drift).
-  Identite garantie : `parse_feature_branch(feature_branch(n, role)) == {:ok, {n, role}}`.
-  """
-  @spec feature_branch(integer(), String.t()) :: String.t()
-  def feature_branch(n, role) when is_integer(n) and is_binary(role),
-    do: "lcars/issue-#{n}-#{role}"
+  @doc "Verdicts décisifs par juge d'une PR. Voir `Fleet.Pilot.ForgeClient.Jury.pr_review_verdicts/3`."
+  def pr_review_verdicts(repo, index, opts \\ []), do: Jury.pr_review_verdicts(repo, index, opts)
 
-  @doc """
-  Extrait `{issue_number, role}` d'une feature-branch systeme `lcars/issue-<n>-<role>` (format
-  construit par `feature_branch/2`, son inverse co-localise). Sert au dispatch juge PR-driven a
-  remonter de la PR (head.ref) au ticket. `:error` si le ref n'est pas une feature-branch fleet (PR
-  externe / branche manuelle -> ignoree par le dispatch, jamais misroutee).
-  """
-  @spec parse_feature_branch(String.t()) :: {:ok, {integer(), String.t()}} | :error
-  def parse_feature_branch(head) when is_binary(head) do
-    case Regex.run(@feature_branch_rx, head) do
-      [_, n, role] -> {:ok, {String.to_integer(n), role}}
-      _ -> :error
-    end
-  end
+  @doc "État de jury (verdicts + SET du jury) d'une PR. Voir `Fleet.Pilot.ForgeClient.Jury.pr_review_state/3`."
+  def pr_review_state(repo, index, opts \\ []), do: Jury.pr_review_state(repo, index, opts)
 
-  def parse_feature_branch(_), do: :error
+  @doc "Feedback des REQUEST_CHANGES en vigueur. Voir `Fleet.Pilot.ForgeClient.Jury.change_request_feedback/3`."
+  def change_request_feedback(repo, index, opts \\ []),
+    do: Jury.change_request_feedback(repo, index, opts)
 
-  @doc """
-  Verdict de review **PAR juge** d'une PR (Gitea `GET /repos/{repo}/pulls/{index}/reviews`) : la
-  DERNIÈRE review décisive non-dismissed de CHAQUE reviewer, clé = login **downcasé**.
+  @doc "Compte les rounds de rework. Voir `Fleet.Pilot.ForgeClient.Jury.count_change_request_rounds/3`."
+  def count_change_request_rounds(repo, index, opts \\ []),
+    do: Jury.count_change_request_rounds(repo, index, opts)
 
-  **Pourquoi par-juge et pas `requested_reviewers`** : Gitea 1.26 ne vide PAS `requested_reviewers`
-  quand un juge a reviewé, et la DELETE est un no-op sur un reviewer déjà actif → on
-  ne peut PAS s'appuyer dessus pour savoir « qui reste à juger ». La SOURCE DE VÉRITÉ = la liste des
-  reviews : un juge a un **verdict décisif** ssi sa dernière review non-dismissed est APPROVED ou
-  REQUEST_CHANGES. Le poller dispatch un juge demandé qui n'a PAS encore de verdict, et tranche
-  (merge/rework) quand tous les demandés en ont un.
-
-  **Commit-scoping (`:head_sha`)** : un verdict ne vaut que pour le COMMIT qu'il a jugé. Passer
-  `head_sha: pr.head.sha` (chemin prod) → seules les reviews `commit_id == head_sha` comptent ; une review
-  sur un commit antérieur est PÉRIMÉE (le code n'existe plus). Crucial pour le REQUEST_CHANGES : Gitea ne
-  le dismisse JAMAIS au push (≠ approbations stale, dismissées par branch-protection) — sans scoping, un
-  REQUEST_CHANGES périmé reste « actif », son juge n'est jamais re-dispatché (il a déjà un verdict) et la
-  PR bouclerait en rework infini. Le scoping le rend `pending` → re-jugé sur le code courant.
-  Les reviews COMMENT/PENDING/REQUEST_REVIEW ne sont PAS décisives (ignorées).
-
-  ## Returns
-    * `{:ok, %{"qualifier" => :approved, "reviewer" => :changes_requested, ...}}` — login(↓) → verdict
-    * `{:ok, %{}}` — aucune review décisive
-    * `{:error, term()}` — HTTP/transport/config
-  """
-  @spec pr_review_verdicts(String.t(), integer(), Keyword.t()) ::
-          {:ok, %{optional(String.t()) => :approved | :changes_requested}} | {:error, term()}
-  def pr_review_verdicts(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
-    # Projection « verdicts seuls » de `pr_review_state` (factorisé : un seul fetch, une seule logique de
-    # scoping/dernière-review). Conservé pour les callers qui n'ont pas besoin du SET du jury (pod_tools).
-    with {:ok, %{verdicts: verdicts}} <- pr_review_state(repo, index, opts), do: {:ok, verdicts}
-  end
-
-  @doc """
-  État de jury d'une PR en UN fetch (`GET .../pulls/{index}/reviews`) : `verdicts` (décisifs par juge,
-  commit-scopés via `:head_sha` — cf. `pr_review_verdicts`) ET `reviewers` (le SET du jury).
-
-  **Le SET du jury ne se lit PAS de `pr.requested_reviewers`** : ce champ est VOLATIL (Gitea
-  l'altère de façon non fiable — un juge peut en DISPARAÎTRE sans avoir voté, ce qui ferait merger sur
-  demi-jury). Source STABLE = les review-records, qui persistent : un `REQUEST_REVIEW` =
-  « ce juge a été demandé » ; un `APPROVED`/`REQUEST_CHANGES` = « il a voté ». Le caller (`dispatch_review`)
-  unionne avec `requested_reviewers` (défensif) et calcule `pending = jury -- verdicts` → un juge
-  jamais-voté reste `pending` (spawné), JAMAIS sauté.
-
-  ## Returns
-    * `{:ok, %{verdicts: %{login↓ => :approved | :changes_requested}, reviewers: [login↓]}}`
-    * `{:error, term()}` — HTTP/transport/config
-  """
-  @spec pr_review_state(String.t(), integer(), Keyword.t()) ::
-          {:ok,
-           %{
-             verdicts: %{optional(String.t()) => :approved | :changes_requested},
-             reviewers: [String.t()]
-           }}
-          | {:error, term()}
-  def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
-    head_sha = Keyword.get(opts, :head_sha)
-
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, reviews} when is_list(reviews) <-
-           http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
-      {:ok,
-       %{verdicts: verdicts_by_reviewer(reviews, head_sha), reviewers: jury_reviewers(reviews)}}
-    else
-      {:ok, _non_list} -> {:ok, %{verdicts: %{}, reviewers: []}}
-      {:error, _} = err -> err
-    end
-  end
-
-  # Le SET du jury = tout login ayant un review-record « de jury » : demandé (`REQUEST_REVIEW`) OU
-  # ayant voté (`APPROVED`/`REQUEST_CHANGES`). Exclut `COMMENT`/`PENDING` (bruit non-juge). Source STABLE
-  # (les records persistent) vs `requested_reviewers` volatil → un juge tombé du champ sans voter reste
-  # dans le jury → `pending` → spawné, plus de merge sur demi-jury.
-  defp jury_reviewers(reviews) do
-    reviews
-    |> Enum.filter(&(&1["state"] in ["REQUEST_REVIEW", "APPROVED", "REQUEST_CHANGES"]))
-    |> Enum.map(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-  end
-
-  # Dernière review décisive PAR reviewer (login downcasé → verdict atom). Gitea liste par ordre de
-  # création → `List.last` d'un groupe = la review EN VIGUEUR de ce reviewer. Quand `head_sha` est fourni
-  # (chemin prod, posé par `dispatch_review` depuis `pr.head.sha`), un verdict est **COMMIT-SCOPÉ** : seul
-  # celui posé sur le commit COURANT (`commit_id == head_sha`) compte ; une review sur un commit antérieur
-  # est PÉRIMÉE — le code jugé n'existe plus, le juge doit re-juger. Indispensable car Gitea ne dismisse
-  # PAS un REQUEST_CHANGES au push (seules les approbations stale via branch-protection le sont) : sans ce
-  # filtre, un REQUEST_CHANGES périmé qui n'est jamais re-dispatché bloque la PR pour TOUJOURS.
-  defp verdicts_by_reviewer(reviews, head_sha) do
-    reviews
-    |> Enum.reject(&Map.get(&1, "dismissed", false))
-    |> Enum.filter(&(&1["state"] in ["APPROVED", "REQUEST_CHANGES"]))
-    |> reject_stale_reviews(head_sha)
-    |> Enum.group_by(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
-    |> Map.new(fn {login, revs} -> {login, decisive_verdict(List.last(revs)["state"])} end)
-  end
-
-  # `head_sha == nil` (appelants bas-niveau / legacy) → pas de scoping. Sinon : strict `commit_id == head`.
-  defp reject_stale_reviews(reviews, nil), do: reviews
-
-  defp reject_stale_reviews(reviews, head_sha),
-    do: Enum.filter(reviews, &(&1["commit_id"] == head_sha))
-
-  defp decisive_verdict("APPROVED"), do: :approved
-  defp decisive_verdict("REQUEST_CHANGES"), do: :changes_requested
-
-  @doc """
-  Feedback des reviews REQUEST_CHANGES en vigueur d'une PR (Gitea `GET .../pulls/{index}/reviews`),
-  pour nourrir le **rework** du producteur. Renvoie la DERNIÈRE review REQUEST_CHANGES par reviewer
-  avec son `body` — le verdict structuré gravé par le juge (`reason`/`details`/`chain`, via
-  `HopConsumer.judge_review_body`). Sans ce body, le `rework_mandate` dit « corrige selon la review »
-  SANS le contenu de la review → l'engineer devine à l'aveugle (famine d'info, DOUBLE :
-  jumeau de l'`outputs: {}` du juge ; sans le body l'eng rend `blocked_dep` plutôt que
-  deviner). Pas de commit-scoping ici : on veut le DERNIER feedback par reviewer (`List.last`), pas
-  un verdict décisif courant (le rework s'exécute AVANT le prochain push, le REQUEST_CHANGES porte
-  sur le head courant). Les reviews sans body (verdict générique) sont écartées (rien d'actionnable).
-
-  ## Returns
-    * `{:ok, [%{"login" => l, "body" => b}]}` — une entrée par reviewer ayant un REQUEST_CHANGES avec substance
-    * `{:ok, []}` — aucun REQUEST_CHANGES avec body actionnable
-    * `{:error, term()}` — HTTP/transport/config
-  """
-  @spec change_request_feedback(String.t(), integer(), Keyword.t()) ::
-          {:ok, [%{optional(String.t()) => String.t()}]} | {:error, term()}
-  def change_request_feedback(repo, index, opts \\ [])
-      when is_binary(repo) and is_integer(index) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, reviews} when is_list(reviews) <-
-           http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
-      {:ok, change_requests_by_reviewer(reviews)}
-    else
-      {:ok, _non_list} -> {:ok, []}
-      {:error, _} = err -> err
-    end
-  end
-
-  @doc """
-  Compte les rounds de REWORK déjà déclenchés sur une PR = nb de reviews `REQUEST_CHANGES`
-  non-dismissed (Gitea `GET .../pulls/{index}/reviews`). Chaque round (juge demande des changements →
-  l'eng re-pousse → re-review) ajoute une review REQUEST_CHANGES → le compteur est **forge-natif** et
-  MONOTONE (les reviews persistent), comme `count_signed_hops` pour le rebond de gate. Sert au frein
-  anti-churn du chemin PR-review (`StageDispatcher.dispatch_rework`) : au-delà du budget → escalade arch.
-
-  Pas de commit-scoping : on veut l'HISTORIQUE des rounds (tous commits), pas le verdict courant.
-
-  `{:error, _}` sur échec HTTP/config — le caller NE re-spawn PAS à l'aveugle si le budget n'est pas
-  vérifiable (un re-spawn non borné pourrait churner), symétrique de `count_signed_hops`.
-  """
-  @spec count_change_request_rounds(String.t(), integer(), Keyword.t()) ::
-          {:ok, non_neg_integer()} | {:error, term()}
-  def count_change_request_rounds(repo, index, opts \\ [])
-      when is_binary(repo) and is_integer(index) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, reviews} when is_list(reviews) <-
-           http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews") do
-      count =
-        reviews
-        |> Enum.reject(&Map.get(&1, "dismissed", false))
-        |> Enum.count(&(&1["state"] == "REQUEST_CHANGES"))
-
-      {:ok, count}
-    else
-      {:ok, _non_list} -> {:ok, 0}
-      {:error, _} = err -> err
-    end
-  end
-
-  # Dernier REQUEST_CHANGES PAR reviewer (login → body). Même tri que `verdicts_by_reviewer` (ordre de
-  # création Gitea → `List.last` = la review en vigueur), filtré aux REQUEST_CHANGES avec un body non-vide.
-  defp change_requests_by_reviewer(reviews) do
-    reviews
-    |> Enum.reject(&Map.get(&1, "dismissed", false))
-    |> Enum.filter(&(&1["state"] == "REQUEST_CHANGES"))
-    |> Enum.group_by(&(get_in(&1, ["user", "login"]) |> to_string() |> String.downcase()))
-    |> Enum.map(fn {login, revs} ->
-      %{"login" => login, "body" => (List.last(revs)["body"] || "") |> to_string()}
-    end)
-    |> Enum.reject(&(String.trim(&1["body"]) == ""))
-  end
-
-  @doc """
-  Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea
-  `PUT /repos/{repo}/contents/{path}`. **Le SYSTÈME publie** (forge-aveugle : le pod ne
-  pousse jamais ; c'est ce chemin qui grave durablement le livrable d'un engineer). Création
-  (pas d'update sha) : viser un `path` neuf (ticket-namespacé). Branche existante requise
-  (défaut `main`) — `opts[:new_branch]` pour brancher depuis `branch`.
-
-  ## Returns
-    * `{:ok, commit_sha}` — fichier écrit
-    * `{:error, term()}` — HTTP/transport/config (422 = path déjà présent sur la branche)
-  """
-  @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  def put_file(repo, path, content, opts \\ [])
-      when is_binary(repo) and is_binary(path) and is_binary(content) do
-    with {:ok, config} <- resolve_config(opts) do
-      body =
-        %{
-          content: Base.encode64(content),
-          message: Keyword.get(opts, :message, "feat(fleet): #{path}"),
-          branch: Keyword.get(opts, :branch, "main")
-        }
-        |> maybe_put_new_branch(Keyword.get(opts, :new_branch))
-        # Traça à 2 niveaux : `author` = le WORKER (qui a écrit),
-        # `committer` = l'HUMAIN commanditaire (qui a fait bosser la fleet ; le système fait l'I/O,
-        # mais le commit attribue les deux niveaux). forge-aveugle préservé (le pod ne pousse jamais).
-        |> maybe_put_identity(:author, Keyword.get(opts, :author))
-        |> maybe_put_identity(:committer, Keyword.get(opts, :committer))
-        # `sha` présent ⇒ UPDATE du fichier existant (Gitea l'exige) ; absent ⇒ CREATE.
-        |> maybe_put_sha(Keyword.get(opts, :sha))
-
-      case http_put(config, "/repos/#{encode_repo(repo)}/contents/#{encode_path(path)}", body) do
-        {:ok, %{"commit" => %{"sha" => sha}}} -> {:ok, sha}
-        {:ok, _other} -> {:ok, :written}
-        {:error, _} = err -> err
-      end
-    end
-  end
-
-  @doc """
-  Lit un fichier du repo (Gitea `GET /contents/{path}?ref=`). Le `sha` renvoyé sert à `put_file(.., sha:)`
-  pour un UPDATE (read-modify-write). `opts[:ref]` = branche/ref (défaut `main`).
-
-  ## Returns
-    * `{:ok, %{content: String.t(), sha: String.t()}}` — fichier lu (content décodé)
-    * `{:error, :not_found}` — 404 (fichier/branche absent)
-    * `{:error, term()}` — HTTP/transport/config/decode
-  """
-  @spec get_file(String.t(), String.t(), Keyword.t()) ::
-          {:ok, %{content: String.t(), sha: String.t()}} | {:error, term()}
-  def get_file(repo, path, opts \\ []) when is_binary(repo) and is_binary(path) do
-    with {:ok, config} <- resolve_config(opts) do
-      ref = Keyword.get(opts, :ref, "main")
-
-      case http_get(
-             config,
-             "/repos/#{encode_repo(repo)}/contents/#{encode_path(path)}?ref=#{URI.encode_www_form(ref)}"
-           ) do
-        {:ok, %{"content" => b64, "sha" => sha}} ->
-          case Base.decode64(b64, ignore: :whitespace) do
-            {:ok, content} -> {:ok, %{content: content, sha: sha}}
-            :error -> {:error, :decode_failed}
-          end
-
-        {:error, {:http, 404, _}} ->
-          {:error, :not_found}
-
-        {:error, _} = err ->
-          err
-      end
-    end
-  end
-
-  defp maybe_put_new_branch(body, nil), do: body
-  defp maybe_put_new_branch(body, nb) when is_binary(nb), do: Map.put(body, :new_branch, nb)
-
-  defp maybe_put_sha(body, nil), do: body
-  defp maybe_put_sha(body, sha) when is_binary(sha), do: Map.put(body, :sha, sha)
-
-  defp maybe_put_identity(body, key, %{name: name, email: email})
-       when is_binary(name) and is_binary(email),
-       do: Map.put(body, key, %{name: name, email: email})
-
-  defp maybe_put_identity(body, _key, _), do: body
+  # put_file / get_file → `Fleet.Pilot.ForgeClient.Files` (concern autonome, appelé en direct, pas via
+  # le seam — `IncidentRegistry` les injecte comme `:get_file_fun`/`:put_file_fun`). Pas de forwarder ici.
 
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     # Paginé — un comment système signé au-delà de 50 ne doit pas échapper au dédup (sinon
@@ -1110,7 +583,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
             true ->
               case forge_bot_login(config, opts) do
-                {:ok, bot} -> Enum.filter(comments, &system_authored?(&1, bot))
+                {:ok, bot} -> Enum.filter(comments, &ForgeProtocol.system_authored?(&1, bot))
                 {:error, _} -> comments
               end
           end
@@ -1129,8 +602,6 @@ defmodule Fleet.Pilot.ForgeClient do
   # Écrit à l'assignation (entrée + reassign), lu par StageDispatcher au spawn.
   # ============================================================
 
-  @route_prefix "[lcars-route:"
-
   @doc """
   Grave le marqueur route `[lcars-route:<pipeline>:<stage>]`. Idempotent (dédup sur le marqueur
   exact → un replay ne duplique pas). Le dernier marqueur posé fait foi (cf. `get_route`).
@@ -1139,7 +610,7 @@ defmodule Fleet.Pilot.ForgeClient do
           {:ok, :posted | :already} | {:error, term()}
   def post_route(repo, issue_number, pipeline, stage, opts \\ [])
       when is_binary(pipeline) and is_binary(stage) do
-    marker = "#{@route_prefix}#{pipeline}:#{stage}]"
+    marker = ForgeProtocol.route_marker(pipeline, stage)
     post_comment(repo, issue_number, marker, Keyword.put(opts, :dedup_signature, marker))
   end
 
@@ -1157,35 +628,11 @@ defmodule Fleet.Pilot.ForgeClient do
       # Ne faire foi QUE des comments écrits par le compte SYSTÈME (bot). Un user forge
       # (humain/attaquant) qui poste `[lcars-route:evil:stage]` piloterait sinon la navigation.
       comments
-      |> Enum.filter(&system_authored?(&1, bot))
+      |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))
       |> Enum.map(& &1["body"])
       |> Enum.reverse()
-      |> Enum.find_value(:none, fn body -> parse_route_marker(body) end)
+      |> Enum.find_value(:none, fn body -> ForgeProtocol.parse_route_marker(body) end)
     end
-  end
-
-  @doc false
-  # Pur : extrait `{pipeline, stage}` d'un body contenant `[lcars-route:p:s]`, sinon nil.
-  def parse_route_marker(nil), do: nil
-
-  def parse_route_marker(body) when is_binary(body) do
-    case Regex.run(~r/\[lcars-route:([^:\]]+):([^:\]]+)\]/, body) do
-      [_, pipeline, stage] -> {:ok, {pipeline, stage}}
-      _ -> nil
-    end
-  end
-
-  @hop_marker_rx ~r/\[hop:[^:\]]+:[^:\]]+\]/
-
-  @doc """
-  Format du marqueur de hop signé `[hop:<role>:<sha>]` (co-localisé avec son
-  parseur `@hop_marker_rx` / `count_signed_hops` — un changement de format se fait ICI,
-  le regex en face, jamais l'un sans l'autre). Posé par `HopCompleter` en fin-de-hop,
-  sert aussi de `:dedup_signature` (replay idempotent).
-  """
-  @spec hop_marker(String.t(), String.t()) :: String.t()
-  def hop_marker(role, sha) when is_binary(role) and is_binary(sha) do
-    "[hop:#{role}:#{sha}]"
   end
 
   @doc """
@@ -1213,35 +660,13 @@ defmodule Fleet.Pilot.ForgeClient do
       # Bot irrésoluble → {:error} (via le with) : le caller NE rebondit PAS sur un budget non vérifiable.
       count =
         comments
-        |> Enum.filter(&system_authored?(&1, bot))
+        |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))
         |> Enum.map(& &1["body"])
-        |> Enum.count(fn b -> is_binary(b) and Regex.match?(@hop_marker_rx, b) end)
+        |> Enum.count(&ForgeProtocol.hop_marker?/1)
 
       {:ok, count}
     end
   end
-
-  @result_block_rx ~r/```result\n(.*?)\n```/s
-  @result_fence_limit 8192
-
-  @doc """
-  Format du bloc ` ```result ` (sérialise les `outputs` d'un stage dans le comment de hop).
-  Co-localisé avec son parseur `parse_result_block/1` — round-trip garanti. `nil`/vide →
-  `""` (pas de bruit). JSON fencé si ≤ 8 KB ; au-delà, une note pointant vers le livrable de la
-  branche (jamais de JSON tronqué = invalide). Préfixe `\\n\\n` inclus (séparateur du corps).
-  """
-  @spec result_block(map() | nil) :: String.t()
-  def result_block(outputs) when is_map(outputs) and map_size(outputs) > 0 do
-    json = Jason.encode!(outputs)
-
-    if byte_size(json) <= @result_fence_limit do
-      "\n\n```result\n#{json}\n```"
-    else
-      "\n\n_(result #{byte_size(json)} o — trop volumineux pour le comment ; livrable complet sur la branche système)_"
-    end
-  end
-
-  def result_block(_), do: ""
 
   @doc """
   Extrait le dernier bloc ` ```result ` posté dans un comment de hop — le `result_K`
@@ -1259,131 +684,12 @@ defmodule Fleet.Pilot.ForgeClient do
       # Le bloc ```result nourrit le MANDAT DE JUGEMENT du gatekeeper. Ne
       # l'extraire QUE de comments SYSTÈME — sinon un user forge injecte ce que le juge évalue.
       comments
-      |> Enum.filter(&system_authored?(&1, bot))
+      |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))
       |> Enum.map(& &1["body"])
       |> Enum.reverse()
-      |> Enum.find_value(:none, &parse_result_block/1)
+      |> Enum.find_value(:none, &ForgeProtocol.parse_result_block/1)
     end
   end
-
-  @doc false
-  # Pur : extrait le map du dernier bloc ```result d'un body, sinon nil.
-  def parse_result_block(body) when is_binary(body) do
-    case Regex.run(@result_block_rx, body) do
-      [_, json] ->
-        case Jason.decode(json) do
-          {:ok, map} when is_map(map) -> {:ok, map}
-          _ -> nil
-        end
-
-      _ ->
-        nil
-    end
-  end
-
-  def parse_result_block(_), do: nil
-
-  @doc false
-  # Pur : un comment est DE CONFIANCE ssi son auteur = le compte système (bot)
-  # de la fleet. Un user forge (humain/attaquant) a un autre login → ses marqueurs sont ignorés.
-  def system_authored?(comment, bot_login)
-      when is_map(comment) and is_binary(bot_login) and bot_login != "" do
-    get_in(comment, ["user", "login"]) == bot_login
-  end
-
-  def system_authored?(_comment, _bot), do: false
-
-  # Login du compte système (le propriétaire de FORGE_TOKEN). Config `:forge_bot_login` (déploiement)
-  # OU dérivé une fois via `GET /user` (l'authentifié du token), caché. Irrésoluble → `{:error}` :
-  # les callers refusent alors de faire foi de marqueurs non vérifiables (fail-closed).
-  defp forge_bot_login(config, opts) do
-    # opts (seam test) > config (déploiement) > dérivé /user (caché).
-    case Keyword.get(opts, :forge_bot_login) ||
-           Application.get_env(:fleet_pilot, :forge_bot_login) do
-      login when is_binary(login) and login != "" -> {:ok, login}
-      _ -> derive_bot_login(config)
-    end
-  end
-
-  defp derive_bot_login(config) do
-    case :persistent_term.get({__MODULE__, :bot_login}, :unset) do
-      login when is_binary(login) ->
-        {:ok, login}
-
-      :unset ->
-        case http_get(config, "/user") do
-          {:ok, %{"login" => login}} when is_binary(login) and login != "" ->
-            :persistent_term.put({__MODULE__, :bot_login}, login)
-            {:ok, login}
-
-          {:ok, _} ->
-            {:error, :bot_login_unresolved}
-
-          {:error, _} = err ->
-            err
-        end
-    end
-  end
-
-  # ============================================================
-  # URL-segment safety — encodage des segments fournis par appelant/forge.
-  #
-  # `repo`/`path`/`ref`/`username`/`topic`/`org`/`label_name` viennent du mandat (issue/PR), du
-  # catalogue ou de la config et sont interpolés dans l'URL Gitea. Un segment hostile (`../`, espace,
-  # `?x=1`, `#frag`) traverserait l'API (`/repos/owner/../admin/...`) ou INJECTERAIT une query/fragment
-  # qui changerait le sens de la requête. On ENCODE donc chaque segment au plus près de l'interpolation —
-  # PAS un slug (un `repo` = `owner/name` ET un `path` de fichier contiennent légitimement des `/`), mais
-  # un encodage qui rend `..`/`/`/espace/`?`/`#` INERTES.
-  #
-  # Deux pièges traités :
-  #   1. un `/` injecté DANS un composant (`name = "x/../admin"`) fabriquerait un faux séparateur →
-  #      `encode_seg` percent-encode le `/` (`%2F`), il ne peut plus séparer.
-  #   2. un composant qui EST le séparateur de chemin `.`/`..` (`repo = "fleet/../admin"`, le `..` est un
-  #      composant entier après split) : `URI.encode_www_form` ne touche PAS le `.` (caractère unreserved),
-  #      donc un `..` brut SURVIVRAIT et le serveur normaliserait le chemin (traversée). On NEUTRALISE
-  #      donc tout composant `.`/`..`/vide en percent-encodant ses points (`..` → `%2E%2E`) → segment
-  #      littéral inerte sur le fil, jamais un opérateur de chemin. C'est le verrou réel du vecteur repo.
-  #
-  # `encode_seg/1` = un composant atomique (username, org, topic, label, ref-en-path) ;
-  # `encode_repo/1`/`encode_path/1` = multi-composant (`owner/name`, `dir/sub/file`), `/` structurels
-  # préservés, chaque composant passé par `encode_component/1`. Pour une QUERY (`?ref=…`),
-  # `URI.encode_www_form` directement (cf. `get_file`).
-
-  @doc false
-  # Encode un composant d'URL atomique (rend `/`, `..`, espace, `?`, `#` inertes). Public pour test.
-  def encode_seg(seg) when is_binary(seg), do: encode_component(seg)
-
-  @doc false
-  # Encode un `owner/name` en préservant le `/` structurel mais en neutralisant tout `/`/`..`/composant
-  # de traversée injecté DANS un composant (owner ou name). Public pour test.
-  def encode_repo(repo) when is_binary(repo) do
-    repo |> String.split("/") |> Enum.map_join("/", &encode_component/1)
-  end
-
-  @doc false
-  # Encode un path de fichier multi-segment (`dir/sub/file.md`) : `/` structurels préservés, chaque
-  # composant neutralisé → un `..`/`.` injecté est inerte, pas de traversée de l'API contents. Public pour test.
-  def encode_path(path) when is_binary(path) do
-    path |> String.split("/") |> Enum.map_join("/", &encode_component/1)
-  end
-
-  # UN composant de chemin sûr. Un composant de TRAVERSÉE (`.`/`..`) est percent-encodé sur ses points
-  # (`..` → `%2E%2E`) → segment littéral inerte que le serveur ne normalisera PAS comme un opérateur de
-  # chemin (le `.` est unreserved : `URI.encode_www_form` ne le toucherait pas, d'où ce cas dédié — c'est
-  # LE verrou du vecteur `owner/../admin`). Un composant vide (`//`) ne traverse pas → laissé tel quel.
-  # Tout autre composant passe par `URI.encode_www_form` (le `/` interne devient `%2F`, l'espace `%20`,
-  # `?`/`#` encodés). Le `+` (espace www-form) est re-traduit en `%20` (sémantique path-segment, pas form).
-  defp encode_component(comp) when comp in [".", ".."] do
-    String.replace(comp, ".", "%2E")
-  end
-
-  defp encode_component(comp) when is_binary(comp) do
-    comp |> URI.encode_www_form() |> String.replace("+", "%20")
-  end
-
-  # ============================================================
-  # HTTP plumbing
-  # ============================================================
 
   defp get_issue_labels(config, repo, issue_number) do
     case http_get(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels") do
@@ -1453,117 +759,6 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  @page_limit 50
-
-  # Lecture PAGINÉE d'une collection source-de-vérité (issues / pulls / comments). Gitea
-  # plafonne `limit` à 50/page — une seule page rate les items 51+ (tickets/PR ignorés, marqueurs de
-  # hop sous-comptés). On boucle `page=1,2,...` (`@page_limit` items/page) en accumulant jusqu'à la
-  # DERNIÈRE page : une page rendant < @page_limit items (ou vide) est la dernière (invariant Gitea :
-  # une page pleine implique « peut-être une suite »). Comportement identique à l'ancien ≤50 items :
-  # une collection ≤50 tient en page 1 (< 50 → stop), un seul round-trip. `query` = query-string SANS
-  # pagination (ex. `"state=open&type=issues"` ou `""`). Toute page en erreur HTTP/transport remonte
-  # (fail-loud : un caller source-de-vérité ne doit JAMAIS travailler sur une vue tronquée silencieuse).
-  defp paginate(config, path_base, query) do
-    do_paginate(config, path_base, query, 1, [])
-  end
-
-  defp do_paginate(config, path_base, query, page, acc) do
-    sep = if query == "", do: "?", else: "?#{query}&"
-    path = "#{path_base}#{sep}page=#{page}&limit=#{@page_limit}"
-
-    case http_get(config, path) do
-      {:ok, items} when is_list(items) ->
-        acc = acc ++ items
-
-        # Page pleine → il PEUT y avoir une suite ; page partielle/vide → dernière page, on s'arrête.
-        if length(items) < @page_limit do
-          {:ok, acc}
-        else
-          do_paginate(config, path_base, query, page + 1, acc)
-        end
-
-      # Réponse 2xx de forme INATTENDUE (non-liste) sur un endpoint de collection. Rendre
-      # `{:ok, acc}` ferait passer une vue VIDE pour une collection vide : page 1 non-liste →
-      # `{:ok, []}` indistinguable d'une collection réellement vide → le poller croirait « rien à
-      # dispatcher » (route → :none, budget rework sous-compté), un caller source-de-vérité
-      # travaillerait sur une vue VIDE silencieuse — le faux-succès que le fail-loud HTTP
-      # empêche déjà pour les erreurs réseau, la forme inattendue en étant le trou. D'où une
-      # ERREUR TYPÉE : la collection n'est PAS dérivable de cette page →
-      # `{:error, {:unexpected_page_shape, …}}`. Les callers (`list_scoped_issues`, `get_route`,
-      # `count_signed_hops`, `get_predecessor_result`, `comment_signed?`) propagent déjà `{:error, _}`.
-      {:ok, non_list} ->
-        {:error, {:unexpected_page_shape, path, page, non_list}}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  defp http_get(config, path), do: request(config, :get, path, nil)
-  defp http_put(config, path, body), do: request(config, :put, path, body)
-  defp http_post(config, path, body), do: request(config, :post, path, body)
-  defp http_patch(config, path, body), do: request(config, :patch, path, body)
-
-  defp request(config, method, path, body) do
-    url = config.base_url <> "/api/v1" <> path
-
-    # `retry: false` — le retry HTTP est délégué au caller :
-    # `Fleet.Pilot.Poller` a son propre backoff exponentiel + jitter
-    # (5min cap, anti-thundering-herd) et sérialise le traitement d'un
-    # event à la fois. Le retry built-in Req (1s/2s/4s sur
-    # 5xx) duplicaterait cette logique + ralentirait les tests d'erreur
-    # de 7s par cas.
-    req_opts =
-      [
-        method: method,
-        url: url,
-        headers: [
-          {"authorization", "token " <> config.token},
-          {"accept", "application/json"}
-        ],
-        receive_timeout: 10_000,
-        retry: false,
-        # Pool dédié à `conn_max_idle_time` court (cf. `Fleet.Pilot.Application.forge_finch_spec`) : évite
-        # qu'une connexion idle devienne stale et fasse pendre le 1er appel jusqu'au receive_timeout. Dans
-        # la liste de BASE (avant le merge) → un test qui injecte `plug:` via `req_options` prime (le plug
-        # court-circuite l'adapter Finch), l'hermétisme des tests reste intact.
-        finch: Fleet.Pilot.ForgeFinch
-      ]
-      |> maybe_put(:json, body)
-      |> Keyword.merge(config.req_options)
-
-    started = System.monotonic_time(:millisecond)
-    result = Req.request(req_opts)
-    elapsed = System.monotonic_time(:millisecond) - started
-
-    # INSTRUMENTATION : un appel à la forge LOCALE qui dépasse 1s est anormal → on le trace (méthode,
-    # path, durée, issue). C'est l'instrument qui dira au prochain run POURQUOI create_ticket cumule
-    # ~30s (3 appels forge : create_issue + add_label[GET+PUT]) — connexion stale ? endpoint qui pend ?
-    if elapsed > 1_000 do
-      Logger.warning(
-        "ForgeClient #{method} #{path} LENT #{elapsed}ms → #{forge_result_tag(result)}"
-      )
-    end
-
-    case result do
-      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
-        {:ok, body}
-
-      {:ok, %Req.Response{status: status, body: body}} ->
-        {:error, {:http, status, body}}
-
-      {:error, exception} ->
-        {:error, {:transport, exception}}
-    end
-  end
-
-  # Résumé compact d'un résultat Req pour le log d'instrumentation (status HTTP ou erreur transport).
-  defp forge_result_tag({:ok, %Req.Response{status: status}}), do: "http #{status}"
-  defp forge_result_tag({:error, exception}), do: "transport #{inspect(exception)}"
-
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
-
   # ============================================================
   # Identite forge — adaptateur credential -> wire (token de role)
   # ============================================================
@@ -1588,65 +783,4 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   def as_role(forge_opts, _role), do: forge_opts
-
-  # ============================================================
-  # Config resolution
-  # ============================================================
-
-  defp resolve_config(opts) do
-    env = Application.get_env(:fleet_pilot, :forge, [])
-    merged = Keyword.merge(env, opts)
-
-    with {:ok, base_url} <- fetch_required(merged, :base_url),
-         {:ok, token} <- resolve_token(merged) do
-      {:ok,
-       %{
-         base_url: String.trim_trailing(base_url, "/"),
-         token: token,
-         req_options: Keyword.get(merged, :req_options, [])
-       }}
-    end
-  end
-
-  defp fetch_required(opts, key) do
-    case Keyword.fetch(opts, key) do
-      {:ok, value} when is_binary(value) and value != "" -> {:ok, value}
-      _ -> {:error, {:config, {:missing, key}}}
-    end
-  end
-
-  defp resolve_token(opts) do
-    case Keyword.get(opts, :token) do
-      token when is_binary(token) and token != "" ->
-        {:ok, token}
-
-      _ ->
-        case Keyword.get(opts, :token_file) || default_token_file() do
-          nil ->
-            {:error, {:config, :no_token_source}}
-
-          path ->
-            case File.read(path) do
-              {:ok, content} ->
-                # Un fichier token VIDE (ou whitespace-only) trime en "" → header
-                # `authorization: token ` envoyé tel quel → 401 TARDIF côté forge (échec opaque,
-                # diagnostiqué loin de la source). On tranche ICI, à la config, fail-loud explicite.
-                case String.trim(content) do
-                  "" -> {:error, {:config, {:token_file_empty, path}}}
-                  token -> {:ok, token}
-                end
-
-              {:error, reason} ->
-                {:error, {:config, {:token_file, path, reason}}}
-            end
-        end
-    end
-  end
-
-  defp default_token_file do
-    case System.user_home() do
-      nil -> nil
-      home -> Path.join(home, ".gitea_token")
-    end
-  end
 end

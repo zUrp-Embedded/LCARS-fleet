@@ -2,6 +2,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.ForgeClient
+  alias Fleet.Pilot.ForgeProtocol
 
   # Plug stub Req — intercepte les requêtes en mémoire, pas de réseau.
   # Pattern Req standard (option `:plug`). Toutes les routes attendues
@@ -58,8 +59,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
         {"GET", "/api/v1/repos/fleet/b/collaborators/bob"} => {404, %{}}
       }
 
-      assert ForgeClient.collaborator?("fleet/a", "bob", opts(h))
-      refute ForgeClient.collaborator?("fleet/b", "bob", opts(h))
+      assert ForgeClient.Repo.collaborator?("fleet/a", "bob", opts(h))
+      refute ForgeClient.Repo.collaborator?("fleet/b", "bob", opts(h))
     end
   end
 
@@ -108,7 +109,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
         {"GET", "/api/v1/repos/fleet/beta/collaborators/bob"} => {204, ""}
       }
 
-      assert {:ok, "fleet/alpha"} = ForgeClient.last_worked_repo("bob", opts(h))
+      assert {:ok, "fleet/alpha"} = ForgeClient.Repo.last_worked_repo("bob", opts(h))
     end
 
     test "aucun repo collaborateur → :none (l'appelant retombe sur le fallback config)" do
@@ -124,12 +125,12 @@ defmodule Fleet.Pilot.ForgeClientTest do
         {"GET", "/api/v1/repos/fleet/poc-old/collaborators/bob"} => {404, %{}}
       }
 
-      assert :none = ForgeClient.last_worked_repo("bob", opts(h))
+      assert :none = ForgeClient.Repo.last_worked_repo("bob", opts(h))
     end
 
     test "issue-search vide → :none" do
       h = %{{"GET", "/api/v1/repos/issues/search"} => {200, []}}
-      assert :none = ForgeClient.last_worked_repo("bob", opts(h))
+      assert :none = ForgeClient.Repo.last_worked_repo("bob", opts(h))
     end
   end
 
@@ -356,7 +357,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
-  describe "list_open_pulls/2 + parse_feature_branch/1 (dispatch juge PR-driven)" do
+  describe "list_open_pulls/2 + get_pull/3 (dispatch juge PR-driven)" do
     test "hybride : /issues?type=pulls (numéros filtrés) PUIS get_pull (shape PR complète)" do
       handlers = %{
         # #5.2 D1 — la liste passe par /issues (filtre assignee forge-side), rend une shape issue (numéros).
@@ -384,27 +385,6 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
       assert {:ok, %{"number" => 6, "head" => %{"sha" => "abc"}}} =
                ForgeClient.get_pull("fleet/lcars", 6, opts(handlers))
-    end
-
-    test "parse_feature_branch extrait {issue, role} d'une branche systeme" do
-      assert {:ok, {42, "engineer"}} = ForgeClient.parse_feature_branch("lcars/issue-42-engineer")
-      assert {:ok, {7, "reviewer"}} = ForgeClient.parse_feature_branch("lcars/issue-7-reviewer")
-    end
-
-    test "parse_feature_branch :error sur une branche non-fleet" do
-      assert :error = ForgeClient.parse_feature_branch("refs/pull/55/head")
-      assert :error = ForgeClient.parse_feature_branch("main")
-      assert :error = ForgeClient.parse_feature_branch("feature/manual")
-      assert :error = ForgeClient.parse_feature_branch(nil)
-    end
-
-    test "feature_branch/2 construit le format ET parse∘build == identité (build+parse co-localisés)" do
-      assert "lcars/issue-42-engineer" = ForgeClient.feature_branch(42, "engineer")
-
-      for {n, role} <- [{1, "engineer"}, {12, "reviewer"}, {999, "qualifier"}] do
-        assert {:ok, {^n, ^role}} =
-                 ForgeClient.parse_feature_branch(ForgeClient.feature_branch(n, role))
-      end
     end
 
     test "pr_review_verdicts : dernière review décisive par reviewer (login↓ → verdict)" do
@@ -760,54 +740,15 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
-  describe "parse_route_marker/1 (A2.1 — pur)" do
-    test "extrait {pipeline, stage} d'un marqueur" do
-      assert {:ok, {"poc-cycle", "build"}} =
-               ForgeClient.parse_route_marker("[lcars-route:poc-cycle:build]")
-    end
-
-    test "marqueur noyé dans du texte" do
-      assert {:ok, {"poc-cycle", "review"}} =
-               ForgeClient.parse_route_marker("blabla\n[lcars-route:poc-cycle:review]\nfin")
-    end
-
-    test "noms kebab-case OK" do
-      assert {:ok, {"standard-qa", "spec-review"}} =
-               ForgeClient.parse_route_marker("[lcars-route:standard-qa:spec-review]")
-    end
-
-    test "pas de marqueur → nil" do
-      assert nil == ForgeClient.parse_route_marker("juste un commentaire")
-      assert nil == ForgeClient.parse_route_marker(nil)
-    end
-  end
-
-  describe "parse_result_block/1 (A2.3b item 5 — pur)" do
-    test "extrait le map du bloc ```result (round-trip avec le format HopCompleter N-04)" do
-      body =
-        "Livrable de architect.\n\n```result\n" <>
-          ~s({"severity_max":"ok","findings":0}) <> "\n```\n\n[hop:architect:abc]"
-
-      assert {:ok, %{"severity_max" => "ok", "findings" => 0}} =
-               ForgeClient.parse_result_block(body)
-    end
-
-    test "pas de bloc result → nil ; JSON invalide → nil ; nil → nil" do
-      assert nil == ForgeClient.parse_result_block("juste un commentaire\n[hop:x:y]")
-      assert nil == ForgeClient.parse_result_block("```result\npas du json\n```")
-      assert nil == ForgeClient.parse_result_block(nil)
-    end
-  end
-
-  describe "F064 — format↔parse co-localisés (round-trip)" do
-    test "hop_marker/2 produit un marqueur reconnu par le comptage" do
+  describe "count_signed_hops/3 — round-trip avec ForgeProtocol.hop_marker" do
+    test "compte un marqueur produit par ForgeProtocol.hop_marker (format reconnu de bout en bout)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
           {200,
            [
              %{
                "user" => %{"login" => "bot"},
-               "body" => ForgeClient.hop_marker("engineer", "deadbeef")
+               "body" => ForgeProtocol.hop_marker("engineer", "deadbeef")
              }
            ]}
       }
@@ -818,42 +759,6 @@ defmodule Fleet.Pilot.ForgeClientTest do
                  42,
                  Keyword.put(opts(handlers), :forge_bot_login, "bot")
                )
-    end
-
-    test "result_block/1 round-trip avec parse_result_block/1" do
-      outputs = %{"severity_max" => "ok", "findings" => 3}
-      body = "Livrable.\n" <> ForgeClient.result_block(outputs)
-
-      assert {:ok, ^outputs} = ForgeClient.parse_result_block(body)
-    end
-
-    test "result_block/1 : map vide → \"\" (pas de bloc, donc rien à parser)" do
-      assert "" == ForgeClient.result_block(%{})
-      assert "" == ForgeClient.result_block(nil)
-      assert nil == ForgeClient.parse_result_block("Livrable sans result.")
-    end
-
-    test "result_block/1 : payload > 8 KB → note, pas de JSON tronqué" do
-      big = %{"blob" => String.duplicate("x", 9000)}
-      block = ForgeClient.result_block(big)
-
-      refute block =~ "```result"
-      assert block =~ "trop volumineux"
-      # la note n'est pas un bloc result valide → parse renvoie nil (jamais de JSON tronqué).
-      assert nil == ForgeClient.parse_result_block(block)
-    end
-  end
-
-  describe "system_authored?/2 (F058/F059/F060 — pur)" do
-    test "true ssi le login de l'auteur == bot" do
-      assert ForgeClient.system_authored?(%{"user" => %{"login" => "lcars-bot"}}, "lcars-bot")
-      refute ForgeClient.system_authored?(%{"user" => %{"login" => "attacker"}}, "lcars-bot")
-    end
-
-    test "false sur structure absente / bot vide / non-map" do
-      refute ForgeClient.system_authored?(%{"body" => "no user"}, "lcars-bot")
-      refute ForgeClient.system_authored?(%{"user" => %{"login" => "lcars-bot"}}, "")
-      refute ForgeClient.system_authored?("pas un comment", "lcars-bot")
     end
   end
 
@@ -946,11 +851,12 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   # ⚠ persistent_term + async (suivi review F058 #1) : `derive_bot_login` cache le login dans
-  # `:persistent_term.{ForgeClient, :bot_login}` — clé GLOBALE partagée par toute la VM ExUnit. TOUT
-  # test qui n'injecte PAS `:forge_bot_login` dans ses opts atteint ce cache et peut polluer/être
-  # pollué par un test concurrent. Invariant du module : tous les AUTRES tests injectent le seam
-  # `forge_bot_login:` exprès (déterministe, pas de cache) ; SEUL le test ci-dessous touche le cache,
-  # et il l'efface en amont ET en `after`. Un futur test sans seam DOIT faire de même (ou async:false).
+  # `:persistent_term.{Fleet.Pilot.ForgeClient.Transport, :bot_login}` — clé GLOBALE partagée par toute
+  # la VM ExUnit (la dérivation /user vit dans le module Transport). TOUT test qui n'injecte PAS
+  # `:forge_bot_login` dans ses opts atteint ce cache et peut polluer/être pollué par un test concurrent.
+  # Invariant du module : tous les AUTRES tests injectent le seam `forge_bot_login:` exprès (déterministe,
+  # pas de cache) ; SEUL le test ci-dessous touche le cache, et il l'efface en amont ET en `after`. Un
+  # futur test sans seam DOIT faire de même (ou async:false).
   describe "forge_bot_login — dérivation /user (seam absent)" do
     test "dérive le login via GET /user quand ni opts ni config" do
       handlers = %{
@@ -960,11 +866,11 @@ defmodule Fleet.Pilot.ForgeClientTest do
       }
 
       # persistent_term cache : effacé en amont pour un test déterministe.
-      :persistent_term.erase({ForgeClient, :bot_login})
+      :persistent_term.erase({Fleet.Pilot.ForgeClient.Transport, :bot_login})
 
       assert {:ok, {"p", "s"}} = ForgeClient.get_route("fleet/lcars", 42, opts(handlers))
     after
-      :persistent_term.erase({ForgeClient, :bot_login})
+      :persistent_term.erase({Fleet.Pilot.ForgeClient.Transport, :bot_login})
     end
   end
 
@@ -1008,7 +914,13 @@ defmodule Fleet.Pilot.ForgeClientTest do
         {"PUT", "/api/v1/repos/fleet/proj/collaborators/engineer"} => {204, ""}
       }
 
-      assert :ok = ForgeClient.add_collaborator("fleet/proj", "engineer", "write", opts(handlers))
+      assert :ok =
+               ForgeClient.Repo.add_collaborator(
+                 "fleet/proj",
+                 "engineer",
+                 "write",
+                 opts(handlers)
+               )
     end
 
     test "protect_branch → POST branch_protections, :ok" do
@@ -1018,7 +930,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
       }
 
       rule = %{rule_name: "main", required_approvals: 2, dismiss_stale_approvals: true}
-      assert :ok = ForgeClient.protect_branch("fleet/proj", rule, opts(handlers))
+      assert :ok = ForgeClient.Repo.protect_branch("fleet/proj", rule, opts(handlers))
     end
 
     test "protect_branch idempotent : règle déjà posée (422) → :ok" do
@@ -1027,7 +939,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
           {422, %{"message" => "branch protection already exists"}}
       }
 
-      assert :ok = ForgeClient.protect_branch("fleet/proj", %{rule_name: "main"}, opts(handlers))
+      assert :ok =
+               ForgeClient.Repo.protect_branch("fleet/proj", %{rule_name: "main"}, opts(handlers))
     end
   end
 
@@ -1225,37 +1138,6 @@ defmodule Fleet.Pilot.ForgeClientTest do
   # chaque COMPOSANT est encodé, les `/` STRUCTURELS préservés ; un `..`/`/`/espace/`?`/`#` injecté inerte.
   # ============================================================
 
-  describe "encode_seg/encode_repo/encode_path — encodage par segment" do
-    test "encode_seg neutralise /, espace, ?, # dans un composant atomique" do
-      assert ForgeClient.encode_seg("a/b") == "a%2Fb"
-      assert ForgeClient.encode_seg("a b") == "a%20b"
-      assert ForgeClient.encode_seg("a?x=1") == "a%3Fx%3D1"
-      assert ForgeClient.encode_seg("a#f") == "a%23f"
-    end
-
-    test "encode_repo préserve le / structurel owner/name MAIS neutralise un composant de traversée" do
-      assert ForgeClient.encode_repo("fleet/lcars") == "fleet/lcars"
-
-      # VECTEUR RÉEL : `fleet/../admin` — le `..` est un COMPOSANT après split. www-form ne touche pas
-      # le `.` → sans le cas dédié il survivrait et le serveur normaliserait (traversée). On le rend inerte :
-      assert ForgeClient.encode_repo("fleet/../admin") == "fleet/%2E%2E/admin"
-      refute ForgeClient.encode_repo("fleet/../admin") =~ ~r{/\.\.(/|$)}
-      assert ForgeClient.encode_repo("fleet/a b") == "fleet/a%20b"
-      # un `/` injecté DANS un composant (faux séparateur) est encodé :
-      assert ForgeClient.encode_repo("fleet/x%2F..") == "fleet/x%252F.."
-    end
-
-    test "encode_path : / structurels préservés, tout composant .. inerte" do
-      assert ForgeClient.encode_path("docs/sub/file.md") == "docs/sub/file.md"
-
-      assert ForgeClient.encode_path("docs/../../../etc/passwd") ==
-               "docs/%2E%2E/%2E%2E/%2E%2E/etc/passwd"
-
-      refute ForgeClient.encode_path("docs/../../../etc/passwd") =~ ~r{/\.\.(/|$)}
-      assert ForgeClient.encode_path(".") == "%2E"
-    end
-  end
-
   describe "URL réelle construite — un segment hostile ne traverse ni n'injecte" do
     # Plug enregistreur : capture l'URL EXACTE vue côté serveur (request_path + query_string)
     # APRÈS encodage client. C'est la preuve sur la construction d'URL réelle, pas que les helpers.
@@ -1295,7 +1177,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
       {:ok, agent} = Agent.start_link(fn -> nil end)
 
       # Sans encodage : `?ref=main&admin=1` injecterait un 2ᵉ paramètre `admin`. www-form encode le `&`.
-      ForgeClient.get_file(
+      ForgeClient.Files.get_file(
         "fleet/lcars",
         "README.md",
         Keyword.put(rec_opts(agent), :ref, "main&admin=1")
@@ -1309,7 +1191,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
 
     test "path hostile (../) dans get_file → aucun composant `..` brut dans le request_path" do
       {:ok, agent} = Agent.start_link(fn -> nil end)
-      ForgeClient.get_file("fleet/lcars", "../../etc/passwd", rec_opts(agent))
+      ForgeClient.Files.get_file("fleet/lcars", "../../etc/passwd", rec_opts(agent))
       %{path: path} = Agent.get(agent, & &1)
 
       refute path =~ ~r{/\.\.(/|$)}
@@ -1380,7 +1262,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
       }
 
       assert {:ok, :already} =
-               ForgeClient.post_onboard_marker("fleet/proj", "alice", admit_opts(h))
+               ForgeClient.Repo.post_onboard_marker("fleet/proj", "alice", admit_opts(h))
     end
 
     test "post_onboard_marker absent → crée l'issue système PUIS la ferme (sceau, tracker propre)" do
@@ -1396,7 +1278,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
           {200, %{"number" => 1, "state" => "closed"}}
       }
 
-      assert {:ok, 1} = ForgeClient.post_onboard_marker("fleet/neuf", "alice", admit_opts(h))
+      assert {:ok, 1} = ForgeClient.Repo.post_onboard_marker("fleet/neuf", "alice", admit_opts(h))
     end
   end
 end

@@ -59,4 +59,28 @@ defmodule Fleet.Pilot.PodIdTest do
     assert a == "fleet-repo-a-issue-1-engineer"
     assert b == "fleet-repo-b-issue-1-engineer"
   end
+
+  test "parse_ref : round-trip avec for_issue/for_pr (le constructeur du format le reconnait)" do
+    # for_issue/for_pr CONSTRUISENT le format, parse_ref le RECONNAIT : meme module, une seule source.
+    # Ce round-trip est la garde : si l'un change sans l'autre, CE test casse (au lieu d'une divergence
+    # silencieuse cote poller qui rendrait [] et boucle de reclaim).
+    issue_id = PodId.for_issue("fleet/poc-8", 42, "engineer")
+    pr_id = PodId.for_pr("fleet/poc-8", 7, "qualifier")
+
+    assert PodId.parse_ref(issue_id, "fleet/poc-8") == {:ok, {:issue, 42}}
+    assert PodId.parse_ref(pr_id, "fleet/poc-8") == {:ok, {:pr, 7}}
+  end
+
+  test "parse_ref : :error hors-scope (autre repo), sur pod_id PROJET, et sur entree anormale" do
+    issue_id = PodId.for_issue("fleet/repo-a", 1, "engineer")
+    # scope d'un AUTRE repo -> pas notre verrou
+    assert PodId.parse_ref(issue_id, "fleet/repo-b") == :error
+
+    # pod_id projet `<repo>-<role>` : aucun marqueur d'instance -> pas de ref de verrou
+    project_id = PodId.for_repo("fleet/poc-8", "engineer")
+    assert PodId.parse_ref(project_id, "fleet/poc-8") == :error
+
+    # entree non-binaire -> :error (pas de crash)
+    assert PodId.parse_ref(nil, "fleet/poc-8") == :error
+  end
 end

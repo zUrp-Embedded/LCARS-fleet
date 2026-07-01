@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.{StageDispatcher, HopConsumer, ForgeClient}
+  alias Fleet.Pilot.{StageDispatcher, HopConsumer, ForgeProtocol}
 
   # ── Sim forge stateful : 1 issue + N PR (objets separes, labels/requested_reviewers propres) ──
   defmodule Sim do
@@ -79,7 +79,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def get_route(pid, _r, _n, _o) do
       (get(pid)["comments"] || [])
       |> Enum.reverse()
-      |> Enum.find_value(:none, &ForgeClient.parse_route_marker/1)
+      |> Enum.find_value(:none, &ForgeProtocol.parse_route_marker/1)
     end
 
     def close_issue(pid, _r, _n, _o) do

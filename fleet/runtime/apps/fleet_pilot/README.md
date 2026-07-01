@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-29 (git réseau borné via Fleet.Credentials.Shell — ls-remote + onboarding, remédiation Lot C)
+**Dernière révision** : 2026-07-01 (atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors HopConsumer — events `*.failed` → registre, concern séparé)
 **Statut** : actif — service d'auto-orchestration tickets Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -73,12 +73,28 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
   (2) l'engagement se lit sur la ROUTE (append-only, robuste), pas sur le chargement de la carte : un échec
   TRANSITOIRE de carte (réseau/forge nil) sur un pipeline routé le classe ENGAGÉ (bail TENU, fail-closed) —
   le dispatch de son stage fail-loud si la carte manque, mais le bail ne se libère pas.
-- `Fleet.Pilot.Labels` — vocabulaire wire-protocol (source unique) : **uniquement** ce qui n'est pas
-  dérivable de l'état forge — verrous `lcars-in-flight`/`lcars-awaits-human`, états `state:*` (legacy carte).
-  Le reste du vocab wire-protocol vit dans `Fleet.Pilot.ForgeClient`, build+parse **co-localisés** (un seul
-  point si le format change) : la feature-branch `lcars/issue-<n>-<role>` (`feature_branch/2` construit,
-  `parse_feature_branch/1` lit) et l'adaptateur credential→wire `as_role/2` (injecte le token du compte de
-  rôle dans `forge_opts[:token]` — source unique partagée par `HopCompleter`/`StageDispatcher`/sceaux gatekeeper).
+- `Fleet.Pilot.Labels` / `Fleet.Pilot.ForgeProtocol` — **vocabulaire wire-protocol** (source unique, build+parse
+  **co-localisés** : un seul point si un format change). `Labels` = les **labels-verrous** non dérivables de
+  l'état forge (`lcars-in-flight`/`lcars-awaits-arch`). `ForgeProtocol` = les **formats purs** (aucun I/O) : la
+  feature-branch `lcars/issue-<n>-<role>` (`feature_branch/2` construit, `parse_feature_branch/1` lit), les
+  marqueurs route/hop/onboard, le bloc ` ```result `, et le primitif de confiance `system_authored?/2`.
+- `Fleet.Pilot.ForgeClient` — **client Gitea, couche DOMAINE** (la forge EST la machine à états). C'est le module
+  injecté par le seam `:forge_client`. Agrégat éclaté par **sous-domaine** : ce module ne garde que le **cœur
+  couplé** (cycle de vie d'une issue : label/assignee/comment/close/create + PR open/review-request/merge +
+  route/hop) + l'adaptateur credential→wire `as_role/2` (token du compte de rôle dans `forge_opts[:token]`,
+  source unique partagée par `HopCompleter`/`StageDispatcher`/sceaux gatekeeper). Les concerns à **frontière
+  nette** vivent dans des sous-modules :
+    - `Fleet.Pilot.ForgeClient.Transport` — moteur HTTP/config/encodage-URL/pagination + login système (zéro
+      protocole forge) ; `ForgeClient` l'**`import`e**.
+    - `Fleet.Pilot.ForgeClient.Jury` — état de jury PR (verdicts commit-scopés, jury volatil, feedback/rounds de rework).
+    - `Fleet.Pilot.ForgeClient.Repo` — provisioning repo + sceau d'admission (`post_onboard_marker`/`admitted?`) ;
+      seule arête descendante : le sceau matérialisé via `create_issue`/`close_issue` du cœur (layering).
+    - `Fleet.Pilot.ForgeClient.Files` — lecture/écriture de fichiers (contents API), appelé en direct par `IncidentRegistry`.
+
+    Discipline du seam : les ops *seam-faced* (atteintes via le `forge` injecté : `pr_review_state`,
+    `repo_id`, `search_repos_by_topic`, `admitted?`, `parse_feature_branch`…) restent **joignables depuis
+    `ForgeClient`** (forwarders explicites / 1 `defdelegate` vers `ForgeProtocol`) ; les ops appelées en direct
+    (provisioning, files) pointent sur leur sous-module. Le vocab pur du wire-protocol vit dans `ForgeProtocol`.
 - `Fleet.Pilot.HopConsumer` — consumer Bus de la **fin-de-hop** (`pod.completed` → `HopCompleter`) ;
   gatekeeper §L441 (escalade soft/terminal → `resume_gate`). **Singleton** : la complétion lourde
   (git push ≤30s) est offloadée en `Task.Supervisor` (`:hop_runner` / `HopTaskSupervisor`, F067) → ne
@@ -86,6 +102,11 @@ chaque hop voyagent dans l'event `pod.completed`. Submodules :
   voyage dans le `metadata` de la **tâche** d'éval (qui survit dans le broker à un crash du HopConsumer
   seul) ; au restart (`gate_evals` RAM vide) le verdict (`task_completed`) est **reconstruit** du metadata
   au lieu d'un drop silencieux (plus d'issue wedgée à vie). `gate_evals` n'est qu'une optimisation fast-path.
+- `Fleet.Pilot.IncidentConsumer` — consumer Bus **séparé** des events d'**échec** de pod (`pod.failed`/
+  `wake.failed`, source `:spawner`) → `IncidentRegistry` (note 1er / escalade récurrent ; wake récurrent =
+  `:sp_suspect`). **Stateless**, sa propre `Task.Supervisor` d'offload (`:runner` défaut nil→sync, prod
+  `&offload_async/1`). Extrait du `HopConsumer` : concern distinct de la complétion → blast-radius isolé
+  (un burst d'échecs ne partage pas la mailbox de la fin-de-hop) et nom du HopConsumer rendu honnête.
 - `Fleet.Pilot.HopCompleter` — orchestrateur de fin-de-hop PR-natif (`complete_pr/2`). **②.1d single-brique
   (sans carte)** : producteur → `:review` (ouvre la PR **au nom de l'eng** via token de rôle + `request_review`
   des juges `:reviewer_roles` + **assigne l'humain** + unlock issue/PR) ; juge → `:reviewed` (poste la review
@@ -123,8 +144,8 @@ pool HTTP/1 dédié au `ForgeClient` avec `conn_max_idle_time: 30_000`. Le défa
 connexion idle traîner jusqu'à ce que la forge la ferme côté serveur → le 1er appel après idle pend jusqu'au
 `receive_timeout` (10s), et `create_ticket` (qui enchaîne 3 appels : `create_issue` + `add_label`[GET+PUT])
 cumulait ainsi jusqu'à ~30s. Inconditionnel car `create_ticket` (côté `fleet_mcp`) appelle le `ForgeClient`
-hors du rail Poller/HopConsumer. `ForgeClient.request/4` route via ce pool (`finch:`) et **trace tout appel
-forge >1s** (`Logger.warning "ForgeClient … LENT …ms"`) — l'observabilité qui localise un appel forge lent
+hors du rail Poller/HopConsumer. `Fleet.Pilot.ForgeClient.Transport.request/4` route via ce pool (`finch:`) et
+**trace tout appel forge >1s** (`Logger.warning "ForgeClient … LENT …ms"`) — l'observabilité qui localise un appel forge lent
 au run réel. Câblage du pool verrouillé par `forge_finch_test.exs` (sonde le process, pas un knob).
 
 Le rail stage démarre aussi `Fleet.Pilot.WorktreeSync` (AVANT Poller/HopConsumer) — sérialiseur qui

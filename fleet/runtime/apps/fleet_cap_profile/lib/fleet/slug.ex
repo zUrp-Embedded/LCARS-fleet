@@ -43,6 +43,14 @@ defmodule Fleet.Slug do
   n'est pas un slug, il faut l'ENCODER (`URI.encode`/`URI.encode_www_form`)
   segment par segment, pas le refuser. Le slug est pour les noms qui DOIVENT
   être atomiques (repo, branche bornée, nom de modop/carte/checkpoint).
+
+  ## NE PAS confondre avec deux autres "slug" (domaines distincts, ne pas fusionner)
+
+  Deux fonctions ressemblent a un slug mais N'EN sont PAS et ne doivent PAS etre rabattues ici :
+    * `Fleet.Pilot.PodId.component/1` — TRANSFORME vers le charset pod_id `[A-Za-z0-9._-]` (casse + `.`
+      preserves, contrat `valid_pod_id?`) ; `Fleet.Slug` VALIDE/rejette, minuscules strict, sans `.`.
+    * `Fleet.Spawner.SeedStore.slugify/1` — reproduit BIT POUR BIT l'algo de Claude Code (compat vendor) ;
+      le remplacer par `Fleet.Slug` casserait le resume. Voir le commentaire la-bas.
   """
 
   # Charset path-safe canon : minuscule/chiffre/`_`/`-`, première position sans `-`/`_`.

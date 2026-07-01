@@ -97,9 +97,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
     # Le poller n'admet un repo que s'il porte ce marqueur bot-authored (`ForgeClient.admitted?`) : un
     # humain ne peut pas le forger faute du token système. Posé ICI, à l'onboarding système, en même temps
     # que le topic — découvrabilité ET admission scellées par le même acte d'infra système.
-    with :ok <- ForgeClient.add_topic(repo, topic, fc_opts(opts)),
-         {:ok, _} <- ForgeClient.post_onboard_marker(repo, my_human, fc_opts(opts)),
-         :ok <- ForgeClient.add_collaborator(repo, my_human, "write", fc_opts(opts)) do
+    with :ok <- ForgeClient.Repo.add_topic(repo, topic, fc_opts(opts)),
+         {:ok, _} <- ForgeClient.Repo.post_onboard_marker(repo, my_human, fc_opts(opts)),
+         :ok <- ForgeClient.Repo.add_collaborator(repo, my_human, "write", fc_opts(opts)) do
       :ok
     else
       {:error, reason} -> {:error, {:register_for_fleet, reason}}
@@ -122,7 +122,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp grant_fleet_roles(repo, opts) do
     Enum.reduce_while(fleet_roles(opts), :ok, fn role, :ok ->
-      case ForgeClient.add_collaborator(repo, role, "write", fc_opts(opts)) do
+      case ForgeClient.Repo.add_collaborator(repo, role, "write", fc_opts(opts)) do
         :ok -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, {:grant_role, role, reason}}}
       end
@@ -138,7 +138,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
       enable_push: false
     }
 
-    case ForgeClient.protect_branch(repo, rule, fc_opts(opts)) do
+    case ForgeClient.Repo.protect_branch(repo, rule, fc_opts(opts)) do
       :ok -> :ok
       {:error, reason} -> {:error, {:protect_main, reason}}
     end
@@ -174,7 +174,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp create_repo(name, org, opts) do
     desc = Keyword.get(opts, :description, "")
 
-    case ForgeClient.create_repo(name, Keyword.merge(opts, org: org, description: desc)) do
+    case ForgeClient.Repo.create_repo(name, Keyword.merge(opts, org: org, description: desc)) do
       {:ok, full_name} when is_binary(full_name) -> {:ok, full_name}
       {:ok, :already_exists} -> {:ok, "#{org}/#{name}"}
       {:error, _} = err -> err

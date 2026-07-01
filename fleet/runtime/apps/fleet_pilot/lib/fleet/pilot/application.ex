@@ -13,6 +13,9 @@ defmodule Fleet.Pilot.Application do
       n'avance pas au-delà du spawn producteur.
     * `Task.Supervisor` (`HopConsumer.task_supervisor/0`) — offload de la complétion de hop : le
       `git push` ≤30s ne bloque pas le singleton `HopConsumer`. Démarré AVANT le HopConsumer (qui s'y réfère).
+    * `Fleet.Pilot.IncidentConsumer` (+ sa `Task.Supervisor`) — consumer Bus SÉPARÉ des events d'ÉCHEC
+      de pod (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct de la fin-de-hop
+      (blast-radius isolé : un burst d'échecs ne partage pas la mailbox du HopConsumer).
 
   ## Historique — rail legacy RETIRÉ (2026-06-16)
 
@@ -125,10 +128,15 @@ defmodule Fleet.Pilot.Application do
       # Superviseur de tasks pour l'offload de la complétion de hop (le git push ≤30s du
       # HopConsumer ne bloque pas le singleton). Démarré AVANT le HopConsumer (qui s'y réfère).
       {Task.Supervisor, name: Fleet.Pilot.HopConsumer.task_supervisor()},
-      # Mémoire persistante des incidents système (owner résilient). Utilisée par WakeRecovery
-      # (kick_gatekeeper / safe_wake) ; démarrée avec le rail, son seul consommateur. Boot best-effort
+      # Mémoire persistante des incidents système (owner résilient). Consommée par WakeRecovery
+      # (kick_gatekeeper / safe_wake) ET par l'IncidentConsumer (events `*.failed`). Boot best-effort
       # (forge injoignable au boot → WAL local seul, pas de crash).
       Fleet.Pilot.IncidentRegistry,
+      # Consumer Bus SÉPARÉ des events d'ÉCHEC de pod (`pod.failed`/`wake.failed`) → IncidentRegistry.
+      # Sa Task.Supervisor (offload du forge du registre) démarrée AVANT lui (il s'y réfère). Séparé du
+      # HopConsumer : concern distinct, le burst d'échecs ne partage pas la mailbox de la complétion.
+      {Task.Supervisor, name: Fleet.Pilot.IncidentConsumer.task_supervisor()},
+      {Fleet.Pilot.IncidentConsumer, runner: &Fleet.Pilot.IncidentConsumer.offload_async/1},
       # Sérialiseur d'alignement du clone local après merge : projette le livrable (`origin/main`) sur
       # `/home/projects/<name>`. Démarré AVANT Poller + HopConsumer — ses deux déclencheurs de merge
       # (`promote_pr` / `HopCompleter.promote`) — pour qu'il sérialise leurs alignements potentiellement

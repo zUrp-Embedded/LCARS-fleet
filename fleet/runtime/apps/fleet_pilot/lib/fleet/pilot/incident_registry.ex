@@ -254,8 +254,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # Read-modify-write avec MERGE : absorbe les incidents posés par d'autres machines depuis le dernier sync
   # (au lieu d'écraser). Renvoie le merge pour que l'owner adopte la vérité cross-machine.
   defp sync_forge(registry, opts) do
-    getter = Keyword.get(opts, :get_file_fun, &ForgeClient.get_file/3)
-    putter = Keyword.get(opts, :put_file_fun, &ForgeClient.put_file/4)
+    getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
+    putter = Keyword.get(opts, :put_file_fun, &ForgeClient.Files.put_file/4)
 
     {forge_reg, sha} =
       case getter.(repo(opts), path(opts), ref: branch(opts)) do
@@ -301,7 +301,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   defp load_forge(opts) do
-    getter = Keyword.get(opts, :get_file_fun, &ForgeClient.get_file/3)
+    getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
 
     case getter.(repo(opts), path(opts), ref: branch(opts)) do
       {:ok, %{content: content}} -> decode(content)

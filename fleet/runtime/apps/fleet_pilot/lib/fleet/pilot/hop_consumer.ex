@@ -283,83 +283,9 @@ defmodule Fleet.Pilot.HopConsumer do
     end
   end
 
-  # Un pod en échec (`transition_failed` : result_timeout/dead-REPL, allocate/launch/auth/project) →
-  # registre d'incidents (PARITÉ avec wake-`{:error}`). 1er = noté (toléré) ; récurrent = escaladé (pattern
-  # → root-cause). Offload (Task) : ne pas bloquer le singleton sur le forge d'un escalade. Le littéral
-  # `:"pod.failed"` crée aussi l'atome dont `best_effort_broadcast` (côté Pod) a besoin.
-  def handle_info(
-        %Fleet.Event{source: :spawner, type: :"pod.failed", payload: %{"pod_id" => pod_id} = p},
-        state
-      )
-      when is_binary(pod_id) do
-    reason = p["reason"]
-
-    Task.Supervisor.start_child(task_supervisor(), fn ->
-      case Fleet.Pilot.IncidentRegistry.record_or_escalate("pod", pod_id, reason) do
-        :recorded ->
-          Logger.info("HopConsumer pod.failed #{pod_id} → incident gravé (#{inspect(reason)})")
-
-        {:escalated, _} ->
-          Logger.warning(
-            "HopConsumer pod.failed #{pod_id} RÉCURRENT → escaladé (#{inspect(reason)})"
-          )
-
-        {:escalation_failed, e} ->
-          Logger.error(
-            "HopConsumer pod.failed #{pod_id} RÉCURRENT mais escalade ÉCHOUÉE — AUCUN ticket " <>
-              "sysadmin créé (forge down ?) : #{inspect(e)}"
-          )
-
-        {:record_failed, e} ->
-          Logger.error(
-            "HopConsumer pod.failed #{pod_id} : incident NON gravé (registre indisponible) : #{inspect(e)}"
-          )
-      end
-    end)
-
-    {:noreply, state}
-  end
-
-  # La boucle ack-driven a épuisé le cap (l'agent n'a JAMAIS acké : ni flag, ni send-keys) →
-  # registre, op="wake". Récurrence = **SP suspect** (pas l'agent : inférence → 1×=random, récurrent=SP
-  # mauvais/dérivé) → escalade `:sp_suspect`. Offload (Task). Le littéral `:"wake.failed"` crée l'atome
-  # dont `best_effort_broadcast` (côté Pod) a besoin.
-  def handle_info(
-        %Fleet.Event{source: :spawner, type: :"wake.failed", payload: %{"pod_id" => pod_id} = p},
-        state
-      )
-      when is_binary(pod_id) do
-    reason = p["reason"]
-
-    Task.Supervisor.start_child(task_supervisor(), fn ->
-      case Fleet.Pilot.IncidentRegistry.record_or_escalate("wake", pod_id, reason,
-             escalate_kind: :sp_suspect,
-             pane: p["pane"]
-           ) do
-        :recorded ->
-          Logger.info("HopConsumer wake.failed #{pod_id} → incident gravé (#{inspect(reason)})")
-
-        {:escalated, _} ->
-          Logger.warning(
-            "HopConsumer wake.failed #{pod_id} RÉCURRENT → SP suspect, escaladé (#{inspect(reason)})"
-          )
-
-        {:escalation_failed, e} ->
-          Logger.error(
-            "HopConsumer wake.failed #{pod_id} RÉCURRENT (SP suspect) mais escalade ÉCHOUÉE — AUCUN " <>
-              "ticket sysadmin créé (forge down ?) : #{inspect(e)}"
-          )
-
-        {:record_failed, e} ->
-          Logger.error(
-            "HopConsumer wake.failed #{pod_id} : incident NON gravé (registre indisponible) : #{inspect(e)}"
-          )
-      end
-    end)
-
-    {:noreply, state}
-  end
-
+  # Les events d'ÉCHEC de pod (`pod.failed`/`wake.failed`) sont routés par `Fleet.Pilot.IncidentConsumer`
+  # (consumer SÉPARÉ → registre d'incidents). Ici ils tombent dans le catch-all (no-op) : ce singleton ne
+  # porte QUE la fin-de-hop (complétion), pas la politique d'incidents (concern distinct, blast-radius isolé).
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
@@ -712,9 +638,9 @@ defmodule Fleet.Pilot.HopConsumer do
   # AMONT du producteur (architect) sont hors-scope (decision engineer-first, mapping PR).
   defp classify_pr_role(payload, n, role, state) do
     if producer?(role, state) do
-      # Format feature-branch = source unique `Fleet.Pilot.ForgeClient.feature_branch/2` (collé à son
+      # Format feature-branch = source unique `Fleet.Pilot.ForgeProtocol.feature_branch/2` (collé à son
       # parseur `parse_feature_branch/1`) — pas de construction `lcars/issue-...` en dur ici.
-      {:producer, Fleet.Pilot.ForgeClient.feature_branch(n, role)}
+      {:producer, Fleet.Pilot.ForgeProtocol.feature_branch(n, role)}
     else
       {:judge, judge_producer_branch(payload, n, state)}
     end
@@ -748,7 +674,7 @@ defmodule Fleet.Pilot.HopConsumer do
     Enum.find_value(pulls, fn pr ->
       head = get_in(pr, ["head", "ref"]) || ""
 
-      case Fleet.Pilot.ForgeClient.parse_feature_branch(head) do
+      case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
         {:ok, {^n, _role}} -> head
         _ -> false
       end
@@ -781,8 +707,8 @@ defmodule Fleet.Pilot.HopConsumer do
       # La gate d'identité vérifie le trailer `Co-authored-by: LCARS-<role>` (signature rôle).
       coauthor_role: role,
       remote: state.remote,
-      # Format feature-branch = source unique `Fleet.Pilot.ForgeClient.feature_branch/2` (collé au parseur).
-      target_branch: Fleet.Pilot.ForgeClient.feature_branch(n, role),
+      # Format feature-branch = source unique `Fleet.Pilot.ForgeProtocol.feature_branch/2` (collé au parseur).
+      target_branch: Fleet.Pilot.ForgeProtocol.feature_branch(n, role),
       push?: true,
       local_ref: "HEAD"
     }
