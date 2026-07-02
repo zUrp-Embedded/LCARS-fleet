@@ -14,7 +14,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   ## Contrat (appelé par `Pod`)
 
   - `effective_project/2` — projet EFFECTIF (brief `opts[:project]` > statique `spec["project"]`).
-    Public car partagé hors-placement (`pod_completed_payload`, bootstrap workspace) : source unique.
+    Public car partagé hors-placement (`Pod.CompletedPayload`, bootstrap workspace) : source unique.
   - `rc_project/2` — nom de projet slugifié depuis `rc_name`, ou `nil`. Public car partagé
     hors-placement (`maybe_checkpoint_seed`) : source unique.
   - `pod_cwd/3` — cwd vu par l'agent. Public car aussi appelé par le recall (`maybe_recall_restore`).

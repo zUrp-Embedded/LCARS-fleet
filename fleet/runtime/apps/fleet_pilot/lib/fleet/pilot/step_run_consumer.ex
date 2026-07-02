@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
     * **Step-dispatch pods** — pas de `workflow_map_id`, mais (s'ils portent un
       projet) le payload embarque `workspace` + `base_sha` + `role` (enrichi à la
-      source, `Fleet.Spawner.Pod.pod_completed_payload`). **Ce consumer les
+      source, `Fleet.Spawner.Pod.CompletedPayload`). **Ce consumer les
       traite.** L'event porte tout l'état → consumer stateless POUR LE HAPPY PATH
       (pass/fail) ; les escalades gatekeeper en attente vivent en RAM (`gate_evals`)
       comme **optimisation fast-path** — mais ce n'est plus une dépendance dure :
@@ -386,7 +386,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # count_signed_step_runs, comments…) et le `remote` (URL de push du livrable) viennent de l'EVENT, pas de la
   # config. Le singleton StepRunConsumer traite les step_runs de TOUS les projets de l'humain → figer repo/remote en
   # config serait faux dès le 2e projet. Le Spawner enrichit `pod.completed` à la source
-  # (`Fleet.Spawner.Pod.pod_completed_payload` : `"repository" => %{"full_name"}` + `"remote"`). Payload nu
+  # (`Fleet.Spawner.Pod.CompletedPayload` : `"repository" => %{"full_name"}` + `"remote"`). Payload nu
   # (sans repo : test/single-repo legacy) → on garde le state de config (fallback). `remote` absent mais
   # repo présent → fallback remote (rare ; un projet bien onboardé porte les deux).
   defp step_run_state(payload, state) do

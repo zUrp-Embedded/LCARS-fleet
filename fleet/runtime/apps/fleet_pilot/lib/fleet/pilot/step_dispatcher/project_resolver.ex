@@ -41,7 +41,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
         with {:ok, sha} <- ls_remote_sha(repo_url, base_branch),
              {:ok, gate_sha} <- resolve_gate_base_sha(repo_url, gate_base_branch, sha) do
           # `"repo"` (full_name "owner/name") embarqué dans le projet → il voyage jusqu'au pod
-          # puis ressort dans `pod.completed` (`pod_completed_payload`) → le StepRunConsumer sait sur QUEL
+          # puis ressort dans `pod.completed` (`CompletedPayload.build`) → le StepRunConsumer sait sur QUEL
           # repo agir (multi-projet), sans le re-dériver. `repo_path` = l'URL de push (remote per-step-run).
           {:ok,
            %{

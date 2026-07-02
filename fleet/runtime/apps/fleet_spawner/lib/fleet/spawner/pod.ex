@@ -68,6 +68,7 @@ defmodule Fleet.Spawner.Pod do
 
   alias Fleet.EventRouter.Bus
   alias Fleet.Spawner.Pod.Backend
+  alias Fleet.Spawner.Pod.CompletedPayload
   alias Fleet.Spawner.Pod.Events
   alias Fleet.Spawner.Pod.Fs
   alias Fleet.Spawner.Pod.Kick
@@ -379,7 +380,7 @@ defmodule Fleet.Spawner.Pod do
   def handle_event(:internal, :proceed, :extracting, data) do
     result = data.submitted_result || %{}
 
-    case Events.required_broadcast("pod.completed", pod_completed_payload(data, result)) do
+    case Events.required_broadcast("pod.completed", CompletedPayload.build(data, result)) do
       :ok ->
         do_extract_proceed(data, result)
 
@@ -808,76 +809,6 @@ defmodule Fleet.Spawner.Pod do
 
   # Délègue à la source unique `Fleet.CapProfile.lifetime_scope/1`.
   defp lifetime_scope(%Fleet.CapProfile{} = cp), do: Fleet.CapProfile.lifetime_scope(cp)
-
-  # pod.completed porte le contexte workflow_map (workflow_map_id+step) SI le pod est spawné avec ces clés.
-  # Plus aucun appelant ne les pose aujourd'hui → en pratique le payload est nu (un consommateur qui
-  # reçoit un payload nu ignore le contexte workflow_map, no-op).
-  defp pod_completed_payload(data, result) do
-    base = %{
-      "pod_id" => data.pod_id,
-      "issue_id" => data.issue_id,
-      "result" => result
-    }
-
-    opts = data.opts || []
-
-    case {Keyword.get(opts, :workflow_map_id), Keyword.get(opts, :step)} do
-      {nil, _} ->
-        # Pod step-dispatch (assignee-driven) hors workflow_map. S'il porte un PROJET (repo cloné), le
-        # payload embarque le contexte de fin-de-step-run : le consumer StepRunConsumer est stateless (l'event
-        # porte l'état). Pod sans projet (memory-X, architect) → payload nu (base), filtré en aval.
-        case LaunchSpec.effective_project(data.opts, data.cap_profile) do
-          %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
-            base
-            |> Map.merge(%{
-              # Autorité unique du sous-dossier workspace (Fleet.Spawner), pas un littéral recopié.
-              "workspace" => Fleet.Spawner.pod_workspace_path(data.pod_dir),
-              "base_sha" => proj["base_sha"],
-              # Base de la GATE de livraison, DÉCONFLÉE de la clone-base (`base_sha`). Pour une
-              # résolution par rebase, le livrable doit DESCENDRE de `main` (cible du rebase). Le
-              # resolver l'égale à `base_sha` pour le forward (build/rework). Fallback `base_sha`.
-              "gate_base_sha" => proj["gate_base_sha"] || proj["base_sha"],
-              "role" => cap_profile_name(data.cap_profile)
-            })
-            |> maybe_put_repo(proj)
-            |> maybe_put_workflow_map_ctx(opts)
-
-          _ ->
-            base
-        end
-
-      {workflow_map_id, step} ->
-        Map.merge(base, %{"workflow_map_id" => workflow_map_id, "step" => step})
-    end
-  end
-
-  # Contexte workflow_map (workflow_map+step) injecté au spawn par StepDispatcher via `:workflow_map`/`:step`.
-  # Permet au StepRunConsumer de naviguer la workflow_map. Absent (workflow_map 1-step) → payload inchangé.
-  defp maybe_put_workflow_map_ctx(payload, opts) do
-    case {Keyword.get(opts, :workflow_map), Keyword.get(opts, :step)} do
-      {p, s} when is_binary(p) and is_binary(s) ->
-        Map.merge(payload, %{"workflow_map" => p, "step" => s})
-
-      _ ->
-        payload
-    end
-  end
-
-  # Multi-projet : embarque le REPO du projet dans `pod.completed` → le StepRunConsumer sait sur quel
-  # repo agir + où pousser. `"repository" => %{"full_name"}` = identifiant forge ; `"remote"` = l'URL
-  # de push. Projet sans `"repo"` → payload inchangé → fallback single-repo du StepRunConsumer.
-  defp maybe_put_repo(payload, %{"repo" => repo} = proj) when is_binary(repo) and repo != "" do
-    payload
-    |> Map.put("repository", %{"full_name" => repo})
-    |> maybe_put_remote(proj["repo_path"])
-  end
-
-  defp maybe_put_repo(payload, _proj), do: payload
-
-  defp maybe_put_remote(payload, remote) when is_binary(remote) and remote != "",
-    do: Map.put(payload, "remote", remote)
-
-  defp maybe_put_remote(payload, _), do: payload
 
   # À la mort d'un pod-PROJET (rc_name présent), checkpointe son JSONl de session ACTIF vers le
   # seed-store pour rappel ultérieur (`--resume`). Permanents (sans rc_name) → pas de seed-store.
