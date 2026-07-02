@@ -75,20 +75,23 @@ defmodule LcarsFleetRuntime.MixProject do
   # (il tournerait une fois par app, avec un cwd d'app ou test/shell_gate.sh n'existe pas). Ici la
   # fonction s'execute UNE fois, a la racine de l'umbrella.
   #
-  # Durcissement bats : le python BLOQUE toujours (present, sur — shell_gate exit!=0 si FAIL>0 ou
-  # coquille vide → Mix.raise ci-dessous). L'absence de bats reste un WARNING compte DANS shell_gate
-  # (pas d'echec) : durcir `mix gate` sur une machine sans bats-core casserait le gate de tous. A
-  # basculer en echec quand bats-core sera un prerequis pose (installe partout / CI) : passer
-  # BATS_MISSING_FATAL=1 a shell_gate.sh (ou flipper son defaut).
+  # Durci (bats-core = prerequis d'outillage dev pose) : on passe BATS_MISSING_FATAL=1 a shell_gate.sh, donc
+  # l'absence de bats FAIT ECHOUER `mix gate` (message d'install clair). Le sanctuaire bwrap (35 tests) +
+  # claude_launch (31) sont ainsi verifies a CHAQUE gate — plus jamais absents en silence (c'est precisement
+  # cette regression-invisible qui avait laisse le test claude_launch stale sur l'ancien contrat 4-args).
+  # Le python bloque de toute facon (FAIL>0 ou coquille vide → Mix.raise ci-dessous).
   defp shell_gate(_args) do
     script = Path.join([__DIR__, "test", "shell_gate.sh"])
-    {out, status} = System.cmd("bash", [script], stderr_to_stdout: true)
+
+    {out, status} =
+      System.cmd("bash", [script], stderr_to_stdout: true, env: [{"BATS_MISSING_FATAL", "1"}])
+
     IO.puts(out)
 
     if status != 0 do
       Mix.raise(
-        "shell_gate (filet tests hors-mix) : ECHEC (exit #{status}) — test python du bridge MCP " <>
-          "rouge ou coquille vide (0 test lance). Voir la sortie ci-dessus."
+        "shell_gate (filet tests hors-mix) : ECHEC (exit #{status}) — test python du bridge MCP rouge, " <>
+          "coquille vide (0 test lance), ou bats absent/rouge (sanctuaire bwrap+claude_launch). Voir la sortie."
       )
     end
   end
