@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-02 (atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer — events `*.failed` → registre, concern séparé)
+**Dernière révision** : 2026-07-02 (atomisation StepDispatcher : extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
 **Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -69,6 +69,20 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       hors-3-seams ne compile pas), jamais le `ctx` entier. La **DÉCISION** d'escalade (budget forge,
       IncidentRegistry, résolution-vs-escalade) reste le SINGLE-AUTHORITY du cœur (`dispatch_rework`/
       `dispatch_conflict_resolution`) — ArchEscalation ne fait QU'ÉCRIRE.
+    - `Fleet.Pilot.StepDispatcher.Spawn` — **feuille de spawn SINGLE-AUTHORITY** sur laquelle les DEUX
+      flux CONVERGENT (issue `dispatch_issue` + PR `do_dispatch_review`) : une seule copie de
+      `spawn_step/9` (ordre canonique **verrou → pod → enqueue → wake**, wake EN DERNIER ; compensation
+      = retrait du verrou + kill SEULEMENT si spawn frais ; retour `{:error, {:wake_unreached, …}}`
+      load-bearing = le poller PREND le bail, le pod est démarré, seul le wake tmux a raté), une seule
+      identité pod (`pod_id_for_scope/4`, project→`for_repo` | instance→`for_issue`) et une seule
+      sérialisation de scope (`serialize_project_scope/6` : gate `:role_busy` AVANT tout verrou +
+      reprovision cold in-place d'un pipe ready). Porte aussi les builders d'opts / naming
+      (`rc_name/2`, `feature_slug/1` purs, `maybe_put_project|route|repo_id`, `resolve_repo_id/3`).
+      Le cœur DÉCIDE (route/rôle/verdict), Spawn EXÉCUTE. **Frontière blindée** : `spawn_step/9` reçoit
+      un struct `%Spawn.Seams{}` (les 6 seams `forge`/`spawner`/`task_queue`/`repo`/`forge_opts`/
+      `wake_recovery`, `@enforce_keys` → un accès hors-6-seams ne compile pas), jamais le `ctx`/`opts`
+      entier ; chacun des 2 callers construit le struct à son site. `safe_kill/2` reste public (partagé
+      avec le cœur `promote_pr`, die-on-promote — une seule copie, pas de fork).
 - `Fleet.Pilot.BriefBuilder` — **autorité du FORMAT des briefs** : worker / judge / brief-review /
   rework / conflit + instructions de voix de l'eng. `StepDispatcher` CHOISIT quel brief selon l'état forge
   (`build_brief/9` dispatche sur `brief_kind`/`judge_target`), `BriefBuilder` le FORME. La **judge-ness**
