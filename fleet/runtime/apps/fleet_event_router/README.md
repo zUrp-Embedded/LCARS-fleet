@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-01 (registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-07-02 (registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -40,12 +40,14 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
 ## API principale
 
 ```elixir
-# Broadcast canon (struct %Fleet.Event{}) — fail-loud si type hors registry
-Fleet.EventRouter.Bus.broadcast("fleet.events", %Fleet.Event{
+# Broadcast canon (struct %Fleet.Event{}) sur le topic principal — fail-loud si type hors registry.
+# `broadcast_main/1` centralise le littéral du topic ; `main_topic/0` l'expose (autorité).
+Fleet.EventRouter.Bus.broadcast_main(%Fleet.Event{
   source: :spawner, type: :"pod.allocate",
   timestamp: DateTime.utc_now(), payload: %{"pod_id" => "p1"}})
+# Variante explicite (topic arbitraire) : Fleet.EventRouter.Bus.broadcast(Fleet.EventRouter.Bus.main_topic(), event)
 
-# Subscribe + receive (subscriber direct = canon, BL-027)
+# Subscribe + receive (subscriber direct = canon, BL-027) — défaut = main_topic/0
 Fleet.EventRouter.Bus.subscribe()
 receive do
   %Fleet.Event{type: :"pod.allocate"} = event -> ...

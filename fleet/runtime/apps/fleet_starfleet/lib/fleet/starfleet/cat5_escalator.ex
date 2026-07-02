@@ -91,7 +91,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
         payload: enriched
       )
 
-    Bus.broadcast("fleet.events", event)
+    Bus.broadcast_main(event)
   rescue
     # UnregisteredError = boot-order toléré : le registry n'est pas encore peuplé,
     # le broadcast est rejeté, on n'en fait pas une alarme — silencieux.

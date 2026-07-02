@@ -45,7 +45,7 @@ defmodule Fleet.Spawner.Pod.Events do
   # le Pod GenServer. RÉSERVÉ aux events NON-lifecycle (observabilité/escalade).
   # Enveloppe : schema canon strict %Fleet.Event{source: :spawner}.
   def best_effort_broadcast(event_type, payload) when is_binary(event_type) do
-    event_bus().broadcast("fleet.events", build_spawner_event(event_type, payload))
+    event_bus().broadcast(Bus.main_topic(), build_spawner_event(event_type, payload))
   rescue
     e ->
       Logger.warning(
@@ -59,7 +59,7 @@ defmodule Fleet.Spawner.Pod.Events do
   # `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé ERROR : un
   # `pod.completed` non diffusé = wedge potentiel (le step_run ne finit pas, verrou conservé).
   def required_broadcast(event_type, payload) when is_binary(event_type) do
-    case event_bus().broadcast("fleet.events", build_spawner_event(event_type, payload)) do
+    case event_bus().broadcast(Bus.main_topic(), build_spawner_event(event_type, payload)) do
       :ok ->
         :ok
 

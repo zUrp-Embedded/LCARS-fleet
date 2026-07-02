@@ -42,9 +42,9 @@ defmodule Fleet.TaskQueue.Server do
   use GenServer
   require Logger
 
+  alias Fleet.EventRouter.Bus
   alias Fleet.TaskQueue.WorkItem
 
-  @default_topic "fleet.events"
   @active_states [:pending, :assigned, :in_progress]
   # Borne de rétention des tâches terminales (:completed/:failed/:cleared). Sans elle,
   # `work_items` croît sans borne et `persist/1` réécrit un `state.json` toujours plus gros à CHAQUE
@@ -78,11 +78,11 @@ defmodule Fleet.TaskQueue.Server do
       polls: %{},
       state_path: state_path,
       persist: persist?,
-      topic: Keyword.get(opts, :topic, @default_topic),
+      topic: Keyword.get(opts, :topic, Bus.main_topic()),
       # Seam du bus (défaut = le vrai `Fleet.EventRouter.Bus`). Module avec `broadcast/2`. Permet
       # de tester le chemin lifecycle non-avalé (un bus stub qui rend `{:error,_}` / lève sur work_item.completed)
       # sans toucher le registry global `:persistent_term`.
-      bus: Keyword.get(opts, :bus, Fleet.EventRouter.Bus),
+      bus: Keyword.get(opts, :bus, Bus),
       retention_terminal_max:
         Keyword.get(opts, :retention_terminal_max) ||
           Application.get_env(

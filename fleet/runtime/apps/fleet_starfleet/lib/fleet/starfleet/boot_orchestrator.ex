@@ -147,7 +147,7 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   defp emit_canon(type, payload) do
     event = Fleet.Event.new(:starfleet, type, payload: payload)
 
-    Bus.broadcast("fleet.events", event)
+    Bus.broadcast_main(event)
   rescue
     # UnregisteredError = boot-order toléré : registry pas encore peuplé, broadcast
     # rejeté, pas une alarme — silencieux.

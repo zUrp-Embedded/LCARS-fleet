@@ -11,7 +11,10 @@ defmodule Fleet.EventRouter.Bus do
   ## Communs
 
     * `child_spec/1` — pour Application supervisor (instancie `Phoenix.PubSub`)
-    * `subscribe/1` / `unsubscribe/1` — gestion abonnements topic
+    * `main_topic/0` — le topic principal (`"fleet.events"`), autorité centrale du
+      littéral. Producteurs/consommateurs passent par ici plutôt que de retaper la string.
+    * `broadcast_main/1` — `broadcast(main_topic(), event)`, raccourci canon.
+    * `subscribe/1` / `unsubscribe/1` — gestion abonnements topic (défaut `main_topic/0`)
     * `authorized_event_types/0` — MapSet atoms chargé au boot par `Catalog.load!/0`
     * `set_authorized_event_types/1` — appelé par `Catalog.load!/0` au boot
 
@@ -46,6 +49,16 @@ defmodule Fleet.EventRouter.Bus do
   def child_spec(_opts), do: Phoenix.PubSub.child_spec(name: @pubsub_name)
 
   @doc """
+  Topic principal du bus (`"fleet.events"`) — l'unique substrat broadcast/subscribe.
+
+  Autorité centrale du littéral : tout producteur (`broadcast_main/1`) et
+  consommateur (`subscribe/0`) résout le topic ici plutôt que de retaper la string,
+  ce qui garantit qu'un producteur et un consommateur matchent toujours le même topic.
+  """
+  @spec main_topic() :: String.t()
+  def main_topic, do: @main_topic
+
+  @doc """
   Diffuse un event au schema canon strict `%Fleet.Event{}` sur le topic
   donné (typiquement `"fleet.events"`).
 
@@ -62,6 +75,17 @@ defmodule Fleet.EventRouter.Bus do
     assert_authorized!(event)
     Phoenix.PubSub.broadcast(@pubsub_name, topic, event)
   end
+
+  @doc """
+  Diffuse un event sur le topic principal (`main_topic/0`) — raccourci
+  `broadcast(main_topic(), event)`, même sémantique fail-loud registry que
+  `broadcast/2`.
+
+  À préférer partout où le topic est le topic principal (cas quasi-universel) :
+  centralise le littéral `"fleet.events"` derrière l'autorité.
+  """
+  @spec broadcast_main(Fleet.Event.t()) :: :ok | {:error, term()}
+  def broadcast_main(%Fleet.Event{} = event), do: broadcast(@main_topic, event)
 
   @doc """
   Set de types d'events autorisés (MapSet d'atomes), chargé depuis

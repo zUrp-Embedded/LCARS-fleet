@@ -51,7 +51,6 @@ defmodule Fleet.Observation.ReadModel do
   @table :fleet_observation_projection
   @stream_max 100
   @deck_max 20
-  @topic "fleet.events"
 
   # Catalogue de routage deck (DATA, pas mécanique) : préfixe de type → deck.
   # L'ordre compte (premier préfixe matché gagne). Une mécanique unique
@@ -104,12 +103,14 @@ defmodule Fleet.Observation.ReadModel do
 
   @impl GenServer
   def handle_continue(:subscribe, %{subscribe?: true} = state) do
-    case Bus.subscribe(@topic) do
+    topic = Bus.main_topic()
+
+    case Bus.subscribe(topic) do
       :ok ->
         :ok
 
       other ->
-        Logger.warning("Observation.ReadModel: subscribe #{@topic} → #{inspect(other)}")
+        Logger.warning("Observation.ReadModel: subscribe #{topic} → #{inspect(other)}")
     end
 
     {:noreply, state}

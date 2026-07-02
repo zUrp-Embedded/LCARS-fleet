@@ -53,7 +53,7 @@ defmodule Fleet.EventRouter.SignalsOS do
       event =
         Fleet.Event.new(:event_router, type_atom, payload: %{"signal" => Atom.to_string(sig)})
 
-      _ = Fleet.EventRouter.Bus.broadcast("fleet.events", event)
+      _ = Fleet.EventRouter.Bus.broadcast_main(event)
     rescue
       ArgumentError ->
         require Logger

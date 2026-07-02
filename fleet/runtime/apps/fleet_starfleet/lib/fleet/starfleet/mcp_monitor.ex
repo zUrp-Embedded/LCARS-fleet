@@ -146,7 +146,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
         }
       )
 
-    Bus.broadcast("fleet.events", event)
+    Bus.broadcast_main(event)
   rescue
     # UnregisteredError = boot-order toléré : registry pas encore peuplé, broadcast
     # rejeté, pas une alarme — silencieux.

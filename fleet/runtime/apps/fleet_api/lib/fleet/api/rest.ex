@@ -287,7 +287,7 @@ defmodule Fleet.API.Rest do
   end
 
   defp safe_broadcast(%Fleet.Event{} = event) do
-    Bus.broadcast("fleet.events", event)
+    Bus.broadcast_main(event)
   rescue
     e in Fleet.Event.UnregisteredError -> {:error, e.message}
     e in [ArgumentError, FunctionClauseError] -> {:error, inspect(e)}

@@ -236,7 +236,7 @@ defmodule Fleet.Coord.Policies do
   # Broadcast canon strict — toléré silencieusement si UnregisteredError (registry pas
   # encore peuplé au boot order) pour ne pas casser le boot ; toute autre erreur remonte.
   defp safe_canon_broadcast(%Fleet.Event{} = event) do
-    Bus.broadcast("fleet.events", event)
+    Bus.broadcast_main(event)
   rescue
     _e in Fleet.Event.UnregisteredError -> :ok
   end

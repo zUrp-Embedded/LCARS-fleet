@@ -155,7 +155,7 @@ defmodule Fleet.Starfleet.MCPWatcher do
         }
       )
 
-    Bus.broadcast("fleet.events", event)
+    Bus.broadcast_main(event)
   rescue
     _e in Fleet.Event.UnregisteredError -> :ok
     _e in [ArgumentError, FunctionClauseError] -> :ok

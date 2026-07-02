@@ -403,7 +403,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
             }
           )
 
-        case Fleet.EventRouter.Bus.broadcast("fleet.events", event) do
+        case Fleet.EventRouter.Bus.broadcast_main(event) do
           :ok ->
             :ok
 

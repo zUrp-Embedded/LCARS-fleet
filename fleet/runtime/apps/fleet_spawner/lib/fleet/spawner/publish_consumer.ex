@@ -132,7 +132,7 @@ defmodule Fleet.Spawner.PublishConsumer do
         }
       )
 
-    case Bus.broadcast("fleet.events", event) do
+    case Bus.broadcast_main(event) do
       :ok ->
         :ok
 
