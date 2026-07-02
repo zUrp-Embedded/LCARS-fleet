@@ -110,7 +110,14 @@ defmodule Fleet.Pilot.StepDispatcher do
              {:ok, route} <-
                tag_err(resolve_route(opts, forge, repo, number, forge_opts), :route_resolution),
              {:ok, route} <-
-               ensure_workflow_map_or_onboard(forge, repo, number, route, workflow_map_loader, forge_opts),
+               ensure_workflow_map_or_onboard(
+                 forge,
+                 repo,
+                 number,
+                 route,
+                 workflow_map_loader,
+                 forge_opts
+               ),
              {:ok, {role, profile, step_spec}} <-
                tag_err(
                  workflow_map_role(
@@ -817,10 +824,17 @@ defmodule Fleet.Pilot.StepDispatcher do
   # Route nil = ANOMALIE : le poller onboarde tout routeless AVANT dispatch (ensure_workflow_map_or_onboard)
   # → si on arrive ici sans route, fail-loud, JAMAIS un fallback eng silencieux. Le rôle vient TOUJOURS de la
   # position workflow_map (route gravée).
-  defp workflow_map_role(nil, _load_role, _workflow_map_loader, _prefetched_workflow_map), do: {:error, :unrouted}
+  defp workflow_map_role(nil, _load_role, _workflow_map_loader, _prefetched_workflow_map),
+    do: {:error, :unrouted}
 
-  defp workflow_map_role({workflow_map_name, step}, load_role, workflow_map_loader, prefetched_workflow_map) do
-    with {:ok, workflow_map} <- workflow_map_or_load(prefetched_workflow_map, workflow_map_name, workflow_map_loader),
+  defp workflow_map_role(
+         {workflow_map_name, step},
+         load_role,
+         workflow_map_loader,
+         prefetched_workflow_map
+       ) do
+    with {:ok, workflow_map} <-
+           workflow_map_or_load(prefetched_workflow_map, workflow_map_name, workflow_map_loader),
          {:ok, role} <- workflow_map_step_role(workflow_map, workflow_map_name, step),
          {:ok, profile} <- load_role.(role) do
       # On remonte le STEP_SPEC entier (extensible) plutôt qu'un champ isolé. build_brief y
@@ -832,8 +846,11 @@ defmodule Fleet.Pilot.StepDispatcher do
   end
 
   # WorkflowMap pré-chargée (poller) → réutilisée ; sinon chargée via le seam.
-  defp workflow_map_or_load(nil, workflow_map_name, workflow_map_loader), do: load_workflow_map(workflow_map_name, workflow_map_loader)
-  defp workflow_map_or_load(workflow_map, _pipeline, _workflow_map_loader), do: {:ok, workflow_map}
+  defp workflow_map_or_load(nil, workflow_map_name, workflow_map_loader),
+    do: load_workflow_map(workflow_map_name, workflow_map_loader)
+
+  defp workflow_map_or_load(workflow_map, _pipeline, _workflow_map_loader),
+    do: {:ok, workflow_map}
 
   # Route pré-lue par le poller (classification) → réutilisée ici ; absente → lecture forge.
   defp resolve_route(opts, forge, repo, number, forge_opts) do
@@ -847,7 +864,14 @@ defmodule Fleet.Pilot.StepDispatcher do
   # create_issue ne grave plus la workflow_map ; ou issue humain brut) → grave la workflow_map par défaut (brief-gate)
   # = elle ENTRE dans le gate → `{:onboarded, step}` (dispatch_issue défère : skip ce tick, le suivant la
   # voit routée). Route postée par le SYSTÈME (forge token système). Échec → `{:error, {:onboard, _}}`.
-  defp ensure_workflow_map_or_onboard(_forge, _repo, _number, route, _workflow_map_loader, _forge_opts)
+  defp ensure_workflow_map_or_onboard(
+         _forge,
+         _repo,
+         _number,
+         route,
+         _workflow_map_loader,
+         _forge_opts
+       )
        when not is_nil(route),
        do: {:ok, route}
 
@@ -865,7 +889,8 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   # WorkflowMap par défaut de l'onboarding (toute issue assignée routeless y entre ; défaut brief-gate : le
   # consultant review le brief AVANT l'eng). Data-catalogue, pas un nom magique en dur.
-  defp default_workflow_map, do: Application.get_env(:fleet_pilot, :delegation_workflow_map, "brief-gate")
+  defp default_workflow_map,
+    do: Application.get_env(:fleet_pilot, :delegation_workflow_map, "brief-gate")
 
   defp load_workflow_map(workflow_map_name, workflow_map_loader) do
     {:ok, workflow_map_loader.(workflow_map_name)}
@@ -1117,94 +1142,9 @@ defmodule Fleet.Pilot.StepDispatcher do
   # Internals
   # ============================================================
 
-  # ============================================================
-  # Résolution projet (base_sha pinné hors-pod)
-  # ============================================================
-
-  # Construit `%{repo_path, base_branch, base_sha}` pour le repo du issue.
-  # `base_url` ← `:forge_opts[:base_url]` ou config app ; `base_branch` ← `:base_branch`
-  # (défaut "main"). Pas de forge configurée → `{:ok, nil}` (pod sans repo, ex. tests
-  # locaux). L'auth de clone/ls-remote est portée par le runtime (`Fleet.Credentials.ForgeAuth.
-  # git_env`, token via env), jamais par le pod (forge-aveugle).
-  @spec default_project_resolver(String.t(), keyword()) ::
-          {:ok, map() | nil} | {:error, term()}
-  def default_project_resolver(repo, opts) do
-    forge_opts = Keyword.get(opts, :forge_opts, [])
-    base_branch = Keyword.get(opts, :base_branch, "main")
-
-    # DÉCONFLATION clone-base / gate-base. `base_sha` confondrait sinon deux
-    # concerns : (1) le POINT DE DÉPART du clone (`pin_base_sha` reset HEAD dessus) et (2) la
-    # base de la GATE (HEAD doit en DESCENDRE). Forward (build/rework) : ils coïncident. RÉSOLUTION
-    # par rebase : ils DIVERGENT — le pod part de la feature (son travail) mais doit descendre de `main`.
-    # `:gate_base_branch` (posé par le dispatch resolve) pinne la base de gate séparément ; absent → la
-    # gate retombe sur la clone-base (`base_sha`), comportement forward INCHANGÉ.
-    gate_base_branch = Keyword.get(opts, :gate_base_branch)
-
-    case forge_base_url(forge_opts) do
-      nil ->
-        {:ok, nil}
-
-      base_url ->
-        repo_url = "#{String.trim_trailing(base_url, "/")}/#{repo}.git"
-
-        with {:ok, sha} <- ls_remote_sha(repo_url, base_branch),
-             {:ok, gate_sha} <- resolve_gate_base_sha(repo_url, gate_base_branch, sha) do
-          # `"repo"` (full_name "owner/name") embarqué dans le projet → il voyage jusqu'au pod
-          # puis ressort dans `pod.completed` (`pod_completed_payload`) → le StepRunConsumer sait sur QUEL
-          # repo agir (multi-projet), sans le re-dériver. `repo_path` = l'URL de push (remote per-step-run).
-          {:ok,
-           %{
-             "repo" => repo,
-             "repo_path" => repo_url,
-             "base_branch" => base_branch,
-             "base_sha" => sha,
-             # gate_base_sha = base de la GATE (≠ clone-base pour une résolution rebase, cf. supra).
-             "gate_base_sha" => gate_sha
-           }}
-        end
-    end
-  end
-
-  # Base de la GATE. Défaut (forward) : = clone-base (`base_sha`) → la garde exige que HEAD descende
-  # de là où le pod a cloné. Un dispatch resolve passe `:gate_base_branch` ("main") → on pinne le tip de
-  # CETTE branche (la cible du rebase) : la garde exige alors que HEAD descende de `main`, pas de l'ancien
-  # tip de feature (réécrit par le rebase → il ne serait plus ancêtre, d'où un `base_not_ancestor`).
-  defp resolve_gate_base_sha(_repo_url, nil, clone_base_sha), do: {:ok, clone_base_sha}
-
-  defp resolve_gate_base_sha(repo_url, branch, _clone_base_sha) when is_binary(branch),
-    do: ls_remote_sha(repo_url, branch)
-
-  defp forge_base_url(forge_opts) do
-    Keyword.get(forge_opts, :base_url) ||
-      get_in(Application.get_env(:fleet_pilot, :forge, []), [:base_url])
-  end
-
-  # `git ls-remote <repo_url> <branch>` borné via `Fleet.Credentials.Shell` (source unique de la borne)
-  # + auth runtime → SHA du tip (hors-pod). Symétrique du pin de base côté pipeline. Le wrapper lance le
-  # ls-remote (RÉSEAU : peut hung/prompter) dans son propre process-group et, à la deadline MUR, tue le
-  # GROUPE entier (le ls-remote ET ses helpers de transport, porteurs du token forge) + ferme le port —
-  # là où le patron `Task.async` + `shutdown(:brutal_kill)` ne tuait que le Task BEAM en laissant fuir le
-  # process git.
-  defp ls_remote_sha(repo_url, branch) do
-    # Token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth.
-    case Fleet.Credentials.Shell.git(["ls-remote", repo_url, branch],
-           timeout_ms: 15_000,
-           env: Fleet.Credentials.ForgeAuth.git_env()
-         ) do
-      {:ok, {out, 0}} ->
-        case out |> String.split("\n", trim: true) |> List.first() do
-          nil -> {:error, :no_ref}
-          line -> {:ok, line |> String.split() |> List.first()}
-        end
-
-      {:ok, {out, rc}} ->
-        {:error, {rc, String.trim(out)}}
-
-      {:error, {:timeout, _ms}} ->
-        {:error, :timeout}
-
-      {:error, {:exit, reason}} ->
-        {:error, {:exit, reason}}
-    end
-  end
+  # Résolution projet (base_sha / gate_base_sha pinnés hors-pod via `git ls-remote`) extraite dans
+  # `Fleet.Pilot.StepDispatcher.ProjectResolver` (cluster I/O isolé, quasi-pur). `default_project_resolver/2`
+  # reste l'API PUBLIQUE de CE module (défaut du seam `:project_resolver` + appelée par les tests) →
+  # `defdelegate` garde le contrat exact.
+  defdelegate default_project_resolver(repo, opts), to: Fleet.Pilot.StepDispatcher.ProjectResolver
 end
