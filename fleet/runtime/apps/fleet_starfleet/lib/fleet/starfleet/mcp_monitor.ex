@@ -137,16 +137,13 @@ defmodule Fleet.Starfleet.MCPMonitor do
   end
 
   defp broadcast_crashed(target, previous, new) do
-    event =
-      Fleet.Event.new(:starfleet, :"mcp.server_crashed",
-        payload: %{
-          "target" => inspect(target),
-          "previous_status" => Atom.to_string(previous),
-          "new_status" => Atom.to_string(new)
-        }
-      )
-
-    Bus.broadcast_main(event)
+    Bus.emit(:starfleet, :"mcp.server_crashed",
+      payload: %{
+        "target" => inspect(target),
+        "previous_status" => Atom.to_string(previous),
+        "new_status" => Atom.to_string(new)
+      }
+    )
   rescue
     # UnregisteredError = boot-order toléré : registry pas encore peuplé, broadcast
     # rejeté, pas une alarme — silencieux.

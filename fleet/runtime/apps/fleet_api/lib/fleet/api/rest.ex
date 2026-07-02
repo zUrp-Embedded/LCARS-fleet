@@ -276,18 +276,19 @@ defmodule Fleet.API.Rest do
   end
 
   defp do_broadcast_spawn(conn, payload) do
-    # Schéma canon %Fleet.Event{source: :api} construit via le constructeur canonique
-    # (source validée contre l'enum, timestamp DateTime garanti), pas un struct littéral.
-    event = Fleet.Event.new(:api, :"admin.spawn.request", payload: payload)
-
-    case safe_broadcast(event) do
+    case safe_broadcast(payload) do
       :ok -> send_resp(conn, 202, ~s|{"status":"queued"}|)
       {:error, reason} -> send_resp(conn, 400, Jason.encode!(%{error: inspect(reason)}))
     end
   end
 
-  defp safe_broadcast(%Fleet.Event{} = event) do
-    Bus.broadcast_main(event)
+  # Schéma canon %Fleet.Event{source: :api} construit + broadcasté via `Bus.emit` (source
+  # validée contre l'enum, timestamp DateTime garanti). La construction ET le broadcast sont
+  # DANS le rescue : la POLITIQUE de l'API est de faire surface HTTP — un event hors registry
+  # (UnregisteredError) ou malformé (ArgumentError/FunctionClauseError du constructeur) devient
+  # `{:error, _}` → 400 côté do_broadcast_spawn, jamais un crash du handler. Politique inchangée.
+  defp safe_broadcast(payload) do
+    Bus.emit(:api, :"admin.spawn.request", payload: payload)
   rescue
     e in Fleet.Event.UnregisteredError -> {:error, e.message}
     e in [ArgumentError, FunctionClauseError] -> {:error, inspect(e)}

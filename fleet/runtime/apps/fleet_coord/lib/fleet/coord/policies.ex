@@ -193,38 +193,32 @@ defmodule Fleet.Coord.Policies do
   end
 
   defp canon_event(type, target, path, payload, correlation_id) do
-    event =
-      Fleet.Event.new(:coord, canon_type(type),
-        pod_id: extract_pod_id(payload),
-        correlation_id: correlation_id,
-        payload: %{
-          "target" => target,
-          "path" => path,
-          "message" => normalize_payload(payload)
-        }
-      )
-
-    safe_canon_broadcast(event)
+    safe_canon_broadcast(canon_type(type),
+      pod_id: extract_pod_id(payload),
+      correlation_id: correlation_id,
+      payload: %{
+        "target" => target,
+        "path" => path,
+        "message" => normalize_payload(payload)
+      }
+    )
   end
 
   defp canon_action(action, path, payload, correlation_id) do
     # Clé registry = `coord.action_dispatched` (préfixe coord, cohérent avec
     # coord.notification_routed/escalation_triggered). Un `:action_dispatched` nu
     # serait hors registry → broadcast rejeté (UnregisteredError) → drop silencieux.
-    event =
-      Fleet.Event.new(:coord, :"coord.action_dispatched",
-        pod_id: extract_pod_id(payload),
-        correlation_id: correlation_id,
-        payload: %{
-          "action" => action,
-          "path" => path,
-          "verdict" => extract_verdict(payload),
-          "reason" => extract_reason(payload),
-          "message" => normalize_payload(payload)
-        }
-      )
-
-    safe_canon_broadcast(event)
+    safe_canon_broadcast(:"coord.action_dispatched",
+      pod_id: extract_pod_id(payload),
+      correlation_id: correlation_id,
+      payload: %{
+        "action" => action,
+        "path" => path,
+        "verdict" => extract_verdict(payload),
+        "reason" => extract_reason(payload),
+        "message" => normalize_payload(payload)
+      }
+    )
   end
 
   defp canon_type(:notification_routed),
@@ -233,10 +227,11 @@ defmodule Fleet.Coord.Policies do
   defp canon_type(:escalation_triggered),
     do: :"coord.escalation_triggered"
 
-  # Broadcast canon strict — toléré silencieusement si UnregisteredError (registry pas
-  # encore peuplé au boot order) pour ne pas casser le boot ; toute autre erreur remonte.
-  defp safe_canon_broadcast(%Fleet.Event{} = event) do
-    Bus.broadcast_main(event)
+  # Broadcast canon strict (source :coord, construction + broadcast via Bus.emit) — toléré
+  # silencieusement si UnregisteredError (registry pas encore peuplé au boot order) pour ne pas
+  # casser le boot ; toute autre erreur remonte. Politique fire-and-forget inchangée.
+  defp safe_canon_broadcast(type, opts) do
+    Bus.emit(:coord, type, opts)
   rescue
     _e in Fleet.Event.UnregisteredError -> :ok
   end

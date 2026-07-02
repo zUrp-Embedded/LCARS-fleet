@@ -50,10 +50,10 @@ defmodule Fleet.EventRouter.SignalsOS do
     try do
       type_atom = String.to_existing_atom(type_str)
 
-      event =
-        Fleet.Event.new(:event_router, type_atom, payload: %{"signal" => Atom.to_string(sig)})
-
-      _ = Fleet.EventRouter.Bus.broadcast_main(event)
+      _ =
+        Fleet.EventRouter.Bus.emit(:event_router, type_atom,
+          payload: %{"signal" => Atom.to_string(sig)}
+        )
     rescue
       ArgumentError ->
         require Logger

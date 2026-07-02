@@ -393,8 +393,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp emit_deliverable_published(step_run, pr) do
     case Map.get(step_run, :pod_id) do
       pod_id when is_binary(pod_id) ->
-        event =
-          Fleet.Event.new(:pipeline, :"deliverable.published",
+        result =
+          Fleet.EventRouter.Bus.emit(:pipeline, :"deliverable.published",
             pod_id: pod_id,
             payload: %{
               "repo" => Map.fetch!(step_run, :repo),
@@ -403,7 +403,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
             }
           )
 
-        case Fleet.EventRouter.Bus.broadcast_main(event) do
+        case result do
           :ok ->
             :ok
 

@@ -146,16 +146,13 @@ defmodule Fleet.Starfleet.MCPWatcher do
   end
 
   defp broadcast_alert(package, current, upstream) do
-    event =
-      Fleet.Event.new(:starfleet, :"sdk.upstream_alert",
-        payload: %{
-          "package" => package,
-          "current" => current,
-          "upstream" => upstream
-        }
-      )
-
-    Bus.broadcast_main(event)
+    Bus.emit(:starfleet, :"sdk.upstream_alert",
+      payload: %{
+        "package" => package,
+        "current" => current,
+        "upstream" => upstream
+      }
+    )
   rescue
     _e in Fleet.Event.UnregisteredError -> :ok
     _e in [ArgumentError, FunctionClauseError] -> :ok

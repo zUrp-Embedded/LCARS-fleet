@@ -84,14 +84,11 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     # to_existing_atom (pas to_atom) — anti atom-leak ; les 3 atomes
     # `starfleet.audit_cat5_<src>` sont registrés (events.yaml + préregistre
     # Starfleet.Application). Une source de type inattendue → ArgumentError → rescue.
-    event =
-      Fleet.Event.new(:starfleet, String.to_existing_atom("starfleet.audit_cat5_#{source}"),
-        pod_id: extract_pod_id(enriched),
-        correlation_id: correlation_id,
-        payload: enriched
-      )
-
-    Bus.broadcast_main(event)
+    Bus.emit(:starfleet, String.to_existing_atom("starfleet.audit_cat5_#{source}"),
+      pod_id: extract_pod_id(enriched),
+      correlation_id: correlation_id,
+      payload: enriched
+    )
   rescue
     # UnregisteredError = boot-order toléré : le registry n'est pas encore peuplé,
     # le broadcast est rejeté, on n'en fait pas une alarme — silencieux.

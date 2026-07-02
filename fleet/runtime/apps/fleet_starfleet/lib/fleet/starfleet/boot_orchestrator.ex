@@ -145,9 +145,7 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
   # BL-021 chantier 9 (B) — broadcast schema canon %Fleet.Event{source: :starfleet}.
   defp emit_canon(type, payload) do
-    event = Fleet.Event.new(:starfleet, type, payload: payload)
-
-    Bus.broadcast_main(event)
+    Bus.emit(:starfleet, type, payload: payload)
   rescue
     # UnregisteredError = boot-order toléré : registry pas encore peuplé, broadcast
     # rejeté, pas une alarme — silencieux.

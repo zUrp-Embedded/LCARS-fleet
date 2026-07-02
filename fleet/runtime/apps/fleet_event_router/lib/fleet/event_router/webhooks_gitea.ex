@@ -60,9 +60,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
           payload = Map.put(body, "issue_id", issue_id)
 
-          event = Fleet.Event.new(:event_router, type_atom, payload: payload)
-
-          _ = Fleet.EventRouter.Bus.broadcast_main(event)
+          _ = Fleet.EventRouter.Bus.emit(:event_router, type_atom, payload: payload)
           send_resp(conn, 200, "ok")
         rescue
           # Un event droppé ne doit JAMAIS être ACK 200. Les deux cas ci-dessous sont

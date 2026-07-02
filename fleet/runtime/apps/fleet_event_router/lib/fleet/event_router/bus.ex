@@ -14,6 +14,8 @@ defmodule Fleet.EventRouter.Bus do
     * `main_topic/0` — le topic principal (`"fleet.events"`), autorité centrale du
       littéral. Producteurs/consommateurs passent par ici plutôt que de retaper la string.
     * `broadcast_main/1` — `broadcast(main_topic(), event)`, raccourci canon.
+    * `emit/3` — `Fleet.Event.new(source, type, opts) |> broadcast_main()`, l'idiome
+      producteur « construire un event canon + broadcaster main » en un appel.
     * `subscribe/1` / `unsubscribe/1` — gestion abonnements topic (défaut `main_topic/0`)
     * `authorized_event_types/0` — MapSet atoms chargé au boot par `Catalog.load!/0`
     * `set_authorized_event_types/1` — appelé par `Catalog.load!/0` au boot
@@ -86,6 +88,29 @@ defmodule Fleet.EventRouter.Bus do
   """
   @spec broadcast_main(Fleet.Event.t()) :: :ok | {:error, term()}
   def broadcast_main(%Fleet.Event{} = event), do: broadcast(@main_topic, event)
+
+  @doc """
+  Construit un `%Fleet.Event{}` via `Fleet.Event.new/3` et le diffuse sur le topic
+  principal via `broadcast_main/1` — un seul appel pour l'idiome producteur
+  « construire l'enveloppe canon + broadcaster main », répété sur ~10 sites.
+
+  Factorise UNIQUEMENT la construction + le broadcast. La POLITIQUE d'erreur reste
+  chez le producteur et diverge volontairement (elle n'est PAS unifiée ici) : `emit/3`
+  ne rescue rien, ne classe rien. Le `rescue Fleet.Event.UnregisteredError` / le `case`
+  sur le retour / le retour spécifique restent AUTOUR de l'appel `emit/3`, chez chaque
+  caller — surface HTTP `{:error, msg}` côté API, fire-and-forget `:ok` au boot,
+  log-and-continue côté consumer. Ne PAS y déplacer de rescue.
+
+  Retour : celui de `broadcast_main/1` (`:ok | {:error, term()}`). Peut LEVER
+  `Fleet.Event.UnregisteredError` (type hors registry) ou `ArgumentError`/`FunctionClauseError`
+  (source hors enum, timestamp non-`%DateTime{}`) — délibérément non attrapées ici, à charge
+  du caller qui décide de sa politique.
+  """
+  @spec emit(Fleet.Event.source(), atom(), keyword()) :: :ok | {:error, term()}
+  def emit(source, type, opts \\ []) do
+    event = Fleet.Event.new(source, type, opts)
+    broadcast_main(event)
+  end
 
   @doc """
   Set de types d'events autorisés (MapSet d'atomes), chargé depuis

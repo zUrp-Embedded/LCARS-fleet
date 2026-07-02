@@ -121,10 +121,10 @@ defmodule Fleet.Spawner.PublishConsumer do
   # consumer → rescue), MAIS l'échec du broadcast n'est PAS avalé en silence : Logger.error, car perdre
   # l'alarme re-silencerait le drop qu'on vient de rendre visible (cohérent avec `pod.failed` côté Pod,
   # best-effort observabilité aussi mais loggué fort si la diffusion casse). Enveloppe canon stricte
-  # via `Fleet.Event.new/3` (`source: :spawner`, type `:"spawn.failed"`, présent au registry events.yaml).
+  # construite + diffusée via `Bus.emit` (`source: :spawner`, type `:"spawn.failed"`, présent au registry events.yaml).
   defp emit_spawn_failed(payload, reason) when is_map(payload) do
-    event =
-      Fleet.Event.new(:spawner, :"spawn.failed",
+    result =
+      Bus.emit(:spawner, :"spawn.failed",
         payload: %{
           "cap_profile_name" => Map.get(payload, "cap_profile_name") || Map.get(payload, "role"),
           "issue_id" => Map.get(payload, "issue_id"),
@@ -132,7 +132,7 @@ defmodule Fleet.Spawner.PublishConsumer do
         }
       )
 
-    case Bus.broadcast_main(event) do
+    case result do
       :ok ->
         :ok
 
