@@ -85,6 +85,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Pilot.Opts
 
   # Cluster PUR du verdict (décodage gate-decision + rendu trace/review/voix-eng), extrait ici : aucun
   # champ `state`, opère sur le payload/result brut. Le cœur décisionnel stateful (apply_verdict,
@@ -460,7 +461,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       comment_body: lead
     }
 
-    hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
+    hc_opts = [forge_opts: state.forge_opts] |> Opts.maybe_put(:forge_client, state.forge_client)
 
     result =
       run_completion(state, "##{n} (blocked)", fn ->
@@ -545,8 +546,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
     hc_opts =
       [forge_opts: state.forge_opts]
-      |> maybe_put(:forge_client, state.forge_client)
-      |> maybe_put(:deliverable, state.deliverable)
+      |> Opts.maybe_put(:forge_client, state.forge_client)
+      |> Opts.maybe_put(:deliverable, state.deliverable)
 
     run_completion(state, "##{n}", fn ->
       state.step_run_completer.complete_pr(step_run, hc_opts)
@@ -973,7 +974,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
           comment_body: trace
         }
 
-        hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
+        hc_opts =
+          [forge_opts: state.forge_opts] |> Opts.maybe_put(:forge_client, state.forge_client)
 
         result =
           run_completion(state, "##{n}", fn ->
@@ -1002,7 +1004,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       comment_body: trace
     }
 
-    hc_opts = [forge_opts: state.forge_opts] |> maybe_put(:forge_client, state.forge_client)
+    hc_opts = [forge_opts: state.forge_opts] |> Opts.maybe_put(:forge_client, state.forge_client)
 
     run_completion(state, "##{n}", fn ->
       state.step_run_completer.complete(step_run, hc_opts)
@@ -1059,9 +1061,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
   rescue
     e -> {:error, {:workflow_map_load, Exception.message(e)}}
   end
-
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp put_unless_nil(map, _key, nil), do: map
   defp put_unless_nil(map, key, value), do: Map.put(map, key, value)

@@ -262,7 +262,7 @@ defmodule Fleet.API.Rest do
       name when is_binary(name) and name != "" ->
         case Fleet.CapProfile.load(name) do
           {:ok, cap} ->
-            if Fleet.CapProfile.containment(cap) == "bwrap",
+            if Fleet.CapProfile.bwrap?(cap),
               do: {:ok, cap},
               else: {:error, {:host_native_forbidden, name}}
 

@@ -31,7 +31,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   require Logger
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Starfleet.{AuditLog, Cat5Escalator, Gatekeeper}
+  alias Fleet.Starfleet.{AuditLog, Cat5Escalator, CoordBackend, Gatekeeper}
 
   @drift_threshold 3
 
@@ -93,7 +93,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   defp dispatch_audit_verdict(payload, correlation_id) do
     case Gatekeeper.validate(payload["decision_json"] || "") do
       {:ok, decision} ->
-        _ = coord_backend().handle_decision(decision, correlation_id)
+        _ = CoordBackend.resolved().handle_decision(decision, correlation_id)
 
       {:error, reason} ->
         _ =
@@ -113,13 +113,5 @@ defmodule Fleet.Starfleet.DriftMonitor do
       n when is_integer(n) -> n
       _ -> 0
     end
-  end
-
-  defp coord_backend do
-    Application.get_env(
-      :fleet_starfleet,
-      :coord_backend,
-      Fleet.Starfleet.CoordBackend.NotWiredYet
-    )
   end
 end

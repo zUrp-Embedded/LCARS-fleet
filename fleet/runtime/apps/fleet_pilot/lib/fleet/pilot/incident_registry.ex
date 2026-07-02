@@ -310,7 +310,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   defp decode(content) do
-    case JSON.decode(content) do
+    case Jason.decode(content) do
       {:ok, reg} when is_map(reg) -> reg
       _ -> %{}
     end
@@ -326,7 +326,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
     body =
       registry
       |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.map_join(",\n", fn {k, v} -> "  #{JSON.encode!(k)}: #{JSON.encode!(v)}" end)
+      |> Enum.map_join(",\n", fn {k, v} -> "  #{Jason.encode!(k)}: #{Jason.encode!(v)}" end)
 
     "{\n" <> body <> "\n}\n"
   end

@@ -175,7 +175,11 @@ defmodule Fleet.Spawner.Pod do
     # (forme identique à l'ancien GenServer dont l'init_it formatait la même paire — fail-loud, aucun launch).
     try do
       recovered = recover_or_init(args)
-      start_state = continue_to_state(Recovery.first_continue_for(recovered))
+
+      # `continue_to_phase` = l'INVERSE de `Recovery.first_continue_for` : le `:continue` de reprise
+      # → le NOM d'état gen_statem de départ. La bijection phase↔continue a sa source unique dans
+      # `Pod.Recovery` (les deux sens y sont dérivés d'une seule table).
+      start_state = Recovery.continue_to_phase(Recovery.first_continue_for(recovered))
       # `data` = le state map MOINS `phase` (= l'état gen_statem) et `recovery` (consommé ici).
       data = Map.drop(recovered, [:phase, :recovery])
       {:ok, start_state, data, [{:next_event, :internal, :proceed}]}
@@ -183,19 +187,6 @@ defmodule Fleet.Spawner.Pod do
       e -> {:stop, {e, __STACKTRACE__}}
     end
   end
-
-  # Mappe le `{:continue, X}` historique de `Pod.Recovery.first_continue_for/1` (qu'on NE modifie
-  # PAS — module Pod.*) vers le NOM d'état gen_statem. En pratique recover_or_init pose toujours
-  # `recovery: :recreate`/`:release` → l'état de départ est :allocating ou :releasing ; les autres
-  # mappings couvrent les clauses phase-based (défensif).
-  defp continue_to_state(:allocate), do: :allocating
-  defp continue_to_state(:clean), do: :cleaning
-  defp continue_to_state(:project), do: :projecting
-  defp continue_to_state(:inject), do: :injecting
-  defp continue_to_state(:launch), do: :launching
-  defp continue_to_state(:monitor), do: :monitoring
-  defp continue_to_state(:extract), do: :extracting
-  defp continue_to_state(:release), do: :releasing
 
   # ============================================================
   # state_enter — armement de :monitoring (le seul état qui en a besoin)

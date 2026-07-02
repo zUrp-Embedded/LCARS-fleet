@@ -42,6 +42,7 @@ defmodule Fleet.Pilot.Poller do
   use GenServer
   require Logger
 
+  alias Fleet.Pilot.Opts
   alias Fleet.Pilot.Poller.Reconciliation
   alias Fleet.Pilot.StepDispatcher
 
@@ -679,25 +680,22 @@ defmodule Fleet.Pilot.Poller do
       forge_client: step_forge_client(state),
       forge_opts: state.forge_opts
     ]
-    |> maybe_put_seam(:loader, state.loader)
+    |> Opts.maybe_put(:loader, state.loader)
     # `workflow_map_role` (dispatch) charge la workflow_map de la route → il lui faut le loader de WORKFLOW_MAP (comme
     # fonction load!/1). Live : nil → défaut `Fleet.Pipeline.Loader.load!` (priv). Test : dérivé du module
     # stub. (Distinct de `:loader` = cap-profiles.)
-    |> maybe_put_seam(:workflow_map_loader, workflow_map_loader_fun(state))
-    |> maybe_put_seam(:spawner, state.spawner)
-    |> maybe_put_seam(:task_queue, state.task_queue)
-    |> maybe_put_seam(:clock, state.clock)
+    |> Opts.maybe_put(:workflow_map_loader, workflow_map_loader_fun(state))
+    |> Opts.maybe_put(:spawner, state.spawner)
+    |> Opts.maybe_put(:task_queue, state.task_queue)
+    |> Opts.maybe_put(:clock, state.clock)
     # Threadé jusqu'à `dispatch_issue` : seul nil retombe sur le défaut réel (la vraie `WakeRecovery.wake/3`).
-    |> maybe_put_seam(:wake_recovery, state.wake_recovery)
+    |> Opts.maybe_put(:wake_recovery, state.wake_recovery)
   end
 
   defp workflow_map_loader_fun(%__MODULE__{workflow_map_loader: nil}), do: nil
 
   defp workflow_map_loader_fun(%__MODULE__{workflow_map_loader: cl}),
     do: fn name -> cl.load!(name) end
-
-  defp maybe_put_seam(opts, _key, nil), do: opts
-  defp maybe_put_seam(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp step_forge_client(%__MODULE__{forge_client_override: nil}), do: Fleet.Pilot.ForgeClient
   defp step_forge_client(%__MODULE__{forge_client_override: fc}), do: fc

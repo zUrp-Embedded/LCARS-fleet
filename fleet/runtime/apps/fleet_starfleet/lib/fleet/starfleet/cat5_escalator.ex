@@ -34,7 +34,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   require Logger
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Starfleet.AuditLog
+  alias Fleet.Starfleet.{AuditLog, CoordBackend}
 
   @doc """
   Déclenche l'escalade Cat 5 pour un `source` donné — DN 13 C2.3-starfleet
@@ -76,7 +76,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     # Broadcast schema canon strict %Fleet.Event{source: :starfleet, ...}
     _ = broadcast_canon(source, enriched, correlation_id)
 
-    _ = coord_backend().handle_escalation(source, enriched, correlation_id)
+    _ = CoordBackend.resolved().handle_escalation(source, enriched, correlation_id)
     :ok
   end
 
@@ -112,12 +112,4 @@ defmodule Fleet.Starfleet.Cat5Escalator do
 
   defp extract_pod_id(%{"pod_id" => pid}) when is_binary(pid), do: pid
   defp extract_pod_id(_), do: nil
-
-  defp coord_backend do
-    Application.get_env(
-      :fleet_starfleet,
-      :coord_backend,
-      Fleet.Starfleet.CoordBackend.NotWiredYet
-    )
-  end
 end

@@ -130,6 +130,8 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       les défauts prod (`spawner || Fleet.Spawner`) à SON site. La **grâce 2-tick** (`prior_suspects`) et
       l'**agrégation cross-repo** (`MapSet.union` des suspects de tous les repos du tick) = état CROSS-TICK →
       RESTENT au cœur (`do_poll`/`step_do_poll`). Ne nomme jamais `Poller` (pas de cycle).
+- `Fleet.Pilot.Opts` — util pur **source unique** de l'idiome `maybe_put/3` (pose une clé opts SI la valeur
+  n'est pas nil), partagé par `StepRunConsumer` / `ForgeClient.Transport` / `Poller` (builders d'opts+seams).
 - `Fleet.Pilot.Labels` / `Fleet.Pilot.ForgeProtocol` — **vocabulaire wire-protocol** (source unique, build+parse
   **co-localisés** : un seul point si un format change). `Labels` = les **labels-verrous** non dérivables de
   l'état forge (`lcars-in-flight`/`lcars-awaits-arch`). `ForgeProtocol` = les **formats purs** (aucun I/O) : la

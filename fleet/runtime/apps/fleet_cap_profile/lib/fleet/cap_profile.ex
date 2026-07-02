@@ -49,6 +49,11 @@ defmodule Fleet.CapProfile do
           spec: map()
         }
 
+  # Mode de containment par défaut = pod SANDBOXÉ. SOURCE UNIQUE du littéral : un trou de config
+  # (clé `metadata.containment` absente) présume TOUJOURS le mode confiné, jamais l'hôte. Lu par
+  # `containment/1` (défaut) et `bwrap?/1` (prédicat), et référencé cross-app par l'admission API.
+  @default_containment "bwrap"
+
   # ============================================================
   # Loader behaviour
   # ============================================================
@@ -192,9 +197,23 @@ defmodule Fleet.CapProfile do
   """
   @spec containment(t()) :: String.t()
   def containment(%__MODULE__{metadata: meta}) when is_map(meta),
-    do: Map.get(meta, "containment") || Map.get(meta, :containment) || "bwrap"
+    do: Map.get(meta, "containment") || Map.get(meta, :containment) || @default_containment
 
-  def containment(%__MODULE__{}), do: "bwrap"
+  def containment(%__MODULE__{}), do: @default_containment
+
+  @doc """
+  Le mode de containment par défaut (`"bwrap"`, pod sandboxé) — SOURCE UNIQUE du littéral, référencée
+  par les lecteurs cross-app plutôt que de le retaper.
+  """
+  @spec default_containment() :: String.t()
+  def default_containment, do: @default_containment
+
+  @doc """
+  Le profil est-il en containment sandboxé bwrap (le défaut) ? `false` = host-native (`"none"`, le
+  pod tourne sur l'hôte *as* l'humain). Prédicat unique pour les gardes host-native (ex. admission API).
+  """
+  @spec bwrap?(t()) :: boolean()
+  def bwrap?(%__MODULE__{} = cap), do: containment(cap) == @default_containment
 
   @doc """
   Le `name` du profil (`metadata["name"]`) — l'identité du rôle/pod portée par le cap-profile.

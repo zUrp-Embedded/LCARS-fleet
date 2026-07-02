@@ -28,6 +28,17 @@ defmodule Fleet.Starfleet.CoordBackend do
               payload :: map(),
               correlation_id :: String.t() | nil
             ) :: :ok | {:error, term()}
+
+  @doc """
+  Backend d'escalade coord câblé (config `:fleet_starfleet, :coord_backend`), ou
+  `NotWiredYet` par défaut (ch14 non câblé). SOURCE UNIQUE de cette lecture pour
+  les producteurs d'escalade (`Cat5Escalator`, `DriftMonitor`) — un seul défaut à
+  garder aligné.
+  """
+  @spec resolved() :: module()
+  def resolved do
+    Application.get_env(:fleet_starfleet, :coord_backend, __MODULE__.NotWiredYet)
+  end
 end
 
 defmodule Fleet.Starfleet.CoordBackend.NotWiredYet do

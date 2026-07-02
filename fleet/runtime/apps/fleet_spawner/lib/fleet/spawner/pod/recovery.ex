@@ -71,15 +71,37 @@ defmodule Fleet.Spawner.Pod.Recovery do
   def first_continue_for(%{phase: :launching}), do: :launch
   def first_continue_for(%{phase: phase}), do: phase_to_continue(phase)
 
-  defp phase_to_continue(:allocating), do: :allocate
-  defp phase_to_continue(:cleaning), do: :clean
-  defp phase_to_continue(:projecting), do: :project
-  defp phase_to_continue(:injecting), do: :inject
-  defp phase_to_continue(:launching), do: :launch
-  defp phase_to_continue(:monitoring), do: :monitor
-  defp phase_to_continue(:extracting), do: :extract
-  defp phase_to_continue(:releasing), do: :release
+  # Bijection phase (nom d'état gen_statem persisté) ↔ point de reprise `:continue`. SOURCE UNIQUE
+  # des deux sens : `phase_to_continue/1` (reprise depuis une phase) et `continue_to_phase/1` (nom
+  # d'état de départ pour la state machine, appelé par `Pod.init/1`). Tapée UNE fois ici.
+  @phases [
+    {:allocating, :allocate},
+    {:cleaning, :clean},
+    {:projecting, :project},
+    {:injecting, :inject},
+    {:launching, :launch},
+    {:monitoring, :monitor},
+    {:extracting, :extract},
+    {:releasing, :release}
+  ]
+
+  # phase persistée → point de reprise. Fallback `:allocate` : une phase inconnue (snapshot d'une
+  # version antérieure) repart proprement du début.
+  for {phase, continue} <- @phases do
+    defp phase_to_continue(unquote(phase)), do: unquote(continue)
+  end
+
   defp phase_to_continue(_), do: :allocate
+
+  @doc """
+  Point de reprise `:continue` (sortie de `first_continue_for/1`) → NOM d'état gen_statem de départ.
+  INVERSE EXACT de `phase_to_continue/1`. Pas de fallback : `first_continue_for/1` ne produit QUE des
+  `:continue` catalogués, donc un atome hors bijection est un bug amont qu'on laisse crasher (visible).
+  """
+  @spec continue_to_phase(atom()) :: atom()
+  for {phase, continue} <- @phases do
+    def continue_to_phase(unquote(continue)), do: unquote(phase)
+  end
 
   def phase_from_string(s) when is_binary(s) do
     # String.to_existing_atom/1 rend TOUJOURS un atome (ou raise ArgumentError si l'atome n'existe pas —

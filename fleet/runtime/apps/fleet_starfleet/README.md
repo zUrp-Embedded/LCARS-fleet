@@ -1,7 +1,7 @@
 # fleet_starfleet (chantier 13)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-01 (test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
+**Dernière révision** : 2026-07-02 (test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
 
@@ -22,7 +22,7 @@ audit, escalade Cat 5 seulement.
 | `Fleet.Starfleet.DriftMonitor` | GenServer subscribe `fleet.events`, 4 handlers (`pod_drift`, `workflow_map.failed`, `oauth.refresh.failed`, `audit.verdict`) |
 | `Fleet.Starfleet.Cat5Escalator` | pure functions `escalate/2` → log `AuditLog` + broadcast `audit.cat5.<source>` + délégation `CoordBackend` ch14 |
 | `Fleet.Starfleet.AuditLog` | wrapper `File.write/3` non-bang fail-safe sur `~/.lcars/log/fleet-starfleet.jsonl` (NDJSON append). **Rotation au seuil** (`:audit_log_max_bytes`, défaut 10 MB) → 1 backup `.1` : l'audit local est une convenance forensics, le durable = forge |
-| `Fleet.Starfleet.CoordBackend` | seam wrap `Fleet.Coord` ch14 (default `NotWiredYet` cohérent canon §0 #1) |
+| `Fleet.Starfleet.CoordBackend` | seam wrap `Fleet.Coord` ch14 (default `NotWiredYet` cohérent canon §0 #1). `resolved/0` = **source unique** du backend résolu (config + défaut) lue par `Cat5Escalator`/`DriftMonitor` — pas de défaut redupliqué par site |
 | `Fleet.Starfleet.Shutdown` | GenServer grace shutdown coordonné (`begin/1`, `drain_in_flight/1`) — DN ring0 `lcars-fleet_service`. Seam `:shutdown_dispatcher` (behaviour `Shutdown.Dispatcher`). `configured_dispatcher/0` = **source unique** du backend résolu (config + défaut canon `NoOpDispatcher`), lue à l'`init` ET par la readiness (`fleet_api`) — pas de second défaut à aligner |
 | `Fleet.Starfleet.Shutdown.NoOpDispatcher` | backend défaut — drain immédiat 0 in-flight (honnête-dégradé, `Fleet.Dispatcher` absent) |
 | `Fleet.Starfleet.Shutdown.AggregateDispatcher` | backend **réel** (câblé prod runtime.exs) — `in_flight_count` = `Spawner.count_pods` + `Pipeline.count_running` + `TaskQueue.list_pending` (tout pod vivant compté) ; `refuse_new_jobs` active `Fleet.Shutdown.Quiesce` |

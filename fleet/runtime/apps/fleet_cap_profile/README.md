@@ -24,6 +24,9 @@ Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor.
 - `Fleet.CapProfile.containment/1` — `metadata.containment` (`"bwrap"` sandboxé / `"none"` host-native ;
   défaut conservateur `"bwrap"`). **Source UNIQUE** de cette lecture : le spawner sélectionne le launcher N0
   dessus, l'API `/api/admin/spawn` REFUSE le host-native dessus (un trou de config ne doit jamais ouvrir l'hôte)
+- `Fleet.CapProfile.default_containment/0` / `bwrap?/1` — **source unique du littéral `"bwrap"`** (mode par
+  défaut sandboxé, `@default_containment`) + prédicat host-native. L'admission API (`Fleet.API.Rest`) tranche
+  via `bwrap?/1` au lieu de retaper le littéral
 - `Fleet.CapProfile.slot_scope/1` — `metadata.slot_scope` (`"project"` = 1 identité/slot Desktop par projet ;
   `"instance"` = fan-out par issue ; **requis, sans défaut → raise**). **Source UNIQUE** : le dispatcher
   (`Fleet.Pilot.StepDispatcher`) choisit `PodId.for_repo` vs `for_issue`/`for_pr` et sérialise les rôles

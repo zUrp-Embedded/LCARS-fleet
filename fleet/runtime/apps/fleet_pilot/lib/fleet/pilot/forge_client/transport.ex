@@ -22,6 +22,8 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
 
   require Logger
 
+  alias Fleet.Pilot.Opts
+
   @type config :: %{
           base_url: String.t(),
           token: String.t(),
@@ -270,7 +272,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
         # court-circuite l'adapter Finch), l'hermétisme des tests reste intact.
         finch: Fleet.Pilot.ForgeFinch
       ]
-      |> maybe_put(:json, body)
+      |> Opts.maybe_put(:json, body)
       |> Keyword.merge(config.req_options)
 
     started = System.monotonic_time(:millisecond)
@@ -301,7 +303,4 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
   # Résumé compact d'un résultat Req pour le log d'instrumentation (status HTTP ou erreur transport).
   defp forge_result_tag({:ok, %Req.Response{status: status}}), do: "http #{status}"
   defp forge_result_tag({:error, exception}), do: "transport #{inspect(exception)}"
-
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 end
