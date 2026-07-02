@@ -8,7 +8,7 @@ defmodule Fleet.API do
   ## Sous-modules
 
     * `Fleet.API.Rest` — Plug.Router HTTP `:8080` endpoints REST
-      (GET pipelines/issues/pods/health + POST admin/spawn) — lecture
+      (GET workflow_runs/issues/pods/health + POST admin/spawn) — lecture
       no-auth, écriture gardée (le HMAC `X-Auth-Token` a été RETIRÉ ;
       frontière = isolation réseau/container, cf. `Fleet.API.Rest` §Auth)
     * `Fleet.API.WS` — Cowboy WebSocket handler `:8080/ws` subscribe

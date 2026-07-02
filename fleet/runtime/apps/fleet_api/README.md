@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-01 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
+**Dernière révision** : 2026-07-02 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -25,7 +25,7 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 |---|---|---|---|
 | GET | `/api/health` | — | readiness probe shallow (200 dès Cowboy bind, consommé ch16 `lcars-readiness`) |
 | GET | `/api/readiness/deep` | — | P05 — état opérationnel LIVE (`Fleet.API.Readiness.deep/0`). 200 même si `status: degraded` (dégradation = donnée, pas erreur HTTP). Vue de câblage interne (pas une probe externe) |
-| GET | `/api/pipelines` | — | liste état pipelines |
+| GET | `/api/workflow_runs` | — | liste des workflow-runs |
 | GET | `/api/issues` | — | liste issues |
 | GET | `/api/pods` | — | liste pods |
 | GET | `/api/version` | — | version du build servi — JSON `{sha, dirty, ref, source}` (`Fleet.API.BuildInfo.current/0`). Lecture → no-auth légitime. **Constatable** : la version est lue, pas déduite |

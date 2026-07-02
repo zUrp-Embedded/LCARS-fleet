@@ -1,7 +1,7 @@
 # Fleet.SPBuilder
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-06-29
+**Dernière révision** : 2026-07-02
 **Statut** : implémenté run #3.1 chantier #2 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_sp_builder.md
 
@@ -50,7 +50,11 @@ paths skills filtrés.
 
 ## Frontière vendor
 
-Module vendor-agnostic : il **compose** le SP, il ne l'injecte pas. Le SP
-composé est passé **inline en argv** à `bin/claude_launch.sh` par le spawner
-(post-ADR-G : RC interactif, plus de `claude -p` ni d'app `fleet_claude_bridge`
-— retirée au pivot).
+Module vendor-agnostic : il **compose** le SP, il ne l'**injecte** pas.
+L'injection est faite par la frontière N1 (`bin/claude_launch.sh`) : le spawner
+écrit le SP composé dans un FICHIER (`<pod_dir>/.lcars/system-prompt.md`), que le
+launcher passe à `claude` via **`--system-prompt-file`** — HORS argv. Motif : le SP
+en argv fuitait par `/proc/<pid>/cmdline` et frôlait `ARG_MAX` ; le mode fichier tue
+les deux (`.lcars/` est lisible in-sandbox, contrairement à `.claude/` masqué par le
+bind creds). RC interactif (post-ADR-G : plus de `claude -p` ni d'app
+`fleet_claude_bridge`, retirée au pivot).
