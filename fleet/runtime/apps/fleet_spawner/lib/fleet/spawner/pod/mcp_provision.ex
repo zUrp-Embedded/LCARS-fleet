@@ -12,11 +12,11 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   Le module ne lit PAS le `state` du Pod et ne rappelle AUCUN private de Pod — le Pod résout
   le placement (`pod_dir`, `sandbox_home`) et le backend, puis passe ces valeurs en arguments.
 
-  - `maybe_provision_mcp_config/5` — appelé dans la `with` de `do_project`. Retourne
+  - `maybe_provision_mcp_config/5` — appelé dans le `with` de l'état `:projecting`. Retourne
     `:ok` (StubBackend sans spec, ou écriture réussie) | `{:error, {:mcp_server_spec_required, backend}}`
     (backend RÉEL sans spec, fail-loud) | `{:error, reason}` (échec FS : `{:write_failed, …}` /
     `{:mcp_bridge_provision_failed, …}`). L'erreur est propagée au `with` → `transition_failed`.
-  - `mcp_channel_env/2` — env vars MCP du process pod à merger dans l'env de launch (`do_launch`). Retourne une map.
+  - `mcp_channel_env/2` — env vars MCP du process pod à merger dans l'env de launch (état `:launching`). Retourne une map.
 
   La spec serveur MCP est lue en config (`:fleet_spawner, :mcp_server_spec`) ; le backend résolu
   est passé par le Pod (source unique `Fleet.Spawner.LaunchBackend.resolved/0`).
@@ -59,7 +59,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
 
   # Écrit `<pod_dir>/.mcp-fleet.json` (+ copie le bridge stdio dans le pod). `backend` est résolu
   # par le Pod (`Fleet.Spawner.LaunchBackend.resolved/0`) et passé ici ; la spec serveur est lue en config.
-  # `socket_path` = chemin host de la socket MCP per-pod (rendu par `ensure_pod_socket`, do_project) ;
+  # `socket_path` = chemin host de la socket MCP per-pod (rendu par `ensure_pod_socket`, état `:projecting`) ;
   # posé tel quel en `LCARS_FLEET_MCP_SOCKET` du serveur (host==namespace, cf. build_fleet_mcp_entry).
   def maybe_provision_mcp_config(pod_dir, sandbox_home, pod_id, socket_path, backend) do
     case {mcp_server_spec(), backend} do
@@ -69,13 +69,13 @@ defmodule Fleet.Spawner.Pod.McpProvision do
 
       # Un backend RÉEL sans spec MCP est un bug de config — le pod réel parle MCP
       # (le brief instruit submit_result, impossible sans serveur). Refus net
-      # (propagé au with do_project → transition_failed) qui rend l'état fautif
+      # (propagé au with de l'état :projecting → transition_failed) qui rend l'état fautif
       # irreprésentable, plutôt qu'un pod lancé puis bloqué en timeout silencieux.
       {nil, backend} ->
         {:error, {:mcp_server_spec_required, backend}}
 
       {spec, _backend} when is_map(spec) ->
-        # Non-bang + retour {:ok|:error} propagé au with chain do_project
+        # Non-bang + retour {:ok|:error} propagé au with chain de l'état `:projecting`
         # (où l'erreur déclenche transition_failed proprement).
         with {:ok, fleet_entry} <-
                build_fleet_mcp_entry(spec, pod_dir, sandbox_home, pod_id, socket_path) do

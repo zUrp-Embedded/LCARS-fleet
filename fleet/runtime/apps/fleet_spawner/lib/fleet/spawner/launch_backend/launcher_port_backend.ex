@@ -7,15 +7,16 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   sans sandbox). L'`exe` du Port = `args.launcher_path` ; l'argv est identique des
   deux côtés (même contrat `<role> <pod_id> <pod_dir> <command...>`).
 
-  ## Modèle INTERACTIF (claude sous PTY, livrable = fichier)
+  ## Modèle INTERACTIF (claude sous PTY, complétion event-driven)
 
-  `claude_launch` lance `claude` INTERACTIF sous PTY ; le livrable
-  est un FICHIER (`$POD_DIR/output/result.md`, lu par `Pod` EXTRACT), PAS un flux
-  NDJSON stdout. Donc `launch/2` **n'attend pas** de frame `init` : il ouvre le
-  Port et **retourne immédiatement**. Le **Pod owns le Port** — `launch/2` tourne
-  dans le process Pod (`do_launch`), donc les messages `{port, {:data, _}}` /
-  `{port, {:exit_status, _}}` arrivent à `Pod.handle_info`. Détection d'exit,
-  monitoring du livrable et kill = lifecycle Pod, pas ici.
+  `claude_launch` lance `claude` INTERACTIF sous PTY. La complétion est EVENT-DRIVEN
+  (le broker `Fleet.TaskQueue` broadcast `%Fleet.Event{work_item.completed}` sur le Bus,
+  consommé par l'état `:monitoring` du `Pod`), PAS un flux NDJSON stdout ni un fichier de
+  livrable. Donc `launch/2` **n'attend pas** de frame `init` : il ouvre le Port et
+  **retourne immédiatement**. Le **Pod owns le Port** — `launch/2` tourne dans le process
+  Pod (état `:launching` via `do_launch_backend`), donc le message `{port, {:exit_status, _}}`
+  arrive à `Pod.handle_event(:info, ...)` (détection d'exit AVANT résultat = échec). Détection
+  d'exit et kill = lifecycle Pod, pas ici.
 
   Retour : `{:ok, %{port: port, tmux_session: name}}` | `{:error, reason}`.
   Tests : `build_spawn/1` pur (ordre/contenu du vecteur args) + smoke fake-exe (Port ouvert / exe absent).
@@ -56,7 +57,7 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   `claude_launch <role> <pod_id> <pod_dir>`. `launcher_path` = bwrap_launch (défaut)
   ou host_launch (containment: none) — **même argv**. Le **SP n'est PAS dans
   l'argv** (fuite /proc/cmdline + ARG_MAX) : claude_launch le lit depuis
-  `pod_dir/.lcars/system-prompt.md` via `--system-prompt-file` (écrit par `Fleet.Spawner` do_project).
+  `pod_dir/.lcars/system-prompt.md` via `--system-prompt-file` (écrit par l'état `:projecting` du `Pod`).
   Pas de budget (pas d'API). Identité/session
   (`LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX`) voyagent par l'ENV du Port (`launch/2`
   `env`), que bwrap_launch `--setenv` dans le pod (host_launch l'hérite directement, sans namespace).

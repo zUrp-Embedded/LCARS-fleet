@@ -7,7 +7,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   du chemin du launcher vendor, produire l'env COMPLET passé au backend de lancement — auth `bind`
   posée, identité git de l'humain résolue, porte credentials (scope/plan) franchie — ou un
   `{:error, reason}` DÉJÀ taggé. `build/4` ne touche ni Port, ni timer, ni state machine : il rend une
-  valeur, le `Pod` (`do_launch`) la branche sur `do_launch_backend` ou `transition_failed`.
+  valeur, le `Pod` (état `:launching`) la branche sur `do_launch_backend` ou `transition_failed`.
 
   ## MÉCANIQUE CREDENTIAL — sanctuaire déplacé tel quel
 
@@ -18,13 +18,13 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
 
   ## Contrat (appelé par `Pod`)
 
-  - `build(state, role, containment, claude_launch_path)` — appelée par `do_launch` ; rend `{:ok, env}`
-    (auth `bind` posée, identité git de l'humain, porte scope/plan franchie) ou `{:error, reason}` DÉJÀ
-    taggé `:launch_env_unresolved` (raise de résolution humain/passwd/vendor-bin),
+  - `build(state, role, containment, claude_launch_path)` — appelée par l'état `:launching` ; rend
+    `{:ok, env}` (auth `bind` posée, identité git de l'humain, porte scope/plan franchie) ou
+    `{:error, reason}` DÉJÀ taggé `:launch_env_unresolved` (raise de résolution humain/passwd/vendor-bin),
     `:credentials_invalid` (porte scope/plan) ou `:auth_token_required` (auth/identité git). Ordre
-    auth → git → gate préservé. `do_launch` la branche sur `do_launch_backend` / `transition_failed`.
+    auth → git → gate préservé. L'état `:launching` la branche sur `do_launch_backend` / `transition_failed`.
   - `claude_dir/0` — claudeDir de l'humain runtime (override config `:claude_dir` sinon
-    `~/.claude`) ; **publique** car aussi appelée par `do_inject` (`Pod`) pour `CLAUDE_DIR` à l'injection.
+    `~/.claude`) ; **publique** car aussi appelée par l'état `:injecting` (`Pod`) pour `CLAUDE_DIR` à l'injection.
 
   Dépend de `Pod.LaunchSpec` (builders d'env), `Pod.McpProvision` (`mcp_channel_env`), `Pod.Paths`
   (`runtime_home`), `Fleet.Credentials.*` (Human/ForgeIdentity/Gate, pleine qualif) et
@@ -41,15 +41,15 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
 
   Rend `{:ok, env}` (auth `bind` posée, identité git de l'humain, porte scope/plan franchie) ou
   `{:error, reason}` taggé (`:launch_env_unresolved` | `:credentials_invalid` | `:auth_token_required`),
-  branché par `do_launch` sur `do_launch_backend` / `transition_failed`. `role`/`containment`/
-  `claude_launch_path` sont résolus côté `Pod` (do_launch) et passés ici : `role` ==
+  branché par l'état `:launching` sur `do_launch_backend` / `transition_failed`. `role`/`containment`/
+  `claude_launch_path` sont résolus côté `Pod` (état `:launching`) et passés ici : `role` ==
   `cap_profile_name(state.cap_profile)` (même valeur, calculée pareil) → on évite la dépendance au
   private de `Pod`.
   """
   def build(state, role, containment, claude_launch_path) do
     # La résolution humain + le pipeline env peuvent RAISE (runtime_user /
     # claude_dir_from_passwd / maybe_put_vendor_bin = fail-loud sur host sans claude
-    # per-user ou home irrésoluble). Un raise non rattrapé ICI crasherait le Pod GenServer SANS
+    # per-user ou home irrésoluble). Un raise non rattrapé ICI crasherait le process pod (gen_statem) SANS
     # transition_failed → task orpheline :pending + state.json à la phase périmée. On
     # rabat tout raise de construction-env sur transition_failed (même cleanup que les
     # autres échecs launch : clear_pod_task + phase=failed).
@@ -145,7 +145,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
 
   # Source UNIQUE `Fleet.Credentials.Human` (pas de `id -un` shellé en double — sinon
   # spawn-ownership et commit-identity peuvent diverger, ce qui casserait la gate d'identité forge).
-  # Fail-loud (raise), rattrapé par le try/rescue de do_launch.
+  # Fail-loud (raise), rattrapé par le try/rescue de `build/4` (converti en {:error, {:launch_env_unresolved, _}}).
   defp runtime_user, do: Fleet.Credentials.Human.current!()
 
   # ════════════════════════════════════════════════════════════════════════════════════════

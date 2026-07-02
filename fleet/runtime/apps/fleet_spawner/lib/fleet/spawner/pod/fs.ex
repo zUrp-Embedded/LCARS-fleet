@@ -3,7 +3,7 @@ defmodule Fleet.Spawner.Pod.Fs do
   Primitives FS partagées du provisioning pod — variantes non-bang de `File.write`/`File.mkdir_p`.
 
   Les variantes bang (`File.mkdir_p!`, `File.write!`, `File.rename!`) raise sur
-  erreur → kill brutal du GenServer → supervisor restart sans transition
+  erreur → kill brutal du process pod (gen_statem) → mort sans transition
   propre → state.json potentiellement obsolète/corrompu côté recovery.
   Ces helpers retournent `{:ok | :error}` avec contexte (path + reason) →
   propagation via `with` → transition_failed clean (state.json

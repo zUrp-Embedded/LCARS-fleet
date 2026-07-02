@@ -41,7 +41,7 @@ defmodule Fleet.Spawner.Application do
         []
       end
 
-    # Reaper périodique des pods orphelins (crash GenServer → bwrap/tmux survit). Gaté
+    # Reaper périodique des pods orphelins (crash du process pod gen_statem → bwrap/tmux survit). Gaté
     # `:start_pod_warden` (défaut true prod, false test — pas de vrais pods à reaper en test).
     reaper =
       if Application.get_env(:fleet_spawner, :start_pod_warden, true) do

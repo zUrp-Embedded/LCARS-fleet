@@ -8,20 +8,20 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   `state` (ou le `cap_profile`) en argument ; le module ne rappelle AUCUN private de `Pod` (pas de
   cycle).
 
-  Ce module N'ORCHESTRE PAS : les PHASES `do_clean`/`do_project` restent au cœur du `Pod` (leur gros
+  Ce module N'ORCHESTRE PAS : les ÉTATS `:cleaning`/`:projecting` restent au cœur du `Pod` (leur gros
   `with` est l'orchestrateur). Le scaffold n'expose que les ÉTAPES — chacune rend `:ok`/`{:ok, _}` ou
-  un `{:error, reason}` taggé que le `with` de `do_project` propage vers `transition_failed` (cleanup
-  clean : phase=failed + state.json écrit).
+  un `{:error, reason}` taggé que le `with` de l'état `:projecting` propage vers `transition_failed`
+  (cleanup clean : phase=failed + state.json écrit).
 
   ## Contrat (appelé par `Pod`)
 
-  - `gc_stale_session_jsonl(state)` — appelé par `do_clean` (GC de l'UUID de session avant un re-spawn
-    `--session-id`).
+  - `gc_stale_session_jsonl(state)` — appelé par l'état `:cleaning` (GC de l'UUID de session avant un
+    re-spawn `--session-id`).
   - `pod_settings_json/0`, `read_agent_draft(cap_profile)`, `read_protocole_user/0`,
     `maybe_path(path)`, `maybe_filter_skills(cap_profile, root)`, `issue_id_to_filename(issue_id)`,
     `default_brief(state)`, `maybe_enqueue_brief(state)`, `provision_monitor_watch(state)`,
-    `maybe_bootstrap_project_workspace(state)`, `maybe_recall_restore(state)` — étapes appelées dans la
-    `with` de `do_project`.
+    `maybe_bootstrap_project_workspace(state)`, `maybe_recall_restore(state)` — étapes appelées dans le
+    `with` de l'état `:projecting`.
 
   Dépend de `Pod.Fs` (écritures FS non-bang), `Pod.LaunchSpec` (cwd/projet effectif), `Pod.TaskProbe`
   (gate d'enqueue), `Fleet.SPBuilder` (filtre des skills) ; et en pleine qualif `Fleet.CapProfile`
@@ -260,7 +260,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
                  eff_cap
                ) do
           # CLAUDE.md composé (pod-identité + conventions repo) à la racine du CWD (workspace) :
-          # l'agent pop dans un projet déjà documenté. Le do_project l'écrit au pod_dir (parent) ;
+          # l'agent pop dans un projet déjà documenté. L'état :projecting l'écrit au pod_dir (parent) ;
           # avec cwd=workspace il doit être DANS le cwd (sinon l'agent code sans sa codebase-doc en cwd).
           _ = File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md"))
 

@@ -23,7 +23,7 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
 
   ## Contrat (appelé par `Pod`)
 
-  - `polled?/1` — bootstrap-stop du kick (handler `handle_info({:kick_attempt, n}, ...)`).
+  - `polled?/1` — bootstrap-stop du kick (handler `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
   - `pod_has_active_task?/1` — `pod_info` (`has_active_task`) + fire de `:result_deadline`.
   - `brief_pulled?/1` — réduit en booléen passé à `Kick.acked?/3` par le handler.
   - `no_pending_brief?/1` — détection bootstrap (handler) + gate de `maybe_enqueue_brief`.

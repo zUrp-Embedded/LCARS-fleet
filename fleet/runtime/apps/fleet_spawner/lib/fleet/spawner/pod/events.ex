@@ -18,8 +18,8 @@ defmodule Fleet.Spawner.Pod.Events do
   - `best_effort_broadcast/2` (PUBLIC) — OBSERVABILITÉ/escalade (`pod.failed`, `wake.failed`).
     Un échec est non-bloquant (rescue → log) ; rend toujours `:ok`.
   - `required_broadcast/2` (PUBLIC) — LIFECYCLE load-bearing (`pod.completed`). L'échec n'est PAS
-    avalé : rend `:ok` | `{:error, {:broadcast_failed, _}}`. `do_extract` NE release/kill PAS le pod
-    sur une complétion orpheline.
+    avalé : rend `:ok` | `{:error, {:broadcast_failed, _}}`. L'état `:extracting` (`do_extract_proceed`)
+    NE release/kill PAS le pod sur une complétion orpheline.
 
   `event_bus/0` et `build_spawner_event/2` sont internes (appelés UNIQUEMENT par les deux broadcasts).
   """
@@ -37,12 +37,12 @@ defmodule Fleet.Spawner.Pod.Events do
   #     non-bloquant (rescue → log) — un consumer fleet_pilot les enregistre en best-effort, personne ne
   #     FINIT un step_run dessus.
   #   - `required_broadcast/2` : LIFECYCLE load-bearing (`pod.completed`). L'échec n'est PAS avalé : il
-  #     remonte `{:error, {:broadcast_failed, _}}` → `do_extract` NE release/kill PAS le pod sur une
+  #     remonte `{:error, {:broadcast_failed, _}}` → l'état `:extracting` NE release/kill PAS le pod sur une
   #     complétion orpheline ; il reste vivant (re-wake re-fire l'extract), fail-loud. Les deux passent
   #     par l'enveloppe canon stricte `%Fleet.Event{source: :spawner}` (build_spawner_event).
 
   # Broadcast Bus avec rescue : un crash event_router (bus down, atom invalide) ne doit JAMAIS faire crash
-  # le Pod GenServer. RÉSERVÉ aux events NON-lifecycle (observabilité/escalade).
+  # le process pod (gen_statem). RÉSERVÉ aux events NON-lifecycle (observabilité/escalade).
   # Enveloppe : schema canon strict %Fleet.Event{source: :spawner}.
   def best_effort_broadcast(event_type, payload) when is_binary(event_type) do
     event_bus().broadcast(Bus.main_topic(), build_spawner_event(event_type, payload))

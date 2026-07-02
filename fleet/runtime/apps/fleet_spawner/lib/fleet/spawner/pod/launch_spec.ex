@@ -18,9 +18,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   - `rc_project/2` — nom de projet slugifié depuis `rc_name`, ou `nil`. Public car partagé
     hors-placement (`maybe_checkpoint_seed`) : source unique.
   - `pod_cwd/3` — cwd vu par l'agent. Public car aussi appelé par le recall (`maybe_recall_restore`).
-  - `sandbox_home/2` — home intra-pod. Public car aussi passé à `McpProvision` (do_project).
+  - `sandbox_home/2` — home intra-pod. Public car aussi passé à `McpProvision` (état `:projecting`).
   - `maybe_put_pod_cwd/4`, `maybe_put_sandbox_home/3`, `launch_home/3`, `permission_mode/1`,
-    `skills_plugins_env/1`, `pod_mounts_env/2` — builders d'env, mergés par `do_launch`.
+    `skills_plugins_env/1`, `pod_mounts_env/2` — builders d'env, mergés par l'état `:launching`.
   """
 
   # Projet EFFECTIF du pod : le brief (`opts[:project]`, dynamique) prime sur le `spec["project"]`

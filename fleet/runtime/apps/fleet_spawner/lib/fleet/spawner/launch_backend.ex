@@ -38,8 +38,8 @@ defmodule Fleet.Spawner.LaunchBackend do
     * `env` — map ENV vars à injecter (OAuth + custom)
 
   Pas de `:budget_sec`/`:budget_usd`. Le timeout de réponse
-  est géré côté Pod GenServer (Process.send_after :result_deadline,
-  default par lifetime_scope) ; pas d'API = pas de budget USD.
+  est géré côté Pod (gen_statem) via le state_timeout natif `:result_deadline`
+  (default par lifetime_scope) ; pas d'API = pas de budget USD.
 
   ## Returns
 

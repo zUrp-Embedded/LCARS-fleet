@@ -8,28 +8,31 @@ defmodule Fleet.Spawner.Pod.Backend do
   résolveurs de chemins des launchers (`bwrap`/`host`/`claude`). Le `Pod` lui passe le `state` (ou un
   `port`/`pod_id`) en argument ; le module ne rappelle AUCUN private de `Pod` (pas de cycle).
 
-  Ce module N'ORCHESTRE PAS : les CALLBACKS/PHASES (`terminate/2`, `handle_call(:kill, ...)`,
-  `do_release`, `do_launch`, `do_launch_backend`, `do_project`) RESTENT au cœur du `Pod` ; ils
-  appellent `Backend.*` pour le geste OS.
+  Ce module N'ORCHESTRE PAS : les CALLBACKS/ÉTATS (`terminate/3`,
+  `handle_event({:call, from}, :kill, ...)`, les états `:releasing`/`:launching`/`:projecting`, la fn
+  `do_launch_backend`) RESTENT au cœur du `Pod` ; ils appellent `Backend.*` pour le geste OS.
 
   ## Contrat (appelé par `Pod`)
 
-  - `teardown_backend(state)` — Port vivant → `Port.close` (SIGTERM holder) ; sinon kill SOCK-AWARE de
-    la session tmux + retrait du sock-dir. Idempotent. Appelé par `terminate/2`, `handle_call(:kill, ...)`
-    et `do_release`.
-  - `reap_orphan_pod(pod_id)` — reap d'un orphelin (bwrap/tmux/claude survivant à un crash GenServer) du
-    même pod_id AVANT un (re)launch. No-op si pas d'orphelin vivant. Appelé par `do_launch`.
+  - `teardown_backend(state)` — Port vivant → `terminate_pod_port` (SIGTERM du holder puis close ;
+    `Port.close` SEUL orphelinerait le holder `sleep infinity`) ; sinon kill SOCK-AWARE de la session
+    tmux + retrait du sock-dir. Idempotent. Appelé par `terminate/3`,
+    `handle_event({:call, from}, :kill, ...)` et l'état `:releasing`.
+  - `reap_orphan_pod(pod_id)` — reap d'un orphelin (bwrap/tmux/claude survivant à un crash du process
+    pod gen_statem) du même pod_id AVANT un (re)launch. No-op si pas d'orphelin vivant. Appelé par l'état
+    `:launching`.
   - `terminate_pod_port(port)` / `safe_port_close(port)` — **publiques** (testées en direct) : SIGTERM
-    l'os_pid du holder puis ferme le Port (race `ArgumentError` absorbée). `Fleet.Spawner.Pod`
-    garde un `defdelegate` pour chacune (contrat préservé).
+    l'os_pid du holder puis ferme le Port (race `ArgumentError` absorbée). Le test les exerce DIRECTEMENT
+    via `Fleet.Spawner.Pod.Backend.terminate_pod_port/1` / `.safe_port_close/1` (plus de `defdelegate`
+    côté `Pod` : appel direct sur le sous-module).
   - `ensure_pod_socket(pod_id)` — crée la socket MCP per-pod AVANT le launch → `{:ok, socket_path}`
-    (chemin host). Appelé par `do_project` (le fichier DOIT exister avant le bind bwrap).
+    (chemin host). Appelé par l'état `:projecting` (le fichier DOIT exister avant le bind bwrap).
   - `release_pod_socket(state)` — arrête le listener + retire le fichier socket (self-protégé, ne lève
-    JAMAIS) ; clause `_state` (pod_id absent) = no-op. Appelé par l'`after` de `terminate/2`.
+    JAMAIS) ; clause `_state` (pod_id absent) = no-op. Appelé par l'`after` de `terminate/3`.
   - `launch_backend/0` — résolveur du backend de lancement (`Fleet.Spawner.LaunchBackend.resolved/0`,
     source unique). Appelé par `do_launch_backend`.
   - `bwrap_launch_path/0` / `host_launch_path/0` / `claude_launch_path/0` — résolveurs de chemins des
-    launchers (config `:fleet_spawner`). Appelés par `do_launch`.
+    launchers (config `:fleet_spawner`). Appelés par l'état `:launching`.
 
   `require Logger` (reap/teardown/release loggent). Alias `Fleet.Spawner.PodTmux` (`kill_holder`,
   `sock_path`, `alive?`). En plein qualif : `Fleet.Spawner.LaunchBackend`, `Application`, et le SEAM
@@ -42,8 +45,8 @@ defmodule Fleet.Spawner.Pod.Backend do
 
   alias Fleet.Spawner.PodTmux
 
-  # Reap un orphelin (bwrap/tmux/claude survivant à un crash GenServer) du même pod_id avant
-  # un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). Le kill (tmux kill-server +
+  # Reap un orphelin (bwrap/tmux/claude survivant à un crash du process pod gen_statem) du même pod_id
+  # avant un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). Le kill (tmux kill-server +
   # pkill -f ancré) est centralisé dans `PodTmux.kill_holder/1` (anti self-kill).
   def reap_orphan_pod(pod_id) do
     if PodTmux.alive?(pod_id) do
@@ -81,7 +84,7 @@ defmodule Fleet.Spawner.Pod.Backend do
     # claude+namespace) → pas besoin de garder le sock-dir « tant que le kill n'est pas sûr ». Sans ce
     # nettoyage, le sock-dir traînerait après un teardown gracieux → le PodWarden le ramasserait ~60s
     # plus tard en loguant un FAUX « orphelin persistant » (bruit qui masque les vrais). Le PodWarden
-    # reste le filet des VRAIS orphelins (GenServer crashé → teardown jamais exécuté → sock-dir + claude
+    # reste le filet des VRAIS orphelins (process pod gen_statem crashé → teardown jamais exécuté → sock-dir + claude
     # survivent → reap). Gardé `tmux_session` : pods réels (bwrap/host), pas StubBackend (sock_path
     # nominal, rm_rf no-op de toute façon).
     if is_binary(state.tmux_session) do
@@ -119,7 +122,7 @@ defmodule Fleet.Spawner.Pod.Backend do
   entre notre check et le close (claude finit tout seul après submit_result → son process
   exit → le port disparaît). La garde `Port.info` seule est insuffisante (TOCTOU) — un port
   déjà fermé EST l'état voulu, donc on rescue plutôt que crash (sinon `:erlang.port_close`
-  ArgumentError dans do_release → GenServer du pod crashe sur une complétion RÉUSSIE).
+  ArgumentError dans l'état `:releasing` → le process pod gen_statem crasherait sur une complétion RÉUSSIE).
   Public pour test direct.
   """
   @spec safe_port_close(port()) :: :ok
@@ -146,13 +149,13 @@ defmodule Fleet.Spawner.Pod.Backend do
     do:
       Application.get_env(:fleet_spawner, :mcp_socket_provisioner, Fleet.MCP.PodSocketSupervisor)
 
-  # ENSURE (do_project, avant le launch) : crée le listener + le fichier socket de CE pod (idempotent côté
+  # ENSURE (état :projecting, avant le launch) : crée le listener + le fichier socket de CE pod (idempotent côté
   # central) et rend `{:ok, socket_path}` (chemin host). Le fichier DOIT exister avant le bind bwrap.
   def ensure_pod_socket(pod_id) when is_binary(pod_id) do
     apply(mcp_socket_provisioner(), :ensure_pod_socket, [pod_id])
   end
 
-  # RELEASE (filet terminate/2, clause `after`) : arrête le listener ET retire le fichier socket (idempotent
+  # RELEASE (filet terminate/3, clause `after`) : arrête le listener ET retire le fichier socket (idempotent
   # côté central). Self-protégé (rescue/catch → log, rend `:ok`) : il tourne dans l'`after` de `terminate`,
   # un raise s'y propagerait et masquerait la raison d'arrêt. Clause `_state` (pod_id absent) = no-op.
   def release_pod_socket(%{pod_id: pod_id}) when is_binary(pod_id) do

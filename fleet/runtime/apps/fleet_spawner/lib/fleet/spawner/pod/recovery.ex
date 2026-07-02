@@ -11,8 +11,9 @@ defmodule Fleet.Spawner.Pod.Recovery do
     `--resume` sur une session morte côté serveur (= pod zombie, prouvé live).
   - `apply_recovery/4` — projette cette décision dans le `state` (`:recreate` laisse la base intacte =
     session neuve ; `:release` grave la phase terminale + le flag de release).
-  - `first_continue_for/1` — choisit le PREMIER `{:continue, _}` de l'`init/1` selon le `recovery`/`phase`
-    du state (`:recreate` → `:allocate`, `:release` → `:release`, sinon mappe la phase observée).
+  - `first_continue_for/1` — choisit le POINT DE REPRISE (atome `:allocate`/`:launch`/… , PAS un état
+    gen_statem) selon le `recovery`/`phase` du state (`:recreate` → `:allocate`, `:release` → `:release`,
+    sinon mappe la phase observée) ; `Pod.init/1` le mappe en état de départ via `continue_to_phase/1`.
   - `phase_from_string/1` — décode la phase string du `state.json` en atome existant (`nil` si inconnue).
 
   Que des opérations de `Map`/`String` déterministes : aucune dépendance externe (pas de `Logger`, pas de
@@ -25,7 +26,8 @@ defmodule Fleet.Spawner.Pod.Recovery do
   - `recovery_action/1` — appelé par `recover_or_init` ; le test `recovery_test.exs` l'exerce DIRECTEMENT
     via `Fleet.Spawner.Pod.Recovery.recovery_action/1` (plus de wrapper délégant côté `Pod`).
   - `apply_recovery/4` — appelé par `recover_or_init` (projette la décision dans le state).
-  - `first_continue_for/1` — appelé par `init/1` (premier `{:continue, _}` de la state machine).
+  - `first_continue_for/1` — appelé par `init/1` (point de reprise → état gen_statem de départ via
+    `continue_to_phase/1`).
   - `phase_from_string/1` — appelé par `recover_or_init` ET `clear_terminal_snapshot`.
   """
 
@@ -55,7 +57,7 @@ defmodule Fleet.Spawner.Pod.Recovery do
   # :recreate → fresh, nouvelle session (base intacte : session_id neuf, resume=false).
   def apply_recovery(base, :recreate, _sid, _phase), do: Map.put(base, :recovery, :recreate)
 
-  # :release → terminal ; le pod stoppera proprement (do_release sur backend nil).
+  # :release → terminal ; le pod stoppera proprement (état :releasing sur backend nil).
   def apply_recovery(base, :release, _sid, phase) do
     base |> Map.put(:phase, phase) |> Map.put(:recovery, :release)
   end

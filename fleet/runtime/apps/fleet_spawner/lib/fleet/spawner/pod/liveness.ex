@@ -4,7 +4,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
 
   Deux rôles jumeaux, tous deux PURS (aucun timer armé ici — l'armement reste au cœur du Pod) :
 
-  - **Sonde de liveness** : à chaque `:liveness_tick`, échantillonner deux signaux complémentaires
+  - **Sonde de liveness** : à chaque tick du generic timeout `:liveness`, échantillonner deux signaux complémentaires
     d'activité du pod — taille cumulée des `<session_id>.jsonl` (« a produit une sortie ») et jiffies
     CPU du process claude via `/proc/<os_pid>/stat` (« moud sans sortie encore ») — et décider si le
     pod a BOUGÉ depuis le tick précédent. Un mouvement → le `Pod` ré-arme le deadline (repousse le
@@ -22,13 +22,14 @@ defmodule Fleet.Spawner.Pod.Liveness do
 
   ## Contrat (appelé par `Pod`)
 
-  - `liveness_sample/1` (PUBLIC) — échantillonne `{taille_jsonl, jiffies_cpu}` (appelé par
-    `handle_info(:liveness_tick, ...)`).
+  - `liveness_sample/1` (PUBLIC) — échantillonne `{taille_jsonl, jiffies_cpu}` (appelé par le handler
+    de tick liveness `handle_event({:timeout, :liveness}, :tick, :monitoring, ...)`).
   - `liveness_moved?/2` (PUBLIC) — compare l'échantillon précédent au nouveau (appelé par le même
     handler).
-  - `liveness_tick_ms/1` (PUBLIC) — cadence du tick (appelé par `schedule_liveness_tick`, qui RESTE
-    dans `Pod` car il ARME le timer).
-  - `monitor_timeout_ms/1` (PUBLIC) — délai (ms) du `:result_deadline` (appelé par `arm_result_deadline`).
+  - `liveness_tick_ms/1` (PUBLIC) — cadence du tick (appelé par `liveness_tick_action`, qui RESTE
+    dans `Pod` car il fabrique l'ACTION de generic timeout `{:timeout, :liveness}`).
+  - `monitor_timeout_ms/1` (PUBLIC) — délai (ms) du `:result_deadline` (appelé par
+    `arm_result_deadline_actions`).
 
   `keyword_opt/2`, `grew?/2`, `jsonl_size/1`, `proc_cpu_jiffies/1`, `to_int/1` et
   `default_response_timeout_sec/1` sont internes (appelés UNIQUEMENT par les fonctions ci-dessus).
@@ -137,15 +138,15 @@ defmodule Fleet.Spawner.Pod.Liveness do
           default_response_timeout_sec(state.cap_profile)
       end
 
-    # `Process.send_after` exige un entier non-négatif. `is_number(override)` accepte les
-    # FLOATS (un cap-profile `timeouts.response_sec: 1.5` passe la validation) → `sec * 1000` = float
-    # → ArgumentError dans arm_result_deadline qui CRASHERAIT le Pod sans transition_failed. `round/1`
-    # coerce → entier (ms), quel que soit l'override.
+    # Le state_timeout natif `:result_deadline` exige un entier non-négatif (ms). `is_number(override)`
+    # accepte les FLOATS (un cap-profile `timeouts.response_sec: 1.5` passe la validation) → `sec * 1000` =
+    # float → ArgumentError dans `arm_result_deadline_actions` qui CRASHERAIT le Pod sans transition_failed.
+    # `round/1` coerce → entier (ms), quel que soit l'override.
     round(sec * 1000)
   end
 
   defp default_response_timeout_sec(%Fleet.CapProfile{spec: spec}) do
-    # Pas de band-aid `forever -> 60_000` : arm_result_deadline n'arme PAS pour `forever`
+    # Pas de band-aid `forever -> 60_000` : arm_result_deadline_actions n'arme PAS pour `forever`
     # (un permanent n'a pas de timeout de réponse), et le fire ne tue que si une task est
     # réellement active. La valeur `forever` ci-dessous est donc inerte (forever n'arme
     # jamais) ; conservée par cohérence si un override `spec.timeouts.response_sec` la

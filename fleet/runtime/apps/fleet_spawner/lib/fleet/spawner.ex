@@ -2,10 +2,11 @@ defmodule Fleet.Spawner do
   @moduledoc """
   Pilote lifecycle pod LCARS v2 (Ring 1 pod primitive).
 
-  Spawne, surveille et termine les pods agents éphémères selon le
-  cycle 8 phases canon (ALLOCATE → CLEAN → PROJECT → INJECT → LAUNCH
-  → MONITOR → EXTRACT → RELEASE). Chaque pod = un `Fleet.Spawner.Pod`
-  GenServer supervisé par `Fleet.Spawner.Supervisor`.
+  Spawne, surveille et termine les pods agents éphémères. Chaque pod est un
+  `Fleet.Spawner.Pod` (`gen_statem`) supervisé par `Fleet.Spawner.Supervisor` :
+  ses ÉTATS sont les 8 phases du cycle canon (`:allocating → :cleaning →
+  :projecting → :injecting → :launching → :monitoring → :extracting →
+  :releasing`).
 
   ## API
 
@@ -19,16 +20,18 @@ defmodule Fleet.Spawner do
   Tous les pods sont `:temporary` (cf. `restart_strategy_for/1`). Le
   `DynamicSupervisor` ne ressuscite JAMAIS un pod —
   un pod mort (normal OU crash) est retiré, point. `lifetime_scope` pilote
-  la RECOVERY (`release|recreate|resume`), pas le restart.
+  la RECOVERY (`release|recreate`), pas le restart.
 
   ## Recovery
 
   State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` =
   **snapshot d'observation** (où en était le pod), pas un état de reconstruction.
-  La résurrection est un acte **délibéré** du boot-orchestrator qui re-matérialise
-  depuis le desired-state (cap-profile), via `--resume <session_id>` si la session
-  est reprenable : le contexte de conversation est préservé côté serveur Anthropic,
-  donc `--resume` reprend exactement là où le pod s'était arrêté.
+  Au (re)spawn, `recover_or_init` lit le snapshot et applique `recovery_action(phase)`
+  (`Pod.Recovery`) : phase terminale → `:release` (rien à relancer), tout le reste →
+  `:recreate` (from scratch, session NEUVE). La résurrection est un acte **délibéré**
+  du boot-orchestrator ; la recovery NE tente JAMAIS `--resume` sur une session morte
+  côté serveur (claude exit → pod zombie, prouvé live) — la tâche restée en queue
+  re-drive un REPL neuf. Seul le RECALL délibéré (`recall/2`) resume une session.
 
   ## Génération du pod_id
 
@@ -131,7 +134,7 @@ defmodule Fleet.Spawner do
   RECALL délibéré : ramène vivant l'agent `(projet, role)` depuis son seed checkpointé
   (`projects.work/<projet>/pods/`). Lit la workflow_map (uuid+jsonl), spawn un pod en mode resume :
   `session_id` = l'uuid du seed, `resume: true`, le seed est restauré dans le pod AVANT le launch
-  (do_project → maybe_recall_restore) → claude `--resume <uuid>` reprend le contexte. Nom Desktop
+  (état :projecting → maybe_recall_restore) → claude `--resume <uuid>` reprend le contexte. Nom Desktop
   `<projet>_<role>`. `allow_no_brief` (le pod resume son contexte, pas idle ; pas de brief neuf).
 
   `{:ok, pid}` | `{:error, :no_seed}` (aucun seed) | `{:error, term}`.
@@ -209,8 +212,9 @@ defmodule Fleet.Spawner do
   def kill_pod(pod_id) when is_binary(pod_id) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [{pid, _}] ->
-        # Release DÉLIBÉRÉE d'abord — handle_call(:kill) fait teardown backend +
-        # clear_for_pod + état terminal :killed, puis stop. Fallback brutal
+        # Release DÉLIBÉRÉE d'abord — le handler `:kill` du Pod
+        # (`handle_event({:call, from}, :kill, ...)`, `GenServer.call` compatible gen_statem) fait
+        # teardown backend + clear_for_pod + état terminal :killed, puis stop. Fallback brutal
         # terminate_child SEULEMENT si le pod ne répond pas (timeout / déjà mort).
         # Jamais de bypass de la transition de release.
         try do
@@ -431,7 +435,7 @@ defmodule Fleet.Spawner do
   Restart strategy d'un pod : `:temporary` pour TOUS les scopes. Le
   `DynamicSupervisor` ne ressuscite JAMAIS un pod — un
   pod mort (sortie normale OU crash) est retiré, point final. La résurrection
-  est un acte délibéré du boot-orchestrator (recovery `release|recreate|resume`).
+  est un acte délibéré du boot-orchestrator (recovery `release|recreate`).
 
   Les enfants `:temporary` ne comptent pas dans l'intensité
   globale `max_restarts` du supervisor → plus de cascade fleet-wide possible.

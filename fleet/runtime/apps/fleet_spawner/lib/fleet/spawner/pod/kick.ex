@@ -13,10 +13,10 @@ defmodule Fleet.Spawner.Pod.Kick do
   - **l'I/O d'envoi** (`kick_send/2` → `do_send_keys/2`) : pousse le mot-clé dans le tmux du pod.
 
   Ce que le module ne porte PAS (RESTE au cœur du `Pod`, mécanique de timer/handler) : l'ARMEMENT du
-  timer (`arm_kick`/`schedule_kick`/`cancel_kick` via `arm_managed_timer`), le HANDLER
-  `handle_info({:kick_attempt, n}, ...)` (qui orchestre cap/retry/ACK et appelle ce module), et les
-  SONDES TaskQueue (`polled?`/`brief_pulled?`/`no_pending_brief?`) que le handler passe déjà
-  réduites en booléens à `acked?/3`.
+  generic timeout `:kick` (cast `:arm_kick` + les action-builders `schedule_kick_action`/`cancel_kick_action`),
+  le HANDLER `handle_event({:timeout, :kick}, {:attempt, n}, ...)` (qui orchestre cap/retry/ACK et appelle
+  ce module), et les SONDES TaskQueue (`polled?`/`brief_pulled?`/`no_pending_brief?`) que le handler passe
+  déjà réduites en booléens à `acked?/3`.
 
   Aucun state propre, aucun timer armé ici : le `Pod` passe son `state` (map) en argument (`kick_send`
   lit `state.pod_id`) ; la config `:fleet_spawner` (bornes + knob `:wake_send_keys`) est lue
@@ -25,10 +25,11 @@ defmodule Fleet.Spawner.Pod.Kick do
 
   ## Contrat (appelé par `Pod`)
 
-  - `kick_first_delay_ms/0` — délai du 1er tick (appelé par `arm_kick`, qui RESTE dans `Pod` car il ARME
-    le timer).
+  - `kick_first_delay_ms/0` — délai du 1er tick (appelé à l'armement du generic timeout `:kick` — cast
+    `:arm_kick` + transition de launch — côté `Pod`).
   - `kick_retry_ms/0` / `kick_max_attempts/0` / `kick_bootstrap_retry_ms/0` / `kick_bootstrap_max/0` —
-    cadence + cap, branche wake vs bootstrap (appelés par le handler `handle_info({:kick_attempt, n}, ...)`).
+    cadence + cap, branche wake vs bootstrap (appelés par le handler
+    `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
   - `acked?/3` (décision PURE) — l'agent a-t-il tendu la main ? STOP de la boucle (appelé par le handler ;
     le test l'exerce DIRECTEMENT via `Fleet.Spawner.Pod.Kick.acked?/3`, plus de wrapper délégant côté `Pod`).
   - `kick_keyword/2` (décision PURE) — mot-clé selon l'ACK (`yop`/`wake`/`nil`) (appelé par `kick_send` ;
@@ -51,8 +52,8 @@ defmodule Fleet.Spawner.Pod.Kick do
   # Un yop à délai fixe arrive trop tôt et est perdu (le sock du serveur tmux n'existe pas
   # encore). On planifie donc une BOUCLE bornée : à chaque tick, si le serveur tmux est
   # joignable (`PodTmux.alive?`) on envoie yop ; on s'arrête dès que le brief est pull
-  # (task ≠ pending) ou au cap. Non-bloquant (send_after + handle_info), le pod passe à
-  # :monitor entretemps. Intervalles configurables (test : valeurs ~ms).
+  # (task ≠ pending) ou au cap. Non-bloquant (generic timeout `:kick`), le pod passe à
+  # :monitoring entretemps. Intervalles configurables (test : valeurs ~ms).
   def kick_first_delay_ms, do: Application.get_env(:fleet_spawner, :kick_first_delay_ms, 2_000)
   def kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
   def kick_max_attempts, do: Application.get_env(:fleet_spawner, :kick_max_attempts, 12)

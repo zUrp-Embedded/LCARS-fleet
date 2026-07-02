@@ -8,8 +8,9 @@ defmodule Fleet.Spawner.Pod.StateFs do
   - `write_state_fs/1` — sérialise le snapshot `{v, session_id, cap_profile_name, started_at, phase,
     conditions, issue_id}` du `state` dans `state.state_fs_path` (écriture ATOMIQUE `.tmp`+`rename`,
     `mkdir_p` de la racine). Un échec d'écriture = perte du point de recovery durable → LOUD (error-level →
-    monitoring) mais NON-fatal (`:ok` rendu, on ne crashe pas le pod ici). Appelé à 4 sites du `Pod`
-    (post-ALLOCATE, transitions, `transition_failed`).
+    monitoring) mais NON-fatal (`:ok` rendu, on ne crashe pas le pod ici). Appelé aux 4 sites de
+    transition du `Pod` (launch → `:monitoring`, kill → `:killed`, release → `:succeeded`,
+    `transition_failed` → `:failed`).
   - `clear_terminal_snapshot/3` — efface la tombstone d'un `pod_id` AVANT un (re)spawn délibéré (no-op si
     pas de snapshot, snapshot illisible, ou phase EN VOL — on ne touche QUE les tombstones terminales).
     Appelé DIRECTEMENT par `Fleet.Spawner.spawn_pod/3` via `Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`.
@@ -46,7 +47,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
   (`issue-N-role`). Si un `state.json` TERMINAL (`:succeeded`/`:released`/`:killed`)
   subsiste d'un cycle précédent — même d'une AUTRE issue #N sur un autre repo, l'id
   ne porte que le numéro —, `recover_or_init` le lit → `recovery_action` rend
-  `:release` → le pod s'arrête AUSSITÔT (`do_release` sur backend nil, `{:stop,
+  `:release` → le pod s'arrête AUSSITÔT (l'état `:releasing` sur backend nil, `{:stop,
   :normal}` MUET) sans rien lancer. Le poller voit alors le verrou in-flight sans
   complétion → réclame l'orphelin → re-dispatch → MÊME tombstone → boucle infinie
   (le pod ne lance jamais de claude).

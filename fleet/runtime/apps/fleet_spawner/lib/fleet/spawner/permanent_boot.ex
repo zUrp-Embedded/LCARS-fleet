@@ -84,7 +84,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   ## Écrivain unique state.json
 
   PermanentBoot **spawne** mais **n'écrit pas** `state.json` — l'écriture est
-  déléguée au `Fleet.Spawner.Pod` GenServer via `write_state_fs/1`. Un seul
+  déléguée au `gen_statem` `Fleet.Spawner.Pod` (via `Pod.StateFs.write_state_fs/1`). Un seul
   écrivain : pas de seam `:state_writer` parallèle.
 
   ## Seams (découplage de l'IO pour les tests)
@@ -140,8 +140,8 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   # `persist_state/2` retirée — règle « écrivain unique » : seul
-  # `Fleet.Spawner.Pod.write_state_fs/1` écrit `state.json`. PermanentBoot
-  # spawne le Pod et délègue l'écriture au GenServer.
+  # `Fleet.Spawner.Pod.StateFs.write_state_fs/1` (appelé par le `Pod`) écrit `state.json`. PermanentBoot
+  # spawne le Pod et délègue l'écriture au gen_statem.
 
   # --- privé ---
 

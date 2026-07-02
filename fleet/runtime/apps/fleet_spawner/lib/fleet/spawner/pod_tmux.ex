@@ -14,11 +14,12 @@ defmodule Fleet.Spawner.PodTmux do
 
   ## Le KILL PRIMAIRE n'est PAS ici (mais le fallback orphelin, si)
 
-  Tuer = `Port.close` du holder bwrap (pod.ex), PAS `kill-session` : le holder (`sleep infinity`) tient
-  le namespace ; tuer juste la session tmux laisserait le holder vivant → namespace orphelin. La socket
-  meurt avec le namespace quand le Port se ferme. **Exception RECOVERY** : quand il n'y a plus de Port
-  (orphelin post-crash GenServer, reap), `kill_holder/1` ci-dessous fait le geste de secours
-  (tmux kill-server + `pkill -f` ancré).
+  Tuer = SIGTERM du holder bwrap (`Pod.Backend.terminate_pod_port`, pod.ex), PAS `kill-session` : le
+  holder (`sleep infinity`) tient le namespace et IGNORE `Port.close` seul (EOF stdin) → on SIGTERM son
+  os_pid ; tuer juste la session tmux laisserait le holder vivant → namespace orphelin. La socket meurt
+  avec le namespace quand le holder tombe. **Exception RECOVERY** : quand il n'y a plus de Port
+  (orphelin post-crash du process pod gen_statem, reap), `kill_holder/1` ci-dessous fait le geste de
+  secours (tmux kill-server + `pkill -f` ancré).
   """
 
   require Logger
@@ -27,8 +28,8 @@ defmodule Fleet.Spawner.PodTmux do
 
   @doc """
   Base des sockets pod. Config `:fleet_spawner, :tmux_sock_base` (défaut `~/.lcars/run/tmux-sock`) — MÊME
-  défaut que `bwrap_launch.sh` (`LCARS_TMUX_SOCK_BASE`). do_launch pose cet env pour que les deux côtés
-  (Elixir host / bwrap pod) calculent le MÊME chemin.
+  défaut que `bwrap_launch.sh` (`LCARS_TMUX_SOCK_BASE`). L'état `:launching` pose cet env pour que les
+  deux côtés (Elixir host / bwrap pod) calculent le MÊME chemin.
   """
   @spec sock_base() :: String.t()
   def sock_base, do: Application.get_env(:fleet_spawner, :tmux_sock_base, default_sock_base())
@@ -59,9 +60,10 @@ defmodule Fleet.Spawner.PodTmux do
 
   @doc """
   Kill le **holder** d'un pod (le process bwrap/host_launch qui tient le namespace + serveur tmux),
-  geste de RECOVERY partagé (DRY) par `Pod.Backend.reap_orphan_pod`, `Pod.terminate` (fallback tmux_session)
-  et `PodWarden.reap`. Le kill PRIMAIRE reste `Port.close` (cf. § « Le KILL n'est PAS ici ») ; ceci
-  est le chemin ORPHELIN/fallback où il n'y a plus de Port vivant.
+  geste de RECOVERY partagé (DRY) par `Pod.Backend.reap_orphan_pod`, `Pod.Backend.teardown_backend`
+  (fallback tmux_session, appelé par `terminate/3`) et `PodWarden.reap`. Le kill PRIMAIRE reste le SIGTERM
+  du holder (`Pod.Backend.terminate_pod_port`, cf. § « Le KILL n'est PAS ici ») ; ceci est le chemin
+  ORPHELIN/fallback où il n'y a plus de Port vivant.
 
   `tmux kill-server` (sur le sock par-pod) tue tmux+claude ; `pkill -9 -f <pattern>` tue le holder
   (que kill-server laisse vivant — il porte le namespace).
