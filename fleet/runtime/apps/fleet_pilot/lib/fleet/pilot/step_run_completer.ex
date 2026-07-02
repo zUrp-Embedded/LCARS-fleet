@@ -97,7 +97,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
          # la route (sinon même seconde → ordre dashboard arbitraire, « logiquement avant, affiché après »).
          :ok <- space_writes(opts),
          {:ok, routed} <- step4_route(forge, repo, n, step_run, forge_opts),
-         {:ok, _} <- step5_unlock(forge, repo, n, forge_opts) do
+         {:ok, _} <- unlock(forge, repo, n, forge_opts) do
       Logger.info("StepRunCompleter: #{repo}##{n} role=#{role} sha=#{sha} → #{routed}")
 
       {:ok, routed}
@@ -566,7 +566,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
     next = Map.fetch!(step_run, :next_assignee)
 
     with :ok <- request_review_step(forge, repo, pr, next, forge_opts),
-         {:ok, _} <- bridge_route(forge, repo, step_run.issue_number, step_run, forge_opts),
+         {:ok, _} <-
+           post_route_if_present(forge, repo, step_run.issue_number, step_run, forge_opts, :route),
          {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts) do
       {:ok, :review_requested}
     end
@@ -577,7 +578,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = step_run.repo
 
-    with {:ok, _} <- bridge_route(forge, repo, step_run.issue_number, step_run, forge_opts),
+    with {:ok, _} <-
+           post_route_if_present(forge, repo, step_run.issue_number, step_run, forge_opts, :route),
          {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts) do
       {:ok, :rework_requested}
     end
@@ -678,13 +680,17 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # Grave la POSITION workflow_map [lcars-route:p:s] sur l'issue (lue par StepDispatcher/dispatch_review
   # pour identifier le step du juge : l'assignee/le reviewer seul ne l'identifie pas, un role peut
   # etre sur N steps). Reste (autorite de navigation) ; seul le TRIGGER (set_assignee) est remplace
-  # par la review-request. Grave si pipeline+next_step presents (sinon 1-step/terminal, pas de route).
-  defp bridge_route(forge, repo, n, step_run, forge_opts) do
+  # par la review-request. Grave si workflow_map+next_step presents (sinon 1-step/terminal, pas de route).
+  # Autorite UNIQUE du post_route pour les DEUX sequences (PR-native `route` ET maison `step4_route`).
+  # `error_tag` : etiquette d'erreur de la sequence appelante — `:route` cote PR-native (via `route`),
+  # `:reassign` cote maison (via `step4_route`). Chaque sequence distingue SON echec de post_route, donc
+  # seule l'etiquette est parametree (logique commune, les deux comportements d'erreur sont preserves).
+  defp post_route_if_present(forge, repo, n, step_run, forge_opts, error_tag) do
     case {Map.get(step_run, :workflow_map), Map.get(step_run, :next_step)} do
       {p, s} when is_binary(p) and is_binary(s) ->
         case forge.post_route(repo, n, p, s, forge_opts) do
           {:ok, _} = ok -> ok
-          {:error, reason} -> {:error, {:route, reason}}
+          {:error, reason} -> {:error, {error_tag, reason}}
         end
 
       _ ->
@@ -699,6 +705,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
+  # Retire le verrou `lcars-in-flight` — leve en DERNIER dans les DEUX sequences (nominale `complete`
+  # et PR-native `route`) : un crash avant ce point laisse le verrou pose → le poller ne re-spawn pas →
+  # la recovery rejoue (remove_label idempotent). Autorite UNIQUE du unlock pour les deux chemins.
   defp unlock(forge, repo, n, forge_opts) do
     case forge.remove_label(repo, n, @in_flight_label, forge_opts) do
       {:ok, _} = ok -> ok
@@ -770,7 +779,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
         # reste l'HUMAIN (traça) ; le rôle du next step (`next`) est dérivé de la route au dispatch
         # (`StepDispatcher.workflow_map_role`), pas de l'assignee. `next` (next_role présent) distingue
         # AVANCE vs terminal (nil → close).
-        case maybe_post_route(forge, repo, n, step_run, forge_opts) do
+        # `post_route_if_present(..., :reassign)` enrobe deja l'erreur en `{:reassign, reason}` (le tag
+        # de CETTE sequence) → on la propage telle quelle (ne PAS re-enrober, sinon double `{:reassign, ...}`).
+        case post_route_if_present(forge, repo, n, step_run, forge_opts, :reassign) do
           {:ok, _} ->
             Logger.debug(
               "StepRunCompleter advance #{repo}##{n} → next step role=#{next} (route gravée, assignee=humain inchangé)"
@@ -778,24 +789,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
             {:ok, :reassigned}
 
-          {:error, reason} ->
-            {:error, {:reassign, reason}}
+          {:error, _} = err ->
+            err
         end
-    end
-  end
-
-  defp maybe_post_route(forge, repo, n, step_run, forge_opts) do
-    case {Map.get(step_run, :workflow_map), Map.get(step_run, :next_step)} do
-      {p, s} when is_binary(p) and is_binary(s) -> forge.post_route(repo, n, p, s, forge_opts)
-      _ -> {:ok, :no_route}
-    end
-  end
-
-  # ── Étape 5 : retire le verrou (DERNIER) ───────────────────────────────────
-  defp step5_unlock(forge, repo, n, forge_opts) do
-    case forge.remove_label(repo, n, @in_flight_label, forge_opts) do
-      {:ok, _} = ok -> ok
-      {:error, reason} -> {:error, {:unlock, reason}}
     end
   end
 
