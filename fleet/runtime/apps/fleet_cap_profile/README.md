@@ -12,8 +12,11 @@ Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor.
 
 ## API
 
-- `Fleet.CapProfile.load/1` — charge un cap-profile depuis le FS, valide schema
-- `Fleet.CapProfile.compose/2` — compose role + modop_set, deep-merge last-wins
+- `Fleet.CapProfile.load/1` — charge un cap-profile depuis le FS, valide schema ; **délègue** la
+  conformité JSON-schema au cluster `Fleet.CapProfile.Schema` (`validate/2`)
+- `Fleet.CapProfile.compose/2` — compose role + modop_set, deep-merge last-wins ; valide base +
+  résultat via `Fleet.CapProfile.Schema.validate/2`, et les fragments modop via
+  `Fleet.CapProfile.Schema.validate_modop_keys/1` (clés réservées) + `validate/2`
 - `Fleet.CapProfile.validate/1` — invariants G24 (incl. G24-9 F-CONT-RISK) ; **délègue** au
   cluster pur `Fleet.CapProfile.Invariants` (une fonction par check), n'y garde que le contrat de
   retour single-authority `:ok | {:error, [codes]}` consommé hors-app (spawner `do_allocate`,
@@ -40,6 +43,18 @@ dans un `Path.join` (feuille FS) ou un segment d'URL borné passe par lui — fa
 - `Fleet.Slug.confined_join/2` — caste + joint sous root + confine, en un geste (feuille FS)
 
 ## Schemas
+
+Validation structurelle portée par `Fleet.CapProfile.Schema` (cluster extrait, en AMONT du cœur —
+distinct des invariants métier G24 de `Fleet.CapProfile.Invariants`) :
+
+- `Fleet.CapProfile.Schema.validate/2` — valide une map brute contre le JSON-schema du kind
+  (`:cap_profile` / `:modop`) ; retourne `:invalid_schema` / `:invalid_modop` / `:schema_unavailable`
+- `Fleet.CapProfile.Schema.validate_modop_keys/1` — refuse un fragment modop portant une clé
+  réservée top-level (`kind`)
+- schemas cachés en `:persistent_term` (keyé par path résolu) ; `schema_dir` lit la clé env
+  `:fleet_cap_profile, :schema_dir` (surchargeable en test), défaut `priv/schema`
+
+Fichiers :
 
 - `priv/schema/cap-profile-v2.5.json` — JSON Schema strict du profile composé
 - `priv/schema/modop-profile.json` — JSON Schema strict du fragment modop

@@ -19,6 +19,10 @@ defmodule Fleet.CapProfile do
 
   @behaviour Fleet.CapProfile.Loader
 
+  # Cluster de validation JSON-schema (conformité structurelle), en AMONT du cœur.
+  # `load`/`compose`/`read_modops` y délèguent ; pas de cycle (Schema n'appelle rien ici).
+  alias Fleet.CapProfile.Schema
+
   require Logger
 
   # Pas de champ `api_version` : le versioning du schéma est porté par le code
@@ -34,13 +38,6 @@ defmodule Fleet.CapProfile do
           metadata: map(),
           spec: map()
         }
-
-  # Fast-path guard for top-level reserved keys. `metadata.containment`
-  # and `metadata.name` are also reserved — enforced by the JSON schema
-  # `priv/schema/modop-profile.json` (`not/anyOf` clause). `kind` reste
-  # réservé (il différencie cap-profile vs modop côté merge) ; `apiVersion`
-  # n'est PAS réservé (champ inexistant — versioning par le code).
-  @reserved_modop_keys ~w(kind)
 
   # ============================================================
   # Loader behaviour
@@ -63,7 +60,7 @@ defmodule Fleet.CapProfile do
   @spec load(String.t()) :: {:ok, t()} | {:error, atom() | String.t()}
   def load(role) when is_binary(role) do
     with {:ok, raw} <- read_role_yaml(role),
-         :ok <- validate_against_schema(raw, :cap_profile) do
+         :ok <- Schema.validate(raw, :cap_profile) do
       {:ok, to_struct(raw)}
     end
   end
@@ -87,10 +84,10 @@ defmodule Fleet.CapProfile do
   @spec compose(String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
   def compose(role, modop_set) when is_binary(role) and is_list(modop_set) do
     with {:ok, base} <- read_role_yaml(role),
-         :ok <- validate_against_schema(base, :cap_profile),
+         :ok <- Schema.validate(base, :cap_profile),
          {:ok, modops} <- read_modops(modop_set),
          merged <- Enum.reduce(modops, base, &deep_merge_last_wins(&2, &1)),
-         :ok <- validate_against_schema(merged, :cap_profile) do
+         :ok <- Schema.validate(merged, :cap_profile) do
       {:ok, to_struct(merged)}
     end
   end
@@ -478,8 +475,8 @@ defmodule Fleet.CapProfile do
 
           if File.exists?(path) do
             with {:ok, raw} <- decode_yaml(path),
-                 :ok <- validate_modop_keys(raw),
-                 :ok <- validate_against_schema(raw, :modop) do
+                 :ok <- Schema.validate_modop_keys(raw),
+                 :ok <- Schema.validate(raw, :modop) do
               {:cont, {:ok, [raw | acc]}}
             else
               {:error, reason} -> {:halt, {:error, reason}}
@@ -523,87 +520,6 @@ defmodule Fleet.CapProfile do
     # jamais été correct hors d'un `LCARS_CAPPROFILES_ROOT` explicite → `:enoent` en release (étanchéité).
     Application.get_env(:fleet_cap_profile, :root_dir) ||
       Path.join(to_string(:code.priv_dir(:fleet_cap_profile)), "canon/cap-profiles")
-  end
-
-  # ============================================================
-  # Schema validation
-  # ============================================================
-
-  defp validate_against_schema(map, kind) do
-    case load_schema(kind) do
-      {:ok, schema} ->
-        case ExJsonSchema.Validator.validate(schema, map) do
-          :ok ->
-            :ok
-
-          {:error, _errors} ->
-            case kind do
-              :cap_profile -> {:error, :invalid_schema}
-              :modop -> {:error, :invalid_modop}
-            end
-        end
-
-      {:error, :schema_unavailable} = err ->
-        err
-    end
-  end
-
-  defp load_schema(:cap_profile), do: load_schema_file("cap-profile-v2.5.json")
-  defp load_schema(:modop), do: load_schema_file("modop-profile.json")
-
-  # Schema priv IMMUABLE : read+decode+resolve une fois, caché en `:persistent_term`
-  # keyé par le path RÉSOLU (les overrides test de `schema_dir/0` ont leur entrée). Lazy-init,
-  # erreurs non-cachées.
-  defp load_schema_file(name) do
-    path = Path.join(schema_dir(), name)
-    key = {__MODULE__, :schema, path}
-
-    case :persistent_term.get(key, :miss) do
-      :miss ->
-        case read_schema_file(path) do
-          {:ok, _schema} = ok ->
-            :persistent_term.put(key, ok)
-            ok
-
-          err ->
-            err
-        end
-
-      cached ->
-        cached
-    end
-  end
-
-  defp read_schema_file(path) do
-    with {:ok, content} <- File.read(path),
-         {:ok, decoded} <- Jason.decode(content),
-         {:ok, schema} <- safe_resolve(decoded) do
-      {:ok, schema}
-    else
-      {:error, reason} ->
-        Logger.warning("schema unavailable: #{inspect(reason)} at #{path}")
-        {:error, :schema_unavailable}
-    end
-  end
-
-  defp safe_resolve(decoded) do
-    {:ok, ExJsonSchema.Schema.resolve(decoded)}
-  rescue
-    e -> {:error, {:schema_resolve_error, Exception.message(e)}}
-  end
-
-  defp schema_dir do
-    case Application.get_env(:fleet_cap_profile, :schema_dir) do
-      nil -> Path.join(to_string(:code.priv_dir(:fleet_cap_profile)), "schema")
-      dir -> dir
-    end
-  end
-
-  defp validate_modop_keys(map) do
-    case Enum.find(@reserved_modop_keys, &Map.has_key?(map, &1)) do
-      nil -> :ok
-      _key -> {:error, :invalid_modop}
-    end
   end
 
   # ============================================================
