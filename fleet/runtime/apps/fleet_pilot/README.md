@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-02 (atomisation StepDispatcher : extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
+**Dernière révision** : 2026-07-02 (atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
 **Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -63,14 +63,13 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       `escalate_rework/4` (rework non convergent, budget épuisé MA-06) + `escalate_conflict/4` (conflit de
       merge récurrent) posent le **commentaire gatekeeper dédupliqué** (`as_role` + `dedup_signature`) + le
       verrou `lcars-awaits-arch` sur l'ISSUE (poller SKIP → fin du churn) via l'unique point d'écriture
-      `escalate_to_arch` (privé, pas de fork). `encode_pr_letters/1` (pur, base-26 digit-free) vit ici,
-      consommé par le cœur pour clé-er l'IncidentRegistry. **Frontière blindée** : reçoit un struct
+      `escalate_to_arch` (privé, pas de fork). **Frontière blindée** : reçoit un struct
       `%ArchEscalation.Seams{}` (les 3 seams `forge`/`repo`/`forge_opts`, `@enforce_keys` → un accès
       hors-3-seams ne compile pas), jamais le `ctx` entier. La **DÉCISION** d'escalade (budget forge,
-      IncidentRegistry, résolution-vs-escalade) reste le SINGLE-AUTHORITY du cœur (`dispatch_rework`/
-      `dispatch_conflict_resolution`) — ArchEscalation ne fait QU'ÉCRIRE.
+      IncidentRegistry, résolution-vs-escalade) reste le SINGLE-AUTHORITY du flux review
+      (`ReviewLifecycle.dispatch_rework`/`dispatch_conflict_resolution`) — ArchEscalation ne fait QU'ÉCRIRE.
     - `Fleet.Pilot.StepDispatcher.Spawn` — **feuille de spawn SINGLE-AUTHORITY** sur laquelle les DEUX
-      flux CONVERGENT (issue `dispatch_issue` + PR `do_dispatch_review`) : une seule copie de
+      flux CONVERGENT (issue `dispatch_issue` + PR `ReviewLifecycle.do_dispatch_review`) : une seule copie de
       `spawn_step/9` (ordre canonique **verrou → pod → enqueue → wake**, wake EN DERNIER ; compensation
       = retrait du verrou + kill SEULEMENT si spawn frais ; retour `{:error, {:wake_unreached, …}}`
       load-bearing = le poller PREND le bail, le pod est démarré, seul le wake tmux a raté), une seule
@@ -82,7 +81,23 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       un struct `%Spawn.Seams{}` (les 6 seams `forge`/`spawner`/`task_queue`/`repo`/`forge_opts`/
       `wake_recovery`, `@enforce_keys` → un accès hors-6-seams ne compile pas), jamais le `ctx`/`opts`
       entier ; chacun des 2 callers construit le struct à son site. `safe_kill/2` reste public (partagé
-      avec le cœur `promote_pr`, die-on-promote — une seule copie, pas de fork).
+      avec `ReviewLifecycle.promote_pr`, die-on-promote — une seule copie, pas de fork).
+    - `Fleet.Pilot.StepDispatcher.ReviewLifecycle` — **cycle de vie REVIEW (PR)**. `dispatch_review/2`
+      (PUBLIQUE, contrat poller) RESTE au cœur (gate PR `in-flight`/`awaits-arch` + construction du `ctx` +
+      lecture `pr_review_state`) et DÉLÈGUE l'aiguillage à `dispatch_by_verdicts/5` (point d'entrée). Trois
+      clusters : **aiguillage** (juge pending → spawn ; tous décisifs + un `:changes_requested` → rework ;
+      tous approuvé → merge ; aucun demandé → `:no_verdict`), **rework/conflit** (`dispatch_rework` borné
+      MA-06 + `dispatch_conflict_resolution` borné IncidentRegistry ; `encode_pr_letters/1` (pur, base-26
+      digit-free) vit ICI, consommé par la clé d'incident), **promotion** (`promote_pr` = sceau
+      `Fleet.Pilot.GatekeeperSeal` + merge rebase + die-on-promote de l'eng). **Dépendance
+      uni-directionnelle** (ReviewLifecycle → `Spawn`/`ArchEscalation`/`GatekeeperSeal` → ø ; ne nomme JAMAIS
+      `StepDispatcher` → pas de cycle) : re-construit `Spawn.Seams`/`ArchEscalation.Seams` au site d'appel de
+      chaque feuille. **Frontière blindée** : reçoit un struct `%ReviewLifecycle.Ctx{}` (les seams
+      `forge`/`loader`/`spawner`/`task_queue`/`resolver`/`repo`/`forge_opts`/`wake_recovery`/`opts`,
+      `@enforce_keys`), jamais une map nue. Les helpers PARTAGÉS avec le flux issue (`route_for/4` lecture de
+      route + `tag_err/2` tagging d'erreur) RESTENT au cœur et sont threadés par CAPTURE dans le `Ctx`
+      (`route_reader`/`err_tagger`, exactement comme `resolver`/`wake_recovery`) — une seule copie (pas de
+      fork), la capture est créée au cœur (pas de référence remontante → pas de cycle).
 - `Fleet.Pilot.BriefBuilder` — **autorité du FORMAT des briefs** : worker / judge / brief-review /
   rework / conflit + instructions de voix de l'eng. `StepDispatcher` CHOISIT quel brief selon l'état forge
   (`build_brief/9` dispatche sur `brief_kind`/`judge_target`), `BriefBuilder` le FORME. La **judge-ness**
