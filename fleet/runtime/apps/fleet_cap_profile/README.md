@@ -61,6 +61,30 @@ Fichiers :
   (clés réservées interdites : apiVersion, kind, metadata.containment,
   metadata.name)
 
+## DisallowedTools
+
+Résolution write-time de `spec.scope.disallowedTools` portée par le cluster
+`Fleet.CapProfile.DisallowedTools` (extrait du cœur — concern UNIQUE
+`disallowedTools`, ne touche aucune autre face du profil ; dépend du struct
+`%Fleet.CapProfile{}`, pas de l'API cœur → pas de cycle). `Fleet.CapProfile`
+expose les trois helpers en **délégateurs** (l'API publique consommée hors-app ne
+bouge pas) :
+
+- `Fleet.CapProfile.with_resolved_disallowed_tools/1` → `DisallowedTools.with_resolved/1` —
+  fusionne (uniq, ordre préservé) `disallowedTools` existant ∪ baseline universel ∪
+  patterns du profil. **Consommé par `Fleet.Spawner.Pod.do_allocate/1`** (écriture
+  `.cap-profile.json`). Idempotent
+- `Fleet.CapProfile.git_ops_denied_patterns/1` → `DisallowedTools.git_ops_denied_patterns/1` —
+  traduit `spec.scope.git_ops_denied` en patterns claude CLI `Bash(git <entrée>:*)`
+- `Fleet.CapProfile.baseline_git_ops_denied_patterns/0` → `DisallowedTools.baseline_patterns/0` —
+  patterns du baseline universel intangible ; **raise** fail-closed si baseline absent/corrompu
+
+Fichier + cache :
+
+- `priv/canon/cap-profiles/_baseline-git-denied.yaml` — baseline universel intangible
+  (résolu via `:code.priv_dir(:fleet_cap_profile)`) ; read+parse caché en
+  `:persistent_term` (lazy, erreurs non-cachées)
+
 ## Configuration
 
 - `:fleet_cap_profile, :root_dir` — racine FS des cap-profiles (default
