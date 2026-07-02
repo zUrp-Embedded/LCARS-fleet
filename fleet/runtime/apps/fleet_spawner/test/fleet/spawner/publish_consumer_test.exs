@@ -69,15 +69,21 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       )
     )
 
+    # Assertion d'INTÉGRATION : le broadcast traverse le consumer (GenServer) + `CapProfile.load` (I/O
+    # disque + parse YAML + validation schéma) AVANT `emit_spawn_failed`. Sous parallélisme `async`, les
+    # 100ms par défaut d'`assert_receive` sont trop serrés → flaky selon le seed d'ordonnancement (le
+    # broadcast arrive après le timeout, mailbox vue vide). Timeout large : on teste QUE l'alarme finit
+    # par arriver, jamais sa latence (qui varie avec la charge des cases async concurrents).
     assert_receive %Fleet.Event{
-      source: :spawner,
-      type: :"spawn.failed",
-      payload: %{
-        "cap_profile_name" => "engineer",
-        "issue_id" => "tk-42",
-        "reason" => reason
-      }
-    }
+                     source: :spawner,
+                     type: :"spawn.failed",
+                     payload: %{
+                       "cap_profile_name" => "engineer",
+                       "issue_id" => "tk-42",
+                       "reason" => reason
+                     }
+                   },
+                   2000
 
     assert reason =~ "boom spawn"
     # Le drop est non-fatal : le consumer reste vivant et a compté l'event.
