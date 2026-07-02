@@ -20,15 +20,20 @@ defmodule Fleet.CapProfile do
   @behaviour Fleet.CapProfile.Loader
 
   # Cluster de validation JSON-schema (conformité structurelle), en AMONT du cœur.
-  # `load`/`compose`/`read_modops` y délèguent ; pas de cycle (Schema n'appelle rien ici).
+  # `load`/`compose` y délèguent (via `Catalog.read_modops` aussi) ; pas de cycle
+  # (Schema n'appelle rien ici).
   alias Fleet.CapProfile.Schema
+
+  # Cluster FS du catalogue (résolution par metadata.name, scan YAML, confinement Slug).
+  # `load`/`compose` appellent `Catalog.read_role`/`Catalog.read_modops` ; `list/1` et
+  # `root_dir/0` (consommés hors-app) y délèguent. Pas de cycle : Catalog est en AMONT
+  # (il dépend de Schema, pas du cœur).
+  alias Fleet.CapProfile.Catalog
 
   # Cluster de résolution write-time de `spec.scope.disallowedTools` (baseline
   # git-denied ∪ profil). Les trois helpers publics ci-dessous y délèguent ; pas
   # de cycle (DisallowedTools dépend du struct, pas de l'API cœur).
   alias Fleet.CapProfile.DisallowedTools
-
-  require Logger
 
   # Pas de champ `api_version` : le versioning du schéma est porté par le code
   # (release v2), pas par un champ embarqué dans le YAML.
@@ -64,7 +69,7 @@ defmodule Fleet.CapProfile do
   @impl Fleet.CapProfile.Loader
   @spec load(String.t()) :: {:ok, t()} | {:error, atom() | String.t()}
   def load(role) when is_binary(role) do
-    with {:ok, raw} <- read_role_yaml(role),
+    with {:ok, raw} <- Catalog.read_role(role),
          :ok <- Schema.validate(raw, :cap_profile) do
       {:ok, to_struct(raw)}
     end
@@ -88,9 +93,9 @@ defmodule Fleet.CapProfile do
   @impl Fleet.CapProfile.Loader
   @spec compose(String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
   def compose(role, modop_set) when is_binary(role) and is_list(modop_set) do
-    with {:ok, base} <- read_role_yaml(role),
+    with {:ok, base} <- Catalog.read_role(role),
          :ok <- Schema.validate(base, :cap_profile),
-         {:ok, modops} <- read_modops(modop_set),
+         {:ok, modops} <- Catalog.read_modops(modop_set),
          merged <- Enum.reduce(modops, base, &deep_merge_last_wins(&2, &1)),
          :ok <- Schema.validate(merged, :cap_profile) do
       {:ok, to_struct(merged)}
@@ -298,155 +303,26 @@ defmodule Fleet.CapProfile do
   end
 
   # ============================================================
-  # I/O
+  # Catalogue FS (délégué)
   # ============================================================
-
-  # Résout un cap-profile par sa PROP `metadata.name` (pas par nom de fichier — celui-ci est
-  # cosmétique). Source de vérité = la donnée, jamais le filesystem (cf. `list/1`).
-  defp read_role_yaml(role) do
-    case name_index(root_dir()) do
-      {:ok, index} ->
-        case Map.fetch(index, role) do
-          {:ok, raw} -> {:ok, raw}
-          :error -> {:error, :not_found}
-        end
-
-      # Catalogue corrompu (un YAML non-décodable) → on ne peut PAS résoudre par name.
-      # Le contrat load/compose (moduledoc) classe « YAML mal formé » en `:invalid_schema` — pas
-      # `:not_found` (qui ferait croire le rôle absent). On honore le contrat.
-      {:error, {:invalid_yaml, _path}} ->
-        {:error, :invalid_schema}
-    end
-  end
 
   @doc """
   Liste les NOMS (`metadata.name`) des cap-profiles du catalogue (`dir`, défaut `root_dir/0`).
-
-  **Source UNIQUE** : tout énumérateur (`Fleet.Spawner.PermanentBoot`) ET `load/1` résolvent par
-  CETTE clé — la prop `name`, **jamais** le nom de fichier (cosmétique). Trié.
-  Collision de `name` entre deux fichiers → `{:error, :name_collision}` (fail-loud : pas de résolution
-  silencieuse au petit bonheur du filesystem).
+  **Délègue** au cluster FS `Fleet.CapProfile.Catalog`. Public + **consommé hors-app**
+  (`Fleet.Spawner.PermanentBoot` énumère, `Fleet.Observation.Deck` liste le dashboard) →
+  l'API portée ici ne bouge pas.
   """
   @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
-  def list(dir \\ root_dir()) do
-    # Dir absent/illisible = erreur (config cassée) — distinct d'un catalogue vide ({:ok, []}).
-    # `Path.wildcard` confond les deux ; `File.dir?` tranche. (`load/1` passe par `name_index`
-    # directement → un dir absent y donne `:not_found`, pas `:enoent` — le rôle est juste introuvable.)
-    if File.dir?(dir) do
-      with {:ok, index} <- name_index(dir) do
-        {:ok, index |> Map.keys() |> Enum.sort()}
-      end
-    else
-      {:error, :enoent}
-    end
-  end
-
-  # Index `metadata.name => raw` en scannant `<dir>/*.yaml` + `<dir>/archivistes/*.yaml` +
-  # `<dir>/monks/*.yaml` (les profils Memory-X canon vivent sous `monks/` ; PermanentBoot — qui
-  # énumère via `list/1` — doit les voir). Le `modop/` reste exclu : les overlays n'ont pas d'identité
-  # de rôle. Fragment sans `metadata.name` → ignoré (baseline/overlay).
-  # Collision `name` → fail-loud (`:name_collision`).
-  #
-  # Un YAML NON-DÉCODABLE dans le catalogue n'est PAS skippé en silence (sinon le rôle serait
-  # INVISIBLE de l'index → `load` le verrait `:not_found` (rôle absent) au lieu de `:invalid_schema`
-  # (rôle corrompu), et `list/1` (énuméré par PermanentBoot) l'amputerait du boot sans bruit → deploy
-  # « vert » incomplet). Un fichier corrompu = artefact de deploy cassé → on propage
-  # `{:error, {:invalid_yaml, path}}` (fail-loud). Conséquence assumée : un seul fichier illisible
-  # empoisonne tout l'index (catalogue corrompu = on n'en charge AUCUN) — cohérent avec « on ne sauve
-  # pas un truc blessé ».
-  defp name_index(dir) do
-    files =
-      Path.wildcard(Path.join(dir, "*.yaml")) ++
-        Path.wildcard(Path.join([dir, "archivistes", "*.yaml"])) ++
-        Path.wildcard(Path.join([dir, "monks", "*.yaml"]))
-
-    Enum.reduce_while(files, {:ok, %{}}, fn path, {:ok, acc} ->
-      case decode_yaml(path) do
-        {:ok, raw} ->
-          case get_in(raw, ["metadata", "name"]) do
-            name when is_binary(name) and name != "" ->
-              if Map.has_key?(acc, name) do
-                Logger.error("CapProfile: collision metadata.name #{inspect(name)} (#{path})")
-                {:halt, {:error, :name_collision}}
-              else
-                {:cont, {:ok, Map.put(acc, name, raw)}}
-              end
-
-            _ ->
-              {:cont, {:ok, acc}}
-          end
-
-        {:error, reason} ->
-          Logger.error(
-            "CapProfile: YAML illisible #{path} (#{inspect(reason)}) — catalogue corrompu"
-          )
-
-          {:halt, {:error, {:invalid_yaml, path}}}
-      end
-    end)
-  end
-
-  defp read_modops(modop_set) do
-    result =
-      Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
-        # Le nom de modop vient du catalogue / d'un composeur (entrée non maîtrisée) et sert de
-        # COMPOSANT de chemin (`modop/<name>/profile.yaml`). Un nom avec `..`/`/` traverserait hors du
-        # modop_root (charger un YAML arbitraire de l'hôte comme « modop »). On le caste en slug AVANT
-        # tout `Path.join` ET on confine la feuille sous `<root>/modop/` : un nom malformé n'atteint
-        # jamais le FS (fail-closed → `:invalid_modop`, comme un fragment réservé/non conforme).
-        modop_root = Path.join(root_dir(), "modop")
-
-        with {:ok, dir} <- Fleet.Slug.confined_join(modop_root, name) do
-          path = Path.join(dir, "profile.yaml")
-
-          if File.exists?(path) do
-            with {:ok, raw} <- decode_yaml(path),
-                 :ok <- Schema.validate_modop_keys(raw),
-                 :ok <- Schema.validate(raw, :modop) do
-              {:cont, {:ok, [raw | acc]}}
-            else
-              {:error, reason} -> {:halt, {:error, reason}}
-            end
-          else
-            Logger.warning("modop not found: #{inspect(name)} at #{path}")
-            {:halt, {:error, :modop_not_found}}
-          end
-        else
-          {:error, _slug_or_escape} ->
-            Logger.warning("modop name non confiné (slug/traversal) : #{inspect(name)} — refusé")
-            {:halt, {:error, :invalid_modop}}
-        end
-      end)
-
-    case result do
-      {:ok, modops} -> {:ok, Enum.reverse(modops)}
-      error -> error
-    end
-  end
-
-  defp decode_yaml(path) do
-    case YamlElixir.read_from_file(path) do
-      {:ok, map} when is_map(map) -> {:ok, map}
-      {:ok, _other} -> {:error, :invalid_schema}
-      {:error, _reason} -> {:error, :invalid_schema}
-    end
-  end
+  defdelegate list(), to: Catalog
+  defdelegate list(dir), to: Catalog
 
   @doc """
   Racine du catalogue cap-profiles (`<root_dir>/<role>.yaml`). **Source UNIQUE** : tout
   énumérateur (ex. `Fleet.Spawner.PermanentBoot`) DOIT scanner ce dir, sinon enum et load
-  se désaccordent.
+  se désaccordent. **Délègue** à `Fleet.CapProfile.Catalog.root_dir/0` (consommé hors-app).
   """
   @spec root_dir() :: String.t()
-  def root_dir do
-    # Un :root_dir explicitement nil (ex. fuite d'env cross-test en umbrella) ne doit JAMAIS
-    # atteindre Path.join → coalesce vers le défaut (état nil rendu inoffensif au boundary).
-    # Défaut = le priv BUNDLÉ (`:code.priv_dir`) → résout en RELEASE (lib/fleet_cap_profile-vsn/priv/…)
-    # comme en dev (_build/…/priv) SANS aucun env. L'ancien défaut `"cap-profiles"` (relatif au CWD) n'a
-    # jamais été correct hors d'un `LCARS_CAPPROFILES_ROOT` explicite → `:enoent` en release (étanchéité).
-    Application.get_env(:fleet_cap_profile, :root_dir) ||
-      Path.join(to_string(:code.priv_dir(:fleet_cap_profile)), "canon/cap-profiles")
-  end
+  defdelegate root_dir(), to: Catalog
 
   # ============================================================
   # Deep merge & canonical encoding

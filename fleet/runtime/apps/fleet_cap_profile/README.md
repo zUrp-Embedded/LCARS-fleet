@@ -85,7 +85,36 @@ Fichier + cache :
   (résolu via `:code.priv_dir(:fleet_cap_profile)`) ; read+parse caché en
   `:persistent_term` (lazy, erreurs non-cachées)
 
+## Catalog
+
+Front FS du catalogue (scan répertoire, décodage YAML, résolution d'un rôle/modop en map
+brute pré-`to_struct`) porté par le cluster `Fleet.CapProfile.Catalog` (extrait du cœur —
+concern UNIQUE : l'I/O du catalogue ; le cœur `load`/`compose` ne touche jamais le FS).
+En AMONT du cœur : dépend de `Fleet.CapProfile.Schema` (validation modop) + `Fleet.Slug`
+(confinement), aucun n'appelle Catalog → pas de cycle. **Invariant de sécurité** : un
+profil est résolu par sa prop `metadata.name`, **jamais** par le nom de fichier
+(cosmétique) — enum et load partagent la même clé ; un nom de modop est confiné sous
+`<root>/modop/` via `Fleet.Slug.confined_join/2` (fail-closed).
+
+- `Fleet.CapProfile.Catalog.read_role/1` — résout par `metadata.name`, retourne la map brute
+  (`{:ok, raw}` / `:not_found` / `:invalid_schema`). Appelé par `load/1` + `compose/2` (cœur)
+- `Fleet.CapProfile.Catalog.read_modops/1` — lit + valide (via `Schema`) les fragments modop
+  nommés, ordre préservé, confinement Slug. Appelé par `compose/2` (cœur)
+- `Fleet.CapProfile.Catalog.list/1` — noms (`metadata.name`) du catalogue, trié ;
+  `:name_collision` fail-loud sur doublon
+- `Fleet.CapProfile.Catalog.root_dir/0` — racine FS du catalogue
+
+`Fleet.CapProfile` ré-expose `list/1` (arités 0 et 1) et `root_dir/0` en **délégateurs**
+(l'API publique consommée **hors-app** ne bouge pas) :
+
+- `Fleet.CapProfile.list/0,1` → `Catalog.list/0,1` — **source UNIQUE** d'énumération ;
+  consommé par `Fleet.Spawner.PermanentBoot` (aligne son dir + énumère) et
+  `Fleet.Observation.Deck` (rôles du dashboard)
+- `Fleet.CapProfile.root_dir/0` → `Catalog.root_dir/0` — consommé par `Fleet.Spawner.PermanentBoot`
+
 ## Configuration
 
-- `:fleet_cap_profile, :root_dir` — racine FS des cap-profiles (default
-  `cap-profiles` cwd-relative)
+- `:fleet_cap_profile, :root_dir` — racine FS des cap-profiles, lue par
+  `Fleet.CapProfile.Catalog.root_dir/0` (les tests la pilotent via `Application.put_env/3`).
+  Défaut = le canon BUNDLÉ `priv/canon/cap-profiles` résolu par
+  `:code.priv_dir(:fleet_cap_profile)` (résout en release comme en dev, sans env)
