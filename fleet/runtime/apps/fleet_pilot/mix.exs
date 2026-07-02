@@ -51,7 +51,14 @@ defmodule Fleet.Pilot.MixProject do
       # les connexions stale (le défaut Finch `:infinity` laisse une connexion idle traîner → le serveur
       # forge la ferme côté lui → le 1er appel après idle pend jusqu'au receive_timeout). Req l'amène en
       # transitif ; dep DIRECTE car on instancie un Finch nommé dans l'arbre de supervision.
-      {:finch, "~> 0.22"}
+      {:finch, "~> 0.22"},
+      # Property-based testing du wire-protocol pur (`ForgeProtocol` round-trip) :
+      # prouve l'invariant parse∘build == identité sur des role/sha générés, pas
+      # seulement sur des exemples câblés. `only: [:dev, :test]` (pas [:test] seul) :
+      # `fleet_credentials` (dép in_umbrella) déclare déjà stream_data en [:dev, :test],
+      # et la convergence umbrella exige que cette déclaration directe couvre au moins
+      # les mêmes envs, sinon `mix deps` refuse (only mismatch).
+      {:stream_data, "~> 1.2", only: [:dev, :test]}
     ]
   end
 end

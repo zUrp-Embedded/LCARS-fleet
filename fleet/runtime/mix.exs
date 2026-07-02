@@ -8,7 +8,42 @@ defmodule LcarsFleetRuntime.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      releases: releases()
+      releases: releases(),
+      dialyzer: dialyzer()
+    ]
+  end
+
+  # R0.6 — filet de types de l'umbrella (Dialyxir). Le PLT couvre TOUTES les apps
+  # umbrella (elles s'analysent ensemble depuis la racine) + `:mix`/`:ex_unit` car
+  # des modules touchent des tâches Mix (verrou release, tâches lcars.*) et le code
+  # de test. PLT stocké sous `_build/plts` (dossier partagé, stable entre envs —
+  # évite de reconstruire un PLT par MIX_ENV).
+  defp dialyzer do
+    [
+      plt_add_apps: [
+        :mix,
+        :ex_unit,
+        :fleet_api,
+        :fleet_cap_profile,
+        :fleet_coord,
+        :fleet_credentials,
+        :fleet_event_router,
+        :fleet_mcp,
+        :fleet_observation,
+        :fleet_pilot,
+        :fleet_pipeline,
+        :fleet_project_bootstrap,
+        :fleet_sp_builder,
+        :fleet_spawner,
+        :fleet_starfleet,
+        :fleet_task_monitor,
+        :fleet_task_queue
+      ],
+      plt_core_path: "_build/plts",
+      plt_local_path: "_build/plts",
+      ignore_warnings: ".dialyzer_ignore.exs",
+      # signale un filtre d'ignore devenu obsolète (code déplacé/corrigé à l'éclatement) → on le nettoie.
+      list_unused_filters: true
     ]
   end
 
@@ -71,7 +106,7 @@ defmodule LcarsFleetRuntime.MixProject do
     # indépendante (Sobelow ↔ holes injection, Dialyzer ↔ @spec, Credo ↔ cohérence).
     [
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev], runtime: false}
     ]
   end

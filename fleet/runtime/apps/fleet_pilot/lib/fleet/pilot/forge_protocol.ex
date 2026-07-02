@@ -101,6 +101,16 @@ defmodule Fleet.Pilot.ForgeProtocol do
   Format du marqueur de step_run signé `[step_run:<role>:<sha>]` (builder dérivé de `@step_run_prefix`, tout comme
   son prédicat `step_run_marker?/1` — un changement de format se fait sur CE seul littéral). Posé par
   `StepRunCompleter` en fin-de-step-run, sert aussi de `:dedup_signature` (replay idempotent).
+
+  Round-trip builder -> prédicat (le prédicat reconnaît ce que le builder grave) :
+
+      iex> marker = Fleet.Pilot.ForgeProtocol.step_run_marker("engineer", "deadbeef")
+      iex> marker
+      "[step_run:engineer:deadbeef]"
+      iex> Fleet.Pilot.ForgeProtocol.step_run_marker?(marker)
+      true
+      iex> Fleet.Pilot.ForgeProtocol.step_run_marker?("juste un commentaire")
+      false
   """
   @spec step_run_marker(String.t(), String.t()) :: String.t()
   def step_run_marker(role, sha) when is_binary(role) and is_binary(sha) do

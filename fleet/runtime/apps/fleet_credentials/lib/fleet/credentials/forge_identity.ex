@@ -208,10 +208,11 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   defp hostname do
-    case :inet.gethostname() do
-      {:ok, h} -> List.to_string(h)
-      _ -> "localhost"
-    end
+    # :inet.gethostname/0 est spec'd {:ok, _} (lecture kernel locale, pas de réseau) → match direct.
+    # Fail-loud : si un jour ça dévie, on veut un MatchError net, pas un "localhost" silencieux trompeur
+    # (l'ancien fallback `_ -> "localhost"` était mort selon la spec OTP).
+    {:ok, h} = :inet.gethostname()
+    List.to_string(h)
   end
 
   defp blank_to_nil(nil), do: nil

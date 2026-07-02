@@ -82,12 +82,9 @@ defmodule Fleet.Spawner.Pod.Recovery do
   defp phase_to_continue(_), do: :allocate
 
   def phase_from_string(s) when is_binary(s) do
-    s
-    |> String.to_existing_atom()
-    |> case do
-      atom when is_atom(atom) -> atom
-      _ -> nil
-    end
+    # String.to_existing_atom/1 rend TOUJOURS un atome (ou raise ArgumentError si l'atome n'existe pas —
+    # rattrapé ci-dessous → nil). Pas de `case`/fallback : l'ancien `_ -> nil` était mort (jamais un non-atom).
+    String.to_existing_atom(s)
   rescue
     ArgumentError -> nil
   end

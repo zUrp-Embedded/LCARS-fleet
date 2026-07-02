@@ -159,7 +159,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  defp error_text(reason) when is_binary(reason), do: reason
+  # PodTools.handle_tool_call ne renvoie que des atomes/tuples d'erreur (jamais un binaire) → une clause
+  # suffit ; `inspect/1` rend toute raison lisible dans le champ text de la réponse MCP d'erreur.
   defp error_text(reason), do: inspect(reason)
 
   defp encode(map), do: Jason.encode!(map) <> "\n"

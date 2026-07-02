@@ -44,7 +44,10 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   post "/webhook/gitea" do
     case verify_hmac(conn) do
       :ok ->
-        body = conn.body_params || %{}
+        # body_params garanti map par `Plug.Parsers` en amont (JSON malformé → 415 avant d'arriver ici).
+        # Pas de `|| %{}` : ce filet est mort (body_params jamais nil) ET ne gérerait pas non plus le cas
+        # `%Plug.Conn.Unfetched{}` (≠ nil) — le vrai garde-fou d'input est Plug.Parsers, pas un défaut ici.
+        body = conn.body_params
         # Ne PAS défaulter aveuglément sur "push" : préférer l'action (routée par
         # events.yaml, ex. gitea.opened/closed), sinon l'event authoritatif (header X-Gitea-Event),
         # sinon "unknown" — un event sans action et non-push ne doit pas être mislabelé "push".

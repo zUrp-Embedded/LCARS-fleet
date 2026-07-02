@@ -5,6 +5,10 @@ defmodule Fleet.Pilot.ForgeProtocolTest do
   # l'invariant `parse ∘ build == identité` (un changement de format casse le test ici, pas en prod).
   alias Fleet.Pilot.ForgeProtocol
 
+  # Exemples exécutables des @doc (step_run_marker/2 + step_run_marker?/1) : la doc reste vraie
+  # ou la suite casse.
+  doctest Fleet.Pilot.ForgeProtocol
+
   describe "feature_branch/2 + parse_feature_branch/1 (build+parse co-localisés)" do
     test "parse_feature_branch extrait {issue, role} d'une branche systeme" do
       assert {:ok, {42, "engineer"}} =
