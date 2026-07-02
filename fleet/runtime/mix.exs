@@ -62,9 +62,35 @@ defmodule LcarsFleetRuntime.MixProject do
       gate: [
         "compile --warnings-as-errors",
         "test",
+        &shell_gate/1,
         "lcars.contracts.check"
       ]
     ]
+  end
+
+  # Etape `mix gate` : filet des tests HORS-mix (python du bridge MCP stdio + bats sanctuaire) que
+  # `mix test` (ExUnit) ne voit pas. Sans ce cablage, test/test_fleet_mcp_stdio_bridge.py peut virer
+  # ROUGE en silence — personne ne le rejoue — exactement le bug (bridge renomme, test jamais rejoue)
+  # qui a motive le filet. Fonction-etape et PAS `mix cmd bash ...` : `cmd` est RECURSIF en umbrella
+  # (il tournerait une fois par app, avec un cwd d'app ou test/shell_gate.sh n'existe pas). Ici la
+  # fonction s'execute UNE fois, a la racine de l'umbrella.
+  #
+  # Durcissement bats : le python BLOQUE toujours (present, sur — shell_gate exit!=0 si FAIL>0 ou
+  # coquille vide → Mix.raise ci-dessous). L'absence de bats reste un WARNING compte DANS shell_gate
+  # (pas d'echec) : durcir `mix gate` sur une machine sans bats-core casserait le gate de tous. A
+  # basculer en echec quand bats-core sera un prerequis pose (installe partout / CI) : passer
+  # BATS_MISSING_FATAL=1 a shell_gate.sh (ou flipper son defaut).
+  defp shell_gate(_args) do
+    script = Path.join([__DIR__, "test", "shell_gate.sh"])
+    {out, status} = System.cmd("bash", [script], stderr_to_stdout: true)
+    IO.puts(out)
+
+    if status != 0 do
+      Mix.raise(
+        "shell_gate (filet tests hors-mix) : ECHEC (exit #{status}) — test python du bridge MCP " <>
+          "rouge ou coquille vide (0 test lance). Voir la sortie ci-dessus."
+      )
+    end
   end
 
   # R7 verrou I-CBC — step de `mix release` : refuse de bâtir la release si un
