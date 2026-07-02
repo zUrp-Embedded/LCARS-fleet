@@ -110,6 +110,16 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       `unwrap_worker_envelope`, primitif partagé). Vocab canon via l'AUTORITÉ UNIQUE `Fleet.Pipeline.GateDecision`
       (`@gate_decisions` non recopié). Le cœur décisionnel stateful (`apply_verdict`/`gate_decide`/`resume_gate`/
       `complete_business_step_run`) reste dans le module racine.
+    - `Fleet.Pilot.StepRunConsumer.GatekeeperEscalation` — cluster **IMPUR** « escalade gatekeeper »
+      (async-out) extrait du consumer : `dispatch/7` (enqueue le brief d'éval au gatekeeper permanent
+      + kick + télémétrie `[:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached]`). Appelé par
+      `gate_decide` sur le chemin `{:dispatch_gatekeeper, _}` ; rend le contrat étroit
+      `{:ok, corr} | {:error, reason}` (fail-loud : pas de gatekeeper booté / enqueue raté →
+      `{:error, _}`, jamais un pass silencieux). **Frontière blindée** : ne reçoit PAS le `state`
+      entier mais un struct `%GatekeeperEscalation.Seams{}` (les 4 seams
+      `task_queue`/`spawner`/`gatekeeper_pod_id_fun`/`wake_recovery`, `@enforce_keys` → un accès à un
+      autre champ de state ne compile pas). Le cœur décisionnel (`gate_decide`/`resume_gate`) reste
+      dans le module racine.
 - `Fleet.Pilot.IncidentConsumer` — consumer Bus **séparé** des events d'**échec** de pod (`pod.failed`/
   `wake.failed`, source `:spawner`) → `IncidentRegistry` (note 1er / escalade récurrent ; wake récurrent =
   `:sp_suspect`). **Stateless**, sa propre `Task.Supervisor` d'offload (`:runner` défaut nil→sync, prod
