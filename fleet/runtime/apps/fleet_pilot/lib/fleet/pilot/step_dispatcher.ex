@@ -30,6 +30,10 @@ defmodule Fleet.Pilot.StepDispatcher do
   # CHOISIT quel brief selon l'état forge ; BriefBuilder le FORME.
   alias Fleet.Pilot.BriefBuilder
 
+  # Écriture de l'escalade humaine (cluster IMPUR extrait) : le cœur DÉCIDE (budget/IncidentRegistry),
+  # ArchEscalation ÉCRIT (comment gatekeeper dédupliqué + verrou `awaits-arch` sur l'ISSUE).
+  alias Fleet.Pilot.StepDispatcher.ArchEscalation
+
   # Vocabulaire protocole = source unique Fleet.Pilot.Labels (constantes compile-time).
   @in_flight_label Fleet.Pilot.Labels.in_flight()
   @awaits_arch_label Fleet.Pilot.Labels.awaits_arch()
@@ -371,33 +375,25 @@ defmodule Fleet.Pilot.StepDispatcher do
             dispatch_pr_role(:rework, pr_number, head, producer_role, ctx)
 
           {:ok, rounds} ->
-            escalate_rework_to_arch(pr_number, head, %{rounds: rounds, budget: budget}, ctx)
+            ArchEscalation.escalate_rework(
+              arch_seams(ctx),
+              pr_number,
+              head,
+              %{rounds: rounds, budget: budget}
+            )
 
           {:error, reason} ->
             # Budget non vérifiable → on n'entre pas dans une boucle aveugle : on remonte à l'arch.
-            escalate_rework_to_arch(pr_number, head, {:budget_unreadable, reason}, ctx)
+            ArchEscalation.escalate_rework(
+              arch_seams(ctx),
+              pr_number,
+              head,
+              {:budget_unreadable, reason}
+            )
         end
 
       :error ->
         {:skipped, :not_fleet_branch}
-    end
-  end
-
-  # Rework PR épuisé (rounds > budget, ou budget illisible) → l'arch tranche. Symétrique de
-  # `escalate_conflict_to_arch` : commentaire gatekeeper dédupliqué + verrou `lcars-awaits-arch` sur l'ISSUE
-  # (le poller la SKIP, plus de re-dispatch). Retour `{:skipped, _}` (forme gérée par le poller).
-  defp escalate_rework_to_arch(pr_number, head, detail, ctx) do
-    with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head) do
-      signature = "[rework-exhausted-escalation:pr-#{pr_number}]"
-
-      body =
-        "**Architecte** — ⚠ Rework non convergent sur la PR ##{pr_number} (issue ##{issue_n}) : le budget " <>
-          "de rounds de review est épuisé (`#{inspect(detail)}`). Le producteur ne satisfait pas les juges. " <>
-          "Reprends : re-cadre le brief, tranche le désaccord, ou ferme la PR. L'issue reste hors-dispatch " <>
-          "tant que `lcars-awaits-arch` est posé.\n\n" <> signature
-
-      escalate_to_arch(issue_n, signature, body, ctx)
-      {:skipped, {:rework_exhausted_escalated, pr_number}}
     end
   end
 
@@ -446,7 +442,7 @@ defmodule Fleet.Pilot.StepDispatcher do
         resolve_first_conflict(head, pr_number, ctx)
 
       {:escalated, _} ->
-        escalate_conflict_to_arch(pr_number, head, reason, ctx)
+        ArchEscalation.escalate_conflict(arch_seams(ctx), pr_number, head, reason)
 
       {:escalation_failed, e} ->
         # Récurrence DÉTECTÉE (le conflit persiste) → on escalade à l'arch comme prévu. Mais le issue
@@ -456,7 +452,7 @@ defmodule Fleet.Pilot.StepDispatcher do
             "issue error_system créé (forge down ?) ; escalade arch tentée tout de même : #{inspect(e)}"
         )
 
-        escalate_conflict_to_arch(pr_number, head, reason, ctx)
+        ArchEscalation.escalate_conflict(arch_seams(ctx), pr_number, head, reason)
     end
   end
 
@@ -473,57 +469,21 @@ defmodule Fleet.Pilot.StepDispatcher do
     end
   end
 
-  # Encode un n° de PR en LETTRES (base-26 bijective a..z) → DIGIT-FREE, donc INVISIBLE à `normalize`
-  # (`~r/\d+/ → "N"`) côté IncidentRegistry. Bijectif (chaque numéro → une chaîne unique : 1→a … 26→z, 27→aa)
-  # → deux PR distinctes ont des clés incident DISTINCTES (l'invariant qui isole les conflits par PR).
-  # Numéro ≤ 0 / non-entier (anomalie forge) → `"x"` constant (digit-free, ne crash pas la clé).
+  # Contrat de frontière de l'écriture d'escalade : le cœur décide, ArchEscalation écrit. On ne lui
+  # passe QUE les 3 seams forge (`@enforce_keys` → un accès hors-3-seams ne compile pas), jamais le ctx entier.
+  defp arch_seams(ctx),
+    do: %ArchEscalation.Seams{forge: ctx.forge, repo: ctx.repo, forge_opts: ctx.forge_opts}
+
+  # Encode un n° de PR en LETTRES (base-26 bijective a..z) → DIGIT-FREE, invisible au `normalize` de
+  # l'IncidentRegistry (qui collapse ~r/\d+/ → "N") : deux PR distinctes gardent des clés incident
+  # DISTINCTES (isole les conflits par PR). n ≤ 0 / non-entier (anomalie forge) → "x" (ne crash pas la clé).
+  # Vit ici (cœur) : seul `dispatch_conflict_resolution` le consomme (clé d'incident, pas l'écriture d'escalade).
   defp encode_pr_letters(n) when is_integer(n) and n > 0, do: encode_pr_letters(n, [])
   defp encode_pr_letters(_), do: "x"
-
   defp encode_pr_letters(0, acc), do: List.to_string(acc)
 
-  defp encode_pr_letters(n, acc) do
-    rem0 = rem(n - 1, 26)
-    encode_pr_letters(div(n - 1, 26), [?a + rem0 | acc])
-  end
-
-  # Conflit non auto-résolu (1 tentative déjà faite) → l'arch tranche. Commentaire signé gatekeeper (dédupliqué)
-  # + verrou `lcars-awaits-arch` sur l'ISSUE → le poller la SKIP (hors-dispatch, plus de retry). Honnête : on ne
-  # masque pas, on remonte au seul canal humain (l'arch).
-  defp escalate_conflict_to_arch(pr_number, head, reason, ctx) do
-    with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head) do
-      signature = "[merge-conflict-escalation:pr-#{pr_number}]"
-
-      body =
-        "**Architecte** — ⚠ Conflit de merge non auto-résolu sur la PR ##{pr_number} (issue ##{issue_n}) " <>
-          "après une tentative de rebase+résolution (`#{inspect(reason)}`). Reprends : fais rebaser/résoudre la " <>
-          "PR sur `main`, ou re-cadre. L'issue reste hors-dispatch tant que `lcars-awaits-arch` est posé.\n\n" <>
-          signature
-
-      escalate_to_arch(issue_n, signature, body, ctx)
-
-      # `{:skipped, _}` = forme GÉRÉE par le poller (step_process_pulls) → compté skipped, pas de crash.
-      # Un `{:escalated, _}` ne serait dans AUCUNE clause du `case do_poll` → CaseClauseError à chaque tick :
-      # un retour de dispatch DOIT être {:ok|:skipped|:error}, jamais une 4ᵉ forme.
-      {:skipped, {:merge_conflict_escalated, pr_number}}
-    end
-  end
-
-  # CŒUR d'escalade arch (factorisé — conflit ET rework épuisé) : commentaire gatekeeper DÉDUPLIQUÉ
-  # (signé via `as_role`) + verrou `lcars-awaits-arch` sur l'ISSUE → le poller la SKIP
-  # (hors-dispatch). Best-effort : on remonte au canal humain (l'arch), on ne masque pas. Un seul point d'écriture
-  # forge pour toutes les escalades arch PR (pas de fork de signature/label).
-  defp escalate_to_arch(issue_n, signature, body, ctx) do
-    gk_opts =
-      ctx.forge_opts
-      |> Fleet.Pilot.ForgeClient.as_role(Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
-      |> Keyword.put(:dedup_signature, signature)
-      |> Keyword.put(:dedup_any_author, true)
-
-    _ = ctx.forge.post_comment(ctx.repo, issue_n, body, gk_opts)
-    _ = ctx.forge.add_label(ctx.repo, issue_n, @awaits_arch_label, ctx.forge_opts)
-    :ok
-  end
+  defp encode_pr_letters(n, acc),
+    do: encode_pr_letters(div(n - 1, 26), [?a + rem(n - 1, 26) | acc])
 
   defp dispatch_pr_role(kind, pr_number, head, role, ctx) do
     with {:ok, {issue_n, _producer}} <- parse_feature_branch_or_skip(head),

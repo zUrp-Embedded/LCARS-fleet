@@ -54,6 +54,21 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   Le pin de base (`ls-remote` du tip, hors-pod) passe par `Fleet.Credentials.Shell.git` : borné par
   construction (process-group dédié, tué entier à la deadline mur) — remplace le `Task.async`+`brutal_kill`
   qui ne tuait que le Task BEAM en laissant fuir le process git porteur du token forge.
+  Les concerns à **frontière nette** sont éclatés en sous-modules :
+    - `Fleet.Pilot.StepDispatcher.ProjectResolver` — cluster I/O **quasi-pur** (aucun seam module) :
+      pinning de la base git (`base_sha`/`gate_base_sha`) via `git ls-remote` HORS-POD.
+      `default_project_resolver/2` = API publique (défaut du seam `:project_resolver`, `defdelegate`
+      depuis le module racine).
+    - `Fleet.Pilot.StepDispatcher.ArchEscalation` — cluster **IMPUR** « escalade arch » (écriture forge) :
+      `escalate_rework/4` (rework non convergent, budget épuisé MA-06) + `escalate_conflict/4` (conflit de
+      merge récurrent) posent le **commentaire gatekeeper dédupliqué** (`as_role` + `dedup_signature`) + le
+      verrou `lcars-awaits-arch` sur l'ISSUE (poller SKIP → fin du churn) via l'unique point d'écriture
+      `escalate_to_arch` (privé, pas de fork). `encode_pr_letters/1` (pur, base-26 digit-free) vit ici,
+      consommé par le cœur pour clé-er l'IncidentRegistry. **Frontière blindée** : reçoit un struct
+      `%ArchEscalation.Seams{}` (les 3 seams `forge`/`repo`/`forge_opts`, `@enforce_keys` → un accès
+      hors-3-seams ne compile pas), jamais le `ctx` entier. La **DÉCISION** d'escalade (budget forge,
+      IncidentRegistry, résolution-vs-escalade) reste le SINGLE-AUTHORITY du cœur (`dispatch_rework`/
+      `dispatch_conflict_resolution`) — ArchEscalation ne fait QU'ÉCRIRE.
 - `Fleet.Pilot.BriefBuilder` — **autorité du FORMAT des briefs** : worker / judge / brief-review /
   rework / conflit + instructions de voix de l'eng. `StepDispatcher` CHOISIT quel brief selon l'état forge
   (`build_brief/9` dispatche sur `brief_kind`/`judge_target`), `BriefBuilder` le FORME. La **judge-ness**
