@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-02 (atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
+**Dernière révision** : 2026-07-02 (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
 **Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -117,6 +117,19 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   (2) l'engagement se lit sur la ROUTE (append-only, robuste), pas sur le chargement de la workflow_map : un échec
   TRANSITOIRE de workflow_map (réseau/forge nil) sur un pipeline routé le classe ENGAGÉ (bail TENU, fail-closed) —
   le dispatch de son step fail-loud si la workflow_map manque, mais le bail ne se libère pas.
+    - `Fleet.Pilot.Poller.Reconciliation` — cluster **IMPUR** « réconciliation des verrous orphelins » extrait
+      du tick loop (frontière nette : le reste du poller = boucle irréductible). Un verrou `lcars-in-flight`
+      ORPHELIN (pod reapé par le PodWarden — process retiré, label forge survivant) bloquerait la brique pour
+      TOUJOURS (`dispatch_*` skip `:in_flight`) → ce module compare les verrous forge aux refs qu'un pod VIVANT
+      possède réellement (refs REPO-QUALIFIÉES `{repo, :issue|:pr, n}` : pas de collision cross-repo sur le seul
+      numéro) et **réclame** (retire le label) les orphelins CONFIRMÉS → re-dispatch au prochain tick. **API** :
+      `reconcile(issues, pulls, pr_issue_ids, prior_suspects, %Seams{}) :: MapSet.t()` — LIT 5 seams, N'ÉCRIT rien
+      (rend le nouveau set de suspects). **Fail-safe** : si l'énumération des pods échoue (`:error`), ne réclame
+      RIEN (jamais déverrouiller à l'aveugle). **Frontière blindée** : `%Seams{}` (`@enforce_keys`
+      `forge`/`spawner`/`task_queue`/`repo`/`forge_opts` — accès hors-5-seams ne compile pas), le caller résout
+      les défauts prod (`spawner || Fleet.Spawner`) à SON site. La **grâce 2-tick** (`prior_suspects`) et
+      l'**agrégation cross-repo** (`MapSet.union` des suspects de tous les repos du tick) = état CROSS-TICK →
+      RESTENT au cœur (`do_poll`/`step_do_poll`). Ne nomme jamais `Poller` (pas de cycle).
 - `Fleet.Pilot.Labels` / `Fleet.Pilot.ForgeProtocol` — **vocabulaire wire-protocol** (source unique, build+parse
   **co-localisés** : un seul point si un format change). `Labels` = les **labels-verrous** non dérivables de
   l'état forge (`lcars-in-flight`/`lcars-awaits-arch`). `ForgeProtocol` = les **formats purs** (aucun I/O) : la

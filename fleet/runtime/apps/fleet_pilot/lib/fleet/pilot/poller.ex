@@ -42,9 +42,12 @@ defmodule Fleet.Pilot.Poller do
   use GenServer
   require Logger
 
+  alias Fleet.Pilot.Poller.Reconciliation
   alias Fleet.Pilot.StepDispatcher
 
-  # Verrou workflow_run (source unique `Fleet.Pilot.Labels`) — lu par la réconciliation d'orphelins.
+  # Verrou workflow_run (source unique `Fleet.Pilot.Labels`) — fast-path `classify_issue` (in-flight →
+  # ENGAGÉ sans lecture de route). La réconciliation d'orphelins re-dérive le SIEN de la même autorité
+  # (`Reconciliation`), même source, pas un fork.
   @in_flight Fleet.Pilot.Labels.in_flight()
 
   # Verrou HUMAIN posé sur l'ISSUE à l'escalade (verdict gatekeeper escalate/halt/redirect, ou conflit non
@@ -224,8 +227,9 @@ defmodule Fleet.Pilot.Poller do
 
   # rescue ET catch :exit/:throw — un `GenServer.call` vers une dép morte (enqueue→TaskQueue,
   # spawn→Spawner) lève `:exit`, PAS `{:error}` ; sans le catch, la boucle crashait (≠ « state preserved »
-  # annoncé). On dégrade gracieusement (err_streak + backoff, state conservé), comme `live_owned_refs` (un
-  # `GenServer.call` peut toujours `:exit` si la cible meurt — ne jamais le laisser remonter nu).
+  # annoncé). On dégrade gracieusement (err_streak + backoff, state conservé), comme
+  # `Reconciliation.live_owned_refs` (un `GenServer.call` peut toujours `:exit` si la cible meurt — ne
+  # jamais le laisser remonter nu).
   defp poll_crash(state, detail, kind_label) do
     Logger.error(
       "fleet_pilot Poller unexpected #{kind_label} in do_poll: #{inspect(detail)} — state preserved"
@@ -258,8 +262,8 @@ defmodule Fleet.Pilot.Poller do
   # de RÉCONCILIATION (`orphan_lock_suspects`, grace 2-tick) DOIT persister cross-tick : sans le re-thread,
   # la grace ne s'accumule jamais → un verrou orphelin n'est JAMAIS réclamé (le pipe wedge). On l'agrège
   # (union sur tous les repos) dans le state rendu. `poll_count` +1/tick (observabilité).
-  # Les refs de verrou sont REPO-QUALIFIÉES (`{repo, :issue|:pr, n}`, voir `live_owned_refs`/
-  # `reconcile_orphan_locks`/`parse_pod_ref`) : l'union cross-repo des suspects ne collisionne plus sur le seul
+  # Les refs de verrou sont REPO-QUALIFIÉES (`{repo, :issue|:pr, n}`, construites dans
+  # `Reconciliation`) : l'union cross-repo des suspects ne collisionne plus sur le seul
   # numéro → un pod vivant #N/repoB NE masque PLUS un orphelin #N/repoA, et la grace 2-tick ne se contamine
   # plus entre repos (plus de double-spawn). La clé porte l'identité.
   defp do_poll(state) do
@@ -377,8 +381,25 @@ defmodule Fleet.Pilot.Poller do
       # Réconciliation verrou AVANT dispatch : un `lcars-in-flight` orphelin (pod mort sans avoir
       # complété → reapé, mais le label survit côté forge) bloquerait la brique pour TOUJOURS
       # (`dispatch_*` skip `:in_flight`). On le réclame (grace 2-tick) → le prochain tick re-dispatche.
-      # Sans ça, un seul stall de pod wedge le pipe définitivement.
-      new_suspects = reconcile_orphan_locks(issues, pulls, pr_issue_ids, state, forge)
+      # Sans ça, un seul stall de pod wedge le pipe définitivement. La DÉCISION vit dans
+      # `Reconciliation` (lit 5 seams, rend le set de suspects) ; la grâce 2-tick (`prior_suspects`) et
+      # l'union cross-repo restent ICI (état cross-tick). On résout les défauts prod des seams à CE site.
+      reconciliation_seams = %Reconciliation.Seams{
+        forge: forge,
+        spawner: state.spawner || Fleet.Spawner,
+        task_queue: state.task_queue || Fleet.TaskQueue,
+        repo: state.repo,
+        forge_opts: state.forge_opts
+      }
+
+      new_suspects =
+        Reconciliation.reconcile(
+          issues,
+          pulls,
+          pr_issue_ids,
+          state.orphan_lock_suspects,
+          reconciliation_seams
+        )
 
       # opts de dispatch calculées UNE fois/tick (partagées issues + pulls), pas 2×.
       opts = step_dispatch_opts(state)
@@ -437,141 +458,6 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # ── Réconciliation verrou orphelin ────────────────────────────────────────────────────────────
-  # Un verrou `lcars-in-flight` est ORPHELIN si la brique le porte mais qu'aucun pod vivant ne la
-  # travaille. Cause : un pod mort (deadline `:result_timeout`, crash, restart BEAM) reapé par
-  # le PodWarden — qui retire le PROCESS mais PAS le label forge. Symétrie cassée → le poller le
-  # répare. Grace 2-tick (intersection avec les suspects du tick précédent) : on ne réclame qu'un
-  # orphelin CONFIRMÉ, jamais un pod fraîchement dispatché (pas encore registré) ou en cours de mort.
-  defp reconcile_orphan_locks(issues, pulls, pr_issue_ids, state, forge) do
-    case live_owned_refs(state) do
-      # Énumération des pods indisponible → fail-safe : on ne réclame RIEN (ne jamais déverrouiller
-      # à l'aveugle), on garde les suspects en l'état.
-      :error ->
-        state.orphan_lock_suspects
-
-      owned ->
-        repo = state.repo
-
-        # Orphelins REPO-QUALIFIÉS (`{repo, :issue|:pr, n}`) : la clé de verrou porte le repo, donc
-        # `owned` (refs repo-scopées des pods vivants de CE repo) et `orphan_lock_suspects` (cross-tick, tous
-        # repos) ne collisionnent plus sur le seul numéro. Un orphelin #N/repoA n'est plus masqué par un pod
-        # vivant #N/repoB, et la grace 2-tick ne se contamine plus entre repos.
-        issue_orphans =
-          for i <- issues,
-              n = i["number"],
-              locked?(i),
-              # une issue avec PR ouverte est en phase JUGE (verrou côté PR) → pas un orphelin issue
-              not MapSet.member?(pr_issue_ids, n),
-              not MapSet.member?(owned, {repo, :issue, n}),
-              into: MapSet.new(),
-              do: {repo, :issue, n}
-
-        pr_orphans =
-          for p <- pulls,
-              n = p["number"],
-              locked?(p),
-              not MapSet.member?(owned, {repo, :pr, n}),
-              into: MapSet.new(),
-              do: {repo, :pr, n}
-
-        orphaned_now = MapSet.union(issue_orphans, pr_orphans)
-        to_reclaim = MapSet.intersection(orphaned_now, state.orphan_lock_suspects)
-        Enum.each(to_reclaim, fn {_repo, _type, n} -> reclaim_lock(forge, state, n) end)
-        MapSet.difference(orphaned_now, to_reclaim)
-    end
-  end
-
-  # Refs `{repo, :issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes STABLES
-  # (`<repo-slug>-issue-<n>-<role>` / `<repo-slug>-pr-<n>-<role>` ; pas de suffixe timestamp).
-  # Filtre par **tâche active** (TaskQueue) : un verrou n'est légitimement tenu QUE pendant qu'un pod a une
-  # tâche active dessus. Un pod VIVANT mais IDLE (long-lived entre deux reworks, ex. l'engineer) ne « possède »
-  # PAS le verrou — sinon il masquerait un juge MORT et la réconciliation ne réclamerait jamais (wedge).
-  # `:error` si l'énumération échoue (fail-safe : on ne réclame rien à l'aveugle).
-  #
-  # SCOPE REPO : on ne garde QUE les pods de `state.repo` (préfixe `PodId.scope_prefix/1`), et la ref
-  # rendue PORTE le repo (`{repo, :issue|:pr, n}`). Sans ça, un pod vivant #N/repoB « posséderait » la ref
-  # `{:issue, N}` globale → il MASQUERAIT l'orphelin #N/repoA (verrou jamais réclamé = wedge) ET la grace
-  # 2-tick se contaminerait cross-repo (double-spawn). La clé de verrou REPO-QUALIFIÉE = l'identité réelle.
-  defp live_owned_refs(state) do
-    spawner = state.spawner || Fleet.Spawner
-    tq = state.task_queue || Fleet.TaskQueue
-    repo = state.repo
-
-    spawner.list_pods()
-    |> Enum.filter(&pod_has_active_task?(tq, &1[:pod_id]))
-    |> Enum.flat_map(&owned_refs_for_pod(&1[:pod_id], repo, tq))
-    |> MapSet.new()
-  rescue
-    _ -> :error
-  catch
-    _, _ -> :error
-  end
-
-  # Refs qu'un pod ACTIF possede. Per-issue (instance) : derivees du pod_id (`-issue-N-` / `-pr-N-`).
-  # SLOT-FREEZE — project pipe (pod_id `<repo>-engineer`, AUCUN `-issue-N-`) : parse_pod_ref rend [] (son
-  # id n'encode pas la brique), donc on derive la brique de sa TACHE ACTIVE (`issue_id` = `issue-N`).
-  # Sinon le poller croit l'eng resident proprietaire d'AUCUN verrou -> reclame le sien -> boucle.
-  defp owned_refs_for_pod(pod_id, repo, tq) do
-    case parse_pod_ref(pod_id, repo) do
-      [] -> project_pod_owned_refs(pod_id, repo, tq)
-      refs -> refs
-    end
-  end
-
-  # Un pod project-scoped de CE repo (prefixe scope) possede la ref de sa tache active (`issue-N` ->
-  # {repo, :issue, N}). Garde le SCOPE repo : un eng d'un autre repo ne possede pas une ref de state.repo.
-  # function_exported? : un stub task_queue sans la fn -> [] (conservateur, ne masque rien).
-  defp project_pod_owned_refs(pod_id, repo, tq) do
-    with true <- String.starts_with?(pod_id, Fleet.Pilot.PodId.scope_prefix(repo)),
-         true <- function_exported?(tq, :pod_active_issue_id, 1),
-         {:ok, issue_id} when is_binary(issue_id) <- tq.pod_active_issue_id(pod_id),
-         {:ok, n} <- Fleet.Pilot.IssueId.parse(issue_id) do
-      [{repo, :issue, n}]
-    else
-      _ -> []
-    end
-  rescue
-    _ -> []
-  catch
-    _, _ -> []
-  end
-
-  # Un pod a-t-il une tâche ACTIVE (assignée, non close) ? `{:ok, nil}` = idle. Tolérant (toute
-  # anomalie → `false` : un pod dont on ne peut établir l'activité ne masque pas un orphelin).
-  defp pod_has_active_task?(tq, pod_id) when is_binary(pod_id) do
-    case tq.pod_status(pod_id) do
-      {:ok, nil} -> false
-      {:ok, _status} -> true
-      _ -> false
-    end
-  rescue
-    _ -> false
-  catch
-    _, _ -> false
-  end
-
-  defp pod_has_active_task?(_tq, _), do: false
-
-  # Refs de verrou qu'un pod d'INSTANCE possede, deduites de son pod_id. Le FORMAT (`issue|pr` + numero)
-  # vit dans `Fleet.Pilot.PodId.parse_ref/2` (l'autorite qui le construit) ; ici on ne fait que SCOPER au
-  # repo courant et habiller la ref. Effet du scope : un pod d'un AUTRE repo rend `:error` (son slug
-  # differe) -> il ne « possede » pas une ref de `state.repo` -> fin du masquage cross-repo (#N/repoB
-  # masquant l'orphelin #N/repoA). La ref rendue PORTE le repo (`{repo, :issue|:pr, n}`) = la cle complete
-  # (l'identite reelle du verrou).
-  defp parse_pod_ref(pod_id, repo) when is_binary(pod_id) and is_binary(repo) do
-    case Fleet.Pilot.PodId.parse_ref(pod_id, repo) do
-      {:ok, {phase, n}} -> [{repo, phase, n}]
-      :error -> []
-    end
-  end
-
-  defp parse_pod_ref(_, _), do: []
-
-  defp locked?(item) do
-    @in_flight in Enum.map(Map.get(item, "labels") || [], & &1["name"])
-  end
-
   # SET des numéros d'issue portant `lcars-awaits-arch`. Dérivé des `issues` DÉJÀ listées
   # par le tick (aucun appel forge supplémentaire) → threadé aux pulls (`:awaits_arch_ids`) pour que
   # `dispatch_review` skippe le juge d'une PR dont l'issue parente attend l'arch.
@@ -581,15 +467,6 @@ defmodule Fleet.Pilot.Poller do
 
   defp awaits_arch?(item) do
     @awaits_arch in Enum.map(Map.get(item, "labels") || [], & &1["name"])
-  end
-
-  defp reclaim_lock(forge, state, number) do
-    Logger.warning(
-      "fleet_pilot Poller réconciliation : verrou #{@in_flight} ORPHELIN sur " <>
-        "#{state.repo}##{number} (pod mort sans complétion) → réclamé (re-dispatch au prochain tick)"
-    )
-
-    forge.remove_label(state.repo, number, @in_flight, state.forge_opts)
   end
 
   # Issues portant une PR fleet ouverte (`lcars/issue-N-role`) = workflow_runs en phase JUGE :
@@ -793,8 +670,8 @@ defmodule Fleet.Pilot.Poller do
   # (loader/spawner/task_queue/clock) ne sont injectés QUE s'ils sont set sur le
   # state — sinon StepDispatcher applique ses défauts réels (passer nil
   # écraserait le défaut).
-  # `:task_queue` est porté par le state (lu dans `live_owned_refs/1`) et DOIT être transmis ici,
-  # sinon StepDispatcher retombe sur `Fleet.TaskQueue` global pour l'enqueue du brief
+  # `:task_queue` est porté par le state (résolu au site d'appel de `Reconciliation.reconcile`) et DOIT
+  # être transmis ici, sinon StepDispatcher retombe sur `Fleet.TaskQueue` global pour l'enqueue du brief
   # (seam de broker non honoré côté dispatch).
   defp step_dispatch_opts(state) do
     [
