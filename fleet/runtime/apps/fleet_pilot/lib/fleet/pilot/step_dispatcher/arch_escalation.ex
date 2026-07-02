@@ -30,9 +30,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   L'API publique est `escalate_rework/4` + `escalate_conflict/4` (pas `escalate_rework_to_arch` :
   le suffixe `_to_arch` est désormais porté par le nom du module — `ArchEscalation.escalate_rework`
   se lit sans redondance). `seams` est le 1ᵉʳ argument (le caller construit le contrat, PUIS
-  décrit l'escalade). `encode_pr_letters/1` (pur) vit avec ce cluster : c'est le vocabulaire de
-  formatage des numéros de PR de l'escalade/incident (voir sa doc), consommé par le cœur pour
-  clé-er l'IncidentRegistry digit-free.
+  décrit l'escalade).
   """
 
   # Vocabulaire protocole = source unique Fleet.Pilot.Labels (constante compile-time, comme dans
