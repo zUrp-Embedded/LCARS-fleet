@@ -86,6 +86,11 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   alias Fleet.EventRouter.Bus
 
+  # Cluster PUR du verdict (décodage gate-decision + rendu trace/review/voix-eng), extrait ici : aucun
+  # champ `state`, opère sur le payload/result brut. Le cœur décisionnel stateful (apply_verdict,
+  # gate_decide, resume_gate, complete_business_step_run) reste dans CE module.
+  alias Fleet.Pilot.StepRunConsumer.Verdict
+
   defstruct [
     :repo,
     :remote,
@@ -400,7 +405,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # `summary` + `lcars-awaits-arch` + unlock → poller SKIP, l'humain tranche via l'arch). SINON la
       # publish sans commit fail-loud `:no_deliverable_commit` = WEDGE silencieux (un eng honnête refuse
       # de deviner → blocage non escaladé). Réutilise tout le filet await_arch.
-      producer?(role, state) and blocked_flag?(unwrap_worker_envelope(payload["result"] || %{})) ->
+      producer?(role, state) and
+          blocked_flag?(Verdict.unwrap_worker_envelope(payload["result"] || %{})) ->
         escalate_blocked_producer(payload, n, role, state)
 
       true ->
@@ -433,7 +439,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp blocked_flag?(_), do: false
 
   defp escalate_blocked_producer(payload, n, role, state) do
-    reason = eng_summary(payload)
+    reason = Verdict.eng_summary(payload)
 
     lead =
       if reason == "",
@@ -557,8 +563,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # → on bloque le merge (rework), jamais un merge sur verdict douteux. (escalade-gatekeeper d'un verdict
   # non-trivial = backlog ; ici fail-closed strict.)
   defp maybe_put_review_event(step_run, :judge, :reviewed, payload) do
-    result = unwrap_worker_envelope(payload["result"] || %{})
-    event = review_event_for_decision(gate_decision(result))
+    result = Verdict.unwrap_worker_envelope(payload["result"] || %{})
+    event = Verdict.review_event_for_decision(Verdict.gate_decision(result))
     step_run = Map.put(step_run, :review_event, event)
 
     # Le juge PRODUIT un `reason`/`details`/`chain` dans sa gate-decision → on le REND sur la review
@@ -566,7 +572,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # générique (« la brique ne satisfait pas son critère »), inactionnable — pour l'humain comme pour
     # le producteur en rework. On ne pose `:review_body` QUE s'il y a de la substance (sans
     # quoi `Map.get(step_run, :review_body, default)` renverrait `nil` au lieu du défaut).
-    case judge_review_body(event, result) do
+    case Verdict.judge_review_body(event, result) do
       body when is_binary(body) and body != "" -> Map.put(step_run, :review_body, body)
       _ -> step_run
     end
@@ -580,64 +586,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # `safe_str` (l'eng peut rendre un non-binaire → ne pas crasher le singleton). Absent/vide → rien
   # posé. Jumeau SORTANT de la famine d'info ENTRANTE — complète la « panne bidirectionnelle de substance ».
   defp maybe_put_eng_summary(step_run, :producer, payload) do
-    case eng_summary(payload) do
+    case Verdict.eng_summary(payload) do
       "" -> step_run
       summary -> Map.put(step_run, :eng_summary, summary)
     end
   end
 
   defp maybe_put_eng_summary(step_run, _pr_role, _payload), do: step_run
-
-  defp eng_summary(payload) do
-    case unwrap_worker_envelope(payload["result"] || %{}) do
-      m when is_map(m) -> m |> Map.get("summary") |> safe_str() |> String.trim()
-      _ -> ""
-    end
-  end
-
-  defp review_event_for_decision("continue"), do: :approve
-  defp review_event_for_decision(_other), do: :request_changes
-
-  # Compose le corps de review depuis la gate-decision du juge. `nil` si aucune substance (→ le
-  # défaut générique de `record_review`, qui porte au moins l'instruction de rework).
-  defp judge_review_body(event, result) when is_map(result) do
-    reason = result |> Map.get("reason") |> safe_str() |> String.trim()
-    details = format_review_details(Map.get(result, "details"))
-    chain = format_review_chain(Map.get(result, "chain"))
-    substance = Enum.reject([reason, details, chain], &(&1 in [nil, ""]))
-
-    if substance == [] do
-      nil
-    else
-      verdict = if event == :approve, do: "APPROUVÉ", else: "CHANGEMENTS DEMANDÉS"
-
-      ["**#{verdict}** — verdict du juge.", reason, details, chain]
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.join("\n\n")
-    end
-  end
-
-  defp judge_review_body(_event, _), do: nil
-
-  # Coercion sûre des sorties LLM : un juge peut rendre `reason`/`details`/`chain` en objets ou listes
-  # imbriqués → interpoler/`to_string` brut crashe (String.Chars non implémenté pour Map/List). Tout
-  # non-binaire est `inspect`é. CRITIQUE : la construction du corps NE DOIT PAS crasher le StepRunConsumer
-  # (SINGLETON) — sinon la fin-de-step-run est perdue, le verrou jamais levé, le pipe wedgé.
-  defp safe_str(nil), do: ""
-  defp safe_str(s) when is_binary(s), do: s
-  defp safe_str(other), do: inspect(other)
-
-  defp format_review_details(d) when is_map(d) and map_size(d) > 0,
-    do:
-      "**Détails**\n" <>
-        Enum.map_join(d, "\n", fn {k, v} -> "- **#{safe_str(k)}** : #{safe_str(v)}" end)
-
-  defp format_review_details(_), do: nil
-
-  defp format_review_chain(c) when is_list(c) and c != [],
-    do: "**Raisonnement**\n" <> Enum.map_join(c, "\n", fn item -> "- #{safe_str(item)}" end)
-
-  defp format_review_chain(_), do: nil
 
   # Classe le role qui finit (engineer-first). Producteur = role git_native (engineer) →
   # pousse le code, ouvre la PR (head = sa propre branche). Juge = role payload (qualifier/reviewer
@@ -805,7 +760,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
     # Déplie l'enveloppe worker `%{"status","result"}` AVANT d'évaluer la gate —
     # sinon la gate voit l'enveloppe au lieu des outputs (hard-gate à tort).
-    result = unwrap_worker_envelope(payload["result"] || %{})
+    result = Verdict.unwrap_worker_envelope(payload["result"] || %{})
 
     if Map.get(spec, "brief_kind") == "judge" do
       # Le step qui finit EST un juge (brief_kind:judge, ex. brief-review/consultant). Son
@@ -813,8 +768,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # jugerait les outputs du juge comme un hard-gate). Le verdict est appliqué par `apply_verdict` (LA
       # fonction, partagée avec le gatekeeper async). gate_decide reste un décideur PUR : il rend
       # l'intention `{:judge_verdict, …}`, c'est run_step_run qui agit.
-      decision = gate_decision(result)
-      trace = verdict_comment(payload["role"], decision, result)
+      decision = Verdict.gate_decision(result)
+      trace = Verdict.verdict_comment(payload["role"], decision, result)
 
       ctx = %{
         n: n,
@@ -1014,9 +969,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
         raw_payload,
         state
       ) do
-    result = gate_result(raw_payload)
-    decision = gate_decision(result)
-    trace = verdict_comment("gatekeeper (juge d'exception §L441)", decision, result)
+    result = Verdict.gate_result(raw_payload)
+    decision = Verdict.gate_decision(result)
+    trace = Verdict.verdict_comment("gatekeeper (juge d'exception §L441)", decision, result)
     apply_verdict(decision, trace, ctx, state)
   end
 
@@ -1117,52 +1072,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
       state.step_run_completer.complete(step_run, hc_opts)
     end)
   end
-
-  # Trace lisible du verdict (portée dans le comment du step_run → durable en forge). `judge_label`
-  # paramètre l'ATTRIBUTION (gatekeeper, consultant, …) → traça forge honnête (le bon juge nommé).
-  # `halt_invalid` n'est PAS une décision rendue : c'est le fallback fail-closed interne (verdict
-  # absent/malformé) → message distinct pour ne pas faire croire à un verdict "halt_invalid".
-  defp verdict_comment(judge_label, "halt_invalid", _result) do
-    "Verdict du **#{judge_label}** illisible ou absent (fail-closed) → escalade humaine."
-  end
-
-  defp verdict_comment(judge_label, decision, result) do
-    reason = if is_map(result), do: Map.get(result, "reason")
-
-    base = "Verdict du **#{judge_label}** — décision : `#{decision}`."
-
-    if is_binary(reason) and reason != "", do: base <> "\nMotif : #{reason}", else: base
-  end
-
-  # Extrait la décision du payload `work_item.completed`. DEUX enveloppes : (1) TaskQueue pose
-  # `:result` (clé atom) ; (2) enveloppe worker `%{"status","result"}` (clés string).
-  defp gate_result(payload) when is_map(payload) do
-    (Map.get(payload, :result) || Map.get(payload, "result"))
-    |> unwrap_worker_envelope()
-  end
-
-  defp gate_result(_), do: nil
-
-  # Vocab canon = AUTORITÉ UNIQUE `Fleet.Pipeline.GateDecision` (évalué au compile → liste literal,
-  # utilisable dans le guard `in` ci-dessous ; ce module se recompile si la liste canon change).
-  # Fail-closed : nil/inconnu → "halt_invalid" (jamais "continue" sur décision absente/malformée →
-  # route en await_arch). `halt_invalid` n'est PAS dans la liste canon (c'est le fallback interne).
-  @gate_decisions Fleet.Pipeline.GateDecision.decisions()
-  defp gate_decision(result) when is_map(result) do
-    case result["decision"] do
-      d when d in @gate_decisions -> d
-      _ -> "halt_invalid"
-    end
-  end
-
-  defp gate_decision(_), do: "halt_invalid"
-
-  # Déplie l'enveloppe worker `%{"status","result"}`. Le worker rend soit directement
-  # `%{"decision"=>...}` / les outputs, soit l'enveloppe `%{"status"=>"ok","result"=>...}`.
-  # Sans dépliage : decision/outputs enfouis → fausse escalade / hard-gate à tort.
-  defp unwrap_worker_envelope(%{"decision" => _} = direct), do: direct
-  defp unwrap_worker_envelope(%{"status" => _, "result" => inner}) when is_map(inner), do: inner
-  defp unwrap_worker_envelope(other), do: other
 
   defp advance(workflow_map, step) do
     case Fleet.Pilot.WorkflowMapNav.next_step(workflow_map, step) do

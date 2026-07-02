@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-01 (atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer — events `*.failed` → registre, concern séparé)
+**Dernière révision** : 2026-07-02 (atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer — events `*.failed` → registre, concern séparé)
 **Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -102,6 +102,14 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   voyage dans le `metadata` de la **tâche** d'éval (qui survit dans le broker à un crash du StepRunConsumer
   seul) ; au restart (`gate_evals` RAM vide) le verdict (`work_item.completed`) est **reconstruit** du metadata
   au lieu d'un drop silencieux (plus d'issue wedgée à vie). `gate_evals` n'est qu'une optimisation fast-path.
+    - `Fleet.Pilot.StepRunConsumer.Verdict` — cluster **PUR** du verdict (aucun `state`) extrait du consumer :
+      **décodage** (`gate_result/1`, `gate_decision/1`, `unwrap_worker_envelope/1` — lecture de la décision
+      gate-decision-v1 enfouie dans les enveloppes TaskQueue/worker) + **rendu texte** (`verdict_comment/3`,
+      `review_event_for_decision/1`, `judge_review_body/2`, `eng_summary/1` — trace verdict durable, corps de
+      review, voix de l'eng). **Un seul module** (décodage+rendu couplés : `eng_summary` s'appuie sur
+      `unwrap_worker_envelope`, primitif partagé). Vocab canon via l'AUTORITÉ UNIQUE `Fleet.Pipeline.GateDecision`
+      (`@gate_decisions` non recopié). Le cœur décisionnel stateful (`apply_verdict`/`gate_decide`/`resume_gate`/
+      `complete_business_step_run`) reste dans le module racine.
 - `Fleet.Pilot.IncidentConsumer` — consumer Bus **séparé** des events d'**échec** de pod (`pod.failed`/
   `wake.failed`, source `:spawner`) → `IncidentRegistry` (note 1er / escalade récurrent ; wake récurrent =
   `:sp_suspect`). **Stateless**, sa propre `Task.Supervisor` d'offload (`:runner` défaut nil→sync, prod
