@@ -31,12 +31,12 @@ Elixir `~> 1.18`. Le release `fleet_umbrella` embarque toutes les apps en `:perm
 
 ### Umbrella + rings
 
-Les apps `apps/fleet_*/` (chacune un OTP app normal, `lib/fleet/<name>/application.ex` = son superviseur) sont étagées en **rings** (couches de substrat, déclarées dans chaque README). De bas en haut :
+Les apps `apps/fleet_*/` (chacune un OTP app normal, `lib/fleet/<name>/application.ex` = son superviseur) sont étagées en **rings** = strates du graphe de dépendances compile **RÉEL** (renuméroté 2026-07-04 : l'ancien modèle « backbone » déclarait event_router/cap_profile en Ring 2 et pilot en Ring 2 dépendant vers le HAUT — faux vs le graphe vérifié ; corrigé). **Règle de dépendance** : une dép va vers le BAS (ring inférieur) ou reste intra-ring ; le PubSub (Bus, Ring 0) est **exempt** (tout le monde publie/consomme) ; 2 seams runtime MONTANTS assumés (`spawner→mcp`, `mcp→pilot` — dispatch dynamique injecté, PAS des deps compile). Le tout est hébergé par le substrat OS `bin/fleet_v2` (lancement per-humain, dans `etc/`+`bin/`, **pas une app** ; **l'humain lance sa fleet**, pas de systemd `User=lcars`). De bas en haut :
 
-- **Ring 0 — substrat OS** : lancement per-humain via `bin/fleet_v2` (dans `etc/` + `bin/`, pas une app). Modèle = **l'humain lance sa fleet** (pas de service systemd `User=lcars`).
-- **Ring 1 — primitives pod + frontière vendor** : `fleet_spawner`, `fleet_credentials`, `fleet_cap_profile`, `fleet_sp_builder`, `fleet_project_bootstrap` + les launchers shell `bin/` (voir Pod sandboxing).
-- **Ring 2 — backbone d'orchestration** : `fleet_event_router` (bus PubSub `fleet.events`), `fleet_task_queue` (broker de mandats `get_task`/`submit_result`), `fleet_pilot` (dispatcher forge→pipeline, off par défaut — **client du core**, dépend du Ring 3 `fleet_workflow`). Le read-model/observabilité est tenu par `fleet_observation` (l'ancienne app `fleet_task_monitor`, dormante, a été supprimée le 2026-07-04).
-- **Ring 3 — coordination + policy** : `fleet_coord`, `fleet_workflow`, `fleet_starfleet` (audit), `fleet_mcp`.
+- **Ring 0 — substrat** : `fleet_event_router` (bus PubSub `fleet.events`), `fleet_cap_profile` (profils de capacité + `Fleet.Slug`). **0 dépendance, ~12 apps en dépendent = le FOND du graphe** (pas un « backbone » médian).
+- **Ring 1 — primitives pod + frontière vendor** : `fleet_credentials`, `fleet_sp_builder`, `fleet_project_bootstrap`, `fleet_task_queue` (broker de mandats `get_task`/`submit_result`), `fleet_spawner` + les launchers shell `bin/` (voir Pod sandboxing).
+- **Ring 2 — coordination + policy** : `fleet_mcp`, `fleet_workflow` (moteur workflow-maps), `fleet_coord`, `fleet_starfleet` (audit).
+- **Ring 3 — driver forge** : `fleet_pilot` (dispatcher forge→workflow, off par défaut — **client du core**, dépend de `fleet_workflow` en Ring 2 = **descendante**, l'inversion de l'ancien modèle est levée).
 - **Ring 4 — surface externe** : `fleet_api` (REST + WS, **no-auth par design** — la frontière est l'isolation réseau/container, cf. `Fleet.API.Rest` § Auth) ; `fleet_observation` (observation deck read-only — dépend vers le bas, rien du core ne dépend de lui).
 
 Les ports et chemins concrets sont posés par `bin/fleet_v2` / lus dans `config/runtime.exs` — pas listés ici.
