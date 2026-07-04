@@ -154,8 +154,19 @@ defmodule Fleet.Starfleet.MCPWatcher do
       }
     )
   rescue
-    _e in Fleet.Event.UnregisteredError -> :ok
-    _e in [ArgumentError, FunctionClauseError] -> :ok
+    # UnregisteredError = boot-order toléré (registry pas encore peuplé) — silencieux, comme MCPMonitor.
+    _e in Fleet.Event.UnregisteredError ->
+      :ok
+
+    # ArgumentError/FunctionClauseError = bug de CONSTRUCTION de l'event, PAS du boot. Ne JAMAIS
+    # l'avaler en :ok muet (conformité 2026-07-04 : ce module était le SEUL des 4 jumeaux à masquer) :
+    # visible puis neutralisé — laisser crasher redémarrerait le watcher et re-fetcherait Hex.pm en boucle.
+    e in [ArgumentError, FunctionClauseError] ->
+      Logger.error(
+        "MCPWatcher: alerte sdk.upstream_alert NON émise — event malformé (bug de construction) : #{inspect(e)}"
+      )
+
+      :ok
   end
 
   defp schedule_check(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do

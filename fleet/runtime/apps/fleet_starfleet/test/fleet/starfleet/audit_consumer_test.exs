@@ -2,6 +2,9 @@ defmodule Fleet.Starfleet.AuditConsumerTest do
   @moduledoc """
   B10/#583 Sprint 1 — AuditConsumer pur send/handle, pas de
   global subscribe (test-seam `:subscribe`). async.
+
+  Conformité 2026-07-04 : pile legacy tuple `{atom, map}` RASÉE (0 producteur) — les tests
+  parlent le schema canon `%Fleet.Event{}`, comme le Bus réel.
   """
   use ExUnit.Case, async: true
 
@@ -13,32 +16,41 @@ defmodule Fleet.Starfleet.AuditConsumerTest do
     {pid, name}
   end
 
-  test "boot_complete : handle_info → count++ (pas de crash)" do
+  defp canon(source, type, opts \\ []) do
+    Fleet.Event.new(source, type, opts)
+  end
+
+  test "boot_complete canon : handle_info → count++ (pas de crash)" do
     {pid, _} = start_consumer()
-    send(pid, {:"fleet.boot_complete", %{"payload" => %{"x" => 1}}})
+    send(pid, canon(:starfleet, :"fleet.boot_complete", payload: %{"x" => 1}))
 
     # Mi14 : :sys.get_state/1 synchronise (FIFO — le send est traité avant) → pas de sleep arbitraire.
     assert %{events_count: 1} = :sys.get_state(pid)
   end
 
-  test "pod.refuse_pattern_match : log warning + count++" do
+  test "pod.drift canon (type-only, producteur à venir) : log warning + count++" do
     {pid, _} = start_consumer()
 
     send(
       pid,
-      {:"pod.refuse_pattern_match",
-       %{"pod_id" => "p1", "issue_id" => "T", "payload" => %{"pattern" => "force-push"}}}
+      canon(:spawner, :"pod.drift", pod_id: "p1", payload: %{"drift_count" => 3})
     )
 
     assert %{events_count: 1} = :sys.get_state(pid)
   end
 
-  test "event inconnu : ignore (no crash, no count)" do
+  test "event canon non audité : ignoré (no crash, NO count — l'audit trail est sélectif)" do
     {pid, _} = start_consumer()
-    send(pid, {:"some.unknown", %{}})
-    # handle_info match wildcard ignore — count incrementé quand même
-    # car premier clause match (atom + map). C'est OK (log_event fallthrough no-op).
-    assert %{events_count: 1} = :sys.get_state(pid)
+    send(pid, canon(:api, :"some.unknown"))
+    assert %{events_count: 0} = :sys.get_state(pid)
+    assert Process.alive?(pid)
+  end
+
+  test "format legacy tuple : plus consommé (no crash, no count — pile rasée)" do
+    {pid, _} = start_consumer()
+    send(pid, {:"fleet.boot_complete", %{"payload" => %{"x" => 1}}})
+    assert %{events_count: 0} = :sys.get_state(pid)
+    assert Process.alive?(pid)
   end
 
   test "msg non-event : pas de crash" do

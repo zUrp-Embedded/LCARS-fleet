@@ -405,7 +405,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
       opts[:author] ||
         Application.get_env(:fleet_pilot, :incident_registry_author, %{
           name: "LCARS-starfleet",
-          email: "starfleet@lcars.local"
+          # Email de rôle : AUTORITÉ = ForgeIdentity (H2 2026-07-04, le domaine n'est plus retapé ici).
+          email: Fleet.Credentials.ForgeIdentity.role_email("starfleet")
         })
 
   defp normalize(subject), do: Regex.replace(~r/\d+/, subject, "N")

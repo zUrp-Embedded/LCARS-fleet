@@ -41,14 +41,12 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:ok, %{events_count: 0}}
   end
 
-  @impl true
-  def handle_info({event_atom, event}, state)
-      when is_atom(event_atom) and is_map(event) do
-    log_event(event_atom, event)
-    {:noreply, %{state | events_count: state.events_count + 1}}
-  end
+  # Pile legacy tuple {atom, map} RASÉE (conformité 2026-07-04) : plus AUCUN producteur du format
+  # tuple sur le Bus (vérifié : zéro Bus.broadcast hors %Fleet.Event{}), les clauses dormaient en
+  # dupliquant le logging des clauses canon ci-dessous (boot_*, pod.completed/failed).
 
   # BL-021 chantier 2d — schema canon strict %Fleet.Event{} (task_queue lifecycle).
+  @impl true
   def handle_info(%Fleet.Event{source: :task_queue, type: type} = event, state) do
     log_task_queue_event(type, event)
     {:noreply, %{state | events_count: state.events_count + 1}}
@@ -101,77 +99,26 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # BL-021 chantier 9 (B) — pipeline git.published / git.publish_failed migrés au schema canon.
-  def handle_info(
-        %Fleet.Event{source: :pipeline, type: type, payload: payload},
-        state
-      )
-      when type in [:"git.published", :"git.publish_failed"] do
-    log_git_event(type, payload)
+  # Clause git.published/git.publish_failed RASÉE (conformité 2026-07-04) : 0 producteur (events.yaml
+  # les documente « à ré-émettre par le rail forge-driven si la publication git redevient observable ») ;
+  # elle matchait en plus l'ancien source :pipeline (renommé :workflow au rename fleet_workflow).
+
+  # pod.drift : migré de la pile legacy (conformité 2026-07-04). Producteur pas encore né (events.yaml :
+  # « producteur manquant ») mais consommé par DriftMonitor — match type-only ALIGNÉ sur DriftMonitor
+  # (le source du futur producteur n'est pas encore fixé ; on ne l'invente pas ici).
+  def handle_info(%Fleet.Event{type: :"pod.drift", payload: payload} = event, state) do
+    Logger.warning(
+      "AUDIT pod.drift pod=#{event.pod_id || Map.get(payload, "pod_id", "?")} " <>
+        "count=#{inspect(Map.get(payload, "drift_count", "?"))}"
+    )
+
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # Ignore les autres %Fleet.Event{} non handlés (cohabitation dual stack).
+  # Ignore les autres %Fleet.Event{} non handlés (l'audit trail est sélectif, pas exhaustif).
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
 
   def handle_info(_other, state), do: {:noreply, state}
-
-  defp log_event(:"pod.refuse_pattern_match", event) do
-    payload = Map.get(event, "payload", %{})
-
-    Logger.warning(
-      "AUDIT pod.refuse_pattern_match pod=#{Map.get(event, "pod_id", "?")} " <>
-        "issue=#{Map.get(event, "issue_id", "?")} " <>
-        "pattern=#{inspect(Map.get(payload, "pattern", "?"))}"
-    )
-  end
-
-  defp log_event(:"pod.drift", event) do
-    payload = Map.get(event, "payload", %{})
-
-    Logger.warning(
-      "AUDIT pod.drift pod=#{Map.get(event, "pod_id", "?")} " <>
-        "count=#{inspect(Map.get(payload, "drift_count", "?"))}"
-    )
-  end
-
-  defp log_event(:"fleet.boot_complete", event) do
-    payload = Map.get(event, "payload", %{})
-    Logger.info("AUDIT fleet.boot_complete #{inspect(payload)}")
-  end
-
-  defp log_event(:"fleet.boot_partial", event) do
-    payload = Map.get(event, "payload", %{})
-    Logger.warning("AUDIT fleet.boot_partial #{inspect(payload)}")
-  end
-
-  defp log_event(:"fleet.boot_failed", event) do
-    payload = Map.get(event, "payload", %{})
-    Logger.error("AUDIT fleet.boot_failed #{inspect(payload)}")
-  end
-
-  # #593 D11 — Pod GenServer Port stream lifecycle (post-init).
-  defp log_event(:"pod.completed", event) do
-    payload = Map.get(event, "payload", %{})
-
-    Logger.info(
-      "AUDIT pod.completed pod=#{Map.get(payload, "pod_id", "?")} " <>
-        "issue=#{Map.get(payload, "issue_id", "?")} " <>
-        "duration_ms=#{get_in(payload, ["result", "duration_ms"]) || "?"}"
-    )
-  end
-
-  defp log_event(:"pod.failed", event) do
-    payload = Map.get(event, "payload", %{})
-
-    Logger.warning(
-      "AUDIT pod.failed pod=#{Map.get(payload, "pod_id", "?")} " <>
-        "issue=#{Map.get(payload, "issue_id", "?")} " <>
-        "result=#{inspect(Map.get(payload, "result"))}"
-    )
-  end
-
-  defp log_event(_other, _event), do: :ok
 
   # BL-021 chantier 2d — task_queue lifecycle (DN orchestration/task-queue §E)
   defp log_task_queue_event(:"work_item.enqueued", %Fleet.Event{pod_id: pid, correlation_id: tid}) do
@@ -233,20 +180,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
     Logger.warning(
       "AUDIT pod.failed pod=#{Map.get(payload, "pod_id", "?")} " <>
         "issue=#{Map.get(payload, "issue_id", "?")} " <>
-        "reason=#{inspect(Map.get(payload, "reason"))}"
-    )
-  end
-
-  defp log_git_event(:"git.published", payload) do
-    Logger.info(
-      "AUDIT git.published pipeline=#{Map.get(payload, "workflow_map_id", "?")} " <>
-        "sha=#{Map.get(payload, "commit_sha", "?")}"
-    )
-  end
-
-  defp log_git_event(:"git.publish_failed", payload) do
-    Logger.warning(
-      "AUDIT git.publish_failed pipeline=#{Map.get(payload, "workflow_map_id", "?")} " <>
         "reason=#{inspect(Map.get(payload, "reason"))}"
     )
   end

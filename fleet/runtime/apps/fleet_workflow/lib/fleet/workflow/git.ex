@@ -252,7 +252,14 @@ defmodule Fleet.Workflow.Git do
     ]
   end
 
-  defp read_head_sha(workspace) do
+  @doc """
+  SHA de HEAD du `workspace`, **borné** (Shell.git : deadline + SIGKILL du process-group — un
+  `rev-parse` pendu sur un FS malade ne bloque jamais l'appelant). Autorité UNIQUE du rev-parse
+  système-side (X1/D4 2026-07-04 : `Deliverable` portait 2 copies via `System.cmd` BRUT non borné —
+  un rev-parse pendu y bloquait la publication).
+  """
+  @spec read_head_sha(Path.t()) :: {:ok, String.t()} | {:error, term()}
+  def read_head_sha(workspace) do
     # Borné + `@hooks_off` par uniformité (rev-parse ne lance aucun filtre/externe → les `-c` sont
     # inertes ici, mais tous les sites git système-side composent le set = invariant auditable).
     case Fleet.Credentials.Shell.git(@hooks_off ++ ["rev-parse", "HEAD"],

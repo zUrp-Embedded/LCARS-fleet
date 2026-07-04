@@ -3,7 +3,7 @@ defmodule Fleet.API.Readiness do
   Read-model — état opérationnel **LIVE** du daemon (anti-vert-creux).
 
   « Release démarrée ≠ système opérationnel. » `/api/health` répond 200 dès
-  que Cowboy a bind `:8080` ; ça ne dit RIEN de l'état de câblage réel
+  que Cowboy a bind son port ; ça ne dit RIEN de l'état de câblage réel
   (registry events chargé, Pilot actif, backends wirés vs placeholders).
   `deep/0` introspecte le système **vivant** (config chargée, registre de
   process, `:persistent_term`) et rend chaque sous-système en clair.

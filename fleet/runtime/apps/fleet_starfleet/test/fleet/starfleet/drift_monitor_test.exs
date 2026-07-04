@@ -16,6 +16,10 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   alias Fleet.EventRouter.Bus
   alias Fleet.Starfleet.DriftMonitor
 
+  # Nom LOCAL de l'instance de test (≠ __MODULE__ du module lib : plus aucune dépendance à une
+  # instance globale app-bootée).
+  @monitor __MODULE__.Monitor
+
   setup %{tmp_dir: tmp_dir} do
     log_path = Path.join(tmp_dir, "drift-monitor-test.jsonl")
     Application.put_env(:fleet_starfleet, :audit_log_path, log_path)
@@ -28,8 +32,11 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
     Application.put_env(:fleet_starfleet, :coord_invocations, [])
 
-    # Application supervisor démarre déjà le DriftMonitor — on le subscribe
-    # au Bus en init. Pas besoin de start_supervised.
+    # Conformité 2026-07-04 : plus d'instance app-bootée (start_drift_monitor: false en test —
+    # hermétisme de la suite). Ce test d'INTÉGRATION démarre la sienne, subscribe RÉEL (l'entrée
+    # passe par le Bus, c'est l'objet du test) ; nom local fixe (async: false justifié : put_env).
+    monitor = start_supervised!({DriftMonitor, name: @monitor})
+
     Bus.subscribe()
 
     on_exit(fn ->
@@ -38,13 +45,13 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
       Application.delete_env(:fleet_starfleet, :coord_invocations)
     end)
 
-    :ok
+    %{monitor: monitor}
   end
 
   defp wait_drift_monitor_drain do
     # Sync GenServer flush — assure que tous les handle_info précédents
     # sont consommés avant l'assertion.
-    _ = :sys.get_state(DriftMonitor)
+    _ = :sys.get_state(@monitor)
     :ok
   end
 
@@ -172,7 +179,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
       wait_drift_monitor_drain()
 
       # DriftMonitor toujours vivant
-      assert Process.alive?(Process.whereis(DriftMonitor))
+      assert Process.alive?(Process.whereis(@monitor))
     end
   end
 end

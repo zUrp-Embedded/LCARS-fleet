@@ -62,6 +62,12 @@ setup_env() {
   export LCARS_OBSERVATION_PORT="$OBS_PORT"
   export LCARS_FLEET_WEBHOOK_PORT="$WEBHOOK_PORT"
 
+  # A7 (accord des ports) : l'URL API de CETTE fleet, posée dans l'état runtime — le CLI `lcars`
+  # (et tout outil hors-env fleet) la LIT au lieu de deviner un port (l'ancien défaut statique :8080
+  # ne pouvait être juste pour personne : les ports sont per-humain, calculés sur l'UID ci-dessus).
+  mkdir -p "$HOME/.lcars/run"
+  printf 'http://localhost:%s\n' "$API_PORT" > "$HOME/.lcars/run/api_url"
+
   # Spec MCP — chemin du bridge stdio du pod (co-localisé avec ce launcher). Le transport pod↔central
   # n'est plus une URL HTTP loopback partagée mais une socket AF_UNIX per-pod (base posée plus bas,
   # LCARS_FLEET_MCP_SOCK_BASE) ; seul le chemin du bridge reste un env de spec MCP.

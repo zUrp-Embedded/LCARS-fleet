@@ -88,7 +88,7 @@ defmodule Fleet.API.WSTest do
 
   describe "websocket_info/2 events" do
     test "event matching topic → frame event JSON" do
-      event = Fleet.Event.new(:pipeline, :"workflow_map.completed", payload: %{"id" => "p1"})
+      event = Fleet.Event.new(:workflow, :"workflow_map.completed", payload: %{"id" => "p1"})
 
       assert {[{:text, frame}], state} =
                WS.websocket_info(event, %{topics: ["workflow_map.*"]})
@@ -111,7 +111,7 @@ defmodule Fleet.API.WSTest do
     end
 
     test "topics vide → match all" do
-      event = Fleet.Event.new(:pipeline, :anything)
+      event = Fleet.Event.new(:workflow, :anything)
 
       assert {[{:text, frame}], _} = WS.websocket_info(event, %{topics: []})
       assert frame =~ "anything"

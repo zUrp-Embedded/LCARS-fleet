@@ -3,11 +3,11 @@ defmodule Fleet.Observation.Application do
   Application supervisor `fleet_observation` (Ring 4 — observation deck).
 
   Frontière read / observabilité du core. Un listener
-  Cowboy dédié sur `:8091` sert `Fleet.Observation.Deck` (HTML LCARS +
+  Cowboy dédié sur son port (per-humain, bin/fleet_v2) sert `Fleet.Observation.Deck` (HTML LCARS +
   endpoints read JSON). Coexiste avec les autres surfaces — **on ne coupe
   rien** (ménage à la fin) :
 
-    * `fleet_api` (`:8080`, REST HMAC) — surface de **commande** ;
+    * `fleet_api` (le port API (per-humain), REST HMAC) — surface de **commande** ;
     * `fleet_dashboard` (`:8089`, branche sœur) — deck observation ;
     * dashboard Python v1.5 (`:8090`) — conservé en parallèle.
 
@@ -19,10 +19,10 @@ defmodule Fleet.Observation.Application do
 
   ## Configuration
 
-    * `:fleet_observation, :http_port` — port HTTP (default `8091`,
+    * `:fleet_observation, :http_port` — port HTTP (posé par runtime.exs, per-humain ; absent → fail-loud,
       knob `LCARS_OBSERVATION_PORT`)
     * `:fleet_observation, :start_listener` — booléen (default `true`).
-      `config/test.exs` le met à `false` (sinon `mix test` bind `:8091`
+      `config/test.exs` le met à `false` (sinon `mix test` bind le port observation (per-humain)
       → crash boot umbrella — même invariant que `fleet_api`).
 
   ## Stratégie
@@ -59,7 +59,8 @@ defmodule Fleet.Observation.Application do
   """
   def listener_children do
     if Application.get_env(:fleet_observation, :start_listener, true) do
-      port = Application.get_env(:fleet_observation, :http_port, 8091)
+      # Pas de défaut statique (A7) : per-humain via bin/fleet_v2 → runtime.exs ; fail-loud si absent.
+      port = Application.fetch_env!(:fleet_observation, :http_port)
 
       # Bind loopback par défaut : le deck observe en lecture seule, no-auth
       # (frontière = isolation réseau, comme fleet_api). Un accès distant au deck

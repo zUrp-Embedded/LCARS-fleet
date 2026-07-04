@@ -80,17 +80,30 @@ defmodule Fleet.Spawner.PodWarden do
 
   @impl true
   def handle_info(:reap_tick, state) do
-    live = live_pod_ids()
+    case live_pod_ids() do
+      {:ok, live} ->
+        # Duty 1 — sockets orphelines.
+        {to_reap, new_suspects} = reconcile_decision(live, sock_pod_ids(), state.suspects)
+        Enum.each(to_reap, &reap/1)
 
-    # Duty 1 — sockets orphelines.
-    {to_reap, new_suspects} = reconcile_decision(live, sock_pod_ids(), state.suspects)
-    Enum.each(to_reap, &reap/1)
+        # Duty 2 — pod_dirs orphelins (cimetière de tombstones).
+        new_gc_suspects = sweep_pod_dir_gc(live, state.gc_suspects)
 
-    # Duty 2 — pod_dirs orphelins (cimetière de tombstones).
-    new_gc_suspects = sweep_pod_dir_gc(live, state.gc_suspects)
+        schedule_tick()
+        {:noreply, %{state | suspects: new_suspects, gc_suspects: new_gc_suspects}}
 
-    schedule_tick()
-    {:noreply, %{state | suspects: new_suspects, gc_suspects: new_gc_suspects}}
+      :unavailable ->
+        # Conformité 2026-07-04 : le Registry indisponible rendait un MapSet VIDE muet → TOUS les
+        # socks paraissaient orphelins → 2 ticks down = reap de pods VIVANTS. Sans la liste des
+        # vivants on ne peut RIEN décider : skip du tick ENTIER (suspects gelés en l'état — ni
+        # accusés ni blanchis), visible. Registry revenu → la grace 2-tick reprend, rien de perdu.
+        Logger.warning(
+          "PodWarden: Registry indisponible — tick de reap SKIPPÉ (aucune décision sans la liste des vivants)"
+        )
+
+        schedule_tick()
+        {:noreply, state}
+    end
   end
 
   def handle_info(_other, state), do: {:noreply, state}
@@ -208,12 +221,16 @@ defmodule Fleet.Spawner.PodWarden do
     end
   end
 
+  # `{:ok, vivants}` ou `:unavailable` (Registry down). JAMAIS un MapSet vide sur erreur : vide
+  # signifie « zéro pod vivant » (décidable), pas « je ne sais pas » (indécidable) — confondre les
+  # deux ferait reaper des pods vivants (cf. handle_info :reap_tick).
   defp live_pod_ids do
-    Fleet.Spawner.Registry
-    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
-    |> MapSet.new()
+    {:ok,
+     Fleet.Spawner.Registry
+     |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+     |> MapSet.new()}
   rescue
-    _ -> MapSet.new()
+    _ -> :unavailable
   end
 
   defp sock_pod_ids do

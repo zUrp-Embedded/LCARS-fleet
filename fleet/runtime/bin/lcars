@@ -21,13 +21,23 @@
 # host (LAUNCH-Q).
 #
 # Config (env) :
-#   LCARS_API_URL         base REST du daemon (défaut http://localhost:8080)
+#   LCARS_API_URL         base REST du daemon (défaut : lu de ~/.lcars/run/api_url, posé par
+#                         fleet_v2 au start — les ports sont per-humain/UID, aucun défaut statique
+#                         n'est juste ; fleet non démarrée → erreur claire, pas un port au pif)
 #   LCARS_TMUX_SOCK_BASE  base des socks par-pod (défaut ~/.lcars/run/tmux-sock ; = défaut Elixir, c368f89d)
 #   LCARS_TMUX_BIN        binaire tmux (défaut tmux dans le PATH)
 
 set -euo pipefail
 
-API_URL="${LCARS_API_URL:-http://localhost:8080}"
+# A7 : env explicite > état runtime posé par fleet_v2 > fail-loud (jamais un port deviné).
+if [[ -n "${LCARS_API_URL:-}" ]]; then
+  API_URL="$LCARS_API_URL"
+elif [[ -r "$HOME/.lcars/run/api_url" ]]; then
+  API_URL="$(cat "$HOME/.lcars/run/api_url")"
+else
+  echo "lcars: LCARS_API_URL absent et ~/.lcars/run/api_url introuvable — la fleet est-elle démarrée (fleet_v2 start) ?" >&2
+  exit 1
+fi
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 

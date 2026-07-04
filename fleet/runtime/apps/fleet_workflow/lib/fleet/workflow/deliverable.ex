@@ -54,11 +54,8 @@ defmodule Fleet.Workflow.Deliverable do
 
   @type result :: %{commit_sha: String.t(), pushed?: boolean(), mode: mode()}
 
-  # Neutralisation config (hooks/fsmonitor/sshCommand/diff.external/attributesFile global) — SOURCE
-  # UNIQUE `Fleet.Credentials.Shell.git_safe_config_args/0`, composée sur toute invocation git côté monde
-  # sur le workspace pod (défense en profondeur ; head_sha/head_advanced sont des rev-parse, mais coût nul
-  # et on garde l'uniformité avec les ops qui, elles, exécuteraient du code config-driven).
-  @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
+  # Plus AUCUNE invocation git directe ici (X1 2026-07-04) : les rev-parse sont délégués à
+  # `Fleet.Workflow.Git.read_head_sha/1` (borné, qui compose lui-même git_safe_config_args).
 
   @common_keys [:mode, :workspace, :base_sha, :allowed_emails]
   @payload_keys [:files, :identity, :message]
@@ -163,12 +160,14 @@ defmodule Fleet.Workflow.Deliverable do
       else: {:error, :no_deliverable_commit}
   end
 
+  # Lecture HEAD déléguée à l'autorité BORNÉE Fleet.Workflow.Git.read_head_sha/1 (X1 2026-07-04 :
+  # ce site était un System.cmd BRUT sans deadline — un rev-parse pendu bloquait la publication).
+  # Échec de lecture → false = « pas de commit détecté » → l'appelant rend
+  # {:error, :no_deliverable_commit} (échec EXPLICITE, pas un silence).
   defp head_advanced?(workspace, base_sha) do
-    case System.cmd("git", @hooks_off ++ ["-C", workspace, "rev-parse", "HEAD"],
-           stderr_to_stdout: true
-         ) do
-      {out, 0} -> String.trim(out) != base_sha
-      _ -> false
+    case Fleet.Workflow.Git.read_head_sha(workspace) do
+      {:ok, sha} -> sha != base_sha
+      {:error, _} -> false
     end
   end
 
@@ -309,12 +308,7 @@ defmodule Fleet.Workflow.Deliverable do
   defp push?(opts), do: Map.get(opts, :push?, true)
   defp local_ref(opts), do: Map.get(opts, :local_ref, "HEAD")
 
-  defp head_sha(workspace) do
-    case System.cmd("git", @hooks_off ++ ["-C", workspace, "rev-parse", "HEAD"],
-           stderr_to_stdout: true
-         ) do
-      {sha, 0} -> {:ok, String.trim(sha)}
-      {err, rc} -> {:error, {:rev_parse_failed, rc, String.trim(err)}}
-    end
-  end
+  # X1/D4 2026-07-04 : délégué à l'autorité bornée (même forme d'erreur {:rev_parse_failed, rc, err},
+  # enrichie de {:rev_parse_timeout|:rev_parse_exit} que le System.cmd brut ne savait pas produire).
+  defp head_sha(workspace), do: Fleet.Workflow.Git.read_head_sha(workspace)
 end

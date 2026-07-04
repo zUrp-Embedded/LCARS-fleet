@@ -19,7 +19,7 @@ defmodule Fleet.API.Dashboard do
   ## Auth
 
   Pas d'auth HTTP — dashboard intra-release accède aux GenServers/PubSub
-  directement. Toute l'API `:8080` est no-auth par design (frontière =
+  directement. Toute l'API est no-auth par design (frontière =
   isolation réseau du container, cf. `Fleet.API.Rest` § Auth).
 
   ## État

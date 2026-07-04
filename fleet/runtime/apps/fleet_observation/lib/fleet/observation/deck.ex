@@ -1,6 +1,6 @@
 defmodule Fleet.Observation.Deck do
   @moduledoc """
-  Plug.Router de l'observation deck `:8091`.
+  Plug.Router de l'observation deck le port observation (per-humain).
 
   ## Routes
 
@@ -49,7 +49,7 @@ defmodule Fleet.Observation.Deck do
   get "/health" do
     conn
     |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{status: "ok", deck: "fleet_observation", port: 8091}))
+    |> send_resp(200, Jason.encode!(%{status: "ok", deck: "fleet_observation", port: Application.get_env(:fleet_observation, :http_port)}))
   end
 
   get "/api/pods" do
@@ -213,7 +213,7 @@ defmodule Fleet.Observation.Deck do
     <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>LCARS // OBSERVATION DECK :8091</title>
+    <title>LCARS // OBSERVATION DECK</title>
     <link rel="icon" href="/static/assets/favicon.svg">
     <link rel="stylesheet" href="/static/lcars-tva.css">
     <style>
@@ -244,7 +244,7 @@ defmodule Fleet.Observation.Deck do
         <div class="bezel bezel-left"></div>
         <div class="head-strip">
           <span class="head-title">LCARS // OBSERVATION</span>
-          <span class="head-sub">DECK :8091 — CORE REMÉDIÉ</span>
+          <span class="head-sub">DECK — CORE REMÉDIÉ</span>
         </div>
         <div class="head-status">
           <span class="status-led" id="led-health"></span>

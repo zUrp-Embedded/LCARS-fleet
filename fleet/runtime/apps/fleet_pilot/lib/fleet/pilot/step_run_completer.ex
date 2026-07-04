@@ -387,14 +387,16 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # SLOT-FREEZE : signale que le livrable du producteur est CONFIRME sur la forge (commit pousse + PR
   # ouverte). Emis APRES open_deliverable_pr (donc le push a deja LU le workspace) → un pod pipe resident
   # peut alors reset son workspace pour le issue suivant SANS courser le push. Porte le `pod_id` (le pod
-  # producteur, depuis le payload pod.completed). Source :pipeline (la publication est une op pipeline).
+  # producteur, depuis le payload pod.completed). Source :workflow (la publication est une op du moteur
+  # workflow ; atome aligne sur le rename fleet_pipeline→fleet_workflow — l'atome nu :pipeline avait
+  # survecu au sed du rename, seul emetteur, zero matcher par source).
   # Best-effort : un echec d'emission ne casse PAS la completion (le livrable est deja publie) — le
   # backstop cote pod (deadline :publishing) couvre un rate. No-op si pas de pod_id (legacy/test).
   defp emit_deliverable_published(step_run, pr) do
     case Map.get(step_run, :pod_id) do
       pod_id when is_binary(pod_id) ->
         result =
-          Fleet.EventRouter.Bus.emit(:pipeline, :"deliverable.published",
+          Fleet.EventRouter.Bus.emit(:workflow, :"deliverable.published",
             pod_id: pod_id,
             payload: %{
               "repo" => Map.fetch!(step_run, :repo),

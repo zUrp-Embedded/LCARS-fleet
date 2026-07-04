@@ -45,11 +45,26 @@ defmodule Fleet.Credentials.ForgeIdentity do
     * `git_native` — le pod commite EN TANT QUE l'humain → author=committer=humain →
       `[human_email]`.
     * `payload` — le SYSTÈME commite (author=humain, committer=système) →
-      `[human_email, "system@lcars.local"]`.
+      `[human_email, system_email()]`.
+
+  ## Destination des identités (contrat H2 2026-07-04)
+
+  Ces identités sont celles de la FORGE LOCALE (comptes de rôle réels, emails mappés → avatars/traça).
+  Le domaine est un CONTRAT WIRE partagé avec `bwrap_launch.sh` (sanctuaire : il pose
+  GIT_AUTHOR/COMMITTER `<role>@lcars.local` en env au launch) — une divergence est rattrapée
+  STRUCTURELLEMENT par la gate d'identité de commit (push rejeté fail-closed). FUTUR GitHub :
+  l'attribution « with Claude Code » au format GH (Co-authored-by + email noreply GH, adossée à
+  l'humain maître du repo) sera une table per-destination À CE POINT UNIQUE — aucun autre module
+  ne tape un email git.
   """
 
   @role_email_domain "lcars.local"
-  @system_email "system@lcars.local"
+  @system_name "lcars-system"
+  # Compte forge SYSTÈME réel (vérifié 2026-07-04 : les commits `lcars-system@lcars.local` sont
+  # mappés au compte forge `lcars-system`, avatar/traça actifs). L'ancien `system@lcars.local`
+  # était un FANTÔME (zéro producteur, zéro commit, zéro compte) pendant que l'onboard retapait
+  # la vraie identité en dur chez lui. UNE identité système, ici.
+  @system_email "#{@system_name}@#{@role_email_domain}"
 
   @type identity :: %{
           author_name: String.t(),
@@ -94,10 +109,10 @@ defmodule Fleet.Credentials.ForgeIdentity do
           {:ok, %{name: String.t(), email: String.t(), human: String.t()}} | {:error, term()}
   def human_identity(opts \\ []), do: resolve_identity(opts)
 
-  @doc "Trailer machine vérifiable du rôle (Co-authored-by canon)."
+  @doc "Trailer machine vérifiable du rôle (Co-authored-by canon). Dérive de `role_email/1`."
   @spec coauthor_trailer(String.t()) :: String.t()
   def coauthor_trailer(role) when is_binary(role) do
-    "Co-authored-by: LCARS-#{role} <#{role}@#{@role_email_domain}>"
+    "Co-authored-by: LCARS-#{role} <#{role_email(role)}>"
   end
 
   @doc """
@@ -127,6 +142,22 @@ defmodule Fleet.Credentials.ForgeIdentity do
   """
   @spec system_email() :: String.t()
   def system_email, do: @system_email
+
+  @doc """
+  Identité git complète du SYSTÈME (`%{name, email}`) — author des commits générés par le runtime
+  lui-même (ex. scaffold d'onboarding). Accesseur UNIQUE : ne pas retaper name/email chez l'appelant.
+  """
+  @spec system_identity() :: %{name: String.t(), email: String.t()}
+  def system_identity, do: %{name: @system_name, email: @system_email}
+
+  @doc """
+  Email git canonique d'un `role` (`<role>@lcars.local`) — le MÊME que celui du trailer
+  (`coauthor_trailer/1` en dérive) et que celui posé en env par le launcher. Accesseur UNIQUE
+  du domaine : aucun appelant ne compose `@lcars.local` à la main.
+  """
+  @spec role_email(String.t()) :: String.t()
+  def role_email(role) when is_binary(role) and role != "",
+    do: "#{role}@#{@role_email_domain}"
 
   # ── internals ──
 

@@ -25,7 +25,7 @@ defmodule Fleet.Observation.ReadModelTest do
     pid = start_supervised!({ReadModel, subscribe: false})
 
     send(pid, ev("work_item.completed", source: :task_queue))
-    send(pid, ev("workflow_map.completed", source: :pipeline))
+    send(pid, ev("workflow_map.completed", source: :workflow))
     send(pid, ev("audit.verdict", source: :starfleet))
     send(pid, ev("coord.escalation_triggered", source: :coord))
     send(pid, ev("gitea.opened", source: :api))

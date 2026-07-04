@@ -37,12 +37,16 @@ defmodule Fleet.Starfleet.DriftMonitor do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    # Canon consumer (conformité 2026-07-04, aligne sur IncidentConsumer) : `name: nil` = anonyme
+    # (tests isolés, plusieurs instances) ; défaut singleton nommé (prod).
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
   @impl GenServer
-  def init(_opts) do
-    Bus.subscribe()
+  def init(opts) do
+    # Seam `subscribe: false` (tests : on envoie les events directement au process, pas de Bus réel
+    # partagé qui parasiterait la suite async). Défaut true (prod).
+    if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
     {:ok, nil}
   end
 

@@ -1,6 +1,6 @@
 defmodule Fleet.API.WS do
   @moduledoc """
-  Cowboy WebSocket handler `:8080/ws` subscribe `Fleet.EventRouter.Bus`
+  Cowboy WebSocket handler `:<port>/ws` (port per-humain, bin/fleet_v2) subscribe `Fleet.EventRouter.Bus`
   topic `fleet.events` + filtre per-client topics + heartbeat ping/pong
   30s.
 

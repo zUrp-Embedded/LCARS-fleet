@@ -1,6 +1,6 @@
 defmodule Fleet.API.Rest do
   @moduledoc """
-  Plug.Router HTTP `:8080` endpoints REST.
+  Plug.Router HTTP endpoints REST (port per-humain, posé par bin/fleet_v2).
 
   ## Routes MVP
 
@@ -18,7 +18,7 @@ defmodule Fleet.API.Rest do
   Pas d'auth applicative *pour la lecture*. Le HMAC `X-Auth-Token` (bearer statique sur la
   constante `"fleet-api-v1"` — pas une signature de requête) a été RETIRÉ : intra-container
   non-exposé = zéro surface, et une auth bricolée donne un faux sentiment de sécurité (pire
-  que rien). **La frontière est l'isolation réseau** : ne PAS publier `:8080` hors du
+  que rien). **La frontière est l'isolation réseau** : ne PAS publier le port API hors du
   container (bind loopback / `docker exec`) ; tunnel (WireGuard/Tailscale) pour un accès
   distant. Threat-model assumé = LAN / humains de confiance.
 

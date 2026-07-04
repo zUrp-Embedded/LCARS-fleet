@@ -246,24 +246,35 @@ if config_env() != :test do
   # ============================================================
   # fleet_api (ch15) — port HTTP (pas d'auth app, cf. rest.ex § Auth)
   # ============================================================
+  # A7 (accord des ports) : les ports sont per-humain (bloc UID calculé par bin/fleet_v2) — un
+  # défaut statique (l'ancien 8080) n'est JAMAIS le vrai port et divergeait du reste de la fleet.
+  # Absent = boot hors bin/fleet_v2 → fail-loud (même règle que LCARS_FLEET_MCP_BRIDGE_PATH).
   http_port =
     case System.get_env("FLEET_API_PORT") do
-      nil -> 8080
-      str -> parse_int.("FLEET_API_PORT", str)
+      nil ->
+        raise "FLEET_API_PORT manquant — les ports sont posés par bin/fleet_v2 (bloc per-humain). " <>
+                "Lance via fleet_v2 start, ou pose la var explicitement."
+
+      str ->
+        parse_int.("FLEET_API_PORT", str)
     end
 
   config :fleet_api, http_port: http_port
   config :fleet_api, start_listener: true
 
   # ============================================================
-  # fleet_observation — observation deck read-only :8091 (BL-026)
+  # fleet_observation — observation deck read-only, port per-humain (BL-026)
   # ============================================================
   # Listener démarré en prod/dev (le `start_listener: false` hermétique de
   # test.exs n'est pas atteint ici : runtime.exs est gardé hors :test).
   obs_port =
     case System.get_env("LCARS_OBSERVATION_PORT") do
-      nil -> 8091
-      str -> parse_int.("LCARS_OBSERVATION_PORT", str)
+      nil ->
+        raise "LCARS_OBSERVATION_PORT manquant — posé par bin/fleet_v2 (bloc per-humain). " <>
+                "Lance via fleet_v2 start, ou pose la var explicitement."
+
+      str ->
+        parse_int.("LCARS_OBSERVATION_PORT", str)
     end
 
   config :fleet_observation, http_port: obs_port

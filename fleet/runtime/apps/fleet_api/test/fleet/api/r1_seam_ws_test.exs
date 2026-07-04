@@ -17,7 +17,7 @@ defmodule Fleet.API.R1SeamWSTest do
     state = %{topics: []}
 
     event =
-      Fleet.Event.new(:pipeline, :"workflow_map.completed",
+      Fleet.Event.new(:workflow, :"workflow_map.completed",
         payload: %{"workflow_map_id" => "p1", "outputs" => %{}}
       )
 

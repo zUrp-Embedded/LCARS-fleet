@@ -44,8 +44,8 @@ defmodule Fleet.GitTest do
       workspace: workspace,
       author_name: "engineer",
       author_email: "engineer@lcars.local",
-      committer_name: "LCARS System",
-      committer_email: "system@lcars.local",
+      committer_name: "Fixture Committer",
+      committer_email: "committer@fixture.test",
       message: "feat: payload from worker",
       branch: "main"
     }
@@ -69,7 +69,7 @@ defmodule Fleet.GitTest do
       {subject, 0} = System.cmd("git", ["log", "-1", "--format=%s"], cd: ws)
 
       assert String.trim(author_line) == "engineer <engineer@lcars.local>"
-      assert String.trim(committer_line) == "LCARS System <system@lcars.local>"
+      assert String.trim(committer_line) == "Fixture Committer <committer@fixture.test>"
       assert String.trim(subject) == "feat: payload from worker"
     end
 

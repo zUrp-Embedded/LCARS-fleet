@@ -2,14 +2,14 @@ defmodule Fleet.API.Application do
   @moduledoc """
   Application supervisor `fleet_api`.
 
-  Démarre le Cowboy listener `:8080` avec dispatch :
+  Démarre le Cowboy listener (port per-humain, bin/fleet_v2) avec dispatch :
 
     - `/ws` → `Fleet.API.WS` (WebSocket handler)
     - `/_*` → `Fleet.API.Rest` (Plug.Router REST)
 
   ## Configuration
 
-    * `:fleet_api, :http_port` — port HTTP (default `8080`)
+    * `:fleet_api, :http_port` — port HTTP (posé par runtime.exs depuis FLEET_API_PORT, per-humain ; absent → fail-loud)
     * `:fleet_api, :start_listener` — booléen (default `true`).
       Tests peuvent set à `false` pour démarrer Cowboy manuellement.
 
@@ -94,7 +94,9 @@ defmodule Fleet.API.Application do
   """
   def listener_children do
     if Application.get_env(:fleet_api, :start_listener, true) do
-      port = Application.get_env(:fleet_api, :http_port, 8080)
+      # Pas de défaut statique (A7) : le port est per-humain (bin/fleet_v2 → runtime.exs). fetch_env!
+      # = fail-loud si la config manque (en test start_listener=false → jamais atteint).
+      port = Application.fetch_env!(:fleet_api, :http_port)
 
       # Dispatch RAW (non pré-compilé) — Plug.Cowboy le compile en
       # interne via to_args/5. Le passer DÉJÀ compilé faisait
@@ -113,7 +115,7 @@ defmodule Fleet.API.Application do
 
       # Bind loopback par défaut (frontière = isolation réseau, cf. Rest § Auth : la seule
       # écriture restante, /api/admin/spawn, est no-auth mais gardée — ne JAMAIS l'exposer
-      # 0.0.0.0 par défaut). Le dashboard navigateur (:8080/dashboard + /ws)
+      # 0.0.0.0 par défaut). Le dashboard navigateur (:<port>/dashboard + /ws)
       # devient local-only : un accès distant passe par un tunnel/reverse-proxy.
       # Exposition publique = opt-in nommé via Fleet.EventRouter.BindAddress (LCARS_BIND_HOST).
       ip = Fleet.EventRouter.BindAddress.ip()

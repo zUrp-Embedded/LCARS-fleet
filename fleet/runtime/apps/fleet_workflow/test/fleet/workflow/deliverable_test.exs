@@ -35,12 +35,12 @@ defmodule Fleet.Workflow.DeliverableTest do
     %{
       author_name: "LCARS-engineer",
       author_email: "engineer@lcars.local",
-      committer_name: "LCARS System",
-      committer_email: "system@lcars.local"
+      committer_name: "Fixture Committer",
+      committer_email: "committer@fixture.test"
     }
   end
 
-  defp payload_allowed, do: ["engineer@lcars.local", "system@lcars.local"]
+  defp payload_allowed, do: ["engineer@lcars.local", "committer@fixture.test"]
 
   describe "mode :payload" do
     test "écrit + commite (système) + gate OK + push sur la branche système-choisie (F-04)",
@@ -71,7 +71,7 @@ defmodule Fleet.Workflow.DeliverableTest do
 
       # D-04 : author=rôle, committer=système.
       {who, 0} = g(ws, ["log", "-1", "--format=%ae|%ce"])
-      assert String.trim(who) == "engineer@lcars.local|system@lcars.local"
+      assert String.trim(who) == "engineer@lcars.local|committer@fixture.test"
     end
 
     test "secret dans le payload → gate BLOQUE, AUCUN push", %{tmp_dir: tmp} do

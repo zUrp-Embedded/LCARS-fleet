@@ -38,7 +38,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
   @work_root "/home/projects.work"
   # author de l'onboarding = le système (il GÉNÈRE le scaffold) — pas l'arch (simple relais), pas l'user
   # (n'a rien écrit). committer = l'humain (git config) trace qui a initié (2026-06-14).
-  @onboard_author %{name: "lcars-system", email: "lcars-system@lcars.local"}
+  # Identité système : AUTORITÉ UNIQUE = Fleet.Credentials.ForgeIdentity.system_identity/0
+  # (H2 2026-07-04 : le name/email était retapé ici en dur — divergence en germe avec la gate).
+  defp onboard_author, do: Fleet.Credentials.ForgeIdentity.system_identity()
 
   @type result :: %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}
 
@@ -212,7 +214,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     with :ok <- GitOps.run(["-C", dir, "add", "-A"], auth: false) do
       # author = lcars-system (le système génère le scaffold, GIT_AUTHOR forcé) ; committer = git config
       # runtime (= l'humain qui a initié → tracé, avatar) (2026-06-14).
-      GitOps.run(["-C", dir, "commit", "-m", message], auth: false, author: @onboard_author)
+      GitOps.run(["-C", dir, "commit", "-m", message], auth: false, author: onboard_author())
     end
   end
 

@@ -26,7 +26,7 @@ defmodule Fleet.Event do
           | :task_queue
           | :mcp
           | :coord
-          | :pipeline
+          | :workflow
           | :starfleet
           | :event_router
           | :credentials
@@ -48,7 +48,7 @@ defmodule Fleet.Event do
   defstruct [:source, :type, :timestamp, :pod_id, :correlation_id, payload: %{}]
 
   # Enum closed list des sources. Étendre = amender cette liste + l'entrée events.yaml correspondante.
-  @canonical_sources ~w(spawner task_queue mcp coord pipeline starfleet event_router credentials capprofile spbuilder doctrine api)a
+  @canonical_sources ~w(spawner task_queue mcp coord workflow starfleet event_router credentials capprofile spbuilder doctrine api)a
 
   @doc "Sources canoniques (enum closed list)."
   @spec canonical_sources() :: [source()]

@@ -1,12 +1,16 @@
 import Config
 
-# fleet_api : do not start Cowboy listener in tests (port :8080 conflict).
+# fleet_api : do not start Cowboy listener in tests (conflit de bind).
+# :http_port posé à 0 (éphémère) : plus AUCUN défaut statique dans le code (A7, fetch_env! fail-loud)
+# → les tests qui construisent le child-spec sans bind (listener_children) ont besoin d'une valeur.
 # Tests instantiate Plug.Cowboy/handlers directly via start_supervised.
 config :fleet_api, start_listener: false
+config :fleet_api, http_port: 0
 
 # fleet_observation : idem — pas de listener Cowboy :8091 en test (sinon bind
 # du port → crash boot umbrella, même invariant hermétique que fleet_api).
 config :fleet_observation, start_listener: false
+config :fleet_observation, http_port: 0
 # ReadModel OFF en test (abonné Bus global = consommateur parasite interdit en
 # async ; les tests le démarrent manuellement avec subscribe:false).
 config :fleet_observation, start_readmodel: false
@@ -39,6 +43,12 @@ config :fleet_starfleet, start_boot_orchestrator: false
 # timer Bus broadcast pollue async tests). Tests dédiés instancient avec opts.
 config :fleet_starfleet, start_mcp_watcher: false
 config :fleet_starfleet, start_mcp_monitor: false
+
+# Conformité 2026-07-04 (trou d'hermétisme PROUVÉ par probe : les 2 PIDs vivants pendant mix test) :
+# DriftMonitor subscribe le Bus inconditionnellement + Shutdown expose un drain global — off en test,
+# les tests dédiés démarrent leur instance avec opts isolés (même règle que les consumers ci-dessus).
+config :fleet_starfleet, start_drift_monitor: false
+config :fleet_starfleet, start_shutdown: false
 config :fleet_spawner, start_publish_consumer: false
 # BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
 config :fleet_spawner, start_pod_warden: false
