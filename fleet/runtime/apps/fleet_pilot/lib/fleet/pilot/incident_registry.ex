@@ -111,6 +111,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
           {:ok, integer()} | {:error, term()}
   def escalate(kind, subject, reason, sig, opts \\ []) do
     create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Pilot.ForgeClient.create_issue/4)
+    add_label_fun = Keyword.get(opts, :add_label_fun, &Fleet.Pilot.ForgeClient.add_label/4)
     repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_issue_repo, "fleet/lcars")
 
     label =
@@ -133,9 +134,27 @@ defmodule Fleet.Pilot.IncidentRegistry do
     #{pane_block(opts[:pane])}
     """
 
-    case create_fun.(repo, title, body, labels: [label], assignees: [assignee]) do
+    # `create_issue` attend des IDs de label ENTIERS (contrat ForgeClient), PAS des noms. On suit donc le
+    # pattern etabli (`PodTools.do_create_issue`) : creer l'issue (avec l'assignee) PUIS poser le label par
+    # NOM via `add_label` (resolution name->id + auto-creation du label d'org cote ForgeClient). Passer
+    # `labels: [nom-string]` au POST -> 422 Gitea « cannot unmarshal string into int64 » : vu LIVE
+    # 2026-07-04 (run poc-morse), l'escalade sysadmin ne creait AUCUNE issue (rail mort silencieux).
+    with {:ok, number} <- create_system_issue(create_fun, repo, title, body, assignee) do
+      # Label = signal DURABLE (le poller/humain trouve l'issue par ce label). add_label est fail-loud cote
+      # ForgeClient mais on ignore ici : l'ISSUE existe = l'escalade a eu lieu ; le label auto-cree son
+      # org-label et retry, echec tres improbable. Meme choix que do_create_issue (type:feature).
+      _ = add_label_fun.(repo, number, label, [])
+      {:ok, number}
+    end
+  end
+
+  # Cree l'issue systeme avec l'assignee sysadmin ; assignee inexistant (compte absent) -> retry SANS
+  # assignee (best-effort : l'escalade prime sur le nommage). Forge down aux deux tentatives -> {:error, _}
+  # propage (record_or_escalate le rend en {:escalation_failed, _}, jamais un {:escalated} menteur).
+  defp create_system_issue(create_fun, repo, title, body, assignee) do
+    case create_fun.(repo, title, body, assignees: [assignee]) do
       {:ok, _} = ok -> ok
-      {:error, _} -> create_fun.(repo, title, body, labels: [label])
+      {:error, _} -> create_fun.(repo, title, body, [])
     end
   end
 

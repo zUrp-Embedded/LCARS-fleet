@@ -311,6 +311,13 @@ defmodule Fleet.MCP.PodTools do
           "issue_state" => issue_state,
           # « livré » = la PR a fermé l'issue (merge FF `Closes #N`). Signal de séquencement multi-issue :
           # l'arch n'enchaîne le issue N+1 que sur `delivered: true`.
+          #
+          # ⚠ LIMITE CONNUE (F-RUN-3, vu live 2026-07-04) : `closed` SEUL confond « fermé par un merge »
+          # (vraie livraison) et « fermé sans livraison » (marqueur d'onboarding `[lcars-onboarded]`,
+          # fermeture manuelle) → faux `delivered:true`. Le fix CORRECT exige de prouver un MERGE (nouvelle
+          # requête forge : PR mergée pour l'issue — `issue_pr_status` ne voit que les PR OUVERTES, nil au
+          # merge). Différé au lot auditabilité. Le DÉCLENCHEUR est neutralisé par F-RUN-1 : create_issue
+          # rend désormais le vrai numéro → l'arch ne DEVINE plus et n'interroge plus le marqueur par erreur.
           "delivered" => issue_state == "closed",
           "pr" => issue_pr_status(forge, repo, number)
         }

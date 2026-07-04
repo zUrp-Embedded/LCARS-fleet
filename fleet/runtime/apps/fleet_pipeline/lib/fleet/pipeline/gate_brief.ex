@@ -34,7 +34,7 @@ defmodule Fleet.Pipeline.GateBrief do
     s = subject_phrases(Map.get(ctx, :subject, :deliverable), step)
 
     """
-    # Brief gatekeeper — éval de gate
+    # #{s.title}
 
     ⚠ TON RÔLE EST DE **JUGER**, PAS DE PRODUIRE. Ne crée AUCUN fichier, ne
     commite RIEN, n'exécute AUCUNE tâche de build. #{s.intro} Ton unique sortie est une **décision** rendue via `submit_result`.
@@ -80,6 +80,10 @@ defmodule Fleet.Pipeline.GateBrief do
   # l'arch, PAS encore exécuté → le juge ne cherche pas un livrable).
   defp subject_phrases(:brief, step) do
     %{
+      # Titre NEUTRE en rôle : ce brief part à N juges (consultant en brief-review, qualifier/reviewer/
+      # gatekeeper en livrable). L'appeler « gatekeeper » quel que soit le juge = drift (vu live
+      # 2026-07-04 : le consultant s'est présenté « rôle gatekeeper »). Le sujet jugé porte le titre.
+      title: "Éval de brief — décision de juge",
       intro: "Le BRIEF à valider (rédigé par l'architecte) est cité plus bas.",
       question:
         "Le brief `#{step}` a été rédigé par l'architecte et n'a PAS encore été exécuté. Au vu du " <>
@@ -92,6 +96,7 @@ defmodule Fleet.Pipeline.GateBrief do
 
   defp subject_phrases(_deliverable, step) do
     %{
+      title: "Éval de livrable — décision de juge",
       intro: "Le livrable existe déjà (il est cité plus bas).",
       question:
         "Le step `#{step}` a livré son résultat. Au vu du livrable ci-dessous et des\n" <>

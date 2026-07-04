@@ -174,17 +174,27 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       # Retour = le NUMÉRO du issue (1, rendu par le stub), pas le reason : un `{:escalated, num}` PROUVE
       # qu'un issue existe vraiment. (Avant le fix d'honnêteté, le retour portait le reason et sortait même
       # quand l'ouverture du issue échouait — cf. le test « forge DOWN » ci-dessous.)
+      # MÉCANIQUE (fix F-RUN-2 2026-07-04) : `create_issue` reçoit l'assignee mais AUCUN label (le POST
+      # Gitea exige des IDs entiers, pas des noms → 422) ; le label `error_system` est posé APRÈS via
+      # `add_label` par NOM. On vérifie les DEUX appels.
       assert {:escalated, 1} =
                Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
                  server: name,
                  create_issue_fun: fn repo, title, _b, iopts ->
                    send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
+                 end,
+                 add_label_fun: fn repo, num, lbl, _o ->
+                   send(pid, {:label, repo, num, lbl}) && {:ok, :added}
                  end
                )
 
       assert_received {:issue, "fleet/lcars", title, iopts}
       assert title =~ "récurrence"
-      assert iopts[:labels] == ["error_system"]
+      # create_issue NE porte PLUS de label (sinon 422) — assignee seulement.
+      refute Keyword.has_key?(iopts, :labels)
+      assert iopts[:assignees] == ["starfleet"]
+      # Le label durable est posé par NOM sur l'issue créée.
+      assert_received {:label, "fleet/lcars", 1, "error_system"}
     end
 
     test "record_or_escalate : déjà vu + forge DOWN → {:escalation_failed,_}, JAMAIS {:escalated} (aucun issue)",
@@ -230,7 +240,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
                  pane: "ECRAN-TEST-42 : derniere ligne REPL",
                  create_issue_fun: fn _r, title, body, _o ->
                    send(pid, {:issue, title, body}) && {:ok, 1}
-                 end
+                 end,
+                 add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
                )
 
       assert_received {:issue, title, body}

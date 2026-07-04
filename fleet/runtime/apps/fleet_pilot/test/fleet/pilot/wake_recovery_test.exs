@@ -52,6 +52,9 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
       note_fun: fn _, _ -> flunk("pas de note si le re-roll échoue") end,
       create_issue_fun: fn repo, title, _body, iopts ->
         send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
+      end,
+      add_label_fun: fn repo, num, lbl, _o ->
+        send(pid, {:label, repo, num, lbl}) && {:ok, :added}
       end
     ]
 
@@ -61,8 +64,12 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     assert_received :respawn
     assert_received {:issue, "fleet/lcars", title, iopts}
     assert title =~ "re-roll échoué"
-    assert iopts[:labels] == ["error_system"]
+
+    # fix F-RUN-2 : create_issue SANS label (le POST Gitea exige des IDs int, pas des noms → 422) ;
+    # le label error_system est posé APRÈS par NOM via add_label.
+    refute Keyword.has_key?(iopts, :labels)
     assert iopts[:assignees] == ["starfleet"]
+    assert_received {:label, "fleet/lcars", 1, "error_system"}
   end
 
   test "fail + DÉJÀ VU → escalade :recurrence DIRECTE (pas de re-roll)" do
@@ -73,7 +80,8 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
       seen_before_fun: fn _ -> true end,
       create_issue_fun: fn repo, title, _b, iopts ->
         send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
-      end
+      end,
+      add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
     ]
 
     assert {:error, {:escalated, :dead}} =
@@ -115,14 +123,21 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
         else
           send(pid, {:fallback, repo, iopts}) && {:ok, 7}
         end
+      end,
+      add_label_fun: fn repo, num, lbl, _o ->
+        send(pid, {:label, repo, num, lbl}) && {:ok, :added}
       end
     ]
 
     WakeRecovery.wake("pod-z", fn -> :ok end, opts)
 
     assert_received :with_assignee
+
+    # fix F-RUN-2 : le fallback (assignee absent) crée SANS assignee NI label ; le label error_system
+    # est posé APRÈS par NOM via add_label — sur l'issue 7 réellement créée par le fallback.
     assert_received {:fallback, "fleet/lcars", fb_opts}
-    assert fb_opts[:labels] == ["error_system"]
+    refute Keyword.has_key?(fb_opts, :labels)
     refute fb_opts[:assignees]
+    assert_received {:label, "fleet/lcars", 7, "error_system"}
   end
 end
