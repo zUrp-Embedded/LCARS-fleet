@@ -197,7 +197,7 @@ defmodule Fleet.Spawner.Pod do
   # watchdogs de réponse (state_timeout :result_deadline + generic timeout :liveness).
   @impl :gen_statem
   def handle_event(:enter, old_state, :monitoring, data) do
-    unless old_state == :extracting, do: Bus.subscribe()
+    unless old_state == :extracting, do: :ok = Bus.subscribe()
     {:keep_state_and_data, arm_result_deadline_actions(data)}
   end
 

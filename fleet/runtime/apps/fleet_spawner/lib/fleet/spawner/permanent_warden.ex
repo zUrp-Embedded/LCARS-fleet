@@ -49,7 +49,7 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   @impl true
   def init(opts) do
-    if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
+    if Keyword.get(opts, :subscribe, true), do: :ok = Bus.subscribe()
     respawn_fun = Keyword.get(opts, :respawn_fun, &Fleet.Spawner.PermanentBoot.respawn/1)
     base = Keyword.get(opts, :backoff_base_ms, 5_000)
     {:ok, %{respawn_fun: respawn_fun, base: base, attempts: %{}}}
@@ -130,7 +130,11 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   @doc "Backoff exponentiel plafonne : base * 2^attempt, cap #{@max_delay_ms} ms. Pur (testable)."
   @spec backoff_delay(non_neg_integer(), pos_integer()) :: pos_integer()
-  def backoff_delay(attempt, base_ms) when attempt >= 0 and base_ms > 0 do
-    min(base_ms * Integer.pow(2, min(attempt, 20)), @max_delay_ms)
+  def backoff_delay(attempt, base_ms)
+      when is_integer(attempt) and attempt >= 0 and is_integer(base_ms) and base_ms > 0 do
+    # E5 : guards TYPÉS (`> 0` seul laissait passer un float → tout le calcul devenait float,
+    # la spec mentait) + shift `1 <<< n` (le type d'Integer.pow inclut un chemin float).
+    import Bitwise, only: [<<<: 2]
+    min(base_ms * (1 <<< min(attempt, 20)), @max_delay_ms)
   end
 end

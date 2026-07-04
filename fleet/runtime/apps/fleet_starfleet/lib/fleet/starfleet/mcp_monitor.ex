@@ -92,11 +92,12 @@ defmodule Fleet.Starfleet.MCPMonitor do
     new_status = check_target(state.target)
     new_state = %{state | status: new_status, last_check: DateTime.utc_now()}
 
-    case {state.status, new_status} do
+    _ =
+      case {state.status, new_status} do
       {:ok, :crashed} ->
         Logger.error("MCPMonitor: target=#{inspect(state.target)} transition :ok → :crashed")
 
-        broadcast_crashed(state.target, :ok, :crashed)
+        _ = broadcast_crashed(state.target, :ok, :crashed)
 
       {:crashed, :ok} ->
         Logger.info("MCPMonitor: target=#{inspect(state.target)} recovered :crashed → :ok")

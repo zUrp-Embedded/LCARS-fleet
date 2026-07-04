@@ -166,9 +166,10 @@ defmodule Fleet.Pilot.Poller do
       incident_fun: Keyword.get(opts, :incident_fun)
     }
 
-    if Keyword.get(opts, :start_tick?, true) do
-      schedule(jitter(state.interval_ms))
-    end
+    _ =
+      if Keyword.get(opts, :start_tick?, true) do
+        schedule(jitter(state.interval_ms))
+      end
 
     Logger.info(
       "fleet_pilot Poller start mode=step MULTI-PROJET topic=#{fleet_topic(state.my_human)} " <>

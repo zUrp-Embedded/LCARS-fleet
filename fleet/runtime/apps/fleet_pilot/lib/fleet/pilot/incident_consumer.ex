@@ -81,7 +81,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
   @impl GenServer
   def init(opts) do
-    if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
+    if Keyword.get(opts, :subscribe, true), do: :ok = Bus.subscribe()
 
     state = %__MODULE__{
       record_fun:

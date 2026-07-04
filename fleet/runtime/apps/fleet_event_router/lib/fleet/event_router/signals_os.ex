@@ -47,8 +47,9 @@ defmodule Fleet.EventRouter.SignalsOS do
     # Schema canon strict : %Fleet.Event{source: :event_router}.
     type_str = "os.signal.#{sig}"
 
-    try do
-      type_atom = String.to_existing_atom(type_str)
+    _ =
+      try do
+        type_atom = String.to_existing_atom(type_str)
 
       _ =
         Fleet.EventRouter.Bus.emit(:event_router, type_atom,

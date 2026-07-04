@@ -46,7 +46,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   def init(opts) do
     # Seam `subscribe: false` (tests : on envoie les events directement au process, pas de Bus réel
     # partagé qui parasiterait la suite async). Défaut true (prod).
-    if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
+    if Keyword.get(opts, :subscribe, true), do: :ok = Bus.subscribe()
     {:ok, nil}
   end
 

@@ -120,7 +120,15 @@ defmodule Fleet.Spawner do
           }
 
           spec = pod_child_spec(args)
-          DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec)
+
+          # E5 : retour NORMALISÉ — le type brut de start_child inclut `:ignore`/`{:ok, pid, info}`
+          # (jamais produits par notre gen_statem, mais les appelants n'ont pas à porter ce contrat).
+          case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
+            {:ok, pid} -> {:ok, pid}
+            {:ok, pid, _info} -> {:ok, pid}
+            :ignore -> {:error, :pod_init_ignored}
+            {:error, _} = err -> err
+          end
         else
           {:error, :invalid_pod_id}
         end
@@ -222,7 +230,7 @@ defmodule Fleet.Spawner do
           :ok
         catch
           :exit, _reason ->
-            DynamicSupervisor.terminate_child(Fleet.Spawner.Supervisor, pid)
+            _ = DynamicSupervisor.terminate_child(Fleet.Spawner.Supervisor, pid)
             :ok
         end
 

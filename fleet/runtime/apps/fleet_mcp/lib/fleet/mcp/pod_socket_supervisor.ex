@@ -68,10 +68,11 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   """
   @spec release_pod_socket(String.t()) :: :ok
   def release_pod_socket(pod_id) when is_binary(pod_id) and pod_id != "" do
-    case Registry.lookup(@registry, pod_id) do
-      [{pid, _}] -> DynamicSupervisor.terminate_child(__MODULE__, pid)
-      [] -> :ok
-    end
+    _ =
+      case Registry.lookup(@registry, pod_id) do
+        [{pid, _}] -> DynamicSupervisor.terminate_child(__MODULE__, pid)
+        [] -> :ok
+      end
 
     path = socket_path(pod_id)
     # Fermer le socket libère le FD, PAS le fichier → on le retire explicitement.

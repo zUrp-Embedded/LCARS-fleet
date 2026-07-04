@@ -165,7 +165,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   @impl GenServer
   def init(opts) do
-    if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
+    if Keyword.get(opts, :subscribe, true), do: :ok = Bus.subscribe()
 
     # MULTI-PROJET : `:repo`/`:remote` ne sont PAS obligatoires — le singleton dérive le
     # repo (+ remote de push) per-step-run depuis l'event (`step_run_state/2`). Ils restent acceptés comme FALLBACK

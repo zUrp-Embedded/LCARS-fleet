@@ -46,8 +46,14 @@ defmodule Fleet.Workflow.Gates do
   @impl Fleet.Workflow.Gate
   def evaluate(step, outputs, ctx), do: eval_by_type(step, outputs, ctx)
 
+  # E5 2026-07-04 : {:human_approval, _} manquait à cette spec INTERNE (le @callback Gate l'a, D2) —
+  # dialyzer propageait le type incomplet et croyait MORTES les clauses human_approval en aval
+  # (step_run_consumer). La spec ment = tout le typage aval ment.
   @spec eval_by_type(step :: map(), outputs :: map(), ctx :: map()) ::
-          :pass | {:fail, String.t()} | {:dispatch_gatekeeper, map()}
+          :pass
+          | {:fail, String.t()}
+          | {:human_approval, String.t()}
+          | {:dispatch_gatekeeper, map()}
   defp eval_by_type(%{"gate" => nil}, _outputs, _ctx), do: :pass
   defp eval_by_type(step, _outputs, _ctx) when not is_map_key(step, "gate"), do: :pass
 

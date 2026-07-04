@@ -86,15 +86,16 @@ defmodule Fleet.Starfleet.MCPWatcher do
 
     case fetch_upstream_version(state) do
       {:ok, upstream} ->
-        if current != upstream do
-          Logger.warning(
-            "MCPWatcher: drift detected package=#{state.package} current=#{inspect(current)} upstream=#{inspect(upstream)}"
-          )
+        _ =
+          if current != upstream do
+            Logger.warning(
+              "MCPWatcher: drift detected package=#{state.package} current=#{inspect(current)} upstream=#{inspect(upstream)}"
+            )
 
-          broadcast_alert(state.package, current, upstream)
-        else
-          Logger.debug("MCPWatcher: package=#{state.package} aligned (#{inspect(current)})")
-        end
+            broadcast_alert(state.package, current, upstream)
+          else
+            Logger.debug("MCPWatcher: package=#{state.package} aligned (#{inspect(current)})")
+          end
 
         %{state | last_check: DateTime.utc_now(), last_current: current, last_upstream: upstream}
 

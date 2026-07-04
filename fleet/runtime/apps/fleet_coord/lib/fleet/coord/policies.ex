@@ -178,17 +178,17 @@ defmodule Fleet.Coord.Policies do
   # l'event à son work item d'origine.
 
   defp dispatch_action("notify_dashboard", path, payload, correlation_id) do
-    canon_event(:notification_routed, "dashboard", path, payload, correlation_id)
+    _ = canon_event(:notification_routed, "dashboard", path, payload, correlation_id)
     :ok
   end
 
   defp dispatch_action("escalate_human", path, payload, correlation_id) do
-    canon_event(:escalation_triggered, "operator", path, payload, correlation_id)
+    _ = canon_event(:escalation_triggered, "operator", path, payload, correlation_id)
     :ok
   end
 
   defp dispatch_action(action, path, payload, correlation_id) when is_binary(action) do
-    canon_action(action, path, payload, correlation_id)
+    _ = canon_action(action, path, payload, correlation_id)
     :ok
   end
 

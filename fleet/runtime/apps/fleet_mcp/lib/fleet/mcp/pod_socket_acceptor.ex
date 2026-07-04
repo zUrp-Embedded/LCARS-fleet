@@ -120,10 +120,11 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   defp serve(sock, pod_id) do
     case :gen_tcp.recv(sock, 0) do
       {:ok, line} ->
-        case handle_line(line, pod_id) do
-          nil -> :ok
-          frame -> :gen_tcp.send(sock, frame)
-        end
+        _ =
+          case handle_line(line, pod_id) do
+            nil -> :ok
+            frame -> :gen_tcp.send(sock, frame)
+          end
 
         serve(sock, pod_id)
 

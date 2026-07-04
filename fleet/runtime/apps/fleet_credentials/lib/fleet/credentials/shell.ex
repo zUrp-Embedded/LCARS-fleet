@@ -302,9 +302,10 @@ defmodule Fleet.Credentials.Shell do
   # /proc indisponible) : on tue le wrapper `setsid` (dégradé honnête). `kill` best-effort (le process a
   # pu mourir entre-temps). Puis fermeture du port. nil = rien à tuer.
   defp terminate(port, os_pid) do
-    case child_pgid(os_pid) do
+    _ =
+      case child_pgid(os_pid) do
       pgid when is_integer(pgid) ->
-        kill_group(pgid)
+        _ = kill_group(pgid)
 
         # Le wrapper setsid lui-même est leader d'une AUTRE session (celle du BEAM) → pas dans le
         # groupe tué ; on l'achève séparément pour ne pas laisser le port à demi-vivant.

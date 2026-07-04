@@ -32,7 +32,7 @@ defmodule Fleet.Spawner.PublishConsumer do
 
   @impl true
   def init(opts) do
-    if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
+    if Keyword.get(opts, :subscribe, true), do: :ok = Bus.subscribe()
     spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
     {:ok, %{spawner: spawner, count: 0}}
   end

@@ -42,7 +42,12 @@ defmodule LcarsFleetRuntime.MixProject do
       plt_local_path: "_build/plts",
       ignore_warnings: ".dialyzer_ignore.exs",
       # signale un filtre d'ignore devenu obsolète (code déplacé/corrigé à l'éclatement) → on le nettoie.
-      list_unused_filters: true
+      list_unused_filters: true,
+      # E5 (2026-07-04) — mode STRICT au-delà du défaut : :unmatched_returns (un retour {:error,_}
+      # jeté sans `_ =` = échec potentiellement avalé), :error_handling (fonctions qui ne peuvent que
+      # crasher), :extra_return/:missing_return (specs vs comportement réel). Top-tier = 0 erreur
+      # AVEC ces flags, pas seulement avec le défaut.
+      flags: [:unmatched_returns, :error_handling, :extra_return, :missing_return]
     ]
   end
 

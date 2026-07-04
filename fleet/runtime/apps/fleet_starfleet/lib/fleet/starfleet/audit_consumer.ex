@@ -11,14 +11,12 @@ defmodule Fleet.Starfleet.AuditConsumer do
     * task-queue : `:"work_item.enqueued"` / `:"work_item.assigned"` / `:"work_item.completed"` /
       `:"work_item.cleared"` / `:"work_item.failed"` / `:"state.corrupt"` (producteur `Fleet.TaskQueue`).
 
-  Handlers DORMANTS (clause défensive, event SANS producteur courant ni clé
-  registry — conservés car testés directement et prêts si un producteur revient) :
-    * `:"pod.refuse_pattern_match"` — hit de pattern refusé (émetteur pod-side jamais
-      implémenté).
-    * `:"pod.drift"` — seuil de drift (même émetteur prévu, jamais implémenté).
+  Handler DORMANT unique : `:"pod.drift"` (clause canon type-only — producteur pas encore né,
+  cf. events.yaml ; consommé aussi par DriftMonitor). `pod.refuse_pattern_match` est PARTI avec la
+  pile legacy (retiré du registry, 0 producteur/0 consumer).
 
-  Pattern GenServer subscribe au boot (init/1), `handle_info({atom,
-  event}, state)` dispatch par atome. Pas de side effect runtime
+  Pattern GenServer subscribe au boot (init/1), dispatch par clauses `%Fleet.Event{}` canon
+  (la pile legacy tuple `{atom, map}` est RASÉE — 0 producteur). Pas de side effect runtime
   au-delà du log (forensics + dashboard subscriber séparé).
 
   Test-seam : `start_link(opts)` accepte `:subscribe` (default true)
@@ -37,7 +35,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
 
   @impl true
   def init(opts) do
-    if Keyword.get(opts, :subscribe, true), do: Bus.subscribe()
+    if Keyword.get(opts, :subscribe, true), do: :ok = Bus.subscribe()
     {:ok, %{events_count: 0}}
   end
 

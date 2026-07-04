@@ -67,16 +67,19 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
     boot_result = if enabled?, do: safe_boot(boot_fn), else: {:ok, []}
 
-    case boot_result do
-      {:ok, pods} ->
-        emit_complete(started_apps, pods)
+    # E5 : émissions best-effort (rescued en interne) — retours jetés délibérément, le boot ne
+    # dépend pas du succès du broadcast.
+    _ =
+      case boot_result do
+        {:ok, pods} ->
+          emit_complete(started_apps, pods)
 
-      {:partial, pods, failed} ->
-        emit_partial(started_apps, pods, failed)
+        {:partial, pods, failed} ->
+          emit_partial(started_apps, pods, failed)
 
-      {:failed, reason} ->
-        emit_failed(reason)
-    end
+        {:failed, reason} ->
+          emit_failed(reason)
+      end
 
     :ok
   end

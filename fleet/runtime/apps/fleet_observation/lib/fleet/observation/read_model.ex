@@ -94,7 +94,7 @@ defmodule Fleet.Observation.ReadModel do
   def init(opts) do
     # Table possédée par CE process (`:protected`) → reads concurrents bypass,
     # écritures via le GenServer. Auto-supprimée à la mort du process.
-    :ets.new(@table, [:set, :protected, :named_table, read_concurrency: true])
+    _ = :ets.new(@table, [:set, :protected, :named_table, read_concurrency: true])
     :ets.insert(@table, {:projection, empty()})
 
     {:ok, %{proj: empty(), subscribe?: Keyword.get(opts, :subscribe, true)},

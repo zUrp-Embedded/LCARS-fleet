@@ -87,9 +87,10 @@ defmodule Fleet.Spawner.Pod.Backend do
     # reste le filet des VRAIS orphelins (process pod gen_statem crashé → teardown jamais exécuté → sock-dir + claude
     # survivent → reap). Gardé `tmux_session` : pods réels (bwrap/host), pas StubBackend (sock_path
     # nominal, rm_rf no-op de toute façon).
-    if is_binary(state.tmux_session) do
-      _ = File.rm_rf(Path.dirname(PodTmux.sock_path(state.pod_id)))
-    end
+    _ =
+      if is_binary(state.tmux_session) do
+        File.rm_rf(Path.dirname(PodTmux.sock_path(state.pod_id)))
+      end
 
     :ok
   end
@@ -106,13 +107,14 @@ defmodule Fleet.Spawner.Pod.Backend do
   """
   @spec terminate_pod_port(port()) :: :ok
   def terminate_pod_port(port) do
-    case Port.info(port, :os_pid) do
-      {:os_pid, os_pid} ->
-        System.cmd("kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
+    _ =
+      case Port.info(port, :os_pid) do
+        {:os_pid, os_pid} ->
+          System.cmd("kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
 
-      _ ->
-        :ok
-    end
+        _ ->
+          :ok
+      end
 
     safe_port_close(port)
   end

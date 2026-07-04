@@ -39,7 +39,8 @@ defmodule Fleet.API.WS do
 
   @impl :cowboy_websocket
   def websocket_init(state) do
-    Bus.subscribe()
+    # E5 : fail-loud — un WS abonné-sourd enverrait un stream mort au client sans erreur.
+    :ok = Bus.subscribe()
     Process.send_after(self(), :heartbeat, @heartbeat_ms)
     {[{:text, ~s|{"type":"connected"}|}], state}
   end
