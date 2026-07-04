@@ -176,7 +176,8 @@ defmodule Fleet.Spawner.PermanentBootTest do
         {:ok, spawn(fn -> :ok end)}
       end
 
-      assert {:ok, [pid_arch]} =
+      # G9 : le boot rend la LISTE DES RÉSULTATS (safe_boot du BootOrchestrator la classe).
+      assert [{:ok, pid_arch}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
@@ -196,7 +197,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
       # spawn_pod rend {:already_started} → ce n'est PAS une erreur, le pod_id est conservé.
       spawner = fn _cp, _tid, _o -> {:error, {:already_started, self()}} end
 
-      assert {:ok, ["permanent-architect"]} =
+      assert [{:ok, "permanent-architect"}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
@@ -222,12 +223,49 @@ defmodule Fleet.Spawner.PermanentBootTest do
                )
     end
 
-    test "succès partiel : spawner {:error} → pod_id omis", %{dir: dir} do
-      assert {:ok, []} =
+    test "G9 boot HONNÊTE : spawner {:error} → l'échec est RENDU nommé, plus jamais filtré", %{
+      dir: dir
+    } do
+      # AVANT (bug G9) : {:ok, []} — l'échec du spawn architect était avalé (reject nil) → le
+      # BootOrchestrator émettait fleet.boot_complete MENTEUR. MAINTENANT : l'échec est dans la
+      # liste des résultats, nommé (role + reason) → safe_boot le classe → fleet.boot_partial.
+      assert [{:error, {"architect", :launch_failed}}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
                  loader: loader_for(),
                  spawner: fn _cp, _t, _o -> {:error, :launch_failed} end
+               )
+    end
+
+    test "G5 respawn/2 : re-spawn d'UN permanent via le chemin de boot (idempotent)", %{dir: _dir} do
+      parent = self()
+
+      spawner = fn %Fleet.CapProfile{metadata: %{"name" => n}}, tid, _o ->
+        send(parent, {:respawned, n, tid})
+        {:ok, spawn(fn -> :ok end)}
+      end
+
+      assert {:ok, "permanent-architect"} =
+               PermanentBoot.respawn("architect", loader: loader_for(), spawner: spawner)
+
+      assert_received {:respawned, "architect", "permanent-architect"}
+    end
+
+    test "G5 respawn/2 : garde-fou — un rôle NON-permanent est refusé fail-loud" do
+      # engineer (boot_at_start: false) : même si un pod_id `permanent-engineer` forgé le demandait,
+      # respawn refuse — un worker one-shot n'a rien à faire dans le cycle permanent.
+      assert {:error, {"engineer", :not_a_permanent}} =
+               PermanentBoot.respawn("engineer",
+                 loader: loader_for(),
+                 spawner: fn _c, _t, _o -> flunk("ne doit pas spawner") end
+               )
+    end
+
+    test "G5 respawn/2 : cap-profile illisible → {:error, {role, {:cap_profile_load_failed, _}}}" do
+      assert {:error, {"architect", {:cap_profile_load_failed, :corrupt}}} =
+               PermanentBoot.respawn("architect",
+                 loader: fn _ -> {:error, :corrupt} end,
+                 spawner: fn _c, _t, _o -> flunk("ne doit pas spawner") end
                )
     end
 

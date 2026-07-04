@@ -42,6 +42,9 @@ config :fleet_starfleet, start_mcp_monitor: false
 config :fleet_spawner, start_publish_consumer: false
 # BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
 config :fleet_spawner, start_pod_warden: false
+# G5 : pas de respawn de permanents en test (pas de vrais permanents ; un test qui en a besoin
+# start_supervised le PermanentWarden avec des seams explicites — cf. Test hermeticity CLAUDE.md).
+config :fleet_spawner, start_permanent_warden: false
 
 # fleet_pilot hermétisme test : le mode step est OFF par défaut (`:step_dispatch?` absent →
 # `step_children` = [] → app inerte, pas de Poller/StepRunConsumer parasite). Le knob legacy

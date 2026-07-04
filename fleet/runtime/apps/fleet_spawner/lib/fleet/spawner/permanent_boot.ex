@@ -77,9 +77,11 @@ defmodule Fleet.Spawner.PermanentBoot do
   le fail-loud, ces échecs seraient droppés en silence — c'est le « truc blessé qu'on garde en
   vie » que la doctrine rejette.
 
-  **Un échec de SPAWN** (bwrap/launch KO) reste **best-effort** : runtime, pas artefact de deploy →
-  loggué (`Logger.error`) + `pod_id` omis, les autres pods bootent. (La détection « tous les pods
-  permanents ont bien spawné » relève de la checklist de démarrage hors-runtime.)
+  **Un échec de SPAWN** (bwrap/launch KO) n'arrête PAS les autres (chacun tente), mais n'est PLUS
+  filtré en silence (G9) : il est rendu en `{:error, {role, reason}}` dans la liste des résultats →
+  le BootOrchestrator émet `fleet.boot_partial` (le permanent manquant est NOMMÉ, pas de
+  `boot_complete` vert amputé). Jupiter-grade : personne ne court derrière avec une checklist —
+  le boot dit la vérité lui-même, et le `PermanentWarden` (G5) re-tente sur `pod.failed`.
 
   ## Écrivain unique state.json
 
@@ -95,7 +97,12 @@ defmodule Fleet.Spawner.PermanentBoot do
     * `:spawner` — `(cp, issue_id, opts) -> {:ok, pid} | {:error, term}`
       (défaut `&Fleet.Spawner.spawn_pod/3`)
   """
-  @spec boot_permanent_pods(keyword()) :: {:ok, [String.t()]} | {:error, term()}
+  # G9 : rend la LISTE DES RÉSULTATS `[{:ok, pod_id} | {:error, {role, reason}}]` — un spawn raté
+  # n'est PLUS filtré (l'ancien `reject(&is_nil/1)` rendait `{:ok, liste_partielle}` → boot MENTEUR).
+  # `safe_boot` (BootOrchestrator) classe nativement la liste : tout-ok → boot_complete, mixte →
+  # boot_partial. Erreur GLOBALE (deploy cassé) → `{:error, reason}` inchangé (→ boot_failed).
+  @spec boot_permanent_pods(keyword()) ::
+          [{:ok, String.t()} | {:error, {String.t(), term()}}] | {:error, term()}
   def boot_permanent_pods(opts \\ []) when is_list(opts) do
     dir = Keyword.get(opts, :cap_profiles_dir) || cap_profiles_dir()
     loader = Keyword.get(opts, :loader, &Fleet.CapProfile.load/1)
@@ -103,13 +110,9 @@ defmodule Fleet.Spawner.PermanentBoot do
 
     with {:ok, roles} <- list_roles(dir),
          {:ok, cps} <- load_all(roles, loader) do
-      pod_ids =
-        cps
-        |> select_permanent()
-        |> Enum.map(&spawn_one(&1, spawner))
-        |> Enum.reject(&is_nil/1)
-
-      {:ok, pod_ids}
+      cps
+      |> select_permanent()
+      |> Enum.map(&spawn_one(&1, spawner))
     else
       # Un load raté = deploy cassé → on propage tel quel (fail-loud). Distinct du dir
       # illisible (`list_roles`), classé `:cap_profiles_dir_unreadable`.
@@ -118,6 +121,34 @@ defmodule Fleet.Spawner.PermanentBoot do
 
       {:error, reason} ->
         {:error, {:cap_profiles_dir_unreadable, reason}}
+    end
+  end
+
+  @doc """
+  Re-spawn UN pod permanent mort (G5, cattle rebuildable) — appelé par `Fleet.Spawner.PermanentWarden`
+  sur `pod.failed` d'un pod `permanent-<role>`. Réutilise EXACTEMENT le chemin de boot (`spawn_one`) :
+  pod_id déterministe idempotent (`{:already_started}` = no-op si le pod est revenu entre-temps) +
+  boot-from-base si une base existe (UUID stable + contexte FRAIS restauré depuis la base — le respawn
+  ne reprend JAMAIS la session accumulée du pod mort, cohérent avec la recovery fresh-reroll).
+
+  Garde-fou : le cap-profile chargé doit être un PERMANENT (`boot_at_start?`) — refuse fail-loud sinon
+  (un rôle non-permanent n'a rien à faire ici, même si un pod_id `permanent-*` forgé le demandait).
+
+  Returns `{:ok, pod_id}` | `{:error, {role, reason}}`.
+  """
+  @spec respawn(String.t(), keyword()) :: {:ok, String.t()} | {:error, {String.t(), term()}}
+  def respawn(role, opts \\ []) when is_binary(role) and is_list(opts) do
+    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.load/1)
+    spawner = Keyword.get(opts, :spawner, &Fleet.Spawner.spawn_pod/3)
+
+    case loader.(role) do
+      {:ok, %Fleet.CapProfile{} = cp} ->
+        if boot_at_start?(cp.spec),
+          do: spawn_one(cp, spawner),
+          else: {:error, {role, :not_a_permanent}}
+
+      {:error, reason} ->
+        {:error, {role, {:cap_profile_load_failed, reason}}}
     end
   end
 
@@ -198,15 +229,16 @@ defmodule Fleet.Spawner.PermanentBoot do
 
     case spawner.(cp, pod_id, opts) do
       {:ok, _pid} ->
-        pod_id
+        {:ok, pod_id}
 
       {:error, {:already_started, _pid}} ->
         Logger.info("PermanentBoot: permanent #{name} déjà vivant (#{pod_id}) — no-op idempotent")
-        pod_id
+        {:ok, pod_id}
 
       {:error, reason} ->
+        # G9 : l'échec est RENDU (plus de nil filtré en silence) → boot_partial visible / respawn retry.
         Logger.error("PermanentBoot: spawn permanent #{name} échoué (#{inspect(reason)})")
-        nil
+        {:error, {name, reason}}
     end
   end
 

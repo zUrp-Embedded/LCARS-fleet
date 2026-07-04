@@ -50,7 +50,17 @@ defmodule Fleet.Spawner.Application do
         []
       end
 
-    children = base ++ publish ++ reaper
+    # Respawn des pods PERMANENTS morts (G5, cattle) : consumer pod.failed scopé `permanent-*` →
+    # PermanentBoot.respawn avec backoff borné. Gaté `:start_permanent_warden` (défaut true prod,
+    # false test — pas de permanents réels à ressusciter en test).
+    permanent_warden =
+      if Application.get_env(:fleet_spawner, :start_permanent_warden, true) do
+        [Fleet.Spawner.PermanentWarden]
+      else
+        []
+      end
+
+    children = base ++ publish ++ reaper ++ permanent_warden
 
     # Pas de boot des pods permanents ici — autorité unique =
     # Fleet.Starfleet.BootOrchestrator (post-readiness). Cette app ne fait que
