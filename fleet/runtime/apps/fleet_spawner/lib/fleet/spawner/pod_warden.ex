@@ -50,10 +50,20 @@ defmodule Fleet.Spawner.PodWarden do
 
   @default_interval_ms 60_000
 
-  # Phases terminales d'un pod (le pod a FINI). Une tombstone dans l'une d'elles n'a plus rien à
-  # protéger → candidate au GC. Miroir du set lu par `Pod.StateFs.clear_terminal_snapshot`/`Pod.Recovery.recovery_action`
-  # (ici en strings car la phase vient du JSON brut du state.json — pas d'atome à matérialiser).
-  @terminal_phases ~w(succeeded released killed)
+  # Phases où une tombstone ORPHELINE (pas de GenServer vivant) est réclamable par le GC : plus de
+  # process à protéger ET aucune donnée à perdre (les artefacts sont re-dérivables — clone frais au
+  # re-spawn, seed `--resume` hors pod_dir dans le seed-store). Deux familles :
+  #   - `succeeded`/`released`/`killed` = terminal-DONE (recovery → `:release`, rien à relancer) ;
+  #   - `failed` = terminal-DIED (recovery → `:recreate`, relance FRESH). Réclamable aussi : le recreate
+  #     re-clone à neuf, il ne lit pas l'ancien pod_dir. Un `failed` jamais re-dispatché (issue fermée
+  #     ailleurs) fuirait sinon tombstone + pod_dir pour toujours.
+  # ⚠ DIVERGENCE VOULUE avec `Pod.StateFs.clear_terminal_snapshot` (qui, LUI, exclut `failed`) : ce dernier
+  # efface la tombstone AU RE-SPAWN, or `recover_or_init` doit d'abord LIRE la phase `failed` pour décider
+  # `:recreate` — la pré-effacer casserait la recovery. Le GC, lui, n'agit que sur l'ORPHELIN (2-tick grace
+  # + `not live`) : le race GC↔recovery est bénin (GC gagne → fresh init sans state.json ; recovery gagne →
+  # registre vivant → GC skip ; les deux aboutissent à un clone frais, un pod `failed` n'a rien à préserver).
+  # Strings (la phase vient du JSON brut du state.json — pas d'atome à matérialiser).
+  @terminal_phases ~w(succeeded released killed failed)
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 

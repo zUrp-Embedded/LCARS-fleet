@@ -41,6 +41,11 @@ defmodule Fleet.Spawner.PodWardenGCTest do
     # terminale + orpheline (pas dans `live`) → doit être GC, mais après la grace.
     done_state = write_state!(sr, "pods", "done", "succeeded")
     done_pod = write_pod_dir!(pr, "done")
+
+    # terminal-DIED `failed` + orphelin → GC-able aussi (G10 : sinon fuite éternelle d'un failed jamais
+    # re-dispatché ; le recreate re-clone frais, rien à perdre). Même traitement que `succeeded`.
+    failed_state = write_state!(sr, "pods", "failed-orphan", "failed")
+    failed_pod = write_pod_dir!(pr, "failed-orphan")
     # non-terminale (en vol) + orpheline → épargnée (recovery :resume/:recreate intacte).
     inflight_state = write_state!(sr, "runs", "inflight", "monitoring")
     inflight_pod = write_pod_dir!(pr, "inflight")
@@ -50,18 +55,22 @@ defmodule Fleet.Spawner.PodWardenGCTest do
 
     live = MapSet.new(["live-term"])
 
-    # Tick 1 (grace) : rien n'est effacé, "done" devient seulement suspecte.
+    # Tick 1 (grace) : rien n'est effacé, "done" ET "failed-orphan" deviennent seulement suspectes.
     suspects1 = W.sweep_pod_dir_gc(live, MapSet.new())
-    assert MapSet.equal?(suspects1, MapSet.new(["done"]))
+    assert MapSet.equal?(suspects1, MapSet.new(["done", "failed-orphan"]))
     assert File.exists?(done_pod)
     assert File.exists?(done_state)
+    assert File.exists?(failed_pod)
+    assert File.exists?(failed_state)
 
-    # Tick 2 : "done" confirmée → state-dir ET pod_dir effacés. Tout le reste intact.
+    # Tick 2 : "done" ET "failed-orphan" confirmées → state-dir ET pod_dir effacés. Reste intact.
     suspects2 = W.sweep_pod_dir_gc(live, suspects1)
     assert MapSet.equal?(suspects2, MapSet.new())
 
     refute File.exists?(done_pod)
     refute File.exists?(done_state)
+    refute File.exists?(failed_pod)
+    refute File.exists?(failed_state)
 
     assert File.exists?(inflight_pod)
     assert File.exists?(inflight_state)
