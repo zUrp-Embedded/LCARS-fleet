@@ -6,7 +6,7 @@
 #         retourne le cap-profile du rôle inchangé.
 # Référencé par: tests stub
 #
-# Pourquoi : Fleet.Pipeline schema v1 exige `steps.<name>.profile` non-
+# Pourquoi : Fleet.Workflow schema v1 exige `steps.<name>.profile` non-
 # vide (chaîne minLength 1). Pour les steps qui n'ont PAS besoin
 # d'overlay modop, on référence ce modop vide — deep_merge_last_wins
 # avec map vide = no-op.

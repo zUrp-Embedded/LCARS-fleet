@@ -3,7 +3,7 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   Navigation **pure** dans une workflow_map (pipeline) — le chaînage forge-driven des steps.
   Remplace la logique RAM `Executor.next_step_or_done` par une résolution
   **stateless** : étant donné la
-  workflow_map (sortie `Fleet.Pipeline.Loader`) + le **nom du step courant**, calcule le
+  workflow_map (sortie `Fleet.Workflow.Loader`) + le **nom du step courant**, calcule le
   step suivant (ou terminal).
 
   ## Pourquoi clé par NOM de step, pas par rôle

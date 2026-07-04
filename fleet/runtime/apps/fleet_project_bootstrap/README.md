@@ -1,7 +1,7 @@
 # fleet_project_bootstrap — core du pod (Ring 1)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-01
+**Dernière révision** : 2026-07-04
 **Statut** : ACTIF — chemin PROD câblé (`Phase.Clone`). Orchestrateur mort `prepare/3` + 4 phases non-Clone RETIRÉS.
 **Dérivé de** : 04_design-notes/ring1/fleet_project_bootstrap.md + session 2026-05-17/18 (rings finalisés)
 
@@ -38,7 +38,7 @@ par `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` au spawn, `reset_in
 
 Auth git : `Fleet.Credentials.ForgeAuth.git_env/0` (token via env hors argv, `GIT_TERMINAL_PROMPT=0`).
 Identité git posée en env au lancement par `bwrap_launch.sh` (pas de `git config` mutable — garantie
-côté monde via `Fleet.Pipeline.DeliverableGate.check_identity/3`).
+côté monde via `Fleet.Workflow.DeliverableGate.check_identity/3`).
 
 **Git BORNÉ par construction** : clone/fetch/checkout/reset passent par `Fleet.Credentials.Shell.git/2`
 (deadline + SIGKILL du process OS à l'expiration) — un git réseau qui pend (ou qui prompterait sans TTY)

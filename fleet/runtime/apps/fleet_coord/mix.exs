@@ -28,7 +28,7 @@ defmodule Fleet.Coord.MixProject do
 
   defp deps do
     # R06 : `fleet_spawner` retiré — coord ne spawne plus (SoftGate/Hook
-    # supprimés, gate LLM consolidée sur le gatekeeper côté `fleet_pipeline`).
+    # supprimés, gate LLM consolidée sur le gatekeeper côté `fleet_workflow`).
     # coord = policies déclaratives pures + broadcast Bus.
     [
       {:fleet_event_router, in_umbrella: true},

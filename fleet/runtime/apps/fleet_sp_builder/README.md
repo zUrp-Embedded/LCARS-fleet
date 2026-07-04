@@ -1,7 +1,7 @@
 # Fleet.SPBuilder
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-02
+**Dernière révision** : 2026-07-04
 **Statut** : implémenté run #3.1 chantier #2 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_sp_builder.md
 
@@ -35,7 +35,7 @@ paths skills filtrés.
   dev sans env (l'ancien défaut relatif `"cap-profiles"`, relatif au CWD, donnait `:enoent` en release).
 - `:fleet_sp_builder, :modop_root` — racine FS des fragments SP de modop (`<root>/<name>/sp.md`).
   **CONFIG-OBLIGATOIRE** : pas de défaut bundlé (les fragments canon vivent dans
-  `fleet_pipeline/priv/canon/modop-bundles`, Ring 3, hors du graphe de deps de ce Ring 1). Non configuré +
+  `fleet_workflow/priv/canon/modop-bundles`, Ring 3, hors du graphe de deps de ce Ring 1). Non configuré +
   modops demandés → `compose/3` rend `{:error, :modop_root_unconfigured}` (fail-loud, plus de défaut relatif
   `"modop"` qui donnait un `:enoent` muet). La chaîne de spawn PROD ne passe aucun modop → root jamais requis.
 

@@ -229,7 +229,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
       end
     end
 
-    # Pas de helper `forge_auth_args/0` local (ni dup de `Fleet.Pipeline.Git`, malgré le cycle compile
+    # Pas de helper `forge_auth_args/0` local (ni dup de `Fleet.Workflow.Git`, malgré le cycle compile
     # pipeline⇄bootstrap) : l'auth forge a une source unique `Fleet.Credentials.ForgeAuth.git_env/0`
     # (fleet_credentials est en-dessous des deux apps → pas de cycle), token via env hors argv.
 
@@ -238,7 +238,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # falsifiable. L'identité est posée en env au lancement (bwrap_launch.sh : GIT_AUTHOR_*/GIT_COMMITTER_*
     # = LCARS-<role> / <role>@lcars.local + GIT_CONFIG_GLOBAL=/dev/null), défaut coopératif déterministe
     # que le pod ne peut pas surcharger. La garantie vit côté monde :
-    # `Fleet.Pipeline.DeliverableGate.check_identity/3` rejette au push tout commit hors identité
+    # `Fleet.Workflow.DeliverableGate.check_identity/3` rejette au push tout commit hors identité
     # autorisée (le pod ne PEUT PAS pousser un livrable usurpé).
   end
 end

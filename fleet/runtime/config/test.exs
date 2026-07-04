@@ -55,7 +55,7 @@ config :fleet_pilot, step_run_write_spacing_ms: 0
 # (start_pipeline ne spawnera pas de pod gatekeeper). Le test dédié
 # (gatekeeper_test.exs) active l'autoboot + injecte des seams stub ; les tests
 # de gate (executor_gate_pending) posent `:gatekeeper_pod_id` directement.
-config :fleet_pipeline, gatekeeper_autoboot: false
+config :fleet_workflow, gatekeeper_autoboot: false
 
 # BL-027 — hermétisme : registry events.yaml non chargé en test (authorized_event_types
 # vide → escape-hatch assert_authorized! → Bus.broadcast/2 ne valide pas). Le test dédié

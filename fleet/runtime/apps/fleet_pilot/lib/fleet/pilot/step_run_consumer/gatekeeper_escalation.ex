@@ -81,7 +81,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
         workflow_map_name = Map.get(workflow_map, "name")
 
         brief =
-          Fleet.Pipeline.GateBrief.build(%{
+          Fleet.Workflow.GateBrief.build(%{
             step: step,
             workflow_map_id: workflow_map_name,
             gate: gate,
@@ -154,7 +154,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   defp kick(seams, pod_id) do
     wake_recovery = seams.wake_recovery || (&Fleet.Pilot.WakeRecovery.wake/3)
 
-    wake_recovery.(pod_id, fn -> Fleet.Pipeline.Gatekeeper.reboot() end,
+    wake_recovery.(pod_id, fn -> Fleet.Workflow.Gatekeeper.reboot() end,
       wake_fun: fn p -> seams.spawner.wake_pod(p) end
     )
   end

@@ -142,7 +142,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Le Loader doit normaliser v1/v2.5 vers une forme interne unique (déballer
   # spec.steps). Sans ça un consommateur lit `pipeline["steps"]=nil` sur du v2.5.
   defp check_pipeline_v25_normalized(root) do
-    rel = "apps/fleet_pipeline/lib/fleet/pipeline/loader.ex"
+    rel = "apps/fleet_workflow/lib/fleet/workflow/loader.ex"
     loader = Path.join(root, rel)
 
     # Anti-vert-creux : matcher `~r/normalize|déball/i` sur TOUT le source rendrait le rail vert dès qu'un
@@ -236,12 +236,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       end)
 
     gates_coord_dep =
-      Path.join(root, "apps/fleet_pipeline/lib/fleet/pipeline/gates.ex")
+      Path.join(root, "apps/fleet_workflow/lib/fleet/workflow/gates.ex")
       |> grep_lines(~r/coord_backend|CoordBackend/)
       |> Enum.filter(fn {_ln, line} ->
         Regex.match?(~r/coord_backend|CoordBackend/, strip_comment(line))
       end)
-      |> Enum.map(fn {ln, _} -> "apps/fleet_pipeline/lib/fleet/pipeline/gates.ex:#{ln}" end)
+      |> Enum.map(fn {ln, _} -> "apps/fleet_workflow/lib/fleet/workflow/gates.ex:#{ln}" end)
 
     evidence = notwired ++ gates_coord_dep
 
@@ -629,7 +629,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `|>` (précédence > `||`) appliquerait flat_map à `[]`, pas à la liste de
   # workflow_maps (`(true && l) || [] |> map` ⇒ `l`, map sauté).
   defp check_gatekeeper_not_a_step(root) do
-    dir = "apps/fleet_pipeline/priv/canon/workflow_maps"
+    dir = "apps/fleet_workflow/priv/canon/workflow_maps"
     abs = Path.join(root, dir)
 
     evidence =

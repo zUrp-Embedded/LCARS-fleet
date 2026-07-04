@@ -33,7 +33,7 @@ defmodule Fleet.Pilot.Poller do
 
   ## Historique — mode legacy RETIRÉ (2026-06-16)
 
-  L'ancien mode `do_poll` legacy (route-table → `Dispatcher.dispatch` → `Fleet.Pipeline.start_pipeline`
+  L'ancien mode `do_poll` legacy (route-table → `Dispatcher.dispatch` → `Fleet.Workflow.start_pipeline`
   = Executor RAM, via l'état de l'`AutoDispatcher`) a été **supprimé** avec le rail legacy
   (`auto_dispatcher`/`dispatcher`/`pipeline_invoker`). Le module `Routing` lui-même a été retiré
   comme code mort. Seul le mode step subsiste ; le moteur RAM tombe en aval.
@@ -652,7 +652,7 @@ defmodule Fleet.Pilot.Poller do
 
   # Charge la workflow_map (seam `workflow_map_loader` ou Loader réel) ; `nil` sur échec (le dispatch re-tentera → fail-loud).
   defp load_workflow_map_or_nil(workflow_map_name, state) do
-    loader = state.workflow_map_loader || Fleet.Pipeline.Loader
+    loader = state.workflow_map_loader || Fleet.Workflow.Loader
     loader.load!(workflow_map_name)
   rescue
     _ -> nil
@@ -682,7 +682,7 @@ defmodule Fleet.Pilot.Poller do
     ]
     |> Opts.maybe_put(:loader, state.loader)
     # `workflow_map_role` (dispatch) charge la workflow_map de la route → il lui faut le loader de WORKFLOW_MAP (comme
-    # fonction load!/1). Live : nil → défaut `Fleet.Pipeline.Loader.load!` (priv). Test : dérivé du module
+    # fonction load!/1). Live : nil → défaut `Fleet.Workflow.Loader.load!` (priv). Test : dérivé du module
     # stub. (Distinct de `:loader` = cap-profiles.)
     |> Opts.maybe_put(:workflow_map_loader, workflow_map_loader_fun(state))
     |> Opts.maybe_put(:spawner, state.spawner)

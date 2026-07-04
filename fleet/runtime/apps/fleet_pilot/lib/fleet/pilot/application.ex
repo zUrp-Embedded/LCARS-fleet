@@ -20,11 +20,11 @@ defmodule Fleet.Pilot.Application do
   ## Historique — rail legacy RETIRÉ (2026-06-16)
 
   L'ancien rail `AutoDispatcher` (webhook Gitea `gitea.*` → `Routing` catalogue → `Dispatcher` →
-  `PipelineInvoker` → `Fleet.Pipeline.start_pipeline` = moteur RAM `Executor`) a été **supprimé** :
+  `PipelineInvoker` → `Fleet.Workflow.start_pipeline` = moteur RAM `Executor`) a été **supprimé** :
   le double-modèle de livraison (RAM + forge) est éliminé, seul le **rail forge** subsiste. Avec lui
   ont disparu `auto_dispatcher.ex` / `dispatcher.ex` / `pipeline_invoker.ex`, le mode `do_poll` legacy
   du `Poller`, et la garde `guard_no_duplicate_poller!` (plus de collision possible : un seul Poller).
-  Le moteur RAM (`fleet_pipeline`) tombe en aval (`start_pipeline` orphelin).
+  Le moteur RAM (`fleet_workflow`) tombe en aval (`start_pipeline` orphelin).
   """
 
   use Application

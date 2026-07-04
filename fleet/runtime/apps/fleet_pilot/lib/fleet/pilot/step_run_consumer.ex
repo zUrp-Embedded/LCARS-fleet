@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   ## Gatekeeper = exception (escalade), PAS un step
 
-  La gate du step fini décide AVANT d'avancer (`Fleet.Pipeline.Gates.evaluate/3`,
+  La gate du step fini décide AVANT d'avancer (`Fleet.Workflow.Gates.evaluate/3`,
   PUR) :
 
     * `:pass`                  → avance dans la workflow_map (next_step).
@@ -25,12 +25,12 @@ defmodule Fleet.Pilot.StepRunConsumer do
   (le `soft`/non-tranchable est une *condition runtime*, pas un *tag de step*).
   Pas de step `role: gatekeeper`, pas de biconditionnelle `soft⟺gatekeeper` —
   toute la machinerie explicit-step est retirée. Ce module REMPLACE l'ancien
-  chaînage gatekeeper du moteur RAM `Fleet.Pipeline.Executor` (`do_dispatch_gatekeeper`/
+  chaînage gatekeeper du moteur RAM `Fleet.Workflow.Executor` (`do_dispatch_gatekeeper`/
   `handle_gate_decision`), SUPPRIMÉ : il refait la même décision, mais forge-driven.
 
   ## Garde résiduelle `workflow_map_id`
 
-  Le moteur RAM `Fleet.Pipeline.Executor` (corrélation workflow_map_name↔step en mémoire)
+  Le moteur RAM `Fleet.Workflow.Executor` (corrélation workflow_map_name↔step en mémoire)
   est SUPPRIMÉ — il n'y a plus de dual-run : ce consumer est le seul rail. Plus
   aucun pod n'est spawné avec `opts[:workflow_map_id]` (l'Executor était le seul
   producteur). La branche `workflow_map_id` présent → skip (L.399) subsiste comme
@@ -73,7 +73,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     * `:step_run_completer` — seam (défaut `Fleet.Pilot.StepRunCompleter`)
     * `:task_queue` — broker de briefs pour l'escalade gatekeeper (défaut `Fleet.TaskQueue`)
     * `:spawner` — wake du gatekeeper après enqueue (défaut `Fleet.Spawner`)
-    * `:gatekeeper_pod_id_fun` — `fn -> pod_id | nil end` (défaut `&Fleet.Pipeline.Gatekeeper.pod_id/0`)
+    * `:gatekeeper_pod_id_fun` — `fn -> pod_id | nil end` (défaut `&Fleet.Workflow.Gatekeeper.pod_id/0`)
     * `:subscribe` — bool défaut `true` (tests : `false` + envoi manuel)
     * `:step_run_runner` — seam d'offload de la complétion. Défaut `nil` → **SYNC** (l'outcome remonte,
       seams/tests inchangés). Prod (`application.ex`) injecte `&offload_async/1` → la complétion (git push
@@ -182,8 +182,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # pour un backend forge alternatif (ou un sim en dogfood bare).
       forge_client: Keyword.get(opts, :forge_client),
       # Loader de workflow_map (mode workflow_map multi-step) : résout le step suivant. Défaut = Loader réel.
-      loader: Keyword.get(opts, :loader, Fleet.Pipeline.Loader),
-      # nil → StepRunCompleter applique son défaut (Fleet.Pipeline.Deliverable). Injectable (sim/test).
+      loader: Keyword.get(opts, :loader, Fleet.Workflow.Loader),
+      # nil → StepRunCompleter applique son défaut (Fleet.Workflow.Deliverable). Injectable (sim/test).
       deliverable: Keyword.get(opts, :deliverable),
       # Classification producteur/juge du step_run PR-natif. Defaut = catalogue cap-profile.
       deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
@@ -195,9 +195,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
       gatekeeper_pod_id_fun:
-        Keyword.get(opts, :gatekeeper_pod_id_fun, &Fleet.Pipeline.Gatekeeper.pod_id/0),
+        Keyword.get(opts, :gatekeeper_pod_id_fun, &Fleet.Workflow.Gatekeeper.pod_id/0),
       gatekeeper_boot_fun:
-        Keyword.get(opts, :gatekeeper_boot_fun, &Fleet.Pipeline.Gatekeeper.ensure_booted/0),
+        Keyword.get(opts, :gatekeeper_boot_fun, &Fleet.Workflow.Gatekeeper.ensure_booted/0),
       # Seam du recovery de wake (défaut = la vraie fn).
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{},
@@ -789,7 +789,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
       {:judge_verdict, decision, trace, ctx}
     else
-      case Fleet.Pipeline.Gates.evaluate(spec, result, %{}) do
+      case Fleet.Workflow.Gates.evaluate(spec, result, %{}) do
         :pass ->
           # L'intent terminal dépend du RÔLE qui finit (cf. tag_advance/2).
           tag_advance(advance(workflow_map, step), producer?(payload["role"], state))

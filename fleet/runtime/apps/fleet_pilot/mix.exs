@@ -30,12 +30,12 @@ defmodule Fleet.Pilot.MixProject do
     # Service auto-orchestration issues Gitea (M-033 backlog, doctrine
     # topologie-ring.md §"Élagage" : client du core, pas core). Découvre ses
     # projets par topic et pilote le rail forge-state-machine (la forge EST la
-    # machine à états) ; il utilise les fonctions pures de `fleet_pipeline`
+    # machine à états) ; il utilise les fonctions pures de `fleet_workflow`
     # (gates, loader, deliverable). Le moteur RAM `start_pipeline`/`PipelineInvoker`
     # est retiré.
     [
       {:fleet_event_router, in_umbrella: true},
-      {:fleet_pipeline, in_umbrella: true},
+      {:fleet_workflow, in_umbrella: true},
       # `fleet_pilot` pilote le rail forge-driven en s'appuyant sur le spawner réel
       # (wake/kill/pod_info/reprovision et contrat pod_id). Dépendance directe :
       # le couplage existe dans le code, donc il doit être visible au build graph.

@@ -7,7 +7,7 @@ defmodule Fleet.Shutdown.Quiesce do
   passe à `true` ; les **points d'entrée de travail top-level neuf** le
   consultent et refusent d'admettre du nouveau travail :
 
-    * `Fleet.Pipeline.start_pipeline/3` — nouveau pipeline (webhook→pipeline
+    * `Fleet.Workflow.start_pipeline/3` — nouveau pipeline (webhook→pipeline
       via Pilot, ou opérateur)
     * REST `POST /api/admin/spawn` — nouveau pod opérateur
 
@@ -17,7 +17,7 @@ defmodule Fleet.Shutdown.Quiesce do
 
   ## Pourquoi ici (fleet_event_router) et pas dans fleet_starfleet
 
-  Les lecteurs (`fleet_pipeline` Ring 3, `fleet_api` Ring 4) ne peuvent pas
+  Les lecteurs (`fleet_workflow` Ring 3, `fleet_api` Ring 4) ne peuvent pas
   prendre `fleet_starfleet` (Ring 3) en dépendance sans coupler des frères /
   inverser le layering. `fleet_event_router` est le substrat universel dont
   tout le monde dépend déjà (comme `Fleet.Event`). Le **primitive** (le flag)

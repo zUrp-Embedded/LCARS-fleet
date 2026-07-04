@@ -22,7 +22,7 @@ defmodule Fleet.Coord do
   Les anciens `invoke_soft_gate/4` + `invoke_hook/2` (spawn pod LLM
   délégué coord) sont **retirés** : le jugement LLM des gates est
   consolidé sur le **gatekeeper** (juge unique), spawné côté pipeline
-  (`Fleet.Pipeline.Gates.dispatch_gatekeeper/4`, async). `Fleet.Coord`
+  (`Fleet.Workflow.Gates.dispatch_gatekeeper/4`, async). `Fleet.Coord`
   ne porte plus de spawn — uniquement les policies déclaratives.
 
   ## Implémentation backend

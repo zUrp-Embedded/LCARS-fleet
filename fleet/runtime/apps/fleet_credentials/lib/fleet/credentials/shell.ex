@@ -60,7 +60,7 @@ defmodule Fleet.Credentials.Shell do
 
   ## Placement (cycle compile)
 
-  `fleet_project_bootstrap` ne peut PAS dépendre de `fleet_pipeline` ni `fleet_spawner` (cycle
+  `fleet_project_bootstrap` ne peut PAS dépendre de `fleet_workflow` ni `fleet_spawner` (cycle
   compile, cf. CLAUDE.md). `fleet_credentials` est SOUS les trois (dépendance commune) — c'est déjà le
   propriétaire de `Fleet.Credentials.ForgeAuth.git_env/0` pour la même raison. Le wrapper vit donc ici,
   atteignable par bootstrap, pipeline ET pilot sans introduire de cycle.

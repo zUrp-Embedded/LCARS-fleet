@@ -33,7 +33,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   ## Seams
 
-  `:deliverable` (défaut `Fleet.Pipeline.Deliverable`), `:forge_client` (défaut
+  `:deliverable` (défaut `Fleet.Workflow.Deliverable`), `:forge_client` (défaut
   `Fleet.Pilot.ForgeClient`) — stubés en test. `:deliverable_opts` quand le step_run
   produit un livrable git ; absent/`nil` = pas de livrable git (ex. verdict de
   juge en mode payload — le `step_run_sha` est alors fourni explicitement).
@@ -83,7 +83,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   @spec complete(step_run(), keyword()) ::
           {:ok, :completed | :reassigned} | {:error, {atom(), term()}}
   def complete(step_run, opts \\ []) when is_map(step_run) do
-    deliverable = Keyword.get(opts, :deliverable, Fleet.Pipeline.Deliverable)
+    deliverable = Keyword.get(opts, :deliverable, Fleet.Workflow.Deliverable)
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
@@ -191,7 +191,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   @spec open_deliverable_pr(map(), keyword()) ::
           {:ok, %{commit_sha: String.t(), pr_number: integer()}} | {:error, {atom(), term()}}
   def open_deliverable_pr(step_run, opts \\ []) when is_map(step_run) do
-    deliverable = Keyword.get(opts, :deliverable, Fleet.Pipeline.Deliverable)
+    deliverable = Keyword.get(opts, :deliverable, Fleet.Workflow.Deliverable)
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 

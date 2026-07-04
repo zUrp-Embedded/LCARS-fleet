@@ -1,7 +1,7 @@
 # _frozen-monks — Memory-X GELÉ (sorti de la boucle de boot)
 
 **Date** : 2026-06-19
-**Dernière révision** : 2026-06-19
+**Dernière révision** : 2026-07-04
 **Statut** : ARCHIVÉ / gelé — hors scan cap-profiles, hors boot permanent
 **Référencé par** : work/backlog.md (LCARS), #5.2/JOURNAL-session
 
@@ -19,7 +19,7 @@ attendant le re-home propre. cf. `work/backlog.md`.
 ## Effet
 
 Déplacé hors de `cap-profiles/` → plus scanné → ne boote plus. Seul `architect` reste `boot_at_start`
-(le gatekeeper boote via fleet_pipeline). Le **code** d'injection monk (`SPBuilder.resolve_monk_injection`)
+(le gatekeeper boote via fleet_workflow). Le **code** d'injection monk (`SPBuilder.resolve_monk_injection`)
 reste en place, juste non sollicité. Tests monk gelés (`@moduletag skip`) : `sp_builder_monk_test`,
 `cap_profile_monks_f041_test`, `monks_v25_conformance_test`.
 

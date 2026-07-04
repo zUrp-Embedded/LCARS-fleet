@@ -442,9 +442,9 @@ defmodule Fleet.SPBuilder do
   end
 
   # `modop_root` — base des fragments SP de modop (`<root>/<name>/sp.md`). CONFIG-OBLIGATOIRE (fail-loud) :
-  # les fragments canon vivent dans `fleet_pipeline/priv/canon/modop-bundles` (Ring 3), HORS du graphe de
+  # les fragments canon vivent dans `fleet_workflow/priv/canon/modop-bundles` (Ring 3), HORS du graphe de
   # deps de sp_builder (Ring 1) → on ne peut PAS y pointer un défaut bundlé sans violer le ring (et
-  # `Application.app_dir(:fleet_pipeline, …)` lèverait « unknown application » en test isolé). Donc AUCUN
+  # `Application.app_dir(:fleet_workflow, …)` lèverait « unknown application » en test isolé). Donc AUCUN
   # défaut relatif trompeur (l'ancien `"modop"` relatif au CWD = `:enoent` muet en release) : sans config,
   # `:error` → `read_modop_fragments` rend `{:error, :modop_root_unconfigured}` (fail-loud explicite). La
   # chaîne de spawn PROD ne passe aucun modop (`compose(cap, [], …)`) → ce root n'est jamais requis en prod.

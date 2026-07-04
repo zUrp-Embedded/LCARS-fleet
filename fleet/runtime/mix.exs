@@ -31,7 +31,7 @@ defmodule LcarsFleetRuntime.MixProject do
         :fleet_mcp,
         :fleet_observation,
         :fleet_pilot,
-        :fleet_pipeline,
+        :fleet_workflow,
         :fleet_project_bootstrap,
         :fleet_sp_builder,
         :fleet_spawner,
@@ -167,7 +167,7 @@ defmodule LcarsFleetRuntime.MixProject do
           # contrat release faux + ambiguïté boot/supervision pour une app OTP centrale (get_task/
           # submit_result). Ajouté explicite.
           fleet_task_queue: :permanent,
-          fleet_pipeline: :permanent,
+          fleet_workflow: :permanent,
           fleet_starfleet: :permanent,
           fleet_coord: :permanent,
           fleet_api: :permanent,

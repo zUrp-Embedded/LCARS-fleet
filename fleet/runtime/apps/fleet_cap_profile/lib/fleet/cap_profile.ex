@@ -392,7 +392,7 @@ defmodule Fleet.CapProfile do
 
   @doc """
   Accesseur canon du `deliverable_mode` (`spec.deliverable_mode`, schéma v2.5). **Source unique** :
-  la sélection du mode de publication (`Fleet.Pipeline.Deliverable.publish/1`) se lit ICI, pas
+  la sélection du mode de publication (`Fleet.Workflow.Deliverable.publish/1`) se lit ICI, pas
   ré-implémentée chez les lecteurs. `default` `"payload"` (le défaut canon, back-compat : un profil
   sans champ = le-système-écrit-le-payload). Les code-rôles déclarent `git_native`.
   """

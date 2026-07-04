@@ -1,7 +1,7 @@
 # fleet_coord (chantier 14)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-01 (R06 — retrait SoftGate/Hook/HookSpawner : gates LLM consolidées sur le gatekeeper côté pipeline ; coord = policies déclaratives pures)
+**Dernière révision** : 2026-07-04 (R06 — retrait SoftGate/Hook/HookSpawner : gates LLM consolidées sur le gatekeeper côté pipeline ; coord = policies déclaratives pures)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_coord.md`, `STATUS-CHANTIERS.md`
 
@@ -13,7 +13,7 @@ orchestration. Source : `04_design-notes/fleet_coord.md`
 **Aucune logique de raisonnement LLM** : `coord` = policies déclaratives
 pures (méta-axiome architecture-cible §L441). Le jugement LLM des gates
 pipeline est **consolidé sur le gatekeeper** (juge unique), spawné côté
-`fleet_pipeline` (R06) — `coord` ne porte plus de soft gate / hook.
+`fleet_workflow` (R06) — `coord` ne porte plus de soft gate / hook.
 
 ## Sous-modules
 
@@ -24,7 +24,7 @@ pipeline est **consolidé sur le gatekeeper** (juge unique), spawné côté
 
 > **Retiré (R06)** : `Fleet.Coord.SoftGate` / `Fleet.Coord.Hook` /
 > `Fleet.Coord.HookSpawner` (+ `NotWiredYet`). Le soft gate et le terminal
-> non-tranchable sont jugés par le **gatekeeper** (`Fleet.Pipeline.Gates`
+> non-tranchable sont jugés par le **gatekeeper** (`Fleet.Workflow.Gates`
 > retourne `{:dispatch_gatekeeper, info}`, l'Executor spawn + ré-évalue).
 
 ## Public API
@@ -45,7 +45,7 @@ pipeline est **consolidé sur le gatekeeper** (juge unique), spawné côté
 config :fleet_starfleet, :coord_backend, Fleet.Coord
 ```
 
-(Plus de `:fleet_pipeline, :coord_backend` — supprimé en R06 : le pipeline
+(Plus de `:fleet_workflow, :coord_backend` — supprimé en R06 : le pipeline
 ne délègue plus la gate LLM à coord.)
 
 ## Format `priv/config/coord-policies.yaml`
@@ -89,5 +89,5 @@ mix test apps/fleet_coord
 ## Frontière vendor
 
 N0 (vendor-agnostic, pas d'inférence dans ce module — policies
-déclaratives pures ; le jugement LLM des gates est côté `fleet_pipeline`
+déclaratives pures ; le jugement LLM des gates est côté `fleet_workflow`
 → gatekeeper, R06).

@@ -8,7 +8,7 @@ Broker d'orchestration cross-pod LCARS (Ring 2). **Un seul écrivain** (GenServe
 distribution/collecte des work items, complétion **event-driven**. Remplace le stub in-mem
 `Fleet.MCP.TaskQueue` (supprimé au build 2, `58cf8d89`).
 
-Flux : `fleet_spawner`/`fleet_pipeline` **enqueue** (source) → `fleet_task_queue` distribue/collecte
+Flux : `fleet_spawner`/`fleet_workflow` **enqueue** (source) → `fleet_task_queue` distribue/collecte
 (broker) → `fleet_mcp` sert aux pods via tools `get_work_item`/`submit_result` (frontière vendor) →
 `fleet_coord` oriente post-résultat.
 

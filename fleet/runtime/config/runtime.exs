@@ -205,16 +205,16 @@ if config_env() != :test do
   end
 
   # ============================================================
-  # fleet_pipeline (ch12) — racine catalogue pipelines YAML
+  # fleet_workflow (ch12) — racine catalogue pipelines YAML
   # ============================================================
   if path = System.get_env("LCARS_WORKFLOW_MAPS_ROOT") do
-    config :fleet_pipeline, workflow_maps_root: path
+    config :fleet_workflow, workflow_maps_root: path
   end
 
   # F092 : racine des workspaces de pipeline (scratch git). Défaut HORS /tmp (ADR-E :
   # PrivateTmp + tmpfs bwrap orphelineraient les écritures) = `~/.lcars/workspaces`.
   if path = System.get_env("LCARS_WORKSPACES_ROOT") do
-    config :fleet_pipeline, workspaces_root: path
+    config :fleet_workflow, workspaces_root: path
   end
 
   # ============================================================
@@ -235,7 +235,7 @@ if config_env() != :test do
   # ============================================================
   # fleet_coord (ch14) — wired backend Fleet.Coord pour ch13
   # (ch12/pipeline : soft gate consolidé sur le gatekeeper côté pipeline, R06 —
-  #  plus de :fleet_pipeline, :coord_backend)
+  #  plus de :fleet_workflow, :coord_backend)
   # ============================================================
   config :fleet_starfleet, :coord_backend, Fleet.Coord
 
@@ -377,7 +377,7 @@ if config_env() != :test do
   end
 
   # NB cap-profiles / workflow_maps : déjà couverts par `LCARS_CAPPROFILES_ROOT` (→ :fleet_cap_profile
-  # :root_dir, plus haut) et `LCARS_WORKFLOW_MAPS_ROOT` (→ :fleet_pipeline :workflow_maps_root). Pas de
+  # :root_dir, plus haut) et `LCARS_WORKFLOW_MAPS_ROOT` (→ :fleet_workflow :workflow_maps_root). Pas de
   # knob dupliqué ici (I-CBC, une source par config).
 
   # (Plus de knob `LCARS_POD_HUMAN` : l'humain = l'user du process runtime, dérivé in-code, jamais

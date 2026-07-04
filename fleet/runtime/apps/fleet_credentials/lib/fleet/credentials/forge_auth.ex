@@ -1,7 +1,7 @@
 defmodule Fleet.Credentials.ForgeAuth do
   @moduledoc """
   Auth git **système-side** des ops forge privées (clone / fetch / ls-remote / push). Source UNIQUE :
-  ce helper a un seul propriétaire ici plutôt qu'un duplicat byte-à-byte dans `Fleet.Pipeline.Git` ET
+  ce helper a un seul propriétaire ici plutôt qu'un duplicat byte-à-byte dans `Fleet.Workflow.Git` ET
   `Fleet.ProjectBootstrap.Phase.Clone` — le cycle compile `pipeline ⇄ bootstrap` interdit le partage
   entre eux. `fleet_credentials` est en-dessous des deux (dépendance commune) → bon propriétaire ; et
   le token forge EST un credential.

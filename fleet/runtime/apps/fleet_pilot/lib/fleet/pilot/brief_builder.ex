@@ -7,10 +7,10 @@ defmodule Fleet.Pilot.BriefBuilder do
   La judge-ness (et la cible d'un juge) est une propriété de SÉCURITÉ : elle ne s'infère JAMAIS par
   omission de clause. `build_brief/9` est une somme TOTALE et fail-loud sur `brief_kind`/`judge_target`
   hors-vocab (raise) — un juge ne doit JAMAIS recevoir un corps d'issue exécutable. Le brief d'un juge est
-  DÉSAMORCÉ (`Fleet.Pipeline.GateBrief` : `request` rendu comme contexte, pas comme instruction exécutable).
+  DÉSAMORCÉ (`Fleet.Workflow.GateBrief` : `request` rendu comme contexte, pas comme instruction exécutable).
 
   `forge` est un ARG injecté (seam) — jamais câblé en dur. Les autres deps (`Fleet.CapProfile`,
-  `Fleet.Pipeline.GateBrief`, `Fleet.Credentials.ForgeIdentity`) sont appelées telles quelles.
+  `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) sont appelées telles quelles.
   """
 
   # Brief de rework : le PRODUCTEUR (engineer) reprend sur une PR REQUEST_CHANGES.
@@ -170,7 +170,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # Un pod **juge** doit savoir QUOI
-  # juger ET comment rendre son verdict. On réutilise le brief canonique `Fleet.Pipeline.GateBrief`
+  # juger ET comment rendre son verdict. On réutilise le brief canonique `Fleet.Workflow.GateBrief`
   # (contexte + livrable + question + **contrat `gate-decision-v1.json` + options canon**) — le même
   # que le modèle RAM. Le `result_K` à juger est lu du comment du step_run précédent (gravé par
   # StepRunCompleter) ; le pod reste forge-aveugle (le runtime lit le comment, pas de
@@ -221,7 +221,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     # ces juges fail-closent `halt_wait_input` sur livrable vide, ils ne RE-buildent pas.
     # Sans le critère (`request`) ET le livrable (diff via `outputs`), le juge jugerait du `{}` → rework
     # infini (le Reviewer ne peut JAMAIS `continue` sur du vide) — c'est la famine d'info.
-    Fleet.Pipeline.GateBrief.build(%{
+    Fleet.Workflow.GateBrief.build(%{
       step: step,
       workflow_map_id: workflow_map_name,
       gate: nil,
@@ -247,7 +247,7 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> {nil, role}
       end
 
-    Fleet.Pipeline.GateBrief.build(%{
+    Fleet.Workflow.GateBrief.build(%{
       step: step,
       workflow_map_id: workflow_map_name,
       gate: nil,

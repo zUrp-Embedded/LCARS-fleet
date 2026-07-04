@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-02 (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
+**Dernière révision** : 2026-07-04 (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
 **Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -16,10 +16,10 @@ catalogue déclaratif `forge-routing.yaml` (axes `type:` × `state:` × `assigne
 a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le lisait.
 
 > **OBSOLÈTE — dispatch legacy RETIRÉ.** L'ancien chemin invoquait
-> `Fleet.Pipeline.start_pipeline/2` (moteur RAM `Fleet.Pipeline.Executor`) avec
+> `Fleet.Workflow.start_pipeline/2` (moteur RAM `Fleet.Workflow.Executor`) avec
 > le issue_id + le brief (issue.body) comme `ask`, et posait un label
 > `lcars-dispatched` (lock atomique) pour l'idempotence inter-restart. Ce moteur
-> RAM a été **supprimé** (②.3 / BL-050 — cf. `fleet_pipeline` `Application`,
+> RAM a été **supprimé** (②.3 / BL-050 — cf. `fleet_workflow` `Application`,
 > `start_pipeline`/`Executor` n'existent plus) et le `AutoDispatcher` retiré à
 > F-09. Le dispatch actuel passe **uniquement** par le mode step (§ ci-dessous).
 
@@ -102,7 +102,7 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   rework / conflit + instructions de voix de l'eng. `StepDispatcher` CHOISIT quel brief selon l'état forge
   (`build_brief/9` dispatche sur `brief_kind`/`judge_target`), `BriefBuilder` le FORME. La **judge-ness**
   est fail-loud (kind/target hors-vocab → `raise` ; un juge ne reçoit JAMAIS un corps d'issue exécutable) ;
-  le brief juge est **désamorcé** via `Fleet.Pipeline.GateBrief` (critère rendu comme contexte). `forge` =
+  le brief juge est **désamorcé** via `Fleet.Workflow.GateBrief` (critère rendu comme contexte). `forge` =
   arg injecté (seam). API publique : `build_brief/9`, `rework_brief/6`, `resolve_conflict_brief/6`.
 - `Fleet.Pilot.Poller` — **DÉCOUVRE** ses repos par topic (`lcars-fleet-<human>`) PUIS **ADMET** uniquement
   ceux scellés système (`ForgeClient.admitted?` — marqueur d'onboarding bot-authored ; le topic mutable seul
@@ -166,7 +166,7 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       gate-decision-v1 enfouie dans les enveloppes TaskQueue/worker) + **rendu texte** (`verdict_comment/3`,
       `review_event_for_decision/1`, `judge_review_body/2`, `eng_summary/1` — trace verdict durable, corps de
       review, voix de l'eng). **Un seul module** (décodage+rendu couplés : `eng_summary` s'appuie sur
-      `unwrap_worker_envelope`, primitif partagé). Vocab canon via l'AUTORITÉ UNIQUE `Fleet.Pipeline.GateDecision`
+      `unwrap_worker_envelope`, primitif partagé). Vocab canon via l'AUTORITÉ UNIQUE `Fleet.Workflow.GateDecision`
       (`@gate_decisions` non recopié). Le cœur décisionnel stateful (`apply_verdict`/`gate_decide`/`resume_gate`/
       `complete_business_step_run`) reste dans le module racine.
     - `Fleet.Pilot.StepRunConsumer.GatekeeperEscalation` — cluster **IMPUR** « escalade gatekeeper »

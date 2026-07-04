@@ -20,15 +20,15 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
 
   ## Autorité unique du vocabulaire
 
-  `gate_decision/1` s'appuie sur `@gate_decisions = Fleet.Pipeline.GateDecision.decisions()` — la
+  `gate_decision/1` s'appuie sur `@gate_decisions = Fleet.Workflow.GateDecision.decisions()` — la
   liste canon n'est PAS recopiée : elle est évaluée au compile depuis l'autorité unique
-  `Fleet.Pipeline.GateDecision` (ce module se recompile si la liste canon change). Fail-closed :
+  `Fleet.Workflow.GateDecision` (ce module se recompile si la liste canon change). Fail-closed :
   décision absente/inconnue → `"halt_invalid"` (jamais `"continue"` sur verdict malformé).
   """
 
-  # Vocab canon = AUTORITÉ UNIQUE `Fleet.Pipeline.GateDecision` (évalué au compile → liste literal,
+  # Vocab canon = AUTORITÉ UNIQUE `Fleet.Workflow.GateDecision` (évalué au compile → liste literal,
   # utilisable dans le guard `in` ci-dessous ; ce module se recompile si la liste canon change).
-  @gate_decisions Fleet.Pipeline.GateDecision.decisions()
+  @gate_decisions Fleet.Workflow.GateDecision.decisions()
 
   # ============================================================
   # Décodage — lecture de la décision enfouie dans les enveloppes

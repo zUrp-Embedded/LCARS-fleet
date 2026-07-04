@@ -100,7 +100,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
 
     # Chargeur de workflow_map injectable (seam, comme les autres) — rend `workflow_map_role` testable sans disque.
-    workflow_map_loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Pipeline.Loader.load!/1)
+    workflow_map_loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1)
 
     case decide(payload) do
       {:skip, reason} ->
