@@ -90,7 +90,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_spawn_gates_wired(root),
         check_gatekeeper_not_a_step(root),
         check_verdict_envelope_unwrapped(root),
-        check_no_root_runtime_guard(root)
+        check_no_root_runtime_guard(root),
+        # ── Verrou de topologie (D4/A2, 2026-07-04) ──
+        check_layering_dependency_graph(root)
         # NB il n'y a pas de rail `pipeline.bounded_retry_system_side` : il vérifiait le retry borné
         # système-side de l'`Executor` RAM, qui n'existe plus. L'équivalent côté rail forge = le
         # `max_rework_rounds` (StepRunConsumer) ; à re-contractualiser si besoin (backlog).
@@ -110,9 +112,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `"event_type" =>` qui subsiste.
   defp check_event_consumers_canon(root) do
     # NB `executor.ex` n'est plus une cible : l'Executor RAM (un consommateur d'events) n'existe plus.
+    # NB `task_monitor.ex` retiré : l'app fleet_task_monitor a été supprimée (D5, 2026-07-04).
     targets = [
-      "apps/fleet_api/lib/fleet/api/ws.ex",
-      "apps/fleet_task_monitor/lib/fleet/task_monitor.ex"
+      "apps/fleet_api/lib/fleet/api/ws.ex"
     ]
 
     pattern = ~r/"event_type"\s*=>/
@@ -772,6 +774,105 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     cwd = File.cwd!()
     if File.dir?(Path.join(cwd, "apps")), do: cwd, else: Path.expand("../..", cwd)
   end
+
+  # ── Verrou de topologie (D4/A2) ──────────────────────────────────────────────
+  # `priv/allowed_graph.yaml` fige le graphe de deps REEL. Trois versants, tous fail-closed :
+  #   (a) mix.exs BIDIRECTIONNEL : arete compile reelle non declaree = fail ; arete declaree fantome = fail.
+  #   (d) monotonicite RING : une dep compile MONTANTE (ring inf -> sup) non-seam = fail (le PubSub via
+  #       event_router R0 est exempt par construction — il n'est pas une dep de couche).
+  #   (b) seams VIVANTS : chaque seam declare porte un `marker` qui DOIT matcher du code de l'app `from` ;
+  #       s'il n'y matche plus, le seam est mort (le code a bouge) et le yaml est stale -> fail.
+  # Encode le graphe ACTUEL -> nait VERT ; tout ajout/retrait de dep le fait rougir tant que le yaml n'est
+  # pas re-declare (force la conscience d'un changement de topologie). yaml illisible -> fail-closed.
+  defp check_layering_dependency_graph(root) do
+    yaml = Path.join(root, "apps/fleet_event_router/priv/allowed_graph.yaml")
+
+    case YamlElixir.read_from_file(yaml) do
+      {:ok, %{"rings" => rings, "edges" => declared_edges} = spec} ->
+        seam_list = spec["seams"] || []
+        seams = MapSet.new(seam_list, &{&1["from"], &1["to"]})
+        declared = MapSet.new(declared_edges, &{&1["from"], &1["to"]})
+        real = MapSet.new(real_mix_edges(root))
+
+        undeclared =
+          for {f, t} <- MapSet.difference(real, declared),
+              do: "arete compile REELLE non declaree : #{f} -> #{t}"
+
+        phantom =
+          for {f, t} <- MapSet.difference(declared, real),
+              do: "arete DECLAREE fantome (absente des mix.exs) : #{f} -> #{t}"
+
+        upward =
+          for {f, t} <- real,
+              rf = rings[f],
+              rt = rings[t],
+              is_integer(rf) and is_integer(rt) and rf < rt and not MapSet.member?(seams, {f, t}),
+              do: "dep compile MONTANTE non-seam : #{f}(R#{rf}) -> #{t}(R#{rt})"
+
+        dead_seams =
+          for s <- seam_list,
+              not seam_alive?(root, s["from"], s["marker"]),
+              do:
+                "seam MORT (marker `#{s["marker"]}` absent du code de #{s["from"]}) : #{s["from"]} -> #{s["to"]}"
+
+        evidence = undeclared ++ phantom ++ upward ++ dead_seams
+
+        %{
+          id: "layering.dependency_graph",
+          remediation:
+            "D4/A2 — MAJ apps/fleet_event_router/priv/allowed_graph.yaml, ou corriger la dep/seam",
+          status: if(evidence == [], do: :pass, else: :fail),
+          evidence: evidence,
+          note:
+            "topologie declaree = graphe compile reel (bidirectionnel) + monotonicite ring + seams vivants ; " <>
+              "PubSub (Bus, R0) exempt"
+        }
+
+      _ ->
+        %{
+          id: "layering.dependency_graph",
+          remediation: "D4/A2",
+          status: :fail,
+          evidence: ["priv/allowed_graph.yaml illisible ou malforme (fail-closed)"],
+          note: "yaml de topologie absent/invalide"
+        }
+    end
+  end
+
+  # Aretes compile reelles extraites des mix.exs (`{:fleet_x, in_umbrella: true}`), comment strippe (une
+  # dep en commentaire ne compte pas). Rend un set de tuples `{from_app, to_app}`.
+  defp real_mix_edges(root) do
+    dep_re = ~r/\{:(fleet_\w+),\s*in_umbrella:\s*true\}/
+
+    Path.wildcard(Path.join(root, "apps/fleet_*/mix.exs"))
+    |> Enum.flat_map(fn mix_path ->
+      from = mix_path |> Path.dirname() |> Path.basename()
+
+      mix_path
+      |> grep_lines(dep_re)
+      |> Enum.flat_map(fn {_ln, line} ->
+        dep_re
+        |> Regex.scan(strip_comment(line))
+        |> Enum.map(fn [_full, to] -> {from, to} end)
+      end)
+    end)
+  end
+
+  # Un seam est VIVANT si son `marker` (regex) matche une ligne de code (comment strippe) de l'app `from`.
+  defp seam_alive?(root, from_app, marker) when is_binary(from_app) and is_binary(marker) do
+    re = Regex.compile!(marker)
+
+    root
+    |> Path.join("apps/#{from_app}/lib/**/*.ex")
+    |> Path.wildcard()
+    |> Enum.any?(fn f ->
+      f
+      |> grep_lines(re)
+      |> Enum.any?(fn {_ln, line} -> Regex.match?(re, strip_comment(line)) end)
+    end)
+  end
+
+  defp seam_alive?(_root, _from, _marker), do: true
 
   defp render_yaml(overall, checks) do
     header = "status: #{overall}\nchecks:"
