@@ -158,6 +158,38 @@ defmodule Fleet.MCP.PodSocketTest do
     assert txt =~ "work_item_id_required"
   end
 
+  test "ligne JSON-RPC > buffer inet par defaut (~1460 o) : servie, pas de hang (F-RUN-1)" do
+    pod = uniq("bigline")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    # Payload ~8 Ko : sans `{:buffer, _}` dans @socket_opts, `packet: :line` livrait la
+    # ligne TRONQUEE en fragments JSON invalides, avales en silence -> hang jusqu'au
+    # timeout du pont (vu live 2026-07-04 : briefs/summaries > 1,4 Ko tous perdus).
+    # L'outil est inconnu EXPRES : on teste le FRAMING (une grosse ligne -> une reponse),
+    # pas le metier — `isError:true` suffit a prouver le round-trip.
+    blob = String.duplicate("x", 8_000)
+
+    assert %{"id" => 42, "result" => %{"isError" => true}} =
+             call(path, 42, "outil_inconnu_test_framing", %{"blob" => blob})
+  end
+
+  test "ligne indecodable -> -32700 fail-loud, pas un silence-timeout (F-RUN-1)" do
+    pod = uniq("badline")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    {:ok, sock} =
+      :gen_tcp.connect({:local, path}, 0, [:binary, {:packet, :line}, {:active, false}])
+
+    :ok = :gen_tcp.send(sock, "{json casse, pas decodable\n")
+    # L'ancien `_ -> nil` avalait la ligne sans repondre : ce recv restait muet 5 s.
+    {:ok, line} = :gen_tcp.recv(sock, 0, 5_000)
+    :gen_tcp.close(sock)
+
+    assert %{"error" => %{"code" => -32_700}} = Jason.decode!(line)
+  end
+
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
   # Un appel JSON-RPC tools/call sur la socket : connecte, envoie une ligne, lit la réponse, ferme.

@@ -40,7 +40,19 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # Options de socket AF_UNIX stream, passive (on `recv` explicitement), une ligne
   # par message. `reuseaddr` est sans danger ici (un fichier socket résiduel est
   # quand même retiré au démarrage — cf. `rm_stale/1`).
-  @socket_opts [:binary, {:packet, :line}, {:active, false}, {:reuseaddr, true}]
+  # `buffer` DOIT depasser la plus longue ligne JSON-RPC possible : avec `packet: :line`,
+  # une ligne plus longue que le buffer (defaut inet ~1460 o) est livree TRONQUEE en
+  # fragments, chaque fragment est un JSON invalide, et le serveur attendait ensuite une
+  # ligne complete qui n'arrivait jamais -> hang silencieux, timeout 30 s cote pont,
+  # payload d'outil > ~1,4 Ko PERDU (vu live 2026-07-04 : brief arch + summaries engineer/
+  # reviewer). 1 MiB couvre tout payload realiste ; au-dela, handle_line repond -32700.
+  @socket_opts [
+    :binary,
+    {:packet, :line},
+    {:active, false},
+    {:reuseaddr, true},
+    {:buffer, 1_048_576}
+  ]
 
   # Task.Supervisor (arbre `Fleet.MCP.Supervisor`) où chaque connexion acceptée est servie dans sa
   # propre Task. Sépare le SERVICE d'une connexion (potentiellement lent) de la BOUCLE d'accept.
@@ -120,10 +132,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # Décode la ligne JSON-RPC. Seul `tools/call` est dispatché vers PodTools. Une
-  # ligne vide / un JSON invalide / une notification sans `id` est ignorée
-  # silencieusement (rien à répondre). Un autre `method` avec un `id` (anomalie :
-  # `initialize`/`tools/list` devraient être servis par le pont) → erreur protocole.
+  # Decode la ligne JSON-RPC. Seul `tools/call` est dispatche vers PodTools. Une
+  # notification sans `id` est ignoree (rien a repondre, contrat JSON-RPC). Un JSON
+  # INVALIDE (ligne tronquee/cassee) -> reponse -32700 + warning : JAMAIS avale en
+  # silence — l'avalement transformait toute ligne invalide en timeout 30 s
+  # indistinguable cote pont, zero trace BEAM (vu live 2026-07-04). Un autre `method`
+  # avec un `id` (anomalie : `initialize`/`tools/list` sont servis par le pont) -> -32601.
   defp handle_line(line, pod_id) do
     case Jason.decode(line) do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->
@@ -139,18 +153,44 @@ defmodule Fleet.MCP.PodSocketAcceptor do
           }
         })
 
-      _ ->
+      {:ok, _notification_sans_id} ->
         nil
+
+      {:error, _decode_error} ->
+        Logger.warning(
+          "PodSocketAcceptor pod=#{pod_id} : ligne indecodable (#{byte_size(line)} o) -> -32700"
+        )
+
+        encode(%{
+          "jsonrpc" => "2.0",
+          "id" => nil,
+          "error" => %{"code" => -32_700, "message" => "parse error (ligne JSON invalide)"}
+        })
     end
   end
 
   # `pod_id` vient de l'ÉTAT de l'accepteur (le canal), JAMAIS de `tool_args` : on
   # ne lit pas d'identité sur le wire. Le format du résultat suit la convention MCP.
+  # Un tools/call lent doit etre VISIBLE cote serveur : avant 2026-07-04 un hang de
+  # 30 s ne laissait AUCUNE trace BEAM (le pont loggue de son cote, mais le serveur
+  # etait aveugle -> forensics impossible). Seuil volontairement haut : on trace
+  # l'anomalie, pas le bruit.
+  @slow_tool_warn_ms 5_000
+
   defp call_tool(params, pod_id) do
     tool = params["name"]
     tool_args = params["arguments"] || %{}
 
-    case PodTools.handle_tool_call(tool, tool_args, %{pod_id: pod_id}) do
+    {us, resp} =
+      :timer.tc(fn -> PodTools.handle_tool_call(tool, tool_args, %{pod_id: pod_id}) end)
+
+    ms = div(us, 1000)
+
+    if ms > @slow_tool_warn_ms do
+      Logger.warning("PodSocketAcceptor pod=#{pod_id} tools/call #{tool} LENT (#{ms} ms)")
+    end
+
+    case resp do
       {:ok, content, _state} ->
         content
 
