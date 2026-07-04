@@ -97,7 +97,13 @@ defmodule Fleet.Starfleet.DriftMonitor do
   defp dispatch_audit_verdict(payload, correlation_id) do
     case Gatekeeper.validate(payload["decision_json"] || "") do
       {:ok, decision} ->
-        _ = CoordBackend.resolved().handle_decision(decision, correlation_id)
+        # Un {:error, "no policy match ..."} était JETÉ ici sans trace (finding DrDree 2026-07-05) :
+        # un verdict sans policy disparaissait. Loggé WARNING — le fix structurel (table de routage
+        # TOTALE, miss = crash au chargement) est le chantier coord D1-Part-2.
+        case CoordBackend.resolved().handle_decision(decision, correlation_id) do
+          :ok -> :ok
+          {:error, why} -> Logger.warning("DriftMonitor: verdict NON routé (#{inspect(why)})")
+        end
 
       {:error, reason} ->
         _ =

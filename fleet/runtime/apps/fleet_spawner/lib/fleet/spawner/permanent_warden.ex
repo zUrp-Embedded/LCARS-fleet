@@ -60,40 +60,17 @@ defmodule Fleet.Spawner.PermanentWarden do
   # non-permanents (issue-*, pr-*) ne matchent pas le prefixe → catch-all no-op (leur relance est
   # le job du rail forge : reconciliation + re-dispatch).
   def handle_info(
-        %Fleet.Event{
-          source: :spawner,
-          type: :"pod.failed",
-          payload: %{"pod_id" => "permanent-" <> role}
-        },
+        %Fleet.Event{source: :spawner, type: :"pod.failed", payload: %{"pod_id" => pod_id}},
         state
       )
-      when is_binary(role) and role != "" do
-    attempt = Map.get(state.attempts, role, 0)
+      when is_binary(pod_id) do
+    # Préfixe permanent : AUTORITÉ = PermanentBoot.parse_permanent/1 (le littéral ne vit plus ici).
+    case Fleet.Spawner.PermanentBoot.parse_permanent(pod_id) do
+      :not_permanent ->
+        {:noreply, state}
 
-    if attempt < @max_attempts do
-      delay = backoff_delay(attempt, state.base)
-
-      Logger.warning(
-        "PermanentWarden: permanent #{role} mort → respawn dans #{div(delay, 1000)}s " <>
-          "(tentative #{attempt + 1}/#{@max_attempts})"
-      )
-
-      Process.send_after(self(), {:respawn, role}, delay)
-      {:noreply, %{state | attempts: Map.put(state.attempts, role, attempt + 1)}}
-    else
-      # Borne atteinte MAIS un pod.failed POST-HALT prouve qu'un pod de ce role A REVECU depuis
-      # (il a fallu qu'il vive pour mourir : le warden ne respawn plus apres HALT → c'est une
-      # reparation externe/manuelle). Cattle : ce nouvel echec merite un NOUVEAU cycle de retries —
-      # sans reset, le warden restait mort pour ce role jusqu'au restart BEAM (E2). Pas de boucle :
-      # chaque cycle post-HALT exige une resurrection externe (la depense est portee par l'acteur).
-      Logger.warning(
-        "PermanentWarden: permanent #{role} mort APRES HALT (reparation externe detectee) → " <>
-          "nouveau cycle de respawn (compteur remis a zero)"
-      )
-
-      delay = backoff_delay(0, state.base)
-      Process.send_after(self(), {:respawn, role}, delay)
-      {:noreply, %{state | attempts: Map.put(state.attempts, role, 1)}}
+      {:ok, role} ->
+        handle_permanent_death(role, state)
     end
   end
 
@@ -141,6 +118,36 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   # Tout autre event / message → no-op (consumer filtrant, comme PublishConsumer).
   def handle_info(_other, state), do: {:noreply, state}
+
+  defp handle_permanent_death(role, state) do
+    attempt = Map.get(state.attempts, role, 0)
+
+    if attempt < @max_attempts do
+      delay = backoff_delay(attempt, state.base)
+
+      Logger.warning(
+        "PermanentWarden: permanent #{role} mort → respawn dans #{div(delay, 1000)}s " <>
+          "(tentative #{attempt + 1}/#{@max_attempts})"
+      )
+
+      Process.send_after(self(), {:respawn, role}, delay)
+      {:noreply, %{state | attempts: Map.put(state.attempts, role, attempt + 1)}}
+    else
+      # Borne atteinte MAIS un pod.failed POST-HALT prouve qu'un pod de ce role A REVECU depuis
+      # (il a fallu qu'il vive pour mourir : le warden ne respawn plus apres HALT → c'est une
+      # reparation externe/manuelle). Cattle : ce nouvel echec merite un NOUVEAU cycle de retries —
+      # sans reset, le warden restait mort pour ce role jusqu'au restart BEAM (E2). Pas de boucle :
+      # chaque cycle post-HALT exige une resurrection externe (la depense est portee par l'acteur).
+      Logger.warning(
+        "PermanentWarden: permanent #{role} mort APRES HALT (reparation externe detectee) → " <>
+          "nouveau cycle de respawn (compteur remis a zero)"
+      )
+
+      delay = backoff_delay(0, state.base)
+      Process.send_after(self(), {:respawn, role}, delay)
+      {:noreply, %{state | attempts: Map.put(state.attempts, role, 1)}}
+    end
+  end
 
   @doc "Backoff exponentiel plafonne : base * 2^attempt, cap #{@max_delay_ms} ms. Pur (testable)."
   @spec backoff_delay(non_neg_integer(), pos_integer()) :: pos_integer()

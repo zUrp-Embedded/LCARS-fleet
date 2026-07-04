@@ -51,7 +51,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   non-assignés. Il n'y a PLUS de pipelines RAM à compter : le moteur
   `Fleet.Workflow.Executor` est supprimé (un pod vivant = un step_run en cours).
 
-    * `Fleet.Spawner.count_pods/0` — pods actifs (couvre aussi le travail
+    * `Fleet.Spawner.list_pods/0` filtré NON-permanents — workers actifs (couvre aussi le travail
       assigné : un work item assigné ⇒ son pod est vivant ⇒ compté ici)
     * `Fleet.TaskQueue.list_pending/0` — work items en file **pas encore assignés**
 
@@ -106,8 +106,11 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   @impl true
   def in_flight_count do
     # `pipeline_running` RETIRÉ (②.3 / BL-050) : le moteur RAM (`Fleet.Workflow.Executor`) est supprimé,
-    # il n'y a plus de pipelines en RAM à drainer. L'in-flight = les **pods vivants** (le travail réel
-    # du rail forge : un pod = un step_run en cours) + les work items **en file** non encore pullés.
+    # il n'y a plus de pipelines en RAM à drainer. L'in-flight = les pods NON-PERMANENTS vivants (le
+    # travail réel du rail forge : un worker = un step_run en cours) + les work items en file non
+    # encore pullés. Les PERMANENTS (arch, gatekeeper) sont des RÉSIDENTS, pas du travail : les
+    # compter rendait le drain inatteignable (ils vivent en continu) → chaque stop graceful consommait
+    # sa grace À PLEIN et concluait « timeout » au lieu de « drainé » (finding DrDree 2026-07-05).
     spawner_pods() + tasks_pending()
   end
 
@@ -117,7 +120,10 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   # à tort → arrêt PENDANT du travail en vol, fail-open). À la place : Logger.error + sentinel « pas
   # vide » → le drain ne conclut pas, il attend son timeout (garde-fou).
   defp spawner_pods do
-    spawner_mod().count_pods()
+    # Filtre par l'AUTORITÉ du préfixe (PermanentBoot.permanent?/1) — les résidents ne comptent pas.
+    spawner_mod().list_pods()
+    |> Enum.reject(fn %{pod_id: pod_id} -> Fleet.Spawner.PermanentBoot.permanent?(pod_id) end)
+    |> length()
   rescue
     e ->
       Logger.error(

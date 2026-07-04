@@ -31,6 +31,8 @@ defmodule Fleet.Starfleet.Cat5Escalator do
       }
   """
 
+  require Logger
+
   alias Fleet.EventRouter.Bus
   alias Fleet.Starfleet.{AuditLog, CoordBackend}
 
@@ -74,7 +76,11 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     # Broadcast schema canon strict %Fleet.Event{source: :starfleet, ...}
     _ = broadcast_canon(source, enriched, correlation_id)
 
-    _ = CoordBackend.resolved().handle_escalation(source, enriched, correlation_id)
+    # Même finding que DriftMonitor (DrDree 2026-07-05) : un miss de policy d'escalade était avalé.
+    case CoordBackend.resolved().handle_escalation(source, enriched, correlation_id) do
+      :ok -> :ok
+      {:error, why} -> Logger.warning("Cat5Escalator: escalade NON routée (#{inspect(why)})")
+    end
     :ok
   end
 

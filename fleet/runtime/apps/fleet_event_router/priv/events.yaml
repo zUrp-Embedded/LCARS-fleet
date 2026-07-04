@@ -29,6 +29,12 @@ events:
   # (fleet_ipc_filter inexistant) = hollow CONSUMER côté starfleet (hors-fleet, non-négo #2),
   # pas un hollow producer ; non touché ici.
   pod.drift: []
+  # ⚠ CHAÎNE CAT-5 DORMANTE (constat DrDree 2026-07-05) : comme pod.drift ci-dessus,
+  # workflow_map.failed et oauth.refresh.failed n'ont AUCUN producteur vivant (l'un est mort avec
+  # l'Executor RAM, l'autre n'a jamais été implémenté côté launcher/credentials). Le rail complet
+  # DriftMonitor→Cat5Escalator→coord est donc inerte AUJOURD'HUI — c'est le pipeline de remédiation
+  # sysadmin, à câbler au chantier admin-sys (producteurs + policies). Clés conservées : consumers
+  # câblés et testés, prêts.
   # wake.failed (#5.2 [5]) : émis par `Spawner.Pod` quand le kick d'onboarding est abandonné après N
   # tentatives (agent jamais acké) — payload `pod_id`/`reason`/`pane`. Consommé par
   # `Pilot.StepRunConsumer` (`type: :"wake.failed"` → escalade `:sp_suspect`, pane attaché au issue).

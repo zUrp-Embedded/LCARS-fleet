@@ -67,7 +67,9 @@ defmodule Fleet.Spawner.Pod do
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Spawner.Pod.Assets
   alias Fleet.Spawner.Pod.Backend
+  alias Fleet.Spawner.Pod.Brief
   alias Fleet.Spawner.Pod.CompletedPayload
   alias Fleet.Spawner.Pod.Events
   alias Fleet.Spawner.Pod.Fs
@@ -77,8 +79,10 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.Spawner.Pod.Liveness
   alias Fleet.Spawner.Pod.McpProvision
   alias Fleet.Spawner.Pod.Paths
+  alias Fleet.Spawner.Pod.Publishing
   alias Fleet.Spawner.Pod.Recovery
   alias Fleet.Spawner.Pod.Scaffold
+  alias Fleet.Spawner.Pod.SessionMint
   alias Fleet.Spawner.Pod.StateFs
   alias Fleet.Spawner.Pod.TaskProbe
   alias Fleet.SPBuilder
@@ -175,7 +179,7 @@ defmodule Fleet.Spawner.Pod do
     # supervisor-driven → backend orphelin (claude brûle OAuth+RAM) + socket MCP fuitée.
     Process.flag(:trap_exit, true)
 
-    # `recover_or_init` (via `deterministic_session_id`) RAISE pour un rôle project-bound sans
+    # `recover_or_init` (via `SessionMint.mint`) RAISE pour un rôle project-bound sans
     # repo_id (forge non résolue) — on ne fabrique JAMAIS un UUID de complaisance. On rend alors
     # `{:stop, {exception, stacktrace}}` : `start_link` renvoie `{:error, {%ArgumentError{}, stack}}`
     # (forme identique à l'ancien GenServer dont l'init_it formatait la même paire — fail-loud, aucun launch).
@@ -264,10 +268,10 @@ defmodule Fleet.Spawner.Pod do
     with {:ok, sp_compose} <-
            SPBuilder.compose(data.cap_profile, [], pod_id: data.pod_id, job_id: data.issue_id),
          {:ok, claude_md} <-
-           SPBuilder.compose_claude_md(data.cap_profile, Scaffold.maybe_path(repo_md)),
-         {:ok, _skills_paths} <- Scaffold.maybe_filter_skills(data.cap_profile, skills_root),
-         {:ok, agent_draft} <- Scaffold.read_agent_draft(data.cap_profile),
-         {:ok, protocole_user} <- Scaffold.read_protocole_user(),
+           SPBuilder.compose_claude_md(data.cap_profile, Assets.maybe_path(repo_md)),
+         {:ok, _skills_paths} <- Assets.maybe_filter_skills(data.cap_profile, skills_root),
+         {:ok, agent_draft} <- Assets.read_agent_draft(data.cap_profile),
+         {:ok, protocole_user} <- Assets.read_protocole_user(),
          :ok <- Fs.safe_mkdir_p(lcars_dir),
          # `.claude/` pod-owned = cible du bind creds-only (bwrap_launch). On ne crée QUE le dir,
          # aucun settings.json dedans → 0 hook humain. bwrap y monte `.credentials.json`.
@@ -281,20 +285,20 @@ defmodule Fleet.Spawner.Pod do
          :ok <- Fs.safe_write(Path.join(data.pod_dir, "CLAUDE.md"), claude_md),
          :ok <- Fs.safe_write(Path.join(lcars_dir, "protocole-user.md"), protocole_user),
          :ok <-
-           Fs.safe_write(Path.join(lcars_dir, "settings.json"), Scaffold.pod_settings_json()),
+           Fs.safe_write(Path.join(lcars_dir, "settings.json"), Assets.pod_settings_json()),
          :ok <- Fs.safe_mkdir_p(issues_dir),
          :ok <-
            Fs.safe_write(
-             Path.join(issues_dir, "#{Scaffold.issue_id_to_filename(data.issue_id)}.md"),
-             Scaffold.default_brief(data)
+             Path.join(issues_dir, "#{Brief.issue_id_to_filename(data.issue_id)}.md"),
+             Brief.default_brief(data)
            ),
          # Le scaffold ci-dessus est le contexte LISIBLE ; le canal CANONIQUE du brief est la
          # TaskQueue (`get_work_item`). Idempotent (skip si déjà en file). Sans cet enqueue, un
          # `admin.spawn` (sans dispatcher) verrait `get_work_item` rendre `{done:true}` → pod idle.
-         :ok <- Scaffold.maybe_enqueue_brief(data),
+         :ok <- Brief.maybe_enqueue_brief(data),
          # Provisionne la socket MCP per-pod AVANT le launch (le bind bwrap échoue si le fichier
          # socket n'existe pas encore). Échec → propagé au `with` → transition_failed.
-         {:ok, mcp_socket_path} <- Backend.ensure_pod_socket(data.pod_id),
+         {:ok, mcp_socket_path} <- McpProvision.ensure_pod_socket(data.pod_id),
          :ok <-
            McpProvision.maybe_provision_mcp_config(
              data.pod_dir,
@@ -303,7 +307,7 @@ defmodule Fleet.Spawner.Pod do
              mcp_socket_path,
              Backend.launch_backend()
            ),
-         :ok <- Scaffold.provision_monitor_watch(data),
+         :ok <- Assets.provision_monitor_watch(data),
          :ok <- Scaffold.maybe_bootstrap_project_workspace(data),
          # Recall délibéré — restaure le seed AVANT le launch (après workspace = cwd réglé).
          :ok <- Scaffold.maybe_recall_restore(data) do
@@ -534,13 +538,14 @@ defmodule Fleet.Spawner.Pod do
   # sans livrable git, ou push KO). On leve :publishing quand meme — sinon le pod resterait jamais-:ready
   # donc jamais re-brief (wedge). Logge WARNING : une confirmation manquee doit etre visible.
   def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
-    if MapSet.member?(data.conditions, :publishing) do
+    if Publishing.publishing?(data) do
       Logger.warning(
         "pod #{data.pod_id} :publishing -> :ready par DEADLINE (deliverable.published non recu a temps)"
       )
     end
 
-    {:keep_state, leave_publishing(data), [cancel_publish_deadline_action()]}
+    {:keep_state, Publishing.leave_publishing(data),
+     [Publishing.cancel_publish_deadline_action()]}
   end
 
   # Boucle KICK ack-driven UNIFIÉE (bootstrap + wake-fallback, paramétrée : cap/retry/mot-clé/ACK).
@@ -651,11 +656,12 @@ defmodule Fleet.Spawner.Pod do
         _state,
         %{pod_id: pid} = data
       ) do
-    if MapSet.member?(data.conditions, :publishing) do
+    if Publishing.publishing?(data) do
       Logger.info("pod #{data.pod_id} livrable confirme sur forge -> :ready")
     end
 
-    {:keep_state, leave_publishing(data), [cancel_publish_deadline_action()]}
+    {:keep_state, Publishing.leave_publishing(data),
+     [Publishing.cancel_publish_deadline_action()]}
   end
 
   def handle_event(:info, %Fleet.Event{type: :"deliverable.published"}, _state, _data),
@@ -720,8 +726,9 @@ defmodule Fleet.Spawner.Pod do
       :ok
   after
     # Toujours exécuté → la socket est libérée même si teardown_backend lève. `release_pod_socket/1`
-    # est self-protégé (ne lève jamais) : un raise ici se propagerait hors de `terminate`.
-    Backend.release_pod_socket(data)
+    # (Pod.McpProvision — le canal MCP au complet vit là-bas) est self-protégé (ne lève jamais) :
+    # un raise ici se propagerait hors de `terminate`.
+    McpProvision.release_pod_socket(data)
   end
 
   # ============================================================
@@ -796,9 +803,8 @@ defmodule Fleet.Spawner.Pod do
 
         # SLOT-FREEZE : enter_publishing -> le pipe est :publishing tant que son livrable n'est pas
         # confirme sur la forge (deliverable.published) ; il n'est pas re-briefable tant qu'il publie.
-        # Conditionne au livrable git async : un pod payload n'a rien a proteger et n'arme donc pas
-        # un deadline jamais leve.
-        {data, pub_actions} = maybe_enter_publishing(data)
+        # Decision + flag + armement du :publish_deadline dans `Pod.Publishing` (gate git_native incluse).
+        {data, pub_actions} = Publishing.maybe_enter_publishing(data)
 
         # Retour à :monitoring : son `:enter` ré-arme result_deadline + liveness.
         {:next_state, :monitoring, data, pub_actions}
@@ -846,46 +852,6 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # session_id DÉTERMINISTE hexspeak calculé au spawn pour un rôle catalogué. La SOURCE du QUOI
-  # (index de rôle, tier protégé, fleet-level) est le cap-profile ; `Fleet.Spawner.SessionId.encode/4`
-  # n'est qu'un encodeur pur. `opts[:session_id]` (seed explicite, ex. recall arch) PRIME.
-  #
-  #   * rôle NON catalogué — `UUID.uuid4()` est légitime.
-  #   * fleet-level (arch, gatekeeper) — repo `0000`, pas de dimension projet.
-  #   * project-bound (eng, juges) — l'identité hexspeak EXIGE le repo.
-  #       - AVEC repo → on minte l'id déterministe.
-  #       - SANS repo → on REFUSE (raise) : l'absence de repo signale une forge qui n'a pas résolu
-  #         l'id (forge down). On ne fabrique JAMAIS un UUID random pour masquer ça (fausse identité,
-  #         non reconstructible). Filet de dernier recours : le stop propre vit en amont (dispatch).
-  defp deterministic_session_id(%Fleet.CapProfile{} = cap_profile, opts) do
-    repo = Keyword.get(opts, :repo_id)
-
-    cond do
-      not Fleet.CapProfile.catalogued?(cap_profile) ->
-        UUID.uuid4()
-
-      Fleet.CapProfile.fleet_level?(cap_profile) ->
-        Fleet.Spawner.SessionId.encode(
-          Fleet.CapProfile.role_index(cap_profile),
-          Fleet.CapProfile.protected?(cap_profile),
-          0x0000
-        )
-
-      is_integer(repo) ->
-        Fleet.Spawner.SessionId.encode(
-          Fleet.CapProfile.role_index(cap_profile),
-          Fleet.CapProfile.protected?(cap_profile),
-          repo
-        )
-
-      true ->
-        raise ArgumentError,
-              "deterministic_session_id: rôle project-bound #{Fleet.CapProfile.name(cap_profile)} " <>
-                "sans repo_id — la forge n'a pas résolu l'id (forge down ?). " <>
-                "On ne fabrique pas d'UUID random."
-    end
-  end
-
   defp initial_state(args) do
     state_fs_path = Paths.state_fs_path_for(args.pod_id, args.cap_profile, args.opts)
     pod_dir = Paths.pod_dir_for(args.pod_id, args.opts)
@@ -898,10 +864,11 @@ defmodule Fleet.Spawner.Pod do
       pod_id: args.pod_id,
       issue_id: args.issue_id,
       # Session UUID PRÉ-ALLOUÉ au spawn : `--session-id <uuid>` à la 1ʳᵉ création. La recovery
-      # depuis state.json ne réutilise PAS ce sid (recreate = session neuve).
+      # depuis state.json ne réutilise PAS ce sid (recreate = session neuve). Le seed explicite
+      # (`opts[:session_id]`, ex. recall arch) PRIME sur le mint (`Pod.SessionMint`).
       session_id:
         Keyword.get(args.opts, :session_id) ||
-          deterministic_session_id(args.cap_profile, args.opts),
+          SessionMint.mint(args.cap_profile, args.opts),
       # Timestamp ISO8601 figé à la création, persisté tel quel dans state.json.
       started_at: DateTime.utc_now(),
       # défaut false ; SEUL le recall délibéré (`opts[:resume]`) le passe à true → claude
@@ -1016,32 +983,6 @@ defmodule Fleet.Spawner.Pod do
   # Annule le generic timeout :liveness (un generic timeout NE s'annule PAS au changement d'état,
   # contrairement au state_timeout :result_deadline). Émis sur :monitoring → :extracting.
   defp cancel_liveness_action, do: {{:timeout, :liveness}, :infinity, :tick}
-
-  # ============================================================
-  # Publishing (FLAG dans data.conditions) + generic timeout :publish_deadline
-  # ============================================================
-
-  # SLOT-FREEZE : seul un pod à livrable git_native a un push async (confirmé par deliverable.published)
-  # qu'il faut protéger du reset/re-brief → :publishing. Un pod payload (gatekeeper/architect : pas de
-  # push) n'a rien à protéger ; le mettre :publishing armerait un deadline 120s jamais levé → WARNING
-  # récurrent + sémantique fausse. Rend `{data, actions}` (la condition + l'armement du publish_deadline).
-  defp maybe_enter_publishing(data) do
-    if Fleet.CapProfile.deliverable_mode(data.cap_profile) == "git_native" do
-      {add_condition(data, :publishing),
-       [{{:timeout, :publish_deadline}, publish_deadline_ms(), :fire}]}
-    else
-      {data, []}
-    end
-  end
-
-  # La levée (deliverable.published OU deadline) retire la condition ; l'annulation du timer est
-  # émise en ACTION par les appelants (cancel_publish_deadline_action/0).
-  defp leave_publishing(data), do: remove_condition(data, :publishing)
-
-  defp cancel_publish_deadline_action, do: {{:timeout, :publish_deadline}, :infinity, :fire}
-
-  defp publish_deadline_ms,
-    do: Application.get_env(:fleet_spawner, :publish_deadline_ms, 120_000)
 
   # SLOT-FREEZE : adopte le issue_id de la tache complétée (de l'event work_item.completed) comme issue
   # courant du pod. Un pipe re-brief change de brique a chaque tache ; sans ca state.issue_id

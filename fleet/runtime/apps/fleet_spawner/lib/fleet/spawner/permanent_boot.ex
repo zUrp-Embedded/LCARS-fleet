@@ -28,6 +28,23 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   require Logger
 
+  # AUTORITÉ du préfixe des pod_id permanents (« permanent-<role> », id déterministe). Tapé UNE
+  # fois : PermanentWarden (détection des morts à respawner) et Shutdown (drain qui EXCLUT les
+  # résidents) en DÉRIVENT — avant, le littéral vivait dans 3 modules.
+  @permanent_prefix "permanent-"
+
+  @doc """
+  Parse un pod_id permanent : `{:ok, role}` si `permanent-<role>`, `:not_permanent` sinon.
+  LE match du préfixe vit ici (autorité unique) — les consommateurs pattern-matchent le résultat.
+  """
+  @spec parse_permanent(String.t()) :: {:ok, String.t()} | :not_permanent
+  def parse_permanent(@permanent_prefix <> role) when role != "", do: {:ok, role}
+  def parse_permanent(_), do: :not_permanent
+
+  @doc "true si le pod_id est celui d'un pod PERMANENT (résident — pas du travail en vol)."
+  @spec permanent?(String.t()) :: boolean()
+  def permanent?(pod_id) when is_binary(pod_id), do: match?({:ok, _}, parse_permanent(pod_id))
+
   @doc """
   Le cap-profile doit-il booter au démarrage fleet (Type 1) ?
 
@@ -218,7 +235,7 @@ defmodule Fleet.Spawner.PermanentBoot do
 
     # pod_id DÉTERMINISTE (stable, sans suffixe timestamp) → re-spawn idempotent (même id : reap-orphan +
     # relance si mort, `{:already_started}` no-op si vivant ; plus de holder-leak/accumulation).
-    pod_id = "permanent-#{name}"
+    pod_id = @permanent_prefix <> name
 
     # Si une base existe pour ce rôle → boot-from-base (UUID FIXE porté par
     # la base + restore + `--resume`) → entrée Claude Desktop UNIQUE réutilisée à chaque boot + contexte
