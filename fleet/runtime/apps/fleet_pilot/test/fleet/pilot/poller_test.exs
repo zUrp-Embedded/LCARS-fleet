@@ -7,6 +7,25 @@ defmodule Fleet.Pilot.PollerTest do
   # (`describe "poll_once/4"`, stubs `StubForge`/`StubInvoker`) sont partis avec. Seul le mode step
   # subsiste ci-dessous (+ le lifecycle GenServer, partagé).
 
+  describe "G4 — awaits_rekick?/2 (throttle du re-kick arch)" do
+    test "au moins 1 issue attend ET tick multiple du throttle → re-kick" do
+      assert Poller.awaits_rekick?(1, 0)
+      assert Poller.awaits_rekick?(3, 10)
+      assert Poller.awaits_rekick?(1, 20)
+    end
+
+    test "aucune issue n'attend → JAMAIS de re-kick (même sur un tick multiple)" do
+      refute Poller.awaits_rekick?(0, 0)
+      refute Poller.awaits_rekick?(0, 10)
+    end
+
+    test "issue attend MAIS tick non-multiple → pas de re-kick (dépense bornée, pas 30s)" do
+      refute Poller.awaits_rekick?(1, 1)
+      refute Poller.awaits_rekick?(2, 9)
+      refute Poller.awaits_rekick?(1, 15)
+    end
+  end
+
   describe "GenServer init / lifecycle" do
     test "F-037 : init SANS :repo réussit (découverte par topic, plus de repo fixe requis)" do
       # Le poller ne scanne plus un repo hard-codé — il DÉCOUVRE ses projets par topic. `:repo` n'est
@@ -176,6 +195,10 @@ defmodule Fleet.Pilot.PollerTest do
     # Réconciliation (B) : aucun pod vivant par défaut → tout verrou `lcars-in-flight` est candidat
     # orphelin (réclamé après la grace 2-tick). Un stub avec list_pods absent ferait fail-safe (skip).
     def list_pods, do: []
+
+    # G4 : le re-kick awaits-arch appelle wake_pod (best-effort) — stub no-op (le tick ne doit pas crasher
+    # quand une issue awaits-arch est présente). La DÉCISION de re-kicker est testée via awaits_rekick?/2.
+    def wake_pod(_pod_id), do: :ok
   end
 
   # F-037 / #25 : un pod VIVANT à pod_id REPO-SCOPÉ (`<repo-slug>-issue-<n>-<role>`, format PodId réel).

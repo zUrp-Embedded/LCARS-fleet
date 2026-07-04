@@ -60,6 +60,12 @@ defmodule Fleet.Pilot.Poller do
   @max_backoff_ms 300_000
   @jitter_ratio 0.1
 
+  # G4 — cadence de RE-KICK de l'arch tant qu'au moins une issue attend (`lcars-awaits-arch`). Throttlé :
+  # 1 wake tous les N ticks (à ~30s/tick, N=10 = ~5 min). Un wake peut coûter un TOUR claude → non throttlé,
+  # ce serait un churn 30s (dépense non bornée, anti-Jupiter). Assez fréquent pour qu'un wake perdu ne bloque
+  # pas une issue POUR TOUJOURS, assez rare pour ne pas marteler le sas humain.
+  @awaits_rekick_every 10
+
   defstruct [
     :repo,
     :interval_ms,
@@ -412,6 +418,10 @@ defmodule Fleet.Pilot.Poller do
       awaits_arch_ids = awaits_arch_ids(issues)
       pulls_opts = Keyword.put(opts, :awaits_arch_ids, awaits_arch_ids)
 
+      # G4 : re-kick throttlé de l'arch tant qu'une issue attend son action (le kick initial à l'escalade
+      # est one-shot ; wake perdu → issue bloquée pour toujours sinon).
+      maybe_rekick_arch(awaits_arch_ids, state)
+
       tally =
         merge_tally(
           step_process_issues(issues, pr_issue_ids, state, opts),
@@ -464,6 +474,41 @@ defmodule Fleet.Pilot.Poller do
   # `dispatch_review` skippe le juge d'une PR dont l'issue parente attend l'arch.
   defp awaits_arch_ids(issues) do
     for i <- issues, n = i["number"], awaits_arch?(i), into: MapSet.new(), do: n
+  end
+
+  # G4 — RE-KICK de l'arch tant qu'au moins une issue attend son action (`lcars-awaits-arch`). Le kick
+  # initial (à l'escalade, StepRunConsumer.kick_architect) est one-shot best-effort : si le wake s'est
+  # perdu (arch occupé, ou mort-puis-respawné par le PermanentWarden), l'issue reste hors-dispatch POUR
+  # TOUJOURS, silencieusement (le poller ne fait que la SKIPPER). On re-kicke donc périodiquement —
+  # THROTTLÉ (`@awaits_rekick_every` ticks) car un wake peut coûter un tour claude (dépense bornée,
+  # Jupiter). Best-effort (le label reste human-released : on nudge le sas, on ne force jamais le verdict).
+  # Réutilise le seam `spawner` (défaut `Fleet.Spawner`) + l'autorité `Roles.architect_pod_id/0` (SSOT
+  # partagée avec kick_architect). nil spawner (test/config) → no-op.
+  defp maybe_rekick_arch(awaits_ids, %__MODULE__{spawner: spawner} = state)
+       when not is_nil(spawner) do
+    if awaits_rekick?(MapSet.size(awaits_ids), state.poll_count) do
+      pod_id = Fleet.Pilot.Roles.architect_pod_id()
+
+      Logger.info(
+        "Poller: #{MapSet.size(awaits_ids)} issue(s) awaits-arch → re-kick #{pod_id} " <>
+          "(throttle #{@awaits_rekick_every} ticks)"
+      )
+
+      _ = spawner.wake_pod(pod_id)
+    end
+
+    :ok
+  end
+
+  defp maybe_rekick_arch(_awaits_ids, _state), do: :ok
+
+  @doc false
+  # Décision PURE du re-kick : au moins UNE issue attend l'arch ET on est sur un tick multiple du
+  # throttle. Exposé (test) — le calcul est le cœur load-bearing (le wake, lui, est une délégation seam).
+  @spec awaits_rekick?(non_neg_integer(), non_neg_integer()) :: boolean()
+  def awaits_rekick?(awaits_size, poll_count)
+      when is_integer(awaits_size) and is_integer(poll_count) do
+    awaits_size > 0 and rem(poll_count, @awaits_rekick_every) == 0
   end
 
   defp awaits_arch?(item) do

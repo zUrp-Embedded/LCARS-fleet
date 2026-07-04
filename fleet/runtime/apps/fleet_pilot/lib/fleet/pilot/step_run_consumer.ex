@@ -957,9 +957,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
       :ok
   end
 
-  # Pod id de l'arch permanent (sas user) — config, défaut "permanent-architect" (id déterministe).
-  defp architect_pod_id,
-    do: Application.get_env(:fleet_pilot, :architect_pod_id, "permanent-architect")
+  # Pod id de l'arch permanent (sas user) — délégué à l'AUTORITÉ UNIQUE `Fleet.Pilot.Roles` (partagée
+  # avec le re-kick awaits-arch du Poller ; plus de littéral "permanent-architect" retapé ici).
+  defp architect_pod_id, do: Fleet.Pilot.Roles.architect_pod_id()
 
   @doc false
   # Reprise après le verdict du gatekeeper. Exposé pour test (le GenServer

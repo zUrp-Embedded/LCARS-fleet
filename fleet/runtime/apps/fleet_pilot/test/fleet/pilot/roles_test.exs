@@ -25,4 +25,9 @@ defmodule Fleet.Pilot.RolesTest do
   test "GatekeeperSeal.gatekeeper_role/0 re-exporte l'autorité (même valeur)" do
     assert Fleet.Pilot.GatekeeperSeal.gatekeeper_role() == Roles.gatekeeper_role()
   end
+
+  test "architect_pod_id : défaut `permanent-architect`, override par l'opt (SSOT)" do
+    assert "permanent-architect" == Roles.architect_pod_id()
+    assert "permanent-arch2" == Roles.architect_pod_id(architect_pod_id: "permanent-arch2")
+  end
 end

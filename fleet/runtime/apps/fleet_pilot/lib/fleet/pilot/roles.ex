@@ -11,6 +11,7 @@ defmodule Fleet.Pilot.Roles do
 
   @default_producer_role "engineer"
   @default_gatekeeper_role "gatekeeper"
+  @default_architect_pod_id "permanent-architect"
 
   @doc """
   Rôle PRODUCTEUR du modèle single-brique (celui qui code la brique, ex. `engineer`). Override par l'opt
@@ -41,5 +42,17 @@ defmodule Fleet.Pilot.Roles do
   def gatekeeper_role(opts \\ []) do
     Keyword.get(opts, :gatekeeper_role) ||
       Application.get_env(:fleet_pilot, :gatekeeper_role, @default_gatekeeper_role)
+  end
+
+  @doc """
+  Pod id de l'ARCHITECTE permanent (le sas UNIQUE vers l'humain). Override par l'opt `:architect_pod_id`
+  (test) ; sinon config `:fleet_pilot, :architect_pod_id` (défaut `"permanent-architect"`, id
+  déterministe posé par `PermanentBoot`). Accesseur UNIQUE — le défaut n'est PAS réécrit chez les
+  appelants (`StepRunConsumer.kick_architect`, `Poller` re-kick des issues `lcars-awaits-arch`).
+  """
+  @spec architect_pod_id(keyword()) :: String.t()
+  def architect_pod_id(opts \\ []) do
+    Keyword.get(opts, :architect_pod_id) ||
+      Application.get_env(:fleet_pilot, :architect_pod_id, @default_architect_pod_id)
   end
 end
