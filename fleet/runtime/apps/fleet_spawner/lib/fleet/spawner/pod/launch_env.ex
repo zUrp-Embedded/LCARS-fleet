@@ -46,6 +46,8 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   `cap_profile_name(state.cap_profile)` (même valeur, calculée pareil) → on évite la dépendance au
   private de `Pod`.
   """
+  @spec build(map(), String.t(), String.t(), String.t()) ::
+          {:ok, %{String.t() => String.t()}} | {:error, term()}
   def build(state, role, containment, claude_launch_path) do
     # La résolution humain + le pipeline env peuvent RAISE (runtime_user /
     # claude_dir_from_passwd / maybe_put_vendor_bin = fail-loud sur host sans claude
@@ -173,6 +175,13 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   #   - un apiKeyHelper / une clé API = facturation MÉTRÉE = sortie de l'abonnement (interdit).
   # Donc : per-humain OUI, partagé-writable OUI, broker NON. NE PAS « améliorer » ceci.
   # ════════════════════════════════════════════════════════════════════════════════════════
+  @doc """
+  claudeDir de l'humain runtime : override config `:fleet_spawner, :claude_dir` sinon `~/.claude`
+  (dérivé de `Paths.runtime_home/0`). Publique car aussi appelée par l'état `:injecting` (`Pod`)
+  pour poser `CLAUDE_DIR` à l'injection. La variante per-humain arbitraire (`claude_dir_for/1`,
+  passwd-résolue) reste privée au pipeline `build/4` — cf. le bloc sanctuaire ci-dessus.
+  """
+  @spec claude_dir() :: String.t()
   def claude_dir do
     Application.get_env(:fleet_spawner, :claude_dir) || Path.join(Paths.runtime_home(), ".claude")
   end

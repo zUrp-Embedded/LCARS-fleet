@@ -6,6 +6,22 @@ defmodule Fleet.Pilot.StepRunConsumer do
   **step-dispatch** (assignee-driven), traduit l'event en `step_run` et délègue la
   séquence de complétion à `Fleet.Pilot.StepRunCompleter`.
 
+  ## Sous-modules (frontières blindées — chacun lit un struct `Seams` étroit, jamais `state`)
+
+    * `GateEngine` — moteur de DÉCISION (resolve_next : gate/rebond/verdict-juge/escalade) ;
+      rend une intention, CE module agit.
+    * `TerminalEscalation` — mur humain (freeze_to_arch : await_arch + kick arch) pour les
+      erreurs terminales non-transitoires, producteurs bloqués et verdicts fail-closed.
+    * `StepRunBuild` — construction de la map step_run PR-natif (classement producteur/juge,
+      deliverable_opts, review_event, eng_summary).
+    * `Verdict` — cluster PUR du verdict (décodage gate-decision-v1 + rendu texte).
+    * `GatekeeperEscalation` — async-out de l'escalade gatekeeper (enqueue brief d'éval + kick).
+
+  CE module garde : le GenServer Bus (subscribe/handle_info), l'état `gate_evals` (reprises
+  async), l'application du verdict (`apply_verdict` — partagée gatekeeper/consultant), la
+  discipline d'exécution sync/offload (`run_completion`) et la dérivation per-step-run du
+  state (`step_run_state` : repo/remote depuis l'event, multi-projet).
+
   ## Gatekeeper = exception (escalade), PAS un step
 
   La gate du step fini décide AVANT d'avancer (`Fleet.Workflow.Gates.evaluate/3`,
@@ -95,8 +111,22 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # Cluster IMPUR « escalade gatekeeper » (async-out) : enqueue le brief d'éval + kick + télémétrie.
   # Ne lit QUE 4 seams (task_queue/spawner/gatekeeper_pod_id_fun/wake_recovery), passés en struct
   # explicite `GatekeeperEscalation.Seams` (pas `state` entier — frontière blindée). Appelé par
-  # `gate_decide` sur le chemin `{:dispatch_gatekeeper, _}`. Le cœur décisionnel reste dans CE module.
+  # le GateEngine sur le chemin `{:dispatch_gatekeeper, _}` (seams transmis via `gate_seams/1`).
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
+
+  # Moteur de DÉCISION de gate (resolve_next/advance_intent/producer?) : rend une INTENTION,
+  # CE module agit. Frontière blindée : lit un `GateEngine.Seams` étroit (`gate_seams/1`), pas `state`.
+  alias Fleet.Pilot.StepRunConsumer.GateEngine
+
+  # Escalade TERMINALE vers l'humain (mur humain → await_arch + kick arch). Frontière blindée :
+  # lit un `TerminalEscalation.Seams` étroit (`terminal_seams/1`), la discipline sync/offload
+  # (`run_completion/3`) reste ICI et voyage en closure.
+  alias Fleet.Pilot.StepRunConsumer.TerminalEscalation
+
+  # Construction du step_run PR-natif (classement producteur/juge + assemblage). Frontière
+  # blindée : lit un `StepRunBuild.Seams` étroit (`build_seams/1`), appelé DANS la closure
+  # offloadée (E4 : l'I/O de résolution de branche juge ne bloque pas la mailbox).
+  alias Fleet.Pilot.StepRunConsumer.StepRunBuild
 
   defstruct [
     :repo,
@@ -409,15 +439,17 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # publish sans commit fail-loud `:no_deliverable_commit` = WEDGE silencieux (un eng honnête refuse
       # de deviner → blocage non escaladé). Réutilise tout le filet await_arch.
       producer?(role, state) and
-          blocked_flag?(Verdict.unwrap_worker_envelope(payload["result"] || %{})) ->
-        escalate_blocked_producer(payload, n, role, state)
+          TerminalEscalation.blocked_flag?(
+            Verdict.unwrap_worker_envelope(payload["result"] || %{})
+          ) ->
+        TerminalEscalation.escalate_blocked_producer(payload, n, role, terminal_seams(state))
 
       true ->
         # Si le payload porte le contexte workflow_map (workflow_map_name+step), le step suivant
         # est calculé par WorkflowMapNav (reassign vers le rôle suivant, ou close si terminal).
         # Sans contexte workflow_map (1-step) → next_assignee nil → close. Une erreur de workflow_map
         # (DAG, step inconnu) NE misroute PAS : elle remonte (le système n'avance pas à l'aveugle).
-        case resolve_next(payload, n, state) do
+        case GateEngine.resolve_next(payload, n, gate_seams(state)) do
           {:error, reason} ->
             # G2 (entonnoir) : une erreur TERMINALE NON-TRANSITOIRE ne doit PAS remonter en `{:noreply}`
             # log-only — sinon le reaper réclame le verrou 2 ticks après, re-dispatch le MÊME step →
@@ -426,8 +458,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
             # → le poller SKIP l'issue, le churn s'arrête, l'humain tranche). Les autres erreurs remontent
             # inchangées : transitoires/auto-réparantes (`:no_gatekeeper` = le gatekeeper permanent reboote,
             # la réconciliation re-dispatche) ou traitées ailleurs (workflow_map illisible → IncidentRegistry, G6).
-            if terminal_escalate?(reason),
-              do: escalate_terminal_error(reason, n, role, state),
+            if TerminalEscalation.terminal_escalate?(reason),
+              do:
+                TerminalEscalation.escalate_terminal_error(
+                  reason,
+                  n,
+                  role,
+                  terminal_seams(state)
+                ),
               else: {:error, reason}
 
           # Escalade gatekeeper : remonte au handle_info qui stocke `gate_evals`.
@@ -445,92 +483,37 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  # Escalade un producteur bloqué vers l'humain (await_arch), motif = sa voix `summary`.
-  # Réutilise le filet existant (comment dédupé + lcars-awaits-arch + unlock) au lieu d'un wedge.
-  defp blocked_flag?(m) when is_map(m), do: m["blocked"] == true
-  defp blocked_flag?(_), do: false
-
-  defp escalate_blocked_producer(payload, n, role, state) do
-    reason = Verdict.eng_summary(payload)
-
-    lead =
-      if reason == "",
-        do: "🚧 **#{role} BLOQUÉ** (dépendance/info manquante) — motif non fourni.",
-        else: "🚧 **#{role} BLOQUÉ** (dépendance/info manquante) :\n\n#{reason}"
-
-    step_run = %{
+  # Frontière blindée vers `TerminalEscalation` : les 5 lectures/effets autorisés, RIEN d'autre.
+  # `run_completion` voyage en closure → la discipline sync/offload reste ICI (source unique),
+  # l'escalade ne choisit pas son mode d'exécution.
+  defp terminal_seams(state) do
+    %TerminalEscalation.Seams{
       repo: state.repo,
-      issue_number: n,
-      role: role,
-      decision: :blocked_dep,
-      comment_body: lead
+      step_run_completer: state.step_run_completer,
+      completer_opts: completer_opts(state),
+      spawner: state.spawner,
+      run_completion: fn label, fun -> run_completion(state, label, fun) end
     }
-
-    hc_opts = [forge_opts: state.forge_opts] |> Opts.maybe_put(:forge_client, state.forge_client)
-
-    result =
-      run_completion(state, "##{n} (blocked)", fn ->
-        state.step_run_completer.await_arch(step_run, hc_opts)
-      end)
-
-    # KICK l'arch : un producteur bloqué = l'arch (auteur du brief) doit débloquer (clarifier/corriger).
-    _ = kick_architect(state)
-    result
   end
 
-  # G2 (entonnoir) — quelles erreurs de fin de step_run sont TERMINALES NON-TRANSITOIRES (= un mur humain,
-  # à escalader) vs remontées telles quelles (transitoires / auto-réparantes / traitées ailleurs) :
-  #   - `rework_exhausted` : le budget est un compteur MONOTONE (step_runs signés) → re-dispatch = re-fail,
-  #     jamais de convergence sans intervention → ESCALADE.
-  #   - `rework_budget_unreadable` : le code choisit explicitement de « surfacer » plutôt que rebondir à
-  #     l'aveugle (un rebond non vérifiable pourrait boucler) → ESCALADE (cohérent avec l'intent de `rebound`).
-  # Tout le reste (`:no_gatekeeper` wrappé `gatekeeper_dispatch`, nav workflow_map, load workflow_map…) reste
-  # remonté : transitoire (gatekeeper permanent reboote) ou d'un autre concern (G6 → IncidentRegistry).
-  defp terminal_escalate?({:rework_exhausted, _}), do: true
-  defp terminal_escalate?({:rework_budget_unreadable, _}), do: true
-
-  # D2/G3 : aval humain requis (gate `human_approval_required`) → escalade directe (pas un échec, pas un rework).
-  defp terminal_escalate?({:human_approval_required, _}), do: true
-  defp terminal_escalate?(_), do: false
-
-  # Escalade une erreur terminale vers l'humain (await_arch), même filet que `escalate_blocked_producer`
-  # (comment adressé à l'arch + `lcars-awaits-arch` + unlock + kick). L'unlock est LOAD-BEARING : il retire
-  # `lcars-in-flight` → le poller ne re-dispatche plus (l'issue porte `lcars-awaits-arch`, skippée) → fin du churn.
-  defp escalate_terminal_error(reason, n, role, state) do
-    step_run = %{
+  # Frontière blindée vers `GateEngine` : les 7 lectures autorisées du moteur de décision.
+  # Construit depuis le state DÉRIVÉ per-step-run (repo/forge_opts de l'event, multi-projet).
+  defp gate_seams(state) do
+    %GateEngine.Seams{
+      loader: state.loader,
+      deliverable_mode_fun: state.deliverable_mode_fun,
+      max_rework_rounds: state.max_rework_rounds,
       repo: state.repo,
-      issue_number: n,
-      role: role,
-      decision: :terminal_error,
-      comment_body: terminal_error_message(reason, role)
+      forge_opts: state.forge_opts,
+      forge_client: state.forge_client,
+      escalation: escalation_seams(state)
     }
-
-    hc_opts = [forge_opts: state.forge_opts] |> Opts.maybe_put(:forge_client, state.forge_client)
-
-    result =
-      run_completion(state, "##{n} (terminal-error)", fn ->
-        state.step_run_completer.await_arch(step_run, hc_opts)
-      end)
-
-    _ = kick_architect(state)
-    result
   end
 
-  defp terminal_error_message({:rework_exhausted, %{step_runs: sr, budget: b}}, role) do
-    "🛑 **Rework épuisé** (dernier producteur : `#{role}`) — #{sr}/#{b} step_runs signés, budget atteint.\n\n" <>
-      "L'issue ne peut plus avancer seule (re-dispatch = re-échec). Corrige le brief ou la workflow_map, " <>
-      "ou abandonne l'issue."
-  end
-
-  defp terminal_error_message({:rework_budget_unreadable, reason}, _role) do
-    "🛑 **Budget de rework illisible** (`#{inspect(reason)}`) — on ne rebondit pas à l'aveugle (risque de " <>
-      "boucle). Vérifie l'état forge de l'issue (comments `[step_run:…]`) puis relance ou abandonne."
-  end
-
-  defp terminal_error_message({:human_approval_required, _reason}, role) do
-    "✋ **Aval humain requis** (step `#{role}`, gate `human_approval_required`) — le livrable attend TON " <>
-      "approbation. Valide (relance le cycle) ou renvoie en correction. La fleet ne s'auto-approuve jamais."
-  end
+  # Opts passés au StepRunCompleter — SOURCE UNIQUE de l'assemblage (forge_opts + forge_client
+  # éventuel) ; `complete_business_step_run` y ajoute `:deliverable`.
+  defp completer_opts(state),
+    do: [forge_opts: state.forge_opts] |> Opts.maybe_put(:forge_client, state.forge_client)
 
   # Exécute la complétion d'un step_run via le seam `step_run_runner`. SYNC (défaut) → exécute, logge
   # l'outcome, et le REND (seams `maybe_complete`/`resume_gate` + tous les tests le reçoivent). ASYNC
@@ -558,12 +541,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   defp run_sync(fun), do: fun.()
 
-  # Construit + applique le step_run PR-natif. Classe le role qui FINIT (producteur git_native
-  # → ouvre la PR ; juge payload → review la PR du producteur) puis delegue le routage selon
-  # l'`intent` de gate a `StepRunCompleter.complete_pr`. `next_step` ne sert plus (la route de complétion
-  # disparait avec le modèle PR-natif). `comment_body` (trace verdict gatekeeper sur continue) est porte
-  # mais pas encore materialise sur la PR — gap transitionnel note (la trace vit dans le resultat de tache
-  # du gatekeeper ; PR-trace = increment ulterieur).
+  # Complète le step_run PR-natif : la CONSTRUCTION (classement producteur/juge + assemblage de la
+  # map step_run) est déléguée à `StepRunBuild.build/5` (frontière blindée via `build_seams/1`) ;
+  # ICI reste l'orchestration (offload + appel completer).
   defp complete_business_step_run(
          payload,
          n,
@@ -575,144 +555,41 @@ defmodule Fleet.Pilot.StepRunConsumer do
          comment_body \\ nil,
          judge_target \\ nil
        ) do
-    # E4 : TOUTE la construction (dont classify_pr_role → list_open_pulls HTTP inline, timeout 10s)
-    # vit DANS la closure offloadée — forge dégradée + rafale de pod.completed ne bloque plus la
-    # mailbox du singleton (le handle_info redevient O(1) en prod, l'offload porte l'I/O).
+    route = %{
+      intent: intent,
+      next_assignee: next_assignee,
+      next_step: next_step,
+      comment_body: comment_body,
+      judge_target: judge_target
+    }
+
+    # E4 : TOUTE la construction (dont la résolution de branche juge → list_open_pulls HTTP inline,
+    # timeout 10s) vit DANS la closure offloadée — forge dégradée + rafale de pod.completed ne bloque
+    # plus la mailbox du singleton (le handle_info redevient O(1) en prod, l'offload porte l'I/O).
     run_completion(state, "##{n}", fn ->
-      {pr_role, producer_branch} = classify_pr_role(payload, n, role, state)
-
-      step_run =
-        %{
-          repo: state.repo,
-          # pod_id du PRODUCTEUR (depuis le payload pod.completed) : porte jusqu'a l'emission de
-          # `deliverable.published` (slot-freeze) pour adresser le pod resident a remettre :ready.
-          pod_id: payload["pod_id"],
-          issue_number: n,
-          role: role,
-          pr_role: pr_role,
-          intent: intent,
-          next_assignee: next_assignee,
-          # Pont transitionnel : workflow_map_name+next_step gravent la route que le StepDispatcher lit
-          # pour spawner le step suivant (retire a l'increment 4, switch sur la review-request).
-          next_step: next_step,
-          workflow_map: payload["workflow_map"],
-          producer_branch: producer_branch,
-          base_branch: "main"
-        }
-        |> put_unless_nil(:comment_body, comment_body)
-        # judge_target (brief|nil) → complete_judge décide trace review-PR vs commentaire-issue ;
-        # absent (chemin normal/gatekeeper) → comportement PR par défaut (fail-loud si pas de PR).
-        |> put_unless_nil(:judge_target, judge_target)
-        |> maybe_put_deliverable(pr_role, role, payload, n, state)
-        |> maybe_put_review_event(pr_role, intent, payload)
-        |> maybe_put_eng_summary(pr_role, payload)
-
-      hc_opts =
-        [forge_opts: state.forge_opts]
-        |> Opts.maybe_put(:forge_client, state.forge_client)
-        |> Opts.maybe_put(:deliverable, state.deliverable)
+      step_run = StepRunBuild.build(payload, n, role, route, build_seams(state))
+      hc_opts = completer_opts(state) |> Opts.maybe_put(:deliverable, state.deliverable)
 
       state.step_run_completer.complete_pr(step_run, hc_opts)
     end)
   end
 
-  # Le producteur (engineer) porte sa `deliverable_opts` (publish vers sa feature-branch) ; le juge
-  # review (il ne pousse pas — son verdict est une review native), pas de livrable git.
-  defp maybe_put_deliverable(step_run, :producer, role, payload, n, state),
-    do: Map.put(step_run, :deliverable_opts, build_deliverable_opts(role, payload, n, state))
-
-  defp maybe_put_deliverable(step_run, :judge, _role, _payload, _n, _state), do: step_run
-
-  # Pour un JUGE no-workflow_map (intent `:reviewed`), le verdict de review (APPROVE/REQUEST_CHANGES)
-  # est lu du gate-decision rendu par le pod (GateBrief : `continue`/`abandon`). On le mappe ici et on
-  # le porte dans le step_run (`:review_event`) → `StepRunCompleter.record_review` poste la review correspondante.
-  # `continue`→approve ; tout le reste (`abandon`/redirect/escalate/halt/illisible)→**request_changes**
-  # (fail-closed DÉCISIF). PAS `:comment` : une review COMMENT n'est pas décisive → le juge resterait
-  # « non tranché » et serait re-jugé en boucle. Un verdict non-`continue` = pas vert
-  # → on bloque le merge (rework), jamais un merge sur verdict douteux. (escalade-gatekeeper d'un verdict
-  # non-trivial = backlog ; ici fail-closed strict.)
-  defp maybe_put_review_event(step_run, :judge, :reviewed, payload) do
-    result = Verdict.unwrap_worker_envelope(payload["result"] || %{})
-    event = Verdict.review_event(Verdict.gate_decision(result))
-    step_run = Map.put(step_run, :review_event, event)
-
-    # Le juge PRODUIT un `reason`/`details`/`chain` dans sa gate-decision → on le REND sur la review
-    # (visu humaine + rework actionnable). Sinon `StepRunCompleter.record_review` retombe sur le corps
-    # générique (« la brique ne satisfait pas son critère »), inactionnable — pour l'humain comme pour
-    # le producteur en rework. On ne pose `:review_body` QUE s'il y a de la substance (sans
-    # quoi `Map.get(step_run, :review_body, default)` renverrait `nil` au lieu du défaut).
-    case Verdict.judge_review_body(event, result) do
-      body when is_binary(body) and body != "" -> Map.put(step_run, :review_body, body)
-      _ -> step_run
-    end
+  # Frontière blindée vers `StepRunBuild` : les 6 lectures autorisées de la construction.
+  # Construit depuis le state DÉRIVÉ per-step-run (repo/remote de l'event, multi-projet).
+  defp build_seams(state) do
+    %StepRunBuild.Seams{
+      repo: state.repo,
+      remote: state.remote,
+      role_emails: state.role_emails,
+      deliverable_mode_fun: state.deliverable_mode_fun,
+      forge_client: state.forge_client,
+      forge_opts: state.forge_opts
+    }
   end
 
-  defp maybe_put_review_event(step_run, _pr_role, _intent, _payload), do: step_run
-
-  # VOIX DE L'ENG (info SORTANTE) : le PRODUCTEUR peut rendre un `summary` markdown dans submit_result
-  # (ce qu'il a fait / réponse à la review / motif blocked). On l'extrait du résultat (déplié de
-  # l'enveloppe worker) → `StepRunCompleter` le poste en commentaire PR (`as_role` engineer). Coercé par
-  # `safe_str` (l'eng peut rendre un non-binaire → ne pas crasher le singleton). Absent/vide → rien
-  # posé. Jumeau SORTANT de la famine d'info ENTRANTE — complète la « panne bidirectionnelle de substance ».
-  defp maybe_put_eng_summary(step_run, :producer, payload) do
-    case Verdict.eng_summary(payload) do
-      "" -> step_run
-      summary -> Map.put(step_run, :eng_summary, summary)
-    end
-  end
-
-  defp maybe_put_eng_summary(step_run, _pr_role, _payload), do: step_run
-
-  # Classe le role qui finit (engineer-first). Producteur = role git_native (engineer) →
-  # pousse le code, ouvre la PR (head = sa propre branche). Juge = role payload (qualifier/reviewer
-  # en AVAL) → review la PR du producteur (head = le head.ref de la PR ouverte de l'issue, résolu
-  # sans workflow_map via `parse_feature_branch`). Un juge sans producteur resoluble → `producer_branch`
-  # nil → `complete_pr` fail-loud `:no_producer_branch` (jamais un mauvais merge). Les steps design
-  # AMONT du producteur (architect) sont hors-scope (decision engineer-first, mapping PR).
-  defp classify_pr_role(payload, n, role, state) do
-    if producer?(role, state) do
-      # Format feature-branch = source unique `Fleet.Pilot.ForgeProtocol.feature_branch/2` (collé à son
-      # parseur `parse_feature_branch/1`) — pas de construction `lcars/issue-...` en dur ici.
-      {:producer, Fleet.Pilot.ForgeProtocol.feature_branch(n, role)}
-    else
-      {:judge, judge_producer_branch(payload, n, state)}
-    end
-  end
-
-  defp producer?(role, state) when is_binary(role),
-    do: state.deliverable_mode_fun.(role) == "git_native"
-
-  defp producer?(_role, _state), do: false
-
-  # Sans workflow_map : le producteur = celui qui a OUVERT la PR de l'issue N.
-  # Sa branche = le `head.ref` de cette PR (`lcars/issue-N-<producteur>`), retrouvée en listant les PR
-  # ouvertes + `parse_feature_branch` (même pattern que le Poller). Le modèle 1-brique=1-producteur
-  # n'a pas de workflow_map (sans `payload["workflow_map"]`, une résolution workflow_map rendrait nil → merge
-  # cassé). Aucune PR résoluble → nil → `complete_pr` fail-loud `:no_producer_branch` (jamais un
-  # mauvais merge).
-  defp judge_producer_branch(_payload, n, state) do
-    forge = state.forge_client || Fleet.Pilot.ForgeClient
-
-    with {:ok, pulls} <- forge.list_open_pulls(state.repo, state.forge_opts),
-         head when is_binary(head) <- producer_head_for_issue(pulls, n) do
-      head
-    else
-      _ -> nil
-    end
-  end
-
-  # La branche producteur de l'issue N = le `head.ref` de la (1ʳᵉ) PR ouverte dont le head parse
-  # vers l'issue N. Ambiguïté (≥2 PR pour N — anormal) → la première ; aucune → nil (fail-loud aval).
-  defp producer_head_for_issue(pulls, n) do
-    Enum.find_value(pulls, fn pr ->
-      head = get_in(pr, ["head", "ref"]) || ""
-
-      case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
-        {:ok, {^n, _role}} -> head
-        _ -> false
-      end
-    end)
-  end
+  # Classement producteur/juge — AUTORITÉ UNIQUE `GateEngine.producer?/2` (partagée avec la
+  # décision de gate et StepRunBuild) ; wrapper local qui lit le seam `deliverable_mode_fun` du state.
+  defp producer?(role, state), do: GateEngine.producer?(role, state.deliverable_mode_fun)
 
   # Defaut du seam : resout le deliverable_mode du role via le catalogue cap-profile (source unique).
   # Irresoluble → `"payload"` (fail-safe : un role non chargeable n'est pas traite comme producteur).
@@ -723,203 +600,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  # Livrable d'un step_run métier : `:git_native`. Le pod a commité dans son workspace,
-  # le système vérifie (gate identité/ancêtre) + pousse. Il n'existe PAS
-  # de step `role: gatekeeper` → pas de branche `:payload`/verdict.json ici (le verdict
-  # du gatekeeper est tracé par `resume_gate`, pas matérialisé comme livrable de step).
-  defp build_deliverable_opts(role, payload, n, state) do
-    %{
-      mode: :git_native,
-      workspace: payload["workspace"],
-      # La gate d'ancêtre se base sur `gate_base_sha` (DÉCONFLÉ de la clone-base) :
-      # pour une résolution par rebase, HEAD descend de `main` (cible du rebase), pas de l'ancien tip de
-      # feature (réécrit → `base_not_ancestor`). Forward (build/rework) : le resolver pose
-      # `gate_base_sha == base_sha`. Fallback `base_sha` (payload nu de test / spawn antérieur au champ).
-      base_sha: payload["gate_base_sha"] || payload["base_sha"],
-      allowed_emails: state.role_emails.(role),
-      # La gate d'identité vérifie le trailer `Co-authored-by: LCARS-<role>` (signature rôle).
-      coauthor_role: role,
-      remote: state.remote,
-      # Format feature-branch = source unique `Fleet.Pilot.ForgeProtocol.feature_branch/2` (collé au parseur).
-      target_branch: Fleet.Pilot.ForgeProtocol.feature_branch(n, role),
-      push?: true,
-      local_ref: "HEAD"
-    }
-  end
+  # La RÉSOLUTION du prochain step (gate/rebond/verdict-juge/escalade gatekeeper) vit dans
+  # `GateEngine.resolve_next/3` (frontière blindée via `gate_seams/1`) — CE module ne garde que
+  # l'ORCHESTRATION (agir sur la décision rendue).
 
-  # Résout le prochain assignee depuis la workflow_map. Le contexte workflow_map arrive dans le
-  # payload `pod.completed` : `workflow_map_name` (nom de workflow_map) + `step` (nom du step courant —
-  # le NOM, pas le rôle, cf. WorkflowMapNav qui indexe par nom de step). Absent → 1-step terminal.
-  defp resolve_next(payload, n, state) do
-    case {payload["workflow_map"], payload["step"]} do
-      {workflow_map_name, step} when is_binary(workflow_map_name) and is_binary(step) ->
-        with {:ok, workflow_map} <- load_workflow_map(state, workflow_map_name) do
-          # Un pod dont le RÔLE ≠ le rôle déclaré du step qu'il porte n'EST pas ce step : c'est un
-          # juge NO-WORKFLOW_MAP (qualifier/reviewer dispatché par `dispatch_review`) ayant HÉRITÉ la route de
-          # l'issue (le step du producteur). Le traiter via la workflow_map le ferait avancer/merger à tort :
-          # un qualifier portant `build` tomberait en terminal non-producteur → `:promote`
-          # → merge sur 1 juge, court-circuitant le quorum. → résolution no-workflow_map (`:reviewed`) : il
-          # enregistre sa review native, et le merge revient au quorum `dispatch_by_verdicts` (qui attend
-          # TOUS les juges). Un vrai step de workflow_map (rôle = rôle du step) passe par la gate.
-          if inherited_route?(workflow_map, step, payload["role"]) do
-            no_workflow_map_resolve(payload, state)
-          else
-            gate_decide(workflow_map, step, payload, n, state)
-          end
-        end
-
-      _ ->
-        # Pas de workflow_map (single-brique) : l'intent dépend du RÔLE qui finit, pas de
-        # `:promote` direct (un terminal qui promeut mergerait SANS juge). Le merge est piloté par
-        # l'état-PR (dispatch_review), pas par l'intent d'un pod isolé.
-        no_workflow_map_resolve(payload, state)
-    end
-  end
-
-  # ROUTE HÉRITÉE = le step EXISTE dans la workflow_map MAIS son rôle déclaré ≠ le rôle du pod : c'est un
-  # juge no-workflow_map (dispatché sur la PR) qui a hérité la route du producteur → à résoudre en no-workflow_map. Un
-  # step INCONNU (route corrompue) n'est PAS « hérité » → `false` → laisse `gate_decide` fail-loud
-  # (`unknown_step`, jamais un misroute silencieux). Un step sans `role` → `false` (gate_decide tranche).
-  defp inherited_route?(workflow_map, step, role) do
-    case Fleet.Pilot.WorkflowMapNav.step_spec(workflow_map, step) do
-      {:ok, spec} ->
-        case Map.get(spec, "role") do
-          r when is_binary(r) -> r != role
-          _ -> false
-        end
-
-      _ ->
-        false
-    end
-  end
-
-  # Résolution single-brique (sans workflow_map) :
-  #   producteur (git_native) → `:review` : `complete_pr` ouvre la PR + met les juges en
-  #     `requested_reviewers` + assigne l'humain + unlock l'issue ;
-  #   juge (payload) → `:reviewed` : `complete_pr` poste la review native (verdict lu du gate-decision,
-  #     porté plus loin via `:review_event`) + unlock la PR. Le merge/rework = poller (dispatch_review).
-  defp no_workflow_map_resolve(payload, state) do
-    if producer?(payload["role"], state) do
-      {:ok, :review, {nil, nil}}
-    else
-      {:ok, :reviewed, {nil, nil}}
-    end
-  end
-
-  # La gate du step FINI décide AVANT d'avancer.
-  # `Gates.evaluate/3` est PUR (gate nil/absente → :pass) ; on lui passe la spec du
-  # step qui vient de finir + le `result` du pod (outputs → prédicats hard).
-  #
-  #   :pass                     → avance dans la workflow_map (next_step)
-  #   {:fail, _}                → REBOND vers le 1er step (rework), BORNÉ (anti-runaway :
-  #                               une boucle de rework infinie ne doit pas être
-  #                               représentable).
-  #   {:dispatch_gatekeeper, _} → enqueue un brief d'éval au gatekeeper
-  #                               permanent + `{:escalate, corr, eval_ctx}` (reprise async
-  #                               sur `work_item.completed`). Enqueue raté → fail-loud (l'issue
-  #                               reste verrouillée, pas d'avance à l'aveugle).
-  defp gate_decide(workflow_map, step, payload, n, state) do
-    spec =
-      case Fleet.Pilot.WorkflowMapNav.step_spec(workflow_map, step) do
-        {:ok, s} -> s
-        # step inconnu : pas de gate → next_step tranchera ({:error,:unknown_step}),
-        # pas de misroute silencieux.
-        :error -> %{}
-      end
-
-    # Déplie l'enveloppe worker `%{"status","result"}` AVANT d'évaluer la gate —
-    # sinon la gate voit l'enveloppe au lieu des outputs (hard-gate à tort).
-    result = Verdict.unwrap_worker_envelope(payload["result"] || %{})
-
-    if Map.get(spec, "brief_kind") == "judge" do
-      # Le step qui finit EST un juge (brief_kind:judge, ex. brief-review/consultant). Son
-      # result PORTE le verdict gate-decision-v1 : le juge a DÉJÀ tranché → PAS de Gates.evaluate (qui
-      # jugerait les outputs du juge comme un hard-gate). Le verdict est appliqué par `apply_verdict` (LA
-      # fonction, partagée avec le gatekeeper async). gate_decide reste un décideur PUR : il rend
-      # l'intention `{:judge_verdict, …}`, c'est run_step_run qui agit.
-      decision = Verdict.gate_decision(result)
-      trace = Verdict.verdict_comment(payload["role"], decision, result)
-
-      ctx = %{
-        n: n,
-        role: payload["role"],
-        payload: payload,
-        workflow_map: workflow_map,
-        step: step,
-        judge_target: Map.get(spec, "judge_target")
-      }
-
-      {:judge_verdict, decision, trace, ctx}
-    else
-      case Fleet.Workflow.Gates.evaluate(spec, result, %{}) do
-        :pass ->
-          # L'intent terminal dépend du RÔLE qui finit (cf. tag_advance/2).
-          tag_advance(advance(workflow_map, step), producer?(payload["role"], state))
-
-        {:fail, reason} ->
-          Logger.info("StepRunConsumer gate FAIL repo=#{state.repo}##{n} step=#{step}: #{reason}")
-
-          tag(:rework, rebound(workflow_map, n, state))
-
-        {:human_approval, reason} ->
-          # D2/G3 : un aval humain requis n'est PAS un échec de gate → on N'entre PAS en rework (qui
-          # gaspillerait `budget` spawns avant d'escalader de toute façon). Erreur terminale ESCALÉE
-          # DIRECTEMENT vers l'arch (via terminal_escalate?/escalate_terminal_error, même filet que
-          # rework_exhausted) : comment + lcars-awaits-arch + unlock → poller skip → l'humain approuve.
-          {:error, {:human_approval_required, reason}}
-
-        {:dispatch_gatekeeper, _info} ->
-          # `payload`/`n`/`role` passés au dispatch : ils sont EMBARQUÉS dans le metadata de la
-          # tâche d'éval (contexte de reprise auto-descriptif). Le StepRunConsumer redémarré (gate_evals RAM
-          # vide) reconstruit l'eval_ctx du metadata au lieu de jeter le verdict en silence. Le cluster
-          # d'escalade reçoit un struct de seams étroit (pas `state` entier — frontière blindée).
-          case GatekeeperEscalation.dispatch(
-                 workflow_map,
-                 step,
-                 result,
-                 payload,
-                 n,
-                 payload["role"],
-                 escalation_seams(state)
-               ) do
-            {:ok, corr} ->
-              {:escalate, corr,
-               %{
-                 n: n,
-                 role: payload["role"],
-                 payload: payload,
-                 workflow_map: workflow_map,
-                 step: step
-               }}
-
-            {:error, reason} ->
-              {:error, {:gatekeeper_dispatch, reason}}
-          end
-      end
-    end
-  end
-
-  # Invariant « un PRODUCTEUR ne merge JAMAIS seul » : `:pass` → `:advance` si un step suit ;
-  # terminal (next_assignee nil) → selon le RÔLE qui finit :
-  #   - PRODUCTEUR (git_native) → `:review` : son livrable ouvre une PR + demande les juges. JAMAIS
-  #     d'auto-merge d'un livrable.
-  #   - JUGE-WORKFLOW_MAP terminal (son rôle EST celui du step) → `:promote` : il a validé le dernier gate de
-  #     SA workflow_map (1 step = 1 rôle = 1 juge) → merge terminal.
-  # Ici on ne voit QUE de vrais steps de workflow_map (un juge NO-WORKFLOW_MAP à route héritée est dévié vers
-  # `no_workflow_map_resolve` AVANT — cf. `resolve_next`/`inherited_route?` : sinon un qualifier portant
-  # `build` mergerait sur 1 juge). Sans le split producteur/juge, une workflow_map terminant sur un producteur
-  # (brief-gate `brief-review→build`) mergerait le code SANS juges. `{:error,_}` tel quel.
-  defp tag_advance({:ok, {nil, nil}}, true), do: {:ok, :review, {nil, nil}}
-  defp tag_advance({:ok, {nil, nil}}, false), do: {:ok, :promote, {nil, nil}}
-  defp tag_advance({:ok, routing}, _producer?), do: {:ok, :advance, routing}
-  defp tag_advance(other, _producer?), do: other
-
-  defp tag(intent, {:ok, routing}), do: {:ok, intent, routing}
-  defp tag(_intent, other), do: other
-
-  # Construit le struct de seams ÉTROIT passé à `GatekeeperEscalation.dispatch` : les 4 seams
-  # async-out lus du state (task_queue/spawner/gatekeeper_pod_id_fun/wake_recovery). On NE passe PAS
-  # `state` entier — frontière blindée : le cluster d'escalade ne peut lire aucun autre champ.
+  # Construit le struct de seams ÉTROIT passé à `GatekeeperEscalation.dispatch` (via GateEngine) :
+  # les 4 seams async-out lus du state (task_queue/spawner/gatekeeper_pod_id_fun/wake_recovery).
+  # On NE passe PAS `state` entier — frontière blindée : le cluster d'escalade ne peut rien lire d'autre.
   defp escalation_seams(state) do
     %GatekeeperEscalation.Seams{
       task_queue: state.task_queue,
@@ -928,37 +615,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
       wake_recovery: state.wake_recovery
     }
   end
-
-  # NOTIFIE l'arch (sas UNIQUE vers l'humain) qu'un verdict (escalate/abandon) ou un blocage requiert
-  # son attention. KICK best-effort via le wake UNIVERSEL (`wake_pod` : flag PORTEUR/MCP → fallback send-keys
-  # → log ; tout pod arme son Monitor au spawn). **PAS de reboot** : l'arch est la SESSION de l'humain, jamais
-  # kill/relancée par la fleet (un arch injoignable = l'humain relance SA session, pas nous) — d'où PAS de
-  # `WakeRecovery.wake` (qui porte un respawn). Échec wake → log-loud, non-bloquant (le label `lcars-awaits-arch`
-  # + le commentaire adressé-arch restent ; l'arch query son inbox au prochain tour).
-  defp kick_architect(state) do
-    pod_id = architect_pod_id()
-
-    case state.spawner.wake_pod(pod_id) do
-      :ok ->
-        :ok
-
-      other ->
-        Logger.warning(
-          "StepRunConsumer: kick arch #{pod_id} → #{inspect(other)} (arch injoignable ? l'humain relance sa " <>
-            "session — la fleet ne reboot PAS l'arch ; label+commentaire restent)"
-        )
-
-        :ok
-    end
-  rescue
-    e ->
-      Logger.warning("StepRunConsumer: kick arch a levé #{inspect(e)} (non-bloquant)")
-      :ok
-  end
-
-  # Pod id de l'arch permanent (sas user) — délégué à l'AUTORITÉ UNIQUE `Fleet.Pilot.Roles` (partagée
-  # avec le re-kick awaits-arch du Poller ; plus de littéral "permanent-architect" retapé ici).
-  defp architect_pod_id, do: Fleet.Pilot.Roles.architect_pod_id()
 
   @doc false
   # Reprise après le verdict du gatekeeper. Exposé pour test (le GenServer
@@ -999,11 +655,11 @@ defmodule Fleet.Pilot.StepRunConsumer do
         # do: :promote, else: :advance`, alors sur un step TERMINAL (next_assignee nil), `apply_verdict`
         # hardcoderait `:promote` quel que soit le RÔLE qui finit → un PRODUCTEUR jugé « continue » sur un
         # terminal MERGERAIT le code SANS passer par les juges PR. On route par le MÊME
-        # `tag_advance(advance(…), producer?(role, state))` que `gate_decide` (chemin :pass) : un producteur
+        # `GateEngine.advance_intent/3` que le chemin gate `:pass` : un producteur
         # terminal → `:review` (ouvre la PR + demande les juges, JAMAIS d'auto-merge d'un livrable) ; un juge
         # terminal (consultant brief-review) → `:promote` (il a validé le dernier gate de sa workflow_map) ;
         # un step suivant → `:advance`. Une seule source de vérité pour l'intent terminal.
-        case tag_advance(advance(workflow_map, step), producer?(role, state)) do
+        case GateEngine.advance_intent(workflow_map, step, producer?(role, state)) do
           {:ok, intent, {next_assignee, next_step}} ->
             complete_business_step_run(
               payload,
@@ -1029,31 +685,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
             trace <> " (Non récupérable ; re-crée un brief corrigé si besoin.)"
 
         result = close_with_trace(n, role, arch_trace, state)
-        _ = kick_architect(state)
+        _ = TerminalEscalation.kick_architect(state.spawner)
         result
 
       other ->
         # `comment_body: trace` → la trace verdict (attribuée au juge via son label, halt_invalid
         # distingué) est portée sur le comment await_arch (qui l'adresse à l'arch), parité continue/abandon.
-        step_run = %{
-          repo: state.repo,
-          issue_number: n,
-          role: role,
-          decision: other,
-          comment_body: trace
-        }
-
-        hc_opts =
-          [forge_opts: state.forge_opts] |> Opts.maybe_put(:forge_client, state.forge_client)
-
-        result =
-          run_completion(state, "##{n}", fn ->
-            state.step_run_completer.await_arch(step_run, hc_opts)
-          end)
-
-        # KICK l'arch (notification active : il arme son monitor au spawn comme tout pod). Best-effort.
-        _ = kick_architect(state)
-        result
+        # Filet UNIQUE `freeze_to_arch` (await_arch + kick) — même geste que les escalades terminales.
+        TerminalEscalation.freeze_to_arch(n, role, other, trace, terminal_seams(state))
     end
   end
 
@@ -1073,65 +712,15 @@ defmodule Fleet.Pilot.StepRunConsumer do
       comment_body: trace
     }
 
-    hc_opts = [forge_opts: state.forge_opts] |> Opts.maybe_put(:forge_client, state.forge_client)
-
     run_completion(state, "##{n}", fn ->
-      state.step_run_completer.complete(step_run, hc_opts)
+      state.step_run_completer.complete(step_run, completer_opts(state))
     end)
   end
 
-  defp advance(workflow_map, step) do
-    case Fleet.Pilot.WorkflowMapNav.next_step(workflow_map, step) do
-      {:ok, {next_step, next_role}} -> {:ok, {next_role, next_step}}
-      :terminal -> {:ok, {nil, nil}}
-      {:error, reason} -> {:error, {:workflow_map_nav, reason}}
-    end
-  end
-
-  # Rebond borné. Budget = nb_steps * (max_rework_rounds + 1) step_runs signés. Le compteur
-  # forge-natif = les comments `[step_run:role:sha]` déjà postés (monotone). Lu UNIQUEMENT ici
-  # (branche fail) → zéro I/O sur le happy path. Budget illisible → on NE rebondit PAS à
-  # l'aveugle (un rebond non vérifiable pourrait boucler) : on surface.
-  defp rebound(workflow_map, n, state) do
-    budget = step_count(workflow_map) * (state.max_rework_rounds + 1)
-
-    case count_step_runs(state, n) do
-      {:ok, step_runs} when step_runs >= budget ->
-        {:error, {:rework_exhausted, %{step_runs: step_runs, budget: budget}}}
-
-      {:ok, _step_runs} ->
-        case Fleet.Pilot.WorkflowMapNav.first_step(workflow_map) do
-          {:ok, {first_step, first_role}} -> {:ok, {first_role, first_step}}
-          {:error, reason} -> {:error, {:workflow_map_nav, reason}}
-        end
-
-      {:error, reason} ->
-        {:error, {:rework_budget_unreadable, reason}}
-    end
-  end
-
-  # Budget rework = tous les steps de la workflow_map. Il n'existe PAS de step
-  # `role: gatekeeper` (le juge est dispatché par gate, pas un step) → pas d'exclusion
-  # à câbler (aucun gatekeeper-step à exclure du compte).
-  defp step_count(workflow_map) do
-    workflow_map |> Map.get("steps", %{}) |> map_size()
-  end
-
-  defp count_step_runs(state, n) do
-    forge = state.forge_client || Fleet.Pilot.ForgeClient
-    forge.count_signed_step_runs(state.repo, n, state.forge_opts)
-  end
-
-  # Pas de `validate_explicit_step` (biconditionnelle soft⟺gatekeeper) :
-  # une gate soft sur un step métier est LÉGITIME (→ escalade gatekeeper), pas
-  # une workflow_map malformée. La workflow_map est juste chargée (le Loader valide le schema).
-  # R4 : délégué à l'autorité unique — et TAG UNIFIÉ (:workflow_map_load_failed ; l'ancien
-  # :workflow_map_load était un 2e nom pour le même échec).
+  # Chargement de workflow_map (reconstruction d'eval_ctx) — autorité unique
+  # `WorkflowMapNav.safe_load` (tag unifié :workflow_map_load_failed), même source que le GateEngine.
   defp load_workflow_map(state, workflow_map_name),
     do: Fleet.Pilot.WorkflowMapNav.safe_load(state.loader, workflow_map_name)
-
-  defp put_unless_nil(map, _key, nil), do: map
-  defp put_unless_nil(map, key, value), do: Map.put(map, key, value)
 
   defp project_payload?(p) do
     is_binary(p["workspace"]) and is_binary(p["base_sha"]) and p["base_sha"] != "" and

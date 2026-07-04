@@ -23,22 +23,28 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     `skills_plugins_env/1`, `pod_mounts_env/2` — builders d'env, mergés par l'état `:launching`.
   """
 
-  # Projet EFFECTIF du pod : le brief (`opts[:project]`, dynamique) prime sur le `spec["project"]`
-  # statique du cap-profile, défaut map vide. Pilote le placement (cwd projet) ET le payload de
-  # fin-de-step-run — d'où la visibilité publique (source unique, pas de re-dérivation côté Pod).
+  @doc """
+  Projet EFFECTIF du pod : le brief (`opts[:project]`, dynamique) prime sur le `spec["project"]`
+  statique du cap-profile, défaut map vide. Pilote le placement (cwd projet) ET le payload de
+  fin-de-step-run — d'où la visibilité publique (source unique, pas de re-dérivation côté Pod).
+  """
+  @spec effective_project(keyword() | nil, Fleet.CapProfile.t()) :: map()
   def effective_project(opts, cap_profile) do
     Keyword.get(opts || [], :project) || get_in(cap_profile.spec, ["project"]) || %{}
   end
 
-  # Nom de projet PROPRE depuis `rc_name` (`<project>_<role>`, source canonique sanitizée par le
-  # dispatcher). `nil` si pas de rc_name (pods permanents / admin → pas de remap cwd). Partagé avec
-  # le checkpoint seed-store.
-  #
-  # Frontière de confinement : ce `projet` est l'UNIQUE dérivation du nom de projet depuis `rc_name`
-  # (entrée de dispatch/recall, non maîtrisée), et il finit interpolé dans des chemins/segments — cwd
-  # `/home/<project>`, home intra-pod, dossier seed-store. On exige donc qu'il soit un slug ICI, au plus
-  # tôt : un `rc_name` malformé (`../evil_role`, `a/b_role`) → `nil` (pod sans remap ni seed, état neutre)
-  # plutôt qu'un `projet` traversant qui atteindrait un `Path.join`. Source unique → un seul point à tenir.
+  @doc """
+  Nom de projet PROPRE depuis `rc_name` (`<project>_<role>`, source canonique sanitizée par le
+  dispatcher). `nil` si pas de rc_name (pods permanents / admin → pas de remap cwd). Partagé avec
+  le checkpoint seed-store.
+
+  Frontière de confinement : ce `projet` est l'UNIQUE dérivation du nom de projet depuis `rc_name`
+  (entrée de dispatch/recall, non maîtrisée), et il finit interpolé dans des chemins/segments — cwd
+  `/home/<project>`, home intra-pod, dossier seed-store. On exige donc qu'il soit un slug ICI, au plus
+  tôt : un `rc_name` malformé (`../evil_role`, `a/b_role`) → `nil` (pod sans remap ni seed, état neutre)
+  plutôt qu'un `projet` traversant qui atteindrait un `Path.join`. Source unique → un seul point à tenir.
+  """
+  @spec rc_project(keyword(), Fleet.CapProfile.t()) :: String.t() | nil
   def rc_project(opts, cap_profile) do
     with rc when is_binary(rc) <- Keyword.get(opts, :rc_name),
          role <- Fleet.CapProfile.name(cap_profile),
@@ -50,10 +56,14 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
-  # cwd VU PAR L'AGENT dans le pod (= LCARS_POD_CWD + base du slug recall). Pour un pod-PROJET,
-  # l'agent voit `/home/<project>` (containment : ni human ni pod_id) ; bwrap y bind le workspace
-  # RÉEL (`pod_cwd_real`). Sinon (pas de projet nommé) = le réel. Le pod_dir RÉEL ne bouge PAS
-  # (reste `/home/<human>/pods/...`) — seul le CWD intra-pod est remappé.
+  @doc """
+  cwd VU PAR L'AGENT dans le pod (= `LCARS_POD_CWD` + base du slug recall). Pour un pod-PROJET,
+  l'agent voit `/home/<project>` (containment : ni human ni pod_id) ; bwrap y bind le workspace
+  RÉEL (`pod_cwd_real`). Sinon (pas de projet nommé) = le réel. Le pod_dir RÉEL ne bouge PAS
+  (reste `/home/<human>/pods/...`) — seul le CWD intra-pod est remappé. Public car aussi appelé
+  par le recall (`Scaffold.maybe_recall_restore`).
+  """
+  @spec pod_cwd(keyword(), Fleet.CapProfile.t(), Path.t()) :: String.t()
   def pod_cwd(opts, cap_profile, pod_dir) do
     cond do
       # Worker projet → /home/<project>.
@@ -75,8 +85,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
-  # Home INTRA-POD. bwrap → /home/.pod (le pod_dir réel masqué derrière) ; sinon (host) → le pod_dir
-  # réel (pas de relocalisation). Doit matcher LCARS_POD_HOME posé par maybe_put_sandbox_home.
+  @doc """
+  Home INTRA-POD. bwrap → `/home/.pod` (le pod_dir réel masqué derrière) ; sinon (host) → le
+  pod_dir réel (pas de relocalisation). Doit matcher `LCARS_POD_HOME` posé par
+  `maybe_put_sandbox_home/3`. Public car aussi passé à `McpProvision` par l'état `:projecting`.
+  """
+  @spec sandbox_home(Fleet.CapProfile.t(), Path.t()) :: String.t()
   def sandbox_home(cap_profile, pod_dir) do
     # « Contenu par bwrap ? » délégué au prédicat d'AUTORITÉ `CapProfile.bwrap?/1` (pas de littéral
     # "bwrap" matché en dur). bwrap → /home/.pod (relocalisation sandbox) ; sinon (host) → pod_dir réel.
@@ -96,14 +110,17 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   defp pod_cwd_real(opts, cap_profile, pod_dir) do
     case effective_project(opts, cap_profile)["repo_path"] do
       nil -> pod_dir
-      _ -> Fleet.Spawner.pod_workspace_path(pod_dir)
+      _ -> Fleet.Spawner.Pod.Paths.pod_workspace_path(pod_dir)
     end
   end
 
-  # Pose le cwd du pod (LCARS_POD_CWD, lu par bwrap_launch ; défaut launcher `$POD_DIR`). cwd = la branche
-  # CODE (`<pod_dir>/workspace`) quand un projet est cloné — l'agent démarre DANS son code, pas dans le
-  # pod_dir nu. La branche DOC est à côté (`<pod_dir>/work`). Pas de projet → cwd = pod_dir (pods
-  # permanents/memory-X sans repo).
+  @doc """
+  Pose le cwd du pod (`LCARS_POD_CWD`, lu par bwrap_launch ; défaut launcher `$POD_DIR`). cwd = la
+  branche CODE (`<pod_dir>/workspace`) quand un projet est cloné — l'agent démarre DANS son code,
+  pas dans le pod_dir nu. La branche DOC est à côté (`<pod_dir>/work`). Pas de projet → cwd =
+  pod_dir (pods permanents/memory-X sans repo). Builder d'env mergé par l'état `:launching`.
+  """
+  @spec maybe_put_pod_cwd(map(), keyword(), Fleet.CapProfile.t(), Path.t()) :: map()
   def maybe_put_pod_cwd(env, opts, cap_profile, pod_dir) do
     env = Map.put(env, "LCARS_POD_CWD", pod_cwd(opts, cap_profile, pod_dir))
 
@@ -115,9 +132,13 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
       else: env
   end
 
-  # Relocalise le home intra-pod (bwrap UNIQUEMENT). LCARS_POD_HOME=/home/.pod → bwrap_launch masque
-  # le pod_dir réel derrière (SANDBOX_HOME) : l'agent ne voit ni human ni pod_id, et `ls /home` ne
-  # montre que les mounts. Host pods (containment none) : pas relocalisés (home réel).
+  @doc """
+  Relocalise le home intra-pod (bwrap UNIQUEMENT). `LCARS_POD_HOME=/home/.pod` → bwrap_launch
+  masque le pod_dir réel derrière (SANDBOX_HOME) : l'agent ne voit ni human ni pod_id, et
+  `ls /home` ne montre que les mounts. Host pods (containment none) : pas relocalisés (home réel).
+  Builder d'env mergé par l'état `:launching`.
+  """
+  @spec maybe_put_sandbox_home(map(), Fleet.CapProfile.t(), Path.t()) :: map()
   def maybe_put_sandbox_home(env, cap_profile, pod_dir) do
     # bwrap UNIQUEMENT (prédicat d'autorité) : relocalise le home intra-pod. Host (none) = home réel, rien à poser.
     if Fleet.CapProfile.bwrap?(cap_profile),
@@ -125,24 +146,36 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
       else: env
   end
 
-  # HOME du pod selon containment. host (none) = home réel de l'humain (claude → `~/.claude`
-  # natif, refresh OAuth) ; bwrap = pod_dir (ignoré sous le sandbox de toute façon). Le `claude_dir`
-  # est RÉSOLU côté Pod (`claude_dir_for/1` — creds, honore l'override config `:claude_dir` et fail-loud
-  # si le passwd de l'humain est introuvable) et passé ici : le HOME host = son parent (`Path.dirname`).
+  @doc """
+  HOME du pod selon containment. host (`"none"`) = home réel de l'humain (claude → `~/.claude`
+  natif, refresh OAuth) ; bwrap = pod_dir (ignoré sous le sandbox de toute façon). Le `claude_dir`
+  est RÉSOLU côté `LaunchEnv` (`claude_dir_for/1` — creds, honore l'override config `:claude_dir`
+  et fail-loud si le passwd de l'humain est introuvable) et passé ici : le HOME host = son parent
+  (`Path.dirname`).
+  """
+  @spec launch_home(String.t(), Path.t(), Path.t()) :: Path.t()
   def launch_home("none", _pod_dir, claude_dir), do: Path.dirname(claude_dir)
   def launch_home(_containment, pod_dir, _claude_dir), do: pod_dir
 
-  # Mode permission du pod : `spec.invocation.permission_mode` du cap-profile, défaut
-  # `"default"` (→ `--permission-mode default`, listes allow/deny ENFORCED). Non-vide → claude_launch
-  # passe `--permission-mode <mode>` ; pour ré-ouvrir le bypass, un cap-profile pose `"bypassPermissions"`.
+  @doc """
+  Mode permission du pod : `spec.invocation.permission_mode` du cap-profile, défaut `"default"`
+  (→ `--permission-mode default`, listes allow/deny ENFORCED). Non-vide → claude_launch passe
+  `--permission-mode <mode>` ; pour ré-ouvrir le bypass, un cap-profile pose `"bypassPermissions"`.
+  Posé en `LCARS_PERMISSION_MODE` par `LaunchEnv.build/4`.
+  """
+  @spec permission_mode(Fleet.CapProfile.t() | term()) :: String.t()
   def permission_mode(%Fleet.CapProfile{spec: spec}),
     do: get_in(spec || %{}, ["invocation", "permission_mode"]) || "default"
 
   def permission_mode(_), do: "default"
 
-  # LCARS_SKILLS_PLUGINS = noms plugins uniques extraits des skills QUALIFIÉS `plugin:skill` du
-  # cap-profile.spec.knowledge.skills. Consommé par bin/bwrap_launch.sh (mount-bind RO). Un skill
-  # non-qualifié (sans `:`) n'est PAS un plugin → filtré. Vide → pas d'env var (rétro-compatible).
+  @doc """
+  `LCARS_SKILLS_PLUGINS` = noms plugins uniques extraits des skills QUALIFIÉS `plugin:skill` du
+  cap-profile `spec.knowledge.skills`. Consommé par `bin/bwrap_launch.sh` (mount-bind RO). Un
+  skill non-qualifié (sans `:`) n'est PAS un plugin → filtré. Vide → pas d'env var
+  (rétro-compatible) : rend `%{}` ou `%{"LCARS_SKILLS_PLUGINS" => "p1 p2"}`.
+  """
+  @spec skills_plugins_env(Fleet.CapProfile.t()) :: map()
   def skills_plugins_env(%Fleet.CapProfile{spec: spec}) do
     plugins =
       (spec || %{})
@@ -161,8 +194,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
-  # Sérialise LCARS_POD_MOUNTS (lu par bwrap_launch) : mount SYSTÈME (dir des launchers) ++ mounts
-  # CATALOGUE du cap-profile. `claude_launch_path` est résolu côté Pod (config d'install) et passé ici.
+  @doc """
+  Sérialise `LCARS_POD_MOUNTS` (lu par bwrap_launch, une ligne `mode:path` par mount) : mount
+  SYSTÈME (dir des launchers) ++ mounts CATALOGUE du cap-profile (`metadata.mounts`).
+  `claude_launch_path` est résolu côté Pod (config d'install) et passé ici.
+  """
+  @spec pod_mounts_env(Fleet.CapProfile.t(), String.t()) :: String.t()
   def pod_mounts_env(cap_profile, claude_launch_path) do
     mounts_env(system_mounts(claude_launch_path) ++ cap_profile_mounts(cap_profile))
   end

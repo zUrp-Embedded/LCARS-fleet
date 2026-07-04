@@ -54,19 +54,27 @@ defmodule Fleet.Spawner.Pod.Recovery do
     end
   end
 
-  # :recreate → fresh, nouvelle session (base intacte : session_id neuf, resume=false).
+  @doc """
+  Projette la décision de recovery dans le `state`. `:recreate` → fresh, nouvelle session (base
+  intacte : session_id neuf, resume=false, seul le flag `:recovery` est posé). `:release` →
+  terminal : grave la phase observée + le flag — le pod stoppera proprement (état `:releasing`
+  sur backend nil). Appelé par `recover_or_init` (`Pod`).
+  """
+  @spec apply_recovery(map(), :recreate | :release, String.t() | nil, atom()) :: map()
   def apply_recovery(base, :recreate, _sid, _phase), do: Map.put(base, :recovery, :recreate)
 
-  # :release → terminal ; le pod stoppera proprement (état :releasing sur backend nil).
   def apply_recovery(base, :release, _sid, phase) do
     base |> Map.put(:phase, phase) |> Map.put(:recovery, :release)
   end
 
-  # Un pod (re)spawné avec un snapshot suit la décision explicite de
-  # `recover_or_init`/`recovery_action` : `:recreate` repart de zéro (`:allocate`,
-  # session neuve), `:release` s'arrête (phase terminale, rien à relancer). JAMAIS
-  # reprendre en `:monitor` sur un backend mort (le supervisor ne ressuscite jamais
-  # sous `:temporary`).
+  @doc """
+  Point de reprise `:continue` d'un pod (re)spawné (atome `:allocate`/`:launch`/…, PAS un état
+  gen_statem — `Pod.init/1` le mappe via `continue_to_phase/1`). Un pod avec snapshot suit la
+  décision explicite de `recover_or_init`/`recovery_action/1` : `:recreate` repart de zéro
+  (`:allocate`, session neuve), `:release` s'arrête (phase terminale, rien à relancer). JAMAIS
+  reprendre en `:monitor` sur un backend mort (le supervisor ne ressuscite jamais sous `:temporary`).
+  """
+  @spec first_continue_for(map()) :: atom()
   def first_continue_for(%{recovery: :recreate}), do: :allocate
   def first_continue_for(%{recovery: :release}), do: :release
   def first_continue_for(%{phase: :pending}), do: :allocate
@@ -105,6 +113,12 @@ defmodule Fleet.Spawner.Pod.Recovery do
     def continue_to_phase(unquote(continue)), do: unquote(phase)
   end
 
+  @doc """
+  Décode la phase string du `state.json` en atome EXISTANT (`nil` si inconnue — snapshot d'une
+  version antérieure, ou champ corrompu). Appelé par `recover_or_init` (`Pod`) ET par
+  `StateFs.clear_terminal_snapshot/3`.
+  """
+  @spec phase_from_string(term()) :: atom() | nil
   def phase_from_string(s) when is_binary(s) do
     # String.to_existing_atom/1 rend TOUJOURS un atome (ou raise ArgumentError si l'atome n'existe pas —
     # rattrapé ci-dessous → nil). Pas de `case`/fallback : l'ancien `_ -> nil` était mort (jamais un non-atom).

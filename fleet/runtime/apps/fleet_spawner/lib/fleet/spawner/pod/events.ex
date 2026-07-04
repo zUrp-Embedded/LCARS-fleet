@@ -47,13 +47,17 @@ defmodule Fleet.Spawner.Pod.Events do
   #     complétion orpheline ; il reste vivant (re-wake re-fire l'extract), fail-loud. Les deux passent
   #     par l'enveloppe canon stricte `%Fleet.Event{source: :spawner}`.
 
-  # OBSERVABILITÉ/escalade : émission via le cœur protégé `Bus.safe_emit/4` (le rescue local dupliqué
-  # est retiré — la politique best-effort a UNE autorité, Ring 0). Un crash event_router (event malformé,
-  # nom de type inconnu) ne doit JAMAIS faire crash le process pod (gen_statem) : safe_emit logge et
-  # neutralise. Le `event_type` BINAIRE est passé tel quel — la conversion anti atom-leak
-  # (`to_existing_atom`) vit SOUS le rescue de safe_emit. `:on_unregistered` défaut (`:log`) : la perte
-  # d'un event d'observabilité reste visible en log. Rend toujours `:ok` (contrat fire-and-forget — le
-  # `{:error,_}` passthrough PubSub est jeté : personne ne FINIT un step_run sur ces events).
+  @doc """
+  Broadcast OBSERVABILITÉ/escalade (`pod.failed`, `wake.failed`) : émission via le cœur protégé
+  `Bus.safe_emit/4` (la politique best-effort a UNE autorité, Ring 0). Un crash event_router
+  (event malformé, nom de type inconnu) ne fait JAMAIS crasher le process pod (gen_statem) :
+  safe_emit logge et neutralise. Le `event_type` BINAIRE est passé tel quel — la conversion anti
+  atom-leak (`to_existing_atom`) vit SOUS le rescue de safe_emit. `:on_unregistered` défaut
+  (`:log`) : la perte d'un event d'observabilité reste visible en log. Rend toujours `:ok`
+  (contrat fire-and-forget — le `{:error,_}` passthrough PubSub est jeté : personne ne FINIT un
+  step_run sur ces events).
+  """
+  @spec best_effort_broadcast(String.t(), map()) :: :ok
   def best_effort_broadcast(event_type, payload) when is_binary(event_type) do
     _ =
       Bus.safe_emit(
@@ -66,12 +70,15 @@ defmodule Fleet.Spawner.Pod.Events do
     :ok
   end
 
-  # Broadcast LIFECYCLE load-bearing (`pod.completed`) : l'échec n'est PAS avalé. VOLONTAIREMENT hors
-  # du cœur `Bus.safe_emit/4` : safe_emit aplatit tout échec en `:ok` loggé (contrat best-effort
-  # « ne jamais crasher l'émetteur ») — indistinguable d'un succès pour l'appelant, alors qu'ici
-  # l'état `:extracting` DOIT distinguer pour retenir le pod. Retourne `:ok` ou
-  # `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé ERROR : un
-  # `pod.completed` non diffusé = wedge potentiel (le step_run ne finit pas, verrou conservé).
+  @doc """
+  Broadcast LIFECYCLE load-bearing (`pod.completed`) : l'échec n'est PAS avalé. VOLONTAIREMENT
+  hors du cœur `Bus.safe_emit/4` : safe_emit aplatit tout échec en `:ok` loggé (contrat
+  best-effort « ne jamais crasher l'émetteur ») — indistinguable d'un succès pour l'appelant,
+  alors qu'ici l'état `:extracting` DOIT distinguer pour retenir le pod. Retourne `:ok` ou
+  `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé ERROR :
+  un `pod.completed` non diffusé = wedge potentiel (le step_run ne finit pas, verrou conservé).
+  """
+  @spec required_broadcast(String.t(), map()) :: :ok | {:error, {:broadcast_failed, term()}}
   def required_broadcast(event_type, payload) when is_binary(event_type) do
     case event_bus().broadcast(Bus.main_topic(), build_spawner_event(event_type, payload)) do
       :ok ->

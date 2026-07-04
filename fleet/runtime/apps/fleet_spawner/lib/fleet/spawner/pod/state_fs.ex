@@ -99,6 +99,15 @@ defmodule Fleet.Spawner.Pod.StateFs do
     :ok
   end
 
+  @doc """
+  Sérialise le snapshot de recovery `{v, session_id, cap_profile_name, started_at, phase,
+  conditions, issue_id}` du `state` dans `state.state_fs_path` — écriture ATOMIQUE
+  (`.tmp` + `rename`, `mkdir_p` de la racine). Échec d'écriture = perte du point de recovery
+  durable → LOUD (error-level → monitoring) mais NON-fatal (`:ok` rendu — appelé depuis
+  `transition_failed` entre autres, un crash ici ferait régresser le cleanup). Appelé aux 4 sites
+  de transition du `Pod` (launch → `:monitoring`, kill → `:killed`, release → `:succeeded`,
+  `transition_failed` → `:failed`).
+  """
   @spec write_state_fs(map()) :: :ok
   def write_state_fs(state) do
     # Schéma complet du snapshot :

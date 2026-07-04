@@ -26,6 +26,23 @@ defmodule Fleet.Spawner.Pod.Paths do
     publiques car franchies depuis ces modules.
   """
 
+  # Le workspace livrable d'un pod = `<pod_dir>/workspace` (sous `$POD_DIR`, bound bwrap RW).
+  # Sous-dossier centralisé ICI — autorité unique de la convention de placement (la façade
+  # `Fleet.Spawner.pod_workspace_path/1` délègue ; les îles `Pod.*` appellent en direct).
+  # `ProjectBootstrap.Clone` garde sa copie (Ring 1 ne peut pas dépendre de spawner sans cycle
+  # spawner⇄bootstrap) MAIS il RETOURNE le workspace calculé → producteur autoritaire.
+  @pod_workspace_subdir "workspace"
+
+  @doc """
+  Workspace livrable depuis un `pod_dir` connu : `<pod_dir>/workspace`. Calcul PUR — autorité
+  unique de la convention de placement (le littéral `"workspace"` ne vit qu'ici côté spawner).
+  Appelé par la façade (`Fleet.Spawner.pod_workspace_path/1`/`pod_workspace_dir/1`),
+  `Pod.LaunchSpec` (bind cwd) et `Pod.CompletedPayload` (clé `workspace` du payload).
+  """
+  @spec pod_workspace_path(Path.t()) :: Path.t()
+  def pod_workspace_path(pod_dir) when is_binary(pod_dir),
+    do: Path.join(pod_dir, @pod_workspace_subdir)
+
   @doc """
   pod_dir d'un pod : `<pod_dir_root>/pod_<pod_id>` (clone git complet + `.lcars`/`.claude`/`issues`).
   Le cap_profile N'ENTRE PAS dans le calcul — le pod_dir ne dépend que du pod_id et de la base — donc il
@@ -36,11 +53,15 @@ defmodule Fleet.Spawner.Pod.Paths do
   @spec pod_dir(String.t(), keyword()) :: String.t()
   def pod_dir(pod_id, opts \\ []) when is_binary(pod_id), do: pod_dir_for(pod_id, opts)
 
+  @doc """
+  pod_dir avec override explicite : `opts[:pod_dir_root]` prime sur la config
+  `:fleet_spawner, :pod_dir_root`, sinon défaut `~/pods` (le pod vit SOUS LE HOME DE L'HUMAIN,
+  `0700`, isolé OS gratis — le home ENCODE déjà l'humain). `pod_<id>` = nom stable (pod_id = clé
+  de recovery, stable pour `--resume`). Appelé par `Pod` (`initial_state`) et
+  `StateFs.clear_terminal_snapshot/3`.
+  """
+  @spec pod_dir_for(String.t(), keyword()) :: String.t()
   def pod_dir_for(pod_id, opts) do
-    # Le pod vit SOUS LE HOME DE L'HUMAIN (= l'user runtime) : `~/pods/pod_<id>`, 0700, isolé OS
-    # gratis (le pod hérite de l'UID du runtime). Le home ENCODE déjà l'humain (pas de `/home/<human>`
-    # construit). `:pod_dir_root` (opts ou config) = override tests/déploiement non-standard ; non-set
-    # ⇒ home du runtime. `pod_<id>` = nom stable (pod_id = clé de recovery, stable pour --resume).
     base =
       Keyword.get(opts, :pod_dir_root) ||
         Application.get_env(:fleet_spawner, :pod_dir_root) ||
@@ -49,6 +70,13 @@ defmodule Fleet.Spawner.Pod.Paths do
     Path.join(base, "pod_#{pod_id}")
   end
 
+  @doc """
+  Chemin du `state.json` de recovery d'un pod : `<state_fs_root>/<scope>/<pod_id>/state.json`,
+  scope dérivé du `lifetime_scope` du cap-profile (`pipe` → `pipes`, `run` → `runs`, sinon
+  `pods`). `opts[:state_fs_root]` (override par-spawn, tests) prime sur la racine globale.
+  Appelé par `Pod` (`initial_state`) et `StateFs.clear_terminal_snapshot/3`.
+  """
+  @spec state_fs_path_for(String.t(), Fleet.CapProfile.t(), keyword()) :: String.t()
   def state_fs_path_for(pod_id, cap_profile, opts) do
     root = Keyword.get(opts, :state_fs_root, state_fs_root())
     scope = scope_for(Fleet.CapProfile.lifetime_scope(cap_profile, nil))
@@ -82,11 +110,16 @@ defmodule Fleet.Spawner.Pod.Paths do
   defp scope_for("forever"), do: "pods"
   defp scope_for(_), do: "pods"
 
-  # L'humain qui fait tourner la fleet = l'user du process runtime lui-même : les SEULS users de
-  # l'instance sont les users fleet → l'user courant EST l'humain. Pas de config, pas de défaut
-  # littéral (un défaut masquerait un trou de câblage au lieu de le faire échouer). Le pod, enfant
-  # du runtime (Port/tmux), HÉRITE de cet UID → tourne dans le home de l'humain, bind ses creds. Si
-  # demain quelqu'un d'autre installe LCARS, c'est SON user qui lance, SON home — rien à hardcoder.
-  # Fail-loud si HOME/user irrésoluble (impossible en pratique, mais jamais rattrapé en silence).
+  @doc """
+  HOME de l'humain runtime. L'humain qui fait tourner la fleet = l'user du process runtime
+  lui-même : les SEULS users de l'instance sont les users fleet → l'user courant EST l'humain.
+  Pas de config, pas de défaut littéral (un défaut masquerait un trou de câblage au lieu de le
+  faire échouer). Le pod, enfant du runtime (Port/tmux), HÉRITE de cet UID → tourne dans le home
+  de l'humain, bind ses creds. Si demain quelqu'un d'autre installe LCARS, c'est SON user qui
+  lance, SON home — rien à hardcoder. Fail-loud si HOME/user irrésoluble (`System.user_home!()`
+  raise — impossible en pratique, mais jamais rattrapé en silence). Aussi appelé par
+  `Pod.LaunchEnv.claude_dir/0`.
+  """
+  @spec runtime_home() :: String.t()
   def runtime_home, do: System.user_home!()
 end

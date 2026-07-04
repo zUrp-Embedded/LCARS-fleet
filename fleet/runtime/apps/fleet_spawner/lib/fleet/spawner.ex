@@ -263,22 +263,17 @@ defmodule Fleet.Spawner do
     end
   end
 
-  # Le workspace livrable d'un pod = `<pod_dir>/workspace` (sous `$POD_DIR`, bound bwrap RW).
-  # Sous-dossier centralisé ICI — autorité unique de la convention de placement.
-  # `Pod` (maybe_put_pod_cwd + pod.completed) le dérive via `pod_workspace_path/1`, plus de
-  # littéral recopié. `ProjectBootstrap.Clone` garde sa copie (ring1 ne peut pas dépendre de spawner
-  # sans cycle spawner⇄bootstrap) MAIS il RETOURNE le workspace calculé → producteur autoritaire.
-  @pod_workspace_subdir "workspace"
-
   @doc """
-  Workspace livrable depuis un `pod_dir` DÉJÀ connu (`<pod_dir>/workspace`). Pur — pour les
-  appelants intra-app qui tiennent le pod_dir (ex. `Pod` sur son state) au lieu de ré-encoder le
-  littéral `"workspace"` (autorité unique de la convention). `pod_workspace_dir/1` reste la voie
-  registry : le monde lit où IL a placé le pod, jamais où le pod prétend être.
+  Workspace livrable depuis un `pod_dir` DÉJÀ connu (`<pod_dir>/workspace`). Point d'entrée
+  PUBLIC (frontière d'app : les consommateurs externes ne dépendent pas de l'arborescence interne
+  `pod/*`) ; l'AUTORITÉ du calcul (le littéral `"workspace"`) vit dans `Pod.Paths.pod_workspace_path/1`
+  — les îles `Pod.*` (LaunchSpec, CompletedPayload) l'appellent en direct, sans remonter à la façade.
+  `pod_workspace_dir/1` reste la voie registry : le monde lit où IL a placé le pod, jamais où le pod
+  prétend être.
   """
   @spec pod_workspace_path(Path.t()) :: Path.t()
   def pod_workspace_path(pod_dir) when is_binary(pod_dir),
-    do: Path.join(pod_dir, @pod_workspace_subdir)
+    do: Fleet.Spawner.Pod.Paths.pod_workspace_path(pod_dir)
 
   @doc """
   Résout le workspace livrable d'un pod (`<pod_dir>/workspace`) depuis le pod_dir ENREGISTRÉ.
@@ -382,13 +377,14 @@ defmodule Fleet.Spawner do
   def wake_pod(pod_id) when is_binary(pod_id) do
     case pod_info(pod_id) do
       {:ok, %{tmux_session: session} = info} when is_binary(session) ->
-        # Réveil-par-flag (rail PORTEUR) : touche `turn.flag` → l'agent Monitor-armé se réveille SANS
-        # send-keys. Pas de send-keys IMMÉDIAT ici → on ARME la boucle ack-driven
-        # du Pod (`:arm_kick`), qui est le FALLBACK : elle send-keys `"wake"` UNIQUEMENT si le pull n'arrive
-        # pas (le flag n'a pas livré), puis escalade au cap. + ré-arme la deadline de RÉPONSE. Le
-        # `wake_pod` n'est qu'un trigger porteur + l'armement du filet ; le contrôle (ACK = pull) vit
-        # dans la boucle (`kick_attempt`). Le knob `:wake_send_keys` (flag-only) est lu par la boucle.
-        _ = touch_turn_flag(info)
+        # Réveil-par-flag (rail PORTEUR) : touche `turn.flag` (`Pod.TurnFlag.touch/1` — l'I/O FS du
+        # flag vit là-bas) → l'agent Monitor-armé se réveille SANS send-keys. Pas de send-keys
+        # IMMÉDIAT ici → on ARME la boucle ack-driven du Pod (`:arm_kick`), qui est le FALLBACK :
+        # elle send-keys `"wake"` UNIQUEMENT si le pull n'arrive pas (le flag n'a pas livré), puis
+        # escalade au cap. + ré-arme la deadline de RÉPONSE. Le `wake_pod` n'est qu'un trigger
+        # porteur + l'armement du filet ; le contrôle (ACK = pull) vit dans la boucle
+        # (`kick_attempt`). Le knob `:wake_send_keys` (flag-only) est lu par la boucle.
+        _ = Fleet.Spawner.Pod.TurnFlag.touch(info)
         _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :rearm_deadline)
         _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :arm_kick)
         :ok
@@ -399,44 +395,6 @@ defmodule Fleet.Spawner do
       {:error, _} = err ->
         err
     end
-  end
-
-  # Touche le flag du monitor in-pod (`pod_dir/turn.flag`, bind-monté = `~/turn.flag` côté
-  # pod). Le `watch.sh` armé via l'outil Monitor émet « ton tour » → réveille l'agent.
-  defp touch_turn_flag(%{pod_dir: pod_dir}) when is_binary(pod_dir), do: write_turn_flag(pod_dir)
-  defp touch_turn_flag(_info), do: :ok
-
-  @doc false
-  # Écrit un token UNIQUE dans `pod_dir/turn.flag`. watch.sh compare le CONTENU (`cur != last`) : un ms BARE
-  # peut se répéter (2 wakes même ms) → token identique → wake MANQUÉ ; le suffixe unique garantit que chaque
-  # écriture change le contenu → toujours détectée. `File.write` RENVOIE `{:error,_}` (ne lève PAS) sur dir
-  # disparu/perm/disque → on traite le RETOUR (le `_ =` l'avalait). Rail PORTEUR : flag muet = log-LOUD
-  # (best-effort : fallback send-keys + result_deadline rattrapent, jamais avalé). Public (`@doc false`) pour
-  # le test : le chemin "proceed" (tmux_session) n'est jamais atteint par StubBackend.
-  def write_turn_flag(pod_dir) when is_binary(pod_dir) do
-    flag = Path.join(pod_dir, "turn.flag")
-
-    token =
-      "#{System.system_time(:millisecond)}-#{System.unique_integer([:positive, :monotonic])}"
-
-    case File.write(flag, token <> "\n") do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning(
-          "write_turn_flag #{pod_dir}: écriture flag échouée (#{inspect(reason)}) — rail porteur muet (best-effort)"
-        )
-
-        :ok
-    end
-  rescue
-    e ->
-      Logger.warning(
-        "write_turn_flag #{pod_dir}: exception écriture flag (#{inspect(e)}) — rail porteur muet (best-effort)"
-      )
-
-      :ok
   end
 
   @doc """

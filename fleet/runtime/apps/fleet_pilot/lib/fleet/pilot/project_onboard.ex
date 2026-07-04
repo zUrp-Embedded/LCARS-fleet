@@ -32,6 +32,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
   alias Fleet.Pilot.GitOps
   alias Fleet.Pilot.Roles
 
+  # Contenu + écriture du scaffold (templates purs, dual-dir main / work-ops) — extrait :
+  # aucune dépendance à l'orchestration, l'onboard l'appelle aux bons moments de sa séquence.
+  alias Fleet.Pilot.ProjectOnboard.Scaffold
+
   require Logger
 
   # H1/H3 : derive de l'autorite unique du layout container (Fleet.Layout, R0).
@@ -68,11 +72,11 @@ defmodule Fleet.Pilot.ProjectOnboard do
          {:ok, full_name} <- create_repo(name, org, opts),
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- clone_main(url, proj_dir),
-         :ok <- scaffold_main(proj_dir, name, opts),
+         :ok <- Scaffold.main(proj_dir, name, opts),
          :ok <- commit(proj_dir, "chore(onboard): scaffold initial du projet"),
          :ok <- push(proj_dir, "main", false),
          :ok <- add_work_ops(proj_dir, work_dir),
-         :ok <- scaffold_work(work_dir, name, opts),
+         :ok <- Scaffold.work(work_dir, name, opts),
          :ok <- commit(work_dir, "chore(onboard): init work/ops"),
          :ok <- push(work_dir, "work/ops", true),
          :ok <- register_for_fleet(full_name, opts),
@@ -225,136 +229,5 @@ defmodule Fleet.Pilot.ProjectOnboard do
         if(set_upstream?, do: ["-u"], else: []) ++ ["origin", branch]
 
     GitOps.run(args, auth: true)
-  end
-
-  # ── scaffold (standard, état de l'art — ajustable) ───────────────────────
-
-  defp scaffold_main(dir, name, opts) do
-    pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, "(à compléter)")
-    File.mkdir_p!(Path.join(dir, "docs"))
-
-    write_all(dir, %{
-      "README.md" => readme(name, pitch),
-      ".gitignore" => gitignore(),
-      ".editorconfig" => editorconfig(),
-      "docs/spec.md" => spec_md(name, pitch)
-    })
-  end
-
-  defp scaffold_work(dir, name, opts) do
-    pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, "")
-    File.mkdir_p!(Path.join(dir, "plans"))
-
-    write_all(dir, %{
-      "backlog.md" => backlog_md(name, pitch),
-      "scratchpad.md" => "",
-      "plans/.gitkeep" => ""
-    })
-  end
-
-  defp write_all(dir, files) do
-    Enum.reduce_while(files, :ok, fn {rel, content}, :ok ->
-      path = Path.join(dir, rel)
-      File.mkdir_p!(Path.dirname(path))
-
-      case File.write(path, content) do
-        :ok -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, {:scaffold_write, rel, reason}}}
-      end
-    end)
-  end
-
-  defp readme(name, pitch) do
-    """
-    # #{name}
-
-    #{pitch}
-
-    ## Installation
-
-    (à compléter)
-
-    ## Usage
-
-    (à compléter)
-    """
-  end
-
-  defp spec_md(name, pitch) do
-    """
-    # #{name} — Spec
-
-    **Date** : 2026-06-14
-    **Dernière révision** : 2026-06-14
-    **Statut** : draft v1
-    **Référencé par** : work/ops:backlog.md
-    **Dérivé de** : —
-
-    ## Pitch
-
-    #{pitch}
-
-    ## Contraintes
-
-    (à compléter)
-    """
-  end
-
-  defp backlog_md(name, pitch) do
-    """
-    # #{name} — Backlog
-
-    **Date** : 2026-06-14
-    **Dernière révision** : 2026-06-14
-    **Statut** : actif
-    **Référencé par** : —
-    **Dérivé de** : docs/spec.md
-
-    > #{pitch}
-
-    ## Todo
-
-    - [ ] Cadrer la spec (`docs/spec.md` sur `main`)
-
-    ## Done
-
-    (vide)
-    """
-  end
-
-  defp gitignore do
-    """
-    # build / artefacts
-    build/
-    dist/
-    *.log
-    *.o
-    *.obj
-
-    # secrets / env
-    .env
-    .env.local
-
-    # langages
-    __pycache__/
-    *.pyc
-    node_modules/
-    _build/
-    deps/
-    """
-  end
-
-  defp editorconfig do
-    """
-    root = true
-
-    [*]
-    charset = utf-8
-    end_of_line = lf
-    insert_final_newline = true
-    indent_style = space
-    indent_size = 4
-    trim_trailing_whitespace = true
-    """
   end
 end

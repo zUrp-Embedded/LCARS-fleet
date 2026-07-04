@@ -21,10 +21,11 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
       http_post: 3,
       http_put: 3,
       paginate: 3,
-      forge_bot_login: 2,
-      encode_repo: 1,
-      encode_seg: 1
+      forge_bot_login: 2
     ]
+
+  # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
+  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
 
   alias Fleet.Pilot.ForgeClient
   alias Fleet.Pilot.ForgeProtocol

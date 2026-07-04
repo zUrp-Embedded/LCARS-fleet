@@ -10,7 +10,10 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   pas le champ requested. Détails dans chaque `@doc`.
   """
 
-  import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, http_get: 2, encode_repo: 1]
+  import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, http_get: 2]
+
+  # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
+  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1]
 
   @doc """
   Verdict de review **PAR juge** d'une PR (Gitea `GET /repos/{repo}/pulls/{index}/reviews`) : la

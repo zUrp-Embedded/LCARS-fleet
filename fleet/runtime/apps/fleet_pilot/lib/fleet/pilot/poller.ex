@@ -22,6 +22,19 @@ defmodule Fleet.Pilot.Poller do
     * **Safety-net `try/rescue`** sur `do_poll/1` — un bug du path dispatch ne crash pas le poller.
     * **Telemetry** `[:fleet_pilot, :poller, :poll]` (duration_ms, dispatched, skipped, errors).
 
+  ## Sous-modules
+
+    * `Backoff` — calcul PUR du délai (jitter + backoff exponentiel) ; le GenServer garde
+      l'effet (`schedule/1`) et le rescue (`safe_poll`).
+    * `Lease` — bail repo-sérialisé (classification ENGAGÉ/EN FILE + dispatch sous bail,
+      chemin issues) ; frontière blindée `Lease.Seams`, vocabulaire du tally.
+    * `Reconciliation` — réclamation des verrous `lcars-in-flight` orphelins (la grâce
+      2-tick — état cross-tick — reste ICI, `orphan_lock_suspects`).
+
+  Restent ICI : la boucle (découverte topic + admission + orchestration tally + backoff
+  d'état), le chemin pulls (`step_process_pulls`, non gardé par le bail) et le re-kick
+  awaits-arch throttlé (couplé à `poll_count`).
+
   ## Configuration init
 
     * `:repo` — `"owner/name"`, obligatoire.
@@ -46,10 +59,14 @@ defmodule Fleet.Pilot.Poller do
   alias Fleet.Pilot.Poller.Reconciliation
   alias Fleet.Pilot.StepDispatcher
 
-  # Verrou workflow_run (source unique `Fleet.Pilot.Labels`) — fast-path `classify_issue` (in-flight →
-  # ENGAGÉ sans lecture de route). La réconciliation d'orphelins re-dérive le SIEN de la même autorité
-  # (`Reconciliation`), même source, pas un fork.
-  @in_flight Fleet.Pilot.Labels.in_flight()
+  # Timing PUR du tick (jitter anti-herd + backoff exponentiel capé) — le GenServer garde
+  # l'EFFET (`schedule/1` = Process.send_after) et le rescue (`safe_poll`), Backoff rend le délai.
+  alias Fleet.Pilot.Poller.Backoff
+
+  # Bail repo-sérialisé (classification ENGAGÉ/EN FILE + dispatch sous bail) — le CŒUR métier du
+  # chemin issues, extrait. Frontière blindée : lit un `Lease.Seams` étroit (`lease_seams/1`), défauts
+  # prod résolus ICI. Possède aussi le vocabulaire du tally (`zero_tally/merge_tally`).
+  alias Fleet.Pilot.Poller.Lease
 
   # Verrou HUMAIN posé sur l'ISSUE à l'escalade (verdict gatekeeper escalate/halt/redirect, ou conflit non
   # résolu). Le poller calcule le SET des issues qui le portent (déjà listées au tick → zéro I/O) et le thread
@@ -57,8 +74,6 @@ defmodule Fleet.Pilot.Poller do
   @awaits_arch Fleet.Pilot.Labels.awaits_arch()
 
   @default_interval_ms 30_000
-  @max_backoff_ms 300_000
-  @jitter_ratio 0.1
 
   # G4 — cadence de RE-KICK de l'arch tant qu'au moins une issue attend (`lcars-awaits-arch`). Throttlé :
   # 1 wake tous les N ticks (à ~30s/tick, N=10 = ~5 min). Un wake peut coûter un TOUR claude → non throttlé,
@@ -165,7 +180,7 @@ defmodule Fleet.Pilot.Poller do
 
     _ =
       if Keyword.get(opts, :start_tick?, true) do
-        schedule(jitter(state.interval_ms))
+        schedule(Backoff.jitter(state.interval_ms))
       end
 
     Logger.info(
@@ -179,7 +194,7 @@ defmodule Fleet.Pilot.Poller do
   @impl GenServer
   def handle_info(:poll, state) do
     {_result, new_state} = safe_poll(state)
-    schedule(next_delay(new_state))
+    schedule(Backoff.next_delay(new_state.err_streak, new_state.interval_ms))
     {:noreply, new_state}
   end
 
@@ -210,20 +225,6 @@ defmodule Fleet.Pilot.Poller do
     Process.send_after(self(), :poll, interval_ms)
   end
 
-  defp next_delay(%__MODULE__{err_streak: 0, interval_ms: base}), do: jitter(base)
-
-  defp next_delay(%__MODULE__{err_streak: streak, interval_ms: base}) do
-    factor = :math.pow(2, min(streak, 10)) |> trunc()
-    delay = min(base * factor, @max_backoff_ms)
-    jitter(delay)
-  end
-
-  defp jitter(ms) do
-    delta = trunc(ms * @jitter_ratio)
-    offset = :rand.uniform(2 * delta + 1) - delta - 1
-    max(ms + offset, 1_000)
-  end
-
   # Retourne `{result, new_state}` — rescue-wrappé. Partagé par le tick (qui jette le
   # result) ET force_poll (qui le renvoie) → force_poll ne bypasse pas le rescue.
   defp safe_poll(state) do
@@ -244,7 +245,7 @@ defmodule Fleet.Pilot.Poller do
       "fleet_pilot Poller unexpected #{kind_label} in do_poll: #{inspect(detail)} — state preserved"
     )
 
-    {%{zero_tally() | errors: 1},
+    {%{Lease.zero_tally() | errors: 1},
      %{
        state
        | error_count: state.error_count + 1,
@@ -291,9 +292,10 @@ defmodule Fleet.Pilot.Poller do
         repos = admitted_repos(forge, discovered, state)
 
         {tally, suspects} =
-          Enum.reduce(repos, {zero_tally(), MapSet.new()}, fn repo, {acc_tally, acc_suspects} ->
+          Enum.reduce(repos, {Lease.zero_tally(), MapSet.new()}, fn repo,
+                                                                    {acc_tally, acc_suspects} ->
             {t, st} = step_do_poll(%{base | repo: repo})
-            {merge_tally(acc_tally, t), MapSet.union(acc_suspects, st.orphan_lock_suspects)}
+            {Lease.merge_tally(acc_tally, t), MapSet.union(acc_suspects, st.orphan_lock_suspects)}
           end)
 
         {tally, %{base | orphan_lock_suspects: suspects, last_tally_errors: tally.errors}}
@@ -350,20 +352,13 @@ defmodule Fleet.Pilot.Poller do
       }
     )
 
-    {%{zero_tally() | errors: 1},
+    {%{Lease.zero_tally() | errors: 1},
      %{
        state
        | error_count: state.error_count + 1,
          err_streak: new_streak,
          last_error: inspect(reason)
      }}
-  end
-
-  defp wrap_issue_as_payload(issue, repo) do
-    %{
-      "issue" => issue,
-      "repository" => %{"full_name" => repo}
-    }
   end
 
   # ============================================================
@@ -425,8 +420,8 @@ defmodule Fleet.Pilot.Poller do
       maybe_rekick_arch(awaits_arch_ids, state)
 
       tally =
-        merge_tally(
-          step_process_issues(issues, pr_issue_ids, state, opts),
+        Lease.merge_tally(
+          Lease.process_issues(issues, pr_issue_ids, opts, lease_seams(state)),
           step_process_pulls(pulls, pulls_opts)
         )
 
@@ -531,22 +526,11 @@ defmodule Fleet.Pilot.Poller do
     |> MapSet.new()
   end
 
-  defp merge_tally(a, b) do
-    %{
-      dispatched: a.dispatched + b.dispatched,
-      skipped: a.skipped + b.skipped,
-      errors: a.errors + b.errors
-    }
-  end
-
-  # Tally vierge (source unique). Les chemins d'erreur utilisent `%{zero_tally() | errors: 1}`.
-  defp zero_tally, do: %{dispatched: 0, skipped: 0, errors: 0}
-
   # Chemin PR-driven : chaque PR ouverte avec une review demandée → dispatch le juge.
   # Non gardé par le bail (les juges d'un workflow_run DÉJÀ actif doivent avancer ; le bail ne borne
   # que l'ENTRÉE de nouveaux workflow_runs, côté issues).
   defp step_process_pulls(pulls, opts) do
-    Enum.reduce(pulls, zero_tally(), fn pr, acc ->
+    Enum.reduce(pulls, Lease.zero_tally(), fn pr, acc ->
       case StepDispatcher.dispatch_review(pr, opts) do
         # `:ok` couvre `{:spawned, _, _}` (juge/rework spawné) ET `{:merged, _}` (PR scellée).
         {:ok, _} -> %{acc | dispatched: acc.dispatched + 1}
@@ -556,191 +540,16 @@ defmodule Fleet.Pilot.Poller do
     end)
   end
 
-  defp step_process_issues(issues, pr_issue_ids, state, opts) do
-    # Cohérence : le routing vit dans la ROUTE-COMMENT (state-machine, gravée à l'onboard) — plus de
-    # routing par label. Le poller lit la route → dispatch (workflow_map_role). Le bail « 1 workflow_run actif/repo »
-    # se lit AUSSI sur la route (robuste, append-only). On classe chaque issue UNE fois :
-    #   - ENGAGÉ (in-flight, ou route avancée au-delà du 1er step = workflow_run démarré) → tient le bail ;
-    #     on dispatche son step courant (continue le step_run, ou skip si in-flight).
-    #   - EN FILE (routée au 1er step, ou routeless à onboarder, pas encore dispatchée) → démarre seulement
-    #     si le bail est libre ; sinon attend (sérialisation → feature-branches séquentielles → FF merge).
-    # `classify_issue` lit la route (+ charge la workflow_map) UNE fois et la THREAD au dispatch via
-    # `prefetch` (mergé aux opts) → fin du double get_route / double load workflow_map (la classif du bail et le
-    # dispatch lisaient la MÊME donnée 2×).
-    classified =
-      Enum.map(issues, fn issue ->
-        pr? = MapSet.member?(pr_issue_ids, Map.get(issue, "number"))
-        {engaged, prefetch} = classify_issue(issue, pr?, state)
-        {issue, pr?, engaged, prefetch}
-      end)
-
-    lease_held0 = Enum.any?(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end)
-
-    {tally, _lease} =
-      Enum.reduce(classified, {zero_tally(), lease_held0}, fn
-        {issue, pr?, engaged, prefetch}, {acc, lease} ->
-          payload = wrap_issue_as_payload(issue, state.repo)
-          item_opts = Keyword.merge(opts, prefetch)
-
-          cond do
-            # Issue avec PR fleet ouverte → phase JUGE (dispatchée via les pulls). SKIP côté
-            # issue (sinon re-spawn du producteur). La PR tient le bail.
-            pr? ->
-              {%{acc | skipped: acc.skipped + 1}, lease}
-
-            # Pipeline ENGAGÉ → dispatche son step courant ; il DÉTIENT le bail → lease inchangé.
-            engaged ->
-              dispatch_engaged(payload, item_opts, acc, lease)
-
-            # EN FILE, bail tenu par un autre workflow_run → attend.
-            lease ->
-              {%{acc | skipped: acc.skipped + 1}, lease}
-
-            # EN FILE, bail libre → DÉMARRE (prend le bail si effectivement dispatché).
-            true ->
-              start_workflow_run(payload, item_opts, acc)
-          end
-      end)
-
-    tally
-  end
-
-  # Dispatch d'un item + mise à jour du tally ET du bail. Deux concerns DISTINCTS, que le retour de
-  # `dispatch_issue` mélange :
-  #
-  #   * BAIL — le workflow_run a-t-il DÉMARRÉ (pod spawné + verrou `lcars-in-flight` posé) ? L'ordre canonique
-  #     du spawn (`StepDispatcher.spawn_step`) est verrou → pod → enqueue → WAKE, le wake EN DERNIER. Donc
-  #     `{:error, {:wake_unreached, …}}` veut dire : le workflow_run EST démarré (verrou + pod + brief en place),
-  #     SEUL le réveil tmux a raté. Le workflow_run tient donc le bail repo-sérialisé — sinon un 2e issue du même
-  #     repo dans le même tick démarrerait un 2e workflow_run (deux feature-branches concurrentes → conflit de merge).
-  #   * TALLY/backoff — y a-t-il une anomalie à SURFACER ? Le wake raté reste compté en `errors` (il alimente
-  #     `err_streak`/telemetry → backoff partiel) : un kick injoignable ne doit PAS être avalé en succès
-  #     silencieux (le pod ne tourne pas tant qu'il n'est pas réveillé).
-  #
-  # D'où le 3ᵉ cas `wake_unreached` = (démarré pour le BAIL, anomalie pour le TALLY). On retourne
-  # `{tally, started?}` ; `started?` (= un pod a réellement été mis en vol ce tick) pilote la prise de bail,
-  # INDÉPENDAMMENT du fait que le dispatch ait fini sans erreur.
-  defp step_do_dispatch(payload, opts, acc) do
-    case StepDispatcher.dispatch_issue(payload, opts) do
-      {:ok, {:spawned, _pod_id, _role}} ->
-        {%{acc | dispatched: acc.dispatched + 1}, true}
-
-      # Pipeline DÉMARRÉ (verrou + pod + brief posés) mais wake injoignable. Le bail est PRIS (started?
-      # = true) ; l'anomalie reste comptée en `errors` (backoff + telemetry honnêtes, jamais avalée).
-      {:error, {:wake_unreached, _pod_id, _role, _reason}} ->
-        {%{acc | errors: acc.errors + 1}, true}
-
-      {:skipped, _reason} ->
-        {%{acc | skipped: acc.skipped + 1}, false}
-
-      # Vrai échec de dispatch (rien démarré — la compensation a retiré le verrou + tué le pod frais) → bail LIBRE.
-      {:error, _reason} ->
-        {%{acc | errors: acc.errors + 1}, false}
-    end
-  end
-
-  # Dispatch d'un workflow_run ENGAGÉ (il tient DÉJÀ le bail) : le bail reste inchangé quoi qu'il arrive
-  # (le tally est mis à jour, `started?` est ignoré — l'engagement vient de la classification, pas de ce step_run).
-  defp dispatch_engaged(payload, opts, acc, lease) do
-    {acc2, _started?} = step_do_dispatch(payload, opts, acc)
-    {acc2, lease}
-  end
-
-  # Démarrage d'un workflow_run EN FILE (bail libre) : dispatch ; si un pod a effectivement été mis en vol
-  # (spawné OU wake_unreached = verrou+pod posés), le bail devient TENU → les autres issues en file du même
-  # tick attendent (sérialisation 1 workflow_run/repo). Un wake raté tient le bail (le workflow_run est démarré),
-  # PAS un échec de dispatch (rien démarré).
-  defp start_workflow_run(payload, opts, acc) do
-    {acc2, started?} = step_do_dispatch(payload, opts, acc)
-    {acc2, started?}
-  end
-
-  # Classifie une issue (bail) ET pré-résout ce que `dispatch_issue` relirait sinon. Renvoie
-  # `{engaged?, prefetch_kw}` ; `prefetch_kw` (mergé aux opts de dispatch) porte `:prefetched_route` +
-  # `:prefetched_workflow_map` → lecture forge/disque UNE seule fois. ENGAGÉ = pod en vol (`in-flight`) OU route
-  # avancée au-delà du 1er step (workflow_run démarré, entre deux step_runs). Fast-path : in-flight → pas de lecture
-  # route (`decide` le skip de toute façon). Routeless (`:none`) → EN FILE, route nil threadée (onboard en
-  # aval). Erreur HTTP get_route → EN FILE, RIEN threadé (le dispatch re-lit → fail-loud `:route_resolution`,
-  # jamais de wedge du bail par une workflow_map/route illisible).
-  defp classify_issue(_issue, true = _pr?, _state), do: {false, []}
-
-  defp classify_issue(issue, false = _pr?, state) do
-    labels = Enum.map(Map.get(issue, "labels") || [], & &1["name"])
-
-    if @in_flight in labels do
-      {true, []}
-    else
-      forge = step_forge_client(state)
-      n = Map.get(issue, "number")
-
-      case forge.get_route(state.repo, n, state.forge_opts) do
-        {:ok, {workflow_map_name, step} = route}
-        when is_binary(workflow_map_name) and is_binary(step) ->
-          # Le bail se lit sur la ROUTE (append-only, robuste), JAMAIS sur le succès du chargement de la
-          # workflow_map. Une route PRÉSENTE = un workflow_run déjà entré dans la machine. ENGAGÉ ssi le step courant
-          # n'est pas le 1er de la workflow_map (workflow_run avancé entre deux step_runs). Si la workflow_map échoue à charger
-          # TRANSITOIREMENT (réseau/forge nil), on NE PEUT PAS exclure que ce workflow_run soit avancé → fail-closed :
-          # on le classe ENGAGÉ (bail TENU). Sinon une workflow_map-nil ferait perdre le bail d'un workflow_run engagé →
-          # un 2e issue du même repo démarrerait un 2e workflow_run (perte de sérialisation). Le dispatch de SON
-          # step fail-loud si la workflow_map manque (workflow_map re-lue côté StepDispatcher), mais le bail NE se libère
-          # pas pour autant. WorkflowMap revenue au tick suivant → classification précise reprise.
-          workflow_map = load_workflow_map_or_nil(workflow_map_name, state)
-          engaged = is_nil(workflow_map) or not first_step?(workflow_map, step)
-          {engaged, [prefetched_route: route, prefetched_workflow_map: workflow_map]}
-
-        :none ->
-          {false, [prefetched_route: nil]}
-
-        _ ->
-          {false, []}
-      end
-    end
-  end
-
-  # Charge la workflow_map (seam `workflow_map_loader` ou Loader réel) ; `nil` sur échec (le dispatch re-tentera → fail-loud).
-  defp load_workflow_map_or_nil(workflow_map_name, state) do
-    loader = state.workflow_map_loader || Fleet.Workflow.Loader
-
-    # R4 : le rescue vit dans l'autorité unique (WorkflowMapNav.safe_load) ; CE site garde sa
-    # sémantique propre (nil = bail fail-closed + escalade G6 ci-dessous).
-    case Fleet.Pilot.WorkflowMapNav.safe_load(loader, workflow_map_name) do
-      {:ok, map} ->
-        map
-
-      {:error, {:workflow_map_load_failed, _name, message}} ->
-        # G6 : la workflow_map ne charge PAS (retirée/renommée du catalogue, ou schema cassé). Le bail
-        # reste fail-closed (cf. classify_issue : on ne libère pas le bail d'un workflow_run peut-être
-        # avancé) — MAIS si l'absence est DURABLE, l'issue tient le bail et le repo est bloqué POUR
-        # TOUJOURS en silence (Jupiter : personne ne le verra). On ESCALADE : IncidentRegistry dédup
-        # par signature → 1ère occurrence = note WAL, RÉCURRENCE (map absente à chaque tick) = issue
-        # sysadmin ouverte. Pas de spam (le dédup EST le throttle). Best-effort (l'escalade ne doit
-        # jamais casser le tick).
-        _ = escalate_workflow_map_incident(workflow_map_name, message, state)
-        nil
-    end
-  end
-
-  defp escalate_workflow_map_incident(workflow_map_name, message, state) do
-    fun = state.incident_fun || (&Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
-
-    fun.(
-      "workflow_map_load",
-      workflow_map_name,
-      {:workflow_map_load_failed, message},
-      forge_opts: state.forge_opts
-    )
-  rescue
-    # L'escalade elle-même ne doit JAMAIS faire tomber le tick (registre down, etc.).
-    _ -> :escalation_skipped
-  end
-
-  # Le step est-il le 1er de la workflow_map (= routé mais pas avancé = EN FILE) ? Anomalie workflow_map → `true`
-  # (traité « non engagé » : le dispatch fail-loud surfacera, jamais de wedge du bail par une workflow_map illisible).
-  defp first_step?(workflow_map, step) do
-    case Fleet.Pilot.WorkflowMapNav.first_step(workflow_map) do
-      {:ok, {first, _role}} -> step == first
-      _ -> true
-    end
+  # Frontière blindée vers `Lease` (bail repo-sérialisé) : les 5 lectures autorisées, défauts
+  # prod résolus ICI (même règle que `Reconciliation.Seams` : on résout au site de construction).
+  defp lease_seams(state) do
+    %Lease.Seams{
+      forge: step_forge_client(state),
+      repo: state.repo,
+      forge_opts: state.forge_opts,
+      workflow_map_loader: state.workflow_map_loader || Fleet.Workflow.Loader,
+      incident_fun: state.incident_fun || (&Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+    }
   end
 
   # Construit les opts de StepDispatcher.dispatch_issue. Les seams

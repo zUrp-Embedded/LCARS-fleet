@@ -2,14 +2,16 @@ defmodule Fleet.Spawner.Pod.Backend do
   @moduledoc """
   VIE & MORT du backend OS d'un pod — île extraite de `Fleet.Spawner.Pod`.
 
-  Tout ce qui TUE le process OS du pod et libère ses ressources host : teardown du backend
-  (Port BEAM → SIGTERM du holder bwrap/host, ou kill SOCK-AWARE de la session tmux survivante),
-  reap d'un orphelin avant un (re)launch, provisioning/libération de la socket MCP per-pod, et les
-  résolveurs de chemins des launchers (`bwrap`/`host`/`claude`). Le `Pod` lui passe le `state` (ou un
-  `port`/`pod_id`) en argument ; le module ne rappelle AUCUN private de `Pod` (pas de cycle).
+  Le PROCESS OS du pod, de bout en bout : les résolveurs de chemins des launchers qui le lancent
+  (`bwrap`/`host`/`claude` — la VIE), le résolveur du backend de lancement, le teardown qui le tue
+  (Port BEAM → SIGTERM du holder bwrap/host, ou kill SOCK-AWARE de la session tmux survivante — la
+  MORT) et le reap d'un orphelin avant un (re)launch. Le cycle de vie de la SOCKET MCP per-pod ne
+  vit PLUS ici (recentrage 2026-07-05) : tout le canal MCP (socket + `.mcp-fleet.json` + env) est
+  dans `Pod.McpProvision`. Le `Pod` lui passe le `state` (ou un `port`/`pod_id`) en argument ; le
+  module ne rappelle AUCUN private de `Pod` (pas de cycle).
 
   Ce module N'ORCHESTRE PAS : les CALLBACKS/ÉTATS (`terminate/3`,
-  `handle_event({:call, from}, :kill, ...)`, les états `:releasing`/`:launching`/`:projecting`, la fn
+  `handle_event({:call, from}, :kill, ...)`, les états `:releasing`/`:launching`, la fn
   `do_launch_backend`) RESTENT au cœur du `Pod` ; ils appellent `Backend.*` pour le geste OS.
 
   ## Contrat (appelé par `Pod`)
@@ -25,19 +27,13 @@ defmodule Fleet.Spawner.Pod.Backend do
     l'os_pid du holder puis ferme le Port (race `ArgumentError` absorbée). Le test les exerce DIRECTEMENT
     via `Fleet.Spawner.Pod.Backend.terminate_pod_port/1` / `.safe_port_close/1` (plus de `defdelegate`
     côté `Pod` : appel direct sur le sous-module).
-  - `ensure_pod_socket(pod_id)` — crée la socket MCP per-pod AVANT le launch → `{:ok, socket_path}`
-    (chemin host). Appelé par l'état `:projecting` (le fichier DOIT exister avant le bind bwrap).
-  - `release_pod_socket(state)` — arrête le listener + retire le fichier socket (self-protégé, ne lève
-    JAMAIS) ; clause `_state` (pod_id absent) = no-op. Appelé par l'`after` de `terminate/3`.
   - `launch_backend/0` — résolveur du backend de lancement (`Fleet.Spawner.LaunchBackend.resolved/0`,
     source unique). Appelé par `do_launch_backend`.
   - `bwrap_launch_path/0` / `host_launch_path/0` / `claude_launch_path/0` — résolveurs de chemins des
     launchers (config `:fleet_spawner`). Appelés par l'état `:launching`.
 
-  `require Logger` (reap/teardown/release loggent). Alias `Fleet.Spawner.PodTmux` (`kill_holder`,
-  `sock_path`, `alive?`). En plein qualif : `Fleet.Spawner.LaunchBackend`, `Application`, et le SEAM
-  RUNTIME `apply(mcp_socket_provisioner(), ...)` (provisionneur MCP résolu au runtime — `fleet_spawner`
-  Ring 1 ne peut PAS dépendre compile-time de `fleet_mcp` Ring 3, dep inversée interdite). Aucune
+  `require Logger` (reap/teardown loggent). Alias `Fleet.Spawner.PodTmux` (`kill_holder`,
+  `sock_path`, `alive?`) ; en pleine qualif `Fleet.Spawner.LaunchBackend` et `Application`. Aucune
   dépendance vers `Fleet.Spawner.Pod` (pas de cycle).
   """
 
@@ -45,9 +41,13 @@ defmodule Fleet.Spawner.Pod.Backend do
 
   alias Fleet.Spawner.PodTmux
 
-  # Reap un orphelin (bwrap/tmux/claude survivant à un crash du process pod gen_statem) du même pod_id
-  # avant un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). Le kill (tmux kill-server +
-  # pkill -f ancré) est centralisé dans `PodTmux.kill_holder/1` (anti self-kill).
+  @doc """
+  Reap un orphelin (bwrap/tmux/claude survivant à un crash du process pod gen_statem) du même
+  pod_id avant un (re)launch. Ne fait RIEN si aucun orphelin vivant (cas pod neuf). Le kill
+  (tmux kill-server + pkill -f ancré) est centralisé dans `PodTmux.kill_holder/1` (anti self-kill).
+  Best-effort (rescue → log) : un reap qui lève ne bloque pas le launch.
+  """
+  @spec reap_orphan_pod(String.t()) :: :ok
   def reap_orphan_pod(pod_id) do
     if PodTmux.alive?(pod_id) do
       Logger.warning("pod #{pod_id} : orphelin vivant détecté avant launch (BL-036) — reap")
@@ -61,9 +61,13 @@ defmodule Fleet.Spawner.Pod.Backend do
       :ok
   end
 
-  # Teardown du backend du pod. Port vivant → Port.close (le SIGTERM du holder bwrap fait tomber
-  # namespace+tmux+claude). Port déjà mort mais session bwrap/tmux/claude survivante → kill
-  # SOCK-AWARE.
+  @doc """
+  Teardown du backend du pod. Port vivant → `terminate_pod_port` (le SIGTERM du holder bwrap fait
+  tomber namespace+tmux+claude). Port déjà mort mais session bwrap/tmux/claude survivante → kill
+  SOCK-AWARE (`PodTmux.kill_holder/1`). Idempotent — appelé par `terminate/3` (filet), le call
+  `:kill` et l'état `:releasing` ; le double appel est inoffensif.
+  """
+  @spec teardown_backend(map()) :: :ok
   def teardown_backend(state) do
     cond do
       is_port(state.port) and Port.info(state.port) ->
@@ -135,54 +139,33 @@ defmodule Fleet.Spawner.Pod.Backend do
     ArgumentError -> :ok
   end
 
-  # Délègue à la source unique du backend (config + défaut canon vivent dans LaunchBackend) —
-  # le spawn et la readiness lisent le MÊME résolveur, pas deux copies du défaut.
+  @doc """
+  Backend de lancement résolu. Délègue à la source unique (config + défaut canon vivent dans
+  `Fleet.Spawner.LaunchBackend.resolved/0`) — le spawn et la readiness lisent le MÊME résolveur,
+  pas deux copies du défaut. Appelé par `do_launch_backend` et l'état `:projecting` (provisioning MCP).
+  """
+  @spec launch_backend() :: module()
   def launch_backend, do: Fleet.Spawner.LaunchBackend.resolved()
 
-  # SEAM RUNTIME du provisionneur de socket MCP per-pod. `fleet_spawner` est Ring 1, `fleet_mcp` est
-  # Ring 3 : une dep mix.exs `fleet_spawner → fleet_mcp` serait une dépendance INVERSÉE (ring bas → ring
-  # haut), INTERDITE. On résout donc le module au RUNTIME (`Application.get_env` + `apply`), exactement
-  # comme `Fleet.MCP.PodTools` appelle `Fleet.Pilot.ForgeClient`/`ProjectOnboard`/`Fleet.Spawner` : le
-  # défaut est un ATOM littéral (pas un `alias`/appel direct) → AUCUNE dep compile-time, donc aucun cycle.
-  # L'umbrella démarre toutes les apps → `Fleet.MCP.PodSocketSupervisor` est vivant quand le pod tourne.
-  # Override en test : `:mcp_socket_provisioner` = un stub qui rend un chemin SANS créer de vrai socket
-  # `/run/lcars/...` (mirror du pattern `launch_backend: StubBackend`).
-  defp mcp_socket_provisioner,
-    do:
-      Application.get_env(:fleet_spawner, :mcp_socket_provisioner, Fleet.MCP.PodSocketSupervisor)
-
-  # ENSURE (état :projecting, avant le launch) : crée le listener + le fichier socket de CE pod (idempotent côté
-  # central) et rend `{:ok, socket_path}` (chemin host). Le fichier DOIT exister avant le bind bwrap.
-  def ensure_pod_socket(pod_id) when is_binary(pod_id) do
-    apply(mcp_socket_provisioner(), :ensure_pod_socket, [pod_id])
-  end
-
-  # RELEASE (filet terminate/3, clause `after`) : arrête le listener ET retire le fichier socket (idempotent
-  # côté central). Self-protégé (rescue/catch → log, rend `:ok`) : il tourne dans l'`after` de `terminate`,
-  # un raise s'y propagerait et masquerait la raison d'arrêt. Clause `_state` (pod_id absent) = no-op.
-  def release_pod_socket(%{pod_id: pod_id}) when is_binary(pod_id) do
-    _ = apply(mcp_socket_provisioner(), :release_pod_socket, [pod_id])
-    :ok
-  rescue
-    e ->
-      Logger.warning(
-        "pod #{pod_id} release_pod_socket a levé (non-fatal) — #{Exception.message(e)}"
-      )
-
-      :ok
-  catch
-    kind, value ->
-      Logger.warning("pod #{pod_id} release_pod_socket #{kind} (non-fatal) — #{inspect(value)}")
-      :ok
-  end
-
-  def release_pod_socket(_state), do: :ok
-
+  @doc """
+  Chemin du launcher N0 bwrap (`bwrap_launch.sh` — sandbox, containment par défaut). Config
+  `:fleet_spawner, :bwrap_launch_path`, défaut install canonique `/usr/local/bin/`.
+  """
+  @spec bwrap_launch_path() :: String.t()
   def bwrap_launch_path, do: launcher_path(:bwrap_launch_path, "bwrap_launch.sh")
 
-  # Launcher N0 host (containment: none) — frère sans-sandbox de bwrap_launch, même argv-shape.
+  @doc """
+  Chemin du launcher N0 host (`host_launch.sh` — containment: none, frère sans-sandbox de
+  bwrap_launch, même argv-shape). Config `:fleet_spawner, :host_launch_path`.
+  """
+  @spec host_launch_path() :: String.t()
   def host_launch_path, do: launcher_path(:host_launch_path, "host_launch.sh")
 
+  @doc """
+  Chemin du launcher vendor N1 (`claude_launch.sh` — la frontière vendor EST ce script). Config
+  `:fleet_spawner, :claude_launch_path`.
+  """
+  @spec claude_launch_path() :: String.t()
   def claude_launch_path, do: launcher_path(:claude_launch_path, "claude_launch.sh")
 
   # Résolution UNIQUE d'un chemin de launcher : config `:fleet_spawner` (clé = nom du launcher),

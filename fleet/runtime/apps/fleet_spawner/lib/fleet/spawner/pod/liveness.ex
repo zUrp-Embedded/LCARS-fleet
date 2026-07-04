@@ -2,7 +2,13 @@ defmodule Fleet.Spawner.Pod.Liveness do
   @moduledoc """
   Watchdog d'ACTIVITÉ + calcul du timeout de RÉPONSE — cluster extrait de `Fleet.Spawner.Pod`.
 
-  Deux rôles jumeaux, tous deux PURS (aucun timer armé ici — l'armement reste au cœur du Pod) :
+  Deux rôles jumeaux, tous deux PURS (aucun timer armé ici — l'armement reste au cœur du Pod).
+  SPLIT REFUSÉ (passe modules 2026-07-05) : ces deux rôles sont les deux MOITIÉS d'un même
+  watchdog — `arm_result_deadline_actions` (Pod) arme ENSEMBLE le deadline (`monitor_timeout_ms`)
+  et le tick (`liveness_tick_ms`), et le tick RÉ-ARME le deadline quand la sonde bouge. Les
+  séparer donnerait un module de ~30 lignes (le calcul du timeout) dont l'unique consommateur
+  co-arme systématiquement avec la sortie de l'autre : deux modules pour UN mécanisme, frontière
+  artificielle. Ils restent co-localisés, sections distinctes ci-dessous :
 
   - **Sonde de liveness** : à chaque tick du generic timeout `:liveness`, échantillonner deux signaux complémentaires
     d'activité du pod — taille cumulée des `<session_id>.jsonl` (« a produit une sortie ») et jiffies
@@ -35,6 +41,16 @@ defmodule Fleet.Spawner.Pod.Liveness do
   `default_response_timeout_sec/1` sont internes (appelés UNIQUEMENT par les fonctions ci-dessus).
   """
 
+  # ============================================================
+  # Rôle 1 — sonde de liveness (le pod a-t-il BOUGÉ ?) + cadence du tick
+  # ============================================================
+
+  @doc """
+  Cadence (ms) du tick de liveness : opt per-pod `:liveness_tick_ms` (async-safe test) sinon
+  config `:fleet_spawner, :liveness_tick_ms`, défaut 30 000. Appelé par `liveness_tick_action`
+  (qui RESTE dans `Pod` : il fabrique l'ACTION de generic timeout `{:timeout, :liveness}`).
+  """
+  @spec liveness_tick_ms(map()) :: non_neg_integer()
   def liveness_tick_ms(state) do
     keyword_opt(state, :liveness_tick_ms) ||
       Application.get_env(:fleet_spawner, :liveness_tick_ms, 30_000)
@@ -49,10 +65,16 @@ defmodule Fleet.Spawner.Pod.Liveness do
     end
   end
 
-  # Sonde de liveness : `{taille_jsonl, jiffies_cpu}` — deux signaux complémentaires (le jsonl couvre « a
-  # produit une sortie », le CPU couvre « moud sans sortie encore »). Injectable (test) via l'opt per-pod
-  # `:liveness_probe_fun` (fun/1) ou la config. `nil` sur un signal = indisponible (pas de fichier / pas de
-  # port) → ne compte pas comme mouvement (biais anti-kill : on ne tue pas sur un nil).
+  @doc """
+  Sonde de liveness : `{taille_jsonl, jiffies_cpu}` — deux signaux complémentaires (le jsonl
+  couvre « a produit une sortie », le CPU couvre « moud sans sortie encore »). Injectable (test)
+  via l'opt per-pod `:liveness_probe_fun` (fun/1) ou la config. `nil` sur un signal = indisponible
+  (pas de fichier / pas de port) → ne compte pas comme mouvement (biais anti-kill : on ne tue pas
+  sur un nil). Forme par défaut `{taille | nil, jiffies | nil}` ; une sonde injectée rend sa
+  propre forme opaque (comparée par `liveness_moved?/2` seulement) — d'où le retour `term()`.
+  Appelé par le handler de tick (`handle_event({:timeout, :liveness}, :tick, …)`).
+  """
+  @spec liveness_sample(map()) :: term()
   def liveness_sample(state) do
     case keyword_opt(state, :liveness_probe_fun) ||
            Application.get_env(:fleet_spawner, :liveness_probe_fun) do
@@ -61,7 +83,12 @@ defmodule Fleet.Spawner.Pod.Liveness do
     end
   end
 
-  # Mouvement = au moins UN des deux signaux a crû. Pas de baseline (1er tick) → vivant (bénéfice du doute).
+  @doc """
+  Le pod a-t-il BOUGÉ depuis l'échantillon précédent ? Mouvement = au moins UN des deux signaux a
+  crû. Pas de baseline (1er tick, `prev = nil`) → vivant (bénéfice du doute). Appelé par le même
+  handler de tick que `liveness_sample/1`.
+  """
+  @spec liveness_moved?(term(), term()) :: boolean()
   def liveness_moved?(nil, _now), do: true
   def liveness_moved?({pj, pc}, {nj, nc}), do: grew?(pj, nj) or grew?(pc, nc)
 
@@ -115,16 +142,22 @@ defmodule Fleet.Spawner.Pod.Liveness do
     end
   end
 
-  # Timeout de RÉPONSE (pas budget de durée de vie) au tool MCP submit_result.
-  # Si pas de réponse dans le délai → :result_deadline → transition_failed → le
-  # pod MEURT (tous `:temporary`) : PAS de relaunch OTP. Conséquence (couplage) :
-  # la task active est à libérer (`TaskQueue.clear_for_pod`) sinon elle reste
-  # orpheline (assigned/pending sans pod), et le re-dispatch est délibéré
-  # (recovery boot-orchestrator).
-  #
-  # Override par cap-profile optionnel : `spec.timeouts.response_sec`. Sinon
-  # default codé par scope (one-shot=300s par défaut ; pour les pods
-  # always-on/forever 60s, response time monk = sub-minute).
+  # ============================================================
+  # Rôle 2 — calcul du timeout de RÉPONSE (le deadline que le rôle 1 ré-arme)
+  # ============================================================
+
+  @doc """
+  Délai (ms) du watchdog `:result_deadline` — timeout de RÉPONSE (pas budget de durée de vie) au
+  tool MCP submit_result. Si pas de réponse dans le délai → `:result_deadline` →
+  `transition_failed` → le pod MEURT (tous `:temporary`) : PAS de relaunch OTP. Conséquence
+  (couplage) : la task active est à libérer (`TaskQueue.clear_for_pod`) sinon elle reste orpheline
+  (assigned/pending sans pod), et le re-dispatch est délibéré (recovery boot-orchestrator).
+
+  Override par cap-profile optionnel : `spec.timeouts.response_sec`. Sinon défaut codé par scope
+  (one-shot = 300 s ; `forever` = 60 s, inerte — `arm_result_deadline_actions` n'arme pas pour un
+  permanent). Appelé par `arm_result_deadline_actions` (`Pod`).
+  """
+  @spec monitor_timeout_ms(map()) :: non_neg_integer()
   def monitor_timeout_ms(state) do
     override = get_in(state.cap_profile.spec, ["timeouts", "response_sec"])
 

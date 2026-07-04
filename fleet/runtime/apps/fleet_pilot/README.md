@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-05 (dedup B5 : `Fleet.Pilot.Offload` — squelette d'offload unique des 2 consumers Bus ; `Opts.maybe_put` remplace les wrappers à clé figée `maybe_put_project|repo_id` de Spawn ; prédicat de confiance `system_authored?` UNIQUE dans ForgeProtocol — la copie issue-side de ForgeClient.Repo délègue ; `Verdict.review_event/1` = table unique token→review-event des 2 vocabulaires decision/intent ; signature gatekeeper internalisée dans `GatekeeperSeal.seal_and_merge` via le writer unique `as_gatekeeper/1` — appelants en forge_opts bruts, ArchEscalation aligné) (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
+**Dernière révision** : 2026-07-05 (éclatement god-modules C1 — chaque concern séparable en sous-module à frontière blindée (structs `Seams` étroits, `@enforce_keys`), API publiques inchangées : StepRunConsumer→`GateEngine`/`TerminalEscalation`/`StepRunBuild` (1165→757 l) ; StepRunCompleter→`Texts`/`Emissions` (796→~710 l ; intent-routing REFUSÉ : seam bidirectionnel) ; Poller→`Backoff`/`Lease` (785→~600 l) ; ReviewLifecycle→`RoleDispatch`/`Remediation` (529→211 l) ; ProjectOnboard→`Scaffold` ; Transport→`ForgeClient.UrlSafe` ; IncidentRegistry→`Escalation` ; Spawn→`Naming`) (dedup B5 : `Fleet.Pilot.Offload` — squelette d'offload unique des 2 consumers Bus ; `Opts.maybe_put` remplace les wrappers à clé figée `maybe_put_project|repo_id` de Spawn ; prédicat de confiance `system_authored?` UNIQUE dans ForgeProtocol — la copie issue-side de ForgeClient.Repo délègue ; `Verdict.review_event/1` = table unique token→review-event des 2 vocabulaires decision/intent ; signature gatekeeper internalisée dans `GatekeeperSeal.seal_and_merge` via le writer unique `as_gatekeeper/1` — appelants en forge_opts bruts, ArchEscalation aligné) (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
 **Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -78,9 +78,10 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       load-bearing = le poller PREND le bail, le pod est démarré, seul le wake tmux a raté), une seule
       identité pod (`pod_id_for_scope/4`, project→`for_repo` | instance→`for_issue`) et une seule
       sérialisation de scope (`serialize_project_scope/6` : gate `:role_busy` AVANT tout verrou +
-      reprovision cold in-place d'un pipe ready). Porte aussi les builders d'opts / naming
-      (`rc_name/2`, `feature_slug/1` purs, `maybe_put_route/2` — 2 clés couplées — et `resolve_repo_id/3` ;
-      les poses à UNE clé `:project`/`:repo_id` passent par `Fleet.Pilot.Opts.maybe_put/3` aux sites d'appel).
+      reprovision cold in-place d'un pipe ready). Les builders d'opts / naming vivent dans le sous-module
+      `Fleet.Pilot.StepDispatcher.Spawn.Naming` (`rc_name/2`, `feature_slug/1` purs, `maybe_put_route/2` —
+      2 clés couplées — et `resolve_repo_id/3`, quasi-purs, partagés par les deux flux ; les poses à UNE clé
+      `:project`/`:repo_id` passent par `Fleet.Pilot.Opts.maybe_put/3` aux sites d'appel).
       Le cœur DÉCIDE (route/rôle/verdict), Spawn EXÉCUTE. **Frontière blindée** : `spawn_step/9` reçoit
       un struct `%Spawn.Seams{}` (les 6 seams `forge`/`spawner`/`task_queue`/`repo`/`forge_opts`/
       `wake_recovery`, `@enforce_keys` → un accès hors-6-seams ne compile pas), jamais le `ctx`/`opts`
@@ -88,15 +89,23 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       avec `ReviewLifecycle.promote_pr`, die-on-promote — une seule copie, pas de fork).
     - `Fleet.Pilot.StepDispatcher.ReviewLifecycle` — **cycle de vie REVIEW (PR)**. `dispatch_review/2`
       (PUBLIQUE, contrat poller) RESTE au cœur (gate PR `in-flight`/`awaits-arch` + construction du `ctx` +
-      lecture `pr_review_state`) et DÉLÈGUE l'aiguillage à `dispatch_by_verdicts/5` (point d'entrée). Trois
-      clusters : **aiguillage** (juge pending → spawn ; tous décisifs + un `:changes_requested` → rework ;
-      tous approuvé → merge ; aucun demandé → `:no_verdict`), **rework/conflit** (`dispatch_rework` borné
-      MA-06 + `dispatch_conflict_resolution` borné IncidentRegistry ; `encode_pr_letters/1` (pur, base-26
-      digit-free) vit ICI, consommé par la clé d'incident), **promotion** (`promote_pr` = sceau
-      `Fleet.Pilot.GatekeeperSeal` + merge rebase + die-on-promote de l'eng). **Dépendance
-      uni-directionnelle** (ReviewLifecycle → `Spawn`/`ArchEscalation`/`GatekeeperSeal` → ø ; ne nomme JAMAIS
-      `StepDispatcher` → pas de cycle) : re-construit `Spawn.Seams`/`ArchEscalation.Seams` au site d'appel de
-      chaque feuille. **Frontière blindée** : reçoit un struct `%ReviewLifecycle.Ctx{}` (les seams
+      lecture `pr_review_state`) et DÉLÈGUE l'aiguillage à `dispatch_by_verdicts/5` (point d'entrée). Le module
+      porte l'**aiguillage** (juge pending → spawn ; tous décisifs + un `:changes_requested` → rework ;
+      tous approuvé → merge ; aucun demandé → `:no_verdict`) + la **promotion** (`promote_pr` = sceau
+      `Fleet.Pilot.GatekeeperSeal` + merge rebase + die-on-promote de l'eng — reste ICI : son error-path
+      conflit ré-entre dans l'aiguillage). Deux sous-modules :
+        - `ReviewLifecycle.RoleDispatch` — feuille d'EXÉCUTION partagée (prépare + spawn UN rôle sur la PR :
+          juge/rework/résolution ; clone-base vs gate-base, identité pod par scope, gate `:role_busy`,
+          briefs via BriefBuilder). C'est la coupe qui rend le graphe ACYCLIQUE : aiguillage ET remédiation
+          convergent dessus (couper aiguillage↔rework en deux aurait créé un cycle — le rework rappelle le
+          spawn du producteur).
+        - `ReviewLifecycle.Remediation` — remédiation BORNÉE (`dispatch_rework` borné MA-06 +
+          `dispatch_conflict_resolution` borné IncidentRegistry ; `encode_pr_letters/1` (pur, base-26
+          digit-free) vit ICI, consommé par la clé d'incident). DÉCIDE, puis redescend sur RoleDispatch
+          (re-spawn) ou ArchEscalation (mur humain).
+      **Dépendance uni-directionnelle** (ReviewLifecycle → `Remediation`/`RoleDispatch` →
+      `Spawn`/`ArchEscalation`/`GatekeeperSeal` → ø ; ne nomme JAMAIS `StepDispatcher` → pas de cycle) :
+      les sous-modules re-construisent `Spawn.Seams`/`ArchEscalation.Seams` au site d'appel de chaque feuille. **Frontière blindée** : reçoit un struct `%ReviewLifecycle.Ctx{}` (les seams
       `forge`/`loader`/`spawner`/`task_queue`/`resolver`/`repo`/`forge_opts`/`wake_recovery`/`opts`,
       `@enforce_keys`), jamais une map nue. Les helpers PARTAGÉS avec le flux issue (`route_for/4` lecture de
       route + `tag_err/2` tagging d'erreur) RESTENT au cœur et sont threadés par CAPTURE dans le `Ctx`
@@ -134,6 +143,19 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       les défauts prod (`spawner || Fleet.Spawner`) à SON site. La **grâce 2-tick** (`prior_suspects`) et
       l'**agrégation cross-repo** (`MapSet.union` des suspects de tous les repos du tick) = état CROSS-TICK →
       RESTENT au cœur (`do_poll`/`step_do_poll`). Ne nomme jamais `Poller` (pas de cycle).
+    - `Fleet.Pilot.Poller.Backoff` — timing PUR du tick (extrait) : `jitter/1` (±10 %, plancher 1 s,
+      anti thundering-herd) + `next_delay/2` (backoff exponentiel ×2^min(streak,10), capé 5 min). Le
+      GenServer garde l'EFFET (`schedule/1` = `Process.send_after`) et le rescue de boucle (`safe_poll`).
+    - `Fleet.Pilot.Poller.Lease` — **bail repo-sérialisé** (extrait, le cœur métier du chemin issues) :
+      `process_issues/4` classe chaque issue (ENGAGÉ = in-flight ou route avancée → tient le bail ;
+      EN FILE → démarre seulement si bail libre) puis dispatche sous ce bail — les 2 invariants fail-closed
+      du bail (pris sur `wake_unreached`, lu sur la ROUTE pas sur le chargement de workflow_map) vivent ICI,
+      ainsi que l'escalade G6 d'une workflow_map durablement illisible (IncidentRegistry, dédup = throttle).
+      Possède le **vocabulaire du tally** (`zero_tally/0`, `merge_tally/2` — la monnaie d'observabilité du
+      tick). **Frontière blindée** : `%Lease.Seams{}` (`@enforce_keys`
+      `forge`/`repo`/`forge_opts`/`workflow_map_loader`/`incident_fun`, défauts prod résolus par le poller
+      AU site de construction). Le chemin pulls (`step_process_pulls`, non gardé par le bail), le re-kick
+      awaits-arch throttlé (couplé à `poll_count`) et l'état cross-tick restent au cœur.
 - `Fleet.Pilot.Opts` — util pur **source unique** de l'idiome `maybe_put/3` (pose une clé opts SI la valeur
   n'est pas nil), partagé par `StepRunConsumer` / `ForgeClient.Transport` / `Poller` (builders d'opts+seams)
   et par les builders de spawn_opts de `StepDispatcher`/`ReviewLifecycle` (`:project`, `:repo_id`).
@@ -153,8 +175,13 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   route/step_run) + l'adaptateur credential→wire `as_role/2` (token du compte de rôle dans `forge_opts[:token]`,
   source unique partagée par `StepRunCompleter`/`StepDispatcher`/sceaux gatekeeper). Les concerns à **frontière
   nette** vivent dans des sous-modules :
-    - `Fleet.Pilot.ForgeClient.Transport` — moteur HTTP/config/encodage-URL/pagination + login système (zéro
+    - `Fleet.Pilot.ForgeClient.Transport` — moteur HTTP/config/pagination + login système (zéro
       protocole forge) ; `ForgeClient` l'**`import`e**.
+    - `Fleet.Pilot.ForgeClient.UrlSafe` — **encodage sûr des segments d'URL** (extrait de Transport) :
+      `encode_seg/1`/`encode_repo/1`/`encode_path/1`, cluster PUR de sécurité **path-traversal** (un
+      composant `..`/`.` est percent-encodé `%2E%2E` — le verrou du vecteur `owner/../admin` ; `/`
+      structurels préservés, `/` injectés inertes). Importé par ForgeClient/Repo/Jury/Files ; testé par
+      `url_safe_test.exs`.
     - `Fleet.Pilot.ForgeClient.Jury` — état de jury PR (verdicts commit-scopés, jury volatil, feedback/rounds de rework).
     - `Fleet.Pilot.ForgeClient.Repo` — provisioning repo + sceau d'admission (`post_onboard_marker`/`admitted?`) ;
       seule arête descendante : le sceau matérialisé via `create_issue`/`close_issue` du cœur (layering).
@@ -181,23 +208,49 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       partagé →request_changes, jamais d'approbation par omission). **Un seul module** (décodage+rendu
       couplés : `eng_summary` s'appuie sur
       `unwrap_worker_envelope`, primitif partagé). Vocab canon via l'AUTORITÉ UNIQUE `Fleet.Workflow.GateDecision`
-      (`@gate_decisions` non recopié). Le cœur décisionnel stateful (`apply_verdict`/`gate_decide`/`resume_gate`/
-      `complete_business_step_run`) reste dans le module racine.
+      (`@gate_decisions` non recopié). Le cœur décisionnel stateful (`apply_verdict`/`resume_gate`/
+      `complete_business_step_run`) reste dans le module racine (la décision de gate vit dans `GateEngine`).
     - `Fleet.Pilot.StepRunConsumer.GatekeeperEscalation` — cluster **IMPUR** « escalade gatekeeper »
       (async-out) extrait du consumer : `dispatch/7` (enqueue le brief d'éval au gatekeeper permanent
       + kick + télémétrie `[:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached]`). Appelé par
-      `gate_decide` sur le chemin `{:dispatch_gatekeeper, _}` ; rend le contrat étroit
+      le `GateEngine` sur le chemin `{:dispatch_gatekeeper, _}` (seams transmis via `Seams.escalation`) ; rend le contrat étroit
       `{:ok, corr} | {:error, reason}` (fail-loud : pas de gatekeeper booté / enqueue raté →
       `{:error, _}`, jamais un pass silencieux). **Frontière blindée** : ne reçoit PAS le `state`
       entier mais un struct `%GatekeeperEscalation.Seams{}` (les 4 seams
       `task_queue`/`spawner`/`gatekeeper_pod_id_fun`/`wake_recovery`, `@enforce_keys` → un accès à un
-      autre champ de state ne compile pas). Le cœur décisionnel (`gate_decide`/`resume_gate`) reste
+      autre champ de state ne compile pas). Le cœur décisionnel (`resume_gate`/`apply_verdict`) reste
       dans le module racine.
+    - `Fleet.Pilot.StepRunConsumer.GateEngine` — **moteur de DÉCISION de gate** (extrait) : `resolve_next/3`
+      (gate du step fini → avancer / rebond borné / verdict-juge / escalade gatekeeper), `advance_intent/3`
+      (SOURCE UNIQUE de l'intent terminal — « un producteur ne merge JAMAIS seul » : producteur → `:review`,
+      juge-workflow_map → `:promote` ; partagée chemin gate `:pass` ET chemin verdict `continue`),
+      `producer?/2` (autorité du classement producteur/juge). Rend une INTENTION, le consumer agit.
+      **Frontière blindée** : `%GateEngine.Seams{}` (7 lectures :
+      `loader`/`deliverable_mode_fun`/`max_rework_rounds`/`repo`/`forge_opts`/`forge_client`/`escalation`).
+    - `Fleet.Pilot.StepRunConsumer.TerminalEscalation` — **mur humain** (extrait) : `freeze_to_arch/5`
+      = LE geste unique (await_arch : comment adressé-arch + `lcars-awaits-arch` + unlock LOAD-BEARING →
+      fin du churn G2, PUIS kick arch best-effort), partagé par `escalate_terminal_error` (rework épuisé /
+      budget illisible / aval humain requis — classés par `terminal_escalate?/1`), `escalate_blocked_producer`
+      (flag `blocked` du producteur, motif = sa voix `summary`) et les verdicts fail-closed d'`apply_verdict`.
+      `kick_architect/1` public (aussi utilisé au close `abandon`). **Frontière blindée** :
+      `%TerminalEscalation.Seams{}` (5 champs, dont la closure `run_completion` — la discipline sync/offload
+      RESTE au consumer, l'escalade ne choisit pas son mode d'exécution).
+    - `Fleet.Pilot.StepRunConsumer.StepRunBuild` — **construction du step_run PR-natif** (extrait) :
+      `build/5` classe le rôle qui finit (producteur git_native → `feature_branch` + `deliverable_opts` +
+      voix eng ; juge payload → branche producteur résolue via `list_open_pulls`+`parse_feature_branch`,
+      `review_event` fail-closed + `review_body`) et assemble la map que `complete_pr` route. Appelé DANS
+      la closure offloadée (E4 : l'I/O de résolution ne bloque pas la mailbox). **Frontière blindée** :
+      `%StepRunBuild.Seams{}` (6 lectures : `repo`/`remote`/`role_emails`/`deliverable_mode_fun`/
+      `forge_client`/`forge_opts`).
 - `Fleet.Pilot.IncidentConsumer` — consumer Bus **séparé** des events d'**échec** de pod (`pod.failed`/
   `wake.failed`, source `:spawner`) → `IncidentRegistry` (note 1er / escalade récurrent ; wake récurrent =
   `:sp_suspect`). **Stateless**, sa propre `Task.Supervisor` d'offload (`:runner` défaut nil→sync, prod
   `&offload_async/1`). Extrait du `StepRunConsumer` : concern distinct de la complétion → blast-radius isolé
   (un burst d'échecs ne partage pas la mailbox de la fin-de-step-run) et nom du StepRunConsumer rendu honnête.
+  Côté registre, l'**escalade sysadmin** (ouverture de l'issue `error_system`, retry sans assignee,
+  kind_describe) vit dans `Fleet.Pilot.IncidentRegistry.Escalation` — acte STATELESS (aucune lecture du
+  GenServer), extrait du registre qui garde la MÉMOIRE (WAL + sync forge) ; `IncidentRegistry.escalate/5`
+  reste en façade (defdelegate) pour WakeRecovery et les consumers.
 - `Fleet.Pilot.StepRunCompleter` — orchestrateur de fin-de-step-run PR-natif (`complete_pr/2`). **②.1d single-brique
   (sans workflow_map)** : producteur → `:review` (ouvre la PR **au nom de l'eng** via token de rôle + `request_review`
   des juges `:reviewer_roles` + **assigne l'humain** + unlock issue/PR) ; juge → `:reviewed` (poste la review
@@ -211,6 +264,13 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   `blocked` plutôt que deviner à l'aveugle.
   Identité ②.1e via `Fleet.Credentials.RoleToken` (poste EN SON NOM ; token absent → fallback système loggué).
   (Legacy workflow_map multi-step : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
+  Deux sous-modules extraits : `StepRunCompleter.Texts` (wording PAR DÉFAUT — `pr_body/2` avec `Closes #N`,
+  `review_body/2`, `step_run_comment/2` — générateurs purs, les overrides de l'appelant priment) et
+  `StepRunCompleter.Emissions` (émissions ANNEXES best-effort de la livraison producteur : voix eng PR+issue
+  `as_role`, slot-freeze `deliverable.published` — un échec ne casse JAMAIS la complétion, d'où la coupe).
+  Le routage par intent (`route/3` ×5) reste DANS le completer : il rappelle la primitive publique `promote`
+  et partage `unlock`/`post_route_if_present` (autorités uniques) avec la séquence maison — l'extraire
+  créerait un seam bidirectionnel (mauvaise frontière, refus argumenté).
 
 Knobs : `:step_dispatch?` + `:poll_interval_ms` (step ; la forge `base_url` est l'unique config requise),
 `:poll_repo` (override legacy/test mono-repo seulement — accepté par le Poller mais écrasé à chaque tick par la
@@ -275,8 +335,10 @@ les marqueurs route/step_run/result). Non forgeable : un humain ordinaire n'a pa
 SOUS l'identité du bot. Pas de crypto, pas de registre — fail-closed (`admitted?` rend `false` sur doute).
 
 Séquence : `ForgeClient.create_repo` (org `fleet`, `auto_init`) → `git clone main` → scaffold (README,
-.gitignore, .editorconfig, docs/spec.md) → commit+push `main` → `git worktree add --orphan -b work/ops`
-→ scaffold (backlog.md, scratchpad.md, plans/) → commit+push `work/ops` → **`register_for_fleet`** (topic +
+.gitignore, .editorconfig, docs/spec.md — contenu + écriture dans le sous-module
+`Fleet.Pilot.ProjectOnboard.Scaffold` : templates purs, zéro dépendance à l'orchestration) → commit+push
+`main` → `git worktree add --orphan -b work/ops`
+→ scaffold (backlog.md, scratchpad.md, plans/ — même sous-module) → commit+push `work/ops` → **`register_for_fleet`** (topic +
 **marqueur d'admission système** + collaborateur write humain) → **`lock_main`** (②.1d) : donne
 le **write** aux comptes de rôle (engineer/qualifier/reviewer/gatekeeper — sinon leurs reviews ne comptent
 pas + le gatekeeper ne peut pas merger) **puis pose la branch-protection sur `main`** (N approvals = nb de

@@ -38,6 +38,16 @@ defmodule Fleet.Spawner.PodWarden do
 
   Gaté `:start_pod_warden` (défaut true prod, false test).
 
+  ## Pourquoi UN module pour deux duties (split refusé, passe modules 2026-07-05)
+
+  Les deux duties partagent tout le SUBSTRAT de décision : une seule horloge (`:reap_tick`), une
+  seule source des vivants (`live_pod_ids/0` — dont le garde « Registry indisponible ⇒ skip du
+  tick ENTIER », qui protège les DEUX duties d'un même coup), et le cœur pur `grace_2tick/2`.
+  Un split en deux modules (ou deux GenServers) dupliquerait l'horloge + le garde Registry, ou
+  créerait un chassé-croisé cross-module autour de `grace_2tick` (l'un des deux devrait appeler
+  le helper de l'autre) pour ~60 lignes par duty. Le regroupement interne est net : sections
+  « Duty 1 » / « Duty 2 » / cœur partagé ci-dessous.
+
   > La mémoire d'échec de wake (re-roll/escalade) ne vit PAS ici : un compteur de session serait
   > éphémère. Elle est ancrée dans le PROJET via `Fleet.Pilot.IncidentRegistry` (registre `work/ops`,
   > cross-session). PodWarden reste le gardien du SUBSTRAT (reap des orphelins).
@@ -109,6 +119,10 @@ defmodule Fleet.Spawner.PodWarden do
 
   def handle_info(_other, state), do: {:noreply, state}
 
+  # ============================================================
+  # Duty 1 — sockets tmux orphelines (décision pure + reap)
+  # ============================================================
+
   @doc """
   Décision PURE de réconciliation des SOCKS. `to_reap` = orphelins (socks − registry) vus AU TICK
   PRÉCÉDENT aussi (`prev_suspects`) → grace 2-tick. `new_suspects` = orphelins du tick courant pas
@@ -119,6 +133,10 @@ defmodule Fleet.Spawner.PodWarden do
     orphans_now = MapSet.difference(socks, live)
     grace_2tick(orphans_now, prev_suspects)
   end
+
+  # ============================================================
+  # Duty 2 — GC des pod_dirs tombstones (décision pure + sweep)
+  # ============================================================
 
   @doc """
   Décision PURE de GC des pod_dirs. `tombstones` = états scannés sur disque, chacun
@@ -137,17 +155,6 @@ defmodule Fleet.Spawner.PodWarden do
     {to_gc, new_suspects}
   end
 
-  # Cœur PUR de la grace 2-tick, PARTAGÉ par les deux duties (socks + pod_dirs) : parmi les
-  # `candidates` (MapSet d'ids réclamables de CE tick), on n'agit QUE sur ceux DÉJÀ suspects au tick
-  # précédent (`prev_suspects`) ; les autres deviennent les suspects du prochain tick. Un candidat qui
-  # disparaît entre deux ticks (re-spawn, Pod revenu vivant) sort donc naturellement de la liste sans
-  # jamais être touché — c'est toute la valeur de la grace. Rend `{to_act, new_suspects}`.
-  defp grace_2tick(candidates, prev_suspects) do
-    to_act = MapSet.intersection(candidates, prev_suspects)
-    new_suspects = MapSet.difference(candidates, to_act)
-    {to_act, new_suspects}
-  end
-
   # Terminale ET orpheline : les deux conditions du GC. Non-terminale (en vol) OU vivante ⇒ épargnée.
   defp gc_candidate?(%{phase: phase, pod_id: pod_id}, live) do
     phase in @terminal_phases and not MapSet.member?(live, pod_id)
@@ -164,6 +171,21 @@ defmodule Fleet.Spawner.PodWarden do
     {to_gc, new_suspects} = reconcile_pod_dir_gc(scan_tombstones(), live, prev_suspects)
     Enum.each(to_gc, &gc_one/1)
     new_suspects
+  end
+
+  # ============================================================
+  # Cœur partagé des deux duties
+  # ============================================================
+
+  # Cœur PUR de la grace 2-tick, PARTAGÉ par les deux duties (socks + pod_dirs) : parmi les
+  # `candidates` (MapSet d'ids réclamables de CE tick), on n'agit QUE sur ceux DÉJÀ suspects au tick
+  # précédent (`prev_suspects`) ; les autres deviennent les suspects du prochain tick. Un candidat qui
+  # disparaît entre deux ticks (re-spawn, Pod revenu vivant) sort donc naturellement de la liste sans
+  # jamais être touché — c'est toute la valeur de la grace. Rend `{to_act, new_suspects}`.
+  defp grace_2tick(candidates, prev_suspects) do
+    to_act = MapSet.intersection(candidates, prev_suspects)
+    new_suspects = MapSet.difference(candidates, to_act)
+    {to_act, new_suspects}
   end
 
   # ============================================================

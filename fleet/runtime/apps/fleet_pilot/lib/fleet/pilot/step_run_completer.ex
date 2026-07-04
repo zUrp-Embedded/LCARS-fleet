@@ -37,6 +37,17 @@ defmodule Fleet.Pilot.StepRunCompleter do
   `Fleet.Pilot.ForgeClient`) — stubés en test. `:deliverable_opts` quand le step_run
   produit un livrable git ; absent/`nil` = pas de livrable git (ex. verdict de
   juge en mode payload — le `step_run_sha` est alors fourni explicitement).
+
+  ## Sous-modules
+
+    * `Texts` — wording PAR DÉFAUT (pr_body/review_body/comment signé), générateurs purs ;
+      les overrides de l'appelant priment.
+    * `Emissions` — émissions ANNEXES best-effort de la livraison producteur (voix eng,
+      slot-freeze `deliverable.published`) ; hors séquence par contrat.
+
+  Le routage par intent (`route/3` ×5) reste ICI : il rappelle les primitives publiques
+  (`promote`) et partage `unlock`/`post_route_if_present` (autorités uniques) avec la
+  séquence maison — l'extraire créerait un seam bidirectionnel (mauvaise frontière).
   """
 
   require Logger
@@ -45,6 +56,14 @@ defmodule Fleet.Pilot.StepRunCompleter do
   alias Fleet.Pilot.ForgeProtocol
   alias Fleet.Pilot.Labels
   alias Fleet.Pilot.Roles
+
+  # Émissions ANNEXES de la livraison producteur (voix eng + slot-freeze) — best-effort par
+  # contrat (un échec ne casse jamais la complétion), d'où leur extraction hors séquence.
+  alias Fleet.Pilot.StepRunCompleter.Emissions
+
+  # Autorité du WORDING par défaut (pr_body/review_body/comment signé) — générateurs purs ;
+  # les overrides de l'appelant (`:pr_body`/`:review_body`/`:comment_body`) priment toujours.
+  alias Fleet.Pilot.StepRunCompleter.Texts
 
   # Vocabulaire protocole = source unique Fleet.Pilot.Labels.
   @in_flight_label Labels.in_flight()
@@ -201,7 +220,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     base = Map.get(step_run, :base_branch, "main")
     head = Map.fetch!(Map.fetch!(step_run, :deliverable_opts), :target_branch)
     title = Map.get(step_run, :title, "Livrable ##{n} — brique livrée par #{role} (engineer)")
-    body = Map.get(step_run, :pr_body, default_pr_body(n, role))
+    body = Map.get(step_run, :pr_body, Texts.pr_body(n, role))
 
     # La PR est ouverte AU NOM DE L'ENG (token de rôle, `as_role`), pas du compte système :
     # l'auteur de la PR sur la forge = Engineer (l'eng a fait le boulot). Token absent → fallback
@@ -221,15 +240,6 @@ defmodule Fleet.Pilot.StepRunCompleter do
       Logger.info("StepRunCompleter: ##{n} #{role} → PR ##{pr} (head=#{head}, sha=#{sha})")
       {:ok, %{commit_sha: sha, pr_number: pr}}
     end
-  end
-
-  # Corps de PR par défaut — descriptif (traça honnête : QUI a fait QUOI) + `Closes #N` (auto-close
-  # natif au merge → close APRÈS merge, jamais avant).
-  defp default_pr_body(n, role) do
-    "Livrable de la brique ##{n}, produit par **#{role}** (engineer). Le système a poussé le commit " <>
-      "(l'eng code dans son workspace, le système publie — barrière forge-aveugle, le pod n'a pas de " <>
-      "token forge). Reviews demandées aux juges (qualifier + reviewer) ; merge à l'approbation.\n\n" <>
-      "Closes ##{n}"
   end
 
   defp open_pr_step(forge, repo, head, base, title, body, forge_opts) do
@@ -255,7 +265,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
     repo = Map.fetch!(step_run, :repo)
     pr = Map.fetch!(step_run, :pr_number)
     event = Map.fetch!(step_run, :review_event)
-    body = Map.get(step_run, :review_body, default_review_body(step_run, event))
+
+    body =
+      Map.get(step_run, :review_body, Texts.review_body(Map.get(step_run, :role, "juge"), event))
 
     # La review native est postée AU NOM DU JUGE (token de rôle, `as_role`) : sur la forge,
     # l'auteur de la review = qualifier/reviewer (avatar/traça honnête), pas le compte système. Token
@@ -273,24 +285,6 @@ defmodule Fleet.Pilot.StepRunCompleter do
       :ok -> {:ok, :reviewed}
       {:ok, _} -> {:ok, :reviewed}
       {:error, reason} -> {:error, {:review, reason}}
-    end
-  end
-
-  # Corps de review par défaut — descriptif (rôle juge + verdict + ce qui est jugé,
-  # lisible directement sur la PR).
-  defp default_review_body(step_run, event) do
-    role = Map.get(step_run, :role, "juge")
-
-    case event do
-      :approve ->
-        "Verdict du juge **#{role}** : **APPROUVÉ** — la brique satisfait son critère de revue."
-
-      :request_changes ->
-        "Verdict du juge **#{role}** : **CHANGEMENTS DEMANDÉS** — la brique ne satisfait pas " <>
-          "son critère ; le producteur (engineer) doit corriger et re-pousser sur la même PR."
-
-      _ ->
-        "Commentaire du juge **#{role}** : verdict non concluant (en attente)."
     end
   end
 
@@ -377,90 +371,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp complete_producer(step_run, opts) do
     with {:ok, %{pr_number: pr}} <- open_deliverable_pr(step_run, opts) do
-      _ = maybe_post_eng_summary(step_run, pr, opts)
-      _ = emit_deliverable_published(step_run, pr)
+      # Émissions ANNEXES best-effort (voix eng PR+issue, slot-freeze deliverable.published) —
+      # discard par contrat : la séquence ne dépend d'aucun retour (cf. Emissions).
+      _ = Emissions.post_eng_summary(step_run, pr, opts)
+      _ = Emissions.deliverable_published(step_run, pr)
       route(step_run, pr, opts)
-    end
-  end
-
-  # SLOT-FREEZE : signale que le livrable du producteur est CONFIRME sur la forge (commit pousse + PR
-  # ouverte). Emis APRES open_deliverable_pr (donc le push a deja LU le workspace) → un pod pipe resident
-  # peut alors reset son workspace pour le issue suivant SANS courser le push. Porte le `pod_id` (le pod
-  # producteur, depuis le payload pod.completed). Source :workflow (la publication est une op du moteur
-  # workflow ; atome aligne sur le rename fleet_pipeline→fleet_workflow — l'atome nu :pipeline avait
-  # survecu au sed du rename, seul emetteur, zero matcher par source).
-  # Best-effort : un echec d'emission ne casse PAS la completion (le livrable est deja publie) — le
-  # backstop cote pod (deadline :publishing) couvre un rate. No-op si pas de pod_id (legacy/test).
-  defp emit_deliverable_published(step_run, pr) do
-    case Map.get(step_run, :pod_id) do
-      pod_id when is_binary(pod_id) ->
-        result =
-          Fleet.EventRouter.Bus.emit(:workflow, :"deliverable.published",
-            pod_id: pod_id,
-            payload: %{
-              "repo" => Map.fetch!(step_run, :repo),
-              "issue" => Map.fetch!(step_run, :issue_number),
-              "pr" => pr
-            }
-          )
-
-        case result do
-          :ok ->
-            :ok
-
-          other ->
-            Logger.warning(
-              "StepRunCompleter: deliverable.published non diffuse (#{inspect(other)})"
-            )
-        end
-
-      _ ->
-        :noop
-    end
-  rescue
-    e -> Logger.warning("StepRunCompleter: deliverable.published a leve (#{inspect(e)})")
-  end
-
-  # VOIX DE L'ENG sur la PR (info SORTANTE, descriptive et traçable) : poste le
-  # `summary` du producteur (ce qu'il a fait à la livraison / sa réponse à la review au rework) en
-  # commentaire PR, AU NOM DE L'ENG (`as_role` — traça honnête ; le pod reste forge-aveugle, c'est
-  # le SYSTÈME qui poste). Best-effort : un échec de post ne casse PAS la complétion (le livrable = le
-  # commit, déjà poussé). Absent/vide → rien (pas de commentaire vide). Couvre livraison ET rework (les
-  # deux passent ici via open_deliverable_pr — PR neuve ou existante).
-  defp maybe_post_eng_summary(step_run, pr, opts) do
-    case Map.get(step_run, :eng_summary) do
-      summary when is_binary(summary) and summary != "" ->
-        forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
-        forge_opts = Keyword.get(opts, :forge_opts, [])
-        repo = Map.fetch!(step_run, :repo)
-        n = Map.fetch!(step_run, :issue_number)
-        role = Map.get(step_run, :role, "engineer")
-        role_opts = ForgeClient.as_role(forge_opts, role)
-
-        # La voix de l'eng sur DEUX canaux à 2 buts distincts — la PR (revue du
-        # diff, contexte code) ET le ISSUE (réponse au brief, « voici ce que j'ai fait », contexte
-        # issue) ; servir la PR seule laisserait un trou côté issue. Best-effort, `as_role` (le pod reste
-        # forge-aveugle, le SYSTÈME poste en son nom — même geste que le commentaire gatekeeper sur le issue).
-        _ =
-          forge.post_comment(
-            repo,
-            pr,
-            "## 🔧 Note de l'#{role} (livrable)\n\n#{summary}",
-            role_opts
-          )
-
-        _ =
-          forge.post_comment(
-            repo,
-            n,
-            "## 🔧 Note de l'#{role} sur le issue\n\n#{summary}",
-            role_opts
-          )
-
-        :ok
-
-      _ ->
-        :noop
     end
   end
 
@@ -740,7 +655,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     signature = ForgeProtocol.step_run_marker(role, sha)
 
     body =
-      Map.get(step_run, :comment_body, default_comment(role, sha)) <>
+      Map.get(step_run, :comment_body, Texts.step_run_comment(role, sha)) <>
         ForgeProtocol.result_block(Map.get(step_run, :outputs)) <> "\n\n" <> signature
 
     # Le comment signé du step_run est AU NOM DU RÔLE qui finit (`as_role` : verdict du consultant /
@@ -788,9 +703,5 @@ defmodule Fleet.Pilot.StepRunCompleter do
             err
         end
     end
-  end
-
-  defp default_comment(role, sha) do
-    "Livrable de **#{role}** poussé par le système (fin-de-step-run). Source: `#{sha}`."
   end
 end

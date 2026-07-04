@@ -48,6 +48,10 @@ defmodule Fleet.Pilot.StepDispatcher do
   # seule copie chacun, jamais un fork. Le cœur DÉCIDE (route/rôle/verdict), Spawn EXÉCUTE.
   alias Fleet.Pilot.StepDispatcher.Spawn
 
+  # Builders d'opts / naming du spawn (rc_name / feature_slug / maybe_put_route / resolve_repo_id) —
+  # partagés avec le flux review (RoleDispatch), une seule copie.
+  alias Fleet.Pilot.StepDispatcher.Spawn.Naming
+
   # Vocabulaire protocole = source unique Fleet.Pilot.Labels (constantes compile-time).
   @in_flight_label Fleet.Pilot.Labels.in_flight()
   @awaits_arch_label Fleet.Pilot.Labels.awaits_arch()
@@ -153,7 +157,7 @@ defmodule Fleet.Pilot.StepDispatcher do
              # une issue qu'on ne traite pas ; le poller re-dispatch au tick suivant).
              scope = Fleet.CapProfile.slot_scope(profile),
              pod_id = Spawn.pod_id_for_scope(scope, repo, number, role),
-             slug = Spawn.feature_slug(issue),
+             slug = Naming.feature_slug(issue),
              :ok <-
                Spawn.serialize_project_scope(
                  scope,
@@ -188,15 +192,15 @@ defmodule Fleet.Pilot.StepDispatcher do
             [
               brief: brief,
               pod_id: pod_id,
-              rc_name: Spawn.rc_name(repo, role),
+              rc_name: Naming.rc_name(repo, role),
               # Nom de branche LOCALE parlant (titre du issue sanitizé), pas
               # le pod_id. Sert à phase.ex → `feature/<slug>`. Calculé une fois (réutilisé par le gate
               # pour la reprovision in-place d'un pipe : même branche au reset qu'au spawn).
               slug: slug
             ]
             |> Opts.maybe_put(:project, project)
-            |> Spawn.maybe_put_route(route)
-            |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
+            |> Naming.maybe_put_route(route)
+            |> Opts.maybe_put(:repo_id, Naming.resolve_repo_id(forge, repo, forge_opts))
 
           # Spawn LEAF partagé avec dispatch_by_verdicts (verrou → pod → enqueue → wake +
           # compensation). Producteur : verrou + issue_id keyés sur l'ISSUE (number). On construit le

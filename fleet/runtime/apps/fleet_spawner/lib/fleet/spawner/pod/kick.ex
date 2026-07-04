@@ -54,18 +54,32 @@ defmodule Fleet.Spawner.Pod.Kick do
   # joignable (`PodTmux.alive?`) on envoie yop ; on s'arrête dès que le brief est pull
   # (task ≠ pending) ou au cap. Non-bloquant (generic timeout `:kick`), le pod passe à
   # :monitoring entretemps. Intervalles configurables (test : valeurs ~ms).
+
+  @doc "Délai (ms) du 1er tick de kick — on laisse le flag porteur livrer d'abord. Config `:kick_first_delay_ms`, défaut 2 000."
+  @spec kick_first_delay_ms() :: non_neg_integer()
   def kick_first_delay_ms, do: Application.get_env(:fleet_spawner, :kick_first_delay_ms, 2_000)
+
+  @doc "Cadence (ms) de retry de la branche WAKE (brief en attente). Config `:kick_retry_ms`, défaut 2 500."
+  @spec kick_retry_ms() :: non_neg_integer()
   def kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
+
+  @doc "Cap de tentatives de la branche WAKE — au-delà, escalade `wake.failed`. Config `:kick_max_attempts`, défaut 12."
+  @spec kick_max_attempts() :: non_neg_integer()
   def kick_max_attempts, do: Application.get_env(:fleet_spawner, :kick_max_attempts, 12)
 
-  # Bootstrap (pod sans brief) : kicks BORNÉS + ESPACÉS jusqu'à ce que le REPL claude réponde (appel
-  # get_work_item = ack). La fenêtre doit couvrir le COLD-START réel de claude en bwrap (binaire ~238 MB,
-  # caches froids, contention multi-fleet) : un défaut trop court (≈32s, calé sur un boot ~15s)
-  # verrait tous les kicks tomber avant REPL prêt → pod jamais onboardé. D'où 30×8s ≈ 4 min : couvre
-  # le cold-start, et le deadline résultat se RÉ-ARME sur activité (donc dès le brief reçu, plus de
-  # timeout). Une fois acké, le réveil-par-flag prend le relais.
+  @doc """
+  Cap de tentatives de la branche BOOTSTRAP (pod sans brief) : kicks BORNÉS + ESPACÉS jusqu'à ce
+  que le REPL claude réponde (appel get_work_item = ack). La fenêtre doit couvrir le COLD-START
+  réel de claude en bwrap (binaire ~238 MB, caches froids, contention multi-fleet) : un défaut
+  trop court (≈32s, calé sur un boot ~15s) verrait tous les kicks tomber avant REPL prêt → pod
+  jamais onboardé. D'où 30×8s ≈ 4 min ; le deadline résultat se RÉ-ARME sur activité. Une fois
+  acké, le réveil-par-flag prend le relais. Config `:kick_bootstrap_max`, défaut 30.
+  """
+  @spec kick_bootstrap_max() :: non_neg_integer()
   def kick_bootstrap_max, do: Application.get_env(:fleet_spawner, :kick_bootstrap_max, 30)
 
+  @doc "Cadence (ms) de retry de la branche BOOTSTRAP (cf. `kick_bootstrap_max/0`). Config `:kick_bootstrap_retry_ms`, défaut 8 000."
+  @spec kick_bootstrap_retry_ms() :: non_neg_integer()
   def kick_bootstrap_retry_ms,
     do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
 
@@ -73,14 +87,22 @@ defmodule Fleet.Spawner.Pod.Kick do
   # ACK (décision PURE, testable) = l'agent a tendu la main. C'est LE contrôle de la boucle :
   # pas d'ACK → on (re)trigger ; ACK → stop ; cap sans ACK → escalade. Wake → `pulled?` (brief_pulled? :
   # le pull PROUVE get_work_item) ; bootstrap (permanent sans brief) → `polled` (last_poll = up + SP lu).
+  @spec acked?(boolean(), boolean(), boolean()) :: boolean()
   def acked?(pulled?, bootstrap?, polled), do: pulled? or (bootstrap? and polled)
 
-  # Mot-clé du kick selon `polled` (= l'agent a déjà appelé get_work_item) :
-  #   - pas encore pollé → `"yop"` : bootstrap-arm, IRRÉDUCTIBLE (seul moyen de démarrer/armer l'agent) ;
-  #   - déjà pollé (pod running) → `"wake"` : FALLBACK (le porteur/flag aurait dû livrer), GATÉ par
-  #     `:wake_send_keys` (off ⇒ flag-only : on valide le Monitor en isolation, pas de fallback).
-  # Le `"yop"` bootstrap n'est JAMAIS gaté (sinon un pod neuf ne démarrerait pas). Mots-clés discriminés
-  # ⇒ on sait, en lisant le REPL/les logs, si c'est un kick (démarrage) ou un fallback (Monitor raté).
+  @doc """
+  Choisit le mot-clé du kick selon `polled` (= l'agent a déjà appelé get_work_item) puis l'envoie
+  au tmux du pod :
+
+    - pas encore pollé → `"yop"` : bootstrap-arm, IRRÉDUCTIBLE (seul moyen de démarrer/armer l'agent) ;
+    - déjà pollé (pod running) → `"wake"` : FALLBACK (le porteur/flag aurait dû livrer), GATÉ par
+      `:wake_send_keys` (off ⇒ flag-only : on valide le Monitor en isolation, pas de fallback).
+
+  Le `"yop"` bootstrap n'est JAMAIS gaté (sinon un pod neuf ne démarrerait pas). Mots-clés
+  discriminés ⇒ on sait, en lisant le REPL/les logs, si c'est un kick (démarrage) ou un fallback
+  (Monitor raté). Un échec send-keys est loggé, jamais propagé (le monitor timeout couvre).
+  """
+  @spec kick_send(map(), boolean()) :: :ok
   def kick_send(state, polled) do
     case kick_keyword(polled, Application.get_env(:fleet_spawner, :wake_send_keys, true)) do
       nil -> :ok
@@ -91,6 +113,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   @doc false
   # Décision PURE du mot-clé (testable). `polled` = l'agent a déjà appelé get_work_item ; `fallback_on?` = knob
   # `:wake_send_keys`. `nil` ⇒ pas de send-keys (flag-only). Le `"yop"` (bootstrap) n'est JAMAIS gaté.
+  @spec kick_keyword(boolean(), boolean()) :: String.t() | nil
   def kick_keyword(polled, fallback_on?) do
     cond do
       not polled -> "yop"

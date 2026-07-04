@@ -27,15 +27,21 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   ## Dépendances (frères / en-bas — pas de cycle vers `Pod`)
 
   - `Fleet.Spawner.Pod.LaunchSpec.effective_project/2` (projet EFFECTIF, source unique),
-  - `Fleet.Spawner.pod_workspace_path/1` (autorité unique du sous-dossier workspace),
+  - `Fleet.Spawner.Pod.Paths.pod_workspace_path/1` (autorité unique du sous-dossier workspace),
   - `Fleet.CapProfile.name/1` (source unique du rôle gravé au spawn).
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
+  alias Fleet.Spawner.Pod.Paths
 
-  # pod.completed porte le contexte workflow_map (workflow_map_id+step) SI le pod est spawné avec ces clés.
-  # Plus aucun appelant ne les pose aujourd'hui → en pratique le payload est nu (un consommateur qui
-  # reçoit un payload nu ignore le contexte workflow_map, no-op).
+  @doc """
+  Construit la map du payload `pod.completed` depuis le `data` du gen_statem (LU, jamais muté) +
+  le `result` reçu. Pod-projet (`repo_path` présent) → embarque `workspace`/`base_sha`/
+  `gate_base_sha`/`role` (+ `repository`/`remote` si `repo`) ; pod sans projet → payload nu
+  (base). Le contexte workflow_map (`workflow_map_id`+`step`) n'est porté que SI le pod est
+  spawné avec ces clés — plus aucun appelant ne les pose aujourd'hui, en pratique le payload est
+  nu (un consommateur qui reçoit un payload nu ignore le contexte workflow_map, no-op).
+  """
   @spec build(map(), map()) :: map()
   def build(data, result) do
     base = %{
@@ -55,8 +61,8 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
           %{"repo_path" => rp} = proj when is_binary(rp) and rp != "" ->
             base
             |> Map.merge(%{
-              # Autorité unique du sous-dossier workspace (Fleet.Spawner), pas un littéral recopié.
-              "workspace" => Fleet.Spawner.pod_workspace_path(data.pod_dir),
+              # Autorité unique du sous-dossier workspace (Pod.Paths), pas un littéral recopié.
+              "workspace" => Paths.pod_workspace_path(data.pod_dir),
               "base_sha" => proj["base_sha"],
               # Base de la GATE de livraison, DÉCONFLÉE de la clone-base (`base_sha`). Pour une
               # résolution par rebase, le livrable doit DESCENDRE de `main` (cible du rebase). Le

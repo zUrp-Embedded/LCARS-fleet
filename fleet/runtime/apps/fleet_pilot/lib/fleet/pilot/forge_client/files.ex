@@ -7,7 +7,10 @@ defmodule Fleet.Pilot.ForgeClient.Files do
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
-    only: [resolve_config: 1, http_get: 2, http_put: 3, encode_repo: 1, encode_path: 1]
+    only: [resolve_config: 1, http_get: 2, http_put: 3]
+
+  # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
+  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_path: 1]
 
   @doc """
   Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea

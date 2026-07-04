@@ -42,10 +42,11 @@ defmodule Fleet.Pilot.ForgeClient do
       http_patch: 3,
       http_delete: 2,
       paginate: 3,
-      forge_bot_login: 2,
-      encode_seg: 1,
-      encode_repo: 1
+      forge_bot_login: 2
     ]
+
+  # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
+  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_seg: 1, encode_repo: 1]
 
   # SEUL ré-export du vocab : `parse_feature_branch/1`. `fleet_mcp` (pod_tools) l'appelle via le seam
   # `forge` (résolu runtime, défaut ce module) pour ne PAS créer de dep compile-time vers fleet_pilot —

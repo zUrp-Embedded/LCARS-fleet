@@ -309,7 +309,7 @@ defmodule Fleet.CapProfile do
 
   @doc """
   Le cap-profile est-il un rôle CATALOGUÉ (porte un `role_index` entier) ? Prédicat SANS raise — c'est
-  le test de présence que `Fleet.Spawner.Pod.deterministic_session_id` interroge AVANT d'appeler
+  le test de présence que `Fleet.Spawner.Pod.SessionMint.mint/2` interroge AVANT d'appeler
   `role_index/1` : un rôle non catalogué (ad-hoc, hors-fleet) n'a pas d'identité déterministe à
   reconstruire → un session_id random y est légitime, pas une erreur.
   """
