@@ -1,7 +1,7 @@
 # Fleet.CapProfile
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-02
+**Dernière révision** : 2026-07-05
 **Statut** : implémenté run #3.1 chantier #1 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_cap_profile.md
 
@@ -54,7 +54,8 @@ distinct des invariants métier G24 de `Fleet.CapProfile.Invariants`) :
   (`:cap_profile` / `:modop`) ; retourne `:invalid_schema` / `:invalid_modop` / `:schema_unavailable`
 - `Fleet.CapProfile.Schema.validate_modop_keys/1` — refuse un fragment modop portant une clé
   réservée top-level (`kind`)
-- schemas cachés en `:persistent_term` (keyé par path résolu) ; `schema_dir` lit la clé env
+- schemas cachés en `:persistent_term` (keyé par path résolu — copie locale assumée du pattern
+  `Fleet.SchemaCache`, pas d'arête intra-R0 vers `fleet_event_router`) ; `schema_dir` lit la clé env
   `:fleet_cap_profile, :schema_dir` (surchargeable en test), défaut `priv/schema`
 
 Fichiers :

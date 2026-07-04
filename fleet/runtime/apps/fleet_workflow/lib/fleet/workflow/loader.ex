@@ -101,22 +101,13 @@ defmodule Fleet.Workflow.Loader do
       Application.app_dir(:fleet_workflow, "priv/canon/workflow_maps")
   end
 
-  # Schema résolu (read+decode+resolve) caché en `:persistent_term`, keyé par
-  # le path RÉSOLU (les overrides `:schema_path` des tests ont leur propre entrée →
-  # pas de pollution prod↔test). Lazy-init, sur le modèle de `Starfleet.Gatekeeper`.
+  # Schema résolu (read+decode+resolve) via l'autorité Ring 0 `Fleet.SchemaCache`
+  # (dédup B-R2 — le pipeline vivait copié ici), keyé par le path RÉSOLU (les
+  # overrides `:schema_path` des tests ont leur propre entrée → pas de pollution
+  # prod↔test). Lazy-init, fail-loud si le fichier schema est absent/malformé.
   defp resolved_schema(opts) do
     path = schema_path(opts)
-    key = {__MODULE__, :schema, path}
-
-    case :persistent_term.get(key, :miss) do
-      :miss ->
-        schema = path |> File.read!() |> Jason.decode!() |> ExJsonSchema.Schema.resolve()
-        :persistent_term.put(key, schema)
-        schema
-
-      schema ->
-        schema
-    end
+    Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, path}, path)
   end
 
   defp schema_path(opts) do

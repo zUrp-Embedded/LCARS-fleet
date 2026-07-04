@@ -1,7 +1,7 @@
 # fleet_coord (chantier 14)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-04 (R06 — retrait SoftGate/Hook/HookSpawner : gates LLM consolidées sur le gatekeeper côté pipeline ; coord = policies déclaratives pures)
+**Dernière révision** : 2026-07-05 (B-R2 dédup chargé-caché : schema coord-policies résolu UNE fois via `Fleet.SchemaCache` — avant : re-read+resolve à CHAQUE `validate_against_schema!` — et get-or-raise de la table via `SchemaCache.fetch!/2` ; 2026-07-04 : R06 — retrait SoftGate/Hook/HookSpawner : gates LLM consolidées sur le gatekeeper côté pipeline ; coord = policies déclaratives pures)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_coord.md`, `STATUS-CHANTIERS.md`
 
@@ -20,7 +20,7 @@ pipeline est **consolidé sur le gatekeeper** (juge unique), spawné côté
 | Module | Rôle |
 |---|---|
 | `Fleet.Coord` | delegator API publique (`handle_decision` / `handle_escalation`) |
-| `Fleet.Coord.Policies` | pure functions table mapping `{verdict, reason} → {action, escalation_path}` lookup `:persistent_term` cache boot-loaded `priv/config/coord-policies.yaml` + broadcast events `coord.action.*` / `coord.notify.dashboard` / `coord.escalate.human`. **`init_policies!/0` VALIDE le YAML parsé contre `priv/schema/coord-policies-v1.json` (ExJsonSchema) au boot** — un coord-policies map-mais-structurellement-invalide (mapping sans `action`, `escalation_path` non-array, clé hors pattern…) FAIL-LOUD comme un fichier absent/illisible (avant : seul « est une map » était vérifié, la validation schema ne tournait qu'en test). Structural-only : résolvabilité des handlers/cibles vérifiée au runtime, pas au schema |
+| `Fleet.Coord.Policies` | pure functions table mapping `{verdict, reason} → {action, escalation_path}` lookup `:persistent_term` cache boot-loaded `priv/config/coord-policies.yaml` + broadcast events `coord.action.*` / `coord.notify.dashboard` / `coord.escalate.human`. **`init_policies!/0` VALIDE le YAML parsé contre `priv/schema/coord-policies-v1.json` (ExJsonSchema) au boot** — un coord-policies map-mais-structurellement-invalide (mapping sans `action`, `escalation_path` non-array, clé hors pattern…) FAIL-LOUD comme un fichier absent/illisible (avant : seul « est une map » était vérifié, la validation schema ne tournait qu'en test). Structural-only : résolvabilité des handlers/cibles vérifiée au runtime, pas au schema. Schema `coord-policies-v1.json` résolu UNE fois via `Fleet.SchemaCache` (autorité Ring 0 — avant B-R2 : re-read à chaque appel), table policies lue via `SchemaCache.fetch!/2` |
 
 > **Retiré (R06)** : `Fleet.Coord.SoftGate` / `Fleet.Coord.Hook` /
 > `Fleet.Coord.HookSpawner` (+ `NotWiredYet`). Le soft gate et le terminal

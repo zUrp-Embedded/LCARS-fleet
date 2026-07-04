@@ -93,6 +93,12 @@ defmodule Fleet.CapProfile.Schema do
   # Schema priv IMMUABLE : read+decode+resolve une fois, caché en `:persistent_term`
   # keyé par le path RÉSOLU (les overrides test de `schema_dir/0` ont leur entrée). Lazy-init,
   # erreurs non-cachées.
+  # Copie locale ASSUMÉE du pattern `Fleet.SchemaCache` (fleet_event_router — l'autorité
+  # Ring 0 du chargé-caché, dédup B-R2) : fleet_cap_profile est Ring 0 SANS dep vers
+  # fleet_event_router, on n'ajoute pas une arête intra-R0 (allowed_graph.yaml) pour ces
+  # lignes. Diffère de `cached/2` sur un point VOULU : `{:error, :schema_unavailable}`
+  # n'est PAS caché (retentable). Si l'arête apparaît un jour pour une autre raison,
+  # migrer ce site (et `DisallowedTools`).
   defp load_schema_file(name) do
     path = Path.join(schema_dir(), name)
     key = {__MODULE__, :schema, path}

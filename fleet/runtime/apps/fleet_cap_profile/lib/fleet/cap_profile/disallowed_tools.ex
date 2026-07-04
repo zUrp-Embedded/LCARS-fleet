@@ -98,6 +98,11 @@ defmodule Fleet.CapProfile.DisallowedTools do
 
   # Baseline priv IMMUABLE : read+parse une fois, caché en `:persistent_term`
   # (lazy-init ; une erreur n'est pas cachée — le bang re-raise au prochain appel).
+  # Copie locale ASSUMÉE du squelette `Fleet.SchemaCache.cached/2` (fleet_event_router —
+  # l'autorité Ring 0 du chargé-caché, dédup B-R2) : fleet_cap_profile est Ring 0 SANS dep
+  # vers fleet_event_router, on n'ajoute pas une arête intra-R0 (allowed_graph.yaml) pour
+  # dix lignes. Si l'arête apparaît un jour pour une autre raison, migrer ce site
+  # (et `CapProfile.Schema`).
   defp load_baseline_git_ops_denied! do
     key = {__MODULE__, :baseline_git_ops_denied}
 

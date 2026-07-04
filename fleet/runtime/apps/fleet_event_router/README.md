@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-05 (B-R1 dédup « émission-Bus-protégée » : `Bus.safe_emit/3-4` = cœur unique de la politique best-effort, les rescue locaux de coord/starfleet/spawner migrent dessus ; registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-07-05 (B-R2 dédup « schema/config chargé-caché » : + `Fleet.SchemaCache`, autorité Ring 0 du pattern `:persistent_term` (`resolve_json_schema!` / `fetch!` / `cached`), consommé par workflow/starfleet/coord — les copies locales de cap_profile restent, pas d'arête intra-R0 ; B-R1 dédup « émission-Bus-protégée » : `Bus.safe_emit/3-4` = cœur unique de la politique best-effort, les rescue locaux de coord/starfleet/spawner migrent dessus ; registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -36,6 +36,14 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
   universel (comme `Fleet.Event`) : lisible par `fleet_workflow`/`fleet_api`
   (gate top-level) sans inversion de layering. Policy (quand quiescer) =
   `fleet_starfleet` (`Shutdown.AggregateDispatcher`). Pas de process (Iron Law)
+- `Fleet.SchemaCache` — autorité du pattern « artefact chargé une fois, caché en
+  `:persistent_term` » (dédup B-R2). `resolve_json_schema!(key, path)` :
+  read+decode+resolve ExJsonSchema, idempotent, fail-loud au boot ;
+  `fetch!(key, hint)` : get-or-raise message actionnable ; `cached(key, fun)` :
+  lazy sentinel générique. Vit ici car substrat universel (comme `Fleet.Event`) :
+  consommé par `fleet_workflow` (Loader), `fleet_starfleet` (Gatekeeper),
+  `fleet_coord` (Policies) sans nouvelle arête. Écrit UNE fois au boot, lu à
+  chaque validation — jamais de `put` par-tick (GC storm). Pas de process (Iron Law)
 
 ## API principale
 

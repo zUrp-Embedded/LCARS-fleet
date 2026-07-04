@@ -110,35 +110,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # mort sur la struct canon (il ne matche plus rien) et le drift est silencieux.
   # Ce check mesure le CODE réel des cibles ci-dessous et flague toute lecture
   # `"event_type" =>` qui subsiste.
+  # 9e instance de la famille B (residue_check), migrée à la factorisation D5. Le `confirm` = le
+  # pattern lui-même post-strip : une mention `"event_type" =>` en COMMENTAIRE (doc du retrait du
+  # tuple legacy) ne compte pas comme violation (sinon le gate flague sa propre documentation).
+  # NB `executor.ex`/`task_monitor.ex` ne sont plus des cibles (rails/apps supprimés).
   defp check_event_consumers_canon(root) do
-    # NB `executor.ex` n'est plus une cible : l'Executor RAM (un consommateur d'events) n'existe plus.
-    # NB `task_monitor.ex` retiré : l'app fleet_task_monitor a été supprimée (D5, 2026-07-04).
-    targets = [
-      "apps/fleet_api/lib/fleet/api/ws.ex"
-    ]
-
-    pattern = ~r/"event_type"\s*=>/
-
-    # Le check mesure le CODE réel : une mention `"event_type" =>` en
-    # commentaire (ex. « le tuple legacy {atom, %{"event_type" => ...}} est
-    # RETIRÉ ») ne doit PAS compter comme une violation (sinon le gate flague
-    # sa propre documentation — clôture sur proxy). On retire donc le commentaire
-    # de fin de ligne avant de re-tester.
-    evidence =
-      Enum.flat_map(targets, fn rel ->
-        Path.join(root, rel)
-        |> grep_lines(pattern)
-        |> Enum.filter(fn {_ln, line} -> Regex.match?(pattern, strip_comment(line)) end)
-        |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
-      end)
-
-    %{
+    residue_check(root, %{
       id: "event.consumers.canon",
       remediation: "R03/R10 (R2)",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
+      files: ["apps/fleet_api/lib/fleet/api/ws.ex"],
+      pattern: ~r/"event_type"\s*=>/,
+      confirm: ~r/"event_type"\s*=>/,
       note: "consommateurs encore sur le tuple legacy \"event_type\""
-    }
+    })
   end
 
   # Le Loader doit normaliser v1/v2.5 vers une forme interne unique (déballer
@@ -261,53 +245,41 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # canon), pas `spec.lifetime_scope` (forme pré-v2.5) — sinon le CLAUDE.md du pod
   # affiche toujours "unknown". Le jumeau `check_lifetime_scope/1` (cap_profile.ex)
   # lit déjà le bon chemin.
+  # Le pattern couvre get_in (forme liste `spec, ["lifetime_scope"]`) ET Map.get
+  # (forme string `spec, "lifetime_scope"`) — futur-proof contre une régression qui
+  # réintroduirait le mauvais chemin sous une autre forme.
   defp check_capprofile_lifetime_scope_path(root) do
-    sp = "apps/fleet_sp_builder/lib/fleet/sp_builder.ex"
-
-    # Couvre get_in (forme liste `spec, ["lifetime_scope"]`) ET Map.get (forme
-    # string `spec, "lifetime_scope"`) — futur-proof contre une régression qui
-    # réintroduirait le mauvais chemin sous une autre forme.
-    wrong = ~r/cap_profile\.spec,\s*(\["lifetime_scope"\]|"lifetime_scope")/
-
-    evidence =
-      Path.join(root, sp)
-      |> grep_lines(wrong)
-      |> Enum.filter(fn {_ln, line} -> Regex.match?(wrong, strip_comment(line)) end)
-      |> Enum.map(fn {ln, _} -> "#{sp}:#{ln}" end)
-
-    %{
+    residue_check(root, %{
       id: "capprofile.lifetime_scope_path",
       remediation: "R12",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
+      files: ["apps/fleet_sp_builder/lib/fleet/sp_builder.ex"],
+      pattern: ~r/cap_profile\.spec,\s*(\["lifetime_scope"\]|"lifetime_scope")/,
       note:
         "compose_claude_md lit spec.lifetime_scope (pré-v2.5) au lieu de spec.invocation.lifetime_scope"
-    }
+    })
   end
 
   # `check_modop_incompatible/1` doit lire `spec.modop_set.incompatible` (schéma
   # v2.5) + comparer aux modops actifs (`default` ++ `optional`), pas
   # `spec.modop_incompatible` (clé inexistante) ni `spec.modop_set` traité comme
-  # une liste → sinon l'invariant ne tire jamais.
+  # une liste → sinon l'invariant ne tire jamais. Confirmation post-strip plus
+  # lâche que le grep : toute mention CODE de `modop_incompatible` sur une ligne
+  # `Map.get(spec, …)` compte, même reformatée.
   defp check_capprofile_modop_incompatible_path(root) do
-    cp = "apps/fleet_cap_profile/lib/fleet/cap_profile.ex"
-
-    evidence =
-      Path.join(root, cp)
-      |> grep_lines(~r/Map\.get\(spec,\s*"modop_incompatible"/)
-      |> Enum.filter(fn {_ln, line} ->
-        Regex.match?(~r/modop_incompatible/, strip_comment(line))
-      end)
-      |> Enum.map(fn {ln, _} -> "#{cp}:#{ln}" end)
-
-    %{
+    residue_check(root, %{
       id: "capprofile.modop_incompatible_path",
       remediation: "R13",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
+      # La fonction gardée (check_modop_incompatible) a été EXTRAITE vers invariants.ex — le rail
+      # surveille les DEUX (le mauvais chemin peut revenir dans l'un ou l'autre).
+      files: [
+        "apps/fleet_cap_profile/lib/fleet/cap_profile.ex",
+        "apps/fleet_cap_profile/lib/fleet/cap_profile/invariants.ex"
+      ],
+      pattern: ~r/Map\.get\(spec,\s*"modop_incompatible"/,
+      confirm: ~r/modop_incompatible/,
       note:
         "check_modop_incompatible lit spec.modop_incompatible (inexistant) au lieu de spec.modop_set.incompatible"
-    }
+    })
   end
 
   # `TmuxBackend` (claude --remote-control HORS bwrap, dont le control-path est cassé) n'existe pas.
@@ -316,29 +288,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `bin/host_launch.sh` (le mécanisme tmux-holder PROUVÉ de bwrap_launch, sélectionné par `do_launch`
   # via `launcher_path`), pas par le remote-control nu de l'ex-TmuxBackend. Le rail interdit la
   # résurrection du MÉCANISME cassé, pas la voie host.
+  # NB le versant runtime.exs matche le source BRUT (pas de strip_comment) :
+  # même une mention en commentaire de TmuxBackend dans la config runtime est
+  # un signal de résurrection à flaguer.
   defp check_launch_backend_containment(root) do
     rt = "config/runtime.exs"
     tb = "apps/fleet_spawner/lib/fleet/spawner/launch_backend/tmux_backend.ex"
-    rt_src = File.read!(Path.join(root, rt))
 
-    evidence =
+    evidence_check(
+      %{
+        id: "launch.backend_containment_coherent",
+        remediation: "R20/F103",
+        note:
+          "TmuxBackend (remote-control nu, control-path cassé) supprimé ; ne doit pas réapparaître. La voie host containment:none = host_launch.sh (tmux-holder prouvé), pas TmuxBackend (LAUNCH-Q)"
+      },
       [
-        {File.exists?(Path.join(root, tb)),
+        {not File.exists?(Path.join(root, tb)),
          "#{tb} : TmuxBackend supprimé (F103) — le module ne doit pas réapparaître"},
-        {Regex.match?(~r/LaunchBackend\.TmuxBackend/, rt_src),
+        {not Regex.match?(~r/LaunchBackend\.TmuxBackend/, File.read!(Path.join(root, rt))),
          "#{rt} : runtime ne doit plus référencer TmuxBackend (backend hors-bwrap supprimé)"}
       ]
-      |> Enum.filter(&elem(&1, 0))
-      |> Enum.map(&elem(&1, 1))
-
-    %{
-      id: "launch.backend_containment_coherent",
-      remediation: "R20/F103",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
-      note:
-        "TmuxBackend (remote-control nu, control-path cassé) supprimé ; ne doit pas réapparaître. La voie host containment:none = host_launch.sh (tmux-holder prouvé), pas TmuxBackend (LAUNCH-Q)"
-    }
+    )
   end
 
   # Un backend RÉEL sans `mcp_server_spec` doit être refusé (fail-loud) — un pod réel
@@ -363,64 +333,39 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     pod = "apps/fleet_spawner/lib/fleet/spawner/pod.ex"
     mcp = "apps/fleet_spawner/lib/fleet/spawner/pod/mcp_provision.ex"
 
-    wired? =
-      Path.join(root, pod)
-      |> grep_lines(~r/McpProvision\.maybe_provision_mcp_config\(/)
-      |> Enum.any?(fn {_ln, line} ->
-        Regex.match?(~r/McpProvision\.maybe_provision_mcp_config\(/, strip_comment(line))
-      end)
-
-    guard? =
-      Path.join(root, mcp)
-      |> grep_lines(~r/:mcp_server_spec_required/)
-      |> Enum.any?(fn {_ln, line} ->
-        stripped = strip_comment(line)
-
-        Regex.match?(~r/:mcp_server_spec_required/, stripped) and
-          Regex.match?(~r/^\s*\{:error,/, stripped)
-      end)
-
-    evidence =
+    evidence_check(
+      %{
+        id: "mcp.required_for_real_backend",
+        remediation: "R14",
+        note:
+          "pod.ex câble McpProvision.maybe_provision_mcp_config (niveau 1) ET mcp_provision.ex refuse fail-loud :mcp_server_spec_required un backend réel sans spec (niveau 2) — les 2 requis"
+      },
       [
-        {not wired?,
+        {code_match?(root, pod, ~r/McpProvision\.maybe_provision_mcp_config\(/),
          "#{pod} : McpProvision.maybe_provision_mcp_config non appelé (provisioning MCP débranché du chemin de spawn)"},
-        {not guard?, "#{mcp} : pas de fail-loud :mcp_server_spec_required (garde réelle absente)"}
+        # Confirmation CONJONCTIVE (les 2 regex sur la ligne strippée) : le token
+        # doit vivre sur une ligne qui EST le tuple d'erreur — cf. anti-vert-creux
+        # durci ci-dessus (le moduledoc porte le même token en prose).
+        {code_match?(root, mcp, ~r/:mcp_server_spec_required/, [
+           ~r/:mcp_server_spec_required/,
+           ~r/^\s*\{:error,/
+         ]), "#{mcp} : pas de fail-loud :mcp_server_spec_required (garde réelle absente)"}
       ]
-      |> Enum.filter(&elem(&1, 0))
-      |> Enum.map(&elem(&1, 1))
-
-    %{
-      id: "mcp.required_for_real_backend",
-      remediation: "R14",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
-      note:
-        "pod.ex câble McpProvision.maybe_provision_mcp_config (niveau 1) ET mcp_provision.ex refuse fail-loud :mcp_server_spec_required un backend réel sans spec (niveau 2) — les 2 requis"
-    }
+    )
   end
 
   # `Fleet.Spawner.spawn_pod/3` doit refuser un pod `one-shot` sans brief (sinon
   # le pod part sans travail → timeout). Marqueur du guard : l'erreur
   # `:brief_required`. Rouge si absente (retour au brief générique muet).
   defp check_spawn_has_brief(root) do
-    sp = "apps/fleet_spawner/lib/fleet/spawner.ex"
-
-    present? =
-      Path.join(root, sp)
-      |> grep_lines(~r/:brief_required/)
-      |> Enum.any?(fn {_ln, line} -> Regex.match?(~r/:brief_required/, strip_comment(line)) end)
-
-    %{
+    presence_check(root, %{
       id: "spawn.has_brief",
       remediation: "R18",
-      status: if(present?, do: :pass, else: :fail),
-      evidence:
-        if(present?,
-          do: [],
-          else: ["#{sp} : pas de guard :brief_required au boundary spawn_pod"]
-        ),
+      file: "apps/fleet_spawner/lib/fleet/spawner.ex",
+      pattern: ~r/:brief_required/,
+      missing: "pas de guard :brief_required au boundary spawn_pod",
       note: "spawn_pod doit refuser un pod one-shot sans brief (hors allow_no_brief)"
-    }
+    })
   end
 
   # `Fleet.SPBuilder.filter_skills/2` doit échouer (fail-loud) si un skill PLAIN
@@ -428,21 +373,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # réclamer un skill inexistant. Marqueur : `:skills_missing`.
   # Rouge si absent.
   defp check_skills_declared_present(root) do
-    sp = "apps/fleet_sp_builder/lib/fleet/sp_builder.ex"
-
-    present? =
-      Path.join(root, sp)
-      |> grep_lines(~r/:skills_missing/)
-      |> Enum.any?(fn {_ln, line} -> Regex.match?(~r/:skills_missing/, strip_comment(line)) end)
-
-    %{
+    presence_check(root, %{
       id: "skills.declared_present",
       remediation: "R11",
-      status: if(present?, do: :pass, else: :fail),
-      evidence:
-        if(present?, do: [], else: ["#{sp} : filter_skills filtre les absents en silence"]),
+      file: "apps/fleet_sp_builder/lib/fleet/sp_builder.ex",
+      pattern: ~r/:skills_missing/,
+      missing: "filter_skills filtre les absents en silence",
       note: "filter_skills doit fail-loud {:skills_missing} sur un skill plain absent"
-    }
+    })
   end
 
   # La clé events.yaml EST le `type` de l'event (le `source` est un champ séparé,
@@ -590,37 +528,32 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     gate = "apps/fleet_credentials/lib/fleet/credentials/gate.ex"
 
     # Chaque vérif = {fichier_relatif, regex, label}. Le label nomme le fichier attendu.
-    checks = [
-      {pod, ~r/CapProfile\.validate\(/,
-       "CapProfile.validate (containment G24/F-CONT-RISK, do_allocate)"},
-      {pod, ~r/LaunchEnv\.build\(/,
-       "Pod.LaunchEnv.build câblé au spawn (do_launch enchaîne env + portes credentials)"},
-      {launch_env, ~r/Fleet\.Credentials\.Gate\.validate\(/,
-       "Fleet.Credentials.Gate.validate (porte scope+plan, dans LaunchEnv.build)"},
-      {gate, ~r/ScopeValidator\.validate\(/,
-       "ScopeValidator.validate (délégation scope-coverage)"},
-      {gate, ~r/PlanValidator\.validate\(/, "PlanValidator.validate (délégation plan payant)"}
-    ]
+    items =
+      for {rel, re, label} <- [
+            {pod, ~r/CapProfile\.validate\(/,
+             "CapProfile.validate (containment G24/F-CONT-RISK, do_allocate)"},
+            {pod, ~r/LaunchEnv\.build\(/,
+             "Pod.LaunchEnv.build câblé au spawn (do_launch enchaîne env + portes credentials)"},
+            {launch_env, ~r/Fleet\.Credentials\.Gate\.validate\(/,
+             "Fleet.Credentials.Gate.validate (porte scope+plan, dans LaunchEnv.build)"},
+            {gate, ~r/ScopeValidator\.validate\(/,
+             "ScopeValidator.validate (délégation scope-coverage)"},
+            {gate, ~r/PlanValidator\.validate\(/,
+             "PlanValidator.validate (délégation plan payant)"}
+          ],
+          do:
+            {code_match?(root, rel, re),
+             "#{rel} : #{label} absente (porte creuse / délégation vide)"}
 
-    evidence =
-      checks
-      |> Enum.reject(fn {rel, re, _label} ->
-        Path.join(root, rel)
-        |> grep_lines(re)
-        |> Enum.any?(fn {_ln, line} -> Regex.match?(re, strip_comment(line)) end)
-      end)
-      |> Enum.map(fn {rel, _re, label} ->
-        "#{rel} : #{label} absente (porte creuse / délégation vide)"
-      end)
-
-    %{
-      id: "spawn.gates_wired",
-      remediation: "R-spawn-gates",
-      status: if(evidence == [], do: :pass, else: :fail),
-      evidence: evidence,
-      note:
-        "porte containment (CapProfile.validate, do_allocate) dans pod.ex + porte credentials câblée au spawn via Pod.LaunchEnv (do_launch appelle LaunchEnv.build, qui enchaîne Fleet.Credentials.Gate.validate), ET la porte délègue réellement scope (ScopeValidator) + plan (PlanValidator) dans gate.ex — 5 vérifs, 2 niveaux"
-    }
+    evidence_check(
+      %{
+        id: "spawn.gates_wired",
+        remediation: "R-spawn-gates",
+        note:
+          "porte containment (CapProfile.validate, do_allocate) dans pod.ex + porte credentials câblée au spawn via Pod.LaunchEnv (do_launch appelle LaunchEnv.build, qui enchaîne Fleet.Credentials.Gate.validate), ET la porte délègue réellement scope (ScopeValidator) + plan (PlanValidator) dans gate.ex — 5 vérifs, 2 niveaux"
+      },
+      items
+    )
   end
 
   # Le gatekeeper est un juge d'EXCEPTION-inférence (dispatché par une gate
@@ -703,23 +636,98 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # Vérifie que le self-check anti-root existe dans le boot path
   # (config/runtime.exs). Rouge s'il disparaît. Le boot guard runtime vit dans
-  # runtime.exs (bloc :prod) ; ce check garde sa présence.
+  # runtime.exs (bloc :prod) ; ce check garde sa présence. Confirmation post-strip
+  # plus lâche que le grep (`root` seul) : le marqueur long peut vivre en partie
+  # dans un commentaire de la ligne, seul `root` doit survivre dans le code.
   defp check_no_root_runtime_guard(root) do
-    rt = "config/runtime.exs"
-
-    present? =
-      Path.join(root, rt)
-      |> grep_lines(~r/R-no-root-runtime|refuse de tourner en root/)
-      |> Enum.any?(fn {_ln, line} -> Regex.match?(~r/root/, strip_comment(line)) end)
-
-    %{
+    presence_check(root, %{
       id: "runtime.no_root_boot_guard",
       remediation: "R-no-root-runtime",
-      status: if(present?, do: :pass, else: :fail),
-      evidence:
-        if(present?, do: [], else: ["#{rt} : pas de self-check anti-root au boot (FORGE-D1)"]),
+      file: "config/runtime.exs",
+      pattern: ~r/R-no-root-runtime|refuse de tourner en root/,
+      confirm: ~r/root/,
+      missing: "pas de self-check anti-root au boot (FORGE-D1)",
       note:
         "le daemon doit refuser getuid()==0 au boot (boot guard) ; User=lcars systemd seul ne couvre pas un run dev/manuel en root"
+    })
+  end
+
+  # ── Combinators (3 familles de checks data-driven) ───────────────────
+  # 8 des 17 checks sont des instanciations pures de 3 familles ; chaque check
+  # migré n'est plus qu'un appel qui porte ses DONNÉES (id, fichiers, patterns,
+  # messages). Les messages d'évidence sont passés tels quels au combinator :
+  # aucune perte de précision vs les versions dépliées qu'ils remplacent.
+
+  # Une ligne de CODE de `rel` matche-t-elle `pattern` ? Grep brut, puis
+  # confirmation sur la ligne strippée de son commentaire (une mention en
+  # commentaire ne compte pas — anti-vert-creux, cf. strip_comment/1).
+  # `confirm` : regex OU liste de regex qui doivent TOUTES matcher la ligne
+  # strippée, quand la confirmation diffère du grep (ex. exiger que le token
+  # vive sur la ligne du tuple `{:error, …}`) ; défaut = `pattern` lui-même.
+  defp code_match?(root, rel, pattern, confirm \\ nil) do
+    confirms = if confirm, do: List.wrap(confirm), else: [pattern]
+
+    Path.join(root, rel)
+    |> grep_lines(pattern)
+    |> Enum.any?(fn {_ln, line} ->
+      stripped = strip_comment(line)
+      Enum.all?(confirms, &Regex.match?(&1, stripped))
+    end)
+  end
+
+  # Famille A — présence-de-marqueur : `file` doit porter `pattern` dans du code
+  # (confirmé hors commentaire, `confirm` optionnel cf. code_match?/4) ;
+  # présent = pass, absent = fail avec `"<file> : <missing>"` en évidence.
+  defp presence_check(root, opts) do
+    present? = code_match?(root, opts.file, opts.pattern, Map.get(opts, :confirm))
+
+    %{
+      id: opts.id,
+      remediation: opts.remediation,
+      status: if(present?, do: :pass, else: :fail),
+      evidence: if(present?, do: [], else: ["#{opts.file} : #{opts.missing}"]),
+      note: opts.note
+    }
+  end
+
+  # Famille B — absence-de-résidu : 0 hit de `pattern` (confirmé hors commentaire
+  # par `confirm`, défaut `pattern`) dans `files` = pass ; chaque hit résiduel =
+  # une évidence `fichier:ligne`. ⚠ hérite du piège vert-creux de `grep_lines/2`
+  # (fichier absent = 0 hit = pass) : ne lister ici que des fichiers vivants dont
+  # l'existence est gardée par ailleurs — pour un résidu sur fichier potentiellement
+  # mort, grepper un glob (cf. check_coord_backend_wired).
+  defp residue_check(root, opts) do
+    confirm = Map.get(opts, :confirm) || opts.pattern
+
+    evidence =
+      Enum.flat_map(opts.files, fn rel ->
+        Path.join(root, rel)
+        |> grep_lines(opts.pattern)
+        |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
+        |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
+      end)
+
+    %{
+      id: opts.id,
+      remediation: opts.remediation,
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
+      note: opts.note
+    }
+  end
+
+  # Famille C — evidence-list : `items` = [{ok?, message}], conditions évaluées au
+  # call site (grep, File.exists?, …). Toutes vraies = pass ; chaque condition
+  # fausse verse son message (précis, pré-composé) en évidence.
+  defp evidence_check(meta, items) do
+    evidence = for {ok?, msg} <- items, not ok?, do: msg
+
+    %{
+      id: meta.id,
+      remediation: meta.remediation,
+      status: if(evidence == [], do: :pass, else: :fail),
+      evidence: evidence,
+      note: meta.note
     }
   end
 

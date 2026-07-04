@@ -1,7 +1,7 @@
 # fleet_workflow (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-01 (push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
+**Dernière révision** : 2026-07-05 (B-R2 dédup chargé-caché : cache schema du `Loader` délégué à `Fleet.SchemaCache`, autorité Ring 0 ; 2026-07-01 : push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
 **Statut** : lib-only (salvage post-moteur-RAM) — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_workflow.md`, `STATUS-CHANTIERS.md`
 
@@ -28,7 +28,7 @@ workflow_map YAML, évaluation de gates, et publication de livrable.
 
 | Module | Rôle (vérifié dans le code) |
 |---|---|
-| `Fleet.Workflow.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`workflow-map-v2.5.json`, enveloppe `kind/metadata/spec`), puis **normalise** vers la forme interne unique `%{"name", "steps"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché en `:persistent_term`. Fonctions pures ; `opts` (`:workflow_maps_root`, `:schema_path`) pour tests async |
+| `Fleet.Workflow.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`workflow-map-v2.5.json`, enveloppe `kind/metadata/spec`), puis **normalise** vers la forme interne unique `%{"name", "steps"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché via `Fleet.SchemaCache` (autorité Ring 0, `:persistent_term`, keyé par path résolu). Fonctions pures ; `opts` (`:workflow_maps_root`, `:schema_path`) pour tests async |
 | `Fleet.Workflow.GraphValidator` | `validate/1` : linter de GRAPHE **pur** (`steps` → `:ok \| {:error, {kind, detail}}`) sur les invariants inter-steps que le JSON Schema ne peut pas exprimer (il valide chaque step isolément). Vérifie : `:phantom_edge` (chaque `needs` réfère un step déclaré — anti-arête-fantôme/typo silencieux), `:no_root`/`:multiple_roots` (exactement 1 racine `needs: []`), `:unreachable` (tout step atteignable depuis la racine), `:cycle` (DAG, tri topologique de Kahn — couvre aussi « aucun terminal atteignable », condition équivalente pour ce runtime séquentiel), `:fan_out` (aucun step à ≥2 successeurs ; runtime séquentiel, aligné `WorkflowMapNav`). `describe/1` rend le message lisible par invariant (composé par le Loader dans son raise). Autonome — ne dépend PAS de `WorkflowMapNav` (la dépendance inverse fleet_workflow→fleet_pilot est interdite) |
 | `Fleet.Workflow.Gate` | `@callback evaluate/3` — behaviour générique d'évaluation de gate, vendor-extensible compile-time |
 | `Fleet.Workflow.Gates` | implémentation du behaviour `Gate`. `evaluate/3` dispatche par type (`:hard \| :soft \| :terminal \| nil`). **Pur** : seul le `soft` retourne `{:dispatch_gatekeeper, info}` (décision d'escalade), il ne spawn rien. `rules` (hard ET terminal) = liste de prédicats string délégués à `Gates.Predicate`. Somme fermée : toute forme inconnue/malformée → `{:fail}` fail-closed (l'éval est TOTALE) |

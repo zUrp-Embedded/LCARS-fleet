@@ -11,9 +11,10 @@ defmodule Fleet.Starfleet.Gatekeeper do
   ## Cache schema
 
   Schema résolu **une fois** au boot via
-  `Fleet.Starfleet.Application.start/2` et persisté dans
-  `:persistent_term` (clé `{__MODULE__, :decision_schema}`).
-  Pattern cohérent ch9 ETS read-only / ch11 schema cache.
+  `Fleet.Starfleet.Application.start/2` → `init_schema!/0`, délégué à
+  l'autorité Ring 0 `Fleet.SchemaCache` (cache `:persistent_term`, clé
+  `{__MODULE__, :decision_schema}`) — dédup B-R2, le pipeline
+  read+decode+resolve vivait copié ici.
 
   ## Public API
 
@@ -58,10 +59,13 @@ defmodule Fleet.Starfleet.Gatekeeper do
   end
 
   @doc """
-  Charge le schema JSON décision et le persiste dans `:persistent_term`.
+  Charge le schema JSON décision et le persiste dans `:persistent_term`
+  via `Fleet.SchemaCache` (autorité Ring 0 du pattern chargé-caché).
 
   Appelée au boot par `Fleet.Starfleet.Application.start/2`. Fail-fast :
-  raise si fichier schema absent ou JSON malformé.
+  raise si fichier schema absent ou JSON malformé. Idempotente par clé :
+  un deuxième appel ne relit pas le fichier (schema priv immuable dans
+  la vie du BEAM).
   """
   @spec init_schema!() :: :ok
   def init_schema! do
@@ -72,25 +76,12 @@ defmodule Fleet.Starfleet.Gatekeeper do
         default_schema_path()
       )
 
-    schema =
-      schema_path
-      |> File.read!()
-      |> Jason.decode!()
-      |> ExJsonSchema.Schema.resolve()
-
-    :persistent_term.put(@schema_key, schema)
+    _ = Fleet.SchemaCache.resolve_json_schema!(@schema_key, schema_path)
     :ok
   end
 
   defp resolved_schema do
-    case :persistent_term.get(@schema_key, nil) do
-      nil ->
-        raise ArgumentError,
-              "Fleet.Starfleet.Gatekeeper: schema not loaded — appeler init_schema!/0 au boot"
-
-      schema ->
-        schema
-    end
+    Fleet.SchemaCache.fetch!(@schema_key, "Fleet.Starfleet.Gatekeeper.init_schema!/0")
   end
 
   defp default_schema_path do

@@ -68,6 +68,10 @@ defmodule Fleet.Coord.Policies do
                   "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
       end
 
+    # Put direct (PAS `Fleet.SchemaCache.cached/2`) : `init_policies!/0` doit TOUJOURS
+    # relire le YAML — les tests le rappellent avec des paths différents et comptent sur
+    # « le raise précède le put » (table du boot intacte). Le put reste boot-time unique,
+    # profil `:persistent_term` respecté ; la lecture passe par `resolved_policies/0`.
     :persistent_term.put(@policies_key, policies)
     :ok
   end
@@ -81,13 +85,15 @@ defmodule Fleet.Coord.Policies do
   # Le schema est STRUCTURAL-ONLY (cf. son `$id`) : la résolvabilité des handlers d'action et l'existence des
   # cibles d'escalade restent vérifiées au runtime par Fleet.Coord, pas ici.
   defp validate_against_schema!(data, path) do
-    schema =
+    schema_path =
       :code.priv_dir(:fleet_coord)
       |> to_string()
       |> Path.join("schema/coord-policies-v1.json")
-      |> File.read!()
-      |> Jason.decode!()
-      |> ExJsonSchema.Schema.resolve()
+
+    # Schema priv IMMUABLE, résolu UNE fois via l'autorité Ring 0 `Fleet.SchemaCache`
+    # (dédup B-R2 : avant, re-read+decode+resolve du fichier à CHAQUE appel, sans cache).
+    schema =
+      Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, schema_path}, schema_path)
 
     case ExJsonSchema.Validator.validate(schema, data) do
       :ok ->
@@ -162,14 +168,7 @@ defmodule Fleet.Coord.Policies do
   end
 
   defp resolved_policies do
-    case :persistent_term.get(@policies_key, nil) do
-      nil ->
-        raise ArgumentError,
-              "Fleet.Coord.Policies: policies not loaded — appeler init_policies!/0 au boot"
-
-      policies ->
-        policies
-    end
+    Fleet.SchemaCache.fetch!(@policies_key, "Fleet.Coord.Policies.init_policies!/0")
   end
 
   # dispatch_action arité 4 (path, payload, correlation_id). Émet le schema canon strict

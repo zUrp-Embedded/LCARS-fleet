@@ -1,7 +1,7 @@
 # fleet_starfleet (chantier 13)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-02 (test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
+**Dernière révision** : 2026-07-05 (B-R2 dédup chargé-caché : `Gatekeeper.init_schema!/0` + get-or-raise délégués à `Fleet.SchemaCache`, autorité Ring 0 ; 2026-07-02 : test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
 
@@ -18,7 +18,7 @@ audit, escalade Cat 5 seulement.
 | Module | Rôle |
 |---|---|
 | `Fleet.Starfleet.Decision` | struct sortie validate `{decision, reason, details, chain}` |
-| `Fleet.Starfleet.Gatekeeper` | pure functions validation JSON décision (PoC-π3 figé) + schema strict `priv/schema/decision-v1.json` `ex_json_schema` au load fail-fast + cache schema `:persistent_term` |
+| `Fleet.Starfleet.Gatekeeper` | pure functions validation JSON décision (PoC-π3 figé) + schema strict `priv/schema/decision-v1.json` `ex_json_schema` au load fail-fast + cache schema via `Fleet.SchemaCache` (autorité Ring 0, `:persistent_term`) |
 | `Fleet.Starfleet.DriftMonitor` | GenServer subscribe `fleet.events`, 4 handlers (`pod_drift`, `workflow_map.failed`, `oauth.refresh.failed`, `audit.verdict`) |
 | `Fleet.Starfleet.Cat5Escalator` | pure functions `escalate/2` → log `AuditLog` + broadcast `audit.cat5.<source>` + délégation `CoordBackend` ch14 |
 | `Fleet.Starfleet.AuditLog` | wrapper `File.write/3` non-bang fail-safe sur `~/.lcars/log/fleet-starfleet.jsonl` (NDJSON append). **Rotation au seuil** (`:audit_log_max_bytes`, défaut 10 MB) → 1 backup `.1` : l'audit local est une convenance forensics, le durable = forge |
@@ -71,9 +71,10 @@ ch11 M1 atom-leak DoS mitigation.
 
 Schema `decision-v1.json` chargé une fois au boot via
 `Fleet.Starfleet.Gatekeeper.init_schema!/0` (appelé par
-`Application.start/2`) puis persisté sous la clé
-`{Fleet.Starfleet.Gatekeeper, :decision_schema}`. Pattern cohérent
-ch9 ETS read-only / ch11 schema cache.
+`Application.start/2`), délégué à l'autorité Ring 0 `Fleet.SchemaCache`
+(`fleet_event_router` — dédup B-R2), clé
+`{Fleet.Starfleet.Gatekeeper, :decision_schema}`. Lecture par
+`SchemaCache.fetch!/2` (raise actionnable si pas chargé).
 
 ## Tests
 
