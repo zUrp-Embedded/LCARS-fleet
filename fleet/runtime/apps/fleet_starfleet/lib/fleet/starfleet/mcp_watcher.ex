@@ -11,7 +11,10 @@ defmodule Fleet.Starfleet.MCPWatcher do
   GenServer + `Process.send_after/3` récursif (pattern canon Elixir natif —
   pas de dep Quantum/Oban). Une seule échéance armée à tout instant : à
   l'expiration, `handle_info(:check_upstream, _)` exécute le check puis
-  re-arme la prochaine.
+  re-arme la prochaine. La plomberie (start_link nommé, tick + ré-armement,
+  hook test `:check_now`) est PARTAGÉE avec `MCPMonitor` via
+  `Fleet.Starfleet.PeriodicCheck` ; ce module garde son état, son
+  `do_check/1` et la forme de sa réponse (`:ok`).
 
   ## Configuration
 
@@ -40,15 +43,14 @@ defmodule Fleet.Starfleet.MCPWatcher do
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Starfleet.PeriodicCheck
 
   @default_interval_ms :timer.hours(168)
   @default_package "ex_mcp"
   @hex_pm_api_base "https://hex.pm/api/packages"
 
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
-  end
+  def start_link(opts \\ []), do: PeriodicCheck.start_link(__MODULE__, opts)
 
   @impl GenServer
   def init(opts) do
@@ -61,25 +63,21 @@ defmodule Fleet.Starfleet.MCPWatcher do
       last_upstream: nil
     }
 
-    schedule_check(state.interval_ms)
+    _ = PeriodicCheck.schedule(:check_upstream, state.interval_ms)
     {:ok, state}
   end
 
   @impl GenServer
-  def handle_info(:check_upstream, state) do
-    new_state = do_check(state)
-    schedule_check(new_state.interval_ms)
-    {:noreply, new_state}
-  end
+  def handle_info(:check_upstream, state),
+    do: PeriodicCheck.tick(state, :check_upstream, &do_check/1)
 
   def handle_info(_other, state), do: {:noreply, state}
 
-  # Hook test : déclenche un check immédiat sync (équivalent au timer).
+  # Hook test : déclenche un check immédiat sync (équivalent au timer). La réponse est un `:ok` nu
+  # (pas de statut à exposer, contrairement au MCPMonitor).
   @impl GenServer
-  def handle_call(:check_now, _from, state) do
-    new_state = do_check(state)
-    {:reply, :ok, new_state}
-  end
+  def handle_call(:check_now, _from, state),
+    do: PeriodicCheck.check_now(state, &do_check/1, fn _ -> :ok end)
 
   defp do_check(state) do
     current = current_version(state.package)
@@ -166,10 +164,6 @@ defmodule Fleet.Starfleet.MCPWatcher do
       on_unregistered: :silent,
       context: "MCPWatcher: alerte sdk.upstream_alert NON émise"
     )
-  end
-
-  defp schedule_check(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do
-    Process.send_after(self(), :check_upstream, interval_ms)
   end
 
   defp config_interval_ms do

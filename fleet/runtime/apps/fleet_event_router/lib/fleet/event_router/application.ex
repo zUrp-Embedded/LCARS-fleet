@@ -80,7 +80,11 @@ defmodule Fleet.EventRouter.Application do
           {Supervisor, :start_link,
            [
              [Fleet.EventRouter.Bus],
-             [strategy: :one_for_one, max_restarts: 0, name: Fleet.EventRouter.Bus.EscalatingSupervisor]
+             [
+               strategy: :one_for_one,
+               max_restarts: 0,
+               name: Fleet.EventRouter.Bus.EscalatingSupervisor
+             ]
            ]}
       }
     ]
@@ -95,19 +99,20 @@ defmodule Fleet.EventRouter.Application do
     if Application.get_env(:fleet_event_router, :start_webhooks, false) do
       port = Application.get_env(:fleet_event_router, :webhook_port, 8081)
 
-      # Bind loopback par défaut (invariant runtime : un listener n'écoute pas
-      # 0.0.0.0 par accident). Le webhook est l'unique surface dont l'exposition
-      # publique est un besoin légitime : si la forge Gitea est SUR UNE AUTRE
-      # MACHINE, ses POST n'atteignent pas une loopback. C'est exactement le rôle
-      # de l'override de surface `LCARS_WEBHOOK_BIND_HOST` (ex. `0.0.0.0`) — opt-in
-      # nommé qui n'ouvre QUE le webhook, pas les surfaces de commande (fleet_api,
-      # deck). Forge co-localisée (loopback) → aucun override nécessaire. La
+      # Child-spec via la source unique Fleet.EventRouter.Listener : bind loopback par défaut
+      # appliqué PAR CONSTRUCTION (invariant runtime : un listener n'écoute pas 0.0.0.0 par
+      # accident). Le webhook est l'unique surface dont l'exposition publique est un besoin
+      # légitime : si la forge Gitea est SUR UNE AUTRE MACHINE, ses POST n'atteignent pas une
+      # loopback. C'est exactement le rôle de l'override de surface `LCARS_WEBHOOK_BIND_HOST`
+      # (ex. `0.0.0.0`) — opt-in nommé qui n'ouvre QUE le webhook, pas les surfaces de commande
+      # (fleet_api, deck). Forge co-localisée (loopback) → aucun override nécessaire. La
       # protection reste le HMAC SHA256 sur le secret partagé, indépendant du bind.
-      ip = Fleet.EventRouter.BindAddress.ip("LCARS_WEBHOOK_BIND_HOST")
-
       [
-        {Plug.Cowboy,
-         scheme: :http, plug: Fleet.EventRouter.WebhooksGitea, options: [ip: ip, port: port]}
+        Fleet.EventRouter.Listener.cowboy_child(
+          plug: Fleet.EventRouter.WebhooksGitea,
+          port: port,
+          surface_env: "LCARS_WEBHOOK_BIND_HOST"
+        )
       ]
     else
       []

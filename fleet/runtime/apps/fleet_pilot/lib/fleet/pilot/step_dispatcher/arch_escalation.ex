@@ -114,9 +114,11 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   # (hors-dispatch). Best-effort : on remonte au canal humain (l'arch), on ne masque pas. Un seul
   # point d'écriture forge pour toutes les escalades arch PR (pas de fork de signature/label).
   defp escalate_to_arch(%Seams{} = seams, issue_n, signature, body) do
+    # Signature gatekeeper via le writer UNIQUE `GatekeeperSeal.as_gatekeeper/1` (pas un
+    # `as_role(_, gatekeeper_role())` local — un seul point du runtime écrit cet idiome).
     gk_opts =
       seams.forge_opts
-      |> Fleet.Pilot.ForgeClient.as_role(Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
+      |> Fleet.Pilot.GatekeeperSeal.as_gatekeeper()
       |> Keyword.put(:dedup_signature, signature)
       |> Keyword.put(:dedup_any_author, true)
 

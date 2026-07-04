@@ -11,7 +11,8 @@ defmodule Fleet.Spawner.PodWarden do
   (`--die-with-parent` = BEAM, pas GenServer). Sous `:temporary` le GenServer n'est jamais ressuscité
   → l'orphelin persiste jusqu'au crash du BEAM. Complète le reap-on-(re)launch
   (`Fleet.Spawner.Pod.Backend.reap_orphan_pod/1`) qui ne couvre QUE le re-spawn. Le reap réutilise le mécanisme
-  prouvé live (`PodTmux.kill_holder` : tmux kill-server + pkill ancré + nettoyage du sock-dir).
+  prouvé live (`PodTmux.kill_holder` : tmux kill-server + pkill ancré) puis retire le sock-dir
+  (`PodTmux.remove_sock_dir`, geste post-kill partagé avec le teardown gracieux).
 
   ## 2. pod_dirs orphelins — GC du cimetière (`gc_one/1`)
 
@@ -116,9 +117,7 @@ defmodule Fleet.Spawner.PodWarden do
   @spec reconcile_decision(MapSet.t(), MapSet.t(), MapSet.t()) :: {MapSet.t(), MapSet.t()}
   def reconcile_decision(live, socks, prev_suspects) do
     orphans_now = MapSet.difference(socks, live)
-    to_reap = MapSet.intersection(orphans_now, prev_suspects)
-    new_suspects = MapSet.difference(orphans_now, to_reap)
-    {to_reap, new_suspects}
+    grace_2tick(orphans_now, prev_suspects)
   end
 
   @doc """
@@ -133,10 +132,20 @@ defmodule Fleet.Spawner.PodWarden do
   def reconcile_pod_dir_gc(tombstones, live, prev_suspects) do
     candidates = Enum.filter(tombstones, &gc_candidate?(&1, live))
     candidate_ids = candidates |> Enum.map(& &1.pod_id) |> MapSet.new()
-    confirmed_ids = MapSet.intersection(candidate_ids, prev_suspects)
+    {confirmed_ids, new_suspects} = grace_2tick(candidate_ids, prev_suspects)
     to_gc = Enum.filter(candidates, &MapSet.member?(confirmed_ids, &1.pod_id))
-    new_suspects = MapSet.difference(candidate_ids, confirmed_ids)
     {to_gc, new_suspects}
+  end
+
+  # Cœur PUR de la grace 2-tick, PARTAGÉ par les deux duties (socks + pod_dirs) : parmi les
+  # `candidates` (MapSet d'ids réclamables de CE tick), on n'agit QUE sur ceux DÉJÀ suspects au tick
+  # précédent (`prev_suspects`) ; les autres deviennent les suspects du prochain tick. Un candidat qui
+  # disparaît entre deux ticks (re-spawn, Pod revenu vivant) sort donc naturellement de la liste sans
+  # jamais être touché — c'est toute la valeur de la grace. Rend `{to_act, new_suspects}`.
+  defp grace_2tick(candidates, prev_suspects) do
+    to_act = MapSet.intersection(candidates, prev_suspects)
+    new_suspects = MapSet.difference(candidates, to_act)
+    {to_act, new_suspects}
   end
 
   # Terminale ET orpheline : les deux conditions du GC. Non-terminale (en vol) OU vivante ⇒ épargnée.
@@ -168,7 +177,7 @@ defmodule Fleet.Spawner.PodWarden do
     )
 
     PodTmux.kill_holder(pod_id)
-    _ = File.rm_rf(Path.dirname(PodTmux.sock_path(pod_id)))
+    PodTmux.remove_sock_dir(pod_id)
     :ok
   rescue
     e -> Logger.warning("PodWarden reap #{pod_id} échec (non-bloquant): #{inspect(e)}")

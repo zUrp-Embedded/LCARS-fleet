@@ -17,8 +17,8 @@ defmodule Fleet.Spawner.Pod.Liveness do
   `.opts` + la config `:fleet_spawner` + `File`/`Port`. Les opts per-pod (`:liveness_tick_ms`,
   `:liveness_probe_fun`) sont lues via `keyword_opt/2` → un test injecte sonde et cadence SANS config
   globale (async-safe). Dépend de `Fleet.CapProfile` (le pattern `%Fleet.CapProfile{spec: spec}` de
-  `default_response_timeout_sec`), déjà une dep de l'app ; aucune dépendance vers `Fleet.Spawner.Pod`
-  (pas de cycle).
+  `default_response_timeout_sec`), déjà une dep de l'app, et de `Pod.SessionFiles` (glob partagé des
+  jsonl de session) ; aucune dépendance vers `Fleet.Spawner.Pod` (pas de cycle).
 
   ## Contrat (appelé par `Pod`)
 
@@ -68,12 +68,11 @@ defmodule Fleet.Spawner.Pod.Liveness do
   defp grew?(prev, now) when is_integer(prev) and is_integer(now), do: now > prev
   defp grew?(_, _), do: false
 
-  # Taille cumulée des `<session_id>.jsonl` du pod (append-only → croît à chaque message/tool-result).
-  # `nil` si aucun jsonl (session pas encore écrite).
+  # Taille cumulée des `<session_id>.jsonl` du pod (append-only → croît à chaque message/tool-result ;
+  # glob partagé `SessionFiles.jsonl_paths/2`). `nil` si aucun jsonl (session pas encore écrite).
   defp jsonl_size(state) do
-    [state.pod_dir, ".claude", "projects", "*", "#{state.session_id}.jsonl"]
-    |> Path.join()
-    |> Path.wildcard()
+    state.pod_dir
+    |> Fleet.Spawner.Pod.SessionFiles.jsonl_paths(state.session_id)
     |> Enum.map(fn f ->
       case File.stat(f) do
         {:ok, %{size: s}} -> s

@@ -7,8 +7,10 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
   ## Mécanique
 
-  GenServer + `Process.send_after/3` récursif. À chaque tick (default 60s),
-  vérifie la liveness de la cible :
+  GenServer + `Process.send_after/3` récursif — la plomberie (start_link nommé, tick + ré-armement,
+  hook test `:check_now`) est PARTAGÉE avec `MCPWatcher` via `Fleet.Starfleet.PeriodicCheck` ; ce
+  module garde son état, son `do_check/1` et la forme de sa réponse (`{:ok, status}`). À chaque
+  tick (default 60s), vérifie la liveness de la cible :
 
     * cible vivante → status `:ok`
     * absente / morte → status `:crashed`
@@ -46,6 +48,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Starfleet.PeriodicCheck
 
   @default_interval_ms 60_000
   # On monitore le substrat pod-facing (le DynamicSupervisor d'accepteurs de socket
@@ -55,9 +58,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
   @default_target {:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}
 
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
-  end
+  def start_link(opts \\ []), do: PeriodicCheck.start_link(__MODULE__, opts)
 
   @impl GenServer
   def init(opts) do
@@ -68,25 +69,20 @@ defmodule Fleet.Starfleet.MCPMonitor do
       last_check: nil
     }
 
-    schedule_check(state.interval_ms)
+    _ = PeriodicCheck.schedule(:health_check, state.interval_ms)
     {:ok, state}
   end
 
   @impl GenServer
-  def handle_info(:health_check, state) do
-    new_state = do_check(state)
-    schedule_check(new_state.interval_ms)
-    {:noreply, new_state}
-  end
+  def handle_info(:health_check, state),
+    do: PeriodicCheck.tick(state, :health_check, &do_check/1)
 
   def handle_info(_other, state), do: {:noreply, state}
 
   # Hook test : déclenche un check immédiat sync (équivalent au timer).
   @impl GenServer
-  def handle_call(:check_now, _from, state) do
-    new_state = do_check(state)
-    {:reply, {:ok, new_state.status}, new_state}
-  end
+  def handle_call(:check_now, _from, state),
+    do: PeriodicCheck.check_now(state, &do_check/1, &{:ok, &1.status})
 
   defp do_check(state) do
     new_status = check_target(state.target)
@@ -158,10 +154,6 @@ defmodule Fleet.Starfleet.MCPMonitor do
       on_unregistered: :silent,
       context: "MCPMonitor: alerte mcp.server_crashed NON émise"
     )
-  end
-
-  defp schedule_check(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do
-    Process.send_after(self(), :health_check, interval_ms)
   end
 
   defp config_interval_ms do

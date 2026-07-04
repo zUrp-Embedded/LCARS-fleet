@@ -24,24 +24,26 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     `with` de l'état `:projecting`.
 
   Dépend de `Pod.Fs` (écritures FS non-bang), `Pod.LaunchSpec` (cwd/projet effectif), `Pod.TaskProbe`
-  (gate d'enqueue), `Fleet.SPBuilder` (filtre des skills) ; et en pleine qualif `Fleet.CapProfile`
-  (source unique du `name`), `Fleet.ProjectBootstrap.Phase.Clone` (clone workspace + doc),
-  `Fleet.Spawner.SeedStore` (restore recall), `Fleet.TaskQueue` (enqueue), `Fleet.Slug` (validation du
-  rôle interpolé), `Application` (config + assets `priv/`). Aucune dépendance vers `Fleet.Spawner.Pod`.
+  (gate d'enqueue), `Pod.SessionFiles` (glob partagé des jsonl de session), `Fleet.SPBuilder` (filtre
+  des skills) ; et en pleine qualif `Fleet.CapProfile` (source unique du `name` + `with_project/2`),
+  `Fleet.ProjectBootstrap.Phase.Clone` (clone workspace + doc), `Fleet.Spawner.SeedStore` (restore
+  recall), `Fleet.TaskQueue` (enqueue), `Fleet.Slug` (validation du rôle interpolé), `Application`
+  (config + assets `priv/`). Aucune dépendance vers `Fleet.Spawner.Pod`.
   """
 
   require Logger
 
   alias Fleet.Spawner.Pod.Fs
   alias Fleet.Spawner.Pod.LaunchSpec
+  alias Fleet.Spawner.Pod.SessionFiles
   alias Fleet.Spawner.Pod.TaskProbe
 
-  # Supprime tout `<session_id>.jsonl` résiduel sous le pod_dir (tous cwd-slugs) → libère l'UUID pour
-  # `--session-id`. Best-effort : un échec ne casse pas le spawn.
+  # Supprime tout `<session_id>.jsonl` résiduel sous le pod_dir (tous cwd-slugs, glob partagé
+  # `SessionFiles.jsonl_paths/2`) → libère l'UUID pour `--session-id`. Best-effort : un échec ne
+  # casse pas le spawn.
   def gc_stale_session_jsonl(state) do
-    [state.pod_dir, ".claude", "projects", "*", "#{state.session_id}.jsonl"]
-    |> Path.join()
-    |> Path.wildcard()
+    state.pod_dir
+    |> SessionFiles.jsonl_paths(state.session_id)
     |> Enum.each(fn f ->
       _ = File.rm(f)
 
@@ -98,12 +100,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
         default
       end
 
-    path = Application.app_dir(:fleet_sp_builder, file)
-
-    case File.read(path) do
-      {:ok, content} -> {:ok, content}
-      {:error, reason} -> {:error, {:agent_draft_missing, path, reason}}
-    end
+    read_tagged(Application.app_dir(:fleet_sp_builder, file), :agent_draft_missing)
   end
 
   # protocole-user.md (mots-clés personnalisés `yop`/`SeeU`).
@@ -121,18 +118,23 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   def read_protocole_user do
     case Application.get_env(:fleet_spawner, :protocole_user_path) do
       nil ->
-        path = Application.app_dir(:fleet_sp_builder, "priv/sp_drafts/protocole-user-worker.md")
-
-        case File.read(path) do
-          {:ok, content} -> {:ok, content}
-          {:error, reason} -> {:error, {:protocole_user_worker_missing, path, reason}}
-        end
+        :fleet_sp_builder
+        |> Application.app_dir("priv/sp_drafts/protocole-user-worker.md")
+        |> read_tagged(:protocole_user_worker_missing)
 
       path when is_binary(path) ->
-        case File.read(path) do
-          {:ok, content} -> {:ok, content}
-          {:error, reason} -> {:error, {:protocole_user_missing, path, reason}}
-        end
+        read_tagged(path, :protocole_user_missing)
+    end
+  end
+
+  # Lecture TAGGÉE d'un asset provisionné (draft SP, protocole-user) : `{:ok, content}` ou
+  # `{:error, {<tag>, path, reason}}` — le tag reste PROPRE à chaque asset (il identifie l'étape en
+  # échec dans le `transition_failed` de l'état `:projecting`), seule la mécanique read→tuple est
+  # partagée.
+  defp read_tagged(path, error_tag) do
+    case File.read(path) do
+      {:ok, content} -> {:ok, content}
+      {:error, reason} -> {:error, {error_tag, path, reason}}
     end
   end
 
@@ -244,7 +246,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
       _repo_path ->
         # cap_profile porteur du projet EFFECTIF (brief > statique) pour les Clone.* (qui lisent spec.project).
-        eff_cap = %{state.cap_profile | spec: Map.put(state.cap_profile.spec, "project", project)}
+        eff_cap = Fleet.CapProfile.with_project(state.cap_profile, project)
 
         with {:ok, workspace, branch} <-
                Fleet.ProjectBootstrap.Phase.Clone.clone_or_skip(

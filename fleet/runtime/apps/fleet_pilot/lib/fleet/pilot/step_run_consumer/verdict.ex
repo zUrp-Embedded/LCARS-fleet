@@ -86,12 +86,23 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   end
 
   @doc false
-  # Mappe un gate-decision (verdict de juge no-workflow_map) vers un review-event forge.
-  # `continue`→approve ; tout le reste (`abandon`/redirect/escalate/halt/illisible)→**request_changes**
-  # (fail-closed DÉCISIF : un verdict non-`continue` = pas vert → on bloque le merge, jamais un merge
-  # sur verdict douteux).
-  def review_event_for_decision("continue"), do: :approve
-  def review_event_for_decision(_other), do: :request_changes
+  # TABLE UNIQUE token → review-event forge (`:approve` | `:request_changes`), fail-closed. DEUX
+  # vocabulaires DISJOINTS y convergent (aucune collision : les décisions sont des STRINGS, les
+  # intents des ATOMS) :
+  #   * gate-decision (juge no-workflow_map, appelant `StepRunConsumer`) : `"continue"`→approve ;
+  #     tout le reste (`abandon`/redirect/escalate/halt/illisible)→**request_changes** (fail-closed
+  #     DÉCISIF : un verdict non-`continue` = pas vert → on bloque le merge, jamais un merge sur
+  #     verdict douteux).
+  #   * intent de gate (juge-workflow_map, appelant `StepRunCompleter`) : SEULS les intents
+  #     gate-PASS approuvent, chacun EXPLICITEMENT — `:advance` (un step suit) et `:promote`
+  #     (terminal) = APPROVED ; `:rework` (gate fail) = REQUEST_CHANGES.
+  # Défaut FAIL-CLOSED partagé : tout autre token (un futur `:reject`/`:abandon`, un step_run qui a
+  # perdu son `:review_event`) ne s'auto-approuve JAMAIS — approuver par OMISSION est le pire
+  # défaut pour un verdict. Le catch-all bloque ; approuver reste un choix gravé, token par token.
+  def review_event("continue"), do: :approve
+  def review_event(:advance), do: :approve
+  def review_event(:promote), do: :approve
+  def review_event(_other), do: :request_changes
 
   @doc false
   # Compose le corps de review depuis la gate-decision du juge. `nil` si aucune substance (→ le

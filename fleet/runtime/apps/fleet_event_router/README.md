@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-05 (B-R2 dédup « schema/config chargé-caché » : + `Fleet.SchemaCache`, autorité Ring 0 du pattern `:persistent_term` (`resolve_json_schema!` / `fetch!` / `cached`), consommé par workflow/starfleet/coord — les copies locales de cap_profile restent, pas d'arête intra-R0 ; B-R1 dédup « émission-Bus-protégée » : `Bus.safe_emit/3-4` = cœur unique de la politique best-effort, les rescue locaux de coord/starfleet/spawner migrent dessus ; registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-07-05 (B5 dédup « child-spec listener » : + `Fleet.EventRouter.Listener.cowboy_child/1`, source unique du child-spec Plug.Cowboy des 3 surfaces HTTP api/observation/webhook — ip BindAddress posée par construction, gates+ports restent chez les apps ; B-R2 dédup « schema/config chargé-caché » : + `Fleet.SchemaCache`, autorité Ring 0 du pattern `:persistent_term` (`resolve_json_schema!` / `fetch!` / `cached`), consommé par workflow/starfleet/coord — les copies locales de cap_profile restent, pas d'arête intra-R0 ; B-R1 dédup « émission-Bus-protégée » : `Bus.safe_emit/3-4` = cœur unique de la politique best-effort, les rescue locaux de coord/starfleet/spawner migrent dessus ; registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -31,6 +31,14 @@ publiés sur Phoenix.PubSub topic `fleet.events`.
   webhook) sans inversion de layering. Invariant : loopback `{127,0,0,1}` par
   défaut, exposition = opt-in nommé (`LCARS_BIND_HOST` global, override de surface
   ex. `LCARS_WEBHOOK_BIND_HOST`)
+- `Fleet.EventRouter.Listener` — source UNIQUE du **child-spec Cowboy** des
+  listeners HTTP (`cowboy_child/1` : opts `plug`/`port` requis ; `scheme`,
+  `dispatch` RAW, `ref`, `surface_env` optionnels), pendant « spec » de
+  `BindAddress` (même concern « comment on expose un listener » — l'`:ip`
+  loopback-par-défaut est posée PAR CONSTRUCTION). Consommé par `fleet_api`
+  (REST+WS, dispatch), `fleet_observation` (deck) et le webhook Gitea de cette
+  app (dedup B5, zéro nouvelle arête). Les gates (`:start_listener`/
+  `:start_webhooks`) et la résolution du port restent chez chaque app
 - `Fleet.Shutdown.Quiesce` — primitive partagée du drain de shutdown (flag
   `:persistent_term` `quiescing?/refuse!/resume!`). Vit ici car substrat
   universel (comme `Fleet.Event`) : lisible par `fleet_workflow`/`fleet_api`

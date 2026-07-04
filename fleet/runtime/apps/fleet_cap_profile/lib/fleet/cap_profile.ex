@@ -187,6 +187,20 @@ defmodule Fleet.CapProfile do
   defdelegate baseline_git_ops_denied_patterns(), to: DisallowedTools, as: :baseline_patterns
 
   @doc """
+  Retourne un `%CapProfile{}` dont `spec.project` est REMPLACÉ par le projet effectif donné (map de
+  clés string, même forme que le `spec.project` du YAML : `repo_path`, `repo`, `remote`…).
+
+  Un pod-projet peut recevoir son projet du BRIEF (dispatch issue→repo, `opts[:project]`) plutôt que
+  du cap-profile statique : les lecteurs de `spec.project` (ex. `Fleet.ProjectBootstrap.Phase.Clone`)
+  reçoivent alors ce cap-profile EFFECTIF. **Source UNIQUE** de cette substitution — les call-sites
+  (`Fleet.Spawner.Pod.Scaffold.maybe_bootstrap_project_workspace`, le reprovision workspace de
+  `Fleet.Spawner.Pod`) ne re-bricolent pas la map `spec` à la main. Pure (rend un nouveau struct).
+  """
+  @spec with_project(t(), map()) :: t()
+  def with_project(%__MODULE__{spec: spec} = cap, project) when is_map(project),
+    do: %{cap | spec: Map.put(spec, "project", project)}
+
+  @doc """
   Le mode de containment du profil (`metadata.containment`). `"bwrap"` = pod sandboxé (RO mounts +
   tmpfs /home + bind credentials, défaut) ; `"none"` = host-native (architect-interactif, starfleet —
   le pod tourne SUR L'HÔTE *as* l'humain, hors sandbox = le pouvoir le plus fort de la fleet).

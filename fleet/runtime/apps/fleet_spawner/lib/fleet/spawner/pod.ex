@@ -440,7 +440,8 @@ defmodule Fleet.Spawner.Pod do
   # ProjectBootstrap.reset_in_place, puis /clear du REPL. Appele quand le pod est :ready (livrable
   # du issue precedent confirme sur la forge -> le push a deja LU le workspace : reset sur).
   def handle_event({:call, from}, {:reprovision_pipe_workspace, project, opts}, _state, data) do
-    eff_cap = %{data.cap_profile | spec: Map.put(data.cap_profile.spec, "project", project)}
+    # cap_profile porteur du projet EFFECTIF (celui du call, pas le statique) pour reset_in_place.
+    eff_cap = Fleet.CapProfile.with_project(data.cap_profile, project)
 
     case Fleet.ProjectBootstrap.Phase.Clone.reset_in_place(data.pod_dir, eff_cap, opts) do
       {:ok, ws, branch} ->

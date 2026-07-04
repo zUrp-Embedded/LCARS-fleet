@@ -38,6 +38,7 @@ defmodule Fleet.Observation.Application do
   @impl Application
   def start(_type, _args) do
     children = readmodel_children() ++ listener_children()
+
     # F4 (E1) : intensite 3/60 EXPLICITE (doctrine event_router/task_queue — 3/5 OTP trop serre pour un blip ; la fenetre est un CHOIX).
     opts = [
       strategy: :one_for_one,
@@ -45,6 +46,7 @@ defmodule Fleet.Observation.Application do
       max_seconds: 60,
       name: Fleet.Observation.Supervisor
     ]
+
     Supervisor.start_link(children, opts)
   end
 
@@ -68,15 +70,11 @@ defmodule Fleet.Observation.Application do
       # Pas de défaut statique (A7) : per-humain via bin/fleet_v2 → runtime.exs ; fail-loud si absent.
       port = Application.fetch_env!(:fleet_observation, :http_port)
 
-      # Bind loopback par défaut : le deck observe en lecture seule, no-auth
-      # (frontière = isolation réseau, comme fleet_api). Un accès distant au deck
-      # passe par tunnel/reverse-proxy. Exposition publique = opt-in nommé via
-      # Fleet.EventRouter.BindAddress (LCARS_BIND_HOST).
-      ip = Fleet.EventRouter.BindAddress.ip()
-
-      [
-        {Plug.Cowboy, scheme: :http, plug: Fleet.Observation.Deck, options: [ip: ip, port: port]}
-      ]
+      # Child-spec via la source unique Fleet.EventRouter.Listener : bind loopback par défaut
+      # appliqué PAR CONSTRUCTION. Le deck observe en lecture seule, no-auth (frontière =
+      # isolation réseau, comme fleet_api). Un accès distant au deck passe par
+      # tunnel/reverse-proxy. Exposition publique = opt-in nommé (LCARS_BIND_HOST, via BindAddress).
+      [Fleet.EventRouter.Listener.cowboy_child(plug: Fleet.Observation.Deck, port: port)]
     else
       []
     end

@@ -31,6 +31,11 @@ Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor.
   `"instance"` = fan-out par issue ; **requis, sans défaut → raise**). **Source UNIQUE** : le dispatcher
   (`Fleet.Pilot.StepDispatcher`) choisit `PodId.for_repo` vs `for_issue`/`for_pr` et sérialise les rôles
   project-scoped là-dessus
+- `Fleet.CapProfile.with_project/2` — rend un `%CapProfile{}` dont `spec.project` est REMPLACÉ par le
+  projet effectif donné (map clés string). **Source UNIQUE** de la substitution brief > statique : un
+  pod-projet peut recevoir son projet du dispatch issue→repo plutôt que du cap-profile YAML ; les
+  call-sites spawner (`Pod.Scaffold.maybe_bootstrap_project_workspace`, reprovision workspace de `Pod`)
+  passent par elle au lieu de re-bricoler la map `spec`
 - `Fleet.CapProfile.sha256/1` — hash canonique stable d'un profile composé
 
 ## Fleet.Slug — smart-constructor path-safe (utilitaire transverse)

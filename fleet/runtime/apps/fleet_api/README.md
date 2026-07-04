@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-02 (B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
+**Dernière révision** : 2026-07-05 (B5 — child-spec listener via la source unique `Fleet.EventRouter.Listener.cowboy_child/1`, dispatch WS inchangé ; 2026-07-02 : B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -111,7 +111,7 @@ Topics : exact match OU wildcard suffixe `*` (ex `workflow_map.*` match
 |---|---|---|
 | `:fleet_api, :http_port` | `8080` | port Cowboy listener |
 | `:fleet_api, :start_listener` | `true` | bool — `false` en tests (`config/test.exs`) |
-| `LCARS_BIND_HOST` (env) | `127.0.0.1` (loopback) | IP de bind du listener — surface no-auth dont la seule écriture restante (`/api/admin/spawn`, gardée) est **local-only par défaut** ; exposer (ex. `0.0.0.0`) = opt-in explicite via cette env. Source unique : `Fleet.EventRouter.BindAddress`. |
+| `LCARS_BIND_HOST` (env) | `127.0.0.1` (loopback) | IP de bind du listener — surface no-auth dont la seule écriture restante (`/api/admin/spawn`, gardée) est **local-only par défaut** ; exposer (ex. `0.0.0.0`) = opt-in explicite via cette env. Sources uniques : `Fleet.EventRouter.BindAddress` (ip) + `Fleet.EventRouter.Listener.cowboy_child/1` (child-spec — le gate `:start_listener` et le port restent ici). |
 
 > **Bind loopback (frontière réseau).** Le listener écoute `{127,0,0,1}` par
 > défaut : la surface est no-auth et le contrat de sécurité est « isolation

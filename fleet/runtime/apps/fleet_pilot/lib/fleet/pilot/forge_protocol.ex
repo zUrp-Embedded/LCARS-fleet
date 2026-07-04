@@ -182,12 +182,15 @@ defmodule Fleet.Pilot.ForgeProtocol do
   def onboard_marker(human) when is_binary(human), do: "#{@onboard_marker_prefix}#{human}]"
 
   @doc false
-  # Pur : un comment est DE CONFIANCE ssi son auteur = le compte système (bot)
-  # de la fleet. Un user forge (humain/attaquant) a un autre login → ses marqueurs sont ignorés.
-  def system_authored?(comment, bot_login)
-      when is_map(comment) and is_binary(bot_login) and bot_login != "" do
-    get_in(comment, ["user", "login"]) == bot_login
+  # Pur : un OBJET forge (comment OU issue — même forme wire Gitea `{"user": {"login": …}}`) est
+  # DE CONFIANCE ssi son auteur = le compte système (bot) de la fleet. Un user forge
+  # (humain/attaquant) a un autre login → ses marqueurs sont ignorés. Prédicat UNIQUE du primitif
+  # de confiance : les lecteurs de marqueurs sur comments (`ForgeClient` route/step_run/result) ET
+  # sur issues (`ForgeClient.Repo.admitted?`, sceau d'admission) passent tous ici — pas de copie.
+  def system_authored?(object, bot_login)
+      when is_map(object) and is_binary(bot_login) and bot_login != "" do
+    get_in(object, ["user", "login"]) == bot_login
   end
 
-  def system_authored?(_comment, _bot), do: false
+  def system_authored?(_object, _bot), do: false
 end

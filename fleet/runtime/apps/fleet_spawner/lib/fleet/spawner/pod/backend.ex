@@ -89,7 +89,7 @@ defmodule Fleet.Spawner.Pod.Backend do
     # nominal, rm_rf no-op de toute façon).
     _ =
       if is_binary(state.tmux_session) do
-        File.rm_rf(Path.dirname(PodTmux.sock_path(state.pod_id)))
+        PodTmux.remove_sock_dir(state.pod_id)
       end
 
     :ok
@@ -178,16 +178,18 @@ defmodule Fleet.Spawner.Pod.Backend do
 
   def release_pod_socket(_state), do: :ok
 
-  def bwrap_launch_path do
-    Application.get_env(:fleet_spawner, :bwrap_launch_path, "/usr/local/bin/bwrap_launch.sh")
-  end
+  def bwrap_launch_path, do: launcher_path(:bwrap_launch_path, "bwrap_launch.sh")
 
   # Launcher N0 host (containment: none) — frère sans-sandbox de bwrap_launch, même argv-shape.
-  def host_launch_path do
-    Application.get_env(:fleet_spawner, :host_launch_path, "/usr/local/bin/host_launch.sh")
-  end
+  def host_launch_path, do: launcher_path(:host_launch_path, "host_launch.sh")
 
-  def claude_launch_path do
-    Application.get_env(:fleet_spawner, :claude_launch_path, "/usr/local/bin/claude_launch.sh")
+  def claude_launch_path, do: launcher_path(:claude_launch_path, "claude_launch.sh")
+
+  # Résolution UNIQUE d'un chemin de launcher : config `:fleet_spawner` (clé = nom du launcher),
+  # défaut = l'install canonique `/usr/local/bin/<basename>` (posée par `etc/install.sh`). Les trois
+  # publics ci-dessus (API inchangée) sont des one-liners dessus — un seul endroit porte la forme
+  # config-key → défaut, pas trois copies à désaligner.
+  defp launcher_path(config_key, default_basename) do
+    Application.get_env(:fleet_spawner, config_key, "/usr/local/bin/" <> default_basename)
   end
 end

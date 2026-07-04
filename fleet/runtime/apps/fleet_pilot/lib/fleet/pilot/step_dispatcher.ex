@@ -32,6 +32,9 @@ defmodule Fleet.Pilot.StepDispatcher do
   # CHOISIT quel brief selon l'état forge ; BriefBuilder le FORME.
   alias Fleet.Pilot.BriefBuilder
 
+  # Source unique de l'idiome « pose la clé SI non-nil » (builders de spawn_opts).
+  alias Fleet.Pilot.Opts
+
   # Cycle de vie REVIEW (PR) extrait : `dispatch_review/2` (ci-dessous, contrat poller) fait le gate PR +
   # lit `pr_review_state`, PUIS délègue tout l'aiguillage (verdicts / rework / conflit / promotion) à
   # `ReviewLifecycle.dispatch_by_verdicts/5`. Dépendance uni-directionnelle (cœur → ReviewLifecycle →
@@ -191,9 +194,9 @@ defmodule Fleet.Pilot.StepDispatcher do
               # pour la reprovision in-place d'un pipe : même branche au reset qu'au spawn).
               slug: slug
             ]
-            |> Spawn.maybe_put_project(project)
+            |> Opts.maybe_put(:project, project)
             |> Spawn.maybe_put_route(route)
-            |> Spawn.maybe_put_repo_id(Spawn.resolve_repo_id(forge, repo, forge_opts))
+            |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
 
           # Spawn LEAF partagé avec dispatch_by_verdicts (verrou → pod → enqueue → wake +
           # compensation). Producteur : verrou + issue_id keyés sur l'ISSUE (number). On construit le

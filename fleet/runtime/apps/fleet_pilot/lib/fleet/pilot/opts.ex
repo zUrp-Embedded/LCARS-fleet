@@ -3,8 +3,11 @@ defmodule Fleet.Pilot.Opts do
   Helpers purs de construction de keyword-lists d'options (opts/seams injectables).
 
   Source UNIQUE de l'idiome « pose la clé SI la valeur n'est pas nil » — utilisé par
-  les builders d'opts du pilot (`StepRunConsumer`, `ForgeClient.Transport`, `Poller`)
-  pour n'injecter un seam/paramètre optionnel que lorsqu'il est réellement présent.
+  les builders d'opts du pilot (`StepRunConsumer`, `ForgeClient.Transport`, `Poller`,
+  et les builders de spawn_opts de `StepDispatcher`/`ReviewLifecycle` : `:project`,
+  `:repo_id`) pour n'injecter un seam/paramètre optionnel que lorsqu'il est réellement
+  présent. (Une pose MULTI-clés couplées — ex. `Spawn.maybe_put_route/2`, 2 clés —
+  n'est pas cet idiome et reste chez son autorité.)
   """
 
   @doc """

@@ -196,23 +196,16 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, issues} when is_list(issues) <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues", "state=all&type=issues") do
+      # Une ISSUE est de confiance ssi son AUTEUR (`user.login`) = le bot système — MÊME primitif
+      # de confiance que les marqueurs route/step_run/result sur comments : le prédicat UNIQUE
+      # `ForgeProtocol.system_authored?/2` (même forme wire Gitea), pas de copie côté issue.
       Enum.any?(issues, fn issue ->
-        Map.get(issue, "title") == marker and system_authored_issue?(issue, bot)
+        Map.get(issue, "title") == marker and ForgeProtocol.system_authored?(issue, bot)
       end)
     else
       _ -> false
     end
   end
-
-  # Une ISSUE est de confiance ssi son AUTEUR (`user.login`) = le bot système. Pendant de
-  # `ForgeProtocol.system_authored?/2` (qui vise les COMMENTS) côté issue — même invariant : un marqueur
-  # n'est cru que s'il vient du compte système (le porteur du token). Couvert par `admitted?`.
-  defp system_authored_issue?(issue, bot_login)
-       when is_map(issue) and is_binary(bot_login) and bot_login != "" do
-    get_in(issue, ["user", "login"]) == bot_login
-  end
-
-  defp system_authored_issue?(_issue, _bot), do: false
 
   @doc """
   `username` est-il collaborateur de `repo` ? Gitea `GET /repos/{repo}/collaborators/{username}` (204 = oui,

@@ -50,6 +50,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # selon le `kind` du dispatch PR ; BriefBuilder le FORME.
   alias Fleet.Pilot.BriefBuilder
 
+  # Source unique de l'idiome « pose la clé SI non-nil » (builders de spawn_opts).
+  alias Fleet.Pilot.Opts
+
   # Écriture de l'escalade humaine (cluster IMPUR) : ReviewLifecycle DÉCIDE (budget rework /
   # IncidentRegistry), ArchEscalation ÉCRIT (comment gatekeeper dédupliqué + verrou `awaits-arch`).
   alias Fleet.Pilot.StepDispatcher.ArchEscalation
@@ -253,9 +256,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
           spawn_opts =
             [brief: brief, pod_id: pod_id, rc_name: Spawn.rc_name(repo, role)]
-            |> Spawn.maybe_put_project(project)
+            |> Opts.maybe_put(:project, project)
             |> Spawn.maybe_put_route(route)
-            |> Spawn.maybe_put_repo_id(Spawn.resolve_repo_id(forge, repo, forge_opts))
+            |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
 
           # Spawn LEAF partagé avec dispatch_issue (verrou → pod → enqueue → wake + compensation).
           # Verrou keyé sur la PR (pr_number) ; issue_id + enqueue keyés sur l'ISSUE (issue_n — le
@@ -489,20 +492,16 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   defp promote_pr(pr_number, head, %Ctx{} = ctx) do
     with {:ok, {issue_n, producer}} <- parse_feature_branch_or_skip(head) do
       # Sceau UNIQUE partagé avec `StepRunCompleter.promote` : commentaire gatekeeper + merge
-      # signé gatekeeper. Un chemin de merge séparé forkerait en token système (l'escalade signerait `system`).
-      gk_opts =
-        Fleet.Pilot.ForgeClient.as_role(
-          ctx.forge_opts,
-          Fleet.Pilot.GatekeeperSeal.gatekeeper_role()
-        )
-
+      # signé gatekeeper. La signature est posée EN INTERNE par `seal_and_merge` (writer unique
+      # `GatekeeperSeal.as_gatekeeper/1`) — un chemin de merge séparé forkerait en token système
+      # (l'escalade signerait `system`).
       case Fleet.Pilot.GatekeeperSeal.seal_and_merge(
              ctx.forge,
              ctx.repo,
              pr_number,
              issue_n,
              producer,
-             gk_opts
+             ctx.forge_opts
            ) do
         :ok ->
           # Die-on-promote (best-effort). Le producteur est `one-shot` : il est DÉJÀ mort en fin de

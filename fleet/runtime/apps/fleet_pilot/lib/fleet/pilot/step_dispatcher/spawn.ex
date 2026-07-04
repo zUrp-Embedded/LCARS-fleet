@@ -366,10 +366,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   end
 
-  @doc "Pose `:project` dans les spawn_opts si présent (nil = no-op)."
-  @spec maybe_put_project(keyword(), map() | nil) :: keyword()
-  def maybe_put_project(spawn_opts, nil), do: spawn_opts
-  def maybe_put_project(spawn_opts, project), do: Keyword.put(spawn_opts, :project, project)
+  # (Les poses conditionnelles à UNE clé — `:project`, `:repo_id` — passent par la source unique
+  # `Fleet.Pilot.Opts.maybe_put/3` aux sites d'appel : plus de wrapper à clé figée ici. Seule
+  # `maybe_put_route/2` reste — elle pose DEUX clés couplées, ce n'est pas l'idiome maybe_put.)
 
   @doc "Pose `:workflow_map`/`:step` dans les spawn_opts si la route est présente (nil = no-op)."
   @spec maybe_put_route(keyword(), {String.t(), String.t()} | nil) :: keyword()
@@ -378,20 +377,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   def maybe_put_route(spawn_opts, {workflow_map_name, step}),
     do: spawn_opts |> Keyword.put(:workflow_map, workflow_map_name) |> Keyword.put(:step, step)
 
-  # `repo_id` = id forge du projet → session_id déterministe des rôles project-bound
-  # (eng, juges) via `Fleet.Spawner.SessionId` (segment `<REPO4>` DÉCIMAL). Forge sans `repo_id`/2
-  # (stub) / forge down / id absent → `nil` → pas de `repo_id` posé. Un rôle project-bound spawné SANS
-  # repo est alors une ANOMALIE : le mint (`deterministic_session_id`) FAIL-LOUD (raise) — on ne fabrique
-  # JAMAIS un UUID random pour masquer une forge non résolue (forge = organe de LCARS, forge down = stop).
-  # `rem(id, 10000)` : `<REPO4>` = 4 chiffres décimaux → DETTE assumée, le
-  # repo 10000 collisionne le repo 0 (on ne rouvrira pas le vieux ; cf. SessionId moduledoc).
-  @spec maybe_put_repo_id(keyword(), non_neg_integer() | nil) :: keyword()
-  def maybe_put_repo_id(spawn_opts, nil), do: spawn_opts
-  def maybe_put_repo_id(spawn_opts, repo_id), do: Keyword.put(spawn_opts, :repo_id, repo_id)
-
   @doc """
-  Résout le `repo_id` forge (borné à `<REPO4>` = `rem(id, 10000)`). Forge sans `repo_id/2` (stub) /
-  forge down / id absent → `nil` (pas de `repo_id` posé, cf. `maybe_put_repo_id/2`).
+  Résout le `repo_id` forge (borné à `<REPO4>` = `rem(id, 10000)`) — l'id forge du projet fait le
+  session_id déterministe des rôles project-bound (eng, juges) via `Fleet.Spawner.SessionId`
+  (segment `<REPO4>` DÉCIMAL). Forge sans `repo_id/2` (stub) / forge down / id absent → `nil`
+  (pas de `:repo_id` posé — `Opts.maybe_put` avale le nil au site d'appel). Un rôle project-bound
+  spawné SANS repo est alors une ANOMALIE : le mint (`deterministic_session_id`) FAIL-LOUD (raise)
+  — on ne fabrique JAMAIS un UUID random pour masquer une forge non résolue (forge = organe de
+  LCARS, forge down = stop). `rem(id, 10000)` : `<REPO4>` = 4 chiffres décimaux → DETTE assumée,
+  le repo 10000 collisionne le repo 0 (on ne rouvrira pas le vieux ; cf. SessionId moduledoc).
   """
   @spec resolve_repo_id(module(), String.t(), keyword()) :: non_neg_integer() | nil
   def resolve_repo_id(forge, repo, forge_opts) do

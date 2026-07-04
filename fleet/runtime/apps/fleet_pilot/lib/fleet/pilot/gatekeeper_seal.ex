@@ -10,10 +10,14 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   Les deux appellent `seal_and_merge/6` → même signature gatekeeper, même trace, partout (sans ce
   point unique, un merge passerait en token système brut, sans commentaire, attribué `lcars-system`).
 
-  Le `gk_opts` est construit par l'appelant (`Fleet.Pilot.ForgeClient.as_role(forge_opts, gatekeeper_role())`) :
-  ce module ne duplique PAS `as_role` (source unique = `Fleet.Pilot.ForgeClient.as_role/2`). Le rôle
-  gatekeeper a son AUTORITÉ UNIQUE dans `Fleet.Pilot.Roles` ; `gatekeeper_role/0` ici n'est qu'un
-  re-export pour les appelants du sceau (StepDispatcher, StepRunCompleter).
+  La signature gatekeeper (`as_gatekeeper/1` = `Fleet.Pilot.ForgeClient.as_role(forge_opts,
+  gatekeeper_role())`) est construite ICI, en interne : `seal_and_merge/6` reçoit les `forge_opts`
+  BRUTS et signe lui-même — il n'existe qu'UN writer de l'idiome `as_role(_, gatekeeper_role())`
+  dans le runtime (ce module ; `ArchEscalation` signe son commentaire d'escalade via le même
+  `as_gatekeeper/1`). Un appelant ne peut plus oublier la signature ni la forker. `as_role` reste
+  la source unique de l'adaptateur credential→wire (`Fleet.Pilot.ForgeClient.as_role/2` — non
+  dupliqué, appelé). Le rôle gatekeeper a son AUTORITÉ UNIQUE dans `Fleet.Pilot.Roles` ;
+  `gatekeeper_role/0` ici n'est qu'un re-export.
   """
 
   @doc "Rôle gardien des PRs (signe les fusions). Re-export de l'autorité unique `Fleet.Pilot.Roles.gatekeeper_role/0`."
@@ -21,17 +25,31 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   defdelegate gatekeeper_role(), to: Fleet.Pilot.Roles
 
   @doc """
-  Scelle la PR : **merge D'ABORD** (`gk_opts` = token gatekeeper), PUIS poste le commentaire de fin
+  Signature gatekeeper UNIQUE : injecte le token du compte `gatekeeper` dans `forge_opts`
+  (`Fleet.Pilot.ForgeClient.as_role/2`). SEUL point du runtime qui écrit l'idiome
+  `as_role(_, gatekeeper_role())` — utilisé en interne par `seal_and_merge/6` (merge + commentaire
+  de sceau) et par `ArchEscalation` (commentaire d'escalade signé gatekeeper). Token de rôle
+  absent/illisible → `forge_opts` inchangé, fallback token système loggué (`RoleToken`,
+  honnête-dégradé).
+  """
+  @spec as_gatekeeper(keyword()) :: keyword()
+  def as_gatekeeper(forge_opts),
+    do: Fleet.Pilot.ForgeClient.as_role(forge_opts, gatekeeper_role())
+
+  @doc """
+  Scelle la PR : **merge D'ABORD** (token gatekeeper), PUIS poste le commentaire de fin
   « ✅ livrée et fusionnée » — SEULEMENT si le merge a réussi (best-effort, le merge fait foi ; Gitea
   accepte un commentaire sur l'issue auto-close). On ne prétend JAMAIS « fusionnée » avant de l'avoir
   vérifié. Merge KO → aucun commentaire de réussite, l'erreur remonte.
 
-  `gk_opts` = `forge_opts` déjà passé par `Fleet.Pilot.ForgeClient.as_role(_, gatekeeper_role())` côté appelant.
+  `forge_opts` = opts forge BRUTS (base_url/token système…) : la signature gatekeeper est posée
+  ICI (`as_gatekeeper/1`), plus par l'appelant — un merge ne peut pas partir non signé.
   Returns `:ok | {:error, {:merge, reason}}`.
   """
   @spec seal_and_merge(module(), String.t(), integer(), integer(), String.t(), keyword()) ::
           :ok | {:error, {:merge, term()}}
-  def seal_and_merge(forge, repo, pr_number, issue_n, producer, gk_opts) do
+  def seal_and_merge(forge, repo, pr_number, issue_n, producer, forge_opts) do
+    gk_opts = as_gatekeeper(forge_opts)
     signature = "[merge:pr-#{pr_number}]"
     body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
 

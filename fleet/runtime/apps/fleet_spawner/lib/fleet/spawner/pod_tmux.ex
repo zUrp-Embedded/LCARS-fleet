@@ -131,6 +131,25 @@ defmodule Fleet.Spawner.PodTmux do
 
   def pkill_pattern(_), do: :unsafe
 
+  @doc """
+  Retire le sock-dir per-pod (`<base>/<pod_id>/`, dirname de `sock_path/1`) — geste POST-KILL
+  partagé par `Pod.Backend.teardown_backend` (teardown gracieux) et `PodWarden.reap` (reap
+  d'orphelin persistant). Sans ce retrait, le sock-dir traînerait après la mort du pod et le
+  `PodWarden` le re-suspecterait en loguant un FAUX « orphelin persistant » (bruit qui masque les vrais).
+
+  VOLONTAIREMENT hors de `kill_holder/1` (le rm n'y est PAS plié) : les deux sémantiques divergent —
+  `Pod.Backend.reap_orphan_pod` (reap AVANT un re-launch) appelle `kill_holder` SANS retirer le
+  sock-dir (l'état `:projecting` le re-provisionne juste après), et le teardown gracieux retire le
+  sock-dir aussi quand le kill est passé par le SIGTERM du Port (chemin sans `kill_holder`). Le rm
+  est donc un geste séparé du kill, pas sa suite systématique. Best-effort (`rm_rf` ne lève pas sur
+  l'absent), rend `:ok`.
+  """
+  @spec remove_sock_dir(String.t()) :: :ok
+  def remove_sock_dir(pod_id) when is_binary(pod_id) do
+    _ = File.rm_rf(Path.dirname(sock_path(pod_id)))
+    :ok
+  end
+
   @doc "Session vivante ? (`tmux -S <sock> has-session`). Health + recovery."
   @spec alive?(String.t()) :: boolean()
   def alive?(pod_id) when is_binary(pod_id) do

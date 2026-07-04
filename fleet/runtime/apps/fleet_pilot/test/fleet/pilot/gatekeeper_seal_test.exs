@@ -1,8 +1,31 @@
 defmodule Fleet.Pilot.GatekeeperSealTest do
-  @moduledoc "Sceau de fusion UNIQUE (F-arch-MCP) : merge signé PUIS comment gatekeeper signé. Le merge fait foi — JAMAIS de « fusionnée » avant la réalité (F-MERGE-CLAIM-BEFORE-REALITY)."
-  use ExUnit.Case, async: true
+  @moduledoc """
+  Sceau de fusion UNIQUE (F-arch-MCP) : merge signé PUIS comment gatekeeper signé. Le merge fait
+  foi — JAMAIS de « fusionnée » avant la réalité (F-MERGE-CLAIM-BEFORE-REALITY). La signature
+  gatekeeper est posée EN INTERNE par `seal_and_merge` (`as_gatekeeper` → RoleToken) : le token du
+  compte gatekeeper vient d'un tmp_dir contrôlé (jamais le vrai `/home/private` du runner).
+  async: false (mute la config globale `:role_tokens_dir`).
+  """
+  use ExUnit.Case, async: false
 
   alias Fleet.Pilot.GatekeeperSeal
+
+  @moduletag :tmp_dir
+
+  setup %{tmp_dir: tmp} do
+    # Token de rôle gatekeeper résoluble → `seal_and_merge` doit signer merge ET comment avec.
+    File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "GK-TOKEN")
+    prev = Application.get_env(:fleet_credentials, :role_tokens_dir)
+    Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev),
+        else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
+    end)
+
+    :ok
+  end
 
   defmodule OkForge do
     def post_comment(repo, n, body, opts) do
@@ -35,9 +58,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     end
   end
 
-  test "merge signé PUIS comment gatekeeper (signé via gk_opts) + dédup → :ok" do
-    gk_opts = [token: "GK-TOKEN"]
-    assert :ok = GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", gk_opts)
+  test "merge signé PUIS comment gatekeeper (signature interne as_gatekeeper) + dédup → :ok" do
+    # forge_opts BRUTS (token système) : la signature gatekeeper doit être posée EN INTERNE par
+    # `seal_and_merge` (writer unique `as_gatekeeper`) — le token de rôle ÉCRASE le système.
+    forge_opts = [token: "system-token"]
+    assert :ok = GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", forge_opts)
 
     assert_received {:merge, "fleet/p", 7, m_opts}
     assert m_opts[:token] == "GK-TOKEN"
@@ -46,7 +71,8 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert body =~ "Brique #42"
     assert body =~ "`engineer`"
     assert body =~ "[merge:pr-7]"
-    # signé gatekeeper (token du gk_opts) + dédup author-agnostic (sinon double-post au retry).
+
+    # signé gatekeeper (token de rôle, posé en interne) + dédup author-agnostic (sinon double-post au retry).
     assert c_opts[:token] == "GK-TOKEN"
     assert c_opts[:dedup_signature] == "[merge:pr-7]"
     assert c_opts[:dedup_any_author] == true

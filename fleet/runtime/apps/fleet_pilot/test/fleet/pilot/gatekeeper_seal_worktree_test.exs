@@ -3,11 +3,13 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
   Câblage : `seal_and_merge` DÉCLENCHE la projection du livrable sur le clone local après un merge
   réussi, et JAMAIS après un merge KO (rien n'a été fusionné → rien à projeter). Le seam `:worktree_sync`
   pointe un espion ; `seal_and_merge` tourne dans CE process (appel direct, pas de GenServer) → l'espion
-  `send(self(), …)` arrive bien au test. async: false (le seam est une config globale, posée/restaurée).
+  `send(self(), …)` arrive bien au test. async: false (les seams sont des configs globales, posées/restaurées).
   """
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.GatekeeperSeal
+
+  @moduletag :tmp_dir
 
   defmodule OkForge do
     def post_comment(_r, _n, _b, _o), do: {:ok, 1}
@@ -24,9 +26,22 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
     def sync(repo), do: send(self(), {:worktree_sync, repo})
   end
 
-  setup do
+  setup %{tmp_dir: tmp} do
     Application.put_env(:fleet_pilot, :worktree_sync, SpySync)
-    on_exit(fn -> Application.delete_env(:fleet_pilot, :worktree_sync) end)
+
+    # `seal_and_merge` signe désormais EN INTERNE (`as_gatekeeper` → RoleToken) : on pointe le
+    # répertoire de tokens sur un tmp VIDE (fallback système, hermétique — jamais le vrai
+    # `/home/private` du runner).
+    prev = Application.get_env(:fleet_credentials, :role_tokens_dir)
+    Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
+
+    on_exit(fn ->
+      Application.delete_env(:fleet_pilot, :worktree_sync)
+
+      if prev,
+        do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev),
+        else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
+    end)
   end
 
   test "merge OK → projection déclenchée sur le bon repo" do

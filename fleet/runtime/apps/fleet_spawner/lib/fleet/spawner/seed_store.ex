@@ -53,7 +53,9 @@ defmodule Fleet.Spawner.SeedStore do
   end
 
   defp do_checkpoint(pod_dir, projet, role, session_id, dest_dir) do
-    case latest_jsonl(pod_dir) do
+    # JSONl actif = le plus récent sous .claude/projects/*/*.jsonl (autorité partagée du glob :
+    # `Pod.SessionFiles.latest_jsonl/1`, robuste aux fichiers volatils).
+    case Fleet.Spawner.Pod.SessionFiles.latest_jsonl(pod_dir) do
       :none ->
         :none
 
@@ -103,23 +105,6 @@ defmodule Fleet.Spawner.SeedStore do
     end)
     |> Enum.reverse()
     |> Enum.join()
-  end
-
-  # JSONl actif = le plus récent sous .claude/projects/*/*.jsonl. Robuste aux fichiers volatils.
-  defp latest_jsonl(pod_dir) do
-    [pod_dir, ".claude", "projects", "*", "*.jsonl"]
-    |> Path.join()
-    |> Path.wildcard()
-    |> Enum.flat_map(fn f ->
-      case File.stat(f, time: :posix) do
-        {:ok, %{mtime: m}} -> [{f, m}]
-        _ -> []
-      end
-    end)
-    |> case do
-      [] -> :none
-      list -> {:ok, list |> Enum.max_by(fn {_f, m} -> m end) |> elem(0)}
-    end
   end
 
   @doc """

@@ -64,20 +64,12 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # Runner ASYNC (prod, injecté en `:runner`) — offload le record/escalade dans la `Task.Supervisor`
   # propre au consumer : le forge du registre ne bloque pas la mailbox. Rend `{:ok, :offloaded}` ; échec
   # de spawn → fail-loud loggé (l'incident n'est alors PAS gravé — visible, pas silencieux).
+  # Squelette partagé `Fleet.Pilot.Offload` (source unique) ; CE consumer garde son superviseur
+  # et sa conséquence de perte (« incident NON gravé »).
   @doc false
-  def offload_async(fun) do
-    case Task.Supervisor.start_child(@task_supervisor, fun) do
-      {:ok, _pid} ->
-        {:ok, :offloaded}
-
-      {:error, reason} ->
-        Logger.error(
-          "IncidentConsumer: offload Task échoué (#{inspect(reason)}) — incident NON gravé"
-        )
-
-        {:error, {:offload_failed, reason}}
-    end
-  end
+  def offload_async(fun),
+    do:
+      Fleet.Pilot.Offload.async(@task_supervisor, fun, {"IncidentConsumer", "incident NON gravé"})
 
   @impl GenServer
   def init(opts) do

@@ -1,7 +1,7 @@
 # fleet_starfleet (chantier 13)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-05 (B-R2 dédup chargé-caché : `Gatekeeper.init_schema!/0` + get-or-raise délégués à `Fleet.SchemaCache`, autorité Ring 0 ; 2026-07-02 : test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
+**Dernière révision** : 2026-07-05 (dédup B4/D8 : plomberie GenServer périodique de `MCPMonitor`/`MCPWatcher` → fonctions partagées `Fleet.Starfleet.PeriodicCheck` (pas de macro), chaque jumeau garde init/do_check/forme de réponse ; B-R2 dédup chargé-caché : `Gatekeeper.init_schema!/0` + get-or-raise délégués à `Fleet.SchemaCache`, autorité Ring 0 ; 2026-07-02 : test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
 
@@ -23,6 +23,9 @@ audit, escalade Cat 5 seulement.
 | `Fleet.Starfleet.Cat5Escalator` | pure functions `escalate/2` → log `AuditLog` + broadcast `audit.cat5.<source>` + délégation `CoordBackend` ch14 |
 | `Fleet.Starfleet.AuditLog` | wrapper `File.write/3` non-bang fail-safe sur `~/.lcars/log/fleet-starfleet.jsonl` (NDJSON append). **Rotation au seuil** (`:audit_log_max_bytes`, défaut 10 MB) → 1 backup `.1` : l'audit local est une convenance forensics, le durable = forge |
 | `Fleet.Starfleet.CoordBackend` | seam wrap `Fleet.Coord` ch14 (default `NotWiredYet` cohérent canon §0 #1). `resolved/0` = **source unique** du backend résolu (config + défaut) lue par `Cat5Escalator`/`DriftMonitor` — pas de défaut redupliqué par site |
+| `Fleet.Starfleet.MCPMonitor` | GenServer périodique (60s) — health check passif du substrat MCP pod-facing (cible `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}` via `which_children`, ou atome nommé) ; transition `:ok → :crashed` → broadcast `mcp.server_crashed` (retour = log seul) |
+| `Fleet.Starfleet.MCPWatcher` | GenServer périodique (hebdo) — drift de version du SDK MCP (`ex_mcp`) local vs Hex.pm ; mismatch → broadcast `sdk.upstream_alert` (fetcher injectable `:mcp_watcher_upstream_fetcher`) |
+| `Fleet.Starfleet.PeriodicCheck` | plomberie PARTAGÉE des deux jumeaux ci-dessus : `start_link(module, opts)` (GenServer nommé), `schedule/2` (send_after récursif), `tick/3` (corps du handle_info), `check_now/3` (hook test sync). Fonctions, pas de macro `use` ; chaque jumeau garde son `init/1`, son `do_check/1` et la forme de sa réponse. NE PAS généraliser au-delà de ces 2 modules |
 | `Fleet.Starfleet.Shutdown` | GenServer grace shutdown coordonné (`begin/1`, `drain_in_flight/1`) — DN ring0 `lcars-fleet_service`. Seam `:shutdown_dispatcher` (behaviour `Shutdown.Dispatcher`). `configured_dispatcher/0` = **source unique** du backend résolu (config + défaut canon `NoOpDispatcher`), lue à l'`init` ET par la readiness (`fleet_api`) — pas de second défaut à aligner |
 | `Fleet.Starfleet.Shutdown.NoOpDispatcher` | backend défaut — drain immédiat 0 in-flight (honnête-dégradé, `Fleet.Dispatcher` absent) |
 | `Fleet.Starfleet.Shutdown.AggregateDispatcher` | backend **réel** (câblé prod runtime.exs) — `in_flight_count` = `Spawner.count_pods` + `Pipeline.count_running` + `TaskQueue.list_pending` (tout pod vivant compté) ; `refuse_new_jobs` active `Fleet.Shutdown.Quiesce` |

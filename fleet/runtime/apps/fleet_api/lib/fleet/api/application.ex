@@ -114,16 +114,18 @@ defmodule Fleet.API.Application do
          ]}
       ]
 
-      # Bind loopback par défaut (frontière = isolation réseau, cf. Rest § Auth : la seule
+      # Child-spec via la source unique Fleet.EventRouter.Listener : bind loopback par défaut
+      # appliqué PAR CONSTRUCTION (frontière = isolation réseau, cf. Rest § Auth : la seule
       # écriture restante, /api/admin/spawn, est no-auth mais gardée — ne JAMAIS l'exposer
-      # 0.0.0.0 par défaut). Le dashboard navigateur (:<port>/dashboard + /ws)
-      # devient local-only : un accès distant passe par un tunnel/reverse-proxy.
-      # Exposition publique = opt-in nommé via Fleet.EventRouter.BindAddress (LCARS_BIND_HOST).
-      ip = Fleet.EventRouter.BindAddress.ip()
-
+      # 0.0.0.0 par défaut). Le dashboard navigateur (:<port>/dashboard + /ws) devient
+      # local-only : un accès distant passe par un tunnel/reverse-proxy. Exposition publique =
+      # opt-in nommé (LCARS_BIND_HOST, via BindAddress).
       [
-        {Plug.Cowboy,
-         scheme: :http, plug: Fleet.API.Rest, options: [ip: ip, port: port, dispatch: dispatch]}
+        Fleet.EventRouter.Listener.cowboy_child(
+          plug: Fleet.API.Rest,
+          port: port,
+          dispatch: dispatch
+        )
       ]
     else
       []

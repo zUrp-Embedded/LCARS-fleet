@@ -148,20 +148,16 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # Runner ASYNC (prod, injecté en `:step_run_runner`) — offload la complétion dans la
   # `Task.Supervisor` : le git push ≤30s + writes forge ne bloquent PAS le singleton. Rend
   # `{:ok, :offloaded}` (le vrai outcome est loggé dans la task). Échec de spawn → fail-loud loggé.
+  # Squelette partagé `Fleet.Pilot.Offload` (source unique) ; CE consumer garde son superviseur
+  # et sa conséquence de perte (« complétion perdue »).
   @doc false
-  def offload_async(fun) do
-    case Task.Supervisor.start_child(@step_run_task_supervisor, fun) do
-      {:ok, _pid} ->
-        {:ok, :offloaded}
-
-      {:error, reason} ->
-        Logger.error(
-          "StepRunConsumer: offload Task échoué (#{inspect(reason)}) — complétion perdue"
-        )
-
-        {:error, {:offload_failed, reason}}
-    end
-  end
+  def offload_async(fun),
+    do:
+      Fleet.Pilot.Offload.async(
+        @step_run_task_supervisor,
+        fun,
+        {"StepRunConsumer", "complétion perdue"}
+      )
 
   @impl GenServer
   def init(opts) do
@@ -637,7 +633,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # non-trivial = backlog ; ici fail-closed strict.)
   defp maybe_put_review_event(step_run, :judge, :reviewed, payload) do
     result = Verdict.unwrap_worker_envelope(payload["result"] || %{})
-    event = Verdict.review_event_for_decision(Verdict.gate_decision(result))
+    event = Verdict.review_event(Verdict.gate_decision(result))
     step_run = Map.put(step_run, :review_event, event)
 
     # Le juge PRODUIT un `reason`/`details`/`chain` dans sa gate-decision → on le REND sur la review

@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-04 (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
+**Dernière révision** : 2026-07-05 (dedup B5 : `Fleet.Pilot.Offload` — squelette d'offload unique des 2 consumers Bus ; `Opts.maybe_put` remplace les wrappers à clé figée `maybe_put_project|repo_id` de Spawn ; prédicat de confiance `system_authored?` UNIQUE dans ForgeProtocol — la copie issue-side de ForgeClient.Repo délègue ; `Verdict.review_event/1` = table unique token→review-event des 2 vocabulaires decision/intent ; signature gatekeeper internalisée dans `GatekeeperSeal.seal_and_merge` via le writer unique `as_gatekeeper/1` — appelants en forge_opts bruts, ArchEscalation aligné) (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
 **Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -45,7 +45,9 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   (défaut 2) → **escalade arch** au lieu de re-spawn → fin du churn infini) ; `:approved` → **merge `rebase` scellé
   `:gatekeeper_role`** via `Fleet.Pilot.GatekeeperSeal` (**sceau UNIQUE** partagé avec `StepRunCompleter.promote`,
   F-arch-MCP : comment gatekeeper + merge signé gatekeeper, plus de fork où l'escalade mergeait en token
-  système ; LINÉAIRE + gère un `main` avancé sous une PR parallèle — multi-issue, cf. `ForgeClient.merge_pr`
+  système ; la signature gatekeeper est posée EN INTERNE par `seal_and_merge` — writer unique
+  `GatekeeperSeal.as_gatekeeper/1`, les appelants passent les `forge_opts` bruts et ne peuvent plus
+  oublier/forker la signature ; LINÉAIRE + gère un `main` avancé sous une PR parallèle — multi-issue, cf. `ForgeClient.merge_pr`
   ; comment de fin honnête + close via `Closes #N`). **Passage de substance
   (anti-famine-d'info, fix #1)** : le brief **juge** (git-native) le POINTE sur son workspace
   (`git diff`) + porte le **critère** (body de l'issue, désamorcé I-CBC via `GateBrief :request`) ; le
@@ -61,7 +63,8 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       depuis le module racine).
     - `Fleet.Pilot.StepDispatcher.ArchEscalation` — cluster **IMPUR** « escalade arch » (écriture forge) :
       `escalate_rework/4` (rework non convergent, budget épuisé MA-06) + `escalate_conflict/4` (conflit de
-      merge récurrent) posent le **commentaire gatekeeper dédupliqué** (`as_role` + `dedup_signature`) + le
+      merge récurrent) posent le **commentaire gatekeeper dédupliqué** (signé via le writer unique
+      `GatekeeperSeal.as_gatekeeper/1` + `dedup_signature`) + le
       verrou `lcars-awaits-arch` sur l'ISSUE (poller SKIP → fin du churn) via l'unique point d'écriture
       `escalate_to_arch` (privé, pas de fork). **Frontière blindée** : reçoit un struct
       `%ArchEscalation.Seams{}` (les 3 seams `forge`/`repo`/`forge_opts`, `@enforce_keys` → un accès
@@ -76,7 +79,8 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       identité pod (`pod_id_for_scope/4`, project→`for_repo` | instance→`for_issue`) et une seule
       sérialisation de scope (`serialize_project_scope/6` : gate `:role_busy` AVANT tout verrou +
       reprovision cold in-place d'un pipe ready). Porte aussi les builders d'opts / naming
-      (`rc_name/2`, `feature_slug/1` purs, `maybe_put_project|route|repo_id`, `resolve_repo_id/3`).
+      (`rc_name/2`, `feature_slug/1` purs, `maybe_put_route/2` — 2 clés couplées — et `resolve_repo_id/3` ;
+      les poses à UNE clé `:project`/`:repo_id` passent par `Fleet.Pilot.Opts.maybe_put/3` aux sites d'appel).
       Le cœur DÉCIDE (route/rôle/verdict), Spawn EXÉCUTE. **Frontière blindée** : `spawn_step/9` reçoit
       un struct `%Spawn.Seams{}` (les 6 seams `forge`/`spawner`/`task_queue`/`repo`/`forge_opts`/
       `wake_recovery`, `@enforce_keys` → un accès hors-6-seams ne compile pas), jamais le `ctx`/`opts`
@@ -131,7 +135,13 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       l'**agrégation cross-repo** (`MapSet.union` des suspects de tous les repos du tick) = état CROSS-TICK →
       RESTENT au cœur (`do_poll`/`step_do_poll`). Ne nomme jamais `Poller` (pas de cycle).
 - `Fleet.Pilot.Opts` — util pur **source unique** de l'idiome `maybe_put/3` (pose une clé opts SI la valeur
-  n'est pas nil), partagé par `StepRunConsumer` / `ForgeClient.Transport` / `Poller` (builders d'opts+seams).
+  n'est pas nil), partagé par `StepRunConsumer` / `ForgeClient.Transport` / `Poller` (builders d'opts+seams)
+  et par les builders de spawn_opts de `StepDispatcher`/`ReviewLifecycle` (`:project`, `:repo_id`).
+- `Fleet.Pilot.Offload` — util **source unique** de l'idiome d'offload supervisé des consumers Bus
+  (`async(supervisor_name, fun, {consumer, conséquence})` : `Task.Supervisor.start_child` →
+  `{:ok, :offloaded}` | échec de spawn fail-loud loggé + `{:error, {:offload_failed, _}}`). Chaque
+  consumer (`StepRunConsumer`, `IncidentConsumer`) garde SON superviseur (blast-radius séparé) et SON
+  message de conséquence (« complétion perdue » vs « incident NON gravé ») ; seul le squelette est partagé.
 - `Fleet.Pilot.Labels` / `Fleet.Pilot.ForgeProtocol` — **vocabulaire wire-protocol** (source unique, build+parse
   **co-localisés** : un seul point si un format change). `Labels` = les **labels-verrous** non dérivables de
   l'état forge (`lcars-in-flight`/`lcars-awaits-arch`). `ForgeProtocol` = les **formats purs** (aucun I/O) : la
@@ -164,8 +174,12 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
     - `Fleet.Pilot.StepRunConsumer.Verdict` — cluster **PUR** du verdict (aucun `state`) extrait du consumer :
       **décodage** (`gate_result/1`, `gate_decision/1`, `unwrap_worker_envelope/1` — lecture de la décision
       gate-decision-v1 enfouie dans les enveloppes TaskQueue/worker) + **rendu texte** (`verdict_comment/3`,
-      `review_event_for_decision/1`, `judge_review_body/2`, `eng_summary/1` — trace verdict durable, corps de
-      review, voix de l'eng). **Un seul module** (décodage+rendu couplés : `eng_summary` s'appuie sur
+      `review_event/1`, `judge_review_body/2`, `eng_summary/1` — trace verdict durable, corps de
+      review, voix de l'eng). `review_event/1` = **TABLE UNIQUE** token→review-event fail-closed, où
+      convergent les DEUX vocabulaires disjoints (gate-decision string `"continue"`→approve côté
+      `StepRunConsumer` ; intent atom `:advance`/`:promote`→approve côté `StepRunCompleter` ; catch-all
+      partagé →request_changes, jamais d'approbation par omission). **Un seul module** (décodage+rendu
+      couplés : `eng_summary` s'appuie sur
       `unwrap_worker_envelope`, primitif partagé). Vocab canon via l'AUTORITÉ UNIQUE `Fleet.Workflow.GateDecision`
       (`@gate_decisions` non recopié). Le cœur décisionnel stateful (`apply_verdict`/`gate_decide`/`resume_gate`/
       `complete_business_step_run`) reste dans le module racine.

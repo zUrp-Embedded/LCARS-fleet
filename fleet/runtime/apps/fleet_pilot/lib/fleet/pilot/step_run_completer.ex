@@ -312,11 +312,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
     producer = producer_of(Map.get(step_run, :producer_branch))
 
     # Sceau UNIQUE : commentaire gatekeeper + merge signé gatekeeper — EXACTEMENT le même chemin que
-    # `StepDispatcher.promote_pr`. Sans ce sceau, ce terminal `:promote` (ex. après escalade)
-    # mergerait avec `forge_opts` brut = token système, sans commentaire (merge attribué `lcars-system`).
-    gk_opts = ForgeClient.as_role(forge_opts, Fleet.Pilot.GatekeeperSeal.gatekeeper_role())
-
-    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, gk_opts) do
+    # `StepDispatcher.promote_pr`. La signature gatekeeper est posée EN INTERNE par `seal_and_merge`
+    # (writer unique `GatekeeperSeal.as_gatekeeper/1`) : ce terminal `:promote` (ex. après escalade)
+    # ne peut pas merger en token système brut sans commentaire (merge attribué `lcars-system`).
+    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, forge_opts) do
       :ok -> {:ok, :promoted}
       {:error, {:merge, _}} = err -> err
     end
@@ -512,25 +511,19 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp review_step_run(step_run, pr) do
     # Un juge no-workflow_map porte `:review_event` (mappé du gate-decision continue/abandon par
-    # StepRunConsumer). À défaut (workflow_map), on dérive de l'intent. Le `:review_event` explicite prime.
+    # StepRunConsumer). À défaut (workflow_map), on dérive de l'INTENT via la TABLE UNIQUE
+    # `Verdict.review_event/1` (autorité du mapping token→review-event, fail-closed : seuls
+    # `:advance`/`:promote` approuvent, tout le reste — dont un intent inconnu — bloque en
+    # REQUEST_CHANGES ; jamais d'approbation par omission). Le `:review_event` explicite prime.
+    # Le `:review_body` (optionnel) prime sur le corps généré.
     event =
-      Map.get(step_run, :review_event) || review_event_for_intent(Map.fetch!(step_run, :intent))
+      Map.get(step_run, :review_event) ||
+        Fleet.Pilot.StepRunConsumer.Verdict.review_event(Map.fetch!(step_run, :intent))
 
     step_run
     |> Map.put(:pr_number, pr)
     |> Map.put(:review_event, event)
   end
-
-  # Verdict de gate (juge-workflow_map) → event de review native. SEULS les intents gate-PASS approuvent,
-  # et chacun EXPLICITEMENT : `:advance` (un step suit) et `:promote` (terminal) = APPROVED.
-  # `:rework` (gate fail) = REQUEST_CHANGES. Le `:review_body` (optionnel) prime sur le corps genere.
-  # Defaut FAIL-CLOSED : tout autre intent (un futur `:reject`/`:abandon`, ou un step_run qui a perdu son
-  # `:review_event`) ne s'auto-approuve JAMAIS — approuver par OMISSION est le pire defaut pour un
-  # verdict. Le catch-all bloque (REQUEST_CHANGES) ; approuver reste un choix gravé, intent par intent.
-  defp review_event_for_intent(:advance), do: :approve
-  defp review_event_for_intent(:promote), do: :approve
-  defp review_event_for_intent(:rework), do: :request_changes
-  defp review_event_for_intent(_), do: :request_changes
 
   # Routage commun selon l'intent. Le trigger du step suivant = la review-request native
   # (`request_review`), plus `set_assignee` : le producteur reste assigne (Entry), les juges
