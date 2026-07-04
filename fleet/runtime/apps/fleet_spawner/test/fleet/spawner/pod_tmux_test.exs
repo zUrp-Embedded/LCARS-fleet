@@ -54,8 +54,13 @@ defmodule Fleet.Spawner.PodTmuxTest do
 
       # le holder porte le pod_id comme arg STANDALONE (bwrap_launch.sh <role> <pod_id> ...) → matche.
       assert Regex.match?(re, "bwrap a pr-8-engineer /home/x/pods/pr-8-engineer claude")
-      # superstring (pod_id préfixe d'un autre) → PAS de match (ancrage token).
+
+      # holder HOST : argv0 `lcars-hold:<role>:<pod_id>` (F-HOLDER-LEAK) — le `:` avant le pod_id fait
+      # rater l'ancrage token seul ; l'alternation `lcars-hold:<role>:` le rattrape.
+      assert Regex.match?(re, "lcars-hold:engineer:pr-8-engineer infinity")
+      # superstring (pod_id préfixe d'un autre) → PAS de match (ancrage token), DEUX formes.
       refute Regex.match?(re, "bwrap a pr-8-engineer-v2 /x claude")
+      refute Regex.match?(re, "lcars-hold:engineer:pr-8-engineer-v2 infinity")
       # substring noyé (pas un token) → PAS de match.
       refute Regex.match?(re, "xxpr-8-engineerxx")
     end

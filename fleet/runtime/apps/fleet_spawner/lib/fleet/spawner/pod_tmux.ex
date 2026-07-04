@@ -114,7 +114,16 @@ defmodule Fleet.Spawner.PodTmux do
   def pkill_pattern(pod_id) when is_binary(pod_id) do
     if Fleet.Spawner.valid_pod_id?(pod_id) and
          Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._\-]{3,}\z/, pod_id) do
-      {:ok, "(^| )#{Regex.escape(pod_id)}( |$)"}
+      esc = Regex.escape(pod_id)
+      # DEUX formes de holder, réunies en UNE alternation ancrée :
+      #   - bwrap : le pod_id est un ARG STANDALONE de `bwrap_launch.sh` (`… <role> <pod_id> …`) →
+      #     préfixe (début|espace).
+      #   - host  : `host_launch.sh` pose argv0 `lcars-hold:<role>:<pod_id>` — le pod_id y est préfixé
+      #     par `:`, PAS un espace, donc l'ancrage token seul le RATAIT (F-HOLDER-LEAK : le holder host
+      #     `sleep infinity` fuyait sur containment:none, jamais tué par ce pkill) → on ajoute le préfixe
+      #     `lcars-hold:<role>:`. Ce préfixe est ultra-spécifique (rien d'autre ne le porte) → zéro risque
+      #     de self-kill du BEAM ; le garde `:unsafe` reste la barrière anti-pattern-trop-large.
+      {:ok, "(^| |lcars-hold:[^ ]*:)#{esc}( |$)"}
     else
       :unsafe
     end
