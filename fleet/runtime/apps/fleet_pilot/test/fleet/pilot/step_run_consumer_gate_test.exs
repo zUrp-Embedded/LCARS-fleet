@@ -209,26 +209,38 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:open_pr, _, _, _}
   end
 
-  test "gate {:fail} mais budget epuise -> rework_exhausted, AUCUNE ecriture forge" do
-    # budget = nb_steps(2) * (max_rework_rounds(2) + 1) = 6
+  test "gate {:fail} + budget epuise -> ESCALADE await_arch (fin du churn G2), plus de {:error} log-only" do
+    # budget = nb_steps(2) * (max_rework_rounds(2) + 1) = 6 ; step_runs deja a 6 => epuise.
+    # AVANT (bug G2) : {:error, {:rework_exhausted}} remontait en {:noreply} log-only -> le reaper
+    # re-dispatchait -> re-fail -> churn infini sans notif humaine. MAINTENANT : escalade vers l'arch
+    # (comment + lcars-awaits-arch + unlock) -> le poller skip l'issue -> l'humain tranche.
     payload = build_done("gated", %{})
 
-    assert {:error, {:rework_exhausted, %{step_runs: 6, budget: 6}}} =
+    assert {:ok, :awaiting_arch} =
              StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 6]))
 
-    refute_received {:assignee, _}
+    assert_received {:label, "lcars-awaits-arch"}
+
+    # unlock LOAD-BEARING : retire lcars-in-flight -> le poller ne re-dispatche plus (fin du churn).
+    assert_received :unlocked
+    assert_received {:comment, body}
+    assert body =~ "Rework"
+    assert body =~ "Architecte"
+    # KICK actif de l'arch (sas unique vers l'humain).
+    assert_received {:wake, "permanent-architect"}
+    # escalade humaine, PAS un rebond (PR) ni un abandon (close).
     refute_received {:open_pr, _, _, _}
-    refute_received :unlocked
     refute_received :closed
   end
 
-  test "budget : juste sous la limite rebondit, pile a la limite s'arrete" do
+  test "budget : juste sous la limite rebondit, pile a la limite ESCALADE (await_arch, plus de churn)" do
     payload = build_done("gated", %{})
 
     assert {:ok, :rework_requested} =
              StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 5]))
 
-    assert {:error, {:rework_exhausted, _}} =
+    # pile a la limite : budget epuise -> escalade humaine (await_arch), plus le {:error} avale (G2).
+    assert {:ok, :awaiting_arch} =
              StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 6]))
   end
 

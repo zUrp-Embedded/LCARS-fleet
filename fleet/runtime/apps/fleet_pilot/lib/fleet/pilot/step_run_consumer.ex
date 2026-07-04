@@ -423,7 +423,16 @@ defmodule Fleet.Pilot.StepRunConsumer do
         # (DAG, step inconnu) NE misroute PAS : elle remonte (le système n'avance pas à l'aveugle).
         case resolve_next(payload, n, state) do
           {:error, reason} ->
-            {:error, reason}
+            # G2 (entonnoir) : une erreur TERMINALE NON-TRANSITOIRE ne doit PAS remonter en `{:noreply}`
+            # log-only — sinon le reaper réclame le verrou 2 ticks après, re-dispatch le MÊME step →
+            # re-fail → CHURN infini sans jamais notifier un humain (asymétrie avec le chemin verdict qui,
+            # lui, escalade). On l'ESCALADE vers l'arch (await_arch : comment + `lcars-awaits-arch` + unlock
+            # → le poller SKIP l'issue, le churn s'arrête, l'humain tranche). Les autres erreurs remontent
+            # inchangées : transitoires/auto-réparantes (`:no_gatekeeper` = le gatekeeper permanent reboote,
+            # la réconciliation re-dispatche) ou traitées ailleurs (workflow_map illisible → IncidentRegistry, G6).
+            if terminal_escalate?(reason),
+              do: escalate_terminal_error(reason, n, role, state),
+              else: {:error, reason}
 
           # Escalade gatekeeper : remonte au handle_info qui stocke `gate_evals`.
           {:escalate, corr, eval_ctx} ->
@@ -471,6 +480,52 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # KICK l'arch : un producteur bloqué = l'arch (auteur du brief) doit débloquer (clarifier/corriger).
     _ = kick_architect(state)
     result
+  end
+
+  # G2 (entonnoir) — quelles erreurs de fin de step_run sont TERMINALES NON-TRANSITOIRES (= un mur humain,
+  # à escalader) vs remontées telles quelles (transitoires / auto-réparantes / traitées ailleurs) :
+  #   - `rework_exhausted` : le budget est un compteur MONOTONE (step_runs signés) → re-dispatch = re-fail,
+  #     jamais de convergence sans intervention → ESCALADE.
+  #   - `rework_budget_unreadable` : le code choisit explicitement de « surfacer » plutôt que rebondir à
+  #     l'aveugle (un rebond non vérifiable pourrait boucler) → ESCALADE (cohérent avec l'intent de `rebound`).
+  # Tout le reste (`:no_gatekeeper` wrappé `gatekeeper_dispatch`, nav workflow_map, load workflow_map…) reste
+  # remonté : transitoire (gatekeeper permanent reboote) ou d'un autre concern (G6 → IncidentRegistry).
+  defp terminal_escalate?({:rework_exhausted, _}), do: true
+  defp terminal_escalate?({:rework_budget_unreadable, _}), do: true
+  defp terminal_escalate?(_), do: false
+
+  # Escalade une erreur terminale vers l'humain (await_arch), même filet que `escalate_blocked_producer`
+  # (comment adressé à l'arch + `lcars-awaits-arch` + unlock + kick). L'unlock est LOAD-BEARING : il retire
+  # `lcars-in-flight` → le poller ne re-dispatche plus (l'issue porte `lcars-awaits-arch`, skippée) → fin du churn.
+  defp escalate_terminal_error(reason, n, role, state) do
+    step_run = %{
+      repo: state.repo,
+      issue_number: n,
+      role: role,
+      decision: :terminal_error,
+      comment_body: terminal_error_message(reason, role)
+    }
+
+    hc_opts = [forge_opts: state.forge_opts] |> Opts.maybe_put(:forge_client, state.forge_client)
+
+    result =
+      run_completion(state, "##{n} (terminal-error)", fn ->
+        state.step_run_completer.await_arch(step_run, hc_opts)
+      end)
+
+    _ = kick_architect(state)
+    result
+  end
+
+  defp terminal_error_message({:rework_exhausted, %{step_runs: sr, budget: b}}, role) do
+    "🛑 **Rework épuisé** (dernier producteur : `#{role}`) — #{sr}/#{b} step_runs signés, budget atteint.\n\n" <>
+      "L'issue ne peut plus avancer seule (re-dispatch = re-échec). Corrige le brief ou la workflow_map, " <>
+      "ou abandonne l'issue."
+  end
+
+  defp terminal_error_message({:rework_budget_unreadable, reason}, _role) do
+    "🛑 **Budget de rework illisible** (`#{inspect(reason)}`) — on ne rebondit pas à l'aveugle (risque de " <>
+      "boucle). Vérifie l'état forge de l'issue (comments `[step_run:…]`) puis relance ou abandonne."
   end
 
   # Exécute la complétion d'un step_run via le seam `step_run_runner`. SYNC (défaut) → exécute, logge
