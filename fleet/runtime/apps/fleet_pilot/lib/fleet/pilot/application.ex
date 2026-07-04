@@ -127,7 +127,9 @@ defmodule Fleet.Pilot.Application do
     [
       # Superviseur de tasks pour l'offload de la complétion de step_run (le git push ≤30s du
       # StepRunConsumer ne bloque pas le singleton). Démarré AVANT le StepRunConsumer (qui s'y réfère).
-      {Task.Supervisor, name: Fleet.Pilot.StepRunConsumer.task_supervisor()},
+      # max_children (E4) : borne le burst (cascade de pod.completed -> N pushes forge concurrents =
+      # thundering herd). Au-dela -> {:error, :max_children}, gere fail-loud par offload_async.
+      {Task.Supervisor, name: Fleet.Pilot.StepRunConsumer.task_supervisor(), max_children: 16},
       # Mémoire persistante des incidents système (owner résilient). Consommée par WakeRecovery
       # (kick_gatekeeper / safe_wake) ET par l'IncidentConsumer (events `*.failed`). Boot best-effort
       # (forge injoignable au boot → WAL local seul, pas de crash).
@@ -135,7 +137,7 @@ defmodule Fleet.Pilot.Application do
       # Consumer Bus SÉPARÉ des events d'ÉCHEC de pod (`pod.failed`/`wake.failed`) → IncidentRegistry.
       # Sa Task.Supervisor (offload du forge du registre) démarrée AVANT lui (il s'y réfère). Séparé du
       # StepRunConsumer : concern distinct, le burst d'échecs ne partage pas la mailbox de la complétion.
-      {Task.Supervisor, name: Fleet.Pilot.IncidentConsumer.task_supervisor()},
+      {Task.Supervisor, name: Fleet.Pilot.IncidentConsumer.task_supervisor(), max_children: 16},
       {Fleet.Pilot.IncidentConsumer, runner: &Fleet.Pilot.IncidentConsumer.offload_async/1},
       # Sérialiseur d'alignement du clone local après merge : projette le livrable (`origin/main`) sur
       # `/home/projects/<name>`. Démarré AVANT Poller + StepRunConsumer — ses deux déclencheurs de merge

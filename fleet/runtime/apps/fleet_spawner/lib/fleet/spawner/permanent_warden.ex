@@ -81,19 +81,33 @@ defmodule Fleet.Spawner.PermanentWarden do
       Process.send_after(self(), {:respawn, role}, delay)
       {:noreply, %{state | attempts: Map.put(state.attempts, role, attempt + 1)}}
     else
-      # Borne de depense atteinte : HALT du retry. Pas silencieux — la recurrence de pod.failed a DEJA
-      # ouvert une issue sysadmin via le rail incident ; on ne brule pas de LLM en boucle infinie.
-      Logger.error(
-        "PermanentWarden: permanent #{role} — #{@max_attempts} respawns consecutifs epuises, HALT " <>
-          "(issue sysadmin deja ouverte par le rail incident ; intervention requise)"
+      # Borne atteinte MAIS un pod.failed POST-HALT prouve qu'un pod de ce role A REVECU depuis
+      # (il a fallu qu'il vive pour mourir : le warden ne respawn plus apres HALT → c'est une
+      # reparation externe/manuelle). Cattle : ce nouvel echec merite un NOUVEAU cycle de retries —
+      # sans reset, le warden restait mort pour ce role jusqu'au restart BEAM (E2). Pas de boucle :
+      # chaque cycle post-HALT exige une resurrection externe (la depense est portee par l'acteur).
+      Logger.warning(
+        "PermanentWarden: permanent #{role} mort APRES HALT (reparation externe detectee) → " <>
+          "nouveau cycle de respawn (compteur remis a zero)"
       )
 
-      {:noreply, state}
+      delay = backoff_delay(0, state.base)
+      Process.send_after(self(), {:respawn, role}, delay)
+      {:noreply, %{state | attempts: Map.put(state.attempts, role, 1)}}
     end
   end
 
   def handle_info({:respawn, role}, state) do
-    case state.respawn_fun.(role) do
+    # F5 (E1) : respawn_fun rescue-wrappe — un raise (bug cap-profile, FS) tuerait le warden
+    # (perte des compteurs + timers pendants → roles morts en silence apres restart vide).
+    result =
+      try do
+        state.respawn_fun.(role)
+      rescue
+        e -> {:error, {:respawn_raised, Exception.message(e)}}
+      end
+
+    case result do
       {:ok, pod_id} ->
         Logger.info("PermanentWarden: permanent #{role} respawne (#{pod_id})")
         # Respawn REUSSI → compteur remis a zero (une mort ULTERIEURE repart en backoff court).

@@ -169,6 +169,12 @@ defmodule Fleet.Spawner.Pod do
 
   @impl :gen_statem
   def init(args) do
+    # F3 (E1 2026-07-04) : trap_exit — SANS lui, terminate/3 n'est PAS invoqué sur un exit signal
+    # (DynamicSupervisor.terminate_child fallback de kill_pod, arrêt superviseur) : le « filet
+    # teardown GARANTI » documenté sur terminate/3 avait un trou précisément sur les arrêts
+    # supervisor-driven → backend orphelin (claude brûle OAuth+RAM) + socket MCP fuitée.
+    Process.flag(:trap_exit, true)
+
     # `recover_or_init` (via `deterministic_session_id`) RAISE pour un rôle project-bound sans
     # repo_id (forge non résolue) — on ne fabrique JAMAIS un UUID de complaisance. On rend alors
     # `{:stop, {exception, stacktrace}}` : `start_link` renvoie `{:error, {%ArgumentError{}, stack}}`

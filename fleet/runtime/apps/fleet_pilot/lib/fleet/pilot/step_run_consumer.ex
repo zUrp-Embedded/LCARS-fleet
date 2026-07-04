@@ -579,40 +579,43 @@ defmodule Fleet.Pilot.StepRunConsumer do
          comment_body \\ nil,
          judge_target \\ nil
        ) do
-    {pr_role, producer_branch} = classify_pr_role(payload, n, role, state)
-
-    step_run =
-      %{
-        repo: state.repo,
-        # pod_id du PRODUCTEUR (depuis le payload pod.completed) : porte jusqu'a l'emission de
-        # `deliverable.published` (slot-freeze) pour adresser le pod resident a remettre :ready.
-        pod_id: payload["pod_id"],
-        issue_number: n,
-        role: role,
-        pr_role: pr_role,
-        intent: intent,
-        next_assignee: next_assignee,
-        # Pont transitionnel : workflow_map_name+next_step gravent la route que le StepDispatcher lit
-        # pour spawner le step suivant (retire a l'increment 4, switch sur la review-request).
-        next_step: next_step,
-        workflow_map: payload["workflow_map"],
-        producer_branch: producer_branch,
-        base_branch: "main"
-      }
-      |> put_unless_nil(:comment_body, comment_body)
-      # judge_target (brief|nil) → complete_judge décide trace review-PR vs commentaire-issue ;
-      # absent (chemin normal/gatekeeper) → comportement PR par défaut (fail-loud si pas de PR).
-      |> put_unless_nil(:judge_target, judge_target)
-      |> maybe_put_deliverable(pr_role, role, payload, n, state)
-      |> maybe_put_review_event(pr_role, intent, payload)
-      |> maybe_put_eng_summary(pr_role, payload)
-
-    hc_opts =
-      [forge_opts: state.forge_opts]
-      |> Opts.maybe_put(:forge_client, state.forge_client)
-      |> Opts.maybe_put(:deliverable, state.deliverable)
-
+    # E4 : TOUTE la construction (dont classify_pr_role → list_open_pulls HTTP inline, timeout 10s)
+    # vit DANS la closure offloadée — forge dégradée + rafale de pod.completed ne bloque plus la
+    # mailbox du singleton (le handle_info redevient O(1) en prod, l'offload porte l'I/O).
     run_completion(state, "##{n}", fn ->
+      {pr_role, producer_branch} = classify_pr_role(payload, n, role, state)
+
+      step_run =
+        %{
+          repo: state.repo,
+          # pod_id du PRODUCTEUR (depuis le payload pod.completed) : porte jusqu'a l'emission de
+          # `deliverable.published` (slot-freeze) pour adresser le pod resident a remettre :ready.
+          pod_id: payload["pod_id"],
+          issue_number: n,
+          role: role,
+          pr_role: pr_role,
+          intent: intent,
+          next_assignee: next_assignee,
+          # Pont transitionnel : workflow_map_name+next_step gravent la route que le StepDispatcher lit
+          # pour spawner le step suivant (retire a l'increment 4, switch sur la review-request).
+          next_step: next_step,
+          workflow_map: payload["workflow_map"],
+          producer_branch: producer_branch,
+          base_branch: "main"
+        }
+        |> put_unless_nil(:comment_body, comment_body)
+        # judge_target (brief|nil) → complete_judge décide trace review-PR vs commentaire-issue ;
+        # absent (chemin normal/gatekeeper) → comportement PR par défaut (fail-loud si pas de PR).
+        |> put_unless_nil(:judge_target, judge_target)
+        |> maybe_put_deliverable(pr_role, role, payload, n, state)
+        |> maybe_put_review_event(pr_role, intent, payload)
+        |> maybe_put_eng_summary(pr_role, payload)
+
+      hc_opts =
+        [forge_opts: state.forge_opts]
+        |> Opts.maybe_put(:forge_client, state.forge_client)
+        |> Opts.maybe_put(:deliverable, state.deliverable)
+
       state.step_run_completer.complete_pr(step_run, hc_opts)
     end)
   end

@@ -35,7 +35,9 @@ defmodule Fleet.API.Rest do
   alias Fleet.EventRouter.Bus
 
   plug(:match)
-  plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
+  # length (E4) : borne EXPLICITE du body (le defaut Plug 8MB etait implicite). 1 MB >> le plus
+  # gros POST legitime (admin/spawn : cap-profile + brief).
+  plug(Plug.Parsers, parsers: [:json], json_decoder: Jason, length: 1_048_576)
   plug(:dispatch)
 
   # Public health probe (200 dès Cowboy bind, consommé par `lcars-readiness`)

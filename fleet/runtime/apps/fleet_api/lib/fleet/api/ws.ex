@@ -34,7 +34,9 @@ defmodule Fleet.API.WS do
 
   @impl :cowboy_websocket
   def init(req, _opts) do
-    {:cowboy_websocket, req, %{topics: []}, %{idle_timeout: 60_000}}
+    # max_frame_size (E4) : defaut Cowboy = infinity — une frame client arbitrairement grosse
+    # serait bufferisee puis decodee par Jason. 64 KiB >> le plus gros message legitime (subscribe).
+    {:cowboy_websocket, req, %{topics: []}, %{idle_timeout: 60_000, max_frame_size: 65_536}}
   end
 
   @impl :cowboy_websocket

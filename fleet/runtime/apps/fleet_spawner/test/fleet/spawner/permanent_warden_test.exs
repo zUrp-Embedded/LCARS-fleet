@@ -69,6 +69,27 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     refute_receive {:respawn_attempt, _}, 300
   end
 
+  test "pod.failed POST-HALT = réparation externe détectée → NOUVEAU cycle (cattle, E2)" do
+    parent = self()
+
+    warden =
+      start_warden(fn role ->
+        send(parent, {:respawn_attempt, role})
+        {:error, {role, :launch_failed}}
+      end)
+
+    # Épuise la borne (1 event + 4 retries = 5 tentatives) → HALT.
+    send(warden, pod_failed("permanent-architect"))
+    for _ <- 1..5, do: assert_receive({:respawn_attempt, "architect"}, 1_000)
+    refute_receive {:respawn_attempt, _}, 200
+
+    # Un pod.failed POST-HALT ne peut venir que d'un pod RESSUSCITÉ par un acteur externe
+    # (le warden ne respawn plus) → le warden repart pour un nouveau cycle au lieu de rester
+    # mort pour ce rôle jusqu'au restart BEAM.
+    send(warden, pod_failed("permanent-architect"))
+    assert_receive {:respawn_attempt, "architect"}, 1_000
+  end
+
   test "backoff_delay/2 : exponentiel plafonné, pur" do
     assert PermanentWarden.backoff_delay(0, 5_000) == 5_000
     assert PermanentWarden.backoff_delay(1, 5_000) == 10_000

@@ -67,7 +67,23 @@ defmodule Fleet.EventRouter.Application do
   end
 
   defp base_children do
-    [Fleet.EventRouter.Bus]
+    # F1 (E1 2026-07-04) : le PubSub sous un superviseur DÉDIÉ `max_restarts: 0`. Un restart LOCAL
+    # de Phoenix.PubSub perdrait TOUTES les souscriptions du node : consumers vivants mais SOURDS
+    # à vie (ils ne s'abonnent qu'à init/1), indétectable (les sondes testent whereis, pas la
+    # souscription). Crash du PubSub → escalade délibérée jusqu'au node (posture assumée :
+    # tout est :permanent, le container restart = la seule resouscription honnête).
+    [
+      %{
+        id: Fleet.EventRouter.Bus.EscalatingSupervisor,
+        type: :supervisor,
+        start:
+          {Supervisor, :start_link,
+           [
+             [Fleet.EventRouter.Bus],
+             [strategy: :one_for_one, max_restarts: 0, name: Fleet.EventRouter.Bus.EscalatingSupervisor]
+           ]}
+      }
+    ]
   end
 
   @doc """

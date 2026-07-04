@@ -22,6 +22,12 @@ set -euo pipefail
 SELF="$(readlink -f "$0")"
 BIN_DIR="$(dirname "$SELF")"
 RUNTIME_DIR="$(dirname "$BIN_DIR")"          # bin/.. = l'umbrella
+
+# Distribution Erlang (opt-in via LCARS_FLEET_V2_ERL_NODE) — dérivation UNIQUE, partagée
+# start (lancement distribué) / stop (RPC graceful F7).
+ERL_NODE="fleet_$(id -un)@127.0.0.1"
+ERL_COOKIE="${LCARS_FLEET_V2_ERL_COOKIE:-lcars}"
+DIST_ON=""; [[ -n "${LCARS_FLEET_V2_ERL_NODE:-}" ]] && DIST_ON=1
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 SESSION="${LCARS_FLEET_V2_SESSION:-fleet_v2}"
 DAEMON_SOCK="${LCARS_FLEET_V2_SOCK:-$HOME/.lcars/run/fleet_v2.sock}"
@@ -130,9 +136,7 @@ cmd_start() {
   #   - SOURCE (dev) : `mix run --no-halt` depuis le repo (itération rapide) + cap-profiles LIVE du source.
   # Distribution Erlang PER-HUMAIN (cf. setup_env) : node `fleet_<user>` (jamais le `fleet_umbrella` fixe
   # partagé). ON seulement si LCARS_FLEET_V2_ERL_NODE est posé (debug RPC) ; sinon OFF (pas d'epmd).
-  local erl_node="fleet_$(id -un)@127.0.0.1"
-  local erl_cookie="${LCARS_FLEET_V2_ERL_COOKIE:-lcars}"
-  local dist_on=""; [[ -n "${LCARS_FLEET_V2_ERL_NODE:-}" ]] && dist_on=1
+  local erl_node="$ERL_NODE" erl_cookie="$ERL_COOKIE" dist_on="$DIST_ON"
 
   local rel_bin="$RUNTIME_DIR/rel/fleet_umbrella/bin/fleet_umbrella"
   local mode launch_cmd
@@ -188,12 +192,41 @@ cmd_start() {
   exec "$BIN_DIR/lcars" attach "$arch_pod"
 }
 
+# F7 (E1 2026-07-04) : stop GRACEFUL d'abord — Shutdown.begin (refuse + drain in-flight) puis
+# :init.stop (arrêt OTP ordonné : terminate des pods tourne, trap_exit F3 → teardown + checkpoint
+# seed). Le kill-server tmux n'est plus que le FALLBACK (BEAM sans distribution, RPC KO, ou
+# graceful qui traîne >30s). Avant : kill-server direct = aucun chemin d'arrêt n'exécutait jamais
+# le rail Shutdown (construit pour ça, zéro caller).
 cmd_stop() {
+  if ! dtmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "fleet_v2: pas de fleet active." >&2
+    return 0
+  fi
+
+  if [[ -n "$DIST_ON" ]]; then
+    echo "fleet_v2: arrêt graceful (drain + teardown ordonné)…" >&2
+    local rel_bin="$RUNTIME_DIR/rel/fleet_umbrella/bin/fleet_umbrella"
+    local rpc_expr='_ = Fleet.Starfleet.Shutdown.begin(grace_ms: 10_000); :init.stop()'
+
+    if [[ -x "$rel_bin" ]]; then
+      RELEASE_DISTRIBUTION=name RELEASE_NODE="$ERL_NODE" RELEASE_COOKIE="$ERL_COOKIE" \
+        "$rel_bin" rpc "$rpc_expr" 2>/dev/null || true
+    else
+      elixir --name "ctl_stop_$$@127.0.0.1" --cookie "$ERL_COOKIE" -e \
+        "true = Node.connect(:\"$ERL_NODE\"); :rpc.call(:\"$ERL_NODE\", Code, :eval_string, [\"$rpc_expr\"])" \
+        2>/dev/null || true
+    fi
+
+    # Attend la fin propre du BEAM (la session tmux meurt avec lui) — 30s max.
+    local i=0
+    while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < 30 )); do sleep 1; ((i++)); done
+  fi
+
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
     dtmux kill-server 2>/dev/null || true
-    echo "fleet_v2: BEAM arrêté. (Pods éventuels reapés au prochain start par l'OrphanReaper.)" >&2
+    echo "fleet_v2: BEAM arrêté (fallback kill — pods éventuels reapés au prochain start)." >&2
   else
-    echo "fleet_v2: pas de fleet active." >&2
+    echo "fleet_v2: BEAM arrêté proprement (drain + teardown exécutés)." >&2
   fi
 }
 

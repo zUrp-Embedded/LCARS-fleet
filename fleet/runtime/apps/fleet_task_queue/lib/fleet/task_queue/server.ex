@@ -329,7 +329,9 @@ defmodule Fleet.TaskQueue.Server do
   end
 
   # Last-poll du pod (`DateTime | nil`) = l'ACK in-band du bootstrap (« l'agent a tendu la main »,
-  # même sans work item). Le consommateur (boucle wake ack-driven) compare avec son instant de trigger.
+  # même sans work item). Le consommateur réel (`Pod.TaskProbe.polled?`) teste la PRÉSENCE (!= nil),
+  # il ne compare PAS d'instants (E3 : si une comparaison de récence naît un jour, la faire en
+  # monotonic/jeton, jamais DateTime-vs-DateTime — sauts NTP).
   def handle_call({:last_poll, pod_id}, _from, state) do
     {:reply, Map.get(state.polls, pod_id), state}
   end

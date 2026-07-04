@@ -456,13 +456,16 @@ defmodule Fleet.Spawner do
   defp pod_child_spec(args) do
     cap_profile = args.cap_profile
     scope = Fleet.CapProfile.lifetime_scope(cap_profile)
-    max_alive_sec = get_in(cap_profile.spec, ["invocation", "max_alive_sec"]) || 600
 
     %{
       id: args.pod_id,
       start: {Pod, :start_link, [args]},
       restart: restart_strategy_for(scope),
-      shutdown: max_alive_sec * 1000,
+      # F3 (E1) : borne du SHUTDOWN superviseur = le temps du TEARDOWN (kill tmux + rm + checkpoint
+      # seed, secondes), PAS la durée de vie du pod (l'ancien `max_alive_sec * 1000` = 600s attendait
+      # 10 min un pod récalcitrant à l'arrêt — config morte sans trap_exit, mur réel avec). 15s puis
+      # brutal-kill OTP ; le PodWarden reape ce qui resterait.
+      shutdown: 15_000,
       type: :worker
     }
   end

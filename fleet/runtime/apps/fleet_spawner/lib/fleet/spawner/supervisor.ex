@@ -23,6 +23,18 @@ defmodule Fleet.Spawner.Supervisor do
 
   @impl DynamicSupervisor
   def init(_args) do
-    DynamicSupervisor.init(strategy: :one_for_one, max_restarts: 3, max_seconds: 60)
+    # max_children (E4) : CAP GLOBAL de pods vivants — un flood de spawn (admin/spawn no-auth
+    # loopback, ou un rail devenu fou) ne peut pas lancer N sessions claude (chacune = un vrai
+    # process OS + tokens). Au-dela -> {:error, :max_children} rendu par spawn_pod (fail-loud chez
+    # l'appelant). Config `:fleet_spawner, :max_pods` (defaut 24 : marge large au-dessus du reel —
+    # ~6 permanents + workers step ; la borne vise l'ANOMALIE, pas le nominal).
+    max = Application.get_env(:fleet_spawner, :max_pods, 24)
+
+    DynamicSupervisor.init(
+      strategy: :one_for_one,
+      max_restarts: 3,
+      max_seconds: 60,
+      max_children: max
+    )
   end
 end

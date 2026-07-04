@@ -28,7 +28,7 @@ defmodule Fleet.Pilot.Poller do
     * `:interval_ms` — défaut `30_000` (30s).
     * `:forge_opts` — keyword ForgeClient (base_url, token, req_options).
     * `:step_dispatch?` — historiquement le switch de mode ; aujourd'hui toujours `true` (seul mode).
-    * seams test : `:forge_client`, `:loader`, `:workflow_map_loader`, `:spawner`, `:clock` (injectés si non-nil).
+    * seams test : `:forge_client`, `:loader`, `:workflow_map_loader`, `:spawner` (injectés si non-nil).
     * `:start_tick?` — défaut `true` ; `false` = pas de 1er tick auto (tests drivent via `force_poll/1`).
 
   ## Historique — mode legacy RETIRÉ (2026-06-16)
@@ -79,7 +79,6 @@ defmodule Fleet.Pilot.Poller do
     workflow_map_loader: nil,
     spawner: nil,
     task_queue: nil,
-    clock: nil,
     # Seam de recovery de wake threadé jusqu'à `StepDispatcher.dispatch_issue` (défaut nil → la vraie
     # `WakeRecovery.wake/3`). Rend testable le contrat « wake raté ⇒ workflow_run démarré, bail PRIS » sans hit
     # IncidentRegistry/tmux réels.
@@ -109,7 +108,6 @@ defmodule Fleet.Pilot.Poller do
           forge_opts: keyword(),
           loader: module() | nil,
           spawner: module() | nil,
-          clock: (atom() -> integer()) | nil,
           poll_count: non_neg_integer(),
           error_count: non_neg_integer(),
           err_streak: non_neg_integer(),
@@ -161,7 +159,6 @@ defmodule Fleet.Pilot.Poller do
       workflow_map_loader: Keyword.get(opts, :workflow_map_loader),
       spawner: Keyword.get(opts, :spawner),
       task_queue: Keyword.get(opts, :task_queue),
-      clock: Keyword.get(opts, :clock),
       wake_recovery: Keyword.get(opts, :wake_recovery),
       incident_fun: Keyword.get(opts, :incident_fun)
     }
@@ -740,7 +737,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # Construit les opts de StepDispatcher.dispatch_issue. Les seams
-  # (loader/spawner/task_queue/clock) ne sont injectés QUE s'ils sont set sur le
+  # (loader/spawner/task_queue) ne sont injectés QUE s'ils sont set sur le
   # state — sinon StepDispatcher applique ses défauts réels (passer nil
   # écraserait le défaut).
   # `:task_queue` est porté par le state (résolu au site d'appel de `Reconciliation.reconcile`) et DOIT
@@ -759,7 +756,6 @@ defmodule Fleet.Pilot.Poller do
     |> Opts.maybe_put(:workflow_map_loader, workflow_map_loader_fun(state))
     |> Opts.maybe_put(:spawner, state.spawner)
     |> Opts.maybe_put(:task_queue, state.task_queue)
-    |> Opts.maybe_put(:clock, state.clock)
     # Threadé jusqu'à `dispatch_issue` : seul nil retombe sur le défaut réel (la vraie `WakeRecovery.wake/3`).
     |> Opts.maybe_put(:wake_recovery, state.wake_recovery)
   end

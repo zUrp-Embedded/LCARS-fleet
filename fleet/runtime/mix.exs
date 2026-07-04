@@ -151,6 +151,11 @@ defmodule LcarsFleetRuntime.MixProject do
     [
       fleet_umbrella: [
         include_executables_for: [:unix],
+        # F8 (E1) : l'ORDRE de cette liste est un invariant de boot pour les paires reliées par un
+        # seam RUNTIME (sans dep compile, Mix ne peut pas les ordonner) : fleet_mcp AVANT
+        # fleet_starfleet (BootOrchestrator spawn les permanents → ensure_pod_socket via seam).
+        # Filet si l'ordre casse : spawn échoue → boot_partial HONNÊTE + retry PermanentWarden
+        # (converge), pas un silence — mais ne pas compter dessus : garder l'ordre.
         applications: [
           fleet_cap_profile: :permanent,
           fleet_sp_builder: :permanent,

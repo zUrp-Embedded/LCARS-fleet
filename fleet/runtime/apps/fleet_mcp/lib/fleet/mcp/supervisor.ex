@@ -51,7 +51,9 @@ defmodule Fleet.MCP.Supervisor do
       # suivantes jamais servies → readline timeout). Une Task par connexion = un handler lent n'affecte
       # que sa connexion. `restart: :temporary` (défaut Task.Supervisor) : une connexion qui crash meurt
       # seule, sans redémarrage.
-      {Task.Supervisor, name: Fleet.MCP.ConnectionTaskSupervisor},
+      # max_children (E4) : un bridge pod qui fuit ses connexions ne peut plus accumuler tasks+fds
+      # sans borne — l'accept loop recoit {:error, :max_children} et refuse la connexion en trop.
+      {Task.Supervisor, name: Fleet.MCP.ConnectionTaskSupervisor, max_children: 32},
       Fleet.MCP.PodSocketSupervisor
     ]
 
@@ -75,10 +77,42 @@ defmodule Fleet.MCP.Supervisor do
   @spec pod_facing_status() :: {:operational | :degraded, map()}
   def pod_facing_status do
     if acceptor_supervisor_alive?() do
-      {:operational, %{acceptor_supervisor: true, sockets: active_sockets()}}
+      sockets = active_sockets()
+
+      # F6 (E1) : vert-creux — le sup peut être VIVANT mais VIDE (restart post-cascade emfile :
+      # les acceptors morts ne sont recréés par personne) pendant que des pods en attendent.
+      # Sonde LOCALE (zéro dep vers spawner) : les FICHIERS sockets sur disque survivent à une
+      # cascade (seul release_pod_socket les efface) → `fichiers > acceptors vivants` = des pods
+      # ont une socket-fichier SANS acceptor derrière = ils sont SOURDS. Dégradé, plus operational.
+      orphaned = max(socket_files_on_disk() - sockets, 0)
+
+      if orphaned > 0 do
+        {:degraded,
+         %{
+           acceptor_supervisor: true,
+           sockets: sockets,
+           socket_files: sockets + orphaned,
+           note: "#{orphaned} socket-fichier(s) SANS acceptor (cascade ?) — pods sourds"
+         }}
+      else
+        {:operational, %{acceptor_supervisor: true, sockets: sockets}}
+      end
     else
       {:degraded, %{acceptor_supervisor: false, note: "PodSocketSupervisor non vivant"}}
     end
+  end
+
+  # Fichiers sockets présents sous la base per-pod (créés par ensure_pod_socket, effacés par
+  # release_pod_socket — une cascade d'acceptors ne les efface PAS : c'est le témoin).
+  defp socket_files_on_disk do
+    base = Fleet.MCP.PodSocketSupervisor.base_dir()
+
+    case File.ls(base) do
+      {:ok, entries} -> length(entries)
+      _ -> 0
+    end
+  rescue
+    _ -> 0
   end
 
   defp acceptor_supervisor_alive? do

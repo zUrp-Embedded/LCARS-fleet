@@ -278,7 +278,6 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         loader: StubLoader,
         spawner: StubSpawner,
         task_queue: StubTaskQueue,
-        clock: fn :second -> 1_700_000_000 end,
         # résolveur stub par défaut : pas de projet (les tests d'ordre ne clonent rien).
         project_resolver: fn _repo, _opts -> {:ok, nil} end,
         # #5.2 D2 — route par défaut (step build=engineer) : depuis le découplage, une issue ROUTELESS

@@ -65,8 +65,19 @@ defmodule Fleet.Spawner.Application do
     # Pas de boot des pods permanents ici — autorité unique =
     # Fleet.Starfleet.BootOrchestrator (post-readiness). Cette app ne fait que
     # démarrer son Registry + Supervisor + PublishConsumer.
+    #
+    # F2 (E1 2026-07-04) : `rest_for_one` — un restart du Registry (1er child) redémarre AUSSI tout
+    # ce qui en dépend (dont PodWarden). En `one_for_one`, un Registry ressuscité VIDE pendant que
+    # les pods :temporary survivent (jamais ré-enregistrés) faisait paraître TOUS les socks orphelins
+    # → le PodWarden reapait les pods VIVANTS à +2 ticks. Le redémarrage du warden ré-arme sa grace
+    # 2-tick (état suspects reparti à zéro) ; les pods, EUX, ne sont pas des children d'ici (leur
+    # rattachement au Registry est perdu — le reap les réclamera comme VRAIS orphelins, et le
+    # BootOrchestrator/PermanentWarden les fera renaître : cattle, cohérent).
     Supervisor.start_link(children,
-      strategy: :one_for_one,
+      strategy: :rest_for_one,
+      # F4 (E1) : 3/60 explicite (doctrine commune).
+      max_restarts: 3,
+      max_seconds: 60,
       name: Fleet.Spawner.RootSupervisor
     )
   end

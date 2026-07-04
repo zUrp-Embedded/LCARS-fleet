@@ -316,7 +316,6 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       workflow_map_loader: &WorkflowMapLoader.load!/1,
       spawner: SpawnStub,
       task_queue: TQStub,
-      clock: fn :second -> 100 end,
       project_resolver: fn _r, _o ->
         {:ok, %{"repo_path" => "x", "base_branch" => "main", "base_sha" => "cafe"}}
       end

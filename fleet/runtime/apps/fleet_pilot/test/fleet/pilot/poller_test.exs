@@ -311,7 +311,6 @@ defmodule Fleet.Pilot.PollerTest do
         ],
         loader: StepStubLoader,
         spawner: StepStubSpawner,
-        clock: fn :second -> 1_700_000_000 end
       )
 
     {name, pid}
@@ -409,7 +408,6 @@ defmodule Fleet.Pilot.PollerTest do
           loader: StepStubLoader,
           spawner: LivePodSpawner,
           task_queue: ActiveTaskQueue,
-          clock: fn :second -> 1_700_000_000 end
         )
 
       Poller.force_poll(name)
@@ -447,7 +445,6 @@ defmodule Fleet.Pilot.PollerTest do
           loader: StepStubLoader,
           spawner: ProjectPipeSpawner,
           task_queue: ProjectTaskQueueIssue8,
-          clock: fn :second -> 1_700_000_000 end
         )
 
       Poller.force_poll(name)
@@ -483,7 +480,6 @@ defmodule Fleet.Pilot.PollerTest do
           loader: StepStubLoader,
           spawner: ProjectPipeSpawner,
           task_queue: ProjectTaskQueueIssue9,
-          clock: fn :second -> 1_700_000_000 end
         )
 
       Poller.force_poll(name)
@@ -532,7 +528,6 @@ defmodule Fleet.Pilot.PollerTest do
           forge_client: StepStubForge,
           forge_opts: [_test_discover: {:error, {:http, 503, "down"}}],
           spawner: StepStubSpawner,
-          clock: fn :second -> 1_700_000_000 end
         )
 
       assert %{dispatched: 0, skipped: 0, errors: 1} = Poller.force_poll(name)
@@ -566,7 +561,6 @@ defmodule Fleet.Pilot.PollerTest do
           ],
           loader: StepStubLoader,
           spawner: StepStubSpawner,
-          clock: fn :second -> 1_700_000_000 end
         )
 
       assert %{dispatched: 0, skipped: 2, errors: 0} = Poller.force_poll(name)
@@ -604,7 +598,6 @@ defmodule Fleet.Pilot.PollerTest do
           loader: StepStubLoader,
           workflow_map_loader: StepStubWorkflowMapLoader,
           spawner: StepStubSpawner,
-          clock: fn :second -> 1_700_000_000 end
         )
 
       # tally = le contrat au niveau Poller (le spawn part dans la mailbox du GenServer, pas du test ;
@@ -644,7 +637,6 @@ defmodule Fleet.Pilot.PollerTest do
           ],
           loader: StepStubLoader,
           spawner: StepStubSpawner,
-          clock: fn :second -> 1_700_000_000 end
         )
 
       {name, pid}
@@ -727,7 +719,6 @@ defmodule Fleet.Pilot.PollerTest do
         loader: StepStubLoader,
         workflow_map_loader: StepStubWorkflowMapLoader,
         spawner: StepStubSpawner,
-        clock: fn :second -> 1_700_000_000 end
       ]
 
       {:ok, pid} = Poller.start_link(Keyword.merge(base, extra_opts))
@@ -1038,7 +1029,6 @@ defmodule Fleet.Pilot.PollerTest do
           loader: StepStubLoader,
           spawner: RepoBPodSpawner,
           task_queue: ActiveTaskQueue2,
-          clock: fn :second -> 1_700_000_000 end
         )
 
       # 1er tick : repoA#8 ET repoB#8 deviennent suspects (grace) — repoB#8 sera filtré (pod vivant) mais

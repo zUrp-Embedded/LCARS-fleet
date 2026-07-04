@@ -29,7 +29,8 @@ defmodule Fleet.API.Application do
   def start(_type, _args) do
     children = listener_children()
 
-    opts = [strategy: :one_for_one, name: Fleet.API.Supervisor]
+    # F4 (E1) : intensite 3/60 EXPLICITE (doctrine event_router/task_queue — 3/5 OTP trop serre pour un blip ; la fenetre est un CHOIX).
+    opts = [strategy: :one_for_one, max_restarts: 3, max_seconds: 60, name: Fleet.API.Supervisor]
 
     case Supervisor.start_link(children, opts) do
       {:ok, _} = ok ->

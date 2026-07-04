@@ -80,6 +80,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
+  # F6 : reprise après pénurie de FDs — re-entre dans la boucle accept.
+  @impl GenServer
+  def handle_info(:retry_accept, state), do: {:noreply, state, {:continue, :accept}}
+
   @impl GenServer
   def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id} = state) do
     case :gen_tcp.accept(lsock) do
@@ -99,7 +103,13 @@ defmodule Fleet.MCP.PodSocketAcceptor do
               {:error, _} -> :gen_tcp.close(sock)
             end
 
-          {:error, _} ->
+          {:error, reason} ->
+            # Dont :max_children (E4, saturation du pool de connexions = bridge qui fuit) —
+            # VISIBLE : sinon le pod ne voit qu'un readline timeout inexplicable.
+            Logger.warning(
+              "PodSocketAcceptor pod=#{pod_id} connexion REFUSEE (#{inspect(reason)}) — bridge qui fuit ?"
+            )
+
             :gen_tcp.close(sock)
         end
 
@@ -108,6 +118,19 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       # Listen socket fermé = on nous a arrêtés (release) → stop net, pas une erreur.
       {:error, :closed} ->
         {:stop, :normal, state}
+
+      # F6 (E1) : pénurie de FDs (emfile/enfile) = souvent TRANSITOIRE (un burst, un leak en cours
+      # de reap). Stopper cascadait : acceptor → PodSocketSupervisor (3/5) → sup MORT-VIDE → tous
+      # les pods sans socket MCP, rien ne les recrée. Retry espacé borné par la mailbox (1 seul
+      # message :retry_accept en vol), VISIBLE ; si la pénurie persiste, le pod remontera par son
+      # propre timeout (rail incident), pas par une cascade silencieuse.
+      {:error, reason} when reason in [:emfile, :enfile] ->
+        Logger.error(
+          "PodSocketAcceptor pod=#{pod_id} accept #{inspect(reason)} (pénurie de FDs) — retry dans 1s"
+        )
+
+        Process.send_after(self(), :retry_accept, 1_000)
+        {:noreply, state}
 
       {:error, reason} ->
         {:stop, {:accept_error, reason}, state}

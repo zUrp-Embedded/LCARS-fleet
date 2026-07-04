@@ -87,8 +87,13 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   """
   @spec socket_path(String.t()) :: Path.t()
   def socket_path(pod_id) when is_binary(pod_id) do
-    Path.join([base(), pod_id, "sock"])
+    Path.join([base_dir(), pod_id, "sock"])
   end
 
-  defp base, do: Application.get_env(:fleet_mcp, :sock_base, @default_base)
+  @doc """
+  Base des sockets per-pod (config `:sock_base`). Exposé pour la sonde F6 de
+  `Fleet.MCP.Supervisor.pod_facing_status/0` (fichiers-sur-disque vs acceptors vivants).
+  """
+  @spec base_dir() :: Path.t()
+  def base_dir, do: Application.get_env(:fleet_mcp, :sock_base, @default_base)
 end

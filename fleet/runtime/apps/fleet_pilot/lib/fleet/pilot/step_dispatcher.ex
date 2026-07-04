@@ -86,7 +86,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   applique l'ordre canonique du spawn (verrou → pod → enqueue → wake, `spawn_step`). Idempotent.
 
   `opts` : `:repo` (obligatoire), `:forge_opts` (passé au ForgeClient), + seams
-  `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` / `:task_queue` / `:clock` (défauts = modules réels).
+  `:forge_client` / `:loader` / `:workflow_map_loader` / `:spawner` / `:task_queue` (défauts = modules réels).
   """
   @spec dispatch_issue(map(), keyword()) ::
           {:ok, {:spawned, pod_id :: String.t(), role :: String.t()}}

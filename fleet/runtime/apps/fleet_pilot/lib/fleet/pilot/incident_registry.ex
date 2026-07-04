@@ -234,7 +234,9 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {:error, reason} ->
         fails = state.forge_fails + 1
 
-        if fails >= @forge_fail_threshold do
+        # Throttle (E4) : au seuil PUIS tous les 20 essais (~10 min a 30s de retry) — une forge down
+        # une semaine ne genere plus ~86k lignes identiques/mois, et l'incident reste VISIBLE.
+        if fails == @forge_fail_threshold or rem(fails, 20) == 0 do
           Logger.error(
             "IncidentRegistry: backing-store forge injoignable depuis #{fails} essais (#{inspect(reason)}) " <>
               "— fail-LOUD. Données SAINES dans le WAL local (#{state.wal_path}) ; re-sync au retour forge."
@@ -267,7 +269,26 @@ defmodule Fleet.Pilot.IncidentRegistry do
       |> Map.put("last_seen", now)
       |> Map.put("last_reason", inspect(reason))
 
-    Map.put(registry, sig, entry)
+    registry |> Map.put(sig, entry) |> prune()
+  end
+
+  # PRUNE (E4) : le registre etait le seul etat NON-BORNE structurel du runtime (aucune eviction,
+  # merge = union monotone, signatures a cardinalite ouverte via des reasons stringifiees) — des mois
+  # d'incidents varies = croissance sans fin du WAL + du fichier forge REECRIT EN ENTIER a chaque note.
+  # Eviction par last_seen (ISO lexicographique = chronologique) au-dela de `:max_entries`
+  # (defaut 500 — tres au-dessus du nominal ; la borne vise l'anomalie). Applique a l'upsert ET au
+  # merge forge (les deux chemins de croissance).
+  defp prune(registry) do
+    max = Application.get_env(:fleet_pilot, :incident_registry_max_entries, 500)
+
+    if map_size(registry) <= max do
+      registry
+    else
+      registry
+      |> Enum.sort_by(fn {_sig, e} -> e["last_seen"] || "" end, :desc)
+      |> Enum.take(max)
+      |> Map.new()
+    end
   end
 
   # Read-modify-write avec MERGE : absorbe les incidents posés par d'autres machines depuis le dernier sync
@@ -282,7 +303,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
         _ -> {%{}, nil}
       end
 
-    merged = merge(registry, forge_reg)
+    merged = registry |> merge(forge_reg) |> prune()
     ident = author(opts)
 
     put_opts = [

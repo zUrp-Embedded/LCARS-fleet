@@ -29,9 +29,13 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   plug(:match)
 
+  # length (E4) : borne EXPLICITE (defaut Plug 8MB implicite). 1 MB >> le plus gros webhook Gitea
+  # legitime (push/issue events). NB : le HMAC est verifie APRES le parse — la borne limite ce qu'un
+  # non-authentifie peut faire decoder (listener opt-in, loopback par defaut).
   plug(Plug.Parsers,
     parsers: [:json],
     json_decoder: Jason,
+    length: 1_048_576,
     body_reader: {__MODULE__, :read_raw_body, []}
   )
 
