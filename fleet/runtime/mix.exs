@@ -36,7 +36,6 @@ defmodule LcarsFleetRuntime.MixProject do
         :fleet_sp_builder,
         :fleet_spawner,
         :fleet_starfleet,
-        :fleet_task_monitor,
         :fleet_task_queue
       ],
       plt_core_path: "_build/plts",
@@ -168,7 +167,6 @@ defmodule LcarsFleetRuntime.MixProject do
           # contrat release faux + ambiguïté boot/supervision pour une app OTP centrale (get_task/
           # submit_result). Ajouté explicite.
           fleet_task_queue: :permanent,
-          fleet_task_monitor: :permanent,
           fleet_pipeline: :permanent,
           fleet_starfleet: :permanent,
           fleet_coord: :permanent,

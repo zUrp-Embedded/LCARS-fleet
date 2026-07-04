@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-06-29 (expurgé : data dupliquée sortie vers ses sources, fonction primaire = guide de navigation)
+**Dernière révision** : 2026-07-04 (expurgé : data dupliquée sortie vers ses sources, fonction primaire = guide de navigation)
 **Statut** : guide runtime v2.
 **Référencé par** : —
 
@@ -35,7 +35,7 @@ Les apps `apps/fleet_*/` (chacune un OTP app normal, `lib/fleet/<name>/applicati
 
 - **Ring 0 — substrat OS** : lancement per-humain via `bin/fleet_v2` (dans `etc/` + `bin/`, pas une app). Modèle = **l'humain lance sa fleet** (pas de service systemd `User=lcars`).
 - **Ring 1 — primitives pod + frontière vendor** : `fleet_spawner`, `fleet_credentials`, `fleet_cap_profile`, `fleet_sp_builder`, `fleet_project_bootstrap` + les launchers shell `bin/` (voir Pod sandboxing).
-- **Ring 2 — backbone d'orchestration** : `fleet_event_router` (bus PubSub `fleet.events`), `fleet_task_queue` (broker de mandats `get_task`/`submit_result`), `fleet_pilot` (dispatcher forge→pipeline, off par défaut — **client du core**, dépend du Ring 3 `fleet_pipeline`). `fleet_task_monitor` est **dormant** (jamais démarré ; le read-model/observabilité est tenu par `fleet_observation`) — candidat suppression.
+- **Ring 2 — backbone d'orchestration** : `fleet_event_router` (bus PubSub `fleet.events`), `fleet_task_queue` (broker de mandats `get_task`/`submit_result`), `fleet_pilot` (dispatcher forge→pipeline, off par défaut — **client du core**, dépend du Ring 3 `fleet_pipeline`). Le read-model/observabilité est tenu par `fleet_observation` (l'ancienne app `fleet_task_monitor`, dormante, a été supprimée le 2026-07-04).
 - **Ring 3 — coordination + policy** : `fleet_coord`, `fleet_pipeline`, `fleet_starfleet` (audit), `fleet_mcp`.
 - **Ring 4 — surface externe** : `fleet_api` (REST + WS, **no-auth par design** — la frontière est l'isolation réseau/container, cf. `Fleet.API.Rest` § Auth) ; `fleet_observation` (observation deck read-only — dépend vers le bas, rien du core ne dépend de lui).
 
