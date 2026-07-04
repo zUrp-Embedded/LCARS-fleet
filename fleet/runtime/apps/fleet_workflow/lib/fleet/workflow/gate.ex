@@ -11,5 +11,8 @@ defmodule Fleet.Workflow.Gate do
   """
 
   @callback evaluate(step :: map(), outputs :: map(), ctx :: map()) ::
-              :pass | {:fail, reason :: String.t()} | {:dispatch_gatekeeper, map()}
+              :pass
+              | {:fail, reason :: String.t()}
+              | {:human_approval, reason :: String.t()}
+              | {:dispatch_gatekeeper, map()}
 end

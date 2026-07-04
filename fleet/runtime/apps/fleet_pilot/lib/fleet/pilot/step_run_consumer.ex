@@ -492,6 +492,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # remonté : transitoire (gatekeeper permanent reboote) ou d'un autre concern (G6 → IncidentRegistry).
   defp terminal_escalate?({:rework_exhausted, _}), do: true
   defp terminal_escalate?({:rework_budget_unreadable, _}), do: true
+
+  # D2/G3 : aval humain requis (gate `human_approval_required`) → escalade directe (pas un échec, pas un rework).
+  defp terminal_escalate?({:human_approval_required, _}), do: true
   defp terminal_escalate?(_), do: false
 
   # Escalade une erreur terminale vers l'humain (await_arch), même filet que `escalate_blocked_producer`
@@ -526,6 +529,11 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp terminal_error_message({:rework_budget_unreadable, reason}, _role) do
     "🛑 **Budget de rework illisible** (`#{inspect(reason)}`) — on ne rebondit pas à l'aveugle (risque de " <>
       "boucle). Vérifie l'état forge de l'issue (comments `[step_run:…]`) puis relance ou abandonne."
+  end
+
+  defp terminal_error_message({:human_approval_required, _reason}, role) do
+    "✋ **Aval humain requis** (step `#{role}`, gate `human_approval_required`) — le livrable attend TON " <>
+      "approbation. Valide (relance le cycle) ou renvoie en correction. La fleet ne s'auto-approuve jamais."
   end
 
   # Exécute la complétion d'un step_run via le seam `step_run_runner`. SYNC (défaut) → exécute, logge
@@ -853,6 +861,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
           Logger.info("StepRunConsumer gate FAIL repo=#{state.repo}##{n} step=#{step}: #{reason}")
 
           tag(:rework, rebound(workflow_map, n, state))
+
+        {:human_approval, reason} ->
+          # D2/G3 : un aval humain requis n'est PAS un échec de gate → on N'entre PAS en rework (qui
+          # gaspillerait `budget` spawns avant d'escalader de toute façon). Erreur terminale ESCALÉE
+          # DIRECTEMENT vers l'arch (via terminal_escalate?/escalate_terminal_error, même filet que
+          # rework_exhausted) : comment + lcars-awaits-arch + unlock → poller skip → l'humain approuve.
+          {:error, {:human_approval_required, reason}}
 
         {:dispatch_gatekeeper, _info} ->
           # `payload`/`n`/`role` passés au dispatch : ils sont EMBARQUÉS dans le metadata de la

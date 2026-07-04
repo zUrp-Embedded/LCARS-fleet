@@ -117,6 +117,21 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         }
       }
     end
+
+    # D2/G3 : workflow_map 1-step avec gate terminal `human_approval_required` (comme standard-qa
+    # brainstorm/plan/spec). L'aval humain → escalade DIRECTE arch (pas un rework).
+    def load!("humanapp") do
+      %{
+        "name" => "humanapp",
+        "steps" => %{
+          "build" => %{
+            "role" => "engineer",
+            "needs" => [],
+            "gate" => %{"type" => "terminal", "human_approval_required" => true}
+          }
+        }
+      }
+    end
   end
 
   defp dmode,
@@ -231,6 +246,22 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     # escalade humaine, PAS un rebond (PR) ni un abandon (close).
     refute_received {:open_pr, _, _, _}
     refute_received :closed
+  end
+
+  test "gate terminal human_approval -> ESCALADE DIRECTE await_arch (D2, pas 6 rounds de rework gaspilles)" do
+    # human_approval n'est PAS un echec de gate : escalade humaine DIRECTE (await_arch), sans passer par
+    # le rework (qui gaspillerait `budget` spawns producteur avant d'escalader de toute facon).
+    assert {:ok, :awaiting_arch} =
+             StepRunConsumer.maybe_complete(build_done("humanapp", %{}), hc())
+
+    assert_received {:label, "lcars-awaits-arch"}
+    assert_received :unlocked
+    assert_received {:comment, body}
+    assert body =~ "Aval humain"
+    assert body =~ "Architecte"
+    assert_received {:wake, "permanent-architect"}
+    # escalade, PAS un rebond (rework) ni une PR.
+    refute_received {:open_pr, _, _, _}
   end
 
   test "budget : juste sous la limite rebondit, pile a la limite ESCALADE (await_arch, plus de churn)" do

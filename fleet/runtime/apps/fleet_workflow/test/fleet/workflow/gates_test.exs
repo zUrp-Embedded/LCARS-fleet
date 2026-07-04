@@ -49,7 +49,9 @@ defmodule Fleet.Workflow.GatesTest do
       assert {:fail, _} = Gates.evaluate(step, %{"severity_max" => "critical"}, %{})
     end
 
-    test "terminal human_approval_required (prédicats OK) → {:fail} fail-closed (pas d'auto-pass)" do
+    test "terminal human_approval_required (prédicats OK) → {:human_approval, _} (escalade, pas auto-pass)" do
+      # D2 : verdict DISTINCT de {:fail} — un aval humain n'est pas un échec de gate, c'est une escalade
+      # (le rail route vers await_arch directement). Fail-closed préservé : jamais :pass silencieux.
       step = %{
         "gate" => %{
           "type" => "terminal",
@@ -58,23 +60,23 @@ defmodule Fleet.Workflow.GatesTest do
         }
       }
 
-      assert {:fail, reason} = Gates.evaluate(step, %{"spec_doc_exists" => true}, %{})
+      assert {:human_approval, reason} = Gates.evaluate(step, %{"spec_doc_exists" => true}, %{})
       assert reason =~ "human_approval_required"
     end
 
-    test "terminal SANS clé rules + human_approval (gate `finish` canon) → {:fail}, pas de crash" do
+    test "terminal SANS clé rules + human_approval (gate `finish` canon) → {:human_approval, _}, pas de crash" do
       # standard-qa `finish` : terminal + human_approval, AUCUNE rules.
       step = %{"gate" => %{"type" => "terminal", "human_approval_required" => true}}
-      assert {:fail, reason} = Gates.evaluate(step, %{}, %{})
+      assert {:human_approval, reason} = Gates.evaluate(step, %{}, %{})
       assert reason =~ "human_approval_required"
     end
 
-    test "terminal rules:[] + human_approval → {:fail} (JAMAIS :pass silencieux)" do
+    test "terminal rules:[] + human_approval → {:human_approval, _} (JAMAIS :pass silencieux)" do
       step = %{
         "gate" => %{"type" => "terminal", "rules" => [], "human_approval_required" => true}
       }
 
-      assert {:fail, reason} = Gates.evaluate(step, %{}, %{})
+      assert {:human_approval, reason} = Gates.evaluate(step, %{}, %{})
       assert reason =~ "human_approval_required"
     end
 

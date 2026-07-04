@@ -109,21 +109,21 @@ defmodule Fleet.Workflow.Gates do
     {:fail, "gate malformée : type/forme non reconnu (#{inspect(gate)}) — fail-closed"}
   end
 
-  # terminal string rules. Ordre : (1) une rule non satisfaite →
-  # {:fail} ; (2) `human_approval_required` → HALT fail-closed (le moteur
-  # mécanique ne peut PAS accorder l'aval humain ; aucun human-in-loop câblé →
-  # jamais d'auto-approbation. Gates ne rend pas `:retry` ; le retry borné est
-  # côté rail forge-driven (`Pilot.StepRunConsumer`) — pas ici) ;
-  # (3) sinon → :pass. L'orchestration severity (fallback_invoke_gatekeeper,
-  # on_*_severity) n'est pas portée ici — couche séparée.
+  # terminal string rules. Ordre : (1) une rule non satisfaite → {:fail} (rework borné côté rail) ;
+  # (2) `human_approval_required` → `{:human_approval, _}` : un aval HUMAIN est requis — ce N'EST PAS un
+  # échec de gate (le travail peut être bon), c'est une ESCALADE. Verdict DISTINCT de `{:fail}` pour que
+  # le rail (`StepRunConsumer`) route DIRECTEMENT vers l'arch (await_arch) au lieu de rebondir en rework
+  # (le moteur mécanique ne peut PAS accorder l'aval → rebondir gaspillerait `budget` spawns puis
+  # escaladerait quand même). Fail-closed préservé : jamais d'auto-approbation, jamais `:pass` silencieux.
+  # (3) sinon → :pass. L'orchestration severity (fallback_invoke_gatekeeper, on_*_severity) = couche séparée.
   defp eval_terminal_string(rules, gate, outputs) do
     cond do
       not Enum.all?(rules, &Predicate.eval?(&1, outputs)) ->
         {:fail, "terminal gate: rule(s) string non satisfaite(s)"}
 
       Map.get(gate, "human_approval_required", false) ->
-        {:fail,
-         "terminal gate: human_approval_required — human-in-loop non câblé (R3, fail-closed)"}
+        {:human_approval,
+         "terminal gate: human_approval_required — aval humain requis (escalade arch, R3)"}
 
       true ->
         :pass
