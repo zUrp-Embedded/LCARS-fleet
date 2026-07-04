@@ -700,17 +700,24 @@ defmodule Fleet.Pilot.Poller do
   # Charge la workflow_map (seam `workflow_map_loader` ou Loader réel) ; `nil` sur échec (le dispatch re-tentera → fail-loud).
   defp load_workflow_map_or_nil(workflow_map_name, state) do
     loader = state.workflow_map_loader || Fleet.Workflow.Loader
-    loader.load!(workflow_map_name)
-  rescue
-    e ->
-      # G6 : la workflow_map ne charge PAS (retirée/renommée du catalogue, ou schema cassé). Le bail reste
-      # fail-closed (cf. classify_issue : on ne libère pas le bail d'un workflow_run peut-être avancé) — MAIS
-      # si l'absence est DURABLE, l'issue tient le bail et le repo est bloqué POUR TOUJOURS en silence
-      # (Jupiter : personne ne le verra). On ESCALADE : IncidentRegistry dédup par signature → 1ère
-      # occurrence = note WAL, RÉCURRENCE (map absente à chaque tick) = issue sysadmin ouverte. Pas de spam
-      # (le dédup EST le throttle). Best-effort (l'escalade ne doit jamais casser le tick).
-      _ = escalate_workflow_map_incident(workflow_map_name, Exception.message(e), state)
-      nil
+
+    # R4 : le rescue vit dans l'autorité unique (WorkflowMapNav.safe_load) ; CE site garde sa
+    # sémantique propre (nil = bail fail-closed + escalade G6 ci-dessous).
+    case Fleet.Pilot.WorkflowMapNav.safe_load(loader, workflow_map_name) do
+      {:ok, map} ->
+        map
+
+      {:error, {:workflow_map_load_failed, _name, message}} ->
+        # G6 : la workflow_map ne charge PAS (retirée/renommée du catalogue, ou schema cassé). Le bail
+        # reste fail-closed (cf. classify_issue : on ne libère pas le bail d'un workflow_run peut-être
+        # avancé) — MAIS si l'absence est DURABLE, l'issue tient le bail et le repo est bloqué POUR
+        # TOUJOURS en silence (Jupiter : personne ne le verra). On ESCALADE : IncidentRegistry dédup
+        # par signature → 1ère occurrence = note WAL, RÉCURRENCE (map absente à chaque tick) = issue
+        # sysadmin ouverte. Pas de spam (le dédup EST le throttle). Best-effort (l'escalade ne doit
+        # jamais casser le tick).
+        _ = escalate_workflow_map_incident(workflow_map_name, message, state)
+        nil
+    end
   end
 
   defp escalate_workflow_map_incident(workflow_map_name, message, state) do

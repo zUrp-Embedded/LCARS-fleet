@@ -67,6 +67,8 @@ edges:
   - {from: fleet_spawner, to: fleet_project_bootstrap}
   - {from: fleet_spawner, to: fleet_task_queue}
   - {from: fleet_starfleet, to: fleet_event_router}
+  # H3 2026-07-04 : Fleet.Layout (autorite layout container, R0) consommee par AuditLog.
+  - {from: fleet_starfleet, to: fleet_cap_profile}
   - {from: fleet_starfleet, to: fleet_spawner}
   - {from: fleet_task_queue, to: fleet_event_router}
   - {from: fleet_workflow, to: fleet_cap_profile}

@@ -1,7 +1,7 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-04 (registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-07-05 (B-R1 dédup « émission-Bus-protégée » : `Bus.safe_emit/3-4` = cœur unique de la politique best-effort, les rescue locaux de coord/starfleet/spawner migrent dessus ; registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
@@ -46,6 +46,20 @@ Fleet.EventRouter.Bus.broadcast_main(%Fleet.Event{
   source: :spawner, type: :"pod.allocate",
   timestamp: DateTime.utc_now(), payload: %{"pod_id" => "p1"}})
 # Variante explicite (topic arbitraire) : Fleet.EventRouter.Bus.broadcast(Fleet.EventRouter.Bus.main_topic(), event)
+
+# Idiome producteur : construire l'event canon + broadcaster main en un appel — fail-loud
+# (mêmes raises que broadcast_main + ceux de Fleet.Event.new, non attrapés).
+Fleet.EventRouter.Bus.emit(:spawner, :"pod.allocate", payload: %{"pod_id" => "p1"})
+
+# Variante PROTÉGÉE pour les émetteurs best-effort (observabilité/escalade) — politique d'erreur
+# UNIFIÉE (dédup des rescue locaux coord/starfleet/spawner) : UnregisteredError toléré selon
+# `:on_unregistered` (`:log` défaut | `:silent` boot-order nominal) ; event malformé (bug de
+# construction) TOUJOURS Logger.error + :ok — jamais avalé muet, jamais un crash de l'émetteur.
+# `type` accepte aussi un binaire (to_existing_atom sous le rescue, anti atom-leak).
+# PAS pour les events load-bearing (pod.completed) : eux doivent PROPAGER l'échec.
+Fleet.EventRouter.Bus.safe_emit(:starfleet, :"mcp.server_crashed",
+  [payload: %{"target" => "..."}],
+  on_unregistered: :silent, context: "MCPMonitor: alerte NON émise")
 
 # Subscribe + receive (subscriber direct = canon, BL-027) — défaut = main_topic/0
 Fleet.EventRouter.Bus.subscribe()

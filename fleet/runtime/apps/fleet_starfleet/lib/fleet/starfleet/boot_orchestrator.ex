@@ -146,25 +146,18 @@ defmodule Fleet.Starfleet.BootOrchestrator do
     emit_canon(:"fleet.boot_failed", payload)
   end
 
-  # BL-021 chantier 9 (B) — broadcast schema canon %Fleet.Event{source: :starfleet}.
+  # BL-021 chantier 9 (B) — broadcast schema canon %Fleet.Event{source: :starfleet}, via le cœur
+  # protégé `Bus.safe_emit/4` (rescue local dupliqué retiré — la politique best-effort a UNE
+  # autorité, Ring 0). `:silent` : cette Task émet PENDANT le boot — un UnregisteredError
+  # (registry pas encore peuplé) y est le cas nominal, pas une alarme. Un event MALFORMÉ (bug de
+  # construction) est loggé ERROR par safe_emit puis neutralisé — ça masquerait sinon un
+  # boot_failed/boot_partial en silence, et cette Task :transient ne doit JAMAIS crasher (un
+  # crash relance toute la séquence boot, re-spawnant les pods permanents, et bouclerait sur un
+  # event malformé).
   defp emit_canon(type, payload) do
-    Bus.emit(:starfleet, type, payload: payload)
-  rescue
-    # UnregisteredError = boot-order toléré : registry pas encore peuplé, broadcast
-    # rejeté, pas une alarme — silencieux.
-    _e in Fleet.Event.UnregisteredError ->
-      :ok
-
-    # ArgumentError/FunctionClauseError = bug de CONSTRUCTION de l'event, PAS du boot.
-    # Ne JAMAIS l'avaler en :ok muet : ça masquerait un boot_failed / boot_partial. On le
-    # rend VISIBLE puis on neutralise — cette Task :transient ne doit JAMAIS crasher (un
-    # crash relance toute la séquence boot, re-spawnant les pods permanents, et bouclerait
-    # sur un event malformé).
-    e in [ArgumentError, FunctionClauseError] ->
-      Logger.error(
-        "BootOrchestrator: event lifecycle #{type} NON émis — event malformé (bug de construction) : #{inspect(e)}"
-      )
-
-      :ok
+    Bus.safe_emit(:starfleet, type, [payload: payload],
+      on_unregistered: :silent,
+      context: "BootOrchestrator: event lifecycle NON émis"
+    )
   end
 end

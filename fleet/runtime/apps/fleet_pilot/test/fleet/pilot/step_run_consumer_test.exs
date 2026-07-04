@@ -262,10 +262,10 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert step_run.intent == :reviewed
     end
 
-    test "workflow_map introuvable -> {:error, {:workflow_map_load, _}}, pas de step_run" do
+    test "workflow_map introuvable -> {:error, {:workflow_map_load_failed, ..}}, pas de step_run" do
       payload = step_payload(%{"workflow_map" => "bad", "step" => "build"})
 
-      assert {:error, {:workflow_map_load, _}} =
+      assert {:error, {:workflow_map_load_failed, _, _}} =
                StepRunConsumer.maybe_complete(payload, state(%{loader: StubLoader}))
 
       refute_received {:step_run, _, _}

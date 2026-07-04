@@ -183,5 +183,6 @@ defmodule Fleet.Spawner.SeedStore do
   @spec slugify(String.t()) :: String.t()
   def slugify(path), do: String.replace(path, ~r/[^A-Za-z0-9-]/, "-")
 
-  defp root, do: Application.get_env(:fleet_spawner, :seed_store_root, "/home/projects.work")
+  defp root,
+    do: Application.get_env(:fleet_spawner, :seed_store_root, Fleet.Layout.work_root())
 end

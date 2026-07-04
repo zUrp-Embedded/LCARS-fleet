@@ -1129,11 +1129,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # Pas de `validate_explicit_step` (biconditionnelle soft⟺gatekeeper) :
   # une gate soft sur un step métier est LÉGITIME (→ escalade gatekeeper), pas
   # une workflow_map malformée. La workflow_map est juste chargée (le Loader valide le schema).
-  defp load_workflow_map(state, workflow_map_name) do
-    {:ok, state.loader.load!(workflow_map_name)}
-  rescue
-    e -> {:error, {:workflow_map_load, Exception.message(e)}}
-  end
+  # R4 : délégué à l'autorité unique — et TAG UNIFIÉ (:workflow_map_load_failed ; l'ancien
+  # :workflow_map_load était un 2e nom pour le même échec).
+  defp load_workflow_map(state, workflow_map_name),
+    do: Fleet.Pilot.WorkflowMapNav.safe_load(state.loader, workflow_map_name)
 
   defp put_unless_nil(map, _key, nil), do: map
   defp put_unless_nil(map, key, value), do: Map.put(map, key, value)

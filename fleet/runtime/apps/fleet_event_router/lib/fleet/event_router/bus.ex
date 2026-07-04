@@ -16,6 +16,9 @@ defmodule Fleet.EventRouter.Bus do
     * `broadcast_main/1` — `broadcast(main_topic(), event)`, raccourci canon.
     * `emit/3` — `Fleet.Event.new(source, type, opts) |> broadcast_main()`, l'idiome
       producteur « construire un event canon + broadcaster main » en un appel.
+    * `safe_emit/3-4` — variante PROTÉGÉE d'`emit/3` pour les émetteurs best-effort
+      (observabilité/escalade) : politique d'erreur UNIFIÉE (boot-order toléré,
+      bug de construction loggé, jamais un crash de l'émetteur).
     * `subscribe/1` / `unsubscribe/1` — gestion abonnements topic (défaut `main_topic/0`)
     * `authorized_event_types/0` — MapSet atoms chargé au boot par `Catalog.load!/0`
     * `set_authorized_event_types/1` — appelé par `Catalog.load!/0` au boot
@@ -40,6 +43,8 @@ defmodule Fleet.EventRouter.Bus do
   `true` (défaut) = laisse passer (safety-net d'init voulu) ; `false` = fail-closed
   (raise tant que le registry n'est pas chargé). Voir `assert_authorized!/1`.
   """
+
+  require Logger
 
   @pubsub_name Fleet.PubSub
   @main_topic "fleet.events"
@@ -94,12 +99,15 @@ defmodule Fleet.EventRouter.Bus do
   principal via `broadcast_main/1` — un seul appel pour l'idiome producteur
   « construire l'enveloppe canon + broadcaster main », répété sur ~10 sites.
 
-  Factorise UNIQUEMENT la construction + le broadcast. La POLITIQUE d'erreur reste
-  chez le producteur et diverge volontairement (elle n'est PAS unifiée ici) : `emit/3`
-  ne rescue rien, ne classe rien. Le `rescue Fleet.Event.UnregisteredError` / le `case`
-  sur le retour / le retour spécifique restent AUTOUR de l'appel `emit/3`, chez chaque
-  caller — surface HTTP `{:error, msg}` côté API, fire-and-forget `:ok` au boot,
-  log-and-continue côté consumer. Ne PAS y déplacer de rescue.
+  Factorise UNIQUEMENT la construction + le broadcast : `emit/3` ne rescue rien, ne
+  classe rien. Deux régimes d'erreur existent chez les producteurs :
+
+    * **best-effort** (observabilité/escalade, fire-and-forget) — la politique est
+      UNIFIÉE dans `safe_emit/3-4` ci-dessous. Ne PAS ré-implémenter un rescue local
+      autour d'`emit/3` : c'est exactement la duplication que `safe_emit` a résorbée.
+    * **spécifique à la surface** — le producteur garde SA politique AUTOUR d'`emit/3` :
+      surface HTTP `{:error, msg}` côté API, propagation load-bearing côté spawner
+      (`Fleet.Spawner.Pod.Events.required_broadcast/2`).
 
   Retour : celui de `broadcast_main/1` (`:ok | {:error, term()}`). Peut LEVER
   `Fleet.Event.UnregisteredError` (type hors registry) ou `ArgumentError`/`FunctionClauseError`
@@ -111,6 +119,89 @@ defmodule Fleet.EventRouter.Bus do
     event = Fleet.Event.new(source, type, opts)
     broadcast_main(event)
   end
+
+  @doc """
+  Variante PROTÉGÉE d'`emit/3` — le cœur UNIQUE de l'idiome « émission-Bus-protégée »,
+  qui était dupliqué sur 7 sites / 3 apps (coord policies, starfleet cat5/boot/
+  mcp_monitor/mcp_watcher, spawner pod events) avec des rescue locaux aux comportements
+  INCOHÉRENTS (certains avalaient tout en silence, d'autres propageaient). Une seule
+  autorité désormais : ici, Ring 0, à côté d'`emit/3` dont elle partage la signature.
+
+  4e argument `safe_opts` :
+
+    * `:on_unregistered` — politique face à `Fleet.Event.UnregisteredError` (type hors
+      registry `events.yaml`, typiquement la fenêtre de boot où le registry n'est pas
+      encore peuplé par `Catalog.load!/0`) :
+        * `:log` (défaut) — `Logger.warning` puis `:ok` : l'event est perdu mais la
+          perte reste VISIBLE.
+        * `:silent` — `:ok` muet : pour les émetteurs dont la fenêtre boot-order est un
+          cas NOMINAL (orchestrateur de boot, escalades pré-registry) — un warning à
+          chaque boot serait du bruit, pas un signal.
+    * `:context` — préfixe du message de log (ex. `"MCPMonitor: alerte mcp.server_crashed
+      NON émise"`) : porte le contexte MÉTIER de l'émetteur dans le log centralisé, sans
+      que chaque site ré-implémente son propre rescue juste pour personnaliser un message.
+
+  ## Contrat d'erreur (le POURQUOI de chaque branche)
+
+    * `Fleet.Event.UnregisteredError` → toléré selon `:on_unregistered` (boot-order),
+      retourne `:ok`.
+    * `ArgumentError` / `FunctionClauseError` → bug de CONSTRUCTION de l'event (source
+      hors enum, timestamp non-`%DateTime{}`, opts non-keyword, nom de type jamais
+      préregistré), PAS un aléa runtime : TOUJOURS `Logger.error` + `:ok`. Jamais avalé
+      muet — une escalade/alerte qui disparaît en silence est indiagnosticable. Jamais
+      propagé — l'émetteur best-effort (GenServer moniteur, Task de boot, gen_statem pod)
+      ne doit JAMAIS crasher pour un défaut d'OBSERVABILITÉ : le laisser crasher ferait
+      boucler son superviseur sur un producteur malformé.
+
+  Le `type` accepte aussi un binaire, converti via `String.to_existing_atom/1` SOUS la
+  protection du rescue (anti atom-leak) : un nom de type jamais préregistré est classé
+  bug de construction (loggé), jamais un crash. C'est ce qui permet aux producteurs qui
+  SYNTHÉTISENT le nom du type (`"starfleet.audit_cat5_\#{source}"`, `event_type` binaire
+  côté pod) de ne garder AUCUN rescue local.
+
+  Ce que `safe_emit` N'EST PAS : le chemin des events LOAD-BEARING. Un `pod.completed`
+  aplati en `:ok` loggé serait indistinguable d'un succès et wedgerait le step_run
+  (verrou forge à vie) — ce chemin doit PROPAGER l'échec à son appelant, cf.
+  `Fleet.Spawner.Pod.Events.required_broadcast/2`, volontairement HORS de ce cœur.
+
+  Retour : `:ok` (émis, ou échec toléré/loggé) | `{:error, reason}` (passthrough
+  `Phoenix.PubSub.broadcast/3`).
+  """
+  @spec safe_emit(Fleet.Event.source(), atom() | String.t(), keyword(), keyword()) ::
+          :ok | {:error, term()}
+  def safe_emit(source, type, opts \\ [], safe_opts \\ []) do
+    emit(source, coerce_type(type), opts)
+  rescue
+    e in Fleet.Event.UnregisteredError ->
+      case Keyword.get(safe_opts, :on_unregistered, :log) do
+        :silent ->
+          :ok
+
+        :log ->
+          Logger.warning(
+            "#{log_context(safe_opts)} — event #{inspect(type)} (source=#{inspect(source)}) " <>
+              "non émis, type hors registry events.yaml : #{Exception.message(e)}"
+          )
+
+          :ok
+      end
+
+    e in [ArgumentError, FunctionClauseError] ->
+      Logger.error(
+        "#{log_context(safe_opts)} — event #{inspect(type)} (source=#{inspect(source)}) " <>
+          "NON émis, event malformé (bug de construction) : #{inspect(e)}"
+      )
+
+      :ok
+  end
+
+  # Conversion du nom de type binaire → atome EXISTANT (anti atom-leak), appelée dans le corps
+  # protégé de `safe_emit/4` : un nom jamais préregistré lève ArgumentError → classé bug de
+  # construction (Logger.error + :ok), jamais un crash de l'émetteur.
+  defp coerce_type(type) when is_atom(type), do: type
+  defp coerce_type(type) when is_binary(type), do: String.to_existing_atom(type)
+
+  defp log_context(safe_opts), do: Keyword.get(safe_opts, :context, "Bus.safe_emit")
 
   @doc """
   Set de types d'events autorisés (MapSet d'atomes), chargé depuis

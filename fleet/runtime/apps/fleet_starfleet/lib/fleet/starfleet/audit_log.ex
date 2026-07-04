@@ -110,6 +110,6 @@ defmodule Fleet.Starfleet.AuditLog do
   # HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un chemin
   # fabriqué : l'état .lcars ne doit pas se disperser en silence.
   defp default_audit_path do
-    Path.join(System.user_home!(), ".lcars/log/fleet-starfleet.jsonl")
+    Path.join(Fleet.Layout.state_dir(), "log/fleet-starfleet.jsonl")
   end
 end

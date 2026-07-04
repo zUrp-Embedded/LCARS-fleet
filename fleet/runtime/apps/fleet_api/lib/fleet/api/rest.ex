@@ -280,7 +280,7 @@ defmodule Fleet.API.Rest do
   defp do_broadcast_spawn(conn, payload) do
     case safe_broadcast(payload) do
       :ok -> send_resp(conn, 202, ~s|{"status":"queued"}|)
-      {:error, reason} -> send_resp(conn, 400, Jason.encode!(%{error: inspect(reason)}))
+      {:error, reason} -> send_json(conn, 400, %{error: inspect(reason)})
     end
   end
 
@@ -304,7 +304,7 @@ defmodule Fleet.API.Rest do
     send_resp(conn, 404, ~s|{"error":"not found"}|)
   end
 
-  defp send_json(conn, payload) do
-    send_resp(conn, 200, Jason.encode!(payload))
-  end
+  # R6 : status paramétrable (200 défaut) — plus de send_resp+encode inline divergents.
+  defp send_json(conn, payload), do: send_json(conn, 200, payload)
+  defp send_json(conn, status, payload), do: send_resp(conn, status, Jason.encode!(payload))
 end

@@ -227,13 +227,17 @@ defmodule Fleet.Coord.Policies do
   defp canon_type(:escalation_triggered),
     do: :"coord.escalation_triggered"
 
-  # Broadcast canon strict (source :coord, construction + broadcast via Bus.emit) — toléré
-  # silencieusement si UnregisteredError (registry pas encore peuplé au boot order) pour ne pas
-  # casser le boot ; toute autre erreur remonte. Politique fire-and-forget inchangée.
+  # Broadcast canon strict (source :coord) via le cœur protégé `Bus.safe_emit/4` — le rescue
+  # local dupliqué est retiré, la politique best-effort a UNE autorité (Ring 0). `:silent` :
+  # UnregisteredError (registry pas encore peuplé au boot order) toléré sans bruit pour ne pas
+  # casser le boot — politique fire-and-forget inchangée. Un event MALFORMÉ (bug de construction)
+  # est loggé ERROR par safe_emit puis neutralisé (plus propagé) : coord ne doit pas crasher sur
+  # un défaut d'observabilité.
   defp safe_canon_broadcast(type, opts) do
-    Bus.emit(:coord, type, opts)
-  rescue
-    _e in Fleet.Event.UnregisteredError -> :ok
+    Bus.safe_emit(:coord, type, opts,
+      on_unregistered: :silent,
+      context: "Coord.Policies: action NON broadcastée"
+    )
   end
 
   defp extract_pod_id(%{pod_id: pid}) when is_binary(pid), do: pid

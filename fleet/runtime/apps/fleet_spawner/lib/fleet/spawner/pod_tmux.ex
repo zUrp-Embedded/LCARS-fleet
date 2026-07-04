@@ -39,7 +39,7 @@ defmodule Fleet.Spawner.PodTmux do
   # HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un chemin
   # fabriqué : l'état .lcars ne doit pas se disperser en silence.
   defp default_sock_base,
-    do: Path.join(System.user_home!(), ".lcars/run/tmux-sock")
+    do: Path.join(Fleet.Layout.state_dir(), "run/tmux-sock")
 
   @doc """
   Chemin socket du pod — convention bwrap_launch.sh : `<base>/<pod_id>/pod.sock`.

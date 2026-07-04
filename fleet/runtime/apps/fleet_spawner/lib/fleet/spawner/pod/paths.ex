@@ -73,7 +73,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   # HOME irrésoluble = runtime cassé → fail-loud via `runtime_home()` (la source unique locale,
   # `System.user_home!()`), jamais un chemin fabriqué : l'état .lcars ne doit pas se disperser en silence.
   defp default_state_fs_root,
-    do: Path.join(runtime_home(), ".lcars/state")
+    do: Path.join(Fleet.Layout.state_dir(), "state")
 
   defp scope_for("pipe"), do: "pipes"
   defp scope_for("run"), do: "runs"

@@ -103,4 +103,20 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   defp steps(workflow_map), do: Map.get(workflow_map, "steps", %{})
   defp needs(spec), do: Map.get(spec, "needs", [])
   defp role(spec), do: Map.get(spec, "role")
+
+  @doc """
+  Chargement PROTÉGÉ d'une workflow_map — autorité UNIQUE du rescue de `load!` (R4 2026-07-04 :
+  3 wrappers dupliqués dans StepDispatcher/Poller/StepRunConsumer, avec 2 TAGS d'erreur différents
+  pour le même échec). `loader` = module (`load!/1`) ou fonction 1-aire (seams test des deux formes).
+  `{:ok, map}` | `{:error, {:workflow_map_load_failed, name, message}}` — tag unifié ; le POURQUOI
+  de l'échec (map retirée du catalogue, schema cassé) est dans `message`.
+  """
+  @spec safe_load(module() | (String.t() -> map()), String.t()) ::
+          {:ok, map()} | {:error, {:workflow_map_load_failed, String.t(), String.t()}}
+  def safe_load(loader, name) when is_binary(name) do
+    map = if is_function(loader, 1), do: loader.(name), else: loader.load!(name)
+    {:ok, map}
+  rescue
+    e -> {:error, {:workflow_map_load_failed, name, Exception.message(e)}}
+  end
 end

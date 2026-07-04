@@ -94,22 +94,22 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
     _ =
       case {state.status, new_status} do
-      {:ok, :crashed} ->
-        Logger.error("MCPMonitor: target=#{inspect(state.target)} transition :ok → :crashed")
+        {:ok, :crashed} ->
+          Logger.error("MCPMonitor: target=#{inspect(state.target)} transition :ok → :crashed")
 
-        _ = broadcast_crashed(state.target, :ok, :crashed)
+          _ = broadcast_crashed(state.target, :ok, :crashed)
 
-      {:crashed, :ok} ->
-        Logger.info("MCPMonitor: target=#{inspect(state.target)} recovered :crashed → :ok")
+        {:crashed, :ok} ->
+          Logger.info("MCPMonitor: target=#{inspect(state.target)} recovered :crashed → :ok")
 
-      {previous, ^new_status} when previous == new_status ->
-        :ok
+        {previous, ^new_status} when previous == new_status ->
+          :ok
 
-      {previous, current} ->
-        Logger.debug(
-          "MCPMonitor: target=#{inspect(state.target)} transition #{inspect(previous)} → #{inspect(current)} (no broadcast)"
-        )
-    end
+        {previous, current} ->
+          Logger.debug(
+            "MCPMonitor: target=#{inspect(state.target)} transition #{inspect(previous)} → #{inspect(current)} (no broadcast)"
+          )
+      end
 
     new_state
   end
@@ -137,31 +137,27 @@ defmodule Fleet.Starfleet.MCPMonitor do
     end
   end
 
+  # Émission via le cœur protégé `Bus.safe_emit/4` (rescue local dupliqué retiré — la politique
+  # best-effort a UNE autorité, Ring 0). `:silent` : UnregisteredError = boot-order toléré
+  # (registry pas encore peuplé), pas une alarme. Un event MALFORMÉ (bug de construction) est
+  # loggé ERROR par safe_emit puis neutralisé — ça masquerait sinon l'alerte « MCP a crashé »,
+  # et ce broadcast tourne DANS le GenServer lui-même : le laisser crasher redémarrerait le
+  # moniteur avec status remis à :unknown, perdant la détection de transition :ok → :crashed
+  # (sa raison d'être), et bouclerait à chaque tick.
   defp broadcast_crashed(target, previous, new) do
-    Bus.emit(:starfleet, :"mcp.server_crashed",
-      payload: %{
-        "target" => inspect(target),
-        "previous_status" => Atom.to_string(previous),
-        "new_status" => Atom.to_string(new)
-      }
+    Bus.safe_emit(
+      :starfleet,
+      :"mcp.server_crashed",
+      [
+        payload: %{
+          "target" => inspect(target),
+          "previous_status" => Atom.to_string(previous),
+          "new_status" => Atom.to_string(new)
+        }
+      ],
+      on_unregistered: :silent,
+      context: "MCPMonitor: alerte mcp.server_crashed NON émise"
     )
-  rescue
-    # UnregisteredError = boot-order toléré : registry pas encore peuplé, broadcast
-    # rejeté, pas une alarme — silencieux.
-    _e in Fleet.Event.UnregisteredError ->
-      :ok
-
-    # ArgumentError/FunctionClauseError = bug de CONSTRUCTION de l'event, PAS du boot.
-    # Ne JAMAIS l'avaler en :ok muet : ça masquerait l'alerte « MCP a crashé ». On la
-    # rend VISIBLE puis on neutralise — ce broadcast tourne DANS le GenServer lui-même ;
-    # le laisser crasher redémarrerait le moniteur avec status remis à :unknown, perdant
-    # la détection de transition :ok → :crashed (sa raison d'être), et bouclerait à chaque tick.
-    e in [ArgumentError, FunctionClauseError] ->
-      Logger.error(
-        "MCPMonitor: alerte mcp.server_crashed NON émise — event malformé (bug de construction) : #{inspect(e)}"
-      )
-
-      :ok
   end
 
   defp schedule_check(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do

@@ -146,28 +146,26 @@ defmodule Fleet.Starfleet.MCPWatcher do
     e -> {:error, {:exception, e}}
   end
 
+  # Émission via le cœur protégé `Bus.safe_emit/4` (rescue local dupliqué retiré — la politique
+  # best-effort a UNE autorité, Ring 0, ce qui clôt la dérive « jumeaux désalignés » : ce module
+  # avait été le seul des 4 à masquer un event malformé). `:silent` : UnregisteredError =
+  # boot-order toléré (registry pas encore peuplé), comme MCPMonitor. Un event MALFORMÉ (bug de
+  # construction) est loggé ERROR par safe_emit puis neutralisé — laisser crasher redémarrerait
+  # le watcher et re-fetcherait Hex.pm en boucle.
   defp broadcast_alert(package, current, upstream) do
-    Bus.emit(:starfleet, :"sdk.upstream_alert",
-      payload: %{
-        "package" => package,
-        "current" => current,
-        "upstream" => upstream
-      }
+    Bus.safe_emit(
+      :starfleet,
+      :"sdk.upstream_alert",
+      [
+        payload: %{
+          "package" => package,
+          "current" => current,
+          "upstream" => upstream
+        }
+      ],
+      on_unregistered: :silent,
+      context: "MCPWatcher: alerte sdk.upstream_alert NON émise"
     )
-  rescue
-    # UnregisteredError = boot-order toléré (registry pas encore peuplé) — silencieux, comme MCPMonitor.
-    _e in Fleet.Event.UnregisteredError ->
-      :ok
-
-    # ArgumentError/FunctionClauseError = bug de CONSTRUCTION de l'event, PAS du boot. Ne JAMAIS
-    # l'avaler en :ok muet (conformité 2026-07-04 : ce module était le SEUL des 4 jumeaux à masquer) :
-    # visible puis neutralisé — laisser crasher redémarrerait le watcher et re-fetcherait Hex.pm en boucle.
-    e in [ArgumentError, FunctionClauseError] ->
-      Logger.error(
-        "MCPWatcher: alerte sdk.upstream_alert NON émise — event malformé (bug de construction) : #{inspect(e)}"
-      )
-
-      :ok
   end
 
   defp schedule_check(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do

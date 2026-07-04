@@ -432,11 +432,9 @@ defmodule Fleet.Pilot.StepDispatcher do
   defp default_workflow_map,
     do: Application.get_env(:fleet_pilot, :delegation_workflow_map, "brief-gate")
 
-  defp load_workflow_map(workflow_map_name, workflow_map_loader) do
-    {:ok, workflow_map_loader.(workflow_map_name)}
-  rescue
-    e -> {:error, {:workflow_map_load_failed, workflow_map_name, Exception.message(e)}}
-  end
+  # R4 : délégué à l'autorité unique (WorkflowMapNav.safe_load — même tag, plus de rescue local).
+  defp load_workflow_map(workflow_map_name, workflow_map_loader),
+    do: Fleet.Pilot.WorkflowMapNav.safe_load(workflow_map_loader, workflow_map_name)
 
   defp workflow_map_step_role(workflow_map, workflow_map_name, step) do
     case Fleet.Pilot.WorkflowMapNav.step_role(workflow_map, step) do

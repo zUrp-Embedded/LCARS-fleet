@@ -31,8 +31,6 @@ defmodule Fleet.Starfleet.Cat5Escalator do
       }
   """
 
-  require Logger
-
   alias Fleet.EventRouter.Bus
   alias Fleet.Starfleet.{AuditLog, CoordBackend}
 
@@ -80,34 +78,28 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     :ok
   end
 
+  # Émission via le cœur protégé `Bus.safe_emit/4` (rescue local dupliqué retiré — la politique
+  # best-effort a UNE autorité, Ring 0). Le nom du type est SYNTHÉTISÉ : on passe le BINAIRE
+  # `starfleet.audit_cat5_<src>` tel quel, safe_emit le convertit via `to_existing_atom` (anti
+  # atom-leak — les 3 atomes sont registrés : events.yaml + préregistre Starfleet.Application)
+  # SOUS son rescue. Une source inattendue (atome jamais préregistré) y est classée bug de
+  # CONSTRUCTION : Logger.error puis :ok — jamais avalé muet (une escalade Cat-5, sévérité max,
+  # qui disparaît en silence est indiagnosticable), jamais propagé (ce broadcast tourne synchrone
+  # dans le GenServer DriftMonitor : le laisser crasher tuerait le subscriber Cat-5 et le ferait
+  # boucler sur un producteur malformé, alors que l'escalade est déjà au journal d'audit).
+  # UnregisteredError = boot-order toléré → `:silent`, comme avant.
   defp broadcast_canon(source, enriched, correlation_id) do
-    # to_existing_atom (pas to_atom) — anti atom-leak ; les 3 atomes
-    # `starfleet.audit_cat5_<src>` sont registrés (events.yaml + préregistre
-    # Starfleet.Application). Une source de type inattendue → ArgumentError → rescue.
-    Bus.emit(:starfleet, String.to_existing_atom("starfleet.audit_cat5_#{source}"),
-      pod_id: extract_pod_id(enriched),
-      correlation_id: correlation_id,
-      payload: enriched
+    Bus.safe_emit(
+      :starfleet,
+      "starfleet.audit_cat5_#{source}",
+      [
+        pod_id: extract_pod_id(enriched),
+        correlation_id: correlation_id,
+        payload: enriched
+      ],
+      on_unregistered: :silent,
+      context: "Cat5Escalator: escalade Cat-5 NON broadcastée"
     )
-  rescue
-    # UnregisteredError = boot-order toléré : le registry n'est pas encore peuplé,
-    # le broadcast est rejeté, on n'en fait pas une alarme — silencieux.
-    _e in Fleet.Event.UnregisteredError ->
-      :ok
-
-    # ArgumentError/FunctionClauseError = bug de CONSTRUCTION de l'event (source hors
-    # enum, ou atome `starfleet.audit_cat5_<src>` jamais préregistré donc refusé par
-    # to_existing_atom), PAS du boot. Ne JAMAIS l'avaler en :ok muet : ça ferait
-    # disparaître en silence une escalade Cat-5 (sévérité max). On le rend VISIBLE puis
-    # on neutralise — l'escalade est déjà au journal d'audit, et ce broadcast tourne
-    # synchrone dans le GenServer DriftMonitor : le laisser crasher tuerait le subscriber
-    # Cat-5 et le ferait boucler sur un producteur malformé.
-    e in [ArgumentError, FunctionClauseError] ->
-      Logger.error(
-        "Cat5Escalator: escalade Cat-5 NON broadcastée — event malformé (bug de construction) : #{inspect(e)}"
-      )
-
-      :ok
   end
 
   defp extract_pod_id(%{"pod_id" => pid}) when is_binary(pid), do: pid

@@ -419,7 +419,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   defp wal_path(opts),
     do:
       opts[:wal_path] || Application.get_env(:fleet_pilot, :incident_registry_wal_path) ||
-        Path.join([System.user_home!(), ".lcars", "system-incidents.json"])
+        Path.join(Fleet.Layout.state_dir(), "system-incidents.json")
 
   defp author(opts),
     do:

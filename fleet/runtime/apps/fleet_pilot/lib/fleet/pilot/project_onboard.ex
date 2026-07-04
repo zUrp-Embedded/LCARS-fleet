@@ -34,8 +34,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   require Logger
 
-  @projects_root "/home/projects"
-  @work_root "/home/projects.work"
+  # H1/H3 : derive de l'autorite unique du layout container (Fleet.Layout, R0).
+  @projects_root Fleet.Layout.projects_root()
+  @work_root Fleet.Layout.work_root()
   # author de l'onboarding = le système (il GÉNÈRE le scaffold) — pas l'arch (simple relais), pas l'user
   # (n'a rien écrit). committer = l'humain (git config) trace qui a initié (2026-06-14).
   # Identité système : AUTORITÉ UNIQUE = Fleet.Credentials.ForgeIdentity.system_identity/0

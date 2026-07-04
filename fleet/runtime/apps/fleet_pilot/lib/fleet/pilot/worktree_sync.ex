@@ -36,7 +36,8 @@ defmodule Fleet.Pilot.WorktreeSync do
 
   alias Fleet.Pilot.GitOps
 
-  @projects_root "/home/projects"
+  # H1/H3 : derive de l'autorite unique du layout container (Fleet.Layout, R0).
+  @projects_root Fleet.Layout.projects_root()
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))

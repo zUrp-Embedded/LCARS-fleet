@@ -48,8 +48,11 @@ defmodule Fleet.Observation.Deck do
 
   get "/health" do
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{status: "ok", deck: "fleet_observation", port: Application.get_env(:fleet_observation, :http_port)}))
+    |> json(200, %{
+      status: "ok",
+      deck: "fleet_observation",
+      port: Application.get_env(:fleet_observation, :http_port)
+    })
   end
 
   get "/api/pods" do
@@ -73,7 +76,7 @@ defmodule Fleet.Observation.Deck do
   end
 
   match _ do
-    send_resp(conn, 404, Jason.encode!(%{error: "deck route not found"}))
+    json(conn, 404, %{error: "deck route not found"})
   end
 
   # Vue JSON-safe d'un pod : sous-ensemble du `:info`. Le runtime peut mettre
@@ -336,5 +339,13 @@ defmodule Fleet.Observation.Deck do
   # Un deck = une section panel LCARS.
   defp deck(num, name, body) do
     ~s|<section class="panel"><div class="panel-head"><span class="panel-num">#{num}</span><span class="panel-name">#{name}</span></div><div class="panel-body">#{body}</div></section>|
+  end
+
+  # R6 : l'envoi JSON (content-type + encode + send) tapé UNE fois — les sends inline divergeaient
+  # (content-type oublié sur le 404).
+  defp json(conn, status, payload) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(status, Jason.encode!(payload))
   end
 end
