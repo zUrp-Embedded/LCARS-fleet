@@ -23,14 +23,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   setup %{tmp_dir: tmp} do
     # token de rôle consultant résoluble → `as_role("consultant")` doit l'injecter.
     File.write!(Path.join(tmp, "consultant.gitea_token"), "tok-consultant")
-    prev = Application.get_env(:fleet_credentials, :role_tokens_dir)
-    Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev),
-        else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
-    end)
+    Fleet.Pilot.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
 
     :ok
   end

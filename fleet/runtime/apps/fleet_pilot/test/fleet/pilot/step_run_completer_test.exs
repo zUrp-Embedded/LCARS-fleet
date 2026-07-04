@@ -1,6 +1,7 @@
 defmodule Fleet.Pilot.StepRunCompleterTest do
   use ExUnit.Case, async: true
 
+  alias Fleet.Pilot.ForgeStubs.MergeFailForge
   alias Fleet.Pilot.StepRunCompleter
 
   # Forge stub qui ENREGISTRE l'ordre des appels (send au test) pour vérifier
@@ -123,13 +124,6 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   # PR introuvable (le juge tombe avant tout review) ; merge FF impossible (open ok, merge 409).
   defmodule NoPrForge do
     def get_pr_for_branch(_r, _h, _b, _o), do: {:error, :pr_not_found}
-  end
-
-  defmodule MergeFailForge do
-    def open_pr(_r, _h, _b, _t, _o), do: {:ok, 7}
-    # Sceau : commente OK puis merge 409 → {:error, {:merge, _}} fail-loud.
-    def post_comment(_r, _n, _b, _o), do: {:ok, 1}
-    def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
   defp base_step_run(extra \\ %{}) do

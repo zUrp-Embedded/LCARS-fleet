@@ -148,14 +148,7 @@ defmodule Fleet.Credentials.ShellTest do
   # git_env/0 lit) ; restauré en on_exit. Sépare l'effet de bord global du describe async ci-dessus.
   describe "git/2 — injecte git_env/0 par défaut (anti-prompt MA-22)" do
     setup do
-      prev = Application.get_env(:fleet_credentials, :forge_auth)
-
-      on_exit(fn ->
-        if prev,
-          do: Application.put_env(:fleet_credentials, :forge_auth, prev),
-          else: Application.delete_env(:fleet_credentials, :forge_auth)
-      end)
-
+      Fleet.Credentials.TestEnv.restore_env_on_exit(:fleet_credentials, :forge_auth)
       :ok
     end
 

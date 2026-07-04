@@ -24,15 +24,11 @@ defmodule Fleet.EventRouter.R1SeamBroadcastTest do
     path = Path.join(tmp, "events.yaml")
     File.write!(path, "events:\n  pod.completed: []\n")
 
-    Application.put_env(:fleet_event_router, :events_yaml_path, path)
-    Application.put_env(:fleet_event_router, :load_event_registry, true)
+    Fleet.EventRouter.TestEnv.put_env_restoring(:fleet_event_router, :events_yaml_path, path)
+    Fleet.EventRouter.TestEnv.put_env_restoring(:fleet_event_router, :load_event_registry, true)
 
-    on_exit(fn ->
-      Application.delete_env(:fleet_event_router, :events_yaml_path)
-      Application.put_env(:fleet_event_router, :load_event_registry, false)
-      # Reset le registry global pour ne pas polluer les autres tests.
-      Bus.set_authorized_event_types(MapSet.new())
-    end)
+    # Reset le registry global pour ne pas polluer les autres tests.
+    on_exit(fn -> Bus.set_authorized_event_types(MapSet.new()) end)
 
     :ok = Catalog.load!()
 

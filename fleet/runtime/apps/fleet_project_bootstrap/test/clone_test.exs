@@ -1,7 +1,8 @@
 defmodule Fleet.ProjectBootstrap.CloneTest do
   # Doc-mount (mundo invocado) : clone branche code (workspace) + branche doc (work/ops) dans le pod.
   # Fixture git RÉELLE (pas de mock) — repo source avec `main` + branche orpheline `work/ops`.
-  use ExUnit.Case, async: false
+  # async : fixtures git isolées par tmp_dir (git -C) — aucun env applicatif muté.
+  use ExUnit.Case, async: true
 
   alias Fleet.ProjectBootstrap.Phase.Clone
 

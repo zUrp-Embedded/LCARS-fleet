@@ -6,18 +6,10 @@ defmodule Fleet.Credentials.RoleTokenTest do
   alias Fleet.Credentials.RoleToken
 
   setup do
-    prev = Application.get_env(:fleet_credentials, :role_tokens_dir)
     tmp = Path.join(System.tmp_dir!(), "roletoken-test-#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
-    Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
-
-    on_exit(fn ->
-      File.rm_rf(tmp)
-
-      if prev,
-        do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev),
-        else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
-    end)
+    on_exit(fn -> File.rm_rf(tmp) end)
+    Fleet.Credentials.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
 
     {:ok, dir: tmp}
   end

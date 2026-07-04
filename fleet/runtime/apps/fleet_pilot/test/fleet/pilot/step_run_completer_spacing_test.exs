@@ -27,16 +27,8 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
     end
   end
 
-  defp set_spacing(ms) do
-    prev = Application.get_env(:fleet_pilot, :step_run_write_spacing_ms)
-    Application.put_env(:fleet_pilot, :step_run_write_spacing_ms, ms)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_pilot, :step_run_write_spacing_ms, prev),
-        else: Application.delete_env(:fleet_pilot, :step_run_write_spacing_ms)
-    end)
-  end
+  defp set_spacing(ms),
+    do: Fleet.Pilot.TestEnv.put_env_restoring(:fleet_pilot, :step_run_write_spacing_ms, ms)
 
   test "complete : le gap configuré est INSÉRÉ entre le comment de verdict et la route" do
     set_spacing(2000)

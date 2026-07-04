@@ -1,7 +1,8 @@
 defmodule Fleet.Workflow.DeliverableGateTest do
   # Gate I-CBC du livrable (O5). Fixture git RÉELLE. Chaque finding consultant (F-01/F-02/F-03) doit
   # être MÉCANIQUEMENT bloqué : un livrable invalide est irreprésentable au push.
-  use ExUnit.Case, async: false
+  # async : fixtures git isolées par tmp_dir (git -C) — aucun env applicatif muté.
+  use ExUnit.Case, async: true
 
   alias Fleet.Workflow.DeliverableGate, as: Gate
 

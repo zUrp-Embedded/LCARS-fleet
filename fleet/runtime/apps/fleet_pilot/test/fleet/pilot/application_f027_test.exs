@@ -5,17 +5,8 @@ defmodule Fleet.Pilot.ApplicationF027Test do
   @keys [:step_dispatch?, :poll_repo, :hop_remote, :forge]
 
   setup do
-    prev = Map.new(@keys, fn k -> {k, Application.get_env(:fleet_pilot, k)} end)
-
-    on_exit(fn ->
-      Enum.each(@keys, fn k ->
-        case Map.get(prev, k) do
-          nil -> Application.delete_env(:fleet_pilot, k)
-          v -> Application.put_env(:fleet_pilot, k, v)
-        end
-      end)
-    end)
-
+    # Les tests posent ces clés eux-mêmes ; on n'enregistre ici que leur restauration.
+    Enum.each(@keys, &Fleet.Pilot.TestEnv.restore_env_on_exit(:fleet_pilot, &1))
     :ok
   end
 

@@ -34,8 +34,7 @@ defmodule Fleet.MCP.ServerTest do
     assert Server.boot_environment([]) == :host
     assert Server.boot_environment(boot_environment: :pod) == :pod
 
-    Application.put_env(:fleet_mcp, :boot_environment, :ci)
-    on_exit(fn -> Application.delete_env(:fleet_mcp, :boot_environment) end)
+    Fleet.MCP.TestEnv.put_env_restoring(:fleet_mcp, :boot_environment, :ci)
     assert Server.boot_environment([]) == :ci
     assert Server.boot_environment(boot_environment: :host) == :host
   end

@@ -11,11 +11,13 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
 
   # Stubs injectés via le seam `:fleet_starfleet, :spawner_mod` pour induire un comptage de pods
   # défaillant (Spawner injoignable = restart en plein quiesce) sans toucher le vrai Spawner.
-  defmodule RaisingSpawner do
+  # Nommés d'après l'op qui échoue (`count_pods`) : un homonyme `RaisingSpawner` dans fleet_spawner
+  # levait sur `spawn_pod` — même nom, contrats différents = piège de lecture (dédup B6, renommés).
+  defmodule RaisingOnCountSpawner do
     def count_pods, do: raise("Spawner injoignable (test E-05)")
   end
 
-  defmodule ExitingSpawner do
+  defmodule ExitingOnCountSpawner do
     def count_pods, do: exit(:noproc)
   end
 
@@ -24,10 +26,8 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
     :ok
   end
 
-  defp inject_spawner(mod) do
-    Application.put_env(:fleet_starfleet, :spawner_mod, mod)
-    on_exit(fn -> Application.delete_env(:fleet_starfleet, :spawner_mod) end)
-  end
+  defp inject_spawner(mod),
+    do: Fleet.Starfleet.TestEnv.put_env_restoring(:fleet_starfleet, :spawner_mod, mod)
 
   test "refuse_new_jobs/1 active la quiescence" do
     Quiesce.resume!()
@@ -48,19 +48,19 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
   test "count_pods qui LÈVE → in_flight_count > 0 (fail-closed : drain ne peut PAS conclure 0)" do
     # E-05 : Spawner présent mais injoignable (restart en plein quiesce). L'ancien `rescue -> 0`
     # sous-comptait → drain déclaré complet à tort. Désormais : sentinel « pas vide ».
-    inject_spawner(RaisingSpawner)
+    inject_spawner(RaisingOnCountSpawner)
     assert AggregateDispatcher.in_flight_count() > 0
   end
 
   test "count_pods qui EXIT (:noproc) → in_flight_count > 0 (pas de sous-comptage)" do
-    inject_spawner(ExitingSpawner)
+    inject_spawner(ExitingOnCountSpawner)
     assert AggregateDispatcher.in_flight_count() > 0
   end
 
   test "drain avec AggregateDispatcher quand count_pods LÈVE → ne conclut pas :drained (timeout)" do
     # Intégration : le drain réel ne doit PAS couper « vide » quand le comptage est indisponible —
     # il consomme la fenêtre de grâce puis procède (status :timeout), au lieu d'un :drained prématuré.
-    inject_spawner(RaisingSpawner)
+    inject_spawner(RaisingOnCountSpawner)
     name = :"sd_e05_#{System.unique_integer([:positive])}"
 
     {:ok, _} =

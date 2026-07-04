@@ -12,6 +12,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.{StepDispatcher, StepRunConsumer, ForgeProtocol}
+  alias Fleet.Pilot.StubTaskQueue
 
   # ── Sim forge stateful : 1 issue + N PR (objets separes, labels/requested_reviewers propres) ──
   defmodule Sim do
@@ -267,10 +268,6 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def wake_pod(_), do: :ok
   end
 
-  defmodule TQStub do
-    def enqueue(_pod, _attrs), do: {:ok, %{id: "t"}}
-  end
-
   defmodule DelivStub do
     def publish(_opts) do
       {:ok,
@@ -315,7 +312,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       # sur le vrai Loader (priv) → "poc-mini"/"gkchain" introuvables → dispatch échoue.
       workflow_map_loader: &WorkflowMapLoader.load!/1,
       spawner: SpawnStub,
-      task_queue: TQStub,
+      task_queue: StubTaskQueue,
       project_resolver: fn _r, _o ->
         {:ok, %{"repo_path" => "x", "base_branch" => "main", "base_sha" => "cafe"}}
       end
@@ -334,7 +331,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       deliverable: DelivStub,
       deliverable_mode_fun: dmode(),
       max_rework_rounds: 2,
-      task_queue: TQStub,
+      task_queue: StubTaskQueue,
       spawner: SpawnStub,
       gatekeeper_pod_id_fun: fn -> "gk-perm" end,
       gate_evals: %{}
@@ -433,7 +430,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert o2[:step] == "review"
 
     # review finit AVEC gate soft -> escalade gatekeeper (brief enqueue, PAS d'avance).
-    assert {:escalate, "t", eval_ctx} =
+    # "corr-1" = l'id fixe rendu par Fleet.Pilot.StubTaskQueue.enqueue/2 (support partagé).
+    assert {:escalate, "corr-1", eval_ctx} =
              StepRunConsumer.maybe_complete(
                completed(o2, "reviewer", %{"severity_max" => "ok"}),
                hc()

@@ -16,7 +16,9 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
   # Spawner qui LÈVE dans `spawn_pod` → exerce le rescue de `handle_info` (spawn droppé). CapProfile.load
   # doit d'abord réussir pour atteindre spawn_pod : on passe un rôle canon réel ("engineer").
-  defmodule RaisingSpawner do
+  # Nommé d'après l'op qui lève : un homonyme `RaisingSpawner` dans fleet_starfleet levait sur
+  # `count_pods` — même nom, contrats différents = piège de lecture (dédup B6, renommés tous deux).
+  defmodule RaisingOnSpawnSpawner do
     def spawn_pod(_cap_profile, _issue_id, _opts), do: raise("boom spawn (test E-04)")
   end
 
@@ -60,7 +62,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     # E-04 : l'API REST a déjà répondu 202 « queued » ; si le dispatch lève, le spawn est droppé.
     # Sans `spawn.failed`, l'admin croit le pod en file → aucun signal. On capture l'alarme sur le Bus.
     :ok = Fleet.EventRouter.Bus.subscribe()
-    {pid, _} = start_consumer(RaisingSpawner)
+    {pid, _} = start_consumer(RaisingOnSpawnSpawner)
 
     send(
       pid,

@@ -8,45 +8,18 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.Pilot.ForgeStubs.{MergeFailForge, OkForge}
   alias Fleet.Pilot.GatekeeperSeal
+  alias Fleet.Pilot.TestEnv
 
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp} do
     # Token de rôle gatekeeper résoluble → `seal_and_merge` doit signer merge ET comment avec.
     File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "GK-TOKEN")
-    prev = Application.get_env(:fleet_credentials, :role_tokens_dir)
-    Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev),
-        else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
-    end)
+    TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
 
     :ok
-  end
-
-  defmodule OkForge do
-    def post_comment(repo, n, body, opts) do
-      send(self(), {:comment, repo, n, body, opts})
-      {:ok, 1}
-    end
-
-    def merge_pr(repo, pr, opts) do
-      send(self(), {:merge, repo, pr, opts})
-      :ok
-    end
-  end
-
-  defmodule MergeFailForge do
-    # post_comment SIGNALE → on prouve qu'AUCUN « fusionnée » n'est posté sur un merge KO.
-    def post_comment(repo, n, body, opts) do
-      send(self(), {:comment, repo, n, body, opts})
-      {:ok, 1}
-    end
-
-    def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
   defmodule CommentFailForge do

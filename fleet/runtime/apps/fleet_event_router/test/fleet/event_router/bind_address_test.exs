@@ -58,16 +58,7 @@ defmodule Fleet.EventRouter.BindAddressTest do
 
   describe "listener webhook — ip threadée dans le child-spec Cowboy" do
     setup do
-      prev = Application.get_env(:fleet_event_router, :start_webhooks)
-      Application.put_env(:fleet_event_router, :start_webhooks, true)
-
-      on_exit(fn ->
-        case prev do
-          nil -> Application.delete_env(:fleet_event_router, :start_webhooks)
-          v -> Application.put_env(:fleet_event_router, :start_webhooks, v)
-        end
-      end)
-
+      Fleet.EventRouter.TestEnv.put_env_restoring(:fleet_event_router, :start_webhooks, true)
       :ok
     end
 

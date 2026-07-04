@@ -3,21 +3,14 @@ defmodule Fleet.EventRouter.CatalogF008Test do
   use ExUnit.Case, async: false
 
   alias Fleet.EventRouter.Catalog
+  alias Fleet.EventRouter.TestEnv
 
   setup do
-    prev_load = Application.get_env(:fleet_event_router, :load_event_registry)
-    prev_path = Application.get_env(:fleet_event_router, :events_yaml_path)
-
-    on_exit(fn ->
-      restore(:load_event_registry, prev_load)
-      restore(:events_yaml_path, prev_path)
-    end)
-
+    # Les tests posent :load_event_registry / :events_yaml_path eux-mêmes ; capture-restauration seule.
+    TestEnv.restore_env_on_exit(:fleet_event_router, :load_event_registry)
+    TestEnv.restore_env_on_exit(:fleet_event_router, :events_yaml_path)
     :ok
   end
-
-  defp restore(key, nil), do: Application.delete_env(:fleet_event_router, key)
-  defp restore(key, val), do: Application.put_env(:fleet_event_router, key, val)
 
   # F-008 (Pattern A crash-boot) : avant, un events.yaml absent/invalide WARNait puis rendait :ok →
   # registry vide → le Bus broadcastait TOUT sans validation (deploy « vert » mais registry mort).

@@ -1,5 +1,6 @@
 defmodule Fleet.Workflow.GatesTest do
-  use ExUnit.Case, async: false
+  # async : Gates.evaluate/3 est une fonction pure (aucun env applicatif, aucun état global).
+  use ExUnit.Case, async: true
 
   alias Fleet.Workflow.Gates
 

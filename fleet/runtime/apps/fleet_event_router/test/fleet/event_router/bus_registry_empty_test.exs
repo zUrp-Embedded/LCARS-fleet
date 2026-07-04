@@ -22,11 +22,13 @@ defmodule Fleet.EventRouter.BusRegistryEmptyTest do
   setup do
     previous = Bus.authorized_event_types()
     Bus.set_authorized_event_types(MapSet.new())
+    on_exit(fn -> Bus.set_authorized_event_types(previous) end)
 
-    on_exit(fn ->
-      Bus.set_authorized_event_types(previous)
-      Application.delete_env(:fleet_event_router, :permit_when_registry_empty)
-    end)
+    # Les tests posent :permit_when_registry_empty eux-mêmes ; capture-restauration seule.
+    Fleet.EventRouter.TestEnv.restore_env_on_exit(
+      :fleet_event_router,
+      :permit_when_registry_empty
+    )
 
     :ok
   end

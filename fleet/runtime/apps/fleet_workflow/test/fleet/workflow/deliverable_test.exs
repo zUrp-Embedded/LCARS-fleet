@@ -2,7 +2,8 @@ defmodule Fleet.Workflow.DeliverableTest do
   # Publication unifiée O5 — fixture git RÉELLE (workspace + bare remote). Les 2 modes (payload /
   # git_native) passent par la MÊME gate + le MÊME push ; seul le temps CONTENU diverge. Un livrable
   # invalide (secret, identité usurpée, historique réécrit) est irreprésentable au push.
-  use ExUnit.Case, async: false
+  # async : fixtures git isolées par tmp_dir (git -C, remotes locaux) — aucun env applicatif muté.
+  use ExUnit.Case, async: true
 
   alias Fleet.Workflow.Deliverable
 

@@ -8,14 +8,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
 
   setup %{tmp_dir: tmp} do
     root = Path.join(tmp, "seedroot")
-    prev = Application.get_env(:fleet_spawner, :seed_store_root)
-    Application.put_env(:fleet_spawner, :seed_store_root, root)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_spawner, :seed_store_root, prev),
-        else: Application.delete_env(:fleet_spawner, :seed_store_root)
-    end)
+    Fleet.Spawner.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
 
     %{tmp: tmp, root: root}
   end

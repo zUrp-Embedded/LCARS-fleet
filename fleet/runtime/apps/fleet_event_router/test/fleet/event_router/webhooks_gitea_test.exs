@@ -9,14 +9,15 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
   setup %{tmp_dir: tmp_dir} do
     secret_path = Path.join(tmp_dir, "webhook-secret")
     File.write!(secret_path, "supersecret\n")
-    Application.put_env(:fleet_event_router, :webhook_secret_path, secret_path)
+
+    Fleet.EventRouter.TestEnv.put_env_restoring(
+      :fleet_event_router,
+      :webhook_secret_path,
+      secret_path
+    )
 
     :ok = Bus.subscribe()
-
-    on_exit(fn ->
-      Bus.unsubscribe()
-      Application.delete_env(:fleet_event_router, :webhook_secret_path)
-    end)
+    on_exit(fn -> Bus.unsubscribe() end)
 
     %{secret: "supersecret"}
   end

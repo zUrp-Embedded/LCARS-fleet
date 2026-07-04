@@ -3,15 +3,13 @@ defmodule Fleet.Credentials.ForgeAuthTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Credentials.ForgeAuth
+  alias Fleet.Credentials.TestEnv
 
   setup do
-    prev = Application.get_env(:fleet_credentials, :forge_auth)
-    on_exit(fn -> restore(:forge_auth, prev) end)
+    # Les tests posent/effacent :forge_auth eux-mêmes ; on ne capture ici que la restauration.
+    TestEnv.restore_env_on_exit(:fleet_credentials, :forge_auth)
     :ok
   end
-
-  defp restore(key, nil), do: Application.delete_env(:fleet_credentials, key)
-  defp restore(key, val), do: Application.put_env(:fleet_credentials, key, val)
 
   describe "git_env/0" do
     # MOVE-1/MA-22 — `GIT_TERMINAL_PROMPT=0` est désormais posé d'OFFICE (inconditionnel) : le contrat

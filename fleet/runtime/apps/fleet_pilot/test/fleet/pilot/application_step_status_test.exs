@@ -5,14 +5,8 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
   alias Fleet.Pilot.Application, as: PilotApp
 
   setup do
-    prev = Application.get_env(:fleet_pilot, :step_dispatch?)
-
-    on_exit(fn ->
-      if is_nil(prev),
-        do: Application.delete_env(:fleet_pilot, :step_dispatch?),
-        else: Application.put_env(:fleet_pilot, :step_dispatch?, prev)
-    end)
-
+    # Les tests posent :step_dispatch? eux-mêmes ; capture-restauration seule.
+    Fleet.Pilot.TestEnv.restore_env_on_exit(:fleet_pilot, :step_dispatch?)
     :ok
   end
 

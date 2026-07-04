@@ -2,6 +2,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.StepDispatcher
+  alias Fleet.Pilot.StubTaskQueue
 
   defp issue(fields) do
     %{
@@ -42,6 +43,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   defmodule StubForge do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+
     # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-workflow_map / 1-step).
     def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
 
@@ -192,13 +194,6 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     def pod_info(pod_id) do
       send(self(), {:pod_info, pod_id})
       {:ok, %{phase: :monitoring}}
-    end
-  end
-
-  defmodule StubTaskQueue do
-    def enqueue(pod_id, attrs) do
-      send(self(), {:enqueued, pod_id, attrs})
-      {:ok, %{id: "task-1"}}
     end
   end
 
@@ -527,7 +522,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     test "#8.B : sans brief_kind au step → défaut du profil (engineer=worker → brief worker)" do
       payload = eng_issue()
-      workflow_map = %{"name" => "g", "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+
+      workflow_map = %{
+        "name" => "g",
+        "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}
+      }
 
       opts =
         dispatch_opts(

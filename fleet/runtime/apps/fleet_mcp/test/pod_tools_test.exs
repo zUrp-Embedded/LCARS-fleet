@@ -12,6 +12,7 @@ defmodule Fleet.MCP.PodToolsTest do
   use ExUnit.Case, async: false
 
   alias Fleet.MCP.PodTools
+  alias Fleet.MCP.TestEnv
   alias Fleet.TaskQueue
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
@@ -189,19 +190,15 @@ defmodule Fleet.MCP.PodToolsTest do
 
   describe "get_issue_status (suivi arch — repo PASSÉ en `project`, plus de global mutable)" do
     setup do
-      prev_forge = Application.get_env(:fleet_mcp, :forge_client)
-      prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
-
-      Application.put_env(:fleet_mcp, :forge_client, RecordingForge)
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingForge)
 
       # Suivre un issue est un acte d'ARCHITECTE : le resolver grave le rôle architect sur le pod du canal.
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
-
-      on_exit(fn ->
-        restore(:forge_client, prev_forge)
-        restore(:pod_resolver, prev_resolver)
-        Application.delete_env(:fleet_mcp, :test_issue_state)
+      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
+        {:ok, %{role: "architect"}}
       end)
+
+      # :test_issue_state est posé par certains tests (état d'issue du RecordingForge) — restauration seule.
+      TestEnv.restore_env_on_exit(:fleet_mcp, :test_issue_state)
 
       :ok
     end
@@ -274,27 +271,17 @@ defmodule Fleet.MCP.PodToolsTest do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
-      prev_forge = Application.get_env(:fleet_mcp, :forge_client)
-      prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
-      prev_tokdir = Application.get_env(:fleet_credentials, :role_tokens_dir)
-      Application.put_env(:fleet_mcp, :forge_client, StubForge)
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
 
       # Déléguer est un acte d'ARCHITECTE : le `:pod_resolver` doit rendre le rôle `architect` (sinon
       # `require_architect` refuse `:forbidden_not_architect`). Le token du compte architect doit aussi être
       # sur disque, sinon create_issue REFUSE (`:role_token_unavailable`, fail-closed).
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
-
-      Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
-      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
-
-      on_exit(fn ->
-        restore(:forge_client, prev_forge)
-        restore(:pod_resolver, prev_resolver)
-
-        if prev_tokdir,
-          do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev_tokdir),
-          else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
+      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
+        {:ok, %{role: "architect"}}
       end)
+
+      TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
 
       :ok
     end
@@ -375,25 +362,15 @@ defmodule Fleet.MCP.PodToolsTest do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
-      prev_forge = Application.get_env(:fleet_mcp, :forge_client)
-      prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
-      prev_tokdir = Application.get_env(:fleet_credentials, :role_tokens_dir)
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
 
-      Application.put_env(:fleet_mcp, :forge_client, StubForge)
+      # :pod_resolver est posé PAR CHAQUE TEST (c'est le binding testé) — restauration seule.
+      TestEnv.restore_env_on_exit(:fleet_mcp, :pod_resolver)
 
       # Token `architect` sur disque (cas légitime). Les tests qui veulent prouver un REFUS le font sur le
       # RÔLE (resolver ≠ architect ou pod inconnu), AVANT même que le token n'entre en jeu.
-      Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
+      TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
       File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
-
-      on_exit(fn ->
-        restore(:forge_client, prev_forge)
-        restore(:pod_resolver, prev_resolver)
-
-        if prev_tokdir,
-          do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev_tokdir),
-          else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
-      end)
 
       :ok
     end
@@ -500,25 +477,14 @@ defmodule Fleet.MCP.PodToolsTest do
     @non_architect_roles ["engineer", "reviewer", "starfleet", "scout", nil]
 
     setup %{tmp_dir: tmp} do
-      prev_forge = Application.get_env(:fleet_mcp, :forge_client)
-      prev_onboard = Application.get_env(:fleet_mcp, :project_onboard)
-      prev_resolver = Application.get_env(:fleet_mcp, :pod_resolver)
-      prev_tokdir = Application.get_env(:fleet_credentials, :role_tokens_dir)
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
+      TestEnv.put_env_restoring(:fleet_mcp, :project_onboard, StubOnboard)
 
-      Application.put_env(:fleet_mcp, :forge_client, StubForge)
-      Application.put_env(:fleet_mcp, :project_onboard, StubOnboard)
-      Application.put_env(:fleet_credentials, :role_tokens_dir, tmp)
+      # :pod_resolver est posé PAR CHAQUE TEST (rôle sous test) — restauration seule.
+      TestEnv.restore_env_on_exit(:fleet_mcp, :pod_resolver)
+
+      TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
       File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
-
-      on_exit(fn ->
-        restore(:forge_client, prev_forge)
-        restore(:project_onboard, prev_onboard)
-        restore(:pod_resolver, prev_resolver)
-
-        if prev_tokdir,
-          do: Application.put_env(:fleet_credentials, :role_tokens_dir, prev_tokdir),
-          else: Application.delete_env(:fleet_credentials, :role_tokens_dir)
-      end)
 
       :ok
     end
@@ -573,7 +539,4 @@ defmodule Fleet.MCP.PodToolsTest do
       end
     end
   end
-
-  defp restore(key, nil), do: Application.delete_env(:fleet_mcp, key)
-  defp restore(key, val), do: Application.put_env(:fleet_mcp, key, val)
 end

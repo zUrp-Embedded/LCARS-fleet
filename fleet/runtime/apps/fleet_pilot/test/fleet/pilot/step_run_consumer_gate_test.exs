@@ -12,6 +12,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.StepRunConsumer
+  alias Fleet.Pilot.StubTaskQueue
 
   # Sim forge : §5 (abandon/await) + primitives PR (Corr.3). Compteur de step_runs via forge_opts[:_step_runs].
   defmodule StubForge do
@@ -39,13 +40,6 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def publish(o) do
       send(self(), {:publish, o})
       {:ok, %{commit_sha: "sha-x", pushed?: true, mode: Map.get(o, :mode, :git_native)}}
-    end
-  end
-
-  defmodule StubQueue do
-    def enqueue(pod_id, attrs) do
-      send(self(), {:enqueue, pod_id, attrs})
-      {:ok, %{id: "corr-1"}}
     end
   end
 
@@ -152,7 +146,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       deliverable: DelivStub,
       deliverable_mode_fun: dmode(),
       max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2),
-      task_queue: StubQueue,
+      task_queue: StubTaskQueue,
       spawner: StubSpawner,
       gatekeeper_pod_id_fun:
         Keyword.get(opts, :gatekeeper_pod_id_fun, fn -> "gatekeeper-permanent" end),
@@ -293,7 +287,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert ctx.step == "build"
     assert ctx.role == "engineer"
 
-    assert_received {:enqueue, "gatekeeper-permanent", attrs}
+    assert_received {:enqueued, "gatekeeper-permanent", attrs}
     assert attrs.role == "gatekeeper"
     assert attrs.metadata["gate_eval"] == true
     assert attrs.metadata["step"] == "build"
@@ -328,7 +322,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
                hc(wake_recovery: escalating)
              )
 
-    assert_received {:enqueue, "gatekeeper-permanent", _attrs}
+    assert_received {:enqueued, "gatekeeper-permanent", _attrs}
 
     # LE finding : le kick injoignable est SURFACÉ (telemetry émise), pas avalé silencieusement.
     assert_received {[:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached], ^ref,
@@ -341,7 +335,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert {:escalate, "corr-1", _ctx} =
              StepRunConsumer.maybe_complete(build_done("soft", enveloped), hc())
 
-    assert_received {:enqueue, _pod, attrs}
+    assert_received {:enqueued, _pod, attrs}
     assert attrs.metadata["outputs"] == %{"sev" => "low"}
   end
 
@@ -584,7 +578,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         loader: WorkflowMap,
         deliverable: DelivStub,
         deliverable_mode_fun: dmode(),
-        task_queue: StubQueue,
+        task_queue: StubTaskQueue,
         spawner: StubSpawner,
         gatekeeper_pod_id_fun: fn -> "gk-perm" end,
         role_emails: fn r -> ["#{r}@lcars.local"] end
@@ -692,7 +686,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         loader: WorkflowMap,
         deliverable: DelivStub,
         deliverable_mode_fun: dmode(),
-        task_queue: StubQueue,
+        task_queue: StubTaskQueue,
         spawner: StubSpawner,
         gatekeeper_pod_id_fun: fn -> "gk-perm" end,
         role_emails: fn r -> ["#{r}@lcars.local"] end

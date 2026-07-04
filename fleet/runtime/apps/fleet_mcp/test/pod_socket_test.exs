@@ -21,16 +21,8 @@ defmodule Fleet.MCP.PodSocketTest do
 
   setup do
     base = Path.join(System.tmp_dir!(), "lcars-mcp-sock-#{System.unique_integer([:positive])}")
-    prev = Application.get_env(:fleet_mcp, :sock_base)
-    Application.put_env(:fleet_mcp, :sock_base, base)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_mcp, :sock_base, prev),
-        else: Application.delete_env(:fleet_mcp, :sock_base)
-
-      File.rm_rf(base)
-    end)
+    on_exit(fn -> File.rm_rf(base) end)
+    Fleet.MCP.TestEnv.put_env_restoring(:fleet_mcp, :sock_base, base)
 
     %{base: base}
   end
