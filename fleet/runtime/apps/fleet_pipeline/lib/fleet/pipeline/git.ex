@@ -163,12 +163,17 @@ defmodule Fleet.Pipeline.Git do
         # un `.gitattributes`+`.git/config` du pod = exécution de commande arbitraire côté monde. Le set
         # neutralise les vecteurs config globale/système ; le vecteur in-tree (filtre nommé) est fermé en
         # amont côté CONTENU par `Deliverable` (cf. le commentaire de `@hooks_off`).
-        case System.cmd("git", @hooks_off ++ ["add", "--" | paths],
+        # Borné par Shell.git (setsid + SIGKILL du process-GROUP OS à la deadline) : un `index.lock`
+        # stale ferait pendre `git add` indéfiniment sans timeout -> le completer n'atteint jamais
+        # l'unlock, l'issue reste wedgée `lcars-in-flight` sans recovery. Même pattern que `run_push`.
+        case Fleet.Credentials.Shell.git(@hooks_off ++ ["add", "--" | paths],
                cd: opts.workspace,
-               stderr_to_stdout: true
+               timeout_ms: git_local_timeout_ms()
              ) do
-          {_out, 0} -> :ok
-          {out, rc} -> {:error, {:git_add_failed, rc, String.trim(out)}}
+          {:ok, {_out, 0}} -> :ok
+          {:ok, {out, rc}} -> {:error, {:git_add_failed, rc, String.trim(out)}}
+          {:error, {:timeout, ms}} -> {:error, {:git_add_timeout, ms}}
+          {:error, {:exit, reason}} -> {:error, {:git_add_exit, reason}}
         end
 
       {:error, _} = err ->
@@ -204,29 +209,37 @@ defmodule Fleet.Pipeline.Git do
         {:error, :nothing_to_commit}
 
       true ->
-        case System.cmd("git", @hooks_off ++ ["commit", "-m", opts.message],
+        # Borné (idem git_add). `env` explicite = identité du commit (commit_env) MERGÉE avec
+        # `ForgeAuth.git_env/0` (GIT_TERMINAL_PROMPT=0) : Shell.git n'injecte son env par défaut QUE
+        # si `:env` est absent -> on compose les deux (aucun chevauchement de clés : AUTHOR/COMMITTER
+        # vs TERMINAL_PROMPT). Pas de régression, + la borne anti-prompt en cohérence.
+        case Fleet.Credentials.Shell.git(@hooks_off ++ ["commit", "-m", opts.message],
                cd: opts.workspace,
-               env: commit_env(opts),
-               stderr_to_stdout: true
+               timeout_ms: git_local_timeout_ms(),
+               env: Fleet.Credentials.ForgeAuth.git_env() ++ commit_env(opts)
              ) do
-          {_out, 0} -> :ok
-          {out, rc} -> {:error, {:git_commit_failed, rc, String.trim(out)}}
+          {:ok, {_out, 0}} -> :ok
+          {:ok, {out, rc}} -> {:error, {:git_commit_failed, rc, String.trim(out)}}
+          {:error, {:timeout, ms}} -> {:error, {:git_commit_timeout, ms}}
+          {:error, {:exit, reason}} -> {:error, {:git_commit_exit, reason}}
         end
     end
   end
 
   defp has_staged_changes?(workspace) do
-    case System.cmd("git", ["diff", "--cached", "--quiet"],
+    # Borné + `@hooks_off` (uniformité : `diff` peut invoquer un `diff.external` armé par le pod ;
+    # le set le désarme, cost nul — comme add/commit). Timeout/exit/code-inattendu → `true` (laisse
+    # commit TENTER et reporter l'erreur avec contexte ; borne préservée : commit est lui aussi borné).
+    case Fleet.Credentials.Shell.git(@hooks_off ++ ["diff", "--cached", "--quiet"],
            cd: workspace,
-           stderr_to_stdout: true
+           timeout_ms: git_local_timeout_ms()
          ) do
       # Exit 0 = aucun diff staged → rien à commit.
-      {_, 0} -> false
+      {:ok, {_, 0}} -> false
       # Exit 1 = diff staged présent (sémantique stable git).
-      {_, 1} -> true
-      # Autre code = erreur git non-attendue (corruption repo, etc.) → laisse
-      # commit tenter et reporter via {:git_commit_failed, ...}.
-      {_, _} -> true
+      {:ok, {_, 1}} -> true
+      # Autre code / timeout / exit = anomalie → laisse commit tenter et reporter.
+      _ -> true
     end
   end
 
@@ -240,9 +253,16 @@ defmodule Fleet.Pipeline.Git do
   end
 
   defp read_head_sha(workspace) do
-    case System.cmd("git", ["rev-parse", "HEAD"], cd: workspace, stderr_to_stdout: true) do
-      {sha, 0} -> {:ok, String.trim(sha)}
-      {err, rc} -> {:error, {:rev_parse_failed, rc, String.trim(err)}}
+    # Borné + `@hooks_off` par uniformité (rev-parse ne lance aucun filtre/externe → les `-c` sont
+    # inertes ici, mais tous les sites git système-side composent le set = invariant auditable).
+    case Fleet.Credentials.Shell.git(@hooks_off ++ ["rev-parse", "HEAD"],
+           cd: workspace,
+           timeout_ms: git_local_timeout_ms()
+         ) do
+      {:ok, {sha, 0}} -> {:ok, String.trim(sha)}
+      {:ok, {err, rc}} -> {:error, {:rev_parse_failed, rc, String.trim(err)}}
+      {:error, {:timeout, ms}} -> {:error, {:rev_parse_timeout, ms}}
+      {:error, {:exit, reason}} -> {:error, {:rev_parse_exit, reason}}
     end
   end
 
@@ -341,6 +361,12 @@ defmodule Fleet.Pipeline.Git do
   # :git_push_timeout_ms (config app ou Application.put_env).
   defp push_timeout_ms do
     Application.get_env(:fleet_pipeline, :git_push_timeout_ms, 30_000)
+  end
+
+  # Borne des ops git LOCALES (add/commit/diff-cached/rev-parse). Normalement <1 s ; un timeout ici =
+  # `index.lock` stale / FS pendu (NFS). 30 s laisse une marge large avant de tuer le groupe OS.
+  defp git_local_timeout_ms do
+    Application.get_env(:fleet_pipeline, :git_local_timeout_ms, 30_000)
   end
 
   # Pas de `forge_auth_args/0`. L'auth forge système-side est portée par

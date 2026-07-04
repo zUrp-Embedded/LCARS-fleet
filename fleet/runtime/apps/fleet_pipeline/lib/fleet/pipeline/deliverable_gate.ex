@@ -291,14 +291,19 @@ defmodule Fleet.Pipeline.DeliverableGate do
   @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
   defp git(workspace, args) do
-    task =
-      Task.async(fn ->
-        System.cmd("git", @hooks_off ++ ["-C", workspace] ++ args, stderr_to_stdout: true)
-      end)
-
-    case Task.yield(task, @git_timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, result} -> result
-      nil -> {"git timeout (#{@git_timeout_ms}ms)", 124}
+    # Borné par `Fleet.Credentials.Shell.git/2` (setsid + SIGKILL du process-GROUP OS à la deadline)
+    # au lieu de l'ancien patron `Task.async + Task.shutdown(:brutal_kill)` qui ne tuait QUE le Task BEAM
+    # en laissant le process `git` OS fuir (un `git log -p` sur un gros diff qui dépasse 15 s laissait un
+    # zombie tenant des FDs sur le workspace ; accumulation non bornée sous gates concurrents). `@hooks_off`
+    # reste composé ICI : Shell.git n'auto-compose PAS la neutralisation config (elle est load-bearing —
+    # anti-RCE `diff.external` sur `git log -p`), le caller la garde. Contrat externe `{out, exit_code}`
+    # préservé (les 2 appelants scan_secret_* matchent `{out, 0}` / `{out, _rc}` — inchangés).
+    case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", workspace] ++ args,
+           timeout_ms: @git_timeout_ms
+         ) do
+      {:ok, {out, code}} -> {out, code}
+      {:error, {:timeout, ms}} -> {"git timeout (#{ms}ms)", 124}
+      {:error, {:exit, reason}} -> {"git exec error: #{inspect(reason)}", 125}
     end
   end
 end
