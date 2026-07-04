@@ -84,6 +84,9 @@ defmodule Fleet.Pilot.Poller do
     # `WakeRecovery.wake/3`). Rend testable le contrat « wake raté ⇒ workflow_run démarré, bail PRIS » sans hit
     # IncidentRegistry/tmux réels.
     wake_recovery: nil,
+    # G6 seam : escalade d'une workflow_map illisible (défaut nil → `IncidentRegistry.record_or_escalate/4`).
+    # Rend testable « map durablement absente ⇒ escalade sysadmin » sans hit le registre/forge réels.
+    incident_fun: nil,
     poll_count: 0,
     error_count: 0,
     err_streak: 0,
@@ -159,7 +162,8 @@ defmodule Fleet.Pilot.Poller do
       spawner: Keyword.get(opts, :spawner),
       task_queue: Keyword.get(opts, :task_queue),
       clock: Keyword.get(opts, :clock),
-      wake_recovery: Keyword.get(opts, :wake_recovery)
+      wake_recovery: Keyword.get(opts, :wake_recovery),
+      incident_fun: Keyword.get(opts, :incident_fun)
     }
 
     if Keyword.get(opts, :start_tick?, true) do
@@ -700,7 +704,29 @@ defmodule Fleet.Pilot.Poller do
     loader = state.workflow_map_loader || Fleet.Workflow.Loader
     loader.load!(workflow_map_name)
   rescue
-    _ -> nil
+    e ->
+      # G6 : la workflow_map ne charge PAS (retirée/renommée du catalogue, ou schema cassé). Le bail reste
+      # fail-closed (cf. classify_issue : on ne libère pas le bail d'un workflow_run peut-être avancé) — MAIS
+      # si l'absence est DURABLE, l'issue tient le bail et le repo est bloqué POUR TOUJOURS en silence
+      # (Jupiter : personne ne le verra). On ESCALADE : IncidentRegistry dédup par signature → 1ère
+      # occurrence = note WAL, RÉCURRENCE (map absente à chaque tick) = issue sysadmin ouverte. Pas de spam
+      # (le dédup EST le throttle). Best-effort (l'escalade ne doit jamais casser le tick).
+      _ = escalate_workflow_map_incident(workflow_map_name, Exception.message(e), state)
+      nil
+  end
+
+  defp escalate_workflow_map_incident(workflow_map_name, message, state) do
+    fun = state.incident_fun || (&Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+
+    fun.(
+      "workflow_map_load",
+      workflow_map_name,
+      {:workflow_map_load_failed, message},
+      forge_opts: state.forge_opts
+    )
+  rescue
+    # L'escalade elle-même ne doit JAMAIS faire tomber le tick (registre down, etc.).
+    _ -> :escalation_skipped
   end
 
   # Le step est-il le 1er de la workflow_map (= routé mais pas avancé = EN FILE) ? Anomalie workflow_map → `true`

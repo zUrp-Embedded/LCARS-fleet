@@ -7,6 +7,47 @@ defmodule Fleet.Pilot.PollerTest do
   # (`describe "poll_once/4"`, stubs `StubForge`/`StubInvoker`) sont partis avec. Seul le mode step
   # subsiste ci-dessous (+ le lifecycle GenServer, partagé).
 
+  # G6 : workflow_map_loader qui RAISE (map retirée/renommée du catalogue) → load_workflow_map_or_nil rescue.
+  defmodule RaisingWorkflowMapLoader do
+    def load!(name), do: raise("workflow_map #{name} introuvable (retirée du catalogue)")
+  end
+
+  describe "G6 — workflow_map illisible → escalade (repo plus bloqué en silence)" do
+    test "load workflow_map RAISE pendant classify → incident_fun appelé (bail tenu MAIS visible)" do
+      parent = self()
+
+      # Issue #42 routée AU-DELÀ du 1er step ("deploy") → classify_issue charge la workflow_map "ghostmap"
+      # → le loader RAISE (map retirée du catalogue). `start_entry_poller` = harnais prouvé (découverte +
+      # admission repo OK) ; on injecte le loader-qui-raise + un incident_fun stub.
+      {name, pid} =
+        start_entry_poller(
+          {:ok,
+           [
+             %{
+               "number" => 42,
+               "body" => "x",
+               "labels" => [],
+               "assignees" => [%{"login" => "lordzurp"}]
+             }
+           ]},
+          %{42 => {"ghostmap", "deploy"}},
+          workflow_map_loader: RaisingWorkflowMapLoader,
+          incident_fun: fn op, subject, reason, _opts ->
+            send(parent, {:incident, op, subject, reason}) && :recorded
+          end
+        )
+
+      Poller.force_poll(name)
+
+      # AVANT : la map absente → issue ENGAGÉE (bail tenu) → repo bloqué POUR TOUJOURS, aucun signal.
+      # MAINTENANT : l'échec de load ESCALADE (IncidentRegistry dédup → note puis issue sysadmin).
+      assert_received {:incident, "workflow_map_load", "ghostmap",
+                       {:workflow_map_load_failed, _msg}}
+
+      GenServer.stop(pid)
+    end
+  end
+
   describe "G4 — awaits_rekick?/2 (throttle du re-kick arch)" do
     test "au moins 1 issue attend ET tick multiple du throttle → re-kick" do
       assert Poller.awaits_rekick?(1, 0)
