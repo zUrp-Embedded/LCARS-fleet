@@ -922,7 +922,10 @@ defmodule Fleet.Spawner.Pod do
   # host_launch.sh (PAS de sandbox) ; sinon la chaîne bwrap. Délègue à la SOURCE UNIQUE
   # `Fleet.CapProfile.containment/1`.
   defp cap_profile_containment(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.containment(cap)
-  defp cap_profile_containment(_), do: "bwrap"
+
+  # Fallback non-struct = le défaut conservateur, lu à l'AUTORITÉ UNIQUE (pas de littéral "bwrap"
+  # retapé qui resterait stale si le défaut changeait).
+  defp cap_profile_containment(_), do: Fleet.CapProfile.default_containment()
 
   # ============================================================
   # Helpers

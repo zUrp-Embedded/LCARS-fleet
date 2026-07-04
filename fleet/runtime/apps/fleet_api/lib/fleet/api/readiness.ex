@@ -109,9 +109,12 @@ defmodule Fleet.API.Readiness do
   # sonder pour la liveness. La présence du backend en config = operational
   # est donc correct (pas de cas « wiré mais process mort »).
   defp coord_backend do
-    backend = Application.get_env(:fleet_starfleet, :coord_backend)
+    # Lit via l'AUTORITÉ UNIQUE `CoordBackend.resolved/0` (comme `shutdown_dispatcher` lit
+    # `Shutdown.configured_dispatcher/0` ci-dessous) plutôt que `Application.get_env` brut : un seul
+    # défaut à garder aligné (`NotWiredYet`), pas de divergence nil-vs-NotWiredYet entre lecteurs.
+    backend = Fleet.Starfleet.CoordBackend.resolved()
 
-    if backend in [nil, Fleet.Starfleet.CoordBackend.NotWiredYet] do
+    if backend == Fleet.Starfleet.CoordBackend.NotWiredYet do
       probe("coord.backend", :degraded, %{
         backend: inspect(backend),
         note: "NotWiredYet/absent — escalades Cat 5 audit-only silencieuses"
@@ -176,7 +179,10 @@ defmodule Fleet.API.Readiness do
   # `:degraded`.
   defp mcp_pod_facing do
     {sub_state, sub_detail} = Fleet.MCP.Supervisor.pod_facing_status()
-    spec_present? = not is_nil(Application.get_env(:fleet_spawner, :mcp_server_spec))
+
+    # Délègue à l'accesseur du propriétaire (comme `LaunchBackend.resolved/0` juste au-dessus) plutôt que
+    # de relire la clé de config de fleet_spawner en dur — pas de couplage implicite au nom de clé.
+    spec_present? = Fleet.Spawner.Pod.McpProvision.server_spec_present?()
     detail = Map.put(sub_detail, :mcp_server_spec, spec_present?)
 
     case sub_state do

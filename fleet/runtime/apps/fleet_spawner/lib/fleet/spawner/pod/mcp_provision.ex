@@ -35,6 +35,16 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # (chemin posé per-pod en `LCARS_FLEET_MCP_SOCKET`), TESTS : fixture file-backed. Même mécanisme, spec différente.
   defp mcp_server_spec, do: Application.get_env(:fleet_spawner, :mcp_server_spec)
 
+  @doc """
+  Le spec serveur MCP est-il configuré (`:fleet_spawner, :mcp_server_spec`) ? Accesseur PUBLIC =
+  SOURCE UNIQUE de cette lecture pour les sondes cross-app (`Fleet.API.Readiness`) : elles délèguent
+  au propriétaire de la clé au lieu de relire `Application.get_env(:fleet_spawner, …)` (couplage
+  implicite au nom de clé → `nil` silencieux si la clé est renommée). Même pattern que
+  `Fleet.Spawner.LaunchBackend.resolved/0`.
+  """
+  @spec server_spec_present?() :: boolean()
+  def server_spec_present?, do: not is_nil(mcp_server_spec())
+
   # Env vars MCP à propager au pod (consommés par bridge.py côté pod). `LCARS_POD_ID`
   # est TOUJOURS posé : nécessaire pour que bridge.py injecte `_lcars_pod_id` dans
   # chaque tool call MCP (corrélation côté central PodTools, filtrage TaskQueue.next_for).

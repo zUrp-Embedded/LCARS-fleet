@@ -78,10 +78,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   # Home INTRA-POD. bwrap → /home/.pod (le pod_dir réel masqué derrière) ; sinon (host) → le pod_dir
   # réel (pas de relocalisation). Doit matcher LCARS_POD_HOME posé par maybe_put_sandbox_home.
   def sandbox_home(cap_profile, pod_dir) do
-    case Fleet.CapProfile.containment(cap_profile) do
-      "bwrap" -> "/home/.pod"
-      _ -> pod_dir
-    end
+    # « Contenu par bwrap ? » délégué au prédicat d'AUTORITÉ `CapProfile.bwrap?/1` (pas de littéral
+    # "bwrap" matché en dur). bwrap → /home/.pod (relocalisation sandbox) ; sinon (host) → pod_dir réel.
+    if Fleet.CapProfile.bwrap?(cap_profile), do: "/home/.pod", else: pod_dir
   end
 
   # cwd d'un orchestrateur = son 1er mount RW (DÉJÀ bindé via LCARS_POD_MOUNTS, donc pas de bind à
@@ -120,10 +119,10 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   # le pod_dir réel derrière (SANDBOX_HOME) : l'agent ne voit ni human ni pod_id, et `ls /home` ne
   # montre que les mounts. Host pods (containment none) : pas relocalisés (home réel).
   def maybe_put_sandbox_home(env, cap_profile, pod_dir) do
-    case Fleet.CapProfile.containment(cap_profile) do
-      "bwrap" -> Map.put(env, "LCARS_POD_HOME", sandbox_home(cap_profile, pod_dir))
-      _ -> env
-    end
+    # bwrap UNIQUEMENT (prédicat d'autorité) : relocalise le home intra-pod. Host (none) = home réel, rien à poser.
+    if Fleet.CapProfile.bwrap?(cap_profile),
+      do: Map.put(env, "LCARS_POD_HOME", sandbox_home(cap_profile, pod_dir)),
+      else: env
   end
 
   # HOME du pod selon containment. host (none) = home réel de l'humain (claude → `~/.claude`
