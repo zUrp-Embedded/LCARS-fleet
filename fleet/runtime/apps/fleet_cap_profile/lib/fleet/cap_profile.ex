@@ -13,8 +13,9 @@ defmodule Fleet.CapProfile do
   keys forbidden, so a modop cannot override the base profile's
   containment/name/kind).
 
-  Composition is deterministic: deep-merge last-wins in declared order,
-  canonical JSON encoding (recursive key sort), `:crypto` sha256.
+  Composition is deterministic: deep-merge last-wins in declared order;
+  the canonical JSON encoding (recursive key sort) and the `:crypto` sha256
+  live in `Fleet.CapProfile.CanonicalJson` (`sha256/1` here delegates).
   """
 
   @behaviour Fleet.CapProfile.Loader
@@ -34,6 +35,12 @@ defmodule Fleet.CapProfile do
   # git-denied ∪ profil). Les trois helpers publics ci-dessous y délèguent ; pas
   # de cycle (DisallowedTools dépend du struct, pas de l'API cœur).
   alias Fleet.CapProfile.DisallowedTools
+
+  # Cluster d'encodage canonique + hash (déterminisme de composition) — concern
+  # orthogonal au loader et aux accesseurs, extrait (C4 2026-07-05). `sha256/1`
+  # (consommé par les tests + assertions de déterminisme) y délègue ; pas de
+  # cycle (CanonicalJson est une feuille pure, zéro dépendance vers le cœur).
+  alias Fleet.CapProfile.CanonicalJson
 
   # Pas de champ `api_version` : le versioning du schéma est porté par le code
   # (release v2), pas par un champ embarqué dans le YAML.
@@ -323,17 +330,11 @@ defmodule Fleet.CapProfile do
   Returns the canonical JSON sha256 (lowercase hex) of a composed map
   or struct. Used by callers to assert deterministic composition.
   Underlying map iteration order is irrelevant — the canonical encoder
-  sorts keys recursively before encoding.
+  (`Fleet.CapProfile.CanonicalJson`) sorts keys recursively before encoding.
   """
   @spec sha256(t() | map()) :: String.t()
   def sha256(%__MODULE__{} = profile), do: profile |> struct_to_map() |> sha256()
-
-  def sha256(map) when is_map(map) do
-    map
-    |> canonical_json()
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
-  end
+  def sha256(map) when is_map(map), do: CanonicalJson.sha256(map)
 
   # ============================================================
   # Catalogue FS (délégué)
@@ -358,7 +359,7 @@ defmodule Fleet.CapProfile do
   defdelegate root_dir(), to: Catalog
 
   # ============================================================
-  # Deep merge & canonical encoding
+  # Deep merge
   # ============================================================
 
   defp deep_merge_last_wins(left, right) when is_map(left) and is_map(right) do
@@ -368,25 +369,6 @@ defmodule Fleet.CapProfile do
   end
 
   defp deep_merge_last_wins(_left, right), do: right
-
-  defp canonical_json(map) when is_map(map) and not is_struct(map) do
-    pairs =
-      map
-      |> Map.to_list()
-      |> Enum.map(fn {k, v} -> {to_string(k), canonical_json(v)} end)
-      |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.map(fn {k, v} -> Jason.encode!(k) <> ":" <> v end)
-      |> Enum.join(",")
-
-    "{" <> pairs <> "}"
-  end
-
-  defp canonical_json(list) when is_list(list) do
-    inner = list |> Enum.map(&canonical_json/1) |> Enum.join(",")
-    "[" <> inner <> "]"
-  end
-
-  defp canonical_json(other), do: Jason.encode!(other)
 
   # ============================================================
   # Struct conversion

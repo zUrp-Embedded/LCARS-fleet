@@ -34,9 +34,26 @@ defmodule Fleet.SPBuilder do
   Déterminisme sha256 : 2 exécutions sur même input produisent un
   `stable_sha256` identique (stable parts uniquement, exclut
   `pod_id`, `spawned_at`, `job_id`, `attempt_id`).
+
+  ## Découpage
+
+  Deux concerns à source de donnée propre sont extraits (la façade compose + templating
+  EEx + résolution de paths reste ici) :
+
+    * `Fleet.SPBuilder.Monk` — résolution de l'injection monk (I/O registry YAML) ;
+      `resolve_monk_injection/2` reste l'API publique (defdelegate).
+    * `Fleet.SPBuilder.RepoSections` — extraction des sections nommées du `CLAUDE.md`
+      repo (mini-parser markdown).
+
+  La résolution de paths (`sp_role_root`/`modop_root`) N'est PAS extraite : ce sont les
+  config-accessors des lectures de CETTE façade (SP rôle, fragments modop), cohésifs
+  avec elles — un module « Paths » ne porterait que deux getters sans logique.
   """
 
   @behaviour Fleet.SPBuilder.Composer
+
+  alias Fleet.SPBuilder.Monk
+  alias Fleet.SPBuilder.RepoSections
 
   # `stable_sha256` est un hex string `String.t()` (encodé via
   # `Base.encode16(case: :lower)`) — type plus précis que `binary()`
@@ -60,8 +77,6 @@ defmodule Fleet.SPBuilder do
           preloaded_paths: [String.t()],
           brief_path: String.t() | nil
         ]
-
-  @repo_section_re ~r/^##\s+(Stack|Build|Test|Conventions|Commands|Gotchas)\b/m
 
   # ============================================================
   # Composer behaviour
@@ -96,12 +111,12 @@ defmodule Fleet.SPBuilder do
       when is_list(modop_bundles) and is_list(opts) do
     with {:ok, sp_role_base} <- read_sp_role_base(cap_profile),
          {:ok, modop_fragments} <- read_modop_fragments(modop_bundles),
-         {:ok, monk_inj} <- monk_injection_or_empty(cap_profile, opts) do
+         {:ok, monk_inj} <- Monk.resolve_or_empty(cap_profile, opts) do
       preloaded_paths =
         Keyword.get(opts, :preloaded_paths, []) ++ monk_inj.corpus_paths
 
       modop_concat =
-        modop_fragments_concat(modop_fragments) <> monk_persona_section(monk_inj)
+        modop_fragments_concat(modop_fragments) <> Monk.persona_section(monk_inj)
 
       stable_concat =
         IO.iodata_to_binary([
@@ -159,7 +174,7 @@ defmodule Fleet.SPBuilder do
   @spec compose_claude_md(Fleet.CapProfile.t(), String.t() | nil, keyword()) ::
           {:ok, String.t()} | {:error, term()}
   def compose_claude_md(%Fleet.CapProfile{} = cap_profile, repo_claude_md_path, _opts \\ []) do
-    with {:ok, repo_sections} <- read_repo_sections(repo_claude_md_path) do
+    with {:ok, repo_sections} <- RepoSections.read(repo_claude_md_path) do
       assigns = [
         role: Fleet.CapProfile.name(cap_profile),
         containment: Fleet.CapProfile.containment(cap_profile),
@@ -220,95 +235,14 @@ defmodule Fleet.SPBuilder do
   end
 
   @doc """
-  Résout l'injection monk : si le cap-profile porte
-  `spec.knowledge.{monk_registry, monk_instance}`, lit le registry YAML
-  (registry mémoire, shape `spec.monks`), trouve l'entrée
-  `monk_instance` → `{:ok, %{persona_hint, corpus_paths}}`. Sinon
-  `:not_a_monk`. L'injection est purement ADDITIVE : pour un non-monk,
-  le flux compose/3 reste byte-identique (aucune branche ne le traverse).
-
-  ## opts
-    * `:monk_registry_root` — racine résolvant le path relatif du registry
-      (test-seam ; défaut config `:fleet_sp_builder, :monk_registry_root`
-      puis `Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")`).
-
-  Le champ `monk_registry` dans le cap-profile = basename (ex `alpha.yaml`)
-  — le code le résout via `:monk_registry_root`. Ce n'est PAS un path absolu :
-  le registry vit in-repo sous la racine, jamais un chemin doctrine externe.
-
-  Fonction **pure** (lecture FS only, aucun process).
+  Résout l'injection monk du cap-profile — API publique historique, déléguée à
+  `Fleet.SPBuilder.Monk.resolve/2` (contrat détaillé, options et codes d'erreur
+  documentés là-bas). `{:ok, %{persona_hint, corpus_paths}}` | `:not_a_monk` |
+  `{:error, term()}`.
   """
   @spec resolve_monk_injection(Fleet.CapProfile.t(), keyword()) ::
-          {:ok, %{persona_hint: String.t(), corpus_paths: [String.t()]}}
-          | :not_a_monk
-          | {:error, term()}
-  def resolve_monk_injection(%Fleet.CapProfile{spec: spec}, opts \\ []) do
-    knowledge = Map.get(spec, "knowledge", %{})
-    registry_rel = Map.get(knowledge, "monk_registry")
-    instance = Map.get(knowledge, "monk_instance")
-
-    cond do
-      is_nil(registry_rel) or is_nil(instance) ->
-        :not_a_monk
-
-      true ->
-        root =
-          Keyword.get(opts, :monk_registry_root) ||
-            Application.get_env(:fleet_sp_builder, :monk_registry_root) ||
-            Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")
-
-        path = Path.join(root, registry_rel)
-
-        with {:ok, reg} <- read_registry(path),
-             {:ok, monk} <- find_monk(reg, instance) do
-          {:ok,
-           %{
-             persona_hint: Map.get(monk, "persona_hint", ""),
-             corpus_paths: Map.get(monk, "corpus_paths", [])
-           }}
-        end
-    end
-  end
-
-  defp read_registry(path) do
-    # Pas d'attribut `kind` (un seul kind par dossier `monks/*.yaml`, le path
-    # déclare le rôle). Validation = présence de `spec.monks` au shape attendu
-    # (liste), pas un `kind` embarqué dans le YAML.
-    case YamlElixir.read_from_file(path) do
-      {:ok, %{"spec" => %{"monks" => monks}} = reg} when is_list(monks) ->
-        {:ok, reg}
-
-      {:ok, _} ->
-        {:error, {:not_a_memory_registry, path}}
-
-      {:error, reason} ->
-        {:error, {:registry_unreadable, path, reason}}
-    end
-  end
-
-  defp find_monk(reg, instance) do
-    monks = get_in(reg, ["spec", "monks"]) || []
-
-    case Enum.find(monks, &(Map.get(&1, "name") == instance)) do
-      nil -> {:error, {:monk_instance_not_found, instance}}
-      monk -> {:ok, monk}
-    end
-  end
-
-  # Wrapper compose/3 : :not_a_monk → injection vide (flux byte-identique
-  # pour un non-monk) ; {:error,_} → propagé (fail-loud).
-  defp monk_injection_or_empty(cap_profile, opts) do
-    case resolve_monk_injection(cap_profile, opts) do
-      {:ok, inj} -> {:ok, inj}
-      :not_a_monk -> {:ok, %{persona_hint: "", corpus_paths: []}}
-      {:error, _} = err -> err
-    end
-  end
-
-  defp monk_persona_section(%{persona_hint: ""}), do: ""
-
-  defp monk_persona_section(%{persona_hint: ph}) when is_binary(ph),
-    do: "\n\n## Monk persona\n\n" <> ph
+          {:ok, Monk.injection()} | :not_a_monk | {:error, term()}
+  defdelegate resolve_monk_injection(cap_profile, opts \\ []), to: Monk, as: :resolve
 
   # ============================================================
   # SP role base + modop fragments I/O
@@ -373,41 +307,6 @@ defmodule Fleet.SPBuilder do
   defp preloaded_paths_concat(paths) do
     "<!-- preloaded -->\n" <> Enum.map_join(paths, "\n", &"- #{&1}")
   end
-
-  # ============================================================
-  # Repo CLAUDE.md section extraction (Stack|Build|Test|Conventions|Commands|Gotchas)
-  # ============================================================
-
-  defp read_repo_sections(nil), do: {:ok, ""}
-
-  defp read_repo_sections(path) when is_binary(path) do
-    case File.read(path) do
-      {:ok, content} -> {:ok, extract_named_sections(content)}
-      {:error, reason} -> {:error, {:repo_claude_md_unreadable, path, reason}}
-    end
-  end
-
-  defp extract_named_sections(content) do
-    lines = String.split(content, "\n")
-    {sections_acc, current} = Enum.reduce(lines, {[], []}, &fold_section/2)
-
-    [current | sections_acc]
-    |> Enum.reverse()
-    |> Enum.map(&Enum.reverse/1)
-    |> Enum.filter(&named_section?/1)
-    |> Enum.map_join("\n\n", &Enum.join(&1, "\n"))
-  end
-
-  defp fold_section(line, {acc, current}) do
-    if String.match?(line, ~r/^##\s+/) do
-      {[current | acc], [line]}
-    else
-      {acc, [line | current]}
-    end
-  end
-
-  defp named_section?([]), do: false
-  defp named_section?([first_line | _]), do: Regex.match?(@repo_section_re, first_line)
 
   # ============================================================
   # Template rendering

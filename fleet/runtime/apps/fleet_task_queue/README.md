@@ -1,6 +1,7 @@
 # Fleet.TaskQueue
 
 **Date** : 2026-06-01
+**Dernière révision** : 2026-07-05 (éclatement Server → Store + Broadcast)
 **Statut** : implémenté run #5 (beyond_#5 chantier 3 build 1, commit `f971d2b3`)
 **Dérivé de** : DN `orchestration/task-queue` §C
 
@@ -15,7 +16,9 @@ Flux : `fleet_spawner`/`fleet_workflow` **enqueue** (source) → `fleet_task_que
 ## Sous-modules
 
 - `Fleet.TaskQueue` — façade API publique. Chaque fonction a une variante test-seam (`server` explicite, ex. `enqueue/3`) pour l'isolation via serveur anonyme (`name: nil`).
-- `Fleet.TaskQueue.Server` — le broker GenServer (un seul écrivain ; persistance `state.json` atomique v:1 ; recovery cross-restart fail-loud `:"state.corrupt"` ; deadline par tâche ; **rétention bornée** des tâches terminales, knob `:retention_terminal_max` défaut 500, F148).
+- `Fleet.TaskQueue.Server` — le broker GenServer (un seul écrivain ; command/query ; deadline par tâche ; **rétention bornée** des tâches terminales, knob `:retention_terminal_max` défaut 500, F148). Garde l'ORCHESTRATION de la persistance et du broadcast (quand persister, quel régime de diffusion) ; la mécanique vit dans les deux modules ci-dessous. Deadline-watchdog et rétention/prune restent DANS le Server (refus argumentés au moduledoc : paire timer couplée au process, prune 20 LOC partageant l'autorité `@active_states`).
+- `Fleet.TaskQueue.Store` — persistance `state.json` (sérialisation + FS, sans state GenServer) : écriture atomique tmp+rename v:1 best-effort loggée error, lecture fail-loud `{:corrupt, _}` (jamais de drop silencieux), `default_path/0`.
+- `Fleet.TaskQueue.Broadcast` — policy de broadcast (sans state GenServer) : `best_effort/3` (observabilité, échec avalé + loggé) vs `required/3` (lifecycle `work_item.completed`, échec propagé `{:error, {:broadcast_failed, _}}`) + enveloppe canon `event/3`. Hors `Bus.safe_emit` (les seams par-instance `:bus`/`:topic` doivent porter les deux chemins ; même exclusion que `Fleet.Spawner.Pod.Events`).
 - `Fleet.TaskQueue.WorkItem` — struct tâche + `to_map/1` / `from_map/1` (sérialisation state.json).
 - `Fleet.TaskQueue.Application` — superviseur (démarre le `Server` nommé).
 

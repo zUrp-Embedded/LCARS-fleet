@@ -1,7 +1,7 @@
 # Fleet.CapProfile
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-05
+**Dernière révision** : 2026-07-05 (C4 — encodage canonique + sha256 extraits en `Fleet.CapProfile.CanonicalJson`, API `sha256/1` inchangée)
 **Statut** : implémenté run #3.1 chantier #1 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_cap_profile.md
 
@@ -36,7 +36,11 @@ Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor.
   pod-projet peut recevoir son projet du dispatch issue→repo plutôt que du cap-profile YAML ; les
   call-sites spawner (`Pod.Scaffold.maybe_bootstrap_project_workspace`, reprovision workspace de `Pod`)
   passent par elle au lieu de re-bricoler la map `spec`
-- `Fleet.CapProfile.sha256/1` — hash canonique stable d'un profile composé
+- `Fleet.CapProfile.sha256/1` — hash canonique stable d'un profile composé (struct ou map).
+  **Délègue** au cluster `Fleet.CapProfile.CanonicalJson` (extrait C4 : concern « déterminisme de
+  composition », orthogonal au loader et aux accesseurs) — `CanonicalJson.encode/1` (JSON canonique,
+  clés stringifiées puis triées récursivement, format de hachage FIGÉ) + `CanonicalJson.sha256/1`
+  (hex minuscules). L'API portée ici ne bouge pas
 
 ## Fleet.Slug — smart-constructor path-safe (utilitaire transverse)
 

@@ -1,7 +1,7 @@
 # fleet_mcp
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-01 (R9 — transport socket AF_UNIX per-pod, l'identité EST le canal)
+**Dernière révision** : 2026-07-05 (éclatement PodTools → WorkItems + Delegation, dispatch conservé)
 **Statut** : implémenté — serveur MCP pod-facing (`get_work_item` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
@@ -10,13 +10,19 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 
 ## Modules
 
-- `Fleet.MCP.PodTools` — outils MCP **pod-facing** : `get_work_item` (le pod tire son
-  brief depuis la TaskQueue), `submit_result` (le pod rend son livrable), `create_issue`
-  (l'arch délègue une implémentation), `create_project` (l'arch onboard un projet neuf) et
-  `get_issue_status` (l'arch suit une délégation). `handle_tool_call/3` = fonctions pures,
-  réutilisables hors transport ; l'identité du pod arrive par le `state` (`%{pod_id: ...}`),
-  jamais par les arguments. Reste wrappé derrière `use ExMCP.Server` pour le DSL `deftool` /
-  `json` / `text` (schémas + format de contenu MCP).
+- `Fleet.MCP.PodTools` — la **table de routage** des outils MCP pod-facing : schémas
+  `deftool` + dispatch `handle_tool_call/3` (guards d'arguments, refus typés
+  `:invalid_arguments`/`:pod_id_required`/`:project_required`, format de contenu MCP
+  `json`/`text`). Fonctions pures, réutilisables hors transport ; l'identité du pod arrive
+  par le `state` (`%{pod_id: ...}`), jamais par les arguments. Reste wrappé derrière
+  `use ExMCP.Server` pour le DSL `deftool` / `json` / `text`. Les métiers vivent dans deux
+  sous-modules aux consommateurs disjoints :
+  - `Fleet.MCP.PodTools.WorkItems` — drive work-item (tout pod) : `get_work_item` (le pod
+    tire son brief depuis la TaskQueue), `submit_result` (le pod rend son livrable,
+    corrélateur `work_item_id` obligatoire + mapping des refus typés).
+  - `Fleet.MCP.PodTools.Delegation` — délégation forge (architecte only) : `create_issue`
+    (l'arch délègue une implémentation), `create_project` (l'arch onboard un projet neuf),
+    `get_issue_status` (l'arch suit une délégation) + la gate `require_architect` commune.
 - `Fleet.MCP.PodSocketAcceptor` — accepteur d'**une** socket AF_UNIX par pod. Un pod = un
   process = une socket : toute ligne reçue vient de CE pod (son `pod_id` est l'état immuable
   de l'accepteur, porté au démarrage). Décode le JSON-RPC newline-framed et dispatche les
@@ -72,7 +78,8 @@ structure que la socket-dir tmux des pods.
 
 `create_project`, `create_issue` et `get_issue_status` sont des actes d'**architecte** : créer
 un repo forge, écrire/pousser dans `/home/projects`, déléguer, suivre une délégation. Le garde
-`require_architect/1` résout le **rôle** depuis l'identité du canal (`state.pod_id` → registre du
+`require_architect/1` (dans `Fleet.MCP.PodTools.Delegation`, appliqué AVANT toute mécanique forge)
+résout le **rôle** depuis l'identité du canal (`state.pod_id` → registre du
 Spawner, `Fleet.Spawner.pod_info`, seam test `:pod_resolver`) **puis** exige `architect`. Le rôle
 vient du spawn, jamais d'un champ du wire. Tout rôle autre (engineer, reviewer, rôle nil/inconnu) →
 `{:error, :forbidden_not_architect}` ; pod absent du registre → `:pod_unknown` ; state sans pod_id →

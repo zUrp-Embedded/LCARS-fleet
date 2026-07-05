@@ -1,16 +1,28 @@
 defmodule Fleet.MCP.PodTools do
   @moduledoc """
-  Couche TOOL MCP pod-facing (drive métier) — les RPC que le pod (client MCP
-  claude) appelle pour communiquer avec le fleet, sans scraping ni injection clavier :
-    - `get_work_item`      : canal IN  — le pod PULL son brief depuis `Fleet.TaskQueue`.
-      `{"done": true}` quand aucun brief (le pod s'arrête). Sinon
-      `{"done": false, "work_item": {"work_item_id", "issue_id", "role", "brief", ...}}`.
-    - `submit_result` : canal OUT — le pod PUSH son livrable (`payload`).
+  Couche TOOL MCP pod-facing — les RPC que le pod (client MCP claude) appelle pour
+  communiquer avec le fleet, sans scraping ni injection clavier. CE module est la
+  **table de routage** : les schémas `deftool` + le dispatch `handle_tool_call/3`
+  (guards d'arguments, refus typés, format de contenu MCP `json`/`text`). Les métiers
+  vivent dans deux sous-modules aux consommateurs disjoints :
 
-  Médiation serveur-side : le pod ne touche jamais la TaskQueue directement (la queue,
-  son schéma, son stockage restent invisibles au pod) ; tout passe par ces tools. Le
-  serveur est **passeur de `correlation_id`** : `work_item_id` exposé côté `get_work_item`,
-  validé côté `submit_result` (le broker rejette un `work_item_id` ≠ brief actif).
+    * `Fleet.MCP.PodTools.WorkItems` — drive work-item (tout pod) :
+      - `get_work_item`  : canal IN  — le pod PULL son brief depuis `Fleet.TaskQueue`.
+        `{"done": true}` quand aucun brief (le pod s'arrête). Sinon
+        `{"done": false, "work_item": {"work_item_id", "issue_id", "role", "brief", ...}}`.
+      - `submit_result` : canal OUT — le pod PUSH son livrable (`payload`),
+        `work_item_id` OBLIGATOIRE (corrélateur).
+    * `Fleet.MCP.PodTools.Delegation` — délégation forge (architecte only, gate
+      `require_architect` serveur-side) :
+      - `create_issue`     : l'arch délègue une brique d'implémentation (issue forge).
+      - `create_project`   : l'arch démarre un projet neuf (repo + dual-dir + scaffold).
+      - `get_issue_status` : l'arch suit une délégation (issue + PR, `delivered`).
+
+  Médiation serveur-side : le pod ne touche jamais la TaskQueue ni la forge directement
+  (la queue, son schéma, son stockage restent invisibles au pod) ; tout passe par ces
+  tools. L'identité (quel pod) est le CANAL : `state.pod_id` est porté par l'accepteur
+  de socket (un pod = une socket), jamais lu du wire — les clauses ici vérifient sa
+  présence (`:pod_id_required` fail-closed), la gate architecte vit dans `Delegation`.
 
   Le broker `Fleet.TaskQueue` broadcast lui-même `%Fleet.Event{work_item.completed}` sur
   `fleet.events` (consommé par `fleet_spawner`/`fleet_coord`) — ce module n'émet
@@ -19,9 +31,8 @@ defmodule Fleet.MCP.PodTools do
 
   use ExMCP.Server
 
-  require Logger
-
-  alias Fleet.TaskQueue
+  alias Fleet.MCP.PodTools.Delegation
+  alias Fleet.MCP.PodTools.WorkItems
 
   deftool "get_work_item" do
     meta do
@@ -133,18 +144,16 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  # ============================================================
+  # Dispatch — drive work-item (Fleet.MCP.PodTools.WorkItems)
+  # ============================================================
+
   @impl true
   def handle_tool_call("get_work_item", _arguments, %{pod_id: pod_id} = state)
       when is_binary(pod_id) and pod_id != "" do
     # Identité = le canal : `pod_id` vient de l'accepteur de socket (un pod = une socket), jamais du wire.
     # On ne lit donc PAS d'identité dans les arguments — il n'y a rien à prouver, la socket discrimine.
-    result =
-      case TaskQueue.get_for_pod(pod_id) do
-        {:ok, task} -> %{"done" => false, "work_item" => envelope(task)}
-        {:error, :no_work_item} -> %{"done" => true}
-      end
-
-    {:ok, %{content: [json(result)]}, state}
+    {:ok, %{content: [json(WorkItems.get_work_item(pod_id))]}, state}
   end
 
   def handle_tool_call("get_work_item", _arguments, state) do
@@ -155,41 +164,13 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("submit_result", %{"payload" => payload} = args, %{pod_id: pod_id} = state)
       when is_map(payload) and is_binary(pod_id) and pod_id != "" do
-    # Identité = le canal (`state.pod_id`, porté par l'accepteur). Reste le `work_item_id` OBLIGATOIRE : il
-    # corrèle le livrable à UN brief précis (le broker rejette un work_item_id ≠ brief actif du pod). C'est un
-    # verrou orthogonal au transport — le pod doit nommer la tâche qu'il clôt, sans quoi le broker tomberait
-    # sur « la dernière active » du pod. Le corrélateur est cherché au top-level (format canonique) PUIS
-    # dans le payload (un agent juge le range parfois dans son payload de verdict). Absent des DEUX → refus.
-    case effective_work_item_id(args, payload) do
-      nil ->
-        {:error, :work_item_id_required, state}
-
-      work_item_id ->
-        # Le broker valide pod_id ↔ work_item_id et broadcast %Fleet.Event{work_item.completed}.
-        case TaskQueue.submit_result(pod_id, Map.put(payload, "work_item_id", work_item_id)) do
-          {:ok, _task} ->
-            {:ok, %{content: [text("Resultat recu par le fleet. Tache close.")]}, state}
-
-          {:error, :no_active_work_item} ->
-            # pas de brief actif = le livrable n'a NULLE PART où aller (jamais assigné, ou clos/
-            # réassigné depuis) → DROP. Le signaler isError (comme :work_item_id_mismatch / :pod_id_required)
-            # plutôt que masquer en {:ok "ok"} : sinon le pod croit son livrable accepté (échec masqué
-            # en succès). (≠ :double_submit_ignored, qui reste :ok — idempotent, le 1er submit EST enregistré.)
-            {:error, :no_active_work_item, state}
-
-          {:error, :double_submit_ignored} ->
-            {:ok, %{content: [text("Resultat deja recu (ignore).")]}, state}
-
-          {:error, :work_item_id_mismatch} ->
-            {:error, :work_item_id_mismatch, state}
-
-          # le broadcast lifecycle `work_item.completed` a échoué : le step_run ne finira PAS (le StepRunConsumer
-          # n'a rien reçu). NE PAS rendre `{:ok, "Tache close."}` (faux succès) — le pod doit
-          # voir un échec (isError) → il peut re-soumettre (le broadcast sera ré-émis), au lieu de croire
-          # son livrable accepté alors que le verrou forge reste posé à vie.
-          {:error, {:broadcast_failed, _reason}} ->
-            {:error, :broadcast_failed, state}
-        end
+    # Identité = le canal (`state.pod_id`, porté par l'accepteur). Le contrat de corrélation
+    # (`work_item_id` OBLIGATOIRE, cherché top-level puis payload) et le mapping des refus typés
+    # (:no_active_work_item, :work_item_id_mismatch, :broadcast_failed — jamais un échec masqué en
+    # succès) vivent dans `WorkItems.submit_result/3`.
+    case WorkItems.submit_result(pod_id, args, payload) do
+      {:ok, message} -> {:ok, %{content: [text(message)]}, state}
+      {:error, reason} -> {:error, reason, state}
     end
   end
 
@@ -203,43 +184,23 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # create_issue — canal DÉLÉGATION : l'architecte délègue une brique d'implémentation à la fleet.
-  # Modèle forge-state-machine : pose une issue PRÊTE pour le poller — auteur=arch (traça),
-  # **assignee=humain owner** (point fixe : routing + ownership) — et S'ARRÊTE. Plus de
-  # `start_pipeline` (rail RAM retiré). Le POLLER prend le relais : issue assignée non verrouillée →
-  # spawn le rôle PRODUCTEUR (`:producer_role`, invariant — pas de marqueur par-issue : un label
-  # `lcars-step:` ré-encoderait une constante). Dispatch runtime via modules-en-variable (pas de dep compile-time pilot).
+  # ============================================================
+  # Dispatch — délégation forge architecte (Fleet.MCP.PodTools.Delegation)
+  # ============================================================
+
+  # La gate architecte (require_architect : rôle résolu du canal, jamais du wire) est appliquée
+  # DANS Delegation, avant toute mécanique forge. Ici : guards de forme des arguments + refus
+  # structurels `project` REQUIS (pas de routage par défaut).
+
   def handle_tool_call(
         "create_issue",
         %{"title" => title, "brief" => brief, "project" => repo},
         state
       )
       when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
-    forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
-
-    # Déléguer un issue est un acte d'ARCHITECTE : `require_architect` résout le rôle depuis l'identité du
-    # canal (`state.pod_id`, porté par l'accepteur de socket) PUIS exige que ce rôle gravé au spawn soit
-    # `architect`. Un pod worker (engineer, reviewer) ou inconnu est REFUSÉ ICI, serveur-side. Le rôle vient
-    # du spawn (résolu par pod_id), JAMAIS d'un champ du wire. L'arch poste ensuite l'issue EN SON NOM :
-    # token du compte de rôle de l'appelant.
-    with {:ok, role} <- require_architect(state),
-         token when is_binary(token) <- Fleet.Credentials.RoleToken.token(role) do
-      do_create_issue(forge, repo, title, brief, [token: token], state)
-    else
-      {:error, reason} ->
-        # Rôle non-architecte, ou pod inconnu du registre → on ne crée RIEN.
-        {:error, reason, state}
-
-      _ ->
-        # Pod prouvé mais token de rôle introuvable sur disque = trou de provisioning (le compte de rôle
-        # n'a pas son token). On REFUSE plutôt que de poster sous le compte système (fail-closed) :
-        # poster en système masquerait la traça (qui a délégué ?) et contournerait le least-privilege.
-        Logger.warning(
-          "create_issue REFUSÉ : token du rôle appelant introuvable (provisioning incomplet) — " <>
-            "pas de repli compte système"
-        )
-
-        {:error, :role_token_unavailable, state}
+    case Delegation.create_issue(repo, title, brief, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
     end
   end
 
@@ -259,19 +220,10 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # create_project — canal ONBOARDING : l'architecte démarre un projet neuf. La gate architecte est
-  # appliquée AVANT toute mécanique (cf. require_architect ci-dessous) ; do_create_project porte la séquence.
   def handle_tool_call("create_project", %{"name" => name} = args, state) when is_binary(name) do
-    # Onboarder un projet CRÉE un repo forge ET écrit/pousse dans `/home/projects` : un acte d'ARCHITECTE.
-    # `require_architect` résout le rôle depuis l'identité du canal (`state.pod_id`) PUIS exige le rôle
-    # `architect` gravé au spawn. Un pod worker (engineer) ou inconnu est REFUSÉ ici, serveur-side, AVANT
-    # toute création de repo ou écriture disque. Fail-closed : pas d'architecte = pas de projet.
-    case require_architect(state) do
-      {:error, reason} ->
-        {:error, reason, state}
-
-      {:ok, _role} ->
-        do_create_project(name, args, state)
+    case Delegation.create_project(name, args, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
     end
   end
 
@@ -279,50 +231,15 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # get_issue_status — canal SUIVI (architecte). Lit l'état d'un issue délégué pour séquencer le
-  # multi-issue. « Livré » = issue fermée par le merge (`Closes #N`). Lecture seule (ForgeClient).
-  # Le repo est PASSÉ explicitement (`project` = owner/name du issue), JAMAIS lu d'une mémoire globale :
-  # un arch qui suit plusieurs projets en parallèle nomme CELUI qu'il interroge. Sinon le « dernier projet
-  # onboardé » servirait l'état du mauvais repo (issue_state/delivered faux → multi-issue mis-séquencé).
-  # Suivre l'état d'un issue délégué reste réservé à l'architecte (cohérent avec create_issue /
-  # create_project) : `require_architect` résout le rôle depuis l'identité du canal et exige `architect`.
   def handle_tool_call(
         "get_issue_status",
         %{"number" => number, "project" => repo},
         state
       )
       when is_integer(number) and is_binary(repo) and repo != "" do
-    case require_architect(state) do
-      {:error, reason} ->
-        {:error, reason, state}
-
-      {:ok, _role} ->
-        forge = Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
-
-        issue_state =
-          case forge.get_issue(repo, number, []) do
-            {:ok, issue} -> Map.get(issue, "state", "unknown")
-            _ -> "unknown"
-          end
-
-        result = %{
-          "repo" => repo,
-          "issue" => number,
-          "issue_state" => issue_state,
-          # « livré » = la PR a fermé l'issue (merge FF `Closes #N`). Signal de séquencement multi-issue :
-          # l'arch n'enchaîne le issue N+1 que sur `delivered: true`.
-          #
-          # ⚠ LIMITE CONNUE (F-RUN-3, vu live 2026-07-04) : `closed` SEUL confond « fermé par un merge »
-          # (vraie livraison) et « fermé sans livraison » (marqueur d'onboarding `[lcars-onboarded]`,
-          # fermeture manuelle) → faux `delivered:true`. Le fix CORRECT exige de prouver un MERGE (nouvelle
-          # requête forge : PR mergée pour l'issue — `issue_pr_status` ne voit que les PR OUVERTES, nil au
-          # merge). Différé au lot auditabilité. Le DÉCLENCHEUR est neutralisé par F-RUN-1 : create_issue
-          # rend désormais le vrai numéro → l'arch ne DEVINE plus et n'interroge plus le marqueur par erreur.
-          "delivered" => issue_state == "closed",
-          "pr" => issue_pr_status(forge, repo, number)
-        }
-
-        {:ok, %{content: [json(result)]}, state}
+    case Delegation.issue_status(repo, number, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
     end
   end
 
@@ -345,193 +262,4 @@ defmodule Fleet.MCP.PodTools do
   def handle_tool_call(_unknown, _arguments, state) do
     {:error, :unknown_tool, state}
   end
-
-  # Séquence d'onboarding proprement dite, exécutée UNIQUEMENT après la gate architecte. Le SYSTÈME exécute
-  # la mécanique (repo forge + dual-worktree main/work-ops + scaffold + push) via Fleet.Pilot.ProjectOnboard,
-  # dispatch runtime (pas de dep compile-time fleet_pilot). Le repo créé est RENDU dans le `result`
-  # (`repo`/`delegation_target`) : l'arch le récupère et le passe explicitement à `create_issue` /
-  # `get_issue_status`. Aucune mémoire globale de « projet courant » — le repo voyage par argument.
-  defp do_create_project(name, args, state) do
-    # Seam `:project_onboard` (app-env, comme `:forge_client`/`:pod_resolver`) — défaut = la vraie séquence
-    # `Fleet.Pilot.ProjectOnboard` (dispatch runtime, pas de dep compile-time fleet_pilot), overridable en test.
-    onboard = Application.get_env(:fleet_mcp, :project_onboard, Fleet.Pilot.ProjectOnboard)
-    org = Application.get_env(:fleet_mcp, :delegation_org, "fleet")
-    pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
-
-    opts = [org: org, description: Map.get(args, "description", pitch), pitch: pitch]
-
-    case apply(onboard, :onboard, [name, opts]) do
-      {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
-        result = %{
-          "status" => "onboarded",
-          "repo" => repo,
-          "project_dir" => pdir,
-          "work_dir" => wdir,
-          "delegation_target" => repo
-        }
-
-        {:ok, %{content: [json(result)]}, state}
-
-      {:error, reason} ->
-        {:error, {:onboard_failed, inspect(reason)}, state}
-    end
-  end
-
-  # Pose l'issue (auteur = compte de rôle via `author_opts`, assignee = humain owner) et l'étiquette de visu.
-  # Extrait de create_issue pour garder le handler centré sur la GATE (require_architect + token).
-  defp do_create_issue(forge, repo, title, brief, author_opts, state) do
-    # assignee = l'HUMAIN owner (point fixe : routing + ownership, jamais le rôle). Login forge
-    # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue ;
-    # Gitea matche l'assignee insensible à la casse → `starfleet` résout `Starfleet`). Pas de label :
-    # le rôle producteur est un invariant côté poller, pas un sticker par-issue.
-    case Fleet.Credentials.Human.current() do
-      {:ok, human} ->
-        issue_opts = Keyword.put(author_opts, :assignees, [human])
-
-        case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
-          {:ok, number} ->
-            # DÉCOUPLAGE : create_issue CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
-            # (graver la workflow_map) n'est PLUS ici : c'est la responsabilité du SYSTÈME — le POLLER grave la workflow_map
-            # par défaut (brief-gate) sur toute issue assignée routeless (cf. fleet_pilot). Un seul acteur
-            # crée+assigne ; le système route. (Uniforme : un issue humain routeless est onboardé pareil.)
-            # type:feature = ÉTIQUETTE de visu (humain), best-effort — JAMAIS du routing.
-            _ = apply(forge, :add_label, [repo, number, "type:feature", []])
-
-            result = %{
-              "status" => "issue_created",
-              "issue" => "#{repo}##{number}",
-              "repo" => repo,
-              "assignee" => human
-            }
-
-            {:ok, %{content: [json(result)]}, state}
-
-          {:error, reason} ->
-            {:error, {:issue_creation_failed, inspect(reason)}, state}
-        end
-
-      {:error, reason} ->
-        {:error, {:human_unresolved, inspect(reason)}, state}
-    end
-  end
-
-  # Pas de `delegation_workflow_map` ni de `grave_initial_route` ici : le routage (graver la workflow_map) vit
-  # côté système (fleet_pilot : le poller onboarde toute issue assignée routeless sur la workflow_map par défaut,
-  # cf. StepDispatcher.ensure_workflow_map_or_onboard). create_issue ne fait QUE créer+assigner.
-
-  # La PR EN COURS du issue #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
-  # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.
-  defp issue_pr_status(forge, repo, number) do
-    # La PR du issue #n = celle dont le head est la feature-branch `lcars/issue-<n>-<role>`. Le parse
-    # de ce format est délégué à l'AUTORITÉ UNIQUE `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1`
-    # (co-localisée avec son builder `feature_branch/2`) au lieu de reconstruire le préfixe en dur : un
-    # changement de format se fait dans le seul ForgeProtocol. On l'atteint via le `forge` INJECTÉ (résolu
-    # runtime, défaut `Fleet.Pilot.ForgeClient`, qui ré-exporte `parse_feature_branch` vers ForgeProtocol) —
-    # donc aucune dep compile-time de fleet_mcp vers fleet_pilot (c'est pourquoi on garde l'appel via le seam
-    # plutôt qu'un appel direct à ForgeProtocol, qui lui créerait cette dépendance).
-    case forge.list_open_pulls(repo, []) do
-      {:ok, pulls} ->
-        Enum.find_value(pulls, fn pr ->
-          head = get_in(pr, ["head", "ref"]) || ""
-
-          case forge.parse_feature_branch(head) do
-            {:ok, {^number, _role}} ->
-              verdicts =
-                case forge.pr_review_verdicts(repo, pr["number"],
-                       head_sha: get_in(pr, ["head", "sha"])
-                     ) do
-                  {:ok, v} -> v
-                  _ -> %{}
-                end
-
-              %{"number" => pr["number"], "merged" => pr["merged"], "verdicts" => verdicts}
-
-            _ ->
-              nil
-          end
-        end)
-
-      _ ->
-        nil
-    end
-  end
-
-  # ============================================================
-  # Autorisation architecte — gate commune des tools privilégiés
-  # ============================================================
-  #
-  # `create_project`, `create_issue` et `get_issue_status` sont des actes d'ARCHITECTE : créer un repo
-  # forge, écrire/pousser dans `/home/projects`, déléguer du travail, suivre une délégation. La barrière
-  # est serveur-side : `require_architect` résout le rôle depuis l'identité du CANAL (`state.pod_id`, porté
-  # par l'accepteur de socket — pas de champ du wire) PUIS exige que ce rôle gravé au spawn soit `architect`.
-  # Un pod worker (engineer, reviewer), un rôle nil/inconnu ou un pod absent du registre → REFUS. Fail-closed
-  # de bout en bout : aucun cas ne retombe sur un accès autorisé. (Le filtre de visibilité côté pont reste
-  # une commodité UX — ne pas montrer un tool inutilisable — mais l'autorisation vit ICI.)
-  defp require_architect(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
-    case resolve_role(pod_id) do
-      {:ok, "architect"} -> {:ok, "architect"}
-      {:ok, _other_role} -> {:error, :forbidden_not_architect}
-      {:error, _reason} = err -> err
-    end
-  end
-
-  defp require_architect(_state), do: {:error, :pod_id_required}
-
-  # ============================================================
-  # Rôle du pod — résolu depuis le pod_id du CANAL, jamais cru sur le wire
-  # ============================================================
-  #
-  # L'identité (quel pod) est le canal lui-même : `state.pod_id` est porté par l'accepteur de socket (un pod
-  # = une socket montée dans son seul sandbox), donc il n'y a plus rien à prouver — pas de capability, pas de
-  # pod_id lu sur le fil. Reste à résoudre le RÔLE (architect / engineer / …) pour gater les tools privilégiés :
-  # il est gravé au SPAWN et lu depuis le registre du Spawner (`Fleet.Spawner.pod_info`), jamais d'un champ
-  # du wire (qu'un pod pourrait forger). Seam test `:pod_resolver` (app-env) : prend le pod_id et rend
-  # `{:ok, %{role: role}}` | `{:error, _}`. Défaut = dispatch RUNTIME vers `Fleet.Spawner.pod_info/1` (pas de
-  # dep compile-time fleet_spawner). Pod inconnu / Spawner indisponible → `:pod_unknown` (fail-closed).
-  defp resolve_role(pod_id) when is_binary(pod_id) do
-    resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
-
-    case resolver.(pod_id) do
-      {:ok, %{role: role}} -> {:ok, role}
-      _ -> {:error, :pod_unknown}
-    end
-  end
-
-  defp default_pod_resolver(pod_id) when is_binary(pod_id) do
-    apply(Fleet.Spawner, :pod_info, [pod_id])
-  rescue
-    _ -> {:error, :pod_unknown}
-  catch
-    _, _ -> {:error, :pod_unknown}
-  end
-
-  # Le `work_item_id` (corrélateur) cherché au top-level du wire PUIS dans le payload : un agent juge range
-  # parfois le corrélateur DANS son payload de verdict plutôt qu'au paramètre top-level. Renvoie le work_item_id
-  # non vide trouvé (top-level prioritaire), ou nil si absent des deux. Le broker corrèle ensuite sur
-  # `result["work_item_id"]` et rejette (`:work_item_id_mismatch`) s'il ne correspond pas à SON brief actif → un pod
-  # ne peut pas clôturer la tâche d'un autre (verrou orthogonal au transport). L'emplacement (top-level vs
-  # payload) n'entre PAS dans la sécurité : le work_item_id reste explicite et validé ; seul le fallback
-  # « dernière active » (implicite) était le trou.
-  defp effective_work_item_id(args, payload) do
-    present_work_item_id(Map.get(args, "work_item_id") || Map.get(args, :work_item_id)) ||
-      present_work_item_id(Map.get(payload, "work_item_id") || Map.get(payload, :work_item_id))
-  end
-
-  defp present_work_item_id(tid) when is_binary(tid) and tid != "", do: tid
-  defp present_work_item_id(_), do: nil
-
-  # JSON envelope du brief exposé au pod — work_item_id = correlation_id.
-  defp envelope(%Fleet.TaskQueue.WorkItem{} = t) do
-    %{
-      "work_item_id" => t.id,
-      "issue_id" => t.issue_id,
-      "role" => t.role,
-      "brief" => t.brief,
-      "deadline" => iso(t.deadline),
-      "retry_count" => t.retry_count
-    }
-  end
-
-  defp iso(nil), do: nil
-  defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 end

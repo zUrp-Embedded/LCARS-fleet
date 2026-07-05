@@ -37,12 +37,38 @@ defmodule Fleet.TaskQueue.Server do
   `required_broadcast` : un échec n'est PAS avalé, il propage `{:error, {:broadcast_failed, _}}` au caller
   de `submit_result` (plus de `:ok` muet qui laisse le verrou forge à vie). Les autres events
   (enqueued/assigned/cleared/failed-deadline/state.corrupt) = `best_effort_broadcast` (observabilité, rescue).
+
+  ## Découpage — ce qui est sorti, ce qui reste (et pourquoi)
+
+  Deux concerns extraits en modules sans state (le state GenServer ne les traverse plus) :
+
+    * `Fleet.TaskQueue.Store` — persistence `state.json` (sérialisation + FS, écriture
+      atomique, décodage fail-loud `:corrupt`). Le Server garde l'ORCHESTRATION :
+      `persist/1` décide SI on persiste (`persist: false` / `state_path: nil`),
+      `load_state/2` décide SI on recharge — Store ne sait que lire/écrire.
+    * `Fleet.TaskQueue.Broadcast` — policy load-bearing vs best-effort + enveloppe
+      `event/3`. Le Server garde des adaptateurs une-ligne qui dépaquettent
+      `state.bus`/`state.topic` (les seams par-instance).
+
+  Deux concerns REFUSÉS à l'extraction (2 découpes nettes > 4 forcées) :
+
+    * **Deadline-watchdog** (`maybe_schedule_deadline/1` + `handle_info {:check_deadline}`) :
+      la paire arme/vérifie est couplée au PROCESS (`Process.send_after(self(), ...)` →
+      message reçu par CE GenServer). Extraire la moitié « armement » poserait un
+      side-effect process-couplé dans un module feuille pendant que la moitié réceptrice
+      (callback) resterait ici : aucun couplage levé, une indirection ajoutée.
+    * **Rétention/prune** (`prune_terminal/2` + `recency/1`) : ~20 LOC pures, UN SEUL
+      call-site (`put_work_item/2`), et le vocabulaire `@active_states` est PARTAGÉ avec
+      la sélection (`find_active`), la supersession et la garde deadline — l'extraire
+      forcerait soit une duplication de cette autorité, soit un module dédié pour 20 LOC.
   """
 
   use GenServer
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.TaskQueue.Broadcast
+  alias Fleet.TaskQueue.Store
   alias Fleet.TaskQueue.WorkItem
 
   @active_states [:pending, :assigned, :in_progress]
@@ -68,7 +94,7 @@ defmodule Fleet.TaskQueue.Server do
   @impl GenServer
   def init(opts) do
     persist? = Keyword.get(opts, :persist, true)
-    state_path = Keyword.get(opts, :state_path, default_path())
+    state_path = Keyword.get(opts, :state_path, Store.default_path())
 
     base = %{
       work_items: %{},
@@ -456,162 +482,44 @@ defmodule Fleet.TaskQueue.Server do
   defp maybe_schedule_deadline(_), do: :ok
 
   # ============================================================
-  # Helpers — events
+  # Helpers — events (policy dans Fleet.TaskQueue.Broadcast)
   # ============================================================
-
-  defp event(type, %WorkItem{} = work_item, payload) do
-    Fleet.Event.new(:task_queue, type,
-      pod_id: work_item.pod_id,
-      correlation_id: work_item.id,
-      payload: payload
-    )
-  end
-
-  # Classification load-bearing vs best-effort. Un `broadcast/2` unique qui avalerait TOUTE exception en
-  # `:ok` — y compris pour `work_item.completed`, dont le StepRunConsumer DÉPEND pour finir le step_run — serait piégeux :
-  # un `work_item.completed` avalé = submit OK rendu au pod, MAIS fin-de-step-run jamais déclenchée → verrou forge
-  # conservé à vie (wedge silencieux). On SÉPARE donc les deux régimes :
   #
-  #   - `best_effort_broadcast/2` : OBSERVABILITÉ pure (work_item.enqueued/assigned/cleared/failed-deadline,
-  #     state.corrupt). Un échec est non-bloquant (rescue → log) — personne ne FINIT un step_run dessus.
-  #   - `required_broadcast/2` : LIFECYCLE load-bearing (work_item.completed). L'échec n'est PAS avalé : il
-  #     remonte `{:error, {:broadcast_failed, _}}` → le caller (`submit_result`) le propage au pod (qui ne
-  #     reçoit PAS un faux "tâche close" et peut re-soumettre) au lieu d'un `:ok` qui ment.
-  #
-  # In-process `Phoenix.PubSub.broadcast` ne lève quasi jamais (process local supervisé) ; le mode de panne
-  # réaliste est `UnregisteredError` (type lifecycle hors registry = bug build/config, attrapé en test) ou
-  # PubSub pas démarré (boot précoce). Les deux deviennent LOUD côté lifecycle. (Durcissement ultérieur
-  # possible : un constructeur `%Fleet.Event{}` prouvé-enregistré au build tuerait la classe UnregisteredError
-  # à la source — refactor cross-app event_router + producteurs, non fait à ce jour.)
-  defp best_effort_broadcast(state, %Fleet.Event{} = ev) do
-    # Passe par Bus.broadcast (validation registry `assert_authorized!`) au lieu
-    # de Phoenix.PubSub direct : les events task ont la même garde que les autres.
-    state.bus.broadcast(state.topic, ev)
-  rescue
-    e ->
-      require Logger
+  # Adaptateurs une-ligne : le state GenServer ne traverse PAS le module de policy —
+  # on dépaquette ici les seams par-instance (`state.bus`, `state.topic`) et on passe
+  # des arguments explicites. La classification load-bearing vs best-effort (le POURQUOI
+  # des deux régimes) vit dans le moduledoc de `Fleet.TaskQueue.Broadcast`.
 
-      Logger.warning(
-        "TaskQueue best_effort_broadcast #{ev.type} échec (pod=#{ev.pod_id}) : #{inspect(e)}"
-      )
+  defp event(type, %WorkItem{} = work_item, payload),
+    do: Broadcast.event(type, work_item, payload)
 
-      :ok
-  end
+  defp best_effort_broadcast(state, %Fleet.Event{} = ev),
+    do: Broadcast.best_effort(state.bus, state.topic, ev)
 
-  # Broadcast LIFECYCLE load-bearing : l'échec n'est PAS avalé. Retourne `:ok` ou
-  # `{:error, {:broadcast_failed, reason}}` (raise OU `{:error, _}` de Bus.broadcast). Loggé en ERROR (pas
-  # warning) : un `work_item.completed` non diffusé = wedge potentiel (step_run jamais fini), c'est un incident.
-  defp required_broadcast(state, %Fleet.Event{} = ev) do
-    case state.bus.broadcast(state.topic, ev) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        require Logger
-
-        Logger.error(
-          "TaskQueue required_broadcast #{ev.type} ÉCHEC (pod=#{ev.pod_id}) : #{inspect(reason)} — " <>
-            "lifecycle NON diffusé (le step_run ne finira pas ; propagé au caller, pas avalé)"
-        )
-
-        {:error, {:broadcast_failed, reason}}
-    end
-  rescue
-    e ->
-      require Logger
-
-      Logger.error(
-        "TaskQueue required_broadcast #{ev.type} a LEVÉ (pod=#{ev.pod_id}) : #{inspect(e)} — " <>
-          "lifecycle NON diffusé (propagé au caller, pas avalé)"
-      )
-
-      {:error, {:broadcast_failed, e}}
-  end
+  defp required_broadcast(state, %Fleet.Event{} = ev),
+    do: Broadcast.required(state.bus, state.topic, ev)
 
   defp now, do: DateTime.utc_now()
 
   # ============================================================
-  # Helpers — persistence (atomic write tmp + rename)
+  # Helpers — persistence (sérialisation + FS dans Fleet.TaskQueue.Store)
   # ============================================================
-
-  defp default_path do
-    Application.get_env(:fleet_task_queue, :state_path, default_state_path())
-  end
-
-  # Le fleet tourne sous l'humain → défaut home-relatif `~/.lcars/task-queue`, comme le pod state_fs_root
-  # (`Fleet.Spawner.Pod.default_state_fs_root`) : un `/var/lib/lcars` en dur ne serait pas ownable hors du
-  # compte `lcars`. HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un
-  # chemin fabriqué : l'état .lcars ne doit pas se disperser en silence.
-  defp default_state_path do
-    Path.join(System.user_home!(), ".lcars/task-queue/state.json")
-  end
+  #
+  # Le Server garde l'ORCHESTRATION (persiste-t-on ? recharge-t-on ?) — les décisions
+  # dépendent de ses options de boot (`persist: false` = mode prod éphémère,
+  # `state_path: nil`). Store ne connaît que le format du fichier.
 
   defp persist(%{persist: false} = state), do: state
   defp persist(%{state_path: nil} = state), do: state
 
   defp persist(%{state_path: path, work_items: work_items} = state) do
-    data = %{
-      "v" => 1,
-      "work_items" => Map.new(work_items, fn {id, t} -> {id, WorkItem.to_map(t)} end)
-    }
-
-    try do
-      File.mkdir_p!(Path.dirname(path))
-      tmp = path <> ".tmp"
-      File.write!(tmp, Jason.encode!(data))
-      File.rename!(tmp, path)
-    rescue
-      e ->
-        # Un échec d'écriture rompt la durabilité du point de recovery cross-restart. C'est
-        # une ERREUR, pas un warning : la queue RAM avance mais state.json diverge → un restart
-        # relirait un état stale. On NE crashe PAS le broker (un blip disque transitoire ne doit pas
-        # tuer les work items en vol) ; la réconciliation passe par le rail forge-driven (re-dispatch
-        # depuis l'état forge). Le breach devient LOUD (error-level → monitoring),
-        # plus de dégradé silencieux.
-        Logger.error(
-          "fleet_task_queue persist ÉCHEC — durabilité du point de recovery rompue (non-fatal, " <>
-            "réconciliation forge-driven ; path=#{path}): #{inspect(e)}"
-        )
-    end
-
+    Store.save(path, work_items)
     state
   end
 
   defp load_state(_path, false), do: :empty
   defp load_state(nil, _persist), do: :empty
-
-  defp load_state(path, true) do
-    case File.read(path) do
-      {:ok, content} -> decode_state(content)
-      {:error, :enoent} -> :empty
-      {:error, reason} -> {:corrupt, reason}
-    end
-  end
-
-  defp decode_state(content) do
-    case Jason.decode(content) do
-      {:ok, %{"v" => 1, "work_items" => work_items_map}} when is_map(work_items_map) ->
-        decode_work_items(work_items_map)
-
-      {:ok, %{"v" => v}} ->
-        {:corrupt, v}
-
-      _ ->
-        {:corrupt, :unparseable}
-    end
-  end
-
-  # fail-loud : une tâche non-désérialisable (state corrompu / champ requis absent) → `{:corrupt, ...}`,
-  # PAS un drop silencieux. `reduce_while` HALTE sur la 1re tâche corrompue plutôt que de la FILTRER (état
-  # tronqué en silence) ; `WorkItem.from_map` rend `{:error, _}` au lieu de RAISER (le fallback `:corrupt` tient).
-  defp decode_work_items(work_items_map) do
-    Enum.reduce_while(work_items_map, {:ok, %{}}, fn {id, tm}, {:ok, acc} ->
-      case WorkItem.from_map(tm) do
-        {:ok, t} -> {:cont, {:ok, Map.put(acc, id, t)}}
-        {:error, reason} -> {:halt, {:corrupt, {:work_item, id, reason}}}
-      end
-    end)
-  end
+  defp load_state(path, true), do: Store.load(path)
 
   # UUID v4 (`correlation_id = work_item.id`) via la dép `:uuid` (déjà shippée dans l'umbrella) —
   # source unique, pas de génération hand-rolled `:crypto` en parallèle.

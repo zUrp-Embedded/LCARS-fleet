@@ -1,7 +1,7 @@
 # Fleet.SPBuilder
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-04
+**Dernière révision** : 2026-07-05 (éclatement façade → Monk + RepoSections)
 **Statut** : implémenté run #3.1 chantier #2 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_sp_builder.md
 
@@ -10,6 +10,20 @@ System Prompt builder/composer (LCARS schema v2.5).
 Module pure data transformer — `%Fleet.CapProfile{}` + modop bundles
 (sp.md fragments) + identifiants pod → `system-prompt.md`, `CLAUDE.md`,
 paths skills filtrés.
+
+## Modules
+
+- `Fleet.SPBuilder` — la façade (behaviour `Composer`) : compose SP + CLAUDE.md +
+  filtre skills, templating EEx, lecture SP rôle / fragments modop, résolution de
+  paths (`sp_role_root`/`modop_root` — config-accessors cohésifs avec ces lectures,
+  volontairement non extraits).
+- `Fleet.SPBuilder.Monk` — résolution de l'injection monk (I/O registry YAML,
+  source de donnée distincte) : `resolve/2` (= l'API publique
+  `resolve_monk_injection/2`, defdelegate), `resolve_or_empty/2` (non-monk →
+  injection vide, flux compose byte-identique), `persona_section/1`.
+- `Fleet.SPBuilder.RepoSections` — mini-parser markdown du `CLAUDE.md` repo :
+  `read/1` + `extract/1` (sections `Stack|Build|Test|Conventions|Commands|Gotchas`).
+- `Fleet.SPBuilder.Composer` — le behaviour (mock test + futur 2e vendor).
 
 ## API
 

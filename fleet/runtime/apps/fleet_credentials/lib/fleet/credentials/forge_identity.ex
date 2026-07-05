@@ -47,6 +47,19 @@ defmodule Fleet.Credentials.ForgeIdentity do
     * `payload` — le SYSTÈME commite (author=humain, committer=système) →
       `[human_email, system_email()]`.
 
+  ## Refus d'éclatement (jugé C4 2026-07-05) — policy de gate NON extraite
+
+  `allowed_emails/2` + `system_email/0` (consommés au CHECK par la gate de
+  commit) ont un consommateur/moment différent du reste (consommé au SPAWN) —
+  bundle identifié à l'audit. La coupe est REFUSÉE : les deux faces dérivent
+  des MÊMES littéraux d'identité (`@system_email`, `@role_email_domain` —
+  `system_email` nourrit `allowed_emails` côté check ET `system_identity`
+  côté spawn ; `role_email` nourrit le trailer). Les séparer = soit dupliquer
+  le littéral (deux autorités → la divergence que ce module existe pour
+  interdire, cf. § Destination : « aucun autre module ne tape un email git »),
+  soit une dep inter-module pour 4 lignes. Le domaine d'identité forge est UNE
+  frontière ; spawn et check en sont les deux moments, pas deux concerns.
+
   ## Destination des identités (contrat H2 2026-07-04)
 
   Ces identités sont celles de la FORGE LOCALE (comptes de rôle réels, emails mappés → avatars/traça).

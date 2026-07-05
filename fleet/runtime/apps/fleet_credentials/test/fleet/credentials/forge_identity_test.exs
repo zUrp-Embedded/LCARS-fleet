@@ -41,8 +41,17 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
     # system@lcars.local était un fantôme sans compte). L'allow-list payload DÉRIVE de system_email
     # (cohérence structurelle testée, pas le littéral retapé deux fois).
     assert ForgeIdentity.system_email() == "lcars-system@lcars.local"
-    assert ForgeIdentity.allowed_emails(:payload, "h@x.tld") == ["h@x.tld", ForgeIdentity.system_email()]
-    assert ForgeIdentity.system_identity() == %{name: "lcars-system", email: ForgeIdentity.system_email()}
+
+    assert ForgeIdentity.allowed_emails(:payload, "h@x.tld") == [
+             "h@x.tld",
+             ForgeIdentity.system_email()
+           ]
+
+    assert ForgeIdentity.system_identity() == %{
+             name: "lcars-system",
+             email: ForgeIdentity.system_email()
+           }
+
     assert ForgeIdentity.role_email("starfleet") == "starfleet@lcars.local"
   end
 

@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-05 (B5 — child-spec listener via la source unique `Fleet.EventRouter.Listener.cowboy_child/1`, dispatch WS inchangé ; 2026-07-02 : B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
+**Dernière révision** : 2026-07-05 (C4 — pipeline d'admission `/api/admin/spawn` extrait en `Fleet.API.SpawnAdmission` (policy), `Rest` = mapping HTTP seul ; B5 — child-spec listener via la source unique `Fleet.EventRouter.Listener.cowboy_child/1`, dispatch WS inchangé ; 2026-07-02 : B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -14,7 +14,8 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 
 | Module | Rôle |
 |---|---|
-| `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST |
+| `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST — reads no-auth + mapping des verdicts d'admission spawn en statuts HTTP |
+| `Fleet.API.SpawnAdmission` | pipeline d'ADMISSION de `POST /api/admin/spawn` (extrait C4) : `admit/1` = allowlist DTO → `pod_id` path-safe → cap-profile chargeable (source unique `Fleet.CapProfile.load/1`) → host-native refusé fail-closed → brief requis one-shot (miroir R18, autorité partagée `Fleet.Spawner.brief_required?/1`) ; `broadcast/1` = émission canon `%Fleet.Event{source: :api}` (event hors registry/malformé → `{:error, _}`, jamais un crash). Fonctions pures + lectures catalogue (pas de process — Iron Law) |
 | `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
 | `Fleet.API.Readiness` | read-model P05 — état opérationnel LIVE (anti-vert-creux). Introspecte config/process/persistent_term ; `deep/0` rend `status: operational\|degraded` + sous-systèmes. Jumeau runtime de `mix lcars.contracts.check` (plan source-conformance build/CI) sur le plan opérationnel. Fonctions pures (pas de process — Iron Law) |
 | `Fleet.API.BuildInfo` | version du build **constatable** (« quel commit tourne ? »). `current/0` rend `%{sha, dirty, ref, source}` — SHA git court + flag dirty + ref, `source` ∈ `:release\|:working_tree\|:unknown` (provenance explicite). Totale (ne lève jamais), mémoïsée en `:persistent_term`. Fonctions pures (pas de process — Iron Law) |

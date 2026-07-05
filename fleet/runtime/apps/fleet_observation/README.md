@@ -1,7 +1,7 @@
 # fleet_observation
 
 **Date** : 2026-06-10
-**Dernière révision** : 2026-07-05 (B5 — child-spec listener via la source unique `Fleet.EventRouter.Listener.cowboy_child/1`)
+**Dernière révision** : 2026-07-05 (C4 — gabarit HTML/CSS/JS extrait en `Fleet.Observation.Deck.View` (rendu pur), `Deck` = contrôleur seul ; B5 — child-spec listener via la source unique `Fleet.EventRouter.Listener.cowboy_child/1`)
 **Statut** : incréments A+B+C — BL-026 read-frontier live (PODS + read-model stream)
 **Référencé par** : —
 **Design** : `DESIGN-observabilite.md` (catalogue de l'observable + organisation LCARS)
@@ -24,7 +24,8 @@ no-auth, intra-release (ADR-C « 5-zéros ») : il observe, il ne mute rien.
 | Module | Rôle |
 |---|---|
 | `Fleet.Observation.Application` | supervisor + listener Cowboy `:8091` (guardé `:test`) |
-| `Fleet.Observation.Deck` | `Plug.Router` — HTML LCARS (7 decks) + endpoints read JSON |
+| `Fleet.Observation.Deck` | `Plug.Router` — CONTRÔLEUR : routing + dérivation du catalogue de rôles (assets/cap-profiles) + snapshots live ; passe la donnée à la vue |
+| `Fleet.Observation.Deck.View` | rendu HTML PUR (gabarit inline HTML/CSS/JS — extrait C4) : `page/0` shell LCARS statique (7 decks, données tirées côté client via `/api/*`), `table_page/2` tableau serveur zéro-CSS (reçoit rôles + pods groupés en argument, ne lit aucune source) |
 | `Fleet.Observation.ReadModel` | GenServer + ETS, abonné unique, projette le stream `%Fleet.Event{}` |
 
 ## Public API (HTTP)

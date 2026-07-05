@@ -59,7 +59,7 @@ defmodule Fleet.Workflow.Git do
   # N'affecte PAS la doctrine `--no-verify JAMAIS` (qui protège l'appelant du module ; ici on neutralise
   # le mécanisme adversaire, pas la vérif d'intégrité de l'appelant). LIMITE honnête : un `filter.<nom>.clean`
   # IN-TREE (armé par un `.gitattributes` + `.git/config` du repo) n'est PAS désactivable par `-c` — c'est
-  # le CONTENU validé en amont (`Deliverable` refuse les payloads écrivant `.git/**` ou un `.gitattributes`
+  # le CONTENU validé en amont (`PayloadGuard` refuse les payloads écrivant `.git/**` ou un `.gitattributes`
   # armant `filter=`) qui ferme ce vecteur-là ; ici on ferme les vecteurs config globale/système + hooks.
   @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 

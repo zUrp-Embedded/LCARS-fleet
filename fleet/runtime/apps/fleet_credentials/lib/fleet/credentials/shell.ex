@@ -70,6 +70,17 @@ defmodule Fleet.Credentials.Shell do
   Sans `:env`, l'env git système-side est injecté (`ForgeAuth.git_env/0` → `GIT_TERMINAL_PROMPT=0` +
   extraheader d'auth si configuré). Un caller non-git passe `env: [...]` (ou `env: []`).
 
+  ## Refus d'éclatement (jugé C4 2026-07-05) — `git_safe_config_args/0` NON extrait
+
+  Le vocab de durcissement config (`@git_safe_config_args`) ne partage aucun helper avec la
+  machinerie d'exécution — bundle identifié à l'audit. La coupe est REFUSÉE : les deux sont les
+  deux faces de LA MÊME frontière « invoquer git système-side sans exécuter le code du pod » —
+  la borne (deadline + kill-group + anti-prompt) ferme le vecteur TEMPS/interaction, le `-c …`
+  ferme le vecteur CONFIG, et les consommateurs (`Fleet.Workflow.Git`/`DeliverableGate`) composent
+  TOUJOURS les deux ensemble sur `git/2`. Un module à une fonction séparerait l'autorité de cette
+  frontière en deux fichiers sans découpler quoi que ce soit (l'API resterait ici en defdelegate).
+  La co-localisation est le statu quo voulu.
+
   ## Résultat TYPÉ (non-ignorable)
 
       {:ok, {output, exit_code}}        # le process a rendu dans le délai (exit_code peut être ≠ 0)
@@ -304,16 +315,16 @@ defmodule Fleet.Credentials.Shell do
   defp terminate(port, os_pid) do
     _ =
       case child_pgid(os_pid) do
-      pgid when is_integer(pgid) ->
-        _ = kill_group(pgid)
+        pgid when is_integer(pgid) ->
+          _ = kill_group(pgid)
 
-        # Le wrapper setsid lui-même est leader d'une AUTRE session (celle du BEAM) → pas dans le
-        # groupe tué ; on l'achève séparément pour ne pas laisser le port à demi-vivant.
-        kill_pid(os_pid)
+          # Le wrapper setsid lui-même est leader d'une AUTRE session (celle du BEAM) → pas dans le
+          # groupe tué ; on l'achève séparément pour ne pas laisser le port à demi-vivant.
+          kill_pid(os_pid)
 
-      nil ->
-        kill_pid(os_pid)
-    end
+        nil ->
+          kill_pid(os_pid)
+      end
 
     safe_close(port)
   end

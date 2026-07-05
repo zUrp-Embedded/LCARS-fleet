@@ -23,15 +23,15 @@ defmodule Fleet.Coord.Policies do
           action: escalate_human
           escalation_path: [dashboard, starfleet_alert]
 
-  ## Actions broadcastées
+  ## Émission (déléguée)
 
-    * `notify_dashboard` → event `coord.notification_routed`
-    * `escalate_human` → event `coord.escalation_triggered`
-    * autres → event `coord.action_dispatched` (action en payload —
-      extensible sans recompile)
+  Un lookup qui matche est traduit en `%Fleet.Event{source: :coord}` canon et
+  broadcasté par `Fleet.Coord.Emitter` (passe d'émission extraite — C4
+  2026-07-05 : le lookup de table et la construction d'event wire ne partagent
+  aucun helper). La table des actions → types d'event vit là-bas.
   """
 
-  alias Fleet.EventRouter.Bus
+  alias Fleet.Coord.Emitter
 
   @policies_key {__MODULE__, :policies}
 
@@ -126,7 +126,7 @@ defmodule Fleet.Coord.Policies do
   def handle_decision(%{decision: decision, reason: reason} = dec, correlation_id) do
     case lookup({decision, reason}) do
       {:ok, %{"action" => action, "escalation_path" => path}} ->
-        dispatch_action(action, path, dec, correlation_id)
+        Emitter.dispatch_action(action, path, dec, correlation_id)
 
       :not_found ->
         {:error, "no policy match for {#{decision}, #{reason}}"}
@@ -150,7 +150,7 @@ defmodule Fleet.Coord.Policies do
 
     case lookup({:escalate, source_str}) do
       {:ok, %{"action" => action, "escalation_path" => path}} ->
-        dispatch_action(action, path, payload, correlation_id)
+        Emitter.dispatch_action(action, path, payload, correlation_id)
 
       :not_found ->
         {:error, "no escalation policy for #{source_str}"}
@@ -170,90 +170,6 @@ defmodule Fleet.Coord.Policies do
   defp resolved_policies do
     Fleet.SchemaCache.fetch!(@policies_key, "Fleet.Coord.Policies.init_policies!/0")
   end
-
-  # dispatch_action arité 4 (path, payload, correlation_id). Émet le schema canon strict
-  # %Fleet.Event{source: :coord, type, correlation_id, ...} sur le topic "fleet.events" via
-  # `Bus.broadcast/2` (struct). Le correlation_id est propagé sur le broadcast pour relier
-  # l'event à son work item d'origine.
-
-  defp dispatch_action("notify_dashboard", path, payload, correlation_id) do
-    _ = canon_event(:notification_routed, "dashboard", path, payload, correlation_id)
-    :ok
-  end
-
-  defp dispatch_action("escalate_human", path, payload, correlation_id) do
-    _ = canon_event(:escalation_triggered, "operator", path, payload, correlation_id)
-    :ok
-  end
-
-  defp dispatch_action(action, path, payload, correlation_id) when is_binary(action) do
-    _ = canon_action(action, path, payload, correlation_id)
-    :ok
-  end
-
-  defp canon_event(type, target, path, payload, correlation_id) do
-    safe_canon_broadcast(canon_type(type),
-      pod_id: extract_pod_id(payload),
-      correlation_id: correlation_id,
-      payload: %{
-        "target" => target,
-        "path" => path,
-        "message" => normalize_payload(payload)
-      }
-    )
-  end
-
-  defp canon_action(action, path, payload, correlation_id) do
-    # Clé registry = `coord.action_dispatched` (préfixe coord, cohérent avec
-    # coord.notification_routed/escalation_triggered). Un `:action_dispatched` nu
-    # serait hors registry → broadcast rejeté (UnregisteredError) → drop silencieux.
-    safe_canon_broadcast(:"coord.action_dispatched",
-      pod_id: extract_pod_id(payload),
-      correlation_id: correlation_id,
-      payload: %{
-        "action" => action,
-        "path" => path,
-        "verdict" => extract_verdict(payload),
-        "reason" => extract_reason(payload),
-        "message" => normalize_payload(payload)
-      }
-    )
-  end
-
-  defp canon_type(:notification_routed),
-    do: :"coord.notification_routed"
-
-  defp canon_type(:escalation_triggered),
-    do: :"coord.escalation_triggered"
-
-  # Broadcast canon strict (source :coord) via le cœur protégé `Bus.safe_emit/4` — le rescue
-  # local dupliqué est retiré, la politique best-effort a UNE autorité (Ring 0). `:silent` :
-  # UnregisteredError (registry pas encore peuplé au boot order) toléré sans bruit pour ne pas
-  # casser le boot — politique fire-and-forget inchangée. Un event MALFORMÉ (bug de construction)
-  # est loggé ERROR par safe_emit puis neutralisé (plus propagé) : coord ne doit pas crasher sur
-  # un défaut d'observabilité.
-  defp safe_canon_broadcast(type, opts) do
-    Bus.safe_emit(:coord, type, opts,
-      on_unregistered: :silent,
-      context: "Coord.Policies: action NON broadcastée"
-    )
-  end
-
-  defp extract_pod_id(%{pod_id: pid}) when is_binary(pid), do: pid
-  defp extract_pod_id(%{"pod_id" => pid}) when is_binary(pid), do: pid
-  defp extract_pod_id(_), do: nil
-
-  defp extract_verdict(%{decision: d}) when is_binary(d), do: d
-  defp extract_verdict(%{"decision" => d}) when is_binary(d), do: d
-  defp extract_verdict(_), do: nil
-
-  defp extract_reason(%{reason: r}) when is_binary(r), do: r
-  defp extract_reason(%{"reason" => r}) when is_binary(r), do: r
-  defp extract_reason(_), do: nil
-
-  defp normalize_payload(%_{} = struct), do: Map.from_struct(struct)
-  defp normalize_payload(map) when is_map(map), do: map
-  defp normalize_payload(other), do: %{"raw" => inspect(other)}
 
   defp default_policies_path do
     :code.priv_dir(:fleet_coord)
