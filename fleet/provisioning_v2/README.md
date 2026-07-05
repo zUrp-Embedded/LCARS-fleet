@@ -28,9 +28,16 @@ morte avec le modèle).
 ```bash
 sudo fleet/provisioning_v2/provision apply            # converge tout (substrat auto-détecté)
 fleet/provisioning_v2/provision doctor                # sonde read-only — LA sonde du nuke-drill
+sudo fleet/provisioning_v2/provision update           # la jambe update du triangle (voir ci-dessous)
 fleet/provisioning_v2/provision list                  # les modules retenus pour ce substrat
 sudo fleet/provisioning_v2/provision apply --only 60  # un seul module
 ```
+
+**`update`** (héritier de `fleet-update.sh` v1) : pull `--ff-only` du checkout source, APRÈS
+vérification d'autorité — le remote DOIT matcher `PROV_EXPECTED_REPO` (déclaré, jamais deviné ;
+sans lui, aucun pull). Puis re-exec du runner FRAÎCHEMENT pullé en `apply` complet (jamais de
+`--only` : un update partiel est irreprésentable). Déjà à jour → re-converge quand même.
+Le rebuild/redeploy effectif est décidé par `60-deploy` (sha déployé vs HEAD).
 
 Codes retour : `apply` 0=convergé 1=échec · `doctor` 0=conforme 1=drift 2=erreur-de-sonde.
 `doctor --porcelain` → `MODULE=OK|DRIFT|ERROR`, une ligne par module (machine-lisible).

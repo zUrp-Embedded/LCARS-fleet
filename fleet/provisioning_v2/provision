@@ -29,7 +29,16 @@
 # USAGE :
 #   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE]
 #   provision doctor [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--porcelain]
+#   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
+#
+# `update` = la jambe runtime du triangle (source→forge→runtime) : pull --ff-only du checkout,
+# APRÈS vérification d'autorité (le remote DOIT matcher PROV_EXPECTED_REPO — déclaré, jamais
+# deviné), puis re-exec du runner FRAÎCHEMENT PULLÉ en `apply` (le provisioning qui vient
+# d'arriver s'applique lui-même — pas de vieux code qui déroule du neuf). Toujours un converge
+# COMPLET : pas de --only sur update (un update partiel est un état qu'on ne veut pas pouvoir
+# représenter). Héritier direct de fleet-update.sh v1 (F-E1 : autorité-avant-pull ; « already
+# up to date — reconverging anyway »).
 # Options :
 #   --substrate S   force le substrat (auto par défaut : docker si /.dockerenv, wsl si kernel
 #                   Microsoft, linux sinon)
@@ -45,7 +54,7 @@ PROV_ROOT="$(dirname "$SELF")"                      # LA racine, résolue UNE fo
 MODULES_DIR="$PROV_ROOT/modules.d"                  # env — jamais d'heuristique ../.. par module
 export PROVISION_LIB="$PROV_ROOT/lib/provision-lib.sh"
 
-usage() { sed -n '6,42p' "$SELF" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '6,52p' "$SELF" | sed 's/^# \{0,1\}//'; }
 die()   { echo "provision: $*" >&2; exit 1; }
 
 [[ -f "$PROVISION_LIB" ]] || die "lib introuvable: $PROVISION_LIB"
@@ -68,7 +77,8 @@ while [[ $# -gt 0 ]]; do
     *) die "option inconnue: $1 (--help)" ;;
   esac
 done
-case "$CMD" in apply|doctor|list) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+case "$CMD" in apply|doctor|update|list) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+[[ "$CMD" == "update" && "${#ONLY[@]}" -gt 0 ]] && die "update est TOUJOURS un converge complet — pas de --only (lance apply --only pour un module isolé)"
 
 if [[ -n "$ENV_FILE" ]]; then
   [[ -r "$ENV_FILE" ]] || die "--env illisible: $ENV_FILE"
@@ -84,6 +94,52 @@ fi
 [[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
 case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
 export PROV_SUBSTRATE="$SUBSTRATE"
+
+# ─── update : pull VÉRIFIÉ du checkout, puis re-exec du runner pullé en apply ─────────────────────
+if [[ "$CMD" == "update" ]]; then
+  [[ "$EUID" -eq 0 ]] || die "update exige root (il enchaîne sur apply) — relance : sudo $SELF update"
+  ROOT="$(repo_root)"
+  git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "update: $ROOT n'est pas un checkout git"
+
+  # 1. AUTORITÉ AVANT PULL (F-E1) : le remote doit matcher le repo déclaré. Pas de défaut :
+  #    on refuse de deviner à qui on fait confiance.
+  [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — déclare le repo attendu (ex: PROV_EXPECTED_REPO=fleet/lcars) via --env ou l'environnement ; SANS lui, aucun pull"
+  REMOTE_URL="$(git -C "$ROOT" remote get-url "$PROV_UPDATE_REMOTE" 2>/dev/null || true)"
+  [[ -n "$REMOTE_URL" ]] || die "update: remote « $PROV_UPDATE_REMOTE » absent du checkout $ROOT"
+  case "$REMOTE_URL" in
+    *"$PROV_EXPECTED_REPO"*) ;;
+    *) die "update: remote « $REMOTE_URL » ne matche pas le repo attendu « $PROV_EXPECTED_REPO » — pull REFUSÉ (autorité)" ;;
+  esac
+
+  # 2. Le pull s'exécute comme l'OWNER du checkout (jamais root : des objets .git root dans le
+  #    checkout d'un humain = le clobber qu'on a fui). Identité validée avant usage (IEC, v1:84).
+  OWNER="$(stat -c '%U' "$ROOT")"
+  [[ "$OWNER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "update: owner du checkout invalide: « $OWNER »"
+  BEFORE="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
+
+  # Lock apply pris AVANT le pull (un converge concurrent pendant qu'on change le code sous lui
+  # est exactement ce que le lock interdit) ; relâché avant le re-exec — le nouveau runner le reprend.
+  LOCK="${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock"
+  exec 9>"$LOCK"
+  flock -n 9 || die "un autre apply/update est en cours (lock: $LOCK)"
+  runuser -u "$OWNER" -- git -C "$ROOT" pull --ff-only "$PROV_UPDATE_REMOTE" \
+    || die "update: pull --ff-only en échec (divergence ? réseau ?) — rien n'a été appliqué"
+  AFTER="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
+  if [[ "$BEFORE" == "$AFTER" ]]; then
+    echo "provision update: déjà à jour ($AFTER) — re-converge quand même (idempotent)"
+  else
+    echo "provision update: $BEFORE → $AFTER"
+    git -C "$ROOT" --no-pager log --oneline "$BEFORE..$AFTER" | sed 's/^/  /'
+  fi
+  flock -u 9
+
+  # 3. Re-exec du runner FRAÎCHEMENT PULLÉ : c'est le code qui vient d'arriver qui s'applique,
+  #    pas celui chargé avant le pull (sinon un update du provisioning lui-même ne prend
+  #    effet qu'à l'update SUIVANT — la faille self-update classique).
+  REEXEC=(--substrate "$SUBSTRATE" --human "$PROV_HUMAN")
+  [[ -n "$ENV_FILE" ]] && REEXEC+=(--env "$ENV_FILE")
+  exec "$SELF" apply "${REEXEC[@]}"
+fi
 
 # ─── Découverte + filtrage ────────────────────────────────────────────────────────────────────────
 # Le header `# SUBSTRATE:` d'un module liste ses terrains (`any` = partout). Un module sans header

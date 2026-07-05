@@ -34,6 +34,11 @@ PROVISION_LIB_LOADED=1
 : "${PROV_ROLES:=architect consultant engineer gatekeeper qualifier reviewer vulcan}"
 : "${PROV_SYSTEM_ACCOUNT:=lcars-system}"       # compte forge du SYSTÈME (signe les marqueurs)
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-}}"     # la forge cible ; vide = modules forge en instruct-only
+# Jambe update du triangle (source→forge→runtime) : le remote à puller et le repo ATTENDU derrière.
+# PROV_EXPECTED_REPO n'a PAS de défaut : l'autorité se DÉCLARE, elle ne se devine pas (héritage
+# F-E1 de fleet-update v1 : vérifier le remote APRÈS le pull était une inversion de chaîne payée).
+: "${PROV_UPDATE_REMOTE:=origin}"
+: "${PROV_EXPECTED_REPO:=}"
 # Toolchain build — pins EXACTS (bump = changer la paire version+sha ICI, nulle part ailleurs).
 # Le zip est le précompilé officiel elixir-lang (assets de release, sha256sum publié à côté).
 : "${PROV_ELIXIR_VERSION:=1.18.4}"
