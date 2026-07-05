@@ -69,6 +69,25 @@ setup_env() {
   load_env
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
 
+  # Profil forge : brancher entre forges SANS tout éditer. `LCARS_FORGE` nomme le profil (défaut
+  # `work` = la forge principale, le MODE NORMAL ; `test` = le bac à sable de dev). Le profil vit
+  # dans ~/.lcars/forge.d/<nom>.env et pose les FORGE_* de CETTE forge (URL + token système + dir des
+  # role-tokens). Le runtime reste MONO-FORGE : il lit les FORGE_* résolus ci-dessous (runtime.exs ;
+  # « pas de multi-forge simultané »). Le nom n'est qu'un handle — la seule vraie variable d'une forge
+  # est son URL ip:port. Sourcé APRÈS l'env plat → le profil fait foi pour la forge active. Défaut
+  # `work` sans fichier de profil → rétro-compat : les FORGE_* du fleet_v2.env plat restent honorés.
+  local _forge_set="${LCARS_FORGE+set}"
+  : "${LCARS_FORGE:=work}"
+  local forge_file="${LCARS_FORGE_DIR:-$HOME/.lcars/forge.d}/${LCARS_FORGE}.env"
+  if [[ -f "$forge_file" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    . "$forge_file"
+    set +a
+  elif [[ -n "$_forge_set" ]]; then
+    die "profil forge inconnu : LCARS_FORGE=$LCARS_FORGE mais $forge_file absent (crée-le, ou pointe un profil existant sous ~/.lcars/forge.d/)"
+  fi
+
   # F-037 multi-projet : le poller DÉCOUVRE ses repos par topic (lcars-fleet-<human>) → plus de
   # LCARS_PILOT_POLL_REPO requis. La garde fail-loud porte désormais sur FORGE_BASE_URL (découverte +
   # push per-step-run), alignée sur la garde Elixir `Fleet.Pilot.Application.step_children!`.
