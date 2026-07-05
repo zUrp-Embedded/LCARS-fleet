@@ -348,6 +348,33 @@ defmodule Fleet.TaskQueueTest do
     assert [_, _, _] = TaskQueue.list_pending(q)
   end
 
+  test "8bis. list_active = pending+assigned+in_progress ; cleared (supersede) et completed EXCLUS",
+       %{q: q} do
+    # 3 pods : A assigned (pullé), B pending (jamais pullé), C complété — puis D supersédé.
+    {:ok, _} = TaskQueue.enqueue(q, "pod-A", %{brief: "a"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
+    {:ok, _} = TaskQueue.enqueue(q, "pod-B", %{brief: "b"})
+    {:ok, tc} = TaskQueue.enqueue(q, "pod-C", %{brief: "c"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-C")
+    {:ok, _} = TaskQueue.submit_result(q, "pod-C", %{"work_item_id" => tc.id, "out" => "ok"})
+
+    # D : la 1re tâche est SUPERSÉDÉE (:cleared) par la 2e à l'enqueue (axiome 1-actif/pod tenu à
+    # l'écriture) → seule la 2e est active. C'est le cas G1 « éval clobbée » : la cleared ne doit
+    # PAS être possédée (sinon un verrou orphelin serait masqué à vie par un fantôme).
+    {:ok, d1} = TaskQueue.enqueue(q, "pod-D", %{brief: "d1"})
+    {:ok, d2} = TaskQueue.enqueue(q, "pod-D", %{brief: "d2"})
+
+    active = TaskQueue.list_active(q)
+    active_ids = MapSet.new(active, & &1.id)
+
+    # A (assigned) + B (pending) + D2 (pending) = 3 actives ; C (completed) et D1 (cleared) exclues.
+    assert length(active) == 3
+    assert MapSet.member?(active_ids, d2.id)
+    refute MapSet.member?(active_ids, d1.id)
+    refute MapSet.member?(active_ids, tc.id)
+    assert Enum.all?(active, &(&1.state in [:pending, :assigned, :in_progress]))
+  end
+
   test "9. clear_for_pod", %{q: q} do
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")

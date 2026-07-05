@@ -67,6 +67,20 @@ defmodule Fleet.TaskQueue do
   @spec list_pending(GenServer.server()) :: [Fleet.TaskQueue.WorkItem.t()]
   def list_pending(server), do: GenServer.call(server, :list_pending)
 
+  @doc """
+  Liste les work items ACTIFS (`:pending` | `:assigned` | `:in_progress` — l'autorité
+  `@active_states` du Server, pas une re-déclaration ici). Query Port, pas de broadcast.
+
+  Consommateur : la réconciliation de verrous du poller (G1) — une brique sous éval gatekeeper
+  ACTIVE est possédée (le metadata `gate_eval` de la tâche porte la brique) ; une éval
+  `:cleared` (supersédée) ou `:completed` ne l'est plus → le reclaim reprend la main.
+  """
+  @spec list_active() :: [Fleet.TaskQueue.WorkItem.t()]
+  def list_active, do: list_active(@server)
+
+  @spec list_active(GenServer.server()) :: [Fleet.TaskQueue.WorkItem.t()]
+  def list_active(server), do: GenServer.call(server, :list_active)
+
   @doc "Annule/clear le work item actif du pod (teardown). Idempotent."
   @spec clear_for_pod(String.t()) :: :ok
   def clear_for_pod(pod_id), do: clear_for_pod(@server, pod_id)

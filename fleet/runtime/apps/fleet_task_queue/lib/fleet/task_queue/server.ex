@@ -332,6 +332,15 @@ defmodule Fleet.TaskQueue.Server do
     {:reply, pending, state}
   end
 
+  # Actifs = `@active_states` (la MÊME autorité que supersede/deadline — pas un 2e vocabulaire
+  # d'états). Consommé par la réconciliation de verrous du poller (G1) : une brique sous éval
+  # gatekeeper ACTIVE est possédée (metadata `gate_eval`) ; une éval `:cleared` (supersédée) ou
+  # `:completed` ne l'est plus → le reclaim d'orphelin reprend la main.
+  def handle_call(:list_active, _from, state) do
+    active = state.work_items |> Map.values() |> Enum.filter(&(&1.state in @active_states))
+    {:reply, active, state}
+  end
+
   def handle_call({:pod_status, pod_id}, _from, state) do
     status =
       case latest_for_pod(state.work_items, pod_id) do
