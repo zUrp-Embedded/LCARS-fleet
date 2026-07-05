@@ -67,7 +67,13 @@ defmodule LcarsFleetRuntime.MixProject do
         "compile --warnings-as-errors",
         "test",
         &shell_gate/1,
-        "lcars.contracts.check"
+        "lcars.contracts.check",
+        # Dialyzer STRICT (E5) DANS le gate — la carte d'entrée le promettait, l'alias ne le
+        # portait pas (divergence doc↔code résorbée côté code : le ratchet types est mécanique,
+        # pas une discipline « penser à le lancer »). Dernier de la chaîne : le plus long à froid
+        # (build PLT une fois par _build) ; à chaud ~2s. Tourne en MIX_ENV=test comme le reste
+        # (preferred_envs) — même env que la suite, un seul _build analysé.
+        "dialyzer"
       ]
     ]
   end
