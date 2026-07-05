@@ -79,11 +79,15 @@ N0 (substrat pur). La frontière vendor N1 isolée = `bin/claude_launch.sh` (pos
 Les comptes de rôle (architect, engineer, qualifier, reviewer, gatekeeper, consultant, vulcan)
 postent EN LEUR NOM via `<FORGE_ROLE_TOKENS_DIR>/<role>.gitea_token`. La pose est mécanisée :
 
-    etc/provision-role-tokens.sh --forge <URL> --passwords-file <secrets.json>   # basic auth = seule voie de mint
-    etc/provision-role-tokens.sh --forge <URL> --check                           # sonde (nuke-drill)
+    etc/provision-role-tokens.sh --forge <URL> --passwords-file <secrets.json> \
+        --extra-token lcars-system:system.gitea_token       # les 7 rôles + le token système = A4 complet
+    etc/provision-role-tokens.sh --forge <URL> --check                          # sonde (nuke-drill)
 
-Le `passwords-file` (JSON `{"role":"pwd"}`, clé insensible à la casse) EST le livrable A4 durable :
-un fichier opérateur-only, rejouable. Gitea n'accepte QUE la basic auth pour créer un token (même un
-token site-admin ne peut pas minter — vérifié 2026-07-05). Exécution PRIVILÉGIÉE, une fois par forge,
-idempotente. Sans ces tokens, un humain neuf bloque au premier geste signé par un rôle (create_issue
-→ 401, vécu 2026-07-05). Tests : `test/provision_role_tokens/` (bats, couvert par `mix gate`).
+Le `passwords-file` (JSON `{"compte":"pwd"}`, clé insensible à la casse) EST le livrable A4 durable :
+un fichier opérateur-only, rejouable. Chaque token = une paire `compte:fichier` : les rôles produisent
+`<role>.gitea_token` ; `--extra-token lcars-system:system.gitea_token` pose le token SYSTÈME (compte
+`lcars-system` ≠ nom de fichier `system.gitea_token`) dans le MÊME geste → A4 100%, pas de token système
+minté à la main. Gitea n'accepte QUE la basic auth pour créer un token (même un token site-admin ne peut
+pas minter — vérifié 2026-07-05). Exécution PRIVILÉGIÉE, une fois par forge, idempotente. Sans ces
+tokens, un humain neuf bloque au premier geste signé par un rôle (create_issue → 401, vécu 2026-07-05).
+Tests : `test/provision_role_tokens/` (bats, couvert par `mix gate`).

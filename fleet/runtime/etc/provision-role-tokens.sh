@@ -27,13 +27,17 @@
 # (exit≠0 si un token est invalide) — c'est la sonde du futur nuke-drill.
 #
 # USAGE :
-#   provision-role-tokens.sh --forge http://localhost:3000 --passwords-file /root/roles.json
-#   provision-role-tokens.sh --forge http://localhost:3000 --check          # sonde seule
+#   provision-role-tokens.sh --forge URL --passwords-file /root/roles.json \
+#       --extra-token lcars-system:system.gitea_token        # les 7 rôles + le token système = A4 complet
+#   provision-role-tokens.sh --forge URL --check             # sonde seule (nuke-drill)
 # Options : --tokens-dir DIR (défaut /home/private) · --roles "a b c" (défaut : les 7) ·
-#           --group GRP (défaut fleet) · --token-name NAME (défaut lcars-fleet)
-# passwords-file : JSON {"engineer":"pwd",...} OU {"engineer":{"password":"pwd"},...}. Clé insensible
-#   à la casse (Gitea résout les comptes case-insensitive : `Architect` matche le rôle `architect`).
-# EXIT : 0 = tous posés/valides · 1 = usage/dépendance · 2 = au moins un rôle en échec.
+#           --extra-token COMPTE:FICHIER (répétable — pour un token où le compte ≠ le nom de fichier,
+#             ex. le système `lcars-system:system.gitea_token`) · --group GRP (défaut fleet) ·
+#           --token-name NAME (défaut lcars-fleet)
+# passwords-file : JSON {"engineer":"pwd",...} OU {"engineer":{"password":"pwd"},...} (le compte système
+#   y a sa clé, ex. "lcars-system"). Clé insensible à la casse (Gitea résout les comptes
+#   case-insensitive : `Architect` matche le rôle `architect`).
+# EXIT : 0 = toutes entrées posées/valides · 1 = usage/dépendance · 2 = au moins une entrée en échec.
 
 set -euo pipefail
 
@@ -45,8 +49,12 @@ TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue,write:user"
 PASSWORDS_FILE=""
 CHECK_ONLY=0
+# Tokens hors-rôle où le compte ≠ le nom de fichier (le mapping est une DONNÉE, pas un cas spécial) :
+# le token SYSTÈME est le compte `lcars-system` mais le runtime lit `system.gitea_token`. Rempli par
+# `--extra-token <compte>:<fichier>` (répétable). Sans lui, A4 laisse le system token en geste manuel.
+declare -a EXTRA_ENTRIES
 
-usage() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +64,9 @@ while [[ $# -gt 0 ]]; do
     --group) GROUP="$2"; shift 2 ;;
     --token-name) TOKEN_NAME="$2"; shift 2 ;;
     --passwords-file) PASSWORDS_FILE="$2"; shift 2 ;;
+    --extra-token)
+      [[ "$2" == *:* ]] || { echo "provision-role-tokens: --extra-token attend <compte>:<fichier> (reçu: $2)" >&2; exit 1; }
+      EXTRA_ENTRIES+=("$2"); shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "provision-role-tokens: option inconnue: $1" >&2; usage >&2; exit 1 ;;
@@ -102,27 +113,36 @@ set_auth_for() { # $1=role
   CURL_AUTH=(-u "$role:$pwd")
 }
 
+# UNE entrée à provisionner = une paire `compte:fichier` (le mapping est une DONNÉE). Les rôles
+# produisent `<role>:<role>.gitea_token` ; `--extra-token` ajoute les paires où compte ≠ fichier
+# (le système : `lcars-system:system.gitea_token`). Une seule mécanique de mint pour tous.
+declare -a ENTRIES
+for role in $ROLES; do ENTRIES+=("$role:$role.gitea_token"); done
+ENTRIES+=("${EXTRA_ENTRIES[@]}")
+
 fail=0
-for role in $ROLES; do
-  file="$TOKENS_DIR/$role.gitea_token"
+for entry in "${ENTRIES[@]}"; do
+  account="${entry%%:*}"
+  filename="${entry#*:}"
+  file="$TOKENS_DIR/$filename"
 
   # Idempotence : token local présent ET valide → rien à faire.
   if [[ -r "$file" ]]; then
     tok="$(tr -d '[:space:]' < "$file")"
     if [[ -n "$tok" ]] && token_valid "$tok"; then
-      echo "OK    $role — token valide ($file)"
+      echo "OK    $account — token valide ($file)"
       continue
     fi
   fi
 
   if [[ "$CHECK_ONLY" -eq 1 ]]; then
-    echo "FAIL  $role — token absent/invalide ($file)" >&2
+    echo "FAIL  $account — token absent/invalide ($file)" >&2
     fail=1
     continue
   fi
 
-  if ! set_auth_for "$role"; then
-    echo "FAIL  $role — pas d'autorité (password absent du fichier / admin token vide)" >&2
+  if ! set_auth_for "$account"; then
+    echo "FAIL  $account — pas d'autorité (password absent du passwords-file)" >&2
     fail=1
     continue
   fi
@@ -130,22 +150,22 @@ for role in $ROLES; do
   # Re-pose : supprime l'éventuel token remote du même nom (le nom est unique par compte), puis mint.
   # Le DELETE 404/422 est normal (pas de token de ce nom) — seul le POST fait foi.
   curl -s -o /dev/null -m 15 "${CURL_AUTH[@]}" -X DELETE \
-    "$FORGE/api/v1/users/$role/tokens/$TOKEN_NAME" || true
+    "$FORGE/api/v1/users/$account/tokens/$TOKEN_NAME" || true
 
   resp="$(curl -s -m 15 "${CURL_AUTH[@]}" -X POST \
     -H "Content-Type: application/json" \
     -d "{\"name\":\"$TOKEN_NAME\",\"scopes\":[$(printf '"%s",' ${SCOPES//,/ } | sed 's/,$//')]}" \
-    "$FORGE/api/v1/users/$role/tokens")"
+    "$FORGE/api/v1/users/$account/tokens")"
   tok="$(printf '%s' "$resp" | jq -r '.sha1 // empty')"
 
   if [[ -z "$tok" ]]; then
-    echo "FAIL  $role — mint refusé par la forge : $(printf '%s' "$resp" | head -c 160)" >&2
+    echo "FAIL  $account — mint refusé par la forge : $(printf '%s' "$resp" | head -c 160)" >&2
     fail=1
     continue
   fi
 
   if ! token_valid "$tok"; then
-    echo "FAIL  $role — token minté mais sonde /user KO (scopes ?)" >&2
+    echo "FAIL  $account — token minté mais sonde /user KO (scopes ?)" >&2
     fail=1
     continue
   fi
@@ -153,16 +173,16 @@ for role in $ROLES; do
   # Écriture atomique (tmp+mv) + droits POSIX : 0640, groupe fleet (le BEAM per-humain lit via
   # le groupe ; personne d'autre). chgrp best-effort (exige le privilège du dossier).
   install -d -m 0750 "$TOKENS_DIR" 2>/dev/null || true
-  tmp="$(mktemp "$TOKENS_DIR/.$role.XXXXXX")" || { echo "FAIL  $role — $TOKENS_DIR non writable" >&2; fail=1; continue; }
+  tmp="$(mktemp "$TOKENS_DIR/.provision.XXXXXX")" || { echo "FAIL  $account — $TOKENS_DIR non writable" >&2; fail=1; continue; }
   printf '%s\n' "$tok" > "$tmp"
   chmod 0640 "$tmp"
-  chgrp "$GROUP" "$tmp" 2>/dev/null || echo "WARN  $role — chgrp $GROUP refusé (à poser à la main)" >&2
+  chgrp "$GROUP" "$tmp" 2>/dev/null || echo "WARN  $account — chgrp $GROUP refusé (à poser à la main)" >&2
   mv -f "$tmp" "$file"
-  echo "POSÉ  $role — token minté + validé → $file"
+  echo "POSÉ  $account — token minté + validé → $file"
 done
 
 if [[ "$fail" -ne 0 ]]; then
-  echo "provision-role-tokens: AU MOINS UN RÔLE EN ÉCHEC (forge $FORGE)" >&2
+  echo "provision-role-tokens: AU MOINS UNE ENTRÉE EN ÉCHEC (forge $FORGE)" >&2
   exit 2
 fi
-echo "provision-role-tokens: tous les rôles valides sur $FORGE"
+echo "provision-role-tokens: toutes les entrées valides sur $FORGE"

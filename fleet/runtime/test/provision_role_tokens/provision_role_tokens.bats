@@ -148,3 +148,32 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 0 ]
   [ "$(cat "$TOKDIR/architect.gitea_token")" = "tok-frais" ]
 }
+
+@test "--extra-token COMPTE:FICHIER : mint le compte système, écrit le fichier (compte ≠ fichier)" {
+  printf '{"lcars-system":"pw-sys"}' > "$TMP/syspw.json"
+  printf '{"sha1":"tok-sys"}' > "$MOCK/post_response"
+  printf '200' > "$MOCK/probe_code"
+  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$TMP/syspw.json" \
+      --roles "" --extra-token lcars-system:system.gitea_token
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"POSÉ  lcars-system"* ]]
+  [ "$(cat "$TOKDIR/system.gitea_token")" = "tok-sys" ]
+  [ ! -f "$TOKDIR/lcars-system.gitea_token" ]
+}
+
+@test "--extra-token sans ':' → exit 1 fail-loud (format compte:fichier requis)" {
+  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --extra-token bidon
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"compte>:<fichier"* ]]
+}
+
+@test "A4 complet : 1 rôle + le système en UN geste (l'appel canonique)" {
+  printf '{"engineer":"pw-eng","lcars-system":"pw-sys"}' > "$TMP/full.json"
+  printf '{"sha1":"tok-x"}' > "$MOCK/post_response"
+  printf '200' > "$MOCK/probe_code"
+  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$TMP/full.json" \
+      --roles engineer --extra-token lcars-system:system.gitea_token
+  [ "$status" -eq 0 ]
+  [ -f "$TOKDIR/engineer.gitea_token" ]
+  [ -f "$TOKDIR/system.gitea_token" ]
+}
