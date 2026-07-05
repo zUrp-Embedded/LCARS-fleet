@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# SOURCE: fleet/provisioning_v2/provision
+# AUTHOR: DrDree
+# STARDATE: 2026-07-05
+# STATUS: PROTO-V2 — LE point d'entrée provisioning : apply (converge), doctor (sonde nuke-drill), list
+#
+# Machine nue → `fleet_v2 start` fonctionnel, en UN geste rejouable à l'infini :
+#     sudo fleet/provisioning_v2/provision apply
+#     fleet/provisioning_v2/provision doctor        # sonde read-only — LA sonde du nuke-drill
+#
+# Modèle (inversion délibérée de la v1) :
+#   - les modules `modules.d/NN-*.sh` sont des PROCESSUS exécutés, pas des scripts sourcés dans un
+#     namespace commun : un module qui meurt rend SON verdict, il n'avorte pas le durcissement des
+#     autres à moitié fait. L'ordre est le préfixe numérique, lisible dans un `ls`.
+#   - chaque module expose `check` (sonde read-only) et `apply` (check → fix → re-check) ;
+#     le doctor N'EST PAS un autre code : c'est le même check que l'apply utilise. Une seule vérité.
+#   - chaque module DÉCLARE son terrain en tête (greppable, pas de registre à maintenir) :
+#         # SUBSTRATE: any|wsl|docker|linux…   (le runner filtre — l'ISO WSL↔Docker est ce filtre)
+#         # NEEDS: root|human                  (droit d'exécution de l'apply)
+#   - AUCUNE sentinelle d'état : l'état, c'est le système, re-sondé à chaque run. (La machine à
+#     états v1 — .install_ok/.fleet_ready/.deploy_ok/.offline-bootstrap éparpillées sur 2 dossiers —
+#     pouvait rester coincée « ni-vierge-ni-provisionnée » sans un message pour l'humain.)
+#   - pas de reprise-par-bashrc-trigger : après le reboot WSL (lockdown C:), l'humain RELANCE le
+#     même apply — l'idempotence rend la reprise triviale, le doctor dit où on en est.
+#
+# Codes retour module (contrat) : check 0=conforme 1=drift 2=erreur-de-sonde · apply 0=convergé 1=échec.
+# Codes retour runner : apply 0=tout convergé 1=au moins un échec · doctor 0=conforme 1=drift 2=erreur.
+#
+# USAGE :
+#   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE]
+#   provision doctor [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--porcelain]
+#   provision list   [--substrate S]
+# Options :
+#   --substrate S   force le substrat (auto par défaut : docker si /.dockerenv, wsl si kernel
+#                   Microsoft, linux sinon)
+#   --only M        n'exécute que ce module (répétable ; nom complet ou préfixe numérique)
+#   --human USER    humain cible des modules per-humain (défaut : SUDO_USER, sinon l'appelant)
+#   --env FILE      fichier KEY=VALUE sourcé avant tout (surcharge les défauts de la lib)
+#   --porcelain     (doctor) sortie machine `MODULE=OK|DRIFT|ERROR`, une ligne par module
+
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+PROV_ROOT="$(dirname "$SELF")"                      # LA racine, résolue UNE fois puis propagée par
+MODULES_DIR="$PROV_ROOT/modules.d"                  # env — jamais d'heuristique ../.. par module
+export PROVISION_LIB="$PROV_ROOT/lib/provision-lib.sh"
+
+usage() { sed -n '6,42p' "$SELF" | sed 's/^# \{0,1\}//'; }
+die()   { echo "provision: $*" >&2; exit 1; }
+
+[[ -f "$PROVISION_LIB" ]] || die "lib introuvable: $PROVISION_LIB"
+[[ -d "$MODULES_DIR" ]]   || die "modules.d introuvable: $MODULES_DIR"
+
+# ─── Args ─────────────────────────────────────────────────────────────────────────────────────────
+CMD="${1:-}"; shift || true
+SUBSTRATE="auto"
+PORCELAIN=0
+ENV_FILE=""
+declare -a ONLY=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --substrate) SUBSTRATE="${2:?--substrate attend une valeur}"; shift 2 ;;
+    --only)      ONLY+=("${2:?--only attend un module}"); shift 2 ;;
+    --human)     export PROV_HUMAN="${2:?--human attend un user}"; shift 2 ;;
+    --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
+    --porcelain) PORCELAIN=1; shift ;;
+    -h|--help)   usage; exit 0 ;;
+    *) die "option inconnue: $1 (--help)" ;;
+  esac
+done
+case "$CMD" in apply|doctor|list) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+
+if [[ -n "$ENV_FILE" ]]; then
+  [[ -r "$ENV_FILE" ]] || die "--env illisible: $ENV_FILE"
+  set -a
+  # shellcheck source=/dev/null
+  . "$ENV_FILE"
+  set +a
+fi
+
+# shellcheck source=lib/provision-lib.sh
+. "$PROVISION_LIB"
+
+[[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
+case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
+export PROV_SUBSTRATE="$SUBSTRATE"
+
+# ─── Découverte + filtrage ────────────────────────────────────────────────────────────────────────
+# Le header `# SUBSTRATE:` d'un module liste ses terrains (`any` = partout). Un module sans header
+# est une ERREUR de construction (fail-loud, pas un défaut silencieux).
+module_field() { # $1=file $2=FIELD → valeur (vide si absent)
+  sed -n "s/^# ${2}: *//p" "$1" | head -1
+}
+
+declare -a SELECTED=()
+for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
+  [[ -f "$mod" ]] || die "aucun module dans $MODULES_DIR"
+  name="$(basename "$mod" .sh)"
+  subs="$(module_field "$mod" SUBSTRATE)"
+  needs="$(module_field "$mod" NEEDS)"
+  [[ -n "$subs" ]]  || die "$name: header '# SUBSTRATE:' manquant"
+  [[ -n "$needs" ]] || die "$name: header '# NEEDS:' manquant"
+  # Filtre --only (nom complet `10-packages` ou préfixe `10`).
+  if [[ "${#ONLY[@]}" -gt 0 ]]; then
+    keep=0
+    for o in "${ONLY[@]}"; do [[ "$name" == "$o" || "$name" == "$o"-* ]] && keep=1; done
+    [[ "$keep" -eq 1 ]] || continue
+  fi
+  # Filtre substrat (le header liste des mots séparés par des espaces : `wsl linux`).
+  if [[ "$subs" != "any" ]]; then
+    case " $subs " in
+      *" $SUBSTRATE "*) ;;
+      *) continue ;;
+    esac
+  fi
+  SELECTED+=("$mod")
+done
+[[ "${#SELECTED[@]}" -gt 0 ]] || die "aucun module ne matche (substrat=$SUBSTRATE${ONLY[0]:+, only=${ONLY[*]}})"
+
+if [[ "$CMD" == "list" ]]; then
+  for mod in "${SELECTED[@]}"; do
+    printf '%-28s SUBSTRATE=%-14s NEEDS=%s\n' "$(basename "$mod" .sh)" \
+      "$(module_field "$mod" SUBSTRATE)" "$(module_field "$mod" NEEDS)"
+  done
+  exit 0
+fi
+
+# ─── Garde de privilège (apply) ───────────────────────────────────────────────────────────────────
+# Le runner N'ESCALADE JAMAIS lui-même (pas de exec sudo caché — l'entrée racine install.sh porte
+# le consentement + l'escalade). Il dit exactement ce qui manque. Les modules NEEDS:human sont
+# ramenés à PROV_HUMAN via as_human par le module lui-même — root peut donc tout appliquer.
+if [[ "$CMD" == "apply" && "$EUID" -ne 0 ]]; then
+  for mod in "${SELECTED[@]}"; do
+    if [[ "$(module_field "$mod" NEEDS)" == "root" ]]; then
+      die "apply exige root pour $(basename "$mod" .sh) — relance : sudo $SELF apply${ONLY[0]:+ --only ${ONLY[*]}}"
+    fi
+  done
+fi
+
+# ─── Lock anti-runs-concurrents (apply seulement — doctor est read-only, libre) ──────────────────
+if [[ "$CMD" == "apply" ]]; then
+  LOCK="${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock"
+  exec 9>"$LOCK"
+  flock -n 9 || die "un autre apply est en cours (lock: $LOCK)"
+fi
+
+# ─── Exécution ────────────────────────────────────────────────────────────────────────────────────
+MODE="check"; [[ "$CMD" == "apply" ]] && MODE="apply"
+total=0 ok=0 drift=0 failed=0
+declare -a REPORT=()
+
+for mod in "${SELECTED[@]}"; do
+  name="$(basename "$mod" .sh)"
+  total=$((total + 1))
+  [[ "$PORCELAIN" -eq 1 ]] || echo "=== $name ($MODE) ==="
+  rc=0
+  PROVISION_MODULE="$name" bash "$mod" "$MODE" || rc=$?
+  case "$MODE:$rc" in
+    check:0) ok=$((ok + 1));      REPORT+=("$name=OK") ;;
+    check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
+    check:*) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
+    apply:0) ok=$((ok + 1));      REPORT+=("$name=OK") ;;
+    apply:*) failed=$((failed + 1)); REPORT+=("$name=FAIL") ;;
+  esac
+done
+
+# ─── Verdict ──────────────────────────────────────────────────────────────────────────────────────
+if [[ "$PORCELAIN" -eq 1 ]]; then
+  printf '%s\n' "${REPORT[@]}"
+else
+  echo ""
+  echo "=== provision $CMD — substrat $SUBSTRATE ==="
+  printf '  modules: %d · conformes/convergés: %d · drift: %d · échecs: %d\n' "$total" "$ok" "$drift" "$failed"
+  if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
+    echo "  → converger : sudo $SELF apply"
+  fi
+fi
+[[ "$failed" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 2 || echo 1)"
+[[ "$CMD" == "doctor" && "$drift" -gt 0 ]] && exit 1
+exit 0

@@ -1,0 +1,85 @@
+# fleet/provisioning_v2 — machine nue → `fleet_v2 start`
+
+**Date** : 2026-07-05
+**Dernière révision** : 2026-07-05
+**Statut** : PROTO-V2 (non testé en réel — blindé statiquement, shellcheck clean)
+**Référencé par** : `install.sh` (racine), `docker.sh` (racine)
+
+Le provisioning du runtime v2 : amène une machine nue (WSL2, Docker, Linux natif) à l'état où
+un humain lance `fleet_v2 start` et la chaîne complète fonctionne. Remplace `fleet/provisioning/`
+(v1, archivée dans ses feuilles `v1/` — elle provisionnait la fleet bash v1, users-par-rôle,
+morte avec le modèle).
+
+## L'idée en 4 lois
+
+1. **L'état, c'est le système.** Aucune sentinelle (`.install_ok`…), aucun fichier d'état :
+   chaque module SONDE le réel (`check`) et le converge (`apply`). Re-lancer est toujours sûr,
+   le doctor dit toujours où on en est. Après le reboot WSL, on relance le même apply.
+2. **Une seule vérité par fait.** Le doctor N'EST PAS un autre code que l'apply : même sonde.
+   La sonde des tokens EST le `--check` du script A4. La sonde du lockdown C: est UN touch-test,
+   défini une fois.
+3. **Verdict réel, échec verbeux.** Tout état est re-sondé APRÈS l'action ; un succès est une
+   ligne, un échec dump tout. Rien n'est étouffé en `2>/dev/null`.
+4. **Atomicité partout.** Tout fichier est écrit tmp-même-dossier puis `mv`. Un crash ne laisse
+   jamais un fichier tronqué ni un état à moitié armé (wsl.conf s'écrit EN DERNIER de son module).
+
+## Usage
+
+```bash
+sudo fleet/provisioning_v2/provision apply            # converge tout (substrat auto-détecté)
+fleet/provisioning_v2/provision doctor                # sonde read-only — LA sonde du nuke-drill
+fleet/provisioning_v2/provision list                  # les modules retenus pour ce substrat
+sudo fleet/provisioning_v2/provision apply --only 60  # un seul module
+```
+
+Codes retour : `apply` 0=convergé 1=échec · `doctor` 0=conforme 1=drift 2=erreur-de-sonde.
+`doctor --porcelain` → `MODULE=OK|DRIFT|ERROR`, une ligne par module (machine-lisible).
+
+Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seule définition) :
+`PROV_PREFIX` (/local/fleet_v2) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/home/private) ·
+`PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_ADMIN_TOKEN_FILE` (création des comptes) ·
+`PROV_PASSWORDS_FILE` (livrable A4, 0600 opérateur) · `PROV_HUMAN` (défaut : l'appelant) ·
+`PROV_WINDOWS_USER` (ready-room WSL, optionnelle) · pins toolchain (`PROV_ELIXIR_*`).
+
+## Modules (`modules.d/NN-*.sh`)
+
+Chaque module est un PROCESSUS exécuté (`<module> check|apply`), qui déclare son terrain en tête
+(`# SUBSTRATE:`, `# NEEDS:` — greppable, filtré par le runner). Ordre = préfixe numérique.
+
+| Module | Substrat | Pose |
+|---|---|---|
+| 00-preflight | any | planchers OS/bash/arch/RAM/disque/WSL2/userns — sondes actionnables, zéro mutation |
+| 10-packages | wsl linux | tmux, bubblewrap, git, curl, jq, unzip + **sonde bwrap RÉELLE** (un sandbox tourne sous l'humain) |
+| 15-toolchain | wsl linux | Erlang apt (plancher OTP) + Elixir précompilé PINNÉ sha256 (/opt, symlinks) — build only |
+| 20-groups | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |
+| 25-directories | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
+| 30-wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent, ready-room optionnelle |
+| 40-claude-bin | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
+| 50-forge | any | comptes de rôle + `lcars-system` (API admin), passwords check-before-create, tokens DÉLÉGUÉS à `etc/provision-role-tokens.sh` (A4) |
+| 60-deploy | wsl linux | orchestre `fleet/runtime/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
+| 70-human | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
+
+En **Docker**, `10/15/60` sont des layers de l'image (`docker/Dockerfile`, mêmes pins, même
+install.sh) et le reste converge à l'entrypoint — l'ISO WSL↔Docker est STRUCTURELLE (même liste
+de modules, filtrée), vérifiée par le MÊME doctor dans les deux substrats.
+
+## Ce que la v2 ne fait PAS (soustractions assumées)
+
+- **Pas d'users Linux par rôle** : un pod = un process bwrap sous l'UID de l'humain ; les rôles
+  sont des cap-profiles du runtime + des comptes forge.
+- **Pas de yq / fleet.yaml** : la donnée est plate (env + listes), jq suffit.
+- **Pas de wizard enchâssé** : les gestes d'identité (claude /login, token opérateur) sont
+  sondés et instruits, jamais exécutés.
+- **Pas de forge auto-installée** : elle vit à côté (sidecar compose en Docker, service externe
+  sinon) ; on provisionne ce que le runtime attend d'ELLE (comptes, tokens) via son API.
+- **Pas de runner CI** : infra de forge, hors du chemin machine-nue→fleet (unit systemd
+  d'exemple sur la boîte de dev, chantier séparé si besoin).
+- **Pas de gestion GitHub** (`gh`, branch-protection…) : la forge du triangle est Gitea.
+
+## Dette de guerre encaissée (payée par v0→v1, à ne JAMAIS repayer)
+
+snapd casse `systemd --user` sous WSL → purgé · gpg-agent-ssh.socket race au shutdown WSL2 →
+masqué · wsl.conf ne prend effet qu'après `wsl --shutdown` + NOUVEL onglet → dit par la sonde ·
+flag drvfs `metadata` obligatoire pour les perms Unix sur NTFS · `usermod -aG` inactif jusqu'au
+relogin → dit (`sg fleet -c`) · le lockdown C: se sonde en RÉEL (touch-test), jamais en lisant
+la config.
