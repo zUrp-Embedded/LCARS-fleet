@@ -1,8 +1,12 @@
 # fleet/provisioning_v2 — machine nue → `fleet_v2 start`
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-07-05
-**Statut** : PROTO-V2 (non testé en réel — blindé statiquement, shellcheck clean)
+**Dernière révision** : 2026-07-06
+**Statut** : **PROTO PARKÉ** (recadrage user 2026-07-06 : v1 est la brique qui marche, aucun client v2
+tant qu'on n'a rien à installer). ⚠ 3 revues hostiles 2026-07-06 ont trouvé des bugs RÉELS **non
+corrigés** — le code MENT vert sur certains échecs (verdict-sur-échec-apt, `runuser` absent en Docker).
+NE PAS s'en servir en l'état. Le nord voulu = un déployeur GÉNÉRIQUE catalogue-driven, pas ce code
+hardcodé LCARS. Décision + analyse + bugs : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
 **Référencé par** : `install.sh` (racine), `docker.sh` (racine)
 
 Le provisioning du runtime v2 : amène une machine nue (WSL2, Docker, Linux natif) à l'état où
