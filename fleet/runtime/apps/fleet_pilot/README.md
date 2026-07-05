@@ -145,7 +145,13 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       numéro) et **réclame** (retire le label) les orphelins CONFIRMÉS → re-dispatch au prochain tick. **API** :
       `reconcile(issues, pulls, pr_issue_ids, prior_suspects, %Seams{}) :: MapSet.t()` — LIT 5 seams, N'ÉCRIT rien
       (rend le nouveau set de suspects). **Fail-safe** : si l'énumération des pods échoue (`:error`), ne réclame
-      RIEN (jamais déverrouiller à l'aveugle). **Frontière blindée** : `%Seams{}` (`@enforce_keys`
+      RIEN (jamais déverrouiller à l'aveugle). **G1 — une brique sous ÉVAL GATEKEEPER active est possédée** :
+      pendant l'éval (un tour claude), le producteur est fini et le gatekeeper porte la tâche sous un pod_id
+      `permanent-*` (sans slug repo) → sans ça, la ref paraissait orpheline et la grâce (~60s) la réclamait EN
+      PLEINE éval (re-dispatch concurrent, verdict fantôme). `gate_eval_owned_refs` lit `TaskQueue.list_active`
+      (metadata MA-03 : `gate_eval` + `resume_n` + repo du `resume_payload` — multi-projet : une éval de repoB ne
+      possède pas une ref de repoA). Une éval `:cleared` (supersédée) ou `:completed` ne possède PLUS sa ref → le
+      reclaim reprend la main (re-dispatch → ré-escalade, self-heal borné par le budget rework). **Frontière blindée** : `%Seams{}` (`@enforce_keys`
       `forge`/`spawner`/`task_queue`/`repo`/`forge_opts` — accès hors-5-seams ne compile pas), le caller résout
       les défauts prod (`spawner || Fleet.Spawner`) à SON site. La **grâce 2-tick** (`prior_suspects`) et
       l'**agrégation cross-repo** (`MapSet.union` des suspects de tous les repos du tick) = état CROSS-TICK →

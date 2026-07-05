@@ -141,15 +141,49 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # rendue PORTE le repo (`{repo, :issue|:pr, n}`). Sans ça, un pod vivant #N/repoB « posséderait » la ref
   # `{:issue, N}` globale → il MASQUERAIT l'orphelin #N/repoA (verrou jamais réclamé = wedge) ET la grace
   # 2-tick se contaminerait cross-repo (double-spawn). La clé de verrou REPO-QUALIFIÉE = l'identité réelle.
+  #
+  # G1 — une brique sous ÉVAL GATEKEEPER est possédée AUSSI : pendant l'éval (un tour claude = minutes),
+  # le pod PRODUCTEUR est fini (mort one-shot ou idle) et le GATEKEEPER porte la tâche d'éval sous un
+  # pod_id `permanent-*` (aucun slug repo) → sans `gate_eval_owned_refs`, la ref paraissait orpheline et
+  # la grâce 2-tick (~60s) la RÉCLAMAIT en pleine éval → re-dispatch du step concurrent (double
+  # workflow_run + verdict fantôme au retour). L'union se fait DANS le try : un échec d'énumération des
+  # évals fait `:error` → le fail-safe « ne rien réclamer » couvre les deux sources.
   defp live_owned_refs(%Seams{spawner: spawner, task_queue: tq, repo: repo}) do
-    spawner.list_pods()
-    |> Enum.filter(&pod_has_active_task?(tq, &1[:pod_id]))
-    |> Enum.flat_map(&owned_refs_for_pod(&1[:pod_id], repo, tq))
-    |> MapSet.new()
+    pod_refs =
+      spawner.list_pods()
+      |> Enum.filter(&pod_has_active_task?(tq, &1[:pod_id]))
+      |> Enum.flat_map(&owned_refs_for_pod(&1[:pod_id], repo, tq))
+      |> MapSet.new()
+
+    MapSet.union(pod_refs, gate_eval_owned_refs(tq, repo))
   rescue
     _ -> :error
   catch
     _, _ -> :error
+  end
+
+  # G1 — refs possédées par les ÉVALS GATEKEEPER ACTIVES du broker. La source de vérité existe déjà :
+  # la tâche d'éval (MA-03, metadata auto-descriptif) porte `gate_eval: true` + `resume_n` (n° d'issue)
+  # + `resume_payload.repository.full_name` (repo — multi-projet : une éval de repoB ne possède PAS une
+  # ref de repoA). États ACTIFS seulement (`TaskQueue.list_active`) : une éval `:cleared` (clobbée par
+  # un supersede à l'enqueue — MA-27 borne à 1 work item actif/pod) ou `:completed` (verdict rendu,
+  # resume en vol — fenêtre couverte par la grâce 2-tick) ne possède PLUS sa ref → le reclaim reprend
+  # la main et le re-dispatch ré-escalade (self-heal borné par le budget rework). Les évals portent sur
+  # des ISSUES (les juges PR passent par dispatch_review, sans gate) → refs `{repo, :issue, n}`.
+  # `function_exported?` : un stub task_queue sans `list_active` → MapSet vide (conservateur, même
+  # pattern que `pod_active_issue_id` — ne masque rien qu'il ne connaît pas).
+  defp gate_eval_owned_refs(tq, repo) do
+    if function_exported?(tq, :list_active, 0) do
+      for %{metadata: meta} <- tq.list_active(),
+          meta["gate_eval"] == true,
+          get_in(meta, ["resume_payload", "repository", "full_name"]) == repo,
+          n = meta["resume_n"],
+          is_integer(n),
+          into: MapSet.new(),
+          do: {repo, :issue, n}
+    else
+      MapSet.new()
+    end
   end
 
   # Refs qu'un pod ACTIF possede. Per-issue (instance) : derivees du pod_id (`-issue-N-` / `-pr-N-`).

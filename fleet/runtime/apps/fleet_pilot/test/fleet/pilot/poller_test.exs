@@ -272,6 +272,43 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-9"}
   end
 
+  # G1 — TaskQueue stub : une ÉVAL GATEKEEPER ACTIVE porte la brique #8 de CE repo (metadata MA-03
+  # auto-descriptif : gate_eval + resume_n + resume_payload.repository). Aucun pod vivant par ailleurs
+  # (le producteur est fini) : c'est exactement la fenêtre d'éval.
+  defmodule GateEvalTaskQueue do
+    def pod_status(_pod_id), do: {:ok, nil}
+
+    def list_active do
+      [
+        %{
+          metadata: %{
+            "gate_eval" => true,
+            "resume_n" => 8,
+            "resume_payload" => %{"repository" => %{"full_name" => "lordzurp/lcars-test"}}
+          }
+        }
+      ]
+    end
+  end
+
+  # G1 — TaskQueue stub : une éval active existe mais pour un AUTRE repo → elle ne possède PAS la
+  # ref #8 de lordzurp/lcars-test (multi-projet : le repo de la ref vient du resume_payload).
+  defmodule GateEvalOtherRepoTaskQueue do
+    def pod_status(_pod_id), do: {:ok, nil}
+
+    def list_active do
+      [
+        %{
+          metadata: %{
+            "gate_eval" => true,
+            "resume_n" => 8,
+            "resume_payload" => %{"repository" => %{"full_name" => "lordzurp/autre-projet"}}
+          }
+        }
+      ]
+    end
+  end
+
   # Recovery de wake qui ÉCHOUE (pod injoignable, re-roll non réparé) → `StepDispatcher.dispatch_issue`
   # surface `{:error, {:wake_unreached, …}}` : le pipeline EST démarré (verrou + pod + brief posés en amont,
   # ordre canonique), seul le réveil tmux a raté. Sert à prouver le contrat « wake raté ⇒ bail PRIS ».
@@ -480,6 +517,84 @@ defmodule Fleet.Pilot.PollerTest do
           loader: StepStubLoader,
           spawner: ProjectPipeSpawner,
           task_queue: ProjectTaskQueueIssue9,
+        )
+
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+      Poller.force_poll(name)
+      assert_received {:remove_label, 8, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "G1 : verrou TENU pendant une éval gatekeeper ACTIVE (jamais réclamé, même après la grâce)" do
+      # Fenêtre d'éval : le producteur de #8 est FINI (aucun pod vivant), le gatekeeper PERMANENT
+      # porte la tâche d'éval (pod_id sans slug repo → invisible aux refs par pod_id). Sans le fix,
+      # la ref paraissait orpheline → réclamée au 2e tick EN PLEINE ÉVAL → re-dispatch concurrent
+      # (double workflow_run + verdict fantôme). Avec le fix : la ref est possédée par l'éval active
+      # (gate_eval_owned_refs) → jamais réclamée, sur autant de ticks que dure l'éval.
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_g1_eval_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StepStubLoader,
+          spawner: StepStubSpawner,
+          task_queue: GateEvalTaskQueue
+        )
+
+      Poller.force_poll(name)
+      Poller.force_poll(name)
+      Poller.force_poll(name)
+      refute_received {:remove_label, 8, _}
+
+      GenServer.stop(pid)
+    end
+
+    test "G1 : une éval gatekeeper d'un AUTRE repo ne tient PAS le verrou (réclamé au 2e tick)" do
+      # Multi-projet : la ref possédée vient du repo du resume_payload. Une éval en cours sur
+      # lordzurp/autre-projet#8 ne masque pas l'orphelin lordzurp/lcars-test#8 — sinon toute éval
+      # active gèlerait la réconciliation de TOUS les repos (wedge symétrique du fix). Couvre aussi
+      # le cas « éval clobbée » (cleared) : une éval hors de list_active ne possède rien (même
+      # chemin — la ref redevient orpheline → reclaim → re-dispatch → ré-escalade, self-heal).
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      name = :"P_g1_other_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
+          loader: StepStubLoader,
+          spawner: StepStubSpawner,
+          task_queue: GateEvalOtherRepoTaskQueue
         )
 
       Poller.force_poll(name)
