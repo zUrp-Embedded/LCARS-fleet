@@ -69,14 +69,23 @@ setup_env() {
   load_env
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
 
-  # Profil forge : brancher entre forges SANS tout éditer. `LCARS_FORGE` nomme le profil (défaut
-  # `work` = la forge principale, le MODE NORMAL ; `test` = le bac à sable de dev). Le profil vit
-  # dans ~/.lcars/forge.d/<nom>.env et pose les FORGE_* de CETTE forge (URL + token système + dir des
-  # role-tokens). Le runtime reste MONO-FORGE : il lit les FORGE_* résolus ci-dessous (runtime.exs ;
-  # « pas de multi-forge simultané »). Le nom n'est qu'un handle — la seule vraie variable d'une forge
-  # est son URL ip:port. Sourcé APRÈS l'env plat → le profil fait foi pour la forge active. Défaut
-  # `work` sans fichier de profil → rétro-compat : les FORGE_* du fleet_v2.env plat restent honorés.
-  local _forge_set="${LCARS_FORGE+set}"
+  # Profil forge : brancher entre forges SANS tout éditer. Un profil vit dans ~/.lcars/forge.d/<nom>.env
+  # et pose les FORGE_* de CETTE forge (URL + token système + dir des role-tokens). Le runtime reste
+  # MONO-FORGE : il lit les FORGE_* résolus ci-dessous (runtime.exs ; « pas de multi-forge simultané »).
+  # Le nom n'est qu'un handle — la seule vraie variable d'une forge est son URL ip:port.
+  #
+  # Résolution de la forge active, 3 niveaux (le plus fort gagne) :
+  #   1. LCARS_FORGE explicite dans l'env         → OVERRIDE ONE-SHOT (un test ponctuel sans rien changer)
+  #   2. ~/.lcars/forge.active (posé par `fleet_v2 forge <nom>`) → LE SWITCH PERSISTANT (façon git checkout)
+  #   3. sinon                                     → `work` (le défaut dur = la forge principale)
+  # Sourcé APRÈS l'env plat → le profil fait foi. Défaut `work` sans fichier de profil → rétro-compat :
+  # les FORGE_* du fleet_v2.env plat restent honorés (aucun switch, aucun profil = comportement historique).
+  local _forge_deliberate="${LCARS_FORGE+set}"
+  local forge_active_file="${LCARS_FORGE_STATE:-$HOME/.lcars/forge.active}"
+  if [[ -z "$_forge_deliberate" && -r "$forge_active_file" ]]; then
+    local _active; _active="$(tr -d '[:space:]' < "$forge_active_file" 2>/dev/null || true)"
+    [[ -n "$_active" ]] && { LCARS_FORGE="$_active"; _forge_deliberate="set"; }
+  fi
   : "${LCARS_FORGE:=work}"
   local forge_file="${LCARS_FORGE_DIR:-$HOME/.lcars/forge.d}/${LCARS_FORGE}.env"
   if [[ -f "$forge_file" ]]; then
@@ -84,8 +93,8 @@ setup_env() {
     # shellcheck source=/dev/null
     . "$forge_file"
     set +a
-  elif [[ -n "$_forge_set" ]]; then
-    die "profil forge inconnu : LCARS_FORGE=$LCARS_FORGE mais $forge_file absent (crée-le, ou pointe un profil existant sous ~/.lcars/forge.d/)"
+  elif [[ -n "$_forge_deliberate" ]]; then
+    die "profil forge inconnu : « $LCARS_FORGE » — $forge_file absent (« fleet_v2 forge <nom> » vers un profil existant, ou crée le fichier)"
   fi
 
   # F-037 multi-projet : le poller DÉCOUVRE ses repos par topic (lcars-fleet-<human>) → plus de
@@ -304,10 +313,38 @@ cmd_version() {
   fi
 }
 
+# Forge active : le SWITCH persistant (façon `git checkout` / `kubectl use-context`). Sans argument →
+# affiche l'active + les profils disponibles. Avec un nom → valide que ~/.lcars/forge.d/<nom>.env existe
+# puis l'écrit dans ~/.lcars/forge.active (persistant ; le prochain `start` l'utilise). Un `LCARS_FORGE=`
+# dans l'env reste un override ONE-SHOT au-dessus de ce switch (cf. setup_env).
+cmd_forge() {
+  local name="${1:-}"
+  local state="${LCARS_FORGE_STATE:-$HOME/.lcars/forge.active}"
+  local dir="${LCARS_FORGE_DIR:-$HOME/.lcars/forge.d}"
+  if [[ -z "$name" ]]; then
+    local active="work (défaut — aucun switch posé)"
+    if [[ -r "$state" ]]; then local a; a="$(tr -d '[:space:]' < "$state")"; [[ -n "$a" ]] && active="$a"; fi
+    echo "fleet_v2: forge active = $active"
+    if [[ -d "$dir" ]]; then
+      local profils=""
+      for f in "$dir"/*.env; do [[ -f "$f" ]] && profils+=" $(basename "$f" .env)"; done
+      echo "fleet_v2: profils disponibles :${profils:- (aucun sous $dir)}"
+    else
+      echo "fleet_v2: aucun profil (dir $dir absent)"
+    fi
+    return 0
+  fi
+  [[ -f "$dir/$name.env" ]] || die "profil forge « $name » inconnu ($dir/$name.env absent) — crée-le d'abord"
+  mkdir -p "$(dirname "$state")"
+  printf '%s\n' "$name" > "$state"
+  echo "fleet_v2: forge active → $name (persistant ; le prochain « fleet_v2 start » l'utilise)"
+}
+
 case "${1:-help}" in
   start)   shift; cmd_start "$@" ;;
   stop)    shift; cmd_stop "$@" ;;
   status)  shift; cmd_status "$@" ;;
   version) shift; cmd_version "$@" ;;
-  *) echo "usage: fleet_v2 {start|stop|status|version}" >&2; exit 1 ;;
+  forge)   shift; cmd_forge "$@" ;;
+  *) echo "usage: fleet_v2 {start|stop|status|version|forge [nom]}" >&2; exit 1 ;;
 esac
