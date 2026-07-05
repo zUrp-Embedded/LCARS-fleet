@@ -13,8 +13,9 @@ defmodule Fleet.Observation.Application do
 
   ## Principe cardinal
 
-  Le deck **ne touche pas au core** : il dépend vers le bas (lit Ring 1/2/3),
-  aucune app du core ne dépend de lui. Lecture seule, intra-release, no-auth
+  Le deck **ne touche pas au core** : il dépend vers le bas (Ring 0 — bus
+  `fleet_event_router` + catalogue `fleet_cap_profile` ; Ring 1 — `fleet_spawner`
+  pour `list_pods/0`), aucune app du core ne dépend de lui. Lecture seule, intra-release, no-auth
   (frontière = isolation réseau/container, comme `fleet_api`) : il observe, il ne mute rien.
 
   ## Configuration

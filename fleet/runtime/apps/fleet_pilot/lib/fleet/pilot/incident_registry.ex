@@ -46,7 +46,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   catch
     :exit, why ->
       Logger.error(
-        "IncidentRegistry indisponible (seen_before? #{sig}): #{inspect(why)} — fail-loud"
+        "IncidentRegistry: indisponible (seen_before? #{sig}): #{inspect(why)} — fail-loud"
       )
 
       false
@@ -58,7 +58,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
     GenServer.call(server(opts), {:note, sig, reason, now(opts)})
   catch
     :exit, why ->
-      Logger.error("IncidentRegistry indisponible (note #{sig}): #{inspect(why)} — fail-loud")
+      Logger.error("IncidentRegistry: indisponible (note #{sig}): #{inspect(why)} — fail-loud")
       {:error, :registry_unavailable}
   end
 

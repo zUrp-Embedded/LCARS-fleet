@@ -10,7 +10,9 @@ defmodule Fleet.Coord do
 
   ## Public API (delegator)
 
-  Cette module délègue à `Fleet.Coord.Policies`.
+  Ce module délègue à `Fleet.Coord.Policies` (lookup de table) ; l'émission
+  des events canon est portée par `Fleet.Coord.Emitter` (passe extraite,
+  appelée par Policies sur un match).
 
     * `handle_decision/2` — consomme un verdict validé
       (`Fleet.Starfleet.Gatekeeper`) → broadcast event canon
@@ -21,9 +23,10 @@ defmodule Fleet.Coord do
 
   Les anciens `invoke_soft_gate/4` + `invoke_hook/2` (spawn pod LLM
   délégué coord) sont **retirés** : le jugement LLM des gates est
-  consolidé sur le **gatekeeper** (juge unique), spawné côté pipeline
-  (`Fleet.Workflow.Gates.dispatch_gatekeeper/4`, async). `Fleet.Coord`
-  ne porte plus de spawn — uniquement les policies déclaratives.
+  consolidé sur le **gatekeeper permanent** (juge unique), booté par
+  `Fleet.Workflow.Gatekeeper.ensure_booted/1` et saisi par brief d'éval
+  enqueué (rail `StepRunConsumer`, gate non-tranchable → gatekeeper).
+  `Fleet.Coord` ne porte plus de spawn — uniquement les policies déclaratives.
 
   ## Implémentation backend
 

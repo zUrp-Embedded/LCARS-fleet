@@ -58,7 +58,9 @@ defmodule Fleet.API.Application do
     dirty = if info.dirty, do: "-dirty", else: ""
     require Logger
 
-    Logger.info("LCARS fleet — build #{info.sha}#{dirty} ref=#{info.ref} (source=#{info.source})")
+    Logger.info(
+      "API: LCARS fleet — build #{info.sha}#{dirty} ref=#{info.ref} (source=#{info.source})"
+    )
   end
 
   # sd_notify minimal — protocole : ouvrir AF_UNIX SOCK_DGRAM, écrire
@@ -72,12 +74,12 @@ defmodule Fleet.API.Application do
           :ok = :gen_udp.send(s, {:local, socket}, 0, "READY=1\n")
           :gen_udp.close(s)
           require Logger
-          Logger.info("Fleet.API: sd_notify READY=1 sent to #{socket}")
+          Logger.info("API: sd_notify READY=1 sent to #{socket}")
           :ok
         rescue
           e ->
             require Logger
-            Logger.warning("Fleet.API: sd_notify failed (non-fatal): #{inspect(e)}")
+            Logger.warning("API: sd_notify failed (non-fatal): #{inspect(e)}")
             :ok
         end
 

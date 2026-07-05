@@ -73,7 +73,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
       )
 
       Logger.info(
-        "Pod.clear_terminal_snapshot #{pod_id}: tombstone :#{phase} effacée (re-spawn FRESH, BL-055)"
+        "pod #{pod_id} clear_terminal_snapshot: tombstone :#{phase} effacée (re-spawn FRESH, BL-055)"
       )
 
       :ok

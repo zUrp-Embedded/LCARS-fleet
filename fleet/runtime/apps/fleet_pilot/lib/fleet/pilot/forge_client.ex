@@ -482,7 +482,7 @@ defmodule Fleet.Pilot.ForgeClient do
       {:error, {:http, 405, body}} = err ->
         if attempts_left > 1 and merge_checking?(body) do
           Logger.info(
-            "ForgeClient.merge_pr ##{index}: mergeabilité en cours (« try again later ») → " <>
+            "ForgeClient: merge_pr ##{index} mergeabilité en cours (« try again later ») → " <>
               "retry dans #{delay}ms (#{attempts_left - 1} restants)"
           )
 

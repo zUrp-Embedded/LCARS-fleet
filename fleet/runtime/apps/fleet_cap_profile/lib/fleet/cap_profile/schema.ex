@@ -126,7 +126,7 @@ defmodule Fleet.CapProfile.Schema do
       {:ok, schema}
     else
       {:error, reason} ->
-        Logger.warning("schema unavailable: #{inspect(reason)} at #{path}")
+        Logger.warning("Schema: schema unavailable: #{inspect(reason)} at #{path}")
         {:error, :schema_unavailable}
     end
   end

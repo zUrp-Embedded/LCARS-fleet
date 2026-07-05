@@ -17,8 +17,9 @@ defmodule Fleet.Spawner.PermanentWarden do
   ## Depense BORNEE (le mode de panne = depense, jamais un churn)
 
   Chaque respawn reussi boote une session claude : un crash-loop non borne brulerait du LLM en boucle.
-  Le retry est donc BORNE : `@max_attempts` tentatives consecutives par role (backoff 5s → 40s → 3m →
-  10m → 10m), compteur remis a zero sur respawn REUSSI. Epuise → HALT du retry + `Logger.error`
+  Le retry est donc BORNE : `@max_attempts` tentatives consecutives par role (backoff expo
+  `base * 2^attempt` plafonne a 10 min — base par defaut 5s, soit 5s → 10s → 20s → 40s → 80s),
+  compteur remis a zero sur respawn REUSSI. Epuise → HALT du retry + `Logger.error`
   (le role reste mort jusqu'a intervention). Ce halt n'est PAS silencieux : l'escalade humaine est
   DEJA passee par le rail incident (`IncidentConsumer` grave chaque `pod.failed` ; la RECURRENCE de la
   meme signature ouvre une issue sysadmin `error_system` sur la forge — rail repare F-RUN-2) — le

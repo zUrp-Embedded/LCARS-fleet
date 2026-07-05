@@ -211,11 +211,12 @@ if config_env() != :test do
     config :fleet_workflow, workflow_maps_root: path
   end
 
-  # F092 : racine des workspaces de pipeline (scratch git). Défaut HORS /tmp (ADR-E :
-  # PrivateTmp + tmpfs bwrap orphelineraient les écritures) = `~/.lcars/workspaces`.
-  if path = System.get_env("LCARS_WORKSPACES_ROOT") do
-    config :fleet_workflow, workspaces_root: path
-  end
+  # TOMBSTONE (D3 2026-07-05) : le knob `LCARS_WORKSPACES_ROOT` (→ `:fleet_workflow,
+  # :workspaces_root`, racine des workspaces scratch git de pipeline) est RETIRÉ — son
+  # dernier lecteur (`WorkspaceProvisioner`, pile du moteur RAM) a été supprimé avec le
+  # retrait du moteur RAM (Executor + pile) ; la config restait posée sans AUCUN lecteur.
+  # Ne pas réintroduire : les workspaces actuels sont per-pod (pod_dir), pas un scratch
+  # git partagé de pipeline.
 
   # ============================================================
   # fleet_starfleet (ch13) — log audit Cat 5
@@ -224,8 +225,8 @@ if config_env() != :test do
     config :fleet_starfleet, audit_log_path: path
   end
 
-  # Drain de shutdown : backend réel (agrège l'in-flight Spawner/Pipeline/
-  # TaskQueue + active la quiescence). Hors `:test` (ce fichier est guardé) →
+  # Drain de shutdown : backend réel (agrège l'in-flight Spawner + TaskQueue et active la
+  # quiescence — le Pipeline RAM historique a disparu du décompte). Hors `:test` (ce fichier est guardé) →
   # les tests gardent le défaut `NoOpDispatcher` (hermétisme). Décision user
   # 2026-06-05 : pas de god-module Fleet.Dispatcher, le seam EST l'abstraction.
   config :fleet_starfleet,
@@ -289,9 +290,11 @@ if config_env() != :test do
 
   # F-037 MULTI-PROJET : le Poller ne scanne PLUS un repo fixe — il DÉCOUVRE ses projets par topic
   # (`lcars-fleet-<human>`, posé à l'onboarding). `LCARS_PILOT_POLL_REPO` n'est donc PLUS requis pour que
-  # le rail tourne (la garde fail-loud boot est sur FORGE_BASE_URL, cf. Fleet.Pilot.Application). On garde
-  # la reconnaissance de l'env var (contrat ops + seam : les tests injectent repo/remote par opts directs,
-  # pas par cette config). En prod multi-projet, repo+remote voyagent dans l'event `pod.completed`.
+  # le rail tourne (la garde fail-loud boot est sur FORGE_BASE_URL, cf. Fleet.Pilot.Application).
+  # ÉTAT VRAI (D3 2026-07-05) : cette config est posée SANS lecteur runtime (aucun
+  # `get_env(:fleet_pilot, :poll_repo)` dans le code ; les tests injectent repo/remote par opts directs).
+  # CONSERVÉE délibérément comme contrat ops (l'env var reste reconnue, pas un no-op surprise si un
+  # déploiement la pose). En prod multi-projet, repo+remote voyagent dans l'event `pod.completed`.
   if repo = System.get_env("LCARS_PILOT_POLL_REPO") do
     config :fleet_pilot, poll_repo: repo
   end

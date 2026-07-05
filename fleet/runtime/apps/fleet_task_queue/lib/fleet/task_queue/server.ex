@@ -407,10 +407,11 @@ defmodule Fleet.TaskQueue.Server do
     |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
   end
 
-  # Supersède TOUTE active du pod (un work item frais à l'enqueue remplace l'ancien). Le `:pending`
-  # jamais pullé est DROPPÉ (jamais servi → rien à tracer) ; l'`:assigned`/`:in_progress` en cours est
-  # transitionné `:cleared` (le pod l'abandonne : `submit_result` du vieux work item tombera sur `find_active`
-  # = nil → `:no_active_work_item`/`:double_submit_ignored`, jamais une mutation du nouveau). Garde tout le reste
+  # Supersède TOUTE active du pod (un work item frais à l'enqueue remplace l'ancien) : chaque active
+  # (`:pending` | `:assigned` | `:in_progress`) est transitionnée `:cleared` — y compris le `:pending`
+  # jamais pullé (MÊME transition que les autres, il reste traçable dans la map ; rien n'est droppé).
+  # Le pod abandonne l'ancien : `submit_result` du vieux work item tombera sur `find_active`
+  # = nil → `:no_active_work_item`/`:double_submit_ignored`, jamais une mutation du nouveau. Garde tout le reste
   # (autres pods, terminaux du pod). Borne la queue à 1 active/pod À L'ÉCRITURE. Retourne
   # `{state, n_superseded}`.
   defp supersede_active(state, pod_id) do

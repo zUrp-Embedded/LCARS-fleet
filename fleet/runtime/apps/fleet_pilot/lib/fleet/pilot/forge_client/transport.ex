@@ -235,7 +235,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     # ~30s (3 appels forge : create_issue + add_label[GET+PUT]) — connexion stale ? endpoint qui pend ?
     if elapsed > 1_000 do
       Logger.warning(
-        "ForgeClient #{method} #{path} LENT #{elapsed}ms → #{forge_result_tag(result)}"
+        "ForgeClient: #{method} #{path} LENT #{elapsed}ms → #{forge_result_tag(result)}"
       )
     end
 

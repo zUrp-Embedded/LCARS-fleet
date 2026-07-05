@@ -110,7 +110,7 @@ defmodule Fleet.Observation.ReadModel do
         :ok
 
       other ->
-        Logger.warning("Observation.ReadModel: subscribe #{topic} → #{inspect(other)}")
+        Logger.warning("ReadModel: subscribe #{topic} → #{inspect(other)}")
     end
 
     {:noreply, state}

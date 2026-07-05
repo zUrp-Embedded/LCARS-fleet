@@ -1,12 +1,13 @@
 defmodule Fleet.Pilot.Poller do
   @moduledoc """
-  Réacteur du rail forge-state-machine (**mode STEP uniquement**) : scan périodique du `repo`
-  configuré, délégation des issues + PR ouvertes au spawn des rôles via `StepDispatcher`.
+  Réacteur du rail forge-state-machine (**mode STEP uniquement**), **multi-projet** : à chaque
+  tick il DÉCOUVRE les repos de son humain par topic forge (`lcars-fleet-<humain>`), puis délègue
+  les issues + PR ouvertes au spawn des rôles via `StepDispatcher`.
 
   ## Rôle
 
-  La forge EST la machine à états ; ce poller en est le réacteur. À chaque tick, pour le `repo`
-  surveillé, il liste les **issues** + **PR** ouvertes et délègue :
+  La forge EST la machine à états ; ce poller en est le réacteur. À chaque tick, pour CHAQUE repo
+  découvert par le topic, il liste les **issues** + **PR** ouvertes et délègue :
 
     * **issue assignée** (assignee=humain owner), non verrouillée, sans PR ouverte → spawn le rôle
       **producteur** (`StepDispatcher.dispatch_issue` ; rôle = `:producer_role`, défaut engineer).
@@ -37,7 +38,10 @@ defmodule Fleet.Pilot.Poller do
 
   ## Configuration init
 
-    * `:repo` — `"owner/name"`, obligatoire.
+    * `:repo` — `"owner/name"`, OPTIONNEL (seam test/legacy) : plus la source des repos —
+      la découverte par topic l'écrase à chaque itération de `do_poll`.
+    * `:human` — seam test ; défaut `Fleet.Credentials.Human.current!()` (fail-loud), la
+      VRAIE source requise du scoping multi-user.
     * `:interval_ms` — défaut `30_000` (30s).
     * `:forge_opts` — keyword ForgeClient (base_url, token, req_options).
     * `:step_dispatch?` — historiquement le switch de mode ; aujourd'hui toujours `true` (seul mode).
@@ -184,7 +188,7 @@ defmodule Fleet.Pilot.Poller do
       end
 
     Logger.info(
-      "fleet_pilot Poller start mode=step MULTI-PROJET topic=#{fleet_topic(state.my_human)} " <>
+      "Poller: start mode=step MULTI-PROJET topic=#{fleet_topic(state.my_human)} " <>
         "interval=#{state.interval_ms}ms jitter=±10%"
     )
 
@@ -242,7 +246,7 @@ defmodule Fleet.Pilot.Poller do
   # jamais le laisser remonter nu).
   defp poll_crash(state, detail, kind_label) do
     Logger.error(
-      "fleet_pilot Poller unexpected #{kind_label} in do_poll: #{inspect(detail)} — state preserved"
+      "Poller: unexpected #{kind_label} in do_poll: #{inspect(detail)} — state preserved"
     )
 
     {%{Lease.zero_tally() | errors: 1},
@@ -338,7 +342,7 @@ defmodule Fleet.Pilot.Poller do
     new_streak = state.err_streak + 1
 
     Logger.warning(
-      "fleet_pilot Poller error repo=#{state.repo} reason=#{inspect(reason)} streak=#{new_streak}"
+      "Poller: error repo=#{state.repo} reason=#{inspect(reason)} streak=#{new_streak}"
     )
 
     :telemetry.execute(

@@ -233,7 +233,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
 
     Logger.info(
-      "fleet_pilot StepRunConsumer start (MULTI-PROJET F-037 : repo/remote per-step-run) " <>
+      "StepRunConsumer: start (MULTI-PROJET F-037 : repo/remote per-step-run) " <>
         "fallback_repo=#{inspect(state.repo)} fallback_remote=#{inspect(state.remote)}"
     )
 
@@ -274,7 +274,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # à l'aveugle avant le verdict).
       {:escalate, corr, eval_ctx} ->
         Logger.info(
-          "StepRunConsumer gate→gatekeeper: #{p["issue_id"]} step=#{eval_ctx.step} corr=#{inspect(corr)}"
+          "StepRunConsumer: gate→gatekeeper #{p["issue_id"]} step=#{eval_ctx.step} corr=#{inspect(corr)}"
         )
 
         {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
@@ -285,7 +285,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
       {:error, reason} ->
         Logger.warning(
-          "StepRunConsumer fin-de-step-run FAIL #{p["issue_id"]}: #{inspect(reason)}"
+          "StepRunConsumer: fin-de-step-run FAIL #{p["issue_id"]}: #{inspect(reason)}"
         )
 
         {:noreply, state}
@@ -346,7 +346,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
       {:error, reason} ->
         Logger.warning(
-          "StepRunConsumer gate resume FAIL corr=#{inspect(corr)}: #{inspect(reason)}"
+          "StepRunConsumer: gate resume FAIL corr=#{inspect(corr)}: #{inspect(reason)}"
         )
     end
   end
@@ -527,10 +527,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
       case outcome do
         {:error, reason} ->
-          Logger.warning("StepRunConsumer fin-de-step-run FAIL #{label}: #{inspect(reason)}")
+          Logger.warning("StepRunConsumer: fin-de-step-run FAIL #{label}: #{inspect(reason)}")
 
         _ ->
-          Logger.info("StepRunConsumer fin-de-step-run #{label} → #{inspect(outcome)}")
+          Logger.info("StepRunConsumer: fin-de-step-run #{label} → #{inspect(outcome)}")
       end
 
       outcome

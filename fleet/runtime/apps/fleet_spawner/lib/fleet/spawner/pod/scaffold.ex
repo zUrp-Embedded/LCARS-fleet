@@ -46,7 +46,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
       _ = File.rm(f)
 
       Logger.info(
-        "Pod.gc #{state.pod_id}: jsonl stale #{Path.basename(f)} retiré (GC UUID → session frais)"
+        "pod #{state.pod_id} gc: jsonl stale #{Path.basename(f)} retiré (GC UUID → session frais)"
       )
     end)
   end

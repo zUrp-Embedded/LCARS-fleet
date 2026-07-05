@@ -239,7 +239,9 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
           )
 
         {:fail, reason} ->
-          Logger.info("StepRunConsumer gate FAIL repo=#{seams.repo}##{n} step=#{step}: #{reason}")
+          Logger.info(
+            "StepRunConsumer: gate FAIL repo=#{seams.repo}##{n} step=#{step}: #{reason}"
+          )
 
           tag(:rework, rebound(workflow_map, n, seams))
 

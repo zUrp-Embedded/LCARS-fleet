@@ -202,7 +202,7 @@ defmodule Fleet.Spawner.PodWarden do
     PodTmux.remove_sock_dir(pod_id)
     :ok
   rescue
-    e -> Logger.warning("PodWarden reap #{pod_id} échec (non-bloquant): #{inspect(e)}")
+    e -> Logger.warning("PodWarden: reap #{pod_id} échec (non-bloquant): #{inspect(e)}")
   end
 
   # GC d'un pod_dir orphelin (mécanisme partagé avec Pod.StateFs.clear_terminal_snapshot/3).
@@ -211,7 +211,7 @@ defmodule Fleet.Spawner.PodWarden do
     StateFs.rm_terminal_artifacts(state_dir, pod_dir)
     :ok
   rescue
-    e -> Logger.warning("PodWarden GC pod_#{pod_id} échec (non-bloquant): #{inspect(e)}")
+    e -> Logger.warning("PodWarden: GC pod_#{pod_id} échec (non-bloquant): #{inspect(e)}")
   end
 
   # Énumère les tombstones sous la racine GLOBALE des state.json (`Pod.Paths.state_fs_root/0` :

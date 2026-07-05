@@ -54,7 +54,7 @@ defmodule Fleet.Starfleet.AuditLog do
         :ok
 
       {:error, reason} = err ->
-        Logger.error("fleet_starfleet audit log write failed: #{inspect(reason)} path=#{path}")
+        Logger.error("AuditLog: write failed: #{inspect(reason)} path=#{path}")
 
         err
     end
@@ -83,7 +83,7 @@ defmodule Fleet.Starfleet.AuditLog do
 
           {:error, reason} ->
             Logger.error(
-              "fleet_starfleet audit log rotation failed: #{inspect(reason)} path=#{path} — " <>
+              "AuditLog: rotation failed: #{inspect(reason)} path=#{path} — " <>
                 "append sans rotation (l'écriture courante n'est pas perdue)"
             )
 

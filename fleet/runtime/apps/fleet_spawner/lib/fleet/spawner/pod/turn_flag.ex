@@ -52,7 +52,7 @@ defmodule Fleet.Spawner.Pod.TurnFlag do
 
       {:error, reason} ->
         Logger.warning(
-          "TurnFlag.write #{pod_dir}: écriture flag échouée (#{inspect(reason)}) — rail porteur muet (best-effort)"
+          "TurnFlag: write #{pod_dir}: écriture flag échouée (#{inspect(reason)}) — rail porteur muet (best-effort)"
         )
 
         :ok
@@ -60,7 +60,7 @@ defmodule Fleet.Spawner.Pod.TurnFlag do
   rescue
     e ->
       Logger.warning(
-        "TurnFlag.write #{pod_dir}: exception écriture flag (#{inspect(e)}) — rail porteur muet (best-effort)"
+        "TurnFlag: write #{pod_dir}: exception écriture flag (#{inspect(e)}) — rail porteur muet (best-effort)"
       )
 
       :ok

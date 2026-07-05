@@ -32,10 +32,10 @@ defmodule Fleet.EventRouter.SignalsOS do
       try do
         :os.set_signal(sig, :handle)
       rescue
-        e -> Logger.warning("SignalsOS set_signal #{sig} fail: #{inspect(e)}")
+        e -> Logger.warning("SignalsOS: set_signal #{sig} fail: #{inspect(e)}")
       catch
         kind, reason ->
-          Logger.warning("SignalsOS set_signal #{sig} #{kind}: #{inspect(reason)}")
+          Logger.warning("SignalsOS: set_signal #{sig} #{kind}: #{inspect(reason)}")
       end
     end)
 
@@ -51,18 +51,18 @@ defmodule Fleet.EventRouter.SignalsOS do
       try do
         type_atom = String.to_existing_atom(type_str)
 
-      _ =
-        Fleet.EventRouter.Bus.emit(:event_router, type_atom,
-          payload: %{"signal" => Atom.to_string(sig)}
-        )
-    rescue
-      ArgumentError ->
-        require Logger
-        Logger.warning("SignalsOS unknown signal atom #{inspect(type_str)} — skip broadcast")
+        _ =
+          Fleet.EventRouter.Bus.emit(:event_router, type_atom,
+            payload: %{"signal" => Atom.to_string(sig)}
+          )
+      rescue
+        ArgumentError ->
+          require Logger
+          Logger.warning("SignalsOS: unknown signal atom #{inspect(type_str)} — skip broadcast")
 
-      _e in Fleet.Event.UnregisteredError ->
-        :ok
-    end
+        _e in Fleet.Event.UnregisteredError ->
+          :ok
+      end
 
     {:noreply, state}
   end

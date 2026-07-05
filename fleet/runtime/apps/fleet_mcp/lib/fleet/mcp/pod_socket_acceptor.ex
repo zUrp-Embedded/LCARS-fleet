@@ -12,9 +12,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   Un accepteur = un process = une socket : il y a un vrai motif runtime (une
   socket est un état I/O qui persiste entre les lignes). Il possède le listen
-  socket, boucle en `accept`, et sert chaque connexion en série — un seul client
-  (le pont de CE pod) la joint, donc bloquer sur lui n'affecte que ce pod, jamais
-  les autres (chacun a son propre accepteur). Supervisé par
+  socket, boucle en `accept`, et confie chaque connexion acceptée à une Task
+  dédiée (`Fleet.MCP.ConnectionTaskSupervisor`) — la boucle re-`accept`
+  aussitôt ; un handler lent ne bloque que SA connexion, jamais les suivantes
+  ni les autres pods (chacun a son propre accepteur). Supervisé par
   `Fleet.MCP.PodSocketSupervisor` (DynamicSupervisor) ; nommé dans le Registry
   `Fleet.MCP.PodSocketRegistry` (clé = `pod_id`) pour la résolution idempotente.
 
@@ -107,7 +108,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
             # Dont :max_children (E4, saturation du pool de connexions = bridge qui fuit) —
             # VISIBLE : sinon le pod ne voit qu'un readline timeout inexplicable.
             Logger.warning(
-              "PodSocketAcceptor pod=#{pod_id} connexion REFUSEE (#{inspect(reason)}) — bridge qui fuit ?"
+              "PodSocketAcceptor: pod=#{pod_id} connexion REFUSEE (#{inspect(reason)}) — bridge qui fuit ?"
             )
 
             :gen_tcp.close(sock)
@@ -126,7 +127,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       # propre timeout (rail incident), pas par une cascade silencieuse.
       {:error, reason} when reason in [:emfile, :enfile] ->
         Logger.error(
-          "PodSocketAcceptor pod=#{pod_id} accept #{inspect(reason)} (pénurie de FDs) — retry dans 1s"
+          "PodSocketAcceptor: pod=#{pod_id} accept #{inspect(reason)} (pénurie de FDs) — retry dans 1s"
         )
 
         Process.send_after(self(), :retry_accept, 1_000)
@@ -182,7 +183,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
       {:error, _decode_error} ->
         Logger.warning(
-          "PodSocketAcceptor pod=#{pod_id} : ligne indecodable (#{byte_size(line)} o) -> -32700"
+          "PodSocketAcceptor: pod=#{pod_id} ligne indecodable (#{byte_size(line)} o) -> -32700"
         )
 
         encode(%{
@@ -211,7 +212,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     ms = div(us, 1000)
 
     if ms > @slow_tool_warn_ms do
-      Logger.warning("PodSocketAcceptor pod=#{pod_id} tools/call #{tool} LENT (#{ms} ms)")
+      Logger.warning("PodSocketAcceptor: pod=#{pod_id} tools/call #{tool} LENT (#{ms} ms)")
     end
 
     case resp do

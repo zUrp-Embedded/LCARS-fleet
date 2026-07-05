@@ -117,7 +117,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
             "correlation_id" => correlation_id
           })
 
-        Logger.warning("starfleet drift_monitor: invalid audit.verdict — #{inspect(reason)}")
+        Logger.warning("DriftMonitor: invalid audit.verdict — #{inspect(reason)}")
     end
   end
 

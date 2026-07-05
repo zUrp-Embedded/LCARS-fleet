@@ -50,7 +50,7 @@ defmodule Fleet.EventRouter.Catalog do
       {:ok, events} when map_size(events) > 0 ->
         set = events |> Map.keys() |> Enum.map(&String.to_atom/1) |> MapSet.new()
         Fleet.EventRouter.Bus.set_authorized_event_types(set)
-        Logger.info("fleet_event_router: registry events.yaml chargé (#{MapSet.size(set)} types)")
+        Logger.info("Catalog: registry events.yaml chargé (#{MapSet.size(set)} types)")
         :ok
 
       {:ok, events} when map_size(events) == 0 ->

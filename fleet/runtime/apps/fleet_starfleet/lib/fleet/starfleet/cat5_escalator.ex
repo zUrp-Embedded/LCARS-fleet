@@ -3,9 +3,12 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   Pure functions module pour escalade Cat 5.
 
   Reçoit `{source, payload}` depuis `DriftMonitor` :
-    1. log audit `/var/log/fleet-starfleet.jsonl` (via `AuditLog`)
-    2. broadcast `audit.cat5.<source>` sur `fleet.events`
-    3. dispatch `CoordBackend.handle_escalation/2` (ch14 deferred)
+    1. log audit NDJSON via `AuditLog` (défaut `~/.lcars/log/fleet-starfleet.jsonl`,
+       knob `:fleet_starfleet, :audit_log_path`)
+    2. broadcast `starfleet.audit_cat5_<source>` sur `fleet.events` (schema canon,
+       via `Bus.safe_emit/4`)
+    3. dispatch `CoordBackend.handle_escalation/3` (backend résolu par config,
+       défaut `NotWiredYet` — ch14 deferred)
 
   Chain trace propagation : `chain` payload étendu avec
   `"starfleet.cat5.<source>"` puis transmis au broadcast + au coord.
@@ -45,11 +48,13 @@ defmodule Fleet.Starfleet.Cat5Escalator do
 
   Étend le `chain` payload avec `"starfleet.cat5.<source>"` puis :
 
-    1. log audit `/var/log/fleet-starfleet.jsonl` via `AuditLog.write/1`
-    2. broadcast `%Fleet.Event{source: :starfleet, type: :"starfleet.audit_cat5_pod_drift",
-       correlation_id, ...}` schema canon (DN 11 C3.1+C3.2) + legacy
-       `audit.cat5.<source>` compat shim
-    3. dispatch `CoordBackend.handle_escalation/3` (DN 9 amendement)
+    1. log audit via `AuditLog.write/1` (chemin : knob `:fleet_starfleet, :audit_log_path`)
+    2. broadcast canon UNIQUE `%Fleet.Event{source: :starfleet,
+       type: :"starfleet.audit_cat5_pod_drift", correlation_id, ...}` (idem pour les
+       deux autres sources — type = `starfleet.audit_cat5_` + source, 3 clés registrées
+       events.yaml) — l'ancien event legacy `audit.cat5.<source>` n'est PLUS émis
+       (shim compat retiré)
+    3. dispatch `CoordBackend.handle_escalation/3`
 
   Toujours `:ok` (audit-only fail-safe : un échec d'écriture log
   n'interrompt pas le pipeline).
@@ -81,6 +86,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
       :ok -> :ok
       {:error, why} -> Logger.warning("Cat5Escalator: escalade NON routée (#{inspect(why)})")
     end
+
     :ok
   end
 

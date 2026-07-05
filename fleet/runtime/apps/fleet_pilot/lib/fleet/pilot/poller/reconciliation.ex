@@ -218,7 +218,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   defp reclaim_lock(%Seams{forge: forge, repo: repo, forge_opts: forge_opts}, number) do
     Logger.warning(
-      "fleet_pilot Poller réconciliation : verrou #{@in_flight} ORPHELIN sur " <>
+      "Poller: réconciliation : verrou #{@in_flight} ORPHELIN sur " <>
         "#{repo}##{number} (pod mort sans complétion) → réclamé (re-dispatch au prochain tick)"
     )
 

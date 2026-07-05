@@ -19,7 +19,8 @@ defmodule Fleet.Coord.Application do
   Le supervisor NE pré-déclare aucun vocab d'atomes : ce serait sans objet. Les
   events réellement émis (`coord.notification_routed` / `coord.escalation_triggered` /
   `coord.action_dispatched`) sont internés au compile-time par les littéraux
-  `:"coord.*"` de `policies.ex` et enregistrés dans `events.yaml` — pas besoin d'un
+  `:"coord.*"` de `emitter.ex` (passe d'émission extraite de Policies) et
+  enregistrés dans `events.yaml` — pas besoin d'un
   `String.to_existing_atom` côté boot. (Toute liste d'atomes posée ici serait un
   vocab mort, disjoint de l'émis et jamais broadcasté, comme l'ancien
   `@coord_event_atoms` `coord.notify.dashboard`/`coord.action.*` à 0 caller.)

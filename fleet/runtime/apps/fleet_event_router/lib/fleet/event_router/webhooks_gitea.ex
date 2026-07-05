@@ -75,7 +75,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
             # Atome inconnu du BEAM (String.to_existing_atom a échoué) = type `gitea.*`
             # jamais déclaré → drift producteur/registry forgé.
             Logger.warning(
-              "fleet_event_router webhook gitea unknown event type #{inspect(event_type)} " <>
+              "WebhooksGitea: unknown event type #{inspect(event_type)} " <>
                 "— DRIFT (atome inconnu), 422"
             )
 
@@ -87,7 +87,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
           # action émise par WebhooksGitea ; voir events.yaml section gitea).
           _e in Fleet.Event.UnregisteredError ->
             Logger.warning(
-              "fleet_event_router webhook gitea type #{inspect(event_type)} hors registry " <>
+              "WebhooksGitea: type #{inspect(event_type)} hors registry " <>
                 "events.yaml — DROP/DRIFT, 422 (ajouter la clé si l'action doit être routée)"
             )
 
@@ -101,7 +101,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
       {:error, reason} ->
         # `reason` est un atome structuré (:hmac_mismatch | :secret_missing) — le message humain
         # vit ICI (log + body 401 wire), pas dans le tuple. Jason encode l'atome en string.
-        Logger.warning("fleet_event_router webhook REFUSÉ 401 — vérification HMAC : #{reason}")
+        Logger.warning("WebhooksGitea: webhook REFUSÉ 401 — vérification HMAC : #{reason}")
         send_resp(conn, 401, Jason.encode!(%{error: reason}))
     end
   end
@@ -147,7 +147,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         case String.trim(secret) do
           "" ->
             Logger.error(
-              "fleet_event_router webhook : secret HMAC VIDE/whitespace (#{secret_path}) — " <>
+              "WebhooksGitea: secret HMAC VIDE/whitespace (#{secret_path}) — " <>
                 "fail-closed (refus : un HMAC à clé vide est forgeable)"
             )
 

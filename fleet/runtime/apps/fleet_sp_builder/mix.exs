@@ -22,9 +22,12 @@ defmodule Fleet.SPBuilder.MixProject do
   end
 
   defp deps do
+    # `jason` retiré (D3) : aucun appel Jason.* dans lib/ ni test/ — dep déclarée sans usage.
     [
       {:fleet_cap_profile, in_umbrella: true},
-      {:jason, "~> 1.4"},
+      # Usage DIRECT (monk.ex `YamlElixir.read_from_file/1`) — déclaré explicitement,
+      # plus une résolution transitive silencieuse via fleet_cap_profile.
+      {:yaml_elixir, "~> 2.12"},
       {:stream_data, "~> 1.1", only: :test}
     ]
   end

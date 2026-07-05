@@ -86,7 +86,7 @@ defmodule Fleet.Spawner.Pod.Events do
 
       {:error, reason} ->
         Logger.error(
-          "Pod required_broadcast #{event_type} ÉCHEC (pod=#{Map.get(payload, "pod_id")}) : " <>
+          "pod #{Map.get(payload, "pod_id")} required_broadcast #{event_type} ÉCHEC : " <>
             "#{inspect(reason)} — lifecycle NON diffusé (le step_run ne finira pas ; pod pas release/kill, fail-loud)"
         )
 
@@ -95,7 +95,7 @@ defmodule Fleet.Spawner.Pod.Events do
   rescue
     e ->
       Logger.error(
-        "Pod required_broadcast #{event_type} a LEVÉ (pod=#{Map.get(payload, "pod_id")}) : " <>
+        "pod #{Map.get(payload, "pod_id")} required_broadcast #{event_type} a LEVÉ : " <>
           "#{Exception.message(e)} — lifecycle NON diffusé (pod pas release/kill, fail-loud)"
       )
 

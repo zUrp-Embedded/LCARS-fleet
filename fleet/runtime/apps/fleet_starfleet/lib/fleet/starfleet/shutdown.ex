@@ -127,7 +127,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   rescue
     e ->
       Logger.error(
-        "Fleet.Starfleet.Shutdown: comptage pods vivants indisponible (Spawner injoignable — restart " <>
+        "Shutdown: comptage pods vivants indisponible (Spawner injoignable — restart " <>
           "en plein quiesce ?) — drain ne peut PAS conclure 0, on reste prudent : #{Exception.message(e)}"
       )
 
@@ -135,7 +135,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   catch
     :exit, reason ->
       Logger.error(
-        "Fleet.Starfleet.Shutdown: comptage pods vivants indisponible (Spawner exit #{inspect(reason)} " <>
+        "Shutdown: comptage pods vivants indisponible (Spawner exit #{inspect(reason)} " <>
           "— restart en plein quiesce ?) — drain ne peut PAS conclure 0, on reste prudent"
       )
 
@@ -161,7 +161,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
         :error ->
           Logger.error(
-            "Fleet.Starfleet.Shutdown: comptage work items en file indisponible (broker task_queue " <>
+            "Shutdown: comptage work items en file indisponible (broker task_queue " <>
               "présent mais injoignable — restart en plein quiesce ?) — drain ne peut PAS conclure 0, prudent"
           )
 
@@ -281,7 +281,7 @@ defmodule Fleet.Starfleet.Shutdown do
   @impl true
   def handle_call({:begin, grace_ms}, _from, state) do
     :ok = state.backend.refuse_new_jobs(reason: :shutdown)
-    Logger.info("Fleet.Starfleet.Shutdown: begin — nouveaux jobs refusés, drain #{grace_ms}ms")
+    Logger.info("Shutdown: begin — nouveaux jobs refusés, drain #{grace_ms}ms")
     {:reply, :ok, wait_drain(state, grace_ms)}
   end
 
@@ -304,7 +304,7 @@ defmodule Fleet.Starfleet.Shutdown do
         %{state | status: :drained, in_flight: 0}
 
       System.monotonic_time(:millisecond) >= deadline ->
-        Logger.warning("Fleet.Starfleet.Shutdown: drain timeout, #{in_flight} job(s) in-flight")
+        Logger.warning("Shutdown: drain timeout, #{in_flight} job(s) in-flight")
         %{state | status: :timeout, in_flight: in_flight}
 
       true ->

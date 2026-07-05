@@ -48,12 +48,12 @@ defmodule Fleet.Pilot.WakeRecovery do
 
     if seen_before_fun.(sig) do
       Logger.error(
-        "WakeRecovery #{pod_id} : #{inspect(reason)} DÉJÀ VU (#{sig}) → escalade directe (récurrence)"
+        "WakeRecovery: #{pod_id} : #{inspect(reason)} DÉJÀ VU (#{sig}) → escalade directe (récurrence)"
       )
 
       escalate_or_signal(:recurrence, pod_id, reason, sig, opts)
     else
-      Logger.warning("WakeRecovery #{pod_id} : #{inspect(reason)} (1er — #{sig}) → re-roll")
+      Logger.warning("WakeRecovery: #{pod_id} : #{inspect(reason)} (1er — #{sig}) → re-roll")
       _ = respawn_fun.()
       re_wake(pod_id, reason, sig, wake_fun, note_fun, opts)
     end
@@ -63,12 +63,12 @@ defmodule Fleet.Pilot.WakeRecovery do
     case wake_fun.(pod_id) do
       :ok ->
         _ = note_fun.(sig, reason)
-        Logger.info("WakeRecovery #{pod_id} : re-roll OK → incident gravé (#{sig})")
+        Logger.info("WakeRecovery: #{pod_id} : re-roll OK → incident gravé (#{sig})")
         :ok
 
       err ->
         Logger.error(
-          "WakeRecovery #{pod_id} : re-roll n'a pas réparé (#{inspect(err)}) → escalade immédiate"
+          "WakeRecovery: #{pod_id} : re-roll n'a pas réparé (#{inspect(err)}) → escalade immédiate"
         )
 
         escalate_or_signal(:reroll_failed, pod_id, reason, sig, opts)
@@ -87,7 +87,7 @@ defmodule Fleet.Pilot.WakeRecovery do
 
       {:error, e} ->
         Logger.error(
-          "WakeRecovery #{pod_id} : escalade (#{kind}) ÉCHOUÉE — AUCUN issue sysadmin créé " <>
+          "WakeRecovery: #{pod_id} : escalade (#{kind}) ÉCHOUÉE — AUCUN issue sysadmin créé " <>
             "(forge down ?) : #{inspect(e)} ; l'incident N'EST PAS escaladé"
         )
 

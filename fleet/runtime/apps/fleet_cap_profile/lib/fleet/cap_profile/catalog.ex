@@ -184,12 +184,15 @@ defmodule Fleet.CapProfile.Catalog do
               {:error, reason} -> {:halt, {:error, reason}}
             end
           else
-            Logger.warning("modop not found: #{inspect(name)} at #{path}")
+            Logger.warning("CapProfile: modop not found: #{inspect(name)} at #{path}")
             {:halt, {:error, :modop_not_found}}
           end
         else
           {:error, _slug_or_escape} ->
-            Logger.warning("modop name non confiné (slug/traversal) : #{inspect(name)} — refusé")
+            Logger.warning(
+              "CapProfile: modop name non confiné (slug/traversal) : #{inspect(name)} — refusé"
+            )
+
             {:halt, {:error, :invalid_modop}}
         end
       end)

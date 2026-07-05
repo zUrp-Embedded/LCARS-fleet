@@ -177,7 +177,7 @@ defmodule Fleet.Spawner.PodTmux do
       :ok
     else
       {out, code} ->
-        Logger.warning("PodTmux send-keys pod=#{pod_id} échec (#{code}) : #{String.trim(out)}")
+        Logger.warning("PodTmux: send-keys pod=#{pod_id} échec (#{code}) : #{String.trim(out)}")
         {:error, {:tmux_send_failed, code, String.trim(out)}}
     end
   end

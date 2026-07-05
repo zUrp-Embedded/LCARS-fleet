@@ -116,28 +116,28 @@ defmodule Fleet.Pilot.IncidentConsumer do
       case state.record_fun.(op, pod_id, reason, reg_opts) do
         :recorded ->
           Logger.info(
-            "IncidentConsumer #{op}.failed #{pod_id} → incident gravé (#{inspect(reason)})"
+            "IncidentConsumer: #{op}.failed #{pod_id} → incident gravé (#{inspect(reason)})"
           )
 
         {:escalated, _} ->
           Logger.warning(
-            "IncidentConsumer #{op}.failed #{pod_id} RÉCURRENT → escaladé (#{inspect(reason)})"
+            "IncidentConsumer: #{op}.failed #{pod_id} RÉCURRENT → escaladé (#{inspect(reason)})"
           )
 
         {:escalation_failed, e} ->
           Logger.error(
-            "IncidentConsumer #{op}.failed #{pod_id} RÉCURRENT mais escalade ÉCHOUÉE — AUCUN issue " <>
+            "IncidentConsumer: #{op}.failed #{pod_id} RÉCURRENT mais escalade ÉCHOUÉE — AUCUN issue " <>
               "sysadmin créé (forge down ?) : #{inspect(e)}"
           )
 
         {:record_failed, e} ->
           Logger.error(
-            "IncidentConsumer #{op}.failed #{pod_id} : incident NON gravé (registre indisponible) : #{inspect(e)}"
+            "IncidentConsumer: #{op}.failed #{pod_id} : incident NON gravé (registre indisponible) : #{inspect(e)}"
           )
 
         other ->
           Logger.warning(
-            "IncidentConsumer #{op}.failed #{pod_id} → outcome inattendu #{inspect(other)}"
+            "IncidentConsumer: #{op}.failed #{pod_id} → outcome inattendu #{inspect(other)}"
           )
       end
     end

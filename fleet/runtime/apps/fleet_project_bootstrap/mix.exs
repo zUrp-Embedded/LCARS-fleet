@@ -1,11 +1,11 @@
 defmodule Fleet.ProjectBootstrap.MixProject do
   use Mix.Project
 
-  # Lot 2 (plan-implementation.md) — core du pod : prépare pod_dir vanilla
-  # AVANT spawn (branch feature + /init mimic + bind creds + mount-binds).
-  # DN : ring1/fleet_project_bootstrap.md. Vendor-agnostic (stdlib + :eex),
-  # AUCUNE dep externe (indépendant du blocant jose #551 — Lot 1).
-  # Invoqué par Fleet.Spawner.Pod phase PROJECT (chantier 6 PROMOTED).
+  # Core du pod (Ring 1, primitives de pod) : prépare le workspace du pod AVANT
+  # spawn. Seule phase câblée : `Fleet.ProjectBootstrap.Phase.Clone` (clone/reset
+  # du repo projet + branche doc) — l'orchestrateur `prepare/3` et les 4 autres
+  # phases historiques sont RETIRÉS (code mort). Vendor-agnostic (stdlib + :eex),
+  # AUCUNE dep Hex externe. Invoqué par Fleet.Spawner.Pod au provisioning workspace.
 
   def project do
     [

@@ -118,7 +118,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         # Registre indisponible : l'incident n'est PAS mémorisé (une récurrence ne sera pas détectée),
         # mais c'est bien une 1re occurrence → on tente quand même la résolution. On le CRIE.
         Logger.error(
-          "StepDispatcher merge-conflict #{subject} : incident NON gravé (registre indisponible) — " <>
+          "StepDispatcher: merge-conflict #{subject} : incident NON gravé (registre indisponible) — " <>
             "1re résolution tentée SANS mémoire (récurrence non détectable) : #{inspect(e)}"
         )
 
@@ -131,7 +131,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         # Récurrence DÉTECTÉE (le conflit persiste) → on escalade à l'arch comme prévu. Mais le issue
         # sysadmin (error_system) n'a PAS pu être ouvert (forge down ?) — on le CRIE, on ne rassure pas.
         Logger.error(
-          "StepDispatcher merge-conflict #{subject} RÉCURRENT mais issue sysadmin ÉCHOUÉ — AUCUN " <>
+          "StepDispatcher: merge-conflict #{subject} RÉCURRENT mais issue sysadmin ÉCHOUÉ — AUCUN " <>
             "issue error_system créé (forge down ?) ; escalade arch tentée tout de même : #{inspect(e)}"
         )
 

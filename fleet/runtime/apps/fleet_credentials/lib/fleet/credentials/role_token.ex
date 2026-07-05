@@ -7,8 +7,10 @@ defmodule Fleet.Credentials.RoleToken do
 
   Lu de `<role_tokens_dir>/<role>.gitea_token`. `role_tokens_dir` = config
   `:fleet_credentials, :role_tokens_dir`, **défaut `/home/private`** (répertoire de secrets, `700`).
-  C'est un path **système absolu** — JAMAIS `System.user_home()` : le runtime tourne sous le compte
-  système (`fleet`), pas sous l'humain qui lance, donc le path ne doit pas dépendre de QUI lance.
+  C'est un path **système absolu** — JAMAIS `System.user_home()` : la fleet est lancée PAR un humain
+  (le BEAM hérite son UID, il n'existe pas de compte système `fleet`), mais les tokens de rôle sont un
+  secret provisionné côté SYSTÈME, partagé par toutes les fleets per-humain — le path ne doit donc pas
+  dépendre de QUI lance (l'override vit dans la config `role_tokens_dir`, pas dans le home).
 
   ## Agnosticité
 
