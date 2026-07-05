@@ -34,19 +34,14 @@ defmodule Fleet.Spawner.Pod.McpProvision do
 
   require Logger
 
+  alias Fleet.Spawner.McpSocketProvisioner
   alias Fleet.Spawner.Pod.Fs
 
-  # SEAM RUNTIME du provisionneur de socket MCP per-pod. `fleet_spawner` est Ring 1, `fleet_mcp` est
-  # Ring 2 (au-dessus) : une dep mix.exs `fleet_spawner → fleet_mcp` serait une dépendance INVERSÉE
-  # (ring bas → ring haut), INTERDITE. On résout donc le module au RUNTIME (`Application.get_env` +
-  # `apply`), exactement comme `Fleet.MCP.PodTools` appelle `Fleet.Pilot.ForgeClient`/`Fleet.Spawner` :
-  # le défaut est un ATOM littéral (pas un `alias`/appel direct) → AUCUNE dep compile-time, donc aucun
-  # cycle. L'umbrella démarre toutes les apps → `Fleet.MCP.PodSocketSupervisor` est vivant quand le pod
-  # tourne. Override en test : `:mcp_socket_provisioner` = un stub qui rend un chemin SANS créer de
-  # vrai socket (mirror du pattern `launch_backend: StubBackend`).
-  defp mcp_socket_provisioner,
-    do:
-      Application.get_env(:fleet_spawner, :mcp_socket_provisioner, Fleet.MCP.PodSocketSupervisor)
+  # SEAM RUNTIME du provisionneur de socket MCP per-pod. Le CONTRAT (callbacks typés, pourquoi
+  # pas de dep compile fleet_spawner → fleet_mcp, quelles impls) vit dans le behaviour
+  # `Fleet.Spawner.McpSocketProvisioner` ; `resolved/0` y est la SOURCE UNIQUE du défaut
+  # (`Fleet.MCP.PodSocketSupervisor` en prod, `Fleet.Spawner.MCPSocketStub` posé par config/test.exs).
+  defp mcp_socket_provisioner, do: McpSocketProvisioner.resolved()
 
   @doc """
   ENSURE (état `:projecting`, avant le launch) : crée le listener + le fichier socket de CE pod

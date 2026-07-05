@@ -1,14 +1,17 @@
 # Fleet.CapProfile
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-05 (C4 — encodage canonique + sha256 extraits en `Fleet.CapProfile.CanonicalJson`, API `sha256/1` inchangée)
+**Dernière révision** : 2026-07-05 (D2 resync contre le code : Ring 0 [renumérotation 2026-07-04], + section `Fleet.Layout`, knobs `:schema_dir` + env `LCARS_CAPPROFILES_ROOT`, codes g24_9_strict/prefix exacts ; C4 — encodage canonique + sha256 extraits en `Fleet.CapProfile.CanonicalJson`, API `sha256/1` inchangée)
 **Statut** : implémenté run #3.1 chantier #1 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_cap_profile.md
 
 Capability Profile composer/loader/validator (LCARS schema v2.5).
 
 Module pure data transformer — YAML on disk → struct Elixir composée.
-Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor.
+Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor
+(callbacks `load/1`, `compose/2`, `validate/1` ; implémentation par défaut =
+`Fleet.CapProfile`). Héberge aussi deux utilitaires transverses Ring 0 :
+`Fleet.Slug` et `Fleet.Layout` (sections dédiées).
 
 ## API
 
@@ -17,8 +20,10 @@ Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor.
 - `Fleet.CapProfile.compose/2` — compose role + modop_set, deep-merge last-wins ; valide base +
   résultat via `Fleet.CapProfile.Schema.validate/2`, et les fragments modop via
   `Fleet.CapProfile.Schema.validate_modop_keys/1` (clés réservées) + `validate/2`
-- `Fleet.CapProfile.validate/1` — invariants G24 (incl. G24-9 F-CONT-RISK) ; **délègue** au
-  cluster pur `Fleet.CapProfile.Invariants` (une fonction par check), n'y garde que le contrat de
+- `Fleet.CapProfile.validate/1` — invariants G24 (incl. `g24_9_strict`/`g24_9_prefix` : refus des
+  server-tools natifs Anthropic, qui tournent côté serveur donc hors du sandbox bwrap par
+  construction) ; **délègue** au cluster pur `Fleet.CapProfile.Invariants` (une fonction par check,
+  codes d'erreur FIGÉS `:g24_1` … `:g24_14`), n'y garde que le contrat de
   retour single-authority `:ok | {:error, [codes]}` consommé hors-app (spawner `do_allocate`,
   `mix lcars.contracts.check`)
 - `Fleet.CapProfile.containment/1` — `metadata.containment` (`"bwrap"` sandboxé / `"none"` host-native ;
@@ -44,7 +49,7 @@ Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor.
 
 ## Fleet.Slug — smart-constructor path-safe (utilitaire transverse)
 
-Source UNIQUE du charset path-safe `^[a-z0-9][a-z0-9_-]*$` (hébergé ici, Ring 1, réutilisé
+Source UNIQUE du charset path-safe `^[a-z0-9][a-z0-9_-]*$` (hébergé ici, Ring 0, réutilisé
 par spawner / pipeline / credentials / pilot). Tout nom de client/payload/catalogue interpolé
 dans un `Path.join` (feuille FS) ou un segment d'URL borné passe par lui — fail-closed.
 
@@ -53,6 +58,20 @@ dans un `Path.join` (feuille FS) ou un segment d'URL borné passe par lui — fa
 - `Fleet.Slug.valid?/1` — prédicat booléen
 - `Fleet.Slug.under_root?/2` — garde de confinement (dest résolu reste sous root)
 - `Fleet.Slug.confined_join/2` — caste + joint sous root + confine, en un geste (feuille FS)
+
+## Fleet.Layout — autorité du layout plateforme (utilitaire transverse)
+
+Autorité UNIQUE du « où vivent les choses » sur la boîte (doctrine H1+H3
+2026-07-04 : LCARS vit SEUL dans un container dédié, layout IMPOSÉ par
+conception — structurel en dur, tapé UNE fois, **pas des knobs de
+déploiement**). Ring 0, à côté de `Fleet.Slug` ; consommé par spawner /
+pilot / starfleet. Les seams de TEST des consommateurs (ex. `seed_store_root`)
+restent : leur défaut dérive d'ici.
+
+- `Fleet.Layout.projects_root/0` — racine des repos de travail (`/home/projects`)
+- `Fleet.Layout.work_root/0` — racine méta/ops (`/home/projects.work` : journaux, seeds, reprise)
+- `Fleet.Layout.state_dir/0` — état runtime per-humain (`~/.lcars`) ; HOME
+  irrésoluble = fail-loud (`System.user_home!/0` raise), jamais un chemin fabriqué
 
 ## Schemas
 
@@ -130,4 +149,9 @@ profil est résolu par sa prop `metadata.name`, **jamais** par le nom de fichier
 - `:fleet_cap_profile, :root_dir` — racine FS des cap-profiles, lue par
   `Fleet.CapProfile.Catalog.root_dir/0` (les tests la pilotent via `Application.put_env/3`).
   Défaut = le canon BUNDLÉ `priv/canon/cap-profiles` résolu par
-  `:code.priv_dir(:fleet_cap_profile)` (résout en release comme en dev, sans env)
+  `:code.priv_dir(:fleet_cap_profile)` (résout en release comme en dev, sans env).
+  Posée par `config/runtime.exs` depuis l'env `LCARS_CAPPROFILES_ROOT` (la même
+  env source pose aussi `:fleet_spawner, :cap_profiles_dir` — path partagé canon)
+- `:fleet_cap_profile, :schema_dir` — répertoire des JSON-schemas, lu par
+  `Fleet.CapProfile.Schema` (surchargeable en test). Défaut = `priv/schema`
+  résolu par `:code.priv_dir(:fleet_cap_profile)`

@@ -1,25 +1,43 @@
 # Fleet.EventRouter
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-05 (B5 dédup « child-spec listener » : + `Fleet.EventRouter.Listener.cowboy_child/1`, source unique du child-spec Plug.Cowboy des 3 surfaces HTTP api/observation/webhook — ip BindAddress posée par construction, gates+ports restent chez les apps ; B-R2 dédup « schema/config chargé-caché » : + `Fleet.SchemaCache`, autorité Ring 0 du pattern `:persistent_term` (`resolve_json_schema!` / `fetch!` / `cached`), consommé par workflow/starfleet/coord — les copies locales de cap_profile restent, pas d'arête intra-R0 ; B-R1 dédup « émission-Bus-protégée » : `Bus.safe_emit/3-4` = cœur unique de la politique best-effort, les rescue locaux de coord/starfleet/spawner migrent dessus ; registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
+**Dernière révision** : 2026-07-05 (D2 resync contre le code : Ring 0 [renumérotation 2026-07-04], Bus struct-only [pas de validation JSON soft, shim 3-arity inexistant], + `Fleet.Event`/`Application`/façade en sous-modules, § Contracts.Check [17 checks], env vars webhook, SignalsOS dormant ; B5 dédup « child-spec listener » : + `Fleet.EventRouter.Listener.cowboy_child/1`, source unique du child-spec Plug.Cowboy des 3 surfaces HTTP api/observation/webhook — ip BindAddress posée par construction, gates+ports restent chez les apps ; B-R2 dédup « schema/config chargé-caché » : + `Fleet.SchemaCache`, autorité Ring 0 du pattern `:persistent_term` (`resolve_json_schema!` / `fetch!` / `cached`), consommé par workflow/starfleet/coord — les copies locales de cap_profile restent, pas d'arête intra-R0 ; B-R1 dédup « émission-Bus-protégée » : `Bus.safe_emit/3-4` = cœur unique de la politique best-effort, les rescue locaux de coord/starfleet/spawner migrent dessus ; registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
 **Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
 **Référencé par** : 04_design-notes/fleet_event_router.md
 
-Bus events (Phoenix.PubSub) + registry events.yaml LCARS v2 (Ring 2 —
-colonne vertébrale orchestration). Consommation = subscribers directs
+Bus events (Phoenix.PubSub) + registry events.yaml LCARS v2 (Ring 0 —
+substrat : 0 dépendance, ~12 apps en dépendent). Consommation = subscribers directs
 PubSub (BL-027 ; table de dispatch retirée). Webhooks Gitea + signaux OS + events
-internes (`pod.*`, `workflow_map.*`, `audit.verdict.*`,
-`pod_drift`)
+internes (`pod.*`, `workflow_map.*`, `work_item.*`, `audit.verdict`,
+`pod.drift`)
 publiés sur Phoenix.PubSub topic `fleet.events`.
 
 ## Sous-modules
 
+- `Fleet.EventRouter` — façade moduledoc-only (index des sous-modules, aucun code)
+- `Fleet.Event` — struct canon des events (**wire format UNIQUE** : tous les
+  producteurs émettent `%Fleet.Event{}`, aucun tuple). `source` = enum closed
+  list (12 sources canoniques), **enforcée** par le constructeur `new/3`
+  (« parse, don't validate » : source hors-enum lève). Porte aussi
+  `UnregisteredError` (type hors registry)
 - `Fleet.EventRouter.Bus` — Phoenix.PubSub instance `Fleet.PubSub`
-  (broadcast / subscribe / validation schema NDJSON soft)
-- `Fleet.EventRouter.WebhooksGitea` — Plug.Router HTTP `:8081` +
-  HMAC SHA256 verify (secret `/etc/fleet/webhook-secret`)
+  (broadcast/subscribe **struct-only** `%Fleet.Event{}` ; la SEULE validation
+  au broadcast = appartenance au registry, fail-loud `UnregisteredError` —
+  pas de validation JSON soft, pas de `Fleet.EventRouter.Schema`)
+- `Fleet.EventRouter.Application` — superviseur d'app : `Catalog.load!` au boot,
+  pré-enregistrement des atoms event_type (`preregister_event_atoms` — les
+  émetteurs dynamiques passent par `to_existing_atom`, anti atom-leak),
+  `gitea_event_types/0` (source unique des actions gitea émissibles), bornes de
+  restart 3/60 ; le PubSub vit sous un superviseur DÉDIÉ `max_restarts: 0`
+  (un restart local perdrait toutes les souscriptions du node → escalade
+  délibérée jusqu'au node)
+- `Fleet.EventRouter.WebhooksGitea` — Plug.Router HTTP (port `:webhook_port`,
+  défaut 8081) + HMAC SHA256 verify (secret `/etc/fleet/webhook-secret`)
 - `Fleet.EventRouter.SignalsOS` — `:os.set_signal/2` SIGUSR1/SIGTERM/SIGHUP
-  → broadcast `os.signal.<sig>`
+  → broadcast `os.signal.<sig>`. **Dormant** : aucun on-switch runtime ne
+  l'active (cf. § Configuration `:start_signals`)
+- `Mix.Tasks.Lcars.Contracts.Check` — checker des contrats inter-module
+  (verrou de cohérence du repo, cf. § Contracts.Check)
 - `Fleet.EventRouter.Catalog` — charge le **registry** `priv/events.yaml` au boot
   (`load!/0` → `authorized_event_types`). Source unique du parse exposée :
   `event_type_strings/0` (clés-types, réutilisée par `Application.preregister_event_atoms/0`,
@@ -82,15 +100,17 @@ Fleet.EventRouter.Bus.subscribe()
 receive do
   %Fleet.Event{type: :"pod.allocate"} = event -> ...
 end
-
-# (Compat shim legacy 3-arity {atom, map} — à retirer ch3 BL-021)
-# Fleet.EventRouter.Bus.broadcast("pod.allocate", %{...}, issue_id: "...")
 ```
+
+Il n'existe AUCUN shim 3-arity `broadcast(event_type, payload, opts)` : le Bus
+est struct-only (cf. moduledoc `Fleet.EventRouter.Bus` § « Pourquoi struct-only »).
 
 ## Configuration
 
 - `:fleet_event_router, :start_webhooks` — boot Plug.Cowboy webhooks
-  (default `false` — dev/test ne touchent pas le port `:8081`)
+  (default `false` — dev/test ne touchent pas le port `:8081`). On-switch
+  runtime : env `LCARS_FLEET_WEBHOOKS=true` (`config/runtime.exs` —
+  intégration forge opt-in, défaut OFF)
 - `:fleet_event_router, :load_event_registry` — charge le registry events.yaml
   au boot (`Catalog.load!`, default `true` ; `false` en `:test` pour l'hermétisme
   — registry vide → validation broadcast off). En prod (`true`), un events.yaml
@@ -103,8 +123,14 @@ end
   tant que `Catalog.load!` n'a pas chargé le registry). Le comportement vide est
   ainsi EXPLICITE, plus un trou silencieux. Voir `Bus.assert_authorized!/1`
 - `:fleet_event_router, :start_signals` — boot SignalsOS GenServer
-  (default `false` — éviter capture signaux dans les tests)
-- `:fleet_event_router, :webhook_port` — port HTTP webhooks (default 8081)
+  (default `false`). **Aucun on-switch runtime ne le pose à `true`**
+  (`config/runtime.exs`) : le `handle_info({:signal, _})` du GenServer est mort
+  (les signaux OS vont au gen_event `:erl_signal_server`, pas au GenServer ;
+  SIGUSR1 halterait même la VM). Module gated-off en attendant le vrai fix
+  (gen_event handler) ; les clés `os.signal.*` du registry sont dormantes
+- `:fleet_event_router, :webhook_port` — port HTTP webhooks (default 8081 ;
+  override env `LCARS_FLEET_WEBHOOK_PORT`, lu seulement si
+  `LCARS_FLEET_WEBHOOKS=true`)
 - `LCARS_WEBHOOK_BIND_HOST` / `LCARS_BIND_HOST` (env) — IP de bind du listener
   webhook. **Loopback `127.0.0.1` par défaut.** Le webhook est la SEULE surface
   dont l'exposition publique est un besoin légitime : une forge Gitea sur une
@@ -114,9 +140,10 @@ end
   surface l'emporte. Protection = HMAC SHA256 (indépendant du bind). Source
   unique : `Fleet.EventRouter.BindAddress`.
 - `:fleet_event_router, :webhook_secret_path` — path secret HMAC
-  (default `/etc/fleet/webhook-secret`)
-- `:fleet_event_router, :events_yaml_path` — path catalogue YAML
-  (default `priv/events.yaml`)
+  (default `/etc/fleet/webhook-secret` ; override env
+  `FLEET_WEBHOOK_SECRET_PATH`)
+- `:fleet_event_router, :events_yaml_path` — path registry YAML
+  (default `priv/events.yaml` résolu via `:code.priv_dir` — tient en release)
 - `:fleet_event_router, :captured_signals` — atoms signaux à capturer
   (default `[:sigusr1, :sigterm, :sighup]`)
 
@@ -142,12 +169,38 @@ dans le moduledoc de chaque consommateur.
 > `Pod.best_effort_broadcast`) rescue `UnregisteredError` → activation sûre. MA-04 : le lifecycle
 > `pod.completed`/`work_item.completed` passe par `required_broadcast` (PROPAGE l'échec, ne l'avale pas).
 
+## Contracts.Check — verrou de cohérence du repo
+
+`Mix.Tasks.Lcars.Contracts.Check` (`lib/mix/tasks/lcars.contracts.check.ex`,
+~900 LOC) valide les contrats inter-module AVANT exécution : chaque check garde
+une classe de dérive déjà rencontrée (rouge tant que le fix n'est pas landé) —
+un agent qui re-dérive casse le build. **17 checks, tous implémentés**
+(`@pending_checks` vide) ; sortie YAML `status + checks[] + evidence
+(file:line)`, exit≠0 si au moins un check `fail`.
+
+Trois points de lancement :
+
+- `mix lcars.contracts.check` (`--quiet` = exit code seul) — CLI/CI ;
+- alias `mix gate` (mix.exs racine) — compile strict + tests + shell gate + checks ;
+- step de `mix release` (`verrou_contracts/1`, mix.exs racine, appelle
+  `run_checks/0`) — la release REFUSE de bâtir si un contrat est rouge.
+
+Les **combinators** vivent dans le même fichier (section « Combinators ») :
+3 familles data-driven — A `presence_check` (marqueur présent dans le code),
+B `residue_check` (zéro résidu dans des fichiers vivants), C `evidence_check`
+(liste de conditions évaluées au call-site) ; 8 des 17 checks en sont des
+instanciations pures. Anti-vert-creux : chaque match est confirmé sur la ligne
+strippée de son commentaire (`strip_comment/1` — une mention en commentaire ne
+compte pas).
+
 ## Dépendances
 
 - `phoenix_pubsub` 2.x — bus distribution-ready
 - `plug` 1.15+ + `plug_cowboy` 2.7+ — HTTP webhooks
 - `jason` — JSON encode/decode
-- `ex_json_schema` — schema validation soft
+- `ex_json_schema` — gate structurel **build-time** du canon `events.yaml`
+  (`events_schema_test`) ; PAS une validation au broadcast (le broadcast
+  vérifie l'appartenance au registry)
 - `yaml_elixir` — parse du registry `events.yaml` (Catalog + preregister ; la dispatch table est retirée BL-027)
 
 ## Cohérence cross-design-notes

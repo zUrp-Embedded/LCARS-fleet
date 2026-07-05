@@ -33,13 +33,17 @@ defmodule Fleet.Starfleet.Gatekeeper do
 
   Returns :
     * `{:ok, %Decision{}}` — JSON parsé + schema valide
-    * `{:error, reason}` — JSON malformé OU schema invalide
+    * `{:error, {:decision_invalid, cause}}` — JSON malformé (`cause` =
+      `%Jason.DecodeError{}`) OU schema invalide (`cause` = erreurs ExJsonSchema).
+      Tuple STRUCTURÉ pattern-matchable (l'ancienne string `"decision invalid: …"`
+      ne l'était pas) ; le rendu humain (`inspect(cause)`) est fait par les
+      consommateurs au moment de logger/journaliser, pas ici.
 
   Raises `ArgumentError` si le schema n'a pas été chargé via
   `init_schema!/0` (boot-time fail-fast).
   """
   @spec validate(String.t()) ::
-          {:ok, Decision.t()} | {:error, String.t()}
+          {:ok, Decision.t()} | {:error, {:decision_invalid, term()}}
   def validate(json_text) when is_binary(json_text) do
     schema = resolved_schema()
 
@@ -54,7 +58,7 @@ defmodule Fleet.Starfleet.Gatekeeper do
        }}
     else
       {:error, reason} ->
-        {:error, "decision invalid: #{inspect(reason)}"}
+        {:error, {:decision_invalid, reason}}
     end
   end
 

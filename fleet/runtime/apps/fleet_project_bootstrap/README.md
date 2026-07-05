@@ -1,7 +1,7 @@
 # fleet_project_bootstrap — core du pod (Ring 1)
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-04
+**Dernière révision** : 2026-07-05 (D2 — resync contrat : section Sous-modules, zéro knob de config explicité)
 **Statut** : ACTIF — chemin PROD câblé (`Phase.Clone`). Orchestrateur mort `prepare/3` + 4 phases non-Clone RETIRÉS.
 **Dérivé de** : 04_design-notes/ring1/fleet_project_bootstrap.md + session 2026-05-17/18 (rings finalisés)
 
@@ -12,6 +12,18 @@ contre le code (`lib/fleet/project_bootstrap/phase.ex`).
 Invariant cardinal (SP positif) : l'agent dans le pod **ne voit aucune trace de la mécanique LCARS**
 hors workspace vanilla + plugins. ⚠ Cet invariant n'est PAS testé en hermétique sur le chemin PROD
 (il dépend de la vue sandbox bwrap) → besoin d'un test-intégration sandbox.
+
+## Sous-modules
+
+| Module | Rôle |
+|---|---|
+| `Fleet.ProjectBootstrap.Application` | supervisor `:one_for_one`, children `[]` — aucun process démarré (existe pour cohérence umbrella OTP, pattern `Fleet.Coord.Application`) |
+| `Fleet.ProjectBootstrap.Phase` | namespace du bootstrap — porte la seule phase câblée, `Clone` |
+| `Fleet.ProjectBootstrap.Phase.Clone` | fonctions pures (File / Path / git, aucun process) : `clone_or_skip/3`, `clone_work_doc/2`, `reset_in_place/3` |
+
+Aucun knob de config : l'app ne lit aucune app env (`get_env`/`fetch_env`) et rien n'est posé
+pour elle dans `config/*.exs` ; la seule calibration passe par opt (`:git_timeout_ms` de
+`clone_or_skip/3`, défaut = les 30s du wrapper `Fleet.Credentials.Shell.git/2`).
 
 ## Ce que l'app fait VRAIMENT en prod (`Phase.Clone`)
 

@@ -1,12 +1,12 @@
 # fleet_workflow (chantier 12)
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-05 (C4 — placement + validation-sécurité du payload extraits en `Fleet.Workflow.PayloadGuard`, `Deliverable` = orchestration 3-temps seule ; B-R2 dédup chargé-caché : cache schema du `Loader` délégué à `Fleet.SchemaCache`, autorité Ring 0 ; 2026-07-01 : push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
+**Dernière révision** : 2026-07-05 (D2 resync contrat : Ring 2 réel, `Application` en table, verdict `{:human_approval, _}` distinct de `{:fail}`, section Configuration, forme test canonique ; C4 — placement + validation-sécurité du payload extraits en `Fleet.Workflow.PayloadGuard`, `Deliverable` = orchestration 3-temps seule ; B-R2 dédup chargé-caché : cache schema du `Loader` délégué à `Fleet.SchemaCache`, autorité Ring 0 ; 2026-07-01 : push borné via Fleet.Credentials.Shell + scan evil-merge `--diff-merges=first-parent` — remédiation Lot C ; doc-rot F-017 antérieur : purge des modules retirés au ②.3/BL-050 — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, le `Registry` per-run et `count_running/0` ne sont plus documentés)
 **Statut** : lib-only (salvage post-moteur-RAM) — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_workflow.md`, `STATUS-CHANTIERS.md`
 
 Lib **workflow_map / gate / delivery** (quasi-pure) consommée par le rail forge-state-machine
-et les apps du core — Ring 3 (coordination + policy).
+et les apps du core — Ring 2 (coordination + policy, renumérotation 2026-07-04).
 
 Source : `04_design-notes/fleet_workflow.md`.
 
@@ -28,6 +28,7 @@ workflow_map YAML, évaluation de gates, et publication de livrable.
 
 | Module | Rôle (vérifié dans le code) |
 |---|---|
+| `Fleet.Workflow.Application` | supervisor **vide** (aucun process à superviser — conservé transitoirement, cible lib-only). Pré-enregistre au compile-time les atomes events `workflow_map.*` (cf. § Atom registration) et les expose via `workflow_map_event_atoms/0` |
 | `Fleet.Workflow.Loader` | `load!/2` : parse YAML `pipelines/<name>.yaml` via `yaml_elixir`, valide le schema strict (`workflow-map-v2.5.json`, enveloppe `kind/metadata/spec`), puis **normalise** vers la forme interne unique `%{"name", "steps"}`, puis valide le **graphe** via `GraphValidator` (raise au load). Schema résolu caché via `Fleet.SchemaCache` (autorité Ring 0, `:persistent_term`, keyé par path résolu). Fonctions pures ; `opts` (`:workflow_maps_root`, `:schema_path`) pour tests async |
 | `Fleet.Workflow.GraphValidator` | `validate/1` : linter de GRAPHE **pur** (`steps` → `:ok \| {:error, {kind, detail}}`) sur les invariants inter-steps que le JSON Schema ne peut pas exprimer (il valide chaque step isolément). Vérifie : `:phantom_edge` (chaque `needs` réfère un step déclaré — anti-arête-fantôme/typo silencieux), `:no_root`/`:multiple_roots` (exactement 1 racine `needs: []`), `:unreachable` (tout step atteignable depuis la racine), `:cycle` (DAG, tri topologique de Kahn — couvre aussi « aucun terminal atteignable », condition équivalente pour ce runtime séquentiel), `:fan_out` (aucun step à ≥2 successeurs ; runtime séquentiel, aligné `WorkflowMapNav`). `describe/1` rend le message lisible par invariant (composé par le Loader dans son raise). Autonome — ne dépend PAS de `WorkflowMapNav` (la dépendance inverse fleet_workflow→fleet_pilot est interdite) |
 | `Fleet.Workflow.Gate` | `@callback evaluate/3` — behaviour générique d'évaluation de gate, vendor-extensible compile-time |
@@ -35,7 +36,7 @@ workflow_map YAML, évaluation de gates, et publication de livrable.
 | `Fleet.Workflow.Gates.Predicate` | `eval?/2` — évaluateur **pur** des rule-strings v2.5 (`"all_tests_pass"`, `"severity_max != critical"`, conjonction `AND`) contre les `outputs` auto-rapportés. Grammaire bornée au corpus canon ; **fail-closed** (fait absent / type incompatible → faux) |
 | `Fleet.Workflow.GateBrief` | `build/1` — fonction pure qui construit le **brief markdown** (texte du brief) que le gatekeeper pull via MCP `get_work_item` : contexte + livrable à juger + question + options canon (consommées depuis `GateDecision`) + contrat de sortie `gate-decision-v1.json` |
 | `Fleet.Workflow.GateDecision` | `decisions/0` — **AUTORITÉ UNIQUE** du vocabulaire des décisions gatekeeper (`continue`/`abandon`/`redirect`/`escalate_user`/`halt_wait_input`). `GateBrief` (énoncé) et `Fleet.Pilot.StepRunConsumer` (validation fail-closed) consomment cette liste → l'énoncé et la validation ne peuvent plus diverger. Le contrat WIRE `gate-decision-v1.json` reste le miroir JSON (égalité schema ⇔ module verrouillée par test) |
-| `Fleet.Workflow.Gatekeeper` | seam de **boot + registration** du gatekeeper permanent (juge unique, pod Type 3, `lifetime_scope: forever`, cap-profile `gatekeeper.yaml`). `ensure_booted/1` (idempotent, config-gated par `:gatekeeper_autoboot`), `pod_id/0` (lecture `:persistent_term` ou override config `:gatekeeper_pod_id`). Seul module non-pur survivant : il appelle `Fleet.CapProfile.load/1` + `Fleet.Spawner.spawn_pod/3` (injectables en test) |
+| `Fleet.Workflow.Gatekeeper` | seam de **boot + registration** du gatekeeper permanent (juge unique, pod Type 3, `lifetime_scope: forever`, cap-profile `gatekeeper.yaml`). `ensure_booted/1` (idempotent, config-gated par `:gatekeeper_autoboot`), `pod_id/0` (lecture `:persistent_term` ou override config `:gatekeeper_pod_id`), `reboot/1` (reap du holder survivant + dé-registre + re-boot frais — sert de `respawn_fun` au re-roll `Fleet.Pilot.WakeRecovery` quand le gatekeeper est injoignable, `ensure_booted` seul no-op sur un pod registré-mais-cassé). Seul module non-pur survivant : il appelle `Fleet.CapProfile.load/1` + `Fleet.Spawner.spawn_pod/3` (injectables en test) |
 | `Fleet.Workflow.Deliverable` | publication unifiée du livrable d'un pod (modèle O5). **Un seul** module, deux modes choisis par `spec.deliverable_mode` au catalogue : `:payload` (le système écrit les fichiers via `PayloadGuard.apply_files/2` + `Git.commit`) / `:git_native` (l'agent a déjà commité — présence d'un commit vérifiée). Trois temps : CONTENU → gate I-CBC partagée (`DeliverableGate.verify`) → push borné (`Git.push`). Frontière pod↔système : le pod est forge-aveugle, le système choisit la branche cible et pousse |
 | `Fleet.Workflow.PayloadGuard` | placement + **validation-sécurité fail-closed** d'un payload de fichiers NON FIABLE dans un workspace (filtre autonome, extrait C4 de `Deliverable`). `apply_files/2` : 2 passes (TOUT validé avant la moindre écriture). Refuse le path-traversal (`{:path_traversal, …}`), le symlink-in-chain (`{:symlink_escape, …}` — `Path.expand` est lexical, `File.write` suivrait le lien hors workspace), **tout composant `.git`** (`{:dotgit_path, …}` — interdit de réécrire `.git/config`/`.git/hooks`), et **tout `.gitattributes` armant `filter=`/`diff=`** (`{:dangerous_gitattributes, …}`). Ferme le vecteur RCE par filtre `clean` : sans cette garde, le `git add` système-side qui suit exécuterait la commande du filtre côté monde (hors bwrap) — le `.gitattributes` IN-TREE n'est PAS désactivable par `-c` (le refus de contenu est le SEUL verrou de ce vecteur). Un `.gitattributes` bénin (sans `filter=`/`diff=`) reste autorisé. Source UNIQUE du placement de livrable |
 | `Fleet.Workflow.DeliverableGate` | gate **I-CBC mécanique** du livrable (modèle O5), vérifiée côté monde (Elixir). `verify/4` enchaîne, dans l'ordre : `check_base_ancestor` (F-03, base SHA hors-pod ancêtre de HEAD), `check_identity` (F-01, author+committer ∈ identités autorisées), trailer co-author optionnel, `scan_secrets` (F-02, aucun secret dans le diff `base..HEAD`). Le scan secret + le scan de noms de fichiers utilisent `git log -p --diff-merges=first-parent` : sans cette option, `git log -p` n'émet AUCUN diff pour un commit de MERGE → un secret ou un fichier interdit présent UNIQUEMENT dans l'arbre RÉSOLU d'un evil-merge (absent des deux parents, base toujours ancêtre, auteur légitime) passerait le scan ; l'option fait scanner le delta du merge vs son premier parent (ce que le merge introduit dans la mainline). Ne croit aucune assertion du pod (lit son `.git` read-only) ; premier check raté → `{:error, reason}`, pas de push |
@@ -77,8 +78,8 @@ orthogonal à l'enveloppe — cf. § Types de gates.
 
 ## Types de gates
 
-`Fleet.Workflow.Gates.evaluate/3` retourne `:pass`, `{:fail, reason}`, ou
-`{:dispatch_gatekeeper, info}` (PUR — aucun spawn) :
+`Fleet.Workflow.Gates.evaluate/3` retourne `:pass`, `{:fail, reason}`,
+`{:human_approval, reason}`, ou `{:dispatch_gatekeeper, info}` (PUR — aucun spawn) :
 
 * **`hard`** — pas de bypass. `rules` = liste de prédicats string (tous vrais
   via `Gates.Predicate.eval?/2`). `:pass` / `{:fail, reason}`.
@@ -89,13 +90,15 @@ orthogonal à l'enveloppe — cf. § Types de gates.
   booté → fail-loud. **Seul** le `soft` dispatche au gatekeeper.
 * **`terminal`** — `rules` = liste de prédicats string (tous vrais → `:pass`,
   sinon `{:fail}`). `rules` OPTIONNEL (gate `finish`). **`human_approval_required: true`
-  → HALT fail-closed `{:fail}`** (aucun human-in-loop câblé ; le moteur mécanique
-  n'auto-approuve jamais).
+  → `{:human_approval, reason}`** : un aval HUMAIN est requis — ce n'est PAS un
+  échec de gate, c'est une ESCALADE (verdict distinct de `{:fail}` pour que le rail
+  `Fleet.Pilot.StepRunConsumer` route directement vers l'arch au lieu de rebondir en
+  rework). Fail-closed préservé : le moteur mécanique n'auto-approuve jamais.
 
 `Gates.evaluate/3` ne retourne **jamais** `:retry` : le retry n'est pas une
-décision de gate. (Le retry borné système-side sur FAIL hard-gate, doctrine F150,
-était piloté par le moteur RAM retiré ; son portage sur le rail forge-state-machine
-est hors de cette lib.)
+décision de gate. Le retry borné sur FAIL existe, mais il est piloté par le rail
+forge-driven (`Fleet.Pilot.StepRunConsumer`, compteur de rework borné) — hors de
+cette lib.
 
 ### Décision du gatekeeper (vocab canon)
 
@@ -114,10 +117,23 @@ jamais projet). Le brief de jugement est rendu par `Fleet.Workflow.GateBrief.bui
 pour rester cohérents avec la mitigation atom-leak DoS de ch11 (`Bus` utilise
 `String.to_existing_atom/1`). Nettoyage prévu au Bloc C.
 
+## Configuration
+
+Knobs réellement lus par le code (tous sous `config :fleet_workflow`) :
+
+| Knob | Default | Rôle |
+|---|---|---|
+| `:workflow_maps_root` | `priv/canon/workflow_maps` de l'app | racine du catalogue pipelines YAML (`Loader.load!/2`). Posé par `runtime.exs` depuis `LCARS_WORKFLOW_MAPS_ROOT` si présente ; `opts[:workflow_maps_root]` prioritaire (tests async) |
+| `:schema_path` | `priv/schema/workflow-map-v2.5.json` de l'app | schema JSON du workflow_map (`Loader`) ; `opts[:schema_path]` prioritaire |
+| `:gatekeeper_autoboot` | `true` | gate de `Gatekeeper.ensure_booted/1` ; `config/test.exs` le met à `false` (hermétisme — pas de spawn gatekeeper sauf opt-in) |
+| `:gatekeeper_pod_id` | — (nil) | override du `pod_id` gatekeeper, prioritaire sur le registre `:persistent_term` (tests) |
+| `:git_push_timeout_ms` | `30_000` | deadline mur du `git push` borné (`Git`, via `Fleet.Credentials.Shell`) |
+| `:git_local_timeout_ms` | `30_000` | deadline des commandes git locales (`Git`) |
+
 ## Tests
 
 ```bash
-mix test apps/fleet_workflow   # suite complète
+( cd apps/fleet_workflow && mix test )   # suite complète — PAS `mix test apps/…` depuis la racine (0 test collecté = faux vert)
 ```
 
 ## Dépendances

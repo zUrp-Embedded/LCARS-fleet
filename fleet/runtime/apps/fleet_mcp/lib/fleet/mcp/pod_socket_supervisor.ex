@@ -20,6 +20,14 @@ defmodule Fleet.MCP.PodSocketSupervisor do
       Idempotent. Le `File.rm` est OBLIGATOIRE : fermer le socket libère le
       descripteur, PAS le fichier — sans `rm` le fichier fuit.
 
+  ⚠ CONTRAT CROISÉ : ces deux fonctions sont l'impl RÉELLE (défaut) du behaviour
+  `Fleet.Spawner.McpSocketProvisioner` (le contrat du seam `:mcp_socket_provisioner`,
+  côté consommateur `fleet_spawner`). On ne peut PAS l'adopter en `@behaviour` :
+  `fleet_mcp` ne dépend pas de `fleet_spawner` et la référence compile créerait une
+  arête nouvelle dans le graphe (`allowed_graph.yaml` rougirait). L'impl reste donc
+  duck-typée — toute évolution de signature ici DOIT être répercutée sur les
+  `@callback` du behaviour (et inversement).
+
   ## Chemin du socket
 
   `<base>/<pod_id>/sock` (`base` = config `:sock_base`, défaut `/run/lcars/mcp`).

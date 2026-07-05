@@ -1,11 +1,11 @@
 # fleet_mcp
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-05 (éclatement PodTools → WorkItems + Delegation, dispatch conservé)
+**Dernière révision** : 2026-07-05 (resync D2 contre le code : ring 2, PodSocketRegistry + sonde readiness documentés, knobs de délégation ajoutés ; éclatement PodTools → WorkItems + Delegation, dispatch conservé)
 **Statut** : implémenté — serveur MCP pod-facing (`get_work_item` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
-Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
+Serveur MCP LCARS (Ring 2) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
 `ex_mcp` derrière un contrat opaque et expose aux pods les outils MCP du runtime.
 
 ## Modules
@@ -31,17 +31,27 @@ Serveur MCP LCARS (Ring 4) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
   `controlling_process`) et l'accepteur re-`accept` aussitôt : un handler lent (ex. un appel
   forge qui pend) ne gèle PAS le pod — les connexions suivantes sont servies en parallèle, pas
   coincées dans le backlog kernel (sinon `readline` timeout côté pont, cf. test « accepteur
-  CONCURRENT »).
-- `Fleet.MCP.ConnectionTaskSupervisor` — `Task.Supervisor` (`restart: :temporary`) des workers
-  de connexion, un par connexion acceptée. Sépare le SERVICE d'une connexion (potentiellement
-  lent) de la BOUCLE d'`accept`.
+  CONCURRENT »). Contrat wire : buffer de ligne 1 MiB (une ligne plus longue arrive tronquée) ;
+  ligne JSON invalide → réponse `-32700` + warning, JAMAIS avalée en silence ; `tools/call`
+  > 5 s loggé LENT (forensics côté serveur).
+- `Fleet.MCP.ConnectionTaskSupervisor` — `Task.Supervisor` (`restart: :temporary`,
+  `max_children: 32`) des workers de connexion, un par connexion acceptée. Sépare le SERVICE
+  d'une connexion (potentiellement lent) de la BOUCLE d'`accept` ; la borne E4 refuse (loggé)
+  la connexion en trop d'un bridge qui fuit, au lieu d'accumuler tasks+FDs sans limite.
+- `Fleet.MCP.PodSocketRegistry` — Registry unique (clé = `pod_id` → accepteur, noms `:via`) :
+  résolution idempotente des accepteurs, démarré AVANT le DynamicSupervisor qui s'y enregistre.
 - `Fleet.MCP.PodSocketSupervisor` — DynamicSupervisor des accepteurs (fan-out un-par-pod) +
-  API de cycle de vie pour le spawner (`ensure_pod_socket` / `release_pod_socket`).
+  API de cycle de vie pour le spawner (`ensure_pod_socket` / `release_pod_socket`) +
+  `base_dir/0`/`socket_path/1` (chemins).
 - `Fleet.MCP.Server` — **garde de boot ADR-C** : `start_link/1` refuse
   (`{:error, :forbidden_in_pod}`) si `boot_environment == :pod` → `fleet_mcp` ne boote
   jamais côté pod. L'ancienne API husk `register_channel`/`list_channels` (push channel) est
   **retirée** (morts chantier 7, 0 appelant prod).
-- `Fleet.MCP.Supervisor` / `Fleet.MCP.Application` — supervision de l'app.
+- `Fleet.MCP.Supervisor` / `Fleet.MCP.Application` — supervision de l'app (`:one_for_one`,
+  `max_restarts: 3` / `max_seconds: 60`). `Fleet.MCP.Supervisor.pod_facing_status/0` = état
+  LIVE du substrat pod-facing pour la readiness (consommé par `Fleet.API.Readiness`) : sonde le
+  PROCESS réel + les fichiers socket sur disque (F6 anti-vert-creux : plus de socket-fichiers
+  que d'acceptors vivants = pods sourds → `:degraded`, jamais un vert de config).
 
 ## Identité du pod — l'identité EST le canal (R9)
 
@@ -111,10 +121,17 @@ manuel des schémas du central. Le câblage du pont vers la socket per-pod (et l
 
 ## Configuration
 
-- `:fleet_mcp, :sock_base` — racine des sockets pod-facing (défaut `/run/lcars/mcp`).
+- `:fleet_mcp, :sock_base` — racine des sockets pod-facing (défaut `/run/lcars/mcp` ; surchargé
+  par l'env `LCARS_FLEET_MCP_SOCK_BASE` dans `config/runtime.exs` — fleet lancée par un humain,
+  `/run/lcars` n'est pas writable sans privilège → base sous son home).
 - `:fleet_mcp, :boot_environment` — environnement injecté au boot du serveur (`:pod` → refus).
 - `:fleet_mcp, :pod_resolver` — seam test : `pod_id → {:ok, %{role: role}}`. Défaut = dispatch runtime
   vers `Fleet.Spawner.pod_info/1`.
+- `:fleet_mcp, :forge_client` — seam : client forge (défaut `Fleet.Pilot.ForgeClient`, dispatch
+  runtime — pas de dep compile-time fleet_pilot).
+- `:fleet_mcp, :project_onboard` — seam : séquence d'onboarding projet (défaut
+  `Fleet.Pilot.ProjectOnboard`, dispatch runtime).
+- `:fleet_mcp, :delegation_org` — org forge des projets onboardés (défaut `"fleet"`).
 
 ## Frontière vendor
 

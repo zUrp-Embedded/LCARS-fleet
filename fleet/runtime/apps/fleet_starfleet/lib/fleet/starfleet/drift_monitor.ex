@@ -97,7 +97,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
   defp dispatch_audit_verdict(payload, correlation_id) do
     case Gatekeeper.validate(payload["decision_json"] || "") do
       {:ok, decision} ->
-        # Un {:error, "no policy match ..."} était JETÉ ici sans trace (finding DrDree 2026-07-05) :
+        # Un {:error, {:no_policy_match, _}} était JETÉ ici sans trace (finding DrDree 2026-07-05) :
         # un verdict sans policy disparaissait. Loggé WARNING — le fix structurel (table de routage
         # TOTALE, miss = crash au chargement) est le chantier coord D1-Part-2.
         case CoordBackend.resolved().handle_decision(decision, correlation_id) do
@@ -106,15 +106,18 @@ defmodule Fleet.Starfleet.DriftMonitor do
         end
 
       {:error, reason} ->
+        # `reason` est un tuple structuré ({:decision_invalid, cause}) : `inspect` le rend
+        # humain ET JSON-encodable (AuditLog encode en NDJSON via Jason — un tuple brut
+        # lèverait Jason.EncodeError et une interpolation `#{reason}` lèverait Protocol.UndefinedError).
         _ =
           AuditLog.write(%{
             "source" => "invalid_decision",
-            "reason" => reason,
+            "reason" => inspect(reason),
             "raw" => payload,
             "correlation_id" => correlation_id
           })
 
-        Logger.warning("starfleet drift_monitor: invalid audit.verdict — #{reason}")
+        Logger.warning("starfleet drift_monitor: invalid audit.verdict — #{inspect(reason)}")
     end
   end
 

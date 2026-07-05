@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-05 (éclatement god-modules C1 — chaque concern séparable en sous-module à frontière blindée (structs `Seams` étroits, `@enforce_keys`), API publiques inchangées : StepRunConsumer→`GateEngine`/`TerminalEscalation`/`StepRunBuild` (1165→757 l) ; StepRunCompleter→`Texts`/`Emissions` (796→~710 l ; intent-routing REFUSÉ : seam bidirectionnel) ; Poller→`Backoff`/`Lease` (785→~600 l) ; ReviewLifecycle→`RoleDispatch`/`Remediation` (529→211 l) ; ProjectOnboard→`Scaffold` ; Transport→`ForgeClient.UrlSafe` ; IncidentRegistry→`Escalation` ; Spawn→`Naming`) (dedup B5 : `Fleet.Pilot.Offload` — squelette d'offload unique des 2 consumers Bus ; `Opts.maybe_put` remplace les wrappers à clé figée `maybe_put_project|repo_id` de Spawn ; prédicat de confiance `system_authored?` UNIQUE dans ForgeProtocol — la copie issue-side de ForgeClient.Repo délègue ; `Verdict.review_event/1` = table unique token→review-event des 2 vocabulaires decision/intent ; signature gatekeeper internalisée dans `GatekeeperSeal.seal_and_merge` via le writer unique `as_gatekeeper/1` — appelants en forge_opts bruts, ArchEscalation aligné) (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer)
+**Dernière révision** : 2026-07-05 (éclatement god-modules C1 — chaque concern séparable en sous-module à frontière blindée (structs `Seams` étroits, `@enforce_keys`), API publiques inchangées : StepRunConsumer→`GateEngine`/`TerminalEscalation`/`StepRunBuild` (1165→757 l) ; StepRunCompleter→`Texts`/`Emissions` (796→~710 l ; intent-routing REFUSÉ : seam bidirectionnel) ; Poller→`Backoff`/`Lease` (785→~600 l) ; ReviewLifecycle→`RoleDispatch`/`Remediation` (529→211 l) ; ProjectOnboard→`Scaffold` ; Transport→`ForgeClient.UrlSafe` ; IncidentRegistry→`Escalation` ; Spawn→`Naming`) (dedup B5 : `Fleet.Pilot.Offload` — squelette d'offload unique des 2 consumers Bus ; `Opts.maybe_put` remplace les wrappers à clé figée `maybe_put_project|repo_id` de Spawn ; prédicat de confiance `system_authored?` UNIQUE dans ForgeProtocol — la copie issue-side de ForgeClient.Repo délègue ; `Verdict.review_event/1` = table unique token→review-event des 2 vocabulaires decision/intent ; signature gatekeeper internalisée dans `GatekeeperSeal.seal_and_merge` via le writer unique `as_gatekeeper/1` — appelants en forge_opts bruts, ArchEscalation aligné) (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer) (resync D2 contre le code : `decide/1` porte pure, routeless→onboarding, blocked→`lcars-awaits-arch`, catalogue knobs complet, modules feuilles inventoriés)
 **Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -10,7 +10,7 @@ Service d'auto-orchestration issues Gitea (M-033 backlog, doctrine
 core ring 1, pas core**).
 
 Découvre ses projets par topic (`lcars-fleet-<humain>`) et spawn le rôle
-producteur via le rail forge-state-machine décrit ci-dessous (mode **step**) :
+du step courant via le rail forge-state-machine décrit ci-dessous (mode **step**) :
 la forge EST la machine à états (label de route gravé sur le issue). Le
 catalogue déclaratif `forge-routing.yaml` (axes `type:` × `state:` × `assignee`)
 a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le lisait.
@@ -25,18 +25,23 @@ a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le l
 
 ## Mode step (forge-state-machine — A2/A3, actif)
 
-Le mode **step** (la forge EST la machine à états : issue **assigné** à l'humain owner, non
-verrouillé → spawn le rôle **PRODUCTEUR** ; l'**assignee = l'humain**, point fixe — DN §1)
+Le mode **step** (la forge EST la machine à états : issue **assignée** à l'humain owner, non
+verrouillée → spawn le rôle du **step courant** de sa route, dérivé de la POSITION workflow_map ;
+l'**assignee = l'humain**, point fixe — DN §1)
 double puis remplace le dispatch legacy ci-dessus. Activé par `:step_dispatch?` + la forge `base_url`
 (`:forge[:base_url]` / `FORGE_BASE_URL`) — c'est la **seule** garde fail-loud du boot step
 (`Fleet.Pilot.Application.step_children!`) : sans `base_url`, ni découverte par topic ni push per-step-run.
-`:poll_repo` n'est **plus** une condition d'activation (override legacy/test mono-repo seulement, cf. § Knobs) :
+`:poll_repo` n'est **plus** une condition d'activation (et n'a plus aucun lecteur, cf. § Knobs) :
 la découverte des repos se fait par topic (`lcars-fleet-<human>`), pas par repo fixe, et le repo+remote de
 chaque step_run voyagent dans l'event `pod.completed`. Submodules :
 
-- `Fleet.Pilot.StepDispatcher` — `decide/2` (issue assignée non verrouillée → `{:spawn, role, profile}`
-  où `role` = **rôle producteur invariant** `:producer_role`, défaut `engineer` — pas un marqueur
-  par-issue, DN §1) + `dispatch_issue/2` (ordre canonique label-verrou → comment → pod). Les **juges**
+- `Fleet.Pilot.StepDispatcher` — `decide/1` (porte PURE : verrou `lcars-in-flight`/`lcars-awaits-arch`
+  → `{:skip, reason}`, sinon `:engage` — le rôle n'est PAS décidé ici) + `dispatch_issue/2` (sur
+  `:engage` : résout projet+route AVANT toute écriture forge ; issue **routeless** → onboarding système
+  — grave la workflow_map de délégation `:delegation_workflow_map` (défaut `brief-gate`) puis DÉFÈRE au
+  tick suivant ; **routée** → `workflow_map_role` dérive `{role, profile, step_spec}` de la POSITION
+  workflow_map (pas de producteur en dur ; route absente à ce point = fail-loud `:unrouted`, jamais
+  l'eng en silence) — puis ordre canonique du spawn verrou → pod → enqueue → wake, `Spawn.spawn_step`). Les **juges**
   sont dispatchés PR-driven via `dispatch_review/2` (②.1d, **PR = machine à états**, DN §1.4-1.5,
   sans branch-protection — LCARS agrège, interim) : reviewers en attente → spawn le prochain juge (un à
   un, sérialisé par le verrou PR ; clone la **feature-branch** pour voir le diff) ; round terminé +
@@ -122,7 +127,9 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   ne suffit plus, cf. § Onboarding « sceau d'admission »). Sur chaque repo admis : scanne, lit la **route-comment**
   (`[lcars-route:workflow_map:step]`, gravée par `create_issue` = la state-machine de routing) → dispatche le rôle du
   step (`workflow_map_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du
-  1er step). Routing par label retiré (`type:*` = visu seulement). Sans route → producteur A1 (fallback).
+  1er step). Routing par label retiré (`type:*` = visu seulement). Sans route → onboarding système :
+  la workflow_map de délégation (défaut `brief-gate`) est gravée et le dispatch DÉFÉRÉ au tick suivant
+  (pas de fallback producteur silencieux).
   **Bail fail-closed (2 invariants)** : (1) le bail se prend dès qu'un pipeline est DÉMARRÉ (verrou posé +
   pod spawné), jamais sur le succès d'une étape postérieure — un dispatch qui rend `{:error,{:wake_unreached,_}}`
   (verrou+pod+brief en place, seul le réveil tmux a raté) PREND le bail intra-tick (sinon un 2e issue du même
@@ -258,10 +265,11 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   **Voix de l'eng (info SORTANTE)** : si le producteur rend un `summary` dans `submit_result` (extrait par
   `StepRunConsumer`, coercé `safe_str`), le système le poste en **commentaire PR `as_role` engineer** (livraison
   ET rework) — l'eng n'est plus muet sur la forge (jumeau sortant de l'anti-famine ; le brief l'élicite).
-  **Blocked_dep** : si le producteur rend `blocked: true` (dépendance/info manquante), `StepRunConsumer` route vers
-  `await_human` (motif = son `summary` + `lcars-awaits-human` + unlock → poller SKIP, l'humain tranche via l'arch)
-  AU LIEU d'une publish vide (`:no_deliverable_commit` = wedge silencieux). Le brief dit à l'eng de marquer
-  `blocked` plutôt que deviner à l'aveugle.
+  **Blocked_dep** : si le producteur rend `blocked: true` (dépendance/info manquante), `StepRunConsumer`
+  escalade via `TerminalEscalation.escalate_blocked_producer` → `freeze_to_arch` (motif = son `summary`,
+  commentaire adressé-arch + `lcars-awaits-arch` + unlock via `StepRunCompleter.await_arch` → poller SKIP,
+  l'humain tranche via l'arch) AU LIEU d'une publish vide (`:no_deliverable_commit` = wedge silencieux).
+  Le brief dit à l'eng de marquer `blocked` plutôt que deviner à l'aveugle.
   Identité ②.1e via `Fleet.Credentials.RoleToken` (poste EN SON NOM ; token absent → fallback système loggué).
   (Legacy workflow_map multi-step : `complete/2` séquence §5 + intents `:advance`/`:promote`/`:rework`, conservé.)
   Deux sous-modules extraits : `StepRunCompleter.Texts` (wording PAR DÉFAUT — `pr_body/2` avec `Closes #N`,
@@ -271,31 +279,106 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   Le routage par intent (`route/3` ×5) reste DANS le completer : il rappelle la primitive publique `promote`
   et partage `unlock`/`post_route_if_present` (autorités uniques) avec la séquence maison — l'extraire
   créerait un seam bidirectionnel (mauvaise frontière, refus argumenté).
+- `Fleet.Pilot.GatekeeperSeal` — **sceau de fusion UNIQUE** (`seal_and_merge/6` : commentaire de fin
+  honnête + merge rebase signé gatekeeper, writer unique `as_gatekeeper/1`), partagé par les deux points
+  de merge (`ReviewLifecycle.promote_pr`, `StepRunCompleter.promote`) ; après merge, caste la projection
+  du clone local à `WorktreeSync.sync(repo)` (seam `:worktree_sync`).
+- `Fleet.Pilot.Roles` — accesseur UNIQUE des rôles de l'atelier : `producer_role/1` (défaut
+  `"engineer"`), `reviewer_roles/1` (fail-loud, data `config/config.exs`), `gatekeeper_role/1` (défaut
+  `"gatekeeper"`), `architect_pod_id/1` (défaut `"permanent-architect"`) — config + override opts,
+  aucun défaut réécrit chez l'appelant.
+- `Fleet.Pilot.WorkflowMapNav` — navigation **PURE** dans une workflow_map (chaînage forge-driven des
+  steps, stateless) : keyée par NOM de step (un même rôle peut tenir plusieurs steps), chaîne linéaire
+  (0/1 successeur ; DAG → `{:error, :dag_not_supported}`) ; `first_step`/`step_role`/`safe_load` —
+  l'appelant passe la workflow_map déjà chargée (sortie `Fleet.Workflow.Loader`).
+- `Fleet.Pilot.IssueId` — source UNIQUE du format `issue_id` step-mode `"issue-<n>"`
+  (`compose/1`/`parse/1`) : corrèle un pod à son issue forge de l'enqueue à la fin-de-step-run
+  (writer `StepDispatcher`, parser `StepRunConsumer` — qui délègue).
+- `Fleet.Pilot.PodId` — id de pod sémantique DÉTERMINISTE, **repo-scopé** (clé GLOBALE : Registry,
+  broker, pod_dir, tmux) : `for_issue`/`for_pr` construisent, `parse_ref/2` ancre (réconciliation des
+  verrous) ; même `(repo, n, role)` → même id (un re-dispatch retombe sur le pod vivant pour le
+  re-briefer) ; path-safe (contrat `Fleet.Spawner.valid_pod_id?/1`).
+- `Fleet.Pilot.WakeRecovery` — durcissement de `Fleet.Spawner.wake_pod/1` (`wake/3`) : incident déjà au
+  registre → escalade DIRECTE (pattern → root-cause) ; 1er coup → re-roll (re-spawn + re-wake) ; re-wake
+  OK → récupéré + gravé au registre ; re-roll raté → escalade immédiate (issue système `error_system`,
+  assignee sysadmin).
+- `Fleet.Pilot.IncidentRegistry` — mémoire PERSISTANTE cross-session des incidents système (GenServer,
+  démarré inconditionnellement dans le rail step) : `seen_before?` = lookup RAM (tient un burst),
+  `note` = upsert sérialisé + WAL local atomique + sync forge ASYNC débouncé (branche `work/ops`, merge
+  bidirectionnel, fail-loud — jamais de perte) ; `record_or_escalate/4` ; l'escalade sysadmin vit dans
+  le sous-module `Escalation` (`escalate/5` reste en façade defdelegate).
+- `Fleet.Pilot.GitOps` — git borné, source unique des ops git FS du pilot (`run/2` : borne réelle
+  `Fleet.Credentials.Shell.git`, token forge en env jamais sur l'argv, identité de commit, retour
+  typé) — partagé par `ProjectOnboard` (clone/scaffold/commit/push) et `WorktreeSync` (fetch/reset).
 
-Knobs : `:step_dispatch?` + `:poll_interval_ms` (step ; la forge `base_url` est l'unique config requise),
-`:poll_repo` (override legacy/test mono-repo seulement — accepté par le Poller mais écrasé à chaque tick par la
-découverte topic ; **pas** la source en prod), `:producer_role` (défaut `engineer`),
-`:reviewer_roles` (juges PR, défaut data posé en `config/config.exs`), `:gatekeeper_role` (scelle les fusions,
-défaut `gatekeeper`) — **les trois rôles ont leur AUTORITÉ UNIQUE dans `Fleet.Pilot.Roles`**
-(`producer_role/1`, `reviewer_roles/1`, `gatekeeper_role/1` : config + overrides opts) ; `ProjectOnboard` et
-`GatekeeperSeal` (qui re-exporte `gatekeeper_role/0`) délèguent ici, plus aucun défaut réécrit chez l'appelant, `:step_run_runner` (offload complétion, F067), `:wake_recovery` (seam recovery de wake,
-défaut `&Fleet.Pilot.WakeRecovery.wake/3` ; MA-17 : le retour du wake est load-bearing → un kick injoignable
-remonte `{:error,{:wake_unreached,_}}` au dispatch (tally honnête) / une telemetry au gatekeeper, jamais avalé).
+### Knobs (app env `:fleet_pilot`)
+
+- `:step_dispatch?` — défaut `false` ; `true` démarre le rail step (env `LCARS_PILOT_STEP=true`, posé
+  par défaut par `bin/fleet_v2`). Garde fail-loud au boot : la forge `base_url` est l'unique config
+  requise (raise sinon, cf. `Application.step_children!`).
+- `:poll_interval_ms` — défaut `30_000` (env `LCARS_PILOT_POLL_INTERVAL_MS`).
+- `:forge` — keyword forge : `base_url` (env `FORGE_BASE_URL`, obligatoire step-mode), `token`
+  (env `FORGE_TOKEN`) / `token_file` (env `FORGE_TOKEN_FILE`, fallback `~/.gitea_token`),
+  `req_options` (tests, passé à `Req.new/1`). Résolu à CHAQUE appel par `Transport.resolve_config/1`
+  (merge avec les opts d'appel).
+- `:forge_bot_login` — login du compte SYSTÈME (les marqueurs route/step_run/result ne font foi que
+  bot-authored). Pas de défaut : absent → dérivé une fois via `GET /user` puis caché (env
+  `FORGE_BOT_LOGIN`).
+- `:poll_repo` — **posé** par `config/runtime.exs` (env `LCARS_PILOT_POLL_REPO`) mais **plus aucun
+  lecteur** dans le code : la découverte est par topic, et l'override mono-repo réel est l'opt d'init
+  `:repo` du Poller (seam test/legacy, écrasé à chaque tick) — NON câblé sur cette config.
+- `:producer_role` (défaut `"engineer"`), `:reviewer_roles` (`fetch_env!` fail-loud — data posée en
+  `config/config.exs` : `["qualifier", "reviewer"]`), `:gatekeeper_role` (défaut `"gatekeeper"`),
+  `:architect_pod_id` (défaut `"permanent-architect"`, id posé par `PermanentBoot`) — **AUTORITÉ
+  UNIQUE `Fleet.Pilot.Roles`** (config + overrides opts) ; `ProjectOnboard` et `GatekeeperSeal` (qui
+  re-exporte `gatekeeper_role/0`) délèguent ici, plus aucun défaut réécrit chez l'appelant.
+- `:delegation_workflow_map` — défaut `"brief-gate"` : la workflow_map gravée à l'onboarding d'une
+  issue routeless (data-catalogue, pas un nom magique en dur).
+- `:step_run_write_spacing_ms` — défaut `2000` (gap inter-écritures forge du `StepRunCompleter`) ;
+  posé à `0` par `config/test.exs` (tests rapides et déterministes).
+- `:worktree_sync` — défaut `Fleet.Pilot.WorktreeSync` (seam test du `GatekeeperSeal` : le process de
+  projection casté après merge).
+- `:incident_registry_repo` (défaut `"fleet/lcars"`), `:incident_registry_branch` (défaut
+  `"work/ops"`), `:incident_registry_path` (défaut `"work/system-incidents.json"`),
+  `:incident_registry_wal_path` (défaut : `Fleet.Layout.state_dir()/system-incidents.json`),
+  `:incident_registry_author` (défaut `LCARS-starfleet` + email de rôle `ForgeIdentity`),
+  `:incident_registry_max_entries` (défaut `500`, cap du registre) — backing store du
+  `IncidentRegistry`.
+- `:system_issue_repo` (défaut `"fleet/lcars"`), `:system_issue_label` (défaut `"error_system"`),
+  `:system_issue_assignee` (défaut `"starfleet"`) — cible de l'escalade sysadmin
+  (`IncidentRegistry.Escalation`).
+
+Opts d'init (seams process, PAS des clés d'app env) : `:step_run_runner` (StepRunConsumer — offload
+complétion F067, défaut `nil` → sync ; prod = `&offload_async/1` posé par l'Application),
+`:wake_recovery` (défaut `&Fleet.Pilot.WakeRecovery.wake/3` ; MA-17 : le retour du wake est
+load-bearing → un kick injoignable remonte `{:error,{:wake_unreached,_}}` au dispatch (tally honnête) /
+une telemetry au gatekeeper, jamais avalé), `:max_rework_rounds` (StepRunConsumer, défaut `2` — budget
+du rebond de gate), `:max_pr_rework_rounds` (flux review, défaut `2` — budget MA-06),
+`:repo`/`:start_tick?` (Poller), `:subscribe` (consumers Bus, défaut `true` — tests : `false` + envoi
+manuel).
+
+Hermétisme test : pas de knob `start_*` dédié — le rail step est OFF par défaut (`:step_dispatch?`
+absent → `step_children` = `[]`, app inerte) ; `config/test.exs` pose uniquement
+`step_run_write_spacing_ms: 0`.
 
 **Supervision (`Application`)** : `:one_for_one` avec bornes explicites `max_restarts: 3 / max_seconds: 60`
 (alignées sur les autres superviseurs d'app du runtime). `:one_for_one` (pas `:rest_for_one`) malgré l'ordre
 de démarrage (Task.Supervisor + `IncidentRegistry` AVANT `Poller` + `StepRunConsumer`) : les enfants se réfèrent
 par **nom global** (résolu à chaque appel), jamais par pid capturé à l'init → le redémarrage d'un singleton
-ne nécessite pas la cascade. Chaque consommateur Bus (`StepRunConsumer`) se ré-abonne par construction : le
-`Bus.subscribe()` vit dans `init/1`, qu'OTP rejoue à chaque restart (un consommateur redémarré n'est jamais
-sourd ; contrat verrouillé par test côté `fleet_starfleet`).
+ne nécessite pas la cascade. Chaque consommateur Bus (`StepRunConsumer`, `IncidentConsumer`) se ré-abonne
+par construction : le `Bus.subscribe()` vit dans `init/1`, qu'OTP rejoue à chaque restart (un consommateur
+redémarré n'est jamais sourd ; contrat verrouillé par test côté `fleet_starfleet`).
+`Application.step_status/0` expose la liveness du rail (`:inactive` | `:operational` | `:degraded` selon
+que Poller + StepRunConsumer sont vivants) — consommé par la readiness de `fleet_api` (le vert-creux
+« daemon up, rail mort » est attrapé sans fuiter les noms de process Ring 2 en Ring 4).
 
 Le superviseur démarre aussi, **inconditionnellement** (avant le rail step), `Fleet.Pilot.ForgeFinch` —
 pool HTTP/1 dédié au `ForgeClient` avec `conn_max_idle_time: 30_000`. Le défaut Finch `:infinity` laisse une
 connexion idle traîner jusqu'à ce que la forge la ferme côté serveur → le 1er appel après idle pend jusqu'au
 `receive_timeout` (10s), et `create_issue` (qui enchaîne 3 appels : `create_issue` + `add_label`[GET+PUT])
 cumulait ainsi jusqu'à ~30s. Inconditionnel car `create_issue` (côté `fleet_mcp`) appelle le `ForgeClient`
-hors du rail Poller/StepRunConsumer. `Fleet.Pilot.ForgeClient.Transport.request/4` route via ce pool (`finch:`) et
+hors du rail Poller/StepRunConsumer. Le moteur HTTP de `Fleet.Pilot.ForgeClient.Transport` (`request/4`,
+privé) route via ce pool (`finch:`) et
 **trace tout appel forge >1s** (`Logger.warning "ForgeClient … LENT …ms"`) — l'observabilité qui localise un appel forge lent
 au run réel. Câblage du pool verrouillé par `forge_finch_test.exs` (sonde le process, pas un knob).
 
@@ -349,8 +432,10 @@ l'arch n'écrit rien, il relaie `name`+`pitch`), `committer`=git config runtime 
 tracé**), `pusher`=`lcars-system` (`ForgeAuth.git_env`, owner fleet-wide) — tout avataré. Rail mécanique
 (l'arch *déclenche* via le tool MCP `create_project`, le système *exécute* ; cf. `fleet_mcp`). Pas de GenServer.
 
-`Fleet.Pilot.ForgeClient` porte aussi les write-ops forge réutilisées ici (`create_repo`, `create_issue`,
-`put_file`, `post_comment`, `close_issue`, `add_collaborator`, `protect_branch`).
+Les write-ops forge réutilisées ici vivent dans le cœur `Fleet.Pilot.ForgeClient` (`create_issue`,
+`post_comment`, `close_issue`) et ses sous-modules appelés en direct : `ForgeClient.Repo`
+(`create_repo`, `add_topic`, `post_onboard_marker`, `add_collaborator`, `protect_branch`) et
+`ForgeClient.Files` (`put_file`).
 
 ## Découplage core
 

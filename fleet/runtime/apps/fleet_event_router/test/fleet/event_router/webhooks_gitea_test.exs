@@ -132,7 +132,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
         |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 401
-      assert Jason.decode!(conn.resp_body)["error"] == "secret missing"
+      # D1 : reason structuré (:secret_missing) — Jason encode l'atome en string sur le wire.
+      assert Jason.decode!(conn.resp_body)["error"] == "secret_missing"
     end
 
     test "MA-13 : secret fichier VIDE/whitespace → 401 fail-closed (PAS d'HMAC à clé vide forgeable)",
@@ -154,7 +155,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
         |> WebhooksGitea.call(WebhooksGitea.init([]))
 
       assert conn.status == 401
-      assert Jason.decode!(conn.resp_body)["error"] == "secret missing"
+      # D1 : reason structuré (:secret_missing) — Jason encode l'atome en string sur le wire.
+      assert Jason.decode!(conn.resp_body)["error"] == "secret_missing"
       refute_receive %Fleet.Event{source: :event_router}, 200
     end
   end

@@ -27,14 +27,22 @@ defmodule Fleet.MCP.PodTools.Delegation do
   ## Seams (app-env `:fleet_mcp`)
 
     * `:forge_client` (défaut `Fleet.Pilot.ForgeClient`) — client forge, dispatch
-      runtime (pas de dep compile-time fleet_pilot).
-    * `:project_onboard` (défaut `Fleet.Pilot.ProjectOnboard`) — séquence d'onboarding.
+      runtime (pas de dep compile-time fleet_pilot). CONTRAT = behaviour
+      `Fleet.MCP.PodTools.Delegation.ForgeClient` (callbacks typés + resolver
+      `resolved/0`, source unique du défaut).
+    * `:project_onboard` (défaut `Fleet.Pilot.ProjectOnboard`) — séquence
+      d'onboarding. CONTRAT = behaviour `Fleet.MCP.PodTools.Delegation.ProjectOnboard`.
     * `:pod_resolver` (défaut dispatch runtime `Fleet.Spawner.pod_info/1`) — résolution
       du rôle du pod.
     * `:delegation_org` (défaut `"fleet"`) — org forge des projets onboardés.
   """
 
   require Logger
+
+  # Les deux behaviours-contrats des seams montants (fleet_mcp → fleet_pilot, dispatch runtime).
+  # ⚠ Ce `ForgeClient` local est le CONTRAT (behaviour + resolver), PAS `Fleet.Pilot.ForgeClient`
+  # (l'impl réelle, jamais référencée en appel direct ici — dep compile interdite).
+  alias Fleet.MCP.PodTools.Delegation.{ForgeClient, ProjectOnboard}
 
   @doc """
   Pose une issue forge prête pour le poller — gate architecte incluse.
@@ -55,7 +63,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
           {:ok, map()} | {:error, term()}
   def create_issue(repo, title, brief, state)
       when is_binary(repo) and is_binary(title) and is_binary(brief) do
-    forge = forge_client()
+    forge = ForgeClient.resolved()
 
     # Déléguer un issue est un acte d'ARCHITECTE : gate AVANT toute mécanique. L'arch poste
     # ensuite l'issue EN SON NOM : token du compte de rôle de l'appelant.
@@ -115,7 +123,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         {:error, reason}
 
       {:ok, _role} ->
-        forge = forge_client()
+        forge = ForgeClient.resolved()
 
         issue_state =
           case forge.get_issue(repo, number, []) do
@@ -149,10 +157,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # ============================================================
 
   # Séquence d'onboarding proprement dite. Le SYSTÈME exécute la mécanique (repo forge +
-  # dual-worktree main/work-ops + scaffold + push) via le seam :project_onboard (défaut
-  # Fleet.Pilot.ProjectOnboard, dispatch runtime — pas de dep compile-time fleet_pilot).
+  # dual-worktree main/work-ops + scaffold + push) via le seam :project_onboard (contrat =
+  # behaviour Delegation.ProjectOnboard ; défaut Fleet.Pilot.ProjectOnboard, dispatch runtime —
+  # pas de dep compile-time fleet_pilot).
   defp do_create_project(name, args) do
-    onboard = Application.get_env(:fleet_mcp, :project_onboard, Fleet.Pilot.ProjectOnboard)
+    onboard = ProjectOnboard.resolved()
     org = Application.get_env(:fleet_mcp, :delegation_org, "fleet")
     pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
@@ -285,6 +294,4 @@ defmodule Fleet.MCP.PodTools.Delegation do
   catch
     _, _ -> {:error, :pod_unknown}
   end
-
-  defp forge_client, do: Application.get_env(:fleet_mcp, :forge_client, Fleet.Pilot.ForgeClient)
 end

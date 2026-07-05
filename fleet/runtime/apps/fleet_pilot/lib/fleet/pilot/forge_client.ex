@@ -14,6 +14,13 @@ defmodule Fleet.Pilot.ForgeClient do
       l'appellent DIRECTEMENT. Seul `parse_feature_branch/1` est ré-exporté ici (`defdelegate`) car
       `fleet_mcp` l'atteint via le seam `:forge_client` (évite une dep compile-time vers fleet_pilot).
 
+  ⚠ CONTRAT CROISÉ (seam `fleet_mcp`) : ce module est l'impl RÉELLE (défaut) du behaviour
+  `Fleet.MCP.PodTools.Delegation.ForgeClient` (callbacks = `create_issue/4`, `add_label/4`,
+  `get_issue/3`, `list_open_pulls/2`, `parse_feature_branch/1`, `pr_review_verdicts/3`). On ne peut
+  PAS l'adopter en `@behaviour` : `fleet_pilot` ne dépend pas de `fleet_mcp` et la référence compile
+  créerait une arête nouvelle (`allowed_graph.yaml` rougirait). Impl duck-typée — toute évolution de
+  ces 6 signatures DOIT être répercutée sur les `@callback` du behaviour (et inversement).
+
   ## Configuration
 
   Résolue à l'appel par `Transport.resolve_config/1` (cf. son moduledoc) : `:base_url`, `:token`

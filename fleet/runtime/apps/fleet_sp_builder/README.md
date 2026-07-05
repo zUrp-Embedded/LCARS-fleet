@@ -1,7 +1,7 @@
 # Fleet.SPBuilder
 
 **Date** : 2026-05-09
-**Dernière révision** : 2026-07-05 (éclatement façade → Monk + RepoSections)
+**Dernière révision** : 2026-07-05 (éclatement façade → Monk + RepoSections ; D2 — resync contrat : knob `monk_registry_root`, API `resolve_monk_injection/2`, dépendances)
 **Statut** : implémenté run #3.1 chantier #2 — design note PROMOTED
 **Référencé par** : 04_design-notes/fleet_sp_builder.md
 
@@ -34,6 +34,8 @@ paths skills filtrés.
   (N3) avec extraction sélective des sections du `CLAUDE.md` repo.
 - `Fleet.SPBuilder.filter_skills/2` — filtre `skills_root` selon la
   whitelist `cap_profile.spec["knowledge"]["skills"]`.
+- `Fleet.SPBuilder.resolve_monk_injection/2` — résout l'injection monk
+  (defdelegate vers `Monk.resolve/2` ; hors behaviour `Composer`).
 
 ## Templates
 
@@ -52,6 +54,22 @@ paths skills filtrés.
   `fleet_workflow/priv/canon/modop-bundles`, Ring 3, hors du graphe de deps de ce Ring 1). Non configuré +
   modops demandés → `compose/3` rend `{:error, :modop_root_unconfigured}` (fail-loud, plus de défaut relatif
   `"modop"` qui donnait un `:enoent` muet). La chaîne de spawn PROD ne passe aucun modop → root jamais requis.
+- `:fleet_sp_builder, :monk_registry_root` — racine résolvant le path relatif du registry monk
+  (`spec.knowledge.monk_registry` = basename, ex. `alpha.yaml`). Précédence : opt `:monk_registry_root`
+  (test-seam) > cette config > défaut bundlé `Application.app_dir(:fleet_cap_profile,
+  "priv/canon/cap-profiles/monks")`.
+
+Aucun de ces knobs n'est posé dans `config/*.exs` ni via env var — défauts inline seulement
+(les tests overrident par `Application.put_env` / opt).
+
+## Dépendances
+
+- `fleet_cap_profile` (in_umbrella, Ring 0) — struct `%Fleet.CapProfile{}` consommée + racines
+  par défaut via `app_dir` (canon cap-profiles, registry monks).
+- `jason` (déclarée dans mix.exs ; aucun appel dans `lib/` aujourd'hui).
+- `stream_data` (test only).
+- `YamlElixir` (`Monk`, lecture registry) n'est PAS déclarée par cette app — résolue via la dep
+  transitive `yaml_elixir ~> 2.9` de `fleet_cap_profile`.
 
 ## Niveaux d'injection canoniques
 

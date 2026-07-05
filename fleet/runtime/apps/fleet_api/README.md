@@ -1,7 +1,7 @@
 # fleet_api (chantier 15)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-05 (C4 — pipeline d'admission `/api/admin/spawn` extrait en `Fleet.API.SpawnAdmission` (policy), `Rest` = mapping HTTP seul ; B5 — child-spec listener via la source unique `Fleet.EventRouter.Listener.cowboy_child/1`, dispatch WS inchangé ; 2026-07-02 : B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
+**Dernière révision** : 2026-07-05 (D2 resync contrat : `Application`/`Dashboard` en table + routes dashboard, port per-humain sans défaut statique (A7), dep `fleet_mcp` + rings réels, forme test canonique ; C4 — pipeline d'admission `/api/admin/spawn` extrait en `Fleet.API.SpawnAdmission` (policy), `Rest` = mapping HTTP seul ; B5 — child-spec listener via la source unique `Fleet.EventRouter.Listener.cowboy_child/1`, dispatch WS inchangé ; 2026-07-02 : B2b — allowlist DTO d'admission `/api/admin/spawn` ; P05 — readiness honnête `/api/readiness/deep`)
 **Statut** : impl att-1 — qualifier en attente
 **Référencé par** : `04_design-notes/fleet_api.md`, `STATUS-CHANTIERS.md`
 
@@ -14,9 +14,12 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 
 | Module | Rôle |
 |---|---|
-| `Fleet.API.Rest` | Plug.Router HTTP `:8080` endpoints REST — reads no-auth + mapping des verdicts d'admission spawn en statuts HTTP |
+| `Fleet.API` | moduledoc de contexte (vue d'ensemble REST + WS, split différé, frontière vendor) — aucun code |
+| `Fleet.API.Application` | supervisor `:one_for_one` (3/60 explicite). Démarre le listener Cowboy via la source unique `Fleet.EventRouter.Listener.cowboy_child/1` (dispatch `/ws` → WS, reste → Rest) quand `:start_listener` ; émet sd_notify `READY=1` après bind (`NOTIFY_SOCKET`, no-op hors systemd) ; log build info au boot |
+| `Fleet.API.Rest` | Plug.Router HTTP (port per-humain, `FLEET_API_PORT` posé par `bin/fleet_v2`) endpoints REST — reads no-auth + mapping des verdicts d'admission spawn en statuts HTTP ; `forward /dashboard` → `Fleet.API.Dashboard` |
+| `Fleet.API.Dashboard` | Plug.Router dashboard V2 Elixir natif (intra-release, pas de proxy Python) : `GET /dashboard` (template EEx compilé au BUILD via `EEx.function_from_file` — template absent = build cassé, pas une 500) + `GET /dashboard/static/*` (`Plug.Static`, `lcars-tva.css`/`favicon.ico`). Squelette en place, panels à remplir |
 | `Fleet.API.SpawnAdmission` | pipeline d'ADMISSION de `POST /api/admin/spawn` (extrait C4) : `admit/1` = allowlist DTO → `pod_id` path-safe → cap-profile chargeable (source unique `Fleet.CapProfile.load/1`) → host-native refusé fail-closed → brief requis one-shot (miroir R18, autorité partagée `Fleet.Spawner.brief_required?/1`) ; `broadcast/1` = émission canon `%Fleet.Event{source: :api}` (event hors registry/malformé → `{:error, _}`, jamais un crash). Fonctions pures + lectures catalogue (pas de process — Iron Law) |
-| `Fleet.API.WS` | Cowboy WebSocket handler `:8080/ws` subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
+| `Fleet.API.WS` | Cowboy WebSocket handler `/ws` (même listener, port per-humain) subscribe Phoenix.PubSub + filtre per-client topics + heartbeat 30s |
 | `Fleet.API.Readiness` | read-model P05 — état opérationnel LIVE (anti-vert-creux). Introspecte config/process/persistent_term ; `deep/0` rend `status: operational\|degraded` + sous-systèmes. Jumeau runtime de `mix lcars.contracts.check` (plan source-conformance build/CI) sur le plan opérationnel. Fonctions pures (pas de process — Iron Law) |
 | `Fleet.API.BuildInfo` | version du build **constatable** (« quel commit tourne ? »). `current/0` rend `%{sha, dirty, ref, source}` — SHA git court + flag dirty + ref, `source` ∈ `:release\|:working_tree\|:unknown` (provenance explicite). Totale (ne lève jamais), mémoïsée en `:persistent_term`. Fonctions pures (pas de process — Iron Law) |
 
@@ -31,9 +34,11 @@ consommateur parmi d'autres possibles, pas couplé à l'arch v2.
 | GET | `/api/pods` | — | liste pods |
 | GET | `/api/version` | — | version du build servi — JSON `{sha, dirty, ref, source}` (`Fleet.API.BuildInfo.current/0`). Lecture → no-auth légitime. **Constatable** : la version est lue, pas déduite |
 | POST | `/api/admin/spawn` | — | broadcast `admin.spawn.request` (ch6) ; **DTO public allowlisté** (422 sur champ interne) ; **503** si quiescence (drain shutdown, `Fleet.Shutdown.Quiesce`) |
+| GET | `/dashboard` | — | dashboard V2 natif (`forward` → `Fleet.API.Dashboard`, EEx compilé au build) |
+| GET | `/dashboard/static/*` | — | assets statiques dashboard (`Plug.Static` : `lcars-tva.css`, `favicon.ico`) |
 
 **Pas d'auth applicative** (HMAC retiré — bearer statique sans surface intra-container).
-Frontière = isolation réseau du container (ne pas publier `:8080` ; tunnel pour le remote).
+Frontière = isolation réseau du container (ne pas publier le port API ; tunnel pour le remote).
 
 ### `/api/admin/spawn` — allowlist DTO (admission)
 
@@ -110,20 +115,21 @@ Topics : exact match OU wildcard suffixe `*` (ex `workflow_map.*` match
 
 | Knob | Default | Rôle |
 |---|---|---|
-| `:fleet_api, :http_port` | `8080` | port Cowboy listener |
-| `:fleet_api, :start_listener` | `true` | bool — `false` en tests (`config/test.exs`) |
+| `:fleet_api, :http_port` | **aucun** (`fetch_env!` fail-loud, A7) | port Cowboy listener. Per-humain : posé par `runtime.exs` depuis `FLEET_API_PORT` (bloc de ports calculé sur l'UID par `bin/fleet_v2`) ; absent = boot hors `fleet_v2` → raise. `config/test.exs` pose `0` (jamais bindé : `start_listener: false`) |
+| `:fleet_api, :start_listener` | `true` | bool — `false` en tests (`config/test.exs`, hermétisme : pas de bind, REST via `Plug.Test`, WS via callbacks directs) |
+| `NOTIFY_SOCKET` (env) | — | posé par systemd (`Type=notify`) : sd_notify `READY=1` émis après bind du listener ; absent/abstract → no-op (dev, test, run hors systemd) |
 | `LCARS_BIND_HOST` (env) | `127.0.0.1` (loopback) | IP de bind du listener — surface no-auth dont la seule écriture restante (`/api/admin/spawn`, gardée) est **local-only par défaut** ; exposer (ex. `0.0.0.0`) = opt-in explicite via cette env. Sources uniques : `Fleet.EventRouter.BindAddress` (ip) + `Fleet.EventRouter.Listener.cowboy_child/1` (child-spec — le gate `:start_listener` et le port restent ici). |
 
 > **Bind loopback (frontière réseau).** Le listener écoute `{127,0,0,1}` par
 > défaut : la surface est no-auth et le contrat de sécurité est « isolation
-> réseau ». Le dashboard navigateur (`:8080/dashboard` + `/ws`) est donc
+> réseau ». Le dashboard navigateur (`:<port>/dashboard` + `/ws`) est donc
 > local-only ; un accès distant passe par un tunnel/reverse-proxy. Exposer
 > publiquement = poser `LCARS_BIND_HOST` (global, toutes surfaces).
 
 ## Tests
 
 ```bash
-mix test apps/fleet_api
+( cd apps/fleet_api && mix test )   # PAS `mix test apps/…` depuis la racine (0 test collecté = faux vert)
 ```
 
 Tests utilisent `Plug.Test` pour Rest (pas de listener réel) et
@@ -131,11 +137,14 @@ callbacks Cowboy directs pour WS (pas de socket réel).
 
 ## Dépendances
 
-* `fleet_event_router` (ch11 PROMOTED) — Bus PubSub
-* `fleet_pilot` (Ring 2) — readiness sonde la liveness du rail step
-* `fleet_spawner` (Ring 1) — readiness lit le backend de lancement résolu via `Fleet.Spawner.LaunchBackend.resolved/0` (source unique du défaut, pas re-copié)
-* `fleet_starfleet` (Ring 3) — readiness lit le backend dispatcher de shutdown résolu via `Fleet.Starfleet.Shutdown.configured_dispatcher/0` (source unique du défaut)
-* `fleet_cap_profile` (ch1) — validation cap-profile à l'admission `/api/admin/spawn`
+(déclarées dans `mix.exs` — toutes descendantes, Ring 4 → bas, acycliques)
+
+* `fleet_event_router` (Ring 0) — Bus PubSub + source unique listener/bind (`Listener.cowboy_child/1`, `BindAddress`)
+* `fleet_pilot` (Ring 3) — readiness sonde la liveness du rail step via `Fleet.Pilot.Application.step_status/0`
+* `fleet_mcp` (Ring 2) — readiness sonde la liveness du listener MCP pod-facing via `Fleet.MCP.Supervisor.pod_facing_status/0` (le PROCESS, pas le knob)
+* `fleet_spawner` (Ring 1) — readiness lit le backend de lancement résolu via `Fleet.Spawner.LaunchBackend.resolved/0` (source unique du défaut, pas re-copié) ; admission spawn : `valid_pod_id?/1`, `brief_required?/1`
+* `fleet_starfleet` (Ring 2) — readiness lit le backend dispatcher de shutdown résolu via `Fleet.Starfleet.Shutdown.configured_dispatcher/0` (source unique du défaut) + le `coord_backend` résolu
+* `fleet_cap_profile` (Ring 0) — validation cap-profile à l'admission `/api/admin/spawn` (même loader que le consumer, MA-18)
 * `:plug`, `:plug_cowboy`, `:jason`
 
 ## D1 décidé (split deferred)

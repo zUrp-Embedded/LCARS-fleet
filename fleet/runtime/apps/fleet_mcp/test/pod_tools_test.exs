@@ -147,12 +147,17 @@ defmodule Fleet.MCP.PodToolsTest do
   end
 
   # Stub forge (seam `:forge_client`) : enregistre create_issue + add_label, retourne le n°.
+  # Adopte le behaviour-contrat du seam → le compilateur vérifie la conformité (anti stub-menteur).
   defmodule StubForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
     def create_issue(repo, title, body, opts) do
       send(self(), {:create_issue, repo, title, body, opts})
       {:ok, 77}
     end
 
+    @impl true
     def add_label(repo, n, label, opts) do
       send(self(), {:add_label, repo, n, label, opts})
       {:ok, :added}
@@ -160,13 +165,26 @@ defmodule Fleet.MCP.PodToolsTest do
 
     # Lecture (get_issue_status) : issue fictive ouverte, aucune PR — suffit à prouver que la GATE a
     # laissé passer (le contenu importe peu, on teste l'autorisation, pas la forge).
+    @impl true
     def get_issue(_repo, _number, _opts), do: {:ok, %{"state" => "open"}}
+    @impl true
     def list_open_pulls(_repo, _opts), do: {:ok, []}
+
+    # Finding D1 (stub incomplet) : ces deux callbacks du contrat manquaient — un test dont
+    # `list_open_pulls` rendrait une PR aurait crashé UndefinedFunctionError au lieu d'un
+    # comportement de stub. Complétés minimal-honnêtes : pas de feature-branch fleet, pas de verdicts.
+    @impl true
+    def parse_feature_branch(_head), do: :error
+    @impl true
+    def pr_review_verdicts(_repo, _index, _opts), do: {:ok, %{}}
   end
 
   # Stub d'onboarding (seam `:project_onboard`) : ne touche NI forge NI disque — rend un repo fictif. Sert
   # à prouver que la gate architecte laisse passer `create_project` sans exécuter la vraie séquence.
   defmodule StubOnboard do
+    @behaviour Fleet.MCP.PodTools.Delegation.ProjectOnboard
+
+    @impl true
     def onboard(name, _opts) do
       {:ok,
        %{
@@ -179,13 +197,33 @@ defmodule Fleet.MCP.PodToolsTest do
 
   # Stub forge qui CAPTURE le repo interrogé par get_issue_status (preuve que le repo vient du `project`
   # passé en argument, pas d'une mémoire globale). L'état d'issue rendu est réglable par `:test_issue_state`.
+  # Lecture SEULE par design : les callbacks d'écriture du contrat raisent fail-loud — un test qui
+  # écrirait sur la forge via ce stub doit exploser, pas passer en silence.
   defmodule RecordingForge do
+    @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    @impl true
     def get_issue(repo, number, _opts) do
       send(self(), {:get_issue, repo, number})
       {:ok, %{"state" => Application.get_env(:fleet_mcp, :test_issue_state, "open")}}
     end
 
+    @impl true
     def list_open_pulls(_repo, _opts), do: {:ok, []}
+
+    @impl true
+    def parse_feature_branch(_head), do: :error
+
+    @impl true
+    def pr_review_verdicts(_repo, _index, _opts), do: {:ok, %{}}
+
+    @impl true
+    def create_issue(_repo, _title, _body, _opts),
+      do: raise("RecordingForge est lecture seule — create_issue inattendu dans ces tests")
+
+    @impl true
+    def add_label(_repo, _n, _label, _opts),
+      do: raise("RecordingForge est lecture seule — add_label inattendu dans ces tests")
   end
 
   describe "get_issue_status (suivi arch — repo PASSÉ en `project`, plus de global mutable)" do

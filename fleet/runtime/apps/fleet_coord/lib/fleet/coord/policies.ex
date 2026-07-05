@@ -117,19 +117,22 @@ defmodule Fleet.Coord.Policies do
 
   Returns :
     * `:ok` — policy match + broadcast effectué
-    * `{:error, reason}` — pas de policy match
+    * `{:error, {:no_policy_match, {decision, reason}}}` — pas de policy match.
+      Tuple STRUCTURÉ (pattern-matchable par les consommateurs — l'ancienne string
+      `"no policy match for …"` ne l'était pas) ; le message humain vit dans les
+      logs des consommateurs (`DriftMonitor`), pas dans le tuple.
   """
   @spec handle_decision(
           Fleet.Starfleet.Decision.t() | map(),
           correlation_id :: String.t() | nil
-        ) :: :ok | {:error, String.t()}
+        ) :: :ok | {:error, {:no_policy_match, {term(), term()}}}
   def handle_decision(%{decision: decision, reason: reason} = dec, correlation_id) do
     case lookup({decision, reason}) do
       {:ok, %{"action" => action, "escalation_path" => path}} ->
         Emitter.dispatch_action(action, path, dec, correlation_id)
 
       :not_found ->
-        {:error, "no policy match for {#{decision}, #{reason}}"}
+        {:error, {:no_policy_match, {decision, reason}}}
     end
   end
 
@@ -139,12 +142,19 @@ defmodule Fleet.Coord.Policies do
   Arité étendue : `correlation_id` explicite (extrait de l'event upstream
   ayant déclenché l'escalade, peut être nil hors work item). Le compat
   shim `handle_escalation/2` (sans correlation_id) est retiré.
+
+  Returns :
+    * `:ok` — policy match + broadcast effectué
+    * `{:error, {:no_escalation_policy, source}}` — pas de policy pour cette
+      source (`source` normalisée en string = la clé de lookup). Tuple STRUCTURÉ,
+      pattern-matchable ; le message humain vit dans les logs des consommateurs
+      (`Cat5Escalator`), pas dans le tuple.
   """
   @spec handle_escalation(
           source :: atom() | String.t(),
           payload :: map(),
           correlation_id :: String.t() | nil
-        ) :: :ok | {:error, String.t()}
+        ) :: :ok | {:error, {:no_escalation_policy, String.t()}}
   def handle_escalation(source, payload, correlation_id) do
     source_str = to_string(source)
 
@@ -153,7 +163,7 @@ defmodule Fleet.Coord.Policies do
         Emitter.dispatch_action(action, path, payload, correlation_id)
 
       :not_found ->
-        {:error, "no escalation policy for #{source_str}"}
+        {:error, {:no_escalation_policy, source_str}}
     end
   end
 

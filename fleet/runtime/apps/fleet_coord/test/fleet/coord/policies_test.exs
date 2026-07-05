@@ -29,11 +29,13 @@ defmodule Fleet.Coord.PoliciesTest do
       assert message[:decision] == "halt" or message["decision"] == "halt"
     end
 
-    test "decision sans match dans table → {:error, _}" do
+    test "decision sans match dans table → {:error, {:no_policy_match, {decision, reason}}}" do
       decision = %{decision: "allow", reason: "unknown", details: %{}, chain: []}
 
-      assert {:error, msg} = Policies.handle_decision(decision, nil)
-      assert msg =~ "no policy match"
+      # Tuple STRUCTURÉ (D1) : le consommateur peut pattern-matcher le miss ET récupérer la
+      # clé de lookup fautive — l'ancienne string "no policy match for …" ne le permettait pas.
+      assert {:error, {:no_policy_match, {"allow", "unknown"}}} =
+               Policies.handle_decision(decision, nil)
     end
   end
 
@@ -91,9 +93,10 @@ defmodule Fleet.Coord.PoliciesTest do
                      500
     end
 
-    test "source inconnu → {:error, _}" do
-      assert {:error, msg} = Policies.handle_escalation(:totally_unknown, %{}, nil)
-      assert msg =~ "no escalation policy"
+    test "source inconnu → {:error, {:no_escalation_policy, source}}" do
+      # Tuple STRUCTURÉ (D1) — source normalisée en string (la clé de lookup).
+      assert {:error, {:no_escalation_policy, "totally_unknown"}} =
+               Policies.handle_escalation(:totally_unknown, %{}, nil)
     end
   end
 end

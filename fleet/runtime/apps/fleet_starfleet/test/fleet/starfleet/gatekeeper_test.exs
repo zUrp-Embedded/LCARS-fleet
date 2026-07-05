@@ -24,21 +24,21 @@ defmodule Fleet.Starfleet.GatekeeperTest do
               }} = Gatekeeper.validate(json)
     end
 
-    test "decision enum invalide → {:error, _}" do
+    # Tuple STRUCTURÉ (D1) : {:decision_invalid, cause} pattern-matchable — la cause distingue
+    # schema invalide (erreurs ExJsonSchema) de JSON malformé (%Jason.DecodeError{}).
+    test "decision enum invalide → {:error, {:decision_invalid, _}}" do
       json = ~s|{"decision":"hocus","reason":"r","details":{}}|
-      assert {:error, msg} = Gatekeeper.validate(json)
-      assert msg =~ "decision invalid"
+      assert {:error, {:decision_invalid, _cause}} = Gatekeeper.validate(json)
     end
 
-    test "champ required manquant → {:error, _}" do
+    test "champ required manquant → {:error, {:decision_invalid, _}}" do
       json = ~s|{"decision":"halt"}|
-      assert {:error, msg} = Gatekeeper.validate(json)
-      assert msg =~ "decision invalid"
+      assert {:error, {:decision_invalid, _cause}} = Gatekeeper.validate(json)
     end
 
-    test "JSON malformé → {:error, _}" do
-      assert {:error, msg} = Gatekeeper.validate(~s|{not valid json|)
-      assert msg =~ "decision invalid"
+    test "JSON malformé → {:error, {:decision_invalid, %Jason.DecodeError{}}}" do
+      assert {:error, {:decision_invalid, %Jason.DecodeError{}}} =
+               Gatekeeper.validate(~s|{not valid json|)
     end
 
     test "reason vide → {:error, _}" do

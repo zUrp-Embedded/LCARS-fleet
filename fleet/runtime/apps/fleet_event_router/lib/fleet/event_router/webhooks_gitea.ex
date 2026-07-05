@@ -99,7 +99,9 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         end
 
       {:error, reason} ->
-        Logger.warning("fleet_event_router webhook hmac mismatch: #{reason}")
+        # `reason` est un atome structuré (:hmac_mismatch | :secret_missing) — le message humain
+        # vit ICI (log + body 401 wire), pas dans le tuple. Jason encode l'atome en string.
+        Logger.warning("fleet_event_router webhook REFUSÉ 401 — vérification HMAC : #{reason}")
         send_resp(conn, 401, Jason.encode!(%{error: reason}))
     end
   end
@@ -125,9 +127,11 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   @doc """
   Vérifie le HMAC SHA256 du `raw_body` contre l'header `x-gitea-signature`.
 
-  Returns `:ok` ou `{:error, "hmac mismatch" | "secret missing"}`.
+  Returns `:ok` ou `{:error, :hmac_mismatch | :secret_missing}` — atomes STRUCTURÉS
+  pattern-matchables (les anciennes strings `"hmac mismatch"`/`"secret missing"` ne
+  l'étaient pas) ; le rendu humain vit dans les logs et le body 401 du handler.
   """
-  @spec verify_hmac(Plug.Conn.t()) :: :ok | {:error, String.t()}
+  @spec verify_hmac(Plug.Conn.t()) :: :ok | {:error, :hmac_mismatch | :secret_missing}
   def verify_hmac(conn) do
     secret_path =
       Application.get_env(:fleet_event_router, :webhook_secret_path, "/etc/fleet/webhook-secret")
@@ -147,7 +151,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
                 "fail-closed (refus : un HMAC à clé vide est forgeable)"
             )
 
-            {:error, "secret missing"}
+            {:error, :secret_missing}
 
           trimmed ->
             sig = conn |> get_req_header("x-gitea-signature") |> List.first() || ""
@@ -156,11 +160,11 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
             if Plug.Crypto.secure_compare(sig, expected),
               do: :ok,
-              else: {:error, "hmac mismatch"}
+              else: {:error, :hmac_mismatch}
         end
 
       {:error, _} ->
-        {:error, "secret missing"}
+        {:error, :secret_missing}
     end
   end
 

@@ -26,6 +26,12 @@ defmodule Fleet.Pilot.ProjectOnboard do
   `committer`=l'humain (git config runtime = **l'user qui a initié le projet → tracé**),
   `pusher`=`lcars-system` (`ForgeAuth.git_env`, owner fleet-wide). Tout avataré (emails → comptes Gitea).
   Pas de GenServer (Iron Law — orchestration d'I/O sans état partagé).
+
+  ⚠ CONTRAT CROISÉ (seam `fleet_mcp`) : `onboard/2` est l'impl RÉELLE (défaut) du behaviour
+  `Fleet.MCP.PodTools.Delegation.ProjectOnboard`. On ne peut PAS l'adopter en `@behaviour` :
+  `fleet_pilot` ne dépend pas de `fleet_mcp` et la référence compile créerait une arête nouvelle
+  (`allowed_graph.yaml` rougirait). Impl duck-typée — toute évolution de la signature/du shape
+  `result()` DOIT être répercutée sur le `@callback` du behaviour (et inversement).
   """
 
   alias Fleet.Pilot.ForgeClient
