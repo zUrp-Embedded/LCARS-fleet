@@ -24,10 +24,24 @@ BIN_DIR="$(dirname "$SELF")"
 RUNTIME_DIR="$(dirname "$BIN_DIR")"          # bin/.. = l'umbrella
 
 # Distribution Erlang (opt-in via LCARS_FLEET_V2_ERL_NODE) — dérivation UNIQUE, partagée
-# start (lancement distribué) / stop (RPC graceful F7).
+# start (lancement distribué) / stop (RPC graceful F7). ⚠ Le flag/cookie viennent de l'ENV FILE
+# (~/.lcars/fleet_v2.env) : compute_dist() doit tourner APRÈS load_env() — un calcul au top-level
+# du script lisait des vars pas encore chargées (bug attrapé au boot réel 2026-07-05 : release
+# démarrée SANS distribution, RPC/stop-graceful morts).
 ERL_NODE="fleet_$(id -un)@127.0.0.1"
-ERL_COOKIE="${LCARS_FLEET_V2_ERL_COOKIE:-lcars}"
-DIST_ON=""; [[ -n "${LCARS_FLEET_V2_ERL_NODE:-}" ]] && DIST_ON=1
+ERL_COOKIE=""
+DIST_ON=""
+ENV_LOADED=""
+
+load_env() {
+  [[ -n "$ENV_LOADED" ]] && return 0
+  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
+  # shellcheck source=/dev/null
+  if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
+  ENV_LOADED=1
+  ERL_COOKIE="${LCARS_FLEET_V2_ERL_COOKIE:-lcars}"
+  [[ -n "${LCARS_FLEET_V2_ERL_NODE:-}" ]] && DIST_ON=1 || true
+}
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 SESSION="${LCARS_FLEET_V2_SESSION:-fleet_v2}"
 DAEMON_SOCK="${LCARS_FLEET_V2_SOCK:-$HOME/.lcars/run/fleet_v2.sock}"
@@ -51,10 +65,9 @@ compute_ports() {
 }
 
 setup_env() {
+  # Env humaine + flag distribution : dérivation UNIQUE load_env() (partagée avec cmd_stop).
+  load_env
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
-  # env humain fourni au runtime (pas un chemin constant) :
-  # shellcheck source=/dev/null
-  if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
 
   # F-037 multi-projet : le poller DÉCOUVRE ses repos par topic (lcars-fleet-<human>) → plus de
   # LCARS_PILOT_POLL_REPO requis. La garde fail-loud porte désormais sur FORGE_BASE_URL (découverte +
@@ -198,6 +211,7 @@ cmd_start() {
 # graceful qui traîne >30s). Avant : kill-server direct = aucun chemin d'arrêt n'exécutait jamais
 # le rail Shutdown (construit pour ça, zéro caller).
 cmd_stop() {
+  load_env
   if ! dtmux has-session -t "$SESSION" 2>/dev/null; then
     echo "fleet_v2: pas de fleet active." >&2
     return 0
@@ -218,8 +232,9 @@ cmd_stop() {
     fi
 
     # Attend la fin propre du BEAM (la session tmux meurt avec lui) — 30s max.
+    # ⚠ set -e : `((i++))` rend 0 (falsy) au premier tour → tuait le script en silence. Forme sûre.
     local i=0
-    while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < 30 )); do sleep 1; ((i++)); done
+    while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < 30 )); do sleep 1; i=$((i + 1)); done
   fi
 
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
