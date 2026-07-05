@@ -1,0 +1,77 @@
+# SOURCE: fleet/provisioning_v2/docker/docker-compose.yml
+# AUTHOR: DrDree
+# STARDATE: 2026-07-05
+# STATUS: PROTO-V2 — LCARS fleet v2 + forge Gitea sidecar (profil `forge`)
+#
+# Détail d'implémentation derrière ./docker.sh (racine repo) — l'humain ne le touche pas.
+# Contexte de build = LA RACINE DU REPO (../../.. depuis CE fichier — vérifié : c'est le
+# path-rot du nid v1 qui avait tué la chaîne d'avant ; le .dockerignore racine s'applique).
+#
+# bwrap DANS le conteneur : les pods exigent unshare/mount/pivot_root/setns (userns + mountns).
+# Le profil seccomp Docker par défaut les bloque → cap SYS_ADMIN + seccomp/apparmor unconfined
+# sur CE service. Trade assumé et documenté : la frontière de containment des PODS est bwrap
+# À L'INTÉRIEUR (l'octogone) ; la frontière du conteneur, elle, est volontairement perméable aux
+# syscalls de namespaces — le durcissement fin (profil seccomp custom additif) est un chantier
+# de ship, pas un défaut silencieux. PAS de `privileged: true` (surface bien plus large).
+
+name: lcars
+
+services:
+  lcars:
+    build:
+      context: ../../..
+      dockerfile: fleet/provisioning_v2/docker/Dockerfile
+      args:
+        GIT_SHA: "${LCARS_GIT_SHA:-unknown}"
+        BUILD_DATE: "${LCARS_BUILD_DATE:-unknown}"
+    image: lcars-fleet:2
+    hostname: lcars
+    environment:
+      LCARS_HUMAN: "${LCARS_HUMAN:-lcars}"
+      LCARS_UID: "${LCARS_UID:-1000}"
+      LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
+      # Avec le profil `forge`, le sidecar répond à ce nom sur le réseau compose.
+      FORGE_BASE_URL: "${FORGE_BASE_URL:-http://forge:3000}"
+    ports:
+      # SSH = la seule surface publiée (login-manager). Les listeners fleet restent en loopback
+      # DANS le conteneur (frontière = isolation réseau) : on y accède par tunnel SSH.
+      - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
+    volumes:
+      - lcars-home:/home
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    restart: unless-stopped
+    networks: [lcars]
+
+  forge:
+    profiles: [forge]
+    # PIN par digest — 1.26.1 = la version validée avec le runtime (marqueurs, tokens, webhooks).
+    image: gitea/gitea:1.26.1-rootless@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62
+    hostname: forge
+    environment:
+      GITEA__server__ROOT_URL: "http://forge:3000/"
+      GITEA__server__HTTP_PORT: "3000"
+    ports:
+      - "${LCARS_FORGE_PORT:-127.0.0.1:3300}:3000"
+    volumes:
+      - forge-data:/var/lib/gitea
+      - forge-config:/etc/gitea
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/v1/version"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+    networks: [lcars]
+
+volumes:
+  lcars-home:
+  forge-data:
+  forge-config:
+
+networks:
+  lcars:

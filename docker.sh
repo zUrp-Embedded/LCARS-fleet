@@ -1,157 +1,102 @@
 #!/usr/bin/env bash
-
-#       ______________________________________________________
-#      /          LCARS FLEET - FEDERATION DATABASE           \
-#     |   ________   __________________________________________\
-#     |  |  2026  |  | SOURCE: docker.sh
-#     |  |________|  | AUTHOR: STARFLEET
-#     |   ________   | SYSTEM: LCARS-FLEET v6.0
-#     |  |  v6.0  |  | STATUS: OPERATIONAL
-#     |  |________|  |__________________________________________
-#     |              \__________________________________________\
-#      \    "To boldly go where no code has gone before..."     /
-#       \______________________________________________________/
+# SOURCE: docker.sh
+# AUTHOR: DrDree
+# STARDATE: 2026-07-05
+# STATUS: PROTO-V2 — entrée Docker user-facing : wrapper mince sur compose (le compose est un détail d'implémentation)
 #
-#     +-----------------------------------------------------------+
-#     | [ LCARS-FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
-#     +-----------------------------------------------------------+
-#     | MODULE: DOCKER-ENTRY    | SUBSYSTEM: DOCKER / BOOTSTRAP   |
-#     | LICENSE: AGPL-3         | STARDATE: 2026.088              |
-#     +-------------------------+---------------------------------+
-#     |                                                           |
-#     |  Docker user-facing entrypoint — wraps docker compose.    |
-#     |  The user never touches docker-compose.yml directly.      |
-#     |                                                           |
-#     +-----------------------------------------------------------+
+# LCARS fleet v2 en conteneur. Modèle : l'image embarque le runtime déployé (release RO) + sshd
+# comme login-manager ; l'humain SSH dans le conteneur EN TANT QUE LUI puis `fleet_v2 start`.
+# Le fichier compose vit dans fleet/provisioning_v2/docker/ — l'humain ne le touche pas.
 #
-#     [FR]
-#     Point d'entree Docker. Encapsule docker compose pour que l'user
-#     n'ait qu'une CLI simple. Le fichier compose est un detail
-#     d'implementation dans fleet/provisioning/docker/.
+# USAGE : ./docker.sh <commande>
+#   build          construit l'image (labels OCI : sha git + date stampés ici)
+#   up             démarre le conteneur fleet (détaché) — `--forge` ajoute le sidecar Gitea
+#   doctor         sonde l'état DANS le conteneur (le même doctor que le chemin WSL)
+#   shell          shell dans le conteneur, en tant que l'humain (LCARS_HUMAN)
+#   logs           logs du conteneur (suivi)
+#   down           arrête et retire les conteneurs (les volumes restent)
+#   reset          down + image + VOLUMES (destructif — l'état /home du conteneur disparaît)
+#   help           cette aide
 #
-#     [EN]
-#     NAME
-#         docker.sh — LCARS fleet Docker entrypoint
+# ENV (tous optionnels) :
+#   LCARS_HUMAN                login de l'humain dans le conteneur (défaut lcars)
+#   LCARS_UID                  uid de l'humain (défaut 1000)
+#   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
+#   LCARS_SSH_PORT             bind du port SSH (défaut 127.0.0.1:2222)
+#   FORGE_BASE_URL             forge cible (défaut http://forge:3000 avec --forge)
 #
-#     SYNOPSIS
-#         ./docker.sh <command> [options]
-#
-#     COMMANDS
-#         build       Build the Docker image
-#         up          Build (if needed) and start the container
-#         shell       Open a shell in a running container
-#         down        Stop and remove the container
-#         reset       Remove container, image, and local volumes
-#         help        Show this help
-#
-#     ENVIRONMENT
-#         ANTHROPIC_API_KEY   Claude API key (optional — can use OAuth instead)
-#         GH_TOKEN            GitHub token for git push (optional)
-#         GIT_USER_NAME       Git commit author name
-#         GIT_USER_EMAIL      Git commit author email
-#         LCARS_REPO          Fork repo (default: lordzurp/LCARS-fleet)
-#
-#     EXIT CODES
-#         0    Success
-#         1    Error or unknown command
-#
-# --- END HEADER ---
+# EXIT : 0 succès · 1 erreur/commande inconnue
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="$SCRIPT_DIR/fleet/provisioning/docker/docker-compose.yml"
-PROJECT_NAME="lcars"
+COMPOSE_FILE="$SCRIPT_DIR/fleet/provisioning_v2/docker/docker-compose.yml"
+PROJECT=lcars
 
-# ─── Preflight ──────────────────────────────────────────────────────────────
-if ! command -v docker &>/dev/null; then
-    echo "ERROR: docker not found — install Docker first" >&2
-    exit 1
-fi
-
-# Check for compose (plugin or standalone)
-if docker compose version &>/dev/null 2>&1; then
-    COMPOSE="docker compose"
-elif command -v docker-compose &>/dev/null; then
-    COMPOSE="docker-compose"
+# ─── Préflight ────────────────────────────────────────────────────────────────────────────────────
+command -v docker >/dev/null || { echo "docker.sh: docker introuvable — installe Docker d'abord" >&2; exit 1; }
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null; then
+  COMPOSE=(docker-compose)
 else
-    echo "ERROR: docker compose not found — install Docker Compose" >&2
-    exit 1
+  echo "docker.sh: docker compose introuvable (plugin ou standalone)" >&2; exit 1
 fi
+[[ -f "$COMPOSE_FILE" ]] || { echo "docker.sh: compose introuvable: $COMPOSE_FILE (checkout incomplet ?)" >&2; exit 1; }
 
-compose_cmd() {
-    $COMPOSE -f "$COMPOSE_FILE" -p "$PROJECT_NAME" "$@"
+compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
+
+# La vérité de révision : stampée au build dans les labels OCI (le worktree/clone HÔTE a git ;
+# le contexte, lui, n'embarque pas .git — cf. Dockerfile).
+build_env() {
+  LCARS_GIT_SHA="$(git -C "$SCRIPT_DIR" rev-parse --short=8 HEAD 2>/dev/null || echo unknown)"
+  LCARS_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  export LCARS_GIT_SHA LCARS_BUILD_DATE
 }
 
-# ─── Commands ───────────────────────────────────────────────────────────────
-cmd_build() {
-    echo "[lcars-docker] Building image..."
-    compose_cmd build "$@"
-}
+cmd_build() { build_env; compose build "$@"; }
 
 cmd_up() {
-    echo "[lcars-docker] Starting LCARS fleet container..."
-    compose_cmd run --rm lcars "$@"
+  local profiles=()
+  if [[ "${1:-}" == "--forge" ]]; then profiles=(--profile forge); shift; fi
+  build_env
+  compose "${profiles[@]}" up -d "$@"
+  echo ""
+  echo "LCARS fleet up. Accès :"
+  echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet_v2 start"
+  echo "  ./docker.sh doctor                                   # état provisionné ?"
 }
 
-cmd_shell() {
-    local container
-    container=$(docker ps --filter "label=com.docker.compose.project=$PROJECT_NAME" --format '{{.ID}}' | head -1)
-    if [[ -z "$container" ]]; then
-        echo "No running LCARS container — use './docker.sh up' first" >&2
-        exit 1
-    fi
-    docker exec -it "$container" bash
+cmd_doctor() {
+  compose exec lcars /opt/lcars/fleet/provisioning_v2/provision doctor --substrate docker \
+    --human "${LCARS_HUMAN:-lcars}" "$@"
 }
 
-cmd_down() {
-    echo "[lcars-docker] Stopping..."
-    compose_cmd down "$@"
-}
+cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
+cmd_logs()  { compose logs -f "$@"; }
+cmd_down()  { compose --profile forge down "$@"; }
 
 cmd_reset() {
-    echo "[lcars-docker] Resetting — removing container, image, and volumes..."
-    compose_cmd down --rmi local -v "$@"
-    echo "[lcars-docker] Reset complete. Run './docker.sh up' to start fresh."
+  echo "docker.sh: RESET — conteneurs + image + VOLUMES (l'état /home du conteneur sera détruit)."
+  read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
+  [[ "$a" == "yes" ]] || { echo "docker.sh: annulé."; exit 1; }
+  compose --profile forge down --rmi local -v
+  echo "docker.sh: reset fait. « ./docker.sh up » pour repartir de zéro."
 }
 
-cmd_help() {
-    cat <<'EOF'
-LCARS Fleet — Docker
+usage() { sed -n '6,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
-Usage: ./docker.sh <command>
+# LCARS_SSH_PORT par défaut, visible dans le message d'accès.
+: "${LCARS_SSH_PORT:=127.0.0.1:2222}"
 
-Commands:
-  build       Build the Docker image
-  up          Build (if needed) and start interactive container
-  shell       Open a shell in a running container
-  down        Stop and remove the container
-  reset       Full reset — remove container, image, volumes
-
-Environment variables:
-  ANTHROPIC_API_KEY   Claude API key (or use OAuth on first run)
-  GH_TOKEN            GitHub token for git push
-  GIT_USER_NAME       Git author name
-  GIT_USER_EMAIL      Git author email
-  LCARS_REPO          Fork repo (default: lordzurp/LCARS-fleet)
-
-Quick start:
-  ./docker.sh up                                    # OAuth login
-  ANTHROPIC_API_KEY=sk-ant-... ./docker.sh up       # API key
-  GH_TOKEN=ghp_... ./docker.sh up                   # with git push
-EOF
-}
-
-# ─── Dispatch ───────────────────────────────────────────────────────────────
 case "${1:-help}" in
-    build) shift; cmd_build "$@" ;;
-    up)    shift; cmd_up "$@" ;;
-    shell) cmd_shell ;;
-    down)  shift; cmd_down "$@" ;;
-    reset) shift; cmd_reset "$@" ;;
-    help|--help|-h) cmd_help ;;
-    *)
-        echo "Unknown command: $1 — use './docker.sh help'" >&2
-        exit 1
-        ;;
+  build)  shift; cmd_build "$@" ;;
+  up)     shift; cmd_up "$@" ;;
+  doctor) shift; cmd_doctor "$@" ;;
+  shell)  cmd_shell ;;
+  logs)   shift; cmd_logs "$@" ;;
+  down)   shift; cmd_down "$@" ;;
+  reset)  cmd_reset ;;
+  help|-h|--help) usage ;;
+  *) echo "docker.sh: commande inconnue: $1 (./docker.sh help)" >&2; exit 1 ;;
 esac

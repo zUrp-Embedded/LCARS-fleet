@@ -1,5 +1,15 @@
-.git
-_archived
-docker-compose.yml
-work/
-docs/#6_diary/
+# .dockerignore — contexte de build = la racine du repo (cf. fleet/provisioning_v2/docker/).
+# WHITELIST : tout est exclu, on n'embarque QUE ce que le Dockerfile consomme. Un contexte
+# minimal = build rapide, zéro fuite (pas de work/, pas de credentials, pas de PoC) et un cache
+# qui ne s'invalide pas pour un fichier sans rapport.
+*
+!fleet/runtime
+!fleet/provisioning_v2
+!LICENSE
+
+# Re-exclusions DANS ce qui est inclus (dernier match gagne) : artefacts de build locaux et
+# état d'éditeur — jamais dans une image (le stage build refait deps+release proprement).
+fleet/runtime/_build
+fleet/runtime/deps
+fleet/runtime/apps/*/tmp
+fleet/runtime/.elixir_ls
