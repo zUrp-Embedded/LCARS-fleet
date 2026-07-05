@@ -1,7 +1,7 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-06-29
+**Dernière révision** : 2026-07-05
 **Statut** : modèle humain-lance (systemd retiré 2026-06-16)
 **Référencé par** : `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -73,3 +73,15 @@ bash test/integration/sandbox_notrace_test.sh
 
 N0 (substrat pur). La frontière vendor N1 isolée = `bin/claude_launch.sh` (post-ADR-G ;
 `fleet_claude_bridge` retiré).
+
+## Role-tokens forge (fix A4)
+
+Les comptes de rôle (architect, engineer, qualifier, reviewer, gatekeeper, consultant, vulcan)
+postent EN LEUR NOM via `<FORGE_ROLE_TOKENS_DIR>/<role>.gitea_token`. La pose est mécanisée :
+
+    etc/provision-role-tokens.sh --forge <URL> --passwords-file <secrets.json>   # ou --admin-token-file
+    etc/provision-role-tokens.sh --forge <URL> --check                           # sonde (nuke-drill)
+
+Exécution PRIVILÉGIÉE (passwords/admin = scalpels), une fois par forge, idempotente. Sans ces
+tokens, un humain neuf bloque au premier geste signé par un rôle (create_issue → 401, vécu
+2026-07-05). Tests : `test/provision_role_tokens/` (bats, couvert par `mix gate`).

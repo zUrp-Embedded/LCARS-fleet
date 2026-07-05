@@ -7,6 +7,9 @@ defmodule Fleet.Credentials.RoleToken do
 
   Lu de `<role_tokens_dir>/<role>.gitea_token`. `role_tokens_dir` = config
   `:fleet_credentials, :role_tokens_dir`, **défaut `/home/private`** (répertoire de secrets, `700`).
+  La POSE est mécanisée : `etc/provision-role-tokens.sh` (fix A4 — mint idempotent par forge,
+  exécution privilégiée une fois ; `--check` = sonde de validité, réutilisée par le nuke-drill).
+  Un jeu par forge (cf. env `FORGE_ROLE_TOKENS_DIR`, lu par runtime.exs).
   C'est un path **système absolu** — JAMAIS `System.user_home()` : la fleet est lancée PAR un humain
   (le BEAM hérite son UID, il n'existe pas de compte système `fleet`), mais les tokens de rôle sont un
   secret provisionné côté SYSTÈME, partagé par toutes les fleets per-humain — le path ne doit donc pas
