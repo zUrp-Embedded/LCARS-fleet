@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-04 (expurgé : data dupliquée sortie vers ses sources, fonction primaire = guide de navigation)
+**Dernière révision** : 2026-07-05 (expurgé : data dupliquée sortie vers ses sources, fonction primaire = guide de navigation)
 **Statut** : guide runtime v2.
 **Référencé par** : —
 
@@ -81,6 +81,14 @@ Plusieurs env vars ont été **retirées** (plus aucun lecteur, ou dangereuses) 
 Quand un test a besoin du vrai backend, il l'instancie directement (`start_supervised` avec args explicites), il ne flippe pas la config globale.
 
 ## Code conventions
+
+- **Logger levels — doctrine** (suivie ~100%, écrite ici pour la verrouiller) : `error` = perte
+  réelle ou condition terminale (donnée NON gravée, event load-bearing NON émis, HALT, corruption) ;
+  `warning` = dégradé/retry/anomalie non-fatale (backoff en cours, skip défensif, refus d'entrée) ;
+  `info` = jalon de lifecycle (boot, spawn, complétion) ; les ticks nominaux sont SILENCIEUX.
+- **Préfixe des messages de log** : `<DernierSegmentModule>: <message>` (ex. `PodWarden: …`). Deux
+  rails délibérés font exception : `AUDIT <event.type>` (rail audit starfleet) et `pod <id> …`
+  (state-machine du pod, corrélation par pod).
 
 - Le `README.md` de chaque app est le **contrat** (sous-modules, API publique, knobs de config, dépendances). Quand tu ajoutes un module, mets à jour le README.
 - En-têtes des scripts shell au format LCARS (`SOURCE: / AUTHOR: / STARDATE: / STATUS:`). La stardate est posée par la skill `/push-github` — ne pas l'éditer à la main avant de pousser.
