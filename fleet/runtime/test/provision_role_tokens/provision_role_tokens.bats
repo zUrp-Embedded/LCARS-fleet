@@ -53,11 +53,17 @@ teardown() { rm -rf "$TMP"; }
   [[ "$output" == *"--forge"* ]]
 }
 
-@test "mode pose SANS autorité (ni passwords ni admin) → exit 1, jamais un mint aveugle" {
+@test "mode pose SANS --passwords-file → exit 1, jamais un mint aveugle" {
   run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --roles engineer
   [ "$status" -eq 1 ]
   [[ "$output" == *"autorité"* ]]
   [ ! -f "$MOCK/calls.log" ]
+}
+
+@test "--admin-token-file RETIRÉ (mode mort-né : Gitea refuse le mint par token admin)" {
+  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --admin-token-file /whatever --roles engineer
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"option inconnue"* ]]
 }
 
 @test "passwords-file illisible → exit 1 (le privilège manquant est DIT, pas contourné)" {
@@ -130,4 +136,15 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 0 ]
   [ -f "$TOKDIR/engineer.gitea_token" ]
   [ -f "$TOKDIR/qualifier.gitea_token" ]
+}
+
+@test "passwords-file : clé CAPITALISÉE matche le rôle minuscule (Gitea case-insensitive, finding starfleet)" {
+  # Un humain écrit les comptes comme il les voit sur la forge (`Architect`) ; le rôle interne est
+  # `architect`. Le lookup doit matcher — sinon FAIL alors que le password EXISTE (le format-piège vécu).
+  printf '{"Architect":"pw-arch"}' > "$TMP/caps.json"
+  printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
+  printf '200' > "$MOCK/probe_code"
+  run "$SCRIPT" --forge http://f --tokens-dir "$TOKDIR" --passwords-file "$TMP/caps.json" --roles architect
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TOKDIR/architect.gitea_token")" = "tok-frais" ]
 }

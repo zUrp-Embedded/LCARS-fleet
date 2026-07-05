@@ -79,9 +79,11 @@ N0 (substrat pur). La frontière vendor N1 isolée = `bin/claude_launch.sh` (pos
 Les comptes de rôle (architect, engineer, qualifier, reviewer, gatekeeper, consultant, vulcan)
 postent EN LEUR NOM via `<FORGE_ROLE_TOKENS_DIR>/<role>.gitea_token`. La pose est mécanisée :
 
-    etc/provision-role-tokens.sh --forge <URL> --passwords-file <secrets.json>   # ou --admin-token-file
+    etc/provision-role-tokens.sh --forge <URL> --passwords-file <secrets.json>   # basic auth = seule voie de mint
     etc/provision-role-tokens.sh --forge <URL> --check                           # sonde (nuke-drill)
 
-Exécution PRIVILÉGIÉE (passwords/admin = scalpels), une fois par forge, idempotente. Sans ces
-tokens, un humain neuf bloque au premier geste signé par un rôle (create_issue → 401, vécu
-2026-07-05). Tests : `test/provision_role_tokens/` (bats, couvert par `mix gate`).
+Le `passwords-file` (JSON `{"role":"pwd"}`, clé insensible à la casse) EST le livrable A4 durable :
+un fichier opérateur-only, rejouable. Gitea n'accepte QUE la basic auth pour créer un token (même un
+token site-admin ne peut pas minter — vérifié 2026-07-05). Exécution PRIVILÉGIÉE, une fois par forge,
+idempotente. Sans ces tokens, un humain neuf bloque au premier geste signé par un rôle (create_issue
+→ 401, vécu 2026-07-05). Tests : `test/provision_role_tokens/` (bats, couvert par `mix gate`).

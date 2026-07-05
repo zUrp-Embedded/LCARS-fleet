@@ -11,11 +11,15 @@
 # opérateur. Ce script EST le mécanisme : il mint les tokens sur UNE forge et les écrit dans UN
 # dossier (un jeu par forge — cf. FORGE_ROLE_TOKENS_DIR côté runtime), rejouable à l'infini.
 #
-# PRIVILÈGES (doctrine POSIX minimum, rien de maison) : minter le token d'un compte exige SOIT le
-# password de ce compte (basic auth — --passwords-file), SOIT un token site-admin (header Sudo —
-# --admin-token-file). Les deux sont des SCALPELS (fichiers root/opérateur-only) : ce script se
-# lance UNE fois par un privilégié ; le runtime, lui, ne lit que les fichiers posés (0640,
-# groupe fleet). Le script n'invente aucun privilège : il échoue proprement s'il n'a pas le sien.
+# PRIVILÈGE (doctrine POSIX minimum, rien de maison) : minter le token d'un compte exige la BASIC
+# AUTH de ce compte (`--passwords-file`). ⚠ Gitea REFUSE la création de token par header token —
+# même un token site-admin, même sur soi-même (`POST /users/{u}/tokens` → "auth required" ; vérifié
+# starfleet 2026-07-05). Il n'existe donc PAS de voie « admin-token » équivalente : un opérateur qui
+# n'a que le token admin doit d'abord poser un password (`PATCH /admin/users/{u}`) PUIS basic-auth —
+# hors scope de ce script (surface + non-idempotent). Le password est un SCALPEL (fichier
+# opérateur-only) : ce script se lance UNE fois par un privilégié ; le runtime, lui, ne lit que les
+# fichiers posés (0640, groupe fleet). Le script n'invente aucun privilège : il échoue proprement
+# s'il n'a pas le sien.
 #
 # IDEMPOTENCE (provisioning brutal) : un token local DÉJÀ VALIDE sur la forge → skip (aucune
 # écriture). Invalide/absent → l'ancien token remote du même nom est supprimé puis re-minté, le
@@ -24,11 +28,11 @@
 #
 # USAGE :
 #   provision-role-tokens.sh --forge http://localhost:3000 --passwords-file /root/roles.json
-#   provision-role-tokens.sh --forge http://10.42.0.118 --admin-token-file /root/.gitea_admin_token
 #   provision-role-tokens.sh --forge http://localhost:3000 --check          # sonde seule
 # Options : --tokens-dir DIR (défaut /home/private) · --roles "a b c" (défaut : les 7) ·
 #           --group GRP (défaut fleet) · --token-name NAME (défaut lcars-fleet)
-# passwords-file : JSON {"engineer":"pwd",...} OU {"engineer":{"password":"pwd"},...}.
+# passwords-file : JSON {"engineer":"pwd",...} OU {"engineer":{"password":"pwd"},...}. Clé insensible
+#   à la casse (Gitea résout les comptes case-insensitive : `Architect` matche le rôle `architect`).
 # EXIT : 0 = tous posés/valides · 1 = usage/dépendance · 2 = au moins un rôle en échec.
 
 set -euo pipefail
@@ -40,10 +44,9 @@ GROUP="fleet"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue,write:user"
 PASSWORDS_FILE=""
-ADMIN_TOKEN_FILE=""
 CHECK_ONLY=0
 
-usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,7 +56,6 @@ while [[ $# -gt 0 ]]; do
     --group) GROUP="$2"; shift 2 ;;
     --token-name) TOKEN_NAME="$2"; shift 2 ;;
     --passwords-file) PASSWORDS_FILE="$2"; shift 2 ;;
-    --admin-token-file) ADMIN_TOKEN_FILE="$2"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "provision-role-tokens: option inconnue: $1" >&2; usage >&2; exit 1 ;;
@@ -65,17 +67,14 @@ command -v jq >/dev/null || { echo "provision-role-tokens: jq requis" >&2; exit 
 [[ -n "$FORGE" ]] || { echo "provision-role-tokens: --forge URL (ou FORGE_BASE_URL) requis" >&2; exit 1; }
 FORGE="${FORGE%/}"
 
-# En mode POSE, une source d'autorité est requise (les deux = passwords prioritaire, plus scopé).
-if [[ "$CHECK_ONLY" -eq 0 && -z "$PASSWORDS_FILE" && -z "$ADMIN_TOKEN_FILE" ]]; then
-  echo "provision-role-tokens: mode pose sans autorité — --passwords-file OU --admin-token-file requis (--check pour sonder seul)" >&2
+# En mode POSE, la basic auth (passwords-file) est requise — seule voie que Gitea accepte pour créer
+# un token (cf. header : le token admin ne peut PAS minter).
+if [[ "$CHECK_ONLY" -eq 0 && -z "$PASSWORDS_FILE" ]]; then
+  echo "provision-role-tokens: mode pose sans autorité — --passwords-file requis (--check pour sonder seul)" >&2
   exit 1
 fi
 if [[ -n "$PASSWORDS_FILE" && ! -r "$PASSWORDS_FILE" ]]; then
   echo "provision-role-tokens: passwords-file illisible: $PASSWORDS_FILE (lance avec le privilège qui le lit)" >&2
-  exit 1
-fi
-if [[ -n "$ADMIN_TOKEN_FILE" && ! -r "$ADMIN_TOKEN_FILE" ]]; then
-  echo "provision-role-tokens: admin-token-file illisible: $ADMIN_TOKEN_FILE" >&2
   exit 1
 fi
 
@@ -85,20 +84,22 @@ token_valid() { # $1=token
   [[ "$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $1" "$FORGE/api/v1/user")" == "200" ]]
 }
 
-# Auth d'ACTION sur le compte $1 : soit basic (password du rôle), soit admin+Sudo. Écrit les args
-# curl dans le tableau global CURL_AUTH (pas d'échappement fragile en string).
+# Auth d'ACTION sur le compte $1 : basic auth (password du rôle). Écrit les args curl dans le tableau
+# global CURL_AUTH (pas d'échappement fragile en string). Lookup de clé INSENSIBLE À LA CASSE : Gitea
+# résout les comptes case-insensitive → un password-file avec `Architect` matche le rôle `architect`
+# (on s'aligne sur le système sous-jacent, on n'impose pas une contrainte plus stricte que lui). La
+# valeur = string nue OU objet `{password: ...}`. `-u user:pass` en basic auth (le seul mint accepté).
 declare -a CURL_AUTH
 set_auth_for() { # $1=role
-  local role="$1" pwd admin
-  if [[ -n "$PASSWORDS_FILE" ]]; then
-    pwd="$(jq -r --arg r "$role" '.[$r] | if type=="object" then .password else . end // empty' "$PASSWORDS_FILE")"
-    [[ -n "$pwd" ]] || return 1
-    CURL_AUTH=(-u "$role:$pwd")
-  else
-    admin="$(tr -d '[:space:]' < "$ADMIN_TOKEN_FILE")"
-    [[ -n "$admin" ]] || return 1
-    CURL_AUTH=(-H "Authorization: token $admin" -H "Sudo: $role")
-  fi
+  local role="$1" pwd
+  pwd="$(jq -r --arg r "$role" '
+    to_entries[]
+    | select((.key | ascii_downcase) == ($r | ascii_downcase))
+    | .value | if type=="object" then .password else . end
+    | select(. != null and . != "")
+  ' "$PASSWORDS_FILE" | head -1)"
+  [[ -n "$pwd" ]] || return 1
+  CURL_AUTH=(-u "$role:$pwd")
 }
 
 fail=0
