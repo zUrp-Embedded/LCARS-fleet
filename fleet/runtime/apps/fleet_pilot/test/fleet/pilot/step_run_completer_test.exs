@@ -422,7 +422,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:unlock, 42, "lcars-in-flight"}
     end
 
-    test "producteur avec :eng_summary → poste la VOIX de l'eng en commentaire PR (fin du « eng muet »)" do
+    test "producteur avec :eng_summary → note COMPLÈTE sur le TICKET, POINTEUR sur la PR (dédup footprint)" do
       step_run =
         producer_step_run(:advance, %{
           next_assignee: "qualifier",
@@ -431,9 +431,15 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert {:ok, :review_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
 
-      assert_received {:comment, 7, body}
-      assert body =~ "j'ai implémenté le décodeur, choisi un buffer circulaire"
-      assert body =~ "Note de l'engineer"
+      # la NOTE COMPLÈTE (la prose) vit UNE seule fois, sur le ISSUE (42).
+      assert_received {:comment, 42, issue_body}
+      assert issue_body =~ "j'ai implémenté le décodeur, choisi un buffer circulaire"
+      assert issue_body =~ "Note de l'engineer"
+
+      # la PR (7) ne reçoit qu'un POINTEUR vers le ticket — plus le blob verbatim.
+      assert_received {:comment, 7, pr_body}
+      assert pr_body =~ "ticket #42"
+      refute pr_body =~ "j'ai implémenté le décodeur"
     end
 
     test "producteur SANS :eng_summary → AUCUN commentaire (pas de voix vide)" do

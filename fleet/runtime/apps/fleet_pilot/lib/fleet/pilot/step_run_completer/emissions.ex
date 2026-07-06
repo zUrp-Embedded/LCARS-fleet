@@ -74,9 +74,10 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   commit, déjà poussé). Absent/vide → rien (pas de commentaire vide). Couvre livraison ET rework (les
   deux passent par open_deliverable_pr — PR neuve ou existante).
 
-  La voix de l'eng sort sur DEUX canaux à 2 buts distincts — la PR (revue du diff, contexte code)
-  ET le ISSUE (réponse au brief, « voici ce que j'ai fait », contexte issue) ; servir la PR seule
-  laisserait un trou côté issue.
+  DÉDUP (footprint) : la NOTE COMPLÈTE va sur le ISSUE (le ticket = record canonique du travail,
+  « voici ce que j'ai fait » en réponse au brief) ; la PR ne reçoit qu'un POINTEUR vers le ticket
+  (le reviewer review le diff ; la prose de l'eng vit UNE seule fois, sur le ticket). Avant, le même
+  `summary` (~1 Ko) était posté verbatim des deux côtés — bruit pur.
   """
   @spec post_eng_summary(map(), integer(), keyword()) :: :ok | :noop
   def post_eng_summary(step_run, pr, opts) do
@@ -89,19 +90,22 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
         role = Map.get(step_run, :role, "engineer")
         role_opts = ForgeClient.as_role(forge_opts, role)
 
-        _ =
-          forge.post_comment(
-            repo,
-            pr,
-            "## 🔧 Note de l'#{role} (livrable)\n\n#{summary}",
-            role_opts
-          )
-
+        # NOTE COMPLÈTE sur le ISSUE (record canonique du travail).
         _ =
           forge.post_comment(
             repo,
             n,
-            "## 🔧 Note de l'#{role} sur le issue\n\n#{summary}",
+            "## 🔧 Note de l'#{role} (livrable)\n\n#{summary}",
+            role_opts
+          )
+
+        # POINTEUR sur la PR (pas le blob) : `##{n}` est auto-linké par Gitea → le reviewer suit le lien
+        # s'il veut la prose ; sinon il review le diff. Fin de la dup verbatim (l'intuition user).
+        _ =
+          forge.post_comment(
+            repo,
+            pr,
+            "🔧 Note de l'#{role} (livrable) → détail sur le ticket ##{n}.",
             role_opts
           )
 
