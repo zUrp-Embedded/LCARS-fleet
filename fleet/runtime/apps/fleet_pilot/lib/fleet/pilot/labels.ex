@@ -31,8 +31,8 @@ defmodule Fleet.Pilot.Labels do
   @spec awaits_arch() :: String.t()
   def awaits_arch, do: @awaits_arch
 
-  # --- Position workflow_map (WS2) : 2 scopes de labels mutex (via `exclusive:true`, posé par
-  # ForgeClient.ensure_org_label). `wfmap/<map>` = QUELLE map (donnée, par-issue → multi-map) ;
+  # --- Position workflow_map (WS2) : 2 scopes de labels mutex (via `exclusive:true`, posé PAR-REPO par
+  # ForgeClient.ensure_repo_label). `wfmap/<map>` = QUELLE map (donnée, par-issue → multi-map) ;
   # `stage/<step>` = l'étape COURANTE, mobile. Valeurs brief-review/build issues du MAP (donnée) ;
   # review/merged = phases du LIFECYCLE PR (mécanisme post-map, humain-seul : la machine ne relit pas
   # get_route sur une issue en review [PR-backed → skip] ni mergée [fermée]).

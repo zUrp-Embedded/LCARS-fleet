@@ -53,7 +53,7 @@ defmodule Fleet.Pilot.ForgeClient do
     ]
 
   # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
-  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_seg: 1, encode_repo: 1]
+  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1]
 
   # SEUL ré-export du vocab : `parse_feature_branch/1`. `fleet_mcp` (pod_tools) l'appelle via le seam
   # `forge` (résolu runtime, défaut ce module) pour ne PAS créer de dep compile-time vers fleet_pilot —
@@ -754,8 +754,9 @@ defmodule Fleet.Pilot.ForgeClient do
 
   # ADD un label par NOM (POST = ajoute sans remplacer l'existant). Gitea résout le nom contre les
   # labels REPO **et ORG** côté serveur (`IssueLabelsOption.labels` = « strings representing label
-  # names », doc swagger) → plus de résolution repo-id côté client (qui ratait les org-labels). Les
-  # labels-verrous du wire-protocol vivent au niveau ORG `fleet` (config fleet, une fois, pas par-repo).
+  # names », doc swagger) → plus de résolution repo-id côté client. Les labels-verrous du wire-protocol
+  # sont créés PAR-REPO (`ensure_repo_label`, via le repo-write du compte système) : pas d'org-ownership
+  # requise, et l'état de routing reste self-contained dans son repo.
   #
   # SELF-HEAL : Gitea ignore EN SILENCE un nom de label qui n'existe NI au repo NI à l'org (POST
   # 200, mais le label n'est PAS posé) → le verrou protocole serait fantôme → boucle de re-dispatch
@@ -769,7 +770,7 @@ defmodule Fleet.Pilot.ForgeClient do
         :ok
 
       {:ok, false} ->
-        with :ok <- ensure_org_label(config, repo, label_name),
+        with :ok <- ensure_repo_label(config, repo, label_name),
              {:ok, true} <- post_issue_label(config, repo, issue_number, label_name) do
           :ok
         else
@@ -793,14 +794,14 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Crée le label protocole manquant au niveau de l'ORG du repo (convention LCARS : les labels
-  # `lcars-*` sont des labels d'ORG, partagés par tous les repos de la fleet). Couleur/
-  # description par défaut (le NOM porte le protocole ; la couleur est cosmétique). Tolérant : un échec
-  # (créé en concurrence, ou repo non-org) → `:ok` — c'est le re-POST + sa vérif qui tranchent (sinon
-  # le fail-loud d'`add_issue_label` remonte).
-  defp ensure_org_label(config, repo, label_name) do
-    org = repo |> String.split("/") |> List.first()
-
+  # Crée le label protocole manquant au niveau du REPO. Les labels de routing (`stage/*`/`wfmap/*`) et les
+  # verrous plats (`lcars-*`) vivent PAR-REPO : l'état de routing appartient aux issues de SON repo (la
+  # forge = state-store, self-contained par projet), et le compte système les crée via son **repo-write** —
+  # jamais besoin d'être org-owner (ce qu'exigerait `POST /orgs/*/labels` → 403 « Must be an organization
+  # owner »). Couleur/description par défaut (le NOM porte le protocole). Tolérant : un échec (créé en
+  # concurrence) → `:ok` — c'est le re-POST + sa vérif qui tranchent (sinon le fail-loud d'`add_issue_label`
+  # remonte).
+  defp ensure_repo_label(config, repo, label_name) do
     # Un label SCOPÉ (nom `scope/valeur`, contient "/") est créé MUTUELLEMENT EXCLUSIF (`exclusive:true`) :
     # Gitea retire l'ancien `scope/*` de l'issue quand on en pose un nouveau (vérifié forge 1.26.1, niveau
     # org ET repo, par NOM). C'est le mécanisme du `stage/*` (position workflow_map = machine à états
@@ -812,7 +813,7 @@ defmodule Fleet.Pilot.ForgeClient do
       description: "label protocole lcars (auto-cree, F-E5)"
     }
 
-    case http_post(config, "/orgs/#{encode_seg(org)}/labels", body) do
+    case http_post(config, "/repos/#{encode_repo(repo)}/labels", body) do
       {:ok, _} -> :ok
       {:error, _} -> :ok
     end

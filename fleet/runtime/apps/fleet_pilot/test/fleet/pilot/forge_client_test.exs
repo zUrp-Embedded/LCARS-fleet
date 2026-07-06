@@ -210,7 +210,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   describe "add_label/4 — F-E5 self-heal (label absent de la forge)" do
-    test "POST muet (label inconnu, 200 SANS le label) -> crée le label org puis ré-ajoute -> :added" do
+    test "POST muet (label inconnu, 200 SANS le label) -> crée le label repo puis ré-ajoute -> :added" do
       {:ok, counter} = Agent.start_link(fn -> 0 end)
 
       handlers = %{
@@ -220,9 +220,9 @@ defmodule Fleet.Pilot.ForgeClientTest do
           n = Agent.get_and_update(counter, &{&1, &1 + 1})
           if n == 0, do: {200, []}, else: {200, [%{"id" => 9, "name" => "lcars-awaits-arch"}]}
         end,
-        # création du label manquant au niveau de l'ORG (le self-heal)
-        {"POST", "/api/v1/orgs/fleet/labels"} => fn ->
-          send(self(), :org_label_created)
+        # création du label manquant au niveau du REPO (le self-heal)
+        {"POST", "/api/v1/repos/fleet/lcars/labels"} => fn ->
+          send(self(), :repo_label_created)
           {201, %{"id" => 9, "name" => "lcars-awaits-arch"}}
         end
       }
@@ -230,8 +230,8 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert {:ok, :added} =
                ForgeClient.add_label("fleet/lcars", 42, "lcars-awaits-arch", opts(handlers))
 
-      # le label a été créé (org) PUIS le 2e POST issue/labels l'a posé (2 POST issue + 1 POST org).
-      assert_received :org_label_created
+      # le label a été créé (repo) PUIS le 2e POST issue/labels l'a posé (2 POST issue + 1 POST repo).
+      assert_received :repo_label_created
       assert Agent.get(counter, & &1) == 2
     end
 
@@ -240,7 +240,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []},
         # POST muet à CHAQUE fois (le label ne tient jamais) -> pas de boucle silencieuse, on remonte.
         {"POST", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, []},
-        {"POST", "/api/v1/orgs/fleet/labels"} =>
+        {"POST", "/api/v1/repos/fleet/lcars/labels"} =>
           {201, %{"id" => 9, "name" => "lcars-awaits-arch"}}
       }
 
