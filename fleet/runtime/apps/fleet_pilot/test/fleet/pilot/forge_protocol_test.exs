@@ -34,32 +34,8 @@ defmodule Fleet.Pilot.ForgeProtocolTest do
     end
   end
 
-  describe "route_marker/2 + parse_route_marker/1" do
-    test "parse∘build == identité" do
-      assert {:ok, {"poc-cycle", "build"}} =
-               ForgeProtocol.parse_route_marker(ForgeProtocol.route_marker("poc-cycle", "build"))
-    end
-
-    test "extrait {pipeline, step} d'un marqueur" do
-      assert {:ok, {"poc-cycle", "build"}} =
-               ForgeProtocol.parse_route_marker("[lcars-route:poc-cycle:build]")
-    end
-
-    test "marqueur noyé dans du texte" do
-      assert {:ok, {"poc-cycle", "review"}} =
-               ForgeProtocol.parse_route_marker("blabla\n[lcars-route:poc-cycle:review]\nfin")
-    end
-
-    test "noms kebab-case OK" do
-      assert {:ok, {"standard-qa", "spec-review"}} =
-               ForgeProtocol.parse_route_marker("[lcars-route:standard-qa:spec-review]")
-    end
-
-    test "pas de marqueur → nil" do
-      assert nil == ForgeProtocol.parse_route_marker("juste un commentaire")
-      assert nil == ForgeProtocol.parse_route_marker(nil)
-    end
-  end
+  # (Les tests route_marker/parse_route_marker sont retirés : la position workflow_map vit dans le label
+  # SCOPÉ stage/* de l'issue, plus dans un marqueur-commentaire — cf. ForgeClient.get_route/post_route.)
 
   describe "step_run_marker/2 + step_run_marker?/1 (build+parse co-localisés)" do
     test "step_run_marker? reconnaît un marqueur produit par step_run_marker" do

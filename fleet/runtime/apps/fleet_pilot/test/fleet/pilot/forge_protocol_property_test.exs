@@ -39,12 +39,5 @@ defmodule Fleet.Pilot.ForgeProtocolPropertyTest do
     end
   end
 
-  property "route_marker/2 + parse_route_marker/1 : parse . build == identite" do
-    check all(workflow_map_name <- token(), step <- token()) do
-      assert {:ok, {^workflow_map_name, ^step}} =
-               ForgeProtocol.parse_route_marker(
-                 ForgeProtocol.route_marker(workflow_map_name, step)
-               )
-    end
-  end
+  # (Property route_marker/parse_route_marker retirée : la position vit dans le label stage/* — cf. ForgeClient.)
 end

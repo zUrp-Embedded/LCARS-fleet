@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.{StepDispatcher, StepRunConsumer, ForgeProtocol}
+  alias Fleet.Pilot.{StepDispatcher, StepRunConsumer}
   alias Fleet.Pilot.StubTaskQueue
 
   # ── Sim forge stateful : 1 issue + N PR (objets separes, labels/requested_reviewers propres) ──
@@ -74,13 +74,37 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       {:ok, :posted}
     end
 
-    def post_route(pid, r, n, p, s, _o),
-      do: post_comment(pid, r, n, "[lcars-route:#{p}:#{s}]", [])
+    # Position = 2 labels scopés (wfmap/<map> + stage/<step>), mutex : on retire les anciens stage/*|wfmap/*
+    # puis on re-pose (émule l'exclusive Gitea). Plus de commentaire route (bruit).
+    def post_route(pid, _r, n, p, s, _o) do
+      upd_issue(pid, fn i ->
+        kept =
+          Enum.reject(i["labels"] || [], fn l ->
+            String.starts_with?(l["name"], "stage/") or String.starts_with?(l["name"], "wfmap/")
+          end)
+
+        Map.put(i, "labels", kept ++ [%{"name" => "wfmap/#{p}"}, %{"name" => "stage/#{s}"}])
+      end)
+
+      {:ok, :posted}
+    end
 
     def get_route(pid, _r, _n, _o) do
-      (get(pid)["comments"] || [])
-      |> Enum.reverse()
-      |> Enum.find_value(:none, &ForgeProtocol.parse_route_marker/1)
+      ls = get(pid)["labels"] || []
+
+      val = fn prefix ->
+        Enum.find_value(ls, fn l ->
+          name = l["name"]
+
+          if is_binary(name) and String.starts_with?(name, prefix),
+            do: String.replace_prefix(name, prefix, "")
+        end)
+      end
+
+      case {val.("wfmap/"), val.("stage/")} do
+        {map, step} when is_binary(map) and is_binary(step) -> {:ok, {map, step}}
+        _ -> :none
+      end
     end
 
     def close_issue(pid, _r, _n, _o) do

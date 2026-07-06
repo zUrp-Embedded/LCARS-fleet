@@ -203,9 +203,10 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Pas de `set_state_label` (transition `state:*`) : l'état vit dans la
-  # route-comment (source unique), pas dans un label `state:*`. Les verrous
-  # (`lcars-in-flight`) passent par `add_label`/`remove_label`.
+  # La POSITION workflow_map (= l'état de la machine à états) vit dans le label SCOPÉ `stage/*` (mutex
+  # natif Gitea, source unique visible humain+machine), posée par `post_route` / lue par `get_route`.
+  # Plus de commentaire `[lcars-route:...]` (bruit). Les verrous PLATS (`lcars-in-flight`) restent
+  # non-scopés via `add_label`/`remove_label`.
 
   @doc """
   Poste un comment. Si `:dedup_signature` est fourni et qu'un comment **système**
@@ -604,43 +605,74 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Marqueur ROUTE — position workflow_map sur la forge.
-  # `[lcars-route:<pipeline>:<step>]` : grave (pipeline, step) sur l'issue, car l'assignee
-  # (= rôle) seul n'identifie pas le step (un rôle peut être sur N steps, cf. WorkflowMapNav).
-  # Écrit à l'assignation (entrée + reassign), lu par StepDispatcher au spawn.
+  # Position workflow_map — 2 labels SCOPÉS sur l'issue (la forge EST la machine à états).
+  # Remplace l'ancien commentaire `[lcars-route:<map>:<step>]` (bruit dans le fil humain) :
+  #   `stage/<step>` : l'étape COURANTE, mobile (mutex natif Gitea : poser une étape retire la précédente).
+  #   `wfmap/<map>`  : QUELLE map suit cette issue, posé une fois (mutex : une seule map par issue).
+  # Les deux VISIBLES (coup d'œil humain), lus directement (pas de scan de commentaires), infalsifiables
+  # via le verrou d'écriture WS1 (rôles en issues:read) : irreprésentabilité > filtrage-à-la-lecture.
+  # Le map vit PAR-ISSUE (donnée) — PAS un défaut global codé : deux issues peuvent suivre deux maps
+  # (multi-map, cf. tests gkchain/poc-mini). Aucun `default` ici : un défaut de map n'a qu'UN lieu
+  # légitime, l'onboard d'une issue routeless (`StepDispatcher.ensure_workflow_map_or_onboard`).
   # ============================================================
 
+  @stage_prefix "stage/"
+  @wfmap_prefix "wfmap/"
+
   @doc """
-  Grave le marqueur route `[lcars-route:<pipeline>:<step>]`. Idempotent (dédup sur le marqueur
-  exact → un replay ne duplique pas). Le dernier marqueur posé fait foi (cf. `get_route`).
+  Pose la position = `wfmap/<pipeline>` (quelle map, idempotent) + `stage/<step>` (l'étape courante,
+  mutex : retire l'ancien `stage/*`). Les deux scopés `exclusive` (cf. `ensure_org_label`).
+  `{:ok, :posted}` si l'étape a bougé, `{:ok, :already}` si déjà à cette étape, `{:error, _}` sinon.
   """
   @spec post_route(String.t(), integer(), String.t(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
   def post_route(repo, issue_number, pipeline, step, opts \\ [])
       when is_binary(pipeline) and is_binary(step) do
-    marker = ForgeProtocol.route_marker(pipeline, step)
-    post_comment(repo, issue_number, marker, Keyword.put(opts, :dedup_signature, marker))
+    with {:ok, _} <- add_label(repo, issue_number, wfmap_label(pipeline), opts) do
+      case add_label(repo, issue_number, stage_label(step), opts) do
+        {:ok, :added} -> {:ok, :posted}
+        {:ok, :already_present} -> {:ok, :already}
+        {:error, _} = err -> err
+      end
+    end
   end
 
   @doc """
-  Lit la position workflow_map courante = le **dernier** marqueur `[lcars-route:p:s]` de l'issue.
-  `:none` si aucun (issue hors-workflow_map / 1-step). `{:error, _}` sur échec HTTP/config.
+  Lit la position = `{:ok, {map, step}}` depuis les labels `wfmap/<map>` + `stage/<step>` de l'issue.
+  `:none` si l'un manque (issue routeless, ou demi-état → ré-onboardée par le caller). `{:error, _}` sur
+  échec HTTP/config. Le map vient de la DONNÉE (label `wfmap/*`), jamais d'un défaut codé — pas
+  d'invention silencieuse d'un map (canon : ambiguïté rejetée, pas de fallback métier caché). La
+  CONFIANCE vient du verrou d'écriture WS1 (seul `lcars-system` pose les labels) : irreprésentabilité >
+  filtrage-à-la-lecture. Modèle de menace : un rôle compromis qui poserait un faux `stage/*` = nuke&redeploy.
   """
   @spec get_route(String.t(), integer(), Keyword.t()) ::
           {:ok, {String.t(), String.t()}} | :none | {:error, term()}
   def get_route(repo, issue_number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, bot} <- forge_bot_login(config, opts),
-         {:ok, comments} when is_list(comments) <-
-           paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
-      # Ne faire foi QUE des comments écrits par le compte SYSTÈME (bot). Un user forge
-      # (humain/attaquant) qui poste `[lcars-route:evil:step]` piloterait sinon la navigation.
-      comments
-      |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))
-      |> Enum.map(& &1["body"])
-      |> Enum.reverse()
-      |> Enum.find_value(:none, fn body -> ForgeProtocol.parse_route_marker(body) end)
+         {:ok, labels} <- get_issue_labels(config, repo, issue_number) do
+      case {current_wfmap(labels), current_stage(labels)} do
+        {map, step} when is_binary(map) and is_binary(step) -> {:ok, {map, step}}
+        _ -> :none
+      end
     end
+  end
+
+  # Builders des labels de position (source-unique des littéraux avec `@stage_prefix`/`@wfmap_prefix`).
+  defp stage_label(step) when is_binary(step), do: @stage_prefix <> step
+  defp wfmap_label(map) when is_binary(map), do: @wfmap_prefix <> map
+
+  # Étape courante = valeur du label `stage/<step>` (au plus un : mutex). Map = valeur du `wfmap/<map>`.
+  defp current_stage(labels), do: label_value(labels, @stage_prefix)
+  defp current_wfmap(labels), do: label_value(labels, @wfmap_prefix)
+
+  # Valeur (suffixe) du 1er label scopé `<prefix><valeur>` de l'issue, nil si aucun. Générique aux 2 scopes.
+  defp label_value(labels, prefix) when is_list(labels) do
+    Enum.find_value(labels, fn label ->
+      name = label["name"]
+
+      if is_binary(name) and String.starts_with?(name, prefix),
+        do: String.replace_prefix(name, prefix, "")
+    end)
   end
 
   @doc """
@@ -755,9 +787,14 @@ defmodule Fleet.Pilot.ForgeClient do
   defp ensure_org_label(config, repo, label_name) do
     org = repo |> String.split("/") |> List.first()
 
+    # Un label SCOPÉ (nom `scope/valeur`, contient "/") est créé MUTUELLEMENT EXCLUSIF (`exclusive:true`) :
+    # Gitea retire l'ancien `scope/*` de l'issue quand on en pose un nouveau (vérifié forge 1.26.1, niveau
+    # org ET repo, par NOM). C'est le mécanisme du `stage/*` (position workflow_map = machine à états
+    # visible) : irreprésentabilité native (jamais 2 étapes). Les verrous PLATS (`lcars-*`) non-exclusifs.
     body = %{
       name: label_name,
-      color: "#ededed",
+      exclusive: String.contains?(label_name, "/"),
+      color: label_color(label_name),
       description: "label protocole lcars (auto-cree, F-E5)"
     }
 
@@ -766,6 +803,14 @@ defmodule Fleet.Pilot.ForgeClient do
       {:error, _} -> :ok
     end
   end
+
+  # Couleur cosmétique (le NOM porte le protocole). Les `stage/*` reçoivent une teinte par étape pour le
+  # coup d'œil humain (bleu→ambre→violet→vert = brief-review→build→review→merged) ; le reste, gris neutre.
+  defp label_color("stage/brief-review"), do: "#4a90d9"
+  defp label_color("stage/build"), do: "#e08e0b"
+  defp label_color("stage/review"), do: "#8e44ad"
+  defp label_color("stage/merged"), do: "#2e9e5b"
+  defp label_color(_), do: "#ededed"
 
   # ============================================================
   # Identite forge — adaptateur credential -> wire (token de role)

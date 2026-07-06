@@ -55,37 +55,9 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   def parse_feature_branch(_), do: :error
 
-  # ============================================================
-  # Marqueur ROUTE — position workflow_map sur la forge.
-  # `[lcars-route:<workflow_map_name>:<step>]` : grave (workflow_map_name, step) sur l'issue, car l'assignee
-  # (= rôle) seul n'identifie pas le step (un rôle peut être sur N steps, cf. WorkflowMapNav).
-  # ============================================================
-
-  # Littéral-SOURCE UNIQUE : builder ET parseur en dérivent.
-  @route_prefix "[lcars-route:"
-  # Regex DÉRIVÉ du même littéral — `Regex.escape` neutralise le `[` (et `-`) du prefix → littéral, pas
-  # de la syntaxe regex. PAS d'ancre `^` : un marqueur route peut être noyé dans le corps d'un comment.
-  @route_marker_rx Regex.compile!(Regex.escape(@route_prefix) <> "([^:\\]]+):([^:\\]]+)\\]")
-
-  @doc """
-  Construit le marqueur route `[lcars-route:<workflow_map_name>:<step>]` (builder unique, dérivé de
-  `@route_prefix` comme son parseur `parse_route_marker/1`). Posé par `ForgeClient.post_route/5`.
-  """
-  @spec route_marker(String.t(), String.t()) :: String.t()
-  # => "[lcars-route:<workflow_map_name>:<step>]"
-  def route_marker(workflow_map_name, step) when is_binary(workflow_map_name) and is_binary(step),
-    do: "#{@route_prefix}#{workflow_map_name}:#{step}]"
-
-  @doc false
-  # Pur : extrait `{workflow_map_name, step}` d'un body contenant `[lcars-route:p:s]`, sinon nil.
-  def parse_route_marker(nil), do: nil
-
-  def parse_route_marker(body) when is_binary(body) do
-    case Regex.run(@route_marker_rx, body) do
-      [_, workflow_map_name, step] -> {:ok, {workflow_map_name, step}}
-      _ -> nil
-    end
-  end
+  # (La position workflow_map n'est plus un marqueur-commentaire `[lcars-route:...]` : elle vit dans le
+  # label SCOPÉ `stage/*` de l'issue — mutex natif Gitea, visible humain, lu sans scan de commentaires.
+  # Builder/lecteur : `Fleet.Pilot.ForgeClient.post_route`/`get_route`.)
 
   # ============================================================
   # Marqueur de STEP_RUN signé `[step_run:<role>:<sha>]` — compteur forge-natif anti-runaway.

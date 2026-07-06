@@ -764,46 +764,53 @@ defmodule Fleet.Pilot.ForgeClientTest do
   end
 
   # ============================================================
-  # Author-trust : marqueurs forge ne font foi QUE s'ils sont écrits par le compte
-  # système (bot). Seam test : `forge_bot_login: "lcars-bot"` (skip le GET /user).
+  # get_route lit la POSITION dans les labels SCOPÉS `wfmap/<map>` + `stage/<step>` (plus un commentaire
+  # `[lcars-route:...]`). Le map vient de la DONNÉE (label wfmap), PAS d'un défaut codé : deux issues
+  # peuvent suivre deux maps. Manque un des deux → `:none` (aucune invention de map). La confiance vient
+  # du verrou d'écriture WS1 (seul lcars-system pose les labels), pas d'un filtre-à-la-lecture.
   # ============================================================
-  describe "get_route/3 — author-trust (F058)" do
-    test "prend le marqueur du bot, ignore celui forgé par un user forge" do
+  describe "get_route/3 — via labels wfmap/* + stage/*" do
+    test "wfmap/brief-gate + stage/build → {:ok, {\"brief-gate\", \"build\"}}" do
       handlers = %{
-        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
           {200,
            [
-             %{
-               "user" => %{"login" => "lcars-bot"},
-               "body" => "[lcars-route:real-pipe:build]"
-             },
-             %{
-               "user" => %{"login" => "attacker"},
-               "body" => "[lcars-route:evil-pipe:exfil]"
-             }
+             %{"name" => "lcars-in-flight"},
+             %{"name" => "wfmap/brief-gate"},
+             %{"name" => "stage/build"}
            ]}
       }
 
-      assert {:ok, {"real-pipe", "build"}} =
-               ForgeClient.get_route(
-                 "fleet/lcars",
-                 42,
-                 Keyword.put(opts(handlers), :forge_bot_login, "lcars-bot")
-               )
+      assert {:ok, {"brief-gate", "build"}} =
+               ForgeClient.get_route("fleet/lcars", 42, opts(handlers))
     end
 
-    test "seul un marqueur d'attaquant → :none (rien de fiable)" do
+    test "le map vient de la DONNÉE : wfmap/gkchain + stage/review → {:ok, {\"gkchain\", \"review\"}}" do
       handlers = %{
-        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
-          {200, [%{"user" => %{"login" => "attacker"}, "body" => "[lcars-route:evil:exfil]"}]}
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+          {200, [%{"name" => "wfmap/gkchain"}, %{"name" => "stage/review"}]}
       }
 
-      assert :none =
-               ForgeClient.get_route(
-                 "fleet/lcars",
-                 42,
-                 Keyword.put(opts(handlers), :forge_bot_login, "lcars-bot")
-               )
+      assert {:ok, {"gkchain", "review"}} =
+               ForgeClient.get_route("fleet/lcars", 42, opts(handlers))
+    end
+
+    test "stage/* sans wfmap/* (demi-état) → :none (aucun map inventé)" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+          {200, [%{"name" => "stage/build"}]}
+      }
+
+      assert :none = ForgeClient.get_route("fleet/lcars", 42, opts(handlers))
+    end
+
+    test "aucun label de position (que des verrous plats) → :none" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+          {200, [%{"name" => "lcars-in-flight"}, %{"name" => "lcars-awaits-arch"}]}
+      }
+
+      assert :none = ForgeClient.get_route("fleet/lcars", 42, opts(handlers))
     end
   end
 
@@ -868,13 +875,15 @@ defmodule Fleet.Pilot.ForgeClientTest do
       handlers = %{
         {"GET", "/api/v1/user"} => {200, %{"login" => "derived-bot"}},
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
-          {200, [%{"user" => %{"login" => "derived-bot"}, "body" => "[lcars-route:p:s]"}]}
+          {200, [%{"user" => %{"login" => "derived-bot"}, "body" => "fin [step_run:a:1]"}]}
       }
 
       # persistent_term cache : effacé en amont pour un test déterministe.
       :persistent_term.erase({Fleet.Pilot.ForgeClient.Transport, :bot_login})
 
-      assert {:ok, {"p", "s"}} = ForgeClient.get_route("fleet/lcars", 42, opts(handlers))
+      # get_route ne dérive plus (lit un label) : on exerce la dérivation /user via count_signed_step_runs
+      # (qui filtre encore les step_runs bot-authored → a besoin du bot-login).
+      assert {:ok, 1} = ForgeClient.count_signed_step_runs("fleet/lcars", 42, opts(handlers))
     after
       :persistent_term.erase({Fleet.Pilot.ForgeClient.Transport, :bot_login})
     end
