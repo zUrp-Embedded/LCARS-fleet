@@ -95,7 +95,10 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
         # (`workflow_map = Loader.load!(workflow_map_name)`) au lieu d'un `{:noreply}` silencieux (issue wedgée à vie). Aucune
         # NOUVELLE source : `payload` porte déjà `workspace`/`base_sha`/`gate_base_sha` — on l'embarque tel quel.
         attrs = %{
-          role: "gatekeeper",
+          # Cible d'escalade = le gatekeeper (juge d'exception STRUCTUREL, GATE-D1) — via l'accesseur
+          # UNIQUE `Roles.gatekeeper_role` (config-overridable), plus un littéral épars. Ce n'est PAS
+          # configurable par map : le gatekeeper EST l'escalade (il gère la patate chaude via son SP).
+          role: Fleet.Pilot.Roles.gatekeeper_role(),
           brief: brief,
           metadata: %{
             "gate_eval" => true,

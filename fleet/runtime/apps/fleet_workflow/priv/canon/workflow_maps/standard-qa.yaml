@@ -134,15 +134,9 @@ spec:
         approval_prompt: "Choose finish action: (a) merge to main, (b) create PR, (c) keep as-is, (d) discard (typed confirmation)"
       timeout_sec: 1800
 
-  on_escalation:
-    # Si max_iterations dépassé OU fallback_invoke_gatekeeper terminal triggered
-    target_role: gatekeeper
-    target_profile: gatekeeper.yaml  # cap-profile pipe-scoped chantier 17 PROMOTED
-    inputs_from: all_previous_audits
-    outputs:
-      - audits/gatekeeper-decision-{date}.json
-    decisions: [proceed, revision, abort, escalate-user]
-
+  # (Pas de `on_escalation` : la cible d'escalade n'est PAS configurable par map — le gatekeeper EST le
+  # juge d'exception STRUCTUREL (GATE-D1, « juge unique »). Un `target_role` ici mentirait : le kernel le
+  # droppait au normalize. Ce que le gatekeeper FAIT de la patate chaude vit dans son SP, pas dans le map.)
   on_failure:
     notify_role: starfleet
     log_path: audits/pipeline-failure-{date}.json
