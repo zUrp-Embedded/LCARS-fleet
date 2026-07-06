@@ -279,6 +279,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     ctx = %ReviewLifecycle.Ctx{
       forge: Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient),
       loader: Keyword.get(opts, :loader, Fleet.CapProfile),
+      workflow_map_loader: Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       resolver: Keyword.get(opts, :project_resolver, &default_project_resolver/2),

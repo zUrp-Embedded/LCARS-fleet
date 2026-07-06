@@ -70,6 +70,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     @enforce_keys [
       :forge,
       :loader,
+      :workflow_map_loader,
       :spawner,
       :task_queue,
       :resolver,
@@ -87,6 +88,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
             forge: module(),
             # Loader de cap-profile injecté (seam `:loader`, défaut prod `Fleet.CapProfile`).
             loader: module(),
+            # Loader de workflow_map injecté (seam `:workflow_map_loader`, défaut `&Fleet.Workflow.Loader.load!/1`) —
+            # lit le budget rework map-level (`spec.max_rework_rounds`) sur le chemin de rework PR.
+            workflow_map_loader: (String.t() -> map()),
             # Spawner injecté (seam `:spawner`, défaut prod `Fleet.Spawner`).
             spawner: module(),
             # Broker de briefs injecté (seam `:task_queue`, défaut prod `Fleet.TaskQueue`).

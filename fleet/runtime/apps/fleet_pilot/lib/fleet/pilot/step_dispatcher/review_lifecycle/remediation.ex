@@ -7,10 +7,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   ## Les deux freins (le concern nommable de ce module)
 
     * **Rework** — compteur FORGE-NATIF (`count_change_request_rounds` = nb de reviews
-      REQUEST_CHANGES, monotone), budget `:max_pr_rework_rounds` (défaut 2, aligné sur
-      le frein workflow_map `max_rework_rounds`). Au-delà → ESCALADE ARCH. Budget
-      illisible → on NE re-spawn PAS à l'aveugle : escalade (symétrique de `rebound`
-      côté StepRunConsumer qui surface).
+      REQUEST_CHANGES, monotone), budget = `spec.max_rework_rounds` du MAP de l'issue (DONNÉE, le
+      MÊME frein que le rebond issue — plus de défaut codé `:max_pr_rework_rounds` aligné à la main).
+      Au-delà → ESCALADE ARCH. Budget/route/map illisible → on NE re-spawn PAS à l'aveugle : escalade
+      (symétrique de `rebound` côté StepRunConsumer qui surface).
     * **Conflit** — l'`IncidentRegistry` (cross-session, work/ops) EST le frein :
       1ʳᵉ occurrence → résolution (rebase producteur) ; récurrence → escalade arch.
       Le dédup par signature EST le throttle.
@@ -44,23 +44,24 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
   def dispatch_rework(pr_number, head, %Ctx{} = ctx) do
     case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
-      {:ok, {_n, producer_role}} ->
-        budget = Keyword.get(ctx.opts, :max_pr_rework_rounds, 2)
-
-        case ctx.forge.count_change_request_rounds(ctx.repo, pr_number, ctx.forge_opts) do
-          {:ok, rounds} when rounds <= budget ->
+      {:ok, {issue_n, producer_role}} ->
+        with {:ok, budget} <- pr_rework_budget(ctx, issue_n),
+             {:ok, rounds} <-
+               ctx.forge.count_change_request_rounds(ctx.repo, pr_number, ctx.forge_opts) do
+          if rounds <= budget do
             RoleDispatch.dispatch(:rework, pr_number, head, producer_role, ctx)
-
-          {:ok, rounds} ->
+          else
             ArchEscalation.escalate_rework(
               arch_seams(ctx),
               pr_number,
               head,
               %{rounds: rounds, budget: budget}
             )
-
+          end
+        else
+          # Budget non vérifiable (route/map illisible) OU compteur illisible → on n'entre PAS dans une
+          # boucle aveugle : on remonte à l'arch (symétrique du frein issue `rework_budget_unreadable`).
           {:error, reason} ->
-            # Budget non vérifiable → on n'entre pas dans une boucle aveugle : on remonte à l'arch.
             ArchEscalation.escalate_rework(
               arch_seams(ctx),
               pr_number,
@@ -71,6 +72,22 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
       :error ->
         {:skipped, :not_fleet_branch}
+    end
+  end
+
+  # Budget rework PR = le MÊME `spec.max_rework_rounds` que le frein issue (policy de churn UNIQUE du
+  # pipeline, lue comme DONNÉE — plus de défaut codé aligné-à-la-main). Route de l'issue → nom de map →
+  # budget. Routeless / map illisible → `{:error}` : le caller escalade (jamais de boucle aveugle).
+  defp pr_rework_budget(%Ctx{} = ctx, issue_n) do
+    with {:ok, {map_name, _step}} when is_binary(map_name) <-
+           ctx.route_reader.(ctx.forge, ctx.repo, issue_n, ctx.forge_opts),
+         {:ok, workflow_map} <-
+           Fleet.Pilot.WorkflowMapNav.safe_load(ctx.workflow_map_loader, map_name) do
+      {:ok, Map.fetch!(workflow_map, "max_rework_rounds")}
+    else
+      {:ok, nil} -> {:error, :routeless}
+      {:error, _} = err -> err
+      other -> {:error, {:route_unreadable, other}}
     end
   end
 

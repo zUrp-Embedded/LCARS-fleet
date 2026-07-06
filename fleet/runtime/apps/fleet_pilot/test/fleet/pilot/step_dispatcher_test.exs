@@ -281,8 +281,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         # est ONBOARDÉE (skip) au lieu de spawner. Les tests d'effet veulent un spawn → ils partent d'une
         # issue déjà routée. Les tests routés/onboard overrident `forge_opts`/`workflow_map_loader`.
         forge_opts: [_test_route: {:ok, {"g", "build"}}],
-        workflow_map_loader: fn "g" ->
-          %{"steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+        # Loader générique (tout nom de map) : porte `max_rework_rounds` (budget rework lu comme donnée
+        # côté rework PR ET issue). Les tests routés spécifiques overrident au besoin.
+        workflow_map_loader: fn _name ->
+          %{
+            "steps" => %{"build" => %{"role" => "engineer", "needs" => []}},
+            "max_rework_rounds" => 2
+          }
         end
       ],
       extra
@@ -1015,6 +1020,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         dispatch_opts(
           forge_opts: [
             _test_verdicts: %{"qualifier" => :changes_requested},
+            # Route présente → le budget (= max_rework_rounds:2 du loader générique) est LISIBLE : on teste
+            # bien « rounds(3) > budget(2) → escalade », pas un budget illisible (couvert par le test suivant).
+            _test_route: {:ok, {"g", "build"}},
             _test_rework_rounds: {:ok, 3}
           ]
         )
@@ -1034,6 +1042,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         dispatch_opts(
           forge_opts: [
             _test_verdicts: %{"qualifier" => :changes_requested},
+            # Route présente → budget lisible : on teste bien le COMPTEUR illisible (count {:error}), pas la route.
+            _test_route: {:ok, {"g", "build"}},
             _test_rework_rounds: {:error, {:http, 500, "boom"}}
           ]
         )
@@ -1042,6 +1052,30 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                StepDispatcher.dispatch_review(pr, opts)
 
       refute_received {:spawned, _, _}
+    end
+
+    test "budget PR map-level HONORÉ : max_rework_rounds:5 rebondit à 4 rounds (le défaut 2 escaladerait)" do
+      # Preuve que le budget PR vient de la DONNÉE du map (spec.max_rework_rounds), pas d'un défaut codé :
+      # un map à 5 laisse rebondir à 4 rounds (4 ≤ 5) là où l'ancien défaut 2 aurait escaladé.
+      pr = pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}]})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :changes_requested},
+            _test_route: {:ok, {"budget5", "build"}},
+            _test_rework_rounds: {:ok, 4}
+          ],
+          workflow_map_loader: fn "budget5" ->
+            %{
+              "steps" => %{"build" => %{"role" => "engineer", "needs" => []}},
+              "max_rework_rounds" => 5
+            }
+          end
+        )
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
+               StepDispatcher.dispatch_review(pr, opts)
     end
 
     test "F-E8 : juge tombé de requested_reviewers (mais dans les review-records) reste au jury -> spawn, PAS merge" do
