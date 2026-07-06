@@ -127,16 +127,31 @@ resource "gitea_team" "writers" {
   }
 }
 
-# judges : rôles qui JUGENT (la review Gitea se soumet en read, le commentaire aussi).
-# Least-priv : ils ne poussent pas. vulcan (externe) est ici → externe = read, jamais code:write.
+# judges : qualifier/reviewer — WRITE. Ils postent des RAPPORTS D'AUDIT lourds committés dans work/ops
+# (via le système `as_role`, jamais le pod forge-aveugle) → ils ont besoin de write, pas juste de la
+# review en read. Corollaire : le grant per-repo `add_collaborator` du runtime (engineer/qualifier/
+# reviewer/gatekeeper) devient REDONDANT avec les teams writers+judges → à retirer côté runtime.
 resource "gitea_team" "judges" {
   name                     = "judges"
   organisation             = gitea_org.fleet.name
-  permission               = "read"
+  permission               = "write"
   can_create_repos         = false # EXPLICITE : le provider défaute à true.
   include_all_repositories = true
   lifecycle {
     ignore_changes = [permission] # cf. team `system` : relecture `permission=none` dépréciée.
+  }
+}
+
+# externals : rôle EXTERNE (vulcan) — READ strict. Séparé des judges JUSTEMENT pour que leur write ne
+# fuite pas à l'externe : un externe ne pousse RIEN (ni code, ni audit), il commente/review en read.
+resource "gitea_team" "externals" {
+  name                     = "externals"
+  organisation             = gitea_org.fleet.name
+  permission               = "read"
+  can_create_repos         = false
+  include_all_repositories = true
+  lifecycle {
+    ignore_changes = [permission]
   }
 }
 
@@ -155,8 +170,9 @@ resource "gitea_team" "humans" {
 
 # ── Memberships ────────────────────────────────────────────────────────────
 locals {
-  writers = ["architect", "consultant", "engineer", "gatekeeper"]
-  judges  = ["qualifier", "reviewer", "vulcan"]
+  writers   = ["architect", "consultant", "engineer", "gatekeeper"]
+  judges    = ["qualifier", "reviewer"]
+  externals = ["vulcan"]
 }
 
 resource "gitea_team_membership" "system" {
@@ -173,6 +189,12 @@ resource "gitea_team_membership" "writers" {
 resource "gitea_team_membership" "judges" {
   for_each = toset(local.judges)
   team_id  = gitea_team.judges.id
+  username = gitea_user.role[each.key].username
+}
+
+resource "gitea_team_membership" "externals" {
+  for_each = toset(local.externals)
+  team_id  = gitea_team.externals.id
   username = gitea_user.role[each.key].username
 }
 
