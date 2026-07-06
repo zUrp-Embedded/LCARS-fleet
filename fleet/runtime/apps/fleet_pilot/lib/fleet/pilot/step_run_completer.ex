@@ -237,6 +237,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
              body,
              ForgeClient.as_role(forge_opts, role)
            ) do
+      # La PR livrable ouverte = l'issue ENTRE en review (lifecycle humain ; mutex retire stage/build).
+      # Best-effort (affichage) : la review/merge procèdent via la PR quoi qu'il arrive. Système-side
+      # (forge_opts, pas as_role) : les stage/* sont gérés par lcars-system (WS1). Le poller ne relit plus
+      # get_route sur cette issue (PR-backed → skip lease.ex:209), donc stage/* y est purement humain.
+      _ = forge.set_stage(repo, n, Fleet.Pilot.Labels.stage_review(), forge_opts)
       Logger.info("StepRunCompleter: ##{n} #{role} → PR ##{pr} (head=#{head}, sha=#{sha})")
       {:ok, %{commit_sha: sha, pr_number: pr}}
     end

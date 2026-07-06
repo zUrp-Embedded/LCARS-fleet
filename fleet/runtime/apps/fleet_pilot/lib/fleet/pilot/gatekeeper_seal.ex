@@ -69,6 +69,12 @@ defmodule Fleet.Pilot.GatekeeperSeal do
       :ok ->
         _ = comment(forge, repo, issue_n, body, comment_opts)
 
+        # Étape terminale VISIBLE : la brique est mergée. L'issue est fermée par `Closes #N` — Gitea
+        # accepte le label sur issue fermée (mutex inclus, vérifié forge 1.26.1). Best-effort (affichage ;
+        # le merge fait foi). Système-side (`forge_opts`, pas la signature gatekeeper) : les stage/* sont
+        # gérés par lcars-system (WS1).
+        _ = forge.set_stage(repo, issue_n, Fleet.Pilot.Labels.stage_merged(), forge_opts)
+
         # Projette le livrable sur le clone local `/home/projects/<name>` (best-effort). La SÉRIALISATION
         # vit DANS le GenServer dédié (un `git` à la fois sur un worktree, contre la race entre les deux
         # déclencheurs de merge) — ici on ne fait que DÉCLENCHER, le merge n'attend pas. Le merge fait foi :

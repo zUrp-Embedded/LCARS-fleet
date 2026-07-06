@@ -24,6 +24,9 @@ defmodule Fleet.Pilot.ForgeStubs do
       send(self(), {:merge, repo, pr, opts})
       :ok
     end
+
+    # WS2 : le sceau pose stage/merged post-merge (best-effort). No-op (le stub prouve l'ordre merge↔comment).
+    def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
   end
 
   defmodule MergeFailForge do
@@ -42,5 +45,7 @@ defmodule Fleet.Pilot.ForgeStubs do
     end
 
     def merge_pr(_repo, _pr, _opts), do: {:error, {:http, 409, "not fast-forward"}}
+
+    def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
   end
 end

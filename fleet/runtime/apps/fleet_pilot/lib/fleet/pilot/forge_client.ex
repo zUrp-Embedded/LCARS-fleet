@@ -616,12 +616,13 @@ defmodule Fleet.Pilot.ForgeClient do
   # légitime, l'onboard d'une issue routeless (`StepDispatcher.ensure_workflow_map_or_onboard`).
   # ============================================================
 
-  @stage_prefix "stage/"
-  @wfmap_prefix "wfmap/"
+  # Préfixes scopés lus depuis la SOURCE UNIQUE du vocab (`Fleet.Pilot.Labels`) — pas de re-déclaration
+  # de littéral (un renommage là-bas se propage ici au compile).
+  @stage_prefix Fleet.Pilot.Labels.stage_prefix()
+  @wfmap_prefix Fleet.Pilot.Labels.wfmap_prefix()
 
   @doc """
-  Pose la position = `wfmap/<pipeline>` (quelle map, idempotent) + `stage/<step>` (l'étape courante,
-  mutex : retire l'ancien `stage/*`). Les deux scopés `exclusive` (cf. `ensure_org_label`).
+  Pose la position = `wfmap/<pipeline>` (quelle map, idempotent) + `stage/<step>` (via `set_stage`, mutex).
   `{:ok, :posted}` si l'étape a bougé, `{:ok, :already}` si déjà à cette étape, `{:error, _}` sinon.
   """
   @spec post_route(String.t(), integer(), String.t(), String.t(), Keyword.t()) ::
@@ -629,11 +630,24 @@ defmodule Fleet.Pilot.ForgeClient do
   def post_route(repo, issue_number, pipeline, step, opts \\ [])
       when is_binary(pipeline) and is_binary(step) do
     with {:ok, _} <- add_label(repo, issue_number, wfmap_label(pipeline), opts) do
-      case add_label(repo, issue_number, stage_label(step), opts) do
-        {:ok, :added} -> {:ok, :posted}
-        {:ok, :already_present} -> {:ok, :already}
-        {:error, _} = err -> err
-      end
+      set_stage(repo, issue_number, step, opts)
+    end
+  end
+
+  @doc """
+  Pose SEULEMENT l'étape courante `stage/<stage>` (mutex : retire l'ancien `stage/*`), sans toucher au
+  `wfmap/*`. Sert au LIFECYCLE PR post-map (`review` à l'ouverture de la PR livrable, `merged` au merge) :
+  l'étape n'est plus une position workflow_map navigable mais reste visible pour l'humain. Le poller ne
+  relit pas `get_route` sur ces issues (PR-backed → skip lease.ex:209 ; mergée → fermée) → `stage/*` y est
+  purement humain. `{:ok, :posted | :already}` | `{:error, _}`.
+  """
+  @spec set_stage(String.t(), integer(), String.t(), Keyword.t()) ::
+          {:ok, :posted | :already} | {:error, term()}
+  def set_stage(repo, issue_number, stage, opts \\ []) when is_binary(stage) do
+    case add_label(repo, issue_number, stage_label(stage), opts) do
+      {:ok, :added} -> {:ok, :posted}
+      {:ok, :already_present} -> {:ok, :already}
+      {:error, _} = err -> err
     end
   end
 

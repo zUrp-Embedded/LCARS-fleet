@@ -29,6 +29,8 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
       send(self(), :merged)
       :ok
     end
+
+    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
   end
 
   test "merge signé PUIS comment gatekeeper (signature interne as_gatekeeper) + dédup → :ok" do

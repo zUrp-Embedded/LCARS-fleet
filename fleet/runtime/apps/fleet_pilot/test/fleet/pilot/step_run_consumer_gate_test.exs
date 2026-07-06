@@ -34,6 +34,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def request_review(_r, pr, revs, _o), do: send(self(), {:request_review, pr, revs}) && :ok
     def post_review(_r, pr, ev, body, _o), do: send(self(), {:review, pr, ev, body}) && :ok
     def merge_pr(_r, pr, _o), do: send(self(), {:merge, pr}) && :ok
+    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
   end
 
   defmodule DelivStub do
@@ -668,6 +669,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def request_review(_r, pr, revs, o), do: relay(o, {:request_review, pr, revs}) && :ok
     def post_review(_r, pr, ev, body, o), do: relay(o, {:review, pr, ev, body}) && :ok
     def merge_pr(_r, pr, o), do: relay(o, {:merge, pr}) && :ok
+    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
   end
 
   defp fresh_step_run_consumer do

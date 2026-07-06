@@ -107,6 +107,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
           result
       end
     end
+
+    def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
   end
 
   defmodule StubLoader do

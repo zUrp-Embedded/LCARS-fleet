@@ -67,6 +67,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       send(self(), {:merge, pr})
       :ok
     end
+
+    def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
   end
 
   defmodule PrFailForge do
@@ -119,6 +121,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       send(self(), {:comment, pr, body})
       {:ok, :posted}
     end
+
+    def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
   end
 
   # PR introuvable (le juge tombe avant tout review) ; merge FF impossible (open ok, merge 409).

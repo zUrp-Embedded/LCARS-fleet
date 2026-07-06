@@ -76,7 +76,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
     # Position = 2 labels scopés (wfmap/<map> + stage/<step>), mutex : on retire les anciens stage/*|wfmap/*
     # puis on re-pose (émule l'exclusive Gitea). Plus de commentaire route (bruit).
-    def post_route(pid, _r, n, p, s, _o) do
+    def post_route(pid, _r, _n, p, s, _o) do
       upd_issue(pid, fn i ->
         kept =
           Enum.reject(i["labels"] || [], fn l ->
@@ -105,6 +105,16 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
         {map, step} when is_binary(map) and is_binary(step) -> {:ok, {map, step}}
         _ -> :none
       end
+    end
+
+    # Étape seule (lifecycle PR : review/merged), mutex : retire stage/* existant, garde wfmap/*.
+    def set_stage(pid, _r, _n, stage, _o) do
+      upd_issue(pid, fn i ->
+        kept = Enum.reject(i["labels"] || [], &String.starts_with?(&1["name"], "stage/"))
+        Map.put(i, "labels", kept ++ [%{"name" => "stage/#{stage}"}])
+      end)
+
+      {:ok, :posted}
     end
 
     def close_issue(pid, _r, _n, _o) do
@@ -215,6 +225,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def post_comment(r, n, b, o), do: Sim.post_comment(p(), r, n, b, o)
     def post_route(r, n, pi, st, o), do: Sim.post_route(p(), r, n, pi, st, o)
     def get_route(r, n, o), do: Sim.get_route(p(), r, n, o)
+    def set_stage(r, n, st, o), do: Sim.set_stage(p(), r, n, st, o)
     def close_issue(r, n, o), do: Sim.close_issue(p(), r, n, o)
     def get_predecessor_result(r, n, o), do: Sim.get_predecessor_result(p(), r, n, o)
     def get_issue(r, n, o), do: Sim.get_issue(p(), r, n, o)
@@ -422,6 +433,13 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     # 5. reviewer finit -> :promote : review APPROVED + merge -> issue close (Closes #N)
     assert {:ok, :promoted} = StepRunConsumer.maybe_complete(completed(o2, "reviewer"), hc())
     assert Sim.get(pid)["state"] == "closed"
+
+    # WS2 inc2 : le sceau pose l'étape terminale VISIBLE `stage/merged` sur l'issue (fermée) ; le mutex
+    # scopé retire l'ancien `stage/*` (ici `stage/review`). Preuve que `set_stage(merged)` s'exécute.
+    issue_labels = Enum.map(Sim.get(pid)["labels"], & &1["name"])
+    assert "stage/merged" in issue_labels
+    refute "stage/review" in issue_labels
+
     # verrou de la PR leve
     refute Enum.any?(Sim.get_pr(pid, pr_n)["labels"], &(&1["name"] == "lcars-in-flight"))
   end
