@@ -340,11 +340,19 @@ cmd_forge() {
   echo "fleet_v2: forge active → $name (persistant ; le prochain « fleet_v2 start » l'utilise)"
 }
 
+# restart = stop (graceful : drain + teardown ordonné ; fallback kill) PUIS start. Le start réattache
+# l'arch à la fin (cf. cmd_start). Un `LCARS_FORGE=` / `fleet_v2 forge <nom>` en amont s'applique au start.
+cmd_restart() {
+  cmd_stop
+  cmd_start "$@"
+}
+
 case "${1:-help}" in
   start)   shift; cmd_start "$@" ;;
   stop)    shift; cmd_stop "$@" ;;
+  restart) shift; cmd_restart "$@" ;;
   status)  shift; cmd_status "$@" ;;
   version) shift; cmd_version "$@" ;;
   forge)   shift; cmd_forge "$@" ;;
-  *) echo "usage: fleet_v2 {start|stop|status|version|forge [nom]}" >&2; exit 1 ;;
+  *) echo "usage: fleet_v2 {start|stop|restart|status|version|forge [nom]}" >&2; exit 1 ;;
 esac
