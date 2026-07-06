@@ -171,7 +171,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       task_queue: StubTaskQueue,
       spawner: StubSpawner,
       gatekeeper_pod_id_fun:
-        Keyword.get(opts, :gatekeeper_pod_id_fun, fn -> "gatekeeper-permanent" end),
+        Keyword.get(opts, :gatekeeper_pod_id_fun, fn -> "gatekeeper" end),
       # MA-17 — seam du recovery de wake (défaut = la vraie fn ; un test l'injecte pour simuler l'escalade).
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{}
@@ -322,13 +322,13 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert ctx.step == "build"
     assert ctx.role == "engineer"
 
-    assert_received {:enqueued, "gatekeeper-permanent", attrs}
+    assert_received {:enqueued, "gatekeeper", attrs}
     assert attrs.role == "gatekeeper"
     assert attrs.metadata["gate_eval"] == true
     assert attrs.metadata["step"] == "build"
     assert is_binary(attrs.brief)
     assert attrs.metadata["outputs"] == %{"sev" => "high"}
-    assert_received {:wake, "gatekeeper-permanent"}
+    assert_received {:wake, "gatekeeper"}
 
     refute_received {:assignee, _}
     refute_received {:open_pr, _, _, _}
@@ -357,11 +357,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
                hc(wake_recovery: escalating)
              )
 
-    assert_received {:enqueued, "gatekeeper-permanent", _attrs}
+    assert_received {:enqueued, "gatekeeper", _attrs}
 
     # LE finding : le kick injoignable est SURFACÉ (telemetry émise), pas avalé silencieusement.
     assert_received {[:fleet_pilot, :step_run_consumer, :gatekeeper_kick_unreached], ^ref,
-                     %{count: 1}, %{pod_id: "gatekeeper-permanent", reason: {:escalated, :dead}}}
+                     %{count: 1}, %{pod_id: "gatekeeper", reason: {:escalated, :dead}}}
   end
 
   test "escalade : outputs ENVELOPPES %{status,result} -> deplies avant le brief (#2)" do

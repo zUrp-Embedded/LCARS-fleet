@@ -38,7 +38,12 @@ defmodule Fleet.Workflow.Gatekeeper do
   require Logger
 
   @pt_key {__MODULE__, :pod_id}
-  @pod_id "gatekeeper-permanent"
+  # Singleton permanent → nom NU par rôle (`gatekeeper`), pas de qualificatif `permanent` redondant. Il ne
+  # matche PAS le préfixe `permanent-*` du PermanentWarden — voulu : le gatekeeper s'AUTO-gère (boot +
+  # registry `@pt_key` + reboot via wake_recovery), hors du warden générique. (L'architect, lui, EST
+  # warden-managé → il garde `permanent-architect`, le préfixe est son signal warden, pas de la déco.)
+  @pod_id "gatekeeper"
+  # Pseudo-issue de contexte du pod permanent (arg spawn distinct du pod_id ; pas d'issue réelle).
   @issue_id "permanent-gatekeeper"
 
   @doc """

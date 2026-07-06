@@ -56,11 +56,11 @@ defmodule Fleet.Workflow.GatekeeperTest do
     end
 
     test "boot → spawn + registration, pod_id résolvable" do
-      assert {:ok, "gatekeeper-permanent"} =
+      assert {:ok, "gatekeeper"} =
                Gatekeeper.ensure_booted(loader: &ok_loader/1, spawner: recording_spawner())
 
-      assert_received {:spawned, "permanent-gatekeeper", "gatekeeper-permanent"}
-      assert Gatekeeper.pod_id() == "gatekeeper-permanent"
+      assert_received {:spawned, "permanent-gatekeeper", "gatekeeper"}
+      assert Gatekeeper.pod_id() == "gatekeeper"
     end
 
     test "idempotent : 2e ensure_booted → pas de re-spawn" do
@@ -68,7 +68,7 @@ defmodule Fleet.Workflow.GatekeeperTest do
       assert_received {:spawned, _, _}
 
       # Déjà registré → no-op, aucun nouveau spawn.
-      assert {:ok, "gatekeeper-permanent"} =
+      assert {:ok, "gatekeeper"} =
                Gatekeeper.ensure_booted(loader: &ok_loader/1, spawner: recording_spawner())
 
       refute_received {:spawned, _, _}
@@ -77,10 +77,10 @@ defmodule Fleet.Workflow.GatekeeperTest do
     test "spawner :already_started → traité comme succès + registré" do
       spawner = fn _cp, _t, _o -> {:error, {:already_started, :some_pid}} end
 
-      assert {:ok, "gatekeeper-permanent"} =
+      assert {:ok, "gatekeeper"} =
                Gatekeeper.ensure_booted(loader: &ok_loader/1, spawner: spawner)
 
-      assert Gatekeeper.pod_id() == "gatekeeper-permanent"
+      assert Gatekeeper.pod_id() == "gatekeeper"
     end
 
     test "loader échoue → {:error}, rien registré (fail-loud)" do
@@ -102,13 +102,13 @@ defmodule Fleet.Workflow.GatekeeperTest do
 
   describe "reboot/1" do
     test "FORCE le re-spawn même déjà registré (≠ ensure_booted idempotent) : reap + dé-registre + re-boote" do
-      {:ok, "gatekeeper-permanent"} =
+      {:ok, "gatekeeper"} =
         Gatekeeper.ensure_booted(loader: &ok_loader/1, spawner: recording_spawner())
 
       assert_received {:spawned, _, _}
 
       # ensure_booted seul serait no-op (déjà registré, cf. test idempotent) ; reboot dé-registre → re-spawn.
-      assert {:ok, "gatekeeper-permanent"} =
+      assert {:ok, "gatekeeper"} =
                Gatekeeper.reboot(
                  loader: &ok_loader/1,
                  spawner: recording_spawner(),

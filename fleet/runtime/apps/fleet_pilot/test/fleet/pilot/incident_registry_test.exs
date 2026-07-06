@@ -8,8 +8,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert Reg.signature("wake", "issue-42-engineer", :not_found) ==
                "wake:issue-N-engineer:not_found"
 
-      assert Reg.signature("wake", "gatekeeper-permanent", {:send_keys_failed, :detail}) ==
-               "wake:gatekeeper-permanent:send_keys_failed"
+      assert Reg.signature("wake", "gatekeeper", {:send_keys_failed, :detail}) ==
+               "wake:gatekeeper:send_keys_failed"
     end
   end
 
