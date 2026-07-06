@@ -47,6 +47,12 @@ ROLES="architect consultant engineer gatekeeper qualifier reviewer vulcan"
 GROUP="fleet"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue,write:user"
+# Le compte SYSTÈME crée les repos d'org (create_project → onboard) : POST /orgs/<org>/repos exige
+# write:organization EN PLUS (vérifié live 2026-07-06 : sans lui, token valide mais 403 à la création ;
+# avec, 201). Les rôles ne créent JAMAIS de repo d'org → ils restent au scope minimal (least-privilege :
+# un token de rôle détourné ne doit pas pouvoir gérer l'org). Le nom du compte système est un fait connu.
+SYSTEM_ACCOUNT="lcars-system"
+SYSTEM_SCOPES="$SCOPES,write:organization"
 PASSWORDS_FILE=""
 CHECK_ONLY=0
 # Tokens hors-rôle où le compte ≠ le nom de fichier (le mapping est une DONNÉE, pas un cas spécial) :
@@ -126,6 +132,11 @@ for entry in "${ENTRIES[@]}"; do
   filename="${entry#*:}"
   file="$TOKENS_DIR/$filename"
 
+  # Scope différencié (least-privilege) : le compte système crée des repos d'org → write:organization en
+  # plus ; les rôles restent au scope minimal. Match insensible à la casse (Gitea résout ainsi les comptes).
+  entry_scopes="$SCOPES"
+  [[ "${account,,}" == "${SYSTEM_ACCOUNT,,}" ]] && entry_scopes="$SYSTEM_SCOPES"
+
   # Idempotence : token local présent ET valide → rien à faire.
   if [[ -r "$file" ]]; then
     tok="$(tr -d '[:space:]' < "$file")"
@@ -154,7 +165,7 @@ for entry in "${ENTRIES[@]}"; do
 
   resp="$(curl -s -m 15 "${CURL_AUTH[@]}" -X POST \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$TOKEN_NAME\",\"scopes\":[$(printf '"%s",' ${SCOPES//,/ } | sed 's/,$//')]}" \
+    -d "{\"name\":\"$TOKEN_NAME\",\"scopes\":[$(printf '"%s",' ${entry_scopes//,/ } | sed 's/,$//')]}" \
     "$FORGE/api/v1/users/$account/tokens")"
   tok="$(printf '%s' "$resp" | jq -r '.sha1 // empty')"
 
