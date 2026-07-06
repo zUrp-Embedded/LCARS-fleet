@@ -54,6 +54,23 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def load!("gated") do
       %{
         "name" => "gated",
+        "max_rework_rounds" => 2,
+        "steps" => %{
+          "build" => %{
+            "role" => "engineer",
+            "needs" => [],
+            "gate" => %{"type" => "hard", "rules" => ["ok"]}
+          },
+          "review" => %{"role" => "reviewer", "needs" => ["build"]}
+        }
+      }
+    end
+
+    # Preuve « budget = DONNÉE du map » : même forme que "gated" mais budget déclaré 4 (→ total 2×5=10).
+    def load!("gated4") do
+      %{
+        "name" => "gated4",
+        "max_rework_rounds" => 4,
         "steps" => %{
           "build" => %{
             "role" => "engineer",
@@ -68,6 +85,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def load!("soft") do
       %{
         "name" => "soft",
+        "max_rework_rounds" => 2,
         "steps" => %{
           "build" => %{"role" => "engineer", "needs" => [], "gate" => %{"type" => "soft"}},
           "review" => %{"role" => "reviewer", "needs" => ["build"]}
@@ -78,6 +96,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def load!("plain") do
       %{
         "name" => "plain",
+        "max_rework_rounds" => 2,
         "steps" => %{
           "build" => %{"role" => "engineer", "needs" => []},
           "review" => %{"role" => "reviewer", "needs" => ["build"]}
@@ -89,6 +108,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def load!("mandgate") do
       %{
         "name" => "mandgate",
+        "max_rework_rounds" => 2,
         "steps" => %{
           "brief-review" => %{
             "role" => "consultant",
@@ -107,6 +127,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def load!("softterm") do
       %{
         "name" => "softterm",
+        "max_rework_rounds" => 2,
         "steps" => %{
           "build" => %{"role" => "engineer", "needs" => [], "gate" => %{"type" => "soft"}}
         }
@@ -118,6 +139,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def load!("humanapp") do
       %{
         "name" => "humanapp",
+        "max_rework_rounds" => 2,
         "steps" => %{
           "build" => %{
             "role" => "engineer",
@@ -146,7 +168,6 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       loader: WorkflowMap,
       deliverable: DelivStub,
       deliverable_mode_fun: dmode(),
-      max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2),
       task_queue: StubTaskQueue,
       spawner: StubSpawner,
       gatekeeper_pod_id_fun:
@@ -268,6 +289,19 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     # pile a la limite : budget epuise -> escalade humaine (await_arch), plus le {:error} avale (G2).
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 6]))
+  end
+
+  test "budget map-level HONORÉ : gated4(max_rework_rounds:4) rebondit là où gated(2) escalade" do
+    # Preuve que le budget vient de la DONNÉE du map, pas d'un défaut codé : gated4 déclare
+    # max_rework_rounds:4 → budget = nb_steps(2) × (4+1) = 10. À 6 step_runs, gated(budget 6) ESCALADE
+    # (test ci-dessus) mais gated4(budget 10) REBONDIT encore ; à 10, gated4 escalade à son tour.
+    payload = build_done("gated4", %{})
+
+    assert {:ok, :rework_requested} =
+             StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 6]))
+
+    assert {:ok, :awaiting_arch} =
+             StepRunConsumer.maybe_complete(payload, hc(forge_opts: [_step_runs: 10]))
   end
 
   test "step_run producteur ordinaire -> livrable git_native (le pod a commite) pousse a l'ouverture PR" do

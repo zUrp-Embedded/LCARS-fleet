@@ -21,6 +21,7 @@ defmodule Fleet.Workflow.LoaderTest do
       metadata:
         name: minimal
       spec:
+        max_rework_rounds: 1
         steps:
           only:
             role: noop
@@ -53,6 +54,7 @@ defmodule Fleet.Workflow.LoaderTest do
       metadata:
         name: bad_gate
       spec:
+        max_rework_rounds: 1
         steps:
           s1:
             role: noop
@@ -80,6 +82,7 @@ defmodule Fleet.Workflow.LoaderTest do
       metadata:
         name: escape
       spec:
+        max_rework_rounds: 1
         steps:
           only:
             role: noop
@@ -107,6 +110,7 @@ defmodule Fleet.Workflow.LoaderTest do
       metadata:
         name: complex
       spec:
+        max_rework_rounds: 1
         steps:
           a:
             role: scout
@@ -138,6 +142,7 @@ defmodule Fleet.Workflow.LoaderTest do
       metadata:
         name: typed
       spec:
+        max_rework_rounds: 1
         steps:
           review:
             role: reviewer
@@ -161,6 +166,7 @@ defmodule Fleet.Workflow.LoaderTest do
       metadata:
         name: bad_kind
       spec:
+        max_rework_rounds: 1
         steps:
           review:
             role: reviewer
@@ -181,6 +187,7 @@ defmodule Fleet.Workflow.LoaderTest do
       metadata:
         name: unknown_field
       spec:
+        max_rework_rounds: 1
         steps:
           s:
             role: noop
@@ -206,6 +213,7 @@ defmodule Fleet.Workflow.LoaderTest do
       metadata:
         name: phantom
       spec:
+        max_rework_rounds: 1
         steps:
           a:
             role: noop

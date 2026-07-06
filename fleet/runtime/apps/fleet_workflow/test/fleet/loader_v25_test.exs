@@ -40,6 +40,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
     metadata:
       name: face2-step
     spec:
+      max_rework_rounds: 1
       steps:
         publish:
           role: engineer
@@ -68,6 +69,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
     metadata:
       name: face2-missing-required
     spec:
+      max_rework_rounds: 1
       steps:
         publish:
           role: engineer
@@ -91,6 +93,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
     metadata:
       name: bad
     spec:
+      max_rework_rounds: 1
       steps: {}
     """
 
@@ -108,6 +111,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
     metadata:
       name: override-target
     spec:
+      max_rework_rounds: 1
       steps:
         only:
           role: engineer

@@ -31,9 +31,14 @@
     "selection_priority": {"type": "array", "items": {"type": "string"}},
     "spec": {
       "type": "object",
-      "required": ["steps"],
+      "required": ["steps", "max_rework_rounds"],
       "additionalProperties": false,
       "properties": {
+        "max_rework_rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Budget anti-emballement du pipeline : nb de restarts complets du workflow tolérés avant escalade humaine (budget total de step-runs = nb_steps × (max_rework_rounds + 1)). OBLIGATOIRE — pas de défaut caché en code : l'auteur du map déclare sa policy de churn (donnée, pas mécanisme figé)."
+        },
         "on_escalation": {"type": "object"},
         "on_failure": {
           "type": "object",
@@ -79,10 +84,6 @@
                       "properties": {
                         "type": {"enum": ["hard", "soft", "terminal"]},
                         "rules": {"type": "array", "items": {"type": "string"}},
-                        "max_rounds": {"type": "integer", "minimum": 1},
-                        "max_retries": {"type": "integer", "minimum": 0},
-                        "max_revisions": {"type": "integer", "minimum": 0},
-                        "max_iterations_per_task": {"type": "integer", "minimum": 1},
                         "human_approval_required": {"type": "boolean"},
                         "approval_prompt": {"type": "string"},
                         "fallback_invoke_gatekeeper": {"type": "boolean"},

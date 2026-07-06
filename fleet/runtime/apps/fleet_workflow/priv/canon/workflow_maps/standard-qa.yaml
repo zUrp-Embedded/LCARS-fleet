@@ -16,6 +16,8 @@ metadata:
   applicable_regime: [R1, R2]
 
 spec:
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
   steps:
 
     # --- Step 1: brainstorm (design Socratique) ---
@@ -73,7 +75,6 @@ spec:
           - "all_tests_pass"
           - "tdd_iron_law_respected"  # test written first per task (witnessed RED → GREEN)
           - "verification_checklist_complete"  # 8 items (cf. modop:tdd rev2)
-        max_iterations_per_task: 3  # anti-storm canon LCARS
       coordHook: before-next  # invoke fleet_coord chantier 14 hook entre steps
       timeout_sec: 3600
 
@@ -94,7 +95,6 @@ spec:
         fallback_invoke_gatekeeper: true  # si severity_max == important, gatekeeper décide proceed/revision
         on_blocking_severity: critical
         on_revision_severity: important
-        max_revisions: 3
       timeout_sec: 600
 
     # --- Step 5: code-review (reviewer — code quality) ---
@@ -114,7 +114,6 @@ spec:
         fallback_invoke_gatekeeper: true
         on_blocking_severity: critical
         on_revision_severity: important
-        max_revisions: 3
       timeout_sec: 600
 
     # --- Step 6: finish (merge/PR/keep/discard) ---

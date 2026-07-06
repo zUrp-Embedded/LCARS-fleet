@@ -19,6 +19,8 @@ metadata:
   applicable_regime: [R1, R2]
 
 spec:
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
   steps:
 
     # --- Step 1 (racine) : revue du brief par le consultant (mode JUGE) ---

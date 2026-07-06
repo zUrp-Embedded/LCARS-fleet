@@ -52,14 +52,13 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     `GatekeeperEscalation` (task_queue/spawner/gatekeeper_pod_id_fun/wake_recovery),
     transmis tel quel à `dispatch/7`.
     """
-    @enforce_keys [:loader, :deliverable_mode_fun, :max_rework_rounds, :escalation]
+    @enforce_keys [:loader, :deliverable_mode_fun, :escalation]
     defstruct [
       # Loader de workflow_map (seam, défaut côté consumer = Fleet.Workflow.Loader).
       :loader,
       # Résout le deliverable_mode d'un rôle ("git_native" producteur / "payload" juge).
       :deliverable_mode_fun,
-      # Bound anti-runaway du rebond de gate (nombre de rounds de rework autorisés).
-      :max_rework_rounds,
+      # (Le bound anti-runaway du rebond n'est PLUS un seam : c'est une DONNÉE du map, lue par `rebound`.)
       # Repo "owner/name" du step_run (per-step-run, dérivé de l'event) — compteur de budget + logs.
       :repo,
       # Opts forge (token…) passés au client pour le compteur de budget.
@@ -73,7 +72,6 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     @type t :: %__MODULE__{
             loader: module() | (String.t() -> map()),
             deliverable_mode_fun: (String.t() -> String.t()),
-            max_rework_rounds: non_neg_integer(),
             repo: String.t() | nil,
             forge_opts: keyword(),
             forge_client: module() | nil,
@@ -314,7 +312,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   # (branche fail) → zéro I/O sur le happy path. Budget illisible → on NE rebondit PAS à
   # l'aveugle (un rebond non vérifiable pourrait boucler) : on surface.
   defp rebound(workflow_map, n, seams) do
-    budget = step_count(workflow_map) * (seams.max_rework_rounds + 1)
+    budget = step_count(workflow_map) * (max_rework_rounds(workflow_map) + 1)
 
     case count_step_runs(seams, n) do
       {:ok, step_runs} when step_runs >= budget ->
@@ -337,6 +335,11 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   defp step_count(workflow_map) do
     workflow_map |> Map.get("steps", %{}) |> map_size()
   end
+
+  # Budget rework = DONNÉE du map (obligatoire, garantie par le schéma + le normalize du Loader). Pas de
+  # défaut codé : un map sans budget ne charge pas (fail-loud). C'est la policy de churn de CE pipeline —
+  # le core ne la hardcode pas (microkernel : le métier vit en donnée).
+  defp max_rework_rounds(workflow_map), do: Map.fetch!(workflow_map, "max_rework_rounds")
 
   defp count_step_runs(seams, n) do
     forge = seams.forge_client || Fleet.Pilot.ForgeClient

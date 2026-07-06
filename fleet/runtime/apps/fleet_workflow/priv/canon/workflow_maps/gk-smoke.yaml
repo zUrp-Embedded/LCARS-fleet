@@ -16,6 +16,8 @@ metadata:
   name: gk-smoke
   description: "Smoke-test escalade gatekeeper (pattern B) : build engineer -> review reviewer (gate soft)"
 spec:
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
   steps:
     build:
       role: engineer
@@ -28,5 +30,4 @@ spec:
       needs: [build]
       gate:
         type: soft
-        max_rounds: 1
       timeout_sec: 900

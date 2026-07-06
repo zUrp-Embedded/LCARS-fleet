@@ -140,7 +140,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # Resout le deliverable_mode d'un role (`"git_native"` producteur / `"payload"` juge)
     # pour classer le step_run PR-natif. Defaut = catalogue cap-profile. Seam test (zero chargement).
     :deliverable_mode_fun,
-    :max_rework_rounds,
     # Seams d'escalade gatekeeper.
     :task_queue,
     :spawner,
@@ -213,10 +212,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       deliverable: Keyword.get(opts, :deliverable),
       # Classification producteur/juge du step_run PR-natif. Defaut = catalogue cap-profile.
       deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
-      # Bound anti-runaway du rebond de gate. Budget de step_runs = nb_steps *
-      # (max_rework_rounds + 1) : la 1re passe + N rounds de rework. Au-delà → stuck
-      # surfacé (pas de boucle). Défaut 2 rounds.
-      max_rework_rounds: Keyword.get(opts, :max_rework_rounds, 2),
+      # (Le bound anti-runaway du rebond n'est PLUS un opt à défaut codé : c'est une DONNÉE du map
+      # `spec.max_rework_rounds`, lue par GateEngine.rebound. Fin du défaut global caché.)
       # Seams d'escalade gatekeeper (défauts = broker/spawner/registry réels).
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
@@ -502,7 +499,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
     %GateEngine.Seams{
       loader: state.loader,
       deliverable_mode_fun: state.deliverable_mode_fun,
-      max_rework_rounds: state.max_rework_rounds,
       repo: state.repo,
       forge_opts: state.forge_opts,
       forge_client: state.forge_client,

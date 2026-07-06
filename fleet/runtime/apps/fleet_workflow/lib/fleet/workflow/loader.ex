@@ -91,8 +91,14 @@ defmodule Fleet.Workflow.Loader do
   # consommés (`metadata` autre que `name`, `spec.on_escalation`/`on_failure`,
   # `cycle`, `selection_priority`) sont volontairement écartés — étendre cette forme
   # quand un consommateur réel apparaît (pas de portage spéculatif).
-  defp normalize(%{"spec" => %{"steps" => steps}} = yaml) when is_map(steps) do
-    %{"name" => get_in(yaml, ["metadata", "name"]), "steps" => steps}
+  defp normalize(%{"spec" => %{"steps" => steps} = spec} = yaml) when is_map(steps) do
+    %{
+      "name" => get_in(yaml, ["metadata", "name"]),
+      "steps" => steps,
+      # Budget rework map-level (obligatoire au schéma → toujours présent ici ; fail-loud sinon). Le
+      # kernel le lit comme DONNÉE (gate_engine), plus de défaut global codé.
+      "max_rework_rounds" => Map.fetch!(spec, "max_rework_rounds")
+    }
   end
 
   defp workflow_maps_root(opts) do

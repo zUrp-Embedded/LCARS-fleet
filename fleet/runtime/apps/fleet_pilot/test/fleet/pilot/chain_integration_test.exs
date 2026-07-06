@@ -365,7 +365,6 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       loader: WorkflowMapLoader,
       deliverable: DelivStub,
       deliverable_mode_fun: dmode(),
-      max_rework_rounds: 2,
       task_queue: StubTaskQueue,
       spawner: SpawnStub,
       gatekeeper_pod_id_fun: fn -> "gk-perm" end,
