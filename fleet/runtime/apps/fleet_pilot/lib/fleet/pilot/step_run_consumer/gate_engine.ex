@@ -115,10 +115,21 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
           # → merge sur 1 juge, court-circuitant le quorum. → résolution no-workflow_map (`:reviewed`) : il
           # enregistre sa review native, et le merge revient au quorum `dispatch_by_verdicts` (qui attend
           # TOUS les juges). Un vrai step de workflow_map (rôle = rôle du step) passe par la gate.
-          if inherited_route?(workflow_map, step, payload["role"]) do
-            no_workflow_map_resolve(payload, seams)
-          else
-            gate_decide(workflow_map, step, payload, n, seams)
+          cond do
+            # STAGE LIFECYCLE PR (review/merged) : posé POST-MAP par open_deliverable_pr/gatekeeper_seal, ce
+            # n'est PAS un step de workflow_map. Un juge qui finit là review la PR d'un producteur-TERMINAL
+            # (ex. brief-gate `build`→PR) : jamais de navigation map (qui échouerait `:unknown_step`) →
+            # résolution no-workflow_map (record review ; merge = quorum dispatch_review). Avant les labels
+            # scopés, le step restait celui du producteur (`build`, route héritée) et `inherited_route?`
+            # tranchait ; le stage/* lifecycle (WS2) a déplacé cette bascule ICI, explicitement.
+            lifecycle_stage?(workflow_map, step) ->
+              no_workflow_map_resolve(payload, seams)
+
+            inherited_route?(workflow_map, step, payload["role"]) ->
+              no_workflow_map_resolve(payload, seams)
+
+            true ->
+              gate_decide(workflow_map, step, payload, n, seams)
           end
         end
 
@@ -167,6 +178,16 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
       _ ->
         false
     end
+  end
+
+  # Un stage LIFECYCLE PR (review/merged, cf. `Fleet.Pilot.Labels`) est posé POST-MAP (open_deliverable_pr →
+  # review, gatekeeper_seal → merged). DISTINCTION du step de map homonyme (une workflow_map PEUT avoir un
+  # step nommé `review`, cf. poc-cycle/reviewer) : c'est un stage lifecycle SEULEMENT s'il n'existe PAS comme
+  # step dans CETTE map. Sinon (step réel) → `inherited_route?`/`gate_decide` tranchent comme avant. Sans ce
+  # garde « pas-dans-la-map », un vrai step `review` serait dévié à tort (perte du `:promote` terminal).
+  defp lifecycle_stage?(workflow_map, step) do
+    step in [Fleet.Pilot.Labels.stage_review(), Fleet.Pilot.Labels.stage_merged()] and
+      not match?({:ok, _}, Fleet.Pilot.WorkflowMapNav.step_spec(workflow_map, step))
   end
 
   # Résolution single-brique (sans workflow_map) :

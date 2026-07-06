@@ -31,6 +31,12 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       }
     end
 
+    # Map producteur-TERMINALE (façon brief-gate) : le dernier step est un producteur (build/engineer) ;
+    # il n'y a PAS de step `review`/`merged` (ceux-ci sont des stages lifecycle PR posés POST-map).
+    def load!("gate-terminal") do
+      %{"name" => "gate-terminal", "steps" => %{"build" => %{"role" => "engineer", "needs" => []}}}
+    end
+
     def load!(_), do: raise("workflow_map introuvable")
   end
 
@@ -250,6 +256,26 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       # le merge revient au quorum `dispatch_by_verdicts` qui attend TOUS les juges).
       payload =
         step_payload(%{"role" => "qualifier", "workflow_map" => "poc-cycle", "step" => "build"})
+
+      assert {:ok, :captured} =
+               StepRunConsumer.maybe_complete(
+                 payload,
+                 state(%{loader: StubLoader, forge_client: StubForge})
+               )
+
+      assert_received {:step_run, step_run, _opts}
+      assert step_run.pr_role == :judge
+      assert step_run.intent == :reviewed
+    end
+
+    test "stage LIFECYCLE (review) hérité sur une map producteur-terminale -> :reviewed, PAS unknown_step" do
+      # Régression WS2 : `stage/review` est posé POST-map (open_deliverable_pr) ; get_route rend alors
+      # step=`review`, qui N'EST PAS un step de la map producteur-terminale `gate-terminal`. Sans le garde
+      # `lifecycle_stage?`, resolve_next tombait en `next_step(map, "review")` -> {:workflow_map_nav,
+      # :unknown_step} (le juge PR bouclait, re-spawn à l'infini, jamais de merge). Un stage lifecycle absent
+      # de la map -> résolution no-workflow_map -> :reviewed (le merge revient au quorum dispatch_review).
+      payload =
+        step_payload(%{"role" => "qualifier", "workflow_map" => "gate-terminal", "step" => "review"})
 
       assert {:ok, :captured} =
                StepRunConsumer.maybe_complete(
