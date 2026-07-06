@@ -47,7 +47,3 @@ spec:
       inputs:
         - ticket.body
       timeout_sec: 1800
-
-  on_failure:
-    notify_role: starfleet
-    cleanup: false

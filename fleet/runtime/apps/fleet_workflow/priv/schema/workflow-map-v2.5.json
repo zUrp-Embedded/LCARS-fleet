@@ -39,15 +39,6 @@
           "minimum": 0,
           "description": "Budget anti-emballement du pipeline : nb de restarts complets du workflow tolérés avant escalade humaine (budget total de step-runs = nb_steps × (max_rework_rounds + 1)). OBLIGATOIRE — pas de défaut caché en code : l'auteur du map déclare sa policy de churn (donnée, pas mécanisme figé)."
         },
-        "on_failure": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "notify_role": {"type": "string"},
-            "log_path": {"type": "string"},
-            "cleanup": {"type": "boolean"}
-          }
-        },
         "steps": {
           "type": "object",
           "minProperties": 1,

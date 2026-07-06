@@ -50,11 +50,6 @@ spec:
         on_blocking_severity: critical
       timeout_sec: 1800
 
-  on_failure:
-    notify_role: starfleet
-    log_path: audits/pipeline-failure-{date}.json
-    cleanup: false
-
 # Metadata cycle
 cycle:
   regime_default: R1  # audit = data déclarative
