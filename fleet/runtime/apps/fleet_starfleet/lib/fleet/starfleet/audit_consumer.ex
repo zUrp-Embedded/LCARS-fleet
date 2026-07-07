@@ -1,26 +1,26 @@
 defmodule Fleet.Starfleet.AuditConsumer do
   @moduledoc """
-  B10 / #583 Sprint 1 — consumer audit events lifecycle + sécurité.
+  Audit consumer — events lifecycle + security.
 
-  Subscribe `Fleet.EventRouter.Bus` topic `fleet.events`, log
-  audit-grade pour events :
+  Subscribes to the `Fleet.EventRouter.Bus` topic `fleet.events`, logs at
+  audit-grade for events:
     * `:"pod.completed"` / `:"pod.failed"` — Pod GenServer Port stream lifecycle
-      (producteurs réels : `Fleet.Spawner.Pod`).
+      (real producers: `Fleet.Spawner.Pod`).
     * `:"fleet.boot_complete"` / `:"fleet.boot_partial"` / `:"fleet.boot_failed"`
       — BootOrchestrator lifecycle.
-    * task-queue : `:"work_item.enqueued"` / `:"work_item.assigned"` / `:"work_item.completed"` /
-      `:"work_item.cleared"` / `:"work_item.failed"` / `:"state.corrupt"` (producteur `Fleet.TaskQueue`).
+    * task-queue: `:"work_item.enqueued"` / `:"work_item.assigned"` / `:"work_item.completed"` /
+      `:"work_item.cleared"` / `:"work_item.failed"` / `:"state.corrupt"` (producer `Fleet.TaskQueue`).
 
-  Handler DORMANT unique : `:"pod.drift"` (clause canon type-only — producteur pas encore né,
-  cf. events.yaml ; consommé aussi par DriftMonitor). `pod.refuse_pattern_match` est PARTI avec la
-  pile legacy (retiré du registry, 0 producteur/0 consumer).
+  Single DORMANT handler: `:"pod.drift"` (canonical type-only clause — producer not yet born,
+  cf. events.yaml; also consumed by DriftMonitor). `pod.refuse_pattern_match` left with the
+  legacy stack (removed from the registry, 0 producer / 0 consumer).
 
-  Pattern GenServer subscribe au boot (init/1), dispatch par clauses `%Fleet.Event{}` canon
-  (la pile legacy tuple `{atom, map}` est RASÉE — 0 producteur). Pas de side effect runtime
-  au-delà du log (forensics + dashboard subscriber séparé).
+  GenServer that subscribes at boot (init/1), dispatches via canonical `%Fleet.Event{}` clauses
+  (the legacy `{atom, map}` tuple stack is RAZED — 0 producer). No runtime side effect
+  beyond the log (forensics + a separate dashboard subscriber).
 
-  Test-seam : `start_link(opts)` accepte `:subscribe` (default true)
-  → tests instancient sans subscribe global.
+  Test-seam: `start_link(opts)` accepts `:subscribe` (default true)
+  → tests instantiate without the global subscribe.
   """
 
   use GenServer
@@ -39,18 +39,18 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:ok, %{events_count: 0}}
   end
 
-  # Pile legacy tuple {atom, map} RASÉE (conformité 2026-07-04) : plus AUCUN producteur du format
-  # tuple sur le Bus (vérifié : zéro Bus.broadcast hors %Fleet.Event{}), les clauses dormaient en
-  # dupliquant le logging des clauses canon ci-dessous (boot_*, pod.completed/failed).
+  # Legacy {atom, map} tuple stack RAZED (conformance 2026-07-04): NO producer of the tuple
+  # format on the Bus anymore (verified: zero Bus.broadcast outside %Fleet.Event{}); the clauses
+  # lay dormant, duplicating the logging of the canonical clauses below (boot_*, pod.completed/failed).
 
-  # BL-021 chantier 2d — schema canon strict %Fleet.Event{} (task_queue lifecycle).
+  # Strict canonical %Fleet.Event{} schema (task_queue lifecycle).
   @impl true
   def handle_info(%Fleet.Event{source: :task_queue, type: type} = event, state) do
     log_task_queue_event(type, event)
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # BL-021 chantier 8 — Extensions V2 (MCPWatcher + MCPMonitor).
+  # V2 extensions (MCPWatcher + MCPMonitor).
   def handle_info(
         %Fleet.Event{source: :starfleet, type: :"sdk.upstream_alert", payload: p},
         state
@@ -77,7 +77,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # BL-021 chantier 9 (B) — boot_orchestrator events migrés au schema canon.
+  # boot_orchestrator events migrated to the canonical schema.
   def handle_info(
         %Fleet.Event{source: :starfleet, type: type, payload: payload},
         state
@@ -87,7 +87,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # BL-021 chantier 9 (B) — Pod GenServer Port stream lifecycle migré au schema canon.
+  # Pod GenServer Port stream lifecycle migrated to the canonical schema.
   def handle_info(
         %Fleet.Event{source: :spawner, type: type, payload: payload},
         state
@@ -97,13 +97,13 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # Clause git.published/git.publish_failed RASÉE (conformité 2026-07-04) : 0 producteur (events.yaml
-  # les documente « à ré-émettre par le rail forge-driven si la publication git redevient observable ») ;
-  # elle matchait en plus l'ancien source :pipeline (renommé :workflow au rename fleet_workflow).
+  # git.published/git.publish_failed clause RAZED (conformance 2026-07-04): 0 producer (events.yaml
+  # documents them as "to be re-emitted by the forge-driven rail if git publication becomes observable
+  # again"); it also matched source :workflow.
 
-  # pod.drift : migré de la pile legacy (conformité 2026-07-04). Producteur pas encore né (events.yaml :
-  # « producteur manquant ») mais consommé par DriftMonitor — match type-only ALIGNÉ sur DriftMonitor
-  # (le source du futur producteur n'est pas encore fixé ; on ne l'invente pas ici).
+  # pod.drift: migrated from the legacy stack (conformance 2026-07-04). Producer not yet born (events.yaml:
+  # "producer missing") but consumed by DriftMonitor — type-only match ALIGNED with DriftMonitor
+  # (the future producer's source is not yet fixed; we do not invent it here).
   def handle_info(%Fleet.Event{type: :"pod.drift", payload: payload} = event, state) do
     Logger.warning(
       "AUDIT pod.drift pod=#{event.pod_id || Map.get(payload, "pod_id", "?")} " <>
@@ -113,12 +113,12 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # Ignore les autres %Fleet.Event{} non handlés (l'audit trail est sélectif, pas exhaustif).
+  # Ignore other unhandled %Fleet.Event{} (the audit trail is selective, not exhaustive).
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
 
   def handle_info(_other, state), do: {:noreply, state}
 
-  # BL-021 chantier 2d — task_queue lifecycle (DN orchestration/task-queue §E)
+  # task_queue lifecycle.
   defp log_task_queue_event(:"work_item.enqueued", %Fleet.Event{pod_id: pid, correlation_id: tid}) do
     Logger.info("AUDIT task_queue.work_item.enqueued pod=#{pid} work_item=#{tid}")
   end
@@ -153,7 +153,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
 
   defp log_task_queue_event(_other, _event), do: :ok
 
-  # BL-021 chantier 9 (B) — boot_orchestrator schema canon dispatcher.
+  # boot_orchestrator canonical schema dispatcher.
   defp log_boot_event(:"fleet.boot_complete", payload) do
     Logger.info("AUDIT fleet.boot_complete #{inspect(payload)}")
   end

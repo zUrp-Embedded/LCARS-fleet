@@ -1,33 +1,33 @@
 defmodule Fleet.Starfleet.PeriodicCheck do
   @moduledoc """
-  Plomberie PARTAGÉE des GenServers de check périodique starfleet (`MCPMonitor`, `MCPWatcher`).
+  SHARED plumbing for starfleet's periodic-check GenServers (`MCPMonitor`, `MCPWatcher`).
 
-  Les deux jumeaux portent le MÊME squelette : GenServer nommé + `Process.send_after/3` récursif
-  (une seule échéance armée à tout instant : le tick exécute le check puis ré-arme la prochaine) +
-  hook test `:check_now` (un call sync qui rejoue le code path complet du timer). Ce squelette vit
-  ICI, sous forme de FONCTIONS appelées depuis leurs callbacks — pas de macro `use` : des fonctions
-  suffisent, et un callback qui délègue explicitement reste auditable ligne à ligne (aucun code
-  généré à reconstituer de tête).
+  Both twins carry the SAME skeleton: named GenServer + recursive `Process.send_after/3`
+  (a single deadline armed at any instant: the tick runs the check then re-arms the next) +
+  test hook `:check_now` (a sync call that replays the timer's full code path). This skeleton lives
+  HERE, as FUNCTIONS called from their callbacks — no `use` macro: functions
+  suffice, and a callback that delegates explicitly stays auditable line by line (no generated
+  code to reconstruct from memory).
 
-  Chaque jumeau garde ce qui lui est PROPRE : son `init/1` (les champs d'état diffèrent — cible et
-  statut pour le monitor, package/fetcher/versions pour le watcher), son `do_check/1` (le métier)
-  et la FORME de sa réponse `:check_now` (`{:ok, status}` pour le monitor, `:ok` pour le watcher).
-  Contrat minimal sur l'état : une map portant `interval_ms` (relu à CHAQUE ré-armement).
+  Each twin keeps what is its OWN: its `init/1` (the state fields differ — target and
+  status for the monitor, package/fetcher/versions for the watcher), its `do_check/1` (the business logic)
+  and the SHAPE of its `:check_now` reply (`{:ok, status}` for the monitor, `:ok` for the watcher).
+  Minimal state contract: a map carrying `interval_ms` (re-read on EVERY re-arm).
 
-  NE PAS généraliser au-delà de ces deux modules : les autres GenServers périodiques du runtime
-  (ex. `Fleet.Spawner.PodWarden`) ont leurs propres nuances (handle_continue, skip de tick) — les
-  plier ici forcerait des paramètres spéculatifs. Deux clients réels, zéro client hypothétique.
+  Do NOT generalize beyond these two modules: the runtime's other periodic GenServers
+  (e.g. `Fleet.Spawner.PodWarden`) have their own nuances (handle_continue, tick skip) — folding
+  them in here would force speculative parameters. Two real clients, zero hypothetical clients.
 
-  ## Contrat (appelé par `MCPMonitor` / `MCPWatcher`)
+  ## Contract (called by `MCPMonitor` / `MCPWatcher`)
 
-  - `start_link(module, opts)` — démarre le GenServer `module` nommé (`opts[:name]`, défaut le
-    module lui-même — les tests injectent un nom unique pour co-exister).
-  - `schedule(tick_message, interval_ms)` — arme la PROCHAINE échéance (`send_after` à `self()`,
-    donc appelé DEPUIS le process GenServer : `init/1` et le handler de tick).
-  - `tick(state, tick_message, do_check)` — corps du `handle_info` de tick : exécute `do_check.(state)`
-    puis ré-arme → `{:noreply, new_state}`.
-  - `check_now(state, do_check, reply)` — corps du `handle_call(:check_now, ...)` : même check que
-    le timer, réponse construite par `reply.(new_state)` → `{:reply, _, new_state}`.
+  - `start_link(module, opts)` — starts the named GenServer `module` (`opts[:name]`, default the
+    module itself — tests inject a unique name to co-exist).
+  - `schedule(tick_message, interval_ms)` — arms the NEXT deadline (`send_after` to `self()`,
+    so called FROM the GenServer process: `init/1` and the tick handler).
+  - `tick(state, tick_message, do_check)` — body of the tick `handle_info`: runs `do_check.(state)`
+    then re-arms → `{:noreply, new_state}`.
+  - `check_now(state, do_check, reply)` — body of `handle_call(:check_now, ...)`: same check as
+    the timer, reply built by `reply.(new_state)` → `{:reply, _, new_state}`.
   """
 
   @spec start_link(module(), keyword()) :: GenServer.on_start()

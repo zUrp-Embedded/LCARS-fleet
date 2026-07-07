@@ -1,21 +1,21 @@
 defmodule Fleet.Starfleet.CoordBackend do
   @moduledoc """
-  Behaviour wrap autour de `Fleet.Coord` (chantier 14).
+  Behaviour wrapper around `Fleet.Coord` (workstream 14).
 
-  Permet de différer la dep `fleet_coord` jusqu'au câblage chantier 14.
-  Default `NotWiredYet` retourne `:ok` (escalade Cat 5 audit-only,
-  pas de side effect runtime). Cohérent canon §0 #1 refus par défaut +
-  fail-safe (audit log écrit même si coord pas câblé).
+  Lets the `fleet_coord` dep be deferred until coord is wired (workstream 14).
+  The `NotWiredYet` default returns `:ok` (Cat 5 escalation is audit-only, no
+  runtime side effect). Consistent with the deny-by-default + fail-safe stance
+  (the audit log is written even if coord is not wired).
 
-  BL-021 chantier 9 (B) — compat shims `/1` et `/2` retirés. Seules les
-  arités canon avec correlation_id explicite (DN 9 C2.3) sont conservées.
+  The `/1` and `/2` compat shims were removed — only the canonical arities with
+  an explicit correlation_id are kept.
 
   ## Callbacks
 
-    * `handle_decision/2` — consume validated decision (gatekeeper output) +
-      correlation_id explicite
-    * `handle_escalation/3` — consume Cat 5 escalade (source + payload) +
-      correlation_id explicite
+    * `handle_decision/2` — consume a validated decision (gatekeeper output) +
+      explicit correlation_id
+    * `handle_escalation/3` — consume a Cat 5 escalation (source + payload) +
+      explicit correlation_id
   """
 
   @callback handle_decision(
@@ -30,10 +30,10 @@ defmodule Fleet.Starfleet.CoordBackend do
             ) :: :ok | {:error, term()}
 
   @doc """
-  Backend d'escalade coord câblé (config `:fleet_starfleet, :coord_backend`), ou
-  `NotWiredYet` par défaut (ch14 non câblé). SOURCE UNIQUE de cette lecture pour
-  les producteurs d'escalade (`Cat5Escalator`, `DriftMonitor`) — un seul défaut à
-  garder aligné.
+  The wired coord escalation backend (config `:fleet_starfleet, :coord_backend`),
+  or `NotWiredYet` by default (coord not wired — workstream 14). SINGLE SOURCE of
+  this lookup for the escalation producers (`Cat5Escalator`, `DriftMonitor`) — a
+  single default to keep aligned.
   """
   @spec resolved() :: module()
   def resolved do
@@ -50,15 +50,13 @@ defmodule Fleet.Starfleet.CoordBackend.NotWiredYet do
 
   @impl Fleet.Starfleet.CoordBackend
   def handle_decision(_decision, _correlation_id) do
-    Logger.debug("starfleet coord_backend: handle_decision/2 deferred ch14 (not wired)")
+    Logger.debug("CoordBackend: handle_decision/2 deferred (not wired)")
     :ok
   end
 
   @impl Fleet.Starfleet.CoordBackend
   def handle_escalation(source, _payload, _correlation_id) do
-    Logger.debug(
-      "starfleet coord_backend: handle_escalation/3 #{inspect(source)} deferred ch14 (not wired)"
-    )
+    Logger.debug("CoordBackend: handle_escalation/3 #{inspect(source)} deferred (not wired)")
 
     :ok
   end

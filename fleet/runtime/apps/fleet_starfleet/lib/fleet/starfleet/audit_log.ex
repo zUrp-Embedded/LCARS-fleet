@@ -1,42 +1,41 @@
 defmodule Fleet.Starfleet.AuditLog do
   @moduledoc """
-  Wrapper `File.write/3` non-bang fail-safe sur le log audit Cat 5
-  (défaut `~/.lcars/log/fleet-starfleet.jsonl` — fleet sous l'humain, 2026-06-11 ;
+  Fail-safe non-bang `File.write/3` wrapper over the Cat 5 audit log
+  (default `~/.lcars/log/fleet-starfleet.jsonl` — fleet under the human, 2026-06-11;
   fallback `/var/log/fleet-starfleet.jsonl`).
 
-  Format NDJSON append : 1 ligne JSON par entrée. Chaque entrée
-  est merge avec `ts` ISO8601 UTC. Le fichier est borné par une **rotation au seuil**
-  (1 backup `.1`, cf. `maybe_rotate/1`) — pas une croissance monotone.
+  NDJSON append format: 1 JSON line per entry. Each entry is merged
+  with an ISO8601 UTC `ts`. The file is bounded by a **threshold rotation**
+  (1 `.1` backup, cf. `maybe_rotate/1`) — not monotonic growth.
 
-  Pattern `:append` mode + non-bang : si écriture échoue
-  (permissions, FS plein, etc.), Logger.error puis `{:error, _}`
-  retourné — pas de crash. Cohérent F2 finding ch9+ch10
-  (audit log fail ne doit pas bloquer le runtime).
+  `:append` mode + non-bang pattern: if a write fails
+  (permissions, full FS, etc.), Logger.error then `{:error, _}`
+  is returned — no crash. An audit-log failure must not block the runtime.
 
   ## Configuration
 
-    * `:fleet_starfleet, :audit_log_path` — path log NDJSON
-      (default `~/.lcars/log/fleet-starfleet.jsonl`, home-relatif — fleet sous l'humain)
-    * `:fleet_starfleet, :audit_log_max_bytes` — seuil de rotation en octets
-      (default 10 MB). Au-delà, le fichier courant est renommé `<path>.1` (1 backup,
-      écrasé à la rotation suivante) et l'écriture repart neuve.
+    * `:fleet_starfleet, :audit_log_path` — NDJSON log path
+      (default `~/.lcars/log/fleet-starfleet.jsonl`, home-relative — fleet under the human)
+    * `:fleet_starfleet, :audit_log_max_bytes` — rotation threshold in bytes
+      (default 10 MB). Past it, the current file is renamed `<path>.1` (1 backup,
+      overwritten at the next rotation) and writing starts fresh.
 
-  Distinct du log audit `fleet-audit.jsonl` (ch9+ch10) : forensics Cat 5 spécifiques.
-  (Avant 2026-06-11 : `/var/log/…` root:adm — tamper-resistance vestigiale ; le vrai
-  audit = forge multi-author, ADR-E.)
+  Distinct from the `fleet-audit.jsonl` audit log: specific Cat 5 forensics.
+  (Before 2026-06-11: `/var/log/…` root:adm — vestigial tamper-resistance; the real
+  audit = the multi-author forge.)
   """
 
   require Logger
 
-  # Seuil de rotation (octets) par défaut, override via config `:audit_log_max_bytes`. 10 MB est
-  # largement au-dessus du débit réel (escalades Cat-5 rares) : ça ne borne QUE la croissance
-  # pathologique, jamais le régime normal.
+  # Default rotation threshold (bytes), overridable via the `:audit_log_max_bytes` config. 10 MB is
+  # far above the real throughput (Cat-5 escalations are rare): it bounds ONLY pathological
+  # growth, never the normal regime.
   @default_max_bytes 10 * 1024 * 1024
 
   @doc """
-  Écrit une entrée NDJSON sur le log audit. Merge `ts` ISO8601 UTC.
+  Writes an NDJSON entry to the audit log. Merges an ISO8601 UTC `ts`.
 
-  Returns `:ok` si écrit, `{:error, reason}` sinon (loggé).
+  Returns `:ok` if written, `{:error, reason}` otherwise (logged).
   """
   @spec write(map()) :: :ok | {:error, term()}
   def write(entry) when is_map(entry) do
@@ -60,23 +59,23 @@ defmodule Fleet.Starfleet.AuditLog do
     end
   end
 
-  # Rotation au seuil, AVANT l'append : si le fichier courant atteint `:audit_log_max_bytes`, on le
-  # renomme en `<path>.1` (écrasant un `.1` existant) et l'append repart d'un fichier neuf. UN SEUL
-  # backup conservé : l'audit LOCAL n'est qu'une convenance forensics — l'historique durable et
-  # tamper-evident vit sur la forge (commits multi-author) ; 1 backup suffit à couvrir la fenêtre
-  # récente sans laisser le fichier croître sans borne.
+  # Threshold rotation, BEFORE the append: if the current file reaches `:audit_log_max_bytes`, we
+  # rename it to `<path>.1` (overwriting an existing `.1`) and the append starts from a fresh file. A
+  # SINGLE backup kept: the LOCAL audit is only a forensics convenience — the durable, tamper-evident
+  # history lives on the forge (multi-author commits); 1 backup is enough to cover the recent window
+  # without letting the file grow unbounded.
   #
-  # Sûr SANS lock : toutes les écritures audit passent par l'UNIQUE process `DriftMonitor`
-  # (`Cat5Escalator` est pur, appelé synchrone dans son `handle_info`) → stat+rename+append sont
-  # sérialisés, pas de race possible sur le rename. (Si un jour un 2e writer concurrent apparaît,
-  # cette rotation aurait une race et devrait être repensée — un append nu, lui, resterait sûr.)
+  # Safe WITHOUT a lock: all audit writes go through the SINGLE `DriftMonitor` process
+  # (`Cat5Escalator` is pure, called synchronously in its `handle_info`) → stat+rename+append are
+  # serialized, no race possible on the rename. (If a 2nd concurrent writer ever appears, this
+  # rotation would have a race and would need to be rethought — a bare append, though, would stay safe.)
   defp maybe_rotate(path) do
     max = max_bytes()
 
     case File.stat(path) do
       {:ok, %File.Stat{size: size}} when size >= max ->
-        # Une rotation qui échoue ne doit JAMAIS perdre l'écriture courante : on log et on retombe
-        # sur l'append au fichier courant (qui repassera au-dessus du seuil, élagué au prochain tour).
+        # A failed rotation must NEVER lose the current write: we log and fall back
+        # to appending to the current file (which will exceed the threshold again, pruned next round).
         case File.rename(path, path <> ".1") do
           :ok ->
             :ok
@@ -91,7 +90,7 @@ defmodule Fleet.Starfleet.AuditLog do
         end
 
       _ ->
-        # Pas encore de fichier (1re écriture) ou sous le seuil → rien à faire.
+        # No file yet (1st write) or under the threshold → nothing to do.
         :ok
     end
   end
@@ -104,11 +103,11 @@ defmodule Fleet.Starfleet.AuditLog do
     Application.get_env(:fleet_starfleet, :audit_log_path, default_audit_path())
   end
 
-  # Doctrine 2026-06-11 (fleet sous l'humain) : défaut home-relatif `~/.lcars/log`. L'audit LOCAL =
-  # convenance forensics ; le vrai audit = forge (commits multi-author, tamper-evident, ADR-E). Avant :
-  # `/var/log/fleet-starfleet.jsonl` (root:adm, non-writable hors root).
-  # HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un chemin
-  # fabriqué : l'état .lcars ne doit pas se disperser en silence.
+  # Doctrine 2026-06-11 (fleet under the human): home-relative default `~/.lcars/log`. The LOCAL audit =
+  # a forensics convenience; the real audit = the forge (multi-author commits, tamper-evident). Before:
+  # `/var/log/fleet-starfleet.jsonl` (root:adm, non-writable outside root).
+  # Unresolvable HOME = broken runtime → fail-loud (`System.user_home!()` raises), never a fabricated
+  # path: the .lcars state must not silently scatter.
   defp default_audit_path do
     Path.join(Fleet.Layout.state_dir(), "log/fleet-starfleet.jsonl")
   end

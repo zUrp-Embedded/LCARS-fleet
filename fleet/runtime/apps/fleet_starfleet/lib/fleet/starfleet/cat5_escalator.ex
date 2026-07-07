@@ -1,36 +1,36 @@
 defmodule Fleet.Starfleet.Cat5Escalator do
   @moduledoc """
-  Pure functions module pour escalade Cat 5.
+  Pure-functions module for Cat 5 escalation.
 
-  Reçoit `{source, payload}` depuis `DriftMonitor` :
-    1. log audit NDJSON via `AuditLog` (défaut `~/.lcars/log/fleet-starfleet.jsonl`,
+  Receives `{source, payload, correlation_id}` from `DriftMonitor`:
+    1. audit-log NDJSON via `AuditLog` (default `~/.lcars/log/fleet-starfleet.jsonl`,
        knob `:fleet_starfleet, :audit_log_path`)
-    2. broadcast `starfleet.audit_cat5_<source>` sur `fleet.events` (schema canon,
+    2. broadcast `starfleet.audit_cat5_<source>` on `fleet.events` (canonical schema,
        via `Bus.safe_emit/4`)
-    3. dispatch `CoordBackend.handle_escalation/3` (backend résolu par config,
-       défaut `NotWiredYet` — ch14 deferred)
+    3. dispatch `CoordBackend.handle_escalation/3` (backend resolved by config,
+       default `NotWiredYet` — deferred)
 
-  Chain trace propagation : `chain` payload étendu avec
-  `"starfleet.cat5.<source>"` puis transmis au broadcast + au coord.
+  Chain-trace propagation: `chain` payload extended with
+  `"starfleet.cat5.<source>"` then passed to the broadcast + the coord.
 
-  ## Sources Cat 5 supportées
+  ## Supported Cat 5 sources
 
-  Les 3 sources sont câblées de bout en bout (DriftMonitor → Cat5Escalator →
-  broadcast + coord) mais leurs events d'ENTRÉE n'ont aujourd'hui aucun producteur
-  live — l'escalateur est prêt, dormant tant qu'un producteur n'émet pas :
+  All 3 sources are wired end to end (DriftMonitor → Cat5Escalator →
+  broadcast + coord) but their INPUT events have no live producer today —
+  the escalator is ready, dormant as long as no producer emits:
 
-    * `:pod_drift` — sur `pod.drift` (drift_count ≥ 3). Émetteur prévu (filtre IPC
-      pod-side comptant les strikes) jamais implémenté → 0 producteur.
-    * `:workflow_map_failed` — sur `workflow_map.failed`. Producteur historique = moteur RAM
-      `Fleet.Workflow.Executor`, SUPPRIMÉ ; le rail forge-driven ne le ré-émet pas.
-    * `:oauth_refresh_failed` — sur `oauth.refresh.failed`. Pas de producteur câblé.
+    * `:pod_drift` — on `pod.drift` (drift_count ≥ 3). Intended emitter (pod-side IPC
+      filter counting the strikes) never implemented → 0 producer.
+    * `:workflow_map_failed` — on `workflow_map.failed`. Historical producer = in-RAM engine
+      `Fleet.Workflow.Executor`, REMOVED; the forge-driven rail does not re-emit it.
+    * `:oauth_refresh_failed` — on `oauth.refresh.failed`. No wired producer.
 
-  ## Format payload broadcast
+  ## Broadcast payload format
 
       %{
         "source" => "pod_drift" | "workflow_map_failed" | "oauth_refresh_failed",
         "chain" => [..., "starfleet.cat5.<source>"],
-        ...payload original (pod_id, drift_count, reason, etc.)
+        ...original payload (pod_id, drift_count, reason, etc.)
       }
   """
 
@@ -40,24 +40,23 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   alias Fleet.Starfleet.{AuditLog, CoordBackend}
 
   @doc """
-  Déclenche l'escalade Cat 5 pour un `source` donné — DN 13 C2.3-starfleet
-  amendement chirurgical.
+  Triggers the Cat 5 escalation for a given `source`.
 
-  Arité étendue : `correlation_id` explicite extrait de l'event upstream
-  ayant déclenché l'escalade (peut être nil hors work item).
+  Extended arity: explicit `correlation_id` extracted from the upstream event
+  that triggered the escalation (may be nil outside a work item).
 
-  Étend le `chain` payload avec `"starfleet.cat5.<source>"` puis :
+  Extends the `chain` payload with `"starfleet.cat5.<source>"` then:
 
-    1. log audit via `AuditLog.write/1` (chemin : knob `:fleet_starfleet, :audit_log_path`)
-    2. broadcast canon UNIQUE `%Fleet.Event{source: :starfleet,
-       type: :"starfleet.audit_cat5_pod_drift", correlation_id, ...}` (idem pour les
-       deux autres sources — type = `starfleet.audit_cat5_` + source, 3 clés registrées
-       events.yaml) — l'ancien event legacy `audit.cat5.<source>` n'est PLUS émis
-       (shim compat retiré)
+    1. audit log via `AuditLog.write/1` (path: knob `:fleet_starfleet, :audit_log_path`)
+    2. SINGLE canonical broadcast `%Fleet.Event{source: :starfleet,
+       type: :"starfleet.audit_cat5_pod_drift", correlation_id, ...}` (same for the
+       other two sources — type = `starfleet.audit_cat5_` + source, 3 keys registered in
+       events.yaml) — the old legacy event `audit.cat5.<source>` is NO LONGER emitted
+       (compat shim removed)
     3. dispatch `CoordBackend.handle_escalation/3`
 
-  Toujours `:ok` (audit-only fail-safe : un échec d'écriture log
-  n'interrompt pas le pipeline).
+  Always `:ok` (audit-only fail-safe: a log-write failure does not interrupt
+  the workflow).
   """
   @spec escalate(source :: atom(), payload :: map(), correlation_id :: String.t() | nil) :: :ok
   def escalate(source, payload, correlation_id)
@@ -78,10 +77,10 @@ defmodule Fleet.Starfleet.Cat5Escalator do
         "correlation_id" => correlation_id
       })
 
-    # Broadcast schema canon strict %Fleet.Event{source: :starfleet, ...}
+    # Broadcast strict canonical schema %Fleet.Event{source: :starfleet, ...}
     _ = broadcast_canon(source, enriched, correlation_id)
 
-    # Même finding que DriftMonitor (DrDree 2026-07-05) : un miss de policy d'escalade était avalé.
+    # Same finding as DriftMonitor (DrDree 2026-07-05): an escalation-policy miss was being swallowed.
     case CoordBackend.resolved().handle_escalation(source, enriched, correlation_id) do
       :ok -> :ok
       {:error, why} -> Logger.warning("Cat5Escalator: escalade NON routée (#{inspect(why)})")
@@ -90,16 +89,16 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     :ok
   end
 
-  # Émission via le cœur protégé `Bus.safe_emit/4` (rescue local dupliqué retiré — la politique
-  # best-effort a UNE autorité, Ring 0). Le nom du type est SYNTHÉTISÉ : on passe le BINAIRE
-  # `starfleet.audit_cat5_<src>` tel quel, safe_emit le convertit via `to_existing_atom` (anti
-  # atom-leak — les 3 atomes sont registrés : events.yaml + préregistre Starfleet.Application)
-  # SOUS son rescue. Une source inattendue (atome jamais préregistré) y est classée bug de
-  # CONSTRUCTION : Logger.error puis :ok — jamais avalé muet (une escalade Cat-5, sévérité max,
-  # qui disparaît en silence est indiagnosticable), jamais propagé (ce broadcast tourne synchrone
-  # dans le GenServer DriftMonitor : le laisser crasher tuerait le subscriber Cat-5 et le ferait
-  # boucler sur un producteur malformé, alors que l'escalade est déjà au journal d'audit).
-  # UnregisteredError = boot-order toléré → `:silent`, comme avant.
+  # Emission via the protected core `Bus.safe_emit/4` (duplicated local rescue removed — the
+  # best-effort policy has ONE authority, Ring 0). The type name is SYNTHESIZED: we pass the BINARY
+  # `starfleet.audit_cat5_<src>` as-is, safe_emit converts it via `to_existing_atom` (anti
+  # atom-leak — the 3 atoms are registered: events.yaml + Starfleet.Application pre-register)
+  # UNDER its rescue. An unexpected source (atom never pre-registered) is classed there as a
+  # CONSTRUCTION bug: Logger.error then :ok — never silently swallowed (a Cat-5 escalation, max
+  # severity, vanishing in silence is undiagnosable), never propagated (this broadcast runs
+  # synchronously in the DriftMonitor GenServer: letting it crash would kill the Cat-5 subscriber
+  # and make it loop over a malformed producer, while the escalation is already in the audit log).
+  # UnregisteredError = boot-order tolerated → `:silent`, as before.
   defp broadcast_canon(source, enriched, correlation_id) do
     Bus.safe_emit(
       :starfleet,

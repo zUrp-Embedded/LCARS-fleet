@@ -1,42 +1,42 @@
 defmodule Fleet.Starfleet.MCPWatcher do
   @moduledoc """
-  Cron passif qui surveille la version upstream du SDK MCP Elixir (`ex_mcp`)
-  sur Hex.pm et alerte si un drift est observé entre la version installée
-  localement et la dernière publiée upstream.
+  Passive cron that watches the upstream version of the Elixir MCP SDK
+  (`ex_mcp`) on Hex.pm and alerts if a drift is observed between the version
+  installed locally and the latest published upstream.
 
-  DN 13 `orchestration/fleet_starfleet.md` §Extensions V2 (BL-021 chantier 8).
+  Design note `orchestration/fleet_starfleet.md` §Extensions V2.
 
-  ## Mécanique
+  ## Mechanics
 
-  GenServer + `Process.send_after/3` récursif (pattern canon Elixir natif —
-  pas de dep Quantum/Oban). Une seule échéance armée à tout instant : à
-  l'expiration, `handle_info(:check_upstream, _)` exécute le check puis
-  re-arme la prochaine. La plomberie (start_link nommé, tick + ré-armement,
-  hook test `:check_now`) est PARTAGÉE avec `MCPMonitor` via
-  `Fleet.Starfleet.PeriodicCheck` ; ce module garde son état, son
-  `do_check/1` et la forme de sa réponse (`:ok`).
+  GenServer + recursive `Process.send_after/3` (canonical native-Elixir
+  pattern — no Quantum/Oban dep). A single deadline armed at any instant: on
+  expiry, `handle_info(:check_upstream, _)` runs the check then re-arms the
+  next. The plumbing (named start_link, tick + re-arming, test hook
+  `:check_now`) is SHARED with `MCPMonitor` via
+  `Fleet.Starfleet.PeriodicCheck`; this module keeps its state, its
+  `do_check/1` and the shape of its reply (`:ok`).
 
   ## Configuration
 
     * `:fleet_starfleet, :mcp_watcher_check_interval_ms` — interval (default
-      hebdomadaire `:timer.hours(168)`)
-    * `:fleet_starfleet, :mcp_watcher_package` — nom du package Hex.pm
+      weekly `:timer.hours(168)`)
+    * `:fleet_starfleet, :mcp_watcher_package` — Hex.pm package name
       (default `"ex_mcp"`)
     * `:fleet_starfleet, :mcp_watcher_upstream_fetcher` — `{:ok, version_str}
       | {:error, reason}` callback override (default `nil` → fetch Hex.pm
-      API via Req). Permet aux tests d'injecter une réponse déterministe.
+      API via Req). Lets tests inject a deterministic response.
 
   ## Event broadcast
 
-  Schema canon `%Fleet.Event{source: :starfleet, type: :"sdk.upstream_alert",
-  payload: %{current, upstream, package}, correlation_id: nil}`. Émis SSI
-  current != upstream. Erreur de fetch ou versions identiques → no-op
-  (log debug seulement).
+  Canonical schema `%Fleet.Event{source: :starfleet, type: :"sdk.upstream_alert",
+  payload: %{current, upstream, package}, correlation_id: nil}`. Emitted IFF
+  current != upstream. Fetch error or identical versions → no-op
+  (debug log only).
 
   ## Iron Law (otp-thinking)
 
-  GenServer = justifié : timer récursif + état partagé minimal (last_check
-  + last_status). Le check lui-même n'est PAS sur le hot path (hebdomadaire).
+  GenServer = justified: recursive timer + minimal shared state (last_check
+  + last_status). The check itself is NOT on the hot path (weekly).
   """
 
   use GenServer
@@ -73,8 +73,8 @@ defmodule Fleet.Starfleet.MCPWatcher do
 
   def handle_info(_other, state), do: {:noreply, state}
 
-  # Hook test : déclenche un check immédiat sync (équivalent au timer). La réponse est un `:ok` nu
-  # (pas de statut à exposer, contrairement au MCPMonitor).
+  # Test hook: triggers an immediate sync check (equivalent to the timer). The reply is a bare `:ok`
+  # (no status to expose, unlike MCPMonitor).
   @impl GenServer
   def handle_call(:check_now, _from, state),
     do: PeriodicCheck.check_now(state, &do_check/1, fn _ -> :ok end)
@@ -144,12 +144,12 @@ defmodule Fleet.Starfleet.MCPWatcher do
     e -> {:error, {:exception, e}}
   end
 
-  # Émission via le cœur protégé `Bus.safe_emit/4` (rescue local dupliqué retiré — la politique
-  # best-effort a UNE autorité, Ring 0, ce qui clôt la dérive « jumeaux désalignés » : ce module
-  # avait été le seul des 4 à masquer un event malformé). `:silent` : UnregisteredError =
-  # boot-order toléré (registry pas encore peuplé), comme MCPMonitor. Un event MALFORMÉ (bug de
-  # construction) est loggé ERROR par safe_emit puis neutralisé — laisser crasher redémarrerait
-  # le watcher et re-fetcherait Hex.pm en boucle.
+  # Emission via the protected core `Bus.safe_emit/4` (duplicated local rescue removed — the
+  # best-effort policy has ONE authority, Ring 0, which closes the "misaligned twins" drift: this
+  # module had been the only one of the 4 to mask a malformed event). `:silent`: UnregisteredError =
+  # boot-order tolerated (registry not yet populated), like MCPMonitor. A MALFORMED event
+  # (construction bug) is logged ERROR by safe_emit then neutralized — letting it crash would
+  # restart the watcher and re-fetch Hex.pm in a loop.
   defp broadcast_alert(package, current, upstream) do
     Bus.safe_emit(
       :starfleet,

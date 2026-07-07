@@ -1,42 +1,54 @@
 defmodule Fleet.Starfleet.Application do
   @moduledoc """
-  Application supervisor `fleet_starfleet`.
+  Application supervisor for `fleet_starfleet`.
 
-  Démarre :
+  Starts:
 
-    1. Pré-charge schema décision via
+    1. Pre-loads the decision schema via
        `Fleet.Starfleet.Gatekeeper.init_schema!/0` (boot fail-fast)
-    2. Pré-enregistre atomes events `starfleet.audit_cat5_*` et `audit.verdict`
-       (compile-time via attribut, cohérent ch11 M1 atom-leak DoS)
-    3. Démarre `Fleet.Starfleet.DriftMonitor` GenServer subscriber
-       (opt-in via `:start_drift_monitor`, default `true` en prod)
+    2. Pre-registers the `starfleet.audit_cat5_*`, `audit.verdict`, `fleet.boot_*`,
+       `sdk.upstream_alert` and `mcp.server_crashed` event atoms (compile-time via a
+       module attribute, atom-leak DoS mitigation)
+    3. Supervises six opt-in children, each gated by a `:start_*` config knob:
+       * `DriftMonitor` (default `true`) — GenServer subscriber for pod drift
+       * `Shutdown` (default `true`) — coordinated graceful shutdown; INERT for now
+         (its systemd ExecStop trigger was removed, awaiting a re-wire onto `fleet_v2 stop`)
+       * `AuditConsumer` (default `true`) — audit-verdict NDJSON rail
+       * `BootOrchestrator` (default `true`, Task `:transient`) — boots the permanent
+         pods then emits `fleet.boot_complete|partial|failed`
+       * `MCPWatcher` (default `false`) — HTTP egress to Hex.pm (SDK upstream alert),
+         opt-in only where outbound is allowed
+       * `MCPMonitor` (default `true`) — local `Process.whereis` liveness, no network
 
   ## Configuration
 
-    * `:fleet_starfleet, :start_drift_monitor` — booléen (default
-      `true`). Tests peuvent set à `false` pour démarrer le monitor
-      manuellement via `start_supervised/1`.
+  One boolean `:start_*` knob per child (all under `:fleet_starfleet`):
+  `:start_drift_monitor`, `:start_shutdown`, `:start_audit_consumer`,
+  `:start_boot_orchestrator` (default `true`), `:start_mcp_watcher` (default `false`),
+  `:start_mcp_monitor` (default `true`). Tests set a knob to `false` to start that
+  child manually via `start_supervised/1`.
 
-  ## Stratégie
+  ## Strategy
 
-  `:one_for_one` — DriftMonitor est seul, autonome, restart `:permanent`.
+  `:one_for_one`, `max_restarts: 3`, `max_seconds: 60` — each child is independent;
+  the widened restart window (vs OTP's 3/5) is a deliberate choice for blips.
   """
 
   use Application
 
-  # R09 : les atomes RÉELLEMENT émis par Cat5Escalator sont
-  # `starfleet.audit_cat5_<src>` (cf. events.yaml + cat5_escalator) — les anciens
-  # `audit.cat5.*` (pointillés) étaient des vestiges jamais émis.
+  # The atoms Cat5Escalator ACTUALLY emits are
+  # `starfleet.audit_cat5_<src>` (cf. events.yaml + cat5_escalator) — the old
+  # `audit.cat5.*` (only ever sketched) were vestiges never emitted.
   @starfleet_event_atoms [
     :"starfleet.audit_cat5_pod_drift",
     :"starfleet.audit_cat5_workflow_map_failed",
     :"starfleet.audit_cat5_oauth_refresh_failed",
     :"audit.verdict",
-    # B10/#583 Sprint 1 — events lifecycle BootOrchestrator
+    # BootOrchestrator lifecycle events
     :"fleet.boot_complete",
     :"fleet.boot_partial",
     :"fleet.boot_failed",
-    # BL-021 chantier 8 — Extensions V2 MCPWatcher + MCPMonitor
+    # V2 extensions — MCPWatcher + MCPMonitor
     :"sdk.upstream_alert",
     :"mcp.server_crashed"
   ]
@@ -45,10 +57,10 @@ defmodule Fleet.Starfleet.Application do
   def start(_type, _args) do
     :ok = Fleet.Starfleet.Gatekeeper.init_schema!()
 
-    # BL-021 chantier 8 — Extensions V2 (DN 13).
-    # MCPWatcher : default OFF (HTTP I/O Hex.pm — opt-in en prod où l'outbound
-    # est autorisé). MCPMonitor : default ON (purement local Process.whereis,
-    # zéro I/O réseau, cohérent avec DriftMonitor/AuditConsumer).
+    # V2 extensions.
+    # MCPWatcher: default OFF (HTTP I/O to Hex.pm — opt-in in prod where outbound
+    # is allowed). MCPMonitor: default ON (purely local Process.whereis,
+    # zero network I/O, consistent with DriftMonitor/AuditConsumer).
     children =
       [] ++
         if(Application.get_env(:fleet_starfleet, :start_drift_monitor, true),
@@ -56,8 +68,9 @@ defmodule Fleet.Starfleet.Application do
           else: []
         ) ++
         if Application.get_env(:fleet_starfleet, :start_shutdown, true) do
-          # Grace shutdown coordonné — doit être vivant pour le RPC
-          # ExecStop systemd (DN ring0/lcars-fleet_service).
+          # Coordinated graceful shutdown — must stay alive to serve the shutdown
+          # RPC. INERT for now: its trigger was removed (the systemd ExecStop it
+          # once answered is gone), awaiting a re-wire onto `fleet_v2 stop`.
           [Fleet.Starfleet.Shutdown]
         else
           []
@@ -67,7 +80,7 @@ defmodule Fleet.Starfleet.Application do
           else: []
         ) ++
         if Application.get_env(:fleet_starfleet, :start_boot_orchestrator, true) do
-          # B10/#583 Sprint 1 — Task :transient post-start sequence
+          # Task :transient post-start sequence:
           # boot_permanent_pods + emit fleet.boot_complete|partial|failed.
           [
             %{
@@ -89,19 +102,21 @@ defmodule Fleet.Starfleet.Application do
           else: []
         )
 
-    # F4 (E1) : intensite 3/60 EXPLICITE (doctrine event_router/task_queue — 3/5 OTP trop serre pour un blip ; la fenetre est un CHOIX).
+    # Restart intensity 3/60 EXPLICIT (event_router/task_queue doctrine — the OTP default 3/5 is too tight for a blip; the window is a deliberate CHOICE).
     opts = [
       strategy: :one_for_one,
       max_restarts: 3,
       max_seconds: 60,
       name: Fleet.Starfleet.Supervisor
     ]
+
     Supervisor.start_link(children, opts)
   end
 
   @doc """
-  Liste des atomes events `audit.*` pré-enregistrés. Cohérent ch11
-  M1 atom-leak DoS mitigation (Bus `String.to_existing_atom/1`).
+  List of the pre-registered event atoms (`starfleet.audit_cat5_*`, `audit.verdict`,
+  `fleet.boot_*`, `sdk.upstream_alert`, `mcp.server_crashed`). Part of the
+  atom-leak DoS mitigation (Bus `String.to_existing_atom/1`).
   """
   @spec starfleet_event_atoms() :: [atom()]
   def starfleet_event_atoms, do: @starfleet_event_atoms

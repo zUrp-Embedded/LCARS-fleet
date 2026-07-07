@@ -1,20 +1,20 @@
 defmodule Fleet.Starfleet.Gatekeeper do
   @moduledoc """
-  Pure functions validation JSON décision pod gatekeeper / autre pod
-  d'arbitrage.
+  Pure functions validating a pod gatekeeper's (or other arbitration
+  pod's) decision JSON.
 
-  Pattern PoC-π3 PROVEN figé : sortie JSON
-  `{decision, reason, details, chain?}`. Schema strict
-  `priv/schema/decision-v1.json` `ex_json_schema` validation au load
+  Proven, frozen pattern established in a proof-of-concept: JSON output
+  `{decision, reason, details, chain?}`. Strict schema
+  `priv/schema/decision-v1.json`, `ex_json_schema` validation at load,
   fail-fast.
 
-  ## Cache schema
+  ## Schema cache
 
-  Schema résolu **une fois** au boot via
-  `Fleet.Starfleet.Application.start/2` → `init_schema!/0`, délégué à
-  l'autorité Ring 0 `Fleet.SchemaCache` (cache `:persistent_term`, clé
-  `{__MODULE__, :decision_schema}`) — dédup B-R2, le pipeline
-  read+decode+resolve vivait copié ici.
+  Schema resolved **once** at boot via
+  `Fleet.Starfleet.Application.start/2` → `init_schema!/0`, delegated to
+  the Ring 0 authority `Fleet.SchemaCache` (`:persistent_term` cache, key
+  `{__MODULE__, :decision_schema}`) — dedup, the read+decode+resolve
+  pipeline used to live copied here.
 
   ## Public API
 
@@ -29,17 +29,17 @@ defmodule Fleet.Starfleet.Gatekeeper do
   @schema_key {__MODULE__, :decision_schema}
 
   @doc """
-  Valide un JSON texte de décision.
+  Validates a decision's JSON text.
 
-  Returns :
-    * `{:ok, %Decision{}}` — JSON parsé + schema valide
-    * `{:error, {:decision_invalid, cause}}` — JSON malformé (`cause` =
-      `%Jason.DecodeError{}`) OU schema invalide (`cause` = erreurs ExJsonSchema).
-      Tuple STRUCTURÉ pattern-matchable (l'ancienne string `"decision invalid: …"`
-      ne l'était pas) ; le rendu humain (`inspect(cause)`) est fait par les
-      consommateurs au moment de logger/journaliser, pas ici.
+  Returns:
+    * `{:ok, %Decision{}}` — JSON parsed + schema valid
+    * `{:error, {:decision_invalid, cause}}` — malformed JSON (`cause` =
+      `%Jason.DecodeError{}`) OR invalid schema (`cause` = ExJsonSchema errors).
+      STRUCTURED pattern-matchable tuple (the old string `"decision invalid: …"`
+      was not); the human rendering (`inspect(cause)`) is done by consumers
+      when logging/journaling, not here.
 
-  Raises `ArgumentError` si le schema n'a pas été chargé via
+  Raises `ArgumentError` if the schema was not loaded via
   `init_schema!/0` (boot-time fail-fast).
   """
   @spec validate(String.t()) ::
@@ -63,13 +63,13 @@ defmodule Fleet.Starfleet.Gatekeeper do
   end
 
   @doc """
-  Charge le schema JSON décision et le persiste dans `:persistent_term`
-  via `Fleet.SchemaCache` (autorité Ring 0 du pattern chargé-caché).
+  Loads the decision JSON schema and persists it in `:persistent_term`
+  via `Fleet.SchemaCache` (Ring 0 authority for the load-and-cache pattern).
 
-  Appelée au boot par `Fleet.Starfleet.Application.start/2`. Fail-fast :
-  raise si fichier schema absent ou JSON malformé. Idempotente par clé :
-  un deuxième appel ne relit pas le fichier (schema priv immuable dans
-  la vie du BEAM).
+  Called at boot by `Fleet.Starfleet.Application.start/2`. Fail-fast:
+  raises if the schema file is absent or the JSON is malformed. Idempotent
+  by key: a second call does not re-read the file (the priv schema is
+  immutable across the BEAM's lifetime).
   """
   @spec init_schema!() :: :ok
   def init_schema! do

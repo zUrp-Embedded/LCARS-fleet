@@ -1,33 +1,33 @@
 defmodule Fleet.Starfleet.BootOrchestrator do
   @moduledoc """
-  B10 / #583 Sprint 1 — orchestrateur post-readiness (Task `:transient`).
+  Post-readiness orchestrator (`:transient` Task).
 
-  Spec arch #583 simplifiée Sprint 1 (Option (b) subscribe direct via
-  consumers GenServers supervisés dans leurs apps respectives) :
+  Simplified architecture spec (Option (b): direct subscribe via supervised
+  consumer GenServers in their respective apps):
 
-  1. **Wire consumers** : géré par OTP (AuditConsumer/PublishConsumer
-     démarrés via supervision tree de leur app, subscribe au `init/1`).
-     Pas d'action explicite ici — c'est le pattern "consumer self-subscribe"
-     accepté arch.
-  2. **boot_permanent_pods** : appelle
-     `Fleet.Spawner.PermanentBoot.boot_permanent_pods/0`. Couvre C2.
-  3. **Émet `fleet.boot_complete`** (ou `partial`/`failed`) sur Bus
-     avec payload `{started_apps, permanent_pods, timestamp}`.
+  1. **Wire consumers** — handled by OTP (AuditConsumer/PublishConsumer
+     started via their app's supervision tree, subscribe at `init/1`).
+     No explicit action here — this is the "consumer self-subscribe"
+     pattern accepted by the architecture.
+  2. **boot_permanent_pods** — calls
+     `Fleet.Spawner.PermanentBoot.boot_permanent_pods/0`.
+  3. **Emits `fleet.boot_complete`** (or `partial`/`failed`) on the Bus
+     with payload `{started_apps, permanent_pods, timestamp}`.
 
-  ## Failure modes (anti-D2)
+  ## Failure modes
 
-  - boot_permanent_pods retourne liste partielle → émet
-    `fleet.boot_partial` avec `failed_pods` listés.
-  - boot_permanent_pods raise → émet `fleet.boot_failed` avec
-    `reason`, daemon reste up (mode degraded).
-  - Cette Task ne crash JAMAIS le daemon : rescue any exception,
-    log + signal fleet.boot_failed, exit normal.
+  - boot_permanent_pods returns a partial list → emits
+    `fleet.boot_partial` with `failed_pods` listed.
+  - boot_permanent_pods raises → emits `fleet.boot_failed` with
+    `reason`, the daemon stays up (degraded mode).
+  - This Task NEVER crashes the daemon: rescue any exception,
+    log + signal fleet.boot_failed, exit normally.
 
   ## Config-gated
 
-    * `:fleet_starfleet, :start_boot_orchestrator` — booléen
-      (default `true`). Tests passent `false` pour démarrer
-      manuellement avec stubs.
+    * `:fleet_starfleet, :start_boot_orchestrator` — boolean
+      (default `true`). Tests pass `false` to start it
+      manually with stubs.
   """
 
   require Logger
@@ -39,8 +39,8 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   end
 
   @doc """
-  Sequence d'orchestration. Spawner backend injectable (test).
-  Émet event `fleet.boot_complete|partial|failed` selon issue.
+  Orchestration sequence. Spawner backend injectable (test).
+  Emits the `fleet.boot_complete|partial|failed` event depending on the outcome.
   """
   @spec run(keyword()) :: :ok
   def run(opts \\ []) do
@@ -49,9 +49,9 @@ defmodule Fleet.Starfleet.BootOrchestrator do
         Fleet.Spawner.PermanentBoot.boot_permanent_pods()
       end)
 
-    # BL-028 : gate canon du boot des pods permanents (DN lcars-fleet_service §391,
-    # défaut true ; `LCARS_BOOT_PERMANENT_AT_START=false` désactive). Désactivé →
-    # on wire les consumers + émet boot_complete, mais 0 pod permanent spawné.
+    # Canonical gate for booting permanent pods (default true;
+    # `LCARS_BOOT_PERMANENT_AT_START=false` disables it). Disabled →
+    # we wire the consumers + emit boot_complete, but 0 permanent pod spawned.
     enabled? =
       Keyword.get(opts, :boot_permanent_enabled, Fleet.Spawner.PermanentBoot.auto_boot_enabled?())
 
@@ -67,8 +67,8 @@ defmodule Fleet.Starfleet.BootOrchestrator do
 
     boot_result = if enabled?, do: safe_boot(boot_fn), else: {:ok, []}
 
-    # E5 : émissions best-effort (rescued en interne) — retours jetés délibérément, le boot ne
-    # dépend pas du succès du broadcast.
+    # Best-effort emissions (rescued internally) — returns discarded deliberately, boot does not
+    # depend on the broadcast succeeding.
     _ =
       case boot_result do
         {:ok, pods} ->
@@ -93,8 +93,8 @@ defmodule Fleet.Starfleet.BootOrchestrator do
           Enum.split_with(results, fn
             {:ok, _} -> true
             {:error, _} -> false
-            # finding Vulcan : un élément malformé (ni :ok ni :error) était compté OK
-            # (`_ -> true`) → faux fleet.boot_complete. Désormais classé en échec.
+            # Vulcan finding: a malformed element (neither :ok nor :error) used to be counted OK
+            # (`_ -> true`) → false fleet.boot_complete. Now classed as a failure.
             _ -> false
           end)
 
@@ -146,14 +146,14 @@ defmodule Fleet.Starfleet.BootOrchestrator do
     emit_canon(:"fleet.boot_failed", payload)
   end
 
-  # BL-021 chantier 9 (B) — broadcast schema canon %Fleet.Event{source: :starfleet}, via le cœur
-  # protégé `Bus.safe_emit/4` (rescue local dupliqué retiré — la politique best-effort a UNE
-  # autorité, Ring 0). `:silent` : cette Task émet PENDANT le boot — un UnregisteredError
-  # (registry pas encore peuplé) y est le cas nominal, pas une alarme. Un event MALFORMÉ (bug de
-  # construction) est loggé ERROR par safe_emit puis neutralisé — ça masquerait sinon un
-  # boot_failed/boot_partial en silence, et cette Task :transient ne doit JAMAIS crasher (un
-  # crash relance toute la séquence boot, re-spawnant les pods permanents, et bouclerait sur un
-  # event malformé).
+  # Canonical schema broadcast %Fleet.Event{source: :starfleet}, via the protected core
+  # `Bus.safe_emit/4` (local duplicated rescue removed — the best-effort policy has ONE
+  # authority, Ring 0). `:silent`: this Task emits DURING boot — an UnregisteredError
+  # (registry not yet populated) is the nominal case here, not an alarm. A MALFORMED event
+  # (construction bug) is logged ERROR by safe_emit then neutralized — otherwise it would mask a
+  # boot_failed/boot_partial silently, and this `:transient` Task must NEVER crash (a
+  # crash restarts the whole boot sequence, re-spawning the permanent pods, and would loop on a
+  # malformed event).
   defp emit_canon(type, payload) do
     Bus.safe_emit(:starfleet, type, [payload: payload],
       on_unregistered: :silent,
