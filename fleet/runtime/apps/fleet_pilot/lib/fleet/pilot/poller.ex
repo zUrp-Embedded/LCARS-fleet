@@ -91,6 +91,10 @@ defmodule Fleet.Pilot.Poller do
     # L'humain de CETTE fleet (OS user, `Human.current!()`). Scoping multi-user : on ne dispatche
     # QUE ses issues (sinon le poller d'Alice spawne pour Bob). Seam test : opt `:human`.
     :my_human,
+    # L'org forge = LA frontière d'admission (WS3) : le poller découvre par `list_org_repos(org)`, tout repo
+    # de l'org EST un projet fleet. Défaut `fleet` (config `:fleet_pilot, :fleet_org`) ; DOIT matcher l'org de
+    # create_project (`:fleet_mcp, :delegation_org`) — les deux défautent à `fleet`. Seam test : opt `:org`.
+    :org,
     :forge_client_override,
     step_dispatch?: false,
     forge_opts: [],
@@ -163,13 +167,15 @@ defmodule Fleet.Pilot.Poller do
 
   @impl GenServer
   def init(opts) do
-    # Multi-projet : plus de `:repo` obligatoire — le poller DÉCOUVRE ses projets par topic
-    # (`fleet_topic(my_human)`, repos `lcars-fleet-<human>`). `:repo` reste accepté (tests/legacy/seam)
-    # mais n'est plus la source (do_poll l'écrase par itération). `my_human` = la VRAIE source requise
-    # (`Human.current!()` fail-loud — un poller qui ne sait pas QUI il est ne peut pas scoper).
+    # Multi-projet : plus de `:repo` obligatoire — le poller DÉCOUVRE ses projets par APPARTENANCE-ORG
+    # (`list_org_repos(org)`, WS3 : tout repo de l'org fleet EST un projet fleet). `:repo` reste accepté
+    # (tests/legacy/seam) mais n'est plus la source (do_poll l'écrase par itération). `my_human` = la VRAIE
+    # source de SCOPING requise (`Human.current!()` fail-loud — un poller qui ne sait pas QUI il est ne peut
+    # pas scoper ses issues via `assigned_by`).
     state = %__MODULE__{
       repo: Keyword.get(opts, :repo),
       my_human: Keyword.get(opts, :human) || Fleet.Credentials.Human.current!(),
+      org: Keyword.get(opts, :org) || Application.get_env(:fleet_pilot, :fleet_org, "fleet"),
       interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
       forge_client_override: Keyword.get(opts, :forge_client),
       step_dispatch?: Keyword.get(opts, :step_dispatch?, false),
@@ -188,7 +194,7 @@ defmodule Fleet.Pilot.Poller do
       end
 
     Logger.info(
-      "Poller: start mode=step MULTI-PROJET topic=#{fleet_topic(state.my_human)} " <>
+      "Poller: start mode=step MULTI-PROJET org=#{state.org} human=#{state.my_human} " <>
         "interval=#{state.interval_ms}ms jitter=±10%"
     )
 
@@ -283,18 +289,15 @@ defmodule Fleet.Pilot.Poller do
   defp do_poll(state) do
     forge = step_forge_client(state)
 
-    case forge.search_repos_by_topic(fleet_topic(state.my_human), state.forge_opts) do
-      {:ok, discovered} ->
+    case forge.list_org_repos(state.org, state.forge_opts) do
+      {:ok, repos} ->
         base = %{state | err_streak: 0, poll_count: state.poll_count + 1, last_error: nil}
 
-        # FRONTIÈRE D'ADMISSION : le topic rend un repo DÉCOUVRABLE mais ne l'ADMET pas (topic mutable —
-        # un propriétaire de repo peut se l'auto-poser). On ne scanne QUE les repos qui portent le sceau
-        # système non forgeable (`admitted?` : marqueur `[lcars-onboarded:<human>]` posé PAR le bot, vérifié
-        # server-side). Un repo tagué mais jamais onboardé par le système (le vecteur du finding) est
-        # ÉCARTÉ ici, avant tout dispatch. Fail-closed : `admitted?` rend `false` sur doute (bot irrésoluble
-        # / erreur de lecture) → on n'admet jamais à l'aveugle.
-        repos = admitted_repos(forge, discovered, state)
-
+        # ADMISSION = APPARTENANCE-ORG (WS3) : tout repo de l'org EST un projet fleet — l'org est LA frontière
+        # du groupe de confiance, gérée EN AMONT par l'admin humain (LCARS n'est pas du multi-tenant
+        # adversarial). Plus de topic mutable ni de sceau server-side à vérifier. Le scoping per-humain reste
+        # `assigned_by` (issue-level, `step_do_poll`) : la fleet ne traite QUE ses issues, même si
+        # `list_org_repos` lui montre les repos des AUTRES humains du groupe (le garde anti-vol tient).
         {tally, suspects} =
           Enum.reduce(repos, {Lease.zero_tally(), MapSet.new()}, fn repo,
                                                                     {acc_tally, acc_suspects} ->
@@ -307,23 +310,6 @@ defmodule Fleet.Pilot.Poller do
       {:error, reason} ->
         handle_poll_error(state, {:discover_repos, reason}, System.monotonic_time(), nil)
     end
-  end
-
-  # Filtre les repos découverts par topic à ceux SCELLÉS par le système (`admitted?` = marqueur
-  # bot-authored, même primitif de confiance que les marqueurs route/step_run). Le poller ne dispatche
-  # jamais sur un repo non admis.
-  #
-  # Filtrage SILENCIEUX, à dessein : écarter un repo découvrable-mais-non-scellé est le fonctionnement
-  # NOMINAL de la frontière (fail-closed), ré-évalué à CHAQUE tick (~30s) — pas un événement. Le logger
-  # (en warning, qui plus est) crachait une ligne par repo écarté par tick : un repo tagué mais jamais
-  # onboardé reste écarté indéfiniment → des centaines de warnings d'un état stable qui noient la trace.
-  # Un repo réellement « à finir d'onboarder » se constate sur la forge (repos portant le topic sans le
-  # sceau), pas dans le log de poll. Seules les ERREURS de découverte/dispatch sont loggées
-  # (handle_poll_error) ; un filtrage de routine est muet.
-  defp admitted_repos(forge, discovered, state) do
-    Enum.filter(discovered, fn repo ->
-      forge.admitted?(repo, state.my_human, state.forge_opts)
-    end)
   end
 
   @doc """

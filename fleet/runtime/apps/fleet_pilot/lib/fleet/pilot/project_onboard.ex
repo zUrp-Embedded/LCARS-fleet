@@ -85,42 +85,17 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- Scaffold.work(work_dir, name, opts),
          :ok <- commit(work_dir, "chore(onboard): init work/ops"),
          :ok <- push(work_dir, "work/ops", true),
-         :ok <- register_for_fleet(full_name, opts),
          :ok <- lock_main(full_name, opts) do
       Logger.info("ProjectOnboard: #{full_name} prêt — main=#{proj_dir}, work/ops=#{work_dir}")
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
     end
   end
 
-  # ── MULTI-PROJET — rend le repo neuf DÉCOUVRABLE + ACCESSIBLE par la fleet de l'humain ──
-  # 1. TOPIC `lcars-fleet-<human>` (source UNIQUE `Fleet.Pilot.Poller.fleet_topic/1`, partagée avec le
-  #    poller qui DÉCOUVRE par `search_repos_by_topic`) → un humain ne voit QUE ses projets (isolation REPO ;
-  #    l'axe ISSUE `assigned_by` est la ceinture). L'ACCÈS ne se pose plus par repo : les teams tofu le portent
-  #    org-wide (`humans`=read, `writers`/`judges`=write, `include_all`). `my_human` = l'user OS du
-  #    runtime — l'onboarding tourne dans SA BEAM (MCP `create_project`), donc `Human.current!()` EST l'humain
-  #    qui a initié → cohérent avec le scoping du poller (même source). Fail-loud si l'user est irrésoluble
-  #    (un repo taggé pour le mauvais humain ne serait jamais découvert).
-  defp register_for_fleet(repo, opts) do
-    my_human = Fleet.Credentials.Human.current!()
-    topic = Fleet.Pilot.Poller.fleet_topic(my_human)
-
-    # Le topic rend le repo DÉCOUVRABLE mais ne l'ADMET pas : il est mutable (un propriétaire de repo
-    # peut le poser lui-même). L'admission exige le SCEAU système — `post_onboard_marker` ouvre une issue
-    # `[lcars-onboarded:<human>]` SOUS le compte du token (= le bot système, `fc_opts` porte `FORGE_TOKEN`).
-    # Le poller n'admet un repo que s'il porte ce marqueur bot-authored (`ForgeClient.admitted?`) : un
-    # humain ne peut pas le forger faute du token système. Posé ICI, à l'onboarding système, en même temps
-    # que le topic — découvrabilité ET admission scellées par le même acte d'infra système.
-    # PAS de write per-repo à l'humain : il produit RIEN directement sur la forge (décision user). Il est
-    # read via la team `humans` du tofu (include_all_repositories) → il voit + commente, ne relabellise ni
-    # ne pousse. S'il veut toucher du code, il fork HORS fleet + pose une PR cross-repo → le système la gate
-    # comme un livrable d'agent (pipeline reviews-driven, agent-agnostique). Read sur l'origin suffit au fork.
-    with :ok <- ForgeClient.Repo.add_topic(repo, topic, fc_opts(opts)),
-         {:ok, _} <- ForgeClient.Repo.post_onboard_marker(repo, my_human, fc_opts(opts)) do
-      :ok
-    else
-      {:error, reason} -> {:error, {:register_for_fleet, reason}}
-    end
-  end
+  # ── DÉCOUVRABILITÉ — WS3 : rien à poser. Le repo est créé DANS l'org `fleet` (create_repo `org:`) → il
+  # est de facto découvert par le poller (`list_org_repos` : appartenance-org = admission). Plus de topic
+  # mutable ni de sceau à graver : l'org EST la frontière du groupe de confiance (posée en amont par l'admin).
+  # L'accès des rôles vient des teams tofu (include_all) ; l'humain est read via la team `humans`. Le scoping
+  # per-humain se fait à l'issue (`assigned_by`), pas au repo. ── Verrou de `main` ci-dessous. ──
 
   # ── Verrou de `main` : le repo neuf naît PRÊT pour le workflow d'agents avec GATE forge-enforcé ──
   # Les comptes de rôle (producteur/juges/gatekeeper) ont DÉJÀ le **write** sur tout repo de l'org via les

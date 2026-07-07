@@ -90,6 +90,21 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
+  Repos de l'org `org` — Gitea `GET /orgs/{org}/repos`. **LA découverte du poller (WS3)** : l'appartenance
+  à l'org EST l'admission (l'org = le groupe de confiance, gérée EN AMONT par l'admin humain) — plus de topic
+  mutable ni de sceau server-side. Le scoping per-humain reste `assigned_by` (issue-level, garde anti-vol :
+  la fleet ne traite QUE ses issues, même si elle voit les repos des autres du groupe). Retourne les
+  `full_name` (`"owner/name"`). (limit=50 : une org small-team a < 50 repos actifs ; pagination = backlog.)
+  """
+  @spec list_org_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def list_org_repos(org, opts \\ []) when is_binary(org) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, body} <- http_get(config, "/orgs/#{encode_seg(org)}/repos?limit=50") do
+      {:ok, body |> List.wrap() |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
+    end
+  end
+
+  @doc """
   Recherche les repos dont un TOPIC matche `topic` — Gitea `GET /repos/search?q=&topic=true`.
   Multi-projet : le poller découvre SES projets via le topic per-humain `lcars-fleet-<human>` (posé par
   l'onboarding). Retourne les `full_name` (`"owner/name"`). Forme inattendue / aucun résultat → `{:ok, []}`.

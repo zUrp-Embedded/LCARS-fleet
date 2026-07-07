@@ -286,6 +286,9 @@ defmodule Fleet.Pilot.ForgeClient do
   # vivent dans `Repo` (qui dépend en retour de `create_issue`/`close_issue` du cœur pour le sceau).
   # ============================================================
 
+  @doc "Repos de l'org (découverte WS3, appartenance-org = admission). Voir `ForgeClient.Repo.list_org_repos/2`."
+  def list_org_repos(org, opts \\ []), do: Repo.list_org_repos(org, opts)
+
   @doc "Repos découverts par topic. Voir `Fleet.Pilot.ForgeClient.Repo.search_repos_by_topic/2`."
   def search_repos_by_topic(topic, opts \\ []), do: Repo.search_repos_by_topic(topic, opts)
 

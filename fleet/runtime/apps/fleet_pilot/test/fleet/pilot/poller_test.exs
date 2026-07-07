@@ -106,25 +106,16 @@ defmodule Fleet.Pilot.PollerTest do
   # réelle, ici on renvoie tel quel) + les write-ops touchées par
   # StepDispatcher.dispatch_issue (add_label / post_comment).
   defmodule StepStubForge do
-    # F-037 — le poller DÉCOUVRE ses repos par topic AVANT de scanner. Défaut = LE repo de test (les tests
-    # single-repo restent identiques : 1 repo découvert → 1 `step_do_poll`). `_test_repos` pour le multi-repo,
-    # `_test_discover` pour simuler une découverte en erreur (forge down → backoff).
-    def search_repos_by_topic(_topic, opts) do
+    # WS3 — le poller DÉCOUVRE ses repos par appartenance-org (`list_org_repos`) AVANT de scanner. Défaut =
+    # LE repo de test (single-repo : 1 repo découvert → 1 `step_do_poll`). `_test_repos` pour le multi-repo,
+    # `_test_discover` pour simuler une découverte en erreur (forge down → backoff). Plus de sceau/admission :
+    # l'appartenance-org EST l'admission (tout repo rendu ici est scanné).
+    def list_org_repos(_org, opts) do
       Keyword.get(
         opts,
         :_test_discover,
         {:ok, Keyword.get(opts, :_test_repos, ["lordzurp/lcars-test"])}
       )
-    end
-
-    # F — frontière d'admission : le poller n'admet QUE les repos scellés système (`admitted?`). Défaut
-    # `true` (les tests single-repo restent : repo découvert = repo admis). Override par `:_test_admitted`
-    # (map repo → bool) pour exercer « topic seul (non admis) » vs « scellé système (admis) ».
-    def admitted?(repo, _human, opts) do
-      case Keyword.get(opts, :_test_admitted) do
-        nil -> true
-        admitted_map -> Map.get(admitted_map, repo, false)
-      end
     end
 
     # #5.2 D1 — le scoping multi-user est FORGE-SIDE : le poller passe `assigned_by=<my_human>`. Le stub
@@ -727,95 +718,13 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   # ============================================================
-  # F — frontière d'admission : topic SEUL ne suffit pas, il faut le sceau système (`admitted?`).
+  # (WS3) Frontière d'admission par SCEAU : RETIRÉE. L'admission = l'appartenance à l'org — `list_org_repos`
+  # ne rend QUE des repos de l'org fleet, tous admis d'office. Les anciens tests « repo tagué-seul écarté /
+  # repo scellé admis » exerçaient le filtre `admitted_repos` de `do_poll`, supprimé : il n'existe PLUS de
+  # repo « découvrable-mais-non-admis » (l'org EST la frontière, gérée EN AMONT par l'admin humain — LCARS
+  # n'est pas du multi-tenant adversarial). Le « tous les repos découverts sont scannés » est couvert par le
+  # test multi-repo de la section découverte.
   # ============================================================
-  #
-  # Le topic `lcars-fleet-<human>` (mutable) rend un repo DÉCOUVRABLE ; un user honnête peut se l'auto-
-  # poser sur un repo qu'il possède. L'admission exige le marqueur d'onboarding posé PAR le bot système
-  # (`ForgeClient.admitted?`, vérifié bot-authored server-side). Le poller n'admet/ne scanne QUE les repos
-  # scellés ; un repo tagué mais non onboardé est ÉCARTÉ avant tout dispatch.
-  describe "mode step — frontière d'admission système (F)" do
-    # `list_open_issues` envoie `{:scoped, :issues, _}` au pid de test SSI le repo est scanné → c'est notre
-    # sonde « ce repo a-t-il franchi l'admission ». Un repo non admis NE déclenche PAS cet appel.
-    defp start_admission_poller(repos, admitted_map, issue) do
-      name = :"P_admit_#{System.unique_integer([:positive])}"
-
-      {:ok, pid} =
-        Poller.start_link(
-          name: name,
-          human: "lordzurp",
-          start_tick?: false,
-          step_dispatch?: true,
-          forge_client: StepStubForge,
-          forge_opts: [
-            _test_repos: repos,
-            _test_admitted: admitted_map,
-            _test_issues: {:ok, [issue]},
-            _test_pid: self()
-          ],
-          loader: StepStubLoader,
-          spawner: StepStubSpawner,
-        )
-
-      {name, pid}
-    end
-
-    @assigned_issue %{
-      "number" => 1,
-      "body" => "x",
-      "labels" => [],
-      "assignees" => [%{"login" => "lordzurp"}]
-    }
-
-    test "repo tagué mais SANS sceau système (topic seul) → ÉCARTÉ, jamais scanné/dispatché" do
-      # LE finding : le repo porte le topic (découvert) mais `admitted? = false` (pas de marqueur bot). Il
-      # ne doit PAS entrer dans la machine : aucun scan (`list_open_issues` jamais appelé → pas de `:scoped`),
-      # zéro dispatch. Régression prouvée : retirer le filtre `admitted_repos` de `do_poll` (poller.ex) fait
-      # repasser ce repo en scanné → `{:scoped, ...}` reçu + l'issue dispatchée. Le sceau EST la frontière.
-      {name, pid} =
-        start_admission_poller(
-          ["lordzurp/evil-untagged"],
-          %{"lordzurp/evil-untagged" => false},
-          @assigned_issue
-        )
-
-      assert %{dispatched: 0, skipped: 0, errors: 0} = Poller.force_poll(name)
-      refute_received {:scoped, :issues, _}
-      refute_received {:spawned, _, _}
-
-      GenServer.stop(pid)
-    end
-
-    test "repo SCELLÉ système (marqueur bot) → admis, scanné (issue traitée)" do
-      # Le pendant : un repo avec `admitted? = true` (marqueur d'onboarding bot-authored) PASSE l'admission
-      # → il est scanné (`:scoped` reçu) et son issue assignée traitée (ici routeless → onboardée+déférée).
-      {name, pid} =
-        start_admission_poller(["lordzurp/sealed"], %{"lordzurp/sealed" => true}, @assigned_issue)
-
-      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
-      assert_received {:scoped, :issues, "lordzurp"}
-
-      GenServer.stop(pid)
-    end
-
-    test "mix découverte : seul le repo scellé est admis, le tagué-seul est écarté" do
-      # 2 repos découverts par topic ; un seul porte le sceau. Le poller scanne UNIQUEMENT le scellé → une
-      # seule sonde `:scoped` (le tagué-seul n'en produit aucune). L'isolation REPO devient le sceau système,
-      # pas le topic mutable.
-      {name, pid} =
-        start_admission_poller(
-          ["lordzurp/sealed", "lordzurp/evil-untagged"],
-          %{"lordzurp/sealed" => true, "lordzurp/evil-untagged" => false},
-          @assigned_issue
-        )
-
-      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
-      assert_received {:scoped, :issues, "lordzurp"}
-      refute_received {:scoped, :issues, _}
-
-      GenServer.stop(pid)
-    end
-  end
 
   # ============================================================
   # Bail repo-serialise (incrément 3) : au plus 1 pipeline actif par repo.
@@ -1084,12 +993,8 @@ defmodule Fleet.Pilot.PollerTest do
     # Forge multi-repo : chaque repo a SA liste d'issues (`_test_issues_by_repo`). `remove_label` porte le
     # REPO (pour distinguer repoA#8 de repoB#8 — MÊME numéro). Le reste = StepStubForge.
     defmodule MultiRepoForge do
-      def search_repos_by_topic(_topic, opts),
+      def list_org_repos(_org, opts),
         do: {:ok, Keyword.get(opts, :_test_repos, [])}
-
-      # Tous les repos multi-repo de ce describe sont scellés système (admis) — le test isole la
-      # réconciliation de verrou, pas l'admission (couverte dans le describe « frontière d'admission »).
-      def admitted?(_repo, _human, _opts), do: true
 
       def list_open_issues(repo, opts) do
         Map.get(Keyword.get(opts, :_test_issues_by_repo, %{}), repo, {:ok, []})
