@@ -97,6 +97,41 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
+  Branche par défaut de `repo` — Gitea `GET /repos/{repo}` → `.default_branch`. Sert à WS4 (import) :
+  la protection/clone du runtime suppose `main` PARTOUT (même convention que `create_repo`, `protect_main`) ;
+  importer un repo dont le défaut n'est PAS `main` est un refus explicite (`Fleet.Pilot.ProjectOnboard.import/2`),
+  pas une généralisation du nom de branche — hors-scope tant qu'aucun repo réel n'en a besoin.
+  """
+  @spec default_branch(String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
+  def default_branch(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, %{"default_branch" => b}} when is_binary(b) <-
+           http_get(config, "/repos/#{encode_repo(repo)}") do
+      {:ok, b}
+    else
+      {:ok, _} -> {:error, :no_default_branch}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  La branche `branch` existe-t-elle sur `repo` ? Gitea `GET /repos/{repo}/branches/{branch}` (200 = oui,
+  404 = non). Sert à WS4 (import) : idempotence de `work/ops` — un repo réimporté (ou déjà onboardé)
+  ne doit pas se faire écraser son orphan branch. `false` sur toute erreur (fail-safe : absence non
+  confirmée ⇒ on tente la création, Gitea refusera proprement si elle existe déjà).
+  """
+  @spec branch_exists?(String.t(), String.t(), Keyword.t()) :: boolean()
+  def branch_exists?(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, _} <-
+           http_get(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  @doc """
   `username` est-il collaborateur de `repo` ? Gitea `GET /repos/{repo}/collaborators/{username}` (204 = oui,
   404 = non). `false` sur toute erreur (config/transport/404) — fail-safe (on ne défaut PAS sur un repo
   inaccessible). Sert au scoping « projet par défaut = repos où l'humain est collaborateur » (create_issue).
@@ -171,15 +206,29 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   `block_on_rejected_reviews`, `enable_push`, …). C'est le **gate forge-enforcé** : sur le repo
   sandbox, la forge refuse le merge tant que les gardes (N approvals, pas de REQUEST_CHANGES) ne sont
   pas vertes → l'arbitre est la forge, pas le runtime. Requiert repo-admin.
-  Idempotent : une règle déjà posée (409/422) → `:ok`.
+  Idempotent : une règle déjà posée → `:ok`. Vérifié empiriquement (WS4 e2e, 2026-07-07) : Gitea rend
+  **403** `"Branch protection already exist"` pour ce cas précis — PAS 409/422 comme documenté avant
+  (bug latent, présent aussi côté `onboard/2` sur tout re-run post-protect ; débusqué par l'idempotence
+  testée d'`import/2`). On ne peut PAS avaler tout 403 (un vrai refus de permission serait masqué) →
+  on matche le MESSAGE précis, pas juste le code.
   """
   @spec protect_branch(String.t(), map(), Keyword.t()) :: :ok | {:error, term()}
   def protect_branch(repo, rule, opts \\ []) when is_binary(repo) and is_map(rule) do
     with {:ok, config} <- resolve_config(opts) do
       case http_post(config, "/repos/#{encode_repo(repo)}/branch_protections", rule) do
-        {:ok, _} -> :ok
-        {:error, {:http, code, _}} when code in [409, 422] -> :ok
-        {:error, _} = err -> err
+        {:ok, _} ->
+          :ok
+
+        {:error, {:http, code, _}} when code in [409, 422] ->
+          :ok
+
+        {:error, {:http, 403, %{"message" => msg}}} when is_binary(msg) ->
+          if String.contains?(msg, "already exist"),
+            do: :ok,
+            else: {:error, {:http, 403, %{"message" => msg}}}
+
+        {:error, _} = err ->
+          err
       end
     end
   end
