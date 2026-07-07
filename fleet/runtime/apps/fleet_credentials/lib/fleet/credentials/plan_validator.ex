@@ -1,30 +1,32 @@
 defmodule Fleet.Credentials.PlanValidator do
   @moduledoc """
-  Gate plan/abonnement : le claudeDir de l'humain doit porter un
-  abonnement payant pour faire tourner des pods claude_code. Lit
-  `claudeAiOauth.subscriptionType` du `.credentials.json` natif — PAS de SDK, pas
-  d'appel réseau (transformateur pur, même contrat que `Fleet.Credentials.ScopeValidator`).
+  Plan/subscription gate: the human's claudeDir must carry a paid
+  subscription in order to run claude_code pods. Reads
+  `claudeAiOauth.subscriptionType` from the native `.credentials.json` — NO SDK, no
+  network call (pure transformer, same contract as `Fleet.Credentials.ScopeValidator`).
 
-  ## Valeurs canon
+  ## Canonical values
 
-  Valeurs émises par le binaire claude dans `.credentials.json` :
+  Values emitted by the claude binary in `.credentials.json`:
   `subscriptionType: "max" | "pro" | "team" | "enterprise" | null`. `null`/absent =
-  pas d'abonnement → refus. Toute valeur payante connue → `:ok` (insensible à la casse).
+  no subscription → refusal. Any known paid value → `:ok` (case-insensitive).
 
-  ## Défense en profondeur
+  ## Defense in depth
 
-  Le binaire claude impose DÉJÀ le plan (401/login). Ce gate fait échouer le spawn
-  TÔT (fail-fast au boundary) plutôt qu'au 1ᵉʳ appel API du pod : un refus clair côté
-  runtime au lieu d'un pod spawné qui mourra sur le premier appel API non autorisé.
+  The claude binary ALREADY enforces the plan (401/login). This gate fails the spawn
+  EARLY (fail-fast at the boundary) rather than at the pod's 1st API call: a clear refusal
+  runtime-side instead of a spawned pod that will die on its first unauthorized API call.
 
   ## Exit codes
 
-    * `:ok` — abonnement payant reconnu
-    * `{:error, {:invalid_plan, type}}` — plan non-payant/inconnu (type conservé pour rapport)
+    * `:ok` — recognized paid subscription
+    * `{:error, {:invalid_plan, type}}` — non-paid/unknown plan (type kept for reporting)
   """
 
-  # Plans payants reconnus (source CC). L'absence/`null` est gérée par le caller
-  # (le slot peut manquer) — ici on ne valide qu'une valeur binaire présente.
+  # Recognized paid plans (source: Claude Code). MUST stay all-lowercase: `validate/1` downcases the
+  # input before the membership test, so a capitalized entry here would never match. The absence/`null`
+  # case is handled by the caller (the slot may be missing) — here we only validate a binary value that
+  # is present.
   @paid_plans ~w(max pro team enterprise)
 
   @spec validate(String.t()) :: :ok | {:error, {:invalid_plan, String.t()}}

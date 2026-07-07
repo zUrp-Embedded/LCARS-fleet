@@ -1,25 +1,25 @@
 defmodule Fleet.Credentials.RoleToken do
   @moduledoc """
-  Token forge du compte d'un RÔLE — pour que le système poste/commente EN SON NOM (issue par
-  `Architect`, comment par `Engineer` → avatar honnête, traça vraie), via le token du compte de rôle.
+  Forge token of a ROLE's account — so the system posts/comments IN ITS NAME (issue by
+  `Architect`, comment by `Engineer` → honest avatar, true traceability), via the role account's token.
 
-  ## Source (path SYSTÈME, jamais un home utilisateur)
+  ## Source (SYSTEM path, never a user home)
 
-  Lu de `<role_tokens_dir>/<role>.gitea_token`. `role_tokens_dir` = config
-  `:fleet_credentials, :role_tokens_dir`, **défaut `/home/private`** (répertoire de secrets, `700`).
-  La POSE est mécanisée : `etc/provision-role-tokens.sh` (fix A4 — mint idempotent par forge,
-  exécution privilégiée une fois ; `--check` = sonde de validité, réutilisée par le nuke-drill).
-  Un jeu par forge (cf. env `FORGE_ROLE_TOKENS_DIR`, lu par runtime.exs).
-  C'est un path **système absolu** — JAMAIS `System.user_home()` : la fleet est lancée PAR un humain
-  (le BEAM hérite son UID, il n'existe pas de compte système `fleet`), mais les tokens de rôle sont un
-  secret provisionné côté SYSTÈME, partagé par toutes les fleets per-humain — le path ne doit donc pas
-  dépendre de QUI lance (l'override vit dans la config `role_tokens_dir`, pas dans le home).
+  Read from `<role_tokens_dir>/<role>.gitea_token`. `role_tokens_dir` = config
+  `:fleet_credentials, :role_tokens_dir`, **default `/home/private`** (secrets directory, `700`).
+  The placement is mechanized: `etc/provision-role-tokens.sh` (idempotent mint per forge,
+  privileged run once; `--check` = validity probe, reused by the nuke-drill).
+  One set per forge (cf. env `FORGE_ROLE_TOKENS_DIR`, read by runtime.exs).
+  This is an **absolute system path** — NEVER `System.user_home()`: the fleet is launched BY a human
+  (the BEAM inherits their UID, there is no `fleet` system account), but role tokens are a
+  secret provisioned on the SYSTEM side, shared by all per-human fleets — so the path must NOT
+  depend on WHO launches (the override lives in the `role_tokens_dir` config, not in the home).
 
-  ## Agnosticité
+  ## Agnosticity
 
-  Le `role` est un **paramètre** — jamais un nom de rôle hardcodé dans le code. Il vient de l'identité
-  du pod appelant (`metadata.name` du cap-profile = le rôle métier, propagé en env `LCARS_ROLE` puis
-  injecté dans les tool calls par le pont MCP). `role` est validé **path-safe** (interpolé dans un path).
+  The `role` is a **parameter** — never a role name hardcoded in the code. It comes from the identity
+  of the calling pod (`metadata.name` of the cap-profile = the business role, propagated in env `LCARS_ROLE` then
+  injected into the tool calls by the MCP bridge). `role` is validated **path-safe** (interpolated into a path).
   """
 
   require Logger
@@ -27,14 +27,14 @@ defmodule Fleet.Credentials.RoleToken do
   @default_dir "/home/private"
 
   @doc """
-  Token forge du compte `role`, ou `nil` si absent/illisible/role invalide. Best-effort : le caller
-  retombe sur le token système si `nil` (dégradé loggué — pas un masquage : le compte de rôle existe,
-  c'est un trou de provisioning à voir, pas une erreur fatale).
+  Forge token of the `role` account, or `nil` if absent/unreadable/invalid role. Best-effort: the caller
+  falls back to the system token when `nil` (degraded and logged — not a masking: the role account exists,
+  it is a provisioning hole to look at, not a fatal error).
   """
   @spec token(String.t() | nil) :: String.t() | nil
   def token(role) when is_binary(role) do
-    # `role` est interpolé dans un path (`<dir>/<role>.gitea_token`) → validé via le smart-constructor
-    # slug (source UNIQUE du charset path-safe ; un `role` malformé est ignoré, fallback token système).
+    # `role` is interpolated into a path (`<dir>/<role>.gitea_token`) → validated via the slug
+    # smart-constructor (SINGLE source of the path-safe charset; a malformed `role` is ignored, system-token fallback).
     if Fleet.Slug.valid?(role) do
       path = Path.join(dir(), "#{role}.gitea_token")
 
@@ -70,7 +70,7 @@ defmodule Fleet.Credentials.RoleToken do
 
   def token(_), do: nil
 
-  @doc "Racine des tokens de rôle (`:fleet_credentials, :role_tokens_dir`, défaut `/home/private`)."
+  @doc "Root of the role tokens (`:fleet_credentials, :role_tokens_dir`, default `/home/private`)."
   @spec dir() :: String.t()
   def dir, do: Application.get_env(:fleet_credentials, :role_tokens_dir) || @default_dir
 end
