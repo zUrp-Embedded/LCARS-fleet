@@ -60,8 +60,15 @@ defmodule Fleet.Spawner do
   inter-app caller.
   """
   @spec valid_pod_id?(term()) :: boolean()
+  # Single authority for the pod_id shape, satisfying ALL consumers by construction: head ALPHANUM
+  # (a leading `.`/`_`/`-` would make a degenerate pkill pattern / a hidden path component), charset
+  # `[A-Za-z0-9._-]`, no `..`, length 1..100 (anti-DoS sanity — the exact `sun_path` ≤ 108 bound is
+  # enforced where the base dir is known, at the socket boundary). `\A…\z`, NOT `^…$` (line anchors in
+  # PCRE → a trailing `\n` would sneak through).
   def valid_pod_id?(id) when is_binary(id),
-    do: Regex.match?(~r/^[A-Za-z0-9._-]+$/, id) and not String.contains?(id, "..")
+    do:
+      Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._-]{0,99}\z/, id) and
+        not String.contains?(id, "..")
 
   def valid_pod_id?(_), do: false
 

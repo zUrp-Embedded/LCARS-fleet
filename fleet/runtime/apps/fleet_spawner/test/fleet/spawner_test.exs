@@ -108,11 +108,29 @@ defmodule Fleet.SpawnerTest do
 
   describe "R18 — refus spawn one-shot sans brief" do
     test "valid_pod_id?/1 est l'autorité publique du charset pod_id" do
-      for ok <- ["pod-1", "permanent-architect", "repo.issue_1-role", UUID.uuid4()] do
+      # "p1" (court) est ACCEPTÉ : l'admission n'impose PAS de longueur mini — le len≥4 est la
+      # sur-armure LOCALE de pkill (PodTmux.pkill_pattern), pas une règle d'admission.
+      for ok <- ["pod-1", "permanent-architect", "repo.issue_1-role", UUID.uuid4(), "p1"] do
         assert Fleet.Spawner.valid_pod_id?(ok), "pod_id #{inspect(ok)} devrait être accepté"
       end
 
-      for bad <- ["../etc/passwd", "a/b", "..", "pod_..", "x y", "", nil, 42] do
+      # tête NON-alnum (`.`/`_`/`-`) et longueur absurde refusées : tout id admis doit être sûr chez
+      # TOUS les consommateurs (tête alnum = anti-motif-pkill-dégénéré ; borne = anti-DoS, sun_path
+      # précis à la frontière socket).
+      for bad <- [
+            "../etc/passwd",
+            "a/b",
+            "..",
+            "pod_..",
+            "x y",
+            "",
+            nil,
+            42,
+            ".hidden",
+            "_lead",
+            "-flag",
+            String.duplicate("a", 200)
+          ] do
         refute Fleet.Spawner.valid_pod_id?(bad), "pod_id #{inspect(bad)} devrait être refusé"
       end
     end
