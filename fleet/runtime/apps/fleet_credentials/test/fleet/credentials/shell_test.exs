@@ -6,6 +6,29 @@ defmodule Fleet.Credentials.ShellTest do
 
   alias Fleet.Credentials.Shell
 
+  describe "run/3 — opts totales (parse au bord : jamais de raise hors {:ok}|{:error})" do
+    test "timeout_ms non-entier / négatif → {:error, {:bad_opt, {:timeout_ms, _}}}" do
+      assert {:error, {:bad_opt, {:timeout_ms, "5"}}} =
+               Shell.run("sh", ["-c", "true"], timeout_ms: "5")
+
+      assert {:error, {:bad_opt, {:timeout_ms, -1}}} =
+               Shell.run("sh", ["-c", "true"], timeout_ms: -1)
+    end
+
+    test "env malformé (non-liste OU tuple non-string) → {:error, {:bad_opt, {:env, _}}}" do
+      assert {:error, {:bad_opt, {:env, _}}} = Shell.run("sh", ["-c", "true"], env: "PATH=/")
+      assert {:error, {:bad_opt, {:env, _}}} = Shell.run("sh", ["-c", "true"], env: [{"K", 1}])
+    end
+
+    test "cd non-string → {:error, {:bad_opt, {:cd, _}}}" do
+      assert {:error, {:bad_opt, {:cd, 42}}} = Shell.run("sh", ["-c", "true"], cd: 42)
+    end
+
+    test "args non-binaire → {:error, {:bad_opt, :args}}" do
+      assert {:error, {:bad_opt, :args}} = Shell.run("sh", ["-c", 123])
+    end
+  end
+
   describe "run/3 — borne par construction (MOVE-1/MA-22)" do
     test "commande qui rend dans le délai → {:ok, {output, exit_code}}" do
       assert {:ok, {out, 0}} = Shell.run("sh", ["-c", "echo hello"], timeout_ms: 5_000)

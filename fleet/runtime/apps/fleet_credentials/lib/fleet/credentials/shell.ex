@@ -98,6 +98,7 @@ defmodule Fleet.Credentials.Shell do
           {:ok, {String.t(), non_neg_integer()}}
           | {:error, {:timeout, pos_integer()}}
           | {:error, {:exit, term()}}
+          | {:error, {:bad_opt, term()}}
 
   # Neutralization of the git MECHANISMS steerable from a repo's content, to compose (`-c …`)
   # into EVERY system-side git op (launched by the Elixir runtime, outside bwrap) on a workspace
@@ -173,49 +174,94 @@ defmodule Fleet.Credentials.Shell do
   """
   @spec run(String.t(), [String.t()], keyword()) :: result()
   def run(cmd, args, opts \\ []) when is_binary(cmd) and is_list(args) do
-    timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
+    case parse_run(args, opts) do
+      {:error, _} = err ->
+        err
 
-    case {System.find_executable(cmd), System.find_executable("setsid")} do
-      {nil, _} ->
-        {:error, {:exit, {:enoent, cmd}}}
+      {:ok, timeout_ms, env, cd} ->
+        case {System.find_executable(cmd), System.find_executable("setsid")} do
+          {nil, _} ->
+            {:error, {:exit, {:enoent, cmd}}}
 
-      {_exe, nil} ->
-        # `setsid` is the precondition of the killed-by-construction process-group (Linux: always
-        # present via util-linux). Absent = we CANNOT guarantee the "whole group killed" invariant →
-        # fail-closed rather than a false sense of security with a bare `System.cmd`.
-        {:error, {:exit, {:enoent, "setsid"}}}
+          {_exe, nil} ->
+            # `setsid` is the precondition of the killed-by-construction process-group (Linux: always
+            # present via util-linux). Absent = we CANNOT guarantee the "whole group killed" invariant →
+            # fail-closed rather than a false sense of security with a bare `System.cmd`.
+            {:error, {:exit, {:enoent, "setsid"}}}
 
-      {exe, setsid} ->
-        # We run `setsid -w <exe> <args>`: `-w` keeps the wrapper ALIVE (parent of the real process),
-        # otherwise it fork-and-dies and the port's os_pid points at nothing useful. The port's
-        # executable is therefore `setsid`; its args = `["-w", exe | args]`.
-        port_opts =
-          [
-            :binary,
-            :exit_status,
-            :stderr_to_stdout,
-            :hide,
-            {:args, ["-w", exe | args]},
-            {:env, to_charlist_env(Keyword.get(opts, :env, []))}
-          ]
-          |> maybe_put_cd(Keyword.get(opts, :cd))
+          {exe, setsid} ->
+            # We run `setsid -w <exe> <args>`: `-w` keeps the wrapper ALIVE (parent of the real process),
+            # otherwise it fork-and-dies and the port's os_pid points at nothing useful. The port's
+            # executable is therefore `setsid`; its args = `["-w", exe | args]`.
+            port_opts =
+              [
+                :binary,
+                :exit_status,
+                :stderr_to_stdout,
+                :hide,
+                {:args, ["-w", exe | args]},
+                {:env, to_charlist_env(env)}
+              ]
+              |> maybe_put_cd(cd)
 
-        port = Port.open({:spawn_executable, setsid}, port_opts)
+            case safe_port_open(setsid, port_opts) do
+              {:error, _} = err ->
+                err
 
-        # `Port.info(:os_pid)` returns `nil` if the port is ALREADY closed (an ultra-fast command
-        # finished between open and info) → no group to kill (the process is already gone); the
-        # {:data}/{:exit_status} messages are still in the mailbox and `collect` drains them. nil = no-kill.
-        os_pid = os_pid(port)
+              {:ok, port} ->
+                # `Port.info(:os_pid)` returns `nil` if the port is ALREADY closed (an ultra-fast command
+                # finished between open and info) → no group to kill (the process is already gone); the
+                # {:data}/{:exit_status} messages are still in the mailbox and `collect` drains them. nil = no-kill.
+                os_pid = os_pid(port)
 
-        # ABSOLUTE deadline computed ONCE: the `receive` loop waits only for the REMAINING time, so a
-        # dripping output never pushes the deadline back (wall, not idle-gap). The PGID of the group to
-        # kill is discovered AT THE MOMENT of the timeout (in `terminate`), not here: right after
-        # `Port.open`, `setsid -w` has not necessarily forked the real process yet (race) → immediate
-        # discovery would return `nil`. By the deadline, the process has run for `timeout_ms` → it is
-        # there, fork included.
-        deadline = System.monotonic_time(:millisecond) + timeout_ms
-        collect(port, os_pid, timeout_ms, deadline, [])
+                # ABSOLUTE deadline computed ONCE: the `receive` loop waits only for the REMAINING time, so a
+                # dripping output never pushes the deadline back (wall, not idle-gap). The PGID of the group to
+                # kill is discovered AT THE MOMENT of the timeout (in `terminate`), not here: right after
+                # `Port.open`, `setsid -w` has not necessarily forked the real process yet (race) → immediate
+                # discovery would return `nil`. By the deadline, the process has run for `timeout_ms` → it is
+                # there, fork included.
+                deadline = System.monotonic_time(:millisecond) + timeout_ms
+                collect(port, os_pid, timeout_ms, deadline, [])
+            end
+        end
     end
+  end
+
+  # Parse-don't-validate at the boundary: `run/3` promises `result()` for ANY caller, so bad opts become a
+  # typed `{:error, {:bad_opt, _}}`, never a raise (a non-integer `timeout_ms` used to blow up on the
+  # deadline `+`, a malformed `env`/`cd` in the charlist conversion). Prod callers (`git/2`) always pass
+  # valid opts; this guards a direct/buggy caller so the contract holds.
+  defp parse_run(args, opts) do
+    timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
+    env = Keyword.get(opts, :env, [])
+    cd = Keyword.get(opts, :cd)
+
+    cond do
+      not Enum.all?(args, &is_binary/1) ->
+        {:error, {:bad_opt, :args}}
+
+      not (is_integer(timeout_ms) and timeout_ms > 0) ->
+        {:error, {:bad_opt, {:timeout_ms, timeout_ms}}}
+
+      not (is_list(env) and Enum.all?(env, &match?({k, v} when is_binary(k) and is_binary(v), &1))) ->
+        {:error, {:bad_opt, {:env, env}}}
+
+      not (is_nil(cd) or is_binary(cd)) ->
+        {:error, {:bad_opt, {:cd, cd}}}
+
+      true ->
+        {:ok, timeout_ms, env, cd}
+    end
+  end
+
+  # `Port.open` can still raise (badarg on a malformed spec/opts that slipped past the parse) → keep the
+  # `result()` contract intact rather than crash the caller.
+  defp safe_port_open(setsid, port_opts) do
+    {:ok, Port.open({:spawn_executable, setsid}, port_opts)}
+  rescue
+    e -> {:error, {:exit, {:port_open, Exception.message(e)}}}
+  catch
+    kind, reason -> {:error, {:exit, {:port_open, {kind, reason}}}}
   end
 
   defp os_pid(port) do
