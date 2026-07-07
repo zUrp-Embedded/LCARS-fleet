@@ -511,6 +511,26 @@ defmodule Fleet.CapProfileTest do
     test "G24-14 passes when neither monk field set (both-or-neither)" do
       assert :ok = Fleet.CapProfile.validate(valid_struct())
     end
+
+    test "R0-CAP-013 : G24-14 traite une chaîne VIDE comme absente (pairing `x`+`\"\"` cassé → fail)" do
+      # `monk_registry: "x"` + `monk_instance: ""` : l'ancien is_nil laissait passer (`""` non-nil) → pairing
+      # à moitié déclaré. Une chaîne vide/whitespace compte comme absente.
+      broken =
+        valid_struct()
+        |> put_knowledge("monk_registry", "/some/registry.yaml")
+        |> put_knowledge("monk_instance", "   ")
+
+      assert {:error, codes} = Fleet.CapProfile.validate(broken)
+      assert :g24_14 in codes
+
+      # `""` + `""` = les deux absents → :ok (both-or-neither respecté)
+      both_empty =
+        valid_struct()
+        |> put_knowledge("monk_registry", "")
+        |> put_knowledge("monk_instance", "")
+
+      assert :ok = Fleet.CapProfile.validate(both_empty)
+    end
   end
 
   # ============================================================

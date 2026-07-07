@@ -236,13 +236,13 @@ defmodule Fleet.CapProfile.Invariants do
   # both independently nullable). The registry's FS existence + the
   # `monk_instance` lookup are I/O ⟹ load-time (`compose/2`), not here.
   defp check_monk_registry_pairing(%CapProfile{spec: spec}) do
-    registry = get_in(spec, ["knowledge", "monk_registry"])
-    instance = get_in(spec, ["knowledge", "monk_instance"])
+    # A BLANK/whitespace string counts as ABSENT, like nil: `monk_registry: ""` is not a real pairing.
+    # The former `is_nil`-only test let `{"x", ""}` pass (both non-nil) — a half-declared, broken pairing.
+    registry? = monk_present?(get_in(spec, ["knowledge", "monk_registry"]))
+    instance? = monk_present?(get_in(spec, ["knowledge", "monk_instance"]))
 
-    case {is_nil(registry), is_nil(instance)} do
-      {true, true} -> :ok
-      {false, false} -> :ok
-      _ -> :error
-    end
+    if registry? == instance?, do: :ok, else: :error
   end
+
+  defp monk_present?(v), do: is_binary(v) and String.trim(v) != ""
 end
