@@ -1,33 +1,33 @@
 defmodule Fleet.Spawner.Pod.SessionFiles do
   @moduledoc """
-  Localisation des JSONL de session claude d'un pod — île de LECTURE FS partagée.
+  Location of a pod's claude session JSONLs — a shared FS-READ island.
 
-  Un seul savoir, une seule autorité : les sessions du claude d'un pod vivent sous
-  `<pod_dir>/.claude/projects/<cwd-slug>/<uuid>.jsonl` (un dossier par cwd-slug, un fichier
-  append-only par session — layout posé par Claude Code, pas par la fleet). Trois consommateurs
-  glob-aient ce chemin chacun de leur côté (GC de l'UUID au re-spawn, sonde de liveness, checkpoint
-  seed-store) ; le glob vit maintenant ICI, chaque caller garde sa logique propre (rm / taille /
-  contenu du plus-récent).
+  One knowledge, one authority: a pod's claude sessions live under
+  `<pod_dir>/.claude/projects/<cwd-slug>/<uuid>.jsonl` (one directory per cwd-slug, one
+  append-only file per session — layout laid down by Claude Code, not by the fleet). Three consumers
+  used to glob this path each on their own side (UUID GC at re-spawn, liveness probe, seed-store
+  checkpoint); the glob now lives HERE, each caller keeps its own logic (rm / size /
+  content of the most-recent).
 
-  Aucun state, aucun timer, aucune ÉCRITURE FS : que du `Path.wildcard` + `File.stat` (c'est ce qui
-  le distingue de `Pod.Paths`, île de calcul PUR sans lecture FS — un glob n'y aurait pas sa place).
-  Aucune dépendance vers `Fleet.Spawner.Pod` (pas de cycle).
+  No state, no timer, no FS WRITE: only `Path.wildcard` + `File.stat` (that is what
+  distinguishes it from `Pod.Paths`, a PURE-computation island with no FS read — a glob would have no place there).
+  No dependency on `Fleet.Spawner.Pod` (no cycle).
 
-  ## Contrat
+  ## Contract
 
-  - `jsonl_paths(pod_dir)` — TOUS les jsonl de session du pod (tous cwd-slugs, tous uuids).
-    Appelé par `Fleet.Spawner.SeedStore` (via `latest_jsonl/1`).
-  - `jsonl_paths(pod_dir, session_id)` — les jsonl de CETTE session, tous cwd-slugs (le cwd-slug
-    n'est pas connu de l'appelant : claude le dérive du cwd du REPL, d'où le `*`). Appelé par
-    `Pod.Scaffold.gc_stale_session_jsonl` (GC) et `Pod.Liveness` (taille cumulée).
-  - `latest_jsonl(pod_dir)` — le jsonl ACTIF (mtime le plus récent) → `{:ok, path}` | `:none`.
-    Appelé par `Fleet.Spawner.SeedStore` (checkpoint du seed).
+  - `jsonl_paths(pod_dir)` — ALL of the pod's session jsonls (all cwd-slugs, all uuids).
+    Called by `Fleet.Spawner.SeedStore` (via `latest_jsonl/1`).
+  - `jsonl_paths(pod_dir, session_id)` — the jsonls of THIS session, all cwd-slugs (the cwd-slug
+    is not known to the caller: claude derives it from the REPL's cwd, hence the `*`). Called by
+    `Pod.Scaffold.gc_stale_session_jsonl` (GC) and `Pod.Liveness` (cumulative size).
+  - `latest_jsonl(pod_dir)` — the ACTIVE jsonl (most recent mtime) → `{:ok, path}` | `:none`.
+    Called by `Fleet.Spawner.SeedStore` (seed checkpoint).
   """
 
   @doc """
-  Chemins des jsonl de session sous `<pod_dir>/.claude/projects/*/`. Arité 1 = tous les jsonl du
-  pod ; arité 2 = ceux de `session_id` (fichier `<session_id>.jsonl`, tous cwd-slugs). Rend `[]` si
-  aucun (session pas encore écrite / pod_dir absent — `Path.wildcard` ne lève pas).
+  Paths of the session jsonls under `<pod_dir>/.claude/projects/*/`. Arity 1 = all of the pod's
+  jsonls; arity 2 = those of `session_id` (file `<session_id>.jsonl`, all cwd-slugs). Returns `[]` if
+  none (session not yet written / pod_dir absent — `Path.wildcard` does not raise).
   """
   @spec jsonl_paths(Path.t(), String.t()) :: [Path.t()]
   def jsonl_paths(pod_dir, session_id \\ "*")
@@ -38,10 +38,10 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
   end
 
   @doc """
-  Le jsonl ACTIF du pod = le plus récemment modifié sous `.claude/projects/*/` (la session VIVANTE,
-  robuste à la rotation d'UUID d'un `/clear`). `:none` si aucun jsonl. Robuste aux fichiers
-  volatils : un `File.stat` qui échoue (fichier disparu entre le glob et le stat) ignore l'entrée
-  au lieu de lever.
+  The pod's ACTIVE jsonl = the most recently modified under `.claude/projects/*/` (the LIVE session,
+  robust to the UUID rotation of a `/clear`). `:none` if no jsonl. Robust to volatile files:
+  a `File.stat` that fails (file vanished between the glob and the stat) ignores the entry
+  instead of raising.
   """
   @spec latest_jsonl(Path.t()) :: {:ok, Path.t()} | :none
   def latest_jsonl(pod_dir) when is_binary(pod_dir) do

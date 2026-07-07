@@ -1,30 +1,30 @@
 defmodule Fleet.Spawner.Pod.Scaffold do
   @moduledoc """
-  WORKSPACE & SESSION du pod_dir — île extraite de `Fleet.Spawner.Pod`, recentrée 2026-07-05.
+  WORKSPACE & SESSION of the pod_dir — island extracted from `Fleet.Spawner.Pod`, re-scoped 2026-07-05.
 
-  Les étapes disque du boot qui touchent le SUBSTRAT de travail du pod : GC de l'UUID de session
-  avant un re-spawn (`:cleaning`), bootstrap du workspace projet (clone git + branche doc,
-  `:projecting`) et restauration du seed de recall (`:projecting`). Les deux autres familles
-  d'étapes ont leurs îles dédiées : les ASSETS vendor/priv (`Pod.Assets` — settings/draft/
-  protocole/watch.sh) et le BRIEF (`Pod.Brief` — `issues/<id>.md` + enqueue TaskQueue).
+  The disk steps of the boot that touch the pod's work SUBSTRATE: GC of the session UUID before a
+  re-spawn (`:cleaning`), project workspace bootstrap (git clone + doc branch, `:projecting`) and
+  restore of the recall seed (`:projecting`). The two other families of steps have their own
+  dedicated islands: the vendor/priv ASSETS (`Pod.Assets` — settings/draft/protocole/watch.sh) and
+  the BRIEF (`Pod.Brief` — `issues/<id>.md` + TaskQueue enqueue).
 
-  Ce module N'ORCHESTRE PAS : les ÉTATS `:cleaning`/`:projecting` restent au cœur du `Pod` (leur
-  gros `with` est l'orchestrateur). Chaque étape rend `:ok` ou un `{:error, reason}` taggé que le
-  `with` de l'état `:projecting` propage vers `transition_failed` (cleanup clean : phase=failed +
-  state.json écrit). Le `Pod` lui passe le `state` en argument ; le module ne rappelle AUCUN
-  private de `Pod` (pas de cycle).
+  This module does NOT ORCHESTRATE: the `:cleaning`/`:projecting` STATES stay at the heart of `Pod`
+  (their big `with` is the orchestrator). Each step returns `:ok` or a tagged `{:error, reason}`
+  that the `:projecting` state's `with` propagates to `transition_failed` (clean cleanup:
+  phase=failed + state.json written). `Pod` passes it the `state` as an argument; the module calls
+  back NO private of `Pod` (no cycle).
 
-  ## Contrat (appelé par `Pod`)
+  ## Contract (called by `Pod`)
 
-  - `gc_stale_session_jsonl(state)` — appelé par l'état `:cleaning` (GC de l'UUID de session avant
-    un re-spawn `--session-id`).
-  - `maybe_bootstrap_project_workspace(state)` / `maybe_recall_restore(state)` — étapes appelées
-    dans le `with` de l'état `:projecting`.
+  - `gc_stale_session_jsonl(state)` — called by the `:cleaning` state (GC of the session UUID before
+    a `--session-id` re-spawn).
+  - `maybe_bootstrap_project_workspace(state)` / `maybe_recall_restore(state)` — steps called in the
+    `:projecting` state's `with`.
 
-  Dépend de `Pod.LaunchSpec` (cwd/projet effectif), `Pod.SessionFiles` (glob partagé des jsonl de
-  session), `Fleet.CapProfile` (source unique du `name` + `with_project/2`),
-  `Fleet.ProjectBootstrap.Phase.Clone` (clone workspace + doc) et `Fleet.Spawner.SeedStore`
-  (restore recall). Aucune dépendance vers `Fleet.Spawner.Pod`.
+  Depends on `Pod.LaunchSpec` (effective cwd/project), `Pod.SessionFiles` (shared glob of the
+  session jsonl), `Fleet.CapProfile` (single source of the `name` + `with_project/2`),
+  `Fleet.ProjectBootstrap.Phase.Clone` (workspace + doc clone) and `Fleet.Spawner.SeedStore`
+  (recall restore). No dependency toward `Fleet.Spawner.Pod`.
   """
 
   require Logger
@@ -33,10 +33,10 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   alias Fleet.Spawner.Pod.SessionFiles
 
   @doc """
-  Supprime tout `<session_id>.jsonl` résiduel sous le pod_dir (tous cwd-slugs, glob partagé
-  `SessionFiles.jsonl_paths/2`) → libère l'UUID pour `--session-id` (un jsonl stale ferait heurter
-  « Session ID already in use » au re-spawn déterministe). Best-effort : un échec ne casse pas le
-  spawn. Appelé par l'état `:cleaning` (skip si `resume` — `SeedStore.restore` écrase le jsonl).
+  Removes any residual `<session_id>.jsonl` under the pod_dir (all cwd-slugs, shared glob
+  `SessionFiles.jsonl_paths/2`) → frees the UUID for `--session-id` (a stale jsonl would trip
+  "Session ID already in use" on the deterministic re-spawn). Best-effort: a failure does not break
+  the spawn. Called by the `:cleaning` state (skipped on `resume` — `SeedStore.restore` overwrites the jsonl).
   """
   @spec gc_stale_session_jsonl(map()) :: :ok
   def gc_stale_session_jsonl(state) do
@@ -52,19 +52,18 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   end
 
   @doc """
-  Câblage de `Fleet.ProjectBootstrap.Phase.Clone` pour les pods porteurs d'un projet
-  (`repo_path`) : le projet EFFECTIF vient du BRIEF (`LaunchSpec.effective_project/2` :
-  `opts[:project]` injecté par le dispatch issue→repo) ou du cap_profile statique (pods
-  permanents). Présent : clone le repo dans `<pod_dir>/workspace/` + checkout feature branch +
-  branche doc (`work/ops` — nil si le projet n'a pas de branche doc, fail-loud si déclarée mais
-  absente) ; le cwd du REPL pointe sur ce workspace (`maybe_put_pod_cwd` → `LCARS_POD_CWD`) →
-  l'agent code DANS sa branche (clone idempotent au respawn). Le `CLAUDE.md` composé est copié à
-  la racine du workspace (avec cwd=workspace il doit être DANS le cwd). Absent (`repo_path` nil) →
-  no-op.
+  Wiring of `Fleet.ProjectBootstrap.Phase.Clone` for pods carrying a project (`repo_path`): the
+  EFFECTIVE project comes from the BRIEF (`LaunchSpec.effective_project/2`: `opts[:project]`
+  injected by the issue→repo dispatch) or from the static cap_profile (permanent pods). Present:
+  clones the repo into `<pod_dir>/workspace/` + checkout of the feature branch + doc branch
+  (`work/ops` — nil if the project has no doc branch, fail-loud if declared but absent); the REPL's
+  cwd points at this workspace (`maybe_put_pod_cwd` → `LCARS_POD_CWD`) → the agent codes INSIDE its
+  branch (idempotent clone on respawn). The composed `CLAUDE.md` is copied to the root of the
+  workspace (with cwd=workspace it must be INSIDE the cwd). Absent (`repo_path` nil) → no-op.
 
-  L'identité git du rôle n'est PAS posée ici (pas de `git config` mutable, falsifiable) : elle est
-  injectée en env au lancement (`LaunchEnv.build` → `GIT_AUTHOR_*`/`GIT_COMMITTER_*`) et la
-  garantie vit côté monde (gate DeliverableGate au push).
+  The role's git identity is NOT set here (no mutable, falsifiable `git config`): it is injected in
+  the env at launch (`LaunchEnv.build` → `GIT_AUTHOR_*`/`GIT_COMMITTER_*`) and the guarantee lives
+  on the world side (DeliverableGate gate at push).
   """
   @spec maybe_bootstrap_project_workspace(map()) ::
           :ok | {:error, {:project_workspace_clone_failed, term()}}
@@ -76,7 +75,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
         :ok
 
       _repo_path ->
-        # cap_profile porteur du projet EFFECTIF (brief > statique) pour les Clone.* (qui lisent spec.project).
+        # cap_profile carrying the EFFECTIVE project (brief > static) for the Clone.* (which read spec.project).
         eff_cap = Fleet.CapProfile.with_project(state.cap_profile, project)
 
         with {:ok, workspace, branch} <-
@@ -85,16 +84,17 @@ defmodule Fleet.Spawner.Pod.Scaffold do
                  eff_cap,
                  []
                ),
-             # Doc-mount (mundo invocado) : la branche `work/ops` (plans/backlog/conventions) à côté
-             # du code. nil si le projet n'a pas de branche doc ; fail-loud si déclarée mais absente.
+             # Doc-mount (mundo invocado): the `work/ops` branch (plans/backlog/conventions) alongside
+             # the code. nil if the project has no doc branch; fail-loud if declared but absent.
              {:ok, doc} <-
                Fleet.ProjectBootstrap.Phase.Clone.clone_work_doc(
                  state.pod_dir,
                  eff_cap
                ) do
-          # CLAUDE.md composé (pod-identité + conventions repo) à la racine du CWD (workspace) :
-          # l'agent pop dans un projet déjà documenté. L'état :projecting l'écrit au pod_dir (parent) ;
-          # avec cwd=workspace il doit être DANS le cwd (sinon l'agent code sans sa codebase-doc en cwd).
+          # Composed CLAUDE.md (pod-identity + repo conventions) at the root of the CWD (workspace):
+          # the agent pops into an already-documented project. The :projecting state writes it at the
+          # pod_dir (parent); with cwd=workspace it must be INSIDE the cwd (otherwise the agent codes
+          # without its codebase-doc in cwd).
           _ = File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md"))
 
           Logger.info(
@@ -110,10 +110,10 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   end
 
   @doc """
-  Recall délibéré. Si `opts[:recall_seed_jsonl]` est fourni (par `Fleet.Spawner.recall/2`),
-  restaure le seed à `projects/<slugify(cwd)>/<session_id>.jsonl` AVANT le launch ; claude
-  `--resume <session_id>` (resume:true via opts) le retrouve. Gaté : absent → no-op (spawn normal
-  intact). Le seed est validé (`read_map`) côté `Spawner.recall` ; absent ICI = fail-loud
+  Deliberate recall. If `opts[:recall_seed_jsonl]` is provided (by `Fleet.Spawner.recall/2`),
+  restores the seed to `projects/<slugify(cwd)>/<session_id>.jsonl` BEFORE the launch; claude
+  `--resume <session_id>` (resume:true via opts) finds it again. Gated: absent → no-op (normal spawn
+  intact). The seed is validated (`read_map`) on the `Spawner.recall` side; absent HERE = fail-loud
   (`{:recall_seed_missing, _}` → `transition_failed`).
   """
   @spec maybe_recall_restore(map()) :: :ok | {:error, {:recall_seed_missing, String.t()}}

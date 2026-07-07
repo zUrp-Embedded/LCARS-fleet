@@ -1,23 +1,23 @@
 defmodule Fleet.Spawner.Pod.Fs do
   @moduledoc """
-  Primitives FS partagées du provisioning pod — variantes non-bang de `File.write`/`File.mkdir_p`.
+  Shared FS primitives of pod provisioning — non-bang variants of `File.write`/`File.mkdir_p`.
 
-  Les variantes bang (`File.mkdir_p!`, `File.write!`, `File.rename!`) raise sur
-  erreur → kill brutal du process pod (gen_statem) → mort sans transition
-  propre → state.json potentiellement obsolète/corrompu côté recovery.
-  Ces helpers retournent `{:ok | :error}` avec contexte (path + reason) →
-  propagation via `with` → transition_failed clean (state.json
-  phase=failed écrit avant `{:stop, ...}`).
+  The bang variants (`File.mkdir_p!`, `File.write!`, `File.rename!`) raise on
+  error → brutal kill of the pod process (gen_statem) → death without a clean
+  transition → state.json potentially stale/corrupt on the recovery side.
+  These helpers return `{:ok | :error}` with context (path + reason) →
+  propagation via `with` → clean transition_failed (state.json
+  phase=failed written before `{:stop, ...}`).
 
-  Pures écritures FS déterministes : aucun state, aucun Port, aucun timer. Partagées
-  par `Fleet.Spawner.Pod` (chaîne de transition) et son île d'extraction
-  `Fleet.Spawner.Pod.McpProvision` (provisioning du `.mcp-fleet.json`) — une primitive,
-  un seul site.
+  Pure deterministic FS writes: no state, no Port, no timer. Shared
+  by `Fleet.Spawner.Pod` (transition chain) and its extraction island
+  `Fleet.Spawner.Pod.McpProvision` (provisioning of `.mcp-fleet.json`) — one primitive,
+  a single site.
   """
 
   @doc """
-  `File.mkdir_p` non-bang : `:ok` ou `{:error, {:mkdir_failed, path, reason}}` — le tag + le path
-  contextualisent l'étape en échec dans le `transition_failed` de l'appelant.
+  `File.mkdir_p` non-bang: `:ok` or `{:error, {:mkdir_failed, path, reason}}` — the tag + the path
+  contextualize the failed step in the caller's `transition_failed`.
   """
   @spec safe_mkdir_p(Path.t()) :: :ok | {:error, {:mkdir_failed, Path.t(), File.posix()}}
   def safe_mkdir_p(path) do
@@ -28,8 +28,8 @@ defmodule Fleet.Spawner.Pod.Fs do
   end
 
   @doc """
-  `File.write` non-bang : `:ok` ou `{:error, {:write_failed, path, reason}}` — le tag + le path
-  contextualisent l'étape en échec dans le `transition_failed` de l'appelant.
+  `File.write` non-bang: `:ok` or `{:error, {:write_failed, path, reason}}` — the tag + the path
+  contextualize the failed step in the caller's `transition_failed`.
   """
   @spec safe_write(Path.t(), iodata()) :: :ok | {:error, {:write_failed, Path.t(), File.posix()}}
   def safe_write(path, content) do

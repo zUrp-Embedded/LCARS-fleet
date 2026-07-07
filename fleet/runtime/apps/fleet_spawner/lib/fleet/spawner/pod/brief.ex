@@ -1,32 +1,33 @@
 defmodule Fleet.Spawner.Pod.Brief do
   @moduledoc """
-  BRIEF du pod : contenu lisible + canal canonique — île extraite de `Fleet.Spawner.Pod.Scaffold`.
+  Pod BRIEF: readable content + canonical channel — an island split out of
+  `Fleet.Spawner.Pod.Scaffold`.
 
-  Le brief d'un pod (sa TÂCHE, livrée par l'orchestrateur, modèle PUSH) a DEUX projections que ce
-  module porte toutes les deux :
+  A pod's brief (its TASK, delivered by the orchestrator, PUSH model) has TWO projections, both
+  carried by this module:
 
-  - le **fichier lisible** `issues/<issue_id>.md` (contexte projet, lu comme contenu — pas une
-    injection-prompt) : `issue_id_to_filename/1` (nom safe) + `default_brief/1` (le corps) ;
-  - le **canal CANONIQUE** : l'enqueue idempotent dans la `Fleet.TaskQueue`
-    (`maybe_enqueue_brief/1`) — le pod PULL via le tool MCP `get_work_item` (déclenché par le
-    mot-clé `yop`), jamais par le texte injecté.
+  - the **readable file** `issues/<issue_id>.md` (project context, read as content — NOT a
+    prompt-injection): `issue_id_to_filename/1` (safe name) + `default_brief/1` (the body);
+  - the **CANONICAL channel**: the idempotent enqueue into `Fleet.TaskQueue`
+    (`maybe_enqueue_brief/1`) — the pod PULLs via the MCP tool `get_work_item` (triggered by the
+    keyword `yop`), never through the injected text.
 
-  Chaque étape rend une valeur ou `:ok`/`{:error, reason}` taggé que le `with` de l'état
-  `:projecting` propage vers `transition_failed`. Aucun state, aucun Port, aucun timer. Dépend de
-  `Pod.TaskProbe` (gate d'enqueue), `Fleet.TaskQueue` (enqueue) et `Fleet.CapProfile` (source
-  unique du `name`). Aucune dépendance vers `Fleet.Spawner.Pod` (pas de cycle).
+  Each step returns a value or a tagged `:ok`/`{:error, reason}` that the `with` of the
+  `:projecting` state propagates to `transition_failed`. No state, no Port, no timer. Depends on
+  `Pod.TaskProbe` (enqueue gate), `Fleet.TaskQueue` (enqueue) and `Fleet.CapProfile` (single
+  source of the `name`). No dependency toward `Fleet.Spawner.Pod` (no cycle).
 
-  ## Contrat (appelé par `Pod`, état `:projecting`)
+  ## Contract (called by `Pod`, `:projecting` state)
 
-  - `issue_id_to_filename/1` + `default_brief/1` — écriture du `issues/<id>.md`.
-  - `maybe_enqueue_brief/1` — enqueue TaskQueue idempotent, APRÈS le scaffold lisible.
+  - `issue_id_to_filename/1` + `default_brief/1` — writing the `issues/<id>.md`.
+  - `maybe_enqueue_brief/1` — idempotent TaskQueue enqueue, AFTER the readable scaffold.
   """
 
   alias Fleet.Spawner.Pod.TaskProbe
 
   @doc """
-  Convertit un `issue_id` (peut contenir `/`, `#`, etc. — ex. `fleet/lcars#600` depuis Gitea) en
-  filename safe : remplace `/` par `_` (un `/` créerait des sous-dirs) et garde `#` (lisible humain).
+  Converts an `issue_id` (may contain `/`, `#`, etc. — e.g. `fleet/lcars#600` from Gitea) into a
+  safe filename: replaces `/` with `_` (a `/` would create sub-dirs) and keeps `#` (human-readable).
   """
   @spec issue_id_to_filename(String.t()) :: String.t()
   def issue_id_to_filename(issue_id) when is_binary(issue_id) do
@@ -34,15 +35,15 @@ defmodule Fleet.Spawner.Pod.Brief do
   end
 
   @doc """
-  Corps du `issues/<id>.md` : cadre conversationnel neutre « pod LCARS (rôle X) » + la demande
-  (`opts[:brief]`, ou un placeholder si absent).
+  Body of the `issues/<id>.md`: neutral conversational framing "pod LCARS (role X)" + the request
+  (`opts[:brief]`, or a placeholder if absent).
 
-  Ton NATUREL (pas multi-section formalisée « ## Tâche / ## Livrable ») : claude REPL en mode
-  interactif peut interpréter un format trop structuré comme tentative de prompt injection et
-  refuser. Le contexte fleet (convention `submit_result`) est posé en préambule conversationnel,
-  pas comme directive impérative. Le RÔLE est interpolé RÉSOLU (source unique
-  `Fleet.CapProfile.name/1`) — pas de « worker engineer » hardcodé qui primerait mal la persona
-  d'un juge.
+  NATURAL tone (not a formalized multi-section "## Task / ## Deliverable"): claude REPL in
+  interactive mode may interpret an overly structured format as a prompt-injection attempt and
+  refuse. The fleet context (`submit_result` convention) is laid down as a conversational preamble,
+  not as an imperative directive. The ROLE is interpolated RESOLVED (single source
+  `Fleet.CapProfile.name/1`) — no hardcoded "worker engineer" that would mis-prime a judge's
+  persona.
   """
   @spec default_brief(map()) :: String.t()
   def default_brief(state) do
@@ -71,15 +72,15 @@ defmodule Fleet.Spawner.Pod.Brief do
   end
 
   @doc """
-  Enqueue le brief dans la TaskQueue (le canal CANONIQUE `get_work_item`), idempotent :
+  Enqueues the brief into the TaskQueue (the CANONICAL channel `get_work_item`), idempotent:
 
-  - pas de brief (pod permanent/interactif booté à froid) → rien à puller → bootstrap (skip) ;
-  - brief DÉJÀ en file (`TaskProbe.no_pending_brief?` faux : dispatch step, le StepDispatcher a
-    enqueué AVANT le spawn) → pas de double-enqueue (skip) ;
-  - sinon (`admin.spawn` / `lcars spawn --brief` : aucun dispatcher) → on enqueue ici, sinon
-    `get_work_item` rend `{done:true}` et le pod reste idle (cf. StepDispatcher.enqueue_brief).
+  - no brief (permanent/interactive pod cold-booted) → nothing to pull → bootstrap (skip);
+  - brief ALREADY in the queue (`TaskProbe.no_pending_brief?` false: dispatch step, the
+    StepDispatcher enqueued BEFORE the spawn) → no double-enqueue (skip);
+  - otherwise (`admin.spawn` / `lcars spawn --brief`: no dispatcher) → we enqueue here, else
+    `get_work_item` returns `{done:true}` and the pod stays idle (cf. StepDispatcher.enqueue_brief).
 
-  Mirror des `attrs` de StepDispatcher (`issue_id`/`role`/`brief`/`metadata`).
+  Mirror of StepDispatcher's `attrs` (`issue_id`/`role`/`brief`/`metadata`).
   """
   @spec maybe_enqueue_brief(map()) :: :ok | {:error, {:brief_enqueue_failed, term()}}
   def maybe_enqueue_brief(state) do

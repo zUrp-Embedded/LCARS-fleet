@@ -1,37 +1,38 @@
 defmodule Fleet.Spawner.Pod.StateFs do
   @moduledoc """
-  PERSISTANCE FS du substrat recovery d'un pod — île d'écritures extraite de `Fleet.Spawner.Pod`.
+  FS PERSISTENCE of a pod's recovery substrate — island of writes extracted from `Fleet.Spawner.Pod`.
 
-  Deux gestes complémentaires : l'ÉCRITURE du `state.json` de recovery (l'état durable du pod sur disque,
-  relu au prochain `init/1` par `recover_or_init` côté `Pod`) et l'EFFACEMENT des tombstones terminales :
+  Two complementary gestures: the WRITE of the recovery `state.json` (the pod's durable on-disk state,
+  re-read at the next `init/1` by `recover_or_init` on the `Pod` side) and the ERASURE of terminal
+  tombstones:
 
-  - `write_state_fs/1` — sérialise le snapshot `{v, session_id, cap_profile_name, started_at, phase,
-    conditions, issue_id}` du `state` dans `state.state_fs_path` (écriture ATOMIQUE `.tmp`+`rename`,
-    `mkdir_p` de la racine). Un échec d'écriture = perte du point de recovery durable → LOUD (error-level →
-    monitoring) mais NON-fatal (`:ok` rendu, on ne crashe pas le pod ici). Appelé aux 4 sites de
-    transition du `Pod` (launch → `:monitoring`, kill → `:killed`, release → `:succeeded`,
+  - `write_state_fs/1` — serializes the `{v, session_id, cap_profile_name, started_at, phase,
+    conditions, issue_id}` snapshot of the `state` into `state.state_fs_path` (ATOMIC write `.tmp`+`rename`,
+    `mkdir_p` of the root). A write failure = loss of the durable recovery point → LOUD (error-level →
+    monitoring) but NON-fatal (`:ok` returned, we do not crash the pod here). Called at the 4 transition
+    sites of the `Pod` (launch → `:monitoring`, kill → `:killed`, release → `:succeeded`,
     `transition_failed` → `:failed`).
-  - `clear_terminal_snapshot/3` — efface la tombstone d'un `pod_id` AVANT un (re)spawn délibéré (no-op si
-    pas de snapshot, snapshot illisible, ou phase EN VOL — on ne touche QUE les tombstones terminales).
-    Appelé DIRECTEMENT par `Fleet.Spawner.spawn_pod/3` via `Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`.
-  - `rm_terminal_artifacts/2` — efface les DEUX dossiers de l'empreinte disque d'un pod terminé (state-dir
-    + pod_dir), geste PARTAGÉ appelé par `clear_terminal_snapshot/3` (local, même module) ET par le
-    `PodWarden` (GC périodique des tombstones orphelines) via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`.
+  - `clear_terminal_snapshot/3` — erases the tombstone of a `pod_id` BEFORE a deliberate (re)spawn (no-op
+    if no snapshot, unreadable snapshot, or IN-FLIGHT phase — we only touch terminal tombstones).
+    Called DIRECTLY by `Fleet.Spawner.spawn_pod/3` via `Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`.
+  - `rm_terminal_artifacts/2` — erases the TWO directories of a finished pod's disk footprint (state-dir
+    + pod_dir), SHARED gesture called by `clear_terminal_snapshot/3` (local, same module) AND by the
+    `PodWarden` (periodic GC of orphan tombstones) via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`.
 
-  Île d'I-O (File + Logger), pas de calcul pur : ne porte aucun state, aucun Port, aucun timer. Le `Pod`
-  lui passe le `state` (write) ou `pod_id`/`cap_profile`/`opts` (clear/rm) en arguments ; le module ne
-  rappelle aucun private de `Pod` (pas de cycle). Dépend de `Fleet.Spawner.Pod.Paths` (résolution des
-  chemins state.json/pod_dir), `Fleet.Spawner.Pod.Recovery` (`phase_from_string`) et `Fleet.CapProfile`
-  (source unique du `name` du snapshot) — déjà des deps de l'app.
+  I/O island (File + Logger), no pure computation: holds no state, no Port, no timer. The `Pod` passes it
+  the `state` (write) or `pod_id`/`cap_profile`/`opts` (clear/rm) as arguments; the module calls back no
+  private of `Pod` (no cycle). Depends on `Fleet.Spawner.Pod.Paths` (resolution of the
+  state.json/pod_dir paths), `Fleet.Spawner.Pod.Recovery` (`phase_from_string`) and `Fleet.CapProfile`
+  (single source of the snapshot's `name`) — already deps of the app.
 
-  ## Contrat (appelants)
+  ## Contract (callers)
 
-  - `write_state_fs/1` — appelé aux 4 sites internes du `Pod`.
-  - `clear_terminal_snapshot/3` — appelé DIRECTEMENT via `Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`
-    (valeur par défaut `opts \\ []`) par `Fleet.Spawner.spawn_pod/3` ET le test `pod_test.exs` (plus de
-    wrapper délégant côté `Pod`).
-  - `rm_terminal_artifacts/2` — appelé DIRECTEMENT via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`
-    par le `PodWarden` (plus de defdelegate côté `Pod`).
+  - `write_state_fs/1` — called at the 4 internal sites of the `Pod`.
+  - `clear_terminal_snapshot/3` — called DIRECTLY via `Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`
+    (default value `opts \\ []`) by `Fleet.Spawner.spawn_pod/3` AND the `pod_test.exs` test (no more
+    delegating wrapper on the `Pod` side).
+  - `rm_terminal_artifacts/2` — called DIRECTLY via `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2`
+    by the `PodWarden` (no more defdelegate on the `Pod` side).
   """
 
   require Logger
@@ -40,23 +41,23 @@ defmodule Fleet.Spawner.Pod.StateFs do
   alias Fleet.Spawner.Pod.Recovery
 
   @doc """
-  Efface la TOMBSTONE d'un `pod_id` AVANT un (re)spawn délibéré (appelé par
+  Erases the TOMBSTONE of a `pod_id` BEFORE a deliberate (re)spawn (called by
   `Fleet.Spawner.spawn_pod/3`).
 
-  Sous l'id pod DÉTERMINISTE, un re-dispatch retombe sur le MÊME `pod_id`
-  (`issue-N-role`). Si un `state.json` TERMINAL (`:succeeded`/`:released`/`:killed`)
-  subsiste d'un cycle précédent — même d'une AUTRE issue #N sur un autre repo, l'id
-  ne porte que le numéro —, `recover_or_init` le lit → `recovery_action` rend
-  `:release` → le pod s'arrête AUSSITÔT (l'état `:releasing` sur backend nil, `{:stop,
-  :normal}` MUET) sans rien lancer. Le poller voit alors le verrou in-flight sans
-  complétion → réclame l'orphelin → re-dispatch → MÊME tombstone → boucle infinie
-  (le pod ne lance jamais de claude).
+  Under the DETERMINISTIC pod id, a re-dispatch lands back on the SAME `pod_id`
+  (`issue-N-role`). If a TERMINAL `state.json` (`:succeeded`/`:released`/`:killed`)
+  survives from a previous cycle — even from ANOTHER issue #N on another repo, the id
+  only carries the number —, `recover_or_init` reads it → `recovery_action` returns
+  `:release` → the pod stops AT ONCE (state `:releasing` on a nil backend, `{:stop,
+  :normal}` SILENT) without launching anything. The poller then sees the in-flight lock
+  with no completion → reclaims the orphan → re-dispatch → SAME tombstone → infinite loop
+  (the pod never launches claude).
 
-  Un (re)spawn est TOUJOURS délibéré (sous `:temporary` le superviseur ne ressuscite
-  jamais) → une tombstone terminale n'a rien à protéger ici : on l'efface + le pod_dir
-  → `init` repart FRESH (`:allocate`). **No-op** si pas de snapshot, snapshot illisible,
-  ou phase EN VOL (`:launching`/`:monitoring`/… → la recovery `:recreate` reste
-  intacte — on ne touche QUE les tombstones).
+  A (re)spawn is ALWAYS deliberate (under `:temporary` the supervisor never resurrects)
+  → a terminal tombstone has nothing to protect here: we erase it + the pod_dir
+  → `init` restarts FRESH (`:allocate`). **No-op** if no snapshot, unreadable snapshot,
+  or IN-FLIGHT phase (`:launching`/`:monitoring`/… → the `:recreate` recovery stays
+  intact — we only touch tombstones).
   """
   @spec clear_terminal_snapshot(String.t(), Fleet.CapProfile.t(), keyword()) :: :ok
   def clear_terminal_snapshot(pod_id, %Fleet.CapProfile{} = cap_profile, opts \\ [])
@@ -83,13 +84,13 @@ defmodule Fleet.Spawner.Pod.StateFs do
   end
 
   @doc """
-  Efface les DEUX dossiers qui composent l'empreinte disque d'un pod terminé : son **state-dir** (le
-  dossier du `state.json`) et son **pod_dir** (clone git + `.lcars`/`.claude`/`issues`) — deux arbres
-  distincts. Idempotent (`rm_rf` ne lève pas sur l'absent). Geste PARTAGÉ, un seul site qui sait quels
-  deux dossiers forment l'empreinte d'un pod : appelé par `clear_terminal_snapshot/3` (au re-spawn du
-  même pod_id) ET par le `PodWarden` (GC périodique des tombstones orphelines jamais re-briefées). Ne
-  lit ni ne vérifie la phase : l'appelant garantit déjà que le pod est terminal. Sûr car le seed
-  `--resume` vit ailleurs (seed-store `projects.work/<projet>/pods/`), pas dans le pod_dir.
+  Erases the TWO directories that make up a finished pod's disk footprint: its **state-dir** (the
+  `state.json` directory) and its **pod_dir** (git clone + `.lcars`/`.claude`/`issues`) — two distinct
+  trees. Idempotent (`rm_rf` does not raise on the absent). SHARED gesture, the single site that knows
+  which two directories form a pod's footprint: called by `clear_terminal_snapshot/3` (at the re-spawn of
+  the same pod_id) AND by the `PodWarden` (periodic GC of orphan tombstones never re-briefed). Neither
+  reads nor checks the phase: the caller already guarantees the pod is terminal. Safe because the
+  `--resume` seed lives elsewhere (seed-store `projects.work/<project>/pods/`), not in the pod_dir.
   """
   @spec rm_terminal_artifacts(String.t(), String.t()) :: :ok
   def rm_terminal_artifacts(state_dir, pod_dir)
@@ -100,17 +101,17 @@ defmodule Fleet.Spawner.Pod.StateFs do
   end
 
   @doc """
-  Sérialise le snapshot de recovery `{v, session_id, cap_profile_name, started_at, phase,
-  conditions, issue_id}` du `state` dans `state.state_fs_path` — écriture ATOMIQUE
-  (`.tmp` + `rename`, `mkdir_p` de la racine). Échec d'écriture = perte du point de recovery
-  durable → LOUD (error-level → monitoring) mais NON-fatal (`:ok` rendu — appelé depuis
-  `transition_failed` entre autres, un crash ici ferait régresser le cleanup). Appelé aux 4 sites
-  de transition du `Pod` (launch → `:monitoring`, kill → `:killed`, release → `:succeeded`,
+  Serializes the recovery snapshot `{v, session_id, cap_profile_name, started_at, phase,
+  conditions, issue_id}` of the `state` into `state.state_fs_path` — ATOMIC write
+  (`.tmp` + `rename`, `mkdir_p` of the root). Write failure = loss of the durable recovery
+  point → LOUD (error-level → monitoring) but NON-fatal (`:ok` returned — called from
+  `transition_failed` among others, a crash here would regress the cleanup). Called at the 4
+  transition sites of the `Pod` (launch → `:monitoring`, kill → `:killed`, release → `:succeeded`,
   `transition_failed` → `:failed`).
   """
   @spec write_state_fs(map()) :: :ok
   def write_state_fs(state) do
-    # Schéma complet du snapshot :
+    # Full schema of the snapshot:
     # {v, session_id, cap_profile_name, started_at, phase, conditions, issue_id}.
     payload = %{
       "v" => 1,
@@ -124,9 +125,9 @@ defmodule Fleet.Spawner.Pod.StateFs do
 
     tmp = state.state_fs_path <> ".tmp"
 
-    # write_state_fs est appelé depuis transition_failed et d'autres sites — un
-    # crash ici ferait régresser le cleanup. Non-bang (le {:stop, ...} prévu se
-    # passe quand même).
+    # write_state_fs is called from transition_failed and other sites — a
+    # crash here would regress the cleanup. Non-bang (the intended {:stop, ...}
+    # happens anyway).
     result =
       with :ok <- File.mkdir_p(Path.dirname(state.state_fs_path)),
            :ok <- File.write(tmp, Jason.encode!(payload, pretty: true)),
@@ -139,9 +140,9 @@ defmodule Fleet.Spawner.Pod.StateFs do
         :ok
 
       {:error, reason} ->
-        # Échec d'écriture state.json = perte du point de recovery durable. C'est une
-        # ERREUR (pas un warning) — `:ok` reste rendu (non-fatal : ne pas crasher ici)
-        # mais le breach est LOUD (error-level → monitoring).
+        # state.json write failure = loss of the durable recovery point. This is an
+        # ERROR (not a warning) — `:ok` is still returned (non-fatal: do not crash here)
+        # but the breach is LOUD (error-level → monitoring).
         Logger.error(
           "pod #{state.pod_id} write_state_fs ÉCHEC — point de recovery durable perdu " <>
             "(non-fatal) : #{inspect(reason)}"

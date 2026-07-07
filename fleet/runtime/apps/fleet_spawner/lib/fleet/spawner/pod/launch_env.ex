@@ -1,35 +1,35 @@
 defmodule Fleet.Spawner.Pod.LaunchEnv do
   @moduledoc """
-  CONSTRUCTION de l'environnement de lancement + résolution/validation des CREDENTIALS du pod —
-  extraite de `Fleet.Spawner.Pod`.
+  CONSTRUCTION of the launch environment + resolution/validation of the pod's CREDENTIALS —
+  extracted from `Fleet.Spawner.Pod`.
 
-  Un seul rôle : à partir du `state` (env de base, cap_profile, opts), du `role`, du `containment` et
-  du chemin du launcher vendor, produire l'env COMPLET passé au backend de lancement — auth `bind`
-  posée, identité git de l'humain résolue, porte credentials (scope/plan) franchie — ou un
-  `{:error, reason}` DÉJÀ taggé. `build/4` ne touche ni Port, ni timer, ni state machine : il rend une
-  valeur, le `Pod` (état `:launching`) la branche sur `do_launch_backend` ou `transition_failed`.
+  A single role: from the `state` (base env, cap_profile, opts), the `role`, the `containment` and
+  the vendor launcher path, produce the COMPLETE env passed to the launch backend — auth `bind`
+  set, the human's git identity resolved, credentials gate (scope/plan) passed — or an
+  `{:error, reason}` ALREADY tagged. `build/4` touches neither Port, nor timer, nor state machine: it returns a
+  value, the `Pod` (state `:launching`) wires it onto `do_launch_backend` or `transition_failed`.
 
-  ## MÉCANIQUE CREDENTIAL — sanctuaire déplacé tel quel
+  ## CREDENTIAL MECHANISM — sanctuary moved as-is
 
-  Les helpers creds (`claude_dir*`, `passwd_home`, `claude_bin_in_home`, `maybe_put_*`) et le bloc
-  encadré « ON N'Y TOUCHE PAS » qui les chapeaute ont été déplacés VERBATIM depuis `Pod` : per-humain
-  OUI, partagé-writable OUI, broker NON (cf. le bloc encadré ci-dessous). L'auth reste mono-valeur
-  `LCARS_AUTH_MODE=bind` — pas de switch, pas de variante.
+  The creds helpers (`claude_dir*`, `passwd_home`, `claude_bin_in_home`, `maybe_put_*`) and the boxed
+  "DO NOT TOUCH" block that caps them were moved VERBATIM from `Pod`: per-human
+  YES, shared-writable YES, broker NO (cf. the boxed block below). The auth stays single-valued
+  `LCARS_AUTH_MODE=bind` — no switch, no variant.
 
-  ## Contrat (appelé par `Pod`)
+  ## Contract (called by `Pod`)
 
-  - `build(state, role, containment, claude_launch_path)` — appelée par l'état `:launching` ; rend
-    `{:ok, env}` (auth `bind` posée, identité git de l'humain, porte scope/plan franchie) ou
-    `{:error, reason}` DÉJÀ taggé `:launch_env_unresolved` (raise de résolution humain/passwd/vendor-bin),
-    `:credentials_invalid` (porte scope/plan) ou `:auth_token_required` (auth/identité git). Ordre
-    auth → git → gate préservé. L'état `:launching` la branche sur `do_launch_backend` / `transition_failed`.
-  - `claude_dir/0` — claudeDir de l'humain runtime (override config `:claude_dir` sinon
-    `~/.claude`) ; **publique** car aussi appelée par l'état `:injecting` (`Pod`) pour `CLAUDE_DIR` à l'injection.
+  - `build(state, role, containment, claude_launch_path)` — called by the `:launching` state; returns
+    `{:ok, env}` (auth `bind` set, the human's git identity, scope/plan gate passed) or
+    `{:error, reason}` ALREADY tagged `:launch_env_unresolved` (raise from human/passwd/vendor-bin resolution),
+    `:credentials_invalid` (scope/plan gate) or `:auth_token_required` (auth/git identity). Order
+    auth → git → gate preserved. The `:launching` state wires it onto `do_launch_backend` / `transition_failed`.
+  - `claude_dir/0` — claudeDir of the runtime human (config override `:claude_dir` else
+    `~/.claude`); **public** because also called by the `:injecting` state (`Pod`) for `CLAUDE_DIR` at injection.
 
-  Dépend de `Pod.LaunchSpec` (builders d'env), `Pod.McpProvision` (`mcp_channel_env`), `Pod.Paths`
-  (`runtime_home`), `Fleet.Credentials.*` (Human/ForgeIdentity/Gate, pleine qualif) et
-  `Fleet.Spawner.PodTmux` (`sock_base`, pleine qualif). Aucune dépendance vers `Fleet.Spawner.Pod`
-  (pas de cycle).
+  Depends on `Pod.LaunchSpec` (env builders), `Pod.McpProvision` (`mcp_channel_env`), `Pod.Paths`
+  (`runtime_home`), `Fleet.Credentials.*` (Human/ForgeIdentity/Gate, full qualif) and
+  `Fleet.Spawner.PodTmux` (`sock_base`, full qualif). No dependency on `Fleet.Spawner.Pod`
+  (no cycle).
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -37,29 +37,29 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   alias Fleet.Spawner.Pod.Paths
 
   @doc """
-  Construit l'env COMPLET de lancement du pod + résout/valide les credentials.
+  Builds the COMPLETE pod launch env + resolves/validates the credentials.
 
-  Rend `{:ok, env}` (auth `bind` posée, identité git de l'humain, porte scope/plan franchie) ou
-  `{:error, reason}` taggé (`:launch_env_unresolved` | `:credentials_invalid` | `:auth_token_required`),
-  branché par l'état `:launching` sur `do_launch_backend` / `transition_failed`. `role`/`containment`/
-  `claude_launch_path` sont résolus côté `Pod` (état `:launching`) et passés ici : `role` ==
-  `cap_profile_name(state.cap_profile)` (même valeur, calculée pareil) → on évite la dépendance au
-  private de `Pod`.
+  Returns `{:ok, env}` (auth `bind` set, the human's git identity, scope/plan gate passed) or
+  `{:error, reason}` tagged (`:launch_env_unresolved` | `:credentials_invalid` | `:auth_token_required`),
+  wired by the `:launching` state onto `do_launch_backend` / `transition_failed`. `role`/`containment`/
+  `claude_launch_path` are resolved on the `Pod` side (state `:launching`) and passed here: `role` ==
+  `cap_profile_name(state.cap_profile)` (same value, computed the same way) → we avoid the dependency on
+  `Pod`'s private.
   """
   @spec build(map(), String.t(), String.t(), String.t()) ::
           {:ok, %{String.t() => String.t()}} | {:error, term()}
   def build(state, role, containment, claude_launch_path) do
-    # La résolution humain + le pipeline env peuvent RAISE (runtime_user /
-    # claude_dir_from_passwd / maybe_put_vendor_bin = fail-loud sur host sans claude
-    # per-user ou home irrésoluble). Un raise non rattrapé ICI crasherait le process pod (gen_statem) SANS
-    # transition_failed → task orpheline :pending + state.json à la phase périmée. On
-    # rabat tout raise de construction-env sur transition_failed (même cleanup que les
-    # autres échecs launch : clear_pod_task + phase=failed).
+    # Human resolution + the env pipeline can RAISE (runtime_user /
+    # claude_dir_from_passwd / maybe_put_vendor_bin = fail-loud on a host without a per-user claude
+    # or an unresolvable home). An uncaught raise HERE would crash the pod process (gen_statem) WITHOUT
+    # transition_failed → orphaned task :pending + state.json at the stale phase. We
+    # fold any env-construction raise onto transition_failed (same cleanup as the
+    # other launch failures: clear_pod_task + phase=failed).
     launch_env =
       try do
         human = Keyword.get(state.opts, :human) || runtime_user()
-        # Creds résolus UNE fois (fail-loud si passwd humain introuvable) : sert au HOME host
-        # (`launch_home`, parent du claude_dir) ET à CLAUDE_DIR. Valeur déterministe (config + passwd).
+        # Creds resolved ONCE (fail-loud if the human's passwd is not found): serves the host HOME
+        # (`launch_home`, parent of the claude_dir) AND CLAUDE_DIR. Deterministic value (config + passwd).
         claude_dir = claude_dir_for(human)
 
         env =
@@ -71,52 +71,52 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
               role
             )
           )
-          # HOME — dépend du containment.
-          #   bwrap (défaut) : HOME=pod_dir (cohérent ; bwrap fait `--setenv HOME` de toute façon,
-          #     cette valeur est ignorée sous le sandbox).
-          #   none (host)    : HOME = home RÉEL de l'humain → claude lit son `~/.claude` natif. C'est l'auth
-          #     `:bind` réalisée NATIVEMENT sur l'hôte (refresh OAuth, full scope, pas de falaise 8h — l'arch
-          #     est un pod forever). host_launch.sh ne re-setenv PAS (pas de namespace) : ce HOME EST l'env réel.
+          # HOME — depends on containment.
+          #   bwrap (default): HOME=pod_dir (coherent; bwrap does `--setenv HOME` anyway,
+          #     this value is ignored under the sandbox).
+          #   none (host)    : HOME = the human's REAL home → claude reads its native `~/.claude`. This is
+          #     `:bind` auth realized NATIVELY on the host (OAuth refresh, full scope, no 8h cliff — the arch
+          #     is a pod forever). host_launch.sh does NOT re-setenv (no namespace): this HOME IS the real env.
           |> Map.put("HOME", LaunchSpec.launch_home(containment, state.pod_dir, claude_dir))
-          # Chaîne de session : bwrap_launch les `--setenv` dans le pod,
-          # claude_launch les lit `:?` strict (no-boot sinon).
+          # Session chain: bwrap_launch `--setenv`s them into the pod,
+          # claude_launch reads them `:?` strict (no-boot otherwise).
           |> Map.put("LCARS_POD_SESSION_ID", state.session_id)
           |> Map.put("LCARS_POD_RESUME", if(state.resume, do: "1", else: "0"))
-          # Mode permission : défaut `default` → claude_launch passe `--permission-mode default`
-          # (allow/deny lists ENFORCED) au lieu de `--dangerously-skip-permissions` (héritage « agents dans la
-          # nature » qui bypasse TOUT). Monde shapé (bwrap RO/RW + cap-profile) → le bypass est inutile, il ne
-          # ferait que neutraliser nos listes. Override par cap-profile `spec.invocation.permission_mode`
-          # (ex. "bypassPermissions" pour ré-ouvrir le yolo explicitement). NB : l'enforcement de l'écriture =
-          # le MOUNT (RO/RW), pas la tool-list → les juges gardent Write/Edit (rapports), bornés par le mount.
+          # Permission mode: default `default` → claude_launch passes `--permission-mode default`
+          # (allow/deny lists ENFORCED) instead of `--dangerously-skip-permissions` (legacy "agents in the
+          # wild" that bypasses EVERYTHING). Shaped world (bwrap RO/RW + cap-profile) → the bypass is useless, it
+          # would only neutralize our lists. Override by cap-profile `spec.invocation.permission_mode`
+          # (e.g. "bypassPermissions" to explicitly re-open yolo). NB: write enforcement =
+          # the MOUNT (RO/RW), not the tool-list → the judges keep Write/Edit (reports), bounded by the mount.
           |> Map.put("LCARS_PERMISSION_MODE", LaunchSpec.permission_mode(state.cap_profile))
-          # Nom RC Desktop : `<projet>_<role>` fourni par le dispatch (`opts[:rc_name]`) ; défaut = role
-          # seul (pods permanents / sans projet). claude_launch le passe en
-          # `--remote-control "<nom>"` EXACT (zéro suffixe auto → pas de « noms random qui s'empilent »).
-          # Sessions RC per-user (l'humain ne voit QUE les siennes). Visibilité Desktop gatée côté
-          # claude_launch.sh (lit `invocation.remote_control` du cap-profile). NB : la VALEUR est le nom
-          # EXACT, pas un préfixe — le nom d'env legacy (`_NAME_PREFIX`) est conservé (moins de churn).
+          # RC Desktop name: `<project>_<role>` supplied by the dispatch (`opts[:rc_name]`); default = role
+          # alone (permanent / project-less pods). claude_launch passes it as
+          # `--remote-control "<name>"` EXACT (zero auto suffix → no "random names piling up").
+          # Per-user RC sessions (the human sees ONLY their own). Desktop visibility gated on the
+          # claude_launch.sh side (reads `invocation.remote_control` of the cap-profile). NB: the VALUE is the
+          # EXACT name, not a prefix — the legacy env name (`_NAME_PREFIX`) is kept (less churn).
           |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", Keyword.get(state.opts, :rc_name, role))
-          # Base sock tmux : bwrap_launch crée la socket sous <base>/<pod_id>/, PodTmux (host) y tape.
-          # MÊME valeur des deux côtés ⇒ le sock calculé coïncide. La valeur = PodTmux.sock_base (défaut
-          # home-relatif `~/.lcars/run/tmux-sock` pour une fleet lancée par un humain ; jamais /run/lcars).
+          # Tmux sock base: bwrap_launch creates the socket under <base>/<pod_id>/, PodTmux (host) hits it.
+          # SAME value on both sides ⇒ the computed sock coincides. The value = PodTmux.sock_base (default
+          # home-relative `~/.lcars/run/tmux-sock` for a fleet launched by a human; never /run/lcars).
           |> Map.put("LCARS_TMUX_SOCK_BASE", Fleet.Spawner.PodTmux.sock_base())
-          # Le pod est celui de l'HUMAIN : creds ET binaire vendor suivent /home/<human> (même règle que
-          # pod_dir). Le binaire est résolu robustement ici (depuis ~/.local/bin, pas le pari `command -v`).
-          # Le pod tourne SOUS l'UID de l'humain PAR CONSTRUCTION : le runtime tourne *as* l'humain
-          # (chaque humain = SA fleet sous son user), le pod = Port BEAM hérite cet UID →
-          # ownership/perms/isolation OS gratis, PAS de systemd-run --uid. (Seul starfleet a un user
-          # dédié, hors-fleet.)
+          # The pod is the HUMAN's: creds AND vendor binary follow /home/<human> (same rule as
+          # pod_dir). The binary is resolved robustly here (from ~/.local/bin, not the `command -v` gamble).
+          # The pod runs UNDER the human's UID BY CONSTRUCTION: the runtime runs *as* the human
+          # (each human = THEIR fleet under their user), the pod = BEAM Port inherits this UID →
+          # ownership/perms/OS isolation for free, NO systemd-run --uid. (Only starfleet has a
+          # dedicated user, off-fleet.)
           |> Map.put("CLAUDE_DIR", claude_dir)
           |> maybe_put_vendor_bin(human)
           |> LaunchSpec.maybe_put_pod_cwd(state.opts, state.cap_profile, state.pod_dir)
-          # Relocalise le home intra-pod (bwrap only) → bwrap masque le pod_dir réel.
+          # Relocates the intra-pod home (bwrap only) → bwrap masks the real pod_dir.
           |> LaunchSpec.maybe_put_sandbox_home(state.cap_profile, state.pod_dir)
-          # LCARS_POD_DIR (racine pod vue par l'agent, où vivent watch.sh/turn.flag) n'est PAS posée ici —
-          # ce serait du dead code : bwrap_launch `--clearenv` la strippe, et host_launch l'`export`e
-          # lui-même (= $POD_DIR). Le SP/watch.sh lisent `${LCARS_POD_DIR:-$HOME}` :
-          # host → la var ; bwrap → fallback `$HOME` (= /home/.pod = racine pod).
-          # Mounts CATALOGUE (cap-profile-driven) → bwrap_launch les bind. Vide / host_launch = inerte.
-          # `system_mounts` préfixe le dir des launchers (install) → claude_launch.sh visible dans le sandbox.
+          # LCARS_POD_DIR (pod root seen by the agent, where watch.sh/turn.flag live) is NOT set here —
+          # it would be dead code: bwrap_launch `--clearenv` strips it, and host_launch `export`s it
+          # itself (= $POD_DIR). The SP/watch.sh read `${LCARS_POD_DIR:-$HOME}`:
+          # host → the var; bwrap → fallback `$HOME` (= /home/.pod = pod root).
+          # CATALOGUE mounts (cap-profile-driven) → bwrap_launch binds them. Empty / host_launch = inert.
+          # `system_mounts` prefixes the launchers' dir (install) → claude_launch.sh visible in the sandbox.
           |> Map.put(
             "LCARS_POD_MOUNTS",
             LaunchSpec.pod_mounts_env(state.cap_profile, claude_launch_path)
@@ -145,56 +145,56 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # Source UNIQUE `Fleet.Credentials.Human` (pas de `id -un` shellé en double — sinon
-  # spawn-ownership et commit-identity peuvent diverger, ce qui casserait la gate d'identité forge).
-  # Fail-loud (raise), rattrapé par le try/rescue de `build/4` (converti en {:error, {:launch_env_unresolved, _}}).
+  # SINGLE source `Fleet.Credentials.Human` (no `id -un` shelled out twice — otherwise
+  # spawn-ownership and commit-identity could diverge, which would break the forge identity gate).
+  # Fail-loud (raise), caught by `build/4`'s try/rescue (converted to {:error, {:launch_env_unresolved, _}}).
   defp runtime_user, do: Fleet.Credentials.Human.current!()
 
   # ════════════════════════════════════════════════════════════════════════════════════════
-  # MÉCANIQUE CREDENTIAL — ON N'Y TOUCHE PAS (et surtout pas pour la « durcir »).
+  # CREDENTIAL MECHANISM — DO NOT TOUCH (and above all not to "harden" it).
   #
-  # Le pod s'authentifie en montant le `.credentials.json` OAuth de SON humain (le `~/.claude`
-  # de l'user runtime), bindé RW par le launcher. Ce fichier est PARTAGÉ et WRITABLE entre tous
-  # les pods du même humain, et c'est VOULU : c'est la SEULE mécanique multi-agent que le vendor
-  # supporte sous abonnement — N process Claude Code se coordonnent pour rafraîchir l'unique token
-  # via un verrou cross-process sur `~/.claude/` (refresh natif, conçu « fleet-wide » côté vendor).
+  # The pod authenticates by mounting the OAuth `.credentials.json` of ITS human (the `~/.claude`
+  # of the runtime user), bound RW by the launcher. This file is SHARED and WRITABLE across all
+  # the pods of the same human, and this is INTENDED: it is the ONLY multi-agent mechanism the vendor
+  # supports under subscription — N Claude Code processes coordinate to refresh the single token
+  # via a cross-process lock on `~/.claude/` (native refresh, designed "fleet-wide" on the vendor side).
   #
-  # Conséquence connue et ACCEPTÉE : un pod avec un shell peut lire le token de son PROPRE humain,
-  # et peut écraser le fichier partagé. Ce n'est PAS un trou à fixer :
-  #   - écraser/corrompre le creds = se suicider (sans creds, pas d'agent) → rien à défendre ;
-  #   - le lire = le pod tourne DÉJÀ AS l'humain (il hérite de son UID) → c'est SON propre token,
-  #     dans la frontière que l'OS lui accorde de toute façon.
-  # Le seul vrai vecteur — lire le token d'un AUTRE humain — est rendu impossible ICI : le claudeDir
-  # est dérivé PER-HUMAIN (`claude_dir_for/1` ; jamais un dir global partagé entre humains).
+  # Known and ACCEPTED consequence: a pod with a shell can read the token of its OWN human,
+  # and can overwrite the shared file. This is NOT a hole to fix:
+  #   - overwriting/corrupting the creds = suicide (no creds, no agent) → nothing to defend;
+  #   - reading it = the pod ALREADY runs AS the human (it inherits their UID) → it is ITS own token,
+  #     within the boundary the OS grants it anyway.
+  # The only real vector — reading ANOTHER human's token — is made impossible HERE: the claudeDir
+  # is derived PER-HUMAN (`claude_dir_for/1`; never a global dir shared across humans).
   #
-  # Tout « fix » qui retirerait le bind RW, isolerait un credential par-pod, ou passerait par un
-  # broker CASSE forcément un des trois piliers durs :
-  #   - un token inference-only (`claude setup-token`) ne peut PAS tenir une session Remote Control
-  #     (= notre mode interactif) ;
-  #   - injecter l'access-token live = falaise ~8h sans refresh (déjà tenté, déjà reverté) ;
-  #   - un apiKeyHelper / une clé API = facturation MÉTRÉE = sortie de l'abonnement (interdit).
-  # Donc : per-humain OUI, partagé-writable OUI, broker NON. NE PAS « améliorer » ceci.
+  # Any "fix" that would remove the RW bind, isolate a credential per-pod, or go through a
+  # broker necessarily BREAKS one of the three hard pillars:
+  #   - an inference-only token (`claude setup-token`) CANNOT sustain a Remote Control session
+  #     (= our interactive mode);
+  #   - injecting the live access-token = ~8h cliff with no refresh (already tried, already reverted);
+  #   - an apiKeyHelper / an API key = METERED billing = leaving the subscription (forbidden).
+  # So: per-human YES, shared-writable YES, broker NO. DO NOT "improve" this.
   # ════════════════════════════════════════════════════════════════════════════════════════
   @doc """
-  claudeDir de l'humain runtime : override config `:fleet_spawner, :claude_dir` sinon `~/.claude`
-  (dérivé de `Paths.runtime_home/0`). Publique car aussi appelée par l'état `:injecting` (`Pod`)
-  pour poser `CLAUDE_DIR` à l'injection. La variante per-humain arbitraire (`claude_dir_for/1`,
-  passwd-résolue) reste privée au pipeline `build/4` — cf. le bloc sanctuaire ci-dessus.
+  claudeDir of the runtime human: config override `:fleet_spawner, :claude_dir` else `~/.claude`
+  (derived from `Paths.runtime_home/0`). Public because also called by the `:injecting` state (`Pod`)
+  to set `CLAUDE_DIR` at injection. The arbitrary per-human variant (`claude_dir_for/1`,
+  passwd-resolved) stays private to the `build/4` pipeline — cf. the sanctuary block above.
   """
   @spec claude_dir() :: String.t()
   def claude_dir do
     Application.get_env(:fleet_spawner, :claude_dir) || Path.join(Paths.runtime_home(), ".claude")
   end
 
-  # Creds du pod = `~/.claude` de l'HUMAIN (= l'user runtime). Override config `:claude_dir` respecté
-  # (tests / déploiement non-standard) ; sinon dérivé de son home passwd. Per-humain par construction
-  # (cf. le gros bloc ci-dessus) — JAMAIS un claudeDir partagé entre humains.
+  # Pod creds = the HUMAN's `~/.claude` (= the runtime user). Config override `:claude_dir` honored
+  # (tests / non-standard deployment); else derived from their passwd home. Per-human by construction
+  # (cf. the big block above) — NEVER a claudeDir shared across humans.
   defp claude_dir_for(human) do
     Application.get_env(:fleet_spawner, :claude_dir) || claude_dir_from_passwd(human)
   end
 
-  # Creds du pod = `.claude` dans le home de l'humain, résolu via `getent passwd`. Échec passwd =
-  # erreur réelle (l'user de l'humain DOIT exister) → fail-loud, pas de `/home/<x>` deviné.
+  # Pod creds = `.claude` in the human's home, resolved via `getent passwd`. Passwd failure =
+  # a real error (the human's user MUST exist) → fail-loud, no guessed `/home/<x>`.
   defp claude_dir_from_passwd(human) do
     case passwd_home(human) do
       {:ok, home} -> Path.join(home, ".claude")
@@ -202,18 +202,13 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # Binaire vendor = celui de l'HUMAIN (~/.local/bin/claude résolu), posé en LCARS_VENDOR_BIN.
-  # Honore le contrat bwrap_launch.sh « autorité = LCARS_VENDOR_BIN (spawner) » : sans ça, bwrap
-  # retombe sur `command -v claude` = PATH du daemon → binaire système périmé (version périmée,
-  # outil Monitor absent). readlink -f ⇒ bwrap_launch dérive VENDOR_SHARE = dirname(dirname(bin))
-  # juste. Absent ⇒ on ne pose rien (fallback bwrap conservé).
-  # Identité git du pod = l'HUMAIN du brief (author ET committer ; le pod commite EN TANT QUE
-  # l'humain qui le run), résolue via le catalogue (`Fleet.Credentials.ForgeIdentity`). Remplace
-  # un DÉFAUT COOPÉRATIF role-based de `bwrap_launch.sh` (GIT_AUTHOR=LCARS-$ROLE) : le rôle ne
-  # signe plus l'identité — il passe en trailer `Co-authored-by`. bwrap_launch.sh forward ces
+  # Pod git identity = the brief's HUMAN (author AND committer; the pod commits AS
+  # the human who runs it), resolved via the catalogue (`Fleet.Credentials.ForgeIdentity`). Replaces
+  # a role-based COOPERATIVE DEFAULT of `bwrap_launch.sh` (GIT_AUTHOR=LCARS-$ROLE): the role no
+  # longer signs the identity — it goes into a `Co-authored-by` trailer. bwrap_launch.sh forwards these
   # GIT_AUTHOR_*/GIT_COMMITTER_*. Catalogue absent → fail-loud {:forge_identity_unresolved,_}
-  # (pas de pod sans identité vérifiable au push — la garantie reste côté MONDE, gate
-  # `allowed_emails=[humain]`).
+  # (no pod without a verifiable identity at push — the guarantee stays on the WORLD side, gate
+  # `allowed_emails=[human]`).
   defp maybe_put_git_identity(env, human, role) do
     case Fleet.Credentials.ForgeIdentity.for_role(role, human: human) do
       {:ok, id} ->
@@ -229,18 +224,18 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # Auth = mode `bind` UNIQUEMENT. bwrap monte le `.credentials.json` de l'humain en RW → refresh
-  # OAuth natif (proactif 5min + réactif 401 + lockfile), full scope, PAS de falaise ~8h. Un mode
-  # token_arg fuirait le token en argv (`--setenv CLAUDE_CODE_OAUTH_TOKEN`) ET ne refresherait pas
-  # (expiresAt:null) → un eng long (>8h) perdrait l'auth en plein travail. Pas de toggle.
+  # Auth = `bind` mode ONLY. bwrap mounts the human's `.credentials.json` RW → native OAuth
+  # refresh (proactive 5min + reactive 401 + lockfile), full scope, NO ~8h cliff. A token_arg
+  # mode would leak the token in argv (`--setenv CLAUDE_CODE_OAUTH_TOKEN`) AND would not refresh
+  # (expiresAt:null) → a long eng (>8h) would lose auth mid-work. No toggle.
   defp maybe_put_auth_token(env, _human) do
     {:ok, Map.put(env, "LCARS_AUTH_MODE", "bind")}
   end
 
-  # Binaire vendor posé en LCARS_VENDOR_BIN (honore le contrat bwrap_launch.sh) = `~/.local/bin/claude`
-  # de l'HUMAIN (= l'user runtime), résolu via son home passwd. PAS de fallback `lcars` : le pod EST
-  # l'humain, c'est SON binaire. Introuvable → fail-loud (sinon bwrap retombe sur `command -v claude`
-  # = binaire système périmé, outil Monitor absent).
+  # Vendor binary set in LCARS_VENDOR_BIN (honors the bwrap_launch.sh contract) = the HUMAN's
+  # `~/.local/bin/claude` (= the runtime user), resolved via their passwd home. NO `lcars` fallback: the
+  # pod IS the human, it is THEIR binary. Not found → fail-loud (otherwise bwrap falls back on
+  # `command -v claude` = stale system binary, Monitor tool absent).
   defp maybe_put_vendor_bin(env, human) do
     case claude_bin_in_home(human) do
       bin when is_binary(bin) ->
@@ -251,8 +246,8 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # Cherche `~/.local/bin/claude` dans le home passwd de `user`. Retourne le path réel
-  # (readlink -f) ou `nil`. Le home vient de `getent passwd` (NSS), pas d'un `/home/<x>` deviné.
+  # Looks for `~/.local/bin/claude` in `user`'s passwd home. Returns the real path
+  # (readlink -f) or `nil`. The home comes from `getent passwd` (NSS), not a guessed `/home/<x>`.
   defp claude_bin_in_home(user) when is_binary(user) do
     with {:ok, home} <- passwd_home(user),
          link = Path.join([home, ".local", "bin", "claude"]),
@@ -270,7 +265,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
 
   defp claude_bin_in_home(_), do: nil
 
-  # Home de `user` via `getent passwd` (champ 6, 0-indexé 5). `{:ok, home}` | `:error`.
+  # `user`'s home via `getent passwd` (field 6, 0-indexed 5). `{:ok, home}` | `:error`.
   defp passwd_home(user) do
     case System.cmd("getent", ["passwd", user], stderr_to_stdout: true) do
       {line, 0} ->

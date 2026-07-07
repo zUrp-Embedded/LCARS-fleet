@@ -1,43 +1,43 @@
 defmodule Fleet.Spawner.Pod.TurnFlag do
   @moduledoc """
-  Écriture du `turn.flag` — le RAIL PORTEUR du réveil-par-flag, île d'I/O FS extraite de la façade
-  `Fleet.Spawner`.
+  Writes the `turn.flag` — the LOAD-BEARING RAIL of the flag-driven wake, an FS-I/O island extracted
+  from the `Fleet.Spawner` façade.
 
-  Le monitor in-pod (`watch.sh`, armé par l'agent via l'outil natif Monitor) surveille
-  `pod_dir/turn.flag` (bind-monté = `~/turn.flag` côté pod) et compare son CONTENU (`cur != last`) :
-  un contenu qui change → « ton tour » → l'agent se réveille SANS send-keys. Ce module ne porte QUE
-  l'écriture du flag ; l'orchestration du wake (trigger + armement du filet ack-driven) reste dans
-  la façade (`Fleet.Spawner.wake_pod/1`), le fallback send-keys dans la boucle de kick du `Pod`.
+  The in-pod monitor (`watch.sh`, armed by the agent via the native Monitor tool) watches
+  `pod_dir/turn.flag` (bind-mounted = `~/turn.flag` on the pod side) and compares its CONTENT
+  (`cur != last`): content that changes → "your turn" → the agent wakes WITHOUT send-keys. This
+  module carries ONLY the flag write; the wake orchestration (trigger + arming of the ack-driven
+  safety-net) stays in the façade (`Fleet.Spawner.wake_pod/1`), the send-keys fallback in the
+  `Pod`'s kick loop.
 
-  Best-effort par contrat : un flag muet (dir disparu, perm, disque) est loggé LOUD mais ne fait
-  jamais échouer le wake — le fallback send-keys + le result_deadline rattrapent. Aucun state,
-  aucun Port, aucun timer : une écriture FS. Aucune dépendance vers `Fleet.Spawner.Pod` (pas de
-  cycle).
+  Best-effort by contract: a mute flag (dir gone, perm, disk) is logged LOUD but never fails the
+  wake — the send-keys fallback + the result_deadline catch up. No state, no Port, no timer: one FS
+  write. No dependency on `Fleet.Spawner.Pod` (no cycle).
 
-  ## Contrat (appelé par `Fleet.Spawner`)
+  ## Contract (called by `Fleet.Spawner`)
 
-  - `touch/1` — touche le flag depuis un `pod_info` (clause `_info` sans pod_dir = no-op).
-  - `write/1` — écrit un token UNIQUE dans `pod_dir/turn.flag` ; testé en direct (le chemin
-    « proceed » de `wake_pod` n'est jamais atteint par StubBackend).
+  - `touch/1` — touches the flag from a `pod_info` (the `_info` clause without pod_dir = no-op).
+  - `write/1` — writes a UNIQUE token into `pod_dir/turn.flag`; tested directly (the "proceed" path
+    of `wake_pod` is never reached by StubBackend).
   """
 
   require Logger
 
   @doc """
-  Touche le flag du monitor in-pod depuis un `pod_info` (map). Avec un `pod_dir` binaire →
-  `write/1` ; sans (info incomplet) → `:ok` no-op — le wake reste best-effort.
+  Touches the in-pod monitor's flag from a `pod_info` (map). With a binary `pod_dir` → `write/1`;
+  without (incomplete info) → `:ok` no-op — the wake stays best-effort.
   """
   @spec touch(map()) :: :ok
   def touch(%{pod_dir: pod_dir}) when is_binary(pod_dir), do: write(pod_dir)
   def touch(_info), do: :ok
 
   @doc """
-  Écrit un token UNIQUE dans `pod_dir/turn.flag`. `watch.sh` compare le CONTENU (`cur != last`) :
-  un ms BARE peut se répéter (2 wakes même ms) → token identique → wake MANQUÉ ; le suffixe unique
-  (`System.unique_integer`) garantit que chaque écriture change le contenu → toujours détectée.
-  `File.write` RENVOIE `{:error, _}` (ne lève pas) sur dir disparu/perm/disque → on traite le
-  RETOUR. Rail PORTEUR : flag muet = log-LOUD, jamais un échec (best-effort — fallback send-keys +
-  result_deadline rattrapent).
+  Writes a UNIQUE token into `pod_dir/turn.flag`. `watch.sh` compares the CONTENT (`cur != last`):
+  a BARE ms can repeat (2 wakes in the same ms) → identical token → wake MISSED; the unique suffix
+  (`System.unique_integer`) guarantees each write changes the content → always detected. `File.write`
+  RETURNS `{:error, _}` (does not raise) on dir gone/perm/disk → we handle the RETURN. LOAD-BEARING
+  rail: a mute flag = log-LOUD, never a failure (best-effort — send-keys fallback + result_deadline
+  catch up).
   """
   @spec write(Path.t()) :: :ok
   def write(pod_dir) when is_binary(pod_dir) do

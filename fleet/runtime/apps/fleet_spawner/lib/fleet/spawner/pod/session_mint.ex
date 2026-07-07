@@ -1,35 +1,35 @@
 defmodule Fleet.Spawner.Pod.SessionMint do
   @moduledoc """
-  MINT du `session_id` d'un pod au spawn — décision extraite de `Fleet.Spawner.Pod`.
+  MINT of a pod's `session_id` at spawn — decision extracted from `Fleet.Spawner.Pod`.
 
-  Décide QUEL session_id un pod reçoit à sa création : déterministe hexspeak pour un rôle
-  catalogué (encodé par `Fleet.Spawner.SessionId.encode/4`, l'encodeur PUR), `UUID.uuid4()` pour un
-  rôle non catalogué, REFUS (raise) pour un rôle project-bound sans `repo_id`. La séparation des
-  autorités est volontaire : `SessionId` déclare « aucun refus de rôle : ces décisions vivent au
-  niveau spawn, pas ici » — la décision vit donc ICI (côté spawn), l'arithmétique de la string
-  reste là-bas. La SOURCE du QUOI (index de rôle, tier protégé, fleet-level) est le cap-profile.
+  Decides WHICH session_id a pod receives at its creation: deterministic hexspeak for a catalogued
+  role (encoded by `Fleet.Spawner.SessionId.encode/4`, the PURE encoder), `UUID.uuid4()` for a
+  non-catalogued role, REFUSAL (raise) for a project-bound role without `repo_id`. The separation of
+  authorities is deliberate: `SessionId` states "no role refusal: those decisions live at the spawn
+  level, not here" — so the decision lives HERE (spawn side), the string arithmetic stays over
+  there. The SOURCE of the WHAT (role index, protected tier, fleet-level) is the cap-profile.
 
-  Quasi-pur : aucune I/O, aucun state, aucun timer — seule la branche « rôle non catalogué » tire
-  de l'aléa (`UUID.uuid4()`). Aucune dépendance vers `Fleet.Spawner.Pod` (pas de cycle).
+  Quasi-pure: no I/O, no state, no timer — only the "non-catalogued role" branch draws randomness
+  (`UUID.uuid4()`). No dependency on `Fleet.Spawner.Pod` (no cycle).
 
-  ## Contrat (appelé par `Pod`)
+  ## Contract (called by `Pod`)
 
-  - `mint/2` — appelé par `initial_state` (via `recover_or_init`) quand `opts[:session_id]` (seed
-    explicite, ex. recall arch) n'est pas fourni — le seed PRIME toujours sur le mint.
+  - `mint/2` — called by `initial_state` (via `recover_or_init`) when `opts[:session_id]` (explicit
+    seed, e.g. arch recall) is not supplied — the seed ALWAYS PRIMES over the mint.
   """
 
   @doc """
-  Minte le session_id d'un pod depuis son cap-profile + les opts du spawn.
+  Mints a pod's session_id from its cap-profile + the spawn opts.
 
-    * rôle NON catalogué — `UUID.uuid4()` est légitime.
-    * fleet-level (arch, gatekeeper) — repo `0000`, pas de dimension projet.
-    * project-bound (eng, juges) — l'identité hexspeak EXIGE le repo (`opts[:repo_id]`).
-        - AVEC repo → id déterministe (`Fleet.Spawner.SessionId.encode/4`).
-        - SANS repo → REFUS (raise `ArgumentError`) : l'absence de repo signale une forge qui n'a
-          pas résolu l'id (forge down). On ne fabrique JAMAIS un UUID random pour masquer ça
-          (fausse identité, non reconstructible). Le raise est rattrapé par le try/rescue de
-          `Pod.init/1` → `{:error, {exception, stack}}` au `start_link` (fail-loud, aucun launch) ;
-          le filet de dernier recours (stop propre) vit en amont, au dispatch.
+    * NON-catalogued role — `UUID.uuid4()` is legitimate.
+    * fleet-level (arch, gatekeeper) — repo `0000`, no project dimension.
+    * project-bound (eng, judges) — the hexspeak identity REQUIRES the repo (`opts[:repo_id]`).
+        - WITH repo → deterministic id (`Fleet.Spawner.SessionId.encode/4`).
+        - WITHOUT repo → REFUSAL (raise `ArgumentError`): the absence of a repo signals a forge that
+          has NOT resolved the id (forge down). We NEVER fabricate a random UUID to mask this
+          (false identity, not reconstructible). The raise is caught by the try/rescue of
+          `Pod.init/1` → `{:error, {exception, stack}}` at `start_link` (fail-loud, no launch);
+          the last-resort safety net (clean stop) lives upstream, at dispatch.
   """
   @spec mint(Fleet.CapProfile.t(), keyword()) :: String.t()
   def mint(%Fleet.CapProfile{} = cap_profile, opts) when is_list(opts) do
