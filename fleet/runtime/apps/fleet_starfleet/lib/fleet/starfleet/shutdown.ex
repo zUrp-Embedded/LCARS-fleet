@@ -47,8 +47,9 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
   ## `in_flight_count/0` — scope (user decision)
 
-  **Every live pod counts** (ephemeral AND permanent) + unassigned queued work
-  items. There are NO MORE in-RAM workflow runs to count: the
+  **Every live NON-PERMANENT pod counts** (the real forge work) + unassigned queued
+  work items. Permanent pods (arch, gatekeeper…) are RESIDENTS, not work — EXCLUDED
+  (see below). There are NO MORE in-RAM workflow runs to count: the
   `Fleet.Workflow.Executor` engine is deleted (one live pod = one step_run in progress).
 
     * `Fleet.Spawner.list_pods/0` filtered to NON-permanent — active workers (also covers
@@ -60,11 +61,11 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   work items are excluded from it and are represented by their live pod
   (counted in `list_pods`). Neither double-counting nor under-counting.
 
-  ⚠ Assumed consequence: permanent pods (Type 1/3 "forever":
-  gatekeeper, archivist…) keep `in_flight_count > 0` permanently ⇒ on a
-  `begin/1` (full stop) the drain consumes the entire grace window then
-  proceeds (the umbrella stop terminates the pods anyway). This is the
-  chosen behavior: give every stop the full grace budget.
+  ⚠ Permanents EXCLUDED (DrDree fix, 2026-07-05): permanent pods (Type 1/3 "forever":
+  gatekeeper, archivist…) live continuously, so counting them kept `in_flight_count > 0`
+  forever ⇒ EVERY graceful stop consumed its full grace then concluded "timeout" instead
+  of "drained". They are now filtered out (`list_pods` |> reject `permanent?`), so the
+  drain can actually reach empty on the real forge work.
 
   **Fail-CLOSED when counting fails**: if a component (Spawner / task_queue
   broker) is PRESENT but unreachable — typically a restart RIGHT IN THE MIDDLE OF

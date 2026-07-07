@@ -2,7 +2,7 @@ defmodule Fleet.Starfleet.AuditLog do
   @moduledoc """
   Fail-safe non-bang `File.write/3` wrapper over the Cat 5 audit log
   (default `~/.lcars/log/fleet-starfleet.jsonl` — fleet under the human, 2026-06-11;
-  fallback `/var/log/fleet-starfleet.jsonl`).
+  the `/var/log/…` root:adm path was the pre-2026-06-11 default, now vestigial — see below).
 
   NDJSON append format: 1 JSON line per entry. Each entry is merged
   with an ISO8601 UTC `ts`. The file is bounded by a **threshold rotation**

@@ -10,9 +10,12 @@ defmodule Fleet.Workflow.Git do
     * action : `git add <paths> → git commit → [git push <remote> <branch>]`
     * output : `{:ok, %{commit_sha, pushed?}}` or `{:error, term()}`
 
-  Strict fail-closed: `--force` and `--no-verify` are **NEVER** composed by
-  the module. If a future case needs an override, it will be an explicit
-  decision with audit, not a default option.
+  Fail-closed on inputs: neither `--force` nor `--no-verify` is ever composed
+  from caller data or as a default option. `--no-verify` is never composed at all.
+  `--force` is composed by ONE system-owned policy only: a bounded retry when the
+  push is rejected for a non-fast-forward on the system-owned feature branch (the
+  system is the sole pusher — its own rebase is safe to overwrite). A protected-branch
+  or server-hook rejection is NEVER force-retried (fail-closed, no data-loss bypass).
 
   Distinct identities: `author_*` reflects the worker (role) identity;
   `committer_*` reflects the system identity. Native git

@@ -1,6 +1,7 @@
 defmodule Fleet.Workflow.Gatekeeper do
   @moduledoc """
-  Boot + registration of the **permanent gatekeeper** (the fleet's single judge).
+  Boot + registration of the **singleton gatekeeper** (the fleet's single judge —
+  one always-registered instance, NOT a system "permanent" pod: see the scope below).
 
   The gatekeeper is a **work-session** pod with scope `lifetime_scope: pipe`
   (cap-profile `gatekeeper.yaml`, `boot_at_start: false`): **bounded to the workflow run**,
