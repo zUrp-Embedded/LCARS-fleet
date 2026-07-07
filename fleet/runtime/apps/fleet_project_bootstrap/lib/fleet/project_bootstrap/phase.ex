@@ -11,6 +11,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
   Cap-profile access: direct STRING keys (`cap_profile.spec["..."]`) —
   `Fleet.CapProfile` guarantees the form at production.
 
+  Workspace-side invariant (the "positive SP": the agent sees only its work, never
+  the machinery): the workspace this builds must show NO trace of LCARS beyond the
+  vanilla repo + its plugins. ⚠ open loose-end: this is NOT hermetically tested on the
+  prod path (it depends on the bwrap sandbox view) — it wants a sandbox integration test.
+
   (The `prepare/3` orchestrator and the 4 non-Clone phases — Allocate / InitMimic /
   BindCredentials / PrepareMountBinds — have been REMOVED: dead path never wired in
   prod, the corresponding concerns are handled elsewhere — CLAUDE.md by `do_project`

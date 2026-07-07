@@ -3,8 +3,15 @@ defmodule Fleet.MCP.PodTools do
   Pod-facing MCP TOOL layer — the RPCs the pod (Claude MCP client) calls to
   talk to the fleet, without scraping or keyboard injection. THIS module is the
   **routing table**: the `deftool` schemas + the `handle_tool_call/3` dispatch
-  (argument guards, typed refusals, MCP content format `json`/`text`). The domain
-  logic lives in two sub-modules with disjoint consumers:
+  (argument guards, typed refusals, MCP content format `json`/`text`).
+
+  Schema SDK vs transport (swappable): the `deftool` schemas come from the `ExMCP`
+  SDK, but the pod-facing TRANSPORT is NOT ExMCP's — it is our own per-pod AF_UNIX
+  `:gen_tcp` socket (`Fleet.MCP.PodSocketAcceptor`; ExMCP offers no per-pod socket).
+  So the schema SDK is swappable (e.g. Hermes) without touching the transport or the
+  tool consumers.
+
+  The domain logic lives in two sub-modules with disjoint consumers:
 
     * `Fleet.MCP.PodTools.WorkItems` — work-item drive (every pod):
       - `get_work_item`  : IN  channel — the pod PULLs its brief from `Fleet.TaskQueue`.
