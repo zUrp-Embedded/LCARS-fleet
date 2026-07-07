@@ -114,10 +114,18 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   def read_raw_body(conn, opts) do
     case Plug.Conn.read_body(conn, opts) do
       {:ok, body, conn} ->
+        # The COMPLETE body: `read_body` accumulates internally up to `:length` (1 MB), so `{:ok}` always
+        # carries the whole payload. This is the ONLY `:raw_body` `verify_hmac` ever reads — the HMAC is
+        # computed over exactly these bytes.
         {:ok, body, Plug.Conn.assign(conn, :raw_body, body)}
 
       {:more, partial, conn} ->
-        {:more, partial, Plug.Conn.assign(conn, :raw_body, partial)}
+        # `{:more}` ⟺ body > `:length` ⟹ `Plug.Parsers` raises `RequestTooLargeError` BEFORE the dispatch,
+        # so `verify_hmac` NEVER runs on this path (the 1 MB cap IS the read boundary). We deliberately do
+        # NOT stash `partial` as `:raw_body`: a truncated body is never a valid HMAC input, and leaving it
+        # unset keeps the HMAC path fail-CLOSED (nil → "" → mismatch → 401) even if this branch were ever
+        # reached. This is why a large payload yields the 413 bound, not a truncated-HMAC 401.
+        {:more, partial, conn}
 
       {:error, _} = err ->
         err

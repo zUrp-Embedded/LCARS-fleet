@@ -97,6 +97,34 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       refute_receive %Fleet.Event{source: :event_router}, 200
     end
 
+    test "REPRO R0-EVT-007 : gros payload (~900KB, <1MB) HMAC-valide → 200 (raw_body complet)", %{
+      secret: secret
+    } do
+      # Falsification du finding « 401 sur gros payload légitime » : un body sous le cap 1 MB doit passer.
+      # Si le raw_body était tronqué (branche {:more}/partial), l'HMAC ne matcherait pas → 401.
+      big = String.duplicate("x", 900_000)
+      body = %{"action" => "opened", "issue" => %{"id" => 1}, "blob" => big}
+      conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 200,
+             "gros payload HMAC-valide refusé (#{conn.status}) — raw_body tronqué ?"
+    end
+
+    test "au-dessus du cap 1MB → borne explicite (RequestTooLargeError), PAS un 401 HMAC-tronqué",
+         %{
+           secret: secret
+         } do
+      # Le seul cas où read_body rend {:more} = body > :length (1MB). Plug.Parsers le REFUSE avant le
+      # dispatch (jamais verify_hmac) → borne 413, pas un 401 sur raw_body tronqué. C'est la preuve que la
+      # branche {:more}/partial n'est PAS un trou HMAC : elle est court-circuitée par le cap.
+      big = String.duplicate("y", 1_200_000)
+      body = %{"action" => "opened", "blob" => big}
+
+      assert_raise Plug.Parsers.RequestTooLargeError, fn ->
+        post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+      end
+    end
+
     test "HMAC manquante → 401", %{secret: _secret} do
       body = Jason.encode!(%{"action" => "opened"})
 
