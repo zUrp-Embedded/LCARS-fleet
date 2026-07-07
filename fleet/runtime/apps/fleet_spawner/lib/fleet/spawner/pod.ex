@@ -452,13 +452,13 @@ defmodule Fleet.Spawner.Pod do
         _ = Fleet.Spawner.PodTmux.send_keys(data.pod_id, "/clear")
 
         Logger.info(
-          "pod #{data.pod_id} workspace reprovisionne COLD (#{ws} branch=#{branch}) + /clear"
+          "pod #{data.pod_id} workspace reprovisioned COLD (#{ws} branch=#{branch}) + /clear"
         )
 
         {:keep_state_and_data, [{:reply, from, :ok}]}
 
       {:error, reason} = err ->
-        Logger.error("pod #{data.pod_id} reprovision workspace ECHOUE : #{inspect(reason)}")
+        Logger.error("pod #{data.pod_id} workspace reprovision FAILED: #{inspect(reason)}")
         {:keep_state_and_data, [{:reply, from, err}]}
     end
   end
@@ -540,7 +540,7 @@ defmodule Fleet.Spawner.Pod do
   def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
     if Publishing.publishing?(data) do
       Logger.warning(
-        "pod #{data.pod_id} :publishing -> :ready par DEADLINE (deliverable.published non recu a temps)"
+        "pod #{data.pod_id} :publishing -> :ready by DEADLINE (deliverable.published not received in time)"
       )
     end
 
@@ -572,7 +572,7 @@ defmodule Fleet.Spawner.Pod do
       # ACK = the agent reached out → we STOP the loop (cancel the :kick generic timeout).
       Kick.acked?(TaskProbe.brief_pulled?(data.pod_id), bootstrap?, polled) ->
         Logger.debug(
-          "pod #{data.pod_id} acké (pull/poll) → kick stoppé (porteur prend le relais)"
+          "pod #{data.pod_id} acked (pull/poll) → kick stopped (carrier rail takes over)"
         )
 
         {:keep_state_and_data, [cancel_kick_action()]}
@@ -583,7 +583,7 @@ defmodule Fleet.Spawner.Pod do
         phase = if bootstrap?, do: :bootstrap, else: :wake
 
         Logger.warning(
-          "pod #{data.pod_id} kick (#{phase}) abandonné après #{n} tentatives — agent jamais acké → escalade #5.2"
+          "pod #{data.pod_id} kick (#{phase}) abandoned after #{n} attempts — agent never acked → escalation #5.2"
         )
 
         Events.best_effort_broadcast("wake.failed", %{
@@ -657,7 +657,7 @@ defmodule Fleet.Spawner.Pod do
         %{pod_id: pid} = data
       ) do
     if Publishing.publishing?(data) do
-      Logger.info("pod #{data.pod_id} livrable confirme sur forge -> :ready")
+      Logger.info("pod #{data.pod_id} deliverable confirmed on forge -> :ready")
     end
 
     {:keep_state, Publishing.leave_publishing(data),
@@ -713,14 +713,14 @@ defmodule Fleet.Spawner.Pod do
   rescue
     e ->
       Logger.warning(
-        "pod #{Map.get(data, :pod_id)} terminate: teardown a levé (non-fatal ; arrêt=#{inspect(reason)}) — #{Exception.message(e)}"
+        "pod #{Map.get(data, :pod_id)} terminate: teardown raised (non-fatal; stop=#{inspect(reason)}) — #{Exception.message(e)}"
       )
 
       :ok
   catch
     kind, value ->
       Logger.warning(
-        "pod #{Map.get(data, :pod_id)} terminate: teardown #{kind} (non-fatal ; arrêt=#{inspect(reason)}) — #{inspect(value)}"
+        "pod #{Map.get(data, :pod_id)} terminate: teardown #{kind} (non-fatal; stop=#{inspect(reason)}) — #{inspect(value)}"
       )
 
       :ok
@@ -948,11 +948,11 @@ defmodule Fleet.Spawner.Pod do
     :ok
   rescue
     e ->
-      Logger.warning("pod #{pod_id} clear_for_pod échec (non-fatal) : #{inspect(e)}")
+      Logger.warning("pod #{pod_id} clear_for_pod failed (non-fatal): #{inspect(e)}")
       :ok
   catch
     :exit, reason ->
-      Logger.warning("pod #{pod_id} clear_for_pod indisponible (non-fatal) : #{inspect(reason)}")
+      Logger.warning("pod #{pod_id} clear_for_pod unavailable (non-fatal): #{inspect(reason)}")
       :ok
   end
 

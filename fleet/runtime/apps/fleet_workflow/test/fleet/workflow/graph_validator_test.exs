@@ -103,7 +103,7 @@ defmodule Fleet.Workflow.GraphValidatorTest do
   describe "describe/1 — message lisible par invariant" do
     test "phantom_edge nomme le step et le needs fautif" do
       msg = GraphValidator.describe({:phantom_edge, %{step: "build", needs: "foo"}})
-      assert msg =~ "arête fantôme"
+      assert msg =~ "phantom edge"
       assert msg =~ "build"
       assert msg =~ "foo"
     end

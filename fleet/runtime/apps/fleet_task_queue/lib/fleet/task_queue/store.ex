@@ -76,8 +76,8 @@ defmodule Fleet.TaskQueue.Store do
     rescue
       e ->
         Logger.error(
-          "Store: persist ÉCHEC — durabilité du point de recovery rompue (non-fatal, " <>
-            "réconciliation forge-driven ; path=#{path}): #{inspect(e)}"
+          "Store: persist FAILED — recovery point durability broken (non-fatal, " <>
+            "forge-driven reconciliation; path=#{path}): #{inspect(e)}"
         )
     end
 

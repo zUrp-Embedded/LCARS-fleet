@@ -81,7 +81,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
 
     File.write!(Path.join(dir, "face2-missing-required.yaml"), yaml)
 
-    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalide/, fn ->
+    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
       Loader.load!("face2-missing-required", workflow_maps_root: dir)
     end
   end
@@ -99,7 +99,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
 
     File.write!(Path.join(dir, "bad.yaml"), bad)
 
-    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalide/, fn ->
+    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
       Loader.load!("bad", workflow_maps_root: dir)
     end
   end

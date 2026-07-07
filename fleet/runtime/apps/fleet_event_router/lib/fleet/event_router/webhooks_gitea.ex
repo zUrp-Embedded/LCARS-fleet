@@ -76,7 +76,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
             # never declared → producer/registry drift, or a forged type.
             Logger.warning(
               "WebhooksGitea: unknown event type #{inspect(event_type)} " <>
-                "— DRIFT (atome inconnu), 422"
+                "— DRIFT (unknown atom), 422"
             )
 
             send_resp(conn, 422, Jason.encode!(%{error: "unknown event type", type: event_type}))
@@ -87,8 +87,8 @@ defmodule Fleet.EventRouter.WebhooksGitea do
           # action emitted by WebhooksGitea; see events.yaml, gitea section).
           _e in Fleet.Event.UnregisteredError ->
             Logger.warning(
-              "WebhooksGitea: type #{inspect(event_type)} hors registry " <>
-                "events.yaml — DROP/DRIFT, 422 (ajouter la clé si l'action doit être routée)"
+              "WebhooksGitea: type #{inspect(event_type)} outside the events.yaml " <>
+                "registry — DROP/DRIFT, 422 (add the key if the action must be routed)"
             )
 
             send_resp(
@@ -101,7 +101,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
       {:error, reason} ->
         # `reason` is a structured atom (:hmac_mismatch | :secret_missing) — the human message
         # lives HERE (log + 401 wire body), not in the tuple. Jason encodes the atom as a string.
-        Logger.warning("WebhooksGitea: webhook REFUSÉ 401 — vérification HMAC : #{reason}")
+        Logger.warning("WebhooksGitea: webhook REFUSED 401 — HMAC verification: #{reason}")
         send_resp(conn, 401, Jason.encode!(%{error: reason}))
     end
   end
@@ -147,8 +147,8 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         case String.trim(secret) do
           "" ->
             Logger.error(
-              "WebhooksGitea: secret HMAC VIDE/whitespace (#{secret_path}) — " <>
-                "fail-closed (refus : un HMAC à clé vide est forgeable)"
+              "WebhooksGitea: HMAC secret EMPTY/whitespace (#{secret_path}) — " <>
+                "fail-closed (refused: an empty-key HMAC is forgeable)"
             )
 
             {:error, :secret_missing}

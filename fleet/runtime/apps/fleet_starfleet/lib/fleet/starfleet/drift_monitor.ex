@@ -101,7 +101,7 @@ defmodule Fleet.Starfleet.DriftMonitor do
         # (a TOTAL routing table where a miss crashes at load) is a separate coord work-item.
         case CoordBackend.resolved().handle_decision(decision, correlation_id) do
           :ok -> :ok
-          {:error, why} -> Logger.warning("DriftMonitor: verdict NON routé (#{inspect(why)})")
+          {:error, why} -> Logger.warning("DriftMonitor: verdict NOT routed (#{inspect(why)})")
         end
 
       {:error, reason} ->

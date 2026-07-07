@@ -128,16 +128,16 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   rescue
     e ->
       Logger.error(
-        "Shutdown: comptage pods vivants indisponible (Spawner injoignable — restart " <>
-          "en plein quiesce ?) — drain ne peut PAS conclure 0, on reste prudent : #{Exception.message(e)}"
+        "Shutdown: live pod count unavailable (Spawner unreachable — restart " <>
+          "mid-quiesce?) — drain can NOT conclude 0, staying cautious: #{Exception.message(e)}"
       )
 
       @count_unavailable
   catch
     :exit, reason ->
       Logger.error(
-        "Shutdown: comptage pods vivants indisponible (Spawner exit #{inspect(reason)} " <>
-          "— restart en plein quiesce ?) — drain ne peut PAS conclure 0, on reste prudent"
+        "Shutdown: live pod count unavailable (Spawner exit #{inspect(reason)} " <>
+          "— restart mid-quiesce?) — drain can NOT conclude 0, staying cautious"
       )
 
       @count_unavailable
@@ -162,8 +162,8 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
         :error ->
           Logger.error(
-            "Shutdown: comptage work items en file indisponible (broker task_queue " <>
-              "présent mais injoignable — restart en plein quiesce ?) — drain ne peut PAS conclure 0, prudent"
+            "Shutdown: queued work item count unavailable (task_queue broker " <>
+              "present but unreachable — restart mid-quiesce?) — drain can NOT conclude 0, cautious"
           )
 
           @count_unavailable
@@ -286,7 +286,7 @@ defmodule Fleet.Starfleet.Shutdown do
   @impl true
   def handle_call({:begin, grace_ms}, _from, state) do
     :ok = state.backend.refuse_new_jobs(reason: :shutdown)
-    Logger.info("Shutdown: begin — nouveaux jobs refusés, drain #{grace_ms}ms")
+    Logger.info("Shutdown: begin — new jobs refused, drain #{grace_ms}ms")
     {:reply, :ok, wait_drain(state, grace_ms)}
   end
 

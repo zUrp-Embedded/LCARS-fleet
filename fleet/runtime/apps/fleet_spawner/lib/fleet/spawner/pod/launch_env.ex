@@ -198,7 +198,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   defp claude_dir_from_passwd(human) do
     case passwd_home(human) do
       {:ok, home} -> Path.join(home, ".claude")
-      :error -> raise "claude_dir: home introuvable (getent passwd #{inspect(human)}) — fail-loud"
+      :error -> raise "claude_dir: home not found (getent passwd #{inspect(human)}) — fail-loud"
     end
   end
 
@@ -242,7 +242,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
         Map.put(env, "LCARS_VENDOR_BIN", bin)
 
       nil ->
-        raise "vendor: binaire claude introuvable dans ~/.local/bin de #{inspect(human)} (fail-loud)"
+        raise "vendor: claude binary not found in ~/.local/bin of #{inspect(human)} (fail-loud)"
     end
   end
 

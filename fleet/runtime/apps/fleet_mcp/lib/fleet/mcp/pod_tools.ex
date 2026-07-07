@@ -39,9 +39,9 @@ defmodule Fleet.MCP.PodTools do
       name("Get Work Item")
 
       description(
-        "Récupère ta prochaine tâche auprès du fleet LCARS. Retourne " <>
-          "{\"done\":true} quand il n'y a plus de tâche (tu t'arrêtes alors), " <>
-          "sinon {\"done\":false,\"work_item\":{...}}."
+        "Fetch your next task from the LCARS fleet. Returns " <>
+          "{\"done\":true} when there is no task left (you then stop), " <>
+          "otherwise {\"done\":false,\"work_item\":{...}}."
       )
     end
 
@@ -53,9 +53,9 @@ defmodule Fleet.MCP.PodTools do
       name("Submit Result")
 
       description(
-        "Retourne le résultat structuré d'une tâche au fleet LCARS, dans `payload`. `work_item_id` REQUIS = " <>
-          "le `work_item_id` rendu par `get_work_item` (la tâche que tu clôs) : le fleet corrèle ton livrable à CETTE " <>
-          "tâche précise, jamais à « la dernière en date »."
+        "Return a task's structured result to the LCARS fleet, in `payload`. `work_item_id` REQUIRED = " <>
+          "the `work_item_id` returned by `get_work_item` (the task you are closing): the fleet correlates " <>
+          "your deliverable to THIS specific task, never to \"the most recent one\"."
       )
     end
 
@@ -74,13 +74,13 @@ defmodule Fleet.MCP.PodTools do
       name("Create Issue")
 
       description(
-        "Délègue une brique d'implémentation à la fleet LCARS : crée une issue forge prête " <>
-          "pour la livraison forge-native (engineer → PR → review → merge). Utilise-le pour DÉLÉGUER " <>
-          "plutôt que de coder toi-même (la fleet livre mieux et préserve ton contexte). " <>
-          "`brief` = le brief clair pour l'engineer. `project` = le repo `owner/name` OÙ LIVRER, **REQUIS** : " <>
-          "le repo retourné par `create_project`, ou le projet désigné par l'humain. La fleet ne route PLUS par " <>
-          "défaut — sans `project`, le issue est REFUSÉ (jamais de misroute silencieux vers un autre projet). " <>
-          "Retourne {\"status\":\"issue_created\",\"repo\":...}."
+        "Delegate an implementation brick to the LCARS fleet: creates a forge issue ready " <>
+          "for forge-native delivery (engineer → PR → review → merge). Use it to DELEGATE " <>
+          "rather than code yourself (the fleet delivers better and preserves your context). " <>
+          "`brief` = the clear brief for the engineer. `project` = the `owner/name` repo WHERE TO DELIVER, **REQUIRED**: " <>
+          "the repo returned by `create_project`, or the project designated by the human. The fleet NO LONGER routes by " <>
+          "default — without `project`, the issue is REFUSED (never a silent misroute to another project). " <>
+          "Returns {\"status\":\"issue_created\",\"repo\":...}."
       )
     end
 
@@ -100,11 +100,11 @@ defmodule Fleet.MCP.PodTools do
       name("Create Project")
 
       description(
-        "Démarre un NOUVEAU projet : crée le repo sur la forge + les 2 dossiers dual-dir " <>
-          "(`/home/projects/<name>` sur `main`, `/home/projects.work/<name>` sur `work/ops`) + " <>
-          "le scaffold de base, et le pousse. Utilise-le quand l'humain veut LANCER un projet neuf. " <>
-          "`name` = slug kebab-case. Retourne {\"status\":\"onboarded\",\"repo\":...} ; enchaîne ensuite " <>
-          "`create_issue` en lui passant `project: <le repo retourné>` pour livrer DANS ce projet."
+        "Start a NEW project: creates the repo on the forge + the 2 dual-dir folders " <>
+          "(`/home/projects/<name>` on `main`, `/home/projects.work/<name>` on `work/ops`) + " <>
+          "the base scaffold, and pushes it. Use it when the human wants to LAUNCH a fresh project. " <>
+          "`name` = kebab-case slug. Returns {\"status\":\"onboarded\",\"repo\":...}; then chain " <>
+          "`create_issue` passing it `project: <the returned repo>` to deliver INTO this project."
       )
     end
 
@@ -124,12 +124,12 @@ defmodule Fleet.MCP.PodTools do
       name("Import Project")
 
       description(
-        "Importe un repo EXISTANT (déjà sur la forge, dans l'org — poussé hors-fleet ou par un humain) " <>
-          "dans la machine à agents : dual-dir (`/home/projects/<name>` sur `main`, " <>
-          "`/home/projects.work/<name>` sur `work/ops`) + gate forge-enforcé, SANS toucher au contenu " <>
-          "de `main` (il reste intact). Utilise-le pour un projet qui existe déjà (≠ create_project, qui " <>
-          "démarre un projet NEUF). `full_name` = `owner/name` (ex. `fleet/deja-la`) — doit déjà être dans " <>
-          "l'org fleet, branche par défaut `main`. Retourne {\"status\":\"imported\",\"repo\":...}."
+        "Import an EXISTING repo (already on the forge, in the org — pushed outside the fleet or by a human) " <>
+          "into the agent machine: dual-dir (`/home/projects/<name>` on `main`, " <>
+          "`/home/projects.work/<name>` on `work/ops`) + forge-enforced gate, WITHOUT touching the content " <>
+          "of `main` (it stays intact). Use it for a project that already exists (≠ create_project, which " <>
+          "starts a FRESH project). `full_name` = `owner/name` (e.g. `fleet/deja-la`) — must already be in " <>
+          "the fleet org, default branch `main`. Returns {\"status\":\"imported\",\"repo\":...}."
       )
     end
 
@@ -147,13 +147,13 @@ defmodule Fleet.MCP.PodTools do
       name("Get Issue Status")
 
       description(
-        "Consulte l'état d'un issue délégué (issue + PR liée) : issue ouverte/fermée, PR mergée " <>
-          "ou non, verdicts de review. Utilise-le pour SUIVRE un issue avant d'enchaîner — ex. valider " <>
-          "la livraison (issue fermée par le merge) du issue N AVANT de poster le issue N+1. " <>
-          "`number` = le numéro d'issue. `project` = le repo `owner/name` DU issue, **REQUIS** : le repo " <>
-          "retourné par `create_project` (ou celui passé à `create_issue`). La fleet ne route PLUS par " <>
-          "défaut — sans `project`, la lecture est REFUSÉE (jamais d'état lu sur le mauvais projet). " <>
-          "Retourne {\"delivered\":bool,\"issue_state\":...,\"pr\":...}."
+        "Check the state of a delegated issue (issue + linked PR): issue open/closed, PR merged " <>
+          "or not, review verdicts. Use it to TRACK an issue before chaining — e.g. validate " <>
+          "the delivery (issue closed by the merge) of issue N BEFORE posting issue N+1. " <>
+          "`number` = the issue number. `project` = the issue's `owner/name` repo, **REQUIRED**: the repo " <>
+          "returned by `create_project` (or the one passed to `create_issue`). The fleet NO LONGER routes by " <>
+          "default — without `project`, the read is REFUSED (never state read on the wrong project). " <>
+          "Returns {\"delivered\":bool,\"issue_state\":...,\"pr\":...}."
       )
     end
 
@@ -234,8 +234,8 @@ defmodule Fleet.MCP.PodTools do
       when is_binary(title) and is_binary(brief) do
     {:error,
      {:project_required,
-      "create_issue REFUSÉ — `project` est REQUIS (le repo `owner/name` où livrer). Aucun routage par " <>
-        "défaut. Passe `project` = le repo retourné par create_project, ou le projet désigné par l'humain."},
+      "create_issue REFUSED — `project` is REQUIRED (the `owner/name` repo where to deliver). No default " <>
+        "routing. Pass `project` = the repo returned by create_project, or the project designated by the human."},
      state}
   end
 
@@ -285,8 +285,8 @@ defmodule Fleet.MCP.PodTools do
       when is_integer(number) do
     {:error,
      {:project_required,
-      "get_issue_status REFUSÉ — `project` est REQUIS (le repo `owner/name` du issue). Aucun routage " <>
-        "par défaut. Passe `project` = le repo retourné par create_project, ou celui passé à create_issue."},
+      "get_issue_status REFUSED — `project` is REQUIRED (the issue's `owner/name` repo). No default " <>
+        "routing. Pass `project` = the repo returned by create_project, or the one passed to create_issue."},
      state}
   end
 

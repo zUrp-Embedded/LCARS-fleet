@@ -93,13 +93,13 @@ defmodule Fleet.MCP.Supervisor do
            acceptor_supervisor: true,
            sockets: sockets,
            socket_files: sockets + orphaned,
-           note: "#{orphaned} socket-fichier(s) SANS acceptor (cascade ?) — pods sourds"
+           note: "#{orphaned} socket file(s) WITHOUT an acceptor (cascade?) — deaf pods"
          }}
       else
         {:operational, %{acceptor_supervisor: true, sockets: sockets}}
       end
     else
-      {:degraded, %{acceptor_supervisor: false, note: "PodSocketSupervisor non vivant"}}
+      {:degraded, %{acceptor_supervisor: false, note: "PodSocketSupervisor not alive"}}
     end
   end
 

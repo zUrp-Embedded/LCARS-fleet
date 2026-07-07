@@ -220,7 +220,7 @@ defmodule Fleet.Spawner.PermanentBoot do
 
              {:error, reason} ->
                Logger.error(
-                 "PermanentBoot: cap-profile #{role} non chargeable (#{inspect(reason)}) — boot fail-loud"
+                 "PermanentBoot: cap-profile #{role} not loadable (#{inspect(reason)}) — boot fail-loud"
                )
 
                {:halt, {:error, {:cap_profile_load_failed, role, reason}}}
@@ -250,12 +250,15 @@ defmodule Fleet.Spawner.PermanentBoot do
         {:ok, pod_id}
 
       {:error, {:already_started, _pid}} ->
-        Logger.info("PermanentBoot: permanent #{name} déjà vivant (#{pod_id}) — no-op idempotent")
+        Logger.info(
+          "PermanentBoot: permanent #{name} already alive (#{pod_id}) — idempotent no-op"
+        )
+
         {:ok, pod_id}
 
       {:error, reason} ->
         # The failure is RETURNED (no more nil silently filtered) → boot_partial visible / respawn retry.
-        Logger.error("PermanentBoot: spawn permanent #{name} échoué (#{inspect(reason)})")
+        Logger.error("PermanentBoot: spawn of permanent #{name} failed (#{inspect(reason)})")
         {:error, {name, reason}}
     end
   end

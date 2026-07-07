@@ -46,7 +46,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
       _ = File.rm(f)
 
       Logger.info(
-        "pod #{state.pod_id} gc: jsonl stale #{Path.basename(f)} retiré (GC UUID → session frais)"
+        "pod #{state.pod_id} gc: stale jsonl #{Path.basename(f)} removed (UUID GC → fresh session)"
       )
     end)
   end
@@ -99,7 +99,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
           Logger.info(
             "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})" <>
-              if(doc, do: " doc=#{doc}", else: " (pas de branche doc)")
+              if(doc, do: " doc=#{doc}", else: " (no doc branch)")
           )
 
           :ok

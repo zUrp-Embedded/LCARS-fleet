@@ -96,8 +96,8 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
           assert :ok = Cat5Escalator.escalate(:bogus_cat5_src, %{"pod_id" => "p1"}, "cid-x")
         end)
 
-      assert log =~ "escalade Cat-5 NON broadcastée"
-      assert log =~ "event malformé"
+      assert log =~ "Cat-5 escalation NOT broadcast"
+      assert log =~ "malformed event"
       refute_receive %Fleet.Event{source: :starfleet}, 200
     end
   end

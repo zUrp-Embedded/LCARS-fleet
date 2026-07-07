@@ -89,8 +89,8 @@ defmodule Fleet.Spawner.PodTmux do
 
       :unsafe ->
         Logger.error(
-          "PodTmux: pod_id #{inspect(pod_id)} non conforme — `pkill -f` SKIP par sécurité " <>
-            "(anti self-kill F-034 : un pattern trop large tuerait le BEAM)"
+          "PodTmux: pod_id #{inspect(pod_id)} non-conformant — `pkill -f` SKIPPED for safety " <>
+            "(anti self-kill F-034: an overly broad pattern would kill the BEAM)"
         )
 
         :ok
@@ -177,7 +177,7 @@ defmodule Fleet.Spawner.PodTmux do
       :ok
     else
       {out, code} ->
-        Logger.warning("PodTmux: send-keys pod=#{pod_id} échec (#{code}) : #{String.trim(out)}")
+        Logger.warning("PodTmux: send-keys pod=#{pod_id} failed (#{code}): #{String.trim(out)}")
         {:error, {:tmux_send_failed, code, String.trim(out)}}
     end
   end

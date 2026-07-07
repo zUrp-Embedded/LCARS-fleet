@@ -87,7 +87,7 @@ defmodule Fleet.Spawner.PermanentWarden do
 
     case result do
       {:ok, pod_id} ->
-        Logger.info("PermanentWarden: permanent #{role} respawne (#{pod_id})")
+        Logger.info("PermanentWarden: permanent #{role} respawned (#{pod_id})")
         # Respawn SUCCESSFUL → counter reset (a LATER death restarts from a short backoff).
         {:noreply, %{state | attempts: Map.delete(state.attempts, role)}}
 
@@ -100,16 +100,16 @@ defmodule Fleet.Spawner.PermanentWarden do
           delay = backoff_delay(attempt, state.base)
 
           Logger.warning(
-            "PermanentWarden: respawn #{role} ECHOUE (#{inspect(reason)}) → retry dans " <>
-              "#{div(delay, 1000)}s (tentative #{attempt + 1}/#{@max_attempts})"
+            "PermanentWarden: respawn #{role} FAILED (#{inspect(reason)}) → retry in " <>
+              "#{div(delay, 1000)}s (attempt #{attempt + 1}/#{@max_attempts})"
           )
 
           Process.send_after(self(), {:respawn, role}, delay)
           {:noreply, %{state | attempts: Map.put(state.attempts, role, attempt + 1)}}
         else
           Logger.error(
-            "PermanentWarden: respawn #{role} — #{@max_attempts} echecs consecutifs, HALT " <>
-              "(issue sysadmin deja ouverte par le rail incident ; intervention requise)"
+            "PermanentWarden: respawn #{role} — #{@max_attempts} consecutive failures, HALT " <>
+              "(sysadmin issue already opened by the incident rail; intervention required)"
           )
 
           {:noreply, state}
@@ -127,8 +127,8 @@ defmodule Fleet.Spawner.PermanentWarden do
       delay = backoff_delay(attempt, state.base)
 
       Logger.warning(
-        "PermanentWarden: permanent #{role} mort → respawn dans #{div(delay, 1000)}s " <>
-          "(tentative #{attempt + 1}/#{@max_attempts})"
+        "PermanentWarden: permanent #{role} dead → respawn in #{div(delay, 1000)}s " <>
+          "(attempt #{attempt + 1}/#{@max_attempts})"
       )
 
       Process.send_after(self(), {:respawn, role}, delay)
@@ -140,8 +140,8 @@ defmodule Fleet.Spawner.PermanentWarden do
       # without a reset, the warden stayed dead for this role until the BEAM restart. No loop:
       # each post-HALT cycle requires an external resurrection (the spend is borne by the actor).
       Logger.warning(
-        "PermanentWarden: permanent #{role} mort APRES HALT (reparation externe detectee) → " <>
-          "nouveau cycle de respawn (compteur remis a zero)"
+        "PermanentWarden: permanent #{role} died AFTER HALT (external repair detected) → " <>
+          "new respawn cycle (counter reset to zero)"
       )
 
       delay = backoff_delay(0, state.base)

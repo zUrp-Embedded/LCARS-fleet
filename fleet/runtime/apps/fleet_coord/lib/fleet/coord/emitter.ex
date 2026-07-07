@@ -103,7 +103,7 @@ defmodule Fleet.Coord.Emitter do
   defp safe_canon_broadcast(type, opts) do
     Bus.safe_emit(:coord, type, opts,
       on_unregistered: :silent,
-      context: "Coord.Emitter: action NON broadcastée"
+      context: "Coord.Emitter: action NOT broadcast"
     )
   end
 

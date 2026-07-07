@@ -68,11 +68,11 @@ defmodule Fleet.SchemaCache do
   def fetch!(persistent_key, boot_loader \\ nil) do
     case :persistent_term.get(persistent_key, @miss) do
       @miss ->
-        hint = boot_loader || "la fonction d'init boot-time de l'app propriétaire"
+        hint = boot_loader || "the owning app's boot-time init function"
 
         raise ArgumentError,
-              "Fleet.SchemaCache: clé #{inspect(persistent_key)} pas chargée — " <>
-                "appeler #{hint} au boot"
+              "Fleet.SchemaCache: key #{inspect(persistent_key)} not loaded — " <>
+                "call #{hint} at boot"
 
       value ->
         value

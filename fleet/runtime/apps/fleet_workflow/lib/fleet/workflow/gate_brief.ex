@@ -36,15 +36,15 @@ defmodule Fleet.Workflow.GateBrief do
     """
     # #{s.title}
 
-    ⚠ TON RÔLE EST DE **JUGER**, PAS DE PRODUIRE. Ne crée AUCUN fichier, ne
-    commite RIEN, n'exécute AUCUNE tâche de build. #{s.intro} Ton unique sortie est une **décision** rendue via `submit_result`.
+    ⚠ YOUR ROLE IS TO **JUDGE**, NOT TO PRODUCE. Create NO file, commit
+    NOTHING, run NO build task. #{s.intro} Your only output is a **decision** returned via `submit_result`.
 
-    ## Contexte
-    - Pipeline : #{inspect(pid)}
-    - Step jugé : #{step}
-    - Gate : type #{gate_type(gate)}
+    ## Context
+    - Pipeline: #{inspect(pid)}
+    - Judged step: #{step}
+    - Gate: type #{gate_type(gate)}
     #{render_request(Map.get(ctx, :request))}
-    ## Question à trancher
+    ## Question to decide
     #{s.question}
 
     ## #{s.heading}
@@ -52,26 +52,26 @@ defmodule Fleet.Workflow.GateBrief do
     #{render(outputs)}
     ```
 
-    ## Règles de gate (référence)
+    ## Gate rules (reference)
     ```
     #{render(gate)}
     ```
 
-    ## Décision attendue — JSON strict (`gate-decision-v1.json`)
-    `{"decision": "<...>", "reason": "<motif structuré>", "details": {...}, "chain": [...]}`
+    ## Expected decision — strict JSON (`gate-decision-v1.json`)
+    `{"decision": "<...>", "reason": "<structured rationale>", "details": {...}, "chain": [...]}`
 
     `decision` ∈ #{Enum.join(@decisions, " | ")}
-    - `continue` : #{s.continue} → avancer au step suivant
-    - `redirect` : renvoyer à l'architecte (ex. brief trop gros → demander la découpe)
-    - `abandon` : abandonner le issue (non récupérable)
-    - `escalate_user` : dépasse le gatekeeper → l'user tranche
-    - `halt_wait_input` : information manquante → halt en attente
+    - `continue`: #{s.continue} → advance to the next step
+    - `redirect`: send back to the architect (e.g. brief too big → ask for a split)
+    - `abandon`: abandon the issue (not recoverable)
+    - `escalate_user`: beyond the gatekeeper → the user decides
+    - `halt_wait_input`: missing information → halt and wait
 
-    ## Comment rendre ta décision
-    Appelle `mcp__fleet__submit_result` avec, comme **résultat**, l'objet JSON
-    gate-decision-v1.json ci-dessus. Le champ `decision` est OBLIGATOIRE et doit
-    valoir l'une des valeurs listées — sans lui, le runtime escalade en humain
-    (fail-closed). Exemple minimal : `{"decision": "continue", "reason": "..."}`.
+    ## How to return your decision
+    Call `mcp__fleet__submit_result` with, as the **result**, the JSON object
+    gate-decision-v1.json above. The `decision` field is MANDATORY and must
+    be one of the listed values — without it, the runtime escalates to a human
+    (fail-closed). Minimal example: `{"decision": "continue", "reason": "..."}`.
     """
   end
 
@@ -83,26 +83,26 @@ defmodule Fleet.Workflow.GateBrief do
       # ROLE-NEUTRAL title: this brief goes to N judges (consultant in brief-review, qualifier/reviewer/
       # gatekeeper in deliverable). Calling it "gatekeeper" regardless of the judge = drift (seen live
       # 2026-07-04: the consultant introduced itself as "gatekeeper role"). The judged subject carries the title.
-      title: "Éval de brief — décision de juge",
-      intro: "Le BRIEF à valider (rédigé par l'architecte) est cité plus bas.",
+      title: "Brief eval — judge decision",
+      intro: "The BRIEF to validate (written by the architect) is quoted below.",
       question:
-        "Le brief `#{step}` a été rédigé par l'architecte et n'a PAS encore été exécuté. Au vu du " <>
-          "brief ci-dessous, est-il EXÉCUTABLE en l'état (clair, complet, cohérent, actionnable par un " <>
-          "engineer sans nouvelle question) — `continue` — ou faut-il le renvoyer / escalader / abandonner ?",
-      heading: "Brief à juger (rédigé par l'architecte — à valider AVANT toute exécution)",
-      continue: "le brief est exécutable en l'état (clair, complet, actionnable)"
+        "The brief `#{step}` was written by the architect and has NOT been executed yet. Given the " <>
+          "brief below, is it EXECUTABLE as-is (clear, complete, coherent, actionable by an " <>
+          "engineer without further questions) — `continue` — or must it be sent back / escalated / abandoned?",
+      heading: "Brief to judge (written by the architect — to validate BEFORE any execution)",
+      continue: "the brief is executable as-is (clear, complete, actionable)"
     }
   end
 
   defp subject_phrases(_deliverable, step) do
     %{
-      title: "Éval de livrable — décision de juge",
-      intro: "Le livrable existe déjà (il est cité plus bas).",
+      title: "Deliverable eval — judge decision",
+      intro: "The deliverable already exists (it is quoted below).",
       question:
-        "Le step `#{step}` a livré son résultat. Au vu du livrable ci-dessous et des\n" <>
-          "règles de la gate, faut-il franchir la gate (`continue`) — ou abandonner /\nrenvoyer / escalader ?",
-      heading: "Livrable à juger (outputs du step — DÉJÀ produit, à évaluer)",
-      continue: "le livrable satisfait la gate"
+        "The step `#{step}` delivered its result. Given the deliverable below and the\n" <>
+          "gate rules, should the gate be crossed (`continue`) — or abandon /\nsend back / escalate?",
+      heading: "Deliverable to judge (step outputs — ALREADY produced, to evaluate)",
+      continue: "the deliverable satisfies the gate"
     }
   end
 
@@ -115,7 +115,7 @@ defmodule Fleet.Workflow.GateBrief do
   defp render_request(req) when is_binary(req) and req != "" do
     """
 
-    ## Demande d'origine (CONTEXTE — déjà traité, NE PAS exécuter)
+    ## Original request (CONTEXT — already handled, DO NOT execute)
     > #{String.replace(req, "\n", "\n> ")}
     """
   end
@@ -123,7 +123,7 @@ defmodule Fleet.Workflow.GateBrief do
   defp render_request(_), do: ""
 
   # Human-readable JSON rendering; fallback to inspect if non-encodable (defensive).
-  defp render(nil), do: "(aucun)"
+  defp render(nil), do: "(none)"
 
   defp render(term) do
     case Jason.encode(term, pretty: true) do

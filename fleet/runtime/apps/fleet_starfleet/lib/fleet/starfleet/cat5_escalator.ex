@@ -83,7 +83,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
     # Same finding as DriftMonitor (DrDree 2026-07-05): an escalation-policy miss was being swallowed.
     case CoordBackend.resolved().handle_escalation(source, enriched, correlation_id) do
       :ok -> :ok
-      {:error, why} -> Logger.warning("Cat5Escalator: escalade NON routée (#{inspect(why)})")
+      {:error, why} -> Logger.warning("Cat5Escalator: escalation NOT routed (#{inspect(why)})")
     end
 
     :ok
@@ -109,7 +109,7 @@ defmodule Fleet.Starfleet.Cat5Escalator do
         payload: enriched
       ],
       on_unregistered: :silent,
-      context: "Cat5Escalator: escalade Cat-5 NON broadcastée"
+      context: "Cat5Escalator: Cat-5 escalation NOT broadcast"
     )
   end
 

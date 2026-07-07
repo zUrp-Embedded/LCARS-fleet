@@ -56,8 +56,8 @@ defmodule Fleet.Spawner.PublishConsumer do
         reason = Exception.message(e)
 
         Logger.error(
-          "PublishConsumer: handle_spawn_request a LEVÉ — spawn DROPPÉ alors que l'API a répondu 202 " <>
-            "« queued » (l'admin croit le pod en file) — #{reason}"
+          "PublishConsumer: handle_spawn_request RAISED — spawn DROPPED while the API already answered 202 " <>
+            "\"queued\" (the admin believes the pod is queued) — #{reason}"
         )
 
         emit_spawn_failed(payload, reason)
@@ -90,7 +90,7 @@ defmodule Fleet.Spawner.PublishConsumer do
     cond do
       not is_binary(name) or name == "" ->
         Logger.warning(
-          "PublishConsumer: admin.spawn.request invalide — name manquant/vide " <>
+          "PublishConsumer: admin.spawn.request invalid — name missing/empty " <>
             "(payload=#{inspect(payload)})"
         )
 
@@ -99,7 +99,7 @@ defmodule Fleet.Spawner.PublishConsumer do
           {:ok, cap_profile} ->
             case state.spawner.spawn_pod(cap_profile, to_string(issue_id), opts) do
               {:ok, _pod_ref} ->
-                Logger.info("PublishConsumer: spawn dispatché name=#{name} issue=#{issue_id}")
+                Logger.info("PublishConsumer: spawn dispatched name=#{name} issue=#{issue_id}")
 
               {:error, reason} ->
                 Logger.warning(
@@ -138,14 +138,14 @@ defmodule Fleet.Spawner.PublishConsumer do
 
       {:error, broadcast_reason} ->
         Logger.error(
-          "PublishConsumer: broadcast spawn.failed ÉCHEC — alarme de spawn droppé NON diffusée : " <>
+          "PublishConsumer: broadcast spawn.failed FAILED — dropped-spawn alarm NOT broadcast: " <>
             "#{inspect(broadcast_reason)}"
         )
     end
   rescue
     e ->
       Logger.error(
-        "PublishConsumer: broadcast spawn.failed a LEVÉ — alarme de spawn droppé NON diffusée : " <>
+        "PublishConsumer: broadcast spawn.failed RAISED — dropped-spawn alarm NOT broadcast: " <>
           "#{Exception.message(e)}"
       )
   end

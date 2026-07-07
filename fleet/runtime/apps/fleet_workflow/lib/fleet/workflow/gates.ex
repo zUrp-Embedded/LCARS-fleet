@@ -63,7 +63,7 @@ defmodule Fleet.Workflow.Gates do
     if Enum.all?(rules, &Predicate.eval?(&1, outputs)) do
       :pass
     else
-      {:fail, "hard gate: rule(s) string non satisfaite(s)"}
+      {:fail, "hard gate: unsatisfied string rule(s)"}
     end
   end
 
@@ -90,14 +90,13 @@ defmodule Fleet.Workflow.Gates do
     # non-enumerable (e.g. an integer).
     cond do
       not is_list(rules) ->
-        {:fail, "gate terminal malformée : `rules` doit être une liste (forme rejetée)"}
+        {:fail, "malformed terminal gate: `rules` must be a list (shape rejected)"}
 
       Enum.all?(rules, &is_binary/1) ->
         eval_terminal_string(rules, gate, outputs)
 
       true ->
-        {:fail,
-         "gate terminal malformée : `rules` doit être une liste de strings (forme rejetée)"}
+        {:fail, "malformed terminal gate: `rules` must be a list of strings (shape rejected)"}
     end
   end
 
@@ -111,7 +110,7 @@ defmodule Fleet.Workflow.Gates do
   # The eval is TOTAL. (Later ideal: a closed ADT parsed at LOAD would make these shapes
   # UNCONSTRUCTIBLE upstream; here we close at the eval boundary, minimum viable.)
   defp eval_by_type(%{"gate" => gate}, _outputs, _ctx) do
-    {:fail, "gate malformée : type/forme non reconnu (#{inspect(gate)}) — fail-closed"}
+    {:fail, "malformed gate: unrecognized type/shape (#{inspect(gate)}) — fail-closed"}
   end
 
   # terminal string rules. Order: (1) an unsatisfied rule → {:fail} (bounded rework on the rail side);
@@ -124,11 +123,11 @@ defmodule Fleet.Workflow.Gates do
   defp eval_terminal_string(rules, gate, outputs) do
     cond do
       not Enum.all?(rules, &Predicate.eval?(&1, outputs)) ->
-        {:fail, "terminal gate: rule(s) string non satisfaite(s)"}
+        {:fail, "terminal gate: unsatisfied string rule(s)"}
 
       Map.get(gate, "human_approval_required", false) ->
         {:human_approval,
-         "terminal gate: human_approval_required — aval humain requis (escalade arch, R3)"}
+         "terminal gate: human_approval_required — human sign-off required (arch escalation, R3)"}
 
       true ->
         :pass

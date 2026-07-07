@@ -27,7 +27,7 @@ defmodule Fleet.Credentials.Human do
         human
 
       {:error, reason} ->
-        raise "Fleet.Credentials.Human: user courant irrésoluble (#{inspect(reason)})"
+        raise "Fleet.Credentials.Human: current user unresolvable (#{inspect(reason)})"
     end
   end
 end

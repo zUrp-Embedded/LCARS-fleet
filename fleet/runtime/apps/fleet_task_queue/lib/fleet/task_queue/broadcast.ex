@@ -73,7 +73,7 @@ defmodule Fleet.TaskQueue.Broadcast do
   rescue
     e ->
       Logger.warning(
-        "Broadcast: best_effort_broadcast #{ev.type} échec (pod=#{ev.pod_id}) : #{inspect(e)}"
+        "Broadcast: best_effort_broadcast #{ev.type} failed (pod=#{ev.pod_id}): #{inspect(e)}"
       )
 
       :ok
@@ -96,8 +96,8 @@ defmodule Fleet.TaskQueue.Broadcast do
 
       {:error, reason} ->
         Logger.error(
-          "Broadcast: required_broadcast #{ev.type} ÉCHEC (pod=#{ev.pod_id}) : #{inspect(reason)} — " <>
-            "lifecycle NON diffusé (le step_run ne finira pas ; propagé au caller, pas avalé)"
+          "Broadcast: required_broadcast #{ev.type} FAILED (pod=#{ev.pod_id}): #{inspect(reason)} — " <>
+            "lifecycle NOT broadcast (the step_run will not finish; propagated to caller, not swallowed)"
         )
 
         {:error, {:broadcast_failed, reason}}
@@ -105,8 +105,8 @@ defmodule Fleet.TaskQueue.Broadcast do
   rescue
     e ->
       Logger.error(
-        "Broadcast: required_broadcast #{ev.type} a LEVÉ (pod=#{ev.pod_id}) : #{inspect(e)} — " <>
-          "lifecycle NON diffusé (propagé au caller, pas avalé)"
+        "Broadcast: required_broadcast #{ev.type} RAISED (pod=#{ev.pod_id}): #{inspect(e)} — " <>
+          "lifecycle NOT broadcast (propagated to caller, not swallowed)"
       )
 
       {:error, {:broadcast_failed, e}}

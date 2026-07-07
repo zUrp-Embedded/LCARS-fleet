@@ -78,9 +78,9 @@ defmodule Fleet.Event do
   def new(source, type, opts \\ []) when is_atom(type) and is_list(opts) do
     if not valid_source?(source) do
       raise ArgumentError,
-            "Fleet.Event.new/3 : source #{inspect(source)} hors enum closed list " <>
-              "#{inspect(@canonical_sources)} — un producteur qui émet une source hors-catalogue " <>
-              "est un bug (corrige la source, n'élargis pas l'enum à l'aveugle)"
+            "Fleet.Event.new/3: source #{inspect(source)} outside the closed enum list " <>
+              "#{inspect(@canonical_sources)} — a producer emitting an out-of-catalogue source " <>
+              "is a bug (fix the source, do not widen the enum blindly)"
     end
 
     %__MODULE__{
@@ -100,8 +100,8 @@ defmodule Fleet.Event do
 
   defp canon_timestamp({:ok, other}) do
     raise ArgumentError,
-          "Fleet.Event.new/3 : timestamp #{inspect(other)} n'est pas un %DateTime{} — " <>
-            "le timestamp d'un event ne peut jamais être autre chose qu'un DateTime"
+          "Fleet.Event.new/3: timestamp #{inspect(other)} is not a %DateTime{} — " <>
+            "an event's timestamp can never be anything but a DateTime"
   end
 
   @doc """

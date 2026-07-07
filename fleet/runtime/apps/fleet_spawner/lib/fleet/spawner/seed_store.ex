@@ -45,7 +45,7 @@ defmodule Fleet.Spawner.SeedStore do
     else
       {:error, reason} ->
         Logger.warning(
-          "SeedStore: checkpoint refusé (nom non confiné) projet=#{inspect(projet)} role=#{inspect(role)} : #{inspect(reason)}"
+          "SeedStore: checkpoint refused (unconfined name) projet=#{inspect(projet)} role=#{inspect(role)}: #{inspect(reason)}"
         )
 
         {:error, reason}
@@ -79,14 +79,14 @@ defmodule Fleet.Spawner.SeedStore do
         )
 
         Logger.info(
-          "SeedStore: checkpoint #{projet}/#{role} (uuid=#{uuid} = builder déterministe) → #{dest_dir}"
+          "SeedStore: checkpoint #{projet}/#{role} (uuid=#{uuid} = deterministic builder) → #{dest_dir}"
         )
 
         :ok
     end
   rescue
     e ->
-      Logger.warning("SeedStore: checkpoint #{projet}/#{role} ÉCHEC (non-fatal) : #{inspect(e)}")
+      Logger.warning("SeedStore: checkpoint #{projet}/#{role} FAILED (non-fatal): #{inspect(e)}")
       {:error, e}
   end
 
@@ -149,7 +149,7 @@ defmodule Fleet.Spawner.SeedStore do
 
     unless Fleet.Slug.under_root?(dest, pod_dir) do
       raise ArgumentError,
-            "SeedStore.restore: uuid non confiné (#{inspect(uuid)}) — évasion refusée"
+            "SeedStore.restore: unconfined uuid (#{inspect(uuid)}) — escape refused"
     end
 
     File.cp!(seed_jsonl, dest)

@@ -83,7 +83,7 @@ defmodule Fleet.Starfleet.AuditLog do
           {:error, reason} ->
             Logger.error(
               "AuditLog: rotation failed: #{inspect(reason)} path=#{path} — " <>
-                "append sans rotation (l'écriture courante n'est pas perdue)"
+                "appending without rotation (current write is not lost)"
             )
 
             :ok

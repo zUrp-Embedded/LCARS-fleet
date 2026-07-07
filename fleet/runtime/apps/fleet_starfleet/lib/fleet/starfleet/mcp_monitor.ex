@@ -150,7 +150,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
         }
       ],
       on_unregistered: :silent,
-      context: "MCPMonitor: alerte mcp.server_crashed NON émise"
+      context: "MCPMonitor: mcp.server_crashed alert NOT emitted"
     )
   end
 

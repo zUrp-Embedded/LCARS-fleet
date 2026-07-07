@@ -66,7 +66,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   rescue
     e ->
       Logger.warning(
-        "pod #{pod_id} release_pod_socket a levé (non-fatal) — #{Exception.message(e)}"
+        "pod #{pod_id} release_pod_socket raised (non-fatal) — #{Exception.message(e)}"
       )
 
       :ok

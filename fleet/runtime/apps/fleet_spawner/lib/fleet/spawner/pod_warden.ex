@@ -109,7 +109,7 @@ defmodule Fleet.Spawner.PodWarden do
         # NOTHING: skip the WHOLE tick (suspects frozen as-is — neither accused nor cleared), visibly.
         # Registry back → the 2-tick grace resumes, nothing lost.
         Logger.warning(
-          "PodWarden: Registry indisponible — tick de reap SKIPPÉ (aucune décision sans la liste des vivants)"
+          "PodWarden: Registry unavailable — reap tick SKIPPED (no decision without the list of live pods)"
         )
 
         schedule_tick()
@@ -195,23 +195,23 @@ defmodule Fleet.Spawner.PodWarden do
   # Reap of an orphan socket (mechanism shared with Pod.Backend.reap_orphan_pod/1).
   defp reap(pod_id) do
     Logger.warning(
-      "PodWarden: pod #{pod_id} = orphelin persistant (sock vivante, aucun GenServer) — reap (BL-036b)"
+      "PodWarden: pod #{pod_id} = persistent orphan (live sock, no GenServer) — reap (BL-036b)"
     )
 
     PodTmux.kill_holder(pod_id)
     PodTmux.remove_sock_dir(pod_id)
     :ok
   rescue
-    e -> Logger.warning("PodWarden: reap #{pod_id} échec (non-bloquant): #{inspect(e)}")
+    e -> Logger.warning("PodWarden: reap #{pod_id} failed (non-blocking): #{inspect(e)}")
   end
 
   # GC of an orphan pod_dir (mechanism shared with Pod.StateFs.clear_terminal_snapshot/3).
   defp gc_one(%{pod_id: pod_id, state_dir: state_dir, pod_dir: pod_dir}) do
-    Logger.info("PodWarden: pod_dir orphelin GC : pod_#{pod_id}, libère #{pod_dir}")
+    Logger.info("PodWarden: orphan pod_dir GC: pod_#{pod_id}, freeing #{pod_dir}")
     StateFs.rm_terminal_artifacts(state_dir, pod_dir)
     :ok
   rescue
-    e -> Logger.warning("PodWarden: GC pod_#{pod_id} échec (non-bloquant): #{inspect(e)}")
+    e -> Logger.warning("PodWarden: GC pod_#{pod_id} failed (non-blocking): #{inspect(e)}")
   end
 
   # Enumerates the tombstones under the GLOBAL root of the state.json files (`Pod.Paths.state_fs_root/0`:
@@ -230,7 +230,7 @@ defmodule Fleet.Spawner.PodWarden do
         do: tomb
   rescue
     e ->
-      Logger.warning("PodWarden: scan tombstones échec (non-bloquant): #{inspect(e)}")
+      Logger.warning("PodWarden: tombstone scan failed (non-blocking): #{inspect(e)}")
       []
   end
 

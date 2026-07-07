@@ -162,7 +162,7 @@ defmodule Fleet.Starfleet.MCPWatcher do
         }
       ],
       on_unregistered: :silent,
-      context: "MCPWatcher: alerte sdk.upstream_alert NON émise"
+      context: "MCPWatcher: sdk.upstream_alert alert NOT emitted"
     )
   end
 

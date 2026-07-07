@@ -55,9 +55,9 @@ defmodule Fleet.Spawner.Pod.SessionMint do
 
       true ->
         raise ArgumentError,
-              "SessionMint.mint: rôle project-bound #{Fleet.CapProfile.name(cap_profile)} " <>
-                "sans repo_id — la forge n'a pas résolu l'id (forge down ?). " <>
-                "On ne fabrique pas d'UUID random."
+              "SessionMint.mint: project-bound role #{Fleet.CapProfile.name(cap_profile)} " <>
+                "without repo_id — the forge did not resolve the id (forge down?). " <>
+                "We do not fabricate a random UUID."
     end
   end
 end

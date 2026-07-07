@@ -62,7 +62,7 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
           assert :ok = Bus.safe_emit(:spawner, :"phantom.never.registered", [])
         end)
 
-      assert log =~ "hors registry"
+      assert log =~ "outside the events.yaml registry"
       assert log =~ "phantom.never.registered"
       refute_receive %Fleet.Event{}, 100
     end
@@ -77,7 +77,7 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
         end)
 
       refute log =~ "phantom.never.registered"
-      refute log =~ "hors registry"
+      refute log =~ "outside the events.yaml registry"
       refute_receive %Fleet.Event{}, 100
     end
   end
@@ -89,7 +89,7 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
           assert :ok = Bus.safe_emit(:not_a_source, :"pod.completed", [])
         end)
 
-      assert log =~ "event malformé"
+      assert log =~ "malformed event"
       assert log =~ "[error]"
       refute_receive %Fleet.Event{}, 100
     end
@@ -100,7 +100,7 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
           assert :ok = Bus.safe_emit(:spawner, "type.jamais.preregistre.xyz", [])
         end)
 
-      assert log =~ "event malformé"
+      assert log =~ "malformed event"
       assert log =~ "[error]"
       refute_receive %Fleet.Event{}, 100
     end
@@ -115,7 +115,7 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
         end)
 
       assert log =~ "MonEmetteur: alerte NON émise"
-      assert log =~ "event malformé"
+      assert log =~ "malformed event"
     end
   end
 end

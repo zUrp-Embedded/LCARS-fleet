@@ -19,7 +19,7 @@ defmodule Fleet.EventRouter.CatalogF008Test do
     Application.put_env(:fleet_event_router, :load_event_registry, true)
     Application.put_env(:fleet_event_router, :events_yaml_path, "/nonexistent/events-xyz.yaml")
 
-    assert_raise RuntimeError, ~r/events\.yaml absent ou invalide/, fn ->
+    assert_raise RuntimeError, ~r/events\.yaml absent or invalid/, fn ->
       Catalog.load!()
     end
   end
@@ -42,7 +42,7 @@ defmodule Fleet.EventRouter.CatalogF008Test do
     Application.put_env(:fleet_event_router, :load_event_registry, true)
     Application.put_env(:fleet_event_router, :events_yaml_path, path)
 
-    assert_raise RuntimeError, ~r/events\.yaml VIDE/, fn ->
+    assert_raise RuntimeError, ~r/events\.yaml EMPTY/, fn ->
       Catalog.load!()
     end
   end

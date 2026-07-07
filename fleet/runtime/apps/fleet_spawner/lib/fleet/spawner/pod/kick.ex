@@ -128,7 +128,7 @@ defmodule Fleet.Spawner.Pod.Kick do
         :ok
 
       {:error, reason} ->
-        Logger.warning("pod #{state.pod_id} kick (#{key}) failed : #{inspect(reason)}")
+        Logger.warning("pod #{state.pod_id} kick (#{key}) failed: #{inspect(reason)}")
     end
   end
 end

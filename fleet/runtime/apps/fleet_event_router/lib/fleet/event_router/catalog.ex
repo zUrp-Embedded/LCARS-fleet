@@ -50,7 +50,7 @@ defmodule Fleet.EventRouter.Catalog do
       {:ok, events} when map_size(events) > 0 ->
         set = events |> Map.keys() |> Enum.map(&String.to_atom/1) |> MapSet.new()
         Fleet.EventRouter.Bus.set_authorized_event_types(set)
-        Logger.info("Catalog: registry events.yaml chargé (#{MapSet.size(set)} types)")
+        Logger.info("Catalog: events.yaml registry loaded (#{MapSet.size(set)} types)")
         :ok
 
       {:ok, events} when map_size(events) == 0 ->
@@ -60,9 +60,9 @@ defmodule Fleet.EventRouter.Catalog do
         # absent/invalid case below, a "green" deploy but a dead registry. `do_load` is reached only
         # in a real boot (`load_event_registry: true`; test sets `false`) → an empty registry here =
         # a broken deploy. Fail-loud at boot, like an absent/invalid events.yaml.
-        raise "fleet_event_router: events.yaml VIDE (events: {}) à #{events_yaml_path()} — un " <>
-                "registry vide laisserait le Bus broadcaster TOUT type sans validation (deploy cassé). " <>
-                "Fail-loud au boot, comme un events.yaml absent/invalide."
+        raise "fleet_event_router: events.yaml EMPTY (events: {}) at #{events_yaml_path()} — an " <>
+                "empty registry would let the Bus broadcast EVERY type without validation (broken deploy). " <>
+                "Fail-loud at boot, same as an absent/invalid events.yaml."
 
       :error ->
         # Deliberate crash-boot ("broken deploy ⇒ we do not boot"): an absent/invalid events.yaml
@@ -72,9 +72,9 @@ defmodule Fleet.EventRouter.Catalog do
         # prod/dev (`load_event_registry: true`; test sets `false`) → here we are necessarily in a
         # real boot that wants the registry. Fail-loud: raise in `Application.start` → the BEAM does
         # not come up, the launcher redeploys. We do NOT start a Bus without validation.
-        raise "fleet_event_router: events.yaml absent ou invalide à #{events_yaml_path()} — " <>
-                "registry d'events non chargeable (deploy cassé). Fail-loud au boot : un Bus sans " <>
-                "registry validerait n'importe quel type. Réparer/redéployer priv/events.yaml."
+        raise "fleet_event_router: events.yaml absent or invalid at #{events_yaml_path()} — " <>
+                "event registry not loadable (broken deploy). Fail-loud at boot: a Bus without a " <>
+                "registry would validate any type. Repair/redeploy priv/events.yaml."
     end
   end
 

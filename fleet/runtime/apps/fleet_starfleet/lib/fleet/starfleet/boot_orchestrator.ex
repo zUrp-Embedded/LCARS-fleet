@@ -61,9 +61,7 @@ defmodule Fleet.Starfleet.BootOrchestrator do
       |> Enum.filter(&String.starts_with?(Atom.to_string(&1), "fleet_"))
       |> Enum.sort()
 
-    Logger.info(
-      "BootOrchestrator: démarrage sequence post-readiness (boot_permanent=#{enabled?})"
-    )
+    Logger.info("BootOrchestrator: starting post-readiness sequence (boot_permanent=#{enabled?})")
 
     boot_result = if enabled?, do: safe_boot(boot_fn), else: {:ok, []}
 
@@ -157,7 +155,7 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   defp emit_canon(type, payload) do
     Bus.safe_emit(:starfleet, type, [payload: payload],
       on_unregistered: :silent,
-      context: "BootOrchestrator: event lifecycle NON émis"
+      context: "BootOrchestrator: lifecycle event NOT emitted"
     )
   end
 end

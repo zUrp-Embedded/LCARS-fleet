@@ -43,8 +43,8 @@ defmodule Fleet.Credentials.RoleToken do
           case String.trim(content) do
             "" ->
               Logger.warning(
-                "RoleToken: token de rôle #{inspect(role)} vide (#{path}) → fallback token " <>
-                  "système (review/commit posté sous le compte système)"
+                "RoleToken: role token #{inspect(role)} empty (#{path}) → fallback to system " <>
+                  "token (review/commit posted under the system account)"
               )
 
               nil
@@ -55,15 +55,15 @@ defmodule Fleet.Credentials.RoleToken do
 
         {:error, reason} ->
           Logger.warning(
-            "RoleToken: token de rôle #{inspect(role)} absent/illisible (#{path} : " <>
-              "#{inspect(reason)}) → fallback token système (review/commit posté sous le compte " <>
-              "système)"
+            "RoleToken: role token #{inspect(role)} absent/unreadable (#{path} : " <>
+              "#{inspect(reason)}) → fallback to system token (review/commit posted under the " <>
+              "system account)"
           )
 
           nil
       end
     else
-      Logger.warning("RoleToken: role non path-safe #{inspect(role)} — ignoré")
+      Logger.warning("RoleToken: non path-safe role #{inspect(role)} — ignored")
       nil
     end
   end

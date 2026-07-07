@@ -108,7 +108,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
             # Notably :max_children (connection-pool saturation = a leaking bridge) —
             # VISIBLE: otherwise the pod just sees an inexplicable readline timeout.
             Logger.warning(
-              "PodSocketAcceptor: pod=#{pod_id} connexion REFUSEE (#{inspect(reason)}) — bridge qui fuit ?"
+              "PodSocketAcceptor: pod=#{pod_id} connection REFUSED (#{inspect(reason)}) — leaking bridge?"
             )
 
             :gen_tcp.close(sock)
@@ -127,7 +127,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       # own timeout (incident rail), not through a silent cascade.
       {:error, reason} when reason in [:emfile, :enfile] ->
         Logger.error(
-          "PodSocketAcceptor: pod=#{pod_id} accept #{inspect(reason)} (pénurie de FDs) — retry dans 1s"
+          "PodSocketAcceptor: pod=#{pod_id} accept #{inspect(reason)} (FD exhaustion) — retry in 1s"
         )
 
         Process.send_after(self(), :retry_accept, 1_000)
@@ -174,7 +174,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
           "id" => id,
           "error" => %{
             "code" => -32_601,
-            "message" => "method #{method} non servie par la socket pod"
+            "message" => "method #{method} not served by the pod socket"
           }
         })
 
@@ -183,13 +183,13 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
       {:error, _decode_error} ->
         Logger.warning(
-          "PodSocketAcceptor: pod=#{pod_id} ligne indecodable (#{byte_size(line)} o) -> -32700"
+          "PodSocketAcceptor: pod=#{pod_id} undecodable line (#{byte_size(line)} B) -> -32700"
         )
 
         encode(%{
           "jsonrpc" => "2.0",
           "id" => nil,
-          "error" => %{"code" => -32_700, "message" => "parse error (ligne JSON invalide)"}
+          "error" => %{"code" => -32_700, "message" => "parse error (invalid JSON line)"}
         })
     end
   end
@@ -212,7 +212,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     ms = div(us, 1000)
 
     if ms > @slow_tool_warn_ms do
-      Logger.warning("PodSocketAcceptor: pod=#{pod_id} tools/call #{tool} LENT (#{ms} ms)")
+      Logger.warning("PodSocketAcceptor: pod=#{pod_id} tools/call #{tool} SLOW (#{ms} ms)")
     end
 
     case resp do

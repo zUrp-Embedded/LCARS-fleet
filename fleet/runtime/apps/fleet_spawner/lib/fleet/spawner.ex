@@ -192,8 +192,8 @@ defmodule Fleet.Spawner do
       brief_required?(cap_profile) ->
         # Diagnosable (not a silent refusal): clearly distinguishes the case.
         Logger.warning(
-          "Spawner: spawn_pod refusé (R18) : pod one-shot sans brief — " <>
-            "fournir :brief (le travail) ou :allow_no_brief (admin/diagnostic)."
+          "Spawner: spawn_pod refused (R18): one-shot pod without brief — " <>
+            "provide :brief (the work) or :allow_no_brief (admin/diagnostic)."
         )
 
         {:error, :brief_required}
@@ -202,8 +202,8 @@ defmodule Fleet.Spawner do
         # Profile with no declared lifetime_scope (unvalidated?): exemption by default
         # (we only refuse the EXPLICIT one-shot), but we make the gap visible.
         Logger.warning(
-          "Spawner: spawn_pod (R18) : lifetime_scope absent du cap-profile — " <>
-            "spawn autorisé sans brief (exemption par défaut, profil à vérifier)."
+          "Spawner: spawn_pod (R18): lifetime_scope missing from cap-profile — " <>
+            "spawn allowed without brief (default exemption, profile to verify)."
         )
 
         :ok

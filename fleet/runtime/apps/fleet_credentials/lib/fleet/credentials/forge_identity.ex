@@ -141,9 +141,9 @@ defmodule Fleet.Credentials.ForgeIdentity do
   """
   @spec coauthor_instruction(String.t()) :: String.t()
   def coauthor_instruction(role) when is_binary(role) do
-    "Signature OBLIGATOIRE — ajoute à CHAQUE commit git le trailer exact :\n" <>
+    "MANDATORY signature — add the exact trailer to EVERY git commit:\n" <>
       "`#{coauthor_trailer(role)}`\n" <>
-      "(sans lui, le livrable est rejeté au push — gate F-01)."
+      "(without it, the deliverable is rejected at push — gate F-01)."
   end
 
   @doc """

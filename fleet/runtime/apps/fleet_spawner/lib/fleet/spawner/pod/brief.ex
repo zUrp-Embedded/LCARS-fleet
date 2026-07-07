@@ -54,18 +54,18 @@ defmodule Fleet.Spawner.Pod.Brief do
       if is_binary(brief) and brief != "" do
         brief
       else
-        "(Pas de brief fourni — issue #{state.issue_id}.)"
+        "(No brief provided — issue #{state.issue_id}.)"
       end
 
     """
-    Salut. Tu es un pod LCARS (rôle #{role}, pod #{state.pod_id}) ; cette session
-    a été lancée par le fleet pour traiter une demande référencée issue #{state.issue_id}.
+    Hi. You are an LCARS pod (role #{role}, pod #{state.pod_id}); this session
+    was launched by the fleet to handle a request referenced as issue #{state.issue_id}.
 
-    Le fleet attend que tu utilises le tool MCP `submit_result` quand ton travail est
-    terminé — c'est la convention LCARS, le canal de retour structuré équivalent d'un
-    Slack DM signed-off. Pas besoin d'écrire de fichier toi-même.
+    The fleet expects you to use the MCP tool `submit_result` when your work is
+    done — that is the LCARS convention, the structured return channel equivalent to a
+    signed-off Slack DM. No need to write any file yourself.
 
-    Voici la demande :
+    Here is the request:
 
     #{body}
     """

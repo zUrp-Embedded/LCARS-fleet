@@ -67,7 +67,7 @@ defmodule Fleet.Workflow.Loader do
         workflow_map
 
       {:error, errors} ->
-        raise "Fleet.Workflow.Loader: schema #{@schema_file} invalide pour #{workflow_map_name}: #{inspect(errors)}"
+        raise "Fleet.Workflow.Loader: schema #{@schema_file} invalid for #{workflow_map_name}: #{inspect(errors)}"
     end
   end
 

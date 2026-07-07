@@ -80,8 +80,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
         # has no token). We REFUSE rather than post under the system account (fail-closed):
         # posting as system would mask traceability (who delegated?) and bypass least-privilege.
         Logger.warning(
-          "Delegation: create_issue REFUSÉ : token du rôle appelant introuvable (provisioning incomplet) — " <>
-            "pas de repli compte système"
+          "Delegation: create_issue REFUSED: calling role's token not found (incomplete provisioning) — " <>
+            "no system-account fallback"
         )
 
         {:error, :role_token_unavailable}

@@ -122,7 +122,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       files: ["apps/fleet_api/lib/fleet/api/ws.ex"],
       pattern: ~r/"event_type"\s*=>/,
       confirm: ~r/"event_type"\s*=>/,
-      note: "consommateurs encore sur le tuple legacy \"event_type\""
+      note: "consumers still on the legacy \"event_type\" tuple"
     })
   end
 
@@ -156,17 +156,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         cond do
           not unwrap_clause? ->
             [
-              "#{rel} : clause `defp normalize(%{\"spec\" => %{\"steps\" => ...}})` (déballage v2.5) absente → un consommateur de la workflow_map lit steps=nil"
+              "#{rel}: `defp normalize(%{\"spec\" => %{\"steps\" => ...}})` clause (v2.5 unwrap) missing → a workflow_map consumer reads steps=nil"
             ]
 
           not called? ->
-            ["#{rel} : `normalize(yaml)` jamais appelé au load → enveloppe v2.5 non déballée"]
+            ["#{rel}: `normalize(yaml)` never called at load → v2.5 envelope not unwrapped"]
 
           true ->
             []
         end,
       note:
-        "Loader DÉBALLE spec.steps via la CLAUSE DE CODE v2.5 (`defp normalize(%{\"spec\"…})`) ET l'appelle au load — matche le code, pas un commentaire (anti-vert-creux durci)"
+        "Loader UNWRAPS spec.steps via the v2.5 CODE CLAUSE (`defp normalize(%{\"spec\"…})`) AND calls it at load — matches the code, not a comment (hardened anti-hollow-green)"
     }
   end
 
@@ -193,9 +193,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       id: "events.handlers.exist",
       remediation: "R08 (R5)",
       status: if(missing == [], do: :pass, else: :fail),
-      evidence: Enum.map(missing, &"events.yaml → #{&1} (absent)"),
-      note:
-        "handlers fantômes référencés dans events.yaml (dispatch table vs subscribers directs)"
+      evidence: Enum.map(missing, &"events.yaml → #{&1} (missing)"),
+      note: "phantom handlers referenced in events.yaml (dispatch table vs direct subscribers)"
     }
   end
 
@@ -238,7 +237,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "gate LLM consolidée gatekeeper (Gates pur) ; pas de NotWiredYet ni délégation coord résiduelle"
+        "LLM gate consolidated on the gatekeeper (pure Gates); no residual NotWiredYet nor coord delegation"
     }
   end
 
@@ -256,7 +255,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       files: ["apps/fleet_sp_builder/lib/fleet/sp_builder.ex"],
       pattern: ~r/cap_profile\.spec,\s*(\["lifetime_scope"\]|"lifetime_scope")/,
       note:
-        "compose_claude_md lit spec.lifetime_scope (pré-v2.5) au lieu de spec.invocation.lifetime_scope"
+        "compose_claude_md reads spec.lifetime_scope (pre-v2.5) instead of spec.invocation.lifetime_scope"
     })
   end
 
@@ -279,7 +278,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       pattern: ~r/Map\.get\(spec,\s*"modop_incompatible"/,
       confirm: ~r/modop_incompatible/,
       note:
-        "check_modop_incompatible lit spec.modop_incompatible (inexistant) au lieu de spec.modop_set.incompatible"
+        "check_modop_incompatible reads spec.modop_incompatible (nonexistent) instead of spec.modop_set.incompatible"
     })
   end
 
@@ -301,13 +300,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         id: "launch.backend_containment_coherent",
         remediation: "R20/F103",
         note:
-          "TmuxBackend (remote-control nu, control-path cassé) supprimé ; ne doit pas réapparaître. La voie host containment:none = host_launch.sh (tmux-holder prouvé), pas TmuxBackend (LAUNCH-Q)"
+          "TmuxBackend (bare remote-control, broken control-path) removed; must not reappear. The host containment:none path = host_launch.sh (proven tmux-holder), not TmuxBackend (LAUNCH-Q)"
       },
       [
         {not File.exists?(Path.join(root, tb)),
-         "#{tb} : TmuxBackend supprimé (F103) — le module ne doit pas réapparaître"},
+         "#{tb}: TmuxBackend removed (F103) — the module must not reappear"},
         {not Regex.match?(~r/LaunchBackend\.TmuxBackend/, File.read!(Path.join(root, rt))),
-         "#{rt} : runtime ne doit plus référencer TmuxBackend (backend hors-bwrap supprimé)"}
+         "#{rt}: runtime must no longer reference TmuxBackend (out-of-bwrap backend removed)"}
       ]
     )
   end
@@ -339,18 +338,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         id: "mcp.required_for_real_backend",
         remediation: "R14",
         note:
-          "pod.ex câble McpProvision.maybe_provision_mcp_config (niveau 1) ET mcp_provision.ex refuse fail-loud :mcp_server_spec_required un backend réel sans spec (niveau 2) — les 2 requis"
+          "pod.ex wires McpProvision.maybe_provision_mcp_config (level 1) AND mcp_provision.ex refuses fail-loud :mcp_server_spec_required a real backend without a spec (level 2) — both required"
       },
       [
         {code_match?(root, pod, ~r/McpProvision\.maybe_provision_mcp_config\(/),
-         "#{pod} : McpProvision.maybe_provision_mcp_config non appelé (provisioning MCP débranché du chemin de spawn)"},
+         "#{pod}: McpProvision.maybe_provision_mcp_config not called (MCP provisioning unwired from the spawn path)"},
         # CONJUNCTIVE confirmation (both regexes on the stripped line): the token
         # must live on a line that IS the error tuple — cf. the hardened
         # anti-hollow-green above (the moduledoc carries the same token in prose).
         {code_match?(root, mcp, ~r/:mcp_server_spec_required/, [
            ~r/:mcp_server_spec_required/,
            ~r/^\s*\{:error,/
-         ]), "#{mcp} : pas de fail-loud :mcp_server_spec_required (garde réelle absente)"}
+         ]), "#{mcp}: no fail-loud :mcp_server_spec_required (real guard missing)"}
       ]
     )
   end
@@ -364,8 +363,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       remediation: "R18",
       file: "apps/fleet_spawner/lib/fleet/spawner.ex",
       pattern: ~r/:brief_required/,
-      missing: "pas de guard :brief_required au boundary spawn_pod",
-      note: "spawn_pod doit refuser un pod one-shot sans brief (hors allow_no_brief)"
+      missing: "no :brief_required guard at the spawn_pod boundary",
+      note: "spawn_pod must refuse a one-shot pod without a brief (except allow_no_brief)"
     })
   end
 
@@ -379,8 +378,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       remediation: "R11",
       file: "apps/fleet_sp_builder/lib/fleet/sp_builder.ex",
       pattern: ~r/:skills_missing/,
-      missing: "filter_skills filtre les absents en silence",
-      note: "filter_skills doit fail-loud {:skills_missing} sur un skill plain absent"
+      missing: "filter_skills silently filters out missing skills",
+      note: "filter_skills must fail-loud {:skills_missing} on a missing plain skill"
     })
   end
 
@@ -406,8 +405,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       id: "events.registry.keys_aligned",
       remediation: "R09/F-08",
       status: if(unregistered == [], do: :pass, else: :fail),
-      evidence: Enum.map(unregistered, &"type consommé hors registry : #{&1}"),
-      note: "tout type consommé (handle_info %Fleet.Event{type:}) doit être une clé events.yaml"
+      evidence: Enum.map(unregistered, &"consumed type outside registry: #{&1}"),
+      note: "every consumed type (handle_info %Fleet.Event{type:}) must be an events.yaml key"
     }
   end
 
@@ -522,11 +521,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     evidence =
       [
         {not state_timeout?,
-         "#{pod} : :result_deadline n'est pas un :state_timeout de :monitoring — il ne s'annulerait plus tout seul au changement d'état (SPAWN-CR1, tue les pods permanents au cycle 2)"},
+         "#{pod}: :result_deadline is not a :state_timeout of :monitoring — it would no longer cancel itself on the state change (SPAWN-CR1, kills permanent pods at cycle 2)"},
         {not cancels_via_transition?,
-         "#{pod} : pas de transition `{:next_state, :extracting, …}` — le résultat arriverait sans quitter :monitoring → state_timeout :result_deadline jamais annulé"},
+         "#{pod}: no `{:next_state, :extracting, …}` transition — the result would arrive without leaving :monitoring → state_timeout :result_deadline never cancelled"},
         {has_hack?,
-         "#{pod} : band-aid `forever -> 60_000` encore présent — revert vers 60s + vrai fix (n'armer que si task active)"}
+         "#{pod}: band-aid `forever -> 60_000` still present — revert to 60s + real fix (arm only if a task is active)"}
       ]
       |> Enum.filter(&elem(&1, 0))
       |> Enum.map(&elem(&1, 1))
@@ -537,7 +536,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "result_deadline = state_timeout de :monitoring, annulé NATIVEMENT par la transition :monitoring → :extracting à l'arrivée du résultat ; n'arme que si pas forever + fire ne tue que si task active ; pas de band-aid 60ks"
+        "result_deadline = state_timeout of :monitoring, cancelled NATIVELY by the :monitoring → :extracting transition when the result arrives; arms only if not forever + fire kills only if a task is active; no 60ks band-aid"
     }
   end
 
@@ -572,24 +571,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             {pod, ~r/CapProfile\.validate\(/,
              "CapProfile.validate (containment G24/F-CONT-RISK, do_allocate)"},
             {pod, ~r/LaunchEnv\.build\(/,
-             "Pod.LaunchEnv.build câblé au spawn (do_launch enchaîne env + portes credentials)"},
+             "Pod.LaunchEnv.build wired to the spawn (do_launch chains env + credentials gates)"},
             {launch_env, ~r/Fleet\.Credentials\.Gate\.validate\(/,
-             "Fleet.Credentials.Gate.validate (porte scope+plan, dans LaunchEnv.build)"},
+             "Fleet.Credentials.Gate.validate (scope+plan gate, in LaunchEnv.build)"},
             {gate, ~r/ScopeValidator\.validate\(/,
-             "ScopeValidator.validate (délégation scope-coverage)"},
-            {gate, ~r/PlanValidator\.validate\(/,
-             "PlanValidator.validate (délégation plan payant)"}
+             "ScopeValidator.validate (scope-coverage delegation)"},
+            {gate, ~r/PlanValidator\.validate\(/, "PlanValidator.validate (paid-plan delegation)"}
           ],
           do:
             {code_match?(root, rel, re),
-             "#{rel} : #{label} absente (porte creuse / délégation vide)"}
+             "#{rel}: #{label} missing (hollow gate / empty delegation)"}
 
     evidence_check(
       %{
         id: "spawn.gates_wired",
         remediation: "R-spawn-gates",
         note:
-          "porte containment (CapProfile.validate, do_allocate) dans pod.ex + porte credentials câblée au spawn via Pod.LaunchEnv (do_launch appelle LaunchEnv.build, qui enchaîne Fleet.Credentials.Gate.validate), ET la porte délègue réellement scope (ScopeValidator) + plan (PlanValidator) dans gate.ex — 5 vérifs, 2 niveaux"
+          "containment gate (CapProfile.validate, do_allocate) in pod.ex + credentials gate wired to the spawn via Pod.LaunchEnv (do_launch calls LaunchEnv.build, which chains Fleet.Credentials.Gate.validate), AND the gate actually delegates scope (ScopeValidator) + plan (PlanValidator) in gate.ex — 5 checks, 2 levels"
       },
       items
     )
@@ -629,7 +627,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "gatekeeper = juge d'exception (dispatch sur gate non-tranchable), jamais un step role:gatekeeper (§L441 ; GATE-D1)"
+        "gatekeeper = exception judge (dispatched on a non-adjudicable gate), never a step role:gatekeeper (§L441; GATE-D1)"
     }
   end
 
@@ -659,17 +657,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         cond do
           not File.exists?(abs) ->
             [
-              "#{step_run} : ABSENT — le verdict-route (déballage enveloppe worker) a disparu (#11) ; si déplacé, MAJ ce rail"
+              "#{step_run}: ABSENT — the verdict-route (worker envelope unwrap) is gone (#11); if moved, update this rail"
             ]
 
           not unwrap_present? ->
-            ["#{step_run} : verdict_route ne déplie pas l'enveloppe worker (#11)"]
+            ["#{step_run}: verdict_route does not unwrap the worker envelope (#11)"]
 
           true ->
             []
         end,
       note:
-        "déplier %{status,result} avant de lire decision (StepRunConsumer) ; idem avant Gates.evaluate côté StepRunConsumer (le rail forge-driven, vérifié par test). Rail EXIGE le fichier (pas de pass-si-absent — anti-vert-creux durci)"
+        "unwrap %{status,result} before reading decision (StepRunConsumer); same before Gates.evaluate on the StepRunConsumer side (the forge-driven rail, test-verified). Rail REQUIRES the file (no pass-if-absent — hardened anti-hollow-green)"
     }
   end
 
@@ -685,9 +683,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       file: "config/runtime.exs",
       pattern: ~r/R-no-root-runtime|refuse de tourner en root/,
       confirm: ~r/root/,
-      missing: "pas de self-check anti-root au boot (FORGE-D1)",
+      missing: "no anti-root self-check at boot (FORGE-D1)",
       note:
-        "le daemon doit refuser getuid()==0 au boot (boot guard) ; User=lcars systemd seul ne couvre pas un run dev/manuel en root"
+        "the daemon must refuse getuid()==0 at boot (boot guard); systemd User=lcars alone does not cover a dev/manual run as root"
     })
   end
 
@@ -843,35 +841,35 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
         undeclared =
           for {f, t} <- MapSet.difference(real, declared),
-              do: "arete compile REELLE non declaree : #{f} -> #{t}"
+              do: "REAL compile edge not declared: #{f} -> #{t}"
 
         phantom =
           for {f, t} <- MapSet.difference(declared, real),
-              do: "arete DECLAREE fantome (absente des mix.exs) : #{f} -> #{t}"
+              do: "DECLARED phantom edge (absent from the mix.exs files): #{f} -> #{t}"
 
         upward =
           for {f, t} <- real,
               rf = rings[f],
               rt = rings[t],
               is_integer(rf) and is_integer(rt) and rf < rt and not MapSet.member?(seams, {f, t}),
-              do: "dep compile MONTANTE non-seam : #{f}(R#{rf}) -> #{t}(R#{rt})"
+              do: "UPWARD non-seam compile dep: #{f}(R#{rf}) -> #{t}(R#{rt})"
 
         dead_seams =
           for s <- seam_list,
               not seam_alive?(root, s["from"], s["marker"]),
               do:
-                "seam MORT (marker `#{s["marker"]}` absent du code de #{s["from"]}) : #{s["from"]} -> #{s["to"]}"
+                "DEAD seam (marker `#{s["marker"]}` absent from the code of #{s["from"]}): #{s["from"]} -> #{s["to"]}"
 
         evidence = undeclared ++ phantom ++ upward ++ dead_seams
 
         %{
           id: "layering.dependency_graph",
           remediation:
-            "D4/A2 — MAJ apps/fleet_event_router/priv/allowed_graph.yaml, ou corriger la dep/seam",
+            "D4/A2 — update apps/fleet_event_router/priv/allowed_graph.yaml, or fix the dep/seam",
           status: if(evidence == [], do: :pass, else: :fail),
           evidence: evidence,
           note:
-            "topologie declaree = graphe compile reel (bidirectionnel) + monotonicite ring + seams vivants ; " <>
+            "declared topology = real compile graph (bidirectional) + ring monotonicity + live seams; " <>
               "PubSub (Bus, R0) exempt"
         }
 
@@ -880,8 +878,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           id: "layering.dependency_graph",
           remediation: "D4/A2",
           status: :fail,
-          evidence: ["priv/allowed_graph.yaml illisible ou malforme (fail-closed)"],
-          note: "yaml de topologie absent/invalide"
+          evidence: ["priv/allowed_graph.yaml unreadable or malformed (fail-closed)"],
+          note: "topology yaml absent/invalid"
         }
     end
   end

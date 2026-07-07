@@ -88,15 +88,15 @@ defmodule Fleet.SchemaCacheTest do
           SchemaCache.fetch!(key, "Fleet.Coord.Policies.init_policies!/0")
         end
 
-      assert err.message =~ "pas chargée"
-      assert err.message =~ "appeler Fleet.Coord.Policies.init_policies!/0 au boot"
+      assert err.message =~ "not loaded"
+      assert err.message =~ "call Fleet.Coord.Policies.init_policies!/0 at boot"
     end
 
     test "clé pas chargée, sans hint → message générique « init boot-time »" do
       key = unique_key(:fetch_miss_no_hint)
 
       err = assert_raise(ArgumentError, fn -> SchemaCache.fetch!(key) end)
-      assert err.message =~ "la fonction d'init boot-time de l'app propriétaire"
+      assert err.message =~ "the owning app's boot-time init function"
     end
   end
 

@@ -366,7 +366,7 @@ defmodule Fleet.Spawner.PodTest do
       # canal-user (safety guardrail REPL).
       issue = File.read!(Path.join(info.pod_dir, "issues/issue-1.md"))
       # F128 : cadre neutre + rôle interpolé (plus de priming "worker engineer").
-      assert issue =~ "pod LCARS (rôle engineer"
+      assert issue =~ "LCARS pod (role engineer"
       assert issue =~ brief
       assert issue =~ "submit_result"
 
@@ -561,7 +561,7 @@ defmodule Fleet.Spawner.PodTest do
                })
 
       assert msg =~ "project-bound"
-      assert msg =~ "sans repo_id"
+      assert msg =~ "without repo_id"
       refute_received {:launch_called, _args, _env}
     end
 

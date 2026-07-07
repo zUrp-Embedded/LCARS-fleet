@@ -74,7 +74,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
       )
 
       Logger.info(
-        "pod #{pod_id} clear_terminal_snapshot: tombstone :#{phase} effacée (re-spawn FRESH, BL-055)"
+        "pod #{pod_id} clear_terminal_snapshot: tombstone :#{phase} erased (FRESH re-spawn, BL-055)"
       )
 
       :ok
@@ -144,8 +144,8 @@ defmodule Fleet.Spawner.Pod.StateFs do
         # ERROR (not a warning) — `:ok` is still returned (non-fatal: do not crash here)
         # but the breach is LOUD (error-level → monitoring).
         Logger.error(
-          "pod #{state.pod_id} write_state_fs ÉCHEC — point de recovery durable perdu " <>
-            "(non-fatal) : #{inspect(reason)}"
+          "pod #{state.pod_id} write_state_fs FAILED — durable recovery point lost " <>
+            "(non-fatal): #{inspect(reason)}"
         )
 
         :ok

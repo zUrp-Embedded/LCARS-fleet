@@ -69,13 +69,13 @@ defmodule Fleet.MCP.PodTools.WorkItems do
       work_item_id ->
         case TaskQueue.submit_result(pod_id, Map.put(payload, "work_item_id", work_item_id)) do
           {:ok, _task} ->
-            {:ok, "Resultat recu par le fleet. Tache close."}
+            {:ok, "Result received by the fleet. Task closed."}
 
           {:error, :no_active_work_item} ->
             {:error, :no_active_work_item}
 
           {:error, :double_submit_ignored} ->
-            {:ok, "Resultat deja recu (ignore)."}
+            {:ok, "Result already received (ignored)."}
 
           {:error, :work_item_id_mismatch} ->
             {:error, :work_item_id_mismatch}

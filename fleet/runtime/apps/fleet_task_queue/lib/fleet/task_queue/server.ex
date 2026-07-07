@@ -181,7 +181,10 @@ defmodule Fleet.TaskQueue.Server do
     {state, superseded} = supersede_active(state, pod_id)
 
     if superseded > 0,
-      do: Logger.debug("Server: enqueue pod=#{pod_id} supersède #{superseded} active(s) stale")
+      do:
+        Logger.debug(
+          "Server: enqueue pod=#{pod_id} supersedes #{superseded} stale active item(s)"
+        )
 
     new_state = state |> put_work_item(work_item) |> persist()
 

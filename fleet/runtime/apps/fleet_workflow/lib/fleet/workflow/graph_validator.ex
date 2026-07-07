@@ -68,30 +68,29 @@ defmodule Fleet.Workflow.GraphValidator do
   @spec describe(error()) :: String.t()
   def describe({:phantom_edge, %{step: step, needs: dep}}),
     do:
-      "le `needs` #{inspect(dep)} du step #{inspect(step)} ne réfère aucun step déclaré — " <>
-        "arête fantôme (typo silencieux : le step attendrait un prédécesseur inexistant et le pipeline se figerait)"
+      "the `needs` #{inspect(dep)} of step #{inspect(step)} refers to no declared step — " <>
+        "phantom edge (silent typo: the step would wait on a nonexistent predecessor and the pipeline would freeze)"
 
   def describe({:no_root, _}),
-    do: "aucun step racine — il faut exactement un step d'entrée avec `needs: []`"
+    do: "no root step — exactly one entry step with `needs: []` is required"
 
   def describe({:multiple_roots, %{roots: roots}}),
     do:
-      "plusieurs steps racine #{inspect(roots)} — un seul point d'entrée `needs: []` est autorisé " <>
-        "(entrée parallèle hors-scope du runtime séquentiel)"
+      "multiple root steps #{inspect(roots)} — a single `needs: []` entry point is allowed " <>
+        "(parallel entry is out of scope for the sequential runtime)"
 
   def describe({:unreachable, %{steps: orphans}}),
-    do:
-      "step(s) orphelin(s) #{inspect(orphans)} inatteignable(s) depuis la racine — ils ne s'exécuteraient jamais"
+    do: "orphan step(s) #{inspect(orphans)} unreachable from the root — they would never run"
 
   def describe({:cycle, %{steps: cyclic}}),
     do:
-      "cycle de dépendances impliquant #{inspect(cyclic)} — le graphe doit être un DAG " <>
-        "(un cycle fige le pipeline ; c'est aussi le cas d'une chaîne sans terminal atteignable)"
+      "dependency cycle involving #{inspect(cyclic)} — the graph must be a DAG " <>
+        "(a cycle freezes the pipeline; a chain with no reachable terminal is the same condition)"
 
   def describe({:fan_out, %{step: step, successors: succs}}),
     do:
-      "le step #{inspect(step)} a #{length(succs)} successeurs #{inspect(succs)} — le runtime est séquentiel " <>
-        "(un seul successeur par step ; cf. Fleet.Pilot.WorkflowMapNav qui rejette le fan-out à la navigation)"
+      "step #{inspect(step)} has #{length(succs)} successors #{inspect(succs)} — the runtime is sequential " <>
+        "(a single successor per step; cf. Fleet.Pilot.WorkflowMapNav, which rejects fan-out at navigation)"
 
   # ── checks (each pure: data → :ok | {:error, {kind, detail}}) ──
 

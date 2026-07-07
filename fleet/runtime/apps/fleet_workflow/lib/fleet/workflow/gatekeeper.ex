@@ -102,11 +102,11 @@ defmodule Fleet.Workflow.Gatekeeper do
     with {:ok, cp} <- loader.("gatekeeper"),
          :ok <- do_spawn(spawner, cp) do
       :persistent_term.put(@pt_key, @pod_id)
-      Logger.info("Gatekeeper: permanent booté + registré pod=#{@pod_id}")
+      Logger.info("Gatekeeper: permanent booted + registered pod=#{@pod_id}")
       {:ok, @pod_id}
     else
       {:error, reason} = err ->
-        Logger.error("Gatekeeper: boot échoué: #{inspect(reason)}")
+        Logger.error("Gatekeeper: boot failed: #{inspect(reason)}")
         err
     end
   end

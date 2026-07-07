@@ -116,9 +116,9 @@ defmodule Fleet.EventRouter.BindAddress do
 
           {:error, reason} ->
             raise ArgumentError,
-                  "LCARS bind host #{inspect(host)} invalide — ni une IP, ni un nom résoluble " <>
-                    "(#{inspect(reason)}). Corriger l'env d'exposition (LCARS_BIND_HOST ou " <>
-                    "l'override de surface) ; boot refusé."
+                  "LCARS bind host #{inspect(host)} invalid — neither an IP nor a resolvable " <>
+                    "name (#{inspect(reason)}). Fix the exposure env (LCARS_BIND_HOST or the " <>
+                    "surface override); boot refused."
         end
     end
   end

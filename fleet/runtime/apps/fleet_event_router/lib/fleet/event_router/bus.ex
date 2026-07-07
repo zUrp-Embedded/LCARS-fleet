@@ -179,7 +179,7 @@ defmodule Fleet.EventRouter.Bus do
         :log ->
           Logger.warning(
             "#{log_context(safe_opts)} — event #{inspect(type)} (source=#{inspect(source)}) " <>
-              "non émis, type hors registry events.yaml : #{Exception.message(e)}"
+              "not emitted, type outside the events.yaml registry: #{Exception.message(e)}"
           )
 
           :ok
@@ -188,7 +188,7 @@ defmodule Fleet.EventRouter.Bus do
     e in [ArgumentError, FunctionClauseError] ->
       Logger.error(
         "#{log_context(safe_opts)} — event #{inspect(type)} (source=#{inspect(source)}) " <>
-          "NON émis, event malformé (bug de construction) : #{inspect(e)}"
+          "NOT emitted, malformed event (construction bug): #{inspect(e)}"
       )
 
       :ok
@@ -255,9 +255,9 @@ defmodule Fleet.EventRouter.Bus do
           :ok
         else
           raise Fleet.Event.UnregisteredError,
-                "registry events.yaml VIDE et :permit_when_registry_empty = false (fail-closed) — " <>
-                  "broadcast de #{inspect(type)} (source=#{inspect(event.source)}) refusé tant que " <>
-                  "le registry n'est pas chargé (Catalog.load!/0 doit tourner avant tout broadcast)."
+                "events.yaml registry EMPTY and :permit_when_registry_empty = false (fail-closed) — " <>
+                  "broadcast of #{inspect(type)} (source=#{inspect(event.source)}) refused until " <>
+                  "the registry is loaded (Catalog.load!/0 must run before any broadcast)."
         end
 
       type in types ->

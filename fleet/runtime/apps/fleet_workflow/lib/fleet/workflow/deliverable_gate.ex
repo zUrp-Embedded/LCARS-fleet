@@ -89,11 +89,11 @@ defmodule Fleet.Workflow.DeliverableGate do
 
       {out, 128} ->
         {:error,
-         {:git_error, "merge-base rc128 (sha invalide / repo corrompu) : #{String.trim(out)}"}}
+         {:git_error, "merge-base rc128 (invalid sha / corrupt repo): #{String.trim(out)}"}}
 
       # Any other unexpected rc: fail-closed as `:git_error` (never a false `base_not_ancestor`).
       {out, rc} ->
-        {:error, {:git_error, "merge-base rc#{rc} : #{String.trim(out)}"}}
+        {:error, {:git_error, "merge-base rc#{rc}: #{String.trim(out)}"}}
     end
   end
 

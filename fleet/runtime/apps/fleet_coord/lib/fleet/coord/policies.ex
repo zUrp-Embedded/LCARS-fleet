@@ -60,12 +60,12 @@ defmodule Fleet.Coord.Policies do
           data
 
         {:ok, other} ->
-          raise "fleet_coord: policies #{path} malformé (pas une map : #{inspect(other)}) — " <>
-                  "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
+          raise "fleet_coord: policies #{path} malformed (not a map: #{inspect(other)}) — " <>
+                  "broken deploy, fail-loud at boot (check LCARS_COORD_POLICIES_PATH)"
 
         {:error, reason} ->
-          raise "fleet_coord: policies #{path} absent/illisible (#{inspect(reason)}) — " <>
-                  "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
+          raise "fleet_coord: policies #{path} missing/unreadable (#{inspect(reason)}) — " <>
+                  "broken deploy, fail-loud at boot (check LCARS_COORD_POLICIES_PATH)"
       end
 
     # Direct put (NOT `Fleet.SchemaCache.cached/2`): `init_policies!/0` must ALWAYS
@@ -100,8 +100,8 @@ defmodule Fleet.Coord.Policies do
         :ok
 
       {:error, errors} ->
-        raise "fleet_coord: policies #{path} INVALIDE vs coord-policies-v1.json (#{inspect(errors)}) — " <>
-                "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
+        raise "fleet_coord: policies #{path} INVALID vs coord-policies-v1.json (#{inspect(errors)}) — " <>
+                "broken deploy, fail-loud at boot (check LCARS_COORD_POLICIES_PATH)"
     end
   end
 
