@@ -1,8 +1,8 @@
 defmodule Fleet.Starfleet.CoordBackend do
   @moduledoc """
-  Behaviour wrapper around `Fleet.Coord` (workstream 14).
+  Behaviour wrapper around `Fleet.Coord`.
 
-  Lets the `fleet_coord` dep be deferred until coord is wired (workstream 14).
+  Lets the `fleet_coord` dep be deferred until coord is wired.
   The `NotWiredYet` default returns `:ok` (Cat 5 escalation is audit-only, no
   runtime side effect). Consistent with the deny-by-default + fail-safe stance
   (the audit log is written even if coord is not wired).
@@ -31,7 +31,7 @@ defmodule Fleet.Starfleet.CoordBackend do
 
   @doc """
   The wired coord escalation backend (config `:fleet_starfleet, :coord_backend`),
-  or `NotWiredYet` by default (coord not wired — workstream 14). SINGLE SOURCE of
+  or `NotWiredYet` by default (coord not wired). SINGLE SOURCE of
   this lookup for the escalation producers (`Cat5Escalator`, `DriftMonitor`) — a
   single default to keep aligned.
   """

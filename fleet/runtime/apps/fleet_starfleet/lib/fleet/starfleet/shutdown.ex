@@ -41,16 +41,17 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   ## `refuse_new_jobs/1`
 
   Activates `Fleet.Shutdown.Quiesce` → the top-level REST entry point
-  `/api/admin/spawn` (`Fleet.API.Rest` reads `quiescing?`) refuses new work.
-  (The RAM engine `Fleet.Workflow.start_pipeline/3`, another entry point gated
-  historically, is REMOVED.) The internal work of an in-flight step_run is NOT gated.
+  `/api/admin/spawn` (`Fleet.API.Rest` reads `quiescing?`) refuses new work. That
+  admission is the SOLE way new work enters, so gating it is total. The internal work
+  of an in-flight step_run is NOT gated.
 
   ## `in_flight_count/0` — scope (user decision)
 
   **Every live NON-PERMANENT pod counts** (the real forge work) + unassigned queued
   work items. Permanent pods (arch, gatekeeper…) are RESIDENTS, not work — EXCLUDED
-  (see below). There are NO MORE in-RAM workflow runs to count: the
-  `Fleet.Workflow.Executor` engine is deleted (one live pod = one step_run in progress).
+  (see below). In-flight is read from the pods and the queue, NEVER from an in-memory
+  run table: RAM state can lie (it drifts on a crash/restart), the pods and the forge
+  stay true — one live pod = one step_run in progress.
 
     * `Fleet.Spawner.list_pods/0` filtered to NON-permanent — active workers (also covers
       assigned work: an assigned work item ⇒ its pod is live ⇒ counted here)
@@ -106,12 +107,12 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
   @impl true
   def in_flight_count do
-    # `pipeline_running` REMOVED: the RAM engine (`Fleet.Workflow.Executor`) is deleted,
-    # there are no more in-RAM workflow runs to drain. The in-flight = live NON-PERMANENT pods (the
-    # real work of the forge rail: one worker = one step_run in progress) + queued work items not
-    # yet pulled. The PERMANENTS (arch, gatekeeper) are RESIDENTS, not work: counting
-    # them made the drain unreachable (they live continuously) → every graceful stop consumed
-    # its grace IN FULL and concluded "timeout" instead of "drained" (DrDree finding, 2026-07-05).
+    # In-flight = live NON-PERMANENT pods + queued work not yet pulled — counted from the pods
+    # and the queue, NEVER from an in-memory run table: RAM state can lie (it drifts on a
+    # crash/restart), the pods and the forge stay true (one live pod = one step_run in progress).
+    # The PERMANENTS (arch, gatekeeper) are RESIDENTS, not work: they live continuously, so counting
+    # them keeps the drain unreachable → every graceful stop burned its full grace and concluded
+    # "timeout" instead of "drained". Hence excluded.
     spawner_pods() + tasks_pending()
   end
 

@@ -10,7 +10,7 @@ defmodule Fleet.CapProfile.DisallowedTools do
   Single dependency direction (no cycle): this module depends on the
   `%Fleet.CapProfile{}` struct (compile-dep); `Fleet.CapProfile` calls this module via
   three delegators — `with_resolved_disallowed_tools/1` (consumed by
-  `Fleet.Spawner.Pod.do_allocate/1`), `git_ops_denied_patterns/1`,
+  the `:allocating` state step of `Fleet.Spawner.Pod`), `git_ops_denied_patterns/1`,
   `baseline_git_ops_denied_patterns/0` (runtime-dep). The public API
   `Fleet.CapProfile.*` does not move. Calls NEITHER `Schema` NOR `Invariants` NOR the
   `load`/`compose` core.
@@ -52,7 +52,7 @@ defmodule Fleet.CapProfile.DisallowedTools do
   Deduplicated union, order preserved: existing, baseline, profile.
   Idempotent.
 
-  Application point: `Fleet.Spawner.Pod.do_allocate/1` when writing
+  Application point: the `:allocating` state step of `Fleet.Spawner.Pod` when writing
   `.cap-profile.json` into the pod, so that `claude_launch.sh` receives the
   already-resolved list. Exposed as `Fleet.CapProfile.with_resolved_disallowed_tools/1`
   (delegator — that is the name the spawner consumes).
@@ -82,7 +82,7 @@ defmodule Fleet.CapProfile.DisallowedTools do
   **Raises** if the baseline file is absent, unreadable, or of an invalid
   format. The baseline is doctrinally "intangible": a silent fail-open
   (returning `[]`) would disable the universal denylist without alerting,
-  contradicting the intent → fail-closed. The caller (`pod.ex do_allocate`)
+  contradicting the intent → fail-closed. The caller (`pod.ex`, `:allocating` state)
   catches via `rescue` and transitions to `:failed` cleanly.
 
   Pure modulo file I/O; read+parse cached in `:persistent_term`.

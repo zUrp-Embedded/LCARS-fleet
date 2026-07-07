@@ -90,7 +90,7 @@ defmodule Fleet.Spawner.PodTmux do
       :unsafe ->
         Logger.error(
           "PodTmux: pod_id #{inspect(pod_id)} non-conformant — `pkill -f` SKIPPED for safety " <>
-            "(anti self-kill F-034: an overly broad pattern would kill the BEAM)"
+            "(anti self-kill: an overly broad pattern would kill the BEAM)"
         )
 
         :ok

@@ -8,7 +8,10 @@ defmodule Fleet.Starfleet.DriftMonitor do
   ⚠ `pod.drift` is an event with NO current producer: the intended emitter
   (a pod-side IPC filter that would count the strikes) was never implemented.
   The `pod.drift` handler below is therefore wired but dormant as long as no
-  producer emits the event. The other 3 handlers have real producers.
+  producer emits the event. Several of the other handlers are latent too (cf.
+  `Cat5Escalator`): `workflow_map.failed` and `oauth.refresh.failed` have no producer
+  wired today; `audit.verdict` is the live path (routed to `CoordBackend`). All handlers
+  stay ready — they route as soon as a producer emits.
 
   ## Events handled
 

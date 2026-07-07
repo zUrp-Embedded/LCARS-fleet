@@ -94,9 +94,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_no_root_runtime_guard(root),
         # ── Topology lock ──
         check_layering_dependency_graph(root)
-        # NB there is no `pipeline.bounded_retry_system_side` rail: it checked the bounded
-        # system-side retry of the in-RAM `Executor`, which no longer exists. The forge-rail
-        # equivalent = `max_rework_rounds` (StepRunConsumer); to re-contract if needed (backlog).
+        # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
+        # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
+        # nothing separate to contract.
       ] ++ Enum.map(@pending_checks, &Map.put(&1, :status, :pending))
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
