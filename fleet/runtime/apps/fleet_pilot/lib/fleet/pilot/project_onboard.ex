@@ -110,9 +110,12 @@ defmodule Fleet.Pilot.ProjectOnboard do
     # Le poller n'admet un repo que s'il porte ce marqueur bot-authored (`ForgeClient.admitted?`) : un
     # humain ne peut pas le forger faute du token système. Posé ICI, à l'onboarding système, en même temps
     # que le topic — découvrabilité ET admission scellées par le même acte d'infra système.
+    # PAS de write per-repo à l'humain : il produit RIEN directement sur la forge (décision user). Il est
+    # read via la team `humans` du tofu (include_all_repositories) → il voit + commente, ne relabellise ni
+    # ne pousse. S'il veut toucher du code, il fork HORS fleet + pose une PR cross-repo → le système la gate
+    # comme un livrable d'agent (pipeline reviews-driven, agent-agnostique). Read sur l'origin suffit au fork.
     with :ok <- ForgeClient.Repo.add_topic(repo, topic, fc_opts(opts)),
-         {:ok, _} <- ForgeClient.Repo.post_onboard_marker(repo, my_human, fc_opts(opts)),
-         :ok <- ForgeClient.Repo.add_collaborator(repo, my_human, "write", fc_opts(opts)) do
+         {:ok, _} <- ForgeClient.Repo.post_onboard_marker(repo, my_human, fc_opts(opts)) do
       :ok
     else
       {:error, reason} -> {:error, {:register_for_fleet, reason}}
