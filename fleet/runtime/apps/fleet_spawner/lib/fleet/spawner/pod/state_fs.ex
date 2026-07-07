@@ -70,7 +70,8 @@ defmodule Fleet.Spawner.Pod.StateFs do
            Recovery.phase_from_string(phase_str) do
       rm_terminal_artifacts(
         Path.dirname(state_fs_path),
-        Paths.pod_dir_for(pod_id, opts)
+        Paths.pod_dir_for(pod_id, opts),
+        opts
       )
 
       Logger.info(
@@ -91,12 +92,32 @@ defmodule Fleet.Spawner.Pod.StateFs do
   the same pod_id) AND by the `PodWarden` (periodic GC of orphan tombstones never re-briefed). Neither
   reads nor checks the phase: the caller already guarantees the pod is terminal. Safe because the
   `--resume` seed lives elsewhere (seed-store `projects.work/<project>/pods/`), not in the pod_dir.
+
+  PATH-ESCAPE GUARD (defense in depth): `rm_rf` is the most destructive gesture in the app; each dir is
+  built from a `pod_id` that SHOULD be validated upstream (`valid_pod_id?`), but a `..`/absolute pod_id
+  that ever slipped through would let the `rm_rf` escape its root. So we re-check the RESOLVED dir is
+  strictly UNDER its root (`state_fs_root` / `pod_dir_root`, resolved the SAME way the path was built,
+  hence the `opts`) and REFUSE (loud, no `rm_rf`) otherwise — a wrong path never widens the blast radius.
   """
-  @spec rm_terminal_artifacts(String.t(), String.t()) :: :ok
-  def rm_terminal_artifacts(state_dir, pod_dir)
-      when is_binary(state_dir) and is_binary(pod_dir) do
-    _ = File.rm_rf(state_dir)
-    _ = File.rm_rf(pod_dir)
+  @spec rm_terminal_artifacts(String.t(), String.t(), keyword()) :: :ok
+  def rm_terminal_artifacts(state_dir, pod_dir, opts \\ [])
+      when is_binary(state_dir) and is_binary(pod_dir) and is_list(opts) do
+    safe_rm_rf(state_dir, Paths.state_fs_root_for(opts), :state_dir)
+    safe_rm_rf(pod_dir, Paths.pod_dir_root(opts), :pod_dir)
+    :ok
+  end
+
+  # rm_rf ONLY if `dir` resolves strictly under `root` — else refuse loudly (never rm outside the root).
+  defp safe_rm_rf(dir, root, label) do
+    if String.starts_with?(Path.expand(dir), Path.expand(root) <> "/") do
+      _ = File.rm_rf(dir)
+    else
+      Logger.error(
+        "StateFs: rm_terminal_artifacts REFUSED #{label} #{inspect(dir)} — not under root " <>
+          "#{inspect(root)} (path-escape guard, no rm_rf)"
+      )
+    end
+
     :ok
   end
 

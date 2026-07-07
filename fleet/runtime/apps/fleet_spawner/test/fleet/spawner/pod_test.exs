@@ -1581,6 +1581,37 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
+  describe "rm_terminal_artifacts/2,3 — guard path-escape (jamais rm_rf hors racine)" do
+    test "REFUSE un state_dir/pod_dir HORS des racines (state_fs_root/pod_dir_root) — rien effacé",
+         %{
+           tmp_dir: tmp
+         } do
+      # Un dir-victime SOUS tmp mais HORS des racines `<tmp>/state` et `<tmp>/pods` (simule un state_dir/
+      # pod_dir forgé via un pod_id évadant qui aurait franchi valid_pod_id? — défense en profondeur).
+      victim = Path.join(tmp, "victim-outside-roots")
+      File.mkdir_p!(victim)
+      File.write!(Path.join(victim, "precious"), "keep")
+
+      assert :ok = Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(victim, victim)
+
+      assert File.exists?(Path.join(victim, "precious")),
+             "rm_terminal_artifacts a effacé un dir HORS racine — le guard path-escape ne tient pas"
+    end
+
+    test "efface bien un state_dir/pod_dir SOUS racine (le chemin nominal marche toujours)", %{
+      tmp_dir: tmp
+    } do
+      pod_id = "issue-guardok-engineer"
+      snap = write_snapshot!(tmp, pod_id, "succeeded")
+      pod_dir = seed_pod_dir!(tmp, pod_id)
+      state_dir = Path.dirname(snap)
+
+      assert :ok = Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(state_dir, pod_dir)
+      refute File.exists?(state_dir)
+      refute File.exists?(pod_dir)
+    end
+  end
+
   # scope_for("one-shot") == "pods" → <state_fs_root>/pods/<pod_id>/state.json (config posée par setup).
   defp write_snapshot!(tmp, pod_id, phase) do
     path = Path.join([tmp, "state", "pods", pod_id, "state.json"])

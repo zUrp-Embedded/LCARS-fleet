@@ -62,12 +62,20 @@ defmodule Fleet.Spawner.Pod.Paths do
   """
   @spec pod_dir_for(String.t(), keyword()) :: String.t()
   def pod_dir_for(pod_id, opts) do
-    base =
-      Keyword.get(opts, :pod_dir_root) ||
-        Application.get_env(:fleet_spawner, :pod_dir_root) ||
-        Path.join(runtime_home(), "pods")
+    Path.join(pod_dir_root(opts), "pod_#{pod_id}")
+  end
 
-    Path.join(base, "pod_#{pod_id}")
+  @doc """
+  Base under which EVERY pod_dir lives (`opts[:pod_dir_root]` > `:fleet_spawner, :pod_dir_root` config >
+  `~/pods`). Exposed as the SINGLE root authority so `StateFs.rm_terminal_artifacts` can verify a
+  pod_dir is strictly UNDER it before an `rm_rf` (path-escape guard) — resolved the SAME way the pod_dir
+  was built, so the check honours the same opts/config override.
+  """
+  @spec pod_dir_root(keyword()) :: String.t()
+  def pod_dir_root(opts \\ []) do
+    Keyword.get(opts, :pod_dir_root) ||
+      Application.get_env(:fleet_spawner, :pod_dir_root) ||
+      Path.join(runtime_home(), "pods")
   end
 
   @doc """
@@ -78,10 +86,17 @@ defmodule Fleet.Spawner.Pod.Paths do
   """
   @spec state_fs_path_for(String.t(), Fleet.CapProfile.t(), keyword()) :: String.t()
   def state_fs_path_for(pod_id, cap_profile, opts) do
-    root = Keyword.get(opts, :state_fs_root, state_fs_root())
     scope = scope_for(Fleet.CapProfile.lifetime_scope(cap_profile, nil))
-    Path.join([root, scope, pod_id, "state.json"])
+    Path.join([state_fs_root_for(opts), scope, pod_id, "state.json"])
   end
+
+  @doc """
+  State root HONOURING an `opts[:state_fs_root]` override (per-spawn/tests), else the global
+  `state_fs_root/0`. The root authority used by `state_fs_path_for/3` AND by
+  `StateFs.rm_terminal_artifacts` for its path-escape guard (same resolution as the built path).
+  """
+  @spec state_fs_root_for(keyword()) :: String.t()
+  def state_fs_root_for(opts), do: Keyword.get(opts, :state_fs_root, state_fs_root())
 
   @doc """
   FS root of the `state.json` snapshots (each pod: `<root>/<scope>/<pod_id>/state.json`, scope ∈
