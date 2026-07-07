@@ -126,4 +126,28 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
              "un champ inconnu au niveau #{label} doit être rejeté (schema strict)"
     end
   end
+
+  test "R0-CAP-011 : enums du schéma == enums code (SSoT lock, détecte le drift schéma↔code)" do
+    raw = @schema_path |> File.read!() |> Jason.decode!()
+
+    # lifetime_scope : dupliqué schéma ↔ Invariants.@lifetime_scope_enum (dedup physique impossible :
+    # JSON-schema ne peut pas référencer de l'Elixir → on VERROUILLE les deux copies par ce test).
+    schema_ls =
+      get_in(raw, [
+        "properties",
+        "spec",
+        "properties",
+        "invocation",
+        "properties",
+        "lifetime_scope",
+        "enum"
+      ])
+
+    assert schema_ls == Fleet.CapProfile.Invariants.lifetime_scope_enum(),
+           "drift lifetime_scope : schéma #{inspect(schema_ls)} ≠ code #{inspect(Fleet.CapProfile.Invariants.lifetime_scope_enum())}"
+
+    # slot_scope : dupliqué schéma ↔ le littéral de l'accessor `slot_scope/1`.
+    schema_ss = get_in(raw, ["properties", "metadata", "properties", "slot_scope", "enum"])
+    assert schema_ss == ["project", "instance"]
+  end
 end

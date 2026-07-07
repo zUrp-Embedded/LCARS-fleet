@@ -80,6 +80,19 @@ defmodule Fleet.CapProfile.Invariants do
     |> Enum.map(fn {code, _fun} -> code end)
   end
 
+  @doc """
+  Closed enum of `spec.invocation.lifetime_scope` (`g24_4`). This list is DUPLICATED in
+  `priv/schema/cap-profile-v2.5.json` (the schema validates it structurally, `g24_4` semantically) — a
+  physical dedup is impossible (JSON schema can't reference Elixir), so a drift test locks the two copies
+  (R0-CAP-011). Exposed as the code-side SSoT that test reads.
+  """
+  @spec lifetime_scope_enum() :: [String.t()]
+  def lifetime_scope_enum, do: @lifetime_scope_enum
+
+  @doc "Closed enum of `metadata.containment` (`g24_1`). Code-only SSoT (the schema leaves containment a free string; `g24_1` is the enforcer)."
+  @spec containment_enum() :: [String.t()]
+  def containment_enum, do: @containment_enum
+
   # ============================================================
   # G24 invariants (one function per check)
   # ============================================================
