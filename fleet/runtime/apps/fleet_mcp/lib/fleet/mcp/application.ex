@@ -1,40 +1,32 @@
 defmodule Fleet.MCP.Application do
   @moduledoc """
-  Application supervisor `fleet_mcp` — substrat MCP système-side.
+  Application supervisor `fleet_mcp` — system-side MCP substrate.
 
-  Le serveur MCP tourne hors bwrap ; le pod le consomme en CLIENT (pull/push).
+  The MCP server runs outside bwrap; the pod consumes it as a CLIENT (pull only).
 
-  Au boot, délègue à `Fleet.MCP.Supervisor` :
-    - `Fleet.MCP.Server` (garde de boot : refuse `start_link` côté pod ;
-      ex-registre de channels push retiré, husk mort)
+  At boot, delegates to `Fleet.MCP.Supervisor`:
+    - `Fleet.MCP.Server` (boot guard: refuses `start_link` on the pod side)
     - `Fleet.MCP.PodSocketRegistry` + `Fleet.MCP.PodSocketSupervisor`
-      (substrat des sockets AF_UNIX per-pod : un accepteur par pod sert
-      `get_work_item`/`submit_result` ; l'identité EST le canal — cf.
+      (substrate of the per-pod AF_UNIX sockets: one acceptor per pod serves
+      `get_work_item`/`submit_result`; identity IS the channel — cf.
       `Fleet.MCP.PodSocketAcceptor`)
 
-  Substrat channels MORT retiré : `Fleet.MCP.Bridge`
-  (pont PubSub↔channels, re-broadcast vers 0 subscriber, channels push retirés)
-  + sa cascade `Fleet.MCP.Schema` / `mcp-channels.yaml` / `mcp-channels-v1.json` (validation
-  config jamais chargée au runtime, 0 caller après le retrait du Bridge). Le drive vit dans
-  `PodTools` (pull). NB homonyme : le pont stdio→HTTP `bin/fleet_mcp_stdio_bridge.py`
-  (transport drive, VIVANT) ≠ ces modules morts.
+  The drive is PULL-only: the pod calls the MCP tools (`get_work_item`/`submit_result`) and is
+  kicked via send-keys. A PUSH-channel model was tried (Anthropic Channel PoC, 4 iterations) and
+  abandoned — do NOT reintroduce push channels. Homonym NB: the stdio→HTTP bridge
+  `bin/fleet_mcp_stdio_bridge.py` is the LIVE drive transport, unrelated to the removed push bridge.
 
-  Purge des channels push : retrait `Channel`, `ChannelHTTP`,
-  `Channels.FleetControl/FleetForge`, `PushDispatcher`. PoC Channel Anthropic
-  KO (4 itérations) → drive ré-implémenté via tools MCP pull
-  (`get_work_item`/`submit_result`) + kick send-keys.
-
-  Stratégie `:one_for_one`, `max_restarts: 3`, `max_seconds: 60`
-  — portée par `Fleet.MCP.Supervisor`.
+  Strategy `:one_for_one`, `max_restarts: 3`, `max_seconds: 60`
+  — carried by `Fleet.MCP.Supervisor`.
 
   ## Transport
 
-  Pod-facing = une **socket AF_UNIX par pod** (`Fleet.MCP.PodSocketAcceptor`,
-  fan-out par `Fleet.MCP.PodSocketSupervisor`) : l'identité EST le canal, pas un
-  secret présenté. La couche TOOL (`Fleet.MCP.PodTools`) reste wrappée derrière
-  le DSL `ExMCP.Server` (deftool / json / text) ; seul le transport HTTP partagé
-  a été retiré. Containment : dans un pod (`boot_environment: :pod`)
-  `Fleet.MCP.Server` refuse → l'app ne boote pas (système-side hors bwrap, voulu).
+  Pod-facing = one **AF_UNIX socket per pod** (`Fleet.MCP.PodSocketAcceptor`,
+  fan-out by `Fleet.MCP.PodSocketSupervisor`): identity IS the channel, not a
+  presented secret. The TOOL layer (`Fleet.MCP.PodTools`) stays wrapped behind
+  the `ExMCP.Server` DSL (deftool / json / text); only the shared HTTP transport
+  was removed. Containment: inside a pod (`boot_environment: :pod`)
+  `Fleet.MCP.Server` refuses → the app does not boot (system-side outside bwrap, intended).
   """
 
   use Application

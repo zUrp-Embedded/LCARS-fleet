@@ -1,54 +1,55 @@
 defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @moduledoc """
-  Behaviour de la séquence d'onboarding projet — le CONTRAT du seam runtime
-  `:project_onboard`, consommé par `Fleet.MCP.PodTools.Delegation`
-  (canal ONBOARDING, tool `create_project`).
+  Behaviour of the project onboarding sequence — the CONTRACT of the
+  `:project_onboard` runtime seam, consumed by `Fleet.MCP.PodTools.Delegation`
+  (ONBOARDING channel, tool `create_project`).
 
-  ## Pourquoi un seam RUNTIME (et pas une dep compile)
+  ## Why a RUNTIME seam (and not a compile dep)
 
-  `fleet_mcp` est Ring 2, `fleet_pilot` est Ring 3 (au-dessus) : une dep mix.exs
-  `fleet_mcp → fleet_pilot` serait MONTANTE, interdite. Le module est résolu au
-  RUNTIME (`resolved/0` : app-env + défaut en atom littéral → aucune dep
-  compile-time, aucun cycle). Seam déclaré dans
-  `fleet_event_router/priv/allowed_graph.yaml` (section `seams`, direction `up`).
+  `fleet_mcp` is Ring 2, `fleet_pilot` is Ring 3 (above): a mix.exs dep
+  `fleet_mcp → fleet_pilot` would be UPWARD, forbidden. The module is resolved at
+  RUNTIME (`resolved/0`: app-env + default as a literal atom → no compile-time
+  dep, no cycle). Seam declared in
+  `fleet_event_router/priv/allowed_graph.yaml` (`seams` section, direction `up`).
 
-  ## Implémentations
+  ## Implementations
 
-    * `Fleet.Pilot.ProjectOnboard` — impl RÉELLE (défaut canon : repo forge +
-      dual-worktree `main`/`work/ops` + scaffold + push). Elle vit dans
-      `fleet_pilot`, qui ne dépend PAS de `fleet_mcp` : elle ne PEUT PAS adopter ce
-      behaviour et reste DUCK-TYPÉE avec un commentaire croisé ; le type du
-      callback est aligné sur son `@spec onboard/2` (`result()`).
-    * Stub test `Fleet.MCP.PodToolsTest.StubOnboard` — même app → adopte le
-      behaviour (le compilateur vérifie la conformité).
+    * `Fleet.Pilot.ProjectOnboard` — the REAL impl (canonical default: forge repo +
+      dual-worktree `main`/`work/ops` + scaffold + push). It lives in
+      `fleet_pilot`, which does NOT depend on `fleet_mcp`: it CANNOT adopt this
+      behaviour and stays DUCK-TYPED with a cross-reference comment; the callback
+      type is aligned on its `@spec onboard/2` (`result()`).
+    * Test stub `Fleet.MCP.PodToolsTest.StubOnboard` — same app → adopts the
+      behaviour (the compiler checks conformance).
   """
 
   @doc """
-  Onboard le projet `name` (slug kebab-case). `opts` consommés par le défaut réel :
+  Onboards the project `name` (kebab-case slug). `opts` consumed by the real default:
   `:org`, `:description`, `:pitch` (cf. `Fleet.Pilot.ProjectOnboard.onboard/2`).
-  Le résultat DOIT porter les 3 clés — `Delegation.do_create_project/2` pattern-matche
-  `%{repo: _, project_dir: _, work_dir: _}` strictement.
+  The result MUST carry the 3 keys — `Delegation.do_create_project/2` pattern-matches
+  `%{repo: _, project_dir: _, work_dir: _}` strictly.
   """
   @callback onboard(name :: String.t(), opts :: keyword()) ::
               {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
               | {:error, term()}
 
   @doc """
-  Importe un repo EXISTANT `full_name` (`"owner/name"`) dans la machine à agents (WS4) — SANS créer ni
-  scaffolder `main` (contenu intact). Mêmes 3 clés de retour qu'`onboard/2` : `Delegation.do_import_project/2`
-  pattern-matche `%{repo: _, project_dir: _, work_dir: _}` strictement, identique au canal onboarding.
+  Imports an EXISTING repo `full_name` (`"owner/name"`) into the agent machine — WITHOUT creating
+  nor scaffolding `main` (content intact). Same 3 return keys as `onboard/2`:
+  `Delegation.do_import_project/2` pattern-matches `%{repo: _, project_dir: _, work_dir: _}`
+  strictly, identical to the onboarding channel.
   """
   @callback import(full_name :: String.t(), opts :: keyword()) ::
               {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
               | {:error, term()}
 
-  # Défaut canon : la séquence d'onboarding réelle côté fleet_pilot. Atom littéral
-  # (pas d'appel remote littéral) → aucune dep compile-time. Posé ICI une seule fois.
+  # Canonical default: the real onboarding sequence on the fleet_pilot side. Literal atom
+  # (not a literal remote call) → no compile-time dep. Set HERE once.
   @default_onboard Fleet.Pilot.ProjectOnboard
 
   @doc """
-  Séquence d'onboarding résolue : config `:fleet_mcp, :project_onboard` sinon le
-  défaut canon `Fleet.Pilot.ProjectOnboard`. SOURCE UNIQUE du défaut.
+  Resolved onboarding sequence: config `:fleet_mcp, :project_onboard` otherwise the
+  canonical default `Fleet.Pilot.ProjectOnboard`. SINGLE SOURCE of the default.
   """
   @spec resolved() :: module()
   def resolved, do: Application.get_env(:fleet_mcp, :project_onboard, @default_onboard)

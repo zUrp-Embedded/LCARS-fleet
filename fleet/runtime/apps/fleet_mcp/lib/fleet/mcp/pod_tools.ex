@@ -1,32 +1,32 @@
 defmodule Fleet.MCP.PodTools do
   @moduledoc """
-  Couche TOOL MCP pod-facing — les RPC que le pod (client MCP claude) appelle pour
-  communiquer avec le fleet, sans scraping ni injection clavier. CE module est la
-  **table de routage** : les schémas `deftool` + le dispatch `handle_tool_call/3`
-  (guards d'arguments, refus typés, format de contenu MCP `json`/`text`). Les métiers
-  vivent dans deux sous-modules aux consommateurs disjoints :
+  Pod-facing MCP TOOL layer — the RPCs the pod (Claude MCP client) calls to
+  talk to the fleet, without scraping or keyboard injection. THIS module is the
+  **routing table**: the `deftool` schemas + the `handle_tool_call/3` dispatch
+  (argument guards, typed refusals, MCP content format `json`/`text`). The domain
+  logic lives in two sub-modules with disjoint consumers:
 
-    * `Fleet.MCP.PodTools.WorkItems` — drive work-item (tout pod) :
-      - `get_work_item`  : canal IN  — le pod PULL son brief depuis `Fleet.TaskQueue`.
-        `{"done": true}` quand aucun brief (le pod s'arrête). Sinon
+    * `Fleet.MCP.PodTools.WorkItems` — work-item drive (every pod):
+      - `get_work_item`  : IN  channel — the pod PULLs its brief from `Fleet.TaskQueue`.
+        `{"done": true}` when there is no brief (the pod stops). Otherwise
         `{"done": false, "work_item": {"work_item_id", "issue_id", "role", "brief", ...}}`.
-      - `submit_result` : canal OUT — le pod PUSH son livrable (`payload`),
-        `work_item_id` OBLIGATOIRE (corrélateur).
-    * `Fleet.MCP.PodTools.Delegation` — délégation forge (architecte only, gate
-      `require_architect` serveur-side) :
-      - `create_issue`     : l'arch délègue une brique d'implémentation (issue forge).
-      - `create_project`   : l'arch démarre un projet neuf (repo + dual-dir + scaffold).
-      - `get_issue_status` : l'arch suit une délégation (issue + PR, `delivered`).
+      - `submit_result` : OUT channel — the pod PUSHes its deliverable (`payload`),
+        `work_item_id` MANDATORY (correlator).
+    * `Fleet.MCP.PodTools.Delegation` — forge delegation (architect only, server-side
+      `require_architect` gate):
+      - `create_issue`     : the arch delegates an implementation brick (forge issue).
+      - `create_project`   : the arch starts a fresh project (repo + dual-dir + scaffold).
+      - `get_issue_status` : the arch tracks a delegation (issue + PR, `delivered`).
 
-  Médiation serveur-side : le pod ne touche jamais la TaskQueue ni la forge directement
-  (la queue, son schéma, son stockage restent invisibles au pod) ; tout passe par ces
-  tools. L'identité (quel pod) est le CANAL : `state.pod_id` est porté par l'accepteur
-  de socket (un pod = une socket), jamais lu du wire — les clauses ici vérifient sa
-  présence (`:pod_id_required` fail-closed), la gate architecte vit dans `Delegation`.
+  Server-side mediation: the pod never touches the TaskQueue nor the forge directly
+  (the queue, its schema, its storage stay invisible to the pod); everything goes through
+  these tools. Identity (which pod) is the CHANNEL: `state.pod_id` is carried by the socket
+  acceptor (one pod = one socket), never read from the wire — the clauses here check its
+  presence (`:pod_id_required`, fail-closed), the architect gate lives in `Delegation`.
 
-  Le broker `Fleet.TaskQueue` broadcast lui-même `%Fleet.Event{work_item.completed}` sur
-  `fleet.events` (consommé par `fleet_spawner`/`fleet_coord`) — ce module n'émet
-  plus d'event string-topic (`pod.result_submitted` supprimé).
+  The `Fleet.TaskQueue` broker itself broadcasts `%Fleet.Event{work_item.completed}` on
+  `fleet.events` (consumed by `fleet_spawner`/`fleet_coord`) — this module no longer emits
+  a string-topic event (`pod.result_submitted` removed).
   """
 
   use ExMCP.Server
@@ -168,29 +168,29 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # ============================================================
-  # Dispatch — drive work-item (Fleet.MCP.PodTools.WorkItems)
+  # Dispatch — work-item drive (Fleet.MCP.PodTools.WorkItems)
   # ============================================================
 
   @impl true
   def handle_tool_call("get_work_item", _arguments, %{pod_id: pod_id} = state)
       when is_binary(pod_id) and pod_id != "" do
-    # Identité = le canal : `pod_id` vient de l'accepteur de socket (un pod = une socket), jamais du wire.
-    # On ne lit donc PAS d'identité dans les arguments — il n'y a rien à prouver, la socket discrimine.
+    # Identity = the channel: `pod_id` comes from the socket acceptor (one pod = one socket), never from the wire.
+    # So we do NOT read any identity from the arguments — there is nothing to prove, the socket discriminates.
     {:ok, %{content: [json(WorkItems.get_work_item(pod_id))]}, state}
   end
 
   def handle_tool_call("get_work_item", _arguments, state) do
-    # `pod_id` absent du state = anomalie de l'accepteur (il DOIT toujours le porter). Erreur typée, pas une
-    # fin de brief masquée en done:true (sinon le pod s'arrêterait en croyant avoir fini). Fail-closed.
+    # `pod_id` absent from the state = acceptor anomaly (it MUST always carry it). Typed error, not a
+    # brief-exhaustion masked as done:true (otherwise the pod would stop believing it had finished). Fail-closed.
     {:error, :pod_id_required, state}
   end
 
   def handle_tool_call("submit_result", %{"payload" => payload} = args, %{pod_id: pod_id} = state)
       when is_map(payload) and is_binary(pod_id) and pod_id != "" do
-    # Identité = le canal (`state.pod_id`, porté par l'accepteur). Le contrat de corrélation
-    # (`work_item_id` OBLIGATOIRE, cherché top-level puis payload) et le mapping des refus typés
-    # (:no_active_work_item, :work_item_id_mismatch, :broadcast_failed — jamais un échec masqué en
-    # succès) vivent dans `WorkItems.submit_result/3`.
+    # Identity = the channel (`state.pod_id`, carried by the acceptor). The correlation contract
+    # (`work_item_id` MANDATORY, looked up top-level then in payload) and the mapping of the typed refusals
+    # (:no_active_work_item, :work_item_id_mismatch, :broadcast_failed — never a failure masked as a
+    # success) live in `WorkItems.submit_result/3`.
     case WorkItems.submit_result(pod_id, args, payload) do
       {:ok, message} -> {:ok, %{content: [text(message)]}, state}
       {:error, reason} -> {:error, reason, state}
@@ -198,8 +198,8 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("submit_result", %{"payload" => payload}, state) when is_map(payload) do
-    # Payload valide mais `pod_id` absent du state = anomalie de l'accepteur → refus typé, jamais de
-    # fallback anonyme (un livrable sans pod identifié n'a nulle part où aller).
+    # Valid payload but `pod_id` absent from the state = acceptor anomaly → typed refusal, never an
+    # anonymous fallback (a deliverable with no identified pod has nowhere to go).
     {:error, :pod_id_required, state}
   end
 
@@ -208,12 +208,12 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # ============================================================
-  # Dispatch — délégation forge architecte (Fleet.MCP.PodTools.Delegation)
+  # Dispatch — architect forge delegation (Fleet.MCP.PodTools.Delegation)
   # ============================================================
 
-  # La gate architecte (require_architect : rôle résolu du canal, jamais du wire) est appliquée
-  # DANS Delegation, avant toute mécanique forge. Ici : guards de forme des arguments + refus
-  # structurels `project` REQUIS (pas de routage par défaut).
+  # The architect gate (require_architect: role resolved from the channel, never from the wire) is applied
+  # INSIDE Delegation, before any forge mechanics. Here: argument-shape guards + structural refusals
+  # `project` REQUIRED (no default routing).
 
   def handle_tool_call(
         "create_issue",
@@ -227,9 +227,9 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  # create_issue SANS `project` valide → REFUS STRUCTUREL. La bonne volonté ne s'impose pas : pas de routage
-  # par défaut (un `project` omis routait en silence vers le dernier projet travaillé → misroute). `project`
-  # est REQUIS ; sans lui, AUCUN issue n'est créé.
+  # create_issue WITHOUT a valid `project` → STRUCTURAL REFUSAL. Goodwill does not impose itself: no default
+  # routing (an omitted `project` used to route silently to the last worked-on project → misroute). `project`
+  # is REQUIRED; without it, NO issue is created.
   def handle_tool_call("create_issue", %{"title" => title, "brief" => brief}, state)
       when is_binary(title) and is_binary(brief) do
     {:error,
@@ -278,9 +278,9 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  # get_issue_status SANS `project` valide → REFUS STRUCTUREL (miroir de create_issue). Pas de routage
-  # par défaut : un `project` omis lirait l'état sur le dernier projet onboardé → état faux, le multi-issue
-  # est mis-séquencé. `project` est REQUIS ; sans lui (ou vide), AUCUNE lecture.
+  # get_issue_status WITHOUT a valid `project` → STRUCTURAL REFUSAL (mirror of create_issue). No default
+  # routing: an omitted `project` would read the state on the last onboarded project → wrong state, the
+  # multi-issue is mis-sequenced. `project` is REQUIRED; without it (or empty), NO read.
   def handle_tool_call("get_issue_status", %{"number" => number}, state)
       when is_integer(number) do
     {:error,
