@@ -156,12 +156,11 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       PLEINE éval (re-dispatch concurrent, verdict fantôme). `gate_eval_owned_refs` lit `TaskQueue.list_active`
       (metadata MA-03 : `gate_eval` + `resume_n` + repo du `resume_payload` — multi-projet : une éval de repoB ne
       possède pas une ref de repoA). Une éval `:cleared` (supersédée) ou `:completed` ne possède PLUS sa ref → le
-      reclaim reprend la main (re-dispatch → ré-escalade, self-heal borné par le budget rework). **Propriété
-      PR par l'issue** (fix 2026-07-07) : un PRODUCTEUR project-scoped en rework/résolution tient le verrou sur
-      la PR (`{repo,:pr,pr_n}`) mais son pod (`<repo>-role`, sans -pr-N-) ne dérivait de sa tâche active que
-      l'ISSUE → son verrou PR se faisait réclamer EN PLEIN TRAVAIL. `augment_pr_ownership_via_issue` : une PR
-      dont l'issue parente (head `lcars/issue-N-role`) est possédée est possédée aussi (les juges `for_pr`
-      possèdent déjà `{repo,:pr,n}` en direct — l'augmentation ne couvre QUE le producteur project-scoped).
+      reclaim reprend la main (re-dispatch → ré-escalade, self-heal borné par le budget rework). **On NE
+      dérive PAS le verrou PR de la propriété de l'issue** (leçon 2026-07-07) : `pod_status` rend `:completed`
+      (fenêtre de publication) → un engineer LIVRÉ « possède » encore son issue ; le protéger étendrait à
+      tort au verrou PR d'un JUGE MORT (verrou PR en review = du juge) → juge jamais re-dispatché = mur. Le
+      churn du verrou PR d'un vrai rework producteur est mineur/self-healing (serialize `:role_busy`).
       **Frontière blindée** : `%Seams{}` (`@enforce_keys`
       `forge`/`spawner`/`task_queue`/`repo`/`forge_opts` — accès hors-5-seams ne compile pas), le caller résout
       les défauts prod (`spawner || Fleet.Spawner`) à SON site. La **grâce 2-tick** (`prior_suspects`) et

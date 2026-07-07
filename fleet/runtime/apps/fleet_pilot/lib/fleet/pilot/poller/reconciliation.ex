@@ -98,17 +98,20 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
       :error ->
         prior_suspects
 
-      owned0 ->
+      owned ->
         repo = seams.repo
 
-        # PROPRIÉTÉ PR PAR L'ISSUE (fix 2026-07-07) : un PRODUCTEUR project-scoped en rework/résolution
-        # tient le verrou sur la PR (`{repo, :pr, pr_n}`), mais son pod (`<repo>-<role>`, sans -pr-N-)
-        # dérive de sa tâche active l'ISSUE (`{repo, :issue, N}`), jamais la PR → son verrou PR paraissait
-        # ORPHELIN et se faisait réclamer EN PLEIN TRAVAIL (bug hello-kitty : verrou volé pendant le pod
-        # vivant). On augmente `owned` : une PR dont l'issue parente (head `lcars/issue-N-role`) est
-        # possédée est possédée AUSSI. Les juges (pod `for_pr`) possèdent déjà `{repo,:pr,n}` en direct
-        # (parse_pod_ref) — cette augmentation ne couvre QUE le producteur project-scoped.
-        owned = augment_pr_ownership_via_issue(owned0, pulls, repo)
+        # NB (leçon 2026-07-07) : on NE dérive PAS le verrou PR de la propriété de l'ISSUE. Tentation
+        # naïve : « une PR dont l'issue parente est possédée est possédée aussi » (pour couvrir un
+        # producteur project-scoped en rework qui tient le verrou PR mais dont le pod ne dérive que
+        # l'issue). MAIS `pod_status` rend `:completed` (fenêtre de publication → `pod_has_active_task?`
+        # compte `:completed` comme actif, correct pour le verrou-ISSUE) : un engineer LIVRÉ (`:completed`,
+        # en review) « possède » encore son issue → il protégerait alors le verrou PR d'un JUGE MORT
+        # (le verrou PR en review appartient au juge, pas au producteur) → juge jamais re-dispatché = MUR
+        # (vu live martine-o-matic PR#2). Le churn du verrou PR pendant un VRAI rework producteur est
+        # mineur et s'auto-guérit (serialize `:role_busy` empêche le double-spawn) — on l'accepte plutôt
+        # que de masquer les orphelins de juge. Un fix propre (set strict `@active_states`, hors
+        # `:completed`) demande un repro de rework — différé, pas d'astuce sous pression.
 
         # Orphelins REPO-QUALIFIÉS (`{repo, :issue|:pr, n}`) : la clé de verrou porte le repo, donc
         # `owned` (refs repo-scopées des pods vivants de CE repo) et `prior_suspects` (cross-tick, tous
@@ -137,22 +140,6 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
         Enum.each(to_reclaim, fn {_repo, _type, n} -> reclaim_lock(seams, n) end)
         MapSet.difference(orphaned_now, to_reclaim)
     end
-  end
-
-  # Augmente `owned` : une PR dont l'ISSUE parente est possédée par un pod vivant est possédée aussi. La
-  # branche head `lcars/issue-N-role` → N via le parseur UNIQUE `ForgeProtocol.parse_feature_branch`
-  # (pas un re-parse maison). Couvre le producteur project-scoped en rework/résolution (son pod
-  # `<repo>-role` ne porte pas -pr-N-, il ne possédait que `{repo,:issue,N}`). Une PR non-fleet ou dont
-  # l'issue n'est pas possédée est laissée telle quelle (candidate orpheline si elle porte le verrou).
-  defp augment_pr_ownership_via_issue(owned, pulls, repo) do
-    for p <- pulls,
-        pr_n = p["number"],
-        is_integer(pr_n),
-        head = get_in(p, ["head", "ref"]) || "",
-        {:ok, {issue_n, _role}} <- [Fleet.Pilot.ForgeProtocol.parse_feature_branch(head)],
-        MapSet.member?(owned, {repo, :issue, issue_n}),
-        into: owned,
-        do: {repo, :pr, pr_n}
   end
 
   # Refs `{repo, :issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes STABLES

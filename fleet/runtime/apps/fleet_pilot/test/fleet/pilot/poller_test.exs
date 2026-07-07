@@ -269,6 +269,14 @@ defmodule Fleet.Pilot.PollerTest do
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-9"}
   end
 
+  # TaskQueue stub : l'eng project a LIVRÉ #8 (tâche `:completed`, fenêtre de publication) — config
+  # martine-o-matic. `pod_status` rend `:completed` (non-nil → compté « actif » pour le verrou-ISSUE),
+  # `pod_active_issue_id` rend encore "issue-8". NE doit PAS protéger le verrou PR d'un juge mort.
+  defmodule ProjectTaskQueueCompletedIssue8 do
+    def pod_status(_pod_id), do: {:ok, :completed}
+    def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
+  end
+
   # G1 — TaskQueue stub : une ÉVAL GATEKEEPER ACTIVE porte la brique #8 de CE repo (metadata MA-03
   # auto-descriptif : gate_eval + resume_n + resume_payload.repository). Aucun pod vivant par ailleurs
   # (le producteur est fini) : c'est exactement la fenêtre d'éval.
@@ -524,12 +532,13 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "verrou PR TENU par un producteur project-scoped en rework/résolution (possédé via l'issue, pas réclamé)" do
-      # Fix 2026-07-07 : un producteur project (`<repo>-engineer`, sans -pr-N-) en rework tient le verrou
-      # SUR LA PR ({repo,:pr,6}), mais sa tâche active ne lui donnait que l'ISSUE ({repo,:issue,8}) → son
-      # verrou PR paraissait orphelin et se faisait voler EN PLEIN TRAVAIL (hello-kitty). L'augmentation
-      # « PR dont l'issue parente est possédée = possédée » le protège : PR #6 (head lcars/issue-8-engineer)
-      # JAMAIS réclamée tant que l'eng travaille #8, même après la grâce 2-tick.
+    test "RÉGRESSION martine : un engineer :completed possédant l'issue ne protège PAS le verrou PR d'un juge mort" do
+      # Bug 2026-07-07 (introduit puis reverté le même jour) : une augmentation « PR dont l'issue parente
+      # est possédée = possédée » protégeait la PR de la réclamation. MAIS `pod_status` rend `:completed`
+      # (fenêtre de publication) → un engineer LIVRÉ « possède » encore son issue → il protégeait le
+      # verrou PR d'un JUGE MORT (verrou PR en review = du juge, pas du producteur) → juge jamais
+      # re-dispatché = MUR (martine-o-matic PR#2). Ici : engineer `:completed` sur issue-8, PR#6 en review
+      # dont le juge est MORT (aucun pod pr-6-* vivant). Le verrou PR#6 DOIT être réclamé (grâce 2-tick).
       issues = [
         %{
           "number" => 8,
@@ -547,7 +556,7 @@ defmodule Fleet.Pilot.PollerTest do
         }
       ]
 
-      name = :"P_pr_lock_#{System.unique_integer([:positive])}"
+      name = :"P_pr_orphan_#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
         Poller.start_link(
@@ -559,15 +568,17 @@ defmodule Fleet.Pilot.PollerTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pulls: {:ok, pulls}, _test_pid: self()],
           loader: StepStubLoader,
+          # engineer project-scoped VIVANT, tâche `:completed` (livré) sur issue-8 — la config martine.
           spawner: ProjectPipeSpawner,
-          task_queue: ProjectTaskQueueIssue8
+          task_queue: ProjectTaskQueueCompletedIssue8
         )
 
+      # issue #8 : PR-backed → exclue du scan issue-orphan, verrou ISSUE jamais réclamé (doctrine).
+      # PR #6 : le juge est mort → verrou orphelin CONFIRMÉ, réclamé après la grâce 2-tick (2e poll).
       Poller.force_poll(name)
-      Poller.force_poll(name)
-
-      # ni le verrou ISSUE (#8, exclu du scan car PR-backed) ni le verrou PR (#6, possédé via l'issue) réclamés.
       refute_received {:remove_label, 6, _}
+      Poller.force_poll(name)
+      assert_received {:remove_label, 6, _}
       refute_received {:remove_label, 8, _}
 
       GenServer.stop(pid)
