@@ -1,0 +1,15 @@
+# SOURCE: bin/claude_launch.identity
+# STATUS: PROD — identité vendor du launcher N1 co-localisé (claude_launch.sh)
+#
+# Fait vendor pur : nom + email d'attribution du CO-AUTHOR git au publish GitHub (jamais lu par le pod,
+# jamais par le runtime BEAM — seul un outil de publication hors-fleet, tel `etc/publish-to-github.sh`,
+# le source). Le co-author = LE VENDOR, jamais hardcodé dans la logique de publication : chaque vendor
+# porte SA propre identité, co-localisée avec SON launcher, même discipline que la frontière N0/N1
+# (« nouveau vendor → nouveau bin/<vendor>_launch.sh » — ici : « → co-localise bin/<vendor>_launch.identity »).
+#
+# Sur la forge de travail, le rôle réel est le trailer `Co-authored-by: LCARS-<role>` (Fleet.Credentials.
+# ForgeIdentity, gate de commit). CE fichier ne concerne QUE la réécriture au publish GH : le rôle interne
+# s'efface, seul le vendor qui a exécuté le travail reste crédité (avec l'humain comme author).
+
+NAME="Claude"
+EMAIL="noreply@anthropic.com"

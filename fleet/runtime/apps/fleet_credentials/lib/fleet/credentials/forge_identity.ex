@@ -65,10 +65,15 @@ defmodule Fleet.Credentials.ForgeIdentity do
   Ces identités sont celles de la FORGE LOCALE (comptes de rôle réels, emails mappés → avatars/traça).
   Le domaine est un CONTRAT WIRE partagé avec `bwrap_launch.sh` (sanctuaire : il pose
   GIT_AUTHOR/COMMITTER `<role>@lcars.local` en env au launch) — une divergence est rattrapée
-  STRUCTURELLEMENT par la gate d'identité de commit (push rejeté fail-closed). FUTUR GitHub :
-  l'attribution « with Claude Code » au format GH (Co-authored-by + email noreply GH, adossée à
-  l'humain maître du repo) sera une table per-destination À CE POINT UNIQUE — aucun autre module
-  ne tape un email git.
+  STRUCTURELLEMENT par la gate d'identité de commit (push rejeté fail-closed).
+
+  PUBLISH GitHub (2026-07-07) : le rôle LCARS s'efface au publish, le CO-AUTHOR devient LE VENDOR (pas
+  un rôle, jamais hardcodé — Claude aujourd'hui, un autre vendor demain), dérivé du fait co-localisé au
+  launcher N1 actif (`bin/<vendor>_launch.identity`, cf. `bin/claude_launch.identity`) — même discipline
+  que la frontière N0/N1 vendor. L'AUTHOR devient l'humain (le système s'efface aussi : `author :=
+  committer` sur les commits `system_email()`). La réécriture elle-même vit hors-Elixir
+  (`etc/publish-to-github.sh`, `git filter-repo`) : ce module reste l'autorité des identités de la forge
+  LOCALE, pas l'exécutant de la transformation de publish.
   """
 
   @role_email_domain "lcars.local"
