@@ -1,10 +1,5 @@
 # Fleet.TaskQueue
 
-**Date**: 2026-06-01
-**Last revised**: 2026-07-07 (translated to EN. Previous resync 2026-07-05 against the code: ring 1, ephemeral broker in prod, full API — `pod_active_issue_id`/`last_poll`, real flow, Configuration section; Server split → Store + Broadcast)
-**Status**: implemented (initial build commit `f971d2b3`)
-**Derived from**: DN `orchestration/task-queue` §C
-
 LCARS cross-pod orchestration broker (Ring 1). **A single writer** (GenServer),
 work-item distribution/collection, **event-driven** completion. Replaces the in-mem stub
 `Fleet.MCP.TaskQueue` (since removed, commit `58cf8d89`).

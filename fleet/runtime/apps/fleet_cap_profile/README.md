@@ -1,10 +1,5 @@
 # Fleet.CapProfile
 
-**Date**: 2026-05-09
-**Last revised**: 2026-07-07 (translated to EN; resynced against the code: `do_allocate` ref replaced by the real spawn-boundary mechanism, `apiVersion` dropped from the modop reserved keys [removed from the schema], API admission module = `Fleet.API.SpawnAdmission`. Previous resync 2026-07-05: Ring 0 [renumbering 2026-07-04], + `Fleet.Layout` section, `:schema_dir` knob + `LCARS_CAPPROFILES_ROOT` env, exact g24_9_strict/prefix codes; canonical encoding + sha256 extracted into `Fleet.CapProfile.CanonicalJson`, `sha256/1` API unchanged)
-**Status**: implemented — design note PROMOTED
-**Referenced by**: 04_design-notes/fleet_cap_profile.md
-
 Capability Profile composer/loader/validator (LCARS schema v2.5).
 
 Pure data-transformer module — YAML on disk → composed Elixir struct.

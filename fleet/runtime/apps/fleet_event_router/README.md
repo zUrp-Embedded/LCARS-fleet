@@ -1,10 +1,5 @@
 # Fleet.EventRouter
 
-**Date**: 2026-05-09
-**Last revised**: 2026-07-05 (resync against the code: Ring 0 [renumbering 2026-07-04], struct-only Bus [no soft JSON validation, no 3-arity shim], + `Fleet.Event`/`Application`/facade as sub-modules, § Contracts.Check, webhook env vars, SignalsOS dormant; "listener child-spec" dedup: + `Fleet.EventRouter.Listener.cowboy_child/1`, single source of the Plug.Cowboy child-spec for the 3 HTTP surfaces api/observation/webhook — BindAddress ip set by construction, gates+ports stay with each app; "loaded-once-cached schema/config" dedup: + `Fleet.SchemaCache`, Ring 0 authority of the `:persistent_term` pattern (`resolve_json_schema!` / `fetch!` / `cached`), consumed by workflow/starfleet/coord — cap_profile's local copies stay, no intra-R0 edge; "protected-Bus-emission" dedup: `Bus.safe_emit/3-4` = single core of the best-effort policy, the local rescues of coord/starfleet/spawner migrate onto it; empty-registry made EXPLICIT: `:permit_when_registry_empty` flag; explicit restart bounds on the app supervisor 3/60; fork settled [user decision 2026-06-05]: Dispatch removed, `Catalog` loads the registry at boot, events.yaml = pure registry; phantom-handlers purge)
-**Status**: implemented — design note PROMOTED; + `Fleet.Shutdown.Quiesce` (shared shutdown-drain primitive)
-**Referenced by**: 04_design-notes/fleet_event_router.md
-
 Event bus (Phoenix.PubSub) + LCARS v2 events.yaml registry (Ring 0 —
 substrate: 0 dependencies, ~12 apps depend on it). Consumption = direct PubSub
 subscribers (dispatch table removed, user decision 2026-06-05). Gitea webhooks

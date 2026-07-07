@@ -1,10 +1,5 @@
 # fleet_starfleet
 
-**Date**: 2026-05-10
-**Last revision**: 2026-07-05 (periodic-GenServer dedup: `MCPMonitor`/`MCPWatcher` plumbing → shared functions `Fleet.Starfleet.PeriodicCheck` (no macro), each twin keeps its init/do_check/reply shape; load-then-cache dedup: `Gatekeeper.init_schema!/0` + get-or-raise delegated to `Fleet.SchemaCache`, Ring 0 authority; 2026-07-02: Bus re-subscribe-after-restart contract test — a killed event consumer re-subscribes via `init/1` and receives the following events; `Shutdown` + real backend `AggregateDispatcher` wired in prod, `:shutdown_dispatcher` seam; contract↔code resync: complete sub-modules (`Application`, `AuditConsumer`, `BootOrchestrator`, behaviours), real `in_flight_count` (non-permanents + pending, no more in-RAM workflow runs), complete knob catalog, event atoms up to date)
-**Status**: implemented — qualification pending
-**Referenced by**: `04_design-notes/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
-
 System-side module consuming the outputs of the arbitration pods
 (gatekeeper + other decision-making roles) on the LCARS core side, Ring 2.
 Source: `04_design-notes/fleet_starfleet.md` (**CONFORMANCE**

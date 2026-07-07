@@ -1,9 +1,5 @@
 # Fleet.Spawner
 
-**Date** : 2026-05-09
-**Last revised** : 2026-07-05 (bundle split: 5 new islands — `Pod.Publishing` (SLOT-FREEZE flag + `:publish_deadline`), `Pod.SessionMint` (session_id mint decision, moved out of `Pod`), `Pod.TurnFlag` (`turn.flag` I/O, moved out of the facade), `Pod.Assets` + `Pod.Brief` (moved out of `Scaffold`, refocused on workspace/session); MCP socket lifecycle moved `Pod.Backend` → `Pod.McpProvision` (the whole MCP channel in one place); `pod_workspace_path` authority → `Pod.Paths` (the facade delegates); contract debt absorbed: @doc/@spec on ALL public functions of the `pod/*` islands. Same day, dedup pass: session jsonl glob → single authority `Pod.SessionFiles`; post-kill sock-dir removal → `PodTmux.remove_sock_dir/1`; `PodWarden` 2-tick grace → shared pure core `grace_2tick/2`; launcher resolvers → single private fn `launcher_path/2`; effective cap-profile → `Fleet.CapProfile.with_project/2`. Contract-resync pass the same day: missing submodules documented — `Application`, `PublishConsumer`, `PermanentBoot`, `PermanentWarden`, `SeedStore` — + config catalogue completed, `:auth_mode` knob removed (no reader left).)
-**Status** : implemented, converged on the interactive RC launch chain 2026-06-01
-
 Drives the LCARS v2 pod lifecycle (Ring 1 pod primitive). The lifecycle IS the
 responsibility: each pod is a `gen_statem` (`Fleet.Spawner.Pod`) whose STATES
 are the phases of the cycle, atomized into 20 `pod/*` submodules (each an island with no

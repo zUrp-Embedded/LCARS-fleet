@@ -1,10 +1,5 @@
 # fleet_project_bootstrap — pod core (Ring 1)
 
-**Date**: 2026-05-18
-**Last revision**: 2026-07-05 (contract resync: Sub-modules section, zero explicit config knob)
-**Status**: ACTIVE — PROD path wired (`Phase.Clone`). Dead orchestrator `prepare/3` + 4 non-Clone phases REMOVED.
-**Derived from**: 04_design-notes/ring1/fleet_project_bootstrap.md + session 2026-05-17/18 (rings finalized)
-
 This app is part of the **V2 core** (Ring 1, pod primitives). It prepares the pod's workspace
 BEFORE spawn. The code is **implemented and active in prod** — this README documents the REAL state,
 checked against the code (`lib/fleet/project_bootstrap/phase.ex`).

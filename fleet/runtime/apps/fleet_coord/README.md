@@ -1,10 +1,5 @@
 # fleet_coord
 
-**Date**: 2026-05-10
-**Last revision**: 2026-07-05 (contract resync against the code: `Application` in the table, real emitted event names, Configuration section, complete deps, canonical test form; emission pass extracted into `Fleet.Coord.Emitter` (build + broadcast of the canonical event), `Policies` = table only; load-then-cache dedup: coord-policies schema resolved ONCE via `Fleet.SchemaCache` — before: re-read+resolve on EVERY `validate_against_schema!` — and get-or-raise of the table via `SchemaCache.fetch!/2`; 2026-07-04: SoftGate/Hook/HookSpawner removed — LLM gates consolidated on the gatekeeper on the workflow side; coord = pure declarative policies)
-**Status**: implemented — qualification pending
-**Referenced by**: `04_design-notes/fleet_coord.md`, `STATUS-CHANTIERS.md`
-
 System-side Elixir module: declarative routing table
 `{verdict, reason} → {action, escalation_path}` LCARS v2 Ring 2
 orchestration. Source: `04_design-notes/fleet_coord.md`

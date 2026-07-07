@@ -1,10 +1,5 @@
 # Fleet.Credentials
 
-**Date**: 2026-05-28
-**Last revised**: 2026-07-07 (EN translation + drift fixes: the removed `fleet_project_bootstrap` BIND phase is no longer described as live, the bwrap bind is `.credentials.json` alone, Remote Control wiring is `.claude.json` + `--remote-control` via `bin/claude_launch.sh`, rank 1-5 env exclusion described as the closed pod env it actually is; 2026-07-05: doc resynced against the code — RoleToken documented, real ForgeAuth/Shell consumers, catalogue removed from ForgeIdentity, Configuration section; two soft bundles JUDGED at audit, cuts REFUSED with the argument in the moduledoc: `Shell.git_safe_config_args/0` stays co-located with the bounded execution (two faces of the same boundary "invoke git system-side without executing the pod's code"), `ForgeIdentity.allowed_emails/system_email` stay with the identity derivation (same identity literals, one authority); 2026-07-04: Shell hardened — process-group via setsid + wall deadline)
-**Status**: active — aligned with ADR-F, PROMOTED 2026-05-26
-**DERIVED FROM**: `01_architecture/adr-f-credentials-anthropic-natif.md` + `04_design-notes/ring0/fleet_credentials.md`
-
 Business OAuth gates for LCARS v2 pods. The auth model is the **native Anthropic claudeDir** (`~/.claude/.credentials.json`) — LCARS manages neither storage nor refresh: just **2 gates** (scope + plan) that read the file directly.
 
 ## Model

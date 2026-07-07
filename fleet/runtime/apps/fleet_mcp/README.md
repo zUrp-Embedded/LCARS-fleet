@@ -1,10 +1,5 @@
 # fleet_mcp
 
-**Date**: 2026-05-18
-**Last revision**: 2026-07-07 (contract resync against the code: ring 2, PodSocketRegistry + readiness probe documented, delegation knobs added; PodTools split → WorkItems + Delegation, dispatch kept)
-**Status**: implemented — pod-facing MCP server (`get_work_item` / `submit_result`)
-**Referenced by**: `04_design-notes/` (ring4/fleet_mcp)
-
 LCARS MCP server (Ring 2) — vendor boundary `mcp_*`: wraps the `ex_mcp` SDK
 behind an opaque contract and exposes the runtime's MCP tools to the pods.
 

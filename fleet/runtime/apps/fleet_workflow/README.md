@@ -1,14 +1,7 @@
 # fleet_workflow
 
-**Date** : 2026-05-09
-**Last revised** : 2026-07-05 (contract resync : actual Ring 2, `Application` in the table, `{:human_approval, _}` verdict distinct from `{:fail}`, Configuration section, canonical test form ; payload placement + security-validation extracted into `Fleet.Workflow.PayloadGuard`, `Deliverable` = 3-stage orchestration only ; loaded-vs-cached dedup : the `Loader`'s schema cache delegated to `Fleet.SchemaCache`, Ring 0 authority ; 2026-07-01 : bounded push via Fleet.Credentials.Shell + evil-merge scan `--diff-merges=first-parent` — security remediation ; earlier doc-rot fix : purge of the modules removed with the RAM engine (2026-06-16) — `Executor`, `StageRunner`, `StageSpawner`, `Toposort`, `start_pipeline`, the per-run `Registry` and `count_running/0` are no longer documented)
-**Status** : lib-only (post-RAM-engine salvage) — qualifier pending
-**Referenced by** : `04_design-notes/fleet_workflow.md`, `STATUS-CHANTIERS.md`
-
 **workflow_map / gate / delivery** lib (quasi-pure) consumed by the forge-state-machine rail
 and the core apps — Ring 2 (coordination + policy, renumbered 2026-07-04).
-
-Source : `04_design-notes/fleet_workflow.md`.
 
 ## App state (RAM-engine removal, 2026-06-16)
 

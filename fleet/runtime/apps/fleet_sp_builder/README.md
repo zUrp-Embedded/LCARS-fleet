@@ -1,10 +1,5 @@
 # Fleet.SPBuilder
 
-**Date**: 2026-05-09
-**Last revised**: 2026-07-07 (EN translation + contract resync against code: `jason` dep removed, `yaml_elixir` now declared directly, `fleet_workflow` ring label corrected 3 → 2 ; 2026-07-05: facade split → Monk + RepoSections ; contract resync: `monk_registry_root` knob, `resolve_monk_injection/2` API, dependencies)
-**Status**: implemented — design note PROMOTED
-**Referenced by**: 04_design-notes/fleet_sp_builder.md
-
 System Prompt builder/composer (LCARS schema v2.5).
 
 Pure data-transformer module — `%Fleet.CapProfile{}` + modop bundles
