@@ -9,8 +9,8 @@ Service d'auto-orchestration issues Gitea (M-033 backlog, doctrine
 `beyond_#4/01_architecture/topologie-ring.md` §"Élagage" : **client du
 core ring 1, pas core**).
 
-Découvre ses projets par topic (`lcars-fleet-<humain>`) et spawn le rôle
-du step courant via le rail forge-state-machine décrit ci-dessous (mode **step**) :
+Découvre ses projets par appartenance-org (WS3 : tout repo de l'org `fleet` EST un projet fleet) et
+spawn le rôle du step courant via le rail forge-state-machine décrit ci-dessous (mode **step**) :
 la forge EST la machine à états (label de route gravé sur le issue). Le
 catalogue déclaratif `forge-routing.yaml` (axes `type:` × `state:` × `assignee`)
 a été SUPPRIMÉ avec le rail AutoDispatcher legacy — plus aucun code ne le lisait.
@@ -30,9 +30,9 @@ verrouillée → spawn le rôle du **step courant** de sa route, dérivé de la 
 l'**assignee = l'humain**, point fixe — DN §1)
 double puis remplace le dispatch legacy ci-dessus. Activé par `:step_dispatch?` + la forge `base_url`
 (`:forge[:base_url]` / `FORGE_BASE_URL`) — c'est la **seule** garde fail-loud du boot step
-(`Fleet.Pilot.Application.step_children!`) : sans `base_url`, ni découverte par topic ni push per-step-run.
+(`Fleet.Pilot.Application.step_children!`) : sans `base_url`, ni découverte (`list_org_repos`) ni push per-step-run.
 `:poll_repo` n'est **plus** une condition d'activation (et n'a plus aucun lecteur, cf. § Knobs) :
-la découverte des repos se fait par topic (`lcars-fleet-<human>`), pas par repo fixe, et le repo+remote de
+la découverte des repos se fait par appartenance-org (WS3), pas par repo fixe, et le repo+remote de
 chaque step_run voyagent dans l'event `pod.completed`. Submodules :
 
 - `Fleet.Pilot.StepDispatcher` — `decide/1` (porte PURE : verrou `lcars-in-flight`/`lcars-awaits-arch`
@@ -332,8 +332,8 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   bot-authored). Pas de défaut : absent → dérivé une fois via `GET /user` puis caché (env
   `FORGE_BOT_LOGIN`).
 - `:poll_repo` — **posé** par `config/runtime.exs` (env `LCARS_PILOT_POLL_REPO`) mais **plus aucun
-  lecteur** dans le code : la découverte est par topic, et l'override mono-repo réel est l'opt d'init
-  `:repo` du Poller (seam test/legacy, écrasé à chaque tick) — NON câblé sur cette config.
+  lecteur** dans le code : la découverte est par appartenance-org (WS3), et l'override mono-repo réel est
+  l'opt d'init `:repo` du Poller (seam test/legacy, écrasé à chaque tick) — NON câblé sur cette config.
 - `:producer_role` (défaut `"engineer"`), `:reviewer_roles` (`fetch_env!` fail-loud — data posée en
   `config/config.exs` : `["qualifier", "reviewer"]`), `:gatekeeper_role` (défaut `"gatekeeper"`),
   `:architect_pod_id` (défaut `"permanent-architect"`, id posé par `PermanentBoot`) — **AUTORITÉ
