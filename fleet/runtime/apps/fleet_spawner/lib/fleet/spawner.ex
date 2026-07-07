@@ -1,50 +1,50 @@
 defmodule Fleet.Spawner do
   @moduledoc """
-  Pilote lifecycle pod LCARS v2 (Ring 1 pod primitive).
+  Drives the LCARS v2 pod lifecycle (Ring 1 pod primitive).
 
-  Spawne, surveille et termine les pods agents éphémères. Chaque pod est un
-  `Fleet.Spawner.Pod` (`gen_statem`) supervisé par `Fleet.Spawner.Supervisor` :
-  ses ÉTATS sont les 8 phases du cycle canon (`:allocating → :cleaning →
+  Spawns, watches and terminates ephemeral agent pods. Each pod is a
+  `Fleet.Spawner.Pod` (`gen_statem`) supervised by `Fleet.Spawner.Supervisor`:
+  its STATES are the 8 phases of the canonical cycle (`:allocating → :cleaning →
   :projecting → :injecting → :launching → :monitoring → :extracting →
   :releasing`).
 
   ## API
 
-    * `spawn_pod/3` — démarre un nouveau pod
-    * `kill_pod/1` — termine un pod par son ID
-    * `pod_info/1` — retourne l'état courant d'un pod
-    * `count_pods/0` — nombre de pods actifs
+    * `spawn_pod/3` — starts a new pod
+    * `kill_pod/1` — terminates a pod by its ID
+    * `pod_info/1` — returns a pod's current state
+    * `count_pods/0` — number of active pods
 
   ## Restart strategy
 
-  Tous les pods sont `:temporary` (cf. `restart_strategy_for/1`). Le
-  `DynamicSupervisor` ne ressuscite JAMAIS un pod —
-  un pod mort (normal OU crash) est retiré, point. `lifetime_scope` pilote
-  la RECOVERY (`release|recreate`), pas le restart.
+  All pods are `:temporary` (cf. `restart_strategy_for/1`). The
+  `DynamicSupervisor` NEVER resurrects a pod —
+  a dead pod (normal OR crash) is removed, full stop. `lifetime_scope` drives
+  RECOVERY (`release|recreate`), not restart.
 
   ## Recovery
 
-  State FS minimal `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` =
-  **snapshot d'observation** (où en était le pod), pas un état de reconstruction.
-  Au (re)spawn, `recover_or_init` lit le snapshot et applique `recovery_action(phase)`
-  (`Pod.Recovery`) : phase terminale → `:release` (rien à relancer), tout le reste →
-  `:recreate` (from scratch, session NEUVE). La résurrection est un acte **délibéré**
-  du boot-orchestrator ; la recovery NE tente JAMAIS `--resume` sur une session morte
-  côté serveur (claude exit → pod zombie, prouvé live) — la tâche restée en queue
-  re-drive un REPL neuf. Seul le RECALL délibéré (`recall/2`) resume une session.
+  Minimal FS state `<state_fs_root>/{pipes,runs,pods}/<id>/state.json` =
+  **observation snapshot** (where the pod was), not a reconstruction state.
+  On (re)spawn, `recover_or_init` reads the snapshot and applies `recovery_action(phase)`
+  (`Pod.Recovery`): terminal phase → `:release` (nothing to relaunch), everything else →
+  `:recreate` (from scratch, FRESH session). Resurrection is a **deliberate** act
+  of the boot-orchestrator; recovery NEVER attempts `--resume` on a session dead
+  server-side (claude exit → zombie pod, proven live) — the task left in the queue
+  re-drives a fresh REPL. Only a deliberate RECALL (`recall/2`) resumes a session.
 
-  ## Génération du pod_id
+  ## pod_id generation
 
-  Génération `UUID.uuid4()` côté caller (collision-free statistique
-  sans coordinateur central).
+  `UUID.uuid4()` generation caller-side (statistically collision-free
+  without a central coordinator).
 
   ## Exit codes
 
-    * `{:ok, pid}` — pod démarré
-    * `{:error, :cap_profile_invalid, reason}` — struct invalide
+    * `{:ok, pid}` — pod started
+    * `{:error, :cap_profile_invalid, reason}` — invalid struct
     * `{:error, {:already_started, pid}}` — pod_id collision
-    * `{:error, :invalid_pod_id}` — pod_id non path-safe (hors `[A-Za-z0-9._-]` ou contient `..`)
-    * `{:error, :brief_required}` — pod one-shot sans brief
+    * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
+    * `{:error, :brief_required}` — one-shot pod without a brief
   """
 
   alias Fleet.Spawner.Pod
@@ -52,12 +52,12 @@ defmodule Fleet.Spawner do
   require Logger
 
   @doc """
-  Valide qu'un `pod_id` est sûr comme composant de chemins et de noms de socket/session.
+  Validates that a `pod_id` is safe as a component of paths and socket/session names.
 
-  Le `pod_id` est interpolé dans le pod dir (`~/pods/pod_<id>`), le state FS,
-  les sockets tmux/MCP et les noms de session. Cette fonction est donc l'autorité
-  publique pour les frontières qui acceptent un `pod_id` fourni par un caller
-  externe ou inter-app.
+  The `pod_id` is interpolated into the pod dir (`~/pods/pod_<id>`), the FS state,
+  the tmux/MCP sockets and the session names. This function is therefore the public
+  authority for the boundaries that accept a `pod_id` supplied by an external or
+  inter-app caller.
   """
   @spec valid_pod_id?(term()) :: boolean()
   def valid_pod_id?(id) when is_binary(id),
@@ -66,9 +66,9 @@ defmodule Fleet.Spawner do
   def valid_pod_id?(_), do: false
 
   @doc """
-  Règle R18 : un cap-profile one-shot exige un brief. Autorité partagée (brief_guard +
-  les frontières qui valident à l'admission, ex. l'API). nil/absent → false (exempté),
-  comme brief_guard.
+  Rule R18: a one-shot cap-profile requires a brief. Shared authority (brief_guard +
+  the boundaries that validate at admission, e.g. the API). nil/absent → false (exempted),
+  like brief_guard.
   """
   @spec brief_required?(Fleet.CapProfile.t()) :: boolean()
   def brief_required?(%Fleet.CapProfile{spec: spec}) do
@@ -80,16 +80,16 @@ defmodule Fleet.Spawner do
 
   ## Inputs
 
-    * `cap_profile` — struct `%Fleet.CapProfile{}` issue de `Fleet.CapProfile.compose/2`
-    * `issue_id` — événement source (issue Gitea, signal OS, etc.)
-    * `opts` :
-      * `:pod_id` (default `UUID.uuid4()`) — doit être **path-safe** (`[A-Za-z0-9._-]`, pas de `..`),
-        car interpolé dans des paths FS (`~/pods/pod_<id>`, sock, state recovery) ;
-        sinon `{:error, :invalid_pod_id}`.
+    * `cap_profile` — `%Fleet.CapProfile{}` struct from `Fleet.CapProfile.compose/2`
+    * `issue_id` — source event (Gitea issue, OS signal, etc.)
+    * `opts`:
+      * `:pod_id` (default `UUID.uuid4()`) — must be **path-safe** (`[A-Za-z0-9._-]`, no `..`),
+        since interpolated into FS paths (`~/pods/pod_<id>`, sock, state recovery);
+        otherwise `{:error, :invalid_pod_id}`.
       * `:state_fs_root` (override, default config `:fleet_spawner, :state_fs_root`)
-      * `:brief` — le travail du pod (string). **Obligatoire** pour un
-        pod `one-shot` (sinon `{:error, :brief_required}`).
-      * `:allow_no_brief` — échappatoire admin/diagnostic (bool, default false).
+      * `:brief` — the pod's work (string). **Mandatory** for a
+        `one-shot` pod (otherwise `{:error, :brief_required}`).
+      * `:allow_no_brief` — admin/diagnostic escape hatch (bool, default false).
   """
   @spec spawn_pod(Fleet.CapProfile.t(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
@@ -99,17 +99,17 @@ defmodule Fleet.Spawner do
       :ok ->
         pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
 
-        # pod_id file dans des paths FS (pod_dir `~/pods/pod_<id>`, sock_path, state recovery)
-        # par interpolation. Défaut UUID = sûr, mais l'override `:pod_id` (step `issue-N-role-ts`, role
-        # résolu forge ; permanent `permanent-<name>-ts` ; admin) n'est PAS forcément contrôlé → un `/` ou `..`
-        # traverserait hors de `~/pods`. Guard charset path-safe + rejet `..` → refus CLAIR, jamais un
-        # path traversé (tous les pod_id légitimes — UUID / catalogue / step — passent).
+        # pod_id threads into FS paths (pod_dir `~/pods/pod_<id>`, sock_path, state recovery)
+        # by interpolation. The UUID default = safe, but the `:pod_id` override (step `issue-N-role-ts`, role
+        # resolved forge-side; permanent `permanent-<name>-ts`; admin) is NOT necessarily controlled → a `/` or `..`
+        # would traverse out of `~/pods`. Path-safe charset guard + `..` rejection → a CLEAR refusal, never a
+        # traversed path (all legitimate pod_ids — UUID / catalogue / step — pass).
         if valid_pod_id?(pod_id) do
-          # id pod DÉTERMINISTE (stable, sans suffixe timestamp) : un re-dispatch retombe sur le même
-          # `pod_id`. Si une TOMBSTONE terminale (`state.json` :succeeded/:released/:killed) d'un cycle
-          # précédent subsiste, `recover_or_init` la lirait → `:release` → stop MUET sans launch → boucle
-          # orphelin côté poller. On efface la tombstone (state + pod_dir) AVANT spawn → init FRESH.
-          # No-op si pas de snapshot / snapshot en vol (recovery :resume/:recreate intacte).
+          # DETERMINISTIC pod id (stable, no timestamp suffix): a re-dispatch falls back on the same
+          # `pod_id`. If a terminal TOMBSTONE (`state.json` :succeeded/:released/:killed) from a previous
+          # cycle survives, `recover_or_init` would read it → `:release` → SILENT stop without launch → orphan
+          # loop poller-side. We clear the tombstone (state + pod_dir) BEFORE spawn → FRESH init.
+          # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
           _ = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
 
           args = %{
@@ -121,8 +121,8 @@ defmodule Fleet.Spawner do
 
           spec = pod_child_spec(args)
 
-          # E5 : retour NORMALISÉ — le type brut de start_child inclut `:ignore`/`{:ok, pid, info}`
-          # (jamais produits par notre gen_statem, mais les appelants n'ont pas à porter ce contrat).
+          # NORMALIZED return — start_child's raw type includes `:ignore`/`{:ok, pid, info}`
+          # (never produced by our gen_statem, but callers should not have to carry that contract).
           case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
             {:ok, pid} -> {:ok, pid}
             {:ok, pid, _info} -> {:ok, pid}
@@ -139,13 +139,13 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  RECALL délibéré : ramène vivant l'agent `(projet, role)` depuis son seed checkpointé
-  (`projects.work/<projet>/pods/`). Lit la workflow_map (uuid+jsonl), spawn un pod en mode resume :
-  `session_id` = l'uuid du seed, `resume: true`, le seed est restauré dans le pod AVANT le launch
-  (état :projecting → maybe_recall_restore) → claude `--resume <uuid>` reprend le contexte. Nom Desktop
-  `<projet>_<role>`. `allow_no_brief` (le pod resume son contexte, pas idle ; pas de brief neuf).
+  Deliberate RECALL: brings the `(projet, role)` agent back alive from its checkpointed seed
+  (`projects.work/<projet>/pods/`). Reads the workflow_map (uuid+jsonl), spawns a pod in resume mode:
+  `session_id` = the seed's uuid, `resume: true`, the seed is restored into the pod BEFORE the launch
+  (state :projecting → maybe_recall_restore) → claude `--resume <uuid>` picks up the context. Desktop name
+  `<projet>_<role>`. `allow_no_brief` (the pod resumes its context, not idle; no fresh brief).
 
-  `{:ok, pid}` | `{:error, :no_seed}` (aucun seed) | `{:error, term}`.
+  `{:ok, pid}` | `{:error, :no_seed}` (no seed) | `{:error, term}`.
   """
   @spec recall(String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
   def recall(projet, role) when is_binary(projet) and is_binary(role) do
@@ -167,15 +167,15 @@ defmodule Fleet.Spawner do
     end
   end
 
-  # Invariant rendu structurellement impossible à violer : un pod `one-shot` (1 tâche
-  # puis meurt) DOIT porter un brief — sinon il part sans travail (brief générique →
-  # claude attend → timeout). Les pods long-lived (`forever`/`run`/`pipe`) pullent leurs
-  # tâches via MCP (`yop` → get_work_item) → exemptés (épargne les pods permanents/gatekeeper).
-  # Échappatoire admin/diagnostic explicite : `opts[:allow_no_brief]`.
+  # Invariant made structurally impossible to violate: a `one-shot` pod (1 task
+  # then dies) MUST carry a brief — otherwise it leaves with no work (generic brief →
+  # claude waits → timeout). Long-lived pods (`forever`/`run`/`pipe`) pull their
+  # tasks via MCP (`yop` → get_work_item) → exempted (spares the permanent/gatekeeper pods).
+  # Explicit admin/diagnostic escape hatch: `opts[:allow_no_brief]`.
   defp brief_guard(%Fleet.CapProfile{spec: spec} = cap_profile, opts) do
     brief = Keyword.get(opts, :brief)
-    # `nil` ET `""` (brief vide — ex. un `build_brief` sur un contexte de step
-    # vide/malformé) comptent tous deux comme « pas de brief ».
+    # `nil` AND `""` (empty brief — e.g. a `build_brief` over an empty/malformed
+    # step context) both count as "no brief".
     has_brief? = is_binary(brief) and brief != ""
     scope = get_in(spec, ["invocation", "lifetime_scope"])
 
@@ -186,11 +186,11 @@ defmodule Fleet.Spawner do
       Keyword.get(opts, :allow_no_brief, false) ->
         :ok
 
-      # Même verdict que `scope == "one-shot"`, mais via le prédicat PUBLIC partagé
-      # `brief_required?/1` (autorité unique de la règle one-shot→brief, aussi appelée
-      # à l'admission par l'API) → pas de règle dupliquée qui pourrait diverger.
+      # Same verdict as `scope == "one-shot"`, but via the shared PUBLIC predicate
+      # `brief_required?/1` (single authority for the one-shot→brief rule, also called
+      # at admission by the API) → no duplicated rule that could diverge.
       brief_required?(cap_profile) ->
-        # Diagnosable (pas un refus muet) : distingue clairement le cas.
+        # Diagnosable (not a silent refusal): clearly distinguishes the case.
         Logger.warning(
           "Spawner: spawn_pod refusé (R18) : pod one-shot sans brief — " <>
             "fournir :brief (le travail) ou :allow_no_brief (admin/diagnostic)."
@@ -199,8 +199,8 @@ defmodule Fleet.Spawner do
         {:error, :brief_required}
 
       is_nil(scope) ->
-        # Profil sans lifetime_scope déclaré (non validé ?) : exemption par défaut
-        # (on ne refuse que le one-shot EXPLICITE), mais on rend le trou visible.
+        # Profile with no declared lifetime_scope (unvalidated?): exemption by default
+        # (we only refuse the EXPLICIT one-shot), but we make the gap visible.
         Logger.warning(
           "Spawner: spawn_pod (R18) : lifetime_scope absent du cap-profile — " <>
             "spawn autorisé sans brief (exemption par défaut, profil à vérifier)."
@@ -214,17 +214,17 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Termine un pod par son ID. Retourne `:ok` si trouvé, `{:error, :not_found}` sinon.
+  Terminates a pod by its ID. Returns `:ok` if found, `{:error, :not_found}` otherwise.
   """
   @spec kill_pod(String.t()) :: :ok | {:error, :not_found}
   def kill_pod(pod_id) when is_binary(pod_id) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [{pid, _}] ->
-        # Release DÉLIBÉRÉE d'abord — le handler `:kill` du Pod
-        # (`handle_event({:call, from}, :kill, ...)`, `GenServer.call` compatible gen_statem) fait
-        # teardown backend + clear_for_pod + état terminal :killed, puis stop. Fallback brutal
-        # terminate_child SEULEMENT si le pod ne répond pas (timeout / déjà mort).
-        # Jamais de bypass de la transition de release.
+        # DELIBERATE release first — the Pod's `:kill` handler
+        # (`handle_event({:call, from}, :kill, ...)`, `GenServer.call` gen_statem-compatible) does
+        # backend teardown + clear_for_pod + terminal state :killed, then stop. Brutal terminate_child
+        # fallback ONLY if the pod does not respond (timeout / already dead).
+        # Never a bypass of the release transition.
         try do
           :ok = GenServer.call(pid, :kill, 5_000)
           :ok
@@ -240,18 +240,18 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Reprovisionne le workspace d'un pod pipe RESIDENT pour son issue suivant (slot-freeze) : reset git
-  IN-PLACE (PAS de rm_rf — le ws est bind-monte dans le sandbox vivant) sur la base du nouveau `project`
-  + `/clear` du contexte REPL. Appele par le dispatcher au re-brief d'un pipe `:ready`. Retourne
-  `:ok` | `{:error, _}` (incl. `:not_found` si le pod n'existe pas, `{:reset_failed, _}` si le git echoue).
+  Reprovisions a RESIDENT pipe pod's workspace for its next issue (slot-freeze): git reset
+  IN-PLACE (NO rm_rf — the ws is bind-mounted in the live sandbox) on the basis of the new `project`
+  + `/clear` of the REPL context. Called by the dispatcher when re-briefing a `:ready` pipe. Returns
+  `:ok` | `{:error, _}` (incl. `:not_found` if the pod does not exist, `{:reset_failed, _}` if the git fails).
   """
   @spec reprovision_pipe_workspace(String.t(), map(), keyword()) :: :ok | {:error, term()}
   def reprovision_pipe_workspace(pod_id, project, opts \\ [])
       when is_binary(pod_id) and is_map(project) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [{pid, _}] ->
-        # Git ops bornees (Shell.git 30s chacune) mais reset+clean+checkout peuvent cumuler → call
-        # genereux (60s). Un :exit (pod mort pendant le call) → erreur typee, pas de crash appelant.
+        # Bounded git ops (Shell.git 30s each) but reset+clean+checkout can add up → generous
+        # call (60s). An :exit (pod dead during the call) → typed error, no caller crash.
         try do
           GenServer.call(pid, {:reprovision_pipe_workspace, project, opts}, 60_000)
         catch
@@ -264,22 +264,22 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Workspace livrable depuis un `pod_dir` DÉJÀ connu (`<pod_dir>/workspace`). Point d'entrée
-  PUBLIC (frontière d'app : les consommateurs externes ne dépendent pas de l'arborescence interne
-  `pod/*`) ; l'AUTORITÉ du calcul (le littéral `"workspace"`) vit dans `Pod.Paths.pod_workspace_path/1`
-  — les îles `Pod.*` (LaunchSpec, CompletedPayload) l'appellent en direct, sans remonter à la façade.
-  `pod_workspace_dir/1` reste la voie registry : le monde lit où IL a placé le pod, jamais où le pod
-  prétend être.
+  Deliverable workspace from an ALREADY-known `pod_dir` (`<pod_dir>/workspace`). PUBLIC entry
+  point (app boundary: external consumers do not depend on the internal `pod/*` tree); the
+  AUTHORITY of the computation (the `"workspace"` literal) lives in `Pod.Paths.pod_workspace_path/1`
+  — the `Pod.*` islands (LaunchSpec, CompletedPayload) call it directly, without going back up to the facade.
+  `pod_workspace_dir/1` remains the registry path: the world reads where IT placed the pod, never where the pod
+  claims to be.
   """
   @spec pod_workspace_path(Path.t()) :: Path.t()
   def pod_workspace_path(pod_dir) when is_binary(pod_dir),
     do: Fleet.Spawner.Pod.Paths.pod_workspace_path(pod_dir)
 
   @doc """
-  Résout le workspace livrable d'un pod (`<pod_dir>/workspace`) depuis le pod_dir ENREGISTRÉ.
-  Le monde lit où IL a placé le pod (record spawner via `pod_info`), pas une assertion du pod :
-  le pod ne nomme jamais le chemin de son propre audit. Sert au rail forge-driven
-  (`Pilot.StepRunCompleter` → `Deliverable`) pour gater le workspace en mode `git_native`.
+  Resolves a pod's deliverable workspace (`<pod_dir>/workspace`) from the REGISTERED pod_dir.
+  The world reads where IT placed the pod (spawner record via `pod_info`), not a pod assertion:
+  the pod never names the path of its own audit. Serves the forge-driven rail
+  (`Pilot.StepRunCompleter` → `Deliverable`) to gate the workspace in `git_native` mode.
   """
   @spec pod_workspace_dir(String.t()) :: {:ok, Path.t()} | {:error, :not_found}
   def pod_workspace_dir(pod_id) when is_binary(pod_id) do
@@ -291,16 +291,16 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Renvoie l'état courant d'un pod (`%{phase, conditions, ...}`).
+  Returns a pod's current state (`%{phase, conditions, ...}`).
   """
   @spec pod_info(String.t()) :: {:ok, map()} | {:error, :not_found}
   def pod_info(pod_id) when is_binary(pod_id) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [{pid, _}] ->
-        # Le pid peut être mort mais encore brièvement dans le Registry (cleanup
-        # async via monitor) — un `GenServer.call` y lèverait `EXIT`. Un pod mort =
-        # absent → `{:error, :not_found}` (cohérent avec le pattern try/catch de
-        # `kill_pod/1` ; supprime une race exposée par le stop rapide de la release).
+        # The pid may be dead but still briefly in the Registry (async cleanup
+        # via monitor) — a `GenServer.call` would raise `EXIT` there. A dead pod =
+        # absent → `{:error, :not_found}` (consistent with the try/catch pattern of
+        # `kill_pod/1`; removes a race exposed by the release's fast stop).
         try do
           {:ok, GenServer.call(pid, :info)}
         catch
@@ -313,13 +313,13 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Énumère les `:info` des pods vivants — **read seam observabilité** (read-only).
+  Enumerates the `:info` of live pods — **observability read seam** (read-only).
 
-  Liste les clés du `Fleet.Spawner.Registry` et collecte le `:info` de chacun
-  via `pod_info/1` ; les pods morts mais encore brièvement registrés (race
-  cleanup async monitor, cf. `pod_info/1`) sont écartés. Lecture seule — n'altère
-  aucun état. C'est l'unique seam d'énumération exposé : les lecteurs (deck
-  d'observabilité Ring 4) passent par ici, **jamais** par le Registry en direct.
+  Lists the keys of `Fleet.Spawner.Registry` and collects each one's `:info`
+  via `pod_info/1`; pods that are dead but still briefly registered (async monitor
+  cleanup race, cf. `pod_info/1`) are discarded. Read-only — alters no
+  state. This is the only exposed enumeration seam: readers (the Ring 4
+  observability deck) go through here, **never** through the Registry directly.
   """
   @spec list_pods() :: [map()]
   def list_pods do
@@ -334,7 +334,7 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Nombre de pods actifs.
+  Number of active pods.
   """
   @spec count_pods() :: non_neg_integer()
   def count_pods do
@@ -343,47 +343,47 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Réveille un pod long-lived (lifetime_scope != one-shot) pour un nouveau cycle.
+  Wakes a long-lived pod (lifetime_scope != one-shot) for a new cycle.
 
-  **Rail porteur = réveil-par-flag** (`turn.flag` + outil Monitor in-pod), touché ICI. Déclenche le workflow
-  agent-worker-base :
+  **Load-bearing rail = wake-by-flag** (`turn.flag` + in-pod Monitor tool), touched HERE. Triggers the
+  agent-worker-base workflow:
 
-      (flag touché → Monitor « ton tour ») → mcp__fleet__get_work_item → traite → mcp__fleet__submit_result
+      (flag touched → Monitor "your turn") → mcp__fleet__get_work_item → processes → mcp__fleet__submit_result
 
-  `wake_pod` n'est QUE *trigger + armement du filet* : il touche le flag (porteur), puis ARME (cast)
-  la boucle ack-driven du Pod (`:arm_kick` — le FALLBACK : send-keys `"wake"` UNIQUEMENT si le pull n'arrive
-  pas) + ré-arme la deadline de RÉPONSE (`:rearm_deadline`). Il ne fait **pas** de send-keys lui-même.
+  `wake_pod` is ONLY *trigger + arming of the net*: it touches the flag (load-bearing), then ARMS (cast)
+  the Pod's ack-driven loop (`:arm_kick` — the FALLBACK: send-keys `"wake"` ONLY if the pull does not
+  arrive) + re-arms the RESPONSE deadline (`:rearm_deadline`). It does **not** send-keys itself.
 
-  Pré-requis : le caller a déjà enqueué le brief dans `Fleet.TaskQueue` (ciblé `pod_id` ; le pod s'identifie
-  par `_lcars_pod_id` sur le fil) AVANT l'appel. Le CONTENU passe TOUJOURS par MCP (`get_work_item`), jamais par
-  le texte injecté.
+  Precondition: the caller has already enqueued the brief in `Fleet.TaskQueue` (targeted at `pod_id`; the pod
+  identifies itself by `_lcars_pod_id` on the thread) BEFORE the call. The CONTENT ALWAYS goes through MCP
+  (`get_work_item`), never through the injected text.
 
-  Use-cases :
-    - pipeline `standard-qa` : après findings reviewer/gatekeeper, push task corrective + wake_pod(eng) ;
-    - starfleet/fleet_pilot : nouveau issue assigné au même pod long-lived → push + wake.
+  Use-cases:
+    - the `standard-qa` workflow-map: after reviewer/gatekeeper findings, push a corrective task + wake_pod(eng);
+    - starfleet/fleet_pilot: new issue assigned to the same long-lived pod → push + wake.
 
-  Renvoie — signale UNIQUEMENT si le trigger a pu PARTIR ; le wake RÉEL est ASYNC :
-    - `:ok` — flag touché + boucle & deadline armées. **N'affirme PAS que l'agent s'est réveillé** : le
-      succès réel = l'ACK (pull) observé par la boucle ; un wake qui ne prend jamais → la boucle escalade au
+  Returns — signals ONLY whether the trigger could LEAVE; the REAL wake is ASYNC:
+    - `:ok` — flag touched + loop & deadline armed. **Does NOT assert the agent woke up**: the
+      real success = the ACK (pull) observed by the loop; a wake that never takes → the loop escalates at the
       cap (`wake.failed` → `:sp_suspect`).
-    - `{:error, :not_found}` — pod_id inconnu/mort (jamais spawn, déjà kill, ou pid mourant).
-    - `{:error, :not_a_tmux_pod}` — pod sans session tmux (StubBackend des tests ; en prod le backend pose
-      toujours un tmux_session, bwrap comme host).
+    - `{:error, :not_found}` — pod_id unknown/dead (never spawned, already killed, or dying pid).
+    - `{:error, :not_a_tmux_pod}` — pod without a tmux session (the tests' StubBackend; in prod the backend
+      always sets a tmux_session, bwrap as well as host).
 
-  Les deux `{:error, _}` = échec STRUCTUREL (on n'a même pas pu trigger) → le caller (cf. `WakeRecovery`)
-  re-roll/escalade. 2e voie, complémentaire de l'escalade async de la boucle (no-ACK).
+  Both `{:error, _}` = STRUCTURAL failure (we could not even trigger) → the caller (cf. `WakeRecovery`)
+  re-rolls/escalates. A 2nd path, complementary to the loop's async escalation (no-ACK).
   """
   @spec wake_pod(String.t()) :: :ok | {:error, :not_found | :not_a_tmux_pod}
   def wake_pod(pod_id) when is_binary(pod_id) do
     case pod_info(pod_id) do
       {:ok, %{tmux_session: session} = info} when is_binary(session) ->
-        # Réveil-par-flag (rail PORTEUR) : touche `turn.flag` (`Pod.TurnFlag.touch/1` — l'I/O FS du
-        # flag vit là-bas) → l'agent Monitor-armé se réveille SANS send-keys. Pas de send-keys
-        # IMMÉDIAT ici → on ARME la boucle ack-driven du Pod (`:arm_kick`), qui est le FALLBACK :
-        # elle send-keys `"wake"` UNIQUEMENT si le pull n'arrive pas (le flag n'a pas livré), puis
-        # escalade au cap. + ré-arme la deadline de RÉPONSE. Le `wake_pod` n'est qu'un trigger
-        # porteur + l'armement du filet ; le contrôle (ACK = pull) vit dans la boucle
-        # (`kick_attempt`). Le knob `:wake_send_keys` (flag-only) est lu par la boucle.
+        # Wake-by-flag (LOAD-BEARING rail): touches `turn.flag` (`Pod.TurnFlag.touch/1` — the flag's
+        # FS I/O lives over there) → the Monitor-armed agent wakes up WITHOUT send-keys. No IMMEDIATE
+        # send-keys here → we ARM the Pod's ack-driven loop (`:arm_kick`), which is the FALLBACK:
+        # it send-keys `"wake"` ONLY if the pull does not arrive (the flag did not deliver), then
+        # escalates at the cap. + re-arms the RESPONSE deadline. `wake_pod` is only a load-bearing
+        # trigger + the arming of the net; the control (ACK = pull) lives in the loop
+        # (`kick_attempt`). The `:wake_send_keys` knob (flag-only) is read by the loop.
         _ = Fleet.Spawner.Pod.TurnFlag.touch(info)
         _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :rearm_deadline)
         _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :arm_kick)
@@ -398,15 +398,15 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Restart strategy d'un pod : `:temporary` pour TOUS les scopes. Le
-  `DynamicSupervisor` ne ressuscite JAMAIS un pod — un
-  pod mort (sortie normale OU crash) est retiré, point final. La résurrection
-  est un acte délibéré du boot-orchestrator (recovery `release|recreate`).
+  A pod's restart strategy: `:temporary` for ALL scopes. The
+  `DynamicSupervisor` NEVER resurrects a pod — a
+  dead pod (normal exit OR crash) is removed, full stop. Resurrection
+  is a deliberate act of the boot-orchestrator (recovery `release|recreate`).
 
-  Les enfants `:temporary` ne comptent pas dans l'intensité
-  globale `max_restarts` du supervisor → plus de cascade fleet-wide possible.
-  `lifetime_scope` pilote la RECOVERY, pas le restart (la détection de
-  typo de scope vit donc avec `lifetime_scope`, plus ici).
+  `:temporary` children do not count toward the supervisor's global
+  `max_restarts` intensity → no more fleet-wide cascade possible.
+  `lifetime_scope` drives RECOVERY, not restart (scope-typo
+  detection therefore lives with `lifetime_scope`, no longer here).
   """
   @spec restart_strategy_for(String.t() | nil) :: :temporary
   def restart_strategy_for(_scope), do: :temporary
@@ -419,10 +419,10 @@ defmodule Fleet.Spawner do
       id: args.pod_id,
       start: {Pod, :start_link, [args]},
       restart: restart_strategy_for(scope),
-      # F3 (E1) : borne du SHUTDOWN superviseur = le temps du TEARDOWN (kill tmux + rm + checkpoint
-      # seed, secondes), PAS la durée de vie du pod (l'ancien `max_alive_sec * 1000` = 600s attendait
-      # 10 min un pod récalcitrant à l'arrêt — config morte sans trap_exit, mur réel avec). 15s puis
-      # brutal-kill OTP ; le PodWarden reape ce qui resterait.
+      # Supervisor SHUTDOWN bound = the TEARDOWN time (kill tmux + rm + seed checkpoint,
+      # seconds), NOT the pod's lifetime (the old `max_alive_sec * 1000` = 600s waited
+      # 10 min on a pod stubborn to stop — dead config without trap_exit, a real wall with it). 15s then
+      # OTP brutal-kill; the PodWarden reaps whatever would remain.
       shutdown: 15_000,
       type: :worker
     }

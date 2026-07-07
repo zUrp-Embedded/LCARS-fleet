@@ -1,56 +1,56 @@
 defmodule Fleet.Spawner.McpSocketProvisioner do
   @moduledoc """
-  Behaviour du provisionneur de socket MCP per-pod — le CONTRAT du seam runtime
-  `:mcp_socket_provisioner`, consommé par `Fleet.Spawner.Pod.McpProvision`
-  (états `:projecting` / filet `terminate/3` du Pod).
+  Behaviour of the per-pod MCP socket provisioner — the CONTRACT of the runtime
+  seam `:mcp_socket_provisioner`, consumed by `Fleet.Spawner.Pod.McpProvision`
+  (`:projecting` states / the Pod's `terminate/3` safety net).
 
-  ## Pourquoi un seam RUNTIME (et pas une dep compile)
+  ## Why a RUNTIME seam (and not a compile dep)
 
-  `fleet_spawner` est Ring 1, `fleet_mcp` est Ring 2 (au-dessus) : une dep mix.exs
-  `fleet_spawner → fleet_mcp` serait une dep MONTANTE (ring bas → ring haut),
-  INTERDITE par le layering. Le module est donc résolu au RUNTIME (`resolved/0` :
-  app-env + défaut en atom littéral → AUCUNE dep compile-time, donc aucun cycle).
-  L'umbrella démarre toutes les apps → l'impl réelle est vivante quand un pod
-  tourne. Seam déclaré dans `fleet_event_router/priv/allowed_graph.yaml`
-  (section `seams`, direction `up`) — le contrat vit ICI, chez le CONSOMMATEUR.
+  `fleet_spawner` is Ring 1, `fleet_mcp` is Ring 2 (above): a mix.exs dep
+  `fleet_spawner → fleet_mcp` would be an UPWARD dep (low ring → high ring),
+  FORBIDDEN by the layering. The module is therefore resolved at RUNTIME (`resolved/0`:
+  app-env + default as a literal atom → NO compile-time dep, hence no cycle).
+  The umbrella starts all the apps → the real impl is live when a pod
+  runs. Seam declared in `fleet_event_router/priv/allowed_graph.yaml`
+  (`seams` section, `up` direction) — the contract lives HERE, at the CONSUMER.
 
-  ## Implémentations
+  ## Implementations
 
-    * `Fleet.MCP.PodSocketSupervisor` — impl RÉELLE (défaut canon). Elle vit dans
-      `fleet_mcp`, qui ne dépend PAS de `fleet_spawner` : elle ne PEUT PAS adopter
-      ce behaviour (`@behaviour` = référence compile, créerait l'arête interdite)
-      et reste DUCK-TYPÉE, avec un commentaire croisé dans son moduledoc. Ce
-      module-ci est la SOURCE DE VÉRITÉ du contrat — toute évolution se répercute
-      des deux côtés à la main.
-    * `Fleet.Spawner.MCPSocketStub` — stub test (même app → adopte le behaviour,
-      le compilateur vérifie la conformité). Rend un chemin sous tmp SANS créer
-      de socket ; posé par `config/test.exs` (mirror de `launch_backend: StubBackend`).
+    * `Fleet.MCP.PodSocketSupervisor` — REAL impl (canonical default). It lives in
+      `fleet_mcp`, which does NOT depend on `fleet_spawner`: it CANNOT adopt
+      this behaviour (`@behaviour` = a compile reference, would create the forbidden edge)
+      and stays DUCK-TYPED, with a cross-reference comment in its moduledoc. This
+      module is the SOURCE OF TRUTH of the contract — any evolution propagates
+      to both sides by hand.
+    * `Fleet.Spawner.MCPSocketStub` — test stub (same app → adopts the behaviour,
+      the compiler checks conformance). Returns a path under tmp WITHOUT creating
+      a socket; set by `config/test.exs` (mirror of `launch_backend: StubBackend`).
   """
 
   @doc """
-  ENSURE (avant le launch) : crée le listener + le fichier socket de ce pod et
-  rend le CHEMIN HOST du fichier socket. Idempotent (re-appel → même chemin,
-  pas de doublon). Le fichier DOIT exister au retour : le bind bwrap échouerait
-  sinon (le launcher monte la socket dans le sandbox du pod).
+  ENSURE (before the launch): creates this pod's listener + socket file and
+  returns the HOST PATH of the socket file. Idempotent (re-call → same path,
+  no duplicate). The file MUST exist on return: otherwise the bwrap bind would
+  fail (the launcher mounts the socket into the pod's sandbox).
   """
   @callback ensure_pod_socket(pod_id :: String.t()) :: {:ok, Path.t()} | {:error, term()}
 
   @doc """
-  RELEASE (teardown) : arrête le listener ET retire le fichier socket (fermer le
-  socket libère le FD, PAS le fichier). Idempotent — un release d'un pod déjà
-  libéré rend `:ok`.
+  RELEASE (teardown): stops the listener AND removes the socket file (closing the
+  socket frees the FD, NOT the file). Idempotent — releasing an already-freed
+  pod returns `:ok`.
   """
   @callback release_pod_socket(pod_id :: String.t()) :: :ok
 
-  # Défaut canon : l'impl réelle côté fleet_mcp. Atom littéral (pas d'appel remote
-  # littéral) → aucune dep compile-time. Posé ICI une seule fois.
+  # Canonical default: the real impl on the fleet_mcp side. Literal atom (not a
+  # literal remote call) → no compile-time dep. Set HERE once.
   @default_provisioner Fleet.MCP.PodSocketSupervisor
 
   @doc """
-  Provisionneur résolu : config `:fleet_spawner, :mcp_socket_provisioner` sinon le
-  défaut canon `Fleet.MCP.PodSocketSupervisor`. SOURCE UNIQUE du défaut (même
-  pattern que `Fleet.Spawner.LaunchBackend.resolved/0`) — le seul lecteur runtime
-  est `Pod.McpProvision`, tout futur lecteur passe ici au lieu de re-déclarer.
+  Resolved provisioner: config `:fleet_spawner, :mcp_socket_provisioner` otherwise the
+  canonical default `Fleet.MCP.PodSocketSupervisor`. SINGLE SOURCE of the default (same
+  pattern as `Fleet.Spawner.LaunchBackend.resolved/0`) — the only runtime reader
+  is `Pod.McpProvision`, any future reader goes through here instead of re-declaring.
   """
   @spec resolved() :: module()
   def resolved do

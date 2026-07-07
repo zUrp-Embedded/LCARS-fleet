@@ -1,17 +1,17 @@
 defmodule Fleet.Spawner.Supervisor do
   @moduledoc """
-  DynamicSupervisor top-level pour les pods. Stratégie `:one_for_one`,
+  Top-level DynamicSupervisor for pods. `:one_for_one` strategy,
   `max_restarts: 3, max_seconds: 60`.
 
-  Les pods sont **tous `:temporary`** (cf.
-  `Fleet.Spawner.restart_strategy_for/1`) : le supervisor ne **ressuscite
-  jamais** un pod. Un pod mort (sortie normale OU crash) est retiré, point.
+  Pods are **all `:temporary`** (cf.
+  `Fleet.Spawner.restart_strategy_for/1`): the supervisor **never
+  resurrects** a pod. A dead pod (normal exit OR crash) is removed, period.
 
-  Comme les enfants `:temporary` ne comptent **pas** dans l'intensité de restart,
-  `max_restarts` ne peut pas déclencher de **cascade fleet-wide** —
-  il est de fait inerte tant que tous les enfants sont `:temporary`.
-  La résurrection est un acte **délibéré** du boot-orchestrator depuis le
-  desired-state (cap-profile), pas un restart OTP : c'est la seule voie de relance.
+  Since `:temporary` children do **not** count toward restart intensity,
+  `max_restarts` cannot trigger a **fleet-wide cascade** —
+  it is effectively inert as long as all children are `:temporary`.
+  Resurrection is a **deliberate** act of the boot-orchestrator from the
+  desired-state (cap-profile), not an OTP restart: it is the only relaunch path.
   """
 
   use DynamicSupervisor
@@ -23,11 +23,11 @@ defmodule Fleet.Spawner.Supervisor do
 
   @impl DynamicSupervisor
   def init(_args) do
-    # max_children (E4) : CAP GLOBAL de pods vivants — un flood de spawn (admin/spawn no-auth
-    # loopback, ou un rail devenu fou) ne peut pas lancer N sessions claude (chacune = un vrai
-    # process OS + tokens). Au-dela -> {:error, :max_children} rendu par spawn_pod (fail-loud chez
-    # l'appelant). Config `:fleet_spawner, :max_pods` (defaut 24 : marge large au-dessus du reel —
-    # ~6 permanents + workers step ; la borne vise l'ANOMALIE, pas le nominal).
+    # max_children: GLOBAL CAP of live pods — a spawn flood (admin/spawn no-auth
+    # loopback, or a rail gone haywire) cannot launch N claude sessions (each = a real
+    # OS process + tokens). Beyond it -> {:error, :max_children} returned by spawn_pod (fail-loud at
+    # the caller). Config `:fleet_spawner, :max_pods` (default 24: wide margin above the real —
+    # ~6 permanents + step workers; the bound targets the ANOMALY, not the nominal).
     max = Application.get_env(:fleet_spawner, :max_pods, 24)
 
     DynamicSupervisor.init(

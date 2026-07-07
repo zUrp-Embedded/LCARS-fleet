@@ -1,25 +1,25 @@
 defmodule Fleet.Spawner.PodTmux do
   @moduledoc """
-  Ops de contrôle host→pod sur le **socket tmux PAR-POD** (`tmux -S <sock>`), conventions PARTAGÉES
-  avec `bin/bwrap_launch.sh` : le pod tourne dans un serveur tmux DANS bwrap, joignable par sa socket
-  bindée (sock-dir host↔pod). Keyé par `pod_id` (pas par l'état) — `sock_path`/`session_name` dérivés
-  du pod_id + config sock-base.
+  Host→pod control ops over the **PER-POD tmux socket** (`tmux -S <sock>`), conventions SHARED with
+  `bin/bwrap_launch.sh`: the pod runs in a tmux server INSIDE bwrap, reachable via its bound socket
+  (host↔pod sock-dir). Keyed by `pod_id` (not by state) — `sock_path`/`session_name` derived from
+  the pod_id + sock-base config.
 
-  ## Ce canal porte le CONTROL-PLANE, pas le brief
+  ## This channel carries the CONTROL-PLANE, not the brief
 
-  Le brief ne voyage PAS ici (il est pull par le pod via MCP `get_work_item`). Ce canal = le **KICK**
-  (« yop » → déclenche get_work_item → traite → submit_result) + les slash-commands (`/clear`) + le health
-  (`has-session`). Les channels MCP sont `skipSlashCommands:true` → seul
-  le send-keys tmux atteint les slash-commands.
+  The brief does NOT travel here (it is pulled by the pod via MCP `get_work_item`). This channel = the
+  **KICK** ("yop" → triggers get_work_item → processes → submit_result) + the slash-commands (`/clear`)
+  + health (`has-session`). The MCP channels are `skipSlashCommands:true` → only the tmux send-keys
+  reaches the slash-commands.
 
-  ## Le KILL PRIMAIRE n'est PAS ici (mais le fallback orphelin, si)
+  ## The PRIMARY KILL is NOT here (but the orphan fallback is)
 
-  Tuer = SIGTERM du holder bwrap (`Pod.Backend.terminate_pod_port`, pod.ex), PAS `kill-session` : le
-  holder (`sleep infinity`) tient le namespace et IGNORE `Port.close` seul (EOF stdin) → on SIGTERM son
-  os_pid ; tuer juste la session tmux laisserait le holder vivant → namespace orphelin. La socket meurt
-  avec le namespace quand le holder tombe. **Exception RECOVERY** : quand il n'y a plus de Port
-  (orphelin post-crash du process pod gen_statem, reap), `kill_holder/1` ci-dessous fait le geste de
-  secours (tmux kill-server + `pkill -f` ancré).
+  Killing = SIGTERM of the bwrap holder (`Pod.Backend.terminate_pod_port`, pod.ex), NOT `kill-session`:
+  the holder (`sleep infinity`) holds the namespace and IGNORES `Port.close` alone (stdin EOF) → we
+  SIGTERM its os_pid; killing just the tmux session would leave the holder alive → orphan namespace.
+  The socket dies with the namespace when the holder falls. **RECOVERY exception**: when there is no
+  Port left (orphan after a crash of the pod gen_statem process, reap), `kill_holder/1` below performs
+  the rescue gesture (tmux kill-server + anchored `pkill -f`).
   """
 
   require Logger
@@ -27,55 +27,55 @@ defmodule Fleet.Spawner.PodTmux do
   @tmux_bin "tmux"
 
   @doc """
-  Base des sockets pod. Config `:fleet_spawner, :tmux_sock_base` (défaut `~/.lcars/run/tmux-sock`) — MÊME
-  défaut que `bwrap_launch.sh` (`LCARS_TMUX_SOCK_BASE`). L'état `:launching` pose cet env pour que les
-  deux côtés (Elixir host / bwrap pod) calculent le MÊME chemin.
+  Base of the pod sockets. Config `:fleet_spawner, :tmux_sock_base` (default `~/.lcars/run/tmux-sock`) —
+  SAME default as `bwrap_launch.sh` (`LCARS_TMUX_SOCK_BASE`). The `:launching` state sets this env so
+  that both sides (Elixir host / bwrap pod) compute the SAME path.
   """
   @spec sock_base() :: String.t()
   def sock_base, do: Application.get_env(:fleet_spawner, :tmux_sock_base, default_sock_base())
 
-  # Fleet tourne sous l'humain → défaut home-relatif `~/.lcars/run/tmux-sock` (un `/run/lcars/tmux-sock`
-  # serait un RuntimeDirectory systemd owned `lcars`, non-writable hors d'un daemon-lcars).
-  # HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un chemin
-  # fabriqué : l'état .lcars ne doit pas se disperser en silence.
+  # Fleet runs as the human → home-relative default `~/.lcars/run/tmux-sock` (a `/run/lcars/tmux-sock`
+  # would be a systemd RuntimeDirectory owned by `lcars`, non-writable outside an lcars-daemon).
+  # Unresolvable HOME = broken runtime → fail-loud (`System.user_home!()` raises), never a fabricated
+  # path: the .lcars state must not scatter silently.
   defp default_sock_base,
     do: Path.join(Fleet.Layout.state_dir(), "run/tmux-sock")
 
   @doc """
-  Chemin socket du pod — convention bwrap_launch.sh : `<base>/<pod_id>/pod.sock`.
+  Pod socket path — bwrap_launch.sh convention: `<base>/<pod_id>/pod.sock`.
 
-  Filename CONSTANT (`pod.sock`), pas `lcars-pod-<pod_id>.sock` : le dir `<pod_id>/`
-  donne déjà l'unicité + l'isolation (bind-mount). Le double pod_id (dir + filename)
-  ferait dépasser la limite dure `sun_path` (108 octets) des sockets Unix dès que
-  `pod_id` est un UUID (chemin pipeline) → `error: File name too long` (un id court en
-  spawn direct passerait ; un pod_id UUID de pipeline, non).
+  CONSTANT filename (`pod.sock`), not `lcars-pod-<pod_id>.sock`: the `<pod_id>/` dir
+  already gives uniqueness + isolation (bind-mount). A doubled pod_id (dir + filename)
+  would blow past the hard `sun_path` limit (108 bytes) of Unix sockets as soon as
+  `pod_id` is a UUID (workflow path) → `error: File name too long` (a short id in a
+  direct spawn would pass; a workflow UUID pod_id would not).
   """
   @spec sock_path(String.t()) :: String.t()
   def sock_path(pod_id) when is_binary(pod_id),
     do: Path.join([sock_base(), pod_id, "pod.sock"])
 
-  @doc "Nom de session tmux INTERNE du pod — convention bwrap_launch.sh (`lcars-pod-<pod_id>`)."
+  @doc "Pod's INTERNAL tmux session name — bwrap_launch.sh convention (`lcars-pod-<pod_id>`)."
   @spec session_name(String.t()) :: String.t()
   def session_name(pod_id) when is_binary(pod_id), do: "lcars-pod-#{pod_id}"
 
   @doc """
-  Kill le **holder** d'un pod (le process bwrap/host_launch qui tient le namespace + serveur tmux),
-  geste de RECOVERY partagé (DRY) par `Pod.Backend.reap_orphan_pod`, `Pod.Backend.teardown_backend`
-  (fallback tmux_session, appelé par `terminate/3`) et `PodWarden.reap`. Le kill PRIMAIRE reste le SIGTERM
-  du holder (`Pod.Backend.terminate_pod_port`, cf. § « Le KILL n'est PAS ici ») ; ceci est le chemin
-  ORPHELIN/fallback où il n'y a plus de Port vivant.
+  Kills a pod's **holder** (the bwrap/host_launch process that holds the namespace + tmux server), a
+  RECOVERY gesture shared (DRY) by `Pod.Backend.reap_orphan_pod`, `Pod.Backend.teardown_backend`
+  (tmux_session fallback, called by `terminate/3`) and `PodWarden.reap`. The PRIMARY kill remains the
+  holder's SIGTERM (`Pod.Backend.terminate_pod_port`, cf. § "The KILL is NOT here"); this is the
+  ORPHAN/fallback path where there is no live Port left.
 
-  `tmux kill-server` (sur le sock par-pod) tue tmux+claude ; `pkill -9 -f <pattern>` tue le holder
-  (que kill-server laisse vivant — il porte le namespace).
+  `tmux kill-server` (on the per-pod sock) kills tmux+claude; `pkill -9 -f <pattern>` kills the holder
+  (which kill-server leaves alive — it carries the namespace).
 
-  Le pattern doit être échappé et ancré, jamais le `pod_id` brut : `pkill -9 -f <pod_id>` brut serait NON ÉCHAPPÉ et NON ANCRÉ :
-    1. un `pod_id` métacaractérisé sur-matcherait ;
-    2. un `pod_id` préfixe d'un autre (`pr-8-engineer` vs `pr-8-engineer-v2`) tuerait les deux ;
-    3. un `pod_id` vide/anormal → `pkill -f ""` tuerait **TOUT le host, BEAM inclus** (self-kill).
-  D'où `pkill_pattern/1` : garde de validité (refus fail-safe si le pod_id n'a pas la forme
-  attendue) + `Regex.escape` + ancrage en token argv. Le holder porte le pod_id comme arg standalone
-  (`bwrap_launch.sh <role> <pod_id> <pod_dir>`) → l'ancrage `(^| )id( |$)` le matche sans le manquer,
-  tout en excluant les sur-matchs substring.
+  The pattern must be escaped and anchored, never the raw `pod_id`: a raw `pkill -9 -f <pod_id>` would be UNESCAPED and UNANCHORED:
+    1. a metacharacter-laden `pod_id` would over-match;
+    2. a `pod_id` that is a prefix of another (`pr-8-engineer` vs `pr-8-engineer-v2`) would kill both;
+    3. an empty/abnormal `pod_id` → `pkill -f ""` would kill **the ENTIRE host, BEAM included** (self-kill).
+  Hence `pkill_pattern/1`: a validity guard (fail-safe refusal if the pod_id does not have the
+  expected shape) + `Regex.escape` + argv-token anchoring. The holder carries the pod_id as a standalone
+  arg (`bwrap_launch.sh <role> <pod_id> <pod_dir>`) → the anchoring `(^| )id( |$)` matches it without
+  missing it, while excluding substring over-matches.
   """
   @spec kill_holder(String.t()) :: :ok
   def kill_holder(pod_id) when is_binary(pod_id) do
@@ -98,31 +98,31 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc """
-  Pattern `pkill -f` pour un pod_id : ancré-en-token (`(^| )<escaped>( |$)`) et échappé, ou `:unsafe`
-  si le pod_id ne convient pas. Public pour test — fonction pure. `:unsafe` ⇒ on NE lance PAS pkill
-  (un pod_id vide/anormal produirait un pattern catastrophique).
+  `pkill -f` pattern for a pod_id: token-anchored (`(^| )<escaped>( |$)`) and escaped, or `:unsafe`
+  if the pod_id is unsuitable. Public for test — pure function. `:unsafe` ⇒ we do NOT run pkill
+  (an empty/abnormal pod_id would produce a catastrophic pattern).
 
-  Deux gardes, dans cet ordre :
-    1. path-safety déléguée à l'AUTORITÉ UNIQUE du charset pod_id, `Fleet.Spawner.valid_pod_id?/1` (charset
-       `[A-Za-z0-9._-]`, pas de `..`) — plus de regex de charset concurrente qui pourrait diverger de
-       l'admission au spawn ;
-    2. delta STRICT propre au domaine pkill : tête alphanumérique + longueur ≥4. C'est un sur-blindage local
-       (un pattern trop court/large tuerait le BEAM — anti self-kill), pas un second format : tout pod_id réel
-       (validé au spawn) passe la garde 1 à l'identique ; seul un id anormal `..`/court est rejeté ici.
+  Two guards, in this order:
+    1. path-safety delegated to the SINGLE AUTHORITY on the pod_id charset, `Fleet.Spawner.valid_pod_id?/1`
+       (charset `[A-Za-z0-9._-]`, no `..`) — no more competing charset regex that could diverge from the
+       spawn-time admission;
+    2. a STRICT delta specific to the pkill domain: alphanumeric head + length ≥4. This is local over-armoring
+       (a too-short/too-broad pattern would kill the BEAM — anti self-kill), not a second format: every real pod_id
+       (validated at spawn) passes guard 1 identically; only an abnormal `..`/short id is rejected here.
   """
   @spec pkill_pattern(String.t()) :: {:ok, String.t()} | :unsafe
   def pkill_pattern(pod_id) when is_binary(pod_id) do
     if Fleet.Spawner.valid_pod_id?(pod_id) and
          Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._\-]{3,}\z/, pod_id) do
       esc = Regex.escape(pod_id)
-      # DEUX formes de holder, réunies en UNE alternation ancrée :
-      #   - bwrap : le pod_id est un ARG STANDALONE de `bwrap_launch.sh` (`… <role> <pod_id> …`) →
-      #     préfixe (début|espace).
-      #   - host  : `host_launch.sh` pose argv0 `lcars-hold:<role>:<pod_id>` — le pod_id y est préfixé
-      #     par `:`, PAS un espace, donc l'ancrage token seul le RATAIT (F-HOLDER-LEAK : le holder host
-      #     `sleep infinity` fuyait sur containment:none, jamais tué par ce pkill) → on ajoute le préfixe
-      #     `lcars-hold:<role>:`. Ce préfixe est ultra-spécifique (rien d'autre ne le porte) → zéro risque
-      #     de self-kill du BEAM ; le garde `:unsafe` reste la barrière anti-pattern-trop-large.
+      # TWO holder forms, merged into ONE anchored alternation:
+      #   - bwrap: the pod_id is a STANDALONE ARG of `bwrap_launch.sh` (`… <role> <pod_id> …`) →
+      #     prefix (start|space).
+      #   - host : `host_launch.sh` sets argv0 `lcars-hold:<role>:<pod_id>` — the pod_id there is
+      #     prefixed by `:`, NOT a space, so token anchoring alone MISSED it (the host holder
+      #     `sleep infinity` was leaking on containment:none, never killed by this pkill) → we add the
+      #     prefix `lcars-hold:<role>:`. This prefix is ultra-specific (nothing else carries it) → zero
+      #     risk of self-killing the BEAM; the `:unsafe` guard remains the anti-too-broad-pattern barrier.
       {:ok, "(^| |lcars-hold:[^ ]*:)#{esc}( |$)"}
     else
       :unsafe
@@ -132,17 +132,17 @@ defmodule Fleet.Spawner.PodTmux do
   def pkill_pattern(_), do: :unsafe
 
   @doc """
-  Retire le sock-dir per-pod (`<base>/<pod_id>/`, dirname de `sock_path/1`) — geste POST-KILL
-  partagé par `Pod.Backend.teardown_backend` (teardown gracieux) et `PodWarden.reap` (reap
-  d'orphelin persistant). Sans ce retrait, le sock-dir traînerait après la mort du pod et le
-  `PodWarden` le re-suspecterait en loguant un FAUX « orphelin persistant » (bruit qui masque les vrais).
+  Removes the per-pod sock-dir (`<base>/<pod_id>/`, the dirname of `sock_path/1`) — a POST-KILL gesture
+  shared by `Pod.Backend.teardown_backend` (graceful teardown) and `PodWarden.reap` (persistent-orphan
+  reap). Without this removal, the sock-dir would linger after the pod's death and `PodWarden` would
+  re-suspect it, logging a FALSE "persistent orphan" (noise that masks the real ones).
 
-  VOLONTAIREMENT hors de `kill_holder/1` (le rm n'y est PAS plié) : les deux sémantiques divergent —
-  `Pod.Backend.reap_orphan_pod` (reap AVANT un re-launch) appelle `kill_holder` SANS retirer le
-  sock-dir (l'état `:projecting` le re-provisionne juste après), et le teardown gracieux retire le
-  sock-dir aussi quand le kill est passé par le SIGTERM du Port (chemin sans `kill_holder`). Le rm
-  est donc un geste séparé du kill, pas sa suite systématique. Best-effort (`rm_rf` ne lève pas sur
-  l'absent), rend `:ok`.
+  DELIBERATELY outside `kill_holder/1` (the rm is NOT folded into it): the two semantics diverge —
+  `Pod.Backend.reap_orphan_pod` (reap BEFORE a re-launch) calls `kill_holder` WITHOUT removing the
+  sock-dir (the `:projecting` state re-provisions it right after), and the graceful teardown removes the
+  sock-dir too when the kill went through the Port's SIGTERM (path without `kill_holder`). The rm is
+  therefore a gesture separate from the kill, not its systematic sequel. Best-effort (`rm_rf` does not
+  raise on the absent), returns `:ok`.
   """
   @spec remove_sock_dir(String.t()) :: :ok
   def remove_sock_dir(pod_id) when is_binary(pod_id) do
@@ -150,7 +150,7 @@ defmodule Fleet.Spawner.PodTmux do
     :ok
   end
 
-  @doc "Session vivante ? (`tmux -S <sock> has-session`). Health + recovery."
+  @doc "Live session? (`tmux -S <sock> has-session`). Health + recovery."
   @spec alive?(String.t()) :: boolean()
   def alive?(pod_id) when is_binary(pod_id) do
     case tmux(pod_id, ["has-session", "-t", session_name(pod_id)]) do
@@ -160,13 +160,13 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc """
-  Envoie `keys` puis `Enter` au REPL du pod (le KICK, ex. « yop »/« wake »). send-keys est le control-plane
-  universel (atteint aussi les slash-commands, contrairement aux channels MCP).
+  Sends `keys` then `Enter` to the pod's REPL (the KICK, e.g. "yop"/"wake"). send-keys is the universal
+  control-plane (it also reaches the slash-commands, unlike the MCP channels).
 
-  Robustesse : le texte et l'`Enter` partent en DEUX send-keys distincts (cf. `send_keys_args/2`). Combinés
-  en un seul (`keys "Enter"`), le TUI de claude rate l'`Enter` par intermittence (le « yop » n'est pas
-  soumis tant qu'on ne renvoie pas l'Enter). send-keys est le SEUL canal out-of-band quand le Monitor
-  est mort → il doit être robuste par construction, pas seulement par le retry de la boucle de kick.
+  Robustness: the text and the `Enter` go out as TWO distinct send-keys (cf. `send_keys_args/2`). Merged
+  into one (`keys "Enter"`), claude's TUI misses the `Enter` intermittently (the "yop" is not submitted
+  until we re-send the Enter). send-keys is the ONLY out-of-band channel when the Monitor is dead → it
+  must be robust by construction, not only by the retry of the kick loop.
   """
   @spec send_keys(String.t(), String.t()) :: :ok | {:error, term()}
   def send_keys(pod_id, keys) when is_binary(pod_id) and is_binary(keys) do
@@ -183,18 +183,18 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc false
-  # Séquence d'args tmux pour send_keys : DEUX sends — (1) le texte LITTÉRAL (`-l` : jamais interprété comme
-  # key-name), (2) l'`Enter` (key). Séparés = 2 events d'input distincts → le TUI ingère le texte avant le
-  # newline. Pure + testable (verrouille le contrat « texte littéral PUIS Enter », anti-régression).
+  # tmux args sequence for send_keys: TWO sends — (1) the LITERAL text (`-l`: never interpreted as a
+  # key-name), (2) the `Enter` (key). Separated = 2 distinct input events → the TUI ingests the text before
+  # the newline. Pure + testable (locks the contract "literal text THEN Enter", anti-regression).
   def send_keys_args(pod_id, keys) when is_binary(pod_id) and is_binary(keys) do
     s = session_name(pod_id)
     [["send-keys", "-t", s, "-l", keys], ["send-keys", "-t", s, "Enter"]]
   end
 
   @doc """
-  Capture le contenu visible du pane du pod (`tmux capture-pane -p`) = l'écran du REPL. Canal d'observation
-  DÉPORTÉ, fallback-ACK : quand l'agent n'acke pas, on attache l'écran au issue d'escalade
-  (starfleet voit ce que l'agent affichait/faisait). Renvoie `""` si la capture échoue (best-effort).
+  Captures the visible content of the pod's pane (`tmux capture-pane -p`) = the REPL screen. An OFFLOADED
+  observation channel, fallback-ACK: when the agent does not ack, we attach the screen to the escalation
+  issue (starfleet sees what the agent was displaying/doing). Returns `""` if the capture fails (best-effort).
   """
   @spec capture_pane(String.t()) :: String.t()
   def capture_pane(pod_id) when is_binary(pod_id) do

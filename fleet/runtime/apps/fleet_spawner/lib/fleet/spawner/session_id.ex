@@ -1,46 +1,46 @@
 defmodule Fleet.Spawner.SessionId do
   @moduledoc """
-  Encodeur PUR du `session_id` claude DÉTERMINISTE (hexspeak) d'un pod fleet. Il transforme un
-  triplet `(role_index, protected, repo[, pool])` — fourni par l'APPELANT — en UUID hexspeak stable,
-  sans suffixe timestamp. Il ne CATALOGUE plus les rôles : la source du QUOI (l'index de rôle, le tier
-  protégé, le caractère fleet-level) est le cap-profile du rôle (`metadata.role_index` / `protected` /
-  `fleet_level`, lus via `Fleet.CapProfile`). Ici on ne fait que l'arithmétique de la string.
+  PURE encoder of a fleet pod's DETERMINISTIC claude `session_id` (hexspeak). It transforms a
+  triplet `(role_index, protected, repo[, pool])` — supplied by the CALLER — into a stable hexspeak
+  UUID, with no timestamp suffix. It no longer CATALOGUES the roles: the source of the WHAT (the role
+  index, the protected tier, the fleet-level character) is the role's cap-profile (`metadata.role_index`
+  / `protected` / `fleet_level`, read via `Fleet.CapProfile`). Here we only do the string arithmetic.
 
-  Format : `<T>badcafe-feed-4dad-babe-<REPO4>dec0de<P><R>`
+  Format: `<T>badcafe-feed-4dad-babe-<REPO4>dec0de<P><R>`
 
-    - `<T>`            tier : `0` = protégé (`0badcafe`) · `1` = worker (`1badcafe`). Le bit vient de
-                      l'argument `protected` (= `metadata.protected` du cap-profile). `badcafe` =
-                      marqueur-kill universel → `pkill -f 1badcafe` nuke les workers et ÉPARGNE les
-                      protégés (arch terminal user) ; `pkill -f badcafe` = tout.
-    - `feed-4dad-babe` filler hexspeak fixe (`4` de `4dad` = nibble version UUID ; `b` de `babe` =
-                      nibble variant RFC4122 valide → la string EST un UUID légal, accepté `--session-id`).
-    - `<REPO4>`       id forge du repo, en **DÉCIMAL** 4 chiffres (la forge crée l'id en décimal → `grep
-                      <id>dec0de` direct, zéro conversion). `0000` = fleet-level (permanents). Les chiffres
-                      `0-9` ⊂ hex → l'UUID reste légal. **DETTE ASSUMÉE** : cap 9999 ; l'appelant passe un
-                      repo dans `0..9999` (le repo 10000 collisionnerait le repo 0, etc. — accepté : on ne
-                      rouvrira pas un vieux projet au moment d'en créer 10000).
+    - `<T>`            tier: `0` = protected (`0badcafe`) · `1` = worker (`1badcafe`). The bit comes from
+                      the `protected` argument (= the cap-profile's `metadata.protected`). `badcafe` =
+                      universal kill-marker → `pkill -f 1badcafe` nukes the workers and SPARES the
+                      protected ones (the user's terminal arch) ; `pkill -f badcafe` = everything.
+    - `feed-4dad-babe` fixed hexspeak filler (`4` of `4dad` = UUID version nibble ; `b` of `babe` =
+                      valid RFC4122 variant nibble → the string IS a legal UUID, accepted by `--session-id`).
+    - `<REPO4>`       repo's forge id, in **DECIMAL** 4 digits (the forge creates the id in decimal → `grep
+                      <id>dec0de` direct, zero conversion). `0000` = fleet-level (permanents). The digits
+                      `0-9` ⊂ hex → the UUID stays legal. **ASSUMED DEBT**: cap 9999 ; the caller passes a
+                      repo in `0..9999` (repo 10000 would collide with repo 0, etc. — accepted: we will not
+                      reopen an old project at the moment of creating a 10000th).
     - `dec0de`        filler.
-    - `<P><R>`        pool (nibble haut, `0` = séquentiel) + index de rôle (nibble bas) — **HEX** (R=0-F).
-                      `R` = l'argument `role_index` (= `metadata.role_index` du cap-profile), PAS un
-                      catalogue local : le mapping rôle → slot vit côté cap-profile.
+    - `<P><R>`        pool (high nibble, `0` = sequential) + role index (low nibble) — **HEX** (R=0-F).
+                      `R` = the `role_index` argument (= the cap-profile's `metadata.role_index`), NOT a
+                      local catalogue: the role → slot mapping lives on the cap-profile side.
 
-  Le QUOI (rôle/tier/projet) est DÉCLARÉ par le cap-profile ; le QUI vit sur l'axe OS (UID hérité — le
-  pod tourne sous l'UID de l'humain) — jamais dupliqués (UID-dans-UUID rejeté). Module PUR (zéro
-  process, zéro IO, zéro catalogue) : un encodeur TOTAL sur des entrées valides — aucun refus de rôle
-  (starfleet, rôle inconnu : ces décisions vivent au niveau spawn, pas ici), aucun `{:error, _}`. Une
-  entrée hors-borne = bug appelant → function-clause/raise.
+  The WHAT (role/tier/project) is DECLARED by the cap-profile ; the WHO lives on the OS axis (inherited
+  UID — the pod runs under the human's UID) — never duplicated (UID-in-UUID rejected). PURE module (zero
+  process, zero IO, zero catalogue): a TOTAL encoder over valid inputs — no role refusal (starfleet, an
+  unknown role: those decisions live at the spawn level, not here), no `{:error, _}`. An out-of-bounds
+  input = caller bug → function-clause/raise.
   """
   import Bitwise
 
   @doc """
-  Encode le triplet `(role_index, protected, repo[, pool])` en UUID hexspeak déterministe.
+  Encodes the triplet `(role_index, protected, repo[, pool])` into a deterministic hexspeak UUID.
 
-  `role_index` (0..15) et `protected` (tier épargné par le kill des workers) viennent du cap-profile
-  (`metadata.role_index` / `protected`). `repo` = id forge DÉCIMAL (0..9999 ; `0` = fleet-level, pas de
-  dimension projet). `pool` = nibble haut de `<P><R>` (0 = séquentiel, défaut).
+  `role_index` (0..15) and `protected` (tier spared by the workers' kill) come from the cap-profile
+  (`metadata.role_index` / `protected`). `repo` = DECIMAL forge id (0..9999 ; `0` = fleet-level, no
+  project dimension). `pool` = high nibble of `<P><R>` (0 = sequential, default).
 
-  Total sur entrées valides : aucun `{:error, _}` — une entrée hors-borne déclenche un function-clause
-  (bug appelant), pas un retour d'erreur.
+  Total over valid inputs: no `{:error, _}` — an out-of-bounds input triggers a function-clause
+  (caller bug), not an error return.
   """
   @spec encode(0..15, boolean(), 0..9999, 0..0xF) :: String.t()
   def encode(role_index, protected, repo, pool \\ 0)
@@ -49,13 +49,13 @@ defmodule Fleet.Spawner.SessionId do
     t = if protected, do: 0, else: 1
     xx = bsl(pool, 4) ||| role_index
 
-    # repo = DÉCIMAL (la forge le crée en décimal → grep direct) ; tier + XX = HEX (compteur natif).
+    # repo = DECIMAL (the forge creates it in decimal → grep direct) ; tier + XX = HEX (native counter).
     "#{hex(t, 1)}badcafe-feed-4dad-babe-#{dec(repo, 4)}dec0de#{hex(xx, 2)}"
   end
 
   defp hex(n, width),
     do: n |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(width, "0")
 
-  # DÉCIMAL zéro-paddé (id forge tel que la forge le crée → grep direct). Chiffres `0-9` ⊂ hex.
+  # DECIMAL zero-padded (forge id as the forge creates it → grep direct). Digits `0-9` ⊂ hex.
   defp dec(n, width), do: n |> Integer.to_string() |> String.pad_leading(width, "0")
 end

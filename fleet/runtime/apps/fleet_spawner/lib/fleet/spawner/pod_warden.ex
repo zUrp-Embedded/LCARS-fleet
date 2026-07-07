@@ -1,56 +1,55 @@
 defmodule Fleet.Spawner.PodWarden do
   @moduledoc """
-  Reaper PÉRIODIQUE du SUBSTRAT pod. À chaque tick il réconcilie deux empreintes laissées sur disque
-  par des pods morts contre l'ensemble des Pods VIVANTS (`Fleet.Spawner.Registry`) et nettoie les
-  orphelins. Deux duties indépendantes, deux empreintes, deux horloges de grace :
+  PERIODIC reaper of the pod SUBSTRATE. On each tick it reconciles two footprints left on disk by dead
+  pods against the set of LIVE Pods (`Fleet.Spawner.Registry`) and cleans up the orphans. Two
+  independent duties, two footprints, two grace clocks:
 
-  ## 1. Sockets tmux orphelines (`reap/1`)
+  ## 1. Orphan tmux sockets (`reap/1`)
 
-  Un orphelin = une socket tmux par-pod vivante (claude tourne, consomme OAuth + RAM) SANS Pod
-  GenServer correspondant. Cause : un crash du Pod GenServer ne tue pas le bwrap/tmux
-  (`--die-with-parent` = BEAM, pas GenServer). Sous `:temporary` le GenServer n'est jamais ressuscité
-  → l'orphelin persiste jusqu'au crash du BEAM. Complète le reap-on-(re)launch
-  (`Fleet.Spawner.Pod.Backend.reap_orphan_pod/1`) qui ne couvre QUE le re-spawn. Le reap réutilise le mécanisme
-  prouvé live (`PodTmux.kill_holder` : tmux kill-server + pkill ancré) puis retire le sock-dir
-  (`PodTmux.remove_sock_dir`, geste post-kill partagé avec le teardown gracieux).
+  An orphan = a live per-pod tmux socket (claude running, consuming OAuth + RAM) WITHOUT a matching Pod
+  GenServer. Cause: a crash of the Pod GenServer does not kill the bwrap/tmux
+  (`--die-with-parent` = BEAM, not GenServer). Under `:temporary` the GenServer is never resurrected
+  → the orphan persists until the BEAM crashes. Complements the reap-on-(re)launch
+  (`Fleet.Spawner.Pod.Backend.reap_orphan_pod/1`) which covers ONLY the re-spawn. The reap reuses the
+  live-proven mechanism (`PodTmux.kill_holder`: tmux kill-server + anchored pkill) then removes the
+  sock-dir (`PodTmux.remove_sock_dir`, post-kill gesture shared with the graceful teardown).
 
-  ## 2. pod_dirs orphelins — GC du cimetière (`gc_one/1`)
+  ## 2. Orphan pod_dirs — graveyard GC (`gc_one/1`)
 
-  Le pod_dir (`~/pods/pod_<id>`, clone git complet + `.lcars`/`.claude`/`issues`) et son state-dir
-  (`~/.lcars/state/<scope>/<id>/`) survivent comme TOMBSTONE après la mort du pod. Ils ne sont effacés
-  qu'au re-spawn du MÊME pod_id (`Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`). Donc un worker
-  par-issue à usage unique — jamais re-briefé — laisse son clone git sur disque POUR TOUJOURS :
-  accumulation monotone. Ici on balaie les tombstones TERMINALES (phase `succeeded`/`released`/`killed`)
-  et ORPHELINES (aucun Pod GenServer vivant) et on efface les deux dossiers via le geste partagé
-  `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2` (le re-spawn re-clonerait FRESH de toute façon). Sûr car
-  le seed `--resume` vit dans le seed-store (`projects.work/<projet>/pods/`), PAS dans le pod_dir.
+  The pod_dir (`~/pods/pod_<id>`, full git clone + `.lcars`/`.claude`/`issues`) and its state-dir
+  (`~/.lcars/state/<scope>/<id>/`) survive as a TOMBSTONE after the pod dies. They are erased only on
+  the re-spawn of the SAME pod_id (`Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot/3`). So a
+  single-use per-issue worker — never re-briefed — leaves its git clone on disk FOREVER: monotone
+  accumulation. Here we sweep the tombstones that are TERMINAL (phase `succeeded`/`released`/`killed`)
+  and ORPHAN (no live Pod GenServer) and erase both directories via the shared gesture
+  `Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/2` (the re-spawn would re-clone FRESH anyway). Safe because
+  the `--resume` seed lives in the seed-store (`projects.work/<project>/pods/`), NOT in the pod_dir.
 
-  ## Grace 2-tick (les deux duties)
+  ## 2-tick grace (both duties)
 
-  Un orphelin n'est nettoyé qu'au 2ᵉ tick CONSÉCUTIF où il est vu (deux MapSet de suspects distincts,
-  `:suspects` pour les socks, `:gc_suspects` pour les pod_dirs). Pour le pod_dir : un re-spawn du même
-  pod_id efface la tombstone (clear_terminal_snapshot) PUIS registre son GenServer AVANT de re-poser un
-  pod_dir frais → au tick suivant il est soit vivant (exclu), soit non-terminal (épargné). La grace donne
-  un intervalle complet de marge en plus. Choix 2-tick (vs TTL) : même mécanisme prouvé que le sock-reap,
-  aucune config neuve, et le state.json ne porte pas de `terminal_at` (un TTL retomberait sur le mtime du
-  fichier, signal implicite/fragile). Un restart du warden re-arme simplement la grace (retarde le GC d'un
-  tick, ne le déclenche JAMAIS à tort) — fail-safe.
+  An orphan is cleaned up only on the 2nd CONSECUTIVE tick where it is seen (two distinct suspect
+  MapSets, `:suspects` for the socks, `:gc_suspects` for the pod_dirs). For the pod_dir: a re-spawn of the
+  same pod_id erases the tombstone (clear_terminal_snapshot) THEN registers its GenServer BEFORE laying
+  down a fresh pod_dir → on the next tick it is either live (excluded) or non-terminal (spared). The grace
+  gives one full interval of extra margin. 2-tick choice (vs TTL): same proven mechanism as the sock-reap,
+  no new config, and the state.json carries no `terminal_at` (a TTL would fall back on the file's mtime, an
+  implicit/fragile signal). A restart of the warden simply re-arms the grace (delays the GC by one tick,
+  NEVER triggers it wrongly) — fail-safe.
 
-  Gaté `:start_pod_warden` (défaut true prod, false test).
+  Gated on `:start_pod_warden` (default true in prod, false in test).
 
-  ## Pourquoi UN module pour deux duties (split refusé, passe modules 2026-07-05)
+  ## Why ONE module for two duties (split refused, modules pass 2026-07-05)
 
-  Les deux duties partagent tout le SUBSTRAT de décision : une seule horloge (`:reap_tick`), une
-  seule source des vivants (`live_pod_ids/0` — dont le garde « Registry indisponible ⇒ skip du
-  tick ENTIER », qui protège les DEUX duties d'un même coup), et le cœur pur `grace_2tick/2`.
-  Un split en deux modules (ou deux GenServers) dupliquerait l'horloge + le garde Registry, ou
-  créerait un chassé-croisé cross-module autour de `grace_2tick` (l'un des deux devrait appeler
-  le helper de l'autre) pour ~60 lignes par duty. Le regroupement interne est net : sections
-  « Duty 1 » / « Duty 2 » / cœur partagé ci-dessous.
+  Both duties share the whole decision SUBSTRATE: a single clock (`:reap_tick`), a single source of the
+  live set (`live_pod_ids/0` — including the guard "Registry unavailable ⇒ skip the WHOLE tick", which
+  protects BOTH duties in one stroke), and the pure core `grace_2tick/2`. A split into two modules (or two
+  GenServers) would duplicate the clock + the Registry guard, or create a cross-module criss-cross around
+  `grace_2tick` (one of the two would have to call the other's helper) for ~60 lines per duty. The internal
+  grouping is clean: "Duty 1" / "Duty 2" / shared-core sections below.
 
-  > La mémoire d'échec de wake (re-roll/escalade) ne vit PAS ici : un compteur de session serait
-  > éphémère. Elle est ancrée dans le PROJET via `Fleet.Pilot.IncidentRegistry` (registre `work/ops`,
-  > cross-session). PodWarden reste le gardien du SUBSTRAT (reap des orphelins).
+  > The wake-failure memory (re-roll/escalation) does NOT live here: a session counter would be
+  > ephemeral. It is anchored in the PROJECT via `Fleet.Pilot.IncidentRegistry` (`work/ops` registry,
+  > cross-session). PodWarden remains the guardian of the SUBSTRATE (reaping orphans).
   """
 
   use GenServer
@@ -61,19 +60,20 @@ defmodule Fleet.Spawner.PodWarden do
 
   @default_interval_ms 60_000
 
-  # Phases où une tombstone ORPHELINE (pas de GenServer vivant) est réclamable par le GC : plus de
-  # process à protéger ET aucune donnée à perdre (les artefacts sont re-dérivables — clone frais au
-  # re-spawn, seed `--resume` hors pod_dir dans le seed-store). Deux familles :
-  #   - `succeeded`/`released`/`killed` = terminal-DONE (recovery → `:release`, rien à relancer) ;
-  #   - `failed` = terminal-DIED (recovery → `:recreate`, relance FRESH). Réclamable aussi : le recreate
-  #     re-clone à neuf, il ne lit pas l'ancien pod_dir. Un `failed` jamais re-dispatché (issue fermée
-  #     ailleurs) fuirait sinon tombstone + pod_dir pour toujours.
-  # ⚠ DIVERGENCE VOULUE avec `Pod.StateFs.clear_terminal_snapshot` (qui, LUI, exclut `failed`) : ce dernier
-  # efface la tombstone AU RE-SPAWN, or `recover_or_init` doit d'abord LIRE la phase `failed` pour décider
-  # `:recreate` — la pré-effacer casserait la recovery. Le GC, lui, n'agit que sur l'ORPHELIN (2-tick grace
-  # + `not live`) : le race GC↔recovery est bénin (GC gagne → fresh init sans state.json ; recovery gagne →
-  # registre vivant → GC skip ; les deux aboutissent à un clone frais, un pod `failed` n'a rien à préserver).
-  # Strings (la phase vient du JSON brut du state.json — pas d'atome à matérialiser).
+  # Phases where an ORPHAN tombstone (no live GenServer) is reclaimable by the GC: no more process to
+  # protect AND no data to lose (the artifacts are re-derivable — fresh clone on re-spawn, `--resume`
+  # seed outside the pod_dir in the seed-store). Two families:
+  #   - `succeeded`/`released`/`killed` = terminal-DONE (recovery → `:release`, nothing to restart);
+  #   - `failed` = terminal-DIED (recovery → `:recreate`, restarts FRESH). Reclaimable too: the recreate
+  #     re-clones from scratch, it does not read the old pod_dir. A `failed` never re-dispatched (issue
+  #     closed elsewhere) would otherwise leak tombstone + pod_dir forever.
+  # ⚠ DELIBERATE DIVERGENCE from `Pod.StateFs.clear_terminal_snapshot` (which, ITSELF, excludes `failed`): the
+  # latter erases the tombstone ON RE-SPAWN, whereas `recover_or_init` must first READ the `failed` phase to
+  # decide `:recreate` — pre-erasing it would break the recovery. The GC, for its part, acts only on the
+  # ORPHAN (2-tick grace + `not live`): the GC↔recovery race is benign (GC wins → fresh init with no
+  # state.json; recovery wins → live registered → GC skips; both end in a fresh clone, a `failed` pod has
+  # nothing to preserve).
+  # Strings (the phase comes from the raw JSON of the state.json — no atom to materialize).
   @terminal_phases ~w(succeeded released killed failed)
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -93,21 +93,21 @@ defmodule Fleet.Spawner.PodWarden do
   def handle_info(:reap_tick, state) do
     case live_pod_ids() do
       {:ok, live} ->
-        # Duty 1 — sockets orphelines.
+        # Duty 1 — orphan sockets.
         {to_reap, new_suspects} = reconcile_decision(live, sock_pod_ids(), state.suspects)
         Enum.each(to_reap, &reap/1)
 
-        # Duty 2 — pod_dirs orphelins (cimetière de tombstones).
+        # Duty 2 — orphan pod_dirs (tombstone graveyard).
         new_gc_suspects = sweep_pod_dir_gc(live, state.gc_suspects)
 
         schedule_tick()
         {:noreply, %{state | suspects: new_suspects, gc_suspects: new_gc_suspects}}
 
       :unavailable ->
-        # Conformité 2026-07-04 : le Registry indisponible rendait un MapSet VIDE muet → TOUS les
-        # socks paraissaient orphelins → 2 ticks down = reap de pods VIVANTS. Sans la liste des
-        # vivants on ne peut RIEN décider : skip du tick ENTIER (suspects gelés en l'état — ni
-        # accusés ni blanchis), visible. Registry revenu → la grace 2-tick reprend, rien de perdu.
+        # Compliance 2026-07-04: an unavailable Registry used to yield a silent EMPTY MapSet → ALL the
+        # socks looked orphaned → 2 ticks down = reap of LIVE pods. Without the live list we can decide
+        # NOTHING: skip the WHOLE tick (suspects frozen as-is — neither accused nor cleared), visibly.
+        # Registry back → the 2-tick grace resumes, nothing lost.
         Logger.warning(
           "PodWarden: Registry indisponible — tick de reap SKIPPÉ (aucune décision sans la liste des vivants)"
         )
@@ -120,13 +120,13 @@ defmodule Fleet.Spawner.PodWarden do
   def handle_info(_other, state), do: {:noreply, state}
 
   # ============================================================
-  # Duty 1 — sockets tmux orphelines (décision pure + reap)
+  # Duty 1 — orphan tmux sockets (pure decision + reap)
   # ============================================================
 
   @doc """
-  Décision PURE de réconciliation des SOCKS. `to_reap` = orphelins (socks − registry) vus AU TICK
-  PRÉCÉDENT aussi (`prev_suspects`) → grace 2-tick. `new_suspects` = orphelins du tick courant pas
-  (encore) reapés.
+  PURE reconciliation decision for the SOCKS. `to_reap` = orphans (socks − registry) seen at the
+  PREVIOUS TICK too (`prev_suspects`) → 2-tick grace. `new_suspects` = this-tick orphans not (yet)
+  reaped.
   """
   @spec reconcile_decision(MapSet.t(), MapSet.t(), MapSet.t()) :: {MapSet.t(), MapSet.t()}
   def reconcile_decision(live, socks, prev_suspects) do
@@ -135,16 +135,16 @@ defmodule Fleet.Spawner.PodWarden do
   end
 
   # ============================================================
-  # Duty 2 — GC des pod_dirs tombstones (décision pure + sweep)
+  # Duty 2 — pod_dir tombstone GC (pure decision + sweep)
   # ============================================================
 
   @doc """
-  Décision PURE de GC des pod_dirs. `tombstones` = états scannés sur disque, chacun
-  `%{pod_id, phase, state_dir, pod_dir}` (`phase` = string brute du state.json). Une tombstone est
-  candidate au GC ssi sa phase est TERMINALE (le pod a fini) ET son pod_id n'a PAS de GenServer vivant
-  (`live`). Grace 2-tick comme `reconcile_decision/3` : on ne GC qu'au 2ᵉ tick consécutif où la candidate
-  est vue (`prev_suspects`). Rend `{tombstones_à_effacer, new_suspects}` — `new_suspects` = pod_ids des
-  candidates pas (encore) effacées.
+  PURE GC decision for the pod_dirs. `tombstones` = states scanned on disk, each
+  `%{pod_id, phase, state_dir, pod_dir}` (`phase` = raw string from the state.json). A tombstone is a GC
+  candidate iff its phase is TERMINAL (the pod finished) AND its pod_id has NO live GenServer
+  (`live`). 2-tick grace like `reconcile_decision/3`: we GC only on the 2nd consecutive tick where the
+  candidate is seen (`prev_suspects`). Returns `{tombstones_to_erase, new_suspects}` — `new_suspects` =
+  pod_ids of the candidates not (yet) erased.
   """
   @spec reconcile_pod_dir_gc([map()], MapSet.t(), MapSet.t()) :: {[map()], MapSet.t()}
   def reconcile_pod_dir_gc(tombstones, live, prev_suspects) do
@@ -155,16 +155,16 @@ defmodule Fleet.Spawner.PodWarden do
     {to_gc, new_suspects}
   end
 
-  # Terminale ET orpheline : les deux conditions du GC. Non-terminale (en vol) OU vivante ⇒ épargnée.
+  # Terminal AND orphan: the two conditions for the GC. Non-terminal (in flight) OR live ⇒ spared.
   defp gc_candidate?(%{phase: phase, pod_id: pod_id}, live) do
     phase in @terminal_phases and not MapSet.member?(live, pod_id)
   end
 
   @doc """
-  Un balayage complet du GC pod_dir : scanne les tombstones, décide (terminale + orpheline + grace
-  2-tick), efface les confirmées. Rend les `new_suspects` (pod_ids candidates pas encore effacées).
-  Public pour être pilotable en test sans le timer ni le Registry réel (on injecte `live` explicitement
-  et la racine de scan via la config `:state_fs_root`/`:pod_dir_root`).
+  A full pod_dir GC sweep: scans the tombstones, decides (terminal + orphan + 2-tick grace), erases the
+  confirmed ones. Returns the `new_suspects` (pod_ids of candidates not yet erased). Public so it can be
+  driven in test without the timer or the real Registry (we inject `live` explicitly and the scan root
+  via the config `:state_fs_root`/`:pod_dir_root`).
   """
   @spec sweep_pod_dir_gc(MapSet.t(), MapSet.t()) :: MapSet.t()
   def sweep_pod_dir_gc(live, prev_suspects) do
@@ -174,14 +174,14 @@ defmodule Fleet.Spawner.PodWarden do
   end
 
   # ============================================================
-  # Cœur partagé des deux duties
+  # Shared core of both duties
   # ============================================================
 
-  # Cœur PUR de la grace 2-tick, PARTAGÉ par les deux duties (socks + pod_dirs) : parmi les
-  # `candidates` (MapSet d'ids réclamables de CE tick), on n'agit QUE sur ceux DÉJÀ suspects au tick
-  # précédent (`prev_suspects`) ; les autres deviennent les suspects du prochain tick. Un candidat qui
-  # disparaît entre deux ticks (re-spawn, Pod revenu vivant) sort donc naturellement de la liste sans
-  # jamais être touché — c'est toute la valeur de la grace. Rend `{to_act, new_suspects}`.
+  # PURE core of the 2-tick grace, SHARED by both duties (socks + pod_dirs): among the `candidates`
+  # (MapSet of reclaimable ids for THIS tick), we act ONLY on those ALREADY suspect at the previous tick
+  # (`prev_suspects`); the others become the next tick's suspects. A candidate that disappears between two
+  # ticks (re-spawn, Pod back alive) thus naturally drops off the list without ever being touched — that is
+  # the whole value of the grace. Returns `{to_act, new_suspects}`.
   defp grace_2tick(candidates, prev_suspects) do
     to_act = MapSet.intersection(candidates, prev_suspects)
     new_suspects = MapSet.difference(candidates, to_act)
@@ -189,10 +189,10 @@ defmodule Fleet.Spawner.PodWarden do
   end
 
   # ============================================================
-  # I/O (rescue-protégé : un nettoyage qui lève ne tue pas le warden)
+  # I/O (rescue-protected: a cleanup that raises does not kill the warden)
   # ============================================================
 
-  # Reap d'une socket orpheline (mécanisme partagé avec Pod.Backend.reap_orphan_pod/1).
+  # Reap of an orphan socket (mechanism shared with Pod.Backend.reap_orphan_pod/1).
   defp reap(pod_id) do
     Logger.warning(
       "PodWarden: pod #{pod_id} = orphelin persistant (sock vivante, aucun GenServer) — reap (BL-036b)"
@@ -205,7 +205,7 @@ defmodule Fleet.Spawner.PodWarden do
     e -> Logger.warning("PodWarden: reap #{pod_id} échec (non-bloquant): #{inspect(e)}")
   end
 
-  # GC d'un pod_dir orphelin (mécanisme partagé avec Pod.StateFs.clear_terminal_snapshot/3).
+  # GC of an orphan pod_dir (mechanism shared with Pod.StateFs.clear_terminal_snapshot/3).
   defp gc_one(%{pod_id: pod_id, state_dir: state_dir, pod_dir: pod_dir}) do
     Logger.info("PodWarden: pod_dir orphelin GC : pod_#{pod_id}, libère #{pod_dir}")
     StateFs.rm_terminal_artifacts(state_dir, pod_dir)
@@ -214,12 +214,12 @@ defmodule Fleet.Spawner.PodWarden do
     e -> Logger.warning("PodWarden: GC pod_#{pod_id} échec (non-bloquant): #{inspect(e)}")
   end
 
-  # Énumère les tombstones sous la racine GLOBALE des state.json (`Pod.Paths.state_fs_root/0` :
-  # `<root>/<scope>/<pod_id>/state.json`). Pour chacune : le pod_id (= nom du dossier), sa phase (brute),
-  # son state-dir (trouvé par le scan) et son pod_dir (dérivé du seul pod_id, cap_profile inutile). Une
-  # entrée sans `state.json` lisible/décodable est ignorée — la phase est la SEULE preuve de terminalité,
-  # donc on ne GC jamais un dossier qu'on ne peut pas confirmer terminal. rescue → [] : un FS cassé ne tue
-  # pas le tick.
+  # Enumerates the tombstones under the GLOBAL root of the state.json files (`Pod.Paths.state_fs_root/0`:
+  # `<root>/<scope>/<pod_id>/state.json`). For each: the pod_id (= dir name), its phase (raw), its
+  # state-dir (found by the scan) and its pod_dir (derived from the pod_id alone, cap_profile not needed).
+  # An entry with no readable/decodable `state.json` is ignored — the phase is the ONLY proof of
+  # terminality, so we never GC a directory we cannot confirm terminal. rescue → []: a broken FS does not
+  # kill the tick.
   defp scan_tombstones do
     root = Paths.state_fs_root()
 
@@ -252,9 +252,9 @@ defmodule Fleet.Spawner.PodWarden do
     end
   end
 
-  # `{:ok, vivants}` ou `:unavailable` (Registry down). JAMAIS un MapSet vide sur erreur : vide
-  # signifie « zéro pod vivant » (décidable), pas « je ne sais pas » (indécidable) — confondre les
-  # deux ferait reaper des pods vivants (cf. handle_info :reap_tick).
+  # `{:ok, live}` or `:unavailable` (Registry down). NEVER an empty MapSet on error: empty means
+  # "zero live pod" (decidable), not "I don't know" (undecidable) — conflating the two would reap live
+  # pods (cf. handle_info :reap_tick).
   defp live_pod_ids do
     {:ok,
      Fleet.Spawner.Registry

@@ -1,23 +1,23 @@
 defmodule Fleet.Spawner.PublishConsumer do
   @moduledoc """
-  Consumer du broadcast `admin.spawn.request`.
+  Consumer of the `admin.spawn.request` broadcast.
 
-  Subscribe `Fleet.EventRouter.Bus` topic `fleet.events`, filtre
-  `:"admin.spawn.request"`, dispatche `Fleet.Spawner.spawn_pod/3`.
+  Subscribes to `Fleet.EventRouter.Bus` topic `fleet.events`, filters
+  `:"admin.spawn.request"`, dispatches `Fleet.Spawner.spawn_pod/3`.
 
-  Payload attendu (rest.ex broadcast les conn.body_params) :
-    * `"cap_profile_name"` ou `"role"` — string, nom canon CapProfile (chargé via `Fleet.CapProfile.load/1`)
-    * `"issue_id"` — string (sinon issue_id enveloppe Bus)
-    * `"opts"` — map keyword (optionnel)
+  Expected payload (rest.ex broadcasts the conn.body_params):
+    * `"cap_profile_name"` or `"role"` — string, canonical CapProfile name (loaded via `Fleet.CapProfile.load/1`)
+    * `"issue_id"` — string (else the Bus envelope's issue_id)
+    * `"opts"` — keyword map (optional)
 
-  Erreurs (load fail / spawn fail) → log warning, **pas de crash**
-  (consumer reste alive, fail-loud non-fatal). La chaîne doit être
-  câblée bout-à-bout : broadcast→consume→spawn est end-to-end ; sans
-  consumer, /api/admin/spawn renvoie HTTP 202 mais ne spawne rien
-  (succès affiché, zéro pod).
+  Errors (load fail / spawn fail) → log warning, **no crash**
+  (the consumer stays alive, non-fatal fail-loud). The chain MUST be
+  wired end-to-end: broadcast→consume→spawn is end-to-end; without the
+  consumer, /api/admin/spawn returns HTTP 202 but spawns nothing
+  (success shown, zero pods).
 
-  Test-seam : `:subscribe` (default true) + `:spawner` backend
-  (default `Fleet.Spawner`, overridable pour mock).
+  Test-seam: `:subscribe` (default true) + `:spawner` backend
+  (default `Fleet.Spawner`, overridable for a mock).
   """
 
   use GenServer
@@ -38,7 +38,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   end
 
   @impl true
-  # Schema canon strict.
+  # Strict canonical schema.
   def handle_info(
         %Fleet.Event{source: :api, type: :"admin.spawn.request", payload: payload},
         state
@@ -48,11 +48,11 @@ defmodule Fleet.Spawner.PublishConsumer do
       handle_spawn_request(payload, payload, state)
     rescue
       e ->
-        # Le dispatch a LEVÉ → le spawn est droppé. MAIS l'API REST a déjà répondu HTTP 202 « queued »
-        # au client AVANT ce traitement async (broadcast→consume→spawn) : sans signal, l'admin croit le
-        # pod en file alors qu'il n'existe pas (succès affiché, zéro pod, zéro alarme). On loggue ERROR
-        # (load-bearing) ET on émet `spawn.failed` sur le Bus — alarme du cycle spawn, jumelle de
-        # `pod.failed`. Le consumer reste vivant (rescue non-fatal) : un drop ne tue pas le broker.
+        # The dispatch RAISED → the spawn is dropped. BUT the REST API already answered HTTP 202 "queued"
+        # to the client BEFORE this async processing (broadcast→consume→spawn): with no signal, the admin
+        # believes the pod is queued when it does not exist (success shown, zero pods, zero alarm). We log ERROR
+        # (load-bearing) AND emit `spawn.failed` on the Bus — spawn-cycle alarm, twin of
+        # `pod.failed`. The consumer stays alive (non-fatal rescue): a drop does not kill the broker.
         reason = Exception.message(e)
 
         Logger.error(
@@ -66,17 +66,17 @@ defmodule Fleet.Spawner.PublishConsumer do
     {:noreply, %{state | count: state.count + 1}}
   end
 
-  # Pas de clause tuple legacy `{:"admin.spawn.request", event}` : AUCUN producteur n'émet le
-  # tuple `{atom, map}` (tous en `%Fleet.Event{}`). Le chemin canon (clause struct ci-dessus)
-  # reçoit l'event ; une clause tuple serait morte. Le catch-all `_other` couvre tout message
-  # non-event.
+  # No legacy tuple clause `{:"admin.spawn.request", event}`: NO producer emits the
+  # `{atom, map}` tuple (all use `%Fleet.Event{}`). The canonical path (the struct clause above)
+  # receives the event; a tuple clause would be dead. The `_other` catch-all covers any
+  # non-event message.
 
-  # autres events broadcasts sur fleet.events → ignore
+  # other events broadcast on fleet.events → ignore
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
-  # `payload` = map applicative ; `envelope` = struct/map qui peut porter `issue_id`
-  # à la racine (cas legacy tuple — la struct canon le porte dans le payload aussi).
+  # `payload` = application map; `envelope` = struct/map that may carry `issue_id`
+  # at the root (legacy tuple case — the canonical struct carries it in the payload too).
   defp handle_spawn_request(payload, envelope, state) do
     name = Map.get(payload, "cap_profile_name") || Map.get(payload, "role")
 
@@ -116,12 +116,12 @@ defmodule Fleet.Spawner.PublishConsumer do
     end
   end
 
-  # Alarme `spawn.failed` (cycle spawn) — émise quand le dispatch d'un `admin.spawn.request` a LEVÉ et
-  # que le spawn est donc droppé. Best-effort vis-à-vis du PROCESS (un Bus down ne doit pas tuer le
-  # consumer → rescue), MAIS l'échec du broadcast n'est PAS avalé en silence : Logger.error, car perdre
-  # l'alarme re-silencerait le drop qu'on vient de rendre visible (cohérent avec `pod.failed` côté Pod,
-  # best-effort observabilité aussi mais loggué fort si la diffusion casse). Enveloppe canon stricte
-  # construite + diffusée via `Bus.emit` (`source: :spawner`, type `:"spawn.failed"`, présent au registry events.yaml).
+  # `spawn.failed` alarm (spawn cycle) — emitted when the dispatch of an `admin.spawn.request` RAISED and
+  # the spawn is therefore dropped. Best-effort toward the PROCESS (a Bus down must not kill the
+  # consumer → rescue), BUT the broadcast failure is NOT swallowed silently: Logger.error, because losing
+  # the alarm would re-silence the drop we just made visible (consistent with `pod.failed` on the Pod side,
+  # best-effort observability too but logged loudly if the broadcast breaks). Strict canonical envelope
+  # built + broadcast via `Bus.emit` (`source: :spawner`, type `:"spawn.failed"`, present in the events.yaml registry).
   defp emit_spawn_failed(payload, reason) when is_map(payload) do
     result =
       Bus.emit(:spawner, :"spawn.failed",
@@ -151,18 +151,18 @@ defmodule Fleet.Spawner.PublishConsumer do
   end
 
   @doc """
-  Convertit une map de payload (clés string) en keyword list pour `spawn_pod`.
+  Converts a payload map (string keys) into a keyword list for `spawn_pod`.
 
-  (atom-leak DoS) : `String.to_atom` sur des clés POST arbitraires
-  permettrait d'épuiser la table d'atomes du BEAM. On n'accepte QUE les clés déjà
-  connues comme atomes (`to_existing_atom`) ; toute clé inconnue est ignorée.
-  Public pour test direct (le chemin via le consumer exige `CapProfile.load` + env
-  global → non async-safe).
+  (atom-leak DoS): `String.to_atom` on arbitrary POST keys
+  would allow exhausting the BEAM's atom table. We accept ONLY keys already
+  known as atoms (`to_existing_atom`); any unknown key is ignored.
+  Public for direct testing (the path through the consumer requires `CapProfile.load` + global
+  env → not async-safe).
 
-  Défense en profondeur : une LISTE n'est rendue telle quelle que si c'est déjà une keyword-list propre
-  (paires `{atom, _}`). Une liste issue d'un tableau JSON décodé n'en est jamais une (clés string → liste
-  de maps/scalaires) — elle serait donc filtrée à `[]` plutôt que gobée brute comme opts du spawner.
-  Le verrou principal reste l'allowlist d'admission de `/api/admin/spawn` (Fleet.API.Rest) ; ceci en double.
+  Defense in depth: a LIST is returned as-is only if it is already a clean keyword-list
+  (`{atom, _}` pairs). A list coming from a decoded JSON array is never one (string keys → a list
+  of maps/scalars) — so it would be filtered to `[]` rather than swallowed raw as spawner opts.
+  The main lock remains the admission allowlist of `/api/admin/spawn` (Fleet.API.Rest); this doubles it.
   """
   def to_keyword(map) when is_map(map) do
     Enum.flat_map(map, fn {k, v} ->

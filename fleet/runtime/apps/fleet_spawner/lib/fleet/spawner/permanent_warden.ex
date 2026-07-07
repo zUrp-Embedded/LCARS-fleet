@@ -1,36 +1,36 @@
 defmodule Fleet.Spawner.PermanentWarden do
   @moduledoc """
-  Respawn des pods PERMANENTS morts (G5, cattle rebuildable) — consumer Bus de `pod.failed`.
+  Respawn of dead PERMANENT pods (cattle, rebuildable) — Bus consumer of `pod.failed`.
 
-  Un pod permanent (`permanent-<role>` : architect, gatekeeper, …) est `restart: :temporary` cote OTP
-  (comme tout pod : le respawn est EVENT-driven, pas supervisor-driven — un restart OTP brut relancerait
-  le gen_statem sans la sequence de boot propre). Avant ce module, sa mort etait un stop DEFINITIF
-  jusqu'au restart BEAM : le seul filet etait le reboot implicite du gatekeeper au prochain kick
-  d'escalade — un archivist/architect mort restait absent en silence.
+  A permanent pod (`permanent-<role>`: architect, gatekeeper, …) is `restart: :temporary` on the OTP
+  side (like every pod: the respawn is EVENT-driven, not supervisor-driven — a bare OTP restart would
+  relaunch the gen_statem without the clean boot sequence). Before this module, its death was a
+  DEFINITIVE stop until the BEAM restart: the only safety net was the gatekeeper's implicit reboot at
+  the next escalation kick — a dead archivist/architect stayed silently absent.
 
-  ## Mecanique
+  ## Mechanics
 
-  `pod.failed` d'un pod `permanent-*` → respawn PLANIFIE avec backoff exponentiel plafonne, via
-  `PermanentBoot.respawn/2` (le MEME chemin que le boot : pod_id deterministe idempotent + boot-from-base
-  = contexte FRAIS depuis la base versionnee — jamais la session accumulee du mort).
+  `pod.failed` from a `permanent-*` pod → respawn SCHEDULED with capped exponential backoff, via
+  `PermanentBoot.respawn/2` (the SAME path as boot: deterministic idempotent pod_id + boot-from-base
+  = FRESH context from the versioned base — never the dead pod's accumulated session).
 
-  ## Depense BORNEE (le mode de panne = depense, jamais un churn)
+  ## BOUNDED spend (the failure mode = spend, never a churn)
 
-  Chaque respawn reussi boote une session claude : un crash-loop non borne brulerait du LLM en boucle.
-  Le retry est donc BORNE : `@max_attempts` tentatives consecutives par role (backoff expo
-  `base * 2^attempt` plafonne a 10 min — base par defaut 5s, soit 5s → 10s → 20s → 40s → 80s),
-  compteur remis a zero sur respawn REUSSI. Epuise → HALT du retry + `Logger.error`
-  (le role reste mort jusqu'a intervention). Ce halt n'est PAS silencieux : l'escalade humaine est
-  DEJA passee par le rail incident (`IncidentConsumer` grave chaque `pod.failed` ; la RECURRENCE de la
-  meme signature ouvre une issue sysadmin `error_system` sur la forge — rail repare F-RUN-2) — le
-  warden n'a donc AUCUN cablage d'escalade a porter (composition, pas de fork d'autorite).
+  Each successful respawn boots a claude session: an unbounded crash-loop would burn LLM in a loop.
+  So the retry is BOUNDED: `@max_attempts` consecutive attempts per role (exponential backoff
+  `base * 2^attempt` capped at 10 min — default base 5s, i.e. 5s → 10s → 20s → 40s → 80s),
+  counter reset on a SUCCESSFUL respawn. Exhausted → retry HALT + `Logger.error`
+  (the role stays dead until intervention). This halt is NOT silent: the human escalation has
+  ALREADY gone through the incident rail (`IncidentConsumer` records every `pod.failed`; the RECURRENCE
+  of the same signature opens an `error_system` sysadmin issue on the forge — a repaired rail) — so the
+  warden carries NO escalation wiring of its own (composition, not an authority fork).
 
   ## Seams (tests)
 
-    * `:subscribe` (defaut true) — abonnement Bus reel.
-    * `:respawn_fun` (defaut `&Fleet.Spawner.PermanentBoot.respawn/1`) — `(role) -> {:ok, pod_id} | {:error, _}`.
-    * `:backoff_base_ms` (defaut 5_000) — base du backoff (reduite en test).
-  Gate de boot : `:fleet_spawner, :start_permanent_warden` (defaut true prod, false test — hermeticite).
+    * `:subscribe` (default true) — real Bus subscription.
+    * `:respawn_fun` (default `&Fleet.Spawner.PermanentBoot.respawn/1`) — `(role) -> {:ok, pod_id} | {:error, _}`.
+    * `:backoff_base_ms` (default 5_000) — backoff base (reduced in test).
+  Boot gate: `:fleet_spawner, :start_permanent_warden` (default true prod, false test — hermeticity).
   """
 
   use GenServer
@@ -39,7 +39,7 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   alias Fleet.EventRouter.Bus
 
-  # Bornes de la depense : 5 tentatives consecutives max par role, backoff expo plafonne a 10 min.
+  # Spend bounds: 5 consecutive attempts max per role, exponential backoff capped at 10 min.
   @max_attempts 5
   @max_delay_ms 600_000
 
@@ -57,15 +57,15 @@ defmodule Fleet.Spawner.PermanentWarden do
   end
 
   @impl true
-  # Mort d'un pod PERMANENT → planifie le respawn (backoff selon le compteur du role). Les pods
-  # non-permanents (issue-*, pr-*) ne matchent pas le prefixe → catch-all no-op (leur relance est
-  # le job du rail forge : reconciliation + re-dispatch).
+  # Death of a PERMANENT pod → schedules the respawn (backoff per the role's counter). Non-permanent
+  # pods (issue-*, pr-*) do not match the prefix → catch-all no-op (their relaunch is the forge rail's
+  # job: reconciliation + re-dispatch).
   def handle_info(
         %Fleet.Event{source: :spawner, type: :"pod.failed", payload: %{"pod_id" => pod_id}},
         state
       )
       when is_binary(pod_id) do
-    # Préfixe permanent : AUTORITÉ = PermanentBoot.parse_permanent/1 (le littéral ne vit plus ici).
+    # Permanent prefix: AUTHORITY = PermanentBoot.parse_permanent/1 (the literal no longer lives here).
     case Fleet.Spawner.PermanentBoot.parse_permanent(pod_id) do
       :not_permanent ->
         {:noreply, state}
@@ -76,8 +76,8 @@ defmodule Fleet.Spawner.PermanentWarden do
   end
 
   def handle_info({:respawn, role}, state) do
-    # F5 (E1) : respawn_fun rescue-wrappe — un raise (bug cap-profile, FS) tuerait le warden
-    # (perte des compteurs + timers pendants → roles morts en silence apres restart vide).
+    # respawn_fun is rescue-wrapped — a raise (cap-profile bug, FS) would kill the warden
+    # (loss of counters + pending timers → roles dead silently after an empty restart).
     result =
       try do
         state.respawn_fun.(role)
@@ -88,12 +88,12 @@ defmodule Fleet.Spawner.PermanentWarden do
     case result do
       {:ok, pod_id} ->
         Logger.info("PermanentWarden: permanent #{role} respawne (#{pod_id})")
-        # Respawn REUSSI → compteur remis a zero (une mort ULTERIEURE repart en backoff court).
+        # Respawn SUCCESSFUL → counter reset (a LATER death restarts from a short backoff).
         {:noreply, %{state | attempts: Map.delete(state.attempts, role)}}
 
       {:error, reason} ->
-        # Echec du spawn LUI-MEME (pas une mort de pod) : pas de pod.failed emis pour re-armer le
-        # cycle → on re-planifie ICI, meme compteur/backoff que via l'event (une seule mecanique).
+        # Failure of the spawn ITSELF (not a pod death): no pod.failed emitted to re-arm the cycle →
+        # we re-schedule HERE, same counter/backoff as via the event (a single mechanism).
         attempt = Map.get(state.attempts, role, 1)
 
         if attempt < @max_attempts do
@@ -117,7 +117,7 @@ defmodule Fleet.Spawner.PermanentWarden do
     end
   end
 
-  # Tout autre event / message → no-op (consumer filtrant, comme PublishConsumer).
+  # Any other event / message → no-op (filtering consumer, like PublishConsumer).
   def handle_info(_other, state), do: {:noreply, state}
 
   defp handle_permanent_death(role, state) do
@@ -134,11 +134,11 @@ defmodule Fleet.Spawner.PermanentWarden do
       Process.send_after(self(), {:respawn, role}, delay)
       {:noreply, %{state | attempts: Map.put(state.attempts, role, attempt + 1)}}
     else
-      # Borne atteinte MAIS un pod.failed POST-HALT prouve qu'un pod de ce role A REVECU depuis
-      # (il a fallu qu'il vive pour mourir : le warden ne respawn plus apres HALT → c'est une
-      # reparation externe/manuelle). Cattle : ce nouvel echec merite un NOUVEAU cycle de retries —
-      # sans reset, le warden restait mort pour ce role jusqu'au restart BEAM (E2). Pas de boucle :
-      # chaque cycle post-HALT exige une resurrection externe (la depense est portee par l'acteur).
+      # Bound reached BUT a POST-HALT pod.failed proves a pod of this role HAS LIVED AGAIN since
+      # (it had to live to die: the warden no longer respawns after HALT → this is an
+      # external/manual repair). Cattle: this new failure deserves a NEW cycle of retries —
+      # without a reset, the warden stayed dead for this role until the BEAM restart. No loop:
+      # each post-HALT cycle requires an external resurrection (the spend is borne by the actor).
       Logger.warning(
         "PermanentWarden: permanent #{role} mort APRES HALT (reparation externe detectee) → " <>
           "nouveau cycle de respawn (compteur remis a zero)"
@@ -150,12 +150,12 @@ defmodule Fleet.Spawner.PermanentWarden do
     end
   end
 
-  @doc "Backoff exponentiel plafonne : base * 2^attempt, cap #{@max_delay_ms} ms. Pur (testable)."
+  @doc "Capped exponential backoff: base * 2^attempt, cap #{@max_delay_ms} ms. Pure (testable)."
   @spec backoff_delay(non_neg_integer(), pos_integer()) :: pos_integer()
   def backoff_delay(attempt, base_ms)
       when is_integer(attempt) and attempt >= 0 and is_integer(base_ms) and base_ms > 0 do
-    # E5 : guards TYPÉS (`> 0` seul laissait passer un float → tout le calcul devenait float,
-    # la spec mentait) + shift `1 <<< n` (le type d'Integer.pow inclut un chemin float).
+    # TYPED guards (`> 0` alone let a float through → the whole computation became float,
+    # the spec lied) + shift `1 <<< n` (Integer.pow's type includes a float path).
     import Bitwise, only: [<<<: 2]
     min(base_ms * (1 <<< min(attempt, 20)), @max_delay_ms)
   end
