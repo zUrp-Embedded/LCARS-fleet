@@ -190,7 +190,18 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   end
 
   # Extract the issue from issues AND pull requests (not only issue.id).
-  defp extract_issue(%{"issue" => %{"id" => id}}), do: "fleet/lcars##{id}"
-  defp extract_issue(%{"pull_request" => %{"id" => id}}), do: "fleet/lcars##{id}"
+  defp extract_issue(%{"issue" => %{"id" => id}} = body), do: issue_ref(body, id)
+  defp extract_issue(%{"pull_request" => %{"id" => id}} = body), do: issue_ref(body, id)
   defp extract_issue(_), do: nil
+
+  # `<repository.full_name>#<id>` — the repo comes from the webhook PAYLOAD, not hardcoded (multi-repo
+  # correct). Fallback `"fleet/lcars"` only when the payload omits `repository.full_name` (the single-repo
+  # default + backward-compat for a body without the field — a real Gitea webhook always carries it).
+  # NB: still the issue's INTERNAL `id`; switching to the repo-scoped `number` (the user-facing ref) is a
+  # SEPARATE change — it alters the correlation key the downstream pilot (Ring 3) matches on, so it needs
+  # coordination with that consumer, not a unilateral R0 edit.
+  defp issue_ref(body, id) do
+    repo = get_in(body, ["repository", "full_name"]) || "fleet/lcars"
+    "#{repo}##{id}"
+  end
 end

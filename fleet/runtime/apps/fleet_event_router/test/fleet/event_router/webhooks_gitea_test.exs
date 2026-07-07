@@ -83,6 +83,20 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
                      500
     end
 
+    test "R0-EVT-008 : repo DYNAMIQUE depuis repository.full_name (plus hardcodé fleet/lcars)", %{
+      secret: secret
+    } do
+      body = %{
+        "action" => "opened",
+        "issue" => %{"id" => 7},
+        "repository" => %{"full_name" => "acme/widgets"}
+      }
+
+      conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+      assert conn.status == 200
+      assert_receive %Fleet.Event{payload: %{"issue_id" => "acme/widgets#7"}}, 500
+    end
+
     test "F-009 : event type drift (atome `gitea.*` inconnu) → 422, plus d'ACK 200 silencieux", %{
       secret: secret
     } do
