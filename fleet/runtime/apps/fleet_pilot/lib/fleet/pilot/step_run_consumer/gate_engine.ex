@@ -116,7 +116,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
           # enregistre sa review native, et le merge revient au quorum `dispatch_by_verdicts` (qui attend
           # TOUS les juges). Un vrai step de workflow_map (rôle = rôle du step) passe par la gate.
           cond do
-            # STAGE LIFECYCLE PR (review/merged) : posé POST-MAP par open_deliverable_pr/gatekeeper_seal, ce
+            # STAGE LIFECYCLE PR (review/merged) : posé POST-MAP par complete_producer/gatekeeper_seal, ce
             # n'est PAS un step de workflow_map. Un juge qui finit là review la PR d'un producteur-TERMINAL
             # (ex. brief-gate `build`→PR) : jamais de navigation map (qui échouerait `:unknown_step`) →
             # résolution no-workflow_map (record review ; merge = quorum dispatch_review). Avant les labels
@@ -180,7 +180,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  # Un stage LIFECYCLE PR (review/merged, cf. `Fleet.Pilot.Labels`) est posé POST-MAP (open_deliverable_pr →
+  # Un stage LIFECYCLE PR (review/merged, cf. `Fleet.Pilot.Labels`) est posé POST-MAP (complete_producer →
   # review, gatekeeper_seal → merged). DISTINCTION du step de map homonyme (une workflow_map PEUT avoir un
   # step nommé `review`, cf. poc-cycle/reviewer) : c'est un stage lifecycle SEULEMENT s'il n'existe PAS comme
   # step dans CETTE map. Sinon (step réel) → `inherited_route?`/`gate_decide` tranchent comme avant. Sans ce

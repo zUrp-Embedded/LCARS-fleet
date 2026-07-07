@@ -86,4 +86,168 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
     assert :comment in seq
     refute Enum.any?(seq, &match?({:slept, _}, &1))
   end
+
+  # F-QoL (2026-07-07) — flux producteur : la NOTE COMPLÈTE (issue) doit être POSTÉE AVANT la transition
+  # de stage (mutex `stage/build`→`stage/review`) — même doctrine « comment PUIS stage », même gap, que
+  # `complete/2` (consultant). Sans lui : l'ordre observé sur le dashboard forge était INVERSÉ (stage posé
+  # avant le comment, alors que le code posait déjà le comment logiquement en premier — tie même-seconde).
+  defmodule ProducerSeqForge do
+    def open_pr(_repo, _head, _base, _title, _opts),
+      do:
+        (
+          send(self(), {:call, :open_pr})
+          {:ok, 7}
+        )
+
+    def post_comment(_repo, _n, _body, _opts),
+      do:
+        (
+          send(self(), {:call, :comment})
+          {:ok, :posted}
+        )
+
+    def set_stage(_repo, _n, _stage, _opts),
+      do:
+        (
+          send(self(), {:call, :stage})
+          {:ok, :posted}
+        )
+
+    def request_review(_repo, _pr, _reviewers, _opts),
+      do:
+        (
+          send(self(), {:call, :request_review})
+          :ok
+        )
+
+    def post_route(_repo, _n, _p, _s, _opts),
+      do:
+        (
+          send(self(), {:call, :route})
+          {:ok, :posted}
+        )
+
+    def remove_label(_repo, _n, _label, _opts),
+      do:
+        (
+          send(self(), {:call, :unlock})
+          {:ok, :removed}
+        )
+  end
+
+  defmodule StubDeliverable do
+    def publish(_opts), do: {:ok, %{commit_sha: "deadbeef", pushed?: true, mode: :git_native}}
+  end
+
+  test "complete_pr producteur :advance — le gap est INSÉRÉ entre le comment (note eng) et la transition de stage" do
+    set_spacing(2000)
+
+    step_run = %{
+      repo: "fleet/proj",
+      issue_number: 42,
+      role: "engineer",
+      pr_role: :producer,
+      intent: :advance,
+      next_assignee: "qualifier",
+      producer_branch: "lcars/issue-42-engineer",
+      eng_summary: "j'ai implémenté le décodeur",
+      deliverable_opts: %{
+        mode: :git_native,
+        workspace: "/tmp/ws",
+        base_sha: "cafe",
+        target_branch: "lcars/issue-42-engineer"
+      }
+    }
+
+    sleeper = fn ms -> send(self(), {:call, {:slept, ms}}) end
+
+    assert {:ok, :review_requested} =
+             StepRunCompleter.complete_pr(step_run,
+               deliverable: StubDeliverable,
+               forge_client: ProducerSeqForge,
+               forge_opts: [],
+               sleeper: sleeper
+             )
+
+    # ordre : le comment (note eng, POINTEUR déjà plié dans open_pr) AVANT le gap AVANT la transition de
+    # stage — plus de tie même-seconde (le stage n'apparaît plus AVANT le comment sur le dashboard).
+    assert [:open_pr, :comment, {:slept, 2000}, :stage | _] = drain()
+  end
+
+  # F-QoL (2026-07-07) — flux PROMOTE (merge, déclenché par le DERNIER juge) : le sceau (merge + comment
+  # + `stage/merged`) doit être VISIBLEMENT antérieur à l'unlock (`lcars-in-flight` retiré, sur la PR —
+  # verrou juge) — même risque de tie même-seconde que ci-dessus, cette fois entre deux écritures de
+  # LABEL de familles distinctes (cf. `Fleet.Pilot.Labels`).
+  defmodule PromoteSeqForge do
+    def get_pr_for_branch(_repo, _head, _base, _opts),
+      do:
+        (
+          send(self(), {:call, :get_pr})
+          {:ok, 7}
+        )
+
+    def post_review(_repo, _pr, _event, _body, _opts),
+      do:
+        (
+          send(self(), {:call, :review})
+          :ok
+        )
+
+    def merge_pr(_repo, _pr, _opts),
+      do:
+        (
+          send(self(), {:call, :merge})
+          :ok
+        )
+
+    def post_comment(_repo, _n, _body, _opts),
+      do:
+        (
+          send(self(), {:call, :comment})
+          {:ok, :posted}
+        )
+
+    def set_stage(_repo, _n, _stage, _opts),
+      do:
+        (
+          send(self(), {:call, :stage})
+          {:ok, :posted}
+        )
+
+    def remove_label(_repo, _n, _label, _opts),
+      do:
+        (
+          send(self(), {:call, :unlock})
+          {:ok, :removed}
+        )
+  end
+
+  test "complete_pr juge :promote — le gap est INSÉRÉ entre le sceau (merge+stage) et l'unlock" do
+    set_spacing(2000)
+
+    step_run = %{
+      repo: "fleet/proj",
+      issue_number: 42,
+      pr_role: :judge,
+      intent: :promote,
+      role: "reviewer",
+      producer_branch: "lcars/issue-42-engineer"
+    }
+
+    sleeper = fn ms -> send(self(), {:call, {:slept, ms}}) end
+
+    assert {:ok, :promoted} =
+             StepRunCompleter.complete_pr(step_run,
+               forge_client: PromoteSeqForge,
+               forge_opts: [],
+               sleeper: sleeper
+             )
+
+    seq = drain()
+    slept_idx = Enum.find_index(seq, &match?({:slept, 2000}, &1))
+    unlock_idx = Enum.find_index(seq, &(&1 == :unlock))
+    assert is_integer(slept_idx) and is_integer(unlock_idx) and slept_idx < unlock_idx
+    assert :merge in seq
+    assert :stage in seq
+  end
 end

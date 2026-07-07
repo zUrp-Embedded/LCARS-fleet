@@ -220,6 +220,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     base = Map.get(step_run, :base_branch, "main")
     head = Map.fetch!(Map.fetch!(step_run, :deliverable_opts), :target_branch)
     title = Map.get(step_run, :title, "Livrable ##{n} — brique livrée par #{role} (engineer)")
+
     # Le pointeur vers la note (si le producteur en a une) est PLIÉ dans ce corps d'ouverture — pas un
     # 2e comment séparé posté juste après par Emissions.post_eng_summary (QoL : un seul post PR, pas deux).
     has_note? = match?(s when is_binary(s) and s != "", Map.get(step_run, :eng_summary))
@@ -240,11 +241,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
              body,
              ForgeClient.as_role(forge_opts, role)
            ) do
-      # La PR livrable ouverte = l'issue ENTRE en review (lifecycle humain ; mutex retire stage/build).
-      # Best-effort (affichage) : la review/merge procèdent via la PR quoi qu'il arrive. Système-side
-      # (forge_opts, pas as_role) : les stage/* sont gérés par lcars-system (WS1). Le poller ne relit plus
-      # get_route sur cette issue (PR-backed → skip lease.ex:209), donc stage/* y est purement humain.
-      _ = forge.set_stage(repo, n, Fleet.Pilot.Labels.stage_review(), forge_opts)
+      # `set_stage(stage_review)` NE se fait PLUS ici : déplacé dans `complete_producer`, APRÈS le
+      # comment (voix de l'eng) — même ordre « comment PUIS transition de stage » que `complete/2`
+      # (gate consultant), avec le même gap `space_writes` anti-même-seconde. Cohérence dashboard.
       Logger.info("StepRunCompleter: ##{n} #{role} → PR ##{pr} (head=#{head}, sha=#{sha})")
       {:ok, %{commit_sha: sha, pr_number: pr}}
     end
@@ -382,6 +381,15 @@ defmodule Fleet.Pilot.StepRunCompleter do
       # Émissions ANNEXES best-effort (voix eng PR+issue, slot-freeze deliverable.published) —
       # discard par contrat : la séquence ne dépend d'aucun retour (cf. Emissions).
       _ = Emissions.post_eng_summary(step_run, opts)
+
+      # Transition de stage APRÈS le comment (même ordre + même gap anti-même-seconde que `complete/2` /
+      # gate consultant : « logiquement avant, affiché après » sinon — cf. `space_writes`).
+      :ok = space_writes(opts)
+      forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+      forge_opts = Keyword.get(opts, :forge_opts, [])
+      repo = Map.fetch!(step_run, :repo)
+      n = Map.fetch!(step_run, :issue_number)
+      _ = forge.set_stage(repo, n, Fleet.Pilot.Labels.stage_review(), forge_opts)
       _ = Emissions.deliverable_published(step_run, pr)
       route(step_run, pr, opts)
     end
@@ -471,7 +479,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
       producer_branch: Map.get(step_run, :producer_branch)
     }
 
+    # Gap AVANT unlock : `promote` merge + poste le sceau + pose `stage/merged` (set_stage, exclusif —
+    # retire `stage/review` dans le MÊME acte Gitea) ; sans lui, `unlock` (retrait `lcars-in-flight`,
+    # écriture INDÉPENDANTE, familles de labels distinctes cf. `Fleet.Pilot.Labels`) risque le même
+    # `created_at` → ordre dashboard arbitraire (même bug que le comment/stage producteur, cf. `complete/2`).
     with {:ok, :promoted} <- promote(promote_step_run, opts),
+         :ok <- space_writes(opts),
          {:ok, _} <- unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts) do
       {:ok, :promoted}
     end
