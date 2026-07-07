@@ -44,6 +44,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
 
+    # Adoption : pose des juges sur une PR orpheline (humaine/fork). Capture pour assertion.
+    def request_review(_repo, index, reviewers, _opts) do
+      send(self(), {:requested_review, index, reviewers})
+      :ok
+    end
+
     # A2.1 : route lue depuis forge_opts[:_test_route] (défaut :none = hors-workflow_map / 1-step).
     def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
 
@@ -819,10 +825,16 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
-    test "PR sans reviewer + aucune review decisive -> skip :no_verdict (②.1d, PR en attente)" do
+    test "PR sans juge (orpheline/humaine) -> ADOPTION : pose les juges, review au tick suivant" do
       pr = pr(%{"requested_reviewers" => []})
-      # _test_review_state defaut :none
-      assert {:skipped, :no_verdict} = StepDispatcher.dispatch_review(pr, dispatch_opts())
+      # requested == [] (ni requested_reviewers, ni jury) = PR NON mise en place par le pipeline (typ.
+      # humaine/fork découverte par le poller). Gate agent-agnostique → on POSE les juges au lieu de skip
+      # `:no_verdict`. Ils spawnent au tick SUIVANT (pas ici → `refute_received {:spawned}`).
+      assert {:ok, {:adopted, _pr_number, reviewers}} =
+               StepDispatcher.dispatch_review(pr, dispatch_opts())
+
+      assert reviewers != []
+      assert_received {:requested_review, _index, ^reviewers}
       refute_received {:spawned, _, _}
     end
 

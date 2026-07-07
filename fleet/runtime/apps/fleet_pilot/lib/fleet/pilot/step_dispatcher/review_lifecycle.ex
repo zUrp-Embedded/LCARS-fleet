@@ -125,7 +125,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
        la boucle de re-spawn.
     2. tous les demandés ont un verdict + au moins un `:changes_requested` → rework du producteur.
     3. tous les demandés ont APPROUVÉ → MERGE (scellé gatekeeper).
-    4. aucun juge demandé → no_verdict (PR sans review-request, surfacé).
+    4. aucun juge demandé → ADOPTION : PR découverte sans setup (typ. HUMAINE/fork) → on POSE les juges
+       (reviewer_roles) → review normale au tick suivant. Gate agent-agnostique : peu importe l'origine.
 
   Point d'entrée du flux review : `StepDispatcher.dispatch_review/2` y délègue après le gate PR + la
   lecture de `pr_review_state`. `requested` = union(requested_reviewers volatil, jury stable) ;
@@ -141,7 +142,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
         RoleDispatch.dispatch(:judge, pr_number, head, hd(pending), ctx)
 
       requested == [] ->
-        {:skipped, :no_verdict}
+        adopt_orphan_pr(pr_number, ctx)
 
       Enum.any?(Map.values(Map.take(verdicts, requested)), &(&1 == :changes_requested)) ->
         Remediation.dispatch_rework(pr_number, head, ctx)
@@ -157,6 +158,22 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           other ->
             other
         end
+    end
+  end
+
+  # ADOPTION — une PR sans AUCUN juge (ni requested_reviewers volatil, ni jury stable) n'a pas été mise en
+  # place par le pipeline : typiquement une PR HUMAINE (fork + cross-repo) que le poller a découverte + scopée
+  # (via l'issue liée `Closes #N`). Le gate est AGENT-AGNOSTIQUE → on POSE les juges (reviewer_roles, token
+  # système via forge_opts) ; au tick suivant `requested` les porte → review normale → merge/rework, EXACTEMENT
+  # comme un livrable d'agent. Une PR d'agent a TOUJOURS ses juges via open_deliverable_pr → n'arrive jamais
+  # ici. Best-effort : un échec de pose surface (`{:error, {:adopt_failed, _}}`), pas de crash ni de skip muet.
+  # Idempotent : re-poser les mêmes reviewers = no-op Gitea (une PR adoptée n'est jamais re-adoptée : requested ≠ []).
+  defp adopt_orphan_pr(pr_number, %Ctx{} = ctx) do
+    reviewers = Fleet.Pilot.Roles.reviewer_roles(ctx.opts)
+
+    case ctx.forge.request_review(ctx.repo, pr_number, reviewers, ctx.forge_opts) do
+      :ok -> {:ok, {:adopted, pr_number, reviewers}}
+      {:error, reason} -> {:error, {:adopt_failed, reason}}
     end
   end
 

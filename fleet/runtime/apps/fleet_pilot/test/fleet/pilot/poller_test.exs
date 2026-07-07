@@ -171,6 +171,9 @@ defmodule Fleet.Pilot.PollerTest do
     # F-E8 : état de jury combiné — aucun verdict + jury vide (les tests poller ne couvrent pas merge) →
     # `requested` = `requested_reviewers` du PR → tout juge demandé reste pending → dispatché.
     def pr_review_state(_repo, _index, _opts), do: {:ok, %{verdicts: %{}, reviewers: []}}
+    # Adoption : pose des juges sur une PR orpheline (humaine/fork, ou agent ayant perdu ses reviewers).
+    def request_review(_repo, index, reviewers, _opts),
+      do: send(self(), {:requested_review, index, reviewers}) && :ok
 
     # MA-06 : compteur forge-natif des rounds de rework (les tests poller ne couvrent pas le rework borné).
     def count_change_request_rounds(_repo, _index, _opts), do: {:ok, 0}
@@ -1050,7 +1053,10 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "PR sans review demandee -> skip (rien a dispatcher)" do
+    test "PR sans juge demandé -> ADOPTION (le système pose les juges → dispatched)" do
+      # requested_reviewers vide = PR non mise en place par le pipeline (humaine/fork, ou agent ayant
+      # perdu ses reviewers). Gate agent-agnostique → adoption : on POSE les juges au lieu de skip. Compté
+      # `dispatched` (retour `{:ok, {:adopted, ...}}`) ; les juges spawnent au tick suivant.
       pulls = [
         %{
           "number" => 8,
@@ -1062,7 +1068,9 @@ defmodule Fleet.Pilot.PollerTest do
 
       {name, pid} = start_step_poller({:ok, []}, {:ok, pulls})
 
-      assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
+      # dispatched: 1 = la PR a été adoptée (`{:ok, {:adopted, ...}}`). Le CALL request_review lui-même est
+      # prouvé au niveau unit (StepDispatcherTest) ; ici on vérifie le tally poller (l'adoption = un dispatch).
+      assert %{dispatched: 1, skipped: 0, errors: 0} = Poller.force_poll(name)
 
       GenServer.stop(pid)
     end
@@ -1095,6 +1103,9 @@ defmodule Fleet.Pilot.PollerTest do
       def get_predecessor_result(_repo, _n, _opts), do: :none
       def get_issue(_repo, n, _opts), do: {:ok, %{"number" => n, "body" => "x"}}
       def pr_review_state(_repo, _index, _opts), do: {:ok, %{verdicts: %{}, reviewers: []}}
+    # Adoption : pose des juges sur une PR orpheline (humaine/fork, ou agent ayant perdu ses reviewers).
+    def request_review(_repo, index, reviewers, _opts),
+      do: send(self(), {:requested_review, index, reviewers}) && :ok
       def post_route(_repo, _n, _p, _s, _opts), do: {:ok, :posted}
 
       def remove_label(repo, n, label, opts) do
