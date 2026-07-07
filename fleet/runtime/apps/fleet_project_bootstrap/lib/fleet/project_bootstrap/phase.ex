@@ -1,27 +1,27 @@
-# `Fleet.CapProfile` garantit des clés STRING (normalisation à `to_struct`) →
-# `Phase.Clone` accède `cap_profile.spec["..."]` directement, sans accesseur
-# tolérant atom|string ni double-lookup défensif (le profil porte déjà la
-# forme canonique, inutile de la re-vérifier ici).
+# `Fleet.CapProfile` guarantees STRING keys (normalized at `to_struct`) →
+# `Phase.Clone` accesses `cap_profile.spec["..."]` directly, without an
+# atom|string tolerant accessor nor a defensive double-lookup (the profile
+# already carries the canonical form, no need to re-check it here).
 defmodule Fleet.ProjectBootstrap.Phase do
   @moduledoc """
-  `Phase.Clone` — la seule phase CÂBLÉE en prod du bootstrap de pod. Fonctions pures
-  (aucun process : File / Path / git). Erreurs typées (codes de sortie distincts).
-  Câblée DIRECTEMENT par `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` →
-  `clone_or_skip`/`clone_work_doc`, et `reset_in_place` au re-brief slot-freeze).
-  Accès cap-profile : clés STRING directes (`cap_profile.spec["..."]`) —
-  `Fleet.CapProfile` garantit la forme à la production.
+  `Phase.Clone` — the only phase WIRED in prod of pod bootstrap. Pure functions
+  (no process: File / Path / git). Typed errors (distinct exit codes).
+  Wired DIRECTLY by `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` →
+  `clone_or_skip`/`clone_work_doc`, and `reset_in_place` on the slot-freeze re-brief).
+  Cap-profile access: direct STRING keys (`cap_profile.spec["..."]`) —
+  `Fleet.CapProfile` guarantees the form at production.
 
-  (L'orchestrateur `prepare/3` et les 4 phases non-Clone — Allocate / InitMimic /
-  BindCredentials / PrepareMountBinds — ont été RETIRÉS : chemin mort jamais câblé en
-  prod, les concerns correspondants sont assurés ailleurs — CLAUDE.md par `do_project`
-  côté pod.ex, mounts/creds par `bwrap_launch.sh`.)
+  (The `prepare/3` orchestrator and the 4 non-Clone phases — Allocate / InitMimic /
+  BindCredentials / PrepareMountBinds — have been REMOVED: dead path never wired in
+  prod, the corresponding concerns are handled elsewhere — CLAUDE.md by `do_project`
+  on the pod.ex side, mounts/creds by `bwrap_launch.sh`.)
   """
 
   defmodule Clone do
     @moduledoc """
-    Phase 2 — CLONE branch feature OU skip (pod permanent / pas de repo).
-    `git clone --reference <mirror bare local>` (objects locaux + fetch incrémental, pas de
-    network par pod) si `spec.project.repo_path`, sinon workspace = répertoire vide (branch nil).
+    Phase 2 — CLONE the feature branch OR skip (permanent pod / no repo).
+    `git clone --reference <local bare mirror>` (local objects + incremental fetch, no
+    per-pod network) if `spec.project.repo_path`, otherwise workspace = empty directory (branch nil).
     """
     @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
@@ -38,56 +38,57 @@ defmodule Fleet.ProjectBootstrap.Phase do
           end
 
         repo_url ->
-          # `fleet_project_bootstrap` ne peut PAS dépendre de `fleet_spawner` (cycle compile), donc
-          # `"workspace"` est ré-encodé ici — il DOIT rester en sync avec
-          # `Fleet.Spawner.@pod_workspace_subdir` (autorité de la convention). Ce module est le
-          # PRODUCTEUR (il crée et retourne le workspace) ; Pod le RECOMPUTE via pod_workspace_path/1.
+          # `fleet_project_bootstrap` CANNOT depend on `fleet_spawner` (compile cycle), so
+          # `"workspace"` is re-encoded here — it MUST stay in sync with `@pod_workspace_subdir` in
+          # `Fleet.Spawner.Pod.Paths` (authority of the convention). This module is the
+          # PRODUCER (it creates and returns the workspace); Pod RECOMPUTES it via pod_workspace_path/1.
           ws = Path.join(pod_dir, "workspace")
 
-          # Idempotence du re-dispatch déterministe : un pod prédécesseur MORT (timeout/crash) laisse son
-          # workspace sur disque ; comme le pod_id est déterministe (`<repo-slug>-issue-N-role`), le
-          # re-dispatch retombe sur le MÊME pod_dir → `git clone` refuserait (« destination already exists
-          # and is not an empty directory ») → wedge PERMANENT du issue (un pod qui timeout boucle sinon à
-          # l'infini sur clone_failed). Le pod POSSÈDE son pod_dir (garde spawn = 1 pod/pod_id) → un `ws`
-          # résiduel ne peut venir que d'un prédécesseur mort → clean slate (le `base_sha` est ré-épinglé
-          # juste après, un clone frais est toujours correct).
+          # Idempotence of the deterministic re-dispatch: a DEAD predecessor pod (timeout/crash) leaves its
+          # workspace on disk; since the pod_id is deterministic (`<repo-slug>-issue-N-role`), the
+          # re-dispatch lands on the SAME pod_dir → `git clone` would refuse ("destination already exists
+          # and is not an empty directory") → PERMANENT wedge of the issue (a pod that times out otherwise
+          # loops forever on clone_failed). The pod OWNS its pod_dir (spawn guard = 1 pod/pod_id) → a residual
+          # `ws` can only come from a dead predecessor → clean slate (the `base_sha` is re-pinned
+          # just after, a fresh clone is always correct).
           _ = File.rm_rf(ws)
 
           ref = project["reference_repo_path"]
           base = project["base_branch"] || "main"
 
-          # Monde propre : branche = `feature/<slug>` SANS le pod_id (l'agent ne doit pas relire son
-          # pod_id dans sa propre branche — containment). Le slug vient du dispatcher (titre du issue
-          # sanitizé) ; défaut `work`. Le slug ne porte aucun préfixe `pod-`/`pod_` (la branche ne
-          # divulgue pas l'identité du pod).
+          # Clean world: branch = `feature/<slug>` WITHOUT the pod_id (the agent must not re-read its
+          # pod_id in its own branch — containment). The slug comes from the dispatcher (sanitized issue
+          # title); default `work`. The slug carries no `pod-`/`pod_` prefix (the branch does not
+          # leak the pod's identity).
           slug = Keyword.get(opts, :slug, "work")
           feature = "feature/#{slug}"
           ref_args = if ref, do: ["--reference", ref], else: []
 
-          # La deadline du clone RÉSEAU est calibrable par l'appelant (`:git_timeout_ms`), défaut = celui
-          # du wrapper (30s). Le spawner peut la resserrer ; les tests l'utilisent pour prouver le bornage
-          # (clone vers une URL qui pend → tué dans le délai, pas de pod zombie).
+          # The NETWORK clone's deadline is calibrable by the caller (`:git_timeout_ms`), default = the
+          # wrapper's (30s). The spawner can tighten it; the tests use it to prove the bounding
+          # (clone to a URL that hangs → killed within the deadline, no zombie pod).
           git_opts = Keyword.take(opts, [:git_timeout_ms]) |> rename_timeout_key()
 
-          # Clone/checkout BORNÉS par construction via `Fleet.Credentials.Shell.git/2` (Task.async +
-          # yield(timeout) || brutal_kill, `GIT_TERMINAL_PROMPT=0` posé par `git_env/0`). Un `git` non
-          # borné figerait le `Fleet.Spawner.Pod` (GenServer) si le clone réseau hung — ou si le git
-          # prompte faute de credential, sans TTY → pod zombie / issue wedgé. Le wrapper tue le git
-          # enfant si la deadline expire et rend une erreur typée → le pod ne reste pas figé. `Shell.git/2`
-          # injecte `git_env/0` (anti-prompt + auth forge).
+          # Clone/checkout BOUNDED by construction via `Fleet.Credentials.Shell.git/2` (runs under
+          # `setsid`; an absolute wall deadline kills the whole process-group `kill -KILL -<pgid>`;
+          # `GIT_TERMINAL_PROMPT=0` set by `git_env/0`). An unbounded `git`
+          # would freeze the `Fleet.Spawner.Pod` (GenServer) if the network clone hung — or if the git
+          # prompts for lack of a credential, with no TTY → zombie pod / wedged issue. The wrapper kills the
+          # child git if the deadline expires and returns a typed error → the pod does not stay frozen. `Shell.git/2`
+          # injects `git_env/0` (anti-prompt + forge auth).
           with {:ok, {_, 0}} <-
                  Fleet.Credentials.Shell.git(
                    ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
                    git_opts
                  ),
-               # Si le rail forge-driven a PINNÉ une base_sha (ls-remote hors-pod), on épingle HEAD dessus
-               # AVANT la feature-branch. Élimine la fenêtre « le pod clone une base que le rail n'a pas
-               # capturée » (course same-role) : `base..HEAD` ne contiendra QUE les commits du pod.
-               # Axiome posé AU boundary clone (pas vérifié « observable post-hoc »).
+               # If the forge-driven rail PINNED a base_sha (out-of-pod ls-remote), we pin HEAD onto it
+               # BEFORE the feature-branch. Eliminates the window "the pod clones a base the rail did not
+               # capture" (same-role race): `base..HEAD` will contain ONLY the pod's commits.
+               # Axiom set AT the clone boundary (not verified "observable post-hoc").
                {:ok, {_, 0}} <- pin_base_sha(ws, project["base_sha"]),
-               # `checkout -b` est local (pas réseau, ne prompte pas) mais passe AUSSI par le wrapper
-               # borné : invariant = aucun `System.cmd git` nu sur ce chemin (pas de git non borné
-               # possible). Env bare (pas d'auth/réseau).
+               # `checkout -b` is local (no network, does not prompt) but ALSO goes through the bounded
+               # wrapper: invariant = no bare `System.cmd git` on this path (no unbounded git
+               # possible). Bare env (no auth/network).
                {:ok, {_, 0}} <-
                  Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-b", feature], env: []) do
             {:ok, ws, feature}
@@ -99,18 +100,15 @@ defmodule Fleet.ProjectBootstrap.Phase do
       end
     end
 
-    # Traduit l'opt PUBLIC `:git_timeout_ms` (vocabulaire bootstrap) en `:timeout_ms` (vocabulaire
-    # `Shell.git/2`). Absent → `[]` (le wrapper applique son défaut 30s). Garde la frontière du wrapper
-    # honnête (un appelant ne peut pas, par mégarde, passer `:env`/`:cd` arbitraires au clone réseau).
     @doc """
-    Reset IN-PLACE du workspace d'un pod RESIDENT (pipe slot-freeze) — PAS de rm_rf. Le `ws` est
-    bind-monte dans le sandbox bwrap VIVANT du pipe : supprimer le dir casserait le mount (l'agent se
-    retrouve dans un cwd deleted) + echouerait. On nettoie l'etat git du issue PRECEDENT SUR PLACE :
-    reset --hard sur le `base_sha` du NOUVEAU issue (`pin_base_sha` reutilise, gere le fetch si la base
-    a avance) + `clean -fdx` (vire l'untracked, ex. un fichier non committe) + `checkout -B feature/<slug>`
-    (recree la branche de travail PROPRE depuis la base — `-B` force car la branche existe deja). Le `ws`
-    DOIT exister (clone du spawn, jamais rm_rf en pipe) ; `base_sha` est REQUIS (le dispatcher l'epingle
-    au re-brief). Retour homogene avec clone_or_skip : `{:ok, ws, feature}` | `{:error, {:reset_failed, _}}`.
+    IN-PLACE reset of a RESIDENT pod's workspace (slot-freeze pipe) — NO rm_rf. The `ws` is
+    bind-mounted into the pipe's LIVE bwrap sandbox: deleting the dir would break the mount (the agent
+    ends up in a deleted cwd) + would fail. We clean the PREVIOUS issue's git state IN PLACE:
+    reset --hard onto the NEW issue's `base_sha` (`pin_base_sha` reused, handles the fetch if the base
+    has advanced) + `clean -fdx` (drops the untracked, e.g. an uncommitted file) + `checkout -B feature/<slug>`
+    (recreates the CLEAN work branch from the base — `-B` forces since the branch already exists). The `ws`
+    MUST exist (cloned at spawn, never rm_rf in pipe); `base_sha` is REQUIRED (the dispatcher pins it
+    at re-brief). Return homogeneous with clone_or_skip: `{:ok, ws, feature}` | `{:error, {:reset_failed, _}}`.
     """
     @spec reset_in_place(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t()} | {:error, term()}
@@ -122,8 +120,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
       case project["base_sha"] do
         sha when is_binary(sha) and sha != "" ->
-          # pin_base_sha REUTILISE (reset --hard sha + fetch cible en fallback si la base a avance).
-          # clean + checkout bornes via Shell.git (aucun `System.cmd git` nu ; env bare, local).
+          # pin_base_sha REUSED (reset --hard sha + targeted fetch as fallback if the base has advanced).
+          # clean + checkout bounded via Shell.git (no bare `System.cmd git`; bare env, local).
           with {:ok, {_, 0}} <- pin_base_sha(ws, sha),
                {:ok, {_, 0}} <- Fleet.Credentials.Shell.git(["-C", ws, "clean", "-fdx"], env: []),
                {:ok, {_, 0}} <-
@@ -136,25 +134,25 @@ defmodule Fleet.ProjectBootstrap.Phase do
           end
 
         _ ->
-          # base_sha absent = bug appelant (le dispatcher DOIT l'epingler au re-brief) → fail-loud
-          # plutot qu'un reset sur une base indefinie (qui garderait l'etat du issue precedent).
+          # base_sha absent = caller bug (the dispatcher MUST pin it at re-brief) → fail-loud
+          # rather than a reset onto an undefined base (which would keep the previous issue's state).
           {:error, {:reset_failed, :no_base_sha}}
       end
     end
 
-    # Traduit l'opt PUBLIC `:git_timeout_ms` (vocabulaire bootstrap) en `:timeout_ms` (vocabulaire
-    # `Shell.git/2`). Absent → `[]` (le wrapper applique son défaut 30s). Garde la frontière du wrapper
-    # honnête (un appelant ne peut pas, par mégarde, passer `:env`/`:cd` arbitraires au clone réseau).
+    # Translates the PUBLIC opt `:git_timeout_ms` (bootstrap vocabulary) into `:timeout_ms` (`Shell.git/2`
+    # vocabulary). Absent → `[]` (the wrapper applies its 30s default). Keeps the wrapper's boundary
+    # honest (a caller cannot, by mistake, pass arbitrary `:env`/`:cd` to the network clone).
     defp rename_timeout_key([]), do: []
     defp rename_timeout_key(git_timeout_ms: ms), do: [timeout_ms: ms]
 
-    # Épingle HEAD du workspace sur `sha` (capturé hors-pod par le rail forge-driven). Le clone `--branch base`
-    # contient déjà `sha` dans le cas nominal (sha = tip) et fast-forward (sha = ancêtre) → `reset
-    # --hard` local suffit. Cas pathologique (force-push remote a effacé `sha`) → `fetch` ciblé puis
-    # reset. Le `fetch` est RÉSEAU (peut hung/prompter) → BORNÉ via `Shell.git/2` (le `reset` local
-    # l'est aussi, pour ne laisser aucun `System.cmd git` nu). Retour homogène avec `Shell.git/2`
-    # (`{:ok, {out, code}}` | `{:error, {:timeout|:exit, _}}`), consommé par le `with` de
-    # `clone_or_skip`. nil/"" = no-op succès.
+    # Pins the workspace's HEAD onto `sha` (captured out-of-pod by the forge-driven rail). The `--branch base`
+    # clone already contains `sha` in the nominal case (sha = tip) and fast-forward (sha = ancestor) → a local
+    # `reset --hard` suffices. Pathological case (a remote force-push erased `sha`) → targeted `fetch` then
+    # reset. The `fetch` is NETWORK (can hang/prompt) → BOUNDED via `Shell.git/2` (the local `reset`
+    # is too, to leave no bare `System.cmd git`). Return homogeneous with `Shell.git/2`
+    # (`{:ok, {out, code}}` | `{:error, {:timeout|:exit, _}}`), consumed by the `with` of
+    # `clone_or_skip`. nil/"" = no-op success.
     defp pin_base_sha(_ws, sha) when sha in [nil, ""], do: {:ok, {"", 0}}
 
     defp pin_base_sha(ws, sha) when is_binary(sha) do
@@ -163,9 +161,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           ok
 
         _ ->
-          # Le `reset` local a échoué (`sha` absent localement) → fetch RÉSEAU ciblé (auth forge + borne
-          # anti-prompt via `git_env/0`), puis re-reset local. Échec du fetch (incl. timeout/exit) →
-          # remonté tel quel au `with` → `{:clone_failed, ...}`.
+          # The local `reset` failed (`sha` absent locally) → targeted NETWORK fetch (forge auth + anti-prompt
+          # bound via `git_env/0`), then local re-reset. Fetch failure (incl. timeout/exit) →
+          # propagated as-is to the `with` → `{:clone_failed, ...}`.
           case Fleet.Credentials.Shell.git(["-C", ws, "fetch", "origin", sha]) do
             {:ok, {_, 0}} ->
               Fleet.Credentials.Shell.git(["-C", ws, "reset", "--hard", sha], env: [])
@@ -177,13 +175,13 @@ defmodule Fleet.ProjectBootstrap.Phase do
     end
 
     @doc """
-    Doc-mount — clone la branche DOC du projet (`spec.project.work_branch`, orpheline `work/ops` par
-    convention LCARS) dans `<pod_dir>/work` : la doc sur quoi l'agent s'appuie pour coder (plans,
-    backlog, conventions). À côté de la branche code (`workspace`).
+    Doc-mount — clones the project's DOC branch (`spec.project.work_branch`, orphan `work/ops` by
+    LCARS convention) into `<pod_dir>/work`: the doc the agent relies on to code (plans,
+    backlog, conventions). Alongside the code branch (`workspace`).
 
-    - `work_branch` nil/absent OU pas de `repo_path` → `{:ok, nil}` (skip : projet sans branche doc).
-    - déclarée mais clone échoué → `{:error, ...}` FAIL-LOUD : un cap-profile qui déclare une branche
-      doc inexistante = bug de config, pas un pod silencieusement amputé de sa doc.
+    - `work_branch` nil/absent OR no `repo_path` → `{:ok, nil}` (skip: project with no doc branch).
+    - declared but clone failed → `{:error, ...}` FAIL-LOUD: a cap-profile that declares a
+      nonexistent doc branch = config bug, not a pod silently amputated of its doc.
     """
     @spec clone_work_doc(Path.t(), Fleet.CapProfile.t()) ::
             {:ok, Path.t() | nil} | {:error, term()}
@@ -199,17 +197,17 @@ defmodule Fleet.ProjectBootstrap.Phase do
         ref = project["reference_repo_path"]
         ref_args = if ref, do: ["--reference", ref], else: []
 
-        # PARITÉ avec `clone_or_skip` (même `rm_rf` du résidu) : un pod prédécesseur MORT laisse son
-        # `work/` sur disque ; le pod_id étant déterministe, le re-dispatch retombe sur le même
-        # `pod_dir` → `git clone` refuserait (« destination already exists and is not an empty
-        # directory ») → même wedge permanent que le workspace. Clean slate : le `work/` résiduel ne
-        # peut venir que d'un prédécesseur mort (le pod possède son pod_dir) → un re-clone frais est
-        # toujours correct.
+        # PARITY with `clone_or_skip` (same `rm_rf` of the residue): a DEAD predecessor pod leaves its
+        # `work/` on disk; the pod_id being deterministic, the re-dispatch lands on the same
+        # `pod_dir` → `git clone` would refuse ("destination already exists and is not an empty
+        # directory") → same permanent wedge as the workspace. Clean slate: the residual `work/` can
+        # only come from a dead predecessor (the pod owns its pod_dir) → a fresh re-clone is
+        # always correct.
         _ = File.rm_rf(doc)
 
-        # --single-branch : la branche doc est orpheline ⇒ inutile de fetch le reste de l'historique.
-        # Clone RÉSEAU BORNÉ via `Shell.git/2` (anti-prompt + auth forge via `git_env/0`, tué dans la
-        # deadline si hung → pas de pod figé sur le clone de la doc).
+        # --single-branch: the doc branch is orphan ⇒ no need to fetch the rest of the history.
+        # NETWORK clone BOUNDED via `Shell.git/2` (anti-prompt + forge auth via `git_env/0`, killed within
+        # the deadline if hung → no pod frozen on the doc clone).
         case Fleet.Credentials.Shell.git(
                ["clone"] ++
                  ref_args ++ ["--branch", work_branch, "--single-branch", repo_url, doc]
@@ -229,16 +227,16 @@ defmodule Fleet.ProjectBootstrap.Phase do
       end
     end
 
-    # Pas de helper `forge_auth_args/0` local (ni dup de `Fleet.Workflow.Git`, malgré le cycle compile
-    # pipeline⇄bootstrap) : l'auth forge a une source unique `Fleet.Credentials.ForgeAuth.git_env/0`
-    # (fleet_credentials est en-dessous des deux apps → pas de cycle), token via env hors argv.
+    # No local `forge_auth_args/0` helper (nor a dup of `Fleet.Workflow.Git`, despite the
+    # pipeline⇄bootstrap compile cycle): forge auth has a single source `Fleet.Credentials.ForgeAuth.git_env/0`
+    # (fleet_credentials is below both apps → no cycle), token via env outside argv.
 
-    # Pas de `set_git_identity/2` : poser l'identité du rôle via `git config` dans le `.git/config` du
-    # workspace serait MUTABLE — le pod pourrait l'écraser (`git config user.email …`) → identité
-    # falsifiable. L'identité est posée en env au lancement (bwrap_launch.sh : GIT_AUTHOR_*/GIT_COMMITTER_*
-    # = LCARS-<role> / <role>@lcars.local + GIT_CONFIG_GLOBAL=/dev/null), défaut coopératif déterministe
-    # que le pod ne peut pas surcharger. La garantie vit côté monde :
-    # `Fleet.Workflow.DeliverableGate.check_identity/3` rejette au push tout commit hors identité
-    # autorisée (le pod ne PEUT PAS pousser un livrable usurpé).
+    # No `set_git_identity/2`: setting the role's identity via `git config` in the workspace's
+    # `.git/config` would be MUTABLE — the pod could overwrite it (`git config user.email …`) → forgeable
+    # identity. The identity is set in env at launch (bwrap_launch.sh: GIT_AUTHOR_*/GIT_COMMITTER_*
+    # = LCARS-<role> / <role>@lcars.local + GIT_CONFIG_GLOBAL=/dev/null), a deterministic cooperative
+    # default the pod cannot override. The guarantee lives on the world side:
+    # `Fleet.Workflow.DeliverableGate.check_identity/3` rejects at push any commit outside the
+    # authorized identity (the pod CANNOT push a spoofed deliverable).
   end
 end

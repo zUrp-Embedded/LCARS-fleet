@@ -1,15 +1,15 @@
 defmodule Fleet.ProjectBootstrap.Application do
   @moduledoc """
-  Application supervisor `fleet_project_bootstrap` (Ring 1, core du pod).
+  Application supervisor for `fleet_project_bootstrap` (Ring 1, pod core).
 
-  `Fleet.ProjectBootstrap.Phase.Clone` est une **fonction pure** (File / Path / git) —
-  aucun process : pas d'état mutable persistant, pas de concurrence interne, pas de
-  fault isolation propre.
+  `Fleet.ProjectBootstrap.Phase.Clone` is a **pure function** (File / Path / git) —
+  no process: no persistent mutable state, no internal concurrency, no fault
+  isolation of its own.
 
-  Invoqué synchroniquement par `Fleet.Spawner.Pod` en phase PROJECT.
+  Invoked synchronously by `Fleet.Spawner.Pod` in the PROJECT phase.
 
-  Supervisor `:one_for_one` children `[]` — existe pour cohérence umbrella OTP
-  (pattern `Fleet.Coord.Application`). Aucun GenServer démarré.
+  `:one_for_one` supervisor with `[]` children — exists for umbrella OTP
+  consistency (`Fleet.Coord.Application` pattern). No GenServer started.
   """
 
   use Application
