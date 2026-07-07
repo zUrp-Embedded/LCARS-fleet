@@ -69,6 +69,9 @@ defmodule Fleet.Event do
     * `timestamp` is ALWAYS a `%DateTime{}`: default `DateTime.utc_now/0`. An override via
       `opts[:timestamp]` is accepted ONLY if it is already a `%DateTime{}` — any other value raises
       `ArgumentError` (an event's timestamp can never be anything but a DateTime).
+    * `pod_id`/`correlation_id` are a binary or nil, and `payload` is a map — any other value raises
+      `ArgumentError`. The struct's `@type` is ENFORCED at construction, not merely documented: a
+      non-map payload / non-binary id is a producer bug, never a representable event.
 
   The `type` stays a free `atom()`: the closed enum of `type` is not enforced here (only `source`
   is, per the schema). Recognized options: `:timestamp` (`%DateTime{}`), `:pod_id`
@@ -87,9 +90,9 @@ defmodule Fleet.Event do
       source: source,
       type: type,
       timestamp: canon_timestamp(Keyword.fetch(opts, :timestamp)),
-      pod_id: Keyword.get(opts, :pod_id),
-      correlation_id: Keyword.get(opts, :correlation_id),
-      payload: Keyword.get(opts, :payload, %{})
+      pod_id: canon_id!(Keyword.get(opts, :pod_id), :pod_id),
+      correlation_id: canon_id!(Keyword.get(opts, :correlation_id), :correlation_id),
+      payload: canon_payload!(Keyword.get(opts, :payload, %{}))
     }
   end
 
@@ -102,6 +105,26 @@ defmodule Fleet.Event do
     raise ArgumentError,
           "Fleet.Event.new/3: timestamp #{inspect(other)} is not a %DateTime{} — " <>
             "an event's timestamp can never be anything but a DateTime"
+  end
+
+  # pod_id/correlation_id can ONLY be a binary or nil (the struct's `@type`): a non-binary is a
+  # producer bug → fail-loud, same stance as source/timestamp (never silently store an ill-typed id).
+  defp canon_id!(nil, _field), do: nil
+  defp canon_id!(s, _field) when is_binary(s), do: s
+
+  defp canon_id!(v, field) do
+    raise ArgumentError,
+          "Fleet.Event.new/3: #{field} #{inspect(v)} is not a String.t() | nil — " <>
+            "an event id can only be a binary or nil"
+  end
+
+  # payload can ONLY be a map (the struct's `@type`, and every JSON-event consumer assumes it): a
+  # non-map is a producer bug → fail-loud (otherwise it would crash `Jason.encode!` downstream).
+  defp canon_payload!(m) when is_map(m), do: m
+
+  defp canon_payload!(v) do
+    raise ArgumentError,
+          "Fleet.Event.new/3: payload #{inspect(v)} is not a map — an event payload is always a map"
   end
 
   @doc """
