@@ -373,6 +373,67 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, :failed} = TaskQueue.pod_status(q, "p1")
   end
 
+  test "MINE-TQ-02 : deadline max-DateTime (année 9999) → enqueue ne crashe PAS le GenServer (clamp du timer)",
+       %{topic: topic} do
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qfar)
+
+    # DateTime MAX valide d'Elixir : ms ≈ 2.5e14 > le plafond `Process.send_after` de l'ERTS → sans clamp,
+    # `send_after` lève ArgumentError DANS handle_call(:enqueue) → crash du GenServer (idem à la recovery).
+    far = ~U[9999-12-31 23:59:59Z]
+
+    assert {:ok, %{deadline: %DateTime{}}} = TaskQueue.enqueue(q, "p1", %{deadline: far})
+
+    assert Process.alive?(q),
+           "le GenServer TaskQueue a crashé sur une deadline lointaine (send_after non clampé)"
+
+    assert [%{pod_id: "p1", state: :pending}] = TaskQueue.list_pending(q)
+  end
+
+  test "MINE-TQ-02 : check_deadline PRÉMATURÉ (deadline pas atteinte) → re-arme, ne fail PAS", %{
+    topic: topic
+  } do
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qearly)
+
+    # deadline dans 1h : un check_deadline qui arrive AVANT (timer clampé qui fire early) ne doit PAS
+    # failer l'item — seule une deadline VRAIMENT atteinte le fait.
+    future = DateTime.add(DateTime.utc_now(), 3600, :second)
+    {:ok, wi} = TaskQueue.enqueue(q, "p1", %{deadline: future})
+
+    send(q, {:check_deadline, wi.id})
+    # list_pending = call synchrone → flushe le check_deadline (FIFO) avant l'assert.
+    assert [%{pod_id: "p1", state: :pending}] = TaskQueue.list_pending(q)
+  end
+
+  test "MINE-TQ-02 : recovery d'une deadline lointaine (année 9999) → boot SANS crash (clamp au ré-arme)",
+       %{topic: topic, tmp_dir: tmp_dir} do
+    now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+    path = Path.join(tmp_dir, "far_deadline_recovery.json")
+
+    # Le pire scénario : une deadline lointaine PERSISTÉE → init la ré-arme → sans clamp, crash au boot
+    # (potentiellement en BOUCLE, la state.json rechargée re-crashe à chaque redémarrage).
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "v" => 1,
+        "work_items" => %{
+          "t1" => %{
+            "id" => "t1",
+            "pod_id" => "p1",
+            "enqueued_at" => now_iso,
+            "state" => "assigned",
+            "deadline" => "9999-12-31T23:59:59Z"
+          }
+        }
+      })
+    )
+
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qfarrec)
+
+    assert Process.alive?(q), "le GenServer a crashé au boot en ré-armant une deadline lointaine"
+    # item recovered actif (la deadline lointaine n'expire pas) — pas de fail spurious.
+    assert {:ok, :assigned} = TaskQueue.pod_status(q, "p1")
+  end
+
   test "7. failed via deadline", %{q: q} do
     deadline = DateTime.add(DateTime.utc_now(), 200, :millisecond)
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x", deadline: deadline})

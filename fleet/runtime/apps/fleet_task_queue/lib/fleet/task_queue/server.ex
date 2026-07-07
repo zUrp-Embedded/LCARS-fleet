@@ -72,6 +72,12 @@ defmodule Fleet.TaskQueue.Server do
   alias Fleet.TaskQueue.WorkItem
 
   @active_states [:pending, :assigned, :in_progress]
+
+  # Portable-safe ceiling for `Process.send_after/3` (2^32-1 ms ≈ 49.7 days): the historic ERTS timer
+  # max, valid on EVERY OTP. A deadline further out (up to the max Elixir DateTime, year 9999 ≈ 8000
+  # years, which alone EXCEEDS the ERTS ceiling and would raise `ArgumentError` → GenServer crash) is
+  # armed at this ceiling and RE-ARMED when the timer fires — see `maybe_schedule_deadline/1`.
+  @max_timer 4_294_967_295
   # Retention bound for terminal tasks (:completed/:failed/:cleared). Without it,
   # `work_items` grows unbounded and `persist/1` rewrites an ever-larger `state.json` on EVERY
   # mutation. We keep the N most recent; the active ones do not count (cf. prune_terminal/2).
@@ -378,17 +384,27 @@ defmodule Fleet.TaskQueue.Server do
   def handle_info({:check_deadline, work_item_id}, state) do
     case Map.get(state.work_items, work_item_id) do
       %WorkItem{state: s} = work_item when s in @active_states ->
-        failed = %{work_item | state: :failed}
-        new_state = state |> put_work_item(failed) |> persist()
+        if deadline_reached?(work_item) do
+          failed = %{work_item | state: :failed}
+          new_state = state |> put_work_item(failed) |> persist()
 
-        # `:"work_item.failed"` (deadline) = watchdog of the IRREDUCIBLE, not a caller-facing
-        # completion: best-effort (a handle_info has no one to propagate to). The guard stays, honest.
-        best_effort_broadcast(
-          new_state,
-          event(:"work_item.failed", failed, %{work_item_id: failed.id, reason: :deadline_expired})
-        )
+          # `:"work_item.failed"` (deadline) = watchdog of the IRREDUCIBLE, not a caller-facing
+          # completion: best-effort (a handle_info has no one to propagate to). The guard stays, honest.
+          best_effort_broadcast(
+            new_state,
+            event(:"work_item.failed", failed, %{
+              work_item_id: failed.id,
+              reason: :deadline_expired
+            })
+          )
 
-        {:noreply, new_state}
+          {:noreply, new_state}
+        else
+          # Timer fired EARLY: the deadline was beyond the send_after ceiling → armed at @max_timer, not
+          # actually reached yet. Re-arm for the remainder; NEVER fail a still-valid item on a clamped tick.
+          maybe_schedule_deadline(work_item)
+          {:noreply, state}
+        end
 
       _ ->
         {:noreply, state}
@@ -479,16 +495,33 @@ defmodule Fleet.TaskQueue.Server do
   defp maybe_schedule_deadline(%WorkItem{deadline: %DateTime{} = dl, id: id}) do
     ms = DateTime.diff(dl, DateTime.utc_now(), :millisecond)
 
-    # ms>0: arm at the deadline. ms<=0 (deadline ALREADY passed, e.g. at recovery): immediate check → fail
-    # via handle_info, instead of ignoring it silently (= task active forever).
-    if ms > 0,
-      do: Process.send_after(self(), {:check_deadline, id}, ms),
-      else: send(self(), {:check_deadline, id})
+    cond do
+      # deadline ALREADY passed (e.g. at recovery): immediate check → fail via handle_info, instead of
+      # ignoring it silently (= task active forever).
+      ms <= 0 ->
+        send(self(), {:check_deadline, id})
+
+      # Beyond the ERTS `send_after` ceiling: arm at @max_timer; the handler re-checks the REAL deadline
+      # and re-arms for the remainder. Without this clamp, a far-future deadline raised `ArgumentError`
+      # here → crash of the TaskQueue GenServer (at enqueue AND at recovery re-arm on boot).
+      ms > @max_timer ->
+        Process.send_after(self(), {:check_deadline, id}, @max_timer)
+
+      true ->
+        Process.send_after(self(), {:check_deadline, id}, ms)
+    end
 
     :ok
   end
 
   defp maybe_schedule_deadline(_), do: :ok
+
+  # now >= deadline. The check_deadline timer can fire EARLY (a far-future deadline is clamped to
+  # @max_timer), so the handler MUST re-verify the real deadline rather than assume expiry on tick.
+  defp deadline_reached?(%WorkItem{deadline: %DateTime{} = dl}),
+    do: DateTime.compare(DateTime.utc_now(), dl) != :lt
+
+  defp deadline_reached?(_), do: false
 
   # ============================================================
   # Helpers — events (policy in Fleet.TaskQueue.Broadcast)
