@@ -63,6 +63,16 @@ set -euo pipefail
 # =============================================================
 
 CLAUDE_DIR="${CLAUDE_DIR:?CLAUDE_DIR required (claudeDir du compte humain, resolu par Fleet.Spawner — adr-f)}"
+# ⚠ DORMANT — NON UTILISÉ (2026-07-07). Pod-side d'un accélérateur de clone (mirror git local → clone
+# `--reference` = objets locaux, fetch incrémental, moins de réseau). Feature CÂBLÉE mais JAMAIS ACTIVÉE :
+# le hook côté clone (`project["reference_repo_path"]`, fleet_project_bootstrap/phase.ex) est LU mais
+# jamais POSÉ → aucun workspace n'a d'`alternates` → ce bind ne résout RIEN aujourd'hui. Son provisioning
+# a disparu à la migration home (le chemin `/var/lib/lcars/git-mirror` est un FOSSILE systemd, retiré —
+# cf. etc/README.md). Décision user 2026-07-07 : on GARDE (feature à valeur potentielle : même projet
+# re-cloné à chaque spawn), on NE purge PAS. Si un jour ACTIVÉ : re-homer le chemin (`~/.lcars/git-mirror`)
+# + provisionner le mirror + poser `reference_repo_path`. Tant que dormant, le guard L167 exige quand même
+# le dossier (fossile présent sur cette machine ; sur un install home vierge il tuerait un 1er spawn — à
+# rendre inerte À CE MOMENT, pas maintenant : scope « garder + annoter »).
 GIT_MIRROR="${LCARS_GIT_MIRROR:-/var/lib/lcars/git-mirror}"
 BWRAP_BIN="${LCARS_BWRAP_BIN:-/usr/bin/bwrap}"
 TMUX_BIN="${LCARS_TMUX_BIN:-/usr/bin/tmux}"
@@ -164,6 +174,8 @@ if [[ -z "$VENDOR_BIN" || ! -x "$VENDOR_BIN" || ! -d "$VENDOR_SHARE" ]]; then
   echo "ERR: vendor '$VENDOR_NAME' introuvable (bin=$VENDOR_BIN share=$VENDOR_SHARE) — set LCARS_VENDOR_BIN" >&2; exit 2
 fi
 [[ -d "$CLAUDE_DIR"  ]] || { echo "ERR: claudeDir $CLAUDE_DIR missing (registration humain — adr-f)" >&2; exit 1; }
+# DORMANT — NON UTILISÉ (cf. GIT_MIRROR L~66) : guard d'une feature jamais activée. Inerte tant que le
+# dossier existe (fossile systemd présent ici) ; à rendre non-fatal si un install home vierge le déclenche.
 [[ -d "$GIT_MIRROR"  ]] || { echo "ERR: git mirror $GIT_MIRROR missing (provisioning starfleet)" >&2; exit 1; }
 [[ -d "$POD_DIR"     ]] || { echo "ERR: pod_dir $POD_DIR missing (caller responsibility)" >&2; exit 1; }
 

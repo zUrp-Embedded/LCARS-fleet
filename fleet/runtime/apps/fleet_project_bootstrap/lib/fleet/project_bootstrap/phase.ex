@@ -22,6 +22,12 @@ defmodule Fleet.ProjectBootstrap.Phase do
     Phase 2 — CLONE branch feature OU skip (pod permanent / pas de repo).
     `git clone --reference <mirror bare local>` (objects locaux + fetch incrémental, pas de
     network par pod) si `spec.project.repo_path`, sinon workspace = répertoire vide (branch nil).
+
+    ⚠ Le `--reference` est DORMANT — NON UTILISÉ (2026-07-07) : `project["reference_repo_path"]` (le
+    chemin du mirror) est LU ci-dessous mais JAMAIS POSÉ par aucun caller → `ref` est toujours `nil` →
+    clone SANS `--reference`, aucun workspace n'a d'`alternates`. Hook d'un accélérateur de clone câblé
+    mais jamais activé (son pendant pod-side = le bind `$GIT_MIRROR` de `bin/bwrap_launch.sh`, aussi
+    dormant ; provisioning perdu à la migration home). Décision user : on GARDE, on ne purge pas.
     """
     @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
