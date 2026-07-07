@@ -119,7 +119,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       {:ok, :removed}
     end
 
-    def stop_stopwatch(_repo, _n, _opts), do: :ok
+    def stop_stopwatch(_repo, n, _opts), do: send(self(), {:stopwatch_stopped, n}) && :ok
 
     # Voix de l'eng (info sortante) : le summary du producteur posté en commentaire PR.
     def post_comment(_repo, pr, body, _opts) do
@@ -429,6 +429,10 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       # QoL 2026-07-07 : le verrou ISSUE ne se lève PLUS à l'advance — il persiste jusqu'au :promote
       # final (la brique reste in-flight pendant toute la review, pas juste le codage).
       refute_received {:unlock, _, _}
+
+      # MAIS le CHRONO de build de l'eng, LUI, se ferme au hand-off (sur l'ISSUE 42) — découplé du verrou :
+      # sinon le temps de l'eng engloberait toute la review (temps de cycle ≠ temps de travail).
+      assert_received {:stopwatch_stopped, 42}
     end
 
     test "producteur avec :eng_summary → note COMPLÈTE sur le TICKET, POINTEUR PLIÉ dans l'ouverture de la PR (QoL, un seul post PR)" do

@@ -556,6 +556,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # brique reste in-flight jusqu'au `:promote` final, 1re livraison ou pas.
     with :ok <- request_reviews_step(forge, repo, pr, Roles.reviewer_roles(opts), forge_opts),
          {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
+         # Hand-off producteur → juges : ferme SON chrono de build (sur l'ISSUE), découplé du verrou (le
+         # verrou ISSUE persiste jusqu'au merge ; l'unlock PR ci-dessous ne couvre que le cas re-livraison
+         # rework). Cf. `maybe_unlock_judge_advance` producteur pour le POURQUOI du découplage chrono↔verrou.
+         :ok <-
+           stop_build_stopwatch(forge, repo, step_run.issue_number, forge_opts, step_run.role),
          {:ok, _} <- unlock(forge, repo, pr, forge_opts, step_run.role) do
       {:ok, :review_requested}
     end
@@ -586,7 +591,15 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  defp maybe_unlock_judge_advance(_forge, _repo, %{pr_role: :producer}, _pr, _forge_opts), do: :ok
+  defp maybe_unlock_judge_advance(forge, repo, %{pr_role: :producer} = step_run, _pr, forge_opts) do
+    # Le PRODUCTEUR a fini SON tour (build livré, hand-off aux juges) : on ferme SON chrono de travail —
+    # MAIS on NE lève PAS le verrou-ISSUE (il persiste jusqu'au merge). Découplage assumé chrono↔verrou :
+    # le verrou = « la brique est-elle encore en vol » (persiste jusqu'au merge) ; le chrono = « combien de
+    # temps CET agent a travaillé » (son tour). Deux durées distinctes — sans ce stop, le chrono de l'eng
+    # engloberait toute la review (temps où il ne fait rien) → temps de CYCLE maquillé en temps de TRAVAIL.
+    stop_build_stopwatch(forge, repo, step_run.issue_number, forge_opts, step_run.role)
+    :ok
+  end
 
   # Demande la review de TOUS les juges d'un coup (qualifier+reviewer en requested_reviewers).
   # Liste vide = trou de config (jamais merger sans juge en interim) → fail-loud.
@@ -685,6 +698,16 @@ defmodule Fleet.Pilot.StepRunCompleter do
       {:ok, _} = ok -> ok
       {:error, reason} -> {:error, {:unlock, reason}}
     end
+  end
+
+  # Ferme le chrono de BUILD du producteur (sur l'ISSUE), à son hand-off vers la review — DÉCOUPLÉ de
+  # `unlock` (le verrou-ISSUE, lui, persiste jusqu'au merge). Sans ce stop, le chrono de l'eng, accroché
+  # au verrou qui persiste, engloberait toute la review → temps de cycle maquillé en temps de travail
+  # (métrique visuelle FAIBLE, mais un chiffre faux ment sur qui a bossé). `role` = le producteur (même
+  # identité que le start au spawn : Gitea est per-utilisateur). Best-effort (discard) : jamais bloquant.
+  defp stop_build_stopwatch(forge, repo, issue_n, forge_opts, role) do
+    _ = forge.stop_stopwatch(repo, issue_n, ForgeClient.as_role(forge_opts, role))
+    :ok
   end
 
   # ── Étape 1 : commit + push livrable (ou step_run_sha fourni si pas de git) ──────
