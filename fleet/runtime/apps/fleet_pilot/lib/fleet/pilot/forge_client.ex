@@ -794,9 +794,10 @@ defmodule Fleet.Pilot.ForgeClient do
   # verrous plats (`lcars-*`) vivent PAR-REPO : l'état de routing appartient aux issues de SON repo (la
   # forge = state-store, self-contained par projet), et le compte système les crée via son **repo-write** —
   # jamais besoin d'être org-owner (ce qu'exigerait `POST /orgs/*/labels` → 403 « Must be an organization
-  # owner »). Couleur/description par défaut (le NOM porte le protocole). Tolérant : un échec (créé en
-  # concurrence) → `:ok` — c'est le re-POST + sa vérif qui tranchent (sinon le fail-loud d'`add_issue_label`
-  # remonte).
+  # owner »). Couleur + description PAR FAMILLE (le NOM porte le protocole, la description l'EXPLIQUE à
+  # l'humain qui survole le label sur la forge — avant : même chaîne cryptique pour tous, « F-E5 » ne veut
+  # rien dire hors du code). Tolérant : un échec (créé en concurrence) → `:ok` — c'est le re-POST + sa vérif
+  # qui tranchent (sinon le fail-loud d'`add_issue_label` remonte).
   defp ensure_repo_label(config, repo, label_name) do
     # Un label SCOPÉ (nom `scope/valeur`, contient "/") est créé MUTUELLEMENT EXCLUSIF (`exclusive:true`) :
     # Gitea retire l'ancien `scope/*` de l'issue quand on en pose un nouveau (vérifié forge 1.26.1, niveau
@@ -806,7 +807,7 @@ defmodule Fleet.Pilot.ForgeClient do
       name: label_name,
       exclusive: String.contains?(label_name, "/"),
       color: label_color(label_name),
-      description: "label protocole lcars (auto-cree, F-E5)"
+      description: label_description(label_name)
     }
 
     case http_post(config, "/repos/#{encode_repo(repo)}/labels", body) do
@@ -822,6 +823,25 @@ defmodule Fleet.Pilot.ForgeClient do
   defp label_color("stage/review"), do: "#8e44ad"
   defp label_color("stage/merged"), do: "#2e9e5b"
   defp label_color(_), do: "#ededed"
+
+  # Description PAR FAMILLE (tooltip Gitea au survol) — le NOM reste le protocole (vocab LCARS intact,
+  # parsé tel quel par le code), la description est le SEUL endroit où on explique en clair à un humain
+  # qui regarde la forge sans le code sous les yeux. `wfmap/<map>` et `stage/<step>` ont des valeurs
+  # dynamiques (nom de map / nom d'étape variables selon le workflow_map) → match sur le PRÉFIXE, pas la
+  # valeur exacte (contrairement à `label_color` qui, lui, ne différencie QUE les 4 stages connus).
+  defp label_description("lcars-in-flight"),
+    do: "Verrou : un pod travaille déjà cette brique (anti double-spawn). Levé par le système en fin de step — jamais à retirer à la main."
+
+  defp label_description("lcars-awaits-arch"),
+    do: "Cette issue attend une action HUMAINE via l'architecte (verdict escalade/halt/redirect) — le poller la laisse tranquille tant qu'il est posé."
+
+  defp label_description("stage/" <> _step),
+    do: "Étape COURANTE de cette issue dans son plan (workflow_map) — bouge à chaque avancée (mutex : une seule à la fois)."
+
+  defp label_description("wfmap/" <> _map),
+    do: "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
+
+  defp label_description(_), do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."
 
   # ============================================================
   # Identite forge — adaptateur credential -> wire (token de role)
