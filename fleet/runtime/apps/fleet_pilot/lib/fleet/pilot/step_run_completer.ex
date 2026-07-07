@@ -116,7 +116,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
          # la route (sinon même seconde → ordre dashboard arbitraire, « logiquement avant, affiché après »).
          :ok <- space_writes(opts),
          {:ok, routed} <- step4_route(forge, repo, n, step_run, forge_opts),
-         {:ok, _} <- unlock(forge, repo, n, forge_opts) do
+         {:ok, _} <- unlock(forge, repo, n, forge_opts, role) do
       Logger.info("StepRunCompleter: #{repo}##{n} role=#{role} sha=#{sha} → #{routed}")
 
       {:ok, routed}
@@ -496,8 +496,16 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # moment où elle est finie.
     with {:ok, :promoted} <- promote(promote_step_run, opts),
          :ok <- space_writes(opts),
-         {:ok, _} <- unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts),
-         {:ok, _} <- unlock(forge, step_run.repo, step_run.issue_number, forge_opts) do
+         {:ok, _} <-
+           unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts, step_run.role),
+         {:ok, _} <-
+           unlock(
+             forge,
+             step_run.repo,
+             step_run.issue_number,
+             forge_opts,
+             Roles.producer_role(opts)
+           ) do
       {:ok, :promoted}
     end
   end
@@ -527,7 +535,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     with {:ok, _} <-
            post_route_if_present(forge, repo, step_run.issue_number, step_run, forge_opts, :route),
-         {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts) do
+         {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts, step_run.role) do
       {:ok, :rework_requested}
     end
   end
@@ -548,7 +556,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # brique reste in-flight jusqu'au `:promote` final, 1re livraison ou pas.
     with :ok <- request_reviews_step(forge, repo, pr, Roles.reviewer_roles(opts), forge_opts),
          {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
-         {:ok, _} <- unlock(forge, repo, pr, forge_opts) do
+         {:ok, _} <- unlock(forge, repo, pr, forge_opts, step_run.role) do
       {:ok, :review_requested}
     end
   end
@@ -562,7 +570,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
-    with {:ok, _} <- unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts) do
+    with {:ok, _} <-
+           unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts, step_run.role) do
       {:ok, :reviewed}
     end
   end
@@ -571,7 +580,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # `:promote` final) ; JUGE non-terminal (verrou PR, qualifier→reviewer) → unlock NORMAL (le tour de CE
   # juge est fini, le suivant pose le sien via dispatch_review — granularité par-tour, pas la brique).
   defp maybe_unlock_judge_advance(forge, repo, %{pr_role: :judge} = step_run, pr, forge_opts) do
-    case unlock(forge, repo, lock_number(step_run, pr), forge_opts) do
+    case unlock(forge, repo, lock_number(step_run, pr), forge_opts, step_run.role) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
@@ -650,14 +659,27 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # Retire le verrou `lcars-in-flight` — leve en DERNIER dans les DEUX sequences (nominale `complete`
-  # et PR-native `route`) : un crash avant ce point laisse le verrou pose → le poller ne re-spawn pas →
-  # la recovery rejoue (remove_label idempotent). Autorite UNIQUE du unlock pour les deux chemins.
-  defp unlock(forge, repo, n, forge_opts) do
+  @doc """
+  Retire le verrou `lcars-in-flight` — levé en DERNIER dans TOUTES les séquences de fin de brique :
+  `complete/2` (nominale), `route/3` PR-native (ce module), ET `StepDispatcher.ReviewLifecycle.promote_pr`
+  (merge poller-driven no-workflow_map, verrou ISSUE — AUTORITÉ UNIQUE, un seul writer de `remove_label`
+  in-flight + `stop_stopwatch`, pas de fork). Un crash avant ce point laisse le verrou posé → le poller
+  ne re-spawn pas → la recovery rejoue (`remove_label` idempotent).
+
+  `role` : identité de STOP du stopwatch — DOIT être la MÊME que celle qui l'a démarré (Gitea est
+  per-utilisateur : un stop signé différemment échoue silencieusement, le stopwatch tourne à jamais).
+  Presque toujours le rôle qui finit lui-même (chaque rôle démarre PUIS arrête SON propre verrou, tour
+  par tour) — SAUF le verrou ISSUE levé au `:promote`/`promote_pr` final : il a été démarré par le
+  PRODUCTEUR à `dispatch_issue` et persiste across plusieurs juges, donc CE stop doit utiliser
+  `Roles.producer_role(opts)`, jamais le rôle du juge/de l'événement qui termine.
+  """
+  @spec unlock(module(), String.t(), integer(), keyword(), String.t()) ::
+          {:ok, term()} | {:error, term()}
+  def unlock(forge, repo, n, forge_opts, role) do
     # Stopwatch : arrêté ICI, symétrique du démarrage au spawn (`Spawn.spawn_step`) — même objet (`n` =
-    # issue ou PR selon le rôle), même mécanique globale. Best-effort (discard) : cosmétique, jamais
-    # bloquant pour le unlock réel (l'invariant qui compte).
-    _ = forge.stop_stopwatch(repo, n, forge_opts)
+    # issue ou PR selon le rôle), même mécanique globale, MÊME identité (`as_role`). Best-effort
+    # (discard) : cosmétique, jamais bloquant pour le unlock réel (l'invariant qui compte).
+    _ = forge.stop_stopwatch(repo, n, ForgeClient.as_role(forge_opts, role))
 
     case forge.remove_label(repo, n, @in_flight_label, forge_opts) do
       {:ok, _} = ok -> ok

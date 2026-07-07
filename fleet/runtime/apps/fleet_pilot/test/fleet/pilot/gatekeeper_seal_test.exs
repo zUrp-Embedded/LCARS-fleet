@@ -52,6 +52,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert c_opts[:token] == "GK-TOKEN"
     assert c_opts[:dedup_signature] == "[merge:pr-7]"
     assert c_opts[:dedup_any_author] == true
+
+    # Close explicite SIGNÉ GATEKEEPER (régression QoL 2026-07-07 : partait signé système — rupture
+    # d'identité dans le sceau alors que merge+comment sont DÉJÀ gatekeeper, cf. ci-dessus).
+    assert_received {:close_issue, "fleet/p", 42, close_opts}
+    assert close_opts[:token] == "GK-TOKEN"
   end
 
   test "merge KO → {:error, {:merge, _}} ET AUCUN « fusionnée » posté (pas de mensonge avant la réalité)" do

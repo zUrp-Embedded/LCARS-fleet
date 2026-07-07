@@ -186,9 +186,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # (gardien des PRs — « c'est dans son nom » ; token de rôle, `as_role`). Comment HONNÊTE
   # (on ne ment pas, on montre) : livré par l'eng, validé par les juges (APPROVED), mergé
   # par le système (branch-protection OFF en dev → LCARS agrège, pas Gitea — explicité). Le merge
-  # `rebase` (LINÉAIRE, gère un `main` avancé sous une PR parallèle — multi-issue, cf. merge_pr)
-  # auto-close l'issue via `Closes #N` du body PR → close APRÈS merge, jamais avant. Pas de verrou
-  # (poller mono-process) ; PR déjà mergée → 409 → la PR disparaît au tick suivant (idempotent).
+  # `rebase` (LINÉAIRE, gère un `main` avancé sous une PR parallèle — multi-issue, cf. merge_pr) —
+  # `seal_and_merge` ferme l'issue EXPLICITEMENT, APRÈS le commentaire (plus de `Closes #N`/auto-close
+  # Gitea, chronologie cohérente, QoL 2026-07-07). Pas de verrou (poller mono-process) ; PR déjà
+  # mergée → 409 → la PR disparaît au tick suivant (idempotent).
   #
   # `promote_comment` + le rôle gatekeeper + le merge vivent dans `Fleet.Pilot.GatekeeperSeal`
   # (sceau UNIQUE partagé avec `StepRunCompleter.promote` — pas de fork de signature de merge).
@@ -217,9 +218,24 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           _ =
             Spawn.safe_kill(ctx.spawner, Fleet.Pilot.PodId.for_issue(ctx.repo, issue_n, producer))
 
+          # Verrou ISSUE (régression QoL 2026-07-07 : ce chemin ne l'a JAMAIS levé — le PR-lock se lève
+          # via `StepRunCompleter.route(:reviewed)` de chaque juge, mais l'ISSUE-lock, démarré par le
+          # PRODUCTEUR à `dispatch_issue` et persistant toute la review, n'était retiré QUE par
+          # `StepRunCompleter.route(:promote)` — jamais atteint sur ce chemin poller-driven). `producer`
+          # (parsé de la branche `lcars/issue-N-<role>`) EST l'identité qui a démarré ce stopwatch —
+          # même autorité `StepRunCompleter.unlock/5` que le chemin workflow_map (pas de fork).
+          _ =
+            Fleet.Pilot.StepRunCompleter.unlock(
+              ctx.forge,
+              ctx.repo,
+              issue_n,
+              ctx.forge_opts,
+              producer
+            )
+
           Logger.info(
             "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
-              "(juges OK → merge rebase, scellé gatekeeper, close via Closes ##{issue_n} ; eng tué)"
+              "(juges OK → merge rebase, scellé gatekeeper, close explicite ; eng tué, verrou issue levé)"
           )
 
           {:ok, {:merged, pr_number}}

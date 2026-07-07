@@ -38,10 +38,12 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
   @doc """
   Scelle la PR : **merge D'ABORD** (token gatekeeper), PUIS poste le commentaire de fin
-  « ✅ livrée et fusionnée », PUIS `stage/merged`, PUIS ferme l'issue EXPLICITEMENT (dernier acte —
-  chronologie cohérente, plus de `Closes #N`/auto-close Gitea qui fermait AVANT le commentaire). Le
-  commentaire est SEULEMENT posté si le merge a réussi (best-effort, le merge fait foi). On ne prétend
-  JAMAIS « fusionnée » avant de l'avoir vérifié. Merge KO → aucun commentaire de réussite, l'erreur remonte.
+  « ✅ livrée et fusionnée » (gatekeeper), PUIS `stage/merged` (système, WS1), PUIS ferme l'issue
+  EXPLICITEMENT — **gatekeeper aussi** (dernier acte — chronologie cohérente, plus de `Closes #N`/
+  auto-close Gitea qui fermait AVANT le commentaire ; même identité que le merge+comment, une seule
+  cérémonie de scellement, pas de rupture d'attribution). Le commentaire est SEULEMENT posté si le
+  merge a réussi (best-effort, le merge fait foi). On ne prétend JAMAIS « fusionnée » avant de l'avoir
+  vérifié. Merge KO → aucun commentaire de réussite, l'erreur remonte.
 
   `forge_opts` = opts forge BRUTS (base_url/token système…) : la signature gatekeeper est posée
   ICI (`as_gatekeeper/1`), plus par l'appelant — un merge ne peut pas partir non signé.
@@ -80,7 +82,14 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         # « ✅ livrée et fusionnée » posté après-coup sur un ticket déjà fermé). On ferme nous-mêmes,
         # APRÈS le commentaire ET le stage/merged, pour une chronologie cohérente : rien ne se poste plus
         # sur l'issue une fois close. Best-effort (le merge fait foi, un close raté n'invalide rien).
-        _ = forge.close_issue(repo, issue_n, forge_opts)
+        #
+        # SIGNÉ GATEKEEPER (`gk_opts`), PAS système (régression QoL 2026-07-07, observée live) : le merge
+        # + le commentaire de sceau sont DÉJÀ gatekeeper — un close système créerait une rupture d'identité
+        # dans la MÊME cérémonie de scellement (« qui a fini cette brique ? » deux réponses différentes
+        # pour trois actes consécutifs). `set_stage` (juste au-dessus) RESTE système : c'est un label
+        # protocole (stage/*), une catégorie séparée, doctrine WS1 (tous les stage/* sont système, partout
+        # ailleurs dans le pipeline) — non concernée par cette incohérence.
+        _ = forge.close_issue(repo, issue_n, gk_opts)
 
         # Projette le livrable sur le clone local `/home/projects/<name>` (best-effort). La SÉRIALISATION
         # vit DANS le GenServer dédié (un `git` à la fois sur un worktree, contre la race entre les deux

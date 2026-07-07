@@ -44,7 +44,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def start_stopwatch(_repo, _n, _opts), do: :ok
-    def stop_stopwatch(_repo, _n, _opts), do: :ok
+
+    # QoL 2026-07-07 (régression) : signale `n` — prouve que `promote_pr` (merge poller-driven,
+    # no-workflow_map) lève DÉSORMAIS le verrou ISSUE en plus du verrou PR (jamais fait avant ce fix).
+    def stop_stopwatch(_repo, n, _opts) do
+      send(self(), {:stopped_watch, n})
+      :ok
+    end
 
     # Adoption : pose des juges sur une PR orpheline (humaine/fork). Capture pour assertion.
     def request_review(_repo, index, reviewers, _opts) do
@@ -856,7 +862,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         )
 
       assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
-      # le merge FF a bien ete declenche sur la PR (auto-close de l'issue via Closes #N)
+
+      # le merge FF a bien ete declenche sur la PR (close explicite via seal_and_merge, plus de Closes #N)
       assert_received {:merged, 6}
       refute_received {:spawned, _, _}
 
@@ -865,6 +872,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # for_repo ici tuerait l'eng s'il code une AUTRE issue). On asserte l'APPEL au kill avec l'id
       # issue-keyé (même s'il no-op), inconditionnel côté dispatcher.
       assert_received {:killed, "lordzurp-lcars-test-issue-42-engineer"}
+
+      # RÉGRESSION QoL 2026-07-07 : ce chemin (merge poller-driven, no-workflow_map) ne levait JAMAIS
+      # le verrou ISSUE — seul le verrou PR se levait (via route(:reviewed) de chaque juge, hors-scope
+      # ici). `promote_pr` doit désormais lever aussi l'ISSUE (42), la brique entière est finie au merge.
+      assert_received {:stopped_watch, 42}
     end
 
     test "F-PARALLEL-PR-CONFLICT : merge en conflit → 1ʳᵉ fois résolution (re-spawn producteur), 2ᵉ fois escalade arch" do

@@ -28,8 +28,13 @@ defmodule Fleet.Pilot.ForgeStubs do
     # WS2 : le sceau pose stage/merged post-merge (best-effort). No-op (le stub prouve l'ordre merge↔comment).
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
 
-    # Close explicite (QoL 2026-07-07) : dernier acte de seal_and_merge. No-op (le stub prouve l'ordre).
-    def close_issue(_repo, _n, _opts), do: {:ok, :closed}
+    # Close explicite (QoL 2026-07-07) : dernier acte de seal_and_merge. SIGNALE (opts inclus) : un test
+    # (GatekeeperSealTest) prouve que le close est signé GATEKEEPER, même identité que merge_pr/comment
+    # (régression QoL 2026-07-07 : le close partait signé système, rupture d'identité dans le sceau).
+    def close_issue(repo, n, opts) do
+      send(self(), {:close_issue, repo, n, opts})
+      {:ok, :closed}
+    end
   end
 
   defmodule MergeFailForge do

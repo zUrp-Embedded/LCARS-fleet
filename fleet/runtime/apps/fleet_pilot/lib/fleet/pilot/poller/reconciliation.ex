@@ -257,7 +257,12 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     )
 
     # Stopwatch : arrêté AUSSI ici (pod mort = jamais passé par `unlock`) — sinon il tournerait jusqu'au
-    # prochain unlock réel, comptant le temps mort comme du travail. Best-effort, symétrique du spawn.
+    # prochain unlock réel, comptant le temps mort comme du travail. Best-effort, symétrique du spawn —
+    # MAIS signé forge_opts BRUT (système), PAS `as_role` : le pod mort a EMPORTÉ son identité de rôle
+    # (aucune trace exploitable à ce point, orphelin = plus aucun pod vivant à interroger). Gitea exige
+    # la MÊME identité pour stop que pour start (per-utilisateur) → CE stop ne matchera PAS le stopwatch
+    # démarré `as_role` par le pod mort (limite connue, assumée : cas d'échec pod, pas le chemin nominal
+    # — cf. `Fleet.Pilot.StepDispatcher.Spawn`/`StepRunCompleter.unlock` pour l'attribution nominale).
     _ = forge.stop_stopwatch(repo, number, forge_opts)
     forge.remove_label(repo, number, @in_flight, forge_opts)
   end

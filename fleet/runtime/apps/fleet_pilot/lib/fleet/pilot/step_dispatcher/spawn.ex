@@ -115,7 +115,17 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
          # Time-tracking natif (best-effort, discard) : DÉMARRE le stopwatch sur le MÊME objet que le
          # verrou (issue ou PR) — mécanique globale, agnostique du rôle (cf. § Time-tracking, ForgeClient).
-         _ = forge.start_stopwatch(repo, lock_target, forge_opts),
+         # Signé AU NOM DU WORKER (`as_role`) — PAS le label (protocole = système) : Gitea attribue le
+         # temps tracké à l'utilisateur AUTHENTIFIÉ, donc un stopwatch système compterait tout le temps
+         # sous `lcars-system`, jamais le worker réel. Gitea exige la MÊME identité pour start ET stop
+         # (stopwatch per-utilisateur) — le stop symétrique vit dans `unlock` (même rôle, sauf le cas
+         # verrou-ISSUE au `:promote` final, cf. StepRunCompleter).
+         _ =
+           forge.start_stopwatch(
+             repo,
+             lock_target,
+             Fleet.Pilot.ForgeClient.as_role(forge_opts, role)
+           ),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
          :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief) do
       # Le retour de `WakeRecovery.wake` est LOAD-BEARING : `{:error, {:escalated, _}}`
@@ -158,8 +168,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         _ = forge.remove_label(repo, lock_target, @in_flight_label, forge_opts)
 
         # Stopwatch démarré avec le verrou → arrêté avec lui (le dispatch n'a jamais abouti, le temps
-        # écoulé serait du bruit, pas du travail réel).
-        _ = forge.stop_stopwatch(repo, lock_target, forge_opts)
+        # écoulé serait du bruit, pas du travail réel). MÊME identité qu'au démarrage (`as_role`, ce
+        # même rôle) — Gitea n'accepte le stop QUE de l'utilisateur qui a démarré.
+        _ =
+          forge.stop_stopwatch(
+            repo,
+            lock_target,
+            Fleet.Pilot.ForgeClient.as_role(forge_opts, role)
+          )
 
         Logger.warning(
           "StepDispatcher: dispatch role=#{role} pod=#{pod_id} #{log_ctx} → #{inspect(err)} " <>
