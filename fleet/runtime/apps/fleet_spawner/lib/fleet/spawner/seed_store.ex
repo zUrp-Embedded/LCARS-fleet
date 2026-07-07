@@ -141,8 +141,9 @@ defmodule Fleet.Spawner.SeedStore do
     # `cwd` is already confined by `slugify` (everything outside `[A-Za-z0-9-]` → `-`, so neither `/` nor `..`). The
     # `uuid`, on the other hand, comes from the seed's `.json` (`read_map`): if that file carried a hostile `uuid`
     # (`../../x`), it would interpolate into the LEAF and write outside the `projects/<slug>/` directory. So we
-    # confine the resolved `dest` under the pod_dir BEFORE the `cp!` — fail-loud (raise) on escape (the
-    # caller `maybe_recall_restore` folds this raise onto `transition_failed`, the pod does not launch).
+    # confine the resolved `dest` under the pod_dir BEFORE the `cp!` — fail-loud (raise) on escape. The
+    # caller `maybe_recall_restore` RESCUES this raise into `{:error, {:recall_restore_failed, _}}` → the
+    # `:projecting` `with` routes it to `transition_failed` (clean tombstone), the pod does not launch.
     dir = Path.join([pod_dir, ".claude", "projects", slugify(cwd)])
     File.mkdir_p!(dir)
     dest = Path.expand(Path.join(dir, "#{uuid}.jsonl"))

@@ -1612,6 +1612,46 @@ defmodule Fleet.Spawner.PodTest do
     end
   end
 
+  describe "maybe_recall_restore/1 — total (rescue le bang SeedStore.restore → {:error}, pas de crash)" do
+    test "seed en échec de restore (raise) → {:error, {:recall_restore_failed, _}}", %{
+      tmp_dir: tmp
+    } do
+      # SeedStore.restore/4 est un BANG : File.cp!/mkdir_p!/escape lèvent. On déclenche le raise avec un
+      # seed_jsonl qui EXISTE mais est un RÉPERTOIRE (File.exists? vrai → File.cp! lève :eisdir). Avant le
+      # fix, ce raise traversait le `with` de :projecting → crash du gen_statem (pas de tombstone).
+      seed = Path.join(tmp, "seed-as-dir")
+      File.mkdir_p!(seed)
+      pod_dir = Path.join(tmp, "pod_recall")
+      File.mkdir_p!(pod_dir)
+
+      state = %{
+        opts: [recall_seed_jsonl: seed],
+        pod_dir: pod_dir,
+        cap_profile: valid_profile(),
+        session_id: "11111111-1111-1111-1111-111111111111"
+      }
+
+      assert {:error, {:recall_restore_failed, _}} =
+               Fleet.Spawner.Pod.Scaffold.maybe_recall_restore(state)
+    end
+
+    test "seed absent → {:error, {:recall_seed_missing, _}} (chemin déjà typé, inchangé)", %{
+      tmp_dir: tmp
+    } do
+      missing = Path.join(tmp, "nope.jsonl")
+
+      state = %{
+        opts: [recall_seed_jsonl: missing],
+        pod_dir: Path.join(tmp, "pod_x"),
+        cap_profile: valid_profile(),
+        session_id: "22222222-2222-2222-2222-222222222222"
+      }
+
+      assert {:error, {:recall_seed_missing, ^missing}} =
+               Fleet.Spawner.Pod.Scaffold.maybe_recall_restore(state)
+    end
+  end
+
   # scope_for("one-shot") == "pods" → <state_fs_root>/pods/<pod_id>/state.json (config posée par setup).
   defp write_snapshot!(tmp, pod_id, phase) do
     path = Path.join([tmp, "state", "pods", pod_id, "state.json"])

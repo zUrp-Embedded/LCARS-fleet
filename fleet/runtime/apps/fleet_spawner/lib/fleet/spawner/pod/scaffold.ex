@@ -116,7 +116,9 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   intact). The seed is validated (`read_map`) on the `Spawner.recall` side; absent HERE = fail-loud
   (`{:recall_seed_missing, _}` → `transition_failed`).
   """
-  @spec maybe_recall_restore(map()) :: :ok | {:error, {:recall_seed_missing, String.t()}}
+  @spec maybe_recall_restore(map()) ::
+          :ok
+          | {:error, {:recall_seed_missing, String.t()} | {:recall_restore_failed, String.t()}}
   def maybe_recall_restore(state) do
     case Keyword.get(state.opts, :recall_seed_jsonl) do
       nil ->
@@ -124,15 +126,23 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
       jsonl when is_binary(jsonl) ->
         if File.exists?(jsonl) do
-          {:ok, _} =
-            Fleet.Spawner.SeedStore.restore(
-              jsonl,
-              state.pod_dir,
-              LaunchSpec.pod_cwd(state.opts, state.cap_profile, state.pod_dir),
-              state.session_id
-            )
+          # `SeedStore.restore/4` is a BANG (raises on cp!/mkdir_p! failure or an escaping uuid). We FOLD
+          # that raise into a typed error so the `:projecting` `with` routes it to `transition_failed`
+          # (clean tombstone written), instead of the raise crossing the `with` and crashing the Pod
+          # gen_statem (abnormal exit → no phase=failed → reclaim/re-dispatch loop on the same bad seed).
+          try do
+            {:ok, _dest} =
+              Fleet.Spawner.SeedStore.restore(
+                jsonl,
+                state.pod_dir,
+                LaunchSpec.pod_cwd(state.opts, state.cap_profile, state.pod_dir),
+                state.session_id
+              )
 
-          :ok
+            :ok
+          rescue
+            e -> {:error, {:recall_restore_failed, Exception.message(e)}}
+          end
         else
           {:error, {:recall_seed_missing, jsonl}}
         end
