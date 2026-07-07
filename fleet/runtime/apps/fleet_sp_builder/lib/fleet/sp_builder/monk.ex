@@ -1,38 +1,38 @@
 defmodule Fleet.SPBuilder.Monk do
   @moduledoc """
-  Résolution de l'injection monk — extrait de `Fleet.SPBuilder` (source de donnée
-  distincte : un registry YAML, seule I/O non-markdown du composeur).
+  Monk-injection resolution — split out of `Fleet.SPBuilder` (a distinct data
+  source: a YAML registry, the composer's only non-markdown I/O).
 
-  Si le cap-profile porte `spec.knowledge.{monk_registry, monk_instance}`, le module
-  lit le registry YAML (registry mémoire, shape `spec.monks`), trouve l'entrée
-  `monk_instance` et rend `%{persona_hint, corpus_paths}`. L'injection est purement
-  ADDITIVE : pour un non-monk, le flux `compose/3` reste byte-identique (aucune
-  branche ne le traverse) — c'est le contrat de `resolve_or_empty/2`.
+  If the cap-profile carries `spec.knowledge.{monk_registry, monk_instance}`, the
+  module reads the YAML registry (memory registry, shape `spec.monks`), finds the
+  `monk_instance` entry and returns `%{persona_hint, corpus_paths}`. The injection
+  is purely ADDITIVE: for a non-monk, the `compose/3` flow stays byte-identical (no
+  branch traverses it) — that is the contract of `resolve_or_empty/2`.
 
-  Fonctions **pures** (lecture FS only, aucun process). L'API publique du composeur
-  reste `Fleet.SPBuilder.resolve_monk_injection/2` (defdelegate vers `resolve/2`).
+  **Pure** functions (FS read only, no process). The composer's public API stays
+  `Fleet.SPBuilder.resolve_monk_injection/2` (defdelegate to `resolve/2`).
   """
 
   @type injection :: %{persona_hint: String.t(), corpus_paths: [String.t()]}
 
   @doc """
-  Résout l'injection monk du cap-profile.
+  Resolves the cap-profile's monk injection.
 
-    * `{:ok, %{persona_hint, corpus_paths}}` — cap-profile monk, entrée trouvée.
-    * `:not_a_monk` — pas de `monk_registry`/`monk_instance` dans `spec.knowledge`.
-    * `{:error, {:registry_unreadable, path, reason}}` — YAML illisible.
-    * `{:error, {:not_a_memory_registry, path}}` — YAML sans `spec.monks` (liste).
-    * `{:error, {:monk_instance_not_found, instance}}` — instance absente du registry.
+    * `{:ok, %{persona_hint, corpus_paths}}` — monk cap-profile, entry found.
+    * `:not_a_monk` — no `monk_registry`/`monk_instance` in `spec.knowledge`.
+    * `{:error, {:registry_unreadable, path, reason}}` — YAML unreadable.
+    * `{:error, {:not_a_memory_registry, path}}` — YAML without `spec.monks` (list).
+    * `{:error, {:monk_instance_not_found, instance}}` — instance absent from the registry.
 
   ## opts
 
-    * `:monk_registry_root` — racine résolvant le path relatif du registry
-      (test-seam ; défaut config `:fleet_sp_builder, :monk_registry_root`
-      puis `Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")`).
+    * `:monk_registry_root` — root resolving the registry's relative path
+      (test-seam; defaults to config `:fleet_sp_builder, :monk_registry_root`
+      then `Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles/monks")`).
 
-  Le champ `monk_registry` dans le cap-profile = basename (ex `alpha.yaml`)
-  — le code le résout via `:monk_registry_root`. Ce n'est PAS un path absolu :
-  le registry vit in-repo sous la racine, jamais un chemin doctrine externe.
+  The `monk_registry` field in the cap-profile = basename (e.g. `alpha.yaml`)
+  — the code resolves it via `:monk_registry_root`. It is NOT an absolute path:
+  the registry lives in-repo under the root, never an external doctrine path.
   """
   @spec resolve(Fleet.CapProfile.t(), keyword()) ::
           {:ok, injection()} | :not_a_monk | {:error, term()}
@@ -65,9 +65,9 @@ defmodule Fleet.SPBuilder.Monk do
   end
 
   @doc """
-  Variante pour le flux `compose/3` : `:not_a_monk` → injection VIDE
-  (`persona_hint: ""`, `corpus_paths: []`) pour que le flux reste byte-identique
-  pour un non-monk ; `{:error, _}` → propagé (fail-loud).
+  Variant for the `compose/3` flow: `:not_a_monk` → EMPTY injection
+  (`persona_hint: ""`, `corpus_paths: []`) so the flow stays byte-identical
+  for a non-monk; `{:error, _}` → propagated (fail-loud).
   """
   @spec resolve_or_empty(Fleet.CapProfile.t(), keyword()) ::
           {:ok, injection()} | {:error, term()}
@@ -80,8 +80,8 @@ defmodule Fleet.SPBuilder.Monk do
   end
 
   @doc """
-  Section markdown « Monk persona » à concaténer aux fragments modop du SP :
-  vide si `persona_hint` est vide (non-monk → aucun octet ajouté au SP).
+  Markdown "Monk persona" section to concatenate to the SP's modop fragments:
+  empty if `persona_hint` is empty (non-monk → no byte added to the SP).
   """
   @spec persona_section(injection()) :: String.t()
   def persona_section(%{persona_hint: ""}), do: ""
@@ -90,9 +90,9 @@ defmodule Fleet.SPBuilder.Monk do
     do: "\n\n## Monk persona\n\n" <> ph
 
   defp read_registry(path) do
-    # Pas d'attribut `kind` (un seul kind par dossier `monks/*.yaml`, le path
-    # déclare le rôle). Validation = présence de `spec.monks` au shape attendu
-    # (liste), pas un `kind` embarqué dans le YAML.
+    # No `kind` attribute (a single kind per `monks/*.yaml` folder, the path
+    # declares the role). Validation = presence of `spec.monks` in the expected
+    # shape (list), not a `kind` embedded in the YAML.
     case YamlElixir.read_from_file(path) do
       {:ok, %{"spec" => %{"monks" => monks}} = reg} when is_list(monks) ->
         {:ok, reg}
