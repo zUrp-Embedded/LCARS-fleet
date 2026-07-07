@@ -75,14 +75,19 @@ defmodule Fleet.CapProfile do
   # ============================================================
 
   @doc """
-  Loads the cap-profile for the given role and validates it against
+  Loads the cap-profile for the given role and validates its STRUCTURE against
   `priv/schema/cap-profile-v2.5.json`.
+
+  Two-stage validation (deliberate): `load`/`compose` check only the STRUCTURAL schema here. The G24
+  SEMANTIC invariants (`validate/1`) are enforced at the SPAWN boundary (`Fleet.Spawner.Pod` do_allocate,
+  asserted by `mix lcars.contracts.check`) — the "validated world" is established at use, not at read: a
+  profile can be loaded for listing/inspection without being spawn-ready.
 
   Resolution is by `metadata.name` (the profile's internal property), NOT by
   filename — see `Fleet.CapProfile.Catalog`; the filename is cosmetic.
 
   ## Exit codes
-    * `{:ok, %Fleet.CapProfile{}}` — load and validation OK
+    * `{:ok, %Fleet.CapProfile{}}` — load + STRUCTURAL validation OK (G24 invariants checked at spawn)
     * `{:error, :not_found}` — no profile carries this name
     * `{:error, :invalid_schema}` — malformed YAML OR schema-nonconformant
     * `{:error, :schema_unavailable}` — the priv schema file is absent or corrupt
@@ -193,7 +198,10 @@ defmodule Fleet.CapProfile do
   """
   @spec with_project(t(), map()) :: t()
   def with_project(%__MODULE__{spec: spec} = cap, project) when is_map(project),
-    do: %{cap | spec: Map.put(spec, "project", project)}
+    # `stringify_keys` (deeply): the injected `project` may arrive with ATOM keys (from a brief/dispatch),
+    # but readers (`Phase.Clone` → `project["repo_path"]`) use STRING keys — preserve the deep-string-keys
+    # invariant that `to_struct/1` establishes, so this substitution can't silently null out a reader.
+    do: %{cap | spec: Map.put(spec, "project", stringify_keys(project))}
 
   @doc """
   The profile's containment mode (`metadata.containment`). `"bwrap"` = sandboxed pod (RO mounts +
@@ -251,10 +259,18 @@ defmodule Fleet.CapProfile do
   raise, first test presence with `catalogued?/1`.
   """
   @spec role_index(t()) :: 0..15
-  def role_index(%__MODULE__{metadata: %{"role_index" => r}}) when is_integer(r), do: r
+  def role_index(%__MODULE__{metadata: %{"role_index" => r}}) when is_integer(r) and r in 0..15,
+    do: r
 
+  # An out-of-range integer (or a missing/non-integer) role_index is NOT a valid nibble (the `R` of the
+  # hexspeak session_id is 4 bits, 0..15): fail-loud rather than encode a corrupt identity. The `@spec`
+  # `0..15` is now ENFORCED, not merely declared.
   def role_index(%__MODULE__{}),
-    do: raise(ArgumentError, "CapProfile without an integer role_index — not a catalogued role")
+    do:
+      raise(
+        ArgumentError,
+        "CapProfile without a valid role_index (integer 0..15) — not a catalogued role"
+      )
 
   @doc """
   Is the role a PROTECTED TIER (`metadata.protected`)? `true` = spared by the worker kill
@@ -309,8 +325,13 @@ defmodule Fleet.CapProfile do
   session_id is legitimate for it, not an error.
   """
   @spec catalogued?(t()) :: boolean()
-  def catalogued?(%__MODULE__{metadata: meta}) when is_map(meta),
-    do: is_integer(Map.get(meta, "role_index"))
+  def catalogued?(%__MODULE__{metadata: meta}) when is_map(meta) do
+    # SAME 0..15 predicate as `role_index/1`: `catalogued?` true ⟺ `role_index/1` returns without raising
+    # (the doc's promise — branch on `catalogued?` to avoid the raise). An out-of-range integer is NOT a
+    # catalogued nibble.
+    r = Map.get(meta, "role_index")
+    is_integer(r) and r in 0..15
+  end
 
   def catalogued?(%__MODULE__{}), do: false
 

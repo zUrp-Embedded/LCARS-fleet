@@ -693,16 +693,29 @@ defmodule Fleet.CapProfileTest do
     defp role_struct(metadata),
       do: %Fleet.CapProfile{kind: "CapabilityProfile", metadata: metadata, spec: %{}}
 
-    test "role_index/1 lit metadata.role_index entier, raise si absent ou non-entier" do
+    test "role_index/1 lit metadata.role_index entier 0..15, raise si absent/non-entier/HORS-BORNES (R0-CAP-006)" do
       assert Fleet.CapProfile.role_index(role_struct(%{"role_index" => 3})) == 3
+      assert Fleet.CapProfile.role_index(role_struct(%{"role_index" => 0})) == 0
+      assert Fleet.CapProfile.role_index(role_struct(%{"role_index" => 15})) == 15
 
-      assert_raise ArgumentError, fn ->
-        Fleet.CapProfile.role_index(role_struct(%{"name" => "ad-hoc"}))
+      # absent, non-entier, ET hors des 4 bits du nibble (16, -1) → raise (nibble invalide)
+      for bad <- [
+            %{"name" => "ad-hoc"},
+            %{"role_index" => "3"},
+            %{"role_index" => 16},
+            %{"role_index" => -1}
+          ] do
+        assert_raise ArgumentError, fn -> Fleet.CapProfile.role_index(role_struct(bad)) end
       end
+    end
 
-      assert_raise ArgumentError, fn ->
-        Fleet.CapProfile.role_index(role_struct(%{"role_index" => "3"}))
-      end
+    test "R0-CAP-005 : with_project stringifie les clés (préserve l'invariant deep-string-keys)" do
+      cap = valid_struct()
+
+      # projet à clés ATOM (ce qu'un brief/dispatch peut passer) → doit ressortir en clés STRING
+      eff = Fleet.CapProfile.with_project(cap, %{repo_path: "/r", nested: %{a: 1}})
+
+      assert eff.spec["project"] == %{"repo_path" => "/r", "nested" => %{"a" => 1}}
     end
 
     test "protected?/1 + fleet_level?/1 lisent le bool, défaut false (conservateur) si absent" do
@@ -719,6 +732,10 @@ defmodule Fleet.CapProfileTest do
       assert Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => 0}))
       refute Fleet.CapProfile.catalogued?(role_struct(%{"name" => "ad-hoc"}))
       refute Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => "0"}))
+
+      # cohérence avec role_index/1 : un index HORS 0..15 n'est pas catalogué (sinon catalogued?=true
+      # mais role_index/1 raise → contrat cassé).
+      refute Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => 16}))
     end
 
     test "slot_scope/1 lit metadata.slot_scope ∈ {project, instance}, raise si absent ou invalide" do
