@@ -682,6 +682,14 @@ defmodule Fleet.CapProfileTest do
     test "differs when content differs" do
       assert Fleet.CapProfile.sha256(%{"a" => 1}) != Fleet.CapProfile.sha256(%{"a" => 2})
     end
+
+    test "R0-CAP-014 : collision de clés après stringification → raise (hash non ambigu)" do
+      # `:k` et `"k"` stringifient tous deux en "k" → forme canonique ambiguë → refus fail-loud plutôt
+      # qu'un hash instable dépendant de l'ordre d'itération Map.
+      assert_raise ArgumentError, ~r/key collision/, fn ->
+        Fleet.CapProfile.CanonicalJson.encode(%{:k => 1, "k" => 2})
+      end
+    end
   end
 
   # ============================================================

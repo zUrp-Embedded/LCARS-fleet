@@ -40,10 +40,25 @@ defmodule Fleet.CapProfile.CanonicalJson do
       |> Map.to_list()
       |> Enum.map(fn {k, v} -> {to_string(k), encode(v)} end)
       |> Enum.sort_by(&elem(&1, 0))
+
+    # A stringified-key COLLISION (`:k` and `"k"` both → `"k"`) would emit `{"k":v1,"k":v2}` — duplicate
+    # JSON keys whose order is UNDEFINED (Map iteration order) → the hash would stop being a function of
+    # the content, breaking "same content ⇒ same hash". Refuse to mint an ambiguous identity (fail-loud)
+    # rather than a silently-unstable one.
+    keys = Enum.map(pairs, &elem(&1, 0))
+
+    unless keys == Enum.uniq(keys) do
+      raise ArgumentError,
+            "CanonicalJson: key collision after stringification " <>
+              "(#{inspect(keys -- Enum.uniq(keys))}) — ambiguous canonical form, cannot hash deterministically"
+    end
+
+    body =
+      pairs
       |> Enum.map(fn {k, v} -> Jason.encode!(k) <> ":" <> v end)
       |> Enum.join(",")
 
-    "{" <> pairs <> "}"
+    "{" <> body <> "}"
   end
 
   def encode(list) when is_list(list) do
