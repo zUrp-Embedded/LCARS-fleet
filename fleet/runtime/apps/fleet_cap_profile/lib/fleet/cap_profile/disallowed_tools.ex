@@ -1,39 +1,39 @@
 defmodule Fleet.CapProfile.DisallowedTools do
   @moduledoc """
-  Résolution write-time de la liste effective `disallowedTools` d'un pod :
-  baseline git-denied universel ∪ patterns du cap-profile worker.
+  Write-time resolution of a pod's effective `disallowedTools` list:
+  the universal git-denied baseline ∪ the worker cap-profile's patterns.
 
-  Cluster extrait de `Fleet.CapProfile`. Concern UNIQUE : `spec.scope.disallowedTools`
-  (écrit) + `spec.scope.git_ops_denied` (lu en entrée). Ne lit/écrit AUCUNE autre
-  face du profil.
+  Cluster extracted from `Fleet.CapProfile`. SINGLE concern: `spec.scope.disallowedTools`
+  (written) + `spec.scope.git_ops_denied` (read as input). Reads/writes NO other
+  face of the profile.
 
-  Sens de dépendance UNIQUE (pas de cycle) : ce module dépend du struct
-  `%Fleet.CapProfile{}` (compile-dep) ; `Fleet.CapProfile` appelle ce module via
-  trois délégateurs — `with_resolved_disallowed_tools/1` (consommé par
+  Single dependency direction (no cycle): this module depends on the
+  `%Fleet.CapProfile{}` struct (compile-dep); `Fleet.CapProfile` calls this module via
+  three delegators — `with_resolved_disallowed_tools/1` (consumed by
   `Fleet.Spawner.Pod.do_allocate/1`), `git_ops_denied_patterns/1`,
-  `baseline_git_ops_denied_patterns/0` (runtime-dep). L'API publique
-  `Fleet.CapProfile.*` ne bouge pas. N'appelle NI `Schema` NI `Invariants` NI le
-  cœur `load`/`compose`.
+  `baseline_git_ops_denied_patterns/0` (runtime-dep). The public API
+  `Fleet.CapProfile.*` does not move. Calls NEITHER `Schema` NOR `Invariants` NOR the
+  `load`/`compose` core.
 
-  I/O : lit le baseline priv IMMUABLE `priv/canon/cap-profiles/_baseline-git-denied.yaml`
-  (résolu via `:code.priv_dir(:fleet_cap_profile)` — même fichier qu'avant
-  l'extraction), read+parse caché une fois en `:persistent_term` (lazy-init ;
-  erreurs non-cachées — le bang re-raise au prochain appel).
+  I/O: reads the IMMUTABLE priv baseline `priv/canon/cap-profiles/_baseline-git-denied.yaml`
+  (resolved via `:code.priv_dir(:fleet_cap_profile)` — the same file as before the
+  extraction), read+parse cached once in `:persistent_term` (lazy-init; errors not
+  cached — the bang re-raises on the next call).
   """
 
-  # Struct source (compile-dep) : les fns pattern-matchent `%CapProfile{}` et le
-  # `@spec` référence `CapProfile.t()`. Pas de cycle (cf. moduledoc).
+  # Source struct (compile-dep): the fns pattern-match `%CapProfile{}` and the
+  # `@spec` references `CapProfile.t()`. No cycle (see moduledoc).
   alias Fleet.CapProfile
 
   @doc """
-  Traduit les entrées sémantiques `spec.scope.git_ops_denied` (ex. `"push --force"`,
-  `"reset --hard"`) en patterns `disallowedTools` claude CLI de la forme
-  `Bash(git <entrée>:*)`. Les entrées vides/non-binaires sont ignorées. Ordre d'entrée
-  préservé. Pure.
+  Translates the semantic entries `spec.scope.git_ops_denied` (e.g. `"push --force"`,
+  `"reset --hard"`) into claude CLI `disallowedTools` patterns of the form
+  `Bash(git <entry>:*)`. Empty/non-binary entries are ignored. Input order
+  preserved. Pure.
 
-  Mécanisme générique catalogue → claude CLI : ce qui était une ligne déclarative
-  validée G24 isolément devient une contrainte effectivement enforced par claude
-  CLI au lancement du pod (disallow l'emporte sur allow sur le même pattern).
+  Generic catalogue → claude CLI mechanism: what was a declarative line validated
+  by G24 in isolation becomes a constraint effectively enforced by claude CLI at
+  pod launch (disallow wins over allow on the same pattern).
   """
   @spec git_ops_denied_patterns(CapProfile.t()) :: [String.t()]
   def git_ops_denied_patterns(%CapProfile{spec: spec}) do
@@ -45,18 +45,17 @@ defmodule Fleet.CapProfile.DisallowedTools do
   end
 
   @doc """
-  Retourne un `%CapProfile{}` dont `spec.scope.disallowedTools` est augmenté :
-  - des patterns du **baseline universel** (`_baseline-git-denied.yaml`,
-    intangibles selon principe directeur)
-  - PUIS des patterns issus de `git_ops_denied_patterns/1` (cap-profile worker
-    spécifique).
-  Union dédupliquée, ordre préservé : existants, baseline, profile.
+  Returns a `%CapProfile{}` whose `spec.scope.disallowedTools` is augmented with:
+  - the patterns of the **universal baseline** (`_baseline-git-denied.yaml`,
+    intangible by guiding principle)
+  - THEN the patterns from `git_ops_denied_patterns/1` (worker-specific cap-profile).
+  Deduplicated union, order preserved: existing, baseline, profile.
   Idempotent.
 
-  Point d'application : `Fleet.Spawner.Pod.do_allocate/1` au moment d'écrire
-  `.cap-profile.json` dans le pod, pour que `claude_launch.sh` reçoive la
-  liste déjà résolue. Exposé sous `Fleet.CapProfile.with_resolved_disallowed_tools/1`
-  (délégateur — c'est ce nom-là que consomme le spawner).
+  Application point: `Fleet.Spawner.Pod.do_allocate/1` when writing
+  `.cap-profile.json` into the pod, so that `claude_launch.sh` receives the
+  already-resolved list. Exposed as `Fleet.CapProfile.with_resolved_disallowed_tools/1`
+  (delegator — that is the name the spawner consumes).
   """
   @spec with_resolved(CapProfile.t()) :: CapProfile.t()
   def with_resolved(%CapProfile{spec: spec} = profile) do
@@ -74,20 +73,19 @@ defmodule Fleet.CapProfile.DisallowedTools do
   end
 
   @doc """
-  Patterns `disallowedTools` issus du baseline universel
-  (`priv/canon/cap-profiles/_baseline-git-denied.yaml`). Patterns
-  intangibles refusés à TOUS les workers indépendamment du cap-profile —
-  retirer un pattern = décision archi explicite (édit du fichier baseline,
-  pas option de cap-profile).
+  The `disallowedTools` patterns from the universal baseline
+  (`priv/canon/cap-profiles/_baseline-git-denied.yaml`). Intangible patterns
+  denied to ALL workers regardless of the cap-profile — removing a pattern is an
+  explicit architectural decision (edit the baseline file, not a cap-profile
+  option).
 
-  **Raise** si le fichier baseline est absent, illisible, ou de format
-  invalide. La baseline est doctrinalement "intangible" : un fail-open
-  silencieux (retour `[]`) désactiverait la denylist universelle sans
-  alerter, contradictoire avec l'intention → fail-closed. Le caller
-  (`pod.ex do_allocate`) catch via `rescue` et transitionne `:failed`
-  proprement.
+  **Raises** if the baseline file is absent, unreadable, or of an invalid
+  format. The baseline is doctrinally "intangible": a silent fail-open
+  (returning `[]`) would disable the universal denylist without alerting,
+  contradicting the intent → fail-closed. The caller (`pod.ex do_allocate`)
+  catches via `rescue` and transitions to `:failed` cleanly.
 
-  Pure modulo I/O fichier ; read+parse caché en `:persistent_term`.
+  Pure modulo file I/O; read+parse cached in `:persistent_term`.
   """
   @spec baseline_patterns() :: [String.t()]
   def baseline_patterns do
@@ -96,13 +94,12 @@ defmodule Fleet.CapProfile.DisallowedTools do
     |> Enum.map(&"Bash(git #{&1}:*)")
   end
 
-  # Baseline priv IMMUABLE : read+parse une fois, caché en `:persistent_term`
-  # (lazy-init ; une erreur n'est pas cachée — le bang re-raise au prochain appel).
-  # Copie locale ASSUMÉE du squelette `Fleet.SchemaCache.cached/2` (fleet_event_router —
-  # l'autorité Ring 0 du chargé-caché, dédup B-R2) : fleet_cap_profile est Ring 0 SANS dep
-  # vers fleet_event_router, on n'ajoute pas une arête intra-R0 (allowed_graph.yaml) pour
-  # dix lignes. Si l'arête apparaît un jour pour une autre raison, migrer ce site
-  # (et `CapProfile.Schema`).
+  # IMMUTABLE priv baseline: read+parse once, cached in `:persistent_term`
+  # (lazy-init; an error is not cached — the bang re-raises on the next call).
+  # DELIBERATE local copy of the `Fleet.SchemaCache.cached/2` skeleton (fleet_event_router —
+  # the Ring 0 authority for load-once-cache): fleet_cap_profile is Ring 0 WITHOUT a dep onto
+  # fleet_event_router, and we do not add an intra-R0 edge (allowed_graph.yaml) for ten lines.
+  # If the edge appears one day for another reason, migrate this site (and `CapProfile.Schema`).
   defp load_baseline_git_ops_denied! do
     key = {__MODULE__, :baseline_git_ops_denied}
 
@@ -129,10 +126,10 @@ defmodule Fleet.CapProfile.DisallowedTools do
         entries
 
       {:ok, _other} ->
-        raise "fleet_cap_profile baseline #{path} : clé `git_ops_denied` absente ou format invalide (baseline intangible — fail-closed)"
+        raise "fleet_cap_profile baseline #{path}: key `git_ops_denied` absent or invalid format (intangible baseline — fail-closed)"
 
       {:error, reason} ->
-        raise "fleet_cap_profile baseline #{path} absent ou corrompu (#{inspect(reason)}) (baseline intangible — fail-closed)"
+        raise "fleet_cap_profile baseline #{path} absent or corrupt (#{inspect(reason)}) (intangible baseline — fail-closed)"
     end
   end
 end

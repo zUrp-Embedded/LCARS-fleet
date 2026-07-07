@@ -1,37 +1,37 @@
 defmodule Fleet.CapProfile.CanonicalJson do
   @moduledoc """
-  Encodage JSON CANONIQUE (déterministe) + hash sha256 — le concern
-  « déterminisme de composition » du cap-profile, ORTHOGONAL au reste de
-  l'app : il ne touche ni le loader (`load`/`compose`/`validate`), ni les
-  accesseurs du struct, ni le catalogue FS. Extrait de `Fleet.CapProfile`
-  pour cette raison (éclatement C4 2026-07-05).
+  CANONICAL (deterministic) JSON encoding + sha256 hash — the cap-profile's
+  "composition determinism" concern, ORTHOGONAL to the rest of the app: it
+  touches neither the loader (`load`/`compose`/`validate`), nor the struct
+  accessors, nor the FS catalogue. Extracted from `Fleet.CapProfile` for that
+  reason.
 
-  ## Pourquoi un encodeur canon (et pas `Jason.encode!` direct)
+  ## Why a canonical encoder (and not `Jason.encode!` directly)
 
-  Deux maps ÉGALES (mêmes paires clé/valeur) peuvent s'itérer dans des ordres
-  différents selon leur historique de construction — `Jason.encode!` produirait
-  alors deux strings différentes, donc deux sha256 différents pour LA MÊME
-  composition. L'encodeur canon rend le hash indépendant de l'ordre d'itération :
-  clés converties en string puis triées RÉCURSIVEMENT avant encodage. C'est ce
-  qui porte l'assertion « même composition ⇒ même hash » que les appelants de
-  `Fleet.CapProfile.sha256/1` vérifient.
+  Two EQUAL maps (same key/value pairs) may iterate in different orders
+  depending on their construction history — `Jason.encode!` would then produce
+  two different strings, hence two different sha256 for THE SAME composition.
+  The canonical encoder makes the hash independent of iteration order: keys
+  converted to strings then sorted RECURSIVELY before encoding. That is what
+  carries the "same composition ⇒ same hash" assertion that callers of
+  `Fleet.CapProfile.sha256/1` verify.
 
-  ## Format FIGÉ (le hash en dépend)
+  ## FROZEN format (the hash depends on it)
 
-  L'encodage est un format de HACHAGE stable : `{"k":v,...}` trié, listes dans
-  l'ordre, scalaires via `Jason.encode!`. Le changer invalide tous les sha256
-  déjà constatés (assertions de déterminisme, comparaisons de composition).
-  Volontairement PAS un protocole `Jason.Encoder` custom : hors du chemin Jason
-  standard, aucune option d'encodage globale ne peut faire dériver les hashes.
+  The encoding is a stable HASHING format: `{"k":v,...}` sorted, lists in
+  order, scalars via `Jason.encode!`. Changing it invalidates every sha256
+  already observed (determinism assertions, composition comparisons).
+  Deliberately NOT a custom `Jason.Encoder` protocol: off the standard Jason
+  path, no global encoding option can make the hashes drift.
   """
 
   @doc """
-  Encode `value` en JSON canonique : clés de map stringifiées puis triées
-  récursivement, listes encodées dans l'ordre, scalaires via l'encodeur JSON
-  standard. Les structs ne sont PAS acceptées en position map (pas de clause :
-  l'appelant les aplatit d'abord en map plate — cf. `Fleet.CapProfile.sha256/1`) —
-  encoder une struct par ses champs internes silencieusement produirait un hash
-  dépendant de la forme du struct, pas de la donnée.
+  Encodes `value` into canonical JSON: map keys stringified then sorted
+  recursively, lists encoded in order, scalars via the standard JSON encoder.
+  Structs are NOT accepted in map position (no clause: the caller flattens them
+  into a plain map first — see `Fleet.CapProfile.sha256/1`) — encoding a struct
+  by its internal fields would silently produce a hash that depends on the
+  struct shape, not on the data.
   """
   @spec encode(term()) :: String.t()
   def encode(map) when is_map(map) and not is_struct(map) do
@@ -54,8 +54,8 @@ defmodule Fleet.CapProfile.CanonicalJson do
   def encode(other), do: Jason.encode!(other)
 
   @doc """
-  sha256 (hex minuscules) de l'encodage canonique de `map`. L'ordre d'itération
-  interne de la map est sans effet — même contenu ⇒ même hash.
+  sha256 (lowercase hex) of the canonical encoding of `map`. The map's internal
+  iteration order has no effect — same content ⇒ same hash.
   """
   @spec sha256(map()) :: String.t()
   def sha256(map) when is_map(map) and not is_struct(map) do
