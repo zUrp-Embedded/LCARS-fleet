@@ -107,10 +107,16 @@ defmodule Fleet.Starfleet.MCPWatcher do
   end
 
   defp current_version(package) when is_binary(package) do
-    case Application.spec(String.to_atom(package), :vsn) do
+    # `to_existing_atom` (not `to_atom`): a package name that has never been an atom is by construction
+    # NOT a loaded app → no local version (nil), same result as `Application.spec` on an unknown app —
+    # but WITHOUT minting a junk atom for a mistyped/upstream-only package (atom-leak hygiene, R2-13).
+    # `ArgumentError` = "no such atom" → nil (behavior-preserving vs the old `to_atom`).
+    case Application.spec(String.to_existing_atom(package), :vsn) do
       nil -> nil
       vsn -> List.to_string(vsn)
     end
+  rescue
+    ArgumentError -> nil
   end
 
   defp fetch_upstream_version(%{fetcher: fetcher} = state) when is_function(fetcher, 1) do
