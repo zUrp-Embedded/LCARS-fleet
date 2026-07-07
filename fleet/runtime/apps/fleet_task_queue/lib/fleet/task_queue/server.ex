@@ -159,46 +159,42 @@ defmodule Fleet.TaskQueue.Server do
 
   @impl GenServer
   def handle_call({:enqueue, pod_id, attrs}, _from, state) do
-    work_item = %WorkItem{
-      id: UUID.uuid4(),
-      pod_id: pod_id,
-      issue_id: attrs[:issue_id] || attrs["issue_id"],
-      role: attrs[:role] || attrs["role"],
-      brief: attrs[:brief] || attrs["brief"],
-      deadline: attrs[:deadline] || attrs["deadline"],
-      enqueued_at: now(),
-      state: :pending,
-      metadata: attrs[:metadata] || attrs["metadata"] || %{}
-    }
+    # Smart constructor: casts the attrs (deadline ISO→DateTime, metadata=map, …) — a malformed attr
+    # is refused with `{:error, {:bad_attr, _}}` instead of storing a semi-typed work item.
+    case WorkItem.new(pod_id, attrs) do
+      {:error, _} = err ->
+        {:reply, err, state}
 
-    # AXIOM "1 ACTIVE work item/pod" held AT WRITE. A FRESH work item SUPERSEDES EVERY active one of the pod:
-    # the `:pending` never pulled (drop) AND the in-flight `:assigned`/`:in_progress` (→ `:cleared`). A re-brief
-    # replaces the old one: the pod will take the new one (the only active left) at the next `get_for_pod`. Uniqueness
-    # MUST be held here, not only at read: keeping a stale `:assigned` alongside the new pending
-    # would leave it ACTIVE and invisible to the guards (`find_active` = `max_by(enqueued_at)` serves the most recent but
-    # MASKS the leak → unbounded "2 actives/pod" state, invariant violated). Uniqueness held AT WRITE →
-    # `find_active`/`max_by` becomes moot (at most 1 active/pod by construction).
-    {state, superseded} = supersede_active(state, pod_id)
+      {:ok, work_item} ->
+        # AXIOM "1 ACTIVE work item/pod" held AT WRITE. A FRESH work item SUPERSEDES EVERY active one of the pod:
+        # the `:pending` never pulled (drop) AND the in-flight `:assigned`/`:in_progress` (→ `:cleared`). A re-brief
+        # replaces the old one: the pod will take the new one (the only active left) at the next `get_for_pod`. Uniqueness
+        # MUST be held here, not only at read: keeping a stale `:assigned` alongside the new pending
+        # would leave it ACTIVE and invisible to the guards (`find_active` = `max_by(enqueued_at)` serves the most recent but
+        # MASKS the leak → unbounded "2 actives/pod" state, invariant violated). Uniqueness held AT WRITE →
+        # `find_active`/`max_by` becomes moot (at most 1 active/pod by construction).
+        {state, superseded} = supersede_active(state, pod_id)
 
-    if superseded > 0,
-      do:
-        Logger.debug(
-          "Server: enqueue pod=#{pod_id} supersedes #{superseded} stale active item(s)"
+        if superseded > 0,
+          do:
+            Logger.debug(
+              "Server: enqueue pod=#{pod_id} supersedes #{superseded} stale active item(s)"
+            )
+
+        new_state = state |> put_work_item(work_item) |> persist()
+
+        # payload = `%{work_item_id}` (consistent with every other work_item.* event), NOT the raw `%WorkItem{}` —
+        # WorkItem has no @derive Jason.Encoder, so a `%{work_item: work_item}` would crash `Jason.encode!`
+        # in any JSON-event consumer (Fleet.API.WS on every enqueue). No consumer
+        # needs the struct (deck = count, audit = pod_id/correlation_id).
+        best_effort_broadcast(
+          new_state,
+          event(:"work_item.enqueued", work_item, %{work_item_id: work_item.id})
         )
 
-    new_state = state |> put_work_item(work_item) |> persist()
-
-    # payload = `%{work_item_id}` (consistent with every other work_item.* event), NOT the raw `%WorkItem{}` —
-    # WorkItem has no @derive Jason.Encoder, so a `%{work_item: work_item}` would crash `Jason.encode!`
-    # in any JSON-event consumer (Fleet.API.WS on every enqueue). No consumer
-    # needs the struct (deck = count, audit = pod_id/correlation_id).
-    best_effort_broadcast(
-      new_state,
-      event(:"work_item.enqueued", work_item, %{work_item_id: work_item.id})
-    )
-
-    maybe_schedule_deadline(work_item)
-    {:reply, {:ok, work_item}, new_state}
+        maybe_schedule_deadline(work_item)
+        {:reply, {:ok, work_item}, new_state}
+    end
   end
 
   def handle_call({:get_for_pod, pod_id}, _from, state) do

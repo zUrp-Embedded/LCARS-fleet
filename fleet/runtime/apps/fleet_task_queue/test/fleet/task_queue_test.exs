@@ -288,6 +288,56 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad)
   end
 
+  test "6e. from_map REFUSE un optionnel malformé (metadata/result non-map, retry_count non-int≥0, id non-binaire) → :invalid" do
+    base = %{
+      "id" => "t1",
+      "pod_id" => "p1",
+      "enqueued_at" => "2026-06-02T00:00:00Z",
+      "state" => "pending"
+    }
+
+    for bad <- [
+          Map.put(base, "metadata", "not-a-map"),
+          Map.put(base, "result", ["not", "a", "map"]),
+          Map.put(base, "retry_count", -1),
+          Map.put(base, "retry_count", "3"),
+          Map.put(base, "issue_id", 42)
+        ] do
+      assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad),
+             "map #{inspect(bad)} devrait être :invalid"
+    end
+  end
+
+  test "6f. WorkItem.new/2 = smart-constructor : caste (deadline ISO→DateTime), refuse un attr malformé" do
+    alias Fleet.TaskQueue.WorkItem
+
+    assert {:ok,
+            %WorkItem{
+              deadline: %DateTime{},
+              metadata: %{"k" => "v"},
+              state: :pending,
+              retry_count: 0
+            }} =
+             WorkItem.new("p1", %{deadline: "2026-06-02T00:00:00Z", metadata: %{"k" => "v"}})
+
+    assert {:ok, %WorkItem{deadline: nil}} = WorkItem.new("p1", %{})
+    assert {:error, {:bad_attr, {:metadata, _}}} = WorkItem.new("p1", %{metadata: "nope"})
+    assert {:error, {:bad_attr, {:deadline, _}}} = WorkItem.new("p1", %{deadline: 12_345})
+    assert {:error, {:bad_attr, {:issue_id, _}}} = WorkItem.new("p1", %{issue_id: 7})
+  end
+
+  test "6g. enqueue propage l'erreur du smart-constructor + caste le deadline ISO", %{
+    topic: topic
+  } do
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qenq)
+
+    assert {:error, {:bad_attr, {:deadline, 42}}} = TaskQueue.enqueue(q, "p1", %{deadline: 42})
+    assert [] = TaskQueue.list_pending(q)
+
+    assert {:ok, %{deadline: %DateTime{}}} =
+             TaskQueue.enqueue(q, "p2", %{deadline: "2030-01-01T00:00:00Z"})
+  end
+
   test "6e. recovery ré-arme les deadlines actives — expirée pendant le downtime → fail (fix deep-02 P1)",
        %{topic: topic, tmp_dir: tmp_dir} do
     now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
