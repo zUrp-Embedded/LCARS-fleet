@@ -22,6 +22,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def remove_label(_r, _n, _l, _o), do: send(self(), :unlocked) && {:ok, :removed}
     def add_label(_r, _n, label, _o), do: send(self(), {:label, label}) && {:ok, :added}
     def close_issue(_r, _n, _o), do: send(self(), :closed) && {:ok, :closed}
+    def stop_stopwatch(_r, _n, _o), do: :ok
     def count_signed_step_runs(_r, _n, opts), do: {:ok, Keyword.get(opts, :_step_runs, 0)}
     def post_route(_r, _n, p, s, _o), do: send(self(), {:route, p, s}) && {:ok, :posted}
 
@@ -170,8 +171,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       deliverable_mode_fun: dmode(),
       task_queue: StubTaskQueue,
       spawner: StubSpawner,
-      gatekeeper_pod_id_fun:
-        Keyword.get(opts, :gatekeeper_pod_id_fun, fn -> "gatekeeper" end),
+      gatekeeper_pod_id_fun: Keyword.get(opts, :gatekeeper_pod_id_fun, fn -> "gatekeeper" end),
       # MA-17 — seam du recovery de wake (défaut = la vraie fn ; un test l'injecte pour simuler l'escalade).
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
       gate_evals: %{}
@@ -214,7 +214,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     # plus de set_assignee (PR-driven) : la position workflow_map est gravee (route), le trigger = la review
     refute_received {:assignee, _}
     assert_received {:route, "gated", "review"}
-    assert_received :unlocked
+
+    # QoL 2026-07-07 : le verrou ISSUE ne se lève PLUS à l'advance — persiste jusqu'au :promote final.
+    refute_received :unlocked
   end
 
   test "pas de gate sur le step -> avance (comportement inchange)" do
@@ -402,7 +404,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:route, "soft", "review"}
     assert_received {:publish, d}
     assert d.mode == :git_native
-    assert_received :unlocked
+
+    # QoL 2026-07-07 : le verrou ISSUE ne se lève PLUS à l'advance — persiste jusqu'au :promote final.
+    refute_received :unlocked
   end
 
   test "verdict continue ENVELOPPE %{status,result} -> deplie (gate_result), avance" do
@@ -695,6 +699,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     def remove_label(_r, _n, _l, o), do: relay(o, :unlocked) && {:ok, :removed}
     def add_label(_r, _n, label, o), do: relay(o, {:label, label}) && {:ok, :added}
     def close_issue(_r, _n, o), do: relay(o, :closed) && {:ok, :closed}
+    def stop_stopwatch(_r, _n, _o), do: :ok
     def count_signed_step_runs(_r, _n, _o), do: {:ok, 0}
     def post_route(_r, _n, p, s, o), do: relay(o, {:route, p, s}) && {:ok, :posted}
     def open_pr(_r, head, base, _t, o), do: relay(o, {:open_pr, head, base, o[:body]}) && {:ok, 7}
@@ -766,7 +771,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
     assert_received {:route, "soft", "review"}
-    assert_received :unlocked
+
+    # QoL 2026-07-07 : le verrou ISSUE ne se lève PLUS à l'advance — persiste jusqu'au :promote final.
+    refute_received :unlocked
   end
 
   test "MA-03 : restart + verdict abandon RECONSTRUIT -> close (terminal), pas de drop" do

@@ -256,6 +256,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
         "#{repo}##{number} (pod mort sans complétion) → réclamé (re-dispatch au prochain tick)"
     )
 
+    # Stopwatch : arrêté AUSSI ici (pod mort = jamais passé par `unlock`) — sinon il tournerait jusqu'au
+    # prochain unlock réel, comptant le temps mort comme du travail. Best-effort, symétrique du spawn.
+    _ = forge.stop_stopwatch(repo, number, forge_opts)
     forge.remove_label(repo, number, @in_flight, forge_opts)
   end
 end

@@ -741,6 +741,53 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  # Time-tracking natif Gitea (stopwatch) — mécanique globale câblée aux mêmes points que le verrou
+  # lcars-in-flight (spawn_step/unlock/reconciliation). 409 dans les deux sens (déjà actif / rien à
+  # arrêter) est idempotent — jamais une erreur bloquante (cf. ForgeClient moduledoc § Time-tracking).
+  describe "start_stopwatch/3 + stop_stopwatch/3" do
+    test "start : 201 -> :ok" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/stopwatch/start"} => {201, %{}}
+      }
+
+      assert :ok = ForgeClient.start_stopwatch("fleet/lcars", 42, opts(handlers))
+    end
+
+    test "start : 409 (déjà actif, rebrief sur pod vivant) -> :ok idempotent" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/stopwatch/start"} =>
+          {409, %{"message" => "cannot start a stopwatch again if it already exists"}}
+      }
+
+      assert :ok = ForgeClient.start_stopwatch("fleet/lcars", 42, opts(handlers))
+    end
+
+    test "stop : 201 -> :ok" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/stopwatch/stop"} => {201, %{}}
+      }
+
+      assert :ok = ForgeClient.stop_stopwatch("fleet/lcars", 42, opts(handlers))
+    end
+
+    test "stop : 409 (aucun stopwatch actif) -> :ok idempotent" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/stopwatch/stop"} =>
+          {409, %{"message" => "cannot stop a non-existent stopwatch"}}
+      }
+
+      assert :ok = ForgeClient.stop_stopwatch("fleet/lcars", 42, opts(handlers))
+    end
+
+    test "stop : erreur réelle (500) remonte, PAS avalée" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/stopwatch/stop"} => {500, %{}}
+      }
+
+      assert {:error, _} = ForgeClient.stop_stopwatch("fleet/lcars", 42, opts(handlers))
+    end
+  end
+
   describe "count_signed_step_runs/3 — round-trip avec ForgeProtocol.step_run_marker" do
     test "compte un marqueur produit par ForgeProtocol.step_run_marker (format reconnu de bout en bout)" do
       handlers = %{
@@ -1212,5 +1259,4 @@ defmodule Fleet.Pilot.ForgeClientTest do
       refute path =~ ~r{/\.\.(/|$)}
     end
   end
-
 end

@@ -8,25 +8,26 @@ defmodule Fleet.Pilot.StepRunCompleter.Texts do
   du système (« QUI a fait QUOI ») se lit directement sur la forge. Le completer garde la
   SÉQUENCE (ordre des écritures, idempotence) ; ici ne vit que la matière textuelle.
 
-  Invariant porté par `pr_body/2` : le corps de PR contient `Closes #N` → la forge
-  auto-close l'issue AU merge (jamais avant) — lien issue↔PR maintenu nativement.
+  PLUS de `Closes #N` (retiré 2026-07-07, QoL chronologie) : Gitea auto-close l'issue AU MOMENT DU
+  MERGE, avant que le système ait pu poster son commentaire de sceau ("✅ livrée et fusionnée" sur un
+  ticket déjà fermé — chronologie incohérente, comment posé après-coup sur un fermé). Le close est
+  désormais EXPLICITE, posé par `GatekeeperSeal.seal_and_merge` APRÈS le commentaire (dernier acte
+  visible sur l'issue) — voir sa doc pour la séquence complète.
   """
 
   @doc """
-  Corps de PR par défaut — descriptif (traça honnête : QUI a fait QUOI) + `Closes #N`
-  (auto-close natif au merge → close APRÈS merge, jamais avant). `has_note?` (défaut `false`) ajoute
-  le POINTEUR vers la note du producteur (posée séparément par `Emissions.post_eng_summary` sur l'ISSUE —
-  la note COMPLÈTE vit UNE seule fois, là-bas ; ce corps ne porte que le lien, pas le blob) : plié DANS
-  le corps d'ouverture plutôt qu'un 2e comment séparé posté juste après — un seul post « en tant
-  qu'engineer » au lieu de deux (QoL, débusqué en lisant le rendu forge réel d'une PR livrée).
+  Corps de PR par défaut — descriptif (traça honnête : QUI a fait QUOI). `has_note?` (défaut `false`)
+  ajoute le POINTEUR vers la note du producteur (posée séparément par `Emissions.post_eng_summary` sur
+  l'ISSUE — la note COMPLÈTE vit UNE seule fois, là-bas ; ce corps ne porte que le lien, pas le blob) :
+  plié DANS le corps d'ouverture plutôt qu'un 2e comment séparé posté juste après — un seul post « en
+  tant qu'engineer » au lieu de deux (QoL, débusqué en lisant le rendu forge réel d'une PR livrée).
   """
   @spec pr_body(integer(), String.t(), boolean()) :: String.t()
   def pr_body(n, role, has_note? \\ false) do
     base =
       "Livrable de la brique ##{n}, produit par **#{role}** (engineer). Le système a poussé le commit " <>
         "(l'eng code dans son workspace, le système publie — barrière forge-aveugle, le pod n'a pas de " <>
-        "token forge). Reviews demandées aux juges (qualifier + reviewer) ; merge à l'approbation.\n\n" <>
-        "Closes ##{n}"
+        "token forge). Reviews demandées aux juges (qualifier + reviewer) ; merge à l'approbation."
 
     if has_note?,
       do: base <> "\n\n🔧 Note de l'#{role} (livrable) → détail sur le ticket ##{n}.",

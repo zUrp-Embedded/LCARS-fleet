@@ -31,6 +31,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       send(self(), {:call, :route, workflow_map_name, step})
       {:ok, :posted}
     end
+
+    def stop_stopwatch(_repo, _n, _opts), do: :ok
   end
 
   defmodule StubDeliverable do
@@ -69,6 +71,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
+    def close_issue(_repo, _n, _opts), do: {:ok, :closed}
   end
 
   defmodule PrFailForge do
@@ -116,6 +119,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       {:ok, :removed}
     end
 
+    def stop_stopwatch(_repo, _n, _opts), do: :ok
+
     # Voix de l'eng (info sortante) : le summary du producteur posté en commentaire PR.
     def post_comment(_repo, pr, body, _opts) do
       send(self(), {:comment, pr, body})
@@ -123,6 +128,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
+    def close_issue(_repo, _n, _opts), do: {:ok, :closed}
   end
 
   # PR introuvable (le juge tombe avant tout review) ; merge FF impossible (open ok, merge 409).
@@ -265,7 +271,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   end
 
   describe "open_deliverable_pr/2 — engineer → PR (Corr.3 PR-natif)" do
-    test "push la feature-branch + ouvre la PR feature→base avec Closes #N" do
+    test "push la feature-branch + ouvre la PR feature→base — SANS Closes #N (close explicite au merge, QoL chronologie)" do
       opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: []]
 
       assert {:ok, %{commit_sha: "deadbeef", pr_number: 7}} =
@@ -273,7 +279,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:published, %{target_branch: "feature/issue-42"}}
       assert_received {:open_pr, "feature/issue-42", "main", body}
-      assert body =~ "Closes #42"
+      refute body =~ "Closes"
     end
 
     test "base_branch override" do
@@ -409,17 +415,20 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       )
     end
 
-    test "producteur :advance → ouvre la PR, request_review(next), unlock l'ISSUE (pas de set_assignee)" do
+    test "producteur :advance → ouvre la PR, request_review(next), PAS de set_assignee, PAS d'unlock (verrou ISSUE persiste jusqu'au promote)" do
       step_run = producer_step_run(:advance, %{next_assignee: "qualifier"})
 
       assert {:ok, :review_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
 
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
-      assert body =~ "Closes #42"
+      refute body =~ "Closes"
       assert_received {:request_review, 7, ["qualifier"]}
       # producteur : le verrou est sur l'ISSUE (dispatch_issue) ; plus de set_assignee (PR-driven)
       refute_received {:assignee, _, _}
-      assert_received {:unlock, 42, "lcars-in-flight"}
+
+      # QoL 2026-07-07 : le verrou ISSUE ne se lève PLUS à l'advance — il persiste jusqu'au :promote
+      # final (la brique reste in-flight pendant toute la review, pas juste le codage).
+      refute_received {:unlock, _, _}
     end
 
     test "producteur avec :eng_summary → note COMPLÈTE sur le TICKET, POINTEUR PLIÉ dans l'ouverture de la PR (QoL, un seul post PR)" do
@@ -491,7 +500,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:unlock, 7, "lcars-in-flight"}
     end
 
-    test "juge :promote (terminal) → review APPROVED puis merge FF, unlock la PR" do
+    test "juge :promote (terminal) → review APPROVED puis merge FF, unlock DES DEUX (PR + ISSUE)" do
       step_run = judge_step_run(:promote, %{role: "reviewer"})
 
       assert {:ok, :promoted} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
@@ -499,7 +508,11 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :approve, _}
       assert_received {:merge, 7}
+
+      # QoL 2026-07-07 : le verrou ISSUE (jamais levé depuis l':advance du producteur, persisté toute
+      # la review) se lève ICI, EN MÊME TEMPS que le verrou PR du juge — la brique entière est finie.
       assert_received {:unlock, 7, _}
+      assert_received {:unlock, 42, _}
     end
 
     test "juge :rework (gate fail) → review REQUEST_CHANGES, unlock la PR, PAS de merge" do
@@ -528,7 +541,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute_received {:merge, _}
     end
 
-    test "②.1d producteur :review (no-workflow_map) → ouvre PR, request_review(qualifier+reviewer), assigne l'humain, unlock issue+PR, PAS de merge" do
+    test "②.1d producteur :review (no-workflow_map) → ouvre PR, request_review(qualifier+reviewer), assigne l'humain, unlock PR SEUL (issue persiste), PAS de merge" do
       step_run = producer_step_run(:review)
 
       assert {:ok, :review_requested} =
@@ -538,15 +551,16 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
                )
 
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
-      assert body =~ "Closes #42"
+      refute body =~ "Closes"
       # DN §1.4 : qualifier + reviewer demandés d'un coup
       assert_received {:request_review, 7, ["qualifier", "reviewer"]}
       # ②.1e : l'humain commanditaire (id -un) est assigné à la PR (#7)
       assert_received {:assignee, 7, _human}
-      # unlock DES DEUX : issue (1re livraison, verrou dispatch_issue) ET PR (re-livraison rework,
-      # verrou dispatch_review) — idempotent, ne stuck ni l'un ni l'autre.
-      assert_received {:unlock, 42, "lcars-in-flight"}
+
+      # unlock PR seul (re-livraison rework, verrou dispatch_review) — l'ISSUE (1re livraison, verrou
+      # dispatch_issue) NE se lève PLUS ici (QoL 2026-07-07) : elle persiste jusqu'au :promote final.
       assert_received {:unlock, 7, "lcars-in-flight"}
+      refute_received {:unlock, 42, _}
       # pas de merge ici : le merge est piloté par l'état-PR (dispatch_review)
       refute_received {:merge, _}
     end

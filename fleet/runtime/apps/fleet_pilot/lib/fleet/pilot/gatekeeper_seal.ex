@@ -38,9 +38,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
   @doc """
   Scelle la PR : **merge D'ABORD** (token gatekeeper), PUIS poste le commentaire de fin
-  « ✅ livrée et fusionnée » — SEULEMENT si le merge a réussi (best-effort, le merge fait foi ; Gitea
-  accepte un commentaire sur l'issue auto-close). On ne prétend JAMAIS « fusionnée » avant de l'avoir
-  vérifié. Merge KO → aucun commentaire de réussite, l'erreur remonte.
+  « ✅ livrée et fusionnée », PUIS `stage/merged`, PUIS ferme l'issue EXPLICITEMENT (dernier acte —
+  chronologie cohérente, plus de `Closes #N`/auto-close Gitea qui fermait AVANT le commentaire). Le
+  commentaire est SEULEMENT posté si le merge a réussi (best-effort, le merge fait foi). On ne prétend
+  JAMAIS « fusionnée » avant de l'avoir vérifié. Merge KO → aucun commentaire de réussite, l'erreur remonte.
 
   `forge_opts` = opts forge BRUTS (base_url/token système…) : la signature gatekeeper est posée
   ICI (`as_gatekeeper/1`), plus par l'appelant — un merge ne peut pas partir non signé.
@@ -61,19 +62,25 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # MERGER D'ABORD, ne commenter « ✅ livrée et fusionnée » QUE si le merge a RÉELLEMENT réussi. L'ordre
     # inverse (comment → merge) posterait la réussite AVANT de la vérifier → sur un conflit, un commentaire
     # MENSONGER « fusionnée » resterait figé : fail silencieux sur LE point crucial du workflow (on
-    # contrôlerait l'INTENTION, pas la RÉALITÉ du merge). Le sceau est donc best-effort POST-merge (le merge
-    # fait foi ; Gitea accepte un commentaire sur l'issue auto-close par `Closes #N`). Merge KO → AUCUN
-    # « fusionnée », l'erreur remonte (la résolution du conflit entre PR parallèles est traitée ailleurs, par
-    # le re-dispatch).
+    # contrôlerait l'INTENTION, pas la RÉALITÉ du merge). Le sceau est donc best-effort POST-merge — comment,
+    # puis stage/merged, puis close EXPLICITE (l'issue est encore OUVERTE quand le comment se poste,
+    # plus d'auto-close-avant-comment). Merge KO → AUCUN « fusionnée », l'erreur remonte (la résolution du
+    # conflit entre PR parallèles est traitée ailleurs, par le re-dispatch).
     case do_merge(forge, repo, pr_number, gk_opts) do
       :ok ->
         _ = comment(forge, repo, issue_n, body, comment_opts)
 
-        # Étape terminale VISIBLE : la brique est mergée. L'issue est fermée par `Closes #N` — Gitea
-        # accepte le label sur issue fermée (mutex inclus, vérifié forge 1.26.1). Best-effort (affichage ;
-        # le merge fait foi). Système-side (`forge_opts`, pas la signature gatekeeper) : les stage/* sont
-        # gérés par lcars-system (WS1).
+        # Étape terminale VISIBLE : la brique est mergée. Système-side (`forge_opts`, pas la signature
+        # gatekeeper) : les stage/* sont gérés par lcars-system (WS1). Best-effort (affichage ; le merge
+        # fait foi).
         _ = forge.set_stage(repo, issue_n, Fleet.Pilot.Labels.stage_merged(), forge_opts)
+
+        # Close EXPLICITE, EN DERNIER acte visible sur l'issue (QoL chronologie, 2026-07-07) : plus de
+        # `Closes #N` dans le corps de PR (Gitea auto-closait AU MERGE, avant même ce commentaire — un
+        # « ✅ livrée et fusionnée » posté après-coup sur un ticket déjà fermé). On ferme nous-mêmes,
+        # APRÈS le commentaire ET le stage/merged, pour une chronologie cohérente : rien ne se poste plus
+        # sur l'issue une fois close. Best-effort (le merge fait foi, un close raté n'invalide rien).
+        _ = forge.close_issue(repo, issue_n, forge_opts)
 
         # Projette le livrable sur le clone local `/home/projects/<name>` (best-effort). La SÉRIALISATION
         # vit DANS le GenServer dédié (un `git` à la fois sur un worktree, contre la race entre les deux
@@ -118,7 +125,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
     - **Livrée par** : `#{producer}` (engineer) — PR ##{pr_number} (l'eng a codé, le système a poussé).
     - **Validée par** : les juges (qualifier + reviewer) ont **APPROUVÉ** la PR (reviews natives).
-    - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge fast-forward → auto-close via `Closes ##{issue_n}`.
+    - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge fast-forward — ce ticket sera fermé juste après ce commentaire.
 
     > ⚠ **Interim (dev)** : la branch-protection native est **OFF** pour ne pas bloquer le push pendant le dev — c'est **LCARS qui agrège les verdicts** des juges et scelle le merge (pas Gitea). Cible : branch-protection native (require qualifier+reviewer approuvés + CI vert). Traça honnête : rien n'est maquillé.
     """

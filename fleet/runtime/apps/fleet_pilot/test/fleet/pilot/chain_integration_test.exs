@@ -39,6 +39,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       {:ok, :removed}
     end
 
+    # Time-tracking (no-op sim, pas d'état à simuler ici) : requis par spawn_step/unlock.
+    def start_stopwatch(_pid, _r, _n, _o), do: :ok
+    def stop_stopwatch(_pid, _r, _n, _o), do: :ok
+
     defp add_lbl(m, l) do
       ls = m["labels"] || []
 
@@ -200,7 +204,10 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     # → dispatch_review n'est appelé qu'AVANT review → verdicts {} + jury [] (requested = requested_reviewers).
     def pr_review_state(_pid, _r, _pr, _o), do: {:ok, %{verdicts: %{}, reviewers: []}}
 
-    # merge FF : PR merged + issue close (Closes #N).
+    # merge FF : PR merged + issue close. QoL 2026-07-07 : plus de `Closes #N` réel (le vrai
+    # GatekeeperSeal ferme l'issue EXPLICITEMENT, séparément, après le commentaire) — ce sim ferme les
+    # deux dans le même appel par simplicité ; le `close_issue` explicite (ligne ~124) re-pose le même
+    # état ensuite, idempotent, sans changer l'assertion finale (`state == "closed"`).
     def merge_pr(pid, _r, pr, _o) do
       Agent.update(pid, fn s ->
         %{
@@ -220,6 +227,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     defp p, do: Process.get(:sim)
     def add_label(r, n, l, o), do: Sim.add_label(p(), r, n, l, o)
     def remove_label(r, n, l, o), do: Sim.remove_label(p(), r, n, l, o)
+    def start_stopwatch(r, n, o), do: Sim.start_stopwatch(p(), r, n, o)
+    def stop_stopwatch(r, n, o), do: Sim.stop_stopwatch(p(), r, n, o)
     def set_state_label(r, n, s, o), do: Sim.set_state_label(p(), r, n, s, o)
     def set_assignee(r, n, l, o), do: Sim.set_assignee(p(), r, n, l, o)
     def post_comment(r, n, b, o), do: Sim.post_comment(p(), r, n, b, o)

@@ -113,6 +113,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     alive_before? = pod_alive?(spawner, pod_id)
 
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
+         # Time-tracking natif (best-effort, discard) : DÉMARRE le stopwatch sur le MÊME objet que le
+         # verrou (issue ou PR) — mécanique globale, agnostique du rôle (cf. § Time-tracking, ForgeClient).
+         _ = forge.start_stopwatch(repo, lock_target, forge_opts),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
          :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief) do
       # Le retour de `WakeRecovery.wake` est LOAD-BEARING : `{:error, {:escalated, _}}`
@@ -153,6 +156,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         # Kill SEULEMENT si frais spawn (un re-brief ne tue JAMAIS l'eng vivant + son contexte).
         if not alive_before?, do: safe_kill(spawner, pod_id)
         _ = forge.remove_label(repo, lock_target, @in_flight_label, forge_opts)
+
+        # Stopwatch démarré avec le verrou → arrêté avec lui (le dispatch n'a jamais abouti, le temps
+        # écoulé serait du bruit, pas du travail réel).
+        _ = forge.stop_stopwatch(repo, lock_target, forge_opts)
 
         Logger.warning(
           "StepDispatcher: dispatch role=#{role} pod=#{pod_id} #{log_ctx} → #{inspect(err)} " <>

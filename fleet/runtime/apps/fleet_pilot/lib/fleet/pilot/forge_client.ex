@@ -263,6 +263,46 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
+  # ============================================================
+  # Time-tracking natif Gitea (stopwatch) — MÉCANIQUE GLOBALE, agnostique du rôle/de l'agent.
+  # `number` = l'objet verrouillé par `lcars-in-flight` (issue OU PR — Gitea unifie les deux sous
+  # `issues/{n}/stopwatch`, une PR EST une issue côté modèle). Câblé aux 3 MÊMES points de convergence
+  # que le verrou lui-même (spawn_step pose+POSE, unlock/reconciliation LÈVENT) : start_stopwatch/2 quand
+  # `lcars-in-flight` est posé, stop_stopwatch/2 quand il est levé — UN SEUL mécanisme, zéro branche
+  # par-rôle (consultant/engineer/qualifier/reviewer/gatekeeper passent tous par les 2 mêmes points).
+  # ============================================================
+
+  @doc """
+  Démarre le stopwatch Gitea natif sur `number` (issue ou PR). Best-effort — idempotent : 409
+  (« déjà actif », un rebrief sur un pod vivant re-pose le même verrou) → `:ok`, pas une erreur.
+  """
+  @spec start_stopwatch(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
+  def start_stopwatch(repo, number, opts \\ []) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{number}/stopwatch/start", %{}) do
+        {:ok, _} -> :ok
+        {:error, {:http, 409, _}} -> :ok
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Arrête le stopwatch Gitea natif sur `number` (grave la durée écoulée). Best-effort — idempotent :
+  409 (« aucun stopwatch actif ») → `:ok`, jamais une erreur bloquante (le stopwatch est cosmétique,
+  pas un invariant de correction du pipeline).
+  """
+  @spec stop_stopwatch(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
+  def stop_stopwatch(repo, number, opts \\ []) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{number}/stopwatch/stop", %{}) do
+        {:ok, _} -> :ok
+        {:error, {:http, 409, _}} -> :ok
+        {:error, _} = err -> err
+      end
+    end
+  end
+
   @doc """
   Ferme l'issue (terminal de chaîne). PATCH `state: closed`. Idempotent côté Gitea.
   """
@@ -830,18 +870,23 @@ defmodule Fleet.Pilot.ForgeClient do
   # dynamiques (nom de map / nom d'étape variables selon le workflow_map) → match sur le PRÉFIXE, pas la
   # valeur exacte (contrairement à `label_color` qui, lui, ne différencie QUE les 4 stages connus).
   defp label_description("lcars-in-flight"),
-    do: "Verrou : un pod travaille déjà cette brique (anti double-spawn). Levé par le système en fin de step — jamais à retirer à la main."
+    do:
+      "Verrou : un pod travaille déjà cette brique (anti double-spawn). Levé par le système en fin de step — jamais à retirer à la main."
 
   defp label_description("lcars-awaits-arch"),
-    do: "Cette issue attend une action HUMAINE via l'architecte (verdict escalade/halt/redirect) — le poller la laisse tranquille tant qu'il est posé."
+    do:
+      "Cette issue attend une action HUMAINE via l'architecte (verdict escalade/halt/redirect) — le poller la laisse tranquille tant qu'il est posé."
 
   defp label_description("stage/" <> _step),
-    do: "Étape COURANTE de cette issue dans son plan (workflow_map) — bouge à chaque avancée (mutex : une seule à la fois)."
+    do:
+      "Étape COURANTE de cette issue dans son plan (workflow_map) — bouge à chaque avancée (mutex : une seule à la fois)."
 
   defp label_description("wfmap/" <> _map),
-    do: "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
+    do:
+      "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
 
-  defp label_description(_), do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."
+  defp label_description(_),
+    do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."
 
   # ============================================================
   # Identite forge — adaptateur credential -> wire (token de role)

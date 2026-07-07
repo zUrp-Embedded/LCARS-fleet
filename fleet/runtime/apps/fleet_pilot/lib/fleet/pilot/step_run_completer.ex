@@ -459,11 +459,17 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # Routage commun selon l'intent. Le trigger du step suivant = la review-request native
   # (`request_review`), plus `set_assignee` : le producteur reste assigne (Entry), les juges
   # sont dispatches via la PR (`dispatch_review`). `post_route` (position workflow_map) RESTE sur l'issue.
-  # `lcars-in-flight` leve en DERNIER sur le bon numero : producteur -> l'ISSUE (verrou pose par
-  # dispatch_issue) ; juge -> la PR (verrou pose par dispatch_review). `pr` = nil seulement sur un
-  # rework producteur (pas de PR).
-  #   :promote -> merge FF (la PR `Closes #N` ferme l'issue), unlock ;
-  #   :advance -> request_review(next) + post_route, unlock ;
+  # `lcars-in-flight` : DEUX verrous distincts possibles sur une brique — l'ISSUE (posé par
+  # dispatch_issue, tenu par le producteur) et la PR (posé par dispatch_review, tenu par le producteur
+  # en rework OU les juges en review). Doctrine (QoL 2026-07-07, en réponse à l'observation user « le
+  # verrou disparaît avant la fin du traitement ») : le verrou ISSUE représente LA BRIQUE de bout en
+  # bout — il ne se lève PLUS à l'avance (`:advance`), il PERSISTE pendant toute la review PR (inerte à
+  # ce stade : le poller ignore l'in-flight d'une issue PR-backed — `classify_issue(_, true, _)` →
+  # jamais engagée — et la réconciliation exclut explicitement une issue avec PR ouverte de son
+  # scan d'orphelins, `pr_issue_ids`). Il se lève à `:promote`, EN MÊME TEMPS que le verrou PR — la
+  # brique est vraiment finie quand elle est mergée, pas quand le producteur a fini SA part.
+  #   :promote -> merge FF + sceau + stage/merged + close explicite (GatekeeperSeal), unlock ISSUE + PR ;
+  #   :advance -> request_review(next) + post_route (le verrou ISSUE PERSISTE, levé au :promote) ;
   #   :rework  -> post_route(rebond), unlock. Re-dispatch : producteur via l'assignee Entry conserve
   #               (pas de PR encore) ; juge -> re-spawn producteur sur changes-requested.
   defp route(%{intent: :promote} = step_run, pr, opts) do
@@ -479,13 +485,19 @@ defmodule Fleet.Pilot.StepRunCompleter do
       producer_branch: Map.get(step_run, :producer_branch)
     }
 
-    # Gap AVANT unlock : `promote` merge + poste le sceau + pose `stage/merged` (set_stage, exclusif —
-    # retire `stage/review` dans le MÊME acte Gitea) ; sans lui, `unlock` (retrait `lcars-in-flight`,
-    # écriture INDÉPENDANTE, familles de labels distinctes cf. `Fleet.Pilot.Labels`) risque le même
-    # `created_at` → ordre dashboard arbitraire (même bug que le comment/stage producteur, cf. `complete/2`).
+    # Gap AVANT unlock : `promote` merge + poste le sceau + pose `stage/merged` + ferme l'issue
+    # (GatekeeperSeal.seal_and_merge) ; sans lui, `unlock` (retrait `lcars-in-flight`, écriture
+    # INDÉPENDANTE, familles de labels distinctes cf. `Fleet.Pilot.Labels`) risque le même `created_at`
+    # → ordre dashboard arbitraire (même bug que le comment/stage producteur, cf. `complete/2`).
+    #
+    # Unlock DES DEUX numéros (idempotent : remove_label no-op si absent) : le verrou ISSUE — jamais levé
+    # depuis `:advance`, il a persisté toute la review — ET le verrou PR (juge, ou producteur si le
+    # `lock_number` du terminal 1-step le porte déjà). La brique entière libère son verrou ICI, au vrai
+    # moment où elle est finie.
     with {:ok, :promoted} <- promote(promote_step_run, opts),
          :ok <- space_writes(opts),
-         {:ok, _} <- unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts) do
+         {:ok, _} <- unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts),
+         {:ok, _} <- unlock(forge, step_run.repo, step_run.issue_number, forge_opts) do
       {:ok, :promoted}
     end
   end
@@ -496,10 +508,14 @@ defmodule Fleet.Pilot.StepRunCompleter do
     repo = step_run.repo
     next = Map.fetch!(step_run, :next_assignee)
 
+    # Unlock CONDITIONNEL (cf. doctrine ci-dessus) : `:advance` est partagé par le PRODUCTEUR (verrou
+    # ISSUE — NE se lève PAS ici, persiste jusqu'au `:promote` final, la brique entière reste in-flight)
+    # ET le JUGE non-terminal (qualifier→reviewer : verrou PR — se lève NORMALEMENT ici, le tour de CE
+    # juge est fini, le suivant posera le sien via dispatch_review — granularité par-tour, pas la brique).
     with :ok <- request_review_step(forge, repo, pr, next, forge_opts),
          {:ok, _} <-
            post_route_if_present(forge, repo, step_run.issue_number, step_run, forge_opts, :route),
-         {:ok, _} <- unlock(forge, repo, lock_number(step_run, pr), forge_opts) do
+         :ok <- maybe_unlock_judge_advance(forge, repo, step_run, pr, forge_opts) do
       {:ok, :review_requested}
     end
   end
@@ -518,21 +534,20 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   # Producteur SANS workflow_map (single-brique) : la PR est ouverte (`complete_producer`) → on met
   # les JUGES (`:reviewer_roles`, défaut qualifier+reviewer) en `requested_reviewers` (le poller
-  # `dispatch_review` les spawn un à un), on ASSIGNE l'HUMAIN à la PR (voir quel humain a
-  # drivé), puis on lève le verrou de l'ISSUE (la PR ouverte fait skip l'issue côté poller via
-  # `pulls_issue_ids`). PAS de merge ici : le merge est piloté par l'état-PR (dispatch_review, quand
-  # tous les juges ont approuvé). Branch-protection OFF en dev → LCARS agrège, interim.
+  # `dispatch_review` les spawn un à un), on ASSIGNE l'HUMAIN à la PR (voir quel humain a drivé). PAS de
+  # merge ici : le merge est piloté par l'état-PR (dispatch_review, quand tous les juges ont approuvé).
+  # Branch-protection OFF en dev → LCARS agrège, interim.
   defp route(%{intent: :review} = step_run, pr, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = step_run.repo
 
-    # Unlock DES DEUX numéros (idempotent : remove_label no-op si absent). 1re livraison → le verrou est
-    # sur l'ISSUE (posé par `dispatch_issue`) ; RE-livraison de rework → le verrou est sur la PR (posé
-    # par `dispatch_review` :rework). On lève les deux pour ne stuck ni l'un ni l'autre.
+    # Unlock de la PR SEULEMENT (idempotent : remove_label no-op si absent) — le cas RE-livraison de
+    # rework : le verrou était sur la PR (posé par `dispatch_review` :rework, tenu par le producteur
+    # re-dispatché). Le verrou ISSUE, lui, NE se lève PAS ici (doctrine ci-dessus, cf. `:advance`) : la
+    # brique reste in-flight jusqu'au `:promote` final, 1re livraison ou pas.
     with :ok <- request_reviews_step(forge, repo, pr, Roles.reviewer_roles(opts), forge_opts),
          {:ok, _} <- assign_human_step(forge, repo, pr, forge_opts),
-         {:ok, _} <- unlock(forge, repo, step_run.issue_number, forge_opts),
          {:ok, _} <- unlock(forge, repo, pr, forge_opts) do
       {:ok, :review_requested}
     end
@@ -551,6 +566,18 @@ defmodule Fleet.Pilot.StepRunCompleter do
       {:ok, :reviewed}
     end
   end
+
+  # Unlock CONDITIONNEL de `route(:advance)` : PRODUCTEUR (verrou ISSUE) → PAS d'unlock (persiste jusqu'au
+  # `:promote` final) ; JUGE non-terminal (verrou PR, qualifier→reviewer) → unlock NORMAL (le tour de CE
+  # juge est fini, le suivant pose le sien via dispatch_review — granularité par-tour, pas la brique).
+  defp maybe_unlock_judge_advance(forge, repo, %{pr_role: :judge} = step_run, pr, forge_opts) do
+    case unlock(forge, repo, lock_number(step_run, pr), forge_opts) do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  defp maybe_unlock_judge_advance(_forge, _repo, %{pr_role: :producer}, _pr, _forge_opts), do: :ok
 
   # Demande la review de TOUS les juges d'un coup (qualifier+reviewer en requested_reviewers).
   # Liste vide = trou de config (jamais merger sans juge en interim) → fail-loud.
@@ -640,6 +667,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # et PR-native `route`) : un crash avant ce point laisse le verrou pose → le poller ne re-spawn pas →
   # la recovery rejoue (remove_label idempotent). Autorite UNIQUE du unlock pour les deux chemins.
   defp unlock(forge, repo, n, forge_opts) do
+    # Stopwatch : arrêté ICI, symétrique du démarrage au spawn (`Spawn.spawn_step`) — même objet (`n` =
+    # issue ou PR selon le rôle), même mécanique globale. Best-effort (discard) : cosmétique, jamais
+    # bloquant pour le unlock réel (l'invariant qui compte).
+    _ = forge.stop_stopwatch(repo, n, forge_opts)
+
     case forge.remove_label(repo, n, @in_flight_label, forge_opts) do
       {:ok, _} = ok -> ok
       {:error, reason} -> {:error, {:unlock, reason}}

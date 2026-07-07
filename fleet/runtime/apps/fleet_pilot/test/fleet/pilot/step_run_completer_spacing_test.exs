@@ -13,6 +13,16 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
     def remove_label(_r, _n, _l, _o), do: tag(:unlock)
     def add_label(_r, _n, _l, _o), do: tag(:label)
 
+    def start_stopwatch(_r, _n, _o) do
+      send(self(), {:call, :sw_start})
+      :ok
+    end
+
+    def stop_stopwatch(_r, _n, _o) do
+      send(self(), {:call, :sw_stop})
+      :ok
+    end
+
     defp tag(t) do
       send(self(), {:call, t})
       {:ok, t}
@@ -133,6 +143,8 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
           send(self(), {:call, :unlock})
           {:ok, :removed}
         )
+
+    def stop_stopwatch(_repo, _n, _opts), do: :ok
   end
 
   defmodule StubDeliverable do
@@ -214,12 +226,16 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
           {:ok, :posted}
         )
 
+    def close_issue(_repo, _n, _opts), do: {:ok, :closed}
+
     def remove_label(_repo, _n, _label, _opts),
       do:
         (
           send(self(), {:call, :unlock})
           {:ok, :removed}
         )
+
+    def stop_stopwatch(_repo, _n, _opts), do: :ok
   end
 
   test "complete_pr juge :promote — le gap est INSÉRÉ entre le sceau (merge+stage) et l'unlock" do

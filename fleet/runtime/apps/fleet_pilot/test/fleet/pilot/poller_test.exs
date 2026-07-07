@@ -141,6 +141,8 @@ defmodule Fleet.Pilot.PollerTest do
 
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+    def start_stopwatch(_repo, _n, _opts), do: :ok
+    def stop_stopwatch(_repo, _n, _opts), do: :ok
 
     # #8 : la route vit dans le route-comment (state-machine). Stub configurable par `_test_routes`
     # (map n → {workflow_map, step}). Défaut :none (issue non routé → A1 producteur).
@@ -162,6 +164,7 @@ defmodule Fleet.Pilot.PollerTest do
     # F-E8 : état de jury combiné — aucun verdict + jury vide (les tests poller ne couvrent pas merge) →
     # `requested` = `requested_reviewers` du PR → tout juge demandé reste pending → dispatché.
     def pr_review_state(_repo, _index, _opts), do: {:ok, %{verdicts: %{}, reviewers: []}}
+
     # Adoption : pose des juges sur une PR orpheline (humaine/fork, ou agent ayant perdu ses reviewers).
     def request_review(_repo, index, reviewers, _opts),
       do: send(self(), {:requested_review, index, reviewers}) && :ok
@@ -341,7 +344,7 @@ defmodule Fleet.Pilot.PollerTest do
           _test_pid: self()
         ],
         loader: StepStubLoader,
-        spawner: StepStubSpawner,
+        spawner: StepStubSpawner
       )
 
     {name, pid}
@@ -438,7 +441,7 @@ defmodule Fleet.Pilot.PollerTest do
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
           spawner: LivePodSpawner,
-          task_queue: ActiveTaskQueue,
+          task_queue: ActiveTaskQueue
         )
 
       Poller.force_poll(name)
@@ -475,7 +478,7 @@ defmodule Fleet.Pilot.PollerTest do
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
           spawner: ProjectPipeSpawner,
-          task_queue: ProjectTaskQueueIssue8,
+          task_queue: ProjectTaskQueueIssue8
         )
 
       Poller.force_poll(name)
@@ -510,7 +513,7 @@ defmodule Fleet.Pilot.PollerTest do
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
           spawner: ProjectPipeSpawner,
-          task_queue: ProjectTaskQueueIssue9,
+          task_queue: ProjectTaskQueueIssue9
         )
 
       Poller.force_poll(name)
@@ -636,7 +639,7 @@ defmodule Fleet.Pilot.PollerTest do
           step_dispatch?: true,
           forge_client: StepStubForge,
           forge_opts: [_test_discover: {:error, {:http, 503, "down"}}],
-          spawner: StepStubSpawner,
+          spawner: StepStubSpawner
         )
 
       assert %{dispatched: 0, skipped: 0, errors: 1} = Poller.force_poll(name)
@@ -669,7 +672,7 @@ defmodule Fleet.Pilot.PollerTest do
             _test_issues: {:ok, [issue]}
           ],
           loader: StepStubLoader,
-          spawner: StepStubSpawner,
+          spawner: StepStubSpawner
         )
 
       assert %{dispatched: 0, skipped: 2, errors: 0} = Poller.force_poll(name)
@@ -706,7 +709,7 @@ defmodule Fleet.Pilot.PollerTest do
           ],
           loader: StepStubLoader,
           workflow_map_loader: StepStubWorkflowMapLoader,
-          spawner: StepStubSpawner,
+          spawner: StepStubSpawner
         )
 
       # tally = le contrat au niveau Poller (le spawn part dans la mailbox du GenServer, pas du test ;
@@ -745,7 +748,7 @@ defmodule Fleet.Pilot.PollerTest do
         forge_opts: [_test_issues: issues_response, _test_routes: routes],
         loader: StepStubLoader,
         workflow_map_loader: StepStubWorkflowMapLoader,
-        spawner: StepStubSpawner,
+        spawner: StepStubSpawner
       ]
 
       {:ok, pid} = Poller.start_link(Keyword.merge(base, extra_opts))
@@ -1003,14 +1006,18 @@ defmodule Fleet.Pilot.PollerTest do
       def list_open_pulls(_repo, _opts), do: {:ok, []}
       def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
       def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+      def start_stopwatch(_repo, _n, _opts), do: :ok
+      def stop_stopwatch(_repo, _n, _opts), do: :ok
       def count_change_request_rounds(_repo, _index, _opts), do: {:ok, 0}
       def get_route(_repo, _n, _opts), do: :none
       def get_predecessor_result(_repo, _n, _opts), do: :none
       def get_issue(_repo, n, _opts), do: {:ok, %{"number" => n, "body" => "x"}}
       def pr_review_state(_repo, _index, _opts), do: {:ok, %{verdicts: %{}, reviewers: []}}
-    # Adoption : pose des juges sur une PR orpheline (humaine/fork, ou agent ayant perdu ses reviewers).
-    def request_review(_repo, index, reviewers, _opts),
-      do: send(self(), {:requested_review, index, reviewers}) && :ok
+
+      # Adoption : pose des juges sur une PR orpheline (humaine/fork, ou agent ayant perdu ses reviewers).
+      def request_review(_repo, index, reviewers, _opts),
+        do: send(self(), {:requested_review, index, reviewers}) && :ok
+
       def post_route(_repo, _n, _p, _s, _opts), do: {:ok, :posted}
 
       def remove_label(repo, n, label, opts) do
@@ -1059,7 +1066,7 @@ defmodule Fleet.Pilot.PollerTest do
           ],
           loader: StepStubLoader,
           spawner: RepoBPodSpawner,
-          task_queue: ActiveTaskQueue2,
+          task_queue: ActiveTaskQueue2
         )
 
       # 1er tick : repoA#8 ET repoB#8 deviennent suspects (grace) — repoB#8 sera filtré (pod vivant) mais

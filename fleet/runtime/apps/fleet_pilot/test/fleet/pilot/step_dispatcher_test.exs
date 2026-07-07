@@ -43,6 +43,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   defmodule StubForge do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+    def start_stopwatch(_repo, _n, _opts), do: :ok
+    def stop_stopwatch(_repo, _n, _opts), do: :ok
 
     # Adoption : pose des juges sur une PR orpheline (humaine/fork). Capture pour assertion.
     def request_review(_repo, index, reviewers, _opts) do
@@ -115,6 +117,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
+    def close_issue(_repo, _n, _opts), do: {:ok, :closed}
   end
 
   defmodule StubLoader do
@@ -827,6 +830,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     test "PR sans juge (orpheline/humaine) -> ADOPTION : pose les juges, review au tick suivant" do
       pr = pr(%{"requested_reviewers" => []})
+
       # requested == [] (ni requested_reviewers, ni jury) = PR NON mise en place par le pipeline (typ.
       # humaine/fork découverte par le poller). Gate agent-agnostique → on POSE les juges au lieu de skip
       # `:no_verdict`. Ils spawnent au tick SUIVANT (pas ici → `refute_received {:spawned}`).
