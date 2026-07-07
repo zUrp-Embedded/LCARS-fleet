@@ -186,7 +186,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           |> Enum.reject(&module_exists?/1)
 
         _ ->
-          []
+          # HOLLOW-GREEN GUARD (R0-EVT-012): an ABSENT/invalid events.yaml used to yield `[]` → `:pass`
+          # — the "every handler exists" check passing precisely when the registry it reads is GONE. An
+          # unreadable registry is a broken deploy → FAIL, not a silent green.
+          [
+            "events.yaml absent or invalid at #{yaml} — handlers unverifiable (hollow-green guard)"
+          ]
       end
 
     %{
@@ -738,10 +743,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     evidence =
       Enum.flat_map(opts.files, fn rel ->
-        Path.join(root, rel)
-        |> grep_lines(opts.pattern)
-        |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
-        |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
+        abs = Path.join(root, rel)
+
+        cond do
+          # HOLLOW-GREEN GUARD (R0-EVT-012): a residue check greps FIXED file paths; on an ABSENT file
+          # `grep_lines` returns `[]` (0 residue) → `:pass` FOREVER, even though the target moved/was
+          # deleted and the contract is no longer verified. An absent residue target is therefore a
+          # FAILURE, not a silent green — the check must be told its file vanished.
+          not File.exists?(abs) ->
+            ["#{rel}:MISSING — residue-check target absent (hollow-green guard, R0-EVT-012)"]
+
+          true ->
+            abs
+            |> grep_lines(opts.pattern)
+            |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
+            |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
+        end
       end)
 
     %{
@@ -854,13 +871,28 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               is_integer(rf) and is_integer(rt) and rf < rt and not MapSet.member?(seams, {f, t}),
               do: "UPWARD non-seam compile dep: #{f}(R#{rf}) -> #{t}(R#{rt})"
 
-        dead_seams =
+        well_formed =
+          Enum.filter(
+            seam_list,
+            &(is_binary(&1["from"]) and is_binary(&1["to"]) and is_binary(&1["marker"]))
+          )
+
+        # HOLLOW-GREEN GUARD (R0-EVT-014): a MALFORMED seam entry (missing/non-string from/to/marker) used
+        # to fall through `seam_alive?/3`'s permissive fallback → counted ALIVE → silently accepted (a
+        # typo'd marker would make the liveness check vacuously pass). A malformed seam is unverifiable →
+        # FAIL explicitly, distinct from a genuinely dead seam.
+        malformed =
           for s <- seam_list,
+              s not in well_formed,
+              do: "MALFORMED seam entry (needs string from/to/marker): #{inspect(s)}"
+
+        dead_seams =
+          for s <- well_formed,
               not seam_alive?(root, s["from"], s["marker"]),
               do:
                 "DEAD seam (marker `#{s["marker"]}` absent from the code of #{s["from"]}): #{s["from"]} -> #{s["to"]}"
 
-        evidence = undeclared ++ phantom ++ upward ++ dead_seams
+        evidence = undeclared ++ phantom ++ upward ++ malformed ++ dead_seams
 
         %{
           id: "layering.dependency_graph",
@@ -917,7 +949,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end)
   end
 
-  defp seam_alive?(_root, _from, _marker), do: true
+  # Fallback: a seam called with a non-string from/marker (a malformed entry) is NOT alive — it is
+  # caught explicitly upstream as `malformed`, but defense-in-depth: never report a malformed seam as live.
+  defp seam_alive?(_root, _from, _marker), do: false
 
   defp render_yaml(overall, checks) do
     header = "status: #{overall}\nchecks:"
