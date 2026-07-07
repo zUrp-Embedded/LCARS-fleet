@@ -163,6 +163,29 @@ defmodule Fleet.CapProfileTest do
 
       assert {:error, :schema_unavailable} = Fleet.CapProfile.load("engineer")
     end
+
+    test "R0-CAP-007 : catalogue ABSENT → :catalogue_missing (≠ :not_found qui masque une config cassée)",
+         %{tmp_dir: tmp_dir} do
+      Application.put_env(:fleet_cap_profile, :root_dir, Path.join(tmp_dir, "does-not-exist"))
+      assert {:error, :catalogue_missing} = Fleet.CapProfile.load("engineer")
+    end
+
+    test "R0-CAP-008 : fichier sans metadata.name NON `_`-préfixé → warning (rôle au name perdu visible)",
+         %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "botched.yaml"), "kind: CapabilityProfile\nspec: {}\n")
+
+      log = ExUnit.CaptureLog.capture_log(fn -> Fleet.CapProfile.load("engineer") end)
+      assert log =~ "botched.yaml has no metadata.name"
+    end
+
+    test "R0-CAP-008 : fichier `_`-préfixé sans name → skip SILENCIEUX (fragment délibéré)", %{
+      tmp_dir: tmp_dir
+    } do
+      File.write!(Path.join(tmp_dir, "_baseline-x.yaml"), "kind: CapabilityProfile\nspec: {}\n")
+
+      log = ExUnit.CaptureLog.capture_log(fn -> Fleet.CapProfile.load("engineer") end)
+      refute log =~ "no metadata.name"
+    end
   end
 
   # ============================================================

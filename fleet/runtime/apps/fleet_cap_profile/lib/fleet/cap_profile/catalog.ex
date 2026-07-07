@@ -61,17 +61,26 @@ defmodule Fleet.CapProfile.Catalog do
       we CANNOT resolve by name. The `load`/`compose` contract classes "malformed
       YAML" as `:invalid_schema` (not `:not_found`, which would suggest the role is absent).
   """
-  @spec read_role(String.t()) :: {:ok, map()} | {:error, :not_found | :invalid_schema}
+  @spec read_role(String.t()) ::
+          {:ok, map()} | {:error, :not_found | :invalid_schema | :catalogue_missing}
   def read_role(role) do
-    case name_index(root_dir()) do
-      {:ok, index} ->
-        case Map.fetch(index, role) do
-          {:ok, raw} -> {:ok, raw}
-          :error -> {:error, :not_found}
-        end
+    # An ABSENT catalogue dir is a BROKEN CONFIG, not "this role is absent" → distinct
+    # `:catalogue_missing` (name_index on a missing dir wildcards to `[]` → empty index → `:not_found`,
+    # which masks the config error as a mere typo'd role name). `list/1` already distinguishes; so must
+    # `read_role`, the path `load/1`/`compose/2` take for a single role.
+    if File.dir?(root_dir()) do
+      case name_index(root_dir()) do
+        {:ok, index} ->
+          case Map.fetch(index, role) do
+            {:ok, raw} -> {:ok, raw}
+            :error -> {:error, :not_found}
+          end
 
-      {:error, {:invalid_yaml, _path}} ->
-        {:error, :invalid_schema}
+        {:error, {:invalid_yaml, _path}} ->
+          {:error, :invalid_schema}
+      end
+    else
+      {:error, :catalogue_missing}
     end
   end
 
@@ -132,6 +141,19 @@ defmodule Fleet.CapProfile.Catalog do
               end
 
             _ ->
+              base = Path.basename(path)
+
+              # A no-name file is a DELIBERATE baseline/overlay fragment ONLY by the `_`-prefix convention
+              # (`_baseline-*.yaml`, mirror of `_frozen-monks/`). A NON-prefixed file with no
+              # `metadata.name` looks like a role whose name was lost → make the silent skip VISIBLE
+              # (warning), otherwise that role vanishes from the index (load → `:not_found`) with no signal.
+              unless String.starts_with?(base, "_") do
+                Logger.warning(
+                  "Catalog: #{base} has no metadata.name — skipped (a role needs a name; " <>
+                    "`_`-prefix a file that is a deliberate non-role fragment)"
+                )
+              end
+
               {:cont, {:ok, acc}}
           end
 
