@@ -172,10 +172,51 @@ export LCARS_TMUX_SOCK_BASE="$LCARS_TMUX_SOCK_BASE"
 RT
 }
 
+# Attend que l'arch (pod permanent `permanent-architect`, sas UNIQUE vers l'humain) ait sa session tmux
+# INTERNE, puis y attache CE terminal (exec — remplace le process ; Ctrl-b d détache sans tuer la fleet).
+# Boucle bornée : arch DÉJÀ vivant → attache immédiate (1er tour, zéro attente) ; arch en (re)boot →
+# on attend son apparition. Couvre 3 cas d'un SEUL geste : (1) boot initial au `start` ; (2) re-`start`
+# sur fleet vivante = simple rattache ; (3) arch MORT sur fleet vivante = le PermanentWarden l'a respawné
+# (event-driven sur `pod.failed`, pod_id déterministe idempotent) → on attend son retour. `$1` = message
+# de contexte, `$2` = timeout (s). Pas de respawn shell-side (le warden EST l'autorité de respawn ; un
+# `lcars spawn` ferait un pod ad-hoc au mauvais id, et le rpc est indispo distribution OFF par défaut).
+attach_arch() {
+  local ctx="$1" timeout="$2"
+  local sock_base="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
+  echo "fleet_v2: $ctx" >&2
+
+  local arch_sock arch_pod="" i
+  for i in $(seq 1 "$timeout"); do
+    # Glob PRÉFIXE (pas `-*`) : depuis BL-055 l'id permanent est DÉTERMINISTE (`permanent-architect`,
+    # sans `-<os_time>`) → le `-*` historique ne matchait plus jamais.
+    arch_sock="$(ls -1d "$sock_base"/permanent-architect*/ 2>/dev/null | head -1 || true)"
+    if [[ -n "$arch_sock" && -S "${arch_sock}pod.sock" ]]; then
+      arch_pod="$(basename "${arch_sock%/}")"
+      # F-ATTACH-RACE : le FICHIER sock apparaît une fraction avant la session tmux INTERNE
+      # (`lcars-pod-<id>`) → on attend la SESSION, pas juste le sock (sinon `lcars attach` → « no sessions »).
+      "$TMUX_BIN" -S "${arch_sock}pod.sock" has-session -t "lcars-pod-$arch_pod" 2>/dev/null && break
+    fi
+    dtmux has-session -t "$SESSION" 2>/dev/null \
+      || die "le BEAM s'est arrêté (logs : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION »)"
+    sleep 1
+    arch_pod=""
+  done
+  [[ -n "$arch_pod" ]] || die "l'arch n'a pas (re)booté en ${timeout}s — « fleet_v2 restart » pour le rebooter (logs : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION »)"
+
+  echo "fleet_v2: arch up ($arch_pod) — attache (Ctrl-b d = détacher sans tuer la fleet)" >&2
+  exec "$BIN_DIR/lcars" attach "$arch_pod"
+}
+
 cmd_start() {
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "tmux introuvable ($TMUX_BIN)"
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
-    die "fleet_v2 déjà démarrée (« fleet_v2 status » / « fleet_v2 stop »)."
+    # Fleet DÉJÀ démarrée : au lieu d'envoyer bouler l'humain, on RECOLLE l'arch directement (attache si
+    # vivant ; s'il est mort le warden l'a respawné → on attend son retour, borné 60s). L'env runtime posé
+    # au start (sock base) est ressourcé pour matcher exactement la fleet vivante.
+    local rt="$HOME/.lcars/run/fleet_v2.runtime.env"
+    # shellcheck source=/dev/null
+    [[ -r "$rt" ]] && { set -a; . "$rt"; set +a; }
+    attach_arch "déjà démarrée — rattache l'arch (respawn warden si mort)…" 60
   fi
   setup_env
 
@@ -220,27 +261,9 @@ cmd_start() {
   # UI : molette = scroll du scrollback des logs BEAM (pas l'historique shell). cf. même geste dans `lcars attach`.
   dtmux set -g mouse on 2>/dev/null || true
 
-  echo "fleet_v2: attente du boot de l'arch…" >&2
-  local arch_sock="" arch_pod=""
-  for _ in $(seq 1 120); do
-    # Glob PRÉFIXE (pas `-*`) : depuis BL-055 l'id permanent est DÉTERMINISTE (`permanent-architect`,
-    # sans `-<os_time>`) → le `-*` historique ne matchait plus jamais (timeout 120s, arch non attaché).
-    arch_sock="$(ls -1d "$LCARS_TMUX_SOCK_BASE"/permanent-architect*/ 2>/dev/null | head -1 || true)"
-    if [[ -n "$arch_sock" && -S "${arch_sock}pod.sock" ]]; then
-      arch_pod="$(basename "${arch_sock%/}")"
-      # F-ATTACH-RACE : le FICHIER sock apparaît une fraction avant que la session tmux INTERNE
-      # (`lcars-pod-<id>`) y soit créée → on attend la SESSION, pas juste le sock, sinon le `lcars
-      # attach` ci-dessous tire dans cette fenêtre → « no sessions » (alors que l'arch est vivant).
-      "$TMUX_BIN" -S "${arch_sock}pod.sock" has-session -t "lcars-pod-$arch_pod" 2>/dev/null && break
-    fi
-    dtmux has-session -t "$SESSION" 2>/dev/null \
-      || die "le BEAM s'est arrêté (logs : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION »)"
-    sleep 1; arch_sock=""; arch_pod=""
-  done
-  [[ -n "$arch_pod" ]] || die "l'arch n'a pas booté en 120s (logs : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION »)"
-
-  echo "fleet_v2: arch up ($arch_pod) — attache (Ctrl-b d = détacher sans tuer la fleet)" >&2
-  exec "$BIN_DIR/lcars" attach "$arch_pod"
+  # Attente du boot de l'arch (BootOrchestrator) PUIS attache — même autorité que le rattache sur fleet
+  # vivante (fonction UNIQUE `attach_arch`, pas de fork de la logique wait+attach).
+  attach_arch "attente du boot de l'arch…" 120
 }
 
 # F7 (E1 2026-07-04) : stop GRACEFUL d'abord — Shutdown.begin (refuse + drain in-flight) puis
