@@ -23,6 +23,16 @@ SELF="$(readlink -f "$0")"
 BIN_DIR="$(dirname "$SELF")"
 RUNTIME_DIR="$(dirname "$BIN_DIR")"          # bin/.. = l'umbrella
 
+# CWD sûr, INCONDITIONNEL (bug vécu 2026-07-07 : lancé depuis /root — un humain root sans accès au
+# home lordzurp — le node Erlang TEMPORAIRE de `cmd_stop` (`fleet_umbrella rpc`, un node de connexion
+# séparé du daemon principal, PAS en mode embedded) retombe sur une recherche de code path incluant
+# `.` (le CWD) pour charger les modules du compilateur nécessaires à l'eval de l'expression RPC ; `/root`
+# inaccessible à l'humain → rafale d'erreurs `eacces` de code_server). Principe : ce script ne doit JAMAIS
+# dépendre du CWD de l'appelant — tout chemin qu'il écrit est déjà absolu (sous $HOME) ; le PROCESS
+# lui-même doit aussi démarrer depuis un répertoire garanti accessible. `cd` AVANT tout calcul relatif
+# (SELF/BIN_DIR/RUNTIME_DIR sont déjà résolus en absolu ci-dessus, donc intacts après ce `cd`).
+cd "$HOME" || { echo "fleet_v2: \$HOME ($HOME) inaccessible — impossible d'ancrer un CWD sûr" >&2; exit 1; }
+
 # Distribution Erlang (opt-in via LCARS_FLEET_V2_ERL_NODE) — dérivation UNIQUE, partagée
 # start (lancement distribué) / stop (RPC graceful F7). ⚠ Le flag/cookie viennent de l'ENV FILE
 # (~/.lcars/fleet_v2.env) : compute_dist() doit tourner APRÈS load_env() — un calcul au top-level
