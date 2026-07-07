@@ -95,8 +95,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # ── MULTI-PROJET — rend le repo neuf DÉCOUVRABLE + ACCESSIBLE par la fleet de l'humain ──
   # 1. TOPIC `lcars-fleet-<human>` (source UNIQUE `Fleet.Pilot.Poller.fleet_topic/1`, partagée avec le
   #    poller qui DÉCOUVRE par `search_repos_by_topic`) → un humain ne voit QUE ses projets (isolation REPO ;
-  #    l'axe ISSUE `assigned_by` est la ceinture). 2. COLLABORATEUR write = l'humain initiateur (les
-  #    comptes-rôles, eux, sont ajoutés par `grant_fleet_roles` dans `lock_main`). `my_human` = l'user OS du
+  #    l'axe ISSUE `assigned_by` est la ceinture). L'ACCÈS ne se pose plus par repo : les teams tofu le portent
+  #    org-wide (`humans`=read, `writers`/`judges`=write, `include_all`). `my_human` = l'user OS du
   #    runtime — l'onboarding tourne dans SA BEAM (MCP `create_project`), donc `Human.current!()` EST l'humain
   #    qui a initié → cohérent avec le scoping du poller (même source). Fail-loud si l'user est irrésoluble
   #    (un repo taggé pour le mauvais humain ne serait jamais découvert).
@@ -123,27 +123,13 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   # ── Verrou de `main` : le repo neuf naît PRÊT pour le workflow d'agents avec GATE forge-enforcé ──
-  # 1. Les comptes de rôle (engineer/qualifier/reviewer/gatekeeper) reçoivent le **write** — sinon
-  #    leurs reviews ne comptent pas au gate ET le gatekeeper ne peut pas merger (la protection
-  #    deadlockerait). 2. `main` est protégée : N approvals (= nb de juges) + dismiss-stale (re-review
-  #    au rework) + block-on-rejected (un REQUEST_CHANGES bloque) + pas de push direct (merge via PR).
-  # Mécanique (ce step, pas une action humaine) → tout projet onboardé a l'arbitre côté FORGE.
-  # `work/ops` + feature-branches NON protégées (zones de mouvement direct du système).
-  defp lock_main(full_name, opts) do
-    with :ok <- grant_fleet_roles(full_name, opts),
-         :ok <- protect_main(full_name, opts) do
-      :ok
-    end
-  end
-
-  defp grant_fleet_roles(repo, opts) do
-    Enum.reduce_while(fleet_roles(opts), :ok, fn role, :ok ->
-      case ForgeClient.Repo.add_collaborator(repo, role, "write", fc_opts(opts)) do
-        :ok -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, {:grant_role, role, reason}}}
-      end
-    end)
-  end
+  # Les comptes de rôle (producteur/juges/gatekeeper) ont DÉJÀ le **write** sur tout repo de l'org via les
+  # teams tofu (`writers`/`judges`, `include_all_repositories`) → plus de grant per-repo redondant ici (leurs
+  # reviews comptent au gate + le gatekeeper merge). Reste LE geste : protéger `main` — N approvals (= nb de
+  # juges) + dismiss-stale (re-review au rework) + block-on-rejected (un REQUEST_CHANGES bloque) + pas de push
+  # direct (merge via PR). Mécanique (ce step, pas une action humaine) → tout projet onboardé a l'arbitre côté
+  # FORGE. `work/ops` + feature-branches NON protégées (zones de mouvement direct du système).
+  defp lock_main(full_name, opts), do: protect_main(full_name, opts)
 
   defp protect_main(repo, opts) do
     rule = %{
@@ -159,12 +145,6 @@ defmodule Fleet.Pilot.ProjectOnboard do
       {:error, reason} -> {:error, {:protect_main, reason}}
     end
   end
-
-  # Comptes de rôle qui agissent sur un repo = producteur + juges + gatekeeper. Les trois viennent de
-  # l'AUTORITÉ UNIQUE `Fleet.Pilot.Roles` (config + overrides opts) — plus de défaut `engineer`/`gatekeeper`
-  # réécrit ici.
-  defp fleet_roles(opts),
-    do: [Roles.producer_role(opts)] ++ Roles.reviewer_roles(opts) ++ [Roles.gatekeeper_role(opts)]
 
   defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])
 
