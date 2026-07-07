@@ -67,15 +67,16 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       `default_project_resolver/2` = API publique (défaut du seam `:project_resolver`, `defdelegate`
       depuis le module racine).
     - `Fleet.Pilot.StepDispatcher.ArchEscalation` — cluster **IMPUR** « escalade arch » (écriture forge) :
-      `escalate_rework/4` (rework non convergent, budget épuisé MA-06) + `escalate_conflict/4` (conflit de
-      merge récurrent) posent le **commentaire gatekeeper dédupliqué** (signé via le writer unique
-      `GatekeeperSeal.as_gatekeeper/1` + `dedup_signature`) + le
-      verrou `lcars-awaits-arch` sur l'ISSUE (poller SKIP → fin du churn) via l'unique point d'écriture
-      `escalate_to_arch` (privé, pas de fork). **Frontière blindée** : reçoit un struct
-      `%ArchEscalation.Seams{}` (les 3 seams `forge`/`repo`/`forge_opts`, `@enforce_keys` → un accès
-      hors-3-seams ne compile pas), jamais le `ctx` entier. La **DÉCISION** d'escalade (budget forge,
-      IncidentRegistry, résolution-vs-escalade) reste le SINGLE-AUTHORITY du flux review
-      (`ReviewLifecycle.dispatch_rework`/`dispatch_conflict_resolution`) — ArchEscalation ne fait QU'ÉCRIRE.
+      `escalate_rework/4` (rework non convergent, budget épuisé MA-06) + `escalate_merge_blocked/5` (merge
+      non auto-résoluble : vrai conflit git / échec non classifié, cf. `Fleet.Pilot.MergeOutcome` — message
+      HONNÊTE selon la classe, jamais « après un rebase » que le système NE fait PAS) posent le
+      **commentaire gatekeeper dédupliqué** (signé via le writer unique `GatekeeperSeal.as_gatekeeper/1` +
+      `dedup_signature`) + le verrou `lcars-awaits-arch` sur l'ISSUE (poller SKIP → fin du churn ; le label
+      EST le throttle) via l'unique point d'écriture `escalate_to_arch` (privé, pas de fork). **Frontière
+      blindée** : reçoit un struct `%ArchEscalation.Seams{}` (les 3 seams `forge`/`repo`/`forge_opts`,
+      `@enforce_keys` → un accès hors-3-seams ne compile pas), jamais le `ctx` entier. La **DÉCISION**
+      d'escalade (budget forge, classification `MergeOutcome`) reste le SINGLE-AUTHORITY du flux review
+      (`ReviewLifecycle.dispatch_rework`/`route_merge_failure`) — ArchEscalation ne fait QU'ÉCRIRE.
     - `Fleet.Pilot.StepDispatcher.Spawn` — **feuille de spawn SINGLE-AUTHORITY** sur laquelle les DEUX
       flux CONVERGENT (issue `dispatch_issue` + PR `ReviewLifecycle.do_dispatch_review`) : une seule copie de
       `spawn_step/9` (ordre canonique **verrou → pod → enqueue → wake**, wake EN DERNIER ; compensation
@@ -95,19 +96,23 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
     - `Fleet.Pilot.StepDispatcher.ReviewLifecycle` — **cycle de vie REVIEW (PR)**. `dispatch_review/2`
       (PUBLIQUE, contrat poller) RESTE au cœur (gate PR `in-flight`/`awaits-arch` + construction du `ctx` +
       lecture `pr_review_state`) et DÉLÈGUE l'aiguillage à `dispatch_by_verdicts/5` (point d'entrée). Le module
-      porte l'**aiguillage** (juge pending → spawn ; tous décisifs + un `:changes_requested` → rework ;
-      tous approuvé → merge ; aucun demandé → `:no_verdict`) + la **promotion** (`promote_pr` = sceau
-      `Fleet.Pilot.GatekeeperSeal` + merge rebase + die-on-promote de l'eng — reste ICI : son error-path
-      conflit ré-entre dans l'aiguillage). Deux sous-modules :
+      porte l'**aiguillage** (PR draft → `:skipped` ; juge pending → spawn ; tous décisifs + un
+      `:changes_requested` → rework ; tous approuvé → merge ; aucun demandé → `:no_verdict`) + la
+      **promotion** (`promote_pr` = sceau `Fleet.Pilot.GatekeeperSeal` + merge rebase + die-on-promote de
+      l'eng — reste ICI : son error-path ré-entre dans l'aiguillage via `route_merge_failure` qui relit
+      l'objet PR et classe la cause RÉELLE de l'échec). Deux sous-modules :
         - `ReviewLifecycle.RoleDispatch` — feuille d'EXÉCUTION partagée (prépare + spawn UN rôle sur la PR :
           juge/rework/résolution ; clone-base vs gate-base, identité pod par scope, gate `:role_busy`,
           briefs via BriefBuilder). C'est la coupe qui rend le graphe ACYCLIQUE : aiguillage ET remédiation
           convergent dessus (couper aiguillage↔rework en deux aurait créé un cycle — le rework rappelle le
           spawn du producteur).
-        - `ReviewLifecycle.Remediation` — remédiation BORNÉE (`dispatch_rework` borné MA-06 +
-          `dispatch_conflict_resolution` borné IncidentRegistry ; `encode_pr_letters/1` (pur, base-26
-          digit-free) vit ICI, consommé par la clé d'incident). DÉCIDE, puis redescend sur RoleDispatch
-          (re-spawn) ou ArchEscalation (mur humain).
+        - `ReviewLifecycle.Remediation` — remédiation BORNÉE (`dispatch_rework` borné MA-06) + **aiguillage
+          de l'échec de merge** `route_merge_failure` : relit l'objet PR et classe via `Fleet.Pilot.MergeOutcome`
+          (`:merged` no-op idempotent / `:closed` annulation humaine / `:draft` parqué / `:policy` re-request
+          humaine → re-dispatch du juge re-demandé (`pr_rerequested_reviewers`) / `:conflict`|`:unknown` →
+          escalade honnête). Remplace le fourre-tout « tout échec = conflit → eng rebase » (impossible car
+          forge-aveugle → mur 2026-07-07). DÉCIDE, puis redescend sur RoleDispatch (re-spawn) ou
+          ArchEscalation (mur humain).
       **Dépendance uni-directionnelle** (ReviewLifecycle → `Remediation`/`RoleDispatch` →
       `Spawn`/`ArchEscalation`/`GatekeeperSeal` → ø ; ne nomme JAMAIS `StepDispatcher` → pas de cycle) :
       les sous-modules re-construisent `Spawn.Seams`/`ArchEscalation.Seams` au site d'appel de chaque feuille. **Frontière blindée** : reçoit un struct `%ReviewLifecycle.Ctx{}` (les seams
@@ -151,7 +156,13 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       PLEINE éval (re-dispatch concurrent, verdict fantôme). `gate_eval_owned_refs` lit `TaskQueue.list_active`
       (metadata MA-03 : `gate_eval` + `resume_n` + repo du `resume_payload` — multi-projet : une éval de repoB ne
       possède pas une ref de repoA). Une éval `:cleared` (supersédée) ou `:completed` ne possède PLUS sa ref → le
-      reclaim reprend la main (re-dispatch → ré-escalade, self-heal borné par le budget rework). **Frontière blindée** : `%Seams{}` (`@enforce_keys`
+      reclaim reprend la main (re-dispatch → ré-escalade, self-heal borné par le budget rework). **Propriété
+      PR par l'issue** (fix 2026-07-07) : un PRODUCTEUR project-scoped en rework/résolution tient le verrou sur
+      la PR (`{repo,:pr,pr_n}`) mais son pod (`<repo>-role`, sans -pr-N-) ne dérivait de sa tâche active que
+      l'ISSUE → son verrou PR se faisait réclamer EN PLEIN TRAVAIL. `augment_pr_ownership_via_issue` : une PR
+      dont l'issue parente (head `lcars/issue-N-role`) est possédée est possédée aussi (les juges `for_pr`
+      possèdent déjà `{repo,:pr,n}` en direct — l'augmentation ne couvre QUE le producteur project-scoped).
+      **Frontière blindée** : `%Seams{}` (`@enforce_keys`
       `forge`/`spawner`/`task_queue`/`repo`/`forge_opts` — accès hors-5-seams ne compile pas), le caller résout
       les défauts prod (`spawner || Fleet.Spawner`) à SON site. La **grâce 2-tick** (`prior_suspects`) et
       l'**agrégation cross-repo** (`MapSet.union` des suspects de tous les repos du tick) = état CROSS-TICK →
@@ -195,7 +206,14 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       composant `..`/`.` est percent-encodé `%2E%2E` — le verrou du vecteur `owner/../admin` ; `/`
       structurels préservés, `/` injectés inertes). Importé par ForgeClient/Repo/Jury/Files ; testé par
       `url_safe_test.exs`.
-    - `Fleet.Pilot.ForgeClient.Jury` — état de jury PR (verdicts commit-scopés, jury volatil, feedback/rounds de rework).
+    - `Fleet.Pilot.ForgeClient.Jury` — état de jury PR (verdicts commit-scopés, jury volatil, feedback/rounds de
+      rework) + `pr_rerequested_reviewers/3` (juges re-demandés à la main, lu de la timeline par COMPTAGE
+      demandes-nettes vs reviews — immunisé à la granularité-seconde des horodatages Gitea ; absorbe le geste
+      humain « redemander un jugement » ET son annulation via `removed_assignee`).
+    - `Fleet.Pilot.MergeOutcome` — classification STRUCTURELLE PURE d'un échec de merge à partir de l'objet PR
+      (`merged`/`state`/`draft`/`mergeable`, jamais le message d'erreur) : somme fermée
+      `:merged|:closed|:draft|:conflict|:policy|:unknown`. Ordre des gardes load-bearing (`draft` AVANT
+      `mergeable` — un draft porte aussi `mergeable:false`). Consommé par `ReviewLifecycle.Remediation.route_merge_failure`.
     - `Fleet.Pilot.ForgeClient.Repo` — provisioning repo (create_repo/add_collaborator/protect_branch) +
       découverte par appartenance-org (`list_org_repos`, WS3) + accesseurs WS4 (`default_branch`,
       `branch_exists?`). Plus de sceau d'admission (`post_onboard_marker`/`admitted?` RETIRÉS WS3).

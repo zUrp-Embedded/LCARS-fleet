@@ -602,6 +602,10 @@ defmodule Fleet.Pilot.ForgeClient do
   def count_change_request_rounds(repo, index, opts \\ []),
     do: Jury.count_change_request_rounds(repo, index, opts)
 
+  @doc "Juges re-demandés après jugement (timeline). Voir `Fleet.Pilot.ForgeClient.Jury.pr_rerequested_reviewers/3`."
+  def pr_rerequested_reviewers(repo, index, opts \\ []),
+    do: Jury.pr_rerequested_reviewers(repo, index, opts)
+
   # put_file / get_file → `Fleet.Pilot.ForgeClient.Files` (concern autonome, appelé en direct, pas via
   # le seam — `IncidentRegistry` les injecte comme `:get_file_fun`/`:put_file_fun`). Pas de forwarder ici.
 

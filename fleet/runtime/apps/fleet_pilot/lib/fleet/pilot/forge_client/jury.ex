@@ -10,7 +10,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   pas le champ requested. Détails dans chaque `@doc`.
   """
 
-  import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, http_get: 2]
+  import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, http_get: 2, paginate: 3]
 
   # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1]
@@ -180,6 +180,89 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
       {:error, _} = err -> err
     end
   end
+
+  @doc """
+  Juges RE-DEMANDÉS après avoir déjà jugé (Gitea `GET .../issues/{index}/timeline`) : logins dont les
+  demandes de review NETTES (`review_request` ajouts − retraits) dépassent le nombre de reviews rendues.
+  C'est le signal STRUCTUREL d'un geste humain « redemander un jugement » (bouton UI) que ni les
+  review-records (Gitea ne les dismisse PAS à la re-request — vérifié live) ni `requested_reviewers`
+  (volatil) ne révèlent. Sans lui, une re-request est INVISIBLE au runtime : le juge n'est jamais
+  re-dispatché, le merge tente puis échoue en boucle sur `not enough approvals` (mur constaté 2026-07-07).
+
+  **Comptage, PAS ordre temporel** (leçon forge 2026-07-07) : les horodatages Gitea sont à la SECONDE →
+  un review et sa re-request dans la même seconde rendent tout ordre `>`/`>=` non fiable (raté ou
+  faux-positif). Le comptage y est IMMUNE. Séquence prod = `request_review`(1 ajout) → review(1) →
+  éventuelle re-request(2e ajout). Net−reviews : 0 = à jour (pas re-demandé) ; >0 = une demande non
+  répondue → re-jugement dû. L'ANNULATION est absorbée par la MÊME lecture : un retrait
+  (`removed_assignee: true`) décrémente le net → le juge repasse « à jour », le merge reprend. Un seul
+  read couvre le geste ET son retrait.
+
+  Timeline paginée (fail-loud sur page tronquée : une re-request ratée = merge wedgé en silence). Logins
+  downcasés (cohérent `jury_reviewers`/`verdicts_by_reviewer`).
+
+  ## Returns
+    * `{:ok, ["qualifier", ...]}` — juges à re-dispatcher (peut être vide)
+    * `{:error, term()}` — HTTP/transport/config
+  """
+  @spec pr_rerequested_reviewers(String.t(), integer(), Keyword.t()) ::
+          {:ok, [String.t()]} | {:error, term()}
+  def pr_rerequested_reviewers(repo, index, opts \\ [])
+      when is_binary(repo) and is_integer(index) do
+    # `paginate` rend TOUJOURS `{:ok, liste}` (accumulée) ou `{:error, _}` (dont
+    # `:unexpected_page_shape` sur une page non-liste — fail-loud, jamais un {:ok, non_list}) : pas de
+    # clause `{:ok, non_list}` à couvrir ici (contrairement aux lectures single-page via `http_get`).
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, events} <-
+           paginate(config, "/repos/#{encode_repo(repo)}/issues/#{index}/timeline", "") do
+      {:ok, rerequested_from_timeline(events)}
+    end
+  end
+
+  # Un juge est en attente de re-jugement ssi ses demandes NETTES (ajouts − retraits de `review_request`)
+  # dépassent ses reviews rendues. Comptage (immunisé à la granularité-seconde des horodatages), pas
+  # d'ordre temporel. Clé = login demandé (assignee) downcasé.
+  defp rerequested_from_timeline(events) do
+    adds = tally(events, fn e -> requested_login(e, false) end)
+    removals = tally(events, fn e -> requested_login(e, true) end)
+    reviews = tally(events, &review_author/1)
+
+    for {login, n_add} <- adds,
+        # a DÉJÀ jugé au moins une fois (sinon c'est une 1re demande jamais répondue = le jury standard,
+        # PAS un re-jugement ; ce cas n'atteint de toute façon pas la branche policy, qui suppose tout jugé).
+        n_rev = Map.get(reviews, login, 0),
+        n_rev > 0,
+        # demandes NETTES > reviews → une demande de review non répondue subsiste (re-jugement dû).
+        n_add - Map.get(removals, login, 0) - n_rev > 0,
+        do: login
+  end
+
+  # Compte par login (↓) les events dont `key_fun` extrait un login non-nil (les autres ignorés).
+  defp tally(events, key_fun) do
+    Enum.reduce(events, %{}, fn e, acc ->
+      case key_fun.(e) do
+        login when is_binary(login) -> Map.update(acc, login, 1, &(&1 + 1))
+        _ -> acc
+      end
+    end)
+  end
+
+  # Login demandé par un `review_request` (l'`assignee`, pas l'acteur), filtré ajout (want_removal false)
+  # vs retrait (true) via `removed_assignee`. Nil si l'event n'est pas un review_request de ce type.
+  defp requested_login(%{"type" => "review_request"} = e, want_removal) do
+    if Map.get(e, "removed_assignee", false) == want_removal do
+      e |> get_in(["assignee", "login"]) |> downcase_or_nil()
+    end
+  end
+
+  defp requested_login(_e, _want_removal), do: nil
+
+  defp review_author(%{"type" => "review"} = e),
+    do: e |> get_in(["user", "login"]) |> downcase_or_nil()
+
+  defp review_author(_e), do: nil
+
+  defp downcase_or_nil(s) when is_binary(s) and s != "", do: String.downcase(s)
+  defp downcase_or_nil(_), do: nil
 
   # Dernier REQUEST_CHANGES PAR reviewer (login → body). Même tri que `verdicts_by_reviewer` (ordre de
   # création Gitea → `List.last` = la review en vigueur), filtré aux REQUEST_CHANGES avec un body non-vide.

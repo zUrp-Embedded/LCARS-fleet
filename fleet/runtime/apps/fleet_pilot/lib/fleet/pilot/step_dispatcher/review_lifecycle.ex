@@ -13,9 +13,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     * `Remediation` — rework/conflit BORNÉS (budget forge-natif, IncidentRegistry) → au-delà,
       escalade arch, jamais de churn infini.
 
-  La promotion reste ICI : son error-path (`{:error, {:merge, _}}` = conflit) ré-entre
-  immédiatement dans l'aiguillage (fallback `Remediation.dispatch_conflict_resolution`) — le couple
-  merge/conflit se lit d'un seul tenant au niveau de la décision.
+  La promotion reste ICI : son error-path (`{:error, {:merge, _}}`) ré-entre immédiatement dans
+  l'aiguillage (`Remediation.route_merge_failure`, qui relit l'objet PR et classe la cause RÉELLE) — le
+  couple merge/échec se lit d'un seul tenant au niveau de la décision.
 
   ## Dépendance UNI-directionnelle (pas de cycle)
 
@@ -148,12 +148,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
         Remediation.dispatch_rework(pr_number, head, ctx)
 
       true ->
-        # Tous approuvé → MERGE. Si le merge échoue sur un CONFLIT (PR approuvée mais
-        # `main` a avancé + même fichier édité), on ne remonte PAS l'erreur sèche (= retry-à-l'infini avec un
-        # sceau mensonger). On RÉSOUT (rebase producteur), borné par l'IncidentRegistry (récurrence → escalade arch).
+        # Tous approuvé → MERGE. Un échec de merge n'est PAS forcément un conflit : on relit l'objet PR
+        # et on aiguille sur la cause RÉELLE (`route_merge_failure` : déjà-mergé / annulé / draft / policy
+        # re-request / vrai conflit / inconnu). Fini le fourre-tout « conflit → eng rebase impossible » (mur
+        # 2026-07-07) et le sceau mensonger d'avant `merge d'abord`.
         case promote_pr(pr_number, head, ctx) do
           {:error, {:merge, reason}} ->
-            Remediation.dispatch_conflict_resolution(pr_number, head, reason, ctx)
+            Remediation.route_merge_failure(pr_number, head, reason, ctx)
 
           other ->
             other

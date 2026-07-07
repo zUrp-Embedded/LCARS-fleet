@@ -3,19 +3,18 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   Cluster IMPUR « escalade arch » (écriture forge) extrait de `Fleet.Pilot.StepDispatcher`.
 
   Quand le cœur décisionnel de `StepDispatcher` a tranché qu'une PR ne peut plus avancer seule —
-  rework non convergent (budget de rounds épuisé, MA-06) ou conflit de merge non auto-résolu
-  (récurrence détectée par l'IncidentRegistry) — il DÉLÈGUE ici l'écriture de l'escalade vers le
-  seul canal humain (l'architecte) :
+  rework non convergent (budget de rounds épuisé, MA-06) ou merge bloqué non auto-résoluble (vrai
+  conflit git / échec non classifié, cf. `Fleet.Pilot.MergeOutcome`) — il DÉLÈGUE ici l'écriture de
+  l'escalade vers le seul canal humain (l'architecte) :
 
     1. un commentaire gatekeeper DÉDUPLIQUÉ (signé via `as_role`, `dedup_signature`) sur l'ISSUE ;
     2. le verrou `lcars-awaits-arch` posé sur l'ISSUE → le poller la SKIP (`decide/1`,
        `dispatch_review`), plus de re-dispatch → fin du churn.
 
-  Ce module ne DÉCIDE de RIEN : le budget de rework (`count_change_request_rounds`/forge),
-  l'IncidentRegistry (récurrence conflit) et le choix résolution-vs-escalade restent le
-  SINGLE-AUTHORITY du cœur (`dispatch_rework`/`dispatch_conflict_resolution`). Ce module ne fait
-  QU'ÉCRIRE — un seul point d'écriture forge partagé par les deux escalades (`escalate_to_arch`,
-  privé), pas de fork de signature/label.
+  Ce module ne DÉCIDE de RIEN : le budget de rework (`count_change_request_rounds`/forge) et la
+  classification de l'échec de merge (`Fleet.Pilot.MergeOutcome`) restent le SINGLE-AUTHORITY du cœur
+  (`dispatch_rework`/`route_merge_failure`). Ce module ne fait QU'ÉCRIRE — un seul point d'écriture
+  forge partagé par les deux escalades (`escalate_to_arch`, privé), pas de fork de signature/label.
 
   ## Frontière : struct de seams explicite (pas le `ctx` entier)
 
@@ -27,7 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
   ## Naming
 
-  L'API publique est `escalate_rework/4` + `escalate_conflict/4` (pas `escalate_rework_to_arch` :
+  L'API publique est `escalate_rework/4` + `escalate_merge_blocked/5` (pas `escalate_rework_to_arch` :
   le suffixe `_to_arch` est désormais porté par le nom du module — `ArchEscalation.escalate_rework`
   se lit sans redondance). `seams` est le 1ᵉʳ argument (le caller construit le contrat, PUIS
   décrit l'escalade).
@@ -41,7 +40,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     @moduledoc """
     Contrat de frontière du cluster d'escalade arch : les 3 seams d'écriture forge lus du dispatch
     (`forge`/`repo`/`forge_opts`). Construit par le caller AVANT `escalate_rework/4` ou
-    `escalate_conflict/4` — le cluster ne reçoit jamais le `ctx`/`opts` entier.
+    `escalate_merge_blocked/5` — le cluster ne reçoit jamais le `ctx`/`opts` entier.
     """
     @enforce_keys [:forge, :repo, :forge_opts]
     defstruct [:forge, :repo, :forge_opts]
@@ -58,7 +57,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
   @doc """
   Rework PR épuisé (rounds > budget, ou budget illisible) → l'arch tranche. Symétrique de
-  `escalate_conflict/4` : commentaire gatekeeper dédupliqué + verrou `lcars-awaits-arch` sur
+  `escalate_merge_blocked/5` : commentaire gatekeeper dédupliqué + verrou `lcars-awaits-arch` sur
   l'ISSUE (le poller la SKIP, plus de re-dispatch). `detail` (map `%{rounds, budget}` ou
   `{:budget_unreadable, reason}`) va DANS le commentaire, pas dans la clé de dédup.
 
@@ -83,31 +82,49 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   end
 
   @doc """
-  Conflit de merge non auto-résolu (1 tentative de rebase déjà faite → récurrence) → l'arch
-  tranche. Commentaire gatekeeper dédupliqué + verrou `lcars-awaits-arch` sur l'ISSUE → le poller
-  la SKIP (hors-dispatch, plus de retry). Honnête : on ne masque pas, on remonte au seul canal
-  humain. `reason` (détail forge du merge KO) va DANS le commentaire.
+  Merge bloqué et NON auto-résoluble par le système (vrai conflit git, ou échec non classifié) → l'arch
+  tranche. `class` (`:conflict` | autre) vient de `Fleet.Pilot.MergeOutcome` : le message dit la cause
+  RÉELLE, jamais « après une tentative de rebase » (le système ne rebase PAS — barrière forge-aveugle,
+  résolution mécanique = incrément ultérieur). Commentaire gatekeeper dédupliqué + verrou
+  `lcars-awaits-arch` sur l'ISSUE → le poller la SKIP (hors-dispatch, plus de retry ; le label EST le
+  throttle). `reason` (détail forge du merge KO) va DANS le commentaire.
 
-  Retour `{:skipped, {:merge_conflict_escalated, pr_number}}` = forme GÉRÉE par le poller
+  Retour `{:skipped, {:merge_blocked_escalated, pr_number}}` = forme GÉRÉE par le poller
   (`step_process_pulls`) → compté skipped, pas de crash. Un `{:escalated, _}` ne serait dans AUCUNE
   clause du `case do_poll` → CaseClauseError à chaque tick : un retour de dispatch DOIT être
   `{:ok|:skipped|:error}`, jamais une 4ᵉ forme. Head non-fleet → `{:skipped, :not_fleet_branch}`.
   """
-  @spec escalate_conflict(Seams.t(), integer(), String.t(), term()) :: {:skipped, term()}
-  def escalate_conflict(%Seams{} = seams, pr_number, head, reason) do
+  @spec escalate_merge_blocked(Seams.t(), integer(), String.t(), atom(), term()) ::
+          {:skipped, term()}
+  def escalate_merge_blocked(%Seams{} = seams, pr_number, head, class, reason) do
     with {:ok, issue_n} <- issue_of_branch_or_skip(head) do
-      signature = "[merge-conflict-escalation:pr-#{pr_number}]"
+      signature = "[merge-blocked-escalation:pr-#{pr_number}]"
 
       body =
-        "**Architecte** — ⚠ Conflit de merge non auto-résolu sur la PR ##{pr_number} (issue ##{issue_n}) " <>
-          "après une tentative de rebase+résolution (`#{inspect(reason)}`). Reprends : fais rebaser/résoudre la " <>
-          "PR sur `main`, ou re-cadre. L'issue reste hors-dispatch tant que `lcars-awaits-arch` est posé.\n\n" <>
-          signature
+        "**Architecte** — ⚠ Merge bloqué sur la PR ##{pr_number} (issue ##{issue_n}) — " <>
+          merge_blocked_cause(class, reason) <>
+          " Le système n'y touche PAS (barrière forge-aveugle : le pod n'a pas de credentials pour " <>
+          "rebaser). Reprends : résous/rebase la PR sur `main` (ou re-cadre). L'issue reste hors-dispatch " <>
+          "tant que `lcars-awaits-arch` est posé.\n\n" <> signature
 
       escalate_to_arch(seams, issue_n, signature, body)
-      {:skipped, {:merge_conflict_escalated, pr_number}}
+      {:skipped, {:merge_blocked_escalated, pr_number}}
     end
   end
+
+  # Cause HONNÊTE selon la classe RÉELLE (MergeOutcome) — jamais « après une tentative de rebase » qu'on
+  # n'a PAS faite (la résolution mécanique est un incrément ultérieur ; ici on ESCALADE, on ne prétend rien).
+  defp merge_blocked_cause(:conflict, _reason),
+    do:
+      "conflit git (les deux côtés touchent les mêmes lignes) → le merge automatique est impossible, résolution manuelle requise."
+
+  defp merge_blocked_cause(:policy, _reason),
+    do:
+      "blocage de branch-protection non levable mécaniquement (commits signés requis, ou une approbation manquante hors re-request) → à débloquer manuellement."
+
+  defp merge_blocked_cause(_unknown, reason),
+    do:
+      "échec de merge non classifié par le système (`#{inspect(reason)}`) → à trancher manuellement."
 
   # CŒUR d'escalade arch (factorisé — conflit ET rework épuisé) : commentaire gatekeeper DÉDUPLIQUÉ
   # (signé via `as_role`) + verrou `lcars-awaits-arch` sur l'ISSUE → le poller la SKIP

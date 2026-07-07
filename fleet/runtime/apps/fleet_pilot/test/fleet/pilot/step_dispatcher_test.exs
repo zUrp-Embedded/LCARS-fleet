@@ -124,6 +124,22 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
     def close_issue(_repo, _n, _opts), do: {:ok, :closed}
+
+    # Objet PR relu par `route_merge_failure` pour CLASSIFIER un échec de merge (MergeOutcome). Seam
+    # `_test_pull` (map de champs mergeable/draft/state) ; défaut = vrai conflit git (mergeable:false).
+    def get_pull(_repo, n, opts) do
+      {:ok,
+       Keyword.get(opts, :_test_pull, %{
+         "number" => n,
+         "state" => "open",
+         "draft" => false,
+         "mergeable" => false
+       })}
+    end
+
+    # Juges re-demandés (timeline) — seam `_test_rerequested` (défaut aucun).
+    def pr_rerequested_reviewers(_repo, _n, opts),
+      do: {:ok, Keyword.get(opts, :_test_rerequested, [])}
   end
 
   defmodule StubLoader do
@@ -879,24 +895,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:stopped_watch, 42}
     end
 
-    test "F-PARALLEL-PR-CONFLICT : merge en conflit → 1ʳᵉ fois résolution (re-spawn producteur), 2ᵉ fois escalade arch" do
-      tmp = Path.join(System.tmp_dir!(), "mc-#{System.unique_integer([:positive])}")
-      File.mkdir_p!(tmp)
-      on_exit(fn -> File.rm_rf(tmp) end)
+    # ── Angle « la machine lit l'état-forge complet » : échec de merge CLASSIFIÉ (2026-07-07) ──
+    # Remplace l'ancien fourre-tout « tout échec = conflit → eng rebase » (impossible car forge-aveugle →
+    # mur live). L'échec est relu de l'objet PR (MergeOutcome) et aiguillé sur sa cause RÉELLE.
 
-      # IncidentRegistry nommé (async-safe) + stubs forge (hermétique) = le compteur du garde-fou.
-      reg = :"reg_mc_#{System.unique_integer([:positive])}"
-
-      start_supervised!(
-        {Fleet.Pilot.IncidentRegistry,
-         name: reg,
-         wal_path: Path.join(tmp, "incidents.json"),
-         sync_debounce_ms: 5,
-         retry_ms: 50,
-         get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-         put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end}
-      )
-
+    test "échec merge + PR mergeable:false (VRAI conflit git) → escalade HONNÊTE arch (pas d'eng-rebase impossible)" do
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -905,85 +908,81 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       opts =
         dispatch_opts(
-          incident_registry_server: reg,
           forge_opts: [
             _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
-            _test_merge_result: {:error, {:http, 409, "not fast-forward"}}
+            _test_merge_result: {:error, {:http, 409, "conflict"}},
+            _test_pull: %{
+              "number" => 6,
+              "state" => "open",
+              "draft" => false,
+              "mergeable" => false
+            }
           ]
         )
 
-      # 1ʳᵉ fois : tous approuvé MAIS merge en CONFLIT → on RÉSOUT (re-spawn le producteur en mode résolution),
-      # PAS de merge, PAS d'escalade. Le brief porte l'instruction rebase+résous.
-      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StepDispatcher.dispatch_review(pr, opts)
-
-      assert_received {:spawned, _issue, spawn_opts}
-      assert spawn_opts[:brief] =~ "RÉSOLUTION DE CONFLIT"
+      # vrai conflit → escalade arch honnête (le système ne rebase PAS — barrière forge-aveugle) ;
+      # AUCUN spawn d'eng, AUCUN merge. Forme `{:skipped, _}` gérée par le poller.
+      assert {:skipped, {:merge_blocked_escalated, 6}} = StepDispatcher.dispatch_review(pr, opts)
+      refute_received {:spawned, _, _}
       refute_received {:merged, _}
-
-      # 2ᵉ fois (même conflit, même registry = récurrence) : la résolution a déjà été tentée → ESCALADE ARCH.
-      # Garde-fou : PAS de boucle infinie. Retour `{:skipped, _}` = forme gérée par le poller (PAS `{:escalated, _}`
-      # qui crashait do_poll en CaseClauseError, vu live arduino-morse PR#4).
-      assert {:skipped, {:merge_conflict_escalated, 6}} =
-               StepDispatcher.dispatch_review(pr, opts)
     end
 
-    test "MA-14 : 2 PR DISTINCTES en conflit (même repo) → la 2ᵉ N'est PAS vue récurrente (clé distincte) → résolue" do
-      # État illégal AVANT MA-14 : `IncidentRegistry.normalize` (`~r/\d+/ → "N"`) collapsait `pr-6` ≡ `pr-12`
-      # → après le 1er conflit (PR #6 enregistré), TOUTE PR suivante en conflit du repo était vue « récurrente »
-      # → escaladée arch au lieu d'être résolue (neutralisait F-PARALLEL dès le 2ᵉ issue parallèle). Le fix
-      # encode le n° de PR DIGIT-FREE au call-site (`pr-i`/`pr-q`…) → clés DISTINCTES → chaque PR a sa 1ʳᵉ chance.
-      tmp = Path.join(System.tmp_dir!(), "mc2-#{System.unique_integer([:positive])}")
-      File.mkdir_p!(tmp)
-      on_exit(fn -> File.rm_rf(tmp) end)
-
-      reg = :"reg_mc2_#{System.unique_integer([:positive])}"
-
-      start_supervised!(
-        {Fleet.Pilot.IncidentRegistry,
-         name: reg,
-         wal_path: Path.join(tmp, "incidents.json"),
-         sync_debounce_ms: 5,
-         retry_ms: 50,
-         get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-         put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end}
-      )
+    test "échec merge + PR mergeable:true (POLICY : re-request humaine) → re-dispatch le juge re-demandé" do
+      # LE cas hello-kitty : git mergeable, mais la branch-protection refuse (un juge re-demandé à la main
+      # a reset le compteur d'approbations). On re-dispatche ce juge (le bouton fait enfin son job), PAS
+      # d'escalade, PAS de traitement conflit.
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6,
+          "head" => %{"ref" => "lcars/issue-42-engineer"}
+        })
 
       opts =
         dispatch_opts(
-          incident_registry_server: reg,
           forge_opts: [
             _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
-            _test_merge_result: {:error, {:http, 409, "not fast-forward"}}
+            _test_merge_result: {:error, {:http, 405, "Does not have enough approvals"}},
+            _test_pull: %{"number" => 6, "state" => "open", "draft" => false, "mergeable" => true},
+            _test_rerequested: ["qualifier"]
           ]
         )
 
-      # PR #6 (issue 42) en conflit → 1ʳᵉ occurrence → RÉSOLUTION (re-spawn producteur).
-      pr6 =
+      assert {:ok, {:spawned, _pod, "qualifier"}} = StepDispatcher.dispatch_review(pr, opts)
+      refute_received {:merged, _}
+    end
+
+    test "échec merge + PR mergeable:true SANS re-request → escalade honnête (policy non levable, pas de wedge muet)" do
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            _test_pull: %{"number" => 6, "state" => "open", "draft" => false, "mergeable" => true},
+            _test_rerequested: []
+          ]
+        )
+
+      assert {:skipped, {:merge_blocked_escalated, 6}} = StepDispatcher.dispatch_review(pr, opts)
+    end
+
+    test "PR repassée en DRAFT (garde dispatch-juge) → skip, pas de review ni de merge" do
+      pr =
         pr(%{
           "number" => 6,
-          "head" => %{"ref" => "lcars/issue-42-engineer"},
-          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}]
+          "draft" => true,
+          "requested_reviewers" => [%{"login" => "Qualifier"}]
         })
 
-      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StepDispatcher.dispatch_review(pr6, opts)
-
-      # PR #12 (issue DIFFÉRENTE 50), AUTRE PR du même repo, AUSSI en conflit. AVANT le fix : `pr-12` collapse
-      # vers la même clé que `pr-6` (déjà vu) → ESCALADE prématurée. APRÈS : clé distincte → 1ʳᵉ occurrence →
-      # RÉSOLUTION (pas d'escalade). C'est le cœur de F-PARALLEL rétabli.
-      pr12 =
-        pr(%{
-          "number" => 12,
-          "head" => %{"ref" => "lcars/issue-50-engineer"},
-          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}]
-        })
-
-      # pod_id projet (slot_scope: project) : MÊME id que pr6 (`...-engineer`) — l'identité est
-      # par-projet, pas par-issue. La distinctness testée ici vit dans la CLÉ DE RÉCURRENCE
-      # (digit-free `pr-i`/`pr-q`), pas dans le pod_id. pr12 = 1ʳᵉ occurrence → résolue (pas escaladée).
-      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
-               StepDispatcher.dispatch_review(pr12, opts)
+      assert {:skipped, :draft} = StepDispatcher.dispatch_review(pr, dispatch_opts())
+      refute_received {:spawned, _, _}
+      refute_received {:merged, _}
     end
 
     test "②.1d : un juge a demandé des changements (les autres approuvent) -> re-spawn le PRODUCTEUR" do

@@ -279,7 +279,8 @@ defmodule Fleet.Pilot.StepDispatcher do
     ctx = %ReviewLifecycle.Ctx{
       forge: Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient),
       loader: Keyword.get(opts, :loader, Fleet.CapProfile),
-      workflow_map_loader: Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1),
+      workflow_map_loader:
+        Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       resolver: Keyword.get(opts, :project_resolver, &default_project_resolver/2),
@@ -308,6 +309,14 @@ defmodule Fleet.Pilot.StepDispatcher do
     cond do
       @in_flight_label in labels ->
         {:skipped, :in_flight}
+
+      # PR repassée en BROUILLON (draft) par un humain = parquée : elle n'est PAS prête pour la review
+      # (Gitea refuse d'ailleurs son merge, « Work in progress PRs cannot be merged »). On ne dispatche
+      # PAS de juge dessus — sinon on jugerait/mergerait un travail que l'humain a explicitement mis en
+      # pause. Le champ `draft` est DÉJÀ dans la shape PR (get_pull) — lecture gratuite, garde de décision
+      # complète (cf. angle « la machine lit l'état-forge gatant complet », 2026-07-07).
+      Map.get(pr, "draft") == true ->
+        {:skipped, :draft}
 
       # L'ISSUE parente porte `lcars-awaits-arch` (escalade : verdict gatekeeper
       # escalate/halt/redirect, ou conflit non auto-résolu) → on NE re-dispatch PAS le juge (sinon churn :

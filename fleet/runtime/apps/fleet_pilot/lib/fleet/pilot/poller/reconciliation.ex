@@ -98,8 +98,17 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
       :error ->
         prior_suspects
 
-      owned ->
+      owned0 ->
         repo = seams.repo
+
+        # PROPRIÉTÉ PR PAR L'ISSUE (fix 2026-07-07) : un PRODUCTEUR project-scoped en rework/résolution
+        # tient le verrou sur la PR (`{repo, :pr, pr_n}`), mais son pod (`<repo>-<role>`, sans -pr-N-)
+        # dérive de sa tâche active l'ISSUE (`{repo, :issue, N}`), jamais la PR → son verrou PR paraissait
+        # ORPHELIN et se faisait réclamer EN PLEIN TRAVAIL (bug hello-kitty : verrou volé pendant le pod
+        # vivant). On augmente `owned` : une PR dont l'issue parente (head `lcars/issue-N-role`) est
+        # possédée est possédée AUSSI. Les juges (pod `for_pr`) possèdent déjà `{repo,:pr,n}` en direct
+        # (parse_pod_ref) — cette augmentation ne couvre QUE le producteur project-scoped.
+        owned = augment_pr_ownership_via_issue(owned0, pulls, repo)
 
         # Orphelins REPO-QUALIFIÉS (`{repo, :issue|:pr, n}`) : la clé de verrou porte le repo, donc
         # `owned` (refs repo-scopées des pods vivants de CE repo) et `prior_suspects` (cross-tick, tous
@@ -128,6 +137,22 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
         Enum.each(to_reclaim, fn {_repo, _type, n} -> reclaim_lock(seams, n) end)
         MapSet.difference(orphaned_now, to_reclaim)
     end
+  end
+
+  # Augmente `owned` : une PR dont l'ISSUE parente est possédée par un pod vivant est possédée aussi. La
+  # branche head `lcars/issue-N-role` → N via le parseur UNIQUE `ForgeProtocol.parse_feature_branch`
+  # (pas un re-parse maison). Couvre le producteur project-scoped en rework/résolution (son pod
+  # `<repo>-role` ne porte pas -pr-N-, il ne possédait que `{repo,:issue,N}`). Une PR non-fleet ou dont
+  # l'issue n'est pas possédée est laissée telle quelle (candidate orpheline si elle porte le verrou).
+  defp augment_pr_ownership_via_issue(owned, pulls, repo) do
+    for p <- pulls,
+        pr_n = p["number"],
+        is_integer(pr_n),
+        head = get_in(p, ["head", "ref"]) || "",
+        {:ok, {issue_n, _role}} <- [Fleet.Pilot.ForgeProtocol.parse_feature_branch(head)],
+        MapSet.member?(owned, {repo, :issue, issue_n}),
+        into: owned,
+        do: {repo, :pr, pr_n}
   end
 
   # Refs `{repo, :issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes STABLES

@@ -124,8 +124,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   end
 
   @doc """
-  Commentaire de fin DESCRIPTIF + HONNÊTE (traça user) : qui a livré, qui a validé, qui a scellé,
-  et que la branch-protection est OFF (interim dev → LCARS agrège, rien maquillé).
+  Commentaire de fin DESCRIPTIF + HONNÊTE (traça user) : qui a livré, qui a validé, qui a scellé, et que
+  la branch-protection native EXIGE les approbations (LCARS les orchestre puis le gatekeeper scelle ;
+  rien maquillé). Merge rebase (linéaire).
   """
   @spec promote_comment(integer(), integer(), String.t()) :: String.t()
   def promote_comment(issue_n, pr_number, producer) do
@@ -134,9 +135,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
     - **Livrée par** : `#{producer}` (engineer) — PR ##{pr_number} (l'eng a codé, le système a poussé).
     - **Validée par** : les juges (qualifier + reviewer) ont **APPROUVÉ** la PR (reviews natives).
-    - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge fast-forward — ce ticket sera fermé juste après ce commentaire.
+    - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge **rebase** (historique linéaire) — ce ticket sera fermé juste après ce commentaire.
 
-    > ⚠ **Interim (dev)** : la branch-protection native est **OFF** pour ne pas bloquer le push pendant le dev — c'est **LCARS qui agrège les verdicts** des juges et scelle le merge (pas Gitea). Cible : branch-protection native (require qualifier+reviewer approuvés + CI vert). Traça honnête : rien n'est maquillé.
+    > ⚠ **Interim (dev)** : la branch-protection native **EXIGE les approbations des juges** (push direct sur `main` bloqué) ; LCARS orchestre l'obtention des verdicts, puis le `gatekeeper` (habilité au merge) scelle. Cible : y **ajouter le CI vert requis**. Traça honnête : rien n'est maquillé.
     """
   end
 end

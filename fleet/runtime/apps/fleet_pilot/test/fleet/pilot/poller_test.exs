@@ -524,6 +524,55 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
+    test "verrou PR TENU par un producteur project-scoped en rework/résolution (possédé via l'issue, pas réclamé)" do
+      # Fix 2026-07-07 : un producteur project (`<repo>-engineer`, sans -pr-N-) en rework tient le verrou
+      # SUR LA PR ({repo,:pr,6}), mais sa tâche active ne lui donnait que l'ISSUE ({repo,:issue,8}) → son
+      # verrou PR paraissait orphelin et se faisait voler EN PLEIN TRAVAIL (hello-kitty). L'augmentation
+      # « PR dont l'issue parente est possédée = possédée » le protège : PR #6 (head lcars/issue-8-engineer)
+      # JAMAIS réclamée tant que l'eng travaille #8, même après la grâce 2-tick.
+      issues = [
+        %{
+          "number" => 8,
+          "body" => "x",
+          "labels" => [%{"name" => "lcars-in-flight"}],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      pulls = [
+        %{
+          "number" => 6,
+          "head" => %{"ref" => "lcars/issue-8-engineer"},
+          "labels" => [%{"name" => "lcars-in-flight"}]
+        }
+      ]
+
+      name = :"P_pr_lock_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, issues}, _test_pulls: {:ok, pulls}, _test_pid: self()],
+          loader: StepStubLoader,
+          spawner: ProjectPipeSpawner,
+          task_queue: ProjectTaskQueueIssue8
+        )
+
+      Poller.force_poll(name)
+      Poller.force_poll(name)
+
+      # ni le verrou ISSUE (#8, exclu du scan car PR-backed) ni le verrou PR (#6, possédé via l'issue) réclamés.
+      refute_received {:remove_label, 6, _}
+      refute_received {:remove_label, 8, _}
+
+      GenServer.stop(pid)
+    end
+
     test "G1 : verrou TENU pendant une éval gatekeeper ACTIVE (jamais réclamé, même après la grâce)" do
       # Fenêtre d'éval : le producteur de #8 est FINI (aucun pod vivant), le gatekeeper PERMANENT
       # porte la tâche d'éval (pod_id sans slug repo → invisible aux refs par pod_id). Sans le fix,

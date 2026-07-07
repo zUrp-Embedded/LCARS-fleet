@@ -1180,6 +1180,77 @@ defmodule Fleet.Pilot.ForgeClientTest do
     end
   end
 
+  describe "pr_rerequested_reviewers/3 (timeline — geste humain « redemander un jugement »)" do
+    # events timeline Gitea : review (user=juge) / review_request (assignee=juge, removed_assignee=bool).
+    defp rev(login, at),
+      do: %{"type" => "review", "user" => %{"login" => login}, "created_at" => at}
+
+    defp req(login, at, removed?),
+      do: %{
+        "type" => "review_request",
+        "user" => %{"login" => "admin"},
+        "assignee" => %{"login" => login},
+        "removed_assignee" => removed?,
+        "created_at" => at
+      }
+
+    defp timeline(repo, n, events),
+      do: %{{"GET", "/api/v1/repos/#{repo}/issues/#{n}/timeline"} => {200, events}}
+
+    # COMPTAGE (immunisé à la granularité-seconde), pas d'ordre temporel : les `at` ci-dessous sont
+    # IDENTIQUES (même seconde) exprès — le comptage doit trancher pareil (c'est le trou du `>` strict
+    # trouvé sur forge). Séquence PROD : demande initiale (`req add`) → review → éventuelle re-request.
+
+    test "séquence prod : demande initiale + review + RE-request (net 2−1>0) → rendu, MÊME seconde" do
+      h =
+        timeline("fleet/proj", 7, [
+          req("qualifier", "2026-07-07T14:14:20Z", false),
+          rev("qualifier", "2026-07-07T14:14:20Z"),
+          req("qualifier", "2026-07-07T14:14:20Z", false)
+        ])
+
+      assert {:ok, ["qualifier"]} = ForgeClient.pr_rerequested_reviewers("fleet/proj", 7, opts(h))
+    end
+
+    test "re-request PUIS annulation (removed_assignee, net 2−1−1=0) → [] (annulation absorbée)" do
+      h =
+        timeline("fleet/proj", 7, [
+          req("qualifier", "2026-07-07T14:14:20Z", false),
+          rev("qualifier", "2026-07-07T14:14:20Z"),
+          req("qualifier", "2026-07-07T14:14:36Z", false),
+          req("qualifier", "2026-07-07T14:17:06Z", true)
+        ])
+
+      assert {:ok, []} = ForgeClient.pr_rerequested_reviewers("fleet/proj", 7, opts(h))
+    end
+
+    test "demande initiale + review, sans re-request (net 1−1=0) → [] (nominal, pas de relance parasite)" do
+      h =
+        timeline("fleet/proj", 7, [
+          req("qualifier", "2026-07-07T14:14:20Z", false),
+          rev("qualifier", "2026-07-07T14:14:20Z")
+        ])
+
+      assert {:ok, []} = ForgeClient.pr_rerequested_reviewers("fleet/proj", 7, opts(h))
+    end
+
+    test "1re demande jamais reviewé (0 review) → [] (le jury standard couvre, pas un RE-jugement)" do
+      h = timeline("fleet/proj", 7, [req("reviewer", "2026-07-07T14:14:36Z", false)])
+      assert {:ok, []} = ForgeClient.pr_rerequested_reviewers("fleet/proj", 7, opts(h))
+    end
+
+    test "login casse-mixte normalisé (downcase, cohérent jury)" do
+      h =
+        timeline("fleet/proj", 7, [
+          req("Qualifier", "2026-07-07T14:14:20Z", false),
+          rev("Qualifier", "2026-07-07T14:14:20Z"),
+          req("Qualifier", "2026-07-07T14:14:20Z", false)
+        ])
+
+      assert {:ok, ["qualifier"]} = ForgeClient.pr_rerequested_reviewers("fleet/proj", 7, opts(h))
+    end
+  end
+
   describe "assigned_by_qs/1 (#5.2 D1b — scoping forge-side, vérifié live Gitea 1.26.1)" do
     test "opt absent → suffixe vide (pas de filtre)" do
       assert ForgeClient.assigned_by_qs([]) == ""
