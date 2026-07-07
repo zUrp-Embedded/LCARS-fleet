@@ -1,47 +1,50 @@
 defmodule Fleet.Coord.Emitter do
   @moduledoc """
-  Passe d'ÉMISSION de fleet_coord : traduit un MATCH de policy
-  (`{action, escalation_path}` rendu par la table `Fleet.Coord.Policies`)
-  en `%Fleet.Event{source: :coord}` canon et le broadcaste sur `fleet.events`.
+  EMISSION pass of fleet_coord: translates a policy MATCH
+  (`{action, escalation_path}` returned by the `Fleet.Coord.Policies` table)
+  into a canonical `%Fleet.Event{source: :coord}` and broadcasts it on
+  `fleet.events`.
 
-  Extrait de `Policies` (éclatement C4 2026-07-05) : le lookup de table
-  (charger/valider/interroger le YAML) et la construction+broadcast d'un event
-  wire sont deux passes distinctes qui ne partagent AUCUN helper — la table ne
-  sait rien du schema d'event, l'émission ne lit jamais la table. `Policies`
-  reste l'entrée publique (`handle_decision`/`handle_escalation`) et appelle
-  `dispatch_action/4` avec le match trouvé.
+  Split out of `Policies` (2026-07-05): the table lookup
+  (load/validate/query the YAML) and the build+broadcast of a wire event are
+  two distinct passes that share NO helper — the table knows nothing of the
+  event schema, the emission never reads the table. `Policies` stays the
+  public entry (`handle_decision`/`handle_escalation`) and calls
+  `dispatch_action/4` with the match it found.
 
-  ## Actions → events (payload = la décision/escalade d'origine, normalisée)
+  ## Actions → events (payload = the original decision/escalation, normalized)
 
     * `"notify_dashboard"` → `coord.notification_routed` (target `"dashboard"`)
     * `"escalate_human"` → `coord.escalation_triggered` (target `"operator"`)
-    * toute autre action string → `coord.action_dispatched` (action en
-      payload — extensible sans recompile ; préfixe `coord.` obligatoire :
-      un type nu serait hors registry → broadcast rejeté → drop silencieux)
+    * any other action string → `coord.action_dispatched` (action in the
+      payload — extensible without recompile; the `coord.` prefix is
+      mandatory: a bare type would be outside the registry → broadcast
+      rejected → silent drop)
 
-  ## Politique de broadcast (best-effort, jamais bloquant)
+  ## Broadcast policy (best-effort, never blocking)
 
-  Via le cœur protégé `Bus.safe_emit/4` (l'autorité Ring 0 de cette politique) :
-  `UnregisteredError` (registry pas encore peuplé au boot order) toléré en
-  SILENCE pour ne pas casser le boot — fire-and-forget ; un event MALFORMÉ
-  (bug de construction) est loggé ERROR par safe_emit puis neutralisé — coord
-  ne doit pas crasher sur un défaut d'observabilité. Le `correlation_id`
-  (task.id UUID du work item d'origine, nil hors work item) est propagé sur
-  chaque broadcast pour relier l'event à son work item.
+  Via the protected core `Bus.safe_emit/4` (the Ring 0 authority of this
+  policy): `UnregisteredError` (registry not yet populated at boot order)
+  tolerated in SILENCE so as not to break the boot — fire-and-forget; a
+  MALFORMED event (build bug) is logged ERROR by safe_emit then neutralized —
+  coord must not crash on an observability defect. The `correlation_id`
+  (task.id UUID of the original work item, nil outside a work item) is
+  propagated on every broadcast to tie the event back to its work item.
   """
 
   alias Fleet.EventRouter.Bus
 
   @doc """
-  Émet l'event canon correspondant à `action` (cf. moduledoc § Actions).
-  `path` = `escalation_path` de la policy (relayé tel quel en payload) ;
-  `payload` = la décision (`%Fleet.Starfleet.Decision{}`/map) ou le payload
-  d'escalade d'origine — normalisé en map, dont on extrait `pod_id`/`verdict`/
-  `reason` (clés atom OU string) ; `correlation_id` propagé sur le broadcast.
+  Emits the canonical event corresponding to `action` (cf. moduledoc
+  § Actions). `path` = the policy's `escalation_path` (relayed as-is into the
+  payload); `payload` = the decision (`%Fleet.Starfleet.Decision{}`/map) or the
+  original escalation payload — normalized into a map, from which we extract
+  `pod_id`/`verdict`/`reason` (atom OR string keys); `correlation_id`
+  propagated on the broadcast.
 
-  Rend TOUJOURS `:ok` (broadcast best-effort — cf. moduledoc § Politique) :
-  le succès du dispatch est le succès du LOOKUP (rendu par `Policies`), pas
-  celui de l'observabilité.
+  ALWAYS returns `:ok` (best-effort broadcast — cf. moduledoc § Policy): the
+  dispatch's success is the LOOKUP's success (returned by `Policies`), not the
+  observability's.
   """
   @spec dispatch_action(String.t(), term(), term(), String.t() | nil) :: :ok
   def dispatch_action("notify_dashboard", path, payload, correlation_id) do
@@ -72,9 +75,9 @@ defmodule Fleet.Coord.Emitter do
   end
 
   defp canon_action(action, path, payload, correlation_id) do
-    # Clé registry = `coord.action_dispatched` (préfixe coord, cohérent avec
-    # coord.notification_routed/escalation_triggered). Un `:action_dispatched` nu
-    # serait hors registry → broadcast rejeté (UnregisteredError) → drop silencieux.
+    # Registry key = `coord.action_dispatched` (coord prefix, consistent with
+    # coord.notification_routed/escalation_triggered). A bare `:action_dispatched`
+    # would be outside the registry → broadcast rejected (UnregisteredError) → silent drop.
     safe_canon_broadcast(:"coord.action_dispatched",
       pod_id: extract_pod_id(payload),
       correlation_id: correlation_id,
@@ -94,9 +97,9 @@ defmodule Fleet.Coord.Emitter do
   defp canon_type(:escalation_triggered),
     do: :"coord.escalation_triggered"
 
-  # Broadcast canon strict (source :coord) via le cœur protégé `Bus.safe_emit/4` — la politique
-  # best-effort a UNE autorité (Ring 0). `:silent` : UnregisteredError toléré sans bruit (boot
-  # order) ; event malformé loggé ERROR par safe_emit puis neutralisé (cf. moduledoc).
+  # Strict canonical broadcast (source :coord) via the protected core `Bus.safe_emit/4` — the
+  # best-effort policy has ONE authority (Ring 0). `:silent`: UnregisteredError tolerated without
+  # noise (boot order); malformed event logged ERROR by safe_emit then neutralized (cf. moduledoc).
   defp safe_canon_broadcast(type, opts) do
     Bus.safe_emit(:coord, type, opts,
       on_unregistered: :silent,
