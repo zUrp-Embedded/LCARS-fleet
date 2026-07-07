@@ -1,53 +1,55 @@
 defmodule Fleet.SchemaCache do
   @moduledoc """
-  Autorité unique du pattern « artefact chargé une fois, caché en `:persistent_term` »
-  (schemas JSON résolus, configs boot-time).
+  Single authority for the "load an artifact once, cache it in `:persistent_term`"
+  pattern (resolved JSON schemas, boot-time configs).
 
-  Dédup B-R2 : le pipeline `File.read! |> Jason.decode! |> ExJsonSchema.Schema.resolve`
-  + cache `:persistent_term` vivait copié dans `fleet_workflow` (Loader),
-  `fleet_starfleet` (Gatekeeper) et `fleet_coord` (Policies — qui, lui, relisait et
-  re-résolvait le fichier schema à CHAQUE validation, sans cache). Une seule
-  implémentation ici, Ring 0 : workflow/starfleet/coord dépendent déjà de
-  `fleet_event_router`, zéro nouvelle arête dans `priv/allowed_graph.yaml`.
+  Dedup: the pipeline `File.read! |> Jason.decode! |> ExJsonSchema.Schema.resolve`
+  + `:persistent_term` cache lived copied across `fleet_workflow` (Loader),
+  `fleet_starfleet` (Gatekeeper) and `fleet_coord` (Policies — which re-read and
+  re-resolved the schema file on EVERY validation, without a cache). A single
+  implementation here, Ring 0: workflow/starfleet/coord already depend on
+  `fleet_event_router`, zero new edge in `priv/allowed_graph.yaml`.
 
-  ## Pourquoi `:persistent_term` (et pas ETS / un GenServer)
+  ## Why `:persistent_term` (and not ETS / a GenServer)
 
-  Ces artefacts sont lus à CHAQUE validation (hot path) et écrits UNE fois au boot
-  ou au premier accès : exactement le profil `:persistent_term` — lecture sans copie
-  ni verrou, depuis n'importe quel process, sans process porteur (Iron Law : pas de
-  process sans raison runtime). La contrepartie est le coût d'écriture : chaque `put`
-  déclenche un scan du heap de TOUS les process (GC global). JAMAIS de `put`
-  par-tick / par-requête à travers ce module — un artefact, une écriture.
+  These artifacts are read on EVERY validation (hot path) and written ONCE at boot
+  or on first access: exactly the `:persistent_term` profile — read with no copy nor
+  lock, from any process, with no carrier process (Iron Law: no process without a
+  runtime reason). The trade-off is the write cost: each `put` triggers a heap scan
+  of ALL processes (global GC). NEVER a per-tick / per-request `put` through this
+  module — one artifact, one write.
 
-  ## Contrat de clé
+  ## Key contract
 
-  La clé `:persistent_term` est l'IDENTITÉ du cache : deux paths différents sous la
-  même clé = la même entrée (le premier chargé gagne). Si le path peut varier dans la
-  vie du BEAM (override de test via Application env), mets le path RÉSOLU DANS la clé
-  (ex. `{__MODULE__, :schema, path}`) — chaque variante a son entrée, pas de pollution
-  prod↔test. Une clé fixe (ex. `{Gatekeeper, :decision_schema}`) sert aux artefacts
-  chargés une fois au boot et relus par `fetch!/2` (qui ne connaît pas le path).
+  The `:persistent_term` key is the cache's IDENTITY: two different paths under the
+  same key = the same entry (the first one loaded wins). If the path can vary within
+  the BEAM's lifetime (test override via Application env), put the RESOLVED path IN
+  the key (e.g. `{__MODULE__, :schema, path}`) — each variant has its own entry, no
+  prod↔test pollution. A fixed key (e.g. `{Gatekeeper, :decision_schema}`) serves
+  artifacts loaded once at boot and re-read by `fetch!/2` (which does not know the
+  path).
 
-  ## Note Ring 0 (cap_profile)
+  ## Ring 0 note (cap_profile)
 
-  `fleet_cap_profile` (Ring 0 lui aussi, SANS dep vers `fleet_event_router`) garde
-  deux copies locales du squelette `cached/2` (`CapProfile.Schema.load_schema_file/1`,
-  `CapProfile.DisallowedTools.load_baseline_git_ops_denied!/0`) : on n'ajoute pas une
-  arête intra-R0 pour dix lignes. Si l'arête apparaît un jour pour une autre raison,
-  migrer ces deux sites.
+  `fleet_cap_profile` (Ring 0 as well, WITHOUT a dep toward `fleet_event_router`)
+  keeps two local copies of the `cached/2` skeleton
+  (`CapProfile.Schema.load_schema_file/1`,
+  `CapProfile.DisallowedTools.load_baseline_git_ops_denied!/0`): we do not add an
+  intra-R0 edge for ten lines. If the edge appears one day for another reason,
+  migrate these two sites.
   """
 
-  # Sentinelle de miss namespacée : `nil` ou `:miss` nus seraient des VALEURS
-  # cachables légitimes (le fun de `cached/2` peut retourner n'importe quoi).
+  # Namespaced miss sentinel: a bare `nil` or `:miss` would be legitimate cacheable
+  # VALUES (the fun of `cached/2` can return anything).
   @miss {__MODULE__, :miss}
 
   @doc """
-  Read + decode + resolve d'un JSON-schema, caché en `:persistent_term` sous
-  `persistent_key`. Idempotent : un hit ne relit PAS le fichier (les schemas priv
-  sont immuables dans la vie du BEAM). Fail-loud si le fichier est absent
-  (`File.Error`), malformé (`Jason.DecodeError`) ou non-résolvable
-  (`ExJsonSchema` raise) — un schema cassé est un artefact de deploy cassé, le
-  boot doit crasher, jamais log-and-continue.
+  Read + decode + resolve of a JSON schema, cached in `:persistent_term` under
+  `persistent_key`. Idempotent: a hit does NOT re-read the file (priv schemas are
+  immutable within the BEAM's lifetime). Fail-loud if the file is absent
+  (`File.Error`), malformed (`Jason.DecodeError`) or non-resolvable (`ExJsonSchema`
+  raises) — a broken schema is a broken deploy artifact, the boot must crash, never
+  log-and-continue.
   """
   @spec resolve_json_schema!(term(), Path.t()) :: ExJsonSchema.Schema.Root.t()
   def resolve_json_schema!(persistent_key, path) do
@@ -57,10 +59,10 @@ defmodule Fleet.SchemaCache do
   end
 
   @doc """
-  Get-or-raise : lit la valeur cachée sous `persistent_key`, raise `ArgumentError`
-  si rien n'a été chargé. `boot_loader` (optionnel) nomme la fonction d'init à
-  appeler au boot (ex. `"Fleet.Coord.Policies.init_policies!/0"`) pour un message
-  d'erreur actionnable.
+  Get-or-raise: reads the value cached under `persistent_key`, raises `ArgumentError`
+  if nothing was loaded. `boot_loader` (optional) names the init function to call at
+  boot (e.g. `"Fleet.Coord.Policies.init_policies!/0"`) for an actionable error
+  message.
   """
   @spec fetch!(term(), String.t() | nil) :: term()
   def fetch!(persistent_key, boot_loader \\ nil) do
@@ -78,14 +80,14 @@ defmodule Fleet.SchemaCache do
   end
 
   @doc """
-  Cache lazy générique : retourne la valeur cachée sous `persistent_key`, sinon
-  exécute `fun`, cache son résultat et le retourne. Si `fun` raise, RIEN n'est
-  caché — le prochain appel retente (erreurs non-cachées).
+  Generic lazy cache: returns the value cached under `persistent_key`, otherwise
+  runs `fun`, caches its result and returns it. If `fun` raises, NOTHING is cached
+  — the next call retries (errors are not cached).
 
-  Piège assumé : si `fun` retourne un tuple `{:error, _}` (au lieu de raise),
-  ce tuple EST caché comme n'importe quelle valeur. Pour un chargement dont
-  l'échec doit rester retentable, faire raise (cf. `resolve_json_schema!/2`)
-  ou gérer le cache à la main (cf. `Fleet.CapProfile.Schema`).
+  Assumed gotcha: if `fun` returns an `{:error, _}` tuple (instead of raising), that
+  tuple IS cached like any other value. For a load whose failure must stay
+  retryable, raise (see `resolve_json_schema!/2`) or manage the cache by hand (see
+  `Fleet.CapProfile.Schema`).
   """
   @spec cached(term(), (-> term())) :: term()
   def cached(persistent_key, fun) when is_function(fun, 0) do

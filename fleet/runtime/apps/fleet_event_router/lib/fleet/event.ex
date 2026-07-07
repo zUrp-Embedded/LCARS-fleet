@@ -1,23 +1,23 @@
 defmodule Fleet.Event do
   @moduledoc """
-  Schema canon des events publiés sur Phoenix.PubSub topic `fleet.events`.
+  Canonical schema of the events published on the Phoenix.PubSub topic `fleet.events`.
 
-  Wire format UNIQUE : tous les producteurs émettent cette struct `%Fleet.Event{}`. Le `Bus` n'expose
-  pas de shim 3-arité `{atom, map}` — « Subscribe à `fleet.events` » garantit donc une forme unique,
-  pas un tuple à dé-wrapper côté consommateur.
+  SINGLE wire format: every producer emits this `%Fleet.Event{}` struct. The `Bus` exposes no
+  3-arity `{atom, map}` shim — "subscribe to `fleet.events`" therefore guarantees a single shape,
+  not a tuple to un-wrap on the consumer side.
 
-  Le `source` est une **enum closed list** (le type `source()` ci-dessous). L'étendre = amender cette
-  liste ET ajouter l'entrée correspondante dans `events.yaml` (sinon l'event part hors registry).
-  Cette appartenance n'est plus seulement documentée : `new/3` (le constructeur canonique) la
-  **enforce** à la construction — une source hors-enum lève, l'event invalide n'est jamais représenté.
+  The `source` is a **closed enum** (the `source()` type below). Extending it = amend this list AND
+  add the matching entry in `events.yaml` (otherwise the event leaves the registry). This membership
+  is no longer merely documented: `new/3` (the canonical constructor) **enforces** it at construction
+  — an out-of-enum source raises, the invalid event is never represented.
 
-  Construire un event = `Fleet.Event.new(source, type, opts)` (« parse, don't validate »). C'est le
-  seul point de construction des producteurs : il garantit `source ∈ enum` et `timestamp` = `%DateTime{}`.
-  Les consommateurs, eux, pattern-matchent la struct (`%Fleet.Event{source: :task_queue, type: :"work_item.completed"} = ev`) — ils
-  ne la construisent pas.
+  Constructing an event = `Fleet.Event.new(source, type, opts)` ("parse, don't validate"). It is the
+  sole construction point for producers: it guarantees `source ∈ enum` and `timestamp` = `%DateTime{}`.
+  Consumers, on the other hand, pattern-match the struct
+  (`%Fleet.Event{source: :task_queue, type: :"work_item.completed"} = ev`) — they do not construct it.
 
-  Convention de nommage d'un event = `<source>.<type>` (ex. `:spawner.pod_degraded`,
-  `:task_queue."work_item.completed"`). Matching consommateur :
+  Event naming convention = `<source>.<type>` (e.g. `:spawner.pod_degraded`,
+  `:task_queue."work_item.completed"`). Consumer matching:
   `handle_info(%Fleet.Event{source: :task_queue, type: :"work_item.completed"} = ev, state)`.
   """
 
@@ -47,32 +47,32 @@ defmodule Fleet.Event do
   @enforce_keys [:source, :type, :timestamp]
   defstruct [:source, :type, :timestamp, :pod_id, :correlation_id, payload: %{}]
 
-  # Enum closed list des sources. Étendre = amender cette liste + l'entrée events.yaml correspondante.
+  # Closed enum of sources. Extend = amend this list + the matching events.yaml entry.
   @canonical_sources ~w(spawner task_queue mcp coord workflow starfleet event_router credentials capprofile spbuilder doctrine api)a
 
-  @doc "Sources canoniques (enum closed list)."
+  @doc "The canonical sources (closed enum)."
   @spec canonical_sources() :: [source()]
   def canonical_sources, do: @canonical_sources
 
-  @doc "Vrai si la source appartient à l'enum closed list canonique."
+  @doc "True if the source belongs to the canonical closed enum."
   @spec valid_source?(atom()) :: boolean()
   def valid_source?(source), do: source in @canonical_sources
 
   @doc """
-  Constructeur canonique d'un `%Fleet.Event{}` — « parse, don't validate » : il rend l'invalide
-  non-représentable et c'est le SEUL point de construction des producteurs.
+  Canonical constructor of a `%Fleet.Event{}` — "parse, don't validate": it makes the invalid
+  non-representable and is the SOLE construction point for producers.
 
-  Garanties (un producteur qui les viole est un bug, pas un cas à tolérer → fail-loud) :
+  Guarantees (a producer that violates them is a bug, not a case to tolerate → fail-loud):
 
-    * `source` est validé contre l'enum closed list (`valid_source?/1`) ; une source hors-catalogue
-      lève `ArgumentError` (corrige la source côté producteur, n'élargis pas l'enum à l'aveugle).
-    * `timestamp` est TOUJOURS un `%DateTime{}` : défaut `DateTime.utc_now/0`. Un override via
-      `opts[:timestamp]` n'est accepté QUE si c'est déjà un `%DateTime{}` — toute autre valeur lève
-      `ArgumentError` (le timestamp d'un event ne peut jamais être autre chose qu'un DateTime).
+    * `source` is validated against the closed enum (`valid_source?/1`); an out-of-catalogue source
+      raises `ArgumentError` (fix the source on the producer side, do not widen the enum blindly).
+    * `timestamp` is ALWAYS a `%DateTime{}`: default `DateTime.utc_now/0`. An override via
+      `opts[:timestamp]` is accepted ONLY if it is already a `%DateTime{}` — any other value raises
+      `ArgumentError` (an event's timestamp can never be anything but a DateTime).
 
-  Le `type` reste un `atom()` libre : l'enum fermé du `type` n'est pas enforcé ici (seul le `source`
-  l'est, conformément au schéma). Options reconnues : `:timestamp` (`%DateTime{}`), `:pod_id`
-  (`String.t() | nil`), `:correlation_id` (`String.t() | nil`), `:payload` (`map()`, défaut `%{}`).
+  The `type` stays a free `atom()`: the closed enum of `type` is not enforced here (only `source`
+  is, per the schema). Recognized options: `:timestamp` (`%DateTime{}`), `:pod_id`
+  (`String.t() | nil`), `:correlation_id` (`String.t() | nil`), `:payload` (`map()`, default `%{}`).
   """
   @spec new(source(), atom(), keyword()) :: t()
   def new(source, type, opts \\ []) when is_atom(type) and is_list(opts) do
@@ -93,8 +93,8 @@ defmodule Fleet.Event do
     }
   end
 
-  # Le timestamp ne peut JAMAIS être autre chose qu'un DateTime : absent → utc_now ; override
-  # `%DateTime{}` → tel quel ; tout le reste → fail-loud (un timestamp string/int est un bug producteur).
+  # The timestamp can NEVER be anything but a DateTime: absent → utc_now; override
+  # `%DateTime{}` → as-is; anything else → fail-loud (a string/int timestamp is a producer bug).
   defp canon_timestamp(:error), do: DateTime.utc_now()
   defp canon_timestamp({:ok, %DateTime{} = ts}), do: ts
 
@@ -105,13 +105,13 @@ defmodule Fleet.Event do
   end
 
   @doc """
-  Représentation canonique à clés string de l'enveloppe (payload **nested**, pas
-  hoisté). Pour les consommateurs dual-stack qui lisent encore `event["…"]` : un
-  struct n'implémente pas `Access`, donc `event["event_type"]` y rendrait `nil`
-  (c'était la cause d'un skip silencieux webhook→pipeline). Le `payload` garde ses
-  propres clés (déjà string côté webhook JSON). Helper canonique fourni ici plutôt
-  que recopié par chaque consommateur, pour que la forme à clés string reste unique
-  et ne dérive pas.
+  Canonical string-keyed representation of the envelope (payload **nested**, not
+  hoisted). For dual-stack consumers that still read `event["…"]`: a struct does
+  not implement `Access`, so `event["event_type"]` would return `nil` there
+  (this was the cause of a silent skip on the webhook→workflow consumer path).
+  The `payload` keeps its own keys (already string on the webhook JSON side).
+  Canonical helper provided here rather than copied by each consumer, so the
+  string-keyed shape stays single and does not drift.
   """
   @spec to_string_map(t()) :: %{optional(String.t()) => any()}
   def to_string_map(%__MODULE__{} = e) do
@@ -127,11 +127,11 @@ defmodule Fleet.Event do
   end
 
   defmodule UnregisteredError do
-    @moduledoc "Event publié hors registry `events.yaml` (fail-loud strict)."
+    @moduledoc "Event published outside the `events.yaml` registry (strict fail-loud)."
     defexception [:message]
   end
 
-  # Pas de `SchemaError` ici : le chemin canon `Bus.broadcast/2` ne valide aucun schema JSON, il
-  # pattern-matche `%Fleet.Event{}` et vérifie le registry → la seule erreur de validation est
-  # `UnregisteredError`. (Un event mal formé ne compile/ne matche simplement pas la struct.)
+  # No `SchemaError` here: the canonical `Bus.broadcast/2` path validates no JSON schema, it
+  # pattern-matches `%Fleet.Event{}` and checks the registry → the only validation error is
+  # `UnregisteredError`. (A malformed event simply does not compile / does not match the struct.)
 end

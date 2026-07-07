@@ -1,44 +1,47 @@
 defmodule Fleet.Shutdown.Quiesce do
   @moduledoc """
-  Flag de **quiescence** global du daemon (drain de shutdown coordonné).
+  Global daemon **quiescence** flag (coordinated shutdown drain).
 
-  Primitive partagée : un seul booléen en `:persistent_term`. Quand le drain
-  commence (`Fleet.Starfleet.Shutdown.begin/1` → `refuse_new_jobs/1`), le flag
-  passe à `true` ; les **points d'entrée de travail top-level neuf** le
-  consultent et refusent d'admettre du nouveau travail :
+  Shared primitive: a single boolean in `:persistent_term`. When the drain
+  begins (`Fleet.Starfleet.Shutdown.begin/1` → `refuse_new_jobs/1`), the flag
+  flips to `true`; the **entry points for new top-level work** consult it and
+  refuse to admit new work.
 
-    * `Fleet.Workflow.start_pipeline/3` — nouveau pipeline (webhook→pipeline
-      via Pilot, ou opérateur)
-    * REST `POST /api/admin/spawn` — nouveau pod opérateur
+  Current reader: REST `POST /api/admin/spawn` (`Fleet.API.Rest`) — a new
+  operator pod is refused while draining. (A workflow-activation reader once
+  lived here too, but that entry point was removed; re-wiring it is part of the
+  graceful-shutdown that is not yet fully active — its trigger
+  `Fleet.Starfleet.Shutdown.begin/1` has no caller today. See that module.)
 
-  Le travail **interne** d'un pipeline déjà en vol (spawn de l'étape suivante,
-  enqueue de brief) ne consulte PAS ce flag — sinon l'in-flight ne pourrait
-  plus se terminer, à l'opposé du but du drain.
+  The **internal** work of already-in-flight work (spawning the next step,
+  enqueuing a brief) does NOT consult this flag — otherwise the in-flight work
+  could no longer finish, the opposite of the drain's purpose.
 
-  ## Pourquoi ici (fleet_event_router) et pas dans fleet_starfleet
+  ## Why here (fleet_event_router) and not in fleet_starfleet
 
-  Les lecteurs (`fleet_workflow` Ring 3, `fleet_api` Ring 4) ne peuvent pas
-  prendre `fleet_starfleet` (Ring 3) en dépendance sans coupler des frères /
-  inverser le layering. `fleet_event_router` est le substrat universel dont
-  tout le monde dépend déjà (comme `Fleet.Event`). Le **primitive** (le flag)
-  vit donc ici ; la **policy** (quand quiescer, l'agrégateur d'in-flight) reste
-  dans `fleet_starfleet`. Iron Law : pas de process, juste `:persistent_term`.
+  A reader in a core app (Ring 2) cannot take `fleet_starfleet` (Ring 2) as a
+  dependency without coupling siblings; and `fleet_event_router` is the
+  universal substrate that everyone already depends on (like `Fleet.Event`), so
+  the flag is reachable downward from any ring. The **primitive** (the flag)
+  therefore lives here; the **policy** (when to quiesce, the in-flight
+  aggregator) stays in `fleet_starfleet`. Iron Law: no process, just
+  `:persistent_term`.
   """
 
   @key {__MODULE__, :quiescing}
 
-  @doc "Le daemon refuse-t-il le travail top-level neuf (drain en cours) ?"
+  @doc "Does the daemon refuse new top-level work (drain in progress)?"
   @spec quiescing?() :: boolean()
   def quiescing?, do: :persistent_term.get(@key, false)
 
-  @doc "Active la quiescence — appelé par `Shutdown.refuse_new_jobs/1`. Idempotent."
+  @doc "Enables quiescence — called by `Shutdown.refuse_new_jobs/1`. Idempotent."
   @spec refuse!() :: :ok
   def refuse! do
     :persistent_term.put(@key, true)
     :ok
   end
 
-  @doc "Lève la quiescence (reprise d'admission). Idempotent."
+  @doc "Lifts quiescence (resumes admission). Idempotent."
   @spec resume!() :: :ok
   def resume! do
     :persistent_term.put(@key, false)

@@ -1,16 +1,28 @@
 defmodule Fleet.EventRouter.SignalsOS do
   @moduledoc """
-  Capture signaux OS (SIGUSR1, SIGTERM, SIGHUP) via `:os.set_signal/2`
-  Erlang stdlib → broadcast event `os.signal.<sig>` sur le bus.
+  INERT — scaffolding for an OS-signal → bus bridge, written against a delivery
+  model that does not hold; kept but gated OFF by default.
 
-  GenServer minimaliste — process raison runtime = handle_info des
-  messages `{:signal, sig}` envoyés par le runtime BEAM lors d'un
-  signal OS.
+  Intended purpose: capture OS signals (SIGUSR1, SIGTERM, SIGHUP) via
+  `:os.set_signal/2` and broadcast an `os.signal.<sig>` event on the bus.
+
+  Why it does not work as written: `:os.set_signal(sig, :handle)` (in `init/1`)
+  routes the signal to OTP's `:erl_signal_server` gen_event — it does NOT send
+  `{:signal, sig}` messages to this GenServer, so `handle_info({:signal, sig}, …)`
+  is UNREACHABLE. The real wiring (a gen_event handler registered on
+  `:erl_signal_server`) was never built; nothing around this module was removed —
+  it is not-yet-born, not dead.
+
+  Status: gated off — `application.ex` starts it only under `:start_signals`
+  (default false), and no on-switch exists in the repo. Do not enable it as-is
+  (it would capture the signals via `:os.set_signal` without ever delivering them
+  here). The fix, when this capability is needed, is a gen_event handler, not this
+  GenServer.
 
   ## Configuration
 
-    * `:fleet_event_router, :captured_signals` — liste atoms de
-      signaux à capturer (default `[:sigusr1, :sigterm, :sighup]`)
+    * `:fleet_event_router, :captured_signals` — list of signal atoms to
+      capture (default `[:sigusr1, :sigterm, :sighup]`)
   """
 
   use GenServer
@@ -44,7 +56,7 @@ defmodule Fleet.EventRouter.SignalsOS do
 
   @impl GenServer
   def handle_info({:signal, sig}, state) when is_atom(sig) do
-    # Schema canon strict : %Fleet.Event{source: :event_router}.
+    # Strict canonical schema: %Fleet.Event{source: :event_router}.
     type_str = "os.signal.#{sig}"
 
     _ =
