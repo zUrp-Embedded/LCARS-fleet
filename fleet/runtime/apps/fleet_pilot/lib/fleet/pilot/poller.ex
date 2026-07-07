@@ -312,18 +312,6 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  @doc """
-  Topic forge per-humain des projets de la fleet : `lcars-fleet-<human-sanitisé>`. **Source UNIQUE**
-  partagée par l'onboarding (qui TAGUE le repo neuf) et le poller (qui DÉCOUVRE). Sanitize Gitea-topic
-  (lowercase, `[a-z0-9-]`). C'est l'axe d'isolation REPO (Alice ne découvre pas les projets de Bob) ;
-  l'axe ISSUE (`assigned_by`) est la ceinture.
-  """
-  @spec fleet_topic(String.t()) :: String.t()
-  def fleet_topic(human) when is_binary(human) do
-    h = human |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
-    "lcars-fleet-#{h}"
-  end
-
   defp handle_poll_error(state, reason, started, _err) do
     new_streak = state.err_streak + 1
 

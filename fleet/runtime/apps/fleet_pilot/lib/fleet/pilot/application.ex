@@ -111,15 +111,16 @@ defmodule Fleet.Pilot.Application do
   # singletons sous leurs noms globaux → conflits / boot parasites). Sert à vérifier la garde fail-loud.
   def step_children_for_test, do: step_children()
 
-  # MULTI-PROJET : plus de `:poll_repo` obligatoire ni de remote figé au boot — le Poller DÉCOUVRE
-  # ses repos par topic (`lcars-fleet-<human>`) et le StepRunConsumer dérive le repo+remote PER-STEP-RUN de l'event.
-  # La config essentielle qui reste = la forge `base_url` : sans elle, ni découverte (`search_repos_by_topic`)
-  # ni push (remote per-step-run) ne marchent → rail mort. C'est la garde fail-loud, pointée sur le réel.
+  # MULTI-PROJET : plus de `:poll_repo` obligatoire ni de remote figé au boot — le Poller DÉCOUVRE ses
+  # repos par appartenance-org (`list_org_repos`, WS3) et le StepRunConsumer dérive le repo+remote
+  # PER-STEP-RUN de l'event. La config essentielle qui reste = la forge `base_url` : sans elle, ni
+  # découverte (`list_org_repos`) ni push (remote per-step-run) ne marchent → rail mort. C'est la garde
+  # fail-loud, pointée sur le réel.
   defp step_children! do
     unless forge_base_url() do
       raise "fleet_pilot: :step_dispatch? activé mais la forge base_url est absente (config :fleet_pilot, " <>
               ":forge[:base_url] / FORGE_BASE_URL) — le Poller ne peut pas DÉCOUVRIR ses projets " <>
-              "(search_repos_by_topic) ni le StepRunConsumer dériver le remote de push. Deploy cassé, fail-loud."
+              "(list_org_repos) ni le StepRunConsumer dériver le remote de push. Deploy cassé, fail-loud."
     end
 
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)

@@ -140,25 +140,17 @@ defmodule Fleet.Pilot.ForgeProtocol do
   def parse_result_block(_), do: nil
 
   # ============================================================
-  # Marqueur d'ADMISSION `[lcars-onboarded:<human>]` + primitif de confiance.
+  # Primitif de confiance (marqueurs bot-authored sur comments : route/step_run/result).
+  # (Le marqueur d'admission `[lcars-onboarded:<human>]` + `admitted?`/`post_onboard_marker` sont
+  # RETIRÉS — WS3 : l'admission est l'appartenance-org, plus de sceau server-side à poser/lire.)
   # ============================================================
-
-  @onboard_marker_prefix "[lcars-onboarded:"
-
-  @doc """
-  Format du marqueur d'admission `[lcars-onboarded:<human>]` (co-localisé avec son lecteur
-  `ForgeClient.admitted?/3`). Posé par l'onboarding via `ForgeClient.post_onboard_marker/3` comme
-  TITRE de l'issue système d'admission, lu+vérifié bot-authored par le poller à la découverte.
-  """
-  @spec onboard_marker(String.t()) :: String.t()
-  def onboard_marker(human) when is_binary(human), do: "#{@onboard_marker_prefix}#{human}]"
 
   @doc false
   # Pur : un OBJET forge (comment OU issue — même forme wire Gitea `{"user": {"login": …}}`) est
   # DE CONFIANCE ssi son auteur = le compte système (bot) de la fleet. Un user forge
   # (humain/attaquant) a un autre login → ses marqueurs sont ignorés. Prédicat UNIQUE du primitif
-  # de confiance : les lecteurs de marqueurs sur comments (`ForgeClient` route/step_run/result) ET
-  # sur issues (`ForgeClient.Repo.admitted?`, sceau d'admission) passent tous ici — pas de copie.
+  # de confiance : les lecteurs de marqueurs sur comments (`ForgeClient` route/step_run/result)
+  # passent tous ici — pas de copie.
   def system_authored?(object, bot_login)
       when is_map(object) and is_binary(bot_login) and bot_login != "" do
     get_in(object, ["user", "login"]) == bot_login

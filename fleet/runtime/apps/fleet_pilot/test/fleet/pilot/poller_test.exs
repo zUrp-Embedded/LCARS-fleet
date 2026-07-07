@@ -624,7 +624,7 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "F-037 : échec de DÉCOUVERTE (search_repos_by_topic) → backoff (err_streak + error_count +1)" do
+    test "F-037 : échec de DÉCOUVERTE (list_org_repos) → backoff (err_streak + error_count +1)" do
       # La forge est DOWN — la découverte elle-même échoue. C'est le SEUL cas qui backoff (handle_poll_error).
       name = :"P_discover_err_#{System.unique_integer([:positive])}"
 

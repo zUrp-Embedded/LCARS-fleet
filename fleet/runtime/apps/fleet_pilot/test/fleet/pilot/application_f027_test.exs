@@ -13,8 +13,9 @@ defmodule Fleet.Pilot.ApplicationF027Test do
   # F-027 + F-037 : avant, `step_dispatch?: true` + config incomplète → `step_children` rendait `[]` en
   # SILENCE → l'app pilot démarrait « verte » sans Poller/StepRunConsumer (rail forge mort, zéro log). Désormais :
   # l'opérateur a DEMANDÉ le mode step → config incomplète = deploy cassé → raise au boot. F-037 a re-pointé
-  # la garde : ce n'est plus `:poll_repo` (le poller DÉCOUVRE par topic) ni un remote figé (per-step-run), mais la
-  # forge `base_url` — sans elle, ni découverte (`search_repos_by_topic`) ni push (remote per-step-run) ne marchent.
+  # la garde : ce n'est plus `:poll_repo` (le poller DÉCOUVRE par appartenance-org, WS3) ni un remote figé
+  # (per-step-run), mais la forge `base_url` — sans elle, ni découverte (`list_org_repos`) ni push
+  # (remote per-step-run) ne marchent.
 
   test "F-037 : step_dispatch? true sans forge base_url (:forge absent) → raise (rail mort évité)" do
     Application.put_env(:fleet_pilot, :step_dispatch?, true)
@@ -34,7 +35,7 @@ defmodule Fleet.Pilot.ApplicationF027Test do
     end
   end
 
-  test "F-037 : :poll_repo n'est PLUS requis (découverte par topic) — pas de raise sur son absence seule" do
+  test "F-037 : :poll_repo n'est PLUS requis (découverte par appartenance-org) — pas de raise sur son absence seule" do
     # La garde ne dépend plus de :poll_repo. Avec une forge base_url présente, l'absence de :poll_repo ne
     # déclenche RIEN (on vérifie via step_children! qu'aucune RuntimeError « base_url » n'est levée).
     Application.put_env(:fleet_pilot, :step_dispatch?, true)

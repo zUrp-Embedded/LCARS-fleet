@@ -58,8 +58,8 @@ defmodule Fleet.Pilot.ForgeClient do
   # SEUL ré-export du vocab : `parse_feature_branch/1`. `fleet_mcp` (pod_tools) l'appelle via le seam
   # `forge` (résolu runtime, défaut ce module) pour ne PAS créer de dep compile-time vers fleet_pilot —
   # le seam doit donc porter cette fonction. Le reste du vocab (`feature_branch`, `step_run_marker`,
-  # `result_block`, marqueurs, `system_authored?`, `onboard_marker`) s'appelle directement sur
-  # `Fleet.Pilot.ForgeProtocol` (impl + tests y vivent) ; ce module-ci ne le ré-exporte plus.
+  # `result_block`, marqueurs, `system_authored?`) s'appelle directement sur `Fleet.Pilot.ForgeProtocol`
+  # (impl + tests y vivent) ; ce module-ci ne le ré-exporte plus.
   defdelegate parse_feature_branch(head), to: ForgeProtocol
 
   @doc """
@@ -279,24 +279,17 @@ defmodule Fleet.Pilot.ForgeClient do
 
   # ============================================================
   # Repo / onboarding — DÉLÉGUÉ à `Fleet.Pilot.ForgeClient.Repo`.
-  # Provisioning (create_repo/add_collaborator/add_topic/protect_branch) + sceau d'admission
-  # (post_onboard_marker/admitted?) + découverte (search_repos_by_topic/repo_id). Les ops de
-  # provisioning sont appelées EN DIRECT sur `ForgeClient.Repo` (par `ProjectOnboard`) ; seules les ops
-  # SEAM-FACED ci-dessous sont forwardées (le module injecté par le seam reste CE module). Doc + logique
-  # vivent dans `Repo` (qui dépend en retour de `create_issue`/`close_issue` du cœur pour le sceau).
+  # Provisioning (create_repo/add_collaborator/protect_branch) + découverte par appartenance-org
+  # (list_org_repos, WS3). Les ops de provisioning sont appelées EN DIRECT sur `ForgeClient.Repo` (par
+  # `ProjectOnboard`) ; seules les ops SEAM-FACED ci-dessous sont forwardées (le module injecté par le
+  # seam reste CE module). Doc + logique vivent dans `Repo`.
   # ============================================================
 
   @doc "Repos de l'org (découverte WS3, appartenance-org = admission). Voir `ForgeClient.Repo.list_org_repos/2`."
   def list_org_repos(org, opts \\ []), do: Repo.list_org_repos(org, opts)
 
-  @doc "Repos découverts par topic. Voir `Fleet.Pilot.ForgeClient.Repo.search_repos_by_topic/2`."
-  def search_repos_by_topic(topic, opts \\ []), do: Repo.search_repos_by_topic(topic, opts)
-
   @doc "Id forge numérique du repo. Voir `Fleet.Pilot.ForgeClient.Repo.repo_id/2`."
   def repo_id(repo, opts \\ []), do: Repo.repo_id(repo, opts)
-
-  @doc "Repo admis (sceau bot-authored) ? Voir `Fleet.Pilot.ForgeClient.Repo.admitted?/3`."
-  def admitted?(repo, human, opts \\ []), do: Repo.admitted?(repo, human, opts)
 
   @doc """
   Crée une issue sur `repo`. `opts[:assignees]` = logins, `opts[:labels]` = IDs entiers
