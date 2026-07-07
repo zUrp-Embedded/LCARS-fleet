@@ -127,8 +127,8 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
         e -> {:error, {:launch_env_unresolved, Exception.message(e)}}
       end
 
-    # L'étape auth sort du pipe (pose LCARS_AUTH_MODE=bind, fail-loud sur erreur). La porte
-    # credentials (scope/plan) suit, taguée {:credentials_invalid, _} pour un refus distinct de l'auth.
+    # The auth step sits outside the pipe (sets LCARS_AUTH_MODE=bind, fail-loud on error). The
+    # credentials gate (scope/plan) follows, tagged {:credentials_invalid, _} for a refusal distinct from auth.
     case launch_env do
       {:ok, human, env} ->
         with {:ok, env} <- maybe_put_auth_token(env, human),

@@ -99,8 +99,8 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         end
 
       {:error, reason} ->
-        # `reason` est un atome structuré (:hmac_mismatch | :secret_missing) — le message humain
-        # vit ICI (log + body 401 wire), pas dans le tuple. Jason encode l'atome en string.
+        # `reason` is a structured atom (:hmac_mismatch | :secret_missing) — the human message
+        # lives HERE (log + 401 wire body), not in the tuple. Jason encodes the atom as a string.
         Logger.warning("WebhooksGitea: webhook REFUSÉ 401 — vérification HMAC : #{reason}")
         send_resp(conn, 401, Jason.encode!(%{error: reason}))
     end

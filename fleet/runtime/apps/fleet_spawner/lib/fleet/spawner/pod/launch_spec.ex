@@ -72,12 +72,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
       project = rc_project(opts, cap_profile) ->
         "/home/#{project}"
 
-      # Orchestrateur → son mount RW déclaré (arch → /home/projects.work). Data-driven (cap-profile).
+      # Orchestrator → its declared RW mount (arch → /home/projects.work). Data-driven (cap-profile).
       rw = first_rw_mount(cap_profile) ->
         rw
 
-      # Permanent / legacy (projet sans rc_name) → le chemin RÉEL relocalisé (pod_dir → sandbox_home).
-      # Home-relocalisé : sandbox_home=/home/.pod → workspace/home relocalisés ; off → pod_dir = identité.
+      # Permanent / legacy (project without rc_name) → the REAL relocated path (pod_dir → sandbox_home).
+      # Home-relocated: sandbox_home=/home/.pod → workspace/home relocated; off → pod_dir = identity.
       true ->
         String.replace_prefix(
           pod_cwd_real(opts, cap_profile, pod_dir),

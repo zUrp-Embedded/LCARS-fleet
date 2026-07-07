@@ -228,7 +228,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     end
 
     # No local `forge_auth_args/0` helper (nor a dup of `Fleet.Workflow.Git`, despite the
-    # pipeline⇄bootstrap compile cycle): forge auth has a single source `Fleet.Credentials.ForgeAuth.git_env/0`
+    # workflow⇄bootstrap compile cycle): forge auth has a single source `Fleet.Credentials.ForgeAuth.git_env/0`
     # (fleet_credentials is below both apps → no cycle), token via env outside argv.
 
     # No `set_git_identity/2`: setting the role's identity via `git config` in the workspace's

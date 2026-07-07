@@ -170,10 +170,10 @@ defmodule Fleet.Spawner.Pod.Liveness do
           default_response_timeout_sec(state.cap_profile)
       end
 
-    # Le state_timeout natif `:result_deadline` exige un entier non-négatif (ms). `is_number(override)`
-    # accepte les FLOATS (un cap-profile `timeouts.response_sec: 1.5` passe la validation) → `sec * 1000` =
-    # float → ArgumentError dans `arm_result_deadline_actions` qui CRASHERAIT le Pod sans transition_failed.
-    # `round/1` coerce → entier (ms), quel que soit l'override.
+    # The native `:result_deadline` state_timeout requires a non-negative integer (ms). `is_number(override)`
+    # accepts FLOATS (a cap-profile `timeouts.response_sec: 1.5` passes validation) → `sec * 1000` =
+    # float → ArgumentError in `arm_result_deadline_actions`, which would CRASH the Pod without transition_failed.
+    # `round/1` coerces → integer (ms), whatever the override.
     round(sec * 1000)
   end
 

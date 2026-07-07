@@ -200,7 +200,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # Invariant: the LLM gate (soft + terminal non-adjudicable) is judged by the
-  # **gatekeeper** on the pipeline side; `coord` carries no gate spawn, and the
+  # **gatekeeper** on the workflow side; `coord` carries no gate spawn, and the
   # `NotWiredYet` placeholder (which would silently break the soft gates) must
   # not reappear in the coord gate-path. So we check the REAL code,
   # not trusting a comment:
