@@ -1,23 +1,23 @@
 defmodule Fleet.Workflow.GateDecision do
   @moduledoc """
-  Source UNIQUE du vocabulaire des décisions gatekeeper (gate de pipeline projet).
+  SINGLE source of the gatekeeper decision vocabulary (project workflow gate).
 
-  Les décisions valides — `continue` / `abandon` / `redirect` / `escalate_user` /
-  `halt_wait_input` — vivent ICI. Le brief (`Fleet.Workflow.GateBrief`, qui les énonce à
-  l'agent juge) ET le validateur du verdict (`Fleet.Pilot.StepRunConsumer`, fail-closed sur
-  décision absente/inconnue) consomment cette liste → l'énoncé et la validation ne peuvent
-  plus diverger.
+  The valid decisions — `continue` / `abandon` / `redirect` / `escalate_user` /
+  `halt_wait_input` — live HERE. The brief (`Fleet.Workflow.GateBrief`, which states them to
+  the judge agent) AND the verdict validator (`Fleet.Pilot.StepRunConsumer`, fail-closed on an
+  absent/unknown decision) both consume this list → the statement and the validation can no
+  longer diverge.
 
-  Le contrat WIRE `priv/schema/gate-decision-v1.json` (champ `decision.enum`) reste le miroir
-  JSON de cette liste ; un test de non-régression vérifie l'égalité schema ⇔ module.
+  The WIRE contract `priv/schema/gate-decision-v1.json` (field `decision.enum`) stays the JSON
+  mirror of this list; a regression test verifies the schema ⇔ module equality.
 
-  `halt_invalid` (le fallback fail-closed interne du StepRunConsumer quand le verdict est absent ou
-  malformé) n'EST PAS une décision rendue → il ne fait pas partie de cette liste.
+  `halt_invalid` (the StepRunConsumer's internal fail-closed fallback when the verdict is absent
+  or malformed) is NOT a rendered decision → it is not part of this list.
   """
 
   @decisions ~w(continue abandon redirect escalate_user halt_wait_input)
 
-  @doc "Liste canonique des décisions gatekeeper valides (l'ordre sert l'énoncé du brief)."
+  @doc "Canonical list of the valid gatekeeper decisions (the order serves the brief's wording)."
   @spec decisions() :: [String.t()]
   def decisions, do: @decisions
 end

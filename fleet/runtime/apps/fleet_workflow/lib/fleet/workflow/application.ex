@@ -1,15 +1,15 @@
 defmodule Fleet.Workflow.Application do
   @moduledoc """
-  Application `fleet_workflow` — désormais une **lib workflow_map/gate/delivery** (quasi-pure).
+  Application `fleet_workflow` — now a **workflow_map/gate/delivery lib** (near-pure).
 
-  Il n'existe AUCUN moteur RAM (pas de `Fleet.Workflow.Executor` ni sa pile Registry/PodRegistry/
-  ExecutorSupervisor, StageRunner, StageSpawner, Toposort, WorkspaceProvisioner) : aucun process n'est
-  supervisé ici (l'orchestration vit sur le rail forge-state-machine). Le supervisor est donc **vide**
-  — conservé transitoirement ; `fleet_workflow` tend vers du **lib-only** (sortie de la clé `mod:` de
-  `mix.exs`). Le contenu réel est la lib consommée par le rail forge + 4 apps :
+  There is NO in-memory (RAM) engine (no `Fleet.Workflow.Executor` nor its Registry/PodRegistry/
+  ExecutorSupervisor, StageRunner, StageSpawner, Toposort, WorkspaceProvisioner stack): no process is
+  supervised here (orchestration lives on the forge-state-machine rail). The supervisor is therefore **empty**
+  — kept transitionally; `fleet_workflow` trends toward **lib-only** (dropping the `mod:` key from
+  `mix.exs`). The real content is the lib consumed by the forge rail + 4 apps:
   `Loader` / `Gates` / `Gate` / `GateBrief` / `Deliverable` / `DeliverableGate` / `Git` / `Gatekeeper`.
 
-  Pré-enregistre encore les atomes events `workflow_map.*` (plus émis, mais le Bus les autorise via
+  Still pre-registers the `workflow_map.*` event atoms (no longer emitted, but the Bus authorizes them via
   `String.to_existing_atom/1`).
   """
 
@@ -23,13 +23,13 @@ defmodule Fleet.Workflow.Application do
 
   @impl Application
   def start(_type, _args) do
-    # Aucun process à superviser → supervisor vide. Conservé transitoirement (cible : lib-only).
+    # No process to supervise → empty supervisor. Kept transitionally (target: lib-only).
     Supervisor.start_link([], strategy: :one_for_one, name: Fleet.Workflow.Supervisor)
   end
 
   @doc """
-  Liste des atomes events `workflow_map.*` pré-enregistrés. Mitige le DoS par fuite d'atomes
-  (le Bus n'accepte que des atomes déjà existants via `String.to_existing_atom/1`).
+  List of pre-registered `workflow_map.*` event atoms. Mitigates atom-leak DoS
+  (the Bus only accepts already-existing atoms via `String.to_existing_atom/1`).
   """
   @spec workflow_map_event_atoms() :: [atom()]
   def workflow_map_event_atoms, do: @workflow_map_event_atoms

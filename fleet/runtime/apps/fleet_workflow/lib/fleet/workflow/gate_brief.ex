@@ -1,31 +1,31 @@
 defmodule Fleet.Workflow.GateBrief do
   @moduledoc """
-  Construit le **brief d'éval** (texte du brief) envoyé au gatekeeper pour
-  trancher une gate de pipeline. Le gatekeeper le pull via MCP `get_work_item`, juge
-  (modop rubber-duck), et rend une décision JSON strict `gate-decision-v1.json`.
+  Builds the **eval brief** (the brief text) sent to the gatekeeper to
+  decide a workflow gate. The gatekeeper pulls it via MCP `get_work_item`, judges
+  (rubber-duck modop), and returns a strict JSON decision `gate-decision-v1.json`.
 
-  Pure function. Template dérivé de `orchestration/gatekeeper-exception.md`
-  §"Brief gatekeeper auto-généré" (contexte invocation + livrable à juger +
-  question à trancher + options déterministes + contrat de sortie). Les données
-  structurées vont aussi dans `task.metadata` ; ce brief est la forme lisible.
+  Pure function. Template derived from `orchestration/gatekeeper-exception.md`
+  §"Brief gatekeeper auto-généré" (invocation context + deliverable to judge +
+  question to decide + deterministic options + output contract). The structured
+  data also go into `task.metadata`; this brief is the human-readable form.
   """
 
-  # Vocab des décisions = AUTORITÉ UNIQUE `Fleet.Workflow.GateDecision` (évalué au compile, donc
-  # ce brief se recompile si la liste canon change — plus de vocabulaire local qui dérive du validateur).
+  # Decision vocab = SINGLE AUTHORITY `Fleet.Workflow.GateDecision` (evaluated at compile time, so
+  # this brief recompiles if the canonical list changes — no more local vocabulary drifting from the validator).
   @decisions Fleet.Workflow.GateDecision.decisions()
 
   @doc """
-  Rend le brief markdown depuis le contexte de gate.
+  Renders the markdown brief from the gate context.
 
-  `ctx` : `%{step: String, workflow_map_id: term, gate: map | nil, outputs: map,
+  `ctx`: `%{step: String, workflow_map_id: term, gate: map | nil, outputs: map,
   request: String | nil, subject: :deliverable | :brief}`.
 
-  `:subject` paramètre CE QUI est jugé — `:deliverable` (défaut, le livrable
-  produit par un step : gatekeeper, juges de PR) ou `:brief` (le BRIEF rédigé
-  par l'architecte, jugé AVANT toute production : brief-review/consultant). Le
-  contrat de verdict (`gate-decision-v1`) et la mécanique sont identiques — seul le
-  cadrage du « truc à juger » change (sinon un juge de brief chasserait un livrable
-  inexistant). Défaut `:deliverable`.
+  `:subject` parametrizes WHAT is judged — `:deliverable` (default, the deliverable
+  produced by a step: gatekeeper, PR judges) or `:brief` (the BRIEF written
+  by the architect, judged BEFORE any production: brief-review/consultant). The
+  verdict contract (`gate-decision-v1`) and the mechanics are identical — only the
+  framing of the "thing to judge" changes (otherwise a brief judge would hunt a
+  nonexistent deliverable). Default `:deliverable`.
   """
   @spec build(map()) :: String.t()
   def build(%{step: step, workflow_map_id: pid} = ctx) do
@@ -75,14 +75,14 @@ defmodule Fleet.Workflow.GateBrief do
     """
   end
 
-  # Cadrage du « truc à juger », paramétré par `:subject`. `:deliverable` = le cas du livrable
-  # produit (gatekeeper/juges-PR) ; `:brief` cadre la revue de brief (le brief est rédigé par
-  # l'arch, PAS encore exécuté → le juge ne cherche pas un livrable).
+  # Framing of the "thing to judge", parametrized by `:subject`. `:deliverable` = the produced-deliverable
+  # case (gatekeeper/PR-judges); `:brief` frames the brief review (the brief is written by
+  # the arch, NOT yet executed → the judge does not look for a deliverable).
   defp subject_phrases(:brief, step) do
     %{
-      # Titre NEUTRE en rôle : ce brief part à N juges (consultant en brief-review, qualifier/reviewer/
-      # gatekeeper en livrable). L'appeler « gatekeeper » quel que soit le juge = drift (vu live
-      # 2026-07-04 : le consultant s'est présenté « rôle gatekeeper »). Le sujet jugé porte le titre.
+      # ROLE-NEUTRAL title: this brief goes to N judges (consultant in brief-review, qualifier/reviewer/
+      # gatekeeper in deliverable). Calling it "gatekeeper" regardless of the judge = drift (seen live
+      # 2026-07-04: the consultant introduced itself as "gatekeeper role"). The judged subject carries the title.
       title: "Éval de brief — décision de juge",
       intro: "Le BRIEF à valider (rédigé par l'architecte) est cité plus bas.",
       question:
@@ -109,9 +109,9 @@ defmodule Fleet.Workflow.GateBrief do
   defp gate_type(%{"type" => t}), do: t
   defp gate_type(_), do: "—"
 
-  # Demande d'origine = CONTEXTE de jugement, jamais une instruction à exécuter
-  # (sinon le gatekeeper refait la tâche du step précédent au lieu de juger).
-  # Encadrée et désamorcée explicitement.
+  # Origin request = judgment CONTEXT, never an instruction to execute
+  # (otherwise the gatekeeper redoes the previous step's task instead of judging).
+  # Explicitly framed and defused.
   defp render_request(req) when is_binary(req) and req != "" do
     """
 
@@ -122,7 +122,7 @@ defmodule Fleet.Workflow.GateBrief do
 
   defp render_request(_), do: ""
 
-  # Rendu JSON lisible ; fallback inspect si non-encodable (défensif).
+  # Human-readable JSON rendering; fallback to inspect if non-encodable (defensive).
   defp render(nil), do: "(aucun)"
 
   defp render(term) do

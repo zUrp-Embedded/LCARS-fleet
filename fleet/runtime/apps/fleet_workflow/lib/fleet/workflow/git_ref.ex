@@ -1,22 +1,22 @@
 defmodule Fleet.Workflow.GitRef do
   @moduledoc """
-  Source UNIQUE de la validation d'un nom de branche / ref git côté monde (système-side).
+  Single source for validating a git branch / ref name on the system side.
 
-  Garde-fou contre des entrées catalogue/brief manifestement cassées (espace, `..`, leading `-`) :
-  PAS une défense anti-injection (`System.cmd` n'utilise pas de shell), mais un boundary qui empêche
-  qu'un nom malformé atteigne `git push`/`commit` brut. Aligné grosso-modo sur `git check-ref-format` :
-  commence par alphanumérique, puis `[A-Za-z0-9._/-]`, et rejette le substring `..`.
+  Guardrail against catalogue/brief inputs that are manifestly broken (space, `..`, leading `-`):
+  NOT an anti-injection defense (`System.cmd` uses no shell), but a boundary that keeps a malformed
+  name from reaching a raw `git push`/`commit`. Roughly aligned with `git check-ref-format`:
+  starts with an alphanumeric, then `[A-Za-z0-9._/-]`, and rejects the `..` substring.
 
-  Consommé par `Fleet.Workflow.Git` (`check_branch`) et `Fleet.Workflow.Deliverable` (`check_ref`) —
-  qui portaient chacun une copie de la même regex. Chaque appelant garde SA forme d'erreur typée
-  (`:invalid_branch` / `{:invalid_ref, ref}`) ; seule la décision « valide ? » est centralisée ici.
+  Consumed by `Fleet.Workflow.Git` (`check_branch`) and `Fleet.Workflow.Deliverable` (`check_ref`) —
+  which each carried a copy of the same regex. Each caller keeps ITS typed error shape
+  (`:invalid_branch` / `{:invalid_ref, ref}`); only the `valid?` decision is centralized here.
   """
 
   @ref_re ~r/^[A-Za-z0-9][A-Za-z0-9._\/\-]*$/
 
   @doc """
-  `true` si `ref` est un nom de branche/ref bien formé : binaire, matche `@ref_re` (tête alphanumérique +
-  `[A-Za-z0-9._/-]`) ET ne contient PAS `..`. Tout le reste (non-binaire, vide, leading `-`, espace) → `false`.
+  `true` if `ref` is a well-formed branch/ref name: binary, matches `@ref_re` (alphanumeric head +
+  `[A-Za-z0-9._/-]`) AND does NOT contain `..`. Everything else (non-binary, empty, leading `-`, space) → `false`.
   """
   @spec valid?(term()) :: boolean()
   def valid?(ref) when is_binary(ref),

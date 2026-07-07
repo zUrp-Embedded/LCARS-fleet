@@ -1,32 +1,32 @@
 defmodule Fleet.Workflow.Deliverable do
   @moduledoc """
-  Publication unifiée du livrable d'un pod — **un seul** module, deux modes sélectionnés
-  par `spec.deliverable_mode` au catalogue (condition d'entrée), PAS deux modules déguisés. Filtre
-  unification : « différenciation par catalogue, pas par branche de code » (même règle que
+  Unified publication of a pod's deliverable — **one** module, two modes selected
+  by `spec.deliverable_mode` at the catalogue (entry condition), NOT two modules in disguise. Unification
+  filter: "differentiation by catalogue, not by code branch" (same rule as
   `lifetime_scope`).
 
-  Frontière pod↔système. Le pod produit du CONTENU (un payload de fichiers, OU des commits git natifs) ;
-  le système le transforme en livrable durable poussé sur la forge. Le pod n'a conscience NI des
-  branches NI de la forge (forge-aveugle) — c'est le système qui choisit la branche cible et
-  pousse. `git` donne l'isolation du livrable ; `bwrap` donne l'isolation du FS.
+  Pod↔system boundary. The pod produces CONTENT (a payload of files, OR native git commits);
+  the system turns it into a durable deliverable pushed to the forge. The pod is aware of NEITHER the
+  branches NOR the forge (forge-blind) — it is the system that chooses the target branch and
+  pushes. `git` gives the deliverable's isolation; `bwrap` gives the FS's isolation.
 
-  ## Les trois temps (ordre fixe, identique aux 2 modes pour 2 et 3)
+  ## The three stages (fixed order, identical across both modes for 2 and 3)
 
-      1. CONTENU (seule branche du mode) :
-         :payload    → `PayloadGuard.apply_files` (valide-sécurité PUIS écrit les fichiers)
-                       + `Git.commit` (le SYSTÈME commite)
-         :git_native → l'agent a déjà commité → on vérifie juste qu'un commit existe (base != HEAD)
-      2. GATE DURCIE — PARTAGÉE : `DeliverableGate.verify` (base ancêtre, identité, secrets).
-         Un livrable invalide est rendu irreprésentable au push (pas rattrapé après).
-      3. PUSH borné — `Git.push(remote, local_ref:target_branch)` sinon fail-loud.
+      1. CONTENT (the only mode-specific branch):
+         :payload    → `PayloadGuard.apply_files` (security-validates THEN writes the files)
+                       + `Git.commit` (the SYSTEM commits)
+         :git_native → the agent has already committed → we just check a commit exists (base != HEAD)
+      2. HARDENED GATE — SHARED: `DeliverableGate.verify` (base ancestor, identity, secrets).
+         An invalid deliverable is made unrepresentable at push (not caught after the fact).
+      3. Bounded PUSH — `Git.push(remote, local_ref:target_branch)` otherwise fail-loud.
 
-  `base_sha` est verrouillée HORS du pod (capturée par le rail forge-driven, épinglée au clone par
-  `ProjectBootstrap.pin_base_sha`) — le pod ne peut pas la falsifier. La gate lit le `.git` du
-  workspace en read-only et ne croit AUCUNE assertion du pod.
+  `base_sha` is locked OUTSIDE the pod (captured by the forge-driven rail, pinned at clone by
+  `ProjectBootstrap.pin_base_sha`) — the pod cannot falsify it. The gate reads the workspace's `.git`
+  read-only and believes NO assertion from the pod.
 
-  Garde-fou unification : la SEULE divergence de mode est le temps 1 (qui commite). Les temps 2 et 3
-  sont strictement partagés. Si un jour le `case mode` métastase (un `if` qui sépare 80 % du tronc),
-  l'unification est à reconsidérer.
+  Unification guardrail: the ONLY mode divergence is stage 1 (who commits). Stages 2 and 3
+  are strictly shared. If one day the `case mode` metastasizes (an `if` that splits 80% of the trunk),
+  the unification must be reconsidered.
   """
 
   require Logger
@@ -44,9 +44,9 @@ defmodule Fleet.Workflow.Deliverable do
           optional(:target_branch) => String.t(),
           optional(:push?) => boolean(),
           optional(:local_ref) => String.t(),
-          # Rôle attendu pour le trailer `Co-authored-by` ; nil/absent → skip.
+          # Expected role for the `Co-authored-by` trailer; nil/absent → skip.
           optional(:coauthor_role) => String.t() | nil,
-          # mode :payload uniquement
+          # :payload mode only
           optional(:files) => [map()],
           optional(:identity) => map(),
           optional(:message) => String.t(),
@@ -55,17 +55,17 @@ defmodule Fleet.Workflow.Deliverable do
 
   @type result :: %{commit_sha: String.t(), pushed?: boolean(), mode: mode()}
 
-  # Plus AUCUNE invocation git directe ici (X1 2026-07-04) : les rev-parse sont délégués à
-  # `Fleet.Workflow.Git.read_head_sha/1` (borné, qui compose lui-même git_safe_config_args).
+  # NO more direct git invocation here (2026-07-04): the rev-parses are delegated to
+  # `Fleet.Workflow.Git.read_head_sha/1` (bounded, which composes git_safe_config_args itself).
 
   @common_keys [:mode, :workspace, :base_sha, :allowed_emails]
   @payload_keys [:files, :identity, :message]
   @identity_keys [:author_name, :author_email, :committer_name, :committer_email]
 
   @doc """
-  Publie le livrable : CONTENU (mode) → GATE (partagée) → PUSH. Retourne `{:ok, %{commit_sha,
-  pushed?, mode}}` ou le PREMIER `{:error, reason}` (fail-loud à chaque temps ; aucun push si la gate
-  refuse). `push?` défaut `true` ; `local_ref` défaut `"HEAD"`.
+  Publishes the deliverable: CONTENT (mode) → GATE (shared) → PUSH. Returns `{:ok, %{commit_sha,
+  pushed?, mode}}` or the FIRST `{:error, reason}` (fail-loud at each stage; no push if the gate
+  refuses). `push?` defaults to `true`; `local_ref` defaults to `"HEAD"`.
   """
   @spec publish(opts()) :: {:ok, result()} | {:error, term()}
   def publish(opts) when is_map(opts) do
@@ -107,8 +107,8 @@ defmodule Fleet.Workflow.Deliverable do
   defp check_mode(m) when m in [:payload, :git_native], do: :ok
   defp check_mode(m), do: {:error, {:invalid_mode, m}}
 
-  # Mode payload : les clés de contenu sont requises. Mode git_native : le contenu vient du pod, rien
-  # à fournir (la présence du commit est vérifiée à `materialize_content`).
+  # payload mode: the content keys are required. git_native mode: the content comes from the pod, nothing
+  # to supply (the commit's presence is verified at `materialize_content`).
   defp check_mode_keys(%{mode: :payload} = opts) do
     with :ok <- check_keys(opts, @payload_keys),
          :ok <- check_keys(opts.identity, @identity_keys) do
@@ -118,8 +118,8 @@ defmodule Fleet.Workflow.Deliverable do
 
   defp check_mode_keys(_opts), do: :ok
 
-  # Push (défaut true) requiert remote + target_branch + un refspec bien formé. Si push?
-  # explicitement false (commit local), ils sont facultatifs.
+  # Push (default true) requires remote + target_branch + a well-formed refspec. If push?
+  # is explicitly false (local commit), they are optional.
   defp check_push_keys(opts) do
     if push?(opts) do
       with :ok <- check_keys(opts, [:remote, :target_branch]),
@@ -132,20 +132,20 @@ defmodule Fleet.Workflow.Deliverable do
     end
   end
 
-  # Validation du refspec (`<local_ref>:<target_branch>`) déléguée à l'AUTORITÉ UNIQUE
-  # `Fleet.Workflow.GitRef` (la regex check-ref-format vivait ici en double avec `Git`). On garde la
-  # forme d'erreur typée propre à ce module (qui porte le `ref` fautif).
+  # Refspec validation (`<local_ref>:<target_branch>`) delegated to the SINGLE AUTHORITY
+  # `Fleet.Workflow.GitRef` (the check-ref-format regex lived here, duplicated with `Git`). We keep the
+  # typed error shape specific to this module (which carries the offending `ref`).
   defp check_ref(ref) do
     if Fleet.Workflow.GitRef.valid?(ref), do: :ok, else: {:error, {:invalid_ref, ref}}
   end
 
   # ============================================================
-  # Temps 1 — CONTENU (seule divergence de mode)
+  # Stage 1 — CONTENT (the only mode divergence)
   # ============================================================
 
-  # Placement + validation-sécurité du payload (path-traversal / `.git` / `.gitattributes`
-  # armé / symlink) délégués à l'autorité unique `Fleet.Workflow.PayloadGuard` (filtre
-  # extrait C4 2026-07-05 — le POURQUOI de chaque vecteur fermé y est documenté).
+  # Payload placement + security-validation (path-traversal / `.git` / weaponized
+  # `.gitattributes` / symlink) delegated to the single authority `Fleet.Workflow.PayloadGuard` (filter
+  # extracted 2026-07-05 — the WHY of each closed vector is documented over there).
   defp materialize_content(%{mode: :payload} = opts) do
     with :ok <- PayloadGuard.apply_files(opts.workspace, opts.files),
          {:ok, _sha} <- Git.commit(commit_opts(opts)) do
@@ -153,21 +153,21 @@ defmodule Fleet.Workflow.Deliverable do
     end
   end
 
-  # git_native : l'agent a commité dans le pod. On NE crée rien — on vérifie juste qu'un livrable
-  # existe (HEAD a avancé depuis base). Range vide = le brief n'a produit aucun commit → fail-loud
-  # (la gate, elle, passe sur range vide par vacuité ; la présence d'un commit est un concern mode-side).
-  # Le cas « HEAD != base mais historique réécrit » passe ici (avancé) et est rattrapé par la gate
-  # (`base_not_ancestor`) — pas de double check ici.
+  # git_native: the agent committed inside the pod. We create NOTHING — we just check a deliverable
+  # exists (HEAD has advanced past base). Empty range = the brief produced no commit → fail-loud
+  # (the gate itself passes on an empty range by vacuity; the commit's presence is a mode-side concern).
+  # The "HEAD != base but history rewritten" case passes here (advanced) and is caught by the gate
+  # (`base_not_ancestor`) — no double check here.
   defp materialize_content(%{mode: :git_native} = opts) do
     if head_advanced?(opts.workspace, opts.base_sha),
       do: :ok,
       else: {:error, :no_deliverable_commit}
   end
 
-  # Lecture HEAD déléguée à l'autorité BORNÉE Fleet.Workflow.Git.read_head_sha/1 (X1 2026-07-04 :
-  # ce site était un System.cmd BRUT sans deadline — un rev-parse pendu bloquait la publication).
-  # Échec de lecture → false = « pas de commit détecté » → l'appelant rend
-  # {:error, :no_deliverable_commit} (échec EXPLICITE, pas un silence).
+  # HEAD read delegated to the BOUNDED authority Fleet.Workflow.Git.read_head_sha/1 (2026-07-04:
+  # this site was a RAW System.cmd with no deadline — a hung rev-parse blocked publication).
+  # Read failure → false = "no commit detected" → the caller returns
+  # {:error, :no_deliverable_commit} (EXPLICIT failure, not a silence).
   defp head_advanced?(workspace, base_sha) do
     case Fleet.Workflow.Git.read_head_sha(workspace) do
       {:ok, sha} -> sha != base_sha
@@ -186,7 +186,7 @@ defmodule Fleet.Workflow.Deliverable do
   end
 
   # ============================================================
-  # Temps 3 — PUSH (partagé)
+  # Stage 3 — PUSH (shared)
   # ============================================================
 
   defp push_deliverable(opts) do
@@ -201,7 +201,7 @@ defmodule Fleet.Workflow.Deliverable do
   defp push?(opts), do: Map.get(opts, :push?, true)
   defp local_ref(opts), do: Map.get(opts, :local_ref, "HEAD")
 
-  # X1/D4 2026-07-04 : délégué à l'autorité bornée (même forme d'erreur {:rev_parse_failed, rc, err},
-  # enrichie de {:rev_parse_timeout|:rev_parse_exit} que le System.cmd brut ne savait pas produire).
+  # 2026-07-04: delegated to the bounded authority (same error shape {:rev_parse_failed, rc, err},
+  # enriched with {:rev_parse_timeout|:rev_parse_exit} that the raw System.cmd could not produce).
   defp head_sha(workspace), do: Fleet.Workflow.Git.read_head_sha(workspace)
 end

@@ -1,65 +1,65 @@
 defmodule Fleet.Workflow.Loader do
   @moduledoc """
-  Pure functions parse YAML `workflow_maps/<name>.yaml` via `yaml_elixir`
-  + validate schema strict `priv/schema/workflow-map-v2.5.json` au load
-  (`ex_json_schema` fail-fast), puis valide le GRAPHE (`Fleet.Workflow.GraphValidator`).
+  Pure functions: parse the YAML `workflow_maps/<name>.yaml` via `yaml_elixir`
+  + validate against the strict schema `priv/schema/workflow-map-v2.5.json` at
+  load (`ex_json_schema` fail-fast), then validate the GRAPH (`Fleet.Workflow.GraphValidator`).
 
-  Le schéma valide chaque step ISOLÉMENT (draft-07 ne sait pas exprimer une
-  contrainte inter-steps) : les invariants de graphe (`needs` → step existant,
-  racine unique, acyclicité, atteignabilité, pas de fan-out) sont vérifiés APRÈS la
-  normalisation par le linter de graphe, qui raise sur violation (même contrat
-  fail-loud que le schéma).
+  The schema validates each step IN ISOLATION (draft-07 cannot express an
+  inter-step constraint): the graph invariants (`needs` → existing step, unique
+  root, acyclicity, reachability, no fan-out) are checked AFTER normalization by
+  the graph linter, which raises on violation (same fail-loud contract as the
+  schema).
 
   ## Configuration
 
-    * `:fleet_workflow, :workflow_maps_root` — racine catalogue YAML
+    * `:fleet_workflow, :workflow_maps_root` — YAML catalogue root
       (default `Application.app_dir(:fleet_workflow, "priv/canon/workflow_maps")`)
-    * `:fleet_workflow, :schema_path` — path schema JSON
-      (default `priv/schema/workflow-map-v2.5.json` du package)
+    * `:fleet_workflow, :schema_path` — JSON schema path
+      (default `priv/schema/workflow-map-v2.5.json` from the package)
 
-  ## Opts explicites pour tests async
+  ## Explicit opts for async tests
 
-  `load!/2` accepte des `opts` qui surchargent l'Application env :
-    * `:workflow_maps_root` — path racine
-    * `:schema_path` — path schema custom
+  `load!/2` accepts `opts` that override the Application env:
+    * `:workflow_maps_root` — root path
+    * `:schema_path` — custom schema path
 
-  Les tests utilisent `load!(name, workflow_maps_root: dir)` pour rester
-  `async: true` (pas de couplage Application env global). `load!/1`
-  reste pour les call sites prod qui peuvent vivre avec l'Application env
-  (lue au boot).
+  Tests use `load!(name, workflow_maps_root: dir)` to stay `async: true` (no
+  coupling to the global Application env). `load!/1` remains for the prod call
+  sites that can live with the Application env (read at boot).
   """
 
-  # Le workflow_map porte une seule enveloppe : `kind: WorkflowMap` / `metadata` / `spec`.
-  # Le versioning vit dans le code (pas de champ `apiVersion` dans le YAML).
+  # The workflow_map carries a single envelope: `kind: WorkflowMap` / `metadata` / `spec`.
+  # Versioning lives in the code (no `apiVersion` field in the YAML).
   @schema_file "workflow-map-v2.5.json"
 
   @doc """
-  Charge un workflow_map YAML par nom, valide le schema, puis **normalise** vers
-  la forme interne unique `%{"name" => ..., "steps" => ...}`.
+  Loads a workflow_map YAML by name, validates the schema, then **normalizes** to
+  the single internal form `%{"name" => ..., "steps" => ...}`.
 
-  L'enveloppe (`kind/metadata/spec.steps`) est déballée ici, au LOAD. En aval,
-  les consommateurs lisent toujours `workflow_map["steps"]` sans rouvrir l'enveloppe :
-  une seule forme représentable.
+  The envelope (`kind/metadata/spec.steps`) is unwrapped here, at LOAD. Downstream,
+  consumers always read `workflow_map["steps"]` without reopening the envelope:
+  a single representable form.
 
-  Raises `YamlElixir.FileNotFoundError` si fichier introuvable,
-  `RuntimeError` si schema invalide.
+  Raises `YamlElixir.FileNotFoundError` if the file is not found,
+  `RuntimeError` if the schema is invalid.
   """
   @spec load!(String.t(), keyword()) :: map()
   def load!(workflow_map_name, opts \\ []) when is_binary(workflow_map_name) and is_list(opts) do
-    # Le nom de workflow_map/workflow_map vient du catalogue / d'un marqueur route forge (entrée non
-    # maîtrisée) et sert de COMPOSANT de chemin (`<root>/<name>.yaml`). Un nom avec `..`/`/`
-    # chargerait un YAML arbitraire de l'hôte comme « workflow_map ». On le caste en slug AVANT le
-    # `Path.join` (fail-loud : `load!` est déjà bang, un nom malformé est un bug d'appelant) ;
-    # un slug ne peut contenir ni `/` ni `..` → la feuille reste sous la racine par construction.
+    # The workflow_map name comes from the catalogue / a forge route marker (untrusted
+    # input) and serves as a path COMPONENT (`<root>/<name>.yaml`). A name with `..`/`/`
+    # would load an arbitrary YAML from the host as a "workflow_map". We cast it to a slug
+    # BEFORE the `Path.join` (fail-loud: `load!` is already a bang, a malformed name is a
+    # caller bug); a slug can contain neither `/` nor `..` → the leaf stays under the root
+    # by construction.
     name = Fleet.Slug.cast!(workflow_map_name)
     yaml_path = Path.join(workflow_maps_root(opts), "#{name}.yaml")
     yaml = YamlElixir.read_from_file!(yaml_path)
     schema = resolved_schema(opts)
 
-    # Le schema est validé AVANT la normalisation : un YAML sans enveloppe v2.5
-    # (kind/metadata/spec absents ou mal formés) échoue ici et raise — il n'atteint
-    # jamais `normalize/1` (qui ne matche que `spec.steps`), donc pas de
-    # FunctionClauseError opaque. Ne pas inverser cet ordre.
+    # The schema is validated BEFORE normalization: a YAML without the v2.5 envelope
+    # (kind/metadata/spec absent or malformed) fails here and raises — it never reaches
+    # `normalize/1` (which only matches `spec.steps`), so no opaque FunctionClauseError.
+    # Do not invert this order.
     case ExJsonSchema.Validator.validate(schema, yaml) do
       :ok ->
         workflow_map = normalize(yaml)
@@ -71,11 +71,11 @@ defmodule Fleet.Workflow.Loader do
     end
   end
 
-  # Le schéma a validé chaque step isolément, jamais le graphe : un `needs` mal
-  # orthographié (arête fantôme) le passe et fige le workflow_map en silence. On valide donc
-  # le graphe (data pure, normalisée) et on raise comme le schéma. Le linter vit DANS
-  # fleet_workflow (autonome) : le Loader ne peut pas dépendre de WorkflowMapNav (fleet_pilot),
-  # ce serait une dépendance inverse.
+  # The schema validated each step in isolation, never the graph: a misspelled `needs`
+  # (phantom edge) passes it and silently freezes the workflow_map. So we validate the
+  # graph (pure, normalized data) and raise like the schema. The linter lives WITHIN
+  # fleet_workflow (self-contained): the Loader cannot depend on WorkflowMapNav (fleet_pilot),
+  # that would be a reverse dependency.
   defp validate_graph!(%{"steps" => steps}, workflow_map_name) do
     case Fleet.Workflow.GraphValidator.validate(steps) do
       :ok ->
@@ -86,17 +86,17 @@ defmodule Fleet.Workflow.Loader do
     end
   end
 
-  # Normalizer. Le schema a déjà garanti la structure (`spec.steps` présent). On
-  # déballe l'enveloppe vers `%{"name", "steps"}`. Les champs d'enveloppe non
-  # consommés (`metadata` autre que `name`, `spec.on_escalation`/`on_failure`,
-  # `cycle`, `selection_priority`) sont volontairement écartés — étendre cette forme
-  # quand un consommateur réel apparaît (pas de portage spéculatif).
+  # Normalizer. The schema has already guaranteed the structure (`spec.steps` present). We
+  # unwrap the envelope into `%{"name", "steps"}`. The unconsumed envelope fields
+  # (`metadata` other than `name`, `spec.on_escalation`/`on_failure`, `cycle`,
+  # `selection_priority`) are deliberately discarded — extend this form when a real
+  # consumer appears (no speculative porting).
   defp normalize(%{"spec" => %{"steps" => steps} = spec} = yaml) when is_map(steps) do
     %{
       "name" => get_in(yaml, ["metadata", "name"]),
       "steps" => steps,
-      # Budget rework map-level (obligatoire au schéma → toujours présent ici ; fail-loud sinon). Le
-      # kernel le lit comme DONNÉE (gate_engine), plus de défaut global codé.
+      # Map-level rework budget (mandatory in the schema → always present here; fail-loud
+      # otherwise). The kernel reads it as DATA (gate_engine), no more hardcoded global default.
       "max_rework_rounds" => Map.fetch!(spec, "max_rework_rounds")
     }
   end
@@ -107,10 +107,10 @@ defmodule Fleet.Workflow.Loader do
       Application.app_dir(:fleet_workflow, "priv/canon/workflow_maps")
   end
 
-  # Schema résolu (read+decode+resolve) via l'autorité Ring 0 `Fleet.SchemaCache`
-  # (dédup B-R2 — le pipeline vivait copié ici), keyé par le path RÉSOLU (les
-  # overrides `:schema_path` des tests ont leur propre entrée → pas de pollution
-  # prod↔test). Lazy-init, fail-loud si le fichier schema est absent/malformé.
+  # Resolved schema (read+decode+resolve) via the Ring 0 authority `Fleet.SchemaCache`
+  # (dedup — this pipeline lived copied here), keyed by the RESOLVED path (the tests'
+  # `:schema_path` overrides have their own entry → no prod↔test pollution). Lazy-init,
+  # fail-loud if the schema file is absent/malformed.
   defp resolved_schema(opts) do
     path = schema_path(opts)
     Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, path}, path)

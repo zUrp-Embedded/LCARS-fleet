@@ -1,21 +1,21 @@
 defmodule Fleet.Workflow.Git do
   @moduledoc """
-  Mécanisme système-side de publication git post-EXTRACT. Composé par le rail
-  d'orchestration sur `pod.completed`, lorsque la step déclare `post_extract.git`,
-  pour transformer le travail du pod en commit (puis push) côté monde.
+  System-side git publication mechanism, post-EXTRACT. Composed by the
+  orchestration rail on `pod.completed`, when the step declares `post_extract.git`,
+  to turn the pod's work into a commit (then push) on the world side.
 
-  Pure data → action :
-    * input  : workspace path, identités auteur/committer, message, branch,
+  Pure data → action:
+    * input  : workspace path, author/committer identities, message, branch,
       add_paths, remote, push?
     * action : `git add <paths> → git commit → [git push <remote> <branch>]`
-    * output : `{:ok, %{commit_sha, pushed?}}` ou `{:error, term()}`
+    * output : `{:ok, %{commit_sha, pushed?}}` or `{:error, term()}`
 
-  Fail-closed strict : `--force` et `--no-verify` ne sont **JAMAIS** composés
-  par le module. Si un cas futur nécessite un override, ce sera une décision
-  explicite avec audit, pas une option par défaut.
+  Strict fail-closed: `--force` and `--no-verify` are **NEVER** composed by
+  the module. If a future case needs an override, it will be an explicit
+  decision with audit, not a default option.
 
-  Identités distinctes : `author_*` reflète l'identité du worker (role) ;
-  `committer_*` reflète l'identité système. Natif git
+  Distinct identities: `author_*` reflects the worker (role) identity;
+  `committer_*` reflects the system identity. Native git
   (`GIT_AUTHOR_*` ≠ `GIT_COMMITTER_*`).
   """
 
@@ -44,28 +44,28 @@ defmodule Fleet.Workflow.Git do
     :branch
   ]
 
-  # `commit/1` ne pousse pas → `:branch`/`:remote` sont des concerns de push,
-  # absents ici. L'identité (author/committer) + message + workspace suffisent.
+  # `commit/1` does not push → `:branch`/`:remote` are push concerns, absent
+  # here. The identity (author/committer) + message + workspace are enough.
   @commit_required_keys @required_keys -- [:branch]
 
-  # Le workspace est CO-ÉCRIT par un pod adversaire ; `.git/hooks/`, `.git/config` et un `.gitattributes`
-  # in-tree y sont posables par le pod. `git add`/`git commit`/`git push` sont lancés ICI, côté MONDE
-  # (runtime Elixir, HORS bwrap) → un hook (`pre-commit`/`pre-push`), un filtre `clean`, une `sshCommand`
-  # ou un `diff.external` armé par le pod s'exécuterait avec les privilèges du runtime = exécution de
-  # commande arbitraire hors sandbox. On compose la SOURCE UNIQUE de neutralisation config
+  # The workspace is CO-WRITTEN by an adversarial pod; `.git/hooks/`, `.git/config` and an in-tree
+  # `.gitattributes` are all placeable there by the pod. `git add`/`git commit`/`git push` are run HERE,
+  # on the WORLD side (Elixir runtime, OUTSIDE bwrap) → a hook (`pre-commit`/`pre-push`), a `clean` filter,
+  # an `sshCommand` or a `diff.external` armed by the pod would execute with the runtime's privileges =
+  # arbitrary command execution outside the sandbox. We compose the SINGLE SOURCE of config neutralization
   # (`Fleet.Credentials.Shell.git_safe_config_args/0` : hooks + fsmonitor + sshCommand + diff.external +
-  # attributesFile global) sur chaque op qui peut exécuter du code config-driven : le monde REFUSE
-  # d'exécuter le code du pod plutôt que d'espérer qu'il n'en arme pas (mauvais état rendu impossible).
-  # N'affecte PAS la doctrine `--no-verify JAMAIS` (qui protège l'appelant du module ; ici on neutralise
-  # le mécanisme adversaire, pas la vérif d'intégrité de l'appelant). LIMITE honnête : un `filter.<nom>.clean`
-  # IN-TREE (armé par un `.gitattributes` + `.git/config` du repo) n'est PAS désactivable par `-c` — c'est
-  # le CONTENU validé en amont (`PayloadGuard` refuse les payloads écrivant `.git/**` ou un `.gitattributes`
-  # armant `filter=`) qui ferme ce vecteur-là ; ici on ferme les vecteurs config globale/système + hooks.
+  # global attributesFile) on every op that can execute config-driven code: the world REFUSES
+  # to run the pod's code rather than hoping it arms none (bad state made impossible).
+  # Does NOT affect the `--no-verify NEVER` doctrine (which protects the module's caller; here we neutralize
+  # the adversarial mechanism, not the caller's integrity check). Honest LIMIT: an IN-TREE `filter.<name>.clean`
+  # (armed by a repo `.gitattributes` + `.git/config`) is NOT disableable via `-c` — it is
+  # the upstream-validated CONTENT (`PayloadGuard` refuses payloads that write `.git/**` or a `.gitattributes`
+  # arming `filter=`) that closes that vector; here we close the global/system config + hooks vectors.
   @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
   @doc """
-  Compose la séquence git système-side (add → commit → [push]) dans
-  `workspace`. Pure data → action ; pas d'état conservé.
+  Composes the system-side git sequence (add → commit → [push]) in
+  `workspace`. Pure data → action; no state kept.
   """
   @spec publish(opts) :: {:ok, %{commit_sha: String.t(), pushed?: boolean()}} | {:error, term()}
   def publish(opts) when is_map(opts) do
@@ -79,10 +79,10 @@ defmodule Fleet.Workflow.Git do
   end
 
   @doc """
-  Commit-only — `git add <paths> → git commit` dans `workspace`, **sans push**. Sépare le
-  CONTENU (le système commite le payload) de la PUBLICATION (`push/3` après la gate de livrable). Utilisé
-  par `Fleet.Workflow.Deliverable` en mode `payload` ; `publish/1` reste le chemin couplé legacy
-  (add+commit+push en un). Pas de `:branch`/`:remote` requis (concerns de push). Retourne le SHA du HEAD commité.
+  Commit-only — `git add <paths> → git commit` in `workspace`, **without push**. Separates the
+  CONTENT (the system commits the payload) from the PUBLICATION (`push/3` after the deliverable gate). Used
+  by `Fleet.Workflow.Deliverable` in `payload` mode; `publish/1` stays the legacy coupled path
+  (add+commit+push in one). No `:branch`/`:remote` required (push concerns). Returns the SHA of the committed HEAD.
   """
   @spec commit(opts) :: {:ok, String.t()} | {:error, term()}
   def commit(opts) when is_map(opts) do
@@ -120,15 +120,15 @@ defmodule Fleet.Workflow.Git do
   defp check_workspace_string(ws) when is_binary(ws) and ws != "", do: :ok
   defp check_workspace_string(_ws), do: {:error, :invalid_workspace}
 
-  # Validation de la branche déléguée à l'AUTORITÉ UNIQUE `Fleet.Workflow.GitRef` (la regex check-ref-format
-  # vivait ici en double avec `Deliverable`). On garde la forme d'erreur typée propre à ce module.
+  # Branch validation delegated to the SINGLE AUTHORITY `Fleet.Workflow.GitRef` (the check-ref-format regex
+  # used to live here, duplicated with `Deliverable`). We keep the typed error shape specific to this module.
   defp check_branch(branch) do
     if Fleet.Workflow.GitRef.valid?(branch), do: :ok, else: {:error, :invalid_branch}
   end
 
   defp check_push_remote(%{push?: true} = opts) do
     case Map.get(opts, :remote) do
-      # Rejet leading-`-` au plus tôt (publish/maybe_push) — `push/3` re-valide aussi.
+      # Reject leading-`-` as early as possible (publish/maybe_push) — `push/3` re-validates too.
       r when is_binary(r) and r != "" ->
         if String.starts_with?(r, "-"), do: {:error, {:invalid_remote, r}}, else: :ok
 
@@ -156,16 +156,16 @@ defmodule Fleet.Workflow.Git do
 
     case validate_add_paths(paths) do
       :ok ->
-        # `--` termine les options → un pathspec commençant par `-` (ex. `add_paths = ["--all"]`
-        # depuis un input non fiable) est traité comme un CHEMIN littéral, pas une option git. `System.cmd`
-        # n'utilise pas de shell, mais GIT parse ses propres options : un arg leading-`-` est une option.
-        # `@hooks_off` (neutralisation config) AVANT `add` : `git add` exécute le filtre `clean` armé par
-        # un `.gitattributes`+`.git/config` du pod = exécution de commande arbitraire côté monde. Le set
-        # neutralise les vecteurs config globale/système ; le vecteur in-tree (filtre nommé) est fermé en
-        # amont côté CONTENU par `Deliverable` (cf. le commentaire de `@hooks_off`).
-        # Borné par Shell.git (setsid + SIGKILL du process-GROUP OS à la deadline) : un `index.lock`
-        # stale ferait pendre `git add` indéfiniment sans timeout -> le completer n'atteint jamais
-        # l'unlock, l'issue reste wedgée `lcars-in-flight` sans recovery. Même pattern que `run_push`.
+        # `--` terminates the options → a pathspec starting with `-` (e.g. `add_paths = ["--all"]`
+        # from an untrusted input) is treated as a literal PATH, not a git option. `System.cmd`
+        # does not use a shell, but GIT parses its own options: a leading-`-` arg is an option.
+        # `@hooks_off` (config neutralization) BEFORE `add` : `git add` runs the `clean` filter armed by
+        # a pod `.gitattributes`+`.git/config` = arbitrary command execution on the world side. The set
+        # neutralizes the global/system config vectors; the in-tree vector (named filter) is closed
+        # upstream on the CONTENT side by `Deliverable` (cf. the `@hooks_off` comment).
+        # Bounded by Shell.git (setsid + SIGKILL of the OS process-GROUP at the deadline): a stale
+        # `index.lock` would make `git add` hang indefinitely without a timeout -> the completer never reaches
+        # the unlock, the issue stays wedged `lcars-in-flight` without recovery. Same pattern as `run_push`.
         case Fleet.Credentials.Shell.git(@hooks_off ++ ["add", "--" | paths],
                cd: opts.workspace,
                timeout_ms: git_local_timeout_ms()
@@ -181,8 +181,8 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  # `add_paths` doit être une liste non vide de chemins binaires non vides (belt-and-suspenders
-  # avec le séparateur `--`).
+  # `add_paths` must be a non-empty list of non-empty binary paths (belt-and-suspenders
+  # with the `--` separator).
   defp validate_add_paths(paths) when is_list(paths) and paths != [] do
     if Enum.all?(paths, &(is_binary(&1) and &1 != "")),
       do: :ok,
@@ -199,20 +199,20 @@ defmodule Fleet.Workflow.Git do
   end
 
   defp run_commit(opts) do
-    # Pas de classification par grep "nothing to commit" sur stderr : ce serait
-    # i18n-dependent (LC_ALL=fr_FR → "rien à valider" → grep rate → mauvaise
-    # classification). Pre-check via `git diff --cached --quiet` (codes RC stables
-    # across locales : 0 = pas de diff staged, 1 = diff staged). Évite le commit
-    # entièrement quand `:nothing_to_commit`.
+    # No classification by grepping "nothing to commit" on stderr: that would be
+    # i18n-dependent (LC_ALL=fr_FR → "rien à valider" → grep misses → wrong
+    # classification). Pre-check via `git diff --cached --quiet` (RC codes stable
+    # across locales: 0 = no staged diff, 1 = staged diff). Avoids the commit
+    # entirely when `:nothing_to_commit`.
     case has_staged_changes?(opts.workspace) do
       false ->
         {:error, :nothing_to_commit}
 
       true ->
-        # Borné (idem git_add). `env` explicite = identité du commit (commit_env) MERGÉE avec
-        # `ForgeAuth.git_env/0` (GIT_TERMINAL_PROMPT=0) : Shell.git n'injecte son env par défaut QUE
-        # si `:env` est absent -> on compose les deux (aucun chevauchement de clés : AUTHOR/COMMITTER
-        # vs TERMINAL_PROMPT). Pas de régression, + la borne anti-prompt en cohérence.
+        # Bounded (same as git_add). Explicit `env` = the commit identity (commit_env) MERGED with
+        # `ForgeAuth.git_env/0` (GIT_TERMINAL_PROMPT=0): Shell.git injects its default env ONLY
+        # if `:env` is absent -> we compose both (no key overlap: AUTHOR/COMMITTER
+        # vs TERMINAL_PROMPT). No regression, + the anti-prompt bound kept consistent.
         case Fleet.Credentials.Shell.git(@hooks_off ++ ["commit", "-m", opts.message],
                cd: opts.workspace,
                timeout_ms: git_local_timeout_ms(),
@@ -227,18 +227,18 @@ defmodule Fleet.Workflow.Git do
   end
 
   defp has_staged_changes?(workspace) do
-    # Borné + `@hooks_off` (uniformité : `diff` peut invoquer un `diff.external` armé par le pod ;
-    # le set le désarme, cost nul — comme add/commit). Timeout/exit/code-inattendu → `true` (laisse
-    # commit TENTER et reporter l'erreur avec contexte ; borne préservée : commit est lui aussi borné).
+    # Bounded + `@hooks_off` (uniformity: `diff` can invoke a `diff.external` armed by the pod;
+    # the set disarms it, zero cost — like add/commit). Timeout/exit/unexpected-code → `true` (lets
+    # commit TRY and report the error with context; bound preserved: commit is itself bounded too).
     case Fleet.Credentials.Shell.git(@hooks_off ++ ["diff", "--cached", "--quiet"],
            cd: workspace,
            timeout_ms: git_local_timeout_ms()
          ) do
-      # Exit 0 = aucun diff staged → rien à commit.
+      # Exit 0 = no staged diff → nothing to commit.
       {:ok, {_, 0}} -> false
-      # Exit 1 = diff staged présent (sémantique stable git).
+      # Exit 1 = staged diff present (stable git semantics).
       {:ok, {_, 1}} -> true
-      # Autre code / timeout / exit = anomalie → laisse commit tenter et reporter.
+      # Other code / timeout / exit = anomaly → lets commit try and report.
       _ -> true
     end
   end
@@ -253,15 +253,15 @@ defmodule Fleet.Workflow.Git do
   end
 
   @doc """
-  SHA de HEAD du `workspace`, **borné** (Shell.git : deadline + SIGKILL du process-group — un
-  `rev-parse` pendu sur un FS malade ne bloque jamais l'appelant). Autorité UNIQUE du rev-parse
-  système-side (X1/D4 2026-07-04 : `Deliverable` portait 2 copies via `System.cmd` BRUT non borné —
-  un rev-parse pendu y bloquait la publication).
+  SHA of `workspace`'s HEAD, **bounded** (Shell.git: deadline + SIGKILL of the process-group — a
+  `rev-parse` hung on a sick FS never blocks the caller). SINGLE AUTHORITY for the system-side rev-parse
+  (2026-07-04: `Deliverable` used to carry 2 copies via RAW unbounded `System.cmd` —
+  a hung rev-parse there blocked publication).
   """
   @spec read_head_sha(Path.t()) :: {:ok, String.t()} | {:error, term()}
   def read_head_sha(workspace) do
-    # Borné + `@hooks_off` par uniformité (rev-parse ne lance aucun filtre/externe → les `-c` sont
-    # inertes ici, mais tous les sites git système-side composent le set = invariant auditable).
+    # Bounded + `@hooks_off` for uniformity (rev-parse launches no filter/external → the `-c` are
+    # inert here, but every system-side git site composes the set = auditable invariant).
     case Fleet.Credentials.Shell.git(@hooks_off ++ ["rev-parse", "HEAD"],
            cd: workspace,
            timeout_ms: git_local_timeout_ms()
@@ -274,10 +274,10 @@ defmodule Fleet.Workflow.Git do
   end
 
   @doc """
-  Push-only — pousse `refspec` du `workspace` vers `remote`, **borné** (timeout). PAS d'add/commit :
-  la branche est déjà commitée (par le pod en mode `git_native`, ou par `publish/1` en mode `payload`).
-  `refspec` peut être `local_ref:target_branch` pour que la ref poussée soit **choisie par le système**.
-  Partagé par `Fleet.Workflow.Deliverable` (les 2 modes) et `maybe_push/1` (compat `publish/1`).
+  Push-only — pushes `refspec` from `workspace` to `remote`, **bounded** (timeout). NO add/commit:
+  the branch is already committed (by the pod in `git_native` mode, or by `publish/1` in `payload` mode).
+  `refspec` can be `local_ref:target_branch` so that the pushed ref is **chosen by the system**.
+  Shared by `Fleet.Workflow.Deliverable` (both modes) and `maybe_push/1` (`publish/1` compat).
   """
   @spec push(Path.t(), String.t(), String.t()) :: {:ok, true} | {:error, term()}
   def push(workspace, remote, refspec) do
@@ -287,10 +287,10 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  # `remote`/`refspec` ne doivent PAS commencer par `-`. Sinon `git push` les lit comme des
-  # OPTIONS (`--receive-pack=<cmd>` → exécution côté remote, `-c <config>`, `--exec=`) → injection
-  # d'options via un input non fiable. `System.cmd` n'utilise pas de shell, mais git parse ses options :
-  # un positional attendu qui commence par `-` est avalé comme option. On rejette fail-closed.
+  # `remote`/`refspec` must NOT start with `-`. Otherwise `git push` reads them as
+  # OPTIONS (`--receive-pack=<cmd>` → execution on the remote side, `-c <config>`, `--exec=`) → option
+  # injection via an untrusted input. `System.cmd` does not use a shell, but git parses its options:
+  # an expected positional that starts with `-` is swallowed as an option. We reject fail-closed.
   defp validate_cli_arg(arg, err) when is_binary(arg) and arg != "" do
     if String.starts_with?(arg, "-"), do: {:error, {err, arg}}, else: :ok
   end
@@ -303,10 +303,10 @@ defmodule Fleet.Workflow.Git do
         {:ok, true}
 
       {:ok, {out, rc}} ->
-        # Une RÉSOLUTION DE CONFLIT rebase la feature-branch → historique réécrit → push rejeté
-        # « non-fast-forward ». La feature-branch est SYSTÈME-owned (seul le système la pousse ; le pod
-        # est forge-aveugle, pas de pousseur concurrent) → un retry `--force` est sûr : le système écrase
-        # SA PROPRE branche avec le rebase. Sans ça, le rebase de résolution ne land JAMAIS.
+        # A CONFLICT RESOLUTION rebases the feature-branch → history rewritten → push rejected
+        # "non-fast-forward". The feature-branch is SYSTEM-owned (only the system pushes it; the pod
+        # is forge-blind, no concurrent pusher) → a `--force` retry is safe: the system overwrites
+        # ITS OWN branch with the rebase. Without it, the resolution rebase NEVER lands.
         if non_fast_forward?(out),
           do: force_push(workspace, remote, refspec),
           else: {:error, {:git_push_failed, rc, String.trim(out)}}
@@ -328,15 +328,15 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  # `git push [extra] remote refspec` borné via `Fleet.Credentials.Shell` (source unique de la borne) —
-  # `git push` n'a pas de timeout natif. Un push réseau hung (DNS, TLS, packfile interrompu) bloquerait le
-  # GenServer appelant ; le wrapper lance dans un process-group dédié et, à la deadline MUR, tue le GROUPE
-  # entier (le push ET ses helpers de transport) + ferme le port. Remplace le patron `Task.async` +
-  # `shutdown(:brutal_kill)` qui ne tuait que le Task BEAM en laissant le process git (porteur du token
-  # forge dans son environ) fuir. `core.hooksPath=/dev/null` conservé (durcissement hooks inchangé).
+  # `git push [extra] remote refspec` bounded via `Fleet.Credentials.Shell` (single source of the bound) —
+  # `git push` has no native timeout. A hung network push (DNS, TLS, interrupted packfile) would block the
+  # calling GenServer; the wrapper launches in a dedicated process-group and, at the WALL deadline, kills the
+  # whole GROUP (the push AND its transport helpers) + closes the port. Replaces the `Task.async` +
+  # `shutdown(:brutal_kill)` pattern which killed only the BEAM Task while letting the git process (carrier of
+  # the forge token in its environ) leak. `core.hooksPath=/dev/null` kept (hook hardening unchanged).
   defp run_push(workspace, remote, refspec, extra) do
-    # Token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth, injectée
-    # explicitement (Shell.git/2 l'injecterait par défaut, mais on est explicites au site sensible).
+    # Forge token via env (out of argv/cmdline) — single source Fleet.Credentials.ForgeAuth, injected
+    # explicitly (Shell.git/2 would inject it by default, but we are explicit at the sensitive site).
     Fleet.Credentials.Shell.git(@hooks_off ++ ["push"] ++ extra ++ [remote, refspec],
       cd: workspace,
       timeout_ms: push_timeout_ms(),
@@ -344,14 +344,14 @@ defmodule Fleet.Workflow.Git do
     )
   end
 
-  # Rejet « non-fast-forward » SEUL (l'historique distant a divergé du local — ici un rebase de
-  # résolution réécrit la feature-branch SYSTÈME-owned → `--force` sûr). Détecté sur la sortie git (stderr
-  # fusionné) en se limitant aux DIAGNOSTICS PROPRES du non-fast-forward : `non-fast-forward` / `fetch first`.
-  # On NE matche PAS le substring `rejected` NU : git l'émet AUSSI pour un rejet de HOOK (`[remote rejected]
-  # … pre-receive hook declined`) ou de branche protégée — un retry `--force` y serait à tort une RÉÉCRITURE
-  # FORCÉE par-dessus une protection serveur (perte de données / contournement de garde). On ne force que
-  # quand la cause EST une divergence d'historique, jamais sur un refus de politique remote (fail-closed :
-  # un rejet non-explicitement-NFF remonte tel quel `{:git_push_failed, …}`, pas de force aveugle).
+  # "non-fast-forward" rejection ONLY (the remote history has diverged from the local one — here a resolution
+  # rebase rewrites the SYSTEM-owned feature-branch → `--force` safe). Detected on the git output (merged
+  # stderr) by restricting to the DIAGNOSTICS SPECIFIC to non-fast-forward: `non-fast-forward` / `fetch first`.
+  # We do NOT match the BARE `rejected` substring: git also emits it for a HOOK rejection (`[remote rejected]
+  # … pre-receive hook declined`) or a protected branch — a `--force` retry there would wrongly be a FORCED
+  # REWRITE over a server protection (data loss / guard bypass). We force only when the cause IS a history
+  # divergence, never on a remote policy refusal (fail-closed: a not-explicitly-NFF rejection propagates as-is
+  # `{:git_push_failed, …}`, no blind force).
   defp non_fast_forward?(out) do
     o = String.downcase(out)
 
@@ -363,19 +363,19 @@ defmodule Fleet.Workflow.Git do
 
   defp maybe_push(_opts), do: {:ok, false}
 
-  # Timeout pour `git push` réseau. Default 30s (suffisant LAN/forge locale,
-  # garde-fou contre hung indéfini WAN). Override via :fleet_workflow,
-  # :git_push_timeout_ms (config app ou Application.put_env).
+  # Timeout for network `git push`. Default 30s (enough for LAN/local forge,
+  # guard against indefinite WAN hang). Override via :fleet_workflow,
+  # :git_push_timeout_ms (app config or Application.put_env).
   defp push_timeout_ms do
     Application.get_env(:fleet_workflow, :git_push_timeout_ms, 30_000)
   end
 
-  # Borne des ops git LOCALES (add/commit/diff-cached/rev-parse). Normalement <1 s ; un timeout ici =
-  # `index.lock` stale / FS pendu (NFS). 30 s laisse une marge large avant de tuer le groupe OS.
+  # Bound for LOCAL git ops (add/commit/diff-cached/rev-parse). Normally <1 s; a timeout here =
+  # stale `index.lock` / hung FS (NFS). 30 s leaves a wide margin before killing the OS group.
   defp git_local_timeout_ms do
     Application.get_env(:fleet_workflow, :git_local_timeout_ms, 30_000)
   end
 
-  # Pas de `forge_auth_args/0`. L'auth forge système-side est portée par
-  # `Fleet.Credentials.ForgeAuth.git_env/0` (source unique, token via env hors argv/cmdline).
+  # No `forge_auth_args/0`. System-side forge auth is carried by
+  # `Fleet.Credentials.ForgeAuth.git_env/0` (single source, token via env out of argv/cmdline).
 end
