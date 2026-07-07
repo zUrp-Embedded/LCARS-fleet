@@ -14,14 +14,23 @@ defmodule Fleet.Pilot.StepRunCompleter.Texts do
 
   @doc """
   Corps de PR par défaut — descriptif (traça honnête : QUI a fait QUOI) + `Closes #N`
-  (auto-close natif au merge → close APRÈS merge, jamais avant).
+  (auto-close natif au merge → close APRÈS merge, jamais avant). `has_note?` (défaut `false`) ajoute
+  le POINTEUR vers la note du producteur (posée séparément par `Emissions.post_eng_summary` sur l'ISSUE —
+  la note COMPLÈTE vit UNE seule fois, là-bas ; ce corps ne porte que le lien, pas le blob) : plié DANS
+  le corps d'ouverture plutôt qu'un 2e comment séparé posté juste après — un seul post « en tant
+  qu'engineer » au lieu de deux (QoL, débusqué en lisant le rendu forge réel d'une PR livrée).
   """
-  @spec pr_body(integer(), String.t()) :: String.t()
-  def pr_body(n, role) do
-    "Livrable de la brique ##{n}, produit par **#{role}** (engineer). Le système a poussé le commit " <>
-      "(l'eng code dans son workspace, le système publie — barrière forge-aveugle, le pod n'a pas de " <>
-      "token forge). Reviews demandées aux juges (qualifier + reviewer) ; merge à l'approbation.\n\n" <>
-      "Closes ##{n}"
+  @spec pr_body(integer(), String.t(), boolean()) :: String.t()
+  def pr_body(n, role, has_note? \\ false) do
+    base =
+      "Livrable de la brique ##{n}, produit par **#{role}** (engineer). Le système a poussé le commit " <>
+        "(l'eng code dans son workspace, le système publie — barrière forge-aveugle, le pod n'a pas de " <>
+        "token forge). Reviews demandées aux juges (qualifier + reviewer) ; merge à l'approbation.\n\n" <>
+        "Closes ##{n}"
+
+    if has_note?,
+      do: base <> "\n\n🔧 Note de l'#{role} (livrable) → détail sur le ticket ##{n}.",
+      else: base
   end
 
   @doc """

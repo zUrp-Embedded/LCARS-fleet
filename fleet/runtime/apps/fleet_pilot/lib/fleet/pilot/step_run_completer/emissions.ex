@@ -67,20 +67,23 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   end
 
   @doc """
-  VOIX DE L'ENG sur la PR (info SORTANTE, descriptive et traçable) : poste le
+  VOIX DE L'ENG sur le TICKET (info SORTANTE, descriptive et traçable) : poste le
   `summary` du producteur (ce qu'il a fait à la livraison / sa réponse à la review au rework) en
-  commentaire PR, AU NOM DE L'ENG (`as_role` — traça honnête ; le pod reste forge-aveugle, c'est
+  commentaire ISSUE, AU NOM DE L'ENG (`as_role` — traça honnête ; le pod reste forge-aveugle, c'est
   le SYSTÈME qui poste). Best-effort : un échec de post ne casse PAS la complétion (le livrable = le
-  commit, déjà poussé). Absent/vide → rien (pas de commentaire vide). Couvre livraison ET rework (les
-  deux passent par open_deliverable_pr — PR neuve ou existante).
+  commit, déjà poussé). Absent/vide → rien (pas de commentaire vide).
 
   DÉDUP (footprint) : la NOTE COMPLÈTE va sur le ISSUE (le ticket = record canonique du travail,
-  « voici ce que j'ai fait » en réponse au brief) ; la PR ne reçoit qu'un POINTEUR vers le ticket
-  (le reviewer review le diff ; la prose de l'eng vit UNE seule fois, sur le ticket). Avant, le même
-  `summary` (~1 Ko) était posté verbatim des deux côtés — bruit pur.
+  « voici ce que j'ai fait » en réponse au brief) — la PR n'en reçoit PLUS de copie ni de pointeur
+  séparé : le pointeur est désormais PLIÉ dans le corps d'OUVERTURE de la PR (`Texts.pr_body/3`,
+  `open_deliverable_pr`), pas un 2e comment posté juste après (QoL 2026-07-07, débusqué en lisant le
+  rendu forge réel d'une PR livrée : deux posts « en tant qu'engineer » à la suite pour UNE info liée).
+  Avant ce fix, le même `summary` (~1 Ko) était posté verbatim des deux côtés — bruit pur ; le fix
+  précédent (dédup footprint) avait déjà réduit ça à un pointeur séparé, celui-ci plie le pointeur
+  dans l'ouverture — plus qu'UN SEUL post PR au total (le corps d'ouverture), zéro comment PR ajouté.
   """
-  @spec post_eng_summary(map(), integer(), keyword()) :: :ok | :noop
-  def post_eng_summary(step_run, pr, opts) do
+  @spec post_eng_summary(map(), keyword()) :: :ok | :noop
+  def post_eng_summary(step_run, opts) do
     case Map.get(step_run, :eng_summary) do
       summary when is_binary(summary) and summary != "" ->
         forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
@@ -90,22 +93,12 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
         role = Map.get(step_run, :role, "engineer")
         role_opts = ForgeClient.as_role(forge_opts, role)
 
-        # NOTE COMPLÈTE sur le ISSUE (record canonique du travail).
+        # NOTE COMPLÈTE sur le ISSUE (record canonique du travail) — seul post de cette fonction.
         _ =
           forge.post_comment(
             repo,
             n,
             "## 🔧 Note de l'#{role} (livrable)\n\n#{summary}",
-            role_opts
-          )
-
-        # POINTEUR sur la PR (pas le blob) : `##{n}` est auto-linké par Gitea → le reviewer suit le lien
-        # s'il veut la prose ; sinon il review le diff. Fin de la dup verbatim (l'intuition user).
-        _ =
-          forge.post_comment(
-            repo,
-            pr,
-            "🔧 Note de l'#{role} (livrable) → détail sur le ticket ##{n}.",
             role_opts
           )
 

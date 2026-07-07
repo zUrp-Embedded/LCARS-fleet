@@ -422,7 +422,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:unlock, 42, "lcars-in-flight"}
     end
 
-    test "producteur avec :eng_summary → note COMPLÈTE sur le TICKET, POINTEUR sur la PR (dédup footprint)" do
+    test "producteur avec :eng_summary → note COMPLÈTE sur le TICKET, POINTEUR PLIÉ dans l'ouverture de la PR (QoL, un seul post PR)" do
       step_run =
         producer_step_run(:advance, %{
           next_assignee: "qualifier",
@@ -436,10 +436,13 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert issue_body =~ "j'ai implémenté le décodeur, choisi un buffer circulaire"
       assert issue_body =~ "Note de l'engineer"
 
-      # la PR (7) ne reçoit qu'un POINTEUR vers le ticket — plus le blob verbatim.
-      assert_received {:comment, 7, pr_body}
+      # le POINTEUR est PLIÉ dans le corps d'OUVERTURE de la PR (7) — pas un 2e comment séparé.
+      assert_received {:open_pr, _head, _base, pr_body}
       assert pr_body =~ "ticket #42"
       refute pr_body =~ "j'ai implémenté le décodeur"
+
+      # zéro comment sur la PR : un seul post « en tant qu'engineer » côté PR (l'ouverture elle-même).
+      refute_received {:comment, 7, _}
     end
 
     test "producteur SANS :eng_summary → AUCUN commentaire (pas de voix vide)" do

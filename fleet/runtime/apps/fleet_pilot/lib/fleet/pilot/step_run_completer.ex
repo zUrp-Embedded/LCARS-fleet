@@ -220,7 +220,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
     base = Map.get(step_run, :base_branch, "main")
     head = Map.fetch!(Map.fetch!(step_run, :deliverable_opts), :target_branch)
     title = Map.get(step_run, :title, "Livrable ##{n} — brique livrée par #{role} (engineer)")
-    body = Map.get(step_run, :pr_body, Texts.pr_body(n, role))
+    # Le pointeur vers la note (si le producteur en a une) est PLIÉ dans ce corps d'ouverture — pas un
+    # 2e comment séparé posté juste après par Emissions.post_eng_summary (QoL : un seul post PR, pas deux).
+    has_note? = match?(s when is_binary(s) and s != "", Map.get(step_run, :eng_summary))
+    body = Map.get(step_run, :pr_body, Texts.pr_body(n, role, has_note?))
 
     # La PR est ouverte AU NOM DE L'ENG (token de rôle, `as_role`), pas du compte système :
     # l'auteur de la PR sur la forge = Engineer (l'eng a fait le boulot). Token absent → fallback
@@ -378,7 +381,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     with {:ok, %{pr_number: pr}} <- open_deliverable_pr(step_run, opts) do
       # Émissions ANNEXES best-effort (voix eng PR+issue, slot-freeze deliverable.published) —
       # discard par contrat : la séquence ne dépend d'aucun retour (cf. Emissions).
-      _ = Emissions.post_eng_summary(step_run, pr, opts)
+      _ = Emissions.post_eng_summary(step_run, opts)
       _ = Emissions.deliverable_published(step_run, pr)
       route(step_run, pr, opts)
     end
