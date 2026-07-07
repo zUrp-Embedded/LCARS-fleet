@@ -119,6 +119,29 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "import_project" do
+    meta do
+      name("Import Project")
+
+      description(
+        "Importe un repo EXISTANT (déjà sur la forge, dans l'org — poussé hors-fleet ou par un humain) " <>
+          "dans la machine à agents : dual-dir (`/home/projects/<name>` sur `main`, " <>
+          "`/home/projects.work/<name>` sur `work/ops`) + gate forge-enforcé, SANS toucher au contenu " <>
+          "de `main` (il reste intact). Utilise-le pour un projet qui existe déjà (≠ create_project, qui " <>
+          "démarre un projet NEUF). `full_name` = `owner/name` (ex. `fleet/deja-la`) — doit déjà être dans " <>
+          "l'org fleet, branche par défaut `main`. Retourne {\"status\":\"imported\",\"repo\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "full_name" => %{"type" => "string"}
+      },
+      "required" => ["full_name"]
+    })
+  end
+
   deftool "get_issue_status" do
     meta do
       name("Get Issue Status")
@@ -228,6 +251,18 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("create_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("import_project", %{"full_name" => full_name}, state)
+      when is_binary(full_name) and full_name != "" do
+    case Delegation.import_project(full_name, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("import_project", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

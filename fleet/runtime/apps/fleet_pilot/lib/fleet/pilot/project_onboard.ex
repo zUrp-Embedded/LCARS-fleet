@@ -91,6 +91,78 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
+  @doc """
+  Importe un repo EXISTANT `full_name` (`"owner/name"`, ex. `"fleet/deja-la"`) dans la machine à agents —
+  WS4. Contrat de sortie IDENTIQUE à `onboard/2` (dual-dir + gate forge-enforcé), mais **ne crée ni ne
+  scaffold `main`** : le contenu du repo reste INTACT (c'est tout le point d'un import — un repo qui existe
+  déjà, poussé hors-fleet ou par un humain). `opts` : mêmes clés que `onboard/2` (`:projects_root`/
+  `:work_root`/`:base_url`/`:token`) — pas de `:org`/`:description`/`:pitch` (rien à créer).
+
+  Préconditions (fail-loud, aucune ne se contourne à l'aveugle) :
+    * `full_name` commence par `"<org>/"` (défaut `"fleet"`, override `opts[:org]`) — WS3 : l'admission
+      = l'appartenance-org, donc un repo hors-org ne serait JAMAIS découvert par le poller après import.
+      Import ne TRANSFÈRE PAS l'ownership (hors-scope V1) : le repo doit déjà être dans l'org (déplace-le
+      via la forge d'abord).
+    * la branche par défaut du repo EST `main` (même convention que `onboard`/`protect_main`, qui la
+      suppose partout) — sinon `{:error, {:unexpected_default_branch, ...}}`.
+
+  Idempotent sur `work/ops` : si la branche existe déjà (repo réimporté, ou déjà onboardé), on ne
+  l'écrase PAS — seul `lock_main` est ré-appliqué (idempotent côté Gitea, re-PUT = même règle).
+  """
+  @spec import(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
+  def import(full_name, opts \\ []) when is_binary(full_name) do
+    org = Keyword.get(opts, :org, "fleet")
+    name = full_name |> String.split("/") |> List.last()
+    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
+    work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
+
+    with :ok <- validate_name(name),
+         :ok <- refute_existing(proj_dir, work_dir),
+         :ok <- require_org_membership(full_name, org),
+         :ok <- require_default_branch_main(full_name, opts),
+         {:ok, url} <- repo_url(full_name, opts),
+         :ok <- clone_main(url, proj_dir),
+         :ok <- ensure_work_ops(full_name, url, proj_dir, work_dir, name, opts),
+         :ok <- lock_main(full_name, opts) do
+      Logger.info("ProjectOnboard: #{full_name} importé — main=#{proj_dir}, work/ops=#{work_dir}")
+      {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
+    end
+  end
+
+  # Admission WS3 = appartenance-org : un import hors-org ne serait jamais découvert par le poller. Check
+  # STRING-level (le full_name Gitea EST "<owner>/<name>" — pas un appel forge de plus pour re-vérifier
+  # ce que le nom dit déjà).
+  defp require_org_membership(full_name, org) do
+    if String.starts_with?(full_name, "#{org}/"),
+      do: :ok,
+      else: {:error, {:not_in_org, full_name, org}}
+  end
+
+  defp require_default_branch_main(full_name, opts) do
+    case ForgeClient.Repo.default_branch(full_name, fc_opts(opts)) do
+      {:ok, "main"} -> :ok
+      {:ok, other} -> {:error, {:unexpected_default_branch, other}}
+      {:error, _} = err -> err
+    end
+  end
+
+  # work/ops idempotent : présent (re-import, ou repo déjà onboardé) → on NE L'ÉCRASE PAS (skip). Absent
+  # (le cas nominal d'un repo externe) → même séquence que l'onboard (steps 5-7) : orphan branch + scaffold
+  # + commit + push.
+  defp ensure_work_ops(full_name, url, proj_dir, work_dir, name, opts) do
+    if ForgeClient.Repo.branch_exists?(full_name, "work/ops", fc_opts(opts)) do
+      File.mkdir_p!(Path.dirname(work_dir))
+      GitOps.run(["clone", "--branch", "work/ops", url, work_dir], cd: nil, auth: true)
+    else
+      with :ok <- add_work_ops(proj_dir, work_dir),
+           :ok <- Scaffold.work(work_dir, name, opts),
+           :ok <- commit(work_dir, "chore(import): init work/ops"),
+           :ok <- push(work_dir, "work/ops", true) do
+        :ok
+      end
+    end
+  end
+
   # ── DÉCOUVRABILITÉ — WS3 : rien à poser. Le repo est créé DANS l'org `fleet` (create_repo `org:`) → il
   # est de facto découvert par le poller (`list_org_repos` : appartenance-org = admission). Plus de topic
   # mutable ni de sceau à graver : l'org EST la frontière du groupe de confiance (posée en amont par l'admin).

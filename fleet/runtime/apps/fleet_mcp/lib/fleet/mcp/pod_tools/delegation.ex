@@ -108,6 +108,21 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  Importe un repo EXISTANT `full_name` (`"owner/name"`) dans la machine à agents (WS4) — dual-worktree
+  `main`/`work/ops` + gate forge-enforcé, SANS créer ni scaffolder `main` (le contenu du repo reste
+  intact — c'est tout le point). Gate architecte AVANT toute écriture disque, même mécanique que
+  `create_project`. Préconditions (repo déjà dans l'org, branche par défaut `main`) vérifiées côté
+  `ProjectOnboard.import/2` — un échec de précondition remonte `{:error, ...}` explicite.
+  """
+  @spec import_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def import_project(full_name, state) when is_binary(full_name) do
+    case require_architect(state) do
+      {:error, reason} -> {:error, reason}
+      {:ok, _role} -> do_import_project(full_name)
+    end
+  end
+
+  @doc """
   Lit l'état d'un issue délégué (issue + PR liée) — gate architecte (suivre une
   délégation reste réservé à l'architecte, cohérent avec `create_issue`/`create_project`).
 
@@ -180,6 +195,26 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
       {:error, reason} ->
         {:error, {:onboard_failed, inspect(reason)}}
+    end
+  end
+
+  # Séquence d'import (WS4) — même seam :project_onboard, callback :import au lieu de :onboard.
+  defp do_import_project(full_name) do
+    onboard = ProjectOnboard.resolved()
+
+    case apply(onboard, :import, [full_name, []]) do
+      {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
+        {:ok,
+         %{
+           "status" => "imported",
+           "repo" => repo,
+           "project_dir" => pdir,
+           "work_dir" => wdir,
+           "delegation_target" => repo
+         }}
+
+      {:error, reason} ->
+        {:error, {:import_failed, inspect(reason)}}
     end
   end
 

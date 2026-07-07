@@ -1,7 +1,7 @@
 # fleet_mcp
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-05 (resync D2 contre le code : ring 2, PodSocketRegistry + sonde readiness documentés, knobs de délégation ajoutés ; éclatement PodTools → WorkItems + Delegation, dispatch conservé)
+**Dernière révision** : 2026-07-07 (resync D2 contre le code : ring 2, PodSocketRegistry + sonde readiness documentés, knobs de délégation ajoutés ; éclatement PodTools → WorkItems + Delegation, dispatch conservé)
 **Statut** : implémenté — serveur MCP pod-facing (`get_work_item` / `submit_result`)
 **Référencé par** : `04_design-notes/` (ring4/fleet_mcp)
 
@@ -22,6 +22,7 @@ Serveur MCP LCARS (Ring 2) — frontière vendor `mcp_*` (ADR-C) : wrappe le SDK
     corrélateur `work_item_id` obligatoire + mapping des refus typés).
   - `Fleet.MCP.PodTools.Delegation` — délégation forge (architecte only) : `create_issue`
     (l'arch délègue une implémentation), `create_project` (l'arch onboard un projet neuf),
+    `import_project` (WS4 — l'arch importe un repo EXISTANT, sans toucher à `main`),
     `get_issue_status` (l'arch suit une délégation) + la gate `require_architect` commune.
 - `Fleet.MCP.PodSocketAcceptor` — accepteur d'**une** socket AF_UNIX par pod. Un pod = un
   process = une socket : toute ligne reçue vient de CE pod (son `pod_id` est l'état immuable
@@ -86,8 +87,8 @@ structure que la socket-dir tmux des pods.
 
 ## Autorisation architecte — tools privilégiés (gate serveur-side)
 
-`create_project`, `create_issue` et `get_issue_status` sont des actes d'**architecte** : créer
-un repo forge, écrire/pousser dans `/home/projects`, déléguer, suivre une délégation. Le garde
+`create_project`, `import_project`, `create_issue` et `get_issue_status` sont des actes d'**architecte** :
+créer/importer un repo forge, écrire/pousser dans `/home/projects`, déléguer, suivre une délégation. Le garde
 `require_architect/1` (dans `Fleet.MCP.PodTools.Delegation`, appliqué AVANT toute mécanique forge)
 résout le **rôle** depuis l'identité du canal (`state.pod_id` → registre du
 Spawner, `Fleet.Spawner.pod_info`, seam test `:pod_resolver`) **puis** exige `architect`. Le rôle
@@ -110,6 +111,11 @@ vient du spawn, jamais d'un champ du wire. Tout rôle autre (engineer, reviewer,
   (repo forge + dual-worktree `main`/`work/ops` + scaffold + push). Gate `require_architect` **avant**
   toute création/écriture. Le repo créé est RENDU dans le résultat (`repo`/`delegation_target`) → l'arch
   le passe explicitement à `create_issue`/`get_issue_status`. Seams test : `:project_onboard`, `:pod_resolver`.
+- `import_project` (WS4, **architecte only**) — `Fleet.Pilot.ProjectOnboard.import/2` (repo EXISTANT :
+  MÊME dual-worktree/gate, mais `main` reste INTACT — pas de création/scaffold). Gate `require_architect`.
+  Préconditions fail-loud côté `ProjectOnboard` (déjà dans l'org, branche par défaut `main`). `full_name`
+  = `"owner/name"`. Même contrat de retour que `create_project` (`status: "imported"`). Seams test :
+  `:project_onboard`, `:pod_resolver`.
 - `get_issue_status` (suivi, **architecte only**) — lit l'état d'un issue (issue + PR) du repo passé
   en `project` (**REQUIS** ; sans lui → `:project_required`, jamais d'état lu sur le mauvais projet). Gate
   `require_architect`. Lecture seule (`ForgeClient`). Seams test : `:forge_client`, `:pod_resolver`.

@@ -1,7 +1,7 @@
 # fleet_pilot
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-05 (éclatement god-modules C1 — chaque concern séparable en sous-module à frontière blindée (structs `Seams` étroits, `@enforce_keys`), API publiques inchangées : StepRunConsumer→`GateEngine`/`TerminalEscalation`/`StepRunBuild` (1165→757 l) ; StepRunCompleter→`Texts`/`Emissions` (796→~710 l ; intent-routing REFUSÉ : seam bidirectionnel) ; Poller→`Backoff`/`Lease` (785→~600 l) ; ReviewLifecycle→`RoleDispatch`/`Remediation` (529→211 l) ; ProjectOnboard→`Scaffold` ; Transport→`ForgeClient.UrlSafe` ; IncidentRegistry→`Escalation` ; Spawn→`Naming`) (dedup B5 : `Fleet.Pilot.Offload` — squelette d'offload unique des 2 consumers Bus ; `Opts.maybe_put` remplace les wrappers à clé figée `maybe_put_project|repo_id` de Spawn ; prédicat de confiance `system_authored?` UNIQUE dans ForgeProtocol — la copie issue-side de ForgeClient.Repo délègue ; `Verdict.review_event/1` = table unique token→review-event des 2 vocabulaires decision/intent ; signature gatekeeper internalisée dans `GatekeeperSeal.seal_and_merge` via le writer unique `as_gatekeeper/1` — appelants en forge_opts bruts, ArchEscalation aligné) (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer) (resync D2 contre le code : `decide/1` porte pure, routeless→onboarding, blocked→`lcars-awaits-arch`, catalogue knobs complet, modules feuilles inventoriés)
+**Dernière révision** : 2026-07-07 (éclatement god-modules C1 — chaque concern séparable en sous-module à frontière blindée (structs `Seams` étroits, `@enforce_keys`), API publiques inchangées : StepRunConsumer→`GateEngine`/`TerminalEscalation`/`StepRunBuild` (1165→757 l) ; StepRunCompleter→`Texts`/`Emissions` (796→~710 l ; intent-routing REFUSÉ : seam bidirectionnel) ; Poller→`Backoff`/`Lease` (785→~600 l) ; ReviewLifecycle→`RoleDispatch`/`Remediation` (529→211 l) ; ProjectOnboard→`Scaffold` ; Transport→`ForgeClient.UrlSafe` ; IncidentRegistry→`Escalation` ; Spawn→`Naming`) (dedup B5 : `Fleet.Pilot.Offload` — squelette d'offload unique des 2 consumers Bus ; `Opts.maybe_put` remplace les wrappers à clé figée `maybe_put_project|repo_id` de Spawn ; prédicat de confiance `system_authored?` UNIQUE dans ForgeProtocol — la copie issue-side de ForgeClient.Repo délègue ; `Verdict.review_event/1` = table unique token→review-event des 2 vocabulaires decision/intent ; signature gatekeeper internalisée dans `GatekeeperSeal.seal_and_merge` via le writer unique `as_gatekeeper/1` — appelants en forge_opts bruts, ArchEscalation aligné) (atomisation Poller : extraction du cluster « réconciliation des verrous orphelins » `Poller.Reconciliation` — `reconcile/5` (lit 5 seams, rend le set de suspects), struct `%Reconciliation.Seams{}` 5 seams, grâce 2-tick + union cross-repo restées au cœur, 835→712 l ; atomisation StepDispatcher : extraction du cycle de vie REVIEW `ReviewLifecycle` — aiguillage verdicts + rework/conflit + promotion (`dispatch_by_verdicts`/`dispatch_rework`/`dispatch_conflict_resolution`/`promote_pr`), struct `%ReviewLifecycle.Ctx{}` + captures partagées `route_for`/`tag_err`, 848→469 l ; extraction feuille de spawn SINGLE-AUTHORITY `Spawn` — spawn_step/pod_id/serialize_scope/opts-builders, struct `%Spawn.Seams{}` 6 seams, 1110→848 l ; + atomisation ForgeClient : Transport + ForgeProtocol + Jury/Repo/Files, 1652→786 l ; extraction `IncidentConsumer` hors StepRunConsumer) (resync D2 contre le code : `decide/1` porte pure, routeless→onboarding, blocked→`lcars-awaits-arch`, catalogue knobs complet, modules feuilles inventoriés)
 **Statut** : actif — service d'auto-orchestration issues Gitea (ring 1 client du core).
 **Référencé par** : `beyond_#4/01_architecture/topologie-ring.md` §Élagage
 
@@ -122,9 +122,9 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
   est fail-loud (kind/target hors-vocab → `raise` ; un juge ne reçoit JAMAIS un corps d'issue exécutable) ;
   le brief juge est **désamorcé** via `Fleet.Workflow.GateBrief` (critère rendu comme contexte). `forge` =
   arg injecté (seam). API publique : `build_brief/9`, `rework_brief/6`, `resolve_conflict_brief/6`.
-- `Fleet.Pilot.Poller` — **DÉCOUVRE** ses repos par topic (`lcars-fleet-<human>`) PUIS **ADMET** uniquement
-  ceux scellés système (`ForgeClient.admitted?` — marqueur d'onboarding bot-authored ; le topic mutable seul
-  ne suffit plus, cf. § Onboarding « sceau d'admission »). Sur chaque repo admis : scanne, lit la **route-comment**
+- `Fleet.Pilot.Poller` — **DÉCOUVRE** ses repos par **appartenance-org** (`list_org_repos`, WS3) : tout
+  repo de l'org `fleet` EST un projet fleet (l'org = la frontière du groupe de confiance, gérée EN AMONT
+  par l'admin humain — plus de topic mutable ni de sceau server-side à vérifier). Sur chaque repo : scanne, lit la **route-comment**
   (`[lcars-route:workflow_map:step]`, gravée par `create_issue` = la state-machine de routing) → dispatche le rôle du
   step (`workflow_map_role`). Bail « 1 pipeline/repo » sur la route (engagé = `in-flight` OU route avancée au-delà du
   1er step). Routing par label retiré (`type:*` = visu seulement). Sans route → onboarding système :
@@ -196,12 +196,13 @@ chaque step_run voyagent dans l'event `pod.completed`. Submodules :
       structurels préservés, `/` injectés inertes). Importé par ForgeClient/Repo/Jury/Files ; testé par
       `url_safe_test.exs`.
     - `Fleet.Pilot.ForgeClient.Jury` — état de jury PR (verdicts commit-scopés, jury volatil, feedback/rounds de rework).
-    - `Fleet.Pilot.ForgeClient.Repo` — provisioning repo + sceau d'admission (`post_onboard_marker`/`admitted?`) ;
-      seule arête descendante : le sceau matérialisé via `create_issue`/`close_issue` du cœur (layering).
+    - `Fleet.Pilot.ForgeClient.Repo` — provisioning repo (create_repo/add_collaborator/protect_branch) +
+      découverte par appartenance-org (`list_org_repos`, WS3) + accesseurs WS4 (`default_branch`,
+      `branch_exists?`). Plus de sceau d'admission (`post_onboard_marker`/`admitted?` RETIRÉS WS3).
     - `Fleet.Pilot.ForgeClient.Files` — lecture/écriture de fichiers (contents API), appelé en direct par `IncidentRegistry`.
 
     Discipline du seam : les ops *seam-faced* (atteintes via le `forge` injecté : `pr_review_state`,
-    `repo_id`, `search_repos_by_topic`, `admitted?`, `parse_feature_branch`…) restent **joignables depuis
+    `repo_id`, `list_org_repos`, `parse_feature_branch`…) restent **joignables depuis
     `ForgeClient`** (forwarders explicites / 1 `defdelegate` vers `ForgeProtocol`) ; les ops appelées en direct
     (provisioning, files) pointent sur leur sous-module. Le vocab pur du wire-protocol vit dans `ForgeProtocol`.
 - `Fleet.Pilot.StepRunConsumer` — consumer Bus de la **fin-de-step-run** (`pod.completed` → `StepRunCompleter`) ;
@@ -414,33 +415,40 @@ bornées par construction (process-group dédié, tué entier à la deadline mur
 nu ne subsiste, et un clone/push réseau qui pend ne fige plus l'orchestration ni ne laisse fuir un process
 git porteur du token forge.
 
-**Sceau d'admission (frontière d'entrée dans la machine).** Le topic `lcars-fleet-<human>` rend le repo
-**découvrable**, mais il est mutable (un propriétaire de repo peut se l'auto-poser) → le topic seul
-n'**admet** pas. `register_for_fleet` pose donc, en plus du topic, le **marqueur d'admission**
-`[lcars-onboarded:<human>]` via `ForgeClient.post_onboard_marker/3` : une issue système ouverte **sous le
-compte du token** (= le bot système). Le poller n'admet un repo que s'il porte ce marqueur **vérifié
-bot-authored** (`ForgeClient.admitted?/3`, `system_authored?` côté issue — MÊME primitif de confiance que
-les marqueurs route/step_run/result). Non forgeable : un humain ordinaire n'a pas le token système pour poster
-SOUS l'identité du bot. Pas de crypto, pas de registre — fail-closed (`admitted?` rend `false` sur doute).
+**Découvrabilité (WS3, 2026-07-07) : rien à poser.** Le repo est créé DANS l'org `fleet`
+(`create_repo org:`) → il est de facto découvert par le poller (`list_org_repos` : l'appartenance-org EST
+l'admission, gérée EN AMONT par l'admin humain — LCARS n'est pas du multi-tenant adversarial). Plus de
+topic mutable ni de sceau server-side (l'ancien `register_for_fleet`/`post_onboard_marker`/`admitted?`
+sont RETIRÉS). L'accès des rôles vient des teams tofu (`write`, `include_all_repositories`) ; l'humain est
+`read` via la team `humans` (décision user : il produit rien directement sur la forge — contribution =
+fork externe + PR, gatée comme un livrable d'agent, cf. `ReviewLifecycle` § adoption).
 
-Séquence : `ForgeClient.create_repo` (org `fleet`, `auto_init`) → `git clone main` → scaffold (README,
+Séquence `onboard/2` : `ForgeClient.create_repo` (org `fleet`, `auto_init`) → `git clone main` → scaffold (README,
 .gitignore, .editorconfig, docs/spec.md — contenu + écriture dans le sous-module
 `Fleet.Pilot.ProjectOnboard.Scaffold` : templates purs, zéro dépendance à l'orchestration) → commit+push
 `main` → `git worktree add --orphan -b work/ops`
-→ scaffold (backlog.md, scratchpad.md, plans/ — même sous-module) → commit+push `work/ops` → **`register_for_fleet`** (topic +
-**marqueur d'admission système** + collaborateur write humain) → **`lock_main`** (②.1d) : donne
-le **write** aux comptes de rôle (engineer/qualifier/reviewer/gatekeeper — sinon leurs reviews ne comptent
-pas + le gatekeeper ne peut pas merger) **puis pose la branch-protection sur `main`** (N approvals = nb de
-juges, dismiss-stale, block-on-rejected, pas de push direct). Mécanique → tout projet onboardé a le **gate
-forge-enforcé** (l'arbitre = la forge, cible DN §1.4). `work/ops` + feature-branches non protégées. Identité **M2** (l'onboarding est
-un acte d'infra système, pas du travail créatif) : `author=lcars-system` (le système GÉNÈRE le scaffold ;
-l'arch n'écrit rien, il relaie `name`+`pitch`), `committer`=git config runtime (**l'humain qui a initié →
-tracé**), `pusher`=`lcars-system` (`ForgeAuth.git_env`, owner fleet-wide) — tout avataré. Rail mécanique
-(l'arch *déclenche* via le tool MCP `create_project`, le système *exécute* ; cf. `fleet_mcp`). Pas de GenServer.
+→ scaffold (backlog.md, scratchpad.md, plans/ — même sous-module) → commit+push `work/ops` → **`lock_main`**
+(②.1d) : pose la **branch-protection sur `main`** (N approvals = nb de juges, dismiss-stale,
+block-on-rejected, pas de push direct — le **write** des comptes de rôle vient déjà des teams tofu, plus de
+grant per-repo). Mécanique → tout projet onboardé a le **gate forge-enforcé** (l'arbitre = la forge, cible
+DN §1.4). `work/ops` + feature-branches non protégées. Identité **M2** (l'onboarding est un acte d'infra
+système, pas du travail créatif) : `author=lcars-system` (le système GÉNÈRE le scaffold ; l'arch n'écrit
+rien, il relaie `name`+`pitch`), `committer`=git config runtime (**l'humain qui a initié → tracé**),
+`pusher`=`lcars-system` (`ForgeAuth.git_env`, owner fleet-wide) — tout avataré. Rail mécanique (l'arch
+*déclenche* via le tool MCP `create_project`, le système *exécute* ; cf. `fleet_mcp`). Pas de GenServer.
+
+**`import/2` (WS4, 2026-07-07)** — importe un repo EXISTANT (`"owner/name"`) : MÊME contrat de sortie
+qu'`onboard/2` (dual-dir + gate forge-enforcé), mais **ne crée ni ne scaffold `main`** — le contenu du repo
+reste intact (c'est tout le point : un repo déjà là, poussé hors-fleet ou par un humain). Préconditions
+fail-loud : le repo est déjà DANS l'org (sinon jamais découvert par le poller — pas de transfer d'ownership,
+hors-scope) et sa branche par défaut EST `main` (même convention que `protect_main`, pas généralisée à un
+autre nom). `work/ops` est créé s'il n'existe pas (`ForgeClient.Repo.branch_exists?`), sinon simplement
+re-cloné (idempotent — un re-import n'écrase jamais le travail déjà scaffoldé). Même rail mécanique,
+tool MCP `import_project` (cf. `fleet_mcp`).
 
 Les write-ops forge réutilisées ici vivent dans le cœur `Fleet.Pilot.ForgeClient` (`create_issue`,
 `post_comment`, `close_issue`) et ses sous-modules appelés en direct : `ForgeClient.Repo`
-(`create_repo`, `add_topic`, `post_onboard_marker`, `add_collaborator`, `protect_branch`) et
+(`create_repo`, `add_collaborator`, `protect_branch`, `default_branch`, `branch_exists?`) et
 `ForgeClient.Files` (`put_file`).
 
 ## Découplage core

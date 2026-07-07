@@ -33,6 +33,15 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
               {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
               | {:error, term()}
 
+  @doc """
+  Importe un repo EXISTANT `full_name` (`"owner/name"`) dans la machine à agents (WS4) — SANS créer ni
+  scaffolder `main` (contenu intact). Mêmes 3 clés de retour qu'`onboard/2` : `Delegation.do_import_project/2`
+  pattern-matche `%{repo: _, project_dir: _, work_dir: _}` strictement, identique au canal onboarding.
+  """
+  @callback import(full_name :: String.t(), opts :: keyword()) ::
+              {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
+              | {:error, term()}
+
   # Défaut canon : la séquence d'onboarding réelle côté fleet_pilot. Atom littéral
   # (pas d'appel remote littéral) → aucune dep compile-time. Posé ICI une seule fois.
   @default_onboard Fleet.Pilot.ProjectOnboard

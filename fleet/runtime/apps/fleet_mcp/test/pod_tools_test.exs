@@ -193,6 +193,18 @@ defmodule Fleet.MCP.PodToolsTest do
          work_dir: "/tmp/projects.work/#{name}"
        }}
     end
+
+    @impl true
+    def import(full_name, _opts) do
+      name = full_name |> String.split("/") |> List.last()
+
+      {:ok,
+       %{
+         repo: full_name,
+         project_dir: "/tmp/projects/#{name}",
+         work_dir: "/tmp/projects.work/#{name}"
+       }}
+    end
   end
 
   # Stub forge qui CAPTURE le repo interrogé par get_issue_status (preuve que le repo vient du `project`
@@ -497,15 +509,16 @@ defmodule Fleet.MCP.PodToolsTest do
   # Gate architecte serveur-side des tools privilégiés
   # ============================================================
   #
-  # `create_project`, `create_issue`, `get_issue_status` exigent le rôle `architect` résolu depuis le
-  # pod_id du canal. Tout rôle non architecte (engineer, reviewer, rôle nil/inconnu), un pod inconnu, ou un
-  # state sans pod_id → REFUS sur les 3 tools ; architect → passe.
+  # `create_project`, `import_project`, `create_issue`, `get_issue_status` exigent le rôle `architect`
+  # résolu depuis le pod_id du canal. Tout rôle non architecte (engineer, reviewer, rôle nil/inconnu), un
+  # pod inconnu, ou un state sans pod_id → REFUS sur les 4 tools ; architect → passe.
   describe "gate architecte (refus de tout rôle non architecte sur les tools privilégiés)" do
     @describetag :tmp_dir
 
-    # Les 3 tools privilégiés avec un jeu d'arguments métier VALIDE (pour que seul le rôle décide du refus).
+    # Les 4 tools privilégiés avec un jeu d'arguments métier VALIDE (pour que seul le rôle décide du refus).
     @privileged_tools [
       {"create_project", %{"name" => "demo-proj"}},
+      {"import_project", %{"full_name" => "fleet/demo-proj"}},
       {"create_issue", %{"title" => "T", "brief" => "B", "project" => "fleet/demo"}},
       {"get_issue_status", %{"number" => 1, "project" => "fleet/demo"}}
     ]
@@ -527,7 +540,7 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "tout rôle NON architecte est REFUSÉ sur les 3 tools — sans aucun effet de bord" do
+    test "tout rôle NON architecte est REFUSÉ sur les 4 tools — sans aucun effet de bord" do
       for role <- @non_architect_roles do
         Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: role}} end)
 
@@ -543,7 +556,7 @@ defmodule Fleet.MCP.PodToolsTest do
       end
     end
 
-    test "pod inconnu (resolver → :pod_unknown) REFUSÉ sur les 3 tools (identité non résolue)" do
+    test "pod inconnu (resolver → :pod_unknown) REFUSÉ sur les 4 tools (identité non résolue)" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:error, :pod_unknown} end)
 
       for {tool, biz_args} <- @privileged_tools do
@@ -555,7 +568,7 @@ defmodule Fleet.MCP.PodToolsTest do
       end
     end
 
-    test "state sans pod_id (anomalie accepteur) REFUSÉ sur les 3 tools → :pod_id_required" do
+    test "state sans pod_id (anomalie accepteur) REFUSÉ sur les 4 tools → :pod_id_required" do
       # Le pod_id est porté par l'accepteur ; absent du state = anomalie → refus typé, jamais d'accès.
       for {tool, biz_args} <- @privileged_tools do
         assert {:error, :pod_id_required, _} =
@@ -564,7 +577,7 @@ defmodule Fleet.MCP.PodToolsTest do
       end
     end
 
-    test "architect → les 3 tools PASSENT la gate (pas de :forbidden / :pod_unknown)" do
+    test "architect → les 4 tools PASSENT la gate (pas de :forbidden / :pod_unknown)" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "architect"}} end)
 
       for {tool, biz_args} <- @privileged_tools do
