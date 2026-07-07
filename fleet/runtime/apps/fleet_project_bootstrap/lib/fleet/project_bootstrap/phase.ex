@@ -30,7 +30,13 @@ defmodule Fleet.ProjectBootstrap.Phase do
     """
     @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
-    def clone_or_skip(pod_dir, %Fleet.CapProfile{spec: spec}, opts) do
+    def clone_or_skip(pod_dir, %Fleet.CapProfile{} = cap_profile, opts) do
+      if confined_pod_dir?(pod_dir),
+        do: do_clone_or_skip(pod_dir, cap_profile, opts),
+        else: {:error, {:unsafe_pod_dir, pod_dir}}
+    end
+
+    defp do_clone_or_skip(pod_dir, %Fleet.CapProfile{spec: spec}, opts) do
       project = spec["project"] || %{}
 
       case project["repo_path"] do
@@ -190,7 +196,13 @@ defmodule Fleet.ProjectBootstrap.Phase do
     """
     @spec clone_work_doc(Path.t(), Fleet.CapProfile.t()) ::
             {:ok, Path.t() | nil} | {:error, term()}
-    def clone_work_doc(pod_dir, %Fleet.CapProfile{spec: spec}) do
+    def clone_work_doc(pod_dir, %Fleet.CapProfile{} = cap_profile) do
+      if confined_pod_dir?(pod_dir),
+        do: do_clone_work_doc(pod_dir, cap_profile),
+        else: {:error, {:unsafe_pod_dir, pod_dir}}
+    end
+
+    defp do_clone_work_doc(pod_dir, %Fleet.CapProfile{spec: spec}) do
       project = spec["project"] || %{}
       work_branch = project["work_branch"]
       repo_url = project["repo_path"]
@@ -231,6 +243,15 @@ defmodule Fleet.ProjectBootstrap.Phase do
         end
       end
     end
+
+    # pod_dir CONFINEMENT lives UPSTREAM: the spawner builds pod_dir as `<pod_dir_root>/pod_<pod_id>`
+    # from a pod_id validated by `Fleet.Spawner.valid_pod_id?` (no `..`, no `/`). This module (Ring 1)
+    # CANNOT re-derive that root without a `fleet_spawner` dep (compile cycle), so it cannot check
+    # "under root" here. What it CAN and MUST assert before any `rm_rf`/`mkdir` is that pod_dir is
+    # ABSOLUTE: a relative pod_dir would make the fixed subdirs `<pod_dir>/workspace|work` resolve
+    # against the runtime's CWD → `rm_rf`/`mkdir` on `<cwd>/workspace` (the one footgun visible without
+    # the root). Non-absolute → refuse fail-loud (`{:error, {:unsafe_pod_dir, _}}`), never touch the FS.
+    defp confined_pod_dir?(pod_dir), do: is_binary(pod_dir) and Path.type(pod_dir) == :absolute
 
     # No local `forge_auth_args/0` helper (nor a dup of `Fleet.Workflow.Git`, despite the
     # workflow⇄bootstrap compile cycle): forge auth has a single source `Fleet.Credentials.ForgeAuth.git_env/0`

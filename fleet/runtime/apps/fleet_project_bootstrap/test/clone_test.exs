@@ -37,6 +37,22 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     }
   end
 
+  test "pod_dir NON-absolu → {:error, {:unsafe_pod_dir}} (guard : jamais mkdir/rm_rf relatif au cwd)" do
+    on_exit(fn -> File.rm_rf("relative-pod-x") end)
+
+    # repo_path nil → branche skip (mkdir workspace), aucun git : on isole le GUARD, pas le clone.
+    profile = cap(%{})
+
+    assert {:error, {:unsafe_pod_dir, "relative-pod-x"}} =
+             Clone.clone_or_skip("relative-pod-x", profile, [])
+
+    assert {:error, {:unsafe_pod_dir, "relative-pod-x"}} =
+             Clone.clone_work_doc("relative-pod-x", profile)
+
+    refute File.exists?("relative-pod-x"),
+           "un pod_dir relatif ne doit RIEN créer/effacer (guard avant toute I/O)"
+  end
+
   test "clone code (workspace) + doc (work) côte à côte", %{tmp_dir: tmp} do
     src = make_source_repo(Path.join(tmp, "src"))
     pod_dir = Path.join(tmp, "pod-test-1")
