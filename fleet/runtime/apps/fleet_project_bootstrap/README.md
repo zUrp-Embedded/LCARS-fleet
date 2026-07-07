@@ -1,79 +1,81 @@
-# fleet_project_bootstrap — core du pod (Ring 1)
+# fleet_project_bootstrap — pod core (Ring 1)
 
-**Date** : 2026-05-18
-**Dernière révision** : 2026-07-05 (D2 — resync contrat : section Sous-modules, zéro knob de config explicité)
-**Statut** : ACTIF — chemin PROD câblé (`Phase.Clone`). Orchestrateur mort `prepare/3` + 4 phases non-Clone RETIRÉS.
-**Dérivé de** : 04_design-notes/ring1/fleet_project_bootstrap.md + session 2026-05-17/18 (rings finalisés)
+**Date**: 2026-05-18
+**Last revision**: 2026-07-05 (contract resync: Sub-modules section, zero explicit config knob)
+**Status**: ACTIVE — PROD path wired (`Phase.Clone`). Dead orchestrator `prepare/3` + 4 non-Clone phases REMOVED.
+**Derived from**: 04_design-notes/ring1/fleet_project_bootstrap.md + session 2026-05-17/18 (rings finalized)
 
-Cette app fait partie du **core V2** (Ring 1, primitives de pod). Elle prépare le workspace du pod
-AVANT spawn. Le code est **implémenté et actif en prod** — ce README documente l'état RÉEL,
-contre le code (`lib/fleet/project_bootstrap/phase.ex`).
+This app is part of the **V2 core** (Ring 1, pod primitives). It prepares the pod's workspace
+BEFORE spawn. The code is **implemented and active in prod** — this README documents the REAL state,
+checked against the code (`lib/fleet/project_bootstrap/phase.ex`).
 
-Invariant cardinal (SP positif) : l'agent dans le pod **ne voit aucune trace de la mécanique LCARS**
-hors workspace vanilla + plugins. ⚠ Cet invariant n'est PAS testé en hermétique sur le chemin PROD
-(il dépend de la vue sandbox bwrap) → besoin d'un test-intégration sandbox.
+Cardinal invariant (positive SP): the agent inside the pod **sees no trace of the LCARS machinery**
+beyond the vanilla workspace + plugins. ⚠ This invariant is NOT hermetically tested on the PROD path
+(it depends on the bwrap sandbox view) → needs a sandbox integration test.
 
-## Sous-modules
+## Sub-modules
 
-| Module | Rôle |
+| Module | Role |
 |---|---|
-| `Fleet.ProjectBootstrap.Application` | supervisor `:one_for_one`, children `[]` — aucun process démarré (existe pour cohérence umbrella OTP, pattern `Fleet.Coord.Application`) |
-| `Fleet.ProjectBootstrap.Phase` | namespace du bootstrap — porte la seule phase câblée, `Clone` |
-| `Fleet.ProjectBootstrap.Phase.Clone` | fonctions pures (File / Path / git, aucun process) : `clone_or_skip/3`, `clone_work_doc/2`, `reset_in_place/3` |
+| `Fleet.ProjectBootstrap.Application` | `:one_for_one` supervisor, children `[]` — no process started (exists for umbrella OTP consistency, `Fleet.Coord.Application` pattern) |
+| `Fleet.ProjectBootstrap.Phase` | bootstrap namespace — carries the only wired phase, `Clone` |
+| `Fleet.ProjectBootstrap.Phase.Clone` | pure functions (File / Path / git, no process): `clone_or_skip/3`, `clone_work_doc/2`, `reset_in_place/3` |
 
-Aucun knob de config : l'app ne lit aucune app env (`get_env`/`fetch_env`) et rien n'est posé
-pour elle dans `config/*.exs` ; la seule calibration passe par opt (`:git_timeout_ms` de
-`clone_or_skip/3`, défaut = les 30s du wrapper `Fleet.Credentials.Shell.git/2`).
+No config knob: the app reads no app env (`get_env`/`fetch_env`) and nothing is set
+for it in `config/*.exs`; the only calibration goes through an opt (`:git_timeout_ms` of
+`clone_or_skip/3`, default = the 30s of the `Fleet.Credentials.Shell.git/2` wrapper).
 
-## Ce que l'app fait VRAIMENT en prod (`Phase.Clone`)
+## What the app REALLY does in prod (`Phase.Clone`)
 
-Le seul chemin câblé en production est `Fleet.ProjectBootstrap.Phase.Clone`, appelé **directement**
-par `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` au spawn, `reset_in_place` au re-brief).
+The only path wired in production is `Fleet.ProjectBootstrap.Phase.Clone`, called **directly**
+by `Fleet.Spawner.Pod` (`maybe_bootstrap_project_workspace` at spawn, `reset_in_place` at re-brief).
 
-- **`clone_or_skip/3`** — clone la branche code dans `<pod_dir>/workspace` :
-  - `spec.project.repo_path` présent → `git clone --branch <base_branch> [--reference <ref>]`, puis
-    pin optionnel sur `base_sha` (épinglage par le rail forge-driven), puis `checkout -b feature/<slug>`.
-  - absent (pod permanent / pas de repo) → `mkdir workspace`, branch `nil` (skip).
-  - `rm_rf` du `workspace/` résiduel avant clone (idempotence du re-dispatch déterministe : un
-    prédécesseur mort ne wedge pas le re-dispatch sur `clone_failed`).
-  - Convention `"workspace"` ré-encodée ici (cycle compile interdit la dép vers `fleet_spawner`) ;
-    DOIT rester en sync avec `Fleet.Spawner.@pod_workspace_subdir` (ce module est le PRODUCTEUR,
-    `Pod` RECOMPUTE via `pod_workspace_path/1`).
-- **`clone_work_doc/2`** — clone la branche DOC orpheline (`spec.project.work_branch`, conv. `work/ops`)
-  dans `<pod_dir>/work` : plans, backlog, conventions sur lesquels l'agent s'appuie. Skip si pas de
-  `work_branch`/`repo_path` ; FAIL-LOUD si déclarée mais clone échoué. `rm_rf` du `work/` résiduel avant
-  clone (parité idempotence avec `clone_or_skip`).
-- **`reset_in_place/3`** — reset COLD IN-PLACE du `workspace` d'un pod RÉSIDENT (pipe slot-freeze) pour le
-  issue suivant, SANS `rm_rf` (le `ws` est bind-monté dans le sandbox bwrap VIVANT — le supprimer
-  casserait le mount). Reset `--hard` sur le `base_sha` du NOUVEAU issue (REQUIS — fail-loud
-  `{:reset_failed, :no_base_sha}` sinon) + `clean -fdx` + `checkout -B feature/<slug>`.
+- **`clone_or_skip/3`** — clones the code branch into `<pod_dir>/workspace`:
+  - `spec.project.repo_path` present → `git clone --branch <base_branch> [--reference <ref>]`, then
+    optional pin onto `base_sha` (pinned by the forge-driven rail), then `checkout -b feature/<slug>`.
+  - absent (permanent pod / no repo) → `mkdir workspace`, branch `nil` (skip).
+  - `rm_rf` of the residual `workspace/` before clone (idempotence of the deterministic re-dispatch: a
+    dead predecessor does not wedge the re-dispatch on `clone_failed`).
+  - The `"workspace"` convention is re-encoded here (a compile cycle forbids the dep on `fleet_spawner`);
+    it MUST stay in sync with `@pod_workspace_subdir` in `Fleet.Spawner.Pod.Paths` (this module is the
+    PRODUCER, `Pod` RECOMPUTES via `pod_workspace_path/1`).
+- **`clone_work_doc/2`** — clones the orphan DOC branch (`spec.project.work_branch`, `work/ops` by convention)
+  into `<pod_dir>/work`: plans, backlog, conventions the agent relies on. Skip if no
+  `work_branch`/`repo_path`; FAIL-LOUD if declared but the clone failed. `rm_rf` of the residual `work/`
+  before clone (idempotence parity with `clone_or_skip`).
+- **`reset_in_place/3`** — COLD IN-PLACE reset of a RESIDENT pod's `workspace` (slot-freeze pipe) for the
+  next issue, WITHOUT `rm_rf` (the `ws` is bind-mounted into the LIVE bwrap sandbox — deleting it
+  would break the mount). Reset `--hard` onto the NEW issue's `base_sha` (REQUIRED — fail-loud
+  `{:reset_failed, :no_base_sha}` otherwise) + `clean -fdx` + `checkout -B feature/<slug>`.
 
-Auth git : `Fleet.Credentials.ForgeAuth.git_env/0` (token via env hors argv, `GIT_TERMINAL_PROMPT=0`).
-Identité git posée en env au lancement par `bwrap_launch.sh` (pas de `git config` mutable — garantie
-côté monde via `Fleet.Workflow.DeliverableGate.check_identity/3`).
+Git auth: `Fleet.Credentials.ForgeAuth.git_env/0` (token via env outside argv, `GIT_TERMINAL_PROMPT=0`).
+Git identity set in env at launch by `bwrap_launch.sh` (no mutable `git config` — world-side guarantee
+via `Fleet.Workflow.DeliverableGate.check_identity/3`).
 
-**Git BORNÉ par construction** : clone/fetch/checkout/reset passent par `Fleet.Credentials.Shell.git/2`
-(deadline + SIGKILL du process OS à l'expiration) — un git réseau qui pend (ou qui prompterait sans TTY)
-est tué dans la deadline et rend `{:clone_failed|:reset_failed, {:git_timeout|:git_exit, _}}` au lieu de
-figer le `Fleet.Spawner.Pod` (GenServer) → plus de pod zombie. La deadline du clone réseau est calibrable
-via l'opt `:git_timeout_ms` de `clone_or_skip/3`.
+**Git BOUNDED by construction**: clone/fetch/checkout/reset go through `Fleet.Credentials.Shell.git/2`
+(deadline + SIGKILL of the OS process-group on expiry) — a hanging network git (or one that would prompt
+without a TTY) is killed within the deadline and returns `{:clone_failed|:reset_failed, {:git_timeout|:git_exit, _}}`
+instead of freezing the `Fleet.Spawner.Pod` (GenServer) → no more zombie pod. The network clone's deadline
+is calibrable via the `:git_timeout_ms` opt of `clone_or_skip/3`.
 
-Les autres concerns du bootstrap sont assurés en prod par des chemins **INDÉPENDANTS de `Phase.Clone`** :
-le CLAUDE.md par `do_project` (pod.ex), les mounts/creds par bwrap (adr-f).
+The other bootstrap concerns are handled in prod by paths INDEPENDENT of `Phase.Clone`:
+the CLAUDE.md by the `:projecting` state of `Fleet.Spawner.Pod` (pod.ex), the mounts/creds by bwrap
+(`bwrap_launch.sh`).
 
-## Code mort RETIRÉ (orchestrateur `prepare/3` + 4 phases non-Clone)
+## Dead code REMOVED (`prepare/3` orchestrator + 4 non-Clone phases)
 
-L'orchestrateur `Fleet.ProjectBootstrap.prepare/3` (pipeline ALLOCATE → CLONE → INIT_MIMIC →
-BIND_CREDENTIALS → PREPARE_MOUNT_BINDS) et les 4 phases non-Clone (`Allocate`, `InitMimic`,
-`BindCredentials`, `PrepareMountBinds`) n'étaient câblés par AUCUN chemin prod (le spawner empruntait
-direct `Phase.Clone`) — uniquement par un `conformance_test` (false-green démoté). Ils ont été **RETIRÉS**
-(décision revive-vs-remove tranchée = remove). Leurs concerns sont assurés ailleurs : CLAUDE.md par
-`do_project` (pod.ex), creds/mounts par `bwrap_launch.sh` (adr-f). La divergence de convention pod_dir
-`pod-<id>` (ancien `Allocate`) vs `pod_<id>` (spawner) disparaît avec le retrait.
+The `Fleet.ProjectBootstrap.prepare/3` orchestrator (ALLOCATE → CLONE → INIT_MIMIC →
+BIND_CREDENTIALS → PREPARE_MOUNT_BINDS pipeline) and the 4 non-Clone phases (`Allocate`, `InitMimic`,
+`BindCredentials`, `PrepareMountBinds`) were wired by NO prod path (the spawner went straight through
+`Phase.Clone`) — only by a `conformance_test` (demoted false-green). They were **REMOVED**
+(revive-vs-remove decision settled = remove). Their concerns are handled elsewhere: the CLAUDE.md by the
+`:projecting` state of `Fleet.Spawner.Pod` (pod.ex), creds/mounts by `bwrap_launch.sh`. The pod_dir
+convention divergence `pod-<id>` (old `Allocate`) vs `pod_<id>` (spawner) disappears with the removal.
 
-## Frontière vendor
+## Vendor boundary
 
-N0 (vendor-agnostic). Aucune dépendance vendor : git + EEx + paths. Dépend vers le bas de
-`fleet_credentials` (`ForgeAuth.git_env/0` ET `Fleet.Credentials.Shell.git/2` pour le git borné) et
-`fleet_cap_profile` (`Fleet.CapProfile`). Ne PEUT PAS dépendre de `fleet_spawner` (cycle compile) —
-d'où la ré-encodage de `"workspace"`.
+N0 (vendor-agnostic). No vendor dependency: git + paths (`:eex` is still declared in the app's
+`extra_applications` but is INERT — no EEx call remains since the non-Clone phases were removed).
+Depends downward on `fleet_credentials` (`ForgeAuth.git_env/0` AND `Fleet.Credentials.Shell.git/2` for
+the bounded git) and `fleet_cap_profile` (`Fleet.CapProfile`). CANNOT depend on `fleet_spawner`
+(compile cycle) — hence the re-encoding of `"workspace"`.

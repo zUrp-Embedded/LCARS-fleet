@@ -1,41 +1,41 @@
-# fleet_starfleet (chantier 13)
+# fleet_starfleet
 
-**Date** : 2026-05-10
-**Dernière révision** : 2026-07-05 (dédup B4/D8 : plomberie GenServer périodique de `MCPMonitor`/`MCPWatcher` → fonctions partagées `Fleet.Starfleet.PeriodicCheck` (pas de macro), chaque jumeau garde init/do_check/forme de réponse ; B-R2 dédup chargé-caché : `Gatekeeper.init_schema!/0` + get-or-raise délégués à `Fleet.SchemaCache`, autorité Ring 0 ; 2026-07-02 : test du contrat re-subscribe au Bus après restart — un consommateur d'events tué se ré-abonne via `init/1` et reçoit les events suivants ; R4 D5 — `Shutdown` + backend réel `AggregateDispatcher` câblé prod, seam `:shutdown_dispatcher` ; D2 resync contrat↔code : sous-modules complets (`Application`, `AuditConsumer`, `BootOrchestrator`, behaviours), `in_flight_count` réel (non-permanents + pending, plus de Pipeline RAM), catalogue knobs complet, atomes events à jour)
-**Statut** : impl att-1 — qualifier en attente
-**Référencé par** : `04_design-notes/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
+**Date**: 2026-05-10
+**Last revision**: 2026-07-05 (periodic-GenServer dedup: `MCPMonitor`/`MCPWatcher` plumbing → shared functions `Fleet.Starfleet.PeriodicCheck` (no macro), each twin keeps its init/do_check/reply shape; load-then-cache dedup: `Gatekeeper.init_schema!/0` + get-or-raise delegated to `Fleet.SchemaCache`, Ring 0 authority; 2026-07-02: Bus re-subscribe-after-restart contract test — a killed event consumer re-subscribes via `init/1` and receives the following events; `Shutdown` + real backend `AggregateDispatcher` wired in prod, `:shutdown_dispatcher` seam; contract↔code resync: complete sub-modules (`Application`, `AuditConsumer`, `BootOrchestrator`, behaviours), real `in_flight_count` (non-permanents + pending, no more in-RAM workflow runs), complete knob catalog, event atoms up to date)
+**Status**: implemented — qualification pending
+**Referenced by**: `04_design-notes/fleet_starfleet.md`, `STATUS-CHANTIERS.md`
 
-Module système-side consommateur des outputs des pods d'arbitrage
-(gatekeeper + autres rôles décisionnels) côté core LCARS Ring 2.
-Source : `04_design-notes/fleet_starfleet.md` (Régime 1, profil
-**CONFORMANCE**, PoC-π3 PROVEN + PoC-10).
+System-side module consuming the outputs of the arbitration pods
+(gatekeeper + other decision-making roles) on the LCARS core side, Ring 2.
+Source: `04_design-notes/fleet_starfleet.md` (**CONFORMANCE**
+profile, validation pattern proven by PoC).
 
-**Pas de pod, pas d'inférence dans ce module** — validation, parsing,
-audit, escalade Cat 5 seulement.
+**No pod, no inference in this module** — validation, parsing,
+audit, Cat 5 escalation only.
 
-## Sous-modules
+## Sub-modules
 
-| Module | Rôle |
+| Module | Role |
 |---|---|
-| `Fleet.Starfleet.Application` | supervisor `:one_for_one` (intensité 3/60 explicite) — `Gatekeeper.init_schema!/0` fail-fast au boot, pré-enregistre les atomes events (`starfleet_event_atoms/0`, cf. Atom registration), démarre les enfants gatés par les knobs `start_*` (cf. Configuration) |
-| `Fleet.Starfleet.Decision` | struct sortie validate `{decision, reason, details, chain}` |
-| `Fleet.Starfleet.Gatekeeper` | pure functions validation JSON décision (PoC-π3 figé) + schema strict `priv/schema/decision-v1.json` `ex_json_schema` au load fail-fast + cache schema via `Fleet.SchemaCache` (autorité Ring 0, `:persistent_term`) |
-| `Fleet.Starfleet.DriftMonitor` | GenServer subscribe `fleet.events`, 4 handlers (`pod.drift`, `workflow_map.failed`, `oauth.refresh.failed`, `audit.verdict`) — cf. Events handlés. Seams test `name:` / `subscribe: false` |
-| `Fleet.Starfleet.AuditConsumer` | GenServer subscribe `fleet.events`, log audit-grade **sélectif** (log seul, aucun side effect runtime) : lifecycle pods `pod.completed`/`pod.failed`, boot `fleet.boot_complete\|partial\|failed`, task-queue `work_item.*`/`state.corrupt`, extensions V2 `sdk.upstream_alert`/`mcp.server_crashed`, `pod.drift` (dormant, 0 producteur). Seam test `subscribe: false` |
-| `Fleet.Starfleet.BootOrchestrator` | Task `:transient` post-readiness — `Fleet.Spawner.PermanentBoot.boot_permanent_pods/0` (gaté par `auto_boot_enabled?/0`, env `LCARS_BOOT_PERMANENT_AT_START`) puis émet `fleet.boot_complete\|partial\|failed` (best-effort via `Bus.safe_emit`). Ne crash JAMAIS le daemon : rescue → `fleet.boot_failed`, mode degraded |
-| `Fleet.Starfleet.Cat5Escalator` | pure functions `escalate/3` (source, payload, correlation_id) → log `AuditLog` + broadcast canon `starfleet.audit_cat5_<source>` + délégation `CoordBackend.handle_escalation/3` (miss de routage → `Logger.warning`, jamais avalé muet). Les 3 sources câblées bout en bout mais **dormantes** (events d'entrée sans producteur live) |
-| `Fleet.Starfleet.AuditLog` | wrapper `File.write/3` non-bang fail-safe sur `~/.lcars/log/fleet-starfleet.jsonl` (NDJSON append, chemin défaut via `Fleet.Layout.state_dir()`). **Rotation au seuil** (`:audit_log_max_bytes`, défaut 10 MB) → 1 backup `.1` : l'audit local est une convenance forensics, le durable = forge |
-| `Fleet.Starfleet.CoordBackend` | behaviour seam wrap `Fleet.Coord` ch14 (`handle_decision/2`, `handle_escalation/3` — correlation_id explicite). `resolved/0` = **source unique** du backend résolu (config + défaut) lue par `Cat5Escalator`/`DriftMonitor` — pas de défaut redupliqué par site |
-| `Fleet.Starfleet.CoordBackend.NotWiredYet` | backend défaut (cohérent canon §0 #1) — log debug + `:ok`, escalade audit-only tant que coord pas câblé (prod : `runtime.exs` pose `Fleet.Coord`) |
-| `Fleet.Starfleet.MCPMonitor` | GenServer périodique (60s) — health check passif du substrat MCP pod-facing (cible `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}` via `which_children`, ou atome nommé) ; transition `:ok → :crashed` → broadcast `mcp.server_crashed` (retour = log seul) |
-| `Fleet.Starfleet.MCPWatcher` | GenServer périodique (hebdo) — drift de version du SDK MCP (`ex_mcp`) local vs Hex.pm ; mismatch → broadcast `sdk.upstream_alert` (fetcher injectable `:mcp_watcher_upstream_fetcher`) |
-| `Fleet.Starfleet.PeriodicCheck` | plomberie PARTAGÉE des deux jumeaux ci-dessus : `start_link(module, opts)` (GenServer nommé), `schedule/2` (send_after récursif), `tick/3` (corps du handle_info), `check_now/3` (hook test sync). Fonctions, pas de macro `use` ; chaque jumeau garde son `init/1`, son `do_check/1` et la forme de sa réponse. NE PAS généraliser au-delà de ces 2 modules |
-| `Fleet.Starfleet.Shutdown` | GenServer grace shutdown coordonné (`begin/1`, `drain_in_flight/1`) — DN ring0 `lcars-fleet_service`. Déclencheur historique (`ExecStop` systemd) retiré 2026-06-16, à recâbler sur `fleet_v2 stop` (backlog graceful-shutdown) — la logique de drain reste valide. Seam `:shutdown_dispatcher` (behaviour `Shutdown.Dispatcher`). `configured_dispatcher/0` = **source unique** du backend résolu (config + défaut canon `NoOpDispatcher`), lue à l'`init` ET par la readiness (`fleet_api`) — pas de second défaut à aligner |
-| `Fleet.Starfleet.Shutdown.Dispatcher` | behaviour du seam (`refuse_new_jobs/1`, `in_flight_count/0`) — EST l'abstraction du drain (pas de god-module `Fleet.Dispatcher`, décision user 2026-06-05) |
-| `Fleet.Starfleet.Shutdown.NoOpDispatcher` | backend défaut test/fallback — drain immédiat 0 in-flight (honnête-dégradé, documenté, pas un Goodhart) |
-| `Fleet.Starfleet.Shutdown.AggregateDispatcher` | backend **réel** (câblé prod runtime.exs) — `in_flight_count` = pods vivants **non-permanents** (`Spawner.list_pods` filtré par `PermanentBoot.permanent?/1` — les résidents Type 1/3 ne comptent pas, sinon drain inatteignable) + work items `:pending` (`TaskQueue.list_pending` par `apply`, seulement si l'app tourne — pas d'inversion de layering). Plus de comptage pipelines RAM (moteur `Fleet.Workflow.Executor` supprimé). **Fail-CLOSED** : comptage injoignable (restart en plein quiesce) → sentinel > 0, le drain attend son timeout au lieu de conclure « vide » à tort. `refuse_new_jobs` active `Fleet.Shutdown.Quiesce` |
+| `Fleet.Starfleet.Application` | `:one_for_one` supervisor (explicit 3/60 intensity) — `Gatekeeper.init_schema!/0` fail-fast at boot, pre-registers the event atoms (`starfleet_event_atoms/0`, cf. Atom registration), starts the children gated by the `start_*` knobs (cf. Configuration) |
+| `Fleet.Starfleet.Decision` | validate output struct `{decision, reason, details, chain}` |
+| `Fleet.Starfleet.Gatekeeper` | pure functions validating the decision JSON (PoC-frozen) + strict schema `priv/schema/decision-v1.json` `ex_json_schema` fail-fast at load + schema cache via `Fleet.SchemaCache` (Ring 0 authority, `:persistent_term`) |
+| `Fleet.Starfleet.DriftMonitor` | GenServer subscribed to `fleet.events`, 4 handlers (`pod.drift`, `workflow_map.failed`, `oauth.refresh.failed`, `audit.verdict`) — cf. Handled events. Test seams `name:` / `subscribe: false` |
+| `Fleet.Starfleet.AuditConsumer` | GenServer subscribed to `fleet.events`, **selective** audit-grade logging (log only, no runtime side effect): pod lifecycle `pod.completed`/`pod.failed`, boot `fleet.boot_complete\|partial\|failed`, task-queue `work_item.*`/`state.corrupt`, V2 extensions `sdk.upstream_alert`/`mcp.server_crashed`, `pod.drift` (dormant, 0 producer). Test seam `subscribe: false` |
+| `Fleet.Starfleet.BootOrchestrator` | post-readiness `:transient` Task — `Fleet.Spawner.PermanentBoot.boot_permanent_pods/0` (gated by `auto_boot_enabled?/0`, env `LCARS_BOOT_PERMANENT_AT_START`) then emits `fleet.boot_complete\|partial\|failed` (best-effort via `Bus.safe_emit`). NEVER crashes the daemon: rescue → `fleet.boot_failed`, degraded mode |
+| `Fleet.Starfleet.Cat5Escalator` | pure functions `escalate/3` (source, payload, correlation_id) → `AuditLog` write + canonical broadcast `starfleet.audit_cat5_<source>` + `CoordBackend.handle_escalation/3` delegation (routing miss → `Logger.warning`, never silently swallowed). The 3 sources are wired end to end but **dormant** (input events have no live producer) |
+| `Fleet.Starfleet.AuditLog` | fail-safe non-bang `File.write/3` wrapper over `~/.lcars/log/fleet-starfleet.jsonl` (NDJSON append, default path via `Fleet.Layout.state_dir()`). **Threshold rotation** (`:audit_log_max_bytes`, default 10 MB) → 1 `.1` backup: the local audit is a forensics convenience, the durable one = the forge |
+| `Fleet.Starfleet.CoordBackend` | behaviour seam wrapping `Fleet.Coord` (`handle_decision/2`, `handle_escalation/3` — explicit correlation_id). `resolved/0` = **single source** of the resolved backend (config + default) read by `Cat5Escalator`/`DriftMonitor` — no default reduplicated per call site |
+| `Fleet.Starfleet.CoordBackend.NotWiredYet` | default backend (consistent with the deny-by-default + fail-safe canon) — debug log + `:ok`, audit-only escalation as long as coord is not wired (prod: `runtime.exs` sets `Fleet.Coord`) |
+| `Fleet.Starfleet.MCPMonitor` | periodic GenServer (60s) — passive health check of the pod-facing MCP substrate (target `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}` via `which_children`, or a named atom); `:ok → :crashed` transition → broadcast `mcp.server_crashed` (recovery = log only) |
+| `Fleet.Starfleet.MCPWatcher` | periodic GenServer (weekly) — version drift of the local MCP SDK (`ex_mcp`) vs Hex.pm; mismatch → broadcast `sdk.upstream_alert` (injectable fetcher `:mcp_watcher_upstream_fetcher`) |
+| `Fleet.Starfleet.PeriodicCheck` | SHARED plumbing of the two twins above: `start_link(module, opts)` (named GenServer), `schedule/2` (recursive send_after), `tick/3` (handle_info body), `check_now/3` (sync test hook). Functions, no `use` macro; each twin keeps its `init/1`, its `do_check/1` and the shape of its reply. Do NOT generalize beyond these 2 modules |
+| `Fleet.Starfleet.Shutdown` | coordinated grace-shutdown GenServer (`begin/1`, `drain_in_flight/1`) — ring0 design-note `lcars-fleet_service`. Historical trigger (systemd `ExecStop`) removed 2026-06-16, to be re-wired onto `fleet_v2 stop` (graceful-shutdown backlog) — **INERT** until then (no caller invokes `begin/1`); the drain logic itself stays valid. `:shutdown_dispatcher` seam (behaviour `Shutdown.Dispatcher`). `configured_dispatcher/0` = **single source** of the resolved backend (config + canonical default `NoOpDispatcher`), read at `init` AND by readiness (`fleet_api`) — no second default to keep aligned |
+| `Fleet.Starfleet.Shutdown.Dispatcher` | seam behaviour (`refuse_new_jobs/1`, `in_flight_count/0`) — IS the drain abstraction (no `Fleet.Dispatcher` god-module, user decision 2026-06-05) |
+| `Fleet.Starfleet.Shutdown.NoOpDispatcher` | test/fallback default backend — immediate drain, 0 in-flight (honestly-degraded, documented, not a Goodhart) |
+| `Fleet.Starfleet.Shutdown.AggregateDispatcher` | **real** backend (wired prod runtime.exs) — `in_flight_count` = live **non-permanent** pods (`Spawner.list_pods` filtered by `PermanentBoot.permanent?/1` — Type 1/3 residents don't count, otherwise the drain is unreachable) + `:pending` work items (`TaskQueue.list_pending` via `apply`, only if the app is running — no layering inversion). No more RAM workflow-run counting (the `Fleet.Workflow.Executor` engine is deleted). **Fail-CLOSED**: count unreachable (restart mid-quiesce) → sentinel > 0, the drain waits out its timeout instead of wrongly concluding "empty". `refuse_new_jobs` activates `Fleet.Shutdown.Quiesce` |
 
-(`Fleet.Starfleet` lui-même = moduledoc de tête du namespace, aucun code.)
+(`Fleet.Starfleet` itself = head moduledoc of the namespace, no code.)
 
 ## Public API
 
@@ -43,96 +43,96 @@ audit, escalade Cat 5 seulement.
 {:ok, %Fleet.Starfleet.Decision{decision: "halt", reason: "r", details: %{}, chain: []}} =
   Fleet.Starfleet.Gatekeeper.validate(~s|{"decision":"halt","reason":"r","details":{}}|)
 
-# correlation_id explicite (3e argument, nil hors work item)
+# explicit correlation_id (3rd argument, nil outside a work item)
 :ok = Fleet.Starfleet.Cat5Escalator.escalate(:pod_drift, %{"pod_id" => "p1", "drift_count" => 3}, nil)
 
 :ok = Fleet.Starfleet.AuditLog.write(%{"source" => "test", "action" => "boot"})
 ```
 
-## Schema décision (PoC-π3 figé)
+## Decision schema (PoC-frozen)
 
 ```json
 {
   "decision": "allow|halt|escalate|retry",
-  "reason": "string non-vide",
+  "reason": "non-empty string",
   "details": {},
   "chain": ["string", ...]
 }
 ```
 
-`reason`, `decision`, `details` requis. `chain` optionnel (default `[]`).
+`reason`, `decision`, `details` required. `chain` optional (default `[]`).
 
-## Events handlés (DriftMonitor)
+## Handled events (DriftMonitor)
 
-| event_type | trigger Cat 5 |
+| event_type | Cat 5 trigger |
 |---|---|
-| `pod.drift` | si `drift_count >= 3` — dormant : émetteur prévu (filtre IPC pod-side) jamais implémenté, 0 producteur |
-| `workflow_map.failed` | inconditionnel — dormant : producteur historique (moteur RAM `Fleet.Workflow.Executor`) supprimé |
-| `oauth.refresh.failed` | inconditionnel — dormant : pas de producteur câblé |
-| `audit.verdict` | `Gatekeeper.validate` puis `CoordBackend.handle_decision/2` ; verdict non routé → `Logger.warning` (pas jeté muet) |
+| `pod.drift` | if `drift_count >= 3` — dormant: intended emitter (pod-side IPC filter) never implemented, 0 producer |
+| `workflow_map.failed` | unconditional — dormant: historical producer (in-RAM engine `Fleet.Workflow.Executor`) removed |
+| `oauth.refresh.failed` | unconditional — dormant: no wired producer |
+| `audit.verdict` | `Gatekeeper.validate` then `CoordBackend.handle_decision/2`; unrouted verdict → `Logger.warning` (not silently dropped) |
 
-Les 3 chemins Cat 5 sont câblés de bout en bout (DriftMonitor → Cat5Escalator →
-broadcast + coord) mais dormants tant qu'aucun producteur n'émet leurs events d'entrée.
+The 3 Cat 5 paths are wired end to end (DriftMonitor → Cat5Escalator →
+broadcast + coord) but dormant as long as no producer emits their input events.
 
 ## Atom registration
 
-Atomes events pré-enregistrés compile-time via l'attribut
-`@starfleet_event_atoms` de `Fleet.Starfleet.Application` (exposé
-`starfleet_event_atoms/0`) :
+Event atoms pre-registered at compile time via the
+`@starfleet_event_atoms` attribute of `Fleet.Starfleet.Application`
+(exposed as `starfleet_event_atoms/0`):
 
-* `starfleet.audit_cat5_{pod_drift,workflow_map_failed,oauth_refresh_failed}` — escalades Cat 5 (les anciens `audit.cat5.*` pointillés étaient des vestiges jamais émis)
+* `starfleet.audit_cat5_{pod_drift,workflow_map_failed,oauth_refresh_failed}` — Cat 5 escalations (the old sketched `audit.cat5.*` were vestiges never emitted)
 * `audit.verdict`
-* `fleet.boot_{complete,partial,failed}` — lifecycle BootOrchestrator
-* `sdk.upstream_alert`, `mcp.server_crashed` — extensions V2 (MCPWatcher/MCPMonitor)
+* `fleet.boot_{complete,partial,failed}` — BootOrchestrator lifecycle
+* `sdk.upstream_alert`, `mcp.server_crashed` — V2 extensions (MCPWatcher/MCPMonitor)
 
-Cohérent ch11 M1 atom-leak DoS mitigation (Bus `String.to_existing_atom/1`).
+Consistent with the event_router atom-leak DoS mitigation (Bus `String.to_existing_atom/1`).
 
-## Schema cache `:persistent_term`
+## `:persistent_term` schema cache
 
-Schema `decision-v1.json` chargé une fois au boot via
-`Fleet.Starfleet.Gatekeeper.init_schema!/0` (appelé par
-`Application.start/2`), délégué à l'autorité Ring 0 `Fleet.SchemaCache`
-(`fleet_event_router` — dédup B-R2), clé
-`{Fleet.Starfleet.Gatekeeper, :decision_schema}`. Lecture par
-`SchemaCache.fetch!/2` (raise actionnable si pas chargé).
+Schema `decision-v1.json` loaded once at boot via
+`Fleet.Starfleet.Gatekeeper.init_schema!/0` (called by
+`Application.start/2`), delegated to the Ring 0 authority `Fleet.SchemaCache`
+(`fleet_event_router` — load-then-cache dedup), key
+`{Fleet.Starfleet.Gatekeeper, :decision_schema}`. Read via
+`SchemaCache.fetch!/2` (actionable raise if not loaded).
 
-## Configuration (knobs `:fleet_starfleet`)
+## Configuration (`:fleet_starfleet` knobs)
 
-### Gating des enfants du superviseur
+### Supervisor children gating
 
-Tous posés à `false` par `config/test.exs` (hermétisme : subscribers Bus,
-emit `fleet.boot_*`, timers et drain global parasiteraient les tests async —
-les tests dédiés instancient manuellement avec opts isolés).
+All set to `false` by `config/test.exs` (hermeticity: Bus subscribers,
+`fleet.boot_*` emits, timers and the global drain would pollute async tests —
+dedicated tests instantiate manually with isolated opts).
 
-| Clé | Défaut | Enfant gaté |
+| Key | Default | Gated child |
 |---|---|---|
 | `:start_drift_monitor` | `true` | `DriftMonitor` |
 | `:start_shutdown` | `true` | `Shutdown` |
 | `:start_audit_consumer` | `true` | `AuditConsumer` |
 | `:start_boot_orchestrator` | `true` | `BootOrchestrator` |
-| `:start_mcp_monitor` | `true` | `MCPMonitor` (purement local, zéro I/O réseau) |
-| `:start_mcp_watcher` | `false` | `MCPWatcher` — **opt-in** (HTTP sortant Hex.pm, à activer là où l'outbound est autorisé) |
+| `:start_mcp_monitor` | `true` | `MCPMonitor` (purely local, zero network I/O) |
+| `:start_mcp_watcher` | `false` | `MCPWatcher` — **opt-in** (outbound HTTP to Hex.pm, enable where outbound is allowed) |
 
 ### Backends (seams)
 
-| Clé | Défaut | Rôle |
+| Key | Default | Role |
 |---|---|---|
-| `:coord_backend` | `CoordBackend.NotWiredYet` — prod (`runtime.exs`) : `Fleet.Coord` | backend décision/escalade, lu via `CoordBackend.resolved/0` |
-| `:shutdown_dispatcher` | `Shutdown.NoOpDispatcher` — prod (`runtime.exs`) : `Shutdown.AggregateDispatcher` | backend drain, lu via `Shutdown.configured_dispatcher/0` |
-| `:spawner_mod` | `Fleet.Spawner` | seam **test uniquement** (stub d'un `list_pods` qui lève/exit) — la prod ne pose jamais cette clé |
+| `:coord_backend` | `CoordBackend.NotWiredYet` — prod (`runtime.exs`): `Fleet.Coord` | decision/escalation backend, read via `CoordBackend.resolved/0` |
+| `:shutdown_dispatcher` | `Shutdown.NoOpDispatcher` — prod (`runtime.exs`): `Shutdown.AggregateDispatcher` | drain backend, read via `Shutdown.configured_dispatcher/0` |
+| `:spawner_mod` | `Fleet.Spawner` | **test-only** seam (stub a `list_pods` that raises/exits) — prod never sets this key |
 
-### Paramètres
+### Parameters
 
-| Clé | Défaut | Rôle |
+| Key | Default | Role |
 |---|---|---|
-| `:decision_schema_path` | `priv/schema/decision-v1.json` (via `:code.priv_dir`) | schema JSON décision (Gatekeeper) |
-| `:audit_log_path` | `Fleet.Layout.state_dir()/log/fleet-starfleet.jsonl` (≈ `~/.lcars/log/…`) — env `LCARS_STARFLEET_AUDIT_LOG` mappée par `runtime.exs` | log NDJSON audit Cat 5 |
-| `:audit_log_max_bytes` | `10 * 1024 * 1024` (10 MB) | seuil de rotation (1 backup `.1`) |
-| `:mcp_monitor_check_interval_ms` | `60_000` | période health check MCP |
-| `:mcp_monitor_target` | `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}` | cible liveness (`{:supervised, sup, child_id}` ou atome nommé) |
-| `:mcp_watcher_check_interval_ms` | `:timer.hours(168)` (hebdo) | période check version SDK |
-| `:mcp_watcher_package` | `"ex_mcp"` | package Hex.pm surveillé |
-| `:mcp_watcher_upstream_fetcher` | `nil` (→ fetch API Hex.pm via Req) | fetcher injectable (tests déterministes) |
+| `:decision_schema_path` | `priv/schema/decision-v1.json` (via `:code.priv_dir`) | decision JSON schema (Gatekeeper) |
+| `:audit_log_path` | `Fleet.Layout.state_dir()/log/fleet-starfleet.jsonl` (≈ `~/.lcars/log/…`) — env `LCARS_STARFLEET_AUDIT_LOG` mapped by `runtime.exs` | Cat 5 audit NDJSON log |
+| `:audit_log_max_bytes` | `10 * 1024 * 1024` (10 MB) | rotation threshold (1 `.1` backup) |
+| `:mcp_monitor_check_interval_ms` | `60_000` | MCP health-check period |
+| `:mcp_monitor_target` | `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}` | liveness target (`{:supervised, sup, child_id}` or a named atom) |
+| `:mcp_watcher_check_interval_ms` | `:timer.hours(168)` (weekly) | SDK version-check period |
+| `:mcp_watcher_package` | `"ex_mcp"` | watched Hex.pm package |
+| `:mcp_watcher_upstream_fetcher` | `nil` (→ Hex.pm API fetch via Req) | injectable fetcher (deterministic tests) |
 
 ## Tests
 
@@ -141,18 +141,18 @@ les tests dédiés instancient manuellement avec opts isolés).
 # 1 doctest + 57 tests, 0 failures
 ```
 
-## Dépendances
+## Dependencies
 
-* `fleet_event_router` (ch11 PROMOTED) — Bus PubSub events + `Fleet.SchemaCache` (autorité chargé-caché Ring 0)
-* `fleet_cap_profile` — `Fleet.Layout.state_dir()` (chemin défaut du log audit)
-* `fleet_spawner` — `PermanentBoot` (BootOrchestrator, filtre permanents du drain) + `list_pods` (AggregateDispatcher) ; pas de cycle (spawner ⊀ starfleet vérifié)
-* `:jason`, `:ex_json_schema`, `:req` (MCPWatcher — fetch Hex.pm)
+* `fleet_event_router` — events PubSub Bus + `Fleet.SchemaCache` (Ring 0 load-then-cache authority)
+* `fleet_cap_profile` — `Fleet.Layout.state_dir()` (default audit-log path)
+* `fleet_spawner` — `PermanentBoot` (BootOrchestrator, permanent-pod filter of the drain) + `list_pods` (AggregateDispatcher); no cycle (spawner ⊀ starfleet verified)
+* `:jason`, `:ex_json_schema`, `:req` (MCPWatcher — Hex.pm fetch)
 
-**Pas** des dépendances mix, câblés autrement :
+**Not** mix dependencies, wired otherwise:
 
-* `fleet_coord` (ch14) — backend posé à runtime par la config (`runtime.exs` → `:coord_backend, Fleet.Coord`), défaut `NotWiredYet`
-* `fleet_task_queue` — `list_pending` lu par `apply` (module en variable, aucune dép compile-time — pas d'inversion de layering), seulement si l'app tourne réellement
+* `fleet_coord` — backend set at runtime by config (`runtime.exs` → `:coord_backend, Fleet.Coord`), default `NotWiredYet`
+* `fleet_task_queue` — `list_pending` read via `apply` (module in a variable, no compile-time dep — no layering inversion), only if the app is actually running
 
-## Frontière vendor
+## Vendor boundary
 
-N0 (vendor-agnostic, pas d'inférence ni d'appel SDK direct).
+N0 (vendor-agnostic, no inference and no direct SDK call).

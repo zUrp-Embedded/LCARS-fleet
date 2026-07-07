@@ -1,212 +1,217 @@
 # Fleet.EventRouter
 
-**Date** : 2026-05-09
-**Dernière révision** : 2026-07-05 (D2 resync contre le code : Ring 0 [renumérotation 2026-07-04], Bus struct-only [pas de validation JSON soft, shim 3-arity inexistant], + `Fleet.Event`/`Application`/façade en sous-modules, § Contracts.Check [17 checks], env vars webhook, SignalsOS dormant ; B5 dédup « child-spec listener » : + `Fleet.EventRouter.Listener.cowboy_child/1`, source unique du child-spec Plug.Cowboy des 3 surfaces HTTP api/observation/webhook — ip BindAddress posée par construction, gates+ports restent chez les apps ; B-R2 dédup « schema/config chargé-caché » : + `Fleet.SchemaCache`, autorité Ring 0 du pattern `:persistent_term` (`resolve_json_schema!` / `fetch!` / `cached`), consommé par workflow/starfleet/coord — les copies locales de cap_profile restent, pas d'arête intra-R0 ; B-R1 dédup « émission-Bus-protégée » : `Bus.safe_emit/3-4` = cœur unique de la politique best-effort, les rescue locaux de coord/starfleet/spawner migrent dessus ; registry-vide rendu EXPLICITE : flag `:permit_when_registry_empty` ; bornes de restart explicites sur le superviseur d'app 3/60 ; BL-027 — fork tranché : Dispatch retiré, `Catalog` charge le registry au boot, events.yaml = registry pur ; R5 — purge handlers fantômes)
-**Statut** : implémenté run #3.1 chantier #11 — design note PROMOTED ; + `Fleet.Shutdown.Quiesce` (R4 D5, primitive drain partagée)
-**Référencé par** : 04_design-notes/fleet_event_router.md
+**Date**: 2026-05-09
+**Last revised**: 2026-07-05 (resync against the code: Ring 0 [renumbering 2026-07-04], struct-only Bus [no soft JSON validation, no 3-arity shim], + `Fleet.Event`/`Application`/facade as sub-modules, § Contracts.Check, webhook env vars, SignalsOS dormant; "listener child-spec" dedup: + `Fleet.EventRouter.Listener.cowboy_child/1`, single source of the Plug.Cowboy child-spec for the 3 HTTP surfaces api/observation/webhook — BindAddress ip set by construction, gates+ports stay with each app; "loaded-once-cached schema/config" dedup: + `Fleet.SchemaCache`, Ring 0 authority of the `:persistent_term` pattern (`resolve_json_schema!` / `fetch!` / `cached`), consumed by workflow/starfleet/coord — cap_profile's local copies stay, no intra-R0 edge; "protected-Bus-emission" dedup: `Bus.safe_emit/3-4` = single core of the best-effort policy, the local rescues of coord/starfleet/spawner migrate onto it; empty-registry made EXPLICIT: `:permit_when_registry_empty` flag; explicit restart bounds on the app supervisor 3/60; fork settled [user decision 2026-06-05]: Dispatch removed, `Catalog` loads the registry at boot, events.yaml = pure registry; phantom-handlers purge)
+**Status**: implemented — design note PROMOTED; + `Fleet.Shutdown.Quiesce` (shared shutdown-drain primitive)
+**Referenced by**: 04_design-notes/fleet_event_router.md
 
-Bus events (Phoenix.PubSub) + registry events.yaml LCARS v2 (Ring 0 —
-substrat : 0 dépendance, ~12 apps en dépendent). Consommation = subscribers directs
-PubSub (BL-027 ; table de dispatch retirée). Webhooks Gitea + signaux OS + events
-internes (`pod.*`, `workflow_map.*`, `work_item.*`, `audit.verdict`,
-`pod.drift`)
-publiés sur Phoenix.PubSub topic `fleet.events`.
+Event bus (Phoenix.PubSub) + LCARS v2 events.yaml registry (Ring 0 —
+substrate: 0 dependencies, ~12 apps depend on it). Consumption = direct PubSub
+subscribers (dispatch table removed, user decision 2026-06-05). Gitea webhooks
++ OS signals + internal events (`pod.*`, `workflow_map.*`, `work_item.*`,
+`audit.verdict`, `pod.drift`)
+published on Phoenix.PubSub topic `fleet.events`.
 
-## Sous-modules
+## Sub-modules
 
-- `Fleet.EventRouter` — façade moduledoc-only (index des sous-modules, aucun code)
-- `Fleet.Event` — struct canon des events (**wire format UNIQUE** : tous les
-  producteurs émettent `%Fleet.Event{}`, aucun tuple). `source` = enum closed
-  list (12 sources canoniques), **enforcée** par le constructeur `new/3`
-  (« parse, don't validate » : source hors-enum lève). Porte aussi
-  `UnregisteredError` (type hors registry)
+- `Fleet.EventRouter` — moduledoc-only facade (index of the sub-modules, no code)
+- `Fleet.Event` — canonical event struct (**SINGLE wire format**: all
+  producers emit `%Fleet.Event{}`, no tuples). `source` = closed-list enum
+  (12 canonical sources), **enforced** by the `new/3` constructor
+  ("parse, don't validate": an out-of-enum source raises). Also carries
+  `UnregisteredError` (type outside the registry)
 - `Fleet.EventRouter.Bus` — Phoenix.PubSub instance `Fleet.PubSub`
-  (broadcast/subscribe **struct-only** `%Fleet.Event{}` ; la SEULE validation
-  au broadcast = appartenance au registry, fail-loud `UnregisteredError` —
-  pas de validation JSON soft, pas de `Fleet.EventRouter.Schema`)
-- `Fleet.EventRouter.Application` — superviseur d'app : `Catalog.load!` au boot,
-  pré-enregistrement des atoms event_type (`preregister_event_atoms` — les
-  émetteurs dynamiques passent par `to_existing_atom`, anti atom-leak),
-  `gitea_event_types/0` (source unique des actions gitea émissibles), bornes de
-  restart 3/60 ; le PubSub vit sous un superviseur DÉDIÉ `max_restarts: 0`
-  (un restart local perdrait toutes les souscriptions du node → escalade
-  délibérée jusqu'au node)
+  (**struct-only** broadcast/subscribe of `%Fleet.Event{}`; the ONLY validation
+  at broadcast = registry membership, fail-loud `UnregisteredError` —
+  no soft JSON validation, no `Fleet.EventRouter.Schema`)
+- `Fleet.EventRouter.Application` — app supervisor: `Catalog.load!` at boot,
+  pre-registration of the event_type atoms (`preregister_event_atoms` — dynamic
+  emitters go through `to_existing_atom`, anti atom-leak),
+  `gitea_event_types/0` (single source of the emittable gitea actions), restart
+  bounds 3/60; the PubSub lives under a DEDICATED supervisor `max_restarts: 0`
+  (a local restart would lose all the node's subscriptions → deliberate
+  escalation all the way to the node)
 - `Fleet.EventRouter.WebhooksGitea` — Plug.Router HTTP (port `:webhook_port`,
-  défaut 8081) + HMAC SHA256 verify (secret `/etc/fleet/webhook-secret`)
+  default 8081) + HMAC SHA256 verify (secret `/etc/fleet/webhook-secret`)
 - `Fleet.EventRouter.SignalsOS` — `:os.set_signal/2` SIGUSR1/SIGTERM/SIGHUP
-  → broadcast `os.signal.<sig>`. **Dormant** : aucun on-switch runtime ne
-  l'active (cf. § Configuration `:start_signals`)
-- `Mix.Tasks.Lcars.Contracts.Check` — checker des contrats inter-module
-  (verrou de cohérence du repo, cf. § Contracts.Check)
-- `Fleet.EventRouter.Catalog` — charge le **registry** `priv/events.yaml` au boot
-  (`load!/0` → `authorized_event_types`). Source unique du parse exposée :
-  `event_type_strings/0` (clés-types, réutilisée par `Application.preregister_event_atoms/0`,
-  dedup F035) + `events_yaml_path/0` (résolution du path). Consommation = subscribers
-  directs PubSub (BL-027 ; ex-`Dispatch` retiré, cf. § Catalogue)
-- `Fleet.EventRouter.BindAddress` — source UNIQUE de l'IP de bind des listeners
-  Cowboy du runtime (`ip/1`). Vit ici car substrat universel (comme `Fleet.Event`)
-  consommé par les 4 surfaces HTTP (`fleet_api`, `fleet_mcp`, `fleet_observation`,
-  webhook) sans inversion de layering. Invariant : loopback `{127,0,0,1}` par
-  défaut, exposition = opt-in nommé (`LCARS_BIND_HOST` global, override de surface
-  ex. `LCARS_WEBHOOK_BIND_HOST`)
-- `Fleet.EventRouter.Listener` — source UNIQUE du **child-spec Cowboy** des
-  listeners HTTP (`cowboy_child/1` : opts `plug`/`port` requis ; `scheme`,
-  `dispatch` RAW, `ref`, `surface_env` optionnels), pendant « spec » de
-  `BindAddress` (même concern « comment on expose un listener » — l'`:ip`
-  loopback-par-défaut est posée PAR CONSTRUCTION). Consommé par `fleet_api`
-  (REST+WS, dispatch), `fleet_observation` (deck) et le webhook Gitea de cette
-  app (dedup B5, zéro nouvelle arête). Les gates (`:start_listener`/
-  `:start_webhooks`) et la résolution du port restent chez chaque app
-- `Fleet.Shutdown.Quiesce` — primitive partagée du drain de shutdown (flag
-  `:persistent_term` `quiescing?/refuse!/resume!`). Vit ici car substrat
-  universel (comme `Fleet.Event`) : lisible par `fleet_workflow`/`fleet_api`
-  (gate top-level) sans inversion de layering. Policy (quand quiescer) =
-  `fleet_starfleet` (`Shutdown.AggregateDispatcher`). Pas de process (Iron Law)
-- `Fleet.SchemaCache` — autorité du pattern « artefact chargé une fois, caché en
-  `:persistent_term` » (dédup B-R2). `resolve_json_schema!(key, path)` :
-  read+decode+resolve ExJsonSchema, idempotent, fail-loud au boot ;
-  `fetch!(key, hint)` : get-or-raise message actionnable ; `cached(key, fun)` :
-  lazy sentinel générique. Vit ici car substrat universel (comme `Fleet.Event`) :
-  consommé par `fleet_workflow` (Loader), `fleet_starfleet` (Gatekeeper),
-  `fleet_coord` (Policies) sans nouvelle arête. Écrit UNE fois au boot, lu à
-  chaque validation — jamais de `put` par-tick (GC storm). Pas de process (Iron Law)
+  → broadcast `os.signal.<sig>`. **Dormant (INERT)**: no runtime on-switch
+  activates it (see § Configuration `:start_signals`)
+- `Mix.Tasks.Lcars.Contracts.Check` — inter-module contract checker
+  (repo coherence lock, see § Contracts.Check)
+- `Fleet.EventRouter.Catalog` — loads the **registry** `priv/events.yaml` at boot
+  (`load!/0` → `authorized_event_types`). Single parse source, exposed as:
+  `event_type_strings/0` (type-keys, reused by `Application.preregister_event_atoms/0`,
+  dedup) + `events_yaml_path/0` (path resolution). Consumption = direct PubSub
+  subscribers (the former `Dispatch` was removed, see § Catalogue)
+- `Fleet.EventRouter.BindAddress` — SINGLE source of the bind IP for the runtime's
+  Cowboy listeners (`ip/1`). Lives here because it is universal substrate (like
+  `Fleet.Event`) consumed by the 4 HTTP surfaces (`fleet_api`, `fleet_mcp`,
+  `fleet_observation`, webhook) without layering inversion. Invariant: loopback
+  `{127,0,0,1}` by default, exposure = named opt-in (`LCARS_BIND_HOST` global,
+  per-surface override e.g. `LCARS_WEBHOOK_BIND_HOST`)
+- `Fleet.EventRouter.Listener` — SINGLE source of the **Cowboy child-spec** for the
+  HTTP listeners (`cowboy_child/1`: opts `plug`/`port` required; `scheme`,
+  RAW `dispatch`, `ref`, `surface_env` optional), the "spec" counterpart of
+  `BindAddress` (same "how a listener is exposed" concern — the
+  loopback-by-default `:ip` is set BY CONSTRUCTION). Consumed by `fleet_api`
+  (REST+WS, dispatch), `fleet_observation` (deck) and this app's Gitea
+  webhook (dedup, zero new edge). The gates (`:start_listener`/
+  `:start_webhooks`) and the port resolution stay with each app
+- `Fleet.Shutdown.Quiesce` — shared primitive of the shutdown drain
+  (`:persistent_term` flag `quiescing?/refuse!/resume!`). Lives here because it is
+  universal substrate (like `Fleet.Event`): readable from any ring without
+  layering inversion. Current reader: `fleet_api` (top-level gate on
+  `POST /api/admin/spawn`); a former `fleet_workflow` activation reader was
+  removed along with its entry point (re-wiring it belongs to the
+  graceful-shutdown work that is not yet fully active). Policy (when to
+  quiesce) = `fleet_starfleet` (`Shutdown.AggregateDispatcher`). No process
+  (Iron Law)
+- `Fleet.SchemaCache` — authority of the "artifact loaded once, cached in
+  `:persistent_term`" pattern (dedup). `resolve_json_schema!(key, path)`:
+  read+decode+resolve ExJsonSchema, idempotent, fail-loud at boot;
+  `fetch!(key, hint)`: get-or-raise with an actionable message; `cached(key, fun)`:
+  generic lazy sentinel. Lives here because it is universal substrate (like
+  `Fleet.Event`): consumed by `fleet_workflow` (Loader), `fleet_starfleet`
+  (Gatekeeper), `fleet_coord` (Policies) without a new edge. Written ONCE at boot,
+  read on every validation — never a per-tick `put` (GC storm). No process (Iron Law)
 
-## API principale
+## Main API
 
 ```elixir
-# Broadcast canon (struct %Fleet.Event{}) sur le topic principal — fail-loud si type hors registry.
-# `broadcast_main/1` centralise le littéral du topic ; `main_topic/0` l'expose (autorité).
+# Canonical broadcast (struct %Fleet.Event{}) on the main topic — fail-loud if type outside registry.
+# `broadcast_main/1` centralizes the topic literal; `main_topic/0` exposes it (authority).
 Fleet.EventRouter.Bus.broadcast_main(%Fleet.Event{
   source: :spawner, type: :"pod.allocate",
   timestamp: DateTime.utc_now(), payload: %{"pod_id" => "p1"}})
-# Variante explicite (topic arbitraire) : Fleet.EventRouter.Bus.broadcast(Fleet.EventRouter.Bus.main_topic(), event)
+# Explicit variant (arbitrary topic): Fleet.EventRouter.Bus.broadcast(Fleet.EventRouter.Bus.main_topic(), event)
 
-# Idiome producteur : construire l'event canon + broadcaster main en un appel — fail-loud
-# (mêmes raises que broadcast_main + ceux de Fleet.Event.new, non attrapés).
+# Producer idiom: construct the canonical event + broadcast to main in one call — fail-loud
+# (same raises as broadcast_main + those of Fleet.Event.new, not caught).
 Fleet.EventRouter.Bus.emit(:spawner, :"pod.allocate", payload: %{"pod_id" => "p1"})
 
-# Variante PROTÉGÉE pour les émetteurs best-effort (observabilité/escalade) — politique d'erreur
-# UNIFIÉE (dédup des rescue locaux coord/starfleet/spawner) : UnregisteredError toléré selon
-# `:on_unregistered` (`:log` défaut | `:silent` boot-order nominal) ; event malformé (bug de
-# construction) TOUJOURS Logger.error + :ok — jamais avalé muet, jamais un crash de l'émetteur.
-# `type` accepte aussi un binaire (to_existing_atom sous le rescue, anti atom-leak).
-# PAS pour les events load-bearing (pod.completed) : eux doivent PROPAGER l'échec.
+# PROTECTED variant for best-effort emitters (observability/escalation) — UNIFIED error
+# policy (dedup of the local rescues in coord/starfleet/spawner): UnregisteredError tolerated per
+# `:on_unregistered` (`:log` default | `:silent` nominal boot-order); a malformed event (construction
+# bug) is ALWAYS Logger.error + :ok — never swallowed silently, never a crash of the emitter.
+# `type` also accepts a binary (to_existing_atom under the rescue, anti atom-leak).
+# NOT for load-bearing events (pod.completed): those must PROPAGATE the failure.
 Fleet.EventRouter.Bus.safe_emit(:starfleet, :"mcp.server_crashed",
   [payload: %{"target" => "..."}],
-  on_unregistered: :silent, context: "MCPMonitor: alerte NON émise")
+  on_unregistered: :silent, context: "MCPMonitor: alert NOT emitted")
 
-# Subscribe + receive (subscriber direct = canon, BL-027) — défaut = main_topic/0
+# Subscribe + receive (direct subscriber = canon) — default = main_topic/0
 Fleet.EventRouter.Bus.subscribe()
 receive do
   %Fleet.Event{type: :"pod.allocate"} = event -> ...
 end
 ```
 
-Il n'existe AUCUN shim 3-arity `broadcast(event_type, payload, opts)` : le Bus
-est struct-only (cf. moduledoc `Fleet.EventRouter.Bus` § « Pourquoi struct-only »).
+There is NO 3-arity shim `broadcast(event_type, payload, opts)`: the Bus is
+struct-only (see the `Fleet.EventRouter.Bus` moduledoc § "Why struct-only").
 
 ## Configuration
 
-- `:fleet_event_router, :start_webhooks` — boot Plug.Cowboy webhooks
-  (default `false` — dev/test ne touchent pas le port `:8081`). On-switch
-  runtime : env `LCARS_FLEET_WEBHOOKS=true` (`config/runtime.exs` —
-  intégration forge opt-in, défaut OFF)
-- `:fleet_event_router, :load_event_registry` — charge le registry events.yaml
-  au boot (`Catalog.load!`, default `true` ; `false` en `:test` pour l'hermétisme
-  — registry vide → validation broadcast off). En prod (`true`), un events.yaml
-  absent/invalide **raise** (crash-boot, F-008/Pattern A : pas de Bus sans
-  validation — un deploy cassé ne démarre pas)
-- `:fleet_event_router, :permit_when_registry_empty` — régime du Bus quand
-  `authorized_event_types` est **vide** (boot précoce / test sans registry).
-  `true` (défaut) = laisse passer (safety-net d'init voulu, pas un by-pass : dès
-  que le set est peuplé la validation tranche) ; `false` = **fail-closed** (raise
-  tant que `Catalog.load!` n'a pas chargé le registry). Le comportement vide est
-  ainsi EXPLICITE, plus un trou silencieux. Voir `Bus.assert_authorized!/1`
-- `:fleet_event_router, :start_signals` — boot SignalsOS GenServer
-  (default `false`). **Aucun on-switch runtime ne le pose à `true`**
-  (`config/runtime.exs`) : le `handle_info({:signal, _})` du GenServer est mort
-  (les signaux OS vont au gen_event `:erl_signal_server`, pas au GenServer ;
-  SIGUSR1 halterait même la VM). Module gated-off en attendant le vrai fix
-  (gen_event handler) ; les clés `os.signal.*` du registry sont dormantes
-- `:fleet_event_router, :webhook_port` — port HTTP webhooks (default 8081 ;
-  override env `LCARS_FLEET_WEBHOOK_PORT`, lu seulement si
+- `:fleet_event_router, :start_webhooks` — boots the Plug.Cowboy webhooks
+  (default `false` — dev/test do not touch port `:8081`). Runtime on-switch:
+  env `LCARS_FLEET_WEBHOOKS=true` (`config/runtime.exs` —
+  forge integration opt-in, default OFF)
+- `:fleet_event_router, :load_event_registry` — loads the events.yaml registry
+  at boot (`Catalog.load!`, default `true`; `false` in `:test` for hermeticity
+  — empty registry → broadcast validation off). In prod (`true`), an absent/invalid
+  events.yaml **raises** (crash-boot: no Bus without
+  validation — a broken deploy does not start)
+- `:fleet_event_router, :permit_when_registry_empty` — Bus regime when
+  `authorized_event_types` is **empty** (early boot / test without registry).
+  `true` (default) = let through (an intended init safety-net, not a by-pass: as
+  soon as the set is populated, validation decides); `false` = **fail-closed** (raise
+  until `Catalog.load!` has loaded the registry). The empty behavior is
+  thus EXPLICIT, no longer a silent hole. See `Bus.assert_authorized!/1`
+- `:fleet_event_router, :start_signals` — boots the SignalsOS GenServer
+  (default `false`). **No runtime on-switch sets it to `true`**
+  (`config/runtime.exs`): the GenServer's `handle_info({:signal, _})` is dead
+  (OS signals go to the `:erl_signal_server` gen_event, not to the GenServer;
+  SIGUSR1 would even halt the VM). Module gated off pending the real fix
+  (a gen_event handler); the registry's `os.signal.*` keys are dormant
+- `:fleet_event_router, :webhook_port` — webhook HTTP port (default 8081;
+  env override `LCARS_FLEET_WEBHOOK_PORT`, read only if
   `LCARS_FLEET_WEBHOOKS=true`)
-- `LCARS_WEBHOOK_BIND_HOST` / `LCARS_BIND_HOST` (env) — IP de bind du listener
-  webhook. **Loopback `127.0.0.1` par défaut.** Le webhook est la SEULE surface
-  dont l'exposition publique est un besoin légitime : une forge Gitea sur une
-  autre machine POST dessus (loopback la bloquerait). `LCARS_WEBHOOK_BIND_HOST`
-  (ex. `0.0.0.0`) expose CE listener seul, sans toucher les surfaces de commande
-  (`fleet_api`, deck). `LCARS_BIND_HOST` (global) l'expose aussi ; l'override de
-  surface l'emporte. Protection = HMAC SHA256 (indépendant du bind). Source
-  unique : `Fleet.EventRouter.BindAddress`.
-- `:fleet_event_router, :webhook_secret_path` — path secret HMAC
-  (default `/etc/fleet/webhook-secret` ; override env
+- `LCARS_WEBHOOK_BIND_HOST` / `LCARS_BIND_HOST` (env) — bind IP of the webhook
+  listener. **Loopback `127.0.0.1` by default.** The webhook is the ONLY surface
+  whose public exposure is a legitimate need: a Gitea forge on another
+  machine POSTs to it (loopback would block it). `LCARS_WEBHOOK_BIND_HOST`
+  (e.g. `0.0.0.0`) exposes THIS listener alone, without touching the command
+  surfaces (`fleet_api`, deck). `LCARS_BIND_HOST` (global) exposes it too; the
+  per-surface override wins. Protection = HMAC SHA256 (independent of the bind).
+  Single source: `Fleet.EventRouter.BindAddress`.
+- `:fleet_event_router, :webhook_secret_path` — HMAC secret path
+  (default `/etc/fleet/webhook-secret`; env override
   `FLEET_WEBHOOK_SECRET_PATH`)
-- `:fleet_event_router, :events_yaml_path` — path registry YAML
-  (default `priv/events.yaml` résolu via `:code.priv_dir` — tient en release)
-- `:fleet_event_router, :captured_signals` — atoms signaux à capturer
+- `:fleet_event_router, :events_yaml_path` — YAML registry path
+  (default `priv/events.yaml` resolved via `:code.priv_dir` — holds in a release)
+- `:fleet_event_router, :captured_signals` — signal atoms to capture
   (default `[:sigusr1, :sigterm, :sighup]`)
 
-## Catalogue events.yaml — registry (BL-027)
+## events.yaml catalogue — registry
 
-`priv/events.yaml` est un **registry PUR** : ses **clés** = `authorized_event_types`,
-chargées au boot par `Fleet.EventRouter.Catalog.load!/0` → `Bus.broadcast/2`
-**fail-loud** sur tout type hors registry (verrou anti-récurrence, T4). Tout event
-émis DOIT avoir sa clé. Les **valeurs sont `[]`** (le runtime n'en consomme aucune).
+`priv/events.yaml` is a **pure registry**: its **keys** = `authorized_event_types`,
+loaded at boot by `Fleet.EventRouter.Catalog.load!/0` → `Bus.broadcast/2`
+**fails loud** on any type outside the registry (anti-recurrence lock). Every
+emitted event MUST have its key. The **values are `[]`** (the runtime consumes none
+of them).
 
-La **consommation** se fait par **subscribers directs** (Phoenix.PubSub :
+**Consumption** happens through **direct subscribers** (Phoenix.PubSub:
 `Bus.subscribe` + `handle_info` — WS dashboard, `AuditConsumer`, `DriftMonitor`,
-`Spawner.PublishConsumer`, …). Qui consomme quoi est documenté
-dans le moduledoc de chaque consommateur.
+`Spawner.PublishConsumer`, …). Who consumes what is documented
+in each consumer's moduledoc.
 
-> **Décision BL-027 (user 2026-06-05)** : « subscribers directs = canon ». Le
-> GenServer `Dispatch` (table `event → handle_event/1`, jamais câblée — aucun
-> module n'implémentait `handle_event/1`) a été **retiré** ; PubSub `subscribe` EST
-> le dispatch. Le chargement du registry, auparavant couplé au `Dispatch` off-en-prod
-> (→ validation broadcast inactive en prod), est désormais fait par `Catalog.load!`
-> au boot (prod-on/test-off). Audit des ~15 émetteurs : les statiques émettent des
-> types registrés, les dynamiques externes (`webhooks_gitea`/`signals_os`/`policies`/
-> `Pod.best_effort_broadcast`) rescue `UnregisteredError` → activation sûre. MA-04 : le lifecycle
-> `pod.completed`/`work_item.completed` passe par `required_broadcast` (PROPAGE l'échec, ne l'avale pas).
+> **Decision (user, 2026-06-05)**: "direct subscribers = canon". The
+> `Dispatch` GenServer (an `event → handle_event/1` table, never wired — no
+> module implemented `handle_event/1`) was **removed**; PubSub `subscribe` IS
+> the dispatch. The registry loading, previously coupled to the off-in-prod `Dispatch`
+> (→ broadcast validation inactive in prod), is now done by `Catalog.load!`
+> at boot (prod-on/test-off). Audit of the ~15 emitters: the static ones emit
+> registered types, the external dynamic ones (`webhooks_gitea`/`signals_os`/`policies`/
+> `Pod.best_effort_broadcast`) rescue `UnregisteredError` → safe activation. The
+> `pod.completed`/`work_item.completed` lifecycle goes through `required_broadcast`
+> (PROPAGATES the failure, does not swallow it).
 
-## Contracts.Check — verrou de cohérence du repo
+## Contracts.Check — repo coherence lock
 
 `Mix.Tasks.Lcars.Contracts.Check` (`lib/mix/tasks/lcars.contracts.check.ex`,
-~900 LOC) valide les contrats inter-module AVANT exécution : chaque check garde
-une classe de dérive déjà rencontrée (rouge tant que le fix n'est pas landé) —
-un agent qui re-dérive casse le build. **17 checks, tous implémentés**
-(`@pending_checks` vide) ; sortie YAML `status + checks[] + evidence
-(file:line)`, exit≠0 si au moins un check `fail`.
+~900 LOC) validates the inter-module contracts BEFORE execution: each check guards
+a class of drift already encountered (red until the fix is landed) —
+an agent that re-derives breaks the build. **18 checks, all implemented**
+(`@pending_checks` empty); YAML output `status + checks[] + evidence
+(file:line)`, exit≠0 if at least one check `fail`s.
 
-Trois points de lancement :
+Three launch points:
 
-- `mix lcars.contracts.check` (`--quiet` = exit code seul) — CLI/CI ;
-- alias `mix gate` (mix.exs racine) — compile strict + tests + shell gate + checks ;
-- step de `mix release` (`verrou_contracts/1`, mix.exs racine, appelle
-  `run_checks/0`) — la release REFUSE de bâtir si un contrat est rouge.
+- `mix lcars.contracts.check` (`--quiet` = exit code only) — CLI/CI;
+- alias `mix gate` (root mix.exs) — strict compile + tests + shell gate + checks + strict dialyzer;
+- `mix release` step (`verrou_contracts/1`, root mix.exs, calls
+  `run_checks/0`) — the release REFUSES to build if a contract is red.
 
-Les **combinators** vivent dans le même fichier (section « Combinators ») :
-3 familles data-driven — A `presence_check` (marqueur présent dans le code),
-B `residue_check` (zéro résidu dans des fichiers vivants), C `evidence_check`
-(liste de conditions évaluées au call-site) ; 8 des 17 checks en sont des
-instanciations pures. Anti-vert-creux : chaque match est confirmé sur la ligne
-strippée de son commentaire (`strip_comment/1` — une mention en commentaire ne
-compte pas).
+The **combinators** live in the same file ("Combinators" section):
+3 data-driven families — A `presence_check` (marker present in the code),
+B `residue_check` (zero residue in living files), C `evidence_check`
+(list of conditions evaluated at the call site); 9 of the 18 checks are pure
+instantiations of them. Anti-hollow-green: each match is confirmed on the line
+stripped of its comment (`strip_comment/1` — a mention in a comment does not
+count).
 
-## Dépendances
+## Dependencies
 
-- `phoenix_pubsub` 2.x — bus distribution-ready
+- `phoenix_pubsub` 2.x — distribution-ready bus
 - `plug` 1.15+ + `plug_cowboy` 2.7+ — HTTP webhooks
 - `jason` — JSON encode/decode
-- `ex_json_schema` — gate structurel **build-time** du canon `events.yaml`
-  (`events_schema_test`) ; PAS une validation au broadcast (le broadcast
-  vérifie l'appartenance au registry)
-- `yaml_elixir` — parse du registry `events.yaml` (Catalog + preregister ; la dispatch table est retirée BL-027)
+- `ex_json_schema` — **build-time** structural gate of the `events.yaml` canon
+  (`events_schema_test`); NOT a broadcast-time validation (the broadcast
+  checks registry membership)
+- `yaml_elixir` — parses the `events.yaml` registry (Catalog + preregister; the dispatch table was removed, decision 2026-06-05)
 
-## Cohérence cross-design-notes
+## Cross-design-notes coherence
 
-- Consommé par chantiers PROMOTED (6, 7, 9, 10) + à venir (12, 13,
-  14, 15)
-- Frontière vendor N0 (vendor-agnostic)
-- F-TEST-MCP mitigation deferred — MCP routing in-process tools
-  `fleet_*` post-1er tool concret (chantier 13 ou 15)
+- Consumed by the PROMOTED design-note chantiers and by the upcoming ones
+- Vendor boundary N0 (vendor-agnostic)
+- MCP in-process tool routing (`fleet_*` tools) — mitigation deferred until
+  after the first concrete tool lands

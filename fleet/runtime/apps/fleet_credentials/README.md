@@ -1,23 +1,23 @@
 # Fleet.Credentials
 
-**Date** : 2026-05-28
-**Dernière révision** : 2026-07-05 (resync D2 contre le code : RoleToken documenté, consommateurs réels de ForgeAuth/Shell, catalogue supprimé chez ForgeIdentity, section Configuration ; C4 — deux bundles doux JUGÉS, coupes REFUSÉES avec argument au moduledoc : `Shell.git_safe_config_args/0` reste co-localisé avec l'exécution bornée (deux faces de la même frontière « invoquer git système-side sans exécuter le code du pod »), `ForgeIdentity.allowed_emails/system_email` restent avec la dérivation d'identité (mêmes littéraux d'identité, une seule autorité) ; 2026-07-04 : Shell durci — process-group via setsid + deadline mur, remédiation Lot C)
-**Statut** : actif — aligné ADR-F PROMOTED 2026-05-26
-**DERIVED FROM** : `01_architecture/adr-f-credentials-anthropic-natif.md` + `04_design-notes/ring0/fleet_credentials.md`
+**Date**: 2026-05-28
+**Last revised**: 2026-07-07 (EN translation + drift fixes: the removed `fleet_project_bootstrap` BIND phase is no longer described as live, the bwrap bind is `.credentials.json` alone, Remote Control wiring is `.claude.json` + `--remote-control` via `bin/claude_launch.sh`, rank 1-5 env exclusion described as the closed pod env it actually is; 2026-07-05: doc resynced against the code — RoleToken documented, real ForgeAuth/Shell consumers, catalogue removed from ForgeIdentity, Configuration section; two soft bundles JUDGED at audit, cuts REFUSED with the argument in the moduledoc: `Shell.git_safe_config_args/0` stays co-located with the bounded execution (two faces of the same boundary "invoke git system-side without executing the pod's code"), `ForgeIdentity.allowed_emails/system_email` stay with the identity derivation (same identity literals, one authority); 2026-07-04: Shell hardened — process-group via setsid + wall deadline)
+**Status**: active — aligned with ADR-F, PROMOTED 2026-05-26
+**DERIVED FROM**: `01_architecture/adr-f-credentials-anthropic-natif.md` + `04_design-notes/ring0/fleet_credentials.md`
 
-Gates métier OAuth pour les pods LCARS v2. Le modèle d'auth est **claudeDir natif Anthropic** (`~/.claude/.credentials.json`) — LCARS ne gère ni le storage ni le refresh : juste **2 gates** (scope + plan) qui lisent le fichier directement.
+Business OAuth gates for LCARS v2 pods. The auth model is the **native Anthropic claudeDir** (`~/.claude/.credentials.json`) — LCARS manages neither storage nor refresh: just **2 gates** (scope + plan) that read the file directly.
 
-## Modèle
+## Model
 
-Les pods s'authentifient via le claudeDir natif Anthropic, **partagé per-humain** entre les pods d'un même UID Linux (compose ADR-E : N humains = N users Linux dans 1 conteneur = N claudeDirs distincts). Le refresh OAuth cross-process est **100% délégué au binaire `claude`** via lockfile POSIX (`proper-lockfile`).
+Pods authenticate via the native Anthropic claudeDir, **shared per-human** across the pods of a single Linux UID (composes with ADR-E: N humans = N Linux users in 1 container = N distinct claudeDirs). Cross-process OAuth refresh is **100% delegated to the `claude` binary** via a POSIX lockfile (`proper-lockfile`).
 
-**Pas d'écriture LCARS *au runtime des pods* dans `.credentials.json`** — l'onboarding (par starfleet hors-bwrap, cf. §Onboarding) est la seule voie d'écriture. Pas de coffre LCARS, pas d'env vars `CLAUDE_CODE_OAUTH_*` injectées au pod, pas de scheduler refresh LCARS-side.
+**No LCARS write *at pod runtime* into `.credentials.json`** — onboarding (by starfleet, outside bwrap, cf. §Onboarding) is the only write path. No LCARS vault, no `CLAUDE_CODE_OAUTH_*` env vars injected into the pod, no LCARS-side refresh scheduler.
 
-### Le `.credentials.json` natif Anthropic
+### The native Anthropic `.credentials.json`
 
-Path **par défaut Linux** : `~/.claude/.credentials.json`, `chmod 0600` (imposé par le `plainTextStorage` Linux/WSL/Windows — seul backend utilisé par LCARS ; macOS utiliserait Keychain mais LCARS = Linux server-side). Override possible via env `CLAUDE_CONFIG_DIR` (non utilisé par LCARS).
+**Linux default** path: `~/.claude/.credentials.json`, `chmod 0600` (imposed by the Linux/WSL/Windows `plainTextStorage` — the only backend LCARS uses; macOS would use Keychain, but LCARS = Linux server-side). Override possible via the `CLAUDE_CONFIG_DIR` env (not used by LCARS).
 
-Deux slots cohabitent dans le même fichier :
+Two slots cohabit in the same file:
 
 ```json
 {
@@ -40,110 +40,110 @@ Deux slots cohabitent dans le même fichier :
 }
 ```
 
-- `claudeAiOauth` — subscription Anthropic principale (`claude /login`), gérée par `utils/auth.ts` du binaire claude.
-- `mcpOAuth[serverKey]` — OAuth per-MCP-server (si MCP server requiert OAuth), géré par `services/mcp/auth.ts`. **Système distinct**, LCARS n'y touche pas. Share-claudeDir partage les deux slots implicitement. Schéma complet : reverse `#0_ref_mcp-oauth.md` §1.
+- `claudeAiOauth` — main Anthropic subscription (`claude /login`), managed by the claude binary's `utils/auth.ts`.
+- `mcpOAuth[serverKey]` — per-MCP-server OAuth (when an MCP server requires OAuth), managed by `services/mcp/auth.ts`. **Distinct system**, LCARS does not touch it. Share-claudeDir shares both slots implicitly. Full schema: reverse `#0_ref_mcp-oauth.md` §1.
 
-## Modules LCARS-side (les seules choses qu'on code)
+## LCARS-side modules (the only things we code)
 
-- `Fleet.Credentials.Gate` — **entrée unique** du gating credentials au spawn-boundary. `validate(claude_dir, cap_profile) :: :ok | {:error, {:credentials_invalid, reason}}` : lit le `.credentials.json` du claudeDir humain UNE fois (bloc `claudeAiOauth`), valide les scopes (par-rôle, via les flags du cap-profile) puis le plan payant, premier échec court-circuite. C'est ici que **vit physiquement** la lecture du fichier (`read_oauth_creds/1`, source unique d'un seul `File.read` + `Jason.decode`) — réconcilie le contrat (le modèle dit déjà « les gates lisent le fichier directement ») avec le code (la lecture était jusque-là dans `Fleet.Spawner.Pod` ; déplacée ici). Transformateur pur, sans état ni process : le chemin du claudeDir est résolu par l'appelant (per-humain) et passé en argument. Consommé par `Fleet.Spawner.Pod` (`LaunchEnv`) au lancement du pod.
-- `Fleet.Credentials.ScopeValidator` — gate **scope-coverage** : vérifie `oauth_scopes ⊇ scopes_requis_role` en lisant `claudeAiOauth.scopes` depuis `.credentials.json`. Profils :
-  - `default` : requiert `user:inference` + `user:sessions:claude_code` (Remote Control)
-  - `bridge_enabled` : ajoute `user:profile` (Bridge / Remote Control opt-in)
-  - `mcp_oauth` : ajoute `user:mcp_servers` (pour les MCP-OAuth servers)
+- `Fleet.Credentials.Gate` — **single entry point** of credentials gating at the spawn-boundary. `validate(claude_dir, cap_profile) :: :ok | {:error, {:credentials_invalid, reason}}`: reads the human claudeDir's `.credentials.json` ONCE (`claudeAiOauth` block), validates the scopes (per-role, via the cap-profile flags) then the paid plan; the first failure short-circuits. This is where the file read **physically lives** (`read_oauth_creds/1`, single source of a single `File.read` + `Jason.decode`) — reconciles the contract (the model already says "the gates read the file directly") with the code (the read used to live in `Fleet.Spawner.Pod`; moved here). Pure transformer, no state, no process: the claudeDir path is resolved by the caller (per-human) and passed as an argument. Consumed by `Fleet.Spawner.Pod` (`LaunchEnv`) at pod launch.
+- `Fleet.Credentials.ScopeValidator` — **scope-coverage** gate: checks `oauth_scopes ⊇ role_required_scopes` by reading `claudeAiOauth.scopes` from `.credentials.json`. Profiles:
+  - `default`: requires `user:inference` + `user:sessions:claude_code` (Remote Control)
+  - `bridge_enabled`: adds `user:profile` (Bridge / Remote Control opt-in)
+  - `mcp_oauth`: adds `user:mcp_servers` (for MCP-OAuth servers)
 
-  Flags combinables (union des scopes requis, calculée par `compute_required/1`).
-- `Fleet.Credentials.PlanValidator` — gate **plan Pro/Max/Team/Enterprise** (F-AC-VALIDATE) : lit `claudeAiOauth.subscriptionType` directement depuis le fichier. Pas d'appel réseau, pas de SDK.
-- `Fleet.Credentials.ForgeAuth` — `git_env/0` : auth git **système-side** des ops forge privées (clone/fetch/ls-remote/push). **Source unique** (F095) consommée par `Fleet.Workflow.Git`, `Fleet.Pilot.StepDispatcher.ProjectResolver` (ls-remote), `Fleet.Pilot.GitOps` (opt `:auth`) et, par défaut d'env, `Fleet.Credentials.Shell.git/2`. Token injecté via env `GIT_CONFIG_*` (hors argv/`/proc/cmdline` — F087), jamais persisté dans `.git/config` (forge-cécité du pod). Config `:fleet_credentials, :forge_auth = %{url_prefix, token}` posée au boot. **Porte TOUJOURS `GIT_TERMINAL_PROMPT=0`** (MOVE-1/MA-22 — borne anti-hang : un git sans credential échoue au lieu de prompter sans TTY) + l'extraheader d'auth si `forge_auth` est configuré.
-- `Fleet.Credentials.Shell` — `run/3` + `git/2` : **exécution bornée PAR CONSTRUCTION** d'une commande externe (MOVE-1/MA-22). Lance la commande via `setsid -w` (process-group dédié) puis `Port.open` (tient l'`os_pid` du wrapper). Deux propriétés DURES de la borne :
-  - **Process-group, pas top-level** : à la deadline, on tue le **GROUPE entier** (`kill -s KILL -- -<pgid>`, le PGID découvert via `/proc/<child>/stat`) → le process ET tous ses descendants (helpers de transport git, credential helpers, filtres) meurent ensemble. Tuer le seul top-level les laisserait vivants (ils gardent le token forge dans leur environ). ⚠ Le `--` est obligatoire : `/usr/bin/kill` lit sinon le `-<pgid>` (commence par `-`) comme une OPTION et NE tue PAS le groupe.
-  - **Deadline MUR, pas idle-gap** : la deadline est absolue (`monotonic_now + timeout_ms`, calculée une fois) ; la boucle `receive` n'attend que le temps RESTANT, jamais un `after timeout_ms` ré-armé à chaque `{:data}`. Un git réseau-hung qui GOUTTE de l'output (un octet juste avant chaque échéance) est tué à l'échéance mur, pas reporté à l'infini.
+  Combinable flags (union of the required scopes, computed by `compute_required/1`).
+- `Fleet.Credentials.PlanValidator` — **Pro/Max/Team/Enterprise plan** gate: reads `claudeAiOauth.subscriptionType` directly from the file. No network call, no SDK.
+- `Fleet.Credentials.ForgeAuth` — `git_env/0`: **system-side** git auth for private forge ops (clone/fetch/ls-remote/push). **Single source** consumed by `Fleet.Workflow.Git`, `Fleet.Pilot.StepDispatcher.ProjectResolver` (ls-remote), `Fleet.Pilot.GitOps` (`:auth` opt) and, as the default env, `Fleet.Credentials.Shell.git/2`. Token injected via the `GIT_CONFIG_*` env vars (kept off argv/`/proc/cmdline`, which is world-readable), never persisted into `.git/config` (pod forge-blindness). Config `:fleet_credentials, :forge_auth = %{url_prefix, token}` set at boot. **ALWAYS carries `GIT_TERMINAL_PROMPT=0`** (anti-hang bound: a git without a credential fails instead of prompting with no TTY) + the auth extraheader if `forge_auth` is configured.
+- `Fleet.Credentials.Shell` — `run/3` + `git/2`: execution of an external command bounded **BY CONSTRUCTION**. Launches the command via `setsid -w` (dedicated process-group) then `Port.open` (holds the wrapper's `os_pid`). Two HARD properties of the bound:
+  - **Process-group, not top-level**: at the deadline, the **whole GROUP** is killed (`kill -s KILL -- -<pgid>`, the PGID discovered via `/proc/<child>/stat`) → the process AND all its descendants (git transport helpers, credential helpers, filters) die together. Killing only the top-level would leave them alive (they keep the forge token in their environ). ⚠ The `--` is mandatory: without it `/usr/bin/kill` reads the `-<pgid>` (starts with `-`) as an OPTION and does NOT kill the group.
+  - **WALL deadline, not idle-gap**: the deadline is absolute (`monotonic_now + timeout_ms`, computed once); the `receive` loop waits only for the REMAINING time, never an `after timeout_ms` re-armed on each `{:data}`. A network-hung git that DRIPS output (one byte just before each expiry) is killed at the wall deadline, not postponed forever.
 
-  Durcit le patron historique `Task.async`+`brutal_kill` de `Fleet.Workflow.Git`, qui tuait le Task BEAM mais laissait le process OS (et ses descendants) fuir. `git/2` injecte `ForgeAuth.git_env/0` par défaut (anti-prompt + auth). Résultat typé non-ignorable : `{:ok, {out, code}}` | `{:error, {:timeout, ms}}` | `{:error, {:exit, reason}}` (`:exit` aussi si `setsid` est absent — fail-closed plutôt qu'un `System.cmd` nu non groupé). Placé ici (sous bootstrap/pipeline/pilot) → aucun cycle compile. Rend `System.cmd("git", …)` non borné **inexprimable** sur le chemin PROJECT. **Linux** (cible documentée : `setsid` + `/proc`). Consommé par `Fleet.Workflow.Git` (push), `Fleet.Workflow.DeliverableGate`, `Fleet.Pilot.StepDispatcher.ProjectResolver` (ls-remote), `Fleet.Pilot.GitOps` (wrapper git de fleet_pilot — `Fleet.Pilot.ProjectOnboard` passe par LUI pour clone/worktree/commit/push) et `Fleet.ProjectBootstrap.Phase`.
+  Hardens the historical `Task.async`+`brutal_kill` pattern of `Fleet.Workflow.Git`, which killed the BEAM Task but let the OS process (and its descendants) leak. `git/2` injects `ForgeAuth.git_env/0` by default (anti-prompt + auth). Typed, non-ignorable result: `{:ok, {out, code}}` | `{:error, {:timeout, ms}}` | `{:error, {:exit, reason}}` (`:exit` also when `setsid` is absent — fail-closed rather than a bare, ungrouped `System.cmd`). Placed here (below bootstrap/workflow/pilot) → no compile cycle. Makes an unbounded `System.cmd("git", …)` **unrepresentable** on the PROJECT path. **Linux** (documented target: `setsid` + `/proc`). Consumed by `Fleet.Workflow.Git` (add/commit/rev-parse/push), `Fleet.Workflow.DeliverableGate`, `Fleet.Pilot.StepDispatcher.ProjectResolver` (ls-remote), `Fleet.Pilot.GitOps` (fleet_pilot's git wrapper — `Fleet.Pilot.ProjectOnboard` goes through IT for clone/worktree/commit/push) and `Fleet.ProjectBootstrap.Phase`.
 
-  **`git_safe_config_args/0` (SOURCE UNIQUE de la neutralisation config git système-side)** : la liste d'arguments `-c <clé>=<val>` à préfixer à TOUTE op git lancée par le runtime (hors bwrap) sur un workspace co-écrit par un pod adversaire. Neutralise les mécanismes git pilotables depuis le contenu du repo : `core.hooksPath=/dev/null` (hooks), `core.fsmonitor=`, `core.sshCommand=`, `diff.external=` (driver de diff externe exécuté par `git log -p`/`diff`/`show`), `core.attributesFile=/dev/null` (fichier d'attributs GLOBAL). Une seule définition — les sites la COMPOSENT au lieu de recopier la liste (`Fleet.Workflow.Git`, `Fleet.Workflow.DeliverableGate` ; `Deliverable` ne compose plus rien directement depuis X1 2026-07-04, ses rev-parse passent par `Fleet.Workflow.Git`). **Limite honnête** : un `filter.<nom>.clean` IN-TREE (armé par un `.gitattributes` + une définition `.git/config` du repo) n'est PAS désactivable par `-c` (git n'a aucun switch « disable all filters ») ; ce vecteur se ferme CÔTÉ CONTENU (refuser fail-closed un payload qui écrirait `.git/**` ou un `.gitattributes` armant `filter=`/`diff=`, fait par `Fleet.Workflow.PayloadGuard`). La définition `.git/config` du filtre n'étant jamais clonée d'un remote, refuser l'écriture `.git/**` côté contenu casse la chaîne complète.
-- `Fleet.Credentials.Human` — source **UNIQUE** de « l'humain de la fleet » = l'user OS du process runtime (`id -un`). Consommée par `ForgeIdentity` + le spawner (pod = l'humain).
-- `Fleet.Credentials.ForgeIdentity` — identité git d'un livrable (Z4 forge-identité B') : **author = l'humain** (via `Human` ; name/email **DÉRIVÉS de l'OS** — `git config --global` → GECOS → login, email fallback `<login>@<hostname>` ; le catalogue est SUPPRIMÉ, doctrine 2026-06-11 : un user OS ⇒ toujours une identité), **rôle = trailer `Co-authored-by: LCARS-<role>`** vérifié F-01 (I-CBC). Fail-loud uniquement si `id -un` est irrésoluble. Porte aussi l'identité SYSTÈME (`system_identity/0` = `lcars-system@lcars.local`, accesseur unique), les `allowed_emails/2` de la gate d'identité de commit et `coauthor_instruction/1` (source unique du trailer injecté au brief). Seam test : config `:forge_identity_override`.
-- `Fleet.Credentials.RoleToken` — `token/1` : token forge du compte d'un RÔLE, pour poster EN SON NOM (issue par `Architect`, review par `Reviewer` — avatar/traça vrais). Lu de `<role_tokens_dir>/<role>.gitea_token` (config `:role_tokens_dir`, défaut `/home/private`) ; `role` validé path-safe via `Fleet.Slug`. Best-effort : absent/vide/illisible → `nil` loggé warning, le caller retombe sur le token système (trou de provisioning à voir, pas une erreur fatale). Consommé par `Fleet.Pilot` (StepRunCompleter, GatekeeperSeal, ForgeClient) et `Fleet.MCP.PodTools.Delegation`.
+  **`git_safe_config_args/0` (SINGLE SOURCE of the system-side git config neutralization)**: the list of `-c <key>=<val>` arguments to prefix to EVERY git op launched by the runtime (outside bwrap) on a workspace co-written by an adversarial pod. Neutralizes the git mechanisms steerable from the repo's content: `core.hooksPath=/dev/null` (hooks), `core.fsmonitor=`, `core.sshCommand=`, `diff.external=` (external diff driver executed by `git log -p`/`diff`/`show`), `core.attributesFile=/dev/null` (the GLOBAL attributes file). A single definition — the sites COMPOSE it instead of recopying the list (`Fleet.Workflow.Git`, `Fleet.Workflow.DeliverableGate`; `Deliverable` no longer composes anything directly since 2026-07-04, its rev-parse goes through `Fleet.Workflow.Git`). **Honest limit**: an IN-TREE `filter.<name>.clean` (armed by a `.gitattributes` + a `.git/config` definition in the repo) is NOT disableable via `-c` (git has no "disable all filters" switch); that vector is closed CONTENT-SIDE (fail-closed refusal of a payload that would write `.git/**` or a `.gitattributes` arming `filter=`/`diff=`, done by `Fleet.Workflow.PayloadGuard`). Since the filter's `.git/config` definition is never cloned from a remote, refusing the `.git/**` write content-side breaks the full chain.
+- `Fleet.Credentials.Human` — the **SINGLE** source of "the fleet's human" = the OS user of the runtime process (`id -un`). Consumed by `ForgeIdentity`, the spawner (pod = the human), `Fleet.Pilot` (`Poller`, `StepRunCompleter`) and `Fleet.MCP.PodTools.Delegation`.
+- `Fleet.Credentials.ForgeIdentity` — git identity of a deliverable: **author = the human** (via `Human`; name/email **DERIVED from the OS** — `git config --global` → GECOS → login, email fallback `<login>@<hostname>`; the catalogue is REMOVED, 2026-06-11 doctrine: an OS user ⇒ always an identity), **role = trailer `Co-authored-by: LCARS-<role>`** verified by the commit-identity gate. Fail-loud only if `id -un` is unresolvable. Also carries the SYSTEM identity (`system_identity/0` = `lcars-system@lcars.local`, single accessor), the commit-identity gate's `allowed_emails/2` and `coauthor_instruction/1` (single source of the trailer injected into the brief). Test seam: `:forge_identity_override` config.
+- `Fleet.Credentials.RoleToken` — `token/1`: forge token of a ROLE's account, to post IN ITS NAME (issue by `Architect`, review by `Reviewer` — true avatar/traceability). Read from `<role_tokens_dir>/<role>.gitea_token` (config `:role_tokens_dir`, default `/home/private`); `role` validated path-safe via `Fleet.Slug`. Best-effort: absent/empty/unreadable → `nil` with a logged warning, the caller falls back to the system token (a provisioning hole to look into, not a fatal error). Consumed by `Fleet.Pilot` (StepRunCompleter, GatekeeperSeal, ForgeClient) and `Fleet.MCP.PodTools.Delegation`.
 
 ## Configuration (`:fleet_credentials`)
 
-- `:forge_auth` — `%{url_prefix, token}` de l'auth git système-side (`ForgeAuth.git_env/0`). Posé au boot par `config/runtime.exs` depuis `FORGE_BASE_URL` + `FORGE_PUSH_TOKEN`/`FORGE_TOKEN`/fichier `FORGE_TOKEN_FILE` (défaut `~/.gitea_token`). Absent → `git_env/0` ne porte que `GIT_TERMINAL_PROMPT=0`.
-- `:role_tokens_dir` — racine des tokens de rôle (`RoleToken`), défaut `/home/private`. Surchargé par l'env `FORGE_ROLE_TOKENS_DIR` (`config/runtime.exs`, multi-forge par profil env : un jeu de tokens isolé par forge).
-- `:forge_identity_override` — seam test (`%{name, email, human?}`) : court-circuite la dérivation OS de `ForgeIdentity` (posé par `config/test.exs` ; un `:identity` explicite en opts le désactive pour tester la vraie résolution).
+- `:forge_auth` — `%{url_prefix, token}` of the system-side git auth (`ForgeAuth.git_env/0`). Set at boot by `config/runtime.exs` from `FORGE_BASE_URL` + `FORGE_PUSH_TOKEN`/`FORGE_TOKEN`/the `FORGE_TOKEN_FILE` file (default `~/.gitea_token`). Absent → `git_env/0` only carries `GIT_TERMINAL_PROMPT=0`.
+- `:role_tokens_dir` — root of the role tokens (`RoleToken`), default `/home/private`. Overridden by the `FORGE_ROLE_TOKENS_DIR` env (`config/runtime.exs`, multi-forge via env profile: one isolated token set per forge).
+- `:forge_identity_override` — test seam (`%{name, email, human?}`): short-circuits `ForgeIdentity`'s OS derivation (set by `config/test.exs`; an explicit `:identity` in opts disables it, to test the real resolution).
 
-(Le knob de coffre `LCARS_CREDENTIALS_ROOT` → `:credentials_root` est **RETIRÉ** — plus aucun lecteur, ADR-F : les creds = claudeDir humain bindé, pas un coffre.)
+(The `LCARS_CREDENTIALS_ROOT` → `:credentials_root` vault knob is **REMOVED** — no reader left, ADR-F: creds = the human's bound claudeDir, not a vault.)
 
-## Distribution — `share-claudeDir` per-humain (ADR-F décidé 2026-05-26)
+## Distribution — per-human `share-claudeDir` (ADR-F, decided 2026-05-26)
 
-Tous les pods d'un humain bindent **son** claudeDir writable (`/home/<humain>/.claude/`). Frontière de partage = l'humain (UID/compte). **Isolation cross-humain** = UID Linux distinct + bwrap mount NS (cf. ADR-E §Isolation), pas le `chmod 0600` seul.
+All of a human's pods share **their** claudeDir (`/home/<human>/.claude/`). Sharing boundary = the human (UID/account). **Cross-human isolation** = distinct Linux UID + bwrap mount NS (cf. ADR-E §Isolation), not the `chmod 0600` alone.
 
-Le bind du claudeDir dans le pod est défini par `04_design-notes/ring0/bwrap_launch.md` (DN canonique ; le script `bin/bwrap_launch.sh` du runtime en est l'implémentation). Phase BIND de `fleet_project_bootstrap` configure les mounts. **Pas de copie** des creds entre pods (`copy-direct` rejeté par ADR-F).
+The claudeDir bind inside the pod is defined by `04_design-notes/ring0/bwrap_launch.md` (canonical DN; the runtime script `bin/bwrap_launch.sh` is its implementation). Under bwrap containment, ONLY `.credentials.json` is bind-mounted RW into the pod's `.claude/` — the rest of `.claude/` is pod-owned (the human's settings/hooks do not leak into the pod); under `containment: none` (`bin/host_launch.sh`) the pod uses the human's native `~/.claude` directly. (The old `fleet_project_bootstrap` BIND phase that configured the mounts is REMOVED — dead code never wired in prod; mounts/creds are handled by `bwrap_launch.sh`.) **No copying** of creds between pods (`copy-direct` rejected by ADR-F).
 
-PoC dé-risque (2026-05-26) : 5 pods bwrap concurrents + 1 warmup séquentiel ; claudeDir partagé intact, `projects/` sans collision, 0 lock résiduel. **Le PoC valide la concurrence claudeDir/`projects/`, PAS la safety du clobber `.credentials.json` sous refresh concurrent** (gate refresh >20min hors-scope par design ; cf. §Caveats).
+De-risking PoC (2026-05-26): 5 concurrent bwrap pods + 1 sequential warmup; shared claudeDir intact, `projects/` without collision, 0 residual lock. **The PoC validates claudeDir/`projects/` concurrency, NOT the safety of the `.credentials.json` clobber under concurrent refresh** (refresh gate >20min out of scope by design; cf. §Accepted caveats).
 
-### Caveats acceptés (cf. ADR-F + reverse)
+### Accepted caveats (cf. ADR-F + reverse)
 
-- **Clobber `.credentials.json` sous refresh concurrent** : *présumé* safe (atomicité Anthropic `rename(2)` à confirmer au build — voir GAP G-3) ; gate refresh >20min hors-scope du PoC.
-- **Fenêtre stale cache cross-process** (reverse §F6, Linux) : un pod qui voit son token comme frais ne re-lit pas le disque même si un autre pod a refresh ; converge sur le 1er 401 via `handleOAuth401Error`. Distinct du clobber, accepté par design.
-- **Dead-token backoff partagé** (reverse §9, `initReplBridge.ts:177-240`) : état persistant dans **`~/.claude.json`** (NB : *pas* `.credentials.json`) — champs `bridgeOauthDeadExpiresAt` + `bridgeOauthDeadFailCount` (cap à 3), content-addressed par `expiresAt`. Si un pod hit "refresh-token mort" 3×, **tous les pods de l'humain** héritent du backoff. Recovery via `claude /login` interactif par l'humain : un nouveau `/login` produit un nouvel `expiresAt`, la clé content-addressée ne match plus → backoff reset implicitement (le `/logout` interdit par §Invariants n'est PAS requis).
-- **Lockfile retry-exhausted** (reverse §F2, événement `tengu_oauth_token_refresh_lock_retry_limit_reached`) : sous N pods simultanés au même `expiresAt − 5min`, les 5 retries × 1-2s peuvent s'épuiser → `checkAndRefreshOAuthTokenIfNeeded` retourne `false` silencieusement → appel API part avec le token courant → 401 → recovery réactif via `handleOAuth401Error` côté binaire claude. Convergence assurée mais à monitorer (event à instrumenter au build).
+- **`.credentials.json` clobber under concurrent refresh**: *presumed* safe (Anthropic `rename(2)` atomicity to be confirmed at build — known open gap); refresh gate >20min out of the PoC's scope.
+- **Cross-process stale-cache window** (reverse §F6, Linux): a pod that sees its token as fresh does not re-read the disk even if another pod refreshed; converges on the 1st 401 via `handleOAuth401Error`. Distinct from the clobber, accepted by design.
+- **Shared dead-token backoff** (reverse §9, `initReplBridge.ts:177-240`): persistent state in **`~/.claude.json`** (NB: *not* `.credentials.json`) — fields `bridgeOauthDeadExpiresAt` + `bridgeOauthDeadFailCount` (capped at 3), content-addressed by `expiresAt`. If one pod hits "dead refresh-token" 3×, **all of the human's pods** inherit the backoff. Recovery via interactive `claude /login` by the human: a new `/login` produces a new `expiresAt`, the content-addressed key no longer matches → the backoff resets implicitly (the `/logout` forbidden by §Invariants is NOT required).
+- **Lockfile retry-exhausted** (reverse §F2, event `tengu_oauth_token_refresh_lock_retry_limit_reached`): under N simultaneous pods at the same `expiresAt − 5min`, the 5 retries × 1-2s can be exhausted → `checkAndRefreshOAuthTokenIfNeeded` returns `false` silently → the API call goes out with the current token → 401 → reactive recovery via `handleOAuth401Error` on the claude-binary side. Convergence assured but to be monitored (event to instrument at build).
 
 ## Onboarding
 
-starfleet (sysadmin root-trusted, hors-bwrap per D-01) **est la seule voie d'écriture** dans `.credentials.json` — il pose les creds dans le claudeDir de l'humain à l'onboarding (compose ADR-E §Onboarding). DN onboarding/catalogue détaillée = backlog post-ADR-F.
+starfleet (root-trusted sysadmin, running outside bwrap by design) **is the only write path** into `.credentials.json` — it places the creds in the human's claudeDir at onboarding (composes with ADR-E §Onboarding). Detailed onboarding/catalogue DN = post-ADR-F backlog.
 
-## Précédence d'auth Anthropic (ordre officiel)
+## Anthropic auth precedence (official order)
 
-Anthropic résout les credentials dans cet ordre (rang 1 = **plus prioritaire**, préempte les rangs suivants) :
+Anthropic resolves credentials in this order (rank 1 = **highest priority**, preempts the ranks below):
 
-| Rang | Source | LCARS |
+| Rank | Source | LCARS |
 |---|---|---|
-| 1 | Cloud provider (`CLAUDE_CODE_USE_BEDROCK`/`VERTEX`/`FOUNDRY`) | env filtrée |
-| 2 | `ANTHROPIC_AUTH_TOKEN` | env filtrée |
-| 3 | `ANTHROPIC_API_KEY` | env filtrée |
-| 4 | `apiKeyHelper` script | settings.json contrôlé (non-configuré) |
-| 5 | `CLAUDE_CODE_OAUTH_TOKEN` (long-lived setup-token) | env filtrée + jamais généré |
-| **6** | **Subscription OAuth `/login`** | **← rang utilisé par LCARS** |
+| 1 | Cloud provider (`CLAUDE_CODE_USE_BEDROCK`/`VERTEX`/`FOUNDRY`) | excluded from the pod env |
+| 2 | `ANTHROPIC_AUTH_TOKEN` | excluded from the pod env |
+| 3 | `ANTHROPIC_API_KEY` | excluded from the pod env |
+| 4 | `apiKeyHelper` script | controlled settings.json (not configured) |
+| 5 | `CLAUDE_CODE_OAUTH_TOKEN` (long-lived setup-token) | excluded from the pod env + never generated |
+| **6** | **Subscription OAuth `/login`** | **← the rank LCARS uses** |
 
-⚠ Précédence **descendante** : un rang supérieur **préempte** les rangs en-dessous. Si setup-token (rang 5) était présent, il masquerait la subscription (rang 6). LCARS l'empêche en **ne générant pas de setup-token** ET en **filtrant les env vars rangs 1-5** au lancement du pod.
+⚠ **Descending** precedence: a higher rank **preempts** the ranks below. If a setup-token (rank 5) were present, it would mask the subscription (rank 6). LCARS prevents this by **never generating a setup-token** AND by **keeping the rank 1-5 env vars out of the pod env** at launch.
 
-Filtrage LCARS-side : le launcher du pod (cf. `ring0/claude_launch.md` + composants Elixir à dériver) retire `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_OAUTH_TOKEN` / `CLAUDE_CODE_USE_*` de l'env injecté ; `settings.json` du pod ne configure pas `apiKeyHelper`. Le `.credentials.json` natif fournit la subscription OAuth (rang 6).
+LCARS-side mechanism: the pod env is **closed by construction** — built explicitly by `Fleet.Spawner.Pod` (`LaunchEnv`) and injected by `bin/bwrap_launch.sh` under `--clearenv` (everything goes through explicit `--setenv`; nothing of the spawner's ambient env leaks). `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_OAUTH_TOKEN` / `CLAUDE_CODE_USE_*` are simply never injected; the pod's `settings.json` does not configure `apiKeyHelper`. (Under `containment: none`, `bin/host_launch.sh` has no `--clearenv` — the pod inherits the BEAM's ambient env; the rank 1-5 exclusion there rests on the human's launch env not exporting them.) The native `.credentials.json` provides the subscription OAuth (rank 6).
 
-NB : le reverse §26 (`utils/auth.ts:153-206`, `getAuthTokenSource()`) documente deux slots FD (`CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`, `CCR_OAUTH_TOKEN_FILE` disk fallback) résolus autour des rangs `apiKeyHelper` / `CLAUDE_CODE_OAUTH_TOKEN`. LCARS n'injecte ni FD ni fichier de fallback — slots inopérants. (`ANTHROPIC_API_KEY` rang 3 est résolu par fonction sœur `getAnthropicApiKeyWithSource()`.)
+NB: reverse §26 (`utils/auth.ts:153-206`, `getAuthTokenSource()`) documents two FD slots (`CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`, `CCR_OAUTH_TOKEN_FILE` disk fallback) resolved around the `apiKeyHelper` / `CLAUDE_CODE_OAUTH_TOKEN` ranks. LCARS injects neither the FD nor the fallback file — inert slots. (`ANTHROPIC_API_KEY`, rank 3, is resolved by the sister function `getAnthropicApiKeyWithSource()`.)
 
 ## Invariants
 
-- **JAMAIS** `ANTHROPIC_API_KEY` (rang 3, filtré).
-- **JAMAIS** `ANTHROPIC_AUTH_TOKEN` (rang 2, filtré).
-- **JAMAIS** `--bare` (mode API-key only, skip subscription OAuth entièrement — gate avant la précédence).
-- **JAMAIS** `claude setup-token` : scope `user:inference` UNIQUEMENT → (a) incompatible MCP-OAuth (`user:mcp_servers` absent), (b) **incompatible Remote Control** (`user:sessions:claude_code` absent) → **rompt directement ADR-G** ; user-reject explicite 2026-05-09.
-- **JAMAIS** `/logout` : `secureStorage.delete()` supprime `.credentials.json` **intégralement** (slot `claudeAiOauth` + tous les slots `mcpOAuth[*]`) → wipe **tous** les pods de l'humain + tous les MCP-OAuth servers de l'humain.
-- Refresh = **délégué au binaire claude** (lockfile natif, refresh à `expiresAt − 5min`, 5 retries 1-2s backoff).
-- Atomicité = lockfile POSIX natif Anthropic (cf. §Caveats acceptés).
+- **NEVER** `ANTHROPIC_API_KEY` (rank 3, excluded from the pod env).
+- **NEVER** `ANTHROPIC_AUTH_TOKEN` (rank 2, excluded from the pod env).
+- **NEVER** `--bare` (API-key-only mode, skips subscription OAuth entirely — gated ahead of the precedence).
+- **NEVER** `claude setup-token`: scope `user:inference` ONLY → (a) incompatible with MCP-OAuth (`user:mcp_servers` absent), (b) **incompatible with Remote Control** (`user:sessions:claude_code` absent) → **directly breaks ADR-G**; explicit user-reject 2026-05-09.
+- **NEVER** `/logout`: `secureStorage.delete()` deletes `.credentials.json` **entirely** (the `claudeAiOauth` slot + all `mcpOAuth[*]` slots) → wipes **all** of the human's pods + all of the human's MCP-OAuth servers.
+- Refresh = **delegated to the claude binary** (native lockfile, refresh at `expiresAt − 5min`, 5 retries with 1-2s backoff).
+- Atomicity = the native Anthropic POSIX lockfile (cf. §Accepted caveats).
 
-## Cohérence ADR-G (post-15/06/2026)
+## ADR-G coherence (post-2026-06-15)
 
-Le pivot facturation Anthropic (annoncé 14/05/2026, effectif 15/06/2026, confirmé par la doc officielle) sépare :
+The Anthropic billing pivot (announced 2026-05-14, effective 2026-06-15, confirmed by the official docs) separates:
 
-- **Interactif terminal `claude` REPL** = subscription = **utilisé par LCARS**.
-- **Programmatique `claude -p` / SDK / stream-json** = pool métré séparé = **interdit pour LCARS**.
+- **Interactive terminal `claude` REPL** = subscription = **used by LCARS**.
+- **Programmatic `claude -p` / SDK / stream-json** = separate metered pool = **forbidden for LCARS**.
 
-LCARS lance les pods en **Mode A interactif** per ADR-G (REPL `claude` interactif sous tmux ; activation Remote Control par `remoteControlAtStartup:true` dans `settings.json` du pod, ou slash `/remote-control [name]` dans le REPL — incantation exacte définie par `04_design-notes/ring0/claude_launch.md`). **Mode B** (sous-commande `claude remote-control` qui spawne des enfants `claude --print`) = headless = **explicitement écarté par ADR-G L29**.
+LCARS launches pods in **interactive Mode A** per ADR-G (interactive `claude` REPL under tmux). Remote Control activation is wired by `bin/claude_launch.sh` (sole writer of the pod's `.claude.json`): the `--remote-control` flag AND `remoteControlAtStartup` in the pod's `.claude.json`, both conditioned on the cap-profile's `spec.invocation.remote_control` flag (so that judge pods stay invisible in Desktop); the `/remote-control [name]` slash inside the REPL remains the manual path — the exact incantation is defined by `04_design-notes/ring0/claude_launch.md`. **Mode B** (the `claude remote-control` subcommand, which spawns `claude --print` children) = headless = **explicitly ruled out by ADR-G**.
 
 ## Articulation
 
 | Doc | Relation |
 |---|---|
-| `01_architecture/adr-f-credentials-anthropic-natif.md` | ADR canonique PROMOTED 2026-05-26 |
-| `01_architecture/adr-e-single-user-runtime.md` | N humains = N users Linux dans 1 conteneur ; N claudeDirs |
-| `01_architecture/adr-g-launch-subscription.md` | Mode A interactif tmux (subscription), pas `-p` (métré) |
-| `04_design-notes/ring0/fleet_credentials.md` | modèle court (claudeDir natif + 2 gates) |
-| `04_design-notes/ring0/bwrap_launch.md` | bind du claudeDir humain RW |
-| `04_design-notes/ring0/claude_launch.md` | incantation exacte du REPL Mode A |
-| `04_design-notes/ring1/fleet_project_bootstrap.md` | Phase 4 BIND claudeDir |
+| `01_architecture/adr-f-credentials-anthropic-natif.md` | canonical ADR, PROMOTED 2026-05-26 |
+| `01_architecture/adr-e-single-user-runtime.md` | N humans = N Linux users in 1 container; N claudeDirs |
+| `01_architecture/adr-g-launch-subscription.md` | interactive Mode A under tmux (subscription), not `-p` (metered) |
+| `04_design-notes/ring0/fleet_credentials.md` | short model (native claudeDir + 2 gates) |
+| `04_design-notes/ring0/bwrap_launch.md` | RW bind of the human's `.credentials.json` (that file alone; `.claude/` is pod-owned) |
+| `04_design-notes/ring0/claude_launch.md` | exact incantation of the Mode A REPL |
+| `04_design-notes/ring1/fleet_project_bootstrap.md` | historical: its claudeDir BIND phase is REMOVED from the code — mounts/creds are handled by `bwrap_launch.sh` |
 
-## Sources externes
+## External sources
 
-- Reverse `inbox/src/#0_audit-reverse/#0_ref_oauth-token-lifecycle.md` (snapshot 2026-04-12, addendum 2026-05-01 — basé sur Claude Code v2.1.88) — OAuth claude.ai principal : `utils/auth.ts`, lockfile, refresh, anti-storm. Mécanique stable confirmée par la doc officielle.
-- Reverse `inbox/src/#0_audit-reverse/#0_ref_mcp-oauth.md` (snapshot 2026-05-01) — OAuth MCP per-server : slot distinct `mcpOAuth[serverKey]`, lockfile per-server, XAA/CIMD (enterprise, non-applicable starfleet personnel).
-- Doc officielle Anthropic à jour : `https://code.claude.com/docs/en/authentication` (la plus récente, priorité 1 en cas de divergence reverse/canon).
+- Reverse `inbox/src/#0_audit-reverse/#0_ref_oauth-token-lifecycle.md` (snapshot 2026-04-12, addendum 2026-05-01 — based on Claude Code v2.1.88) — main claude.ai OAuth: `utils/auth.ts`, lockfile, refresh, anti-storm. Mechanics stable, confirmed by the official docs.
+- Reverse `inbox/src/#0_audit-reverse/#0_ref_mcp-oauth.md` (snapshot 2026-05-01) — per-server MCP OAuth: distinct `mcpOAuth[serverKey]` slot, per-server lockfile, XAA/CIMD (enterprise, not applicable to a personal starfleet).
+- Up-to-date official Anthropic doc: `https://code.claude.com/docs/en/authentication` (the most recent; priority 1 in case of reverse/canon divergence).

@@ -1,157 +1,158 @@
 # Fleet.CapProfile
 
-**Date** : 2026-05-09
-**Dernière révision** : 2026-07-05 (D2 resync contre le code : Ring 0 [renumérotation 2026-07-04], + section `Fleet.Layout`, knobs `:schema_dir` + env `LCARS_CAPPROFILES_ROOT`, codes g24_9_strict/prefix exacts ; C4 — encodage canonique + sha256 extraits en `Fleet.CapProfile.CanonicalJson`, API `sha256/1` inchangée)
-**Statut** : implémenté run #3.1 chantier #1 — design note PROMOTED
-**Référencé par** : 04_design-notes/fleet_cap_profile.md
+**Date**: 2026-05-09
+**Last revised**: 2026-07-07 (translated to EN; resynced against the code: `do_allocate` ref replaced by the real spawn-boundary mechanism, `apiVersion` dropped from the modop reserved keys [removed from the schema], API admission module = `Fleet.API.SpawnAdmission`. Previous resync 2026-07-05: Ring 0 [renumbering 2026-07-04], + `Fleet.Layout` section, `:schema_dir` knob + `LCARS_CAPPROFILES_ROOT` env, exact g24_9_strict/prefix codes; canonical encoding + sha256 extracted into `Fleet.CapProfile.CanonicalJson`, `sha256/1` API unchanged)
+**Status**: implemented — design note PROMOTED
+**Referenced by**: 04_design-notes/fleet_cap_profile.md
 
 Capability Profile composer/loader/validator (LCARS schema v2.5).
 
-Module pure data transformer — YAML on disk → struct Elixir composée.
-Behaviour `Fleet.CapProfile.Loader` exposé pour mock test + futur 2e vendor
-(callbacks `load/1`, `compose/2`, `validate/1` ; implémentation par défaut =
-`Fleet.CapProfile`). Héberge aussi deux utilitaires transverses Ring 0 :
-`Fleet.Slug` et `Fleet.Layout` (sections dédiées).
+Pure data-transformer module — YAML on disk → composed Elixir struct.
+Behaviour `Fleet.CapProfile.Loader` exposed for test mocks + a future 2nd vendor
+(callbacks `load/1`, `compose/2`, `validate/1`; default implementation =
+`Fleet.CapProfile`). Also hosts two cross-cutting Ring 0 utilities:
+`Fleet.Slug` and `Fleet.Layout` (dedicated sections).
 
 ## API
 
-- `Fleet.CapProfile.load/1` — charge un cap-profile depuis le FS, valide schema ; **délègue** la
-  conformité JSON-schema au cluster `Fleet.CapProfile.Schema` (`validate/2`)
-- `Fleet.CapProfile.compose/2` — compose role + modop_set, deep-merge last-wins ; valide base +
-  résultat via `Fleet.CapProfile.Schema.validate/2`, et les fragments modop via
-  `Fleet.CapProfile.Schema.validate_modop_keys/1` (clés réservées) + `validate/2`
-- `Fleet.CapProfile.validate/1` — invariants G24 (incl. `g24_9_strict`/`g24_9_prefix` : refus des
-  server-tools natifs Anthropic, qui tournent côté serveur donc hors du sandbox bwrap par
-  construction) ; **délègue** au cluster pur `Fleet.CapProfile.Invariants` (une fonction par check,
-  codes d'erreur FIGÉS `:g24_1` … `:g24_14`), n'y garde que le contrat de
-  retour single-authority `:ok | {:error, [codes]}` consommé hors-app (spawner `do_allocate`,
+- `Fleet.CapProfile.load/1` — loads a cap-profile from the FS, validates schema; **delegates**
+  JSON-schema conformance to the `Fleet.CapProfile.Schema` cluster (`validate/2`)
+- `Fleet.CapProfile.compose/2` — composes role + modop_set, deep-merge last-wins; validates base +
+  result via `Fleet.CapProfile.Schema.validate/2`, and the modop fragments via
+  `Fleet.CapProfile.Schema.validate_modop_keys/1` (reserved keys) + `validate/2`
+- `Fleet.CapProfile.validate/1` — G24 invariants (incl. `g24_9_strict`/`g24_9_prefix`: refusal of
+  Anthropic's native server-tools, which run server-side and are therefore outside the bwrap sandbox
+  by construction); **delegates** to the pure cluster `Fleet.CapProfile.Invariants` (one function per
+  check, FROZEN error codes `:g24_1` … `:g24_14`), keeps only the single-authority
+  return contract `:ok | {:error, [codes]}` consumed out of the app (the spawner's spawn-boundary
+  containment gate — `Fleet.Spawner.Pod`, `:allocating` boot step — and
   `mix lcars.contracts.check`)
-- `Fleet.CapProfile.containment/1` — `metadata.containment` (`"bwrap"` sandboxé / `"none"` host-native ;
-  défaut conservateur `"bwrap"`). **Source UNIQUE** de cette lecture : le spawner sélectionne le launcher N0
-  dessus, l'API `/api/admin/spawn` REFUSE le host-native dessus (un trou de config ne doit jamais ouvrir l'hôte)
-- `Fleet.CapProfile.default_containment/0` / `bwrap?/1` — **source unique du littéral `"bwrap"`** (mode par
-  défaut sandboxé, `@default_containment`) + prédicat host-native. L'admission API (`Fleet.API.Rest`) tranche
-  via `bwrap?/1` au lieu de retaper le littéral
-- `Fleet.CapProfile.slot_scope/1` — `metadata.slot_scope` (`"project"` = 1 identité/slot Desktop par projet ;
-  `"instance"` = fan-out par issue ; **requis, sans défaut → raise**). **Source UNIQUE** : le dispatcher
-  (`Fleet.Pilot.StepDispatcher`) choisit `PodId.for_repo` vs `for_issue`/`for_pr` et sérialise les rôles
-  project-scoped là-dessus
-- `Fleet.CapProfile.with_project/2` — rend un `%CapProfile{}` dont `spec.project` est REMPLACÉ par le
-  projet effectif donné (map clés string). **Source UNIQUE** de la substitution brief > statique : un
-  pod-projet peut recevoir son projet du dispatch issue→repo plutôt que du cap-profile YAML ; les
-  call-sites spawner (`Pod.Scaffold.maybe_bootstrap_project_workspace`, reprovision workspace de `Pod`)
-  passent par elle au lieu de re-bricoler la map `spec`
-- `Fleet.CapProfile.sha256/1` — hash canonique stable d'un profile composé (struct ou map).
-  **Délègue** au cluster `Fleet.CapProfile.CanonicalJson` (extrait C4 : concern « déterminisme de
-  composition », orthogonal au loader et aux accesseurs) — `CanonicalJson.encode/1` (JSON canonique,
-  clés stringifiées puis triées récursivement, format de hachage FIGÉ) + `CanonicalJson.sha256/1`
-  (hex minuscules). L'API portée ici ne bouge pas
+- `Fleet.CapProfile.containment/1` — `metadata.containment` (`"bwrap"` sandboxed / `"none"` host-native;
+  conservative default `"bwrap"`). **SINGLE source** of this read: the spawner selects the N0 launcher
+  on it, the `/api/admin/spawn` API REFUSES host-native on it (a config hole must never open the host)
+- `Fleet.CapProfile.default_containment/0` / `bwrap?/1` — **single source of the `"bwrap"` literal**
+  (default sandboxed mode, `@default_containment`) + host-native predicate. API admission
+  (`Fleet.API.SpawnAdmission`) decides via `bwrap?/1` instead of retyping the literal
+- `Fleet.CapProfile.slot_scope/1` — `metadata.slot_scope` (`"project"` = 1 Desktop identity/slot per
+  project; `"instance"` = fan-out per issue; **required, no default → raise**). **SINGLE source**: the
+  dispatcher (`Fleet.Pilot.StepDispatcher`) picks `PodId.for_repo` vs `for_issue`/`for_pr` and
+  serializes project-scoped roles on it
+- `Fleet.CapProfile.with_project/2` — returns a `%CapProfile{}` whose `spec.project` is REPLACED by the
+  given effective project (string-keyed map). **SINGLE source** of the brief > static substitution: a
+  project pod may receive its project from the issue→repo dispatch rather than from the cap-profile
+  YAML; the spawner call-sites (`Pod.Scaffold.maybe_bootstrap_project_workspace`, `Pod`'s workspace
+  reprovision) go through it instead of re-hacking the `spec` map
+- `Fleet.CapProfile.sha256/1` — stable canonical hash of a composed profile (struct or map).
+  **Delegates** to the `Fleet.CapProfile.CanonicalJson` cluster (extracted concern: « composition
+  determinism », orthogonal to the loader and the accessors) — `CanonicalJson.encode/1` (canonical
+  JSON, keys stringified then recursively sorted, FROZEN hash format) + `CanonicalJson.sha256/1`
+  (lowercase hex). The API hosted here does not move
 
-## Fleet.Slug — smart-constructor path-safe (utilitaire transverse)
+## Fleet.Slug — path-safe smart-constructor (cross-cutting utility)
 
-Source UNIQUE du charset path-safe `^[a-z0-9][a-z0-9_-]*$` (hébergé ici, Ring 0, réutilisé
-par spawner / pipeline / credentials / pilot). Tout nom de client/payload/catalogue interpolé
-dans un `Path.join` (feuille FS) ou un segment d'URL borné passe par lui — fail-closed.
+SINGLE source of the path-safe charset `^[a-z0-9][a-z0-9_-]*$` (hosted here, Ring 0, reused
+by spawner / workflow / credentials / pilot). Every client/payload/catalogue name interpolated
+into a `Path.join` (FS leaf) or a bounded URL segment goes through it — fail-closed.
 
-- `Fleet.Slug.cast/1` — `{:ok, slug}` ou `{:error, {:invalid_slug, raw}}`
-- `Fleet.Slug.cast!/1` — bang (raise `ArgumentError`) pour les sites où un nom invalide = bug appelant
-- `Fleet.Slug.valid?/1` — prédicat booléen
-- `Fleet.Slug.under_root?/2` — garde de confinement (dest résolu reste sous root)
-- `Fleet.Slug.confined_join/2` — caste + joint sous root + confine, en un geste (feuille FS)
+- `Fleet.Slug.cast/1` — `{:ok, slug}` or `{:error, {:invalid_slug, raw}}`
+- `Fleet.Slug.cast!/1` — bang (raises `ArgumentError`) for sites where an invalid name = caller bug
+- `Fleet.Slug.valid?/1` — boolean predicate
+- `Fleet.Slug.under_root?/2` — confinement guard (resolved dest stays under root)
+- `Fleet.Slug.confined_join/2` — cast + join under root + confine, in one gesture (FS leaf)
 
-## Fleet.Layout — autorité du layout plateforme (utilitaire transverse)
+## Fleet.Layout — platform layout authority (cross-cutting utility)
 
-Autorité UNIQUE du « où vivent les choses » sur la boîte (doctrine H1+H3
-2026-07-04 : LCARS vit SEUL dans un container dédié, layout IMPOSÉ par
-conception — structurel en dur, tapé UNE fois, **pas des knobs de
-déploiement**). Ring 0, à côté de `Fleet.Slug` ; consommé par spawner /
-pilot / starfleet. Les seams de TEST des consommateurs (ex. `seed_store_root`)
-restent : leur défaut dérive d'ici.
+SINGLE authority on « where things live » on the box (doctrine
+2026-07-04: LCARS lives ALONE in a dedicated container, layout IMPOSED by
+design — structural, hard-coded, typed ONCE, **not deployment
+knobs**). Ring 0, next to `Fleet.Slug`; consumed by spawner /
+pilot / starfleet. Consumers' TEST seams (e.g. `seed_store_root`)
+stay: their default derives from here.
 
-- `Fleet.Layout.projects_root/0` — racine des repos de travail (`/home/projects`)
-- `Fleet.Layout.work_root/0` — racine méta/ops (`/home/projects.work` : journaux, seeds, reprise)
-- `Fleet.Layout.state_dir/0` — état runtime per-humain (`~/.lcars`) ; HOME
-  irrésoluble = fail-loud (`System.user_home!/0` raise), jamais un chemin fabriqué
+- `Fleet.Layout.projects_root/0` — root of the working repos (`/home/projects`)
+- `Fleet.Layout.work_root/0` — meta/ops root (`/home/projects.work`: journals, seeds, resume)
+- `Fleet.Layout.state_dir/0` — per-human runtime state (`~/.lcars`); unresolvable HOME
+  = fail-loud (`System.user_home!/0` raises), never a fabricated path
 
 ## Schemas
 
-Validation structurelle portée par `Fleet.CapProfile.Schema` (cluster extrait, en AMONT du cœur —
-distinct des invariants métier G24 de `Fleet.CapProfile.Invariants`) :
+Structural validation carried by `Fleet.CapProfile.Schema` (extracted cluster, UPSTREAM of the core —
+distinct from the G24 business invariants of `Fleet.CapProfile.Invariants`):
 
-- `Fleet.CapProfile.Schema.validate/2` — valide une map brute contre le JSON-schema du kind
-  (`:cap_profile` / `:modop`) ; retourne `:invalid_schema` / `:invalid_modop` / `:schema_unavailable`
-- `Fleet.CapProfile.Schema.validate_modop_keys/1` — refuse un fragment modop portant une clé
-  réservée top-level (`kind`)
-- schemas cachés en `:persistent_term` (keyé par path résolu — copie locale assumée du pattern
-  `Fleet.SchemaCache`, pas d'arête intra-R0 vers `fleet_event_router`) ; `schema_dir` lit la clé env
-  `:fleet_cap_profile, :schema_dir` (surchargeable en test), défaut `priv/schema`
+- `Fleet.CapProfile.Schema.validate/2` — validates a raw map against the kind's JSON-schema
+  (`:cap_profile` / `:modop`); returns `:invalid_schema` / `:invalid_modop` / `:schema_unavailable`
+- `Fleet.CapProfile.Schema.validate_modop_keys/1` — refuses a modop fragment carrying a reserved
+  top-level key (`kind`)
+- schemas cached in `:persistent_term` (keyed by resolved path — assumed local copy of the
+  `Fleet.SchemaCache` pattern, no intra-R0 edge toward `fleet_event_router`); `schema_dir` reads the
+  env key `:fleet_cap_profile, :schema_dir` (overridable in test), default `priv/schema`
 
-Fichiers :
+Files:
 
-- `priv/schema/cap-profile-v2.5.json` — JSON Schema strict du profile composé
-- `priv/schema/modop-profile.json` — JSON Schema strict du fragment modop
-  (clés réservées interdites : apiVersion, kind, metadata.containment,
-  metadata.name)
+- `priv/schema/cap-profile-v2.5.json` — strict JSON Schema of the composed profile
+- `priv/schema/modop-profile.json` — strict JSON Schema of the modop fragment
+  (forbidden reserved keys: kind, metadata.containment, metadata.name)
 
 ## DisallowedTools
 
-Résolution write-time de `spec.scope.disallowedTools` portée par le cluster
-`Fleet.CapProfile.DisallowedTools` (extrait du cœur — concern UNIQUE
-`disallowedTools`, ne touche aucune autre face du profil ; dépend du struct
-`%Fleet.CapProfile{}`, pas de l'API cœur → pas de cycle). `Fleet.CapProfile`
-expose les trois helpers en **délégateurs** (l'API publique consommée hors-app ne
-bouge pas) :
+Write-time resolution of `spec.scope.disallowedTools` carried by the
+`Fleet.CapProfile.DisallowedTools` cluster (extracted from the core — SINGLE concern
+`disallowedTools`, touches no other face of the profile; depends on the
+`%Fleet.CapProfile{}` struct, not on the core API → no cycle). `Fleet.CapProfile`
+exposes the three helpers as **delegators** (the public API consumed out of the app does
+not move):
 
 - `Fleet.CapProfile.with_resolved_disallowed_tools/1` → `DisallowedTools.with_resolved/1` —
-  fusionne (uniq, ordre préservé) `disallowedTools` existant ∪ baseline universel ∪
-  patterns du profil. **Consommé par `Fleet.Spawner.Pod.do_allocate/1`** (écriture
-  `.cap-profile.json`). Idempotent
+  merges (uniq, order preserved) existing `disallowedTools` ∪ universal baseline ∪
+  profile patterns. **Consumed by `Fleet.Spawner.Pod`** at the `:allocating` boot step
+  (`.cap-profile.json` write). Idempotent
 - `Fleet.CapProfile.git_ops_denied_patterns/1` → `DisallowedTools.git_ops_denied_patterns/1` —
-  traduit `spec.scope.git_ops_denied` en patterns claude CLI `Bash(git <entrée>:*)`
+  translates `spec.scope.git_ops_denied` into claude CLI patterns `Bash(git <entry>:*)`
 - `Fleet.CapProfile.baseline_git_ops_denied_patterns/0` → `DisallowedTools.baseline_patterns/0` —
-  patterns du baseline universel intangible ; **raise** fail-closed si baseline absent/corrompu
+  patterns of the intangible universal baseline; **raises** fail-closed if the baseline is
+  absent/corrupt
 
-Fichier + cache :
+File + cache:
 
-- `priv/canon/cap-profiles/_baseline-git-denied.yaml` — baseline universel intangible
-  (résolu via `:code.priv_dir(:fleet_cap_profile)`) ; read+parse caché en
-  `:persistent_term` (lazy, erreurs non-cachées)
+- `priv/canon/cap-profiles/_baseline-git-denied.yaml` — intangible universal baseline
+  (resolved via `:code.priv_dir(:fleet_cap_profile)`); read+parse cached in
+  `:persistent_term` (lazy, errors not cached)
 
 ## Catalog
 
-Front FS du catalogue (scan répertoire, décodage YAML, résolution d'un rôle/modop en map
-brute pré-`to_struct`) porté par le cluster `Fleet.CapProfile.Catalog` (extrait du cœur —
-concern UNIQUE : l'I/O du catalogue ; le cœur `load`/`compose` ne touche jamais le FS).
-En AMONT du cœur : dépend de `Fleet.CapProfile.Schema` (validation modop) + `Fleet.Slug`
-(confinement), aucun n'appelle Catalog → pas de cycle. **Invariant de sécurité** : un
-profil est résolu par sa prop `metadata.name`, **jamais** par le nom de fichier
-(cosmétique) — enum et load partagent la même clé ; un nom de modop est confiné sous
+FS front of the catalogue (directory scan, YAML decoding, resolution of a role/modop into a raw
+pre-`to_struct` map) carried by the `Fleet.CapProfile.Catalog` cluster (extracted from the core —
+SINGLE concern: the catalogue's I/O; the `load`/`compose` core never touches the FS).
+UPSTREAM of the core: depends on `Fleet.CapProfile.Schema` (modop validation) + `Fleet.Slug`
+(confinement), neither calls Catalog → no cycle. **Security invariant**: a
+profile is resolved by its `metadata.name` prop, **never** by the file name
+(cosmetic) — enum and load share the same key; a modop name is confined under
 `<root>/modop/` via `Fleet.Slug.confined_join/2` (fail-closed).
 
-- `Fleet.CapProfile.Catalog.read_role/1` — résout par `metadata.name`, retourne la map brute
-  (`{:ok, raw}` / `:not_found` / `:invalid_schema`). Appelé par `load/1` + `compose/2` (cœur)
-- `Fleet.CapProfile.Catalog.read_modops/1` — lit + valide (via `Schema`) les fragments modop
-  nommés, ordre préservé, confinement Slug. Appelé par `compose/2` (cœur)
-- `Fleet.CapProfile.Catalog.list/1` — noms (`metadata.name`) du catalogue, trié ;
-  `:name_collision` fail-loud sur doublon
-- `Fleet.CapProfile.Catalog.root_dir/0` — racine FS du catalogue
+- `Fleet.CapProfile.Catalog.read_role/1` — resolves by `metadata.name`, returns the raw map
+  (`{:ok, raw}` / `:not_found` / `:invalid_schema`). Called by `load/1` + `compose/2` (core)
+- `Fleet.CapProfile.Catalog.read_modops/1` — reads + validates (via `Schema`) the named modop
+  fragments, order preserved, Slug confinement. Called by `compose/2` (core)
+- `Fleet.CapProfile.Catalog.list/1` — names (`metadata.name`) of the catalogue, sorted;
+  `:name_collision` fail-loud on duplicate
+- `Fleet.CapProfile.Catalog.root_dir/0` — FS root of the catalogue
 
-`Fleet.CapProfile` ré-expose `list/1` (arités 0 et 1) et `root_dir/0` en **délégateurs**
-(l'API publique consommée **hors-app** ne bouge pas) :
+`Fleet.CapProfile` re-exposes `list/1` (arities 0 and 1) and `root_dir/0` as **delegators**
+(the public API consumed **out of the app** does not move):
 
-- `Fleet.CapProfile.list/0,1` → `Catalog.list/0,1` — **source UNIQUE** d'énumération ;
-  consommé par `Fleet.Spawner.PermanentBoot` (aligne son dir + énumère) et
-  `Fleet.Observation.Deck` (rôles du dashboard)
-- `Fleet.CapProfile.root_dir/0` → `Catalog.root_dir/0` — consommé par `Fleet.Spawner.PermanentBoot`
+- `Fleet.CapProfile.list/0,1` → `Catalog.list/0,1` — **SINGLE source** of enumeration;
+  consumed by `Fleet.Spawner.PermanentBoot` (aligns its dir + enumerates) and
+  `Fleet.Observation.Deck` (dashboard roles)
+- `Fleet.CapProfile.root_dir/0` → `Catalog.root_dir/0` — consumed by `Fleet.Spawner.PermanentBoot`
 
 ## Configuration
 
-- `:fleet_cap_profile, :root_dir` — racine FS des cap-profiles, lue par
-  `Fleet.CapProfile.Catalog.root_dir/0` (les tests la pilotent via `Application.put_env/3`).
-  Défaut = le canon BUNDLÉ `priv/canon/cap-profiles` résolu par
-  `:code.priv_dir(:fleet_cap_profile)` (résout en release comme en dev, sans env).
-  Posée par `config/runtime.exs` depuis l'env `LCARS_CAPPROFILES_ROOT` (la même
-  env source pose aussi `:fleet_spawner, :cap_profiles_dir` — path partagé canon)
-- `:fleet_cap_profile, :schema_dir` — répertoire des JSON-schemas, lu par
-  `Fleet.CapProfile.Schema` (surchargeable en test). Défaut = `priv/schema`
-  résolu par `:code.priv_dir(:fleet_cap_profile)`
+- `:fleet_cap_profile, :root_dir` — FS root of the cap-profiles, read by
+  `Fleet.CapProfile.Catalog.root_dir/0` (tests drive it via `Application.put_env/3`).
+  Default = the BUNDLED canon `priv/canon/cap-profiles` resolved via
+  `:code.priv_dir(:fleet_cap_profile)` (resolves in a release as in dev, without env).
+  Set by `config/runtime.exs` from the `LCARS_CAPPROFILES_ROOT` env (the same
+  env source also sets `:fleet_spawner, :cap_profiles_dir` — shared canon path)
+- `:fleet_cap_profile, :schema_dir` — directory of the JSON-schemas, read by
+  `Fleet.CapProfile.Schema` (overridable in test). Default = `priv/schema`
+  resolved via `:code.priv_dir(:fleet_cap_profile)`
