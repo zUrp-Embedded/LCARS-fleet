@@ -613,22 +613,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # Espace deux écritures forge d'un même step_run d'au moins UNE SECONDE. Gitea horodate les events à
-  # la seconde : deux écritures dans la même seconde tiennent une égalité de `created_at` que le feed
-  # dashboard rend dans un ordre arbitraire (« logiquement avant, affiché après », constaté sur plusieurs
-  # runs). On insère ce gap entre le commentaire HUMAIN (verdict) et l'écriture protocole suivante
-  # (route/label) → le commentaire prend un `created_at` strictement antérieur → ordre de lecture cohérent.
-  # Knob `:fleet_pilot, :step_run_write_spacing_ms` (défaut 2000 ; 0 en test → pas de sleep). Seam `:sleeper`
-  # (test). NB : bloque brièvement le consumer (run_completion sync) — assumé : un step_run est rare et bloque
-  # déjà sur le push + les écritures HTTP ; 2s achète une traça honnête (décision user).
-  defp space_writes(opts) do
-    case Application.get_env(:fleet_pilot, :step_run_write_spacing_ms, 2000) do
-      ms when is_integer(ms) and ms > 0 -> (opts[:sleeper] || (&Process.sleep/1)).(ms)
-      _ -> :ok
-    end
-
-    :ok
-  end
+  # Anti-tie « created_at » (Gitea) entre deux écritures forge — autorité PARTAGÉE avec `ProjectOnboard`
+  # (même bug, même fix, même config) : `Fleet.Pilot.WriteSpacing`, voir sa doc pour le POURQUOI complet.
+  defp space_writes(opts), do: Fleet.Pilot.WriteSpacing.gap(opts)
 
   # Verrou a lever : producteur -> l'issue (verrou pose par dispatch_issue) ; juge -> la PR (verrou
   # pose par dispatch_review). Un rework producteur (pr nil) tombe sur l'issue.

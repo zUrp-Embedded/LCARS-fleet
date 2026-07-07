@@ -1,5 +1,5 @@
 defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
-  # async: false — mute la config globale `:step_run_write_spacing_ms` (cf. Fleet.Credentials.RoleTokenTest).
+  # async: false — mute la config globale `:forge_write_spacing_ms` (cf. Fleet.Credentials.RoleTokenTest).
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepRunCompleter
@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
   end
 
   defp set_spacing(ms),
-    do: Fleet.Pilot.TestEnv.put_env_restoring(:fleet_pilot, :step_run_write_spacing_ms, ms)
+    do: Fleet.Pilot.TestEnv.put_env_restoring(:fleet_pilot, :forge_write_spacing_ms, ms)
 
   test "complete : le gap configuré est INSÉRÉ entre le comment de verdict et la route" do
     set_spacing(2000)

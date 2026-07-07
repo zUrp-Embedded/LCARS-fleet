@@ -73,14 +73,21 @@ defmodule Fleet.Pilot.ProjectOnboard do
     proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
 
+    # Gaps anti-tie (Fleet.Pilot.WriteSpacing, PARTAGÉ avec StepRunCompleter) : la séquence tourne en
+    # LOCAL (git), quasi-instantanée — sans gap, create_repo/push main/push work/ops tombent dans la
+    # MÊME seconde Gitea et le feed d'activité les affiche dans un ordre ARBITRAIRE (constaté en direct :
+    # "push main" apparaissait AVANT "repo créé"). Un gap après create_repo (le repo EST créé avant tout
+    # push) et un après push main (main EST poussé avant work/ops) suffisent aux 3 événements visibles.
     with :ok <- validate_name(name),
          :ok <- refute_existing(proj_dir, work_dir),
          {:ok, full_name} <- create_repo(name, org, opts),
+         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- clone_main(url, proj_dir),
          :ok <- Scaffold.main(proj_dir, name, opts),
          :ok <- commit(proj_dir, "chore(onboard): scaffold initial du projet"),
          :ok <- push(proj_dir, "main", false),
+         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
          :ok <- add_work_ops(proj_dir, work_dir),
          :ok <- Scaffold.work(work_dir, name, opts),
          :ok <- commit(work_dir, "chore(onboard): init work/ops"),
