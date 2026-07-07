@@ -24,8 +24,9 @@ defmodule Fleet.CapProfileTest do
   # ============================================================
 
   defp valid_profile_yaml do
+    # NB: pas de `apiVersion` — le champ a été RETIRÉ du modèle (versioning par le code, R0.8-brick3) ;
+    # le schéma v2.5 strict (additionalProperties:false) le rejette désormais comme champ inconnu.
     """
-    apiVersion: lcars/v2.5
     kind: CapabilityProfile
     metadata:
       name: test-role
@@ -121,7 +122,7 @@ defmodule Fleet.CapProfileTest do
       write_role(
         tmp_dir,
         "incomplete",
-        "apiVersion: lcars/v2.5\nkind: CapabilityProfile\nmetadata:\n  name: incomplete\n"
+        "kind: CapabilityProfile\nmetadata:\n  name: incomplete\n"
       )
 
       assert {:error, :invalid_schema} = Fleet.CapProfile.load("incomplete")
@@ -214,6 +215,28 @@ defmodule Fleet.CapProfileTest do
       assert {:error, :modop_not_found} = Fleet.CapProfile.compose("engineer", ["ghost"])
     end
 
+    test "R0-CAP-009 : modop clé top-level INCONNUE (typo) → :invalid_modop (lock fragment)", %{
+      tmp_dir: tmp_dir
+    } do
+      write_role(tmp_dir, "engineer", valid_profile_yaml())
+
+      # `spce` au lieu de `spec` : additionalProperties:false du schéma modop le refuse au fragment.
+      write_modop(tmp_dir, "typo", "spce:\n  invocation:\n    model: x\n")
+
+      assert {:error, :invalid_modop} = Fleet.CapProfile.compose("engineer", ["typo"])
+    end
+
+    test "R0-CAP-009 : modop champ NESTÉ inconnu → :invalid_schema (backstop composé, SSoT)", %{
+      tmp_dir: tmp_dir
+    } do
+      write_role(tmp_dir, "engineer", valid_profile_yaml())
+
+      # `invocaton` (typo nesté) passe le fragment permissif mais le profil COMPOSÉ strict le rejette.
+      write_modop(tmp_dir, "nested_typo", "spec:\n  invocaton:\n    model: x\n")
+
+      assert {:error, :invalid_schema} = Fleet.CapProfile.compose("engineer", ["nested_typo"])
+    end
+
     test "deterministic sha256 across 100 invocations (PoC-16)", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
 
@@ -228,14 +251,18 @@ defmodule Fleet.CapProfileTest do
 
     test "modop_set order matters (precedence)", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
-      write_modop(tmp_dir, "m1", "spec:\n  lifetime_scope: pipe\n")
-      write_modop(tmp_dir, "m2", "spec:\n  lifetime_scope: run\n")
+
+      # Champ libre VALIDE (`spec.invocation.model`) pour démontrer la précédence deep-merge : l'ancien
+      # `spec.lifetime_scope` était au MAUVAIS niveau (le vrai champ = `spec.invocation.lifetime_scope`),
+      # toléré par le schéma permissif — le v2.5 strict le rejette désormais.
+      write_modop(tmp_dir, "m1", "spec:\n  invocation:\n    model: model-a\n")
+      write_modop(tmp_dir, "m2", "spec:\n  invocation:\n    model: model-b\n")
 
       {:ok, p_a} = Fleet.CapProfile.compose("engineer", ["m1", "m2"])
       {:ok, p_b} = Fleet.CapProfile.compose("engineer", ["m2", "m1"])
 
-      assert p_a.spec["lifetime_scope"] == "run"
-      assert p_b.spec["lifetime_scope"] == "pipe"
+      assert p_a.spec["invocation"]["model"] == "model-b"
+      assert p_b.spec["invocation"]["model"] == "model-a"
       assert Fleet.CapProfile.sha256(p_a) != Fleet.CapProfile.sha256(p_b)
     end
 

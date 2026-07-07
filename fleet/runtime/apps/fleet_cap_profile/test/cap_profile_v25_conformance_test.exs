@@ -104,4 +104,26 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     bad = put_in(base, ["spec", "invocation", "lifetime_scope"], "eternal")
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
+
+  test "négatif — champ INCONNU (typo) rejeté à chaque niveau (additionalProperties:false, R0-CAP-001)",
+       %{schema: schema} do
+    base =
+      @canon_dir
+      |> Path.join("engineer.yaml")
+      |> YamlElixir.read_from_file!()
+
+    # Un champ mistypé (ex. `containmnet`) doit être REJETÉ, pas silencieusement ignoré → sinon le pod
+    # tourne avec le défaut inattendu. On couvre top-level, metadata, spec, spec.invocation.
+    for {path, label} <- [
+          {["unknown_top"], "top-level"},
+          {["metadata", "containmnet"], "metadata"},
+          {["spec", "unknown_spec_field"], "spec"},
+          {["spec", "invocation", "typo_field"], "spec.invocation"}
+        ] do
+      bad = put_in(base, path, "x")
+
+      assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad),
+             "un champ inconnu au niveau #{label} doit être rejeté (schema strict)"
+    end
+  end
 end
