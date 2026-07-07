@@ -85,6 +85,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_spawn_has_brief(root),
         check_skills_declared_present(root),
         check_events_registry_keys_aligned(root),
+        check_no_cowboy_bypass(root),
         # ── Remediation rails ──
         check_result_deadline_cancelled(root),
         check_spawn_gates_wired(root),
@@ -436,6 +437,43 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
+  # Every HTTP listener child-spec `{Plug.Cowboy, …}` must be built by the SINGLE authority
+  # `Fleet.EventRouter.Listener.cowboy_child/1` — that is where the loopback `:ip` bind is set BY
+  # CONSTRUCTION (via BindAddress). A surface that builds its own `{Plug.Cowboy, …}` elsewhere would
+  # bypass the loopback-by-default guarantee (network exposure by accident). Red if a `{Plug.Cowboy,`
+  # child-spec appears on a code line outside listener.ex. NB the pattern matches the child-spec tuple
+  # `{Plug.Cowboy,` (comma), NOT `Plug.Cowboy.Handler` (a dispatch clause) nor comments (strip_comment).
+  # ⚠ This checker file is scanned too: its own evidence/note prose must AVOID the literal `{Plug.Cowboy,`
+  # token (it would self-flag — strip_comment removes it from comments, not from string bodies).
+  defp check_no_cowboy_bypass(root) do
+    builder = "apps/fleet_event_router/lib/fleet/event_router/listener.ex"
+
+    bypass =
+      Path.wildcard(Path.join(root, "apps/*/lib/**/*.ex"))
+      |> Enum.reject(&(Path.relative_to(&1, root) == builder))
+      |> Enum.flat_map(fn file ->
+        file
+        |> grep_lines(~r/\{Plug\.Cowboy,/)
+        |> Enum.filter(fn {_ln, line} ->
+          Regex.match?(~r/\{Plug\.Cowboy,/, strip_comment(line))
+        end)
+        |> Enum.map(fn {ln, _} -> "#{Path.relative_to(file, root)}:#{ln}" end)
+      end)
+
+    %{
+      id: "listener.no_cowboy_bypass",
+      remediation: "route the listener through Fleet.EventRouter.Listener.cowboy_child/1",
+      status: if(bypass == [], do: :pass, else: :fail),
+      evidence:
+        Enum.map(
+          bypass,
+          &"#{&1} : a Plug.Cowboy listener child-spec is built outside listener.ex — loopback-by-construction bypassed"
+        ),
+      note:
+        "the Plug.Cowboy listener child-spec has a single builder (Listener.cowboy_child/1, loopback :ip by construction); no surface builds one of its own"
+    }
+  end
+
   # ── Remediation rails ─────────────────────────────────────────────
   # These rails promote invariants from a documentary closure to a closure
   # by constraint: an invariant we already violated for lack of a check becomes here an
@@ -654,7 +692,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # ── Combinators (3 families of data-driven checks) ───────────────────
-  # 8 of the 17 checks are pure instantiations of 3 families; each migrated
+  # 8 of the 18 checks are pure instantiations of 3 families; each migrated
   # check is now just a call carrying its DATA (id, files, patterns,
   # messages). The evidence messages are passed as-is to the combinator:
   # no loss of precision vs the unrolled versions they replace.
