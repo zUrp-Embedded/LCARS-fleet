@@ -56,6 +56,31 @@ defmodule Fleet.MCP.PodSocketTest do
     assert {:ok, %{"done" => true}} = content(call(path, 3, "get_work_item", %{}))
   end
 
+  test "ensure_pod_socket refuse un pod_id non-path-safe (frontière FS mcp), zéro acceptor" do
+    for bad <- ["../escape", "a/b", "..", ".", "z\0y", String.duplicate("q", 200)] do
+      assert {:error, {:unsafe_pod_id, _}} = PodSocketSupervisor.ensure_pod_socket(bad),
+             "pod_id #{inspect(bad)} devrait être refusé à la frontière socket"
+
+      assert Registry.lookup(Fleet.MCP.PodSocketRegistry, bad) == []
+    end
+  end
+
+  test "release_pod_socket sur un pod_id évadant (..) n'efface RIEN hors base (anti-escape FS)",
+       %{
+         base: base
+       } do
+    # base DOIT exister pour que la traversée `..` résolve (sinon ENOENT masque la vuln = faux vert).
+    File.mkdir_p!(base)
+    evil_pod = "../" <> Path.basename(base) <> "-evil"
+    victim = Path.join([Path.dirname(base), Path.basename(base) <> "-evil", "sock"])
+    File.mkdir_p!(Path.dirname(victim))
+    File.write!(victim, "precious")
+    on_exit(fn -> File.rm_rf(Path.dirname(victim)) end)
+
+    assert :ok = PodSocketSupervisor.release_pod_socket(evil_pod)
+    assert File.exists?(victim), "release ne doit PAS effacer un fichier hors base via `..`"
+  end
+
   test "accepteur CONCURRENT : une connexion ouverte-muette ne bloque pas les autres (anti-gel du pod)" do
     pod = uniq("concurrent")
     nonce = "live-#{System.unique_integer([:positive])}"

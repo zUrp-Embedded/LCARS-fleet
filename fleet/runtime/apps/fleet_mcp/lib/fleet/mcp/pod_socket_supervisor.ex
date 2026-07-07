@@ -37,11 +37,14 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   """
 
   use DynamicSupervisor
+  require Logger
 
   alias Fleet.MCP.PodSocketAcceptor
 
   @registry Fleet.MCP.PodSocketRegistry
   @default_base "/run/lcars/mcp"
+  # AF_UNIX `sun_path` hard limit (108 incl. the NUL terminator) → the built socket path must be ≤ 107.
+  @sun_path_max 107
 
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts \\ []) do
@@ -59,14 +62,18 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   """
   @spec ensure_pod_socket(String.t()) :: {:ok, Path.t()} | {:error, term()}
   def ensure_pod_socket(pod_id) when is_binary(pod_id) and pod_id != "" do
-    path = socket_path(pod_id)
-    spec = {PodSocketAcceptor, pod_id: pod_id, socket_path: path}
+    if safe_pod_id?(pod_id) do
+      path = socket_path(pod_id)
+      spec = {PodSocketAcceptor, pod_id: pod_id, socket_path: path}
 
-    case DynamicSupervisor.start_child(__MODULE__, spec) do
-      {:ok, _pid} -> {:ok, path}
-      # Already started (Registry `pod_id` key) → idempotent, same path.
-      {:error, {:already_started, _pid}} -> {:ok, path}
-      {:error, reason} -> {:error, reason}
+      case DynamicSupervisor.start_child(__MODULE__, spec) do
+        {:ok, _pid} -> {:ok, path}
+        # Already started (Registry `pod_id` key) → idempotent, same path.
+        {:error, {:already_started, _pid}} -> {:ok, path}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, {:unsafe_pod_id, pod_id}}
     end
   end
 
@@ -76,17 +83,25 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   """
   @spec release_pod_socket(String.t()) :: :ok
   def release_pod_socket(pod_id) when is_binary(pod_id) and pod_id != "" do
-    _ =
-      case Registry.lookup(@registry, pod_id) do
-        [{pid, _}] -> DynamicSupervisor.terminate_child(__MODULE__, pid)
-        [] -> :ok
-      end
+    if safe_pod_id?(pod_id) do
+      _ =
+        case Registry.lookup(@registry, pod_id) do
+          [{pid, _}] -> DynamicSupervisor.terminate_child(__MODULE__, pid)
+          [] -> :ok
+        end
 
-    path = socket_path(pod_id)
-    # Closing the socket frees the FD, NOT the file → we remove it explicitly.
-    _ = File.rm(path)
-    # Removes the per-pod dir if empty (best-effort, breaks nothing otherwise).
-    _ = File.rmdir(Path.dirname(path))
+      path = socket_path(pod_id)
+      # Closing the socket frees the FD, NOT the file → we remove it explicitly.
+      _ = File.rm(path)
+      # Removes the per-pod dir if empty (best-effort, breaks nothing otherwise).
+      _ = File.rmdir(Path.dirname(path))
+    else
+      # A `..`/`/` pod_id would make File.rm escape the base → refuse the FS gesture (idempotent :ok).
+      Logger.warning(
+        "PodSocketSupervisor: release_pod_socket refused unsafe pod_id #{inspect(pod_id)} — no FS action"
+      )
+    end
+
     :ok
   end
 
@@ -104,4 +119,14 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   """
   @spec base_dir() :: Path.t()
   def base_dir, do: Application.get_env(:fleet_mcp, :sock_base, @default_base)
+
+  # Boundary guard: mcp owns its FS safety (a DIFFERENT concern from the pod_id GRAMMAR, whose authority
+  # is `Fleet.Spawner.valid_pod_id?` — no cross-app dep here; mcp defends its OWN effect boundary, since
+  # ensure/release do `File.rm` on `<base>/<pod_id>/…` and a `/` or `..` would escape it). The pod_id must
+  # be ONE safe path component AND the built socket path must fit `sun_path`.
+  defp safe_pod_id?(pod_id) do
+    pod_id not in ["", ".", ".."] and
+      not String.contains?(pod_id, ["/", "..", "\0"]) and
+      byte_size(socket_path(pod_id)) <= @sun_path_max
+  end
 end
