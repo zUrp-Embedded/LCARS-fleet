@@ -46,13 +46,19 @@ TOKENS_DIR="/home/private"
 ROLES="architect consultant engineer gatekeeper qualifier reviewer vulcan"
 GROUP="fleet"
 TOKEN_NAME="lcars-fleet"
-SCOPES="write:repository,write:issue,write:user"
+SCOPES="write:repository,write:issue"
 # Le compte SYSTÈME crée les repos d'org (create_project → onboard) : POST /orgs/<org>/repos exige
 # write:organization EN PLUS (vérifié live 2026-07-06 : sans lui, token valide mais 403 à la création ;
 # avec, 201). Les rôles ne créent JAMAIS de repo d'org → ils restent au scope minimal (least-privilege :
 # un token de rôle détourné ne doit pas pouvoir gérer l'org). Le nom du compte système est un fait connu.
+# `read:user` est réservé au SYSTÈME (audit A4 2026-07-07) : SEUL `forge_bot_login` (GET /user, résolution
+# du login bot pour vérifier les marqueurs bot-authored route/step_run/result) en a besoin — et lui SEUL,
+# car les tokens de RÔLE ne servent JAMAIS à ce GET (les rôles écrivent via `as_role`, posts/reviews/merge ;
+# les LECTURES forge — dont forge_bot_login — passent TOUJOURS par le token système, jamais un rôle).
+# Un rôle avec `write:user` (ancien scope) pouvait éditer son propre profil compte — capacité inutile à
+# son job, gardée seulement parce que l'ancienne sonde token_valid l'exigeait (cf. token_valid ci-dessous).
 SYSTEM_ACCOUNT="lcars-system"
-SYSTEM_SCOPES="$SCOPES,write:organization"
+SYSTEM_SCOPES="$SCOPES,write:organization,read:user"
 PASSWORDS_FILE=""
 CHECK_ONLY=0
 # Tokens hors-rôle où le compte ≠ le nom de fichier (le mapping est une DONNÉE, pas un cas spécial) :
@@ -95,10 +101,17 @@ if [[ -n "$PASSWORDS_FILE" && ! -r "$PASSWORDS_FILE" ]]; then
   exit 1
 fi
 
-# Sonde de validité d'un token : GET /user AVEC ce token. 200 = valide. (Les tokens mintés ici
-# portent write:user ⊃ read:user → /user répond ; un 401/403 = invalide/scopé-ailleurs → re-pose.)
+# Sonde de validité d'un token : GET /user AVEC ce token. Fix A4 (2026-07-07, faux-négatif débusqué) :
+# un token scopé étroit (rôle, SANS read:user) rend 403 sur /user — VIVANT, juste hors-scope pour CET
+# endpoint précis. Seul 401 = mort/révoqué (Gitea authentifie le token puis refuse le SCOPE en 403,
+# distinct du 401 « le token n'existe pas / a expiré »). Vérifié empiriquement 2026-07-07 : token
+# minimal (write:repository,write:issue) → GET /user = 403 ; token read:user → 200 ; token révoqué →
+# 401. Sonde correcte : {200,403} = vivant, 401 (ou tout le reste : 500/timeout/connexion) = invalide/
+# indéterminé → re-pose (fail-safe : on ne suppose jamais valide sur un doute).
 token_valid() { # $1=token
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $1" "$FORGE/api/v1/user")" == "200" ]]
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $1" "$FORGE/api/v1/user")"
+  [[ "$code" == "200" || "$code" == "403" ]]
 }
 
 # Auth d'ACTION sur le compte $1 : basic auth (password du rôle). Écrit les args curl dans le tableau
