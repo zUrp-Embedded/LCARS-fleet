@@ -1,93 +1,93 @@
 defmodule Fleet.Credentials.Shell do
   @moduledoc """
-  Exécution bornée PAR CONSTRUCTION d'une commande externe (git, et plus généralement tout binaire
-  lent/réseau). La frontière qui rend INEXPRIMABLE un `System.cmd("git", …)` non borné
-  sur le chemin PROJECT : un appel externe a TOUJOURS une deadline, et la deadline tue le process
-  enfant — ET tous ses descendants — si elle expire.
+  Execution bounded BY CONSTRUCTION of an external command (git, and more generally any
+  slow/network binary). The boundary that makes an unbounded `System.cmd("git", …)` UNREPRESENTABLE
+  on the PROJECT path: an external call ALWAYS has a deadline, and the deadline kills the child
+  process — AND all its descendants — if it expires.
 
-  ## Pourquoi un wrapper, pas une discipline par call-site
+  ## Why a wrapper, not a per-call-site discipline
 
-  `System.cmd/3` n'a **aucun timeout natif**. Un git réseau hung (DNS lent, TLS qui pend, packfile
-  interrompu) — ou pire, un git qui ouvre un PROMPT interactif faute de credential (sans TTY → pend à
-  l'infini) — bloque le process appelant. Sur le chemin PROJECT ce process est un GenServer (le
-  `Fleet.Spawner.Pod` qui clone, le `Fleet.Pilot.Poller` qui merge) : figé, il ne traite plus aucun
-  message → **pod zombie / issue wedgé**. Ce module extrait le patron borné en helper réutilisable
-  pour que la borne vive dans le TYPE de l'appel, pas dans la vigilance de chaque site.
+  `System.cmd/3` has **no native timeout**. A hung network git (slow DNS, TLS that hangs, an
+  interrupted packfile) — or worse, a git that opens an interactive PROMPT for lack of a credential
+  (no TTY → hangs forever) — blocks the calling process. On the PROJECT path that process is a
+  GenServer (the `Fleet.Spawner.Pod` that clones, the `Fleet.Pilot.Poller` that merges): frozen, it
+  no longer handles any message → **zombie pod / wedged issue**. This module extracts the bounded
+  pattern into a reusable helper so that the bound lives in the TYPE of the call, not in the vigilance
+  of each site.
 
-  ## Deux propriétés DURES de la borne
+  ## Two HARD properties of the bound
 
-  ### 1. La deadline tue le process-GROUP entier, pas juste le top-level
+  ### 1. The deadline kills the whole process-GROUP, not just the top-level
 
-  Un `git` réseau ne s'exécute pas seul : il fork des helpers de transport (`git-remote-https`),
-  des credential helpers, des filtres. Tuer le SEUL process top-level (`kill -KILL <os_pid>`) laisse
-  ces descendants vivants après la deadline — ils continuent de consommer ressources/credentials et
-  l'extraheader d'auth forge reste dans leur environ. On lance donc la commande dans sa **propre
-  session/process-group** (`setsid`) et, à la deadline, on tue le **GROUPE entier**
-  (`kill -KILL -<pgid>`) : le top-level ET toute sa descendance meurent ensemble. Vérifié au sol
-  (2026-06-24) : un `bash -lc "sleep 30 & wait"` qui détache un descendant — `kill -KILL <top>` seul
-  laisse le `sleep` ZOMBIE, alors que `kill -KILL -<pgid>` l'emporte avec.
+  A network `git` does not run alone: it forks transport helpers (`git-remote-https`), credential
+  helpers, filters. Killing ONLY the top-level process (`kill -KILL <os_pid>`) leaves these
+  descendants alive after the deadline — they keep consuming resources/credentials and the forge auth
+  extraheader stays in their environment. So we run the command in its **own session/process-group**
+  (`setsid`) and, at the deadline, we kill the **whole GROUP** (`kill -KILL -<pgid>`): the top-level
+  AND its entire descent die together. Field-verified (2026-06-24): a `bash -lc "sleep 30 & wait"`
+  that detaches a descendant — `kill -KILL <top>` alone leaves the `sleep` a ZOMBIE, whereas
+  `kill -KILL -<pgid>` takes it with it.
 
-  ### 2. La deadline est un MUR (wall-clock absolu), pas un idle-gap réarmable
+  ### 2. The deadline is a WALL (absolute wall-clock), not a re-armable idle-gap
 
-  Un git réseau-hung ne pend pas forcément en silence : il peut GOUTTER de l'output (un octet toutes
-  les `timeout-1` ms — keepalive, progress qui traîne). Une boucle `receive … after timeout_ms` qui
-  se RÉARME à chaque `{:data}` ne tuerait JAMAIS ce git : chaque octet repousse l'échéance. C'est
-  pourtant son scénario cible. On calcule donc une **deadline absolue** (`monotonic_now + timeout_ms`)
-  UNE fois au démarrage ; la boucle `receive` n'attend que le temps RESTANT (`deadline - now`),
-  jamais un `after timeout_ms` ré-armé. Le wall-clock total est borné quelle que soit la cadence de
-  l'output. Vérifié au sol : un process qui émet en continu (drip) est tué à la deadline mur.
+  A hung-network git does not necessarily hang in silence: it can DRIP output (one byte every
+  `timeout-1` ms — keepalive, a progress line dragging on). A `receive … after timeout_ms` loop that
+  RE-ARMS on each `{:data}` would NEVER kill this git: each byte pushes the deadline back. Yet that is
+  its target scenario. So we compute an **absolute deadline** (`monotonic_now + timeout_ms`) ONCE at
+  startup; the `receive` loop waits only for the REMAINING time (`deadline - now`), never a re-armed
+  `after timeout_ms`. The total wall-clock is bounded whatever the cadence of the output.
+  Field-verified: a process that emits continuously (drip) is killed at the wall deadline.
 
-  ## Mécanisme du process-group (setsid + découverte du PGID)
+  ## The process-group mechanism (setsid + PGID discovery)
 
-  `setsid` place la commande dans une nouvelle session ⇒ elle devient leader de son propre
-  process-group (`PGID == son PID`), distinct de celui du BEAM. On lance `setsid -w <cmd> <args>` :
-  l'option `-w` garde le wrapper `setsid` VIVANT comme parent (sinon il fork-and-die et l'`os_pid`
-  tenu par `Port.open` pointe sur un wrapper déjà mort, sans lien vers le vrai groupe). L'`os_pid`
-  du port est alors le PID de `setsid` ; le vrai process est son UNIQUE enfant, dont on lit le PGID
-  via `/proc/<child>/stat` (champ `pgrp`, Linux — cible documentée). La découverte du PGID se fait AU
-  MOMENT du timeout (pas juste après l'open : `setsid -w` n'a pas forcément encore forké le process
-  réel à cet instant → la découverte rendrait `nil`). Au timeout : `kill -s KILL -- -<child_pgid>`
-  (groupe entier) puis fermeture du port et `kill` du wrapper `setsid`.
+  `setsid` places the command in a new session ⇒ it becomes the leader of its own process-group
+  (`PGID == its PID`), distinct from the BEAM's. We run `setsid -w <cmd> <args>`: the `-w` option
+  keeps the `setsid` wrapper ALIVE as parent (otherwise it fork-and-dies and the `os_pid` held by
+  `Port.open` points at an already-dead wrapper, with no link to the real group). The port's `os_pid`
+  is then `setsid`'s PID; the real process is its SOLE child, whose PGID we read via
+  `/proc/<child>/stat` (`pgrp` field, Linux — documented target). PGID discovery is done AT THE MOMENT
+  of the timeout (not right after the open: at that instant `setsid -w` has not necessarily forked the
+  real process yet → discovery would return `nil`). At the timeout: `kill -s KILL -- -<child_pgid>`
+  (whole group) then closing the port and `kill` of the `setsid` wrapper.
 
-  ⚠ Le séparateur `--` du `kill` est LOAD-BEARING : `/usr/bin/kill` (util-linux) lit sinon le
-  `-<pgid>` (commence par `-`) comme une OPTION et rend rc 0 SANS tuer le groupe (vérifié au sol
-  2026-06-24). On passe donc le signal via `-s KILL` puis `--` puis la cible négative.
+  ⚠ The `--` separator of `kill` is LOAD-BEARING: otherwise `/usr/bin/kill` (util-linux) reads the
+  `-<pgid>` (starts with `-`) as an OPTION and returns rc 0 WITHOUT killing the group (field-verified
+  2026-06-24). So we pass the signal via `-s KILL` then `--` then the negative target.
 
-  Si la découverte du groupe échoue (race rare, /proc indisponible), on retombe sur
-  `kill -KILL <os_pid>` du wrapper : dégradé honnête (le wrapper meurt, un descendant détaché PEUT
-  survivre) — mais c'est le cas-limite, pas le chemin nominal, et il est journalisé implicitement par
-  l'absence de groupe.
+  If group discovery fails (rare race, /proc unavailable), we fall back to the wrapper's
+  `kill -KILL <os_pid>`: an honest degradation (the wrapper dies, a detached descendant CAN survive) —
+  but this is the edge case, not the nominal path, and it is implicitly logged by the absence of a
+  group.
 
-  ## Placement (cycle compile)
+  ## Placement (compile cycle)
 
-  `fleet_project_bootstrap` ne peut PAS dépendre de `fleet_workflow` ni `fleet_spawner` (cycle
-  compile, cf. CLAUDE.md). `fleet_credentials` est SOUS les trois (dépendance commune) — c'est déjà le
-  propriétaire de `Fleet.Credentials.ForgeAuth.git_env/0` pour la même raison. Le wrapper vit donc ici,
-  atteignable par bootstrap, pipeline ET pilot sans introduire de cycle.
+  `fleet_project_bootstrap` CANNOT depend on `fleet_workflow` nor `fleet_spawner` (compile cycle, cf.
+  CLAUDE.md). `fleet_credentials` is BELOW all three (a common dependency) — it is already the owner
+  of `Fleet.Credentials.ForgeAuth.git_env/0` for the same reason. So the wrapper lives here, reachable
+  by bootstrap, workflow AND pilot without introducing a cycle.
 
-  ## Env par défaut
+  ## Default env
 
-  Sans `:env`, l'env git système-side est injecté (`ForgeAuth.git_env/0` → `GIT_TERMINAL_PROMPT=0` +
-  extraheader d'auth si configuré). Un caller non-git passe `env: [...]` (ou `env: []`).
+  Without `:env`, the system-side git env is injected (`ForgeAuth.git_env/0` → `GIT_TERMINAL_PROMPT=0`
+  + auth extraheader if configured). A non-git caller passes `env: [...]` (or `env: []`).
 
-  ## Refus d'éclatement (jugé C4 2026-07-05) — `git_safe_config_args/0` NON extrait
+  ## Split refused (audit judgment, 2026-07-05) — `git_safe_config_args/0` NOT extracted
 
-  Le vocab de durcissement config (`@git_safe_config_args`) ne partage aucun helper avec la
-  machinerie d'exécution — bundle identifié à l'audit. La coupe est REFUSÉE : les deux sont les
-  deux faces de LA MÊME frontière « invoquer git système-side sans exécuter le code du pod » —
-  la borne (deadline + kill-group + anti-prompt) ferme le vecteur TEMPS/interaction, le `-c …`
-  ferme le vecteur CONFIG, et les consommateurs (`Fleet.Workflow.Git`/`DeliverableGate`) composent
-  TOUJOURS les deux ensemble sur `git/2`. Un module à une fonction séparerait l'autorité de cette
-  frontière en deux fichiers sans découpler quoi que ce soit (l'API resterait ici en defdelegate).
-  La co-localisation est le statu quo voulu.
+  The config-hardening vocabulary (`@git_safe_config_args`) shares no helper with the execution
+  machinery — a bundle flagged in the audit. The cut is REFUSED: the two are the two faces of THE SAME
+  boundary "invoke git system-side without executing the pod's code" — the bound (deadline + kill-group
+  + anti-prompt) closes the TIME/interaction vector, the `-c …` closes the CONFIG vector, and the
+  consumers (`Fleet.Workflow.Git`/`DeliverableGate`) ALWAYS compose the two together on `git/2`. A
+  one-function module would split the authority of this boundary across two files without decoupling
+  anything (the API would remain here as a defdelegate). Co-location is the intended status quo.
 
-  ## Résultat TYPÉ (non-ignorable)
+  ## TYPED result (non-ignorable)
 
-      {:ok, {output, exit_code}}        # le process a rendu dans le délai (exit_code peut être ≠ 0)
-      {:error, {:timeout, timeout_ms}}  # délai dépassé → process-GROUP OS TUÉ (SIGKILL) + port fermé
-      {:error, {:exit, reason}}         # binaire introuvable / impossible à lancer ({:enoent, cmd})
+      {:ok, {output, exit_code}}        # the process returned within the deadline (exit_code may be ≠ 0)
+      {:error, {:timeout, timeout_ms}}  # deadline exceeded → OS process-GROUP KILLED (SIGKILL) + port closed
+      {:error, {:exit, reason}}         # binary not found / impossible to launch ({:enoent, cmd})
 
-  L'appelant DOIT matcher : un `{:error, {:timeout, _}}` n'est pas un succès silencieux.
+  The caller MUST match: an `{:error, {:timeout, _}}` is not a silent success.
   """
 
   require Logger
@@ -99,25 +99,26 @@ defmodule Fleet.Credentials.Shell do
           | {:error, {:timeout, pos_integer()}}
           | {:error, {:exit, term()}}
 
-  # Neutralisation des MÉCANISMES git pilotables depuis le contenu d'un repo, à composer (`-c …`)
-  # par TOUTE op git système-side (lancée par le runtime Elixir, hors bwrap) sur un workspace co-écrit
-  # par un pod adversaire. SOURCE UNIQUE : un site qui oublie un de ces tournevis rouvre le trou ;
-  # cette liste est LA définition de « git système-side neutralisé », tous les sites la composent
-  # (ne JAMAIS recopier la liste ailleurs). Chaque flag rend INERTE un vecteur d'exécution de code que
-  # le pod pourrait armer dans le `.git/config`, le `.gitattributes` ou un includeIf :
+  # Neutralization of the git MECHANISMS steerable from a repo's content, to compose (`-c …`)
+  # into EVERY system-side git op (launched by the Elixir runtime, outside bwrap) on a workspace
+  # co-written by an adversarial pod. SINGLE SOURCE: a site that forgets one of these knobs reopens
+  # the hole; this list is THE definition of "system-side git neutralized", every site composes it
+  # (NEVER copy the list elsewhere). Each flag renders INERT a code-execution vector that the pod
+  # could arm in the `.git/config`, the `.gitattributes` or an includeIf:
   #
-  #   * `core.hooksPath=/dev/null` — aucun hook (`pre-commit`/`pre-push`/… posé dans `.git/hooks/`,
-  #     ou un `core.hooksPath` pointé ailleurs par le pod) ne s'exécute côté monde.
-  #   * `core.fsmonitor=` — désarme un programme fsmonitor (lancé par git au scan de l'index).
-  #   * `core.sshCommand=` — désarme une commande ssh custom (lancée par fetch/push via ssh).
-  #   * `diff.external=` — désarme le driver de diff externe (lancé par `git log -p`/`diff`/`show`,
-  #     c.-à-d. par les ops de la gate de livrable qui scannent le diff `base..HEAD`).
-  #   * `core.attributesFile=/dev/null` — neutralise le fichier d'attributs GLOBAL (un `filter=`/`diff=`
-  #     déclaré hors-repo). NB : le `.gitattributes` IN-TREE n'est PAS désactivable par `-c` (git n'a
-  #     aucun switch « disable all filters ») ; un `filter.<nom>.clean` in-tree à nom arbitraire reste
-  #     exécutable par `git add`. Le seul verrou réel du vecteur IN-TREE est donc CÔTÉ CONTENU (refuser
-  #     fail-closed le payload qui écrirait `.git/**` ou un `.gitattributes` armant `filter=`/`diff=`,
-  #     fait par l'appelant qui place le contenu), pas ce flag. Ce flag ferme le vecteur config GLOBALE.
+  #   * `core.hooksPath=/dev/null` — no hook (`pre-commit`/`pre-push`/… placed in `.git/hooks/`,
+  #     or a `core.hooksPath` pointed elsewhere by the pod) executes on the world side.
+  #   * `core.fsmonitor=` — disarms an fsmonitor program (launched by git when scanning the index).
+  #   * `core.sshCommand=` — disarms a custom ssh command (launched by fetch/push over ssh).
+  #   * `diff.external=` — disarms the external diff driver (launched by `git log -p`/`diff`/`show`,
+  #     i.e. by the deliverable-gate ops that scan the `base..HEAD` diff).
+  #   * `core.attributesFile=/dev/null` — neutralizes the GLOBAL attributes file (a `filter=`/`diff=`
+  #     declared out-of-repo). NB: the IN-TREE `.gitattributes` is NOT disableable via `-c` (git has
+  #     no "disable all filters" switch); a `filter.<name>.clean` in-tree with an arbitrary name stays
+  #     executable by `git add`. The only real lock on the IN-TREE vector is therefore CONTENT-SIDE
+  #     (fail-closed refusal of the payload that would write `.git/**` or a `.gitattributes` arming
+  #     `filter=`/`diff=`, done by the caller that places the content), not this flag. This flag closes
+  #     the GLOBAL-config vector.
   @git_safe_config_args [
     "-c",
     "core.hooksPath=/dev/null",
@@ -132,26 +133,26 @@ defmodule Fleet.Credentials.Shell do
   ]
 
   @doc """
-  Arguments `-c <clé>=<val>` à préfixer à TOUTE invocation `git` système-side sur un workspace
-  co-écrit par un pod. Source UNIQUE de la neutralisation config (hooks, fsmonitor, sshCommand,
-  diff.external, attributesFile global) ; les sites la composent au lieu de recopier la liste.
-  Voir le commentaire de `@git_safe_config_args` pour le POURQUOI de chaque flag et la limite
-  IN-TREE (les filtres `.gitattributes` du repo se ferment côté CONTENU, pas par `-c`).
+  `-c <key>=<val>` arguments to prefix to EVERY system-side `git` invocation on a workspace
+  co-written by a pod. SINGLE source of the config neutralization (hooks, fsmonitor, sshCommand,
+  diff.external, global attributesFile); the sites compose it instead of recopying the list.
+  See the comment on `@git_safe_config_args` for the WHY of each flag and the IN-TREE limit
+  (the repo's `.gitattributes` filters are closed CONTENT-side, not via `-c`).
   """
   @spec git_safe_config_args() :: [String.t()]
   def git_safe_config_args, do: @git_safe_config_args
 
   @doc """
-  Exécute `git <args>` borné. `output` = stdout+stderr fusionnés (`stderr_to_stdout: true`, comme tous
-  les sites git du codebase). Options :
+  Runs `git <args>` bounded. `output` = stdout+stderr merged (`stderr_to_stdout: true`, like every git
+  site in the codebase). Options:
 
-    * `:timeout_ms` — deadline MUR (défaut #{@default_timeout_ms} ms). Au-delà, le process-GROUP git OS
-      est tué (`SIGKILL` au groupe + fermeture du port) et on rend `{:error, {:timeout, timeout_ms}}`.
-    * `:cd` — répertoire d'exécution.
-    * `:env` — env du process enfant. **Défaut** : `Fleet.Credentials.ForgeAuth.git_env/0` (porte
-      `GIT_TERMINAL_PROMPT=0` → un git sans credential ÉCHOUE au lieu de prompter/pendre). Passer
-      `env: [...]` pour surcharger, `env: []` pour un env bare (mais on perd la borne anti-prompt —
-      à éviter sur du git).
+    * `:timeout_ms` — WALL deadline (default #{@default_timeout_ms} ms). Beyond it, the git OS
+      process-GROUP is killed (`SIGKILL` to the group + port close) and we return `{:error, {:timeout, timeout_ms}}`.
+    * `:cd` — execution directory.
+    * `:env` — the child process's env. **Default**: `Fleet.Credentials.ForgeAuth.git_env/0` (carries
+      `GIT_TERMINAL_PROMPT=0` → a git with no credential FAILS instead of prompting/hanging). Pass
+      `env: [...]` to override, `env: []` for a bare env (but then the anti-prompt bound is lost —
+      avoid on git).
   """
   @spec git([String.t()], keyword()) :: result()
   def git(args, opts \\ []) when is_list(args) do
@@ -160,15 +161,15 @@ defmodule Fleet.Credentials.Shell do
   end
 
   @doc """
-  Exécute `cmd <args>` borné — primitive générique sous `git/2`. Mêmes options que `git/2`, mais
-  **sans** env par défaut (`env: []` si absent) : `git/2` est le seul à injecter `git_env/0`.
+  Runs `cmd <args>` bounded — the generic primitive under `git/2`. Same options as `git/2`, but
+  **without** a default env (`env: []` if absent): `git/2` is the only one that injects `git_env/0`.
 
-  ## La borne TUE le process-GROUP OS (pas juste le BEAM, pas juste le top-level)
+  ## The bound KILLS the OS process-GROUP (not just the BEAM, not just the top-level)
 
-  Lancé via `setsid` (nouveau process-group) puis `Port.open` pour tenir l'`os_pid`. À la deadline
-  MUR (deadline absolue, pas idle-gap réarmable), on tue le **GROUPE entier** (`SIGKILL` à `-<pgid>`)
-  ET on ferme le port → la commande et TOUS ses descendants (helpers de transport git, credential
-  helpers, filtres) sont réellement morts. Pas de chemin pour appeler ce module sans deadline.
+  Launched via `setsid` (new process-group) then `Port.open` to hold the `os_pid`. At the WALL
+  deadline (absolute deadline, not a re-armable idle-gap), we kill the **whole GROUP** (`SIGKILL` to
+  `-<pgid>`) AND close the port → the command and ALL its descendants (git transport helpers,
+  credential helpers, filters) are really dead. There is no path to call this module without a deadline.
   """
   @spec run(String.t(), [String.t()], keyword()) :: result()
   def run(cmd, args, opts \\ []) when is_binary(cmd) and is_list(args) do
@@ -179,15 +180,15 @@ defmodule Fleet.Credentials.Shell do
         {:error, {:exit, {:enoent, cmd}}}
 
       {_exe, nil} ->
-        # `setsid` est la condition du process-group tué-par-construction (Linux : toujours présent
-        # via util-linux). Absent = on ne peut PAS garantir l'invariant « groupe entier tué » →
-        # fail-closed plutôt qu'un faux sentiment de sécurité avec un `System.cmd` nu.
+        # `setsid` is the precondition of the killed-by-construction process-group (Linux: always
+        # present via util-linux). Absent = we CANNOT guarantee the "whole group killed" invariant →
+        # fail-closed rather than a false sense of security with a bare `System.cmd`.
         {:error, {:exit, {:enoent, "setsid"}}}
 
       {exe, setsid} ->
-        # On lance `setsid -w <exe> <args>` : `-w` garde le wrapper VIVANT (parent du vrai process),
-        # sinon il fork-and-die et l'os_pid du port ne pointe sur rien d'utile. L'exécutable du port
-        # est donc `setsid` ; ses args = `["-w", exe | args]`.
+        # We run `setsid -w <exe> <args>`: `-w` keeps the wrapper ALIVE (parent of the real process),
+        # otherwise it fork-and-dies and the port's os_pid points at nothing useful. The port's
+        # executable is therefore `setsid`; its args = `["-w", exe | args]`.
         port_opts =
           [
             :binary,
@@ -201,16 +202,17 @@ defmodule Fleet.Credentials.Shell do
 
         port = Port.open({:spawn_executable, setsid}, port_opts)
 
-        # `Port.info(:os_pid)` rend `nil` si le port est DÉJÀ fermé (commande ultra-rapide finie entre
-        # open et info) → pas de groupe à tuer (le process est déjà parti) ; les messages {:data}/
-        # {:exit_status} sont quand même dans la mailbox et `collect` les draine. nil = no-kill.
+        # `Port.info(:os_pid)` returns `nil` if the port is ALREADY closed (an ultra-fast command
+        # finished between open and info) → no group to kill (the process is already gone); the
+        # {:data}/{:exit_status} messages are still in the mailbox and `collect` drains them. nil = no-kill.
         os_pid = os_pid(port)
 
-        # Deadline ABSOLUE calculée UNE fois : la boucle `receive` n'attend que le temps RESTANT, donc
-        # un output qui goutte ne repousse jamais l'échéance (mur, pas idle-gap). Le PGID du groupe à
-        # tuer est découvert au MOMENT du timeout (dans `terminate`), pas ici : juste après `Port.open`,
-        # `setsid -w` n'a pas forcément encore forké le process réel (race) → la découverte immédiate
-        # rendrait `nil`. À la deadline, le process tourne depuis `timeout_ms` → il est là, fork inclus.
+        # ABSOLUTE deadline computed ONCE: the `receive` loop waits only for the REMAINING time, so a
+        # dripping output never pushes the deadline back (wall, not idle-gap). The PGID of the group to
+        # kill is discovered AT THE MOMENT of the timeout (in `terminate`), not here: right after
+        # `Port.open`, `setsid -w` has not necessarily forked the real process yet (race) → immediate
+        # discovery would return `nil`. By the deadline, the process has run for `timeout_ms` → it is
+        # there, fork included.
         deadline = System.monotonic_time(:millisecond) + timeout_ms
         collect(port, os_pid, timeout_ms, deadline, [])
     end
@@ -223,12 +225,12 @@ defmodule Fleet.Credentials.Shell do
     end
   end
 
-  # PGID du process-group à tuer = celui de l'UNIQUE enfant de `setsid` (le vrai process). `setsid -w`
-  # garde le wrapper vivant → le lien PPID est stable le temps de la découverte. On scanne `/proc` pour
-  # le process dont le PPID = l'os_pid du wrapper, puis on lit son champ `pgrp` (champ 5 de
-  # `/proc/<pid>/stat`, après le `state` qui suit le `(comm)` — comm peut contenir espaces/parenthèses,
-  # d'où le découpage APRÈS le dernier `)`). Linux uniquement (cible documentée) ; toute anomalie → nil
-  # (le timeout retombe sur `kill <os_pid>`, dégradé honnête).
+  # PGID of the process-group to kill = that of the SOLE child of `setsid` (the real process). `setsid
+  # -w` keeps the wrapper alive → the PPID link is stable for the duration of the discovery. We scan
+  # `/proc` for the process whose PPID = the wrapper's os_pid, then read its `pgrp` field (field 5 of
+  # `/proc/<pid>/stat`, after the `state` that follows the `(comm)` — comm may contain spaces/
+  # parentheses, hence the split AFTER the last `)`). Linux only (documented target); any anomaly → nil
+  # (the timeout falls back to `kill <os_pid>`, an honest degradation).
   defp child_pgid(nil), do: nil
 
   defp child_pgid(parent_os_pid) do
@@ -251,10 +253,10 @@ defmodule Fleet.Credentials.Shell do
 
   defp pid_dir?(entry), do: Regex.match?(~r/^\d+$/, entry)
 
-  # PPID = champ 4 de /proc/<pid>/stat ; pgrp = champ 5. Le format est :
+  # PPID = field 4 of /proc/<pid>/stat; pgrp = field 5. The format is:
   #   pid (comm) state ppid pgrp ...
-  # `comm` peut contenir des espaces et des parenthèses → on coupe APRÈS le DERNIER `)` puis on
-  # split sur l'espace : [state, ppid, pgrp, ...].
+  # `comm` may contain spaces and parentheses → we cut AFTER the LAST `)` then
+  # split on the space: [state, ppid, pgrp, ...].
   defp ppid_of(pid), do: stat_field(pid, 1)
 
   defp read_pgrp(pid) do
@@ -285,10 +287,10 @@ defmodule Fleet.Credentials.Shell do
     end
   end
 
-  # Boucle de réception bornée par DEADLINE MUR : accumule la sortie, rend `{:ok, {output, exit_code}}`
-  # à l'exit ; à la deadline (temps RESTANT épuisé), tue le process-GROUP et ferme le port → `{:error,
-  # {:timeout, timeout_ms}}`. La valeur du `after` est `deadline - now` (jamais ré-armée à `timeout_ms`) :
-  # un output qui goutte fait progresser la boucle mais NE repousse PAS l'échéance.
+  # Receive loop bounded by a WALL DEADLINE: accumulates the output, returns `{:ok, {output, exit_code}}`
+  # on exit; at the deadline (REMAINING time exhausted), kills the process-GROUP and closes the port →
+  # `{:error, {:timeout, timeout_ms}}`. The `after` value is `deadline - now` (never re-armed to
+  # `timeout_ms`): a dripping output advances the loop but does NOT push the deadline back.
   defp collect(port, os_pid, timeout_ms, deadline, acc) do
     remaining = max(deadline - System.monotonic_time(:millisecond), 0)
 
@@ -305,21 +307,21 @@ defmodule Fleet.Credentials.Shell do
     end
   end
 
-  # Tuer à la deadline. Le PGID du groupe à tuer = celui du process RÉEL (l'enfant de `setsid -w`),
-  # découvert MAINTENANT : le process tourne depuis `timeout_ms` (fork inclus) → la découverte est
-  # fiable, contrairement à juste après l'open où `setsid -w` n'a pas forcément encore forké. Cible
-  # PRIVILÉGIÉE = le process-GROUP entier : le top-level ET tous ses descendants (helpers de transport
-  # git, filtres) meurent ensemble. Fallback si le PGID n'a pas pu être découvert (process déjà parti /
-  # /proc indisponible) : on tue le wrapper `setsid` (dégradé honnête). `kill` best-effort (le process a
-  # pu mourir entre-temps). Puis fermeture du port. nil = rien à tuer.
+  # Kill at the deadline. The PGID of the group to kill = that of the REAL process (the child of
+  # `setsid -w`), discovered NOW: the process has run for `timeout_ms` (fork included) → the discovery
+  # is reliable, unlike right after the open where `setsid -w` has not necessarily forked yet. PREFERRED
+  # target = the whole process-GROUP: the top-level AND all its descendants (git transport helpers,
+  # filters) die together. Fallback if the PGID could not be discovered (process already gone / /proc
+  # unavailable): we kill the `setsid` wrapper (an honest degradation). `kill` is best-effort (the
+  # process may have died in the meantime). Then port close. nil = nothing to kill.
   defp terminate(port, os_pid) do
     _ =
       case child_pgid(os_pid) do
         pgid when is_integer(pgid) ->
           _ = kill_group(pgid)
 
-          # Le wrapper setsid lui-même est leader d'une AUTRE session (celle du BEAM) → pas dans le
-          # groupe tué ; on l'achève séparément pour ne pas laisser le port à demi-vivant.
+          # The setsid wrapper itself is the leader of ANOTHER session (the BEAM's) → not in the
+          # killed group; we finish it off separately so as not to leave the port half-alive.
           kill_pid(os_pid)
 
         nil ->
@@ -329,17 +331,18 @@ defmodule Fleet.Credentials.Shell do
     safe_close(port)
   end
 
-  # SIGKILL au process-GROUP entier (PID négatif = groupe en sémantique `kill(2)`). On passe le signal
-  # via `-s KILL` et on SÉPARE l'argument-cible par `--` : sinon `/usr/bin/kill` (util-linux) lit le
-  # `-<pgid>` (commence par `-`) comme une OPTION et NON comme une cible → il rend rc 0 SANS tuer le
-  # groupe (vérifié au sol 2026-06-24 : `kill -KILL -<pgid>` laisse le descendant vivant ; `kill -s KILL
-  # -- -<pgid>` le tue). Le `--` ferme le parsing d'options → le `-<pgid>` est interprété comme cible.
+  # SIGKILL to the whole process-GROUP (negative PID = the group in `kill(2)` semantics). We pass the
+  # signal via `-s KILL` and SEPARATE the target argument with `--`: otherwise `/usr/bin/kill`
+  # (util-linux) reads the `-<pgid>` (starts with `-`) as an OPTION and NOT as a target → it returns
+  # rc 0 WITHOUT killing the group (field-verified 2026-06-24: `kill -KILL -<pgid>` leaves the
+  # descendant alive; `kill -s KILL -- -<pgid>` kills it). The `--` closes option parsing → the
+  # `-<pgid>` is interpreted as the target.
   defp kill_group(pgid) do
     System.cmd("kill", ["-s", "KILL", "--", "-#{pgid}"], stderr_to_stdout: true)
   end
 
-  # SIGKILL à un PID unique (le wrapper setsid). `--` pour rester homogène (un PID positif n'est pas
-  # ambigu, mais on garde la même forme défensive).
+  # SIGKILL to a single PID (the setsid wrapper). `--` to stay homogeneous (a positive PID is not
+  # ambiguous, but we keep the same defensive form).
   defp kill_pid(nil), do: :ok
 
   defp kill_pid(pid) do
@@ -352,7 +355,7 @@ defmodule Fleet.Credentials.Shell do
     ArgumentError -> :ok
   end
 
-  # `Port.open env:` veut des charlists ({~c"K", ~c"V"}) ; on accepte les {String, String} du codebase.
+  # `Port.open env:` wants charlists ({~c"K", ~c"V"}); we accept the {String, String} of the codebase.
   defp to_charlist_env(env) do
     Enum.map(env, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
   end
