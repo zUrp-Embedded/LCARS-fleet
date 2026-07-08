@@ -122,7 +122,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
       :closed ->
         Logger.info(
-          "StepDispatcher: PR #{ctx.repo}##{pr_number} fermée (annulation humaine) → merge abandonné"
+          "StepDispatcher: PR #{ctx.repo}##{pr_number} closed (human cancellation) → merge abandoned"
         )
 
         {:skipped, {:cancelled, pr_number}}
@@ -157,7 +157,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     case ctx.forge.pr_rerequested_reviewers(ctx.repo, pr_number, ctx.forge_opts) do
       {:ok, [judge | _]} ->
         Logger.info(
-          "StepDispatcher: PR #{ctx.repo}##{pr_number} bloquée par re-request humaine → re-dispatch #{judge}"
+          "StepDispatcher: PR #{ctx.repo}##{pr_number} blocked by human re-request → re-dispatch #{judge}"
         )
 
         RoleDispatch.dispatch(:judge, pr_number, head, judge, ctx)

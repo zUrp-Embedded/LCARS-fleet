@@ -154,8 +154,8 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           # (idempotent: alive_before? will be true, maybe_spawn no-op, re-wake retried).
           Logger.warning(
             "StepDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
-              "MAIS wake INJOIGNABLE → #{inspect(reason)} (verrou+brief conservés, re-wake au prochain tick ; " <>
-              "tally = error, pas dispatched silencieux)"
+              "BUT wake UNREACHABLE → #{inspect(reason)} (lock+brief kept, re-wake on next tick ; " <>
+              "tally = error, not silently dispatched)"
           )
 
           {:error, {:wake_unreached, pod_id, role, reason}}
@@ -179,7 +179,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
         Logger.warning(
           "StepDispatcher: dispatch role=#{role} pod=#{pod_id} #{log_ctx} → #{inspect(err)} " <>
-            "(verrou retiré#{if(not alive_before?, do: ", pod tué", else: "")} — re-dispatch au prochain tick)"
+            "(lock removed#{if(not alive_before?, do: ", pod killed", else: "")} — re-dispatch on next tick)"
         )
 
         err

@@ -264,8 +264,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   defp reclaim_lock(%Seams{forge: forge, repo: repo, forge_opts: forge_opts}, number) do
     Logger.warning(
-      "Poller: réconciliation : verrou #{@in_flight} ORPHELIN sur " <>
-        "#{repo}##{number} (pod mort sans complétion) → réclamé (re-dispatch au prochain tick)"
+      "Poller: reconciliation : lock #{@in_flight} ORPHAN on " <>
+        "#{repo}##{number} (pod dead without completion) → reclaimed (re-dispatch on next tick)"
     )
 
     # Stopwatch: stopped ALSO here (dead pod = never went through `unlock`) — otherwise it would run until

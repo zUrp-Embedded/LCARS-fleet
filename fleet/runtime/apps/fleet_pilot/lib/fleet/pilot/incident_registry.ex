@@ -46,7 +46,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   catch
     :exit, why ->
       Logger.error(
-        "IncidentRegistry: indisponible (seen_before? #{sig}): #{inspect(why)} — fail-loud"
+        "IncidentRegistry: unavailable (seen_before? #{sig}): #{inspect(why)} — fail-loud"
       )
 
       false
@@ -58,7 +58,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
     GenServer.call(server(opts), {:note, sig, reason, now(opts)})
   catch
     :exit, why ->
-      Logger.error("IncidentRegistry: indisponible (note #{sig}): #{inspect(why)} — fail-loud")
+      Logger.error("IncidentRegistry: unavailable (note #{sig}): #{inspect(why)} — fail-loud")
       {:error, :registry_unavailable}
   end
 
@@ -134,7 +134,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   @impl true
   def handle_continue(:load, state) do
     registry = merge(read_wal(state.wal_path), load_forge(state.opts))
-    Logger.info("IncidentRegistry: chargé #{map_size(registry)} signature(s) (WAL ∪ forge)")
+    Logger.info("IncidentRegistry: loaded #{map_size(registry)} signature(s) (WAL ∪ forge)")
     {:noreply, %{state | registry: registry}}
   end
 
@@ -167,8 +167,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
         # for a week no longer generates ~86k identical lines/month, and the incident stays VISIBLE.
         if fails == @forge_fail_threshold or rem(fails, 20) == 0 do
           Logger.error(
-            "IncidentRegistry: backing-store forge injoignable depuis #{fails} essais (#{inspect(reason)}) " <>
-              "— fail-LOUD. Données SAINES dans le WAL local (#{state.wal_path}) ; re-sync au retour forge."
+            "IncidentRegistry: backing-store forge unreachable for #{fails} attempts (#{inspect(reason)}) " <>
+              "— fail-LOUD. Data SAFE in the local WAL (#{state.wal_path}) ; re-sync when forge returns."
           )
         end
 
@@ -264,7 +264,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
       :ok
     else
       {:error, reason} ->
-        Logger.error("IncidentRegistry: WAL write échoué (#{path}): #{inspect(reason)}")
+        Logger.error("IncidentRegistry: WAL write failed (#{path}): #{inspect(reason)}")
         {:error, reason}
     end
   end

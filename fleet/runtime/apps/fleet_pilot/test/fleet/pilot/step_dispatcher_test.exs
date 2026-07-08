@@ -596,7 +596,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
           workflow_map_loader: fn "g" -> workflow_map end
         )
 
-      assert_raise ArgumentError, ~r/hors vocabulaire \{worker, judge\}/, fn ->
+      assert_raise ArgumentError, ~r/out of vocabulary \{worker, judge\}/, fn ->
         StepDispatcher.dispatch_issue(payload, opts)
       end
     end
@@ -622,7 +622,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
           workflow_map_loader: fn "g" -> workflow_map end
         )
 
-      assert_raise ArgumentError, ~r/hors vocabulaire \{brief, deliverable\}/, fn ->
+      assert_raise ArgumentError, ~r/out of vocabulary \{brief, deliverable\}/, fn ->
         StepDispatcher.dispatch_issue(payload, opts)
       end
     end

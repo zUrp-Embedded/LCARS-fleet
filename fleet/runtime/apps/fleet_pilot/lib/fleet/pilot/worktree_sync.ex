@@ -79,7 +79,7 @@ defmodule Fleet.Pilot.WorktreeSync do
     else
       # No local clone (project onboarded on another machine, or folder deleted by hand):
       # nothing to align, this is not an error (the deliverable remains viewable on the forge).
-      Logger.debug("WorktreeSync: #{repo} — pas de clone local en #{dir}, skip")
+      Logger.debug("WorktreeSync: #{repo} — no local clone at #{dir}, skip")
       :ok
     end
   end
@@ -94,13 +94,13 @@ defmodule Fleet.Pilot.WorktreeSync do
   end
 
   defp log_result(repo, dir, :ok) do
-    Logger.info("WorktreeSync: #{repo} → #{dir} aligné sur origin/main")
+    Logger.info("WorktreeSync: #{repo} → #{dir} aligned on origin/main")
     :ok
   end
 
   defp log_result(repo, _dir, {:error, reason} = err) do
     Logger.warning(
-      "WorktreeSync: #{repo} alignement échoué (#{inspect(reason)}) — le livrable reste sur la forge"
+      "WorktreeSync: #{repo} alignment failed (#{inspect(reason)}) — the deliverable stays on the forge"
     )
 
     err

@@ -65,11 +65,15 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # `Task.Supervisor`: the registry's forge does not block the mailbox. Returns `{:ok, :offloaded}`; spawn
   # failure → fail-loud logged (the incident is then NOT recorded — visible, not silent).
   # Shared skeleton `Fleet.Pilot.Offload` (single source); THIS consumer keeps its supervisor
-  # and its loss consequence (« incident NON gravé »).
+  # and its loss consequence ("incident NOT recorded").
   @doc false
   def offload_async(fun),
     do:
-      Fleet.Pilot.Offload.async(@task_supervisor, fun, {"IncidentConsumer", "incident NON gravé"})
+      Fleet.Pilot.Offload.async(
+        @task_supervisor,
+        fun,
+        {"IncidentConsumer", "incident NOT recorded"}
+      )
 
   @impl GenServer
   def init(opts) do
@@ -116,28 +120,28 @@ defmodule Fleet.Pilot.IncidentConsumer do
       case state.record_fun.(op, pod_id, reason, reg_opts) do
         :recorded ->
           Logger.info(
-            "IncidentConsumer: #{op}.failed #{pod_id} → incident gravé (#{inspect(reason)})"
+            "IncidentConsumer: #{op}.failed #{pod_id} → incident recorded (#{inspect(reason)})"
           )
 
         {:escalated, _} ->
           Logger.warning(
-            "IncidentConsumer: #{op}.failed #{pod_id} RÉCURRENT → escaladé (#{inspect(reason)})"
+            "IncidentConsumer: #{op}.failed #{pod_id} RECURRENT → escalated (#{inspect(reason)})"
           )
 
         {:escalation_failed, e} ->
           Logger.error(
-            "IncidentConsumer: #{op}.failed #{pod_id} RÉCURRENT mais escalade ÉCHOUÉE — AUCUN issue " <>
-              "sysadmin créé (forge down ?) : #{inspect(e)}"
+            "IncidentConsumer: #{op}.failed #{pod_id} RECURRENT but escalation FAILED — NO sysadmin " <>
+              "issue created (forge down ?) : #{inspect(e)}"
           )
 
         {:record_failed, e} ->
           Logger.error(
-            "IncidentConsumer: #{op}.failed #{pod_id} : incident NON gravé (registre indisponible) : #{inspect(e)}"
+            "IncidentConsumer: #{op}.failed #{pod_id} : incident NOT recorded (registry unavailable) : #{inspect(e)}"
           )
 
         other ->
           Logger.warning(
-            "IncidentConsumer: #{op}.failed #{pod_id} → outcome inattendu #{inspect(other)}"
+            "IncidentConsumer: #{op}.failed #{pod_id} → unexpected outcome #{inspect(other)}"
           )
       end
     end

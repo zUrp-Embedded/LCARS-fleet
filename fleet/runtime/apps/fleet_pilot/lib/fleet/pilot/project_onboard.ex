@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- commit(work_dir, "chore(onboard): init work/ops"),
          :ok <- push(work_dir, "work/ops", true),
          :ok <- lock_main(full_name, opts) do
-      Logger.info("ProjectOnboard: #{full_name} prêt — main=#{proj_dir}, work/ops=#{work_dir}")
+      Logger.info("ProjectOnboard: #{full_name} ready — main=#{proj_dir}, work/ops=#{work_dir}")
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
     end
   end
@@ -131,7 +131,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- clone_main(url, proj_dir),
          :ok <- ensure_work_ops(full_name, url, proj_dir, work_dir, name, opts),
          :ok <- lock_main(full_name, opts) do
-      Logger.info("ProjectOnboard: #{full_name} importé — main=#{proj_dir}, work/ops=#{work_dir}")
+      Logger.info(
+        "ProjectOnboard: #{full_name} imported — main=#{proj_dir}, work/ops=#{work_dir}"
+      )
+
       {:ok, %{repo: full_name, project_dir: proj_dir, work_dir: work_dir}}
     end
   end

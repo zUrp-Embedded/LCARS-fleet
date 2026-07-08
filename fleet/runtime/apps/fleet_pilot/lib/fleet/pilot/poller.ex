@@ -194,7 +194,7 @@ defmodule Fleet.Pilot.Poller do
       end
 
     Logger.info(
-      "Poller: start mode=step MULTI-PROJET org=#{state.org} human=#{state.my_human} " <>
+      "Poller: start mode=step MULTI-PROJECT org=#{state.org} human=#{state.my_human} " <>
         "interval=#{state.interval_ms}ms jitter=±10%"
     )
 

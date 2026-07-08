@@ -51,7 +51,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
 
           other ->
             Logger.warning(
-              "StepRunCompleter: deliverable.published non diffuse (#{inspect(other)})"
+              "StepRunCompleter: deliverable.published not emitted (#{inspect(other)})"
             )
 
             :ok
@@ -62,7 +62,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
     end
   rescue
     e ->
-      Logger.warning("StepRunCompleter: deliverable.published a leve (#{inspect(e)})")
+      Logger.warning("StepRunCompleter: deliverable.published raised (#{inspect(e)})")
       :ok
   end
 

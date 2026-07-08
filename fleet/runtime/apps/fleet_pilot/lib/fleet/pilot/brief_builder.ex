@@ -138,7 +138,7 @@ defmodule Fleet.Pilot.BriefBuilder do
       # judge_target PRESENT but outside {brief, deliverable} → anomaly: we don't guess the target.
       {"judge", other} ->
         raise ArgumentError,
-              "judge_target #{inspect(other)} hors vocabulaire {brief, deliverable} — la cible d'un juge ne s'infère pas"
+              "judge_target #{inspect(other)} out of vocabulary {brief, deliverable} — a judge's target is not inferred"
 
       {"worker", _} ->
         build_worker_brief(role, issue)
@@ -146,7 +146,7 @@ defmodule Fleet.Pilot.BriefBuilder do
       # kind ∉ {worker, judge} (brief_kind present but out-of-vocab) → fail-loud.
       {other, _} ->
         raise ArgumentError,
-              "brief_kind #{inspect(other)} hors vocabulaire {worker, judge} — la judge-ness ne s'infère pas"
+              "brief_kind #{inspect(other)} out of vocabulary {worker, judge} — judge-ness is not inferred"
     end
   end
 

@@ -178,14 +178,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # `Task.Supervisor`: the git push ≤30s + forge writes do NOT block the singleton. Returns
   # `{:ok, :offloaded}` (the real outcome is logged in the task). Spawn failure → fail-loud logged.
   # Shared skeleton `Fleet.Pilot.Offload` (single source); THIS consumer keeps its supervisor
-  # and its loss consequence (« complétion perdue »).
+  # and its loss consequence ("completion lost").
   @doc false
   def offload_async(fun),
     do:
       Fleet.Pilot.Offload.async(
         @step_run_task_supervisor,
         fun,
-        {"StepRunConsumer", "complétion perdue"}
+        {"StepRunConsumer", "completion lost"}
       )
 
   @impl GenServer
@@ -230,7 +230,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
 
     Logger.info(
-      "StepRunConsumer: start (MULTI-PROJET F-037 : repo/remote per-step-run) " <>
+      "StepRunConsumer: start (MULTI-PROJECT F-037 : repo/remote per-step-run) " <>
         "fallback_repo=#{inspect(state.repo)} fallback_remote=#{inspect(state.remote)}"
     )
 
@@ -247,11 +247,11 @@ defmodule Fleet.Pilot.StepRunConsumer do
         :ok
 
       {:ok, pod_id} ->
-        Logger.info("StepRunConsumer: gatekeeper permanent assuré (pod=#{pod_id})")
+        Logger.info("StepRunConsumer: gatekeeper permanent ensured (pod=#{pod_id})")
 
       {:error, reason} ->
         Logger.warning(
-          "StepRunConsumer: ensure gatekeeper échoué (#{inspect(reason)}) — escalades KO"
+          "StepRunConsumer: ensure gatekeeper failed (#{inspect(reason)}) — escalations KO"
         )
     end
 
@@ -282,7 +282,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
       {:error, reason} ->
         Logger.warning(
-          "StepRunConsumer: fin-de-step-run FAIL #{p["issue_id"]}: #{inspect(reason)}"
+          "StepRunConsumer: end-of-step-run FAIL #{p["issue_id"]}: #{inspect(reason)}"
         )
 
         {:noreply, state}
@@ -368,8 +368,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       else
         other ->
           Logger.warning(
-            "StepRunConsumer: metadata gate_eval mais reconstruction eval_ctx impossible " <>
-              "(#{inspect(other)}) — verdict NON repris (fail-loud, pas de resume sur contexte tronqué)"
+            "StepRunConsumer: metadata gate_eval but eval_ctx reconstruction impossible " <>
+              "(#{inspect(other)}) — verdict NOT resumed (fail-loud, no resume on truncated context)"
           )
 
           :not_gate_eval
@@ -523,10 +523,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
       case outcome do
         {:error, reason} ->
-          Logger.warning("StepRunConsumer: fin-de-step-run FAIL #{label}: #{inspect(reason)}")
+          Logger.warning("StepRunConsumer: end-of-step-run FAIL #{label}: #{inspect(reason)}")
 
         _ ->
-          Logger.info("StepRunConsumer: fin-de-step-run #{label} → #{inspect(outcome)}")
+          Logger.info("StepRunConsumer: end-of-step-run #{label} → #{inspect(outcome)}")
       end
 
       outcome
@@ -740,8 +740,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
       {:error, reason} ->
         Logger.warning(
-          "StepRunConsumer: identité forge irrésoluble (role=#{role}): #{inspect(reason)} — " <>
-            "allowed_emails=[] (F-01 rejettera le push, fail-closed)"
+          "StepRunConsumer: forge identity unresolvable (role=#{role}): #{inspect(reason)} — " <>
+            "allowed_emails=[] (F-01 will reject the push, fail-closed)"
         )
 
         []

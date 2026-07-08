@@ -107,8 +107,8 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
                  WakeRecovery.wake("pod-down", fn -> flunk("pas de re-roll si déjà vu") end, opts)
       end)
 
-    assert log =~ "escalade"
-    assert log =~ "AUCUN issue sysadmin"
+    assert log =~ "escalation"
+    assert log =~ "NO sysadmin issue"
   end
 
   test "escalade : create_issue échoue avec assignee → fallback label-only" do

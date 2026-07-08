@@ -242,7 +242,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
           {:error, {phase, reason}} ->
             Logger.warning(
-              "StepDispatcher: #{phase} issue=#{repo}##{number} → #{inspect(reason)} (skip, pas de verrou)"
+              "StepDispatcher: #{phase} issue=#{repo}##{number} → #{inspect(reason)} (skip, no lock)"
             )
 
             {:error, {phase, reason}}

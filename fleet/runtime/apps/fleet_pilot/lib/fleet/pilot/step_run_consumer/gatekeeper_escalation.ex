@@ -132,9 +132,9 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
                 )
 
                 Logger.warning(
-                  "StepRunConsumer: gatekeeper #{pod_id} kické MAIS INJOIGNABLE (#{inspect(reason)}) — " <>
-                    "brief d'éval enqueué (corr=#{inspect(corr)}), escalade WakeRecovery active ; le verdict " <>
-                    "ne reviendra qu'au re-wake/réparation (pas un kick silencieux qui ment)"
+                  "StepRunConsumer: gatekeeper #{pod_id} kicked BUT UNREACHABLE (#{inspect(reason)}) — " <>
+                    "eval brief enqueued (corr=#{inspect(corr)}), WakeRecovery escalation active ; the verdict " <>
+                    "will only return on re-wake/repair (not a silent kick that lies)"
                 )
 
                 {:ok, corr}

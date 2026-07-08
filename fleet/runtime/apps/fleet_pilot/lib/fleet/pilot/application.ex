@@ -118,9 +118,9 @@ defmodule Fleet.Pilot.Application do
   # fail-loud guard, aimed at the real thing.
   defp step_children! do
     unless forge_base_url() do
-      raise "fleet_pilot: :step_dispatch? activé mais la forge base_url est absente (config :fleet_pilot, " <>
-              ":forge[:base_url] / FORGE_BASE_URL) — le Poller ne peut pas DÉCOUVRIR ses projets " <>
-              "(list_org_repos) ni le StepRunConsumer dériver le remote de push. Deploy cassé, fail-loud."
+      raise "fleet_pilot: :step_dispatch? enabled but the forge base_url is absent (config :fleet_pilot, " <>
+              ":forge[:base_url] / FORGE_BASE_URL) — the Poller cannot DISCOVER its projects " <>
+              "(list_org_repos) nor can the StepRunConsumer derive the push remote. Deploy broken, fail-loud."
     end
 
     interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)

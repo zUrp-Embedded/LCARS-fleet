@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.Offload do
         {:ok, :offloaded}
 
       {:error, reason} ->
-        Logger.error("#{consumer}: offload Task échoué (#{inspect(reason)}) — #{consequence}")
+        Logger.error("#{consumer}: offload Task failed (#{inspect(reason)}) — #{consequence}")
 
         {:error, {:offload_failed, reason}}
     end

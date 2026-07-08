@@ -628,7 +628,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
       {:error, reason} ->
         Logger.warning(
-          "StepRunCompleter: humain commanditaire irrésoluble (#{inspect(reason)}) — PR ##{pr} non assignée"
+          "StepRunCompleter: requesting human unresolvable (#{inspect(reason)}) — PR ##{pr} not assigned"
         )
 
         {:ok, :no_human}
@@ -779,7 +779,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
         case post_route_if_present(forge, repo, n, step_run, forge_opts, :reassign) do
           {:ok, _} ->
             Logger.debug(
-              "StepRunCompleter advance #{repo}##{n} → next step role=#{next} (route gravée, assignee=humain inchangé)"
+              "StepRunCompleter advance #{repo}##{n} → next step role=#{next} (route recorded, assignee=human unchanged)"
             )
 
             {:ok, :reassigned}

@@ -172,15 +172,15 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
       other ->
         Logger.warning(
-          "StepRunConsumer: kick arch #{pod_id} → #{inspect(other)} (arch injoignable ? l'humain relance sa " <>
-            "session — la fleet ne reboot PAS l'arch ; label+commentaire restent)"
+          "StepRunConsumer: kick arch #{pod_id} → #{inspect(other)} (arch unreachable ? the human restarts their " <>
+            "session — the fleet does NOT reboot the arch ; label+comment remain)"
         )
 
         :ok
     end
   rescue
     e ->
-      Logger.warning("StepRunConsumer: kick arch a levé #{inspect(e)} (non-bloquant)")
+      Logger.warning("StepRunConsumer: kick arch raised #{inspect(e)} (non-blocking)")
       :ok
   end
 

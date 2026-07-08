@@ -236,7 +236,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
           Logger.info(
             "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
-              "(juges OK → merge rebase, scellé gatekeeper, close explicite ; eng tué, verrou issue levé)"
+              "(judges OK → rebase merge, gatekeeper sealed, explicit close ; eng killed, issue lock released)"
           )
 
           {:ok, {:merged, pr_number}}
