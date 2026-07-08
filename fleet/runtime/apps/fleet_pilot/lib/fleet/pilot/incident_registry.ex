@@ -1,25 +1,25 @@
 defmodule Fleet.Pilot.IncidentRegistry do
   @moduledoc """
-  Mémoire PERSISTANTE cross-session des incidents système — **owner résilient**.
+  PERSISTENT cross-session memory of system incidents — **resilient owner**.
 
-  Un gestionnaire d'erreurs doit être PLUS fiable que ce qu'il surveille : sa mémoire ne peut pas dépendre
-  (synchrone, copie unique, race-prone) du substrat qu'elle surveille. D'où ce GenServer — l'Iron Law est
-  ici SATISFAIT (état mutable à bufferiser + accès sérialisé + isolation de la panne forge) :
+  An error handler must be MORE reliable than what it watches: its memory cannot depend
+  (synchronous, single copy, race-prone) on the substrate it watches. Hence this GenServer — the Iron Law is
+  SATISFIED here (mutable state to buffer + serialized access + isolation of forge failure):
 
-    - **check récurrence** (`seen_before?`) = lookup MÉMOIRE → 0 I/O par fail → tient un **burst** (N pods
-      qui tombent ensemble = la signature même du métier d'un error-handler) ;
-    - **écriture** (`note`) = upsert sérialisé + **WAL local** (JSON, écriture atomique tmp+rename →
-      crash-survivable) PUIS déclenche un **sync forge ASYNC** → le dispatcher ne bloque JAMAIS sur la forge ;
-    - **forge = backing-store durable cross-machine** (branche `work/ops`), sync async débouncé + retried,
-      **merge bidirectionnel** (incidents d'autres machines absorbés) ; forge injoignable = log **fail-LOUD**,
-      jamais de perte (le WAL tient, re-sync au retour) ni de re-roll silencieux.
+    - **recurrence check** (`seen_before?`) = MEMORY lookup → 0 I/O per fail → withstands a **burst** (N pods
+      falling together = the very signature of an error-handler's job);
+    - **write** (`note`) = serialized upsert + **local WAL** (JSON, atomic write tmp+rename →
+      crash-survivable) THEN triggers an **ASYNC forge sync** → the dispatcher NEVER blocks on the forge;
+    - **forge = durable cross-machine backing-store** (branch `work/ops`), debounced + retried async sync,
+      **bidirectional merge** (incidents from other machines absorbed); forge unreachable = **fail-LOUD** log,
+      never a loss (the WAL holds, re-sync on return) nor a silent re-roll.
 
-  Au boot : `merge(WAL local, forge)`. `signature/3` reste une fonction pure. L'historique git du fichier
-  forge = la timeline des incidents.
+  At boot: `merge(local WAL, forge)`. `signature/3` stays a pure function. The git history of the forge
+  file = the incident timeline.
 
-  L'ESCALADE sysadmin (ouverture de l'issue `error_system`) vit dans le sous-module
-  `Escalation` (acte stateless, aucune lecture du GenServer) — `escalate/5` reste ici en
-  façade (defdelegate) pour WakeRecovery et les consumers d'échec.
+  The sysadmin ESCALATION (opening the `error_system` issue) lives in the sub-module
+  `Escalation` (stateless act, no read of the GenServer) — `escalate/5` stays here as a
+  façade (defdelegate) for WakeRecovery and the failure consumers.
   """
   use GenServer
   require Logger
@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   @retry_ms 30_000
 
   # ============================================================
-  # API (signature inchangée pour WakeRecovery)
+  # API (signature unchanged for WakeRecovery)
   # ============================================================
 
   @spec signature(String.t(), String.t(), term()) :: String.t()
@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
     "#{op}:#{normalize(subject)}:#{reason_category(reason)}"
   end
 
-  @doc "Récurrence ? Lookup MÉMOIRE (0 I/O → burst-proof). fail-LOUD si l'owner est indisponible (log + first-time)."
+  @doc "Recurrence? MEMORY lookup (0 I/O → burst-proof). fail-LOUD if the owner is unavailable (log + first-time)."
   @spec seen_before?(String.t(), keyword()) :: boolean()
   def seen_before?(sig, opts \\ []) when is_binary(sig) do
     GenServer.call(server(opts), {:seen_before?, sig})
@@ -52,7 +52,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
       false
   end
 
-  @doc "Grave l'incident : upsert mémoire + WAL local PUIS sync forge async. fail-LOUD si owner indisponible."
+  @doc "Records the incident: memory upsert + local WAL THEN async forge sync. fail-LOUD if owner unavailable."
   @spec note(String.t(), term(), keyword()) :: :ok | {:error, term()}
   def note(sig, reason, opts \\ []) when is_binary(sig) do
     GenServer.call(server(opts), {:note, sig, reason, now(opts)})
@@ -63,19 +63,19 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   @doc """
-  Enregistre un échec, OU escalade s'il est récurrent (déjà vu). Pour les chemins SANS re-roll (ex.
-  `pod.failed` / `result_timeout`) : 1er = `note` (toléré, possiblement random) ; récurrence = escalade
+  Records a failure, OR escalates it if recurrent (already seen). For the paths WITHOUT re-roll (e.g.
+  `pod.failed` / `result_timeout`): 1st = `note` (tolerated, possibly random); recurrence = escalation
   (pattern → root-cause).
 
-  Retour HONNÊTE — il porte ce qui s'est VRAIMENT passé, jamais un succès par optimisme :
+  HONEST return — it carries what ACTUALLY happened, never an optimistic success:
 
-    - `:recorded` — 1re fois, incident gravé en mémoire + WAL local.
-    - `{:escalated, issue_number}` — récurrence, issue sysadmin RÉELLEMENT ouvert (le numéro le PROUVE).
-    - `{:escalation_failed, reason}` — récurrence détectée mais l'ouverture du issue a échoué (forge down ?) :
-      AUCUN issue n'existe. L'incident reste en mémoire/WAL local (gravé au 1er passage), mais l'alarme
-      sysadmin N'est PAS passée → l'appelant doit le CRIER, pas rassurer.
-    - `{:record_failed, reason}` — 1re fois mais l'owner (GenServer) est indisponible : l'incident n'a PAS
-      été gravé du tout (ni mémoire ni WAL) → une récurrence ne pourra pas être détectée.
+    - `:recorded` — first time, incident recorded in memory + local WAL.
+    - `{:escalated, issue_number}` — recurrence, sysadmin issue ACTUALLY opened (the number PROVES it).
+    - `{:escalation_failed, reason}` — recurrence detected but opening the issue failed (forge down?):
+      NO issue exists. The incident stays in memory/local WAL (recorded on the 1st pass), but the sysadmin
+      alarm did NOT go out → the caller must SHOUT it, not reassure.
+    - `{:record_failed, reason}` — first time but the owner (GenServer) is unavailable: the incident was NOT
+      recorded at all (neither memory nor WAL) → a recurrence cannot be detected.
   """
   @spec record_or_escalate(String.t(), String.t(), term(), keyword()) ::
           :recorded
@@ -87,17 +87,17 @@ defmodule Fleet.Pilot.IncidentRegistry do
     sig = signature(op, subject, reason)
 
     if seen_before?(sig, opts) do
-      # `escalate_kind` (défaut `:recurrence`) : le wake passe `:sp_suspect` (récurrence = SP, pas l'agent).
-      # On PROPAGE le résultat de l'escalade : `{:escalated, num}` ne sort QUE si le issue a vraiment été
-      # ouvert (le numéro le prouve). Forge down → `{:escalation_failed, _}` ; l'incident reste dans le WAL
-      # local (gravé au 1er passage, ce qui a rendu `seen_before?` vrai), seul le ISSUE manque.
+      # `escalate_kind` (default `:recurrence`): the wake passes `:sp_suspect` (recurrence = SP, not the agent).
+      # We PROPAGATE the escalation result: `{:escalated, num}` comes out ONLY if the issue was really
+      # opened (the number proves it). Forge down → `{:escalation_failed, _}`; the incident stays in the local
+      # WAL (recorded on the 1st pass, which made `seen_before?` true), only the ISSUE is missing.
       case escalate(Keyword.get(opts, :escalate_kind, :recurrence), subject, reason, sig, opts) do
         {:ok, num} -> {:escalated, num}
         {:error, e} -> {:escalation_failed, e}
       end
     else
-      # `note` grave en mémoire + WAL local. `{:error, _}` = owner indisponible → RIEN n'est gravé : on le
-      # signale (`{:record_failed, _}`), on ne ment pas un `:recorded`.
+      # `note` records in memory + local WAL. `{:error, _}` = owner unavailable → NOTHING is recorded: we
+      # signal it (`{:record_failed, _}`), we don't lie a `:recorded`.
       case note(sig, reason, opts) do
         :ok -> :recorded
         {:error, e} -> {:record_failed, e}
@@ -106,10 +106,10 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   @doc """
-  Ouvre un issue système pour un incident — DÉLÉGUÉ à `IncidentRegistry.Escalation`
-  (acte STATELESS : aucune lecture du GenServer, tout vient des arguments + config ;
-  le registre garde la MÉMOIRE). Façade conservée : **partagée** par WakeRecovery et
-  les consumers d'échec (DRY). Returns `{:ok, number}` | `{:error, term}`.
+  Opens a system issue for an incident — DELEGATED to `IncidentRegistry.Escalation`
+  (STATELESS act: no read of the GenServer, everything comes from the arguments + config;
+  the registry keeps the MEMORY). Façade kept: **shared** by WakeRecovery and
+  the failure consumers (DRY). Returns `{:ok, number}` | `{:error, term}`.
   """
   defdelegate escalate(kind, subject, reason, sig, opts \\ []),
     to: Fleet.Pilot.IncidentRegistry.Escalation
@@ -146,7 +146,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   def handle_call({:note, sig, reason, now}, _from, state) do
     registry = upsert(state.registry, sig, reason, now)
 
-    # WAL local crash-survivable AVANT la forge ; la forge est async (jamais sur le chemin du dispatcher).
+    # Local crash-survivable WAL BEFORE the forge; the forge is async (never on the dispatcher's path).
     _ = write_wal(state.wal_path, registry)
     {:reply, :ok, schedule_sync(%{state | registry: registry})}
   end
@@ -163,8 +163,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {:error, reason} ->
         fails = state.forge_fails + 1
 
-        # Throttle (E4) : au seuil PUIS tous les 20 essais (~10 min a 30s de retry) — une forge down
-        # une semaine ne genere plus ~86k lignes identiques/mois, et l'incident reste VISIBLE.
+        # Throttle (E4): at the threshold THEN every 20 tries (~10 min at 30s retry) — a forge down
+        # for a week no longer generates ~86k identical lines/month, and the incident stays VISIBLE.
         if fails == @forge_fail_threshold or rem(fails, 20) == 0 do
           Logger.error(
             "IncidentRegistry: backing-store forge injoignable depuis #{fails} essais (#{inspect(reason)}) " <>
@@ -180,7 +180,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   def handle_info(_other, state), do: {:noreply, state}
 
   # ============================================================
-  # Interne
+  # Internal
   # ============================================================
 
   defp schedule_sync(%{sync_pending: true} = state), do: state
@@ -201,12 +201,12 @@ defmodule Fleet.Pilot.IncidentRegistry do
     registry |> Map.put(sig, entry) |> prune()
   end
 
-  # PRUNE (E4) : le registre etait le seul etat NON-BORNE structurel du runtime (aucune eviction,
-  # merge = union monotone, signatures a cardinalite ouverte via des reasons stringifiees) — des mois
-  # d'incidents varies = croissance sans fin du WAL + du fichier forge REECRIT EN ENTIER a chaque note.
-  # Eviction par last_seen (ISO lexicographique = chronologique) au-dela de `:max_entries`
-  # (defaut 500 — tres au-dessus du nominal ; la borne vise l'anomalie). Applique a l'upsert ET au
-  # merge forge (les deux chemins de croissance).
+  # PRUNE (E4): the registry was the runtime's only structurally UNBOUNDED state (no eviction,
+  # merge = monotone union, signatures with open cardinality via stringified reasons) — months
+  # of varied incidents = endless growth of the WAL + of the forge file REWRITTEN IN FULL on each note.
+  # Eviction by last_seen (ISO lexicographic = chronological) beyond `:max_entries`
+  # (default 500 — well above nominal; the bound targets the anomaly). Applied to the upsert AND the
+  # forge merge (both growth paths).
   defp prune(registry) do
     max = Application.get_env(:fleet_pilot, :incident_registry_max_entries, 500)
 
@@ -220,8 +220,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
     end
   end
 
-  # Read-modify-write avec MERGE : absorbe les incidents posés par d'autres machines depuis le dernier sync
-  # (au lieu d'écraser). Renvoie le merge pour que l'owner adopte la vérité cross-machine.
+  # Read-modify-write with MERGE: absorbs incidents posted by other machines since the last sync
+  # (instead of overwriting). Returns the merge so the owner adopts the cross-machine truth.
   defp sync_forge(registry, opts) do
     getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
     putter = Keyword.get(opts, :put_file_fun, &ForgeClient.Files.put_file/4)
@@ -285,10 +285,10 @@ defmodule Fleet.Pilot.IncidentRegistry do
     end
   end
 
-  # Encode le registre avec UN incident par ligne, clés triées. Le diff git du fichier (commité sur
-  # work/ops ET le WAL local) montre alors un incident ajouté = une ligne ajoutée, au lieu d'un blob
-  # JSON mono-ligne où le moindre ajout réécrit tout. Reste un JSON valide — `decode/1` le relit tel
-  # quel ; le tri par clé garantit un ordre stable (sinon l'ordre map ferait du bruit dans le diff).
+  # Encode the registry with ONE incident per line, sorted keys. The git diff of the file (committed on
+  # work/ops AND the local WAL) then shows an added incident = an added line, instead of a single-line
+  # JSON blob where the slightest addition rewrites everything. Stays valid JSON — `decode/1` reads it as
+  # is; sorting by key guarantees a stable order (otherwise map order would make noise in the diff).
   defp encode_registry(registry) when map_size(registry) == 0, do: "{}\n"
 
   defp encode_registry(registry) do
@@ -326,7 +326,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
         else: b["last_reason"]
       )
 
-  # --- config (opts > app env > défaut) ---
+  # --- config (opts > app env > default) ---
   defp server(opts), do: Keyword.get(opts, :server, __MODULE__)
   defp now(opts), do: opts[:now] || DateTime.to_iso8601(DateTime.utc_now())
   defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
@@ -343,8 +343,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
       opts[:path] ||
         Application.get_env(:fleet_pilot, :incident_registry_path, "work/system-incidents.json")
 
-  # HOME irrésoluble = runtime cassé → fail-loud (`System.user_home!()` raise), jamais un chemin
-  # fabriqué : l'état .lcars ne doit pas se disperser en silence (p.ex. orphelin sous /tmp).
+  # HOME unresolvable = broken runtime → fail-loud (`System.user_home!()` raises), never a fabricated
+  # path: the .lcars state must not silently scatter (e.g. orphaned under /tmp).
   defp wal_path(opts),
     do:
       opts[:wal_path] || Application.get_env(:fleet_pilot, :incident_registry_wal_path) ||
@@ -355,7 +355,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
       opts[:author] ||
         Application.get_env(:fleet_pilot, :incident_registry_author, %{
           name: "LCARS-starfleet",
-          # Email de rôle : AUTORITÉ = ForgeIdentity (H2 2026-07-04, le domaine n'est plus retapé ici).
+          # Role email: AUTHORITY = ForgeIdentity (H2 2026-07-04, the domain is no longer retyped here).
           email: Fleet.Credentials.ForgeIdentity.role_email("starfleet")
         })
 

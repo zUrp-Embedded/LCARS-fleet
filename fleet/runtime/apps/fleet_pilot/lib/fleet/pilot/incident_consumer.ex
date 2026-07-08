@@ -1,43 +1,43 @@
 defmodule Fleet.Pilot.IncidentConsumer do
   @moduledoc """
-  Consumer Bus des events d'**ÉCHEC de pod** (`pod.failed` / `wake.failed`, source `:spawner`) →
-  `Fleet.Pilot.IncidentRegistry` (note 1er / escalade récurrent). Subscribe `Fleet.EventRouter.Bus`
+  Bus consumer of **pod FAILURE** events (`pod.failed` / `wake.failed`, source `:spawner`) →
+  `Fleet.Pilot.IncidentRegistry` (note on 1st / escalate on recurrent). Subscribes `Fleet.EventRouter.Bus`
   (topic `fleet.events`).
 
-  ## Pourquoi un consumer SÉPARÉ du StepRunConsumer
+  ## Why a consumer SEPARATE from the StepRunConsumer
 
-  Les échecs de pod sont un concern **distinct** de la fin-de-step-run (complétion) : ils ne touchent ni la
-  workflow_map, ni la gate, ni l'état de complétion — juste « cet incident, 1er ou récurrent ? » → registre.
-  Les deux handlers sont **stateless** (ils ne lisent aucun état du consumer). Les isoler dans leur
-  propre singleton : (a) le StepRunConsumer (singleton de complétion) ne porte plus une 2ᵉ responsabilité
-  bolted-on, (b) une rafale d'échecs ne partage plus la mailbox du chemin de complétion (blast-radius
-  réduit). La POLITIQUE d'escalade (1er=note / récurrent=root-cause, kinds, labels) vit dans
-  `IncidentRegistry` ; ce module ne fait que **router l'event vers elle**.
+  Pod failures are a **distinct** concern from step-run-end (completion): they touch neither the
+  workflow_map, nor the gate, nor the completion state — just « this incident, 1st or recurrent? » → registry.
+  Both handlers are **stateless** (they read no state of the consumer). Isolating them in their
+  own singleton: (a) the StepRunConsumer (completion singleton) no longer carries a 2nd
+  bolted-on responsibility, (b) a burst of failures no longer shares the completion path's mailbox (reduced
+  blast-radius). The escalation POLICY (1st=note / recurrent=root-cause, kinds, labels) lives in
+  `IncidentRegistry`; this module only **routes the event to it**.
 
-  ## Décision d'escalade (déléguée à `IncidentRegistry`)
+  ## Escalation decision (delegated to `IncidentRegistry`)
 
-    * `pod.failed` — un pod en échec (`transition_failed` : result_timeout/dead-REPL, allocate/launch/
-      auth/project). 1er = noté (toléré, possiblement random) ; récurrent = escaladé (pattern → root-cause).
-    * `wake.failed` — la boucle ack-driven a épuisé le cap (l'agent n'a JAMAIS acké : ni flag, ni
-      send-keys). Récurrence = **SP suspect** (l'inférence vise le SP, pas l'agent : 1×=random, récurrent
-      = SP mauvais/dérivé) → `escalate_kind: :sp_suspect` (+ `pane` pour le diag).
+    * `pod.failed` — a failed pod (`transition_failed`: result_timeout/dead-REPL, allocate/launch/
+      auth/project). 1st = noted (tolerated, possibly random); recurrent = escalated (pattern → root-cause).
+    * `wake.failed` — the ack-driven loop exhausted the cap (the agent NEVER acked: neither flag, nor
+      send-keys). Recurrence = **SP suspect** (inference targets the SP, not the agent: 1×=random, recurrent
+      = bad/drifted SP) → `escalate_kind: :sp_suspect` (+ `pane` for the diag).
 
-  Les littéraux d'atome `:"pod.failed"` / `:"wake.failed"` sont écrits ICI : ils créent aussi l'atome
-  dont `best_effort_broadcast` (côté `Fleet.Spawner.Pod`) a besoin pour publier ces events.
+  The atom literals `:"pod.failed"` / `:"wake.failed"` are written HERE: they also create the atom
+  that `best_effort_broadcast` (on the `Fleet.Spawner.Pod` side) needs to publish these events.
 
   ## Offload (`:runner`)
 
-  `record_or_escalate` touche la forge (lecture/écriture du registre) → OFFLOAD dans une
-  `Task.Supervisor` pour ne pas bloquer la mailbox du consumer sur un burst d'échecs. Seam `:runner` :
-  défaut `nil` → **SYNC** (l'outcome est loggé en ligne ; tests déterministes sans injection). Prod
-  (`application.ex`) injecte `&offload_async/1` → async supervisé (un `record` qui crash est isolé).
+  `record_or_escalate` touches the forge (registry read/write) → OFFLOAD into a
+  `Task.Supervisor` so as not to block the consumer's mailbox on a burst of failures. Seam `:runner`:
+  default `nil` → **SYNC** (the outcome is logged inline; deterministic tests without injection). Prod
+  (`application.ex`) injects `&offload_async/1` → supervised async (a `record` that crashes is isolated).
 
   ## Config / seams
 
-    * `:subscribe` — bool défaut `true` (tests : `false` + envoi manuel via `send/2`).
+    * `:subscribe` — bool default `true` (tests: `false` + manual sending via `send/2`).
     * `:record_fun` — `fn op, subject, reason, opts -> :recorded | {:escalated|…, _} end`
-      (défaut `&Fleet.Pilot.IncidentRegistry.record_or_escalate/4`). Seam test (zéro forge).
-    * `:runner` — seam d'offload (cf. ci-dessus). Défaut `nil` → sync.
+      (default `&Fleet.Pilot.IncidentRegistry.record_or_escalate/4`). Test seam (zero forge).
+    * `:runner` — offload seam (see above). Default `nil` → sync.
   """
 
   use GenServer
@@ -45,8 +45,8 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
   alias Fleet.EventRouter.Bus
 
-  # Superviseur de tasks pour l'offload (prod). Nom partagé entre `application.ex` (qui le démarre AVANT
-  # ce consumer) et `offload_async/1`. Propre à ce consumer (pas celui du StepRunConsumer) : séparation nette.
+  # Task supervisor for the offload (prod). Name shared between `application.ex` (which starts it BEFORE
+  # this consumer) and `offload_async/1`. Specific to this consumer (not the StepRunConsumer's): clean separation.
   @task_supervisor Fleet.Pilot.IncidentConsumer.TaskSupervisor
 
   defstruct record_fun: nil, runner: nil
@@ -61,11 +61,11 @@ defmodule Fleet.Pilot.IncidentConsumer do
   @doc false
   def task_supervisor, do: @task_supervisor
 
-  # Runner ASYNC (prod, injecté en `:runner`) — offload le record/escalade dans la `Task.Supervisor`
-  # propre au consumer : le forge du registre ne bloque pas la mailbox. Rend `{:ok, :offloaded}` ; échec
-  # de spawn → fail-loud loggé (l'incident n'est alors PAS gravé — visible, pas silencieux).
-  # Squelette partagé `Fleet.Pilot.Offload` (source unique) ; CE consumer garde son superviseur
-  # et sa conséquence de perte (« incident NON gravé »).
+  # ASYNC runner (prod, injected as `:runner`) — offloads the record/escalate into the consumer's own
+  # `Task.Supervisor`: the registry's forge does not block the mailbox. Returns `{:ok, :offloaded}`; spawn
+  # failure → fail-loud logged (the incident is then NOT recorded — visible, not silent).
+  # Shared skeleton `Fleet.Pilot.Offload` (single source); THIS consumer keeps its supervisor
+  # and its loss consequence (« incident NON gravé »).
   @doc false
   def offload_async(fun),
     do:
@@ -99,18 +99,18 @@ defmodule Fleet.Pilot.IncidentConsumer do
         state
       )
       when is_binary(pod_id) do
-    # Récurrence wake = SP suspect (cf. moduledoc) → escalade typée + `pane` pour le diag.
+    # wake recurrence = SP suspect (see moduledoc) → typed escalation + `pane` for the diag.
     record(state, "wake", pod_id, p["reason"], escalate_kind: :sp_suspect, pane: p["pane"])
     {:noreply, state}
   end
 
-  # Tout autre message (events non-échec qu'on voit aussi via le Bus, ou non-Fleet.Event) → no-op.
+  # Any other message (non-failure events we also see via the Bus, or non-Fleet.Event) → no-op.
   def handle_info(_other, state), do: {:noreply, state}
 
-  # Route l'incident vers le registre, offloadé via `:runner` (défaut sync). Le 4-uplet
-  # `(op, subject, reason, opts)` est le contrat de `IncidentRegistry.record_or_escalate/4` (`op="pod"` →
-  # `opts=[]` ; `op="wake"` → `escalate_kind:/pane:`). L'outcome est loggé (jamais avalé) : un incident
-  # non gravé / une escalade ratée doit être VISIBLE (forge down ? registre indispo ?).
+  # Routes the incident to the registry, offloaded via `:runner` (default sync). The 4-tuple
+  # `(op, subject, reason, opts)` is the contract of `IncidentRegistry.record_or_escalate/4` (`op="pod"` →
+  # `opts=[]`; `op="wake"` → `escalate_kind:/pane:`). The outcome is logged (never swallowed): an
+  # unrecorded incident / a failed escalation must be VISIBLE (forge down? registry unavailable?).
   defp record(state, op, pod_id, reason, reg_opts) do
     exec = fn ->
       case state.record_fun.(op, pod_id, reason, reg_opts) do

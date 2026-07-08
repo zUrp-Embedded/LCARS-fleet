@@ -1,71 +1,71 @@
 defmodule Fleet.Pilot.ProjectOnboard do
   @moduledoc """
-  Onboarding d'un projet (Rail 1 firmware-as-a-service, 2026-06-14) : « idée → le projet existe ».
+  Onboarding of a project (Rail 1 firmware-as-a-service, 2026-06-14): « idea → the project exists ».
 
-  Réplique l'archi dual-dir de LCARS lui-même (un repo, **deux worktrees**) :
+  Replicates the dual-dir architecture of LCARS itself (one repo, **two worktrees**):
 
-    * `/home/projects/<name>`       → worktree branche `main`     (le livrable, push origin)
-    * `/home/projects.work/<name>`  → worktree branche `work/ops` (orphan : plans, backlog, ops)
+    * `/home/projects/<name>`       → worktree branch `main`     (the deliverable, push origin)
+    * `/home/projects.work/<name>`  → worktree branch `work/ops` (orphan: plans, backlog, ops)
 
-  C'est un **rail mécanique** (compliance structurelle) : l'arch *déclenche* via le tool
-  MCP `create_project`, le SYSTÈME *exécute* cette séquence déterministe — l'arch ne tape jamais de git.
+  It is a **mechanical rail** (structural compliance): the arch *triggers* via the MCP
+  tool `create_project`, the SYSTEM *executes* this deterministic sequence — the arch never types git.
 
-  Séquence (idempotence repo via `create_repo` 409 ; échoue clair si le dossier local existe déjà) :
+  Sequence (repo idempotence via `create_repo` 409; fails clearly if the local folder already exists):
 
-    1. `ForgeClient.create_repo` (org `fleet`, `auto_init` → `main` clonable)
+    1. `ForgeClient.create_repo` (org `fleet`, `auto_init` → `main` cloneable)
     2. `git clone --branch main` → `/home/projects/<name>`
     3. scaffold `main` (README, .gitignore, .editorconfig, docs/spec.md)
-    4. commit (author=`Architect`, committer=git config runtime = l'humain) + push `main`
+    4. commit (author=`lcars-system`, committer=git config runtime = the human) + push `main`
     5. `git worktree add --orphan -b work/ops` → `/home/projects.work/<name>`
     6. scaffold `work/ops` (backlog.md, scratchpad.md, plans/)
     7. commit + push `-u work/ops`
 
-  Identité (décision 2026-06-14 — l'onboarding est un acte d'INFRA système, pas du travail créatif) :
-  `author=lcars-system` (le SYSTÈME génère le scaffold depuis des templates ; l'arch n'écrit aucun fichier,
-  il **relaie** `name`+`pitch` — il est transparent dans l'attribution git, sa trace vit dans la demande),
-  `committer`=l'humain (git config runtime = **l'user qui a initié le projet → tracé**),
-  `pusher`=`lcars-system` (`ForgeAuth.git_env`, owner fleet-wide). Tout avataré (emails → comptes Gitea).
-  Pas de GenServer (Iron Law — orchestration d'I/O sans état partagé).
+  Identity (decision 2026-06-14 — onboarding is an act of system INFRA, not creative work):
+  `author=lcars-system` (the SYSTEM generates the scaffold from templates; the arch writes no file,
+  it **relays** `name`+`pitch` — it is transparent in the git attribution, its trace lives in the request),
+  `committer`=the human (git config runtime = **the user who initiated the project → traced**),
+  `pusher`=`lcars-system` (`ForgeAuth.git_env`, fleet-wide owner). All avatared (emails → Gitea accounts).
+  No GenServer (Iron Law — I/O orchestration without shared state).
 
-  ⚠ CONTRAT CROISÉ (seam `fleet_mcp`) : `onboard/2` est l'impl RÉELLE (défaut) du behaviour
-  `Fleet.MCP.PodTools.Delegation.ProjectOnboard`. On ne peut PAS l'adopter en `@behaviour` :
-  `fleet_pilot` ne dépend pas de `fleet_mcp` et la référence compile créerait une arête nouvelle
-  (`allowed_graph.yaml` rougirait). Impl duck-typée — toute évolution de la signature/du shape
-  `result()` DOIT être répercutée sur le `@callback` du behaviour (et inversement).
+  ⚠ CROSS CONTRACT (seam `fleet_mcp`): `onboard/2` is the REAL impl (default) of the behaviour
+  `Fleet.MCP.PodTools.Delegation.ProjectOnboard`. It CANNOT be adopted as `@behaviour`:
+  `fleet_pilot` does not depend on `fleet_mcp` and the compile reference would create a new edge
+  (`allowed_graph.yaml` would go red). Duck-typed impl — any evolution of the signature/of the
+  `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
   """
 
   alias Fleet.Pilot.ForgeClient
   alias Fleet.Pilot.GitOps
   alias Fleet.Pilot.Roles
 
-  # Contenu + écriture du scaffold (templates purs, dual-dir main / work-ops) — extrait :
-  # aucune dépendance à l'orchestration, l'onboard l'appelle aux bons moments de sa séquence.
+  # Content + writing of the scaffold (pure templates, dual-dir main / work-ops) — extracted:
+  # no dependency on the orchestration, onboard calls it at the right moments of its sequence.
   alias Fleet.Pilot.ProjectOnboard.Scaffold
 
   require Logger
 
-  # H1/H3 : derive de l'autorite unique du layout container (Fleet.Layout, R0).
+  # H1/H3: derived from the single authority of the container layout (Fleet.Layout, R0).
   @projects_root Fleet.Layout.projects_root()
   @work_root Fleet.Layout.work_root()
-  # author de l'onboarding = le système (il GÉNÈRE le scaffold) — pas l'arch (simple relais), pas l'user
-  # (n'a rien écrit). committer = l'humain (git config) trace qui a initié (2026-06-14).
-  # Identité système : AUTORITÉ UNIQUE = Fleet.Credentials.ForgeIdentity.system_identity/0
-  # (H2 2026-07-04 : le name/email était retapé ici en dur — divergence en germe avec la gate).
+  # onboarding author = the system (it GENERATES the scaffold) — not the arch (mere relay), not the user
+  # (wrote nothing). committer = the human (git config) traces who initiated (2026-06-14).
+  # System identity: SINGLE AUTHORITY = Fleet.Credentials.ForgeIdentity.system_identity/0
+  # (H2 2026-07-04: the name/email was retyped here hardcoded — a divergence in the making with the gate).
   defp onboard_author, do: Fleet.Credentials.ForgeIdentity.system_identity()
 
   @type result :: %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}
 
   @doc """
-  Onboard le projet `name` (slug kebab-case). `opts` :
+  Onboard the project `name` (kebab-case slug). `opts`:
 
-    * `:org`           — org forge (défaut `"fleet"`)
-    * `:description`   — description du repo (défaut `""`)
-    * `:pitch`         — phrase de pitch (scaffold README/spec ; défaut = description)
-    * `:projects_root` / `:work_root` — racines FS (défauts : `/home/projects`, `/home/projects.work`)
-    * `:base_url` / `:token` — override forge (sinon config `:fleet_pilot, :forge`)
+    * `:org`           — forge org (default `"fleet"`)
+    * `:description`   — repo description (default `""`)
+    * `:pitch`         — pitch phrase (README/spec scaffold; default = description)
+    * `:projects_root` / `:work_root` — FS roots (defaults: `/home/projects`, `/home/projects.work`)
+    * `:base_url` / `:token` — forge override (otherwise config `:fleet_pilot, :forge`)
 
-  Retourne `{:ok, %{repo, project_dir, work_dir}}` ou `{:error, term()}` (fail-fast, pas de rollback
-  auto : un échec à mi-chemin laisse l'état partiel — l'opérateur nettoie avant re-run).
+  Returns `{:ok, %{repo, project_dir, work_dir}}` or `{:error, term()}` (fail-fast, no auto
+  rollback: a mid-way failure leaves partial state — the operator cleans up before re-run).
   """
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def onboard(name, opts \\ []) when is_binary(name) do
@@ -73,11 +73,11 @@ defmodule Fleet.Pilot.ProjectOnboard do
     proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
     work_dir = Path.join(Keyword.get(opts, :work_root, @work_root), name)
 
-    # Gaps anti-tie (Fleet.Pilot.WriteSpacing, PARTAGÉ avec StepRunCompleter) : la séquence tourne en
-    # LOCAL (git), quasi-instantanée — sans gap, create_repo/push main/push work/ops tombent dans la
-    # MÊME seconde Gitea et le feed d'activité les affiche dans un ordre ARBITRAIRE (constaté en direct :
-    # "push main" apparaissait AVANT "repo créé"). Un gap après create_repo (le repo EST créé avant tout
-    # push) et un après push main (main EST poussé avant work/ops) suffisent aux 3 événements visibles.
+    # Anti-tie gaps (Fleet.Pilot.WriteSpacing, SHARED with StepRunCompleter): the sequence runs
+    # LOCALLY (git), near-instantaneous — without a gap, create_repo/push main/push work/ops fall in the
+    # SAME Gitea second and the activity feed displays them in an ARBITRARY order (observed live:
+    # "push main" appeared BEFORE "repo created"). A gap after create_repo (the repo IS created before any
+    # push) and one after push main (main IS pushed before work/ops) suffice for the 3 visible events.
     with :ok <- validate_name(name),
          :ok <- refute_existing(proj_dir, work_dir),
          {:ok, full_name} <- create_repo(name, org, opts),
@@ -99,22 +99,22 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   @doc """
-  Importe un repo EXISTANT `full_name` (`"owner/name"`, ex. `"fleet/deja-la"`) dans la machine à agents —
-  WS4. Contrat de sortie IDENTIQUE à `onboard/2` (dual-dir + gate forge-enforcé), mais **ne crée ni ne
-  scaffold `main`** : le contenu du repo reste INTACT (c'est tout le point d'un import — un repo qui existe
-  déjà, poussé hors-fleet ou par un humain). `opts` : mêmes clés que `onboard/2` (`:projects_root`/
-  `:work_root`/`:base_url`/`:token`) — pas de `:org`/`:description`/`:pitch` (rien à créer).
+  Imports an EXISTING repo `full_name` (`"owner/name"`, e.g. `"fleet/deja-la"`) into the agent machine —
+  WS4. Output contract IDENTICAL to `onboard/2` (dual-dir + forge-enforced gate), but **neither creates nor
+  scaffolds `main`**: the repo content stays INTACT (that is the whole point of an import — a repo that
+  already exists, pushed outside-fleet or by a human). `opts`: same keys as `onboard/2` (`:projects_root`/
+  `:work_root`/`:base_url`/`:token`) — no `:org`/`:description`/`:pitch` (nothing to create).
 
-  Préconditions (fail-loud, aucune ne se contourne à l'aveugle) :
-    * `full_name` commence par `"<org>/"` (défaut `"fleet"`, override `opts[:org]`) — WS3 : l'admission
-      = l'appartenance-org, donc un repo hors-org ne serait JAMAIS découvert par le poller après import.
-      Import ne TRANSFÈRE PAS l'ownership (hors-scope V1) : le repo doit déjà être dans l'org (déplace-le
-      via la forge d'abord).
-    * la branche par défaut du repo EST `main` (même convention que `onboard`/`protect_main`, qui la
-      suppose partout) — sinon `{:error, {:unexpected_default_branch, ...}}`.
+  Preconditions (fail-loud, none bypassed blindly):
+    * `full_name` starts with `"<org>/"` (default `"fleet"`, override `opts[:org]`) — WS3: admission
+      = org-membership, so a repo outside-org would NEVER be discovered by the poller after import.
+      Import does NOT TRANSFER ownership (out-of-scope V1): the repo must already be in the org (move it
+      via the forge first).
+    * the repo's default branch IS `main` (same convention as `onboard`/`protect_main`, which assume it
+      everywhere) — otherwise `{:error, {:unexpected_default_branch, ...}}`.
 
-  Idempotent sur `work/ops` : si la branche existe déjà (repo réimporté, ou déjà onboardé), on ne
-  l'écrase PAS — seul `lock_main` est ré-appliqué (idempotent côté Gitea, re-PUT = même règle).
+  Idempotent on `work/ops`: if the branch already exists (re-imported repo, or already onboarded), we do
+  NOT overwrite it — only `lock_main` is re-applied (idempotent on the Gitea side, re-PUT = same rule).
   """
   @spec import(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import(full_name, opts \\ []) when is_binary(full_name) do
@@ -136,9 +136,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  # Admission WS3 = appartenance-org : un import hors-org ne serait jamais découvert par le poller. Check
-  # STRING-level (le full_name Gitea EST "<owner>/<name>" — pas un appel forge de plus pour re-vérifier
-  # ce que le nom dit déjà).
+  # WS3 admission = org-membership: an outside-org import would never be discovered by the poller. Check
+  # at STRING-level (the Gitea full_name IS "<owner>/<name>" — not one more forge call to re-verify
+  # what the name already says).
   defp require_org_membership(full_name, org) do
     if String.starts_with?(full_name, "#{org}/"),
       do: :ok,
@@ -153,8 +153,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  # work/ops idempotent : présent (re-import, ou repo déjà onboardé) → on NE L'ÉCRASE PAS (skip). Absent
-  # (le cas nominal d'un repo externe) → même séquence que l'onboard (steps 5-7) : orphan branch + scaffold
+  # work/ops idempotent: present (re-import, or repo already onboarded) → we DO NOT OVERWRITE it (skip). Absent
+  # (the nominal case of an external repo) → same sequence as onboard (steps 5-7): orphan branch + scaffold
   # + commit + push.
   defp ensure_work_ops(full_name, url, proj_dir, work_dir, name, opts) do
     if ForgeClient.Repo.branch_exists?(full_name, "work/ops", fc_opts(opts)) do
@@ -170,19 +170,19 @@ defmodule Fleet.Pilot.ProjectOnboard do
     end
   end
 
-  # ── DÉCOUVRABILITÉ — WS3 : rien à poser. Le repo est créé DANS l'org `fleet` (create_repo `org:`) → il
-  # est de facto découvert par le poller (`list_org_repos` : appartenance-org = admission). Plus de topic
-  # mutable ni de sceau à graver : l'org EST la frontière du groupe de confiance (posée en amont par l'admin).
-  # L'accès des rôles vient des teams tofu (include_all) ; l'humain est read via la team `humans`. Le scoping
-  # per-humain se fait à l'issue (`assigned_by`), pas au repo. ── Verrou de `main` ci-dessous. ──
+  # ── DISCOVERABILITY — WS3: nothing to post. The repo is created IN the org `fleet` (create_repo `org:`) → it
+  # is de facto discovered by the poller (`list_org_repos`: org-membership = admission). No more mutable
+  # topic nor seal to engrave: the org IS the frontier of the trust group (set upstream by the admin).
+  # Role access comes from the tofu teams (include_all); the human is read via the `humans` team. Per-human
+  # scoping is done at the issue (`assigned_by`), not at the repo. ── `main` lock below. ──
 
-  # ── Verrou de `main` : le repo neuf naît PRÊT pour le workflow d'agents avec GATE forge-enforcé ──
-  # Les comptes de rôle (producteur/juges/gatekeeper) ont DÉJÀ le **write** sur tout repo de l'org via les
-  # teams tofu (`writers`/`judges`, `include_all_repositories`) → plus de grant per-repo redondant ici (leurs
-  # reviews comptent au gate + le gatekeeper merge). Reste LE geste : protéger `main` — N approvals (= nb de
-  # juges) + dismiss-stale (re-review au rework) + block-on-rejected (un REQUEST_CHANGES bloque) + pas de push
-  # direct (merge via PR). Mécanique (ce step, pas une action humaine) → tout projet onboardé a l'arbitre côté
-  # FORGE. `work/ops` + feature-branches NON protégées (zones de mouvement direct du système).
+  # ── `main` lock: the new repo is born READY for the agent workflow with a forge-enforced GATE ──
+  # The role accounts (producer/judges/gatekeeper) ALREADY have **write** on any repo of the org via the
+  # tofu teams (`writers`/`judges`, `include_all_repositories`) → no more redundant per-repo grant here (their
+  # reviews count at the gate + the gatekeeper merges). LEFT is THE gesture: protect `main` — N approvals (= nb of
+  # judges) + dismiss-stale (re-review on rework) + block-on-rejected (a REQUEST_CHANGES blocks) + no direct
+  # push (merge via PR). Mechanical (this step, not a human action) → every onboarded project has the arbiter on the
+  # FORGE side. `work/ops` + feature-branches NOT protected (zones of direct system movement).
   defp lock_main(full_name, opts), do: protect_main(full_name, opts)
 
   defp protect_main(repo, opts) do
@@ -202,9 +202,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])
 
-  # ── slug / pré-conditions ────────────────────────────────────────────────
+  # ── slug / preconditions ─────────────────────────────────────────────────
 
-  # Slug path-safe (kebab-case, ≥2 char, pas de tiret bordure) — même contrat que skill v1 /new-project.
+  # Path-safe slug (kebab-case, ≥2 char, no border dash) — same contract as skill v1 /new-project.
   defp validate_name(name) do
     if Regex.match?(~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, name),
       do: :ok,
@@ -252,7 +252,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp add_work_ops(proj_dir, work_dir) do
     File.mkdir_p!(Path.dirname(work_dir))
 
-    # git 2.43 : --orphan -b <branch> <path> → worktree lié, branche orpheline (merge-base vide).
+    # git 2.43: --orphan -b <branch> <path> → linked worktree, orphan branch (empty merge-base).
     GitOps.run(["-C", proj_dir, "worktree", "add", "--orphan", "-b", "work/ops", work_dir],
       auth: false
     )
@@ -260,8 +260,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp commit(dir, message) do
     with :ok <- GitOps.run(["-C", dir, "add", "-A"], auth: false) do
-      # author = lcars-system (le système génère le scaffold, GIT_AUTHOR forcé) ; committer = git config
-      # runtime (= l'humain qui a initié → tracé, avatar) (2026-06-14).
+      # author = lcars-system (the system generates the scaffold, GIT_AUTHOR forced); committer = git config
+      # runtime (= the human who initiated → traced, avatar) (2026-06-14).
       GitOps.run(["-C", dir, "commit", "-m", message], auth: false, author: onboard_author())
     end
   end

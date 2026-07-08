@@ -1,30 +1,30 @@
 defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   @moduledoc """
-  Escalade SYSADMIN d'un incident (ouverture d'une issue forge `error_system`), extraite
-  de `Fleet.Pilot.IncidentRegistry` : le registre est la MÉMOIRE (GenServer, WAL + sync
-  forge) ; l'escalade est un acte STATELESS (aucune lecture du GenServer — tout vient
-  des arguments + config) qui construit et poste l'issue. Deux concerns, deux modules.
+  SYSADMIN escalation of an incident (opening an `error_system` forge issue), extracted
+  from `Fleet.Pilot.IncidentRegistry`: the registry is the MEMORY (GenServer, WAL + forge
+  sync); the escalation is a STATELESS act (no read of the GenServer — everything comes
+  from the arguments + config) that builds and posts the issue. Two concerns, two modules.
 
-  Partagée par `WakeRecovery` et les consumers d'échec via la façade
-  `IncidentRegistry.escalate/5` (DRY — un seul writer de l'issue sysadmin).
+  Shared by `WakeRecovery` and the failure consumers via the façade
+  `IncidentRegistry.escalate/5` (DRY — a single writer of the sysadmin issue).
 
-  ## Contrat
+  ## Contract
 
-    * Label `error_system` = signal DURABLE (le poller/humain trouve l'issue par lui) ;
-      assignee sysadmin best-effort (compte absent → retry SANS assignee : l'escalade
-      prime sur le nommage).
-    * Forge down → `{:error, _}` propagé (`record_or_escalate` le rend en
-      `{:escalation_failed, _}`, jamais un `{:escalated}` menteur).
-    * `kind` qualifie le MESSAGE (récurrence / re-roll échoué / pod récurrent /
-      SP suspect) — le diagnostic guide le sysadmin vers la root-cause.
+    * Label `error_system` = DURABLE signal (the poller/human finds the issue by it);
+      sysadmin assignee best-effort (account absent → retry WITHOUT assignee: escalation
+      takes precedence over naming).
+    * Forge down → `{:error, _}` propagated (`record_or_escalate` renders it as
+      `{:escalation_failed, _}`, never a lying `{:escalated}`).
+    * `kind` qualifies the MESSAGE (recurrence / failed re-roll / recurrent pod /
+      SP suspect) — the diagnosis guides the sysadmin toward the root-cause.
   """
 
   require Logger
 
   @doc """
-  Ouvre un issue système (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin) pour un
-  incident. `kind` : `:recurrence` | `:reroll_failed` | `:pod_failed` | `:sp_suspect`. Label = signal
-  DURABLE (toujours) ; assignee best-effort (fallback label-only si le compte n'existe pas).
+  Opens a system issue (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin) for an
+  incident. `kind`: `:recurrence` | `:reroll_failed` | `:pod_failed` | `:sp_suspect`. Label = DURABLE
+  signal (always); assignee best-effort (label-only fallback if the account does not exist).
   Returns `{:ok, number}` | `{:error, term}`.
   """
   @spec escalate(atom(), String.t(), term(), String.t(), keyword()) ::
@@ -54,23 +54,23 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     #{pane_block(opts[:pane])}
     """
 
-    # `create_issue` attend des IDs de label ENTIERS (contrat ForgeClient), PAS des noms. On suit donc le
-    # pattern etabli (`PodTools.do_create_issue`) : creer l'issue (avec l'assignee) PUIS poser le label par
-    # NOM via `add_label` (resolution name->id + auto-creation du label d'org cote ForgeClient). Passer
-    # `labels: [nom-string]` au POST -> 422 Gitea « cannot unmarshal string into int64 » : vu LIVE
-    # 2026-07-04 (run poc-morse), l'escalade sysadmin ne creait AUCUNE issue (rail mort silencieux).
+    # `create_issue` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the
+    # established pattern (`PodTools.do_create_issue`): create the issue (with the assignee) THEN set the label by
+    # NAME via `add_label` (name->id resolution + org-label auto-creation on the ForgeClient side). Passing
+    # `labels: [name-string]` to the POST -> 422 Gitea « cannot unmarshal string into int64 »: seen LIVE
+    # 2026-07-04 (run poc-morse), the sysadmin escalation created NO issue (silent dead rail).
     with {:ok, number} <- create_system_issue(create_fun, repo, title, body, assignee) do
-      # Label = signal DURABLE (le poller/humain trouve l'issue par ce label). add_label est fail-loud cote
-      # ForgeClient mais on ignore ici : l'ISSUE existe = l'escalade a eu lieu ; le label auto-cree son
-      # org-label et retry, echec tres improbable. Meme choix que do_create_issue (type:feature).
+      # Label = DURABLE signal (the poller/human finds the issue by this label). add_label is fail-loud on the
+      # ForgeClient side but we ignore it here: the ISSUE exists = the escalation happened; the label auto-creates its
+      # org-label and retries, failure very unlikely. Same choice as do_create_issue (type:feature).
       _ = add_label_fun.(repo, number, label, [])
       {:ok, number}
     end
   end
 
-  # Cree l'issue systeme avec l'assignee sysadmin ; assignee inexistant (compte absent) -> retry SANS
-  # assignee (best-effort : l'escalade prime sur le nommage). Forge down aux deux tentatives -> {:error, _}
-  # propage (record_or_escalate le rend en {:escalation_failed, _}, jamais un {:escalated} menteur).
+  # Creates the system issue with the sysadmin assignee; nonexistent assignee (account absent) -> retry WITHOUT
+  # assignee (best-effort: escalation takes precedence over naming). Forge down on both attempts -> {:error, _}
+  # propagated (record_or_escalate renders it as {:escalation_failed, _}, never a lying {:escalated}).
   defp create_system_issue(create_fun, repo, title, body, assignee) do
     case create_fun.(repo, title, body, assignees: [assignee]) do
       {:ok, _} = ok -> ok
@@ -78,7 +78,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     end
   end
 
-  # Bloc « écran capturé » (fallback-ACK déporté) attaché au issue — vide si pas de pane.
+  # « Captured screen » block (offloaded fallback-ACK) attached to the issue — empty if no pane.
   defp pane_block(pane) when is_binary(pane) and pane != "" do
     "\n## Écran capturé (ce que l'agent affichait au moment de l'échec)\n```\n#{pane}\n```\n"
   end

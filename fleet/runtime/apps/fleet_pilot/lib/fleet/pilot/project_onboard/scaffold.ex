@@ -1,24 +1,24 @@
 defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
   @moduledoc """
-  Scaffold d'un projet neuf, extrait de `Fleet.Pilot.ProjectOnboard` : le CONTENU des
-  fichiers initiaux (templates purs) + leur écriture sur disque. Aucune dépendance à
-  l'orchestration (forge, git, worktrees) — l'onboard appelle `main/3` et `work/3` aux
-  bons moments de sa séquence, ce module ne sait rien du reste.
+  Scaffold of a new project, extracted from `Fleet.Pilot.ProjectOnboard`: the CONTENT of
+  the initial files (pure templates) + their writing to disk. No dependency on the
+  orchestration (forge, git, worktrees) — onboard calls `main/3` and `work/3` at the
+  right moments of its sequence, this module knows nothing of the rest.
 
-  ## Les deux faces du dual-dir (archi LCARS répliquée)
+  ## The two faces of the dual-dir (replicated LCARS architecture)
 
-    * `main/3` — worktree branche `main` (le livrable) : README, .gitignore,
+    * `main/3` — `main` branch worktree (the deliverable): README, .gitignore,
       .editorconfig, docs/spec.md.
-    * `work/3` — worktree branche `work/ops` (orphan — plans, backlog, ops) :
+    * `work/3` — `work/ops` branch worktree (orphan — plans, backlog, ops):
       backlog.md, scratchpad.md, plans/.
 
-  Templates « standard, état de l'art — ajustable » : générateurs PURS (name+pitch →
-  markdown), le seul effet est `write_all` (mkdir_p + write, fail-loud par fichier).
+  Templates « standard, state of the art — adjustable »: PURE generators (name+pitch →
+  markdown), the only effect is `write_all` (mkdir_p + write, fail-loud per file).
   """
 
   @doc """
-  Scaffold du worktree `main` : README + .gitignore + .editorconfig + docs/spec.md.
-  `opts` : `:pitch` (défaut `:description`, défaut `"(à compléter)"`).
+  Scaffold of the `main` worktree: README + .gitignore + .editorconfig + docs/spec.md.
+  `opts`: `:pitch` (default `:description`, default `"(à compléter)"`).
   """
   @spec main(Path.t(), String.t(), keyword()) ::
           :ok | {:error, {:scaffold_write, String.t(), term()}}
@@ -35,8 +35,8 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
   end
 
   @doc """
-  Scaffold du worktree `work/ops` : backlog.md + scratchpad.md + plans/.
-  `opts` : `:pitch` (défaut `:description`, défaut `""`).
+  Scaffold of the `work/ops` worktree: backlog.md + scratchpad.md + plans/.
+  `opts`: `:pitch` (default `:description`, default `""`).
   """
   @spec work(Path.t(), String.t(), keyword()) ::
           :ok | {:error, {:scaffold_write, String.t(), term()}}
@@ -51,8 +51,8 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
     })
   end
 
-  # Écrit le manifest {chemin relatif => contenu} sous `dir` — fail-loud PAR fichier
-  # (le premier échec arrête et nomme le fichier fautif).
+  # Writes the manifest {relative path => content} under `dir` — fail-loud PER file
+  # (the first failure stops and names the offending file).
   defp write_all(dir, files) do
     Enum.reduce_while(files, :ok, fn {rel, content}, :ok ->
       path = Path.join(dir, rel)
