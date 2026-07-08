@@ -1,15 +1,16 @@
-defmodule Fleet.Workflow.GitRef do
+defmodule Fleet.GitRef do
   @moduledoc """
-  Single source for validating a git branch / ref name on the system side.
+  Single source for validating a git branch / ref name, system-wide.
 
   Guardrail against catalogue/brief inputs that are manifestly broken (space, `..`, leading `-`):
   NOT an anti-injection defense (`System.cmd` uses no shell), but a boundary that keeps a malformed
-  name from reaching a raw `git push`/`commit`. Enforces the `git check-ref-format` rules that a
+  name from reaching a raw `git clone`/`push`/`commit`. Enforces the `git check-ref-format` rules that a
   charset regex alone misses (R2-06 — full git authority, not "roughly aligned").
 
-  Consumed by `Fleet.Workflow.Git` (`check_branch`) and `Fleet.Workflow.Deliverable` (`check_ref`) —
-  which each carried a copy of the same regex. Each caller keeps ITS typed error shape
-  (`:invalid_branch` / `{:invalid_ref, ref}`); only the `valid?` decision is centralized here.
+  PURE primitive living in Ring 0 (alongside `Fleet.Slug`) so BOTH the workflow (`Git`/`Deliverable`,
+  Ring 2) and the project bootstrap (`Phase.Clone`, Ring 1) validate refs at their OWN boundary without
+  an upward compile edge — the reason it moved out of `fleet_workflow` (R1-07/08). Each caller keeps ITS
+  typed error shape (`:invalid_branch` / `{:invalid_ref, ref}`); only the `valid?` decision is centralized.
   """
 
   @ref_re ~r/^[A-Za-z0-9][A-Za-z0-9._\/\-]*$/

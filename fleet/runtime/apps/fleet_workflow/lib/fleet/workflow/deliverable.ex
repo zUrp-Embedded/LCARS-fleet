@@ -154,10 +154,10 @@ defmodule Fleet.Workflow.Deliverable do
   end
 
   # Refspec validation (`<local_ref>:<target_branch>`) delegated to the SINGLE AUTHORITY
-  # `Fleet.Workflow.GitRef` (the check-ref-format regex lived here, duplicated with `Git`). We keep the
-  # typed error shape specific to this module (which carries the offending `ref`).
+  # `Fleet.GitRef` (Ring 0 primitive; the check-ref-format regex lived here, duplicated with `Git`). We
+  # keep the typed error shape specific to this module (which carries the offending `ref`).
   defp check_ref(ref) do
-    if Fleet.Workflow.GitRef.valid?(ref), do: :ok, else: {:error, {:invalid_ref, ref}}
+    if Fleet.GitRef.valid?(ref), do: :ok, else: {:error, {:invalid_ref, ref}}
   end
 
   # ============================================================

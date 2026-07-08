@@ -325,7 +325,7 @@ defmodule Fleet.MCP.PodTools do
 
   # A forge repo ref is a gitea `owner/name` full-name (R2-03): exactly one `/`, both sides non-empty and
   # whitespace-free. A guardrail that rejects a manifestly-broken ref EARLY with a clear error (before the
-  # forge call fails obscurely) — NOT the full gitea naming authority, same spirit as `Fleet.Workflow.GitRef`.
+  # forge call fails obscurely) — NOT the full gitea naming authority, same spirit as `Fleet.GitRef`.
   defp valid_repo_ref?(ref) when is_binary(ref) do
     case String.split(ref, "/") do
       [owner, name] -> owner != "" and name != "" and not String.match?(ref, ~r/\s/)

@@ -123,10 +123,10 @@ defmodule Fleet.Workflow.Git do
   defp check_workspace_string(ws) when is_binary(ws) and ws != "", do: :ok
   defp check_workspace_string(_ws), do: {:error, :invalid_workspace}
 
-  # Branch validation delegated to the SINGLE AUTHORITY `Fleet.Workflow.GitRef` (the check-ref-format regex
-  # used to live here, duplicated with `Deliverable`). We keep the typed error shape specific to this module.
+  # Branch validation delegated to the SINGLE AUTHORITY `Fleet.GitRef` (Ring 0 primitive; the
+  # check-ref-format regex used to live here, duplicated with `Deliverable`). We keep the typed error shape.
   defp check_branch(branch) do
-    if Fleet.Workflow.GitRef.valid?(branch), do: :ok, else: {:error, :invalid_branch}
+    if Fleet.GitRef.valid?(branch), do: :ok, else: {:error, :invalid_branch}
   end
 
   defp check_push_remote(%{push?: true} = opts) do

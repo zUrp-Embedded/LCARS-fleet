@@ -1,11 +1,12 @@
-defmodule Fleet.Workflow.GitRefTest do
+defmodule Fleet.GitRefTest do
   @moduledoc """
-  Verrouille l'AUTORITÉ unique de validation de ref git (`Fleet.Workflow.Git` et
-  `Fleet.Workflow.Deliverable` délèguent ici). Couvre les cas frontière du check-ref-format.
+  Verrouille l'AUTORITÉ unique de validation de ref git — primitive Ring 0 (`Fleet.Workflow.Git`,
+  `Fleet.Workflow.Deliverable` et `Fleet.ProjectBootstrap.Phase.Clone` délèguent ici). Couvre les cas
+  frontière du check-ref-format.
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Workflow.GitRef
+  alias Fleet.GitRef
 
   test "refs bien formées acceptées (slash, points, ref simple)" do
     for ok <- ["main", "feature/work", "lcars/issue-7-engineer", "release-1.2.3", "a"] do
