@@ -1,14 +1,14 @@
 defmodule Fleet.Pilot.ForgeClient.Repo do
   @moduledoc """
-  **Provisioning de repo** dans la machine à agents — sous-domaine de `Fleet.Pilot.ForgeClient` :
-  création de repo, collaborateurs, découverte par appartenance-org (WS3), branch-protection, identité
-  forge du repo. (Le sceau d'admission `post_onboard_marker`/`admitted?` + la découverte par topic
-  `search_repos_by_topic`/`add_topic` sont RETIRÉS — l'admission est l'appartenance à l'org, gérée EN
-  AMONT par l'admin humain ; plus de marqueur server-side à poser/lire.)
+  **Repo provisioning** in the agent machine — sub-domain of `Fleet.Pilot.ForgeClient`:
+  repo creation, collaborators, discovery by org-membership (WS3), branch-protection, the repo's forge
+  identity. (The `post_onboard_marker`/`admitted?` admission seal + the topic discovery
+  `search_repos_by_topic`/`add_topic` are REMOVED — admission is org membership, managed
+  UPSTREAM by the human admin; no more server-side marker to set/read.)
 
-  Les ops *seam-faced* (`repo_id`, `list_org_repos`) sont forwardées par `ForgeClient` (le module injecté
-  par le seam `:forge_client` reste lui) ; les ops de provisioning (`create_repo`, `add_collaborator`,
-  `protect_branch`) sont appelées en direct par `Fleet.Pilot.ProjectOnboard`.
+  The *seam-faced* ops (`repo_id`, `list_org_repos`) are forwarded by `ForgeClient` (the module injected
+  by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `add_collaborator`,
+  `protect_branch`) are called directly by `Fleet.Pilot.ProjectOnboard`.
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
@@ -19,17 +19,17 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
       http_put: 3
     ]
 
-  # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
+  # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
 
   @doc """
-  Crée un repo sur la forge. `opts[:org]` → `POST /orgs/<org>/repos` (repo d'org) ; sinon
-  `POST /user/repos` (compte du token). `auto_init: true` par défaut (commit initial + README
-  → clonable tout de suite). Idempotent best-effort : repo déjà présent (HTTP 409) → `{:ok, :already_exists}`.
+  Creates a repo on the forge. `opts[:org]` → `POST /orgs/<org>/repos` (org repo); otherwise
+  `POST /user/repos` (the token's account). `auto_init: true` by default (initial commit + README
+  → clonable right away). Best-effort idempotent: repo already present (HTTP 409) → `{:ok, :already_exists}`.
 
   ## Returns
-    * `{:ok, full_name}` — repo créé (ex `"fleet/poc-helloworld"`)
-    * `{:ok, :already_exists}` — déjà présent (409)
+    * `{:ok, full_name}` — repo created (e.g. `"fleet/poc-helloworld"`)
+    * `{:ok, :already_exists}` — already present (409)
     * `{:error, term()}` — HTTP/transport/config
   """
   @spec create_repo(String.t(), Keyword.t()) ::
@@ -59,11 +59,11 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Ajoute/met à jour un **collaborateur** sur `repo` avec `permission` (`"read"|"write"|"admin"`) —
-  Gitea `PUT /repos/{repo}/collaborators/{username}`. Idempotent (re-PUT = même perm). Requiert
-  repo-admin (token système). L'onboarding donne le **write** aux comptes de rôle (engineer/
-  qualifier/reviewer/gatekeeper) pour que leurs reviews comptent au gate de branch-protection et que
-  le gatekeeper puisse merger.
+  Adds/updates a **collaborator** on `repo` with `permission` (`"read"|"write"|"admin"`) —
+  Gitea `PUT /repos/{repo}/collaborators/{username}`. Idempotent (re-PUT = same perm). Requires
+  repo-admin (system token). Onboarding grants **write** to the role accounts (engineer/
+  qualifier/reviewer/gatekeeper) so that their reviews count at the branch-protection gate and so that
+  the gatekeeper can merge.
   """
   @spec add_collaborator(String.t(), String.t(), String.t(), Keyword.t()) ::
           :ok | {:error, term()}
@@ -82,11 +82,11 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Repos de l'org `org` — Gitea `GET /orgs/{org}/repos`. **LA découverte du poller (WS3)** : l'appartenance
-  à l'org EST l'admission (l'org = le groupe de confiance, gérée EN AMONT par l'admin humain) — plus de topic
-  mutable ni de sceau server-side. Le scoping per-humain reste `assigned_by` (issue-level, garde anti-vol :
-  la fleet ne traite QUE ses issues, même si elle voit les repos des autres du groupe). Retourne les
-  `full_name` (`"owner/name"`). (limit=50 : une org small-team a < 50 repos actifs ; pagination = backlog.)
+  Repos of the org `org` — Gitea `GET /orgs/{org}/repos`. **THE poller's discovery (WS3)**: org
+  membership IS the admission (the org = the trust group, managed UPSTREAM by the human admin) — no more mutable
+  topic nor server-side seal. The per-human scoping stays `assigned_by` (issue-level, anti-theft guard:
+  the fleet processes ONLY its issues, even if it sees the group's other repos). Returns the
+  `full_name`s (`"owner/name"`). (limit=50: a small-team org has < 50 active repos; pagination = backlog.)
   """
   @spec list_org_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list_org_repos(org, opts \\ []) when is_binary(org) do
@@ -97,10 +97,10 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Branche par défaut de `repo` — Gitea `GET /repos/{repo}` → `.default_branch`. Sert à WS4 (import) :
-  la protection/clone du runtime suppose `main` PARTOUT (même convention que `create_repo`, `protect_main`) ;
-  importer un repo dont le défaut n'est PAS `main` est un refus explicite (`Fleet.Pilot.ProjectOnboard.import/2`),
-  pas une généralisation du nom de branche — hors-scope tant qu'aucun repo réel n'en a besoin.
+  Default branch of `repo` — Gitea `GET /repos/{repo}` → `.default_branch`. Serves WS4 (import):
+  the runtime's protection/clone assumes `main` EVERYWHERE (same convention as `create_repo`, `protect_main`);
+  importing a repo whose default is NOT `main` is an explicit refusal (`Fleet.Pilot.ProjectOnboard.import/2`),
+  not a generalization of the branch name — out-of-scope as long as no real repo needs it.
   """
   @spec default_branch(String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   def default_branch(repo, opts \\ []) when is_binary(repo) do
@@ -115,10 +115,10 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  La branche `branch` existe-t-elle sur `repo` ? Gitea `GET /repos/{repo}/branches/{branch}` (200 = oui,
-  404 = non). Sert à WS4 (import) : idempotence de `work/ops` — un repo réimporté (ou déjà onboardé)
-  ne doit pas se faire écraser son orphan branch. `false` sur toute erreur (fail-safe : absence non
-  confirmée ⇒ on tente la création, Gitea refusera proprement si elle existe déjà).
+  Does the branch `branch` exist on `repo`? Gitea `GET /repos/{repo}/branches/{branch}` (200 = yes,
+  404 = no). Serves WS4 (import): idempotence of `work/ops` — a re-imported (or already onboarded) repo
+  must not have its orphan branch overwritten. `false` on any error (fail-safe: unconfirmed absence
+  ⇒ we attempt creation, Gitea will refuse cleanly if it already exists).
   """
   @spec branch_exists?(String.t(), String.t(), Keyword.t()) :: boolean()
   def branch_exists?(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
@@ -132,9 +132,9 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  `username` est-il collaborateur de `repo` ? Gitea `GET /repos/{repo}/collaborators/{username}` (204 = oui,
-  404 = non). `false` sur toute erreur (config/transport/404) — fail-safe (on ne défaut PAS sur un repo
-  inaccessible). Sert au scoping « projet par défaut = repos où l'humain est collaborateur » (create_issue).
+  Is `username` a collaborator of `repo`? Gitea `GET /repos/{repo}/collaborators/{username}` (204 = yes,
+  404 = no). `false` on any error (config/transport/404) — fail-safe (we do NOT default on an
+  inaccessible repo). Serves the "default project = repos where the human is a collaborator" scoping (create_issue).
   """
   @spec collaborator?(String.t(), String.t(), Keyword.t()) :: boolean()
   def collaborator?(repo, username, opts \\ []) when is_binary(repo) and is_binary(username) do
@@ -148,13 +148,13 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Repo du **dernier issue travaillé** par `human`, SCOPÉ aux repos où il est **collaborateur**. Sert de
-  projet par défaut quand l'arch appelle `create_issue` sans `project` explicite (≠ « dernier créé », jugé
-  mauvais). Mécanique : issue-search global `assigned_by=<human>` → tri
-  CLIENT-SIDE par `updated_at` desc (le `sort=` Gitea s'est révélé peu fiable) → 1ʳᵉ issue dont le repo passe
-  `collaborator?/3` (l'`assigned_by` seul inclut des repos non-collaborateur, ex. vieux issues de test). `:none`
-  si rien (fleet neuve / forge down). Il n'y a plus de repli config global : le repo cible d'une délégation
-  est désormais passé explicitement par l'arch (`project`), jamais lu d'une mémoire de « projet courant ».
+  Repo of the **last issue worked** by `human`, SCOPED to repos where they are a **collaborator**. Serves as
+  the default project when the arch calls `create_issue` without an explicit `project` (≠ "last created", judged
+  wrong). Mechanics: global issue-search `assigned_by=<human>` → CLIENT-SIDE sort
+  by `updated_at` desc (Gitea's `sort=` proved unreliable) → 1st issue whose repo passes
+  `collaborator?/3` (`assigned_by` alone includes non-collaborator repos, e.g. old test issues). `:none`
+  if nothing (fresh fleet / forge down). There is no more global config fallback: a delegation's target repo
+  is now passed explicitly by the arch (`project`), never read from a "current project" memory.
   """
   @spec last_worked_repo(String.t(), Keyword.t()) :: {:ok, String.t()} | :none
   def last_worked_repo(human, opts \\ []) when is_binary(human) do
@@ -182,11 +182,11 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  L'**id forge numérique** du repo (`GET /repos/<repo>` → `.id`). C'est l'identité du projet pour le
-  `session_id` déterministe (`Fleet.Spawner.SessionId`, segment `<REPO4>`) : la FORGE est la
-  source de vérité, on ne dérive PAS un id du néant. Id Gitea = entier séquentiel stable (ex.
-  `fleet/lcars` = 145). `{:error, _}` si le repo n'existe pas / forge down → l'appelant retombe sur un
-  UUID random (best-effort, zéro collision).
+  The repo's **numeric forge id** (`GET /repos/<repo>` → `.id`). It's the project's identity for the
+  deterministic `session_id` (`Fleet.Spawner.SessionId`, `<REPO4>` segment): the FORGE is the
+  source of truth, we do NOT derive an id from nothing. Gitea id = stable sequential integer (e.g.
+  `fleet/lcars` = 145). `{:error, _}` if the repo doesn't exist / forge down → the caller falls back to a
+  random UUID (best-effort, zero collision).
   """
   @spec repo_id(String.t(), Keyword.t()) :: {:ok, integer()} | {:error, term()}
   def repo_id(repo, opts \\ []) when is_binary(repo) do
@@ -201,16 +201,16 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   end
 
   @doc """
-  Pose une règle de **branch-protection** sur `repo` — Gitea `POST /repos/{repo}/branch_protections`.
-  `rule` = map d'options Gitea (`rule_name`, `required_approvals`, `dismiss_stale_approvals`,
-  `block_on_rejected_reviews`, `enable_push`, …). C'est le **gate forge-enforcé** : sur le repo
-  sandbox, la forge refuse le merge tant que les gardes (N approvals, pas de REQUEST_CHANGES) ne sont
-  pas vertes → l'arbitre est la forge, pas le runtime. Requiert repo-admin.
-  Idempotent : une règle déjà posée → `:ok`. Vérifié empiriquement (WS4 e2e, 2026-07-07) : Gitea rend
-  **403** `"Branch protection already exist"` pour ce cas précis — PAS 409/422 comme documenté avant
-  (bug latent, présent aussi côté `onboard/2` sur tout re-run post-protect ; débusqué par l'idempotence
-  testée d'`import/2`). On ne peut PAS avaler tout 403 (un vrai refus de permission serait masqué) →
-  on matche le MESSAGE précis, pas juste le code.
+  Places a **branch-protection** rule on `repo` — Gitea `POST /repos/{repo}/branch_protections`.
+  `rule` = map of Gitea options (`rule_name`, `required_approvals`, `dismiss_stale_approvals`,
+  `block_on_rejected_reviews`, `enable_push`, …). It's the **forge-enforced gate**: on the sandbox
+  repo, the forge refuses the merge as long as the guards (N approvals, no REQUEST_CHANGES) are
+  not green → the arbiter is the forge, not the runtime. Requires repo-admin.
+  Idempotent: an already-placed rule → `:ok`. Empirically verified (WS4 e2e, 2026-07-07): Gitea returns
+  **403** `"Branch protection already exist"` for this precise case — NOT 409/422 as documented before
+  (latent bug, also present on the `onboard/2` side on any post-protect re-run; flushed out by the tested
+  idempotence of `import/2`). We CANNOT swallow every 403 (a real permission refusal would be masked) →
+  we match the precise MESSAGE, not just the code.
   """
   @spec protect_branch(String.t(), map(), Keyword.t()) :: :ok | {:error, term()}
   def protect_branch(repo, rule, opts \\ []) when is_binary(repo) and is_map(rule) do

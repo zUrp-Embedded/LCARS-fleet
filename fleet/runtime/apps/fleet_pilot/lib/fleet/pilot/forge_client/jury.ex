@@ -1,62 +1,62 @@
 defmodule Fleet.Pilot.ForgeClient.Jury do
   @moduledoc """
-  Lecture de l'**état de jury** d'une PR (reviews natives Gitea) — sous-domaine de `Fleet.Pilot.ForgeClient`.
-  Concern autonome : il ne lit QUE `GET .../pulls/{index}/reviews` et en dérive verdicts/jury/feedback ;
-  il n'appelle aucune autre op forge (zéro couplage au cœur issues/PR). `ForgeClient` forwarde ces
-  fonctions (le module injecté par le seam `:forge_client` reste `ForgeClient` ; l'implémentation vit ici).
+  Reads the **jury state** of a PR (native Gitea reviews) — sub-domain of `Fleet.Pilot.ForgeClient`.
+  Self-contained concern: it reads ONLY `GET .../pulls/{index}/reviews` and derives verdicts/jury/feedback
+  from it; it calls no other forge op (zero coupling to the issues/PR core). `ForgeClient` forwards these
+  functions (the module injected by the `:forge_client` seam stays `ForgeClient`; the implementation lives here).
 
-  La subtilité du domaine — pourquoi ce n'est PAS trivial — est le **commit-scoping** et le fait que
-  `requested_reviewers` de Gitea est VOLATIL : la source de vérité du jury est la liste des review-records,
-  pas le champ requested. Détails dans chaque `@doc`.
+  The domain subtlety — why this is NOT trivial — is the **commit-scoping** and the fact that
+  Gitea's `requested_reviewers` is VOLATILE: the jury's source of truth is the list of review-records,
+  not the requested field. Details in each `@doc`.
   """
 
   import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, http_get: 2, paginate: 3]
 
-  # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
+  # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1]
 
   @doc """
-  Verdict de review **PAR juge** d'une PR (Gitea `GET /repos/{repo}/pulls/{index}/reviews`) : la
-  DERNIÈRE review décisive non-dismissed de CHAQUE reviewer, clé = login **downcasé**.
+  Review verdict **PER judge** of a PR (Gitea `GET /repos/{repo}/pulls/{index}/reviews`): the
+  LAST decisive non-dismissed review of EACH reviewer, key = **downcased** login.
 
-  **Pourquoi par-juge et pas `requested_reviewers`** : Gitea 1.26 ne vide PAS `requested_reviewers`
-  quand un juge a reviewé, et la DELETE est un no-op sur un reviewer déjà actif → on
-  ne peut PAS s'appuyer dessus pour savoir « qui reste à juger ». La SOURCE DE VÉRITÉ = la liste des
-  reviews : un juge a un **verdict décisif** ssi sa dernière review non-dismissed est APPROVED ou
-  REQUEST_CHANGES. Le poller dispatch un juge demandé qui n'a PAS encore de verdict, et tranche
-  (merge/rework) quand tous les demandés en ont un.
+  **Why per-judge and not `requested_reviewers`**: Gitea 1.26 does NOT clear `requested_reviewers`
+  when a judge has reviewed, and the DELETE is a no-op on an already-active reviewer → we
+  CANNOT rely on it to know "who is left to judge". The SOURCE OF TRUTH = the list of
+  reviews: a judge has a **decisive verdict** iff its last non-dismissed review is APPROVED or
+  REQUEST_CHANGES. The poller dispatches a requested judge that does NOT yet have a verdict, and decides
+  (merge/rework) when all the requested ones have one.
 
-  **Commit-scoping (`:head_sha`)** : un verdict ne vaut que pour le COMMIT qu'il a jugé. Passer
-  `head_sha: pr.head.sha` (chemin prod) → seules les reviews `commit_id == head_sha` comptent ; une review
-  sur un commit antérieur est PÉRIMÉE (le code n'existe plus). Crucial pour le REQUEST_CHANGES : Gitea ne
-  le dismisse JAMAIS au push (≠ approbations stale, dismissées par branch-protection) — sans scoping, un
-  REQUEST_CHANGES périmé reste « actif », son juge n'est jamais re-dispatché (il a déjà un verdict) et la
-  PR bouclerait en rework infini. Le scoping le rend `pending` → re-jugé sur le code courant.
-  Les reviews COMMENT/PENDING/REQUEST_REVIEW ne sont PAS décisives (ignorées).
+  **Commit-scoping (`:head_sha`)**: a verdict is only valid for the COMMIT it judged. Passing
+  `head_sha: pr.head.sha` (prod path) → only reviews `commit_id == head_sha` count; a review
+  on an earlier commit is STALE (the code no longer exists). Crucial for REQUEST_CHANGES: Gitea
+  NEVER dismisses it on push (≠ stale approvals, dismissed by branch-protection) — without scoping, a
+  stale REQUEST_CHANGES stays "active", its judge is never re-dispatched (it already has a verdict) and the
+  PR would loop in infinite rework. Scoping makes it `pending` → re-judged on the current code.
+  COMMENT/PENDING/REQUEST_REVIEW reviews are NOT decisive (ignored).
 
   ## Returns
     * `{:ok, %{"qualifier" => :approved, "reviewer" => :changes_requested, ...}}` — login(↓) → verdict
-    * `{:ok, %{}}` — aucune review décisive
+    * `{:ok, %{}}` — no decisive review
     * `{:error, term()}` — HTTP/transport/config
   """
   @spec pr_review_verdicts(String.t(), integer(), Keyword.t()) ::
           {:ok, %{optional(String.t()) => :approved | :changes_requested}} | {:error, term()}
   def pr_review_verdicts(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
-    # Projection « verdicts seuls » de `pr_review_state` (factorisé : un seul fetch, une seule logique de
-    # scoping/dernière-review). Conservé pour les callers qui n'ont pas besoin du SET du jury (pod_tools).
+    # "Verdicts only" projection of `pr_review_state` (factored: a single fetch, a single
+    # scoping/last-review logic). Kept for callers that don't need the jury SET (pod_tools).
     with {:ok, %{verdicts: verdicts}} <- pr_review_state(repo, index, opts), do: {:ok, verdicts}
   end
 
   @doc """
-  État de jury d'une PR en UN fetch (`GET .../pulls/{index}/reviews`) : `verdicts` (décisifs par juge,
-  commit-scopés via `:head_sha` — cf. `pr_review_verdicts`) ET `reviewers` (le SET du jury).
+  Jury state of a PR in ONE fetch (`GET .../pulls/{index}/reviews`): `verdicts` (decisive per judge,
+  commit-scoped via `:head_sha` — cf. `pr_review_verdicts`) AND `reviewers` (the jury SET).
 
-  **Le SET du jury ne se lit PAS de `pr.requested_reviewers`** : ce champ est VOLATIL (Gitea
-  l'altère de façon non fiable — un juge peut en DISPARAÎTRE sans avoir voté, ce qui ferait merger sur
-  demi-jury). Source STABLE = les review-records, qui persistent : un `REQUEST_REVIEW` =
-  « ce juge a été demandé » ; un `APPROVED`/`REQUEST_CHANGES` = « il a voté ». Le caller (`dispatch_review`)
-  unionne avec `requested_reviewers` (défensif) et calcule `pending = jury -- verdicts` → un juge
-  jamais-voté reste `pending` (spawné), JAMAIS sauté.
+  **The jury SET is NOT read from `pr.requested_reviewers`**: that field is VOLATILE (Gitea
+  alters it unreliably — a judge can DISAPPEAR from it without having voted, which would merge on a
+  half-jury). STABLE source = the review-records, which persist: a `REQUEST_REVIEW` =
+  "this judge was requested"; an `APPROVED`/`REQUEST_CHANGES` = "it voted". The caller (`dispatch_review`)
+  unions with `requested_reviewers` (defensive) and computes `pending = jury -- verdicts` → a
+  never-voted judge stays `pending` (spawned), NEVER skipped.
 
   ## Returns
     * `{:ok, %{verdicts: %{login↓ => :approved | :changes_requested}, reviewers: [login↓]}}`
@@ -83,10 +83,10 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     end
   end
 
-  # Le SET du jury = tout login ayant un review-record « de jury » : demandé (`REQUEST_REVIEW`) OU
-  # ayant voté (`APPROVED`/`REQUEST_CHANGES`). Exclut `COMMENT`/`PENDING` (bruit non-juge). Source STABLE
-  # (les records persistent) vs `requested_reviewers` volatil → un juge tombé du champ sans voter reste
-  # dans le jury → `pending` → spawné, plus de merge sur demi-jury.
+  # The jury SET = every login with a "jury" review-record: requested (`REQUEST_REVIEW`) OR
+  # having voted (`APPROVED`/`REQUEST_CHANGES`). Excludes `COMMENT`/`PENDING` (non-jury noise). STABLE source
+  # (the records persist) vs volatile `requested_reviewers` → a judge dropped from the field without voting stays
+  # in the jury → `pending` → spawned, no more merge on a half-jury.
   defp jury_reviewers(reviews) do
     reviews
     |> Enum.filter(&(&1["state"] in ["REQUEST_REVIEW", "APPROVED", "REQUEST_CHANGES"]))
@@ -95,13 +95,13 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     |> Enum.uniq()
   end
 
-  # Dernière review décisive PAR reviewer (login downcasé → verdict atom). Gitea liste par ordre de
-  # création → `List.last` d'un groupe = la review EN VIGUEUR de ce reviewer. Quand `head_sha` est fourni
-  # (chemin prod, posé par `dispatch_review` depuis `pr.head.sha`), un verdict est **COMMIT-SCOPÉ** : seul
-  # celui posé sur le commit COURANT (`commit_id == head_sha`) compte ; une review sur un commit antérieur
-  # est PÉRIMÉE — le code jugé n'existe plus, le juge doit re-juger. Indispensable car Gitea ne dismisse
-  # PAS un REQUEST_CHANGES au push (seules les approbations stale via branch-protection le sont) : sans ce
-  # filtre, un REQUEST_CHANGES périmé qui n'est jamais re-dispatché bloque la PR pour TOUJOURS.
+  # Last decisive review PER reviewer (downcased login → verdict atom). Gitea lists in creation
+  # order → `List.last` of a group = that reviewer's IN-FORCE review. When `head_sha` is provided
+  # (prod path, set by `dispatch_review` from `pr.head.sha`), a verdict is **COMMIT-SCOPED**: only
+  # the one placed on the CURRENT commit (`commit_id == head_sha`) counts; a review on an earlier commit
+  # is STALE — the judged code no longer exists, the judge must re-judge. Indispensable because Gitea does
+  # NOT dismiss a REQUEST_CHANGES on push (only stale approvals via branch-protection are): without this
+  # filter, a stale REQUEST_CHANGES that is never re-dispatched blocks the PR FOREVER.
   defp verdicts_by_reviewer(reviews, head_sha) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))
@@ -111,7 +111,7 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     |> Map.new(fn {login, revs} -> {login, decisive_verdict(List.last(revs)["state"])} end)
   end
 
-  # `head_sha == nil` (appelants bas-niveau / legacy) → pas de scoping. Sinon : strict `commit_id == head`.
+  # `head_sha == nil` (low-level / legacy callers) → no scoping. Otherwise: strict `commit_id == head`.
   defp reject_stale_reviews(reviews, nil), do: reviews
 
   defp reject_stale_reviews(reviews, head_sha),
@@ -121,19 +121,19 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   defp decisive_verdict("REQUEST_CHANGES"), do: :changes_requested
 
   @doc """
-  Feedback des reviews REQUEST_CHANGES en vigueur d'une PR (Gitea `GET .../pulls/{index}/reviews`),
-  pour nourrir le **rework** du producteur. Renvoie la DERNIÈRE review REQUEST_CHANGES par reviewer
-  avec son `body` — le verdict structuré gravé par le juge (`reason`/`details`/`chain`, via
-  `StepRunConsumer.Verdict.judge_review_body`). Sans ce body, le `rework_brief` dit « corrige selon la review »
-  SANS le contenu de la review → l'engineer devine à l'aveugle (famine d'info, DOUBLE :
-  jumeau de l'`outputs: {}` du juge ; sans le body l'eng rend `blocked_dep` plutôt que
-  deviner). Pas de commit-scoping ici : on veut le DERNIER feedback par reviewer (`List.last`), pas
-  un verdict décisif courant (le rework s'exécute AVANT le prochain push, le REQUEST_CHANGES porte
-  sur le head courant). Les reviews sans body (verdict générique) sont écartées (rien d'actionnable).
+  Feedback from a PR's in-force REQUEST_CHANGES reviews (Gitea `GET .../pulls/{index}/reviews`),
+  to feed the producer's **rework**. Returns the LAST REQUEST_CHANGES review per reviewer
+  with its `body` — the structured verdict recorded by the judge (`reason`/`details`/`chain`, via
+  `StepRunConsumer.Verdict.judge_review_body`). Without this body, the `rework_brief` says "fix per the review"
+  WITHOUT the review's content → the engineer guesses blindly (info famine, DOUBLE:
+  twin of the judge's `outputs: {}`; without the body the eng returns `blocked_dep` rather than
+  guessing). No commit-scoping here: we want the LAST feedback per reviewer (`List.last`), not
+  a current decisive verdict (the rework runs BEFORE the next push, the REQUEST_CHANGES concerns
+  the current head). Reviews without a body (generic verdict) are discarded (nothing actionable).
 
   ## Returns
-    * `{:ok, [%{"login" => l, "body" => b}]}` — une entrée par reviewer ayant un REQUEST_CHANGES avec substance
-    * `{:ok, []}` — aucun REQUEST_CHANGES avec body actionnable
+    * `{:ok, [%{"login" => l, "body" => b}]}` — one entry per reviewer having a REQUEST_CHANGES with substance
+    * `{:ok, []}` — no REQUEST_CHANGES with an actionable body
     * `{:error, term()}` — HTTP/transport/config
   """
   @spec change_request_feedback(String.t(), integer(), Keyword.t()) ::
@@ -151,16 +151,16 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   end
 
   @doc """
-  Compte les rounds de REWORK déjà déclenchés sur une PR = nb de reviews `REQUEST_CHANGES`
-  non-dismissed (Gitea `GET .../pulls/{index}/reviews`). Chaque round (juge demande des changements →
-  l'eng re-pousse → re-review) ajoute une review REQUEST_CHANGES → le compteur est **forge-natif** et
-  MONOTONE (les reviews persistent), comme `count_signed_step_runs` pour le rebond de gate. Sert au frein
-  anti-churn du chemin PR-review (`StepDispatcher.dispatch_rework`) : au-delà du budget → escalade arch.
+  Counts the REWORK rounds already triggered on a PR = number of non-dismissed `REQUEST_CHANGES`
+  reviews (Gitea `GET .../pulls/{index}/reviews`). Each round (judge requests changes →
+  the eng re-pushes → re-review) adds a REQUEST_CHANGES review → the counter is **forge-native** and
+  MONOTONIC (the reviews persist), like `count_signed_step_runs` for the gate bounce. Serves the
+  anti-churn brake of the PR-review path (`StepDispatcher.dispatch_rework`): beyond budget → arch escalation.
 
-  Pas de commit-scoping : on veut l'HISTORIQUE des rounds (tous commits), pas le verdict courant.
+  No commit-scoping: we want the HISTORY of rounds (all commits), not the current verdict.
 
-  `{:error, _}` sur échec HTTP/config — le caller NE re-spawn PAS à l'aveugle si le budget n'est pas
-  vérifiable (un re-spawn non borné pourrait churner), symétrique de `count_signed_step_runs`.
+  `{:error, _}` on HTTP/config failure — the caller does NOT re-spawn blindly if the budget is not
+  verifiable (an unbounded re-spawn could churn), symmetric to `count_signed_step_runs`.
   """
   @spec count_change_request_rounds(String.t(), integer(), Keyword.t()) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -182,35 +182,35 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   end
 
   @doc """
-  Juges RE-DEMANDÉS après avoir déjà jugé (Gitea `GET .../issues/{index}/timeline`) : logins dont les
-  demandes de review NETTES (`review_request` ajouts − retraits) dépassent le nombre de reviews rendues.
-  C'est le signal STRUCTUREL d'un geste humain « redemander un jugement » (bouton UI) que ni les
-  review-records (Gitea ne les dismisse PAS à la re-request — vérifié live) ni `requested_reviewers`
-  (volatil) ne révèlent. Sans lui, une re-request est INVISIBLE au runtime : le juge n'est jamais
-  re-dispatché, le merge tente puis échoue en boucle sur `not enough approvals` (mur constaté 2026-07-07).
+  Judges RE-REQUESTED after having already judged (Gitea `GET .../issues/{index}/timeline`): logins whose
+  NET review requests (`review_request` additions − removals) exceed the number of reviews rendered.
+  This is the STRUCTURAL signal of a human gesture "re-request a judgment" (UI button) that neither the
+  review-records (Gitea does NOT dismiss them on re-request — verified live) nor `requested_reviewers`
+  (volatile) reveal. Without it, a re-request is INVISIBLE to the runtime: the judge is never
+  re-dispatched, the merge attempts then fails in a loop on `not enough approvals` (wall observed 2026-07-07).
 
-  **Comptage, PAS ordre temporel** (leçon forge 2026-07-07) : les horodatages Gitea sont à la SECONDE →
-  un review et sa re-request dans la même seconde rendent tout ordre `>`/`>=` non fiable (raté ou
-  faux-positif). Le comptage y est IMMUNE. Séquence prod = `request_review`(1 ajout) → review(1) →
-  éventuelle re-request(2e ajout). Net−reviews : 0 = à jour (pas re-demandé) ; >0 = une demande non
-  répondue → re-jugement dû. L'ANNULATION est absorbée par la MÊME lecture : un retrait
-  (`removed_assignee: true`) décrémente le net → le juge repasse « à jour », le merge reprend. Un seul
-  read couvre le geste ET son retrait.
+  **Counting, NOT temporal order** (forge lesson 2026-07-07): Gitea timestamps are at SECOND granularity →
+  a review and its re-request within the same second make any `>`/`>=` ordering unreliable (missed or
+  false-positive). Counting is IMMUNE to it. Prod sequence = `request_review`(1 addition) → review(1) →
+  possible re-request(2nd addition). Net−reviews: 0 = up to date (not re-requested); >0 = an unanswered
+  request → re-judgment due. CANCELLATION is absorbed by the SAME read: a removal
+  (`removed_assignee: true`) decrements the net → the judge goes back to "up to date", the merge resumes. A single
+  read covers the gesture AND its removal.
 
-  Timeline paginée (fail-loud sur page tronquée : une re-request ratée = merge wedgé en silence). Logins
-  downcasés (cohérent `jury_reviewers`/`verdicts_by_reviewer`).
+  Paginated timeline (fail-loud on a truncated page: a missed re-request = merge wedged silently). Downcased
+  logins (consistent with `jury_reviewers`/`verdicts_by_reviewer`).
 
   ## Returns
-    * `{:ok, ["qualifier", ...]}` — juges à re-dispatcher (peut être vide)
+    * `{:ok, ["qualifier", ...]}` — judges to re-dispatch (may be empty)
     * `{:error, term()}` — HTTP/transport/config
   """
   @spec pr_rerequested_reviewers(String.t(), integer(), Keyword.t()) ::
           {:ok, [String.t()]} | {:error, term()}
   def pr_rerequested_reviewers(repo, index, opts \\ [])
       when is_binary(repo) and is_integer(index) do
-    # `paginate` rend TOUJOURS `{:ok, liste}` (accumulée) ou `{:error, _}` (dont
-    # `:unexpected_page_shape` sur une page non-liste — fail-loud, jamais un {:ok, non_list}) : pas de
-    # clause `{:ok, non_list}` à couvrir ici (contrairement aux lectures single-page via `http_get`).
+    # `paginate` ALWAYS returns `{:ok, list}` (accumulated) or `{:error, _}` (including
+    # `:unexpected_page_shape` on a non-list page — fail-loud, never an {:ok, non_list}): no
+    # `{:ok, non_list}` clause to cover here (unlike single-page reads via `http_get`).
     with {:ok, config} <- resolve_config(opts),
          {:ok, events} <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{index}/timeline", "") do
@@ -218,25 +218,25 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     end
   end
 
-  # Un juge est en attente de re-jugement ssi ses demandes NETTES (ajouts − retraits de `review_request`)
-  # dépassent ses reviews rendues. Comptage (immunisé à la granularité-seconde des horodatages), pas
-  # d'ordre temporel. Clé = login demandé (assignee) downcasé.
+  # A judge is awaiting re-judgment iff its NET requests (additions − removals of `review_request`)
+  # exceed its rendered reviews. Counting (immune to the second-granularity of timestamps), not
+  # temporal order. Key = requested login (assignee), downcased.
   defp rerequested_from_timeline(events) do
     adds = tally(events, fn e -> requested_login(e, false) end)
     removals = tally(events, fn e -> requested_login(e, true) end)
     reviews = tally(events, &review_author/1)
 
     for {login, n_add} <- adds,
-        # a DÉJÀ jugé au moins une fois (sinon c'est une 1re demande jamais répondue = le jury standard,
-        # PAS un re-jugement ; ce cas n'atteint de toute façon pas la branche policy, qui suppose tout jugé).
+        # has ALREADY judged at least once (otherwise it's a 1st never-answered request = the standard jury,
+        # NOT a re-judgment; this case doesn't reach the policy branch anyway, which assumes everything judged).
         n_rev = Map.get(reviews, login, 0),
         n_rev > 0,
-        # demandes NETTES > reviews → une demande de review non répondue subsiste (re-jugement dû).
+        # NET requests > reviews → an unanswered review request remains (re-judgment due).
         n_add - Map.get(removals, login, 0) - n_rev > 0,
         do: login
   end
 
-  # Compte par login (↓) les events dont `key_fun` extrait un login non-nil (les autres ignorés).
+  # Counts, per login (↓), the events from which `key_fun` extracts a non-nil login (the others ignored).
   defp tally(events, key_fun) do
     Enum.reduce(events, %{}, fn e, acc ->
       case key_fun.(e) do
@@ -246,8 +246,8 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
     end)
   end
 
-  # Login demandé par un `review_request` (l'`assignee`, pas l'acteur), filtré ajout (want_removal false)
-  # vs retrait (true) via `removed_assignee`. Nil si l'event n'est pas un review_request de ce type.
+  # Login requested by a `review_request` (the `assignee`, not the actor), filtered addition (want_removal false)
+  # vs removal (true) via `removed_assignee`. Nil if the event is not a review_request of this type.
   defp requested_login(%{"type" => "review_request"} = e, want_removal) do
     if Map.get(e, "removed_assignee", false) == want_removal do
       e |> get_in(["assignee", "login"]) |> downcase_or_nil()
@@ -264,8 +264,8 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   defp downcase_or_nil(s) when is_binary(s) and s != "", do: String.downcase(s)
   defp downcase_or_nil(_), do: nil
 
-  # Dernier REQUEST_CHANGES PAR reviewer (login → body). Même tri que `verdicts_by_reviewer` (ordre de
-  # création Gitea → `List.last` = la review en vigueur), filtré aux REQUEST_CHANGES avec un body non-vide.
+  # Last REQUEST_CHANGES PER reviewer (login → body). Same ordering as `verdicts_by_reviewer` (Gitea
+  # creation order → `List.last` = the in-force review), filtered to REQUEST_CHANGES with a non-empty body.
   defp change_requests_by_reviewer(reviews) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))

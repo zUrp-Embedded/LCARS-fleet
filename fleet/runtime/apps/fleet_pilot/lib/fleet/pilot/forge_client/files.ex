@@ -1,27 +1,27 @@
 defmodule Fleet.Pilot.ForgeClient.Files do
   @moduledoc """
-  Lecture/écriture de **fichiers** dans un repo via l'API contents Gitea — sous-domaine de
-  `Fleet.Pilot.ForgeClient`. Concern autonome (ni seam ni couplage au cœur issues/PR) : les
-  callers l'utilisent en direct (`Fleet.Pilot.IncidentRegistry`, qui les injecte comme seams
-  `:get_file_fun`/`:put_file_fun`). **Le SYSTÈME publie** — forge-aveugle : le pod ne pousse jamais.
+  Read/write of **files** in a repo via the Gitea contents API — sub-domain of
+  `Fleet.Pilot.ForgeClient`. Self-contained concern (neither seam nor coupling to the issues/PR core):
+  callers use it directly (`Fleet.Pilot.IncidentRegistry`, which injects them as seams
+  `:get_file_fun`/`:put_file_fun`). **The SYSTEM publishes** — forge-blind: the pod never pushes.
   """
 
   import Fleet.Pilot.ForgeClient.Transport,
     only: [resolve_config: 1, http_get: 2, http_put: 3]
 
-  # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
+  # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_path: 1]
 
   @doc """
-  Écrit un fichier `path` (texte `content`) sur `repo`/`branch` — Gitea
-  `PUT /repos/{repo}/contents/{path}`. **Le SYSTÈME publie** (forge-aveugle : le pod ne
-  pousse jamais ; c'est ce chemin qui grave durablement le livrable d'un engineer). Création
-  (pas d'update sha) : viser un `path` neuf (issue-namespacé). Branche existante requise
-  (défaut `main`) — `opts[:new_branch]` pour brancher depuis `branch`.
+  Writes a file `path` (text `content`) on `repo`/`branch` — Gitea
+  `PUT /repos/{repo}/contents/{path}`. **The SYSTEM publishes** (forge-blind: the pod never
+  pushes; this is the path that durably records an engineer's deliverable). Creation
+  (no sha update): target a fresh `path` (issue-namespaced). Existing branch required
+  (default `main`) — `opts[:new_branch]` to branch from `branch`.
 
   ## Returns
-    * `{:ok, commit_sha}` — fichier écrit
-    * `{:error, term()}` — HTTP/transport/config (422 = path déjà présent sur la branche)
+    * `{:ok, commit_sha}` — file written
+    * `{:error, term()}` — HTTP/transport/config (422 = path already present on the branch)
   """
   @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, String.t()} | {:error, term()}
@@ -35,12 +35,12 @@ defmodule Fleet.Pilot.ForgeClient.Files do
           branch: Keyword.get(opts, :branch, "main")
         }
         |> maybe_put_new_branch(Keyword.get(opts, :new_branch))
-        # Traça à 2 niveaux : `author` = le WORKER (qui a écrit),
-        # `committer` = l'HUMAIN commanditaire (qui a fait bosser la fleet ; le système fait l'I/O,
-        # mais le commit attribue les deux niveaux). forge-aveugle préservé (le pod ne pousse jamais).
+        # Two-level attribution: `author` = the WORKER (who wrote it),
+        # `committer` = the commissioning HUMAN (who put the fleet to work; the system does the I/O,
+        # but the commit attributes both levels). forge-blind preserved (the pod never pushes).
         |> maybe_put_identity(:author, Keyword.get(opts, :author))
         |> maybe_put_identity(:committer, Keyword.get(opts, :committer))
-        # `sha` présent ⇒ UPDATE du fichier existant (Gitea l'exige) ; absent ⇒ CREATE.
+        # `sha` present ⇒ UPDATE of the existing file (Gitea requires it); absent ⇒ CREATE.
         |> maybe_put_sha(Keyword.get(opts, :sha))
 
       case http_put(config, "/repos/#{encode_repo(repo)}/contents/#{encode_path(path)}", body) do
@@ -52,12 +52,12 @@ defmodule Fleet.Pilot.ForgeClient.Files do
   end
 
   @doc """
-  Lit un fichier du repo (Gitea `GET /contents/{path}?ref=`). Le `sha` renvoyé sert à `put_file(.., sha:)`
-  pour un UPDATE (read-modify-write). `opts[:ref]` = branche/ref (défaut `main`).
+  Reads a file from the repo (Gitea `GET /contents/{path}?ref=`). The returned `sha` feeds `put_file(.., sha:)`
+  for an UPDATE (read-modify-write). `opts[:ref]` = branch/ref (default `main`).
 
   ## Returns
-    * `{:ok, %{content: String.t(), sha: String.t()}}` — fichier lu (content décodé)
-    * `{:error, :not_found}` — 404 (fichier/branche absent)
+    * `{:ok, %{content: String.t(), sha: String.t()}}` — file read (content decoded)
+    * `{:error, :not_found}` — 404 (file/branch absent)
     * `{:error, term()}` — HTTP/transport/config/decode
   """
   @spec get_file(String.t(), String.t(), Keyword.t()) ::
