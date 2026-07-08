@@ -1,21 +1,21 @@
 defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   @moduledoc """
-  Émissions ANNEXES de la livraison producteur (voix de l'eng + event slot-freeze),
-  extraites de `Fleet.Pilot.StepRunCompleter` : tout ce qui accompagne la publication
-  d'un livrable SANS faire partie de la séquence de complétion.
+  SIDE emissions of the producer delivery (eng voice + slot-freeze event),
+  extracted from `Fleet.Pilot.StepRunCompleter`: everything that accompanies the publication
+  of a deliverable WITHOUT being part of the completion sequence.
 
-  ## Best-effort par contrat
+  ## Best-effort by contract
 
-  Les deux émissions sont **best-effort** : un échec ne casse JAMAIS la complétion
-  (le livrable = le commit, déjà poussé ; la PR est déjà ouverte). C'est précisément
-  ce contrat qui rend le concern séparable : la séquence du completer (ordre, verrou,
-  idempotence) ne dépend d'AUCUN retour d'ici — l'appelant discard (`_ =`).
+  Both emissions are **best-effort**: a failure NEVER breaks the completion
+  (the deliverable = the commit, already pushed; the PR is already open). It is precisely
+  this contract that makes the concern separable: the completer's sequence (order, lock,
+  idempotence) depends on NO return value from here — the caller discards (`_ =`).
 
-  Appelées par `complete_producer` APRÈS `open_deliverable_pr` (le push a déjà LU le
-  workspace) et AVANT `route` (le verrou n'est pas encore levé).
+  Called by `complete_producer` AFTER `open_deliverable_pr` (the push has already READ the
+  workspace) and BEFORE `route` (the lock is not yet lifted).
 
-  Mêmes seams keyword que le completer (`:forge_client` / `:forge_opts`) — pas de
-  struct dédié : le module vit dans l'orbite du completer et lit les mêmes opts.
+  Same keyword seams as the completer (`:forge_client` / `:forge_opts`) — no
+  dedicated struct: the module lives in the completer's orbit and reads the same opts.
   """
 
   require Logger
@@ -23,13 +23,13 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   alias Fleet.Pilot.ForgeClient
 
   @doc """
-  SLOT-FREEZE : signale que le livrable du producteur est CONFIRMÉ sur la forge (commit poussé + PR
-  ouverte) → un pod pipe résident peut alors reset son workspace pour le issue suivant SANS courser
-  le push. Porte le `pod_id` (le pod producteur, depuis le payload pod.completed). Source `:workflow`
-  (la publication est une op du moteur workflow ; atome aligné sur le rename fleet_pipeline→fleet_workflow —
-  l'atome nu :pipeline avait survécu au sed du rename, seul émetteur, zéro matcher par source).
-  Best-effort : un échec d'émission ne casse PAS la complétion (le livrable est déjà publié) — le
-  backstop côté pod (deadline :publishing) couvre un raté. No-op si pas de pod_id (legacy/test).
+  SLOT-FREEZE: signals that the producer's deliverable is CONFIRMED on the forge (commit pushed + PR
+  open) → a resident pipe pod can then reset its workspace for the next issue WITHOUT racing
+  the push. Carries the `pod_id` (the producer pod, from the pod.completed payload). Source `:workflow`
+  (the publication is a workflow-engine op; atom aligned on the fleet_pipeline→fleet_workflow rename —
+  the bare :pipeline atom had survived the rename sed, sole emitter, zero matcher by source).
+  Best-effort: an emission failure does NOT break the completion (the deliverable is already published) — the
+  pod-side backstop (:publishing deadline) covers a miss. No-op if no pod_id (legacy/test).
   """
   @spec deliverable_published(map(), integer()) :: :ok | :noop
   def deliverable_published(step_run, pr) do
@@ -67,20 +67,20 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   end
 
   @doc """
-  VOIX DE L'ENG sur le TICKET (info SORTANTE, descriptive et traçable) : poste le
-  `summary` du producteur (ce qu'il a fait à la livraison / sa réponse à la review au rework) en
-  commentaire ISSUE, AU NOM DE L'ENG (`as_role` — traça honnête ; le pod reste forge-aveugle, c'est
-  le SYSTÈME qui poste). Best-effort : un échec de post ne casse PAS la complétion (le livrable = le
-  commit, déjà poussé). Absent/vide → rien (pas de commentaire vide).
+  ENG VOICE on the TICKET (OUTGOING info, descriptive and traceable): posts the
+  producer's `summary` (what it did on delivery / its response to the review on rework) as an
+  ISSUE comment, IN THE NAME OF THE ENG (`as_role` — honest trace; the pod stays forge-blind, it is
+  the SYSTEM that posts). Best-effort: a post failure does NOT break the completion (the deliverable = the
+  commit, already pushed). Absent/empty → nothing (no empty comment).
 
-  DÉDUP (footprint) : la NOTE COMPLÈTE va sur le ISSUE (le ticket = record canonique du travail,
-  « voici ce que j'ai fait » en réponse au brief) — la PR n'en reçoit PLUS de copie ni de pointeur
-  séparé : le pointeur est désormais PLIÉ dans le corps d'OUVERTURE de la PR (`Texts.pr_body/3`,
-  `open_deliverable_pr`), pas un 2e comment posté juste après (QoL 2026-07-07, débusqué en lisant le
-  rendu forge réel d'une PR livrée : deux posts « en tant qu'engineer » à la suite pour UNE info liée).
-  Avant ce fix, le même `summary` (~1 Ko) était posté verbatim des deux côtés — bruit pur ; le fix
-  précédent (dédup footprint) avait déjà réduit ça à un pointeur séparé, celui-ci plie le pointeur
-  dans l'ouverture — plus qu'UN SEUL post PR au total (le corps d'ouverture), zéro comment PR ajouté.
+  DEDUP (footprint): the FULL NOTE goes on the ISSUE (the ticket = canonical record of the work,
+  "here is what I did" in response to the brief) — the PR NO LONGER receives a copy nor a separate
+  pointer: the pointer is now FOLDED into the PR OPENING body (`Texts.pr_body/3`,
+  `open_deliverable_pr`), not a 2nd comment posted right after (QoL 2026-07-07, uncovered by reading the
+  real forge rendering of a delivered PR: two "as engineer" posts in a row for ONE related piece of info).
+  Before this fix, the same `summary` (~1 KB) was posted verbatim on both sides — pure noise; the previous
+  fix (footprint dedup) had already reduced that to a separate pointer, this one folds the pointer
+  into the opening — only a SINGLE PR post total (the opening body), zero PR comment added.
   """
   @spec post_eng_summary(map(), keyword()) :: :ok | :noop
   def post_eng_summary(step_run, opts) do
@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
         role = Map.get(step_run, :role, "engineer")
         role_opts = ForgeClient.as_role(forge_opts, role)
 
-        # NOTE COMPLÈTE sur le ISSUE (record canonique du travail) — seul post de cette fonction.
+        # FULL NOTE on the ISSUE (canonical record of the work) — the sole post of this function.
         _ =
           forge.post_comment(
             repo,
