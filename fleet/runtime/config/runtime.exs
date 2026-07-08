@@ -34,19 +34,10 @@ if config_env() != :test do
     end
   end
 
-  # Z6 (CFG-CR) — parse entier d'un env var SANS crash-boot opaque. Malformé → raise CLAIR
-  # (un port/intervalle invalide DOIT refuser le boot, mais avec un message lisible, pas une
-  # `** (ArgumentError) String.to_integer`). Le daemon ne doit jamais crash-booter sur une
-  # stacktrace énigmatique d'un typo d'env.
-  parse_int = fn name, val ->
-    case Integer.parse(val) do
-      {n, ""} ->
-        n
-
-      _ ->
-        raise "LCARS config: #{name}=#{inspect(val)} n'est pas un entier valide — boot refusé (corriger l'env)"
-    end
-  end
+  # Z6 (CFG-CR) — parsing des env vars DÉLÉGUÉ à `Fleet.EnvParse` (Ring 0, TESTABLE — ce fichier est
+  # wrappé `config_env() != :test`, un lambda inline ne serait jamais testé : SOC-CONF-001/002/003).
+  # Domaine borné : `port` (1..65535), `positive_ms` (>0), `count` (≥0), `bool` (formes reconnues +
+  # défaut si inconnu), `path` (expand + rejet `..`/control). Un knob load-bearing invalide → raise clair.
 
   # ============================================================
   # Logger
@@ -103,11 +94,12 @@ if config_env() != :test do
   # F161/F036 : ON-SWITCH du listener webhook Gitea (:8081 HMAC). Sans lui, `:start_webhooks` restait
   # à `false` partout → WebhooksGitea + le secret + les clés gitea.* du registre étaient une surface
   # de config qui ne pouvait JAMAIS démarrer. Défaut OFF (intégration forge opt-in). Port surchargeable.
-  if System.get_env("LCARS_FLEET_WEBHOOKS") == "true" do
+  if Fleet.EnvParse.bool("LCARS_FLEET_WEBHOOKS", System.get_env("LCARS_FLEET_WEBHOOKS"), false) do
     config :fleet_event_router, start_webhooks: true
 
     if port = System.get_env("LCARS_FLEET_WEBHOOK_PORT") do
-      config :fleet_event_router, webhook_port: parse_int.("LCARS_FLEET_WEBHOOK_PORT", port)
+      config :fleet_event_router,
+        webhook_port: Fleet.EnvParse.port("LCARS_FLEET_WEBHOOK_PORT", port)
     end
   end
 
@@ -128,7 +120,12 @@ if config_env() != :test do
   # tourne du tout. Deux knobs distincts et significatifs.
   # ============================================================
   config :fleet_spawner,
-    boot_permanent_at_start: System.get_env("LCARS_BOOT_PERMANENT_AT_START") != "false"
+    boot_permanent_at_start:
+      Fleet.EnvParse.bool(
+        "LCARS_BOOT_PERMANENT_AT_START",
+        System.get_env("LCARS_BOOT_PERMANENT_AT_START"),
+        true
+      )
 
   # ============================================================
   # fleet_spawner pod_dir : PER-HUMAIN, dérivé du HOME du process runtime (pod.ex `pod_dir_for` →
@@ -257,7 +254,7 @@ if config_env() != :test do
                 "Lance via fleet_v2 start, ou pose la var explicitement."
 
       str ->
-        parse_int.("FLEET_API_PORT", str)
+        Fleet.EnvParse.port("FLEET_API_PORT", str)
     end
 
   config :fleet_api, http_port: http_port
@@ -275,7 +272,7 @@ if config_env() != :test do
                 "Lance via fleet_v2 start, ou pose la var explicitement."
 
       str ->
-        parse_int.("LCARS_OBSERVATION_PORT", str)
+        Fleet.EnvParse.port("LCARS_OBSERVATION_PORT", str)
     end
 
   config :fleet_observation, http_port: obs_port
@@ -300,7 +297,8 @@ if config_env() != :test do
   end
 
   if interval = System.get_env("LCARS_PILOT_POLL_INTERVAL_MS") do
-    config :fleet_pilot, poll_interval_ms: parse_int.("LCARS_PILOT_POLL_INTERVAL_MS", interval)
+    config :fleet_pilot,
+      poll_interval_ms: Fleet.EnvParse.positive_ms("LCARS_PILOT_POLL_INTERVAL_MS", interval)
   end
 
   # Forge config — résolue par Fleet.Pilot.ForgeClient.resolve_config/1
@@ -346,7 +344,7 @@ if config_env() != :test do
   # (cf. Fleet.Pilot.Application.step_children!). F-037 : requiert UNIQUEMENT FORGE_BASE_URL — c'est la
   # seule garde fail-loud du boot step (découverte des projets par topic + push per-step-run). LCARS_PILOT_POLL_REPO
   # n'est PAS requis (override legacy/test seulement ; la découverte réelle est par topic forge, pas un repo fixe).
-  if System.get_env("LCARS_PILOT_STEP") == "true" do
+  if Fleet.EnvParse.bool("LCARS_PILOT_STEP", System.get_env("LCARS_PILOT_STEP"), false) do
     config :fleet_pilot, step_dispatch?: true
   end
 
@@ -435,11 +433,18 @@ if config_env() != :test do
   # déployé (binaire 238MB, caches froids) → kick abandonné avant REPL prêt → pod sans brief.
   # Élargir en deploy. Entiers via env.
   if v = System.get_env("LCARS_KICK_FIRST_DELAY_MS"),
-    do: config(:fleet_spawner, kick_first_delay_ms: parse_int.("LCARS_KICK_FIRST_DELAY_MS", v))
+    do:
+      config(:fleet_spawner,
+        kick_first_delay_ms: Fleet.EnvParse.positive_ms("LCARS_KICK_FIRST_DELAY_MS", v)
+      )
 
   if v = System.get_env("LCARS_KICK_RETRY_MS"),
-    do: config(:fleet_spawner, kick_retry_ms: parse_int.("LCARS_KICK_RETRY_MS", v))
+    do:
+      config(:fleet_spawner, kick_retry_ms: Fleet.EnvParse.positive_ms("LCARS_KICK_RETRY_MS", v))
 
   if v = System.get_env("LCARS_KICK_MAX_ATTEMPTS"),
-    do: config(:fleet_spawner, kick_max_attempts: parse_int.("LCARS_KICK_MAX_ATTEMPTS", v))
+    do:
+      config(:fleet_spawner,
+        kick_max_attempts: Fleet.EnvParse.count("LCARS_KICK_MAX_ATTEMPTS", v)
+      )
 end
