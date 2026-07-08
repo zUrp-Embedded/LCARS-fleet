@@ -46,6 +46,11 @@ defmodule Fleet.Starfleet.AuditLog do
     line = Jason.encode!(full) <> "\n"
     path = audit_log_path()
 
+    # Ensure the parent dir exists (first write, or after a cleanup): otherwise `File.write` fails
+    # `:enoent` and the audit entry (a Cat 5 trail) is LOST. Non-bang (fail-safe wrapper) — a mkdir
+    # failure just falls through to the `File.write` error path below.
+    _ = File.mkdir_p(Path.dirname(path))
+
     maybe_rotate(path)
 
     case File.write(path, line, [:append]) do
