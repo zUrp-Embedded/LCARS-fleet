@@ -162,17 +162,33 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   def launch_home("none", _pod_dir, claude_dir), do: Path.dirname(claude_dir)
   def launch_home(_containment, pod_dir, _claude_dir), do: pod_dir
 
+  # Closed claude CLI `--permission-mode` enum. `permission_mode` is a SECURITY setting (governs the
+  # allow/deny enforcement) → bound to this list; an out-of-enum value (config typo / forged profile) is
+  # NOT handed raw to the launcher.
+  @permission_modes ~w(default acceptEdits bypassPermissions plan)
+
   @doc """
   Pod permission mode: the cap-profile's `spec.invocation.permission_mode`, default `"default"`
   (→ `--permission-mode default`, allow/deny lists ENFORCED). Non-empty → claude_launch passes
   `--permission-mode <mode>`; to re-open the bypass, a cap-profile sets `"bypassPermissions"`.
-  Set as `LCARS_PERMISSION_MODE` by `LaunchEnv.build/4`.
+  Set as `LCARS_PERMISSION_MODE` by `LaunchEnv.build/4`. Bounded to the closed CLI enum — an unknown mode
+  falls back to the SAFE `"default"` (never an arbitrary string on the launcher's argv).
   """
   @spec permission_mode(Fleet.CapProfile.t() | term()) :: String.t()
   def permission_mode(%Fleet.CapProfile{spec: spec}),
-    do: get_in(spec || %{}, ["invocation", "permission_mode"]) || "default"
+    do: bound_permission_mode(get_in(spec || %{}, ["invocation", "permission_mode"]) || "default")
 
   def permission_mode(_), do: "default"
+
+  defp bound_permission_mode(mode) when mode in @permission_modes, do: mode
+
+  defp bound_permission_mode(other) do
+    Logger.warning(
+      "LaunchSpec: unknown permission_mode #{inspect(other)} — falling back to \"default\" (safe)"
+    )
+
+    "default"
+  end
 
   @doc """
   `LCARS_SKILLS_PLUGINS` = unique plugin names extracted from the QUALIFIED `plugin:skill` skills of

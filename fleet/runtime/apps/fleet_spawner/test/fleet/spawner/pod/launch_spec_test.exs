@@ -37,4 +37,35 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       assert env =~ "rw:/home/project"
     end
   end
+
+  describe "permission_mode/1 — borné à l'enum CLI (R1-28)" do
+    defp cap_with_permission_mode(mode) do
+      %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "test", "containment" => "bwrap"},
+        spec: %{"invocation" => %{"permission_mode" => mode}}
+      }
+    end
+
+    test "les modes VALIDES de l'enum sont conservés" do
+      for mode <- ~w(default acceptEdits bypassPermissions plan) do
+        assert LaunchSpec.permission_mode(cap_with_permission_mode(mode)) == mode
+      end
+    end
+
+    test "un mode INCONNU (setting sécurité forgé) → fallback \"default\" (safe) + warning" do
+      {mode, log} =
+        with_log(fn ->
+          LaunchSpec.permission_mode(cap_with_permission_mode("yolo-bypass-everything"))
+        end)
+
+      assert mode == "default"
+      assert log =~ "unknown permission_mode"
+    end
+
+    test "absent → default" do
+      cap = %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{}, spec: %{}}
+      assert LaunchSpec.permission_mode(cap) == "default"
+    end
+  end
 end
