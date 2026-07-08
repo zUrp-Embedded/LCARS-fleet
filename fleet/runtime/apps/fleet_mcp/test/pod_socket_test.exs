@@ -231,6 +231,19 @@ defmodule Fleet.MCP.PodSocketTest do
     assert %{"id" => 1, "result" => %{"isError" => true}} = resp
   end
 
+  test "SOC-EFF-005 : readiness compte les `*/sock`, pas les dirs — un dir stray ne fausse pas 'orphaned'",
+       %{base: base} do
+    pod = uniq("ready")
+    {:ok, _path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    # dir résiduel SANS sock (provisioning à moitié / release ayant retiré le sock pas le dir) : ne doit
+    # PAS être compté comme un socket-fichier (sinon socket_files > acceptors → faux 'orphaned/deaf').
+    File.mkdir_p!(Path.join(base, "stray-no-sock"))
+
+    assert {:operational, _} = Fleet.MCP.Supervisor.pod_facing_status()
+  end
+
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
   # Un appel JSON-RPC tools/call sur la socket : connecte, envoie une ligne, lit la réponse, ferme.

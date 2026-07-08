@@ -108,10 +108,14 @@ defmodule Fleet.MCP.Supervisor do
   defp socket_files_on_disk do
     base = Fleet.MCP.PodSocketSupervisor.base_dir()
 
-    case File.ls(base) do
-      {:ok, entries} -> length(entries)
-      _ -> 0
-    end
+    # Count the actual per-pod socket FILES (`<base>/<pod_id>/sock`), NOT the entries of `base` — those
+    # are the per-pod DIRECTORIES, and a stray dir or a half-provisioned pod-dir WITHOUT a `sock` would
+    # inflate the count → a FALSE "orphaned socket / deaf pod" degraded reading (SOC-EFF-005). The glob
+    # matches exactly the sockets.
+    base
+    |> Path.join("*/sock")
+    |> Path.wildcard()
+    |> length()
   rescue
     _ -> 0
   end
