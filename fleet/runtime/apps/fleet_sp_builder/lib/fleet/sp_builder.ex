@@ -109,7 +109,8 @@ defmodule Fleet.SPBuilder do
           {:ok, composed()} | {:error, term()}
   def compose(%Fleet.CapProfile{} = cap_profile, modop_bundles, opts \\ [])
       when is_list(modop_bundles) and is_list(opts) do
-    with {:ok, sp_role_base} <- read_sp_role_base(cap_profile),
+    with :ok <- validate_compose_opts(opts),
+         {:ok, sp_role_base} <- read_sp_role_base(cap_profile),
          {:ok, modop_fragments} <- read_modop_fragments(modop_bundles),
          {:ok, monk_inj} <- Monk.resolve_or_empty(cap_profile, opts) do
       preloaded_paths =
@@ -243,6 +244,26 @@ defmodule Fleet.SPBuilder do
   @spec resolve_monk_injection(Fleet.CapProfile.t(), keyword()) ::
           {:ok, Monk.injection()} | :not_a_monk | {:error, term()}
   defdelegate resolve_monk_injection(cap_profile, opts \\ []), to: Monk, as: :resolve
+
+  # Parse-at-boundary: the load-bearing opts CRASH the composition if malformed — a `preloaded_paths`
+  # that is not a list of binaries blows up the `++` / concat, a `spawned_at` that is not a `%DateTime{}`
+  # blows up `DateTime.to_iso8601`. Turn those into a typed `{:error, {:bad_opt, _}}` (compose promises
+  # `{:ok}|{:error}`), never a raise. Prod callers (`Pod`) pass the defaults; this guards a direct caller.
+  defp validate_compose_opts(opts) do
+    preloaded = Keyword.get(opts, :preloaded_paths, [])
+    spawned_at = Keyword.get(opts, :spawned_at, DateTime.utc_now())
+
+    cond do
+      not (is_list(preloaded) and Enum.all?(preloaded, &is_binary/1)) ->
+        {:error, {:bad_opt, {:preloaded_paths, preloaded}}}
+
+      not match?(%DateTime{}, spawned_at) ->
+        {:error, {:bad_opt, {:spawned_at, spawned_at}}}
+
+      true ->
+        :ok
+    end
+  end
 
   # ============================================================
   # SP role base + modop fragments I/O

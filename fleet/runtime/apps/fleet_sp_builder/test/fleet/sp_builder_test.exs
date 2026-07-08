@@ -123,6 +123,19 @@ defmodule Fleet.SPBuilderTest do
       refute sp_md =~ "Role base"
     end
 
+    test "R1-04 : opts load-bearing malformés → {:error, {:bad_opt, _}} (parse au bord, pas de raise)" do
+      # `preloaded_paths` non-liste crashait le `++` ; `spawned_at` non-DateTime crashait
+      # `DateTime.to_iso8601`. Bornés en erreur typée.
+      assert {:error, {:bad_opt, {:preloaded_paths, _}}} =
+               Fleet.SPBuilder.compose(valid_cap_profile(), [], preloaded_paths: "/not/a/list")
+
+      assert {:error, {:bad_opt, {:preloaded_paths, _}}} =
+               Fleet.SPBuilder.compose(valid_cap_profile(), [], preloaded_paths: [42])
+
+      assert {:error, {:bad_opt, {:spawned_at, _}}} =
+               Fleet.SPBuilder.compose(valid_cap_profile(), [], spawned_at: "2030-01-01")
+    end
+
     test "modop_root config-OBLIGATOIRE : modop sans config → {:error, :modop_root_unconfigured} (fail-loud)" do
       # EXERCE le DÉFAUT runtime (sans put_env) : on retire l'override du setup → modop_root non configuré.
       # cap-profile sans systemPrompt (cas prod) → sp_role_base vide, on isole le modop_root non configuré.
