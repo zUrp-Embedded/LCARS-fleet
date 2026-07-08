@@ -244,6 +244,15 @@ defmodule Fleet.MCP.PodSocketTest do
     assert {:operational, _} = Fleet.MCP.Supervisor.pod_facing_status()
   end
 
+  test "SOC-CONTRACT-001 : PodSocketSupervisor exporte le contrat du seam mcp_socket_provisioner (duck-typed)" do
+    # Le seam est DUCK-TYPED : fleet_mcp ne peut pas adopter le `@behaviour` de fleet_spawner (edge compile
+    # MONTANT interdit) → le compilateur ne vérifie PAS la conformité. Ce test verrouille le côté IMPL :
+    # PodSocketSupervisor DOIT exporter les callbacks que le consumer (Pod.McpProvision, garde R1-23)
+    # appelle. Une signature qui dérive casse CE test, pas un pod en prod. Contrat = Fleet.Spawner.McpSocketProvisioner.
+    assert function_exported?(Fleet.MCP.PodSocketSupervisor, :ensure_pod_socket, 1)
+    assert function_exported?(Fleet.MCP.PodSocketSupervisor, :release_pod_socket, 1)
+  end
+
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
   # Un appel JSON-RPC tools/call sur la socket : connecte, envoie une ligne, lit la réponse, ferme.
