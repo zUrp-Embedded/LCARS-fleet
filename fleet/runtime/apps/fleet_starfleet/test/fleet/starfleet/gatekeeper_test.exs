@@ -48,6 +48,14 @@ defmodule Fleet.Starfleet.GatekeeperTest do
       assert {:ok, %Decision{decision: "allow"}} = Gatekeeper.validate(ok)
     end
 
+    test "R2-12 : JSON décision > 256 KiB → {:error, {:decision_invalid, {:too_large, _}}} (borne anti-DoS)" do
+      # un pod runaway/malicieux ne doit pas forcer un parse non-borné : la borne coupe AVANT Jason.decode.
+      big_reason = String.duplicate("x", 300_000)
+      json = ~s|{"decision":"halt","reason":"#{big_reason}","details":{}}|
+
+      assert {:error, {:decision_invalid, {:too_large, _}}} = Gatekeeper.validate(json)
+    end
+
     test "JSON malformé → {:error, {:decision_invalid, %Jason.DecodeError{}}}" do
       assert {:error, {:decision_invalid, %Jason.DecodeError{}}} =
                Gatekeeper.validate(~s|{not valid json|)

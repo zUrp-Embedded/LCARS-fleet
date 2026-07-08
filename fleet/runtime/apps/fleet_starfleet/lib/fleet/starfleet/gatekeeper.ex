@@ -42,8 +42,18 @@ defmodule Fleet.Starfleet.Gatekeeper do
   Raises `ArgumentError` if the schema was not loaded via
   `init_schema!/0` (boot-time fail-fast).
   """
+  # A gate decision is a structured VERDICT (decision + reason + details) — KB-scale. Bound the input
+  # BEFORE `Jason.decode` (R2-12): a runaway/malicious pod could otherwise submit a giant JSON and force
+  # an unbounded parse (memory DoS). 256 KiB is generous for a decision with rich `details`.
+  @max_decision_bytes 262_144
+
   @spec validate(String.t()) ::
           {:ok, Decision.t()} | {:error, {:decision_invalid, term()}}
+  def validate(json_text)
+      when is_binary(json_text) and byte_size(json_text) > @max_decision_bytes do
+    {:error, {:decision_invalid, {:too_large, byte_size(json_text)}}}
+  end
+
   def validate(json_text) when is_binary(json_text) do
     schema = resolved_schema()
 
