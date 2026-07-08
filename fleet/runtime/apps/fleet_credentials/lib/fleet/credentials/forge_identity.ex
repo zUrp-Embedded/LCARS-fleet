@@ -217,14 +217,34 @@ defmodule Fleet.Credentials.ForgeIdentity do
   defp os_identity(human, opts) do
     case Keyword.get(opts, :identity) do
       %{name: name, email: email} when is_binary(name) and is_binary(email) ->
-        {:ok, %{name: name, email: email}}
+        # A caller-supplied identity is hygiened too (defense in depth): strip control chars so it can
+        # never carry a newline into the git identity (R1-14).
+        {:ok, %{name: strip_control(name), email: strip_control(email)}}
 
       _ ->
-        name = git_config("user.name") || gecos_name(human) || human
-        email = git_config("user.email") || "#{human}@#{hostname()}"
+        # Each human-editable source (~/.gitconfig, GECOS) is HYGIENED before it enters the identity — a
+        # newline/control char would inject a `git config` line or a commit-header line (R1-14). A source
+        # that strips to blank → nil, so the chain falls through to the safe OS-derived fallback.
+        name =
+          sanitize_identity(git_config("user.name")) || sanitize_identity(gecos_name(human)) ||
+            human
+
+        email = sanitize_identity(git_config("user.email")) || "#{human}@#{hostname()}"
         {:ok, %{name: name, email: email}}
     end
   end
+
+  # git identity (name/email) is fed to GIT_AUTHOR_*/GIT_COMMITTER_* and possibly `git config`: a value
+  # from a hand-edited ~/.gitconfig / GECOS carrying a newline or control char would inject a config line
+  # or a commit-header line (R1-14). `strip_control/1` removes ASCII control chars (incl. \n \r \t) →
+  # always a binary. `sanitize_identity/1` additionally trims + blanks-to-nil so the OS-derivation chain
+  # falls through to the safe fallback (login/hostname) when a source is empty after stripping.
+  defp strip_control(s) when is_binary(s), do: String.replace(s, ~r/[\x00-\x1F\x7F]/, "")
+
+  defp sanitize_identity(nil), do: nil
+
+  defp sanitize_identity(s) when is_binary(s),
+    do: s |> strip_control() |> String.trim() |> blank_to_nil()
 
   # `git config --global --get <key>` of the human (daemon runs *as* them → ~/.gitconfig).
   # git absent / key not set → nil (→ fallback).
