@@ -36,6 +36,18 @@ defmodule Fleet.Starfleet.GatekeeperTest do
       assert {:error, {:decision_invalid, _cause}} = Gatekeeper.validate(json)
     end
 
+    test "R2-11 : champ top-level INCONNU → {:error, {:decision_invalid, _}} (additionalProperties:false)" do
+      # La donnée riche va dans `details` (free-form), jamais en clé top → un champ top inconnu = rejeté.
+      bad = ~s|{"decision":"halt","reason":"r","details":{},"stray_field":"x"}|
+      assert {:error, {:decision_invalid, _}} = Gatekeeper.validate(bad)
+
+      # data arbitraire DANS details → toujours OK (details reste non-borné)
+      ok =
+        ~s|{"decision":"allow","reason":"r","details":{"gate":"qa","score":9,"nested":{"a":1}}}|
+
+      assert {:ok, %Decision{decision: "allow"}} = Gatekeeper.validate(ok)
+    end
+
     test "JSON malformé → {:error, {:decision_invalid, %Jason.DecodeError{}}}" do
       assert {:error, {:decision_invalid, %Jason.DecodeError{}}} =
                Gatekeeper.validate(~s|{not valid json|)
