@@ -136,6 +136,34 @@ defmodule Fleet.SPBuilderTest do
                Fleet.SPBuilder.compose(valid_cap_profile(), [], spawned_at: "2030-01-01")
     end
 
+    test "R1-01 : systemPrompt en traversée (`../`) → {:error, {:sp_role_path_escape, _}} (confiné)" do
+      profile = valid_cap_profile(%{"systemPrompt" => "../../../etc/passwd"})
+      assert {:error, {:sp_role_path_escape, _}} = Fleet.SPBuilder.compose(profile, [])
+    end
+
+    test "R1-01 : systemPrompt avec null byte → {:error, {:sp_role_path_unsafe, _}} (pas de raise)" do
+      profile = valid_cap_profile(%{"systemPrompt" => "role\0.md"})
+      assert {:error, {:sp_role_path_unsafe, _}} = Fleet.SPBuilder.compose(profile, [])
+    end
+
+    test "R1-02/03 : modop bundle en traversée (`../`) → {:error, {:modop_bundle_unsafe, _}} (confined_join)" do
+      # systemPrompt=nil → sp_role_base vide, on isole le confinement du modop.
+      profile = valid_cap_profile(%{"systemPrompt" => nil})
+
+      assert {:error, {:modop_bundle_unsafe, {"../evil", _}}} =
+               Fleet.SPBuilder.compose(profile, ["../evil"])
+    end
+
+    test "R1-29 : un nom de skill non-slug (traversée) → {:error, {:skills_unsafe, _}}", %{
+      sp_role_root: root
+    } do
+      # `root` existe (dir) → on dépasse le garde File.dir? ; "../../etc" est rejeté AVANT File.exists?.
+      profile = valid_cap_profile(%{"knowledge" => %{"skills" => ["../../etc", "loop"]}})
+
+      assert {:error, {:skills_unsafe, ["../../etc"]}} =
+               Fleet.SPBuilder.filter_skills(profile, root)
+    end
+
     test "modop_root config-OBLIGATOIRE : modop sans config → {:error, :modop_root_unconfigured} (fail-loud)" do
       # EXERCE le DÉFAUT runtime (sans put_env) : on retire l'override du setup → modop_root non configuré.
       # cap-profile sans systemPrompt (cas prod) → sp_role_base vide, on isole le modop_root non configuré.

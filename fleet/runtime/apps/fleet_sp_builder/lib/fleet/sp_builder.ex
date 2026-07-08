@@ -218,17 +218,26 @@ defmodule Fleet.SPBuilder do
       # NOT as mounted paths → excluded from the on-disk presence check.
       plain = Enum.reject(whitelist, &String.contains?(&1, ":"))
 
-      {present, missing} =
-        plain
-        |> Enum.map(&{&1, Path.join(skills_root, &1)})
-        |> Enum.split_with(fn {_name, path} -> File.exists?(path) end)
+      # Each plain skill name becomes a bind-mount SOURCE in the pod: a name that is not a plain slug
+      # (`..`, `/`, absolute, control) could probe/mount an arbitrary path (R1-29). Refuse fail-loud rather
+      # than resolve it (skill dirs are slugs; a `plugin:skill` was already excluded above).
+      case Enum.reject(plain, &Fleet.Slug.valid?/1) do
+        [] ->
+          {present, missing} =
+            plain
+            |> Enum.map(&{&1, Path.join(skills_root, &1)})
+            |> Enum.split_with(fn {_name, path} -> File.exists?(path) end)
 
-      # A whitelisted skill ABSENT from disk is a fail-loud (an upstream error
-      # that makes the "missing skill" state unrepresentable, not caught downstream):
-      # `{:error, {:skills_missing, names}}`, not a silent filtering of the pod.
-      case missing do
-        [] -> {:ok, Enum.map(present, fn {_name, path} -> path end)}
-        _ -> {:error, {:skills_missing, Enum.map(missing, fn {name, _path} -> name end)}}
+          # A whitelisted skill ABSENT from disk is a fail-loud (an upstream error
+          # that makes the "missing skill" state unrepresentable, not caught downstream):
+          # `{:error, {:skills_missing, names}}`, not a silent filtering of the pod.
+          case missing do
+            [] -> {:ok, Enum.map(present, fn {_name, path} -> path end)}
+            _ -> {:error, {:skills_missing, Enum.map(missing, fn {name, _path} -> name end)}}
+          end
+
+        unsafe ->
+          {:error, {:skills_unsafe, unsafe}}
       end
     else
       {:error, :skills_root_missing}
@@ -275,11 +284,24 @@ defmodule Fleet.SPBuilder do
         {:ok, ""}
 
       path when is_binary(path) ->
-        full_path = Path.join(sp_role_root(), path)
+        root = sp_role_root()
+        full_path = Path.join(root, path)
 
-        case File.read(full_path) do
-          {:ok, content} -> {:ok, content}
-          {:error, _reason} -> {:error, {:sp_role_path_missing, full_path}}
+        # `systemPrompt` comes from the catalogue YAML (untrusted artifact): confine the read to the SP
+        # root (R1-01). A control char (incl. NUL — which would raise in Path.expand/File.read) is refused
+        # first, then the joined path must stay UNDER the root (`..` traversal → escape → refused).
+        cond do
+          String.match?(path, ~r/[\x00-\x1F\x7F]/) ->
+            {:error, {:sp_role_path_unsafe, path}}
+
+          not Fleet.Slug.under_root?(full_path, root) ->
+            {:error, {:sp_role_path_escape, path}}
+
+          true ->
+            case File.read(full_path) do
+              {:ok, content} -> {:ok, content}
+              {:error, _reason} -> {:error, {:sp_role_path_missing, full_path}}
+            end
         end
     end
   end
@@ -294,14 +316,17 @@ defmodule Fleet.SPBuilder do
       {:ok, root} ->
         result =
           Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
-            path = Path.join([root, name, "sp.md"])
+            # Confine the modop leaf under `root`: a malformed `name` (`..`, `/`, absolute) never reaches
+            # the FS (R1-02/03) — same patron as `Fleet.CapProfile.Catalog.read_modops`.
+            case Fleet.Slug.confined_join(root, name) do
+              {:ok, dir} ->
+                case File.read(Path.join(dir, "sp.md")) do
+                  {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
+                  {:error, _reason} -> {:halt, {:error, {:modop_bundle_missing, name}}}
+                end
 
-            case File.read(path) do
-              {:ok, content} ->
-                {:cont, {:ok, [{name, content} | acc]}}
-
-              {:error, _reason} ->
-                {:halt, {:error, {:modop_bundle_missing, name}}}
+              {:error, reason} ->
+                {:halt, {:error, {:modop_bundle_unsafe, {name, reason}}}}
             end
           end)
 
