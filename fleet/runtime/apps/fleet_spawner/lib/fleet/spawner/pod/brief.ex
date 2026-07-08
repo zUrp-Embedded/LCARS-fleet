@@ -26,12 +26,16 @@ defmodule Fleet.Spawner.Pod.Brief do
   alias Fleet.Spawner.Pod.TaskProbe
 
   @doc """
-  Converts an `issue_id` (may contain `/`, `#`, etc. — e.g. `fleet/lcars#600` from Gitea) into a
-  safe filename: replaces `/` with `_` (a `/` would create sub-dirs) and keeps `#` (human-readable).
+  Converts an `issue_id` (untrusted — spawn args / Gitea event; may legitimately carry `/`, `#`, etc.,
+  e.g. `fleet/lcars#600`) into a safe filename. Replaces ANYTHING outside a filename-safe charset
+  (`[A-Za-z0-9._#-]`) with `_` (R1-35): the old `replace("/", "_")` left NUL (which RAISES in `File.write`
+  → crashes `:projecting` = DoS), control chars and `\\` intact. `/` is still neutralized, so the result
+  is ALWAYS a leaf under `issues/` (no traversal). `#` and `-` are kept (human-readable). Consistent for
+  write AND any read (both derive the name through this one function).
   """
   @spec issue_id_to_filename(String.t()) :: String.t()
   def issue_id_to_filename(issue_id) when is_binary(issue_id) do
-    String.replace(issue_id, "/", "_")
+    String.replace(issue_id, ~r/[^A-Za-z0-9._#-]/, "_")
   end
 
   @doc """
