@@ -27,18 +27,9 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   @impl Fleet.Spawner.LaunchBackend
   def launch(args, env) when is_map(args) and is_map(env) do
     with {:ok, exe, argv} <- build_spawn(args),
-         :ok <- ensure_executable(exe) do
-      env_list = Enum.map(env, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
-
-      port =
-        Port.open({:spawn_executable, exe}, [
-          :binary,
-          :exit_status,
-          {:args, argv},
-          {:env, env_list},
-          {:cd, to_charlist(args.pod_dir)}
-        ])
-
+         {:ok, env_list} <- charlist_env(env),
+         :ok <- ensure_executable(exe),
+         {:ok, port} <- safe_port_open(exe, argv, env_list, args.pod_dir) do
       {:ok,
        %{
          port: port,
@@ -47,6 +38,33 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
          tmux_session: Fleet.Spawner.PodTmux.session_name(args.pod_id)
        }}
     end
+  end
+
+  # env MUST be string→string (bwrap_launch `--setenv`): a non-binary key/value would blow up
+  # `to_charlist` (ArgumentError). Turn that into a typed `{:error, {:bad_env, _}}` — the prod caller
+  # (`LaunchEnv`) builds strings; this guards a buggy caller so `launch/2` never raises out of contract.
+  defp charlist_env(env) do
+    if Enum.all?(env, fn {k, v} -> is_binary(k) and is_binary(v) end) do
+      {:ok, Enum.map(env, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)}
+    else
+      {:error, {:bad_env, "launch env must be a string→string map"}}
+    end
+  end
+
+  # `Port.open` can raise (badarg on a malformed spec/opts) → keep the `{:ok}|{:error}` contract.
+  defp safe_port_open(exe, argv, env_list, pod_dir) do
+    {:ok,
+     Port.open({:spawn_executable, exe}, [
+       :binary,
+       :exit_status,
+       {:args, argv},
+       {:env, env_list},
+       {:cd, to_charlist(pod_dir)}
+     ])}
+  rescue
+    e -> {:error, {:port_open, Exception.message(e)}}
+  catch
+    kind, reason -> {:error, {:port_open, {kind, reason}}}
   end
 
   @doc """

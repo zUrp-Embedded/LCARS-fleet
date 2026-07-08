@@ -86,5 +86,15 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
       assert {:error, {:executable_missing, _}} =
                LauncherPortBackend.launch(args(dir, Path.join(dir, "nope.sh")), %{})
     end
+
+    @tag :tmp_dir
+    test "R1-25 : env avec valeur NON-string → {:error, {:bad_env, _}} (parse au bord, pas de raise to_charlist)",
+         %{tmp_dir: dir} do
+      bwrap = fake_exe(dir, "fake_bwrap.sh", "true")
+
+      # `to_charlist(42)` lèverait ArgumentError hors contrat → borné en erreur typée.
+      assert {:error, {:bad_env, _}} = LauncherPortBackend.launch(args(dir, bwrap), %{"K" => 42})
+      assert {:error, {:bad_env, _}} = LauncherPortBackend.launch(args(dir, bwrap), %{"K" => nil})
+    end
   end
 end
