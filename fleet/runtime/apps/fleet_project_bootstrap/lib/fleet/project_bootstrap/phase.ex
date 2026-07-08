@@ -87,7 +87,12 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # prompts for lack of a credential, with no TTY → zombie pod / wedged issue. The wrapper kills the
           # child git if the deadline expires and returns a typed error → the pod does not stay frozen. `Shell.git/2`
           # injects `git_env/0` (anti-prompt + forge auth).
-          with {:ok, {_, 0}} <-
+          # base_branch (catalogue/brief) + feature (built from the dispatcher slug) VALIDATED as git refs
+          # BEFORE they reach `git clone --branch`/`checkout` (R1-07/08): a malformed ref → a CLEAR typed
+          # error, not a cryptic git failure. `Fleet.GitRef` = the Ring-0 check-ref-format authority.
+          with true <- Fleet.GitRef.valid?(base) or {:invalid_base_branch, base},
+               true <- Fleet.GitRef.valid?(feature) or {:invalid_feature_branch, feature},
+               {:ok, {_, 0}} <-
                  Fleet.Credentials.Shell.git(
                    ["clone"] ++ ref_args ++ ["--branch", base, repo_url, ws],
                    git_opts
@@ -104,9 +109,20 @@ defmodule Fleet.ProjectBootstrap.Phase do
                  Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-b", feature], env: []) do
             {:ok, ws, feature}
           else
-            {:ok, {out, code}} -> {:error, {:clone_failed, {code, String.slice(out, 0, 500)}}}
-            {:error, {:timeout, ms}} -> {:error, {:clone_failed, {:git_timeout, ms}}}
-            {:error, {:exit, reason}} -> {:error, {:clone_failed, {:git_exit, reason}}}
+            {:invalid_base_branch, b} ->
+              {:error, {:clone_failed, {:invalid_base_branch, b}}}
+
+            {:invalid_feature_branch, f} ->
+              {:error, {:clone_failed, {:invalid_feature_branch, f}}}
+
+            {:ok, {out, code}} ->
+              {:error, {:clone_failed, {code, String.slice(out, 0, 500)}}}
+
+            {:error, {:timeout, ms}} ->
+              {:error, {:clone_failed, {:git_timeout, ms}}}
+
+            {:error, {:exit, reason}} ->
+              {:error, {:clone_failed, {:git_exit, reason}}}
           end
       end
     end

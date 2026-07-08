@@ -72,6 +72,18 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     refute File.exists?(Path.join(doc, "src.txt"))
   end
 
+  test "R1-07/08 : base_branch malformé (`-inject`) → {:invalid_base_branch} AVANT tout git", %{
+    tmp_dir: tmp
+  } do
+    pod_dir = Path.join(tmp, "pod-badref")
+    File.mkdir_p!(pod_dir)
+    # repo_path bidon : la validation du ref coupe AVANT le clone, donc on ne l'atteint jamais.
+    profile = cap(%{"repo_path" => "/nonexistent/repo.git", "base_branch" => "-inject"})
+
+    assert {:error, {:clone_failed, {:invalid_base_branch, "-inject"}}} =
+             Clone.clone_or_skip(pod_dir, profile, [])
+  end
+
   test "idempotence : workspace résiduel (pod prédécesseur mort) → nettoyé + re-cloné, pas de clone_failed",
        %{tmp_dir: tmp} do
     # Régression live 2026-06-22 : un pod timeout/crash laisse son workspace ; le pod_id étant
