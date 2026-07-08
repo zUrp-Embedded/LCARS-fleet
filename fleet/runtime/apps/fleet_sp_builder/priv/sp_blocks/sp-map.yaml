@@ -5,9 +5,9 @@
 # bloc listé mais absent du disque → le générateur ÉCHOUE (fail-loud). Pas de SP → pas de pod → pas de fleet.
 # Un test de non-régression vérifie : tous les blocs existent + le flat committé == la re-génération (no-drift).
 #
-# NB : `gatekeeper` (exception/promotion) et `architect` (user-facing, hors socle-pod) ne sont PAS encore ici
-# — chantier en cours. Tant qu'ils n'y sont pas, ils gardent leur draft existant / le fallback (le flip
-# fail-loud de read_agent_draft ne se fait QU'APRÈS que tous les rôles spawnables aient leur SP).
+# NB : `architect` (user-facing, hors socle-pod) n'est PAS ici — il garde son draft existant (socle
+# différent : humain en face). Tous les autres rôles spawnés via `assets.ex` sont couverts → le flip
+# fail-loud de `read_agent_draft` est fait (plus de fallback worker-base).
 
 # --- Juges de PR (jugent le diff dans leur workspace) ---
 qualifier:
@@ -45,3 +45,12 @@ consultant:
   - core/judge-verdict
   - method/brief-review
   - role/consultant
+
+# --- Juge d'exception / promotion finale (arbitre les verdicts amont ; pas de diff) ---
+gatekeeper:
+  - core/pod-sanctuary
+  - core/runtime-contract
+  - core/evidence
+  - core/judge-verdict
+  - method/gatekeeper-arbitrate
+  - role/gatekeeper

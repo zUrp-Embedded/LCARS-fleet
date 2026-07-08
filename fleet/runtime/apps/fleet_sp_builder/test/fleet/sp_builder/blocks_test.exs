@@ -35,4 +35,20 @@ defmodule Fleet.SPBuilder.BlocksTest do
       Blocks.compose!("x", [], blocks_dir())
     end
   end
+
+  test "complétude catalogue : chaque rôle-pod a son SP dédié (le flip no-fallback briquerait son spawn sinon)" do
+    # Rôles spawnés via `Fleet.Spawner.Pod.Assets.read_agent_draft` (bwrap/host pods). Hors liste :
+    # `starfleet` (host-native, booté par un systemd unit séparé, ne passe PAS par assets.ex).
+    # `architect` garde son draft historique (socle user-facing, hors blocs). Un NOUVEAU rôle-pod → l'ajouter
+    # ici ET lui donner un draft, sinon son spawn meurt dur (no-fallback, cf. no-sp-no-pod-no-fleet).
+    pod_roles = ~w(architect consultant engineer gatekeeper qualifier reviewer)
+
+    for role <- pod_roles do
+      path = Path.join(drafts_dir(), "agent-#{role}-base.md")
+
+      assert File.exists?(path),
+             "agent-#{role}-base.md manquant → le spawn de #{role} briquerait (no-fallback). " <>
+               "Compose-le (bloc + carte sp-map.yaml + `mix lcars.sp.gen`) ou fournis son draft."
+    end
+  end
 end

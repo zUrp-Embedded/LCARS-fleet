@@ -44,31 +44,35 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  Draft SP role-aware : le draft d'un rôle est `agent-<role>-base.md` s'il EXISTE (dans les
-  `priv/sp_drafts/` de `fleet_sp_builder`), sinon le draft worker générique (workflow yop →
-  get_work_item → submit_result). Convention catalogue (le draft suit le `metadata.name`), plus de
-  rôle gravé en `case` : l'architecte tombe sur son draft délégateur, tout rôle sans draft dédié
-  sur le draft worker. `role` est interpolé dans un path → validé via le smart-constructor slug
-  (source unique du charset path-safe ; un `role` malformé retombe juste sur le draft par défaut).
+  Draft SP role-aware : le draft d'un rôle est `agent-<role>-base.md`, résolu par `metadata.name`. Les
+  drafts pod sont composés par blocs (`Fleet.SPBuilder.Blocks` + `mix lcars.sp.gen`).
+
+  **NO-FALLBACK** (cf. mémoire no-sp-no-pod-no-fleet) : un rôle sans son draft dédié → `{:error,
+  {:agent_draft_missing, …}}` → mort dure du spawn (état `:projecting`). Plus de dégradation silencieuse vers
+  un draft générique — un rôle sans SP est un demi-rôle refusé. `role` est interpolé dans un path → validé via
+  le smart-constructor slug (un `role` malformé → `{:error, {:agent_draft_invalid_role, role}}`).
   """
   @spec read_agent_draft(Fleet.CapProfile.t()) ::
-          {:ok, String.t()} | {:error, {:agent_draft_missing, Path.t(), File.posix()}}
+          {:ok, String.t()}
+          | {:error,
+             {:agent_draft_missing, Path.t(), File.posix()} | {:agent_draft_invalid_role, String.t()}}
   def read_agent_draft(%Fleet.CapProfile{} = cap) do
     role = Fleet.CapProfile.name(cap)
-    default = "priv/sp_drafts/agent-worker-base.md"
 
-    file =
-      if Fleet.Slug.valid?(role) do
-        candidate = "priv/sp_drafts/agent-#{role}-base.md"
-
-        if File.exists?(Application.app_dir(:fleet_sp_builder, candidate)),
-          do: candidate,
-          else: default
-      else
-        default
-      end
-
-    read_tagged(Application.app_dir(:fleet_sp_builder, file), :agent_draft_missing)
+    # NO-FALLBACK (cf. mémoire no-sp-no-pod-no-fleet) : CHAQUE rôle DOIT avoir son SP dédié
+    # `agent-<role>-base.md`. Absent → `{:error, {:agent_draft_missing, …}}` → échec de l'état `:projecting`
+    # → mort DURE du spawn. Pas de SP → pas de pod → pas de fleet. Aucune dégradation silencieuse vers un
+    # draft générique (un rôle sans SP = un demi-rôle sale → le système refuse). Un agent vanilla = `claude`
+    # lancé à la main hors fleet, jamais via la forge. `role` est interpolé dans un path → un slug malformé
+    # est un cap-profile cassé (fail-loud), pas un fallback.
+    if Fleet.Slug.valid?(role) do
+      read_tagged(
+        Application.app_dir(:fleet_sp_builder, "priv/sp_drafts/agent-#{role}-base.md"),
+        :agent_draft_missing
+      )
+    else
+      {:error, {:agent_draft_invalid_role, role}}
+    end
   end
 
   @doc """
@@ -129,7 +133,7 @@ defmodule Fleet.Spawner.Pod.Assets do
 
   @doc """
   Provisionne le monitor in-pod (`watch.sh`) dans le pod_dir (= HOME bwrap). L'agent l'arme via
-  l'outil natif `Monitor` (cf. SP `agent-worker-base.md`) → réveil-par-flag (`turn.flag` touché par
+  l'outil natif `Monitor` (cf. SP du rôle, bloc `core/runtime-contract`) → réveil-par-flag (`turn.flag` touché par
   la fleet), zéro send-keys de CONTENU. L'asset vit en `priv/` de `fleet_spawner` (résolu
   `app_dir`, comme le SP draft). chmod best-effort : l'agent lance `bash ~/watch.sh`, le bit exec
   n'est pas requis.
