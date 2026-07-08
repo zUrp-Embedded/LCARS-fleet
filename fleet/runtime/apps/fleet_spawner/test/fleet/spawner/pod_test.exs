@@ -333,10 +333,11 @@ defmodule Fleet.Spawner.PodTest do
       %File.Stat{mode: mode} = File.stat!(watch)
       assert Bitwise.band(mode, 0o100) != 0, "watch.sh doit être exécutable (owner)"
 
-      # SP enrichi par agent-worker-base draft : doit contenir le workflow
-      # yop → get_work_item → submit_result + le protocole Monitor (réveil-par-flag).
+      # SP enrichi par le draft de RÔLE (résolu par metadata.name=engineer → agent-engineer-base.md, généré
+      # par blocs) : doit porter l'identité du rôle + le workflow yop → get_work_item → submit_result + le
+      # protocole Monitor (réveil-par-flag), tous portés par core/runtime-contract.
       sp = File.read!(Path.join(info.pod_dir, ".lcars/system-prompt.md"))
-      assert sp =~ "agent worker LCARS"
+      assert sp =~ "System Prompt — engineer"
       assert sp =~ "submit_result"
       assert sp =~ "yop"
       assert sp =~ "Monitor"

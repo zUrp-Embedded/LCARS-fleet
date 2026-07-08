@@ -1,0 +1,47 @@
+# Carte rôle → blocs SP. Ordre de la liste = ordre d'assemblage ; `role/*` toujours en dernier.
+# Le générateur (`mix lcars.sp.gen`) compose ces blocs → `priv/sp_drafts/agent-<role>-base.md`.
+#
+# RÈGLE DURE (no-fallback, cf. mémoire no-sp-no-pod-no-fleet) : un rôle du catalogue sans entrée ici, OU un
+# bloc listé mais absent du disque → le générateur ÉCHOUE (fail-loud). Pas de SP → pas de pod → pas de fleet.
+# Un test de non-régression vérifie : tous les blocs existent + le flat committé == la re-génération (no-drift).
+#
+# NB : `gatekeeper` (exception/promotion) et `architect` (user-facing, hors socle-pod) ne sont PAS encore ici
+# — chantier en cours. Tant qu'ils n'y sont pas, ils gardent leur draft existant / le fallback (le flip
+# fail-loud de read_agent_draft ne se fait QU'APRÈS que tous les rôles spawnables aient leur SP).
+
+# --- Juges de PR (jugent le diff dans leur workspace) ---
+qualifier:
+  - core/pod-sanctuary
+  - core/runtime-contract
+  - core/evidence
+  - core/judge-code-input
+  - core/judge-verdict
+  - method/test-evidence-review
+  - role/qualifier
+
+reviewer:
+  - core/pod-sanctuary
+  - core/runtime-contract
+  - core/evidence
+  - core/judge-code-input
+  - core/judge-verdict
+  - method/review-conformance
+  - role/reviewer
+
+# --- Producteur (git-natif : committe en local, le système pousse) ---
+engineer:
+  - core/pod-sanctuary
+  - core/runtime-contract
+  - core/evidence
+  - core/producer-output
+  - method/engineer-implement
+  - role/engineer
+
+# --- Juge du brief (pré-PR, read-only : pas de diff, l'input est le brief) ---
+consultant:
+  - core/pod-sanctuary
+  - core/runtime-contract
+  - core/evidence
+  - core/judge-verdict
+  - method/brief-review
+  - role/consultant
