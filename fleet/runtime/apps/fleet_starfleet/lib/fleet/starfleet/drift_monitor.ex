@@ -56,6 +56,12 @@ defmodule Fleet.Starfleet.DriftMonitor do
   @impl GenServer
   # Pattern-match on the strict canonical %Fleet.Event{} schema. The legacy tuple
   # format was removed (producers migrated to the canonical schema).
+  #
+  # R2-16: these clauses match TYPE ONLY because NONE of these types has a live producer yet (all
+  # "not-yet-born" scaffolding — cf. `cat5_escalator`/`audit_consumer`). There is no legit `source` to
+  # match against today. INVARIANT for whoever wires a real producer: its clause MUST also match
+  # `source:` (the producer's atom) so a SPOOFED-source event of that type cannot trigger the Cat 5
+  # escalation. Matching a guessed source now would just break silently when the real producer is born.
 
   def handle_info(
         %Fleet.Event{type: :"pod.drift", payload: payload, correlation_id: cid},
