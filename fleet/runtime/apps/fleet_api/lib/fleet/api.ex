@@ -1,35 +1,36 @@
 defmodule Fleet.API do
   @moduledoc """
-  API publique LCARS v2 (Ring 4 — frontières externes) : REST + WS.
+  LCARS v2 public API (Ring 4 — external boundaries): REST + WS.
 
-  **API agnostique du client** — le dashboard web v1.5 `:8090` est
-  *un* consommateur parmi d'autres possibles, pas couplé à l'arch v2.
+  **Client-agnostic API** — the v1.5 `:8090` web dashboard is *one*
+  possible consumer among others, not coupled to the v2 arch.
 
-  ## Sous-modules
+  ## Sub-modules
 
-    * `Fleet.API.Rest` — Plug.Router HTTP endpoints REST (port per-humain, posé par bin/fleet_v2)
-      (GET workflow_runs/issues/pods/health + POST admin/spawn) — lecture
-      no-auth, écriture gardée (le HMAC `X-Auth-Token` a été RETIRÉ ;
-      frontière = isolation réseau/container, cf. `Fleet.API.Rest` §Auth)
-    * `Fleet.API.WS` — Cowboy WebSocket handler `:<port>/ws` (port per-humain, bin/fleet_v2) subscribe
-      Phoenix.PubSub bus + filtre per-client topics + heartbeat 30s
+    * `Fleet.API.Rest` — Plug.Router HTTP REST endpoints (per-human port, laid down by bin/fleet_v2)
+      (GET workflow_runs/issues/pods/health + POST admin/spawn) — no-auth
+      reads, guarded writes (the `X-Auth-Token` HMAC was REMOVED;
+      boundary = network/container isolation, cf. `Fleet.API.Rest` §Auth)
+    * `Fleet.API.WS` — Cowboy WebSocket handler `:<port>/ws` (per-human port, bin/fleet_v2) subscribes
+      the Phoenix.PubSub bus + per-client topic filter + 30s heartbeat
 
-  ## Split différé
+  ## Deferred split
 
-  MVP : 1 app umbrella `fleet_api` unique (REST + WS dans même
-  supervision). Pas de duplication subscribe bus, simplicité OTP
-  supervision tree.
+  MVP: 1 single `fleet_api` umbrella app (REST + WS in the same
+  supervision). No duplicated bus subscribe, OTP supervision-tree
+  simplicity.
 
-  **Différé** : split en `fleet_bus_socket` (irréductible côté
-  event_router) + `fleet_rest_facade` (optionnel surcouche). Critère
-  opérationnalisable post-implem **90 jours** : si 1er client observé
-  consume bus NDJSON brut sans REST surcouche (ex CLI custom, autre
-  dashboard expérimental, MCP server externe) → on splitte ; tant
-  qu'aucun tel client n'existe, le split serait spéculatif.
+  **Deferred**: split into `fleet_bus_socket` (irreducible on the
+  event_router side) + `fleet_rest_facade` (optional overlay).
+  Operationalizable post-implementation criterion **90 days**: if the
+  first observed client consumes the raw NDJSON bus without the REST
+  overlay (e.g. custom CLI, another experimental dashboard, external MCP
+  server) → we split; as long as no such client exists, the split would
+  be speculative.
 
-  ## Frontière vendor
+  ## Vendor boundary
 
-  N0 (vendor-agnostic, pas d'inférence — orchestration via le bus
-  PubSub ; aucune inférence vendor dans cette couche).
+  N0 (vendor-agnostic, no inference — orchestration via the PubSub bus;
+  no vendor inference in this layer).
   """
 end

@@ -2,44 +2,44 @@ defmodule Fleet.API.Application do
   @moduledoc """
   Application supervisor `fleet_api`.
 
-  Démarre le Cowboy listener (port per-humain, bin/fleet_v2) avec dispatch :
+  Starts the Cowboy listener (per-human port, bin/fleet_v2) with dispatch:
 
     - `/ws` → `Fleet.API.WS` (WebSocket handler)
     - `/_*` → `Fleet.API.Rest` (Plug.Router REST)
 
   ## Configuration
 
-    * `:fleet_api, :http_port` — port HTTP (posé par runtime.exs depuis FLEET_API_PORT, per-humain ; absent → fail-loud)
-    * `:fleet_api, :start_listener` — booléen (default `true`).
-      Tests peuvent set à `false` pour démarrer Cowboy manuellement.
+    * `:fleet_api, :http_port` — HTTP port (laid down by runtime.exs from FLEET_API_PORT, per-human; absent → fail-loud)
+    * `:fleet_api, :start_listener` — boolean (default `true`).
+      Tests can set it to `false` to start Cowboy manually.
 
-  ## Stratégie
+  ## Strategy
 
   `:one_for_one` — Cowboy listener restart `:permanent`.
-  Pré-enregistrement atomes events (créés au compile-time, pas dérivés d'entrée externe → pas de fuite d'atomes DoS).
+  Pre-registration of event atoms (created at compile-time, not derived from external input → no atom-exhaustion DoS leak).
   """
 
   use Application
 
-  # NB atome `api` (admin.spawn.request) : créé au compile-time par son vrai site
-  # (rest.ex) — pas besoin d'un attribut de pré-enregistrement dédié dans cette
-  # application (l'atome existe déjà via le `%Fleet.Event{type: :"admin.spawn.request"}`).
+  # NB atom `api` (admin.spawn.request): created at compile-time by its real site
+  # (rest.ex) — no need for a dedicated pre-registration attribute in this
+  # application (the atom already exists via the `%Fleet.Event{type: :"admin.spawn.request"}`).
 
   @impl Application
   def start(_type, _args) do
     children = listener_children()
 
-    # F4 (E1) : intensite 3/60 EXPLICITE (doctrine event_router/task_queue — 3/5 OTP trop serre pour un blip ; la fenetre est un CHOIX).
+    # F4 (E1): 3/60 intensity EXPLICIT (event_router/task_queue doctrine — 3/5 OTP too tight for a blip; the window is a CHOICE).
     opts = [strategy: :one_for_one, max_restarts: 3, max_seconds: 60, name: Fleet.API.Supervisor]
 
     case Supervisor.start_link(children, opts) do
       {:ok, _} = ok ->
-        # Une unit systemd `Type=notify` attend sd_notify(READY=1). Émis
-        # APRÈS Supervisor.start_link OK (listener Cowboy bind effectif
-        # — sinon `is-active = activating` jusqu'à TimeoutStartSec=120s).
-        # Inline gen_udp AF_UNIX SOCK_DGRAM (pas de dep Hex). Guard
-        # NOTIFY_SOCKET (no-op dev/test sans systemd). Rescue : ne
-        # jamais crash l'app sur notify failure.
+        # A systemd `Type=notify` unit waits for sd_notify(READY=1). Emitted
+        # AFTER Supervisor.start_link OK (Cowboy listener effectively bound
+        # — otherwise `is-active = activating` until TimeoutStartSec=120s).
+        # Inline gen_udp AF_UNIX SOCK_DGRAM (no Hex dep). NOTIFY_SOCKET
+        # guard (no-op in dev/test without systemd). Rescue: never
+        # crash the app on notify failure.
         notify_systemd_ready()
         log_build_info()
         ok
@@ -49,10 +49,10 @@ defmodule Fleet.API.Application do
     end
   end
 
-  # Trace de boot : la version du build servi, lisible dans les logs de la fleet
-  # qui tourne (« quel commit tourne ? » constatable, pas déduit). Totale —
-  # `BuildInfo.current/0` ne lève jamais. Mémoïsé : ce premier appel au boot
-  # remplit le cache (un seul `git` sur toute la vie du BEAM).
+  # Boot trace: the version of the served build, readable in the logs of the
+  # running fleet ("which commit is running?" observable, not deduced). Total —
+  # `BuildInfo.current/0` never raises. Memoized: this first call at boot
+  # fills the cache (a single `git` over the whole life of the BEAM).
   defp log_build_info do
     info = Fleet.API.BuildInfo.current()
     dirty = if info.dirty, do: "-dirty", else: ""
@@ -63,9 +63,9 @@ defmodule Fleet.API.Application do
     )
   end
 
-  # sd_notify minimal — protocole : ouvrir AF_UNIX SOCK_DGRAM, écrire
-  # "READY=1\n" sur $NOTIFY_SOCKET (chemin Unix). Cas abstract socket
-  # (préfixe \0/@) non géré (rare en pratique systemd).
+  # Minimal sd_notify — protocol: open AF_UNIX SOCK_DGRAM, write
+  # "READY=1\n" to $NOTIFY_SOCKET (Unix path). Abstract socket case
+  # (\0/@ prefix) not handled (rare in practice for systemd).
   defp notify_systemd_ready do
     case System.get_env("NOTIFY_SOCKET") do
       socket when is_binary(socket) and socket != "" and binary_part(socket, 0, 1) == "/" ->
@@ -84,30 +84,30 @@ defmodule Fleet.API.Application do
         end
 
       _ ->
-        # NOTIFY_SOCKET absent/vide/abstract → no-op (dev, test, run
-        # hors systemd, ou setup abstract socket non géré).
+        # NOTIFY_SOCKET absent/empty/abstract → no-op (dev, test, run
+        # outside systemd, or unhandled abstract socket setup).
         :ok
     end
   end
 
   @doc """
-  Child specs du listener Cowboy (public pour le test de bind : l'`:ip` du listener
-  est un contrat de sécurité — loopback par défaut, override nommé seulement).
-  Retourne `[]` quand `:start_listener` est `false`.
+  Cowboy listener child specs (public for the bind test: the listener's `:ip`
+  is a security contract — loopback by default, named override only).
+  Returns `[]` when `:start_listener` is `false`.
   """
   def listener_children do
     if Application.get_env(:fleet_api, :start_listener, true) do
-      # Pas de défaut statique (A7) : le port est per-humain (bin/fleet_v2 → runtime.exs). fetch_env!
-      # = fail-loud si la config manque (en test start_listener=false → jamais atteint).
+      # No static default (A7): the port is per-human (bin/fleet_v2 → runtime.exs). fetch_env!
+      # = fail-loud if the config is missing (in test start_listener=false → never reached).
       port = Application.fetch_env!(:fleet_api, :http_port)
 
-      # Dispatch RAW (non pré-compilé) — Plug.Cowboy le compile en
-      # interne via to_args/5. Le passer DÉJÀ compilé faisait
-      # re-compiler la structure interne cowboy → segments décomposés
-      # réinterprétés comme paths bruts → "ws" sans slash →
-      # ArgumentError. Bug PROD réel (pas couvert en test, où
-      # start_listener:false court-circuite le bind du listener — le
-      # dispatch n'est jamais compilé).
+      # RAW dispatch (not pre-compiled) — Plug.Cowboy compiles it
+      # internally via to_args/5. Passing it ALREADY compiled made
+      # cowboy re-compile the internal structure → decomposed segments
+      # reinterpreted as raw paths → "ws" without a slash →
+      # ArgumentError. Real PROD bug (not covered in test, where
+      # start_listener:false short-circuits the listener bind — the
+      # dispatch is never compiled).
       dispatch = [
         {:_,
          [
@@ -116,12 +116,12 @@ defmodule Fleet.API.Application do
          ]}
       ]
 
-      # Child-spec via la source unique Fleet.EventRouter.Listener : bind loopback par défaut
-      # appliqué PAR CONSTRUCTION (frontière = isolation réseau, cf. Rest § Auth : la seule
-      # écriture restante, /api/admin/spawn, est no-auth mais gardée — ne JAMAIS l'exposer
-      # 0.0.0.0 par défaut). Le dashboard navigateur (:<port>/dashboard + /ws) devient
-      # local-only : un accès distant passe par un tunnel/reverse-proxy. Exposition publique =
-      # opt-in nommé (LCARS_BIND_HOST, via BindAddress).
+      # Child-spec via the single source Fleet.EventRouter.Listener: loopback bind by default
+      # applied BY CONSTRUCTION (boundary = network isolation, cf. Rest § Auth: the only
+      # remaining write, /api/admin/spawn, is no-auth but guarded — NEVER expose it on
+      # 0.0.0.0 by default). The browser dashboard (:<port>/dashboard + /ws) becomes
+      # local-only: remote access goes through a tunnel/reverse-proxy. Public exposure =
+      # named opt-in (LCARS_BIND_HOST, via BindAddress).
       [
         Fleet.EventRouter.Listener.cowboy_child(
           plug: Fleet.API.Rest,

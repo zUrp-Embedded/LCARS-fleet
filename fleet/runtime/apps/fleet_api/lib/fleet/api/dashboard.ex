@@ -1,48 +1,48 @@
 defmodule Fleet.API.Dashboard do
   @moduledoc """
-  Plug.Router dashboard V2 Elixir natif.
+  Native Elixir V2 dashboard Plug.Router.
 
-  Voie retenue (natif intra-release, pas de proxy Python externe) :
-  - Voie B (Plug+Cowboy+EEx) — `plug 1.19` + `plug_cowboy 2.8` déjà deps
-  - Pas de proxy Python (`dashboard-server.py` v1.5 décommissionné)
-  - Accès direct GenServers/Registry/PubSub intra-release (lit l'état via appel direct des modules, sans réseau ni auth)
-  - Esthétique LCARS conservée (clean-room copy CSS, attribution
+  Chosen path (native intra-release, no external Python proxy):
+  - Path B (Plug+Cowboy+EEx) — `plug 1.19` + `plug_cowboy 2.8` already deps
+  - No Python proxy (`dashboard-server.py` v1.5 decommissioned)
+  - Direct GenServers/Registry/PubSub intra-release access (reads state via direct module calls, without network nor auth)
+  - LCARS aesthetic preserved (clean-room CSS copy, attribution
     `starfleet#1` + `starfleet#2`)
 
   ## Routes
 
-    * `GET /dashboard` — render EEx layout `priv/dashboard/index.html.eex`
-      (header LCARS + rail nav + main grid panels placeholders)
-    * `GET /dashboard/static/*` — sert `priv/dashboard/static/` via
-      `Plug.Static` (lcars-tva.css, futurs JS/images des panels)
+    * `GET /dashboard` — renders EEx layout `priv/dashboard/index.html.eex`
+      (LCARS header + nav rail + main grid panel placeholders)
+    * `GET /dashboard/static/*` — serves `priv/dashboard/static/` via
+      `Plug.Static` (lcars-tva.css, future panel JS/images)
 
   ## Auth
 
-  Pas d'auth HTTP — dashboard intra-release accède aux GenServers/PubSub
-  directement. Toute l'API est no-auth par design (frontière =
-  isolation réseau du container, cf. `Fleet.API.Rest` § Auth).
+  No HTTP auth — the intra-release dashboard accesses the GenServers/PubSub
+  directly. The whole API is no-auth by design (boundary =
+  container network isolation, cf. `Fleet.API.Rest` § Auth).
 
-  ## État
+  ## State
 
-  Squelette HTML + CSS + route en place. Les panels (data sources,
-  MEMORY-X, build status, coordination, quota OAUTH) restent à
-  remplir.
+  HTML + CSS + route skeleton in place. The panels (data sources,
+  MEMORY-X, build status, coordination, OAUTH quota) remain to be
+  filled in.
   """
 
   use Plug.Router
   require EEx
 
-  # Template compilé UNE FOIS au build (pas de `EEx.eval_file` par requête =
-  # re-lecture+recompilation à chaque hit, ni de 500 runtime sur template absent côté route NON
-  # authentifiée). `function_from_file` génère `render_dashboard/1` au build ; un template manquant
-  # casse le BUILD (détecté tôt), pas une 500. `@external_resource` → recompile si le `.eex` change.
+  # Template compiled ONCE at build (no `EEx.eval_file` per request =
+  # re-read+recompilation on every hit, nor a runtime 500 on a missing template on an UN-
+  # authenticated route). `function_from_file` generates `render_dashboard/1` at build; a missing template
+  # breaks the BUILD (detected early), not a 500. `@external_resource` → recompiles if the `.eex` changes.
   @dashboard_template Path.expand("../../../priv/dashboard/index.html.eex", __DIR__)
   @external_resource @dashboard_template
   EEx.function_from_file(:defp, :render_dashboard, @dashboard_template, [:assigns])
 
-  # Static assets sous /dashboard/static (servis depuis priv/dashboard/static).
-  # `at:` = URL prefix après le mount point parent. Le forward `/dashboard`
-  # dans rest.ex consomme `/dashboard` prefix, donc ici on voit `/static/*`.
+  # Static assets under /dashboard/static (served from priv/dashboard/static).
+  # `at:` = URL prefix after the parent mount point. The `/dashboard` forward
+  # in rest.ex consumes the `/dashboard` prefix, so here we see `/static/*`.
   plug(Plug.Static,
     at: "/static",
     from: {:fleet_api, "priv/dashboard/static"},
@@ -53,7 +53,7 @@ defmodule Fleet.API.Dashboard do
   plug(:match)
   plug(:dispatch)
 
-  # GET /dashboard (forward consomme le prefix, on voit "/" ici)
+  # GET /dashboard (the forward consumes the prefix, we see "/" here)
   get "/" do
     body = render_dashboard(%{title: "LCARS // V2 MAINFRAME"})
 

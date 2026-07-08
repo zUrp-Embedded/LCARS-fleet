@@ -1,47 +1,47 @@
 defmodule Fleet.API.Readiness do
   @moduledoc """
-  Read-model — état opérationnel **LIVE** du daemon (anti-vert-creux).
+  Read-model — **LIVE** operational state of the daemon (anti-hollow-green).
 
-  « Release démarrée ≠ système opérationnel. » `/api/health` répond 200 dès
-  que Cowboy a bind son port ; ça ne dit RIEN de l'état de câblage réel
-  (registry events chargé, Pilot actif, backends wirés vs placeholders).
-  `deep/0` introspecte le système **vivant** (config chargée, registre de
-  process, `:persistent_term`) et rend chaque sous-système en clair.
+  "Release started ≠ operational system." `/api/health` answers 200 as soon
+  as Cowboy has bound its port; that says NOTHING about the real wiring state
+  (event registry loaded, Pilot active, backends wired vs placeholders).
+  `deep/0` introspects the **live** system (loaded config, process registry,
+  `:persistent_term`) and renders each subsystem in plain terms.
 
-  ## Plan distinct de `mix lcars.contracts.check`
+  ## A plane distinct from `mix lcars.contracts.check`
 
-  `contracts.check` est un gate **source-conformance** (grep statique des
-  sources + exit≠0, joué au build/CI). Il n'est PAS rejouable depuis une
-  release (ni sources ni Mix au runtime). `deep/0` est son **jumeau runtime**
-  sur l'autre plan : l'**état opérationnel live**. Les deux sont
-  complémentaires — l'un verrouille la conformité du code, l'autre expose ce
-  qui est effectivement câblé dans le daemon qui tourne.
+  `contracts.check` is a **source-conformance** gate (static grep of the
+  sources + exit≠0, run at build/CI). It is NOT replayable from a release
+  (neither sources nor Mix at runtime). `deep/0` is its **runtime twin** on
+  the other plane: the **live operational state**. The two are
+  complementary — one locks the code's conformance, the other exposes what
+  is actually wired in the running daemon.
 
-  ## Vocabulaire d'état (par sous-système)
+  ## State vocabulary (per subsystem)
 
-    * `:operational` — wiré et fonctionnel comme attendu
-    * `:inactive` — **volontairement** off (gate config/env), attendu, PAS une
-      faute (ex. Pilot off-par-défaut, rollout progressif) — visible mais ne
-      dégrade PAS le verdict global
-    * `:degraded` — DEVRAIT être opérationnel mais ne l'est pas → le signal
-      anti-vert-creux (ex. registry vide en prod, drain NoOp, launch Stub).
-      Bascule le verdict global en `degraded`
+    * `:operational` — wired and functional as expected
+    * `:inactive` — **deliberately** off (config/env gate), expected, NOT a
+      fault (e.g. Pilot off-by-default, progressive rollout) — visible but
+      does NOT degrade the global verdict
+    * `:degraded` — SHOULD be operational but isn't → the anti-hollow-green
+      signal (e.g. empty registry in prod, NoOp drain, Stub launch).
+      Flips the global verdict to `degraded`
 
-  Chaque probe est défensif : une exception est rabattue en `:degraded`
-  plutôt que de faire planter l'endpoint (read-model résilient).
+  Each probe is defensive: an exception is folded into `:degraded`
+  rather than crashing the endpoint (resilient read-model).
   """
 
   @doc """
-  État opérationnel deep. Verdict global `operational | degraded` +
-  liste des sous-systèmes dégradés + détail par sous-système.
+  Deep operational state. Global verdict `operational | degraded` +
+  list of degraded subsystems + detail per subsystem.
   """
   @spec deep() :: map()
   def deep, do: deep(default_probes())
 
   @doc """
-  Variante injectable : agrège une liste de probes `{id, fun}`. `fun/0` rend
-  `%{id, state, detail}`. Le défaut `default_probes/0` sonde le système réel ;
-  les tests injectent des probes contrôlées pour exercer l'agrégation seule.
+  Injectable variant: aggregates a list of probes `{id, fun}`. `fun/0` returns
+  `%{id, state, detail}`. The default `default_probes/0` probes the real system;
+  tests inject controlled probes to exercise the aggregation alone.
   """
   @spec deep([{String.t(), (-> map())}]) :: map()
   def deep(probes) when is_list(probes) do
@@ -71,11 +71,11 @@ defmodule Fleet.API.Readiness do
     ]
   end
 
-  # ── Probes (chacune : %{id, state, detail}) ──────────────────────────
+  # ── Probes (each: %{id, state, detail}) ──────────────────────────────
 
-  # Registry events chargé ⇒ `Bus.broadcast/2` fail-loud actif. Vide ⇒
-  # escape-hatch boot (validation OFF) = registry-vide-en-prod, un bug réel
-  # (broadcasts non validés) ; le sonder ici l'expose comme dégradé, pas vert-creux.
+  # Event registry loaded ⇒ `Bus.broadcast/2` fail-loud active. Empty ⇒
+  # boot escape-hatch (validation OFF) = empty-registry-in-prod, a real bug
+  # (unvalidated broadcasts); probing it here exposes it as degraded, not hollow-green.
   defp event_registry do
     size = MapSet.size(Fleet.EventRouter.Bus.authorized_event_types())
 
@@ -92,26 +92,26 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # Le rail forge-state-machine (Poller step + StepRunConsumer) est sondé — sa mort
-  # runtime (singleton tombé) bascule en `:degraded` au lieu d'un vert-creux. Délégué à fleet_pilot,
-  # qui possède la topologie du rail (`Fleet.Pilot.Application.step_status/0`) — pas de fuite des
-  # noms de process Ring 2 dans Ring 4. `:inactive` si step off (n'altère pas le verdict global).
-  # (Le rail forge-state-machine est l'UNIQUE rail de dispatch : pas de sonde dispatcher RAM legacy.)
+  # The forge-state-machine rail (Poller step + StepRunConsumer) is probed — its
+  # runtime death (fallen singleton) flips to `:degraded` instead of a hollow-green. Delegated to fleet_pilot,
+  # which owns the rail topology (`Fleet.Pilot.Application.step_status/0`) — no leak of
+  # Ring 3 process names into Ring 4. `:inactive` if step off (doesn't alter the global verdict).
+  # (The forge-state-machine rail is the ONLY dispatch rail: no legacy RAM dispatcher probe.)
   defp pilot_step do
     {state, detail} = Fleet.Pilot.Application.step_status()
     probe("pilot.step", state, detail)
   end
 
-  # Backend d'escalade Cat 5 coord : `NotWiredYet` (ou absent) ⇒ escalades
-  # audit-only silencieuses ⇒ `:degraded`. Vrai backend ⇒ operational.
-  # NB : `Fleet.Coord` est un module PUR (Policies = fonctions pures, aucun
-  # GenServer — cf. fleet_coord/application.ex) ; il n'y a pas de process à
-  # sonder pour la liveness. La présence du backend en config = operational
-  # est donc correct (pas de cas « wiré mais process mort »).
+  # Coord Cat 5 escalation backend: `NotWiredYet` (or absent) ⇒ silent
+  # audit-only escalations ⇒ `:degraded`. Real backend ⇒ operational.
+  # NB: `Fleet.Coord` is a PURE module (Policies = pure functions, no
+  # GenServer — cf. fleet_coord/application.ex); there is no process to
+  # probe for liveness. The presence of the backend in config = operational
+  # is therefore correct (no "wired but dead process" case).
   defp coord_backend do
-    # Lit via l'AUTORITÉ UNIQUE `CoordBackend.resolved/0` (comme `shutdown_dispatcher` lit
-    # `Shutdown.configured_dispatcher/0` ci-dessous) plutôt que `Application.get_env` brut : un seul
-    # défaut à garder aligné (`NotWiredYet`), pas de divergence nil-vs-NotWiredYet entre lecteurs.
+    # Reads via the SINGLE AUTHORITY `CoordBackend.resolved/0` (like `shutdown_dispatcher` reads
+    # `Shutdown.configured_dispatcher/0` below) rather than raw `Application.get_env`: a single
+    # default to keep aligned (`NotWiredYet`), no nil-vs-NotWiredYet divergence between readers.
     backend = Fleet.Starfleet.CoordBackend.resolved()
 
     if backend == Fleet.Starfleet.CoordBackend.NotWiredYet do
@@ -124,13 +124,13 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # Drain de shutdown : `NoOpDispatcher` (défaut test/fallback) ⇒ drain immédiat
-  # 0 in-flight = honnête-dégradé (le drain ne draine pas). Operational quand le
-  # backend prod `AggregateDispatcher` est câblé (seam `:shutdown_dispatcher`).
+  # Shutdown drain: `NoOpDispatcher` (test/fallback default) ⇒ immediate drain
+  # 0 in-flight = honest-degraded (the drain doesn't drain). Operational when the
+  # prod backend `AggregateDispatcher` is wired (seam `:shutdown_dispatcher`).
   defp shutdown_dispatcher do
-    # Lit le backend via la SOURCE UNIQUE du propriétaire (`Fleet.Starfleet.Shutdown`, qui
-    # l'utilise aussi à son init) au lieu de re-déclarer le défaut `NoOpDispatcher` ici — pas
-    # de second défaut à garder aligné.
+    # Reads the backend via the owner's SINGLE SOURCE (`Fleet.Starfleet.Shutdown`, which
+    # also uses it at its init) instead of re-declaring the `NoOpDispatcher` default here — no
+    # second default to keep aligned.
     backend = Fleet.Starfleet.Shutdown.configured_dispatcher()
 
     if backend == Fleet.Starfleet.Shutdown.NoOpDispatcher do
@@ -143,14 +143,14 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # Backend de lancement de pod : `StubBackend` = inerte (test/non-prod),
-  # aucun spawn réel ⇒ `:degraded` ; backend réel (LauncherPort/Tmux) ⇒
-  # operational ; absent ⇒ degraded.
+  # Pod launch backend: `StubBackend` = inert (test/non-prod),
+  # no real spawn ⇒ `:degraded`; real backend (LauncherPort/Tmux) ⇒
+  # operational; absent ⇒ degraded.
   defp launch_backend do
-    # Lit le backend via la SOURCE UNIQUE du propriétaire (`Fleet.Spawner.LaunchBackend.resolved/0`,
-    # que le spawner appelle aussi au spawn) au lieu de re-copier le défaut `LauncherPortBackend` ici.
-    # Conséquence : sur une fleet saine où la clé n'est pas posée, readiness lit le MÊME défaut que
-    # ce qui lance réellement les pods → pas de `:degraded` permanent fantôme, pas de défaut à aligner.
+    # Reads the backend via the owner's SINGLE SOURCE (`Fleet.Spawner.LaunchBackend.resolved/0`,
+    # which the spawner also calls at spawn) instead of re-copying the `LauncherPortBackend` default here.
+    # Consequence: on a healthy fleet where the key isn't set, readiness reads the SAME default as
+    # what actually launches the pods → no phantom permanent `:degraded`, no default to align.
     backend = Fleet.Spawner.LaunchBackend.resolved()
 
     cond do
@@ -168,20 +168,20 @@ defmodule Fleet.API.Readiness do
     end
   end
 
-  # MCP pod-facing : transport pull des pods. Sonde le PROCESS RÉEL (le
-  # DynamicSupervisor d'accepteurs de socket per-pod tourne-t-il ?) délégué au
-  # propriétaire de la topologie `Fleet.MCP.Supervisor.pod_facing_status/0` — pas
-  # un knob de config. Délégation = pas de fuite des noms de process Ring 3 dans
-  # Ring 4 (même pattern que `pilot.step`). Le `mcp_server_spec` (côté spawner)
-  # reste sondé en config : c'est le spec injecté AUX pods, pas un process — sa
-  # présence/absence est l'état réel à ce niveau. Substrat vivant + spec présent →
-  # `:operational` ; substrat mort, OU vivant mais spec absent (pods non câblés) →
+  # MCP pod-facing: pods' pull transport. Probes the REAL PROCESS (is the
+  # per-pod socket-acceptor DynamicSupervisor running?) delegated to the
+  # topology owner `Fleet.MCP.Supervisor.pod_facing_status/0` — not a config
+  # knob. Delegation = no leak of Ring 2 process names into Ring 4 (same
+  # pattern as `pilot.step`). The `mcp_server_spec` (spawner side) stays
+  # probed in config: it's the spec injected TO the pods, not a process — its
+  # presence/absence is the real state at this level. Live substrate + present spec →
+  # `:operational`; dead substrate, OR live but absent spec (pods not wired) →
   # `:degraded`.
   defp mcp_pod_facing do
     {sub_state, sub_detail} = Fleet.MCP.Supervisor.pod_facing_status()
 
-    # Délègue à l'accesseur du propriétaire (comme `LaunchBackend.resolved/0` juste au-dessus) plutôt que
-    # de relire la clé de config de fleet_spawner en dur — pas de couplage implicite au nom de clé.
+    # Delegates to the owner's accessor (like `LaunchBackend.resolved/0` just above) rather than
+    # re-reading fleet_spawner's config key hard-coded — no implicit coupling to the key name.
     spec_present? = Fleet.Spawner.Pod.McpProvision.server_spec_present?()
     detail = Map.put(sub_detail, :mcp_server_spec, spec_present?)
 
@@ -209,8 +209,8 @@ defmodule Fleet.API.Readiness do
 
   defp probe(id, state, detail), do: %{id: id, state: state, detail: detail}
 
-  # Un probe qui crash ne fait pas tomber l'endpoint : rabattu en :degraded,
-  # en conservant l'id du sous-système (attribution correcte du dégradé).
+  # A probe that crashes doesn't take the endpoint down: folded into :degraded,
+  # keeping the subsystem id (correct attribution of the degraded state).
   defp safe_probe(id, fun) do
     fun.()
   rescue

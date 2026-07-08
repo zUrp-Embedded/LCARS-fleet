@@ -1,29 +1,29 @@
 defmodule Fleet.API.WS do
   @moduledoc """
-  Cowboy WebSocket handler `:<port>/ws` (port per-humain, bin/fleet_v2) subscribe `Fleet.EventRouter.Bus`
-  topic `fleet.events` + filtre per-client topics + heartbeat ping/pong
-  30s.
+  Cowboy WebSocket handler `:<port>/ws` (per-human port, bin/fleet_v2) subscribes `Fleet.EventRouter.Bus`
+  topic `fleet.events` + per-client topic filter + 30s ping/pong
+  heartbeat.
 
-  ## Protocol JSON
+  ## JSON protocol
 
   ### Client → Server
 
       {"action": "subscribe", "topics": ["workflow_map.*", "audit.cat5.*"]}
 
-  Topics liste vide = subscribe all (default au connect).
+  Empty topics list = subscribe all (default at connect).
 
   ### Server → Client
 
       {"type": "connected"}                   ← initial handshake
-      {"type": "subscribed", "topics": [...]} ← ack subscribe
-      {"type": "ping"}                        ← heartbeat 30s
+      {"type": "subscribed", "topics": [...]} ← subscribe ack
+      {"type": "ping"}                        ← 30s heartbeat
       {"type": "event", "event_type": "workflow_map.completed", "payload": {...}}
       {"type": "error", "reason": "..."}
 
-  ## Filtre topics
+  ## Topic filter
 
-  Pattern simple : exact match OU wildcard suffixe `*` (ex
-  `"workflow_map.*"` match `"workflow_map.completed"`).
+  Simple pattern: exact match OR `*` suffix wildcard (e.g.
+  `"workflow_map.*"` matches `"workflow_map.completed"`).
   """
 
   @behaviour :cowboy_websocket
@@ -34,14 +34,14 @@ defmodule Fleet.API.WS do
 
   @impl :cowboy_websocket
   def init(req, _opts) do
-    # max_frame_size (E4) : defaut Cowboy = infinity — une frame client arbitrairement grosse
-    # serait bufferisee puis decodee par Jason. 64 KiB >> le plus gros message legitime (subscribe).
+    # max_frame_size (E4): Cowboy default = infinity — an arbitrarily large client frame
+    # would be buffered then decoded by Jason. 64 KiB >> the biggest legitimate message (subscribe).
     {:cowboy_websocket, req, %{topics: []}, %{idle_timeout: 60_000, max_frame_size: 65_536}}
   end
 
   @impl :cowboy_websocket
   def websocket_init(state) do
-    # E5 : fail-loud — un WS abonné-sourd enverrait un stream mort au client sans erreur.
+    # E5: fail-loud — a deaf-subscribed WS would send a dead stream to the client without error.
     :ok = Bus.subscribe()
     Process.send_after(self(), :heartbeat, @heartbeat_ms)
     {[{:text, ~s|{"type":"connected"}|}], state}
@@ -51,10 +51,10 @@ defmodule Fleet.API.WS do
   def websocket_handle({:text, msg}, state) do
     case Jason.decode(msg) do
       {:ok, %{"action" => "subscribe", "topics" => topics}} when is_list(topics) ->
-        # Le WS est no-auth : un client envoie n'importe quoi. Un topic non-string passerait l'ACK
-        # puis crasherait `topic_matches?` en aval (`String.ends_with?(123, ".*")`) au 1er event —
-        # vecteur de crash non authentifié. On valide donc à l'ADMISSION que CHAQUE topic est une
-        # string ; sinon rejet net, état INCHANGÉ (pas d'ACK, pas de subscribe).
+        # The WS is no-auth: a client sends anything. A non-string topic would pass the ACK
+        # then crash `topic_matches?` downstream (`String.ends_with?(123, ".*")`) on the 1st event —
+        # an unauthenticated crash vector. So we validate at ADMISSION that EACH topic is a
+        # string; otherwise a clean reject, state UNCHANGED (no ACK, no subscribe).
         if Enum.all?(topics, &is_binary/1) do
           frame = Jason.encode!(%{type: "subscribed", topics: topics})
           {[{:text, frame}], %{state | topics: topics}}
@@ -72,11 +72,11 @@ defmodule Fleet.API.WS do
 
   def websocket_handle(_other, state), do: {[], state}
 
-  # Schéma événementiel UNIQUE : on ne reçoit que la struct canon `%Fleet.Event{}`
-  # (pas de tuple `{atom, %{"event_type" => ...}}`) — les producteurs émettent la
-  # struct, les subscribers la reçoivent directement, une seule forme sur le bus.
-  # `event_type` (string, forme dot) dérivé de `type` (atom) pour le filtre topics
-  # + le wire JSON client.
+  # SINGLE event schema: we only receive the canonical struct `%Fleet.Event{}`
+  # (no `{atom, %{"event_type" => ...}}` tuple) — producers emit the
+  # struct, subscribers receive it directly, a single form on the bus.
+  # `event_type` (string, dot form) derived from `type` (atom) for the topic filter
+  # + the client JSON wire.
   @impl :cowboy_websocket
   def websocket_info(%Fleet.Event{type: type, payload: payload}, state) do
     event_type = Atom.to_string(type)
@@ -103,11 +103,11 @@ defmodule Fleet.API.WS do
   def websocket_info(_msg, state), do: {[], state}
 
   @doc """
-  Vérifie si `event_type` (string) match au moins un pattern dans
-  `topics`. Liste vide = match all (subscribe-all default).
+  Checks whether `event_type` (string) matches at least one pattern in
+  `topics`. Empty list = match all (subscribe-all default).
 
-  Patterns : exact match OU wildcard suffixe `*` (ex `"workflow_map.*"`
-  match `"workflow_map.completed"`).
+  Patterns: exact match OR `*` suffix wildcard (e.g. `"workflow_map.*"`
+  matches `"workflow_map.completed"`).
   """
   @spec topic_matches?(String.t(), [String.t()]) :: boolean()
   def topic_matches?(_event_type, []), do: true

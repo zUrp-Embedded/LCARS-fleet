@@ -1,53 +1,55 @@
 defmodule Fleet.API.Rest do
   @moduledoc """
-  Plug.Router HTTP endpoints REST (port per-humain, posé par bin/fleet_v2).
+  Plug.Router HTTP REST endpoints (per-human port, laid down by bin/fleet_v2).
 
-  ## Routes MVP
+  ## MVP routes
 
-    * `GET /api/health` — readiness probe (200 dès Cowboy bind ; consommé par `lcars-readiness`)
-    * `GET /api/readiness/deep` — état opérationnel LIVE via
-      `Fleet.API.Readiness.deep/0` — anti-vert-creux
-    * `GET /api/workflow_runs` / `issues` / `pods` — lecture état (stubs MVP)
-    * `POST /api/admin/spawn` — filtre le payload par allowlist DTO (422 si un champ interne du
-      spawner / une clé inconnue est présent), valide le cap-profile (400 si absent, 422 si
-      inconnu / host-native), exige un `brief` pour un cap-profile one-shot (422 sinon — miroir
-      R18, évite le 202 menteur) PUIS broadcast `admin.spawn.request` event + 202. Toute la
-      policy d'admission vit dans `Fleet.API.SpawnAdmission` ; ce routeur mappe les verdicts
-      en statuts HTTP
+    * `GET /api/health` — readiness probe (200 as soon as Cowboy binds; consumed by `lcars-readiness`)
+    * `GET /api/version` — the deployed build stamp (`Fleet.API.BuildInfo`)
+    * `GET /api/readiness/deep` — LIVE operational state via
+      `Fleet.API.Readiness.deep/0` — anti-hollow-green
+    * `GET /api/workflow_runs` / `issues` / `pods` — state read (MVP stubs)
+    * `POST /api/admin/spawn` — filters the payload by DTO allowlist (422 if an internal spawner
+      field / an unknown key is present), validates the cap-profile (400 if absent, 422 if
+      unknown / host-native), requires a `brief` for a one-shot cap-profile (422 otherwise — mirror
+      of R18, avoids the lying 202) THEN broadcasts the `admin.spawn.request` event + 202. All the
+      admission policy lives in `Fleet.API.SpawnAdmission`; this router maps the verdicts
+      to HTTP statuses
+    * `/dashboard` — forwarded to `Fleet.API.Dashboard` (the external web dashboard's entry)
 
-  ## Auth — lecture no-auth, écriture gardée (pas de blanket no-auth)
+  ## Auth — no-auth reads, guarded writes (not blanket no-auth)
 
-  Pas d'auth applicative *pour la lecture*. Le HMAC `X-Auth-Token` (bearer statique sur la
-  constante `"fleet-api-v1"` — pas une signature de requête) a été RETIRÉ : intra-container
-  non-exposé = zéro surface, et une auth bricolée donne un faux sentiment de sécurité (pire
-  que rien). **La frontière est l'isolation réseau** : ne PAS publier le port API hors du
-  container (bind loopback / `docker exec`) ; tunnel (WireGuard/Tailscale) pour un accès
-  distant. Threat-model assumé = LAN / humains de confiance.
+  No application auth *for reads*. The `X-Auth-Token` HMAC (static bearer on the
+  constant `"fleet-api-v1"` — not a request signature) was REMOVED: unexposed
+  intra-container = zero surface, and a hand-rolled auth gives a false sense of security (worse
+  than nothing). **The boundary is network isolation**: do NOT publish the API port outside the
+  container (loopback bind / `docker exec`); tunnel (WireGuard/Tailscale) for remote
+  access. Assumed threat-model = LAN / trusted humans.
 
-  La lecture (dashboard GET, observation) reste no-auth — légitime, inchangé. **L'écriture de
-  config a été retirée** : il n'existe plus de porte d'écriture générique sur le repo de config.
-  Une directive active (cap-profiles, coord-policies, workflow_maps) ne se modifie QUE par git/forge
-  (la source de vérité tracée), jamais par un POST no-auth. La SEULE écriture restante est
-  `POST /api/admin/spawn`, qui n'est PAS couverte par un blanket no-auth : elle garde ses gardes
-  propres (allowlist DTO + host-native refusé à l'admission).
+  Reads (dashboard GET, observation) stay no-auth — legitimate, unchanged. **Config writing
+  was removed**: there is no longer a generic write door onto the config repo.
+  An active directive (cap-profiles, coord-policies, workflow_maps) is only modified via git/forge
+  (the traced source of truth), never via a no-auth POST. The ONLY remaining write is
+  `POST /api/admin/spawn`, which is NOT covered by a blanket no-auth: it keeps its own
+  guards (DTO allowlist + host-native refused at admission).
   """
 
   use Plug.Router
 
   plug(:match)
-  # length (E4) : borne EXPLICITE du body (le defaut Plug 8MB etait implicite). 1 MB >> le plus
-  # gros POST legitime (admin/spawn : cap-profile + brief).
+  # length (E4): EXPLICIT body bound (the Plug 8MB default was implicit). 1 MB >> the biggest
+  # legitimate POST (admin/spawn: cap-profile + brief).
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason, length: 1_048_576)
   plug(:dispatch)
 
-  # Public health probe (200 dès Cowboy bind, consommé par `lcars-readiness`)
+  # Public health probe (200 as soon as Cowboy binds, consumed by `lcars-readiness`)
   get "/api/health" do
     send_json(conn, %{status: "ok", ts: DateTime.utc_now() |> DateTime.to_iso8601()})
   end
 
-  # Readiness deep : état opérationnel LIVE (anti-vert-creux). Vue de câblage
-  # interne (pas un probe public comme /api/health). 200 même si `status: degraded`
-  # — la dégradation est une donnée, pas une erreur HTTP.
+  # Readiness deep: LIVE operational state (anti-hollow-green). Internal wiring
+  # view (not a public probe like /api/health). 200 even if `status: degraded`
+  # — degradation is data, not an HTTP error.
   get "/api/readiness/deep" do
     send_json(conn, Fleet.API.Readiness.deep())
   end
@@ -64,18 +66,18 @@ defmodule Fleet.API.Rest do
     send_json(conn, %{pods: []})
   end
 
-  # Version du build servi — SHA git court + dirty + ref + source (cf.
-  # `Fleet.API.BuildInfo`). Rend la version CONSTATABLE (e2e, debug) sans la
-  # déduire. LECTURE → no-auth légitime, cohérent avec le § Auth ci-dessus.
+  # Version of the served build — short git SHA + dirty + ref + source (cf.
+  # `Fleet.API.BuildInfo`). Makes the version OBSERVABLE (e2e, debug) without
+  # deducing it. READ → legitimate no-auth, consistent with the § Auth above.
   get "/api/version" do
     send_json(conn, Fleet.API.BuildInfo.current())
   end
 
   post "/api/admin/spawn" do
-    # Chokepoint « nouveau pod opérateur » : refusé pendant un drain de
-    # shutdown (Fleet.Shutdown.Quiesce). 503 = indisponible temporairement.
-    # REST est l'UNIQUE producteur de l'event `admin.spawn.request` (vérifié) —
-    # gater ici couvre donc intégralement l'admission de pods top-level.
+    # "New operator pod" chokepoint: refused during a shutdown drain
+    # (Fleet.Shutdown.Quiesce). 503 = temporarily unavailable.
+    # REST is the ONLY producer of the `admin.spawn.request` event (verified) —
+    # gating here therefore fully covers top-level pod admission.
     if Fleet.Shutdown.Quiesce.quiescing?() do
       send_resp(conn, 503, ~s|{"error":"quiescing — shutdown drain in progress"}|)
     else
@@ -83,11 +85,11 @@ defmodule Fleet.API.Rest do
     end
   end
 
-  # Mapping VERDICT D'ADMISSION → HTTP. Toute la POLICY (allowlist DTO, pod_id path-safe,
-  # cap-profile chargeable, host-native refusé, brief one-shot R18) vit dans
-  # `Fleet.API.SpawnAdmission.admit/1` (extraite C4 2026-07-05, le POURQUOI de chaque garde
-  # y est documenté) ; ici on ne fait que traduire chaque refus en statut + corps JSON.
-  # Un refus = RIEN n'a été broadcasté (l'admission précède l'émission par construction).
+  # ADMISSION VERDICT → HTTP mapping. All the POLICY (DTO allowlist, path-safe pod_id,
+  # loadable cap-profile, host-native refused, one-shot brief R18) lives in
+  # `Fleet.API.SpawnAdmission.admit/1` (extracted C4 2026-07-05, the WHY of each guard
+  # is documented there); here we only translate each refusal into a status + JSON body.
+  # A refusal = NOTHING was broadcast (admission precedes emission by construction).
   defp do_admin_spawn(conn) do
     raw = conn.body_params || %{}
 
@@ -96,8 +98,8 @@ defmodule Fleet.API.Rest do
         do_broadcast_spawn(conn, payload)
 
       {:error, {:forbidden_fields, fields}} ->
-        # 422 Unprocessable — la requête porte des champs non publics (opts internes du spawner /
-        # seams / racines disque). Refusé à la frontière, le consumer ne les interprète jamais.
+        # 422 Unprocessable — the request carries non-public fields (internal spawner opts /
+        # seams / disk roots). Refused at the boundary, the consumer never interprets them.
         send_resp(
           conn,
           422,
@@ -118,7 +120,7 @@ defmodule Fleet.API.Rest do
         )
 
       {:error, :brief_required} ->
-        # 422 — cap-profile one-shot sans `brief` : le spawner refuserait (R18), le 202 mentirait.
+        # 422 — one-shot cap-profile without `brief`: the spawner would refuse (R18), the 202 would lie.
         send_resp(
           conn,
           422,
@@ -130,7 +132,7 @@ defmodule Fleet.API.Rest do
         )
 
       {:error, :missing_cap_profile} ->
-        # 400 Bad Request — le champ requis manque (requête incomplète, pas un contenu invalide).
+        # 400 Bad Request — the required field is missing (incomplete request, not invalid content).
         send_resp(
           conn,
           400,
@@ -138,8 +140,8 @@ defmodule Fleet.API.Rest do
         )
 
       {:error, {:cap_profile, name, reason}} ->
-        # 422 — bien formée mais le cap-profile nommé n'est pas chargeable → AUCUN pod ne peut
-        # naître. Plus de 202 qui ment.
+        # 422 — well-formed but the named cap-profile is not loadable → NO pod can
+        # be born. No more lying 202.
         send_resp(
           conn,
           422,
@@ -147,8 +149,8 @@ defmodule Fleet.API.Rest do
         )
 
       {:error, {:host_native_forbidden, name}} ->
-        # 422 — cap-profile HOST-NATIVE (`containment: none`) : jamais atteignable par cette porte
-        # spawn générique no-auth (voie dédiée hors-bande). Fail-closed par construction.
+        # 422 — HOST-NATIVE cap-profile (`containment: none`): never reachable via this generic
+        # no-auth spawn door (dedicated out-of-band path). Fail-closed by construction.
         send_resp(
           conn,
           422,
@@ -168,15 +170,15 @@ defmodule Fleet.API.Rest do
     end
   end
 
-  # Dashboard V2 Elixir natif. Mount Fleet.API.Dashboard sous
-  # /dashboard (UI GET-only). Pas d'auth — comme toute l'API (cf. moduledoc § Auth).
+  # Native Elixir V2 dashboard. Mounts Fleet.API.Dashboard under
+  # /dashboard (GET-only UI). No auth — like the whole API (cf. moduledoc § Auth).
   forward("/dashboard", to: Fleet.API.Dashboard)
 
   match _ do
     send_resp(conn, 404, ~s|{"error":"not found"}|)
   end
 
-  # R6 : status paramétrable (200 défaut) — plus de send_resp+encode inline divergents.
+  # R6: parameterizable status (200 default) — no more divergent inline send_resp+encode.
   defp send_json(conn, payload), do: send_json(conn, 200, payload)
   defp send_json(conn, status, payload), do: send_resp(conn, status, Jason.encode!(payload))
 end

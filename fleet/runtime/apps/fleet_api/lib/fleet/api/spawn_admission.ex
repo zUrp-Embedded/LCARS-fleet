@@ -1,53 +1,53 @@
 defmodule Fleet.API.SpawnAdmission do
   @moduledoc """
-  Pipeline d'ADMISSION de `POST /api/admin/spawn` — la POLICY de la seule
-  écriture de l'API, séparée du routing HTTP (éclatement C4 2026-07-05) :
-  `Fleet.API.Rest` mappe chaque verdict rendu ici sur son statut HTTP, ce
-  module décide QUI passe. Fonctions pures + lectures catalogue (aucun process).
+  ADMISSION pipeline for `POST /api/admin/spawn` — the POLICY of the API's
+  only write, separated from the HTTP routing (C4 2026-07-05 split):
+  `Fleet.API.Rest` maps each verdict returned here onto its HTTP status, this
+  module decides WHO passes. Pure functions + catalog reads (no process).
 
-  ## Pourquoi une admission stricte sur une surface no-auth
+  ## Why a strict admission on a no-auth surface
 
-  `/api/admin/spawn` est no-auth (frontière = isolation réseau, cf. moduledoc
-  `Fleet.API.Rest` § Auth). Le `PublishConsumer` convertit ENSUITE
-  `payload["opts"]` en opts internes du spawner via `to_keyword/1` — sans
-  filtre, des opts privilégiés (`pod_dir_root`, `state_fs_root`, `human`,
-  `project` → clone d'un repo attaquant dans le pod, `recall_seed_jsonl`,
-  `resume`, `session_id`, `rc_name`, `allow_no_brief`, seams module/fun…)
-  deviendraient pilotables depuis l'API. Le pipeline (ordre fixe) :
+  `/api/admin/spawn` is no-auth (boundary = network isolation, cf. moduledoc
+  `Fleet.API.Rest` § Auth). The `PublishConsumer` THEN converts
+  `payload["opts"]` into internal spawner opts via `to_keyword/1` — without a
+  filter, privileged opts (`pod_dir_root`, `state_fs_root`, `human`,
+  `project` → clone of an attacker repo into the pod, `recall_seed_jsonl`,
+  `resume`, `session_id`, `rc_name`, `allow_no_brief`, module/fun seams…)
+  would become drivable from the API. The pipeline (fixed order):
 
-    1. **Allowlist DTO** (`@admin_spawn_public_fields`) — seul un DTO public
-       PLAT est admis ; toute clé inconnue (y compris un `opts` brut) →
-       `{:error, {:forbidden_fields, …}}` AVANT le moindre broadcast. Le
-       payload canonique reconstruit ici est la SEULE chose diffusée — l'API
-       construit elle-même l'`opts` interne.
-    2. **`pod_id` path-safe** — un pod_id est interpolé dans des paths FS
-       (`~/pods/pod_<id>`) : seul le charset `[A-Za-z0-9._-]` sans `..` passe
-       (autorité `Fleet.Spawner.valid_pod_id?/1`, pas une regex recopiée).
-    3. **Cap-profile chargeable** — validé AVANT l'ACK : si le 202 partait dès
-       le broadcast, un `cap_profile_name` inexistant ne serait détecté QUE
-       dans `PublishConsumer` (simple warning, ZÉRO pod) → 202 menteur. Même
-       loader que le consumer (source unique `Fleet.CapProfile.load/1`).
-    4. **Host-native refusé** — un cap-profile `containment: none` lancerait
-       un pod HORS-SANDBOX sur l'hôte *as* l'humain (le pouvoir le plus fort
-       de la fleet) via cette porte générique no-auth. Rendu IRREPRÉSENTABLE
-       par ce chemin : refus à l'admission, le host-native garde sa voie
-       dédiée hors-bande (starfleet / `bin/host_launch.sh`). Fail-closed.
-    5. **Brief requis pour un one-shot** — MIROIR de R18
-       (`Fleet.Spawner.brief_guard`) : un one-shot sans `brief` partirait sans
-       travail → le spawner le refuserait (ZÉRO pod), donc le 202 mentirait.
-       `Fleet.Spawner.brief_required?/1` EST l'autorité partagée (pas de règle
-       recopiée, pas de divergence possible).
+    1. **DTO allowlist** (`@admin_spawn_public_fields`) — only a FLAT public
+       DTO is admitted; any unknown key (including a raw `opts`) →
+       `{:error, {:forbidden_fields, …}}` BEFORE the slightest broadcast. The
+       canonical payload rebuilt here is the ONLY thing broadcast — the API
+       builds the internal `opts` itself.
+    2. **path-safe `pod_id`** — a pod_id is interpolated into FS paths
+       (`~/pods/pod_<id>`): only the charset `[A-Za-z0-9._-]` without `..` passes
+       (authority `Fleet.Spawner.valid_pod_id?/1`, not a copied regex).
+    3. **Loadable cap-profile** — validated BEFORE the ACK: if the 202 left as
+       soon as the broadcast happened, a non-existent `cap_profile_name` would
+       be detected ONLY in `PublishConsumer` (mere warning, ZERO pod) → lying
+       202. Same loader as the consumer (single source `Fleet.CapProfile.load/1`).
+    4. **Host-native refused** — a `containment: none` cap-profile would launch
+       a pod OUT-OF-SANDBOX on the host *as* the human (the strongest power
+       of the fleet) via this generic no-auth door. Made UNREPRESENTABLE
+       by this path: refusal at admission, host-native keeps its dedicated
+       out-of-band path (starfleet / `bin/host_launch.sh`). Fail-closed.
+    5. **Brief required for a one-shot** — MIRROR of R18
+       (`Fleet.Spawner.brief_guard`): a one-shot without `brief` would leave
+       without work → the spawner would refuse it (ZERO pod), so the 202 would lie.
+       `Fleet.Spawner.brief_required?/1` IS the shared authority (no copied
+       rule, no possible divergence).
 
-  `broadcast/1` (l'étape post-admission) émet le schema canon
-  `%Fleet.Event{source: :api}` — un event hors registry ou malformé devient
-  `{:error, _}` (surface HTTP 400 côté Rest), jamais un crash du handler.
+  `broadcast/1` (the post-admission step) emits the canonical schema
+  `%Fleet.Event{source: :api}` — an out-of-registry or malformed event becomes
+  `{:error, _}` (HTTP 400 surface on the Rest side), never a handler crash.
   """
 
   alias Fleet.EventRouter.Bus
 
   @typedoc """
-  Verdicts de refus d'admission — chacun mappé sur UN statut HTTP par
-  `Fleet.API.Rest` (400 pour `:missing_cap_profile`, 422 pour le reste).
+  Admission-refusal verdicts — each mapped onto ONE HTTP status by
+  `Fleet.API.Rest` (400 for `:missing_cap_profile`, 422 for the rest).
   """
   @type refusal ::
           {:forbidden_fields, [String.t()]}
@@ -57,22 +57,22 @@ defmodule Fleet.API.SpawnAdmission do
           | {:host_native_forbidden, String.t()}
           | :brief_required
 
-  # Champs publics admis au top-level du DTO `/api/admin/spawn`. Tout le reste est REFUSÉ.
-  #   * `cap_profile_name` / `role` — le profil de capacités (l'un des deux, requis ; validé plus bas)
-  #   * `issue_id` — corrélation forge/event (string libre)
-  #   * `brief` — le travail du pod (string) ; replacé dans l'`opts` interne construit par l'API
-  #   * `pod_id` — identifiant de pod imposé (rare, admin) ; n'est accepté QUE s'il est path-safe
-  #     (même règle que `Fleet.Spawner` : `[A-Za-z0-9._-]`, pas de `..`), sinon refus
+  # Public fields admitted at the top-level of the `/api/admin/spawn` DTO. Everything else is REFUSED.
+  #   * `cap_profile_name` / `role` — the capability profile (one of the two, required; validated below)
+  #   * `issue_id` — forge/event correlation (free string)
+  #   * `brief` — the pod's work (string); placed back into the internal `opts` built by the API
+  #   * `pod_id` — imposed pod id (rare, admin); accepted ONLY if it is path-safe
+  #     (same rule as `Fleet.Spawner`: `[A-Za-z0-9._-]`, no `..`), otherwise refused
   @admin_spawn_public_fields ~w(cap_profile_name role issue_id brief pod_id)
 
   @doc """
-  Admission complète d'un body `POST /api/admin/spawn` (les 5 étapes du
-  moduledoc, ordre fixe, premier refus rendu). `{:ok, payload}` = le payload
-  CANONIQUE prêt à broadcaster (seule chose qui atteindra le consumer/spawner) ;
-  `{:error, refusal}` = rien ne part, `Fleet.API.Rest` traduit en HTTP.
+  Full admission of a `POST /api/admin/spawn` body (the 5 steps of the
+  moduledoc, fixed order, first refusal returned). `{:ok, payload}` = the
+  CANONICAL payload ready to broadcast (the only thing that will reach the consumer/spawner);
+  `{:error, refusal}` = nothing leaves, `Fleet.API.Rest` translates to HTTP.
 
-  Un body non-map (parseur JSON rendant autre chose) est traité comme un DTO
-  vide → `{:error, :missing_cap_profile}` (le champ requis manque).
+  A non-map body (JSON parser returning something else) is treated as an empty
+  DTO → `{:error, :missing_cap_profile}` (the required field is missing).
   """
   @spec admit(term()) :: {:ok, map()} | {:error, refusal()}
   def admit(raw) do
@@ -84,13 +84,13 @@ defmodule Fleet.API.SpawnAdmission do
   end
 
   @doc """
-  Broadcast du payload ADMIS : schema canon `%Fleet.Event{source: :api}`
-  construit + broadcasté via `Bus.emit` (source validée contre l'enum,
-  timestamp DateTime garanti). La construction ET le broadcast sont DANS le
-  rescue : la POLITIQUE de l'API est de faire surface HTTP — un event hors
-  registry (`UnregisteredError`) ou malformé (`ArgumentError`/
-  `FunctionClauseError` du constructeur) devient `{:error, _}` (→ 400 côté
-  Rest), jamais un crash du handler.
+  Broadcast of the ADMITTED payload: canonical schema `%Fleet.Event{source: :api}`
+  built + broadcast via `Bus.emit` (source validated against the enum,
+  DateTime timestamp guaranteed). The construction AND the broadcast are INSIDE the
+  rescue: the API's POLICY is to surface as HTTP — an out-of-registry event
+  (`UnregisteredError`) or a malformed one (`ArgumentError`/
+  `FunctionClauseError` from the constructor) becomes `{:error, _}` (→ 400 on the
+  Rest side), never a handler crash.
   """
   @spec broadcast(map()) :: :ok | {:error, term()}
   def broadcast(payload) do
@@ -100,9 +100,9 @@ defmodule Fleet.API.SpawnAdmission do
     e in [ArgumentError, FunctionClauseError] -> {:error, inspect(e)}
   end
 
-  # Parse le payload entrant vers un DTO public allowlisté. Le `opts` interne du spawner n'est JAMAIS pris
-  # du client : l'API le (re)construit à partir des seuls champs publics (`brief`, `pod_id`). Toute clé
-  # top-level inconnue ou interdite (y compris un `opts` brut) → `{:error, {:forbidden_fields, ...}}`.
+  # Parses the incoming payload into an allowlisted public DTO. The spawner's internal `opts` is NEVER taken
+  # from the client: the API (re)builds it from the public fields only (`brief`, `pod_id`). Any unknown
+  # or forbidden top-level key (including a raw `opts`) → `{:error, {:forbidden_fields, ...}}`.
   defp parse_admin_spawn_dto(raw) when is_map(raw) do
     extraneous = Map.keys(raw) -- @admin_spawn_public_fields
 
@@ -124,7 +124,7 @@ defmodule Fleet.API.SpawnAdmission do
 
   defp parse_admin_spawn_dto(_), do: {:ok, %{}}
 
-  # Construit l'`opts` du spawn à partir des seuls champs publics. `pod_id` n'est retenu que path-safe.
+  # Builds the spawn `opts` from the public fields only. `pod_id` is kept only if path-safe.
   defp build_admin_opts(raw) do
     opts = if is_binary(raw["brief"]), do: %{"brief" => raw["brief"]}, else: %{}
 
@@ -145,18 +145,18 @@ defmodule Fleet.API.SpawnAdmission do
   defp maybe_put_opts(payload, opts) when map_size(opts) == 0, do: payload
   defp maybe_put_opts(payload, opts), do: Map.put(payload, "opts", opts)
 
-  # Même contrat que `Fleet.Spawner` : un pod_id est interpolé dans des paths FS (`~/pods/pod_<id>`),
-  # donc seul un charset path-safe sans remontée `..` est admis. L'autorité de cette règle vit côté
-  # spawner, qui possède les chemins et sockets dérivés du pod_id ; l'API ne recopie pas la regex.
+  # Same contract as `Fleet.Spawner`: a pod_id is interpolated into FS paths (`~/pods/pod_<id>`),
+  # so only a path-safe charset without `..` traversal is admitted. The authority of this rule lives on
+  # the spawner side, which owns the paths and sockets derived from the pod_id; the API does not copy the regex.
   defp valid_pod_id?(id), do: Fleet.Spawner.valid_pod_id?(id)
 
-  # Résout le cap-profile demandé (`cap_profile_name` ou `role`, mêmes clés que
-  # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing_cap_profile}` ; load KO →
-  # `{:error, {:cap_profile, name, reason}}` ; HOST-NATIVE (`containment != bwrap`) →
-  # `{:error, {:host_native_forbidden, name}}` ; chargé + sandboxé → `{:ok, cap}` (l'admission
-  # continue ; le cap chargé alimente la garde brief one-shot R18, sans re-load). Même loader +
-  # même lecture de containment que le spawner (source unique `Fleet.CapProfile`) → pas de
-  # divergence de verdict entre l'API et le lancement réel.
+  # Resolves the requested cap-profile (`cap_profile_name` or `role`, same keys as
+  # `PublishConsumer.handle_spawn_request`). Absent → `{:error, :missing_cap_profile}`; load KO →
+  # `{:error, {:cap_profile, name, reason}}`; HOST-NATIVE (`containment != bwrap`) →
+  # `{:error, {:host_native_forbidden, name}}`; loaded + sandboxed → `{:ok, cap}` (admission
+  # continues; the loaded cap feeds the R18 one-shot brief guard, without a re-load). Same loader +
+  # same containment read as the spawner (single source `Fleet.CapProfile`) → no
+  # verdict divergence between the API and the real launch.
   defp validate_cap_profile(payload) do
     case Map.get(payload, "cap_profile_name") || Map.get(payload, "role") do
       name when is_binary(name) and name != "" ->
@@ -175,13 +175,13 @@ defmodule Fleet.API.SpawnAdmission do
     end
   end
 
-  # MIROIR de R18 (Fleet.Spawner.brief_guard) à l'ADMISSION : un cap-profile one-shot
-  # (reviewer/qualifier/consultant) lancé SANS `brief` partirait sans travail → le spawner
-  # le refuse (`brief_required`, ZÉRO pod). Sans cette garde, le 202 « mis en file » serait un
-  # 202 menteur (jumeau exact du cap-profile menteur). `Fleet.Spawner.brief_required?/1` EST
-  # l'autorité partagée (même lecture `get_in` nil-aware que `brief_guard`) → on n'a PAS recopié
-  # la règle (pas de divergence possible). Un one-shot LÉGITIME porte son `brief` dans le DTO
-  # (allowlist) → `has_brief?` vrai → il passe.
+  # MIRROR of R18 (Fleet.Spawner.brief_guard) at ADMISSION: a one-shot cap-profile
+  # (reviewer/qualifier/consultant) launched WITHOUT `brief` would leave without work → the spawner
+  # refuses it (`brief_required`, ZERO pod). Without this guard, the "queued" 202 would be a
+  # lying 202 (exact twin of the lying cap-profile). `Fleet.Spawner.brief_required?/1` IS
+  # the shared authority (same nil-aware `get_in` read as `brief_guard`) → we did NOT copy
+  # the rule (no possible divergence). A LEGITIMATE one-shot carries its `brief` in the DTO
+  # (allowlist) → `has_brief?` true → it passes.
   defp check_brief_required(payload, cap) do
     brief = get_in(payload, ["opts", "brief"])
     has_brief? = is_binary(brief) and brief != ""
