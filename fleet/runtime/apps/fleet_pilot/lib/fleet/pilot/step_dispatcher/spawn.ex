@@ -1,82 +1,82 @@
 defmodule Fleet.Pilot.StepDispatcher.Spawn do
   @moduledoc """
-  Feuille de spawn SINGLE-AUTHORITY extraite de `Fleet.Pilot.StepDispatcher`.
+  SINGLE-AUTHORITY spawn leaf extracted from `Fleet.Pilot.StepDispatcher`.
 
-  Les DEUX flux du dispatcher — issue (`dispatch_issue`, producteur) ET PR (`do_dispatch_review`,
-  juge/rework/résolution) — CONVERGENT ici : un seul point de spawn (`spawn_step/9`), une seule
-  identité de pod (`pod_id_for_scope/4`), une seule sérialisation de scope (`serialize_project_scope/6`).
-  Ce module ne DÉCIDE de rien (route, rôle, verdict, budget restent le cœur `StepDispatcher`) : il
-  EXÉCUTE la séquence de spawn. Il n'existe qu'UNE copie de chaque — jamais un fork issue/review.
-  (Les builders d'opts / naming — `rc_name`/`feature_slug`/`maybe_put_route`/`resolve_repo_id` —
-  vivent dans le sous-module `Spawn.Naming`, quasi-purs, appelés par les deux flux.)
+  The dispatcher's TWO flows — issue (`dispatch_issue`, producer) AND PR (`do_dispatch_review`,
+  judge/rework/resolution) — CONVERGE here: a single spawn point (`spawn_step/9`), a single
+  pod identity (`pod_id_for_scope/4`), a single scope serialization (`serialize_project_scope/6`).
+  This module DECIDES nothing (route, role, verdict, budget stay in the `StepDispatcher` core): it
+  EXECUTES the spawn sequence. There is only ONE copy of each — never an issue/review fork.
+  (The opts builders / naming — `rc_name`/`feature_slug`/`maybe_put_route`/`resolve_repo_id` —
+  live in the `Spawn.Naming` submodule, quasi-pure, called by both flows.)
 
-  ## Sémantique LOAD-BEARING (préservée mot-pour-mot depuis le cœur)
+  ## LOAD-BEARING semantics (preserved word-for-word from the core)
 
-  - **Ordre canonique** `verrou → pod → enqueue → wake` (le wake EN DERNIER). Le label-verrou
-    `lcars-in-flight` est posé AVANT le pod, sinon double-spawn.
-  - **Compensation** : si une étape POST-verrou échoue, on retire le verrou ET on kill le pod
-    SEULEMENT s'il vient d'être spawné frais (`alive_before? == false`) — un re-brief sur un pod
-    vivant ne tue JAMAIS l'eng ni son contexte.
-  - **Retour `{:error, {:wake_unreached, pod_id, role, reason}}`** : le pod EST démarré (verrou +
-    brief + pod en place), seul le wake tmux a raté. Le POLLER lit ce retour pour PRENDRE le bail
-    (l'objet est in-flight) et le compter en `errors` (tally honnête, pas un succès silencieux). Ce
-    contrat de retour NE change PAS.
+  - **Canonical order** `lock → pod → enqueue → wake` (wake LAST). The label-lock
+    `lcars-in-flight` is set BEFORE the pod, else double-spawn.
+  - **Compensation**: if a POST-lock step fails, we remove the lock AND kill the pod
+    ONLY if it was just spawned fresh (`alive_before? == false`) — a re-brief on a living pod
+    NEVER kills the eng or its context.
+  - **Return `{:error, {:wake_unreached, pod_id, role, reason}}`**: the pod IS started (lock +
+    brief + pod in place), only the tmux wake failed. The POLLER reads this return to TAKE the lease
+    (the object is in-flight) and count it in `errors` (honest tally, not a silent success). This
+    return contract does NOT change.
 
-  ## Frontière : struct de seams explicite (pas le `ctx`/`opts` entier)
+  ## Boundary: explicit seams struct (not the whole `ctx`/`opts`)
 
-  `spawn_step/9` ne lit que 6 seams du dispatch. On NE passe PAS le `ctx`/`opts` entier — ce serait
-  une fuite de frontière. Chaque caller (issue via `opts`, review via `ctx`) construit un `%Seams{}`
-  (contrat étroit, TYPÉ) : `@enforce_keys` force les 6 champs à l'appel, et un accès
-  `seams.<autre_champ>` ne compile pas (KeyError statique) — une map nue laisserait passer
-  `Map.get(seams, :loader)` en silence.
+  `spawn_step/9` reads only 6 seams of the dispatch. We do NOT pass the whole `ctx`/`opts` — that would be
+  a boundary leak. Each caller (issue via `opts`, review via `ctx`) builds a `%Seams{}`
+  (narrow, TYPED contract): `@enforce_keys` forces the 6 fields at the call, and an access
+  `seams.<other_field>` does not compile (static KeyError) — a bare map would let
+  `Map.get(seams, :loader)` pass silently.
 
-  Les helpers PARTAGÉS avec le cœur restent PUBLICS ici et sont appelés par `StepDispatcher` :
-  `safe_kill/2` (compensation dans `spawn_step` ET die-on-promote dans `promote_pr`).
+  The helpers SHARED with the core stay PUBLIC here and are called by `StepDispatcher`:
+  `safe_kill/2` (compensation in `spawn_step` AND die-on-promote in `promote_pr`).
   """
 
   require Logger
 
-  # Vocabulaire protocole = source unique Fleet.Pilot.Labels (constante compile-time, comme dans
-  # StepDispatcher qui garde SON @in_flight_label pour `decide/1`/`dispatch_review` — même source,
-  # pas un fork).
+  # Protocol vocabulary = single source Fleet.Pilot.Labels (compile-time constant, as in
+  # StepDispatcher which keeps ITS @in_flight_label for `decide/1`/`dispatch_review` — same source,
+  # not a fork).
   @in_flight_label Fleet.Pilot.Labels.in_flight()
 
   defmodule Seams do
     @moduledoc """
-    Contrat de frontière de la feuille de spawn : les 6 seams (et RIEN d'autre) que `spawn_step/9`
-    lit. `@enforce_keys` force les 6 champs à la construction ; un accès `seams.<autre_champ>` ne
-    compile pas — le cluster ne reçoit jamais le `ctx`/`opts` entier du dispatch.
+    Boundary contract of the spawn leaf: the 6 seams (and NOTHING else) that `spawn_step/9`
+    reads. `@enforce_keys` forces the 6 fields at construction; an access `seams.<other_field>` does
+    not compile — the cluster never receives the whole `ctx`/`opts` of the dispatch.
     """
     @enforce_keys [:forge, :spawner, :task_queue, :repo, :forge_opts, :wake_recovery]
     defstruct [:forge, :spawner, :task_queue, :repo, :forge_opts, :wake_recovery]
 
     @type t :: %__MODULE__{
-            # Client forge injecté (seam `:forge_client`, défaut prod `Fleet.Pilot.ForgeClient`).
+            # Injected forge client (seam `:forge_client`, prod default `Fleet.Pilot.ForgeClient`).
             forge: module(),
-            # Spawner injecté (seam `:spawner`, défaut prod `Fleet.Spawner`).
+            # Injected spawner (seam `:spawner`, prod default `Fleet.Spawner`).
             spawner: module(),
-            # Broker de briefs injecté (seam `:task_queue`, défaut prod `Fleet.TaskQueue`).
+            # Injected brief broker (seam `:task_queue`, prod default `Fleet.TaskQueue`).
             task_queue: module(),
-            # `owner/name` du repo (l'objet verrouillé y vit).
+            # The repo's `owner/name` (the locked object lives there).
             repo: String.t(),
-            # Opts forge (base_url/token…) passés au ForgeClient.
+            # Forge opts (base_url/token…) passed to the ForgeClient.
             forge_opts: keyword(),
-            # Recovery de wake injecté (seam `:wake_recovery`, défaut `&Fleet.Pilot.WakeRecovery.wake/3`).
+            # Injected wake recovery (seam `:wake_recovery`, default `&Fleet.Pilot.WakeRecovery.wake/3`).
             wake_recovery: (String.t(), (-> any()), keyword() -> :ok | {:error, term()})
           }
   end
 
   # ============================================================
-  # Cluster H — feuille de spawn (SINGLE-AUTHORITY)
+  # Cluster H — spawn leaf (SINGLE-AUTHORITY)
   # ============================================================
 
   @doc """
-  LEAF de spawn partagé par dispatch_issue (producteur) ET do_dispatch_review (juge/rework).
-  ORDRE CANONIQUE : label-verrou `lcars-in-flight` AVANT pod (sinon double-spawn) → pod
-  (`maybe_spawn` : RE-BRIEFE si vivant) → enqueue du brief (que le pod pull via get_work_item) →
-  wake+recovery. Échec POST-verrou → compensation : retrait du verrou (+ kill SI frais spawn,
-  JAMAIS un re-brief vivant). `lock_target` = l'objet verrouillé (issue number | PR number) ;
-  `issue_number` = le numéro d'issue pour le `issue_id` ET l'enqueue ; `log_ctx` = contexte de log caller.
+  Spawn LEAF shared by dispatch_issue (producer) AND do_dispatch_review (judge/rework).
+  CANONICAL ORDER: label-lock `lcars-in-flight` BEFORE pod (else double-spawn) → pod
+  (`maybe_spawn`: RE-BRIEFS if alive) → enqueue of the brief (that the pod pulls via get_work_item) →
+  wake+recovery. POST-lock failure → compensation: removal of the lock (+ kill IF fresh spawn,
+  NEVER a living re-brief). `lock_target` = the locked object (issue number | PR number);
+  `issue_number` = the issue number for the `issue_id` AND the enqueue; `log_ctx` = caller log context.
   """
   @spec spawn_step(
           Seams.t(),
@@ -113,13 +113,13 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     alive_before? = pod_alive?(spawner, pod_id)
 
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
-         # Time-tracking natif (best-effort, discard) : DÉMARRE le stopwatch sur le MÊME objet que le
-         # verrou (issue ou PR) — mécanique globale, agnostique du rôle (cf. § Time-tracking, ForgeClient).
-         # Signé AU NOM DU WORKER (`as_role`) — PAS le label (protocole = système) : Gitea attribue le
-         # temps tracké à l'utilisateur AUTHENTIFIÉ, donc un stopwatch système compterait tout le temps
-         # sous `lcars-system`, jamais le worker réel. Gitea exige la MÊME identité pour start ET stop
-         # (stopwatch per-utilisateur) — le stop symétrique vit dans `unlock` (même rôle, sauf le cas
-         # verrou-ISSUE au `:promote` final, cf. StepRunCompleter).
+         # Native time-tracking (best-effort, discard): STARTS the stopwatch on the SAME object as the
+         # lock (issue or PR) — global mechanic, role-agnostic (cf. § Time-tracking, ForgeClient).
+         # Signed IN THE WORKER'S NAME (`as_role`) — NOT the label (protocol = system): Gitea attributes the
+         # tracked time to the AUTHENTICATED user, so a system stopwatch would count all the time
+         # under `lcars-system`, never the real worker. Gitea requires the SAME identity for start AND stop
+         # (per-user stopwatch) — the symmetric stop lives in `unlock` (same role, except the
+         # ISSUE-lock case at the final `:promote`, cf. StepRunCompleter).
          _ =
            forge.start_stopwatch(
              repo,
@@ -128,14 +128,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
            ),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
          :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief) do
-      # Le retour de `WakeRecovery.wake` est LOAD-BEARING : `{:error, {:escalated, _}}`
-      # (pod injoignable, escaladé à starfleet) ou `{:error, _}` (re-wake KO) signifie que le pod n'est
-      # PAS réveillé. Jeter ce retour (`_ = wake(...)`) ferait toujours rendre `spawn_step`
-      # `{:ok, {:spawned}}` → le poller compterait `dispatched +1 / errors 0` MENTEUR (pod jamais réveillé,
-      # mais tally clean). On le MATCHE donc : le verrou + le brief + le pod RESTENT en place (le
-      # brief est enqueué, l'escalade système existe → pas un cul-de-sac, re-wake au prochain tick), mais
-      # le dispatch n'est PAS un succès silencieux — il remonte `{:error, {:wake_unreached, …}}` → le poller
-      # le compte en `errors` (tally honnête + err_streak/telemetry reflètent l'injoignabilité réelle).
+      # The return of `WakeRecovery.wake` is LOAD-BEARING: `{:error, {:escalated, _}}`
+      # (pod unreachable, escalated to starfleet) or `{:error, _}` (re-wake failed) means the pod is
+      # NOT woken. Discarding this return (`_ = wake(...)`) would always make `spawn_step` return
+      # `{:ok, {:spawned}}` → the poller would count `dispatched +1 / errors 0` LYING (pod never woken,
+      # but a clean tally). So we MATCH it: the lock + the brief + the pod STAY in place (the
+      # brief is enqueued, the system escalation exists → not a dead-end, re-wake at the next tick), but
+      # the dispatch is NOT a silent success — it surfaces `{:error, {:wake_unreached, …}}` → the poller
+      # counts it in `errors` (honest tally + err_streak/telemetry reflect the real unreachability).
       case wake_recovery.(
              pod_id,
              fn -> maybe_spawn(spawner, false, profile, issue_id, spawn_opts) end,
@@ -149,9 +149,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           {:ok, {:spawned, pod_id, role}}
 
         {:error, reason} ->
-          # PAS de compensation : verrou conservé (le pod est dispatché, l'objet EST in-flight),
-          # brief conservé, pod conservé. Seul le réveil a échoué → tally honnête + re-wake au tick suivant
-          # (idempotent : alive_before? sera vrai, maybe_spawn no-op, re-wake retenté).
+          # NO compensation: lock kept (the pod is dispatched, the object IS in-flight),
+          # brief kept, pod kept. Only the wake-up failed → honest tally + re-wake at the next tick
+          # (idempotent: alive_before? will be true, maybe_spawn no-op, re-wake retried).
           Logger.warning(
             "StepDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
               "MAIS wake INJOIGNABLE → #{inspect(reason)} (verrou+brief conservés, re-wake au prochain tick ; " <>
@@ -162,14 +162,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       end
     else
       {:error, _} = err ->
-        # Une étape POST-verrou a échoué → compensation (retrait du verrou, sinon stuck à jamais).
-        # Kill SEULEMENT si frais spawn (un re-brief ne tue JAMAIS l'eng vivant + son contexte).
+        # A POST-lock step failed → compensation (removal of the lock, else stuck forever).
+        # Kill ONLY if fresh spawn (a re-brief NEVER kills the living eng + its context).
         if not alive_before?, do: safe_kill(spawner, pod_id)
         _ = forge.remove_label(repo, lock_target, @in_flight_label, forge_opts)
 
-        # Stopwatch démarré avec le verrou → arrêté avec lui (le dispatch n'a jamais abouti, le temps
-        # écoulé serait du bruit, pas du travail réel). MÊME identité qu'au démarrage (`as_role`, ce
-        # même rôle) — Gitea n'accepte le stop QUE de l'utilisateur qui a démarré.
+        # Stopwatch started with the lock → stopped with it (the dispatch never succeeded, the elapsed
+        # time would be noise, not real work). SAME identity as at the start (`as_role`, that
+        # same role) — Gitea accepts the stop ONLY from the user who started it.
         _ =
           forge.stop_stopwatch(
             repo,
@@ -199,13 +199,13 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   defp disposition(true = _alive_before?), do: "re-briefed (pod vivant, contexte gardé)"
   defp disposition(false = _alive_before?), do: "spawned"
 
-  # Enqueue le brief dans le broker `Fleet.TaskQueue` ciblé pod_id — le claude REPL le pull via
-  # `mcp__fleet__get_work_item` → `PodTools.get_work_item` → `TaskQueue.get_for_pod` (PAS un Read fichier).
-  # Sans cet enqueue, `TaskQueue.pod_status(pod_id) == nil` → le pod se croit bootstrap
-  # (rien à puller) → idle.
-  # Le `brief` = le BRIEF role-aware déjà construit (build_brief) : GateBrief désamorcé pour le
-  # gatekeeper, corps de l'issue pour un worker. Un `issue["body"]` brut ferait
-  # puller au juge le brief BUILD exécutable. `metadata.issue` corrèle au issue.
+  # Enqueues the brief in the `Fleet.TaskQueue` broker targeted at pod_id — the claude REPL pulls it via
+  # `mcp__fleet__get_work_item` → `PodTools.get_work_item` → `TaskQueue.get_for_pod` (NOT a file Read).
+  # Without this enqueue, `TaskQueue.pod_status(pod_id) == nil` → the pod thinks it is bootstrap
+  # (nothing to pull) → idle.
+  # The `brief` = the role-aware BRIEF already built (build_brief): disarmed GateBrief for the
+  # gatekeeper, issue body for a worker. A raw `issue["body"]` would make
+  # the judge pull the executable BUILD brief. `metadata.issue` correlates to the issue.
   defp enqueue_brief(task_queue, pod_id, role, number, brief) do
     attrs = %{
       issue_id: Fleet.Pilot.IssueId.compose(number),
@@ -227,11 +227,11 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   @doc """
-  Compensation best-effort : tue le pod (s'il a spawné) avant de retirer le verrou.
-  No-op silencieux si le spawner n'expose pas `kill_pod/1` ou si le pod n'existe pas.
+  Best-effort compensation: kills the pod (if it spawned) before removing the lock.
+  Silent no-op if the spawner does not expose `kill_pod/1` or if the pod does not exist.
 
-  PUBLIC car partagé avec le cœur : `spawn_step/9` (compensation) ET `StepDispatcher.promote_pr`
-  (die-on-promote de l'eng). Une seule copie, pas de fork.
+  PUBLIC because shared with the core: `spawn_step/9` (compensation) AND `ReviewLifecycle.promote_pr`
+  (die-on-promote of the eng). One copy, no fork.
   """
   @spec safe_kill(module(), String.t()) :: any()
   def safe_kill(spawner, pod_id) do
@@ -240,10 +240,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     _ -> :ok
   end
 
-  # Dispatch idempotent. Un pod déjà VIVANT (id déterministe stable) = l'eng pipe long-lived
-  # → on le RE-BRIEFE (enqueue + wake, garde son contexte), pas de re-spawn (plus de leak/orphelin).
-  # `pod_alive?` défaute à `false` si le spawner n'expose pas `pod_info/1` (stubs de test) → chemin
-  # spawn inchangé.
+  # Idempotent dispatch. An already-ALIVE pod (stable deterministic id) = the long-lived pipe eng
+  # → we RE-BRIEF it (enqueue + wake, keeps its context), no re-spawn (no more leak/orphan).
+  # `pod_alive?` defaults to `false` if the spawner does not expose `pod_info/1` (test stubs) → spawn
+  # path unchanged.
   defp pod_alive?(spawner, pod_id) do
     function_exported?(spawner, :pod_info, 1) and match?({:ok, _}, spawner.pod_info(pod_id))
   rescue
@@ -251,14 +251,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   # ============================================================
-  # Cluster I — identité pod + sérialisation de scope (SINGLE-AUTHORITY)
+  # Cluster I — pod identity + scope serialization (SINGLE-AUTHORITY)
   # ============================================================
 
   @doc """
-  Granularité d'identité du pod, dérivée du catalogue (`slot_scope` du cap-profile, source unique) :
-    "instance" → keyé ISSUE (`for_issue`) : fan-out, un id distinct par issue/PR (juges éphémères).
-    "project"  → keyé REPO seul (`for_repo`) : UNE identité par (repo, rôle) → un slot Desktop stable.
-  Total sur l'enum slot_scope (l'accessor `Fleet.CapProfile.slot_scope/1` garantit project|instance).
+  Pod identity granularity, derived from the catalogue (`slot_scope` of the cap-profile, single source):
+    "instance" → keyed on ISSUE (`for_issue`): fan-out, a distinct id per issue/PR (ephemeral judges).
+    "project"  → keyed on REPO alone (`for_repo`): ONE identity per (repo, role) → a stable Desktop slot.
+  Total over the slot_scope enum (the `Fleet.CapProfile.slot_scope/1` accessor guarantees project|instance).
   """
   @spec pod_id_for_scope(String.t(), String.t(), integer(), String.t()) :: String.t()
   def pod_id_for_scope("project", repo, _number, role),
@@ -268,20 +268,20 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     do: Fleet.Pilot.PodId.for_issue(repo, number, role)
 
   @doc """
-  Serialisation des roles project-scoped : UNE identite (repo, role) vivante a la fois (1 slot Desktop).
-  Module par le lifetime :
-    instance         -> jamais gated (ids distincts par issue, fan-out assume).
-    project one-shot  -> vivant = occupe par un autre issue -> DEFERE ; il meurt en fin de tache +
-                         spawn frais au issue suivant (comportement baseline, INCHANGE).
-    project pipe      -> process RESIDENT, selon son etat (pipe_rebrief_state) :
-                           dead  -> :ok (spawn frais, 1er issue) ;
-                           busy  -> DEFERE (travaille encore une tache OU publie son dernier livrable :
-                                    resetter son workspace maintenant le corromprait / courserait le push) ;
-                           ready -> reset COLD in-place du workspace pour le nouveau brief + /clear, PUIS
-                                    :ok (spawn_step re-brief sur un workspace propre, bonne branche).
-  Tout AVANT le verrou/enqueue (sinon on verrouillerait une issue qu'on ne traite pas). `{:skipped,
-  :role_busy}` remonte au poller (retry au tick suivant). La base du reset = `project["base_sha"]` :
-  nouveau issue -> main tip (fresh) ; rework -> tip de la PR (continue le travail de l'eng). 1 seule fn.
+  Serialization of project-scoped roles: ONE identity (repo, role) alive at a time (1 Desktop slot).
+  Modulated by the lifetime:
+    instance         -> never gated (distinct ids per issue, fan-out assumed).
+    project one-shot  -> alive = occupied by another issue -> DEFERRED; it dies at the end of the task +
+                         fresh spawn at the next issue (baseline behavior, UNCHANGED).
+    project pipe      -> RESIDENT process, per its state (pipe_rebrief_state):
+                           dead  -> :ok (fresh spawn, 1st issue);
+                           busy  -> DEFERRED (still working a task OR publishing its last deliverable:
+                                    resetting its workspace now would corrupt it / race the push);
+                           ready -> COLD in-place reset of the workspace for the new brief + /clear, THEN
+                                    :ok (spawn_step re-briefs on a clean workspace, right branch).
+  All BEFORE the lock/enqueue (else we would lock an issue we are not processing). `{:skipped,
+  :role_busy}` surfaces to the poller (retry at the next tick). The reset base = `project["base_sha"]`:
+  new issue -> main tip (fresh); rework -> tip of the PR (continues the eng's work). 1 single fn.
   """
   @spec serialize_project_scope(
           String.t(),
@@ -305,9 +305,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   end
 
-  # Etat d'un pipe project-scoped face a un NOUVEAU brief. :ready = idle ET dernier livrable confirme (ni
-  # tache active ni :publishing) — la SEULE situation ou resetter le workspace est sur (le push a deja lu
-  # le commit, l'agent n'ecrit plus). pod_info expose conditions + has_active_task (le pod sait les deux).
+  # State of a project-scoped pipe facing a NEW brief. :ready = idle AND last deliverable confirmed (neither
+  # active task nor :publishing) — the ONLY situation where resetting the workspace is safe (the push already read
+  # the commit, the agent writes no more). pod_info exposes conditions + has_active_task (the pod knows both).
   defp pipe_rebrief_state(spawner, pod_id) do
     case safe_pod_info(spawner, pod_id) do
       {:ok, %{conditions: conds, has_active_task: active}} ->
@@ -317,8 +317,8 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           true -> :ready
         end
 
-      # pod_info sans has_active_task (stub partiel) : conservateur -> :busy (un pipe vivant d'etat
-      # inconnu n'est PAS resette, juste defere). Absent/erreur -> :dead (spawn frais).
+      # pod_info without has_active_task (partial stub): conservative -> :busy (a living pipe of unknown
+      # state is NOT reset, just deferred). Absent/error -> :dead (fresh spawn).
       {:ok, _partial} ->
         :busy
 
@@ -340,9 +340,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     _ -> :error
   end
 
-  # Reset COLD in-place du workspace + /clear AVANT le rebrief, puis :ok (proceed). Reset KO -> DEFERE
-  # (retry au tick suivant). Pas de project (legacy) ou spawner sans la fn (stub) -> :ok sans reset
-  # (degrade honnete : on ne bloque pas, mais sans la garantie cold de ce tour).
+  # COLD in-place reset of the workspace + /clear BEFORE the rebrief, then :ok (proceed). Reset failed -> DEFERRED
+  # (retry at the next tick). No project (legacy) or spawner without the fn (stub) -> :ok without reset
+  # (honest degrade: we do not block, but without the cold guarantee of this round).
   defp reprovision_then_proceed(spawner, pod_id, project, slug) do
     if is_map(project) and function_exported?(spawner, :reprovision_pipe_workspace, 3) do
       case spawner.reprovision_pipe_workspace(pod_id, project, slug: slug) do
@@ -354,7 +354,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   end
 
-  # (Ex-cluster J — builders d'opts / naming : DÉPLACÉ vers `Spawn.Naming` (rc_name /
-  # feature_slug / maybe_put_route / resolve_repo_id). Quasi-purs, partagés par les deux
-  # flux du dispatcher — la feuille garde la MÉCANIQUE de spawn, Naming garde les NOMS.)
+  # (Ex-cluster J — opts builders / naming: MOVED to `Spawn.Naming` (rc_name /
+  # feature_slug / maybe_put_route / resolve_repo_id). Quasi-pure, shared by the two
+  # dispatcher flows — the leaf keeps the spawn MECHANIC, Naming keeps the NAMES.)
 end

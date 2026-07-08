@@ -1,33 +1,33 @@
 defmodule Fleet.Pilot.StepDispatcher.Spawn.Naming do
   @moduledoc """
-  Builders d'opts / naming du spawn, extraits de `StepDispatcher.Spawn` : tout ce qui
-  NOMME ou RÉSOUT une donnée d'identité embarquée dans les `spawn_opts` (label RC
-  Desktop, slug de branche, route gravée, repo_id forge). Quasi-purs (seule
-  `resolve_repo_id/3` lit la forge), zéro décision de spawn — la feuille `Spawn` garde
-  la MÉCANIQUE (ordre verrou→pod→enqueue→wake, compensation, sérialisation de scope).
+  Spawn opts builders / naming, extracted from `StepDispatcher.Spawn`: everything that
+  NAMES or RESOLVES an identity datum embedded in the `spawn_opts` (Desktop RC
+  label, branch slug, written route, forge repo_id). Quasi-pure (only
+  `resolve_repo_id/3` reads the forge), zero spawn decision — the `Spawn` leaf keeps
+  the MECHANIC (order lock→pod→enqueue→wake, compensation, scope serialization).
 
-  Partagés par les DEUX flux du dispatcher (issue via `StepDispatcher`, review via
-  `ReviewLifecycle.RoleDispatch`) — une seule copie de chaque, jamais un fork.
+  Shared by the dispatcher's TWO flows (issue via `StepDispatcher`, review via
+  `ReviewLifecycle.RoleDispatch`) — one copy of each, never a fork.
   """
 
   @doc """
-  Nom RC Desktop = `<projet>_<role>` (projet = segment final du repo, ex.
-  `fleet/poc-8` → `poc-8`). Label EXACT (claude_launch → `--remote-control "<nom>"`, zéro suffixe
-  auto). Distinct du pod_id (clé technique repo-scopée) ; ici c'est le label humain-lisible Desktop.
+  Desktop RC name = `<project>_<role>` (project = final segment of the repo, e.g.
+  `fleet/poc-8` → `poc-8`). EXACT label (claude_launch → `--remote-control "<name>"`, zero auto
+  suffix). Distinct from the pod_id (repo-scoped technical key); here it is the human-readable Desktop label.
   """
   @spec rc_name(String.t(), String.t()) :: String.t()
   def rc_name(repo, role), do: "#{project_name(repo)}_#{role}"
 
-  # Nom de projet path/name-safe (charset [A-Za-z0-9-], zéro espace/`/`/`_`).
-  # Segment final du repo, sanitizé. C'est LA source du `<project>` partout en aval (nom RC Desktop,
-  # SANDBOX_HOME `/home/<project>`, seed-store, branche) via `rc_name` → un seul point de vérité, propre.
-  # Pas de `_` (séparateur de rc_name `<project>_<role>` → garderait l'ambiguïté).
+  # Path/name-safe project name (charset [A-Za-z0-9-], zero space/`/`/`_`).
+  # Final segment of the repo, sanitized. It is THE source of `<project>` everywhere downstream (Desktop RC name,
+  # SANDBOX_HOME `/home/<project>`, seed-store, branch) via `rc_name` → a single point of truth, clean.
+  # No `_` (rc_name separator `<project>_<role>` → would keep the ambiguity).
   defp project_name(repo),
     do: repo |> String.split("/") |> List.last() |> String.replace(~r/[^A-Za-z0-9-]/, "-")
 
   @doc """
-  Slug parlant du titre du issue pour la branche LOCALE (`feature/<slug>`).
-  Sanitizé + tronqué ; vide → `work`. Aucune fuite de pod_id/human.
+  Speaking slug from the issue title for the LOCAL branch (`feature/<slug>`).
+  Sanitized + truncated; empty → `work`. No pod_id/human leak.
   """
   @spec feature_slug(map()) :: String.t()
   def feature_slug(issue) do
@@ -42,11 +42,11 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn.Naming do
     end
   end
 
-  # (Les poses conditionnelles à UNE clé — `:project`, `:repo_id` — passent par la source unique
-  # `Fleet.Pilot.Opts.maybe_put/3` aux sites d'appel : plus de wrapper à clé figée ici. Seule
-  # `maybe_put_route/2` vit ici — elle pose DEUX clés couplées, ce n'est pas l'idiome maybe_put.)
+  # (The conditional puts of ONE key — `:project`, `:repo_id` — go through the single source
+  # `Fleet.Pilot.Opts.maybe_put/3` at the call sites: no more fixed-key wrapper here. Only
+  # `maybe_put_route/2` lives here — it puts TWO coupled keys, which is not the maybe_put idiom.)
 
-  @doc "Pose `:workflow_map`/`:step` dans les spawn_opts si la route est présente (nil = no-op)."
+  @doc "Puts `:workflow_map`/`:step` into the spawn_opts if the route is present (nil = no-op)."
   @spec maybe_put_route(keyword(), {String.t(), String.t()} | nil) :: keyword()
   def maybe_put_route(spawn_opts, nil), do: spawn_opts
 
@@ -54,14 +54,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn.Naming do
     do: spawn_opts |> Keyword.put(:workflow_map, workflow_map_name) |> Keyword.put(:step, step)
 
   @doc """
-  Résout le `repo_id` forge (borné à `<REPO4>` = `rem(id, 10000)`) — l'id forge du projet fait le
-  session_id déterministe des rôles project-bound (eng, juges) via `Fleet.Spawner.SessionId`
-  (segment `<REPO4>` DÉCIMAL). Forge sans `repo_id/2` (stub) / forge down / id absent → `nil`
-  (pas de `:repo_id` posé — `Opts.maybe_put` avale le nil au site d'appel). Un rôle project-bound
-  spawné SANS repo est alors une ANOMALIE : le mint (`Fleet.Spawner.Pod.SessionMint`) FAIL-LOUD (raise)
-  — on ne fabrique JAMAIS un UUID random pour masquer une forge non résolue (forge = organe de
-  LCARS, forge down = stop). `rem(id, 10000)` : `<REPO4>` = 4 chiffres décimaux → DETTE assumée,
-  le repo 10000 collisionne le repo 0 (on ne rouvrira pas le vieux ; cf. SessionId moduledoc).
+  Resolves the forge `repo_id` (bounded to `<REPO4>` = `rem(id, 10000)`) — the project's forge id makes the
+  deterministic session_id of project-bound roles (eng, judges) via `Fleet.Spawner.SessionId`
+  (DECIMAL `<REPO4>` segment). Forge without `repo_id/2` (stub) / forge down / absent id → `nil`
+  (no `:repo_id` put — `Opts.maybe_put` swallows the nil at the call site). A project-bound role
+  spawned WITHOUT a repo is then an ANOMALY: the mint (`Fleet.Spawner.Pod.SessionMint`) FAILS-LOUD (raises)
+  — we NEVER fabricate a random UUID to mask an unresolved forge (forge = organ of
+  LCARS, forge down = stop). `rem(id, 10000)`: `<REPO4>` = 4 decimal digits → assumed DEBT,
+  repo 10000 collides with repo 0 (we will not reopen the old one; cf. SessionId moduledoc).
   """
   @spec resolve_repo_id(module(), String.t(), keyword()) :: non_neg_integer() | nil
   def resolve_repo_id(forge, repo, forge_opts) do

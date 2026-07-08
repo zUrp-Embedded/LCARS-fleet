@@ -1,34 +1,34 @@
 defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   @moduledoc """
-  Résolution projet : pinning de la base git (`base_sha` / `gate_base_sha`) via `git ls-remote`,
-  HORS-POD. Cluster I/O ISOLÉ extrait de `Fleet.Pilot.StepDispatcher`.
+  Project resolution: pinning the git base (`base_sha` / `gate_base_sha`) via `git ls-remote`,
+  OUT-OF-POD. ISOLATED I/O cluster extracted from `Fleet.Pilot.StepDispatcher`.
 
-  Frontière **quasi-pure** : ce module ne touche AUCUN seam module (pas de forge_client / spawner /
-  task_queue / loader) ; il lit `opts` / `forge_opts` et appelle `Fleet.Credentials.Shell` /
-  `Fleet.Credentials.ForgeAuth` (auth runtime, jamais le pod — le pod est forge-aveugle).
+  **Quasi-pure** boundary: this module touches NO seam module (no forge_client / spawner /
+  task_queue / loader); it reads `opts` / `forge_opts` and calls `Fleet.Credentials.Shell` /
+  `Fleet.Credentials.ForgeAuth` (runtime auth, never the pod — the pod is forge-blind).
 
-  `default_project_resolver/2` est l'API PUBLIQUE : c'est le défaut du seam `:project_resolver` de
-  `StepDispatcher` (délégué depuis le module racine via `defdelegate`) ET la fn appelée directement par
-  les tests. Le reste (résolution gate-base, base_url, ls-remote) est interne à ce cluster.
+  `default_project_resolver/2` is the PUBLIC API: it is the default of `StepDispatcher`'s
+  `:project_resolver` seam (delegated from the root module via `defdelegate`) AND the fn called directly by
+  the tests. The rest (gate-base resolution, base_url, ls-remote) is internal to this cluster.
   """
 
-  # Construit `%{repo_path, base_branch, base_sha}` pour le repo du issue.
-  # `base_url` ← `:forge_opts[:base_url]` ou config app ; `base_branch` ← `:base_branch`
-  # (défaut "main"). Pas de forge configurée → `{:ok, nil}` (pod sans repo, ex. tests
-  # locaux). L'auth de clone/ls-remote est portée par le runtime (`Fleet.Credentials.ForgeAuth.
-  # git_env`, token via env), jamais par le pod (forge-aveugle).
+  # Builds `%{repo_path, base_branch, base_sha}` for the issue's repo.
+  # `base_url` ← `:forge_opts[:base_url]` or app config; `base_branch` ← `:base_branch`
+  # (default "main"). No forge configured → `{:ok, nil}` (pod without repo, e.g. local
+  # tests). The clone/ls-remote auth is carried by the runtime (`Fleet.Credentials.ForgeAuth.
+  # git_env`, token via env), never by the pod (forge-blind).
   @spec default_project_resolver(String.t(), keyword()) ::
           {:ok, map() | nil} | {:error, term()}
   def default_project_resolver(repo, opts) do
     forge_opts = Keyword.get(opts, :forge_opts, [])
     base_branch = Keyword.get(opts, :base_branch, "main")
 
-    # DÉCONFLATION clone-base / gate-base. `base_sha` confondrait sinon deux
-    # concerns : (1) le POINT DE DÉPART du clone (`pin_base_sha` reset HEAD dessus) et (2) la
-    # base de la GATE (HEAD doit en DESCENDRE). Forward (build/rework) : ils coïncident. RÉSOLUTION
-    # par rebase : ils DIVERGENT — le pod part de la feature (son travail) mais doit descendre de `main`.
-    # `:gate_base_branch` (posé par le dispatch resolve) pinne la base de gate séparément ; absent → la
-    # gate retombe sur la clone-base (`base_sha`), comportement forward INCHANGÉ.
+    # DECONFLATION clone-base / gate-base. `base_sha` would otherwise conflate two
+    # concerns: (1) the STARTING POINT of the clone (`pin_base_sha` resets HEAD onto it) and (2) the
+    # GATE base (HEAD must DESCEND from it). Forward (build/rework): they coincide. RESOLUTION
+    # by rebase: they DIVERGE — the pod starts from the feature (its work) but must descend from `main`.
+    # `:gate_base_branch` (set by the dispatch resolve) pins the gate base separately; absent → the
+    # gate falls back to the clone-base (`base_sha`), forward behavior UNCHANGED.
     gate_base_branch = Keyword.get(opts, :gate_base_branch)
 
     case forge_base_url(forge_opts) do
@@ -40,26 +40,26 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
 
         with {:ok, sha} <- ls_remote_sha(repo_url, base_branch),
              {:ok, gate_sha} <- resolve_gate_base_sha(repo_url, gate_base_branch, sha) do
-          # `"repo"` (full_name "owner/name") embarqué dans le projet → il voyage jusqu'au pod
-          # puis ressort dans `pod.completed` (`CompletedPayload.build`) → le StepRunConsumer sait sur QUEL
-          # repo agir (multi-projet), sans le re-dériver. `repo_path` = l'URL de push (remote per-step-run).
+          # `"repo"` (full_name "owner/name") embedded in the project → it travels all the way to the pod
+          # then comes back out in `pod.completed` (`CompletedPayload.build`) → the StepRunConsumer knows on WHICH
+          # repo to act (multi-project), without re-deriving it. `repo_path` = the push URL (per-step-run remote).
           {:ok,
            %{
              "repo" => repo,
              "repo_path" => repo_url,
              "base_branch" => base_branch,
              "base_sha" => sha,
-             # gate_base_sha = base de la GATE (≠ clone-base pour une résolution rebase, cf. supra).
+             # gate_base_sha = the GATE base (≠ clone-base for a rebase resolution, cf. above).
              "gate_base_sha" => gate_sha
            }}
         end
     end
   end
 
-  # Base de la GATE. Défaut (forward) : = clone-base (`base_sha`) → la garde exige que HEAD descende
-  # de là où le pod a cloné. Un dispatch resolve passe `:gate_base_branch` ("main") → on pinne le tip de
-  # CETTE branche (la cible du rebase) : la garde exige alors que HEAD descende de `main`, pas de l'ancien
-  # tip de feature (réécrit par le rebase → il ne serait plus ancêtre, d'où un `base_not_ancestor`).
+  # The GATE base. Default (forward): = clone-base (`base_sha`) → the guard requires HEAD to descend
+  # from where the pod cloned. A dispatch resolve passes `:gate_base_branch` ("main") → we pin the tip of
+  # THAT branch (the rebase target): the guard then requires HEAD to descend from `main`, not from the old
+  # feature tip (rewritten by the rebase → it would no longer be an ancestor, hence a `base_not_ancestor`).
   defp resolve_gate_base_sha(_repo_url, nil, clone_base_sha), do: {:ok, clone_base_sha}
 
   defp resolve_gate_base_sha(repo_url, branch, _clone_base_sha) when is_binary(branch),
@@ -70,14 +70,14 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
       get_in(Application.get_env(:fleet_pilot, :forge, []), [:base_url])
   end
 
-  # `git ls-remote <repo_url> <branch>` borné via `Fleet.Credentials.Shell` (source unique de la borne)
-  # + auth runtime → SHA du tip (hors-pod). Symétrique du pin de base côté pipeline. Le wrapper lance le
-  # ls-remote (RÉSEAU : peut hung/prompter) dans son propre process-group et, à la deadline MUR, tue le
-  # GROUPE entier (le ls-remote ET ses helpers de transport, porteurs du token forge) + ferme le port —
-  # là où le patron `Task.async` + `shutdown(:brutal_kill)` ne tuait que le Task BEAM en laissant fuir le
-  # process git.
+  # `git ls-remote <repo_url> <branch>` bounded via `Fleet.Credentials.Shell` (single source of the bound)
+  # + runtime auth → tip SHA (out-of-pod). Symmetric to the base pin on the pipeline side. The wrapper launches the
+  # ls-remote (NETWORK: can hang/prompt) in its own process-group and, at the WALL deadline, kills the
+  # whole GROUP (the ls-remote AND its transport helpers, holders of the forge token) + closes the port —
+  # whereas the `Task.async` + `shutdown(:brutal_kill)` pattern only killed the BEAM Task while letting the
+  # git process leak.
   defp ls_remote_sha(repo_url, branch) do
-    # Token forge via env (hors argv/cmdline) — source unique Fleet.Credentials.ForgeAuth.
+    # Forge token via env (out of argv/cmdline) — single source Fleet.Credentials.ForgeAuth.
     case Fleet.Credentials.Shell.git(["ls-remote", repo_url, branch],
            timeout_ms: 15_000,
            env: Fleet.Credentials.ForgeAuth.git_env()

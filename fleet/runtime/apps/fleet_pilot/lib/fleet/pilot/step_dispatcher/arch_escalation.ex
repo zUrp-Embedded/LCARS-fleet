@@ -1,69 +1,69 @@
 defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   @moduledoc """
-  Cluster IMPUR « escalade arch » (écriture forge) extrait de `Fleet.Pilot.StepDispatcher`.
+  IMPURE cluster "arch escalation" (forge write) extracted from `Fleet.Pilot.StepDispatcher`.
 
-  Quand le cœur décisionnel de `StepDispatcher` a tranché qu'une PR ne peut plus avancer seule —
-  rework non convergent (budget de rounds épuisé, MA-06) ou merge bloqué non auto-résoluble (vrai
-  conflit git / échec non classifié, cf. `Fleet.Pilot.MergeOutcome`) — il DÉLÈGUE ici l'écriture de
-  l'escalade vers le seul canal humain (l'architecte) :
+  When `StepDispatcher`'s decision core has ruled that a PR can no longer advance on its own —
+  non-convergent rework (rounds budget exhausted, MA-06) or a merge blocked and not auto-resolvable (real
+  git conflict / unclassified failure, cf. `Fleet.Pilot.MergeOutcome`) — it DELEGATES here the write of
+  the escalation to the only human channel (the architect):
 
-    1. un commentaire gatekeeper DÉDUPLIQUÉ (signé via `as_role`, `dedup_signature`) sur l'ISSUE ;
-    2. le verrou `lcars-awaits-arch` posé sur l'ISSUE → le poller la SKIP (`decide/1`,
-       `dispatch_review`), plus de re-dispatch → fin du churn.
+    1. a DEDUPLICATED gatekeeper comment (signed via `as_role`, `dedup_signature`) on the ISSUE;
+    2. the `lcars-awaits-arch` lock set on the ISSUE → the poller SKIPS it (`decide/1`,
+       `dispatch_review`), no more re-dispatch → end of the churn.
 
-  Ce module ne DÉCIDE de RIEN : le budget de rework (`count_change_request_rounds`/forge) et la
-  classification de l'échec de merge (`Fleet.Pilot.MergeOutcome`) restent le SINGLE-AUTHORITY du cœur
-  (`dispatch_rework`/`route_merge_failure`). Ce module ne fait QU'ÉCRIRE — un seul point d'écriture
-  forge partagé par les deux escalades (`escalate_to_arch`, privé), pas de fork de signature/label.
+  This module DECIDES NOTHING: the rework budget (`count_change_request_rounds`/forge) and the
+  classification of the merge failure (`Fleet.Pilot.MergeOutcome`) stay the core's SINGLE-AUTHORITY
+  (`dispatch_rework`/`route_merge_failure`). This module ONLY WRITES — a single forge write point
+  shared by the two escalations (`escalate_to_arch`, private), no fork of signature/label.
 
-  ## Frontière : struct de seams explicite (pas le `ctx` entier)
+  ## Boundary: explicit seams struct (not the whole `ctx`)
 
-  Le cluster ne lit QUE 3 seams du dispatch (`forge`, `repo`, `forge_opts`). On NE passe PAS le
-  `ctx`/`opts` entier — ce serait une fuite de frontière. Le caller construit un `%Seams{}`
-  (contrat étroit, TYPÉ) : `@enforce_keys` force les 3 champs à l'appel, et un accès
-  `seams.<autre_champ>` ne compile pas (KeyError statique) — une map nue laisserait passer
-  `Map.get(seams, :spawner)` en silence.
+  The cluster reads ONLY 3 seams of the dispatch (`forge`, `repo`, `forge_opts`). We do NOT pass the
+  whole `ctx`/`opts` — that would be a boundary leak. The caller builds a `%Seams{}`
+  (narrow, TYPED contract): `@enforce_keys` forces the 3 fields at the call, and an access
+  `seams.<other_field>` does not compile (static KeyError) — a bare map would let
+  `Map.get(seams, :spawner)` pass silently.
 
   ## Naming
 
-  L'API publique est `escalate_rework/4` + `escalate_merge_blocked/5` (pas `escalate_rework_to_arch` :
-  le suffixe `_to_arch` est désormais porté par le nom du module — `ArchEscalation.escalate_rework`
-  se lit sans redondance). `seams` est le 1ᵉʳ argument (le caller construit le contrat, PUIS
-  décrit l'escalade).
+  The public API is `escalate_rework/4` + `escalate_merge_blocked/5` (not `escalate_rework_to_arch`:
+  the `_to_arch` suffix is now carried by the module name — `ArchEscalation.escalate_rework`
+  reads without redundancy). `seams` is the 1st argument (the caller builds the contract, THEN
+  describes the escalation).
   """
 
-  # Vocabulaire protocole = source unique Fleet.Pilot.Labels (constante compile-time, comme dans
-  # StepDispatcher qui garde SON @awaits_arch_label pour `decide/1` — même source, pas un fork).
+  # Protocol vocabulary = single source Fleet.Pilot.Labels (compile-time constant, as in
+  # StepDispatcher which keeps ITS @awaits_arch_label for `decide/1` — same source, not a fork).
   @awaits_arch_label Fleet.Pilot.Labels.awaits_arch()
 
   defmodule Seams do
     @moduledoc """
-    Contrat de frontière du cluster d'escalade arch : les 3 seams d'écriture forge lus du dispatch
-    (`forge`/`repo`/`forge_opts`). Construit par le caller AVANT `escalate_rework/4` ou
-    `escalate_merge_blocked/5` — le cluster ne reçoit jamais le `ctx`/`opts` entier.
+    Boundary contract of the arch escalation cluster: the 3 forge-write seams read from the dispatch
+    (`forge`/`repo`/`forge_opts`). Built by the caller BEFORE `escalate_rework/4` or
+    `escalate_merge_blocked/5` — the cluster never receives the whole `ctx`/`opts`.
     """
     @enforce_keys [:forge, :repo, :forge_opts]
     defstruct [:forge, :repo, :forge_opts]
 
     @type t :: %__MODULE__{
-            # Client forge injecté (seam `:forge_client`, défaut prod `Fleet.Pilot.ForgeClient`).
+            # Injected forge client (seam `:forge_client`, prod default `Fleet.Pilot.ForgeClient`).
             forge: module(),
-            # `owner/name` du repo (l'escalade écrit sur l'ISSUE de ce repo).
+            # The repo's `owner/name` (the escalation writes on this repo's ISSUE).
             repo: String.t(),
-            # Opts forge (base_url/token…) ; `as_role` gatekeeper + dedup y sont ajoutés.
+            # Forge opts (base_url/token…); gatekeeper `as_role` + dedup are added to it.
             forge_opts: keyword()
           }
   end
 
   @doc """
-  Rework PR épuisé (rounds > budget, ou budget illisible) → l'arch tranche. Symétrique de
-  `escalate_merge_blocked/5` : commentaire gatekeeper dédupliqué + verrou `lcars-awaits-arch` sur
-  l'ISSUE (le poller la SKIP, plus de re-dispatch). `detail` (map `%{rounds, budget}` ou
-  `{:budget_unreadable, reason}`) va DANS le commentaire, pas dans la clé de dédup.
+  PR rework exhausted (rounds > budget, or unreadable budget) → the arch rules. Symmetric to
+  `escalate_merge_blocked/5`: deduplicated gatekeeper comment + `lcars-awaits-arch` lock on
+  the ISSUE (the poller SKIPS it, no more re-dispatch). `detail` (map `%{rounds, budget}` or
+  `{:budget_unreadable, reason}`) goes INTO the comment, not into the dedup key.
 
-  Retour `{:skipped, {:rework_exhausted_escalated, pr_number}}` (forme gérée par le poller). Head
-  non-fleet (anomalie : le caller a déjà parsé le producteur en amont) → `{:skipped,
-  :not_fleet_branch}` (défensif).
+  Returns `{:skipped, {:rework_exhausted_escalated, pr_number}}` (form handled by the poller). Non-fleet
+  head (anomaly: the caller already parsed the producer upstream) → `{:skipped,
+  :not_fleet_branch}` (defensive).
   """
   @spec escalate_rework(Seams.t(), integer(), String.t(), term()) :: {:skipped, term()}
   def escalate_rework(%Seams{} = seams, pr_number, head, detail) do
@@ -82,17 +82,17 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   end
 
   @doc """
-  Merge bloqué et NON auto-résoluble par le système (vrai conflit git, ou échec non classifié) → l'arch
-  tranche. `class` (`:conflict` | autre) vient de `Fleet.Pilot.MergeOutcome` : le message dit la cause
-  RÉELLE, jamais « après une tentative de rebase » (le système ne rebase PAS — barrière forge-aveugle,
-  résolution mécanique = incrément ultérieur). Commentaire gatekeeper dédupliqué + verrou
-  `lcars-awaits-arch` sur l'ISSUE → le poller la SKIP (hors-dispatch, plus de retry ; le label EST le
-  throttle). `reason` (détail forge du merge KO) va DANS le commentaire.
+  Merge blocked and NOT auto-resolvable by the system (real git conflict, or unclassified failure) → the arch
+  rules. `class` (`:conflict` | other) comes from `Fleet.Pilot.MergeOutcome`: the message states the REAL
+  cause, never "after a rebase attempt" (the system does NOT rebase — forge-blind barrier,
+  mechanical resolution = later increment). Deduplicated gatekeeper comment + `lcars-awaits-arch`
+  lock on the ISSUE → the poller SKIPS it (out-of-dispatch, no more retry; the label IS the
+  throttle). `reason` (forge detail of the failed merge) goes INTO the comment.
 
-  Retour `{:skipped, {:merge_blocked_escalated, pr_number}}` = forme GÉRÉE par le poller
-  (`step_process_pulls`) → compté skipped, pas de crash. Un `{:escalated, _}` ne serait dans AUCUNE
-  clause du `case do_poll` → CaseClauseError à chaque tick : un retour de dispatch DOIT être
-  `{:ok|:skipped|:error}`, jamais une 4ᵉ forme. Head non-fleet → `{:skipped, :not_fleet_branch}`.
+  Returns `{:skipped, {:merge_blocked_escalated, pr_number}}` = form HANDLED by the poller
+  (`step_process_pulls`) → counted skipped, no crash. An `{:escalated, _}` would be in NO
+  clause of the `case do_poll` → CaseClauseError at each tick: a dispatch return MUST be
+  `{:ok|:skipped|:error}`, never a 4th form. Non-fleet head → `{:skipped, :not_fleet_branch}`.
   """
   @spec escalate_merge_blocked(Seams.t(), integer(), String.t(), atom(), term()) ::
           {:skipped, term()}
@@ -112,8 +112,8 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     end
   end
 
-  # Cause HONNÊTE selon la classe RÉELLE (MergeOutcome) — jamais « après une tentative de rebase » qu'on
-  # n'a PAS faite (la résolution mécanique est un incrément ultérieur ; ici on ESCALADE, on ne prétend rien).
+  # HONEST cause per the REAL class (MergeOutcome) — never "after a rebase attempt" that we did
+  # NOT do (the mechanical resolution is a later increment; here we ESCALATE, we claim nothing).
   defp merge_blocked_cause(:conflict, _reason),
     do:
       "conflit git (les deux côtés touchent les mêmes lignes) → le merge automatique est impossible, résolution manuelle requise."
@@ -126,13 +126,13 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     do:
       "échec de merge non classifié par le système (`#{inspect(reason)}`) → à trancher manuellement."
 
-  # CŒUR d'escalade arch (factorisé — conflit ET rework épuisé) : commentaire gatekeeper DÉDUPLIQUÉ
-  # (signé via `as_role`) + verrou `lcars-awaits-arch` sur l'ISSUE → le poller la SKIP
-  # (hors-dispatch). Best-effort : on remonte au canal humain (l'arch), on ne masque pas. Un seul
-  # point d'écriture forge pour toutes les escalades arch PR (pas de fork de signature/label).
+  # CORE of arch escalation (factored — conflict AND exhausted rework): DEDUPLICATED gatekeeper comment
+  # (signed via `as_role`) + `lcars-awaits-arch` lock on the ISSUE → the poller SKIPS it
+  # (out-of-dispatch). Best-effort: we surface to the human channel (the arch), we do not mask. A single
+  # forge write point for all PR arch escalations (no fork of signature/label).
   defp escalate_to_arch(%Seams{} = seams, issue_n, signature, body) do
-    # Signature gatekeeper via le writer UNIQUE `GatekeeperSeal.as_gatekeeper/1` (pas un
-    # `as_role(_, gatekeeper_role())` local — un seul point du runtime écrit cet idiome).
+    # Gatekeeper signature via the UNIQUE writer `GatekeeperSeal.as_gatekeeper/1` (not a local
+    # `as_role(_, gatekeeper_role())` — a single point of the runtime writes this idiom).
     gk_opts =
       seams.forge_opts
       |> Fleet.Pilot.GatekeeperSeal.as_gatekeeper()
@@ -144,11 +144,11 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     :ok
   end
 
-  # Extrait le n° d'ISSUE parente de la feature-branch (`lcars/issue-<n>-<role>`) via le parseur
-  # UNIQUE `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1` (pas un re-parse maison). Adaptateur
-  # local `{:ok, issue_n} | {:skipped, :not_fleet_branch}` — le producteur n'intéresse pas
-  # l'escalade (elle écrit sur l'issue), d'où un retour plus étroit que le `parse_feature_branch_or_skip`
-  # de StepDispatcher (qui rend le tuple `{n, role}` complet pour promote_pr/dispatch_pr_role).
+  # Extracts the parent ISSUE number from the feature-branch (`lcars/issue-<n>-<role>`) via the
+  # UNIQUE parser `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1` (not a homemade re-parse). Local
+  # adapter `{:ok, issue_n} | {:skipped, :not_fleet_branch}` — the producer does not interest
+  # the escalation (it writes on the issue), hence a narrower return than
+  # `RoleDispatch.parse_feature_branch_or_skip` (which returns the full `{n, role}` tuple for the review dispatch).
   defp issue_of_branch_or_skip(head) do
     case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
       {:ok, {issue_n, _producer}} -> {:ok, issue_n}
