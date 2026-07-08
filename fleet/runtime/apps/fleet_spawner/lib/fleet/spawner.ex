@@ -238,12 +238,30 @@ defmodule Fleet.Spawner do
         catch
           :exit, _reason ->
             _ = DynamicSupervisor.terminate_child(Fleet.Spawner.Supervisor, pid)
+
+            # The pod did NOT answer :kill (timeout / already dead) → brutal terminate, so it could not
+            # run its OWN clear_for_pod. Without releasing the mandate here, the work item stays ACTIVE →
+            # the poller reclaims it → re-dispatch → a kill/timeout LOOP. So we release it (the
+            # load-bearing part; the `:killed` tombstone is secondary and lost with the dead pod).
+            # Best-effort: a TaskQueue that is itself down must never make `kill_pod` crash.
+            _ = safe_clear_for_pod(pod_id)
             :ok
         end
 
       [] ->
         {:error, :not_found}
     end
+  end
+
+  # Release a pod's active mandate, best-effort (used by the brutal `kill_pod` fallback): a TaskQueue
+  # that is itself down/absent must never propagate an exit into `kill_pod`.
+  defp safe_clear_for_pod(pod_id) do
+    Fleet.TaskQueue.clear_for_pod(pod_id)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
   end
 
   @doc """
