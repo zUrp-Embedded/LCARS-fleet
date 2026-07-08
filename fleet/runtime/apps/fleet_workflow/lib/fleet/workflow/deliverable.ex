@@ -91,9 +91,30 @@ defmodule Fleet.Workflow.Deliverable do
   defp validate(opts) do
     with :ok <- check_keys(opts, @common_keys),
          :ok <- check_mode(opts.mode),
+         :ok <- check_types(opts),
          :ok <- check_mode_keys(opts),
          :ok <- check_push_keys(opts) do
       :ok
+    end
+  end
+
+  # `@type opts` declares TYPES for the required fields, but `check_keys` only checks PRESENCE — a field
+  # present with the WRONG type (a `workspace` that is not a path, an `allowed_emails` that is not a list
+  # of strings) would crash the downstream git ops. Validate the types too (R2-07/10, parse-don't-validate
+  # at the publish boundary). Reached only after `check_keys` → the keys exist, `opts.<key>` is safe.
+  defp check_types(opts) do
+    cond do
+      not is_binary(opts.workspace) ->
+        {:error, {:bad_opt, {:workspace, opts.workspace}}}
+
+      not is_binary(opts.base_sha) ->
+        {:error, {:bad_opt, {:base_sha, opts.base_sha}}}
+
+      not (is_list(opts.allowed_emails) and Enum.all?(opts.allowed_emails, &is_binary/1)) ->
+        {:error, {:bad_opt, {:allowed_emails, opts.allowed_emails}}}
+
+      true ->
+        :ok
     end
   end
 

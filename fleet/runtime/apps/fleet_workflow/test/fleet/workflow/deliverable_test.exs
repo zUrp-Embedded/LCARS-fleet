@@ -75,6 +75,28 @@ defmodule Fleet.Workflow.DeliverableTest do
       assert String.trim(who) == "engineer@lcars.local|committer@fixture.test"
     end
 
+    test "R2-07/10 : un champ requis MAL TYPÉ → {:error, {:bad_opt, _}} (types validés, pas juste présence)" do
+      # le type-check coupe AVANT les git ops → pas besoin de vrai ws
+      base = %{
+        mode: :payload,
+        workspace: "/tmp/ws",
+        base_sha: "abc",
+        allowed_emails: ["e@x"],
+        files: [],
+        identity: %{},
+        message: "m"
+      }
+
+      assert {:error, {:bad_opt, {:workspace, _}}} = Deliverable.publish(%{base | workspace: 42})
+      assert {:error, {:bad_opt, {:base_sha, _}}} = Deliverable.publish(%{base | base_sha: nil})
+
+      assert {:error, {:bad_opt, {:allowed_emails, _}}} =
+               Deliverable.publish(%{base | allowed_emails: "e@x"})
+
+      assert {:error, {:bad_opt, {:allowed_emails, _}}} =
+               Deliverable.publish(%{base | allowed_emails: [42]})
+    end
+
     test "secret dans le payload → gate BLOQUE, AUCUN push", %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "payload-secret")
       {before, 0} = g(bare, ["rev-parse", "main"])
