@@ -225,6 +225,11 @@ defmodule Fleet.Spawner.PodWarden do
 
     for scope <- subdirs(root),
         pod_id <- subdirs(Path.join(root, scope)),
+        # Only GC dirs whose NAME is a valid pod_id — i.e. OURS. A foreign/odd-named dir under the state
+        # root (never produced by a spawn, since `valid_pod_id?` gates every pod_id) is NOT our leak to
+        # clean: we must NOT derive a pod_dir from it and `rm_rf` it (R1-33 defense; complements the
+        # StateFs `safe_rm_rf` under-root guard).
+        Fleet.Spawner.valid_pod_id?(pod_id),
         tomb = tombstone_for(root, scope, pod_id),
         not is_nil(tomb),
         do: tomb

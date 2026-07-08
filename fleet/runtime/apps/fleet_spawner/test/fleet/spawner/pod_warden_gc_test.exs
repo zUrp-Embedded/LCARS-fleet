@@ -77,4 +77,28 @@ defmodule Fleet.Spawner.PodWardenGCTest do
     assert File.exists?(liveterm_pod)
     assert File.exists?(liveterm_state)
   end
+
+  test "R1-33 : un dir dont le NOM n'est pas un pod_id valide (`.hidden-evil`) n'est JAMAIS scanné/GC",
+       %{state_root: sr, pod_root: pr} do
+    # dir FOREIGN : nom non-`valid_pod_id?` (point de tête) + state.json terminale + pod_dir → doit
+    # SURVIVRE (jamais produit par un spawn, donc pas notre fuite à nettoyer ; ne pas rm_rf un dir inconnu).
+    foreign_state = write_state!(sr, "pods", ".hidden-evil", "succeeded")
+    foreign_pod = write_pod_dir!(pr, ".hidden-evil")
+
+    # contrôle : un pod_id VALIDE terminal-orphelin est bien GC après la grace.
+    valid_state = write_state!(sr, "pods", "issue-9-engineer", "succeeded")
+    valid_pod = write_pod_dir!(pr, "issue-9-engineer")
+
+    live = MapSet.new()
+    suspects1 = W.sweep_pod_dir_gc(live, MapSet.new())
+    # le foreign n'est même pas SUSPECT (jamais scanné) — seul le valide l'est.
+    assert MapSet.equal?(suspects1, MapSet.new(["issue-9-engineer"]))
+
+    _ = W.sweep_pod_dir_gc(live, suspects1)
+
+    assert File.exists?(foreign_state), "un dir non-pod_id ne doit JAMAIS être GC (R1-33)"
+    assert File.exists?(foreign_pod)
+    refute File.exists?(valid_state)
+    refute File.exists?(valid_pod)
+  end
 end
