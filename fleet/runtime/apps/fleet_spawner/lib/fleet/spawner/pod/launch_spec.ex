@@ -29,6 +29,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   AND the end-of-step-run payload — hence the public visibility (single source, no re-derivation
   on the Pod side).
   """
+
+  require Logger
+
   @spec effective_project(keyword() | nil, Fleet.CapProfile.t()) :: map()
   def effective_project(opts, cap_profile) do
     Keyword.get(opts || [], :project) || get_in(cap_profile.spec, ["project"]) || %{}
@@ -230,7 +233,20 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   # Serializes the mounts for bwrap_launch (`LCARS_POD_MOUNTS`): one "mode:path" line per mount.
   defp mounts_env(mounts) when is_list(mounts) do
-    mounts
+    # `LCARS_POD_MOUNTS` is NEWLINE-DELIMITED (bwrap_launch reads one `mode:path` per line). A `\n`/`\r`
+    # in a mount field would INJECT an extra mount line → an unintended (possibly RW) bind into the
+    # sandbox = an escape. A newline in a mount field is NEVER legitimate → DROP the mount + LOUD (the
+    # injection is neutralized, the sandbox is built without it, and the anomaly is visible; we do NOT
+    # raise here — a raise in the launch path would crash the pod gen_statem, cf. R1-21).
+    {injecting, clean} = Enum.split_with(mounts, &mount_has_newline?/1)
+
+    for m <- injecting do
+      Logger.error(
+        "LaunchSpec: mount DROPPED — newline in a mount field (LCARS_POD_MOUNTS injection): #{inspect(m)}"
+      )
+    end
+
+    clean
     |> Enum.map(fn m ->
       mode = Map.get(m, "mode") || Map.get(m, :mode)
       path = Map.get(m, "path") || Map.get(m, :path)
@@ -240,4 +256,11 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   defp mounts_env(_), do: ""
+
+  defp mount_has_newline?(m) do
+    has_newline?(Map.get(m, "mode") || Map.get(m, :mode)) or
+      has_newline?(Map.get(m, "path") || Map.get(m, :path))
+  end
+
+  defp has_newline?(v), do: is_binary(v) and String.contains?(v, ["\n", "\r"])
 end
