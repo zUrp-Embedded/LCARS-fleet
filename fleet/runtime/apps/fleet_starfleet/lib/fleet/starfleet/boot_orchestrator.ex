@@ -112,6 +112,11 @@ defmodule Fleet.Starfleet.BootOrchestrator do
     end
   rescue
     e -> {:failed, {:exception, Exception.message(e)}}
+  catch
+    # This is a `:transient` Task → an EXIT/THROW that escaped (a `boot_fn` that GenServer.call's a dead
+    # process = exit, or a throw) would exit the Task ABNORMALLY → the supervisor RESTARTS it → a boot
+    # reboot LOOP. The "NEVER crashes the daemon" contract must cover exit/throw, not just exceptions.
+    kind, reason -> {:failed, {:caught, kind, reason}}
   end
 
   defp emit_complete(apps, pods) do
