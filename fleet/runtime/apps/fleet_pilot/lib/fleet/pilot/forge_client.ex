@@ -1,36 +1,36 @@
 defmodule Fleet.Pilot.ForgeClient do
   @moduledoc """
-  Client Gitea REST API de `fleet_pilot` — la couche DOMAINE de la forge-state-machine
-  (la forge EST la machine à états). Porte les ops sur issues/PR (read/write idempotentes),
-  l'état de jury des PR, l'onboarding repo + sceau d'admission, et l'adaptateur credential→wire
-  `as_role/2`. C'est le module injecté par le seam `:forge_client` (StepDispatcher/Poller).
+  `fleet_pilot`'s Gitea REST API client — the DOMAIN layer of the forge-state-machine
+  (the forge IS the state machine). Carries the ops on issues/PRs (idempotent read/write),
+  PR jury state, repo onboarding + admission seal, and the credential→wire adapter
+  `as_role/2`. It is the module injected by the `:forge_client` seam (StepDispatcher/Poller).
 
-  Deux couches vivent SOUS lui (ré-exportées ici pour préserver le contrat historique) :
+  Two layers live BELOW it (re-exported here to preserve the historical contract):
 
-    * `Fleet.Pilot.ForgeClient.Transport` — moteur HTTP/config/encodage/pagination + login système.
-      Aucune connaissance du protocole forge. `ForgeClient` l'`import`e (`http_get`, `paginate`, …).
-    * `Fleet.Pilot.ForgeProtocol` — vocabulaire PUR du wire-protocol (feature-branches, marqueurs
-      route/step_run/onboard, blocs result, `system_authored?`), build+parse co-localisés. Les callers
-      l'appellent DIRECTEMENT. Seul `parse_feature_branch/1` est ré-exporté ici (`defdelegate`) car
-      `fleet_mcp` l'atteint via le seam `:forge_client` (évite une dep compile-time vers fleet_pilot).
+    * `Fleet.Pilot.ForgeClient.Transport` — HTTP/config/encoding/pagination engine + system login.
+      No knowledge of the forge protocol. `ForgeClient` `import`s it (`http_get`, `paginate`, …).
+    * `Fleet.Pilot.ForgeProtocol` — PURE vocabulary of the wire-protocol (feature-branches,
+      route/step_run/onboard markers, result blocks, `system_authored?`), build+parse co-located. Callers
+      call it DIRECTLY. Only `parse_feature_branch/1` is re-exported here (`defdelegate`) because
+      `fleet_mcp` reaches it via the `:forge_client` seam (avoids a compile-time dep on fleet_pilot).
 
-  ⚠ CONTRAT CROISÉ (seam `fleet_mcp`) : ce module est l'impl RÉELLE (défaut) du behaviour
+  ⚠ CROSS CONTRACT (`fleet_mcp` seam): this module is the REAL (default) impl of the behaviour
   `Fleet.MCP.PodTools.Delegation.ForgeClient` (callbacks = `create_issue/4`, `add_label/4`,
-  `get_issue/3`, `list_open_pulls/2`, `parse_feature_branch/1`, `pr_review_verdicts/3`). On ne peut
-  PAS l'adopter en `@behaviour` : `fleet_pilot` ne dépend pas de `fleet_mcp` et la référence compile
-  créerait une arête nouvelle (`allowed_graph.yaml` rougirait). Impl duck-typée — toute évolution de
-  ces 6 signatures DOIT être répercutée sur les `@callback` du behaviour (et inversement).
+  `get_issue/3`, `list_open_pulls/2`, `parse_feature_branch/1`, `pr_review_verdicts/3`). It CANNOT
+  be adopted as a `@behaviour`: `fleet_pilot` does not depend on `fleet_mcp` and the compile reference
+  would create a new edge (`allowed_graph.yaml` would go red). Duck-typed impl — any evolution of
+  these 6 signatures MUST be mirrored onto the behaviour's `@callback`s (and vice versa).
 
   ## Configuration
 
-  Résolue à l'appel par `Transport.resolve_config/1` (cf. son moduledoc) : `:base_url`, `:token`
-  (ou `:token_file`, défaut `~/.gitea_token`), `:req_options` passées à `Req`.
+  Resolved at call time by `Transport.resolve_config/1` (see its moduledoc): `:base_url`, `:token`
+  (or `:token_file`, default `~/.gitea_token`), `:req_options` passed to `Req`.
 
   ## Idempotence
 
-  Les write-ops sont idempotentes (skip si l'état cible est déjà atteint). Ex. `add_label/4` :
-  `GET issue labels + PUT label set` (un POST append créerait des doublons), re-call sur label
-  présent = `{:ok, :already_present}`, zéro round-trip d'écriture.
+  Write-ops are idempotent (skip if the target state is already reached). E.g. `add_label/4`:
+  `GET issue labels + PUT label set` (a POST append would create duplicates), re-call on a label
+  already present = `{:ok, :already_present}`, zero write round-trip.
   """
 
   require Logger
@@ -39,8 +39,8 @@ defmodule Fleet.Pilot.ForgeClient do
   alias Fleet.Pilot.ForgeClient.Jury
   alias Fleet.Pilot.ForgeClient.Repo
 
-  # Plomberie tirée de Transport sous les noms historiques → les call-sites domaine restent
-  # inchangés (`http_get(config, …)`, `paginate(…)`, `resolve_config(opts)`, …).
+  # Plumbing pulled from Transport under the historical names → the domain call-sites stay
+  # unchanged (`http_get(config, …)`, `paginate(…)`, `resolve_config(opts)`, …).
   import Fleet.Pilot.ForgeClient.Transport,
     only: [
       resolve_config: 1,
@@ -52,29 +52,29 @@ defmodule Fleet.Pilot.ForgeClient do
       forge_bot_login: 2
     ]
 
-  # Encodage sûr des segments d'URL (verrou path-traversal) — autorité unique UrlSafe.
+  # Safe encoding of URL segments (path-traversal guard) — UrlSafe is the single authority.
   import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1]
 
-  # SEUL ré-export du vocab : `parse_feature_branch/1`. `fleet_mcp` (pod_tools) l'appelle via le seam
-  # `forge` (résolu runtime, défaut ce module) pour ne PAS créer de dep compile-time vers fleet_pilot —
-  # le seam doit donc porter cette fonction. Le reste du vocab (`feature_branch`, `step_run_marker`,
-  # `result_block`, marqueurs, `system_authored?`) s'appelle directement sur `Fleet.Pilot.ForgeProtocol`
-  # (impl + tests y vivent) ; ce module-ci ne le ré-exporte plus.
+  # ONLY re-export of the vocab: `parse_feature_branch/1`. `fleet_mcp` (pod_tools) calls it via the
+  # `:forge_client` seam (runtime-resolved, defaulting to this module) so as NOT to create a compile-time dep on
+  # fleet_pilot — the seam must therefore carry this function. The rest of the vocab (`feature_branch`,
+  # `step_run_marker`, `result_block`, markers, `system_authored?`) is called directly on
+  # `Fleet.Pilot.ForgeProtocol` (impl + tests live there); this module no longer re-exports it.
   defdelegate parse_feature_branch(head), to: ForgeProtocol
 
   @doc """
-  Ajoute le label `label_name` à l'issue `repo`/`issue_number` côté
-  forge. Idempotent : si le label est déjà présent, aucune écriture.
+  Adds the label `label_name` to the issue `repo`/`issue_number` on the
+  forge. Idempotent: if the label is already present, no write.
 
   ## Returns
 
-    * `{:ok, :added}` — label fraîchement ajouté
-    * `{:ok, :already_present}` — label déjà sur l'issue (no-op)
-    * `{:error, {:label_unknown, label_name}}` — label n'existe pas
-      dans le repo (à pre-provisioner côté forge)
-    * `{:error, {:http, status, body}}` — réponse HTTP non-2xx
-    * `{:error, {:transport, reason}}` — échec réseau / DNS / ...
-    * `{:error, {:config, reason}}` — config manquante / token illisible
+    * `{:ok, :added}` — label freshly added
+    * `{:ok, :already_present}` — label already on the issue (no-op)
+    * `{:error, {:label_not_added, label_name}}` — the label could not be added
+      (e.g. it does not exist in the repo — pre-provision it on the forge)
+    * `{:error, {:http, status, body}}` — non-2xx HTTP response
+    * `{:error, {:transport, reason}}` — network / DNS / ... failure
+    * `{:error, {:config, reason}}` — missing config / unreadable token
   """
   @spec add_label(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :added | :already_present}
@@ -94,23 +94,23 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Liste les issues ouvertes du `repo` qui n'ont PAS le label `exclude_label`
-  (filtrage client-side : Gitea n'expose pas la négation côté query).
-  Utilisé par `Fleet.Pilot.Poller` (catch-up issues sans
+  Lists the open issues of `repo` that do NOT have the label `exclude_label`
+  (client-side filtering: Gitea does not expose negation on the query side).
+  Used by `Fleet.Pilot.Poller` (catch-up on issues without
   `lcars-dispatched`).
 
   ## Returns
 
-    * `{:ok, [issue]}` — issues filtrées, payloads bruts Gitea
-    * `{:error, term()}` — propagation des erreurs HTTP/transport/config
+    * `{:ok, [issue]}` — filtered issues, raw Gitea payloads
+    * `{:error, term()}` — propagation of HTTP/transport/config errors
 
   ## Pagination
 
-  Limite hard-coded à 50 issues/page, 1 seule page. Pour les opérations
-  catch-up, ça couvre largement la fenêtre de catch-up post-crash. Si
-  le poller doit traiter +50 issues entre 2 ticks, c'est un signe que
-  l'interval est trop long ou la forge en burst — sujet de tuning, pas
-  une limite à lever.
+  Hard-coded limit of 50 issues/page, a single page. For catch-up
+  operations, that amply covers the post-crash catch-up window. If
+  the poller has to process 50+ issues between 2 ticks, that is a sign
+  the interval is too long or the forge is bursting — a tuning matter, not
+  a limit to lift.
   """
   @spec list_open_issues_without_label(String.t(), String.t(), Keyword.t()) ::
           {:ok, [map()]} | {:error, term()}
@@ -128,20 +128,20 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Liste les issues ouvertes du `repo` ASSIGNÉES À MOI (scoping multi-user forge-side). Brique du
-  bail dispatch repo-serialise (compte les pipelines actifs, in-flight inclus). PAGINÉ. Délègue à
-  `list_scoped_issues` — issues ET PR passent par le MÊME endpoint `/issues?type=…` (un seul code de scoping).
+  Lists the open issues of `repo` ASSIGNED TO ME (forge-side multi-user scoping). Building block of the
+  repo-serialised dispatch lease (counts active pipelines, in-flight included). PAGINATED. Delegates to
+  `list_scoped_issues` — issues AND PRs go through the SAME `/issues?type=…` endpoint (a single scoping code path).
   """
   @spec list_open_issues(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_open_issues(repo, opts \\ []) when is_binary(repo) do
     list_scoped_issues(repo, "issues", opts)
   end
 
-  # UN SEUL lister sur `/issues`, paramétré par `type` (issues|pulls) + scopé assignee FORGE-SIDE.
-  # Source unique du listing/scoping (state/type/assigned_by), paginée. La forge filtre
-  # (`assigned_by` — Gitea 1.26.1 marche sur /issues pour les 2 types) → le poller ne voit
-  # QUE les siennes (le bail devient par-humain, cohérent N-fleets-par-humain). Le scoping vit ICI, en un
-  # seul endroit — decide/dispatch_review n'ont plus à re-vérifier l'ownership.
+  # A SINGLE lister on `/issues`, parameterised by `type` (issues|pulls) + assignee-scoped FORGE-SIDE.
+  # Single source of the listing/scoping (state/type/assigned_by), paginated. The forge filters
+  # (`assigned_by` — Gitea 1.26.1 works on /issues for both types) → the poller sees
+  # ONLY its own (the lease becomes per-human, consistent with N-fleets-per-human). The scoping lives HERE, in a
+  # single place — decide/dispatch_review no longer have to re-check ownership.
   defp list_scoped_issues(repo, type, opts) when type in ["issues", "pulls"] do
     with {:ok, config} <- resolve_config(opts) do
       paginate(
@@ -152,7 +152,7 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Suffixe query `&assigned_by=<login>` si `opts[:assigned_by]` posé, sinon "". Pur/testable.
+  # Query suffix `&assigned_by=<login>` if `opts[:assigned_by]` is set, otherwise "". Pure/testable.
   @doc false
   def assigned_by_qs(opts) do
     case Keyword.get(opts, :assigned_by) do
@@ -162,9 +162,9 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Lit une issue par numéro (Gitea `GET /repos/{repo}/issues/{n}`). Lecture seule : `state`
-  (open/closed), labels, assignees… Utilisé par le tool MCP `get_issue_status` (l'arch SUIT un
-  issue délégué — ex. valider la livraison avant d'enchaîner). `{:error, {:http, 404, _}}` si absent.
+  Reads an issue by number (Gitea `GET /repos/{repo}/issues/{n}`). Read-only: `state`
+  (open/closed), labels, assignees… Used by the MCP tool `get_issue_status` (the arch FOLLOWS a
+  delegated issue — e.g. validating the delivery before chaining on). `{:error, {:http, 404, _}}` if absent.
   """
   @spec get_issue(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
   def get_issue(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
@@ -174,13 +174,13 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Write-ops — primitives mécaniques de fin-de-step-run (la forge EST la machine à états).
-  # Toutes idempotentes (skip si l'état cible est déjà atteint).
+  # Write-ops — mechanical primitives of step-run end (the forge IS the state machine).
+  # All idempotent (skip if the target state is already reached).
   # ============================================================
 
   @doc """
-  Réassigne l'issue à `login` (1-assignee strict, invariant de la workflow_map). PATCH `assignees: [login]`
-  remplace la liste. Idempotent : `{:ok, :already}` si `login` est déjà le seul assignee.
+  Reassigns the issue to `login` (strict 1-assignee, workflow_map invariant). PATCH `assignees: [login]`
+  replaces the list. Idempotent: `{:ok, :already}` if `login` is already the only assignee.
   """
   @spec set_assignee(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :set | :already} | {:error, term()}
@@ -203,17 +203,17 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # La POSITION workflow_map (= l'état de la machine à états) vit dans le label SCOPÉ `stage/*` (mutex
-  # natif Gitea, source unique visible humain+machine), posée par `post_route` / lue par `get_route`.
-  # Plus de commentaire `[lcars-route:...]` (bruit). Les verrous PLATS (`lcars-in-flight`) restent
-  # non-scopés via `add_label`/`remove_label`.
+  # The workflow_map POSITION (= the state-machine state) lives in the SCOPED label `stage/*` (Gitea
+  # native mutex, single source visible to human+machine), set by `post_route` / read by `get_route`.
+  # No more `[lcars-route:...]` comment (noise). The FLAT locks (`lcars-in-flight`) stay
+  # non-scoped via `add_label`/`remove_label`.
 
   @doc """
-  Poste un comment. Si `:dedup_signature` est fourni et qu'un comment **système**
-  existant la contient déjà, no-op (`{:ok, :already}`) — la signature `[step_run:<role>:<sha>]` rend le
-  replay idempotent. Le dédup ne fait foi QUE des comments du bot : sinon un
-  user forge postant la signature en avance supprimerait le comment système (→ `count_signed_step_runs`
-  sous-compterait). Bot irrésoluble → dédup non filtré (fail-open vers la sûreté du replay).
+  Posts a comment. If `:dedup_signature` is provided and an existing **system**
+  comment already contains it, no-op (`{:ok, :already}`) — the signature `[step_run:<role>:<sha>]` makes the
+  replay idempotent. The dedup trusts ONLY the bot's comments: otherwise a
+  forge user posting the signature ahead of time would suppress the system comment (→ `count_signed_step_runs`
+  would undercount). Unresolvable bot → unfiltered dedup (fail-open toward replay safety).
   """
   @spec post_comment(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
@@ -236,8 +236,8 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Retire le label `label_name` (release du verrou `lcars-in-flight` en fin-de-step-run).
-  Idempotent : `{:ok, :already_absent}` si le label n'est pas présent.
+  Removes the label `label_name` (release of the `lcars-in-flight` lock at step-run end).
+  Idempotent: `{:ok, :already_absent}` if the label is not present.
   """
   @spec remove_label(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :removed | :already_absent} | {:error, term()}
@@ -245,8 +245,8 @@ defmodule Fleet.Pilot.ForgeClient do
       when is_binary(label_name) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, current} <- get_issue_labels(config, repo, issue_number) do
-      # L'`id` vient des labels ATTACHÉS à l'issue (`current`), pas d'un index repo (qui rate les
-      # org-labels) : un org-label attaché y figure avec son id → DELETE marche pour repo ET org.
+      # The `id` comes from the labels ATTACHED to the issue (`current`), not a repo index (which misses
+      # org-labels): an attached org-label appears there with its id → DELETE works for repo AND org.
       case Enum.find(current, &(&1["name"] == label_name)) do
         nil ->
           {:ok, :already_absent}
@@ -264,17 +264,17 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Time-tracking natif Gitea (stopwatch) — MÉCANIQUE GLOBALE, agnostique du rôle/de l'agent.
-  # `number` = l'objet verrouillé par `lcars-in-flight` (issue OU PR — Gitea unifie les deux sous
-  # `issues/{n}/stopwatch`, une PR EST une issue côté modèle). Câblé aux 3 MÊMES points de convergence
-  # que le verrou lui-même (spawn_step pose+POSE, unlock/reconciliation LÈVENT) : start_stopwatch/2 quand
-  # `lcars-in-flight` est posé, stop_stopwatch/2 quand il est levé — UN SEUL mécanisme, zéro branche
-  # par-rôle (consultant/engineer/qualifier/reviewer/gatekeeper passent tous par les 2 mêmes points).
+  # Gitea native time-tracking (stopwatch) — GLOBAL MECHANICS, agnostic of role/agent.
+  # `number` = the object locked by `lcars-in-flight` (issue OR PR — Gitea unifies both under
+  # `issues/{n}/stopwatch`, a PR IS an issue on the model side). Wired to the 3 SAME convergence points
+  # as the lock itself (spawn_step SETS it, unlock/reconciliation LIFT it): start_stopwatch/2 when
+  # `lcars-in-flight` is set, stop_stopwatch/2 when it is lifted — A SINGLE mechanism, zero per-role
+  # branch (consultant/engineer/qualifier/reviewer/gatekeeper all go through the same 2 points).
   # ============================================================
 
   @doc """
-  Démarre le stopwatch Gitea natif sur `number` (issue ou PR). Best-effort — idempotent : 409
-  (« déjà actif », un rebrief sur un pod vivant re-pose le même verrou) → `:ok`, pas une erreur.
+  Starts the Gitea native stopwatch on `number` (issue or PR). Best-effort — idempotent: 409
+  ("already active", a rebrief on a live pod re-sets the same lock) → `:ok`, not an error.
   """
   @spec start_stopwatch(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def start_stopwatch(repo, number, opts \\ []) do
@@ -288,9 +288,9 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Arrête le stopwatch Gitea natif sur `number` (grave la durée écoulée). Best-effort — idempotent :
-  409 (« aucun stopwatch actif ») → `:ok`, jamais une erreur bloquante (le stopwatch est cosmétique,
-  pas un invariant de correction du pipeline).
+  Stops the Gitea native stopwatch on `number` (records the elapsed duration). Best-effort — idempotent:
+  409 ("no active stopwatch") → `:ok`, never a blocking error (the stopwatch is cosmetic,
+  not a pipeline-correctness invariant).
   """
   @spec stop_stopwatch(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def stop_stopwatch(repo, number, opts \\ []) do
@@ -304,7 +304,7 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Ferme l'issue (terminal de chaîne). PATCH `state: closed`. Idempotent côté Gitea.
+  Closes the issue (chain terminal). PATCH `state: closed`. Idempotent on the Gitea side.
   """
   @spec close_issue(String.t(), integer(), Keyword.t()) :: {:ok, :closed} | {:error, term()}
   def close_issue(repo, issue_number, opts \\ []) do
@@ -318,26 +318,26 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Repo / onboarding — DÉLÉGUÉ à `Fleet.Pilot.ForgeClient.Repo`.
-  # Provisioning (create_repo/add_collaborator/protect_branch) + découverte par appartenance-org
-  # (list_org_repos, WS3). Les ops de provisioning sont appelées EN DIRECT sur `ForgeClient.Repo` (par
-  # `ProjectOnboard`) ; seules les ops SEAM-FACED ci-dessous sont forwardées (le module injecté par le
-  # seam reste CE module). Doc + logique vivent dans `Repo`.
+  # Repo / onboarding — DELEGATED to `Fleet.Pilot.ForgeClient.Repo`.
+  # Provisioning (create_repo/add_collaborator/protect_branch) + discovery by org-membership
+  # (list_org_repos, WS3). The provisioning ops are called DIRECTLY on `ForgeClient.Repo` (by
+  # `ProjectOnboard`); only the SEAM-FACED ops below are forwarded (the module injected by the
+  # seam stays THIS module). Doc + logic live in `Repo`.
   # ============================================================
 
-  @doc "Repos de l'org (découverte WS3, appartenance-org = admission). Voir `ForgeClient.Repo.list_org_repos/2`."
+  @doc "Org repos (WS3 discovery, org-membership = admission). See `ForgeClient.Repo.list_org_repos/2`."
   def list_org_repos(org, opts \\ []), do: Repo.list_org_repos(org, opts)
 
-  @doc "Id forge numérique du repo. Voir `Fleet.Pilot.ForgeClient.Repo.repo_id/2`."
+  @doc "Numeric forge id of the repo. See `Fleet.Pilot.ForgeClient.Repo.repo_id/2`."
   def repo_id(repo, opts \\ []), do: Repo.repo_id(repo, opts)
 
   @doc """
-  Crée une issue sur `repo`. `opts[:assignees]` = logins, `opts[:labels]` = IDs entiers
-  (le label `type:*` de routage se pose plutôt via `add_label/4` après, résolution name→id).
-  Retourne le numéro d'issue.
+  Creates an issue on `repo`. `opts[:assignees]` = logins, `opts[:labels]` = integer IDs
+  (the routing label `type:*` is rather set via `add_label/4` afterwards, name→id resolution).
+  Returns the issue number.
 
   ## Returns
-    * `{:ok, issue_number}` — issue créée
+    * `{:ok, issue_number}` — issue created
     * `{:error, term()}` — HTTP/transport/config
   """
   @spec create_issue(String.t(), String.t(), String.t(), Keyword.t()) ::
@@ -360,20 +360,20 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Pull requests (git-native) — la PR est la surface de la phase
-  # REVIEW+PROMOTE : domicile durable des verdicts de gate (review native Gitea) et
-  # entonnoir unique vers `main`. Barrière : le SYSTÈME ouvre/review/merge, le pod
-  # n'a jamais le token. Primitives IDEMPOTENTES (rejouables sans casser).
+  # Pull requests (git-native) — the PR is the surface of the
+  # REVIEW+PROMOTE phase: durable home of the gate verdicts (Gitea native review) and
+  # single funnel toward `main`. Barrier: the SYSTEM opens/reviews/merges, the pod
+  # never has the token. IDEMPOTENT primitives (replayable without breaking).
   # ============================================================
 
   @doc """
-  Ouvre une pull request `head` → `base` sur `repo` (Gitea `POST /repos/{repo}/pulls`).
-  IDEMPOTENT : si une PR ouverte existe déjà pour cette `head`, retourne son numéro (le
-  409 Gitea n'est pas une erreur). `opts[:body]` = corps — y mettre `Closes #N` pour
-  l'auto-close de l'issue au merge (la forge maintient le lien issue↔PR).
+  Opens a pull request `head` → `base` on `repo` (Gitea `POST /repos/{repo}/pulls`).
+  IDEMPOTENT: if an open PR already exists for this `head`, returns its number (the
+  Gitea 409 is not an error). `opts[:body]` = body — put `Closes #N` in it for
+  the issue auto-close at merge (the forge maintains the issue↔PR link).
 
   ## Returns
-    * `{:ok, number}` — PR ouverte (ou déjà existante)
+    * `{:ok, number}` — PR opened (or already existing)
     * `{:error, term()}` — HTTP/transport/config
   """
   @spec open_pr(String.t(), String.t(), String.t(), String.t(), Keyword.t()) ::
@@ -385,7 +385,7 @@ defmodule Fleet.Pilot.ForgeClient do
 
       case http_post(config, "/repos/#{encode_repo(repo)}/pulls", attrs) do
         {:ok, %{"number" => number}} -> {:ok, number}
-        # PR déjà ouverte pour cette head (Gitea 409) → idempotence : on la retrouve.
+        # PR already open for this head (Gitea 409) → idempotence: we find it again.
         {:error, {:http, 409, _}} -> get_pr_for_branch(repo, head, base, opts)
         {:error, _} = err -> err
       end
@@ -393,12 +393,12 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Retrouve la PR OUVERTE `head` → `base` sur `repo` (Gitea `GET /repos/{repo}/pulls`, filtré
-  côté client par `head.ref`/`base.ref`). Brique d'idempotence d'`open_pr/5`.
+  Finds the OPEN PR `head` → `base` on `repo` (Gitea `GET /repos/{repo}/pulls`, filtered
+  client-side by `head.ref`/`base.ref`). Idempotence building block of `open_pr/5`.
 
   ## Returns
-    * `{:ok, number}` — PR trouvée
-    * `{:error, :pr_not_found}` — aucune PR ouverte head→base
+    * `{:ok, number}` — PR found
+    * `{:error, :pr_not_found}` — no open PR head→base
     * `{:error, term()}` — HTTP/transport/config
   """
   @spec get_pr_for_branch(String.t(), String.t(), String.t(), Keyword.t()) ::
@@ -427,10 +427,10 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Demande la review des `reviewers` (logins) sur la PR `index` (Gitea
-  `POST /repos/{repo}/pulls/{index}/requested_reviewers`). C'est la mécanique de
-  DÉCLENCHEMENT de la phase judge — remplace `set_assignee` côté PR (le poller spawn le
-  juge sur la review-request).
+  Requests review from the `reviewers` (logins) on the PR `index` (Gitea
+  `POST /repos/{repo}/pulls/{index}/requested_reviewers`). This is the TRIGGER
+  mechanics of the judge phase — replaces `set_assignee` on the PR side (the poller spawns the
+  judge on the review-request).
   """
   @spec request_review(String.t(), integer(), [String.t()], Keyword.t()) ::
           :ok | {:error, term()}
@@ -447,9 +447,9 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Poste une review native sur la PR `index` (Gitea `POST /repos/{repo}/pulls/{index}/reviews`).
-  `event` ∈ `:approve | :request_changes | :comment` → c'est le DOMICILE durable du verdict de
-  gate (review native traçable, vs l'ancien comment-JSON maison). `body` = le verdict lisible.
+  Posts a native review on the PR `index` (Gitea `POST /repos/{repo}/pulls/{index}/reviews`).
+  `event` ∈ `:approve | :request_changes | :comment` → this is the durable HOME of the gate
+  verdict (traceable native review, vs the old home-grown JSON-comment). `body` = the human-readable verdict.
   """
   @spec post_review(
           String.t(),
@@ -478,20 +478,20 @@ defmodule Fleet.Pilot.ForgeClient do
   defp review_event(other), do: {:error, {:invalid_review_event, other}}
 
   @doc """
-  Merge (PROMOTE) la PR `index` en **`rebase`** (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
-  `Do: rebase` par défaut) : rejoue les commits de la PR sur le `main` courant puis fast-forward →
-  reste **LINÉAIRE** (pas de merge commit, doctrine append-only préservée) ET gère un `main` qui a
-  avancé sous la PR (MULTI-ISSUE PARALLÈLE : 2 issues disjoints → 2 PR du même `main` → la 1ʳᵉ
-  merge avance `main`, la 2ᵉ n'est plus FF-able mais reste mergeable → `rebase` la passe ; `fast-forward-only`
-  la wedgerait à l'infini).
+  Merges (PROMOTES) the PR `index` via **`rebase`** (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
+  `Do: rebase` by default): replays the PR's commits onto the current `main` then fast-forwards →
+  stays **LINEAR** (no merge commit, append-only doctrine preserved) AND handles a `main` that has
+  advanced under the PR (PARALLEL MULTI-ISSUE: 2 disjoint issues → 2 PRs off the same `main` → the 1st
+  merge advances `main`, the 2nd is no longer FF-able but stays mergeable → `rebase` gets it through; `fast-forward-only`
+  would wedge it forever).
 
-  **PAS de cascade FF→rebase** : une 1ʳᵉ tentative qui échoue rejette la PR en état « checking »
-  (Gitea recalcule la mergeabilité de façon ASYNCHRONE), et la 2ᵉ tentative dos-à-dos tape dans cette
-  fenêtre → `405 « Please try again later »` (double-appel = double-405 ; `rebase` seul
-  sur une PR stable = 200). Donc UN SEUL appel, et le `405 try-again-later` est traité comme un
-  **TRANSITOIRE** (retry borné `@merge_checking_retries` × `merge_retry_delay_ms`, défaut 800ms — la
-  mergeabilité se stabilise en ~1 calcul). Tout autre échec (vrai conflit, pas d'approbations sous
-  branch-protection) remonte tel quel (fail-loud). `opts[:method]` force un style (ex. tests).
+  **NO FF→rebase cascade**: a 1st attempt that fails throws the PR back into "checking" state
+  (Gitea recomputes mergeability ASYNCHRONOUSLY), and the 2nd back-to-back attempt hits that
+  window → `405 "Please try again later"` (double-call = double-405; `rebase` alone
+  on a stable PR = 200). So A SINGLE call, and the `405 try-again-later` is treated as a
+  **TRANSIENT** (bounded retry `@merge_checking_retries` × `merge_retry_delay_ms`, default 800ms — the
+  mergeability stabilises in ~1 computation). Any other failure (real conflict, no approvals under
+  branch-protection) propagates as-is (fail-loud). `opts[:method]` forces a style (e.g. tests).
   """
   @merge_checking_retries 3
   @spec merge_pr(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
@@ -503,12 +503,12 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # UN appel `Do: method` ; retry borné UNIQUEMENT sur le transitoire « try again later » (mergeabilité
-  # en cours de calcul côté Gitea). Toute autre erreur = définitive → remonte (fail-loud).
+  # ONE `Do: method` call; bounded retry ONLY on the "try again later" transient (mergeability
+  # being computed on the Gitea side). Any other error = definitive → propagates (fail-loud).
   defp do_merge(config, repo, index, method, delay, attempts_left) do
-    # `delete_branch_after_merge` → Gitea supprime la feature-branch
-    # `lcars/issue-N-role` après merge (hygiène : pas d'empilement de branches mortes). No-op si
-    # branche protégée/absente ; le merge reste l'autorité (la suppression est un effet de bord).
+    # `delete_branch_after_merge` → Gitea deletes the feature-branch
+    # `lcars/issue-N-role` after merge (hygiene: no pile-up of dead branches). No-op if the
+    # branch is protected/absent; the merge stays the authority (the deletion is a side effect).
     case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
            "Do" => method,
            "delete_branch_after_merge" => true
@@ -534,22 +534,22 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Transitoire Gitea : la mergeabilité d'une PR est recalculée en async (après création / push / un
-  # `main` avancé) → toute tentative de merge pendant ce calcul renvoie 405 « Please try again later ».
+  # Gitea transient: a PR's mergeability is recomputed asynchronously (after creation / push / an
+  # advanced `main`) → any merge attempt during that computation returns 405 "Please try again later".
   defp merge_checking?(body) when is_map(body),
     do: body |> Map.get("message", "") |> String.downcase() |> String.contains?("try again later")
 
   defp merge_checking?(_), do: false
 
   @doc """
-  Liste les PR OUVERTES du `repo` ASSIGNÉES À MOI (scoping multi-user forge-side), shape PR
-  COMPLÈTE : `number`, `head.ref` (feature-branch `lcars/issue-N-role`), `head.sha`, `requested_reviewers`,
-  `labels`. PAGINÉ. Brique du dispatch juge PR-driven.
+  Lists the OPEN PRs of `repo` ASSIGNED TO ME (forge-side multi-user scoping), FULL PR
+  shape: `number`, `head.ref` (feature-branch `lcars/issue-N-role`), `head.sha`, `requested_reviewers`,
+  `labels`. PAGINATED. Building block of the PR-driven judge dispatch.
 
-  Hybride (Gitea 1.26.1) : `/pulls` n'a PAS `assigned_by`, mais `/issues?type=pulls&assigned_by`
-  filtre l'assignee (en rendant une shape ISSUE, sans head/requested_reviewers). Donc on FILTRE via
-  `list_scoped_issues(type: pulls)` — MÊME code de scoping/pagination que les issues — puis on récupère la
-  shape PR complète via `get_pull/3`, 1 par numéro. Le scoping reste 100% forge-side, comme les issues.
+  Hybrid (Gitea 1.26.1): `/pulls` does NOT have `assigned_by`, but `/issues?type=pulls&assigned_by`
+  filters the assignee (returning an ISSUE shape, without head/requested_reviewers). So we FILTER via
+  `list_scoped_issues(type: pulls)` — SAME scoping/pagination code as the issues — then fetch the
+  full PR shape via `get_pull/3`, 1 per number. The scoping stays 100% forge-side, like the issues.
   """
   @spec list_open_pulls(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_open_pulls(repo, opts \\ []) when is_binary(repo) do
@@ -558,8 +558,8 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Récupère la shape PR complète (head/head.sha/requested_reviewers) pour chaque numéro filtré. Fail-fast :
-  # une erreur sur une PR arrête tout (on ne dispatche pas sur une vue partielle, comme la pagination).
+  # Fetches the full PR shape (head/head.sha/requested_reviewers) for each filtered number. Fail-fast:
+  # an error on one PR halts everything (we don't dispatch on a partial view, like pagination).
   defp fetch_pulls(numbers, repo, opts) do
     numbers
     |> Enum.reduce_while({:ok, []}, fn n, {:ok, acc} ->
@@ -574,7 +574,7 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  @doc "GET une PR unique → shape complète (head/head.sha/requested_reviewers). Brique de list_open_pulls."
+  @doc "GET a single PR → full shape (head/head.sha/requested_reviewers). Building block of list_open_pulls."
   @spec get_pull(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
   def get_pull(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
     with {:ok, config} <- resolve_config(opts),
@@ -582,51 +582,51 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Jury PR — DÉLÉGUÉ à `Fleet.Pilot.ForgeClient.Jury`.
-  # Concern autonome (lecture des reviews, zéro couplage au cœur). Le module injecté par le seam
-  # `:forge_client` reste CE module → on FORWARDE (wrappers explicites : `defdelegate` ne gère pas les
-  # args par défaut). Doc + logique (commit-scoping, jury volatil) vivent dans `Jury`.
+  # PR Jury — DELEGATED to `Fleet.Pilot.ForgeClient.Jury`.
+  # Autonomous concern (reading reviews, zero coupling to the core). The module injected by the
+  # `:forge_client` seam stays THIS module → we FORWARD (explicit wrappers: `defdelegate` doesn't handle
+  # default args). Doc + logic (commit-scoping, volatile jury) live in `Jury`.
   # ============================================================
 
-  @doc "Verdicts décisifs par juge d'une PR. Voir `Fleet.Pilot.ForgeClient.Jury.pr_review_verdicts/3`."
+  @doc "Decisive per-judge verdicts of a PR. See `Fleet.Pilot.ForgeClient.Jury.pr_review_verdicts/3`."
   def pr_review_verdicts(repo, index, opts \\ []), do: Jury.pr_review_verdicts(repo, index, opts)
 
-  @doc "État de jury (verdicts + SET du jury) d'une PR. Voir `Fleet.Pilot.ForgeClient.Jury.pr_review_state/3`."
+  @doc "Jury state (verdicts + jury SET) of a PR. See `Fleet.Pilot.ForgeClient.Jury.pr_review_state/3`."
   def pr_review_state(repo, index, opts \\ []), do: Jury.pr_review_state(repo, index, opts)
 
-  @doc "Feedback des REQUEST_CHANGES en vigueur. Voir `Fleet.Pilot.ForgeClient.Jury.change_request_feedback/3`."
+  @doc "Feedback of the REQUEST_CHANGES in force. See `Fleet.Pilot.ForgeClient.Jury.change_request_feedback/3`."
   def change_request_feedback(repo, index, opts \\ []),
     do: Jury.change_request_feedback(repo, index, opts)
 
-  @doc "Compte les rounds de rework. Voir `Fleet.Pilot.ForgeClient.Jury.count_change_request_rounds/3`."
+  @doc "Counts the rework rounds. See `Fleet.Pilot.ForgeClient.Jury.count_change_request_rounds/3`."
   def count_change_request_rounds(repo, index, opts \\ []),
     do: Jury.count_change_request_rounds(repo, index, opts)
 
-  @doc "Juges re-demandés après jugement (timeline). Voir `Fleet.Pilot.ForgeClient.Jury.pr_rerequested_reviewers/3`."
+  @doc "Judges re-requested after judgment (timeline). See `Fleet.Pilot.ForgeClient.Jury.pr_rerequested_reviewers/3`."
   def pr_rerequested_reviewers(repo, index, opts \\ []),
     do: Jury.pr_rerequested_reviewers(repo, index, opts)
 
-  # put_file / get_file → `Fleet.Pilot.ForgeClient.Files` (concern autonome, appelé en direct, pas via
-  # le seam — `IncidentRegistry` les injecte comme `:get_file_fun`/`:put_file_fun`). Pas de forwarder ici.
+  # put_file / get_file → `Fleet.Pilot.ForgeClient.Files` (autonomous concern, called directly, not via
+  # the seam — `IncidentRegistry` injects them as `:get_file_fun`/`:put_file_fun`). No forwarder here.
 
   defp comment_signed?(config, repo, issue_number, sig, opts) do
-    # Paginé — un comment système signé au-delà de 50 ne doit pas échapper au dédup (sinon
-    # double-post au replay). Une page de forme inattendue rend `{:error, …}` (et non un
-    # `{:ok, acc}` tronqué) → tombe dans le `_ -> false` (pas de signature trouvée = on poste, fail-safe
-    # dédup : au pire un double-post au replay, jamais une suppression silencieuse d'un marqueur).
+    # Paginated — a signed system comment beyond 50 must not escape the dedup (otherwise
+    # double-post on replay). A page of unexpected shape yields `{:error, …}` (and not a
+    # truncated `{:ok, acc}`) → falls into the `_ -> false` (no signature found = we post, fail-safe
+    # dedup: at worst a double-post on replay, never a silent suppression of a marker).
     case paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
-        # Le dédup garde une ÉCRITURE système → ne fait foi que des comments
-        # du bot. Sinon un user forge poste la signature en avance → le comment système est skipé →
-        # `count_signed_step_runs` sous-compte (budget anti-runaway sur-permissif). Bot irrésoluble →
-        # fail-OPEN (dédup non filtré) : au pire un comment dupliqué au replay, jamais une suppression
-        # silencieuse d'un marqueur load-bearing.
+        # The dedup guards a system WRITE → trusts only the bot's
+        # comments. Otherwise a forge user posts the signature ahead of time → the system comment is skipped →
+        # `count_signed_step_runs` undercounts (over-permissive anti-runaway budget). Unresolvable bot →
+        # fail-OPEN (unfiltered dedup): at worst a duplicated comment on replay, never a silent
+        # suppression of a load-bearing marker.
         trusted =
           cond do
-            # Marqueur NON load-bearing (ex. `[merge:pr-N]`, posté par le compte de RÔLE
-            # gatekeeper et non le bot système) → dédup AUTHOR-AGNOSTIC. Le filtre bot-only ne
-            # protège QUE les marqueurs comptés (`[step_run:role:sha]` → count_signed_step_runs) : un comment de
-            # sceau gatekeeper échapperait sinon au dédup bot-only (double-post au replay/retry).
+            # NON load-bearing marker (e.g. `[merge:pr-N]`, posted by the gatekeeper ROLE
+            # account and not the system bot) → AUTHOR-AGNOSTIC dedup. The bot-only filter only
+            # protects the COUNTED markers (`[step_run:role:sha]` → count_signed_step_runs): a gatekeeper
+            # seal comment would otherwise escape the bot-only dedup (double-post on replay/retry).
             Keyword.get(opts, :dedup_any_author, false) ->
               comments
 
@@ -645,25 +645,25 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   # ============================================================
-  # Position workflow_map — 2 labels SCOPÉS sur l'issue (la forge EST la machine à états).
-  # Remplace l'ancien commentaire `[lcars-route:<map>:<step>]` (bruit dans le fil humain) :
-  #   `stage/<step>` : l'étape COURANTE, mobile (mutex natif Gitea : poser une étape retire la précédente).
-  #   `wfmap/<map>`  : QUELLE map suit cette issue, posé une fois (mutex : une seule map par issue).
-  # Les deux VISIBLES (coup d'œil humain), lus directement (pas de scan de commentaires), infalsifiables
-  # via le verrou d'écriture WS1 (rôles en issues:read) : irreprésentabilité > filtrage-à-la-lecture.
-  # Le map vit PAR-ISSUE (donnée) — PAS un défaut global codé : deux issues peuvent suivre deux maps
-  # (multi-map, cf. tests gkchain/poc-mini). Aucun `default` ici : un défaut de map n'a qu'UN lieu
-  # légitime, l'onboard d'une issue routeless (`StepDispatcher.ensure_workflow_map_or_onboard`).
+  # workflow_map position — 2 SCOPED labels on the issue (the forge IS the state machine).
+  # Replaces the old `[lcars-route:<map>:<step>]` comment (noise in the human thread):
+  #   `stage/<step>`: the CURRENT step, mobile (Gitea native mutex: setting a step removes the previous one).
+  #   `wfmap/<map>` : WHICH map this issue follows, set once (mutex: a single map per issue).
+  # Both VISIBLE (human glance), read directly (no comment scan), unfalsifiable
+  # via the WS1 write lock (roles at issues:read): unrepresentability > filtering-at-read.
+  # The map lives PER-ISSUE (data) — NOT a coded global default: two issues can follow two maps
+  # (multi-map, cf. gkchain/poc-mini tests). No `default` here: a map default has only ONE
+  # legitimate place, the onboard of a routeless issue (`StepDispatcher.ensure_workflow_map_or_onboard`).
   # ============================================================
 
-  # Préfixes scopés lus depuis la SOURCE UNIQUE du vocab (`Fleet.Pilot.Labels`) — pas de re-déclaration
-  # de littéral (un renommage là-bas se propage ici au compile).
+  # Scoped prefixes read from the SINGLE SOURCE of the vocab (`Fleet.Pilot.Labels`) — no re-declaration
+  # of the literal (a rename there propagates here at compile time).
   @stage_prefix Fleet.Pilot.Labels.stage_prefix()
   @wfmap_prefix Fleet.Pilot.Labels.wfmap_prefix()
 
   @doc """
-  Pose la position = `wfmap/<pipeline>` (quelle map, idempotent) + `stage/<step>` (via `set_stage`, mutex).
-  `{:ok, :posted}` si l'étape a bougé, `{:ok, :already}` si déjà à cette étape, `{:error, _}` sinon.
+  Sets the position = `wfmap/<pipeline>` (which map, idempotent) + `stage/<step>` (via `set_stage`, mutex).
+  `{:ok, :posted}` if the step moved, `{:ok, :already}` if already at that step, `{:error, _}` otherwise.
   """
   @spec post_route(String.t(), integer(), String.t(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
@@ -675,11 +675,11 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Pose SEULEMENT l'étape courante `stage/<stage>` (mutex : retire l'ancien `stage/*`), sans toucher au
-  `wfmap/*`. Sert au LIFECYCLE PR post-map (`review` à l'ouverture de la PR livrable, `merged` au merge) :
-  l'étape n'est plus une position workflow_map navigable mais reste visible pour l'humain. Le poller ne
-  relit pas `get_route` sur ces issues (PR-backed → skip lease.ex:209 ; mergée → fermée) → `stage/*` y est
-  purement humain. `{:ok, :posted | :already}` | `{:error, _}`.
+  Sets ONLY the current step `stage/<stage>` (mutex: removes the old `stage/*`), without touching
+  `wfmap/*`. Serves the post-map PR LIFECYCLE (`review` at the opening of the deliverable PR, `merged` at merge):
+  the step is no longer a navigable workflow_map position but stays visible for the human. The poller does
+  not re-read `get_route` on these issues (PR-backed → skip lease.ex:209; merged → closed) → `stage/*` there is
+  purely human. `{:ok, :posted | :already}` | `{:error, _}`.
   """
   @spec set_stage(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
@@ -692,12 +692,12 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Lit la position = `{:ok, {map, step}}` depuis les labels `wfmap/<map>` + `stage/<step>` de l'issue.
-  `:none` si l'un manque (issue routeless, ou demi-état → ré-onboardée par le caller). `{:error, _}` sur
-  échec HTTP/config. Le map vient de la DONNÉE (label `wfmap/*`), jamais d'un défaut codé — pas
-  d'invention silencieuse d'un map (canon : ambiguïté rejetée, pas de fallback métier caché). La
-  CONFIANCE vient du verrou d'écriture WS1 (seul `lcars-system` pose les labels) : irreprésentabilité >
-  filtrage-à-la-lecture. Modèle de menace : un rôle compromis qui poserait un faux `stage/*` = nuke&redeploy.
+  Reads the position = `{:ok, {map, step}}` from the issue's `wfmap/<map>` + `stage/<step>` labels.
+  `:none` if one is missing (routeless issue, or half-state → re-onboarded by the caller). `{:error, _}` on
+  HTTP/config failure. The map comes from the DATA (label `wfmap/*`), never from a coded default — no
+  silent invention of a map (canon: ambiguity rejected, no hidden business fallback). The
+  TRUST comes from the WS1 write lock (only `lcars-system` sets the labels): unrepresentability >
+  filtering-at-read. Threat model: a compromised role setting a fake `stage/*` = nuke&redeploy.
   """
   @spec get_route(String.t(), integer(), Keyword.t()) ::
           {:ok, {String.t(), String.t()}} | :none | {:error, term()}
@@ -711,15 +711,15 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Builders des labels de position (source-unique des littéraux avec `@stage_prefix`/`@wfmap_prefix`).
+  # Position label builders (single-source of the literals with `@stage_prefix`/`@wfmap_prefix`).
   defp stage_label(step) when is_binary(step), do: @stage_prefix <> step
   defp wfmap_label(map) when is_binary(map), do: @wfmap_prefix <> map
 
-  # Étape courante = valeur du label `stage/<step>` (au plus un : mutex). Map = valeur du `wfmap/<map>`.
+  # Current step = value of the `stage/<step>` label (at most one: mutex). Map = value of the `wfmap/<map>`.
   defp current_stage(labels), do: label_value(labels, @stage_prefix)
   defp current_wfmap(labels), do: label_value(labels, @wfmap_prefix)
 
-  # Valeur (suffixe) du 1er label scopé `<prefix><valeur>` de l'issue, nil si aucun. Générique aux 2 scopes.
+  # Value (suffix) of the issue's 1st scoped label `<prefix><value>`, nil if none. Generic across both scopes.
   defp label_value(labels, prefix) when is_list(labels) do
     Enum.find_value(labels, fn label ->
       name = label["name"]
@@ -730,17 +730,17 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Compte les comments portant un marqueur de step_run signé `[step_run:<role>:<sha>]`
-  (posés par `StepRunCompleter` à chaque fin-de-step-run). Sert de compteur **forge-natif**
-  au bound anti-runaway du rebond de gate : combien de step_runs ont déjà été
-  joués sur l'issue. Monotone (les comments ne sont pas retirés), idempotent à lire.
+  Counts the comments carrying a signed step_run marker `[step_run:<role>:<sha>]`
+  (posted by `StepRunCompleter` at each step-run end). Serves as the **forge-native** counter
+  for the anti-runaway bound of the gate bounce: how many step_runs have already been
+  played on the issue. Monotone (comments are not removed), idempotent to read.
 
-  `{:error, _}` sur échec HTTP/config — le caller NE rebondit PAS à l'aveugle si le
-  budget n'est pas vérifiable (un rebond non vérifiable pourrait boucler).
+  `{:error, _}` on HTTP/config failure — the caller does NOT bounce blindly if the
+  budget is not verifiable (an unverifiable bounce could loop).
 
-  PAGINÉ : même si le budget de rework (`nb_steps * (max_rounds+1)`) reste en
-  général sous 50, le compteur est source-de-vérité du bound anti-runaway — un step_run signé
-  perdu au-delà de 50 sous-compterait le budget (sur-permissif). On lit donc TOUTES les pages.
+  PAGINATED: even though the rework budget (`nb_steps * (max_rounds+1)`) generally
+  stays under 50, the counter is the source-of-truth of the anti-runaway bound — a signed step_run
+  lost beyond 50 would undercount the budget (over-permissive). So we read ALL the pages.
   """
   @spec count_signed_step_runs(String.t(), integer(), Keyword.t()) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -749,9 +749,9 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
-      # Compter SEULEMENT les step_runs signés par le SYSTÈME — sinon un user forge forge des
-      # `[step_run:role:sha]` pour gonfler le compteur et faire TRIPPER le budget anti-runaway (DoS rework).
-      # Bot irrésoluble → {:error} (via le with) : le caller NE rebondit PAS sur un budget non vérifiable.
+      # Count ONLY the step_runs signed by the SYSTEM — otherwise a forge user forges
+      # `[step_run:role:sha]` to inflate the counter and TRIP the anti-runaway budget (rework DoS).
+      # Unresolvable bot → {:error} (via the with): the caller does NOT bounce on an unverifiable budget.
       count =
         comments
         |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))
@@ -763,10 +763,10 @@ defmodule Fleet.Pilot.ForgeClient do
   end
 
   @doc """
-  Extrait le dernier bloc ` ```result ` posté dans un comment de step_run — le `result_K`
-  gravé par `StepRunCompleter` quand le step avance vers un gatekeeper. Sert
-  à `StepDispatcher` pour donner au pod gatekeeper **quoi juger** dans son brief
-  (option B : pas de clone de branche). `:none` si aucun ; `{:error, _}` HTTP/config.
+  Extracts the last ` ```result ` block posted in a step_run comment — the `result_K`
+  recorded by `StepRunCompleter` when the step advances toward a gatekeeper. Serves
+  `StepDispatcher` to give the gatekeeper pod **what to judge** in its brief
+  (option B: no branch clone). `:none` if none; `{:error, _}` HTTP/config.
   """
   @spec get_predecessor_result(String.t(), integer(), Keyword.t()) ::
           {:ok, map()} | :none | {:error, term()}
@@ -775,8 +775,8 @@ defmodule Fleet.Pilot.ForgeClient do
          {:ok, bot} <- forge_bot_login(config, opts),
          {:ok, comments} when is_list(comments) <-
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
-      # Le bloc ```result nourrit le BRIEF DE JUGEMENT du gatekeeper. Ne
-      # l'extraire QUE de comments SYSTÈME — sinon un user forge injecte ce que le juge évalue.
+      # The ```result block feeds the gatekeeper's JUDGMENT BRIEF. Extract it
+      # ONLY from SYSTEM comments — otherwise a forge user injects what the judge evaluates.
       comments
       |> Enum.filter(&ForgeProtocol.system_authored?(&1, bot))
       |> Enum.map(& &1["body"])
@@ -792,18 +792,18 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # ADD un label par NOM (POST = ajoute sans remplacer l'existant). Gitea résout le nom contre les
-  # labels REPO **et ORG** côté serveur (`IssueLabelsOption.labels` = « strings representing label
-  # names », doc swagger) → plus de résolution repo-id côté client. Les labels-verrous du wire-protocol
-  # sont créés PAR-REPO (`ensure_repo_label`, via le repo-write du compte système) : pas d'org-ownership
-  # requise, et l'état de routing reste self-contained dans son repo.
+  # ADD a label by NAME (POST = adds without replacing the existing). Gitea resolves the name against the
+  # REPO **and ORG** labels server-side (`IssueLabelsOption.labels` = « strings representing label
+  # names », swagger doc) → no more repo-id resolution client-side. The wire-protocol lock-labels
+  # are created PER-REPO (`ensure_repo_label`, via the system account's repo-write): no org-ownership
+  # required, and the routing state stays self-contained in its repo.
   #
-  # SELF-HEAL : Gitea ignore EN SILENCE un nom de label qui n'existe NI au repo NI à l'org (POST
-  # 200, mais le label n'est PAS posé) → le verrou protocole serait fantôme → boucle de re-dispatch
-  # (ex. `lcars-awaits-arch` absent de l'org). On ne se fie donc PAS au seul 200 : on VÉRIFIE
-  # que le label est dans la réponse ; absent → on le CRÉE (org du repo) puis on ré-essaie ; toujours
-  # absent → fail-loud `{:label_not_added}` (jamais un :ok menteur). Plus de dépendance à des labels
-  # créés à la main.
+  # SELF-HEAL: Gitea SILENTLY ignores a label name that exists NEITHER at the repo NOR at the org (POST
+  # 200, but the label is NOT set) → the protocol lock would be a phantom → re-dispatch loop
+  # (e.g. `lcars-awaits-arch` absent from the org). So we do NOT rely on the 200 alone: we VERIFY
+  # that the label is in the response; absent → we CREATE it (repo's org) then retry; still
+  # absent → fail-loud `{:label_not_added}` (never a lying :ok). No more dependence on hand-created
+  # labels.
   defp add_issue_label(config, repo, issue_number, label_name) do
     case post_issue_label(config, repo, issue_number, label_name) do
       {:ok, true} ->
@@ -822,8 +822,8 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # POST le label ET vérifie qu'il est réellement posé : la réponse Gitea = les labels de l'issue après
-  # ajout. Un nom inconnu est ignoré en silence (200 sans le label) → `{:ok, false}` (à compenser).
+  # POST the label AND verify it is really set: the Gitea response = the issue's labels after
+  # the add. An unknown name is silently ignored (200 without the label) → `{:ok, false}` (to be compensated).
   defp post_issue_label(config, repo, issue_number, label_name) do
     case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels", %{
            labels: [label_name]
@@ -834,19 +834,19 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Crée le label protocole manquant au niveau du REPO. Les labels de routing (`stage/*`/`wfmap/*`) et les
-  # verrous plats (`lcars-*`) vivent PAR-REPO : l'état de routing appartient aux issues de SON repo (la
-  # forge = state-store, self-contained par projet), et le compte système les crée via son **repo-write** —
-  # jamais besoin d'être org-owner (ce qu'exigerait `POST /orgs/*/labels` → 403 « Must be an organization
-  # owner »). Couleur + description PAR FAMILLE (le NOM porte le protocole, la description l'EXPLIQUE à
-  # l'humain qui survole le label sur la forge — avant : même chaîne cryptique pour tous, « F-E5 » ne veut
-  # rien dire hors du code). Tolérant : un échec (créé en concurrence) → `:ok` — c'est le re-POST + sa vérif
-  # qui tranchent (sinon le fail-loud d'`add_issue_label` remonte).
+  # Creates the missing protocol label at the REPO level. The routing labels (`stage/*`/`wfmap/*`) and the
+  # flat locks (`lcars-*`) live PER-REPO: the routing state belongs to ITS repo's issues (the
+  # forge = state-store, self-contained per project), and the system account creates them via its **repo-write** —
+  # never needing to be org-owner (which `POST /orgs/*/labels` would require → 403 « Must be an organization
+  # owner »). Color + description PER FAMILY (the NAME carries the protocol, the description EXPLAINS it to
+  # the human hovering over the label on the forge — before: the same cryptic string for all, « F-E5 » means
+  # nothing outside the code). Tolerant: a failure (created concurrently) → `:ok` — it's the re-POST + its verification
+  # that decide (otherwise `add_issue_label`'s fail-loud propagates).
   defp ensure_repo_label(config, repo, label_name) do
-    # Un label SCOPÉ (nom `scope/valeur`, contient "/") est créé MUTUELLEMENT EXCLUSIF (`exclusive:true`) :
-    # Gitea retire l'ancien `scope/*` de l'issue quand on en pose un nouveau (vérifié forge 1.26.1, niveau
-    # org ET repo, par NOM). C'est le mécanisme du `stage/*` (position workflow_map = machine à états
-    # visible) : irreprésentabilité native (jamais 2 étapes). Les verrous PLATS (`lcars-*`) non-exclusifs.
+    # A SCOPED label (name `scope/value`, contains "/") is created MUTUALLY EXCLUSIVE (`exclusive:true`):
+    # Gitea removes the old `scope/*` from the issue when a new one is set (verified forge 1.26.1, org AND
+    # repo level, by NAME). This is the mechanism of `stage/*` (workflow_map position = visible state
+    # machine): native unrepresentability (never 2 steps). The FLAT locks (`lcars-*`) are non-exclusive.
     body = %{
       name: label_name,
       exclusive: String.contains?(label_name, "/"),
@@ -860,19 +860,19 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  # Couleur cosmétique (le NOM porte le protocole). Les `stage/*` reçoivent une teinte par étape pour le
-  # coup d'œil humain (bleu→ambre→violet→vert = brief-review→build→review→merged) ; le reste, gris neutre.
+  # Cosmetic color (the NAME carries the protocol). The `stage/*` get a per-step tint for the
+  # human glance (blue→amber→purple→green = brief-review→build→review→merged); the rest, neutral gray.
   defp label_color("stage/brief-review"), do: "#4a90d9"
   defp label_color("stage/build"), do: "#e08e0b"
   defp label_color("stage/review"), do: "#8e44ad"
   defp label_color("stage/merged"), do: "#2e9e5b"
   defp label_color(_), do: "#ededed"
 
-  # Description PAR FAMILLE (tooltip Gitea au survol) — le NOM reste le protocole (vocab LCARS intact,
-  # parsé tel quel par le code), la description est le SEUL endroit où on explique en clair à un humain
-  # qui regarde la forge sans le code sous les yeux. `wfmap/<map>` et `stage/<step>` ont des valeurs
-  # dynamiques (nom de map / nom d'étape variables selon le workflow_map) → match sur le PRÉFIXE, pas la
-  # valeur exacte (contrairement à `label_color` qui, lui, ne différencie QUE les 4 stages connus).
+  # Description PER FAMILY (Gitea tooltip on hover) — the NAME stays the protocol (LCARS vocab intact,
+  # parsed as-is by the code), the description is the ONLY place where we explain in plain terms to a human
+  # looking at the forge without the code in front of them. `wfmap/<map>` and `stage/<step>` have
+  # dynamic values (map name / step name varying by workflow_map) → match on the PREFIX, not the
+  # exact value (unlike `label_color`, which differentiates ONLY the 4 known stages).
   defp label_description("lcars-in-flight"),
     do:
       "Verrou : un pod travaille déjà cette brique (anti double-spawn). Levé par le système en fin de step — jamais à retirer à la main."
@@ -893,19 +893,19 @@ defmodule Fleet.Pilot.ForgeClient do
     do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."
 
   # ============================================================
-  # Identite forge — adaptateur credential -> wire (token de role)
+  # Forge identity — credential -> wire adapter (role token)
   # ============================================================
 
   @doc """
-  Injecte le token du compte de RÔLE (`role`) dans `forge_opts`, sous la clé `:token` que
-  `resolve_config`/`resolve_token` relisent → le SYSTÈME poste/merge EN SON NOM sur la forge (avatar +
-  traça honnête, au lieu du compte système). C'est l'adaptateur UNIQUE credential→wire — source unique
-  partagée par `StepRunCompleter`, `StepDispatcher` et les sceaux gatekeeper (le writer du `:token` est ici,
-  collé à son reader). `Fleet.Credentials.RoleToken` fournit le token, `forge_opts[:token]` le porte
-  jusqu'à la requête. Rôle vide/absent OU token absent/illisible/vide → `forge_opts` inchangé → fallback
-  sur le token (système) déjà présent ; `RoleToken.token/1` émet un `Logger.warning` sur ce dégradé, donc
-  observable côté appelant. Le pod ne poste jamais : c'est le système qui poste avec le token de rôle,
-  jamais le pod (forge-aveugle).
+  Injects the ROLE account's token (`role`) into `forge_opts`, under the `:token` key that
+  `resolve_config`/`resolve_token` re-read → the SYSTEM posts/merges IN ITS NAME on the forge (avatar +
+  honest trace, instead of the system account). This is the SINGLE credential→wire adapter — single source
+  shared by `StepRunCompleter`, `StepDispatcher` and the gatekeeper seals (the `:token` writer is here,
+  glued to its reader). `Fleet.Credentials.RoleToken` supplies the token, `forge_opts[:token]` carries it
+  through to the request. Empty/absent role OR absent/unreadable/empty token → `forge_opts` unchanged → fallback
+  on the (system) token already present; `RoleToken.token/1` emits a `Logger.warning` on this degraded path, so
+  observable on the caller side. The pod never posts: it's the system that posts with the role token,
+  never the pod (forge-blind).
   """
   @spec as_role(keyword(), String.t() | nil) :: keyword()
   def as_role(forge_opts, role) when is_binary(role) and role != "" do

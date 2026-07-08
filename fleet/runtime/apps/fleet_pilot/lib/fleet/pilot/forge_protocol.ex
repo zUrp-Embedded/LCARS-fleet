@@ -1,38 +1,38 @@
 defmodule Fleet.Pilot.ForgeProtocol do
   @moduledoc """
-  Vocabulaire **pur** du wire-protocol forge-state-machine : la forge EST la machine à états,
-  ces formats sont son fil. SOURCE UNIQUE des marqueurs gravés sur les issues/PR et des
-  feature-branches. Aucun I/O — que du build + parse de chaînes (les ops HTTP qui les
-  *posent*/les *lisent* vivent dans `Fleet.Pilot.ForgeClient`).
+  **Pure** vocabulary of the forge-state-machine wire-protocol: the forge IS the state machine,
+  these formats are its thread. SINGLE SOURCE of the markers recorded on issues/PRs and of the
+  feature-branches. No I/O — only build + parse of strings (the HTTP ops that
+  *post*/*read* them live in `Fleet.Pilot.ForgeClient`).
 
-  Pendant de `Fleet.Pilot.Labels` (les deux portent le wire-protocol) : `Labels` = les
-  **labels-verrous** (`lcars-in-flight`/`lcars-awaits-arch`) ; ici = **branches, marqueurs
-  route/step_run/onboard, blocs result** et le **primitif de confiance** `system_authored?/2`.
+  Counterpart of `Fleet.Pilot.Labels` (both carry the wire-protocol): `Labels` = the
+  **lock-labels** (`lcars-in-flight`/`lcars-awaits-arch`); here = **branches,
+  route/step_run/onboard markers, result blocks** and the **trust primitive** `system_authored?/2`.
 
-  **Invariant build+parse co-localisés** : chaque format a son BUILDER et son PARSEUR dans
-  CE module, l'un collé à l'autre — un changement de format se fait ICI, les deux ensemble,
-  jamais l'un sans l'autre (plus de drift entre ce qui est écrit et ce qui est relu).
-  Les consommateurs (`StepDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `Poller`) appellent ces
-  fonctions DIRECTEMENT. Seul `parse_feature_branch/1` est aussi ré-exporté par `ForgeClient`
-  (`defdelegate`) : `fleet_mcp` l'atteint via le seam `:forge_client` pour éviter une dépendance
-  compile-time vers fleet_pilot.
+  **Co-located build+parse invariant**: each format has its BUILDER and its PARSER in
+  THIS module, glued to each other — a format change happens HERE, both together,
+  never one without the other (no more drift between what is written and what is re-read).
+  The consumers (`StepDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `Poller`) call these
+  functions DIRECTLY. Only `parse_feature_branch/1` is also re-exported by `ForgeClient`
+  (`defdelegate`): `fleet_mcp` reaches it via the `:forge_client` seam to avoid a compile-time
+  dependency on fleet_pilot.
   """
 
   # ============================================================
-  # Feature-branch système `lcars/issue-<n>-<role>`.
+  # System feature-branch `lcars/issue-<n>-<role>`.
   # ============================================================
 
-  # Littéral-SOURCE UNIQUE du format : builder ET parseur en dérivent (zéro token écrit en double).
+  # SINGLE-SOURCE literal of the format: builder AND parser derive from it (zero token written twice).
   @feature_branch_prefix "lcars/issue-"
-  # Regex DÉRIVÉ du même littéral — `Regex.escape` neutralise le `/` (et tout méta-caractère) du prefix
-  # → littéral inerte dans le pattern, jamais interprété comme syntaxe regex.
+  # Regex DERIVED from the same literal — `Regex.escape` neutralises the `/` (and any meta-character) of the prefix
+  # → inert literal in the pattern, never interpreted as regex syntax.
   @feature_branch_rx Regex.compile!("^" <> Regex.escape(@feature_branch_prefix) <> "(\\d+)-(.+)$")
 
   @doc """
-  Construit la feature-branch systeme `lcars/issue-<n>-<role>` — le BUILDER unique du format,
-  dérivé de `@feature_branch_prefix` tout comme son parseur `parse_feature_branch/1` : un changement
-  de format se fait sur CE seul littéral, build et parse suivent (plus de token en double).
-  Identite garantie : `parse_feature_branch(feature_branch(n, role)) == {:ok, {n, role}}`.
+  Builds the system feature-branch `lcars/issue-<n>-<role>` — the single BUILDER of the format,
+  derived from `@feature_branch_prefix` just like its parser `parse_feature_branch/1`: a format
+  change happens on THIS single literal, build and parse follow (no more token twice).
+  Guaranteed identity: `parse_feature_branch(feature_branch(n, role)) == {:ok, {n, role}}`.
   """
   @spec feature_branch(integer(), String.t()) :: String.t()
   # => "lcars/issue-<n>-<role>"
@@ -40,10 +40,10 @@ defmodule Fleet.Pilot.ForgeProtocol do
     do: "#{@feature_branch_prefix}#{n}-#{role}"
 
   @doc """
-  Extrait `{issue_number, role}` d'une feature-branch systeme `lcars/issue-<n>-<role>` (format
-  construit par `feature_branch/2`, son inverse co-localise). Sert au dispatch juge PR-driven a
-  remonter de la PR (head.ref) au issue. `:error` si le ref n'est pas une feature-branch fleet (PR
-  externe / branche manuelle -> ignoree par le dispatch, jamais misroutee).
+  Extracts `{issue_number, role}` from a system feature-branch `lcars/issue-<n>-<role>` (format
+  built by `feature_branch/2`, its co-located inverse). Serves the PR-driven judge dispatch to go
+  back from the PR (head.ref) to the issue. `:error` if the ref is not a fleet feature-branch (external
+  PR / manual branch -> ignored by the dispatch, never misrouted).
   """
   @spec parse_feature_branch(String.t()) :: {:ok, {integer(), String.t()}} | :error
   def parse_feature_branch(head) when is_binary(head) do
@@ -55,26 +55,26 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   def parse_feature_branch(_), do: :error
 
-  # (La position workflow_map n'est plus un marqueur-commentaire `[lcars-route:...]` : elle vit dans le
-  # label SCOPÉ `stage/*` de l'issue — mutex natif Gitea, visible humain, lu sans scan de commentaires.
-  # Builder/lecteur : `Fleet.Pilot.ForgeClient.post_route`/`get_route`.)
+  # (The workflow_map position is no longer a `[lcars-route:...]` comment-marker: it lives in the
+  # issue's SCOPED label `stage/*` — Gitea native mutex, human-visible, read without a comment scan.
+  # Builder/reader: `Fleet.Pilot.ForgeClient.post_route`/`get_route`.)
 
   # ============================================================
-  # Marqueur de STEP_RUN signé `[step_run:<role>:<sha>]` — compteur forge-natif anti-runaway.
+  # Signed STEP_RUN marker `[step_run:<role>:<sha>]` — forge-native anti-runaway counter.
   # ============================================================
 
-  # Littéral-SOURCE UNIQUE : builder ET prédicat en dérivent.
+  # SINGLE-SOURCE literal: builder AND predicate derive from it.
   @step_run_prefix "[step_run:"
-  # Regex DÉRIVÉ du même littéral — `Regex.escape` neutralise le `[` du prefix. PAS d'ancre : le
-  # marqueur est posé en fin de body de comment.
+  # Regex DERIVED from the same literal — `Regex.escape` neutralises the `[` of the prefix. NO anchor: the
+  # marker is placed at the end of a comment body.
   @step_run_marker_rx Regex.compile!(Regex.escape(@step_run_prefix) <> "[^:\\]]+:[^:\\]]+\\]")
 
   @doc """
-  Format du marqueur de step_run signé `[step_run:<role>:<sha>]` (builder dérivé de `@step_run_prefix`, tout comme
-  son prédicat `step_run_marker?/1` — un changement de format se fait sur CE seul littéral). Posé par
-  `StepRunCompleter` en fin-de-step-run, sert aussi de `:dedup_signature` (replay idempotent).
+  Format of the signed step_run marker `[step_run:<role>:<sha>]` (builder derived from `@step_run_prefix`, just like
+  its predicate `step_run_marker?/1` — a format change happens on THIS single literal). Posted by
+  `StepRunCompleter` at step-run end, also serves as `:dedup_signature` (idempotent replay).
 
-  Round-trip builder -> prédicat (le prédicat reconnaît ce que le builder grave) :
+  Round-trip builder -> predicate (the predicate recognises what the builder records):
 
       iex> marker = Fleet.Pilot.ForgeProtocol.step_run_marker("engineer", "deadbeef")
       iex> marker
@@ -91,23 +91,23 @@ defmodule Fleet.Pilot.ForgeProtocol do
   end
 
   @doc false
-  # Pur : un body porte-t-il un marqueur de step_run signé ? Inverse de `step_run_marker/2` pour le comptage
-  # forge-natif (`ForgeClient.count_signed_step_runs`).
+  # Pure: does a body carry a signed step_run marker? Inverse of `step_run_marker/2` for the forge-native
+  # counting (`ForgeClient.count_signed_step_runs`).
   def step_run_marker?(body) when is_binary(body), do: Regex.match?(@step_run_marker_rx, body)
   def step_run_marker?(_), do: false
 
   # ============================================================
-  # Bloc ` ```result ` — sérialise les `outputs` d'un step dans le comment de step_run.
+  # ` ```result ` block — serialises a step's `outputs` in the step_run comment.
   # ============================================================
 
   @result_block_rx ~r/```result\n(.*?)\n```/s
   @result_fence_limit 8192
 
   @doc """
-  Format du bloc ` ```result ` (sérialise les `outputs` d'un step dans le comment de step_run).
-  Co-localisé avec son parseur `parse_result_block/1` — round-trip garanti. `nil`/vide →
-  `""` (pas de bruit). JSON fencé si ≤ 8 KB ; au-delà, une note pointant vers le livrable de la
-  branche (jamais de JSON tronqué = invalide). Préfixe `\\n\\n` inclus (séparateur du corps).
+  Format of the ` ```result ` block (serialises a step's `outputs` in the step_run comment).
+  Co-located with its parser `parse_result_block/1` — round-trip guaranteed. `nil`/empty →
+  `""` (no noise). JSON fenced if ≤ 8 KB; beyond that, a note pointing to the branch's
+  deliverable (never truncated JSON = invalid). `\\n\\n` prefix included (body separator).
   """
   @spec result_block(map() | nil) :: String.t()
   def result_block(outputs) when is_map(outputs) and map_size(outputs) > 0 do
@@ -123,7 +123,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
   def result_block(_), do: ""
 
   @doc false
-  # Pur : extrait le map du dernier bloc ```result d'un body, sinon nil.
+  # Pure: extracts the map from the last ```result block of a body, otherwise nil.
   def parse_result_block(body) when is_binary(body) do
     case Regex.run(@result_block_rx, body) do
       [_, json] ->
@@ -140,17 +140,17 @@ defmodule Fleet.Pilot.ForgeProtocol do
   def parse_result_block(_), do: nil
 
   # ============================================================
-  # Primitif de confiance (marqueurs bot-authored sur comments : route/step_run/result).
-  # (Le marqueur d'admission `[lcars-onboarded:<human>]` + `admitted?`/`post_onboard_marker` sont
-  # RETIRÉS — WS3 : l'admission est l'appartenance-org, plus de sceau server-side à poser/lire.)
+  # Trust primitive (bot-authored markers on comments: route/step_run/result).
+  # (The admission marker `[lcars-onboarded:<human>]` + `admitted?`/`post_onboard_marker` are
+  # REMOVED — WS3: admission is org-membership, no more server-side seal to set/read.)
   # ============================================================
 
   @doc false
-  # Pur : un OBJET forge (comment OU issue — même forme wire Gitea `{"user": {"login": …}}`) est
-  # DE CONFIANCE ssi son auteur = le compte système (bot) de la fleet. Un user forge
-  # (humain/attaquant) a un autre login → ses marqueurs sont ignorés. Prédicat UNIQUE du primitif
-  # de confiance : les lecteurs de marqueurs sur comments (`ForgeClient` route/step_run/result)
-  # passent tous ici — pas de copie.
+  # Pure: a forge OBJECT (comment OR issue — same Gitea wire shape `{"user": {"login": …}}`) is
+  # TRUSTED iff its author = the fleet's system (bot) account. A forge user
+  # (human/attacker) has a different login → its markers are ignored. The SINGLE predicate of the
+  # trust primitive: the marker readers on comments (`ForgeClient` route/step_run/result)
+  # all go through here — no copy.
   def system_authored?(object, bot_login)
       when is_map(object) and is_binary(bot_login) and bot_login != "" do
     get_in(object, ["user", "login"]) == bot_login
