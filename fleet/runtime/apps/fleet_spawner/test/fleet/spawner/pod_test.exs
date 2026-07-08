@@ -231,6 +231,41 @@ defmodule Fleet.Spawner.PodTest do
       assert content["phase"] == "succeeded"
     end
 
+    test "R1-20 : state.json PRÉSENT mais CORROMPU → recover LOUD (error), pas de fresh init silencieux" do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply(session_id: "s-corrupt"))
+      pod_id = "pod-corrupt-#{System.unique_integer([:positive])}"
+
+      # point de recovery cassé : fichier présent, JSON illisible (≠ absent = fresh pod normal)
+      path = state_fs_path(pod_id)
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "{ ceci n'est pas du json")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
+          assert_receive {:launch_called, _args, _env}, 2_000
+        end)
+
+      assert log =~ "CORRUPT",
+             "un state.json corrompu doit être LOUD (error, comme state.corrupt du TaskQueue), pas silencieux"
+    end
+
+    test "R1-20 : state.json ABSENT → fresh init SILENCIEUX (pas de faux warning corrupt)" do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply(session_id: "s-fresh"))
+      pod_id = "pod-fresh-#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
+          assert_receive {:launch_called, _args, _env}, 2_000
+        end)
+
+      refute log =~ "CORRUPT"
+      refute log =~ "recover: state.json"
+    end
+
     # MA-04 — LE finding : `pod.completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir
     # le step_run). Si sa diffusion ÉCHOUE, le pod NE doit PAS release/kill sur une complétion orpheline (sinon
     # le pod « réussit » mais le step_run ne finit jamais → verrou forge à vie). Bus stub qui lève → le pod RESTE

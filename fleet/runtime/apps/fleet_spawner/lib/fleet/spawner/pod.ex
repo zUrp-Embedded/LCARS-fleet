@@ -842,13 +842,38 @@ defmodule Fleet.Spawner.Pod do
   defp recover_or_init(args) do
     base = initial_state(args)
 
-    with {:ok, json} <- File.read(base.state_fs_path),
-         {:ok, %{"session_id" => sid, "phase" => phase_str}} when is_binary(sid) <-
-           Jason.decode(json) do
-      phase = Recovery.phase_from_string(phase_str) || :launching
-      Recovery.apply_recovery(base, Recovery.recovery_action(phase), sid, phase)
-    else
-      _ -> base
+    case File.read(base.state_fs_path) do
+      # No prior state.json = a FRESH pod (first boot for this pod_id) → silent fresh init (normal).
+      {:error, :enoent} ->
+        base
+
+      {:ok, json} ->
+        case Jason.decode(json) do
+          {:ok, %{"session_id" => sid, "phase" => phase_str}} when is_binary(sid) ->
+            phase = Recovery.phase_from_string(phase_str) || :launching
+            Recovery.apply_recovery(base, Recovery.recovery_action(phase), sid, phase)
+
+          # state.json PRESENT but CORRUPT/incomplete (bad JSON, missing session_id/phase) = a broken
+          # recovery point. We fresh-init (cannot recover), but LOUD (error = real loss: the durable
+          # recovery point is gone), like the TaskQueue emits `state.corrupt` — a silent fresh init would
+          # masquerade the data loss as a normal boot.
+          _ ->
+            Logger.error(
+              "pod #{base.pod_id} recover: state.json PRESENT but CORRUPT at #{base.state_fs_path} " <>
+                "— fresh init (durable recovery point lost)"
+            )
+
+            base
+        end
+
+      # File present but UNREADABLE (perms/IO) = also a broken recovery point → LOUD, fresh init.
+      {:error, reason} ->
+        Logger.error(
+          "pod #{base.pod_id} recover: state.json UNREADABLE (#{inspect(reason)}) at " <>
+            "#{base.state_fs_path} — fresh init"
+        )
+
+        base
     end
   end
 
