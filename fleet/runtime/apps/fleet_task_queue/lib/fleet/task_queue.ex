@@ -37,6 +37,17 @@ defmodule Fleet.TaskQueue do
   `:double_submit_ignored`). If `result` carries a `work_item_id` ≠ the pod's active work item
   → `:work_item_id_mismatch` (the deliverable's correlation_id does not match), no mutation.
 
+  ## Boundary placement (SOC-STATE-001) — deliberate, not a gap
+
+  `work_item_id` is an OPTIONAL correlation lock HERE: this is the GENERIC broker, and `submit_result`
+  completes the pod's active work item (`find_active`) whether or not the correlator is supplied — it is
+  only *verified* when present (mismatch → reject). The MANDATORY-`work_item_id` policy is a
+  POD-INTERACTION concern, enforced ONE level up at the fleet_mcp boundary (`Fleet.MCP.PodTools.WorkItems`
+  always stamps `work_item_id` before calling here) — the only surface where pods actually submit.
+  Keeping the broker policy-light while the pod-facing mandatory lives at the interaction edge is the
+  intended layering: raising the requirement into the broker would break its generic contract (internal
+  callers correlate by the pod's single active item).
+
   The `work_item.completed` broadcast is LIFECYCLE load-bearing (the StepRunConsumer depends on it to
   finish the step_run). If its broadcast fails, the return is `{:error, {:broadcast_failed, _}}` (the task
   stays `:completed`+persisted, but the caller does NOT receive a false success — no more `:ok` that lies).
