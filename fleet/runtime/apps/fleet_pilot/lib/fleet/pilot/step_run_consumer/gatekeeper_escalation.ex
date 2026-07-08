@@ -1,69 +1,69 @@
 defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   @moduledoc """
-  Cluster IMPUR « escalade gatekeeper » (async-out) extrait de `Fleet.Pilot.StepRunConsumer`.
+  IMPURE "gatekeeper escalation" cluster (async-out) extracted from `Fleet.Pilot.StepRunConsumer`.
 
-  Quand une gate `:soft`/terminal non-tranchable escalade (`{:dispatch_gatekeeper, _}`), ce
-  module CONVOQUE le gatekeeper permanent :
+  When a `:soft`/undecidable-terminal gate escalates (`{:dispatch_gatekeeper, _}`), this
+  module SUMMONS the permanent gatekeeper:
 
-    1. enqueue un brief d'éval au gatekeeper PERMANENT (work-session, adressé par `pod_id` via la
-       TaskQueue — l'overseer n'est PAS spawné/possédé ici) ;
-    2. kicke le pod (best-effort avec recovery de wake) ;
-    3. rend le `correlation_id` (= task.id) pour la reprise async
+    1. enqueues an eval brief to the PERMANENT gatekeeper (work-session, addressed by `pod_id` via the
+       TaskQueue — the overseer is NOT spawned/owned here);
+    2. kicks the pod (best-effort with wake recovery);
+    3. returns the `correlation_id` (= task.id) for the async resumption
        (`task_queue.work_item.completed` → `resume_gate`).
 
-  Il ne DÉCIDE PAS de la route : le cœur décisionnel stateful (`gate_decide`/`resume_gate`/
-  `apply_verdict`) reste le SINGLE-AUTHORITY du module racine, qui appelle `dispatch/7` sur le
-  seul chemin `{:dispatch_gatekeeper, _}`.
+  It does NOT DECIDE the route: the stateful decision core (`gate_decide`/`resume_gate`/
+  `apply_verdict`) stays the SINGLE-AUTHORITY of the root module, which calls `dispatch/7` on the
+  sole `{:dispatch_gatekeeper, _}` path.
 
-  ## Frontière : struct de seams explicite (pas `state` entier)
+  ## Boundary: explicit seams struct (not the whole `state`)
 
-  Le cluster ne lit QUE 4 seams du `state` du consumer (`task_queue`, `spawner`,
-  `gatekeeper_pod_id_fun`, `wake_recovery`). On NE passe PAS le `state` entier — ce serait une
-  fuite de frontière : le caller construit un `%Seams{}` (contrat étroit, TYPÉ → dialyzer voit
-  exactement les 4 champs, aucune autre lecture de state n'est représentable ici). Le struct
-  (vs une map nue) est le choix qui BLINDE le mieux la frontière : `@enforce_keys` force les 4
-  champs à l'appel, et un accès `seams.<autre_champ>` ne compile pas (KeyError statique). Une map
-  laisserait passer `Map.get(seams, :repo)` en silence.
+  The cluster reads ONLY 4 seams from the consumer's `state` (`task_queue`, `spawner`,
+  `gatekeeper_pod_id_fun`, `wake_recovery`). We do NOT pass the whole `state` — that would be a
+  boundary leak: the caller builds a `%Seams{}` (narrow contract, TYPED → dialyzer sees
+  exactly the 4 fields, no other state read is representable here). The struct
+  (vs a bare map) is the choice that best ARMORS the boundary: `@enforce_keys` forces the 4
+  fields at the call, and an access `seams.<other_field>` does not compile (static KeyError). A map
+  would silently let `Map.get(seams, :repo)` through.
 
-  ## Contrat de retour étroit
+  ## Narrow return contract
 
-  `dispatch/7 :: {:ok, corr} | {:error, reason}` — `gate_decide` consomme ce contrat tel quel :
-  `{:ok, corr}` → escalade légitime (`{:escalate, corr, eval_ctx}`) ; `{:error, reason}` →
-  fail-loud (`{:error, {:gatekeeper_dispatch, reason}}`, jamais un pass silencieux).
+  `dispatch/7 :: {:ok, corr} | {:error, reason}` — `gate_decide` consumes this contract as-is:
+  `{:ok, corr}` → legitimate escalation (`{:escalate, corr, eval_ctx}`); `{:error, reason}` →
+  fail-loud (`{:error, {:gatekeeper_dispatch, reason}}`, never a silent pass).
   """
 
   require Logger
 
   defmodule Seams do
     @moduledoc """
-    Contrat de frontière du cluster d'escalade : les 4 seams async-out lus du `state` du
-    `StepRunConsumer`. Construit par le caller AVANT `dispatch/7` — le cluster ne reçoit jamais
-    le `state` entier.
+    Boundary contract of the escalation cluster: the 4 async-out seams read from the
+    `StepRunConsumer`'s `state`. Built by the caller BEFORE `dispatch/7` — the cluster never
+    receives the whole `state`.
     """
     @enforce_keys [:task_queue, :spawner, :gatekeeper_pod_id_fun, :wake_recovery]
     defstruct [:task_queue, :spawner, :gatekeeper_pod_id_fun, :wake_recovery]
 
     @type t :: %__MODULE__{
-            # Broker de briefs d'éval (défaut prod `Fleet.TaskQueue`).
+            # Broker of eval briefs (prod default `Fleet.TaskQueue`).
             task_queue: module(),
-            # Wake du pod gatekeeper (défaut prod `Fleet.Spawner`).
+            # Wake of the gatekeeper pod (prod default `Fleet.Spawner`).
             spawner: module(),
-            # Résout le pod_id du gatekeeper permanent (`nil` si non booté → fail-loud).
+            # Resolves the permanent gatekeeper's pod_id (`nil` if not booted → fail-loud).
             gatekeeper_pod_id_fun: (-> any()),
-            # Recovery de wake (respawn au 1er échec, escalade starfleet au 2e) ; `nil` → défaut.
+            # Wake recovery (respawn on 1st failure, starfleet escalation on 2nd); `nil` → default.
             wake_recovery: (... -> any()) | nil
           }
   end
 
   @doc """
-  Convocation forge-driven du gatekeeper sur escalade de gate. Enqueue un brief d'éval au
-  gatekeeper PERMANENT (adressé par `pod_id`), kicke (best-effort), et rend le `correlation_id`
-  (= task.id) pour la corrélation `task_queue.work_item.completed`. Pas de gatekeeper booté /
-  enqueue raté → `{:error, _}` (l'appelant fail-loud ; jamais un pass silencieux).
+  Forge-driven summoning of the gatekeeper on gate escalation. Enqueues an eval brief to the
+  PERMANENT gatekeeper (addressed by `pod_id`), kicks (best-effort), and returns the `correlation_id`
+  (= task.id) for the `task_queue.work_item.completed` correlation. No booted gatekeeper /
+  failed enqueue → `{:error, _}` (the caller fail-louds; never a silent pass).
 
-  `outputs`/`payload`/`n`/`role` sont EMBARQUÉS dans le metadata de la tâche d'éval (contexte de
-  reprise auto-descriptif) : le StepRunConsumer redémarré (gate_evals RAM vide) reconstruit
-  l'eval_ctx du metadata au lieu de jeter le verdict en silence.
+  `outputs`/`payload`/`n`/`role` are EMBEDDED in the metadata of the eval task (self-describing
+  resumption context): the restarted StepRunConsumer (empty gate_evals RAM) rebuilds
+  the eval_ctx from the metadata instead of silently dropping the verdict.
   """
   @spec dispatch(
           map(),
@@ -88,16 +88,16 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
             outputs: outputs
           })
 
-        # VERDICT AUTO-DESCRIPTIF : le metadata de la tâche d'éval porte le contexte de REPRISE
-        # (`payload`/`n`/`role` en plus du step/workflow_map_name déjà présents). Cette tâche survit dans le broker
-        # (TaskQueue = autre process) à un crash du StepRunConsumer seul → le verdict (`work_item.completed`) ramène
-        # ce metadata → le StepRunConsumer redémarré (gate_evals RAM vidé) reconstruit l'eval_ctx
-        # (`workflow_map = Loader.load!(workflow_map_name)`) au lieu d'un `{:noreply}` silencieux (issue wedgée à vie). Aucune
-        # NOUVELLE source : `payload` porte déjà `workspace`/`base_sha`/`gate_base_sha` — on l'embarque tel quel.
+        # SELF-DESCRIBING VERDICT: the eval task's metadata carries the RESUMPTION context
+        # (`payload`/`n`/`role` on top of the step/workflow_map_name already present). This task survives in the broker
+        # (TaskQueue = another process) a crash of the StepRunConsumer alone → the verdict (`work_item.completed`) brings
+        # this metadata back → the restarted StepRunConsumer (emptied gate_evals RAM) rebuilds the eval_ctx
+        # (`workflow_map = Loader.load!(workflow_map_name)`) instead of a silent `{:noreply}` (issue wedged forever). No
+        # NEW source: `payload` already carries `workspace`/`base_sha`/`gate_base_sha` — we embed it as-is.
         attrs = %{
-          # Cible d'escalade = le gatekeeper (juge d'exception STRUCTUREL, GATE-D1) — via l'accesseur
-          # UNIQUE `Roles.gatekeeper_role` (config-overridable), plus un littéral épars. Ce n'est PAS
-          # configurable par map : le gatekeeper EST l'escalade (il gère la patate chaude via son SP).
+          # Escalation target = the gatekeeper (STRUCTURAL exception judge, GATE-D1) — via the
+          # SINGLE accessor `Roles.gatekeeper_role` (config-overridable), no scattered literal. It is NOT
+          # configurable per map: the gatekeeper IS the escalation (it handles the hot potato via its SP).
           role: Fleet.Pilot.Roles.gatekeeper_role(),
           brief: brief,
           metadata: %{
@@ -114,12 +114,12 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
 
         case seams.task_queue.enqueue(pod_id, attrs) do
           {:ok, %{id: corr}} ->
-            # Le retour du kick est LOAD-BEARING : si le wake escalade (gatekeeper injoignable →
-            # starfleet) ou échoue, on ne l'AVALE PAS (`_ = kick`). Le brief d'éval EST enqueué (corr
-            # valide) → l'escalade gatekeeper reste légitime ({:escalate, corr, …}) ; mais un kick non
-            # joignable est SURFACÉ (telemetry + warning distinct), pas confondu avec un kick OK. Sans ça,
-            # un gatekeeper jamais réveillé resterait invisible (le verdict ne reviendrait jamais, gate stallée
-            # en silence). `corr` retourné dans les deux cas (le brief survit, le re-wake/escalade le couvre).
+            # The kick's return is LOAD-BEARING: if the wake escalates (gatekeeper unreachable →
+            # starfleet) or fails, we do NOT SWALLOW it (`_ = kick`). The eval brief IS enqueued (valid
+            # corr) → the gatekeeper escalation stays legitimate ({:escalate, corr, …}); but an unreachable
+            # kick is SURFACED (telemetry + distinct warning), not confused with an OK kick. Without this,
+            # a gatekeeper never woken would stay invisible (the verdict would never come back, gate stalled
+            # silently). `corr` returned in both cases (the brief survives, the re-wake/escalation covers it).
             case kick(seams, pod_id) do
               :ok ->
                 {:ok, corr}
@@ -149,11 +149,11 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
     end
   end
 
-  # KICK le gatekeeper après l'enqueue. Pod PERMANENT déjà booté+idle (:monitoring) : son kick-loop de
-  # boot est fini, ce brief arrive APRÈS → sans wake il ne pull jamais (gate qui stalle). Un wake
-  # raté = panne FLEET (pod injoignable), PAS un pb projet → re-roll (reboot du gatekeeper) au 1er fail,
-  # escalade système → starfleet au 2e. Pas de warn-et-oublie ici (le gatekeeper est un juge, pas un
-  # sysadmin : il ne peut rien faire d'une erreur système).
+  # KICK the gatekeeper after the enqueue. PERMANENT pod already booted+idle (:monitoring): its boot
+  # kick-loop is over, this brief arrives AFTER → without a wake it never pulls (stalling gate). A failed
+  # wake = a FLEET failure (unreachable pod), NOT a project problem → re-roll (reboot the gatekeeper) on the 1st fail,
+  # system escalation → starfleet on the 2nd. No warn-and-forget here (the gatekeeper is a judge, not a
+  # sysadmin: it can do nothing with a system error).
   defp kick(seams, pod_id) do
     wake_recovery = seams.wake_recovery || (&Fleet.Pilot.WakeRecovery.wake/3)
 
