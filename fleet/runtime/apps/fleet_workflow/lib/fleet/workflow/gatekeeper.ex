@@ -60,7 +60,12 @@ defmodule Fleet.Workflow.Gatekeeper do
 
   @doc """
   Ensures a permanent gatekeeper is booted + registered (idempotent). No-op if
-  already up (registry or config override) or if autoboot is disabled.
+  already REGISTERED (the `:persistent_term` singleton or a config override) or if autoboot is disabled.
+
+  ⚠ PRESENCE, not liveness (SOC-OTP-002): `{:ok, pod_id}` proves a pod_id is REGISTERED in
+  `:persistent_term`, NOT that the gatekeeper process is ALIVE — a registered-but-DEAD pod no-ops here.
+  For a LIVENESS-aware recovery (reap the ghost holder + de-register + re-boot), use `reboot/1` (the
+  `respawn_fun` of `Fleet.Pilot.WakeRecovery` when the gatekeeper is unreachable).
 
   Seams (tests): `:loader` (default `&Fleet.CapProfile.load/1`), `:spawner`
   (default `&Fleet.Spawner.spawn_pod/3`).
