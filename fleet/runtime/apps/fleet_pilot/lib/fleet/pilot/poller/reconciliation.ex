@@ -1,127 +1,127 @@
 defmodule Fleet.Pilot.Poller.Reconciliation do
   @moduledoc """
-  Cluster IMPUR « réconciliation des verrous orphelins » extrait de `Fleet.Pilot.Poller`.
+  IMPURE "orphaned lock reconciliation" cluster extracted from `Fleet.Pilot.Poller`.
 
-  Un verrou `lcars-in-flight` est ORPHELIN si la brique le porte mais qu'aucun pod vivant ne la
-  travaille. Cause : un pod mort (deadline `:result_timeout`, crash, restart BEAM) reapé par le
-  PodWarden — qui retire le PROCESS mais PAS le label forge. Symétrie cassée → sans réparation le
-  `dispatch_*` skip la brique `:in_flight` POUR TOUJOURS (un seul stall de pod wedge le pipe). Ce
-  module RÉPARE : à chaque tick, il compare les verrous vus sur la forge aux refs qu'un pod VIVANT
-  possède réellement, et réclame (retire le label) les orphelins CONFIRMÉS → le prochain tick
-  re-dispatche.
+  A `lcars-in-flight` lock is ORPHANED if the brick carries it but no live pod is
+  working it. Cause: a dead pod (`:result_timeout` deadline, crash, BEAM restart) reaped by the
+  PodWarden — which removes the PROCESS but NOT the forge label. Broken symmetry → without repair the
+  `dispatch_*` skips the `:in_flight` brick FOREVER (a single pod stall wedges the pipe). This
+  module REPAIRS: at each tick, it compares the locks seen on the forge to the refs that a LIVE pod
+  actually owns, and reclaims (removes the label) the CONFIRMED orphans → the next tick
+  re-dispatches.
 
-  ## Ce que ce module fait / ne fait PAS
+  ## What this module does / does NOT do
 
-  Il LIT 5 seams (`%Seams{}`) et rend le NOUVEAU set de suspects (`MapSet.t()`) — il n'ÉCRIT aucun
-  state du poller. La **grâce 2-tick** (n'accumuler un suspect que sur deux ticks consécutifs) et
-  l'**agrégation cross-repo** (`MapSet.union` des suspects de tous les repos d'un tick) sont de
-  l'état CROSS-TICK : elles RESTENT au cœur (`Fleet.Pilot.Poller` — `do_poll`/`step_do_poll` passe
-  les suspects du tick précédent en `prior_suspects` et ré-écrit le set rendu dans le state).
+  It READS 5 seams (`%Seams{}`) and yields the NEW set of suspects (`MapSet.t()`) — it WRITES no
+  poller state. The **2-tick grace** (only accumulate a suspect over two consecutive ticks) and
+  the **cross-repo aggregation** (`MapSet.union` of the suspects of all the repos of a tick) are
+  CROSS-TICK state: they STAY at the core (`Fleet.Pilot.Poller` — `do_poll`/`step_do_poll` passes
+  the suspects of the previous tick as `prior_suspects` and re-writes the yielded set into the state).
 
-  ## Grâce 2-tick + refs REPO-QUALIFIÉES (sémantique load-bearing, verbatim)
+  ## 2-tick grace + REPO-QUALIFIED refs (load-bearing semantics, verbatim)
 
-  On ne réclame qu'un orphelin CONFIRMÉ : `reconcile/5` intersecte les orphelins vus CE tick avec
-  `prior_suspects` (les orphelins vus au tick PRÉCÉDENT) — jamais un pod fraîchement dispatché (pas
-  encore registré) ou en cours de mort. Les refs de verrou sont REPO-QUALIFIÉES
-  (`{repo, :issue|:pr, n}`) : la clé porte le repo, donc les refs des pods vivants (`owned`, scopées
-  au repo courant) et les suspects cross-tick (tous repos) ne collisionnent plus sur le seul numéro.
-  Un orphelin #N/repoA n'est plus masqué par un pod vivant #N/repoB, et la grâce ne se contamine plus
-  entre repos.
+  We only reclaim a CONFIRMED orphan: `reconcile/5` intersects the orphans seen THIS tick with
+  `prior_suspects` (the orphans seen at the PREVIOUS tick) — never a freshly dispatched pod (not
+  yet registered) or one in the process of dying. The lock refs are REPO-QUALIFIED
+  (`{repo, :issue|:pr, n}`): the key carries the repo, so the refs of the live pods (`owned`, scoped
+  to the current repo) and the cross-tick suspects (all repos) no longer collide on the number alone.
+  An orphan #N/repoA is no longer masked by a live pod #N/repoB, and the grace no longer contaminates
+  across repos.
 
   ## Fail-safe (verbatim)
 
-  Si l'énumération des pods vivants échoue (`live_owned_refs/1 → :error`), on ne réclame RIEN et on
-  garde `prior_suspects` en l'état — ne JAMAIS déverrouiller à l'aveugle.
+  If the enumeration of live pods fails (`live_owned_refs/1 → :error`), we reclaim NOTHING and
+  keep `prior_suspects` as is — NEVER unlock blindly.
 
-  ## Frontière : struct de seams explicite (pas le `state` entier)
+  ## Boundary: explicit seams struct (not the whole `state`)
 
-  Le cluster ne lit que 5 seams du poller (`forge`/`spawner`/`task_queue`/`repo`/`forge_opts`). On
-  NE passe PAS le `state` entier — ce serait une fuite de frontière. Le caller construit un
-  `%Seams{}` (contrat étroit, TYPÉ) : `@enforce_keys` force les 5 champs à l'appel, et un accès
-  `seams.<autre_champ>` ne compile pas (KeyError statique) — une map nue laisserait passer
-  `Map.get(seams, :orphan_lock_suspects)` en silence. Le caller résout les défauts prod
-  (`state.spawner || Fleet.Spawner`, `state.task_queue || Fleet.TaskQueue`) à SON site : le cluster
-  reçoit des modules déjà résolus.
+  The cluster reads only 5 seams of the poller (`forge`/`spawner`/`task_queue`/`repo`/`forge_opts`). We
+  do NOT pass the whole `state` — that would be a boundary leak. The caller builds a
+  `%Seams{}` (narrow, TYPED contract): `@enforce_keys` forces the 5 fields at the call, and an access
+  `seams.<other_field>` does not compile (static KeyError) — a bare map would let
+  `Map.get(seams, :orphan_lock_suspects)` pass silently. The caller resolves the prod defaults
+  (`state.spawner || Fleet.Spawner`, `state.task_queue || Fleet.TaskQueue`) at ITS site: the cluster
+  receives already-resolved modules.
 
-  Dépendances (jamais `Fleet.Pilot.Poller` → pas de cycle) : `Fleet.Pilot.Labels` (source unique du
-  verrou), `Fleet.Pilot.PodId` (format des pod_ids), `Fleet.Pilot.IssueId` (parse issue_id) + les
-  seams injectés (spawner/task_queue/forge).
+  Dependencies (never `Fleet.Pilot.Poller` → no cycle): `Fleet.Pilot.Labels` (single source of the
+  lock), `Fleet.Pilot.PodId` (format of the pod_ids), `Fleet.Pilot.IssueId` (parse issue_id) + the
+  injected seams (spawner/task_queue/forge).
   """
 
   require Logger
 
-  # Verrou workflow_run : source unique `Fleet.Pilot.Labels` (constante compile-time). MÊME source que
-  # le `@in_flight` du cœur `Poller` (qui garde le sien pour le fast-path `classify_issue`) — pas un
-  # fork de littéral, l'autorité reste `Labels.in_flight/0`.
+  # workflow_run lock: single source `Fleet.Pilot.Labels` (compile-time constant). SAME source as
+  # the `@in_flight` of the core `Poller` (which keeps its own for the fast-path `classify_issue`) — not a
+  # fork of a literal, the authority stays `Labels.in_flight/0`.
   @in_flight Fleet.Pilot.Labels.in_flight()
 
   defmodule Seams do
     @moduledoc """
-    Contrat de frontière de la réconciliation : les 5 seams (et RIEN d'autre) que `reconcile/5` lit.
-    `@enforce_keys` force les 5 champs à la construction ; un accès `seams.<autre_champ>` ne compile
-    pas — le cluster ne reçoit jamais le `state` entier du poller. `spawner`/`task_queue` sont déjà
-    RÉSOLUS par le caller (défauts prod `Fleet.Spawner`/`Fleet.TaskQueue` appliqués à son site).
+    Reconciliation boundary contract: the 5 seams (and NOTHING else) that `reconcile/5` reads.
+    `@enforce_keys` forces the 5 fields at construction; an access `seams.<other_field>` does not compile
+    — the cluster never receives the poller's whole `state`. `spawner`/`task_queue` are already
+    RESOLVED by the caller (prod defaults `Fleet.Spawner`/`Fleet.TaskQueue` applied at its site).
     """
     @enforce_keys [:forge, :spawner, :task_queue, :repo, :forge_opts]
     defstruct [:forge, :spawner, :task_queue, :repo, :forge_opts]
 
     @type t :: %__MODULE__{
-            # Client forge injecté (seam `:forge_client`, défaut prod `Fleet.Pilot.ForgeClient`).
+            # Injected forge client (seam `:forge_client`, prod default `Fleet.Pilot.ForgeClient`).
             forge: module(),
-            # Spawner injecté, DÉJÀ résolu par le caller (seam `:spawner`, défaut prod `Fleet.Spawner`).
+            # Injected spawner, ALREADY resolved by the caller (seam `:spawner`, prod default `Fleet.Spawner`).
             spawner: module(),
-            # Broker injecté, DÉJÀ résolu par le caller (seam `:task_queue`, défaut prod `Fleet.TaskQueue`).
+            # Injected broker, ALREADY resolved by the caller (seam `:task_queue`, prod default `Fleet.TaskQueue`).
             task_queue: module(),
-            # `owner/name` du repo courant (les refs de verrou y sont repo-qualifiées).
+            # `owner/name` of the current repo (the lock refs are repo-qualified there).
             repo: String.t(),
-            # Opts forge (base_url/token…) passés au ForgeClient (`remove_label`).
+            # Forge opts (base_url/token…) passed to the ForgeClient (`remove_label`).
             forge_opts: keyword()
           }
   end
 
   @doc """
-  Réconcilie les verrous `lcars-in-flight` orphelins du repo `seams.repo` et rend le NOUVEAU set de
-  suspects (`MapSet.t()` de refs repo-qualifiées `{repo, :issue|:pr, n}`).
+  Reconciles the orphaned `lcars-in-flight` locks of the repo `seams.repo` and yields the NEW set of
+  suspects (`MapSet.t()` of repo-qualified refs `{repo, :issue|:pr, n}`).
 
-  `prior_suspects` = les orphelins vus au tick PRÉCÉDENT (grâce 2-tick, portée par le cœur). Effet de
-  bord : retire le label forge (`reclaim_lock/2`) des orphelins CONFIRMÉS (vus les deux ticks). Le
-  set rendu = les orphelins de CE tick pas encore réclamés (ceux qui attendent leur 2ᵉ confirmation).
+  `prior_suspects` = the orphans seen at the PREVIOUS tick (2-tick grace, carried by the core). Side
+  effect: removes the forge label (`reclaim_lock/2`) of the CONFIRMED orphans (seen at both ticks). The
+  yielded set = the orphans of THIS tick not yet reclaimed (those awaiting their 2nd confirmation).
 
-  Fail-safe : si l'énumération des pods échoue (`:error`), rend `prior_suspects` inchangé (ne réclame
-  rien à l'aveugle).
+  Fail-safe: if the enumeration of the pods fails (`:error`), yields `prior_suspects` unchanged (reclaims
+  nothing blindly).
   """
   @spec reconcile(list(map()), list(map()), MapSet.t(), MapSet.t(), Seams.t()) :: MapSet.t()
   def reconcile(issues, pulls, pr_issue_ids, prior_suspects, %Seams{} = seams) do
     case live_owned_refs(seams) do
-      # Énumération des pods indisponible → fail-safe : on ne réclame RIEN (ne jamais déverrouiller
-      # à l'aveugle), on garde les suspects en l'état.
+      # Pod enumeration unavailable → fail-safe: we reclaim NOTHING (never unlock
+      # blindly), we keep the suspects as is.
       :error ->
         prior_suspects
 
       owned ->
         repo = seams.repo
 
-        # NB (leçon 2026-07-07) : on NE dérive PAS le verrou PR de la propriété de l'ISSUE. Tentation
-        # naïve : « une PR dont l'issue parente est possédée est possédée aussi » (pour couvrir un
-        # producteur project-scoped en rework qui tient le verrou PR mais dont le pod ne dérive que
-        # l'issue). MAIS `pod_status` rend `:completed` (fenêtre de publication → `pod_has_active_task?`
-        # compte `:completed` comme actif, correct pour le verrou-ISSUE) : un engineer LIVRÉ (`:completed`,
-        # en review) « possède » encore son issue → il protégerait alors le verrou PR d'un JUGE MORT
-        # (le verrou PR en review appartient au juge, pas au producteur) → juge jamais re-dispatché = MUR
-        # (vu live martine-o-matic PR#2). Le churn du verrou PR pendant un VRAI rework producteur est
-        # mineur et s'auto-guérit (serialize `:role_busy` empêche le double-spawn) — on l'accepte plutôt
-        # que de masquer les orphelins de juge. Un fix propre (set strict `@active_states`, hors
-        # `:completed`) demande un repro de rework — différé, pas d'astuce sous pression.
+        # NB (lesson 2026-07-07): we do NOT derive the PR lock from the ownership of the ISSUE. Naive
+        # temptation: "a PR whose parent issue is owned is owned too" (to cover a
+        # project-scoped producer in rework that holds the PR lock but whose pod only derives
+        # the issue). BUT `pod_status` yields `:completed` (publication window → `pod_has_active_task?`
+        # counts `:completed` as active, correct for the ISSUE-lock): a DELIVERED engineer (`:completed`,
+        # in review) still "owns" its issue → it would then protect the PR lock of a DEAD JUDGE
+        # (the PR lock in review belongs to the judge, not the producer) → judge never re-dispatched = WALL
+        # (seen live martine-o-matic PR#2). The churn of the PR lock during a REAL producer rework is
+        # minor and self-heals (serialize `:role_busy` prevents the double-spawn) — we accept it rather
+        # than masking the judge orphans. A clean fix (strict `@active_states` set, excluding
+        # `:completed`) requires a rework repro — deferred, no trick under pressure.
 
-        # Orphelins REPO-QUALIFIÉS (`{repo, :issue|:pr, n}`) : la clé de verrou porte le repo, donc
-        # `owned` (refs repo-scopées des pods vivants de CE repo) et `prior_suspects` (cross-tick, tous
-        # repos) ne collisionnent plus sur le seul numéro. Un orphelin #N/repoA n'est plus masqué par un
-        # pod vivant #N/repoB, et la grâce 2-tick ne se contamine plus entre repos.
+        # REPO-QUALIFIED orphans (`{repo, :issue|:pr, n}`): the lock key carries the repo, so
+        # `owned` (repo-scoped refs of the live pods of THIS repo) and `prior_suspects` (cross-tick, all
+        # repos) no longer collide on the number alone. An orphan #N/repoA is no longer masked by a
+        # live pod #N/repoB, and the 2-tick grace no longer contaminates across repos.
         issue_orphans =
           for i <- issues,
               n = i["number"],
               locked?(i),
-              # une issue avec PR ouverte est en phase JUGE (verrou côté PR) → pas un orphelin issue
+              # an issue with an open PR is in JUDGE phase (lock on the PR side) → not an issue orphan
               not MapSet.member?(pr_issue_ids, n),
               not MapSet.member?(owned, {repo, :issue, n}),
               into: MapSet.new(),
@@ -142,24 +142,24 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     end
   end
 
-  # Refs `{repo, :issue|:pr, n}` qu'un pod travaille RÉELLEMENT, dérivées des pod_ids déterministes STABLES
-  # (`<repo-slug>-issue-<n>-<role>` / `<repo-slug>-pr-<n>-<role>` ; pas de suffixe timestamp).
-  # Filtre par **tâche active** (TaskQueue) : un verrou n'est légitimement tenu QUE pendant qu'un pod a une
-  # tâche active dessus. Un pod VIVANT mais IDLE (long-lived entre deux reworks, ex. l'engineer) ne « possède »
-  # PAS le verrou — sinon il masquerait un juge MORT et la réconciliation ne réclamerait jamais (wedge).
-  # `:error` si l'énumération échoue (fail-safe : on ne réclame rien à l'aveugle).
+  # Refs `{repo, :issue|:pr, n}` that a pod is REALLY working, derived from the deterministic STABLE pod_ids
+  # (`<repo-slug>-issue-<n>-<role>` / `<repo-slug>-pr-<n>-<role>`; no timestamp suffix).
+  # Filters by **active task** (TaskQueue): a lock is legitimately held ONLY while a pod has an active
+  # task on it. A LIVE but IDLE pod (long-lived between two reworks, e.g. the engineer) does NOT "own"
+  # the lock — otherwise it would mask a DEAD judge and the reconciliation would never reclaim (wedge).
+  # `:error` if the enumeration fails (fail-safe: we reclaim nothing blindly).
   #
-  # SCOPE REPO : on ne garde QUE les pods de `seams.repo` (préfixe `PodId.scope_prefix/1`), et la ref
-  # rendue PORTE le repo (`{repo, :issue|:pr, n}`). Sans ça, un pod vivant #N/repoB « posséderait » la ref
-  # `{:issue, N}` globale → il MASQUERAIT l'orphelin #N/repoA (verrou jamais réclamé = wedge) ET la grace
-  # 2-tick se contaminerait cross-repo (double-spawn). La clé de verrou REPO-QUALIFIÉE = l'identité réelle.
+  # REPO SCOPE: we keep ONLY the pods of `seams.repo` (prefix `PodId.scope_prefix/1`), and the ref
+  # yielded CARRIES the repo (`{repo, :issue|:pr, n}`). Without this, a live pod #N/repoB would "own" the global
+  # ref `{:issue, N}` → it would MASK the orphan #N/repoA (lock never reclaimed = wedge) AND the 2-tick
+  # grace would contaminate cross-repo (double-spawn). The REPO-QUALIFIED lock key = the real identity.
   #
-  # G1 — une brique sous ÉVAL GATEKEEPER est possédée AUSSI : pendant l'éval (un tour claude = minutes),
-  # le pod PRODUCTEUR est fini (mort one-shot ou idle) et le GATEKEEPER porte la tâche d'éval sous un
-  # pod_id `permanent-*` (aucun slug repo) → sans `gate_eval_owned_refs`, la ref paraissait orpheline et
-  # la grâce 2-tick (~60s) la RÉCLAMAIT en pleine éval → re-dispatch du step concurrent (double
-  # workflow_run + verdict fantôme au retour). L'union se fait DANS le try : un échec d'énumération des
-  # évals fait `:error` → le fail-safe « ne rien réclamer » couvre les deux sources.
+  # G1 — a brick under GATEKEEPER EVAL is owned TOO: during the eval (a claude turn = minutes),
+  # the PRODUCER pod is done (dead one-shot or idle) and the GATEKEEPER carries the eval task under a
+  # pod_id `permanent-*` (no repo slug) → without `gate_eval_owned_refs`, the ref looked orphaned and
+  # the 2-tick grace (~60s) RECLAIMED it in the middle of the eval → re-dispatch of the concurrent step (double
+  # workflow_run + ghost verdict on return). The union is done INSIDE the try: a failure to enumerate the
+  # evals makes `:error` → the fail-safe "reclaim nothing" covers both sources.
   defp live_owned_refs(%Seams{spawner: spawner, task_queue: tq, repo: repo}) do
     pod_refs =
       spawner.list_pods()
@@ -174,16 +174,16 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     _, _ -> :error
   end
 
-  # G1 — refs possédées par les ÉVALS GATEKEEPER ACTIVES du broker. La source de vérité existe déjà :
-  # la tâche d'éval (MA-03, metadata auto-descriptif) porte `gate_eval: true` + `resume_n` (n° d'issue)
-  # + `resume_payload.repository.full_name` (repo — multi-projet : une éval de repoB ne possède PAS une
-  # ref de repoA). États ACTIFS seulement (`TaskQueue.list_active`) : une éval `:cleared` (clobbée par
-  # un supersede à l'enqueue — MA-27 borne à 1 work item actif/pod) ou `:completed` (verdict rendu,
-  # resume en vol — fenêtre couverte par la grâce 2-tick) ne possède PLUS sa ref → le reclaim reprend
-  # la main et le re-dispatch ré-escalade (self-heal borné par le budget rework). Les évals portent sur
-  # des ISSUES (les juges PR passent par dispatch_review, sans gate) → refs `{repo, :issue, n}`.
-  # `function_exported?` : un stub task_queue sans `list_active` → MapSet vide (conservateur, même
-  # pattern que `pod_active_issue_id` — ne masque rien qu'il ne connaît pas).
+  # G1 — refs owned by the ACTIVE GATEKEEPER EVALS of the broker. The source of truth already exists:
+  # the eval task (MA-03, self-describing metadata) carries `gate_eval: true` + `resume_n` (issue number)
+  # + `resume_payload.repository.full_name` (repo — multi-project: an eval of repoB does NOT own a
+  # ref of repoA). ACTIVE states only (`TaskQueue.list_active`): an eval `:cleared` (clobbered by
+  # a supersede at enqueue — MA-27 bounds to 1 active work item/pod) or `:completed` (verdict rendered,
+  # resume in flight — window covered by the 2-tick grace) no longer owns its ref → the reclaim takes
+  # back control and the re-dispatch re-escalates (self-heal bounded by the rework budget). The evals are on
+  # ISSUES (the PR judges go through dispatch_review, without a gate) → refs `{repo, :issue, n}`.
+  # `function_exported?`: a task_queue stub without `list_active` → empty MapSet (conservative, same
+  # pattern as `pod_active_issue_id` — masks nothing it does not know).
   defp gate_eval_owned_refs(tq, repo) do
     if function_exported?(tq, :list_active, 0) do
       for %{metadata: meta} <- tq.list_active(),
@@ -198,10 +198,10 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     end
   end
 
-  # Refs qu'un pod ACTIF possede. Per-issue (instance) : derivees du pod_id (`-issue-N-` / `-pr-N-`).
-  # SLOT-FREEZE — project pipe (pod_id `<repo>-engineer`, AUCUN `-issue-N-`) : parse_pod_ref rend [] (son
-  # id n'encode pas la brique), donc on derive la brique de sa TACHE ACTIVE (`issue_id` = `issue-N`).
-  # Sinon le poller croit l'eng resident proprietaire d'AUCUN verrou -> reclame le sien -> boucle.
+  # Refs that an ACTIVE pod owns. Per-issue (instance): derived from the pod_id (`-issue-N-` / `-pr-N-`).
+  # SLOT-FREEZE — project pipe (pod_id `<repo>-engineer`, NO `-issue-N-`): parse_pod_ref yields [] (its
+  # id does not encode the brick), so we derive the brick from its ACTIVE TASK (`issue_id` = `issue-N`).
+  # Otherwise the poller thinks the resident eng owns NO lock -> reclaims its own -> loops.
   defp owned_refs_for_pod(pod_id, repo, tq) do
     case parse_pod_ref(pod_id, repo) do
       [] -> project_pod_owned_refs(pod_id, repo, tq)
@@ -209,9 +209,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     end
   end
 
-  # Un pod project-scoped de CE repo (prefixe scope) possede la ref de sa tache active (`issue-N` ->
-  # {repo, :issue, N}). Garde le SCOPE repo : un eng d'un autre repo ne possede pas une ref de seams.repo.
-  # function_exported? : un stub task_queue sans la fn -> [] (conservateur, ne masque rien).
+  # A project-scoped pod of THIS repo (scope prefix) owns the ref of its active task (`issue-N` ->
+  # {repo, :issue, N}). Keeps the repo SCOPE: an eng of another repo does not own a ref of seams.repo.
+  # function_exported?: a task_queue stub without the fn -> [] (conservative, masks nothing).
   defp project_pod_owned_refs(pod_id, repo, tq) do
     with true <- String.starts_with?(pod_id, Fleet.Pilot.PodId.scope_prefix(repo)),
          true <- function_exported?(tq, :pod_active_issue_id, 1),
@@ -227,8 +227,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     _, _ -> []
   end
 
-  # Un pod a-t-il une tâche ACTIVE (assignée, non close) ? `{:ok, nil}` = idle. Tolérant (toute
-  # anomalie → `false` : un pod dont on ne peut établir l'activité ne masque pas un orphelin).
+  # Does a pod have an ACTIVE task (assigned, not closed)? `{:ok, nil}` = idle. Tolerant (any
+  # anomaly → `false`: a pod whose activity cannot be established does not mask an orphan).
   defp pod_has_active_task?(tq, pod_id) when is_binary(pod_id) do
     case tq.pod_status(pod_id) do
       {:ok, nil} -> false
@@ -243,12 +243,12 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   defp pod_has_active_task?(_tq, _), do: false
 
-  # Refs de verrou qu'un pod d'INSTANCE possede, deduites de son pod_id. Le FORMAT (`issue|pr` + numero)
-  # vit dans `Fleet.Pilot.PodId.parse_ref/2` (l'autorite qui le construit) ; ici on ne fait que SCOPER au
-  # repo courant et habiller la ref. Effet du scope : un pod d'un AUTRE repo rend `:error` (son slug
-  # differe) -> il ne « possede » pas une ref de `seams.repo` -> fin du masquage cross-repo (#N/repoB
-  # masquant l'orphelin #N/repoA). La ref rendue PORTE le repo (`{repo, :issue|:pr, n}`) = la cle complete
-  # (l'identite reelle du verrou).
+  # Lock refs that an INSTANCE pod owns, deduced from its pod_id. The FORMAT (`issue|pr` + number)
+  # lives in `Fleet.Pilot.PodId.parse_ref/2` (the authority that builds it); here we only SCOPE to the
+  # current repo and dress the ref. Effect of the scope: a pod of ANOTHER repo yields `:error` (its slug
+  # differs) -> it does not "own" a ref of `seams.repo` -> end of the cross-repo masking (#N/repoB
+  # masking the orphan #N/repoA). The ref yielded CARRIES the repo (`{repo, :issue|:pr, n}`) = the complete key
+  # (the real identity of the lock).
   defp parse_pod_ref(pod_id, repo) when is_binary(pod_id) and is_binary(repo) do
     case Fleet.Pilot.PodId.parse_ref(pod_id, repo) do
       {:ok, {phase, n}} -> [{repo, phase, n}]
@@ -268,13 +268,13 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
         "#{repo}##{number} (pod mort sans complétion) → réclamé (re-dispatch au prochain tick)"
     )
 
-    # Stopwatch : arrêté AUSSI ici (pod mort = jamais passé par `unlock`) — sinon il tournerait jusqu'au
-    # prochain unlock réel, comptant le temps mort comme du travail. Best-effort, symétrique du spawn —
-    # MAIS signé forge_opts BRUT (système), PAS `as_role` : le pod mort a EMPORTÉ son identité de rôle
-    # (aucune trace exploitable à ce point, orphelin = plus aucun pod vivant à interroger). Gitea exige
-    # la MÊME identité pour stop que pour start (per-utilisateur) → CE stop ne matchera PAS le stopwatch
-    # démarré `as_role` par le pod mort (limite connue, assumée : cas d'échec pod, pas le chemin nominal
-    # — cf. `Fleet.Pilot.StepDispatcher.Spawn`/`StepRunCompleter.unlock` pour l'attribution nominale).
+    # Stopwatch: stopped ALSO here (dead pod = never went through `unlock`) — otherwise it would run until
+    # the next real unlock, counting the dead time as work. Best-effort, symmetric to the spawn —
+    # BUT signed with RAW forge_opts (system), NOT `as_role`: the dead pod TOOK its role identity with it
+    # (no usable trace at this point, orphan = no live pod left to query). Gitea requires
+    # the SAME identity to stop as to start (per-user) → THIS stop will NOT match the stopwatch
+    # started `as_role` by the dead pod (known limit, assumed: pod failure case, not the nominal path
+    # — cf. `Fleet.Pilot.StepDispatcher.Spawn`/`StepRunCompleter.unlock` for the nominal attribution).
     _ = forge.stop_stopwatch(repo, number, forge_opts)
     forge.remove_label(repo, number, @in_flight, forge_opts)
   end

@@ -1,29 +1,29 @@
 defmodule Fleet.Pilot.Poller.Backoff do
   @moduledoc """
-  Timing du poller (extrait de `Fleet.Pilot.Poller`) : jitter anti thundering-herd +
-  backoff exponentiel capé. Calcul PUR (modulo `:rand` pour le jitter) — aucun seam,
-  aucun état : le GenServer garde l'EFFET (`Process.send_after`) et le rescue de boucle
-  (`safe_poll`), ce module ne rend que le DÉLAI.
+  Poller timing (extracted from `Fleet.Pilot.Poller`): anti thundering-herd jitter +
+  capped exponential backoff. PURE computation (modulo `:rand` for the jitter) — no seam,
+  no state: the GenServer keeps the EFFECT (`Process.send_after`) and the loop rescue
+  (`safe_poll`), this module only yields the DELAY.
 
-  ## Pourquoi ces deux mécanismes (port v1.5 `LcarsFleetPoller`, conservé)
+  ## Why these two mechanisms (port from v1.5 `LcarsFleetPoller`, retained)
 
-    * **Jitter ±10 %** — N daemons qui redémarrent ensemble ne doivent pas marteler la
-      forge en phase (anti thundering-herd). Plancher 1 s (jamais de délai nul/négatif).
-    * **Backoff exponentiel** sur erreurs (×2 par tick en échec, capé à 5 min) — la
-      forge down n'inonde ni les logs ni l'API. Le streak vient du state du poller
-      (erreurs de LISTE, mais aussi erreurs de DISPATCH per-item : backoff partiel).
+    * **Jitter ±10 %** — N daemons that restart together must not hammer the
+      forge in phase (anti thundering-herd). 1 s floor (never a null/negative delay).
+    * **Exponential backoff** on errors (×2 per failed tick, capped at 5 min) — a
+      forge that is down floods neither the logs nor the API. The streak comes from the poller's state
+      (LIST errors, but also per-item DISPATCH errors: partial backoff).
   """
 
-  # Cap du backoff : la forge down ne pousse jamais l'attente au-delà de 5 min
-  # (au retour de la forge, on re-poll vite).
+  # Backoff cap: a forge that is down never pushes the wait beyond 5 min
+  # (when the forge comes back, we re-poll quickly).
   @max_backoff_ms 300_000
-  # Amplitude du jitter (±10 % de l'interval).
+  # Jitter amplitude (±10 % of the interval).
   @jitter_ratio 0.1
 
   @doc """
-  Délai du prochain tick : interval nominal jitté si le streak d'erreurs est nul,
-  sinon backoff exponentiel `base × 2^min(streak, 10)` capé à #{@max_backoff_ms} ms,
-  puis jitté.
+  Delay of the next tick: nominal interval jittered if the error streak is zero,
+  otherwise exponential backoff `base × 2^min(streak, 10)` capped at #{@max_backoff_ms} ms,
+  then jittered.
   """
   @spec next_delay(non_neg_integer(), pos_integer()) :: pos_integer()
   def next_delay(0, base_ms), do: jitter(base_ms)
@@ -35,16 +35,16 @@ defmodule Fleet.Pilot.Poller.Backoff do
   end
 
   @doc """
-  Jitter ±#{trunc(@jitter_ratio * 100)} % autour de `ms`, plancher 1 s (un délai jitté
-  ne descend jamais sous 1 000 ms — pas de busy-poll accidentel sur petit interval).
+  Jitter ±#{trunc(@jitter_ratio * 100)} % around `ms`, 1 s floor (a jittered delay
+  never drops below 1 000 ms — no accidental busy-poll on a small interval).
   """
   @spec jitter(pos_integer()) :: pos_integer()
   def jitter(ms) when is_integer(ms) and ms > 0 do
     delta = trunc(ms * @jitter_ratio)
     offset = :rand.uniform(2 * delta + 1) - delta - 1
 
-    # Clamp explicite (≡ `max(ms + offset, 1_000)`) : le guard de range permet à dialyzer de
-    # PROUVER le retour pos_integer (le BIF `max/2` rend l'union des deux args → integer()).
+    # Explicit clamp (≡ `max(ms + offset, 1_000)`): the range guard lets dialyzer
+    # PROVE the pos_integer return (the BIF `max/2` yields the union of the two args → integer()).
     case ms + offset do
       jittered when jittered >= 1_000 -> jittered
       _ -> 1_000
