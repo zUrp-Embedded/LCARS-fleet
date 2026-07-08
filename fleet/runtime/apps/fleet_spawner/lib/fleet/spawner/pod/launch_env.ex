@@ -252,7 +252,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     with {:ok, home} <- passwd_home(user),
          link = Path.join([home, ".local", "bin", "claude"]),
          true <- File.exists?(link) do
-      case System.cmd("readlink", ["-f", link], stderr_to_stdout: true) do
+      case cmd_with_timeout("readlink", ["-f", link]) do
         {out, 0} -> String.trim(out)
         _ -> link
       end
@@ -267,7 +267,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
 
   # `user`'s home via `getent passwd` (field 6, 0-indexed 5). `{:ok, home}` | `:error`.
   defp passwd_home(user) do
-    case System.cmd("getent", ["passwd", user], stderr_to_stdout: true) do
+    case cmd_with_timeout("getent", ["passwd", user]) do
       {line, 0} ->
         case String.split(String.trim(line), ":") do
           fields when length(fields) >= 6 -> {:ok, Enum.at(fields, 5)}
@@ -281,5 +281,29 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     _ -> :error
   catch
     _, _ -> :error
+  end
+
+  # `System.cmd` has NO native timeout: a network-backed NSS (`getent passwd` over LDAP/SSSD) or a
+  # pathological `readlink` could HANG the whole pod spawn indefinitely (SOC-EFF-001). Run it in a bounded
+  # Task: on timeout, brutal-kill the Task → the Port closes → the OS process is SIGKILLed, and return a
+  # non-`{_, 0}` sentinel so the caller's existing fallback fires. `System.cmd` is wrapped in try INSIDE
+  # the Task so a raise (command absent) never crashes the linked caller.
+  @cmd_timeout_ms 5_000
+  defp cmd_with_timeout(cmd, args) do
+    task =
+      Task.async(fn ->
+        try do
+          System.cmd(cmd, args, stderr_to_stdout: true)
+        rescue
+          _ -> {"", 124}
+        catch
+          _, _ -> {"", 124}
+        end
+      end)
+
+    case Task.yield(task, @cmd_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      _ -> {"", 124}
+    end
   end
 end
