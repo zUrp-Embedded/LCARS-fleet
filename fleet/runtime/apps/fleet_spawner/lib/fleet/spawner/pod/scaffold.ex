@@ -94,8 +94,18 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           # Composed CLAUDE.md (pod-identity + repo conventions) at the root of the CWD (workspace):
           # the agent pops into an already-documented project. The :projecting state writes it at the
           # pod_dir (parent); with cwd=workspace it must be INSIDE the cwd (otherwise the agent codes
-          # without its codebase-doc in cwd).
-          _ = File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md"))
+          # without its codebase-doc in cwd). Load-bearing → a copy FAILURE is LOUD (was silently `_ =`),
+          # not fatal (the pod still launches; the doc-in-cwd is a degradation, not a HALT).
+          case File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md")) do
+            :ok ->
+              :ok
+
+            {:error, reason} ->
+              Logger.warning(
+                "pod #{state.pod_id} CLAUDE.md → workspace copy FAILED (#{inspect(reason)}) — " <>
+                  "the agent's cwd lacks its codebase-doc (pod-identity + repo conventions)"
+              )
+          end
 
           Logger.info(
             "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})" <>
