@@ -87,7 +87,7 @@ defmodule Fleet.API.Readiness do
     else
       probe("event.registry", :degraded, %{
         authorized_types: 0,
-        note: "registry vide — validation broadcast OFF (escape-hatch boot)"
+        note: "empty registry — broadcast validation OFF (boot escape-hatch)"
       })
     end
   end
@@ -117,7 +117,7 @@ defmodule Fleet.API.Readiness do
     if backend == Fleet.Starfleet.CoordBackend.NotWiredYet do
       probe("coord.backend", :degraded, %{
         backend: inspect(backend),
-        note: "NotWiredYet/absent — escalades Cat 5 audit-only silencieuses"
+        note: "NotWiredYet/absent — silent audit-only Cat 5 escalations"
       })
     else
       probe("coord.backend", :operational, %{backend: inspect(backend)})
@@ -136,7 +136,7 @@ defmodule Fleet.API.Readiness do
     if backend == Fleet.Starfleet.Shutdown.NoOpDispatcher do
       probe("shutdown.dispatcher", :degraded, %{
         backend: "NoOpDispatcher",
-        note: "drain NoOp (AggregateDispatcher non câblé) — 0 in-flight, drain immédiat"
+        note: "NoOp drain (AggregateDispatcher not wired) — 0 in-flight, immediate drain"
       })
     else
       probe("shutdown.dispatcher", :operational, %{backend: inspect(backend)})
@@ -155,12 +155,12 @@ defmodule Fleet.API.Readiness do
 
     cond do
       is_nil(backend) ->
-        probe("launch.backend", :degraded, %{backend: "nil", note: "non configuré"})
+        probe("launch.backend", :degraded, %{backend: "nil", note: "not configured"})
 
       backend == Fleet.Spawner.LaunchBackend.StubBackend ->
         probe("launch.backend", :degraded, %{
           backend: "StubBackend",
-          note: "backend inerte (test/non-prod) — aucun spawn réel"
+          note: "inert backend (test/non-prod) — no real spawn"
         })
 
       true ->
@@ -196,7 +196,7 @@ defmodule Fleet.API.Readiness do
           Map.put(
             detail,
             :note,
-            "substrat socket vivant mais mcp_server_spec absent (pods non câblés)"
+            "socket substrate alive but mcp_server_spec absent (pods not wired)"
           )
         )
 

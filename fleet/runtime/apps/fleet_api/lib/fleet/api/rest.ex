@@ -104,7 +104,7 @@ defmodule Fleet.API.Rest do
           conn,
           422,
           Jason.encode!(%{
-            error: "champs non autorisés sur /api/admin/spawn",
+            error: "unauthorized fields on /api/admin/spawn",
             forbidden: Enum.sort(fields)
           })
         )
@@ -114,7 +114,7 @@ defmodule Fleet.API.Rest do
           conn,
           422,
           Jason.encode!(%{
-            error: "pod_id invalide (attendu [A-Za-z0-9._-], sans '..')",
+            error: "invalid pod_id (expected [A-Za-z0-9._-], no '..')",
             value: inspect(value)
           })
         )
@@ -125,9 +125,9 @@ defmodule Fleet.API.Rest do
           conn,
           422,
           Jason.encode!(%{
-            error: "brief requis (cap-profile one-shot)",
+            error: "brief required (one-shot cap-profile)",
             reason:
-              "lifetime_scope one-shot sans `brief` : le pod partirait sans travail (R18). Fournir `brief`."
+              "one-shot lifetime_scope without `brief`: the pod would leave with no work (R18). Provide `brief`."
           })
         )
 
@@ -136,7 +136,7 @@ defmodule Fleet.API.Rest do
         send_resp(
           conn,
           400,
-          ~s|{"error":"cap_profile_name (ou role) requis"}|
+          ~s|{"error":"cap_profile_name (or role) required"}|
         )
 
       {:error, {:cap_profile, name, reason}} ->
@@ -145,7 +145,7 @@ defmodule Fleet.API.Rest do
         send_resp(
           conn,
           422,
-          Jason.encode!(%{error: "cap_profile inconnu : #{name}", reason: inspect(reason)})
+          Jason.encode!(%{error: "unknown cap_profile: #{name}", reason: inspect(reason)})
         )
 
       {:error, {:host_native_forbidden, name}} ->
@@ -155,9 +155,9 @@ defmodule Fleet.API.Rest do
           conn,
           422,
           Jason.encode!(%{
-            error: "cap_profile host-native interdit via /api/admin/spawn : #{name}",
+            error: "host-native cap_profile forbidden via /api/admin/spawn: #{name}",
             reason:
-              "containment != bwrap — le host-native passe par sa voie dédiée, pas l'API spawn"
+              "containment != bwrap — host-native goes through its dedicated path, not the spawn API"
           })
         )
     end
