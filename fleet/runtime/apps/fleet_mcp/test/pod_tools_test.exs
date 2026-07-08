@@ -418,6 +418,21 @@ defmodule Fleet.MCP.PodToolsTest do
 
       refute_received {:create_issue, _, _, _, _}
     end
+
+    test "R2-03 : `project` non-vide mais mal formé (pas owner/name) → {:invalid_project_ref} au bord" do
+      pod = uniq("pod-arch")
+
+      # sans slash, 3 composants, partie vide, ou espace → rejetés AVANT tout appel forge/gate
+      for bad <- ["justname", "a/b/c", "owner/", "/name", "own er/name"] do
+        assert {:error, {:invalid_project_ref, _}, _} =
+                 PodTools.handle_tool_call(
+                   "create_issue",
+                   %{"title" => "T", "brief" => "X", "project" => bad},
+                   pod_state(pod)
+                 ),
+               "project #{inspect(bad)} devrait être rejeté"
+      end
+    end
   end
 
   # ============================================================

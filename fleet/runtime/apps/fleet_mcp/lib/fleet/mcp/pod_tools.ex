@@ -228,9 +228,15 @@ defmodule Fleet.MCP.PodTools do
         state
       )
       when is_binary(title) and is_binary(brief) and is_binary(repo) and repo != "" do
-    case Delegation.create_issue(repo, title, brief, state) do
-      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
-      {:error, reason} -> {:error, reason, state}
+    if valid_repo_ref?(repo) do
+      case Delegation.create_issue(repo, title, brief, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_project_ref, "`project` must be an `owner/name` repo (got #{inspect(repo)})"},
+       state}
     end
   end
 
@@ -263,9 +269,15 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("import_project", %{"full_name" => full_name}, state)
       when is_binary(full_name) and full_name != "" do
-    case Delegation.import_project(full_name, state) do
-      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
-      {:error, reason} -> {:error, reason, state}
+    if valid_repo_ref?(full_name) do
+      case Delegation.import_project(full_name, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_full_name,
+        "`full_name` must be an `owner/name` repo (got #{inspect(full_name)})"}, state}
     end
   end
 
@@ -279,9 +291,15 @@ defmodule Fleet.MCP.PodTools do
         state
       )
       when is_integer(number) and is_binary(repo) and repo != "" do
-    case Delegation.issue_status(repo, number, state) do
-      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
-      {:error, reason} -> {:error, reason, state}
+    if valid_repo_ref?(repo) do
+      case Delegation.issue_status(repo, number, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_project_ref, "`project` must be an `owner/name` repo (got #{inspect(repo)})"},
+       state}
     end
   end
 
@@ -303,5 +321,15 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call(_unknown, _arguments, state) do
     {:error, :unknown_tool, state}
+  end
+
+  # A forge repo ref is a gitea `owner/name` full-name (R2-03): exactly one `/`, both sides non-empty and
+  # whitespace-free. A guardrail that rejects a manifestly-broken ref EARLY with a clear error (before the
+  # forge call fails obscurely) — NOT the full gitea naming authority, same spirit as `Fleet.Workflow.GitRef`.
+  defp valid_repo_ref?(ref) when is_binary(ref) do
+    case String.split(ref, "/") do
+      [owner, name] -> owner != "" and name != "" and not String.match?(ref, ~r/\s/)
+      _ -> false
+    end
   end
 end
