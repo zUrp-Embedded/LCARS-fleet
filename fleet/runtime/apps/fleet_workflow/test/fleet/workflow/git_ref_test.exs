@@ -18,4 +18,16 @@ defmodule Fleet.Workflow.GitRefTest do
       refute GitRef.valid?(bad), "ref #{inspect(bad)} devrait être rejetée"
     end
   end
+
+  test "R2-06 : règles git check-ref-format qu'un regex de charset manque" do
+    # trailing /, // (composant vide), trailing ., suffixe .lock, composant commençant par .
+    for bad <- ["foo/", "a//b", "foo.", "foo.lock", "feature/foo.lock", "a/.hidden", "x/"] do
+      refute GitRef.valid?(bad), "ref #{inspect(bad)} devrait être rejetée (git check-ref-format)"
+    end
+
+    # et les refs multi-composants légitimes restent acceptées
+    for ok <- ["deliverables/engineer/m-42", "a/b/c", "release-1.2.3"] do
+      assert GitRef.valid?(ok), "ref #{inspect(ok)} devrait rester valide"
+    end
+  end
 end
