@@ -85,19 +85,18 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
                      500
     end
 
-    test "source dont l'atome canon n'est pas préregistré : escalade NON broadcastée mais LOUD (pas de :ok muet)" do
-      # `starfleet.audit_cat5_bogus_cat5_src` n'a jamais été préregistré → le
-      # `String.to_existing_atom/1` de `broadcast_canon` lève ArgumentError. C'est un
-      # bug de construction de l'event, pas un boot-order : le rescue ne l'avale plus en
-      # silence, il l'émet en Logger.error (sinon une escalade Cat-5 disparaîtrait muette).
-      # `escalate/3` reste :ok (contrat fail-safe), mais AUCUN event canon ne part sur le bus.
+    test "R2-15 : source HORS l'enum Cat 5 → REFUS loud (error) + :ok, PAS de broadcast/effet" do
+      # `:bogus_cat5_src` n'est pas une des 3 sources câblées (DriftMonitor + events.yaml). AVANT R2-15,
+      # `escalate` acceptait tout atom → procédait jusqu'à un broadcast d'un `audit_cat5_<src>` non
+      # enregistré (bug de construction d'event, loud au niveau broadcast). Désormais borné au source-enum :
+      # refus AU BORD (aucun effet de bord bogus : ni AuditLog.write, ni broadcast, ni coord). `escalate/3`
+      # reste :ok (contrat fail-safe), mais LOUD (Logger.error) — jamais un :ok muet.
       log =
         capture_log(fn ->
           assert :ok = Cat5Escalator.escalate(:bogus_cat5_src, %{"pod_id" => "p1"}, "cid-x")
         end)
 
-      assert log =~ "Cat-5 escalation NOT broadcast"
-      assert log =~ "malformed event"
+      assert log =~ "REFUSED unknown Cat 5 source"
       refute_receive %Fleet.Event{source: :starfleet}, 200
     end
   end

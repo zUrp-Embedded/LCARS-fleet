@@ -58,9 +58,14 @@ defmodule Fleet.Starfleet.Cat5Escalator do
   Always `:ok` (audit-only fail-safe: a log-write failure does not interrupt
   the workflow).
   """
+  # Closed enum of Cat 5 sources — the ONLY 3 wired (DriftMonitor emitters + the `starfleet.audit_cat5_*`
+  # keys in events.yaml). An out-of-enum source would synthesize an UNREGISTERED `audit_cat5_<source>`
+  # event (broken broadcast) → escalation `escalate` must bound the source, not accept any atom.
+  @cat5_sources [:pod_drift, :workflow_map_failed, :oauth_refresh_failed]
+
   @spec escalate(source :: atom(), payload :: map(), correlation_id :: String.t() | nil) :: :ok
   def escalate(source, payload, correlation_id)
-      when is_atom(source) and is_map(payload) do
+      when source in @cat5_sources and is_map(payload) do
     chain = (Map.get(payload, "chain") || []) ++ ["starfleet.cat5.#{source}"]
 
     enriched =
@@ -85,6 +90,18 @@ defmodule Fleet.Starfleet.Cat5Escalator do
       :ok -> :ok
       {:error, why} -> Logger.warning("Cat5Escalator: escalation NOT routed (#{inspect(why)})")
     end
+
+    :ok
+  end
+
+  # Out-of-enum source = a producer drift (only DriftMonitor emits, with the 3 wired sources). We do NOT
+  # synthesize a broken `audit_cat5_<source>` broadcast — REFUSE loud, return `:ok` (the `@spec`; a
+  # Cat 5 escalator must never itself crash a caller).
+  def escalate(source, _payload, _correlation_id) when is_atom(source) do
+    Logger.error(
+      "Cat5Escalator: REFUSED unknown Cat 5 source #{inspect(source)} — not in " <>
+        "#{inspect(@cat5_sources)} (producer drift; audit_cat5_<source> would be unregistered)"
+    )
 
     :ok
   end
