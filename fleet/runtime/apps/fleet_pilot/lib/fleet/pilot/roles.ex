@@ -1,12 +1,12 @@
 defmodule Fleet.Pilot.Roles do
   @moduledoc """
-  **Rôles du modèle single-brique** — accesseurs aux rôles de l'atelier (producteur, juges,
-  gatekeeper). Source data UNIQUE = `config/config.exs` ; ce module est l'accesseur UNIQUE (sans lui
-  le défaut serait réécrit en dur dans chaque appelant). Surcharge par projet/test via les opts.
+  **Roles of the single-brick model** — accessors for the workshop's roles (producer, judges,
+  gatekeeper). SINGLE data source = `config/config.exs`; this module is the SINGLE accessor (without it
+  the default would be hard-rewritten in each caller). Override per project/test via the opts.
 
-  Les trois rôles vivent ICI : producteur (`producer_role/1`), jury (`reviewer_roles/1`) et gatekeeper
-  (`gatekeeper_role/1`). `Fleet.Pilot.ProjectOnboard` et `Fleet.Pilot.GatekeeperSeal` délèguent ici
-  (plus aucun défaut `engineer`/`gatekeeper` réécrit chez l'appelant).
+  The three roles live HERE: producer (`producer_role/1`), jury (`reviewer_roles/1`) and gatekeeper
+  (`gatekeeper_role/1`). `Fleet.Pilot.ProjectOnboard` and `Fleet.Pilot.GatekeeperSeal` delegate here
+  (no more `engineer`/`gatekeeper` default rewritten at the caller).
   """
 
   @default_producer_role "engineer"
@@ -14,8 +14,8 @@ defmodule Fleet.Pilot.Roles do
   @default_architect_pod_id "permanent-architect"
 
   @doc """
-  Rôle PRODUCTEUR du modèle single-brique (celui qui code la brique, ex. `engineer`). Override par l'opt
-  `:producer_role` (projet/test) ; sinon config `:fleet_pilot, :producer_role` (défaut `"engineer"`).
+  PRODUCER role of the single-brick model (the one that codes the brick, e.g. `engineer`). Override by the opt
+  `:producer_role` (project/test); otherwise config `:fleet_pilot, :producer_role` (default `"engineer"`).
   """
   @spec producer_role(keyword()) :: String.t()
   def producer_role(opts \\ []) do
@@ -24,10 +24,10 @@ defmodule Fleet.Pilot.Roles do
   end
 
   @doc """
-  Jury (juges PR) du modèle single-brique : les rôles dont la review est demandée sur la PR d'un
-  producteur, et seedés à l'onboarding. Override par l'opt `:reviewer_roles` (projet/test) ; sinon la
-  config (source data unique, `config/config.exs`). `fetch_env!` = fail-loud si la config est absente
-  (elle DOIT être posée — aucun défaut codé en dur ici).
+  Jury (PR judges) of the single-brick model: the roles whose review is requested on a
+  producer's PR, and seeded at onboarding. Override by the opt `:reviewer_roles` (project/test); otherwise the
+  config (single data source, `config/config.exs`). `fetch_env!` = fail-loud if the config is absent
+  (it MUST be set — no hard-coded default here).
   """
   @spec reviewer_roles(keyword()) :: [String.t()]
   def reviewer_roles(opts \\ []) do
@@ -35,8 +35,8 @@ defmodule Fleet.Pilot.Roles do
   end
 
   @doc """
-  Rôle GATEKEEPER (gardien des PRs, signe les fusions). Override par l'opt `:gatekeeper_role`
-  (projet/test) ; sinon config `:fleet_pilot, :gatekeeper_role` (défaut `"gatekeeper"`).
+  GATEKEEPER role (PR guardian, signs the merges). Override by the opt `:gatekeeper_role`
+  (project/test); otherwise config `:fleet_pilot, :gatekeeper_role` (default `"gatekeeper"`).
   """
   @spec gatekeeper_role(keyword()) :: String.t()
   def gatekeeper_role(opts \\ []) do
@@ -45,10 +45,10 @@ defmodule Fleet.Pilot.Roles do
   end
 
   @doc """
-  Pod id de l'ARCHITECTE permanent (le sas UNIQUE vers l'humain). Override par l'opt `:architect_pod_id`
-  (test) ; sinon config `:fleet_pilot, :architect_pod_id` (défaut `"permanent-architect"`, id
-  déterministe posé par `PermanentBoot`). Accesseur UNIQUE — le défaut n'est PAS réécrit chez les
-  appelants (`StepRunConsumer.kick_architect`, `Poller` re-kick des issues `lcars-awaits-arch`).
+  Pod id of the permanent ARCHITECT (the SINGLE airlock to the human). Override by the opt `:architect_pod_id`
+  (test); otherwise config `:fleet_pilot, :architect_pod_id` (default `"permanent-architect"`,
+  deterministic id set by `PermanentBoot`). SINGLE accessor — the default is NOT rewritten at the
+  callers (`StepRunConsumer.kick_architect`, `Poller` re-kick of `lcars-awaits-arch` issues).
   """
   @spec architect_pod_id(keyword()) :: String.t()
   def architect_pod_id(opts \\ []) do

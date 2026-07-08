@@ -1,52 +1,52 @@
 defmodule Fleet.Pilot.GatekeeperSeal do
   @moduledoc """
-  **Sceau de fusion gatekeeper** — UN seul chemin pour sceller une PR : commentaire de fin honnête
-  sur l'issue + merge **signé au nom du `gatekeeper`** (token de rôle via `gk_opts`).
+  **Gatekeeper merge seal** — a SINGLE path to seal a PR: honest closing comment
+  on the issue + merge **signed in the name of the `gatekeeper`** (role token via `gk_opts`).
 
-  Chemin UNIQUE partagé par les **deux** points de merge (sinon ils divergeraient) :
-  - `Fleet.Pilot.StepDispatcher.promote_pr` (juges APPROVED en direct) ;
-  - `Fleet.Pilot.StepRunCompleter.promote` (terminal `:promote`, ex. après escalade gatekeeper).
+  UNIQUE path shared by the **two** merge points (otherwise they would diverge):
+  - `Fleet.Pilot.StepDispatcher.promote_pr` (judges APPROVED directly);
+  - `Fleet.Pilot.StepRunCompleter.promote` (terminal `:promote`, e.g. after gatekeeper escalation).
 
-  Les deux appellent `seal_and_merge/6` → même signature gatekeeper, même trace, partout (sans ce
-  point unique, un merge passerait en token système brut, sans commentaire, attribué `lcars-system`).
+  Both call `seal_and_merge/6` → same gatekeeper signature, same trace, everywhere (without this
+  single point, a merge would go through with a raw system token, without a comment, attributed to `lcars-system`).
 
-  La signature gatekeeper (`as_gatekeeper/1` = `Fleet.Pilot.ForgeClient.as_role(forge_opts,
-  gatekeeper_role())`) est construite ICI, en interne : `seal_and_merge/6` reçoit les `forge_opts`
-  BRUTS et signe lui-même — il n'existe qu'UN writer de l'idiome `as_role(_, gatekeeper_role())`
-  dans le runtime (ce module ; `ArchEscalation` signe son commentaire d'escalade via le même
-  `as_gatekeeper/1`). Un appelant ne peut plus oublier la signature ni la forker. `as_role` reste
-  la source unique de l'adaptateur credential→wire (`Fleet.Pilot.ForgeClient.as_role/2` — non
-  dupliqué, appelé). Le rôle gatekeeper a son AUTORITÉ UNIQUE dans `Fleet.Pilot.Roles` ;
-  `gatekeeper_role/0` ici n'est qu'un re-export.
+  The gatekeeper signature (`as_gatekeeper/1` = `Fleet.Pilot.ForgeClient.as_role(forge_opts,
+  gatekeeper_role())`) is built HERE, internally: `seal_and_merge/6` receives the RAW `forge_opts`
+  and signs itself — there is only ONE writer of the `as_role(_, gatekeeper_role())` idiom
+  in the runtime (this module; `ArchEscalation` signs its escalation comment via the same
+  `as_gatekeeper/1`). A caller can no longer forget the signature nor fork it. `as_role` remains
+  the single source of the credential→wire adapter (`Fleet.Pilot.ForgeClient.as_role/2` — not
+  duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
+  `gatekeeper_role/0` here is only a re-export.
   """
 
-  @doc "Rôle gardien des PRs (signe les fusions). Re-export de l'autorité unique `Fleet.Pilot.Roles.gatekeeper_role/0`."
+  @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."
   @spec gatekeeper_role() :: String.t()
   defdelegate gatekeeper_role(), to: Fleet.Pilot.Roles
 
   @doc """
-  Signature gatekeeper UNIQUE : injecte le token du compte `gatekeeper` dans `forge_opts`
-  (`Fleet.Pilot.ForgeClient.as_role/2`). SEUL point du runtime qui écrit l'idiome
-  `as_role(_, gatekeeper_role())` — utilisé en interne par `seal_and_merge/6` (merge + commentaire
-  de sceau) et par `ArchEscalation` (commentaire d'escalade signé gatekeeper). Token de rôle
-  absent/illisible → `forge_opts` inchangé, fallback token système loggué (`RoleToken`,
-  honnête-dégradé).
+  UNIQUE gatekeeper signature: injects the `gatekeeper` account's token into `forge_opts`
+  (`Fleet.Pilot.ForgeClient.as_role/2`). ONLY point in the runtime that writes the
+  `as_role(_, gatekeeper_role())` idiom — used internally by `seal_and_merge/6` (merge + seal
+  comment) and by `ArchEscalation` (gatekeeper-signed escalation comment). Role token
+  absent/unreadable → `forge_opts` unchanged, logged fallback to system token (`RoleToken`,
+  honest-degraded).
   """
   @spec as_gatekeeper(keyword()) :: keyword()
   def as_gatekeeper(forge_opts),
     do: Fleet.Pilot.ForgeClient.as_role(forge_opts, gatekeeper_role())
 
   @doc """
-  Scelle la PR : **merge D'ABORD** (token gatekeeper), PUIS poste le commentaire de fin
-  « ✅ livrée et fusionnée » (gatekeeper), PUIS `stage/merged` (système, WS1), PUIS ferme l'issue
-  EXPLICITEMENT — **gatekeeper aussi** (dernier acte — chronologie cohérente, plus de `Closes #N`/
-  auto-close Gitea qui fermait AVANT le commentaire ; même identité que le merge+comment, une seule
-  cérémonie de scellement, pas de rupture d'attribution). Le commentaire est SEULEMENT posté si le
-  merge a réussi (best-effort, le merge fait foi). On ne prétend JAMAIS « fusionnée » avant de l'avoir
-  vérifié. Merge KO → aucun commentaire de réussite, l'erreur remonte.
+  Seals the PR: **merge FIRST** (gatekeeper token), THEN posts the closing comment
+  "✅ delivered and merged" (gatekeeper), THEN `stage/merged` (system, WS1), THEN closes the issue
+  EXPLICITLY — **gatekeeper too** (last act — coherent chronology, no more `Closes #N`/
+  Gitea auto-close that closed BEFORE the comment; same identity as the merge+comment, a single
+  sealing ceremony, no attribution break). The comment is ONLY posted if the
+  merge succeeded (best-effort, the merge is authoritative). We NEVER claim "merged" before having
+  verified it. Merge failed → no success comment, the error bubbles up.
 
-  `forge_opts` = opts forge BRUTS (base_url/token système…) : la signature gatekeeper est posée
-  ICI (`as_gatekeeper/1`), plus par l'appelant — un merge ne peut pas partir non signé.
+  `forge_opts` = RAW forge opts (base_url/system token…): the gatekeeper signature is applied
+  HERE (`as_gatekeeper/1`), no longer by the caller — a merge cannot go out unsigned.
   Returns `:ok | {:error, {:merge, reason}}`.
   """
   @spec seal_and_merge(module(), String.t(), integer(), integer(), String.t(), keyword()) ::
@@ -56,45 +56,45 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     signature = "[merge:pr-#{pr_number}]"
     body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
 
-    # `dedup_any_author` : le comment est signé GATEKEEPER (compte de rôle, pas le bot système) → le dédup
-    # doit le voir quel que soit l'auteur, sinon double-post quand `promote` rejoue (retry merge / escalade).
+    # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup
+    # must see it regardless of author, otherwise double-post when `promote` replays (merge retry / escalation).
     comment_opts =
       gk_opts |> Keyword.put(:dedup_signature, signature) |> Keyword.put(:dedup_any_author, true)
 
-    # MERGER D'ABORD, ne commenter « ✅ livrée et fusionnée » QUE si le merge a RÉELLEMENT réussi. L'ordre
-    # inverse (comment → merge) posterait la réussite AVANT de la vérifier → sur un conflit, un commentaire
-    # MENSONGER « fusionnée » resterait figé : fail silencieux sur LE point crucial du workflow (on
-    # contrôlerait l'INTENTION, pas la RÉALITÉ du merge). Le sceau est donc best-effort POST-merge — comment,
-    # puis stage/merged, puis close EXPLICITE (l'issue est encore OUVERTE quand le comment se poste,
-    # plus d'auto-close-avant-comment). Merge KO → AUCUN « fusionnée », l'erreur remonte (la résolution du
-    # conflit entre PR parallèles est traitée ailleurs, par le re-dispatch).
+    # MERGE FIRST, only comment "✅ delivered and merged" IF the merge REALLY succeeded. The reverse
+    # order (comment → merge) would post the success BEFORE verifying it → on a conflict, a
+    # LYING "merged" comment would stay frozen: silent failure on THE crucial point of the workflow (we
+    # would control the INTENT, not the REALITY of the merge). The seal is therefore best-effort POST-merge — comment,
+    # then stage/merged, then EXPLICIT close (the issue is still OPEN when the comment is posted,
+    # no more auto-close-before-comment). Merge failed → NO "merged", the error bubbles up (resolution of the
+    # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
     case do_merge(forge, repo, pr_number, gk_opts) do
       :ok ->
         _ = comment(forge, repo, issue_n, body, comment_opts)
 
-        # Étape terminale VISIBLE : la brique est mergée. Système-side (`forge_opts`, pas la signature
-        # gatekeeper) : les stage/* sont gérés par lcars-system (WS1). Best-effort (affichage ; le merge
-        # fait foi).
+        # VISIBLE terminal step: the brick is merged. System-side (`forge_opts`, not the gatekeeper
+        # signature): the stage/* are managed by lcars-system (WS1). Best-effort (display; the merge
+        # is authoritative).
         _ = forge.set_stage(repo, issue_n, Fleet.Pilot.Labels.stage_merged(), forge_opts)
 
-        # Close EXPLICITE, EN DERNIER acte visible sur l'issue (QoL chronologie, 2026-07-07) : plus de
-        # `Closes #N` dans le corps de PR (Gitea auto-closait AU MERGE, avant même ce commentaire — un
-        # « ✅ livrée et fusionnée » posté après-coup sur un ticket déjà fermé). On ferme nous-mêmes,
-        # APRÈS le commentaire ET le stage/merged, pour une chronologie cohérente : rien ne se poste plus
-        # sur l'issue une fois close. Best-effort (le merge fait foi, un close raté n'invalide rien).
+        # EXPLICIT close, as the LAST visible act on the issue (chronology QoL, 2026-07-07): no more
+        # `Closes #N` in the PR body (Gitea auto-closed AT MERGE, before even this comment — a
+        # "✅ delivered and merged" posted after the fact on an already-closed ticket). We close ourselves,
+        # AFTER the comment AND the stage/merged, for a coherent chronology: nothing else posts
+        # on the issue once closed. Best-effort (the merge is authoritative, a failed close invalidates nothing).
         #
-        # SIGNÉ GATEKEEPER (`gk_opts`), PAS système (régression QoL 2026-07-07, observée live) : le merge
-        # + le commentaire de sceau sont DÉJÀ gatekeeper — un close système créerait une rupture d'identité
-        # dans la MÊME cérémonie de scellement (« qui a fini cette brique ? » deux réponses différentes
-        # pour trois actes consécutifs). `set_stage` (juste au-dessus) RESTE système : c'est un label
-        # protocole (stage/*), une catégorie séparée, doctrine WS1 (tous les stage/* sont système, partout
-        # ailleurs dans le pipeline) — non concernée par cette incohérence.
+        # SIGNED GATEKEEPER (`gk_opts`), NOT system (QoL regression 2026-07-07, observed live): the merge
+        # + the seal comment are ALREADY gatekeeper — a system close would create an identity break
+        # in the SAME sealing ceremony ("who finished this brick?" two different answers
+        # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
+        # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
+        # else in the pipeline) — not concerned by this inconsistency.
         _ = forge.close_issue(repo, issue_n, gk_opts)
 
-        # Projette le livrable sur le clone local `/home/projects/<name>` (best-effort). La SÉRIALISATION
-        # vit DANS le GenServer dédié (un `git` à la fois sur un worktree, contre la race entre les deux
-        # déclencheurs de merge) — ici on ne fait que DÉCLENCHER, le merge n'attend pas. Le merge fait foi :
-        # un alignement raté = disque en retard, jamais une perte (le livrable est sur la forge).
+        # Projects the deliverable onto the local clone `/home/projects/<name>` (best-effort). The SERIALIZATION
+        # lives IN the dedicated GenServer (one `git` at a time on a worktree, against the race between the two
+        # merge triggers) — here we only TRIGGER, the merge does not wait. The merge is authoritative:
+        # a failed alignment = disk behind, never a loss (the deliverable is on the forge).
         _ = worktree_sync().sync(repo)
         :ok
 
@@ -103,7 +103,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     end
   end
 
-  # Seam (test) : le sérialiseur d'alignement du clone local après merge. Défaut = le GenServer prod.
+  # Seam (test): the serializer that aligns the local clone after merge. Default = the prod GenServer.
   defp worktree_sync,
     do: Application.get_env(:fleet_pilot, :worktree_sync, Fleet.Pilot.WorktreeSync)
 
@@ -114,7 +114,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     end
   end
 
-  # `ForgeClient.merge_pr/3` rend `:ok` (pas `{:ok, _}`) sur succès — matcher les deux.
+  # `ForgeClient.merge_pr/3` returns `:ok` (not `{:ok, _}`) on success — match both.
   defp do_merge(forge, repo, pr_number, opts) do
     case forge.merge_pr(repo, pr_number, opts) do
       :ok -> :ok
@@ -124,9 +124,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   end
 
   @doc """
-  Commentaire de fin DESCRIPTIF + HONNÊTE (traça user) : qui a livré, qui a validé, qui a scellé, et que
-  la branch-protection native EXIGE les approbations (LCARS les orchestre puis le gatekeeper scelle ;
-  rien maquillé). Merge rebase (linéaire).
+  DESCRIPTIVE + HONEST closing comment (user traceability): who delivered, who validated, who sealed, and that
+  native branch-protection REQUIRES the approvals (LCARS orchestrates them then the gatekeeper seals;
+  nothing faked). Rebase merge (linear).
   """
   @spec promote_comment(integer(), integer(), String.t()) :: String.t()
   def promote_comment(issue_n, pr_number, producer) do

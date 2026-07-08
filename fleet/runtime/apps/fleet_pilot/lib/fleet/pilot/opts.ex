@@ -1,18 +1,18 @@
 defmodule Fleet.Pilot.Opts do
   @moduledoc """
-  Helpers purs de construction de keyword-lists d'options (opts/seams injectables).
+  Pure helpers for building option keyword-lists (injectable opts/seams).
 
-  Source UNIQUE de l'idiome « pose la clé SI la valeur n'est pas nil » — utilisé par
-  les builders d'opts du pilot (`StepRunConsumer`, `ForgeClient.Transport`, `Poller`,
-  et les builders de spawn_opts de `StepDispatcher`/`ReviewLifecycle` : `:project`,
-  `:repo_id`) pour n'injecter un seam/paramètre optionnel que lorsqu'il est réellement
-  présent. (Une pose MULTI-clés couplées — ex. `Spawn.maybe_put_route/2`, 2 clés —
-  n'est pas cet idiome et reste chez son autorité.)
+  SINGLE source of the "set the key IF the value is not nil" idiom — used by
+  the pilot's opts builders (`StepRunConsumer`, `ForgeClient.Transport`, `Poller`,
+  and the spawn_opts builders of `StepDispatcher`/`ReviewLifecycle`: `:project`,
+  `:repo_id`) to inject an optional seam/parameter only when it is actually
+  present. (A coupled MULTI-key set — e.g. `Spawn.maybe_put_route/2`, 2 keys —
+  is not this idiom and stays with its authority.)
   """
 
   @doc """
-  Pose `{key, value}` dans `opts` SI `value != nil` ; sinon rend `opts` inchangé
-  (la valeur par défaut avale l'absence). Préserve l'ordre existant (`Keyword.put`).
+  Sets `{key, value}` in `opts` IF `value != nil`; otherwise returns `opts` unchanged
+  (the default value swallows the absence). Preserves the existing order (`Keyword.put`).
   """
   @spec maybe_put(keyword(), atom(), term()) :: keyword()
   def maybe_put(opts, _key, nil), do: opts

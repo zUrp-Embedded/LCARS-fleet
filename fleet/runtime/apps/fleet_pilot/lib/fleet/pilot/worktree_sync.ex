@@ -1,33 +1,33 @@
 defmodule Fleet.Pilot.WorktreeSync do
   @moduledoc """
-  Projection du livrable sur le clone local après merge — sérialiseur dédié.
+  Projection of the deliverable onto the local clone after merge — dedicated serializer.
 
-  Au merge terminal d'une PR (`Fleet.Pilot.GatekeeperSeal.seal_and_merge`), `origin/main` avance sur la
-  forge, mais le clone local `/home/projects/<name>` (le worktree `main`, désigné « le livrable » par
-  `Fleet.Pilot.ProjectOnboard`) ne suit pas tout seul : il reste figé à l'onboarding. Ce module l'aligne
-  — `git fetch origin main` puis `git reset --hard origin/main`.
+  On the terminal merge of a PR (`Fleet.Pilot.GatekeeperSeal.seal_and_merge`), `origin/main` advances on the
+  forge, but the local clone `/home/projects/<name>` (the `main` worktree, designated "the deliverable" by
+  `Fleet.Pilot.ProjectOnboard`) does not follow on its own: it stays frozen at onboarding. This module aligns it
+  — `git fetch origin main` then `git reset --hard origin/main`.
 
-  ## Pourquoi un process (Iron Law) : la SÉRIALISATION
+  ## Why a process (Iron Law): the SERIALIZATION
 
-  Le merge a DEUX déclencheurs qui peuvent tourner en même temps :
+  The merge has TWO triggers that can run at the same time:
 
-    * le poller (`Fleet.Pilot.StepDispatcher.promote_pr`), mono-process ;
-    * le StepRunConsumer (`Fleet.Pilot.StepRunCompleter.promote`), **offloadé dans une `Task`**.
+    * the poller (`Fleet.Pilot.StepDispatcher.promote_pr`), mono-process;
+    * the StepRunConsumer (`Fleet.Pilot.StepRunCompleter.promote`), **offloaded into a `Task`**.
 
-  Deux `reset --hard` simultanés sur le MÊME worktree corrompent l'index (`index.lock`). Faire reposer
-  la sûreté sur le bail « 1 pipeline actif/repo » serait prier contre la race : ce bail est un invariant
-  LOGIQUE du poller (le code dit lui-même « pas de verrou, poller mono-process »), pas un verrou physique
-  sur le disque. Ce GenServer ferme la race par construction : il traite un message à la fois → un `git`
-  à la fois, quel que soit le nombre de déclencheurs.
+  Two simultaneous `reset --hard` on the SAME worktree corrupt the index (`index.lock`). Resting
+  safety on the "1 active pipeline/repo" lease would be praying against the race: that lease is a
+  LOGICAL invariant of the poller (the code itself says "no lock, mono-process poller"), not a physical lock
+  on disk. This GenServer closes the race by construction: it handles one message at a time → one `git`
+  at a time, whatever the number of triggers.
 
-  ## Best-effort et convergent
+  ## Best-effort and convergent
 
-  `sync/2` est un **cast** : le merge ne l'attend pas (hot-path intact) et le livrable est déjà sur la
-  forge — un alignement raté n'est qu'un disque en retard, jamais une perte. L'alignement est
-  **convergent et idempotent** : `reset --hard origin/main` ramène le DERNIER `main`, peu importe combien
-  de merges ont eu lieu entre le cast et son traitement. On ne cherche pas à matcher un merge précis : on
-  veut « clone == dernier `main` ». Le timing avec les merges n'a donc aucune importance fonctionnelle —
-  c'est ce qui rend la non-coalescence sans conséquence (le bail espace déjà les merges d'un même repo).
+  `sync/2` is a **cast**: the merge does not wait for it (hot-path intact) and the deliverable is already on the
+  forge — a failed alignment is only a disk behind, never a loss. The alignment is
+  **convergent and idempotent**: `reset --hard origin/main` brings back the LATEST `main`, no matter how many
+  merges happened between the cast and its handling. We don't try to match a precise merge: we
+  want "clone == latest `main`". The timing with the merges therefore has no functional importance —
+  that's what makes the non-coalescence inconsequential (the lease already spaces out the merges of a same repo).
   """
 
   use GenServer
@@ -36,18 +36,18 @@ defmodule Fleet.Pilot.WorktreeSync do
 
   alias Fleet.Pilot.GitOps
 
-  # H1/H3 : derive de l'autorite unique du layout container (Fleet.Layout, R0).
+  # Derives from the single authority of the container layout (Fleet.Layout, R0).
   @projects_root Fleet.Layout.projects_root()
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
-  @doc "Demande (best-effort, sérialisée) l'alignement du clone local de `repo` sur `origin/main`."
+  @doc "Requests (best-effort, serialized) the alignment of `repo`'s local clone onto `origin/main`."
   @spec sync(GenServer.server(), String.t()) :: :ok
   def sync(server \\ __MODULE__, repo), do: GenServer.cast(server, {:sync, repo})
 
-  @doc "Variante SYNCHRONE (usage bloquant / tests) : aligne `repo` et renvoie le résultat git."
+  @doc "SYNCHRONOUS variant (blocking usage / tests): aligns `repo` and returns the git result."
   @spec sync_now(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def sync_now(server \\ __MODULE__, repo), do: GenServer.call(server, {:sync, repo}, 60_000)
 
@@ -56,8 +56,8 @@ defmodule Fleet.Pilot.WorktreeSync do
     {:ok, %{root: Keyword.get(opts, :projects_root, @projects_root)}}
   end
 
-  # cast (prod) et call (bloquant / tests) partagent `do_sync`. Le GenServer traite un message à la fois
-  # → les alignements sont sérialisés, jamais deux `git` concurrents sur un même worktree.
+  # cast (prod) and call (blocking / tests) share `do_sync`. The GenServer handles one message at a time
+  # → the alignments are serialized, never two concurrent `git` on the same worktree.
   @impl GenServer
   def handle_cast({:sync, repo}, state) do
     _ = do_sync(repo, state.root)
@@ -70,23 +70,23 @@ defmodule Fleet.Pilot.WorktreeSync do
   end
 
   defp do_sync(repo, root) do
-    # Le repo forge est `<org>/<name>` ; le clone local vit sous `<root>/<name>` (segment final).
+    # The forge repo is `<org>/<name>`; the local clone lives under `<root>/<name>` (final segment).
     name = repo |> String.split("/") |> List.last()
     dir = Path.join(root, name)
 
     if File.dir?(Path.join(dir, ".git")) do
       log_result(repo, dir, align(dir))
     else
-      # Pas de clone local (projet onboardé sur une autre machine, ou dossier supprimé à la main) :
-      # rien à aligner, ce n'est pas une erreur (le livrable reste consultable sur la forge).
+      # No local clone (project onboarded on another machine, or folder deleted by hand):
+      # nothing to align, this is not an error (the deliverable remains viewable on the forge).
       Logger.debug("WorktreeSync: #{repo} — pas de clone local en #{dir}, skip")
       :ok
     end
   end
 
-  # `fetch` (réseau, token forge) puis `reset --hard` : le worktree `main` prend le dernier `origin/main`.
-  # Le worktree est une vitrine read-only (les pods bossent dans leurs clones éphémères) → `reset --hard`
-  # n'écrase rien d'utile, et garantit la convergence même si quelque chose avait divergé.
+  # `fetch` (network, forge token) then `reset --hard`: the `main` worktree takes the latest `origin/main`.
+  # The worktree is a read-only showcase (the pods work in their ephemeral clones) → `reset --hard`
+  # overwrites nothing useful, and guarantees convergence even if something had diverged.
   defp align(dir) do
     with :ok <- GitOps.run(["-C", dir, "fetch", "origin", "main"], auth: true) do
       GitOps.run(["-C", dir, "reset", "--hard", "origin/main"], auth: false)

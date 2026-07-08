@@ -1,29 +1,29 @@
 defmodule Fleet.Pilot.BriefBuilder do
   @moduledoc """
-  Autorité du FORMAT des briefs : worker / judge / brief-review / rework / conflit, plus les
-  instructions de voix de l'eng. `StepDispatcher` APPELLE (il choisit QUEL brief selon l'état forge),
-  il ne FORME plus le brief lui-même.
+  Authority over the FORMAT of briefs: worker / judge / brief-review / rework / conflict, plus the
+  eng voice instructions. `StepDispatcher` CALLS (it chooses WHICH brief based on the forge state),
+  it no longer FORMS the brief itself.
 
-  La judge-ness (et la cible d'un juge) est une propriété de SÉCURITÉ : elle ne s'infère JAMAIS par
-  omission de clause. `build_brief/9` est une somme TOTALE et fail-loud sur `brief_kind`/`judge_target`
-  hors-vocab (raise) — un juge ne doit JAMAIS recevoir un corps d'issue exécutable. Le brief d'un juge est
-  DÉSAMORCÉ (`Fleet.Workflow.GateBrief` : `request` rendu comme contexte, pas comme instruction exécutable).
+  Judge-ness (and a judge's target) is a SECURITY property: it is NEVER inferred by
+  omission of a clause. `build_brief/9` is a TOTAL sum and fail-loud on out-of-vocab `brief_kind`/`judge_target`
+  (raise) — a judge must NEVER receive an executable issue body. A judge's brief is
+  DEFUSED (`Fleet.Workflow.GateBrief`: `request` rendered as context, not as an executable instruction).
 
-  `forge` est un ARG injecté (seam) — jamais câblé en dur. Les autres deps (`Fleet.CapProfile`,
-  `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) sont appelées telles quelles.
+  `forge` is an injected ARG (seam) — never hard-wired. The other deps (`Fleet.CapProfile`,
+  `Fleet.Workflow.GateBrief`, `Fleet.Credentials.ForgeIdentity`) are called as-is.
   """
 
-  # Brief de rework : le PRODUCTEUR (engineer) reprend sur une PR REQUEST_CHANGES.
-  # PORTE LA MÊME instruction git-native que `build_worker_brief` (sinon `:no_deliverable_commit` : le
-  # rework « re-pousse » mais le pod est FORGE-AVEUGLE et sans l'ordre de COMMITTER il ne livre rien —
-  # jumeau du brief producteur). Le pod corrige + commite EN LOCAL ; le SYSTÈME pousse (frontière
-  # forge). Trailer obligatoire (gate de push).
+  # Rework brief: the PRODUCER (engineer) resumes on a REQUEST_CHANGES PR.
+  # CARRIES THE SAME git-native instruction as `build_worker_brief` (otherwise `:no_deliverable_commit`: the
+  # rework "re-pushes" but the pod is FORGE-BLIND and without the order to COMMIT it delivers nothing —
+  # twin of the producer brief). The pod fixes + commits LOCALLY; the SYSTEM pushes (forge
+  # boundary). Trailer mandatory (push gate).
   #
-  # FAMINE D'INFO, moitié rework : sans le BODY des reviews REQUEST_CHANGES,
-  # « corrige selon la review » est creux — le pod forge-aveugle ne voit PAS la review → il devine à
-  # l'aveugle (un eng prudent refuse de deviner → `blocked_dep` → wedge). On lit le feedback sur la forge
-  # (le runtime, pas le pod : frontière forge préservée) et on l'injecte. Si la lecture échoue / aucun body,
-  # on retombe sur l'instruction générique (le pod a quand même la PR clonée + son code).
+  # INFO STARVATION, rework half: without the BODY of the REQUEST_CHANGES reviews,
+  # "fix according to the review" is hollow — the forge-blind pod does NOT see the review → it guesses
+  # blind (a cautious eng refuses to guess → `blocked_dep` → wedge). We read the feedback on the forge
+  # (the runtime, not the pod: forge boundary preserved) and inject it. If the read fails / no body,
+  # we fall back to the generic instruction (the pod still has the cloned PR + its code).
   def rework_brief(role, forge, repo, pr, forge_opts, _route) do
     [
       "REWORK — une review REQUEST_CHANGES a été déposée sur la PR ##{pr}. Corrige ton code selon le " <>
@@ -39,10 +39,10 @@ defmodule Fleet.Pilot.BriefBuilder do
     |> Enum.join("\n\n")
   end
 
-  # Brief de RÉSOLUTION DE CONFLIT : la PR est APPROUVÉE mais `main` a avancé (un
-  # autre issue parallèle a fusionné) → conflit. Le PRODUCTEUR (git_native, il a écrit le contenu) RÉCONCILIE :
-  # rebase sur `main` + résolution en gardant TOUT (le sien + main). Pas un re-code. Le système pousse ;
-  # le push rebasé invalide les vieilles reviews (head_sha) → les juges re-valident le fusionné, gatekeeper scelle.
+  # CONFLICT RESOLUTION brief: the PR is APPROVED but `main` has advanced (another
+  # parallel issue merged) → conflict. The PRODUCER (git_native, it wrote the content) RECONCILES:
+  # rebase onto `main` + resolution keeping EVERYTHING (its own + main). Not a re-code. The system pushes;
+  # the rebased push invalidates the old reviews (head_sha) → the judges re-validate the merged result, gatekeeper seals.
   def resolve_conflict_brief(role, _forge, _repo, pr, _forge_opts, _route) do
     [
       "RÉSOLUTION DE CONFLIT — ta PR ##{pr} a été APPROUVÉE, mais `main` a avancé depuis (un autre issue " <>
@@ -61,10 +61,10 @@ defmodule Fleet.Pilot.BriefBuilder do
     |> Enum.join("\n\n")
   end
 
-  # VOIX DE L'ENG (info SORTANTE, jumeau de la famine d'info entrante) : le `summary` rendu dans
-  # `submit_result` est POSTÉ sur la PR par le système (forge-aveugle, `as_role` engineer) → l'eng
-  # a une voix pour l'humain. Sans ça il est muet sur la forge (un diagnostic même excellent ne serait
-  # jamais vu) ; feedback verbeux, descriptif, traçable.
+  # ENG VOICE (OUTGOING info, twin of the incoming info starvation): the `summary` rendered in
+  # `submit_result` is POSTED on the PR by the system (forge-blind, `as_role` engineer) → the eng
+  # has a voice for the human. Without it it is mute on the forge (even an excellent diagnosis would
+  # never be seen); verbose, descriptive, traceable feedback.
   defp eng_voice_instruction(:build) do
     "**Ta voix — le `payload` de `submit_result` DOIT contenir un champ `summary`** " <>
       "(ex. `submit_result` avec `payload = {\"summary\": \"Implémenté X ; choisi Y parce que Z\"}`). Le " <>
@@ -83,8 +83,8 @@ defmodule Fleet.Pilot.BriefBuilder do
       "NARRATION (pas le code — déjà committé). Le SYSTÈME le poste sur la PR : ta réponse traçable au reviewer."
   end
 
-  # Rend le feedback des reviews REQUEST_CHANGES (body du verdict de chaque juge) en bloc actionnable.
-  # `""` si rien (lecture KO ou aucun body) → le brief retombe sur l'instruction générique (Enum.reject).
+  # Renders the feedback of the REQUEST_CHANGES reviews (verdict body of each judge) as an actionable block.
+  # `""` if nothing (read failed or no body) → the brief falls back to the generic instruction (Enum.reject).
   defp render_rework_feedback(forge, repo, pr, forge_opts) do
     case forge.change_request_feedback(repo, pr, forge_opts) do
       {:ok, [_ | _] = feedbacks} ->
@@ -100,8 +100,8 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
-  # La forme du brief est une propriété du rôle (cap-profile `brief_kind`), PAS un nom
-  # magique en ring2. `judge` → GateBrief désamorcé ; tout le reste (`worker`, défaut) → corps d'issue.
+  # The shape of the brief is a property of the role (cap-profile `brief_kind`), NOT a magic
+  # name in ring2. `judge` → defused GateBrief; everything else (`worker`, default) → issue body.
   def build_brief(
         profile,
         role,
@@ -113,29 +113,29 @@ defmodule Fleet.Pilot.BriefBuilder do
         route,
         step_spec
       ) do
-    # Le `brief_kind` du STEP (workflow_map) PRIME sur celui du profil (override per-step) — réutilise
-    # un profil worker (consultant) en JUGE sans profil-doublon. ABSENT au step → défaut profil
-    # (lui-même "worker" par défaut, fail-safe) via le `||` : l'absence n'est PAS une anomalie. Ce
-    # qui suit traite la valeur PRÉSENTE-mais-hors-vocab, distincte de l'absence.
+    # The STEP's `brief_kind` (workflow_map) TAKES PRECEDENCE over the profile's (per-step override) — reuses
+    # a worker (consultant) profile as a JUDGE without a duplicate profile. ABSENT at the step → profile default
+    # (itself "worker" by default, fail-safe) via the `||`: absence is NOT an anomaly. What
+    # follows handles the PRESENT-but-out-of-vocab value, distinct from absence.
     kind = Map.get(step_spec, "brief_kind") || Fleet.CapProfile.brief_kind(profile)
 
-    # Somme TOTALE et fail-loud. La judge-ness (et la cible d'un juge) est une propriété de
-    # SÉCURITÉ : elle ne s'infère JAMAIS par omission de clause. Un kind/target hors-vocab (typo, ou
-    # valeur d'un futur vocabulaire) NE DOIT PAS retomber silencieusement sur worker — sinon un rôle
-    # juge recevrait un corps d'issue EXÉCUTABLE (brief actif) au lieu d'un brief désamorcé. On
-    # rejette bruyamment (raise) plutôt que de construire un brief dangereux en silence.
+    # TOTAL sum and fail-loud. Judge-ness (and a judge's target) is a
+    # SECURITY property: it is NEVER inferred by omission of a clause. An out-of-vocab kind/target (typo, or
+    # value from a future vocabulary) MUST NOT silently fall back to worker — otherwise a judge
+    # role would receive an EXECUTABLE issue body (active brief) instead of a defused brief. We
+    # reject loudly (raise) rather than build a dangerous brief silently.
     case {kind, Map.get(step_spec, "judge_target")} do
-      # Juge de BRIEF (judge_target:brief) → juge le issue.body (exécutable ?), PAS un livrable
-      # (pas de code en amont).
+      # BRIEF judge (judge_target:brief) → judges the issue.body (executable?), NOT a deliverable
+      # (no code upstream).
       {"judge", "brief"} ->
         build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route)
 
-      # Juge de LIVRABLE : judge_target ABSENT (nil → défaut canon) ou "deliverable" explicite →
-      # juge un livrable (PR), brief inchangé.
+      # DELIVERABLE judge: judge_target ABSENT (nil → canonical default) or explicit "deliverable" →
+      # judges a deliverable (PR), brief unchanged.
       {"judge", target} when target in [nil, "deliverable"] ->
         build_judge_brief(role, forge, repo, number, forge_opts, route)
 
-      # judge_target PRÉSENT mais hors {brief, deliverable} → anomalie : on ne devine pas la cible.
+      # judge_target PRESENT but outside {brief, deliverable} → anomaly: we don't guess the target.
       {"judge", other} ->
         raise ArgumentError,
               "judge_target #{inspect(other)} hors vocabulaire {brief, deliverable} — la cible d'un juge ne s'infère pas"
@@ -143,18 +143,18 @@ defmodule Fleet.Pilot.BriefBuilder do
       {"worker", _} ->
         build_worker_brief(role, issue)
 
-      # kind ∉ {worker, judge} (brief_kind présent mais hors-vocab) → fail-loud.
+      # kind ∉ {worker, judge} (brief_kind present but out-of-vocab) → fail-loud.
       {other, _} ->
         raise ArgumentError,
               "brief_kind #{inspect(other)} hors vocabulaire {worker, judge} — la judge-ness ne s'infère pas"
     end
   end
 
-  # Brief producteur = le brief de l'issue + l'instruction de LIVRAISON git-native. Sans elle,
-  # le pod « submit les contenus » au lieu de
-  # COMMITTER → la publish git_native ne trouve aucun commit (`:no_deliverable_commit`).
-  # Le pod commite en LOCAL ; le SYSTÈME pousse + ouvre la PR (forge-aveugle). Le trailer
-  # est obligatoire (gate de push, source unique `ForgeIdentity.coauthor_instruction`).
+  # Producer brief = the issue's brief + the git-native DELIVERY instruction. Without it,
+  # the pod "submits the contents" instead of
+  # COMMITTING → the git_native publish finds no commit (`:no_deliverable_commit`).
+  # The pod commits LOCALLY; the SYSTEM pushes + opens the PR (forge-blind). The trailer
+  # is mandatory (push gate, single source `ForgeIdentity.coauthor_instruction`).
   defp build_worker_brief(role, issue) do
     [
       issue["body"] || "",
@@ -169,11 +169,11 @@ defmodule Fleet.Pilot.BriefBuilder do
     |> Enum.join("\n\n")
   end
 
-  # Un pod **juge** doit savoir QUOI
-  # juger ET comment rendre son verdict. On réutilise le brief canonique `Fleet.Workflow.GateBrief`
-  # (contexte + livrable + question + **contrat `gate-decision-v1.json` + options canon**) — le même
-  # que le modèle RAM. Le `result_K` à juger est lu du comment du step_run précédent (gravé par
-  # StepRunCompleter) ; le pod reste forge-aveugle (le runtime lit le comment, pas de
+  # A **judge** pod must know WHAT
+  # to judge AND how to render its verdict. We reuse the canonical brief `Fleet.Workflow.GateBrief`
+  # (context + deliverable + question + **`gate-decision-v1.json` contract + canonical options**) — the same
+  # as the RAM model. The `result_K` to judge is read from the previous step_run's comment (engraved by
+  # StepRunCompleter); the pod stays forge-blind (the runtime reads the comment, no
   # clone).
   defp build_judge_brief(role, forge, repo, number, forge_opts, route) do
     predecessor =
@@ -182,10 +182,10 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> nil
       end
 
-    # GIT-NATIVE (predecessor vide) : le livrable N'EST PAS un payload — c'est le CODE de la
-    # branche. Le juge clone la feature-branch + a `Bash(git diff/log/show)` → on le POINTE sur son
-    # workspace au lieu de lui donner `{}` (sur quoi il fail-closerait `halt_wait_input`). Sinon il juge
-    # du vide → rework infini (le Reviewer ne peut JAMAIS dire `continue` sur `{}`).
+    # GIT-NATIVE (empty predecessor): the deliverable IS NOT a payload — it's the branch
+    # CODE. The judge clones the feature-branch + has `Bash(git diff/log/show)` → we POINT it at its
+    # workspace instead of giving it `{}` (on which it would fail-close `halt_wait_input`). Otherwise it judges
+    # emptiness → infinite rework (the Reviewer can NEVER say `continue` on `{}`).
     outputs =
       predecessor ||
         %{
@@ -196,8 +196,8 @@ defmodule Fleet.Pilot.BriefBuilder do
               "pour les commits, `git show <sha>` pour le détail. Juge ces changements contre le critère ci-dessous."
         }
 
-    # CRITÈRE de réussite = le body de l'issue (le brief). Passé via `:request` → GateBrief le rend
-    # DÉSAMORCÉ (contexte, pas instruction exécutable → l'état exécutable est rendu irreprésentable) → le juge sait CONTRE QUOI juger.
+    # SUCCESS CRITERION = the issue body (the brief). Passed via `:request` → GateBrief renders it
+    # DEFUSED (context, not executable instruction → the executable state is made unrepresentable) → the judge knows AGAINST WHAT to judge.
     request =
       case forge.get_issue(repo, number, forge_opts) do
         {:ok, issue} -> Map.get(issue, "body")
@@ -210,17 +210,17 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> {nil, role}
       end
 
-    # Le brief du juge ne doit contenir AUCUNE instruction exécutable (état exécutable rendu
-    # irreprésentable en amont). Le `request` (body de l'issue = critère) est rendu par GateBrief DÉSAMORCÉ
-    # (blockquote « CONTEXTE — déjà traité, NE PAS exécuter » + bannière « JUGER, PAS PRODUIRE »). Le risque
-    # vise un juge **base-worker** (profile noop, gatekeeper) qui RE-exécuterait le build même quoté : ce
-    # juge-là reçoit son brief par `dispatch_gatekeeper` (step_run_consumer) qui NE passe PAS `request` — il
-    # n'est pas affecté ici. `build_judge_brief` ne sert que les juges À PERSONA (qualifier/reviewer,
-    # `subagent_template` spec-reviewer/code-quality-reviewer) — le cas réputé SÛR
-    # (un juge à vraie persona : GateBrief sait rendre `request` désamorcé). En pratique
-    # ces juges fail-closent `halt_wait_input` sur livrable vide, ils ne RE-buildent pas.
-    # Sans le critère (`request`) ET le livrable (diff via `outputs`), le juge jugerait du `{}` → rework
-    # infini (le Reviewer ne peut JAMAIS `continue` sur du vide) — c'est la famine d'info.
+    # The judge's brief must contain NO executable instruction (executable state made
+    # unrepresentable upstream). The `request` (issue body = criterion) is rendered DEFUSED by GateBrief
+    # (blockquote "CONTEXT — already handled, DO NOT execute" + banner "JUDGE, DO NOT PRODUCE"). The risk
+    # targets a **base-worker** judge (noop profile, gatekeeper) that would RE-execute the build even quoted: that
+    # judge receives its brief via `dispatch_gatekeeper` (step_run_consumer) which does NOT pass `request` — it
+    # is not affected here. `build_judge_brief` only serves PERSONA judges (qualifier/reviewer,
+    # `subagent_template` spec-reviewer/code-quality-reviewer) — the case deemed SAFE
+    # (a judge with a real persona: GateBrief knows how to render `request` defused). In practice
+    # these judges fail-close `halt_wait_input` on an empty deliverable, they do not RE-build.
+    # Without the criterion (`request`) AND the deliverable (diff via `outputs`), the judge would judge `{}` → infinite
+    # rework (the Reviewer can NEVER `continue` on emptiness) — that's the info starvation.
     Fleet.Workflow.GateBrief.build(%{
       step: step,
       workflow_map_id: workflow_map_name,
@@ -230,15 +230,15 @@ defmodule Fleet.Pilot.BriefBuilder do
     })
   end
 
-  # Brief d'un juge de BRIEF (brief-review, judge_target:brief). Le consultant juge le BRIEF
-  # (issue.body rédigé par l'arch) AVANT que l'engineer ne parte : exécutable sans nouvelle question ? On
-  # réutilise le MÊME GateBrief (contrat gate-decision-v1 + options canon) que les autres juges — seul le
-  # `subject: :brief` recadre le « truc à juger ». Le BRIEF va dans `outputs` (le truc À JUGER ; ≠
-  # build_judge_brief où outputs = le livrable/code) ; pas de `request` (le critère d'exécutabilité est
-  # porté par le cadrage :brief). Le juge est PRÉ-PR (aucun clone, aucun livrable) → cohérent N0.
+  # Brief of a BRIEF judge (brief-review, judge_target:brief). The consultant judges the BRIEF
+  # (issue.body written by the arch) BEFORE the engineer sets off: executable without a new question? We
+  # reuse the SAME GateBrief (gate-decision-v1 contract + canonical options) as the other judges — only
+  # `subject: :brief` reframes the "thing to judge". The BRIEF goes into `outputs` (the thing TO JUDGE; ≠
+  # build_judge_brief where outputs = the deliverable/code); no `request` (the executability criterion is
+  # carried by the :brief framing). The judge is PRE-PR (no clone, no deliverable) → N0-consistent.
   defp build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route) do
-    # Le brief = body de l'ISSUE, DÉJÀ en main (le poller a listé l'issue ; brief-review est
-    # toujours issue-path). On l'utilise → pas de `get_issue` redondant. Fallback fetch si body absent (robustesse).
+    # The brief = the ISSUE body, ALREADY in hand (the poller listed the issue; brief-review is
+    # always issue-path). We use it → no redundant `get_issue`. Fallback fetch if body absent (robustness).
     brief = issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts)
 
     {workflow_map_name, step} =
@@ -256,8 +256,8 @@ defmodule Fleet.Pilot.BriefBuilder do
     })
   end
 
-  # Body de l'issue DÉJÀ listée par le poller → utilisé direct ; fetch SEULEMENT en fallback
-  # (body absent/vide — défensif ; brief-review est toujours issue-path, l'issue est en main).
+  # Body of the issue ALREADY listed by the poller → used directly; fetch ONLY as a fallback
+  # (body absent/empty — defensive; brief-review is always issue-path, the issue is in hand).
   defp issue_body_in_hand_or_fetch(issue, forge, repo, number, forge_opts) do
     case Map.get(issue, "body") do
       body when is_binary(body) and body != "" ->

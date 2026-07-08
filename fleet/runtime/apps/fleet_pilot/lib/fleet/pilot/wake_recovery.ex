@@ -1,33 +1,33 @@
 defmodule Fleet.Pilot.WakeRecovery do
   @moduledoc """
-  Durcissement de `Fleet.Spawner.wake_pod/1`. Un échec de wake (pod injoignable : `:not_found`,
-  tmux absent/mort) n'est PAS bloquant en soi. Le modèle :
+  Hardening of `Fleet.Spawner.wake_pod/1`. A wake failure (pod unreachable: `:not_found`,
+  tmux absent/dead) is NOT blocking in itself. The model:
 
-    - **déjà vu** — l'incident est dans le registre persistant `Fleet.Pilot.IncidentRegistry` (donc déjà
-      survenu, éventuellement en session précédente) → **escalade DIRECTE** : pattern, pas random → root-cause ;
-    - **1er coup** → **re-roll** (re-spawn injecté + re-wake) :
-        - re-wake OK → **récupéré** → on GRAVE l'incident dans le registre (ancre pour la prochaine fois) ;
-        - re-wake FAIL → le re-roll n'a pas réparé → **escalade IMMÉDIATE** (problème actif).
+    - **already seen** — the incident is in the persistent registry `Fleet.Pilot.IncidentRegistry` (so already
+      occurred, possibly in a previous session) → **DIRECT escalation**: pattern, not random → root-cause;
+    - **first time** → **re-roll** (injected re-spawn + re-wake):
+        - re-wake OK → **recovered** → we RECORD the incident in the registry (anchor for next time);
+        - re-wake FAIL → the re-roll did not repair → **IMMEDIATE escalation** (active problem).
 
-  Escalade = issue système (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin), `reason`
-  préservé, 2 portes distinctes (`:recurrence` / `:reroll_failed`). Frontière : un wake raté = **problème
-  de FLEET → starfleet** (qui peut re-spawner/réparer), PAS le gatekeeper (juge de projet). **La mémoire
-  vit dans le PROJET** (registre `work/ops`), pas la session : session exécute, projet se souvient,
-  système répare.
+  Escalation = system issue (`fleet/lcars`, label `error_system`, assignee `starfleet`=sysadmin), `reason`
+  preserved, 2 distinct gates (`:recurrence` / `:reroll_failed`). Boundary: a failed wake = **a FLEET
+  problem → starfleet** (which can re-spawn/repair), NOT the gatekeeper (project judge). **The memory
+  lives in the PROJECT** (registry `work/ops`), not the session: session executes, project remembers,
+  system repairs.
 
-  Seams (fonctions) pour le test ; défauts = les vraies fns. API `wake/3` inchangée pour les appelants.
+  Seams (functions) for testing; defaults = the real fns. `wake/3` API unchanged for the callers.
   """
   require Logger
 
   alias Fleet.Pilot.IncidentRegistry
 
   @doc """
-  Réveille `pod_id` avec recovery. `respawn_fun/0` = le re-spawn type-spécifique injecté par l'appelant
-  (reboot du gatekeeper ; re-spawn worker). Pré-requis : le brief est DÉJÀ en file.
+  Wakes `pod_id` with recovery. `respawn_fun/0` = the type-specific re-spawn injected by the caller
+  (gatekeeper reboot; worker re-spawn). Prerequisite: the brief is ALREADY queued.
 
-  Returns `:ok` | `{:error, term()}` (du re-wake) | `{:error, {:escalated, reason}}` (issue sysadmin
-  RÉELLEMENT ouvert) | `{:error, {:escalation_failed, reason}}` (récurrence/re-roll KO mais l'ouverture du
-  issue a échoué — forge down ? — AUCUN issue n'existe : retour HONNÊTE, pas un `:escalated` rassurant).
+  Returns `:ok` | `{:error, term()}` (from the re-wake) | `{:error, {:escalated, reason}}` (sysadmin issue
+  ACTUALLY opened) | `{:error, {:escalation_failed, reason}}` (recurrence/re-roll failed but the issue
+  opening failed — forge down? — NO issue exists: HONEST return, not a reassuring `:escalated`).
   """
   @spec wake(String.t(), (-> any()), keyword()) :: :ok | {:error, term()}
   def wake(pod_id, respawn_fun, opts \\ [])
@@ -75,11 +75,11 @@ defmodule Fleet.Pilot.WakeRecovery do
     end
   end
 
-  # Ouvre le issue sysadmin ET propage le résultat CONSTATÉ (jamais `:escalated` par optimisme) :
-  #   - issue ouvert (`{:ok, _}`) → `{:error, {:escalated, reason}}` (wake raté + alarme passée) ;
-  #   - ouverture KO (`{:error, _}`, forge down ?) → log LOUD + `{:error, {:escalation_failed, _}}` :
-  #     AUCUN issue n'existe, l'appelant ne doit pas croire qu'un sysadmin a été prévenu.
-  # Partagé par les 2 portes d'escalade (récurrence directe / re-roll épuisé) — même propagation.
+  # Opens the sysadmin issue AND propagates the OBSERVED result (never `:escalated` out of optimism):
+  #   - issue opened (`{:ok, _}`) → `{:error, {:escalated, reason}}` (wake failed + alarm raised);
+  #   - opening failed (`{:error, _}`, forge down?) → LOUD log + `{:error, {:escalation_failed, _}}`:
+  #     NO issue exists, the caller must not believe a sysadmin was notified.
+  # Shared by the 2 escalation gates (direct recurrence / exhausted re-roll) — same propagation.
   defp escalate_or_signal(kind, pod_id, reason, sig, opts) do
     case IncidentRegistry.escalate(kind, pod_id, reason, sig, opts) do
       {:ok, _num} ->

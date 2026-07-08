@@ -1,70 +1,70 @@
 defmodule Fleet.Pilot.PodId do
   @moduledoc """
-  ID de pod sémantique DÉTERMINISTE, **repo-scopé**.
+  DETERMINISTIC semantic pod ID, **repo-scoped**.
 
-  Le pod_id est la clé GLOBALE du pod : `Registry`, broker `task.pod_id`, `pod_dir`
-  (`~/pods/pod_<id>`), sock, et nom de session tmux (`lcars-pod-<id>`). Sans repo-scope,
-  `issue-N-role` collisionne entre repos/runs au même n° → un SEUL pod pour deux travaux
-  distincts (multi-repo / délégation cross-repo). Le slug repo désambiguïse.
+  The pod_id is the pod's GLOBAL key: `Registry`, `task.pod_id` broker, `pod_dir`
+  (`~/pods/pod_<id>`), sock, and tmux session name (`lcars-pod-<id>`). Without repo-scope,
+  `issue-N-role` collides between repos/runs at the same number → a SINGLE pod for two distinct
+  jobs (multi-repo / cross-repo delegation). The repo slug disambiguates.
 
-  DÉTERMINISTE (clé stable, sans suffixe timestamp) : même `(repo, n, role)` → même id → un re-dispatch retombe sur
-  le pod vivant pour le RE-BRIEFER (garde son contexte). Le format vit ENTIEREMENT ici : `for_issue`/`for_pr`
-  le CONSTRUISENT, `parse_ref/2` l'ANCRE (phase + numero d'instance) pour la reconciliation de verrous. Un seul
-  module connait le format -> aucun parseur distant ne le re-derive (un changement de format ne casse personne
-  en silence). On ne reconstruit jamais `(n, role)` complets depuis l'id (le role n'est pas re-extrait) : l'id
-  reste opaque a l'exterieur, qui passe par `parse_ref/2` plutot que de re-parser le litteral.
+  DETERMINISTIC (stable key, no timestamp suffix): same `(repo, n, role)` → same id → a re-dispatch falls back onto
+  the live pod to RE-BRIEF it (keeps its context). The format lives ENTIRELY here: `for_issue`/`for_pr`
+  BUILD it, `parse_ref/2` ANCHORS it (phase + instance number) for lock reconciliation. A single
+  module knows the format -> no remote parser re-derives it (a format change breaks no one
+  silently). We never reconstruct full `(n, role)` from the id (the role is not re-extracted): the id
+  stays opaque to the outside, which goes through `parse_ref/2` rather than re-parsing the literal.
 
-  La feature-branch (`lcars/issue-N-role`) reste **repo-LOCALE** (elle vit DANS le repo → pas de
-  collision) → NON scopée. pod_id et branche sont construits indépendamment depuis `(n, role)`.
+  The feature-branch (`lcars/issue-N-role`) stays **repo-LOCAL** (it lives IN the repo → no
+  collision) → NOT scoped. pod_id and branch are built independently from `(n, role)`.
 
-  Path-safe (contrat `Fleet.Spawner.valid_pod_id?/1`) car interpolé dans des paths FS / noms tmux.
+  Path-safe (contract `Fleet.Spawner.valid_pod_id?/1`) because interpolated into FS paths / tmux names.
   """
 
-  # Marqueurs de phase d'instance — LITTERAL-SOURCE unique : `for_issue`/`for_pr` les POSENT,
-  # `parse_ref` les RECONNAIT. Renommer = ce seul point (plus de token tape en double builder/parseur).
-  # Alphanumeriques purs -> pas de Regex.escape necessaire cote parseur.
+  # Instance phase markers — single LITERAL-SOURCE: `for_issue`/`for_pr` SET them,
+  # `parse_ref` RECOGNIZES them. Renaming = this single point (no more token typed twice in builder/parser).
+  # Pure alphanumerics -> no Regex.escape needed on the parser side.
   @phase_issue "issue"
   @phase_pr "pr"
 
-  @doc "pod_id producteur (keyé ISSUE) : `<repo-slug>-issue-<n>-<role>`."
+  @doc "Producer pod_id (keyed by ISSUE): `<repo-slug>-issue-<n>-<role>`."
   @spec for_issue(String.t(), integer() | String.t(), String.t()) :: String.t()
   def for_issue(repo, n, role),
     do: Enum.join([slug(repo), @phase_issue, component(n), component(role)], "-")
 
-  @doc "pod_id juge (keyé PR) : `<repo-slug>-pr-<n>-<role>`."
+  @doc "Judge pod_id (keyed by PR): `<repo-slug>-pr-<n>-<role>`."
   @spec for_pr(String.t(), integer() | String.t(), String.t()) :: String.t()
   def for_pr(repo, n, role),
     do: Enum.join([slug(repo), @phase_pr, component(n), component(role)], "-")
 
   @doc """
-  pod_id PROJET (keyé repo SEUL, sans numéro) : `<repo-slug>-<role>`. Pour les rôles `slot_scope:
-  project` (engineer, singletons fleet-level) : UNE identité par (repo, rôle) → un re-dispatch de
-  N'IMPORTE quelle issue/PR du repo retombe sur le MÊME pod_id → UN slot Desktop stable (cwd +
-  session-id figés), dispatch sérialisé par (repo, rôle). À opposer à `for_issue`/`for_pr` (keyés par
-  instance → fan-out). Réutilise `scope_prefix/1` (source unique du slug). Le rôle (`engineer`, …) ne
-  contient jamais `-issue-`/`-pr-` → pas de collision avec un id d'instance.
+  PROJECT pod_id (keyed by repo ALONE, without a number): `<repo-slug>-<role>`. For `slot_scope:
+  project` roles (engineer, fleet-level singletons): ONE identity per (repo, role) → a re-dispatch of
+  ANY issue/PR of the repo falls back onto the SAME pod_id → ONE stable Desktop slot (frozen cwd +
+  session-id), dispatch serialized by (repo, role). To contrast with `for_issue`/`for_pr` (keyed by
+  instance → fan-out). Reuses `scope_prefix/1` (single source of the slug). The role (`engineer`, …) never
+  contains `-issue-`/`-pr-` → no collision with an instance id.
   """
   @spec for_repo(String.t(), String.t()) :: String.t()
   def for_repo(repo, role) when is_binary(role), do: scope_prefix(repo) <> component(role)
 
   @doc """
-  Préfixe de scope REPO d'un pod_id : `<repo-slug>-`. C'est l'ANCRE qui qualifie une clé de
-  verrou par repo. Tout pod_id du repo commence par lui (`for_issue`/`for_pr` posent `<slug>-issue|pr-…`).
-  Source UNIQUE du slug (le même que `for_issue`/`for_pr`) → la réconciliation scope ses refs par repo
-  sans re-dériver le format. (`PodId` reste opaque : on ne re-parse pas l'id, on l'ANCRE par préfixe.)
+  REPO scope prefix of a pod_id: `<repo-slug>-`. It's the ANCHOR that qualifies a lock
+  key by repo. Every pod_id of the repo starts with it (`for_issue`/`for_pr` set `<slug>-issue|pr-…`).
+  SINGLE source of the slug (the same as `for_issue`/`for_pr`) → the reconciliation scopes its refs by repo
+  without re-deriving the format. (`PodId` stays opaque: we don't re-parse the id, we ANCHOR it by prefix.)
   """
   @spec scope_prefix(String.t()) :: String.t()
   def scope_prefix(repo) when is_binary(repo), do: "#{slug(repo)}-"
 
   @doc """
-  Reconnait le marqueur d'INSTANCE qu'un pod_id encode (`issue`/`pr` + numero), ancre sur le scope du
-  repo. Inverse partiel de `for_issue`/`for_pr` : l'autorite qui CONSTRUIT le format le RECONNAIT aussi,
-  pour qu'aucun parseur distant n'ait a re-deriver le litteral (un changement de format casserait sinon
-  un lecteur lointain en silence). On n'extrait QUE la phase et le numero (jamais le role) -> l'id reste
-  opaque sur sa semantique complete.
+  Recognizes the INSTANCE marker a pod_id encodes (`issue`/`pr` + number), anchored on the repo
+  scope. Partial inverse of `for_issue`/`for_pr`: the authority that BUILDS the format also RECOGNIZES it,
+  so that no remote parser has to re-derive the literal (a format change would otherwise break
+  a distant reader silently). We extract ONLY the phase and the number (never the role) -> the id stays
+  opaque on its full semantics.
 
-  `{:ok, {:issue | :pr, n}}` si `pod_id` appartient au repo et encode une instance ;
-  `:error` sinon (autre repo, ou pod_id projet `<repo>-<role>` sans `-issue|pr-N-`).
+  `{:ok, {:issue | :pr, n}}` if `pod_id` belongs to the repo and encodes an instance;
+  `:error` otherwise (other repo, or project pod_id `<repo>-<role>` without `-issue|pr-N-`).
   """
   @spec parse_ref(String.t(), String.t()) :: {:ok, {:issue | :pr, pos_integer()}} | :error
   def parse_ref(pod_id, repo) when is_binary(pod_id) and is_binary(repo) do
@@ -79,13 +79,13 @@ defmodule Fleet.Pilot.PodId do
 
   def parse_ref(_, _), do: :error
 
-  # `owner/name` → `owner-name` ; tout char hors-charset path-safe → `-`.
-  # Les runs de `.` sont réduits pour satisfaire le contrat spawner (`..` interdit
-  # même si le charset l'autorise).
+  # `owner/name` → `owner-name`; any char outside the path-safe charset → `-`.
+  # Runs of `.` are reduced to satisfy the spawner contract (`..` forbidden
+  # even if the charset allows it).
   #
-  # DOMAINE SLUG DISTINCT (ne pas fusionner) : `component` TRANSFORME vers le charset pod_id
-  # `[A-Za-z0-9._-]` (casse + `.` preserves, contrat `valid_pod_id?`). Ce n'est NI `Fleet.Slug`
-  # (VALIDE/rejette, minuscules strict, sans `.`), NI `SeedStore.slugify` (compat vendor Claude).
+  # DISTINCT SLUG DOMAIN (do not merge): `component` TRANSFORMS toward the pod_id charset
+  # `[A-Za-z0-9._-]` (case + `.` preserved, contract `valid_pod_id?`). It is NEITHER `Fleet.Slug`
+  # (VALIDATES/rejects, strict lowercase, no `.`), NOR `SeedStore.slugify` (Claude vendor compat).
   defp slug(repo) when is_binary(repo) do
     repo
     |> String.replace("/", "-")

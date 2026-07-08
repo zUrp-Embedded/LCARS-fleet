@@ -1,34 +1,34 @@
 defmodule Fleet.Pilot.Offload do
   @moduledoc """
-  Source UNIQUE de l'idiome d'**offload supervisé** des consumers Bus du pilot
-  (`Fleet.Pilot.StepRunConsumer`, `Fleet.Pilot.IncidentConsumer`) : exécuter un travail I/O
-  (git push, écritures forge) dans une `Task.Supervisor` pour ne PAS bloquer la mailbox du
-  singleton, avec un échec de spawn fail-loud (jamais silencieux).
+  SINGLE source of the **supervised offload** idiom of the pilot's Bus consumers
+  (`Fleet.Pilot.StepRunConsumer`, `Fleet.Pilot.IncidentConsumer`): run I/O work
+  (git push, forge writes) in a `Task.Supervisor` so as NOT to block the singleton's
+  mailbox, with a fail-loud spawn failure (never silent).
 
-  Les deux consumers portaient chacun leur copie de `offload_async/1` (même séquence
+  The two consumers each carried their own copy of `offload_async/1` (same sequence
   `Task.Supervisor.start_child` → `{:ok, :offloaded}` | log error + `{:error, {:offload_failed, _}}`).
-  Le squelette est factorisé ici ; chaque consumer GARDE :
+  The skeleton is factored here; each consumer KEEPS:
 
-    * **son superviseur** (`task_supervisor/0`, démarré par `application.ex` AVANT le consumer —
-      blast-radius séparé : un burst d'un concern ne sature pas les tasks de l'autre) ;
-    * **son message d'échec** (la conséquence d'un offload raté diffère : « complétion perdue »
-      côté step_run vs « incident NON gravé » côté incidents) — porté par `error_label`.
+    * **its supervisor** (`task_supervisor/0`, started by `application.ex` BEFORE the consumer —
+      separate blast-radius: a burst of one concern does not saturate the other's tasks);
+    * **its failure message** (the consequence of a failed offload differs: "completion lost"
+      on the step_run side vs "incident NOT recorded" on the incidents side) — carried by `error_label`.
 
-  Le vrai outcome du travail offloadé est loggé DANS la task par l'appelant (le retour
-  `{:ok, :offloaded}` ne dit que « la task est partie »).
+  The real outcome of the offloaded work is logged IN the task by the caller (the return
+  `{:ok, :offloaded}` only says "the task was launched").
   """
 
   require Logger
 
   @doc """
-  Démarre `fun` dans la `Task.Supervisor` nommée `supervisor_name`. Rend `{:ok, :offloaded}`
-  (le vrai outcome est loggé dans la task par l'appelant). Échec de spawn (ex. `:max_children`
-  atteint) → fail-loud : log `"<consumer>: offload Task échoué (<reason>) — <conséquence>"` +
-  `{:error, {:offload_failed, reason}}` — le travail N'A PAS été lancé, et ça se voit.
+  Starts `fun` in the `Task.Supervisor` named `supervisor_name`. Returns `{:ok, :offloaded}`
+  (the real outcome is logged in the task by the caller). Spawn failure (e.g. `:max_children`
+  reached) → fail-loud: logs `"<consumer>: offload Task échoué (<reason>) — <conséquence>"` +
+  `{:error, {:offload_failed, reason}}` — the work was NOT launched, and it shows.
 
-  `error_label` = `{consumer, conséquence}` : le nom du consumer (préfixe du log) et la
-  conséquence métier de la perte (suffixe du log), les deux seuls points de divergence des
-  copies d'origine.
+  `error_label` = `{consumer, consequence}`: the consumer name (log prefix) and the
+  business consequence of the loss (log suffix), the only two points of divergence of the
+  original copies.
   """
   @spec async(atom(), (-> any()), {String.t(), String.t()}) ::
           {:ok, :offloaded} | {:error, {:offload_failed, term()}}

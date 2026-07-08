@@ -1,21 +1,21 @@
 defmodule Fleet.Pilot.WriteSpacing do
   @moduledoc """
-  Gap anti-tie ENTRE deux écritures forge dont l'ORDRE d'affichage compte (dashboard/activité Gitea).
-  Gitea horodate les events à la SECONDE : deux écritures dans la même seconde tiennent une égalité de
-  `created_at` que le feed rend dans un ordre ARBITRAIRE (« logiquement avant, affiché après » —
-  constaté en direct, plusieurs fois, sur des séquences DIFFÉRENTES).
+  Anti-tie gap BETWEEN two forge writes whose DISPLAY ORDER matters (Gitea dashboard/activity).
+  Gitea timestamps events to the SECOND: two writes in the same second hold a `created_at`
+  tie that the feed renders in an ARBITRARY order ("logically before, displayed after" —
+  observed live, several times, on DIFFERENT sequences).
 
-  UN SEUL primitif, deux consommateurs : `StepRunCompleter` (comment de verdict → route/stage ; sceau
-  de merge → unlock) et `ProjectOnboard` (create_repo → push main → push work/ops — la séquence tourne
-  en local, quasi-instantanée, donc collision quasi garantie sans gap). Même config, même seam test —
-  le concept est « écriture forge visible humain », pas « step_run » ni « onboard » spécifiquement.
+  A SINGLE primitive, two consumers: `StepRunCompleter` (verdict comment → route/stage; merge
+  seal → unlock) and `ProjectOnboard` (create_repo → push main → push work/ops — the sequence runs
+  locally, near-instantaneous, so collision near-guaranteed without a gap). Same config, same test seam —
+  the concept is "human-visible forge write", not "step_run" nor "onboard" specifically.
   """
 
   @doc """
-  Insère le gap configuré (`:fleet_pilot, :forge_write_spacing_ms`, défaut 2000ms ; 0 en test → no-op,
-  cf. `config/test.exs`). Seam `:sleeper` dans `opts` (test — capture la durée demandée, ne dort pas
-  réellement). NB : bloque brièvement l'appelant (assumé : déjà sur le chemin d'écritures HTTP
-  synchrones — 2s achète une chronologie honnête, décision user).
+  Inserts the configured gap (`:fleet_pilot, :forge_write_spacing_ms`, default 2000ms; 0 in test → no-op,
+  cf. `config/test.exs`). `:sleeper` seam in `opts` (test — captures the requested duration, does not actually
+  sleep). NB: briefly blocks the caller (assumed: already on the synchronous HTTP writes
+  path — 2s buys an honest chronology, user decision).
   """
   @spec gap(keyword()) :: :ok
   def gap(opts \\ []) do

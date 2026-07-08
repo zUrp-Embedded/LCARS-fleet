@@ -1,29 +1,29 @@
 defmodule Fleet.Pilot.GitOps do
   @moduledoc """
-  Git borné — source unique du wrapper `git` pour les opérations FS du pilot (onboarding d'un projet,
-  alignement d'un worktree). La BORNE réelle (process-group dédié + deadline MUR qui tue le groupe +
-  anti-prompt) vit dans `Fleet.Credentials.Shell.git` ; ce module y ajoute trois choses partagées :
+  Bounded git — single source of the `git` wrapper for the pilot's FS operations (onboarding a project,
+  aligning a worktree). The real BOUND (dedicated process-group + WALL deadline that kills the group +
+  anti-prompt) lives in `Fleet.Credentials.Shell.git`; this module adds three shared things to it:
 
-    * l'injection d'auth (token forge en env, JAMAIS sur l'argv) pour les ops réseau (clone/fetch/push) ;
-    * l'identité de commit (author posé par l'appelant, committer = l'humain pour la traça) ;
-    * un retour TYPÉ `:ok | {:error, {:git_failed | :git_timeout | :git_exit, …}}`.
+    * auth injection (forge token in env, NEVER on the argv) for the network ops (clone/fetch/push);
+    * the commit identity (author set by the caller, committer = the human for traceability);
+    * a TYPED return `:ok | {:error, {:git_failed | :git_timeout | :git_exit, …}}`.
 
-  Partagé par `Fleet.Pilot.ProjectOnboard` (clone/scaffold/commit/push) et `Fleet.Pilot.WorktreeSync`
-  (fetch/reset) : un seul endroit où un `git` du pilot s'exécute — pas deux wrappers à garder en phase.
+  Shared by `Fleet.Pilot.ProjectOnboard` (clone/scaffold/commit/push) and `Fleet.Pilot.WorktreeSync`
+  (fetch/reset): a single place where a pilot `git` runs — not two wrappers to keep in sync.
   """
 
   alias Fleet.Credentials.ForgeAuth
 
   @doc """
-  Lance `git args` borné. `opts` :
+  Runs bounded `git args`. `opts`:
 
-    * `:auth` (défaut `false`) → token forge en env (`ForgeAuth.git_env`) pour les ops réseau
-      (clone/fetch/push). Les ops locales (reset/commit/worktree add) n'en ont pas besoin.
-    * `:author` (`%{name, email}` | `nil`) → `GIT_AUTHOR_*`. Le committer est laissé à la résolution
-      d'identité humaine (traça), pas à l'author.
+    * `:auth` (default `false`) → forge token in env (`ForgeAuth.git_env`) for the network ops
+      (clone/fetch/push). The local ops (reset/commit/worktree add) don't need it.
+    * `:author` (`%{name, email}` | `nil`) → `GIT_AUTHOR_*`. The committer is left to the human
+      identity resolution (traceability), not to the author.
 
-  Retour : `:ok` (exit 0) | `{:error, …}`. Les args sont tronqués à 3 dans l'erreur (assez pour
-  identifier l'op : `git -C <dir> <verbe>`, sans déverser le reste).
+  Return: `:ok` (exit 0) | `{:error, …}`. The args are truncated to 3 in the error (enough to
+  identify the op: `git -C <dir> <verb>`, without dumping the rest).
   """
   @spec run([String.t()], keyword()) :: :ok | {:error, term()}
   def run(args, opts \\ []) do
@@ -46,10 +46,10 @@ defmodule Fleet.Pilot.GitOps do
     end
   end
 
-  # Commit (author posé) : `GIT_AUTHOR` = ce que l'appelant déclare ; `GIT_COMMITTER` = l'humain,
-  # résolu ROBUSTE via `ForgeIdentity.human_identity` (git config → GECOS → login) — ne dépend donc PAS
-  # du `~/.gitconfig` humain. Sans ce committer, un humain non-configuré ferait « empty ident name » →
-  # commit refusé. Author absent (`nil`) → aucun env d'identité (les ops sans commit s'en moquent).
+  # Commit (author set): `GIT_AUTHOR` = what the caller declares; `GIT_COMMITTER` = the human,
+  # resolved ROBUSTLY via `ForgeIdentity.human_identity` (git config → GECOS → login) — so it does NOT depend
+  # on the human's `~/.gitconfig`. Without this committer, an unconfigured human would get "empty ident name" →
+  # commit refused. Author absent (`nil`) → no identity env (the ops without commit don't care).
   defp identity_env(%{name: name, email: email}) do
     committer =
       case Fleet.Credentials.ForgeIdentity.human_identity() do
