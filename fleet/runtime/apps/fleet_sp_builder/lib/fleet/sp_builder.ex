@@ -10,44 +10,44 @@ defmodule Fleet.SPBuilder do
   `compose_claude_md/3`, `filter_skills/2`) implementing the
   `Fleet.SPBuilder.Composer` behaviour.
 
-  ## 6 niveaux d'injection canoniques
+  ## The 6 canonical injection levels
 
-    * N0  — poids modèle (rien runtime)
-    * N1  — server prompt Anthropic (config console)
-    * N2  — `system-prompt.md` composé via `compose/3`
-    * N2bis — `~/context/brief.md` brief-spécifique (référencé, pas composé)
-    * N3  — `~/.claude/CLAUDE.md` composé via `compose_claude_md/3`
-    * N3bis — `~/.claude/skills/` filtrés via `filter_skills/2`
+    * N0  — model weights (nothing at runtime)
+    * N1  — Anthropic server prompt (console config)
+    * N2  — `system-prompt.md` composed via `compose/3`
+    * N2bis — `~/context/brief.md` brief-specific (referenced, not composed)
+    * N3  — `~/.claude/CLAUDE.md` composed via `compose_claude_md/3`
+    * N3bis — `~/.claude/skills/` filtered via `filter_skills/2`
 
-  Frontière vendor : ce module reste vendor-agnostic — il COMPOSE le contenu, il
-  n'injecte rien. L'INJECTION du SP dans le pod est faite par la **frontière N1**
-  (`bin/claude_launch.sh`), qui lit le SP composé depuis
-  `<pod_dir>/.lcars/system-prompt.md` et le passe à `claude` via **`--system-prompt-file`**
-  (HORS argv : le SP en argv fuitait `/proc/<pid>/cmdline` et frôlait ARG_MAX, d'où le
-  passage en mode fichier le 2026-06-14 — `.lcars/` est lisible in-sandbox, contrairement à
-  `.claude/` masqué par le bind creds). REPL interactif (Remote Control), jamais headless.
+  Vendor boundary: this module stays vendor-agnostic — it COMPOSES the content, it
+  injects nothing. INJECTING the SP into the pod is done by the **N1 boundary**
+  (`bin/claude_launch.sh`), which reads the composed SP from
+  `<pod_dir>/.lcars/system-prompt.md` and passes it to `claude` via **`--system-prompt-file`**
+  (OUT of argv: the SP in argv leaked via `/proc/<pid>/cmdline` and grazed ARG_MAX, hence the
+  switch to file mode on 2026-06-14 — `.lcars/` is readable in-sandbox, unlike
+  `.claude/` masked by the creds bind). Interactive REPL (Remote Control), never headless.
 
-  La frontière N1 EST le script `bin/` : il n'existe AUCUNE app claude-bridge ni module
-  `Fleet.Claude.SPInjection`, et AUCUN mode metered (`claude -p`) — ne pas réintroduire ces
-  réfs dans le moduledoc.
+  The N1 boundary IS the `bin/` script: there is NO claude-bridge app and NO module
+  `Fleet.Claude.SPInjection`, and NO metered mode (`claude -p`) — do not reintroduce these
+  refs into the moduledoc.
 
-  Déterminisme sha256 : 2 exécutions sur même input produisent un
-  `stable_sha256` identique (stable parts uniquement, exclut
+  sha256 determinism: 2 runs on the same input produce an
+  identical `stable_sha256` (stable parts only, excludes
   `pod_id`, `spawned_at`, `job_id`, `attempt_id`).
 
-  ## Découpage
+  ## Split-out
 
-  Deux concerns à source de donnée propre sont extraits (la façade compose + templating
-  EEx + résolution de paths reste ici) :
+  Two concerns with their own data source are extracted (the compose facade + EEx
+  templating + path resolution stays here):
 
-    * `Fleet.SPBuilder.Monk` — résolution de l'injection monk (I/O registry YAML) ;
-      `resolve_monk_injection/2` reste l'API publique (defdelegate).
-    * `Fleet.SPBuilder.RepoSections` — extraction des sections nommées du `CLAUDE.md`
-      repo (mini-parser markdown).
+    * `Fleet.SPBuilder.Monk` — resolution of the monk injection (YAML registry I/O);
+      `resolve_monk_injection/2` stays the public API (defdelegate).
+    * `Fleet.SPBuilder.RepoSections` — extraction of the named sections from the repo
+      `CLAUDE.md` (markdown mini-parser).
 
-  La résolution de paths (`sp_role_root`/`modop_root`) N'est PAS extraite : ce sont les
-  config-accessors des lectures de CETTE façade (SP rôle, fragments modop), cohésifs
-  avec elles — un module « Paths » ne porterait que deux getters sans logique.
+  Path resolution (`sp_role_root`/`modop_root`) is NOT extracted: these are the
+  config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
+  with them — a "Paths" module would carry only two getters with no logic.
   """
 
   @behaviour Fleet.SPBuilder.Composer
@@ -55,10 +55,10 @@ defmodule Fleet.SPBuilder do
   alias Fleet.SPBuilder.Monk
   alias Fleet.SPBuilder.RepoSections
 
-  # `stable_sha256` est un hex string `String.t()` (encodé via
-  # `Base.encode16(case: :lower)`) — type plus précis que `binary()`
-  # (sous-type plus large). Hex printable et
-  # comparable en tests.
+  # `stable_sha256` is a hex string `String.t()` (encoded via
+  # `Base.encode16(case: :lower)`) — a tighter type than `binary()`
+  # (the wider supertype). Hex printable and
+  # comparable in tests.
   @type composed :: %{
           sp_md: String.t(),
           stable_sha256: String.t(),
@@ -83,33 +83,34 @@ defmodule Fleet.SPBuilder do
   # ============================================================
 
   @doc """
-  Compose le system prompt à partir d'une cap-profile et de modop bundles.
+  Compose the system prompt from a cap-profile and modop bundles.
 
   ## Inputs
 
-    * `cap_profile` — struct `%Fleet.CapProfile{}` issue de `Fleet.CapProfile.compose/2`
-    * `modop_bundles` — liste ordonnée des noms de modops (ordre = précédence)
-    * `opts` :
-      * `:pod_id` (volatile, exclu du sha256 stable)
+    * `cap_profile` — `%Fleet.CapProfile{}` struct from `Fleet.CapProfile.compose/2`
+    * `modop_bundles` — ordered list of modop names (order = precedence)
+    * `opts`:
+      * `:pod_id` (volatile, excluded from the stable sha256)
       * `:job_id` (volatile)
       * `:attempt_id` (volatile)
       * `:spawned_at` (volatile, DateTime, default `DateTime.utc_now/0`)
-      * `:preloaded_paths` (paths archive-mode, **inclus** dans le hash stable)
-      * `:brief_path` (référencé par path, pas composé dans le SP)
+      * `:preloaded_paths` (archive-mode paths, **included** in the stable hash)
+      * `:brief_path` (referenced by path, not composed into the SP)
 
   ## Exit codes
 
     * `{:ok, %{sp_md, stable_sha256, metadata}}` — composition OK
     * `{:error, {:modop_bundle_missing, name}}` — modop sp.md absent
-    * `{:error, {:sp_role_path_missing, path}}` — SP rôle base absent
-    * `{:error, {:template_render_failed, reason}}` — erreur EEx
+    * `{:error, {:sp_role_path_missing, path}}` — SP role base absent
+    * `{:error, {:template_render_failed, reason}}` — EEx error
   """
   @impl Fleet.SPBuilder.Composer
   @spec compose(Fleet.CapProfile.t(), [String.t()], compose_opts()) ::
           {:ok, composed()} | {:error, term()}
   def compose(%Fleet.CapProfile{} = cap_profile, modop_bundles, opts \\ [])
       when is_list(modop_bundles) and is_list(opts) do
-    with {:ok, sp_role_base} <- read_sp_role_base(cap_profile),
+    with :ok <- validate_compose_opts(opts),
+         {:ok, sp_role_base} <- read_sp_role_base(cap_profile),
          {:ok, modop_fragments} <- read_modop_fragments(modop_bundles),
          {:ok, monk_inj} <- Monk.resolve_or_empty(cap_profile, opts) do
       preloaded_paths =
@@ -157,18 +158,18 @@ defmodule Fleet.SPBuilder do
   end
 
   @doc """
-  Compose `CLAUDE.md` du pod (N3) — conventions pod + extraction sélective
-  des sections du `CLAUDE.md` repo si fourni.
+  Compose the pod's `CLAUDE.md` (N3) — pod conventions + selective extraction
+  of the repo `CLAUDE.md` sections if provided.
 
-  Sections extraites du repo CLAUDE.md (si fourni) : `Stack`, `Build`,
-  `Test`, `Conventions`, `Commands`, `Gotchas` — chaque header de niveau
-  2 et son corps jusqu'au prochain header.
+  Sections extracted from the repo CLAUDE.md (if provided): `Stack`, `Build`,
+  `Test`, `Conventions`, `Commands`, `Gotchas` — each level-2 header
+  and its body up to the next header.
 
   ## Exit codes
 
     * `{:ok, claude_md_content}` — composition OK
-    * `{:error, {:repo_claude_md_unreadable, path, reason}}` — path donné mais illisible
-    * `{:error, {:template_render_failed, reason}}` — erreur EEx
+    * `{:error, {:repo_claude_md_unreadable, path, reason}}` — path given but unreadable
+    * `{:error, {:template_render_failed, reason}}` — EEx error
   """
   @impl Fleet.SPBuilder.Composer
   @spec compose_claude_md(Fleet.CapProfile.t(), String.t() | nil, keyword()) ::
@@ -178,9 +179,9 @@ defmodule Fleet.SPBuilder do
       assigns = [
         role: Fleet.CapProfile.name(cap_profile),
         containment: Fleet.CapProfile.containment(cap_profile),
-        # lifetime_scope est nesté sous spec.invocation (schéma v2.5 +
-        # cap-profiles canon ; cohérent avec check_lifetime_scope/1). L'ancien
-        # chemin spec.lifetime_scope (pré-v2.5) rend toujours "unknown".
+        # lifetime_scope is nested under spec.invocation (schema v2.5 +
+        # canon cap-profiles; consistent with check_lifetime_scope/1). The old
+        # spec.lifetime_scope path (pre-v2.5) always yields "unknown".
         lifetime_scope: Fleet.CapProfile.lifetime_scope(cap_profile, "unknown"),
         git_ops_denied: get_in(cap_profile.spec, ["scope", "git_ops_denied"]) || [],
         repo_claude_md_sections: repo_sections
@@ -191,19 +192,19 @@ defmodule Fleet.SPBuilder do
   end
 
   @doc """
-  Filtre `skills_root` selon la whitelist `cap_profile.spec["knowledge"]["skills"]`.
+  Filters `skills_root` by the `cap_profile.spec["knowledge"]["skills"]` whitelist.
 
-  Retourne la liste des paths absolus à mount-bind dans le pod. Un skill
-  PLAIN whitelisté mais absent du FS est un **fail-loud** (pas de filtrage
-  silencieux — un pod ne doit pas réclamer un skill inexistant). Les skills
-  QUALIFIÉS `plugin:skill` sont livrés via `LCARS_SKILLS_PLUGINS` (pas comme
-  paths) → exclus de ce check de présence.
+  Returns the list of absolute paths to mount-bind into the pod. A PLAIN
+  whitelisted skill absent from the FS is a **fail-loud** (no silent
+  filtering — a pod must not claim a nonexistent skill). QUALIFIED
+  `plugin:skill` skills are delivered via `LCARS_SKILLS_PLUGINS` (not as
+  paths) → excluded from this presence check.
 
   ## Exit codes
 
-    * `{:ok, [path_absolu, ...]}` — paths des skills plain présents (ordre conservé)
-    * `{:error, {:skills_missing, [name, ...]}}` — skill(s) plain whitelisté(s) absent(s)
-    * `{:error, :skills_root_missing}` — `skills_root` n'existe pas
+    * `{:ok, [absolute_path, ...]}` — paths of the present plain skills (order preserved)
+    * `{:error, {:skills_missing, [name, ...]}}` — whitelisted plain skill(s) absent
+    * `{:error, :skills_root_missing}` — `skills_root` does not exist
   """
   @impl Fleet.SPBuilder.Composer
   @spec filter_skills(Fleet.CapProfile.t(), Path.t()) :: {:ok, [Path.t()]} | {:error, term()}
@@ -212,22 +213,31 @@ defmodule Fleet.SPBuilder do
     if File.dir?(skills_root) do
       whitelist = get_in(cap_profile.spec, ["knowledge", "skills"]) || []
 
-      # Les skills QUALIFIÉS `plugin:skill` sont livrés via
-      # `LCARS_SKILLS_PLUGINS` (skills_plugins_env → bwrap charge le plugin),
-      # PAS comme paths montés → exclus du check de présence sur disque.
+      # QUALIFIED `plugin:skill` skills are delivered via
+      # `LCARS_SKILLS_PLUGINS` (skills_plugins_env → bwrap loads the plugin),
+      # NOT as mounted paths → excluded from the on-disk presence check.
       plain = Enum.reject(whitelist, &String.contains?(&1, ":"))
 
-      {present, missing} =
-        plain
-        |> Enum.map(&{&1, Path.join(skills_root, &1)})
-        |> Enum.split_with(fn {_name, path} -> File.exists?(path) end)
+      # Each plain skill name becomes a bind-mount SOURCE in the pod: a name that is not a plain slug
+      # (`..`, `/`, absolute, control) could probe/mount an arbitrary path (R1-29). Refuse fail-loud rather
+      # than resolve it (skill dirs are slugs; a `plugin:skill` was already excluded above).
+      case Enum.reject(plain, &Fleet.Slug.valid?/1) do
+        [] ->
+          {present, missing} =
+            plain
+            |> Enum.map(&{&1, Path.join(skills_root, &1)})
+            |> Enum.split_with(fn {_name, path} -> File.exists?(path) end)
 
-      # Un skill whitelisté mais ABSENT du disque est un fail-loud (erreur en amont
-      # qui rend l'état « skill manquant » irreprésentable, pas rattrapé en aval) :
-      # `{:error, {:skills_missing, names}}`, pas un filtrage silencieux du pod.
-      case missing do
-        [] -> {:ok, Enum.map(present, fn {_name, path} -> path end)}
-        _ -> {:error, {:skills_missing, Enum.map(missing, fn {name, _path} -> name end)}}
+          # A whitelisted skill ABSENT from disk is a fail-loud (an upstream error
+          # that makes the "missing skill" state unrepresentable, not caught downstream):
+          # `{:error, {:skills_missing, names}}`, not a silent filtering of the pod.
+          case missing do
+            [] -> {:ok, Enum.map(present, fn {_name, path} -> path end)}
+            _ -> {:error, {:skills_missing, Enum.map(missing, fn {name, _path} -> name end)}}
+          end
+
+        unsafe ->
+          {:error, {:skills_unsafe, unsafe}}
       end
     else
       {:error, :skills_root_missing}
@@ -235,14 +245,34 @@ defmodule Fleet.SPBuilder do
   end
 
   @doc """
-  Résout l'injection monk du cap-profile — API publique historique, déléguée à
-  `Fleet.SPBuilder.Monk.resolve/2` (contrat détaillé, options et codes d'erreur
-  documentés là-bas). `{:ok, %{persona_hint, corpus_paths}}` | `:not_a_monk` |
+  Resolves the cap-profile's monk injection — historical public API, delegated to
+  `Fleet.SPBuilder.Monk.resolve/2` (detailed contract, options and error codes
+  documented over there). `{:ok, %{persona_hint, corpus_paths}}` | `:not_a_monk` |
   `{:error, term()}`.
   """
   @spec resolve_monk_injection(Fleet.CapProfile.t(), keyword()) ::
           {:ok, Monk.injection()} | :not_a_monk | {:error, term()}
   defdelegate resolve_monk_injection(cap_profile, opts \\ []), to: Monk, as: :resolve
+
+  # Parse-at-boundary: the load-bearing opts CRASH the composition if malformed — a `preloaded_paths`
+  # that is not a list of binaries blows up the `++` / concat, a `spawned_at` that is not a `%DateTime{}`
+  # blows up `DateTime.to_iso8601`. Turn those into a typed `{:error, {:bad_opt, _}}` (compose promises
+  # `{:ok}|{:error}`), never a raise. Prod callers (`Pod`) pass the defaults; this guards a direct caller.
+  defp validate_compose_opts(opts) do
+    preloaded = Keyword.get(opts, :preloaded_paths, [])
+    spawned_at = Keyword.get(opts, :spawned_at, DateTime.utc_now())
+
+    cond do
+      not (is_list(preloaded) and Enum.all?(preloaded, &is_binary/1)) ->
+        {:error, {:bad_opt, {:preloaded_paths, preloaded}}}
+
+      not match?(%DateTime{}, spawned_at) ->
+        {:error, {:bad_opt, {:spawned_at, spawned_at}}}
+
+      true ->
+        :ok
+    end
+  end
 
   # ============================================================
   # SP role base + modop fragments I/O
@@ -254,18 +284,31 @@ defmodule Fleet.SPBuilder do
         {:ok, ""}
 
       path when is_binary(path) ->
-        full_path = Path.join(sp_role_root(), path)
+        root = sp_role_root()
+        full_path = Path.join(root, path)
 
-        case File.read(full_path) do
-          {:ok, content} -> {:ok, content}
-          {:error, _reason} -> {:error, {:sp_role_path_missing, full_path}}
+        # `systemPrompt` comes from the catalogue YAML (untrusted artifact): confine the read to the SP
+        # root (R1-01). A control char (incl. NUL — which would raise in Path.expand/File.read) is refused
+        # first, then the joined path must stay UNDER the root (`..` traversal → escape → refused).
+        cond do
+          String.match?(path, ~r/[\x00-\x1F\x7F]/) ->
+            {:error, {:sp_role_path_unsafe, path}}
+
+          not Fleet.Slug.under_root?(full_path, root) ->
+            {:error, {:sp_role_path_escape, path}}
+
+          true ->
+            case File.read(full_path) do
+              {:ok, content} -> {:ok, content}
+              {:error, _reason} -> {:error, {:sp_role_path_missing, full_path}}
+            end
         end
     end
   end
 
-  # Aucun modop demandé (chemin PROD : `SPBuilder.compose(cap, [], …)` côté pod.ex) → rien à lire,
-  # `modop_root` jamais résolu : ce root sert UNIQUEMENT la fonctionnalité (config-pilotée) des fragments
-  # de modop, non câblée dans la chaîne de spawn actuelle.
+  # No modop requested (PROD path: `SPBuilder.compose(cap, [], …)` on the pod.ex side) → nothing to read,
+  # `modop_root` never resolved: this root serves ONLY the (config-driven) modop-fragments
+  # feature, not wired into the current spawn chain.
   defp read_modop_fragments([]), do: {:ok, []}
 
   defp read_modop_fragments(modop_bundles) do
@@ -273,14 +316,17 @@ defmodule Fleet.SPBuilder do
       {:ok, root} ->
         result =
           Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
-            path = Path.join([root, name, "sp.md"])
+            # Confine the modop leaf under `root`: a malformed `name` (`..`, `/`, absolute) never reaches
+            # the FS (R1-02/03) — same patron as `Fleet.CapProfile.Catalog.read_modops`.
+            case Fleet.Slug.confined_join(root, name) do
+              {:ok, dir} ->
+                case File.read(Path.join(dir, "sp.md")) do
+                  {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
+                  {:error, _reason} -> {:halt, {:error, {:modop_bundle_missing, name}}}
+                end
 
-            case File.read(path) do
-              {:ok, content} ->
-                {:cont, {:ok, [{name, content} | acc]}}
-
-              {:error, _reason} ->
-                {:halt, {:error, {:modop_bundle_missing, name}}}
+              {:error, reason} ->
+                {:halt, {:error, {:modop_bundle_unsafe, {name, reason}}}}
             end
           end)
 
@@ -331,22 +377,22 @@ defmodule Fleet.SPBuilder do
   # Path resolution (config knobs for testability)
   # ============================================================
 
-  # `sp_role_root` — base sous laquelle résout le chemin `spec.systemPrompt` d'un cap-profile. Défaut =
-  # le canon cap-profiles BUNDLÉ (`Application.app_dir(:fleet_cap_profile, …)`, MÊME source que
-  # `Fleet.CapProfile.root_dir/0`, dont sp_builder dépend déjà) → résout en RELEASE comme en dev SANS env.
-  # L'ancien défaut relatif `"cap-profiles"` (relatif au CWD) donnait `:enoent` en release. Override config (test).
+  # `sp_role_root` — base under which a cap-profile's `spec.systemPrompt` path resolves. Default =
+  # the BUNDLED cap-profiles canon (`Application.app_dir(:fleet_cap_profile, …)`, the SAME source as
+  # `Fleet.CapProfile.root_dir/0`, which sp_builder already depends on) → resolves in RELEASE as in dev WITHOUT env.
+  # The old relative default `"cap-profiles"` (relative to CWD) gave `:enoent` in release. Config override (test).
   defp sp_role_root do
     Application.get_env(:fleet_sp_builder, :sp_role_root) ||
       Application.app_dir(:fleet_cap_profile, "priv/canon/cap-profiles")
   end
 
-  # `modop_root` — base des fragments SP de modop (`<root>/<name>/sp.md`). CONFIG-OBLIGATOIRE (fail-loud) :
-  # les fragments canon vivent dans `fleet_workflow/priv/canon/modop-bundles` (Ring 3), HORS du graphe de
-  # deps de sp_builder (Ring 1) → on ne peut PAS y pointer un défaut bundlé sans violer le ring (et
-  # `Application.app_dir(:fleet_workflow, …)` lèverait « unknown application » en test isolé). Donc AUCUN
-  # défaut relatif trompeur (l'ancien `"modop"` relatif au CWD = `:enoent` muet en release) : sans config,
-  # `:error` → `read_modop_fragments` rend `{:error, :modop_root_unconfigured}` (fail-loud explicite). La
-  # chaîne de spawn PROD ne passe aucun modop (`compose(cap, [], …)`) → ce root n'est jamais requis en prod.
+  # `modop_root` — base of the modop SP fragments (`<root>/<name>/sp.md`). CONFIG-MANDATORY (fail-loud):
+  # the canon fragments live in `fleet_workflow/priv/canon/modop-bundles` (Ring 2), OUTSIDE sp_builder's
+  # dep graph (Ring 1) → we can NOT point a bundled default there without violating the ring (and
+  # `Application.app_dir(:fleet_workflow, …)` would raise "unknown application" in an isolated test). So NO
+  # misleading relative default (the old `"modop"` relative to CWD = silent `:enoent` in release): without config,
+  # `:error` → `read_modop_fragments` returns `{:error, :modop_root_unconfigured}` (explicit fail-loud). The
+  # PROD spawn chain passes no modop (`compose(cap, [], …)`) → this root is never required in prod.
   defp modop_root do
     case Application.fetch_env(:fleet_sp_builder, :modop_root) do
       {:ok, root} -> {:ok, root}

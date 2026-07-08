@@ -23,6 +23,20 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
     assert id.role == "engineer"
   end
 
+  test "R1-14 : name/email avec newline/control → hygiénés (pas d'injection dans l'identité git)" do
+    assert {:ok, id} =
+             ForgeIdentity.for_role("engineer",
+               human: "lordzurp",
+               identity: %{name: "Foo\nBar", email: "a@b\r.tld"}
+             )
+
+    assert id.author_name == "FooBar"
+    assert id.author_email == "a@b.tld"
+    assert id.committer_name == "FooBar"
+    refute id.author_name =~ "\n"
+    refute id.committer_email =~ "\r"
+  end
+
   test "for_role : le rôle est porté par le trailer Co-authored-by (pas l'identité)" do
     assert {:ok, id} = ForgeIdentity.for_role("reviewer", opts())
     assert id.coauthor_trailer == "Co-authored-by: LCARS-reviewer <reviewer@lcars.local>"

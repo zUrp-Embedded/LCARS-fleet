@@ -30,8 +30,8 @@ defmodule Fleet.TaskQueue.PersistF007Test do
         # enqueue → handle_call synchrone → persist tente l'écriture → échec loggé avant le reply.
       end)
 
-    assert log =~ "persist ÉCHEC"
-    assert log =~ "durabilité"
+    assert log =~ "persist FAILED"
+    assert log =~ "durability"
 
     # le broker n'a PAS crashé : le work item est toujours servi depuis la RAM.
     assert {:ok, %{state: :assigned}} = TaskQueue.get_for_pod(q, "pod-A")

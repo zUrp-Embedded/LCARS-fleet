@@ -127,6 +127,31 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       assert PublishConsumer.to_keyword(nil) == []
     end
 
+    test "R1-30 : opts d'INFRASTRUCTURE (atomes existants mais dangereux) DROPPÉS (allowlist fail-closed)" do
+      # Force l'existence de ces atomes → ils PASSENT le filtre atom-leak (to_existing_atom OK) : ce qui
+      # les drop est donc bien l'ALLOWLIST, pas le filtre. Ils redirigeraient le FS hors home confiné
+      # (pod_dir_root/state_fs_root), ouvriraient l'hôte (containment) ou changeraient le backend.
+      _intern = [:pod_dir_root, :state_fs_root, :containment, :launch_backend]
+
+      injected = %{
+        "brief" => "x",
+        "pod_id" => "issue-1-engineer",
+        "pod_dir_root" => "/evil",
+        "state_fs_root" => "/evil",
+        "containment" => "none",
+        "launch_backend" => "Evil"
+      }
+
+      kept = PublishConsumer.to_keyword(injected)
+
+      assert Keyword.get(kept, :brief) == "x"
+      assert Keyword.get(kept, :pod_id) == "issue-1-engineer"
+      refute Keyword.has_key?(kept, :pod_dir_root)
+      refute Keyword.has_key?(kept, :state_fs_root)
+      refute Keyword.has_key?(kept, :containment)
+      refute Keyword.has_key?(kept, :launch_backend)
+    end
+
     test "liste NON keyword (tableau JSON décodé) → [] (défense en profondeur, plus gobée brute)" do
       # Un `opts` arrivé comme tableau JSON (`["module","fun"]` ou `[%{...}]`) n'est JAMAIS une keyword-list
       # (clés string → maps/scalaires). Avant, `to_keyword(list) = list` le rendait tel quel → opts arbitraires

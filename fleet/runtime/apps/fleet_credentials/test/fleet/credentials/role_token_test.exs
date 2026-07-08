@@ -23,15 +23,15 @@ defmodule Fleet.Credentials.RoleTokenTest do
   # Désormais il émet un Logger.warning → le fallback token-système est OBSERVABLE.
   test "F-029 : token absent → nil + Logger.warning", _ctx do
     log = capture_log(fn -> assert RoleToken.token("reviewer") == nil end)
-    assert log =~ "absent/illisible"
+    assert log =~ "absent/unreadable"
     assert log =~ "reviewer"
-    assert log =~ "fallback token"
+    assert log =~ "fallback to system token"
   end
 
   test "F-029 : token vide → nil + Logger.warning", %{dir: dir} do
     File.write!(Path.join(dir, "qualifier.gitea_token"), "   \n")
     log = capture_log(fn -> assert RoleToken.token("qualifier") == nil end)
-    assert log =~ "vide"
+    assert log =~ "empty"
     assert log =~ "qualifier"
   end
 

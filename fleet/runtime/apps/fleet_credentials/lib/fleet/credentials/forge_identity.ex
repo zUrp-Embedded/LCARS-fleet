@@ -1,87 +1,87 @@
 defmodule Fleet.Credentials.ForgeIdentity do
   @moduledoc """
-  Résout l'identité git d'un livrable : **author = l'humain
-  du brief**, le rôle LCARS étant porté par un trailer **vérifié** `Co-authored-by:
-  LCARS-<role>` (non négociable : l'identité n'est JAMAIS aplatie sur un compte partagé ;
-  la signature machine est un trailer vérifié, pas l'auteur).
+  Resolves the git identity of a deliverable: **author = the human
+  of the brief**, the LCARS role being carried by a **verified** trailer `Co-authored-by:
+  LCARS-<role>` (non-negotiable: the identity is NEVER flattened onto a shared account;
+  the machine signature is a verified trailer, not the author).
 
-  ## D'où vient l'humain
+  ## Where the human comes from
 
-  L'humain du brief = **l'user du process runtime** (`id -un`). Doctrine 2026-06-11 :
-  la fleet ENTIÈRE tourne sous l'user OS de l'humain qui la lance (`User=<humain>`) —
-  chaque humain = sa fleet sous son user, isolation OS par construction ; le pod (Port
-  BEAM) hérite cet UID. Donc l'user courant EST l'humain. Pas de défaut littéral
-  (masquerait un trou de câblage) : `id -un` irrésoluble → fail-loud.
+  The human of the brief = **the user of the runtime process** (`id -un`). 2026-06-11 doctrine:
+  the ENTIRE fleet runs under the OS user of the human who launches it (`User=<human>`) —
+  each human = their fleet under their user, OS isolation by construction; the pod (BEAM
+  Port) inherits this UID. So the current user IS the human. No literal default
+  (it would mask a wiring hole): `id -un` unresolvable → fail-loud.
 
-  ## D'où vient son name/email git — l'OS, pas un catalogue
+  ## Where its git name/email comes from — the OS, not a catalogue
 
-  Doctrine 2026-06-11 : **si l'user existe sur le système, c'est un humain de la fleet**
-  — on ne re-filtre pas par un catalogue (supprimé). L'identité git se DÉRIVE de l'OS,
-  dans l'ordre :
+  2026-06-11 doctrine: **if the user exists on the system, it is a human of the fleet**
+  — we do not re-filter through a catalogue (removed). The git identity is DERIVED from the OS,
+  in order:
 
-    * **name**  : `git config --global user.name` (le daemon tourne *as* l'humain → lit
-      son `~/.gitconfig`, l'identité avec laquelle il commite DÉJÀ) → sinon GECOS
-      (`getent passwd`) → sinon le login.
-    * **email** : `git config --global user.email` → sinon `<login>@<hostname>`
-      (convention git par défaut).
+    * **name**  : `git config --global user.name` (the daemon runs *as* the human → reads
+      their `~/.gitconfig`, the identity it ALREADY commits with) → otherwise GECOS
+      (`getent passwd`) → otherwise the login.
+    * **email** : `git config --global user.email` → otherwise `<login>@<hostname>`
+      (git's default convention).
 
-  Aucune lecture de fichier, aucun knob à provisionner, aucun fail-loud « humain absent
-  du catalogue » : un user OS ⇒ toujours une identité. (Seam test : `opts[:identity]`
-  ou `config :fleet_credentials, :forge_identity_override` — `git config` varie par runner.)
+  No file read, no knob to provision, no fail-loud "human absent from the
+  catalogue": an OS user ⇒ always an identity. (Test seam: `opts[:identity]`
+  or `config :fleet_credentials, :forge_identity_override` — `git config` varies per runner.)
 
-  **Pré-requis déploiement nominal** : l'humain a `git config --global user.email` configuré.
-  Sinon le fallback `<login>@<hostname>` n'est PAS stable — l'email est résolu
-  deux fois indépendamment (au spawn → `GIT_AUTHOR_EMAIL` du pod ; au check → `allowed_emails`
-  de la gate d'identité de commit) ; si le gitconfig est complété ou le hostname change entre les deux,
-  les emails divergent et la gate rejette un commit légitime. Avec `git config user.email` posé, stable.
+  **Nominal deployment prerequisite**: the human has `git config --global user.email` configured.
+  Otherwise the `<login>@<hostname>` fallback is NOT stable — the email is resolved
+  twice independently (at spawn → the pod's `GIT_AUTHOR_EMAIL`; at check → the `allowed_emails`
+  of the commit-identity gate); if the gitconfig is completed or the hostname changes between the two,
+  the emails diverge and the gate rejects a legitimate commit. With `git config user.email` set, stable.
 
-  ## Trailer rôle
+  ## Role trailer
 
-  `Co-authored-by: LCARS-<role> <<role>@lcars.local>` — le trailer est ce que la gate
-  d'identité de commit vérifie (présence + rôle ↔ step). Pure string, vérifiable mécaniquement.
+  `Co-authored-by: LCARS-<role> <<role>@lcars.local>` — the trailer is what the commit-identity
+  gate verifies (presence + role ↔ step). A pure string, mechanically verifiable.
 
-  ## allowed_emails (gate d'identité de commit)
+  ## allowed_emails (commit-identity gate)
 
-    * `git_native` — le pod commite EN TANT QUE l'humain → author=committer=humain →
+    * `git_native` — the pod commits AS the human → author=committer=human →
       `[human_email]`.
-    * `payload` — le SYSTÈME commite (author=humain, committer=système) →
+    * `payload` — the SYSTEM commits (author=human, committer=system) →
       `[human_email, system_email()]`.
 
-  ## Refus d'éclatement (jugé C4 2026-07-05) — policy de gate NON extraite
+  ## Refusal to split (audit judgment, 2026-07-05) — gate policy NOT extracted
 
-  `allowed_emails/2` + `system_email/0` (consommés au CHECK par la gate de
-  commit) ont un consommateur/moment différent du reste (consommé au SPAWN) —
-  bundle identifié à l'audit. La coupe est REFUSÉE : les deux faces dérivent
-  des MÊMES littéraux d'identité (`@system_email`, `@role_email_domain` —
-  `system_email` nourrit `allowed_emails` côté check ET `system_identity`
-  côté spawn ; `role_email` nourrit le trailer). Les séparer = soit dupliquer
-  le littéral (deux autorités → la divergence que ce module existe pour
-  interdire, cf. § Destination : « aucun autre module ne tape un email git »),
-  soit une dep inter-module pour 4 lignes. Le domaine d'identité forge est UNE
-  frontière ; spawn et check en sont les deux moments, pas deux concerns.
+  `allowed_emails/2` + `system_email/0` (consumed at CHECK time by the commit
+  gate) have a different consumer/moment from the rest (consumed at SPAWN time) —
+  a bundle flagged at audit. The split is REFUSED: both faces derive
+  from the SAME identity literals (`@system_email`, `@role_email_domain` —
+  `system_email` feeds `allowed_emails` on the check side AND `system_identity`
+  on the spawn side; `role_email` feeds the trailer). Separating them = either duplicating
+  the literal (two authorities → the divergence this module exists to
+  forbid, cf. § Destination: "no other module types a git email"),
+  or an inter-module dep for 4 lines. The forge-identity domain is ONE
+  boundary; spawn and check are its two moments, not two concerns.
 
-  ## Destination des identités (contrat H2 2026-07-04)
+  ## Identity destination (contract, 2026-07-04)
 
-  Ces identités sont celles de la FORGE LOCALE (comptes de rôle réels, emails mappés → avatars/traça).
-  Le domaine est un CONTRAT WIRE partagé avec `bwrap_launch.sh` (sanctuaire : il pose
-  GIT_AUTHOR/COMMITTER `<role>@lcars.local` en env au launch) — une divergence est rattrapée
-  STRUCTURELLEMENT par la gate d'identité de commit (push rejeté fail-closed).
+  These identities are those of the LOCAL FORGE (real role accounts, emails mapped → avatars/traceability).
+  The domain is a WIRE CONTRACT shared with `bwrap_launch.sh` (sanctuary: it sets
+  GIT_AUTHOR/COMMITTER `<role>@lcars.local` in env at launch) — a divergence is caught
+  STRUCTURALLY by the commit-identity gate (push rejected fail-closed).
 
-  PUBLISH GitHub (2026-07-07) : le rôle LCARS s'efface au publish, le CO-AUTHOR devient LE VENDOR (pas
-  un rôle, jamais hardcodé — Claude aujourd'hui, un autre vendor demain), dérivé du fait co-localisé au
-  launcher N1 actif (`bin/<vendor>_launch.identity`, cf. `bin/claude_launch.identity`) — même discipline
-  que la frontière N0/N1 vendor. L'AUTHOR devient l'humain (le système s'efface aussi : `author :=
-  committer` sur les commits `system_email()`). La réécriture elle-même vit hors-Elixir
-  (`etc/publish-to-github.sh`, `git filter-repo`) : ce module reste l'autorité des identités de la forge
-  LOCALE, pas l'exécutant de la transformation de publish.
+  GitHub PUBLISH (2026-07-07): the LCARS role steps aside at publish, the CO-AUTHOR becomes THE
+  VENDOR (not a role, never hardcoded — Claude today, another vendor tomorrow), derived from the
+  fact co-located with the active N1 launcher (`bin/<vendor>_launch.identity`, cf.
+  `bin/claude_launch.identity`) — same discipline as the N0/N1 vendor boundary. The AUTHOR becomes
+  the human (the system steps aside too: `author := committer` on `system_email()` commits). The
+  rewrite itself lives outside Elixir (`etc/publish-to-github.sh`, `git filter-repo`): this module
+  stays the authority for the LOCAL forge identities, not the executor of the publish transformation.
   """
 
   @role_email_domain "lcars.local"
   @system_name "lcars-system"
-  # Compte forge SYSTÈME réel (vérifié 2026-07-04 : les commits `lcars-system@lcars.local` sont
-  # mappés au compte forge `lcars-system`, avatar/traça actifs). L'ancien `system@lcars.local`
-  # était un FANTÔME (zéro producteur, zéro commit, zéro compte) pendant que l'onboard retapait
-  # la vraie identité en dur chez lui. UNE identité système, ici.
+  # Real SYSTEM forge account (verified 2026-07-04: the `lcars-system@lcars.local` commits are
+  # mapped to the `lcars-system` forge account, avatar/traceability active). The old `system@lcars.local`
+  # was a PHANTOM (zero producer, zero commit, zero account) while the onboard re-typed
+  # the real identity hardcoded on its side. ONE system identity, here.
   @system_email "#{@system_name}@#{@role_email_domain}"
 
   @type identity :: %{
@@ -95,11 +95,11 @@ defmodule Fleet.Credentials.ForgeIdentity do
         }
 
   @doc """
-  Identité git complète pour un `role` (author=humain + trailer rôle). `opts` :
-  `:human` (override, défaut `id -un`), `:identity` (map `%{name, email}` injectée —
-  tests, court-circuite la dérivation OS).
+  Complete git identity for a `role` (author=human + role trailer). `opts`:
+  `:human` (override, default `id -un`), `:identity` (injected `%{name, email}` map —
+  tests, short-circuits the OS derivation).
 
-  `{:ok, identity}` | `{:error, reason}` (fail-loud uniquement si `id -un` irrésoluble).
+  `{:ok, identity}` | `{:error, reason}` (fail-loud only if `id -un` is unresolvable).
   """
   @spec for_role(String.t(), keyword()) :: {:ok, identity()} | {:error, term()}
   def for_role(role, opts \\ []) when is_binary(role) and role != "" do
@@ -118,60 +118,60 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   @doc """
-  Identité git de l'HUMAIN qui run la fleet (name + email robustes : git config → GECOS → login ; ne FAIL
-  jamais sur un user OS). Sert de `committer` aux commits SYSTÈME (ex. onboard projet, author=`lcars-system`)
-  → trace qui a initié, SANS dépendre du `~/.gitconfig` humain (sans ça, un humain non
-  configuré → committer « empty ident name » → commit refusé). `opts` identiques à `for_role/2`.
+  Git identity of the HUMAN who runs the fleet (robust name + email: git config → GECOS → login; NEVER
+  fails on an OS user). Serves as `committer` for SYSTEM commits (e.g. project onboard, author=`lcars-system`)
+  → traces who initiated, WITHOUT depending on the human's `~/.gitconfig` (without this, an unconfigured
+  human → committer "empty ident name" → commit rejected). `opts` identical to `for_role/2`.
   """
   @spec human_identity(keyword()) ::
           {:ok, %{name: String.t(), email: String.t(), human: String.t()}} | {:error, term()}
   def human_identity(opts \\ []), do: resolve_identity(opts)
 
-  @doc "Trailer machine vérifiable du rôle (Co-authored-by canon). Dérive de `role_email/1`."
+  @doc "Machine-verifiable trailer for the role (canonical Co-authored-by). Derives from `role_email/1`."
   @spec coauthor_trailer(String.t()) :: String.t()
   def coauthor_trailer(role) when is_binary(role) do
     "Co-authored-by: LCARS-#{role} <#{role_email(role)}>"
   end
 
   @doc """
-  Instruction de signature à injecter dans le brief du pod — SOURCE UNIQUE du trailer.
-  Dérive de `coauthor_trailer/1` : tout brief (construit par `Pilot.BriefBuilder.build_brief`)
-  doit l'utiliser, sinon la chaîne (instruction côté pod / needle de la gate d'identité de commit)
-  se désaccorde du canon.
+  Signature instruction to inject into the pod's brief — SINGLE SOURCE of the trailer.
+  Derives from `coauthor_trailer/1`: every brief (built by `Pilot.BriefBuilder.build_brief`)
+  must use it, otherwise the chain (pod-side instruction / needle of the commit-identity gate)
+  diverges from the canon.
   """
   @spec coauthor_instruction(String.t()) :: String.t()
   def coauthor_instruction(role) when is_binary(role) do
-    "Signature OBLIGATOIRE — ajoute à CHAQUE commit git le trailer exact :\n" <>
+    "MANDATORY signature — add the exact trailer to EVERY git commit:\n" <>
       "`#{coauthor_trailer(role)}`\n" <>
-      "(sans lui, le livrable est rejeté au push — gate F-01)."
+      "(without it, the deliverable is rejected at push — gate F-01)."
   end
 
   @doc """
-  Emails d'identité acceptés par la gate d'identité de commit selon le mode. `git_native` → l'humain
-  seul (il commite) ; `payload` → l'humain (author) + système (committer).
+  Identity emails accepted by the commit-identity gate depending on the mode. `git_native` → the human
+  alone (they commit); `payload` → the human (author) + system (committer).
   """
   @spec allowed_emails(:git_native | :payload, String.t()) :: [String.t()]
   def allowed_emails(:git_native, human_email), do: [human_email]
   def allowed_emails(:payload, human_email), do: [human_email, @system_email]
 
   @doc """
-  Identité système (committer en mode payload). Le système N'EST PAS l'humain : il
-  matérialise le commit, l'author reste l'humain.
+  System identity (committer in payload mode). The system IS NOT the human: it
+  materializes the commit, the author stays the human.
   """
   @spec system_email() :: String.t()
   def system_email, do: @system_email
 
   @doc """
-  Identité git complète du SYSTÈME (`%{name, email}`) — author des commits générés par le runtime
-  lui-même (ex. scaffold d'onboarding). Accesseur UNIQUE : ne pas retaper name/email chez l'appelant.
+  Complete git identity of the SYSTEM (`%{name, email}`) — author of commits generated by the runtime
+  itself (e.g. onboarding scaffold). SINGLE accessor: do not re-type name/email at the caller.
   """
   @spec system_identity() :: %{name: String.t(), email: String.t()}
   def system_identity, do: %{name: @system_name, email: @system_email}
 
   @doc """
-  Email git canonique d'un `role` (`<role>@lcars.local`) — le MÊME que celui du trailer
-  (`coauthor_trailer/1` en dérive) et que celui posé en env par le launcher. Accesseur UNIQUE
-  du domaine : aucun appelant ne compose `@lcars.local` à la main.
+  Canonical git email of a `role` (`<role>@lcars.local`) — the SAME as the trailer's
+  (`coauthor_trailer/1` derives from it) and the one set in env by the launcher. SINGLE accessor
+  for the domain: no caller composes `@lcars.local` by hand.
   """
   @spec role_email(String.t()) :: String.t()
   def role_email(role) when is_binary(role) and role != "",
@@ -184,16 +184,16 @@ defmodule Fleet.Credentials.ForgeIdentity do
       h when is_binary(h) and h != "" ->
         {:ok, h}
 
-      # Source UNIQUE `Fleet.Credentials.Human` (jamais de `id -un` shellé en double).
+      # SINGLE source `Fleet.Credentials.Human` (never a second `id -un` shelled out).
       _ ->
         Fleet.Credentials.Human.current()
     end
   end
 
-  # Résout {name, email, human}. Override config `:forge_identity_override` (map
-  # %{name, email, human?}) court-circuite TOUT (seam test : `id -un`/`git config`
-  # varient par runner). Un `:identity` explicite (forge_identity_test) désactive
-  # l'override pour tester la VRAIE assemblée. Sinon : humain (`id -un`) → identité OS.
+  # Resolves {name, email, human}. The `:forge_identity_override` config override (a
+  # %{name, email, human?} map) short-circuits EVERYTHING (test seam: `id -un`/`git config`
+  # vary per runner). An explicit `:identity` (forge_identity_test) disables
+  # the override to test the REAL assembly. Otherwise: human (`id -un`) → OS identity.
   defp resolve_identity(opts) do
     override = Application.get_env(:fleet_credentials, :forge_identity_override)
     explicit_identity? = Keyword.has_key?(opts, :identity)
@@ -211,23 +211,43 @@ defmodule Fleet.Credentials.ForgeIdentity do
     end
   end
 
-  # Identité OS de l'humain. `opts[:identity]` (test) court-circuite. Sinon dérive :
-  # git config (l'identité de commit du humain) → GECOS → login ; email → <login>@<host>.
-  # Ne FAIL JAMAIS : un user OS ⇒ toujours une identité (« on n'over-filtre pas »).
+  # OS identity of the human. `opts[:identity]` (test) short-circuits. Otherwise derives:
+  # git config (the human's commit identity) → GECOS → login; email → <login>@<host>.
+  # NEVER fails: an OS user ⇒ always an identity ("we do not over-filter").
   defp os_identity(human, opts) do
     case Keyword.get(opts, :identity) do
       %{name: name, email: email} when is_binary(name) and is_binary(email) ->
-        {:ok, %{name: name, email: email}}
+        # A caller-supplied identity is hygiened too (defense in depth): strip control chars so it can
+        # never carry a newline into the git identity (R1-14).
+        {:ok, %{name: strip_control(name), email: strip_control(email)}}
 
       _ ->
-        name = git_config("user.name") || gecos_name(human) || human
-        email = git_config("user.email") || "#{human}@#{hostname()}"
+        # Each human-editable source (~/.gitconfig, GECOS) is HYGIENED before it enters the identity — a
+        # newline/control char would inject a `git config` line or a commit-header line (R1-14). A source
+        # that strips to blank → nil, so the chain falls through to the safe OS-derived fallback.
+        name =
+          sanitize_identity(git_config("user.name")) || sanitize_identity(gecos_name(human)) ||
+            human
+
+        email = sanitize_identity(git_config("user.email")) || "#{human}@#{hostname()}"
         {:ok, %{name: name, email: email}}
     end
   end
 
-  # `git config --global --get <key>` du humain (daemon tourne *as* lui → ~/.gitconfig).
-  # git absent / clé non set → nil (→ fallback).
+  # git identity (name/email) is fed to GIT_AUTHOR_*/GIT_COMMITTER_* and possibly `git config`: a value
+  # from a hand-edited ~/.gitconfig / GECOS carrying a newline or control char would inject a config line
+  # or a commit-header line (R1-14). `strip_control/1` removes ASCII control chars (incl. \n \r \t) →
+  # always a binary. `sanitize_identity/1` additionally trims + blanks-to-nil so the OS-derivation chain
+  # falls through to the safe fallback (login/hostname) when a source is empty after stripping.
+  defp strip_control(s) when is_binary(s), do: String.replace(s, ~r/[\x00-\x1F\x7F]/, "")
+
+  defp sanitize_identity(nil), do: nil
+
+  defp sanitize_identity(s) when is_binary(s),
+    do: s |> strip_control() |> String.trim() |> blank_to_nil()
+
+  # `git config --global --get <key>` of the human (daemon runs *as* them → ~/.gitconfig).
+  # git absent / key not set → nil (→ fallback).
   defp git_config(key) do
     case System.cmd("git", ["config", "--global", "--get", key], stderr_to_stdout: true) do
       {out, 0} -> blank_to_nil(String.trim(out))
@@ -237,7 +257,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
     _ -> nil
   end
 
-  # GECOS (champ 5 de `getent passwd`, avant la 1re virgule) = nom complet, ou nil.
+  # GECOS (field 5 of `getent passwd`, before the 1st comma) = full name, or nil.
   defp gecos_name(human) do
     case System.cmd("getent", ["passwd", human], stderr_to_stdout: true) do
       {line, 0} ->
@@ -257,9 +277,9 @@ defmodule Fleet.Credentials.ForgeIdentity do
   end
 
   defp hostname do
-    # :inet.gethostname/0 est spec'd {:ok, _} (lecture kernel locale, pas de réseau) → match direct.
-    # Fail-loud : si un jour ça dévie, on veut un MatchError net, pas un "localhost" silencieux trompeur
-    # (l'ancien fallback `_ -> "localhost"` était mort selon la spec OTP).
+    # :inet.gethostname/0 is spec'd {:ok, _} (local kernel read, no network) → direct match.
+    # Fail-loud: if it ever deviates, we want a clean MatchError, not a misleading silent "localhost"
+    # (the old `_ -> "localhost"` fallback was dead per the OTP spec).
     {:ok, h} = :inet.gethostname()
     List.to_string(h)
   end

@@ -253,6 +253,22 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
+    test "R2-05 : forge_client MISCONFIGURÉ → {:error, {:seam_misconfigured, _, _}} (pas de crash apply/3)" do
+      # Enum n'exporte AUCUN callback forge → la garde conforming_forge le détecte au lieu de laisser
+      # `apply(forge, :get_issue, …)` lever un UndefinedFunctionError. Seam duck-typed = 0 check compilo.
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, Enum)
+      pod = uniq("pod-arch")
+
+      assert {:error, {:seam_misconfigured, Enum, missing}, _} =
+               PodTools.handle_tool_call(
+                 "get_issue_status",
+                 %{"number" => 1, "project" => "fleet/x"},
+                 pod_state(pod)
+               )
+
+      assert {:get_issue, 3} in missing
+    end
+
     test "lit l'état du repo PASSÉ dans `project` (pas d'un projet courant globalisé)" do
       pod = uniq("pod-arch")
 
@@ -401,6 +417,21 @@ defmodule Fleet.MCP.PodToolsTest do
                )
 
       refute_received {:create_issue, _, _, _, _}
+    end
+
+    test "R2-03 : `project` non-vide mais mal formé (pas owner/name) → {:invalid_project_ref} au bord" do
+      pod = uniq("pod-arch")
+
+      # sans slash, 3 composants, partie vide, ou espace → rejetés AVANT tout appel forge/gate
+      for bad <- ["justname", "a/b/c", "owner/", "/name", "own er/name"] do
+        assert {:error, {:invalid_project_ref, _}, _} =
+                 PodTools.handle_tool_call(
+                   "create_issue",
+                   %{"title" => "T", "brief" => "X", "project" => bad},
+                   pod_state(pod)
+                 ),
+               "project #{inspect(bad)} devrait être rejeté"
+      end
     end
   end
 

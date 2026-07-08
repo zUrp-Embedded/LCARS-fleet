@@ -1,47 +1,45 @@
 defmodule Fleet.Starfleet.MCPMonitor do
   @moduledoc """
-  Health check passif du **substrat MCP pod-facing** (le DynamicSupervisor des
-  sockets per-pod, `Fleet.MCP.PodSocketSupervisor`).
+  Passive health check of the **pod-facing MCP substrate** (the DynamicSupervisor
+  of per-pod sockets, `Fleet.MCP.PodSocketSupervisor`).
 
-  DN 13 `orchestration/fleet_starfleet.md` §Extensions V2 (BL-021 chantier 8).
+  ## Mechanics
 
-  ## Mécanique
+  GenServer + recursive `Process.send_after/3` — the plumbing (named start_link, tick + re-arming,
+  test hook `:check_now`) is SHARED with `MCPWatcher` via `Fleet.Starfleet.PeriodicCheck`; this
+  module keeps its state, its `do_check/1` and the shape of its reply (`{:ok, status}`). On each
+  tick (default 60s), checks the target's liveness:
 
-  GenServer + `Process.send_after/3` récursif — la plomberie (start_link nommé, tick + ré-armement,
-  hook test `:check_now`) est PARTAGÉE avec `MCPWatcher` via `Fleet.Starfleet.PeriodicCheck` ; ce
-  module garde son état, son `do_check/1` et la forme de sa réponse (`{:ok, status}`). À chaque
-  tick (default 60s), vérifie la liveness de la cible :
+    * target alive → status `:ok`
+    * absent / dead → status `:crashed`
 
-    * cible vivante → status `:ok`
-    * absente / morte → status `:crashed`
+  Detects the `:ok → :crashed` transition (NOT `:unknown → :crashed` at boot,
+  NOT `:crashed → :crashed` so as not to spam) and broadcasts a canonical event.
+  The `:crashed → :ok` return just logs (silent recovery, no dedicated event
+  in the MVP).
 
-  Détecte la transition `:ok → :crashed` (PAS `:unknown → :crashed` au boot,
-  PAS `:crashed → :crashed` pour ne pas spammer) et broadcast un event canon.
-  Le retour `:crashed → :ok` log juste (recovery silencieuse, pas d'event
-  dédié dans la DN MVP).
+  ## Target
 
-  ## Cible
-
-  Le substrat pod-facing (`get_work_item`/`submit_result`) est servi par une socket
-  AF_UNIX par pod, fan-out par le DynamicSupervisor `Fleet.MCP.PodSocketSupervisor`.
-  On vérifie sa liveness par l'**arbre de supervision** : cible
+  The pod-facing substrate (`get_work_item`/`submit_result`) is served by a per-pod
+  AF_UNIX socket, fanned out by the DynamicSupervisor `Fleet.MCP.PodSocketSupervisor`.
+  We check its liveness via the **supervision tree**: target
   `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}` →
-  `Supervisor.which_children/1` cherche l'enfant et teste que son pid est vivant.
-  Robuste (OTP pur) et sémantiquement juste : substrat absent → `:crashed`
-  silencieux (aucun broadcast depuis `:unknown`, rien à monitorer). Une cible
-  **atome** reste supportée (`Process.whereis`, pour les tests + tout process nommé).
+  `Supervisor.which_children/1` looks up the child and tests that its pid is alive.
+  Robust (pure OTP) and semantically correct: substrate absent → silent `:crashed`
+  (no broadcast from `:unknown`, nothing to monitor). An **atom** target stays
+  supported (`Process.whereis`, for tests + any named process).
 
   ## Event broadcast
 
-  Schema canon `%Fleet.Event{source: :starfleet, type: :"mcp.server_crashed",
+  Canonical schema `%Fleet.Event{source: :starfleet, type: :"mcp.server_crashed",
   payload: %{previous_status, new_status, target}, correlation_id: nil}`.
 
   ## Configuration
 
     * `:fleet_starfleet, :mcp_monitor_check_interval_ms` — default `60_000` (1 min)
-    * `:fleet_starfleet, :mcp_monitor_target` — cible (default
-      `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}`). Accepte un
-      atome (process nommé) OU `{:supervised, sup, child_id}`. Les tests injectent une cible factice.
+    * `:fleet_starfleet, :mcp_monitor_target` — target (default
+      `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}`). Accepts an
+      atom (named process) OR `{:supervised, sup, child_id}`. Tests inject a fake target.
   """
 
   use GenServer
@@ -51,10 +49,10 @@ defmodule Fleet.Starfleet.MCPMonitor do
   alias Fleet.Starfleet.PeriodicCheck
 
   @default_interval_ms 60_000
-  # On monitore le substrat pod-facing (le DynamicSupervisor d'accepteurs de socket
-  # per-pod) via l'arbre de supervision (`which_children`) : enfant
-  # `Fleet.MCP.PodSocketSupervisor` vivant sous `Fleet.MCP.Supervisor` → :ok.
-  # Cf. moduledoc §Cible + `check_target/1`.
+  # We monitor the pod-facing substrate (the DynamicSupervisor of per-pod socket
+  # acceptors) via the supervision tree (`which_children`): child
+  # `Fleet.MCP.PodSocketSupervisor` alive under `Fleet.MCP.Supervisor` → :ok.
+  # Cf. moduledoc §Target + `check_target/1`.
   @default_target {:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -79,7 +77,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
   def handle_info(_other, state), do: {:noreply, state}
 
-  # Hook test : déclenche un check immédiat sync (équivalent au timer).
+  # Test hook: triggers an immediate sync check (equivalent to the timer).
   @impl GenServer
   def handle_call(:check_now, _from, state),
     do: PeriodicCheck.check_now(state, &do_check/1, &{:ok, &1.status})
@@ -110,8 +108,8 @@ defmodule Fleet.Starfleet.MCPMonitor do
     new_state
   end
 
-  # F049 — cible supervisée : on lit l'arbre de supervision (OTP pur). L'enfant
-  # `child_id` vivant (pid) → :ok ; absent / :restarting / :undefined → :crashed.
+  # Supervised target: we read the supervision tree (pure OTP). The child
+  # `child_id` alive (pid) → :ok; absent / :restarting / :undefined → :crashed.
   defp check_target({:supervised, sup, child_id}) do
     case List.keyfind(Supervisor.which_children(sup), child_id, 0) do
       {^child_id, pid, _type, _modules} when is_pid(pid) -> :ok
@@ -120,9 +118,9 @@ defmodule Fleet.Starfleet.MCPMonitor do
   rescue
     _ -> :crashed
   catch
-    # `which_children` sur un superviseur non démarré (fleet_mcp absent du nœud)
-    # fait un `exit :noproc` (pas une exception) → :crashed silencieux (depuis
-    # :unknown = aucun broadcast, rien à monitorer).
+    # `which_children` on a supervisor that is not started (fleet_mcp absent from the node)
+    # does an `exit :noproc` (not an exception) → silent :crashed (from
+    # :unknown = no broadcast, nothing to monitor).
     :exit, _ -> :crashed
   end
 
@@ -133,13 +131,13 @@ defmodule Fleet.Starfleet.MCPMonitor do
     end
   end
 
-  # Émission via le cœur protégé `Bus.safe_emit/4` (rescue local dupliqué retiré — la politique
-  # best-effort a UNE autorité, Ring 0). `:silent` : UnregisteredError = boot-order toléré
-  # (registry pas encore peuplé), pas une alarme. Un event MALFORMÉ (bug de construction) est
-  # loggé ERROR par safe_emit puis neutralisé — ça masquerait sinon l'alerte « MCP a crashé »,
-  # et ce broadcast tourne DANS le GenServer lui-même : le laisser crasher redémarrerait le
-  # moniteur avec status remis à :unknown, perdant la détection de transition :ok → :crashed
-  # (sa raison d'être), et bouclerait à chaque tick.
+  # Emission via the protected core `Bus.safe_emit/4` (duplicated local rescue removed — the
+  # best-effort policy has ONE authority, Ring 0). `:silent`: UnregisteredError = boot-order tolerated
+  # (registry not yet populated), not an alarm. A MALFORMED event (construction bug) is
+  # logged ERROR by safe_emit then neutralized — otherwise it would mask the "MCP crashed" alert,
+  # and this broadcast runs INSIDE the GenServer itself: letting it crash would restart the
+  # monitor with status reset to :unknown, losing the :ok → :crashed transition detection
+  # (its whole purpose), and would loop on every tick.
   defp broadcast_crashed(target, previous, new) do
     Bus.safe_emit(
       :starfleet,
@@ -152,7 +150,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
         }
       ],
       on_unregistered: :silent,
-      context: "MCPMonitor: alerte mcp.server_crashed NON émise"
+      context: "MCPMonitor: mcp.server_crashed alert NOT emitted"
     )
   end
 

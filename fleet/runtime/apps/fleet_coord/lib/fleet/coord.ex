@@ -1,46 +1,46 @@
 defmodule Fleet.Coord do
   @moduledoc """
-  Module Elixir système-side : table de routage déclarative
+  System-side Elixir module: declarative routing table
   `{verdict, reason} → {action, escalation_path}` LCARS v2 Ring 2
   orchestration.
 
-  Coord = règle déclarative, **pas raisonnement LLM** (méta-axiome :
-  une forte fréquence d'invocation d'un coord raisonneur trahit un
-  design défaillant — resserrer pipeline/règles, pas enrichir le coord).
+  Coord = declarative rule, **not LLM reasoning** (meta-axiom:
+  a high invocation frequency of a reasoning coord betrays a
+  flawed design — tighten the workflow/rules, not enrich the coord).
 
   ## Public API (delegator)
 
-  Ce module délègue à `Fleet.Coord.Policies` (lookup de table) ; l'émission
-  des events canon est portée par `Fleet.Coord.Emitter` (passe extraite,
-  appelée par Policies sur un match).
+  This module delegates to `Fleet.Coord.Policies` (table lookup); emission
+  of the canonical events is carried by `Fleet.Coord.Emitter` (extracted
+  pass, called by Policies on a match).
 
-    * `handle_decision/2` — consomme un verdict validé
-      (`Fleet.Starfleet.Gatekeeper`) → broadcast event canon
-    * `handle_escalation/3` — consomme une escalade Cat 5
-      (`Fleet.Starfleet.Cat5Escalator`) → broadcast event canon
+    * `handle_decision/2` — consumes a validated verdict
+      (`Fleet.Starfleet.Gatekeeper`) → broadcast canonical event
+    * `handle_escalation/3` — consumes a Cat 5 escalation
+      (`Fleet.Starfleet.Cat5Escalator`) → broadcast canonical event
 
-  ## Soft gate / hook — supersédés
+  ## Soft gate / hook — superseded
 
-  Les anciens `invoke_soft_gate/4` + `invoke_hook/2` (spawn pod LLM
-  délégué coord) sont **retirés** : le jugement LLM des gates est
-  consolidé sur le **gatekeeper permanent** (juge unique), booté par
-  `Fleet.Workflow.Gatekeeper.ensure_booted/1` et saisi par brief d'éval
-  enqueué (rail `StepRunConsumer`, gate non-tranchable → gatekeeper).
-  `Fleet.Coord` ne porte plus de spawn — uniquement les policies déclaratives.
+  The old `invoke_soft_gate/4` + `invoke_hook/2` (coord-delegated LLM pod
+  spawn) are **removed**: the LLM judgment of the gates is
+  consolidated onto the **permanent gatekeeper** (single judge), booted by
+  `Fleet.Workflow.Gatekeeper.ensure_booted/1` and engaged via an enqueued
+  eval brief (`StepRunConsumer` rail, non-decidable gate → gatekeeper).
+  `Fleet.Coord` no longer carries any spawn — only the declarative policies.
 
-  ## Implémentation backend
+  ## Backend implementation
 
-  Cette module satisfait le behaviour `Fleet.Starfleet.CoordBackend`
-  (callbacks `handle_decision/2` + `handle_escalation/3`). Configuration :
+  This module satisfies the `Fleet.Starfleet.CoordBackend` behaviour
+  (callbacks `handle_decision/2` + `handle_escalation/3`). Configuration:
 
       config :fleet_starfleet, :coord_backend, Fleet.Coord
 
-  ## Frontière vendor
+  ## Vendor boundary
 
-  N0 (vendor-agnostic, pas d'inférence — règle déclarative pure).
+  N0 (vendor-agnostic, no inference — pure declarative rule).
   """
 
-  # Arités strict canon : les compat shims `handle_decision/1` et `handle_escalation/2` sont retirés.
+  # Strict canonical arities: the compat shims `handle_decision/1` and `handle_escalation/2` are removed.
   defdelegate handle_decision(decision, correlation_id), to: Fleet.Coord.Policies
   defdelegate handle_escalation(source, payload, correlation_id), to: Fleet.Coord.Policies
 end

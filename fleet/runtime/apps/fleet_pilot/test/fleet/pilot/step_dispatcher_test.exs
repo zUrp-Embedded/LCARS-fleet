@@ -655,9 +655,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:spawned, "issue-42", spawn_opts}
       brief = spawn_opts[:brief]
       # cadrage BRIEF (subject:brief) + le brief à juger, PAS le cadrage livrable.
-      assert brief =~ "Brief à juger"
+      assert brief =~ "Brief to judge"
       assert brief =~ "MON BRIEF A JUGER"
-      refute brief =~ "Livrable à juger (outputs du step"
+      refute brief =~ "Deliverable to judge (step outputs"
       refute brief =~ "Livraison (git-native)"
     end
 
@@ -828,7 +828,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:spawned, "issue-42", spawn_opts}
       assert spawn_opts[:workflow_map] == "poc" and spawn_opts[:step] == "spec-review"
       # brief juge desamorce (brief_kind: judge) — pas un corps executable
-      assert spawn_opts[:brief] =~ "JUGER"
+      assert spawn_opts[:brief] =~ "JUDGE"
 
       # Fix famine-d'info (juge) : predecessor vide (git-native) → le juge est POINTÉ sur son
       # workspace ET reçoit le CRITÈRE (body de l'issue, désamorcé en contexte).

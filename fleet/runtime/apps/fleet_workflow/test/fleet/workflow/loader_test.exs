@@ -43,7 +43,7 @@ defmodule Fleet.Workflow.LoaderTest do
       spec: {}
       """)
 
-      assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
+      assert_raise RuntimeError, ~r/schema .*invalid/, fn ->
         Loader.load!("invalid")
       end
     end
@@ -63,7 +63,7 @@ defmodule Fleet.Workflow.LoaderTest do
               type: hocus_pocus
       """)
 
-      assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
+      assert_raise RuntimeError, ~r/schema .*invalid/, fn ->
         Loader.load!("bad_gate")
       end
     end
@@ -174,7 +174,7 @@ defmodule Fleet.Workflow.LoaderTest do
             brief_kind: reviewer
       """)
 
-      assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
+      assert_raise RuntimeError, ~r/schema .*invalid/, fn ->
         Loader.load!("bad_kind")
       end
     end
@@ -195,7 +195,7 @@ defmodule Fleet.Workflow.LoaderTest do
             bogus_field: oops
       """)
 
-      assert_raise RuntimeError, ~r/schema .*invalide/, fn ->
+      assert_raise RuntimeError, ~r/schema .*invalid/, fn ->
         Loader.load!("unknown_field")
       end
     end
@@ -224,7 +224,7 @@ defmodule Fleet.Workflow.LoaderTest do
             needs: [typo]
       """)
 
-      assert_raise RuntimeError, ~r/arête fantôme/, fn ->
+      assert_raise RuntimeError, ~r/phantom edge/, fn ->
         Loader.load!("phantom")
       end
     end

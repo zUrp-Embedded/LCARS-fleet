@@ -1,67 +1,65 @@
-# Registry des events canon (BL-027 — fork « subscribers directs = canon »).
+# Canonical event registry (subscribers-direct model = canon).
 #
-# `events.yaml` est un **registry PUR** : ses CLÉS sont les `authorized_event_types`
-# (chargées au boot par `Fleet.EventRouter.Catalog.load!/0` → `Bus.broadcast/2`
-# fail-loud sur tout type hors registry). Tout event émis DOIT avoir sa clé ici.
+# `events.yaml` is a **pure registry**: its KEYS are the `authorized_event_types`
+# (loaded at boot by `Fleet.EventRouter.Catalog.load!/0` → `Bus.broadcast/2`
+# fail-loud on any type outside the registry). Every emitted event MUST have its key here.
 #
-# La **consommation** se fait par **subscribers directs** (Phoenix.PubSub :
-# `Bus.subscribe` + `handle_info`) — PAS par une table de dispatch. Le GenServer
-# `Dispatch` (table `event → handle_event/1`, jamais câblée) a été RETIRÉ. Qui
-# consomme quel event est documenté dans le moduledoc de chaque consommateur
+# **Consumption** is done by **direct subscribers** (Phoenix.PubSub:
+# `Bus.subscribe` + `handle_info`) — NOT by a dispatch table. The `Dispatch`
+# GenServer (table `event → handle_event/1`, never wired) was REMOVED. Which
+# consumer consumes which event is documented in each consumer's moduledoc
 # (`AuditConsumer`, `DriftMonitor`, `Spawner.PublishConsumer`,
-# `API.WS`, `Pilot.StepRunConsumer`, …). (Le moteur RAM `Pipeline.Executor`, qui
-# fut consommateur, est supprimé : le rail forge-driven `Pilot.StepRunConsumer` l'a
-# remplacé.)
+# `API.WS`, `Pilot.StepRunConsumer`, …). (The RAM engine `Pipeline.Executor`, once
+# a consumer, is removed: the forge-driven rail `Pilot.StepRunConsumer` replaced it.)
 #
-# Valeurs = `[]` (registry pur). Le schéma (`events-v1.json`) tolère une liste de
-# handlers `Fleet.*` non vide pour un éventuel futur ré-câblage, mais le runtime
-# n'en consomme aucune.
+# Values = `[]` (pure registry). The schema (`events-v1.json`) tolerates a non-empty
+# list of `Fleet.*` handlers for a possible future re-wiring, but the runtime
+# consumes none.
 events:
   # --- Pod lifecycle (Spawner.Pod) ---
-  # Z5 (nettoyage hollow producers) : `Spawner.Pod` n'émet QUE `pod.completed` + `pod.failed`
-  # (call-sites vérifiés). `pod.allocate`/`transition`/`release`/`terminated`/
-  # `refuse_pattern_match` étaient enregistrés mais JAMAIS produits (0 producteur, 0 consumer
-  # type-spécifique) = mensonge de registry (I-CBC : le registry doit refléter la réalité).
-  # Retirés ; à ré-ajouter AVEC un producteur si la progression pod devient observable.
+  # Hollow-producer cleanup: `Spawner.Pod` emits ONLY `pod.completed` + `pod.failed`
+  # (call-sites verified). `pod.allocate`/`transition`/`release`/`terminated`/
+  # `refuse_pattern_match` were registered but NEVER produced (0 producer, 0 type-specific
+  # consumer) = registry lie (the registry must reflect reality). Removed; to re-add WITH a
+  # producer if pod progression becomes observable.
   pod.completed: []
   pod.failed: []
-  # pod.drift : conservé — consommé par DriftMonitor (SF-D1) ; son producteur manquant
-  # (fleet_ipc_filter inexistant) = hollow CONSUMER côté starfleet (hors-fleet, non-négo #2),
-  # pas un hollow producer ; non touché ici.
+  # pod.drift: kept — consumed by DriftMonitor; its missing producer
+  # (nonexistent fleet_ipc_filter) = a hollow CONSUMER on the starfleet side (out-of-fleet),
+  # not a hollow producer; not touched here.
   pod.drift: []
-  # ⚠ CHAÎNE CAT-5 DORMANTE (constat DrDree 2026-07-05) : comme pod.drift ci-dessus,
-  # workflow_map.failed et oauth.refresh.failed n'ont AUCUN producteur vivant (l'un est mort avec
-  # l'Executor RAM, l'autre n'a jamais été implémenté côté launcher/credentials). Le rail complet
-  # DriftMonitor→Cat5Escalator→coord est donc inerte AUJOURD'HUI — c'est le pipeline de remédiation
-  # sysadmin, à câbler au chantier admin-sys (producteurs + policies). Clés conservées : consumers
-  # câblés et testés, prêts.
-  # wake.failed (#5.2 [5]) : émis par `Spawner.Pod` quand le kick d'onboarding est abandonné après N
-  # tentatives (agent jamais acké) — payload `pod_id`/`reason`/`pane`. Consommé par
-  # `Pilot.StepRunConsumer` (`type: :"wake.failed"` → escalade `:sp_suspect`, pane attaché au issue).
-  # Producteur ET consumer réels → clé légitime (était absente = consommé-hors-registry, I-CBC rouge).
+  # ⚠ DORMANT CAT-5 CHAIN: like pod.drift above, workflow_map.failed and
+  # oauth.refresh.failed have NO live producer (one died with the RAM Executor, the other was
+  # never implemented on the launcher/credentials side). The full DriftMonitor→Cat5Escalator→coord
+  # rail is therefore inert TODAY — it is the sysadmin remediation pipeline, to be wired in the
+  # admin-sys chantier (producers + policies). Keys kept: consumers wired and tested, ready.
+  # wake.failed: emitted by `Spawner.Pod` when the onboarding kick is abandoned after N
+  # attempts (agent never acked) — payload `pod_id`/`reason`/`pane`. Consumed by
+  # `Pilot.StepRunConsumer` (`type: :"wake.failed"` → `:sp_suspect` escalation, pane attached to the issue).
+  # Real producer AND consumer → legitimate key (was absent = consumed-outside-registry, contracts-check red).
   wake.failed: []
-  # spawn.failed : émis par `Spawner.PublishConsumer` (source :spawner) quand le dispatch d'un
-  # `admin.spawn.request` LÈVE (CapProfile/spawn_pod plante de façon inattendue) → le spawn est droppé.
-  # L'API REST a déjà répondu HTTP 202 « queued » au client AVANT ce dispatch async → sans cet event le
-  # drop est SILENCIEUX (l'admin croit le pod en file ; zéro pod, zéro alarme). Jumelle de `pod.failed`,
-  # même cycle. Payload `cap_profile_name`/`issue_id`/`reason`. Producteur réel ; consumer (dashboard/
-  # opérateur) à venir — clé légitime (sans elle le broadcast ferait UnregisteredError → re-drop muet).
+  # spawn.failed: emitted by `Spawner.PublishConsumer` (source :spawner) when the dispatch of an
+  # `admin.spawn.request` RAISES (CapProfile/spawn_pod fails unexpectedly) → the spawn is dropped.
+  # The REST API has already replied HTTP 202 "queued" to the client BEFORE this async dispatch → without
+  # this event the drop is SILENT (the admin thinks the pod is queued; zero pod, zero alarm). Twin of
+  # `pod.failed`, same cycle. Payload `cap_profile_name`/`issue_id`/`reason`. Real producer; consumer
+  # (dashboard/operator) to come — legitimate key (without it the broadcast would UnregisteredError → re-drop silently).
   spawn.failed: []
 
   # --- Credentials ---
   oauth.refresh.failed: []
 
   # --- Audit gatekeeper / forge tickets / tick ---
-  # R09 : `audit.verdict` (2 segments) — aligné sur le consommateur réel
-  # (DriftMonitor `%Fleet.Event{type: :"audit.verdict"}`) + l'atome pré-enregistré
-  # (Starfleet.Application). L'ancienne clé `audit.verdict.gatekeeper` (3 segments,
-  # jamais émise) était désalignée du consommateur → consommateur mort.
+  # `audit.verdict` (2 segments) — aligned on the real consumer
+  # (DriftMonitor `%Fleet.Event{type: :"audit.verdict"}`) + the pre-registered atom
+  # (Starfleet.Application). The old key `audit.verdict.gatekeeper` (3 segments,
+  # never emitted) was misaligned with the consumer → dead consumer.
   audit.verdict: []
-  # Z5 #9 : le producteur (`WebhooksGitea`, `gitea.<action>` dynamique) + les atomes
-  # pré-enregistrés (`event_router/application.ex` `to_existing_atom`) émettent CES 10
-  # actions. N'avoir que opened/closed → les 8 autres broadcastaient en `UnregisteredError`
-  # SILENCIEUX (rescue `:ok`) → webhook 200 OK mais event jamais routé (drop muet). Registry
-  # aligné sur le producteur (sinon un subscriber `gitea.*` ne voit jamais reopened/merged/edited/…).
+  # The producer (`WebhooksGitea`, dynamic `gitea.<action>`) + the pre-registered atoms
+  # (`event_router/application.ex` `to_existing_atom`) emit THESE 10 actions. Having only
+  # opened/closed → the 8 others would broadcast as SILENT `UnregisteredError` (rescue `:ok`)
+  # → webhook 200 OK but event never routed (silent drop). Registry aligned on the producer
+  # (otherwise a `gitea.*` subscriber never sees reopened/merged/edited/…).
   gitea.opened: []
   gitea.closed: []
   gitea.reopened: []
@@ -73,10 +71,10 @@ events:
   gitea.push: []
   gitea.unknown: []
 
-  # --- Signaux OS (SignalsOS, source :event_router) ---
-  # R09 : émis par SignalsOS sur SIGUSR1/SIGTERM/SIGHUP — registrés ici pour
-  # éviter le drop silencieux (UnregisteredError rescue). Pas de consommateur
-  # routé pour l'instant (le drain passe par ExecStop/Shutdown, pas par signal).
+  # --- OS signals (SignalsOS, source :event_router) ---
+  # Emitted by SignalsOS on SIGUSR1/SIGTERM/SIGHUP — registered here to
+  # avoid the silent drop (UnregisteredError rescue). No routed consumer
+  # for now (the drain goes through ExecStop/Shutdown, not through a signal).
   os.signal.sigusr1: []
   os.signal.sigterm: []
   os.signal.sighup: []
@@ -90,37 +88,37 @@ events:
   fleet.boot_failed: []
 
   # --- Coord (Policies, source :coord) ---
-  # ASYMÉTRIE VOULUE (producteur réel, 0 consommateur routé) : `Coord.Policies` émet
-  # ces 3 events (notify_dashboard / escalate_human / autres), mais aucun subscriber
-  # n'écoute encore `coord.*` sur le Bus. Clés légitimes (un producteur les émet → drop
-  # silencieux évité) ; un consommateur (dashboard / opérateur) viendra s'abonner.
+  # INTENDED ASYMMETRY (real producer, 0 routed consumer): `Coord.Policies` emits
+  # these 3 events (notify_dashboard / escalate_human / others), but no subscriber
+  # listens on `coord.*` on the Bus yet. Legitimate keys (a producer emits them → silent
+  # drop avoided); a consumer (dashboard / operator) will come and subscribe.
   coord.notification_routed: []
   coord.escalation_triggered: []
   coord.action_dispatched: []
 
-  # --- Pipeline (source :pipeline) ---
-  # ASYMÉTRIE INVERSE (consommateur réel, 0 producteur courant) : `workflow_map.failed`
-  # est consommé par `Starfleet.DriftMonitor` (→ Cat 5) et `workflow_map.completed` matché
-  # par `API.WS` (`workflow_map.*`). Le producteur était le moteur RAM `Pipeline.Executor`,
-  # SUPPRIMÉ — le rail forge-driven (`Pilot.StepRunConsumer`) ferme l'issue au lieu d'émettre
-  # `workflow_map.failed`. Clés conservées (consommateur câblé) ; à ré-émettre si le rail
-  # forge-driven publie un signal d'échec/complétion de pipeline.
+  # --- Workflow-map (source :workflow) ---
+  # INVERSE ASYMMETRY (real consumer, 0 current producer): `workflow_map.failed`
+  # is consumed by `Starfleet.DriftMonitor` (→ Cat 5) and `workflow_map.completed` matched
+  # by `API.WS` (`workflow_map.*`). The producer was the RAM engine `Pipeline.Executor`,
+  # REMOVED — the forge-driven rail (`Pilot.StepRunConsumer`) closes the issue instead of emitting
+  # `workflow_map.failed`. Keys kept (consumer wired); to re-emit if the forge-driven rail
+  # publishes a workflow_map failure/completion signal.
   workflow_map.failed: []
   workflow_map.completed: []
   workflow_map.step.completed: []
-  # deliverable.published (slot-freeze) : emis par Pilot.StepRunCompleter (source :pipeline — la publication
-  # EST une op pipeline via Deliverable.publish) APRES push + PR confirmes, porte `pod_id` (le pod
-  # producteur, depuis le payload pod.completed). Consomme par Spawner.Pod : un pod resident (pipe) passe
-  # :publishing -> :ready (son workspace a ete LU/pousse, il peut etre reset pour le issue suivant sans
-  # courser le push). Producteur reel.
+  # deliverable.published (slot-freeze): emitted by Pilot.StepRunCompleter (source :workflow — the
+  # publication IS a workflow op via Deliverable.publish) AFTER push + PR confirmed, carries `pod_id` (the
+  # producer pod, from the pod.completed payload). Consumed by Spawner.Pod: a resident pod (pipe) goes
+  # :publishing → :ready (its workspace has been READ/pushed, it can be reset for the next issue without
+  # racing the push). Real producer.
   deliverable.published: []
 
   # --- post_extract.git ---
-  # ASYMÉTRIE INVERSE (consommateur réel, 0 producteur courant) : consommés par
-  # `Starfleet.AuditConsumer`. Le producteur était le moteur RAM `Pipeline.Executor`
-  # (publication post-extract), SUPPRIMÉ. `Pipeline.Git.publish/1` ne broadcast pas
-  # lui-même. Clés conservées (consommateur câblé) ; à ré-émettre par le rail forge-driven
-  # si la publication git redevient observable sur le Bus.
+  # INVERSE ASYMMETRY (real consumer, 0 current producer): consumed by
+  # `Starfleet.AuditConsumer`. The producer was the RAM engine `Pipeline.Executor`
+  # (post-extract publication), REMOVED. `Pipeline.Git.publish/1` does not broadcast
+  # itself. Keys kept (consumer wired); to re-emit by the forge-driven rail
+  # if git publication becomes observable on the Bus again.
   git.published: []
   git.publish_failed: []
 
@@ -137,6 +135,6 @@ events:
   work_item.failed: []
   state.corrupt: []
 
-  # --- Extensions V2 (MCPWatcher / MCPMonitor) ---
+  # --- V2 extensions (MCPWatcher / MCPMonitor) ---
   sdk.upstream_alert: []
   mcp.server_crashed: []

@@ -36,6 +36,26 @@ defmodule Fleet.Starfleet.GatekeeperTest do
       assert {:error, {:decision_invalid, _cause}} = Gatekeeper.validate(json)
     end
 
+    test "R2-11 : champ top-level INCONNU → {:error, {:decision_invalid, _}} (additionalProperties:false)" do
+      # La donnée riche va dans `details` (free-form), jamais en clé top → un champ top inconnu = rejeté.
+      bad = ~s|{"decision":"halt","reason":"r","details":{},"stray_field":"x"}|
+      assert {:error, {:decision_invalid, _}} = Gatekeeper.validate(bad)
+
+      # data arbitraire DANS details → toujours OK (details reste non-borné)
+      ok =
+        ~s|{"decision":"allow","reason":"r","details":{"gate":"qa","score":9,"nested":{"a":1}}}|
+
+      assert {:ok, %Decision{decision: "allow"}} = Gatekeeper.validate(ok)
+    end
+
+    test "R2-12 : JSON décision > 256 KiB → {:error, {:decision_invalid, {:too_large, _}}} (borne anti-DoS)" do
+      # un pod runaway/malicieux ne doit pas forcer un parse non-borné : la borne coupe AVANT Jason.decode.
+      big_reason = String.duplicate("x", 300_000)
+      json = ~s|{"decision":"halt","reason":"#{big_reason}","details":{}}|
+
+      assert {:error, {:decision_invalid, {:too_large, _}}} = Gatekeeper.validate(json)
+    end
+
     test "JSON malformé → {:error, {:decision_invalid, %Jason.DecodeError{}}}" do
       assert {:error, {:decision_invalid, %Jason.DecodeError{}}} =
                Gatekeeper.validate(~s|{not valid json|)

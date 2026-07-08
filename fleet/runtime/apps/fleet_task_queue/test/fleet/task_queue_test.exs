@@ -288,6 +288,56 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad)
   end
 
+  test "6e. from_map REFUSE un optionnel malformé (metadata/result non-map, retry_count non-int≥0, id non-binaire) → :invalid" do
+    base = %{
+      "id" => "t1",
+      "pod_id" => "p1",
+      "enqueued_at" => "2026-06-02T00:00:00Z",
+      "state" => "pending"
+    }
+
+    for bad <- [
+          Map.put(base, "metadata", "not-a-map"),
+          Map.put(base, "result", ["not", "a", "map"]),
+          Map.put(base, "retry_count", -1),
+          Map.put(base, "retry_count", "3"),
+          Map.put(base, "issue_id", 42)
+        ] do
+      assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad),
+             "map #{inspect(bad)} devrait être :invalid"
+    end
+  end
+
+  test "6f. WorkItem.new/2 = smart-constructor : caste (deadline ISO→DateTime), refuse un attr malformé" do
+    alias Fleet.TaskQueue.WorkItem
+
+    assert {:ok,
+            %WorkItem{
+              deadline: %DateTime{},
+              metadata: %{"k" => "v"},
+              state: :pending,
+              retry_count: 0
+            }} =
+             WorkItem.new("p1", %{deadline: "2026-06-02T00:00:00Z", metadata: %{"k" => "v"}})
+
+    assert {:ok, %WorkItem{deadline: nil}} = WorkItem.new("p1", %{})
+    assert {:error, {:bad_attr, {:metadata, _}}} = WorkItem.new("p1", %{metadata: "nope"})
+    assert {:error, {:bad_attr, {:deadline, _}}} = WorkItem.new("p1", %{deadline: 12_345})
+    assert {:error, {:bad_attr, {:issue_id, _}}} = WorkItem.new("p1", %{issue_id: 7})
+  end
+
+  test "6g. enqueue propage l'erreur du smart-constructor + caste le deadline ISO", %{
+    topic: topic
+  } do
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qenq)
+
+    assert {:error, {:bad_attr, {:deadline, 42}}} = TaskQueue.enqueue(q, "p1", %{deadline: 42})
+    assert [] = TaskQueue.list_pending(q)
+
+    assert {:ok, %{deadline: %DateTime{}}} =
+             TaskQueue.enqueue(q, "p2", %{deadline: "2030-01-01T00:00:00Z"})
+  end
+
   test "6e. recovery ré-arme les deadlines actives — expirée pendant le downtime → fail (fix deep-02 P1)",
        %{topic: topic, tmp_dir: tmp_dir} do
     now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -321,6 +371,89 @@ defmodule Fleet.TaskQueueTest do
                    1000
 
     assert {:ok, :failed} = TaskQueue.pod_status(q, "p1")
+  end
+
+  test "MINE-TQ-02 : deadline max-DateTime (année 9999) → enqueue ne crashe PAS le GenServer (clamp du timer)",
+       %{topic: topic} do
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qfar)
+
+    # DateTime MAX valide d'Elixir : ms ≈ 2.5e14 > le plafond `Process.send_after` de l'ERTS → sans clamp,
+    # `send_after` lève ArgumentError DANS handle_call(:enqueue) → crash du GenServer (idem à la recovery).
+    far = ~U[9999-12-31 23:59:59Z]
+
+    assert {:ok, %{deadline: %DateTime{}}} = TaskQueue.enqueue(q, "p1", %{deadline: far})
+
+    assert Process.alive?(q),
+           "le GenServer TaskQueue a crashé sur une deadline lointaine (send_after non clampé)"
+
+    assert [%{pod_id: "p1", state: :pending}] = TaskQueue.list_pending(q)
+  end
+
+  test "MINE-TQ-02 : check_deadline PRÉMATURÉ (deadline pas atteinte) → re-arme, ne fail PAS", %{
+    topic: topic
+  } do
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qearly)
+
+    # deadline dans 1h : un check_deadline qui arrive AVANT (timer clampé qui fire early) ne doit PAS
+    # failer l'item — seule une deadline VRAIMENT atteinte le fait.
+    future = DateTime.add(DateTime.utc_now(), 3600, :second)
+    {:ok, wi} = TaskQueue.enqueue(q, "p1", %{deadline: future})
+
+    send(q, {:check_deadline, wi.id})
+    # list_pending = call synchrone → flushe le check_deadline (FIFO) avant l'assert.
+    assert [%{pod_id: "p1", state: :pending}] = TaskQueue.list_pending(q)
+  end
+
+  test "MINE-TQ-02 : recovery d'une deadline lointaine (année 9999) → boot SANS crash (clamp au ré-arme)",
+       %{topic: topic, tmp_dir: tmp_dir} do
+    now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+    path = Path.join(tmp_dir, "far_deadline_recovery.json")
+
+    # Le pire scénario : une deadline lointaine PERSISTÉE → init la ré-arme → sans clamp, crash au boot
+    # (potentiellement en BOUCLE, la state.json rechargée re-crashe à chaque redémarrage).
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "v" => 1,
+        "work_items" => %{
+          "t1" => %{
+            "id" => "t1",
+            "pod_id" => "p1",
+            "enqueued_at" => now_iso,
+            "state" => "assigned",
+            "deadline" => "9999-12-31T23:59:59Z"
+          }
+        }
+      })
+    )
+
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qfarrec)
+
+    assert Process.alive?(q), "le GenServer a crashé au boot en ré-armant une deadline lointaine"
+    # item recovered actif (la deadline lointaine n'expire pas) — pas de fail spurious.
+    assert {:ok, :assigned} = TaskQueue.pod_status(q, "p1")
+  end
+
+  test "MINE-TQ-01 : les polls STALE (> TTL) sont purgés → `polls` borné (pod mort sans clear ne fuit pas)",
+       %{topic: topic} do
+    {:ok, q} =
+      start_supervised(
+        {Server, name: nil, topic: topic, persist: false, poll_retention_ms: 30},
+        id: :qpolls
+      )
+
+    # podA poll (get_for_pod enregistre le poll même sans work item = signal bootstrap)
+    TaskQueue.get_for_pod(q, "podA")
+    assert %DateTime{} = TaskQueue.last_poll(q, "podA")
+
+    # au-delà du TTL (30ms) sans re-poll ni clear : podB poll → le poll STALE de podA est purgé
+    Process.sleep(60)
+    TaskQueue.get_for_pod(q, "podB")
+
+    assert TaskQueue.last_poll(q, "podA") == nil,
+           "le poll stale de podA (pod mort sans clear) aurait dû être purgé"
+
+    assert %DateTime{} = TaskQueue.last_poll(q, "podB")
   end
 
   test "7. failed via deadline", %{q: q} do

@@ -1,62 +1,63 @@
 defmodule Fleet.Workflow.PayloadGuard do
   @moduledoc """
-  Placement + validation-SÉCURITÉ d'un payload de fichiers NON FIABLE dans un
-  workspace : « écrire ce que le pod a produit, sans qu'il puisse s'évader du
-  workspace ni armer la plomberie git côté monde ». Filtre autonome, extrait
-  de `Fleet.Workflow.Deliverable` (éclatement C4 2026-07-05) — il ne sait rien
-  des modes de livrable, de la gate ni du push : il ne connaît qu'un workspace
-  et une liste `%{"path" => …, "content" => …}` adverses.
+  Placement + SECURITY-validation of an UNTRUSTED file payload into a
+  workspace: "write what the pod produced, without letting it escape the
+  workspace or arm the world-side git plumbing". Standalone filter, extracted
+  from `Fleet.Workflow.Deliverable` (split 2026-07-05) — it knows nothing
+  about deliverable modes, the gate, nor the push: it only knows a workspace
+  and an adversarial `%{"path" => …, "content" => …}` list.
 
-  Source UNIQUE de l'application payload : une seule autorité de placement du
-  livrable (un placement divergent est rendu irreprésentable). Atomicité
-  best-effort en 2 passes : (1) valider TOUS les paths avant toute écriture ;
-  (2) écrire — un payload partiellement invalide n'écrit RIEN.
+  SINGLE source of payload application: one sole authority for deliverable
+  placement (a divergent placement is made unrepresentable). Best-effort
+  atomicity in 2 passes: (1) validate ALL paths before any write;
+  (2) write — a partially invalid payload writes NOTHING.
 
-  ## Les 4 vecteurs fermés (fail-closed, premier refus rendu)
+  ## The 4 closed vectors (fail-closed, first refusal returned)
 
-    * **Path traversal** — `Path.expand` du join doit rester sous le workspace
-      (un `../` résolu hors racine → `{:path_traversal, path}`).
-    * **Composant `.git`** — un payload écrivant SOUS `.git/` (à n'importe quel
-      niveau) réécrirait la config du repo : `.git/config` (armer un
-      `filter.<nom>.clean` exécuté par le `git add` système-side qui suit),
-      `.git/hooks/pre-commit`, etc. → exécution de commande arbitraire côté
-      monde au commit. Le pod ne pose JAMAIS sa propre plomberie git via le
-      payload → `{:dotgit_path, path}`. (Le commit système-side est ce qui
-      transforme ce contenu en livrable, donc le payload est consommé APRÈS
-      écriture → la garde DOIT être ici, avant l'écriture.)
-    * **`.gitattributes` armé** — un `.gitattributes` dont le contenu ARME un
-      `filter=` ou un `diff=` détourne `git add`/`git log -p` système-side vers
-      une commande externe. `core.attributesFile=/dev/null` ne neutralise QUE
-      le fichier GLOBAL ; le `.gitattributes` IN-TREE reste honoré et n'est PAS
-      désactivable par `-c` (git n'a aucun « disable all filters »). Le SEUL
-      verrou réel de ce vecteur est donc CE refus de contenu →
+    * **Path traversal** — the `Path.expand` of the join must stay under the
+      workspace (a `../` resolved outside the root → `{:path_traversal, path}`).
+    * **`.git` component** — a payload writing UNDER `.git/` (at any level)
+      would rewrite the repo config: `.git/config` (arming a
+      `filter.<name>.clean` executed by the system-side `git add` that
+      follows), `.git/hooks/pre-commit`, etc. → arbitrary command execution
+      world-side at commit time. The pod NEVER lays down its own git plumbing
+      via the payload → `{:dotgit_path, path}`. (The system-side commit is what
+      turns this content into a deliverable, so the payload is consumed AFTER
+      the write → the guard MUST be here, before the write.)
+    * **armed `.gitattributes`** — a `.gitattributes` whose content ARMS a
+      `filter=` or a `diff=` diverts system-side `git add`/`git log -p` toward
+      an external command. `core.attributesFile=/dev/null` neutralizes ONLY
+      the GLOBAL file; the IN-TREE `.gitattributes` stays honored and is NOT
+      disablable via `-c` (git has no "disable all filters"). The ONLY real
+      lock on this vector is therefore THIS content refusal →
       `{:dangerous_gitattributes, path}`.
-    * **Symlink dans la chaîne** — `Path.expand` est LEXICAL (résout `..`, PAS
-      les symlinks) : un symlink checké-in dans le repo cloné
-      (`out -> /home/<human>/.claude`) passe le check de préfixe, mais
-      `File.write` SUIT le symlink → écriture HORS workspace. Refus si un
-      composant EXISTANT du chemin est un symlink → `{:symlink_escape, path}`.
+    * **Symlink in the chain** — `Path.expand` is LEXICAL (resolves `..`, NOT
+      symlinks): a symlink checked into the cloned repo
+      (`out -> /home/<human>/.claude`) passes the prefix check, but
+      `File.write` FOLLOWS the symlink → write OUTSIDE the workspace. Refuse if
+      an EXISTING component of the path is a symlink → `{:symlink_escape, path}`.
 
-  L'entrée publique unique (`apply_files/2`) enchaîne validation puis écriture :
-  écrire sans valider est impossible par construction (la validation n'est pas
-  une étape optionnelle exposée).
+  The single public entry (`apply_files/2`) chains validation then write:
+  writing without validating is impossible by construction (validation is not
+  an optional exposed step).
   """
 
   @doc """
-  Valide puis écrit `files` (liste de `%{"path" => rel, "content" => bin}`)
-  sous `workspace`. 2 passes : TOUT est validé (cf. moduledoc — traversal,
-  `.git`, `.gitattributes` armé, symlink) avant la MOINDRE écriture.
+  Validates then writes `files` (list of `%{"path" => rel, "content" => bin}`)
+  under `workspace`. 2 passes: EVERYTHING is validated (cf. moduledoc —
+  traversal, `.git`, armed `.gitattributes`, symlink) before the SLIGHTEST
+  write.
 
   ## Exit codes
-    * `:ok` — tous les fichiers écrits
-    * `{:error, :no_files_in_payload}` — liste vide ou pas une liste
-    * `{:error, {:invalid_payload_file, repr}}` — entrée sans `path`/`content`
-      binaires, ou `path` vide (un path `""` passerait les checks puis
-      `File.write` sur le dir = `:eisdir` opaque — rejet propre en amont)
+    * `:ok` — all files written
+    * `{:error, :no_files_in_payload}` — empty list or not a list
+    * `{:error, {:invalid_payload_file, repr}}` — entry without binary
+      `path`/`content`, or empty `path` (a path `""` would pass the checks then
+      `File.write` on the dir = opaque `:eisdir` — clean rejection upstream)
     * `{:error, {:path_traversal | :dotgit_path | :dangerous_gitattributes |
-      :symlink_escape, rel_path}}` — vecteur refusé (rien n'est écrit)
-    * `{:error, {:file_write_failed, rel_path, reason}}` — écriture KO en
-      passe 2 (les fichiers déjà écrits restent — atomicité best-effort)
+      :symlink_escape, rel_path}}` — vector refused (nothing is written)
+    * `{:error, {:file_write_failed, rel_path, reason}}` — write KO in pass 2
+      (files already written remain — best-effort atomicity)
   """
   @spec apply_files(Path.t(), term()) :: :ok | {:error, term()}
   def apply_files(workspace, files) when is_list(files) and files != [] do
@@ -71,8 +72,8 @@ defmodule Fleet.Workflow.PayloadGuard do
     expanded_ws = Path.expand(workspace)
 
     Enum.reduce_while(files, :ok, fn
-      # `rel_path` non-vide — un path "" passe les checks (Path.expand → workspace,
-      # symlink_in_chain? sur [] → false) puis File.write sur le dir = :eisdir opaque. Rejet propre.
+      # `rel_path` non-empty — a path "" passes the checks (Path.expand → workspace,
+      # symlink_in_chain? on [] → false) then File.write on the dir = opaque :eisdir. Clean rejection.
       %{"path" => rel_path, "content" => content}, :ok
       when is_binary(rel_path) and rel_path != "" and is_binary(content) ->
         full = Path.expand(Path.join(workspace, rel_path))
@@ -99,30 +100,30 @@ defmodule Fleet.Workflow.PayloadGuard do
     end)
   end
 
-  # Vrai si UN composant du chemin relatif est exactement `.git` (`.git/config`, `a/.git/hooks/x`, …).
-  # Comparaison sur les COMPOSANTS (pas un substring) : un fichier nommé `.gitignore` ou `foo.git`
-  # n'est PAS un composant `.git` et reste autorisé. Ferme la réécriture de la plomberie git du repo.
+  # True if ONE component of the relative path is exactly `.git` (`.git/config`, `a/.git/hooks/x`, …).
+  # Comparison on the COMPONENTS (not a substring): a file named `.gitignore` or `foo.git`
+  # is NOT a `.git` component and stays allowed. Closes rewriting the repo's git plumbing.
   defp dotgit_component?(rel_path) do
     rel_path |> Path.split() |> Enum.any?(&(&1 == ".git"))
   end
 
-  # Vrai si le BASENAME du chemin est `.gitattributes` (à n'importe quel niveau : `.gitattributes`,
-  # `sub/.gitattributes`). C'est ce fichier qui mappe un pattern de fichiers vers un `filter`/`diff` driver.
+  # True if the BASENAME of the path is `.gitattributes` (at any level: `.gitattributes`,
+  # `sub/.gitattributes`). It is this file that maps a file pattern to a `filter`/`diff` driver.
   defp gitattributes_basename?(rel_path) do
     Path.basename(rel_path) == ".gitattributes"
   end
 
-  # Vrai si le CONTENU d'un `.gitattributes` arme un attribut `filter=<x>` ou `diff=<x>` — ce sont les deux
-  # attributs qui détournent `git add` (`clean`) ou `git log -p`/`diff` (`textconv`) vers une commande
-  # externe configurée. On reste large (ligne contenant `filter=`/`diff=`, non-vide), fail-closed : mieux
-  # vaut refuser un `.gitattributes` bénin portant `diff=python` que laisser passer un armement. Les autres
-  # attributs (`text`, `eol`, `binary`, `merge=`…) n'exécutent pas de commande externe → non bloqués.
+  # True if the CONTENT of a `.gitattributes` arms a `filter=<x>` or `diff=<x>` attribute — these are the two
+  # attributes that divert `git add` (`clean`) or `git log -p`/`diff` (`textconv`) toward a configured
+  # external command. We stay broad (line containing `filter=`/`diff=`, non-empty), fail-closed: better
+  # to refuse a benign `.gitattributes` carrying `diff=python` than to let an arming through. The other
+  # attributes (`text`, `eol`, `binary`, `merge=`…) do not execute an external command → not blocked.
   defp arms_filter_or_diff?(content) do
     Regex.match?(~r/(^|\s)(filter|diff)=\S/m, content)
   end
 
-  # Vrai si un composant EXISTANT du chemin (de workspace au fichier) est un symlink. `lstat` ne
-  # suit pas le lien (stat le lien lui-même) → on détecte le vecteur d'évasion avant tout write.
+  # True if an EXISTING component of the path (from workspace to the file) is a symlink. `lstat` does
+  # not follow the link (stats the link itself) → we detect the escape vector before any write.
   defp symlink_in_chain?(workspace, rel_path) do
     rel_path
     |> Path.split()

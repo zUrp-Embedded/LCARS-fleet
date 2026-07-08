@@ -1,9 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LCARS Capability Profile v2.5",
-  "description": "Structural schema for a composed Capability Profile. Semantic invariants (enums, value constraints) are checked by Fleet.CapProfile.validate/1 (G24).",
+  "description": "Structural schema for a composed Capability Profile. Semantic invariants (enums, value constraints) are checked by Fleet.CapProfile.validate/1 (G24). STRICT: additionalProperties:false at every object level — an unknown/typo'd field (e.g. `containmnet`) is REJECTED, not silently ignored (R0-CAP-001). As the COMPOSED profile (base + modops) is validated here, this also catches junk fields introduced by a modop fragment (R0-CAP-009 backstop).",
   "type": "object",
   "required": ["kind", "metadata", "spec"],
+  "additionalProperties": false,
   "properties": {
     "kind": {
       "type": "string"
@@ -11,6 +12,7 @@
     "metadata": {
       "type": "object",
       "required": ["name", "containment", "slot_scope"],
+      "additionalProperties": false,
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "containment": { "type": "string" },
@@ -28,6 +30,7 @@
           "items": {
             "type": "object",
             "required": ["path", "mode"],
+            "additionalProperties": false,
             "properties": {
               "path": { "type": "string", "pattern": "^/" },
               "mode": { "type": "string", "enum": ["ro", "rw"] }
@@ -45,9 +48,11 @@
         "injects",
         "modop_set"
       ],
+      "additionalProperties": false,
       "properties": {
         "scope": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "allowedTools": {
               "type": "array",
@@ -69,6 +74,7 @@
         },
         "knowledge": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "libs": { "type": "array", "items": { "type": "string" } },
             "skills": { "type": "array", "items": { "type": "string" } },
@@ -83,6 +89,7 @@
         "invocation": {
           "type": "object",
           "required": ["lifetime_scope"],
+          "additionalProperties": false,
           "properties": {
             "lifetime_scope": {
               "type": "string",
@@ -112,6 +119,7 @@
         },
         "injects": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "gitconfig": { "type": "boolean" },
             "forge_signing_allowed": { "type": "boolean" }
@@ -120,6 +128,7 @@
         "modop_set": {
           "type": "object",
           "required": ["default"],
+          "additionalProperties": false,
           "properties": {
             "default": {
               "type": "array",
@@ -142,6 +151,7 @@
         },
         "project": {
           "type": ["object", "null"],
+          "additionalProperties": false,
           "properties": {
             "repo_path": { "type": "string" },
             "base_branch": { "type": "string" },

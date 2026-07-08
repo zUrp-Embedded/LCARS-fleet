@@ -1,35 +1,35 @@
 defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   @moduledoc """
-  Behaviour du client forge — le CONTRAT du seam runtime `:forge_client`, consommé
-  par `Fleet.MCP.PodTools.Delegation` (canaux DÉLÉGATION / SUIVI).
+  Forge-client behaviour — the CONTRACT of the `:forge_client` runtime seam, consumed
+  by `Fleet.MCP.PodTools.Delegation` (DELEGATION / TRACKING channels).
 
-  Le contrat appartient au CONSOMMATEUR : les callbacks sont EXACTEMENT les
-  fonctions que `Delegation` appelle (create_issue, add_label, get_issue,
-  list_open_pulls, parse_feature_branch, pr_review_verdicts) — pas la surface
-  complète du client forge du pilot.
+  The contract belongs to the CONSUMER: the callbacks are EXACTLY the
+  functions that `Delegation` calls (create_issue, add_label, get_issue,
+  list_open_pulls, parse_feature_branch, pr_review_verdicts) — not the full
+  surface of the pilot's forge client.
 
-  ## Pourquoi un seam RUNTIME (et pas une dep compile)
+  ## Why a RUNTIME seam (and not a compile dep)
 
-  `fleet_mcp` est Ring 2, `fleet_pilot` est Ring 3 (au-dessus) : une dep mix.exs
-  `fleet_mcp → fleet_pilot` serait MONTANTE, interdite. Le module est résolu au
-  RUNTIME (`resolved/0` : app-env + défaut en atom littéral → aucune dep
-  compile-time, aucun cycle). Seam déclaré dans
-  `fleet_event_router/priv/allowed_graph.yaml` (section `seams`, direction `up`).
+  `fleet_mcp` is Ring 2, `fleet_pilot` is Ring 3 (above): a mix.exs dep
+  `fleet_mcp → fleet_pilot` would be UPWARD, forbidden. The module is resolved at
+  RUNTIME (`resolved/0`: app-env + default as a literal atom → no compile-time
+  dep, no cycle). Seam declared in
+  `fleet_event_router/priv/allowed_graph.yaml` (`seams` section, direction `up`).
 
-  ## Implémentations
+  ## Implementations
 
-    * `Fleet.Pilot.ForgeClient` — impl RÉELLE (défaut canon). Elle vit dans
-      `fleet_pilot`, qui ne dépend PAS de `fleet_mcp` : elle ne PEUT PAS adopter
-      ce behaviour (`@behaviour` = référence compile, créerait une arête nouvelle)
-      et reste DUCK-TYPÉE avec un commentaire croisé. Ce module-ci est la source
-      de vérité du contrat vu du consommateur ; les types des callbacks sont
-      alignés sur les `@spec` réelles du pilot (`ForgeClient`, `ForgeClient.Jury`,
+    * `Fleet.Pilot.ForgeClient` — the REAL impl (canonical default). It lives in
+      `fleet_pilot`, which does NOT depend on `fleet_mcp`: it CANNOT adopt
+      this behaviour (`@behaviour` = a compile reference, would create a new edge)
+      and stays DUCK-TYPED with a cross-reference comment. This module is the source
+      of truth of the contract as seen by the consumer; the callback types are
+      aligned on the pilot's real `@spec`s (`ForgeClient`, `ForgeClient.Jury`,
       `ForgeProtocol`).
-    * Stubs test `Fleet.MCP.PodToolsTest.{StubForge, RecordingForge}` — même app →
-      adoptent le behaviour (le compilateur vérifie la conformité, anti stub-menteur).
+    * Test stubs `Fleet.MCP.PodToolsTest.{StubForge, RecordingForge}` — same app →
+      adopt the behaviour (the compiler checks conformance, anti lying-stub).
   """
 
-  @doc "Pose une issue → `{:ok, numéro}` (auteur/assignee/token passés en `opts`)."
+  @doc "Creates an issue → `{:ok, number}` (author/assignee/token passed in `opts`)."
   @callback create_issue(
               repo :: String.t(),
               title :: String.t(),
@@ -37,7 +37,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
               opts :: keyword()
             ) :: {:ok, issue_number :: integer()} | {:error, term()}
 
-  @doc "Étiquette une issue (best-effort côté Delegation : résultat ignoré)."
+  @doc "Labels an issue (best-effort on the Delegation side: result ignored)."
   @callback add_label(
               repo :: String.t(),
               issue_number :: integer(),
@@ -45,34 +45,34 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
               opts :: keyword()
             ) :: {:ok, :added | :already_present} | {:error, term()}
 
-  @doc "Lit une issue (map API Gitea brute — Delegation lit `\"state\"`)."
+  @doc "Reads an issue (raw Gitea API map — Delegation reads `\"state\"`)."
   @callback get_issue(repo :: String.t(), number :: integer(), opts :: keyword()) ::
               {:ok, map()} | {:error, term()}
 
-  @doc "PRs OUVERTES du repo (maps API Gitea brutes — Delegation lit `head.ref`/`head.sha`)."
+  @doc "OPEN PRs of the repo (raw Gitea API maps — Delegation reads `head.ref`/`head.sha`)."
   @callback list_open_pulls(repo :: String.t(), opts :: keyword()) ::
               {:ok, [map()]} | {:error, term()}
 
   @doc """
-  Parse une feature-branch système `lcars/issue-<n>-<role>` → `{:ok, {n, role}}`,
-  `:error` si le ref n'est pas une feature-branch fleet. Porté par le seam pour que
-  `Delegation` n'appelle jamais `Fleet.Pilot.ForgeProtocol` en direct (dep compile).
+  Parses a system feature-branch `lcars/issue-<n>-<role>` → `{:ok, {n, role}}`,
+  `:error` if the ref is not a fleet feature-branch. Carried by the seam so that
+  `Delegation` never calls `Fleet.Pilot.ForgeProtocol` directly (compile dep).
   """
   @callback parse_feature_branch(head :: String.t()) ::
               {:ok, {issue_number :: integer(), role :: String.t()}} | :error
 
-  @doc "Verdicts de review de la PR (dernière review par reviewer, scopée `head_sha`)."
+  @doc "PR review verdicts (last review per reviewer, scoped to `head_sha`)."
   @callback pr_review_verdicts(repo :: String.t(), index :: integer(), opts :: keyword()) ::
               {:ok, %{optional(String.t()) => :approved | :changes_requested}}
               | {:error, term()}
 
-  # Défaut canon : le client forge réel côté fleet_pilot. Atom littéral (pas d'appel
-  # remote littéral) → aucune dep compile-time. Posé ICI une seule fois.
+  # Canonical default: the real forge client on the fleet_pilot side. Literal atom (not a
+  # literal remote call) → no compile-time dep. Set HERE once.
   @default_client Fleet.Pilot.ForgeClient
 
   @doc """
-  Client forge résolu : config `:fleet_mcp, :forge_client` sinon le défaut canon
-  `Fleet.Pilot.ForgeClient`. SOURCE UNIQUE du défaut (même pattern que
+  Resolved forge client: config `:fleet_mcp, :forge_client` otherwise the canonical
+  default `Fleet.Pilot.ForgeClient`. SINGLE SOURCE of the default (same pattern as
   `Fleet.Spawner.LaunchBackend.resolved/0`).
   """
   @spec resolved() :: module()

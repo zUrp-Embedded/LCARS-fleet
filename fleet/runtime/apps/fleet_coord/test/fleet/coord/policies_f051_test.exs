@@ -23,7 +23,7 @@ defmodule Fleet.Coord.PoliciesF051Test do
   test "F-051 : policies absentes → raise (plus de table vide DÉGRADÉE)" do
     Application.put_env(:fleet_coord, :policies_path, "/nonexistent/coord-policies-xyz.yaml")
 
-    assert_raise RuntimeError, ~r/absent\/illisible/, fn ->
+    assert_raise RuntimeError, ~r/missing\/unreadable/, fn ->
       Policies.init_policies!()
     end
   end
@@ -35,7 +35,7 @@ defmodule Fleet.Coord.PoliciesF051Test do
 
     Application.put_env(:fleet_coord, :policies_path, tmp)
 
-    assert_raise RuntimeError, ~r/malformé/, fn ->
+    assert_raise RuntimeError, ~r/malformed/, fn ->
       Policies.init_policies!()
     end
   end
@@ -51,7 +51,7 @@ defmodule Fleet.Coord.PoliciesF051Test do
 
     Application.put_env(:fleet_coord, :policies_path, tmp)
 
-    assert_raise RuntimeError, ~r/INVALIDE vs coord-policies-v1\.json/, fn ->
+    assert_raise RuntimeError, ~r/INVALID vs coord-policies-v1\.json/, fn ->
       Policies.init_policies!()
     end
   end

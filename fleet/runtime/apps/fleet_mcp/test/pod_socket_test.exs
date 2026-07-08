@@ -1,3 +1,10 @@
+defmodule Fleet.MCP.PodSocketTest.RaisingTools do
+  @moduledoc false
+  # Handler de tool qui CRASHE — injecté via `:fleet_mcp, :tool_handler` pour prouver le rescue
+  # SOC-RES-001 (un outil qui lève → isError result, PAS une connexion droppée).
+  def handle_tool_call(_tool, _args, _state), do: raise("simulated tool crash (SOC-RES-001)")
+end
+
 defmodule Fleet.MCP.PodSocketTest do
   @moduledoc """
   Transport pod-facing AF_UNIX per-pod (`Fleet.MCP.PodSocketAcceptor` /
@@ -54,6 +61,31 @@ defmodule Fleet.MCP.PodSocketTest do
 
     # Plus de brief actif → done.
     assert {:ok, %{"done" => true}} = content(call(path, 3, "get_work_item", %{}))
+  end
+
+  test "ensure_pod_socket refuse un pod_id non-path-safe (frontière FS mcp), zéro acceptor" do
+    for bad <- ["../escape", "a/b", "..", ".", "z\0y", String.duplicate("q", 200)] do
+      assert {:error, {:unsafe_pod_id, _}} = PodSocketSupervisor.ensure_pod_socket(bad),
+             "pod_id #{inspect(bad)} devrait être refusé à la frontière socket"
+
+      assert Registry.lookup(Fleet.MCP.PodSocketRegistry, bad) == []
+    end
+  end
+
+  test "release_pod_socket sur un pod_id évadant (..) n'efface RIEN hors base (anti-escape FS)",
+       %{
+         base: base
+       } do
+    # base DOIT exister pour que la traversée `..` résolve (sinon ENOENT masque la vuln = faux vert).
+    File.mkdir_p!(base)
+    evil_pod = "../" <> Path.basename(base) <> "-evil"
+    victim = Path.join([Path.dirname(base), Path.basename(base) <> "-evil", "sock"])
+    File.mkdir_p!(Path.dirname(victim))
+    File.write!(victim, "precious")
+    on_exit(fn -> File.rm_rf(Path.dirname(victim)) end)
+
+    assert :ok = PodSocketSupervisor.release_pod_socket(evil_pod)
+    assert File.exists?(victim), "release ne doit PAS effacer un fichier hors base via `..`"
   end
 
   test "accepteur CONCURRENT : une connexion ouverte-muette ne bloque pas les autres (anti-gel du pod)" do
@@ -180,6 +212,45 @@ defmodule Fleet.MCP.PodSocketTest do
     :gen_tcp.close(sock)
 
     assert %{"error" => %{"code" => -32_700}} = Jason.decode!(line)
+  end
+
+  test "SOC-RES-001 : un tool qui CRASHE → isError result, la connexion N'est PAS droppée (pod pas hang)" do
+    # handler de tool raisant injecté → sans le rescue de l'acceptor, la Task connexion mourrait → socket
+    # fermée → le `call` ci-dessous verrait recv `{:error, :closed}` (le pod attendrait son timeout).
+    Fleet.MCP.TestEnv.put_env_restoring(
+      :fleet_mcp,
+      :tool_handler,
+      Fleet.MCP.PodSocketTest.RaisingTools
+    )
+
+    pod = uniq("crash")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    resp = call(path, 1, "get_work_item", %{})
+    assert %{"id" => 1, "result" => %{"isError" => true}} = resp
+  end
+
+  test "SOC-EFF-005 : readiness compte les `*/sock`, pas les dirs — un dir stray ne fausse pas 'orphaned'",
+       %{base: base} do
+    pod = uniq("ready")
+    {:ok, _path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    # dir résiduel SANS sock (provisioning à moitié / release ayant retiré le sock pas le dir) : ne doit
+    # PAS être compté comme un socket-fichier (sinon socket_files > acceptors → faux 'orphaned/deaf').
+    File.mkdir_p!(Path.join(base, "stray-no-sock"))
+
+    assert {:operational, _} = Fleet.MCP.Supervisor.pod_facing_status()
+  end
+
+  test "SOC-CONTRACT-001 : PodSocketSupervisor exporte le contrat du seam mcp_socket_provisioner (duck-typed)" do
+    # Le seam est DUCK-TYPED : fleet_mcp ne peut pas adopter le `@behaviour` de fleet_spawner (edge compile
+    # MONTANT interdit) → le compilateur ne vérifie PAS la conformité. Ce test verrouille le côté IMPL :
+    # PodSocketSupervisor DOIT exporter les callbacks que le consumer (Pod.McpProvision, garde R1-23)
+    # appelle. Une signature qui dérive casse CE test, pas un pod en prod. Contrat = Fleet.Spawner.McpSocketProvisioner.
+    assert function_exported?(Fleet.MCP.PodSocketSupervisor, :ensure_pod_socket, 1)
+    assert function_exported?(Fleet.MCP.PodSocketSupervisor, :release_pod_socket, 1)
   end
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"

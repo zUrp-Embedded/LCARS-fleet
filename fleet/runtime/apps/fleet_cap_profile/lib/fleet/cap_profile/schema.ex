@@ -1,51 +1,51 @@
 defmodule Fleet.CapProfile.Schema do
   @moduledoc """
-  Validation JSON-schema d'un cap-profile / modop (conformité STRUCTURELLE).
+  JSON-schema validation of a cap-profile / modop (STRUCTURAL conformance).
 
-  Cluster de validation extrait de `Fleet.CapProfile`. Distinct des invariants
-  métier G24 (`Fleet.CapProfile.Invariants`, purs sur le struct composé) : ici
-  on valide la **forme** d'une map brute (post-YAML, avant `to_struct`) contre
-  les JSON-schemas pinnés dans `priv/schema/` —
+  Validation cluster extracted from `Fleet.CapProfile`. Distinct from the G24
+  business invariants (`Fleet.CapProfile.Invariants`, pure over the composed
+  struct): here we validate the **shape** of a raw map (post-YAML, before
+  `to_struct`) against the JSON-schemas pinned in `priv/schema/` —
 
-    * `cap-profile-v2.5.json` — schema strict du profile composé.
-    * `modop-profile.json` — schema strict du fragment modop (clés réservées
-      interdites : `kind`, `metadata.containment`, `metadata.name` — un modop ne
-      peut donc pas override le containment/name/kind du profile de base).
+    * `cap-profile-v2.5.json` — strict schema of the composed profile.
+    * `modop-profile.json` — strict schema of the modop fragment (reserved keys
+      forbidden: `kind`, `metadata.containment`, `metadata.name` — so a modop
+      cannot override the base profile's containment/name/kind).
 
-  Sens de dépendance UNIQUE (pas de cycle) : ce module est en AMONT du cœur — il
-  n'appelle ni les accesseurs single-authority (`name/1`, `containment/1`…) ni le
-  futur `Catalog`. Ses seules deps sont `Jason` / `ExJsonSchema` / `File` (déjà
-  dans l'app). `Fleet.CapProfile.load/1` et `compose/2` appellent `validate/2` ;
-  `read_modops/2` (côté cœur) appelle `validate_modop_keys/1` puis `validate/2`.
+  Single dependency direction (no cycle): this module is UPSTREAM of the core — it
+  calls neither the single-authority accessors (`name/1`, `containment/1`…) nor
+  `Catalog`. Its only deps are `Jason` / `ExJsonSchema` / `File` (already in the
+  app). `Fleet.CapProfile.load/1` and `compose/2` call `validate/2`;
+  `read_modops/2` (core side) calls `validate_modop_keys/1` then `validate/2`.
 
-  I/O : lit les fichiers schema du FS. `schema_dir/0` lit la clé env
-  `:fleet_cap_profile, :schema_dir` (les tests la surchargent via
-  `Application.put_env/3`), défaut = `priv/schema` bundlé. Le read+decode+resolve
-  est caché en `:persistent_term` (keyé par le path RÉSOLU → les overrides test
-  ont leur propre entrée), lazy, erreurs non-cachées.
+  I/O: reads the schema files from the FS. `schema_dir/0` reads the env key
+  `:fleet_cap_profile, :schema_dir` (tests override it via
+  `Application.put_env/3`), default = the bundled `priv/schema`. The
+  read+decode+resolve is cached in `:persistent_term` (keyed by the RESOLVED path
+  → test overrides get their own entry), lazy, errors not cached.
   """
 
   require Logger
 
   # Fast-path guard for top-level reserved keys. `metadata.containment`
   # and `metadata.name` are also reserved — enforced by the JSON schema
-  # `priv/schema/modop-profile.json` (`not/anyOf` clause). `kind` reste
-  # réservé (il différencie cap-profile vs modop côté merge) ; `apiVersion`
-  # n'est PAS réservé (champ inexistant — versioning par le code).
+  # `priv/schema/modop-profile.json` (`not/anyOf` clause). `kind` stays
+  # reserved (it distinguishes cap-profile vs modop at merge time); `apiVersion`
+  # is NOT reserved (no such field — versioning is done by the code).
   @reserved_modop_keys ~w(kind)
 
   @doc """
-  Valide une map brute contre le JSON-schema du `kind` demandé.
+  Validates a raw map against the JSON-schema of the requested `kind`.
 
   ## Exit codes
-    * `:ok` — conforme au schema.
-    * `{:error, :invalid_schema}` — `kind: :cap_profile` non-conforme.
-    * `{:error, :invalid_modop}` — `kind: :modop` non-conforme.
-    * `{:error, :schema_unavailable}` — fichier schema priv absent ou corrompu.
+    * `:ok` — conformant to the schema.
+    * `{:error, :invalid_schema}` — `kind: :cap_profile` nonconformant.
+    * `{:error, :invalid_modop}` — `kind: :modop` nonconformant.
+    * `{:error, :schema_unavailable}` — the priv schema file is absent or corrupt.
 
-  Les atomes d'erreur (`:invalid_schema`/`:invalid_modop`/`:schema_unavailable`)
-  sont le contrat de retour de `load/1` et `compose/2` (cf. leurs moduledocs) —
-  figés, ne pas renommer.
+  The error atoms (`:invalid_schema`/`:invalid_modop`/`:schema_unavailable`)
+  are the return contract of `load/1` and `compose/2` (see their moduledocs) —
+  frozen, do not rename.
   """
   @spec validate(map(), :cap_profile | :modop) ::
           :ok | {:error, :invalid_schema | :invalid_modop | :schema_unavailable}
@@ -69,11 +69,11 @@ defmodule Fleet.CapProfile.Schema do
   end
 
   @doc """
-  Refuse un fragment modop qui porte une clé réservée top-level (`kind`).
-  Garde fast-path AVANT la validation JSON-schema : un modop ne peut pas
-  override le `kind` du profile de base.
+  Refuses a modop fragment carrying a top-level reserved key (`kind`).
+  Fast-path guard BEFORE the JSON-schema validation: a modop cannot override the
+  base profile's `kind`.
 
-  `:ok` si aucune clé réservée, sinon `{:error, :invalid_modop}`.
+  `:ok` if no reserved key, otherwise `{:error, :invalid_modop}`.
   """
   @spec validate_modop_keys(map()) :: :ok | {:error, :invalid_modop}
   def validate_modop_keys(map) when is_map(map) do
@@ -84,21 +84,21 @@ defmodule Fleet.CapProfile.Schema do
   end
 
   # ============================================================
-  # Schema loading (privé — I/O + cache)
+  # Schema loading (private — I/O + cache)
   # ============================================================
 
   defp load_schema(:cap_profile), do: load_schema_file("cap-profile-v2.5.json")
   defp load_schema(:modop), do: load_schema_file("modop-profile.json")
 
-  # Schema priv IMMUABLE : read+decode+resolve une fois, caché en `:persistent_term`
-  # keyé par le path RÉSOLU (les overrides test de `schema_dir/0` ont leur entrée). Lazy-init,
-  # erreurs non-cachées.
-  # Copie locale ASSUMÉE du pattern `Fleet.SchemaCache` (fleet_event_router — l'autorité
-  # Ring 0 du chargé-caché, dédup B-R2) : fleet_cap_profile est Ring 0 SANS dep vers
-  # fleet_event_router, on n'ajoute pas une arête intra-R0 (allowed_graph.yaml) pour ces
-  # lignes. Diffère de `cached/2` sur un point VOULU : `{:error, :schema_unavailable}`
-  # n'est PAS caché (retentable). Si l'arête apparaît un jour pour une autre raison,
-  # migrer ce site (et `DisallowedTools`).
+  # IMMUTABLE priv schema: read+decode+resolve once, cached in `:persistent_term`
+  # keyed by the RESOLVED path (the `schema_dir/0` test overrides get their entry). Lazy-init,
+  # errors not cached.
+  # DELIBERATE local copy of the `Fleet.SchemaCache` pattern (fleet_event_router — the Ring 0
+  # authority for load-once-cache): fleet_cap_profile is Ring 0 WITHOUT a dep onto
+  # fleet_event_router, and we do not add an intra-R0 edge (allowed_graph.yaml) for these lines.
+  # It differs from `cached/2` on one INTENTIONAL point: `{:error, :schema_unavailable}` is NOT
+  # cached (retryable). If the edge appears one day for another reason, migrate this site
+  # (and `DisallowedTools`).
   defp load_schema_file(name) do
     path = Path.join(schema_dir(), name)
     key = {__MODULE__, :schema, path}

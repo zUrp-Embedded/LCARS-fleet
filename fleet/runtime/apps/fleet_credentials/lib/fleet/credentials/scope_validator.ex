@@ -1,31 +1,31 @@
 defmodule Fleet.Credentials.ScopeValidator do
   @moduledoc """
-  Gate scope-coverage `oauth_scopes ⊇ scopes_requis_role`.
+  Scope-coverage gate `oauth_scopes ⊇ role_required_scopes`.
 
-  Câblé au **spawn** via `Fleet.Credentials.Gate.validate/2` (appelée par
-  `Fleet.Spawner.Pod` au lancement) : lit les scopes du `.credentials.json` de l'humain (bindé natif, pas de copie) et refuse le
-  spawn (`{:credentials_invalid, {:insufficient_scopes, …}}`) si insuffisants. Défense en
-  profondeur préflight (le binaire claude impose aussi les scopes via 401, mais on échoue
-  tôt et clair côté runtime). Pas de coffre ni `setup-credentials.sh` : le claudeDir humain
-  est bindé directement, il n'y a pas de coffre `/var/lib/lcars/credentials`.
+  Wired at **spawn** via `Fleet.Credentials.Gate.validate/2` (called by
+  `Fleet.Spawner.Pod` at launch): reads the scopes from the human's `.credentials.json` (bound native, no copy) and refuses the
+  spawn (`{:credentials_invalid, {:insufficient_scopes, …}}`) if insufficient. Preflight defense in
+  depth (the claude binary also enforces the scopes via 401, but we fail
+  early and clear on the runtime side). No vault nor `setup-credentials.sh`: the human's claudeDir
+  is bound directly, there is no `/var/lib/lcars/credentials` vault.
 
-  ## Profils de scopes
+  ## Scope profiles
 
-    * `default` — minimum opérationnel (`user:inference`,
+    * `default` — operational minimum (`user:inference`,
       `user:sessions:claude_code`)
-    * `bridge_enabled` — ajoute `user:profile` (Bridge / Remote
-      Control opt-in, hors-MVP mais profil prêt)
-    * `mcp_oauth` — ajoute `user:mcp_servers` (MCP OAuth
+    * `bridge_enabled` — adds `user:profile` (Bridge / Remote
+      Control opt-in, out-of-MVP but the profile is ready)
+    * `mcp_oauth` — adds `user:mcp_servers` (MCP OAuth
       Anthropic-mediated)
 
-  Combinable : un cap-profile peut activer plusieurs flags, l'union
-  des scopes requis est calculée.
+  Combinable: a cap-profile can enable several flags, the union
+  of the required scopes is computed.
 
   ## Exit codes
 
-    * `:ok` — scopes suffisants (`required \\\\ oauth_scopes` vide)
-    * `{:error, {:insufficient_scopes, missing}}` — liste des scopes
-      manquants (ordre conservé pour rapport humain)
+    * `:ok` — scopes sufficient (`required \\\\ oauth_scopes` empty)
+    * `{:error, {:insufficient_scopes, missing}}` — list of the
+      missing scopes (order preserved for human reporting)
   """
 
   @scopes_default ["user:inference", "user:sessions:claude_code"]
@@ -33,17 +33,17 @@ defmodule Fleet.Credentials.ScopeValidator do
   @scopes_mcp ["user:mcp_servers"]
 
   @doc """
-  Valide qu'une liste de scopes OAuth couvre les requis du rôle.
+  Validates that a list of OAuth scopes covers the role's requirements.
 
   ## Inputs
 
-    * `oauth_scopes` — liste lue du `.credentials.json` de l'humain
-      (string-split sur whitespace côté caller)
-    * `role_profile_flags` — map des flags activés sur le cap-profile,
-      par ex. `%{"bridge_enabled" => true}`. Toute clé non listée
-      ci-dessus est ignorée silencieusement.
+    * `oauth_scopes` — list read from the human's `.credentials.json`
+      (string-split on whitespace on the caller side)
+    * `role_profile_flags` — map of the flags enabled on the cap-profile,
+      e.g. `%{"bridge_enabled" => true}`. Any key not listed
+      above is silently ignored.
 
-  ## Exemples
+  ## Examples
 
       iex> Fleet.Credentials.ScopeValidator.validate(
       ...>   ["user:inference", "user:sessions:claude_code"],
@@ -57,8 +57,8 @@ defmodule Fleet.Credentials.ScopeValidator do
       ...> )
       {:error, {:insufficient_scopes, ["user:sessions:claude_code"]}}
   """
-  @spec validate([String.t()], map()) ::
-          :ok | {:error, {:insufficient_scopes, [String.t()]}}
+  @spec validate(term(), term()) ::
+          :ok | {:error, {:insufficient_scopes, [String.t()]} | {:invalid_scope_args, term()}}
   def validate(oauth_scopes, role_profile_flags)
       when is_list(oauth_scopes) and is_map(role_profile_flags) do
     required = compute_required(role_profile_flags)
@@ -67,11 +67,16 @@ defmodule Fleet.Credentials.ScopeValidator do
     if missing == [], do: :ok, else: {:error, {:insufficient_scopes, missing}}
   end
 
-  @doc """
-  Liste des scopes requis pour un set de flags donnés.
+  # Total (R1-36): malformed args (oauth_scopes not a list, role_profile_flags not a map) → typed refusal,
+  # not a FunctionClauseError. A caller (Gate) normalizes upstream, but the validator stands total on its own.
+  def validate(oauth_scopes, role_profile_flags),
+    do: {:error, {:invalid_scope_args, {oauth_scopes, role_profile_flags}}}
 
-  Utilitaire pur (pas d'IO), exposé pour les pré-flight check
-  shell-side et la documentation runtime.
+  @doc """
+  List of the scopes required for a given set of flags.
+
+  Pure utility (no IO), exposed for the shell-side pre-flight
+  check and runtime documentation.
   """
   @spec compute_required(map()) :: [String.t()]
   def compute_required(role_profile_flags) when is_map(role_profile_flags) do

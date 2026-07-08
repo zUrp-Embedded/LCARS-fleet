@@ -1,35 +1,35 @@
 defmodule Fleet.MCP.PodSocketAcceptor do
   @moduledoc """
-  Accepteur de socket AF_UNIX pour UN pod : l'identité du pod EST le canal.
+  AF_UNIX socket acceptor for ONE pod: the pod's identity IS the channel.
 
-  Chaque pod a SA propre socket, montée dans son seul sandbox. Donc toute ligne
-  reçue sur CETTE socket vient forcément de CE pod : le `pod_id` est l'état
-  immuable de l'accepteur (porté au démarrage, depuis le nom du socket), jamais
-  lu du wire. Il n'y a plus rien à prouver — pas de secret présenté, pas de
-  `pod_id` à comparer : le canal discrimine. (L'ancien transport HTTP loopback
-  était partagé par tous les pods ; le `pod_id` y était devinable, d'où l'ancienne
-  capability. La socket per-pod ferme ce trou par construction.)
+  Each pod has ITS own socket, mounted into its sole sandbox. So every line
+  received on THIS socket necessarily comes from THIS pod: the `pod_id` is the
+  acceptor's immutable state (carried at startup, from the socket name), never
+  read off the wire. There is nothing left to prove — no secret presented, no
+  `pod_id` to compare: the channel discriminates. (The old HTTP loopback
+  transport was shared by all pods; the `pod_id` there was guessable, hence the
+  old capability. The per-pod socket closes that hole by construction.)
 
-  Un accepteur = un process = une socket : il y a un vrai motif runtime (une
-  socket est un état I/O qui persiste entre les lignes). Il possède le listen
-  socket, boucle en `accept`, et confie chaque connexion acceptée à une Task
-  dédiée (`Fleet.MCP.ConnectionTaskSupervisor`) — la boucle re-`accept`
-  aussitôt ; un handler lent ne bloque que SA connexion, jamais les suivantes
-  ni les autres pods (chacun a son propre accepteur). Supervisé par
-  `Fleet.MCP.PodSocketSupervisor` (DynamicSupervisor) ; nommé dans le Registry
-  `Fleet.MCP.PodSocketRegistry` (clé = `pod_id`) pour la résolution idempotente.
+  One acceptor = one process = one socket: there is a genuine runtime reason (a
+  socket is I/O state that persists across lines). It owns the listen socket,
+  loops on `accept`, and hands each accepted connection to a dedicated Task
+  (`Fleet.MCP.ConnectionTaskSupervisor`) — the loop re-`accept`s
+  immediately; a slow handler blocks only ITS connection, never the following
+  ones nor the other pods (each has its own acceptor). Supervised by
+  `Fleet.MCP.PodSocketSupervisor` (DynamicSupervisor); named in the Registry
+  `Fleet.MCP.PodSocketRegistry` (key = `pod_id`) for idempotent resolution.
 
-  ## Protocole
+  ## Protocol
 
-  JSON-RPC newline-framed (`{:packet, :line}`), un message = une ligne. Seul
-  `method == "tools/call"` est servi ici : `initialize` / `tools/list` sont
-  répondus localement par le pont stdio (`bin/fleet_mcp_stdio_bridge.py`). Le
-  frame de réponse réutilise `Fleet.MCP.PodTools.handle_tool_call/3` :
+  JSON-RPC newline-framed (`{:packet, :line}`), one message = one line. Only
+  `method == "tools/call"` is served here: `initialize` / `tools/list` are
+  answered locally by the stdio bridge (`bin/fleet_mcp_stdio_bridge.py`). The
+  response frame reuses `Fleet.MCP.PodTools.handle_tool_call/3`:
 
-    * `{:ok, content, _}`  → `result` = ce `content` (déjà au format MCP) ;
-    * `{:error, reason, _}` → `result` = `%{"content" => [texte], "isError" => true}`
-      (convention MCP : une erreur d'outil est un résultat avec `isError`, pas une
-      erreur de protocole — le pod la lit comme du texte d'outil).
+    * `{:ok, content, _}`  → `result` = that `content` (already in MCP format);
+    * `{:error, reason, _}` → `result` = `%{"content" => [text], "isError" => true}`
+      (MCP convention: a tool error is a result with `isError`, not a protocol
+      error — the pod reads it as tool text).
   """
 
   use GenServer
@@ -38,15 +38,15 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   alias Fleet.MCP.PodTools
 
-  # Options de socket AF_UNIX stream, passive (on `recv` explicitement), une ligne
-  # par message. `reuseaddr` est sans danger ici (un fichier socket résiduel est
-  # quand même retiré au démarrage — cf. `rm_stale/1`).
-  # `buffer` DOIT depasser la plus longue ligne JSON-RPC possible : avec `packet: :line`,
-  # une ligne plus longue que le buffer (defaut inet ~1460 o) est livree TRONQUEE en
-  # fragments, chaque fragment est un JSON invalide, et le serveur attendait ensuite une
-  # ligne complete qui n'arrivait jamais -> hang silencieux, timeout 30 s cote pont,
-  # payload d'outil > ~1,4 Ko PERDU (vu live 2026-07-04 : brief arch + summaries engineer/
-  # reviewer). 1 MiB couvre tout payload realiste ; au-dela, handle_line repond -32700.
+  # AF_UNIX stream socket options, passive (we `recv` explicitly), one line per
+  # message. `reuseaddr` is harmless here (a residual socket file is removed at
+  # startup anyway — cf. `rm_stale/1`).
+  # `buffer` MUST exceed the longest possible JSON-RPC line: with `packet: :line`,
+  # a line longer than the buffer (inet default ~1460 B) is delivered TRUNCATED into
+  # fragments, each fragment is invalid JSON, and the server then waited for a
+  # complete line that never arrived -> silent hang, 30 s timeout on the bridge side,
+  # tool payload > ~1.4 KB LOST (seen live 2026-07-04: arch brief + engineer/
+  # reviewer summaries). 1 MiB covers every realistic payload; beyond that, handle_line answers -32700.
   @socket_opts [
     :binary,
     {:packet, :line},
@@ -55,8 +55,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     {:buffer, 1_048_576}
   ]
 
-  # Task.Supervisor (arbre `Fleet.MCP.Supervisor`) où chaque connexion acceptée est servie dans sa
-  # propre Task. Sépare le SERVICE d'une connexion (potentiellement lent) de la BOUCLE d'accept.
+  # Task.Supervisor (tree `Fleet.MCP.Supervisor`) where each accepted connection is served in its
+  # own Task. Separates the SERVICE of a connection (potentially slow) from the accept LOOP.
   @conn_sup Fleet.MCP.ConnectionTaskSupervisor
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -81,7 +81,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # F6 : reprise après pénurie de FDs — re-entre dans la boucle accept.
+  # Recovery after FD exhaustion — re-enters the accept loop.
   @impl GenServer
   def handle_info(:retry_accept, state), do: {:noreply, state, {:continue, :accept}}
 
@@ -89,14 +89,14 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   def handle_continue(:accept, %{lsock: lsock, pod_id: pod_id} = state) do
     case :gen_tcp.accept(lsock) do
       {:ok, sock} ->
-        # CONCURRENT : chaque connexion est servie dans sa PROPRE Task, jamais inline ici. Servir
-        # inline (l'ancien `serve(sock, pod_id)`) bloquait la boucle d'accept tant qu'UN handler pendait
-        # (ex. un appel forge lent de ~30 s) : on ne revenait jamais à `accept`, donc toute connexion
-        # suivante du pod restait dans le backlog kernel sans être servie → `readline` timeout côté pont
-        # (le pod gelait entier). Une Task par connexion → on re-`accept` tout de suite ; un handler lent
-        # n'affecte que sa connexion. `controlling_process` donne la socket au worker (l'accepteur peut
-        # re-accept / mourir sans tuer les connexions en vol) ; transfert en échec (worker déjà mort) →
-        # on ferme la socket plutôt que la fuir.
+        # CONCURRENT: each connection is served in its OWN Task, never inline here. Serving
+        # inline (the old `serve(sock, pod_id)`) blocked the accept loop while ONE handler was pending
+        # (e.g. a slow ~30 s forge call): we never came back to `accept`, so every following connection
+        # from the pod stayed in the kernel backlog unserved → `readline` timeout on the bridge side
+        # (the whole pod froze). One Task per connection → we re-`accept` right away; a slow handler
+        # affects only its connection. `controlling_process` gives the socket to the worker (the acceptor can
+        # re-accept / die without killing the in-flight connections); transfer failed (worker already dead) →
+        # we close the socket rather than leak it.
         case Task.Supervisor.start_child(@conn_sup, fn -> serve(sock, pod_id) end) do
           {:ok, pid} ->
             case :gen_tcp.controlling_process(sock, pid) do
@@ -105,10 +105,10 @@ defmodule Fleet.MCP.PodSocketAcceptor do
             end
 
           {:error, reason} ->
-            # Dont :max_children (E4, saturation du pool de connexions = bridge qui fuit) —
-            # VISIBLE : sinon le pod ne voit qu'un readline timeout inexplicable.
+            # Notably :max_children (connection-pool saturation = a leaking bridge) —
+            # VISIBLE: otherwise the pod just sees an inexplicable readline timeout.
             Logger.warning(
-              "PodSocketAcceptor: pod=#{pod_id} connexion REFUSEE (#{inspect(reason)}) — bridge qui fuit ?"
+              "PodSocketAcceptor: pod=#{pod_id} connection REFUSED (#{inspect(reason)}) — leaking bridge?"
             )
 
             :gen_tcp.close(sock)
@@ -116,18 +116,18 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
         {:noreply, state, {:continue, :accept}}
 
-      # Listen socket fermé = on nous a arrêtés (release) → stop net, pas une erreur.
+      # Listen socket closed = we were stopped (release) → clean stop, not an error.
       {:error, :closed} ->
         {:stop, :normal, state}
 
-      # F6 (E1) : pénurie de FDs (emfile/enfile) = souvent TRANSITOIRE (un burst, un leak en cours
-      # de reap). Stopper cascadait : acceptor → PodSocketSupervisor (3/5) → sup MORT-VIDE → tous
-      # les pods sans socket MCP, rien ne les recrée. Retry espacé borné par la mailbox (1 seul
-      # message :retry_accept en vol), VISIBLE ; si la pénurie persiste, le pod remontera par son
-      # propre timeout (rail incident), pas par une cascade silencieuse.
+      # FD exhaustion (emfile/enfile) = often TRANSIENT (a burst, a leak being reaped). Stopping
+      # cascaded: acceptor → PodSocketSupervisor (3/5) → DEAD-EMPTY sup → all pods with no MCP
+      # socket, nothing recreates them. Spaced retry bounded by the mailbox (a single :retry_accept
+      # message in flight), VISIBLE; if the exhaustion persists, the pod will surface through its
+      # own timeout (incident rail), not through a silent cascade.
       {:error, reason} when reason in [:emfile, :enfile] ->
         Logger.error(
-          "PodSocketAcceptor: pod=#{pod_id} accept #{inspect(reason)} (pénurie de FDs) — retry dans 1s"
+          "PodSocketAcceptor: pod=#{pod_id} accept #{inspect(reason)} (FD exhaustion) — retry in 1s"
         )
 
         Process.send_after(self(), :retry_accept, 1_000)
@@ -138,9 +138,9 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # Sert une connexion ligne par ligne jusqu'à ce que le pair ferme (le pont fait
-  # un appel = une ligne, puis lit la réponse ; il peut en enchaîner plusieurs sur
-  # la même connexion). À la fermeture / erreur, on rend la main à la boucle accept.
+  # Serves a connection line by line until the peer closes (the bridge does one
+  # call = one line, then reads the response; it may chain several over the same
+  # connection). On close / error, we hand control back to the accept loop.
   defp serve(sock, pod_id) do
     case :gen_tcp.recv(sock, 0) do
       {:ok, line} ->
@@ -157,12 +157,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # Decode la ligne JSON-RPC. Seul `tools/call` est dispatche vers PodTools. Une
-  # notification sans `id` est ignoree (rien a repondre, contrat JSON-RPC). Un JSON
-  # INVALIDE (ligne tronquee/cassee) -> reponse -32700 + warning : JAMAIS avale en
-  # silence — l'avalement transformait toute ligne invalide en timeout 30 s
-  # indistinguable cote pont, zero trace BEAM (vu live 2026-07-04). Un autre `method`
-  # avec un `id` (anomalie : `initialize`/`tools/list` sont servis par le pont) -> -32601.
+  # Decode the JSON-RPC line. Only `tools/call` is dispatched to PodTools. A
+  # notification with no `id` is ignored (nothing to answer, JSON-RPC contract). An
+  # INVALID JSON (truncated/broken line) -> -32700 response + warning: NEVER swallowed
+  # silently — swallowing turned every invalid line into a 30 s timeout
+  # indistinguable on the bridge side, zero BEAM trace (seen live 2026-07-04). Another `method`
+  # with an `id` (anomaly: `initialize`/`tools/list` are served by the bridge) -> -32601.
   defp handle_line(line, pod_id) do
     case Jason.decode(line) do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->
@@ -174,7 +174,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
           "id" => id,
           "error" => %{
             "code" => -32_601,
-            "message" => "method #{method} non servie par la socket pod"
+            "message" => "method #{method} not served by the pod socket"
           }
         })
 
@@ -183,23 +183,23 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
       {:error, _decode_error} ->
         Logger.warning(
-          "PodSocketAcceptor: pod=#{pod_id} ligne indecodable (#{byte_size(line)} o) -> -32700"
+          "PodSocketAcceptor: pod=#{pod_id} undecodable line (#{byte_size(line)} B) -> -32700"
         )
 
         encode(%{
           "jsonrpc" => "2.0",
           "id" => nil,
-          "error" => %{"code" => -32_700, "message" => "parse error (ligne JSON invalide)"}
+          "error" => %{"code" => -32_700, "message" => "parse error (invalid JSON line)"}
         })
     end
   end
 
-  # `pod_id` vient de l'ÉTAT de l'accepteur (le canal), JAMAIS de `tool_args` : on
-  # ne lit pas d'identité sur le wire. Le format du résultat suit la convention MCP.
-  # Un tools/call lent doit etre VISIBLE cote serveur : avant 2026-07-04 un hang de
-  # 30 s ne laissait AUCUNE trace BEAM (le pont loggue de son cote, mais le serveur
-  # etait aveugle -> forensics impossible). Seuil volontairement haut : on trace
-  # l'anomalie, pas le bruit.
+  # `pod_id` comes from the acceptor's STATE (the channel), NEVER from `tool_args`: we
+  # do not read an identity off the wire. The result format follows the MCP convention.
+  # A slow tools/call must be VISIBLE on the server side: before 2026-07-04 a 30 s
+  # hang left NO BEAM trace (the bridge logs on its side, but the server
+  # was blind -> forensics impossible). Threshold deliberately high: we trace
+  # the anomaly, not the noise.
   @slow_tool_warn_ms 5_000
 
   defp call_tool(params, pod_id) do
@@ -207,12 +207,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     tool_args = params["arguments"] || %{}
 
     {us, resp} =
-      :timer.tc(fn -> PodTools.handle_tool_call(tool, tool_args, %{pod_id: pod_id}) end)
+      :timer.tc(fn -> safe_handle_tool_call(tool, tool_args, pod_id) end)
 
     ms = div(us, 1000)
 
     if ms > @slow_tool_warn_ms do
-      Logger.warning("PodSocketAcceptor: pod=#{pod_id} tools/call #{tool} LENT (#{ms} ms)")
+      Logger.warning("PodSocketAcceptor: pod=#{pod_id} tools/call #{tool} SLOW (#{ms} ms)")
     end
 
     case resp do
@@ -224,8 +224,26 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # PodTools.handle_tool_call ne renvoie que des atomes/tuples d'erreur (jamais un binaire) → une clause
-  # suffit ; `inspect/1` rend toute raison lisible dans le champ text de la réponse MCP d'erreur.
+  # `PodTools.handle_tool_call` is EXPECTED total (`{:ok}|{:error}`), but a bug/edge in a tool could RAISE
+  # — an uncaught raise here KILLS the connection Task WITHOUT sending any response → the pod HANGS to its
+  # own timeout (SOC-RES-001). Rescue into an `{:error, ...}` 3-tuple → the caller renders it as an MCP
+  # `isError` result, so the pod ALWAYS gets an answer (MCP convention: a failure is a result, not a
+  # dropped connection).
+  defp safe_handle_tool_call(tool, tool_args, pod_id) do
+    tool_handler().handle_tool_call(tool, tool_args, %{pod_id: pod_id})
+  rescue
+    e -> {:error, {:tool_crashed, tool, Exception.message(e)}, %{pod_id: pod_id}}
+  catch
+    kind, reason -> {:error, {:tool_crashed, tool, {kind, reason}}, %{pod_id: pod_id}}
+  end
+
+  # Tool dispatcher: the real `PodTools` in prod. Injectable (`:fleet_mcp, :tool_handler`) so a test can
+  # supply a RAISING handler and prove the SOC-RES-001 rescue (a crashing tool → isError result, not a
+  # dropped connection). Same seam pattern as `LaunchBackend`/`McpSocketProvisioner` elsewhere.
+  defp tool_handler, do: Application.get_env(:fleet_mcp, :tool_handler, PodTools)
+
+  # `PodTools.handle_tool_call` only returns error atoms/tuples (never a binary) → one clause
+  # suffices; `inspect/1` renders any reason readable in the text field of the MCP error response.
   defp error_text(reason), do: inspect(reason)
 
   defp encode(map), do: Jason.encode!(map) <> "\n"
@@ -237,8 +255,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # Un fichier socket résiduel (crash antérieur) ferait échouer le bind
-  # (`:eaddrinuse`). On le retire avant de réécouter ; absent = rien à faire.
+  # A residual socket file (earlier crash) would make the bind fail
+  # (`:eaddrinuse`). We remove it before re-listening; absent = nothing to do.
   defp rm_stale(path) do
     case File.rm(path) do
       :ok -> :ok

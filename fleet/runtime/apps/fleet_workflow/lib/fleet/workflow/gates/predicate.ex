@@ -1,9 +1,9 @@
 defmodule Fleet.Workflow.Gates.Predicate do
   @moduledoc """
-  Évaluateur de prédicats des gate `rules` v2.5 (strings) contre les `outputs`
-  auto-rapportés par le pod. Module **pur** (pas d'état runtime).
+  Predicate evaluator for gate `rules` v2.5 (strings) against the `outputs`
+  self-reported by the pod. **Pure** module (no runtime state).
 
-  ## Grammaire (bornée au corpus canon `standard-qa` / `audit-only`)
+  ## Grammar (bounded to the canon corpus `standard-qa` / `audit-only`)
 
       rule       := conjunct ( "AND" conjunct )*
       conjunct   := comparison | atom
@@ -12,42 +12,43 @@ defmodule Fleet.Workflow.Gates.Predicate do
       operand    := number | bareword
       atom       := identifier
 
-  - `identifier` est résolu dans `outputs[identifier]` (faits auto-rapportés
-    par le pod, ex. `%{"severity_max" => "important", "tasks_count" => 3,
+  - `identifier` is resolved in `outputs[identifier]` (facts self-reported
+    by the pod, e.g. `%{"severity_max" => "important", "tasks_count" => 3,
     "spec_doc_exists" => true}`).
-  - **atom** (identifiant nu) = vrai ssi `outputs[id] == true` (booléen strict,
-    le pod rapporte un fait explicite — pas de truthiness laxiste).
-  - **comparison** : `outputs[lhs] op operand`. Nombres pour `>=/>/<=/<` ;
-    `==/!=` comparent valeur ↔ operand (bareword → string, ex. `critical`).
-  - **conjonction** : `AND` uniquement (le corpus n'utilise ni `OR` ni
-    parenthèses ni négation hors `!=`). Une rule = conjonction de tous ses
-    termes.
+  - **atom** (bare identifier) = true iff `outputs[id] == true` (strict
+    boolean, the pod reports an explicit fact — no lax truthiness).
+  - **comparison**: `outputs[lhs] op operand`. Numbers for `>=/>/<=/<`;
+    `==/!=` compare value ↔ operand (bareword → string, e.g. `critical`).
+  - **conjunction**: `AND` only (the corpus uses neither `OR` nor
+    parentheses nor negation beyond `!=`). A rule = conjunction of all its
+    terms.
 
-  Limite connue (hors corpus canon) : un operande RHS multi-mots
-  (`severity_max != very critical`) est capté comme un seul bareword
-  `"very critical"` — borné au corpus actuel (operandes mono-mot/nombre). À
-  durcir si un pipeline futur introduit des operandes à espaces.
+  Known limitation (outside the canon corpus): a multi-word RHS operand
+  (`severity_max != very critical`) is captured as a single bareword
+  `"very critical"` — bounded to the current corpus (single-word/number
+  operands). To be hardened if a future workflow introduces operands with
+  spaces.
 
   ## Fail-closed
 
-  Un fait référencé **absent** des outputs, ou un type incompatible (ex. `>=`
-  sur un non-nombre), rend le prédicat **faux** — jamais un pass silencieux sur
-  preuve manquante. Le moteur est mécanique : il ne fetch rien, il lit `outputs`.
+  A referenced fact **absent** from the outputs, or an incompatible type (e.g. `>=`
+  on a non-number), renders the predicate **false** — never a silent pass on
+  missing evidence. The engine is mechanical: it fetches nothing, it reads `outputs`.
 
-  ## Hors-scope (non décidé ici)
+  ## Out-of-scope (not decided here)
 
-  L'orchestration adjacente du gate (`human_approval_required`,
+  The gate's adjacent orchestration (`human_approval_required`,
   `fallback_invoke_gatekeeper`, `on_blocking_severity`, `on_revision_severity`)
-  n'est PAS portée par cet évaluateur — il ne fait QUE `rule_string → bool`.
-  Le mapping vers `:pass`/`:fail`/`:retry` (dont le refus d'auto-approuver un
-  gate `human_approval_required`) est dans `Fleet.Workflow.Gates`.
+  is NOT carried by this evaluator — it does ONLY `rule_string → bool`.
+  The mapping to `:pass`/`:fail`/`:retry` (including the refusal to auto-approve a
+  `human_approval_required` gate) is in `Fleet.Workflow.Gates`.
   """
 
   @ops ~w(>= <= == != > <)
 
   @doc """
-  Évalue une rule-string (conjonction de termes `AND`) contre `outputs`.
-  Renvoie `true` ssi tous les termes sont satisfaits.
+  Evaluates a rule-string (conjunction of `AND` terms) against `outputs`.
+  Returns `true` iff all terms are satisfied.
 
   ## Examples
 
@@ -73,14 +74,14 @@ defmodule Fleet.Workflow.Gates.Predicate do
     |> Enum.all?(&eval_term(String.trim(&1), outputs))
   end
 
-  # Clause TOTALE fail-closed. Le hard gate v2.5 applique `eval?` à CHAQUE item de
-  # `rules` sans garantir que ce soit une string : asymétrie connue avec le terminal
-  # gate, qui lui filtre ses items non-string en amont (`Enum.all?(rules, &is_binary/1)`).
-  # Un `rule` non-string (ex. une rule-map d'un gate v1 mal aiguillée vers le chemin
-  # hard v2.5, ou un override non schématisé) — ou des `outputs` non-map — rend `false` :
-  # le hard gate ÉCHOUE (`Enum.all?` devient false → `{:fail, …}` dans Gates), JAMAIS un
-  # FunctionClauseError qui remonterait crasher le StepRunConsumer (singleton). L'éval est
-  # rendue TOTALE, symétrique du catch-all fail-closed du terminal.
+  # TOTAL fail-closed clause. The hard gate v2.5 applies `eval?` to EVERY item of
+  # `rules` without guaranteeing it is a string: known asymmetry with the terminal
+  # gate, which filters its non-string items upstream (`Enum.all?(rules, &is_binary/1)`).
+  # A non-string `rule` (e.g. a v1 gate rule-map mis-routed to the hard v2.5 path,
+  # or an unschematized override) — or non-map `outputs` — renders `false`:
+  # the hard gate FAILS (`Enum.all?` becomes false → `{:fail, …}` in Gates), NEVER a
+  # FunctionClauseError that would bubble up and crash the StepRunConsumer (singleton). The eval
+  # is made TOTAL, symmetric with the terminal's fail-closed catch-all.
   def eval?(_rule, _outputs), do: false
 
   defp eval_term(term, outputs) do
@@ -90,7 +91,7 @@ defmodule Fleet.Workflow.Gates.Predicate do
     end
   end
 
-  # "identifier op operand" → {:cmp, ...} ; sinon identifiant nu → {:atom, id}.
+  # "identifier op operand" → {:cmp, ...} ; otherwise bare identifier → {:atom, id}.
   defp parse(term) do
     case Regex.run(~r/^(\w+)\s*(>=|<=|==|!=|>|<)\s*(.+)$/, term) do
       [_, lhs, op, rhs] when op in @ops -> {:cmp, lhs, op, operand(String.trim(rhs))}
@@ -111,9 +112,9 @@ defmodule Fleet.Workflow.Gates.Predicate do
     end
   end
 
-  # Fail-closed : fait absent OU présent-à-nil → prédicat faux (pas de pass sur
-  # preuve manquante). Le cas nil est critique pour `!=` : `nil != "critical"`
-  # serait `true` en Elixir nu — on le neutralise (nil ≡ absent).
+  # Fail-closed: fact absent OR present-as-nil → predicate false (no pass on
+  # missing evidence). The nil case is critical for `!=`: `nil != "critical"`
+  # would be `true` in bare Elixir — we neutralize it (nil ≡ absent).
   defp compare(:__absent__, _op, _operand), do: false
   defp compare(nil, _op, _operand), do: false
   defp compare(lhs, "==", operand), do: lhs == operand
@@ -128,6 +129,6 @@ defmodule Fleet.Workflow.Gates.Predicate do
     end
   end
 
-  # Type incompatible (ex. `>=` sur un non-nombre) → fail-closed.
+  # Incompatible type (e.g. `>=` on a non-number) → fail-closed.
   defp compare(_lhs, _op, _operand), do: false
 end

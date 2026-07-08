@@ -2,6 +2,8 @@ defmodule Fleet.Credentials.ForgeAuthTest do
   # async: false — mute `:fleet_credentials, :forge_auth` (env applicatif global).
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Fleet.Credentials.ForgeAuth
   alias Fleet.Credentials.TestEnv
 
@@ -21,12 +23,42 @@ defmodule Fleet.Credentials.ForgeAuthTest do
       assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
     end
 
-    test "config incomplète (token vide / prefix manquant) → borne anti-prompt seule" do
-      Application.put_env(:fleet_credentials, :forge_auth, %{url_prefix: "https://f/", token: ""})
-      assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
+    test "MINE-CRED-01 : config PRÉSENTE mais incomplète (token vide / prefix manquant) → anti-prompt seul + LOUD" do
+      # Avant : swallow silencieux (`_ ->`). Une config de credential cassée doit être LOUD (sinon git part
+      # non-authentifié et n'échoue qu'au remote 403/404, masquant la vraie cause).
+      log1 =
+        capture_log(fn ->
+          Application.put_env(:fleet_credentials, :forge_auth, %{
+            url_prefix: "https://f/",
+            token: ""
+          })
 
-      Application.put_env(:fleet_credentials, :forge_auth, %{token: "t"})
-      assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
+          assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
+        end)
+
+      assert log1 =~ "PRESENT but malformed"
+
+      log2 =
+        capture_log(fn ->
+          Application.put_env(:fleet_credentials, :forge_auth, %{token: "t"})
+          assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
+        end)
+
+      assert log2 =~ "PRESENT but malformed"
+    end
+
+    test "R1-15 : url_prefix avec newline/control → header SKIP + LOUD (pas d'injection de clé git-config)" do
+      log =
+        capture_log(fn ->
+          Application.put_env(:fleet_credentials, :forge_auth, %{
+            url_prefix: "https://f/\ninject",
+            token: "t"
+          })
+
+          assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
+        end)
+
+      assert log =~ "control char"
     end
 
     test "configuré → GIT_TERMINAL_PROMPT=0 + GIT_CONFIG_* (token DANS l'env, jamais sur l'argv — F087)" do

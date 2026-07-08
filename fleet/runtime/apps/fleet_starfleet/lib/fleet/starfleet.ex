@@ -1,43 +1,43 @@
 defmodule Fleet.Starfleet do
   @moduledoc """
-  Module système-side consommateur des outputs des pods d'arbitrage
-  (gatekeeper + autres rôles décisionnels) côté core LCARS Ring 2.
+  System-side module consuming the outputs of arbitration pods
+  (gatekeeper + other decision-making roles) on the LCARS core Ring 2 side.
 
-  **Pas de pod, pas d'inférence dans ce module** — validation, parsing,
-  audit, escalade Cat 5 seulement.
+  **No pod, no inference in this module** — validation, parsing, audit,
+  Cat 5 escalation only.
 
-  ## Sous-modules
+  ## Sub-modules
 
-    * `Fleet.Starfleet.Application` — superviseur de l'app (consumers gated
-      par config : hermétisme test)
-    * `Fleet.Starfleet.Decision` — struct sortie validate
-    * `Fleet.Starfleet.Gatekeeper` — pure functions validation JSON
-      décision (PoC-π3 figé `{decision, reason, details, chain}`)
-    * `Fleet.Starfleet.DriftMonitor` — GenServer subscribe `fleet.events`,
+    * `Fleet.Starfleet.Application` — the app's supervisor (consumers gated
+      by config: test hermeticity)
+    * `Fleet.Starfleet.Decision` — validated-output struct
+    * `Fleet.Starfleet.Gatekeeper` — pure functions, decision-JSON
+      validation (frozen `{decision, reason, details, chain}` schema)
+    * `Fleet.Starfleet.DriftMonitor` — GenServer subscribing to `fleet.events`,
       4 handlers (`pod.drift`, `workflow_map.failed`, `oauth.refresh.failed`,
       `audit.verdict`)
-    * `Fleet.Starfleet.Cat5Escalator` — pure functions escalade Cat 5 :
-      broadcast canon `starfleet.audit_cat5_<source>` + délégation `CoordBackend`
-    * `Fleet.Starfleet.AuditLog` — pure functions wrapper `File.write`
-      non-bang fail-safe, NDJSON rotaté (défaut `~/.lcars/log/fleet-starfleet.jsonl`,
+    * `Fleet.Starfleet.Cat5Escalator` — pure functions, Cat 5 escalation:
+      canonical broadcast `starfleet.audit_cat5_<source>` + `CoordBackend` delegation
+    * `Fleet.Starfleet.AuditLog` — pure functions, fail-safe non-bang `File.write`
+      wrapper, rotated NDJSON (default `~/.lcars/log/fleet-starfleet.jsonl`,
       knob `:audit_log_path`)
-    * `Fleet.Starfleet.CoordBackend` — seam wrap `Fleet.Coord` ch14
+    * `Fleet.Starfleet.CoordBackend` — seam wrapping `Fleet.Coord`
       (default `NotWiredYet`)
-    * `Fleet.Starfleet.AuditConsumer` — consumer Bus du rail AUDIT
-      (lifecycle + sécurité, préfixe de log `AUDIT <event.type>`)
-    * `Fleet.Starfleet.BootOrchestrator` — orchestrateur post-readiness
-      (Task `:transient`, émet `fleet.boot_complete`/`boot_partial`/`boot_failed`)
+    * `Fleet.Starfleet.AuditConsumer` — Bus consumer of the AUDIT rail
+      (lifecycle + security, log prefix `AUDIT <event.type>`)
+    * `Fleet.Starfleet.BootOrchestrator` — post-readiness orchestrator
+      (`:transient` Task, emits `fleet.boot_complete`/`boot_partial`/`boot_failed`)
     * `Fleet.Starfleet.Shutdown` (+ behaviour `Shutdown.Dispatcher`,
-      `NoOpDispatcher`, `AggregateDispatcher`) — quiesce + drain borné du BEAM
-    * `Fleet.Starfleet.MCPMonitor` — health check passif du substrat MCP
-      pod-facing (`Fleet.MCP.PodSocketSupervisor`)
-    * `Fleet.Starfleet.MCPWatcher` — cron passif : drift de version upstream
-      du SDK MCP Elixir sur Hex.pm
-    * `Fleet.Starfleet.PeriodicCheck` — plomberie partagée des checks
-      périodiques (`MCPMonitor`, `MCPWatcher`)
+      `NoOpDispatcher`, `AggregateDispatcher`) — quiesce + bounded drain of the BEAM
+    * `Fleet.Starfleet.MCPMonitor` — passive health check of the pod-facing
+      MCP substrate (`Fleet.MCP.PodSocketSupervisor`)
+    * `Fleet.Starfleet.MCPWatcher` — passive cron: upstream version drift
+      of the Elixir MCP SDK on Hex.pm
+    * `Fleet.Starfleet.PeriodicCheck` — shared plumbing for the periodic
+      checks (`MCPMonitor`, `MCPWatcher`)
 
-  ## Frontière vendor
+  ## Vendor boundary
 
-  N0 (vendor-agnostic, pas d'appel SDK direct).
+  N0 (vendor-agnostic, no direct SDK call).
   """
 end

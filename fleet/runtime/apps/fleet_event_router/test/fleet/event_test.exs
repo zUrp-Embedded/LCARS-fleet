@@ -15,7 +15,7 @@ defmodule Fleet.EventTest do
     end
 
     test "source hors enum closed list → ArgumentError (fail-loud)" do
-      assert_raise ArgumentError, ~r/hors enum closed list/, fn ->
+      assert_raise ArgumentError, ~r/outside the closed enum list/, fn ->
         Event.new(:bogus, :whatever)
       end
     end
@@ -36,7 +36,7 @@ defmodule Fleet.EventTest do
     end
 
     test "override non-DateTime → ArgumentError" do
-      assert_raise ArgumentError, ~r/n'est pas un %DateTime/, fn ->
+      assert_raise ArgumentError, ~r/is not a %DateTime/, fn ->
         Event.new(:api, :x, timestamp: "2020-01-01")
       end
     end
@@ -56,6 +56,22 @@ defmodule Fleet.EventTest do
         )
 
       assert %Event{pod_id: "p1", correlation_id: "c1", payload: %{a: 1}} = ev
+    end
+
+    test "payload non-map → ArgumentError (fail-loud, comme source/timestamp)" do
+      assert_raise ArgumentError, ~r/payload .* is not a map/, fn ->
+        Event.new(:coord, :x, payload: "not-a-map")
+      end
+    end
+
+    test "pod_id / correlation_id non-binaire → ArgumentError" do
+      assert_raise ArgumentError, ~r/pod_id .* is not a String/, fn ->
+        Event.new(:coord, :x, pod_id: 42)
+      end
+
+      assert_raise ArgumentError, ~r/correlation_id .* is not a String/, fn ->
+        Event.new(:coord, :x, correlation_id: {:not, :a, :string})
+      end
     end
 
     test "type reste un atom libre (l'enum du type n'est pas enforcé ici)" do

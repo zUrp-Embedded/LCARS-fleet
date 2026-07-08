@@ -1,94 +1,103 @@
 defmodule Fleet.CapProfile.Catalog do
   @moduledoc """
-  Résolution + lecture des fichiers YAML du catalogue de cap-profiles.
+  Resolution + reading of the cap-profile catalogue YAML files.
 
-  Cluster extrait de `Fleet.CapProfile`. Concern UNIQUE : le FRONT FS du domaine
-  (scan du répertoire, décodage YAML, résolution d'un rôle/modop en map brute
-  pré-`to_struct`). Le cœur `load`/`compose` appelle `read_role/1` et
-  `read_modops/1` ; il ne touche jamais le FS lui-même.
+  Cluster extracted from `Fleet.CapProfile`. SINGLE concern: the FS FRONT of the
+  domain (directory scan, YAML decode, resolving a role/modop into a raw map
+  pre-`to_struct`). The `load`/`compose` core calls `read_role/1` and
+  `read_modops/1`; it never touches the FS itself.
 
-  ## Invariant de sécurité — résolution par `metadata.name`, jamais par filename
+  ## Security invariant — resolution by `metadata.name`, never by filename
 
-  Un cap-profile est résolu par sa PROP interne `metadata.name` (via `name_index/1`),
-  PAS par le nom de fichier (cosmétique). La source de vérité est la donnée, jamais
-  le filesystem : `list/1`, `read_role/1` et l'énumérateur de boot partagent ainsi
-  la MÊME clé (le name) → enum et load ne se désaccordent jamais (un profil listé
-  est toujours chargeable). Un nom de modop (entrée non maîtrisée servant de segment
-  de chemin) est confiné sous `<root>/modop/` via `Fleet.Slug.confined_join/2`
-  (fail-closed : un `..`/`/` n'atteint jamais le FS).
+  A cap-profile is resolved by its INTERNAL `metadata.name` prop (via `name_index/1`),
+  NOT by filename (cosmetic). The source of truth is the data, never the
+  filesystem: `list/1`, `read_role/1` and the boot enumerator thus share the
+  SAME key (the name) → enum and load never drift apart (a listed profile is
+  always loadable). A modop name (an untrusted input used as a path segment) is
+  confined under `<root>/modop/` via `Fleet.Slug.confined_join/2` (fail-closed:
+  a `..`/`/` never reaches the FS).
 
-  ## Surface publique + re-export hors-app
+  ## Public surface + out-of-app re-export
 
-  `list/1` et `root_dir/0` sont consommés HORS de l'app (`Fleet.Spawner.PermanentBoot`
-  énumère + aligne son dir ; `Fleet.Observation.Deck` liste les rôles du dashboard).
-  `Fleet.CapProfile` les ré-expose en `defdelegate` — l'API publique consommée hors-app
-  ne bouge PAS. `read_role/1` et `read_modops/1` sont publics pour le cœur (même app).
+  `list/1` and `root_dir/0` are consumed OUT of the app (`Fleet.Spawner.PermanentBoot`
+  enumerates + aligns its dir; `Fleet.Observation.Deck` lists the dashboard roles).
+  `Fleet.CapProfile` re-exports them via `defdelegate` — the public API consumed
+  out-of-app does NOT move. `read_role/1` and `read_modops/1` are public for the
+  core (same app).
 
-  ## Sens de dépendance UNIQUE (pas de cycle)
+  ## Single dependency direction (no cycle)
 
-  Ce module dépend de `Fleet.CapProfile.Schema` (validation des fragments modop dans
-  `read_modops/1`) et de `Fleet.Slug` (confinement) — tous deux en AMONT, aucun
-  n'appelle Catalog. Le cœur `Fleet.CapProfile.load`/`compose` appelle ce module
-  (runtime-dep). Pas de cycle.
+  This module depends on `Fleet.CapProfile.Schema` (validating modop fragments in
+  `read_modops/1`) and on `Fleet.Slug` (confinement) — both UPSTREAM, neither
+  calls Catalog. The `Fleet.CapProfile.load`/`compose` core calls this module
+  (runtime-dep). No cycle.
 
   ## Configuration
 
-  `root_dir/0` lit la clé env `:fleet_cap_profile, :root_dir` (les tests la pilotent
-  via `Application.put_env/3`), défaut = le canon BUNDLÉ résolu par
-  `:code.priv_dir(:fleet_cap_profile)` (résout en release comme en dev, sans env).
+  `root_dir/0` reads the env key `:fleet_cap_profile, :root_dir` (tests drive it
+  via `Application.put_env/3`), default = the BUNDLED canon resolved by
+  `:code.priv_dir(:fleet_cap_profile)` (resolves in a release as in dev, without env).
   """
 
   require Logger
 
-  # Validation JSON-schema des fragments modop (clés réservées + conformité). En AMONT :
-  # Schema n'appelle rien ici (pas de cycle). Deux appels FQ sous credo AliasUsage, aliasé
-  # pour la lisibilité du cluster.
+  # JSON-schema validation of modop fragments (reserved keys + conformance). UPSTREAM:
+  # Schema calls nothing here (no cycle). Two FQ calls under credo AliasUsage, aliased
+  # for the cluster's readability.
   alias Fleet.CapProfile.Schema
 
   # ============================================================
-  # Résolution de rôle (par metadata.name)
+  # Role resolution (by metadata.name)
   # ============================================================
 
   @doc """
-  Résout un cap-profile par sa PROP `metadata.name` (pas par nom de fichier — celui-ci est
-  cosmétique) et retourne la map brute (pré-`to_struct`). Source de vérité = la donnée,
-  jamais le filesystem (cf. `list/1`).
+  Resolves a cap-profile by its `metadata.name` prop (not by filename — that is cosmetic) and
+  returns the raw map (pre-`to_struct`). Source of truth = the data, never the filesystem (see `list/1`).
 
   ## Exit codes
-    * `{:ok, raw}` — le rôle existe dans le catalogue.
-    * `{:error, :not_found}` — aucun profil ne porte ce `name`.
-    * `{:error, :invalid_schema}` — catalogue corrompu (un YAML non-décodable) →
-      on ne peut PAS résoudre par name. Le contrat `load`/`compose` classe « YAML mal
-      formé » en `:invalid_schema` (pas `:not_found`, qui ferait croire le rôle absent).
+    * `{:ok, raw}` — the role exists in the catalogue.
+    * `{:error, :not_found}` — no profile carries this `name`.
+    * `{:error, :invalid_schema}` — corrupt catalogue (an undecodable YAML) →
+      we CANNOT resolve by name. The `load`/`compose` contract classes "malformed
+      YAML" as `:invalid_schema` (not `:not_found`, which would suggest the role is absent).
   """
-  @spec read_role(String.t()) :: {:ok, map()} | {:error, :not_found | :invalid_schema}
+  @spec read_role(String.t()) ::
+          {:ok, map()} | {:error, :not_found | :invalid_schema | :catalogue_missing}
   def read_role(role) do
-    case name_index(root_dir()) do
-      {:ok, index} ->
-        case Map.fetch(index, role) do
-          {:ok, raw} -> {:ok, raw}
-          :error -> {:error, :not_found}
-        end
+    # An ABSENT catalogue dir is a BROKEN CONFIG, not "this role is absent" → distinct
+    # `:catalogue_missing` (name_index on a missing dir wildcards to `[]` → empty index → `:not_found`,
+    # which masks the config error as a mere typo'd role name). `list/1` already distinguishes; so must
+    # `read_role`, the path `load/1`/`compose/2` take for a single role.
+    if File.dir?(root_dir()) do
+      case name_index(root_dir()) do
+        {:ok, index} ->
+          case Map.fetch(index, role) do
+            {:ok, raw} -> {:ok, raw}
+            :error -> {:error, :not_found}
+          end
 
-      {:error, {:invalid_yaml, _path}} ->
-        {:error, :invalid_schema}
+        {:error, {:invalid_yaml, _path}} ->
+          {:error, :invalid_schema}
+      end
+    else
+      {:error, :catalogue_missing}
     end
   end
 
   @doc """
-  Liste les NOMS (`metadata.name`) des cap-profiles du catalogue (`dir`, défaut `root_dir/0`).
+  Lists the NAMES (`metadata.name`) of the catalogue's cap-profiles (`dir`, default `root_dir/0`).
 
-  **Source UNIQUE** : tout énumérateur (`Fleet.Spawner.PermanentBoot`) ET `Fleet.CapProfile.load/1`
-  résolvent par CETTE clé — la prop `name`, **jamais** le nom de fichier (cosmétique). Trié.
-  Collision de `name` entre deux fichiers → `{:error, :name_collision}` (fail-loud : pas de résolution
-  silencieuse au petit bonheur du filesystem).
+  **SINGLE SOURCE**: every enumerator (`Fleet.Spawner.PermanentBoot`) AND `Fleet.CapProfile.load/1`
+  resolve by THIS key — the `name` prop, **never** the filename (cosmetic). Sorted.
+  A `name` collision between two files → `{:error, :name_collision}` (fail-loud: no silent
+  resolution at the whim of the filesystem).
   """
   @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list(dir \\ root_dir()) do
-    # Dir absent/illisible = erreur (config cassée) — distinct d'un catalogue vide ({:ok, []}).
-    # `Path.wildcard` confond les deux ; `File.dir?` tranche. (`load/1` passe par `read_role` →
-    # `name_index` directement → un dir absent y donne `:not_found`, pas `:enoent` — le rôle est
-    # juste introuvable.)
+    # Absent/unreadable dir = error (broken config) — distinct from an empty catalogue ({:ok, []}).
+    # `Path.wildcard` conflates the two; `File.dir?` decides. (`load/1` goes through `read_role` →
+    # `name_index` directly → an absent dir there gives `:not_found`, not `:enoent` — the role is
+    # simply not found.)
     if File.dir?(dir) do
       with {:ok, index} <- name_index(dir) do
         {:ok, index |> Map.keys() |> Enum.sort()}
@@ -98,19 +107,21 @@ defmodule Fleet.CapProfile.Catalog do
     end
   end
 
-  # Index `metadata.name => raw` en scannant `<dir>/*.yaml` + `<dir>/archivistes/*.yaml` +
-  # `<dir>/monks/*.yaml` (les profils Memory-X canon vivent sous `monks/` ; PermanentBoot — qui
-  # énumère via `list/1` — doit les voir). Le `modop/` reste exclu : les overlays n'ont pas d'identité
-  # de rôle. Fragment sans `metadata.name` → ignoré (baseline/overlay).
+  # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml` +
+  # `<dir>/monks/*.yaml`. The `monks/` scan is INERT scaffolding: the Memory-X monks are currently
+  # FROZEN under `priv/canon/_frozen-monks/` (deliberately NOT scanned — scanning them would boot
+  # ~17 pods on one shared corpus). `monks/` does not exist today; the scan is here for when they are
+  # re-homed (the re-home adds their slot_scope then). The `modop/` dir stays excluded: overlays have
+  # no role identity. A fragment without `metadata.name` → ignored (baseline/overlay).
   # Collision `name` → fail-loud (`:name_collision`).
   #
-  # Un YAML NON-DÉCODABLE dans le catalogue n'est PAS skippé en silence (sinon le rôle serait
-  # INVISIBLE de l'index → `load` le verrait `:not_found` (rôle absent) au lieu de `:invalid_schema`
-  # (rôle corrompu), et `list/1` (énuméré par PermanentBoot) l'amputerait du boot sans bruit → deploy
-  # « vert » incomplet). Un fichier corrompu = artefact de deploy cassé → on propage
-  # `{:error, {:invalid_yaml, path}}` (fail-loud). Conséquence assumée : un seul fichier illisible
-  # empoisonne tout l'index (catalogue corrompu = on n'en charge AUCUN) — cohérent avec « on ne sauve
-  # pas un truc blessé ».
+  # A NON-DECODABLE YAML in the catalogue is NOT silently skipped (otherwise the role would be
+  # INVISIBLE to the index → `load` would see it as `:not_found` (role absent) instead of
+  # `:invalid_schema` (role corrupt), and `list/1` (enumerated by PermanentBoot) would amputate it
+  # from boot silently → a "green" but incomplete deploy). A corrupt file = a broken deploy artifact →
+  # we propagate `{:error, {:invalid_yaml, path}}` (fail-loud). Assumed consequence: a single
+  # unreadable file poisons the whole index (corrupt catalogue = we load NONE of it) — consistent with
+  # "we do not save a wounded thing".
   defp name_index(dir) do
     files =
       Path.wildcard(Path.join(dir, "*.yaml")) ++
@@ -123,19 +134,32 @@ defmodule Fleet.CapProfile.Catalog do
           case get_in(raw, ["metadata", "name"]) do
             name when is_binary(name) and name != "" ->
               if Map.has_key?(acc, name) do
-                Logger.error("CapProfile: collision metadata.name #{inspect(name)} (#{path})")
+                Logger.error("Catalog: metadata.name collision #{inspect(name)} (#{path})")
                 {:halt, {:error, :name_collision}}
               else
                 {:cont, {:ok, Map.put(acc, name, raw)}}
               end
 
             _ ->
+              base = Path.basename(path)
+
+              # A no-name file is a DELIBERATE baseline/overlay fragment ONLY by the `_`-prefix convention
+              # (`_baseline-*.yaml`, mirror of `_frozen-monks/`). A NON-prefixed file with no
+              # `metadata.name` looks like a role whose name was lost → make the silent skip VISIBLE
+              # (warning), otherwise that role vanishes from the index (load → `:not_found`) with no signal.
+              unless String.starts_with?(base, "_") do
+                Logger.warning(
+                  "Catalog: #{base} has no metadata.name — skipped (a role needs a name; " <>
+                    "`_`-prefix a file that is a deliberate non-role fragment)"
+                )
+              end
+
               {:cont, {:ok, acc}}
           end
 
         {:error, reason} ->
           Logger.error(
-            "CapProfile: YAML illisible #{path} (#{inspect(reason)}) — catalogue corrompu"
+            "Catalog: unreadable YAML #{path} (#{inspect(reason)}) — corrupt catalogue"
           )
 
           {:halt, {:error, {:invalid_yaml, path}}}
@@ -144,32 +168,32 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   # ============================================================
-  # Lecture des modops
+  # Modop reading
   # ============================================================
 
   @doc """
-  Lit et valide les fragments modop nommés (ordre déclaré préservé), retourne les maps brutes.
+  Reads and validates the named modop fragments (declared order preserved), returns the raw maps.
 
-  Chaque nom (entrée non maîtrisée, servant de COMPOSANT de chemin `modop/<name>/profile.yaml`)
-  est casté en slug et confiné sous `<root>/modop/` AVANT tout `Path.join` — un nom malformé
-  (`..`/`/`) n'atteint jamais le FS (fail-closed → `:invalid_modop`). Chaque fragment est validé
-  via `Fleet.CapProfile.Schema` (clés réservées + JSON-schema modop).
+  Each name (an untrusted input, serving as a path COMPONENT `modop/<name>/profile.yaml`) is cast
+  to a slug and confined under `<root>/modop/` BEFORE any `Path.join` — a malformed name
+  (`..`/`/`) never reaches the FS (fail-closed → `:invalid_modop`). Each fragment is validated
+  via `Fleet.CapProfile.Schema` (reserved keys + modop JSON-schema).
 
   ## Exit codes
-    * `{:ok, [raw]}` — tous les modops lus et conformes.
-    * `{:error, :modop_not_found}` — un modop nommé est absent (loggé).
-    * `{:error, :invalid_modop}` — nom non confiné, clé réservée, ou fragment non conforme.
-    * `{:error, :invalid_schema}` / `{:error, :schema_unavailable}` — décodage/schema (cf. Schema).
+    * `{:ok, [raw]}` — all modops read and conformant.
+    * `{:error, :modop_not_found}` — a named modop is absent (logged).
+    * `{:error, :invalid_modop}` — name not confined, reserved key, or nonconformant fragment.
+    * `{:error, :invalid_schema}` / `{:error, :schema_unavailable}` — decode/schema (see Schema).
   """
   @spec read_modops([String.t()]) :: {:ok, [map()]} | {:error, term()}
   def read_modops(modop_set) when is_list(modop_set) do
     result =
       Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
-        # Le nom de modop vient du catalogue / d'un composeur (entrée non maîtrisée) et sert de
-        # COMPOSANT de chemin (`modop/<name>/profile.yaml`). Un nom avec `..`/`/` traverserait hors du
-        # modop_root (charger un YAML arbitraire de l'hôte comme « modop »). On le caste en slug AVANT
-        # tout `Path.join` ET on confine la feuille sous `<root>/modop/` : un nom malformé n'atteint
-        # jamais le FS (fail-closed → `:invalid_modop`, comme un fragment réservé/non conforme).
+        # The modop name comes from the catalogue / a composer (untrusted input) and serves as a path
+        # COMPONENT (`modop/<name>/profile.yaml`). A name with `..`/`/` would traverse outside the
+        # modop_root (loading an arbitrary host YAML as a "modop"). We cast it to a slug BEFORE any
+        # `Path.join` AND confine the leaf under `<root>/modop/`: a malformed name never reaches the
+        # FS (fail-closed → `:invalid_modop`, like a reserved/nonconformant fragment).
         modop_root = Path.join(root_dir(), "modop")
 
         with {:ok, dir} <- Fleet.Slug.confined_join(modop_root, name) do
@@ -184,13 +208,13 @@ defmodule Fleet.CapProfile.Catalog do
               {:error, reason} -> {:halt, {:error, reason}}
             end
           else
-            Logger.warning("CapProfile: modop not found: #{inspect(name)} at #{path}")
+            Logger.warning("Catalog: modop not found: #{inspect(name)} at #{path}")
             {:halt, {:error, :modop_not_found}}
           end
         else
           {:error, _slug_or_escape} ->
             Logger.warning(
-              "CapProfile: modop name non confiné (slug/traversal) : #{inspect(name)} — refusé"
+              "Catalog: modop name not confined (slug/traversal): #{inspect(name)} — refused"
             )
 
             {:halt, {:error, :invalid_modop}}
@@ -204,7 +228,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   # ============================================================
-  # Décodage YAML + racine du catalogue
+  # YAML decode + catalogue root
   # ============================================================
 
   defp decode_yaml(path) do
@@ -216,17 +240,17 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  Racine du catalogue cap-profiles (`<root_dir>/<role>.yaml`). **Source UNIQUE** : tout
-  énumérateur (ex. `Fleet.Spawner.PermanentBoot`) DOIT scanner ce dir, sinon enum et load
-  se désaccordent.
+  Root of the cap-profiles catalogue (`<root_dir>/<role>.yaml`). **SINGLE SOURCE**: every
+  enumerator (e.g. `Fleet.Spawner.PermanentBoot`) MUST scan this dir, otherwise enum and load
+  drift apart.
   """
   @spec root_dir() :: String.t()
   def root_dir do
-    # Un :root_dir explicitement nil (ex. fuite d'env cross-test en umbrella) ne doit JAMAIS
-    # atteindre Path.join → coalesce vers le défaut (état nil rendu inoffensif au boundary).
-    # Défaut = le priv BUNDLÉ (`:code.priv_dir`) → résout en RELEASE (lib/fleet_cap_profile-vsn/priv/…)
-    # comme en dev (_build/…/priv) SANS aucun env. L'ancien défaut `"cap-profiles"` (relatif au CWD) n'a
-    # jamais été correct hors d'un `LCARS_CAPPROFILES_ROOT` explicite → `:enoent` en release (étanchéité).
+    # A `:root_dir` explicitly set to nil (e.g. cross-test env leak in the umbrella) must NEVER
+    # reach Path.join → coalesce to the default (the nil state made harmless at the boundary).
+    # Default = the BUNDLED priv (`:code.priv_dir`) → resolves in a RELEASE (lib/fleet_cap_profile-vsn/priv/…)
+    # as in dev (_build/…/priv) WITHOUT any env. The old default `"cap-profiles"` (relative to the CWD) was
+    # never correct without an explicit `LCARS_CAPPROFILES_ROOT` → `:enoent` in a release (hermeticity).
     Application.get_env(:fleet_cap_profile, :root_dir) ||
       Path.join(to_string(:code.priv_dir(:fleet_cap_profile)), "canon/cap-profiles")
   end

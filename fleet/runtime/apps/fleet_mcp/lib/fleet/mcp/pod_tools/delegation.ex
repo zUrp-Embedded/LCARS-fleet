@@ -1,87 +1,87 @@
 defmodule Fleet.MCP.PodTools.Delegation do
   @moduledoc """
-  Métier « délégation forge » de l'architecte + gate d'autorisation — extrait de
-  `Fleet.MCP.PodTools` (qui garde la table de routage `handle_tool_call/3` et le
-  format de contenu MCP). Nommé d'après le vocabulaire du code (« canal DÉLÉGATION »,
-  `delegation_org`, `delegation_target`) : les trois tools forment le canal par lequel
-  l'architecte délègue du travail à la fleet et le suit.
+  Architect's "forge delegation" domain + authorization gate — extracted from
+  `Fleet.MCP.PodTools` (which keeps the `handle_tool_call/3` routing table and the
+  MCP content format). Named after the code's vocabulary ("DELEGATION channel",
+  `delegation_org`, `delegation_target`): the three tools form the channel through which
+  the architect delegates work to the fleet and tracks it.
 
-    * `create_issue/4` — canal DÉLÉGATION : pose une issue forge prête pour le poller.
-    * `create_project/3` — canal ONBOARDING : démarre un projet neuf (repo + dual-dir).
-    * `issue_status/3` — canal SUIVI : lit l'état d'un issue délégué (issue + PR).
+    * `create_issue/4` — DELEGATION channel: places a forge issue ready for the poller.
+    * `create_project/3` — ONBOARDING channel: starts a fresh project (repo + dual-dir).
+    * `issue_status/3` — TRACKING channel: reads the state of a delegated issue (issue + PR).
 
-  ## Gate architecte (commune aux trois)
+  ## Architect gate (common to the three)
 
-  Ces tools sont des actes d'ARCHITECTE : créer un repo forge, écrire/pousser dans
-  `/home/projects`, déléguer du travail, suivre une délégation. La barrière est
-  serveur-side : `require_architect/1` résout le rôle depuis l'identité du CANAL
-  (`state.pod_id`, porté par l'accepteur de socket — pas de champ du wire) PUIS exige
-  que ce rôle gravé au spawn soit `architect`. Un pod worker (engineer, reviewer), un
-  rôle nil/inconnu ou un pod absent du registre → REFUS. Fail-closed de bout en bout :
-  aucun cas ne retombe sur un accès autorisé. (Le filtre de visibilité côté pont reste
-  une commodité UX — ne pas montrer un tool inutilisable — mais l'autorisation vit ICI.)
+  These tools are ARCHITECT acts: create a forge repo, write/push into
+  `/home/projects`, delegate work, track a delegation. The barrier is
+  server-side: `require_architect/1` resolves the role from the CHANNEL identity
+  (`state.pod_id`, carried by the socket acceptor — not a wire field) THEN requires
+  that this role burned in at spawn be `architect`. A worker pod (engineer, reviewer), a
+  nil/unknown role or a pod absent from the registry → REFUSAL. Fail-closed end to end:
+  no case falls back onto an authorized access. (The bridge-side visibility filter stays
+  a UX convenience — do not show an unusable tool — but the authorization lives HERE.)
 
-  Les trois fonctions prennent le `state` MCP en dernier argument et n'y lisent QUE
-  `pod_id` (la gate) — jamais d'identité dans les arguments wire.
+  The three functions take the MCP `state` as their last argument and read ONLY
+  `pod_id` from it (the gate) — never an identity from the wire arguments.
 
   ## Seams (app-env `:fleet_mcp`)
 
-    * `:forge_client` (défaut `Fleet.Pilot.ForgeClient`) — client forge, dispatch
-      runtime (pas de dep compile-time fleet_pilot). CONTRAT = behaviour
-      `Fleet.MCP.PodTools.Delegation.ForgeClient` (callbacks typés + resolver
-      `resolved/0`, source unique du défaut).
-    * `:project_onboard` (défaut `Fleet.Pilot.ProjectOnboard`) — séquence
-      d'onboarding. CONTRAT = behaviour `Fleet.MCP.PodTools.Delegation.ProjectOnboard`.
-    * `:pod_resolver` (défaut dispatch runtime `Fleet.Spawner.pod_info/1`) — résolution
-      du rôle du pod.
-    * `:delegation_org` (défaut `"fleet"`) — org forge des projets onboardés.
+    * `:forge_client` (default `Fleet.Pilot.ForgeClient`) — forge client, runtime
+      dispatch (no compile-time dep on fleet_pilot). CONTRACT = behaviour
+      `Fleet.MCP.PodTools.Delegation.ForgeClient` (typed callbacks + resolver
+      `resolved/0`, single source of the default).
+    * `:project_onboard` (default `Fleet.Pilot.ProjectOnboard`) — onboarding
+      sequence. CONTRACT = behaviour `Fleet.MCP.PodTools.Delegation.ProjectOnboard`.
+    * `:pod_resolver` (default runtime dispatch `Fleet.Spawner.pod_info/1`) — resolution
+      of the pod's role.
+    * `:delegation_org` (default `"fleet"`) — forge org of onboarded projects.
   """
 
   require Logger
 
-  # Les deux behaviours-contrats des seams montants (fleet_mcp → fleet_pilot, dispatch runtime).
-  # ⚠ Ce `ForgeClient` local est le CONTRAT (behaviour + resolver), PAS `Fleet.Pilot.ForgeClient`
-  # (l'impl réelle, jamais référencée en appel direct ici — dep compile interdite).
+  # The two behaviour-contracts of the upward seams (fleet_mcp → fleet_pilot, runtime dispatch).
+  # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Pilot.ForgeClient`
+  # (the real impl, never referenced by a direct call here — compile dep forbidden).
   alias Fleet.MCP.PodTools.Delegation.{ForgeClient, ProjectOnboard}
 
   @doc """
-  Pose une issue forge prête pour le poller — gate architecte incluse.
+  Places a forge issue ready for the poller — architect gate included.
 
-  Modèle forge-state-machine : auteur = compte de rôle de l'appelant (traça),
-  **assignee = humain owner** (point fixe : routing + ownership) — et S'ARRÊTE. Le
-  POLLER prend le relais (issue assignée non verrouillée → spawn le rôle producteur).
-  Le ROUTAGE (graver la workflow_map) n'est PAS ici : c'est la responsabilité du
-  SYSTÈME (le poller onboarde toute issue assignée routeless, cf.
-  `StepDispatcher.ensure_workflow_map_or_onboard` côté fleet_pilot).
+  Forge-state-machine model: author = the caller's role account (traceability),
+  **assignee = human owner** (fixed point: routing + ownership) — and STOPS. The
+  POLLER takes over (assigned unlocked issue → spawns the producer role).
+  The ROUTING (burning the workflow_map) is NOT here: it is the responsibility of the
+  SYSTEM (the poller onboards any assigned routeless issue, cf.
+  `StepDispatcher.ensure_workflow_map_or_onboard` on the fleet_pilot side).
 
-  Refus (fail-closed, rien n'est créé) : rôle non-architecte / pod inconnu (gate),
-  `:role_token_unavailable` (token du compte de rôle absent = trou de provisioning —
-  poster sous le compte système masquerait la traça et contournerait le
+  Refusals (fail-closed, nothing is created): non-architect role / unknown pod (gate),
+  `:role_token_unavailable` (the role account's token absent = provisioning hole —
+  posting under the system account would mask traceability and bypass
   least-privilege), `{:human_unresolved, _}` / `{:issue_creation_failed, _}` (forge).
   """
   @spec create_issue(String.t(), String.t(), String.t(), map()) ::
           {:ok, map()} | {:error, term()}
   def create_issue(repo, title, brief, state)
       when is_binary(repo) and is_binary(title) and is_binary(brief) do
-    forge = ForgeClient.resolved()
-
-    # Déléguer un issue est un acte d'ARCHITECTE : gate AVANT toute mécanique. L'arch poste
-    # ensuite l'issue EN SON NOM : token du compte de rôle de l'appelant.
-    with {:ok, role} <- require_architect(state),
+    # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The arch then
+    # posts the issue IN ITS OWN NAME: the caller's role-account token. `conforming_forge/0` guards the
+    # DUCK-TYPED forge seam → a misconfigured seam is a typed error, not an obscure apply/3 crash (R2-05).
+    with {:ok, forge} <- conforming_forge(),
+         {:ok, role} <- require_architect(state),
          token when is_binary(token) <- Fleet.Credentials.RoleToken.token(role) do
       do_create_issue(forge, repo, title, brief, token: token)
     else
       {:error, reason} ->
-        # Rôle non-architecte, ou pod inconnu du registre → on ne crée RIEN.
+        # Non-architect role, or pod unknown to the registry → we create NOTHING.
         {:error, reason}
 
       _ ->
-        # Pod prouvé mais token de rôle introuvable sur disque = trou de provisioning (le compte de rôle
-        # n'a pas son token). On REFUSE plutôt que de poster sous le compte système (fail-closed) :
-        # poster en système masquerait la traça (qui a délégué ?) et contournerait le least-privilege.
+        # Pod proven but role token not found on disk = provisioning hole (the role account
+        # has no token). We REFUSE rather than post under the system account (fail-closed):
+        # posting as system would mask traceability (who delegated?) and bypass least-privilege.
         Logger.warning(
-          "Delegation: create_issue REFUSÉ : token du rôle appelant introuvable (provisioning incomplet) — " <>
-            "pas de repli compte système"
+          "Delegation: create_issue REFUSED: calling role's token not found (incomplete provisioning) — " <>
+            "no system-account fallback"
         )
 
         {:error, :role_token_unavailable}
@@ -89,18 +89,18 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  Démarre un projet neuf (repo forge + dual-worktree `main`/`work/ops` + scaffold +
-  push) — gate architecte appliquée AVANT toute création de repo ou écriture disque.
+  Starts a fresh project (forge repo + dual-worktree `main`/`work/ops` + scaffold +
+  push) — architect gate applied BEFORE any repo creation or disk write.
 
-  Le SYSTÈME exécute la mécanique via le seam `:project_onboard` (défaut
-  `Fleet.Pilot.ProjectOnboard`, dispatch runtime). Le repo créé est RENDU dans le
-  résultat (`repo`/`delegation_target`) : l'arch le récupère et le passe explicitement
-  à `create_issue`/`issue_status`. Aucune mémoire globale de « projet courant » — le
-  repo voyage par argument.
+  The SYSTEM runs the mechanics via the `:project_onboard` seam (default
+  `Fleet.Pilot.ProjectOnboard`, runtime dispatch). The created repo is RETURNED in the
+  result (`repo`/`delegation_target`): the arch retrieves it and passes it explicitly
+  to `create_issue`/`issue_status`. No global memory of a "current project" — the
+  repo travels by argument.
   """
   @spec create_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def create_project(name, args, state) when is_binary(name) and is_map(args) do
-    # Fail-closed : pas d'architecte = pas de projet.
+    # Fail-closed: no architect = no project.
     case require_architect(state) do
       {:error, reason} -> {:error, reason}
       {:ok, _role} -> do_create_project(name, args)
@@ -108,11 +108,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  Importe un repo EXISTANT `full_name` (`"owner/name"`) dans la machine à agents (WS4) — dual-worktree
-  `main`/`work/ops` + gate forge-enforcé, SANS créer ni scaffolder `main` (le contenu du repo reste
-  intact — c'est tout le point). Gate architecte AVANT toute écriture disque, même mécanique que
-  `create_project`. Préconditions (repo déjà dans l'org, branche par défaut `main`) vérifiées côté
-  `ProjectOnboard.import/2` — un échec de précondition remonte `{:error, ...}` explicite.
+  Imports an EXISTING repo `full_name` (`"owner/name"`) into the agent machine — dual-worktree
+  `main`/`work/ops` + forge-enforced gate, WITHOUT creating nor scaffolding `main` (the repo
+  content stays intact — that is the whole point). Architect gate BEFORE any disk write, same
+  mechanics as `create_project`. Preconditions (repo already in the org, default branch `main`)
+  are checked by `ProjectOnboard.import/2` — a precondition failure returns an explicit
+  `{:error, ...}`.
   """
   @spec import_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def import_project(full_name, state) when is_binary(full_name) do
@@ -123,118 +124,133 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  Lit l'état d'un issue délégué (issue + PR liée) — gate architecte (suivre une
-  délégation reste réservé à l'architecte, cohérent avec `create_issue`/`create_project`).
+  Reads the state of a delegated issue (issue + linked PR) — architect gate (tracking a
+  delegation stays reserved to the architect, consistent with `create_issue`/`create_project`).
 
-  « Livré » = issue fermée par le merge (`Closes #N`) : signal de séquencement
-  multi-issue (l'arch n'enchaîne le issue N+1 que sur `delivered: true`). Lecture seule
-  (ForgeClient). Le repo est PASSÉ explicitement, JAMAIS lu d'une mémoire globale : un
-  arch qui suit plusieurs projets en parallèle nomme CELUI qu'il interroge.
+  "Delivered" = issue closed by the merge (`Closes #N`): a multi-issue sequencing
+  signal (the arch only chains issue N+1 on `delivered: true`). Read-only
+  (ForgeClient). The repo is PASSED explicitly, NEVER read from a global memory: an
+  arch tracking several projects in parallel names the ONE it is querying.
   """
   @spec issue_status(String.t(), integer(), map()) :: {:ok, map()} | {:error, term()}
   def issue_status(repo, number, state) when is_binary(repo) and is_integer(number) do
-    case require_architect(state) do
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, _role} <- require_architect(state),
+         {:ok, forge} <- conforming_forge() do
+      issue_state =
+        case forge.get_issue(repo, number, []) do
+          {:ok, issue} -> Map.get(issue, "state", "unknown")
+          _ -> "unknown"
+        end
 
-      {:ok, _role} ->
-        forge = ForgeClient.resolved()
+      result = %{
+        "repo" => repo,
+        "issue" => number,
+        "issue_state" => issue_state,
+        # "delivered" = the PR closed the issue (FF merge `Closes #N`). Multi-issue sequencing signal:
+        # the arch only chains issue N+1 on `delivered: true`.
+        #
+        # ⚠ KNOWN LIMIT (seen live 2026-07-04): `closed` ALONE conflates "closed by a merge"
+        # (real delivery) and "closed without delivery" (onboarding marker `[lcars-onboarded]`,
+        # manual closure) → false `delivered:true`. The CORRECT fix requires proving a MERGE (new
+        # forge request: PR merged for the issue — `issue_pr_status` only sees OPEN PRs, nil at
+        # merge). Deferred to the auditability batch. The TRIGGER is neutralized: create_issue
+        # now returns the real number → the arch no longer GUESSES and no longer queries the marker by mistake.
+        "delivered" => issue_state == "closed",
+        "pr" => issue_pr_status(forge, repo, number)
+      }
 
-        issue_state =
-          case forge.get_issue(repo, number, []) do
-            {:ok, issue} -> Map.get(issue, "state", "unknown")
-            _ -> "unknown"
-          end
-
-        result = %{
-          "repo" => repo,
-          "issue" => number,
-          "issue_state" => issue_state,
-          # « livré » = la PR a fermé l'issue (merge FF `Closes #N`). Signal de séquencement multi-issue :
-          # l'arch n'enchaîne le issue N+1 que sur `delivered: true`.
-          #
-          # ⚠ LIMITE CONNUE (F-RUN-3, vu live 2026-07-04) : `closed` SEUL confond « fermé par un merge »
-          # (vraie livraison) et « fermé sans livraison » (marqueur d'onboarding `[lcars-onboarded]`,
-          # fermeture manuelle) → faux `delivered:true`. Le fix CORRECT exige de prouver un MERGE (nouvelle
-          # requête forge : PR mergée pour l'issue — `issue_pr_status` ne voit que les PR OUVERTES, nil au
-          # merge). Différé au lot auditabilité. Le DÉCLENCHEUR est neutralisé par F-RUN-1 : create_issue
-          # rend désormais le vrai numéro → l'arch ne DEVINE plus et n'interroge plus le marqueur par erreur.
-          "delivered" => issue_state == "closed",
-          "pr" => issue_pr_status(forge, repo, number)
-        }
-
-        {:ok, result}
+      {:ok, result}
     end
   end
 
+  # The forge/onboard seams are DUCK-TYPED: fleet_mcp cannot adopt the `@behaviour` (an
+  # fleet_mcp→fleet_pilot compile edge would be UPWARD-forbidden), so the compiler cannot check that the
+  # resolved module conforms. A misconfigured seam (a module missing a callback) would `apply/3`-crash
+  # with an obscure UndefinedFunctionError deep in the delegation. Guard at resolution → a CLEAR
+  # `{:error, {:seam_misconfigured, mod, missing}}` (R2-05, same shape as the spawner's R1-23 guard).
+  defp conforming_forge, do: conforming(ForgeClient, ForgeClient.resolved())
+  defp conforming_onboard, do: conforming(ProjectOnboard, ProjectOnboard.resolved())
+
+  defp conforming(behaviour, impl) do
+    Code.ensure_loaded(impl)
+
+    missing =
+      for {fun, arity} <- behaviour.behaviour_info(:callbacks),
+          not function_exported?(impl, fun, arity),
+          do: {fun, arity}
+
+    if missing == [], do: {:ok, impl}, else: {:error, {:seam_misconfigured, impl, missing}}
+  end
+
   # ============================================================
-  # Mécanique forge (exécutée UNIQUEMENT après la gate)
+  # Forge mechanics (run ONLY after the gate)
   # ============================================================
 
-  # Séquence d'onboarding proprement dite. Le SYSTÈME exécute la mécanique (repo forge +
-  # dual-worktree main/work-ops + scaffold + push) via le seam :project_onboard (contrat =
-  # behaviour Delegation.ProjectOnboard ; défaut Fleet.Pilot.ProjectOnboard, dispatch runtime —
-  # pas de dep compile-time fleet_pilot).
+  # The onboarding sequence proper. The SYSTEM runs the mechanics (forge repo +
+  # dual-worktree main/work-ops + scaffold + push) via the :project_onboard seam (contract =
+  # behaviour Delegation.ProjectOnboard; default Fleet.Pilot.ProjectOnboard, runtime dispatch —
+  # no compile-time dep on fleet_pilot).
   defp do_create_project(name, args) do
-    onboard = ProjectOnboard.resolved()
-    org = Application.get_env(:fleet_mcp, :delegation_org, "fleet")
-    pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
+    with {:ok, onboard} <- conforming_onboard() do
+      org = Application.get_env(:fleet_mcp, :delegation_org, "fleet")
+      pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
-    opts = [org: org, description: Map.get(args, "description", pitch), pitch: pitch]
+      opts = [org: org, description: Map.get(args, "description", pitch), pitch: pitch]
 
-    case apply(onboard, :onboard, [name, opts]) do
-      {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
-        {:ok,
-         %{
-           "status" => "onboarded",
-           "repo" => repo,
-           "project_dir" => pdir,
-           "work_dir" => wdir,
-           "delegation_target" => repo
-         }}
+      case apply(onboard, :onboard, [name, opts]) do
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
+          {:ok,
+           %{
+             "status" => "onboarded",
+             "repo" => repo,
+             "project_dir" => pdir,
+             "work_dir" => wdir,
+             "delegation_target" => repo
+           }}
 
-      {:error, reason} ->
-        {:error, {:onboard_failed, inspect(reason)}}
+        {:error, reason} ->
+          {:error, {:onboard_failed, inspect(reason)}}
+      end
     end
   end
 
-  # Séquence d'import (WS4) — même seam :project_onboard, callback :import au lieu de :onboard.
+  # Import sequence — same :project_onboard seam, callback :import instead of :onboard.
   defp do_import_project(full_name) do
-    onboard = ProjectOnboard.resolved()
+    with {:ok, onboard} <- conforming_onboard() do
+      case apply(onboard, :import, [full_name, []]) do
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
+          {:ok,
+           %{
+             "status" => "imported",
+             "repo" => repo,
+             "project_dir" => pdir,
+             "work_dir" => wdir,
+             "delegation_target" => repo
+           }}
 
-    case apply(onboard, :import, [full_name, []]) do
-      {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
-        {:ok,
-         %{
-           "status" => "imported",
-           "repo" => repo,
-           "project_dir" => pdir,
-           "work_dir" => wdir,
-           "delegation_target" => repo
-         }}
-
-      {:error, reason} ->
-        {:error, {:import_failed, inspect(reason)}}
+        {:error, reason} ->
+          {:error, {:import_failed, inspect(reason)}}
+      end
     end
   end
 
-  # Pose l'issue (auteur = compte de rôle via `author_opts`, assignee = humain owner) et l'étiquette de visu.
+  # Places the issue (author = role account via `author_opts`, assignee = human owner) and its visual label.
   defp do_create_issue(forge, repo, title, brief, author_opts) do
-    # assignee = l'HUMAIN owner (point fixe : routing + ownership, jamais le rôle). Login forge
-    # = login OS de l'humain qui lance la fleet (doctrine : tout dérive de l'OS, pas de catalogue ;
-    # Gitea matche l'assignee insensible à la casse → `starfleet` résout `Starfleet`). Pas de label :
-    # le rôle producteur est un invariant côté poller, pas un sticker par-issue.
+    # assignee = the HUMAN owner (fixed point: routing + ownership, never the role). Forge login
+    # = OS login of the human who launches the fleet (doctrine: everything derives from the OS, no catalogue;
+    # Gitea matches the assignee case-insensitively → `starfleet` resolves `Starfleet`). No label:
+    # the producer role is an invariant on the poller side, not a per-issue sticker.
     case Fleet.Credentials.Human.current() do
       {:ok, human} ->
         issue_opts = Keyword.put(author_opts, :assignees, [human])
 
         case apply(forge, :create_issue, [repo, title, brief, issue_opts]) do
           {:ok, number} ->
-            # DÉCOUPLAGE : create_issue CRÉE seulement (auteur=arch, assignee=humain). Le ROUTAGE
-            # (graver la workflow_map) n'est PLUS ici : c'est la responsabilité du SYSTÈME — le POLLER grave
-            # la workflow_map par défaut (brief-gate) sur toute issue assignée routeless (cf. fleet_pilot).
-            # Un seul acteur crée+assigne ; le système route. (Uniforme : un issue humain routeless est
-            # onboardé pareil.) type:feature = ÉTIQUETTE de visu (humain), best-effort — JAMAIS du routing.
+            # DECOUPLING: create_issue only CREATES (author=arch, assignee=human). The ROUTING
+            # (burning the workflow_map) is NO LONGER here: it is the responsibility of the SYSTEM — the POLLER burns
+            # the default workflow_map (brief-gate) on any assigned routeless issue (cf. fleet_pilot).
+            # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
+            # onboarded the same way.) type:feature = a visual LABEL (human), best-effort — NEVER routing.
             _ = apply(forge, :add_label, [repo, number, "type:feature", []])
 
             {:ok,
@@ -254,16 +270,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # La PR EN COURS du issue #n (parmi les open). Livré (mergé) → la PR n'est plus open → `nil`
-  # (l'info « livré » vient alors de l'issue close). Sinon : numéro + merged + verdicts de review.
+  # The IN-PROGRESS PR of issue #n (among the open ones). Delivered (merged) → the PR is no longer open → `nil`
+  # (the "delivered" info then comes from the closed issue). Otherwise: number + merged + review verdicts.
   defp issue_pr_status(forge, repo, number) do
-    # La PR du issue #n = celle dont le head est la feature-branch `lcars/issue-<n>-<role>`. Le parse
-    # de ce format est délégué à l'AUTORITÉ UNIQUE `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1`
-    # (co-localisée avec son builder `feature_branch/2`) au lieu de reconstruire le préfixe en dur : un
-    # changement de format se fait dans le seul ForgeProtocol. On l'atteint via le `forge` INJECTÉ (résolu
-    # runtime, défaut `Fleet.Pilot.ForgeClient`, qui ré-exporte `parse_feature_branch` vers ForgeProtocol) —
-    # donc aucune dep compile-time de fleet_mcp vers fleet_pilot (c'est pourquoi on garde l'appel via le seam
-    # plutôt qu'un appel direct à ForgeProtocol, qui lui créerait cette dépendance).
+    # The PR of issue #n = the one whose head is the feature-branch `lcars/issue-<n>-<role>`. Parsing
+    # this format is delegated to the SINGLE AUTHORITY `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1`
+    # (co-located with its builder `feature_branch/2`) instead of rebuilding the prefix by hand: a
+    # format change happens in ForgeProtocol alone. We reach it via the INJECTED `forge` (resolved
+    # runtime, default `Fleet.Pilot.ForgeClient`, which re-exports `parse_feature_branch` to ForgeProtocol) —
+    # so no compile-time dep from fleet_mcp to fleet_pilot (that is why we keep the call via the seam
+    # rather than a direct call to ForgeProtocol, which would create that dependency).
     case forge.list_open_pulls(repo, []) do
       {:ok, pulls} ->
         Enum.find_value(pulls, fn pr ->
@@ -292,12 +308,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   # ============================================================
-  # Gate architecte + résolution du rôle
+  # Architect gate + role resolution
   # ============================================================
 
-  # Gate commune des trois tools : résout le rôle depuis l'identité du canal (`state.pod_id`)
-  # PUIS exige `architect`. State sans pod_id = anomalie de l'accepteur → :pod_id_required
-  # (fail-closed, jamais d'accès anonyme).
+  # Common gate of the three tools: resolves the role from the channel identity (`state.pod_id`)
+  # THEN requires `architect`. State without pod_id = acceptor anomaly → :pod_id_required
+  # (fail-closed, never anonymous access).
   defp require_architect(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
     case resolve_role(pod_id) do
       {:ok, "architect"} -> {:ok, "architect"}
@@ -308,11 +324,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp require_architect(_state), do: {:error, :pod_id_required}
 
-  # Le RÔLE (architect / engineer / …) est gravé au SPAWN et lu depuis le registre du Spawner
-  # (`Fleet.Spawner.pod_info`), jamais d'un champ du wire (qu'un pod pourrait forger). Seam test
-  # `:pod_resolver` (app-env) : prend le pod_id et rend `{:ok, %{role: role}}` | `{:error, _}`.
-  # Défaut = dispatch RUNTIME vers `Fleet.Spawner.pod_info/1` (pas de dep compile-time
-  # fleet_spawner). Pod inconnu / Spawner indisponible → `:pod_unknown` (fail-closed).
+  # The ROLE (architect / engineer / …) is burned in at SPAWN and read from the Spawner registry
+  # (`Fleet.Spawner.pod_info`), never from a wire field (which a pod could forge). Test seam
+  # `:pod_resolver` (app-env): takes the pod_id and returns `{:ok, %{role: role}}` | `{:error, _}`.
+  # Default = RUNTIME dispatch to `Fleet.Spawner.pod_info/1` (no compile-time dep on
+  # fleet_spawner). Unknown pod / Spawner unavailable → `:pod_unknown` (fail-closed).
   defp resolve_role(pod_id) when is_binary(pod_id) do
     resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
 

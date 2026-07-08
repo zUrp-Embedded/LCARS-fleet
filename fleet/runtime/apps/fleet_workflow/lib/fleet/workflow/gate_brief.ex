@@ -1,31 +1,31 @@
 defmodule Fleet.Workflow.GateBrief do
   @moduledoc """
-  Construit le **brief d'éval** (texte du brief) envoyé au gatekeeper pour
-  trancher une gate de pipeline. Le gatekeeper le pull via MCP `get_work_item`, juge
-  (modop rubber-duck), et rend une décision JSON strict `gate-decision-v1.json`.
+  Builds the **eval brief** (the brief text) sent to the gatekeeper to
+  decide a workflow gate. The gatekeeper pulls it via MCP `get_work_item`, judges
+  (rubber-duck modop), and returns a strict JSON decision `gate-decision-v1.json`.
 
-  Pure function. Template dérivé de `orchestration/gatekeeper-exception.md`
-  §"Brief gatekeeper auto-généré" (contexte invocation + livrable à juger +
-  question à trancher + options déterministes + contrat de sortie). Les données
-  structurées vont aussi dans `task.metadata` ; ce brief est la forme lisible.
+  Pure function. Template derived from `orchestration/gatekeeper-exception.md`
+  §"Brief gatekeeper auto-généré" (invocation context + deliverable to judge +
+  question to decide + deterministic options + output contract). The structured
+  data also go into `task.metadata`; this brief is the human-readable form.
   """
 
-  # Vocab des décisions = AUTORITÉ UNIQUE `Fleet.Workflow.GateDecision` (évalué au compile, donc
-  # ce brief se recompile si la liste canon change — plus de vocabulaire local qui dérive du validateur).
+  # Decision vocab = SINGLE AUTHORITY `Fleet.Workflow.GateDecision` (evaluated at compile time, so
+  # this brief recompiles if the canonical list changes — no more local vocabulary drifting from the validator).
   @decisions Fleet.Workflow.GateDecision.decisions()
 
   @doc """
-  Rend le brief markdown depuis le contexte de gate.
+  Renders the markdown brief from the gate context.
 
-  `ctx` : `%{step: String, workflow_map_id: term, gate: map | nil, outputs: map,
+  `ctx`: `%{step: String, workflow_map_id: term, gate: map | nil, outputs: map,
   request: String | nil, subject: :deliverable | :brief}`.
 
-  `:subject` paramètre CE QUI est jugé — `:deliverable` (défaut, le livrable
-  produit par un step : gatekeeper, juges de PR) ou `:brief` (le BRIEF rédigé
-  par l'architecte, jugé AVANT toute production : brief-review/consultant). Le
-  contrat de verdict (`gate-decision-v1`) et la mécanique sont identiques — seul le
-  cadrage du « truc à juger » change (sinon un juge de brief chasserait un livrable
-  inexistant). Défaut `:deliverable`.
+  `:subject` parametrizes WHAT is judged — `:deliverable` (default, the deliverable
+  produced by a step: gatekeeper, PR judges) or `:brief` (the BRIEF written
+  by the architect, judged BEFORE any production: brief-review/consultant). The
+  verdict contract (`gate-decision-v1`) and the mechanics are identical — only the
+  framing of the "thing to judge" changes (otherwise a brief judge would hunt a
+  nonexistent deliverable). Default `:deliverable`.
   """
   @spec build(map()) :: String.t()
   def build(%{step: step, workflow_map_id: pid} = ctx) do
@@ -36,15 +36,15 @@ defmodule Fleet.Workflow.GateBrief do
     """
     # #{s.title}
 
-    ⚠ TON RÔLE EST DE **JUGER**, PAS DE PRODUIRE. Ne crée AUCUN fichier, ne
-    commite RIEN, n'exécute AUCUNE tâche de build. #{s.intro} Ton unique sortie est une **décision** rendue via `submit_result`.
+    ⚠ YOUR ROLE IS TO **JUDGE**, NOT TO PRODUCE. Create NO file, commit
+    NOTHING, run NO build task. #{s.intro} Your only output is a **decision** returned via `submit_result`.
 
-    ## Contexte
-    - Pipeline : #{inspect(pid)}
-    - Step jugé : #{step}
-    - Gate : type #{gate_type(gate)}
+    ## Context
+    - Pipeline: #{inspect(pid)}
+    - Judged step: #{step}
+    - Gate: type #{gate_type(gate)}
     #{render_request(Map.get(ctx, :request))}
-    ## Question à trancher
+    ## Question to decide
     #{s.question}
 
     ## #{s.heading}
@@ -52,78 +52,78 @@ defmodule Fleet.Workflow.GateBrief do
     #{render(outputs)}
     ```
 
-    ## Règles de gate (référence)
+    ## Gate rules (reference)
     ```
     #{render(gate)}
     ```
 
-    ## Décision attendue — JSON strict (`gate-decision-v1.json`)
-    `{"decision": "<...>", "reason": "<motif structuré>", "details": {...}, "chain": [...]}`
+    ## Expected decision — strict JSON (`gate-decision-v1.json`)
+    `{"decision": "<...>", "reason": "<structured rationale>", "details": {...}, "chain": [...]}`
 
     `decision` ∈ #{Enum.join(@decisions, " | ")}
-    - `continue` : #{s.continue} → avancer au step suivant
-    - `redirect` : renvoyer à l'architecte (ex. brief trop gros → demander la découpe)
-    - `abandon` : abandonner le issue (non récupérable)
-    - `escalate_user` : dépasse le gatekeeper → l'user tranche
-    - `halt_wait_input` : information manquante → halt en attente
+    - `continue`: #{s.continue} → advance to the next step
+    - `redirect`: send back to the architect (e.g. brief too big → ask for a split)
+    - `abandon`: abandon the issue (not recoverable)
+    - `escalate_user`: beyond the gatekeeper → the user decides
+    - `halt_wait_input`: missing information → halt and wait
 
-    ## Comment rendre ta décision
-    Appelle `mcp__fleet__submit_result` avec, comme **résultat**, l'objet JSON
-    gate-decision-v1.json ci-dessus. Le champ `decision` est OBLIGATOIRE et doit
-    valoir l'une des valeurs listées — sans lui, le runtime escalade en humain
-    (fail-closed). Exemple minimal : `{"decision": "continue", "reason": "..."}`.
+    ## How to return your decision
+    Call `mcp__fleet__submit_result` with, as the **result**, the JSON object
+    gate-decision-v1.json above. The `decision` field is MANDATORY and must
+    be one of the listed values — without it, the runtime escalates to a human
+    (fail-closed). Minimal example: `{"decision": "continue", "reason": "..."}`.
     """
   end
 
-  # Cadrage du « truc à juger », paramétré par `:subject`. `:deliverable` = le cas du livrable
-  # produit (gatekeeper/juges-PR) ; `:brief` cadre la revue de brief (le brief est rédigé par
-  # l'arch, PAS encore exécuté → le juge ne cherche pas un livrable).
+  # Framing of the "thing to judge", parametrized by `:subject`. `:deliverable` = the produced-deliverable
+  # case (gatekeeper/PR-judges); `:brief` frames the brief review (the brief is written by
+  # the arch, NOT yet executed → the judge does not look for a deliverable).
   defp subject_phrases(:brief, step) do
     %{
-      # Titre NEUTRE en rôle : ce brief part à N juges (consultant en brief-review, qualifier/reviewer/
-      # gatekeeper en livrable). L'appeler « gatekeeper » quel que soit le juge = drift (vu live
-      # 2026-07-04 : le consultant s'est présenté « rôle gatekeeper »). Le sujet jugé porte le titre.
-      title: "Éval de brief — décision de juge",
-      intro: "Le BRIEF à valider (rédigé par l'architecte) est cité plus bas.",
+      # ROLE-NEUTRAL title: this brief goes to N judges (consultant in brief-review, qualifier/reviewer/
+      # gatekeeper in deliverable). Calling it "gatekeeper" regardless of the judge = drift (seen live
+      # 2026-07-04: the consultant introduced itself as "gatekeeper role"). The judged subject carries the title.
+      title: "Brief eval — judge decision",
+      intro: "The BRIEF to validate (written by the architect) is quoted below.",
       question:
-        "Le brief `#{step}` a été rédigé par l'architecte et n'a PAS encore été exécuté. Au vu du " <>
-          "brief ci-dessous, est-il EXÉCUTABLE en l'état (clair, complet, cohérent, actionnable par un " <>
-          "engineer sans nouvelle question) — `continue` — ou faut-il le renvoyer / escalader / abandonner ?",
-      heading: "Brief à juger (rédigé par l'architecte — à valider AVANT toute exécution)",
-      continue: "le brief est exécutable en l'état (clair, complet, actionnable)"
+        "The brief `#{step}` was written by the architect and has NOT been executed yet. Given the " <>
+          "brief below, is it EXECUTABLE as-is (clear, complete, coherent, actionable by an " <>
+          "engineer without further questions) — `continue` — or must it be sent back / escalated / abandoned?",
+      heading: "Brief to judge (written by the architect — to validate BEFORE any execution)",
+      continue: "the brief is executable as-is (clear, complete, actionable)"
     }
   end
 
   defp subject_phrases(_deliverable, step) do
     %{
-      title: "Éval de livrable — décision de juge",
-      intro: "Le livrable existe déjà (il est cité plus bas).",
+      title: "Deliverable eval — judge decision",
+      intro: "The deliverable already exists (it is quoted below).",
       question:
-        "Le step `#{step}` a livré son résultat. Au vu du livrable ci-dessous et des\n" <>
-          "règles de la gate, faut-il franchir la gate (`continue`) — ou abandonner /\nrenvoyer / escalader ?",
-      heading: "Livrable à juger (outputs du step — DÉJÀ produit, à évaluer)",
-      continue: "le livrable satisfait la gate"
+        "The step `#{step}` delivered its result. Given the deliverable below and the\n" <>
+          "gate rules, should the gate be crossed (`continue`) — or abandon /\nsend back / escalate?",
+      heading: "Deliverable to judge (step outputs — ALREADY produced, to evaluate)",
+      continue: "the deliverable satisfies the gate"
     }
   end
 
   defp gate_type(%{"type" => t}), do: t
   defp gate_type(_), do: "—"
 
-  # Demande d'origine = CONTEXTE de jugement, jamais une instruction à exécuter
-  # (sinon le gatekeeper refait la tâche du step précédent au lieu de juger).
-  # Encadrée et désamorcée explicitement.
+  # Origin request = judgment CONTEXT, never an instruction to execute
+  # (otherwise the gatekeeper redoes the previous step's task instead of judging).
+  # Explicitly framed and defused.
   defp render_request(req) when is_binary(req) and req != "" do
     """
 
-    ## Demande d'origine (CONTEXTE — déjà traité, NE PAS exécuter)
+    ## Original request (CONTEXT — already handled, DO NOT execute)
     > #{String.replace(req, "\n", "\n> ")}
     """
   end
 
   defp render_request(_), do: ""
 
-  # Rendu JSON lisible ; fallback inspect si non-encodable (défensif).
-  defp render(nil), do: "(aucun)"
+  # Human-readable JSON rendering; fallback to inspect if non-encodable (defensive).
+  defp render(nil), do: "(none)"
 
   defp render(term) do
     case Jason.encode(term, pretty: true) do

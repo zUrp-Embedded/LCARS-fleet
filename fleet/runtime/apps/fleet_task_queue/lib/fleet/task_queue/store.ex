@@ -1,30 +1,30 @@
 defmodule Fleet.TaskQueue.Store do
   @moduledoc """
-  Persistence `state.json` du broker — sérialisation + FS, extrait de
-  `Fleet.TaskQueue.Server` (le GenServer garde l'orchestration : QUAND persister,
-  QUOI recharger ; ce module ne sait QUE lire/écrire une map de work items).
+  `state.json` persistence of the broker — serialization + FS, extracted from
+  `Fleet.TaskQueue.Server` (the GenServer keeps the orchestration: WHEN to persist,
+  WHAT to reload; this module ONLY knows how to read/write a map of work items).
 
-  Aucun process, aucun state GenServer : les deux opérations prennent un `path`
-  et une map `%{id => %WorkItem{}}` en arguments explicites.
+  No process, no GenServer state: both operations take a `path` and a
+  `%{id => %WorkItem{}}` map as explicit arguments.
 
-  ## Contrat
+  ## Contract
 
-    * `save/2` — écriture ATOMIQUE (tmp + rename) du schéma versionné `v: 1`.
-      **Best-effort côté WRITE** : un échec d'écriture est loggé **error**
-      (durabilité du point de recovery rompue) mais rend `:ok` quand même —
-      on ne crashe pas le broker sur un blip disque ; la réconciliation passe
-      par le rail forge-driven (re-dispatch depuis l'état forge), pas par
-      cette persistance locale.
-    * `load/1` — **fail-loud côté READ** : un `state.json` non-parseable, de
-      version inattendue ou portant un work item non-désérialisable rend
-      `{:corrupt, found}` (jamais un drop silencieux d'une partie de l'état) ;
-      le Server en fait un fallback non-bloquant (state vide + event
-      `:"state.corrupt"`).
-    * `default_path/0` — où vit `state.json` quand l'appelant ne le fixe pas.
+    * `save/2` — ATOMIC write (tmp + rename) of the versioned schema `v: 1`.
+      **Best-effort on the WRITE side**: a write failure is logged at **error**
+      (durability of the recovery point is broken) but still returns `:ok` —
+      we do not crash the broker over a disk blip; reconciliation goes through
+      the forge-driven rail (re-dispatch from the forge state), not through
+      this local persistence.
+    * `load/1` — **fail-loud on the READ side**: a `state.json` that is
+      unparseable, of an unexpected version, or carrying a non-deserializable
+      work item returns `{:corrupt, found}` (never a silent drop of part of the
+      state); the Server turns it into a non-blocking fallback (empty state +
+      `:"state.corrupt"` event).
+    * `default_path/0` — where `state.json` lives when the caller does not set it.
 
-  La décision de NE PAS persister (`persist: false`, mode prod éphémère) ou de
-  charger à vide reste dans le Server : elle dépend de ses options de boot, pas
-  du format du fichier.
+  The decision NOT to persist (`persist: false`, ephemeral prod mode) or to load
+  empty stays in the Server: it depends on its boot options, not on the file
+  format.
   """
 
   require Logger
@@ -32,14 +32,14 @@ defmodule Fleet.TaskQueue.Store do
   alias Fleet.TaskQueue.WorkItem
 
   @doc """
-  Chemin par défaut de `state.json` : config `:fleet_task_queue, :state_path`,
-  sinon `~/.lcars/task-queue/state.json`.
+  Default path of `state.json`: config `:fleet_task_queue, :state_path`,
+  otherwise `~/.lcars/task-queue/state.json`.
 
-  Le fleet tourne sous l'humain → défaut home-relatif `~/.lcars/task-queue`, comme le pod
-  state_fs_root (`Fleet.Spawner.Pod.default_state_fs_root`) : un `/var/lib/lcars` en dur ne
-  serait pas ownable hors du compte `lcars`. HOME irrésoluble = runtime cassé → fail-loud
-  (`System.user_home!()` raise), jamais un chemin fabriqué : l'état .lcars ne doit pas se
-  disperser en silence.
+  The fleet runs under the human → home-relative default `~/.lcars/task-queue`, like the pod
+  state_fs_root (`Fleet.Spawner.Pod.default_state_fs_root`): a hardcoded `/var/lib/lcars`
+  would not be ownable outside the `lcars` account. Unresolvable HOME = broken runtime →
+  fail-loud (`System.user_home!()` raises), never a fabricated path: the .lcars state must
+  not scatter silently.
   """
   @spec default_path() :: Path.t()
   def default_path do
@@ -51,15 +51,15 @@ defmodule Fleet.TaskQueue.Store do
   end
 
   @doc """
-  Écrit la map de work items dans `path` — écriture atomique (tmp + rename),
-  schéma `%{"v" => 1, "work_items" => %{id => WorkItem.to_map(t)}}`.
+  Writes the map of work items to `path` — atomic write (tmp + rename),
+  schema `%{"v" => 1, "work_items" => %{id => WorkItem.to_map(t)}}`.
 
-  Best-effort : rend TOUJOURS `:ok`. Un échec d'écriture rompt la durabilité du point de
-  recovery cross-restart — c'est une ERREUR loggée, pas un warning : la queue RAM avance
-  mais state.json diverge → un restart relirait un état stale. On NE crashe PAS le broker
-  (un blip disque transitoire ne doit pas tuer les work items en vol) ; la réconciliation
-  passe par le rail forge-driven. Le breach devient LOUD (error-level → monitoring), plus
-  de dégradé silencieux.
+  Best-effort: ALWAYS returns `:ok`. A write failure breaks the durability of the
+  cross-restart recovery point — this is a logged ERROR, not a warning: the RAM queue
+  moves forward but state.json diverges → a restart would re-read a stale state. We do NOT
+  crash the broker (a transient disk blip must not kill the in-flight work items);
+  reconciliation goes through the forge-driven rail. The breach becomes LOUD
+  (error-level → monitoring), no more silent degradation.
   """
   @spec save(Path.t(), %{optional(String.t()) => WorkItem.t()}) :: :ok
   def save(path, work_items) when is_binary(path) and is_map(work_items) do
@@ -76,8 +76,8 @@ defmodule Fleet.TaskQueue.Store do
     rescue
       e ->
         Logger.error(
-          "Store: persist ÉCHEC — durabilité du point de recovery rompue (non-fatal, " <>
-            "réconciliation forge-driven ; path=#{path}): #{inspect(e)}"
+          "Store: persist FAILED — recovery point durability broken (non-fatal, " <>
+            "forge-driven reconciliation; path=#{path}): #{inspect(e)}"
         )
     end
 
@@ -85,15 +85,15 @@ defmodule Fleet.TaskQueue.Store do
   end
 
   @doc """
-  Lit et désérialise `state.json` depuis `path`.
+  Reads and deserializes `state.json` from `path`.
 
-    * `:empty` — fichier absent (`:enoent`) : premier boot, rien à recharger.
-    * `{:ok, %{id => %WorkItem{}}}` — schéma `v: 1` valide, tous les work items désérialisés.
-    * `{:corrupt, found}` — fichier illisible, JSON non-parseable, version ≠ 1, ou un
-      work item non-désérialisable (state corrompu / champ requis absent). Fail-loud :
-      on HALTE sur le 1er work item corrompu plutôt que de le FILTRER (état tronqué en
-      silence) ; `WorkItem.from_map` rend `{:error, _}` au lieu de RAISER (le fallback
-      `:corrupt` du Server tient).
+    * `:empty` — file absent (`:enoent`): first boot, nothing to reload.
+    * `{:ok, %{id => %WorkItem{}}}` — valid `v: 1` schema, all work items deserialized.
+    * `{:corrupt, found}` — unreadable file, unparseable JSON, version ≠ 1, or a
+      non-deserializable work item (corrupt state / required field absent). Fail-loud:
+      we HALT on the 1st corrupt work item rather than FILTERING it out (state silently
+      truncated); `WorkItem.from_map` returns `{:error, _}` instead of RAISING (the
+      Server's `:corrupt` fallback holds).
   """
   @spec load(Path.t()) ::
           :empty | {:ok, %{optional(String.t()) => WorkItem.t()}} | {:corrupt, term()}
@@ -118,9 +118,9 @@ defmodule Fleet.TaskQueue.Store do
     end
   end
 
-  # fail-loud : une tâche non-désérialisable → `{:corrupt, ...}`, PAS un drop silencieux.
-  # `reduce_while` HALTE sur la 1re tâche corrompue plutôt que de la FILTRER (état tronqué
-  # en silence).
+  # fail-loud: a non-deserializable task → `{:corrupt, ...}`, NOT a silent drop.
+  # `reduce_while` HALTS on the 1st corrupt task rather than FILTERING it out (state
+  # silently truncated).
   defp decode_work_items(work_items_map) do
     Enum.reduce_while(work_items_map, {:ok, %{}}, fn {id, tm}, {:ok, acc} ->
       case WorkItem.from_map(tm) do

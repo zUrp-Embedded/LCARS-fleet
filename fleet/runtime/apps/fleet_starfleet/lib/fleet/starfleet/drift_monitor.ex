@@ -1,29 +1,32 @@
 defmodule Fleet.Starfleet.DriftMonitor do
   @moduledoc """
-  GenServer pure subscriber `Fleet.EventRouter.Bus` topic `fleet.events`.
+  Pure-subscriber GenServer on `Fleet.EventRouter.Bus` topic `fleet.events`.
 
-  Pas de state runtime : le seuil est évalué sur le `drift_count` porté par le
-  payload `pod.drift` lui-même (`drift_count/1`), pas par un compteur local.
+  No runtime state: the threshold is evaluated against the `drift_count` carried
+  by the `pod.drift` payload itself (`drift_count/1`), not by a local counter.
 
-  ⚠ `pod.drift` est un event SANS producteur courant : l'émetteur prévu
-  (un filtre IPC pod-side qui compterait les strikes) n'a jamais été implémenté.
-  Le handler `pod.drift` ci-dessous est donc câblé mais dormant tant qu'aucun
-  producteur n'émet l'event. Les 3 autres handlers ont des producteurs réels.
+  ⚠ `pod.drift` is an event with NO current producer: the intended emitter
+  (a pod-side IPC filter that would count the strikes) was never implemented.
+  The `pod.drift` handler below is therefore wired but dormant as long as no
+  producer emits the event. Several of the other handlers are latent too (cf.
+  `Cat5Escalator`): `workflow_map.failed` and `oauth.refresh.failed` have no producer
+  wired today; `audit.verdict` is the live path (routed to `CoordBackend`). All handlers
+  stay ready — they route as soon as a producer emits.
 
-  ## Events handlés
+  ## Events handled
 
-  | event_type | trigger Cat 5 |
+  | event_type | Cat 5 trigger |
   |---|---|
-  | `pod.drift` | si `drift_count >= 3` (dormant : 0 producteur) |
-  | `workflow_map.failed` | inconditionnel |
-  | `oauth.refresh.failed` | inconditionnel |
-  | `audit.verdict` | validate JSON décision puis dispatch CoordBackend |
+  | `pod.drift` | if `drift_count >= 3` (dormant: 0 producer) |
+  | `workflow_map.failed` | unconditional |
+  | `oauth.refresh.failed` | unconditional |
+  | `audit.verdict` | validate the decision JSON then dispatch to CoordBackend |
 
-  ## Process raison runtime
+  ## Why a runtime process
 
-  GenServer = subscribe PubSub events asynchrones cross-process
-  (ch11 Phoenix.PubSub). Pure functions impossibles. Pas de state =
-  Iron Law minimal (1 process, pas d'ETS local).
+  GenServer = subscribe to asynchronous cross-process PubSub events. Pure
+  functions are impossible. No state = minimal Iron Law (1 process, no local
+  ETS).
   """
 
   use GenServer
@@ -37,23 +40,28 @@ defmodule Fleet.Starfleet.DriftMonitor do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    # Canon consumer (conformité 2026-07-04, aligne sur IncidentConsumer) : `name: nil` = anonyme
-    # (tests isolés, plusieurs instances) ; défaut singleton nommé (prod).
+    # Canonical consumer form (2026-07-04 conformance, aligned with IncidentConsumer): `name: nil` =
+    # anonymous (isolated tests, several instances); default is the named singleton (prod).
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
   @impl GenServer
   def init(opts) do
-    # Seam `subscribe: false` (tests : on envoie les events directement au process, pas de Bus réel
-    # partagé qui parasiterait la suite async). Défaut true (prod).
+    # `subscribe: false` seam (tests: events are sent directly to the process, no shared real Bus
+    # that would pollute the async suite). Default true (prod).
     if Keyword.get(opts, :subscribe, true), do: :ok = Bus.subscribe()
     {:ok, nil}
   end
 
   @impl GenServer
-  # DN 13 C2.3-starfleet — pattern match schema canon %Fleet.Event{} strict
-  # (DN 11 C3.1+C3.2). Legacy tuple format retiré chantier 3 BL-021 (les
-  # producteurs sont passés au schema canon).
+  # Pattern-match on the strict canonical %Fleet.Event{} schema. The legacy tuple
+  # format was removed (producers migrated to the canonical schema).
+  #
+  # R2-16: these clauses match TYPE ONLY because NONE of these types has a live producer yet (all
+  # "not-yet-born" scaffolding — cf. `cat5_escalator`/`audit_consumer`). There is no legit `source` to
+  # match against today. INVARIANT for whoever wires a real producer: its clause MUST also match
+  # `source:` (the producer's atom) so a SPOOFED-source event of that type cannot trigger the Cat 5
+  # escalation. Matching a guessed source now would just break silently when the real producer is born.
 
   def handle_info(
         %Fleet.Event{type: :"pod.drift", payload: payload, correlation_id: cid},
@@ -90,25 +98,25 @@ defmodule Fleet.Starfleet.DriftMonitor do
     {:noreply, state}
   end
 
-  # Ignore les autres types de %Fleet.Event{} non handlés + tout autre message.
+  # Ignore other unhandled %Fleet.Event{} types + any other message.
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
   def handle_info(_msg, state), do: {:noreply, state}
 
   defp dispatch_audit_verdict(payload, correlation_id) do
     case Gatekeeper.validate(payload["decision_json"] || "") do
       {:ok, decision} ->
-        # Un {:error, {:no_policy_match, _}} était JETÉ ici sans trace (finding DrDree 2026-07-05) :
-        # un verdict sans policy disparaissait. Loggé WARNING — le fix structurel (table de routage
-        # TOTALE, miss = crash au chargement) est le chantier coord D1-Part-2.
+        # A {:error, {:no_policy_match, _}} used to be DROPPED here with no trace (DrDree finding,
+        # 2026-07-05): a verdict with no policy vanished. Logged at WARNING — the structural fix
+        # (a TOTAL routing table where a miss crashes at load) is a separate coord work-item.
         case CoordBackend.resolved().handle_decision(decision, correlation_id) do
           :ok -> :ok
-          {:error, why} -> Logger.warning("DriftMonitor: verdict NON routé (#{inspect(why)})")
+          {:error, why} -> Logger.warning("DriftMonitor: verdict NOT routed (#{inspect(why)})")
         end
 
       {:error, reason} ->
-        # `reason` est un tuple structuré ({:decision_invalid, cause}) : `inspect` le rend
-        # humain ET JSON-encodable (AuditLog encode en NDJSON via Jason — un tuple brut
-        # lèverait Jason.EncodeError et une interpolation `#{reason}` lèverait Protocol.UndefinedError).
+        # `reason` is a structured tuple ({:decision_invalid, cause}): `inspect` makes it
+        # human-readable AND JSON-encodable (AuditLog encodes to NDJSON via Jason — a raw tuple
+        # would raise Jason.EncodeError and a `#{reason}` interpolation would raise Protocol.UndefinedError).
         _ =
           AuditLog.write(%{
             "source" => "invalid_decision",

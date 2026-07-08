@@ -93,7 +93,7 @@ defmodule Fleet.Workflow.GatesTest do
       # → FunctionClauseError remontait au StepRunConsumer (singleton) → crash.
       step = %{"gate" => %{"type" => "hard"}}
       assert {:fail, reason} = Gates.evaluate(step, %{"x" => 1}, %{})
-      assert reason =~ "malformée"
+      assert reason =~ "malformed"
     end
 
     test "hard avec rules NON-LISTE (string) → {:fail}, pas BadMapError" do

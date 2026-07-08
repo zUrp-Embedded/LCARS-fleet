@@ -1,23 +1,25 @@
 defmodule Fleet.EventRouter.SignalsOS do
   @moduledoc """
-  Capture signaux OS (SIGUSR1, SIGTERM, SIGHUP) via `:os.set_signal/2`
-  Erlang stdlib → broadcast event `os.signal.<sig>` sur le bus.
+  INERT — scaffolding for an OS-signal → bus bridge, written against a delivery
+  model that does not hold; kept but gated OFF by default.
 
-  GenServer minimaliste — process raison runtime = handle_info des
-  messages `{:signal, sig}` envoyés par le runtime BEAM lors d'un
-  signal OS.
+  Intended purpose: capture OS signals (SIGUSR1, SIGTERM, SIGHUP) via
+  `:os.set_signal/2` and broadcast an `os.signal.<sig>` event on the bus.
 
-  ## Configuration
+  Why it does not work as written: `:os.set_signal(sig, :handle)` (in `init/1`)
+  routes the signal to OTP's `:erl_signal_server` gen_event — it does NOT send
+  `{:signal, sig}` messages to this GenServer, so `handle_info({:signal, sig}, …)`
+  is UNREACHABLE. The real wiring (a gen_event handler registered on
+  `:erl_signal_server`) was never built; nothing around this module was removed —
+  it is not-yet-born, not dead.
 
-    * `:fleet_event_router, :captured_signals` — liste atoms de
-      signaux à capturer (default `[:sigusr1, :sigterm, :sighup]`)
+  Status: FAIL-LOUD — `application.ex` starts it only under `:start_signals` (default false), and `init/1`
+  now RAISES immediately (before any `:os.set_signal`). Enabling `:start_signals` therefore fails the boot
+  LOUDLY rather than silently capturing SIGTERM/SIGHUP into a dead handler. The fix, when this capability
+  is needed, is a gen_event handler on `:erl_signal_server`, not this GenServer.
   """
 
   use GenServer
-
-  require Logger
-
-  @default_signals [:sigusr1, :sigterm, :sighup]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -26,25 +28,20 @@ defmodule Fleet.EventRouter.SignalsOS do
 
   @impl GenServer
   def init(_opts) do
-    signals = Application.get_env(:fleet_event_router, :captured_signals, @default_signals)
-
-    Enum.each(signals, fn sig ->
-      try do
-        :os.set_signal(sig, :handle)
-      rescue
-        e -> Logger.warning("SignalsOS: set_signal #{sig} fail: #{inspect(e)}")
-      catch
-        kind, reason ->
-          Logger.warning("SignalsOS: set_signal #{sig} #{kind}: #{inspect(reason)}")
-      end
-    end)
-
-    {:ok, %{signals: signals}}
+    # FAIL-LOUD, BEFORE any `:os.set_signal`: SignalsOS is NOT-YET-IMPLEMENTED (the delivery model does
+    # not hold — see @moduledoc). If it were allowed to run, `:os.set_signal(sigterm/sighup, :handle)`
+    # would CAPTURE those OS signals away from their default disposition WITHOUT ever delivering them here
+    # (handle_info unreachable) — a dangerous silent no-op (a swallowed SIGTERM in prod). Enabling
+    # `:start_signals` is therefore a MISCONFIGURATION → we refuse to start (loud boot failure) rather
+    # than capture the signals. The real fix, when needed, is a gen_event handler on `:erl_signal_server`.
+    raise "Fleet.EventRouter.SignalsOS is not implemented and MUST NOT be started — enabling " <>
+            ":start_signals is a misconfiguration (it would capture SIGTERM/SIGHUP without delivering " <>
+            "them). The fix is a gen_event handler on :erl_signal_server, not this GenServer."
   end
 
   @impl GenServer
   def handle_info({:signal, sig}, state) when is_atom(sig) do
-    # Schema canon strict : %Fleet.Event{source: :event_router}.
+    # Strict canonical schema: %Fleet.Event{source: :event_router}.
     type_str = "os.signal.#{sig}"
 
     _ =

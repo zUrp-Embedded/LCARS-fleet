@@ -1,54 +1,53 @@
 defmodule Fleet.Workflow.Gates do
   @moduledoc """
-  Évalue les gates par type — `:hard | :soft | :terminal | nil`.
+  Evaluates gates by type — `:hard | :soft | :terminal | nil`.
 
-  Types :
+  Types:
 
-    * **hard** — `rules` = liste de prédicats STRING évalués contre `outputs`
-      par `Fleet.Workflow.Gates.Predicate`. Tous vrais → `:pass`, sinon
-      `{:fail, …}`. Pas de bypass.
-    * **soft** — jugement LLM délégué au **gatekeeper**. `Gates` est
-      PUR : il retourne `{:dispatch_gatekeeper, info}` (décision d'escalade) ;
-      le rail forge-driven (`Pilot.StepRunConsumer`) spawn le gatekeeper + collecte
-      sa décision. La délégation du jugement est consolidée sur le gatekeeper.
-    * **terminal** — `rules` = liste de prédicats STRING (Predicate), mais
-      OPTIONNELLE (le gate `finish` du canon est terminal + `human_approval`
-      SANS rules). Une rule non satisfaite → `{:fail}` ;
-      `human_approval_required: true` → **HALT fail-closed** (aucun human-in-loop
-      câblé : le moteur mécanique n'auto-approuve jamais) ; sinon → `:pass`.
-    * **nil / absent** — `:pass` direct.
+    * **hard** — `rules` = list of STRING predicates evaluated against `outputs`
+      by `Fleet.Workflow.Gates.Predicate`. All true → `:pass`, otherwise
+      `{:fail, …}`. No bypass.
+    * **soft** — LLM judgment delegated to the **gatekeeper**. `Gates` is
+      PURE: it returns `{:dispatch_gatekeeper, info}` (escalation decision);
+      the forge-driven rail (`Pilot.StepRunConsumer`) spawns the gatekeeper + collects
+      its decision. Judgment delegation is consolidated onto the gatekeeper.
+    * **terminal** — `rules` = list of STRING predicates (Predicate), but
+      OPTIONAL (the canon's `finish` gate is terminal + `human_approval`
+      WITHOUT rules). An unsatisfied rule → `{:fail}`;
+      `human_approval_required: true` → **HALT fail-closed** (no human-in-loop
+      wired: the mechanical engine never self-approves); otherwise → `:pass`.
+    * **nil / absent** — direct `:pass`.
 
-  Les `rules` (hard ET terminal) sont des prédicats STRING — `"all_tests_pass"`,
-  `"severity_max != critical"` — évalués contre `outputs` par
-  `Fleet.Workflow.Gates.Predicate`. Seul le **soft** gate dispatche au
-  gatekeeper (le juge unique de la fleet) : `Gates` ne fait AUCUN spawn (pur),
-  c'est le rail forge-driven (`Pilot.StepRunConsumer`) qui possède le nom de step
-  + le lifecycle d'attente du verdict.
+  The `rules` (hard AND terminal) are STRING predicates — `"all_tests_pass"`,
+  `"severity_max != critical"` — evaluated against `outputs` by
+  `Fleet.Workflow.Gates.Predicate`. Only the **soft** gate dispatches to the
+  gatekeeper (the fleet's sole judge): `Gates` does NO spawn (pure),
+  it is the forge-driven rail (`Pilot.StepRunConsumer`) that owns the step name
+  + the verdict-await lifecycle.
 
-  `Gates` ne retourne JAMAIS `:retry` (le retry n'est pas une décision de gate).
-  Un retry BORNÉ existe, mais c'est le **rail forge-driven**
-  (`Pilot.StepRunConsumer`) qui le pilote (compteur de rework borné), pas la gate ;
-  la borne écarte le risque de re-spawn-en-boucle. L'orchestration severity
-  (`fallback_invoke_gatekeeper`, `on_*_severity`) reste hors-scope de cet
-  évaluateur.
+  `Gates` NEVER returns `:retry` (retry is not a gate decision).
+  A BOUNDED retry exists, but it is the **forge-driven rail**
+  (`Pilot.StepRunConsumer`) that drives it (bounded rework counter), not the gate;
+  the bound rules out the re-spawn-in-a-loop risk. Severity orchestration
+  (`fallback_invoke_gatekeeper`, `on_*_severity`) stays out of scope of this
+  evaluator.
 
-  Toute forme de gate inconnue/malformée tombe sur le catch-all fail-closed
-  (`{:fail, …}`) — l'éval est TOTALE, jamais un crash, jamais un `:pass`
-  silencieux.
+  Any unknown/malformed gate shape falls onto the fail-closed catch-all
+  (`{:fail, …}`) — the eval is TOTAL, never a crash, never a silent `:pass`.
   """
 
   @behaviour Fleet.Workflow.Gate
 
   alias Fleet.Workflow.Gates.Predicate
 
-  # Gates EST l'implémentation MVP du behaviour Fleet.Workflow.Gate (hard/soft/terminal).
-  # evaluate/3 = point d'entrée du contrat, délègue à eval_by_type pattern-matché ci-dessous.
+  # Gates IS the MVP implementation of the Fleet.Workflow.Gate behaviour (hard/soft/terminal).
+  # evaluate/3 = the contract entry point, delegates to eval_by_type pattern-matched below.
   @impl Fleet.Workflow.Gate
   def evaluate(step, outputs, ctx), do: eval_by_type(step, outputs, ctx)
 
-  # E5 2026-07-04 : {:human_approval, _} manquait à cette spec INTERNE (le @callback Gate l'a, D2) —
-  # dialyzer propageait le type incomplet et croyait MORTES les clauses human_approval en aval
-  # (step_run_consumer). La spec ment = tout le typage aval ment.
+  # 2026-07-04: {:human_approval, _} was missing from this INTERNAL spec (the @callback Gate has it) —
+  # dialyzer propagated the incomplete type and believed the human_approval clauses downstream were DEAD
+  # (step_run_consumer). The spec lies = all downstream typing lies.
   @spec eval_by_type(step :: map(), outputs :: map(), ctx :: map()) ::
           :pass
           | {:fail, String.t()}
@@ -57,79 +56,78 @@ defmodule Fleet.Workflow.Gates do
   defp eval_by_type(%{"gate" => nil}, _outputs, _ctx), do: :pass
   defp eval_by_type(step, _outputs, _ctx) when not is_map_key(step, "gate"), do: :pass
 
-  # hard gate, `rules` = liste de prédicats string évalués contre
-  # les outputs (Predicate). Pas de bypass : tous vrais → :pass, sinon {:fail}.
+  # hard gate, `rules` = list of string predicates evaluated against
+  # the outputs (Predicate). No bypass: all true → :pass, otherwise {:fail}.
   defp eval_by_type(%{"gate" => %{"type" => "hard", "rules" => rules}}, outputs, _ctx)
        when is_list(rules) do
     if Enum.all?(rules, &Predicate.eval?(&1, outputs)) do
       :pass
     else
-      {:fail, "hard gate: rule(s) string non satisfaite(s)"}
+      {:fail, "hard gate: unsatisfied string rule(s)"}
     end
   end
 
-  # Soft gate = jugement LLM délégué au **gatekeeper** (juge unique de la
-  # fleet : il fait tourner la fleet, récupère les problèmes). `Gates` reste PUR :
-  # il décide qu'il faut le gatekeeper (`{:dispatch_gatekeeper, info}`) ; le spawn
-  # async + la corrélation `pod.completed` sont faits par le rail forge-driven
-  # (`Pilot.StepRunConsumer`, qui possède le nom de step + le lifecycle). Pas de spawn
-  # coord ni de cap-profile dédié : le jugement est consolidé sur le gatekeeper unique.
+  # Soft gate = LLM judgment delegated to the **gatekeeper** (the fleet's sole
+  # judge: it runs the fleet, collects the problems). `Gates` stays PURE:
+  # it decides that the gatekeeper is needed (`{:dispatch_gatekeeper, info}`); the async
+  # spawn + the `pod.completed` correlation are done by the forge-driven rail
+  # (`Pilot.StepRunConsumer`, which owns the step name + the lifecycle). No coord
+  # spawn nor dedicated cap-profile: judgment is consolidated onto the single gatekeeper.
   defp eval_by_type(%{"gate" => %{"type" => "soft"}}, _outputs, _ctx) do
     {:dispatch_gatekeeper, %{kind: :soft}}
   end
 
-  # Terminal : `rules` est OPTIONNEL (le gate `finish` du canon est terminal +
-  # human_approval SANS rules) → on défaute à `[]`. Seules des rules STRING sont
-  # acceptées (Predicate) ; toute autre forme est rejetée fail-closed.
+  # Terminal: `rules` is OPTIONAL (the canon's `finish` gate is terminal +
+  # human_approval WITHOUT rules) → we default to `[]`. Only STRING rules are
+  # accepted (Predicate); any other shape is rejected fail-closed.
   defp eval_by_type(%{"gate" => %{"type" => "terminal"} = gate}, outputs, _ctx) do
     rules = Map.get(gate, "rules", [])
 
-    # `rules` doit être une LISTE de strings. Une forme dégénérée (`rules` =
-    # string/map/nil non-liste, ou liste avec un item non-string) ne doit PAS
-    # atteindre `eval_terminal_string` (Predicate suppose des strings) — fail-closed.
-    # Le `not is_list` garde aussi `Enum.all?` d'un Protocol.UndefinedError sur un
-    # non-énumérable (ex. entier).
+    # `rules` must be a LIST of strings. A degenerate shape (`rules` =
+    # string/map/nil non-list, or a list with a non-string item) must NOT
+    # reach `eval_terminal_string` (Predicate assumes strings) — fail-closed.
+    # The `not is_list` also guards `Enum.all?` from a Protocol.UndefinedError on a
+    # non-enumerable (e.g. an integer).
     cond do
       not is_list(rules) ->
-        {:fail, "gate terminal malformée : `rules` doit être une liste (forme rejetée)"}
+        {:fail, "malformed terminal gate: `rules` must be a list (shape rejected)"}
 
       Enum.all?(rules, &is_binary/1) ->
         eval_terminal_string(rules, gate, outputs)
 
       true ->
-        {:fail,
-         "gate terminal malformée : `rules` doit être une liste de strings (forme rejetée)"}
+        {:fail, "malformed terminal gate: `rules` must be a list of strings (shape rejected)"}
     end
   end
 
-  # CLAUSE CATCH-ALL FAIL-CLOSED (la garde qui meurt = l'absence de garde).
-  # Sans elle, `eval_by_type` serait une somme OUVERTE : un gate malformé (`{type:hard}` SANS
-  # `rules` ; `rules` non-liste ; `type` inconnu ; `gate` non-map) ne matcherait AUCUNE
-  # clause → `FunctionClauseError` remonterait au `handle_info(pod.completed)` non gardé →
-  # CRASH du StepRunConsumer (SINGLETON) → `gate_evals` perdus, fin-de-step-run jamais déclenchée.
-  # Cette clause FERME la somme : tout gate qui n'est pas une forme connue-valide est
-  # REJETÉ fail-closed (`{:fail, …}`), JAMAIS un crash, JAMAIS un `:pass` silencieux.
-  # L'éval est TOTALE. (Idéal ultérieur : un ADT fermé parsé au LOAD rendrait ces formes
-  # INCONSTRUCTIBLES en amont ; ici on ferme au boundary d'éval, minimum viable.)
+  # FAIL-CLOSED CATCH-ALL CLAUSE (the guard that dies = the absence of a guard).
+  # Without it, `eval_by_type` would be an OPEN sum: a malformed gate (`{type:hard}` WITHOUT
+  # `rules`; non-list `rules`; unknown `type`; non-map `gate`) would match NO
+  # clause → `FunctionClauseError` would bubble up to the unguarded `handle_info(pod.completed)` →
+  # CRASH of the StepRunConsumer (SINGLETON) → `gate_evals` lost, end-of-step-run never triggered.
+  # This clause CLOSES the sum: any gate that is not a known-valid shape is
+  # REJECTED fail-closed (`{:fail, …}`), NEVER a crash, NEVER a silent `:pass`.
+  # The eval is TOTAL. (Later ideal: a closed ADT parsed at LOAD would make these shapes
+  # UNCONSTRUCTIBLE upstream; here we close at the eval boundary, minimum viable.)
   defp eval_by_type(%{"gate" => gate}, _outputs, _ctx) do
-    {:fail, "gate malformée : type/forme non reconnu (#{inspect(gate)}) — fail-closed"}
+    {:fail, "malformed gate: unrecognized type/shape (#{inspect(gate)}) — fail-closed"}
   end
 
-  # terminal string rules. Ordre : (1) une rule non satisfaite → {:fail} (rework borné côté rail) ;
-  # (2) `human_approval_required` → `{:human_approval, _}` : un aval HUMAIN est requis — ce N'EST PAS un
-  # échec de gate (le travail peut être bon), c'est une ESCALADE. Verdict DISTINCT de `{:fail}` pour que
-  # le rail (`StepRunConsumer`) route DIRECTEMENT vers l'arch (await_arch) au lieu de rebondir en rework
-  # (le moteur mécanique ne peut PAS accorder l'aval → rebondir gaspillerait `budget` spawns puis
-  # escaladerait quand même). Fail-closed préservé : jamais d'auto-approbation, jamais `:pass` silencieux.
-  # (3) sinon → :pass. L'orchestration severity (fallback_invoke_gatekeeper, on_*_severity) = couche séparée.
+  # terminal string rules. Order: (1) an unsatisfied rule → {:fail} (bounded rework on the rail side);
+  # (2) `human_approval_required` → `{:human_approval, _}`: a HUMAN sign-off is required — this is NOT a
+  # gate failure (the work may be good), it is an ESCALATION. Verdict DISTINCT from `{:fail}` so that
+  # the rail (`StepRunConsumer`) routes DIRECTLY to the arch (await_arch) instead of bouncing into rework
+  # (the mechanical engine CANNOT grant the sign-off → bouncing would waste `budget` spawns then
+  # escalate anyway). Fail-closed preserved: never a self-approval, never a silent `:pass`.
+  # (3) otherwise → :pass. Severity orchestration (fallback_invoke_gatekeeper, on_*_severity) = separate layer.
   defp eval_terminal_string(rules, gate, outputs) do
     cond do
       not Enum.all?(rules, &Predicate.eval?(&1, outputs)) ->
-        {:fail, "terminal gate: rule(s) string non satisfaite(s)"}
+        {:fail, "terminal gate: unsatisfied string rule(s)"}
 
       Map.get(gate, "human_approval_required", false) ->
         {:human_approval,
-         "terminal gate: human_approval_required — aval humain requis (escalade arch, R3)"}
+         "terminal gate: human_approval_required — human sign-off required (arch escalation, R3)"}
 
       true ->
         :pass

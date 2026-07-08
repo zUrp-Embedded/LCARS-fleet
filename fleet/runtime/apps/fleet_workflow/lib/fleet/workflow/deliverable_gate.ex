@@ -1,26 +1,27 @@
 defmodule Fleet.Workflow.DeliverableGate do
   @moduledoc """
-  Gate de livrable (rend un état invalide irreprésentable au push) — vérifie MÉCANIQUEMENT, côté monde (Elixir), qu'un workspace
-  de pod peut être poussé sur la forge. N'a PAS confiance dans le pod : lit son `.git` en read-only,
-  ne lit aucune assertion du pod. Chaque check raté = fail-loud typé `{:error, reason}` (le push
-  n'a PAS lieu). Partagé par les deux modes (`payload` / `git_native`) de `Fleet.Workflow.Deliverable`.
+  Deliverable gate (makes an invalid state unrepresentable at push) — verifies MECHANICALLY, on the
+  world side (Elixir), that a pod workspace can be pushed to the forge. Does NOT trust the pod: reads
+  its `.git` read-only, reads no assertion from the pod. Each failed check = fail-loud typed
+  `{:error, reason}` (the push does NOT happen). Shared by both modes (`payload` / `git_native`) of
+  `Fleet.Workflow.Deliverable`.
 
-  Les trois invariants vérifiés :
+  The three invariants verified:
 
-  - **base ancêtre** `check_base_ancestor/2` — la base SHA (capturée hors-pod au clone) DOIT être ancêtre
-    de HEAD : pas de réécriture d'historique (`git reset --hard base~5` rejeté).
-  - **identité** `check_identity/3` — tous les commits `base..HEAD` ont author ET committer ∈ identités
-    autorisées (`LCARS-<role>`) : l'identité est vérifiée au boundary monde, pas crue depuis le pod.
-  - **secrets** `scan_secrets/2` — aucun secret dans le diff `base..HEAD` (le pod a un token OAuth en env ;
-    `env > t && git add -A && commit` doit être bloqué avant push).
+  - **base ancestor** `check_base_ancestor/2` — the base SHA (captured off-pod at clone) MUST be an
+    ancestor of HEAD: no history rewrite (`git reset --hard base~5` rejected).
+  - **identity** `check_identity/3` — every commit in `base..HEAD` has author AND committer ∈ authorized
+    identities (`LCARS-<role>`): identity is verified at the world boundary, not trusted from the pod.
+  - **secrets** `scan_secrets/2` — no secret in the `base..HEAD` diff (the pod has an OAuth token in env;
+    `env > t && git add -A && commit` must be blocked before push).
 
-  La branche cible système-choisie et l'isolation réseau forge sont hors de ce module
-  (resp. `Fleet.Workflow.Deliverable.publish` et le containment bwrap).
+  The system-chosen target branch and the forge network isolation are outside this module
+  (resp. `Fleet.Workflow.Deliverable.publish` and the bwrap containment).
   """
 
   @git_timeout_ms 15_000
 
-  # Patterns haut-signal (faible faux-positif). Le token OAuth du pod est un JWT `eyJ…`.
+  # High-signal patterns (low false-positive). The pod's OAuth token is a JWT `eyJ…`.
   @secret_patterns [
     {~r/sk-ant-[A-Za-z0-9_\-]{8,}/, "anthropic_key"},
     {~r/eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}/, "jwt_token"},
@@ -29,7 +30,7 @@ defmodule Fleet.Workflow.DeliverableGate do
     {~r/ghp_[A-Za-z0-9]{36}/, "github_pat"}
   ]
 
-  # Fichiers interdits dans un diff (creds/secrets par nom). Match sur basename.
+  # Files forbidden in a diff (creds/secrets by name). Match on basename.
   @secret_file_re ~r/(^|\/)(\.credentials\.json|\.env(\..+)?|\.netrc|\.tok|id_rsa.*|.*\.pem|.*\.key)$/
 
   @type reason ::
@@ -38,13 +39,13 @@ defmodule Fleet.Workflow.DeliverableGate do
           | {:missing_coauthor_trailer, String.t(), [String.t()]}
           | {:secret_detected, String.t(), String.t()}
           | {:git_error, term()}
-          # Timeout git distinct du diagnostic « pas ancêtre » et de l'erreur git dure.
+          # Git timeout, distinct from the "not ancestor" diagnostic and from a hard git error.
           | {:git_timeout, term()}
 
   @doc """
-  Composite : tous les checks sur `[base_sha..HEAD]` du `workspace`. `allowed_emails` = la liste
-  des emails d'identité acceptés (typiquement `["<role>@lcars.local"]`). `{:ok, :verified}` ou le
-  PREMIER `{:error, reason}`. Ordre : base → identité → secrets.
+  Composite: all checks over `[base_sha..HEAD]` of `workspace`. `allowed_emails` = the list of
+  accepted identity emails (typically `["<role>@lcars.local"]`). `{:ok, :verified}` or the FIRST
+  `{:error, reason}`. Order: base → identity → secrets.
   """
   @spec verify(Path.t(), String.t(), [String.t()], String.t() | nil) ::
           {:ok, :verified} | {:error, reason()}
@@ -57,30 +58,30 @@ defmodule Fleet.Workflow.DeliverableGate do
     end
   end
 
-  # Volet trailer-rôle de l'identité, opt-in par `expected_role`. nil → skip (mode
-  # payload système / back-compat). Posé en `git_native` (le pod commite + signe son rôle).
+  # Role-trailer facet of identity, opt-in via `expected_role`. nil → skip (system payload
+  # mode / back-compat). Set in `git_native` (the pod commits + signs its role).
   defp maybe_check_trailer(_workspace, _base_sha, nil), do: :ok
 
   defp maybe_check_trailer(workspace, base_sha, role) when is_binary(role),
     do: check_coauthor_trailer(workspace, base_sha, role)
 
-  @doc "`base_sha` doit être un ancêtre de HEAD (pas de réécriture d'historique)."
+  @doc "`base_sha` must be an ancestor of HEAD (no history rewrite)."
   @spec check_base_ancestor(Path.t(), String.t()) :: :ok | {:error, reason()}
   def check_base_ancestor(workspace, base_sha) do
     case git(workspace, ["merge-base", "--is-ancestor", base_sha, "HEAD"]) do
       {_out, 0} ->
         :ok
 
-      # RÉSULTAT GIT TYPÉ par rc (rc1/rc128/rc124 distincts) : mapper TOUT rc≠0 sur
-      # `{:base_not_ancestor}` FAUX-DIAGNOSTIQUERAIT un sha-invalide (rc128, repo corrompu) ou un TIMEOUT
-      # (rc124, rendu par le helper `git/2`) en « base pas ancêtre » → traque dans la mauvaise direction.
-      # SEUL rc1 (la réponse PROPRE de `--is-ancestor` : « pas ancêtre ») est `:base_not_ancestor` ;
-      # rc128 = `:git_error` (sha invalide/repo cassé) ; rc124 = `:git_timeout`.
+      # GIT RESULT TYPED by rc (rc1/rc128/rc124 distinct): mapping EVERY rc≠0 onto
+      # `{:base_not_ancestor}` would MIS-DIAGNOSE an invalid-sha (rc128, corrupt repo) or a TIMEOUT
+      # (rc124, returned by the `git/2` helper) as "base not ancestor" → hunt in the wrong direction.
+      # ONLY rc1 (the CLEAN answer of `--is-ancestor`: "not ancestor") is `:base_not_ancestor`;
+      # rc128 = `:git_error` (invalid sha / broken repo); rc124 = `:git_timeout`.
       {_out, 1} ->
-        # Message DIAGNOSTIQUE. `merge-base --is-ancestor` ne sort RIEN sur le cas nominal d'échec
-        # (base valide mais pas ancêtre de HEAD, ex. un rebase a réécrit par-dessus) → un
-        # `{:base_not_ancestor, ""}` nu est intraçable. On embarque le `base_sha` (court) : un seul log
-        # dit « telle base ⊄ HEAD » → la cause (clone-base au lieu de la cible du rebase) saute aux yeux.
+        # DIAGNOSTIC message. `merge-base --is-ancestor` outputs NOTHING on the nominal failure case
+        # (valid base but not an ancestor of HEAD, e.g. a rebase rewrote over it) → a bare
+        # `{:base_not_ancestor, ""}` is untraceable. We embed the `base_sha` (short): a single log
+        # says "such base ⊄ HEAD" → the cause (clone-base instead of the rebase target) is obvious.
         {:error, {:base_not_ancestor, "#{String.slice(to_string(base_sha), 0, 12)} ⊄ HEAD"}}
 
       {_out, 124} ->
@@ -88,36 +89,36 @@ defmodule Fleet.Workflow.DeliverableGate do
 
       {out, 128} ->
         {:error,
-         {:git_error, "merge-base rc128 (sha invalide / repo corrompu) : #{String.trim(out)}"}}
+         {:git_error, "merge-base rc128 (invalid sha / corrupt repo): #{String.trim(out)}"}}
 
-      # Tout autre rc inattendu : fail-closed en `:git_error` (jamais un faux `base_not_ancestor`).
+      # Any other unexpected rc: fail-closed as `:git_error` (never a false `base_not_ancestor`).
       {out, rc} ->
-        {:error, {:git_error, "merge-base rc#{rc} : #{String.trim(out)}"}}
+        {:error, {:git_error, "merge-base rc#{rc}: #{String.trim(out)}"}}
     end
   end
 
   @doc """
-  Tous les commits `base..HEAD` ont author email ET committer email ∈ `allowed`.
-  Range vide (aucun commit) → `:ok` (vacuité ; la présence d'un commit est gérée hors-gate, mode-side).
+  Every commit in `base..HEAD` has author email AND committer email ∈ `allowed`.
+  Empty range (no commit) → `:ok` (vacuity; the presence of a commit is handled outside the gate, mode-side).
   """
   @spec check_identity(Path.t(), String.t(), [String.t()]) :: :ok | {:error, reason()}
   def check_identity(workspace, base_sha, allowed) do
     case git(workspace, ["log", "#{base_sha}..HEAD", "--format=%ae%n%ce"]) do
       {out, 0} ->
-        # Un commit à author/committer email VIDE ne doit PAS contourner la gate : `String.split(…,
-        # trim: true)` DROPPERAIT les lignes vides → l'email vide ne serait JAMAIS comparé à l'allow-list →
-        # `Enum.reject([])` = `[]` → `:ok` (contournement). Un email VIDE est une identité ILLÉGALE (pas
-        # `LCARS-<role>`) → il DOIT être rejeté, pas escamoté.
+        # A commit with an EMPTY author/committer email must NOT bypass the gate: `String.split(…,
+        # trim: true)` would DROP the empty lines → the empty email would NEVER be compared to the allow-list →
+        # `Enum.reject([])` = `[]` → `:ok` (bypass). An EMPTY email is an ILLEGAL identity (not
+        # `LCARS-<role>`) → it MUST be rejected, not swept away.
         #
-        # ANTI-RÉGRESSION : ne PAS forcer un séparateur `%x00` qui produirait un faux positif terminal
-        # `[""]` cassant TOUT livrable propre. La discrimination est NETTE :
-        #   - range VIDE (aucun commit) → git rend `out == ""` (0 byte) → `:ok` (vacuité) ;
-        #   - 1 commit à emails vides → git rend `"\n\n"` (2 bytes) → on retire le SEUL `\n` FINAL
-        #     (`replace_suffix`, PAS `trim_trailing` qui mangerait AUSSI les lignes-emails-vides et
-        #     re-confondrait avec le range vide) → `"\n"` → split → `["", ""]` → emails vides détectés.
-        #   - livrable propre → emails non-vides → aucun `""` → :ok.
+        # ANTI-REGRESSION: do NOT force a `%x00` separator that would produce a terminal false positive
+        # `[""]` breaking EVERY clean deliverable. The discrimination is SHARP:
+        #   - EMPTY range (no commit) → git returns `out == ""` (0 byte) → `:ok` (vacuity);
+        #   - 1 commit with empty emails → git returns `"\n\n"` (2 bytes) → we strip the SINGLE TRAILING `\n`
+        #     (`replace_suffix`, NOT `trim_trailing` which would ALSO eat the empty-email lines and
+        #     re-conflate with the empty range) → `"\n"` → split → `["", ""]` → empty emails detected.
+        #   - clean deliverable → non-empty emails → no `""` → :ok.
         case out do
-          # Range vide (aucun nouveau commit) → `:ok` (vacuité ; présence d'un commit gérée mode-side).
+          # Empty range (no new commit) → `:ok` (vacuity; presence of a commit handled mode-side).
           "" ->
             :ok
 
@@ -130,9 +131,9 @@ defmodule Fleet.Workflow.DeliverableGate do
 
             allowed_set = MapSet.new(allowed)
 
-            # Un email vide (`""`) n'est JAMAIS dans l'allow-list (`<role>@lcars.local`) → rejeté par
-            # `Enum.reject` au même titre qu'un email usurpé. On le rend EXPLICITE dans le diagnostic
-            # (`<empty-email>`) pour ne pas afficher une chaîne vide illisible dans le `{:bad_identity}`.
+            # An empty email (`""`) is NEVER in the allow-list (`<role>@lcars.local`) → rejected by
+            # `Enum.reject` just like a spoofed email. We make it EXPLICIT in the diagnostic
+            # (`<empty-email>`) so as not to display an unreadable empty string in the `{:bad_identity}`.
             case Enum.reject(emails, &MapSet.member?(allowed_set, &1)) do
               [] -> :ok
               bad -> {:error, {:bad_identity, bad |> Enum.map(&label_email/1) |> Enum.uniq()}}
@@ -144,33 +145,33 @@ defmodule Fleet.Workflow.DeliverableGate do
     end
   end
 
-  # Rend un email vide LISIBLE dans le diagnostic `{:bad_identity}` (sinon `""` dans la liste passe
-  # inaperçu). L'email reste rejeté par construction (pas dans l'allow-list) ; ceci ne change que l'affichage.
+  # Makes an empty email READABLE in the `{:bad_identity}` diagnostic (otherwise `""` in the list goes
+  # unnoticed). The email stays rejected by construction (not in the allow-list); this only changes the display.
   defp label_email(""), do: "<empty-email>"
   defp label_email(e), do: e
 
   @doc """
-  Volet trailer de l'identité — chaque commit `base..HEAD` porte le trailer
-  `Co-authored-by: LCARS-<role>` ATTENDU (la signature machine du rôle est vérifiée au
-  boundary monde, pas crue depuis le pod ; rôle ↔ step = `expected_role`, posé par
-  l'appelant). Range vide → `:ok` (vacuité). Un commit sans le trailer → fail-loud
-  `{:missing_coauthor_trailer, expected_role, [sha…]}` (le push n'a pas lieu).
+  Trailer facet of identity — every commit in `base..HEAD` carries the EXPECTED
+  `Co-authored-by: LCARS-<role>` trailer (the machine signature of the role is verified at the
+  world boundary, not trusted from the pod; role ↔ step = `expected_role`, set by the
+  caller). Empty range → `:ok` (vacuity). A commit without the trailer → fail-loud
+  `{:missing_coauthor_trailer, expected_role, [sha…]}` (the push does not happen).
 
-  Câblé dans `verify/4` via `expected_role` (opt-in). git_native → le pod signe
-  son rôle (brief instruit par `Pilot.BriefBuilder.build_brief`) ; payload système → `nil` (skip).
-  L'author git = l'humain ; le rôle = CE trailer, vérifié au boundary monde.
+  Wired in `verify/4` via `expected_role` (opt-in). git_native → the pod signs
+  its role (brief instructed by `Pilot.BriefBuilder.build_brief`); system payload → `nil` (skip).
+  The git author = the human; the role = THIS trailer, verified at the world boundary.
   """
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
   def check_coauthor_trailer(workspace, base_sha, expected_role) when is_binary(expected_role) do
-    # Needle DÉRIVÉ du trailer canon (ForgeIdentity.coauthor_trailer = SOURCE UNIQUE) — on
-    # prend le préfixe avant l'email (lenient sur l'adresse) tout en suivant tout changement de format
-    # du owner ; pas de string inline qui se désaccorderait de l'instruction donnée au pod.
+    # Needle DERIVED from the canonical trailer (ForgeIdentity.coauthor_trailer = SINGLE SOURCE) — we
+    # take the prefix before the email (lenient on the address) while tracking any format change from
+    # the owner; no inline string that would drift from the instruction given to the pod.
     needle =
       Fleet.Credentials.ForgeIdentity.coauthor_trailer(expected_role)
       |> String.split(" <")
       |> hd()
 
-    # `%x00` (NUL) sépare les commits — un NUL ne peut pas apparaître dans un message git.
+    # `%x00` (NUL) separates the commits — a NUL cannot appear in a git message.
     case git(workspace, ["log", "#{base_sha}..HEAD", "--format=%H%x1f%B%x00"]) do
       {out, 0} ->
         missing =
@@ -194,14 +195,14 @@ defmodule Fleet.Workflow.DeliverableGate do
   end
 
   @doc """
-  Scan PAR-COMMIT de `base..HEAD` : patterns secrets (tokens/keys) dans le CONTENU ajouté + noms de
-  fichiers interdits. `:ok` si propre, sinon `{:error, {:secret_detected, kind, hint}}`.
+  PER-COMMIT scan of `base..HEAD`: secret patterns (tokens/keys) in the ADDED CONTENT + forbidden file
+  names. `:ok` if clean, otherwise `{:error, {:secret_detected, kind, hint}}`.
 
-  Le scan est PAR-COMMIT (`git log -p`/`--name-only`), PAS sur le diff NET `base..HEAD`. Le diff
-  net est aveugle à un secret INTRODUIT puis RETIRÉ dans la chaîne (`env > t && commit` puis `rm t &&
-  commit` → diff net VIDE), alors que le PUSH transfère TOUTE la chaîne → le secret resterait dans
-  l'historique forge. Scanner chaque commit (miroir EXACT de ce que `check_identity`/
-  `check_coauthor_trailer` font déjà sur la chaîne) ferme cette évasion : le commit qui a INTRODUIT le secret porte la ligne `+` fautive.
+  The scan is PER-COMMIT (`git log -p`/`--name-only`), NOT over the NET diff `base..HEAD`. The net
+  diff is blind to a secret INTRODUCED then REMOVED in the chain (`env > t && commit` then `rm t &&
+  commit` → NET diff EMPTY), whereas the PUSH transfers the WHOLE chain → the secret would remain in
+  the forge history. Scanning each commit (an EXACT mirror of what `check_identity`/
+  `check_coauthor_trailer` already do over the chain) closes this evasion: the commit that INTRODUCED the secret carries the offending `+` line.
   """
   @spec scan_secrets(Path.t(), String.t()) :: :ok | {:error, reason()}
   def scan_secrets(workspace, base_sha) do
@@ -212,17 +213,17 @@ defmodule Fleet.Workflow.DeliverableGate do
   end
 
   defp scan_secret_filenames(workspace, base_sha) do
-    # `log --name-only` liste les fichiers touchés PAR CHAQUE commit de la chaîne (un fichier secret
-    # ajouté puis supprimé apparaît dans le commit d'ajout), là où `diff --name-only base..HEAD` ne verrait
-    # que le NET (fichier supprimé en bout de chaîne → invisible). `--pretty=format:` supprime les en-têtes
-    # de commit (on ne veut que les noms de fichiers).
+    # `log --name-only` lists the files touched BY EACH commit of the chain (a secret file added then
+    # deleted shows up in the add commit), whereas `diff --name-only base..HEAD` would see only the NET
+    # (a file deleted at the end of the chain → invisible). `--pretty=format:` removes the commit headers
+    # (we want only the file names).
     #
-    # `--diff-merges=first-parent` : SANS lui, `git log -p` n'émet AUCUN diff pour un commit de MERGE → un
-    # fichier interdit introduit UNIQUEMENT dans l'arbre RÉSOLU d'un evil-merge (présent dans NI l'un NI
-    # l'autre parent, base toujours ancêtre, auteur légitime) passerait le scan et serait poussé. L'option
-    # fait émettre, pour chaque merge, le delta vs son PREMIER parent (= ce que le merge introduit dans la
-    # mainline) → le fichier de l'arbre résolu redevient visible. N'altère PAS le scan linéaire (chaque
-    # commit non-merge garde son diff par-commit).
+    # `--diff-merges=first-parent`: WITHOUT it, `git log -p` emits NO diff for a MERGE commit → a
+    # forbidden file introduced ONLY in the RESOLVED tree of an evil-merge (present in NEITHER parent,
+    # base still an ancestor, legitimate author) would pass the scan and be pushed. The option makes it
+    # emit, for each merge, the delta vs its FIRST parent (= what the merge introduces into the
+    # mainline) → the file of the resolved tree becomes visible again. Does NOT alter the linear scan (each
+    # non-merge commit keeps its per-commit diff).
     case git(workspace, [
            "log",
            "-p",
@@ -245,15 +246,15 @@ defmodule Fleet.Workflow.DeliverableGate do
   end
 
   defp scan_secret_content(workspace, base_sha) do
-    # `git log -p --unified=0` rend le diff DE CHAQUE COMMIT individuellement (pas le net) → un
-    # secret introduit-puis-retiré porte sa ligne `+` dans le commit d'introduction. Seules les lignes
-    # AJOUTÉES (`+`) comptent — on ne bloque pas sur du contexte préexistant.
+    # `git log -p --unified=0` yields the diff OF EACH COMMIT individually (not the net) → a
+    # secret introduced-then-removed carries its `+` line in the introduction commit. Only the ADDED
+    # lines (`+`) count — we do not block on preexisting context.
     #
-    # `--diff-merges=first-parent` : SANS lui, `git log -p` n'émet AUCUN diff pour un commit de MERGE → un
-    # secret introduit UNIQUEMENT dans l'arbre RÉSOLU d'un evil-merge (présent dans NI l'un NI l'autre
-    # parent) passerait le scan et serait poussé dans l'historique forge. L'option fait émettre, pour
-    # chaque merge, le delta vs son PREMIER parent (= ce que le merge introduit dans la mainline) → la
-    # ligne `+` du secret de l'arbre résolu redevient visible. N'altère PAS le scan linéaire.
+    # `--diff-merges=first-parent`: WITHOUT it, `git log -p` emits NO diff for a MERGE commit → a
+    # secret introduced ONLY in the RESOLVED tree of an evil-merge (present in NEITHER parent) would
+    # pass the scan and be pushed into the forge history. The option makes it emit, for each merge, the
+    # delta vs its FIRST parent (= what the merge introduces into the mainline) → the `+` line of the
+    # secret in the resolved tree becomes visible again. Does NOT alter the linear scan.
     case git(workspace, [
            "log",
            "-p",
@@ -281,23 +282,23 @@ defmodule Fleet.Workflow.DeliverableGate do
     end
   end
 
-  # `git -C <ws> <args>` borné (push/diff réseau ou gros packfile ne bloquent pas le GenServer).
-  # Neutralisation config — SOURCE UNIQUE `Fleet.Credentials.Shell.git_safe_config_args/0` (hooks +
-  # fsmonitor + sshCommand + diff.external + attributesFile global), composée sur TOUTE invocation git côté
-  # monde sur un workspace co-écrit par le pod. LOAD-BEARING ici : `scan_secrets` lance `git log -p`, qui
-  # exécute un `diff.external`/textconv armé par le pod = exécution de commande arbitraire côté monde au
-  # moment du scan de livrable. Le `diff.external=` du set le désarme (les autres flags ferment hooks et
-  # consorts par uniformité, coût nul).
+  # `git -C <ws> <args>` bounded (network push/diff or a big packfile do not block the GenServer).
+  # Config neutralization — SINGLE SOURCE `Fleet.Credentials.Shell.git_safe_config_args/0` (hooks +
+  # fsmonitor + sshCommand + diff.external + global attributesFile), composed on EVERY world-side git
+  # invocation on a workspace co-written by the pod. LOAD-BEARING here: `scan_secrets` runs `git log -p`, which
+  # executes a `diff.external`/textconv armed by the pod = arbitrary command execution on the world side at
+  # the moment of the deliverable scan. The set's `diff.external=` disarms it (the other flags close hooks and
+  # the like for uniformity, zero cost).
   @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
   defp git(workspace, args) do
-    # Borné par `Fleet.Credentials.Shell.git/2` (setsid + SIGKILL du process-GROUP OS à la deadline)
-    # au lieu de l'ancien patron `Task.async + Task.shutdown(:brutal_kill)` qui ne tuait QUE le Task BEAM
-    # en laissant le process `git` OS fuir (un `git log -p` sur un gros diff qui dépasse 15 s laissait un
-    # zombie tenant des FDs sur le workspace ; accumulation non bornée sous gates concurrents). `@hooks_off`
-    # reste composé ICI : Shell.git n'auto-compose PAS la neutralisation config (elle est load-bearing —
-    # anti-RCE `diff.external` sur `git log -p`), le caller la garde. Contrat externe `{out, exit_code}`
-    # préservé (les 2 appelants scan_secret_* matchent `{out, 0}` / `{out, _rc}` — inchangés).
+    # Bounded by `Fleet.Credentials.Shell.git/2` (setsid + SIGKILL of the OS process-GROUP at the deadline)
+    # instead of the old pattern `Task.async + Task.shutdown(:brutal_kill)` which killed ONLY the BEAM Task
+    # while letting the OS `git` process leak (a `git log -p` on a big diff exceeding 15 s left a
+    # zombie holding FDs on the workspace; unbounded accumulation under concurrent gates). `@hooks_off`
+    # stays composed HERE: Shell.git does NOT auto-compose the config neutralization (it is load-bearing —
+    # anti-RCE `diff.external` on `git log -p`), the caller keeps it. External contract `{out, exit_code}`
+    # preserved (the 2 scan_secret_* callers match `{out, 0}` / `{out, _rc}` — unchanged).
     case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", workspace] ++ args,
            timeout_ms: @git_timeout_ms
          ) do

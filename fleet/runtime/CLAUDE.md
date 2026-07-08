@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-07-05 (expurgé : data dupliquée sortie vers ses sources, fonction primaire = guide de navigation)
+**Dernière révision** : 2026-07-08 (expurgé : data dupliquée sortie vers ses sources, fonction primaire = guide de navigation)
 **Statut** : guide runtime v2.
 **Référencé par** : —
 
@@ -9,7 +9,7 @@ Ce fichier oriente un agent (Claude Code) dans ce dépôt : où vivent les chose
 
 ## Project
 
-LCARS Fleet runtime — umbrella Elixir/OTP, couche runtime du projet LCARS (`/home/projects/LCARS/`), lancée par humain via `bin/fleet_v2`. Les design-notes qui pilotent chaque app vivent dans `04_design-notes/` (une par « chantier »). Chaque app `apps/fleet_*/` correspond à un chantier numéroté, et **son `README.md` est le contrat canonique** (sous-modules, API publique, knobs de config, dépendances). Pour comprendre une app, lis son README d'abord.
+LCARS Fleet runtime — umbrella Elixir/OTP, couche runtime du projet LCARS (`/home/projects/LCARS/`), lancée par humain via `bin/fleet_v2`. Les design-notes qui pilotent chaque app vivent dans `04_design-notes/` (une par « chantier »). Le contrat de chaque module vit dans son `@moduledoc` (SSoT, machine-visible via `h`/ExDoc) ; le `README.md` de l'app est une **carte** (index des modules + pointeurs), PAS une copie du contrat. Pour comprendre une app : le `@moduledoc` de sa façade `Fleet.<App>` (ex. `h Fleet.Coord`) + la carte README.
 
 ## Build / test / release
 
@@ -90,7 +90,7 @@ Quand un test a besoin du vrai backend, il l'instancie directement (`start_super
   rails délibérés font exception : `AUDIT <event.type>` (rail audit starfleet) et `pod <id> …`
   (state-machine du pod, corrélation par pod).
 
-- Le `README.md` de chaque app est le **contrat** (sous-modules, API publique, knobs de config, dépendances). Quand tu ajoutes un module, mets à jour le README.
+- Le contrat de chaque module = son `@moduledoc` (SSoT). Le `README.md` de l'app est une **carte qui POINTE, jamais une copie** : index des modules (un label par module) + knobs/deps en pointeurs. Un README qui réénonce l'API/le comportement = 3ᵉ copie qui drifte (le README, le `@moduledoc` de façade, le `@moduledoc` du sous-module diraient la même chose). Nouveau module → une ligne dans la carte ; le contrat reste dans son `@moduledoc`.
 - En-têtes des scripts shell au format LCARS (`SOURCE: / AUTHOR: / STARDATE: / STATUS:`). La stardate est posée par la skill `/push-github` — ne pas l'éditer à la main avant de pousser.
-- **Commentaires self-contained** : un commentaire doit se comprendre en lisant CE fichier seul — pas de tag cryptique (`#578`, `BL-050`, codes de grille…) ni de pointeur vers les specs. Inline le POURQUOI / l'invariant / le piège en clair ; le code EST la doc (lecteur primaire = un agent). Porte le sens, pas une coordonnée d'incident.
+- **Commentaires self-contained** (doctrine `BACKLOG.md` BL-058 — la référence, pas cette ligne compressée) : la CICATRICE — le POURQUOI / l'invariant / le piège (« ce qui pète si on simplifie ») — vit INLINE et autonome (le lecteur comprend SANS ouvrir le corpus), en forme PRINCIPE pas histoire (« le RAM peut mentir, la forge reste vraie » > « moteur RAM supprimé »). Un **renvoi NU** au corpus (« va voir `DN §4` / `chantier-6` ») dégage UNE FOIS la leçon inline — c'est l'A/R code↔corpus à tuer. MAIS l'ANCRE de régression qui trace un vrai fil de retour (`#578`, `BL-055`) se GARDE : c'est l'index des régressions, pas de la déco. Exceptions = index autorisés (atomes wire figés, home g24). Un commentaire périmé (décrit un état révolu) = mensonge → tuer/corriger.
 - `apps/*/tmp/` = artefacts ExUnit `@tag :tmp_dir` gitignorés — ne jamais committer.

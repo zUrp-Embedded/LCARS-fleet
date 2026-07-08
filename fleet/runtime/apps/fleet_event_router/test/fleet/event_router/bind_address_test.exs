@@ -52,7 +52,7 @@ defmodule Fleet.EventRouter.BindAddressTest do
 
     test "host invalide → raise clair (jamais retomber en silence sur loopback)" do
       System.put_env("LCARS_BIND_HOST", "pas-un-host-..-invalide")
-      assert_raise ArgumentError, ~r/invalide/, fn -> BindAddress.ip() end
+      assert_raise ArgumentError, ~r/invalid/, fn -> BindAddress.ip() end
     end
   end
 

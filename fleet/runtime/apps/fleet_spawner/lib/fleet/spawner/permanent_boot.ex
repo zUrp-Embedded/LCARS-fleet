@@ -1,56 +1,57 @@
 defmodule Fleet.Spawner.PermanentBoot do
   @moduledoc """
-  Boot des pods permanents Type 1 fleet-level **au démarrage du runtime fleet_v2
-  lancé par l'humain** (`bin/fleet_v2 start` démarre la BEAM sous l'UID de l'humain
-  puis boote le pod architect permanent — modèle humain-lance, plus de service
-  système, systemd retiré). Extension `fleet_spawner` (PAS refactor).
+  Boot of the fleet-level Type 1 permanent pods **at startup of the fleet_v2
+  runtime launched by the human** (`bin/fleet_v2 start` starts the BEAM under
+  the human's UID then boots the permanent architect pod — human-launches
+  model, no more system service, systemd removed). `fleet_spawner` extension
+  (NOT a refactor).
 
 
-  ## Garde anti-violation CRITIQUE
+  ## CRITICAL anti-violation guard
 
-  `boot_at_start?/1` n'autorise un boot fleet_spawner que si
-  `boot_at_start: true` **ET** `lifetime_scope: forever` **ET**
-  `host_native != true`. Le 3e terme est la **garde anti-violation** :
-  `starfleet` (host_native: true, dérogation canon) ne DOIT
-  JAMAIS être spawné via fleet_spawner bwrap
-  (il boote à part, host-native hors de fleet_spawner — `host_launch.sh`,
-  containment: none). Garde défensive même si un profil host_native portait
-  `boot_at_start: true` par erreur.
+  `boot_at_start?/1` only allows a fleet_spawner boot if
+  `boot_at_start: true` **AND** `lifetime_scope: forever` **AND**
+  `host_native != true`. The 3rd term is the **anti-violation guard**:
+  `starfleet` (host_native: true, canon derogation) must NEVER
+  be spawned via fleet_spawner bwrap
+  (it boots separately, host-native outside fleet_spawner — `host_launch.sh`,
+  containment: none). Defensive guard even if a host_native profile carried
+  `boot_at_start: true` by mistake.
 
-  ## Clés string, pas atom
+  ## String keys, not atom
 
-  Le `%Fleet.CapProfile{}` réel a `spec :: map()` à **clés
-  string** (cf. `cap_profile.ex`, `spec: Map.get(raw, "spec", %{})`).
-  Coder des atom-keys (`get_in(cp, [:spec, :invocation, ...])`) → `nil` →
-  0 pod booté silencieusement. D'où l'accès string-keyed ici.
+  The real `%Fleet.CapProfile{}` has `spec :: map()` with **string
+  keys** (cf. `cap_profile.ex`, `spec: Map.get(raw, "spec", %{})`).
+  Coding atom-keys (`get_in(cp, [:spec, :invocation, ...])`) → `nil` →
+  0 pod booted silently. Hence the string-keyed access here.
 
   """
 
   require Logger
 
-  # AUTORITÉ du préfixe des pod_id permanents (« permanent-<role> », id déterministe). Tapé UNE
-  # fois : PermanentWarden (détection des morts à respawner) et Shutdown (drain qui EXCLUT les
-  # résidents) en DÉRIVENT — avant, le littéral vivait dans 3 modules.
+  # AUTHORITY of the permanent pod_id prefix ("permanent-<role>", deterministic id). Typed ONCE:
+  # PermanentWarden (detection of dead pods to respawn) and Shutdown (drain that EXCLUDES the
+  # residents) DERIVE from it — before, the literal lived in 3 modules.
   @permanent_prefix "permanent-"
 
   @doc """
-  Parse un pod_id permanent : `{:ok, role}` si `permanent-<role>`, `:not_permanent` sinon.
-  LE match du préfixe vit ici (autorité unique) — les consommateurs pattern-matchent le résultat.
+  Parses a permanent pod_id: `{:ok, role}` if `permanent-<role>`, `:not_permanent` otherwise.
+  THE prefix match lives here (single authority) — consumers pattern-match the result.
   """
   @spec parse_permanent(String.t()) :: {:ok, String.t()} | :not_permanent
   def parse_permanent(@permanent_prefix <> role) when role != "", do: {:ok, role}
   def parse_permanent(_), do: :not_permanent
 
-  @doc "true si le pod_id est celui d'un pod PERMANENT (résident — pas du travail en vol)."
+  @doc "true if the pod_id is that of a PERMANENT pod (resident — not in-flight work)."
   @spec permanent?(String.t()) :: boolean()
   def permanent?(pod_id) when is_binary(pod_id), do: match?({:ok, _}, parse_permanent(pod_id))
 
   @doc """
-  Le cap-profile doit-il booter au démarrage fleet (Type 1) ?
+  Should this cap-profile boot at fleet startup (Type 1)?
 
-  `true` ssi `spec.invocation.boot_at_start == true` ET
-  `spec.invocation.lifetime_scope == "forever"` ET
-  **`spec.invocation.host_native != true`** (garde anti-violation).
+  `true` iff `spec.invocation.boot_at_start == true` AND
+  `spec.invocation.lifetime_scope == "forever"` AND
+  **`spec.invocation.host_native != true`** (anti-violation guard).
   """
   @spec boot_at_start?(Fleet.CapProfile.t() | map()) :: boolean()
   def boot_at_start?(%Fleet.CapProfile{spec: spec}), do: boot_at_start?(spec)
@@ -66,8 +67,8 @@ defmodule Fleet.Spawner.PermanentBoot do
   def boot_at_start?(_), do: false
 
   @doc """
-  Filtre une liste de cap-profiles → ceux éligibles au boot permanent
-  Type 1 (garde `boot_at_start?/1` appliquée, host_native exclu).
+  Filters a list of cap-profiles → those eligible for Type 1 permanent
+  boot (`boot_at_start?/1` guard applied, host_native excluded).
   """
   @spec select_permanent([Fleet.CapProfile.t()]) :: [Fleet.CapProfile.t()]
   def select_permanent(cap_profiles) when is_list(cap_profiles) do
@@ -75,49 +76,49 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   @doc """
-  Boot des pods permanents Type 1.
-  Invoqué post-readiness par l'**autorité unique**
-  `Fleet.Starfleet.BootOrchestrator` (le hook `Fleet.Spawner.Application`
-  qui l'invoquait aussi a été retiré pour éviter le double-boot).
+  Boot of the Type 1 permanent pods.
+  Invoked post-readiness by the **single authority**
+  `Fleet.Starfleet.BootOrchestrator` (the `Fleet.Spawner.Application` hook
+  that also invoked it was removed to avoid double-boot).
 
-  Énumère les rôles du répertoire cap-profiles → délègue le chargement+
-  validation au loader canonique `Fleet.CapProfile.load/1` (DRY — pas de
-  re-parse YAML) → garde `select_permanent/1` (host_native exclu) →
+  Enumerates the roles of the cap-profiles directory → delegates loading+
+  validation to the canonical loader `Fleet.CapProfile.load/1` (DRY — no
+  YAML re-parse) → `select_permanent/1` guard (host_native excluded) →
   `spawn_pod/3`
-  (signature réelle `(%CapProfile{}, issue_id, opts)`).
+  (real signature `(%CapProfile{}, issue_id, opts)`).
 
-  ## Échec de LOAD vs échec de SPAWN
+  ## LOAD failure vs SPAWN failure
 
-  **Un cap-profile qui ne CHARGE pas** (absent / YAML corrompu / schema invalide) = artefact de
-  deploy cassé → **fail-loud** : `boot_permanent_pods/1` rend `{:error, {:cap_profile_load_failed,
-  role, reason}}` (BootOrchestrator → `fleet.boot_failed`, pas `boot_complete` vert amputé). Sans
-  le fail-loud, ces échecs seraient droppés en silence — c'est le « truc blessé qu'on garde en
-  vie » que la doctrine rejette.
+  **A cap-profile that does NOT LOAD** (missing / corrupt YAML / invalid schema) = broken
+  deploy artifact → **fail-loud**: `boot_permanent_pods/1` returns `{:error, {:cap_profile_load_failed,
+  role, reason}}` (BootOrchestrator → `fleet.boot_failed`, not an amputated-green `boot_complete`). Without
+  the fail-loud, these failures would be dropped silently — the "wounded thing kept
+  alive" that the doctrine rejects.
 
-  **Un échec de SPAWN** (bwrap/launch KO) n'arrête PAS les autres (chacun tente), mais n'est PLUS
-  filtré en silence (G9) : il est rendu en `{:error, {role, reason}}` dans la liste des résultats →
-  le BootOrchestrator émet `fleet.boot_partial` (le permanent manquant est NOMMÉ, pas de
-  `boot_complete` vert amputé). Jupiter-grade : personne ne court derrière avec une checklist —
-  le boot dit la vérité lui-même, et le `PermanentWarden` (G5) re-tente sur `pod.failed`.
+  **A SPAWN failure** (bwrap/launch KO) does NOT stop the others (each one tries), but is NO LONGER
+  silently filtered: it is returned as `{:error, {role, reason}}` in the results list →
+  the BootOrchestrator emits `fleet.boot_partial` (the missing permanent is NAMED, no
+  amputated-green `boot_complete`). Jupiter-grade: nobody runs behind it with a checklist —
+  the boot tells the truth itself, and the `PermanentWarden` retries on `pod.failed`.
 
-  ## Écrivain unique state.json
+  ## Single writer state.json
 
-  PermanentBoot **spawne** mais **n'écrit pas** `state.json` — l'écriture est
-  déléguée au `gen_statem` `Fleet.Spawner.Pod` (via `Pod.StateFs.write_state_fs/1`). Un seul
-  écrivain : pas de seam `:state_writer` parallèle.
+  PermanentBoot **spawns** but **does NOT write** `state.json` — the write is
+  delegated to the `gen_statem` `Fleet.Spawner.Pod` (via `Pod.StateFs.write_state_fs/1`). A single
+  writer: no parallel `:state_writer` seam.
 
-  ## Seams (découplage de l'IO pour les tests)
-    * `:cap_profiles_dir` — répertoire scanné (défaut config
+  ## Seams (IO decoupling for tests)
+    * `:cap_profiles_dir` — scanned directory (config default
       `:fleet_spawner, :cap_profiles_dir`)
     * `:loader` — `(role :: String.t()) -> {:ok, cp} | {:error, term}`
-      (défaut `&Fleet.CapProfile.load/1`)
+      (default `&Fleet.CapProfile.load/1`)
     * `:spawner` — `(cp, issue_id, opts) -> {:ok, pid} | {:error, term}`
-      (défaut `&Fleet.Spawner.spawn_pod/3`)
+      (default `&Fleet.Spawner.spawn_pod/3`)
   """
-  # G9 : rend la LISTE DES RÉSULTATS `[{:ok, pod_id} | {:error, {role, reason}}]` — un spawn raté
-  # n'est PLUS filtré (l'ancien `reject(&is_nil/1)` rendait `{:ok, liste_partielle}` → boot MENTEUR).
-  # `safe_boot` (BootOrchestrator) classe nativement la liste : tout-ok → boot_complete, mixte →
-  # boot_partial. Erreur GLOBALE (deploy cassé) → `{:error, reason}` inchangé (→ boot_failed).
+  # Returns the RESULTS LIST `[{:ok, pod_id} | {:error, {role, reason}}]` — a failed spawn
+  # is NO LONGER filtered (the old `reject(&is_nil/1)` returned `{:ok, partial_list}` → LYING boot).
+  # `safe_boot` (BootOrchestrator) classifies the list natively: all-ok → boot_complete, mixed →
+  # boot_partial. GLOBAL error (broken deploy) → `{:error, reason}` unchanged (→ boot_failed).
   @spec boot_permanent_pods(keyword()) ::
           [{:ok, String.t()} | {:error, {String.t(), term()}}] | {:error, term()}
   def boot_permanent_pods(opts \\ []) when is_list(opts) do
@@ -131,8 +132,8 @@ defmodule Fleet.Spawner.PermanentBoot do
       |> select_permanent()
       |> Enum.map(&spawn_one(&1, spawner))
     else
-      # Un load raté = deploy cassé → on propage tel quel (fail-loud). Distinct du dir
-      # illisible (`list_roles`), classé `:cap_profiles_dir_unreadable`.
+      # A failed load = broken deploy → we propagate it as-is (fail-loud). Distinct from the
+      # unreadable dir (`list_roles`), classified `:cap_profiles_dir_unreadable`.
       {:error, {:cap_profile_load_failed, _role, _reason}} = err ->
         err
 
@@ -142,14 +143,14 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   @doc """
-  Re-spawn UN pod permanent mort (G5, cattle rebuildable) — appelé par `Fleet.Spawner.PermanentWarden`
-  sur `pod.failed` d'un pod `permanent-<role>`. Réutilise EXACTEMENT le chemin de boot (`spawn_one`) :
-  pod_id déterministe idempotent (`{:already_started}` = no-op si le pod est revenu entre-temps) +
-  boot-from-base si une base existe (UUID stable + contexte FRAIS restauré depuis la base — le respawn
-  ne reprend JAMAIS la session accumulée du pod mort, cohérent avec la recovery fresh-reroll).
+  Re-spawn ONE dead permanent pod (rebuildable cattle) — called by `Fleet.Spawner.PermanentWarden`
+  on `pod.failed` of a `permanent-<role>` pod. Reuses EXACTLY the boot path (`spawn_one`):
+  deterministic idempotent pod_id (`{:already_started}` = no-op if the pod came back in the meantime) +
+  boot-from-base if a base exists (stable UUID + FRESH context restored from the base — the respawn
+  NEVER resumes the dead pod's accumulated session, consistent with the fresh-reroll recovery).
 
-  Garde-fou : le cap-profile chargé doit être un PERMANENT (`boot_at_start?`) — refuse fail-loud sinon
-  (un rôle non-permanent n'a rien à faire ici, même si un pod_id `permanent-*` forgé le demandait).
+  Safeguard: the loaded cap-profile must be a PERMANENT (`boot_at_start?`) — fail-loud refusal otherwise
+  (a non-permanent role has no business here, even if a forged `permanent-*` pod_id asked for it).
 
   Returns `{:ok, pod_id}` | `{:error, {role, reason}}`.
   """
@@ -170,47 +171,47 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   @doc """
-  Le boot des pods permanents est-il activé ? Config `:fleet_spawner,
-  :boot_permanent_at_start` — **défaut `true`** (« default true en prod, false en
-  test » ; `false` désactive). Pur,
-  testable (gate découplé de l'IO spawn).
+  Is permanent-pod boot enabled? Config `:fleet_spawner,
+  :boot_permanent_at_start` — **default `true`** ("default true in prod, false in
+  test"; `false` disables). Pure,
+  testable (gate decoupled from spawn IO).
 
-  Ce prédicat est l'**unique gate canon** du boot des pods
-  permanents, consulté par `Fleet.Starfleet.BootOrchestrator` (l'autorité de boot
-  unique). `LCARS_BOOT_PERMANENT_AT_START=false` (runtime.exs) le met à
-  `false` → BootOrchestrator wire les consumers + émet `fleet.boot_complete` mais
-  ne spawn AUCUN pod permanent (mode dégradé/maintenance explicite). Le défaut
-  (env absent) = `true` = boote — comportement prod nominal.
+  This predicate is the **single canon gate** for permanent-pod
+  boot, consulted by `Fleet.Starfleet.BootOrchestrator` (the single boot
+  authority). `LCARS_BOOT_PERMANENT_AT_START=false` (runtime.exs) sets it to
+  `false` → BootOrchestrator wires the consumers + emits `fleet.boot_complete` but
+  spawns NO permanent pod (explicit degraded/maintenance mode). The default
+  (env absent) = `true` = boots — nominal prod behavior.
   """
   @spec auto_boot_enabled?() :: boolean()
   def auto_boot_enabled? do
     Application.get_env(:fleet_spawner, :boot_permanent_at_start, true) == true
   end
 
-  # `persist_state/2` retirée — règle « écrivain unique » : seul
-  # `Fleet.Spawner.Pod.StateFs.write_state_fs/1` (appelé par le `Pod`) écrit `state.json`. PermanentBoot
-  # spawne le Pod et délègue l'écriture au gen_statem.
+  # `persist_state/2` removed — "single writer" rule: only
+  # `Fleet.Spawner.Pod.StateFs.write_state_fs/1` (called by the `Pod`) writes `state.json`. PermanentBoot
+  # spawns the Pod and delegates the write to the gen_statem.
 
-  # --- privé ---
+  # --- private ---
 
   defp cap_profiles_dir do
-    # Source UNIQUE alignée sur le LOADER (`Fleet.CapProfile.root_dir`) — sinon
-    # PermanentBoot ÉNUMÈRE un dir (`05_data-canon/cap-profiles`) pendant que `Fleet.CapProfile.load`
-    # CHARGE depuis un autre (`cap-profiles`) → un profil listé n'est pas chargeable (enum/load
-    # désaccordés). L'override `:fleet_spawner, :cap_profiles_dir` reste (tests/déploiement non-standard).
+    # SINGLE source aligned on the LOADER (`Fleet.CapProfile.root_dir`) — otherwise
+    # PermanentBoot ENUMERATES one dir (`05_data-canon/cap-profiles`) while `Fleet.CapProfile.load`
+    # LOADS from another (`cap-profiles`) → a listed profile is not loadable (enum/load
+    # mismatched). The override `:fleet_spawner, :cap_profiles_dir` stays (tests/non-standard deployment).
     Application.get_env(:fleet_spawner, :cap_profiles_dir) || Fleet.CapProfile.root_dir()
   end
 
-  # Énumère via la SOURCE UNIQUE `Fleet.CapProfile.list/1` — par prop
-  # `metadata.name`, jamais par nom de fichier. Enum et `load` partagent ainsi la MÊME clé
-  # (le name) → plus de désaccord enum↔load (un profil listé est toujours chargeable).
+  # Enumerates via the SINGLE SOURCE `Fleet.CapProfile.list/1` — by the
+  # `metadata.name` prop, never by filename. Enum and `load` thus share the SAME key
+  # (the name) → no more enum↔load mismatch (a listed profile is always loadable).
   defp list_roles(dir) do
     Fleet.CapProfile.list(dir)
   end
 
-  # Charge TOUS les rôles, short-circuit au PREMIER échec de load (fail-loud, plus de skip
-  # silencieux). Valide ainsi tout le catalogue au boot — un profil corrompu est attrapé avant même
-  # d'être nécessaire. (Le filtrage permanent vient APRÈS, sur les cps chargés.)
+  # Loads ALL roles, short-circuits on the FIRST load failure (fail-loud, no more silent
+  # skip). Thus validates the whole catalogue at boot — a corrupt profile is caught before it is
+  # even needed. (The permanent filtering comes AFTER, on the loaded cps.)
   defp load_all(roles, loader) do
     case Enum.reduce_while(roles, {:ok, []}, fn role, {:ok, acc} ->
            case loader.(role) do
@@ -219,7 +220,7 @@ defmodule Fleet.Spawner.PermanentBoot do
 
              {:error, reason} ->
                Logger.error(
-                 "PermanentBoot: cap-profile #{role} non chargeable (#{inspect(reason)}) — boot fail-loud"
+                 "PermanentBoot: cap-profile #{role} not loadable (#{inspect(reason)}) — boot fail-loud"
                )
 
                {:halt, {:error, {:cap_profile_load_failed, role, reason}}}
@@ -233,15 +234,15 @@ defmodule Fleet.Spawner.PermanentBoot do
   defp spawn_one(%Fleet.CapProfile{} = cp, spawner) do
     name = Fleet.CapProfile.name(cp)
 
-    # pod_id DÉTERMINISTE (stable, sans suffixe timestamp) → re-spawn idempotent (même id : reap-orphan +
-    # relance si mort, `{:already_started}` no-op si vivant ; plus de holder-leak/accumulation).
+    # DETERMINISTIC pod_id (stable, no timestamp suffix) → idempotent re-spawn (same id: reap-orphan +
+    # relaunch if dead, `{:already_started}` no-op if alive; no more holder-leak/accumulation).
     pod_id = @permanent_prefix <> name
 
-    # Si une base existe pour ce rôle → boot-from-base (UUID FIXE porté par
-    # la base + restore + `--resume`) → entrée Claude Desktop UNIQUE réutilisée à chaque boot + contexte
-    # FRAIS (la base capturée hors-fleet, pas la session accumulée du run précédent). Sinon → recreate
-    # (session neuve, comportement par défaut). Distinct de la recovery de CRASH (qui ne reprend jamais
-    # une session — elle reroll FRESH) ; ici c'est le boot DÉLIBÉRÉ propre.
+    # If a base exists for this role → boot-from-base (FIXED UUID carried by
+    # the base + restore + `--resume`) → a UNIQUE Claude Desktop entry reused at each boot + FRESH
+    # context (the base captured out-of-fleet, not the accumulated session of the previous run). Otherwise → recreate
+    # (new session, default behavior). Distinct from CRASH recovery (which never resumes
+    # a session — it rerolls FRESH); here it is the clean DELIBERATE boot.
     opts = boot_opts(name, pod_id)
 
     case spawner.(cp, pod_id, opts) do
@@ -249,21 +250,24 @@ defmodule Fleet.Spawner.PermanentBoot do
         {:ok, pod_id}
 
       {:error, {:already_started, _pid}} ->
-        Logger.info("PermanentBoot: permanent #{name} déjà vivant (#{pod_id}) — no-op idempotent")
+        Logger.info(
+          "PermanentBoot: permanent #{name} already alive (#{pod_id}) — idempotent no-op"
+        )
+
         {:ok, pod_id}
 
       {:error, reason} ->
-        # G9 : l'échec est RENDU (plus de nil filtré en silence) → boot_partial visible / respawn retry.
-        Logger.error("PermanentBoot: spawn permanent #{name} échoué (#{inspect(reason)})")
+        # The failure is RETURNED (no more nil silently filtered) → boot_partial visible / respawn retry.
+        Logger.error("PermanentBoot: spawn of permanent #{name} failed (#{inspect(reason)})")
         {:error, {name, reason}}
     end
   end
 
-  # Opts de spawn d'un permanent.
-  # Base présente (`priv/base_seeds/<role>.jsonl`) → boot-from-base : UUID FIXE = le `sessionId` PORTÉ par
-  # la base (la base EST la source de l'UUID, pas de config séparée) → `--resume` ce même UUID à chaque
-  # boot = UNE entrée Desktop, et `recall_seed_jsonl` restaure la base AVANT le launch = contexte frais.
-  # Pas de base → `[pod_id:]` seul = recreate (session neuve).
+  # Spawn opts of a permanent.
+  # Base present (`priv/base_seeds/<role>.jsonl`) → boot-from-base: FIXED UUID = the `sessionId` CARRIED by
+  # the base (the base IS the source of the UUID, no separate config) → `--resume` that same UUID at each
+  # boot = ONE Desktop entry, and `recall_seed_jsonl` restores the base BEFORE the launch = fresh context.
+  # No base → `[pod_id:]` alone = recreate (new session).
   defp boot_opts(name, pod_id) do
     path = base_seed_path(name)
 
@@ -276,12 +280,12 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
-  # Base seed d'un permanent : ancre résumable propre, capturée hors-fleet (claude pur), versionnée en priv.
+  # Base seed of a permanent: clean resumable anchor, captured out-of-fleet (pure claude), versioned in priv.
   defp base_seed_path(name) do
     Path.join([:code.priv_dir(:fleet_spawner), "base_seeds", "#{name}.jsonl"])
   end
 
-  # UUID fixe = 1er `sessionId` trouvé dans la base. nil si absent (→ boot_opts retombe sur recreate).
+  # Fixed UUID = 1st `sessionId` found in the base. nil if absent (→ boot_opts falls back to recreate).
   defp base_seed_uuid(path) do
     path
     |> File.stream!()

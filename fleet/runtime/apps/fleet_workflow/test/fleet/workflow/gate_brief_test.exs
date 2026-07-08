@@ -14,7 +14,7 @@ defmodule Fleet.Workflow.GateBriefTest do
       })
 
     # Contexte
-    assert brief =~ "Step jugé : spec-review"
+    assert brief =~ "Judged step: spec-review"
     assert brief =~ "pipe-42"
     assert brief =~ "type terminal"
     # Livrable à juger (rendu JSON)
@@ -27,7 +27,7 @@ defmodule Fleet.Workflow.GateBriefTest do
 
     # Contrat de sortie
     assert brief =~ "gate-decision-v1.json"
-    assert brief =~ "Question à trancher"
+    assert brief =~ "Question to decide"
   end
 
   test "request = contexte de jugement désamorcé (NE PAS exécuter) — pas une instruction (bug PASSE-9)" do
@@ -43,26 +43,26 @@ defmodule Fleet.Workflow.GateBriefTest do
       })
 
     # Cadre de désamorçage explicite + instruction de jugement, pas de production.
-    assert brief =~ "NE PAS exécuter"
-    assert brief =~ "JUGER"
-    assert brief =~ "Ne crée AUCUN fichier"
+    assert brief =~ "DO NOT execute"
+    assert brief =~ "JUDGE"
+    assert brief =~ "Create NO file"
     # Le body est présent comme contexte cité (préfixe blockquote), pas brut.
     assert brief =~ "> Crée SMOKE.md et commit."
     # Instruction de sortie explicite : submit_result avec decision obligatoire.
     assert brief =~ "mcp__fleet__submit_result"
-    assert brief =~ "decision` est OBLIGATOIRE"
+    assert brief =~ "decision` field is MANDATORY"
   end
 
   test "sans request → pas de section demande d'origine" do
     brief = GateBrief.build(%{step: "s", workflow_map_id: "p", gate: nil, outputs: %{}})
-    refute brief =~ "Demande d'origine"
+    refute brief =~ "Original request"
   end
 
   test "gate nil + outputs vides → rendu défensif (pas de crash)" do
     brief = GateBrief.build(%{step: "audit", workflow_map_id: "p", gate: nil, outputs: %{}})
-    assert brief =~ "Step jugé : audit"
+    assert brief =~ "Judged step: audit"
     assert brief =~ "type —"
-    assert brief =~ "(aucun)"
+    assert brief =~ "(none)"
   end
 
   test "outputs non-JSON-encodable → fallback inspect (défensif)" do
@@ -75,6 +75,6 @@ defmodule Fleet.Workflow.GateBriefTest do
       })
 
     assert is_binary(brief)
-    assert brief =~ "Step jugé : s"
+    assert brief =~ "Judged step: s"
   end
 end

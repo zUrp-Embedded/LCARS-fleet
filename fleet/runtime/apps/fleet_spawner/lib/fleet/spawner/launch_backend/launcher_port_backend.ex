@@ -1,25 +1,25 @@
 defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   @moduledoc """
-  Backend RÉEL — lance la chaîne `<launcher N0> → bin/claude_launch.sh` via
-  `Port.open/2` `:spawn_executable`, **non-privilégié**. Le launcher N0 est choisi
-  par le spawner selon `containment` : `bin/bwrap_launch.sh` (défaut, bwrap
-  fait l'isolation userns/mountns) ou `bin/host_launch.sh` (containment: none, host
-  sans sandbox). L'`exe` du Port = `args.launcher_path` ; l'argv est identique des
-  deux côtés (même contrat `<role> <pod_id> <pod_dir> <command...>`).
+  REAL backend — launches the chain `<launcher N0> → bin/claude_launch.sh` via
+  `Port.open/2` `:spawn_executable`, **non-privileged**. The N0 launcher is chosen
+  by the spawner according to `containment`: `bin/bwrap_launch.sh` (default, bwrap
+  does the userns/mountns isolation) or `bin/host_launch.sh` (containment: none, host
+  without sandbox). The Port's `exe` = `args.launcher_path`; the argv is identical on
+  both sides (same contract `<role> <pod_id> <pod_dir> <command...>`).
 
-  ## Modèle INTERACTIF (claude sous PTY, complétion event-driven)
+  ## INTERACTIVE model (claude under PTY, event-driven completion)
 
-  `claude_launch` lance `claude` INTERACTIF sous PTY. La complétion est EVENT-DRIVEN
-  (le broker `Fleet.TaskQueue` broadcast `%Fleet.Event{work_item.completed}` sur le Bus,
-  consommé par l'état `:monitoring` du `Pod`), PAS un flux NDJSON stdout ni un fichier de
-  livrable. Donc `launch/2` **n'attend pas** de frame `init` : il ouvre le Port et
-  **retourne immédiatement**. Le **Pod owns le Port** — `launch/2` tourne dans le process
-  Pod (état `:launching` via `do_launch_backend`), donc le message `{port, {:exit_status, _}}`
-  arrive à `Pod.handle_event(:info, ...)` (détection d'exit AVANT résultat = échec). Détection
-  d'exit et kill = lifecycle Pod, pas ici.
+  `claude_launch` launches `claude` INTERACTIVE under a PTY. Completion is EVENT-DRIVEN
+  (the `Fleet.TaskQueue` broker broadcasts `%Fleet.Event{work_item.completed}` on the Bus,
+  consumed by the `Pod`'s `:monitoring` state), NOT an NDJSON stdout stream nor a deliverable
+  file. So `launch/2` **does not wait** for an `init` frame: it opens the Port and
+  **returns immediately**. The **Pod owns the Port** — `launch/2` runs in the Pod
+  process (`:launching` state via `do_launch_backend`), so the `{port, {:exit_status, _}}` message
+  arrives at `Pod.handle_event(:info, ...)` (exit detected BEFORE a result = failure). Exit
+  detection and kill = Pod lifecycle, not here.
 
-  Retour : `{:ok, %{port: port, tmux_session: name}}` | `{:error, reason}`.
-  Tests : `build_spawn/1` pur (ordre/contenu du vecteur args) + smoke fake-exe (Port ouvert / exe absent).
+  Return: `{:ok, %{port: port, tmux_session: name}}` | `{:error, reason}`.
+  Tests: `build_spawn/1` pure (order/content of the args vector) + fake-exe smoke (Port opened / exe missing).
   """
 
   @behaviour Fleet.Spawner.LaunchBackend
@@ -27,40 +27,58 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
   @impl Fleet.Spawner.LaunchBackend
   def launch(args, env) when is_map(args) and is_map(env) do
     with {:ok, exe, argv} <- build_spawn(args),
-         :ok <- ensure_executable(exe) do
-      env_list = Enum.map(env, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
-
-      port =
-        Port.open({:spawn_executable, exe}, [
-          :binary,
-          :exit_status,
-          {:args, argv},
-          {:env, env_list},
-          {:cd, to_charlist(args.pod_dir)}
-        ])
-
+         {:ok, env_list} <- charlist_env(env),
+         :ok <- ensure_executable(exe),
+         {:ok, port} <- safe_port_open(exe, argv, env_list, args.pod_dir) do
       {:ok,
        %{
          port: port,
-         # tmux_session présent ⇒ pod KICKABLE (PodTmux send-keys sur le sock par-pod). Le sock est
-         # dérivé du pod_id (convention bwrap_launch.sh), pas besoin de le porter dans l'état.
+         # tmux_session present ⇒ pod KICKABLE (PodTmux send-keys on the per-pod sock). The sock is
+         # derived from the pod_id (bwrap_launch.sh convention), no need to carry it in the state.
          tmux_session: Fleet.Spawner.PodTmux.session_name(args.pod_id)
        }}
     end
   end
 
-  @doc """
-  Pur : construit `{:ok, executable, argv}` pour `Port.open`. L'ordre/contenu du
-  vecteur est sensible → testé isolément.
+  # env MUST be string→string (bwrap_launch `--setenv`): a non-binary key/value would blow up
+  # `to_charlist` (ArgumentError). Turn that into a typed `{:error, {:bad_env, _}}` — the prod caller
+  # (`LaunchEnv`) builds strings; this guards a buggy caller so `launch/2` never raises out of contract.
+  defp charlist_env(env) do
+    if Enum.all?(env, fn {k, v} -> is_binary(k) and is_binary(v) end) do
+      {:ok, Enum.map(env, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)}
+    else
+      {:error, {:bad_env, "launch env must be a string→string map"}}
+    end
+  end
 
-  `<launcher_path> <role> <pod_id> <pod_dir>` puis `<command...>` =
-  `claude_launch <role> <pod_id> <pod_dir>`. `launcher_path` = bwrap_launch (défaut)
-  ou host_launch (containment: none) — **même argv**. Le **SP n'est PAS dans
-  l'argv** (fuite /proc/cmdline + ARG_MAX) : claude_launch le lit depuis
-  `pod_dir/.lcars/system-prompt.md` via `--system-prompt-file` (écrit par l'état `:projecting` du `Pod`).
-  Pas de budget (pas d'API). Identité/session
-  (`LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX`) voyagent par l'ENV du Port (`launch/2`
-  `env`), que bwrap_launch `--setenv` dans le pod (host_launch l'hérite directement, sans namespace).
+  # `Port.open` can raise (badarg on a malformed spec/opts) → keep the `{:ok}|{:error}` contract.
+  defp safe_port_open(exe, argv, env_list, pod_dir) do
+    {:ok,
+     Port.open({:spawn_executable, exe}, [
+       :binary,
+       :exit_status,
+       {:args, argv},
+       {:env, env_list},
+       {:cd, to_charlist(pod_dir)}
+     ])}
+  rescue
+    e -> {:error, {:port_open, Exception.message(e)}}
+  catch
+    kind, reason -> {:error, {:port_open, {kind, reason}}}
+  end
+
+  @doc """
+  Pure: builds `{:ok, executable, argv}` for `Port.open`. The order/content of the
+  vector is sensitive → tested in isolation.
+
+  `<launcher_path> <role> <pod_id> <pod_dir>` then `<command...>` =
+  `claude_launch <role> <pod_id> <pod_dir>`. `launcher_path` = bwrap_launch (default)
+  or host_launch (containment: none) — **same argv**. The **SP is NOT in
+  the argv** (/proc/cmdline leak + ARG_MAX): claude_launch reads it from
+  `pod_dir/.lcars/system-prompt.md` via `--system-prompt-file` (written by the `Pod`'s `:projecting` state).
+  No budget (no API). Identity/session
+  (`LCARS_POD_SESSION_ID`/`_RESUME`/`_SESSION_NAME_PREFIX`) travel via the Port's ENV (`launch/2`
+  `env`), which bwrap_launch `--setenv`s into the pod (host_launch inherits it directly, without a namespace).
   """
   @spec build_spawn(map()) :: {:ok, String.t(), [String.t()]} | {:error, term()}
   def build_spawn(%{
@@ -72,7 +90,7 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
       })
       when is_binary(role) and is_binary(pod_id) and is_binary(pod_dir) and
              is_binary(launcher) and is_binary(claude) do
-    # SP pas en argv (fuite /proc/cmdline + frôle ARG_MAX) : claude_launch le lit depuis
+    # SP not in argv (/proc/cmdline leak + brushes ARG_MAX): claude_launch reads it from
     # pod_dir/.lcars/system-prompt.md via --system-prompt-file (--system-prompt-file = replace +
     # TRUSTED).
     argv = [role, pod_id, pod_dir, claude, role, pod_id, pod_dir]

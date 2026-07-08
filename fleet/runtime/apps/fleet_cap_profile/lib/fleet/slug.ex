@@ -1,69 +1,82 @@
 defmodule Fleet.Slug do
   @moduledoc """
-  Smart-constructor d'un nom CONFINÉ-PAR-CONSTRUCTION utilisé comme composant
-  de chemin FS ou segment d'URL borné.
+  Smart-constructor for a CONFINED-BY-CONSTRUCTION name used as an FS path
+  component or a bounded URL segment.
 
-  ## Le problème qu'il ferme
+  ## The problem it closes
 
-  Un nom fourni par un client / un payload / un catalogue (nom de checkpoint
-  `rc_name`, nom de modop, nom de workflow_map/pipeline, nom de repo/branche forge…)
-  finit souvent interpolé dans un `Path.join` (feuille FS) ou un segment
-  d'URL. S'il porte `..`, `/`, un octet NUL ou un caractère de contrôle, il
-  TRAVERSE hors de la racine attendue ou casse/injecte l'URL. Vérifier après
-  coup est fragile ; on rend l'état interdit IRREPRÉSENTABLE : on caste le nom
-  AU PLUS TÔT, fail-closed, et un nom malformé n'atteint JAMAIS un `Path.join`.
+  A name supplied by a client / a payload / a catalogue (a checkpoint name
+  `rc_name`, a modop name, a workflow_map name, a forge repo/branch name…)
+  often ends up interpolated into a `Path.join` (FS leaf) or a URL segment.
+  If it carries `..`, `/`, a NUL byte or a control character, it TRAVERSES
+  outside the expected root or breaks/injects the URL. Checking after the
+  fact is fragile; instead we make the forbidden state UNREPRESENTABLE: we
+  cast the name AS EARLY AS POSSIBLE, fail-closed, and a malformed name
+  NEVER reaches a `Path.join`.
 
-  ## Le contrat du slug
+  ## The slug contract
 
-  Un slug valide matche `^[a-z0-9][a-z0-9_-]*$` :
+  A valid slug matches `^[a-z0-9][a-z0-9_-]*$`:
 
-    * minuscules / chiffres / `_` / `-` uniquement ;
-    * commence par `[a-z0-9]` (donc PAS de `-`/`_` en tête — pas de slug qui
-      ressemble à un flag `-rf`, pas de nom « caché ») ;
-    * non-vide ;
-    * pas de `/` (un seul composant de chemin), pas de `.` (donc ni `.` ni
-      `..` — pas de remontée de répertoire), pas d'octet NUL ni de caractère
-      de contrôle (interdits par le charset), pas d'unicode trompeur
-      (homoglyphes hors `[a-z0-9_-]` refusés).
+    * lowercase / digits / `_` / `-` only;
+    * starts with `[a-z0-9]` (so NO leading `-`/`_` — no slug that looks
+      like a `-rf` flag, no "hidden" name);
+    * non-empty;
+    * no `/` (a single path component), no `.` (so neither `.` nor `..` —
+      no directory traversal), no NUL byte nor control character (excluded
+      by the charset), no misleading unicode (homoglyphs outside
+      `[a-z0-9_-]` are rejected).
 
-  C'est le MÊME charset que les regexes path-safe historiquement recopiées
-  (rôle, role_token…) — désormais centralisées ici, une seule source.
+  This is the SAME charset as the path-safe regexes historically copied
+  around (role, role_token…) — now centralized here, a single source.
 
-  ## Confinement à la feuille FS
+  ## Confinement to the FS leaf
 
-  Caster le segment ne suffit pas si la RACINE elle-même est calculée : on
-  ajoute `under_root?/2` (le chemin résolu reste `== root` ou sous `root <>
-  "/"`) et `confined_join/2` (caste + joint + confine d'un coup). `Path.expand`
-  est LEXICAL (résout `..`, pas les symlinks) — le slug a déjà tué le `..`, le
-  confinement est la ceinture en plus des bretelles.
+  Casting the segment is not enough if the ROOT itself is computed: we add
+  `under_root?/2` (the resolved path stays `== root` or under `root <>
+  "/"`) and `confined_join/2` (cast + join + confine in one shot).
+  `Path.expand` is LEXICAL (it resolves `..`, not symlinks) — the slug has
+  already killed the `..`, the confinement is the belt on top of the
+  suspenders.
 
-  ## Quand NE PAS utiliser le slug (cas URL multi-segment)
+  ## When NOT to use the slug (multi-segment URL case)
 
-  Un `path` forge légitime peut contenir des `/` (`docs/sub/file.md`) : ce
-  n'est pas un slug, il faut l'ENCODER (`URI.encode`/`URI.encode_www_form`)
-  segment par segment, pas le refuser. Le slug est pour les noms qui DOIVENT
-  être atomiques (repo, branche bornée, nom de modop/workflow_map/checkpoint).
+  A legitimate forge `path` may contain `/` (`docs/sub/file.md`): that is
+  not a slug, it must be ENCODED (`URI.encode`/`URI.encode_www_form`)
+  segment by segment, not refused. The slug is for names that MUST be
+  atomic (repo, bounded branch, modop/workflow_map/checkpoint name).
 
-  ## NE PAS confondre avec deux autres "slug" (domaines distincts, ne pas fusionner)
+  ## Do NOT confuse with two other "slugs" (distinct domains, do not merge)
 
-  Deux fonctions ressemblent a un slug mais N'EN sont PAS et ne doivent PAS etre rabattues ici :
-    * `Fleet.Pilot.PodId.component/1` — TRANSFORME vers le charset pod_id `[A-Za-z0-9._-]` (casse + `.`
-      preserves, contrat `valid_pod_id?`) ; `Fleet.Slug` VALIDE/rejette, minuscules strict, sans `.`.
-    * `Fleet.Spawner.SeedStore.slugify/1` — reproduit BIT POUR BIT l'algo de Claude Code (compat vendor) ;
-      le remplacer par `Fleet.Slug` casserait le resume. Voir le commentaire la-bas.
+  Two functions look like a slug but are NOT, and must NOT be folded in here:
+
+    * `Fleet.Pilot.PodId.component/1` — TRANSFORMS into the pod_id charset
+      `[A-Za-z0-9._-]` (case and `.` preserved, contract `valid_pod_id?`);
+      `Fleet.Slug` VALIDATES/rejects, strict lowercase, no `.`.
+    * `Fleet.Spawner.SeedStore.slugify/1` — reproduces Claude Code's algo
+      BIT FOR BIT (vendor compat); replacing it with `Fleet.Slug` would
+      break resume. See the comment over there.
   """
 
-  # Charset path-safe canon : minuscule/chiffre/`_`/`-`, première position sans `-`/`_`.
-  # `\A..\z` (pas `^..$`) → ancrage STRICT début/fin de chaîne entière : `^/$` matchent aussi
-  # une frontière de ligne, donc un nom multi-ligne `"ok\n../evil"` passerait `^[a-z0-9...]$`.
+  # Canonical path-safe charset: lowercase/digit/`_`/`-`, first position never `-`/`_`.
+  # `\A..\z` (not `^..$`) → STRICT whole-string anchoring: `^`/`$` also match a line
+  # boundary, so a multi-line name `"ok\n../evil"` would pass `^[a-z0-9...]$`.
   @slug_rx ~r/\A[a-z0-9][a-z0-9_-]*\z/
 
   @type t :: String.t()
 
   @doc """
-  Caste un nom en slug confiné. `{:ok, slug}` si le nom matche le contrat,
-  sinon `{:error, {:invalid_slug, raw}}` (fail-closed — le nom malformé ne
-  ressort jamais comme un slug utilisable).
+  Casts a name into a confined slug. `{:ok, slug}` if the name matches the
+  contract, otherwise `{:error, {:invalid_slug, raw}}` (fail-closed — a
+  malformed name never comes back out as a usable slug).
+
+  ## Examples
+
+      iex> Fleet.Slug.cast("my-checkpoint-1")
+      {:ok, "my-checkpoint-1"}
+
+      iex> Fleet.Slug.cast("../evil")
+      {:error, {:invalid_slug, "../evil"}}
   """
   @spec cast(term()) :: {:ok, t()} | {:error, {:invalid_slug, term()}}
   def cast(name) when is_binary(name) do
@@ -73,8 +86,13 @@ defmodule Fleet.Slug do
   def cast(name), do: {:error, {:invalid_slug, name}}
 
   @doc """
-  Variante fail-loud de `cast/1` pour les sites où un slug invalide est un bug
-  de programmation (jamais une entrée client) : raise `ArgumentError`.
+  Fail-loud variant of `cast/1` for sites where an invalid slug is a
+  programming bug (never a client input): raises `ArgumentError`.
+
+  ## Examples
+
+      iex> Fleet.Slug.cast!("ok-1")
+      "ok-1"
   """
   @spec cast!(term()) :: t()
   def cast!(name) do
@@ -84,16 +102,34 @@ defmodule Fleet.Slug do
     end
   end
 
-  @doc "Prédicat : `name` est-il un slug valide ?"
+  @doc """
+  Predicate: is `name` a valid slug?
+
+  ## Examples
+
+      iex> Fleet.Slug.valid?("engineer")
+      true
+
+      iex> Fleet.Slug.valid?("../x")
+      false
+  """
   @spec valid?(term()) :: boolean()
   def valid?(name) when is_binary(name), do: Regex.match?(@slug_rx, name)
   def valid?(_), do: false
 
   @doc """
-  Garde de confinement : le chemin `dest` résolu reste-t-il SOUS `root`
-  (`== root` ou commence par `root <> "/"`) ? `Path.expand` résout les `..`
-  lexicalement → un `dest` qui remonte au-dessus de la racine est rejeté.
-  Les deux côtés sont expandés (un `root` relatif ne fausse pas la comparaison).
+  Confinement guard: does the resolved `dest` path stay UNDER `root`
+  (`== root` or starting with `root <> "/"`)? `Path.expand` resolves `..`
+  lexically → a `dest` that climbs above the root is rejected. Both sides
+  are expanded (a relative `root` does not skew the comparison).
+
+  ## Examples
+
+      iex> Fleet.Slug.under_root?("/srv/store/sub", "/srv/store")
+      true
+
+      iex> Fleet.Slug.under_root?("/srv/store-evil", "/srv/store")
+      false
   """
   @spec under_root?(Path.t(), Path.t()) :: boolean()
   def under_root?(dest, root) when is_binary(dest) and is_binary(root) do
@@ -103,13 +139,21 @@ defmodule Fleet.Slug do
   end
 
   @doc """
-  Joint un `name` casté-en-slug SOUS `root` et VÉRIFIE le confinement. C'est le
-  geste complet attendu à une feuille FS dont le composant vient d'une entrée :
-  `{:ok, abs}` (slug valide ET chemin confiné sous la racine), sinon
-  `{:error, {:invalid_slug, name}}` (nom malformé) ou
-  `{:error, {:path_escape, abs}}` (le confinement échoue — garde en
-  ceinture+bretelles : avec un slug le `..` est déjà impossible, mais si la
-  racine elle-même est suspecte on refuse plutôt que d'écrire hors-zone).
+  Casts `name` into a slug UNDER `root` and VERIFIES the confinement. This is
+  the complete gesture expected at an FS leaf whose component comes from an
+  input: `{:ok, abs}` (valid slug AND path confined under the root), otherwise
+  `{:error, {:invalid_slug, name}}` (malformed name) or
+  `{:error, {:path_escape, abs}}` (confinement fails — belt-and-suspenders
+  guard: with a slug the `..` is already impossible, but if the root itself
+  is suspect we refuse rather than write out-of-zone).
+
+  ## Examples
+
+      iex> Fleet.Slug.confined_join("/srv/store", "proj-1")
+      {:ok, "/srv/store/proj-1"}
+
+      iex> Fleet.Slug.confined_join("/srv/store", "../evil")
+      {:error, {:invalid_slug, "../evil"}}
   """
   @spec confined_join(Path.t(), term()) ::
           {:ok, Path.t()} | {:error, {:invalid_slug, term()} | {:path_escape, Path.t()}}

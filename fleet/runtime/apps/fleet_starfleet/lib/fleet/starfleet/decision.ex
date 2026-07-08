@@ -1,16 +1,16 @@
 defmodule Fleet.Starfleet.Decision do
   @moduledoc """
-  Struct sortie de `Fleet.Starfleet.Gatekeeper.validate/1`.
+  Struct returned by `Fleet.Starfleet.Gatekeeper.validate/1`.
 
-  Pattern PoC-π3 figé : décision JSON `{decision, reason, details,
-  chain}`, jamais atome opaque.
+  Frozen pattern: JSON decision `{decision, reason, details, chain}`,
+  never an opaque atom.
 
-  ## Champs
+  ## Fields
 
     * `decision` — enum `"allow" | "halt" | "escalate" | "retry"`
-    * `reason` — string non-vide
-    * `details` — map (objet JSON quelconque)
-    * `chain` — liste de strings (chain trace audit, default `[]`)
+    * `reason` — non-empty string
+    * `details` — map (arbitrary JSON object)
+    * `chain` — list of strings (audit chain trace, default `[]`)
   """
 
   @enforce_keys [:decision, :reason, :details]

@@ -1,3 +1,21 @@
+defmodule Fleet.SpawnerTest.UnresponsivePod do
+  @moduledoc false
+  # Faux pod : s'enregistre dans Fleet.Spawner.Registry sous `pod_id` puis CRASHE sur `:kill` → le
+  # `GenServer.call(:kill)` de kill_pod exit → déclenche le fallback BRUTAL (R1-18).
+  use GenServer
+
+  def start(pod_id), do: GenServer.start(__MODULE__, pod_id)
+
+  @impl true
+  def init(pod_id) do
+    {:ok, _} = Registry.register(Fleet.Spawner.Registry, pod_id, nil)
+    {:ok, pod_id}
+  end
+
+  @impl true
+  def handle_call(:kill, _from, _state), do: raise("simulated unresponsive pod (R1-18)")
+end
+
 defmodule Fleet.SpawnerTest do
   use ExUnit.Case, async: false
 
@@ -108,11 +126,29 @@ defmodule Fleet.SpawnerTest do
 
   describe "R18 — refus spawn one-shot sans brief" do
     test "valid_pod_id?/1 est l'autorité publique du charset pod_id" do
-      for ok <- ["pod-1", "permanent-architect", "repo.issue_1-role", UUID.uuid4()] do
+      # "p1" (court) est ACCEPTÉ : l'admission n'impose PAS de longueur mini — le len≥4 est la
+      # sur-armure LOCALE de pkill (PodTmux.pkill_pattern), pas une règle d'admission.
+      for ok <- ["pod-1", "permanent-architect", "repo.issue_1-role", UUID.uuid4(), "p1"] do
         assert Fleet.Spawner.valid_pod_id?(ok), "pod_id #{inspect(ok)} devrait être accepté"
       end
 
-      for bad <- ["../etc/passwd", "a/b", "..", "pod_..", "x y", "", nil, 42] do
+      # tête NON-alnum (`.`/`_`/`-`) et longueur absurde refusées : tout id admis doit être sûr chez
+      # TOUS les consommateurs (tête alnum = anti-motif-pkill-dégénéré ; borne = anti-DoS, sun_path
+      # précis à la frontière socket).
+      for bad <- [
+            "../etc/passwd",
+            "a/b",
+            "..",
+            "pod_..",
+            "x y",
+            "",
+            nil,
+            42,
+            ".hidden",
+            "_lead",
+            "-flag",
+            String.duplicate("a", 200)
+          ] do
         refute Fleet.Spawner.valid_pod_id?(bad), "pod_id #{inspect(bad)} devrait être refusé"
       end
     end
@@ -252,6 +288,20 @@ defmodule Fleet.SpawnerTest do
            "kill_pod devrait libérer la task (release propre), statut : #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
 
     assert wait_until(fn -> match?({:error, :not_found}, Fleet.Spawner.pod_info(pod_id)) end)
+  end
+
+  test "R1-18 : kill_pod fallback BRUTAL (pod muet) libère quand même le mandat (pas de reclaim loop)" do
+    pod_id = "pod-brutal-#{System.unique_integer([:positive])}"
+    {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
+
+    # pod fake ENREGISTRÉ mais qui CRASHE sur :kill → GenServer.call(:kill) exit → fallback brutal
+    {:ok, _fake} = Fleet.SpawnerTest.UnresponsivePod.start(pod_id)
+
+    assert :ok = Fleet.Spawner.kill_pod(pod_id)
+
+    # le mandat DOIT être libéré (sinon le poller le re-dispatche → loop), même sans release gracieuse
+    assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
+           "le fallback brutal aurait dû libérer la task, statut : #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
   end
 
   test "pod_info returns :not_found when pod doesn't exist" do

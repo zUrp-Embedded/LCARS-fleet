@@ -26,6 +26,20 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
                    1_000
   end
 
+  test "R2-14 : boot_fn qui EXIT → boot_failed (Task :transient PAS crashée → pas de reboot loop)" do
+    # un boot_fn qui exit (ex. GenServer.call vers un process mort) échapperait au `rescue` (exceptions
+    # seulement) → exit anormal du Task :transient → restart → reboot loop. Le `catch` le classe :failed.
+    assert :ok = BootOrchestrator.run(boot_permanent_pods: fn -> exit(:simulated_boot_crash) end)
+
+    assert_receive %Fleet.Event{source: :starfleet, type: :"fleet.boot_failed"}, 1_000
+  end
+
+  test "R2-14 : boot_fn qui THROW → boot_failed (idem exit)" do
+    assert :ok = BootOrchestrator.run(boot_permanent_pods: fn -> throw(:simulated_throw) end)
+
+    assert_receive %Fleet.Event{source: :starfleet, type: :"fleet.boot_failed"}, 1_000
+  end
+
   test "BL-028 : boot_permanent désactivé → boot_complete avec 0 pod, boot_fn PAS appelé" do
     parent = self()
 

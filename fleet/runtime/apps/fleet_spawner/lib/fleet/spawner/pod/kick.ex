@@ -1,106 +1,106 @@
 defmodule Fleet.Spawner.Pod.Kick do
   @moduledoc """
-  DÉCISION + I/O de la boucle de réveil ack-driven (« kick ») — cluster extrait de `Fleet.Spawner.Pod`.
+  DECISION + I/O of the ack-driven wake loop ("kick") — cluster extracted from `Fleet.Spawner.Pod`.
 
-  La boucle de kick réveille le REPL claude d'un pod fraîchement lancé (mot-clé `yop` bootstrap) ou
-  re-déclenche un pull de brief resté en attente (mot-clé `wake` fallback), jusqu'à ce que l'agent
-  ACKE (il a tendu la main via get_work_item). Ce module porte les TROIS pièces sans état du tick :
+  The kick loop wakes the claude REPL of a freshly launched pod (bootstrap keyword `yop`) or
+  re-triggers a pull of a brief left pending (fallback keyword `wake`), until the agent
+  ACKs (it reached out via get_work_item). This module carries the THREE stateless pieces of the tick:
 
-  - **les bornes/cadences** (`kick_first_delay_ms`, `kick_retry_ms`, `kick_max_attempts`,
-    `kick_bootstrap_max`, `kick_bootstrap_retry_ms`) : config `:fleet_spawner` lue à chaque tick ;
-  - **les décisions PURES** (`acked?/3`, `kick_keyword/2`) : faut-il stopper la boucle (ACK) et,
-    sinon, quel mot-clé envoyer (`yop`/`wake`/rien) — testables hors process ;
-  - **l'I/O d'envoi** (`kick_send/2` → `do_send_keys/2`) : pousse le mot-clé dans le tmux du pod.
+  - **the bounds/cadences** (`kick_first_delay_ms`, `kick_retry_ms`, `kick_max_attempts`,
+    `kick_bootstrap_max`, `kick_bootstrap_retry_ms`): `:fleet_spawner` config read on every tick;
+  - **the PURE decisions** (`acked?/3`, `kick_keyword/2`): should the loop stop (ACK) and,
+    otherwise, which keyword to send (`yop`/`wake`/nothing) — testable outside the process;
+  - **the send I/O** (`kick_send/2` → `do_send_keys/2`): pushes the keyword into the pod's tmux.
 
-  Ce que le module ne porte PAS (RESTE au cœur du `Pod`, mécanique de timer/handler) : l'ARMEMENT du
-  generic timeout `:kick` (cast `:arm_kick` + les action-builders `schedule_kick_action`/`cancel_kick_action`),
-  le HANDLER `handle_event({:timeout, :kick}, {:attempt, n}, ...)` (qui orchestre cap/retry/ACK et appelle
-  ce module), et les SONDES TaskQueue (`polled?`/`brief_pulled?`/`no_pending_brief?`) que le handler passe
-  déjà réduites en booléens à `acked?/3`.
+  What the module does NOT carry (STAYS in the core of `Pod`, timer/handler mechanics): the ARMING of the
+  generic timeout `:kick` (cast `:arm_kick` + the action-builders `schedule_kick_action`/`cancel_kick_action`),
+  the HANDLER `handle_event({:timeout, :kick}, {:attempt, n}, ...)` (which orchestrates cap/retry/ACK and calls
+  this module), and the TaskQueue PROBES (`polled?`/`brief_pulled?`/`no_pending_brief?`) that the handler passes
+  already reduced to booleans to `acked?/3`.
 
-  Aucun state propre, aucun timer armé ici : le `Pod` passe son `state` (map) en argument (`kick_send`
-  lit `state.pod_id`) ; la config `:fleet_spawner` (bornes + knob `:wake_send_keys`) est lue
-  directement. Dépend de `Fleet.Spawner.PodTmux` (l'envoi de send-keys), déjà une dep de l'app ; aucune
-  dépendance vers `Fleet.Spawner.Pod` (pas de cycle).
+  No state of its own, no timer armed here: `Pod` passes its `state` (map) as an argument (`kick_send`
+  reads `state.pod_id`); the `:fleet_spawner` config (bounds + knob `:wake_send_keys`) is read
+  directly. Depends on `Fleet.Spawner.PodTmux` (the send-keys sending), already a dep of the app; no
+  dependency on `Fleet.Spawner.Pod` (no cycle).
 
-  ## Contrat (appelé par `Pod`)
+  ## Contract (called by `Pod`)
 
-  - `kick_first_delay_ms/0` — délai du 1er tick (appelé à l'armement du generic timeout `:kick` — cast
-    `:arm_kick` + transition de launch — côté `Pod`).
+  - `kick_first_delay_ms/0` — delay of the 1st tick (called at the arming of the generic timeout `:kick` — cast
+    `:arm_kick` + launch transition — on the `Pod` side).
   - `kick_retry_ms/0` / `kick_max_attempts/0` / `kick_bootstrap_retry_ms/0` / `kick_bootstrap_max/0` —
-    cadence + cap, branche wake vs bootstrap (appelés par le handler
+    cadence + cap, wake vs bootstrap branch (called by the handler
     `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
-  - `acked?/3` (décision PURE) — l'agent a-t-il tendu la main ? STOP de la boucle (appelé par le handler ;
-    le test l'exerce DIRECTEMENT via `Fleet.Spawner.Pod.Kick.acked?/3`, plus de wrapper délégant côté `Pod`).
-  - `kick_keyword/2` (décision PURE) — mot-clé selon l'ACK (`yop`/`wake`/`nil`) (appelé par `kick_send` ;
-    le test l'exerce DIRECTEMENT via `Fleet.Spawner.Pod.Kick.kick_keyword/2`, plus de wrapper délégant).
-  - `kick_send/2` — choisit le mot-clé puis l'envoie au tmux du pod (appelé par le handler).
+  - `acked?/3` (PURE decision) — did the agent reach out? STOP of the loop (called by the handler;
+    the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.acked?/3`, no more delegating wrapper on the `Pod` side).
+  - `kick_keyword/2` (PURE decision) — keyword according to the ACK (`yop`/`wake`/`nil`) (called by `kick_send`;
+    the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.kick_keyword/2`, no more delegating wrapper).
+  - `kick_send/2` — chooses the keyword then sends it to the pod's tmux (called by the handler).
 
-  `do_send_keys/2` est interne (appelé UNIQUEMENT par `kick_send`).
+  `do_send_keys/2` is internal (called ONLY by `kick_send`).
   """
 
   require Logger
 
   alias Fleet.Spawner.PodTmux
 
-  # Kick AUTONOME « yop » readiness-gated. Déclenche le pull du brief
-  # par MCP get_work_item — le brief n'est PAS injecté (il vit dans issues/ + TaskQueue).
-  # No-op si pas de tmux_session (StubBackend ; LauncherPortBackend en pose un, bwrap ou host).
+  # AUTONOMOUS `yop` kick, readiness-gated. Triggers the pull of the brief
+  # via MCP get_work_item — the brief is NOT injected (it lives in issues/ + TaskQueue).
+  # No-op if no tmux_session (StubBackend; LauncherPortBackend sets one, bwrap or host).
   #
-  # Pourquoi pas un délai FIXE : le claude REPL n'est pas prêt à un instant connu — il
-  # boote (tmux server up, banner, init MCP servers via .mcp-fleet.json), durée variable.
-  # Un yop à délai fixe arrive trop tôt et est perdu (le sock du serveur tmux n'existe pas
-  # encore). On planifie donc une BOUCLE bornée : à chaque tick, si le serveur tmux est
-  # joignable (`PodTmux.alive?`) on envoie yop ; on s'arrête dès que le brief est pull
-  # (task ≠ pending) ou au cap. Non-bloquant (generic timeout `:kick`), le pod passe à
-  # :monitoring entretemps. Intervalles configurables (test : valeurs ~ms).
+  # Why not a FIXED delay: the claude REPL is not ready at a known instant — it
+  # boots (tmux server up, banner, MCP servers init via .mcp-fleet.json), variable duration.
+  # A fixed-delay yop arrives too early and is lost (the tmux server's sock does not exist
+  # yet). So we schedule a BOUNDED LOOP: at each tick, if the tmux server is
+  # reachable (`PodTmux.alive?`) we send yop; we stop as soon as the brief is pulled
+  # (task ≠ pending) or at the cap. Non-blocking (generic timeout `:kick`), the pod moves to
+  # :monitoring in the meantime. Intervals configurable (test: ~ms values).
 
-  @doc "Délai (ms) du 1er tick de kick — on laisse le flag porteur livrer d'abord. Config `:kick_first_delay_ms`, défaut 2 000."
+  @doc "Delay (ms) of the 1st kick tick — we let the carrier flag deliver first. Config `:kick_first_delay_ms`, default 2000."
   @spec kick_first_delay_ms() :: non_neg_integer()
   def kick_first_delay_ms, do: Application.get_env(:fleet_spawner, :kick_first_delay_ms, 2_000)
 
-  @doc "Cadence (ms) de retry de la branche WAKE (brief en attente). Config `:kick_retry_ms`, défaut 2 500."
+  @doc "Retry cadence (ms) of the WAKE branch (brief pending). Config `:kick_retry_ms`, default 2500."
   @spec kick_retry_ms() :: non_neg_integer()
   def kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
 
-  @doc "Cap de tentatives de la branche WAKE — au-delà, escalade `wake.failed`. Config `:kick_max_attempts`, défaut 12."
+  @doc "Attempts cap of the WAKE branch — beyond it, escalation `wake.failed`. Config `:kick_max_attempts`, default 12."
   @spec kick_max_attempts() :: non_neg_integer()
   def kick_max_attempts, do: Application.get_env(:fleet_spawner, :kick_max_attempts, 12)
 
   @doc """
-  Cap de tentatives de la branche BOOTSTRAP (pod sans brief) : kicks BORNÉS + ESPACÉS jusqu'à ce
-  que le REPL claude réponde (appel get_work_item = ack). La fenêtre doit couvrir le COLD-START
-  réel de claude en bwrap (binaire ~238 MB, caches froids, contention multi-fleet) : un défaut
-  trop court (≈32s, calé sur un boot ~15s) verrait tous les kicks tomber avant REPL prêt → pod
-  jamais onboardé. D'où 30×8s ≈ 4 min ; le deadline résultat se RÉ-ARME sur activité. Une fois
-  acké, le réveil-par-flag prend le relais. Config `:kick_bootstrap_max`, défaut 30.
+  Attempts cap of the BOOTSTRAP branch (pod with no brief): BOUNDED + SPACED-OUT kicks until
+  the claude REPL responds (get_work_item call = ack). The window must cover claude's real
+  COLD-START under bwrap (~238 MB binary, cold caches, multi-fleet contention): a default too
+  short (≈32s, tuned for a ~15s boot) would see all the kicks fall before the REPL is ready → pod
+  never onboarded. Hence 30×8s ≈ 4 min; the resulting deadline RE-ARMS on activity. Once
+  acked, wake-by-flag takes over. Config `:kick_bootstrap_max`, default 30.
   """
   @spec kick_bootstrap_max() :: non_neg_integer()
   def kick_bootstrap_max, do: Application.get_env(:fleet_spawner, :kick_bootstrap_max, 30)
 
-  @doc "Cadence (ms) de retry de la branche BOOTSTRAP (cf. `kick_bootstrap_max/0`). Config `:kick_bootstrap_retry_ms`, défaut 8 000."
+  @doc "Retry cadence (ms) of the BOOTSTRAP branch (cf. `kick_bootstrap_max/0`). Config `:kick_bootstrap_retry_ms`, default 8000."
   @spec kick_bootstrap_retry_ms() :: non_neg_integer()
   def kick_bootstrap_retry_ms,
     do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
 
   @doc false
-  # ACK (décision PURE, testable) = l'agent a tendu la main. C'est LE contrôle de la boucle :
-  # pas d'ACK → on (re)trigger ; ACK → stop ; cap sans ACK → escalade. Wake → `pulled?` (brief_pulled? :
-  # le pull PROUVE get_work_item) ; bootstrap (permanent sans brief) → `polled` (last_poll = up + SP lu).
+  # ACK (PURE decision, testable) = the agent reached out. This is THE control of the loop:
+  # no ACK → we (re)trigger; ACK → stop; cap without ACK → escalation. Wake → `pulled?` (brief_pulled? :
+  # the pull PROVES get_work_item); bootstrap (permanent with no brief) → `polled` (last_poll = up + SP read).
   @spec acked?(boolean(), boolean(), boolean()) :: boolean()
   def acked?(pulled?, bootstrap?, polled), do: pulled? or (bootstrap? and polled)
 
   @doc """
-  Choisit le mot-clé du kick selon `polled` (= l'agent a déjà appelé get_work_item) puis l'envoie
-  au tmux du pod :
+  Chooses the kick's keyword according to `polled` (= the agent has already called get_work_item) then
+  sends it to the pod's tmux:
 
-    - pas encore pollé → `"yop"` : bootstrap-arm, IRRÉDUCTIBLE (seul moyen de démarrer/armer l'agent) ;
-    - déjà pollé (pod running) → `"wake"` : FALLBACK (le porteur/flag aurait dû livrer), GATÉ par
-      `:wake_send_keys` (off ⇒ flag-only : on valide le Monitor en isolation, pas de fallback).
+    - not yet polled → `"yop"` : bootstrap-arm, IRREDUCIBLE (the only way to start/arm the agent);
+    - already polled (pod running) → `"wake"` : FALLBACK (the carrier/flag should have delivered), GATED by
+      `:wake_send_keys` (off ⇒ flag-only: we validate the Monitor in isolation, no fallback).
 
-  Le `"yop"` bootstrap n'est JAMAIS gaté (sinon un pod neuf ne démarrerait pas). Mots-clés
-  discriminés ⇒ on sait, en lisant le REPL/les logs, si c'est un kick (démarrage) ou un fallback
-  (Monitor raté). Un échec send-keys est loggé, jamais propagé (le monitor timeout couvre).
+  The bootstrap `"yop"` is NEVER gated (otherwise a fresh pod would not start). Discriminated
+  keywords ⇒ we know, by reading the REPL/the logs, whether it is a kick (startup) or a fallback
+  (Monitor missed). A send-keys failure is logged, never propagated (the monitor timeout covers).
   """
   @spec kick_send(map(), boolean()) :: :ok
   def kick_send(state, polled) do
@@ -111,8 +111,8 @@ defmodule Fleet.Spawner.Pod.Kick do
   end
 
   @doc false
-  # Décision PURE du mot-clé (testable). `polled` = l'agent a déjà appelé get_work_item ; `fallback_on?` = knob
-  # `:wake_send_keys`. `nil` ⇒ pas de send-keys (flag-only). Le `"yop"` (bootstrap) n'est JAMAIS gaté.
+  # PURE decision of the keyword (testable). `polled` = the agent has already called get_work_item; `fallback_on?` = knob
+  # `:wake_send_keys`. `nil` ⇒ no send-keys (flag-only). The `"yop"` (bootstrap) is NEVER gated.
   @spec kick_keyword(boolean(), boolean()) :: String.t() | nil
   def kick_keyword(polled, fallback_on?) do
     cond do
@@ -128,7 +128,7 @@ defmodule Fleet.Spawner.Pod.Kick do
         :ok
 
       {:error, reason} ->
-        Logger.warning("pod #{state.pod_id} kick (#{key}) failed : #{inspect(reason)}")
+        Logger.warning("pod #{state.pod_id} kick (#{key}) failed: #{inspect(reason)}")
     end
   end
 end

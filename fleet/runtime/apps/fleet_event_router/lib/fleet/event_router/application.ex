@@ -3,23 +3,24 @@ defmodule Fleet.EventRouter.Application do
 
   use Application
 
-  # Actions gitea que `WebhooksGitea` peut émettre (`gitea.<action>`). Source UNIQUE :
-  # pré-enregistrement des atomes (preregister_event_atoms) ET garde de cohérence registry
-  # (test `gitea_event_types/0 ⊆ events.yaml`). Ajouter une action ici SANS la clé events.yaml
-  # = drop muet en prod → le test casse (cette cohérence est verrouillée par le test).
+  # Gitea actions that `WebhooksGitea` can emit (`gitea.<action>`). SINGLE SOURCE:
+  # both the atom pre-registration (preregister_event_atoms) AND the registry-coherence
+  # guard (test `gitea_event_types/0 ⊆ events.yaml`). Adding an action here WITHOUT the
+  # matching events.yaml key = a silent drop in prod → the test breaks (this coherence is
+  # locked by the test).
   @gitea_event_types ~w(gitea.opened gitea.closed gitea.push gitea.unknown gitea.reopened
                         gitea.merged gitea.edited gitea.created gitea.synchronized gitea.deleted)
 
-  @doc "Types d'events gitea pré-enregistrés (= ce que WebhooksGitea peut broadcaster)."
+  @doc "Pre-registered gitea event types (= what WebhooksGitea can broadcast)."
   @spec gitea_event_types() :: [String.t()]
   def gitea_event_types, do: @gitea_event_types
 
   @impl Application
   def start(_type, _args) do
     preregister_event_atoms()
-    # Charge le registry events.yaml → peuple `authorized_event_types` (validation broadcast
-    # fail-loud, active en prod, off en test). Il n'y a pas de GenServer de dispatch : la
-    # consommation se fait par subscribers PubSub directs, ce registry n'est qu'une allow-list.
+    # Loads the events.yaml registry → populates `authorized_event_types` (fail-loud broadcast
+    # validation, on in prod, off in test). There is no dispatch GenServer: consumption happens
+    # through direct PubSub subscribers, this registry is only an allow-list.
     Fleet.EventRouter.Catalog.load!()
 
     children =
@@ -27,11 +28,11 @@ defmodule Fleet.EventRouter.Application do
         webhook_children() ++
         signals_children()
 
-    # Bornes de restart EXPLICITES (alignées sur les autres superviseurs d'app, ex. TaskQueue 3/60) :
-    # au-delà de 3 crashes en 60s, l'enfant est en boucle de crash (Bus / listener webhook / SignalsOS
-    # qui ne tient pas) → on remonte au superviseur d'app racine plutôt que de marteler un redémarrage
-    # qui ne réussira pas. Le défaut OTP (3/5) est trop serré pour un blip transitoire ; on l'allonge à
-    # 60s, rendu explicite pour que la fenêtre soit un choix, pas un implicite.
+    # EXPLICIT restart bounds (aligned with the other app supervisors, e.g. TaskQueue 3/60):
+    # past 3 crashes in 60s the child is in a crash loop (Bus / webhook listener / SignalsOS
+    # that won't stay up) → we escalate to the root app supervisor rather than hammering a
+    # restart that won't succeed. The OTP default (3/5) is too tight for a transient blip; we
+    # widen it to 60s, made explicit so the window is a choice, not an implicit default.
     Supervisor.start_link(children,
       strategy: :one_for_one,
       max_restarts: 3,
@@ -40,23 +41,23 @@ defmodule Fleet.EventRouter.Application do
     )
   end
 
-  # Pré-enregistre les atoms event_type connus au boot (depuis events.yaml +
-  # ensemble fixe os.signal.<sig>) pour que les émetteurs dynamiques puissent les
-  # résoudre via `String.to_existing_atom` au lieu de `to_atom` — un type forgé venu
-  # de l'extérieur ne crée donc pas d'atome (mitigation atom leak DoS).
+  # Pre-registers the known event_type atoms at boot (from events.yaml + the fixed
+  # os.signal.<sig> set) so that dynamic emitters can resolve them via
+  # `String.to_existing_atom` instead of `to_atom` — a type forged from the outside
+  # therefore creates no atom (atom-leak DoS mitigation).
   defp preregister_event_atoms do
-    # Parse events.yaml via la source unique `Catalog.event_type_strings/0`
-    # (plus de localisation + parse inline dupliqués avec `Catalog.do_load/0`).
+    # Parse events.yaml through the single source `Catalog.event_type_strings/0`
+    # (no path-resolution + inline parse duplicated against `Catalog.do_load/0`).
     yaml_events = Fleet.EventRouter.Catalog.event_type_strings()
 
     signal_events = ~w(os.signal.sigusr1 os.signal.sigterm os.signal.sighup)
     fallback_events = ~w(unknown_event)
 
-    # Le webhook gitea broadcaste un `gitea.<action>` dynamique (action du body ou
-    # header X-Gitea-Event). On pré-enregistre les types vus en pratique pour autoriser
-    # le schema canon `:gitea.<action>` via `to_existing_atom`.
-    # Ces types DOIVENT aussi être clés d'events.yaml, sinon `Bus.broadcast` fait
-    # fail-loud `UnregisteredError` → drop muet du webhook. Garde : test
+    # The gitea webhook broadcasts a dynamic `gitea.<action>` (action from the body or the
+    # X-Gitea-Event header). We pre-register the types seen in practice so the canonical
+    # `:gitea.<action>` atom resolves via `to_existing_atom`.
+    # These types MUST also be events.yaml keys, otherwise `Bus.broadcast` fails loud with
+    # `UnregisteredError` → a silent drop of the webhook. Guard: test
     # `gitea_event_types/0 ⊆ registry` (event_registry_gitea_test).
     Enum.each(
       yaml_events ++ signal_events ++ fallback_events ++ gitea_event_types(),
@@ -67,11 +68,11 @@ defmodule Fleet.EventRouter.Application do
   end
 
   defp base_children do
-    # F1 (E1 2026-07-04) : le PubSub sous un superviseur DÉDIÉ `max_restarts: 0`. Un restart LOCAL
-    # de Phoenix.PubSub perdrait TOUTES les souscriptions du node : consumers vivants mais SOURDS
-    # à vie (ils ne s'abonnent qu'à init/1), indétectable (les sondes testent whereis, pas la
-    # souscription). Crash du PubSub → escalade délibérée jusqu'au node (posture assumée :
-    # tout est :permanent, le container restart = la seule resouscription honnête).
+    # The PubSub sits under a DEDICATED supervisor with `max_restarts: 0`. A LOCAL restart of
+    # Phoenix.PubSub would lose ALL of the node's subscriptions: consumers alive but DEAF for
+    # life (they only subscribe in init/1), and undetectable (probes test whereis, not the
+    # subscription). A PubSub crash → deliberate escalation all the way to the node (assumed
+    # posture: everything is :permanent, a container restart is the only honest resubscription).
     [
       %{
         id: Fleet.EventRouter.Bus.EscalatingSupervisor,
@@ -91,22 +92,22 @@ defmodule Fleet.EventRouter.Application do
   end
 
   @doc """
-  Child specs du listener Cowboy webhook (public pour le test de bind : l'`:ip` est
-  un contrat — loopback par défaut, override de surface `LCARS_WEBHOOK_BIND_HOST`).
-  Retourne `[]` quand `:start_webhooks` est `false`.
+  Child specs of the webhook Cowboy listener (public for the bind test: the `:ip` is a
+  contract — loopback by default, surface override `LCARS_WEBHOOK_BIND_HOST`).
+  Returns `[]` when `:start_webhooks` is `false`.
   """
   def webhook_children do
     if Application.get_env(:fleet_event_router, :start_webhooks, false) do
       port = Application.get_env(:fleet_event_router, :webhook_port, 8081)
 
-      # Child-spec via la source unique Fleet.EventRouter.Listener : bind loopback par défaut
-      # appliqué PAR CONSTRUCTION (invariant runtime : un listener n'écoute pas 0.0.0.0 par
-      # accident). Le webhook est l'unique surface dont l'exposition publique est un besoin
-      # légitime : si la forge Gitea est SUR UNE AUTRE MACHINE, ses POST n'atteignent pas une
-      # loopback. C'est exactement le rôle de l'override de surface `LCARS_WEBHOOK_BIND_HOST`
-      # (ex. `0.0.0.0`) — opt-in nommé qui n'ouvre QUE le webhook, pas les surfaces de commande
-      # (fleet_api, deck). Forge co-localisée (loopback) → aucun override nécessaire. La
-      # protection reste le HMAC SHA256 sur le secret partagé, indépendant du bind.
+      # Child-spec through the single source Fleet.EventRouter.Listener: loopback bind by
+      # default applied BY CONSTRUCTION (runtime invariant: a listener does not listen on
+      # 0.0.0.0 by accident). The webhook is the ONLY surface whose public exposure is a
+      # legitimate need: if the Gitea forge is ON ANOTHER MACHINE, its POSTs cannot reach a
+      # loopback. That is exactly the role of the surface override `LCARS_WEBHOOK_BIND_HOST`
+      # (e.g. `0.0.0.0`) — a named opt-in that opens ONLY the webhook, not the command surfaces
+      # (fleet_api, deck). Co-located forge (loopback) → no override needed. The protection stays
+      # the HMAC SHA256 over the shared secret, independent of the bind.
       [
         Fleet.EventRouter.Listener.cowboy_child(
           plug: Fleet.EventRouter.WebhooksGitea,

@@ -35,10 +35,28 @@ defmodule Fleet.Starfleet.AuditLogTest do
       assert length(lines) == 2
     end
 
-    test "write fail-safe : path inaccessible → {:error, _} loggé pas crash", %{
-      tmp_dir: tmp_dir
-    } do
-      bad_path = Path.join([tmp_dir, "nonexistent-dir", "log.jsonl"])
+    test "SOC-EFF-004 : parent absent mais CRÉABLE → mkdir_p + entrée écrite (Cat 5 pas perdue :enoent)",
+         %{
+           tmp_dir: tmp_dir
+         } do
+      # Avant SOC-EFF-004, ce path (parent absent) rendait {:error, :enoent} → l'entrée audit était PERDUE.
+      # Le write doit maintenant créer le parent (mkdir_p) et graver l'entrée.
+      nested = Path.join([tmp_dir, "does", "not", "exist", "audit.jsonl"])
+      Application.put_env(:fleet_starfleet, :audit_log_path, nested)
+
+      assert :ok = AuditLog.write(%{"source" => "test", "k" => "v"})
+      assert File.read!(nested) =~ ~s("k":"v")
+    end
+
+    test "write fail-safe : path VRAIMENT inaccessible (parent = un fichier) → {:error, _} pas crash",
+         %{
+           tmp_dir: tmp_dir
+         } do
+      # Un FICHIER bloque la création du parent (mkdir_p → :enotdir) → File.write échoue aussi → {:error}
+      # fail-safe, pas de crash. (Un simple dir absent est désormais CRÉABLE — cf. SOC-EFF-004 ci-dessus.)
+      blocker = Path.join(tmp_dir, "blocker")
+      File.write!(blocker, "je suis un fichier, pas un dir")
+      bad_path = Path.join([blocker, "log.jsonl"])
       Application.put_env(:fleet_starfleet, :audit_log_path, bad_path)
 
       assert {:error, _reason} = AuditLog.write(%{"k" => "v"})

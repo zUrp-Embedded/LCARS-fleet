@@ -1,29 +1,29 @@
 defmodule Fleet.SPBuilder.RepoSections do
   @moduledoc """
-  Extraction sélective des sections du `CLAUDE.md` repo — le mini-parser markdown
-  extrait de `Fleet.SPBuilder`, utilisé par `compose_claude_md/3` pour reporter dans
-  le `CLAUDE.md` du pod (N3) les sections utiles du repo cible.
+  Selective extraction of sections from the repo `CLAUDE.md` — the mini markdown
+  parser split out of `Fleet.SPBuilder`, used by `compose_claude_md/3` to carry
+  over into the pod's `CLAUDE.md` (N3) the useful sections of the target repo.
 
-  Sections retenues : `Stack`, `Build`, `Test`, `Conventions`, `Commands`, `Gotchas`
-  — chaque header markdown de niveau 2 (`## Nom`) et son corps jusqu'au prochain
-  header de niveau 2. Tout le reste du fichier est ignoré (le CLAUDE.md repo porte
-  aussi des sections humaines sans valeur pour un pod).
+  Sections kept: `Stack`, `Build`, `Test`, `Conventions`, `Commands`, `Gotchas`
+  — each level-2 markdown header (`## Name`) and its body up to the next level-2
+  header. Everything else in the file is ignored (the repo CLAUDE.md also carries
+  human sections with no value for a pod).
 
-  Fonctions **pures** (lecture FS only pour `read/1`, aucun process).
+  **Pure** functions (FS read only for `read/1`, no process).
   """
 
-  # Liste fermée des sections reportées dans le pod. Le `\b` borne le nom sur une frontière
-  # de mot : « ## Test suite » matche (espace après `Test`), « ## Testing » ou
-  # « ## Stackoverflow » ne matchent pas (le mot continue).
+  # Closed list of the sections carried over into the pod. The `\b` bounds the name on a
+  # word boundary: `## Test suite` matches (space after `Test`), `## Testing` or
+  # `## Stackoverflow` do not match (the word continues).
   @repo_section_re ~r/^##\s+(Stack|Build|Test|Conventions|Commands|Gotchas)\b/m
 
   @doc """
-  Lit le `CLAUDE.md` repo et en extrait les sections nommées.
+  Reads the repo `CLAUDE.md` and extracts the named sections from it.
 
-    * `path = nil` → `{:ok, ""}` (pas de repo CLAUDE.md fourni : aucune section, pas
-      une erreur — le template rend la zone vide).
-    * path fourni mais illisible → `{:error, {:repo_claude_md_unreadable, path, reason}}`
-      (fail-loud : un path donné DOIT être lisible, pas d'extraction silencieusement vide).
+    * `path = nil` → `{:ok, ""}` (no repo CLAUDE.md supplied: no section, not
+      an error — the template renders the zone empty).
+    * path supplied but unreadable → `{:error, {:repo_claude_md_unreadable, path, reason}}`
+      (fail-loud: a supplied path MUST be readable, no silently-empty extraction).
   """
   @spec read(String.t() | nil) :: {:ok, String.t()} | {:error, term()}
   def read(nil), do: {:ok, ""}
@@ -36,9 +36,9 @@ defmodule Fleet.SPBuilder.RepoSections do
   end
 
   @doc """
-  Extrait du contenu markdown les sections de la liste fermée (parser pur) :
-  découpe aux headers `## `, garde les sections dont le titre matche, les rejoint
-  par ligne vide. Contenu sans section nommée → `""`.
+  Extracts from the markdown content the sections in the closed list (pure parser):
+  splits at the `## ` headers, keeps the sections whose title matches, joins them
+  by a blank line. Content with no named section → `""`.
   """
   @spec extract(String.t()) :: String.t()
   def extract(content) when is_binary(content) do
@@ -52,9 +52,9 @@ defmodule Fleet.SPBuilder.RepoSections do
     |> Enum.map_join("\n\n", &Enum.join(&1, "\n"))
   end
 
-  # Fold ligne-à-ligne : un header `## ` ouvre une nouvelle section (l'accumulateur
-  # de la précédente est poussé), toute autre ligne s'ajoute à la section courante.
-  # Les listes sont construites en préfixe (O(1)) puis renversées par `extract/1`.
+  # Line-by-line fold: a `## ` header opens a new section (the accumulator
+  # of the previous one is pushed), any other line is added to the current section.
+  # The lists are built by prepending (O(1)) then reversed by `extract/1`.
   defp fold_section(line, {acc, current}) do
     if String.match?(line, ~r/^##\s+/) do
       {[current | acc], [line]}

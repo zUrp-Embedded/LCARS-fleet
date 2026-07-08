@@ -1,32 +1,32 @@
 defmodule Fleet.Credentials.Gate do
   @moduledoc """
-  Porte credentials au spawn-boundary : scope-coverage + plan payant.
+  Credentials gate at the spawn-boundary: scope-coverage + paid plan.
 
-  Entrée unique `validate/2`. Lit le claudeDir natif de l'humain UNE fois
-  (`<claude_dir>/.credentials.json`, bloc `claudeAiOauth`), puis valide la
-  couverture de scopes (`Fleet.Credentials.ScopeValidator`, par-rôle via les flags
-  du cap-profile) ET le plan payant (`Fleet.Credentials.PlanValidator`). Le binaire
-  claude impose déjà scope+plan (refus 401) ; ces gates font échouer TÔT — au
-  spawn-boundary, côté runtime — au lieu du 1ᵉʳ appel API du pod. Tous les refus
-  sont taggés `{:credentials_invalid, _}` pour les distinguer, au call-site
-  (`Fleet.Spawner.Pod` au lancement), d'un échec d'auth-token.
+  Single entry point `validate/2`. Reads the human's native claudeDir ONCE
+  (`<claude_dir>/.credentials.json`, `claudeAiOauth` block), then validates the
+  scope coverage (`Fleet.Credentials.ScopeValidator`, per-role via the cap-profile
+  flags) AND the paid plan (`Fleet.Credentials.PlanValidator`). The claude
+  binary already enforces scope+plan (401 refusal); these gates fail EARLY — at the
+  spawn-boundary, runtime-side — instead of at the pod's 1st API call. Every refusal
+  is tagged `{:credentials_invalid, _}` so it can be distinguished, at the call-site
+  (`Fleet.Spawner.Pod` at launch), from an auth-token failure.
 
-  Transformateur pur : lecture fichier + délégation, sans état ni process. Le chemin
-  du claudeDir est résolu par l'appelant (per-humain) et passé en argument — ce module
-  ne fait QUE la validation, jamais la résolution du chemin.
+  Pure transformer: file read + delegation, no state, no process. The claudeDir path
+  is resolved by the caller (per-human) and passed as an argument — this module does
+  ONLY the validation, never the path resolution.
   """
 
   @doc """
-  Valide le `.credentials.json` d'un claudeDir humain contre un cap-profile.
+  Validates a human claudeDir's `.credentials.json` against a cap-profile.
 
-  Lit `<claude_dir>/.credentials.json` (bloc `claudeAiOauth`), vérifie d'abord les
-  scopes (par-rôle, dérivés des flags du cap-profile) puis le plan payant. Le premier
-  échec court-circuite (`with`).
+  Reads `<claude_dir>/.credentials.json` (`claudeAiOauth` block), checks the scopes
+  first (per-role, derived from the cap-profile flags) then the paid plan. The first
+  failure short-circuits (`with`).
 
-    * `claude_dir` — chemin du claudeDir de l'humain (résolu par l'appelant)
-    * `cap_profile` — `%Fleet.CapProfile{}` ; ses flags pilotent les scopes requis
+    * `claude_dir` — the human's claudeDir path (resolved by the caller)
+    * `cap_profile` — `%Fleet.CapProfile{}`; its flags drive the required scopes
 
-  Retour : `:ok` | `{:error, {:credentials_invalid, reason}}`.
+  Return: `:ok` | `{:error, {:credentials_invalid, reason}}`.
   """
   @spec validate(Path.t(), Fleet.CapProfile.t()) ::
           :ok | {:error, {:credentials_invalid, term()}}
@@ -38,9 +38,9 @@ defmodule Fleet.Credentials.Gate do
     end
   end
 
-  # SOURCE UNIQUE de lecture du creds natif `<claude_dir>/.credentials.json` : un seul
-  # File.read + Jason.decode + extraction du bloc `claudeAiOauth`. `validate/2` (scope+plan)
-  # consomme CE parse — source unique, pas de parsers driftables du même fichier.
+  # SINGLE SOURCE for reading the native creds `<claude_dir>/.credentials.json`: a single
+  # File.read + Jason.decode + extraction of the `claudeAiOauth` block. `validate/2` (scope+plan)
+  # consumes THIS parse — single source, no driftable parsers of the same file.
   defp read_oauth_creds(claude_dir) do
     creds_path = Path.join(claude_dir, ".credentials.json")
 
@@ -48,9 +48,9 @@ defmodule Fleet.Credentials.Gate do
          {:ok, %{"claudeAiOauth" => oauth}} when is_map(oauth) <- Jason.decode(raw) do
       {:ok, oauth}
     else
-      # Hygiène creds : la cause est CATÉGORISÉE, jamais le JSON décodé (qui porte
-      # refreshToken/accessToken). `:malformed_json` (Jason) / `:no_oauth_block` (décodé sans bloc oauth
-      # valide) / posix (File.read) — tous sûrs à propager et logger.
+      # Creds hygiene: the cause is CATEGORIZED, never the decoded JSON (which carries
+      # refreshToken/accessToken). `:malformed_json` (Jason) / `:no_oauth_block` (decoded without a valid
+      # oauth block) / posix (File.read) — all safe to propagate and log.
       {:error, %Jason.DecodeError{}} ->
         {:error, {:credentials_invalid, {:credentials_unreadable, creds_path, :malformed_json}}}
 
@@ -62,13 +62,13 @@ defmodule Fleet.Credentials.Gate do
     end
   end
 
-  # ScopeValidator par-rôle : les scopes requis dépendent des flags du cap-profile
-  # (bridge_enabled→user:profile, mcp_oauth→user:mcp_servers ; défaut = inference+sessions).
+  # Per-role ScopeValidator: the required scopes depend on the cap-profile flags
+  # (bridge_enabled→user:profile, mcp_oauth→user:mcp_servers; default = inference+sessions).
   defp gate_scopes(oauth, cap_profile) do
     scopes =
       case Map.get(oauth, "scopes") do
         l when is_list(l) -> l
-        # certains formats portent les scopes en string whitespace-séparée (cf. ScopeValidator)
+        # some formats carry the scopes as a whitespace-separated string (cf. ScopeValidator)
         s when is_binary(s) -> String.split(s)
         _ -> []
       end

@@ -231,6 +231,41 @@ defmodule Fleet.Spawner.PodTest do
       assert content["phase"] == "succeeded"
     end
 
+    test "R1-20 : state.json PRÉSENT mais CORROMPU → recover LOUD (error), pas de fresh init silencieux" do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply(session_id: "s-corrupt"))
+      pod_id = "pod-corrupt-#{System.unique_integer([:positive])}"
+
+      # point de recovery cassé : fichier présent, JSON illisible (≠ absent = fresh pod normal)
+      path = state_fs_path(pod_id)
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "{ ceci n'est pas du json")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
+          assert_receive {:launch_called, _args, _env}, 2_000
+        end)
+
+      assert log =~ "CORRUPT",
+             "un state.json corrompu doit être LOUD (error, comme state.corrupt du TaskQueue), pas silencieux"
+    end
+
+    test "R1-20 : state.json ABSENT → fresh init SILENCIEUX (pas de faux warning corrupt)" do
+      Process.flag(:trap_exit, true)
+      StubBackend.set_reply(interactive_reply(session_id: "s-fresh"))
+      pod_id = "pod-fresh-#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _pid} = spawn_via_supervisor(build_args(pod_id, "issue-1"))
+          assert_receive {:launch_called, _args, _env}, 2_000
+        end)
+
+      refute log =~ "CORRUPT"
+      refute log =~ "recover: state.json"
+    end
+
     # MA-04 — LE finding : `pod.completed` est LIFECYCLE load-bearing (le StepRunConsumer en dépend pour finir
     # le step_run). Si sa diffusion ÉCHOUE, le pod NE doit PAS release/kill sur une complétion orpheline (sinon
     # le pod « réussit » mais le step_run ne finit jamais → verrou forge à vie). Bus stub qui lève → le pod RESTE
@@ -367,7 +402,7 @@ defmodule Fleet.Spawner.PodTest do
       # canal-user (safety guardrail REPL).
       issue = File.read!(Path.join(info.pod_dir, "issues/issue-1.md"))
       # F128 : cadre neutre + rôle interpolé (plus de priming "worker engineer").
-      assert issue =~ "pod LCARS (rôle engineer"
+      assert issue =~ "LCARS pod (role engineer"
       assert issue =~ brief
       assert issue =~ "submit_result"
 
@@ -562,7 +597,7 @@ defmodule Fleet.Spawner.PodTest do
                })
 
       assert msg =~ "project-bound"
-      assert msg =~ "sans repo_id"
+      assert msg =~ "without repo_id"
       refute_received {:launch_called, _args, _env}
     end
 
@@ -1579,6 +1614,77 @@ defmodule Fleet.Spawner.PodTest do
                  "issue-404-engineer",
                  valid_profile()
                )
+    end
+  end
+
+  describe "rm_terminal_artifacts/2,3 — guard path-escape (jamais rm_rf hors racine)" do
+    test "REFUSE un state_dir/pod_dir HORS des racines (state_fs_root/pod_dir_root) — rien effacé",
+         %{
+           tmp_dir: tmp
+         } do
+      # Un dir-victime SOUS tmp mais HORS des racines `<tmp>/state` et `<tmp>/pods` (simule un state_dir/
+      # pod_dir forgé via un pod_id évadant qui aurait franchi valid_pod_id? — défense en profondeur).
+      victim = Path.join(tmp, "victim-outside-roots")
+      File.mkdir_p!(victim)
+      File.write!(Path.join(victim, "precious"), "keep")
+
+      assert :ok = Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(victim, victim)
+
+      assert File.exists?(Path.join(victim, "precious")),
+             "rm_terminal_artifacts a effacé un dir HORS racine — le guard path-escape ne tient pas"
+    end
+
+    test "efface bien un state_dir/pod_dir SOUS racine (le chemin nominal marche toujours)", %{
+      tmp_dir: tmp
+    } do
+      pod_id = "issue-guardok-engineer"
+      snap = write_snapshot!(tmp, pod_id, "succeeded")
+      pod_dir = seed_pod_dir!(tmp, pod_id)
+      state_dir = Path.dirname(snap)
+
+      assert :ok = Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(state_dir, pod_dir)
+      refute File.exists?(state_dir)
+      refute File.exists?(pod_dir)
+    end
+  end
+
+  describe "maybe_recall_restore/1 — total (rescue le bang SeedStore.restore → {:error}, pas de crash)" do
+    test "seed en échec de restore (raise) → {:error, {:recall_restore_failed, _}}", %{
+      tmp_dir: tmp
+    } do
+      # SeedStore.restore/4 est un BANG : File.cp!/mkdir_p!/escape lèvent. On déclenche le raise avec un
+      # seed_jsonl qui EXISTE mais est un RÉPERTOIRE (File.exists? vrai → File.cp! lève :eisdir). Avant le
+      # fix, ce raise traversait le `with` de :projecting → crash du gen_statem (pas de tombstone).
+      seed = Path.join(tmp, "seed-as-dir")
+      File.mkdir_p!(seed)
+      pod_dir = Path.join(tmp, "pod_recall")
+      File.mkdir_p!(pod_dir)
+
+      state = %{
+        opts: [recall_seed_jsonl: seed],
+        pod_dir: pod_dir,
+        cap_profile: valid_profile(),
+        session_id: "11111111-1111-1111-1111-111111111111"
+      }
+
+      assert {:error, {:recall_restore_failed, _}} =
+               Fleet.Spawner.Pod.Scaffold.maybe_recall_restore(state)
+    end
+
+    test "seed absent → {:error, {:recall_seed_missing, _}} (chemin déjà typé, inchangé)", %{
+      tmp_dir: tmp
+    } do
+      missing = Path.join(tmp, "nope.jsonl")
+
+      state = %{
+        opts: [recall_seed_jsonl: missing],
+        pod_dir: Path.join(tmp, "pod_x"),
+        cap_profile: valid_profile(),
+        session_id: "22222222-2222-2222-2222-222222222222"
+      }
+
+      assert {:error, {:recall_seed_missing, ^missing}} =
+               Fleet.Spawner.Pod.Scaffold.maybe_recall_restore(state)
     end
   end
 

@@ -1,92 +1,23 @@
-# Fleet.SPBuilder
+# fleet_sp_builder
 
-**Date** : 2026-05-09
-**Dernière révision** : 2026-07-05 (éclatement façade → Monk + RepoSections ; D2 — resync contrat : knob `monk_registry_root`, API `resolve_monk_injection/2`, dépendances)
-**Statut** : implémenté run #3.1 chantier #2 — design note PROMOTED
-**Référencé par** : 04_design-notes/fleet_sp_builder.md
+System Prompt builder/composer (Ring 1): a pure data-transformer turning a
+`%Fleet.CapProfile{}` + modop bundles + pod identifiers into a `system-prompt.md`,
+a pod `CLAUDE.md`, and a filtered skills list. No process, no state.
 
-System Prompt builder/composer (LCARS schema v2.5).
-
-Module pure data transformer — `%Fleet.CapProfile{}` + modop bundles
-(sp.md fragments) + identifiants pod → `system-prompt.md`, `CLAUDE.md`,
-paths skills filtrés.
+**This file is a map, not the contract.** Each module owns its contract in its own
+`@moduledoc`/`@spec` (`h Fleet.SPBuilder` in IEx, or `lib/`) — the 6 injection levels
+(N0–N3bis), the vendor boundary, the sha256 determinism and every exit code live
+there, not restated here.
 
 ## Modules
+- `Fleet.SPBuilder` — the facade + `Composer` impl (`compose/3`, `compose_claude_md/3`, `filter_skills/2`, `resolve_monk_injection/2` defdelegate); EEx templating (`priv/templates/*.eex`) + role-SP / modop reads + path resolution
+- `Fleet.SPBuilder.Monk` — monk-injection resolution (`resolve/2`, `resolve_or_empty/2`, `persona_section/1`); the composer's only YAML-registry I/O
+- `Fleet.SPBuilder.RepoSections` — markdown mini-parser lifting the target repo `CLAUDE.md` named sections into the pod `CLAUDE.md`
+- `Fleet.SPBuilder.Composer` — the behaviour (test mock + future 2nd vendor)
 
-- `Fleet.SPBuilder` — la façade (behaviour `Composer`) : compose SP + CLAUDE.md +
-  filtre skills, templating EEx, lecture SP rôle / fragments modop, résolution de
-  paths (`sp_role_root`/`modop_root` — config-accessors cohésifs avec ces lectures,
-  volontairement non extraits).
-- `Fleet.SPBuilder.Monk` — résolution de l'injection monk (I/O registry YAML,
-  source de donnée distincte) : `resolve/2` (= l'API publique
-  `resolve_monk_injection/2`, defdelegate), `resolve_or_empty/2` (non-monk →
-  injection vide, flux compose byte-identique), `persona_section/1`.
-- `Fleet.SPBuilder.RepoSections` — mini-parser markdown du `CLAUDE.md` repo :
-  `read/1` + `extract/1` (sections `Stack|Build|Test|Conventions|Commands|Gotchas`).
-- `Fleet.SPBuilder.Composer` — le behaviour (mock test + futur 2e vendor).
-
-## API
-
-- `Fleet.SPBuilder.compose/3` — compose le SP, retourne `{sp_md,
-  stable_sha256, metadata}`. Déterminisme stable parts (pod_id,
-  spawned_at, job_id, attempt_id exclus du hash).
-- `Fleet.SPBuilder.compose_claude_md/3` — compose `CLAUDE.md` du pod
-  (N3) avec extraction sélective des sections du `CLAUDE.md` repo.
-- `Fleet.SPBuilder.filter_skills/2` — filtre `skills_root` selon la
-  whitelist `cap_profile.spec["knowledge"]["skills"]`.
-- `Fleet.SPBuilder.resolve_monk_injection/2` — résout l'injection monk
-  (defdelegate vers `Monk.resolve/2` ; hors behaviour `Composer`).
-
-## Templates
-
-- `priv/templates/sp_template.eex` — template système prompt (zones
-  nommées, EEx stdlib).
-- `priv/templates/claude_md_template.eex` — template CLAUDE.md du pod.
-
-## Configuration
-
-- `:fleet_sp_builder, :sp_role_root` — racine FS sous laquelle résout le chemin `spec.systemPrompt` d'un
-  cap-profile. Défaut = le **canon cap-profiles BUNDLÉ** (`Application.app_dir(:fleet_cap_profile,
-  "priv/canon/cap-profiles")`, même source que `Fleet.CapProfile.root_dir/0`) → résout en release comme en
-  dev sans env (l'ancien défaut relatif `"cap-profiles"`, relatif au CWD, donnait `:enoent` en release).
-- `:fleet_sp_builder, :modop_root` — racine FS des fragments SP de modop (`<root>/<name>/sp.md`).
-  **CONFIG-OBLIGATOIRE** : pas de défaut bundlé (les fragments canon vivent dans
-  `fleet_workflow/priv/canon/modop-bundles`, Ring 3, hors du graphe de deps de ce Ring 1). Non configuré +
-  modops demandés → `compose/3` rend `{:error, :modop_root_unconfigured}` (fail-loud, plus de défaut relatif
-  `"modop"` qui donnait un `:enoent` muet). La chaîne de spawn PROD ne passe aucun modop → root jamais requis.
-- `:fleet_sp_builder, :monk_registry_root` — racine résolvant le path relatif du registry monk
-  (`spec.knowledge.monk_registry` = basename, ex. `alpha.yaml`). Précédence : opt `:monk_registry_root`
-  (test-seam) > cette config > défaut bundlé `Application.app_dir(:fleet_cap_profile,
-  "priv/canon/cap-profiles/monks")`.
-
-Aucun de ces knobs n'est posé dans `config/*.exs` ni via env var — défauts inline seulement
-(les tests overrident par `Application.put_env` / opt).
-
-## Dépendances
-
-- `fleet_cap_profile` (in_umbrella, Ring 0) — struct `%Fleet.CapProfile{}` consommée + racines
-  par défaut via `app_dir` (canon cap-profiles, registry monks).
-- `jason` (déclarée dans mix.exs ; aucun appel dans `lib/` aujourd'hui).
-- `stream_data` (test only).
-- `YamlElixir` (`Monk`, lecture registry) n'est PAS déclarée par cette app — résolue via la dep
-  transitive `yaml_elixir ~> 2.9` de `fleet_cap_profile`.
-
-## Niveaux d'injection canoniques
-
-- N0 : poids modèle.
-- N1 : server prompt Anthropic.
-- N2 : `system-prompt.md` (`compose/3`).
-- N2bis : `~/context/brief.md` (référencé, pas composé).
-- N3 : `~/.claude/CLAUDE.md` (`compose_claude_md/3`).
-- N3bis : `~/.claude/skills/` (`filter_skills/2`).
-
-## Frontière vendor
-
-Module vendor-agnostic : il **compose** le SP, il ne l'**injecte** pas.
-L'injection est faite par la frontière N1 (`bin/claude_launch.sh`) : le spawner
-écrit le SP composé dans un FICHIER (`<pod_dir>/.lcars/system-prompt.md`), que le
-launcher passe à `claude` via **`--system-prompt-file`** — HORS argv. Motif : le SP
-en argv fuitait par `/proc/<pid>/cmdline` et frôlait `ARG_MAX` ; le mode fichier tue
-les deux (`.lcars/` est lisible in-sandbox, contrairement à `.claude/` masqué par le
-bind creds). RC interactif (post-ADR-G : plus de `claude -p` ni d'app
-`fleet_claude_bridge`, retirée au pivot).
+## Config & deps
+- Knob `:fleet_sp_builder, :sp_role_root` — read by the facade; default = bundled cap-profiles canon (rationale on `sp_role_root/0`).
+- Knob `:fleet_sp_builder, :modop_root` — read by the facade; config-mandatory fail-loud (rationale on `modop_root/0`).
+- Knob `:fleet_sp_builder, :monk_registry_root` — read by `Monk`; precedence + default in its `@moduledoc`.
+- None set in `config/*.exs` or via env var — inline defaults only (tests override via `put_env`/opt).
+- Deps: see `mix.exs`.

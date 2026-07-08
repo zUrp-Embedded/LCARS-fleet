@@ -1,54 +1,56 @@
 defmodule Fleet.Workflow.Gatekeeper do
   @moduledoc """
-  Boot + registration du **gatekeeper permanent** (juge unique de la fleet).
+  Boot + registration of the **singleton gatekeeper** (the fleet's single judge —
+  one always-registered instance, NOT a system "permanent" pod: see the scope below).
 
-  Le gatekeeper est un pod **work-session** de scope `lifetime_scope: pipe`
-  (cap-profile `gatekeeper.yaml`, `boot_at_start: false`) : **borné au pipeline-run**,
-  PAS `forever`/always-on. Il n'est PAS booté au démarrage de la fleet (≠ l'`architect`,
-  lui booté au start), mais **à l'activation d'un pipeline** (`Fleet.Workflow.start_pipeline`),
-  et vit pour la durée du travail. Étant non-`forever`, il arme le watchdog de réponse
-  (`:result_deadline`, défaut 300s pour un scope non-`forever` ; `Fleet.Spawner.Pod.Liveness`) :
-  resté silencieux au-delà du délai alors qu'une tâche est attendue → il est reclaim
-  (`transition_failed` ; pod `:temporary`, pas de relaunch OTP) — là où `forever` ne
-  l'armerait jamais. Il est adressé via **brief MCP** — l'appelant qui le pilote ne le
-  possède pas (pas de lien de supervision : il est joint par son `pod_id`, pas tenu
-  comme enfant).
+  The gatekeeper is a **work-session** pod with scope `lifetime_scope: pipe`
+  (cap-profile `gatekeeper.yaml`, `boot_at_start: false`): **bounded to the workflow run**,
+  NOT `forever`/always-on. It is NOT booted at fleet startup (unlike the `architect`,
+  which IS booted at start), but **on a workflow activation** (dispatched by the forge-driven rail
+  when a non-decidable gate enqueues its eval brief),
+  and lives for the duration of the work. Being non-`forever`, it arms the response watchdog
+  (`:result_deadline`, default 300s for a non-`forever` scope; `Fleet.Spawner.Pod.Liveness`):
+  stayed silent past the deadline while a task is expected → it is reclaimed
+  (`transition_failed`; pod `:temporary`, no OTP relaunch) — whereas `forever` would never
+  arm it. It is addressed via **MCP brief** — the caller that drives it does not
+  own it (no supervision link: it is reached by its `pod_id`, not held as a
+  child).
 
   ## Registration
 
-  Le `pod_id` du gatekeeper est registré en `:persistent_term` (singleton), lu
-  par l'appelant via `pod_id/0`. Override config/test : `:fleet_workflow,
-  :gatekeeper_pod_id` (prioritaire — les tests de gate l'utilisent sans booter).
+  The gatekeeper's `pod_id` is registered in `:persistent_term` (singleton), read
+  by the caller via `pod_id/0`. Config/test override: `:fleet_workflow,
+  :gatekeeper_pod_id` (takes priority — gate tests use it without booting).
 
-  ## ⚠ MVP singleton vs cible per-projet
+  ## ⚠ MVP singleton vs per-project target
 
-  La cible prescrit **1 gatekeeper par projet actif**. Le runtime n'a pas encore
-  de modèle « projet » → MVP **singleton work-session** (un gatekeeper pour tout
-  le runtime). Le keying per-projet + le teardown `project.complete → terminate`
-  sont des **raffinements** différés : ils n'ont de sens que lorsque le modèle
-  « projet » existe.
+  The target prescribes **1 gatekeeper per active project**. The runtime does not
+  yet have a "project" model → MVP **singleton work-session** (one gatekeeper for
+  the whole runtime). Per-project keying + the `project.complete → terminate`
+  teardown are deferred **refinements**: they only make sense once the "project"
+  model exists.
 
   ## Autoboot config-gated
 
-  `ensure_booted/1` ne boote que si `:fleet_workflow, :gatekeeper_autoboot` est
-  vrai (défaut `true` ; `config/test.exs` le met à `false` pour l'hermétisme —
-  les tests pipeline ne spawnent pas de gatekeeper sauf opt-in explicite).
+  `ensure_booted/1` only boots if `:fleet_workflow, :gatekeeper_autoboot` is
+  true (default `true`; `config/test.exs` sets it to `false` for hermeticity —
+  workflow tests do not spawn a gatekeeper unless explicitly opted in).
   """
 
   require Logger
 
   @pt_key {__MODULE__, :pod_id}
-  # Singleton permanent → nom NU par rôle (`gatekeeper`), pas de qualificatif `permanent` redondant. Il ne
-  # matche PAS le préfixe `permanent-*` du PermanentWarden — voulu : le gatekeeper s'AUTO-gère (boot +
-  # registry `@pt_key` + reboot via wake_recovery), hors du warden générique. (L'architect, lui, EST
-  # warden-managé → il garde `permanent-architect`, le préfixe est son signal warden, pas de la déco.)
+  # Permanent singleton → BARE name by role (`gatekeeper`), no redundant `permanent` qualifier. It does
+  # NOT match the PermanentWarden's `permanent-*` prefix — intended: the gatekeeper SELF-manages (boot +
+  # `@pt_key` registry + reboot via wake_recovery), outside the generic warden. (The architect, by contrast,
+  # IS warden-managed → it keeps `permanent-architect`, the prefix is its warden signal, not decoration.)
   @pod_id "gatekeeper"
-  # Pseudo-issue de contexte du pod permanent (arg spawn distinct du pod_id ; pas d'issue réelle).
+  # Context pseudo-issue for the permanent pod (spawn arg distinct from pod_id; not a real issue).
   @issue_id "permanent-gatekeeper"
 
   @doc """
-  `pod_id` du gatekeeper permanent à adresser, ou `nil` si aucun n'est booté.
-  Override config (`:gatekeeper_pod_id`) prioritaire sur le registry runtime.
+  `pod_id` of the permanent gatekeeper to address, or `nil` if none is booted.
+  Config override (`:gatekeeper_pod_id`) takes priority over the runtime registry.
   """
   @spec pod_id() :: String.t() | nil
   def pod_id do
@@ -57,11 +59,16 @@ defmodule Fleet.Workflow.Gatekeeper do
   end
 
   @doc """
-  Assure qu'un gatekeeper permanent est booté + registré (idempotent). No-op si
-  déjà up (registry ou override config) ou si l'autoboot est désactivé.
+  Ensures a permanent gatekeeper is booted + registered (idempotent). No-op if
+  already REGISTERED (the `:persistent_term` singleton or a config override) or if autoboot is disabled.
 
-  Seams (tests) : `:loader` (défaut `&Fleet.CapProfile.load/1`), `:spawner`
-  (défaut `&Fleet.Spawner.spawn_pod/3`).
+  ⚠ PRESENCE, not liveness (SOC-OTP-002): `{:ok, pod_id}` proves a pod_id is REGISTERED in
+  `:persistent_term`, NOT that the gatekeeper process is ALIVE — a registered-but-DEAD pod no-ops here.
+  For a LIVENESS-aware recovery (reap the ghost holder + de-register + re-boot), use `reboot/1` (the
+  `respawn_fun` of `Fleet.Pilot.WakeRecovery` when the gatekeeper is unreachable).
+
+  Seams (tests): `:loader` (default `&Fleet.CapProfile.load/1`), `:spawner`
+  (default `&Fleet.Spawner.spawn_pod/3`).
 
   Returns `{:ok, pod_id}` | `{:ok, :disabled}` | `{:error, reason}`.
   """
@@ -80,10 +87,10 @@ defmodule Fleet.Workflow.Gatekeeper do
   end
 
   @doc """
-  Reboot du gatekeeper permanent : reap le holder survivant (cas ghost), dé-registre, re-boote frais.
-  Sert de `respawn_fun` au re-roll de `Fleet.Pilot.WakeRecovery` quand le gatekeeper est injoignable
-  (`ensure_booted` seul ne suffit pas : présence-based, il no-op sur un pod registré-mais-cassé).
-  Mêmes returns que `ensure_booted/1`.
+  Reboot of the permanent gatekeeper: reap the surviving holder (ghost case), de-register, re-boot fresh.
+  Serves as the `respawn_fun` for `Fleet.Pilot.WakeRecovery`'s re-roll when the gatekeeper is unreachable
+  (`ensure_booted` alone is not enough: presence-based, it no-ops on a registered-but-broken pod).
+  Same returns as `ensure_booted/1`.
   """
   @spec reboot(keyword()) :: {:ok, String.t() | :disabled} | {:error, term()}
   def reboot(opts \\ []) when is_list(opts) do
@@ -100,21 +107,21 @@ defmodule Fleet.Workflow.Gatekeeper do
     with {:ok, cp} <- loader.("gatekeeper"),
          :ok <- do_spawn(spawner, cp) do
       :persistent_term.put(@pt_key, @pod_id)
-      Logger.info("Gatekeeper: permanent booté + registré pod=#{@pod_id}")
+      Logger.info("Gatekeeper: permanent booted + registered pod=#{@pod_id}")
       {:ok, @pod_id}
     else
       {:error, reason} = err ->
-        Logger.error("Gatekeeper: boot échoué: #{inspect(reason)}")
+        Logger.error("Gatekeeper: boot failed: #{inspect(reason)}")
         err
     end
   end
 
-  # `:already_started` = le gatekeeper est déjà vivant (idempotence) → succès.
-  # NB race : `ensure_booted` n'est pas sérialisé (appelé dans le process
-  # appelant de `start_pipeline`). Deux activations concurrentes peuvent passer
-  # le check `is_binary(pod_id())` et appeler `do_spawn` en parallèle — le
-  # spawner rattrape (le 2e reçoit `{:already_started, _}` sur le `@pod_id` stable)
-  # → un seul pod spawné, les deux registrent le même pod_id. Sain (singleton).
+  # `:already_started` = the gatekeeper is already alive (idempotence) → success.
+  # NB race: `ensure_booted` is not serialized (called in the caller's process
+  # on the gate-dispatch path). Two concurrent activations can pass
+  # the `is_binary(pod_id())` check and call `do_spawn` in parallel — the
+  # spawner catches up (the 2nd receives `{:already_started, _}` on the stable `@pod_id`)
+  # → a single pod spawned, both register the same pod_id. Sound (singleton).
   defp do_spawn(spawner, cp) do
     case spawner.(cp, @issue_id, pod_id: @pod_id) do
       {:ok, _pid} -> :ok

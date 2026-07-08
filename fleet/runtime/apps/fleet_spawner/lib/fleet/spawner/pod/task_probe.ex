@@ -1,39 +1,39 @@
 defmodule Fleet.Spawner.Pod.TaskProbe do
   @moduledoc """
-  SONDES de l'état tâche/agent via le `Fleet.TaskQueue` — cluster extrait de `Fleet.Spawner.Pod`.
+  PROBES of task/agent state via `Fleet.TaskQueue` — cluster extracted from `Fleet.Spawner.Pod`.
 
-  Quatre questions best-effort que le cœur du `Pod` (handler de kick, deadline de réponse, enqueue de
-  brief) pose au broker pour DÉCIDER, sans jamais porter d'état ni de timer :
+  Four best-effort questions that the `Pod` core (kick handler, response deadline, brief
+  enqueue) asks the broker in order to DECIDE, without ever holding state or a timer:
 
-  - `polled?/1` — l'agent a-t-il déjà appelé `get_work_item` (ACK in-band réel, `last_poll`) ? Stoppe le kick
-    bootstrap dès que le REPL répond. Prend le `state` (lit `state.pod_id`).
-  - `pod_has_active_task?/1` — le pod a-t-il une task ACTIVE (`pending|assigned|in_progress`) là, maintenant ?
-    Au fire de `:result_deadline` : oui = vrai timeout de réponse (kill) ; non = idle, on laisse lapser.
-  - `brief_pulled?/1` — le brief est-il déjà pull (`assigned|in_progress|completed`) ? Stoppe la boucle de wake.
-  - `no_pending_brief?/1` — AUCUN brief en attente (`{:ok, nil}`, jamais enqueué) ? Distingue le pod
-    permanent/interactif (bootstrap) du worker (brief `pending` au spawn).
+  - `polled?/1` — has the agent already called `get_work_item` (real in-band ACK, `last_poll`)? Stops the
+    bootstrap kick as soon as the REPL responds. Takes the `state` (reads `state.pod_id`).
+  - `pod_has_active_task?/1` — does the pod have an ACTIVE task (`pending|assigned|in_progress`) here, right now?
+    On `:result_deadline` fire: yes = a real response timeout (kill); no = idle, we let it lapse.
+  - `brief_pulled?/1` — is the brief already pulled (`assigned|in_progress|completed`)? Stops the wake loop.
+  - `no_pending_brief?/1` — NO brief pending (`{:ok, nil}`, never enqueued)? Distinguishes the
+    permanent/interactive pod (bootstrap) from the worker (brief `pending` at spawn).
 
-  Les trois dernières prennent le `pod_id` (string) ; toutes lisent `Fleet.TaskQueue.pod_status/last_poll`
-  derrière une garde `rescue`/`catch :exit` qui ramène `false` — un hoquet du broker (down/restarting,
-  GenServer.call qui EXIT) ne doit PAS crasher le pod. Aucun state propre, aucun Port, aucun timer, aucune
-  écriture FS : que des lectures best-effort. Le `Pod` passe `pod_id`/`state` en arguments — le module ne
-  rappelle aucun private de `Pod`. Dépend de `Fleet.TaskQueue` (déjà une dep de l'app) ; aucune dépendance
-  vers `Fleet.Spawner.Pod` (pas de cycle). Ces sondes ne loggent pas (pas de `Logger`) : elles décident,
-  le cœur du `Pod` trace.
+  The last three take the `pod_id` (string); all read `Fleet.TaskQueue.pod_status/last_poll`
+  behind a `rescue`/`catch :exit` guard that returns `false` — a broker hiccup (down/restarting,
+  GenServer.call that EXITs) must NOT crash the pod. No own state, no Port, no timer, no
+  FS write: best-effort reads only. The `Pod` passes `pod_id`/`state` as arguments — the module never
+  calls back into any `Pod` private. Depends on `Fleet.TaskQueue` (already an app dep); no dependency
+  on `Fleet.Spawner.Pod` (no cycle). These probes do not log (no `Logger`): they decide,
+  the `Pod` core traces.
 
-  ## Contrat (appelé par `Pod`)
+  ## Contract (called by `Pod`)
 
-  - `polled?/1` — bootstrap-stop du kick (handler `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
-  - `pod_has_active_task?/1` — `pod_info` (`has_active_task`) + fire de `:result_deadline`.
-  - `brief_pulled?/1` — réduit en booléen passé à `Kick.acked?/3` par le handler.
-  - `no_pending_brief?/1` — détection bootstrap (handler) + gate de `maybe_enqueue_brief`.
+  - `polled?/1` — bootstrap-stop of the kick (handler `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
+  - `pod_has_active_task?/1` — `pod_info` (`has_active_task`) + `:result_deadline` fire.
+  - `brief_pulled?/1` — reduced to the boolean passed to `Kick.acked?/3` by the handler.
+  - `no_pending_brief?/1` — bootstrap detection (handler) + gate of `maybe_enqueue_brief`.
   """
 
   @doc """
-  L'agent a-t-il POLLÉ (appelé get_work_item) ? = ACK in-band RÉEL : l'agent a tendu la main via
-  l'API officielle (`last_poll`, tracké par le TaskQueue), pas un proxy host-side comme un
-  `pgrep watch.sh` (« le process existe » ≠ « l'agent agit »). Sert à stopper le kick bootstrap
-  dès que l'agent est up. Prend le `state` (lit `state.pod_id`) ; hoquet broker → `false`.
+  Has the agent POLLED (called get_work_item)? = REAL in-band ACK: the agent reached out via
+  the official API (`last_poll`, tracked by the TaskQueue), not a host-side proxy like a
+  `pgrep watch.sh` ("the process exists" ≠ "the agent is acting"). Used to stop the bootstrap kick
+  as soon as the agent is up. Takes the `state` (reads `state.pod_id`); broker hiccup → `false`.
   """
   @spec polled?(term()) :: boolean()
   def polled?(%{pod_id: pod_id}) when is_binary(pod_id) do
@@ -41,17 +41,17 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   rescue
     _ -> false
   catch
-    # `last_poll` est un GenServer.call → TaskQueue down/restarting EXIT (ne raise pas), `rescue` ne
-    # l'attrape pas. MÊME garde que brief_pulled?/no_pending_brief? : un hoquet broker ne crashe PAS le pod.
+    # `last_poll` is a GenServer.call → TaskQueue down/restarting EXITs (does not raise), `rescue` does
+    # not catch it. SAME guard as brief_pulled?/no_pending_brief?: a broker hiccup does NOT crash the pod.
     :exit, _ -> false
   end
 
   def polled?(_), do: false
 
-  # pod_status best-effort : un hoquet du broker (down/restart, GenServer.call qui EXIT) rend `:error`
-  # au lieu de crasher — comme `:error` ne matche aucun `{:ok, _}`, chaque sonde retombe sur `false`
-  # (même table de vérité que l'ancien rescue/catch inline). Source unique des 3 sondes pod_status
-  # ci-dessous ; `polled?` n'utilise PAS ce helper (il lit `last_poll`, avec sa propre garde).
+  # pod_status best-effort: a broker hiccup (down/restart, GenServer.call that EXITs) yields `:error`
+  # instead of crashing — since `:error` matches no `{:ok, _}`, each probe falls back to `false`
+  # (same truth table as the former inline rescue/catch). Single source of the 3 pod_status probes
+  # below; `polled?` does NOT use this helper (it reads `last_poll`, with its own guard).
   defp safe_pod_status(pod_id) do
     Fleet.TaskQueue.pod_status(pod_id)
   rescue
@@ -61,34 +61,34 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   end
 
   @doc """
-  Le pod a-t-il une task ACTIVE (`pending`/`assigned`/`in_progress`) là, maintenant ? Utilisé au
-  FIRE de `:result_deadline` : oui = vrai timeout de réponse (kill) ; non = le pod attendait
-  juste sa prochaine task (idle), on laisse lapser. Même source que
-  `brief_pulled?`/`no_pending_brief?` (`TaskQueue.pod_status` via `safe_pod_status`), même
-  fail-safe (TaskQueue indisponible ⇒ `:error` ⇒ pas de task active connue ⇒ pas de kill).
+  Does the pod have an ACTIVE task (`pending`/`assigned`/`in_progress`) here, right now? Used on
+  `:result_deadline` FIRE: yes = a real response timeout (kill); no = the pod was just
+  waiting for its next task (idle), we let it lapse. Same source as
+  `brief_pulled?`/`no_pending_brief?` (`TaskQueue.pod_status` via `safe_pod_status`), same
+  fail-safe (TaskQueue unavailable ⇒ `:error` ⇒ no known active task ⇒ no kill).
   """
   @spec pod_has_active_task?(String.t()) :: boolean()
   def pod_has_active_task?(pod_id),
     do: match?({:ok, s} when s in [:pending, :assigned, :in_progress], safe_pod_status(pod_id))
 
   @doc """
-  Le brief est-il déjà pull par le pod ? « Pull » = la task est dans un état qui PROUVE que
-  claude a appelé get_work_item : `:assigned | :in_progress | :completed`. Volontairement PAS :
-  `:pending`/`nil` (pas encore pull / pas encore enqueué — on continue de kicker, ce qui couvre
-  aussi la race spawn↔enqueue), ni `:cleared`/`:failed` (kill délibéré / deadline broker — le pod
-  n'a rien pull, ne PAS arrêter le kick sur un faux « pull » ; au pire on kicke jusqu'au cap,
-  harmless, le result_deadline couvre). Best-effort : exception/exit broker → `false` (on
-  retentera). Sert à ARRÊTER la boucle.
+  Is the brief already pulled by the pod? "Pull" = the task is in a state that PROVES that
+  Claude has called get_work_item: `:assigned | :in_progress | :completed`. Deliberately NOT:
+  `:pending`/`nil` (not yet pulled / not yet enqueued — we keep kicking, which also covers
+  the spawn↔enqueue race), nor `:cleared`/`:failed` (deliberate kill / broker deadline — the pod
+  has pulled nothing, do NOT stop the kick on a false "pull"; worst case we kick up to the cap,
+  harmless, the result_deadline covers it). Best-effort: broker exception/exit → `false` (we
+  will retry). Used to STOP the loop.
   """
   @spec brief_pulled?(String.t()) :: boolean()
   def brief_pulled?(pod_id),
     do: match?({:ok, s} when s in [:assigned, :in_progress, :completed], safe_pod_status(pod_id))
 
   @doc """
-  AUCUN brief (task) en attente pour ce pod : `pod_status == {:ok, nil}` (jamais enqueué).
-  Distingue le pod permanent/interactif (rien à puller à froid → bootstrap) du worker (brief
-  `pending` enqueué au spawn). En cas d'erreur → `false` (défaut sûr : on traite comme un
-  worker, kick fréquent — on ne suspend pas par erreur les kicks d'un vrai brief).
+  NO brief (task) pending for this pod: `pod_status == {:ok, nil}` (never enqueued).
+  Distinguishes the permanent/interactive pod (nothing to pull cold → bootstrap) from the worker (brief
+  `pending` enqueued at spawn). On error → `false` (safe default: we treat it as a
+  worker, frequent kick — we do not mistakenly suspend the kicks of a real brief).
   """
   @spec no_pending_brief?(String.t()) :: boolean()
   def no_pending_brief?(pod_id),

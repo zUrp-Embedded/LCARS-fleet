@@ -1,47 +1,45 @@
 defmodule Fleet.Workflow.GraphValidator do
   @moduledoc """
-  Linter de GRAPHE **pur** d'une workflow_map (pipeline). Vérifie les invariants
-  inter-steps que le JSON Schema ne peut PAS exprimer : le schéma draft-07 valide
-  chaque step ISOLÉMENT (sa forme, ses champs), jamais la relation entre steps.
-  Un `needs` mal orthographié passe donc le schéma mais pose une arête fantôme — un
-  step attend un prédécesseur qui n'existe pas, et le pipeline se fige EN SILENCE.
+  **Pure** GRAPH linter for a workflow_map. Checks the inter-step invariants the JSON
+  Schema CANNOT express: the draft-07 schema validates each step in ISOLATION (its shape,
+  its fields), never the relation between steps. A misspelled `needs` therefore passes the
+  schema but lays a phantom edge — a step waits on a predecessor that does not exist, and
+  the workflow freezes SILENTLY.
 
-  `validate/1` prend la map `steps` (forme normalisée du Loader,
-  `%{nom => %{"needs" => [...], "role" => ..., ...}}`) et retourne `:ok` ou
-  `{:error, {kind, detail}}`. Aucune I/O : la décision est de la DATA, testable
-  sans fichier. Le Loader appelle ceci après normalisation et raise sur l'erreur
-  (même contrat fail-loud que le schéma).
+  `validate/1` takes the `steps` map (the Loader's normalized shape,
+  `%{name => %{"needs" => [...], "role" => ..., ...}}`) and returns `:ok` or
+  `{:error, {kind, detail}}`. No I/O: the decision is pure DATA, testable without a file.
+  The Loader calls this after normalization and raises on error (same fail-loud contract
+  as the schema).
 
-  ## Le graphe
+  ## The graph
 
-  Un step B avec `needs: [A]` pose l'arête A → B (A précède B, B est un successeur
-  de A). Une workflow_map sans `needs` (ou `needs: []`) est une racine.
+  A step B with `needs: [A]` lays the edge A → B (A precedes B, B is a successor of A). A
+  workflow_map with no `needs` (or `needs: []`) is a root.
 
-  ## Invariants (un `kind` par invariant)
+  ## Invariants (one `kind` per invariant)
 
-    * `:phantom_edge` — chaque nom dans un `needs` réfère un step DÉCLARÉ. C'est le
-      trou le plus pernicieux : un typo (`needs: [implment]`) est silencieux au schéma.
-    * `:no_root` / `:multiple_roots` — exactement 1 step racine (`needs == []`) ;
-      0 = pas de point d'entrée, ≥2 = entrée parallèle (hors-scope du runtime séquentiel).
-    * `:unreachable` — tout step est atteignable depuis la racine (un orphelin ne
-      s'exécuterait jamais).
-    * `:cycle` — le graphe est un DAG (tri topologique de Kahn). Un cycle fige le
-      pipeline. Pour ce runtime séquentiel (racine unique + pas de fan-out), « cycle »
-      et « aucun terminal atteignable » sont la MÊME condition : une chaîne qui boucle
-      n'a aucun step sans successeur. L'invariant « ≥1 terminal atteignable » est donc
-      garanti par la conjonction racine-unique + acyclicité — une workflow_map sans terminal
-      est rejetée ici comme `:cycle` (pas de branche dédiée qui ne pourrait jamais tirer).
-    * `:fan_out` — aucun step n'a ≥2 successeurs. Le runtime est SÉQUENTIEL :
-      `Fleet.Pilot.WorkflowMapNav.next_step/2` rejette déjà une branche parallèle à la
-      navigation (`:dag_not_supported`) ; on échoue ici au LOAD, plus tôt et cohérent.
+    * `:phantom_edge` — every name in a `needs` refers to a DECLARED step. This is the
+      most insidious hole: a typo (`needs: [implment]`) is silent at the schema.
+    * `:no_root` / `:multiple_roots` — exactly 1 root step (`needs == []`);
+      0 = no entry point, ≥2 = parallel entry (out of scope for the sequential runtime).
+    * `:unreachable` — every step is reachable from the root (an orphan would never run).
+    * `:cycle` — the graph is a DAG (Kahn topological sort). A cycle freezes the workflow.
+      For this sequential runtime (single root + no fan-out), "cycle" and "no reachable
+      terminal" are the SAME condition: a chain that loops has no step without a successor.
+      The "≥1 reachable terminal" invariant is therefore guaranteed by the conjunction
+      single-root + acyclicity — a workflow_map with no terminal is rejected here as
+      `:cycle` (no dedicated branch that could never fire).
+    * `:fan_out` — no step has ≥2 successors. The runtime is SEQUENTIAL:
+      `Fleet.Pilot.WorkflowMapNav.next_step/2` already rejects a parallel branch at
+      navigation (`:dag_not_supported`); we fail here at LOAD, earlier and consistent.
 
-  ## Ordre des vérifications
+  ## Order of the checks
 
-  Chaque check suppose les invariants précédents tenus, ce qui donne le diagnostic le
-  plus précis : un blob déconnecté (qui est techniquement aussi un cycle) est diagnostiqué
-  `:unreachable` (« ces steps ne sont pas câblés à l'entrée », message actionnable) parce
-  que l'atteignabilité est vérifiée AVANT l'acyclicité ; une boucle SUR la chaîne reste
-  diagnostiquée `:cycle`.
+  Each check assumes the previous invariants hold, which yields the most precise
+  diagnostic: a disconnected blob (technically also a cycle) is diagnosed `:unreachable`
+  ("these steps are not wired to the entry", an actionable message) because reachability is
+  checked BEFORE acyclicity; a loop ON the chain stays diagnosed `:cycle`.
   """
 
   @type steps :: %{optional(String.t()) => map()}
@@ -52,9 +50,9 @@ defmodule Fleet.Workflow.GraphValidator do
 
   @spec validate(steps()) :: :ok | {:error, error()}
   def validate(steps) when is_map(steps) do
-    # Successeurs construits une fois (dep → [steps qui le `needs`]). Calculé avant les
-    # checks : ses seuls consommateurs (atteignabilité / acyclicité / fan-out) tournent
-    # APRÈS le check d'arête fantôme, donc sur un graphe déjà prouvé sans arête fantôme.
+    # Successors built once (dep → [steps that `needs` it]). Computed before the checks:
+    # its only consumers (reachability / acyclicity / fan-out) run AFTER the phantom-edge
+    # check, so on a graph already proven free of phantom edges.
     successors = successors(steps)
 
     with :ok <- check_no_phantom_edges(steps),
@@ -66,36 +64,35 @@ defmodule Fleet.Workflow.GraphValidator do
     end
   end
 
-  @doc "Message lisible par invariant — composé par le Loader dans son `raise`."
+  @doc "Human-readable message per invariant — composed by the Loader in its `raise`."
   @spec describe(error()) :: String.t()
   def describe({:phantom_edge, %{step: step, needs: dep}}),
     do:
-      "le `needs` #{inspect(dep)} du step #{inspect(step)} ne réfère aucun step déclaré — " <>
-        "arête fantôme (typo silencieux : le step attendrait un prédécesseur inexistant et le pipeline se figerait)"
+      "the `needs` #{inspect(dep)} of step #{inspect(step)} refers to no declared step — " <>
+        "phantom edge (silent typo: the step would wait on a nonexistent predecessor and the pipeline would freeze)"
 
   def describe({:no_root, _}),
-    do: "aucun step racine — il faut exactement un step d'entrée avec `needs: []`"
+    do: "no root step — exactly one entry step with `needs: []` is required"
 
   def describe({:multiple_roots, %{roots: roots}}),
     do:
-      "plusieurs steps racine #{inspect(roots)} — un seul point d'entrée `needs: []` est autorisé " <>
-        "(entrée parallèle hors-scope du runtime séquentiel)"
+      "multiple root steps #{inspect(roots)} — a single `needs: []` entry point is allowed " <>
+        "(parallel entry is out of scope for the sequential runtime)"
 
   def describe({:unreachable, %{steps: orphans}}),
-    do:
-      "step(s) orphelin(s) #{inspect(orphans)} inatteignable(s) depuis la racine — ils ne s'exécuteraient jamais"
+    do: "orphan step(s) #{inspect(orphans)} unreachable from the root — they would never run"
 
   def describe({:cycle, %{steps: cyclic}}),
     do:
-      "cycle de dépendances impliquant #{inspect(cyclic)} — le graphe doit être un DAG " <>
-        "(un cycle fige le pipeline ; c'est aussi le cas d'une chaîne sans terminal atteignable)"
+      "dependency cycle involving #{inspect(cyclic)} — the graph must be a DAG " <>
+        "(a cycle freezes the pipeline; a chain with no reachable terminal is the same condition)"
 
   def describe({:fan_out, %{step: step, successors: succs}}),
     do:
-      "le step #{inspect(step)} a #{length(succs)} successeurs #{inspect(succs)} — le runtime est séquentiel " <>
-        "(un seul successeur par step ; cf. Fleet.Pilot.WorkflowMapNav qui rejette le fan-out à la navigation)"
+      "step #{inspect(step)} has #{length(succs)} successors #{inspect(succs)} — the runtime is sequential " <>
+        "(a single successor per step; cf. Fleet.Pilot.WorkflowMapNav, which rejects fan-out at navigation)"
 
-  # ── checks (chacun pur : data → :ok | {:error, {kind, detail}}) ──
+  # ── checks (each pure: data → :ok | {:error, {kind, detail}}) ──
 
   defp check_no_phantom_edges(steps) do
     declared = steps |> Map.keys() |> MapSet.new()
@@ -125,9 +122,9 @@ defmodule Fleet.Workflow.GraphValidator do
     end
   end
 
-  # Acyclicité par tri topologique de Kahn : on retire itérativement les steps dont tous
-  # les prédécesseurs (`needs`) sont déjà sortis. Si tous sortent → DAG ; ceux qui restent
-  # bloqués (in-degree jamais retombé à 0) forment le/les cycle(s).
+  # Acyclicity via Kahn topological sort: iteratively remove the steps whose predecessors
+  # (`needs`) have all already come out. If all come out → DAG; those that stay blocked
+  # (in-degree never dropping back to 0) form the cycle(s).
   defp check_acyclic(steps, successors) do
     in_degree = Map.new(steps, fn {name, spec} -> {name, length(needs(spec))} end)
     ready = for {name, 0} <- in_degree, do: name
@@ -146,7 +143,7 @@ defmodule Fleet.Workflow.GraphValidator do
     end
   end
 
-  # ── primitives de graphe ──
+  # ── graph primitives ──
 
   defp successors(steps) do
     Enum.reduce(steps, %{}, fn {name, spec}, acc ->
@@ -158,8 +155,8 @@ defmodule Fleet.Workflow.GraphValidator do
 
   defp needs(spec), do: Map.get(spec, "needs", [])
 
-  # DFS itératif (pile = liste) avec ensemble vu : robuste même si la région contient un
-  # cycle (l'atteignabilité est volontairement vérifiée avant l'acyclicité).
+  # Iterative DFS (stack = list) with a seen set: robust even if the region contains a
+  # cycle (reachability is deliberately checked before acyclicity).
   defp reach([], _successors, seen), do: seen
 
   defp reach([node | rest], successors, seen) do

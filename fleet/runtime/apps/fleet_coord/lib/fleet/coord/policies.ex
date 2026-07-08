@@ -1,19 +1,19 @@
 defmodule Fleet.Coord.Policies do
   @moduledoc """
-  Pure functions module table de routage déclarative
+  Module of pure functions: a declarative routing table
   `{verdict, reason} → {action, escalation_path}`.
 
-  Lookup table chargée une fois au boot via `init_policies!/0`
-  depuis `priv/config/coord-policies.yaml` (ou path config) et
-  persistée dans `:persistent_term` (clé
-  `{__MODULE__, :policies}`) : lecture O(1) sans process, table figée
-  au boot (même pattern que les caches read-only chargés une fois).
+  Lookup table loaded once at boot via `init_policies!/0`
+  from `priv/config/coord-policies.yaml` (or the configured path) and
+  persisted in `:persistent_term` (key
+  `{__MODULE__, :policies}`): O(1) read with no process, table frozen
+  at boot (same pattern as the read-only caches loaded once).
 
-  **Aucune logique de raisonnement LLM** dans ce module : pur lookup
-  table déclaratif (méta-axiome — tout jugement LLM est consolidé sur
-  le gatekeeper, spawné côté pipeline, jamais ici).
+  **No LLM reasoning logic** in this module: a pure declarative lookup
+  table (meta-axiom — all LLM judgment is consolidated on
+  the gatekeeper, spawned on the workflow side, never here).
 
-  ## Format `coord-policies.yaml`
+  ## `coord-policies.yaml` format
 
       mappings:
         "halt.gatekeeper.refuse":
@@ -23,12 +23,12 @@ defmodule Fleet.Coord.Policies do
           action: escalate_human
           escalation_path: [dashboard, starfleet_alert]
 
-  ## Émission (déléguée)
+  ## Emission (delegated)
 
-  Un lookup qui matche est traduit en `%Fleet.Event{source: :coord}` canon et
-  broadcasté par `Fleet.Coord.Emitter` (passe d'émission extraite — C4
-  2026-07-05 : le lookup de table et la construction d'event wire ne partagent
-  aucun helper). La table des actions → types d'event vit là-bas.
+  A lookup that matches is translated into a canonical `%Fleet.Event{source: :coord}` and
+  broadcast by `Fleet.Coord.Emitter` (emission pass extracted — the table
+  lookup and the wire-event construction share no helper). The
+  actions → event-types table lives over there.
   """
 
   alias Fleet.Coord.Emitter
@@ -38,21 +38,21 @@ defmodule Fleet.Coord.Policies do
   require Logger
 
   @doc """
-  Charge les policies YAML et persiste dans `:persistent_term`.
-  Fail-fast au boot si fichier absent ou YAML malformé.
+  Loads the YAML policies and persists them in `:persistent_term`.
+  Fail-fast at boot if the file is absent or the YAML is malformed.
   """
   @spec init_policies!() :: :ok
   def init_policies! do
     path = Application.get_env(:fleet_coord, :policies_path, default_policies_path())
 
-    # FAIL-LOUD au boot : un fichier policies absent/malformé = artefact de deploy cassé, pas un
-    # état runtime à tolérer. On `raise` (propagé par `Application.start`) plutôt que de dégrader
-    # sur une table de routage VIDE — ce dégradé ferait booter coord « vert » alors que TOUTE
-    # décision/escalade tomberait ensuite `:not_found` (un « truc blessé qu'on garde en vie »).
-    # Conséquence voulue : fleet_coord ne démarre pas → le BEAM sort non-zéro → le launcher
-    # redéploie/escalade (dead-man's switch). Le contrat « Fail-fast au boot » du @doc est ainsi
-    # tenu littéralement. Règle générale : panne de chargement annoncée fail-loud DOIT crasher le
-    # boot, jamais log-and-continue derrière un statut vert.
+    # FAIL-LOUD at boot: an absent/malformed policies file = a broken deploy artifact, not a
+    # runtime state to tolerate. We `raise` (propagated by `Application.start`) rather than degrade
+    # to an EMPTY routing table — that degradation would boot coord "green" while EVERY
+    # decision/escalation would then fall through to `:not_found` (a "wounded thing kept alive").
+    # Intended consequence: fleet_coord does not start → the BEAM exits non-zero → the launcher
+    # redeploys/escalates (dead-man's switch). The @doc's "Fail-fast at boot" contract is thereby
+    # held literally. General rule: an announced fail-loud load failure MUST crash the
+    # boot, never log-and-continue behind a green status.
     policies =
       case YamlElixir.read_from_file(path) do
         {:ok, %{} = data} ->
@@ -60,38 +60,38 @@ defmodule Fleet.Coord.Policies do
           data
 
         {:ok, other} ->
-          raise "fleet_coord: policies #{path} malformé (pas une map : #{inspect(other)}) — " <>
-                  "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
+          raise "fleet_coord: policies #{path} malformed (not a map: #{inspect(other)}) — " <>
+                  "broken deploy, fail-loud at boot (check LCARS_COORD_POLICIES_PATH)"
 
         {:error, reason} ->
-          raise "fleet_coord: policies #{path} absent/illisible (#{inspect(reason)}) — " <>
-                  "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
+          raise "fleet_coord: policies #{path} missing/unreadable (#{inspect(reason)}) — " <>
+                  "broken deploy, fail-loud at boot (check LCARS_COORD_POLICIES_PATH)"
       end
 
-    # Put direct (PAS `Fleet.SchemaCache.cached/2`) : `init_policies!/0` doit TOUJOURS
-    # relire le YAML — les tests le rappellent avec des paths différents et comptent sur
-    # « le raise précède le put » (table du boot intacte). Le put reste boot-time unique,
-    # profil `:persistent_term` respecté ; la lecture passe par `resolved_policies/0`.
+    # Direct put (NOT `Fleet.SchemaCache.cached/2`): `init_policies!/0` must ALWAYS
+    # re-read the YAML — the tests call it again with different paths and rely on
+    # "the raise precedes the put" (boot table intact). The put stays boot-time-unique,
+    # `:persistent_term` profile respected; reads go through `resolved_policies/0`.
     :persistent_term.put(@policies_key, policies)
     :ok
   end
 
-  # Validation STRUCTURELLE du YAML parsé contre `priv/schema/coord-policies-v1.json` (ExJsonSchema). Le
-  # schema s'annonçait « Validated by ex_json_schema at init_policies!/0 » mais NE l'était PAS : le code
-  # n'acceptait que « est une map » → un coord-policies malformé (mapping sans `action`, `escalation_path`
-  # non-array, clé hors pattern, propriété additionnelle…) passait silencieusement et cassait ensuite chaque
-  # lookup. Désormais FAIL-LOUD au boot, MÊME contrat dead-man's-switch que fichier absent/illisible (le BEAM
-  # sort non-zéro, le launcher escalade) plutôt qu'une table de routage structurellement cassée tenue en vie.
-  # Le schema est STRUCTURAL-ONLY (cf. son `$id`) : la résolvabilité des handlers d'action et l'existence des
-  # cibles d'escalade restent vérifiées au runtime par Fleet.Coord, pas ici.
+  # STRUCTURAL validation of the parsed YAML against `priv/schema/coord-policies-v1.json` (ExJsonSchema). The
+  # schema advertised itself as "Validated by ex_json_schema at init_policies!/0" but was NOT: the code
+  # only accepted "is a map" → a malformed coord-policies (mapping without `action`, non-array
+  # `escalation_path`, key outside the pattern, additional property…) passed silently and then broke every
+  # lookup. Now FAIL-LOUD at boot, the SAME dead-man's-switch contract as an absent/unreadable file (the BEAM
+  # exits non-zero, the launcher escalates) rather than a structurally broken routing table kept alive.
+  # The schema is STRUCTURAL-ONLY (cf. its `$id`): the resolvability of action handlers and the existence of
+  # escalation targets stay verified at runtime by Fleet.Coord, not here.
   defp validate_against_schema!(data, path) do
     schema_path =
       :code.priv_dir(:fleet_coord)
       |> to_string()
       |> Path.join("schema/coord-policies-v1.json")
 
-    # Schema priv IMMUABLE, résolu UNE fois via l'autorité Ring 0 `Fleet.SchemaCache`
-    # (dédup B-R2 : avant, re-read+decode+resolve du fichier à CHAQUE appel, sans cache).
+    # IMMUTABLE priv schema, resolved ONCE via the Ring 0 authority `Fleet.SchemaCache`
+    # (dedup: before, re-read+decode+resolve of the file on EACH call, no cache).
     schema =
       Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, schema_path}, schema_path)
 
@@ -100,27 +100,27 @@ defmodule Fleet.Coord.Policies do
         :ok
 
       {:error, errors} ->
-        raise "fleet_coord: policies #{path} INVALIDE vs coord-policies-v1.json (#{inspect(errors)}) — " <>
-                "deploy cassé, fail-loud au boot (vérifier LCARS_COORD_POLICIES_PATH)"
+        raise "fleet_coord: policies #{path} INVALID vs coord-policies-v1.json (#{inspect(errors)}) — " <>
+                "broken deploy, fail-loud at boot (check LCARS_COORD_POLICIES_PATH)"
     end
   end
 
   @doc """
-  Dispatch d'une décision validée Gatekeeper.
+  Dispatch of a validated Gatekeeper decision.
 
-  Arité étendue : `correlation_id` explicite (task.id UUID v4 du work item
-  ayant produit le verdict, peut être nil hors work item).
+  Extended arity: explicit `correlation_id` (task.id UUID v4 of the work item
+  that produced the verdict, may be nil outside a work item).
 
-  Lookup `{decision, reason}` → table policies → broadcast schema canon
+  Lookup `{decision, reason}` → policies table → broadcast of the canonical schema
   `%Fleet.Event{source: :coord, type, correlation_id, …}`.
-  Le compat shim `handle_decision/1` (sans correlation_id) est retiré.
+  The `handle_decision/1` compat shim (without correlation_id) is removed.
 
-  Returns :
-    * `:ok` — policy match + broadcast effectué
-    * `{:error, {:no_policy_match, {decision, reason}}}` — pas de policy match.
-      Tuple STRUCTURÉ (pattern-matchable par les consommateurs — l'ancienne string
-      `"no policy match for …"` ne l'était pas) ; le message humain vit dans les
-      logs des consommateurs (`DriftMonitor`), pas dans le tuple.
+  Returns:
+    * `:ok` — policy match + broadcast done
+    * `{:error, {:no_policy_match, {decision, reason}}}` — no policy match.
+      STRUCTURED tuple (pattern-matchable by consumers — the old string
+      `"no policy match for …"` was not); the human message lives in the
+      consumers' logs (`DriftMonitor`), not in the tuple.
   """
   @spec handle_decision(
           Fleet.Starfleet.Decision.t() | map(),
@@ -137,18 +137,18 @@ defmodule Fleet.Coord.Policies do
   end
 
   @doc """
-  Dispatch d'une escalade Cat 5.
+  Dispatch of a Cat 5 escalation.
 
-  Arité étendue : `correlation_id` explicite (extrait de l'event upstream
-  ayant déclenché l'escalade, peut être nil hors work item). Le compat
-  shim `handle_escalation/2` (sans correlation_id) est retiré.
+  Extended arity: explicit `correlation_id` (extracted from the upstream event
+  that triggered the escalation, may be nil outside a work item). The
+  `handle_escalation/2` compat shim (without correlation_id) is removed.
 
-  Returns :
-    * `:ok` — policy match + broadcast effectué
-    * `{:error, {:no_escalation_policy, source}}` — pas de policy pour cette
-      source (`source` normalisée en string = la clé de lookup). Tuple STRUCTURÉ,
-      pattern-matchable ; le message humain vit dans les logs des consommateurs
-      (`Cat5Escalator`), pas dans le tuple.
+  Returns:
+    * `:ok` — policy match + broadcast done
+    * `{:error, {:no_escalation_policy, source}}` — no policy for this
+      source (`source` normalized to a string = the lookup key). STRUCTURED tuple,
+      pattern-matchable; the human message lives in the consumers' logs
+      (`Cat5Escalator`), not in the tuple.
   """
   @spec handle_escalation(
           source :: atom() | String.t(),

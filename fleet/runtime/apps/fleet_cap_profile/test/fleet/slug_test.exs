@@ -1,52 +1,54 @@
 defmodule Fleet.SlugTest do
   @moduledoc """
-  Smart-constructor `Fleet.Slug` — la brique de confinement-par-construction des noms
-  qui atteignent un `Path.join` (feuille FS) ou un segment d'URL. Le contrat exact
-  (`^[a-z0-9][a-z0-9_-]*$`, pas de `..`/`/`/contrôle, non-vide, pas de leading `-`/`_`)
-  est prouvé ici une fois ; les sites (seed-store, modop, pipeline, forge) le composent.
+  Smart-constructor `Fleet.Slug` — the confinement-by-construction brick for names
+  that reach a `Path.join` (FS leaf) or a URL segment. The exact contract
+  (`^[a-z0-9][a-z0-9_-]*$`, no `..`/`/`/control, non-empty, no leading `-`/`_`) is
+  proven here once; the call sites (seed-store, modop, workflow_map, forge) compose it.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
 
   alias Fleet.Slug
 
-  describe "cast/1 — accepte les slugs valides" do
-    test "noms canon" do
+  doctest Fleet.Slug
+
+  describe "cast/1 — accepts valid slugs" do
+    test "canonical names" do
       for ok <- ["a", "z9", "my_checkpoint-1", "poc-8", "engineer", "a_b-c", "0", "x123"] do
-        assert {:ok, ^ok} = Slug.cast(ok), "devrait accepter #{inspect(ok)}"
+        assert {:ok, ^ok} = Slug.cast(ok), "should accept #{inspect(ok)}"
         assert Slug.valid?(ok)
       end
     end
   end
 
-  describe "cast/1 — REFUSE tout ce qui pourrait traverser ou injecter" do
-    test "traversal / séparateurs de chemin" do
+  describe "cast/1 — REFUSES anything that could traverse or inject" do
+    test "traversal / path separators" do
       for bad <- ["..", "../evil", "a/b", "/abs", "a/../b", "."] do
-        assert {:error, {:invalid_slug, ^bad}} = Slug.cast(bad), "devrait refuser #{inspect(bad)}"
+        assert {:error, {:invalid_slug, ^bad}} = Slug.cast(bad), "should refuse #{inspect(bad)}"
         refute Slug.valid?(bad)
       end
     end
 
-    test "vide / leading - ou _ (ressemble à un flag, ou nom caché)" do
+    test "empty / leading - or _ (looks like a flag, or a hidden name)" do
       for bad <- ["", "-rf", "_hidden", "-", "_"] do
         assert {:error, {:invalid_slug, ^bad}} = Slug.cast(bad)
       end
     end
 
-    test "NUL / contrôle / newline (un nom multi-ligne ne doit pas passer)" do
+    test "NUL / control / newline (a multi-line name must not pass)" do
       for bad <- ["ok\x00evil", "ok\nevil", "tab\tx", "a\r"] do
         assert {:error, {:invalid_slug, ^bad}} = Slug.cast(bad)
       end
     end
 
-    test "majuscules / unicode trompeur / espace / ponctuation" do
-      # "оk" porte un O cyrillique (U+043E) — homoglyphe hors [a-z0-9_-].
+    test "uppercase / misleading unicode / space / punctuation" do
+      # "оk" carries a Cyrillic O (U+043E) — a homoglyph outside [a-z0-9_-].
       for bad <- ["Ok", "ОK", "оk", "a b", "a.b", "a?x=1", "a#frag", "été"] do
         assert {:error, {:invalid_slug, ^bad}} = Slug.cast(bad)
       end
     end
 
-    test "non-binaire → refusé fail-closed" do
+    test "non-binary → refused fail-closed" do
       assert {:error, {:invalid_slug, nil}} = Slug.cast(nil)
       assert {:error, {:invalid_slug, 42}} = Slug.cast(42)
       refute Slug.valid?(nil)
@@ -54,27 +56,27 @@ defmodule Fleet.SlugTest do
   end
 
   describe "cast!/1" do
-    test "bang rend la valeur ou raise" do
+    test "bang returns the value or raises" do
       assert "ok-1" == Slug.cast!("ok-1")
       assert_raise ArgumentError, fn -> Slug.cast!("../evil") end
     end
   end
 
-  describe "under_root?/2 + confined_join/2 — la garde de feuille FS" do
-    test "un slug joint sous la racine reste confiné" do
+  describe "under_root?/2 + confined_join/2 — the FS-leaf guard" do
+    test "a slug joined under the root stays confined" do
       assert {:ok, abs} = Slug.confined_join("/srv/store", "proj-1")
       assert abs == "/srv/store/proj-1"
       assert Slug.under_root?(abs, "/srv/store")
     end
 
-    test "un nom non-slug est refusé AVANT le join (jamais de Path.join atteint)" do
+    test "a non-slug name is refused BEFORE the join (no Path.join ever reached)" do
       assert {:error, {:invalid_slug, "../evil"}} = Slug.confined_join("/srv/store", "../evil")
     end
 
-    test "under_root? rejette un dest qui remonte au-dessus de la racine" do
+    test "under_root? rejects a dest that climbs above the root" do
       refute Slug.under_root?("/srv/store/../evil", "/srv/store")
       refute Slug.under_root?("/srv/other", "/srv/store")
-      # préfixe-sœur (pas un vrai sous-dossier) refusé
+      # sibling prefix (not a real subdirectory) refused
       refute Slug.under_root?("/srv/store-evil", "/srv/store")
       assert Slug.under_root?("/srv/store", "/srv/store")
       assert Slug.under_root?("/srv/store/sub/deep", "/srv/store")
@@ -82,13 +84,13 @@ defmodule Fleet.SlugTest do
   end
 
   # ============================================================
-  # Property : le slug accepté est EXACTEMENT le charset path-safe, et il est sûr par construction.
+  # Property: the accepted slug is EXACTLY the path-safe charset, and it is safe by construction.
   # ============================================================
 
-  property "tout slug accepté est mono-composant et ne remonte pas (round-trip Path.join sûr)" do
+  property "every accepted slug is single-component and does not climb (safe Path.join round-trip)" do
     check all(slug <- valid_slug_gen()) do
       assert {:ok, ^slug} = Slug.cast(slug)
-      # Un slug ne contient ni séparateur ni `..` → joint sous une racine, il reste confiné.
+      # A slug contains neither a separator nor `..` → joined under a root, it stays confined.
       joined = Path.join("/root", slug)
       assert Path.expand(joined) == "/root/" <> slug
       assert Slug.under_root?(Path.expand(joined), "/root")
@@ -96,18 +98,18 @@ defmodule Fleet.SlugTest do
     end
   end
 
-  property "une chaîne portant / ou .. ou un contrôle est TOUJOURS refusée" do
+  property "a string carrying / or .. or a control char is ALWAYS refused" do
     check all(
             prefix <- string(:alphanumeric, min_length: 0, max_length: 4),
             poison <- member_of(["..", "/", "\x00", "\n", " ", "%2e%2e"]),
             suffix <- string(:alphanumeric, min_length: 0, max_length: 4)
           ) do
       candidate = prefix <> poison <> suffix
-      refute Slug.valid?(candidate), "ne doit JAMAIS accepter #{inspect(candidate)}"
+      refute Slug.valid?(candidate), "must NEVER accept #{inspect(candidate)}"
     end
   end
 
-  # Générateur de slugs valides : 1ʳᵉ position [a-z0-9], reste [a-z0-9_-].
+  # Generator of valid slugs: first position [a-z0-9], rest [a-z0-9_-].
   defp valid_slug_gen do
     gen all(
           head <- member_of(Enum.to_list(?a..?z) ++ Enum.to_list(?0..?9)),

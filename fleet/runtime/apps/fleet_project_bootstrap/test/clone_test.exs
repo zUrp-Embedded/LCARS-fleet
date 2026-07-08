@@ -37,6 +37,22 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     }
   end
 
+  test "pod_dir NON-absolu → {:error, {:unsafe_pod_dir}} (guard : jamais mkdir/rm_rf relatif au cwd)" do
+    on_exit(fn -> File.rm_rf("relative-pod-x") end)
+
+    # repo_path nil → branche skip (mkdir workspace), aucun git : on isole le GUARD, pas le clone.
+    profile = cap(%{})
+
+    assert {:error, {:unsafe_pod_dir, "relative-pod-x"}} =
+             Clone.clone_or_skip("relative-pod-x", profile, [])
+
+    assert {:error, {:unsafe_pod_dir, "relative-pod-x"}} =
+             Clone.clone_work_doc("relative-pod-x", profile)
+
+    refute File.exists?("relative-pod-x"),
+           "un pod_dir relatif ne doit RIEN créer/effacer (guard avant toute I/O)"
+  end
+
   test "clone code (workspace) + doc (work) côte à côte", %{tmp_dir: tmp} do
     src = make_source_repo(Path.join(tmp, "src"))
     pod_dir = Path.join(tmp, "pod-test-1")
@@ -54,6 +70,18 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     assert doc == Path.join(pod_dir, "work")
     assert File.exists?(Path.join(doc, "BACKLOG.md"))
     refute File.exists?(Path.join(doc, "src.txt"))
+  end
+
+  test "R1-07/08 : base_branch malformé (`-inject`) → {:invalid_base_branch} AVANT tout git", %{
+    tmp_dir: tmp
+  } do
+    pod_dir = Path.join(tmp, "pod-badref")
+    File.mkdir_p!(pod_dir)
+    # repo_path bidon : la validation du ref coupe AVANT le clone, donc on ne l'atteint jamais.
+    profile = cap(%{"repo_path" => "/nonexistent/repo.git", "base_branch" => "-inject"})
+
+    assert {:error, {:clone_failed, {:invalid_base_branch, "-inject"}}} =
+             Clone.clone_or_skip(pod_dir, profile, [])
   end
 
   test "idempotence : workspace résiduel (pod prédécesseur mort) → nettoyé + re-cloné, pas de clone_failed",

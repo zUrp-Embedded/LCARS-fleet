@@ -2,28 +2,28 @@ defmodule Fleet.Coord.Application do
   @moduledoc """
   Application supervisor `fleet_coord`.
 
-  Au boot :
+  At boot:
 
-    1. `Fleet.Coord.Policies.init_policies!/0` charge YAML +
-       persiste `:persistent_term` (fail-fast)
-    2. Pas de GenServer démarré — `Policies` = pure functions,
-       aucun process raison runtime
+    1. `Fleet.Coord.Policies.init_policies!/0` loads YAML +
+       persists to `:persistent_term` (fail-fast)
+    2. No GenServer started — `Policies` = pure functions,
+       no process has a runtime reason to exist
 
-  ## Stratégie
+  ## Strategy
 
-  `:one_for_one` mais avec `[]` children (tree minimal). Le supervisor
-  existe pour cohérence umbrella OTP.
+  `:one_for_one` but with `[]` children (minimal tree). The supervisor
+  exists for umbrella OTP consistency.
 
-  ## Pas de pré-enregistrement d'atomes d'events
+  ## No pre-registration of event atoms
 
-  Le supervisor NE pré-déclare aucun vocab d'atomes : ce serait sans objet. Les
-  events réellement émis (`coord.notification_routed` / `coord.escalation_triggered` /
-  `coord.action_dispatched`) sont internés au compile-time par les littéraux
-  `:"coord.*"` de `emitter.ex` (passe d'émission extraite de Policies) et
-  enregistrés dans `events.yaml` — pas besoin d'un
-  `String.to_existing_atom` côté boot. (Toute liste d'atomes posée ici serait un
-  vocab mort, disjoint de l'émis et jamais broadcasté, comme l'ancien
-  `@coord_event_atoms` `coord.notify.dashboard`/`coord.action.*` à 0 caller.)
+  The supervisor pre-declares no atom vocab: it would be pointless. The
+  events actually emitted (`coord.notification_routed` / `coord.escalation_triggered` /
+  `coord.action_dispatched`) are interned at compile-time by the
+  `:"coord.*"` literals in `emitter.ex` (the emission pass extracted from Policies) and
+  registered in `events.yaml` — no need for a
+  `String.to_existing_atom` at boot. (Any atom list placed here would be
+  dead vocab, disjoint from what is emitted and never broadcast, like the old
+  `@coord_event_atoms` `coord.notify.dashboard`/`coord.action.*` with 0 callers.)
   """
 
   use Application
