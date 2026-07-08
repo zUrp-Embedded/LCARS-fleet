@@ -65,6 +65,7 @@ if config_env() != :test do
   # fleet_cap_profile (ch1) — chemin catalogue cap-profiles
   # ============================================================
   if path = System.get_env("LCARS_CAPPROFILES_ROOT") do
+    path = Fleet.EnvParse.path("LCARS_CAPPROFILES_ROOT", path)
     # Clé `:root_dir` (pas `:capprofiles_root`) — ce que
     # Fleet.CapProfile.root_dir/0 lit réellement (cap_profile.ex:206).
     config :fleet_cap_profile, root_dir: path
@@ -88,7 +89,8 @@ if config_env() != :test do
   # fleet_event_router (ch11) — webhook Gitea + signaux OS
   # ============================================================
   if path = System.get_env("FLEET_WEBHOOK_SECRET_PATH") do
-    config :fleet_event_router, webhook_secret_path: path
+    config :fleet_event_router,
+      webhook_secret_path: Fleet.EnvParse.path("FLEET_WEBHOOK_SECRET_PATH", path)
   end
 
   # F161/F036 : ON-SWITCH du listener webhook Gitea (:8081 HMAC). Sans lui, `:start_webhooks` restait
@@ -141,7 +143,7 @@ if config_env() != :test do
   # `LCARS_TMUX_SOCK_BASE` que les launchers lisent. (`/run/lcars/tmux-sock` = ancien RuntimeDirectory du
   # service systemd retiré, jamais le défaut courant.)
   if sock_base = System.get_env("LCARS_TMUX_SOCK_BASE") do
-    config :fleet_spawner, tmux_sock_base: sock_base
+    config :fleet_spawner, tmux_sock_base: Fleet.EnvParse.path("LCARS_TMUX_SOCK_BASE", sock_base)
   end
 
   # ============================================================
@@ -163,7 +165,7 @@ if config_env() != :test do
   # comme `LCARS_TMUX_SOCK_BASE` le fait pour la socket tmux des pods. La socket est bindée au MÊME chemin
   # absolu dans le sandbox bwrap (`--bind X X`) → host == namespace (pas de remap du chemin).
   if sock_base = System.get_env("LCARS_FLEET_MCP_SOCK_BASE") do
-    config :fleet_mcp, sock_base: sock_base
+    config :fleet_mcp, sock_base: Fleet.EnvParse.path("LCARS_FLEET_MCP_SOCK_BASE", sock_base)
   end
 
   # ============================================================
@@ -187,7 +189,7 @@ if config_env() != :test do
   if bridge_path = System.get_env("LCARS_FLEET_MCP_BRIDGE_PATH") do
     config :fleet_spawner, :mcp_server_spec, %{
       # Chemin HÔTE du bridge, copié per-pod par pod.ex (pas lancé en place).
-      "bridge_source" => bridge_path,
+      "bridge_source" => Fleet.EnvParse.path("LCARS_FLEET_MCP_BRIDGE_PATH", bridge_path),
       "command" => "bash",
       "args" => [
         "-c",
@@ -205,7 +207,8 @@ if config_env() != :test do
   # fleet_workflow (ch12) — racine catalogue pipelines YAML
   # ============================================================
   if path = System.get_env("LCARS_WORKFLOW_MAPS_ROOT") do
-    config :fleet_workflow, workflow_maps_root: path
+    config :fleet_workflow,
+      workflow_maps_root: Fleet.EnvParse.path("LCARS_WORKFLOW_MAPS_ROOT", path)
   end
 
   # TOMBSTONE (D3 2026-07-05) : le knob `LCARS_WORKSPACES_ROOT` (→ `:fleet_workflow,
@@ -219,7 +222,8 @@ if config_env() != :test do
   # fleet_starfleet (ch13) — log audit Cat 5
   # ============================================================
   if path = System.get_env("LCARS_STARFLEET_AUDIT_LOG") do
-    config :fleet_starfleet, audit_log_path: path
+    config :fleet_starfleet,
+      audit_log_path: Fleet.EnvParse.path("LCARS_STARFLEET_AUDIT_LOG", path)
   end
 
   # Drain de shutdown : backend réel (agrège l'in-flight Spawner + TaskQueue et active la
@@ -238,7 +242,7 @@ if config_env() != :test do
   config :fleet_starfleet, :coord_backend, Fleet.Coord
 
   if path = System.get_env("LCARS_COORD_POLICIES_PATH") do
-    config :fleet_coord, policies_path: path
+    config :fleet_coord, policies_path: Fleet.EnvParse.path("LCARS_COORD_POLICIES_PATH", path)
   end
 
   # ============================================================
@@ -334,7 +338,8 @@ if config_env() != :test do
   # FORGE_TOKEN_FILE. Absent = défaut (rétro-compat stricte). Pas de multi-forge SIMULTANÉ
   # (registry/routing par-projet) : hors-scope, ce serait un autre modèle.
   if role_tokens_dir = System.get_env("FORGE_ROLE_TOKENS_DIR") do
-    config :fleet_credentials, role_tokens_dir: role_tokens_dir
+    config :fleet_credentials,
+      role_tokens_dir: Fleet.EnvParse.path("FORGE_ROLE_TOKENS_DIR", role_tokens_dir)
   end
 
   # ============================================================
@@ -397,14 +402,14 @@ if config_env() != :test do
 
   # State task-queue (défaut home-relatif `~/.lcars/task-queue/state.json` ; `/var/lib/lcars` = fallback si home irrésoluble).
   if path = System.get_env("LCARS_STATE_PATH") do
-    config :fleet_task_queue, state_path: path
+    config :fleet_task_queue, state_path: Fleet.EnvParse.path("LCARS_STATE_PATH", path)
   end
 
   # State FS des pods (session_id/phase, recovery). Défaut `~/.lcars/state` (fleet sous l'humain,
   # doctrine 2026-06-11 — cf. pod.ex `default_state_fs_root`). Override explicite si déploiement
   # non-standard ; sinon le state suit le home de l'humain qui lance la fleet.
   if path = System.get_env("LCARS_STATE_FS_ROOT") do
-    config :fleet_spawner, state_fs_root: path
+    config :fleet_spawner, state_fs_root: Fleet.EnvParse.path("LCARS_STATE_FS_ROOT", path)
   end
 
   # Launchers pod (N0/N1) : path absolu lu par le spawner (défaut `/usr/local/bin`, pod.ex). Le launcher
@@ -412,21 +417,33 @@ if config_env() != :test do
   # `sudo cp` vers /usr/local/bin). Le dir parent est bindé RO dans le sandbox (pod.ex `system_mounts`,
   # dérivé de `claude_launch_path`). Param d'install → le `v2 → lcars` futur ne touche aucun code.
   if path = System.get_env("LCARS_BWRAP_LAUNCH_PATH"),
-    do: config(:fleet_spawner, bwrap_launch_path: path)
+    do:
+      config(:fleet_spawner,
+        bwrap_launch_path: Fleet.EnvParse.path("LCARS_BWRAP_LAUNCH_PATH", path)
+      )
 
   if path = System.get_env("LCARS_HOST_LAUNCH_PATH"),
-    do: config(:fleet_spawner, host_launch_path: path)
+    do:
+      config(:fleet_spawner,
+        host_launch_path: Fleet.EnvParse.path("LCARS_HOST_LAUNCH_PATH", path)
+      )
 
   if path = System.get_env("LCARS_CLAUDE_LAUNCH_PATH"),
-    do: config(:fleet_spawner, claude_launch_path: path)
+    do:
+      config(:fleet_spawner,
+        claude_launch_path: Fleet.EnvParse.path("LCARS_CLAUDE_LAUNCH_PATH", path)
+      )
 
   # Seed store (round-1 des pods — optimisation de reprise, JAMAIS requis ; vide = auto-peuplant, le pod
   # spawne fresh). Défaut repointé sous le home (`~/.lcars/seeds`) : c'est de l'état per-humain, pas du
   # source/install (seed_store.ex défautait `/home/projects.work`). Override `LCARS_SEED_STORE_ROOT`.
-  config :fleet_spawner,
-    seed_store_root:
-      System.get_env("LCARS_SEED_STORE_ROOT") ||
-        Path.join(System.user_home() || "/var/lib/lcars", ".lcars/seeds")
+  seed_store_root =
+    case System.get_env("LCARS_SEED_STORE_ROOT") do
+      nil -> Path.join(System.user_home() || "/var/lib/lcars", ".lcars/seeds")
+      p -> Fleet.EnvParse.path("LCARS_SEED_STORE_ROOT", p)
+    end
+
+  config :fleet_spawner, seed_store_root: seed_store_root
 
   # Kick d'onboarding du pod (nudge `yop` → claude appelle get_work_item). La fenêtre par défaut
   # (first 2s + 12×2.5s ≈ 32s) est trop courte face au cold-start claude en bwrap sur le service
