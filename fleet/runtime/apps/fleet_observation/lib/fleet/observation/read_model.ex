@@ -1,46 +1,46 @@
 defmodule Fleet.Observation.ReadModel do
   @moduledoc """
-  Frontière read-model de l'observabilité.
+  Read-model frontier of observability.
 
-  **Un seul** processus consomme le stream `%Fleet.Event{}` (abonné au bus
-  `Fleet.EventRouter.Bus`, topic `fleet.events`) et maintient une **projection**
-  lisible dans une table ETS qu'il possède. Les lecteurs (le `Deck` Ring 4)
-  lisent la projection via `projection/0` — un **read ETS direct** qui *bypass*
-  le GenServer (Iron Law OTP : les écritures sérialisent via le process, les
-  lectures ne le touchent pas).
+  **A single** process consumes the `%Fleet.Event{}` stream (subscribed to the
+  `Fleet.EventRouter.Bus` bus, topic `fleet.events`) and maintains a readable
+  **projection** in an ETS table it owns. The readers (the Ring 4 `Deck`)
+  read the projection via `projection/0` — a **direct ETS read** that *bypasses*
+  the GenServer (OTP Iron Law: writes serialize through the process, reads
+  don't touch it).
 
-  Le ReadModel **n'introspecte jamais** l'état interne d'un GenServer tiers : il
-  ne voit que les events publics. C'est la frontière read explicite du core.
+  The ReadModel **never introspects** the internal state of a third-party GenServer: it
+  sees only the public events. This is the explicit read frontier of the core.
 
-  ## Projection (forme JSON-safe)
+  ## Projection (JSON-safe shape)
 
       %{
-        total: n,                      # events vus depuis le boot
-        counts: %{type => n},          # tally par type (BRIDGE + FLOW dérivent d'ici)
-        stream: [summary, ...],        # 100 derniers (la colonne vertébrale)
-        workflow_runs: [summary, ...], # 20 derniers workflow_map.*
-        gatekeeper: [summary, ...],    # 20 derniers audit.verdict / coord.escalation_*
-        coordination: [summary, ...],  # 20 derniers coord.* / gitea.*
-        diagnostics: [summary, ...]    # 20 derniers boot/oauth/mcp/sdk/signal/git
+        total: n,                      # events seen since boot
+        counts: %{type => n},          # tally per type (BRIDGE + FLOW derive from here)
+        stream: [summary, ...],        # last 100 (the backbone)
+        workflow_runs: [summary, ...], # last 20 workflow_map.*
+        gatekeeper: [summary, ...],    # last 20 audit.verdict / coord.escalation_*
+        coordination: [summary, ...],  # last 20 coord.* / gitea.*
+        diagnostics: [summary, ...]    # last 20 boot/oauth/mcp/sdk/signal/git
       }
 
-  `summary = %{type, source, pod_id, correlation_id, ts}` — uniquement des
-  champs encodables (jamais le `payload` brut, qui peut porter des termes
-  non-JSON, cf. `Deck.pod_view/1`).
+  `summary = %{type, source, pod_id, correlation_id, ts}` — only
+  encodable fields (never the raw `payload`, which can carry non-JSON
+  terms, cf. `Deck.pod_view/2`).
 
-  ## Snapshot au boot
+  ## Snapshot at boot
 
-  Les decks event-dérivés démarrent vides (le bus est un flux, pas un store) ;
-  les **pods** restent un snapshot *live* via `Spawner.list_pods/0` (endpoint
-  `/api/pods`), car `pod.*` n'émet que des terminaux (completed/failed/drift),
-  pas un lifecycle complet.
+  The event-derived decks start empty (the bus is a stream, not a store);
+  the **pods** stay a *live* snapshot via `Spawner.list_pods/0` (endpoint
+  `/api/pods`), because `pod.*` emits only terminals (completed/failed/drift),
+  not a full lifecycle.
 
   ## Configuration
 
-    * `:subscribe` (opt, default `true`) — s'abonner au bus. Les tests passent
-      `false` et envoient les events via `send/2` (hermétique, pas de bus réel).
+    * `:subscribe` (opt, default `true`) — subscribe to the bus. Tests pass
+      `false` and send events via `send/2` (hermetic, no real bus).
     * `:fleet_observation, :start_readmodel` (app env, default `true`) —
-      `false` en `:test` (pas d'abonné parasite, invariant hermétique).
+      `false` in `:test` (no parasitic subscriber, hermetic invariant).
   """
 
   use GenServer
@@ -52,9 +52,9 @@ defmodule Fleet.Observation.ReadModel do
   @stream_max 100
   @deck_max 20
 
-  # Catalogue de routage deck (DATA, pas mécanique) : préfixe de type → deck.
-  # L'ordre compte (premier préfixe matché gagne). Une mécanique unique
-  # (`String.starts_with?`), le catalogue varie.
+  # Deck routing catalogue (DATA, not mechanics): type prefix → deck.
+  # Order matters (first matched prefix wins). One single mechanic
+  # (`String.starts_with?`), the catalogue varies.
   @deck_prefixes [
     {"workflow_map.", :workflow_runs},
     {"audit.verdict", :gatekeeper},
@@ -77,9 +77,9 @@ defmodule Fleet.Observation.ReadModel do
   end
 
   @doc """
-  Lit la projection courante. **Read ETS direct** — ne fait PAS de `GenServer.call`
-  (bypass, Iron Law). Si le ReadModel n'est pas démarré (table absente), renvoie
-  une projection vide — le deck ne crashe jamais sur un read-model éteint.
+  Reads the current projection. **Direct ETS read** — does NOT do a `GenServer.call`
+  (bypass, Iron Law). If the ReadModel isn't started (table absent), returns
+  an empty projection — the deck never crashes on a dead read-model.
   """
   @spec projection() :: map()
   def projection do
@@ -92,8 +92,8 @@ defmodule Fleet.Observation.ReadModel do
 
   @impl GenServer
   def init(opts) do
-    # Table possédée par CE process (`:protected`) → reads concurrents bypass,
-    # écritures via le GenServer. Auto-supprimée à la mort du process.
+    # Table owned by THIS process (`:protected`) → concurrent reads bypass,
+    # writes via the GenServer. Auto-deleted on process death.
     _ = :ets.new(@table, [:set, :protected, :named_table, read_concurrency: true])
     :ets.insert(@table, {:projection, empty()})
 
@@ -125,7 +125,7 @@ defmodule Fleet.Observation.ReadModel do
     {:noreply, %{state | proj: proj}}
   end
 
-  # Défensif : un message non-`%Fleet.Event{}` est ignoré, jamais un crash.
+  # Defensive: a non-`%Fleet.Event{}` message is ignored, never a crash.
   def handle_info(_other, state), do: {:noreply, state}
 
   # ── Projection (pure) ────────────────────────────────────────────────────────
@@ -152,8 +152,8 @@ defmodule Fleet.Observation.ReadModel do
     end
   end
 
-  # `payload` exclu (peut porter des termes non-encodables) ; on ne garde que
-  # des champs JSON-safe.
+  # `payload` excluded (can carry non-encodable terms); we keep only
+  # JSON-safe fields.
   defp summarize(%Fleet.Event{} = e) do
     %{
       type: to_string(e.type),

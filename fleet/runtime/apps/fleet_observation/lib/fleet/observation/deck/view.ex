@@ -1,33 +1,33 @@
 defmodule Fleet.Observation.Deck.View do
   @moduledoc """
-  Rendu HTML PUR de l'observation deck — le gabarit (HTML + CSS + JS inline),
-  séparé du contrôleur (`Fleet.Observation.Deck` : routing Plug + dérivation du
-  catalogue de rôles + snapshots live). Extrait de `Deck` (éclatement C4
-  2026-07-05) : ~85 % de ce fichier est du gabarit, zéro logique de routeur.
+  PURE HTML rendering of the observation deck — the template (inline HTML + CSS + JS),
+  separated from the controller (`Fleet.Observation.Deck`: Plug routing + role-catalogue
+  derivation + live snapshots). Extracted from `Deck` (C4 split
+  2026-07-05): ~85% of this file is template, zero router logic.
 
-  Deux vues, deux philosophies :
+  Two views, two philosophies:
 
-    * `page/0` — le shell LCARS « 7 decks » : coquille STATIQUE (aucune donnée
-      serveur), tout le contenu est tiré côté client par le JS embarqué
-      (`fetch /api/pods` + `/api/projection`, refresh 3 s). Fonction 0-arité :
-      la page ne dépend d'AUCUN état — la donnée passe par les endpoints JSON.
-    * `table_page/2` — le tableau basique rendu CÔTÉ SERVEUR (zéro CSS, zéro
-      JS, auto-refresh `<meta refresh>`) : reçoit les données du contrôleur
-      (rôles + pods groupés par rôle) et ne fait QUE les rendre. Pure : mêmes
-      arguments ⇒ même HTML.
+    * `page/0` — the LCARS "7 decks" shell: STATIC skeleton (no server
+      data), all content is pulled client-side by the embedded JS
+      (`fetch /api/pods` + `/api/projection`, 3 s refresh). 0-arity function:
+      the page depends on NO state — the data flows through the JSON endpoints.
+    * `table_page/2` — the basic table rendered SERVER-SIDE (zero CSS, zero
+      JS, auto-refresh `<meta refresh>`): receives the data from the controller
+      (roles + pods grouped by role) and does ONLY render them. Pure: same
+      arguments ⇒ same HTML.
 
-  Frontière : ce module ne lit NI le spawner NI le read-model NI le catalogue
-  cap-profiles — toute donnée arrive en argument. Le choix de QUOI afficher
-  (quels rôles, quels pods) reste dans `Deck` ; ici on décide seulement de
-  COMMENT le montrer. Toute valeur interpolée côté serveur passe par
-  l'échappement `h/1` (côté client, par `esc()` dans le JS embarqué).
+  Frontier: this module reads NEITHER the spawner NOR the read-model NOR the
+  cap-profiles catalogue — all data arrives as an argument. The choice of WHAT to display
+  (which roles, which pods) stays in `Deck`; here we decide only
+  HOW to show it. Every value interpolated server-side goes through
+  the `h/1` escaping (client-side, through `esc()` in the embedded JS).
   """
 
   @doc """
-  Shell LCARS statique : header BRIDGE (LED santé + horloge) + les 7 decks
-  (PODS live, les autres alimentés par la projection du read-model). Le JS
-  embarqué tire `/api/pods` et `/api/projection` toutes les 3 s — la page
-  elle-même ne porte aucune donnée serveur.
+  Static LCARS shell: BRIDGE header (health LED + clock) + the 7 decks
+  (PODS live, the others fed by the read-model projection). The embedded
+  JS pulls `/api/pods` and `/api/projection` every 3 s — the page
+  itself carries no server data.
   """
   @spec page() :: String.t()
   def page do
@@ -158,12 +158,12 @@ defmodule Fleet.Observation.Deck.View do
   end
 
   @doc """
-  Tableau basique rendu serveur (zéro CSS/JS, auto-refresh `<meta refresh>` 3 s).
-  `roles` = les rôles à afficher (une ligne TOUJOURS présente par rôle, « absent »
-  si aucun pod vivant ne le porte) ; `pods_by_role` = les pods vivants groupés par
-  rôle (un rôle peut en porter plusieurs : tous listés). Pure — le contrôleur
-  (`Deck`, route `/table`) fournit les deux. `border="1"` est le minimum pour que
-  les cellules soient visibles.
+  Basic server-rendered table (zero CSS/JS, auto-refresh `<meta refresh>` 3 s).
+  `roles` = the roles to display (a row ALWAYS present per role, "absent"
+  if no live pod carries it); `pods_by_role` = the live pods grouped by
+  role (a role can carry several: all listed). Pure — the controller
+  (`Deck`, `/table` route) provides both. `border="1"` is the minimum for the
+  cells to be visible.
   """
   @spec table_page([String.t()], %{optional(String.t() | nil) => [map()]}) :: String.t()
   def table_page(roles, pods_by_role) when is_list(roles) and is_map(pods_by_role) do
@@ -205,12 +205,12 @@ defmodule Fleet.Observation.Deck.View do
     end)
   end
 
-  # Un deck = une section panel LCARS.
+  # A deck = one LCARS panel section.
   defp deck(num, name, body) do
     ~s|<section class="panel"><div class="panel-head"><span class="panel-num">#{num}</span><span class="panel-name">#{name}</span></div><div class="panel-body">#{body}</div></section>|
   end
 
-  # Échappe pour le HTML — toute valeur (atom phase, string, nil) → texte sûr.
+  # Escapes for HTML — any value (phase atom, string, nil) → safe text.
   defp h(nil), do: ""
   defp h(v), do: v |> to_string() |> Plug.HTML.html_escape()
 end
