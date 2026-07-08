@@ -207,7 +207,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     tool_args = params["arguments"] || %{}
 
     {us, resp} =
-      :timer.tc(fn -> PodTools.handle_tool_call(tool, tool_args, %{pod_id: pod_id}) end)
+      :timer.tc(fn -> safe_handle_tool_call(tool, tool_args, pod_id) end)
 
     ms = div(us, 1000)
 
@@ -224,7 +224,25 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # PodTools.handle_tool_call only returns error atoms/tuples (never a binary) → one clause
+  # `PodTools.handle_tool_call` is EXPECTED total (`{:ok}|{:error}`), but a bug/edge in a tool could RAISE
+  # — an uncaught raise here KILLS the connection Task WITHOUT sending any response → the pod HANGS to its
+  # own timeout (SOC-RES-001). Rescue into an `{:error, ...}` 3-tuple → the caller renders it as an MCP
+  # `isError` result, so the pod ALWAYS gets an answer (MCP convention: a failure is a result, not a
+  # dropped connection).
+  defp safe_handle_tool_call(tool, tool_args, pod_id) do
+    tool_handler().handle_tool_call(tool, tool_args, %{pod_id: pod_id})
+  rescue
+    e -> {:error, {:tool_crashed, tool, Exception.message(e)}, %{pod_id: pod_id}}
+  catch
+    kind, reason -> {:error, {:tool_crashed, tool, {kind, reason}}, %{pod_id: pod_id}}
+  end
+
+  # Tool dispatcher: the real `PodTools` in prod. Injectable (`:fleet_mcp, :tool_handler`) so a test can
+  # supply a RAISING handler and prove the SOC-RES-001 rescue (a crashing tool → isError result, not a
+  # dropped connection). Same seam pattern as `LaunchBackend`/`McpSocketProvisioner` elsewhere.
+  defp tool_handler, do: Application.get_env(:fleet_mcp, :tool_handler, PodTools)
+
+  # `PodTools.handle_tool_call` only returns error atoms/tuples (never a binary) → one clause
   # suffices; `inspect/1` renders any reason readable in the text field of the MCP error response.
   defp error_text(reason), do: inspect(reason)
 

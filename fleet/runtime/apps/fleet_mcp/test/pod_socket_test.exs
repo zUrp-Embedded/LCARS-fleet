@@ -1,3 +1,10 @@
+defmodule Fleet.MCP.PodSocketTest.RaisingTools do
+  @moduledoc false
+  # Handler de tool qui CRASHE — injecté via `:fleet_mcp, :tool_handler` pour prouver le rescue
+  # SOC-RES-001 (un outil qui lève → isError result, PAS une connexion droppée).
+  def handle_tool_call(_tool, _args, _state), do: raise("simulated tool crash (SOC-RES-001)")
+end
+
 defmodule Fleet.MCP.PodSocketTest do
   @moduledoc """
   Transport pod-facing AF_UNIX per-pod (`Fleet.MCP.PodSocketAcceptor` /
@@ -205,6 +212,23 @@ defmodule Fleet.MCP.PodSocketTest do
     :gen_tcp.close(sock)
 
     assert %{"error" => %{"code" => -32_700}} = Jason.decode!(line)
+  end
+
+  test "SOC-RES-001 : un tool qui CRASHE → isError result, la connexion N'est PAS droppée (pod pas hang)" do
+    # handler de tool raisant injecté → sans le rescue de l'acceptor, la Task connexion mourrait → socket
+    # fermée → le `call` ci-dessous verrait recv `{:error, :closed}` (le pod attendrait son timeout).
+    Fleet.MCP.TestEnv.put_env_restoring(
+      :fleet_mcp,
+      :tool_handler,
+      Fleet.MCP.PodSocketTest.RaisingTools
+    )
+
+    pod = uniq("crash")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    resp = call(path, 1, "get_work_item", %{})
+    assert %{"id" => 1, "result" => %{"isError" => true}} = resp
   end
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
