@@ -57,8 +57,8 @@ defmodule Fleet.Credentials.ScopeValidator do
       ...> )
       {:error, {:insufficient_scopes, ["user:sessions:claude_code"]}}
   """
-  @spec validate([String.t()], map()) ::
-          :ok | {:error, {:insufficient_scopes, [String.t()]}}
+  @spec validate(term(), term()) ::
+          :ok | {:error, {:insufficient_scopes, [String.t()]} | {:invalid_scope_args, term()}}
   def validate(oauth_scopes, role_profile_flags)
       when is_list(oauth_scopes) and is_map(role_profile_flags) do
     required = compute_required(role_profile_flags)
@@ -66,6 +66,11 @@ defmodule Fleet.Credentials.ScopeValidator do
 
     if missing == [], do: :ok, else: {:error, {:insufficient_scopes, missing}}
   end
+
+  # Total (R1-36): malformed args (oauth_scopes not a list, role_profile_flags not a map) → typed refusal,
+  # not a FunctionClauseError. A caller (Gate) normalizes upstream, but the validator stands total on its own.
+  def validate(oauth_scopes, role_profile_flags),
+    do: {:error, {:invalid_scope_args, {oauth_scopes, role_profile_flags}}}
 
   @doc """
   List of the scopes required for a given set of flags.
