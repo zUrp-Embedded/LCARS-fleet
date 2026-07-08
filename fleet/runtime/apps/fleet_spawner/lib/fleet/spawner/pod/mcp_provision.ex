@@ -43,6 +43,23 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # (`Fleet.MCP.PodSocketSupervisor` in prod, `Fleet.Spawner.MCPSocketStub` set by config/test.exs).
   defp mcp_socket_provisioner, do: McpSocketProvisioner.resolved()
 
+  # The seam is DUCK-TYPED (fleet_mcp can't adopt the @behaviour — upward compile edge forbidden), so a
+  # misconfigured `:mcp_socket_provisioner` (a module that does not export the callbacks) would make
+  # `apply/3` raise `UndefinedFunctionError` deep in `:projecting` → crash the pod gen_statem with an
+  # obscure error. Guard with `function_exported?` → a typed `{:error, {:mcp_provisioner_misconfigured,
+  # mod}}` the caller folds onto `transition_failed`, a CLEAR deploy-error message.
+  defp conforming_provisioner do
+    mod = mcp_socket_provisioner()
+    Code.ensure_loaded(mod)
+
+    if function_exported?(mod, :ensure_pod_socket, 1) and
+         function_exported?(mod, :release_pod_socket, 1) do
+      {:ok, mod}
+    else
+      {:error, {:mcp_provisioner_misconfigured, mod}}
+    end
+  end
+
   @doc """
   ENSURE (state `:projecting`, before the launch): creates the listener + the socket file of THIS pod
   (idempotent on the central side) and returns `{:ok, socket_path}` (host path). The file MUST exist
@@ -50,7 +67,9 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   """
   @spec ensure_pod_socket(String.t()) :: {:ok, Path.t()} | {:error, term()}
   def ensure_pod_socket(pod_id) when is_binary(pod_id) do
-    apply(mcp_socket_provisioner(), :ensure_pod_socket, [pod_id])
+    with {:ok, mod} <- conforming_provisioner() do
+      apply(mod, :ensure_pod_socket, [pod_id])
+    end
   end
 
   @doc """
@@ -61,7 +80,14 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   """
   @spec release_pod_socket(map()) :: :ok
   def release_pod_socket(%{pod_id: pod_id}) when is_binary(pod_id) do
-    _ = apply(mcp_socket_provisioner(), :release_pod_socket, [pod_id])
+    case conforming_provisioner() do
+      {:ok, mod} ->
+        _ = apply(mod, :release_pod_socket, [pod_id])
+
+      {:error, reason} ->
+        Logger.warning("pod #{pod_id} release_pod_socket skipped — #{inspect(reason)}")
+    end
+
     :ok
   rescue
     e ->
