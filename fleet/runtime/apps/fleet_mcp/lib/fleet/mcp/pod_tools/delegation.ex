@@ -63,11 +63,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
           {:ok, map()} | {:error, term()}
   def create_issue(repo, title, brief, state)
       when is_binary(repo) and is_binary(title) and is_binary(brief) do
-    forge = ForgeClient.resolved()
-
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The arch then
-    # posts the issue IN ITS OWN NAME: the caller's role-account token.
-    with {:ok, role} <- require_architect(state),
+    # posts the issue IN ITS OWN NAME: the caller's role-account token. `conforming_forge/0` guards the
+    # DUCK-TYPED forge seam → a misconfigured seam is a typed error, not an obscure apply/3 crash (R2-05).
+    with {:ok, forge} <- conforming_forge(),
+         {:ok, role} <- require_architect(state),
          token when is_binary(token) <- Fleet.Credentials.RoleToken.token(role) do
       do_create_issue(forge, repo, title, brief, token: token)
     else
@@ -134,38 +134,52 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec issue_status(String.t(), integer(), map()) :: {:ok, map()} | {:error, term()}
   def issue_status(repo, number, state) when is_binary(repo) and is_integer(number) do
-    case require_architect(state) do
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, _role} <- require_architect(state),
+         {:ok, forge} <- conforming_forge() do
+      issue_state =
+        case forge.get_issue(repo, number, []) do
+          {:ok, issue} -> Map.get(issue, "state", "unknown")
+          _ -> "unknown"
+        end
 
-      {:ok, _role} ->
-        forge = ForgeClient.resolved()
+      result = %{
+        "repo" => repo,
+        "issue" => number,
+        "issue_state" => issue_state,
+        # "delivered" = the PR closed the issue (FF merge `Closes #N`). Multi-issue sequencing signal:
+        # the arch only chains issue N+1 on `delivered: true`.
+        #
+        # ⚠ KNOWN LIMIT (seen live 2026-07-04): `closed` ALONE conflates "closed by a merge"
+        # (real delivery) and "closed without delivery" (onboarding marker `[lcars-onboarded]`,
+        # manual closure) → false `delivered:true`. The CORRECT fix requires proving a MERGE (new
+        # forge request: PR merged for the issue — `issue_pr_status` only sees OPEN PRs, nil at
+        # merge). Deferred to the auditability batch. The TRIGGER is neutralized: create_issue
+        # now returns the real number → the arch no longer GUESSES and no longer queries the marker by mistake.
+        "delivered" => issue_state == "closed",
+        "pr" => issue_pr_status(forge, repo, number)
+      }
 
-        issue_state =
-          case forge.get_issue(repo, number, []) do
-            {:ok, issue} -> Map.get(issue, "state", "unknown")
-            _ -> "unknown"
-          end
-
-        result = %{
-          "repo" => repo,
-          "issue" => number,
-          "issue_state" => issue_state,
-          # "delivered" = the PR closed the issue (FF merge `Closes #N`). Multi-issue sequencing signal:
-          # the arch only chains issue N+1 on `delivered: true`.
-          #
-          # ⚠ KNOWN LIMIT (seen live 2026-07-04): `closed` ALONE conflates "closed by a merge"
-          # (real delivery) and "closed without delivery" (onboarding marker `[lcars-onboarded]`,
-          # manual closure) → false `delivered:true`. The CORRECT fix requires proving a MERGE (new
-          # forge request: PR merged for the issue — `issue_pr_status` only sees OPEN PRs, nil at
-          # merge). Deferred to the auditability batch. The TRIGGER is neutralized: create_issue
-          # now returns the real number → the arch no longer GUESSES and no longer queries the marker by mistake.
-          "delivered" => issue_state == "closed",
-          "pr" => issue_pr_status(forge, repo, number)
-        }
-
-        {:ok, result}
+      {:ok, result}
     end
+  end
+
+  # The forge/onboard seams are DUCK-TYPED: fleet_mcp cannot adopt the `@behaviour` (an
+  # fleet_mcp→fleet_pilot compile edge would be UPWARD-forbidden), so the compiler cannot check that the
+  # resolved module conforms. A misconfigured seam (a module missing a callback) would `apply/3`-crash
+  # with an obscure UndefinedFunctionError deep in the delegation. Guard at resolution → a CLEAR
+  # `{:error, {:seam_misconfigured, mod, missing}}` (R2-05, same shape as the spawner's R1-23 guard).
+  defp conforming_forge, do: conforming(ForgeClient, ForgeClient.resolved())
+  defp conforming_onboard, do: conforming(ProjectOnboard, ProjectOnboard.resolved())
+
+  defp conforming(behaviour, impl) do
+    Code.ensure_loaded(impl)
+
+    missing =
+      for {fun, arity} <- behaviour.behaviour_info(:callbacks),
+          not function_exported?(impl, fun, arity),
+          do: {fun, arity}
+
+    if missing == [], do: {:ok, impl}, else: {:error, {:seam_misconfigured, impl, missing}}
   end
 
   # ============================================================
@@ -177,45 +191,46 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # behaviour Delegation.ProjectOnboard; default Fleet.Pilot.ProjectOnboard, runtime dispatch —
   # no compile-time dep on fleet_pilot).
   defp do_create_project(name, args) do
-    onboard = ProjectOnboard.resolved()
-    org = Application.get_env(:fleet_mcp, :delegation_org, "fleet")
-    pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
+    with {:ok, onboard} <- conforming_onboard() do
+      org = Application.get_env(:fleet_mcp, :delegation_org, "fleet")
+      pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
-    opts = [org: org, description: Map.get(args, "description", pitch), pitch: pitch]
+      opts = [org: org, description: Map.get(args, "description", pitch), pitch: pitch]
 
-    case apply(onboard, :onboard, [name, opts]) do
-      {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
-        {:ok,
-         %{
-           "status" => "onboarded",
-           "repo" => repo,
-           "project_dir" => pdir,
-           "work_dir" => wdir,
-           "delegation_target" => repo
-         }}
+      case apply(onboard, :onboard, [name, opts]) do
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
+          {:ok,
+           %{
+             "status" => "onboarded",
+             "repo" => repo,
+             "project_dir" => pdir,
+             "work_dir" => wdir,
+             "delegation_target" => repo
+           }}
 
-      {:error, reason} ->
-        {:error, {:onboard_failed, inspect(reason)}}
+        {:error, reason} ->
+          {:error, {:onboard_failed, inspect(reason)}}
+      end
     end
   end
 
   # Import sequence — same :project_onboard seam, callback :import instead of :onboard.
   defp do_import_project(full_name) do
-    onboard = ProjectOnboard.resolved()
+    with {:ok, onboard} <- conforming_onboard() do
+      case apply(onboard, :import, [full_name, []]) do
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
+          {:ok,
+           %{
+             "status" => "imported",
+             "repo" => repo,
+             "project_dir" => pdir,
+             "work_dir" => wdir,
+             "delegation_target" => repo
+           }}
 
-    case apply(onboard, :import, [full_name, []]) do
-      {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir}} ->
-        {:ok,
-         %{
-           "status" => "imported",
-           "repo" => repo,
-           "project_dir" => pdir,
-           "work_dir" => wdir,
-           "delegation_target" => repo
-         }}
-
-      {:error, reason} ->
-        {:error, {:import_failed, inspect(reason)}}
+        {:error, reason} ->
+          {:error, {:import_failed, inspect(reason)}}
+      end
     end
   end
 

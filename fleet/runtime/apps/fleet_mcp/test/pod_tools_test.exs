@@ -253,6 +253,22 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
+    test "R2-05 : forge_client MISCONFIGURÉ → {:error, {:seam_misconfigured, _, _}} (pas de crash apply/3)" do
+      # Enum n'exporte AUCUN callback forge → la garde conforming_forge le détecte au lieu de laisser
+      # `apply(forge, :get_issue, …)` lever un UndefinedFunctionError. Seam duck-typed = 0 check compilo.
+      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, Enum)
+      pod = uniq("pod-arch")
+
+      assert {:error, {:seam_misconfigured, Enum, missing}, _} =
+               PodTools.handle_tool_call(
+                 "get_issue_status",
+                 %{"number" => 1, "project" => "fleet/x"},
+                 pod_state(pod)
+               )
+
+      assert {:get_issue, 3} in missing
+    end
+
     test "lit l'état du repo PASSÉ dans `project` (pas d'un projet courant globalisé)" do
       pod = uniq("pod-arch")
 
