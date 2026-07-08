@@ -44,13 +44,13 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  Draft SP role-aware : le draft d'un rôle est `agent-<role>-base.md`, résolu par `metadata.name`. Les
-  drafts pod sont composés par blocs (`Fleet.SPBuilder.Blocks` + `mix lcars.sp.gen`).
+  Role-aware SP draft: a role's draft is `agent-<role>-base.md`, resolved by `metadata.name`. Pod drafts are
+  composed by blocks (`Fleet.SPBuilder.Blocks` + `mix lcars.sp.gen`).
 
-  **NO-FALLBACK** (cf. mémoire no-sp-no-pod-no-fleet) : un rôle sans son draft dédié → `{:error,
-  {:agent_draft_missing, …}}` → mort dure du spawn (état `:projecting`). Plus de dégradation silencieuse vers
-  un draft générique — un rôle sans SP est un demi-rôle refusé. `role` est interpolé dans un path → validé via
-  le smart-constructor slug (un `role` malformé → `{:error, {:agent_draft_invalid_role, role}}`).
+  **NO-FALLBACK** (cf. memory no-sp-no-pod-no-fleet): a role without its dedicated draft → `{:error,
+  {:agent_draft_missing, …}}` → hard spawn death (`:projecting` state). No more silent degradation to a
+  generic draft — a role without an SP is a rejected half-role. `role` is interpolated into a path →
+  validated via the slug smart-constructor (a malformed `role` → `{:error, {:agent_draft_invalid_role, role}}`).
   """
   @spec read_agent_draft(Fleet.CapProfile.t()) ::
           {:ok, String.t()}
@@ -59,12 +59,12 @@ defmodule Fleet.Spawner.Pod.Assets do
   def read_agent_draft(%Fleet.CapProfile{} = cap) do
     role = Fleet.CapProfile.name(cap)
 
-    # NO-FALLBACK (cf. mémoire no-sp-no-pod-no-fleet) : CHAQUE rôle DOIT avoir son SP dédié
-    # `agent-<role>-base.md`. Absent → `{:error, {:agent_draft_missing, …}}` → échec de l'état `:projecting`
-    # → mort DURE du spawn. Pas de SP → pas de pod → pas de fleet. Aucune dégradation silencieuse vers un
-    # draft générique (un rôle sans SP = un demi-rôle sale → le système refuse). Un agent vanilla = `claude`
-    # lancé à la main hors fleet, jamais via la forge. `role` est interpolé dans un path → un slug malformé
-    # est un cap-profile cassé (fail-loud), pas un fallback.
+    # NO-FALLBACK (cf. memory no-sp-no-pod-no-fleet): EACH role MUST have its dedicated SP
+    # `agent-<role>-base.md`. Missing → `{:error, {:agent_draft_missing, …}}` → `:projecting` state failure
+    # → HARD spawn death. No SP → no pod → no fleet. No silent degradation to a generic draft (a role without
+    # an SP = a dirty half-role → the system refuses). A vanilla agent = `claude` launched by hand outside the
+    # fleet, never through the forge. `role` is interpolated into a path → a malformed slug is a broken
+    # cap-profile (fail-loud), not a fallback.
     if Fleet.Slug.valid?(role) do
       read_tagged(
         Application.app_dir(:fleet_sp_builder, "priv/sp_drafts/agent-#{role}-base.md"),

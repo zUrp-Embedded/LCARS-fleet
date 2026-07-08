@@ -766,8 +766,8 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # Le 1er send-keys sera `yop` (bootstrap) ; le SP du rôle (bloc `core/runtime-contract`) porte le workflow
-  # get_work_item→submit_result. Pas de tmux_session (StubBackend/kill race) → aucune action.
+  # The 1st send-keys will be `yop` (bootstrap); the role's SP (`core/runtime-contract` block) carries the
+  # get_work_item→submit_result workflow. No tmux_session (StubBackend/kill race) → no action.
   defp brief_kick_actions(%{tmux_session: nil}), do: []
 
   defp brief_kick_actions(%{tmux_session: session}) when is_binary(session),

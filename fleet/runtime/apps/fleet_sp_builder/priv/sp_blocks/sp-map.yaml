@@ -1,15 +1,15 @@
-# Carte rôle → blocs SP. Ordre de la liste = ordre d'assemblage ; `role/*` toujours en dernier.
-# Le générateur (`mix lcars.sp.gen`) compose ces blocs → `priv/sp_drafts/agent-<role>-base.md`.
+# Role → SP block map. List order = assembly order; `role/*` always last.
+# The generator (`mix lcars.sp.gen`) composes these blocks → `priv/sp_drafts/agent-<role>-base.md`.
 #
-# RÈGLE DURE (no-fallback, cf. mémoire no-sp-no-pod-no-fleet) : un rôle du catalogue sans entrée ici, OU un
-# bloc listé mais absent du disque → le générateur ÉCHOUE (fail-loud). Pas de SP → pas de pod → pas de fleet.
-# Un test de non-régression vérifie : tous les blocs existent + le flat committé == la re-génération (no-drift).
+# HARD RULE (no-fallback, cf. memory no-sp-no-pod-no-fleet): a catalogue role with no entry here, OR a listed
+# block absent from disk → the generator FAILS (fail-loud). No SP → no pod → no fleet.
+# A non-regression test checks: all blocks exist + the committed flat == the regeneration (no-drift).
 #
-# NB : `architect` (user-facing, hors socle-pod) n'est PAS ici — il garde son draft existant (socle
-# différent : humain en face). Tous les autres rôles spawnés via `assets.ex` sont couverts → le flip
-# fail-loud de `read_agent_draft` est fait (plus de fallback worker-base).
+# NB: `architect` (user-facing, outside the pod socle) is NOT here — it keeps its historical draft (a
+# different socle: a human in front). All other roles spawned via `assets.ex` are covered → the no-fallback
+# flip of `read_agent_draft` is done (no more worker-base fallback).
 
-# --- Juges de PR (jugent le diff dans leur workspace) ---
+# --- PR judges (judge the diff in their workspace) ---
 qualifier:
   - core/pod-sanctuary
   - core/runtime-contract
@@ -28,7 +28,7 @@ reviewer:
   - method/review-conformance
   - role/reviewer
 
-# --- Producteur (git-natif : committe en local, le système pousse) ---
+# --- Producer (git-native: commits locally, the system pushes) ---
 engineer:
   - core/pod-sanctuary
   - core/runtime-contract
@@ -37,7 +37,7 @@ engineer:
   - method/engineer-implement
   - role/engineer
 
-# --- Juge du brief (pré-PR, read-only : pas de diff, l'input est le brief) ---
+# --- Brief judge (pre-PR, read-only: no diff, the input is the brief) ---
 consultant:
   - core/pod-sanctuary
   - core/runtime-contract
@@ -46,7 +46,7 @@ consultant:
   - method/brief-review
   - role/consultant
 
-# --- Juge d'exception / promotion finale (arbitre les verdicts amont ; pas de diff) ---
+# --- Exception judge / final promotion (arbitrates the upstream verdicts; no diff) ---
 gatekeeper:
   - core/pod-sanctuary
   - core/runtime-contract

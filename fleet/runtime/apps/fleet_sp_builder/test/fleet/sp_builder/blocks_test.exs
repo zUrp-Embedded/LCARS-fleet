@@ -3,11 +3,11 @@ defmodule Fleet.SPBuilder.BlocksTest do
 
   alias Fleet.SPBuilder.Blocks
 
-  # `priv` résolu au RUNTIME (l'app est démarrée en test) — le _build reflète la source au dernier compile.
+  # `priv` resolved at RUNTIME (the app is started in test) — `_build` mirrors the source at the last compile.
   defp blocks_dir, do: :fleet_sp_builder |> Application.app_dir("priv") |> Path.join("sp_blocks")
   defp drafts_dir, do: :fleet_sp_builder |> Application.app_dir("priv") |> Path.join("sp_drafts")
 
-  test "chaque rôle de la carte compose un SP non vide et titré" do
+  test "each role in the map composes a non-empty, titled SP" do
     for {role, blocks} <- Blocks.role_map(blocks_dir()) do
       sp = Blocks.compose!(role, blocks, blocks_dir())
       assert sp =~ "# System Prompt — #{role}"
@@ -15,40 +15,40 @@ defmodule Fleet.SPBuilder.BlocksTest do
     end
   end
 
-  test "no-drift : le flat committé == la re-génération depuis les blocs (sinon `mix lcars.sp.gen`)" do
+  test "no-drift: the committed flat == the regeneration from the blocks (else run `mix lcars.sp.gen`)" do
     for {role, blocks} <- Blocks.role_map(blocks_dir()) do
       committed = drafts_dir() |> Path.join("agent-#{role}-base.md") |> File.read!()
 
       assert committed == Blocks.compose!(role, blocks, blocks_dir()),
-             "agent-#{role}-base.md a drifté de ses blocs → lance `mix lcars.sp.gen` et committe"
+             "agent-#{role}-base.md drifted from its blocks → run `mix lcars.sp.gen` and commit"
     end
   end
 
-  test "fail-loud : un bloc listé absent → lève (no-fallback)" do
+  test "fail-loud: a listed block absent from disk → raises (no-fallback)" do
     assert_raise RuntimeError, ~r/no-fallback/, fn ->
-      Blocks.compose!("x", ["core/n-existe-pas"], blocks_dir())
+      Blocks.compose!("x", ["core/does-not-exist"], blocks_dir())
     end
   end
 
-  test "fail-loud : rôle sans blocs → lève (no-fallback)" do
+  test "fail-loud: a role with no blocks → raises (no-fallback)" do
     assert_raise RuntimeError, ~r/no-fallback/, fn ->
       Blocks.compose!("x", [], blocks_dir())
     end
   end
 
-  test "complétude catalogue : chaque rôle-pod a son SP dédié (le flip no-fallback briquerait son spawn sinon)" do
-    # Rôles spawnés via `Fleet.Spawner.Pod.Assets.read_agent_draft` (bwrap/host pods). Hors liste :
-    # `starfleet` (host-native, booté par un systemd unit séparé, ne passe PAS par assets.ex).
-    # `architect` garde son draft historique (socle user-facing, hors blocs). Un NOUVEAU rôle-pod → l'ajouter
-    # ici ET lui donner un draft, sinon son spawn meurt dur (no-fallback, cf. no-sp-no-pod-no-fleet).
+  test "catalog completeness: each pod role has its own SP (the no-fallback flip would brick its spawn otherwise)" do
+    # Roles spawned via `Fleet.Spawner.Pod.Assets.read_agent_draft` (bwrap/host pods). Excluded:
+    # `starfleet` (host-native, booted by a separate systemd unit, does NOT go through assets.ex).
+    # `architect` keeps its historical draft (user-facing socle, outside the blocks). A NEW pod role → add it
+    # here AND give it a draft, else its spawn dies hard (no-fallback, cf. no-sp-no-pod-no-fleet).
     pod_roles = ~w(architect consultant engineer gatekeeper qualifier reviewer)
 
     for role <- pod_roles do
       path = Path.join(drafts_dir(), "agent-#{role}-base.md")
 
       assert File.exists?(path),
-             "agent-#{role}-base.md manquant → le spawn de #{role} briquerait (no-fallback). " <>
-               "Compose-le (bloc + carte sp-map.yaml + `mix lcars.sp.gen`) ou fournis son draft."
+             "agent-#{role}-base.md missing → spawning #{role} would brick (no-fallback). " <>
+               "Compose it (block + sp-map.yaml + `mix lcars.sp.gen`) or provide its draft."
     end
   end
 end

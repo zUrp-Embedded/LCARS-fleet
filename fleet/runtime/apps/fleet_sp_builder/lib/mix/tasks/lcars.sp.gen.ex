@@ -1,16 +1,16 @@
 defmodule Mix.Tasks.Lcars.Sp.Gen do
-  @shortdoc "Compose les SP de rôle : priv/sp_blocks/ → priv/sp_drafts/agent-<role>-base.md"
+  @shortdoc "Compose per-role SPs: priv/sp_blocks/ → priv/sp_drafts/agent-<role>-base.md"
   @moduledoc """
-  Génère les SP de rôle par composition de blocs (`Fleet.SPBuilder.Blocks`).
+  Generate the per-role system prompts by composing blocks (`Fleet.SPBuilder.Blocks`).
 
       mix lcars.sp.gen
 
-  Lit `priv/sp_blocks/sp-map.yaml` + les blocs, écrit `priv/sp_drafts/agent-<role>-base.md`. Fail-loud sur
-  bloc/rôle manquant (no-fallback). Les flats générés sont committés ; un test vérifie l'absence de drift.
+  Reads `priv/sp_blocks/sp-map.yaml` + the blocks, writes `priv/sp_drafts/agent-<role>-base.md`. Fail-loud on
+  a missing block/role (no-fallback). The generated flats are committed; a test checks for drift.
   """
   use Mix.Task
 
-  # Chemin SOURCE (compile-time) de `priv/`, robuste au cwd : ce fichier est en `lib/mix/tasks/`.
+  # SOURCE path (compile-time) of `priv/`, robust to the cwd: this file lives under `lib/mix/tasks/`.
   @priv Path.expand("../../../priv", __DIR__)
 
   @impl Mix.Task
@@ -20,6 +20,6 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
     roles =
       Fleet.SPBuilder.Blocks.generate!(Path.join(@priv, "sp_blocks"), Path.join(@priv, "sp_drafts"))
 
-    Mix.shell().info("SP de rôle générés (#{length(roles)}) : #{Enum.join(roles, ", ")}")
+    Mix.shell().info("Per-role SPs generated (#{length(roles)}): #{Enum.join(roles, ", ")}")
   end
 end

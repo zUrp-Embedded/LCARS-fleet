@@ -345,8 +345,8 @@ defmodule Fleet.Spawner do
   @doc """
   Réveille un pod long-lived (lifetime_scope != one-shot) pour un nouveau cycle.
 
-  **Rail porteur = réveil-par-flag** (`turn.flag` + outil Monitor in-pod), touché ICI. Déclenche le workflow
-  commun (bloc `core/runtime-contract` du SP par rôle) :
+  **Rail porteur = réveil-par-flag** (`turn.flag` + outil Monitor in-pod), touché ICI. Triggers the common
+  workflow (`core/runtime-contract` block of the per-role SP):
 
       (flag touché → Monitor « ton tour ») → mcp__fleet__get_work_item → traite → mcp__fleet__submit_result
 
