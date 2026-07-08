@@ -162,12 +162,23 @@ defmodule Fleet.Spawner.PublishConsumer do
   Defense in depth: a LIST is returned as-is only if it is already a clean keyword-list
   (`{atom, _}` pairs). A list coming from a decoded JSON array is never one (string keys → a list
   of maps/scalars) — so it would be filtered to `[]` rather than swallowed raw as spawner opts.
-  The main lock remains the admission allowlist of `/api/admin/spawn` (Fleet.API.Rest); this doubles it.
+
+  ALLOWLIST (R1-30): beyond the atom-leak filter, only `@allowed_spawn_opts` keys are kept — the DROP
+  of everything else is what actually "doubles" the `/api/admin/spawn` admission lock (the moduledoc
+  claimed it; the code did not). The allowlist mirrors the SOLE producer
+  (`Fleet.API.SpawnAdmission.build_admin_opts`, which emits ONLY `brief` + `pod_id`). The infrastructure
+  opts (`pod_dir_root`/`state_fs_root` = FS redirect out of the confined home, `containment` = host-native
+  escape, `launch_backend`/`fleet_spawner` = backend override) are all existing atoms → they PASS the
+  atom-leak filter, so without an allowlist a forged bus event could inject them. `pod_id` stays
+  re-validated by `spawn_pod` itself (T1 `valid_pod_id?`).
   """
+  @allowed_spawn_opts ~w(brief pod_id)a
+
   def to_keyword(map) when is_map(map) do
     Enum.flat_map(map, fn {k, v} ->
       try do
-        [{String.to_existing_atom(to_string(k)), v}]
+        atom = String.to_existing_atom(to_string(k))
+        if atom in @allowed_spawn_opts, do: [{atom, v}], else: []
       rescue
         ArgumentError -> []
       end
@@ -175,7 +186,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   end
 
   def to_keyword(list) when is_list(list) do
-    if Keyword.keyword?(list), do: list, else: []
+    if Keyword.keyword?(list), do: Keyword.take(list, @allowed_spawn_opts), else: []
   end
 
   def to_keyword(_), do: []
