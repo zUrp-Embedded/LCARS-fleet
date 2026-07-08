@@ -83,6 +83,10 @@ defmodule Fleet.TaskQueue.Server do
   # mutation. We keep the N most recent; the active ones do not count (cf. prune_terminal/2).
   @default_retention_terminal 500
 
+  # Default last-poll TTL (24 h): a live pod polls FAR more often than this (get_for_pod on each work
+  # cycle) → this never drops a live pod, only bounds dead-pod-without-clear leakage to ~1 day of churn.
+  @default_poll_retention_ms 86_400_000
+
   # ============================================================
   # Lifecycle
   # ============================================================
@@ -121,7 +125,13 @@ defmodule Fleet.TaskQueue.Server do
             :fleet_task_queue,
             :retention_terminal_max,
             @default_retention_terminal
-          )
+          ),
+      # TTL of a per-pod last-poll (in-mem): a pod that has not polled within it is dead → its entry is
+      # pruned. Bounds `polls` (record_poll only ADDS, clear_for_pod is the only removal → a pod that
+      # crashes WITHOUT a clear would leak its entry forever, unbounded over uptime).
+      poll_retention_ms:
+        Keyword.get(opts, :poll_retention_ms) ||
+          Application.get_env(:fleet_task_queue, :poll_retention_ms, @default_poll_retention_ms)
     }
 
     case load_state(state_path, persist?) do
@@ -460,8 +470,18 @@ defmodule Fleet.TaskQueue.Server do
     Enum.any?(Map.values(work_items), &(&1.pod_id == pod_id and &1.state == :completed))
   end
 
-  defp record_poll(state, pod_id) when is_binary(pod_id),
-    do: %{state | polls: Map.put(state.polls, pod_id, now())}
+  defp record_poll(state, pod_id) when is_binary(pod_id) do
+    now = now()
+
+    # Prune stale polls on each activity (bounds `polls` — see @default_poll_retention_ms), then record.
+    polls = state.polls |> prune_stale_polls(now, state.poll_retention_ms) |> Map.put(pod_id, now)
+    %{state | polls: polls}
+  end
+
+  defp prune_stale_polls(polls, now, ttl_ms) do
+    cutoff = DateTime.add(now, -ttl_ms, :millisecond)
+    Map.reject(polls, fn {_pod, ts} -> DateTime.compare(ts, cutoff) == :lt end)
+  end
 
   defp put_work_item(state, %WorkItem{} = work_item) do
     work_items = Map.put(state.work_items, work_item.id, work_item)

@@ -434,6 +434,28 @@ defmodule Fleet.TaskQueueTest do
     assert {:ok, :assigned} = TaskQueue.pod_status(q, "p1")
   end
 
+  test "MINE-TQ-01 : les polls STALE (> TTL) sont purgés → `polls` borné (pod mort sans clear ne fuit pas)",
+       %{topic: topic} do
+    {:ok, q} =
+      start_supervised(
+        {Server, name: nil, topic: topic, persist: false, poll_retention_ms: 30},
+        id: :qpolls
+      )
+
+    # podA poll (get_for_pod enregistre le poll même sans work item = signal bootstrap)
+    TaskQueue.get_for_pod(q, "podA")
+    assert %DateTime{} = TaskQueue.last_poll(q, "podA")
+
+    # au-delà du TTL (30ms) sans re-poll ni clear : podB poll → le poll STALE de podA est purgé
+    Process.sleep(60)
+    TaskQueue.get_for_pod(q, "podB")
+
+    assert TaskQueue.last_poll(q, "podA") == nil,
+           "le poll stale de podA (pod mort sans clear) aurait dû être purgé"
+
+    assert %DateTime{} = TaskQueue.last_poll(q, "podB")
+  end
+
   test "7. failed via deadline", %{q: q} do
     deadline = DateTime.add(DateTime.utc_now(), 200, :millisecond)
     {:ok, t} = TaskQueue.enqueue(q, "pod-A", %{brief: "x", deadline: deadline})
