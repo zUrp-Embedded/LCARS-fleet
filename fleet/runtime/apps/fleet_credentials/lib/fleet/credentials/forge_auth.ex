@@ -34,6 +34,8 @@ defmodule Fleet.Credentials.ForgeAuth do
   # and the bounded wrapper (`Fleet.Credentials.Shell.run/2`) can kill it within its timeout. Set even
   # when `forge_auth` is NOT configured (local repo `file://`): that is precisely the case where the
   # absence of credential would trigger the prompt. Covers ALL call-sites going through `git_env()`.
+  require Logger
+
   @git_no_prompt {"GIT_TERMINAL_PROMPT", "0"}
 
   @doc """
@@ -45,17 +47,45 @@ defmodule Fleet.Credentials.ForgeAuth do
   @spec git_env() :: [{String.t(), String.t()}]
   def git_env do
     case Application.get_env(:fleet_credentials, :forge_auth) do
+      nil ->
+        # ABSENT = a fleet with no forge configured (tests, local-only `file://`) → anti-prompt only, no
+        # noise. This is the legitimate "no auth" state (distinct from a present-but-broken config below).
+        [@git_no_prompt]
+
       %{url_prefix: prefix, token: token}
       when is_binary(prefix) and is_binary(token) and prefix != "" and token != "" ->
-        [
-          @git_no_prompt,
-          {"GIT_CONFIG_COUNT", "1"},
-          {"GIT_CONFIG_KEY_0", "http.#{prefix}.extraheader"},
-          {"GIT_CONFIG_VALUE_0", "Authorization: token #{token}"}
-        ]
+        if safe_prefix?(prefix) do
+          [
+            @git_no_prompt,
+            {"GIT_CONFIG_COUNT", "1"},
+            {"GIT_CONFIG_KEY_0", "http.#{prefix}.extraheader"},
+            {"GIT_CONFIG_VALUE_0", "Authorization: token #{token}"}
+          ]
+        else
+          # R1-15: a newline/control char in `url_prefix` would inject a parasite git-config key. Refuse
+          # the header (never `inspect` the value — it sits next to the token). LOUD, not silent.
+          Logger.error(
+            "ForgeAuth: :forge_auth url_prefix carries a newline/control char — auth header SKIPPED " <>
+              "(git ops UNAUTHENTICATED). Fix the forge config."
+          )
 
-      _ ->
+          [@git_no_prompt]
+        end
+
+      _other ->
+        # PRESENT but malformed (empty/missing url_prefix or token, wrong shape): do NOT swallow silently
+        # (MINE-CRED-01). Otherwise git runs UNAUTHENTICATED and only fails later at the remote (403/404),
+        # masking the real cause = the broken credential config. LOUD (no `inspect` — a token may be inside).
+        Logger.error(
+          "ForgeAuth: :forge_auth is PRESENT but malformed (empty/missing url_prefix or token) — auth " <>
+            "header SKIPPED (git ops UNAUTHENTICATED). Fix the forge config."
+        )
+
         [@git_no_prompt]
     end
   end
+
+  # `url_prefix` is interpolated into the git-config key `http.<prefix>.extraheader`: a control char
+  # (esp. newline) would inject a parasite config line. NOT the full URL authority — a guardrail.
+  defp safe_prefix?(prefix), do: not String.match?(prefix, ~r/[\x00-\x1F\x7F]/)
 end
