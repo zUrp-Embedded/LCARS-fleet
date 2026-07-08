@@ -1,71 +1,71 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   @moduledoc """
-  Cycle de vie REVIEW (PR) extrait de `Fleet.Pilot.StepDispatcher`.
+  REVIEW (PR) lifecycle extracted from `Fleet.Pilot.StepDispatcher`.
 
-  `StepDispatcher.dispatch_review/2` (PUBLIQUE — contrat du poller) reste au cœur : elle fait le gate
-  PR (`in-flight`/`awaits-arch`), lit `pr_review_state` (verdicts commit-scopés + jury stable) PUIS
-  DÉLÈGUE ici tout l'aiguillage. Ce module porte l'AIGUILLAGE (`dispatch_by_verdicts/5`) + la
-  PROMOTION scellée (`promote_pr`) ; les deux autres clusters du flux descendent en sous-modules :
+  `StepDispatcher.dispatch_review/2` (PUBLIC — the poller's contract) stays at the core: it does the PR
+  gate (`in-flight`/`awaits-arch`), reads `pr_review_state` (commit-scoped verdicts + stable jury) THEN
+  DELEGATES all routing here. This module carries the ROUTING (`dispatch_by_verdicts/5`) + the sealed
+  PROMOTION (`promote_pr`); the flow's two other clusters descend into sub-modules:
 
-    * `RoleDispatch` — feuille d'EXÉCUTION partagée : prépare et spawn UN rôle sur la PR
-      (juge / rework / résolution). C'est la coupe qui rend le graphe acyclique : aiguillage ET
-      remédiation convergent dessus (couper aiguillage↔rework en deux aurait créé un cycle).
-    * `Remediation` — rework/conflit BORNÉS (budget forge-natif, IncidentRegistry) → au-delà,
-      escalade arch, jamais de churn infini.
+    * `RoleDispatch` — shared EXECUTION leaf: prepares and spawns ONE role on the PR
+      (judge / rework / resolution). It's the cut that makes the graph acyclic: routing AND
+      remediation both converge on it (splitting routing↔rework in two would have created a cycle).
+    * `Remediation` — BOUNDED rework/conflict (forge-native budget, IncidentRegistry) → beyond that,
+      arch escalation, never infinite churn.
 
-  La promotion reste ICI : son error-path (`{:error, {:merge, _}}`) ré-entre immédiatement dans
-  l'aiguillage (`Remediation.route_merge_failure`, qui relit l'objet PR et classe la cause RÉELLE) — le
-  couple merge/échec se lit d'un seul tenant au niveau de la décision.
+  Promotion stays HERE: its error-path (`{:error, {:merge, _}}`) immediately re-enters
+  routing (`Remediation.route_merge_failure`, which re-reads the PR object and classifies the REAL
+  cause) — the merge/failure pair reads as one piece at the decision level.
 
-  ## Dépendance UNI-directionnelle (pas de cycle)
+  ## UNI-directional dependency (no cycle)
 
-  ReviewLifecycle → `RoleDispatch`/`Remediation` → `Spawn` (feuille de spawn SINGLE-AUTHORITY) +
-  `ArchEscalation` (écriture de l'escalade humaine) + `GatekeeperSeal` (sceau de merge, autorité
-  EXTERNE partagée avec `StepRunCompleter.promote`) → ø. Ce module ne NOMME JAMAIS `StepDispatcher` :
-  le flux review descend vers les feuilles, il ne remonte pas au cœur. Le cœur DÉCIDE (gate PR +
-  verdicts lus), ReviewLifecycle AIGUILLE, les feuilles EXÉCUTENT.
+  ReviewLifecycle → `RoleDispatch`/`Remediation` → `Spawn` (SINGLE-AUTHORITY spawn leaf) +
+  `ArchEscalation` (writing the human escalation) + `GatekeeperSeal` (merge seal, EXTERNAL authority
+  shared with `StepRunCompleter.promote`) → ø. This module NEVER NAMES `StepDispatcher`:
+  the review flow descends toward the leaves, it doesn't climb back to the core. The core DECIDES (PR
+  gate + verdicts read), ReviewLifecycle ROUTES, the leaves EXECUTE.
 
-  ## Frontière : struct de seams `%Ctx{}` (blindé, `@enforce_keys`)
+  ## Boundary: `%Ctx{}` seams struct (hardened, `@enforce_keys`)
 
-  Le flux review a besoin d'un large contexte (forge/loader/spawner/task_queue/resolver/repo/forge_opts/
-  wake_recovery/opts). Contrairement aux seams ÉTROITS de `Spawn`/`ArchEscalation` (6 / 3 champs, un
-  cluster feuille), ce contexte est le paquet complet du dispatch — d'où un struct DÉDIÉ plutôt qu'une
-  map nue : `@enforce_keys` force chaque champ à la construction (site UNIQUE : `StepDispatcher.
-  dispatch_review/2`) et un accès `ctx.<typo>` ne compile pas (là où `Map.get(ctx, :typo)` passerait en
-  silence). Les sous-modules re-construisent `Spawn.Seams`/`ArchEscalation.Seams` depuis ce `Ctx` au
-  site d'appel de chaque feuille (frontière étroite préservée).
+  The review flow needs a large context (forge/loader/spawner/task_queue/resolver/repo/forge_opts/
+  wake_recovery/opts). Unlike the NARROW seams of `Spawn`/`ArchEscalation` (6 / 3 fields, one
+  leaf cluster), this context is the dispatch's full package — hence a DEDICATED struct rather than a
+  bare map: `@enforce_keys` forces every field at construction (SINGLE site: `StepDispatcher.
+  dispatch_review/2`) and a `ctx.<typo>` access does not compile (where `Map.get(ctx, :typo)` would pass
+  silently). The sub-modules re-build `Spawn.Seams`/`ArchEscalation.Seams` from this `Ctx` at the
+  call site of each leaf (narrow boundary preserved).
 
-  ## Helpers PARTAGÉS avec le cœur, threadés SANS cycle ni fork
+  ## Helpers SHARED with the core, threaded WITHOUT cycle or fork
 
-  `route_for/4` (lecture de la route gravée) et `tag_err/2` (tagging d'erreur de résolution) sont
-  utilisés par les DEUX flux (issue `dispatch_issue` AU CŒUR + review ici). Ils RESTENT définis au cœur
-  (leur home : le flux issue les appelle en direct) et sont threadés vers le flux review par CAPTURE
-  dans le `Ctx` (`route_reader` / `err_tagger`), exactement comme `resolver`/`wake_recovery` — la
-  capture est créée AU CŒUR, donc ce flux n'a aucune référence compile-time vers
-  `StepDispatcher` (dépendance strictement uni-directionnelle, pas de cycle) sans dupliquer les deux
-  helpers (pas de fork).
+  `route_for/4` (reading the engraved route) and `tag_err/2` (tagging a resolution error) are
+  used by BOTH flows (issue `dispatch_issue` AT THE CORE + review here). They STAY defined at the core
+  (their home: the issue flow calls them directly) and are threaded into the review flow by CAPTURE
+  in the `Ctx` (`route_reader` / `err_tagger`), exactly like `resolver`/`wake_recovery` — the
+  capture is created AT THE CORE, so this flow has no compile-time reference to
+  `StepDispatcher` (strictly uni-directional dependency, no cycle) without duplicating the two
+  helpers (no fork).
   """
 
   require Logger
 
-  # Feuille de spawn SINGLE-AUTHORITY : `safe_kill/2` (die-on-promote) — même autorité que le
-  # spawn des juges/rework (via RoleDispatch), jamais un fork.
+  # SINGLE-AUTHORITY spawn leaf: `safe_kill/2` (die-on-promote) — same authority as the
+  # judge/rework spawn (via RoleDispatch), never a fork.
   alias Fleet.Pilot.StepDispatcher.Spawn
 
-  # Remédiation BORNÉE (rework budget forge-natif / conflit via IncidentRegistry) — DÉCIDE, puis
-  # redescend sur RoleDispatch (re-spawn producteur) ou ArchEscalation (mur humain).
+  # BOUNDED remediation (rework forge-native budget / conflict via IncidentRegistry) — DECIDES, then
+  # descends back onto RoleDispatch (producer re-spawn) or ArchEscalation (human wall).
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation
 
-  # Feuille d'EXÉCUTION du spawn PR-role (juge/rework/résolution) : résolutions read-only puis
-  # Spawn.spawn_step. Partagée aiguillage ↔ remédiation (la coupe acyclique du flux).
+  # EXECUTION leaf of the PR-role spawn (judge/rework/resolution): read-only resolutions then
+  # Spawn.spawn_step. Shared by routing ↔ remediation (the flow's acyclic cut).
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
 
   defmodule Ctx do
     @moduledoc """
-    Contexte complet du flux review, construit au site UNIQUE `StepDispatcher.dispatch_review/2` et
-    threadé à travers l'aiguillage/rework/promotion. Struct DÉDIÉ (pas une map) : `@enforce_keys`
-    force chaque champ, un accès `ctx.<typo>` ne compile pas. `route_reader`/`err_tagger` sont les
-    captures des helpers du cœur (`route_for`/`tag_err`) partagés avec le flux issue.
+    Full context of the review flow, built at the SINGLE site `StepDispatcher.dispatch_review/2` and
+    threaded through routing/rework/promotion. DEDICATED struct (not a map): `@enforce_keys`
+    forces every field, a `ctx.<typo>` access does not compile. `route_reader`/`err_tagger` are the
+    captures of the core's helpers (`route_for`/`tag_err`) shared with the issue flow.
     """
     @enforce_keys [
       :forge,
@@ -84,53 +84,53 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     defstruct @enforce_keys
 
     @type t :: %__MODULE__{
-            # Client forge injecté (seam `:forge_client`, défaut prod `Fleet.Pilot.ForgeClient`).
+            # Injected forge client (seam `:forge_client`, prod default `Fleet.Pilot.ForgeClient`).
             forge: module(),
-            # Loader de cap-profile injecté (seam `:loader`, défaut prod `Fleet.CapProfile`).
+            # Injected cap-profile loader (seam `:loader`, prod default `Fleet.CapProfile`).
             loader: module(),
-            # Loader de workflow_map injecté (seam `:workflow_map_loader`, défaut `&Fleet.Workflow.Loader.load!/1`) —
-            # lit le budget rework map-level (`spec.max_rework_rounds`) sur le chemin de rework PR.
+            # Injected workflow_map loader (seam `:workflow_map_loader`, default `&Fleet.Workflow.Loader.load!/1`) —
+            # reads the map-level rework budget (`spec.max_rework_rounds`) on the PR rework path.
             workflow_map_loader: (String.t() -> map()),
-            # Spawner injecté (seam `:spawner`, défaut prod `Fleet.Spawner`).
+            # Injected spawner (seam `:spawner`, prod default `Fleet.Spawner`).
             spawner: module(),
-            # Broker de briefs injecté (seam `:task_queue`, défaut prod `Fleet.TaskQueue`).
+            # Injected brief broker (seam `:task_queue`, prod default `Fleet.TaskQueue`).
             task_queue: module(),
-            # Résolveur projet injecté (seam `:project_resolver`, défaut `&default_project_resolver/2`).
+            # Injected project resolver (seam `:project_resolver`, default `&default_project_resolver/2`).
             resolver: (String.t(), keyword() -> {:ok, map() | nil} | {:error, term()}),
-            # `owner/name` du repo (PR + issue parente y vivent).
+            # Repo `owner/name` (the PR + parent issue live there).
             repo: String.t(),
-            # Opts forge (base_url/token…) passés au ForgeClient.
+            # Forge opts (base_url/token…) passed to the ForgeClient.
             forge_opts: keyword(),
-            # Recovery de wake injecté (seam `:wake_recovery`, défaut `&Fleet.Pilot.WakeRecovery.wake/3`).
+            # Injected wake recovery (seam `:wake_recovery`, default `&Fleet.Pilot.WakeRecovery.wake/3`).
             wake_recovery: (String.t(), (-> any()), keyword() -> :ok | {:error, term()}),
-            # Le keyword `opts` brut du dispatch (base des `review_opts`, budgets, seam d'incident registry).
+            # The raw dispatch `opts` keyword (base of `review_opts`, budgets, incident registry seam).
             opts: keyword(),
-            # Capture de `StepDispatcher.route_for/4` (lecture de la route gravée) — partagée avec le flux issue.
+            # Capture of `StepDispatcher.route_for/4` (reading the engraved route) — shared with the issue flow.
             route_reader: (module(), String.t(), integer(), keyword() ->
                              {:ok, {String.t(), String.t()} | nil} | {:error, term()}),
-            # Capture de `StepDispatcher.tag_err/2` (tagging d'erreur de résolution) — partagée avec le flux issue.
+            # Capture of `StepDispatcher.tag_err/2` (tagging a resolution error) — shared with the issue flow.
             err_tagger: (term(), atom() -> term())
           }
   end
 
   # ============================================================
-  # Aiguillage (entrée du flux review)
+  # Routing (review flow entry)
   # ============================================================
 
   @doc """
-  Aiguillage REVIEWS-DRIVEN (la source de vérité = les reviews postées, PAS `requested_reviewers`
-  que Gitea ne vide pas). Sans branch-protection : LCARS agrège (décision user). ORDRE :
-    1. un juge demandé SANS verdict décisif → round actif → on le spawn (sérialisé par le verrou PR).
-       Un juge déjà décisif (même encore listé dans requested_reviewers) n'est PAS re-spawné → fin de
-       la boucle de re-spawn.
-    2. tous les demandés ont un verdict + au moins un `:changes_requested` → rework du producteur.
-    3. tous les demandés ont APPROUVÉ → MERGE (scellé gatekeeper).
-    4. aucun juge demandé → ADOPTION : PR découverte sans setup (typ. HUMAINE/fork) → on POSE les juges
-       (reviewer_roles) → review normale au tick suivant. Gate agent-agnostique : peu importe l'origine.
+  REVIEWS-DRIVEN routing (the source of truth = the posted reviews, NOT `requested_reviewers`
+  which Gitea does not clear). Without branch-protection: LCARS aggregates (user decision). ORDER:
+    1. a requested judge WITHOUT a decisive verdict → active round → we spawn it (serialized by the PR lock).
+       A judge already decisive (even if still listed in requested_reviewers) is NOT re-spawned → end of
+       the re-spawn loop.
+    2. all requested have a verdict + at least one `:changes_requested` → producer rework.
+    3. all requested have APPROVED → MERGE (gatekeeper-sealed).
+    4. no requested judge → ADOPTION: PR discovered without setup (typ. HUMAN/fork) → we LAY the judges
+       (reviewer_roles) → normal review on the next tick. Agent-agnostic gate: origin doesn't matter.
 
-  Point d'entrée du flux review : `StepDispatcher.dispatch_review/2` y délègue après le gate PR + la
-  lecture de `pr_review_state`. `requested` = union(requested_reviewers volatil, jury stable) ;
-  `verdicts` = map `login → verdict` commit-scopée.
+  Entry point of the review flow: `StepDispatcher.dispatch_review/2` delegates here after the PR gate + the
+  read of `pr_review_state`. `requested` = union(volatile requested_reviewers, stable jury);
+  `verdicts` = commit-scoped `login → verdict` map.
   """
   @spec dispatch_by_verdicts([String.t()], map(), integer(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
@@ -148,10 +148,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
         Remediation.dispatch_rework(pr_number, head, ctx)
 
       true ->
-        # Tous approuvé → MERGE. Un échec de merge n'est PAS forcément un conflit : on relit l'objet PR
-        # et on aiguille sur la cause RÉELLE (`route_merge_failure` : déjà-mergé / annulé / draft / policy
-        # re-request / vrai conflit / inconnu). Fini le fourre-tout « conflit → eng rebase impossible » (mur
-        # 2026-07-07) et le sceau mensonger d'avant `merge d'abord`.
+        # All approved → MERGE. A merge failure is NOT necessarily a conflict: we re-read the PR object
+        # and route on the REAL cause (`route_merge_failure`: already-merged / cancelled / draft / policy
+        # re-request / real conflict / unknown). Gone is the catch-all "conflict → eng rebase impossible" (wall
+        # 2026-07-07) and the lying seal from before `merge first`.
         case promote_pr(pr_number, head, ctx) do
           {:error, {:merge, reason}} ->
             Remediation.route_merge_failure(pr_number, head, reason, ctx)
@@ -162,13 +162,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     end
   end
 
-  # ADOPTION — une PR sans AUCUN juge (ni requested_reviewers volatil, ni jury stable) n'a pas été mise en
-  # place par le pipeline : typiquement une PR HUMAINE (fork + cross-repo) que le poller a découverte + scopée
-  # (via l'issue liée `Closes #N`). Le gate est AGENT-AGNOSTIQUE → on POSE les juges (reviewer_roles, token
-  # système via forge_opts) ; au tick suivant `requested` les porte → review normale → merge/rework, EXACTEMENT
-  # comme un livrable d'agent. Une PR d'agent a TOUJOURS ses juges via open_deliverable_pr → n'arrive jamais
-  # ici. Best-effort : un échec de pose surface (`{:error, {:adopt_failed, _}}`), pas de crash ni de skip muet.
-  # Idempotent : re-poser les mêmes reviewers = no-op Gitea (une PR adoptée n'est jamais re-adoptée : requested ≠ []).
+  # ADOPTION — a PR with NO judge at all (neither volatile requested_reviewers nor stable jury) was not set
+  # up by the pipeline: typically a HUMAN PR (fork + cross-repo) that the poller discovered + scoped
+  # (via the linked issue `Closes #N`). The gate is AGENT-AGNOSTIC → we LAY the judges (reviewer_roles, system
+  # token via forge_opts); on the next tick `requested` carries them → normal review → merge/rework, EXACTLY
+  # like an agent deliverable. An agent PR ALWAYS has its judges via open_deliverable_pr → never reaches
+  # here. Best-effort: a laying failure surfaces (`{:error, {:adopt_failed, _}}`), no crash or silent skip.
+  # Idempotent: re-laying the same reviewers = Gitea no-op (an adopted PR is never re-adopted: requested ≠ []).
   defp adopt_orphan_pr(pr_number, %Ctx{} = ctx) do
     reviewers = Fleet.Pilot.Roles.reviewer_roles(ctx.opts)
 
@@ -179,27 +179,27 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   end
 
   # ============================================================
-  # Promotion (merge scellé gatekeeper)
+  # Promotion (gatekeeper-sealed merge)
   # ============================================================
 
-  # PROMOTE PR-state-driven (interim, sans branch-protection) : tous les juges ont
-  # approuvé → le système SCELLE. Comment de fin + merge signés GATEKEEPER
-  # (gardien des PRs — « c'est dans son nom » ; token de rôle, `as_role`). Comment HONNÊTE
-  # (on ne ment pas, on montre) : livré par l'eng, validé par les juges (APPROVED), mergé
-  # par le système (branch-protection OFF en dev → LCARS agrège, pas Gitea — explicité). Le merge
-  # `rebase` (LINÉAIRE, gère un `main` avancé sous une PR parallèle — multi-issue, cf. merge_pr) —
-  # `seal_and_merge` ferme l'issue EXPLICITEMENT, APRÈS le commentaire (plus de `Closes #N`/auto-close
-  # Gitea, chronologie cohérente, QoL 2026-07-07). Pas de verrou (poller mono-process) ; PR déjà
-  # mergée → 409 → la PR disparaît au tick suivant (idempotent).
+  # PROMOTE PR-state-driven (interim, without branch-protection): all judges have
+  # approved → the system SEALS. Closing comment + merge signed GATEKEEPER
+  # (the PRs' keeper — "it's in the name"; role token, `as_role`). HONEST comment
+  # (we don't lie, we show): delivered by the eng, validated by the judges (APPROVED), merged
+  # by the system (branch-protection OFF in dev → LCARS aggregates, not Gitea — made explicit). The
+  # `rebase` merge (LINEAR, handles a `main` advanced under a parallel PR — multi-issue, cf. merge_pr) —
+  # `seal_and_merge` closes the issue EXPLICITLY, AFTER the comment (no more `Closes #N`/Gitea auto-close,
+  # coherent chronology, QoL 2026-07-07). No lock (single-process poller); PR already
+  # merged → 409 → the PR disappears on the next tick (idempotent).
   #
-  # `promote_comment` + le rôle gatekeeper + le merge vivent dans `Fleet.Pilot.GatekeeperSeal`
-  # (sceau UNIQUE partagé avec `StepRunCompleter.promote` — pas de fork de signature de merge).
+  # `promote_comment` + the gatekeeper role + the merge live in `Fleet.Pilot.GatekeeperSeal`
+  # (SINGLE seal shared with `StepRunCompleter.promote` — no fork of the merge signature).
   defp promote_pr(pr_number, head, %Ctx{} = ctx) do
     with {:ok, {issue_n, producer}} <- RoleDispatch.parse_feature_branch_or_skip(head) do
-      # Sceau UNIQUE partagé avec `StepRunCompleter.promote` : commentaire gatekeeper + merge
-      # signé gatekeeper. La signature est posée EN INTERNE par `seal_and_merge` (writer unique
-      # `GatekeeperSeal.as_gatekeeper/1`) — un chemin de merge séparé forkerait en token système
-      # (l'escalade signerait `system`).
+      # SINGLE seal shared with `StepRunCompleter.promote`: gatekeeper comment + gatekeeper-signed
+      # merge. The signature is applied INTERNALLY by `seal_and_merge` (single writer
+      # `GatekeeperSeal.as_gatekeeper/1`) — a separate merge path would fork into a system token
+      # (the escalation would sign `system`).
       case Fleet.Pilot.GatekeeperSeal.seal_and_merge(
              ctx.forge,
              ctx.repo,
@@ -209,22 +209,22 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              ctx.forge_opts
            ) do
         :ok ->
-          # Die-on-promote (best-effort). Le producteur est `one-shot` : il est DÉJÀ mort en fin de
-          # build/rework → ce kill est un no-op dans le cas nominal. On garde DÉLIBÉRÉMENT `for_issue`
-          # (pas `for_repo`) : pour un producteur `slot_scope: project`, `for_issue(issue_n, producer)`
-          # cible un pod_id PHANTÔME (`<repo>-issue-N-engineer` n'existe pas — l'identité projet est
-          # `<repo>-engineer`) → no-op SÛR. Utiliser `for_repo` ici TUERAIT l'eng s'il code déjà une
-          # AUTRE issue (pod projet partagé) = bug « kill the wrong eng ». À revisiter SEULEMENT si un
-          # producteur PIPE (long-lived) est réintroduit (cleanup ciblé non-naïf nécessaire alors).
+          # Die-on-promote (best-effort). The producer is `one-shot`: it is ALREADY dead at the end of
+          # build/rework → this kill is a no-op in the nominal case. We DELIBERATELY keep `for_issue`
+          # (not `for_repo`): for a `slot_scope: project` producer, `for_issue(issue_n, producer)`
+          # targets a PHANTOM pod_id (`<repo>-issue-N-engineer` does not exist — the project identity is
+          # `<repo>-engineer`) → SAFE no-op. Using `for_repo` here would KILL the eng if it's already coding
+          # ANOTHER issue (shared project pod) = "kill the wrong eng" bug. To revisit ONLY if a
+          # PIPE (long-lived) producer is reintroduced (targeted, non-naive cleanup needed then).
           _ =
             Spawn.safe_kill(ctx.spawner, Fleet.Pilot.PodId.for_issue(ctx.repo, issue_n, producer))
 
-          # Verrou ISSUE (régression QoL 2026-07-07 : ce chemin ne l'a JAMAIS levé — le PR-lock se lève
-          # via `StepRunCompleter.route(:reviewed)` de chaque juge, mais l'ISSUE-lock, démarré par le
-          # PRODUCTEUR à `dispatch_issue` et persistant toute la review, n'était retiré QUE par
-          # `StepRunCompleter.route(:promote)` — jamais atteint sur ce chemin poller-driven). `producer`
-          # (parsé de la branche `lcars/issue-N-<role>`) EST l'identité qui a démarré ce stopwatch —
-          # même autorité `StepRunCompleter.unlock/5` que le chemin workflow_map (pas de fork).
+          # ISSUE lock (QoL regression 2026-07-07: this path NEVER lifted it — the PR-lock lifts
+          # via each judge's `StepRunCompleter.route(:reviewed)`, but the ISSUE-lock, started by the
+          # PRODUCER at `dispatch_issue` and persisting through the whole review, was removed ONLY by
+          # `StepRunCompleter.route(:promote)` — never reached on this poller-driven path). `producer`
+          # (parsed from the `lcars/issue-N-<role>` branch) IS the identity that started this stopwatch —
+          # same `StepRunCompleter.unlock/5` authority as the workflow_map path (no fork).
           _ =
             Fleet.Pilot.StepRunCompleter.unlock(
               ctx.forge,

@@ -1,49 +1,49 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   @moduledoc """
-  Remédiation BORNÉE du flux review, extraite de `ReviewLifecycle` : re-spawn du producteur pour REWORK
-  (verdict `changes_requested`), et AIGUILLAGE d'un échec de merge selon sa cause réelle
-  (`route_merge_failure`) — toujours sous un frein / une classification honnête, jamais de churn infini
-  ni d'action sur une prémisse fausse.
+  BOUNDED remediation of the review flow, extracted from `ReviewLifecycle`: producer re-spawn for REWORK
+  (verdict `changes_requested`), and ROUTING of a merge failure by its real cause
+  (`route_merge_failure`) — always under a brake / an honest classification, never infinite churn
+  nor action on a false premise.
 
-  ## Rework — frein anti-churn
+  ## Rework — anti-churn brake
 
-  Compteur FORGE-NATIF (`count_change_request_rounds` = nb de reviews REQUEST_CHANGES, monotone),
-  budget = `spec.max_rework_rounds` du MAP de l'issue (DONNÉE, le MÊME frein que le rebond issue — plus
-  de défaut codé `:max_pr_rework_rounds` aligné à la main). Au-delà → ESCALADE ARCH. Budget/route/map
-  illisible → on NE re-spawn PAS à l'aveugle : escalade (symétrique de `rebound` côté StepRunConsumer).
+  FORGE-NATIVE counter (`count_change_request_rounds` = number of REQUEST_CHANGES reviews, monotonic),
+  budget = the issue MAP's `spec.max_rework_rounds` (DATA, the SAME brake as the issue rebound — no more
+  hand-aligned hard-coded `:max_pr_rework_rounds` default). Beyond that → ARCH ESCALATION. Unreadable
+  budget/route/map → we DO NOT re-spawn blindly: escalation (symmetric to `rebound` on the StepRunConsumer side).
 
-  ## Échec de merge — classification honnête (`route_merge_failure`)
+  ## Merge failure — honest classification (`route_merge_failure`)
 
-  Un merge peut échouer pour des raisons NATURELLEMENT distinctes (`Fleet.Pilot.MergeOutcome`, relue de
-  l'objet PR) : déjà-mergé / annulé (close humain) / draft / policy (re-request humaine) / vrai conflit
-  git / inconnu. Chacune a son aiguillage propre. Le fourre-tout historique « tout échec = conflit →
-  dispatch eng rebase » est retiré (l'eng est forge-aveugle, il ne peut PAS rebaser → mur 2026-07-07).
-  Le throttle des cas escaladés = le verrou `lcars-awaits-arch` posé par `ArchEscalation` (le poller
-  SKIP l'issue), pas un IncidentRegistry (plus de boucle de résolution à borner ici).
+  A merge can fail for NATURALLY distinct reasons (`Fleet.Pilot.MergeOutcome`, re-read from
+  the PR object): already-merged / cancelled (human close) / draft / policy (human re-request) / real git
+  conflict / unknown. Each has its own routing. The historical catch-all "any failure = conflict →
+  dispatch eng rebase" is removed (the eng is forge-blind, it CANNOT rebase → wall 2026-07-07).
+  The throttle for escalated cases = the `lcars-awaits-arch` lock laid by `ArchEscalation` (the poller
+  SKIPS the issue), not an IncidentRegistry (no more resolution loop to bound here).
 
-  La DÉCISION vit ici ; l'EXÉCUTION du re-spawn descend vers `RoleDispatch` (feuille partagée avec le
-  spawn de juge — pas de fork de la mécanique) ; l'ÉCRITURE de l'escalade humaine descend vers
-  `ArchEscalation` (seams étroits reconstruits ICI, jamais le `Ctx` entier).
+  The DECISION lives here; the EXECUTION of the re-spawn descends to `RoleDispatch` (leaf shared with the
+  judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
+  `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
   """
 
   require Logger
 
-  # Écriture de l'escalade humaine (cluster IMPUR) : Remediation DÉCIDE (budget rework /
-  # IncidentRegistry), ArchEscalation ÉCRIT (comment gatekeeper dédupliqué + verrou `awaits-arch`).
+  # Writing the human escalation (IMPURE cluster): Remediation DECIDES (rework budget /
+  # IncidentRegistry), ArchEscalation WRITES (deduplicated gatekeeper comment + `awaits-arch` lock).
   alias Fleet.Pilot.StepDispatcher.ArchEscalation
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
 
   @doc """
-  Rework juge : la PR porte un verdict REQUEST_CHANGES courant (l'état a déjà été lu par
-  `dispatch_review` → pas de re-lecture ici) → le PRODUCTEUR (rôle git_native de head.ref)
-  reprend pour corriger sur la même PR. Idempotent (verrou PR).
+  Judge rework: the PR carries a current REQUEST_CHANGES verdict (the state was already read by
+  `dispatch_review` → no re-read here) → the PRODUCER (git_native role from head.ref)
+  resumes to fix on the same PR. Idempotent (PR lock).
 
-  FREIN ANTI-CHURN : sans compteur, ce chemin re-spawnerait le producteur à chaque tick —
-  le frein `rebound` (budget workflow_map, StepRunConsumer) n'est JAMAIS appelé sur le
-  chemin PR-review-driven → rework INFINI si l'eng ne satisfait jamais le juge. Bornage
-  forge-natif (cf. moduledoc), au-delà → escalade arch, fin du churn.
+  ANTI-CHURN BRAKE: without a counter, this path would re-spawn the producer on every tick —
+  the `rebound` brake (workflow_map budget, StepRunConsumer) is NEVER called on the
+  PR-review-driven path → INFINITE rework if the eng never satisfies the judge. Forge-native
+  bounding (cf. moduledoc), beyond that → arch escalation, end of churn.
   """
   @spec dispatch_rework(integer(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
@@ -64,8 +64,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
             )
           end
         else
-          # Budget non vérifiable (route/map illisible) OU compteur illisible → on n'entre PAS dans une
-          # boucle aveugle : on remonte à l'arch (symétrique du frein issue `rework_budget_unreadable`).
+          # Budget not verifiable (unreadable route/map) OR unreadable counter → we do NOT enter a
+          # blind loop: we escalate to the arch (symmetric to the issue brake `rework_budget_unreadable`).
           {:error, reason} ->
             ArchEscalation.escalate_rework(
               arch_seams(ctx),
@@ -80,9 +80,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  # Budget rework PR = le MÊME `spec.max_rework_rounds` que le frein issue (policy de churn UNIQUE du
-  # pipeline, lue comme DONNÉE — plus de défaut codé aligné-à-la-main). Route de l'issue → nom de map →
-  # budget. Routeless / map illisible → `{:error}` : le caller escalade (jamais de boucle aveugle).
+  # PR rework budget = the SAME `spec.max_rework_rounds` as the issue brake (the pipeline's SINGLE churn
+  # policy, read as DATA — no more hand-aligned hard-coded default). Issue route → map name →
+  # budget. Routeless / unreadable map → `{:error}`: the caller escalates (never a blind loop).
   defp pr_rework_budget(%Ctx{} = ctx, issue_n) do
     with {:ok, {map_name, _step}} when is_binary(map_name) <-
            ctx.route_reader.(ctx.forge, ctx.repo, issue_n, ctx.forge_opts),
@@ -97,21 +97,21 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   end
 
   @doc """
-  Aiguillage d'un ÉCHEC DE MERGE selon sa cause RÉELLE (`Fleet.Pilot.MergeOutcome`, relue de l'objet PR
-  frais — jamais le fourre-tout « conflit »). Remplace l'ancien `dispatch_conflict_resolution` qui
-  supposait TOUJOURS un conflit git et dispatchait le producteur pour rebaser — IMPOSSIBLE (le pod est
-  forge-aveugle, pas de credentials) → mur constaté live 2026-07-07 sur une simple fenêtre de policy.
+  Routing of a MERGE FAILURE by its REAL cause (`Fleet.Pilot.MergeOutcome`, re-read from the fresh PR
+  object — never the "conflict" catch-all). Replaces the old `dispatch_conflict_resolution` which
+  ALWAYS assumed a git conflict and dispatched the producer to rebase — IMPOSSIBLE (the pod is
+  forge-blind, no credentials) → wall observed live 2026-07-07 on a mere policy window.
 
-    * `:merged`   → quelqu'un a mergé entre-temps (course multi-acteur / replay) → `{:ok, :merged}` idempotent.
-    * `:closed`   → un humain a FERMÉ la PR (annulation) → la brique est morte, on ne s'acharne pas.
-    * `:draft`    → un humain l'a repassée en brouillon (parquée) → skip ; `dispatch_review` la re-skip
-                    tant que draft (garde dispatch-juge).
-    * `:policy`   → git mergeable mais branch-protection refuse (approbations retirées par une
-                    RE-REQUEST humaine, CI…) → on re-converge : re-dispatch le juge re-demandé (timeline).
-                    Aucun re-demandé = blocage de policy qu'on ne peut pas lever mécaniquement → escalade honnête.
-    * `:conflict` / `:unknown` → non auto-résoluble par le système (barrière forge-aveugle) → escalade
-                    HONNÊTE arch (plus de brief menteur « après un rebase » ni de dispatch-eng-impossible).
-                    La résolution mécanique du conflit (système rebase en scratch) est un incrément ultérieur.
+    * `:merged`   → someone merged in the meantime (multi-actor race / replay) → `{:ok, :merged}` idempotent.
+    * `:closed`   → a human CLOSED the PR (cancellation) → the brick is dead, we don't push on.
+    * `:draft`    → a human moved it back to draft (parked) → skip; `dispatch_review` re-skips it
+                    while draft (dispatch-judge guard).
+    * `:policy`   → git-mergeable but branch-protection refuses (approvals cleared by a
+                    human RE-REQUEST, CI…) → we re-converge: re-dispatch the re-requested judge (timeline).
+                    No re-requested = policy block we can't lift mechanically → honest escalation.
+    * `:conflict` / `:unknown` → not auto-resolvable by the system (forge-blind barrier) → HONEST
+                    arch escalation (no more lying brief "after a rebase" nor impossible-eng-dispatch).
+                    Mechanical conflict resolution (system rebase in scratch) is a later increment.
   """
   @spec route_merge_failure(integer(), String.t(), term(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
@@ -138,8 +138,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  # Relit l'objet PR FRAIS et le classe (source de vérité = les champs forge, pas le message d'erreur du
-  # merge). get_pull en échec → `:unknown` (on ne devine pas → escalade honnête plutôt qu'une action fausse).
+  # Re-reads the FRESH PR object and classifies it (source of truth = the forge fields, not the merge
+  # error message). get_pull failing → `:unknown` (we don't guess → honest escalation rather than a wrong action).
   defp classify_merge_failure(pr_number, %Ctx{} = ctx) do
     case ctx.forge.get_pull(ctx.repo, pr_number, ctx.forge_opts) do
       {:ok, pull} -> Fleet.Pilot.MergeOutcome.classify(pull)
@@ -147,12 +147,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  # `:policy` = git mergeable mais la forge refuse. Cause NOMINALE (CI off en dev) : une RE-REQUEST humaine
-  # a reset le compteur d'approbations de la branch-protection. On lit la timeline (`pr_rerequested_reviewers`)
-  # → le(s) juge(s) re-demandé(s) → on re-dispatche le premier (spawn re-review, sérialisé par le verrou PR ;
-  # les suivants au tick d'après). C'est le bouton « redemander un jugement » qui FAIT enfin son job. Aucun
-  # re-demandé = blocage de policy non levable mécaniquement (commits signés requis, ou — si un jour activé —
-  # CI non verte, à gater par une lecture de status avant d'escalader) → escalade honnête plutôt que wedge muet.
+  # `:policy` = git-mergeable but the forge refuses. NOMINAL cause (CI off in dev): a human RE-REQUEST
+  # reset the branch-protection approval counter. We read the timeline (`pr_rerequested_reviewers`)
+  # → the re-requested judge(s) → we re-dispatch the first (spawn re-review, serialized by the PR lock;
+  # the rest on the next tick). It's the "re-request a judgment" button that FINALLY does its job. No
+  # re-requested = policy block not mechanically liftable (signed commits required, or — if ever enabled —
+  # CI not green, to be gated by a status read before escalating) → honest escalation rather than a silent wedge.
   defp reconverge_policy(pr_number, head, %Ctx{} = ctx) do
     case ctx.forge.pr_rerequested_reviewers(ctx.repo, pr_number, ctx.forge_opts) do
       {:ok, [judge | _]} ->
@@ -182,8 +182,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  # Contrat de frontière de l'écriture d'escalade : Remediation décide, ArchEscalation écrit. On ne
-  # lui passe QUE les 3 seams forge (`@enforce_keys` → un accès hors-3-seams ne compile pas), jamais le ctx entier.
+  # Boundary contract of the escalation writing: Remediation decides, ArchEscalation writes. We pass
+  # it ONLY the 3 forge seams (`@enforce_keys` → an out-of-3-seams access does not compile), never the whole ctx.
   defp arch_seams(%Ctx{} = ctx),
     do: %ArchEscalation.Seams{forge: ctx.forge, repo: ctx.repo, forge_opts: ctx.forge_opts}
 end

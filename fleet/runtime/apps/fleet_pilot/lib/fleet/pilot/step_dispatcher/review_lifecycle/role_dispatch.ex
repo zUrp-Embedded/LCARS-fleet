@@ -1,65 +1,65 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   @moduledoc """
-  Feuille d'EXÉCUTION du flux review, extraite de `ReviewLifecycle` : prépare et spawn
-  UN rôle sur une PR — juge (`:judge`), producteur en rework (`:rework`), producteur en
-  résolution de conflit (`:resolve_conflict`).
+  EXECUTION leaf of the review flow, extracted from `ReviewLifecycle`: prepares and spawns
+  ONE role on a PR — judge (`:judge`), producer in rework (`:rework`), producer in
+  conflict resolution (`:resolve_conflict`).
 
-  ## Pourquoi cette coupe (et pas une par cluster déclaré)
+  ## Why this cut (and not one per declared cluster)
 
-  Les trois clusters de `ReviewLifecycle` (aiguillage / rework-conflit / promotion)
-  convergent TOUS sur la même mécanique de spawn PR-role : couper aiguillage↔rework en
-  deux modules créerait un cycle (le rework rappelle le spawn du producteur). En
-  extrayant la FEUILLE partagée, le graphe devient un DAG strict :
-  aiguillage → remédiation → ICI → `Spawn` (leaf global). La décision reste en amont,
-  ce module EXÉCUTE (résolutions read-only puis spawn, jamais de choix de politique).
+  The three clusters of `ReviewLifecycle` (routing / rework-conflict / promotion)
+  ALL converge on the same PR-role spawn mechanics: splitting routing↔rework into
+  two modules would create a cycle (rework calls back the producer spawn). By
+  extracting the shared LEAF, the graph becomes a strict DAG:
+  routing → remediation → HERE → `Spawn` (global leaf). The decision stays upstream,
+  this module EXECUTES (read-only resolutions then spawn, never a policy choice).
 
-  ## Invariants portés ici
+  ## Invariants carried here
 
-    * **clone-base vs gate-base** : le pod review/rework clone la FEATURE-BRANCH
-      (`base_branch: head` — le juge doit voir le DIFF, le rework reprend SON travail) ;
-      une RÉSOLUTION (rebase) garde la feature en clone-base mais pinne la gate
-      d'ancêtre sur `main` (`gate_base_branch` — le tip de feature est réécrit par le
-      rebase, il ne serait plus ancêtre).
-    * **résolutions AVANT toute écriture forge** (projet + route read-only) : un échec
-      ne laisse jamais de verrou orphelin.
-    * **identité pod par scope** : rework/conflit = le PRODUCTEUR (`slot_scope` project
-      → `for_repo`, MÊME identité que le flux issue ; instance → `for_issue`) ; le JUGE
-      keye sur la PR (`for_pr`, fan-out par review).
-    * **gate de sérialisation** : un producteur project-scoped occupé → `{:skipped,
-      :role_busy}` (retry au tick suivant), jamais re-briefer-pendant-occupé.
+    * **clone-base vs gate-base**: the review/rework pod clones the FEATURE-BRANCH
+      (`base_branch: head` — the judge must see the DIFF, the rework resumes ITS work);
+      a RESOLUTION (rebase) keeps the feature as clone-base but pins the ancestor
+      gate to `main` (`gate_base_branch` — the feature tip is rewritten by the
+      rebase, it would no longer be an ancestor).
+    * **resolutions BEFORE any forge write** (project + route read-only): a failure
+      never leaves an orphan lock.
+    * **pod identity by scope**: rework/conflict = the PRODUCER (`slot_scope` project
+      → `for_repo`, SAME identity as the issue flow; instance → `for_issue`); the JUDGE
+      keys on the PR (`for_pr`, fan-out by review).
+    * **serialization gate**: a busy project-scoped producer → `{:skipped,
+      :role_busy}` (retry on the next tick), never re-brief-while-busy.
 
-  Reçoit le `%Ctx{}` du flux review (construit au site unique
-  `StepDispatcher.dispatch_review/2`) et re-construit `Spawn.Seams` au site d'appel de
-  la feuille globale (frontière étroite préservée).
+  Receives the review flow's `%Ctx{}` (built at the single site
+  `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
+  the global leaf (narrow boundary preserved).
   """
 
   require Logger
 
-  # Autorité du FORMAT des briefs (worker/judge/rework/conflit) : l'appelant CHOISIT le `kind`,
-  # BriefBuilder FORME le brief.
+  # Authority over the brief FORMAT (worker/judge/rework/conflict): the caller CHOOSES the `kind`,
+  # BriefBuilder SHAPES the brief.
   alias Fleet.Pilot.BriefBuilder
 
-  # Source unique de l'idiome « pose la clé SI non-nil » (builders de spawn_opts).
+  # Single source of the "put the key IF non-nil" idiom (spawn_opts builders).
   alias Fleet.Pilot.Opts
 
-  # Feuille de spawn SINGLE-AUTHORITY (ordre verrou→pod→enqueue→wake + compensation).
+  # SINGLE-AUTHORITY spawn leaf (order lock→pod→enqueue→wake + compensation).
   alias Fleet.Pilot.StepDispatcher.Spawn
 
-  # Builders d'opts / naming du spawn (rc_name / maybe_put_route / resolve_repo_id) — partagés
-  # avec le flux issue (StepDispatcher), une seule copie.
+  # Spawn opts builders / naming (rc_name / maybe_put_route / resolve_repo_id) — shared
+  # with the issue flow (StepDispatcher), a single copy.
   alias Fleet.Pilot.StepDispatcher.Spawn.Naming
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
-  @typedoc "Nature du dispatch PR : juge, rework producteur, ou résolution de conflit (rebase)."
+  @typedoc "Nature of the PR dispatch: judge, producer rework, or conflict resolution (rebase)."
   @type kind :: :judge | :rework | :resolve_conflict
 
   @doc """
-  Prépare et spawn le rôle `role` sur la PR `pr_number` (head = feature-branch du
-  producteur). Résout la brique (`parse_feature_branch_or_skip/1`) + le cap-profile,
-  puis exécute. `{:skipped, _}` (branche non-fleet / rôle inconnu / role_busy) remonte
-  au poller (retry au tick suivant) ; `{:error, {phase, _}}` = résolution échouée
-  (aucune écriture forge posée).
+  Prepares and spawns the `role` role on PR `pr_number` (head = the producer's
+  feature-branch). Resolves the brick (`parse_feature_branch_or_skip/1`) + the cap-profile,
+  then executes. `{:skipped, _}` (non-fleet branch / unknown role / role_busy) bubbles
+  up to the poller (retry on the next tick); `{:error, {phase, _}}` = resolution failed
+  (no forge write laid).
   """
   @spec dispatch(kind(), integer(), String.t(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
@@ -71,9 +71,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   end
 
   @doc """
-  Vocabulaire de la feature-branch fleet, mappé au contrat du poller : head non-fleet →
-  `{:skipped, :not_fleet_branch}` (jamais une erreur — une PR étrangère n'est pas une
-  anomalie). Partagé par tout le flux review (aiguillage/remédiation/promotion).
+  Vocabulary of the fleet feature-branch, mapped to the poller's contract: non-fleet head →
+  `{:skipped, :not_fleet_branch}` (never an error — a foreign PR is not an
+  anomaly). Shared by the whole review flow (routing/remediation/promotion).
   """
   @spec parse_feature_branch_or_skip(String.t()) ::
           {:ok, {integer(), String.t()}} | {:skipped, :not_fleet_branch}
@@ -94,7 +94,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   end
 
   defp do_dispatch_review(pr_number, issue_n, head, role, profile, kind, %Ctx{} = ctx) do
-    # Spawner/task_queue ne sont pas lus ici directement : ils transitent via `ctx` vers `spawn_step`.
+    # Spawner/task_queue are not read here directly: they transit via `ctx` to `spawn_step`.
     %Ctx{
       repo: repo,
       forge: forge,
@@ -103,33 +103,33 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
       opts: opts
     } = ctx
 
-    # Le pod review (juge) OU rework (producteur) clone la FEATURE-BRANCH (`head.ref`), PAS
-    # `main` : le juge doit voir le DIFF du producteur (sinon il juge `main`, c.-à-d. rien de réel) ;
-    # le rework reprend SON propre travail. Read-only sur le code via le workspace provisionné par le
-    # système (le pod n'a aucun token forge). `base_branch: head` → le pod CLONE et
-    # part du tip de la feature-branch.
+    # The review pod (judge) OR rework pod (producer) clones the FEATURE-BRANCH (`head.ref`), NOT
+    # `main`: the judge must see the producer's DIFF (otherwise it judges `main`, i.e. nothing real);
+    # the rework resumes ITS own work. Read-only on the code via the workspace provisioned by the
+    # system (the pod has no forge token). `base_branch: head` → the pod CLONES and
+    # starts from the feature-branch tip.
     #
-    # La RÉSOLUTION (rebase) part AUSSI de la feature (son travail à rebaser),
-    # mais son livrable doit DESCENDRE de `main` (la cible du rebase), pas de l'ancien tip de feature
-    # (réécrit par le rebase → la gate le rejetterait : `base_not_ancestor`). On
-    # DÉCONFLE les deux rôles autrement portés par `base_sha` : `base_branch` = clone-base (feature, le pod
-    # part de là, INCHANGÉ) ; `gate_base_branch` = "main" → le resolver pinne la base de GATE sur `main`.
-    # judge/rework (forward, pas de réécriture) : pas de `gate_base_branch` → gate = clone-base, inchangé.
+    # The RESOLUTION (rebase) ALSO starts from the feature (its work to rebase),
+    # but its deliverable must DESCEND from `main` (the rebase target), not from the old feature tip
+    # (rewritten by the rebase → the gate would reject it: `base_not_ancestor`). We
+    # DECONFLATE the two roles otherwise carried by `base_sha`: `base_branch` = clone-base (feature, the pod
+    # starts from there, UNCHANGED); `gate_base_branch` = "main" → the resolver pins the GATE base to `main`.
+    # judge/rework (forward, no rewrite): no `gate_base_branch` → gate = clone-base, unchanged.
     review_opts =
       opts
       |> Keyword.put(:base_branch, head)
       |> maybe_gate_base_main(kind)
 
-    # PROJET + ROUTE resolus AVANT toute ecriture forge (read-only) : un echec ne laisse pas de
-    # verrou orphelin. La route (workflow_map_name, step) est lue sur l'ISSUE (le pipeline-state y reste).
-    # `route_reader`/`err_tagger` = captures des helpers du cœur (route_for/tag_err), partagés avec le flux issue.
+    # PROJECT + ROUTE resolved BEFORE any forge write (read-only): a failure leaves no
+    # orphan lock. The route (workflow_map_name, step) is read on the ISSUE (the pipeline-state stays there).
+    # `route_reader`/`err_tagger` = captures of the core's helpers (route_for/tag_err), shared with the issue flow.
     with {:ok, project} <- ctx.err_tagger.(resolver.(repo, review_opts), :project_resolution),
          {:ok, route} <-
            ctx.err_tagger.(ctx.route_reader.(forge, repo, issue_n, forge_opts), :route_resolution) do
-      # pod_id : rework/conflict = le PRODUCTEUR, routé par `slot_scope` (project → for_repo = MÊME
-      # identité que dispatch_issue, UNE par projet ; instance → for_issue). Le JUGE keye sur la PR
-      # (for_pr, fan-out par review). Le rework re-lit son état DEPUIS LA FORGE (PR + findings) →
-      # changer l'identité du pod ne perd aucun contexte.
+      # pod_id: rework/conflict = the PRODUCER, routed by `slot_scope` (project → for_repo = SAME
+      # identity as dispatch_issue, ONE per project; instance → for_issue). The JUDGE keys on the PR
+      # (for_pr, fan-out by review). The rework re-reads its state FROM THE FORGE (PR + findings) →
+      # changing the pod identity loses no context.
       pod_id =
         case kind do
           k when k in [:rework, :resolve_conflict] ->
@@ -139,10 +139,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
             Fleet.Pilot.PodId.for_pr(repo, pr_number, role)
         end
 
-      # Gate de sérialisation (MÊME règle que dispatch_issue) : un producteur project-scoped déjà vivant
-      # (occupé par un autre issue) → on DÉFÈRE, jamais re-briefer-pendant-occupé. Juges (instance) et
-      # rework instance → `:ok` (no-op, jamais gated). Appel uniforme via `slot_scope`. `{:skipped,
-      # :role_busy}` remonte au poller (qui gère `{:skipped, _}` → retry au tick suivant).
+      # Serialization gate (SAME rule as dispatch_issue): a project-scoped producer already alive
+      # (busy with another issue) → we DEFER, never re-brief-while-busy. Judges (instance) and
+      # instance rework → `:ok` (no-op, never gated). Uniform call via `slot_scope`. `{:skipped,
+      # :role_busy}` bubbles up to the poller (which handles `{:skipped, _}` → retry on the next tick).
       case Spawn.serialize_project_scope(
              Fleet.CapProfile.slot_scope(profile),
              Fleet.CapProfile.lifetime_scope(profile),
@@ -155,7 +155,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
           {:skipped, :role_busy}
 
         :ok ->
-          # :judge -> GateBrief désamorcé ; :rework -> brief au PRODUCTEUR (corrige + push).
+          # :judge -> GateBrief defused; :rework -> brief to the PRODUCER (fix + push).
           brief =
             review_brief(
               kind,
@@ -175,10 +175,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
             |> Naming.maybe_put_route(route)
             |> Opts.maybe_put(:repo_id, Naming.resolve_repo_id(forge, repo, forge_opts))
 
-          # Spawn LEAF partagé avec dispatch_issue (verrou → pod → enqueue → wake + compensation).
-          # Verrou keyé sur la PR (pr_number) ; issue_id + enqueue keyés sur l'ISSUE (issue_n — le
-          # pipeline-state y reste). On construit le struct de seams à ce site depuis `ctx` (les 6
-          # seams, pas le `ctx` entier — frontière blindée).
+          # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).
+          # Lock keyed on the PR (pr_number); issue_id + enqueue keyed on the ISSUE (issue_n — the
+          # pipeline-state stays there). We build the seams struct at this site from `ctx` (the 6
+          # seams, not the whole `ctx` — hardened boundary).
           log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
 
           Spawn.spawn_step(
@@ -210,20 +210,20 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
-  # DÉCONFLATION clone-base / gate-base. Une RÉSOLUTION (rebase) part de la
-  # feature (clone-base, son travail) mais son livrable doit DESCENDRE de `main` (cible du rebase) → la
-  # gate se base sur `main`, pas sur l'ancien tip de feature (réécrit par le rebase, donc pas
-  # ancêtre). judge/rework (forward, pas de réécriture) : aucune divergence → gate = clone-base.
+  # DECONFLATION clone-base / gate-base. A RESOLUTION (rebase) starts from the
+  # feature (clone-base, its work) but its deliverable must DESCEND from `main` (rebase target) → the
+  # gate bases on `main`, not on the old feature tip (rewritten by the rebase, hence not an
+  # ancestor). judge/rework (forward, no rewrite): no divergence → gate = clone-base.
   defp maybe_gate_base_main(opts, :resolve_conflict),
     do: Keyword.put(opts, :gate_base_branch, "main")
 
   defp maybe_gate_base_main(opts, _kind), do: opts
 
-  # Brief d'un dispatch PR : :judge -> GateBrief desamorce (via build_brief, le pod
-  # juge l'issue) ; :rework -> brief de rework au PRODUCTEUR (corrige selon la review, re-pousse).
-  # Chemin PR-juge — pas de step workflow_map ici (juges PR-driven) → `step_spec = %{}` :
-  # build_brief retombe sur le `brief_kind` du profil (judge pour qualifier/reviewer) ET sur le
-  # `judge_target` par défaut (deliverable) → build_judge_brief (juge le livrable/PR).
+  # Brief of a PR dispatch: :judge -> GateBrief defused (via build_brief, the pod
+  # judges the issue); :rework -> rework brief to the PRODUCER (fixes per the review, re-pushes).
+  # PR-judge path — no workflow_map step here (PR-driven judges) → `step_spec = %{}`:
+  # build_brief falls back to the profile's `brief_kind` (judge for qualifier/reviewer) AND to the
+  # default `judge_target` (deliverable) → build_judge_brief (judges the deliverable/PR).
   defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr),
     do:
       BriefBuilder.build_brief(
