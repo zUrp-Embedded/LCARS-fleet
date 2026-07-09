@@ -204,8 +204,9 @@ defmodule Fleet.Pilot.Poller.Lease do
   # `:prefetched_workflow_map` → forge/disk read ONCE only. ENGAGED = pod in flight (`in-flight`) OR route
   # advanced beyond the 1st step (workflow_run started, between two step_runs). Fast-path: in-flight → no route
   # read (`decide` skips it anyway). Routeless (`:none`) → QUEUED, nil route threaded (onboard
-  # downstream). get_route HTTP error → QUEUED, NOTHING threaded (the dispatch re-reads → fail-loud `:route_resolution`,
-  # never a lease wedge by an unreadable workflow_map/route).
+  # downstream). get_route error (or unexpected shape) → fail-CLOSED: ENGAGED (lease HELD), nothing threaded
+  # (the dispatch re-reads → fail-loud `:route_resolution`); the lease is NOT released for a maybe-advanced
+  # workflow_run — symmetric with the transient workflow_map-load failure below.
   defp classify_issue(_issue, true = _pr?, _seams), do: {false, []}
 
   defp classify_issue(issue, false = _pr?, seams) do
@@ -235,7 +236,13 @@ defmodule Fleet.Pilot.Poller.Lease do
           {false, [prefetched_route: nil]}
 
         _ ->
-          {false, []}
+          # Fail-CLOSED (symmetric with the workflow_map-load-failure branch above): a transient get_route
+          # error — or any unexpected shape — leaves engagement UNKNOWN. Releasing the lease here would let
+          # a maybe-advanced workflow_run lose its serialization → a 2nd issue of the same repo would start a
+          # 2nd workflow_run (the exact danger the sibling guards, 6 lines up). So classify ENGAGED (lease
+          # HELD), nothing prefetched; the dispatch re-reads (fail-loud `:route_resolution`) and precise
+          # classification resumes at the next tick.
+          {true, []}
       end
     end
   end

@@ -149,6 +149,8 @@ defmodule Fleet.Pilot.PollerTest do
     def get_route(_repo, n, opts) do
       case Map.get(Keyword.get(opts, :_test_routes, %{}), n) do
         {workflow_map, step} -> {:ok, {workflow_map, step}}
+        # `:error` sentinel → transient forge failure (fail-closed lease test).
+        :error -> {:error, :timeout}
         _ -> :none
       end
     end
@@ -967,6 +969,41 @@ defmodule Fleet.Pilot.PollerTest do
       # #18 engagé (workflow_map-nil mais route avancée → fail-closed) tient le bail : son step est dispatché mais
       # fail-loud (workflow_map manquante côté StepDispatcher → errors:1), le bail reste TENU. #19 → bail tenu →
       # skipped:1. Aucun 2e pipeline démarré (dispatched:0).
+      assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
+
+      GenServer.stop(pid)
+    end
+
+    test "issue routée-avancée à get_route en ERREUR tient le bail (transient forge ne libère pas le bail — symétrie fail-closed)" do
+      # Canary tué : le catch-all `_ -> {false, []}` de classify_issue classait une issue engagée dont
+      # get_route erre TRANSITOIREMENT comme EN FILE → elle sortait du lease set → une 2e issue du même repo
+      # démarrait un 2e workflow_run (perte de sérialisation) — EXACTEMENT le danger que le frère
+      # workflow_map-nil (juste au-dessus) ferme fail-closed. Un transient get_route ne peut PAS exclure que
+      # ce workflow_run soit avancé → fail-closed : ENGAGÉ (bail TENU).
+      #
+      # #18 : get_route → {:error, :timeout} → fail-closed ENGAGÉ → tient le bail ; son step est dispatché
+      # mais fail-loud (route illisible côté StepDispatcher → errors:1). #19 : routeless → EN FILE → bail
+      # tenu → skipped:1. Aucun 2e workflow_run.
+      #
+      # Régression prouvée : reviens au buggy `_ -> {false, []}` → #18 sort du lease set → #19 voit le bail
+      # LIBRE → DÉMARRE → le tally devient `dispatched:1, skipped:0` (au lieu de `dispatched:0, skipped:1`).
+      issues = [
+        %{
+          "number" => 18,
+          "body" => "avance",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        },
+        %{
+          "number" => 19,
+          "body" => "file",
+          "labels" => [],
+          "assignees" => [%{"login" => "lordzurp"}]
+        }
+      ]
+
+      {name, pid} = start_entry_poller({:ok, issues}, %{18 => :error})
+
       assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
 
       GenServer.stop(pid)
