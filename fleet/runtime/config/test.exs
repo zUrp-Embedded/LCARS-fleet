@@ -7,6 +7,11 @@ import Config
 config :fleet_api, start_listener: false
 config :fleet_api, http_port: 0
 
+# fleet_mcp : boot guard fail-closed (soft-default #6). Le défaut code de `boot_environment` est `:pod`
+# (refuse par omission) ; en test la BEAM tourne HOST-side (le superviseur MCP doit démarrer) → on déclare
+# `:host` POSITIVEMENT, comme runtime.exs le fait sur le daemon.
+config :fleet_mcp, boot_environment: :host
+
 # fleet_observation : idem — pas de listener Cowboy :8091 en test (sinon bind
 # du port → crash boot umbrella, même invariant hermétique que fleet_api).
 config :fleet_observation, start_listener: false

@@ -5,9 +5,14 @@ defmodule Fleet.MCP.Server do
   **Containment invariant**: `fleet_mcp` must NEVER start on the pod side (the pod
   is a CLIENT of the server, not its host). This process, supervised by `Fleet.MCP.Supervisor`,
   carries the guard: `start_link/1` reads `:boot_environment` (priority opts > app env >
-  default `:host`) and refuses (`{:error, :forbidden_in_pod}`) if `:pod` → the child fails
-  → the supervisor fails → the app does not boot inside a pod. Assertable by a
-  conformance test (`Process.whereis(Fleet.MCP.Server) == nil` on the pod side).
+  default **`:pod`**, FAIL-CLOSED) and refuses (`{:error, :forbidden_in_pod}`) on `:pod` → the child
+  fails → the supervisor fails → the app does not boot. The HOST declares itself POSITIVELY
+  (`config :fleet_mcp, boot_environment: :host` in `runtime.exs` on the daemon boot, and in
+  `config/test.exs`); a boot that does NOT declare `:host` is refused BY OMISSION, never started
+  permissively. Assertable by a conformance test (`Process.whereis(Fleet.MCP.Server) == nil` pod-side).
+  (Residual, wire-time: a pod running the full umbrella BEAM would still run `runtime.exs` → `:host`;
+  pods run a `claude` REPL + `bridge.py`, NOT the BEAM, so this is latent — a per-boot host signal from
+  `bin/fleet_v2` would harden it further.)
 
   ## Why this process exists (and is NOT removed)
 
@@ -35,13 +40,13 @@ defmodule Fleet.MCP.Server do
 
   @doc """
   Effective boot environment: `opts[:boot_environment]` >
-  `Application.get_env(:fleet_mcp, :boot_environment)` > `:host`.
-  Exposed for the conformance test "zero MCP server on the pod side".
+  `Application.get_env(:fleet_mcp, :boot_environment)` > **`:pod`** (fail-closed default: absence of
+  any positive `:host` declaration → refuse). Exposed for the conformance test "zero MCP server pod-side".
   """
   @spec boot_environment(keyword()) :: atom()
   def boot_environment(opts \\ []) do
     Keyword.get(opts, :boot_environment) ||
-      Application.get_env(:fleet_mcp, :boot_environment, :host)
+      Application.get_env(:fleet_mcp, :boot_environment, :pod)
   end
 
   @impl GenServer

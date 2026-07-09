@@ -34,6 +34,16 @@ if config_env() != :test do
     end
   end
 
+  # ============================================================
+  # fleet_mcp — boot guard fail-closed (soft-default #6)
+  # ============================================================
+  # Le défaut code de `Fleet.MCP.Server.boot_environment` est `:pod` (refuse PAR OMISSION). runtime.exs ne
+  # tourne QU'AU boot du daemon HOST → on y déclare `:host` POSITIVEMENT. Un boot qui ne passe pas par ici
+  # (ni par config/test.exs) est refusé, jamais démarré permissivement. Résiduel wire-time : un pod qui
+  # tournerait la BEAM umbrella complète exécuterait aussi runtime.exs ; les pods sont des REPL claude +
+  # bridge.py, PAS la BEAM (latent — un signal host per-boot de bin/fleet_v2 durcirait encore).
+  config :fleet_mcp, boot_environment: :host
+
   # Z6 (CFG-CR) — parsing des env vars DÉLÉGUÉ à `Fleet.EnvParse` (Ring 0, TESTABLE — ce fichier est
   # wrappé `config_env() != :test`, un lambda inline ne serait jamais testé : SOC-CONF-001/002/003).
   # Domaine borné : `port` (1..65535), `positive_ms` (>0), `count` (≥0), `bool` (formes reconnues +
