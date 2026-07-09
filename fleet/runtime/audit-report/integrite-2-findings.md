@@ -2,7 +2,7 @@
 
 **Date** : 2026-07-09
 **Dernière révision** : 2026-07-09
-**Statut** : remédiation en cours — **B (9 Tier-1) : 9/9 livrés** ; A mensonges 2/4 ; C (Cat-5) + D (tests) à venir
+**Statut** : remédiation avancée — **B 9/9 ✅ · A 4/4 ✅ · D 3/3 ✅ · C/Q2 (Cat-5 draft) ✅** · reste P4 (Tier-2 muets)
 **Référencé par** : `_plan-integrite-2.md`, `soft-defaults-audit.md`
 
 ## Avancement remédiation (triage user Q1 « Mensonges + 9 Tier-1 + tests-clés », Q2 « câbler producteurs Cat-5 draft »)
@@ -18,9 +18,10 @@
 | B | #7 pod /clear REPL bleed | `6cafaa58d` | vérifié-par-lecture (PodTmux sans seam) |
 | A | #1 (dans B-#5) / #2 (dans B-#4) | ✅ | corrigés avec leurs fixes B |
 | A | #4 events.yaml git.* menteur → clés retirées | `691f9a92e` | `contracts.check` keys_aligned PASS |
-| A | #3 drift_monitor « audit.verdict live » | ⏳ | résolu par Q2 (Cat-5 draft) |
+| A | #3 drift_monitor « audit.verdict live » → dit vrai | `2ae205aec` | résolu par Q2 (producteur draft) |
+| C/Q2 | producteurs Cat-5 draft (workflow_map.failed + audit.verdict) | `dbbf4870e`/`2ae205aec`/`7b0b6a096`/`4b8d77a91` | pilot 355 / starfleet 64 (anti-spoof) / coord 18 |
 
-**B CLOS : 9/9. A : 3/4** (reste A-#3, résolu par Q2). **D CLOS : 3/3** (`6863c4943`). Reste Q2 (producteurs Cat-5 draft, résout A-#3), puis P4 (Tier-2 muets).
+**B 9/9 ✅ · A 4/4 ✅ · D 3/3 ✅ · C/Q2 ✅ (ça clignote).** Reste **P4** (Tier-2 muets : permanent_boot, mcp hollow-green, observation LED, safe_clear_for_pod, task_probe, reconciliation).
 
 ## Le fil rouge des 3 passes : le MENSONGE
 
@@ -45,11 +46,22 @@ couvrir/vivre/fail-loud alors que c'est mort**. Priorité : **fixer les mensonge
 
 + ~15 TIER-2 muets (safe_clear_for_pod sans log, task_probe→skip-enqueue, reconciliation under-report, permanent_boot muet, mcp hollow-green, coord/emitter, wake_recovery note…). ~30 sites OK vérifiés (best-effort légitime).
 
-## C. P3 — le filet Cat-5/coord MORT de bout en bout (DOCTRINE)
+## C. P3 — le filet Cat-5/coord MORT de bout en bout (DOCTRINE) — ⚡ Q2 : ÇA CLIGNOTE (2/4 câblés)
 Trigger (pod.drift/workflow_map.failed/oauth.refresh.failed) = 0 producteur → Cat5Escalator (0 consumer dédié)
 → CoordBackend (prod ✓) → Coord.Emitter (ne fire jamais, amont mort). Une revue croit l'escalade active. Rien
 ne circule. + orphelins : `spawn.failed` (0 consumer → alarme drop-silencieux ignorée), `workflow_map.step.completed`
 (fantôme total 0-référence), 10 `gitea.*` (0 réacteur métier).
+
+**Q2 RÉSOLU (choix user « + audit.verdict aussi » ; draft honnête) — `dbbf4870e`/`2ae205aec`/`7b0b6a096`/`4b8d77a91` :**
+- 2 producteurs DRAFT dans `StepRunConsumer` (source :workflow, best-effort) : `workflow_map.failed`
+  (sur `:workflow_map_load_failed`) → Cat5Escalator ; `audit.verdict` (verdict juge escalade-digne,
+  traduit decision-v1 escalate/audit_verdict) → CoordBackend.handle_decision. La chaîne blink de bout en
+  bout jusqu'à `coord.notification_routed` (chaque maillon testé : pilot 355 / starfleet 64 / coord 18).
+- DriftMonitor : `source: :workflow` anti-spoof sur les 2 clauses + 2 tests anti-spoof. **Mensonge A-#3
+  corrigé** (moduledoc « audit.verdict live path » → dit vrai : dormant→draft, statut par event).
+- events.yaml aligné (registre = réalité). `pod.drift`/`oauth.refresh.failed` restent dormants : aucun
+  signal réel à fabriquer honnêtement aujourd'hui (documentés tels quels).
+- RESTE (hors Q2) : orphelins spawn.failed / workflow_map.step.completed / gitea.* (P4 ou chantier séparé).
 
 ## D. P5 — faux-vert (localisé, suite globalement solide) — ✅ 3/3 durcis (`6863c4943`)
 - 2 TAUTOLOGIQUES ✅ : `mcp_watcher_test:46` (is_binary OR is_nil → attendu calculé Application.spec ex_mcp) ; `blocks_test:11/19` (boucles vacues → guard `map_size(roles)>0` avant chaque `for`).
