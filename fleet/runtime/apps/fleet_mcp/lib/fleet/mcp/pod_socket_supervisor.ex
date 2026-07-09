@@ -95,6 +95,7 @@ defmodule Fleet.MCP.PodSocketSupervisor do
       _ = File.rm(path)
       # Removes the per-pod dir if empty (best-effort, breaks nothing otherwise).
       _ = File.rmdir(Path.dirname(path))
+      :ok
     else
       # A `..`/`/` pod_id would make File.rm escape the base → refuse the FS gesture (idempotent :ok).
       Logger.warning(

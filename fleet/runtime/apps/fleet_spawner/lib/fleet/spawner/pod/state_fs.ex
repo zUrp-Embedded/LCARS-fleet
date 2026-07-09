@@ -111,14 +111,15 @@ defmodule Fleet.Spawner.Pod.StateFs do
   defp safe_rm_rf(dir, root, label) do
     if String.starts_with?(Path.expand(dir), Path.expand(root) <> "/") do
       _ = File.rm_rf(dir)
+      :ok
     else
       Logger.error(
         "StateFs: rm_terminal_artifacts REFUSED #{label} #{inspect(dir)} — not under root " <>
           "#{inspect(root)} (path-escape guard, no rm_rf)"
       )
-    end
 
-    :ok
+      :ok
+    end
   end
 
   @doc """

@@ -50,7 +50,9 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # mod}}` the caller folds onto `transition_failed`, a CLEAR deploy-error message.
   defp conforming_provisioner do
     mod = mcp_socket_provisioner()
-    Code.ensure_loaded(mod)
+
+    # Side-effect only (trigger load); the real check is `function_exported?` below → discard explicitly.
+    _ = Code.ensure_loaded(mod)
 
     if function_exported?(mod, :ensure_pod_socket, 1) and
          function_exported?(mod, :release_pod_socket, 1) do

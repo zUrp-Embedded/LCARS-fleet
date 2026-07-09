@@ -173,7 +173,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp conforming_onboard, do: conforming(ProjectOnboard, ProjectOnboard.resolved())
 
   defp conforming(behaviour, impl) do
-    Code.ensure_loaded(impl)
+    # Side-effect only (trigger load); the real check is `function_exported?` below → discard explicitly.
+    _ = Code.ensure_loaded(impl)
 
     missing =
       for {fun, arity} <- behaviour.behaviour_info(:callbacks),

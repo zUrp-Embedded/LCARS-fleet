@@ -26,6 +26,10 @@ defmodule Fleet.EventRouter.SignalsOS do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
+  # init/1 ALWAYS raises by design (SignalsOS not-yet-implemented; enabling it is a misconfiguration —
+  # see below). The `no_return` is intentional, not a bug → suppress the (correct) dialyzer warning so
+  # the baseline stays clean (0 warnings → any future one is a real regression).
+  @dialyzer {:nowarn_function, init: 1}
   @impl GenServer
   def init(_opts) do
     # FAIL-LOUD, BEFORE any `:os.set_signal`: SignalsOS is NOT-YET-IMPLEMENTED (the delivery model does
