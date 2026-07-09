@@ -40,6 +40,14 @@ defmodule Fleet.Workflow.GatesTest do
       assert {:fail, _} = Gates.evaluate(step, %{"all_tests_pass" => false}, %{})
     end
 
+    test "hard : rules VIDES → {:fail} (n'applique rien = fail-closed, jamais :pass par vacuité)" do
+      # Repli mou #4 : `Enum.all?([]) == true` → une hard-gate à rules vides passait sans RIEN valider
+      # (une gate censée bloquer — all_tests_pass, severity != critical — franchie à vide). Une hard-gate
+      # sans règle est MALFORMÉE → {:fail} via le catch-all fail-closed, jamais un :pass par vacuité.
+      step = %{"gate" => %{"type" => "hard", "rules" => []}}
+      assert {:fail, _} = Gates.evaluate(step, %{}, %{})
+    end
+
     test "terminal : prédicats vrais sans aval humain → :pass" do
       step = %{"gate" => %{"type" => "terminal", "rules" => ["severity_max != critical"]}}
       assert :pass = Gates.evaluate(step, %{"severity_max" => "important"}, %{})

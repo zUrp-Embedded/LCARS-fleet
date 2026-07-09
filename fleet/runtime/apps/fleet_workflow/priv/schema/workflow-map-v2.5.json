@@ -79,7 +79,17 @@
                         "fallback_invoke_gatekeeper": {"type": "boolean"},
                         "on_blocking_severity": {"type": "string"},
                         "on_revision_severity": {"type": "string"}
-                      }
+                      },
+                      "allOf": [
+                        {
+                          "$comment": "soft-default #4 : une hard-gate DOIT porter ≥1 règle — sinon Enum.all?([]) la fait passer à vide (fail-open, gate qui n'applique rien). rules REQUIS + minItems 1 pour type=hard ; terminal garde rules optionnel/vide (la gate `finish` est terminal + human_approval sans règle).",
+                          "if": {"properties": {"type": {"const": "hard"}}, "required": ["type"]},
+                          "then": {
+                            "required": ["rules"],
+                            "properties": {"rules": {"type": "array", "items": {"type": "string"}, "minItems": 1}}
+                          }
+                        }
+                      ]
                     }
                   ]
                 },

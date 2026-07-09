@@ -105,6 +105,36 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   @tag :tmp_dir
+  test "soft-default #4 — hard gate avec rules VIDES → raise schema (n'applique rien = fail-open)",
+       %{
+         tmp_dir: dir
+       } do
+    # Verrou amont : une hard-gate à rules vides passait `Enum.all?([]) == true` → :pass (gate qui
+    # n'applique RIEN). Le schéma la REJETTE au load (`if type==hard then rules minItems 1`) → le cas
+    # est inreprésentable en amont. (terminal garde des rules vides légitimes : la gate `finish`.)
+    bad = """
+    kind: WorkflowMap
+    metadata:
+      name: empty-hard
+    spec:
+      max_rework_rounds: 1
+      steps:
+        build:
+          role: engineer
+          profile: engineer
+          gate:
+            type: hard
+            rules: []
+    """
+
+    File.write!(Path.join(dir, "empty-hard.yaml"), bad)
+
+    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
+      Loader.load!("empty-hard", workflow_maps_root: dir)
+    end
+  end
+
+  @tag :tmp_dir
   test "M7 — load!/2 opt :schema_path override Application env", %{tmp_dir: dir} do
     yaml = """
     kind: WorkflowMap

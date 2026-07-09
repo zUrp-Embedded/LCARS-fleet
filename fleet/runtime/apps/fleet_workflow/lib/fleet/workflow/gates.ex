@@ -56,10 +56,13 @@ defmodule Fleet.Workflow.Gates do
   defp eval_by_type(%{"gate" => nil}, _outputs, _ctx), do: :pass
   defp eval_by_type(step, _outputs, _ctx) when not is_map_key(step, "gate"), do: :pass
 
-  # hard gate, `rules` = list of string predicates evaluated against
-  # the outputs (Predicate). No bypass: all true → :pass, otherwise {:fail}.
+  # hard gate, `rules` = NON-EMPTY list of string predicates evaluated against the outputs (Predicate).
+  # No bypass: all true → :pass, otherwise {:fail}. EMPTY `rules` is excluded from the guard (`rules != []`):
+  # a hard gate that enforces NOTHING is malformed → it falls to the fail-closed catch-all ({:fail}), NEVER
+  # a :pass by `Enum.all?([]) == true` vacuity. The schema also rejects it at load (`if type==hard then rules
+  # minItems 1`) — this eval-boundary guard is defense-in-depth for a schema-bypassed (in-memory) gate.
   defp eval_by_type(%{"gate" => %{"type" => "hard", "rules" => rules}}, outputs, _ctx)
-       when is_list(rules) do
+       when is_list(rules) and rules != [] do
     if Enum.all?(rules, &Predicate.eval?(&1, outputs)) do
       :pass
     else
