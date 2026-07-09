@@ -296,6 +296,18 @@ defmodule Fleet.Spawner.PermanentBoot do
       end
     end)
   rescue
-    _ -> nil
+    e ->
+      # A MISSING base is normal (fresh permanent pod → recreate) and stays silent. A PRESENT-but-unreadable
+      # base is NOT the same: for a PERMANENT pod (architect/gatekeeper) the base carries the FIXED session
+      # UUID = the single reused Desktop entry. Falling back to nil then mints a FRESH session (a NEW Desktop
+      # entry) at EVERY boot → accumulation, with zero trace. Distinguish, and log the corrupt case LOUD.
+      if File.exists?(path) do
+        Logger.warning(
+          "PermanentBoot: base seed #{path} present but unreadable (#{Exception.message(e)}) — the fixed " <>
+            "session UUID is lost, falling back to a FRESH session (a new Desktop entry each boot, accumulation)"
+        )
+      end
+
+      nil
   end
 end

@@ -93,4 +93,20 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   @spec no_pending_brief?(String.t()) :: boolean()
   def no_pending_brief?(pod_id),
     do: match?({:ok, nil}, safe_pod_status(pod_id))
+
+  @doc """
+  3-state brief slot, for the ENQUEUE gate (`Brief.maybe_enqueue_brief`) which must NOT conflate the
+  two `no_pending_brief? == false` causes: `:free` (`{:ok, nil}`, never enqueued → enqueue), `:occupied`
+  (`{:ok, _}`, a brief is already pending → genuine skip), `:unknown` (broker unreachable → the caller
+  cannot verify; it still skips to avoid a double-enqueue, but LOUDLY — a dropped admin.spawn brief leaves
+  the pod idle). The probe itself stays log-free (by design); the caller decides what to log.
+  """
+  @spec brief_slot(String.t()) :: :free | :occupied | :unknown
+  def brief_slot(pod_id) do
+    case safe_pod_status(pod_id) do
+      {:ok, nil} -> :free
+      {:ok, _} -> :occupied
+      :error -> :unknown
+    end
+  end
 end

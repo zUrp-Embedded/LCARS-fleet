@@ -259,9 +259,24 @@ defmodule Fleet.Spawner do
     Fleet.TaskQueue.clear_for_pod(pod_id)
     :ok
   rescue
-    _ -> :ok
+    e ->
+      # The rescue/catch is legitimately fail-safe (must NEVER make kill_pod crash). But it must not be
+      # SILENT: this is the load-bearing mandate release — if it fails, the work item stays active → the
+      # poller reclaims it → kill/re-dispatch LOOP (exactly what the release exists to prevent). Log LOUD.
+      Logger.error(
+        "Spawner: kill_pod could NOT release the mandate of #{pod_id} (#{inspect(e)}) — the work item may " <>
+          "stay active → poller reclaim → kill/re-dispatch loop"
+      )
+
+      :ok
   catch
-    :exit, _ -> :ok
+    :exit, reason ->
+      Logger.error(
+        "Spawner: kill_pod could NOT release the mandate of #{pod_id} (TaskQueue exit: #{inspect(reason)}) " <>
+          "— the work item may stay active → poller reclaim → kill/re-dispatch loop"
+      )
+
+      :ok
   end
 
   @doc """

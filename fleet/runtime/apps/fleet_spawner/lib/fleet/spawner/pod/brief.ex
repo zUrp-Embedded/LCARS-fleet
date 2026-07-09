@@ -23,6 +23,8 @@ defmodule Fleet.Spawner.Pod.Brief do
   - `maybe_enqueue_brief/1` — idempotent TaskQueue enqueue, AFTER the readable scaffold.
   """
 
+  require Logger
+
   alias Fleet.Spawner.Pod.TaskProbe
 
   @doc """
@@ -90,25 +92,37 @@ defmodule Fleet.Spawner.Pod.Brief do
   def maybe_enqueue_brief(state) do
     brief = Keyword.get(state.opts || [], :brief)
 
-    cond do
-      not (is_binary(brief) and brief != "") ->
-        :ok
+    if is_binary(brief) and brief != "" do
+      case TaskProbe.brief_slot(state.pod_id) do
+        :occupied ->
+          # A brief is genuinely already pending (dispatch step) → skip, silent.
+          :ok
 
-      not TaskProbe.no_pending_brief?(state.pod_id) ->
-        :ok
+        :unknown ->
+          # Broker unreachable → we CANNOT verify the slot. We still skip (never double-enqueue), but LOUD:
+          # a dropped admin.spawn brief leaves the pod idle (`get_work_item` returns done:true). Retry the spawn.
+          Logger.warning(
+            "Brief: could not verify pod #{state.pod_id} brief slot (broker unreachable) — SKIPPING the " <>
+              "admin.spawn brief enqueue to avoid a double-enqueue; the pod may sit idle with no brief. Retry the spawn."
+          )
 
-      true ->
-        attrs = %{
-          issue_id: state.issue_id,
-          role: Fleet.CapProfile.name(state.cap_profile),
-          brief: brief,
-          metadata: %{"source" => "admin.spawn"}
-        }
+          :ok
 
-        case Fleet.TaskQueue.enqueue(state.pod_id, attrs) do
-          {:ok, _task} -> :ok
-          {:error, reason} -> {:error, {:brief_enqueue_failed, reason}}
-        end
+        :free ->
+          attrs = %{
+            issue_id: state.issue_id,
+            role: Fleet.CapProfile.name(state.cap_profile),
+            brief: brief,
+            metadata: %{"source" => "admin.spawn"}
+          }
+
+          case Fleet.TaskQueue.enqueue(state.pod_id, attrs) do
+            {:ok, _task} -> :ok
+            {:error, reason} -> {:error, {:brief_enqueue_failed, reason}}
+          end
+      end
+    else
+      :ok
     end
   end
 end
