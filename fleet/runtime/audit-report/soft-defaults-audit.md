@@ -60,8 +60,8 @@ Chaque case : TDD (RED prouve le repli → verrou amont → GREEN → `case` sup
 
 - [x] **① lease.ex:237** — `0e8b4b27e` — get_route erreur → fail-CLOSED (bail tenu). TDD RED→GREEN, pilot 347/0.
 - [x] **② cap_profile brief_kind** — `802c14643` — REQUIS au schéma (défaut worker supprimé). TDD, cap_profile 112/0 + pilot 347/0 + spawner 211/0. Co-update 7 fixtures.
-- [ ] **④ gates.ex:63** — hard-gate `rules:[]` → schéma `minItems:1` + parse non-vide.
-- [ ] **⑤ launch_spec mount mode** — enum `{ro,rw}` au load.
+- [x] **④ gates.ex:63** — `cdffce346` — schéma `if type==hard then minItems 1` + eval garde `rules != []`. TDD ×2, workflow 139/0, pilot 347/0.
+- [x] **⑤ launch_spec mount mode** —  — borne  au eval (schéma déjà enum au load). spawner 212/0.
 - [ ] **⑥ mcp boot_environment** — défaut fail-closed / config requise.
 - [ ] **③ role_token→système** — smart-ctor `RoleIdentity` (pilot+mcp).
 - [ ] **⑦ forge_client bot_login** — aligner sur frères fail-closed.

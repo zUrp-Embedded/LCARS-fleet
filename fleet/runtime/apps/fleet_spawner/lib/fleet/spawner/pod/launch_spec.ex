@@ -190,6 +190,22 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     "default"
   end
 
+  # Closed bwrap mount-mode enum. An out-of-enum mount `mode` (config typo, nil) falls back to the
+  # RESTRICTIVE `"ro"` — never a raw/unknown token that bwrap_launch could read as RW (a write OUT of the
+  # sandbox). Twin of `bound_permission_mode`; the cap-profile schema bounds `mode` at LOAD, this is the
+  # eval-boundary net for a schema-bypassed mount.
+  @mount_modes ~w(ro rw)
+
+  defp bound_mount_mode(mode) when mode in @mount_modes, do: mode
+
+  defp bound_mount_mode(other) do
+    Logger.warning(
+      "LaunchSpec: unknown mount mode #{inspect(other)} — falling back to \"ro\" (safe)"
+    )
+
+    "ro"
+  end
+
   @doc """
   `LCARS_SKILLS_PLUGINS` = unique plugin names extracted from the QUALIFIED `plugin:skill` skills of
   the cap-profile `spec.knowledge.skills`. Consumed by `bin/bwrap_launch.sh` (RO mount-bind). An
@@ -264,7 +280,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
     clean
     |> Enum.map(fn m ->
-      mode = Map.get(m, "mode") || Map.get(m, :mode)
+      # `mode` is bound to the closed enum `{ro, rw}` — an out-of-enum value (config typo `"RW"`, nil) is
+      # NOT serialized raw into `LCARS_POD_MOUNTS` (which would delegate RW/RO semantics to bwrap_launch's
+      # parse — a permissive read of an unknown mode = a write OUT of the sandbox). Unknown → the RESTRICTIVE
+      # `ro`. The cap-profile schema already bounds `mode` at LOAD (`enum: [ro, rw]`); this is defense-in-depth
+      # for a schema-bypassed (in-memory) mount, twin of `permission_mode`.
+      mode = bound_mount_mode(Map.get(m, "mode") || Map.get(m, :mode))
       path = Map.get(m, "path") || Map.get(m, :path)
       "#{mode}:#{path}"
     end)

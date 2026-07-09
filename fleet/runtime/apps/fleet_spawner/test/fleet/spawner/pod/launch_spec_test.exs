@@ -36,6 +36,19 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       env = LaunchSpec.pod_mounts_env(cap, "/opt/claude_launch.sh")
       assert env =~ "rw:/home/project"
     end
+
+    test "un mount avec mode HORS-ENUM (typo) est borné à `ro` (safe), pas sérialisé brut" do
+      # Repli mou #5 : `mode` sérialisé BRUT dans LCARS_POD_MOUNTS. Un mode nil/typo (`"RW"`) déléguait la
+      # sémantique RW/RO au parse de bwrap_launch.sh (RW hors-sandbox s'il le traite permissif). Le schéma
+      # borne déjà `mode ∈ {ro,rw}` au LOAD (upstream) ; ici on borne AUSSI au eval (défense-en-profondeur
+      # pour un struct schéma-bypassé) → mode inconnu = `ro` (côté RESTRICTIF), jamais brut. Jumeau de
+      # `permission_mode`.
+      cap = cap_with_mounts([%{"mode" => "RW", "path" => "/x"}])
+      {env, log} = with_log(fn -> LaunchSpec.pod_mounts_env(cap, "/opt/claude_launch.sh") end)
+      assert env =~ "ro:/x"
+      refute env =~ "RW:/x"
+      assert log =~ "unknown mount mode"
+    end
   end
 
   describe "permission_mode/1 — borné à l'enum CLI (R1-28)" do
