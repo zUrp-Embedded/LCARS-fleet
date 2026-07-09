@@ -17,9 +17,10 @@
 | B | #6 state_fs rm_rf tombstone | `8542389dd` | `pod_test` rm_rf-eacces déterministe |
 | B | #7 pod /clear REPL bleed | `6cafaa58d` | vérifié-par-lecture (PodTmux sans seam) |
 | A | #1 (dans B-#5) / #2 (dans B-#4) | ✅ | corrigés avec leurs fixes B |
-| A | #3 drift_monitor / #4 events.yaml git.* | ⏳ | à faire (A-#3 = résolu par Q2 Cat-5) |
+| A | #4 events.yaml git.* menteur → clés retirées | `691f9a92e` | `contracts.check` keys_aligned PASS |
+| A | #3 drift_monitor « audit.verdict live » | ⏳ | résolu par Q2 (Cat-5 draft) |
 
-**B CLOS : 9/9.** Reste A-#4 (yaml git.* menteur), puis D (tests tautologiques + seal-gap), puis Q2 (producteurs Cat-5 draft, résout A-#3), puis P4 (Tier-2 muets).
+**B CLOS : 9/9. A : 3/4** (reste A-#3, résolu par Q2). Reste D (tests tautologiques + seal-gap), puis Q2 (producteurs Cat-5 draft, résout A-#3), puis P4 (Tier-2 muets).
 
 ## Le fil rouge des 3 passes : le MENSONGE
 
