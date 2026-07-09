@@ -60,10 +60,23 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     # `labels: [name-string]` to the POST -> 422 Gitea « cannot unmarshal string into int64 »: seen LIVE
     # 2026-07-04 (run poc-morse), the sysadmin escalation created NO issue (silent dead rail).
     with {:ok, number} <- create_system_issue(create_fun, repo, title, body, assignee) do
-      # Label = DURABLE signal (the poller/human finds the issue by this label). add_label is fail-loud on the
-      # ForgeClient side but we ignore it here: the ISSUE exists = the escalation happened; the label auto-creates its
-      # org-label and retries, failure very unlikely. Same choice as do_create_issue (type:feature).
-      _ = add_label_fun.(repo, number, label, [])
+      # `error_system` is THE durable DISCOVERY label — the moduledoc's contract is « the poller/human finds
+      # the issue BY this label ». `add_label` is NOT fail-loud on the ForgeClient side (bare tuple, no log)
+      # → a failed label would leave the sysadmin issue INVISIBLE to label-filtered discovery (and, combined
+      # with the assignee-retry, possibly with no assignee either) under a LYING `{:ok}`. So we LOG LOUD on
+      # failure: the issue still exists + is usually assigned (the escalation happened), but its discovery
+      # signal is degraded — an operator must KNOW, not a silent swallow.
+      case add_label_fun.(repo, number, label, []) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error(
+            "IncidentRegistry.Escalation: sysadmin issue ##{number} created but discovery label " <>
+              "#{inspect(label)} NOT added (#{inspect(reason)}) — findable by assignee only, not by label filter"
+          )
+      end
+
       {:ok, number}
     end
   end

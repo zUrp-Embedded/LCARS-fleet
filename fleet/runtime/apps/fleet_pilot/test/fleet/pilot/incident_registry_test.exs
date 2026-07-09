@@ -197,6 +197,36 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received {:label, "fleet/lcars", 1, "error_system"}
     end
 
+    test "record_or_escalate : add_label ÉCHOUE → escalade tient ({:escalated}) MAIS log LOUD (pas de swallow)",
+         %{tmp_dir: tmp} do
+      # Repli B-#5 : `error_system` = LE signal de découverte durable ; add_label était jeté (`_ =`) sous un
+      # commentaire menteur « fail-loud » → label raté = alarme sysadmin invisible au filtre-label, en silence.
+      # Fix : log LOUD (l'issue existe + assignée, mais découverte dégradée → l'opérateur doit SAVOIR).
+      sig = Reg.signature("pod", "issue-7-engineer", :result_timeout)
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o ->
+            {:ok, %{content: JSON.encode!(%{sig => %{"count" => 1}}), sha: "s"}}
+          end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:escalated, 1} =
+                   Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
+                     server: name,
+                     create_issue_fun: fn _r, _t, _b, _o -> {:ok, 1} end,
+                     add_label_fun: fn _r, _n, _l, _o ->
+                       {:error, {:label_not_added, "error_system"}}
+                     end
+                   )
+        end)
+
+      assert log =~ "NOT added"
+    end
+
     test "record_or_escalate : déjà vu + forge DOWN → {:escalation_failed,_}, JAMAIS {:escalated} (aucun issue)",
          %{tmp_dir: tmp} do
       sig = Reg.signature("pod", "issue-7-engineer", :result_timeout)
