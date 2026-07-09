@@ -21,6 +21,8 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   """
 
   @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Pilot.Roles.gatekeeper_role/0`."
+  require Logger
+
   @spec gatekeeper_role() :: String.t()
   defdelegate gatekeeper_role(), to: Fleet.Pilot.Roles
 
@@ -91,7 +93,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # `Closes #N` in the PR body (Gitea auto-closed AT MERGE, before even this comment — a
             # "✅ delivered and merged" posted after the fact on an already-closed ticket). We close ourselves,
             # AFTER the comment AND the stage/merged, for a coherent chronology: nothing else posts
-            # on the issue once closed. Best-effort (the merge is authoritative, a failed close invalidates nothing).
+            # on the issue once closed. Since `Closes #N` was REMOVED (2026-07-07), THIS close is the gesture that
+            # takes the merged brick out of `list_open_issues` — a FAILED close is NOT harmless: the merged brick
+            # re-appears as an OPEN issue and `decide/1` re-engages it every tick (churn / double-delivery). So we
+            # LOG LOUD on failure (the merge is authoritative + done; the stuck-open issue must be visible).
             #
             # SIGNED GATEKEEPER (`gk_opts`), NOT system (QoL regression 2026-07-07, observed live): the merge
             # + the seal comment are ALREADY gatekeeper — a system close would create an identity break
@@ -99,7 +104,17 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
             # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
             # else in the pipeline) — not concerned by this inconsistency.
-            _ = forge.close_issue(repo, issue_n, gk_opts)
+            case forge.close_issue(repo, issue_n, gk_opts) do
+              {:error, reason} ->
+                Logger.error(
+                  "GatekeeperSeal: PR ##{pr_number} MERGED but issue ##{issue_n} close FAILED " <>
+                    "(#{inspect(reason)}) — the merged brick re-appears as an OPEN issue " <>
+                    "(re-dispatch churn) until closed"
+                )
+
+              _ ->
+                :ok
+            end
 
             # Projects the deliverable onto the local clone `/home/projects/<name>` (best-effort). The SERIALIZATION
             # lives IN the dedicated GenServer (one `git` at a time on a worktree, against the race between the two

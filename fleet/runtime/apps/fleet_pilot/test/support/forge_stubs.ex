@@ -37,6 +37,14 @@ defmodule Fleet.Pilot.ForgeStubs do
     end
   end
 
+  defmodule CloseFailForge do
+    @moduledoc "Merge OK mais `close_issue` ÉCHOUE — prouve que le sceau LOG LOUD (brique mergée reste OUVERTE)."
+    def post_comment(_repo, _n, _body, _opts), do: {:ok, 1}
+    def merge_pr(_repo, _pr, _opts), do: :ok
+    def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
+    def close_issue(_repo, _n, _opts), do: {:error, {:http, 500, "close boom"}}
+  end
+
   defmodule MergeFailForge do
     @moduledoc """
     Forge dont le merge échoue (`{:http, 409, "not fast-forward"}`). `post_comment` SIGNALE

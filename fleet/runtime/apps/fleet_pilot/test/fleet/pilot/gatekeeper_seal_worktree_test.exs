@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ForgeStubs.{MergeFailForge, OkForge}
+  alias Fleet.Pilot.ForgeStubs.{CloseFailForge, MergeFailForge, OkForge}
   alias Fleet.Pilot.GatekeeperSeal
   alias Fleet.Pilot.TestEnv
 
@@ -55,5 +55,29 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
              GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [])
 
     refute_received {:worktree_sync, _}
+  end
+
+  test "soft-default B-#4 — merge OK mais close ÉCHOUE → seal :ok (merge autoritatif) MAIS log LOUD" do
+    # Repli B-#4 : `_ = close_issue` était jeté sous « a failed close invalidates nothing » (FAUX depuis le
+    # retrait de `Closes #N`) → une brique MERGÉE restait issue OUVERTE → re-dispatchée chaque tick, en silence.
+    # Fix : log LOUD sur close raté (le merge est autoritatif + fait ; le stuck-open doit être visible).
+    # Le token gatekeeper est posé par le setup.
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert :ok =
+                 GatekeeperSeal.seal_and_merge(
+                   CloseFailForge,
+                   "fleet/myproj",
+                   7,
+                   42,
+                   "engineer",
+                   []
+                 )
+      end)
+
+    assert log =~ "close FAILED"
+
+    # Le merge a eu lieu → la projection worktree EST déclenchée (le close raté n'invalide pas le merge).
+    assert_received {:worktree_sync, "fleet/myproj"}
   end
 end
