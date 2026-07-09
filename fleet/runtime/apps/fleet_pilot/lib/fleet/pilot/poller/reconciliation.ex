@@ -263,9 +263,11 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   end
 
   defp reclaim_lock(%Seams{forge: forge, repo: repo, forge_opts: forge_opts}, number) do
+    # "reclaiming", NOT "reclaimed": the announce precedes the WRITE (remove_label). A premature "reclaimed"
+    # would over-report — on a forge-down the label survives and the lock is NOT actually released.
     Logger.warning(
       "Poller: reconciliation : lock #{@in_flight} ORPHAN on " <>
-        "#{repo}##{number} (pod dead without completion) → reclaimed (re-dispatch on next tick)"
+        "#{repo}##{number} (pod dead without completion) → reclaiming (re-dispatch on next tick)"
     )
 
     # Stopwatch: stopped ALSO here (dead pod = never went through `unlock`) — otherwise it would run until
@@ -276,6 +278,18 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     # started `as_role` by the dead pod (known limit, assumed: pod failure case, not the nominal path
     # — cf. `Fleet.Pilot.StepDispatcher.Spawn`/`StepRunCompleter.unlock` for the nominal attribution).
     _ = forge.stop_stopwatch(repo, number, forge_opts)
-    forge.remove_label(repo, number, @in_flight, forge_opts)
+
+    # The label removal IS the reclaim: a failed remove_label means the lock is NOT released (the announced
+    # reclaim did not take). Self-heals on the next tick (2-tick grace), but it must be VISIBLE, not swallowed.
+    case forge.remove_label(repo, number, @in_flight, forge_opts) do
+      {:error, reason} ->
+        Logger.error(
+          "Poller: reconciliation : reclaim of #{repo}##{number} FAILED — #{@in_flight} NOT removed " <>
+            "(#{inspect(reason)}) — lock persists, retry next tick"
+        )
+
+      _ ->
+        :ok
+    end
   end
 end

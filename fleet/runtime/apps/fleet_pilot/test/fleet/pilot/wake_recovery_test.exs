@@ -43,6 +43,32 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     assert_received {:note, "wake:issue-N-engineer:dead", :dead}
   end
 
+  test "re-roll RÉCUPÈRE mais note ÉCHOUE → :ok MAIS log LOUD (l'ancre incident PAS enregistrée, plus de mensonge « recorded »)" do
+    pid = self()
+    ctr = :counters.new(1, [])
+
+    opts = [
+      wake_fun: fn p ->
+        send(pid, {:wake, p})
+        n = :counters.get(ctr, 1)
+        :counters.add(ctr, 1, 1)
+        if n == 0, do: {:error, :dead}, else: :ok
+      end,
+      seen_before_fun: fn _ -> false end,
+      # Registry indisponible : la note échoue → l'ancre n'est PAS posée → la prochaine récurrence ne
+      # sera pas vue comme telle (pas d'escalade). Le fix : log LOUD, pas de « recorded » menteur.
+      note_fun: fn _, _ -> {:error, :registry_unavailable} end
+    ]
+
+    log =
+      capture_log(fn ->
+        assert :ok = WakeRecovery.wake("issue-7-engineer", fn -> send(pid, :respawn) end, opts)
+      end)
+
+    assert log =~ "NOT recorded"
+    refute log =~ "→ incident recorded"
+  end
+
   test "fail + jamais vu + re-roll ÉCHOUE → escalade :reroll_failed + {:error,{:escalated,_}}" do
     pid = self()
 

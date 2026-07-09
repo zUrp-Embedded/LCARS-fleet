@@ -250,10 +250,37 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   defp read_wal(path) do
-    with {:ok, content} <- File.read(path), reg when is_map(reg) <- decode(content) do
-      reg
-    else
-      _ -> %{}
+    # DISTINGUISH the 3 cases: a MISSING WAL (`:enoent`) is a fresh install → empty is normal & silent.
+    # A PRESENT-but-unreadable or unparseable WAL is DATA LOSS: the cross-session incident memory is wiped
+    # → recurrences stop being detected → escalations never fire, while boot would otherwise report
+    # "0 signatures" as if nominal. We still return `%{}` (never crash boot) but LOUD, not silent.
+    # NB: `Jason.decode` DIRECTLY, not the local `decode/1` — the latter swallows a parse error into `%{}`
+    # (so a corrupt WAL would look like a valid-empty one). Here we MUST see the `{:error, _}` to log it.
+    case File.read(path) do
+      {:ok, content} ->
+        case Jason.decode(content) do
+          {:ok, reg} when is_map(reg) ->
+            reg
+
+          other ->
+            Logger.error(
+              "IncidentRegistry: WAL #{path} present but UNPARSEABLE (#{inspect(other)}) — cross-session " <>
+                "incident memory LOST (recurrences won't be detected until it is rebuilt). Starting from empty."
+            )
+
+            %{}
+        end
+
+      {:error, :enoent} ->
+        %{}
+
+      {:error, reason} ->
+        Logger.error(
+          "IncidentRegistry: WAL #{path} unreadable (#{inspect(reason)}) — cross-session incident " <>
+            "memory unavailable this boot (recurrences won't be detected). Starting from empty."
+        )
+
+        %{}
     end
   end
 

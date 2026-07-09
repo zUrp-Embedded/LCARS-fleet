@@ -62,8 +62,20 @@ defmodule Fleet.Pilot.WakeRecovery do
   defp re_wake(pod_id, reason, sig, wake_fun, note_fun, opts) do
     case wake_fun.(pod_id) do
       :ok ->
-        _ = note_fun.(sig, reason)
-        Logger.info("WakeRecovery: #{pod_id} : re-roll OK → incident recorded (#{sig})")
+        # The incident anchor MUST persist: it is what makes the NEXT occurrence of `sig` a RECURRENCE
+        # (→ direct escalation). A swallowed note-failure + a log claiming "recorded" would be a lie —
+        # the recurrence would be seen as a first-time wake and re-rolled forever, no escalation.
+        case note_fun.(sig, reason) do
+          :ok ->
+            Logger.info("WakeRecovery: #{pod_id} : re-roll OK → incident recorded (#{sig})")
+
+          other ->
+            Logger.error(
+              "WakeRecovery: #{pod_id} : re-roll OK BUT incident anchor NOT recorded (#{inspect(other)}) " <>
+                "— the next recurrence of #{sig} won't be detected as such (no escalation)"
+            )
+        end
+
         :ok
 
       err ->

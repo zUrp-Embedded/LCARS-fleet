@@ -100,6 +100,39 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert Reg.seen_before?("wake:b:y", server: name)
     end
 
+    test "boot : WAL présent mais CORROMPU → log LOUD (amnésie visible), reg boote quand même vide",
+         %{
+           tmp_dir: tmp
+         } do
+      # Un WAL présent mais illisible = PERTE de la mémoire cross-session (les récurrences ne sont plus
+      # détectées, plus d'escalade). Avant : `decode` avalait l'erreur Jason en `%{}` → boot « 0 signatures »
+      # comme si nominal. Fix : Jason.decode direct → log LOUD (l'amnésie doit être visible), reg boote vide.
+      File.write!(Path.join(tmp, "incidents.json"), "ceci n'est pas du JSON {{{")
+
+      name = :"reg_#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          start_supervised!(
+            {Reg,
+             [
+               name: name,
+               wal_path: Path.join(tmp, "incidents.json"),
+               sync_debounce_ms: 5,
+               retry_ms: 50,
+               get_file_fun: fn _r, _p, _o -> {:error, :not_found} end
+             ]}
+          )
+
+          # flush du handle_continue(:load) (où read_wal tourne)
+          _ = :sys.get_state(name)
+        end)
+
+      assert log =~ "UNPARSEABLE"
+      # le reg boote et fonctionne : mémoire vide, pas de crash
+      refute Reg.seen_before?("wake:whatever:x", server: name)
+    end
+
     test "forge down : note reste :ok + WAL tient (fail-loud, AUCUNE perte)", %{tmp_dir: tmp} do
       name =
         start_reg(tmp,
