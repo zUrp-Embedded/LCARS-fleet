@@ -28,11 +28,12 @@ events:
   # (nonexistent fleet_ipc_filter) = a hollow CONSUMER on the starfleet side (out-of-fleet),
   # not a hollow producer; not touched here.
   pod.drift: []
-  # ⚠ DORMANT CAT-5 CHAIN: like pod.drift above, workflow_map.failed and
-  # oauth.refresh.failed have NO live producer (one died with the RAM Executor, the other was
-  # never implemented on the launcher/credentials side). The full DriftMonitor→Cat5Escalator→coord
-  # rail is therefore inert TODAY — it is the sysadmin remediation pipeline, to be wired in the
-  # admin-sys chantier (producers + policies). Keys kept: consumers wired and tested, ready.
+  # CAT-5 CHAIN (partially wired, Q2 2026-07-09): `workflow_map.failed` and `audit.verdict` now have a
+  # DRAFT producer (`Pilot.StepRunConsumer`, source `:workflow`) → the DriftMonitor→Cat5Escalator/
+  # CoordBackend→coord rail BLINKS end-to-end on a real signal (draft, not the final signal — see the
+  # per-key comments). STILL DORMANT: `pod.drift` (intended pod-side IPC filter never built) and
+  # `oauth.refresh.failed` (never implemented on the launcher/credentials side) — no honest signal to
+  # emit yet. Keys kept: consumers wired + tested, ready.
   # wake.failed: emitted by `Spawner.Pod` when the onboarding kick is abandoned after N
   # attempts (agent never acked) — payload `pod_id`/`reason`/`pane`. Consumed by
   # `Pilot.StepRunConsumer` (`type: :"wake.failed"` → `:sp_suspect` escalation, pane attached to the issue).
@@ -50,10 +51,12 @@ events:
   oauth.refresh.failed: []
 
   # --- Audit gatekeeper / forge tickets / tick ---
-  # `audit.verdict` (2 segments) — aligned on the real consumer
-  # (DriftMonitor `%Fleet.Event{type: :"audit.verdict"}`) + the pre-registered atom
-  # (Starfleet.Application). The old key `audit.verdict.gatekeeper` (3 segments,
-  # never emitted) was misaligned with the consumer → dead consumer.
+  # `audit.verdict` (2 segments) — consumed by DriftMonitor (`%Fleet.Event{source: :workflow,
+  # type: :"audit.verdict"}`, routed DIRECTLY to CoordBackend.handle_decision) AND, since Q2
+  # (2026-07-09), produced by a DRAFT emitter: `Pilot.StepRunConsumer.apply_verdict` broadcasts it
+  # (source `:workflow`) on an escalation-worthy judge verdict, decision-v1 `{decision: "escalate",
+  # reason: "audit_verdict"}`. The old key `audit.verdict.gatekeeper` (3 segments, never emitted) was
+  # misaligned with the consumer → dead consumer. DRAFT: coarse verdict→decision-v1 translation.
   audit.verdict: []
   # The producer (`WebhooksGitea`, dynamic `gitea.<action>`) + the pre-registered atoms
   # (`event_router/application.ex` `to_existing_atom`) emit THESE 10 actions. Having only
@@ -97,12 +100,12 @@ events:
   coord.action_dispatched: []
 
   # --- Workflow-map (source :workflow) ---
-  # INVERSE ASYMMETRY (real consumer, 0 current producer): `workflow_map.failed`
-  # is consumed by `Starfleet.DriftMonitor` (→ Cat 5) and `workflow_map.completed` matched
-  # by `API.WS` (`workflow_map.*`). The producer was the RAM engine `Pipeline.Executor`,
-  # REMOVED — the forge-driven rail (`Pilot.StepRunConsumer`) closes the issue instead of emitting
-  # `workflow_map.failed`. Keys kept (consumer wired); to re-emit if the forge-driven rail
-  # publishes a workflow_map failure/completion signal.
+  # `workflow_map.failed` — consumed by `Starfleet.DriftMonitor` (→ Cat 5) AND, since Q2 (2026-07-09),
+  # produced by a DRAFT emitter: `Pilot.StepRunConsumer` broadcasts it (source `:workflow`) on a
+  # `:workflow_map_load_failed` (the WorkflowMapNav single authority). The old RAM-engine producer
+  # (`Pipeline.Executor`) was removed; this is the "forge-driven rail publishes a workflow_map failure
+  # signal" anticipated here. DRAFT: covers the main dispatch load-failure, not yet every rail path.
+  # `workflow_map.completed` — matched by `API.WS` (`workflow_map.*`), still 0 producer (kept, ready).
   workflow_map.failed: []
   workflow_map.completed: []
   workflow_map.step.completed: []
