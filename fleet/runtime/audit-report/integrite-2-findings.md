@@ -20,7 +20,7 @@
 | A | #4 events.yaml git.* menteur → clés retirées | `691f9a92e` | `contracts.check` keys_aligned PASS |
 | A | #3 drift_monitor « audit.verdict live » | ⏳ | résolu par Q2 (Cat-5 draft) |
 
-**B CLOS : 9/9. A : 3/4** (reste A-#3, résolu par Q2). Reste D (tests tautologiques + seal-gap), puis Q2 (producteurs Cat-5 draft, résout A-#3), puis P4 (Tier-2 muets).
+**B CLOS : 9/9. A : 3/4** (reste A-#3, résolu par Q2). **D CLOS : 3/3** (`6863c4943`). Reste Q2 (producteurs Cat-5 draft, résout A-#3), puis P4 (Tier-2 muets).
 
 ## Le fil rouge des 3 passes : le MENSONGE
 
@@ -51,7 +51,7 @@ Trigger (pod.drift/workflow_map.failed/oauth.refresh.failed) = 0 producteur → 
 ne circule. + orphelins : `spawn.failed` (0 consumer → alarme drop-silencieux ignorée), `workflow_map.step.completed`
 (fantôme total 0-référence), 10 `gitea.*` (0 réacteur métier).
 
-## D. P5 — faux-vert (localisé, suite globalement solide)
-- 2 TAUTOLOGIQUES : `starfleet/mcp_watcher_test:46` (is_binary OR is_nil = accepte tout), `sp_builder/blocks_test:11/19` (boucles vacuous 0-assertion si role_map vide).
-- SÉCU n°1 : `pilot/step_run_completer_test:361-371` — test FF-409 ne garde PAS contre le sceau-menteur (pas de `refute_received {:comment}` sur le fail-path). Recoupe P2-#4.
+## D. P5 — faux-vert (localisé, suite globalement solide) — ✅ 3/3 durcis (`6863c4943`)
+- 2 TAUTOLOGIQUES ✅ : `mcp_watcher_test:46` (is_binary OR is_nil → attendu calculé Application.spec ex_mcp) ; `blocks_test:11/19` (boucles vacues → guard `map_size(roles)>0` avant chaque `for`).
+- SÉCU n°1 ✅ : `step_run_completer_test:361` — invariant `refute_received {:comment}` sur le fail-path 409 + PrFailForge rendu signalant. VÉRIFIÉ : le sceau EST merge-first (pas de bug, trou de test comblé).
 - ~15 FAIBLE (count/return-sans-contenu) + `poller_test refute_received {:spawned}` inertes (message → mailbox Poller). Suite ok par ailleurs.
