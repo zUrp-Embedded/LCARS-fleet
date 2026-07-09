@@ -10,6 +10,7 @@ Méthodo : recon (fan-out/outil) → VÉRIF code par finding → classé → TDD
 - [x] **P1 Dialyzer** ✅ baseline propre, (@spec mentent) : PLT en fond → `mix dialyzer` umbrella → tri (bug vs spec-à-préciser) → remédie. `dialyzer-audit.md`.
 - [ ] **P2 Sweep `_ =`** (avalage silencieux) : fan-out ~58 sites `_ = <call>` + rescue/catch-qui-rendent → discard justifié vs panne load-bearing avalée.
 - [ ] **P3 Graphe d'events** (rails morts) : registry `events.yaml` ∪ producteurs ∪ consumers → orphelins (produit-jamais-consommé / consommé-jamais-produit).
+- [ ] **Q2 Cat-5 (décision user : câbler)** — producteurs DRAFT honnêtes/documentés-comme-tels qui font CLIGNOTER le rail de bout en bout (pas la version béton ; « quelque chose bouge au bout »).
 - [ ] **P4 Tier-2 vivants** (scoutés) : permanent_boot muet, webhooks ACK-200-drop, mcp hollow-green, incident amnésie, observation LED-verte.
 - [ ] **P5 Qualité tests** (faux-vert) : tautologiques, passe-sur-code-supprimé, co-édités-verrouillant-faux, async:false-couplage.
 
