@@ -2,8 +2,24 @@
 
 **Date** : 2026-07-09
 **Dernière révision** : 2026-07-09
-**Statut** : recon CLOSE (P1 dialyzer déjà remédié) — triage user en attente
+**Statut** : remédiation en cours — **B (9 Tier-1) : 9/9 livrés** ; A mensonges 2/4 ; C (Cat-5) + D (tests) à venir
 **Référencé par** : `_plan-integrite-2.md`, `soft-defaults-audit.md`
+
+## Avancement remédiation (triage user Q1 « Mensonges + 9 Tier-1 + tests-clés », Q2 « câbler producteurs Cat-5 draft »)
+
+| Lot | Item | Commit | Test |
+|---|---|---|---|
+| B | #1 webhooks_gitea → 422 | `62a600925` | seam `webhook_emit_fun` |
+| B | #2/#8/#9 spawn safe_wake/pod_alive/pod_info | `df8ce9b36` | — (rescue surface + fail-closed) |
+| B | #4 gatekeeper_seal close raté (+ mensonge A-#2) | `416ee81a9` | `CloseFailForge` + worktree_test |
+| B | #5 escalation label error_system (+ mensonge A-#1) | `d09cbd0f0` | — |
+| B | #3 arch_escalation label awaits-arch | `a64ff67b1` | `arch_escalation_test` (LabelFailForge) |
+| B | #6 state_fs rm_rf tombstone | `8542389dd` | `pod_test` rm_rf-eacces déterministe |
+| B | #7 pod /clear REPL bleed | `6cafaa58d` | vérifié-par-lecture (PodTmux sans seam) |
+| A | #1 (dans B-#5) / #2 (dans B-#4) | ✅ | corrigés avec leurs fixes B |
+| A | #3 drift_monitor / #4 events.yaml git.* | ⏳ | à faire (A-#3 = résolu par Q2 Cat-5) |
+
+**B CLOS : 9/9.** Reste A-#4 (yaml git.* menteur), puis D (tests tautologiques + seal-gap), puis Q2 (producteurs Cat-5 draft, résout A-#3), puis P4 (Tier-2 muets).
 
 ## Le fil rouge des 3 passes : le MENSONGE
 
