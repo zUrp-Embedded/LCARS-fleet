@@ -1,7 +1,7 @@
 # Audit — « repli mou silencieux » (soft defaults / fail-open sur le chemin malheureux)
 
 **Date** : 2026-07-09
-**Statut** : recon CLOSE (6 chercheurs adversariaux, 14 apps, croisés/vérifiés) — triage user en attente
+**Statut** : recon CLOSE (6 chercheurs adversariaux, 14 apps, croisés/vérifiés) — **7/7 Tier-1 CASSÉS (2026-07-09)**
 **Méthode** : fan-out 6 agents (seams sécu ×3 sous-agents, config, avalage-erreur, vide→permissif, rail/décision, fondation/bord), chaque candidat lu+vérifié, classé Tier-1/2/faux-positif.
 
 ## Mission (reframe user)
@@ -63,5 +63,5 @@ Chaque case : TDD (RED prouve le repli → verrou amont → GREEN → `case` sup
 - [x] **④ gates.ex:63** — `cdffce346` — schéma `if type==hard then minItems 1` + eval garde `rules != []`. TDD ×2, workflow 139/0, pilot 347/0.
 - [x] **⑤ launch_spec mount mode** — `bcec15d47` — borne `{ro,rw}` au eval (schéma déjà enum au load). TDD, spawner 212/0.
 - [x] **⑥ mcp boot_environment** — d8ae8f1a7 — défaut fail-closed :pod + host déclaré positivement. TDD, mcp 52/0.
-- [ ] **③ role_token→système** — smart-ctor `RoleIdentity` (pilot+mcp).
+- [x] **③ role_token→système** — a6e2252ca — smart-ctor RoleIdentity, as_role/create_issue fail-closed. TDD, credentials 47/0 + pilot 349/0 + mcp 52/0.
 - [x] **⑦ forge_client bot_login** — e7fbd2797 — dedup bot non-résolu → trust personne (fail-closed). TDD, pilot 348/0.
