@@ -64,8 +64,29 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
           payload = Map.put(body, "issue_id", issue_id)
 
-          _ = Fleet.EventRouter.Bus.emit(:event_router, type_atom, payload: payload)
-          send_resp(conn, 200, "ok")
+          # `Bus.emit` can return an `{:error, _}` TUPLE (PubSub adapter down), NOT only raise. A dropped
+          # event must NEVER be ACKed 200 (module invariant) → MATCH the return: `:ok` → 200, `{:error}` →
+          # 422 so Gitea retries/alerts (same fail-loud stance as the rescue clauses below). `emit_fun` seam
+          # (test): forces the `{:error}` path deterministically.
+          emit_fun =
+            Application.get_env(
+              :fleet_event_router,
+              :webhook_emit_fun,
+              &Fleet.EventRouter.Bus.emit/3
+            )
+
+          case emit_fun.(:event_router, type_atom, payload: payload) do
+            :ok ->
+              send_resp(conn, 200, "ok")
+
+            {:error, reason} ->
+              Logger.warning(
+                "WebhooksGitea: broadcast FAILED #{inspect(reason)} for #{event_type} " <>
+                  "— DRIFT, 422 (never ACK a dropped event)"
+              )
+
+              send_resp(conn, 422, "broadcast failed")
+          end
         rescue
           # A dropped event must NEVER be ACKed 200. The two cases below are
           # DRIFT (not an intentional drop — there is no "known but deliberately

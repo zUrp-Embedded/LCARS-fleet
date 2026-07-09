@@ -47,6 +47,24 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
                      500
     end
 
+    test "broadcast {:error} → 422, JAMAIS ACK 200 (un event droppé ne doit pas être cru livré)",
+         %{
+           secret: secret
+         } do
+      # Repli B-#1 : `_ = Bus.emit` jetait le tuple `{:error}` → `send_resp 200` → Gitea croit livré, ne
+      # rejoue jamais → event forge perdu en silence. Fix : matcher le retour → `{:error}` → 422 (retry/alerte).
+      Fleet.EventRouter.TestEnv.put_env_restoring(
+        :fleet_event_router,
+        :webhook_emit_fun,
+        fn _source, _type, _opts -> {:error, :pubsub_down} end
+      )
+
+      body = %{"action" => "opened", "issue" => %{"id" => 42}}
+      conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 422
+    end
+
     test "M20 : sans action, event_type via header X-Gitea-Event (pas défaut 'push')", %{
       secret: secret
     } do
