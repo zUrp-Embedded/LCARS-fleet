@@ -449,11 +449,23 @@ defmodule Fleet.Spawner.Pod do
 
     case Fleet.ProjectBootstrap.Phase.Clone.reset_in_place(data.pod_dir, eff_cap, opts) do
       {:ok, ws, branch} ->
-        _ = Fleet.Spawner.PodTmux.send_keys(data.pod_id, "/clear")
+        # `/clear` is the OTHER load-bearing half of the cold reset (git workspace + REPL context). A failed
+        # `/clear` leaves the REPL carrying the PREVIOUS issue's conversation → context BLEED into the next
+        # issue — and the "+ /clear" log would lie. We surface it (the workspace IS reset; only the REPL clear
+        # failed) rather than swallow + falsely report success. We still proceed (:ok) — the git isolation
+        # holds and a tmux hiccup is transient; the bleed is now VISIBLE, not silent.
+        case Fleet.Spawner.PodTmux.send_keys(data.pod_id, "/clear") do
+          :ok ->
+            Logger.info(
+              "pod #{data.pod_id} workspace reprovisioned COLD (#{ws} branch=#{branch}) + /clear"
+            )
 
-        Logger.info(
-          "pod #{data.pod_id} workspace reprovisioned COLD (#{ws} branch=#{branch}) + /clear"
-        )
+          {:error, reason} ->
+            Logger.error(
+              "pod #{data.pod_id} workspace reset COLD (#{ws} branch=#{branch}) but REPL /clear FAILED " <>
+                "(#{inspect(reason)}) — REPL keeps the previous issue's context (bleed) until re-cleared"
+            )
+        end
 
         {:keep_state_and_data, [{:reply, from, :ok}]}
 
