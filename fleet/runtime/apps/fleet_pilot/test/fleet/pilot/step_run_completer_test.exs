@@ -77,8 +77,15 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   defmodule PrFailForge do
     def open_pr(_r, _h, _b, _t, _o), do: {:error, {:http, 422, "no commits between"}}
     def post_review(_r, _pr, _e, _b, _o), do: {:error, {:http, 500, "boom"}}
-    # Le sceau commente OK puis le merge échoue (409) → {:error, {:merge, _}} fail-loud.
-    def post_comment(_r, _n, _b, _o), do: {:ok, 1}
+
+    # SIGNALE le commentaire : le sceau est MERGE-FIRST (ne commente QUE si le merge réussit) → sur le
+    # merge 409, post_comment ne DOIT jamais être appelé. On signale pour qu'un `refute_received {:comment}`
+    # au site d'appel soit PROBANT (s'il l'était par régression comment-before-merge, le test le verrait).
+    def post_comment(_r, n, body, opts) do
+      send(self(), {:comment, n, body, opts})
+      {:ok, 1}
+    end
+
     def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
@@ -368,6 +375,12 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert {:error, {:merge, {:http, 409, _}}} =
                StepRunCompleter.promote(step_run, forge_client: PrFailForge, forge_opts: [])
+
+      # Invariant F-MERGE-CLAIM-BEFORE-REALITY : le sceau est MERGE-FIRST → un merge 409 ne DOIT laisser
+      # AUCUN commentaire « scellé/fusionné » sur l'issue (commenter avant confirmation gèlerait un succès
+      # non advenu). PrFailForge SIGNALE ses commentaires → ce refute est probant (il casserait sur une
+      # régression comment-before-merge, le bug exact que gatekeeper_seal évite).
+      refute_received {:comment, _, _, _}
     end
   end
 

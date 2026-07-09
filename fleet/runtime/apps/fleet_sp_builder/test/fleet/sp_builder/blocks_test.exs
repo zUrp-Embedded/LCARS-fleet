@@ -8,7 +8,14 @@ defmodule Fleet.SPBuilder.BlocksTest do
   defp drafts_dir, do: :fleet_sp_builder |> Application.app_dir("priv") |> Path.join("sp_drafts")
 
   test "each role in the map composes a non-empty, titled SP" do
-    for {role, blocks} <- Blocks.role_map(blocks_dir()) do
+    roles = Blocks.role_map(blocks_dir())
+
+    # Anti-vacuité : un `for` sur une map VIDE ne lève rien → le test passerait VERT sans exécuter la
+    # moindre assertion (ex. sp-map.yaml introuvable dans _build). On exige au moins un rôle AVANT la boucle.
+    assert map_size(roles) > 0,
+           "role_map vide (sp-map.yaml introuvable ?) → la boucle ne teste RIEN"
+
+    for {role, blocks} <- roles do
       sp = Blocks.compose!(role, blocks, blocks_dir())
       assert sp =~ "# System Prompt — #{role}"
       assert String.length(sp) > 200
@@ -16,7 +23,12 @@ defmodule Fleet.SPBuilder.BlocksTest do
   end
 
   test "no-drift: the committed flat == the regeneration from the blocks (else run `mix lcars.sp.gen`)" do
-    for {role, blocks} <- Blocks.role_map(blocks_dir()) do
+    roles = Blocks.role_map(blocks_dir())
+
+    assert map_size(roles) > 0,
+           "role_map vide (sp-map.yaml introuvable ?) → le no-drift ne compare RIEN"
+
+    for {role, blocks} <- roles do
       committed = drafts_dir() |> Path.join("agent-#{role}-base.md") |> File.read!()
 
       assert committed == Blocks.compose!(role, blocks, blocks_dir()),

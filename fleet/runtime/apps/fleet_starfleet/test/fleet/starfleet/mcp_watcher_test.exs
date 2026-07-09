@@ -43,7 +43,17 @@ defmodule Fleet.Starfleet.MCPWatcherTest do
                      },
                      500
 
-      assert is_binary(current) or is_nil(current)
+      # Le contrat de l'alerte : `current` = la version ex_mcp RÉELLEMENT résolue localement (via
+      # Application.spec, ou nil si absente), PAS une valeur arbitraire. `is_binary or is_nil` était
+      # vacue (toujours vrai). On calcule l'attendu DANS ce process → robuste que ex_mcp soit chargé
+      # (→ "0.9.1") ou non (→ nil) : si le watcher rapportait un current bidon/codé en dur, ça casse.
+      expected_current =
+        case Application.spec(:ex_mcp, :vsn) do
+          nil -> nil
+          vsn -> List.to_string(vsn)
+        end
+
+      assert current == expected_current
 
       state = :sys.get_state(pid)
       assert state.last_upstream == "9.9.9-fake-upstream"
