@@ -113,14 +113,13 @@ events:
   # racing the push). Real producer.
   deliverable.published: []
 
-  # --- post_extract.git ---
-  # INVERSE ASYMMETRY (real consumer, 0 current producer): consumed by
-  # `Starfleet.AuditConsumer`. The producer was the RAM engine `Pipeline.Executor`
-  # (post-extract publication), REMOVED. `Pipeline.Git.publish/1` does not broadcast
-  # itself. Keys kept (consumer wired); to re-emit by the forge-driven rail
-  # if git publication becomes observable on the Bus again.
-  git.published: []
-  git.publish_failed: []
+  # --- post_extract.git (REMOVED) ---
+  # `git.published`/`git.publish_failed` REMOVED: 0 producer (the RAM engine `Pipeline.Executor`
+  # was removed; `Pipeline.Git.publish/1` does not broadcast) AND 0 consumer (the
+  # `Starfleet.AuditConsumer` clause was RAZED 2026-07-04, cf. `audit_consumer.ex`). 0 producer +
+  # 0 consumer = registry lie (the registry must reflect reality, exactly as pod.allocate/transition
+  # above). The prior comment still claimed "consumed by AuditConsumer / consumer wired" — false since
+  # the raze. To re-add WITH a producer AND a consumer if git publication becomes observable again.
 
   # --- Cat 5 broadcasts (Cat5Escalator, source :starfleet) ---
   starfleet.audit_cat5_pod_drift: []

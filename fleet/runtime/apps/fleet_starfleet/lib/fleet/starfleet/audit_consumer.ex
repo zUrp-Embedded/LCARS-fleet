@@ -97,9 +97,9 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # git.published/git.publish_failed clause RAZED (conformance 2026-07-04): 0 producer (events.yaml
-  # documents them as "to be re-emitted by the forge-driven rail if git publication becomes observable
-  # again"); it also matched source :workflow.
+  # git.published/git.publish_failed clause RAZED (conformance 2026-07-04): 0 producer AND, since this
+  # raze, 0 consumer → both keys are now REMOVED from events.yaml too (registry-lie cleanup: a 0/0 key
+  # must not linger claiming "consumer wired"). Re-add a clause here only if a producer + registry key return.
 
   # pod.drift: migrated from the legacy stack (conformance 2026-07-04). Producer not yet born (events.yaml:
   # "producer missing") but consumed by DriftMonitor — type-only match ALIGNED with DriftMonitor
