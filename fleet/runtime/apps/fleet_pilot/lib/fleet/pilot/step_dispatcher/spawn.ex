@@ -220,7 +220,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   defp safe_wake(spawner, pod_id) do
     if function_exported?(spawner, :wake_pod, 1), do: spawner.wake_pod(pod_id), else: :ok
   rescue
-    _ -> :ok
+    e ->
+      # A RAISE from wake_pod is NOT a successful wake — returning `:ok` would report a woken pod that never
+      # woke (false `dispatched` tally, silent). Surface it as `{:error}` so WakeRecovery re-rolls/escalates.
+      Logger.warning(
+        "Spawn.safe_wake: wake_pod RAISED for #{inspect(pod_id)} (#{inspect(e)}) → {:error}"
+      )
+
+      {:error, {:wake_raised, pod_id}}
   end
 
   @doc """
@@ -244,7 +251,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   defp pod_alive?(spawner, pod_id) do
     function_exported?(spawner, :pod_info, 1) and match?({:ok, _}, spawner.pod_info(pod_id))
   rescue
-    _ -> false
+    e ->
+      # A RAISE from pod_info leaves aliveness UNKNOWN. Defaulting to `false` (dead) is UNSAFE: a live pod
+      # classed dead → double-spawn on the deterministic pod_id AND `safe_kill` of the LIVING eng + its
+      # context. Fail-CLOSED → assume ALIVE (no destructive action; a wrong "alive" at worst wastes a rebrief).
+      Logger.warning(
+        "Spawn.pod_alive?: pod_info RAISED for #{inspect(pod_id)} (#{inspect(e)}) → assume ALIVE (fail-closed)"
+      )
+
+      true
   end
 
   # ============================================================
@@ -334,7 +349,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       :error
     end
   rescue
-    _ -> :error
+    e ->
+      # A RAISE from pod_info leaves the pod state UNKNOWN. We keep the conservative `:error` (→ cold reset,
+      # recoverable — the pod re-does its work) but SURFACE it: a silent swallow here masked a maybe-busy pod
+      # being reset. (Full fail-closed = defer-on-uncertainty; that needs `pipe_rebrief_state` to grow a variant.)
+      Logger.warning(
+        "Spawn.safe_pod_info: pod_info RAISED for #{inspect(pod_id)} (#{inspect(e)}) → :error (conservative reset)"
+      )
+
+      :error
   end
 
   # COLD in-place reset of the workspace + /clear BEFORE the rebrief, then :ok (proceed). Reset failed -> DEFERRED
