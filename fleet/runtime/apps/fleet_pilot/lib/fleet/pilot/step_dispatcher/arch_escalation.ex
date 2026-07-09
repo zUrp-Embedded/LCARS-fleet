@@ -34,6 +34,8 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
   # Protocol vocabulary = single source Fleet.Pilot.Labels (compile-time constant, as in
   # StepDispatcher which keeps ITS @awaits_arch_label for `decide/1` — same source, not a fork).
+  require Logger
+
   @awaits_arch_label Fleet.Pilot.Labels.awaits_arch()
 
   defmodule Seams do
@@ -143,7 +145,20 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
         seams.forge.post_comment(seams.repo, issue_n, body, gk_opts)
       end
 
-    _ = seams.forge.add_label(seams.repo, issue_n, @awaits_arch_label, seams.forge_opts)
+    case seams.forge.add_label(seams.repo, issue_n, @awaits_arch_label, seams.forge_opts) do
+      {:error, reason} ->
+        # `lcars-awaits-arch` IS the throttle (`decide/1` / `dispatch_review` skip on it). A failed label →
+        # the PR is re-dispatched every tick (the exact churn this escalation exists to STOP), while we report
+        # `{:skipped, _escalated}`. NOT silent → LOG LOUD (an operator must know the escalation did not throttle).
+        Logger.error(
+          "ArchEscalation: issue ##{issue_n} escalated but throttle label #{inspect(@awaits_arch_label)} " <>
+            "NOT added (#{inspect(reason)}) — the PR will re-dispatch (churn) until the label sticks"
+        )
+
+      _ ->
+        :ok
+    end
+
     :ok
   end
 
