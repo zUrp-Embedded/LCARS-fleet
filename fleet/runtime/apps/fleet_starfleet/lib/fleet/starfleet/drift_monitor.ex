@@ -5,22 +5,28 @@ defmodule Fleet.Starfleet.DriftMonitor do
   No runtime state: the threshold is evaluated against the `drift_count` carried
   by the `pod.drift` payload itself (`drift_count/1`), not by a local counter.
 
-  ⚠ `pod.drift` is an event with NO current producer: the intended emitter
-  (a pod-side IPC filter that would count the strikes) was never implemented.
-  The `pod.drift` handler below is therefore wired but dormant as long as no
-  producer emits the event. Several of the other handlers are latent too (cf.
-  `Cat5Escalator`): `workflow_map.failed` and `oauth.refresh.failed` have no producer
-  wired today; `audit.verdict` is the live path (routed to `CoordBackend`). All handlers
-  stay ready — they route as soon as a producer emits.
+  Producer status (2026-07-09, Q2 draft wiring — "at least it blinks"):
+  - `workflow_map.failed` — LIVE via a DRAFT producer: `Pilot.StepRunConsumer` emits it (source
+    `:workflow`) on a `:workflow_map_load_failed` in the forge-driven rail. Honest but partial (covers
+    the main dispatch load-failure, not yet every rail path). Routes to `Cat5Escalator`.
+  - `audit.verdict` — LIVE via a DRAFT producer: `Pilot.StepRunConsumer.apply_verdict` emits it (source
+    `:workflow`) on an escalation-worthy judge verdict (halt/`halt_invalid` → freeze-to-arch), translated
+    to a decision-v1 `{decision: "escalate", reason: "audit_verdict", details: <real verdict>}`. Routed
+    DIRECTLY to `CoordBackend` (`handle_decision`), NOT via `Cat5Escalator`.
+  - `pod.drift` — STILL DORMANT: the intended emitter (a pod-side IPC strike filter) was never built;
+    there is no honest signal source to fabricate today. Handler wired + anti-spoof-ready, waiting.
+  - `oauth.refresh.failed` — STILL DORMANT: no producer on the launcher/credentials side yet.
+
+  All handlers stay ready — the dormant two route as soon as a real producer emits.
 
   ## Events handled
 
-  | event_type | Cat 5 trigger |
-  |---|---|
-  | `pod.drift` | if `drift_count >= 3` (dormant: 0 producer) |
-  | `workflow_map.failed` | unconditional |
-  | `oauth.refresh.failed` | unconditional |
-  | `audit.verdict` | validate the decision JSON then dispatch to CoordBackend |
+  | event_type | source match | Cat 5 trigger |
+  |---|---|---|
+  | `pod.drift` | type-only (dormant) | if `drift_count >= 3` |
+  | `workflow_map.failed` | `:workflow` (draft producer) | unconditional → `Cat5Escalator` |
+  | `oauth.refresh.failed` | type-only (dormant) | unconditional |
+  | `audit.verdict` | `:workflow` (draft producer) | validate decision JSON → `CoordBackend` |
 
   ## Why a runtime process
 
@@ -57,11 +63,12 @@ defmodule Fleet.Starfleet.DriftMonitor do
   # Pattern-match on the strict canonical %Fleet.Event{} schema. The legacy tuple
   # format was removed (producers migrated to the canonical schema).
   #
-  # R2-16: these clauses match TYPE ONLY because NONE of these types has a live producer yet (all
-  # "not-yet-born" scaffolding — cf. `cat5_escalator`/`audit_consumer`). There is no legit `source` to
-  # match against today. INVARIANT for whoever wires a real producer: its clause MUST also match
-  # `source:` (the producer's atom) so a SPOOFED-source event of that type cannot trigger the Cat 5
-  # escalation. Matching a guessed source now would just break silently when the real producer is born.
+  # R2-16 / Q2 anti-spoof: the two DRAFT-wired types (`workflow_map.failed`, `audit.verdict`) now ALSO
+  # match `source: :workflow` — their producers live in `Pilot.StepRunConsumer` (the workflow rail). Per
+  # the invariant, matching the source means a SPOOFED-source event of that type (e.g. a pod broadcasting
+  # `audit.verdict` on `:event_router`) CANNOT trigger the Cat 5 escalation. The two DORMANT types
+  # (`pod.drift`, `oauth.refresh.failed`) stay TYPE-ONLY: no producer exists, so there is no legit source
+  # to match yet — whoever wires them MUST add its `source:` (same anti-spoof rule).
 
   def handle_info(
         %Fleet.Event{type: :"pod.drift", payload: payload, correlation_id: cid},
@@ -75,7 +82,12 @@ defmodule Fleet.Starfleet.DriftMonitor do
   end
 
   def handle_info(
-        %Fleet.Event{type: :"workflow_map.failed", payload: payload, correlation_id: cid},
+        %Fleet.Event{
+          source: :workflow,
+          type: :"workflow_map.failed",
+          payload: payload,
+          correlation_id: cid
+        },
         state
       ) do
     Cat5Escalator.escalate(:workflow_map_failed, payload, cid)
@@ -91,7 +103,12 @@ defmodule Fleet.Starfleet.DriftMonitor do
   end
 
   def handle_info(
-        %Fleet.Event{type: :"audit.verdict", payload: payload, correlation_id: cid},
+        %Fleet.Event{
+          source: :workflow,
+          type: :"audit.verdict",
+          payload: payload,
+          correlation_id: cid
+        },
         state
       ) do
     dispatch_audit_verdict(payload, cid)

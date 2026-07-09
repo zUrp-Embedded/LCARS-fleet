@@ -59,17 +59,26 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     Application.get_env(:fleet_starfleet, :coord_invocations, [])
   end
 
-  defp emit_canon(type, payload, cid \\ nil, pod_id \\ nil) do
+  # `source` défaut `:event_router` (les 2 types encore DORMANTS matchent type-only) ; les 2 producteurs
+  # draft (workflow_map.failed / audit.verdict) exigent `source: :workflow` (invariant anti-spoof DriftMonitor).
+  defp emit_canon(type, payload, opts \\ []) do
     Bus.broadcast(
       "fleet.events",
-      Fleet.Event.new(:event_router, type, pod_id: pod_id, correlation_id: cid, payload: payload)
+      Fleet.Event.new(Keyword.get(opts, :source, :event_router), type,
+        pod_id: opts[:pod_id],
+        correlation_id: opts[:cid],
+        payload: payload
+      )
     )
   end
 
   describe "pod.drift event" do
     test "drift_count >= 3 → Cat5 escalade" do
       :ok =
-        emit_canon(:"pod.drift", %{"pod_id" => "drifty", "drift_count" => 3}, "cid-1", "drifty")
+        emit_canon(:"pod.drift", %{"pod_id" => "drifty", "drift_count" => 3},
+          cid: "cid-1",
+          pod_id: "drifty"
+        )
 
       wait_drift_monitor_drain()
 
@@ -99,9 +108,11 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   describe "workflow_map.failed event" do
-    test "broadcast → Cat5 escalade workflow_map_failed" do
+    test "source :workflow → Cat5 escalade workflow_map_failed" do
       :ok =
-        emit_canon(:"workflow_map.failed", %{"workflow_map_id" => "pl1", "reason" => "gate fail"})
+        emit_canon(:"workflow_map.failed", %{"workflow_map_id" => "pl1", "reason" => "gate fail"},
+          source: :workflow
+        )
 
       wait_drift_monitor_drain()
 
@@ -113,6 +124,20 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
                      500
 
       assert Enum.any?(coord_invocations(), fn
+               {:escalation, :workflow_map_failed, _, _} -> true
+               _ -> false
+             end)
+    end
+
+    test "ANTI-SPOOF : même type mais source ≠ :workflow → IGNORÉ (pas d'escalade)" do
+      # Invariant DriftMonitor : un event de type workflow_map.failed émis par une source USURPÉE
+      # (ici :event_router, p.ex. un pod malveillant) ne DOIT pas déclencher l'escalade Cat-5.
+      :ok =
+        emit_canon(:"workflow_map.failed", %{"workflow_map_id" => "spoof"}, source: :event_router)
+
+      wait_drift_monitor_drain()
+
+      refute Enum.any?(coord_invocations(), fn
                {:escalation, :workflow_map_failed, _, _} -> true
                _ -> false
              end)
@@ -144,10 +169,10 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   describe "audit.verdict event" do
-    test "decision_json valide → CoordBackend.handle_decision invoqué" do
+    test "source :workflow + decision_json valide → CoordBackend.handle_decision invoqué" do
       json = ~s|{"decision":"halt","reason":"gatekeeper-said","details":{}}|
 
-      :ok = emit_canon(:"audit.verdict", %{"decision_json" => json})
+      :ok = emit_canon(:"audit.verdict", %{"decision_json" => json}, source: :workflow)
 
       wait_drift_monitor_drain()
 
@@ -157,9 +182,22 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
              end)
     end
 
-    test "decision_json invalide → AuditLog write + pas de handle_decision",
+    test "ANTI-SPOOF : audit.verdict source ≠ :workflow → IGNORÉ (pas de handle_decision)" do
+      json = ~s|{"decision":"halt","reason":"spoofed","details":{}}|
+
+      :ok = emit_canon(:"audit.verdict", %{"decision_json" => json}, source: :event_router)
+
+      wait_drift_monitor_drain()
+
+      refute Enum.any?(coord_invocations(), fn
+               {:decision, _, _} -> true
+               _ -> false
+             end)
+    end
+
+    test "source :workflow + decision_json invalide → AuditLog write + pas de handle_decision",
          %{tmp_dir: tmp_dir} do
-      :ok = emit_canon(:"audit.verdict", %{"decision_json" => ~s|{not json}|})
+      :ok = emit_canon(:"audit.verdict", %{"decision_json" => ~s|{not json}|}, source: :workflow)
 
       wait_drift_monitor_drain()
 
