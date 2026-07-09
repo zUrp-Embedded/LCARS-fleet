@@ -110,8 +110,23 @@ defmodule Fleet.Spawner.Pod.StateFs do
   # rm_rf ONLY if `dir` resolves strictly under `root` — else refuse loudly (never rm outside the root).
   defp safe_rm_rf(dir, root, label) do
     if String.starts_with?(Path.expand(dir), Path.expand(root) <> "/") do
-      _ = File.rm_rf(dir)
-      :ok
+      case File.rm_rf(dir) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason, file} ->
+          # Erasing the terminal `state.json` is THIS module's reason to exist — if it fails and the tombstone
+          # SURVIVES, `recover_or_init` re-reads it → `:release` → the pod `{:stop, :normal}` silently → poller
+          # reclaim → re-dispatch → same tombstone: an INFINITE no-launch loop, masked by a false "erased" log.
+          # LOG LOUD (rm_rf removes files before the dir, so state.json often goes even on a partial failure;
+          # when it survives, the loop must be visible).
+          Logger.error(
+            "StateFs: #{label} tombstone erase FAILED at #{inspect(file)} (#{inspect(reason)}) — a surviving " <>
+              "state.json will loop the pod on :release (recover_or_init re-reads the tombstone)"
+          )
+
+          :ok
+      end
     else
       Logger.error(
         "StateFs: rm_terminal_artifacts REFUSED #{label} #{inspect(dir)} — not under root " <>

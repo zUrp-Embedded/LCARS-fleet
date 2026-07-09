@@ -1646,6 +1646,39 @@ defmodule Fleet.Spawner.PodTest do
       refute File.exists?(state_dir)
       refute File.exists?(pod_dir)
     end
+
+    test "B-#6 — rm_rf ÉCHOUE (I/O) → :ok rendu (non-fatal) MAIS log LOUD (tombstone survivant = boucle)",
+         %{tmp_dir: tmp} do
+      # Repli B-#6 : `_ = File.rm_rf(dir)` avalait un échec d'effacement. Si le `state.json` SURVIT,
+      # `recover_or_init` le relit → `:release` → `{:stop, :normal}` SILENCIEUX → poller reclaim →
+      # re-dispatch → même tombstone : boucle no-launch INFINIE, masquée par un faux « erased ».
+      # On force un échec I/O DÉTERMINISTE (runner non-root) : le state_dir vit sous un parent read-only
+      # → `rm_rf` supprime le contenu mais échoue au `rmdir` final (`{:error, :eacces, _}`).
+      state_root = Path.join(tmp, "state")
+      ro_parent = Path.join(state_root, "ro-parent")
+      state_dir = Path.join(ro_parent, "doomed")
+      File.mkdir_p!(state_dir)
+      # pod_dir bénin (inexistant sous sa racine → rm_rf {:ok, []}, aucun log parasite).
+      pod_root = Path.join(tmp, "pods")
+      File.mkdir_p!(pod_root)
+      pod_dir = Path.join(pod_root, "pod_absent")
+
+      opts = [state_fs_root: state_root, pod_dir_root: pod_root]
+
+      File.chmod!(ro_parent, 0o500)
+      # Restaure l'écriture pour que le nettoyage @tmp_dir d'ExUnit puisse tout effacer.
+      on_exit(fn -> File.chmod(ro_parent, 0o700) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok =
+                   Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(state_dir, pod_dir, opts)
+        end)
+
+      assert log =~ "tombstone erase FAILED"
+      assert log =~ "state_dir"
+      assert log =~ "loop the pod"
+    end
   end
 
   describe "maybe_recall_restore/1 — total (rescue le bang SeedStore.restore → {:error}, pas de crash)" do
