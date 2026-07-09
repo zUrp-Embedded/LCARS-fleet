@@ -2,7 +2,22 @@
 
 **Date** : 2026-07-09
 **Dernière révision** : 2026-07-09
-**Statut** : remédiation avancée — **B 9/9 ✅ · A 4/4 ✅ · D 3/3 ✅ · C/Q2 (Cat-5 draft) ✅** · reste P4 (Tier-2 muets)
+**Statut** : **CAMPAGNE CLOSE — B 9/9 ✅ · A 4/4 ✅ · D 3/3 ✅ · C/Q2 (Cat-5 draft) ✅ · P4 7/7 ✅**
+
+## P4 — 7 Tier-2 muets (avalage silencieux d'un échec load-bearing, souvent + un log menteur) — ✅ 7/7
+
+| # | Site | Fix | Commit |
+|---|---|---|---|
+| 7 | `incident_registry.ex` read_wal | WAL corrompu → amnésie cross-session ; `decode` avalait Jason en `%{}` (fix au mauvais endroit dans le rapport) → Jason.decode direct + log LOUD. **Test.** | `122a036fd` |
+| 8 | `wake_recovery.ex` | `_ = note` + log « recorded » menteur → case + log LOUD si l'ancre pas posée. **Test.** | `122a036fd` |
+| 6 | `poller/reconciliation.ex` | « reclaimed » AVANT l'écriture + remove_label non vérifié → « reclaiming » + log LOUD sur échec (vérifié-lecture) | `122a036fd` |
+| 1 | `permanent_boot.ex` base_seed_uuid | `rescue → nil` confond base absente/corrompue (UUID session fixe perdu) → `File.exists?` + log LOUD | `ce5aa998b` |
+| 4 | `spawner.ex` safe_clear_for_pod | repli fail-safe du kill sans trace (release load-bearing du mandat → boucle) → log LOUD rescue/catch | `ce5aa998b` |
+| 5 | `brief.ex` + `task_probe.ex` | `no_pending_brief?` collapse erreur broker en `false` → brief droppé silencieux → sonde 3-états `brief_slot` + log LOUD :unknown | `ce5aa998b` |
+| 2 | `mcp/supervisor.ex` | scan sockets `rescue → 0` = hollow green → log LOUD (check aveugle) | `42f2988c2` |
+| 3 | `observation/read_model.ex` | ReadModel mort → `empty()` = flotte-calme → distingue table absente + log LOUD | `42f2988c2` |
+
+Note : `escalation.ex:66` confirmé **déjà-fait** (B-#5). Orphelins d'events (spawn.failed 0-consumer, gitea.* 0-réacteur) = chantier séparé (hors Tier-2 muets).
 **Référencé par** : `_plan-integrite-2.md`, `soft-defaults-audit.md`
 
 ## Avancement remédiation (triage user Q1 « Mensonges + 9 Tier-1 + tests-clés », Q2 « câbler producteurs Cat-5 draft »)
