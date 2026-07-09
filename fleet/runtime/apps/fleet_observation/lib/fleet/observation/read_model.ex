@@ -85,7 +85,19 @@ defmodule Fleet.Observation.ReadModel do
   def projection do
     :ets.lookup_element(@table, :projection, 2)
   rescue
-    ArgumentError -> empty()
+    ArgumentError ->
+      # A dead ReadModel (ETS table gone) renders as `empty()` = INDISTINGUISHABLE from a quiet-healthy
+      # fleet (total:0, decks empty) → the deck is silently blind. Distinguish: table ABSENT = the
+      # read-model is DOWN (a real blind spot) → log LOUD; table present but the `:projection` key not yet
+      # written (fresh boot, transient) → silent `empty()`. Supervised → the absent window is brief.
+      if :ets.whereis(@table) == :undefined do
+        Logger.warning(
+          "Observation.ReadModel: ETS table #{inspect(@table)} absent — read-model is DOWN, the projection " <>
+            "reads EMPTY (a dead read-model looks like a quiet-healthy fleet; the deck is blind until it restarts)"
+        )
+      end
+
+      empty()
   end
 
   # ── Server ──────────────────────────────────────────────────────────────────

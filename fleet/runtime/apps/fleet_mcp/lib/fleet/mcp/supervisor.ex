@@ -32,6 +32,8 @@ defmodule Fleet.MCP.Supervisor do
 
   use Supervisor
 
+  require Logger
+
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts \\ []) do
     Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
@@ -117,7 +119,17 @@ defmodule Fleet.MCP.Supervisor do
     |> Path.wildcard()
     |> length()
   rescue
-    _ -> 0
+    e ->
+      # The socket scan IS the deaf-pod / orphaned-socket cross-check. Collapsing a FAILED scan to `0`
+      # yields `orphaned = max(0 - sockets, 0) = 0` → an `{:operational, …}` (green) reading even though
+      # the check could NOT run — a hollow green. We keep `0` (a fabricated `:degraded` would be worse), but
+      # LOUD: the operator must know the cross-check was blind this tick.
+      Logger.warning(
+        "MCP.Supervisor: on-disk socket-file scan FAILED (#{inspect(e)}) — deaf-pod cross-check could " <>
+          "not run, treating on-disk sockets as 0 (status may read operational without verification)"
+      )
+
+      0
   end
 
   defp acceptor_supervisor_alive? do
