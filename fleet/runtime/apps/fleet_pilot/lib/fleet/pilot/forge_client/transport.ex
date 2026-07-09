@@ -106,6 +106,9 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
     case Keyword.get(opts, :forge_bot_login) ||
            Application.get_env(:fleet_pilot, :forge_bot_login) do
       login when is_binary(login) and login != "" -> {:ok, login}
+      # Explicit error seam: a deployment misconfig surfaced as `{:error, _}`, or a test injecting an
+      # unresolvable bot → propagated as-is (callers fail-closed on an unverifiable bot).
+      {:error, _} = err -> err
       _ -> derive_bot_login(config)
     end
   end

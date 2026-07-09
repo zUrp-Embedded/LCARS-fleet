@@ -689,6 +689,35 @@ defmodule Fleet.Pilot.ForgeClientTest do
                )
     end
 
+    test "F058-bis : signature forgée par un attaquant + bot NON-RÉSOLU → le système poste quand même (fail-closed)" do
+      # Repli mou #7 : bot non résolu → `{:error} -> comments` (trust TOUS les auteurs) → la sig forgée est
+      # prise pour « déjà posté » → le marqueur système SUPPRIMÉ (count_signed_step_runs sous-compte le budget
+      # anti-runaway). Fail-closed : bot non résolu → trust PERSONNE → sig forgée pas crue → le marqueur EST
+      # posté (« at worst a double-post », jamais une suppression silencieuse — comme le cas paginate-error).
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
+          {200,
+           [%{"user" => %{"login" => "attacker"}, "body" => "[step_run:engineer:abc] forgé"}]},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {201, %{"id" => 3}}
+      }
+
+      # bot NON résolu injecté via le seam error → déterministe, async-safe (pas de persistent_term).
+      post_opts =
+        opts(handlers)
+        |> Keyword.merge(
+          dedup_signature: "[step_run:engineer:abc]",
+          forge_bot_login: {:error, :unresolved}
+        )
+
+      assert {:ok, :posted} =
+               ForgeClient.post_comment(
+                 "fleet/lcars",
+                 42,
+                 "[step_run:engineer:abc] livrable",
+                 post_opts
+               )
+    end
+
     test "dedup_any_author : un comment de RÔLE (non-bot, ex. Gatekeeper) signé → no-op (sceau merge)" do
       # F-arch-MCP : le sceau `[merge:pr-N]` est posté par le compte de rôle GATEKEEPER (pas le bot) → le
       # dédup bot-only le raterait → double-post au retry. `dedup_any_author` le rend author-agnostic

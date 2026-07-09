@@ -213,7 +213,7 @@ defmodule Fleet.Pilot.ForgeClient do
   comment already contains it, no-op (`{:ok, :already}`) — the signature `[step_run:<role>:<sha>]` makes the
   replay idempotent. The dedup trusts ONLY the bot's comments: otherwise a
   forge user posting the signature ahead of time would suppress the system comment (→ `count_signed_step_runs`
-  would undercount). Unresolvable bot → unfiltered dedup (fail-open toward replay safety).
+  would undercount). Unresolvable bot → trust NOBODY (fail-closed): the marker is (re-)posted, never suppressed.
   """
   @spec post_comment(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
@@ -616,11 +616,12 @@ defmodule Fleet.Pilot.ForgeClient do
     # dedup: at worst a double-post on replay, never a silent suppression of a marker).
     case paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
-        # The dedup guards a system WRITE → trusts only the bot's
-        # comments. Otherwise a forge user posts the signature ahead of time → the system comment is skipped →
-        # `count_signed_step_runs` undercounts (over-permissive anti-runaway budget). Unresolvable bot →
-        # fail-OPEN (unfiltered dedup): at worst a duplicated comment on replay, never a silent
-        # suppression of a load-bearing marker.
+        # The dedup guards a system WRITE → trusts only the bot's comments. Otherwise a forge user posts the
+        # signature ahead of time → the system comment is skipped → `count_signed_step_runs` undercounts
+        # (over-permissive anti-runaway budget). Unresolvable bot → trust NOBODY (`[]`), FAIL-CLOSED: a forged
+        # signature is NOT believed "already posted" → the system marker IS (re-)posted (at worst a double-post
+        # on replay — over-count-safe for the budget — NEVER a silent suppression). Same fail-safe stance as
+        # the paginate-error branch below.
         trusted =
           cond do
             # NON load-bearing marker (e.g. `[merge:pr-N]`, posted by the gatekeeper ROLE
@@ -633,7 +634,9 @@ defmodule Fleet.Pilot.ForgeClient do
             true ->
               case forge_bot_login(config, opts) do
                 {:ok, bot} -> Enum.filter(comments, &ForgeProtocol.system_authored?(&1, bot))
-                {:error, _} -> comments
+                # Unresolvable bot → trust NOBODY (fail-closed), NOT everybody: a forged signature must not
+                # be believed "already posted" (which would SUPPRESS the system marker → undercount).
+                {:error, _} -> []
               end
           end
 
