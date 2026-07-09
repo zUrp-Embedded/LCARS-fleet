@@ -448,6 +448,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
         # (DAG, unknown step) does NOT misroute: it bubbles up (the system does not advance blindly).
         case GateEngine.resolve_next(payload, n, gate_seams(state)) do
           {:error, reason} ->
+            # Q2 DRAFT producer (best-effort, before the escalation): a workflow_map LOAD failure lights
+            # the dormant Cat-5 rail (see emit_workflow_map_failed_draft/3).
+            emit_workflow_map_failed_draft(reason, n, role)
+
             # G2 (funnel): a NON-TRANSIENT TERMINAL error must NOT bubble up as a log-only `{:noreply}`
             # — otherwise the reaper reclaims the lock 2 ticks later, re-dispatches the SAME step →
             # re-fail → infinite CHURN without ever notifying a human (asymmetry with the verdict path which
@@ -685,10 +689,86 @@ defmodule Fleet.Pilot.StepRunConsumer do
         result
 
       other ->
+        # Q2 DRAFT producer (best-effort, before the escalation): an escalation-worthy judge verdict
+        # (halt/`halt_invalid`/… → freeze-to-arch) lights the dormant audit rail (see emit_audit_verdict_draft/4).
+        emit_audit_verdict_draft(other, n, role, trace)
+
         # `comment_body: trace` → the verdict trace (attributed to the judge via its label, halt_invalid
         # distinguished) is carried on the await_arch comment (which addresses it to the arch), continue/abandon parity.
         # SINGLE safety net `freeze_to_arch` (await_arch + kick) — same gesture as the terminal escalations.
         TerminalEscalation.freeze_to_arch(n, role, other, trace, terminal_seams(state))
+    end
+  end
+
+  # ============================================================
+  # Q2 DRAFT event producers (2026-07-09) — "at least it blinks"
+  #
+  # Two dormant Cat-5 rails had a wired consumer (Starfleet.DriftMonitor) but NO producer. These emit a
+  # REAL, honest signal from the forge-driven rail so the chain DriftMonitor → Cat5Escalator/CoordBackend →
+  # Coord.Policies → Emitter → coord.* fires end-to-end. DRAFT: honest but partial (see per-fun notes);
+  # both are BEST-EFFORT (safe_emit, never crashes the load-bearing rail) and emit source `:workflow` so
+  # they satisfy DriftMonitor's anti-spoof source match.
+  # ============================================================
+
+  # `workflow_map.failed` — emitted on a workflow_map LOAD failure (`:workflow_map_load_failed`, the
+  # WorkflowMapNav single authority). This is the exact "forge-driven rail publishes a workflow_map
+  # failure signal" the registry (events.yaml) anticipated. DRAFT: covers this dispatch path's load
+  # failure, not yet every rail path (e.g. the gate-resume reconstruction). Other error reasons → no-op.
+  defp emit_workflow_map_failed_draft({:workflow_map_load_failed, name, msg}, n, role) do
+    case Bus.safe_emit(
+           :workflow,
+           :"workflow_map.failed",
+           [
+             payload: %{
+               "workflow_map" => name,
+               "issue" => n,
+               "role" => role,
+               "reason" => to_string(msg),
+               "producer" => "draft:step_run_consumer"
+             }
+           ],
+           on_unregistered: :log
+         ) do
+      :ok ->
+        :ok
+
+      {:error, why} ->
+        Logger.warning("StepRunConsumer: workflow_map.failed draft NOT emitted: #{inspect(why)}")
+    end
+  end
+
+  defp emit_workflow_map_failed_draft(_other_reason, _n, _role), do: :ok
+
+  # `audit.verdict` — emitted on an escalation-worthy judge verdict (apply_verdict `other` branch:
+  # halt/`halt_invalid`/… → freeze-to-arch; NOT continue/abandon). DRAFT: the pilot judge vocabulary is
+  # coarsely translated to a decision-v1 `{decision: "escalate", reason: "audit_verdict"}` (which matches
+  # the coord policy `escalate.audit_verdict`); the REAL verdict + issue + role + trace ride in `details`
+  # so nothing is lost. Routed by DriftMonitor DIRECTLY to CoordBackend.handle_decision.
+  defp emit_audit_verdict_draft(verdict, n, role, trace) do
+    decision_json =
+      Jason.encode!(%{
+        "decision" => "escalate",
+        "reason" => "audit_verdict",
+        "details" => %{
+          "verdict" => to_string(verdict),
+          "issue" => n,
+          "role" => role,
+          "trace" => trace
+        },
+        "chain" => ["pilot.step_run_consumer.apply_verdict"]
+      })
+
+    case Bus.safe_emit(
+           :workflow,
+           :"audit.verdict",
+           [payload: %{"decision_json" => decision_json}],
+           on_unregistered: :log
+         ) do
+      :ok ->
+        :ok
+
+      {:error, why} ->
+        Logger.warning("StepRunConsumer: audit.verdict draft NOT emitted: #{inspect(why)}")
     end
   end
 
