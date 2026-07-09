@@ -14,6 +14,9 @@ metadata:
   fleet_level: false
   slot_scope: instance  # fan-out par issue (consultant-as-judge ephemere, invisible Desktop)
 spec:
+  # Profil WORKER : brief exécutable par défaut. Devient juge VIA l'override per-step (`brief_kind: judge`
+  # au step brief-review) — pas de profil dupliqué. REQUIS (schéma) — la judge-ness ne s'infère jamais.
+  brief_kind: worker
   scope:
     allowedTools:
       - Read

@@ -411,20 +411,21 @@ defmodule Fleet.CapProfile do
   `deliverable_mode` (output): it declares the **shape of the brief** the role receives, by catalogue
   and NOT by a magic role name.
 
-    * `"worker"` (default) — the brief is an executable instruction (the issue body): the role
-      ACTS (engineer, architect…).
+    * `"worker"` — the brief is an executable instruction (the issue body): the role ACTS (engineer,
+      architect…). A worker profile can still be driven as a judge for a SPECIFIC step via the
+      workflow_map's per-step `brief_kind: judge` override (`Fleet.Pilot.BriefBuilder`).
     * `"judge"` — the role JUDGES: it receives a `GateBrief` that is structurally **defused** (context +
       deliverable + verdict contract, NO executable instruction — otherwise the judge would run the body).
-      The gatekeeper declares it.
 
-  `default` `"worker"` is **fail-safe**: a profile without the field receives an executable brief (the
-  overwhelmingly common case); never the reverse (a worker defused by mistake would do nothing). A judge
-  role MUST declare `judge` explicitly — judge-ness is a security property (made structurally true, never
-  inferred).
+  `brief_kind` is **REQUIRED** by the schema (`spec.required`): judge-ness is a security property, NEVER
+  inferred — a profile without it is REJECTED at load. There is NO silent `worker` default (a judge that
+  forgot `judge` would otherwise fall back to worker=execute, running attacker-controlled issue content —
+  the fail-open this closes). Returns `nil` only for a hand-built struct that bypassed the schema → the
+  consumer (`BriefBuilder`) fail-louds on `nil` (out-of-vocab), never a silent worker.
   """
-  @spec brief_kind(t(), term()) :: String.t() | term()
-  def brief_kind(%__MODULE__{spec: spec}, default \\ "worker") do
-    get_in(spec, ["brief_kind"]) || default
+  @spec brief_kind(t()) :: String.t() | nil
+  def brief_kind(%__MODULE__{spec: spec}) do
+    get_in(spec, ["brief_kind"])
   end
 
   defp to_struct(raw) when is_map(raw) do

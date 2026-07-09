@@ -23,6 +23,8 @@ metadata:
     - path: /home/projects.work   # RW : écrire la DOC (moon-shot/beyond), en amont des tickets
       mode: rw
 spec:
+  # Rôle worker (interactif) : brief = instruction exécutable, jamais un juge. REQUIS (schéma) — jamais inféré.
+  brief_kind: worker
   scope:
     # Convention nommage tools (cohérent fleet_cap_profile G24-9 F-CONT-RISK gate) :
     #   - PascalCase  = tools Claude Code natifs côté pod, validés via `can_use_tool` permission callback

@@ -46,7 +46,8 @@
         "knowledge",
         "invocation",
         "injects",
-        "modop_set"
+        "modop_set",
+        "brief_kind"
       ],
       "additionalProperties": false,
       "properties": {
@@ -168,7 +169,7 @@
         "brief_kind": {
           "type": "string",
           "enum": ["worker", "judge"],
-          "description": "Forme du BRIEF reçu par le rôle — dual d'entrée de deliverable_mode (différenciation par catalogue, pas par nom magique de code, F077). `worker` : brief = instruction exécutable (corps de l'issue) ; le rôle AGIT. `judge` : le rôle JUGE et reçoit un GateBrief I-CBC désamorcé (contexte + livrable + contrat de verdict, AUCUNE instruction exécutable — bug PASSE-9 prouvé live #11/#12). Absent → défaut `worker` appliqué côté code (fail-safe : un juge doit déclarer `judge` explicitement, la judge-ness est une propriété de sécurité)."
+          "description": "Forme du BRIEF reçu par le rôle — dual d'entrée de deliverable_mode (différenciation par catalogue, pas par nom magique de code, F077). `worker` : brief = instruction exécutable (corps de l'issue) ; le rôle AGIT. `judge` : le rôle JUGE et reçoit un GateBrief I-CBC désamorcé (contexte + livrable + contrat de verdict, AUCUNE instruction exécutable — bug PASSE-9 prouvé live #11/#12). REQUIS (`spec.required`) : la judge-ness est une propriété de SÉCURITÉ, JAMAIS inférée — un profil sans `brief_kind` est REJETÉ au load. Pas de défaut `worker` silencieux (un juge qui oublie `judge` retomberait sur worker=exécute = fail-open sur le contenu attaquant)."
         }
       },
       "allOf": [

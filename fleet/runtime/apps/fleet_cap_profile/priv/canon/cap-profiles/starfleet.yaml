@@ -22,6 +22,8 @@ metadata:
   fleet_level: true
   slot_scope: project   # singleton fleet-level (repo 0000) ; reserve le slot R=0, inerte (pas de pod)
 spec:
+  # Rôle système host-native : brief = instruction exécutable, jamais un juge. REQUIS (schéma) — jamais inféré.
+  brief_kind: worker
   scope:
     allowedTools:
       - Read

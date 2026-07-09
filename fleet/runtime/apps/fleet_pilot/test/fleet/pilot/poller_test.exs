@@ -191,7 +191,7 @@ defmodule Fleet.Pilot.PollerTest do
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"slot_scope" => "project"},
-           spec: %{}
+           spec: %{"brief_kind" => "worker"}
          }}
 
     # Corr.3 : juge de PR (qualifier/reviewer) -> brief_kind: judge (brief GateBrief desamorce).

@@ -111,3 +111,6 @@ spec:
   # qu'IL choisit (forge-aveugle). Les juges restent en `payload` (défaut) : leur livrable
   # est un verdict structuré, pas un patch git. Cf. JOURNAL-deliverable-model-2026-06-07.
   deliverable_mode: git_native
+  # Dual d'ENTRÉE de deliverable_mode : brief = instruction exécutable (corps de l'issue), le rôle AGIT.
+  # REQUIS (schéma) — la judge-ness ne s'infère jamais.
+  brief_kind: worker

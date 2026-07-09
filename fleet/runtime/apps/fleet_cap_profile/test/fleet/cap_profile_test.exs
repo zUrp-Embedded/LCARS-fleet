@@ -33,6 +33,7 @@ defmodule Fleet.CapProfileTest do
       containment: bwrap
       slot_scope: instance
     spec:
+      brief_kind: worker
       scope:
         disallowedTools:
           - web_search

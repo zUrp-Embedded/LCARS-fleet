@@ -42,7 +42,7 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"slot_scope" => "project"},
-           spec: %{}
+           spec: %{"brief_kind" => "worker"}
          }}
   end
 

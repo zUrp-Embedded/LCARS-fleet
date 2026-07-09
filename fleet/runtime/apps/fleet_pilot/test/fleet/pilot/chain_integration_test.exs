@@ -284,7 +284,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"name" => "engineer", "slot_scope" => "project"},
-           spec: %{}
+           spec: %{"brief_kind" => "worker"}
          }}
 
     def load(role) when role in ["reviewer", "qualifier", "gatekeeper", "architect"],

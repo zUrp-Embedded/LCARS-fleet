@@ -105,6 +105,22 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
+  test "négatif — spec.brief_kind MANQUANT rejeté (judge-ness jamais inférée)", %{schema: schema} do
+    # Verrou amont du repli mou #2 : brief_kind absent → défaut code `worker` = EXÉCUTE (issue brute).
+    # Un rôle JUGE qui oublie `brief_kind: judge` retomberait sur worker → il exécuterait le contenu
+    # attaquant au lieu de le juger. « judge-ness = propriété de sécurité, jamais inférée » : brief_kind
+    # est REQUIS au schéma → un profil sans lui est rejeté AU LOAD, le défaut worker devient inatteignable.
+    base =
+      @canon_dir
+      |> Path.join("engineer.yaml")
+      |> YamlElixir.read_from_file!()
+
+    {_, bad} = pop_in(base, ["spec", "brief_kind"])
+
+    assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad),
+           "un cap-profile sans brief_kind doit être REJETÉ au load (worker=exécute par omission = fail-open)"
+  end
+
   test "négatif — champ INCONNU (typo) rejeté à chaque niveau (additionalProperties:false, R0-CAP-001)",
        %{schema: schema} do
     base =

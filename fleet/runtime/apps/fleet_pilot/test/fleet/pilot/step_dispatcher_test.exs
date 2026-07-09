@@ -149,7 +149,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"slot_scope" => "project"},
-           spec: %{}
+           spec: %{"brief_kind" => "worker"}
          }}
 
     # F077 : un rôle juge déclare `brief_kind: judge` dans son cap-profile (pas un nom magique).
@@ -243,7 +243,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
          %Fleet.CapProfile{
            kind: "CapabilityProfile",
            metadata: %{"slot_scope" => "project"},
-           spec: %{"invocation" => %{"lifetime_scope" => "pipe"}}
+           spec: %{"brief_kind" => "worker", "invocation" => %{"lifetime_scope" => "pipe"}}
          }}
 
     def load(_), do: {:error, :not_found}
@@ -293,7 +293,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
        %Fleet.CapProfile{
          kind: "CapabilityProfile",
          metadata: %{"slot_scope" => "project"},
-         spec: %{}
+         spec: %{"brief_kind" => "worker"}
        }}
     end
   end
