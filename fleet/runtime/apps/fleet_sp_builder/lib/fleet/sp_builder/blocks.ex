@@ -30,13 +30,17 @@ defmodule Fleet.SPBuilder.Blocks do
 
   @doc "Composed SP for one role. Fail-loud if a listed block is missing, or if the list is empty."
   @spec compose!(String.t(), [String.t()], Path.t()) :: String.t()
-  def compose!(role, blocks, blocks_dir) when is_binary(role) and is_list(blocks) and blocks != [] do
+  def compose!(role, blocks, blocks_dir)
+      when is_binary(role) and is_list(blocks) and blocks != [] do
     body = Enum.map_join(blocks, "\n\n", &read_block!(role, &1, blocks_dir))
     Enum.join([@header, "# System Prompt — #{role}", body], "\n\n") <> "\n"
   end
 
   def compose!(role, _blocks, _dir),
-    do: raise("SP blocks: role #{inspect(role)} has no blocks in sp-map.yaml (no-fallback: no SP → no pod)")
+    do:
+      raise(
+        "SP blocks: role #{inspect(role)} has no blocks in sp-map.yaml (no-fallback: no SP → no pod)"
+      )
 
   @doc """
   Generate ALL `agent-<role>-base.md` flats from the map, into `drafts_dir`. Returns the generated roles.
@@ -46,7 +50,11 @@ defmodule Fleet.SPBuilder.Blocks do
     blocks_dir
     |> role_map()
     |> Enum.map(fn {role, blocks} ->
-      File.write!(Path.join(drafts_dir, "agent-#{role}-base.md"), compose!(role, blocks, blocks_dir))
+      File.write!(
+        Path.join(drafts_dir, "agent-#{role}-base.md"),
+        compose!(role, blocks, blocks_dir)
+      )
+
       role
     end)
     |> Enum.sort()

@@ -18,7 +18,10 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
 
     roles =
-      Fleet.SPBuilder.Blocks.generate!(Path.join(@priv, "sp_blocks"), Path.join(@priv, "sp_drafts"))
+      Fleet.SPBuilder.Blocks.generate!(
+        Path.join(@priv, "sp_blocks"),
+        Path.join(@priv, "sp_drafts")
+      )
 
     Mix.shell().info("Per-role SPs generated (#{length(roles)}): #{Enum.join(roles, ", ")}")
   end
