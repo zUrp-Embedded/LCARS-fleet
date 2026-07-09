@@ -37,6 +37,27 @@ defmodule Fleet.Coord.PoliciesTest do
       assert {:error, {:no_policy_match, {"allow", "unknown"}}} =
                Policies.handle_decision(decision, nil)
     end
+
+    test "escalate + audit_verdict → notify_dashboard (dernier maillon du producteur draft Q2 audit.verdict)" do
+      # Le producteur draft `StepRunConsumer.emit_audit_verdict_draft` émet EXACTEMENT ce decision_json
+      # (decision "escalate", reason "audit_verdict") ; DriftMonitor le route vers handle_decision → clé
+      # "escalate.audit_verdict" (coord-policies.yaml). Ce test verrouille que la chaîne blink jusqu'à coord.
+      decision = %{
+        decision: "escalate",
+        reason: "audit_verdict",
+        details: %{"verdict" => "halt_wait_input", "issue" => 42},
+        chain: ["pilot.step_run_consumer.apply_verdict"]
+      }
+
+      assert :ok = Policies.handle_decision(decision, nil)
+
+      assert_receive %Fleet.Event{
+                       source: :coord,
+                       type: :"coord.notification_routed",
+                       payload: %{"target" => "dashboard"}
+                     },
+                     500
+    end
   end
 
   describe "handle_escalation/3" do
