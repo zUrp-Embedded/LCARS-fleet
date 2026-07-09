@@ -170,13 +170,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # The VERDICT comment is IN THE NAME OF THE JUDGE (`as_role`: the text says "Verdict du juge X",
     # the forge author must be X, not the system account — otherwise lying trace, masks the worker). The
     # labels (add/remove) stay SYSTEM: the protocol state belongs to the system, not the judge.
-    with {:ok, _} <-
-           forge.post_comment(
-             repo,
-             n,
-             body,
-             forge_opts |> ForgeClient.as_role(role) |> Keyword.put(:dedup_signature, signature)
-           ),
+    with {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role),
+         comment_opts = Keyword.put(role_opts, :dedup_signature, signature),
+         {:ok, _} <- forge.post_comment(repo, n, body, comment_opts),
          # Gap BEFORE the labels: the verdict comment takes an earlier `created_at` (coherent reading).
          :ok <- space_writes(opts),
          {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
@@ -227,10 +223,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
     body = Map.get(step_run, :pr_body, Texts.pr_body(n, role, has_note?))
 
     # The PR is opened IN THE NAME OF THE ENG (role token, `as_role`), not the system account:
-    # the PR author on the forge = Engineer (the eng did the work). Token absent → logged system
-    # fallback (RoleToken, honest-degraded). It is the SYSTEM that posts with the role token,
-    # never the pod (forge-blind).
+    # the PR author on the forge = Engineer (the eng did the work). Token absent → `{:error,
+    # :role_token_unavailable}` (fail-closed: no PR opened under the system account). It is the SYSTEM
+    # that posts with the role token, never the pod (forge-blind).
     with {:ok, sha} <- step1_publish(step_run, deliverable),
+         {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role),
          {:ok, pr} <-
            open_pr_step(
              forge,
@@ -239,7 +236,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
              base,
              title,
              body,
-             ForgeClient.as_role(forge_opts, role)
+             role_opts
            ) do
       # `set_stage(stage_review)` is NO LONGER done here: moved into `complete_producer`, AFTER the
       # comment (eng voice) — same order "comment THEN stage transition" as `complete/2`
@@ -278,20 +275,20 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     # The native review is posted IN THE NAME OF THE JUDGE (role token, `as_role`): on the forge,
     # the review author = qualifier/reviewer (honest avatar/trace), not the system account. Token
-    # absent → logged system fallback (RoleToken, honest-degraded). The pod has no token;
-    # it is the SYSTEM that posts the review in its name (the pod stays forge-blind).
+    # absent → `{:error, :role_token_unavailable}` (fail-closed: no review under the system account).
+    # The pod has no token; it is the SYSTEM that posts the review in its name (the pod stays forge-blind).
     # NB `ForgeClient.post_review/5` returns `:ok` (not `{:ok, _}`) on success — match both
     # (a test seam may return either; the real contract = `:ok`).
-    case forge.post_review(
-           repo,
-           pr,
-           event,
-           body,
-           ForgeClient.as_role(forge_opts, Map.get(step_run, :role))
-         ) do
-      :ok -> {:ok, :reviewed}
-      {:ok, _} -> {:ok, :reviewed}
-      {:error, reason} -> {:error, {:review, reason}}
+    case ForgeClient.as_role(forge_opts, Map.get(step_run, :role)) do
+      {:ok, role_opts} ->
+        case forge.post_review(repo, pr, event, body, role_opts) do
+          :ok -> {:ok, :reviewed}
+          {:ok, _} -> {:ok, :reviewed}
+          {:error, reason} -> {:error, {:review, reason}}
+        end
+
+      {:error, :role_token_unavailable} = err ->
+        err
     end
   end
 
@@ -319,6 +316,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
     case Fleet.Pilot.GatekeeperSeal.seal_and_merge(forge, repo, pr, issue_n, producer, forge_opts) do
       :ok -> {:ok, :promoted}
       {:error, {:merge, _}} = err -> err
+      # Fail-closed: no gatekeeper role token → the seal refused (no merge/close under the system account).
+      {:error, :role_token_unavailable} = err -> err
     end
   end
 
@@ -692,7 +691,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # Stopwatch: stopped HERE, symmetric to the start at spawn (`Spawn.spawn_step`) — same object (`n` =
     # issue or PR depending on the role), same global mechanics, SAME identity (`as_role`). Best-effort
     # (discard): cosmetic, never blocking for the real unlock (the invariant that matters).
-    _ = forge.stop_stopwatch(repo, n, ForgeClient.as_role(forge_opts, role))
+    # Best-effort + fail-closed on the token: no role token → skip the (cosmetic) stopwatch stop rather
+    # than stamp it under the system account. `_ =` discards; the real unlock (below) is unaffected.
+    _ =
+      with {:ok, ro} <- ForgeClient.as_role(forge_opts, role),
+           do: forge.stop_stopwatch(repo, n, ro)
 
     case forge.remove_label(repo, n, @in_flight_label, forge_opts) do
       {:ok, _} = ok -> ok
@@ -706,7 +709,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # (a WEAK visual metric, but a false number lies about who worked). `role` = the producer (same
   # identity as the start at spawn: Gitea is per-user). Best-effort (discard): never blocking.
   defp stop_build_stopwatch(forge, repo, issue_n, forge_opts, role) do
-    _ = forge.stop_stopwatch(repo, issue_n, ForgeClient.as_role(forge_opts, role))
+    # Best-effort + fail-closed on the token (skip rather than stamp under the system account).
+    _ =
+      with {:ok, ro} <- ForgeClient.as_role(forge_opts, role),
+           do: forge.stop_stopwatch(repo, issue_n, ro)
+
     :ok
   end
 
@@ -745,14 +752,17 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     # The signed step_run comment is IN THE NAME OF THE ROLE that finishes (`as_role`: consultant verdict /
     # eng deliverable → forge author = the role, not the system account; same gesture as the PR/review/seal).
-    case forge.post_comment(
-           repo,
-           n,
-           body,
-           forge_opts |> ForgeClient.as_role(role) |> Keyword.put(:dedup_signature, signature)
-         ) do
-      {:ok, _} = ok -> ok
-      {:error, reason} -> {:error, {:comment, reason}}
+    case ForgeClient.as_role(forge_opts, role) do
+      {:ok, role_opts} ->
+        comment_opts = Keyword.put(role_opts, :dedup_signature, signature)
+
+        case forge.post_comment(repo, n, body, comment_opts) do
+          {:ok, _} = ok -> ok
+          {:error, reason} -> {:error, {:comment, reason}}
+        end
+
+      {:error, :role_token_unavailable} = err ->
+        err
     end
   end
 

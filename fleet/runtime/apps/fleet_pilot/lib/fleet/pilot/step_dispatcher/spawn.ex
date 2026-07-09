@@ -121,10 +121,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          # (per-user stopwatch) — the symmetric stop lives in `unlock` (same role, except the
          # ISSUE-lock case at the final `:promote`, cf. StepRunCompleter).
          _ =
-           forge.start_stopwatch(
-             repo,
-             lock_target,
-             Fleet.Pilot.ForgeClient.as_role(forge_opts, role)
+           with(
+             {:ok, ro} <- Fleet.Pilot.ForgeClient.as_role(forge_opts, role),
+             do: forge.start_stopwatch(repo, lock_target, ro)
            ),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
          :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief) do
@@ -171,11 +170,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         # time would be noise, not real work). SAME identity as at the start (`as_role`, that
         # same role) — Gitea accepts the stop ONLY from the user who started it.
         _ =
-          forge.stop_stopwatch(
-            repo,
-            lock_target,
-            Fleet.Pilot.ForgeClient.as_role(forge_opts, role)
-          )
+          with {:ok, ro} <- Fleet.Pilot.ForgeClient.as_role(forge_opts, role) do
+            forge.stop_stopwatch(repo, lock_target, ro)
+          end
 
         Logger.warning(
           "StepDispatcher: dispatch role=#{role} pod=#{pod_id} #{log_ctx} → #{inspect(err)} " <>

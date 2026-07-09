@@ -131,15 +131,18 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   # (out-of-dispatch). Best-effort: we surface to the human channel (the arch), we do not mask. A single
   # forge write point for all PR arch escalations (no fork of signature/label).
   defp escalate_to_arch(%Seams{} = seams, issue_n, signature, body) do
-    # Gatekeeper signature via the UNIQUE writer `GatekeeperSeal.as_gatekeeper/1` (not a local
-    # `as_role(_, gatekeeper_role())` — a single point of the runtime writes this idiom).
-    gk_opts =
-      seams.forge_opts
-      |> Fleet.Pilot.GatekeeperSeal.as_gatekeeper()
-      |> Keyword.put(:dedup_signature, signature)
-      |> Keyword.put(:dedup_any_author, true)
+    # Gatekeeper-signed comment (best-effort) via the UNIQUE writer `GatekeeperSeal.as_gatekeeper/1`.
+    # Fail-CLOSED on the token: if the gatekeeper role token is unavailable, SKIP the comment (do not post
+    # it under the system account) but STILL post the load-bearing `lcars-awaits-arch` label (system, the
+    # poller throttle) — the escalation's effect (out-of-dispatch) holds regardless of the comment.
+    _ =
+      with {:ok, gk} <- Fleet.Pilot.GatekeeperSeal.as_gatekeeper(seams.forge_opts) do
+        gk_opts =
+          gk |> Keyword.put(:dedup_signature, signature) |> Keyword.put(:dedup_any_author, true)
 
-    _ = seams.forge.post_comment(seams.repo, issue_n, body, gk_opts)
+        seams.forge.post_comment(seams.repo, issue_n, body, gk_opts)
+      end
+
     _ = seams.forge.add_label(seams.repo, issue_n, @awaits_arch_label, seams.forge_opts)
     :ok
   end

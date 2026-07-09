@@ -68,23 +68,24 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # DUCK-TYPED forge seam → a misconfigured seam is a typed error, not an obscure apply/3 crash (R2-05).
     with {:ok, forge} <- conforming_forge(),
          {:ok, role} <- require_architect(state),
-         token when is_binary(token) <- Fleet.Credentials.RoleToken.token(role) do
-      do_create_issue(forge, repo, title, brief, token: token)
+         {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
+      do_create_issue(forge, repo, title, brief, token: identity.token)
     else
-      {:error, reason} ->
-        # Non-architect role, or pod unknown to the registry → we create NOTHING.
-        {:error, reason}
-
-      _ ->
-        # Pod proven but role token not found on disk = provisioning hole (the role account
-        # has no token). We REFUSE rather than post under the system account (fail-closed):
-        # posting as system would mask traceability (who delegated?) and bypass least-privilege.
+      {:error, :role_token_unavailable} = err ->
+        # Pod proven but role token not found on disk = provisioning hole (the role account has no
+        # token). We REFUSE rather than post under the system account (fail-closed): posting as system
+        # would mask traceability (who delegated?) and bypass least-privilege. SHARED policy with pilot
+        # (`ForgeClient.as_role`) via the `Fleet.Credentials.RoleIdentity` smart-constructor (single source).
         Logger.warning(
           "Delegation: create_issue REFUSED: calling role's token not found (incomplete provisioning) — " <>
             "no system-account fallback"
         )
 
-        {:error, :role_token_unavailable}
+        err
+
+      {:error, reason} ->
+        # Non-architect role, or pod unknown to the registry → we create NOTHING.
+        {:error, reason}
     end
   end
 

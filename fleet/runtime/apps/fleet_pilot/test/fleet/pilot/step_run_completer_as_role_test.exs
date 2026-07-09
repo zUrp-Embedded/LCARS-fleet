@@ -45,6 +45,9 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     File.write!(Path.join(tmp, "consultant.gitea_token"), "tok-consultant")
     File.write!(Path.join(tmp, "reviewer.gitea_token"), "tok-reviewer")
     File.write!(Path.join(tmp, "engineer.gitea_token"), "tok-engineer")
+
+    # :promote passe par `GatekeeperSeal.seal_and_merge` (fail-closed, soft-default #3) → token gatekeeper requis.
+    File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "tok-gatekeeper")
     Fleet.Pilot.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
 
     :ok

@@ -901,22 +901,23 @@ defmodule Fleet.Pilot.ForgeClient do
 
   @doc """
   Injects the ROLE account's token (`role`) into `forge_opts`, under the `:token` key that
-  `resolve_config`/`resolve_token` re-read → the SYSTEM posts/merges IN ITS NAME on the forge (avatar +
-  honest trace, instead of the system account). This is the SINGLE credential→wire adapter — single source
-  shared by `StepRunCompleter`, `StepDispatcher` and the gatekeeper seals (the `:token` writer is here,
-  glued to its reader). `Fleet.Credentials.RoleToken` supplies the token, `forge_opts[:token]` carries it
-  through to the request. Empty/absent role OR absent/unreadable/empty token → `forge_opts` unchanged → fallback
-  on the (system) token already present; `RoleToken.token/1` emits a `Logger.warning` on this degraded path, so
-  observable on the caller side. The pod never posts: it's the system that posts with the role token,
-  never the pod (forge-blind).
+  `resolve_config`/`resolve_token` re-read → the SYSTEM posts/merges IN THE ROLE'S NAME on the forge (avatar
+  + honest trace). This is the SINGLE credential→wire adapter shared by `StepRunCompleter`, `StepDispatcher`
+  and the gatekeeper seals.
+
+  **Fail-CLOSED** (via the `Fleet.Credentials.RoleIdentity` smart-constructor): a role whose token is
+  absent/unreadable/empty (or a non-path-safe role) → `{:error, :role_token_unavailable}`. It NEVER falls
+  back to the system token — posting/merging as the most-privileged system account would be a privilege
+  ESCALATION + a traceability lie. Load-bearing callers (gatekeeper seal, arch escalation) PROPAGATE the
+  error (the op does not happen); best-effort callers (eng voice, stopwatch) SKIP. The pod never posts:
+  it's the system that posts with the ROLE token, never the pod (forge-blind).
   """
-  @spec as_role(keyword(), String.t() | nil) :: keyword()
-  def as_role(forge_opts, role) when is_binary(role) and role != "" do
-    case Fleet.Credentials.RoleToken.token(role) do
-      t when is_binary(t) -> Keyword.put(forge_opts, :token, t)
-      _ -> forge_opts
+  @spec as_role(keyword(), String.t() | nil) ::
+          {:ok, keyword()} | {:error, :role_token_unavailable}
+  def as_role(forge_opts, role) do
+    case Fleet.Credentials.RoleIdentity.for_role(role) do
+      {:ok, identity} -> {:ok, Keyword.put(forge_opts, :token, identity.token)}
+      {:error, _} = err -> err
     end
   end
-
-  def as_role(forge_opts, _role), do: forge_opts
 end

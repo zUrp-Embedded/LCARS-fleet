@@ -91,16 +91,19 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
         repo = Map.fetch!(step_run, :repo)
         n = Map.fetch!(step_run, :issue_number)
         role = Map.get(step_run, :role, "engineer")
-        role_opts = ForgeClient.as_role(forge_opts, role)
 
         # FULL NOTE on the ISSUE (canonical record of the work) — the sole post of this function.
+        # Best-effort + fail-closed on the token: no role token → skip (do not post the eng voice under the
+        # system account); the completion is unaffected (the deliverable = the pushed commit).
         _ =
-          forge.post_comment(
-            repo,
-            n,
-            "## 🔧 Note de l'#{role} (livrable)\n\n#{summary}",
-            role_opts
-          )
+          with {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role) do
+            forge.post_comment(
+              repo,
+              n,
+              "## 🔧 Note de l'#{role} (livrable)\n\n#{summary}",
+              role_opts
+            )
+          end
 
         :ok
 

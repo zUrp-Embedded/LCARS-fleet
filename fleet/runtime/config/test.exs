@@ -36,7 +36,12 @@ config :fleet_spawner, mcp_socket_provisioner: Fleet.Spawner.MCPSocketStub
 # `Fleet.Credentials.ForgeIdentity.for_role/2` court-circuite sur cet override (sauf les
 # tests qui injectent un `:catalog` explicite — forge_identity_test teste la vraie résolution).
 config :fleet_credentials,
-  forge_identity_override: %{name: "Test Human", email: "human@lcars.local"}
+  forge_identity_override: %{name: "Test Human", email: "human@lcars.local"},
+  # soft-default #3 : `as_role`/`RoleIdentity` sont fail-closed (plus de fallback système). Les flux de
+  # test (completer/dispatch) postent EN TANT QUE rôle → il leur faut un role-token résoluble. Fixtures
+  # factices pour tous les rôles ; les tests qui vérifient l'ABSENCE de token (role_token/role_identity)
+  # surchargent `role_tokens_dir` dans leur propre setup.
+  role_tokens_dir: Path.expand("../apps/fleet_pilot/test/support/role_tokens", __DIR__)
 
 # B10/#583 Sprint 1 — hermétisme test : consumers + BootOrchestrator
 # off par défaut. Subscribe global au Bus + emit fleet.boot_* parasiterait

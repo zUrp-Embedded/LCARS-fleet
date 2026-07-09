@@ -32,7 +32,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   absent/unreadable → `forge_opts` unchanged, logged fallback to system token (`RoleToken`,
   honest-degraded).
   """
-  @spec as_gatekeeper(keyword()) :: keyword()
+  @spec as_gatekeeper(keyword()) :: {:ok, keyword()} | {:error, :role_token_unavailable}
   def as_gatekeeper(forge_opts),
     do: Fleet.Pilot.ForgeClient.as_role(forge_opts, gatekeeper_role())
 
@@ -47,59 +47,70 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
   `forge_opts` = RAW forge opts (base_url/system token…): the gatekeeper signature is applied
   HERE (`as_gatekeeper/1`), no longer by the caller — a merge cannot go out unsigned.
-  Returns `:ok | {:error, {:merge, reason}}`.
+  Returns `:ok | {:error, {:merge, reason}}`; **`{:error, :role_token_unavailable}`** if the gatekeeper
+  role token is missing (fail-closed — the merge/close does NOT go out under the system account).
   """
   @spec seal_and_merge(module(), String.t(), integer(), integer(), String.t(), keyword()) ::
-          :ok | {:error, {:merge, term()}}
+          :ok | {:error, {:merge, term()} | :role_token_unavailable}
   def seal_and_merge(forge, repo, pr_number, issue_n, producer, forge_opts) do
-    gk_opts = as_gatekeeper(forge_opts)
-    signature = "[merge:pr-#{pr_number}]"
-    body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
-
-    # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup
-    # must see it regardless of author, otherwise double-post when `promote` replays (merge retry / escalation).
-    comment_opts =
-      gk_opts |> Keyword.put(:dedup_signature, signature) |> Keyword.put(:dedup_any_author, true)
-
-    # MERGE FIRST, only comment "✅ delivered and merged" IF the merge REALLY succeeded. The reverse
-    # order (comment → merge) would post the success BEFORE verifying it → on a conflict, a
-    # LYING "merged" comment would stay frozen: silent failure on THE crucial point of the workflow (we
-    # would control the INTENT, not the REALITY of the merge). The seal is therefore best-effort POST-merge — comment,
-    # then stage/merged, then EXPLICIT close (the issue is still OPEN when the comment is posted,
-    # no more auto-close-before-comment). Merge failed → NO "merged", the error bubbles up (resolution of the
-    # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
-    case do_merge(forge, repo, pr_number, gk_opts) do
-      :ok ->
-        _ = comment(forge, repo, issue_n, body, comment_opts)
-
-        # VISIBLE terminal step: the brick is merged. System-side (`forge_opts`, not the gatekeeper
-        # signature): the stage/* are managed by lcars-system (WS1). Best-effort (display; the merge
-        # is authoritative).
-        _ = forge.set_stage(repo, issue_n, Fleet.Pilot.Labels.stage_merged(), forge_opts)
-
-        # EXPLICIT close, as the LAST visible act on the issue (chronology QoL, 2026-07-07): no more
-        # `Closes #N` in the PR body (Gitea auto-closed AT MERGE, before even this comment — a
-        # "✅ delivered and merged" posted after the fact on an already-closed ticket). We close ourselves,
-        # AFTER the comment AND the stage/merged, for a coherent chronology: nothing else posts
-        # on the issue once closed. Best-effort (the merge is authoritative, a failed close invalidates nothing).
-        #
-        # SIGNED GATEKEEPER (`gk_opts`), NOT system (QoL regression 2026-07-07, observed live): the merge
-        # + the seal comment are ALREADY gatekeeper — a system close would create an identity break
-        # in the SAME sealing ceremony ("who finished this brick?" two different answers
-        # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
-        # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
-        # else in the pipeline) — not concerned by this inconsistency.
-        _ = forge.close_issue(repo, issue_n, gk_opts)
-
-        # Projects the deliverable onto the local clone `/home/projects/<name>` (best-effort). The SERIALIZATION
-        # lives IN the dedicated GenServer (one `git` at a time on a worktree, against the race between the two
-        # merge triggers) — here we only TRIGGER, the merge does not wait. The merge is authoritative:
-        # a failed alignment = disk behind, never a loss (the deliverable is on the forge).
-        _ = worktree_sync().sync(repo)
-        :ok
-
-      {:error, _} = err ->
+    case as_gatekeeper(forge_opts) do
+      {:error, :role_token_unavailable} = err ->
+        # Fail-CLOSED: no gatekeeper role token → we do NOT merge/close under the SYSTEM account (privilege
+        # escalation + attribution lie). Refuse; the caller surfaces it (the PR stays unmerged until the token
+        # is provisioned). `RoleToken.token/1` already logged the missing/empty token.
         err
+
+      {:ok, gk_opts} ->
+        signature = "[merge:pr-#{pr_number}]"
+        body = promote_comment(issue_n, pr_number, producer) <> "\n\n" <> signature
+
+        # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup
+        # must see it regardless of author, otherwise double-post when `promote` replays (merge retry / escalation).
+        comment_opts =
+          gk_opts
+          |> Keyword.put(:dedup_signature, signature)
+          |> Keyword.put(:dedup_any_author, true)
+
+        # MERGE FIRST, only comment "✅ delivered and merged" IF the merge REALLY succeeded. The reverse
+        # order (comment → merge) would post the success BEFORE verifying it → on a conflict, a
+        # LYING "merged" comment would stay frozen: silent failure on THE crucial point of the workflow (we
+        # would control the INTENT, not the REALITY of the merge). The seal is therefore best-effort POST-merge — comment,
+        # then stage/merged, then EXPLICIT close (the issue is still OPEN when the comment is posted,
+        # no more auto-close-before-comment). Merge failed → NO "merged", the error bubbles up (resolution of the
+        # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
+        case do_merge(forge, repo, pr_number, gk_opts) do
+          :ok ->
+            _ = comment(forge, repo, issue_n, body, comment_opts)
+
+            # VISIBLE terminal step: the brick is merged. System-side (`forge_opts`, not the gatekeeper
+            # signature): the stage/* are managed by lcars-system (WS1). Best-effort (display; the merge
+            # is authoritative).
+            _ = forge.set_stage(repo, issue_n, Fleet.Pilot.Labels.stage_merged(), forge_opts)
+
+            # EXPLICIT close, as the LAST visible act on the issue (chronology QoL, 2026-07-07): no more
+            # `Closes #N` in the PR body (Gitea auto-closed AT MERGE, before even this comment — a
+            # "✅ delivered and merged" posted after the fact on an already-closed ticket). We close ourselves,
+            # AFTER the comment AND the stage/merged, for a coherent chronology: nothing else posts
+            # on the issue once closed. Best-effort (the merge is authoritative, a failed close invalidates nothing).
+            #
+            # SIGNED GATEKEEPER (`gk_opts`), NOT system (QoL regression 2026-07-07, observed live): the merge
+            # + the seal comment are ALREADY gatekeeper — a system close would create an identity break
+            # in the SAME sealing ceremony ("who finished this brick?" two different answers
+            # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
+            # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
+            # else in the pipeline) — not concerned by this inconsistency.
+            _ = forge.close_issue(repo, issue_n, gk_opts)
+
+            # Projects the deliverable onto the local clone `/home/projects/<name>` (best-effort). The SERIALIZATION
+            # lives IN the dedicated GenServer (one `git` at a time on a worktree, against the race between the two
+            # merge triggers) — here we only TRIGGER, the merge does not wait. The merge is authoritative:
+            # a failed alignment = disk behind, never a loss (the deliverable is on the forge).
+            _ = worktree_sync().sync(repo)
+            :ok
+
+          {:error, _} = err ->
+            err
+        end
     end
   end
 
