@@ -1,8 +1,8 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-10 (montage initial)
-**Statut** : PHASE 0 — verify-sweep, sur le point de lancer
+**Dernière révision** : 2026-07-10 (phase 0 lancée)
+**Statut** : PHASE 0 — verify-sweep EN COURS (8 workers en fan-out)
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `PLAN.md`, puis le
@@ -18,9 +18,11 @@
 
 ## Prochaine action précise
 
-Lancer la **phase 0** : fan-out de workers Explore, chacun un lot de ~20-25 findings, chaque worker
-VÉRIFIE contre la source (percé + atteignable + citations + vrai chemin de données), rend un verdict par
-finding. Puis je consolide dans `LEDGER.csv`.
+**Attendre les 8 workers de vérification** (lots : C001-021 / C022-042 / C043-063 / C064-084 / C085-105 /
+C106-126 / C127-147 / C148-167). Dès qu'ils rendent : **consolider les verdicts dans `LEDGER.csv`**
+(verify_verdict = PERCE/THEORIQUE/DEJA-FIXE/DOCTRINE + phase), spot-vérifier moi-même les PERCE à fort
+enjeu (je ne fais pas confiance aveugle aux workers non plus), puis regrouper les PERCE B5 en familles de
+constructeurs. ENSUITE seulement : phase 1 (hollow-gates). Rien ne touche le code avant ça.
 
 ## Compteurs
 
@@ -32,10 +34,10 @@ finding. Puis je consolide dans `LEDGER.csv`.
 | fixés (commit) | 0 |
 | constructeurs de frontière posés | 0 |
 
-## Crons
+## Crons (session-only — à SUPPRIMER en fin de chantier)
 
-- watchdog 10 min : (à créer sur montage)
-- relevé horaire : (à créer sur montage)
+- watchdog 10 min : `a73c2099`
+- relevé horaire (:47) : `b1dc7bc3`
 
 ## Décisions en attente (pour le user)
 
