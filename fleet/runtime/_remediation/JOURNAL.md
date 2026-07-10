@@ -153,3 +153,7 @@
 - **Restent 5 décisions (→ user)** : F-C006 (test conformance fausse-couverture), F-C132-test + F-C137-test (tests intégration shell = contrat retiré, hors gate mix), F-C151 (canon dual-review live-assemblable contredit sp_drafts → D3), F-C087 (dates hardcodées scaffold → mini seam horloge).
 - Note hors-lot repérée : forge_client_test.exs:667 commentaire archéo « route-comment » (candidat finding séparé, non touché).
 - **REMÉDIATION MÉCANIQUE COMPLÈTE** : 12 code-fixes + 22 doc-fixes. Reste = 87 doctrine + 5 décisions-doc (→ user) + cleanup crons.
+
+### F-C087 FIXÉ — scaffold date = date d'onboard (seam :today)
+- Dernier item mécanique non-bloqué. Dates hardcodées 2026-06-14 dans spec.md/backlog.md générés → seam :today (défaut Date.utc_today). main/work signatures inchangées (opts), spec_md/backlog_md privés → pas de caller cassé. RED implicite→GREEN, fleet_pilot vert.
+- **REMÉDIATION MÉCANIQUE 100% : 13 code + 22 doc = 35 fixes.** Reste STRICTEMENT décisions user (87 doctrine + F-C006/132-test/137-test/151) + cleanup.
