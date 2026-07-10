@@ -146,3 +146,10 @@
 - **Bougé cette heure** : F-C037 + F-C086 fixés (TDD) → **JALON code-fix TERMINÉ (12 fixés, 0 PERCE ouvert)**. F-C031→theo (plugin non-exercé), F-C075/076→doctrine (escalade a lieu, fix=fork). Gate complet VERT & DÉTERMINISTE (0 échec umbrella, --warnings-as-errors clean). Phase 5 lancée (3 workers).
 - **Dérive attrapée** : (1) 2 warnings clause-grouping (--warnings-as-errors) introduits par F-C037/F-C119 → R-11. (2) 1 flaky async capture_log bleed (arch_escalation, chaîne partagée avec IncidentRegistry) → R-12. Les DEUX attrapés seulement au gate COMPLET (compile-force + mix test umbrella), pas aux runs app-par-app.
 - **Décision en attente user** : 87 DOCTRINE (`DECISION-BRIEF.md`, 7 clusters + ajouts) = le GROS du reste. Non-bloquant pour phase 5.
+
+### Phase 5 — batch doc LIVRÉ (22/25) + 3 décisions
+- 3 workers ont vérifié (CONFIRM-STALE/NOT-STALE/CODE-ISSUE) puis APPLIQUÉ (mode write, fichiers disjoints) ; moi : 5 single-line + review des 3 diffs + gate.
+- **22 doc-fixes appliqués** (20 complets + F-C132/F-C137 part-doc), gate complet 0 échec + --warnings-as-errors clean. Couplage F-C017 (log role_token ↔ assertion role_token_test) appliqué cohérent.
+- **Restent 5 décisions (→ user)** : F-C006 (test conformance fausse-couverture), F-C132-test + F-C137-test (tests intégration shell = contrat retiré, hors gate mix), F-C151 (canon dual-review live-assemblable contredit sp_drafts → D3), F-C087 (dates hardcodées scaffold → mini seam horloge).
+- Note hors-lot repérée : forge_client_test.exs:667 commentaire archéo « route-comment » (candidat finding séparé, non touché).
+- **REMÉDIATION MÉCANIQUE COMPLÈTE** : 12 code-fixes + 22 doc-fixes. Reste = 87 doctrine + 5 décisions-doc (→ user) + cleanup crons.
