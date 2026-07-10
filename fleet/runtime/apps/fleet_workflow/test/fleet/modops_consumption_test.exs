@@ -46,7 +46,7 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   end
 
   test "refs `profile` des pipelines v2.5 résolvent vers cap-profiles existants" do
-    for pname <- ["standard-qa", "audit-only"] do
+    for pname <- ["standard-qa", "audit-only", "brief-gate"] do
       pipe = YamlElixir.read_from_file!(Path.join([@canon, "workflow_maps", "#{pname}.yaml"]))
       steps = get_in(pipe, ["spec", "steps"])
 

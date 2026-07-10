@@ -32,6 +32,20 @@ defmodule Fleet.Workflow.LoaderV25Test do
     refute Map.has_key?(pipe, "spec")
   end
 
+  # F-C160 : brief-gate EST la workflow_map DÉFAUT du dispatch prod (StepDispatcher) mais était exclue de
+  # la conformance canon (seules standard-qa + audit-only étaient couvertes). On la couvre : elle doit
+  # normaliser proprement + porter sa forme load-bearing (gate de brief consultant-juge AVANT l'engineer).
+  test "canon brief-gate.yaml (V2.5, map DÉFAUT prod) normalisé → brief-review(judge) gate build" do
+    pipe = Loader.load!("brief-gate", workflow_maps_root: @canon_pipelines)
+    assert pipe["name"] == "brief-gate"
+    assert is_map(pipe["steps"])
+    assert is_map(pipe["steps"]["brief-review"])
+    assert pipe["steps"]["brief-review"]["brief_kind"] == "judge"
+    assert is_map(pipe["steps"]["build"])
+    assert pipe["steps"]["build"]["needs"] == ["brief-review"]
+    refute Map.has_key?(pipe, "spec")
+  end
+
   @tag :tmp_dir
   test "V2.5 step avec post_extract.git valide schema (face 2 décision archi git)",
        %{tmp_dir: dir} do
