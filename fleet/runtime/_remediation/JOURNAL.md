@@ -56,3 +56,7 @@
 - Phase 1 CLOSE : F-C166 + F-C160 fixés ; F-C167→D7, F-C165→D6 (doctrine-tails) ; F-C164 faux/reclassé.
 **Dérive attrapée** : aucune dérive de MA part. Mais la vérif a évité **3 actions erronées / 5** en phase 1 (règles R-06/R-07 déjà posées ; F-C164 = énième « rapport mal-localisé », couvert par R-01). Discipline tenue.
 **Décision(s) en attente user** : les **7 clusters DOCTRINE D1-D7** (71 findings) — dont **F-C167 (D7)** et **F-C165 (D6)** remontés de la phase 1. Non-bloquant pour phases 1-2-4 (code clair) ; bloquant pour phase 3 + une part de 4.
+
+### Phase 2 — F-C097 (1er constructeur)
+- **F-C097 FIXÉ** : `Fleet.Starfleet.Application.boot_enabled?/2` — booléen strict fail-loud, route les 6 knobs `:start_*`. Test dédié 3/0 + suite starfleet 67/0.
+- 1 constructeur posé, 1 finding tué. Pattern éprouvé (verrou amont config-boot). Prochain : la famille config-int (F-C099/104/117/082) — voir si un helper `Fleet.EnvParse` partagé consolide, ou site-par-site.

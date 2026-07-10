@@ -38,8 +38,8 @@ Chacun : re-vérif moi-même (spot) → fix → test/gate → commit → journal
 | DOCTRINE (→ user) | 71 (7 clusters) |
 | THEORIQUE (WONTFIX) | 21 |
 | DEJA-FIXE | 1 |
-| fixés (commit) | 2 (F-C166, F-C160) |
-| constructeurs de frontière posés | 0 (phase 2 démarre) |
+| fixés (commit) | 3 (F-C166, F-C160, F-C097) |
+| constructeurs de frontière posés | 1 (boot_enabled?) |
 
 ## Crons (session-only — à SUPPRIMER en fin de chantier)
 
