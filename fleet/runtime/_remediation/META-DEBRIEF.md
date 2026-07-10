@@ -1,7 +1,7 @@
 # META-DÉBRIEF — chaque dérive évitée → règle datée
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-10
+**Dernière révision** : 2026-07-11
 **Statut** : actif (append-only, garde le protocole vivant)
 **Référencé par** : `PLAYBOOK.md`
 
@@ -59,3 +59,14 @@
   `{:invalid_issue_id, _}`, mais `Fleet.API.Rest.do_admin_spawn` matchait chaque refus explicitement (pas de
   `_ ->`) → crash. Le RED l'a attrapé (raison de plus de faire RED-first sur un test d'INTÉGRATION, pas juste
   unitaire). Corollaire de la classe intégrité : une nouvelle branche de retour n'est jamais purement locale.
+
+- **R-11 (2026-07-11)** — *Une def publique insérée ENTRE des clauses de même nom/arité casse le groupe →
+  `mix compile --warnings-as-errors` échoue.* Vécu : F-C037 (`result_deadline_fire/2`) et F-C119
+  (`validate_issue_id/1`) posées au milieu d'un groupe `handle_event/4` resp. `parse_admin_spawn_dto/1`.
+  Placer les seams @doc false HORS des groupes de clauses, et **lancer le gate `--warnings-as-errors` après
+  tout ajout de fonction près d'un groupe** (le gate CI l'aurait bloqué — je l'ai attrapé à la vérif milestone).
+- **R-12 (2026-07-11)** — *Un `capture_log` en test `async` capture TOUT le log global (bleed inter-tests).*
+  Une assertion `refute log =~ <chaîne>` doit keyer sur un token UNIQUE au module (préfixe `ModuleName:`), pas
+  une chaîne partagée. Vécu : `arch_escalation_test refute =~ "NOT added"` flaky car `IncidentRegistry.Escalation`
+  émet aussi « NOT added » et bave sous charge concurrente. Fix : token arch-unique `ArchEscalation:`. Corollaire :
+  faire tourner le gate `mix test` COMPLET (pas app-par-app) révèle les flaky de bleed que les runs isolés cachent.

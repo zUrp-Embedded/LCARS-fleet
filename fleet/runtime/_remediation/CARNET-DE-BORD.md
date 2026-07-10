@@ -1,7 +1,7 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-11 ~minuit (JALON : shortlist CLEAN-FIX COMPLÈTE — 12 fixés, 0 PERCE ouvert)
+**Dernière révision** : 2026-07-11 ~00h10 (relevé horaire · code-fix TERMINÉ · phase 5 doc en vérif)
 **Statut** : PHASES 1/2/4 CLOSES (code-fix terminé) · reste PHASE 5 (doc-batch) + triage DOCTRINE user
 **Référencé par** : `PLAYBOOK.md`
 
@@ -46,13 +46,13 @@
 | findings totaux | 167 |
 | vérifiés (1er + 2e passage) | 167 / 167 |
 | **PERCE** (verify_verdict) | **12** (TOUS FIXÉS ✅ — 0 ouvert) |
-| PERCE-doc | 25 (phase 5, non commencée) |
+| PERCE-doc | 25 (phase 5 EN COURS — 3 workers vérif) |
 | **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C059-b, voir DECISION-BRIEF.md) |
 | THEORIQUE (WONTFIX) | 42 |
 | DEJA-FIXE | 1 |
 | **fixés (commit)** | **12** (166/160/097/098/059/069/119/018/044/035/037/086) |
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
-| règles méta posées | R-01 → R-10 |
+| règles méta posées | R-01 → R-12 |
 
 ## Crons (session-only — MEURENT au crash de session → RÉ-ARMER EN PREMIER si reprise)
 

@@ -138,3 +138,11 @@
 - `mix compile --warnings-as-errors` a attrapé 2 warnings clause-grouping (F-C037 result_deadline_fire/2, F-C119 validate_issue_id/1 inséraient une fonction au milieu d'un groupe de clauses) → déplacées, comportement inchangé. LEÇON : lancer --warnings-as-errors après chaque ajout de def public entre des clauses groupées.
 - `mix test` complet a révélé 1 flaky (arch_escalation_test refute log =~ "NOT added" — chaîne partagée avec IncidentRegistry.Escalation, bleed async capture_log). PAS ma régression (passe isolé). Durci sur token arch-unique "ArchEscalation:". → gate déterministe.
 - Résultat : umbrella 0 échec (fleet_pilot 364, fleet_spawner 219, fleet_api 74, fleet_credentials 48, fleet_starfleet 68 + doctests/properties), compile clean.
+
+---
+## RELEVÉ DE POSTE — 2026-07-11 ~00h10
+- **Phase** : 5 — batch PERCE-doc (3 workers vérif en vol).
+- **Compteurs** : 167/167 vérifiés · PERCE 12 (**TOUS FIXÉS**) · DOCTRINE 87 · THEORIQUE 42 · PERCE-doc 25 (en vérif) · DEJA-FIXE 1. Verrous posés : 7 (+ R-01→R-12).
+- **Bougé cette heure** : F-C037 + F-C086 fixés (TDD) → **JALON code-fix TERMINÉ (12 fixés, 0 PERCE ouvert)**. F-C031→theo (plugin non-exercé), F-C075/076→doctrine (escalade a lieu, fix=fork). Gate complet VERT & DÉTERMINISTE (0 échec umbrella, --warnings-as-errors clean). Phase 5 lancée (3 workers).
+- **Dérive attrapée** : (1) 2 warnings clause-grouping (--warnings-as-errors) introduits par F-C037/F-C119 → R-11. (2) 1 flaky async capture_log bleed (arch_escalation, chaîne partagée avec IncidentRegistry) → R-12. Les DEUX attrapés seulement au gate COMPLET (compile-force + mix test umbrella), pas aux runs app-par-app.
+- **Décision en attente user** : 87 DOCTRINE (`DECISION-BRIEF.md`, 7 clusters + ajouts) = le GROS du reste. Non-bloquant pour phase 5.
