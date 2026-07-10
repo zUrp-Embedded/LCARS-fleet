@@ -84,7 +84,7 @@ F-C082,low,confirmed,apps/fleet_pilot/lib/fleet/pilot/write_spacing.ex:14,DOCTRI
 F-C083,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/brief_builder.ex:22,DOCTRINE,unassigned,"BriefBuilder turns forge read failures into empty or generic brief inputs"
 F-C084,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/project_onboard.ex:13,DOCTRINE,unassigned,"ProjectOnboard treats repo-already-exists as success before proving the repo is safe to mutate"
 F-C085,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/project_onboard.ex:101,THEORIQUE,unassigned,"ProjectOnboard.import derives local clone identity from a malformed-accepting `full_name`"
-F-C086,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/project_onboard/scaffold.ex:23,PERCE,unassigned,"Scaffold mkdir failures escape the typed scaffold error contract"
+F-C086,medium,confirmed,apps/fleet_pilot/lib/fleet/pilot/project_onboard/scaffold.ex:23,PERCE,FIXÉ,"Scaffold mkdir failures escape the typed scaffold error contract"
 F-C087,low,confirmed,apps/fleet_pilot/lib/fleet/pilot/project_onboard/scaffold.ex:84,PERCE-doc,unassigned,"Generated project scaffold hard-codes old dates"
 F-C088,low,confirmed,apps/fleet_pilot/test/fleet/pilot/chain_integration_test.exs:72,PERCE-doc,unassigned,"Chain integration comments still describe route comments after route moved to labels"
 F-C089,medium,confirmed,apps/fleet_event_router/lib/fleet/event_router/bus.ex:41,DOCTRINE,unassigned,"Empty event registry still defaults to fail-open and the tests lock that implicit default"

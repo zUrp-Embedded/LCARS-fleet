@@ -121,3 +121,7 @@
 ### F-C037 FIXÉ — :result_deadline 3-state (:unknown broker → re-arm)
 - Vérifié moi-même : le no-kill sur :error est délibéré+correct, mais le LAPSE (consommer le deadline) orphelinait un pod hung dont le broker blip au fire. Fix distinct : garder no-kill, transformer lapse→re-arm. active_task_state/1 (3-state) + couture result_deadline_fire/2 (testable, gen_statem). pod_has_active_task? gardé pour le champ pod_info (l.428).
 - TDD 2-phases RED→GREEN, fleet_spawner 219/0. Enchaîne → F-C086 (faible enjeu).
+
+### F-C086 FIXÉ — scaffold mkdir_p! → typed (honore le @spec)
+- Vérifié moi-même : 3 mkdir_p! bang violaient le @spec {:scaffold_write}. R-10 : onboard/2 with SANS else → aujourd'hui le raise crashe, après fix {:error} retourné ; onboard @spec = {:error,term()} + retourne déjà des {:error} variés → safe. Nouveau test scaffold_test (aucun n'existait). RED (File.Error)→GREEN, fleet_pilot 364/0.
+- Enchaîne → F-C031 (plugin slug, dernier CLEAN-FIX worker) puis re-vérif F-C075/076.
