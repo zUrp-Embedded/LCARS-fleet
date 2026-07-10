@@ -1,8 +1,8 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-10 (phase 2 en cours — 4 workers re-vérif en vol)
-**Statut** : PHASE 1 CLOSE · PHASE 2 EN COURS (constructeurs + re-vérif consequence-check déléguée)
+**Dernière révision** : 2026-07-10 (pass-2 consolidé · 9 fixés · shortlist CLEAN-FIX en cours)
+**Statut** : PHASE 1 CLOSE · PHASE 2/4 EN COURS (9 CLEAN-FIX livrés, 6 PERCE ouverts)
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `META-DEBRIEF.md`
@@ -15,17 +15,19 @@
 - **cwd shell** : se reset à `/home/lordzurp/audit/LCARS-13761e19/fleet/runtime` après chaque bash → TOUJOURS `cd /home/lordzurp/wt-remediation/fleet/runtime` ou `git -C`.
 - **Phase 0 CLOSE** : 167/167 vérifiés (verdicts dans `verdicts/lot-*.md`, distribution dans `CONSOLIDATION.md`).
 - **Phase 1 CLOSE** : hollow-gates. F-C166 fixé (bwrap sentinel), F-C160 fixé (brief-gate coverage), F-C164→THEORIQUE (install.sh clone tout, mal-localisé), F-C167→DOCTRINE D7 (gate creux + invariant violé), F-C165→DOCTRINE D6 (liste rôles).
-- **Phase 2 EN COURS** : F-C097 fixé (1er constructeur `boot_enabled?/2`). Config-int re-scopée. **4 workers re-vérif consequence-check des 37 PERCE ouverts en vol** (agentIds : a2535b81, ac2b5f71, a3529a97, a9dcee08 — lancés 22:31, verdicts attendus).
-- **DECISION-BRIEF.md livré** : 7 clusters doctrine prêts à trancher pour l'user.
+- **Pass-2 CONSOLIDÉ** (4 workers rendus, `CONSOLIDATION-PASS2.md`) : 9 CLEAN-FIX, 18→theo, 7→doctrine.
+- **9 FIXÉS** (TDD, committés) : F-C166, F-C160, F-C097, F-C098, F-C059, F-C069, F-C119, F-C018, F-C044.
+- **DECISION-BRIEF.md livré** : 7 clusters doctrine (+7 ajouts pass-2 + F-C059-b) prêts à trancher pour l'user.
 
 ## Prochaine action précise
 
-**Pass-2 consolidé + F-C059 FIXÉ.** Continuer la shortlist CLEAN-FIX en TDD (RED→verrou amont→GREEN→gate→
-commit→journal), un finding par unité, verify-moi-même avant chaque fix. Ordre restant par valeur :
-**F-C069** (2xx corrompu → merge/half-jury, jumeau `paginate`) → **F-C119** (issue_id ingress no-auth, jumeau pod_id)
-→ **F-C018** (rôle brut → injection trailer/email, pattern-slug au load) → **F-C044/F-C035/F-C037**
-(observabilité spawn/admin, finitions `emit_spawn_failed`/`brief_slot` 3-state) → **F-C086/F-C031** (faible enjeu).
-Puis **F-C075/F-C076** (oubliés de la délégation) : re-vérif consequence-check moi-même AVANT tout fix.
+**Continuer la shortlist CLEAN-FIX** en TDD (RED→verrou amont→GREEN→commit→journal), verify-moi avant chaque fix.
+**Restent 6 PERCE ouverts** :
+- **F-C035** (broker `:unknown` → brief admin.spawn droppé ; jumeau `brief_slot` 3-state + branche `:free`)
+- **F-C037** (hiccup TaskQueue consomme `:result_deadline` ; jumeau `brief_slot` 3-state + `rearm_deadline`)
+- **F-C086** (scaffold `mkdir_p!` viole @spec typé ; jumeau `File.write` in-fn ; faible enjeu)
+- **F-C031** (plugin skill whitespace lossy ; jumeau `Fleet.Slug` ; basse prio, danger déjà rattrapé par bwrap)
+- **F-C075, F-C076** (Sysadmin escalation/assignee) — **JAMAIS re-vérifiés (oubli délégation)** → consequence-check MOI-MÊME avant tout fix.
 **Rien ne bouge sur un finding non-confirmé-percé-ET-conséquence-matérialisée.**
 
 ## Reclassements (verify-the-verifier + consequence-check R-09)
