@@ -34,3 +34,8 @@
 - **F-C165 → doctrine-tail (flag user, D6)** : la bonne liste = rôles `needs_role_token`, pas swap vulcan→starfleet. Non touché.
 - **F-C164** : à re-vérifier (install.sh copie-list) — probablement propre. **F-C160** : couverture test brief-gate (Elixir) — avec les tests.
 - Règles R-06/R-07 ajoutées au méta-débrief (re-vérif = 2 mis-fixes évités ; hollow-green masque un vrai rouge).
+
+### Phase 1 — F-C164 reclassé FAUX (verify-the-verifier)
+- **F-C164 → THEORIQUE** : `bin/claude_launch.identity` = constante vendor COMMITTÉE (NAME/EMAIL, trackée), pas un secret à générer. `install.sh` clone tout le repo → présente ; `publish-to-github.sh` la résout relativement (`etc/../bin`). Citation Codex `install.sh:50 copie sélective` factuellement fausse (install.sh ne copie rien, il clone+délègue). Aucune brèche → PAS de fix.
+- **Bilan phase 1** : 5 « hollow-gates clairs » → 1 fix propre (F-C166), 2 doctrine-tails (F-C167 D7, F-C165 D6), 1 FAUX (F-C164), 1 restant (F-C160 couverture test brief-gate). La règle cardinale a évité 1 mis-fix + 2 fix-mal-formés sur 4.
+- Distribution ledger : PERCE 48, THEORIQUE 22 (F-C164 migré).

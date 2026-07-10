@@ -162,7 +162,7 @@ F-C160,low,confirmed,apps/fleet_workflow/priv/canon/workflow_maps/brief-gate.yam
 F-C161,medium,confirmed,apps/fleet_workflow/priv/schema/gate-decision-v1.json:4,PERCE,unassigned,"gate-decision schema requires reason but runtime verdict decoding only enforces the decision enum"
 F-C162,low,confirmed,apps/fleet_observation/DESIGN-observabilite.md:117,PERCE-doc,unassigned,"observation design still says fleet_api has auth HMAC after the API moved to no-auth by design"
 F-C163,low,confirmed,.run-journal/run-global.md:3,THEORIQUE,unassigned,"checked-in run journal still presents stale runtime state as active resumable state"
-F-C164,medium,confirmed,etc/install.sh:49,PERCE,unassigned,"install.sh omits the vendor identity file required by publish-to-github's default path"
+F-C164,medium,confirmed,etc/install.sh:49,THEORIQUE,unassigned,"install.sh omits the vendor identity file required by publish-to-github's default path"
 F-C165,medium,confirmed,etc/provision-role-tokens.sh:31,PERCE,unassigned,"role-token provisioning has a second hard-coded role list that diverges from canonical cap-profiles"
 F-C166,medium,confirmed,test/gate-r0.1-bwrap.sh:15,PERCE,unassigned,"bwrap isolation gate passes when the host secret being tested does not exist"
 F-C167,high,confirmed,test/gate-r0.8-canon.sh:6,PERCE,unassigned,"gate-r0.8-canon exits green without running any canon checks"
