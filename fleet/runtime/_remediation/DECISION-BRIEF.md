@@ -169,3 +169,13 @@ phase 3. Tu peux répondre cluster par cluster, dans l'ordre que tu veux.
 
 **Note honnêteté** : F-C075 et F-C076 (Sysadmin escalation / assignee) ont été **oubliés** dans la délégation
 de re-vérif → je les re-vérifie moi-même avant de conclure ; ils pourraient ajouter 0-2 items ici ou en CLEAN-FIX.
+
+### Item doctrine surgi PENDANT le fix F-C059 (couche-2)
+**F-C059-b (contrat `pod_info` : absent vs timeout-vivant)** — le fix F-C059 a fermé l'asymétrie du *raise*
+(→ `:unknown` → defer). Mais `pod_info` rend `{:error, :not_found}` pour DEUX états indistinguables à ce niveau :
+un pod **vraiment mort** ET un pod **vivant-mais-lent** dont le `GenServer.call` timeout. Donc un pipe vivant-lent
+peut encore être classé `:dead` → reset/kill. **On ne peut pas** traiter `{:error,:not_found}` comme incertain au
+niveau `safe_pod_info` (un pod mort resterait `:busy` = wedge du pipe). → **Le fork** : donner à `pod_info` (côté
+spawner) un contrat qui **distingue `:absent` de `:timeout`** (ex : `{:error, :timeout}` vs `{:error, :not_found}`),
+puis mapper `:timeout → :busy`. Ma reco : oui, split le contrat `pod_info` (verrou amont correct), cluster **D6**
+(SSOT/contrat). Effort : moyen (touche le spawner + les 2 lecteurs `pod_alive?`/`safe_pod_info`).

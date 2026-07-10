@@ -79,3 +79,9 @@
 - **Oubli assumé** : F-C075/F-C076 jamais assignés à un lot → à re-vérifier moi-même avant tout fix.
 - Motif méta : l'intégrité a déjà posé les logs LOUD ; le substrat durable (forge-sync/re-wake/poller-rescan/scoped-label-mutex) neutralise le faux-succès ; les vrais CLEAN-FIX sont des FINITIONS de verrous à moitié posés (jumeau existant). F-C059 = le plus sérieux (retour ment + kill destructif).
 - Prochain : F-C059 (verify-moi + TDD).
+
+### F-C059 FIXÉ — safe_pod_info raise → :unknown → pipe DEFER (le plus sérieux du pass-2)
+- Vérifié moi-même : asymétrie réelle documentée (pod_alive? assume-ALIVE vs safe_pod_info :error→:dead→spawn destructif). Fix = variante `:unknown → :busy` (defer), miroir pod_alive?, implémente le TODO l.355 du code.
+- RED = spawn frais destructif d'un pipe vivant ; GREEN. fleet_pilot 358+2+1/0.
+- **Couche-2 flaggée DOCTRINE** : `pod_info` conflate absent vs timeout-vivant (tous deux `{:error,:not_found}`) → un pipe vivant-mais-lent peut encore être classé :dead. Non fixable au niveau safe_pod_info (un pod vraiment mort resterait :busy = wedge) → exige un split de contrat pod_info côté spawner = décision design (ajouté DECISION-BRIEF).
+- Prochain : F-C069 (jury 2xx corrompu → merge/half-jury).

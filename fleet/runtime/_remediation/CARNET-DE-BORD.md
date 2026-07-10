@@ -20,11 +20,10 @@
 
 ## Prochaine action précise
 
-**Pass-2 consolidé** (les 4 workers ont rendu, `CONSOLIDATION-PASS2.md`). **Attaquer la shortlist CLEAN-FIX**
-en TDD (RED→verrou amont→GREEN→supprimer default case→gate→commit→journal), un finding par unité, verify-moi-même
-avant chaque fix (le worker propose, je confirme). Ordre par valeur :
-**F-C059** (retour ment + kill destructif d'un pipe vivant = plus sérieux) → **F-C069** (2xx corrompu → merge/half-jury)
-→ **F-C119** (issue_id ingress no-auth) → **F-C018** (rôle brut → injection trailer/email) → **F-C044/F-C035/F-C037**
+**Pass-2 consolidé + F-C059 FIXÉ.** Continuer la shortlist CLEAN-FIX en TDD (RED→verrou amont→GREEN→gate→
+commit→journal), un finding par unité, verify-moi-même avant chaque fix. Ordre restant par valeur :
+**F-C069** (2xx corrompu → merge/half-jury, jumeau `paginate`) → **F-C119** (issue_id ingress no-auth, jumeau pod_id)
+→ **F-C018** (rôle brut → injection trailer/email, pattern-slug au load) → **F-C044/F-C035/F-C037**
 (observabilité spawn/admin, finitions `emit_spawn_failed`/`brief_slot` 3-state) → **F-C086/F-C031** (faible enjeu).
 Puis **F-C075/F-C076** (oubliés de la délégation) : re-vérif consequence-check moi-même AVANT tout fix.
 **Rien ne bouge sur un finding non-confirmé-percé-ET-conséquence-matérialisée.**
@@ -47,8 +46,8 @@ Puis **F-C075/F-C076** (oubliés de la délégation) : re-vérif consequence-che
 | **DOCTRINE** (→ user) | **85** (7 clusters D1-D7 + 7 ajouts pass-2, voir DECISION-BRIEF.md) |
 | THEORIQUE (WONTFIX) | 41 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **4** (F-C166, F-C160, F-C097, **F-C098**) |
-| constructeurs de frontière posés | 2 (`boot_enabled?/2`, `encode_line/1` fail-safe) |
+| **fixés (commit)** | **5** (F-C166, F-C160, F-C097, F-C098, **F-C059**) |
+| constructeurs de frontière posés | 3 (`boot_enabled?/2`, `encode_line/1`, `safe_pod_info` :unknown) |
 | règles méta posées | R-01 → R-09 |
 
 ## Crons (session-only — à SUPPRIMER en fin de chantier)
