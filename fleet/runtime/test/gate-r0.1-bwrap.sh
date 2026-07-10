@@ -10,9 +10,9 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BWRAP_LAUNCH="$HERE/../bin/bwrap_launch.sh"
 WORK="$(mktemp -d)"; FAIL=0
-trap 'rm -rf "$WORK"' EXIT
+SENTINEL="$HOME/.claude/.gate-r01-sentinel-$$"
+trap 'rm -rf "$WORK"; rm -f "$SENTINEL"' EXIT
 mkdir -p "$WORK/creds/testrole" "$WORK/mirror" "$WORK/pod1" "$WORK/pod2"
-HOST_SECRET="$HOME/.claude/.credentials.json"
 export LCARS_CREDS_ROOT="$WORK/creds" LCARS_GIT_MIRROR="$WORK/mirror" LCARS_BWRAP_NO_CLEANUP=1
 
 echo "== Gate R0.1 — bwrap primitive (vrai bwrap_launch.sh) =="
@@ -26,11 +26,18 @@ else
   echo "FAIL BIND  claude introuvable/inexecutable (out: $(echo "$OUT" | tr '\n' ' ' | cut -c1-140))"; FAIL=1
 fi
 
-# ISO : le secret host reste masque dans le pod
-if timeout 25 "$BWRAP_LAUNCH" testrole pod2 "$WORK/pod2" /bin/cat "$HOST_SECRET" >/dev/null 2>&1; then
-  echo "FAIL ISO   secret host LISIBLE dans le pod (isolation cassee)"; FAIL=1
+# ISO : un secret host DOIT rester masque dans le pod. On ne depend PAS de l'existence du vrai
+# ~/.claude/.credentials.json (absent -> l'ancien test faisait `cat` sur un fichier inexistant ->
+# echec -> branche `else` -> faux PASS = faux-vert, F-C166). On pose une SENTINELLE deterministe dans
+# ~/.claude (masquee par le meme --tmpfs /home que le vrai secret), on prouve qu'elle est masquee, on la
+# retire (trap EXIT). Le test devient reel et deterministe quelle que soit la machine.
+mkdir -p "$HOME/.claude"
+if ! echo "lcars-gate-r01-secret" > "$SENTINEL" 2>/dev/null; then
+  echo "FAIL ISO   impossible de poser la sentinelle host ($SENTINEL) — isolation non verifiable"; FAIL=1
+elif timeout 25 "$BWRAP_LAUNCH" testrole pod2 "$WORK/pod2" /bin/cat "$SENTINEL" >/dev/null 2>&1; then
+  echo "FAIL ISO   sentinelle host LISIBLE dans le pod (isolation cassee)"; FAIL=1
 else
-  echo "PASS ISO   secret host masque (--tmpfs /home tient)"
+  echo "PASS ISO   sentinelle host masquee (--tmpfs /home tient)"
 fi
 
 echo "---"
