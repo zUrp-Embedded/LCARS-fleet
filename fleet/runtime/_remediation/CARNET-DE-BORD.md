@@ -50,10 +50,17 @@ Puis **F-C075/F-C076** (oubliés de la délégation) : re-vérif consequence-che
 | constructeurs de frontière posés | 3 (`boot_enabled?/2`, `encode_line/1`, `safe_pod_info` :unknown) |
 | règles méta posées | R-01 → R-09 |
 
-## Crons (session-only — à SUPPRIMER en fin de chantier)
+## Crons (session-only — MEURENT au crash de session → RÉ-ARMER EN PREMIER si reprise)
 
-- watchdog 10 min : `a73c2099`
-- relevé horaire (:47) : `b1dc7bc3`
+> ⚠️ `durable` sans effet : ces crons vivent en mémoire de session. **Si tu reprends ce chantier dans une
+> session fraîche, ta TOUTE PREMIÈRE action est de recréer le watchdog** (sinon plus aucun heartbeat, le
+> dispositif autonome est mort). Vérifie d'abord avec `CronList` : s'il manque, recrée-le AVANT tout le reste.
+
+- **watchdog 10 min** : `a73c2099` — cron `3-59/10 * * * *`. Ré-arme via `CronCreate` avec ce prompt exact :
+  > WATCHDOG remédiation-ssot (10 min). Relis /home/lordzurp/wt-remediation/fleet/runtime/_remediation/CARNET-DE-BORD.md. Check court : est-ce que j'avance sur le plan ? un worker délégué est-il fini ou bloqué (si fini → consolide dans LEDGER.csv + avance à l'unité suivante) ? suis-je en train de dériver (« je fais vite ce bout ») ou d'attendre bêtement ? RÈGLE CARDINALE : aucun code ne bouge sur un finding non vérifié-percé (cf. PLAYBOOK.md). Si tout tourne bien, ne fais qu'un check et continue le travail en cours — ne churn pas. Si le chantier est en pause sans raison, relance l'étape suivante du PLAN.md.
+- **relevé horaire (:47)** : `b1dc7bc3` — cron `47 * * * *` — checkpoint horaire (pause + écriture d'état).
+- **À SUPPRIMER en fin de chantier** (CronDelete a73c2099 + b1dc7bc3).
+- ⚠️ auto-expiration cron : 7 jours (ré-armer si le chantier dépasse).
 
 ## Décisions en attente (pour le user)
 
