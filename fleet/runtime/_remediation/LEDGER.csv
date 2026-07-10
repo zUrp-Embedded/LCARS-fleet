@@ -29,7 +29,7 @@ F-C027,high,confirmed,apps/fleet_pilot/lib/fleet/pilot/step_dispatcher/spawn/nam
 F-C028,high,confirmed,apps/fleet_project_bootstrap/lib/fleet/project_bootstrap/phase.ex:106,THEORIQUE,unassigned,"Project clone with `repo_path` can proceed without a pinned `base_sha`"
 F-C029,medium,confirmed,apps/fleet_project_bootstrap/lib/fleet/project_bootstrap/phase.ex:96,THEORIQUE,unassigned,"`work_branch` reaches `git clone --branch` without the GitRef validation used for code branches"
 F-C030,hygiene,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/completed_payload.ex:41,THEORIQUE,unassigned,"The residual `workflow_map_id` completion branch builds a payload that the current consumer explicitly skips"
-F-C031,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/launch_spec.ex:216,PERCE,unassigned,"Plugin-qualified skills are serialized into a whitespace protocol before plugin names are validated"
+F-C031,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/launch_spec.ex:216,THEORIQUE,unassigned,"Plugin-qualified skills are serialized into a whitespace protocol before plugin names are validated"
 F-C032,hygiene,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/launch_spec.ex:165,THEORIQUE,unassigned,"LaunchSpec keeps schema-bypassed invalid modes launchable by falling back to safe defaults"
 F-C033,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/scaffold.ex:94,DOCTRINE,unassigned,"Project pods can launch without `CLAUDE.md` in the workspace when the load-bearing copy fails"
 F-C034,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/launch_env.ex:60,DOCTRINE,unassigned,"`:claude_dir` override bypasses the per-human credential resolution while the module claims per-human by construction"

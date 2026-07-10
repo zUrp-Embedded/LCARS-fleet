@@ -125,3 +125,6 @@
 ### F-C086 FIXÉ — scaffold mkdir_p! → typed (honore le @spec)
 - Vérifié moi-même : 3 mkdir_p! bang violaient le @spec {:scaffold_write}. R-10 : onboard/2 with SANS else → aujourd'hui le raise crashe, après fix {:error} retourné ; onboard @spec = {:error,term()} + retourne déjà des {:error} variés → safe. Nouveau test scaffold_test (aucun n'existait). RED (File.Error)→GREEN, fleet_pilot 364/0.
 - Enchaîne → F-C031 (plugin slug, dernier CLEAN-FIX worker) puis re-vérif F-C075/076.
+
+### F-C031 → DOWNGRADE (THEORIQUE) — protocole plugin whitespace non-exercé
+- Verify-the-verifier : ZÉRO skill plugin-qualifié dans le canon (6/7 `skills: []`, architect = 3 skills simples sans `:`). skills_plugins_env retourne `%{}` partout → le protocole whitespace-lossy n'est exercé par AUCUN config réel (R-08). Le danger sécu (traversal/mount) est déjà rattrapé par l'allowlist bwrap (bwrap_launch.sh:204-207). Résidu = fidélité pure sur un chemin inexistant. Fix fail-loud propre = changement de contrat de skills_plugins_env (map→result) disproportionné. → défensif-si-adopté, pas percé-aujourd'hui. Cohérent avec le re-scope config-int.
