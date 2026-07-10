@@ -31,7 +31,8 @@
 #   LCARS_VENDOR_BIN              binaire claude per-user résolu par le spawner (autorité, pas `command -v`).
 #
 # Usage : host_launch.sh <role> <pod_id> <pod_dir> <command...>
-#   <command...> = `claude_launch.sh <role> <pod_id> <pod_dir> <sp>` (opaque, argv préservé).
+#   <command...> = `claude_launch.sh <role> <pod_id> <pod_dir>` (opaque, argv préservé) ; le SP est lu
+#   depuis $POD_DIR/.lcars/system-prompt.md (hors argv depuis 2026-06-14).
 #
 # Teardown (DIFFÉRENCE clé vs bwrap) : pas de namespace → tuer le holder ne CASCADE PAS sur le serveur
 # tmux (orphelin claude). Donc le holder TRAP SIGTERM/EXIT → `tmux kill-server` sur la socket par-pod

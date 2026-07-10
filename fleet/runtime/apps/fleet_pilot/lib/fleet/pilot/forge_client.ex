@@ -29,8 +29,9 @@ defmodule Fleet.Pilot.ForgeClient do
   ## Idempotence
 
   Write-ops are idempotent (skip if the target state is already reached). E.g. `add_label/4`:
-  `GET issue labels + PUT label set` (a POST append would create duplicates), re-call on a label
-  already present = `{:ok, :already_present}`, zero write round-trip.
+  `GET issue labels` to short-circuit, else `POST issue/labels` by NAME (Gitea resolves repo+org
+  server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
+  re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
   """
 
   require Logger
@@ -106,11 +107,8 @@ defmodule Fleet.Pilot.ForgeClient do
 
   ## Pagination
 
-  Hard-coded limit of 50 issues/page, a single page. For catch-up
-  operations, that amply covers the post-crash catch-up window. If
-  the poller has to process 50+ issues between 2 ticks, that is a sign
-  the interval is too long or the forge is bursting — a tuning matter, not
-  a limit to lift.
+  Paginated: delegates to `list_open_issues/2` → `list_scoped_issues/3` → `Transport.paginate/3`,
+  so issue discovery is source-of-truth complete (all pages read), not a single hard-coded page.
   """
   @spec list_open_issues_without_label(String.t(), String.t(), Keyword.t()) ::
           {:ok, [map()]} | {:error, term()}

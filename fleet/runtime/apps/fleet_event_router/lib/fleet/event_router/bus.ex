@@ -38,8 +38,8 @@ defmodule Fleet.EventRouter.Bus do
   from `priv/events.yaml` via `:persistent_term`. As soon as it is populated, any event
   outside the set raises `UnregisteredError`.
 
-  The behavior when the set is EMPTY (early boot / test `load_event_registry: false`)
-  is **explicit** via `:fleet_event_router, :permit_when_registry_empty`:
+  The behavior when the set is EMPTY (test `load_event_registry: false`, or any config that disables
+  the boot-time `Catalog.load!`) is **explicit** via `:fleet_event_router, :permit_when_registry_empty`:
   `true` (default) = let through (intended init safety-net); `false` = fail-closed
   (raise while the registry is not loaded). See `assert_authorized!/1`.
   """
@@ -229,14 +229,16 @@ defmodule Fleet.EventRouter.Bus do
 
   # Behavior when the registry is EMPTY — made EXPLICIT and configurable, no longer a silent hole.
   #
-  # The registry is empty in two legitimate situations: (1) at boot, between the Bus starting and
-  # `Catalog.load!/0` populating it; (2) in tests with `load_event_registry: false` (hermeticity — no
-  # full boot to validate a type). In these windows, validating against an empty set would reject
+  # The registry is empty in legitimate situations: in tests with `load_event_registry: false`
+  # (hermeticity — no full boot to validate a type), or any deployment that disables the boot-time
+  # `Catalog.load!`. (Normal prod boot is NOT one of them: `Application.start/2` runs `Catalog.load!/0`
+  # BEFORE starting the supervisor children, so the registry is already populated when the Bus process
+  # starts — see application.ex.) In these windows, validating against an empty set would reject
   # EVERY event. The `:permit_when_registry_empty` flag chooses the regime:
   #
-  #   * `true` (default) — empty registry ⇒ LET THROUGH. INTENDED safety-net: do not break early boot
-  #     nor force each test to populate the registry by hand. This is NOT a disabled validation — as
-  #     soon as the set is populated (`Catalog.load!` at boot, right after the Bus starts), the
+  #   * `true` (default) — empty registry ⇒ LET THROUGH. INTENDED safety-net: do not force each test
+  #     to populate the registry by hand. This is NOT a disabled validation — in normal boot the set
+  #     is ALREADY populated (`Catalog.load!` runs BEFORE the Bus child starts), so the
   #     `type in types` branch decides and any event outside the registry raises. Producers already
   #     all emit the canonical schema, and the `UnregisteredError` rescue on the caller side covers
   #     the residue. It is an INTENTIONAL admission of the init window, not a silent by-pass.

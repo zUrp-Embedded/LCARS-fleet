@@ -1,5 +1,10 @@
 # fleet_credentials
 
+**Date** : 2026-07-11
+**Dernière révision** : 2026-07-11
+**Statut** : actif — carte du module
+**Référencé par** : —
+
 Ring 1 (pod primitives + vendor boundary). Credential + identity primitives for LCARS
 pods: the auth model is the **native Anthropic claudeDir** (`~/.claude/.credentials.json`,
 per-human, shared across a UID's pods) gated at the spawn-boundary — LCARS stores and
@@ -20,7 +25,7 @@ reverse OAuth notes, and the spawner's `Fleet.Spawner.Pod.LaunchEnv` — this ap
 - `Fleet.Credentials.Shell` — `run/3`+`git/2`: external command bounded by construction (kill process-group + wall deadline) + `git_safe_config_args/0` (system-side git config neutralization)
 - `Fleet.Credentials.ForgeIdentity` — deliverable git identity (author = human, role = verified `Co-authored-by` trailer); plus the commit-identity gate's `allowed_emails/2` and the system/role identity accessors
 - `Fleet.Credentials.Human` — the SINGLE source of "the fleet's human" (`id -un`)
-- `Fleet.Credentials.RoleToken` — `token/1`: forge token of a role's account (best-effort, system-token fallback)
+- `Fleet.Credentials.RoleToken` — `token/1`: forge token of a role's account (reports `nil` if absent/empty; policy-neutral, callers fail-closed via `RoleIdentity`)
 
 Pure library app — no supervisor / `mod:`.
 

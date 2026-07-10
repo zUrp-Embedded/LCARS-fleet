@@ -185,8 +185,9 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   The repo's **numeric forge id** (`GET /repos/<repo>` → `.id`). It's the project's identity for the
   deterministic `session_id` (`Fleet.Spawner.SessionId`, `<REPO4>` segment): the FORGE is the
   source of truth, we do NOT derive an id from nothing. Gitea id = stable sequential integer (e.g.
-  `fleet/lcars` = 145). `{:error, _}` if the repo doesn't exist / forge down → the caller falls back to a
-  random UUID (best-effort, zero collision).
+  `fleet/lcars` = 145). `{:error, _}` if the repo doesn't exist / forge down → propagated to spawn identity:
+  the caller puts NO `:repo_id` (nil), and a project-bound role spawned without a repo is an ANOMALY that
+  fails loud in the mint (`Fleet.Spawner.Pod.SessionMint`) — never a random-UUID fallback.
   """
   @spec repo_id(String.t(), Keyword.t()) :: {:ok, integer()} | {:error, term()}
   def repo_id(repo, opts \\ []) when is_binary(repo) do

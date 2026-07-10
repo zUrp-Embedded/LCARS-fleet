@@ -31,8 +31,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   (`Fleet.Pilot.ForgeClient.as_role/2`). ONLY point in the runtime that writes the
   `as_role(_, gatekeeper_role())` idiom — used internally by `seal_and_merge/6` (merge + seal
   comment) and by `ArchEscalation` (gatekeeper-signed escalation comment). Role token
-  absent/unreadable → `forge_opts` unchanged, logged fallback to system token (`RoleToken`,
-  honest-degraded).
+  absent/unreadable → `{:error, :role_token_unavailable}` (fail-CLOSED via
+  `Fleet.Credentials.RoleIdentity`): NEVER a system-token fallback — `seal_and_merge/6`
+  refuses the merge/close rather than act under the most-privileged system account.
   """
   @spec as_gatekeeper(keyword()) :: {:ok, keyword()} | {:error, :role_token_unavailable}
   def as_gatekeeper(forge_opts),

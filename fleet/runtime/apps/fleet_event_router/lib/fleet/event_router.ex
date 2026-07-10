@@ -6,7 +6,7 @@ defmodule Fleet.EventRouter do
 
     * `Fleet.EventRouter.Bus` — Phoenix.PubSub instance + broadcast/subscribe
     * `Fleet.EventRouter.WebhooksGitea` — Plug.Router HTTP HMAC SHA256
-    * `Fleet.EventRouter.SignalsOS` — `:os.set_signal/2` GenServer
+    * `Fleet.EventRouter.SignalsOS` — OS-signal → bus bridge, **INERT / gated off** (see its moduledoc)
     * `Fleet.EventRouter.Catalog` — loads the events.yaml registry at boot (populates `authorized_event_types`)
   """
 end

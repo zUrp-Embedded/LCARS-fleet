@@ -95,9 +95,9 @@ defmodule Fleet.CapProfile.Catalog do
   @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list(dir \\ root_dir()) do
     # Absent/unreadable dir = error (broken config) — distinct from an empty catalogue ({:ok, []}).
-    # `Path.wildcard` conflates the two; `File.dir?` decides. (`load/1` goes through `read_role` →
-    # `name_index` directly → an absent dir there gives `:not_found`, not `:enoent` — the role is
-    # simply not found.)
+    # `Path.wildcard` conflates the two; `File.dir?` decides. (`load/1`/`compose/2` go through
+    # `read_role`, which ALSO checks `File.dir?` first → an absent dir there gives `:catalogue_missing`
+    # (same broken-config signal as here), NOT `:not_found`.)
     if File.dir?(dir) do
       with {:ok, index} <- name_index(dir) do
         {:ok, index |> Map.keys() |> Enum.sort()}

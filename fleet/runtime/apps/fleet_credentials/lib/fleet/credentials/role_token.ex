@@ -29,17 +29,16 @@ defmodule Fleet.Credentials.RoleToken do
   @doc """
   Forge token of the `role` account, or `nil` if absent/unreadable/invalid role.
 
-  `nil` is a best-effort REPORTING of absence (logged here), NOT a policy: the fail-open-vs-closed decision
-  is the CALLER's (R1-16). The MCP delegation (`Fleet.MCP.PodTools.Delegation.create_issue`) REFUSES on
-  `nil` — `:role_token_unavailable`, NO system-account fallback (fail-CLOSED, the safe path). `fleet_pilot`'s
-  forge client degrades to the SYSTEM token on `nil` (fail-OPEN — its own policy, in Ring 3): a role token
-  that is a provisioning hole is masked by a system-account action there, which is the security decision to
-  revisit cross-territory (drdree), not here. This module neither fails open nor closed — it reports.
+  `nil` is a best-effort REPORTING of absence (logged here), NOT a policy: this module stays policy-NEUTRAL.
+  The fail-CLOSED policy is carried by the `Fleet.Credentials.RoleIdentity` smart-constructor, the SINGLE
+  source shared by both consumers (pilot `ForgeClient.as_role/2`, mcp `Delegation.create_issue`): a `nil`
+  token yields `{:error, :role_token_unavailable}` and NEVER a system-account fallback (which would be a
+  privilege escalation + a traceability lie). This module neither fails open nor closed — it reports.
   """
   @spec token(String.t() | nil) :: String.t() | nil
   def token(role) when is_binary(role) do
     # `role` is interpolated into a path (`<dir>/<role>.gitea_token`) → validated via the slug
-    # smart-constructor (SINGLE source of the path-safe charset; a malformed `role` is ignored, system-token fallback).
+    # smart-constructor (SINGLE source of the path-safe charset; a malformed `role` returns nil — caller fail-closes via RoleIdentity).
     if Fleet.Slug.valid?(role) do
       path = Path.join(dir(), "#{role}.gitea_token")
 
@@ -48,8 +47,8 @@ defmodule Fleet.Credentials.RoleToken do
           case String.trim(content) do
             "" ->
               Logger.warning(
-                "RoleToken: role token #{inspect(role)} empty (#{path}) → fallback to system " <>
-                  "token (review/commit posted under the system account)"
+                "RoleToken: role token #{inspect(role)} empty (#{path}) → unavailable " <>
+                  "(caller policy in RoleIdentity: fail-closed, no system-account fallback)"
               )
 
               nil
@@ -61,8 +60,8 @@ defmodule Fleet.Credentials.RoleToken do
         {:error, reason} ->
           Logger.warning(
             "RoleToken: role token #{inspect(role)} absent/unreadable (#{path} : " <>
-              "#{inspect(reason)}) → fallback to system token (review/commit posted under the " <>
-              "system account)"
+              "#{inspect(reason)}) → unavailable (caller policy in RoleIdentity: fail-closed, " <>
+              "no system-account fallback)"
           )
 
           nil

@@ -74,7 +74,7 @@ defmodule Fleet.Pilot.ForgeClientTest do
       assert {:ok, 145} = ForgeClient.repo_id("fleet/lcars", opts(h))
     end
 
-    test "repo inexistant (404) → {:error, _} (l'appelant retombe sur un UUID random)" do
+    test "repo inexistant (404) → {:error, _} (l'appelant ne pose pas de :repo_id — mint fail-loud)" do
       h = %{{"GET", "/api/v1/repos/fleet/ghost"} => {404, %{}}}
       assert {:error, _} = ForgeClient.repo_id("fleet/ghost", opts(h))
     end

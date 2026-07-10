@@ -6,10 +6,12 @@ defmodule Fleet.Event do
   3-arity `{atom, map}` shim — "subscribe to `fleet.events`" therefore guarantees a single shape,
   not a tuple to un-wrap on the consumer side.
 
-  The `source` is a **closed enum** (the `source()` type below). Extending it = amend this list AND
-  add the matching entry in `events.yaml` (otherwise the event leaves the registry). This membership
-  is no longer merely documented: `new/3` (the canonical constructor) **enforces** it at construction
-  — an out-of-enum source raises, the invalid event is never represented.
+  The `source` is a **closed enum** (the `source()` type below), defined and enforced HERE only:
+  `new/3` (the canonical constructor) raises on an out-of-enum source, so the invalid event is never
+  represented. `events.yaml` is a SEPARATE authority — it registers event *types* (`<...>.<...>`
+  keys, validated on `event.type` by `Bus.broadcast/2`), NOT sources; there is no source registry in
+  `events.yaml`. A new producer must satisfy BOTH independently: (1) its `source` ∈ this enum, and
+  (2) each `event.type` it emits has a key in `events.yaml`.
 
   Constructing an event = `Fleet.Event.new(source, type, opts)` ("parse, don't validate"). It is the
   sole construction point for producers: it guarantees `source ∈ enum` and `timestamp` = `%DateTime{}`.
@@ -47,7 +49,7 @@ defmodule Fleet.Event do
   @enforce_keys [:source, :type, :timestamp]
   defstruct [:source, :type, :timestamp, :pod_id, :correlation_id, payload: %{}]
 
-  # Closed enum of sources. Extend = amend this list + the matching events.yaml entry.
+  # Closed enum of sources — the SOLE authority for `source`. (events.yaml registers event *types*, not sources.)
   @canonical_sources ~w(spawner task_queue mcp coord workflow starfleet event_router credentials capprofile spbuilder doctrine api)a
 
   @doc "The canonical sources (closed enum)."

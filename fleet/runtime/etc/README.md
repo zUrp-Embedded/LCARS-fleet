@@ -1,7 +1,7 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
 **Date** : 2026-05-10
-**Dernière révision** : 2026-07-05
+**Dernière révision** : 2026-07-11
 **Statut** : modèle humain-lance (systemd retiré 2026-06-16)
 **Référencé par** : `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -54,8 +54,7 @@ bash test/integration/host_launch_test.sh
 
 bash test/integration/sandbox_notrace_test.sh
 # F094 : invariant no-trace de bwrap_launch.sh vs bwrap RÉEL — arbo runtime LCARS host invisible,
-# /home tmpfs, HOME=pod_dir. 12 checks, exit 0. Nécessite bwrap+userns+tmux.
-# ⚠ FINDING : /etc/fleet (secrets) visible dans le pod (--ro-bind /etc) — BL-046.
+# /home tmpfs, HOME=pod_dir, /etc SÉLECTIF (/etc/fleet ABSENT du pod). Nécessite bwrap+userns+tmux.
 ```
 
 *(`test/integration/boot_test.sh` testait le hardening/readiness systemd — obsolète avec le retrait,

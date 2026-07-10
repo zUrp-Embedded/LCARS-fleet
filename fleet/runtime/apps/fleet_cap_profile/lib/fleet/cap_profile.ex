@@ -14,8 +14,10 @@ defmodule Fleet.CapProfile do
       `lifetime_scope/2`, `deliverable_mode/2`, `brief_kind/2`, …) — each the
       sole reader of its field, so cross-app callers never re-derive it.
 
-  Schema is pinned to `apiVersion: lcars/v2.5`. Every profile is matched
-  against `priv/schema/cap-profile-v2.5.json` at load time. Modops are
+  The schema version (LCARS v2.5) is pinned by the code / the bundled schema file path
+  (`priv/schema/cap-profile-v2.5.json`), NOT by an embedded `apiVersion` field (that field was
+  removed — R0.8-brick3). Every profile is matched against `priv/schema/cap-profile-v2.5.json`
+  at load time. Modops are
   matched against `priv/schema/modop-profile.json` (strict — reserved
   keys forbidden, so a modop cannot override the base profile's
   containment/name/kind).
@@ -89,6 +91,8 @@ defmodule Fleet.CapProfile do
   ## Exit codes
     * `{:ok, %Fleet.CapProfile{}}` — load + STRUCTURAL validation OK (G24 invariants checked at spawn)
     * `{:error, :not_found}` — no profile carries this name
+    * `{:error, :catalogue_missing}` — the catalogue root directory is absent (broken config,
+      distinct from a role that is simply not found — propagated from `Catalog.read_role/1`)
     * `{:error, :invalid_schema}` — malformed YAML OR schema-nonconformant
     * `{:error, :schema_unavailable}` — the priv schema file is absent or corrupt
   """
@@ -110,6 +114,8 @@ defmodule Fleet.CapProfile do
   ## Exit codes
     * `{:ok, %Fleet.CapProfile{}}` — composition OK
     * `{:error, :not_found}` — base role absent
+    * `{:error, :catalogue_missing}` — the catalogue root directory is absent (broken config,
+      distinct from a role that is simply not found — propagated from `Catalog.read_role/1`)
     * `{:error, :modop_not_found}` — at least one named modop is absent
       (the missing modop name is logged via `Logger.warning/1`)
     * `{:error, :invalid_schema}` — base or post-merge result nonconformant

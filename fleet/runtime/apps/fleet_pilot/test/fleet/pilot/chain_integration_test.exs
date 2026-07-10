@@ -69,7 +69,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
       {:ok, :set}
     end
 
-    # comment sur l'issue (route) ; sur une PR (lock comment du juge) -> ignore (osef pour le test).
+    # comment sur l'issue ; sur une PR (lock comment du juge) -> ignore (osef pour le test).
     def post_comment(pid, _r, n, body, _o) do
       unless pr?(pid, n) do
         upd_issue(pid, fn i -> Map.put(i, "comments", (i["comments"] || []) ++ [body]) end)
@@ -406,9 +406,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   test "chaine engineer-first PR-driven : build(engineer) ouvre PR -> review(reviewer) -> merge close" do
     pid = new_issue()
 
-    # 1. ENTREE : #8 cohérence — le routing vit dans la ROUTE-COMMENT (gravée par create_issue). Ici on
-    #    la grave directement (workflow_map poc-mini, 1er step build). L'assignee reste l'HUMAIN (jamais touché ;
-    #    le rôle du step est dérivé de la route au dispatch via workflow_map_role). Plus de routing par label.
+    # 1. ENTREE : #8 cohérence — le routing vit dans les LABELS scopés (wfmap/<map> + stage/<step>, posés
+    #    par create_issue). Ici on les pose directement (workflow_map poc-mini, 1er step build). L'assignee reste
+    #    l'HUMAIN (jamais touché ; le rôle du step est dérivé de la route au dispatch via workflow_map_role).
     SimForge.post_route("o/r", 1, "poc-mini", "build", [])
     assert {:ok, {"poc-mini", "build"}} = SimForge.get_route("o/r", 1, [])
     assert [%{"login" => "human"}] = Sim.get(pid)["assignees"]
@@ -456,7 +456,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
   defp drive_to_review do
     pid = new_issue()
 
-    # Route gravée directement (workflow_map gkchain, 1er step build) — comme create_issue (route-comment).
+    # Route posée directement via labels wfmap/stage (workflow_map gkchain, 1er step build) — comme create_issue.
     SimForge.post_route("o/r", 1, "gkchain", "build", [])
 
     assert {:ok, {:spawned, _, "engineer"}} =

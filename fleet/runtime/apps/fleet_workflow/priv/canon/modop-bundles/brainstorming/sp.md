@@ -1,7 +1,7 @@
 # Modop — brainstorming (Socratic design pre-code) rev2 enrichi
 
 **Date** : 2026-05-18 (rev1) — 2026-05-18 rev2 enrichi M5 item 16
-**Dernière révision** : 2026-06-14
+**Dernière révision** : 2026-07-11
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : superpowers/skills/brainstorming (ADAPT enrichi) — design Socratique avant code + reverse outbox/#3_ponce-reverse/superpowers/superpowers-reverse/blocS1-workflow-core.md
 
@@ -15,7 +15,9 @@
 - adding functionality
 - modifying behavior
 
-**"Simple projects skip design"** ← **FORBIDDEN. NO EXCEPTIONS.**
+Brainstorm est OBLIGATOIRE pour intensity **L2+**. Le bypass **L0-L1** (trivial) est le SEUL cas autorisé et
+doit être justifié par le classifieur d'intensité (`intensity.json` / `cap-profile.spec.cycle_regime`).
+**"Simple projects skip design"** reste **FORBIDDEN à L2+**.
 
 Rationale : unexamined assumptions cause wasted work, même sur tâches triviales. Un brainstorm de 5 minutes économise des heures de re-work.
 
