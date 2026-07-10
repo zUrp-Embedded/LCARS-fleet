@@ -1,0 +1,27 @@
+# META-DÉBRIEF — chaque dérive évitée → règle datée
+
+**Date** : 2026-07-10
+**Dernière révision** : 2026-07-10
+**Statut** : actif (append-only, garde le protocole vivant)
+**Référencé par** : `PLAYBOOK.md`
+
+> Seed 3 de l'amorce : une règle que J'ÉCRIS depuis la friction se déclenche au point de décision ; une
+> règle reçue non. Ici chaque quasi-raccourci, correction, ou rattrapage devient une règle datée, à moi.
+
+## Règles amorcées (portées depuis cette session — déjà éprouvées, pas reçues)
+
+- **R-01 (2026-07-10)** — *Vérifier le vérificateur.* Le rapport ment aussi sur OÙ va le fix. Preuve vécue :
+  amnésie WAL — l'agent situait le fix dans `read_wal`, mais `decode/1` avalait déjà l'erreur Jason en `%{}`
+  → la branche proposée aurait été **du code mort**. Lire le vrai chemin de données, pas la ligne pointée.
+- **R-02 (2026-07-10)** — *Un candidat « mort » est souvent porteur.* `:jose` (0 usage lib) = transitif
+  obligatoire d'ex_mcp ; `finch` = pool de Req. Grep-négatif ≠ mort. Vérifier la voie dynamique (config, capture, MFA, transitif).
+- **R-03 (2026-07-10)** — *Le préfetch OK vs le cache KO.* Réutiliser UNE lecture dans une fenêtre
+  verrouillée = bon dédup. Un cache-à-travers-le-temps avec TTL = soft-default déguisé (staleness = mensonge). Refuser.
+- **R-04 (2026-07-10)** — *L'outbox est un 2e SSOT.* Ne pas prescrire d'outbox pour un event lifecycle dont
+  la forge possède déjà le fait ; identifier la preuve forge manquante, pas ajouter un store durable concurrent.
+- **R-05 (2026-07-10)** — *Ne pas inférer la couverture d'un grep.* Un fichier n'est couvert que quand son
+  état de vérif change avec citations. (Discipline ledger de Codex, adoptée.)
+
+## Débriefs de session (à remplir depuis la friction réelle)
+
+- (rien encore — j'ajoute au premier quasi-raccourci / correction / rattrapage)
