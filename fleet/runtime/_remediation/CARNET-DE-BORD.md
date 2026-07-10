@@ -43,14 +43,14 @@
 |---|---|
 | findings totaux | 167 |
 | vérifiés (1er + 2e passage) | 167 / 167 |
-| **PERCE** (verify_verdict) | **15** (4 FIXÉ + 11 ouverts : 9 CLEAN-FIX + F-C075/076 à re-vérif) |
+| **PERCE** (verify_verdict) | **15** (9 FIXÉ + 6 ouverts : F-C031/035/037/086 + F-C075/076 à re-vérif) |
 | PERCE-doc | 25 |
-| **DOCTRINE** (→ user) | **85** (7 clusters D1-D7 + 7 ajouts pass-2, voir DECISION-BRIEF.md) |
+| **DOCTRINE** (→ user) | **85** (7 clusters D1-D7 + 7 ajouts pass-2 + F-C059-b, voir DECISION-BRIEF.md) |
 | THEORIQUE (WONTFIX) | 41 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **6** (F-C166, F-C160, F-C097, F-C098, F-C059, **F-C069**) |
-| constructeurs de frontière posés | 3 (`boot_enabled?/2`, `encode_line/1`, `safe_pod_info` :unknown) |
-| règles méta posées | R-01 → R-09 |
+| **fixés (commit)** | **9** (F-C166/160/097/098/059/069/119/018/044) |
+| verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
+| règles méta posées | R-01 → R-10 |
 
 ## Crons (session-only — MEURENT au crash de session → RÉ-ARMER EN PREMIER si reprise)
 
