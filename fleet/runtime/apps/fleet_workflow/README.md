@@ -1,5 +1,10 @@
 # fleet_workflow
 
+**Date** : 2026-07-11
+**Dernière révision** : 2026-07-11
+**Statut** : actif — carte du module (les contrats vivent dans les `@moduledoc`)
+**Référencé par** : —
+
 workflow_map / gate / delivery lib (Ring 2, near-pure): parse+validate workflow-map
 YAML, evaluate gates, publish deliverables. No RAM engine — the supervisor is empty
 (orchestration lives on the forge-driven rail); trends toward lib-only.
@@ -21,7 +26,7 @@ is restated, only pointed at.
 - `Fleet.Workflow.Deliverable` — unified publication of a pod deliverable (`:payload` / `:git_native`)
 - `Fleet.Workflow.PayloadGuard` — `apply_files/2`: fail-closed placement + security-validation of an untrusted file payload
 - `Fleet.Workflow.DeliverableGate` — `verify/4`: mechanical world-side gate (base ancestor, identity, secrets) before push
-- `Fleet.Workflow.GitRef` — `valid?/1`: single authority for git branch/ref name validation
+- `Fleet.GitRef` — `valid?/1`: single authority for git branch/ref name validation (Ring 0 utility hosted by `fleet_cap_profile`)
 - `Fleet.Workflow.Git` — system-side git publication mechanism (add → commit → [push]), fail-closed
 
 ## Config & deps

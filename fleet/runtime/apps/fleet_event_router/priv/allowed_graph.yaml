@@ -10,7 +10,7 @@
 # tant qu'elle n'est pas re-declaree ici (force la conscience d'un changement de topologie).
 #
 # Aligne 2026-07-04 sur le graphe compile reel (post-rename fleet_workflow, post-suppression
-# fleet_task_monitor, renumerotation D4). Verifie : les 37 aretes compile sont TOUTES descendantes ou
+# fleet_task_monitor, renumerotation D4). Verifie : les 38 aretes compile sont TOUTES descendantes ou
 # intra-ring (zero montante) — d'ou zero exception cote `edges`. Les seams montants sont DYNAMIQUES.
 
 rings:

@@ -1,7 +1,7 @@
 # DESIGN — Observabilité du core LCARS Fleet (`fleet_observation`)
 
 **Date** : 2026-06-10
-**Dernière révision** : 2026-07-01
+**Dernière révision** : 2026-07-11
 **Statut** : design note exploratoire (incrément A — la base de travail). Mode exploration : pas de mauvaise réponse, on teste.
 **Référencé par** : `apps/fleet_observation/README.md` (à venir, incrément B)
 **Auteur** : agent de correction (suite de mission post-remédiation Z0→Z7)
@@ -120,7 +120,7 @@ TOUT ce qui est observable, on triera l'affichage après — un manque tu, c'est
 | **Readiness deep** | le jumeau runtime de `contracts.check` (anti-vert-creux) | `Fleet.API.Readiness.deep/0` |
 | Quiescence | shutdown en cours de drain ? (`:quiescing`) | `Fleet.Shutdown.Quiesce` |
 | Boot | orchestrateur, pods permanents bootés, root-boot-guard | events boot |
-| API | endpoints REST, connexions WS, auth HMAC | `fleet_api` |
+| API | endpoints REST, connexions WS, no-auth by design (isolation réseau) + écritures gardées (POST /api/admin/spawn) | `fleet_api` |
 | `not_wired_yet` | modules présents mais non câblés | introspection config |
 | Quota OAUTH / rate-limit | 5h / weekly usage (angle :8090, BL-016) | (source à câbler — flag) |
 
