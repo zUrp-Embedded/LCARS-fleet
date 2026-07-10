@@ -1,8 +1,8 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-11 ~00h10 (relevé horaire · code-fix TERMINÉ · phase 5 doc en vérif)
-**Statut** : PHASES 1/2/4 CLOSES (code-fix terminé) · reste PHASE 5 (doc-batch) + triage DOCTRINE user
+**Dernière révision** : 2026-07-11 ~00h30 (JALON : remédiation MÉCANIQUE complète — 12 code + 22 doc)
+**Statut** : PHASES 1-5 CODE+DOC CLOSES · reste = DÉCISIONS USER (87 doctrine + 5 doc-forks) + cleanup crons
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `META-DEBRIEF.md`
@@ -21,16 +21,17 @@
 
 ## Prochaine action précise
 
-**CODE-FIX TERMINÉ (12 fixés, 0 PERCE ouvert).** Deux chantiers restants :
-1. **PHASE 5 — batch PERCE-doc (25) — EN COURS** : **3 workers vérif en vol** (a985b007, ac3977d7, ae1dd821 —
-   lancés ~00h15) confirment stale + rédigent la correction (CONFIRM-STALE / NOT-STALE / CODE-ISSUE). Dès rendus →
-   j'applique les CONFIRM-STALE en batch, je vérifie moi-même les CODE-ISSUE (tests). ⚠️ ne PAS fixer à l'aveugle.
-2. **TRIAGE DOCTRINE (87 findings)** : `DECISION-BRIEF.md` (7 clusters D1-D7 + ajouts pass-2/2b), prêt à décider.
-   C'est le GROS du chantier restant → **attend l'user**.
+**REMÉDIATION MÉCANIQUE COMPLÈTE (12 code + 22 doc, gate vert).** Il ne reste que des DÉCISIONS USER + cleanup :
+1. **TRIAGE DOCTRINE (87 findings)** : `DECISION-BRIEF.md` (7 clusters D1-D7 + ajouts pass-2/2b + F-C151/F-C059-b),
+   prêt à décider, ma reco par cluster. **C'est le GROS du reste → attend l'user.**
+2. **5 doc-forks (→ user, petits)** : F-C006 (test conformance fausse-couverture : renommer vs vrai test apiVersion-inconnu),
+   F-C132-test + F-C137-test (tests intégration SHELL asserte un contrat retiré — hors gate mix, réécriture),
+   F-C151 (canon dual-review live vs sp_drafts → D3), F-C087 (dates hardcodées scaffold → mini seam horloge, cosmétique).
 3. **CLEANUP fin** : `CronDelete a73c2099 b1dc7bc3`.
 
-**12 FIXÉS (TDD, committés)** : F-C166, F-C160, F-C097, F-C098, F-C059, F-C069, F-C119, F-C018, F-C044, F-C035, F-C037, F-C086.
-**Reclassés à la re-vérif** : F-C031→theo (plugin non-exercé), F-C075/076→doctrine (escalade a lieu, fix=fork).
+**12 CODE-FIXÉS (TDD)** : F-C166/160/097/098/059/069/119/018/044/035/037/086.
+**22 DOC-FIXÉS** : F-C002/003/004/008/009/012/014/017/067/070/071/072/088/090/128/131/134/148/158/162 (+ F-C132/137 part-doc).
+**Reclassés re-vérif** : F-C031→theo · F-C075/076→doctrine · (voir Reclassements ↓).
 
 ## Reclassements (verify-the-verifier + consequence-check R-09)
 
@@ -45,12 +46,12 @@
 |---|---|
 | findings totaux | 167 |
 | vérifiés (1er + 2e passage) | 167 / 167 |
-| **PERCE** (verify_verdict) | **12** (TOUS FIXÉS ✅ — 0 ouvert) |
-| PERCE-doc | 25 (phase 5 EN COURS — 3 workers vérif) |
-| **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C059-b, voir DECISION-BRIEF.md) |
+| **PERCE** (verify_verdict) | **12** (TOUS FIXÉS ✅) |
+| **PERCE-doc** | 25 (**22 FIXÉS** ✅ + 3 décisions : F-C006/087/151) |
+| **DOCTRINE** (→ user) | **87** (7 clusters D1-D7 + ajouts pass-2/2b + F-C151 + F-C059-b, voir DECISION-BRIEF.md) |
 | THEORIQUE (WONTFIX) | 42 |
 | DEJA-FIXE | 1 |
-| **fixés (commit)** | **12** (166/160/097/098/059/069/119/018/044/035/037/086) |
+| **fixés (commit)** | **34** (12 code + 22 doc) |
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
 | règles méta posées | R-01 → R-12 |
 
