@@ -151,19 +151,23 @@ defmodule Fleet.API.Readiness do
     # which the spawner also calls at spawn) instead of re-copying the `LauncherPortBackend` default here.
     # Consequence: on a healthy fleet where the key isn't set, readiness reads the SAME default as
     # what actually launches the pods → no phantom permanent `:degraded`, no default to align.
-    backend = Fleet.Spawner.LaunchBackend.resolved()
+    # F-C041 — the CONFORMING resolver also flags a module that does not export `launch/2` as
+    # `:degraded` (nil / typo'd module) instead of a hollow-green `:operational`: such a backend would
+    # crash the pod at launch, so readiness must NOT report it healthy.
+    case Fleet.Spawner.LaunchBackend.resolved_conforming() do
+      {:error, {:launch_backend_misconfigured, mod}} ->
+        probe("launch.backend", :degraded, %{
+          backend: inspect(mod),
+          note: "misconfigured — nil or no launch/2 (would crash the pod at launch)"
+        })
 
-    cond do
-      is_nil(backend) ->
-        probe("launch.backend", :degraded, %{backend: "nil", note: "not configured"})
-
-      backend == Fleet.Spawner.LaunchBackend.StubBackend ->
+      {:ok, Fleet.Spawner.LaunchBackend.StubBackend} ->
         probe("launch.backend", :degraded, %{
           backend: "StubBackend",
           note: "inert backend (test/non-prod) — no real spawn"
         })
 
-      true ->
+      {:ok, backend} ->
         probe("launch.backend", :operational, %{backend: inspect(backend)})
     end
   end

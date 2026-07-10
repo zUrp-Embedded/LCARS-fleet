@@ -758,33 +758,38 @@ defmodule Fleet.Spawner.Pod do
   # ============================================================
 
   defp do_launch_backend(data, args, env) do
-    case Backend.launch_backend().launch(args, env) do
-      {:ok, launched} when is_map(launched) ->
-        # Extract the port (LauncherPortBackend includes it, StubBackend does not). nil-able: a stub test
-        # has no Port → the exit_status clauses never match → legacy behavior preserved.
-        port = Map.get(launched, :port)
+    # F-C041 — conformity guard BEFORE dispatch: a misconfigured `:launch_backend` (typo/absent → no
+    # `launch/2`) would raise `UndefinedFunctionError` HERE and crash the gen_statem WITH NO
+    # transition_failed (orphan task + stale state.json). `launch_backend_conforming/0` folds it to a
+    # typed error → clean pod failure (mirror of the MCP provisioner conformity guard).
+    with {:ok, backend} <- Backend.launch_backend_conforming(),
+         {:ok, launched} when is_map(launched) <- backend.launch(args, env) do
+      # Extract the port (LauncherPortBackend includes it, StubBackend does not). nil-able: a stub test
+      # has no Port → the exit_status clauses never match → legacy behavior preserved.
+      port = Map.get(launched, :port)
 
-        # tmux_session set by LauncherPortBackend (bwrap AND host); nil for StubBackend.
-        tmux_session = Map.get(launched, :tmux_session)
+      # tmux_session set by LauncherPortBackend (bwrap AND host); nil for StubBackend.
+      tmux_session = Map.get(launched, :tmux_session)
 
-        data =
-          data
-          |> Map.put(:port, port)
-          |> Map.put(:tmux_session, tmux_session)
-          # PRE-ALLOCATED session_id (data) — no init_msg capture (the -p model is dead).
-          |> Map.put(:session_id, data.session_id)
-          |> add_condition(:process_launched)
-          |> add_condition(:stream_alive)
+      data =
+        data
+        |> Map.put(:port, port)
+        |> Map.put(:tmux_session, tmux_session)
+        # PRE-ALLOCATED session_id (data) — no init_msg capture (the -p model is dead).
+        |> Map.put(:session_id, data.session_id)
+        |> add_condition(:process_launched)
+        |> add_condition(:stream_alive)
 
-        StateFs.write_state_fs(put_phase(data, :monitoring))
+      StateFs.write_state_fs(put_phase(data, :monitoring))
 
-        # Brief delivery to the long-lived RC pod: PodTmux send-keys on the per-pod sock (universal,
-        # bwrap AND host). Stub path (tests): no-op (no tmux_session returned → kick not armed).
-        # We arm the ack-driven kick loop as a transition ACTION (1st tick = bootstrap "yop").
-        {:next_state, :monitoring, data, brief_kick_actions(data)}
-
-      {:error, reason} ->
-        transition_failed(data, {:launch_failed, reason})
+      # Brief delivery to the long-lived RC pod: PodTmux send-keys on the per-pod sock (universal,
+      # bwrap AND host). Stub path (tests): no-op (no tmux_session returned → kick not armed).
+      # We arm the ack-driven kick loop as a transition ACTION (1st tick = bootstrap "yop").
+      {:next_state, :monitoring, data, brief_kick_actions(data)}
+    else
+      # Guard misconfig `{:launch_backend_misconfigured, _}` OR launch `{:error, _}` → both fail the pod
+      # cleanly via transition_failed (no UndefinedFunctionError crash, no orphaned task).
+      {:error, reason} -> transition_failed(data, {:launch_failed, reason})
     end
   end
 

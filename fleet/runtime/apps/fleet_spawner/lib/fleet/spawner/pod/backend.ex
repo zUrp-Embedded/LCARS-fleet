@@ -148,6 +148,16 @@ defmodule Fleet.Spawner.Pod.Backend do
   def launch_backend, do: Fleet.Spawner.LaunchBackend.resolved()
 
   @doc """
+  Resolved launch backend WITH a conformity guard (F-C041) — `{:ok, mod}` if it exports `launch/2`,
+  else `{:error, {:launch_backend_misconfigured, mod}}`. Used at the dispatch seam (`do_launch_backend`)
+  so a misconfigured backend fails the pod via `transition_failed` instead of an `UndefinedFunctionError`
+  crash. Delegates to the single source `Fleet.Spawner.LaunchBackend.resolved_conforming/0`.
+  """
+  @spec launch_backend_conforming() ::
+          {:ok, module()} | {:error, {:launch_backend_misconfigured, term()}}
+  def launch_backend_conforming, do: Fleet.Spawner.LaunchBackend.resolved_conforming()
+
+  @doc """
   Path of the N0 bwrap launcher (`bwrap_launch.sh` — sandbox, default containment). Config
   `:fleet_spawner, :bwrap_launch_path`, default canonical install `/usr/local/bin/`.
   """

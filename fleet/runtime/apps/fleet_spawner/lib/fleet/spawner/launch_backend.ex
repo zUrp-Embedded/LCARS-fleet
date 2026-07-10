@@ -64,4 +64,27 @@ defmodule Fleet.Spawner.LaunchBackend do
   def resolved do
     Application.get_env(:fleet_spawner, :launch_backend, @default_backend)
   end
+
+  @doc """
+  `resolved/0` GUARDED (F-C041) — verifies the backend module exports `launch/2` BEFORE it is
+  dispatched. A typo'd/absent/`nil` module → `{:error, {:launch_backend_misconfigured, mod}}` (a CLEAR
+  deploy-error the caller folds onto `transition_failed`), instead of an `UndefinedFunctionError` raised
+  deep in `:launching` that crashes the pod gen_statem WITH NO transition (orphan task + stale state.json).
+  `resolved/0` stays a bare-module accessor (Readiness + the MCP path consume it as such) — the conformity
+  guard lives HERE, at the dispatch seam. Mirror of `Pod.McpProvision`'s `conforming_provisioner`.
+  """
+  @spec resolved_conforming() ::
+          {:ok, module()} | {:error, {:launch_backend_misconfigured, term()}}
+  def resolved_conforming do
+    mod = resolved()
+
+    # Side-effect only (trigger load); the real check is `function_exported?` below → discard explicitly.
+    _ = Code.ensure_loaded(mod)
+
+    if is_atom(mod) and function_exported?(mod, :launch, 2) do
+      {:ok, mod}
+    else
+      {:error, {:launch_backend_misconfigured, mod}}
+    end
+  end
 end
