@@ -112,3 +112,8 @@
 - **Bougé cette heure** : 5 CLEAN-FIX livrés en continu (F-C059 pipe-DEFER, F-C069 reviews fail-loud, F-C119 admission issue_id, F-C018 strip_control(role), F-C044 emit spawn.failed). Chacun verify-moi + TDD + non-régression suite complète + commit.
 - **Dérive attrapée** : (1) j'avais traité le watchdog comme un CADENCEUR (« 1 fix puis j'attends le tick ») — le user a corrigé : c'est un HOMME-MORT (réveil si bloqué), on bosse en continu → mémoire posée [[watchdog-is-deadman-not-pacer]] + je ne finis plus un tour par « j'attends ». (2) F-C119 : une nouvelle forme de retour `{:invalid_issue_id}` a percuté `do_admin_spawn` sans catch-all → CaseClauseError → règle R-10.
 - **Décision en attente user** : 85 findings DOCTRINE (`DECISION-BRIEF.md`, 7 clusters + 7 ajouts pass-2 + F-C059-b contrat pod_info). Non-bloquant pour la shortlist en cours.
+
+### F-C035 FIXÉ — brief slot :unknown → fail-closed (plus de pod idle)
+- Vérifié moi-même : :unknown → :ok laissait un pod admin.spawn idle sans brief (seul enqueue, pas de réconciliation). Fail-closed {:error} → with :projecting échoue avant launch → retry. R-10 appliqué : else du with générique ({:error,reason}→transition_failed) → safe.
+- Couture enqueue_by_slot/3 extraite (test :unknown sans TaskQueue down). TDD 2-phases RED→GREEN, fleet_spawner 217/0.
+- Prochain : F-C037 (JUMEAU — result_deadline 3-state ; touche le gen_statem pod.ex, à faire à tête reposée).

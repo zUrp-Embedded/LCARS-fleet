@@ -33,7 +33,7 @@ F-C031,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/launch_spec.ex:
 F-C032,hygiene,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/launch_spec.ex:165,THEORIQUE,unassigned,"LaunchSpec keeps schema-bypassed invalid modes launchable by falling back to safe defaults"
 F-C033,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/scaffold.ex:94,DOCTRINE,unassigned,"Project pods can launch without `CLAUDE.md` in the workspace when the load-bearing copy fails"
 F-C034,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/launch_env.ex:60,DOCTRINE,unassigned,"`:claude_dir` override bypasses the per-human credential resolution while the module claims per-human by construction"
-F-C035,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/brief.ex:80,PERCE,unassigned,"Admin-spawn briefs are dropped when the broker cannot be probed, but the pod still launches"
+F-C035,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/brief.ex:80,PERCE,FIXÉ,"Admin-spawn briefs are dropped when the broker cannot be probed, but the pod still launches"
 F-C036,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/mcp_provision.ex:118,DOCTRINE,unassigned,"`mcp_server_spec` is only checked for nil/map and then used as an unvalidated config object"
 F-C037,high,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/task_probe.ex:51,PERCE,unassigned,"A TaskQueue hiccup at `:result_deadline` can consume the response timeout without failing the pod"
 F-C038,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/state_fs.ex:9,DOCTRINE,unassigned,"`state.json` write failure loses the durable recovery point but is always non-fatal"
