@@ -27,3 +27,10 @@
 - **PERCE code → 6 familles** : F gates(5) · C ingress-parse(10) · B config-parse(6) · D identité(4) · E schéma(2) · A fail-closed(22). Le « constructeur » (B/C/D/E ~22) = ~5-6 smart-ctors ; A ~22 edits fail-closed (pattern intégrité prouvé).
 - **DOCTRINE → 7 clusters** (D1 fiabilité-events · D2 stubs-MVP · D3 canon-legacy · D4 config-boot · D5 tolérances · D6 SSOT-cross-surface · D7 outillage) — checkpoint user.
 - **Aucun code touché.** → attente GO phase 1 + steer triage doctrine.
+
+### Phase 1 — hollow-gates (en cours)
+- **F-C166 FIXÉ** (`2d6cee826`) : gate-r0.1-bwrap sentinelle host déterministe → fin du faux-vert ISO. bash -n OK (gate complet non-runnable ici : bwrap/vendor absents).
+- **F-C167 → doctrine-tail (flag user, D7)** : re-vérif → `05_data-canon` encore référencé dans 5 tests → le gate câblé ÉCHOUERAIT. Fix = re-câbler / supprimer le scaffold / marquer = choix de design sur un gate CI. Non touché.
+- **F-C165 → doctrine-tail (flag user, D6)** : la bonne liste = rôles `needs_role_token`, pas swap vulcan→starfleet. Non touché.
+- **F-C164** : à re-vérifier (install.sh copie-list) — probablement propre. **F-C160** : couverture test brief-gate (Elixir) — avec les tests.
+- Règles R-06/R-07 ajoutées au méta-débrief (re-vérif = 2 mis-fixes évités ; hollow-green masque un vrai rouge).

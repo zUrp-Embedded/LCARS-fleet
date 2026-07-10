@@ -22,6 +22,15 @@
 - **R-05 (2026-07-10)** — *Ne pas inférer la couverture d'un grep.* Un fichier n'est couvert que quand son
   état de vérif change avec citations. (Discipline ledger de Codex, adoptée.)
 
-## Débriefs de session (à remplir depuis la friction réelle)
+## Débriefs de session (depuis la friction réelle)
 
-- (rien encore — j'ajoute au premier quasi-raccourci / correction / rattrapage)
+- **R-06 (2026-07-10)** — *Vérifier DEUX choses, pas une : (1) la brèche est-elle réelle ? (2) le FIX est-il
+  mécanique ou un choix de design ?* En re-vérifiant les hollow-gates « clairs » de la phase 1, deux ont
+  révélé un **fork doctrine dans leur fix** : F-C167 (le gate `05_data-canon` est vide-mais-l'invariant est
+  en fait VIOLÉ dans 5 tests → re-câbler tout / supprimer le scaffold obsolète / marquer non-câblé = choix),
+  F-C165 (la bonne liste de rôles = ceux qui ont `needs_role_token`, pas un swap vulcan→starfleet). J'ai
+  failli les fixer unilatéralement. **Règle : un gate CI / une liste déployée dont le fix a plusieurs formes
+  valides = doctrine, je flag.** Corollaire : « PERCE » (brèche réelle) ≠ « fix mécanique ».
+- **R-07 (2026-07-10)** — *Le hollow-green cache parfois une VRAIE violation.* F-C167 : le gate ne checkait
+  rien ET l'invariant qu'il prétend tenir (0 ref `05_data-canon` en test) est **violé** (5 fichiers). Le
+  faux-vert masquait le vrai rouge. Toujours vérifier ce que le gate DEVRAIT trouver s'il tournait.
