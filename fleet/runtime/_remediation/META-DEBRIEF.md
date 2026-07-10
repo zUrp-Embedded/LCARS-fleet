@@ -70,3 +70,11 @@
   une chaîne partagée. Vécu : `arch_escalation_test refute =~ "NOT added"` flaky car `IncidentRegistry.Escalation`
   émet aussi « NOT added » et bave sous charge concurrente. Fix : token arch-unique `ArchEscalation:`. Corollaire :
   faire tourner le gate `mix test` COMPLET (pas app-par-app) révèle les flaky de bleed que les runs isolés cachent.
+
+- **R-13 (2026-07-11)** — *À la frontière de l'autonome, la prep FACTUELLE bornée avance le chantier ; la
+  RE-ANALYSE spéculative d'un travail décision-driven que le user possède = churn déguisé en productivité.*
+  Vécu : mécanique 100% close → j'ai fait un preview D7 (Credo/Sobelow/F-C167 = data TOOL factuelle, utile
+  quel que soit le choix user) MAIS j'ai STOPPÉ avant de « préviewer » D1-D6 (best-effort-vs-load-bearing,
+  garder-vs-resserrer, direction-SSOT = JUGEMENT, pas data). Re-analyser ça aurait été décider à la place du
+  user + du churn pour ne pas idler. Corollaire du débrief best-effort/flemme : **le churn est l'AUTRE face de
+  la paresse** (s'acharner sur du non-sujet pour éviter le vrai). La décision user EST le gate — on s'arrête là.

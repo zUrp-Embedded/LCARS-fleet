@@ -163,3 +163,11 @@
 - **Sobelow (F-C026)** : « not a Phoenix application » → scanner Phoenix (XSS/CSRF/Ecto), peu applicable au runtime non-Phoenix. → reco : hors-gate OK (ou per-app fleet_api si besoin). Low-value.
 - **F-C167 (le vrai « garde qui ment »)** : le gate `gate-r0.8-canon.sh` A un check (`grep 05_data-canon` dans test/ + suite verte), mais **9 fichiers réfèrent encore `05_data-canon`** — QUASI TOUS des commentaires/descriptions du VIEUX path : permanent_boot.ex:199 (commentaire), intensity-v1.json + coord-policies-v1.json (`description` de schéma ; coord déjà = « ancien chemin doctrine » intentionnel post-F-C158), + 5 fichiers test + le gate lui-même. → **Le « violé » est du stale-doc**, pas une brèche fonctionnelle (aucun READ live cassé). FORK D7 : (a) nettoyer les ~7 refs-doc non-intentionnelles (doc-fix, low-risk) PUIS faire tourner/enforcer le gate à 0-ref ; (b) accepter les refs historiques et relâcher/retirer le gate. Ma reco : (a) — nettoyer (c'est du PERCE-doc) + gate qui enforce. Reste : Dialyzer (scope, PLT lent) + exclusions test (F-C121/122/123/127/129).
 - D7 est désormais PREVIEWED (Credo/Sobelow/F-C167). Prêt pour ta décision.
+
+---
+## RELEVÉ DE POSTE — 2026-07-11 ~01h30
+- **Phase** : 5 CLOSE (remédiation mécanique 100%). Transition → phase DOCTRINE (user-driven).
+- **Compteurs** : 167/167 vérifiés · PERCE 12 (**TOUS FIXÉS**) · PERCE-doc 25 (22 FIXÉS + 3 décisions) · DOCTRINE 87 · THEORIQUE 42 · DEJA-FIXE 1. **35 fixes livrés (13 code + 22 doc)**, gate vert. Règles R-01→R-13.
+- **Bougé cette heure** : F-C087 fixé (dernier item mécanique, seam :today) → **remédiation mécanique COMPLÈTE**. Preview D7 (Credo=laisser, Sobelow=hors-gate, F-C167=nettoyer+enforcer). User en échange doctrine : « c'est quoi à trancher ? », guidelines/invariants du projet, position best-effort/flemme — j'ai articulé la doctrine (mensonge-du-code interdit / différer honnêtement OK / best-effort légitime si documenté+observable+backstop-forge).
+- **Dérive attrapée** : failli continuer à « préviewer » D1-D6 (décision-driven) après D7 → churn déguisé → STOP. Règle R-13 (l'anti-churn = l'autre face de la flemme).
+- **Décision en attente user** : 87 doctrine (7 clusters, DECISION-BRIEF prêt) + 4 doc-forks. Le user sonde les principes = l'étape en cours.

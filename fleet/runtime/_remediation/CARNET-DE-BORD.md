@@ -1,7 +1,7 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-11 ~00h30 (JALON : remédiation MÉCANIQUE complète — 12 code + 22 doc)
+**Dernière révision** : 2026-07-11 ~01h30 (relevé horaire · mécanique 100% close · D7 previewé · attente décisions user)
 **Statut** : PHASES 1-5 CODE+DOC CLOSES · reste = DÉCISIONS USER (87 doctrine + 5 doc-forks) + cleanup crons
 **Référencé par** : `PLAYBOOK.md`
 
@@ -53,7 +53,7 @@
 | DEJA-FIXE | 1 |
 | **fixés (commit)** | **34** (12 code + 22 doc) |
 | verrous posés | `boot_enabled?/2`, `encode_line/1` fail-safe, `safe_pod_info` :unknown, jury `:unexpected_review_shape`, `validate_issue_id`, `strip_control(role)`, `emit_spawn_failed` sur {:error} |
-| règles méta posées | R-01 → R-12 |
+| règles méta posées | R-01 → R-13 |
 
 ## Crons (session-only — MEURENT au crash de session → RÉ-ARMER EN PREMIER si reprise)
 
