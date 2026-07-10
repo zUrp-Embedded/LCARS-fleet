@@ -22,6 +22,12 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     def spawn_pod(_cap_profile, _issue_id, _opts), do: raise("boom spawn (test E-04)")
   end
 
+  # F-C044 — spawn_pod retourne {:error, _} (PAS un raise) → exerce la branche ordinaire {:error} de
+  # `handle_spawn_request` (celle qui ne loggait qu'un warning, sans `spawn.failed`).
+  defmodule ErrorOnSpawnSpawner do
+    def spawn_pod(_cap_profile, _issue_id, _opts), do: {:error, :no_capacity}
+  end
+
   defp start_consumer(spawner \\ StubSpawner) do
     Process.put(:test_pid, self())
     name = :"pc_#{System.unique_integer([:positive])}"
@@ -91,6 +97,58 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     # Le drop est non-fatal : le consumer reste vivant et a compté l'event.
     assert Process.alive?(pid)
     assert %{count: 1} = :sys.get_state(pid)
+  end
+
+  test "F-C044 : CapProfile.load fail → spawn.failed émis (le drop load n'est plus silencieux)" do
+    # Même exigence que le cas RAISE, mais pour un {:error} ORDINAIRE (name ghost → load KO) : l'admin a
+    # eu son 202, le pod ne naît pas → l'alarme doit sortir sur le Bus (read-model observation), pas juste un log.
+    :ok = Fleet.EventRouter.Bus.subscribe()
+    {pid, _} = start_consumer()
+
+    send(
+      pid,
+      Fleet.Event.new(:api, :"admin.spawn.request",
+        payload: %{"cap_profile_name" => "ghost-role-xyz", "issue_id" => "tk-7"}
+      )
+    )
+
+    assert_receive %Fleet.Event{
+                     source: :spawner,
+                     type: :"spawn.failed",
+                     payload: %{
+                       "cap_profile_name" => "ghost-role-xyz",
+                       "issue_id" => "tk-7",
+                       "reason" => _
+                     }
+                   },
+                   2000
+
+    assert Process.alive?(pid)
+  end
+
+  test "F-C044 : spawn_pod {:error} → spawn.failed émis (202 queued, 0 pod → alarme, pas silence)" do
+    :ok = Fleet.EventRouter.Bus.subscribe()
+    {pid, _} = start_consumer(ErrorOnSpawnSpawner)
+
+    send(
+      pid,
+      Fleet.Event.new(:api, :"admin.spawn.request",
+        payload: %{"cap_profile_name" => "engineer", "issue_id" => "tk-8"}
+      )
+    )
+
+    assert_receive %Fleet.Event{
+                     source: :spawner,
+                     type: :"spawn.failed",
+                     payload: %{
+                       "cap_profile_name" => "engineer",
+                       "issue_id" => "tk-8",
+                       "reason" => _
+                     }
+                   },
+                   2000
+
+    assert Process.alive?(pid)
   end
 
   test "event autre que admin.spawn.request → ignore (alive, pas spawn_called)" do

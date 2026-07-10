@@ -106,12 +106,20 @@ defmodule Fleet.Spawner.PublishConsumer do
                   "PublishConsumer: spawn_pod fail name=#{name} issue=#{issue_id} " <>
                     "reason=#{inspect(reason)}"
                 )
+
+                # F-C044 — the API already answered 202 "queued"; an ordinary `{:error}` (not only a raise)
+                # also DROPS the spawn → emit `spawn.failed` so the drop reaches the read-model observation
+                # the admin queries, not just the server log (same alarm as the rescue path).
+                emit_spawn_failed(payload, {:spawn_pod, reason})
             end
 
           {:error, reason} ->
             Logger.warning(
               "PublishConsumer: CapProfile.load fail name=#{name} reason=#{inspect(reason)}"
             )
+
+            # F-C044 — a load failure drops the spawn just as visibly as a spawn_pod failure: alarm it too.
+            emit_spawn_failed(payload, {:cap_profile_load, reason})
         end
     end
   end
