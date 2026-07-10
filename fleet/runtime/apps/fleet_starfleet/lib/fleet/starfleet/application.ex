@@ -63,11 +63,11 @@ defmodule Fleet.Starfleet.Application do
     # zero network I/O, consistent with DriftMonitor/AuditConsumer).
     children =
       [] ++
-        if(Application.get_env(:fleet_starfleet, :start_drift_monitor, true),
+        if(boot_enabled?(:start_drift_monitor, true),
           do: [Fleet.Starfleet.DriftMonitor],
           else: []
         ) ++
-        if Application.get_env(:fleet_starfleet, :start_shutdown, true) do
+        if boot_enabled?(:start_shutdown, true) do
           # Coordinated graceful shutdown — must stay alive to serve the shutdown
           # RPC. INERT for now: its trigger was removed (the systemd ExecStop it
           # once answered is gone), awaiting a re-wire onto `fleet_v2 stop`.
@@ -75,11 +75,11 @@ defmodule Fleet.Starfleet.Application do
         else
           []
         end ++
-        if(Application.get_env(:fleet_starfleet, :start_audit_consumer, true),
+        if(boot_enabled?(:start_audit_consumer, true),
           do: [Fleet.Starfleet.AuditConsumer],
           else: []
         ) ++
-        if Application.get_env(:fleet_starfleet, :start_boot_orchestrator, true) do
+        if boot_enabled?(:start_boot_orchestrator, true) do
           # Task :transient post-start sequence:
           # boot_permanent_pods + emit fleet.boot_complete|partial|failed.
           [
@@ -93,11 +93,11 @@ defmodule Fleet.Starfleet.Application do
         else
           []
         end ++
-        if(Application.get_env(:fleet_starfleet, :start_mcp_watcher, false),
+        if(boot_enabled?(:start_mcp_watcher, false),
           do: [Fleet.Starfleet.MCPWatcher],
           else: []
         ) ++
-        if(Application.get_env(:fleet_starfleet, :start_mcp_monitor, true),
+        if(boot_enabled?(:start_mcp_monitor, true),
           do: [Fleet.Starfleet.MCPMonitor],
           else: []
         )
@@ -111,6 +111,26 @@ defmodule Fleet.Starfleet.Application do
     ]
 
     Supervisor.start_link(children, opts)
+  end
+
+  @doc false
+  # Boot-topology knob → STRICT boolean. A `:start_*` config governs the supervision tree; reading it with
+  # a bare `if Application.get_env(...)` (truthiness) means a malformed value silently changes the topology:
+  # a string `"false"` or `0` is TRUTHY → the child starts anyway; a stray `nil` is falsy → the child is
+  # skipped even when its default is `true`. So we PARSE at the boundary: a boolean is honoured, absence
+  # yields the (boolean) default, and any non-boolean value FAILS LOUD at boot (fail-closed — a containment/
+  # topology knob must never be interpreted, and a boot on a malformed config must crash visibly, not drift).
+  @spec boot_enabled?(atom(), boolean()) :: boolean()
+  def boot_enabled?(key, default) when is_atom(key) and is_boolean(default) do
+    case Application.get_env(:fleet_starfleet, key, default) do
+      v when is_boolean(v) ->
+        v
+
+      other ->
+        raise ArgumentError,
+              "Fleet.Starfleet boot knob #{inspect(key)} must be a boolean, got #{inspect(other)} — a " <>
+                "malformed boot config must not silently change the supervision topology (fail-closed at boot)"
+    end
   end
 
   @doc """
