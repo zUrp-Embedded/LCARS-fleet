@@ -1,8 +1,8 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-10 (phase 0 lancée)
-**Statut** : PHASE 0 — verify-sweep EN COURS (8 workers en fan-out)
+**Dernière révision** : 2026-07-10 (phase 0 CLOSE)
+**Statut** : PHASE 0 CLOSE (167/167 vérifiés) — CHECKPOINT user en attente ; phase 1 prête
 **Référencé par** : `PLAYBOOK.md`
 
 > Si tu reprends ce chantier après un crash : lis ce fichier, puis `LEDGER.csv`, puis `PLAN.md`, puis le
@@ -18,19 +18,26 @@
 
 ## Prochaine action précise
 
-**Attendre les 8 workers de vérification** (lots : C001-021 / C022-042 / C043-063 / C064-084 / C085-105 /
-C106-126 / C127-147 / C148-167). Dès qu'ils rendent : **consolider les verdicts dans `LEDGER.csv`**
-(verify_verdict = PERCE/THEORIQUE/DEJA-FIXE/DOCTRINE + phase), spot-vérifier moi-même les PERCE à fort
-enjeu (je ne fais pas confiance aveugle aux workers non plus), puis regrouper les PERCE B5 en familles de
-constructeurs. ENSUITE seulement : phase 1 (hollow-gates). Rien ne touche le code avant ça.
+**Phase 0 CLOSE.** Verdicts consolidés dans `LEDGER.csv` + `CONSOLIDATION.md` (distribution + 6 familles de
+verrous PERCE + 7 clusters DOCTRINE + WONTFIX théoriques). Détail par lot dans `verdicts/`.
+
+**Checkpoint user posté** : (a) le fait 43 % DOCTRINE (te revient, 7 clusters D1-D7), (b) go/no-go phase 1.
+
+**Dès GO** : PHASE 1 — hollow-gates F-C167 (gate-r0.8 vert-sans-check), F-C166 (bwrap secret-absent),
+F-C164 (install.sh identity), F-C165 (provision-role-tokens divergent), F-C160 (brief-gate coverage).
+Chacun : re-vérif moi-même (spot) → fix → test/gate → commit → journal. Rien avant re-vérif.
 
 ## Compteurs
 
 | | valeur |
 |---|---|
 | findings totaux | 167 |
-| vérifiés | 0 / 167 |
-| percés confirmés | — |
+| vérifiés | **167 / 167** |
+| PERCE code | 49 (6 familles) |
+| PERCE doc | 25 |
+| DOCTRINE (→ user) | 71 (7 clusters) |
+| THEORIQUE (WONTFIX) | 21 |
+| DEJA-FIXE | 1 |
 | fixés (commit) | 0 |
 | constructeurs de frontière posés | 0 |
 

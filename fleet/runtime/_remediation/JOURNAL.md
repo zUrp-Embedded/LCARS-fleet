@@ -19,3 +19,11 @@
 - Crons armés : watchdog `a73c2099` (`3-59/10 * * * *`), relevé `b1dc7bc3` (`47 * * * *`). Session-only → à supprimer en fin.
 - **8 workers Explore** lancés en fan-out (F-C001→167, ~21 chacun) : vérif adversariale contre le code réel du worktree, verdict PERCE/THEORIQUE/DEJA-FIXE/DOCTRINE + citations + vrai chemin de données.
 - Attente : consolidation des verdicts dans `LEDGER.csv` dès retour des workers, puis spot-vérif moi-même des PERCE à fort enjeu, puis regroupement B5 en familles de constructeurs.
+
+### Phase 0 CLOSE — 167/167 vérifiés
+- 8 workers rentrés. Verdicts capturés par lot dans `verdicts/lot-*.md` (durable), consolidés dans `LEDGER.csv` + `CONSOLIDATION.md`.
+- **Distribution** : 71 DOCTRINE (42,5 %) · 49 PERCE-code · 25 PERCE-doc · 21 THEORIQUE · 1 DEJA-FIXE.
+- **Gain règle cardinale** : 21 THEORIQUE dissous (schéma verrouille déjà à l'entrée / producteur passe valide / prose non-assemblée) → 21 non-brèches non-fixées. Plusieurs localisations corrigées (vrai verrou un niveau au-dessus).
+- **PERCE code → 6 familles** : F gates(5) · C ingress-parse(10) · B config-parse(6) · D identité(4) · E schéma(2) · A fail-closed(22). Le « constructeur » (B/C/D/E ~22) = ~5-6 smart-ctors ; A ~22 edits fail-closed (pattern intégrité prouvé).
+- **DOCTRINE → 7 clusters** (D1 fiabilité-events · D2 stubs-MVP · D3 canon-legacy · D4 config-boot · D5 tolérances · D6 SSOT-cross-surface · D7 outillage) — checkpoint user.
+- **Aucun code touché.** → attente GO phase 1 + steer triage doctrine.
