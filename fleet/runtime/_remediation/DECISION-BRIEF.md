@@ -129,6 +129,13 @@ rallumer d'un coup peut faire remonter du bruit latent. Ordre proposé : (1) le 
 vérif OU supprimer le scaffold obsolète + les 5 refs mortes — **fork à trancher**), (2) exclusions test périmées
 (mécanique), (3) Credo/Sobelow/Dialyzer un par un.
 
+> **Preview D7 (fait, data concrète)** — **Credo (F-C023)** : PAS « off » — 69 checks actifs ; les « désactivés »
+> sont exactement la liste **standard opt-in de Credo** (controversial/experimental : SinglePipe, MultiAlias,
+> ABCSize, Specs, DuplicatedCode… = style/opinion, PAS correctness). `--strict` remonterait **221 suggestions**
+> (91 refactor + 36 lisibilité + 94 design) = bruit. → reco affinée : **laisser tel quel** ; au plus activer
+> `Readability.Specs` si tu veux imposer les @spec (discipline). Reste à preview à l'ouverture de D7 : **Sobelow**
+> (sécurité, plus load-bearing), **Dialyzer** (scope), **F-C167** (le seul vrai « garde qui ment »).
+
 → **Décision demandée** : (a) F-C167 — câbler la vérif canon réelle, ou supprimer le scaffold `05_data-canon`
 obsolète (+ nettoyer les 5 refs) ? (b) OK pour rallumer Credo/Sobelow/Dialyzer incrémentalement ?
 **Effort** : F-C167 selon ton fork ; le reste incrémental.
