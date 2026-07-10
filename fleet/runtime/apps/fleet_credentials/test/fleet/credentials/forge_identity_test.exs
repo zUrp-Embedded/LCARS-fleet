@@ -49,6 +49,18 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
              "Co-authored-by: LCARS-gatekeeper <gatekeeper@lcars.local>"
   end
 
+  test "F-C018 R1-14 : rôle avec newline/control → hygiéné (trailer + email), pas d'injection de header commit" do
+    # Symétrique du test name/email : le rôle (= cap-profile `metadata.name`, champ schéma-OUVERT sans
+    # pattern) est interpolé dans le trailer Co-authored-by + l'email de rôle. Un newline/control (profil
+    # cap mal-authored) injecterait une ligne de commit-header (R1-14). Le module strip_control les champs
+    # HUMAINS mais laissait le rôle brut — on applique la MÊME défense au rôle (sink-side, source-agnostique).
+    trailer = ForgeIdentity.coauthor_trailer("engineer\nBcc: evil")
+    refute trailer =~ ~r/[\x00-\x1F]/, "trailer: aucun char de contrôle (injection R1-14)"
+
+    email = ForgeIdentity.role_email("qualifier\r\ninjected")
+    refute email =~ ~r/[\x00-\x1F]/, "role_email: aucun char de contrôle"
+  end
+
   test "allowed_emails : git_native = humain seul ; payload = humain + système" do
     assert ForgeIdentity.allowed_emails(:git_native, "h@x.tld") == ["h@x.tld"]
     # H2 2026-07-04 : l'identité système = le compte forge RÉEL lcars-system (l'ancien

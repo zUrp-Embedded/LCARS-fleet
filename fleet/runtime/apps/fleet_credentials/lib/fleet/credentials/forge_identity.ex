@@ -130,7 +130,12 @@ defmodule Fleet.Credentials.ForgeIdentity do
   @doc "Machine-verifiable trailer for the role (canonical Co-authored-by). Derives from `role_email/1`."
   @spec coauthor_trailer(String.t()) :: String.t()
   def coauthor_trailer(role) when is_binary(role) do
-    "Co-authored-by: LCARS-#{role} <#{role_email(role)}>"
+    # F-C018 — `role` (= cap-profile `metadata.name`, a schema-OPEN field, no pattern) is interpolated into
+    # the trailer + role email that land in commit headers. A newline/control char would inject a commit-header
+    # line (R1-14) — the exact defense the human name/email already get via `strip_control` (`os_identity/2`).
+    # We apply the SAME hygiene to the role here (sink-side, source-agnostic). No-op on the clean canon slugs.
+    clean = strip_control(role)
+    "Co-authored-by: LCARS-#{clean} <#{role_email(clean)}>"
   end
 
   @doc """
@@ -175,7 +180,9 @@ defmodule Fleet.Credentials.ForgeIdentity do
   """
   @spec role_email(String.t()) :: String.t()
   def role_email(role) when is_binary(role) and role != "",
-    do: "#{role}@#{@role_email_domain}"
+    # F-C018 — strip control chars from `role` before it enters the email (commit-header sink, R1-14),
+    # same hygiene as the human identity fields. No-op on the clean canon slugs.
+    do: "#{strip_control(role)}@#{@role_email_domain}"
 
   # ── internals ──
 
