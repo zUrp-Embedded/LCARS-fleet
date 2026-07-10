@@ -39,7 +39,7 @@ Chacun : re-vérif moi-même (spot) → fix → test/gate → commit → journal
 | THEORIQUE (WONTFIX) | 21 |
 | DEJA-FIXE | 1 |
 | fixés (commit) | 2 (F-C166, F-C160) |
-| constructeurs de frontière posés | 0 |
+| constructeurs de frontière posés | 0 (phase 2 démarre) |
 
 ## Crons (session-only — à SUPPRIMER en fin de chantier)
 

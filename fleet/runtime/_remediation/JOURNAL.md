@@ -44,3 +44,15 @@
 - **F-C160 FIXÉ** (couverture brief-gate, 12 tests/0). brief_kind:judge survit à la normalisation (bonus : confirme F-C109 = MAP-level seulement).
 - **Bilan phase 1 (5 findings)** : 2 FIXÉS (F-C166 sentinelle bwrap, F-C160 conformance brief-gate) · 2 DOCTRINE-TAIL (F-C167→D7, F-C165→D6) · 1 FAUX (F-C164). La règle cardinale a évité 3 fixes erronés sur 5 (2 mal-formés + 1 non-brèche).
 - → PHASE 2 : constructeurs de frontière (B/C/D/E). Je commence par re-vérifier une famille + concevoir le smart-ctor.
+
+---
+## RELEVÉ DE POSTE #1 — 2026-07-10 (~22:47)
+
+**Phase** : 2 — constructeurs de frontière (B5), tout juste entamée.
+**Compteurs** : 167/167 vérifiés · PERCE 48 · PERCE-doc 25 · DOCTRINE 71 · THEORIQUE 22 · DEJA-FIXE 1 · **fixés : 2** (F-C166, F-C160) · **constructeurs posés : 0**.
+**Bougé cette heure** :
+- Montage complet (worktree, 6 docs, ledger, 2 crons, build-env vert).
+- Phase 0 : 8 workers → 167/167 vérifiés, consolidés (LEDGER + CONSOLIDATION + verdicts/lot-*.md).
+- Phase 1 CLOSE : F-C166 + F-C160 fixés ; F-C167→D7, F-C165→D6 (doctrine-tails) ; F-C164 faux/reclassé.
+**Dérive attrapée** : aucune dérive de MA part. Mais la vérif a évité **3 actions erronées / 5** en phase 1 (règles R-06/R-07 déjà posées ; F-C164 = énième « rapport mal-localisé », couvert par R-01). Discipline tenue.
+**Décision(s) en attente user** : les **7 clusters DOCTRINE D1-D7** (71 findings) — dont **F-C167 (D7)** et **F-C165 (D6)** remontés de la phase 1. Non-bloquant pour phases 1-2-4 (code clair) ; bloquant pour phase 3 + une part de 4.
