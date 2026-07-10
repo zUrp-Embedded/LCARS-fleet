@@ -1,7 +1,7 @@
 # JOURNAL — remédiation SSOT/irrepr (chronologique)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-10
+**Dernière révision** : 2026-07-11
 **Statut** : actif
 **Référencé par** : `CARNET-DE-BORD.md`
 
@@ -133,3 +133,8 @@
 - F-C075 : escalade a lieu (issue créée+assignée+Logger.error LOUD sur échec-label). Propager {:error} → risque DOUBLONS (issue existe). {:ok,number} correct, résidu surfacé. Fork : assignee+log suffisant vs label-load-bearing+dédup → DOCTRINE (D1).
 - F-C076 : retry-sans-assignee sur toute erreur = documenté « escalation precedence over naming » (l.14-15/84). Le fix classify+propager-transitoire réduirait la fiabilité d'escalade (plus d'issue sur transitoire) = tradeoff design → DOCTRINE (D1). Consequence narrow (transitoire-qui-clear) + mitigée (label-findable).
 - **SHORTLIST CLEAN-FIX COMPLÈTE** : 12 fixés, les 2 derniers PERCE → doctrine. Plus aucun PERCE ouvert.
+
+### Vérif milestone — gate complet vert & déterministe (12 fixes)
+- `mix compile --warnings-as-errors` a attrapé 2 warnings clause-grouping (F-C037 result_deadline_fire/2, F-C119 validate_issue_id/1 inséraient une fonction au milieu d'un groupe de clauses) → déplacées, comportement inchangé. LEÇON : lancer --warnings-as-errors après chaque ajout de def public entre des clauses groupées.
+- `mix test` complet a révélé 1 flaky (arch_escalation_test refute log =~ "NOT added" — chaîne partagée avec IncidentRegistry.Escalation, bleed async capture_log). PAS ma régression (passe isolé). Durci sur token arch-unique "ArchEscalation:". → gate déterministe.
+- Résultat : umbrella 0 échec (fleet_pilot 364, fleet_spawner 219, fleet_api 74, fleet_credentials 48, fleet_starfleet 68 + doctests/properties), compile clean.
