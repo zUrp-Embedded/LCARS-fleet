@@ -157,3 +157,9 @@
 ### F-C087 FIXÉ — scaffold date = date d'onboard (seam :today)
 - Dernier item mécanique non-bloqué. Dates hardcodées 2026-06-14 dans spec.md/backlog.md générés → seam :today (défaut Date.utc_today). main/work signatures inchangées (opts), spec_md/backlog_md privés → pas de caller cassé. RED implicite→GREEN, fleet_pilot vert.
 - **REMÉDIATION MÉCANIQUE 100% : 13 code + 22 doc = 35 fixes.** Reste STRICTEMENT décisions user (87 doctrine + F-C006/132-test/137-test/151) + cleanup.
+
+### Preview D7 (outillage) — data pour la décision user (pas des fixes)
+- **Credo (F-C023)** : 69 checks actifs ; désactivés = liste standard opt-in Credo (style/opinion). `--strict` = 221 suggestions (bruit). → reco : laisser tel quel ; au plus activer `Readability.Specs`.
+- **Sobelow (F-C026)** : « not a Phoenix application » → scanner Phoenix (XSS/CSRF/Ecto), peu applicable au runtime non-Phoenix. → reco : hors-gate OK (ou per-app fleet_api si besoin). Low-value.
+- **F-C167 (le vrai « garde qui ment »)** : le gate `gate-r0.8-canon.sh` A un check (`grep 05_data-canon` dans test/ + suite verte), mais **9 fichiers réfèrent encore `05_data-canon`** — QUASI TOUS des commentaires/descriptions du VIEUX path : permanent_boot.ex:199 (commentaire), intensity-v1.json + coord-policies-v1.json (`description` de schéma ; coord déjà = « ancien chemin doctrine » intentionnel post-F-C158), + 5 fichiers test + le gate lui-même. → **Le « violé » est du stale-doc**, pas une brèche fonctionnelle (aucun READ live cassé). FORK D7 : (a) nettoyer les ~7 refs-doc non-intentionnelles (doc-fix, low-risk) PUIS faire tourner/enforcer le gate à 0-ref ; (b) accepter les refs historiques et relâcher/retirer le gate. Ma reco : (a) — nettoyer (c'est du PERCE-doc) + gate qui enforce. Reste : Dialyzer (scope, PLT lent) + exclusions test (F-C121/122/123/127/129).
+- D7 est désormais PREVIEWED (Credo/Sobelow/F-C167). Prêt pour ta décision.
