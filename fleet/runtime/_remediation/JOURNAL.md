@@ -171,3 +171,7 @@
 - **Bougé cette heure** : F-C087 fixé (dernier item mécanique, seam :today) → **remédiation mécanique COMPLÈTE**. Preview D7 (Credo=laisser, Sobelow=hors-gate, F-C167=nettoyer+enforcer). User en échange doctrine : « c'est quoi à trancher ? », guidelines/invariants du projet, position best-effort/flemme — j'ai articulé la doctrine (mensonge-du-code interdit / différer honnêtement OK / best-effort légitime si documenté+observable+backstop-forge).
 - **Dérive attrapée** : failli continuer à « préviewer » D1-D6 (décision-driven) après D7 → churn déguisé → STOP. Règle R-13 (l'anti-churn = l'autre face de la flemme).
 - **Décision en attente user** : 87 doctrine (7 clusters, DECISION-BRIEF prêt) + 4 doc-forks. Le user sonde les principes = l'étape en cours.
+
+### D4 RÉSOLU — F-C041 FIXÉ (garde launch_backend) + 3 R-08-défensifs
+- Worker vérif + moi : grep config cardinal → aucune des 4 clés posée malformée par un config réel. F-C041 seul FIX (knob actif test.exs + jumeau conforming_provisioner + crash-sans-transition réel + hollow-green Readiness). F-C034/036/056 = R-08-défensif (ta décision require-vs-soft).
+- Fix F-C041 : resolved_conforming/0 (miroir MCP) au seam do_launch_backend (R-10 : pas resolved/0) + Readiness :degraded. TDD RED(Enum)→GREEN, 223/74 verts.
