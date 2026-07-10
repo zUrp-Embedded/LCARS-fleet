@@ -95,3 +95,8 @@
 - Vérifié moi-même : issue_id optionnel pris cru vs pod_id strictement gardé (même module). Pas path-bound (path=pod_id). Conséquence modeste (mis-corrélation/control-bytes logs) mais trou de typage à un ingress no-auth.
 - RED a attrapé un CaseClauseError : do_admin_spawn (rest.ex) sans catch-all → nouvelle forme {:invalid_issue_id} non gérée → 500. Ajouté la clause 422. (Leçon intégrité : nouvelle forme de retour = vérifier TOUS les callers.)
 - fleet_api 74/0. Enchaîne → F-C018.
+
+### F-C018 FIXÉ — strip_control(role) sink-side (R1-14, miroir champs humains)
+- Vérifié moi-même : role brut dans coauthor_trailer(l.133)+role_email(l.177) vs champs humains strip_control (l.222/229). launch_env met GIT_* depuis l'humain (pas role brut) → seul sink de role = trailer/email. RoleIdentity (jumeau) n'a pas ce pattern.
+- Choix sink-side strip_control (vs schéma-pattern) : plus sûr (19 profils, 2 modules) + mirror exact de la défense R1-14 du module + source-agnostique. RED→GREEN, 48+2/0.
+- Enchaîne → F-C044.

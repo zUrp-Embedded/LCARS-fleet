@@ -16,7 +16,7 @@ F-C014,hygiene,confirmed,apps/fleet_event_router/priv/allowed_graph.yaml:13,PERC
 F-C015,medium,confirmed,apps/fleet_credentials/lib/fleet/credentials/gate.ex:95,THEORIQUE,unassigned,"Credentials scope gate can silently reduce required scopes through soft flag defaults"
 F-C016,medium,confirmed,apps/fleet_credentials/lib/fleet/credentials/forge_auth.ex:49,DOCTRINE,unassigned,"ForgeAuth treats present-but-broken forge auth config as unauthenticated git env"
 F-C017,hygiene,confirmed,apps/fleet_credentials/lib/fleet/credentials/role_token.ex:32,PERCE-doc,unassigned,"RoleToken still reports missing role tokens as “fallback to system token” while role identity construction is fail-closed"
-F-C018,medium,confirmed,apps/fleet_credentials/lib/fleet/credentials/forge_identity.ex:130,PERCE,unassigned,"ForgeIdentity sanitizes human name/email but not the role inserted into trailer/email strings"
+F-C018,medium,confirmed,apps/fleet_credentials/lib/fleet/credentials/forge_identity.ex:130,PERCE,FIXÉ,"ForgeIdentity sanitizes human name/email but not the role inserted into trailer/email strings"
 F-C019,high,confirmed,apps/fleet_task_queue/lib/fleet/task_queue.ex:51,DOCTRINE,unassigned,"`submit_result` marks the work item completed before the required broadcast, making the local broadcast failure non-retryable"
 F-C020,medium,confirmed,apps/fleet_task_queue/lib/fleet/task_queue/work_item.ex:80,THEORIQUE,unassigned,"WorkItem.new/2 treats false optional attrs as absent because `fetch/2` uses `||`"
 F-C021,medium,confirmed,apps/fleet_task_queue/lib/fleet/task_queue/work_item.ex:138,DOCTRINE,unassigned,"WorkItem.from_map/1 silently drops malformed optional timestamps, including active deadlines"
