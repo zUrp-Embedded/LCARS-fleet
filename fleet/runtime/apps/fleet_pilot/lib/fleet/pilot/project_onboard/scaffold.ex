@@ -24,14 +24,15 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
           :ok | {:error, {:scaffold_write, String.t(), term()}}
   def main(dir, name, opts) do
     pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, "(à compléter)")
-    File.mkdir_p!(Path.join(dir, "docs"))
 
-    write_all(dir, %{
-      "README.md" => readme(name, pitch),
-      ".gitignore" => gitignore(),
-      ".editorconfig" => editorconfig(),
-      "docs/spec.md" => spec_md(name, pitch)
-    })
+    with :ok <- ensure_dir(Path.join(dir, "docs")) do
+      write_all(dir, %{
+        "README.md" => readme(name, pitch),
+        ".gitignore" => gitignore(),
+        ".editorconfig" => editorconfig(),
+        "docs/spec.md" => spec_md(name, pitch)
+      })
+    end
   end
 
   @doc """
@@ -42,13 +43,14 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
           :ok | {:error, {:scaffold_write, String.t(), term()}}
   def work(dir, name, opts) do
     pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, "")
-    File.mkdir_p!(Path.join(dir, "plans"))
 
-    write_all(dir, %{
-      "backlog.md" => backlog_md(name, pitch),
-      "scratchpad.md" => "",
-      "plans/.gitkeep" => ""
-    })
+    with :ok <- ensure_dir(Path.join(dir, "plans")) do
+      write_all(dir, %{
+        "backlog.md" => backlog_md(name, pitch),
+        "scratchpad.md" => "",
+        "plans/.gitkeep" => ""
+      })
+    end
   end
 
   # Writes the manifest {relative path => content} under `dir` — fail-loud PER file
@@ -56,13 +58,27 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
   defp write_all(dir, files) do
     Enum.reduce_while(files, :ok, fn {rel, content}, :ok ->
       path = Path.join(dir, rel)
-      File.mkdir_p!(Path.dirname(path))
 
-      case File.write(path, content) do
-        :ok -> {:cont, :ok}
+      with :ok <- ensure_dir(Path.dirname(path)),
+           :ok <- File.write(path, content) do
+        {:cont, :ok}
+      else
+        # ensure_dir already wraps to {:scaffold_write, dir, _}; File.write returns a raw reason.
+        {:error, {:scaffold_write, _, _}} = err -> {:halt, err}
         {:error, reason} -> {:halt, {:error, {:scaffold_write, rel, reason}}}
       end
     end)
+  end
+
+  # F-C086 — non-bang mkdir_p → the module's TYPED `{:scaffold_write}` contract (mirror of the `File.write`
+  # handling above). A mkdir failure (`:enotdir`/permission) must fail-loud as a VALUE, not a raise: the
+  # @spec promises `{:error, {:scaffold_write, _, _}}`, and `ProjectOnboard.onboard/2`'s `with` has NO
+  # `else` → a raise would CRASH it instead of surfacing the typed error its `{:error, term()}` contract expects.
+  defp ensure_dir(path) do
+    case File.mkdir_p(path) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:scaffold_write, path, reason}}
+    end
   end
 
   defp readme(name, pitch) do
