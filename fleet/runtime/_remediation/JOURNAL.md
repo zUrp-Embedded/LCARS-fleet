@@ -117,3 +117,7 @@
 - Vérifié moi-même : :unknown → :ok laissait un pod admin.spawn idle sans brief (seul enqueue, pas de réconciliation). Fail-closed {:error} → with :projecting échoue avant launch → retry. R-10 appliqué : else du with générique ({:error,reason}→transition_failed) → safe.
 - Couture enqueue_by_slot/3 extraite (test :unknown sans TaskQueue down). TDD 2-phases RED→GREEN, fleet_spawner 217/0.
 - Prochain : F-C037 (JUMEAU — result_deadline 3-state ; touche le gen_statem pod.ex, à faire à tête reposée).
+
+### F-C037 FIXÉ — :result_deadline 3-state (:unknown broker → re-arm)
+- Vérifié moi-même : le no-kill sur :error est délibéré+correct, mais le LAPSE (consommer le deadline) orphelinait un pod hung dont le broker blip au fire. Fix distinct : garder no-kill, transformer lapse→re-arm. active_task_state/1 (3-state) + couture result_deadline_fire/2 (testable, gen_statem). pod_has_active_task? gardé pour le champ pod_info (l.428).
+- TDD 2-phases RED→GREEN, fleet_spawner 219/0. Enchaîne → F-C086 (faible enjeu).

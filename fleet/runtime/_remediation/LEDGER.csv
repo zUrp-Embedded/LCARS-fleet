@@ -35,7 +35,7 @@ F-C033,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/scaffold.ex:94,
 F-C034,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/launch_env.ex:60,DOCTRINE,unassigned,"`:claude_dir` override bypasses the per-human credential resolution while the module claims per-human by construction"
 F-C035,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/brief.ex:80,PERCE,FIXÉ,"Admin-spawn briefs are dropped when the broker cannot be probed, but the pod still launches"
 F-C036,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/mcp_provision.ex:118,DOCTRINE,unassigned,"`mcp_server_spec` is only checked for nil/map and then used as an unvalidated config object"
-F-C037,high,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/task_probe.ex:51,PERCE,unassigned,"A TaskQueue hiccup at `:result_deadline` can consume the response timeout without failing the pod"
+F-C037,high,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/task_probe.ex:51,PERCE,FIXÉ,"A TaskQueue hiccup at `:result_deadline` can consume the response timeout without failing the pod"
 F-C038,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/state_fs.ex:9,DOCTRINE,unassigned,"`state.json` write failure loses the durable recovery point but is always non-fatal"
 F-C039,hygiene,confirmed,apps/fleet_spawner/lib/fleet/spawner/pod/paths.ex:87,THEORIQUE,unassigned,"Unknown or missing lifetime scopes are normalized into ordinary pod behavior in spawner helpers"
 F-C040,hygiene,confirmed,apps/fleet_spawner/README.md:38,DOCTRINE,unassigned,"Spawner README advertises an LCARS env catalogue for knobs that runtime/template do not expose"
