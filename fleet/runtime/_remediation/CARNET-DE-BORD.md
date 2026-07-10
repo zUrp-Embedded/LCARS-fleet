@@ -1,7 +1,7 @@
 # CARNET DE BORD — état résumable (LIRE EN PREMIER si reprise)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-10 (pass-2 consolidé · 9 fixés · shortlist CLEAN-FIX en cours)
+**Dernière révision** : 2026-07-10 ~23h (relevé horaire · 9 fixés · shortlist CLEAN-FIX en cours)
 **Statut** : PHASE 1 CLOSE · PHASE 2/4 EN COURS (9 CLEAN-FIX livrés, 6 PERCE ouverts)
 **Référencé par** : `PLAYBOOK.md`
 

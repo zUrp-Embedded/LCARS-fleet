@@ -104,3 +104,11 @@
 ### F-C044 FIXÉ — emit spawn.failed sur les {:error} ordinaires
 - Vérifié moi-même : 3 branches log-warn-seul, jumeau emit_spawn_failed n'était appelé qu'au rescue. read_model consomme tout %Fleet.Event → spawn.failed alimente la vue admin. Fix = emit dans spawn-fail + load-fail. name-missing = edge quasi-mort (admission F-C119 garantit le name) → laissé.
 - RED×2, GREEN, fleet_spawner 215/0. Enchaîne → F-C035/F-C037 (finitions brief_slot 3-state).
+
+---
+## RELEVÉ DE POSTE — 2026-07-10 ~23h
+- **Phase** : 2/4 — shortlist CLEAN-FIX (pass-2 consolidé).
+- **Compteurs** : 167/167 vérifiés (1er+2e passage) · PERCE 15 (9 FIXÉ + 6 ouverts) · DOCTRINE 85 · THEORIQUE 41 · PERCE-doc 25 · DEJA-FIXE 1. Verrous posés : 9.
+- **Bougé cette heure** : 5 CLEAN-FIX livrés en continu (F-C059 pipe-DEFER, F-C069 reviews fail-loud, F-C119 admission issue_id, F-C018 strip_control(role), F-C044 emit spawn.failed). Chacun verify-moi + TDD + non-régression suite complète + commit.
+- **Dérive attrapée** : (1) j'avais traité le watchdog comme un CADENCEUR (« 1 fix puis j'attends le tick ») — le user a corrigé : c'est un HOMME-MORT (réveil si bloqué), on bosse en continu → mémoire posée [[watchdog-is-deadman-not-pacer]] + je ne finis plus un tour par « j'attends ». (2) F-C119 : une nouvelle forme de retour `{:invalid_issue_id}` a percuté `do_admin_spawn` sans catch-all → CaseClauseError → règle R-10.
+- **Décision en attente user** : 85 findings DOCTRINE (`DECISION-BRIEF.md`, 7 clusters + 7 ajouts pass-2 + F-C059-b contrat pod_info). Non-bloquant pour la shortlist en cours.

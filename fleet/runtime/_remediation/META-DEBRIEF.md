@@ -52,3 +52,10 @@
   Résidu réel = label cosmétique sur issue fermée + log « released » imprécis (rare). Fix = harness
   disproportionné vs valeur → **downgrade, pas de gold-plating.** Corollaire de R-01 : tracer le chemin
   jusqu'au MAUVAIS RÉSULTAT, pas s'arrêter à la ligne fautive.
+
+- **R-10 (2026-07-10)** — *Ajouter une nouvelle forme de retour `{:error, {:tag, …}}` = tracer TOUS ses
+  callers avant de committer.* Un `case`/handler peut n'avoir AUCUN catch-all → la forme neuve tombe en
+  CaseClauseError (500), pire que le bug d'origine. Vécu : F-C119 — `validate_issue_id` a renvoyé
+  `{:invalid_issue_id, _}`, mais `Fleet.API.Rest.do_admin_spawn` matchait chaque refus explicitement (pas de
+  `_ ->`) → crash. Le RED l'a attrapé (raison de plus de faire RED-first sur un test d'INTÉGRATION, pas juste
+  unitaire). Corollaire de la classe intégrité : une nouvelle branche de retour n'est jamais purement locale.
