@@ -175,3 +175,7 @@
 ### D4 RÉSOLU — F-C041 FIXÉ (garde launch_backend) + 3 R-08-défensifs
 - Worker vérif + moi : grep config cardinal → aucune des 4 clés posée malformée par un config réel. F-C041 seul FIX (knob actif test.exs + jumeau conforming_provisioner + crash-sans-transition réel + hollow-green Readiness). F-C034/036/056 = R-08-défensif (ta décision require-vs-soft).
 - Fix F-C041 : resolved_conforming/0 (miroir MCP) au seam do_launch_backend (R-10 : pas resolved/0) + Readiness :degraded. TDD RED(Enum)→GREEN, 223/74 verts.
+
+### D5 RÉSOLU — 0 fix mécanique (2 workers, 11 tolérances)
+- Toutes légitimes (documentées+LOUD+backstop) : F-C001/016/033/045/048/080/081 KEEP ; F-C021 DOWNGRADE (prod persist:false). Mon pari « F-C048=fix » RÉFUTÉ (transitoire+re-poll, ≠ F-C041 durable/silencieux).
+- 2 résidus réels → design-fork user : F-C050 (orphelin permanent au cas issue-terminale ; fix=state-split publishing, PAS exclure :completed), F-C083 (critère judge perdu sur read-error ; fix=typed-per-kind). Reco : resserrer via le design correct, pas la forme naïve.

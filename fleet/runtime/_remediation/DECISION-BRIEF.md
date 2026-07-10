@@ -233,3 +233,12 @@ Grep config cardinal (R-08) : aucune des 4 clés n'est posée MALFORMÉE par un 
 - **F-C036 `mcp_server_spec`** = R-08-DÉFENSIF (config = map littérale figée bien-formée ; malformé = édition-main) → ta décision.
 - **F-C056 roles accessors** = R-08-DÉFENSIF (defaults sûrs + reviewer_roles valide ; malformé = opts-test ; aval fail-closed rattrape) → ta décision.
 → Je fixe F-C041 (atteignable + jumeau). Les 3 défensifs : « durcir en parse-au-bord OU laisser » = ton call require-vs-soft (rien de cassé aujourd'hui).
+
+### D5 RÉSOLU (2 workers, 11 tolérances) — 0 FIX MÉCANIQUE
+Test « masque un load-bearing SANS backstop ? » → **toutes légitimes** (documentées + LOUD + backstoppées) sauf 2 résidus réels dont le fix est un design-fork.
+- **KEEP-DOCUMENTED (7)** : F-C001 (over-strict fail-closed, masque rien), F-C016 (LOUD + git rc≠0 aval), F-C033 (warning + QA-gated aval), F-C045 (recall REFUSE, ≠ F-C043 qui procède), F-C048 (transitoire + re-poll + propriété primaire vérifiée, ≠ F-C041), F-C080 (re-wake=autorité), F-C081 (malformé inatteignable, forge garantit owner/name + mono-org).
+- **DOWNGRADE (1)** : F-C021 (prod `persist:false` → `from_map` jamais appelé ; divergence du jumeau F-C037 qui était atteignable en ops live). Mon phase-0 « atteignable via recovery » était faux.
+- **2 RÉSIDUS RÉELS → TA DÉCISION (design-fork, la forme naïve régresse)** :
+  - **F-C050 (le plus dur, high)** : un `:completed` de pipe-projet + crash de l'offload mid-publication (Task `:temporary`) + N = DERNIÈRE issue → lock `lcars-in-flight` **orphelin PERMANENT, silencieux** (la reconciliation compte `:completed` comme owning → jamais reclaim). Fix correct = **state-split durable `active|publishing|published`**, **JAMAIS** exclure `:completed` (ça régresse la fenêtre de publication normale = churn). Le seul du lot avec perte durable possible.
+  - **F-C083 (high)** : `build_judge_brief` sur read-error forge → `request: nil` → judge sans CRITÈRE mais avec le diff → risque d'approbation criterion-less (faux GREEN), backstop LLM soft non-garanti. Fix = retour de dispatch typé par brief_kind (read-error ≠ absence), pas un fallback silencieux.
+→ Ma reco : garder les 8, et pour F-C050/F-C083 = **oui à resserrer** mais via le design correct (state-split / typed-per-kind), pas la forme naïve. C'est ton call require-vs-effort.
