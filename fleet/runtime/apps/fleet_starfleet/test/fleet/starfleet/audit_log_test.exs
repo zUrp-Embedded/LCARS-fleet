@@ -62,6 +62,18 @@ defmodule Fleet.Starfleet.AuditLogTest do
       assert {:error, _reason} = AuditLog.write(%{"k" => "v"})
     end
 
+    test "F-C098 fail-safe : entrée non-encodable (tuple/PID) → {:error, {:encode_failed, _}}, pas de crash" do
+      # AuditLog se documente « fail-safe non-bang wrapper … no crash » (@spec :ok | {:error, term()}).
+      # Un payload portant un terme non JSON-encodable (tuple/PID/ref — pas de Jason.Encoder →
+      # Protocol.UndefinedError) faisait RAISE `Jason.encode!` AVANT F-C098, violant le contrat propre
+      # du module sur le chemin Cat-5 load-bearing (les callers font `_ = write(...)`, n'attrapent pas un
+      # raise). Le wrapper doit rescue → {:error, {:encode_failed, _}}, symétrique du non-bang File.write.
+      assert {:error, {:encode_failed, _}} =
+               AuditLog.write(%{"source" => "x", "bad" => {:a, :tuple}})
+
+      assert {:error, {:encode_failed, _}} = AuditLog.write(%{"pid" => self()})
+    end
+
     test "ts auto-mergé si absent" do
       assert :ok = AuditLog.write(%{"k" => "v"})
     end

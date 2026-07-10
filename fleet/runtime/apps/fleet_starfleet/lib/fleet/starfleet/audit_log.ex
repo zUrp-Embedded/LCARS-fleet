@@ -43,25 +43,44 @@ defmodule Fleet.Starfleet.AuditLog do
       entry
       |> Map.put_new("ts", DateTime.utc_now() |> DateTime.to_iso8601())
 
-    line = Jason.encode!(full) <> "\n"
-    path = audit_log_path()
+    with {:ok, line} <- encode_line(full) do
+      path = audit_log_path()
 
-    # Ensure the parent dir exists (first write, or after a cleanup): otherwise `File.write` fails
-    # `:enoent` and the audit entry (a Cat 5 trail) is LOST. Non-bang (fail-safe wrapper) — a mkdir
-    # failure just falls through to the `File.write` error path below.
-    _ = File.mkdir_p(Path.dirname(path))
+      # Ensure the parent dir exists (first write, or after a cleanup): otherwise `File.write` fails
+      # `:enoent` and the audit entry (a Cat 5 trail) is LOST. Non-bang (fail-safe wrapper) — a mkdir
+      # failure just falls through to the `File.write` error path below.
+      _ = File.mkdir_p(Path.dirname(path))
 
-    maybe_rotate(path)
+      maybe_rotate(path)
 
-    case File.write(path, line, [:append]) do
-      :ok ->
-        :ok
+      case File.write(path, line, [:append]) do
+        :ok ->
+          :ok
 
-      {:error, reason} = err ->
-        Logger.error("AuditLog: write failed: #{inspect(reason)} path=#{path}")
+        {:error, reason} = err ->
+          Logger.error("AuditLog: write failed: #{inspect(reason)} path=#{path}")
 
-        err
+          err
+      end
     end
+  end
+
+  # JSON encoding is fail-safe too — the module documents itself as a non-bang, "no crash" wrapper
+  # (@spec `:ok | {:error, term()}`), so encoding must honour that contract like `File.write` below.
+  # `Jason.encode!` RAISES on a non-encodable term: a stray tuple/PID/ref in a payload has no
+  # `Jason.Encoder` impl → `Protocol.UndefinedError` (and the non-bang `Jason.encode/1` raises on that
+  # too, so it is NOT enough); an invalid value → `Jason.EncodeError`. We rescue the raise into the
+  # typed `{:error, {:encode_failed, _}}` — an un-encodable Cat-5 payload must never crash the audit
+  # path (the callers do `_ = write(...)` and would not catch a raise).
+  defp encode_line(full) do
+    {:ok, Jason.encode!(full) <> "\n"}
+  rescue
+    e ->
+      Logger.error(
+        "AuditLog: entry not JSON-encodable: #{inspect(e)} — entry dropped (fail-safe, no crash)"
+      )
+
+      {:error, {:encode_failed, e}}
   end
 
   # Threshold rotation, BEFORE the append: if the current file reaches `:audit_log_max_bytes`, we
