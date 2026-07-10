@@ -179,3 +179,13 @@ niveau `safe_pod_info` (un pod mort resterait `:busy` = wedge du pipe). → **Le
 spawner) un contrat qui **distingue `:absent` de `:timeout`** (ex : `{:error, :timeout}` vs `{:error, :not_found}`),
 puis mapper `:timeout → :busy`. Ma reco : oui, split le contrat `pod_info` (verrou amont correct), cluster **D6**
 (SSOT/contrat). Effort : moyen (touche le spawner + les 2 lecteurs `pod_alive?`/`safe_pod_info`).
+
+### Ajouts pass-2b — fiabilité escalade incident (D1)
+**F-C075 / F-C076** (`incident_registry/escalation.ex`) — la création d'issue sysadmin dégrade un canal de
+découverte SANS perdre l'escalade (l'issue existe, logguée LOUD) :
+- **F-C075** : échec du label `error_system` → issue trouvable par assignee+log mais pas par filtre-label.
+  *Fork* : accepter assignee+log (garder `{:ok}`), ou fail-closed avec **dédup** (propager `{:error}` seul
+  risque des doublons — l'issue existe déjà). Ma reco : garder `{:ok}` + éventuel retry-label borné.
+- **F-C076** : retry-sans-assignee sur TOUTE erreur (pas seulement account-absent). *Fork* : garder la
+  « précédence escalade » documentée (issue créée même sans assignee), ou classifier (préserver l'assignee
+  sur transitoire, au prix de moins d'issues créées). Ma reco : garder la précédence (l'alerte prime).

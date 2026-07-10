@@ -128,3 +128,8 @@
 
 ### F-C031 → DOWNGRADE (THEORIQUE) — protocole plugin whitespace non-exercé
 - Verify-the-verifier : ZÉRO skill plugin-qualifié dans le canon (6/7 `skills: []`, architect = 3 skills simples sans `:`). skills_plugins_env retourne `%{}` partout → le protocole whitespace-lossy n'est exercé par AUCUN config réel (R-08). Le danger sécu (traversal/mount) est déjà rattrapé par l'allowlist bwrap (bwrap_launch.sh:204-207). Résidu = fidélité pure sur un chemin inexistant. Fix fail-loud propre = changement de contrat de skills_plugins_env (map→result) disproportionné. → défensif-si-adopté, pas percé-aujourd'hui. Cohérent avec le re-scope config-int.
+
+### F-C075 + F-C076 → DOCTRINE (consequence-check moi-même, les 2 oubliés de délégation)
+- F-C075 : escalade a lieu (issue créée+assignée+Logger.error LOUD sur échec-label). Propager {:error} → risque DOUBLONS (issue existe). {:ok,number} correct, résidu surfacé. Fork : assignee+log suffisant vs label-load-bearing+dédup → DOCTRINE (D1).
+- F-C076 : retry-sans-assignee sur toute erreur = documenté « escalation precedence over naming » (l.14-15/84). Le fix classify+propager-transitoire réduirait la fiabilité d'escalade (plus d'issue sur transitoire) = tradeoff design → DOCTRINE (D1). Consequence narrow (transitoire-qui-clear) + mitigée (label-findable).
+- **SHORTLIST CLEAN-FIX COMPLÈTE** : 12 fixés, les 2 derniers PERCE → doctrine. Plus aucun PERCE ouvert.
