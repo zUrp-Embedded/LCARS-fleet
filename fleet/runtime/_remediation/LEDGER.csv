@@ -42,7 +42,7 @@ F-C040,hygiene,confirmed,apps/fleet_spawner/README.md:38,DOCTRINE,unassigned,"Sp
 F-C041,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/launch_backend.ex:57,DOCTRINE,unassigned,"The launch backend runtime seam has no conformity guard before dynamic dispatch"
 F-C042,high,confirmed,apps/fleet_spawner/lib/fleet/spawner.ex:242,DOCTRINE,unassigned,"Pod death paths return success even when the active TaskQueue mandate was not released"
 F-C043,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/permanent_boot.ex:241,DOCTRINE,unassigned,"Permanent base seed corruption falls back to fresh sessions instead of failing the permanent boot"
-F-C044,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/publish_consumer.ex:13,PERCE,unassigned,"`admin.spawn.request` only emits `spawn.failed` for raised exceptions, not ordinary dispatch failures"
+F-C044,medium,confirmed,apps/fleet_spawner/lib/fleet/spawner/publish_consumer.ex:13,PERCE,FIXÉ,"`admin.spawn.request` only emits `spawn.failed` for raised exceptions, not ordinary dispatch failures"
 F-C045,hygiene,confirmed,apps/fleet_spawner/lib/fleet/spawner.ex:148,DOCTRINE,unassigned,"Seed-store recall conflates absent seeds with present corrupt seed metadata"
 F-C046,medium,confirmed,apps/fleet_mcp/lib/fleet/mcp/pod_tools/work_items.ex:57,DOCTRINE,unassigned,"MCP `submit_result` presents broadcast failure as retryable even though a retry becomes a success-shaped double submit"
 F-C047,high,confirmed,apps/fleet_mcp/lib/fleet/mcp/pod_tools.ex:157,DOCTRINE,unassigned,"`get_issue_status` exposes `delivered: true` for any closed issue, not a proven merge delivery"

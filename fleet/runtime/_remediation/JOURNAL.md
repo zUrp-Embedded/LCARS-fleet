@@ -100,3 +100,7 @@
 - Vérifié moi-même : role brut dans coauthor_trailer(l.133)+role_email(l.177) vs champs humains strip_control (l.222/229). launch_env met GIT_* depuis l'humain (pas role brut) → seul sink de role = trailer/email. RoleIdentity (jumeau) n'a pas ce pattern.
 - Choix sink-side strip_control (vs schéma-pattern) : plus sûr (19 profils, 2 modules) + mirror exact de la défense R1-14 du module + source-agnostique. RED→GREEN, 48+2/0.
 - Enchaîne → F-C044.
+
+### F-C044 FIXÉ — emit spawn.failed sur les {:error} ordinaires
+- Vérifié moi-même : 3 branches log-warn-seul, jumeau emit_spawn_failed n'était appelé qu'au rescue. read_model consomme tout %Fleet.Event → spawn.failed alimente la vue admin. Fix = emit dans spawn-fail + load-fail. name-missing = edge quasi-mort (admission F-C119 garantit le name) → laissé.
+- RED×2, GREEN, fleet_spawner 215/0. Enchaîne → F-C035/F-C037 (finitions brief_slot 3-state).
