@@ -206,3 +206,11 @@ valide la **preuve de test**, reviewer = valide la **conformité au brief**. Et 
 *Fork (D3)* : (a) réécrire le bundle + les 2 subagent-templates pour matcher les sp_drafts, ou (b) supprimer
 `dual-review` du modop_set (superseded par les drafts). Ma reco : aligner sur les sp_drafts (autorité), OU
 retirer si le modèle dual-review est mort. Décision produit (qu'est-ce qui est l'autorité canonique du juge ?).
+
+### Décomposition D4 (pré-classif factuelle, à vérifier-percé finding par finding)
+Le cluster « config require-vs-soft » N'EST PAS homogène :
+- **Mal-rangés (pas de la config)** : F-C040 = stale-README (doc-fix) · F-C049 = dep `fleet_event_router` vestigiale dans mix.exs (hygiène dep).
+- **Vraie config-validation load-bearing → parse-au-bord/fail-loud** (ma reco = appliquer EnvParse, à vérifier-percé) : F-C034 (:claude_dir bypass résolution creds), F-C036 (mcp_server_spec non validé), F-C041 (launch_backend dispatch sans garde de conformité), F-C056 (role/pod-id from config non validés).
+- **Config-int keys-JAMAIS-posées (R-08, défensif)** : 082/099/104/117 — garde-anti-misconfig-future ; fail-loud défensif si tu veux, mais aucune valeur malformée n'y arrive aujourd'hui.
+- **Autres concerns (pas require-vs-soft)** : F-C052 (fallback legacy vs event=SSoT → fail-closed), F-C063 (default brief-gate caché = documenté), F-C064 (troncature repo-id 4 digits → identité).
+→ Après vérif, D4 se réduit à ~4 fixes config-validation + 2 doc/dep + 4 défensifs + 3 autres. Ta décision : appliquer EnvParse aux 4 load-bearing ? (les 4 défensifs + autres = sous-décisions séparées.)
