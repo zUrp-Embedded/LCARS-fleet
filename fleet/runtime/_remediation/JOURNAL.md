@@ -66,3 +66,7 @@
 - F-C097 gardé (knobs activement configurés + doctrine EnvParse établie). La famille B « config-parse » s'effondre : 1 fix légitime (F-C097), le reste → D4 user.
 - → Phase 2 se recentre sur les familles DATA-FLOW (C ingress-parse, D identité, E schéma) = vraies brèches atteignables par données réelles (webhook/forge/champ-schéma-ouvert).
 - Distribution : PERCE 44, DOCTRINE 75.
+
+### F-C060 — verify-the-verifier : churn non-matérialisée → THEORIQUE
+- Tracé : seal_and_merge FERME l'issue (l.43/80/84) ; poller dispatch seulement issues ouvertes → pas de re-dispatch ; Réconciliation réclame les orphan-locks (producteur killé). La brèche décrite (churn load-bearing) ne survient pas. Résidu = label cosmétique sur issue fermée + log imprécis → pas de fix (harness disproportionné). R-09 posée.
+- PATTERN de campagne confirmé (3 cas de suite : F-C010 doctrine-tail, config-int non-atteignable, F-C060 conséquence-nulle) → je délègue la re-vérif des PERCE restants avec la discipline consequence-check.

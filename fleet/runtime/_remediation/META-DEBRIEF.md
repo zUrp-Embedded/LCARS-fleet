@@ -43,3 +43,12 @@
   reclassés DOCTRINE. Nuance retenue : un knob ACTIVEMENT configuré (F-C097 `:start_*`, posé en test.exs)
   avec un typo plausible + une doctrine codebase établie (EnvParse « load-bearing → raise ») justifie le fix.
   Corollaire de R-06 : « PERCE » (worker) ≠ « atteignable par un chemin réel aujourd'hui ».
+
+- **R-09 (2026-07-10)** — *Vérifier que la CONSÉQUENCE se matérialise, pas juste le mécanisme.* Un finding
+  peut décrire un vrai mécanisme (unlock jeté) mais une conséquence qui **ne survient pas**. F-C060 :
+  « promote_pr jette l'unlock → issue reste lcars-in-flight → churn ». Réalité tracée : `seal_and_merge`
+  **ferme l'issue** ; le poller ne dispatch que des issues **ouvertes** → jamais de re-dispatch → **pas de
+  churn** ; et la Réconciliation réclame les locks orphelins (producteur killé) → le label est nettoyé.
+  Résidu réel = label cosmétique sur issue fermée + log « released » imprécis (rare). Fix = harness
+  disproportionné vs valeur → **downgrade, pas de gold-plating.** Corollaire de R-01 : tracer le chemin
+  jusqu'au MAUVAIS RÉSULTAT, pas s'arrêter à la ligne fautive.
