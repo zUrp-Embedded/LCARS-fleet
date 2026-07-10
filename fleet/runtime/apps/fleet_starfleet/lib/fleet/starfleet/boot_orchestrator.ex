@@ -41,6 +41,12 @@ defmodule Fleet.Starfleet.BootOrchestrator do
   @doc """
   Orchestration sequence. Spawner backend injectable (test).
   Emits the `fleet.boot_complete|partial|failed` event depending on the outcome.
+
+  Returns `:ok` = "the orchestration Task ran to completion" (it NEVER crashes the daemon — a
+  crash would reboot the sequence into a permanent-respawn loop), NOT "the boot succeeded". The
+  real outcome lives in the emitted `fleet.boot_*` event (best-effort observability); the durable
+  fact "which permanent pods run" is re-derivable via the spawner registry + reconciled by
+  `PermanentWarden`. A caller must NOT read `:ok` as boot success.
   """
   @spec run(keyword()) :: :ok
   def run(opts \\ []) do

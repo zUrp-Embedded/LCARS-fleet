@@ -56,8 +56,12 @@ defmodule Fleet.MCP.PodTools.WorkItems do
       brief (the broker's anti-impersonation lock).
     * `{:error, :broadcast_failed}` — the `work_item.completed` lifecycle broadcast
       failed: the step_run will NOT finish (the StepRunConsumer received nothing). The pod
-      must see a failure → it can re-submit (the broadcast will be re-emitted), instead of
-      believing its deliverable accepted while the forge lock stays set for life.
+      sees a failure instead of believing its deliverable accepted. Recovery is NOT a pod
+      re-submit (a re-submit is idempotently ignored → `{:ok, "already received"}`, no
+      re-emission): the durable backstop is the poller — the `:completed`-but-unresumed eval
+      no longer owns its lock, so `Reconciliation` reclaims the orphan and re-dispatches the
+      step (re-evaluated afresh). The pod is not left believing success while the forge lock
+      stays set for life.
   """
   @spec submit_result(String.t(), map(), map()) :: {:ok, String.t()} | {:error, atom()}
   def submit_result(pod_id, args, payload)

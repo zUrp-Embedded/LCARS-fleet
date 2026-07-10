@@ -15,15 +15,16 @@ defmodule Fleet.Starfleet.Cat5Escalator do
 
   ## Supported Cat 5 sources
 
-  All 3 sources are wired end to end (DriftMonitor → Cat5Escalator →
-  broadcast + coord) but their INPUT events have no live producer today —
-  the escalator is ready, dormant as long as no producer emits:
+  All 3 sources are wired end to end (DriftMonitor → Cat5Escalator → broadcast + coord).
+  Producer status (Q2 draft wiring, cf. `DriftMonitor` moduledoc — the authority):
 
-    * `:pod_drift` — on `pod.drift` (drift_count ≥ 3). Intended emitter (pod-side IPC
-      filter counting the strikes) never implemented → 0 producer.
-    * `:workflow_map_failed` — on `workflow_map.failed`. No producer emits it today
-      (the forge-driven rail does not).
-    * `:oauth_refresh_failed` — on `oauth.refresh.failed`. No wired producer.
+    * `:workflow_map_failed` — on `workflow_map.failed`. **LIVE via a Q2 DRAFT producer**:
+      `Pilot.StepRunConsumer` emits it on a `:workflow_map_load_failed` in the forge-driven
+      rail (`step_run_consumer.ex` `emit_workflow_map_failed_draft/3`) → routed here via
+      DriftMonitor. Honest-but-partial (covers the main dispatch load-failure, not every rail).
+    * `:pod_drift` — on `pod.drift` (drift_count ≥ 3). DORMANT: the intended emitter (pod-side
+      IPC strike filter) was never built → 0 producer.
+    * `:oauth_refresh_failed` — on `oauth.refresh.failed`. DORMANT: no wired producer.
 
   ## Broadcast payload format
 
