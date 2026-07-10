@@ -225,3 +225,11 @@ Résultat honnête : **le code applique DÉJÀ ta doctrine** — chaque event LI
 
 **Résidus doc (je nettoie, PERCE-doc-like)** : F-C046 (`work_items.ex:57-60` sur-affirme « re-submit → re-emit » ; en vrai recovery = poller reconciliation), F-C051 (`cat5_escalator.ex:22-26` dit « no producer » alors que `step_run_consumer:453/717` en a un live → aligner sur `drift_monitor.ex`), F-C102 (`@spec run/1 :: :ok` = « orchestrateur exécuté » ≠ « boot réussi », clarté).
 **Optionnel R-08 défensif (ta décision)** : F-C089 prod fail-closed, F-C093/F-C105 forward-guards de dé-câblage — rien de cassé aujourd'hui.
+
+### D4 RÉSOLU (worker vérif + moi) — 1 FIX + 3 R-08-défensifs
+Grep config cardinal (R-08) : aucune des 4 clés n'est posée MALFORMÉE par un config réel.
+- **F-C041 `launch_backend` = FIX-ENVPARSE** (le seul) : knob ACTIVEMENT configuré (test.exs) + dispatch dynamique SANS garde → un module typo lève `UndefinedFunctionError` qui **crashe le gen_statem SANS transition_failed** (orphelin), ET la sonde Readiness le classe `:operational` (**hollow-green**). Jumeau bâti+testé : `McpProvision.conforming_provisioner`. → garde `resolved_conforming/0` (Code.ensure_loaded + function_exported?(:launch,2)) pliée sur transition_failed AU SEAM (pas `resolved/0`, R-10) + Readiness `:degraded`.
+- **F-C034 `:claude_dir`** = R-08-DÉFENSIF (test-only, single-human, ≈downgrade) → ta décision.
+- **F-C036 `mcp_server_spec`** = R-08-DÉFENSIF (config = map littérale figée bien-formée ; malformé = édition-main) → ta décision.
+- **F-C056 roles accessors** = R-08-DÉFENSIF (defaults sûrs + reviewer_roles valide ; malformé = opts-test ; aval fail-closed rattrape) → ta décision.
+→ Je fixe F-C041 (atteignable + jumeau). Les 3 défensifs : « durcir en parse-au-bord OU laisser » = ton call require-vs-soft (rien de cassé aujourd'hui).
