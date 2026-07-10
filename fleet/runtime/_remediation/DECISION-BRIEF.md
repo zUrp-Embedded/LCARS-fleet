@@ -1,7 +1,7 @@
 # BRIEF DE DÉCISION — DOCTRINE (les arbitrages qui te reviennent)
 
 **Date** : 2026-07-10
-**Dernière révision** : 2026-07-10
+**Dernière révision** : 2026-07-11
 **Statut** : actif — prêt à décider (7 clusters). Les workers re-vérif en vol peuvent ajouter des doctrine-tails (D5/D6 surtout).
 **Référencé par** : `CONSOLIDATION.md`, `CARNET-DE-BORD.md`, `PLAN.md`
 
@@ -189,3 +189,13 @@ découverte SANS perdre l'escalade (l'issue existe, logguée LOUD) :
 - **F-C076** : retry-sans-assignee sur TOUTE erreur (pas seulement account-absent). *Fork* : garder la
   « précédence escalade » documentée (issue créée même sans assignee), ou classifier (préserver l'assignee
   sur transitoire, au prix de moins d'issues créées). Ma reco : garder la précédence (l'alerte prime).
+
+### Ajout phase-5 — F-C151 canon dual-review (D3 cleanup, VÉRIFIÉ live)
+**F-C151** — le modop-bundle `dual-review/sp.md` décrit « qualifier check spec compliance / reviewer check
+code quality ». Or les `sp_drafts` (autorité courante, servis aux pods) disent l'INVERSE : qualifier =
+valide la **preuve de test**, reviewer = valide la **conformité au brief**. Et `dual-review` est
+`optional: [dual-review]` dans **qualifier.yaml + reviewer.yaml** + référencé dans `standard-qa.yaml` →
+**assemblable dans un SP vivant** → contradiction d'instructions pour un pod juge, PAS juste une doc périmée.
+*Fork (D3)* : (a) réécrire le bundle + les 2 subagent-templates pour matcher les sp_drafts, ou (b) supprimer
+`dual-review` du modop_set (superseded par les drafts). Ma reco : aligner sur les sp_drafts (autorité), OU
+retirer si le modèle dual-review est mort. Décision produit (qu'est-ce qui est l'autorité canonique du juge ?).
