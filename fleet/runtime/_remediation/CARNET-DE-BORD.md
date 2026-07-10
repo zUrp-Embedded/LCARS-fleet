@@ -38,7 +38,7 @@ Chacun : re-vérif moi-même (spot) → fix → test/gate → commit → journal
 | DOCTRINE (→ user) | 71 (7 clusters) |
 | THEORIQUE (WONTFIX) | 21 |
 | DEJA-FIXE | 1 |
-| fixés (commit) | 1 (F-C166) |
+| fixés (commit) | 2 (F-C166, F-C160) |
 | constructeurs de frontière posés | 0 |
 
 ## Crons (session-only — à SUPPRIMER en fin de chantier)

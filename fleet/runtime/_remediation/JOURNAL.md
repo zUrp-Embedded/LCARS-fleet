@@ -39,3 +39,8 @@
 - **F-C164 → THEORIQUE** : `bin/claude_launch.identity` = constante vendor COMMITTÉE (NAME/EMAIL, trackée), pas un secret à générer. `install.sh` clone tout le repo → présente ; `publish-to-github.sh` la résout relativement (`etc/../bin`). Citation Codex `install.sh:50 copie sélective` factuellement fausse (install.sh ne copie rien, il clone+délègue). Aucune brèche → PAS de fix.
 - **Bilan phase 1** : 5 « hollow-gates clairs » → 1 fix propre (F-C166), 2 doctrine-tails (F-C167 D7, F-C165 D6), 1 FAUX (F-C164), 1 restant (F-C160 couverture test brief-gate). La règle cardinale a évité 1 mis-fix + 2 fix-mal-formés sur 4.
 - Distribution ledger : PERCE 48, THEORIQUE 22 (F-C164 migré).
+
+### Phase 1 CLOSE
+- **F-C160 FIXÉ** (couverture brief-gate, 12 tests/0). brief_kind:judge survit à la normalisation (bonus : confirme F-C109 = MAP-level seulement).
+- **Bilan phase 1 (5 findings)** : 2 FIXÉS (F-C166 sentinelle bwrap, F-C160 conformance brief-gate) · 2 DOCTRINE-TAIL (F-C167→D7, F-C165→D6) · 1 FAUX (F-C164). La règle cardinale a évité 3 fixes erronés sur 5 (2 mal-formés + 1 non-brèche).
+- → PHASE 2 : constructeurs de frontière (B/C/D/E). Je commence par re-vérifier une famille + concevoir le smart-ctor.
